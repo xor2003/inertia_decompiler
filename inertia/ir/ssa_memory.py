@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Build function-level SSA for exact segmented stack-memory ranges.
 
 Layer: IR.
@@ -9,6 +10,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import replace
 from typing import cast
@@ -40,15 +43,17 @@ from .ssa_memory_ranges import (
     stack_memory_access_8616,
     versioned_memory_address_8616,
 )
+import operator
+import builtins
 
 __all__ = ["build_x86_16_function_memory_ssa"]
 
 
 def _rewrite_atom_8616(
     atom: IRAtom,
-    versions: dict[MemoryRangeKey8616, int],
-    accepted_ranges: frozenset[MemoryRangeKey8616],
-    cells_by_range: dict[MemoryRangeKey8616, tuple[MemoryRangeKey8616, ...]],
+    versions: object,
+    accepted_ranges: object,
+    cells_by_range: object,
 ) -> IRAtom:
     """Rewrite a one-cell memory atom to its reaching version."""
     if isinstance(atom, IRCondition):
@@ -56,7 +61,7 @@ def _rewrite_atom_8616(
             op=atom.op,
             args=tuple(
                 _rewrite_atom_8616(item, versions, accepted_ranges, cells_by_range)
-                for item in atom.args
+                for item in iter(atom.args)
             ),
             expr=atom.expr,
             width_bits=atom.width_bits,
@@ -75,7 +80,7 @@ def _rewrite_atom_8616(
 
 
 def _call_effect_sites_8616(
-    blocks: tuple[SSABlock, ...],
+    blocks: object,
 ) -> tuple[SSACallStackEffectSite8616, ...]:
     """Collect every CALL's typed stack effect site in deterministic order."""
     return tuple(
@@ -85,18 +90,19 @@ def _call_effect_sites_8616(
             instruction.addr,
             instruction.call_stack_effect or IRCallStackEffect8616(),
         )
-        for block in sorted(blocks, key=lambda item: item.addr)
-        for instr_index, instruction in enumerate(block.instrs)
+        for block in builtins.iter(sorted(blocks, key=lambda item: item.addr))
+        for instr_index, instruction in builtins.iter(enumerate(block.instrs))
         if instruction.op == "CALL"
     )
 
 
+@cython.ccall
 def _access_refusal_kind_8616(
-    key: MemoryRangeKey8616 | None,
-    coordinate_conflict: bool,
-    layout_complete: bool,
-    refused_ranges: frozenset[MemoryRangeKey8616],
-) -> str:
+    key: object,
+    coordinate_conflict: cython.bint,
+    layout_complete: cython.bint,
+    refused_ranges: object,
+) -> object:
     """Classify the dominant refusal kind for one refused access."""
     if coordinate_conflict and key is not None:
         return cast(str, StackCoordinateAgreement8616.CONFLICT)
@@ -108,12 +114,12 @@ def _access_refusal_kind_8616(
 
 
 def _range_refusals_8616(
-    accesses: tuple[StackMemoryAccessInput8616, ...],
-    range_addresses: dict[MemoryRangeKey8616, IRAddress],
-    refused_ranges: frozenset[MemoryRangeKey8616],
+    accesses: object,
+    range_addresses: object,
+    refused_ranges: object,
     *,
-    coordinate_conflict: bool,
-    layout_complete: bool,
+    coordinate_conflict: cython.bint,
+    layout_complete: cython.bint,
 ) -> tuple[IRRefusal, ...]:
     """Refuse every access whose range is absent, refused, or unproven."""
     return tuple(
@@ -127,7 +133,7 @@ def _range_refusals_8616(
             detail=f"refused SS range base={address.base!r} offset={address.offset} size={address.size}",
             block_addr=block_addr,
         )
-        for block_addr, _index, address in accesses
+        for block_addr, _index, address in iter(accesses)
         if memory_range_key_8616(address) is None
         or memory_range_key_8616(address) not in range_addresses
         or memory_range_key_8616(address) in refused_ranges
@@ -135,12 +141,17 @@ def _range_refusals_8616(
 
 
 def _store_version_map_8616(
-    blocks: tuple[SSABlock, ...],
-    accepted_ranges: frozenset[MemoryRangeKey8616],
-    cells_by_range: dict[MemoryRangeKey8616, tuple[MemoryRangeKey8616, ...]],
-) -> tuple[dict[tuple[int, int, MemoryRangeKey8616], int], int]:
+    blocks: object,
+    accepted_ranges: object,
+    cells_by_range: object,
+) -> tuple[dict[tuple[cython.longlong, cython.longlong, MemoryRangeKey8616], cython.longlong], cython.longlong]:
     """Assign each accepted STORE a fresh per-cell version."""
-    store_versions: dict[tuple[int, int, MemoryRangeKey8616], int] = {}
+    address: object
+    block: object
+    cell_key: object
+    index: object
+    instruction: object
+    store_versions: dict[tuple[cython.longlong, cython.longlong, MemoryRangeKey8616], cython.longlong] = {}
     next_version = 1
     for block in sorted(blocks, key=lambda item: item.addr):
         for index, instruction in enumerate(block.instrs):
@@ -154,38 +165,37 @@ def _store_version_map_8616(
 
 
 def _last_store_versions_8616(
-    blocks: tuple[SSABlock, ...],
-    accepted_cells: tuple[MemoryRangeKey8616, ...],
-    store_versions: dict[tuple[int, int, MemoryRangeKey8616], int],
-) -> dict[tuple[int, MemoryRangeKey8616], int]:
+    blocks: object,
+    accepted_cells: object,
+    store_versions: object,
+) -> dict[tuple[cython.longlong, MemoryRangeKey8616], cython.longlong]:
     """Return the latest store version per block and accepted cell."""
     return {
         (block.addr, cell_key): max(
             (
                 version
-                for (store_block, _index, store_cell), version in store_versions.items()
-                if store_block == block.addr and store_cell == cell_key
+                for (store_block, _index, store_cell), version in builtins.iter(store_versions.items())
+                if operator.eq(store_block, block.addr) and store_cell == cell_key
             ),
             default=0,
         )
-        for block in blocks
-        for cell_key in accepted_cells
+        for block in iter(blocks)
+        for cell_key in iter(accepted_cells)
     }
 
 
 def _join_version_fixed_point_8616(
-    blocks: tuple[SSABlock, ...],
-    predecessor_map: dict[int, tuple[int, ...]],
-    accepted_cells: tuple[MemoryRangeKey8616, ...],
-    phi_versions: dict[tuple[int, MemoryRangeKey8616], int],
-    last_store: dict[tuple[int, MemoryRangeKey8616], int],
-) -> tuple[
-    dict[tuple[int, MemoryRangeKey8616], int],
-    dict[tuple[int, MemoryRangeKey8616], int],
-] | None:
+    blocks: object,
+    predecessor_map: object,
+    accepted_cells: object,
+    phi_versions: object,
+    last_store: object,
+) -> object:
     """Iterate block entry/exit versions to the deterministic fixed point."""
+    block: object
+    cell_key: object
     entry_versions = {
-        (block.addr, cell_key): 0 for block in blocks for cell_key in accepted_cells
+        (block.addr, cell_key): 0 for block in iter(blocks) for cell_key in iter(accepted_cells)
     }
     exit_versions = dict(entry_versions)
     iteration_limit = max(1, len(blocks) * max(1, len(accepted_cells)) + 1)
@@ -195,7 +205,7 @@ def _join_version_fixed_point_8616(
             for cell_key in accepted_cells:
                 predecessor_versions = {
                     exit_versions[(predecessor, cell_key)]
-                    for predecessor in predecessor_map.get(block.addr, ())
+                    for predecessor in builtins.iter(predecessor_map.get(block.addr, ()))
                     if (predecessor, cell_key) in exit_versions
                 }
                 entry = (
@@ -207,8 +217,8 @@ def _join_version_fixed_point_8616(
                 )
                 exit_version = last_store[(block.addr, cell_key)] or entry
                 if (
-                    entry_versions[(block.addr, cell_key)] != entry
-                    or exit_versions[(block.addr, cell_key)] != exit_version
+                    operator.ne(entry_versions[(block.addr, cell_key)], entry)
+                    or operator.ne(exit_versions[(block.addr, cell_key)], exit_version)
                 ):
                     entry_versions[(block.addr, cell_key)] = entry
                     exit_versions[(block.addr, cell_key)] = exit_version
@@ -220,16 +230,21 @@ def _join_version_fixed_point_8616(
 
 def _materialize_block_versions_8616(
     block: SSABlock,
-    accepted_cells: tuple[MemoryRangeKey8616, ...],
-    entry_versions: dict[tuple[int, MemoryRangeKey8616], int],
-    store_versions: dict[tuple[int, int, MemoryRangeKey8616], int],
-    accepted_ranges: frozenset[MemoryRangeKey8616],
-    cells_by_range: dict[MemoryRangeKey8616, tuple[MemoryRangeKey8616, ...]],
-    cell_addresses: dict[MemoryRangeKey8616, IRAddress],
-) -> tuple[SSABlock, int, list[SSAMemoryBinding8616], list[SSAMemoryAccess8616]]:
+    accepted_cells: object,
+    entry_versions: object,
+    store_versions: object,
+    accepted_ranges: object,
+    cells_by_range: object,
+    cell_addresses: object,
+) -> tuple[SSABlock, cython.longlong, list[SSAMemoryBinding8616], list[SSAMemoryAccess8616]]:
     """Rewrite one block's accesses and collect its typed bindings."""
+    address: object
+    key: object
+    cell_key: object
+    index: object
+    instruction: object
     current = {
-        cell_key: entry_versions[(block.addr, cell_key)] for cell_key in accepted_cells
+        cell_key: entry_versions[(block.addr, cell_key)] for cell_key in iter(accepted_cells)
     }
     bindings: list[SSAMemoryBinding8616] = []
     versioned_accesses: list[SSAMemoryAccess8616] = []
@@ -238,7 +253,7 @@ def _materialize_block_versions_8616(
     for index, instruction in enumerate(block.instrs):
         args = tuple(
             _rewrite_atom_8616(atom, current, accepted_ranges, cells_by_range)
-            for atom in instruction.args
+            for atom in iter(instruction.args)
         )
         address = stack_memory_access_8616(instruction)
         key = memory_range_key_8616(address) if address is not None else None
@@ -255,7 +270,7 @@ def _materialize_block_versions_8616(
                         cell_addresses[cell_key], current[cell_key]
                     ),
                 )
-                for cell_key in cell_keys
+                for cell_key in iter(cell_keys)
             )
             access = SSAMemoryAccess8616(
                 SSAMemoryAccessKind8616.STORE
@@ -274,7 +289,7 @@ def _materialize_block_versions_8616(
             if instruction.op == "STORE":
                 bindings.extend(
                     SSAMemoryBinding8616(block.addr, index, item.address)
-                    for item in slices
+                    for item in iter(slices)
                 )
         rewritten_instrs.append(
             replace(instruction, args=args)
@@ -289,11 +304,11 @@ def _materialize_block_versions_8616(
 
 
 def _phi_nodes_8616(
-    join_keys: tuple[tuple[int, MemoryRangeKey8616], ...],
-    predecessor_map: dict[int, tuple[int, ...]],
-    cell_addresses: dict[MemoryRangeKey8616, IRAddress],
-    phi_versions: dict[tuple[int, MemoryRangeKey8616], int],
-    exit_versions: dict[tuple[int, MemoryRangeKey8616], int],
+    join_keys: object,
+    predecessor_map: object,
+    cell_addresses: object,
+    phi_versions: object,
+    exit_versions: object,
 ) -> tuple[SSAMemoryPhiNode8616, ...]:
     """Emit phi nodes only for cells whose joined versions differ."""
     return tuple(
@@ -310,14 +325,14 @@ def _phi_nodes_8616(
                         cell_addresses[cell_key], exit_versions[(predecessor, cell_key)]
                     ),
                 )
-                for predecessor in predecessor_map[block_addr]
+                for predecessor in iter(predecessor_map[block_addr])
             ),
         )
-        for block_addr, cell_key in join_keys
+        for block_addr, cell_key in iter(join_keys)
         if len(
             {
                 exit_versions[(predecessor, cell_key)]
-                for predecessor in predecessor_map[block_addr]
+                for predecessor in iter(predecessor_map[block_addr])
             }
         )
         > 1
@@ -325,26 +340,28 @@ def _phi_nodes_8616(
 
 
 def build_x86_16_function_memory_ssa(
-    function_addr: int,
-    blocks: tuple[SSABlock, ...],
-    predecessor_map: dict[int, tuple[int, ...]],
+    function_addr: cython.longlong,
+    blocks: object,
+    predecessor_map: object,
     logical_memory: IRLogicalMemoryArtifact8616 | None = None,
 ) -> SSAFunctionMemoryResult8616:
     """Version canonical stack cells and join reaching definitions to a fixed point."""
+    version_result: object
+    block: object
     if logical_memory is not None and (
-        logical_memory.function_addr != function_addr or not logical_memory.closed
+        operator.ne(logical_memory.function_addr, function_addr) or not logical_memory.closed
     ):
         raise ValueError("memory SSA requires closed function-owned logical memory")
     accesses = collect_stack_memory_accesses_8616(blocks)
     coordinate_conflict = stack_coordinate_agreement_8616(blocks) is StackCoordinateAgreement8616.CONFLICT
     layout = build_stack_memory_cell_layout_8616(() if coordinate_conflict else accesses)
-    range_addresses = {item.key: item.address for item in layout.ranges}
+    range_addresses = {item.key: item.address for item in iter(layout.ranges)}
     cells_by_range = {
-        item.key: tuple((cell.space.value, cell.base, cell.offset, cell.size) for cell in item.cells)
-        for item in layout.ranges
+        item.key: tuple((cell.space.value, cell.base, cell.offset, cell.size) for cell in iter(item.cells))
+        for item in iter(layout.ranges)
     }
     cell_addresses = {
-        (cell.space.value, cell.base, cell.offset, cell.size): cell for cell in layout.cells
+        (cell.space.value, cell.base, cell.offset, cell.size): cell for cell in iter(layout.cells)
     }
     call_effects = _call_effect_sites_8616(blocks)
     call_refused_ranges = call_clobbered_load_ranges_8616(
@@ -364,13 +381,13 @@ def build_x86_16_function_memory_ssa(
         coordinate_conflict=coordinate_conflict,
         layout_complete=layout.complete,
     )
-    accepted_ranges = frozenset(key for key in range_addresses if key not in refused_ranges)
+    accepted_ranges = frozenset(key for key in iter(range_addresses) if key not in refused_ranges)
     accepted_cells = tuple(
         sorted(
             {
                 cell_key
-                for key in accepted_ranges
-                for cell_key in cells_by_range[key]
+                for key in iter(accepted_ranges)
+                for cell_key in iter(cells_by_range[key])
             }
         )
     )
@@ -380,11 +397,11 @@ def build_x86_16_function_memory_ssa(
 
     join_keys = tuple(
         (block_addr, cell_key)
-        for block_addr, predecessors in sorted(predecessor_map.items())
+        for block_addr, predecessors in builtins.iter(sorted(tuple(predecessor_map.items())))
         if len(predecessors) > 1
-        for cell_key in accepted_cells
+        for cell_key in iter(accepted_cells)
     )
-    phi_versions = {item: next_version + index for index, item in enumerate(join_keys)}
+    phi_versions = {item: next_version + index for index, item in builtins.iter(enumerate(join_keys))}
     last_store = _last_store_versions_8616(blocks, accepted_cells, store_versions)
     version_result = _join_version_fixed_point_8616(
         blocks,
@@ -403,7 +420,7 @@ def build_x86_16_function_memory_ssa(
                 ),
                 block_addr=block_addr,
             )
-            for block_addr, _index, address in accesses
+            for block_addr, _index, address in iter(accesses)
             if memory_range_key_8616(address) in accepted_ranges
         )
         return SSAFunctionMemoryResult8616(

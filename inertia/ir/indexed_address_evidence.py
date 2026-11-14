@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Collect versioned indexed segmented-memory evidence from function SSA.
 
 Layer: IR.
@@ -12,6 +13,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -36,18 +39,21 @@ from .scalar_definitions import (
     scalar_definition_key_8616,
 )
 from .ssa_function import SSAFunctionArtifact
+import dataclasses
+import operator
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _TraceResult8616:
     """Internal successful source trace or one typed refusal."""
 
     source: IRAddress | None
-    shift: int
-    path: tuple[IndexedAddressDefinitionSite8616, ...]
+    shift: cython.longlong
+    path: object
     failure: IndexedAddressFailureKind8616 | None
 
 
+@cython.ccall
 def _path_site_8616(
     definition: ScalarDefinition8616,
 ) -> IndexedAddressDefinitionSite8616 | None:
@@ -63,7 +69,8 @@ def _path_site_8616(
     )
 
 
-def _stable_bp_address_8616(address: IRAddress) -> bool:
+@cython.ccall
+def _stable_bp_address_8616(address: IRAddress) -> cython.bint:
     """Return whether the address is a proven stable BP-relative cell."""
     return (
         address.space is MemSpace.SS
@@ -73,6 +80,7 @@ def _stable_bp_address_8616(address: IRAddress) -> bool:
     )
 
 
+@cython.ccall
 def _stable_stack_source_8616(instruction: IRInstr) -> IRAddress | None:
     """Return an exact BP-relative source for one width-coherent SSA LOAD."""
     address = instruction.args[0] if instruction.args else None
@@ -81,19 +89,21 @@ def _stable_stack_source_8616(instruction: IRInstr) -> IRAddress | None:
     if (
         not _stable_bp_address_8616(address)
         or address.size <= 0
-        or instruction.size != address.size
+        or operator.ne(instruction.size, address.size)
     ):
         return None
     return address
 
 
+@cython.ccall
 def _index_continuation_8616(
     instruction: IRInstr,
-    shift: int,
-    next_path: tuple[IndexedAddressDefinitionSite8616, ...],
-) -> tuple[IRValue, int] | _TraceResult8616:
+    shift: cython.longlong,
+    next_path: object,
+) -> object:
     """Return the next traced value and shift for exact copy/shift ops."""
-    next_value: IRValue | None = None
+    next_value: object
+    next_value = None
     next_shift = shift
     if instruction.op == "MOV" and len(instruction.args) == 1:
         argument = instruction.args[0]
@@ -125,19 +135,22 @@ def _index_continuation_8616(
     return next_value, next_shift
 
 
+@cython.ccall
 def _trace_index_source_8616(
     value: IRValue,
     definitions: ScalarDefinitionIndex8616,
     logical_memory: IRLogicalMemoryArtifact8616 | None,
     *,
-    function_addr: int,
-    block_addr: int,
-    before_index: int,
-    shift: int = 0,
-    path: tuple[IndexedAddressDefinitionSite8616, ...] = (),
-    seen: frozenset[tuple[str, str | None, int, int, int | None]] = frozenset(),
+    function_addr: cython.longlong,
+    block_addr: cython.longlong,
+    before_index: cython.longlong,
+    shift: cython.longlong = 0,
+    path: object = (),
+    seen: object = frozenset(),
 ) -> _TraceResult8616:
     """Trace one versioned index through proven scalar definitions."""
+    site: object
+    source: object
     key = scalar_definition_key_8616(value)
     if key in seen:
         return _TraceResult8616(
@@ -166,7 +179,7 @@ def _trace_index_source_8616(
     next_path = (*path, site)
     source = _stable_stack_source_8616(definition.instruction)
     if source is not None:
-        if source.size != value.size:
+        if operator.ne(source.size, value.size):
             return _TraceResult8616(
                 None,
                 shift,
@@ -188,7 +201,7 @@ def _trace_index_source_8616(
         return _TraceResult8616(
             logical_trace.source,
             shift,
-            (*next_path, *logical_trace.definition_path),
+            tuple(next_path) + tuple(logical_trace.definition_path),
             logical_trace.failure,
         )
     continued = _index_continuation_8616(instruction, shift, next_path)
@@ -208,9 +221,10 @@ def _trace_index_source_8616(
     )
 
 
+@cython.ccall
 def _candidate_failure_8616(
     address: IRAddress,
-    access_size: int,
+    access_size: cython.longlong,
 ) -> IndexedAddressFailureKind8616 | None:
     """Validate address and access fields before tracing index provenance."""
     if (
@@ -219,12 +233,12 @@ def _candidate_failure_8616(
         or address.size <= 0
     ):
         return IndexedAddressFailureKind8616.ADDRESS_UNPROVEN
-    if access_size != address.size:
+    if operator.ne(access_size, address.size):
         return IndexedAddressFailureKind8616.ACCESS_WIDTH_CONFLICT
     if len(address.base) != 1 or len(address.base_values) != 1:
         return IndexedAddressFailureKind8616.MULTIPLE_DYNAMIC_TERMS
     index_value = address.base_values[0]
-    if address.base != (index_value.name,):
+    if operator.ne(address.base, (index_value.name,)):
         return IndexedAddressFailureKind8616.ADDRESS_UNPROVEN
     if (
         index_value.space is not MemSpace.REG
@@ -235,10 +249,14 @@ def _candidate_failure_8616(
     return None
 
 
+@cython.ccall
 def collect_indexed_address_evidence_8616(
     artifact: SSAFunctionArtifact,
 ) -> IndexedAddressEvidence8616:
     """Collect every indexed DS/ES access as a fact or typed refusal."""
+    failure: object
+    trace: object
+    access: object
     definitions = build_scalar_definition_index_8616(artifact)
     normalization = normalize_indexed_address_accesses_8616(artifact)
     facts: list[IndexedAddressFact8616] = []
@@ -246,7 +264,7 @@ def collect_indexed_address_evidence_8616(
     for access in normalization.accesses:
         address = access.address
         failure = access.failure or _candidate_failure_8616(address, access.access_size)
-        trace: _TraceResult8616 | None = None
+        trace = None
         if failure is None:
             trace = _trace_index_source_8616(
                 address.base_values[0],

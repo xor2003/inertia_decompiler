@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Resolve Alias-proven stack word loads to canonical C variables.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -24,6 +27,8 @@ from inertia.ir.logical_memory_contracts import IRMemoryAccessKind8616
 
 from .stack_lowering_from_facts import materialize_stack_cvar_at_offset_from_facts_8616
 from .stack_variable_coordinates import stack_variable_coordinate_registry_8616
+import dataclasses
+import operator
 
 
 class StackWordLoadProjectionStatus8616(StrEnum):
@@ -37,7 +42,7 @@ class StackWordLoadProjectionStatus8616(StrEnum):
     PROJECTION_MISMATCH = "projection_mismatch"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackWordLoadProjectionResult8616:
     """Canonical word CVariable or an exact typed refusal."""
 
@@ -46,7 +51,7 @@ class StackWordLoadProjectionResult8616:
     detail: str = ""
 
     @property
-    def resolved(self) -> bool:
+    def resolved(self) -> cython.bint:
         """Return whether an existing or newly materialized owner was proven."""
         return self.cvar is not None and self.status in {
             StackWordLoadProjectionStatus8616.EXISTING,
@@ -60,33 +65,38 @@ class _CodegenBoundary8616(Protocol):
     _inertia_vex_ir_frame: object
 
 
+@cython.ccall
 def _exact_projection_cvar_8616(
     codegen: object,
     variable: SimStackVariable,
-    bp_offset: int,
-    size: int,
+    bp_offset: cython.longlong,
+    size: cython.longlong,
 ) -> structured_c.CVariable | None:
     """Return the C owner only when every stored coordinate agrees."""
+    projection: object
     projection = stack_variable_coordinate_registry_8616(codegen).for_variable(variable)
     if (
         projection is not None
-        and projection.bp_offset == bp_offset
-        and projection.entry_sp_offset == variable.offset
-        and projection.size == size
+        and operator.eq(projection.bp_offset, bp_offset)
+        and operator.eq(projection.entry_sp_offset, variable.offset)
+        and operator.eq(projection.size, size)
         and isinstance(projection.cvar, structured_c.CVariable)
     ):
         return projection.cvar
     return None
 
 
+@cython.ccall
 def resolve_stack_word_load_projection_8616(
     codegen: object,
     variable: SimStackVariable,
     *,
-    bp_offset: int,
-    size: int,
+    bp_offset: cython.longlong,
+    size: cython.longlong,
 ) -> StackWordLoadProjectionResult8616:
     """Resolve a word load through exact Alias and frame coordinates only."""
+    existing: object
+    result: object
     existing = _exact_projection_cvar_8616(codegen, variable, bp_offset, size)
     if existing is not None:
         return StackWordLoadProjectionResult8616(
@@ -111,7 +121,7 @@ def resolve_stack_word_load_projection_8616(
         )
 
     entry_sp_offset = bp_offset + frame.bp_coordinate.bp_entry_sp_delta
-    if variable.base != "bp" or variable.offset != entry_sp_offset:
+    if variable.base != "bp" or operator.ne(variable.offset, entry_sp_offset):
         return StackWordLoadProjectionResult8616(
             StackWordLoadProjectionStatus8616.VARIABLE_MISMATCH,
             detail=(
@@ -156,6 +166,7 @@ def resolve_logical_stack_word_owner_8616(
     high: object,
 ) -> StackWordLoadProjectionResult8616:
     """Resolve an instructionless same-owner word from exact logical Alias IR."""
+    projection: object
     variable = low.variable
     if (
         not isinstance(high, structured_c.CVariable)
@@ -180,12 +191,12 @@ def resolve_logical_stack_word_owner_8616(
         )
     matches = tuple(
         identity
-        for identity in source_alias.logical_storage_identities
+        for identity in iter(source_alias.logical_storage_identities)
         if identity.source.kind is IRMemoryAccessKind8616.READ
         and identity.address.space is MemSpace.SS
         and identity.address.base == ("bp",)
-        and identity.address.offset == projection.bp_offset
-        and identity.address.size == projection.size
+        and operator.eq(identity.address.offset, projection.bp_offset)
+        and operator.eq(identity.address.size, projection.size)
     )
     if not source_alias.logical_storage_complete or len(matches) != 1:
         return StackWordLoadProjectionResult8616(

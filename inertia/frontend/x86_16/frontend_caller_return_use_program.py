@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Decode one caller-range corpus for repeated return-use queries.
 
 Layer: Frontend instruction inventory.
@@ -7,6 +8,8 @@ Semantics/callsite summary.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager, suppress
@@ -21,8 +24,10 @@ from .frontend_direct_callsite_index import (
     DirectCallTargetResolver8616,
     build_decoded_direct_callsite_index_8616,
 )
+import dataclasses
+import operator
 
-type InstructionAddressResolver8616 = Callable[[object], int | None]
+InstructionAddressResolver8616 = typing.TypeAliasType("InstructionAddressResolver8616", Callable[[object], int | None])
 
 
 class CallerReturnUseProgramStatus8616(StrEnum):
@@ -35,7 +40,7 @@ class CallerReturnUseProgramStatus8616(StrEnum):
 class _MemoryBoundary8616(Protocol):
     """Third-party loader memory surface used by Frontend decoding."""
 
-    def load(self, addr: int, size: int) -> object:
+    def load(self, addr: cython.longlong, size: cython.longlong) -> object:
         """Return exact bytes for one linear caller range."""
         ...
 
@@ -43,9 +48,9 @@ class _MemoryBoundary8616(Protocol):
 class _DisassemblerBoundary8616(Protocol):
     """Third-party Capstone surface used by Frontend decoding."""
 
-    detail: bool
+    detail: cython.bint
 
-    def disasm(self, data: bytes, addr: int) -> Iterable[object]:
+    def disasm(self, data: object, addr: cython.longlong) -> Iterable[object]:
         """Decode one exact byte range at its linear address."""
         ...
 
@@ -69,67 +74,66 @@ class _ProjectBoundary8616(Protocol):
     loader: _LoaderBoundary8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallerReturnUseProgramStats8616:
     """Closed range-level accounting for one decoded caller corpus."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every requested range became evidence or refusal."""
         return bool(
             self.raw_fact_count >= self.normalized_fact_count
             >= self.classified_fact_count
             >= self.materialized_count
             >= 0
-            and self.raw_fact_count
-            == self.materialized_count + self.failure_count
+            and operator.eq(self.raw_fact_count, self.materialized_count + self.failure_count)
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallerReturnUseProgramEvidence8616:
     """One request-owned decoded range corpus and direct-call index."""
 
     source_project: object = field(repr=False, compare=False)
-    function_ranges: tuple[tuple[int, int], ...]
+    function_ranges: object
     callsites: DecodedDirectCallsiteIndex8616
     status: CallerReturnUseProgramStatus8616
     stats: CallerReturnUseProgramStats8616
 
     @property
-    def range_census_complete(self) -> bool:
+    def range_census_complete(self) -> cython.bint:
         """Require every distinct caller range before interpreting absent uses."""
         return (
             self.status is CallerReturnUseProgramStatus8616.READY
             and self.stats.closed
-            and self.stats.materialized_count == self.stats.normalized_fact_count
+            and operator.eq(self.stats.materialized_count, self.stats.normalized_fact_count)
         )
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether range and callsite accounting are coherent."""
         return bool(
             self.stats.closed
             and self.callsites.stats.closed
-            and self.function_ranges == tuple(sorted(set(self.function_ranges)))
+            and operator.eq(self.function_ranges, tuple(sorted(tuple(set(self.function_ranges)))))
         )
 
     def matches(
         self,
         project: object,
-        function_ranges: Sequence[tuple[int, int]],
-    ) -> bool:
+        function_ranges: Sequence[tuple[cython.longlong, cython.longlong]],
+    ) -> cython.bint:
         """Match the explicit request owner and exact normalized range census."""
         return bool(
             self.complete
             and project is self.source_project
-            and self.function_ranges == tuple(sorted(set(function_ranges)))
+            and operator.eq(self.function_ranges, tuple(sorted(tuple(set(function_ranges)))))
         )
 
 
@@ -138,6 +142,7 @@ _ACTIVE_CALLER_RETURN_PROGRAM_8616: ContextVar[
 ] = ContextVar("active_caller_return_program_8616", default=None)
 
 
+@cython.ccall
 def _empty_callsite_index_8616(
     direct_target_resolver: DirectCallTargetResolver8616,
     instruction_address_resolver: InstructionAddressResolver8616,
@@ -150,15 +155,19 @@ def _empty_callsite_index_8616(
     )
 
 
+@cython.ccall
 def build_caller_return_use_program_evidence_8616(
     project: object,
-    function_ranges: Sequence[tuple[int, int]],
+    function_ranges: Sequence[tuple[cython.longlong, cython.longlong]],
     *,
     direct_target_resolver: DirectCallTargetResolver8616,
     instruction_address_resolver: InstructionAddressResolver8616,
 ) -> CallerReturnUseProgramEvidence8616:
     """Decode exact ranges once and publish a closed direct-call index."""
-    normalized_ranges = tuple(sorted(set(function_ranges)))
+    identity: object
+    end: object
+    start: object
+    normalized_ranges = tuple(sorted(tuple(set(function_ranges))))
     raw_fact_count = len(function_ranges)
     try:
         project_boundary = cast(_ProjectBoundary8616, project)
@@ -184,8 +193,8 @@ def build_caller_return_use_program_evidence_8616(
     with suppress(AttributeError, TypeError, ValueError):
         disassembler.detail = True
 
-    decoded_ranges: dict[tuple[int, int], tuple[object, ...]] = {}
-    identities: dict[tuple[int, int], CallerEntryIdentity8616] = {}
+    decoded_ranges: dict[tuple[cython.longlong, cython.longlong], tuple[object, ...]] = {}
+    identities: dict[tuple[cython.longlong, cython.longlong], CallerEntryIdentity8616] = {}
     classified_fact_count = 0
     for start, end in normalized_ranges:
         if not isinstance(start, int) or not isinstance(end, int) or end <= start:
@@ -240,11 +249,13 @@ def use_caller_return_use_program_evidence_8616(
         _ACTIVE_CALLER_RETURN_PROGRAM_8616.reset(token)
 
 
+@cython.ccall
 def current_caller_return_use_program_evidence_8616(
     project: object,
-    function_ranges: Sequence[tuple[int, int]],
+    function_ranges: Sequence[tuple[cython.longlong, cython.longlong]],
 ) -> CallerReturnUseProgramEvidence8616 | None:
     """Return matching request evidence without creating a persistent cache."""
+    evidence: object
     evidence = _ACTIVE_CALLER_RETURN_PROGRAM_8616.get()
     if evidence is None or not evidence.matches(project, function_ranges):
         return None

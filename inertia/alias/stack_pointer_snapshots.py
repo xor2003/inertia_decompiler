@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Resolve stack addresses through immutable typed SP/BP captures.
 
 Layer: Alias.
@@ -8,6 +9,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from typing import Literal
@@ -15,38 +18,42 @@ from typing import Literal
 from inertia.ir.constant_flow import IRConstantFlow8616
 from inertia.ir.core import IRAddress, IRInstr, IRValue, MemSpace
 from inertia.semantics.register_value_preservation import register_value_family_8616
+import dataclasses
+import operator
+import builtins
 
 _FRAME_REGISTERS = frozenset({"sp", "bp"})
-_FRAME_FAMILIES = {name: register_value_family_8616(name) for name in _FRAME_REGISTERS}
+_FRAME_FAMILIES = {name: register_value_family_8616(name) for name in iter(_FRAME_REGISTERS)}
 _GENERAL_WORD_REGISTERS = frozenset({"ax", "bx", "cx", "dx", "si", "di"})
 _GENERAL_WORD_BY_ALIAS = {
     alias: register
-    for register in _GENERAL_WORD_REGISTERS
-    for alias in register_value_family_8616(register)
+    for register in iter(_GENERAL_WORD_REGISTERS)
+    for alias in builtins.iter(register_value_family_8616(register))
 }
 _WORD_BYTES = 2
 _BINARY_OPERAND_COUNT = 2
-type FrameRegister8616 = Literal["sp", "bp"]
+FrameRegister8616 = typing.TypeAliasType("FrameRegister8616", Literal["sp", "bp"])
 
 
-def _plain_word_register(value: IRValue, register: str) -> bool:
+@cython.ccall
+def _plain_word_register(value: IRValue, register: object) -> cython.bint:
     """Require a live, undecorated word view of one canonical register."""
-    exact_storage = value.name == register and value.size == _WORD_BYTES and value.offset == 0
+    exact_storage = operator.eq(value.name, register) and operator.eq(value.size, _WORD_BYTES) and value.offset == 0
     undecorated = value.expr is None and value.index is None and value.index_shift == 0
     live_value = value.version is None and value.source_tmp is None
     unprojected = value.active_unary is None and value.call_output is None
     return exact_storage and undecorated and live_value and unprojected
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackFrameBase8616:
     """One explicitly identified frame register in entry-SP coordinates."""
 
     register: FrameRegister8616
-    entry_sp_offset: int
+    entry_sp_offset: cython.longlong
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class StackPointerSnapshots8616:
     """Frame values and exact word-register copies in entry-SP coordinates.
 
@@ -54,11 +61,13 @@ class StackPointerSnapshots8616:
     storage and lose their coordinate on any unmodeled overlapping write.
     """
 
-    offsets: dict[int, int | None] = field(default_factory=dict)
-    register_offsets: dict[str, int] = field(default_factory=dict)
+    offsets: object = field(default_factory=dict)
+    register_offsets: object = field(default_factory=dict)
 
+    @cython.ccall
     def value_offset(self, value: IRValue, current_sp: int | None, current_bp: int | None) -> int | None:
         """Resolve the exact producer value, never adding its displacement twice."""
+        base: object
         if value.size < _WORD_BYTES:
             return None
         if value.source_tmp is not None:
@@ -74,6 +83,7 @@ class StackPointerSnapshots8616:
         base = current_sp if value.name == "sp" else current_bp
         return None if base is None else base + value.offset
 
+    @cython.ccall
     def observe(
         self,
         instruction: IRInstr,
@@ -104,8 +114,9 @@ class StackPointerSnapshots8616:
             result = self._affine_offset(instruction, current_sp, current_bp, constants)
         self.offsets[destination.source_tmp] = result
 
+    @cython.ccall
     def _numeric_operand_8616(
-        self, value: IRValue, constants: IRConstantFlow8616 | None,
+        self, value: IRValue, constants: object,
     ) -> int | None:
         """Resolve one operand as a plain integer, never an SP coordinate.
 
@@ -120,6 +131,7 @@ class StackPointerSnapshots8616:
             return None
         return constants.constant(value)
 
+    @cython.ccall
     def _observe_general_register(
         self,
         instruction: IRInstr,
@@ -128,6 +140,8 @@ class StackPointerSnapshots8616:
         constants: IRConstantFlow8616 | None = None,
     ) -> None:
         """Transfer exact MOVs and affine adds; other writes kill aliases."""
+        register: object
+        result: object
         destination = instruction.dst
         if not isinstance(destination, IRValue) or destination.name is None:
             return
@@ -145,6 +159,7 @@ class StackPointerSnapshots8616:
         if result is not None:
             self.register_offsets[register] = result
 
+    @cython.ccall
     def _affine_offset(
         self,
         instruction: IRInstr,
@@ -153,7 +168,9 @@ class StackPointerSnapshots8616:
         constants: IRConstantFlow8616 | None = None,
     ) -> int | None:
         """Resolve a frame coordinate plus/minus one exact integer."""
-        if len(instruction.args) != _BINARY_OPERAND_COUNT:
+        base: object
+        operand: object
+        if operator.ne(len(instruction.args), _BINARY_OPERAND_COUNT):
             return None
         left, right = instruction.args
         if not isinstance(left, IRValue) or not isinstance(right, IRValue):
@@ -166,6 +183,7 @@ class StackPointerSnapshots8616:
             return None
         return base + operand if instruction.op == "Iop_Add16" else base - operand
 
+    @cython.ccall
     def updated_register(
         self,
         register: FrameRegister8616,
@@ -176,20 +194,22 @@ class StackPointerSnapshots8616:
         constants: IRConstantFlow8616 | None = None,
     ) -> int | None:
         """Transfer a word-frame register, refusing wide/unknown clobbers."""
+        base: object
+        operand: object
         current = sp if register == "sp" else bp
         destination = instruction.dst
         if not isinstance(destination, IRValue) or destination.space is not MemSpace.REG:
             return current
         if destination.name not in _FRAME_FAMILIES[register]:
             return current
-        exact_word = destination.name == register and destination.size == _WORD_BYTES
+        exact_word = operator.eq(destination.name, register) and operator.eq(destination.size, _WORD_BYTES)
         source = instruction.args[0] if instruction.args else None
         if not exact_word:
             return None
         if instruction.op == "MOV" and isinstance(source, IRValue):
             return self.value_offset(source, sp, bp)
         if instruction.op in {"Iop_Add16", "Iop_Sub16"}:
-            if len(instruction.args) != _BINARY_OPERAND_COUNT:
+            if operator.ne(len(instruction.args), _BINARY_OPERAND_COUNT):
                 return None
             left, right = instruction.args
             if not isinstance(left, IRValue) or not isinstance(right, IRValue):
@@ -203,10 +223,13 @@ class StackPointerSnapshots8616:
             return base + operand if instruction.op == "Iop_Add16" else base - operand
         return None
 
+    @cython.ccall
     def address_base(
         self, address: IRAddress, current_sp: int | None, current_bp: int | None = None,
     ) -> StackFrameBase8616 | None:
         """Return the exact captured base or refuse an unavailable capture."""
+        current: object
+        offset: object
         if len(address.base) != 1 or address.base[0] not in _FRAME_REGISTERS:
             return None
         register: FrameRegister8616 = "sp" if address.base[0] == "sp" else "bp"
@@ -216,7 +239,7 @@ class StackPointerSnapshots8616:
         if len(address.base_values) != 1:
             return None
         base = address.base_values[0]
-        if base.space is not MemSpace.REG or base.name != register or base.offset != 0:
+        if base.space is not MemSpace.REG or operator.ne(base.name, register) or base.offset != 0:
             return None
         offset = self.value_offset(base, current_sp, current_bp)
         return None if offset is None else StackFrameBase8616(register, offset)

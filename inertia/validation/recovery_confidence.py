@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery/reporting.
 
 Responsibility: classify recovery confidence from already-collected structured diagnostics.
@@ -10,6 +11,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import Counter
 from collections.abc import Sequence
@@ -24,6 +27,9 @@ from inertia.semantics.function_state_summary import FunctionStateSummary, summa
 from inertia.semantics.helper_effect_summary import HelperEligibilitySummary, summarize_x86_16_helper_eligibility
 from inertia.semantics.helper_family_routing import summarize_x86_16_helper_family_routes
 from inertia.structuring.ir_readiness import IRReadinessSummary, summarize_x86_16_ir_readiness
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "RECOVERY_CONFIDENCE_AXES",
@@ -38,30 +44,30 @@ __all__ = [
     "summarize_recovery_confidence",
 ]
 
-type RecoveryConfidenceSource = FunctionEffectSource
+RecoveryConfidenceSource = typing.TypeAliasType("RecoveryConfidenceSource", FunctionEffectSource)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RecoveryEvidence:
     """Evidence item supporting a recovery confidence classification."""
 
-    kind: str
-    detail: str
+    kind: object
+    detail: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RecoveryAssumption:
     """Open assumption that weakens a recovery confidence classification."""
 
-    kind: str
-    detail: str
+    kind: object
+    detail: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RecoveryConfidenceSummary:
     """Deterministic confidence verdict derived from existing recovery diagnostics."""
 
-    status: str
+    status: object
     evidence: tuple[RecoveryEvidence, ...] = ()
     assumptions: tuple[RecoveryAssumption, ...] = ()
     diagnostics: tuple[str, ...] = ()
@@ -72,24 +78,27 @@ class RecoveryConfidenceSummary:
         """Return a JSON-compatible recovery confidence payload."""
         return {
             "status": self.status,
-            "evidence": [{"kind": item.kind, "detail": item.detail} for item in self.evidence],
-            "assumptions": [{"kind": item.kind, "detail": item.detail} for item in self.assumptions],
+            "evidence": [{"kind": item.kind, "detail": item.detail} for item in iter(self.evidence)],
+            "assumptions": [{"kind": item.kind, "detail": item.detail} for item in iter(self.assumptions)],
             "diagnostics": list(self.diagnostics),
             "scan_safe_classification": self.scan_safe_classification,
             "helper_summary": None if self.helper_summary is None else self.helper_summary.to_dict(),
         }
 
 
-def _value(source: RecoveryConfidenceSource, name: str, default: object = None) -> object:
+@cython.ccall
+def _value(source: RecoveryConfidenceSource, name: object, default: object = None) -> object:
     return source.get(name, default)
 
 
-def _count(source: RecoveryConfidenceSource, name: str) -> int:
+@cython.ccall
+def _count(source: RecoveryConfidenceSource, name: object) -> cython.longlong:
     value = _value(source, name, 0)
     return value if isinstance(value, int) else 0
 
 
-def _optional_text(value: object) -> str | None:
+@cython.ccall
+def _optional_text(value: object) -> object:
     if value is None:
         return None
     return str(value)
@@ -98,19 +107,19 @@ def _optional_text(value: object) -> str | None:
 def _append_recovery_evidence_8616(
     source: RecoveryConfidenceSource,
     *,
-    ok: bool,
-    decompiled_count: int,
-    fallback_kind: str | None,
-    interrupt_dos_helper_count: int,
-    interrupt_bios_helper_count: int,
-    last_structuring_pass: str | None,
-    last_postprocess_pass: str | None,
+    ok: cython.bint,
+    decompiled_count: cython.longlong,
+    fallback_kind: object,
+    interrupt_dos_helper_count: cython.longlong,
+    interrupt_bios_helper_count: cython.longlong,
+    last_structuring_pass: object,
+    last_postprocess_pass: object,
     effect_summary: FunctionEffectSummary,
     state_summary: FunctionStateSummary,
     helper_summary: HelperEligibilitySummary,
     ir_readiness: IRReadinessSummary,
-) -> list[RecoveryEvidence]:
-    def _impl() -> list[RecoveryEvidence]:
+) -> object:
+    def _impl() -> object:
         evidence = _output_stage_evidence_8616(
             ok=ok,
             decompiled_count=decompiled_count,
@@ -139,15 +148,16 @@ def _append_recovery_evidence_8616(
 
 
 
+@cython.ccall
 def _output_stage_evidence_8616(
     *,
-    ok: bool,
-    decompiled_count: int,
-    interrupt_dos_helper_count: int,
-    interrupt_bios_helper_count: int,
-    last_structuring_pass: str | None,
-    last_postprocess_pass: str | None,
-) -> list[RecoveryEvidence]:
+    ok: cython.bint,
+    decompiled_count: cython.longlong,
+    interrupt_dos_helper_count: cython.longlong,
+    interrupt_bios_helper_count: cython.longlong,
+    last_structuring_pass: object,
+    last_postprocess_pass: object,
+) -> object:
     """Collect evidence about decompilation output, helpers, and pass stages."""
     evidence: list[RecoveryEvidence] = []
     if ok and decompiled_count > 0:
@@ -166,12 +176,13 @@ def _output_stage_evidence_8616(
     return evidence
 
 
+@cython.ccall
 def _summary_evidence_8616(
     effect_summary: FunctionEffectSummary,
     state_summary: FunctionStateSummary,
     helper_summary: HelperEligibilitySummary,
     ir_readiness: IRReadinessSummary,
-) -> list[RecoveryEvidence]:
+) -> object:
     """Collect evidence contributed by the effect/state/helper/IR summaries."""
     evidence: list[RecoveryEvidence] = []
     if _effect_summary_has_signal_8616(effect_summary):
@@ -196,7 +207,8 @@ def _summary_evidence_8616(
     return evidence
 
 
-def _effect_summary_has_signal_8616(effect_summary: FunctionEffectSummary) -> bool:
+@cython.ccall
+def _effect_summary_has_signal_8616(effect_summary: FunctionEffectSummary) -> cython.bint:
     """True when the effect summary carries any observable signal."""
     return bool(
         effect_summary.register_inputs
@@ -212,7 +224,8 @@ def _effect_summary_has_signal_8616(effect_summary: FunctionEffectSummary) -> bo
     )
 
 
-def _state_summary_has_signal_8616(state_summary: FunctionStateSummary) -> bool:
+@cython.ccall
+def _state_summary_has_signal_8616(state_summary: FunctionStateSummary) -> cython.bint:
     """True when the state summary carries any observable signal."""
     return bool(
         state_summary.gp_register_inputs
@@ -225,22 +238,22 @@ def _state_summary_has_signal_8616(state_summary: FunctionStateSummary) -> bool:
 
 def _append_recovery_assumptions_8616(
     *,
-    ok: bool,
-    fallback_kind: str | None,
-    has_far_call_reloc: bool,
-    rewrite_failed: bool,
-    regeneration_failed: bool,
-    structuring_failed: bool,
-    interrupt_unresolved_wrapper_count: int,
-    interrupt_wrapper_call_count: int,
-    interrupt_dos_helper_count: int,
-    interrupt_bios_helper_count: int,
+    ok: cython.bint,
+    fallback_kind: object,
+    has_far_call_reloc: cython.bint,
+    rewrite_failed: cython.bint,
+    regeneration_failed: cython.bint,
+    structuring_failed: cython.bint,
+    interrupt_unresolved_wrapper_count: cython.longlong,
+    interrupt_wrapper_call_count: cython.longlong,
+    interrupt_dos_helper_count: cython.longlong,
+    interrupt_bios_helper_count: cython.longlong,
     effect_summary: FunctionEffectSummary,
     state_summary: FunctionStateSummary,
     helper_summary: HelperEligibilitySummary,
     ir_readiness: IRReadinessSummary,
-) -> list[RecoveryAssumption]:
-    def _impl() -> list[RecoveryAssumption]:
+) -> object:
+    def _impl() -> object:
         assumptions = _helper_assumptions_8616(
             interrupt_unresolved_wrapper_count=interrupt_unresolved_wrapper_count,
             interrupt_wrapper_call_count=interrupt_wrapper_call_count,
@@ -269,14 +282,15 @@ def _append_recovery_assumptions_8616(
 
 
 
+@cython.ccall
 def _helper_assumptions_8616(
     *,
-    interrupt_unresolved_wrapper_count: int,
-    interrupt_wrapper_call_count: int,
-    interrupt_dos_helper_count: int,
-    interrupt_bios_helper_count: int,
+    interrupt_unresolved_wrapper_count: cython.longlong,
+    interrupt_wrapper_call_count: cython.longlong,
+    interrupt_dos_helper_count: cython.longlong,
+    interrupt_bios_helper_count: cython.longlong,
     helper_summary: HelperEligibilitySummary,
-) -> list[RecoveryAssumption]:
+) -> object:
     """Collect assumptions about unresolved/unmapped helper calls."""
     assumptions: list[RecoveryAssumption] = []
     if interrupt_unresolved_wrapper_count > 0:
@@ -298,15 +312,16 @@ def _helper_assumptions_8616(
     return assumptions
 
 
+@cython.ccall
 def _failure_assumptions_8616(
     *,
-    ok: bool,
-    fallback_kind: str | None,
-    has_far_call_reloc: bool,
-    rewrite_failed: bool,
-    regeneration_failed: bool,
-    structuring_failed: bool,
-) -> list[RecoveryAssumption]:
+    ok: cython.bint,
+    fallback_kind: object,
+    has_far_call_reloc: cython.bint,
+    rewrite_failed: cython.bint,
+    regeneration_failed: cython.bint,
+    structuring_failed: cython.bint,
+) -> object:
     """Collect assumptions tied to unresolved relocations and failed stages."""
     assumptions: list[RecoveryAssumption] = []
     if has_far_call_reloc and (not ok or fallback_kind not in (None, "none")):
@@ -331,14 +346,15 @@ def _failure_assumptions_8616(
     return assumptions
 
 
+@cython.ccall
 def _summary_assumptions_8616(
     *,
     effect_summary: FunctionEffectSummary,
     state_summary: FunctionStateSummary,
     helper_summary: HelperEligibilitySummary,
     ir_readiness: IRReadinessSummary,
-    interrupt_unresolved_wrapper_count: int,
-) -> list[RecoveryAssumption]:
+    interrupt_unresolved_wrapper_count: cython.longlong,
+) -> object:
     """Collect assumptions derived from the effect/state/helper/IR summaries."""
     assumptions: list[RecoveryAssumption] = []
     if effect_summary.has_indirect_control():
@@ -388,16 +404,17 @@ def _summary_assumptions_8616(
         )
     return assumptions
 
+@cython.ccall
 def _recovery_diagnostics_8616(
     *,
-    reason: str | None,
-    failure_class: str | None,
-    stage_reached: str | None,
+    reason: object,
+    failure_class: object,
+    stage_reached: object,
     effect_summary: FunctionEffectSummary,
     state_summary: FunctionStateSummary,
     helper_summary: HelperEligibilitySummary,
     ir_readiness: IRReadinessSummary,
-) -> list[str]:
+) -> object:
     diagnostics: list[str] = []
     if reason:
         diagnostics.append(str(reason))
@@ -405,9 +422,9 @@ def _recovery_diagnostics_8616(
         diagnostics.append(f"failure_class={failure_class}")
     if stage_reached:
         diagnostics.append(f"stage_reached={stage_reached}")
-    if effect_summary != summarize_x86_16_function_effects({}):
+    if operator.ne(effect_summary, summarize_x86_16_function_effects({})):
         diagnostics.append(f"function_effects={effect_summary.brief()}")
-    if state_summary != summarize_x86_16_function_state({}):
+    if operator.ne(state_summary, summarize_x86_16_function_state({})):
         diagnostics.append(f"function_state={state_summary.brief()}")
     if helper_summary.status != "no_signal":
         diagnostics.append(f"helper_summary={helper_summary.brief()}")
@@ -426,19 +443,19 @@ def _recovery_diagnostics_8616(
 def _recovery_status_8616(
     *,
     source: RecoveryConfidenceSource,
-    ok: bool,
-    decompiled_count: int,
-    fallback_kind: str | None,
-    has_far_call_reloc: bool,
-    rewrite_failed: bool,
-    regeneration_failed: bool,
-    structuring_failed: bool,
-    interrupt_unresolved_wrapper_count: int,
-    interrupt_wrapper_call_count: int,
-    interrupt_dos_helper_count: int,
-    interrupt_bios_helper_count: int,
-    assumptions: list[RecoveryAssumption],
-) -> str:
+    ok: cython.bint,
+    decompiled_count: cython.longlong,
+    fallback_kind: object,
+    has_far_call_reloc: cython.bint,
+    rewrite_failed: cython.bint,
+    regeneration_failed: cython.bint,
+    structuring_failed: cython.bint,
+    interrupt_unresolved_wrapper_count: cython.longlong,
+    interrupt_wrapper_call_count: cython.longlong,
+    interrupt_dos_helper_count: cython.longlong,
+    interrupt_bios_helper_count: cython.longlong,
+    assumptions: object,
+) -> object:
     def _impl() -> str:
         if (
             ok
@@ -469,7 +486,8 @@ def _recovery_status_8616(
     return _impl()
 
 
-def _scan_safe_classification_for_status_8616(status: str) -> str:
+@cython.ccall
+def _scan_safe_classification_for_status_8616(status: object) -> str:
     if status in {"target_recovered_strong", "bounded_recovery"}:
         return "strong"
     if status in {"partial_recovery", "helper_guessed_weak"}:
@@ -477,6 +495,7 @@ def _scan_safe_classification_for_status_8616(status: str) -> str:
     return "unresolved"
 
 
+@cython.ccall
 def classify_x86_16_recovery_confidence(source: RecoveryConfidenceSource) -> RecoveryConfidenceSummary:
     """Classify confidence from already-collected structured recovery diagnostics."""
     ok = bool(_value(source, "ok", False))
@@ -566,44 +585,44 @@ def classify_x86_16_recovery_confidence(source: RecoveryConfidenceSource) -> Rec
     )
 
 
-def summarize_recovery_confidence(results: Sequence[RecoveryConfidenceSource]) -> dict[str, object]:
+def summarize_recovery_confidence(results: Sequence[RecoveryConfidenceSource]) -> object:
     """Summarize confidence classifications across existing recovery mapping rows."""
 
     def _impl() -> dict[str, object]:
-        summaries = [classify_x86_16_recovery_confidence(result) for result in results]
-        status_counter = Counter(summary.status for summary in summaries)
-        scan_safe_counter = Counter(summary.scan_safe_classification for summary in summaries)
-        assumption_counter = Counter(item.kind for summary in summaries for item in summary.assumptions)
-        evidence_counter = Counter(item.kind for summary in summaries for item in summary.evidence)
+        summaries = [classify_x86_16_recovery_confidence(result) for result in iter(results)]
+        status_counter = Counter(summary.status for summary in iter(summaries))
+        scan_safe_counter = Counter(summary.scan_safe_classification for summary in iter(summaries))
+        assumption_counter = Counter(item.kind for summary in iter(summaries) for item in iter(summary.assumptions))
+        evidence_counter = Counter(item.kind for summary in iter(summaries) for item in iter(summary.evidence))
         helper_status_counter = Counter(
-            summary.helper_summary.status for summary in summaries if summary.helper_summary is not None
+            summary.helper_summary.status for summary in iter(summaries) if summary.helper_summary is not None
         )
         helper_candidate_counter = Counter(
             summary.helper_summary.candidate_kind
-            for summary in summaries
+            for summary in iter(summaries)
             if summary.helper_summary is not None and summary.helper_summary.candidate_kind != "none"
         )
         helper_refusal_counter = Counter(
             refusal.kind
-            for summary in summaries
+            for summary in iter(summaries)
             if summary.helper_summary is not None
-            for refusal in summary.helper_summary.refusals
+            for refusal in iter(summary.helper_summary.refusals)
         )
         helper_family_rows = tuple(
             item.to_dict()
-            for item in summarize_x86_16_helper_family_routes(
-                summary.helper_summary for summary in summaries if summary.helper_summary is not None
-            )
+            for item in builtins.iter(summarize_x86_16_helper_family_routes(
+                summary.helper_summary for summary in iter(summaries) if summary.helper_summary is not None
+            ))
         )
 
         return {
-            "status_counts": dict(sorted(status_counter.items())),
-            "scan_safe_counts": dict(sorted(scan_safe_counter.items())),
-            "assumption_counts": dict(sorted(assumption_counter.items())),
-            "evidence_counts": dict(sorted(evidence_counter.items())),
-            "helper_status_counts": dict(sorted(helper_status_counter.items())),
-            "helper_candidate_counts": dict(sorted(helper_candidate_counter.items())),
-            "helper_refusal_counts": dict(sorted(helper_refusal_counter.items())),
+            "status_counts": dict(sorted(tuple(status_counter.items()))),
+            "scan_safe_counts": dict(sorted(tuple(scan_safe_counter.items()))),
+            "assumption_counts": dict(sorted(tuple(assumption_counter.items()))),
+            "evidence_counts": dict(sorted(tuple(evidence_counter.items()))),
+            "helper_status_counts": dict(sorted(tuple(helper_status_counter.items()))),
+            "helper_candidate_counts": dict(sorted(tuple(helper_candidate_counter.items()))),
+            "helper_refusal_counts": dict(sorted(tuple(helper_refusal_counter.items()))),
             "helper_family_rows": list(helper_family_rows),
         }
 
@@ -620,6 +639,7 @@ RECOVERY_CONFIDENCE_AXES: tuple[tuple[str, str], ...] = (
 )
 
 
-def describe_x86_16_recovery_confidence_axes() -> tuple[tuple[str, str], ...]:
+@cython.ccall
+def describe_x86_16_recovery_confidence_axes() -> object:
     """Return the stable recovery confidence axis descriptions."""
     return RECOVERY_CONFIDENCE_AXES

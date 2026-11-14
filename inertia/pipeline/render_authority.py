@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed contract for selecting the authoritative generated-C render source.
 
 Layer: Pipeline governance.
@@ -11,6 +12,7 @@ fields on third-party angr codegen objects.
 """
 
 from __future__ import annotations
+import cython
 
 from enum import Enum
 from typing import Any, Protocol, cast, runtime_checkable
@@ -38,16 +40,19 @@ class CodegenRenderAuthority8616(Enum):
 class CodegenRenderIntegrityGuard8616(Protocol):
     """Owned live-state guard invoked immediately before codegen rendering."""
 
-    def verify(self, codegen: object, *, context: str) -> None:
+    def verify(self, codegen: object, *, context: object) -> None:
         """Hard-fail when the owning layer's live render contract is invalid."""
 
 
+@cython.ccall
 def codegen_render_authority_8616(codegen: object) -> CodegenRenderAuthority8616 | None:
     """Read the typed authority installed on a third-party angr codegen object."""
+    authority: object
     authority = getattr(codegen, "_inertia_codegen_render_authority_8616", None)
     return authority if isinstance(authority, CodegenRenderAuthority8616) else None
 
 
+@cython.ccall
 def mark_cfunction_ast_render_authority_8616(codegen: object) -> CodegenRenderAuthority8616:
     """Mark a successfully rendered live C AST without replacing a proven override."""
     authority = codegen_render_authority_8616(codegen)
@@ -58,6 +63,7 @@ def mark_cfunction_ast_render_authority_8616(codegen: object) -> CodegenRenderAu
     return CodegenRenderAuthority8616.CFUNCTION_AST
 
 
+@cython.ccall
 def install_codegen_render_integrity_guard_8616(
     codegen: object,
     guard: CodegenRenderIntegrityGuard8616,
@@ -66,8 +72,10 @@ def install_codegen_render_integrity_guard_8616(
     cast(Any, codegen)._inertia_codegen_render_integrity_guard_8616 = guard
 
 
-def require_codegen_render_integrity_8616(codegen: object, *, context: str) -> None:
+@cython.ccall
+def require_codegen_render_integrity_8616(codegen: object, *, context: object) -> None:
     """Invoke the installed owning-layer guard before rendering generated C."""
+    guard: object
     guard = getattr(codegen, "_inertia_codegen_render_integrity_guard_8616", None)
     if guard is None:
         return

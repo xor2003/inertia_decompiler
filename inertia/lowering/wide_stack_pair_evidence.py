@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove that typed stack words belong to one widened stack object.
 
 Layer: Types/Lowering.
@@ -12,6 +13,8 @@ instruction shapes.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.analyses.decompiler.structured_codegen.c import CVariable
@@ -23,6 +26,7 @@ from inertia.ir.core import IRValue, MemSpace
 from .real_mode_linear import proven_wide_stack_pair_low_offset_8616
 from .semantic_cast import CSemanticCast8616
 from .stack_variable_coordinates import machine_bp_offset_for_stack_variable_8616
+import operator
 
 _WORD_BYTES = 2
 _DWORD_BYTES = 4
@@ -30,6 +34,7 @@ _WORD_BITS = 16
 _WORD_MASK = 0xFFFF
 
 
+@cython.ccall
 def materialize_proven_wide_stack_pair_variable_8616(
     codegen: object,
     high_expression: object,
@@ -37,6 +42,7 @@ def materialize_proven_wide_stack_pair_variable_8616(
     candidate_expression: object,
 ) -> CVariable | None:
     """Materialize a four-byte stack variable only from a widening proof."""
+    low_offset: object
     low_offset = proven_wide_stack_pair_low_offset_8616(
         high_expression,
         low_expression,
@@ -46,12 +52,12 @@ def materialize_proven_wide_stack_pair_variable_8616(
     candidate_variable = candidate_expression.variable
     if (
         not isinstance(candidate_variable, SimStackVariable)
-        or candidate_variable.offset != low_offset
+        or operator.ne(candidate_variable.offset, low_offset)
     ):
         return None
-    if candidate_variable.size == _DWORD_BYTES:
+    if operator.eq(candidate_variable.size, _DWORD_BYTES):
         return candidate_expression
-    if candidate_variable.size != _WORD_BYTES:
+    if operator.ne(candidate_variable.size, _WORD_BYTES):
         return None
     return CVariable(
         SimStackVariable(
@@ -69,30 +75,34 @@ def materialize_proven_wide_stack_pair_variable_8616(
     )
 
 
-def _word_projection_source_8616(expression: object, shift: int) -> CVariable | None:
+@cython.ccall
+def _word_projection_source_8616(expression: object, shift: cython.longlong) -> CVariable | None:
     """Recover one masked word projection of a proven wide stack C variable."""
     if not isinstance(expression, structured_c.CBinaryOp) or expression.op != "And":
         return None
     mask = expression.rhs
-    if not isinstance(mask, structured_c.CConstant) or mask.value != _WORD_MASK:
+    if not isinstance(mask, structured_c.CConstant) or operator.ne(mask.value, _WORD_MASK):
         return None
     source = expression.lhs
     if shift:
         if not isinstance(source, structured_c.CBinaryOp) or source.op != "Shr":
             return None
         shift_node = source.rhs
-        if not isinstance(shift_node, structured_c.CConstant) or shift_node.value != shift:
+        if not isinstance(shift_node, structured_c.CConstant) or operator.ne(shift_node.value, shift):
             return None
         source = source.lhs
     return source if isinstance(source, CVariable) else None
 
 
+@cython.ccall
 def _proven_projected_wide_pair_8616(
     high_expression: object,
     low_expression: object,
-    low_offset: int,
-) -> bool:
+    low_offset: cython.longlong,
+) -> cython.bint:
     """Join one four-byte owner to IR using its authoritative BP projection."""
+    high_source: object
+    low_source: object
     high_source = _word_projection_source_8616(high_expression, _WORD_BITS)
     low_source = _word_projection_source_8616(low_expression, 0)
     if high_source is None or low_source is None:
@@ -101,20 +111,22 @@ def _proven_projected_wide_pair_8616(
     low_variable = low_source.variable
     if not isinstance(high_variable, SimStackVariable) or not isinstance(low_variable, SimStackVariable):
         return False
-    if high_variable != low_variable or high_variable.size != _DWORD_BYTES or high_variable.base != "bp":
+    if high_variable != low_variable or operator.ne(high_variable.size, _DWORD_BYTES) or high_variable.base != "bp":
         return False
     # Rendered entry-SP offsets are not the machine-BP coordinates used by IR.
     return (
-        machine_bp_offset_for_stack_variable_8616(high_source.codegen, high_variable) == low_offset
-        and machine_bp_offset_for_stack_variable_8616(low_source.codegen, low_variable) == low_offset
+        operator.eq(machine_bp_offset_for_stack_variable_8616(high_source.codegen, high_variable), low_offset)
+        and operator.eq(machine_bp_offset_for_stack_variable_8616(low_source.codegen, low_variable), low_offset)
     )
 
 
+@cython.ccall
 def _proven_low_owner_with_high_slice_8616(
     high_expression: object,
     low_expression: object,
-) -> bool:
+) -> cython.bint:
     """Accept a low-word projection whose four-byte owner covers the high slice."""
+    low_source: object
     low_source = _word_projection_source_8616(low_expression, 0)
     if (
         low_source is None
@@ -130,12 +142,12 @@ def _proven_low_owner_with_high_slice_8616(
     return (
         isinstance(high_variable, SimStackVariable)
         and isinstance(low_variable, SimStackVariable)
-        and high_variable.size == _WORD_BYTES
-        and low_variable.size == _DWORD_BYTES
-        and high_variable.offset == low_variable.offset + _WORD_BYTES
-        and high_variable.base == low_variable.base
-        and high_variable.base_addr == low_variable.base_addr
-        and high_variable.region == low_variable.region
+        and operator.eq(high_variable.size, _WORD_BYTES)
+        and operator.eq(low_variable.size, _DWORD_BYTES)
+        and operator.eq(high_variable.offset, low_variable.offset + _WORD_BYTES)
+        and operator.eq(high_variable.base, low_variable.base)
+        and operator.eq(high_variable.base_addr, low_variable.base_addr)
+        and operator.eq(high_variable.region, low_variable.region)
     )
 
 
@@ -144,15 +156,15 @@ def proven_wide_stack_ir_pair_8616(
     low_value: IRValue,
     high_expression: object,
     low_expression: object,
-) -> bool:
+) -> cython.bint:
     """Return whether typed IR slices and active stack objects prove a pair."""
     are_bp_words = all(
-        value.space is MemSpace.SS and value.name == "bp" and value.size == _WORD_BYTES
-        for value in (high_value, low_value)
+        value.space is MemSpace.SS and value.name == "bp" and operator.eq(value.size, _WORD_BYTES)
+        for value in iter((high_value, low_value))
     )
-    if not are_bp_words or high_value.offset != low_value.offset + _WORD_BYTES:
+    if not are_bp_words or operator.ne(high_value.offset, low_value.offset + _WORD_BYTES):
         return False
-    if proven_wide_stack_pair_low_offset_8616(high_expression, low_expression) == low_value.offset:
+    if operator.eq(proven_wide_stack_pair_low_offset_8616(high_expression, low_expression), low_value.offset):
         return True
     if _proven_projected_wide_pair_8616(
         high_expression,
@@ -169,8 +181,8 @@ def proven_wide_stack_ir_pair_8616(
     return (
         isinstance(high_variable, SimStackVariable)
         and isinstance(low_variable, SimStackVariable)
-        and high_variable.offset == high_value.offset
-        and low_variable.offset == low_value.offset
+        and operator.eq(high_variable.offset, high_value.offset)
+        and operator.eq(low_variable.offset, low_value.offset)
         and isinstance(low_variable.size, int)
         and low_variable.size >= _DWORD_BYTES
     )

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Optional evidence/reporting.
 
 Responsibility: parse Turbo Debugger TDINFO records into optional labels and diagnostics.
@@ -11,6 +12,9 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import dataclasses
+import typing
+import cython
 
 import struct
 from collections import Counter
@@ -19,6 +23,8 @@ from dataclasses import dataclass, field, replace
 from enum import IntEnum
 from pathlib import Path
 from typing import Any
+import operator
+import builtins
 
 _TDINFO_MAGIC = 0x52FB
 _PAGE_SIZE = 512
@@ -131,107 +137,107 @@ class TDInfoTypeKind(IntEnum):
     BUILTIN = 0x100
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TDInfoHeader:
     """Decoded TDINFO header counters and version fields."""
 
-    major_version: int
-    minor_version: int
-    names_pool_size_in_bytes: int
-    names_count: int
-    types_count: int
-    members_count: int
-    symbols_count: int
-    globals_count: int
-    extension_size: int
+    major_version: cython.longlong
+    minor_version: cython.longlong
+    names_pool_size_in_bytes: cython.longlong
+    names_count: cython.longlong
+    types_count: cython.longlong
+    members_count: cython.longlong
+    symbols_count: cython.longlong
+    globals_count: cython.longlong
+    extension_size: cython.longlong
     # Extended TDS 3.x table counts (zero when the header predates them).
-    source_modules_count: int = 0
-    local_symbols_count: int = 0
-    scopes_count: int = 0
-    line_entries_count: int = 0
-    include_files_count: int = 0
-    segments_count: int = 0
-    correlations_count: int = 0
-    class_entries_count: int = 0
-    parent_entries_count: int = 0
-    module_class_entries_count: int = 0
-    coverage_offsets_count: int = 0
+    source_modules_count: cython.longlong = 0
+    local_symbols_count: cython.longlong = 0
+    scopes_count: cython.longlong = 0
+    line_entries_count: cython.longlong = 0
+    include_files_count: cython.longlong = 0
+    segments_count: cython.longlong = 0
+    correlations_count: cython.longlong = 0
+    class_entries_count: cython.longlong = 0
+    parent_entries_count: cython.longlong = 0
+    module_class_entries_count: cython.longlong = 0
+    coverage_offsets_count: cython.longlong = 0
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TDInfoModule:
     """One TD32 module-table entry: a compilation unit's table references."""
 
-    index: int
-    name: str
-    language_flags: int
-    symbols_index: int
-    symbols_count: int
-    sources_index: int
-    sources_count: int
-    correlation_index: int
-    correlation_count: int
+    index: cython.longlong
+    name: object
+    language_flags: cython.longlong
+    symbols_index: cython.longlong
+    symbols_count: cython.longlong
+    sources_index: cython.longlong
+    sources_count: cython.longlong
+    correlation_index: cython.longlong
+    correlation_count: cython.longlong
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TDInfoSourceFile:
     """One TD32 source-file-table entry: a name plus DOS timestamp."""
 
-    index: int
-    name: str
-    size: int
-    timestamp: int
+    index: cython.longlong
+    name: object
+    size: cython.longlong
+    timestamp: cython.longlong
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TDInfoSegment:
     """One TD32 segment-table entry mapping a code segment to a module."""
 
-    index: int
-    module_index: int
-    code_segment: int
-    code_offset: int
-    code_length: int
-    scope_index: int
-    scope_count: int
-    correlation_index: int
-    correlation_count: int
+    index: cython.longlong
+    module_index: cython.longlong
+    code_segment: cython.longlong
+    code_offset: cython.longlong
+    code_length: cython.longlong
+    scope_index: cython.longlong
+    scope_count: cython.longlong
+    correlation_index: cython.longlong
+    correlation_count: cython.longlong
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TDInfoLineEntry:
     """One TD32 line-table entry: a source line's code offset."""
 
-    index: int
-    line: int
-    offset: int
+    index: cython.longlong
+    line: cython.longlong
+    offset: cython.longlong
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TDInfoScope:
     """One TD32 scope-table entry: a lexical scope's autos and bounds."""
 
-    index: int
-    autos_index: int
-    autos_count: int
-    parent_scope: int
-    function_symbol: int
-    scope_offset: int
-    scope_length: int
+    index: cython.longlong
+    autos_index: cython.longlong
+    autos_count: cython.longlong
+    parent_scope: cython.longlong
+    function_symbol: cython.longlong
+    scope_offset: cython.longlong
+    scope_length: cython.longlong
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TDInfoCorrelation:
     """One TD32 correlation-table entry mapping a source file's line run."""
 
-    index: int
-    segment_index: int
-    file_index: int
-    line_index: int
-    line_count: int
+    index: cython.longlong
+    segment_index: cython.longlong
+    file_index: cython.longlong
+    line_index: cython.longlong
+    line_count: cython.longlong
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TDInfoClassEntry:
     """One TD32 class-table entry: a class's member list and parents.
 
@@ -244,29 +250,29 @@ class TDInfoClassEntry:
     parent table, whose u16 entries are class-table indexes.
     """
 
-    index: int
-    name: str
-    name_index: int
-    parent_table_index: int
-    parent_count: int
-    member_ordinal: int
-    vptr_index: int
-    info: int
-    parent_class_indexes: tuple[int, ...] = ()
+    index: cython.longlong
+    name: object
+    name_index: cython.longlong
+    parent_table_index: cython.longlong
+    parent_count: cython.longlong
+    member_ordinal: cython.longlong
+    vptr_index: cython.longlong
+    info: cython.longlong
+    parent_class_indexes: tuple[cython.longlong, ...] = ()
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TDInfoModuleClassEntry:
     """One TD32 module-class-table entry: a module's class-table run."""
 
-    index: int
-    flags: int
-    reserved: int
-    class_index: int
-    class_count: int
+    index: cython.longlong
+    flags: cython.longlong
+    reserved: cython.longlong
+    class_index: cython.longlong
+    class_count: cython.longlong
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TDInfoTableLayout:
     """Computed file offsets for every fixed-size TD32 table.
 
@@ -275,84 +281,84 @@ class TDInfoTableLayout:
     output.  ``members_end`` bounds the variable-size member stream.
     """
 
-    module_table_offset: int = 0
-    source_file_table_offset: int = 0
-    line_table_offset: int = 0
-    scope_table_offset: int = 0
-    segment_table_offset: int = 0
-    correlation_table_offset: int = 0
-    type_table_offset: int = 0
-    member_table_offset: int = 0
-    member_table_end: int = 0
-    class_table_offset: int = 0
-    parent_table_offset: int = 0
-    module_class_table_offset: int = 0
-    coverage_map_table_offset: int = 0
-    coverage_offsets_table_offset: int = 0
-    module_flags_table_offset: int = 0
+    module_table_offset: cython.longlong = 0
+    source_file_table_offset: cython.longlong = 0
+    line_table_offset: cython.longlong = 0
+    scope_table_offset: cython.longlong = 0
+    segment_table_offset: cython.longlong = 0
+    correlation_table_offset: cython.longlong = 0
+    type_table_offset: cython.longlong = 0
+    member_table_offset: cython.longlong = 0
+    member_table_end: cython.longlong = 0
+    class_table_offset: cython.longlong = 0
+    parent_table_offset: cython.longlong = 0
+    module_class_table_offset: cython.longlong = 0
+    coverage_map_table_offset: cython.longlong = 0
+    coverage_offsets_table_offset: cython.longlong = 0
+    module_flags_table_offset: cython.longlong = 0
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TDInfoSymbolRecord:
     """Raw TDINFO symbol record with segmented address metadata."""
 
-    index: int
-    type_index: int
-    offset: int
-    segment: int
+    index: cython.longlong
+    type_index: cython.longlong
+    offset: cython.longlong
+    segment: cython.longlong
     symbol_class: TDInfoSymbolClass
 
-    def linear_addr(self, *, load_base_linear: int) -> int:
+    def linear_addr(self, *, load_base_linear: cython.longlong) -> cython.longlong:
         """Return a display-only linear address for optional symbol labels."""
         return load_base_linear + (self.segment << 4) + self.offset
 
     @property
-    def signed_offset(self) -> int:
+    def signed_offset(self) -> cython.longlong:
         """Interpret the 16-bit record offset as a signed stack displacement."""
         return self.offset - 0x10000 if self.offset & 0x8000 else self.offset
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TDInfoNamedSymbol:
     """TDINFO symbol paired with its decoded name pool entry."""
 
-    name: str
+    name: object
     record: TDInfoSymbolRecord
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TDInfoTypeMember:
     """Member entry decoded from a TDINFO structure, union, or array payload."""
 
-    name: str
-    offset: int
-    type_index: int
-    attributes: int
-    payload_offset: int
+    name: object
+    offset: cython.longlong
+    type_index: cython.longlong
+    attributes: cython.longlong
+    payload_offset: cython.longlong
     owner_type_index: int | None = None
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TDInfoEnumMember:
     """Enum value decoded from a TDINFO enum payload."""
 
-    name: str
-    value: int
-    attributes: int
-    payload_offset: int
+    name: object
+    value: cython.longlong
+    attributes: cython.longlong
+    payload_offset: cython.longlong
     owner_type_index: int | None = None
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TDInfoTypeDescriptor:
     """TDINFO type descriptor retained as optional debug type evidence."""
 
-    type_index: int
+    type_index: cython.longlong
     kind: TDInfoTypeKind
-    name: str
-    size: int
-    payload_offset: int
-    raw_bytes: bytes
+    name: object
+    size: cython.longlong
+    payload_offset: cython.longlong
+    raw_bytes: object
     base_type_index: int | None = None
     target_type_index: int | None = None
     return_type_index: int | None = None
@@ -376,7 +382,7 @@ class TDInfoTypeDescriptor:
     extension: bytes = b""
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TDInfoMemberList:
     """One decoded TD32 member-record list: an aggregate's field block.
 
@@ -385,88 +391,88 @@ class TDInfoMemberList:
     through their trailing ``member_ref`` field (verified against TDUMP).
     """
 
-    record_index: int
-    payload_offset: int
-    size: int
-    owner_name: str
+    record_index: cython.longlong
+    payload_offset: cython.longlong
+    size: cython.longlong
+    owner_name: object
     owner_type_index: int | None
-    bitfield: bool
-    member_names: tuple[str, ...]
-    method_names: tuple[str, ...]
+    bitfield: cython.bint
+    member_names: object
+    method_names: object
     members: tuple[TDInfoTypeMember, ...] = ()
     block_ordinal: int | None = None
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TDInfoTypeReference:
     """Reference from a named TDINFO symbol to a type descriptor index."""
 
-    name: str
-    type_index: int
+    name: object
+    type_index: cython.longlong
     symbol_class: TDInfoSymbolClass
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TDInfoNamePoolEntry:
     """Classified TDINFO name-pool string."""
 
-    index: int
-    name: str
+    index: cython.longlong
+    name: object
     kind: TDInfoNameKind
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TDInfoRawTableSpan:
     """Byte span for a TDINFO table retained for diagnostics and schema dumps."""
 
-    name: str
-    offset: int
-    size: int
+    name: object
+    offset: cython.longlong
+    size: cython.longlong
     count: int | None = None
     record_size: int | None = None
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TDInfoCoverageMapEntry:
     """Per-segment start index into the coverage-offsets table."""
 
-    index: int
-    offset_index: int
+    index: cython.longlong
+    offset_index: cython.longlong
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TDInfoCoverageOffset:
     """Coverage-table code offset: a statement boundary inside a segment."""
 
-    index: int
-    segment_index: int
-    offset: int
+    index: cython.longlong
+    segment_index: cython.longlong
+    offset: cython.longlong
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TDInfoModuleFlags:
     """TD32 module flags record (all zero in this corpus)."""
 
-    index: int
-    flags: int
+    index: cython.longlong
+    flags: cython.longlong
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TDInfoEXEInfo:
     """Parsed TDINFO payload exposed as optional labels and debug diagnostics."""
 
     header: TDInfoHeader
-    debug_info_offset: int
-    symbols: tuple[TDInfoSymbolRecord, ...]
-    names: tuple[str, ...]
+    debug_info_offset: cython.longlong
+    symbols: object
+    names: object
     name_pool_entries: tuple[TDInfoNamePoolEntry, ...] = ()
     source_files: tuple[str, ...] = ()
     candidate_identifiers: tuple[str, ...] = ()
     public_symbols: tuple[str, ...] = ()
     local_identifiers: tuple[str, ...] = ()
     named_symbols: tuple[TDInfoNamedSymbol, ...] = ()
-    names_by_class: dict[TDInfoSymbolClass, tuple[str, ...]] = field(default_factory=dict)
-    symbols_by_class: dict[TDInfoSymbolClass, tuple[TDInfoSymbolRecord, ...]] = field(default_factory=dict)
+    names_by_class: object = field(default_factory=dict)
+    symbols_by_class: object = field(default_factory=dict)
     stack_variables: tuple[TDInfoNamedSymbol, ...] = ()
     register_symbols: tuple[TDInfoNamedSymbol, ...] = ()
     constant_symbols: tuple[TDInfoNamedSymbol, ...] = ()
@@ -480,7 +486,7 @@ class TDInfoEXEInfo:
     source_file_entries: tuple[TDInfoSourceFile, ...] = ()
     segments: tuple[TDInfoSegment, ...] = ()
     class_entries: tuple[TDInfoClassEntry, ...] = ()
-    parent_class_table: tuple[int, ...] = ()
+    parent_class_table: tuple[cython.longlong, ...] = ()
     module_class_entries: tuple[TDInfoModuleClassEntry, ...] = ()
     line_entries: tuple[TDInfoLineEntry, ...] = ()
     scopes: tuple[TDInfoScope, ...] = ()
@@ -489,8 +495,8 @@ class TDInfoEXEInfo:
     coverage_offsets: tuple[TDInfoCoverageOffset, ...] = ()
     module_flags: tuple[TDInfoModuleFlags, ...] = ()
     raw_table_spans: tuple[TDInfoRawTableSpan, ...] = ()
-    code_labels: dict[int, str] = field(default_factory=dict)
-    data_labels: dict[int, str] = field(default_factory=dict)
+    code_labels: object = field(default_factory=dict)
+    data_labels: object = field(default_factory=dict)
     # TLink/TDS version identification
     tds_version_str: str = ""
     tlink_version_str: str = ""
@@ -498,12 +504,14 @@ class TDInfoEXEInfo:
     products: str = ""
 
 
-def parse_tdinfo_exe(path: Path, *, load_base_linear: int = 0) -> TDInfoEXEInfo | None:
+@cython.ccall
+def parse_tdinfo_exe(path: Path, *, load_base_linear: cython.longlong = 0) -> TDInfoEXEInfo | None:
     """Parse TDINFO debug metadata from an MZ executable when present."""
     return parse_tdinfo_exe_bytes(path.read_bytes(), load_base_linear=load_base_linear)
 
 
-def _tdinfo_header_layout_8616(data: bytes) -> tuple[TDInfoHeader, int, int, int, TDInfoTableLayout] | None:
+@cython.ccall
+def _tdinfo_header_layout_8616(data: object) -> object:
     """Decode the TDINFO header layout, or None when absent/truncated."""
     if len(data) < 0x40 or data[:2] != b"MZ":
         return None
@@ -683,28 +691,29 @@ def _tdinfo_header_layout_8616(data: bytes) -> tuple[TDInfoHeader, int, int, int
     )
 
 
-@dataclass
+@dataclasses.dataclass
 class _TdinfoSymbolCollection8616:
     """Mutable buckets for TDINFO symbol classification."""
 
-    symbols: list[TDInfoSymbolRecord] = field(default_factory=list)
-    symbols_by_class: dict[TDInfoSymbolClass, list[TDInfoSymbolRecord]] = field(
-        default_factory=lambda: {klass: [] for klass in TDInfoSymbolClass}
+    symbols: object = field(default_factory=list)
+    symbols_by_class: object = field(
+        default_factory=lambda: {klass: [] for klass in iter(TDInfoSymbolClass)}
     )
-    named_symbols: list[TDInfoNamedSymbol] = field(default_factory=list)
-    names_by_class: dict[TDInfoSymbolClass, list[str]] = field(
-        default_factory=lambda: {klass: [] for klass in TDInfoSymbolClass}
+    named_symbols: object = field(default_factory=list)
+    names_by_class: object = field(
+        default_factory=lambda: {klass: [] for klass in iter(TDInfoSymbolClass)}
     )
-    code_labels: dict[int, str] = field(default_factory=dict)
-    data_labels: dict[int, str] = field(default_factory=dict)
-    type_names: list[str] = field(default_factory=list)
-    stack_variables: list[TDInfoNamedSymbol] = field(default_factory=list)
-    register_symbols: list[TDInfoNamedSymbol] = field(default_factory=list)
-    constant_symbols: list[TDInfoNamedSymbol] = field(default_factory=list)
-    type_references: list[TDInfoTypeReference] = field(default_factory=list)
+    code_labels: object = field(default_factory=dict)
+    data_labels: object = field(default_factory=dict)
+    type_names: object = field(default_factory=list)
+    stack_variables: object = field(default_factory=list)
+    register_symbols: object = field(default_factory=list)
+    constant_symbols: object = field(default_factory=list)
+    type_references: object = field(default_factory=list)
 
-    def add_symbol(self, symbol: TDInfoSymbolRecord, names: tuple[str, ...]) -> str | None:
+    def add_symbol(self, symbol: TDInfoSymbolRecord, names: object) -> object:
         """Classify one symbol record into the typed buckets."""
+        name: object
         self.symbols.append(symbol)
         self.symbols_by_class.setdefault(symbol.symbol_class, []).append(symbol)
         name = _tdinfo_symbol_name(symbol, names)
@@ -731,16 +740,18 @@ class _TdinfoSymbolCollection8616:
         return name
 
 
+@cython.ccall
 def _collect_tdinfo_symbols_8616(
-    data: bytes,
+    data: object,
     *,
-    symbol_records_offset: int,
-    symbols_count: int,
-    names: tuple[str, ...],
-    load_base_linear: int,
+    symbol_records_offset: cython.longlong,
+    symbols_count: cython.longlong,
+    names: object,
+    load_base_linear: cython.longlong,
     collection: _TdinfoSymbolCollection8616,
 ) -> None:
     """Fold fixed 9-byte symbol records into the collection."""
+    name: object
     for index in range(symbols_count):
         entry_offset = symbol_records_offset + index * 9
         name_index, type_index, offset, segment, bitfield = struct.unpack_from("<HHHHB", data, entry_offset)
@@ -764,7 +775,8 @@ def _collect_tdinfo_symbols_8616(
             collection.data_labels.setdefault(linear, name)
 
 
-def _tdinfo_version_strings_8616(major_version: int, minor_version: int) -> tuple[str, str, str, str]:
+@cython.ccall
+def _tdinfo_version_strings_8616(major_version: cython.longlong, minor_version: cython.longlong) -> object:
     """Return (tds, tlink, commandline_hint, products) version strings."""
     normalized_minor_version = 10 if major_version == 3 and minor_version == 0x10 else minor_version
     tds_key = (major_version, normalized_minor_version)
@@ -775,8 +787,10 @@ def _tdinfo_version_strings_8616(major_version: int, minor_version: int) -> tupl
     return f"{major_version}.{normalized_minor_version}", "unknown", "", ""
 
 
-def parse_tdinfo_exe_bytes(data: bytes, *, load_base_linear: int = 0) -> TDInfoEXEInfo | None:
+def parse_tdinfo_exe_bytes(data: object, *, load_base_linear: cython.longlong = 0) -> TDInfoEXEInfo | None:
     """Parse TDINFO debug metadata from executable bytes when present."""
+    layout_result: object
+    symbol: object
     layout_result = _tdinfo_header_layout_8616(data)
     if layout_result is None:
         return None
@@ -788,8 +802,8 @@ def parse_tdinfo_exe_bytes(data: bytes, *, load_base_linear: int = 0) -> TDInfoE
 
     names = _parse_tdinfo_name_pool(data[names_pool_offset:], expected_count=header.names_count)
     name_pool_entries = _classify_tdinfo_name_pool(names)
-    public_symbols = tuple(entry.name for entry in name_pool_entries if entry.kind is TDInfoNameKind.PUBLIC_SYMBOL)
-    local_identifiers = tuple(entry.name for entry in name_pool_entries if entry.kind is TDInfoNameKind.IDENTIFIER)
+    public_symbols = tuple(entry.name for entry in iter(name_pool_entries) if entry.kind is TDInfoNameKind.PUBLIC_SYMBOL)
+    local_identifiers = tuple(entry.name for entry in iter(name_pool_entries) if entry.kind is TDInfoNameKind.IDENTIFIER)
 
     collection = _TdinfoSymbolCollection8616()
     _collect_tdinfo_symbols_8616(
@@ -805,7 +819,7 @@ def parse_tdinfo_exe_bytes(data: bytes, *, load_base_linear: int = 0) -> TDInfoE
     source_file_entries: tuple[TDInfoSourceFile, ...] = ()
     segments: tuple[TDInfoSegment, ...] = ()
     class_entries: tuple[TDInfoClassEntry, ...] = ()
-    parent_class_table: tuple[int, ...] = ()
+    parent_class_table: tuple[cython.longlong, ...] = ()
     module_class_entries: tuple[TDInfoModuleClassEntry, ...] = ()
     line_entries: tuple[TDInfoLineEntry, ...] = ()
     scopes: tuple[TDInfoScope, ...] = ()
@@ -813,9 +827,9 @@ def parse_tdinfo_exe_bytes(data: bytes, *, load_base_linear: int = 0) -> TDInfoE
     coverage_map: tuple[TDInfoCoverageMapEntry, ...] = ()
     coverage_offsets: tuple[TDInfoCoverageOffset, ...] = ()
     module_flags: tuple[TDInfoModuleFlags, ...] = ()
-    type_descriptors: tuple[TDInfoTypeDescriptor, ...]
-    member_payload: bytes
-    member_base_offset: int
+    type_descriptors: object
+    member_payload: object
+    member_base_offset: cython.longlong
 
     if table_layout.type_table_offset:
         # Extended TDS 3.x layout: every table offset is computed from the
@@ -945,17 +959,17 @@ def parse_tdinfo_exe_bytes(data: bytes, *, load_base_linear: int = 0) -> TDInfoE
         symbols=tuple(collection.symbols),
         names=names,
         name_pool_entries=name_pool_entries,
-        source_files=tuple(entry.name for entry in name_pool_entries if entry.kind is TDInfoNameKind.SOURCE_FILE),
+        source_files=tuple(entry.name for entry in iter(name_pool_entries) if entry.kind is TDInfoNameKind.SOURCE_FILE),
         candidate_identifiers=tuple(
             entry.name
-            for entry in name_pool_entries
+            for entry in iter(name_pool_entries)
             if entry.kind in {TDInfoNameKind.IDENTIFIER, TDInfoNameKind.PUBLIC_SYMBOL}
         ),
         public_symbols=public_symbols,
         local_identifiers=local_identifiers,
         named_symbols=tuple(collection.named_symbols),
-        names_by_class={klass: tuple(items) for klass, items in collection.names_by_class.items() if items},
-        symbols_by_class={klass: tuple(items) for klass, items in collection.symbols_by_class.items() if items},
+        names_by_class={klass: tuple(items) for klass, items in builtins.iter(collection.names_by_class.items()) if items},
+        symbols_by_class={klass: tuple(items) for klass, items in builtins.iter(collection.symbols_by_class.items()) if items},
         stack_variables=tuple(collection.stack_variables),
         register_symbols=tuple(collection.register_symbols),
         constant_symbols=tuple(collection.constant_symbols),
@@ -987,17 +1001,23 @@ def parse_tdinfo_exe_bytes(data: bytes, *, load_base_linear: int = 0) -> TDInfoE
     )
 
 
+@cython.ccall
 def _tdinfo_raw_table_spans(
     *,
-    debug_info_offset: int,
-    symbol_records_offset: int,
-    symbol_records_size: int,
-    symbols_count: int,
-    names_pool_offset: int,
-    names_pool_size: int,
+    debug_info_offset: cython.longlong,
+    symbol_records_offset: cython.longlong,
+    symbol_records_size: cython.longlong,
+    symbols_count: cython.longlong,
+    names_pool_offset: cython.longlong,
+    names_pool_size: cython.longlong,
     header: TDInfoHeader,
     layout: TDInfoTableLayout,
 ) -> tuple[TDInfoRawTableSpan, ...]:
+    count: object
+    name: object
+    offset: object
+    record_size: object
+    size: object
     spans = [
         TDInfoRawTableSpan(
             name="header",
@@ -1063,11 +1083,12 @@ def _tdinfo_raw_table_spans(
     return tuple(spans)
 
 
+@cython.ccall
 def _parse_tdinfo_module_table(
-    data: bytes,
-    offset: int,
-    count: int,
-    names: tuple[str, ...],
+    data: object,
+    offset: cython.longlong,
+    count: cython.longlong,
+    names: object,
 ) -> tuple[TDInfoModule, ...]:
     """Decode the TD32 module table: 16-byte records of table references."""
     modules: list[TDInfoModule] = []
@@ -1102,11 +1123,12 @@ def _parse_tdinfo_module_table(
     return tuple(modules)
 
 
+@cython.ccall
 def _parse_tdinfo_source_file_table(
-    data: bytes,
-    offset: int,
-    count: int,
-    names: tuple[str, ...],
+    data: object,
+    offset: cython.longlong,
+    count: cython.longlong,
+    names: object,
 ) -> tuple[TDInfoSourceFile, ...]:
     """Decode the TD32 source-file table: 6-byte name/size/timestamp records."""
     entries: list[TDInfoSourceFile] = []
@@ -1127,10 +1149,11 @@ def _parse_tdinfo_source_file_table(
     return tuple(entries)
 
 
+@cython.ccall
 def _parse_tdinfo_segment_table(
-    data: bytes,
-    offset: int,
-    count: int,
+    data: object,
+    offset: cython.longlong,
+    count: cython.longlong,
 ) -> tuple[TDInfoSegment, ...]:
     """Decode the TD32 segment table: 16-byte module/scope mappings."""
     segments: list[TDInfoSegment] = []
@@ -1164,12 +1187,13 @@ def _parse_tdinfo_segment_table(
     return tuple(segments)
 
 
+@cython.ccall
 def _parse_tdinfo_class_table(
-    data: bytes,
-    offset: int,
-    count: int,
-    names: tuple[str, ...],
-    parent_class_table: tuple[int, ...],
+    data: object,
+    offset: cython.longlong,
+    count: cython.longlong,
+    names: object,
+    parent_class_table: object,
 ) -> tuple[TDInfoClassEntry, ...]:
     """Decode the TD32 class table: 11-byte class records."""
     classes: list[TDInfoClassEntry] = []
@@ -1187,7 +1211,7 @@ def _parse_tdinfo_class_table(
         ) = struct.unpack_from("<HHHHHB", data, entry_offset)
         name = names[name_index - 1] if 1 <= name_index <= len(names) else ""
         # The parent-table index is 1-based (TDUMP prints it verbatim).
-        parents: tuple[int, ...] = ()
+        parents: tuple[cython.longlong, ...] = ()
         if parent_count and parent_table_index >= 1:
             base = parent_table_index - 1
             parents = tuple(parent_class_table[base : base + parent_count])
@@ -1208,10 +1232,10 @@ def _parse_tdinfo_class_table(
 
 
 def _parse_tdinfo_parent_table(
-    data: bytes,
-    offset: int,
-    count: int,
-) -> tuple[int, ...]:
+    data: object,
+    offset: cython.longlong,
+    count: cython.longlong,
+) -> tuple[cython.longlong, ...]:
     """Decode the TD32 parent table: u16 class-table indexes."""
     if offset < 0 or offset + count * 2 > len(data):
         return ()
@@ -1221,10 +1245,11 @@ def _parse_tdinfo_parent_table(
     )
 
 
+@cython.ccall
 def _parse_tdinfo_module_class_table(
-    data: bytes,
-    offset: int,
-    count: int,
+    data: object,
+    offset: cython.longlong,
+    count: cython.longlong,
 ) -> tuple[TDInfoModuleClassEntry, ...]:
     """Decode the TD32 module-class table: 8-byte class-range records."""
     entries: list[TDInfoModuleClassEntry] = []
@@ -1248,9 +1273,9 @@ def _parse_tdinfo_module_class_table(
 
 
 def _parse_tdinfo_line_table(
-    data: bytes,
-    offset: int,
-    count: int,
+    data: object,
+    offset: cython.longlong,
+    count: cython.longlong,
 ) -> tuple[TDInfoLineEntry, ...]:
     """Decode the TD32 line table: 4-byte (line, offset) records."""
     if offset < 0 or offset + count * 4 > len(data):
@@ -1261,16 +1286,17 @@ def _parse_tdinfo_line_table(
             line=line,
             offset=code_offset,
         )
-        for index, (line, code_offset) in enumerate(
+        for index, (line, code_offset) in builtins.iter(enumerate(
             struct.iter_unpack("<HH", data[offset : offset + count * 4])
-        )
+        ))
     )
 
 
+@cython.ccall
 def _parse_tdinfo_scope_table(
-    data: bytes,
-    offset: int,
-    count: int,
+    data: object,
+    offset: cython.longlong,
+    count: cython.longlong,
 ) -> tuple[TDInfoScope, ...]:
     """Decode the TD32 scope table: 12-byte lexical scope records."""
     scopes: list[TDInfoScope] = []
@@ -1301,9 +1327,9 @@ def _parse_tdinfo_scope_table(
 
 
 def _parse_tdinfo_coverage_map(
-    data: bytes,
-    offset: int,
-    count: int,
+    data: object,
+    offset: cython.longlong,
+    count: cython.longlong,
 ) -> tuple[TDInfoCoverageMapEntry, ...]:
     """Decode the coverage map: one u16 per segment = start index into the
     coverage-offsets table (statement-boundary code offsets)."""
@@ -1311,29 +1337,31 @@ def _parse_tdinfo_coverage_map(
         return ()
     return tuple(
         TDInfoCoverageMapEntry(index=index + 1, offset_index=start)
-        for index, (start,) in enumerate(
+        for index, (start,) in builtins.iter(enumerate(
             struct.iter_unpack("<H", data[offset : offset + count * 2])
-        )
+        ))
     )
 
 
 def _parse_tdinfo_coverage_offsets(
-    data: bytes,
-    offset: int,
-    count: int,
-    coverage_map: tuple[TDInfoCoverageMapEntry, ...],
+    data: object,
+    offset: cython.longlong,
+    count: cython.longlong,
+    coverage_map: object,
 ) -> tuple[TDInfoCoverageOffset, ...]:
     """Decode coverage offsets, attributing each to its segment's range."""
+    code_offset: object
+    index: object
     if offset < 0 or offset + count * 2 > len(data):
         return ()
-    bounds = sorted(entry.offset_index for entry in coverage_map if entry.offset_index)
+    bounds = sorted(entry.offset_index for entry in iter(coverage_map) if entry.offset_index)
     bounds.append(count + 1)
     offsets: list[TDInfoCoverageOffset] = []
     for index, (code_offset,) in enumerate(
         struct.iter_unpack("<H", data[offset : offset + count * 2])
     ):
         ordinal = index + 1
-        segment_index = sum(1 for bound in bounds[:-1] if ordinal >= bound)
+        segment_index = sum(1 for bound in iter(bounds[:-1]) if ordinal >= bound)
         offsets.append(
             TDInfoCoverageOffset(
                 index=ordinal,
@@ -1345,25 +1373,26 @@ def _parse_tdinfo_coverage_offsets(
 
 
 def _parse_tdinfo_module_flags(
-    data: bytes,
-    offset: int,
-    count: int,
+    data: object,
+    offset: cython.longlong,
+    count: cython.longlong,
 ) -> tuple[TDInfoModuleFlags, ...]:
     """Decode per-module flag dwords (unused/zero in this corpus)."""
     if offset < 0 or offset + count * 4 > len(data):
         return ()
     return tuple(
         TDInfoModuleFlags(index=index + 1, flags=flags)
-        for index, (flags,) in enumerate(
+        for index, (flags,) in builtins.iter(enumerate(
             struct.iter_unpack("<I", data[offset : offset + count * 4])
-        )
+        ))
     )
 
 
+@cython.ccall
 def _parse_tdinfo_correlation_table(
-    data: bytes,
-    offset: int,
-    count: int,
+    data: object,
+    offset: cython.longlong,
+    count: cython.longlong,
 ) -> tuple[TDInfoCorrelation, ...]:
     """Decode the TD32 correlation table: 8-byte file/line-run records."""
     correlations: list[TDInfoCorrelation] = []
@@ -1386,13 +1415,14 @@ def _parse_tdinfo_correlation_table(
     return tuple(correlations)
 
 
+@cython.ccall
 def _parse_tdinfo_flat_type_table(
-    data: bytes,
-    offset: int,
-    count: int,
-    names: tuple[str, ...],
+    data: object,
+    offset: cython.longlong,
+    count: cython.longlong,
+    names: object,
     *,
-    members_bound: int = 0x10000,
+    members_bound: cython.longlong = 0x10000,
 ) -> tuple[TDInfoTypeDescriptor, ...]:
     """Decode the flat TD32 type table: 8-byte records, 1-based index.
 
@@ -1400,6 +1430,7 @@ def _parse_tdinfo_flat_type_table(
     lives at ``offset + (N - 1) * 8`` — member records reference these
     indexes directly, so no anchoring is required.
     """
+    parsed: object
     descriptors: list[TDInfoTypeDescriptor] = []
     index = 0
     while index < count:
@@ -1504,7 +1535,7 @@ _TDINFO_RANGED_BUILTIN_TYPE_IDS = {0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0
 # preamble slots but are never referenced by C++ members in this corpus.
 # ``label``/``pword`` (ids 0x24/0x2A) are protected-mode control-flow and
 # far-pointer builtins emitted by BC2-era libraries.
-TDINFO_BUILTIN_TYPE_NAMES: dict[int, str] = {
+TDINFO_BUILTIN_TYPE_NAMES: dict[cython.longlong, str] = {
     0x00: "void",
     0x04: "signed char",
     0x05: "int",
@@ -1525,21 +1556,23 @@ TDINFO_BUILTIN_TYPE_NAMES: dict[int, str] = {
 }
 
 
+@cython.ccall
 def _parse_tdinfo_type_descriptors(
-    payload: bytes,
-    names: tuple[str, ...],
+    payload: object,
+    names: object,
     *,
-    payload_base_offset: int,
-    type_references: tuple[TDInfoTypeReference, ...] = (),
-    members_count: int = 0,
-    types_count: int = 0,
-) -> tuple[TDInfoTypeDescriptor, ...]:
+    payload_base_offset: cython.longlong,
+    type_references: object = (),
+    members_count: cython.longlong = 0,
+    types_count: cython.longlong = 0,
+) -> object:
     """Scan `payload` for TD32 type descriptor records.
 
     Real TDS 3.x payloads keep descriptor records in per-module runs mixed
     with other tables, so every offset is probed instead of assuming one
     contiguous descriptor table.
     """
+    parsed: object
     descriptors: list[TDInfoTypeDescriptor] = []
     offset = 0
     type_index = _TDINFO_DESCRIPTOR_FIRST_INDEX
@@ -1568,10 +1601,11 @@ def _parse_tdinfo_type_descriptors(
     )
 
 
+@cython.ccall
 def _tdinfo_descriptor_kind_8616(
-    payload: bytes,
-    offset: int,
-    allow_builtins: bool,
+    payload: object,
+    offset: cython.longlong,
+    allow_builtins: cython.bint,
 ) -> TDInfoTypeKind | None:
     """Map a record's tag byte to a type kind, or None when unknown."""
     try:
@@ -1582,16 +1616,18 @@ def _tdinfo_descriptor_kind_8616(
         return None
 
 
+@cython.ccall
 def _tdinfo_descriptor_head_8616(
-    payload: bytes,
-    names: tuple[str, ...],
-    offset: int,
+    payload: object,
+    names: object,
+    offset: cython.longlong,
     *,
-    members_bound: int = 0x10000,
-    fixed_record_size: int = 0,
-    allow_builtins: bool = False,
-) -> tuple[TDInfoTypeKind, bytes, str, int] | None:
+    members_bound: cython.longlong = 0x10000,
+    fixed_record_size: cython.longlong = 0,
+    allow_builtins: cython.bint = False,
+) -> object:
     """Return (kind, raw, name, size) for one descriptor record, or None."""
+    kind: object
     if offset + _TDINFO_DESCRIPTOR_RECORD_SIZE > len(payload):
         return None
     kind = _tdinfo_descriptor_kind_8616(payload, offset, allow_builtins)
@@ -1629,9 +1665,10 @@ def _tdinfo_descriptor_head_8616(
     return kind, payload[offset : offset + record_size], name, size
 
 
+@cython.ccall
 def _tdinfo_descriptor_links_8616(
     kind: TDInfoTypeKind,
-    raw: bytes,
+    raw: object,
 ) -> tuple[int | None, int | None, int | None, int | None, int | None, int | None]:
     """Return (base, target, return, call_kind, lower, upper) links for one kind."""
     aux_type = struct.unpack_from("<H", raw, 6)[0]
@@ -1659,17 +1696,19 @@ def _tdinfo_descriptor_links_8616(
     return None, None, None, None, None, None
 
 
+@cython.ccall
 def _parse_tdinfo_type_descriptor(
-    payload: bytes,
-    names: tuple[str, ...],
+    payload: object,
+    names: object,
     *,
-    offset: int,
-    payload_base_offset: int,
-    type_index: int,
-    members_bound: int = 0x10000,
-    fixed_record_size: int = 0,
-    allow_builtins: bool = False,
+    offset: cython.longlong,
+    payload_base_offset: cython.longlong,
+    type_index: cython.longlong,
+    members_bound: cython.longlong = 0x10000,
+    fixed_record_size: cython.longlong = 0,
+    allow_builtins: cython.bint = False,
 ) -> TDInfoTypeDescriptor | None:
+    head: object
     head = _tdinfo_descriptor_head_8616(
         payload,
         names,
@@ -1712,18 +1751,20 @@ def _parse_tdinfo_type_descriptor(
     )
 
 
-def _tdinfo_i16(value: int) -> int:
+@cython.ccall
+def _tdinfo_i16(value: cython.longlong) -> cython.longlong:
     return value - 0x10000 if value & 0x8000 else value
 
 
 def _tdinfo_group_descriptor_runs(
-    descriptors: tuple[TDInfoTypeDescriptor, ...],
-) -> list[list[TDInfoTypeDescriptor]]:
+    descriptors: object,
+) -> object:
     """Group offset-sorted descriptors into contiguous 8-byte runs."""
+    descriptor: object
     by_offset = sorted(descriptors, key=lambda descriptor: descriptor.payload_offset)
     runs: list[list[TDInfoTypeDescriptor]] = []
     for descriptor in by_offset:
-        if runs and descriptor.payload_offset - runs[-1][-1].payload_offset == _TDINFO_DESCRIPTOR_RECORD_SIZE:
+        if runs and operator.eq(descriptor.payload_offset - runs[-1][-1].payload_offset, _TDINFO_DESCRIPTOR_RECORD_SIZE):
             runs[-1].append(descriptor)
         else:
             runs.append([descriptor])
@@ -1731,8 +1772,8 @@ def _tdinfo_group_descriptor_runs(
 
 
 def _tdinfo_anchor_run_by_votes(
-    run: list[TDInfoTypeDescriptor],
-    index_by_name: dict[str, set[int]],
+    run: object,
+    index_by_name: object,
 ) -> int | None:
     """Vote a run's index base from named descriptors, or None if ambiguous.
 
@@ -1742,8 +1783,11 @@ def _tdinfo_anchor_run_by_votes(
     distinct names — otherwise ambiguous single-name copies would mislabel
     the whole run.
     """
-    votes: Counter[int] = Counter()
-    names_at_base: dict[int, set[str]] = {}
+    descriptor: object
+    global_index: object
+    position: object
+    votes: Counter[cython.longlong] = Counter()
+    names_at_base: dict[cython.longlong, set[str]] = {}
     for position, descriptor in enumerate(run):
         for global_index in index_by_name.get(descriptor.name, ()):
             base = global_index - position
@@ -1755,25 +1799,29 @@ def _tdinfo_anchor_run_by_votes(
         return None
     base, _ = max(votes.items(), key=lambda item: (len(names_at_base[item[0]]), item[1], -item[0]))
     supporting = names_at_base[base]
-    if len(supporting) >= 2 or any(len(index_by_name[name]) == 1 for name in supporting):
+    if len(supporting) >= 2 or any(len(index_by_name[name]) == 1 for name in iter(supporting)):
         return base
     return None
 
 
 def _tdinfo_anchor_run_by_continuation(
-    run: list[TDInfoTypeDescriptor],
-    position: int,
-    runs: list[list[TDInfoTypeDescriptor]],
-    index_by_name: dict[str, set[int]],
-    assigned: dict[int, int],
-    index_bound: int,
+    run: object,
+    position: cython.longlong,
+    runs: object,
+    index_by_name: object,
+    assigned: object,
+    index_bound: cython.longlong,
 ) -> int | None:
     """Pick the candidate base closest to the previous run's continuation.
 
     Gaps between runs hold records the scanner could not decode, so
     ``prev_base + prev_len + gap_records`` estimates the next base.
     """
-    candidates: set[int] = set()
+    expected: object
+    descriptor: object
+    global_index: object
+    pos: object
+    candidates: set[cython.longlong] = set()
     for pos, descriptor in enumerate(run):
         for global_index in index_by_name.get(descriptor.name, ()):
             base = global_index - pos
@@ -1781,7 +1829,7 @@ def _tdinfo_anchor_run_by_continuation(
                 candidates.add(base)
     if not candidates:
         return None
-    expected: int | None = None
+    expected = None
     if position > 0:
         prev = runs[position - 1]
         if id(prev[-1]) in assigned:
@@ -1793,11 +1841,13 @@ def _tdinfo_anchor_run_by_continuation(
     return min(candidates, key=lambda candidate: (abs(candidate - expected), candidate))
 
 
+@cython.ccall
 def _tdinfo_type_index_by_name(
-    type_references: tuple[TDInfoTypeReference, ...],
-) -> dict[str, set[int]]:
+    type_references: object,
+) -> object:
     """Map each named type to every global index its copies occupy."""
-    index_by_name: dict[str, set[int]] = {}
+    ref: object
+    index_by_name: dict[str, set[cython.longlong]] = {}
     for ref in type_references:
         if ref.symbol_class not in {TDInfoSymbolClass.TYPEDEF, TDInfoSymbolClass.STRUCT_UNION_OR_ENUM}:
             continue
@@ -1808,12 +1858,17 @@ def _tdinfo_type_index_by_name(
 
 
 def _tdinfo_assign_run_bases(
-    runs: list[list[TDInfoTypeDescriptor]],
-    index_by_name: dict[str, set[int]],
-    types_count: int,
-) -> dict[int, int]:
+    runs: object,
+    index_by_name: object,
+    types_count: cython.longlong,
+) -> object:
     """Anchor each descriptor run to its global index base."""
-    assigned: dict[int, int] = {}
+    base: object
+    descriptor: object
+    pos: object
+    position: object
+    run: object
+    assigned: dict[cython.longlong, cython.longlong] = {}
     for run in runs:
         base = _tdinfo_anchor_run_by_votes(run, index_by_name)
         if base is None:
@@ -1823,7 +1878,7 @@ def _tdinfo_assign_run_bases(
 
     index_bound = types_count + 64 if types_count else 0x10000
     for position, run in enumerate(runs):
-        if any(id(descriptor) in assigned for descriptor in run):
+        if any(id(descriptor) in assigned for descriptor in iter(run)):
             continue
         base = _tdinfo_anchor_run_by_continuation(
             run, position, runs, index_by_name, assigned, index_bound
@@ -1835,11 +1890,12 @@ def _tdinfo_assign_run_bases(
     return assigned
 
 
+@cython.ccall
 def _tdinfo_reconcile_descriptor_indexes(
-    descriptors: tuple[TDInfoTypeDescriptor, ...],
-    type_references: tuple[TDInfoTypeReference, ...],
+    descriptors: object,
+    type_references: object,
     *,
-    types_count: int = 0,
+    types_count: cython.longlong = 0,
 ) -> tuple[TDInfoTypeDescriptor, ...]:
     """Assign original TD32 type indexes to scanned descriptors.
 
@@ -1849,11 +1905,15 @@ def _tdinfo_reconcile_descriptor_indexes(
     of every record in that run — including anonymous pointers, arrays,
     and function types that member records reference.
     """
+    candidate: object
+    candidates: object
+    type_index: object
+    descriptor: object
     index_by_name = _tdinfo_type_index_by_name(type_references)
     runs = _tdinfo_group_descriptor_runs(descriptors)
     assigned = _tdinfo_assign_run_bases(runs, index_by_name, types_count)
 
-    used_indexes: set[int] = set(assigned.values())
+    used_indexes: set[cython.longlong] = set(assigned.values())
     reconciled: list[TDInfoTypeDescriptor] = []
     # Unanchored descriptors (scan false positives or fragments without a
     # named anchor) are numbered in a disjoint space above the real type
@@ -1875,12 +1935,13 @@ def _tdinfo_reconcile_descriptor_indexes(
     return tuple(reconciled)
 
 
+@cython.ccall
 def _parse_tdinfo_extra_symbol_records(
-    payload: bytes,
-    names: tuple[str, ...],
+    payload: object,
+    names: object,
     *,
-    types_count: int = 0,
-) -> tuple[tuple[TDInfoSymbolRecord, ...], int]:
+    types_count: cython.longlong = 0,
+) -> tuple[tuple[TDInfoSymbolRecord, ...], cython.longlong]:
     symbols: list[TDInfoSymbolRecord] = []
     offset = 0
     type_bound = max(types_count, 0x100)
@@ -1974,33 +2035,35 @@ class _TDInfoStreamRecordKind(IntEnum):
     BITFIELD_MARKER = 6
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class _TDInfoStreamRecord:
     """One decoded record of the TD32 member-record stream."""
 
     kind: _TDInfoStreamRecordKind
     ordinal: int | None
-    payload_offset: int
-    name_index: int = 0
-    type_index: int = 0
-    attributes: int = 0
+    payload_offset: cython.longlong
+    name_index: cython.longlong = 0
+    type_index: cython.longlong = 0
+    attributes: cython.longlong = 0
     trailer_size: int | None = None
     next_offset: int | None = None
 
 
-def _tdinfo_stream_name(names: tuple[str, ...], name_index: int) -> str:
+@cython.ccall
+def _tdinfo_stream_name(names: object, name_index: cython.longlong) -> object:
     """Return the decoded name-pool entry, or "" for out-of-range indexes."""
     if not 1 <= name_index <= len(names):
         return ""
     return names[name_index - 1]
 
 
+@cython.ccall
 def _tdinfo_method_record_at(
-    payload: bytes,
-    names: tuple[str, ...],
-    type_bound: int,
-    offset: int,
-) -> tuple[int, int] | None:
+    payload: object,
+    names: object,
+    type_bound: cython.longlong,
+    offset: cython.longlong,
+) -> object:
     """Decode an attr-first method record at `offset`, or None."""
     if not (_TDINFO_METHOD_ATTR_LOW <= payload[offset] <= _TDINFO_METHOD_ATTR_HIGH):
         return None
@@ -2011,12 +2074,13 @@ def _tdinfo_method_record_at(
     return name_index, type_index
 
 
+@cython.ccall
 def _tdinfo_field_record_at(
-    payload: bytes,
-    names: tuple[str, ...],
-    type_bound: int,
-    offset: int,
-) -> tuple[int, int, int] | None:
+    payload: object,
+    names: object,
+    type_bound: cython.longlong,
+    offset: cython.longlong,
+) -> object:
     """Decode a name-first field record at `offset`, or None."""
     name_index, type_index = struct.unpack_from("<HH", payload, offset)
     attributes = payload[offset + 4]
@@ -2030,7 +2094,8 @@ def _tdinfo_field_record_at(
     return name_index, type_index, attributes
 
 
-def _tdinfo_bookkeeping_record_at(payload: bytes, offset: int) -> bool:
+@cython.ccall
+def _tdinfo_bookkeeping_record_at(payload: object, offset: cython.longlong) -> cython.bint:
     """Return True when `offset` holds a bookkeeping pseudo-record.
 
     Bitfield groups keep 5-byte records whose name_index is 0/0xffff or
@@ -2041,12 +2106,13 @@ def _tdinfo_bookkeeping_record_at(payload: bytes, offset: int) -> bool:
     return name_index in {0, 0xFFFF} or type_index == 0
 
 
+@cython.ccall
 def _tdinfo_var_decl_record_at(
-    payload: bytes,
-    names: tuple[str, ...],
-    type_bound: int,
-    offset: int,
-) -> tuple[int, int] | None:
+    payload: object,
+    names: object,
+    type_bound: cython.longlong,
+    offset: cython.longlong,
+) -> object:
     """Decode a 4-byte (name_index, type_index) var-decl record, or None.
 
     These sit inside method groups; the byte after the pair is always a
@@ -2062,12 +2128,13 @@ def _tdinfo_var_decl_record_at(
     return name_index, type_index
 
 
+@cython.ccall
 def _tdinfo_stream_record_starts(
-    payload: bytes,
-    names: tuple[str, ...],
-    type_bound: int,
-    offset: int,
-) -> bool:
+    payload: object,
+    names: object,
+    type_bound: cython.longlong,
+    offset: cython.longlong,
+) -> cython.bint:
     """Return True when any stream record can start at `offset`."""
     if offset + 5 > len(payload):
         return False
@@ -2079,16 +2146,17 @@ def _tdinfo_stream_record_starts(
     )
 
 
+@cython.ccall
 def _tdinfo_field_tail(
-    payload: bytes,
-    names: tuple[str, ...],
-    type_bound: int,
-    pos: int,
-    ordinal: int,
-    attributes: int,
-    payload_base_offset: int,
-    records: list[_TDInfoStreamRecord],
-) -> tuple[int, int, bool, bool]:
+    payload: object,
+    names: object,
+    type_bound: cython.longlong,
+    pos: cython.longlong,
+    ordinal: cython.longlong,
+    attributes: cython.longlong,
+    payload_base_offset: cython.longlong,
+    records: object,
+) -> tuple[cython.longlong, cython.longlong, cython.bint, cython.bint]:
     """Consume the records that may follow a FIELD record.
 
     Returns (pos, ordinal, in_bitfield, stop).  Handles the 5-byte
@@ -2143,20 +2211,25 @@ def _tdinfo_field_tail(
     return pos, ordinal, in_bitfield, False
 
 
+@cython.ccall
 def _walk_tdinfo_member_stream(
-    payload: bytes,
-    names: tuple[str, ...],
+    payload: object,
+    names: object,
     *,
-    type_bound: int,
-    start: int,
-    payload_base_offset: int,
-) -> tuple[tuple[_TDInfoStreamRecord, ...], int]:
+    type_bound: cython.longlong,
+    start: cython.longlong,
+    payload_base_offset: cython.longlong,
+) -> tuple[tuple[_TDInfoStreamRecord, ...], cython.longlong]:
     """Walk one contiguous TD32 record stream from `start`.
 
     Returns (records, end_offset).  Each record carries its member-table
     ordinal — the index space aggregate descriptor ``member_ref`` values
     reference.  The walk stops at the first byte that decodes as nothing.
     """
+    bitfield_state: object
+    field: object
+    method: object
+    var_decl: object
     records: list[_TDInfoStreamRecord] = []
     pos = start
     ordinal = 0
@@ -2234,8 +2307,10 @@ def _walk_tdinfo_member_stream(
     return tuple(records), pos
 
 
-def _tdinfo_owner_name_from_methods(method_names: list[str]) -> str:
+@cython.ccall
+def _tdinfo_owner_name_from_methods(method_names: object) -> object:
     """Extract the owning class name from '@CLASS@METHOD$Q...' records."""
+    method_name: object
     for method_name in method_names:
         if method_name.startswith("@") and "@" in method_name[1:]:
             return method_name[1 : method_name.index("@", 1)]
@@ -2243,15 +2318,15 @@ def _tdinfo_owner_name_from_methods(method_names: list[str]) -> str:
 
 
 def _tdinfo_close_member_list(
-    records: tuple[_TDInfoStreamRecord, ...],
-    index: int,
-    current: list[dict[str, Any]],
-    pending_methods: list[str],
-    pending_block_ordinal: int | None,
-    first_ordinal: int,
-    bitfield_next: bool,
-    previous_owner: str,
-    size_candidates_of: Callable[[int, int], tuple[int, ...]],
+    records: object,
+    index: cython.longlong,
+    current: object,
+    pending_methods: object,
+    pending_block_ordinal: object,
+    first_ordinal: cython.longlong,
+    bitfield_next: cython.bint,
+    previous_owner: object,
+    size_candidates_of: Callable[[int, int], tuple[cython.longlong, ...]],
 ) -> TDInfoMemberList | None:
     """Emit a member list when a trailer follows the current fields."""
     if index >= len(records) or records[index].kind is not _TDInfoStreamRecordKind.LIST_TRAILER:
@@ -2275,7 +2350,7 @@ def _tdinfo_close_member_list(
         owner_name=owner_name,
         owner_type_index=None,
         bitfield=bitfield_next,
-        member_names=tuple(member.name for member in members),
+        member_names=tuple(member.name for member in iter(members)),
         method_names=tuple(pending_methods),
         members=members,
         block_ordinal=(
@@ -2284,21 +2359,24 @@ def _tdinfo_close_member_list(
     )
 
 
+@cython.ccall
 def _tdinfo_member_lists_from_stream(
-    records: tuple[_TDInfoStreamRecord, ...],
-    names: tuple[str, ...],
-    size_candidates_of: Callable[[int, int], tuple[int, ...]],
-) -> list[TDInfoMemberList]:
+    records: object,
+    names: object,
+    size_candidates_of: Callable[[int, int], tuple[cython.longlong, ...]],
+) -> object:
     """Group walked stream records into member lists split by trailers.
 
     Member offsets are solved against the trailer's object size so the
     layout stays consistent even when some member type indexes do not
     resolve to a unique descriptor.
     """
+    member_list: object
+    pending_block_ordinal: object
     lists: list[TDInfoMemberList] = []
     current: list[dict[str, Any]] = []
     pending_methods: list[str] = []
-    pending_block_ordinal: int | None = None
+    pending_block_ordinal = None
     pending_ext: int | None = None
     first_ordinal = 0
     bitfield_next = False
@@ -2363,13 +2441,17 @@ def _tdinfo_member_lists_from_stream(
     return lists
 
 
+@cython.ccall
 def _tdinfo_materialize_members(
-    entries: list[dict[str, Any]],
-    size_candidates_of: Callable[[int, int], tuple[int, ...]],
+    entries: object,
+    size_candidates_of: Callable[[int, int], tuple[cython.longlong, ...]],
     *,
     trailer_size: int | None,
 ) -> tuple[TDInfoTypeMember, ...]:
     """Emit members with offsets solved to satisfy the trailer size."""
+    offsets: object
+    entry: object
+    offset: object
     offsets = _tdinfo_solve_member_offsets(entries, size_candidates_of, trailer_size)
     if offsets is None:
         # No satisfying layout — fall back to preferred candidate sizes.
@@ -2394,20 +2476,27 @@ def _tdinfo_materialize_members(
     return tuple(members)
 
 
+@cython.ccall
 def _tdinfo_offset_transitions(
-    states: dict[int, tuple[int, tuple[int, ...]]],
-    entry: dict[str, Any],
-    size_candidates_of: Callable[[int, int], tuple[int, ...]],
-    trailer_size: int | None,
-) -> dict[int, tuple[int, tuple[int, ...]]]:
+    states: object,
+    entry: object,
+    size_candidates_of: Callable[[int, int], tuple[cython.longlong, ...]],
+    trailer_size: object,
+) -> object:
     """Advance every DP state across one member entry."""
+    best: object
+    off: object
+    offs: object
+    rank: object
+    score: object
+    size: object
     if entry["bitfield"]:
-        sizes: tuple[int, ...] = (0,)
+        sizes: tuple[cython.longlong, ...] = (0,)
     else:
         sizes = tuple(size_candidates_of(entry["ti"], entry["pos"])) or (
             (4,) if entry["var_decl"] else (0,)
         )
-    new: dict[int, tuple[int, tuple[int, ...]]] = {}
+    new: dict[cython.longlong, tuple[cython.longlong, tuple[cython.longlong, ...]]] = {}
     for off, (score, offs) in states.items():
         cur = entry["ext"] if entry["ext"] is not None else off
         for rank, size in enumerate(sizes):
@@ -2422,27 +2511,28 @@ def _tdinfo_offset_transitions(
 
 
 def _tdinfo_solve_member_offsets(
-    entries: list[dict[str, Any]],
-    size_candidates_of: Callable[[int, int], tuple[int, ...]],
-    trailer_size: int | None,
-) -> list[int] | None:
+    entries: object,
+    size_candidates_of: Callable[[int, int], tuple[cython.longlong, ...]],
+    trailer_size: object,
+) -> object:
     """Solve member offsets so member sizes sum to `trailer_size`.
 
     DP over members: each member's offset is the previous member's end, or
     an absolute offset-extension override.  States are pruned by the
     trailer bound and ranked by preferred-size hits.
     """
+    entry: object
     # offset -> (score, offsets tuple)
-    states: dict[int, tuple[int, tuple[int, ...]]] = {0: (0, ())}
+    states: dict[cython.longlong, tuple[cython.longlong, tuple[cython.longlong, ...]]] = {0: (0, ())}
     for entry in entries:
         states = _tdinfo_offset_transitions(states, entry, size_candidates_of, trailer_size)
         if not states:
             return None
         if len(states) > 4096:
-            keep = sorted(states.items(), key=lambda kv: -kv[1][0])[:1024]
+            keep = sorted(tuple(states.items()), key=lambda kv: -kv[1][0])[:1024]
             states = dict(keep)
     if trailer_size is not None:
-        states = {off: v for off, v in states.items() if off == trailer_size}
+        states = {off: v for off, v in builtins.iter(states.items()) if operator.eq(off, trailer_size)}
         if not states:
             return None
     _off, (_score, offs) = max(states.items(), key=lambda kv: kv[1][0])
@@ -2450,26 +2540,29 @@ def _tdinfo_solve_member_offsets(
 
 
 def _tdinfo_calibrate_member_index_shift(
-    lists: list[TDInfoMemberList],
-    descriptors: tuple[TDInfoTypeDescriptor, ...],
-) -> int:
+    lists: object,
+    descriptors: object,
+) -> cython.longlong:
     """Return the constant shift between list ordinals and descriptor refs.
 
     Member-table ordinals start at the first record of the stream; when a
     walk began mid-stream the shift is nonzero, so calibrate it against
     size-matched descriptor pairs.
     """
+    descriptor: object
+    ordinal: object
+    size: object
     size_by_ordinal = {
         member_list.record_index: member_list.size
-        for member_list in lists
+        for member_list in iter(lists)
         if member_list.member_names
     }
-    candidates: Counter[int] = Counter()
+    candidates: Counter[cython.longlong] = Counter()
     for descriptor in descriptors:
         if descriptor.member_ref is None or not descriptor.size:
             continue
         for ordinal, size in size_by_ordinal.items():
-            if size == descriptor.size:
+            if operator.eq(size, descriptor.size):
                 candidates[descriptor.member_ref - ordinal] += 1
     if not candidates:
         return 0
@@ -2477,46 +2570,48 @@ def _tdinfo_calibrate_member_index_shift(
     # stray pair must not outvote the majority shift of a long stream.
     ref_size_pairs = {
         (descriptor.member_ref, descriptor.size)
-        for descriptor in descriptors
+        for descriptor in iter(descriptors)
         if descriptor.member_ref is not None and descriptor.size
     }
-    def _match_count(shift: int) -> int:
+    def _match_count(shift: cython.longlong) -> cython.longlong:
         return sum(
             1
-            for ordinal, size in size_by_ordinal.items()
+            for ordinal, size in builtins.iter(size_by_ordinal.items())
             if (ordinal + shift, size) in ref_size_pairs
         )
 
     return max(candidates, key=_match_count)
 
 
+@cython.ccall
 def _tdinfo_match_owner_descriptor(
     member_list: TDInfoMemberList,
-    descriptors: tuple[TDInfoTypeDescriptor, ...],
-    shift: int,
+    descriptors: object,
+    shift: cython.longlong,
 ) -> TDInfoTypeDescriptor | None:
     """Find the aggregate descriptor whose member_ref/size match a list.
 
     Both fields must agree — a member-table ordinal hit without a matching
     object size is a false positive from scan-based descriptor decoding.
     """
+    descriptor: object
     target = member_list.record_index + shift
     for descriptor in descriptors:
         if (
-            descriptor.member_ref == target
-            and descriptor.size == member_list.size
+            operator.eq(descriptor.member_ref, target)
+            and operator.eq(descriptor.size, member_list.size)
         ):
             return descriptor
     return None
 
 
 def _tdinfo_collect_member_runs(
-    payload: bytes,
-    names: tuple[str, ...],
-    type_bound: int,
-    reserved: set[int],
-    payload_base_offset: int,
-) -> list[tuple[_TDInfoStreamRecord, ...]]:
+    payload: object,
+    names: object,
+    type_bound: cython.longlong,
+    reserved: object,
+    payload_base_offset: cython.longlong,
+) -> object:
     """Walk the payload and collect runs containing complete member lists."""
     runs: list[tuple[_TDInfoStreamRecord, ...]] = []
     pos = 0
@@ -2532,7 +2627,7 @@ def _tdinfo_collect_member_runs(
             payload_base_offset=payload_base_offset,
         )
         complete_lists = sum(
-            1 for record in records if record.kind is _TDInfoStreamRecordKind.LIST_TRAILER
+            1 for record in iter(records) if record.kind is _TDInfoStreamRecordKind.LIST_TRAILER
         )
         if complete_lists and len(records) >= 2:
             runs.append(records)
@@ -2543,8 +2638,8 @@ def _tdinfo_collect_member_runs(
 
 
 def _tdinfo_member_size_resolver(
-    type_descriptors: tuple[TDInfoTypeDescriptor, ...],
-) -> Callable[[int, int], tuple[int, ...]]:
+    type_descriptors: object,
+) -> Callable[[int, int], tuple[cython.longlong, ...]]:
     """Build the member-size candidate lookup for the offset solver.
 
     Member type_index values are original TD32 type indexes, which the
@@ -2552,11 +2647,15 @@ def _tdinfo_member_size_resolver(
     index, so the copy nearest the member record is the owning module's.
     A function-typed member holds a far code pointer (4 bytes here).
     """
-    descriptors_by_index: dict[int, list[TDInfoTypeDescriptor]] = {}
+    descriptor: object
+    descriptors_by_index: dict[cython.longlong, list[TDInfoTypeDescriptor]] = {}
     for descriptor in type_descriptors:
         descriptors_by_index.setdefault(descriptor.type_index, []).append(descriptor)
 
-    def _member_size_candidates(type_index: int, position: int) -> tuple[int, ...]:
+    def _member_size_candidates(type_index: cython.longlong, position: cython.longlong) -> tuple[cython.longlong, ...]:
+        builtin: object
+        candidates: object
+        descriptor: object
         builtin = _TDINFO_TYPE_SIZES.get(type_index)
         if builtin is not None:
             return (builtin,)
@@ -2564,7 +2663,7 @@ def _tdinfo_member_size_resolver(
         if not candidates:
             return ()
         by_distance = sorted(candidates, key=lambda descriptor: abs(descriptor.payload_offset - position))
-        sizes: list[int] = []
+        sizes: list[cython.longlong] = []
         for descriptor in by_distance:
             size = (
                 4
@@ -2578,9 +2677,10 @@ def _tdinfo_member_size_resolver(
     return _member_size_candidates
 
 
+@cython.ccall
 def _tdinfo_match_owner_class(
     member_list: TDInfoMemberList,
-    class_entries: tuple[TDInfoClassEntry, ...],
+    class_entries: object,
 ) -> TDInfoClassEntry | None:
     """Match a member list to a class-table entry via member_ordinal.
 
@@ -2588,24 +2688,32 @@ def _tdinfo_match_owner_class(
     (one-based), which precedes the data-member records — the ordinal the
     descriptor ``member_ref`` of plain structs points at directly.
     """
+    block: object
+    entry: object
     block = member_list.block_ordinal
     if block is None:
         return None
     for entry in class_entries:
-        if entry.member_ordinal == block + 1:
+        if operator.eq(entry.member_ordinal, block + 1):
             return entry
     return None
 
 
+@cython.ccall
 def _tdinfo_resolve_list_owners(
-    runs: list[tuple[_TDInfoStreamRecord, ...]],
-    names: tuple[str, ...],
-    type_descriptors: tuple[TDInfoTypeDescriptor, ...],
-    size_candidates_of: Callable[[int, int], tuple[int, ...]],
-    class_entries: tuple[TDInfoClassEntry, ...] = (),
-) -> list[TDInfoMemberList]:
+    runs: object,
+    names: object,
+    type_descriptors: object,
+    size_candidates_of: Callable[[int, int], tuple[cython.longlong, ...]],
+    class_entries: object = (),
+) -> object:
     """Materialize member lists and resolve their owning aggregate."""
-    descriptor_by_name = {d.name.lower(): d for d in type_descriptors if d.name}
+    descriptor: object
+    matched: object
+    matched_class: object
+    member_list: object
+    records: object
+    descriptor_by_name = {d.name.lower(): d for d in iter(type_descriptors) if d.name}
     resolved_lists: list[TDInfoMemberList] = []
     for records in runs:
         run_lists = _tdinfo_member_lists_from_stream(records, names, size_candidates_of)
@@ -2634,15 +2742,18 @@ def _tdinfo_resolve_list_owners(
     return resolved_lists
 
 
+@cython.ccall
 def _tdinfo_dedup_members(
-    resolved_lists: list[TDInfoMemberList],
-    enum_owner_indexes: set[int],
+    resolved_lists: object,
+    enum_owner_indexes: object,
 ) -> tuple[tuple[TDInfoTypeMember, ...], tuple[TDInfoEnumMember, ...]]:
     """Flatten member lists into deduplicated member and enum sequences."""
+    member: object
+    member_list: object
     members: list[TDInfoTypeMember] = []
     enum_members: list[TDInfoEnumMember] = []
-    seen: set[tuple[str, int, int, int | None]] = set()
-    enum_seen: set[tuple[str, int]] = set()
+    seen: set[tuple[str, cython.longlong, cython.longlong, int | None]] = set()
+    enum_seen: set[tuple[str, cython.longlong]] = set()
     for member_list in resolved_lists:
         owner_type_index = member_list.owner_type_index
         if owner_type_index in enum_owner_indexes:
@@ -2670,14 +2781,15 @@ def _tdinfo_dedup_members(
     return tuple(members), tuple(enum_members)
 
 
+@cython.ccall
 def _parse_tdinfo_members(
-    payload: bytes,
-    names: tuple[str, ...],
+    payload: object,
+    names: object,
     *,
-    payload_base_offset: int,
-    type_descriptors: tuple[TDInfoTypeDescriptor, ...] = (),
-    types_count: int = 0,
-    class_entries: tuple[TDInfoClassEntry, ...] = (),
+    payload_base_offset: cython.longlong,
+    type_descriptors: object = (),
+    types_count: cython.longlong = 0,
+    class_entries: object = (),
 ) -> tuple[tuple[TDInfoTypeMember, ...], tuple[TDInfoEnumMember, ...], tuple[TDInfoMemberList, ...]]:
     """Decode the TD32 member-record stream into per-aggregate member lists.
 
@@ -2693,7 +2805,7 @@ def _parse_tdinfo_members(
     # descriptor bytes can themselves decode as phantom member records.
     reserved = {
         index
-        for descriptor in type_descriptors
+        for descriptor in iter(type_descriptors)
         for index in range(
             descriptor.payload_offset - payload_base_offset,
             descriptor.payload_offset - payload_base_offset + len(descriptor.raw_bytes),
@@ -2705,13 +2817,15 @@ def _parse_tdinfo_members(
         runs, names, type_descriptors, size_candidates_of, class_entries
     )
     enum_owner_indexes = {
-        descriptor.type_index for descriptor in type_descriptors if descriptor.kind is TDInfoTypeKind.ENUM
+        descriptor.type_index for descriptor in iter(type_descriptors) if descriptor.kind is TDInfoTypeKind.ENUM
     }
     members, enum_members = _tdinfo_dedup_members(resolved_lists, enum_owner_indexes)
     return members, enum_members, tuple(resolved_lists)
 
 
-def _parse_tdinfo_name_pool(data: bytes, *, expected_count: int) -> tuple[str, ...]:
+@cython.ccall
+def _parse_tdinfo_name_pool(data: object, *, expected_count: cython.longlong) -> tuple[str, ...]:
+    raw_name: object
     names: list[str] = []
     for raw_name in data.split(b"\x00"):
         if len(names) >= expected_count:
@@ -2722,7 +2836,8 @@ def _parse_tdinfo_name_pool(data: bytes, *, expected_count: int) -> tuple[str, .
     return tuple(names)
 
 
-def _tdinfo_symbol_name(symbol: TDInfoSymbolRecord, names: tuple[str, ...]) -> str | None:
+@cython.ccall
+def _tdinfo_symbol_name(symbol: TDInfoSymbolRecord, names: object) -> object:
     if not (1 <= symbol.index <= len(names)):
         return None
     name = names[symbol.index - 1]
@@ -2731,15 +2846,16 @@ def _tdinfo_symbol_name(symbol: TDInfoSymbolRecord, names: tuple[str, ...]) -> s
     return name
 
 
-def _classify_tdinfo_name_pool(names: tuple[str, ...]) -> tuple[TDInfoNamePoolEntry, ...]:
+def _classify_tdinfo_name_pool(names: object) -> tuple[TDInfoNamePoolEntry, ...]:
     return tuple(
         TDInfoNamePoolEntry(index=index, name=name, kind=_classify_tdinfo_name(name))
-        for index, name in enumerate(names, start=1)
+        for index, name in builtins.iter(enumerate(names, start=1))
         if name and name != "?"
     )
 
 
-def _classify_tdinfo_name(name: str) -> TDInfoNameKind:
+@cython.ccall
+def _classify_tdinfo_name(name: object) -> TDInfoNameKind:
     lowered = name.lower()
     basename = lowered.rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
     if "." in basename and basename.rsplit(".", 1)[-1] in {"c", "h", "asm", "pas", "cpp", "cxx"}:
@@ -2752,12 +2868,14 @@ def _classify_tdinfo_name(name: str) -> TDInfoNameKind:
     return TDInfoNameKind.UNKNOWN
 
 
-def _tdinfo_name_looks_like_code(name: str) -> bool:
+@cython.ccall
+def _tdinfo_name_looks_like_code(name: object) -> cython.bint:
     lowered = name.lower()
     return not lowered.startswith(("dgroup@", "byte_", "word_", "dword_", "off_", "stru_"))
 
 
-def _tdinfo_type_name_looks_user_defined(name: str) -> bool:
+@cython.ccall
+def _tdinfo_type_name_looks_user_defined(name: object) -> cython.bint:
     if not name or name.startswith("_"):
         return False
     return _classify_tdinfo_name(name) is TDInfoNameKind.IDENTIFIER

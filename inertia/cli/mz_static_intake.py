@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Install a source-authenticated invocation surface from MZ bytes alone.
 
 Layer: CLI/fallback/reporting.
@@ -16,6 +17,8 @@ decision per load.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import hashlib
 from collections.abc import Callable, Iterable
@@ -62,6 +65,8 @@ from inertia.ir.real16_declared_interrupt8616 import (
 from inertia.lowering.analysis_helpers import (
     resolve_direct_call_target_from_instruction_8616,
 )
+import dataclasses
+import operator
 
 __all__ = [
     "MzStaticIntakeInstall8616",
@@ -110,7 +115,7 @@ class MzStaticIntakeStatus8616(StrEnum):
     DECLARED_REFUSED = "declared_refused"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class MzStaticIntakeInstall8616:
     """Typed receipt of one static-MZ intake decision.
 
@@ -127,14 +132,14 @@ class MzStaticIntakeInstall8616:
 
     status: MzStaticIntakeStatus8616
     inventory: InvocationInventory8616 | None
-    entry_linear: int
-    boot_sha256: str
+    entry_linear: cython.longlong
+    boot_sha256: object
     refusal_addr: int | None
-    pending_targets: tuple[int, ...] = ()
+    pending_targets: tuple[cython.longlong, ...] = ()
     local_evidence: LocalCallFrameEvidence8616 | None = None
 
     @property
-    def installed(self) -> bool:
+    def installed(self) -> cython.bint:
         """Return whether this receipt installed a source."""
         return self.status in {MzStaticIntakeStatus8616.INSTALLED, MzStaticIntakeStatus8616.DECLARED_ENTRIES_INSTALLED}
 
@@ -142,7 +147,7 @@ class MzStaticIntakeInstall8616:
 class _MzLoaderMemory8616(Protocol):
     """Third-party loader memory used for mapped-byte authentication."""
 
-    def load(self, addr: int, size: int) -> object:
+    def load(self, addr: cython.longlong, size: cython.longlong) -> object:
         """Return the mapped bytes for one linear range."""
         ...
 
@@ -150,14 +155,14 @@ class _MzLoaderMemory8616(Protocol):
 class _MzLoaderObject8616(Protocol):
     """The DOS MZ backend surface the intake authenticates."""
 
-    mz_load_segment: int
+    mz_load_segment: cython.longlong
 
 
 class _MzMappedObject8616(Protocol):
     """Third-party loaded-object bounds, inclusive at the upper endpoint."""
 
-    min_addr: int
-    max_addr: int
+    min_addr: cython.longlong
+    max_addr: cython.longlong
 
 
 class _MzLoaderSurface8616(Protocol):
@@ -166,7 +171,7 @@ class _MzLoaderSurface8616(Protocol):
     memory: _MzLoaderMemory8616
     main_object: object
 
-    def find_object_containing(self, address: int) -> object | None:
+    def find_object_containing(self, address: cython.longlong) -> object | None:
         """Return the loaded object owning this address."""
         ...
 
@@ -175,7 +180,7 @@ class _MzProjectSurface8616(Protocol):
     """Minimal project surface required for intake authentication."""
 
     loader: _MzLoaderSurface8616
-    entry: int
+    entry: cython.longlong
 
 
 class _MzIntakeReceiptMarker8616(Protocol):
@@ -184,12 +189,14 @@ class _MzIntakeReceiptMarker8616(Protocol):
     _inertia_mz_static_invocation_install_8616: MzStaticIntakeInstall8616
 
 
+@cython.ccall
 def _mz_loader_object_8616(project: object) -> _MzLoaderObject8616 | None:
     """Return the main object when it carries the DOS MZ loader surface.
 
     ``mz_load_segment`` exists only on the DOS MZ backend — a third-party
     dynamic boundary, so presence plus type is the gate.
     """
+    load_segment: object
     try:
         main_object = cast(_MzProjectSurface8616, project).loader.main_object
     except AttributeError:
@@ -200,6 +207,7 @@ def _mz_loader_object_8616(project: object) -> _MzLoaderObject8616 | None:
     return cast(_MzLoaderObject8616, main_object)
 
 
+@cython.ccall
 def _refusal_8616(
     project: object,
     status: MzStaticIntakeStatus8616,
@@ -227,9 +235,10 @@ def _refusal_8616(
     )
 
 
+@cython.ccall
 def _request_freshness_key_8616(
     project: object,
-) -> tuple[int, int, str] | None:
+) -> object:
     """Fingerprint the mapped evidence a deferred attempt authenticates.
 
     The key binds the loader's recorded entry, the declared load
@@ -238,6 +247,8 @@ def _request_freshness_key_8616(
     key, so a memoized refusal can never masquerade as fresh evidence.
     ``None`` means the loader surface is absent; nothing is memoized.
     """
+    main_object: object
+    mapped: object
     main_object = _mz_loader_object_8616(project)
     if main_object is None:
         return None
@@ -266,7 +277,7 @@ def _request_freshness_key_8616(
     return (entry, main_object.mz_load_segment, digest)
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class MzStaticIntakeRequest8616:
     """Deferred intake evidence retained on a project at build time.
 
@@ -285,7 +296,7 @@ class MzStaticIntakeRequest8616:
     the in-progress guard always clears, including on unexpected exceptions.
     """
 
-    source: bytes
+    source: object
     #: Optional caller-declared environment authority: a ``ProgramBoot``
     #: over the identical ``source`` bytes plus the declared interrupt
     #: service relations minted under it. When supplied, the scoped source
@@ -312,12 +323,13 @@ class MzStaticIntakeRequest8616:
     _scoped_source_evidence: LocalCallFrameEvidence8616 | None = field(
         default=None, init=False
     )
-    _refused_key: tuple[str, tuple[int, int, str]] | None = field(default=None, init=False)
+    _refused_key: object = field(default=None, init=False)
     _refused_receipt: MzStaticIntakeInstall8616 | None = field(
         default=None, init=False
     )
-    _installing: bool = field(default=False, init=False)
+    _installing: cython.bint = field(default=False, init=False)
 
+    @cython.ccall
     def install(self, project: object) -> MzStaticIntakeInstall8616:
         """Attempt the deferred intake against the current mapped image.
 
@@ -338,8 +350,11 @@ class MzStaticIntakeRequest8616:
         finally:
             self._installing = False
 
+    @cython.ccall
     def _install_current(self, project: object) -> MzStaticIntakeInstall8616:
         """Authenticate current evidence without reusing inventory refusals."""
+        image_key: object
+        key: object
         image_key = _request_freshness_key_8616(project)
         key = (
             (hashlib.sha256(self.source).hexdigest(), image_key)
@@ -349,7 +364,7 @@ class MzStaticIntakeRequest8616:
         if (
             key is not None
             and self._refused_receipt is not None
-            and key == self._refused_key
+            and operator.eq(key, self._refused_key)
         ):
             return self._refused_receipt
         receipt = install_mz_static_invocation_source_8616(
@@ -380,6 +395,7 @@ class MzStaticIntakeRequest8616:
             self._refused_receipt = None
         return receipt
 
+    @cython.ccall
     def scoped_invocation_source_8616(
         self,
         project: object,
@@ -405,6 +421,9 @@ class MzStaticIntakeRequest8616:
         chained-scope consumer requires — while a replaced evidence
         record mints a fresh authority instead of reviving the old.
         """
+        local: object
+        retained: object
+        scoped: object
         # Local frame evidence can survive removal of that request, but
         # invocation authority must remain bound to this exact receiver —
         # a removed, replaced, or detached receiver may never borrow the
@@ -443,11 +462,12 @@ class MzStaticIntakeRequest8616:
         self._scoped_source_evidence = local if scoped is not None else None
         return scoped
 
+    @cython.ccall
     def _scoped_declaration_current_8616(
         self,
         scoped: Real16InvocationSource8616,
         local: LocalCallFrameEvidence8616,
-    ) -> bool:
+    ) -> cython.bint:
         """Re-admit the memoized record's declaration under current fields.
 
         ``declared_boot``, ``declared_boot_recompute`` and
@@ -462,15 +482,16 @@ class MzStaticIntakeRequest8616:
         is reminted by the caller as a new epoch rather than served
         stale.
         """
+        binding: object
         binding = self._declared_scope_binding_8616(local)
         if binding is None:
             return False
         boot, recompute, services = binding
         return bool(
-            boot == scoped.boot
+            operator.eq(boot, scoped.boot)
             and recompute is scoped.boot_recompute
-            and services == scoped.declared_services
-            and self.function_entries == scoped.function_entries
+            and operator.eq(services, scoped.declared_services)
+            and operator.eq(self.function_entries, scoped.function_entries)
         )
 
     def _mint_scoped_source_8616(
@@ -502,12 +523,12 @@ class MzStaticIntakeRequest8616:
         """
         if type(self.source) is not bytes or not self.source:
             return None
-        if hashlib.sha256(self.source).hexdigest() != local.source_sha256:
+        if operator.ne(hashlib.sha256(self.source).hexdigest(), local.source_sha256):
             return None
         if (
             type(local.callsite_index) is not DecodedDirectCallsiteIndex8616
             or type(local.pending_targets) is not tuple
-            or not all(type(head) is int for head in local.pending_targets)
+            or not all(type(head) is int for head in iter(local.pending_targets))
         ):
             return None
         declared = self._declared_scope_binding_8616(local)
@@ -523,16 +544,18 @@ class MzStaticIntakeRequest8616:
             function_entries=self.function_entries,
         )
 
+    @cython.ccall
     def _declared_scope_binding_8616(
         self,
         local: LocalCallFrameEvidence8616,
-    ) -> tuple[MzStaticBoot8616 | _DeclaredBootSurface8616, Callable[[object], object] | None, tuple[DeclaredInterruptService8616, ...]] | None:
+    ) -> object:
         """Bind the declared or static boot authority for one scoped mint.
 
         Delegates to the shared binding contract over this request's
         declared fields and the evidence's authenticated loader context;
         ``None`` refuses identically to the installed path.
         """
+        binding: object
         binding = _declared_boot_binding_8616(
             self.source,
             local.load_segment,
@@ -550,17 +573,20 @@ class MzStaticIntakeRequest8616:
             return None
         return binding
 
-    def _entry_environment_digest_8616(self) -> str | None:
+    @cython.ccall
+    def _entry_environment_digest_8616(self) -> object:
         """Read environment authority only from the explicitly declared boot."""
         if self.declared_boot is None:
             return None
         digest = declared_environment_digest_8616(cast(_DeclaredBootSurface8616, self.declared_boot).environment)
         return digest if isinstance(digest, str) else None
 
+    @cython.ccall
     def validate_installed_source_8616(
         self, project: object, source: Real16InvocationSource8616,
-    ) -> bool:
+    ) -> cython.bint:
         """Revalidate an installed declaration without rebuilding any inventory."""
+        binding: object
         # Dynamic third-party project boundary: the loader owns this request slot.
         if getattr(project, "_inertia_mz_static_invocation_request_8616", None) is not self:
             install_real16_invocation_source_8616(project, None)
@@ -575,9 +601,9 @@ class MzStaticIntakeRequest8616:
             )
             if binding is not None:
                 boot, recompute, services = binding
-                valid = (boot == source.boot and recompute is source.boot_recompute
-                         and services == source.declared_services
-                         and self.function_entries == source.function_entries
+                valid = (operator.eq(boot, source.boot) and recompute is source.boot_recompute
+                         and operator.eq(services, source.declared_services)
+                         and operator.eq(self.function_entries, source.function_entries)
                          and declared_entries_current_8616(
                              self.function_entries, projection, self._entry_environment_digest_8616()))
         if not valid:
@@ -586,13 +612,13 @@ class MzStaticIntakeRequest8616:
 
 
 def _declared_boot_binding_8616(
-    source_bytes: bytes,
-    load_segment: int,
-    entry_linear: int,
-    declared_boot: object | None,
-    declared_boot_recompute: Callable[[object], object] | None,
-    declared_services: tuple[DeclaredInterruptService8616, ...],
-) -> tuple[MzStaticBoot8616 | _DeclaredBootSurface8616, Callable[[object], object] | None, tuple[DeclaredInterruptService8616, ...]] | None:
+    source_bytes: object,
+    load_segment: cython.longlong,
+    entry_linear: cython.longlong,
+    declared_boot: object,
+    declared_boot_recompute: object,
+    declared_services: object,
+) -> object:
     """Bind the declared or static boot authority for one source mint.
 
     Returns ``(boot, boot_recompute, declared_services)``; ``None``
@@ -604,11 +630,12 @@ def _declared_boot_binding_8616(
     against this intake's own evidence — the digest is re-derived here,
     never trusted from the relation.
     """
+    environment: object
     if declared_boot is None:
         if declared_services or declared_boot_recompute is not None:
             return None
         boot = mz_static_boot_8616(source_bytes, load_segment)
-        if boot.entry.linear() != entry_linear:
+        if operator.ne(boot.entry.linear(), entry_linear):
             return None
         return (boot, recompute_mz_static_boot_8616, ())
     try:
@@ -628,7 +655,7 @@ def _declared_boot_binding_8616(
         return None
     if (
         not callable(declared_boot_recompute)
-        or declared_boot_recompute(declared_boot) != declared_boot
+        or operator.ne(declared_boot_recompute(declared_boot), declared_boot)
     ):
         return None
     digest = declared_environment_digest_8616(environment)
@@ -636,16 +663,17 @@ def _declared_boot_binding_8616(
         return None
     if type(declared_services) is not tuple or not all(
         type(service) is DeclaredInterruptService8616
-        and service.environment_sha256 == digest
-        for service in declared_services
+        and operator.eq(service.environment_sha256, digest)
+        for service in iter(declared_services)
     ):
         return None
     return (declared_surface, declared_boot_recompute, declared_services)
 
 
+@cython.ccall
 def _authenticated_mz_surface_or_refusal_8616(
-    project: object, source: bytes
-) -> MzStaticIntakeInstall8616 | tuple[int, MzInvocationSource8616]:
+    project: object, source: object
+) -> object:
     """Authenticate retained MZ bytes against the loader's live surface.
 
     Reparses the bytes under the loader's recorded paragraph, requires
@@ -653,6 +681,7 @@ def _authenticated_mz_surface_or_refusal_8616(
     whole relocated module to equal the project's mapped bytes. Returns
     either a typed refusal receipt or ``(load_segment, projection)``.
     """
+    main_object: object
     main_object = _mz_loader_object_8616(project)
     if main_object is None:
         return MzStaticIntakeInstall8616(
@@ -686,7 +715,7 @@ def _authenticated_mz_surface_or_refusal_8616(
         entry = surface.entry
     except AttributeError:
         entry = None
-    if not isinstance(entry, int) or entry != projection.entry_linear:
+    if not isinstance(entry, int) or operator.ne(entry, projection.entry_linear):
         return _refusal_8616(
             project,
             MzStaticIntakeStatus8616.ENTRY_MISMATCH_REFUSED,
@@ -699,7 +728,7 @@ def _authenticated_mz_surface_or_refusal_8616(
             project,
             MzStaticIntakeStatus8616.LOADER_SURFACE_REFUSED,
         )
-    if mapped != projection.module:
+    if operator.ne(mapped, projection.module):
         return _refusal_8616(
             project,
             MzStaticIntakeStatus8616.IMAGE_MISMATCH_REFUSED,
@@ -708,15 +737,16 @@ def _authenticated_mz_surface_or_refusal_8616(
     return (load_segment, projection)
 
 
+@cython.ccall
 def _declared_binding_or_refusal_8616(
     project: object,
-    source_bytes: bytes,
-    load_segment: int,
-    entry_linear: int,
+    source_bytes: object,
+    load_segment: cython.longlong,
+    entry_linear: cython.longlong,
     declared_boot: object | None,
     declared_boot_recompute: Callable[[object], object] | None,
-    declared_services: tuple[DeclaredInterruptService8616, ...],
-) -> tuple[MzStaticBoot8616 | _DeclaredBootSurface8616, Callable[[object], object] | None, tuple[DeclaredInterruptService8616, ...]] | MzStaticIntakeInstall8616:
+    declared_services: object,
+) -> object:
     """Bind declared evidence for the installed path or refuse the intake.
 
     Same admission contract as the scoped mint — a ``None`` bind becomes
@@ -724,6 +754,7 @@ def _declared_binding_or_refusal_8616(
     installed path can never install a partially authenticated
     declaration.
     """
+    binding: object
     binding = _declared_boot_binding_8616(
         source_bytes,
         load_segment,
@@ -743,7 +774,7 @@ def _declared_binding_or_refusal_8616(
 class _DeclaredBootEntrySurface8616(Protocol):
     """The linear-projection seam a declared boot entry must expose."""
 
-    def linear(self) -> int:
+    def linear(self) -> cython.longlong:
         """Return the entry's linear address."""
         ...
 
@@ -756,23 +787,24 @@ class _DeclaredBootSurface8616(Protocol):
     contract that minted it.
     """
 
-    source: bytes
+    source: object
     entry: _DeclaredBootEntrySurface8616
     environment: object
-    boot_sha256: str
+    boot_sha256: object
 
 
+@cython.ccall
 def install_mz_static_invocation_source_8616(
     project: object,
-    source: bytes,
+    source: object,
     *,
-    extra_entries: Iterable[int] = (),
+    extra_entries: Iterable[cython.longlong] = (),
     budget: InvocationInventoryBudget8616 | None = None,
     direct_target_resolver: DirectCallTargetResolver8616 | None = None,
     declared_boot: object | None = None,
     declared_boot_recompute: Callable[[object], object] | None = None,
-    declared_services: tuple[DeclaredInterruptService8616, ...] = (),
-    function_entries: tuple[DeclaredFunctionEntryAdmission8616, ...] = (),
+    declared_services: object = (),
+    function_entries: object = (),
 ) -> MzStaticIntakeInstall8616:
     """Install the static-header invocation source when bytes authenticate.
 
@@ -807,6 +839,8 @@ def install_mz_static_invocation_source_8616(
     still runs in full, and a census that retained proof evidence
     changed installs a new epoch exactly as before.
     """
+    local: object
+    prior_local_evidence: object
     prior_local_evidence = local_call_frame_evidence_8616(project)
     install_real16_invocation_source_8616(project, None)
     install_local_call_frame_evidence_8616(project, None)

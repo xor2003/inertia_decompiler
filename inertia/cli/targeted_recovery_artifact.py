@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery/reporting.
 
 Responsibility: build targeted recovery artifacts for one bounded COD procedure.
@@ -11,12 +12,16 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from .corpus_scan import extract_cod_functions, scan_function
 from .recovery_artifact_writer import RecoveryArtifactWriteResult, write_x86_16_function_recovery_artifact
+import dataclasses
+import builtins
 
 __all__ = [
     "TargetedRecoveryArtifactResult",
@@ -24,16 +29,16 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TargetedRecoveryArtifactResult:
     """Result metadata for one targeted bounded COD recovery artifact."""
 
     cod_path: Path
-    proc_name: str
-    proc_kind: str
+    proc_name: object
+    proc_kind: object
     write_result: RecoveryArtifactWriteResult
-    confidence_status: str | None
-    fallback_kind: str | None
+    confidence_status: object
+    fallback_kind: object
 
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-compatible result payload."""
@@ -47,22 +52,23 @@ class TargetedRecoveryArtifactResult:
         }
 
 
+@cython.ccall
 def write_x86_16_targeted_cod_recovery_artifact(
-    cod_path: str | Path,
-    proc_name: str,
-    output_path: str | Path,
+    cod_path: object,
+    proc_name: object,
+    output_path: object,
     *,
-    timeout_sec: int = 5,
-    mode: str = "scan-safe",
-    max_cfg_bytes: int = 192,
-    max_cfg_blocks: int = 8,
-    max_cfg_insns: int = 200,
-    max_decompile_bytes: int = 384,
-    max_loop_bytes: int = 128,
+    timeout_sec: cython.longlong = 5,
+    mode: object = "scan-safe",
+    max_cfg_bytes: cython.longlong = 192,
+    max_cfg_blocks: cython.longlong = 8,
+    max_cfg_insns: cython.longlong = 200,
+    max_decompile_bytes: cython.longlong = 384,
+    max_loop_bytes: cython.longlong = 128,
 ) -> TargetedRecoveryArtifactResult:
     """Scan one COD procedure and write its bounded recovery artifact."""
     source_path = Path(cod_path)
-    entries = {name: (kind, code) for name, kind, code in extract_cod_functions(source_path)}
+    entries = {name: (kind, code) for name, kind, code in builtins.iter(extract_cod_functions(source_path))}
     if proc_name not in entries:
         raise KeyError(f"{proc_name} not found in {source_path}")
     proc_kind, code = entries[proc_name]

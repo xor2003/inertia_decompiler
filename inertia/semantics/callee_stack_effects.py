@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bind a real word CALL to its callee's retained returning SP proof.
 
 Layer: Semantics.
@@ -9,6 +10,8 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -29,6 +32,8 @@ from inertia.ir.vex_import import build_x86_16_ir_function_artifact
 from .bp_call_preservation import _exact_boundary_8616
 from .callsite_summary import CallsiteMachineFrameKind8616
 from .direct_ret_call_effect import direct_call_target_is_bound_8616
+import dataclasses
+import operator
 
 
 class CalleeStackCallFailure8616(StrEnum):
@@ -41,7 +46,7 @@ class CalleeStackCallFailure8616(StrEnum):
     BODY_REFUSED = "body_refused"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CalleeStackCallResult8616:
     """Physical call identity and a retained whole-body Alias result."""
 
@@ -52,22 +57,22 @@ class CalleeStackCallResult8616:
     frame_kind: CallsiteMachineFrameKind8616 | None
     body: CalleeStackPointerResult8616 | None
     failure: CalleeStackCallFailure8616 | None
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
-    def _retained_call_is_accepted(self) -> bool:
+    def _retained_call_is_accepted(self) -> cython.bint:
         """Require published call evidence rather than a retained refusal detail."""
         counts = (self.raw_fact_count, self.normalized_fact_count,
                   self.classified_fact_count, self.materialized_count, self.failure_count)
         return bool(
             self.failure is None and counts == (1, 1, 1, 1, 0)
-            and all(type(count) is int for count in counts)
+            and all(type(count) is int for count in iter(counts))
         )
 
-    def _call_identity_is_current(self) -> bool:
+    def _call_identity_is_current(self) -> cython.bint:
         """Check the retained result and physical call before consuming Alias."""
         if not self._retained_call_is_accepted() or self.body is None:
             return False
@@ -76,14 +81,14 @@ class CalleeStackCallResult8616:
         coverage = self.body.coverage
         return bool(
             coverage.boundary.project is self.project
-            and coverage.artifact.function_addr == self.target_addr
+            and operator.eq(coverage.artifact.function_addr, self.target_addr)
             and direct_call_target_is_bound_8616(
                 self.project, self.callsite_addr, self.return_addr, self.target_addr, self.frame_kind,
             )
         )
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Recheck source, registry identity, call bytes and Alias evidence."""
         return bool(
             self._call_identity_is_current()
@@ -111,10 +116,13 @@ class CalleeStackCallResult8616:
         return self.body.return_sp_delta
 
 
+@cython.ccall
 def _body_stack_proof_8616(
-    project: object, target: int,
+    project: object, target: cython.longlong,
 ) -> tuple[CalleeStackPointerResult8616 | None, CalleeStackCallFailure8616 | None]:
     """Consume or import one raw bounded body without recursive decompilation."""
+    artifact: object
+    boundary: object
     boundary = _exact_boundary_8616(project, target)
     if boundary is None:
         return None, CalleeStackCallFailure8616.BOUNDARY_MISSING
@@ -131,13 +139,15 @@ def _body_stack_proof_8616(
     return body, None if body.complete else CalleeStackCallFailure8616.BODY_REFUSED
 
 
+@cython.ccall
 def prove_direct_callee_stack_effect_8616(
     project: object, callsite_addr: int | None, return_addr: int | None,
-    target_addr: int | None, frame_kind: CallsiteMachineFrameKind8616 | None,
+    target_addr: object, frame_kind: CallsiteMachineFrameKind8616 | None,
 ) -> CalleeStackCallResult8616:
     """Publish a source-bound returning effect or a typed non-result."""
+    failure: object
     body = None
-    failure: CalleeStackCallFailure8616 | None = CalleeStackCallFailure8616.CALL_TARGET_UNPROVEN
+    failure = CalleeStackCallFailure8616.CALL_TARGET_UNPROVEN
     if target_addr is not None and is_synthetic_call_stub_8616(project, target_addr):
         failure = CalleeStackCallFailure8616.SYNTHETIC_BODY
     elif direct_call_target_is_bound_8616(

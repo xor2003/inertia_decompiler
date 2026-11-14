@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Run bounded CLI work in a disposable POSIX process tree.
 
 Layer: CLI/fallback/reporting.
@@ -6,6 +7,7 @@ process-isolated decompiler work without changing decompiler semantics.
 """
 
 from __future__ import annotations
+import cython
 
 import contextlib
 import ctypes
@@ -23,10 +25,13 @@ import traceback
 import typing
 from collections.abc import Callable
 from dataclasses import dataclass
+import dataclasses
+import operator
+ResultT = typing.TypeVar("ResultT")
 
 _ROOT_PROCESS_GROUP: int | None = None
 _EXPECTED_OWNER_PID: int | None = None
-_CHILD_ADMIT_FDS: tuple[int, int, int, int] | None = None
+_CHILD_ADMIT_FDS: object = None
 _PR_SET_PDEATHSIG = 1
 _ADMISSION_BOUND_SECONDS = 15.0
 _GUARDIAN_ADMIT_TOKEN = b"G"
@@ -40,7 +45,8 @@ class _GuardianStatus(enum.Enum):
     FAILED = "F"
 
 
-def _try_arm_owner_death_guard_8616() -> bool:
+@cython.ccall
+def _try_arm_owner_death_guard_8616() -> cython.bint:
     """Arm ``PR_SET_PDEATHSIG`` so this process dies when its owner thread dies.
 
     Linux-only and best-effort: returns ``False`` on other platforms or when
@@ -61,9 +67,9 @@ def _try_arm_owner_death_guard_8616() -> bool:
 class ForkChildExitError(RuntimeError):
     """Expose a reaped child's exit status when no complete IPC result exists."""
 
-    returncode: int
+    returncode: cython.longlong
 
-    def __init__(self, message: str, child_status: int) -> None:
+    def __init__(self, message: object, child_status: cython.longlong) -> None:
         """Keep the full diagnostic and an OS-decoded exit code or negative signal."""
         super().__init__(message)
         self.returncode = os.waitstatus_to_exitcode(child_status)
@@ -76,18 +82,20 @@ class _ForkResultKind(enum.Enum):
     ERROR = "error"
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class _ForkResult:
     """Carry one typed result or exception report across the fork pipe."""
 
     kind: _ForkResultKind
     value: object | None = None
-    error_type: str | None = None
-    error_detail: str | None = None
+    error_type: object = None
+    error_detail: object = None
 
 
+@cython.ccall
 def _faulthandler_output_file() -> typing.TextIO | None:
     """Return a usable diagnostic stream for child stack dumps."""
+    stream: object
     for stream in (sys.stderr, sys.__stderr__):
         if stream is None:
             continue
@@ -99,7 +107,8 @@ def _faulthandler_output_file() -> typing.TextIO | None:
     return None
 
 
-def _write_all(fd: int, data: bytes) -> None:
+@cython.ccall
+def _write_all(fd: cython.longlong, data: object) -> None:
     """Write a complete framed payload to a blocking pipe."""
     offset = 0
     while offset < len(data):
@@ -109,14 +118,16 @@ def _write_all(fd: int, data: bytes) -> None:
         offset += written
 
 
-def _write_result(fd: int, result: _ForkResult) -> None:
+@cython.ccall
+def _write_result(fd: cython.longlong, result: _ForkResult) -> None:
     """Serialize and frame one child result."""
     data = pickle.dumps(result, protocol=pickle.HIGHEST_PROTOCOL)
     _write_all(fd, len(data).to_bytes(8, "little"))
     _write_all(fd, data)
 
 
-def _read_exact(fd: int, size: int, *, deadline: float) -> bytes:
+@cython.ccall
+def _read_exact(fd: cython.longlong, size: cython.longlong, *, deadline: cython.double) -> bytes:
     """Read up to ``size`` bytes before EOF or the shared IPC deadline."""
     data = bytearray()
     while len(data) < size:
@@ -133,7 +144,8 @@ def _read_exact(fd: int, size: int, *, deadline: float) -> bytes:
     return bytes(data)
 
 
-def _child_exit_detail(status: int) -> str:
+@cython.ccall
+def _child_exit_detail(status: cython.longlong) -> str:
     """Render a stable child exit diagnostic."""
     if os.WIFEXITED(status):
         return f"exitcode={os.WEXITSTATUS(status)}"
@@ -147,17 +159,19 @@ def _child_exit_detail(status: int) -> str:
     return f"exit_status_raw={int(status)}"
 
 
+@cython.ccall
 def _join_root_process_group() -> None:
     """Make the outer timeout child the leader of its disposable process group."""
     pid = os.getpid()
     try:
         os.setpgid(0, 0)
     except OSError:
-        if os.getpgrp() != pid:
+        if operator.ne(os.getpgrp(), pid):
             raise
 
 
-def _terminate_child(pid: int, *, owns_process_group: bool) -> None:
+@cython.ccall
+def _terminate_child(pid: cython.longlong, *, owns_process_group: cython.bint) -> None:
     """Kill a direct child and, for an outer timeout, every descendant group member."""
     if owns_process_group:
         with contextlib.suppress(ProcessLookupError):
@@ -166,8 +180,10 @@ def _terminate_child(pid: int, *, owns_process_group: bool) -> None:
         os.kill(pid, signal.SIGKILL)
 
 
+@cython.ccall
 def _configure_child_stack_dump() -> None:
     """Enable optional repeated stack dumps inside a timeout child."""
+    stack_dump_file: object
     stack_dump_raw = os.environ.get("INERTIA_FORK_STACK_DUMP_SEC", "").strip()
     if not stack_dump_raw:
         return
@@ -179,8 +195,11 @@ def _configure_child_stack_dump() -> None:
             faulthandler.dump_traceback_later(stack_dump_sec, repeat=True, file=stack_dump_file)
 
 
-def _run_child[ResultT](func: Callable[[], ResultT], write_fd: int, read_fd: int, *, owns_process_group: bool) -> typing.NoReturn:
+@cython.ccall
+def _run_child(func: Callable[[], ResultT], write_fd: cython.longlong, read_fd: cython.longlong, *, owns_process_group: cython.bint) -> typing.NoReturn:
     """Execute and report one callable from the fork child."""
+    owner_pid: object
+    stray_fd: object
     global _ROOT_PROCESS_GROUP
 
     try:
@@ -192,7 +211,7 @@ def _run_child[ResultT](func: Callable[[], ResultT], write_fd: int, read_fd: int
                 " bounded guardian fallback remains",
                 file=sys.stderr,
             )
-        if armed and owner_pid is not None and os.getppid() != owner_pid:
+        if armed and owner_pid is not None and operator.ne(os.getppid(), owner_pid):
             # Owner died between fork and arming; prctl does not fire
             # retroactively, so refuse to continue as an orphan.
             os._exit(1)
@@ -241,11 +260,12 @@ def _run_child[ResultT](func: Callable[[], ResultT], write_fd: int, read_fd: int
         os._exit(0)
 
 
+@cython.ccall
 def _fail_incomplete_child_8616(
-    pid: int,
-    owns_process_group: bool,
-    deadline: float,
-    timeout: int,
+    pid: cython.longlong,
+    owns_process_group: cython.bint,
+    deadline: cython.double,
+    timeout: cython.longlong,
     render_error: Callable[[int], str],
 ) -> typing.NoReturn:
     """Terminate a child that produced a truncated frame and raise its failure."""
@@ -258,12 +278,12 @@ def _fail_incomplete_child_8616(
 
 
 def _read_result_frame_8616(
-    read_fd: int,
-    pid: int,
-    owns_process_group: bool,
-    deadline: float,
-    timeout: int,
-) -> tuple[bytes, int]:
+    read_fd: cython.longlong,
+    pid: cython.longlong,
+    owns_process_group: cython.bint,
+    deadline: cython.double,
+    timeout: cython.longlong,
+) -> tuple[bytes, cython.longlong]:
     """Read the child's framed result payload and reap it."""
     header = _read_exact(read_fd, 8, deadline=deadline)
     if len(header) != 8:
@@ -276,7 +296,7 @@ def _read_result_frame_8616(
         )
     expected = int.from_bytes(header, "little")
     framed_data = _read_exact(read_fd, expected, deadline=deadline)
-    if len(framed_data) != expected:
+    if operator.ne(len(framed_data), expected):
         _fail_incomplete_child_8616(
             pid,
             owns_process_group,
@@ -291,10 +311,11 @@ def _read_result_frame_8616(
     return framed_data, child_status
 
 
+@cython.ccall
 def _decode_fork_result_8616(
-    framed_data: bytes,
-    child_status: int,
-    timeout: int,
+    framed_data: object,
+    child_status: cython.longlong,
+    timeout: cython.longlong,
 ) -> object:
     """Decode the child's framed result, re-raising its typed failure."""
     result = pickle.loads(framed_data)
@@ -311,8 +332,9 @@ def _decode_fork_result_8616(
     )
 
 
+@cython.ccall
 def _guardian_child_8616(
-    worker_pid: int, ready_fd: int, deadline_monotonic: float
+    worker_pid: cython.longlong, ready_fd: cython.longlong, deadline_monotonic: cython.double
 ) -> typing.NoReturn:
     """Supervise one owned worker group until the worker dies or the bound ends.
 
@@ -328,6 +350,7 @@ def _guardian_child_8616(
     longer allowance), then SIGKILLs the whole group, which includes itself:
     the sweep finishes atomically and no guardian can linger.
     """
+    pidfd_open: object
     status = _GuardianStatus.FAILED
     watch_fd = -1
     try:
@@ -350,7 +373,7 @@ def _guardian_child_8616(
                 status = _GuardianStatus.FAILED
     with contextlib.suppress(OSError):
         os.write(ready_fd, status.value.encode("ascii"))
-    if status != _GuardianStatus.READY:
+    if operator.ne(status, _GuardianStatus.READY):
         os._exit(0)
     try:
         remaining = deadline_monotonic - time.monotonic()
@@ -368,9 +391,10 @@ def _guardian_child_8616(
         os._exit(0)
 
 
+@cython.ccall
 def _spawn_guardian_8616(
-    worker_pid: int, ready_fd: int, stray_fds: tuple[int, ...], deadline: float
-) -> int:
+    worker_pid: cython.longlong, ready_fd: cython.longlong, stray_fds: object, deadline: cython.double
+) -> cython.longlong:
     """Fork the sibling supervisor for the root worker's disposable group.
 
     Propagates ``OSError`` on fork failure — supervision is mandatory for the
@@ -378,6 +402,7 @@ def _spawn_guardian_8616(
     The guardian keeps only ``ready_fd``; every other inherited fd is closed so
     worker death still shows up as EOF on the result pipe for the owner.
     """
+    stray_fd: object
     guardian_pid = os.fork()
     if guardian_pid == 0:
         for stray_fd in stray_fds:
@@ -387,7 +412,8 @@ def _spawn_guardian_8616(
     return guardian_pid
 
 
-def _read_guardian_token_8616(ready_fd: int, *, deadline: float) -> _GuardianStatus:
+@cython.ccall
+def _read_guardian_token_8616(ready_fd: cython.longlong, *, deadline: cython.double) -> _GuardianStatus:
     """Await the guardian's one-byte supervision status within a hard bound."""
     remaining = max(0.0, min(_ADMISSION_BOUND_SECONDS, deadline - time.monotonic()))
     ready, _, _ = select.select([ready_fd], [], [], remaining)
@@ -405,18 +431,20 @@ def _read_guardian_token_8616(ready_fd: int, *, deadline: float) -> _GuardianSta
 
 def _close_suppressed_8616(*fds: int) -> None:
     """Close fds that may already be closed."""
+    fd: object
     for fd in fds:
         with contextlib.suppress(OSError):
             os.close(fd)
 
 
+@cython.ccall
 def _establish_supervision_8616(
-    worker_pid: int,
-    write_fd: int,
-    read_fd: int,
-    admit_fds: tuple[int, int],
-    ready_fds: tuple[int, int],
-    deadline: float,
+    worker_pid: cython.longlong,
+    write_fd: cython.longlong,
+    read_fd: cython.longlong,
+    admit_fds: object,
+    ready_fds: object,
+    deadline: cython.double,
 ) -> int | None:
     """Spawn the guardian, await its watch token, then admit the parked worker.
 
@@ -424,9 +452,10 @@ def _establish_supervision_8616(
     worker is terminated and reaped, the guardian (if forked) is reaped, and a
     loud ``RuntimeError`` is raised — the callable never runs unsupervised.
     """
+    guardian_pid: object
     admit_read_fd, admit_write_fd = admit_fds
     ready_read_fd, ready_write_fd = ready_fds
-    guardian_pid: int | None = None
+    guardian_pid = None
     admission_error: OSError | None = None
     try:
         guardian_pid = _spawn_guardian_8616(
@@ -443,10 +472,10 @@ def _establish_supervision_8616(
         admission_error = error
         token = _GuardianStatus.FAILED
     _close_suppressed_8616(ready_write_fd, admit_read_fd)
-    if token == _GuardianStatus.READY:
+    if operator.eq(token, _GuardianStatus.READY):
         with contextlib.suppress(OSError):
             os.write(admit_write_fd, _GUARDIAN_ADMIT_TOKEN)
-    elif token != _GuardianStatus.GONE:
+    elif operator.ne(token, _GuardianStatus.GONE):
         # Admission failed: the worker is still parked at the barrier, so no
         # callable code or descendants can exist yet. Terminate and reap it.
         _close_suppressed_8616(admit_write_fd, ready_read_fd, write_fd, read_fd)
@@ -465,7 +494,8 @@ def _establish_supervision_8616(
     return guardian_pid
 
 
-def _reap_guardian_8616(guardian_pid: int) -> None:
+@cython.ccall
+def _reap_guardian_8616(guardian_pid: cython.longlong) -> None:
     """Reap the guardian after the worker is reaped; force it if it lingers."""
     deadline = time.monotonic() + 2.0
     while time.monotonic() < deadline:
@@ -479,12 +509,17 @@ def _reap_guardian_8616(guardian_pid: int) -> None:
         os.waitpid(guardian_pid, 0)
 
 
-def run_with_timeout_in_fork[ResultT](
+@cython.ccall
+def run_with_timeout_in_fork(
     func: Callable[[], ResultT],
     *,
-    timeout: int,
+    timeout: cython.longlong,
 ) -> ResultT:
     """Run a callable in a bounded POSIX process tree and reap all descendants."""
+    admit_fds: object
+    child_status: object
+    guardian_pid: object
+    ready_fds: object
     if os.name != "posix" or not hasattr(os, "fork"):
         raise RuntimeError("fork unavailable")
     if threading.current_thread() is not threading.main_thread():
@@ -494,8 +529,8 @@ def run_with_timeout_in_fork[ResultT](
 
     owns_process_group = _ROOT_PROCESS_GROUP is None
     read_fd, write_fd = os.pipe()
-    admit_fds: tuple[int, int] | None = None
-    ready_fds: tuple[int, int] | None = None
+    admit_fds = None
+    ready_fds = None
     if owns_process_group:
         admit_fds = os.pipe()
         ready_fds = os.pipe()
@@ -515,7 +550,7 @@ def run_with_timeout_in_fork[ResultT](
     _CHILD_ADMIT_FDS = None
 
     deadline = time.monotonic() + max(1, timeout)
-    guardian_pid: int | None = None
+    guardian_pid = None
     if owns_process_group:
         assert admit_fds is not None
         assert ready_fds is not None
@@ -525,7 +560,7 @@ def run_with_timeout_in_fork[ResultT](
             pid, write_fd, read_fd, admit_fds, ready_fds, deadline
         )
     os.close(write_fd)
-    child_status: int | None = None
+    child_status = None
     try:
         framed_data, child_status = _read_result_frame_8616(
             read_fd, pid, owns_process_group, deadline, timeout
@@ -546,11 +581,12 @@ def run_with_timeout_in_fork[ResultT](
                 _reap_guardian_8616(guardian_pid)
 
 
+@cython.ccall
 def run_captured_subprocess_tree(
     command: typing.Sequence[str],
     *,
     env: typing.Mapping[str, str],
-    timeout: int,
+    timeout: cython.longlong,
 ) -> subprocess.CompletedProcess[str]:
     """Run a captured command and reap its entire process tree on timeout."""
     bounded_timeout = max(1, int(timeout))

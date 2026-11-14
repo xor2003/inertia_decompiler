@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed contracts for deterministic SSA CFG proof artifacts.
 
 Layer: IR.
@@ -8,12 +9,16 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
+import dataclasses
+import operator
 
-type SSACFGEdge8616 = tuple[int, int]
-type SSACFGAdjacency8616 = tuple[tuple[int, tuple[int, ...]], ...]
+SSACFGEdge8616 = typing.TypeAliasType("SSACFGEdge8616", tuple[int, int])
+SSACFGAdjacency8616 = typing.TypeAliasType("SSACFGAdjacency8616", tuple[tuple[int, tuple[int, ...]], ...])
 
 
 class SSACFGFailureKind8616(StrEnum):
@@ -37,18 +42,18 @@ class SSACFGFailureKind8616(StrEnum):
     NON_UNIQUE_EXIT_TARGET = "non_unique_exit_target"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SSACFGEvidenceStats8616:
     """Closed five-counter accounting for one CFG proof candidate."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether the candidate has exactly one final outcome."""
         counts = (
             self.raw_fact_count,
@@ -58,11 +63,11 @@ class SSACFGEvidenceStats8616:
             self.failure_count,
         )
         return bool(
-            all(count >= 0 for count in counts)
+            all(count >= 0 for count in iter(counts))
             and self.raw_fact_count >= self.normalized_fact_count
             and self.normalized_fact_count >= self.classified_fact_count
             and self.classified_fact_count >= self.materialized_count
-            and self.raw_fact_count == self.materialized_count + self.failure_count
+            and operator.eq(self.raw_fact_count, self.materialized_count + self.failure_count)
             and not (
                 self.classified_fact_count > 0
                 and self.materialized_count == 0
@@ -72,112 +77,110 @@ class SSACFGEvidenceStats8616:
 
 def ssa_cfg_neighbors_8616(
     adjacency: SSACFGAdjacency8616,
-    node: int,
-) -> tuple[int, ...] | None:
+    node: cython.longlong,
+) -> object:
     """Look up one immutable adjacency entry without manufacturing emptiness."""
     return next(
-        (neighbors for address, neighbors in adjacency if address == node),
+        (neighbors for address, neighbors in iter(adjacency) if address == node),
         None,
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SSACFGSnapshot8616:
     """Immutable closed SSA CFG, or an empty typed refusal."""
 
-    function_addr: int
-    block_addrs: tuple[int, ...]
+    function_addr: cython.longlong
+    block_addrs: object
     predecessor_map: SSACFGAdjacency8616
     successor_map: SSACFGAdjacency8616
-    edges: tuple[SSACFGEdge8616, ...]
+    edges: object
     stats: SSACFGEvidenceStats8616
     failure: SSACFGFailureKind8616 | None = None
-    refusal_nodes: tuple[int, ...] = ()
+    refusal_nodes: tuple[cython.longlong, ...] = ()
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether all nodes and both adjacency projections are exact."""
         return bool(
             self.failure is None
             and self.stats.closed
             and self.stats.materialized_count == 1
-            and self.block_addrs == tuple(sorted(set(self.block_addrs)))
+            and operator.eq(self.block_addrs, tuple(sorted(tuple(set(self.block_addrs)))))
             and self.function_addr in self.block_addrs
-            and tuple(node for node, _items in self.predecessor_map)
-            == self.block_addrs
-            and tuple(node for node, _items in self.successor_map)
-            == self.block_addrs
+            and operator.eq(tuple(node for node, _items in iter(self.predecessor_map)), self.block_addrs)
+            and operator.eq(tuple(node for node, _items in iter(self.successor_map)), self.block_addrs)
             and self.refusal_nodes == ()
         )
 
-    def predecessors(self, node: int) -> tuple[int, ...] | None:
+    def predecessors(self, node: cython.longlong) -> object:
         """Return exact predecessors, or ``None`` when no CFG was proven."""
         return ssa_cfg_neighbors_8616(self.predecessor_map, node) if self.complete else None
 
-    def successors(self, node: int) -> tuple[int, ...] | None:
+    def successors(self, node: cython.longlong) -> object:
         """Return exact successors, or ``None`` when no CFG was proven."""
         return ssa_cfg_neighbors_8616(self.successor_map, node) if self.complete else None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SSADominators8616:
     """Exact dominator sets tied to one immutable CFG edge relation."""
 
-    function_addr: int
-    block_addrs: tuple[int, ...]
-    cfg_edges: tuple[SSACFGEdge8616, ...]
+    function_addr: cython.longlong
+    block_addrs: object
+    cfg_edges: object
     dominator_sets: SSACFGAdjacency8616
     stats: SSACFGEvidenceStats8616
     failure: SSACFGFailureKind8616 | None = None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every CFG node has one exact dominator set."""
         return bool(
             self.failure is None
             and self.stats.closed
             and self.stats.materialized_count == 1
-            and tuple(node for node, _items in self.dominator_sets)
-            == self.block_addrs
+            and operator.eq(tuple(node for node, _items in iter(self.dominator_sets)), self.block_addrs)
         )
 
-    def dominators(self, node: int) -> tuple[int, ...] | None:
+    def dominators(self, node: cython.longlong) -> object:
         """Return the node's exact dominators, or ``None`` when unproven."""
         return ssa_cfg_neighbors_8616(self.dominator_sets, node) if self.complete else None
 
-    def dominates(self, dominator: int, node: int) -> bool | None:
+    def dominates(self, dominator: cython.longlong, node: cython.longlong) -> bool | None:
         """Return exact dominance, or ``None`` when the relation is unproven."""
+        values: object
         values = self.dominators(node)
         return None if values is None else dominator in values
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SSANaturalLoop8616:
     """Exact single-latch natural loop, or an empty typed refusal."""
 
-    header: int
-    latch: int
-    blocks: tuple[int, ...]
-    entry_edges: tuple[SSACFGEdge8616, ...]
-    backedges: tuple[SSACFGEdge8616, ...]
-    exit_edges: tuple[SSACFGEdge8616, ...]
+    header: cython.longlong
+    latch: cython.longlong
+    blocks: object
+    entry_edges: object
+    backedges: object
+    exit_edges: object
     stats: SSACFGEvidenceStats8616
     failure: SSACFGFailureKind8616 | None = None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether exact single-entry and single-exit topology is proven."""
         return bool(
             self.failure is None
             and self.stats.closed
             and self.stats.materialized_count == 1
-            and self.blocks == tuple(sorted(set(self.blocks)))
+            and operator.eq(self.blocks, tuple(sorted(tuple(set(self.blocks)))))
             and self.header in self.blocks
             and self.latch in self.blocks
-            and self.backedges == ((self.latch, self.header),)
-            and all(target == self.header for _source, target in self.entry_edges)
+            and operator.eq(self.backedges, ((self.latch, self.header),))
+            and all(operator.eq(target, self.header) for _source, target in iter(self.entry_edges))
             and self.exit_edges
-            and len({target for _source, target in self.exit_edges}) == 1
+            and len({target for _source, target in iter(self.exit_edges)}) == 1
         )
 
 

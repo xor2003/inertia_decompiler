@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Structuring diagnostics and failure classification.
 
 Layer: Structuring.
@@ -22,6 +23,7 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import cython
 
 import typing
 from dataclasses import dataclass, field
@@ -34,6 +36,7 @@ from inertia.structuring.structuring_cfg_indirect import CFGIndirectSiteArtifact
 from inertia.structuring.structuring_cfg_ownership import CFGOwnershipArtifact
 from inertia.structuring.structuring_cfg_snapshot import CFGSnapshot
 from inertia.structuring.structuring_ir_hints import StructuringIRHintArtifact, build_structuring_ir_hint_artifact
+import dataclasses
 
 __all__ = [
     "DiagnosticsCollector",
@@ -62,17 +65,17 @@ class StructuringFailureReason(Enum):
 class _StructuringFailureStatsLike8616(Protocol):
     """Structural view of fields needed to classify structuring failure."""
 
-    iterations: int
-    regions_reduced: int
-    max_iterations_reached: bool
+    iterations: cython.longlong
+    regions_reduced: cython.longlong
+    max_iterations_reached: cython.bint
 
 
 @runtime_checkable
 class _StructuringHintStatsLike8616(_StructuringFailureStatsLike8616, Protocol):
     """Structural view of fields needed to emit structuring recovery hints."""
 
-    cycles_resolved: int
-    had_unstructured_gotos: bool
+    cycles_resolved: cython.longlong
+    had_unstructured_gotos: cython.bint
 
 
 @runtime_checkable
@@ -82,34 +85,36 @@ class _CodegenWithCfuncLike8616(Protocol):
     cfunc: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StructuringDiagnostic:
     """Single diagnostic entry from structuring analysis."""
 
-    kind: str  # 'failure', 'warning', 'progress'
-    message: str
-    region_ids: tuple[int, ...] = ()  # Affected region IDs if applicable
-    iteration: int = 0  # Iteration when diagnostic occurred
+    kind: object  # 'failure', 'warning', 'progress'
+    message: object
+    region_ids: tuple[cython.longlong, ...] = ()  # Affected region IDs if applicable
+    iteration: cython.longlong = 0  # Iteration when diagnostic occurred
     reason: StructuringFailureReason | None = None
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class DiagnosticsCollector:
     """Collects diagnostics during structuring analysis."""
 
-    diagnostics: list[StructuringDiagnostic] = field(default_factory=list)
-    current_iteration: int = 0
-    max_iterations: int = 1000
+    diagnostics: object = field(default_factory=list)
+    current_iteration: cython.longlong = 0
+    max_iterations: cython.longlong = 1000
 
-    def record_iteration(self, iteration: int) -> None:
+    @cython.ccall
+    def record_iteration(self, iteration: cython.longlong) -> None:
         """Update current iteration counter."""
         self.current_iteration = iteration
 
+    @cython.ccall
     def add_diagnostic(
         self,
-        kind: str,
-        message: str,
-        region_ids: tuple[int, ...] = (),
+        kind: object,
+        message: object,
+        region_ids: object = (),
         reason: StructuringFailureReason | None = None,
     ) -> None:
         """Add a diagnostic entry."""
@@ -122,35 +127,39 @@ class DiagnosticsCollector:
         )
         self.diagnostics.append(diag)
 
-    def add_progress(self, message: str, region_ids: tuple[int, ...] = ()) -> None:
+    @cython.ccall
+    def add_progress(self, message: object, region_ids: object = ()) -> None:
         """Record successful progress."""
         self.add_diagnostic(kind="progress", message=message, region_ids=region_ids)
 
-    def add_warning(self, message: str, region_ids: tuple[int, ...] = ()) -> None:
+    @cython.ccall
+    def add_warning(self, message: object, region_ids: object = ()) -> None:
         """Record a warning (non-fatal issue)."""
         self.add_diagnostic(kind="warning", message=message, region_ids=region_ids)
 
+    @cython.ccall
     def add_failure(
         self,
-        message: str,
+        message: object,
         reason: StructuringFailureReason,
-        region_ids: tuple[int, ...] = (),
+        region_ids: object = (),
     ) -> None:
         """Record a failure with classified reason."""
         self.add_diagnostic(kind="failure", message=message, region_ids=region_ids, reason=reason)
 
-    def failure_count(self) -> int:
+    def failure_count(self) -> cython.longlong:
         """Count total failures recorded."""
-        return sum(1 for d in self.diagnostics if d.kind == "failure")
+        return sum(1 for d in iter(self.diagnostics) if d.kind == "failure")
 
-    def warning_count(self) -> int:
+    def warning_count(self) -> cython.longlong:
         """Count total warnings recorded."""
-        return sum(1 for d in self.diagnostics if d.kind == "warning")
+        return sum(1 for d in iter(self.diagnostics) if d.kind == "warning")
 
-    def progress_count(self) -> int:
+    def progress_count(self) -> cython.longlong:
         """Count successful progress entries."""
-        return sum(1 for d in self.diagnostics if d.kind == "progress")
+        return sum(1 for d in iter(self.diagnostics) if d.kind == "progress")
 
+    @cython.ccall
     def to_dict(self) -> dict[str, object]:
         """Convert to dictionary representation."""
         return {
@@ -167,40 +176,44 @@ class DiagnosticsCollector:
                     "reason": d.reason.value if d.reason else None,
                     "region_ids": list(d.region_ids),
                 }
-                for d in self.diagnostics
+                for d in iter(self.diagnostics)
             ],
         }
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class StructuringDiagnosticsReport:
     """Full report of structuring analysis."""
 
-    func_addr: int
-    func_name: str
-    succeeded: bool
-    final_iteration: int
-    max_iterations: int
+    func_addr: cython.longlong
+    func_name: object
+    succeeded: cython.bint
+    final_iteration: cython.longlong
+    max_iterations: cython.longlong
     diagnostics_collector: DiagnosticsCollector
     failure_reason: StructuringFailureReason | None = None
-    recovery_hints: list[str] = field(default_factory=list)
+    recovery_hints: object = field(default_factory=list)
     cfg_snapshot: CFGSnapshot | None = None
     cfg_ownership: CFGOwnershipArtifact | None = None
     cfg_indirect: CFGIndirectSiteArtifact | None = None
     cfg_grouping: CFGGroupingArtifact | None = None
     ir_hints: StructuringIRHintArtifact | None = None
 
-    def add_recovery_hint(self, hint: str) -> None:
+    @cython.ccall
+    def add_recovery_hint(self, hint: object) -> None:
         """Add a recovery hint for debugging."""
         self.recovery_hints.append(hint)
 
+    @cython.ccall
     def last_failure_reason(self) -> StructuringFailureReason | None:
         """Get reason of last failure, if any."""
+        diag: object
         for diag in reversed(self.diagnostics_collector.diagnostics):
             if diag.kind == "failure" and diag.reason:
                 return diag.reason
         return self.failure_reason
 
+    @cython.ccall
     def summary_line(self) -> str:
         """One-line summary for logging."""
         if self.succeeded:
@@ -213,8 +226,10 @@ class StructuringDiagnosticsReport:
                 f"failed after {self.final_iteration} iterations ({reason_str})"
             )
 
+    @cython.ccall
     def to_dict(self) -> dict[str, object]:
         """Convert to dictionary representation."""
+        failure_reason: object
         failure_reason = self.last_failure_reason()
         return {
             "func_addr": hex(self.func_addr),
@@ -233,6 +248,7 @@ class StructuringDiagnosticsReport:
         }
 
 
+@cython.ccall
 def build_failure_reason_from_stats(stats: object) -> StructuringFailureReason | None:
     """Classify failure reason from structuring statistics.
 
@@ -255,7 +271,8 @@ def build_failure_reason_from_stats(stats: object) -> StructuringFailureReason |
     return None
 
 
-def suggest_recovery_hints(stats: object, region_ids: tuple[int, ...] = ()) -> list[str]:
+@cython.ccall
+def suggest_recovery_hints(stats: object, region_ids: object = ()) -> object:
     """Suggest recovery hints based on structuring statistics.
 
     Args:
@@ -295,10 +312,16 @@ def suggest_recovery_hints(stats: object, region_ids: tuple[int, ...] = ()) -> l
     return hints
 
 
-def apply_x86_16_structuring_diagnostics(codegen: object) -> bool:
+def apply_x86_16_structuring_diagnostics(codegen: object) -> cython.bint:
     """Attach diagnostics metadata at the angr/codegen dynamic boundary without changing structuring."""
 
-    def _impl() -> bool:
+    def _impl() -> cython.bint:
+        cfg_grouping: object
+        cfg_indirect: object
+        cfg_ownership: object
+        func_addr: object
+        func_name: object
+        structuring_stats: object
         try:
             # Handle missing or empty cfunc gracefully
             if not isinstance(codegen, _CodegenWithCfuncLike8616) or not codegen.cfunc:
@@ -364,8 +387,10 @@ def apply_x86_16_structuring_diagnostics(codegen: object) -> bool:
     return _impl()
 
 
+@cython.ccall
 def _cfunc_structuring_stats_8616(cfunc: object) -> _StructuringFailureStatsLike8616 | None:
     """Read the optional structuring stats attached at the codegen boundary."""
+    stats: object
     # Dynamic codegen boundary: angr cfunc metadata may carry this optional compatibility field.
     stats = getattr(cfunc, "_structuring_stats", None)
     if isinstance(stats, _StructuringFailureStatsLike8616):
@@ -373,6 +398,7 @@ def _cfunc_structuring_stats_8616(cfunc: object) -> _StructuringFailureStatsLike
     return None
 
 
+@cython.ccall
 def _collect_diagnostics_progress_8616(
     collector: DiagnosticsCollector,
     report: StructuringDiagnosticsReport,
@@ -382,6 +408,7 @@ def _collect_diagnostics_progress_8616(
     cfg_grouping: CFGGroupingArtifact | None,
 ) -> None:
     """Feed artifact summary lines into the diagnostics collector."""
+    artifact: object
     for artifact in (cfg_snapshot, cfg_ownership, cfg_indirect, cfg_grouping):
         if artifact is not None:
             collector.add_progress(artifact.summary_line())
@@ -397,12 +424,14 @@ def _collect_diagnostics_progress_8616(
         )
 
 
+@cython.ccall
 def _attach_report_hints_8616(
     report: StructuringDiagnosticsReport,
     structuring_stats: _StructuringFailureStatsLike8616 | None,
-    succeeded: bool,
+    succeeded: cython.bint,
 ) -> None:
     """Generate recovery hints and attach them to the diagnostics report."""
+    hint: object
     if not succeeded and structuring_stats:
         for hint in suggest_recovery_hints(structuring_stats):
             report.add_recovery_hint(hint)
@@ -411,10 +440,12 @@ def _attach_report_hints_8616(
             report.add_recovery_hint(hint)
 
 
+@cython.ccall
 def _attach_diagnostics_report_8616(
     codegen: object, cfunc: object, report: StructuringDiagnosticsReport
 ) -> None:
     """Attach the diagnostics report to codegen side metadata and the cfunc."""
+    cfunc_metadata: object
     metadata = get_codegen_side_metadata(codegen)
     metadata["structuring_diagnostics"] = report
     try:

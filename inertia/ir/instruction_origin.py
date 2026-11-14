@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Retain exact VEX statement and memory-address identity in typed IR.
 
 Layer: IR.
@@ -8,14 +9,17 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
 from pyvex.expr import Load, RdTmp
 from pyvex.stmt import Store, WrTmp
+import dataclasses
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRInstructionOrigin8616:
     """Source identity, not permission to replay current register contents.
 
@@ -37,12 +41,12 @@ class IRInstructionOrigin8616:
     field is never set for ordinary instruction facts.
     """
 
-    block_addr: int
-    statement_index: int
+    block_addr: cython.longlong
+    statement_index: cython.longlong
     address_tmp: int | None = None
-    is_block_next: bool = False
+    is_block_next: cython.bint = False
     block_next_tmp: int | None = None
-    is_instruction_mark: bool = False
+    is_instruction_mark: cython.bint = False
 
     def to_dict(self) -> dict[str, int | bool | None]:
         """Serialize source coordinates without deriving them from names."""
@@ -56,8 +60,9 @@ class IRInstructionOrigin8616:
         }
 
 
+@cython.ccall
 def vex_instruction_origin_8616(
-    statement: object, *, block_addr: int, statement_index: int,
+    statement: object, *, block_addr: cython.longlong, statement_index: cython.longlong,
 ) -> IRInstructionOrigin8616:
     """Capture a statement's exact address temporary at the pyvex boundary."""
     address = None
@@ -72,8 +77,9 @@ def vex_instruction_origin_8616(
     )
 
 
+@cython.ccall
 def vex_imark_origin_8616(
-    *, block_addr: int, statement_index: int,
+    *, block_addr: cython.longlong, statement_index: cython.longlong,
 ) -> IRInstructionOrigin8616:
     """Capture an ``Ist_IMark`` statement's exact position as origin provenance.
 
@@ -89,8 +95,9 @@ def vex_imark_origin_8616(
     )
 
 
+@cython.ccall
 def vex_block_next_origin_8616(
-    next_expr: object, *, block_addr: int, statement_count: int,
+    next_expr: object, *, block_addr: cython.longlong, statement_count: cython.longlong,
 ) -> IRInstructionOrigin8616:
     """Capture the block ``next`` expression identity at the pyvex boundary.
 

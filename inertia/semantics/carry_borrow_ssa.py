@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Exact SSA helpers for carry/borrow semantic classification.
 
 Layer: Semantics.
@@ -10,6 +11,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 
@@ -34,10 +37,13 @@ from .carry_borrow_contracts import (
     CarryBorrowMemoryWordUse8616,
     CarryBorrowOperandUse8616,
 )
+import operator
+import builtins
 
-type CarryBorrowDefinitions8616 = dict[int, CarryBorrowDefinitionSite8616]
+CarryBorrowDefinitions8616 = typing.TypeAliasType("CarryBorrowDefinitions8616", dict[int, CarryBorrowDefinitionSite8616])
 
 
+@cython.ccall
 def ir_op_8616(instruction: IRInstr) -> CarryBorrowIROp8616 | None:
     """Normalize one exact IR operation into the admitted operation enum."""
     try:
@@ -46,6 +52,7 @@ def ir_op_8616(instruction: IRInstr) -> CarryBorrowIROp8616 | None:
         return None
 
 
+@cython.ccall
 def arithmetic_kind_8616(instruction: IRInstr) -> CarryBorrowKind8616 | None:
     """Return the carry/borrow kind of one admitted arithmetic operation."""
     op = ir_op_8616(instruction)
@@ -58,11 +65,12 @@ def arithmetic_kind_8616(instruction: IRInstr) -> CarryBorrowKind8616 | None:
 
 def site_value_args_8616(site: CarryBorrowDefinitionSite8616) -> tuple[IRValue, ...]:
     """Return typed value arguments only when every argument is a value."""
-    if not all(isinstance(arg, IRValue) for arg in site.instruction.args):
+    if not all(isinstance(arg, IRValue) for arg in iter(site.instruction.args)):
         return ()
-    return tuple(arg for arg in site.instruction.args if isinstance(arg, IRValue))
+    return tuple(arg for arg in iter(site.instruction.args) if isinstance(arg, IRValue))
 
 
+@cython.ccall
 def definition_for_8616(
     value: IRValue,
     definitions: CarryBorrowDefinitions8616,
@@ -80,6 +88,7 @@ def definition_for_8616(
     return definitions.get(value.source_tmp)
 
 
+@cython.ccall
 def single_source_8616(site: CarryBorrowDefinitionSite8616) -> IRValue | None:
     """Return the only source of one exact typed MOV definition."""
     args = site_value_args_8616(site)
@@ -91,10 +100,11 @@ def single_source_8616(site: CarryBorrowDefinitionSite8616) -> IRValue | None:
 _PENDING_CONVERSION_DEPTH_8616 = 8
 
 
+@cython.ccall
 def _conversion_projection_8616(
     value: IRValue,
     definitions: CarryBorrowDefinitions8616,
-    depth: int,
+    depth: cython.longlong,
 ) -> ScalarProjection8616 | None:
     """Authenticate one pending unary view as an exact integer conversion.
 
@@ -105,6 +115,8 @@ def _conversion_projection_8616(
     Non-conversion operations, pinned views, and unproven widths earn no
     projection. ``depth`` bounds nested producer recursion.
     """
+    operand_bits: object
+    unary: object
     unary = value.active_unary
     if unary is None or value.source_tmp is not None:
         return None
@@ -121,7 +133,7 @@ def _site_produced_width_8616(
     site: CarryBorrowDefinitionSite8616,
     read: IRValue,
     definitions: CarryBorrowDefinitions8616,
-    depth: int,
+    depth: cython.longlong,
 ) -> int | None:
     """Return the proven result width in bits of one captured site.
 
@@ -133,14 +145,17 @@ def _site_produced_width_8616(
     destination width (shift counts are exempt from operand-width matching).
     Anything else returns no proof rather than trusting declared metadata.
     """
+    dst: object
+    op: object
+    source_bits: object
     instruction = site.instruction
     dst = instruction.dst
     if (
         dst is None
-        or dst.source_tmp != read.source_tmp
-        or dst.size != read.size
+        or operator.ne(dst.source_tmp, read.source_tmp)
+        or operator.ne(dst.size, read.size)
         or dst.size <= 0
-        or instruction.size != dst.size
+        or operator.ne(instruction.size, dst.size)
     ):
         return None
     op = ir_op_8616(instruction)
@@ -148,7 +163,7 @@ def _site_produced_width_8616(
         return None
     if op is CarryBorrowIROp8616.MOV:
         args = site_value_args_8616(site)
-        if len(args) != 1 or args[0].size != dst.size:
+        if len(args) != 1 or operator.ne(args[0].size, dst.size):
             return None
         source_bits = _produced_width_bits_8616(args[0], definitions, depth + 1)
         if source_bits is None or source_bits > dst.size * 8:
@@ -156,7 +171,7 @@ def _site_produced_width_8616(
         return source_bits
     if op is CarryBorrowIROp8616.LOAD:
         arg = instruction.args[0] if len(instruction.args) == 1 else None
-        if not isinstance(arg, IRAddress) or arg.size != dst.size:
+        if not isinstance(arg, IRAddress) or operator.ne(arg.size, dst.size):
             return None
         return int(dst.size * 8)
     args = site_value_args_8616(site)
@@ -165,15 +180,16 @@ def _site_produced_width_8616(
         if op in (CarryBorrowIROp8616.SHL16, CarryBorrowIROp8616.SHR16)
         else args
     )
-    if len(args) != 2 or any(arg.size != dst.size for arg in width_checked):
+    if len(args) != 2 or any(operator.ne(arg.size, dst.size) for arg in iter(width_checked)):
         return None
     return int(dst.size * 8)
 
 
+@cython.ccall
 def _produced_width_bits_8616(
     value: IRValue,
     definitions: CarryBorrowDefinitions8616,
-    depth: int = 0,
+    depth: cython.longlong = 0,
 ) -> int | None:
     """Return the reaching producer's proven result width in bits.
 
@@ -184,6 +200,8 @@ def _produced_width_bits_8616(
     bound return no proof — a declared ``result_bits`` alone never proves a
     produced width.
     """
+    projection: object
+    site: object
     if depth > _PENDING_CONVERSION_DEPTH_8616:
         return None
     if value.active_unary is not None:
@@ -199,6 +217,7 @@ def _produced_width_bits_8616(
     return int(value.size * 8)
 
 
+@cython.ccall
 def conversion_source_8616(
     site: CarryBorrowDefinitionSite8616,
     conversion: CarryBorrowConversion8616,
@@ -214,27 +233,31 @@ def conversion_source_8616(
     keeps its own identity — the conversion is consumed here at the caller's
     explicit request, never erased into a fabricated temporary identity.
     """
+    dst: object
+    source: object
     source = single_source_8616(site)
     if (
         source is None
-        or source.expr != (conversion.value,)
+        or operator.ne(source.expr, (conversion.value,))
         or source.active_unary is None
-        or source.active_unary.op != conversion.value
+        or operator.ne(source.active_unary.op, conversion.value)
     ):
         return None
     dst = site.instruction.dst
-    if dst is None or site.instruction.size != dst.size or source.size != dst.size:
+    if dst is None or operator.ne(site.instruction.size, dst.size) or operator.ne(source.size, dst.size):
         return None
     if _conversion_projection_8616(source, definitions, 0) is None:
         return None
     return source.active_unary.operand
 
 
-def is_constant_8616(value: IRValue, expected: int) -> bool:
+@cython.ccall
+def is_constant_8616(value: IRValue, expected: cython.longlong) -> cython.bint:
     """Return whether a value is the expected exact IR constant."""
-    return value.space is MemSpace.CONST and value.const == expected
+    return value.space is MemSpace.CONST and operator.eq(value.const, expected)
 
 
+@cython.ccall
 def _value_identity_8616(value: IRValue) -> tuple[object, ...]:
     return (
         value.space,
@@ -248,19 +271,21 @@ def _value_identity_8616(value: IRValue) -> tuple[object, ...]:
     )
 
 
-def same_operands_8616(lhs: Iterable[IRValue], rhs: Iterable[IRValue]) -> bool:
+def same_operands_8616(lhs: Iterable[IRValue], rhs: Iterable[IRValue]) -> cython.bint:
     """Compare arithmetic operands including exact temporary provenance."""
-    return tuple(_value_identity_8616(value) for value in lhs) == tuple(
-        _value_identity_8616(value) for value in rhs
-    )
+    return operator.eq(tuple(_value_identity_8616(value) for value in iter(lhs)), tuple(
+        _value_identity_8616(value) for value in iter(rhs)
+    ))
 
 
+@cython.ccall
 def operand_use_8616(
     value: IRValue,
     definitions: CarryBorrowDefinitions8616,
     logical_memory: IRLogicalMemoryArtifact8616 | None = None,
 ) -> CarryBorrowOperandUse8616 | None:
     """Retain an operand together with its exact temporary definition."""
+    definition: object
     if value.space is MemSpace.CONST:
         return CarryBorrowOperandUse8616(value, None)
     definition = definition_for_8616(value, definitions)
@@ -273,10 +298,15 @@ def operand_use_8616(
     )
 
 
+@cython.ccall
 def _load_byte_8616(
     value: IRValue,
     definitions: CarryBorrowDefinitions8616,
-) -> tuple[CarryBorrowDefinitionSite8616, IRAddress] | None:
+) -> object:
+    address: object
+    conversion: object
+    load: object
+    source: object
     conversion = definition_for_8616(value, definitions)
     if conversion is None:
         return None
@@ -293,27 +323,31 @@ def _load_byte_8616(
     return load, address
 
 
+@cython.ccall
 def _sized_load_address_8616(
-    site: CarryBorrowDefinitionSite8616 | None,
-    width: int,
+    site: object,
+    width: cython.longlong,
 ) -> IRAddress | None:
     """Return the exact `width`-byte address of a proven LOAD site."""
+    dst: object
     if site is None or ir_op_8616(site.instruction) is not CarryBorrowIROp8616.LOAD:
         return None
     instruction = site.instruction
     dst = instruction.dst
-    if dst is None or dst.size != width or len(instruction.args) != 1:
+    if dst is None or operator.ne(dst.size, width) or len(instruction.args) != 1:
         return None
     arg = instruction.args[0]
-    if not isinstance(arg, IRAddress) or arg.size != width:
+    if not isinstance(arg, IRAddress) or operator.ne(arg.size, width):
         return None
     return arg
 
 
+@cython.ccall
 def _shifted_high_byte_8616(
     value: IRValue,
     definitions: CarryBorrowDefinitions8616,
-) -> tuple[CarryBorrowDefinitionSite8616, IRAddress] | None:
+) -> object:
+    shift: object
     shift = definition_for_8616(value, definitions)
     if shift is None or ir_op_8616(shift.instruction) is not CarryBorrowIROp8616.SHL16:
         return None
@@ -324,20 +358,20 @@ def _shifted_high_byte_8616(
 
 
 def _authoritative_word_access_8616(
-    execution_loads: tuple[CarryBorrowMemoryLoadUse8616, ...],
-    logical_memory: IRLogicalMemoryArtifact8616 | None,
+    execution_loads: object,
+    logical_memory: object,
 ) -> IRLogicalMemoryAccess8616 | None:
     """Return the unique complete logical word owning these exact load sites."""
     if logical_memory is None or not logical_memory.closed or len(execution_loads) != 2:
         return None
     matches = tuple(
         access
-        for access in logical_memory.accesses
+        for access in iter(logical_memory.accesses)
         if access.complete
         and access.kind is IRMemoryAccessKind8616.READ
-        and access.key.function_addr == logical_memory.function_addr
+        and operator.eq(access.key.function_addr, logical_memory.function_addr)
         and access.address.size == 2
-        and len(access.execution_slices) == len(execution_loads)
+        and operator.eq(len(access.execution_slices), len(execution_loads))
         and all(
             logical_memory_execution_address_matches_8616(
                 load.address,
@@ -346,20 +380,20 @@ def _authoritative_word_access_8616(
                 access.address_bits,
             )
             and load.address.size == 1
-            and execution.source_byte_offset == source_byte_offset
-            and execution.block_addr == load.site.block_addr
-            and execution.instr_index == load.site.instr_index
-            and execution.insn_addr == load.site.instruction.addr
-            and execution.address.size == load.address.size
+            and operator.eq(execution.source_byte_offset, source_byte_offset)
+            and operator.eq(execution.block_addr, load.site.block_addr)
+            and operator.eq(execution.instr_index, load.site.instr_index)
+            and operator.eq(execution.insn_addr, load.site.instruction.addr)
+            and operator.eq(execution.address.size, load.address.size)
             and logical_memory_execution_address_matches_8616(
                 load.address,
                 execution.address,
                 0,
                 access.address_bits,
             )
-            for source_byte_offset, (load, execution) in enumerate(
+            for source_byte_offset, (load, execution) in builtins.iter(enumerate(
                 zip(execution_loads, access.execution_slices, strict=True)
-            )
+            ))
         )
     )
     return matches[0] if len(matches) == 1 else None
@@ -371,6 +405,8 @@ def _memory_word_use_8616(
     logical_memory: IRLogicalMemoryArtifact8616 | None,
 ) -> CarryBorrowMemoryWordUse8616 | None:
     """Retain direct words or exact byte sites with optional logical ownership."""
+    logical_access: object
+    logical_address: object
     logical_address = _sized_load_address_8616(definition, 2)
     if logical_address is not None:
         execution_load = CarryBorrowMemoryLoadUse8616(definition, logical_address)
@@ -386,9 +422,9 @@ def _memory_word_use_8616(
         return None
     choices = tuple(
         (low, high)
-        for low_index, low_value in enumerate(args)
+        for low_index, low_value in builtins.iter(enumerate(args))
         if (low := _load_byte_8616(low_value, definitions)) is not None
-        for high_index, high_value in enumerate(args)
+        for high_index, high_value in builtins.iter(enumerate(args))
         if high_index != low_index
         and (high := _shifted_high_byte_8616(high_value, definitions)) is not None
     )
@@ -412,6 +448,7 @@ def _memory_word_use_8616(
     )
 
 
+@cython.ccall
 def dependency_arithmetic_sites_8616(
     value: IRValue,
     definitions: CarryBorrowDefinitions8616,
@@ -425,8 +462,10 @@ def dependency_arithmetic_sites_8616(
     authenticates the conversion. An active-plus-pinned wrapper is corrupt and
     is dropped before any capture lookup — missing proof is never identity.
     """
+    current: object
+    site: object
     pending = [value]
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     matches: list[CarryBorrowDefinitionSite8616] = []
     while pending:
         current = pending.pop()

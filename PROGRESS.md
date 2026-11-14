@@ -1,3 +1,111 @@
+## 2026-11-14 — tools: compiled inertia/ tree reaches baseline parity on SORTDEMO
+
+Compatibility pass over the compiled extension tree (1274 `.so` + 11
+designed interpreted modules: 8 PEP 695/810 fallbacks, 4 `python -m`
+entry points excluded from `MAIN_MODULES` in `build_perfile.sh` —
+compiled modules cannot serve as `__main__` for per-function workers;
+`call_stack_input_contracts.py` compiles via the `CYTHON-NOINFER` retry
+that strips `infer_types` to dodge a global-inference blowup).
+
+Runtime-coercion fixes landed in `transform.py`/`census.py` and proven
+against the compiled tree:
+
+- `infer_types` mistypes loop vars as the *container* type
+  (`Expected tuple, got str`): `for`/`CompFor` iterables over
+  call-expressions wrap in `builtins.iter(...)`, and every for-target
+  gets an `x: object` top-of-scope decl — no container inference, no
+  coercion. Plain `iter()`/`genexpr` wraps crash Cython's
+  `OptimizeBuiltinCalls` or emit broken `__pyx_opt_args` structs under
+  optional-arg `ccall` — `builtins.iter` dodges both.
+- `.get()`/`.pop()`/`next()`/`getattr()`/regex results and any
+  `None`-compared name: `x: object` decls injected at scope top
+  (`none_decl`), annotations stripped at later assign sites. Params
+  proven `None`-able demote to `object` (`arg_ann_none_demote`).
+- Exact-builtin annotations CheckExact-reject subclasses CPython
+  accepts (`defaultdict`, `StrEnum`): demoted to `object` on params,
+  returns, and locals — including inside unions (`str | None` →
+  `Optional[str]` still exact-checks) and `x: T = None` default slots
+  (`_ann_has_exact`, `ann/arg/ret_ann_exact_demote`).
+- `x = cython.declare(T, …)` names excluded from `none_decl`
+  (redeclaration); scalar declares demote to `object` when the value
+  may be `None` (`declare_scalar_demote`).
+- `v = d.get(); if v is not None:` — `infer_types` typed `v` native
+  and coerced at the *assign*, raising before the guard. Same for
+  `==`/`!=` against scalars: compares now route through
+  `operator.eq`/`operator.ne` to keep `PyObject_RichCompare` semantics.
+- `frozen=True` dataclasses can never be `cython.dataclasses.dataclass`:
+  readonly C fields break the pervasive `object.__setattr__` escape
+  hatch (`__post_init__` coercion, `T.__new__` deep-clone in
+  `ir/native_copy_memo.py` — `attribute 'addr' … is not writable`).
+  Census marks them ineligible; `_revert_class` handles methods and
+  decorators uniformly. 1911 frozen classes stay plain dataclasses.
+- cdataclass `__init__` never calls an *inherited* `__post_init__` —
+  `field(init=False)` slots stay `None`
+  (`NoneType is not a container`). Census propagates
+  `inherited_post_init` through the MRO and disqualifies; 1 site
+  (`_PushArgSourceScan8616`) reverted to plain dataclass.
+
+Verified: `decompile.py SORTDEMO.EXE --addr` on Sleep, InsertionSort,
+Beep, BubbleSort — compiled tree produces *byte-identical* verdicts to
+the pre-migration `git worktree` baseline (all remaining failures are
+designed honest refusals: `allocation convergence refused`,
+`terminal_jump_selector_window_unproved` — documented blockers, not
+migration defects). Import sweep: 1285/1285 modules clean.
+Transform fixpoint: second full pass writes 0 files.
+Note: `tools/dev/build_cython_vex.py` must be re-run whenever
+`lift_86_16.py` is re-transformed (source-sha256 bundle check).
+
+## 2026-11-13 — tools: inertia/ migrated to Cython pure-mode via cythonize_rewrite
+
+Automated whole-tree migration of `inertia/` (1285 modules) to Cython
+pure-mode Python syntax that remains CPython-compatible, driven by
+`tools/cythonize_rewrite/` (census.py scan -> LibCST transform.py ->
+run_transform.py parallel driver -> build_perfile.sh per-file
+cython+gcc pipeline).
+
+Native types everywhere legal (shim-compatible under CPython):
+`int`->`cython.longlong`, `float`->`cython.double`, `bool`->`cython.bint`,
+`complex`->`cython.doublecomplex` across args, returns, locals, class
+attrs, module annotations, `typing.cast`/`cython.cast`/`cython.declare`
+and `@cython.locals`. `|` unions and `Optional[...]` keep Python types
+(Cython hard-rejects scalars there); `typing.Union` accepts natives.
+
+PEP 695 `type X = ...` aliases become `typing.TypeAliasType(...)` when
+eager evaluation is safe; forward-ref and self-recursive aliases stay
+lazy `type` statements (interpreted fallback). PEP 695 generic classes
+get `typing.Generic[...]` injected before `[T]` is stripped, preserving
+`C[X]` subscription. PEP 810 `lazy import` files stay interpreted.
+PEP 758 bare `except A, B:` is parenthesized for Cython's parser.
+
+Census-driven `@cython.cclass`/`@cython.ccall` with reversion paths so
+re-runs are idempotent (decorator dedup, dynamic-class revert). Same-name
+overload implementations keep no `ccall`; overriding defs in cclass
+hierarchies are demoted to plain `def` (cpdef vtable mismatch). Classes
+used as two-or-more extension-type bases in cross-module mixins are
+demoted to plain Python classes (fix for `Processor(Eflags, CR)`
+instance-layout conflict — `mixin_demoted` lives on the module record,
+read via `self.rec`, not the per-class record).
+
+Final state: 1277 `.so` extensions built; import sweep = 1279 imported
+(1270 native + 9 interpreted fallback), 6 failures — all the
+pre-existing optional `Cython VEX build missing or stale` backend
+ImportErrors. `call_stack_input_contracts.py` is an intentional
+fallback (infer_types compile-time blowup, 900s timeout). Build script
+is race-safe: atomic `.c` via tmp+rename, stale `.so` removed on
+failure, per-file regeneration when `.py` is newer.
+
+Hardening fixes after a `--check`-mode incident: `run_transform.py`
+`--check` passed `rec={}` yet still wrote output, stripping decorators
+from 874 files — now a true dry run (`would_write` stat, real records,
+no writes). `visit_ClassDef` read `mixin_demoted` from the per-class
+record; it lives on the module record (`self.rec`) — fixed, so
+`Memory`/`IO`/`Eflags`/`CR` demote and `Processor(Eflags, CR)` imports.
+`sorted(<untyped>)` wrap was non-idempotent (re-wrapped its own
+`tuple()` arg every pass, stacking no-op layers); now skips
+already-materialized `tuple()` args and collapses stacked layers
+(`sorted_wrap_collapsed`). Post-fix dry run: `would_write=0` — the
+tree is a transform fixpoint.
+
 ## 2026-10-21 — cli: NB05/CV4 debug-info decode fix + gdb ELF symbol export
 
 `inertia/cli/codeview_nb02_nb04.py` now handles the LINK 5.x interim

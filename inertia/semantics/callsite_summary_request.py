@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Retain callsite semantic lookups for one immutable summary cohort.
 
 Layer: Semantics.
@@ -12,12 +13,16 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 
 from .terminal_stack_cleanup import TerminalStackCleanupEvidence8616
+import dataclasses
+import operator
 
 __all__ = [
     "CallsiteCleanupProjectRole8616",
@@ -33,17 +38,17 @@ class CallsiteCleanupProjectRole8616(StrEnum):
     ORIGINAL = "original"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallsiteSummaryRequestStats8616:
     """Closed accounting for request-local semantic lookup reuse."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    build_count: int
-    reuse_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    build_count: cython.longlong
+    reuse_count: cython.longlong
 
     def validate(self) -> None:
         """Reject negative or open request accounting."""
@@ -56,42 +61,37 @@ class CallsiteSummaryRequestStats8616:
             self.build_count,
             self.reuse_count,
         )
-        if any(count < 0 for count in counts):
+        if any(count < 0 for count in iter(counts)):
             raise ValueError("callsite summary request counters must be nonnegative")
         if not (
-            self.raw_fact_count == self.normalized_fact_count
-            and self.normalized_fact_count
-            == self.materialized_count + self.failure_count
-            and self.classified_fact_count == self.materialized_count
-            and self.materialized_count == self.build_count + self.reuse_count
+            operator.eq(self.raw_fact_count, self.normalized_fact_count)
+            and operator.eq(self.normalized_fact_count, self.materialized_count + self.failure_count)
+            and operator.eq(self.classified_fact_count, self.materialized_count)
+            and operator.eq(self.materialized_count, self.build_count + self.reuse_count)
         ):
             raise ValueError("callsite summary request accounting does not close")
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class CallsiteSummaryRequestCache8616:
     """Cache exact callsite semantics during one immutable summary request."""
 
-    _cleanup_by_key: dict[
-        tuple[CallsiteCleanupProjectRole8616, int],
-        TerminalStackCleanupEvidence8616,
-    ] = field(default_factory=dict)
-    _frame_pushes_by_function_identity: dict[
-        int,
-        tuple[object, frozenset[int]],
-    ] = field(default_factory=dict)
-    _raw_fact_count: int = 0
-    _build_count: int = 0
-    _reuse_count: int = 0
-    _failure_count: int = 0
+    _cleanup_by_key: object = field(default_factory=dict)
+    _frame_pushes_by_function_identity: object = field(default_factory=dict)
+    _raw_fact_count: cython.longlong = 0
+    _build_count: cython.longlong = 0
+    _reuse_count: cython.longlong = 0
+    _failure_count: cython.longlong = 0
 
+    @cython.ccall
     def terminal_cleanup(
         self,
         role: CallsiteCleanupProjectRole8616,
-        address: int,
+        address: cython.longlong,
         collector: Callable[[], TerminalStackCleanupEvidence8616],
     ) -> TerminalStackCleanupEvidence8616:
         """Return one exact proof or refusal, collecting it at most once."""
+        cached: object
         if not isinstance(address, int) or address < 0:
             raise ValueError("terminal cleanup request address must be nonnegative")
         self._raw_fact_count += 1
@@ -115,9 +115,10 @@ class CallsiteSummaryRequestCache8616:
     def callee_saved_frame_pushes(
         self,
         function: object,
-        collector: Callable[[], frozenset[int]],
-    ) -> frozenset[int]:
+        collector: Callable[[], frozenset[cython.longlong]],
+    ) -> object:
         """Return one function's proven frame pushes, collecting them once."""
+        cached: object
         self._raw_fact_count += 1
         key = id(function)
         cached = self._frame_pushes_by_function_identity.get(key)
@@ -130,7 +131,7 @@ class CallsiteSummaryRequestCache8616:
             self._failure_count += 1
             raise
         if not isinstance(addresses, frozenset) or any(
-            not isinstance(address, int) or address < 0 for address in addresses
+            not isinstance(address, int) or address < 0 for address in iter(addresses)
         ):
             self._failure_count += 1
             raise TypeError("callee-saved frame pushes must be nonnegative integers")
@@ -138,6 +139,7 @@ class CallsiteSummaryRequestCache8616:
         self._build_count += 1
         return addresses
 
+    @cython.ccall
     def stats(self) -> CallsiteSummaryRequestStats8616:
         """Return validated closed accounting for this request."""
         materialized = self._build_count + self._reuse_count

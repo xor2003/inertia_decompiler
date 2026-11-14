@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Adapt third-party structured-node tag containers.
 
 Layer: Helper boundary.
@@ -11,6 +12,7 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import cython
 
 from collections.abc import Iterable
 from typing import Protocol, cast
@@ -23,15 +25,15 @@ class _StructuredTagItems8616(Protocol):
         """Return tag key/value entries."""
 
 
-def copy_structured_tags_8616(tags: object) -> dict[str, object] | None:
+def copy_structured_tags_8616(tags: object) -> object:
     """Return a lossless owned copy of one supported third-party tag map."""
     try:
         items = tuple(cast(_StructuredTagItems8616, tags).items())
     except (AttributeError, TypeError, ValueError):
         return None
-    if not all(isinstance(key, str) for key, _value in items):
+    if not all(isinstance(key, str) for key, _value in iter(items)):
         return None
-    return {cast(str, key): value for key, value in items}
+    return {cast(str, key): value for key, value in iter(items)}
 
 
 __all__ = ["copy_structured_tags_8616"]

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Preserve execution order when placing proven pretest-loop initializers.
 
 Layer: Structuring.
@@ -8,10 +9,15 @@ Do not perform alias-state ownership, widening, type/materialization recovery, r
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import TYPE_CHECKING
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
+import builtins
+DirectStackMoveAssignmentLocation8616 = typing.TypeVar("DirectStackMoveAssignmentLocation8616")
+DirectStackMovePretestInitializerSite8616 = typing.TypeVar("DirectStackMovePretestInitializerSite8616")
 
 if TYPE_CHECKING:
     from .direct_stack_move_loop_sites import DirectStackMoveAssignmentLocation8616
@@ -19,10 +25,10 @@ if TYPE_CHECKING:
 
 
 def _contains_unconditional_location(
-    statements: list[object],
+    statements: object,
     location: DirectStackMoveAssignmentLocation8616,
-    seen: set[int],
-) -> bool:
+    seen: object,
+) -> cython.bint:
     """Follow only sequence containers, never conditional or repeated bodies."""
     if statements is location.statements:
         return True
@@ -32,18 +38,19 @@ def _contains_unconditional_location(
     return any(
         isinstance(statement, structured_c.CStatements)
         and _contains_unconditional_location(statement.statements, location, seen)
-        for statement in statements
+        for statement in iter(statements)
     )
 
 
 def place_pretest_initializer_8616(
     site: DirectStackMovePretestInitializerSite8616,
     assignment: structured_c.CAssignment,
-    location: DirectStackMoveAssignmentLocation8616 | None,
-) -> tuple[bool, bool]:
+    location: object,
+) -> tuple[cython.bint, cython.bint]:
     """Return (placed, already placed) without moving an initializer past reads."""
+    loop_index: object
     try:
-        loop_index = next(index for index, statement in enumerate(site.statements) if statement is site.loop)
+        loop_index = next(index for index, statement in builtins.iter(enumerate(site.statements)) if statement is site.loop)
     except StopIteration:
         return False, False
     if location is not None:

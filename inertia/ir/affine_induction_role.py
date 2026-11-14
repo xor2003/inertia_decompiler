@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Select an affine address term using exact loop guard and write evidence.
 
 Layer: IR.
@@ -13,6 +14,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -37,6 +40,9 @@ from .indexed_address_range_witnesses import (
 )
 from .logical_memory_write_value import LogicalWordWriteValueKind8616, trace_logical_word_write_values_8616
 from .scalar_affine_contracts import ScalarAffineTerm8616
+import dataclasses
+import operator
+import builtins
 
 
 class AffineInductionRoleFailure8616(StrEnum):
@@ -47,11 +53,11 @@ class AffineInductionRoleFailure8616(StrEnum):
     ROLE_CONFLICT = "role_conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class AffineInductionRoleWitness8616:
     """Exact selected term and the supplied CFG/guard/write proof sites."""
 
-    term_index: int
+    term_index: cython.longlong
     loop: IndexedNaturalLoopWitness8616
     initializer: IndexedLoopProofSite8616
     increment: IndexedLoopProofSite8616
@@ -63,16 +69,24 @@ def _role_candidates_8616(
     address: AffineIndexedAddressReceipt8616,
 ) -> tuple[AffineInductionRoleWitness8616, ...]:
     """Match all terms against current owned evidence without term-order heuristics."""
+    block: object
+    conditions: object
+    guard_site: object
+    identity: object
+    normalized: object
+    polarity: object
+    index: object
+    term: object
     artifact = address.artifact
     loops, dominators = collect_ssa_natural_loops_8616(artifact)
-    loops = tuple(loop for loop in loops if address.access.block_addr in loop.blocks)
+    loops = tuple(loop for loop in iter(loops) if address.access.block_addr in loop.blocks)
     writes = trace_logical_word_write_values_8616(artifact)
     conditions = artifact.condition_evidence
     if len(loops) != 1 or not writes.closed or conditions is None or not conditions.complete:
         return ()
     loop = loops[0]
     guards = conditions.conditions_for_block(loop.header)
-    block = next((item for item in artifact.blocks if item.addr == loop.header), None)
+    block = next((item for item in iter(artifact.blocks) if operator.eq(item.addr, loop.header)), None)
     if len(guards) != 1 or block is None:
         return ()
     condition = guards[0]
@@ -96,15 +110,15 @@ def _role_candidates_8616(
         if not ((guard.proves_strict_unsigned_continue or guard.proves_strict_signed_continue)
                 and guard.guard_dominates_access and guard.guard_dominates_latch):
             continue
-        matching = tuple(write for write in writes.facts
+        matching = tuple(write for write in iter(writes.facts)
                          if write.complete and logical_write_matches_induction_8616(write, identity))
-        entries = {source for source, _target in loop.entry_edges}
-        initializers = tuple(write for write in matching if write.proves_constant_zero
+        entries = {source for source, _target in iter(loop.entry_edges)}
+        initializers = tuple(write for write in iter(matching) if write.proves_constant_zero
                              and write.access.key.block_addr in entries
                              and dominators.dominates(write.access.key.block_addr, loop.header) is True)
-        increments = tuple(write for write in matching
+        increments = tuple(write for write in iter(matching)
                            if write.kind is LogicalWordWriteValueKind8616.OLD_LOGICAL_WORD_PLUS_ONE
-                           and write.access.key.block_addr == loop.latch)
+                           and operator.eq(write.access.key.block_addr, loop.latch))
         if len(initializers) == len(increments) == 1:
             candidates.append(AffineInductionRoleWitness8616(
                 index, project_ssa_loop_witness_8616(loop),
@@ -114,7 +128,7 @@ def _role_candidates_8616(
     return tuple(candidates)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class AffineInductionRoleReceipt8616:
     """Replayable role selection, deliberately not a materialized range."""
 
@@ -124,17 +138,19 @@ class AffineInductionRoleReceipt8616:
     stats: IndexedAddressStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Require exact current selection and closed one-role accounting."""
+        left: object
+        right: object
         expected = IndexedAddressStats8616(1, 1, 1, 1, 0)
-        if self.failure is not None or self.witness is None or self.stats != expected or not self.address.complete:
+        if self.failure is not None or self.witness is None or operator.ne(self.stats, expected) or not self.address.complete:
             return False
         if type(self.witness.term_index) is not int:
             return False
         counts = (self.stats.raw_fact_count, self.stats.normalized_fact_count,
                   self.stats.classified_fact_count, self.stats.materialized_count,
                   self.stats.failure_count, self.stats.coalesced_fact_count)
-        if not all(type(count) is int for count in counts):
+        if not all(type(count) is int for count in iter(counts)):
             return False
         current = _role_candidates_8616(self.address)
         if current != (self.witness,):
@@ -143,7 +159,7 @@ class AffineInductionRoleReceipt8616:
         original = current[0].guard.condition
         retained = self.witness.guard.condition
         for left, right in ((original.lhs, retained.lhs), (original.rhs, retained.rhs)):
-            if isinstance(left, IRValue) and isinstance(right, IRValue) and left.to_dict() != right.to_dict():
+            if isinstance(left, IRValue) and isinstance(right, IRValue) and operator.ne(left.to_dict(), right.to_dict()):
                 return False
         return True
 
@@ -159,14 +175,16 @@ class AffineInductionRoleReceipt8616:
         """Keep every remaining value without inferring pointer or stability roles."""
         if not self.complete or self.witness is None:
             return ()
-        return tuple(term for index, term in enumerate(self.address.terms) if index != self.witness.term_index)
+        return tuple(term for index, term in builtins.iter(enumerate(self.address.terms)) if operator.ne(index, self.witness.term_index))
 
 
+@cython.ccall
 def prove_affine_induction_role_8616(
     address: AffineIndexedAddressReceipt8616,
 ) -> AffineInductionRoleReceipt8616:
     """Publish one exact loop role or an atomic typed refusal."""
-    failure: AffineInductionRoleFailure8616 | None = None
+    failure: object
+    failure = None
     candidates: tuple[AffineInductionRoleWitness8616, ...] = ()
     if not address.complete:
         failure = AffineInductionRoleFailure8616.ADDRESS_UNPROVEN

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Canonicalize exact structured predicate identities for Validation.
 
 Layer: Validation.
@@ -12,6 +13,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import cast
 
@@ -19,11 +22,13 @@ from inertia.ir.condition_ir import inverted_comparison_op_8616
 
 __all__ = ["PredicateToken8616", "invert_predicate_token_8616"]
 
-type PredicateToken8616 = tuple[object, ...]
+PredicateToken8616 = typing.TypeAliasType("PredicateToken8616", tuple[object, ...])
 
 
+@cython.ccall
 def invert_predicate_token_8616(token: PredicateToken8616) -> PredicateToken8616:
     """Return the canonical logical complement of one exact predicate token."""
+    inverted_op: object
     if len(token) == 4 and token[0] == "binary" and isinstance(token[1], str):
         inverted_op = inverted_comparison_op_8616(token[1])
         if inverted_op is not None:

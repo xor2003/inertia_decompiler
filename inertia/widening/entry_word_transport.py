@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Transport one proven entry-stack word to a later 16-bit MOV definition.
 
 Layer: Widening.
@@ -15,6 +16,8 @@ Do not join values from rendered text, cosmetic shape, postprocess, or CLI/repor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -49,15 +52,18 @@ from .entry_word_transport_state import (
     plain_destination_8616,
     transfer_block_8616,
 )
+import dataclasses
+import operator
 
 
+@cython.ccall
 def _refused_8616(
     artifact: IRFunctionArtifact,
     word_proof: EntryStackWordProof8616,
-    reasons: list[EntryWordTransportRefusal8616],
+    reasons: object,
     *,
-    raw: int = 0,
-    normalized: int = 0,
+    raw: cython.longlong = 0,
+    normalized: cython.longlong = 0,
 ) -> EntryWordTransportProof8616:
     """Retain a closed typed non-result rather than inventing a transport."""
     return EntryWordTransportProof8616(
@@ -69,12 +75,13 @@ def _refused_8616(
     )
 
 
+@cython.ccall
 def _refusal_proof_8616(
     artifact: IRFunctionArtifact,
     word_proof: EntryStackWordProof8616,
     kind: Refusal,
     *,
-    block_addr: int,
+    block_addr: cython.longlong,
     index: int | None = None,
 ) -> EntryWordTransportProof8616:
     """Wrap one typed refusal reason as the whole proof non-result."""
@@ -83,20 +90,21 @@ def _refusal_proof_8616(
     ])
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _Seed8616:
     """The replayed canonical seed fact plus its lowercase register name."""
 
     fact: EntryStackWord8616
-    name: str
+    name: object
 
 
 def _seed_obligation_8616(
     artifact: IRFunctionArtifact,
     word_proof: EntryStackWordProof8616,
-    target_block_addr: int,
+    target_block_addr: cython.longlong,
 ) -> _Seed8616 | EntryWordTransportProof8616:
     """Bind the seed to a replayed canonical full-word REG entry definition."""
+    fact: object
     def refuse(kind: Refusal) -> EntryWordTransportProof8616:
         return _refusal_proof_8616(
             artifact, word_proof, kind, block_addr=target_block_addr,
@@ -115,7 +123,7 @@ def _seed_obligation_8616(
     )
     if replayed != word_proof:
         return refuse(Refusal.STALE_WORD_PROOF)
-    if fact.block_addr != artifact.function_addr:
+    if operator.ne(fact.block_addr, artifact.function_addr):
         return refuse(Refusal.SEED_OUTSIDE_ENTRY)
     if fact.target_space is not MemSpace.REG or not full_word_register_8616(
         fact.target_name
@@ -126,28 +134,32 @@ def _seed_obligation_8616(
     return _Seed8616(fact=fact, name=fact.target_name.lower())
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _Cone8616:
     """The proven acyclic target cone plus its block index and predecessors."""
 
-    by_addr: dict[int, int]
-    pred_map: dict[int, tuple[int, ...]]
-    order: list[int]
-    exits: tuple[int, ...]
+    by_addr: object
+    pred_map: object
+    order: object
+    exits: object
 
 
 def _cone_obligation_8616(
     artifact: IRFunctionArtifact,
     word_proof: EntryStackWordProof8616,
-    target_block_addr: int,
+    target_block_addr: cython.longlong,
 ) -> _Cone8616 | EntryWordTransportProof8616:
     """Index the artifact blocks and prove an acyclic entry-to-target cone."""
+    failure: object
+    order: object
+    block: object
+    position: object
     def refuse(kind: Refusal) -> EntryWordTransportProof8616:
         return _refusal_proof_8616(
             artifact, word_proof, kind, block_addr=target_block_addr,
         )
 
-    by_addr: dict[int, int] = {}
+    by_addr: dict[cython.longlong, cython.longlong] = {}
     for position, block in enumerate(artifact.blocks):
         if block.addr in by_addr:
             return refuse(Refusal.AMBIGUOUS_BLOCK_ADDR)
@@ -165,35 +177,39 @@ def _cone_obligation_8616(
     return _Cone8616(by_addr, pred_map, order, exits)
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _Traversal8616:
     """Accumulated cone traversal: target run, diagnostics, and census."""
 
     run: TransportRun8616
-    refusals: list[EntryWordTransportRefusal8616]
-    raw: int
-    normalized: int
-    poisoned: bool
+    refusals: object
+    raw: cython.longlong
+    normalized: cython.longlong
+    poisoned: cython.bint
 
 
+@cython.ccall
 def _traverse_cone_8616(
     *,
     artifact: IRFunctionArtifact,
     cone: _Cone8616,
-    ssa: dict[int, SSABlock],
+    ssa: object,
     seed: _Seed8616,
-    target_block_addr: int,
-    target_instr_index: int,
+    target_block_addr: cython.longlong,
+    target_instr_index: cython.longlong,
 ) -> _Traversal8616:
     """Drive the per-block transfer over the cone in topological order."""
-    exits_state: dict[int, dict[str, bool] | None] = {}
+    entry_regs: object
+    final_run: object
+    addr: object
+    exits_state: dict[cython.longlong, dict[str, bool] | None] = {}
     refusals: list[EntryWordTransportRefusal8616] = []
     raw = normalized = 0
-    final_run: TransportRun8616 | None = None
+    final_run = None
     poisoned = False
     for addr in cone.order:
-        if addr == artifact.function_addr:
-            entry_regs: dict[str, bool] | None = {}
+        if operator.eq(addr, artifact.function_addr):
+            entry_regs = {}
         else:
             entry_regs = meet_incoming_words_8616(
                 cone.pred_map, exits_state, addr,
@@ -207,7 +223,7 @@ def _traverse_cone_8616(
                 target_instr_index if is_target else len(ssa[addr].instrs)
             ),
             seed_index=(
-                seed.fact.instr_index if addr == seed.fact.block_addr else None
+                seed.fact.instr_index if operator.eq(addr, seed.fact.block_addr) else None
             ),
             seed_name=seed.name,
             seed_version=seed.fact.target_version,
@@ -225,28 +241,32 @@ def _traverse_cone_8616(
     return _Traversal8616(final_run, refusals, raw, normalized, poisoned)
 
 
+@cython.ccall
 def _site_refusal_8616(
     kind: Refusal,
-    detail: str,
-    block_addr: int,
-    index: int,
+    detail: object,
+    block_addr: cython.longlong,
+    index: cython.longlong,
 ) -> list[EntryWordTransportRefusal8616]:
     """One refusal diagnostic bound to the selected target site."""
     return [EntryWordTransportRefusal8616(kind, detail, block_addr, index)]
 
 
+@cython.ccall
 def _selected_site_refusals_8616(
     *,
     target: IRInstr,
     run: TransportRun8616,
-    block_addr: int,
-    index: int,
-) -> list[EntryWordTransportRefusal8616]:
+    block_addr: cython.longlong,
+    index: cython.longlong,
+) -> object:
     """Refuse the selected site unless it reads the proven word into a reg.
 
     Check order is contractual: scalar MOV shape, full-word width, scalar
     operand, then the tracked word resolution against the transfer state.
     """
+    destination: object
+    resolved: object
     destination = target.dst
     if (
         target.op != "MOV" or destination is None
@@ -258,7 +278,7 @@ def _selected_site_refusals_8616(
             "selected site is not a scalar MOV reg def", block_addr, index,
         )
     if (
-        destination.size != 2 or target.size != destination.size
+        destination.size != 2 or operator.ne(target.size, destination.size)
         or not full_word_register_8616(destination.name)
     ):
         return _site_refusal_8616(
@@ -293,15 +313,17 @@ def _selected_site_refusals_8616(
     )]
 
 
+@cython.ccall
 def _proven_fact_8616(
     *,
     seed: _Seed8616,
     cone: _Cone8616,
     target: IRInstr,
-    target_block_addr: int,
-    target_instr_index: int,
+    target_block_addr: cython.longlong,
+    target_instr_index: cython.longlong,
 ) -> EntryWordTransport8616:
     """Assemble the conditional cone-scoped transport fact, never closure."""
+    destination: object
     destination = target.dst
     assert destination is not None
     return EntryWordTransport8616(
@@ -322,11 +344,12 @@ def _proven_fact_8616(
     )
 
 
+@cython.ccall
 def prove_entry_word_transport_8616(
     artifact: IRFunctionArtifact,
     word_proof: EntryStackWordProof8616,
-    target_block_addr: int,
-    target_instr_index: int,
+    target_block_addr: cython.longlong,
+    target_instr_index: cython.longlong,
 ) -> EntryWordTransportProof8616:
     """Prove the selected MOV destination carries the canonical entry word.
 
@@ -343,7 +366,7 @@ def prove_entry_word_transport_8616(
         return cone
     ssa = {
         addr: build_x86_16_block_local_ssa(artifact.blocks[cone.by_addr[addr]])
-        for addr in cone.order
+        for addr in iter(cone.order)
     }
     if not 0 <= target_instr_index < len(ssa[target_block_addr].instrs):
         return _refusal_proof_8616(
@@ -355,7 +378,7 @@ def prove_entry_word_transport_8616(
         target_block_addr=target_block_addr,
         target_instr_index=target_instr_index,
     )
-    if traversal.poisoned and target_block_addr != artifact.function_addr:
+    if traversal.poisoned and operator.ne(target_block_addr, artifact.function_addr):
         refusals = [*traversal.refusals, EntryWordTransportRefusal8616(
             Refusal.UNSEEDED_PREDECESSOR,
             "a target predecessor bypasses the seed", target_block_addr,

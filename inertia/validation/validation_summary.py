@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Validation (cross-cutting governance).
 
 Responsibility: ensure validation attribution remains honest — uncollected,
@@ -10,9 +11,13 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from enum import Enum
+import dataclasses
+import operator
 
 __all__ = [
     "ValidationAggregate",
@@ -36,18 +41,19 @@ class ValidationState(Enum):
     CRASH = "crash"
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class ValidationRecord:
     """A single-function validation attribution record."""
 
-    function_name: str
-    function_addr: int = 0
+    function_name: object
+    function_addr: cython.longlong = 0
     structuring_state: ValidationState = ValidationState.UNCOLLECTED
     postprocess_state: ValidationState = ValidationState.UNCOLLECTED
-    fallback_mode: str | None = None
-    proc_identity: str | None = None
+    fallback_mode: object = None
+    proc_identity: object = None
     note: str = ""
 
+    @cython.ccall
     def to_dict(self) -> dict[str, object]:
         """Serialize this record for reports and JSON snapshots."""
         return {
@@ -61,33 +67,34 @@ class ValidationRecord:
         }
 
     @property
-    def is_clean(self) -> bool:
+    def is_clean(self) -> cython.bint:
         """Return true when every tracked validation layer passed."""
-        return self.structuring_state == ValidationState.PASSED and self.postprocess_state == ValidationState.PASSED
+        return operator.eq(self.structuring_state, ValidationState.PASSED) and operator.eq(self.postprocess_state, ValidationState.PASSED)
 
     @property
-    def has_uncollected(self) -> bool:
+    def has_uncollected(self) -> cython.bint:
         """Return true when any validation layer lacks collected evidence."""
         return (
-            self.structuring_state == ValidationState.UNCOLLECTED
-            or self.postprocess_state == ValidationState.UNCOLLECTED
+            operator.eq(self.structuring_state, ValidationState.UNCOLLECTED)
+            or operator.eq(self.postprocess_state, ValidationState.UNCOLLECTED)
         )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class ValidationAggregate:
     """Aggregated validation stats across a corpus."""
 
-    records: list[ValidationRecord] = field(default_factory=list)
-    total_functions: int = 0
-    passed: int = 0
-    changed: int = 0
-    uncollected: int = 0
-    unknown: int = 0
-    timeout: int = 0
-    fallback: int = 0
-    crash: int = 0
+    records: object = field(default_factory=list)
+    total_functions: cython.longlong = 0
+    passed: cython.longlong = 0
+    changed: cython.longlong = 0
+    uncollected: cython.longlong = 0
+    unknown: cython.longlong = 0
+    timeout: cython.longlong = 0
+    fallback: cython.longlong = 0
+    crash: cython.longlong = 0
 
+    @cython.ccall
     def to_dict(self) -> dict[str, object]:
         """Serialize aggregate counts and records for artifact reports."""
         return {
@@ -99,19 +106,20 @@ class ValidationAggregate:
             "timeout": self.timeout,
             "fallback": self.fallback,
             "crash": self.crash,
-            "records": [r.to_dict() for r in self.records],
+            "records": [r.to_dict() for r in iter(self.records)],
         }
 
 
+@cython.ccall
 def build_validation_record_8616(
-    function_name: str,
+    function_name: object,
     *,
-    function_addr: int = 0,
-    structuring_state: str | None = None,
-    postprocess_state: str | None = None,
-    fallback_mode: str | None = None,
-    proc_identity: str | None = None,
-    note: str = "",
+    function_addr: cython.longlong = 0,
+    structuring_state: object = None,
+    postprocess_state: object = None,
+    fallback_mode: object = None,
+    proc_identity: object = None,
+    note: object = "",
 ) -> ValidationRecord:
     """Build a single validation record from tail_validation state strings."""
     _struct = _parse_validation_state_8616(structuring_state)
@@ -127,10 +135,12 @@ def build_validation_record_8616(
     )
 
 
+@cython.ccall
 def aggregate_validation_records_8616(
-    records: list[ValidationRecord],
+    records: object,
 ) -> ValidationAggregate:
     """Build an aggregate summary from individual validation records."""
+    r: object
     agg = ValidationAggregate()
     agg.records = records
     agg.total_functions = len(records)
@@ -140,8 +150,10 @@ def aggregate_validation_records_8616(
     return agg
 
 
+@cython.ccall
 def format_validation_aggregate_report_8616(agg: ValidationAggregate) -> str:
     """Format an honest aggregate report — uncollected stays visible."""
+    name: object
     lines: list[str] = [
         f"Validation Aggregate ({agg.total_functions} functions)",
         "=" * 50,
@@ -154,7 +166,7 @@ def format_validation_aggregate_report_8616(agg: ValidationAggregate) -> str:
         f"  crash:        {agg.crash}",
     ]
     if agg.uncollected > 0:
-        uncollected_names = [r.function_name for r in agg.records if r.has_uncollected]
+        uncollected_names = [r.function_name for r in iter(agg.records) if r.has_uncollected]
         if uncollected_names:
             lines.append("")
             lines.append("  Uncollected functions:")
@@ -163,12 +175,14 @@ def format_validation_aggregate_report_8616(agg: ValidationAggregate) -> str:
     return "\n".join(lines)
 
 
-def _parse_validation_state_8616(v: str | None) -> ValidationState:
+@cython.ccall
+def _parse_validation_state_8616(v: object) -> ValidationState:
+    s: object
     if not isinstance(v, str) or not v:
         return ValidationState.UNCOLLECTED
     v_lower = v.strip().lower()
     for s in ValidationState:
-        if s.value == v_lower:
+        if operator.eq(s.value, v_lower):
             return s
     if v_lower in ("stable",):
         return ValidationState.PASSED
@@ -177,7 +191,7 @@ def _parse_validation_state_8616(v: str | None) -> ValidationState:
     return ValidationState.UNKNOWN
 
 
-_STATE_RANK_8616: dict[ValidationState, int] = {
+_STATE_RANK_8616: dict[ValidationState, cython.longlong] = {
     ValidationState.CRASH: 0,
     ValidationState.TIMEOUT: 1,
     ValidationState.FALLBACK: 2,
@@ -187,9 +201,13 @@ _STATE_RANK_8616: dict[ValidationState, int] = {
 }
 
 
+@cython.ccall
 def _worst_record_state_8616(record: ValidationRecord) -> ValidationState:
     """Pick the worst state across the record's structuring/postprocess verdicts."""
-    worst: ValidationState | None = None
+    rank: object
+    worst: object
+    state: object
+    worst = None
     for state in (record.structuring_state, record.postprocess_state):
         rank = _STATE_RANK_8616.get(state)
         if rank is None:
@@ -201,6 +219,7 @@ def _worst_record_state_8616(record: ValidationRecord) -> ValidationState:
     return worst if worst is not None else ValidationState.UNCOLLECTED
 
 
+@cython.ccall
 def _count_record_into_aggregate_8616(agg: ValidationAggregate, r: ValidationRecord) -> None:
     """Count the worst state for a record into the aggregate.
 
@@ -211,17 +230,17 @@ def _count_record_into_aggregate_8616(agg: ValidationAggregate, r: ValidationRec
     """
     worst = _worst_record_state_8616(r)
 
-    if worst == ValidationState.PASSED:
+    if operator.eq(worst, ValidationState.PASSED):
         agg.passed += 1
-    elif worst == ValidationState.CHANGED:
+    elif operator.eq(worst, ValidationState.CHANGED):
         agg.changed += 1
-    elif worst == ValidationState.UNCOLLECTED:
+    elif operator.eq(worst, ValidationState.UNCOLLECTED):
         agg.uncollected += 1
-    elif worst == ValidationState.UNKNOWN:
+    elif operator.eq(worst, ValidationState.UNKNOWN):
         agg.unknown += 1
-    elif worst == ValidationState.TIMEOUT:
+    elif operator.eq(worst, ValidationState.TIMEOUT):
         agg.timeout += 1
-    elif worst == ValidationState.FALLBACK:
+    elif operator.eq(worst, ValidationState.FALLBACK):
         agg.fallback += 1
-    elif worst == ValidationState.CRASH:
+    elif operator.eq(worst, ValidationState.CRASH):
         agg.crash += 1

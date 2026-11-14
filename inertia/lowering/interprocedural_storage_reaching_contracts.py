@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed outcomes for call-argument SSA reaching-definition lookup.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -24,6 +27,7 @@ from .interprocedural_storage_logical_input_contracts import (
     PhysicalPushStoreSlice8616,
     SSAInstructionSite8616,
 )
+import dataclasses
 
 __all__ = [
     "CallArgumentDefinitionFailure8616",
@@ -70,18 +74,18 @@ class CallArgumentDefinitionFailure8616(StrEnum):
     UNSUPPORTED_SOURCE_KIND = "unsupported_source_kind"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallArgumentDefinitionStats8616:
     """Closed evidence accounting for one logical argument lookup."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether the argument became one proof-bearing binding."""
         return (
             self.raw_fact_count == 1
@@ -92,30 +96,30 @@ class CallArgumentDefinitionStats8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallArgumentDefinitionResolution8616:
     """Exact source pieces and call use, or one typed refusal."""
 
     verdict: CallArgumentDefinitionVerdict8616
-    definitions: tuple[StorageReachingDefinition8616, ...]
+    definitions: object
     use: StorageUseEvidence8616 | None
     failure: CallArgumentDefinitionFailure8616 | None
     stats: CallArgumentDefinitionStats8616
     affine_expression: ScalarAffineExpression8616 | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PhysicalCallArgumentPiece8616:
     """One exact physical push contributing bytes to a logical argument."""
 
-    width: int
-    source: tuple[object, ...]
-    push_addr: int
+    width: cython.longlong
+    source: object
+    push_addr: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PhysicalCallArgument8616:
     """One source-order logical argument and its ordered physical pieces."""
 
-    width: int
-    pieces: tuple[PhysicalCallArgumentPiece8616, ...]
+    width: cython.longlong
+    pieces: object

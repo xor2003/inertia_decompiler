@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Guard that blocks linearized segment expressions from leaking into semantic layers.
 
 Layer: Pipeline governance.
@@ -15,6 +16,7 @@ silent fallback.
 """
 
 from __future__ import annotations
+import cython
 
 from .errors import PipelineHardError
 
@@ -30,15 +32,18 @@ _FORBIDDEN_LINEAR_PATTERNS: tuple[str, ...] = (
 )
 
 
-def _text_contains_forbidden_linear_pattern(text: str) -> str | None:
+@cython.ccall
+def _text_contains_forbidden_linear_pattern(text: object) -> object:
     """Return the first matching forbidden pattern, or None."""
+    pattern: object
     for pattern in _FORBIDDEN_LINEAR_PATTERNS:
         if pattern in text:
             return pattern
     return None
 
 
-def assert_no_linearized_segment_expr_8616(expr: object, *, layer: str, function_addr: int | None = None) -> None:
+@cython.ccall
+def assert_no_linearized_segment_expr_8616(expr: object, *, layer: object, function_addr: int | None = None) -> None:
     """Raise PipelineHardError if *expr* contains a linearized segment term.
 
     Call this before any semantic log, artifact emission, or postprocess
@@ -50,6 +55,7 @@ def assert_no_linearized_segment_expr_8616(expr: object, *, layer: str, function
         layer: Semantic layer name for the error message.
         function_addr: Optional address for diagnostics.
     """
+    pattern: object
     text = repr(expr)
     pattern = _text_contains_forbidden_linear_pattern(text)
     if pattern is None:

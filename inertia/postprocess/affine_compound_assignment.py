@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Restore rendering identity for proven affine ``for`` iterators.
 
 Layer: Rewrite/Postprocess cleanup
@@ -9,6 +10,8 @@ flow, or facts from rendered text, COD, source, or CLI/reporting evidence here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Protocol
@@ -22,6 +25,8 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616, _same_c_expression_8616
+import dataclasses
+import operator
 
 __all__ = [
     "AffineCompoundAssignmentStats8616",
@@ -50,23 +55,24 @@ class _CodegenBoundary8616(Protocol):
     _inertia_affine_compound_assignment_stats_8616: AffineCompoundAssignmentStats8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class AffineCompoundAssignmentStats8616:
     """Closed accounting for affine iterator rendering identities."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    changed_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    changed_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether at least one iterator identity was restored."""
         return self.changed_count > 0
 
 
+@cython.ccall
 def _self_update_operand_8616(
     lhs: CVariable,
     rhs: CBinaryOp,
@@ -89,6 +95,9 @@ def restore_affine_compound_assignment_identity_8616(
     codegen: _CodegenBoundary8616,
 ) -> AffineCompoundAssignmentStats8616:
     """Restore shared render identity on exact affine ``CForLoop`` iterators."""
+    owner: object
+    self_operand: object
+    node: object
     root = codegen.cfunc.statements
     raw_count = 0
     normalized_count = 0
@@ -109,13 +118,13 @@ def restore_affine_compound_assignment_identity_8616(
         normalized_count += 1
         owners = tuple(
             owner
-            for owner in (
+            for owner in iter((
                 assignment.lhs.unified_variable,
                 self_operand.unified_variable,
-            )
+            ))
             if owner is not None
         )
-        if owners and any(owner != owners[0] for owner in owners[1:]):
+        if owners and any(operator.ne(owner, owners[0]) for owner in iter(owners[1:])):
             failure_count += 1
             continue
         classified_count += 1
@@ -127,8 +136,8 @@ def restore_affine_compound_assignment_identity_8616(
             self_operand.unified_variable = owner
             changed_count += 1
         if (
-            assignment.lhs.unified_variable == owner
-            and self_operand.unified_variable == owner
+            operator.eq(assignment.lhs.unified_variable, owner)
+            and operator.eq(self_operand.unified_variable, owner)
         ):
             materialized_count += 1
         else:
@@ -147,8 +156,9 @@ def restore_affine_compound_assignment_identity_8616(
     return stats
 
 
+@cython.ccall
 def apply_affine_compound_assignment_identity_8616(
     codegen: _CodegenBoundary8616,
-) -> bool:
+) -> cython.bint:
     """Apply the render-identity pass through the postprocess driver."""
     return restore_affine_compound_assignment_identity_8616(codegen).changed

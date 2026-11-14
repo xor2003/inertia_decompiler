@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bridge typed status-flag lift evidence into def-use validation.
 
 Layer: Validation.
@@ -9,6 +10,8 @@ evidence only and does not infer behavior from rendered C or assembly text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -17,12 +20,13 @@ from dataclasses import dataclass
 from typing import Protocol, cast
 
 from inertia.ir.status_flag_lift_context import resolve_status_flag_lift_artifact_8616
+import dataclasses
 
 
 class _ArchBoundary8616(Protocol):
     """Third-party architecture register map used at the validation boundary."""
 
-    registers: Mapping[str, tuple[int, int]]
+    registers: Mapping[str, tuple[cython.longlong, cython.longlong]]
 
 
 class _ProjectBoundary8616(Protocol):
@@ -34,7 +38,7 @@ class _ProjectBoundary8616(Protocol):
 class _CFunctionBoundary8616(Protocol):
     """Third-party structured function identity."""
 
-    addr: int
+    addr: cython.longlong
 
 
 class _CodegenBoundary8616(Protocol):
@@ -43,14 +47,14 @@ class _CodegenBoundary8616(Protocol):
     cfunc: _CFunctionBoundary8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PackedStatusFlagPreservationEvidence8616:
     """Exact packed-FLAGS offset and instruction sites proven by the frontend."""
 
-    register_offset: int
-    instruction_addresses: frozenset[int]
+    register_offset: cython.longlong
+    instruction_addresses: object
 
-    def covers_instruction(self, instruction_address: object) -> bool:
+    def covers_instruction(self, instruction_address: object) -> cython.bint:
         """Return whether one structured node belongs to a proven partial write."""
         return isinstance(instruction_address, int) and instruction_address in self.instruction_addresses
 
@@ -60,6 +64,9 @@ def packed_status_flag_preservation_evidence_8616(
     codegen: object,
 ) -> PackedStatusFlagPreservationEvidence8616 | None:
     """Resolve immutable lift evidence for the current structured function."""
+    artifact: object
+    flags_register: object
+    resolution: object
     try:
         project_boundary = cast(_ProjectBoundary8616, project)
         function_address = int(cast(_CodegenBoundary8616, codegen).cfunc.addr)
@@ -88,7 +95,7 @@ def packed_status_flag_preservation_evidence_8616(
     if artifact.original_linear_delta:
         instruction_addresses = instruction_addresses | frozenset(
             address - artifact.original_linear_delta
-            for address in instruction_addresses
+            for address in iter(instruction_addresses)
         )
     return PackedStatusFlagPreservationEvidence8616(register_offset, instruction_addresses)
 

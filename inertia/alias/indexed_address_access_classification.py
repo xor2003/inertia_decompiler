@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify Alias-proven indexed addresses by exact access role.
 
 Layer: Alias.
@@ -10,6 +11,7 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import cython
 
 from inertia.pipeline.errors import PipelineHardError
 
@@ -27,6 +29,7 @@ from .indexed_address_contracts import (
 )
 
 
+@cython.ccall
 def _classify_access_8616(
     source: IndexedAddressAliasFact8616,
 ) -> IndexedAliasAccessFact8616 | IndexedAliasAccessRefusal8616:
@@ -55,10 +58,12 @@ def _classify_access_8616(
     )
 
 
+@cython.ccall
 def classify_indexed_alias_accesses_8616(
     source: IndexedAddressAliasEvidence8616,
 ) -> IndexedAliasAccessEvidence8616:
     """Classify every closed Alias outcome into one exact role or refusal."""
+    source_fact: object
     if not source.closed:
         raise PipelineHardError(
             "indexed-address Alias evidence is incomplete before access classification",
@@ -71,7 +76,7 @@ def classify_indexed_alias_accesses_8616(
             f"Alias refused indexed address: {refusal.failure.value}",
             source_refusal=refusal,
         )
-        for refusal in source.refusals
+        for refusal in iter(source.refusals)
     ]
     for source_fact in source.facts:
         classified = _classify_access_8616(source_fact)

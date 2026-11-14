@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize proven segmented global loads and stores in generated C.
 
 Layer: Types/Lowering.
@@ -9,6 +10,7 @@ Postprocess and CLI may consume materialized loads, but proof belongs here.
 """
 
 from __future__ import annotations
+import cython
 
 import contextlib
 import itertools
@@ -200,23 +202,26 @@ from .wide_call_return_recombine import (
     DIRECT_CALL_RETURN_STORE_EVIDENCE_TAG_8616,
     fold_tagged_wide_call_return_stores_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 log: logging.Logger = logging.getLogger(__name__)
 
-type CopyKey8616 = str | tuple[str, int | str]
-type CodegenBoundary8616 = Any
-type ProjectBoundary8616 = Any
-type SyntheticGlobalsBoundary8616 = object
-type CodMetadataBoundary8616 = object | None
-type DwordUpdateMatch8616 = tuple[CAssignment, int] | None
-type DwordStorePairMatch8616 = tuple[CAssignment, bool] | None
+CopyKey8616 = typing.TypeAliasType("CopyKey8616", str | tuple[str, int | str])
+CodegenBoundary8616 = typing.TypeAliasType("CodegenBoundary8616", Any)
+ProjectBoundary8616 = typing.TypeAliasType("ProjectBoundary8616", Any)
+SyntheticGlobalsBoundary8616 = typing.TypeAliasType("SyntheticGlobalsBoundary8616", object)
+CodMetadataBoundary8616 = typing.TypeAliasType("CodMetadataBoundary8616", object | None)
+DwordUpdateMatch8616 = typing.TypeAliasType("DwordUpdateMatch8616", tuple[CAssignment, int] | None)
+DwordStorePairMatch8616 = typing.TypeAliasType("DwordStorePairMatch8616", tuple[CAssignment, bool] | None)
 _ANONYMOUS_DIRECT_SCALAR_CLASSIFIED_TAG_8616 = "inertia_x86_16_anonymous_direct_scalar_classified"
 _ANONYMOUS_DIRECT_SCALAR_MATERIALIZED_TAG_8616 = "inertia_x86_16_anonymous_direct_scalar_materialized"
 _NAMED_DIRECT_SCALAR_MATERIALIZED_TAG_8616 = "inertia_x86_16_named_direct_scalar_materialized"
 _DIRECT_CALL_RETURN_STORE_EVIDENCE_TAG_8616 = DIRECT_CALL_RETURN_STORE_EVIDENCE_TAG_8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CapstoneMemoryView8616:
     """Typed memory operand with its effective, rather than override-only, segment."""
 
@@ -226,7 +231,7 @@ class CapstoneMemoryView8616:
     displacement: int | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CapstoneOperandView8616:
     """Typed snapshot of one dynamic Capstone x86 operand."""
 
@@ -239,14 +244,14 @@ class CapstoneOperandView8616:
     memory: CapstoneMemoryView8616 | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CapstoneInstructionView8616:
     """Typed snapshot of one dynamic angr/Capstone instruction wrapper."""
 
     raw: object
     instruction_id: int | None
     address: int | None
-    operands: tuple[CapstoneOperandView8616, ...]
+    operands: object
 
 
 class _CapstoneMemoryBoundary8616(typing.Protocol):
@@ -300,11 +305,11 @@ class _CAssignmentBoundary8616(typing.Protocol):
 class _TypeStoreBoundary8616(typing.Protocol):
     """Type registration surface exposed by angr's per-function type store."""
 
-    def __getitem__(self, name: str) -> SimType:
+    def __getitem__(self, name: object) -> SimType:
         """Return one registered named type."""
         ...
 
-    def __setitem__(self, name: str, value: TypeRef) -> None:
+    def __setitem__(self, name: object, value: TypeRef) -> None:
         """Register one named type reference."""
 
     def iter_own(self) -> Iterable[SimType]:
@@ -322,9 +327,9 @@ class _VariableManagerTypeBoundary8616(typing.Protocol):
         variable: SimVariable,
         type_: SimType,
         *,
-        name: str | None = None,
-        override_bot: bool = True,
-        all_unified: bool = False,
+        name: object = None,
+        override_bot: cython.bint = True,
+        all_unified: cython.bint = False,
     ) -> None:
         """Assign one recovered type to a variable storage identity."""
         _ = variable, type_, name, override_bot, all_unified
@@ -333,7 +338,7 @@ class _VariableManagerTypeBoundary8616(typing.Protocol):
     def get_variable_type(self, variable: SimVariable) -> SimType | None:
         """Return the current type for one variable storage identity."""
 
-    def get_variables(self, sort: object = None, collapse_same_ident: bool = False) -> Iterable[SimVariable]:
+    def get_variables(self, sort: object = None, collapse_same_ident: cython.bint = False) -> Iterable[SimVariable]:
         """Return variables known to this function manager."""
         _ = sort, collapse_same_ident
         raise NotImplementedError
@@ -342,46 +347,43 @@ class _VariableManagerTypeBoundary8616(typing.Protocol):
 class _CFunctionTypeBoundary8616(typing.Protocol):
     """Variable-manager field exposed by an angr structured C function."""
 
-    addr: int
+    addr: cython.longlong
     variable_manager: _VariableManagerTypeBoundary8616
-    variables_in_use: dict[SimVariable, CVariable]
-    unified_local_vars: dict[SimVariable, set[tuple[CVariable, SimType]]]
+    variables_in_use: object
+    unified_local_vars: object
 
 
 class _CodegenTypeBoundary8616(typing.Protocol):
     """Fields needed to register and render a recovered local aggregate type."""
 
     cfunc: _CFunctionTypeBoundary8616 | None
-    show_local_types: bool
+    show_local_types: cython.bint
 
 
 class _CodegenStackAggregateFactBoundary8616(typing.Protocol):
     """Owned Lowering metadata used to survive later CFunction rebuilds."""
 
-    _inertia_consumed_direct_global_boolean_carrier_ins_addrs_8616: frozenset[int]
-    _inertia_global_declaration_specs_8616: tuple[
-        tuple[str, str, GlobalDeclarationArrayLength8616], ...
-    ]
+    _inertia_consumed_direct_global_boolean_carrier_ins_addrs_8616: object
+    _inertia_global_declaration_specs_8616: object
     _inertia_named_global_aggregate_declaration_reconcile_stats_8616: NamedGlobalAggregateTypeReplayStats8616
     _inertia_named_global_aggregate_expression_replay_stats_8616: NamedGlobalAggregateExpressionReplayStats8616
-    _inertia_named_global_aggregate_type_facts_8616: tuple[NamedGlobalAggregateTypeFact8616, ...]
+    _inertia_named_global_aggregate_type_facts_8616: object
     _inertia_named_global_aggregate_type_replay_stats_8616: NamedGlobalAggregateTypeReplayStats8616
-    _inertia_stack_aggregate_type_facts_8616: tuple[StackAggregateTypeFact8616, ...]
+    _inertia_stack_aggregate_type_facts_8616: object
     _inertia_stack_aggregate_type_replay_stats_8616: StackAggregateTypeReplayStats8616
-    _inertia_stack_aggregate_field_projection_facts_8616: tuple[StackAggregateFieldProjectionFact8616, ...]
+    _inertia_stack_aggregate_field_projection_facts_8616: object
     _inertia_stack_aggregate_field_projection_replay_stats_8616: StackAggregateFieldProjectionReplayStats8616
-    _inertia_indexed_global_stack_aggregate_copy_facts_8616: tuple[
-        IndexedGlobalStackAggregateCopyFact8616,
-        ...,
-    ]
+    _inertia_indexed_global_stack_aggregate_copy_facts_8616: object
 
 
+@cython.ccall
 def _optional_int_boundary_8616(value: object) -> int | None:
     """Narrow one dynamic third-party scalar to an integer."""
 
     return value if isinstance(value, int) else None
 
 
+@cython.ccall
 def _capstone_memory_view_8616(memory_raw: object) -> CapstoneMemoryView8616:
     """Snapshot one dynamic third-party Capstone memory operand."""
 
@@ -412,8 +414,10 @@ def _capstone_memory_view_8616(memory_raw: object) -> CapstoneMemoryView8616:
     )
 
 
+@cython.ccall
 def _capstone_operand_view_8616(operand: object) -> CapstoneOperandView8616:
     """Snapshot one dynamic Capstone operand into a typed local contract."""
+    memory_raw: object
     operand_boundary = typing.cast(_CapstoneOperandBoundary8616, operand)
     try:
         memory_raw = operand_boundary.mem
@@ -451,6 +455,7 @@ def _capstone_operand_view_8616(operand: object) -> CapstoneOperandView8616:
     )
 
 
+@cython.ccall
 def _capstone_instruction_view_8616(wrapper: object) -> CapstoneInstructionView8616:
     """Snapshot one dynamic angr/Capstone wrapper into a typed local contract."""
 
@@ -466,7 +471,7 @@ def _capstone_instruction_view_8616(wrapper: object) -> CapstoneInstructionView8
         raw_operands = ()
     operands: list[CapstoneOperandView8616] = [
         _capstone_operand_view_8616(operand)
-        for operand in (tuple(raw_operands) if isinstance(raw_operands, Iterable) else ())
+        for operand in iter((tuple(raw_operands) if isinstance(raw_operands, Iterable) else ()))
     ]
     try:
         instruction_id = instruction_boundary.id
@@ -484,12 +489,15 @@ def _capstone_instruction_view_8616(wrapper: object) -> CapstoneInstructionView8
     )
 
 
+@cython.ccall
 def _codegen_switch_case_bodies_8616(node: object) -> tuple[object, ...]:
     """Return child bodies from an angr codegen switch-case node.
 
     Dynamic boundary: angr codegen CSwitchCase nodes do not expose a stable typed
     public contract for their ``cases`` field.
     """
+    cases: object
+    item: object
 
     cases = getattr(node, "cases", ())
     if not isinstance(cases, Iterable):
@@ -503,12 +511,14 @@ def _codegen_switch_case_bodies_8616(node: object) -> tuple[object, ...]:
     return tuple(bodies)
 
 
+@cython.ccall
 def _capstone_operands_8616(insn: object) -> tuple[object, ...]:
     """Return operands from a capstone instruction object.
 
     Dynamic boundary: capstone instruction operands are third-party runtime
     attributes rather than owned Inertia contracts.
     """
+    operands: object
 
     operands = getattr(insn, "operands", ())
     if not isinstance(operands, Iterable):
@@ -516,31 +526,37 @@ def _capstone_operands_8616(insn: object) -> tuple[object, ...]:
     return tuple(operands)
 
 
-def _signed_remainder_register_aliases_8616(register_name: str) -> frozenset[str]:
+@cython.ccall
+def _signed_remainder_register_aliases_8616(register_name: object) -> frozenset[str]:
     """Return the DX-family names that can carry a signed remainder."""
     if register_name.lower() in {"dx", "dl", "dh"}:
         return frozenset({"dx", "dl", "dh"})
     return frozenset({register_name.lower()})
 
 
-def _invalidate_register_storage_carriers_8616(carriers: dict[str, int], register_name: str) -> None:
+@cython.ccall
+def _invalidate_register_storage_carriers_8616(carriers: object, register_name: object) -> None:
     """Drop all carrier views sharing the written register's storage identity."""
+    storage_domain: object
+    candidate_name: object
 
     storage_domain = register_domain_for_name(register_name)
     for candidate_name in tuple(carriers):
         if candidate_name == register_name or (
             storage_domain is not None
-            and register_domain_for_name(candidate_name) == storage_domain
+            and operator.eq(register_domain_for_name(candidate_name), storage_domain)
         ):
             carriers.pop(candidate_name, None)
 
 
+@cython.ccall
 def _unwrap_codegen_expr_8616(node: object) -> object:
     """Unwrap nested angr codegen expression wrappers.
 
     Dynamic boundary: angr codegen nodes may carry an ``expr`` wrapper field
     without a stable typed class shared by all wrapper variants.
     """
+    wrapped: object
 
     current = node
     while True:
@@ -550,6 +566,7 @@ def _unwrap_codegen_expr_8616(node: object) -> object:
         current = wrapped
 
 
+@cython.ccall
 def _codegen_project_optional_8616(codegen: CodegenBoundary8616) -> object | None:
     """Return optional project context from dynamic angr codegen metadata."""
 
@@ -557,6 +574,7 @@ def _codegen_project_optional_8616(codegen: CodegenBoundary8616) -> object | Non
     return getattr(codegen, "project", None)
 
 
+@cython.ccall
 def _codegen_cfunc_optional_8616(codegen: CodegenBoundary8616) -> object | None:
     """Return optional CFunction context from dynamic angr codegen metadata."""
 
@@ -564,7 +582,8 @@ def _codegen_cfunc_optional_8616(codegen: CodegenBoundary8616) -> object | None:
     return getattr(codegen, "cfunc", None)
 
 
-def _debug_segmented_global_materialized_8616(kind: str, original: object, replacement: object) -> None:
+@cython.ccall
+def _debug_segmented_global_materialized_8616(kind: object, original: object, replacement: object) -> None:
     if not os.environ.get("INERTIA_DEBUG_SEGMENTED_GLOBAL_LOADS"):
         return
     log.warning(
@@ -612,13 +631,13 @@ class SegmentLoadHelper8616(Enum):
     SEG_U32 = "SEG_U32"
 
     @property
-    def helper_name(self) -> str:
+    def helper_name(self) -> object:
         """Return the generated helper function name."""
 
         return self.value
 
     @property
-    def width(self) -> int:
+    def width(self) -> cython.longlong:
         """Return the byte width loaded by the helper."""
 
         if self is SegmentLoadHelper8616.SEG_U8:
@@ -635,72 +654,72 @@ class SegmentPointerHelper8616(Enum):
     MK_FP = "MK_FP"
 
     @property
-    def helper_name(self) -> str:
+    def helper_name(self) -> object:
         """Return the generated helper function name."""
 
         return self.value
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NamedGlobalEvidence8616:
     """Named direct global evidence keyed by DS offset."""
 
-    offset: int
-    name: str
-    width: int
+    offset: cython.longlong
+    name: object
+    width: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CompareRegisterGlobalCarrierEvidence8616:
     """Register carrier evidence for compares against direct globals."""
 
-    reg_name: str
-    offset: int
-    width: int
+    reg_name: object
+    offset: cython.longlong
+    width: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DwordGlobalZeroTestEvidence8616:
     """Adjacent low/high word evidence for a scalar dword zero-test."""
 
-    base_offset: int
-    low_offset: int
-    high_offset: int
-    reg_name: str
+    base_offset: cython.longlong
+    low_offset: cython.longlong
+    high_offset: cython.longlong
+    reg_name: object
     low_instruction_addr: int | None = None
     high_instruction_addr: int | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DwordGlobalZeroTestMaterializationRecord8616:
     """Closed evidence loop for materialized scalar dword zero-tests."""
 
-    evidence: tuple[DwordGlobalZeroTestEvidence8616, ...]
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    evidence: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedSegmentedGlobalMaterializationRecord8616:
     """Cumulative typed evidence consumed by indexed-global materialization."""
 
-    evidence: tuple[IndexedSegmentedGlobalEvidence8616, ...]
-    materialized_count: int
+    evidence: object
+    materialized_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedGlobalReadCarrierMaterializationRecord8616:
     """Closed evidence loop for indexed loads replacing register carriers."""
 
-    evidence: tuple[IndexedSegmentedGlobalLoadSiteEvidence8616, ...]
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    evidence: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
 class AggregateTypeIdentityStrength8616(Enum):
@@ -710,11 +729,11 @@ class AggregateTypeIdentityStrength8616(Enum):
     PROJECT_COPY_FAMILY = "project-copy-family"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NamedGlobalAggregateTypeFact8616:
     """Proven named global aggregate that must survive codegen rebuilds."""
 
-    global_name: str
+    global_name: object
     struct_type: SimStruct
     array_len: GlobalDeclarationArrayLength8616
     identity_strength: AggregateTypeIdentityStrength8616 = (
@@ -722,99 +741,99 @@ class NamedGlobalAggregateTypeFact8616:
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NamedGlobalAggregateTypeReplayStats8616:
     """Closed evidence loop for replaying named global aggregate declarations."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NamedGlobalAggregateExpressionReplayStats8616:
     """Closed evidence loop for restoring named aggregate expression types."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    field_projection_count: int
-    changed: bool
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    field_projection_count: cython.longlong
+    changed: cython.bint
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackAggregateTypeFact8616:
     """Proven aggregate type for one exact BP-relative stack identity."""
 
-    base: str
-    offset: int
-    width: int
+    base: object
+    offset: cython.longlong
+    width: cython.longlong
     struct_type: SimStruct
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackAggregateTypeReplayStats8616:
     """Closed evidence loop for replaying aggregate stack declaration types."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackAggregateFieldProjectionFact8616:
     """Proven field projection between exact machine-BP stack identities."""
 
-    source_base: str
-    source_offset: int
-    destination_base: str
-    destination_offset: int
-    field_offset: int
+    source_base: object
+    source_offset: cython.longlong
+    destination_base: object
+    destination_offset: cython.longlong
+    field_offset: cython.longlong
     struct_type: SimStruct
     cast_source_type: SimType | None
     cast_destination_type: SimTypeChar
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackAggregateFieldProjectionReplayStats8616:
     """Closed evidence loop for replaying proven stack aggregate projections."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedGlobalStackAggregateCopyFact8616:
     """Proven whole-value copy into an exact machine-BP stack identity."""
 
-    source_global_offset: int
-    source_index_base: str
-    source_index_offset: int
-    source_index_adjustment: int
-    destination_base: str
-    destination_offset: int
-    width: int
+    source_global_offset: cython.longlong
+    source_index_base: object
+    source_index_offset: cython.longlong
+    source_index_adjustment: cython.longlong
+    destination_base: object
+    destination_offset: cython.longlong
+    width: cython.longlong
     struct_type: SimStruct
-    load_ins_addr: int
-    store_ins_addr: int
+    load_ins_addr: cython.longlong
+    store_ins_addr: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedSegmentedGlobalStackStore8616:
     """Exact BP-relative store consuming one indexed segmented-global load."""
 
-    stack_offset: int
-    width: int
-    ins_addr: int
+    stack_offset: cython.longlong
+    width: cython.longlong
+    ins_addr: cython.longlong
 
 
 class IndexedSegmentedGlobalLoadConsumer8616(Enum):
@@ -825,40 +844,40 @@ class IndexedSegmentedGlobalLoadConsumer8616(Enum):
     COMPARISON = "comparison"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedSegmentedGlobalLoadSiteEvidence8616:
     """Binary-proven indexed DS load site and its stack-index provenance."""
 
-    base_offset: int
-    width: int
-    index_stack_offset: int
-    index_shift: int
-    ins_addr: int
+    base_offset: cython.longlong
+    width: cython.longlong
+    index_stack_offset: cython.longlong
+    index_shift: cython.longlong
+    ins_addr: cython.longlong
     stack_stores: tuple[IndexedSegmentedGlobalStackStore8616, ...] = ()
-    destination_register: str | None = None
-    index_stack_width: int = 2
+    destination_register: object = None
+    index_stack_width: cython.longlong = 2
     consumer: IndexedSegmentedGlobalLoadConsumer8616 = IndexedSegmentedGlobalLoadConsumer8616.REGISTER
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SignedRemainderStackSource8616:
     """Binary-proven signed remainder source carried from DX/DL into a store."""
 
-    dividend_stack_offset: int
-    divisor_stack_offset: int
-    width: int
-    post_adjust: int = 0
+    dividend_stack_offset: cython.longlong
+    divisor_stack_offset: cython.longlong
+    width: cython.longlong
+    post_adjust: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedSegmentedGlobalStoreEvidence8616:
     """Indexed global store evidence recovered from binary instructions."""
 
-    base_offset: int
-    width: int
-    index_stack_offset: int
-    index_shift: int
-    ins_addr: int
+    base_offset: cython.longlong
+    width: cython.longlong
+    index_stack_offset: cython.longlong
+    index_shift: cython.longlong
+    ins_addr: cython.longlong
     source_base_offset: int | None = None
     source_width: int | None = None
     source_index_stack_offset: int | None = None
@@ -868,110 +887,110 @@ class IndexedSegmentedGlobalStoreEvidence8616:
     source_signed_remainder: SignedRemainderStackSource8616 | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectGlobalSymbolRef8616:
     """Direct global symbol reference aligned with binary memory evidence."""
 
-    offset: int
-    name: str
-    relative_disp: int
-    width: int
-    max_relative_disp: int
+    offset: cython.longlong
+    name: object
+    relative_disp: cython.longlong
+    width: cython.longlong
+    max_relative_disp: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectSegmentedGlobalLoadEvidence8616:
     """Binary-proven direct segmented-memory load without symbol evidence."""
 
-    offset: int
-    width: int
+    offset: cython.longlong
+    width: cython.longlong
     space: MemSpace
-    ins_addr: int
+    ins_addr: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectSegmentedGlobalStoreEvidence8616:
     """Binary-proven direct segmented-memory store without symbol evidence."""
 
-    offset: int
-    width: int
+    offset: cython.longlong
+    width: cython.longlong
     space: MemSpace
-    ins_addr: int
+    ins_addr: cython.longlong
     immediate_value: int | None = None
     segment_value: int | None = None
     segment_source: IRAddress | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class GlobalAddressLiteralEvidence8616:
     """Global address literal evidence for pointer materialization."""
 
-    offset: int
-    value: str
+    offset: cython.longlong
+    value: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CodOffsetGlobalRef8616:
     """COD sidecar global-offset reference record."""
 
-    ins_addr: int
-    name: str
-    relative_disp: int
+    ins_addr: cython.longlong
+    name: object
+    relative_disp: cython.longlong
     opcode: int | None = None
-    literal: str | None = None
+    literal: object = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectGlobalUpdateEvidence8616:
     """Direct global word update evidence with a signed delta."""
 
-    offset: int
-    width: int
-    delta: int
+    offset: cython.longlong
+    width: cython.longlong
+    delta: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectGlobalBooleanStoreEvidence8616:
     """Evidence for CMP/SBB/NEG materialized boolean stores to direct globals."""
 
-    source_offset: int
-    source_width: int
-    compare_value: int
-    dest_offset: int
-    dest_width: int
+    source_offset: cython.longlong
+    source_width: cython.longlong
+    compare_value: cython.longlong
+    dest_offset: cython.longlong
+    dest_width: cython.longlong
     store_ins_addr: int | None = None
     compare_ins_addr: int | None = None
     sbb_ins_addr: int | None = None
     neg_ins_addr: int | None = None
 
     @property
-    def carrier_ins_addrs(self) -> tuple[int, ...]:
+    def carrier_ins_addrs(self) -> tuple[cython.longlong, ...]:
         """Return exact non-store instructions consumed by boolean lowering."""
         return tuple(
             address
-            for address in (
+            for address in iter((
                 self.compare_ins_addr,
                 self.sbb_ins_addr,
                 self.neg_ins_addr,
-            )
+            ))
             if isinstance(address, int)
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectGlobalCallReturnStoreEvidence8616:
     """Direct scalar or dword global store evidence sourced from a call return."""
 
-    offset: int
-    width: int
-    source_call_name: str
+    offset: cython.longlong
+    width: cython.longlong
+    source_call_name: object
     source_call_target: int | None
-    source_call_ins_addr: int
-    low_store_ins_addr: int
+    source_call_ins_addr: cython.longlong
+    low_store_ins_addr: cython.longlong
     high_store_ins_addr: int | None
 
     @property
-    def store_ins_addrs(self) -> tuple[int, ...]:
+    def store_ins_addrs(self) -> tuple[cython.longlong, ...]:
         """Return the complete ordered instruction identity of the proven store."""
 
         if self.high_store_ins_addr is None:
@@ -979,92 +998,93 @@ class DirectGlobalCallReturnStoreEvidence8616:
         return (self.low_store_ins_addr, self.high_store_ins_addr)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _StandaloneCallSite8616:
     """One exact standalone structured-C call matched to binary evidence."""
 
     statements: CStatements
-    index: int
+    index: cython.longlong
     statement: object
     call: CFunctionCall
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _AnonymousDirectStoreMaterializationResult8616:
     """Closed result counters for anonymous direct segmented stores."""
 
-    changed: bool
-    classified_count: int
-    materialized_count: int
-    failure_count: int
+    changed: cython.bint
+    classified_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class SegmentedGlobalLoadStats8616:
     """Materialization counters for segmented global lowering evidence."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    refused_no_evidence: int = 0
-    refused_no_cfunc: int = 0
-    refused_helper_mismatch: int = 0
-    refused_segment_mismatch: int = 0
-    refused_offset_mismatch: int = 0
-    compare_register_raw_fact_count: int = 0
-    compare_register_classified_count: int = 0
-    compare_register_materialized_count: int = 0
-    compare_register_refused_no_evidence: int = 0
-    compare_register_refused_no_cfunc: int = 0
-    compare_register_refused_no_matching_global: int = 0
-    indexed_raw_fact_count: int = 0
-    indexed_classified_count: int = 0
-    indexed_materialized_count: int = 0
-    indexed_load_site_raw_fact_count: int = 0
-    indexed_load_site_materialized_count: int = 0
-    indexed_store_materialized_count: int = 0
-    indexed_store_lvalue_raw_fact_count: int = 0
-    indexed_store_lvalue_materialized_count: int = 0
-    indexed_store_instruction_classified_count: int = 0
-    indexed_store_instruction_materialized_count: int = 0
-    indexed_store_instruction_failure_count: int = 0
-    indexed_store_affine_source_raw_fact_count: int = 0
-    indexed_store_affine_source_classified_count: int = 0
-    indexed_store_affine_source_materialized_count: int = 0
-    indexed_store_affine_source_failure_count: int = 0
-    indexed_store_source_carrier_removed_count: int = 0
-    indexed_stack_aggregate_type_promoted_count: int = 0
-    indexed_stack_aggregate_byte_cast_projected_count: int = 0
-    indexed_byte_store_lvalue_materialized_count: int = 0
-    indexed_byte_store_source_materialized_count: int = 0
-    direct_symbol_store_materialized_count: int = 0
-    direct_symbol_update_raw_fact_count: int = 0
-    direct_symbol_update_materialized_count: int = 0
-    direct_symbol_boolean_store_raw_fact_count: int = 0
-    direct_symbol_boolean_store_materialized_count: int = 0
-    direct_symbol_boolean_duplicate_pruned_count: int = 0
-    direct_symbol_call_return_raw_fact_count: int = 0
-    direct_symbol_call_return_materialized_count: int = 0
-    direct_symbol_call_return_carrier_removed_count: int = 0
-    direct_symbol_segment_pointer_self_assignment_removed_count: int = 0
-    indexed_refused_no_evidence: int = 0
-    indexed_refused_no_cfunc: int = 0
-    indexed_refused_shape_mismatch: int = 0
-    direct_symbol_raw_fact_count: int = 0
-    direct_symbol_materialized_count: int = 0
-    anonymous_direct_raw_fact_count: int = 0
-    anonymous_direct_normalized_fact_count: int = 0
-    anonymous_direct_classified_fact_count: int = 0
-    anonymous_direct_materialized_count: int = 0
-    anonymous_direct_failure_count: int = 0
-    anonymous_direct_store_raw_fact_count: int = 0
-    anonymous_direct_store_normalized_fact_count: int = 0
-    anonymous_direct_store_classified_fact_count: int = 0
-    anonymous_direct_store_materialized_count: int = 0
-    anonymous_direct_store_failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    refused_no_evidence: cython.longlong = 0
+    refused_no_cfunc: cython.longlong = 0
+    refused_helper_mismatch: cython.longlong = 0
+    refused_segment_mismatch: cython.longlong = 0
+    refused_offset_mismatch: cython.longlong = 0
+    compare_register_raw_fact_count: cython.longlong = 0
+    compare_register_classified_count: cython.longlong = 0
+    compare_register_materialized_count: cython.longlong = 0
+    compare_register_refused_no_evidence: cython.longlong = 0
+    compare_register_refused_no_cfunc: cython.longlong = 0
+    compare_register_refused_no_matching_global: cython.longlong = 0
+    indexed_raw_fact_count: cython.longlong = 0
+    indexed_classified_count: cython.longlong = 0
+    indexed_materialized_count: cython.longlong = 0
+    indexed_load_site_raw_fact_count: cython.longlong = 0
+    indexed_load_site_materialized_count: cython.longlong = 0
+    indexed_store_materialized_count: cython.longlong = 0
+    indexed_store_lvalue_raw_fact_count: cython.longlong = 0
+    indexed_store_lvalue_materialized_count: cython.longlong = 0
+    indexed_store_instruction_classified_count: cython.longlong = 0
+    indexed_store_instruction_materialized_count: cython.longlong = 0
+    indexed_store_instruction_failure_count: cython.longlong = 0
+    indexed_store_affine_source_raw_fact_count: cython.longlong = 0
+    indexed_store_affine_source_classified_count: cython.longlong = 0
+    indexed_store_affine_source_materialized_count: cython.longlong = 0
+    indexed_store_affine_source_failure_count: cython.longlong = 0
+    indexed_store_source_carrier_removed_count: cython.longlong = 0
+    indexed_stack_aggregate_type_promoted_count: cython.longlong = 0
+    indexed_stack_aggregate_byte_cast_projected_count: cython.longlong = 0
+    indexed_byte_store_lvalue_materialized_count: cython.longlong = 0
+    indexed_byte_store_source_materialized_count: cython.longlong = 0
+    direct_symbol_store_materialized_count: cython.longlong = 0
+    direct_symbol_update_raw_fact_count: cython.longlong = 0
+    direct_symbol_update_materialized_count: cython.longlong = 0
+    direct_symbol_boolean_store_raw_fact_count: cython.longlong = 0
+    direct_symbol_boolean_store_materialized_count: cython.longlong = 0
+    direct_symbol_boolean_duplicate_pruned_count: cython.longlong = 0
+    direct_symbol_call_return_raw_fact_count: cython.longlong = 0
+    direct_symbol_call_return_materialized_count: cython.longlong = 0
+    direct_symbol_call_return_carrier_removed_count: cython.longlong = 0
+    direct_symbol_segment_pointer_self_assignment_removed_count: cython.longlong = 0
+    indexed_refused_no_evidence: cython.longlong = 0
+    indexed_refused_no_cfunc: cython.longlong = 0
+    indexed_refused_shape_mismatch: cython.longlong = 0
+    direct_symbol_raw_fact_count: cython.longlong = 0
+    direct_symbol_materialized_count: cython.longlong = 0
+    anonymous_direct_raw_fact_count: cython.longlong = 0
+    anonymous_direct_normalized_fact_count: cython.longlong = 0
+    anonymous_direct_classified_fact_count: cython.longlong = 0
+    anonymous_direct_materialized_count: cython.longlong = 0
+    anonymous_direct_failure_count: cython.longlong = 0
+    anonymous_direct_store_raw_fact_count: cython.longlong = 0
+    anonymous_direct_store_normalized_fact_count: cython.longlong = 0
+    anonymous_direct_store_classified_fact_count: cython.longlong = 0
+    anonymous_direct_store_materialized_count: cython.longlong = 0
+    anonymous_direct_store_failure_count: cython.longlong = 0
 
+    @cython.ccall
     def record(self, decision: SegmentedGlobalLoadDecision8616) -> None:
         """Record a named/direct segmented-global materialization decision."""
 
@@ -1083,6 +1103,7 @@ class SegmentedGlobalLoadStats8616:
         elif decision is SegmentedGlobalLoadDecision8616.REFUSED_OFFSET_MISMATCH:
             self.refused_offset_mismatch += 1
 
+    @cython.ccall
     def record_compare(self, decision: CompareRegisterGlobalCarrierDecision8616) -> None:
         """Record a compare-register carrier materialization decision."""
 
@@ -1098,6 +1119,7 @@ class SegmentedGlobalLoadStats8616:
         elif decision is CompareRegisterGlobalCarrierDecision8616.REFUSED_NO_MATCHING_GLOBAL:
             self.compare_register_refused_no_matching_global += 1
 
+    @cython.ccall
     def record_indexed(self, decision: IndexedSegmentedGlobalDecision8616) -> None:
         """Record an indexed segmented-global materialization decision."""
 
@@ -1114,7 +1136,7 @@ class SegmentedGlobalLoadStats8616:
             self.indexed_refused_shape_mismatch += 1
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _NamedSegGlobalLoadRun8616:
     """Run state for named segmented-global load materialization."""
 
@@ -1122,25 +1144,30 @@ class _NamedSegGlobalLoadRun8616:
     codegen: CodegenBoundary8616
     cfunc: _CFunctionTypeBoundary8616
     stats: SegmentedGlobalLoadStats8616
-    evidence_by_offset: dict[int, NamedGlobalEvidence8616]
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616]
-    anonymous_by_offset: dict[tuple[int, int], DirectSegmentedGlobalLoadEvidence8616]
-    zero_test_evidence: tuple[DwordGlobalZeroTestEvidence8616, ...]
-    dirty_assignments: dict[tuple[str, int | str], object] | None
-    created: dict[tuple[int, int], CVariable] = field(default_factory=dict)
-    materialized_zero_test_evidence: set[DwordGlobalZeroTestEvidence8616] = field(default_factory=set)
-    zero_test_materialized_count: int = 0
-    anonymous_classified_nodes: set[int] = field(default_factory=set)
-    anonymous_materialized_nodes: set[int] = field(default_factory=set)
+    evidence_by_offset: object
+    direct_by_offset: object
+    anonymous_by_offset: object
+    zero_test_evidence: object
+    dirty_assignments: object
+    created: object = field(default_factory=dict)
+    materialized_zero_test_evidence: object = field(default_factory=set)
+    zero_test_materialized_count: cython.longlong = 0
+    anonymous_classified_nodes: object = field(default_factory=set)
+    anonymous_materialized_nodes: object = field(default_factory=set)
 
-    def should_process_child_8616(self, current: object, attr: str) -> bool:
+    @cython.ccall
+    def should_process_child_8616(self, current: object, attr: object) -> cython.bint:
         """Skip assignment LHS roots and indexed-variable bases during rewriting."""
         if isinstance(current, CAssignment) and attr == "lhs":
             return False
         return not (isinstance(current, CIndexedVariable) and attr == "variable")
 
+    @cython.ccall
     def transform_8616(self, node: object) -> object:
         """Rewrite one node when its global-load role is proven."""
+        indexed_projection: object
+        pair_expr: object
+        replaced: object
         if isinstance(node, CVariable) and isinstance(
             node.tags.get(_NAMED_DIRECT_SCALAR_MATERIALIZED_TAG_8616),
             SegmentedLoadIdentity8616,
@@ -1177,6 +1204,8 @@ class _NamedSegGlobalLoadRun8616:
 
     def _transform_zero_test_8616(self, node: object) -> object | None:
         """Materialize a proven dword zero-test expression node."""
+        matched_evidence: object
+        zero_test_expr: object
         zero_test_expr = _materialize_direct_global_zero_test_or_expr_8616(
             self.codegen,
             node,
@@ -1191,8 +1220,8 @@ class _NamedSegGlobalLoadRun8616:
             matched_evidence = next(
                 (
                     item
-                    for item in self.zero_test_evidence
-                    if (item.base_offset & 0xFFFF) == (scalar_addr & 0xFFFF)
+                    for item in iter(self.zero_test_evidence)
+                    if operator.eq((item.base_offset & 0xFFFF), (scalar_addr & 0xFFFF))
                 ),
                 None,
             )
@@ -1203,8 +1232,14 @@ class _NamedSegGlobalLoadRun8616:
         self.stats.record(SegmentedGlobalLoadDecision8616.MATERIALIZED)
         return cast(object, _with_replacement_tags_8616(node, zero_test_expr))
 
+    @cython.ccall
     def _transform_cvar_8616(self, node: CVariable) -> object:
         """Rewrite a CVariable node through direct-ref or anonymous-load evidence."""
+        anonymous_evidence: object
+        direct_load_evidence: object
+        direct_ref: object
+        expr: object
+        identity: object
         if isinstance(
             node.tags.get(_ANONYMOUS_DIRECT_SCALAR_MATERIALIZED_TAG_8616),
             SegmentedLoadIdentity8616,
@@ -1265,10 +1300,12 @@ class _NamedSegGlobalLoadRun8616:
                 return resolved_expr
         return node
 
+    @cython.ccall
     def _helper_direct_ref_expr_8616(
-        self, node: object, direct_ref: DirectGlobalSymbolRef8616, offset: int, width: int
-    ) -> tuple[object | None, bool]:
+        self, node: object, direct_ref: DirectGlobalSymbolRef8616, offset: cython.longlong, width: cython.longlong
+    ) -> tuple[object | None, cython.bint]:
         """Resolve a direct-ref helper load; returns (expr, refused_segment)."""
+        expr: object
         if not may_lower_codegen_access_to_entry_ds_object_8616(
             self.codegen,
             node,
@@ -1290,8 +1327,14 @@ class _NamedSegGlobalLoadRun8616:
             return _with_replacement_tags_8616(node, expr), False
         return None, False
 
+    @cython.ccall
     def _transform_helper_call_8616(self, node: CFunctionCall) -> object:
         """Rewrite a segment-load helper call through proven global evidence."""
+        byte_expr: object
+        direct_expr: object
+        direct_ref: object
+        helper: object
+        parsed: object
         helper = _segment_load_helper_8616(node)
         if helper is None:
             self.stats.record(SegmentedGlobalLoadDecision8616.REFUSED_HELPER_MISMATCH)
@@ -1315,8 +1358,10 @@ class _NamedSegGlobalLoadRun8616:
                 return byte_expr
         return self._helper_evidence_expr_8616(node, offset, helper.width)
 
-    def _helper_call_offset_8616(self, node: CFunctionCall) -> tuple[tuple[object, ...], int] | None:
+    @cython.ccall
+    def _helper_call_offset_8616(self, node: CFunctionCall) -> object:
         """Parse the helper call offset, recording the refusal reason on failure."""
+        offset: object
         args = tuple(node.args or ())
         if len(args) != 2:
             self.stats.record(SegmentedGlobalLoadDecision8616.REFUSED_SEGMENT_MISMATCH)
@@ -1327,7 +1372,8 @@ class _NamedSegGlobalLoadRun8616:
             return None
         return args, offset
 
-    def _helper_segment_allowed_8616(self, node: object, segment_expr: object, offset: int, width: int) -> bool:
+    @cython.ccall
+    def _helper_segment_allowed_8616(self, node: object, segment_expr: object, offset: cython.longlong, width: cython.longlong) -> cython.bint:
         """Gate helper lowering on DS segment evidence and access permission."""
         allowed = _is_ds_segment_expr_8616(self.project, segment_expr) and may_lower_codegen_access_to_entry_ds_object_8616(
             self.codegen,
@@ -1340,8 +1386,11 @@ class _NamedSegGlobalLoadRun8616:
             self.stats.record(SegmentedGlobalLoadDecision8616.REFUSED_SEGMENT_MISMATCH)
         return allowed
 
-    def _helper_covering_byte_expr_8616(self, node: object, offset: int) -> object | None:
+    @cython.ccall
+    def _helper_covering_byte_expr_8616(self, node: object, offset: cython.longlong) -> object | None:
         """Materialize a byte projection when a wider direct ref covers the offset."""
+        covering_ref: object
+        expr: object
         covering_ref = _direct_global_ref_covering_byte_8616(self.direct_by_offset, offset & 0xFFFF)
         if covering_ref is None:
             return None
@@ -1357,8 +1406,11 @@ class _NamedSegGlobalLoadRun8616:
         self.stats.record(SegmentedGlobalLoadDecision8616.MATERIALIZED)
         return cast(object, _with_replacement_tags_8616(node, expr))
 
-    def _helper_evidence_expr_8616(self, node: object, offset: int, width: int) -> object:
+    @cython.ccall
+    def _helper_evidence_expr_8616(self, node: object, offset: cython.longlong, width: cython.longlong) -> object:
         """Resolve the helper call through anonymous or named global evidence."""
+        anonymous_evidence: object
+        item: object
         anonymous_evidence = _unambiguous_anonymous_direct_scalar_evidence_8616(
             self.anonymous_by_offset,
             offset,
@@ -1372,8 +1424,9 @@ class _NamedSegGlobalLoadRun8616:
             return node
         return self._materialize_named_cvar_8616(node, item, width)
 
+    @cython.ccall
     def _materialize_anonymous_cvar_8616(
-        self, node: CFunctionCall, anonymous_evidence: DirectSegmentedGlobalLoadEvidence8616, offset: int, width: int
+        self, node: CFunctionCall, anonymous_evidence: DirectSegmentedGlobalLoadEvidence8616, offset: cython.longlong, width: cython.longlong
     ) -> object:
         """Materialize a synthetic anonymous scalar global CVariable."""
         node_id = id(node)
@@ -1405,8 +1458,10 @@ class _NamedSegGlobalLoadRun8616:
             tags=tags,
         )
 
-    def _materialize_named_cvar_8616(self, node: CFunctionCall, item: NamedGlobalEvidence8616, width: int) -> object:
+    @cython.ccall
+    def _materialize_named_cvar_8616(self, node: CFunctionCall, item: NamedGlobalEvidence8616, width: cython.longlong) -> object:
         """Materialize or reuse a named scalar global CVariable."""
+        cvar: object
         key = (item.offset & 0xFFFF, width)
         cvar = self.created.get(key)
         if cvar is None:
@@ -1430,12 +1485,13 @@ class _NamedSegGlobalLoadRun8616:
         self.stats.record(SegmentedGlobalLoadDecision8616.MATERIALIZED)
         return _with_replacement_tags_8616(node, cvar)
 
-    def transform_assignment_lvalue_reads_8616(self, root: object) -> bool:
+    def transform_assignment_lvalue_reads_8616(self, root: object) -> cython.bint:
         """Materialize reads used to compute assignment destinations."""
+        assignment: object
         lvalues_changed = False
         for assignment in (
             node
-            for node in _iter_c_nodes_deep_8616(root)
+            for node in builtins.iter(_iter_c_nodes_deep_8616(root))
             if isinstance(node, CAssignment)
         ):
             if _replace_c_children_8616(
@@ -1449,9 +1505,9 @@ class _NamedSegGlobalLoadRun8616:
 
 def _record_dword_zero_test_materialization_8616(
     codegen: CodegenBoundary8616,
-    zero_test_evidence: tuple[DwordGlobalZeroTestEvidence8616, ...],
-    materialized_zero_test_evidence: set[DwordGlobalZeroTestEvidence8616],
-    zero_test_materialized_count: int,
+    zero_test_evidence: object,
+    materialized_zero_test_evidence: object,
+    zero_test_materialized_count: cython.longlong,
 ) -> None:
     """Merge this run's zero-test materializations into the codegen record."""
     try:
@@ -1469,7 +1525,7 @@ def _record_dword_zero_test_materialization_8616(
         else 0
     )
     combined_evidence = tuple(
-        dict.fromkeys((*previous_evidence, *sorted(materialized_zero_test_evidence, key=lambda item: item.base_offset)))
+        dict.fromkeys(tuple(previous_evidence) + tuple(sorted(materialized_zero_test_evidence, key=lambda item: item.base_offset)))
     )
     raw_fact_count = max(
         len(zero_test_evidence),
@@ -1494,8 +1550,11 @@ def materialize_named_segmented_global_loads_8616(
     codegen: CodegenBoundary8616,
     synthetic_globals: SyntheticGlobalsBoundary8616,
     cod_metadata: CodMetadataBoundary8616 = None,
-) -> bool:
+) -> cython.bint:
     """Materialize named DS global loads from proven lowering evidence."""
+    cfunc: object
+    function: object
+    root: object
 
     stats = SegmentedGlobalLoadStats8616()
     evidence = _collect_named_global_evidence_8616(project, codegen, synthetic_globals, cod_metadata=cod_metadata)
@@ -1510,7 +1569,7 @@ def materialize_named_segmented_global_loads_8616(
         _collect_synthetic_direct_global_symbol_refs_8616(synthetic_globals, summaries),
         tuple(
             DirectGlobalSymbolRef8616(ref.offset, ref.name, 0, ref.width, 0)
-            for ref in collect_annotated_direct_global_refs_8616(function, summaries)
+            for ref in builtins.iter(collect_annotated_direct_global_refs_8616(function, summaries))
         ),
         _materialized_sidecar_free_dword_update_refs_8616(codegen, summaries),
         _sidecar_free_boolean_store_refs_8616(direct_boolean_stores),
@@ -1527,8 +1586,8 @@ def materialize_named_segmented_global_loads_8616(
     stats.normalized_fact_count += len(anonymous_by_offset)
     _seg_global_debug_log_8616(
         "[seg-global-loads] evidence=%s direct_refs=%s",
-        tuple((item.offset & 0xFFFF, item.name, item.width) for item in evidence),
-        tuple((item.offset & 0xFFFF, item.name, item.relative_disp, item.width) for item in direct_refs),
+        tuple((item.offset & 0xFFFF, item.name, item.width) for item in iter(evidence)),
+        tuple((item.offset & 0xFFFF, item.name, item.relative_disp, item.width) for item in iter(direct_refs)),
     )
     if not evidence and not direct_refs and not anonymous_by_offset:
         stats.record(SegmentedGlobalLoadDecision8616.REFUSED_NO_EVIDENCE)
@@ -1545,8 +1604,8 @@ def materialize_named_segmented_global_loads_8616(
         codegen=codegen,
         cfunc=cfunc,
         stats=stats,
-        evidence_by_offset={item.offset & 0xFFFF: item for item in evidence},
-        direct_by_offset={(item.offset & 0xFFFF, item.width): item for item in direct_refs},
+        evidence_by_offset={item.offset & 0xFFFF: item for item in iter(evidence)},
+        direct_by_offset={(item.offset & 0xFFFF, item.width): item for item in iter(direct_refs)},
         anonymous_by_offset=anonymous_by_offset,
         zero_test_evidence=zero_test_evidence,
         dirty_assignments=_collect_unique_dirty_assignment_rhs_8616(cfunc),
@@ -1588,8 +1647,9 @@ def materialize_direct_global_symbol_stores_8616(
     codegen: CodegenBoundary8616,
     synthetic_globals: SyntheticGlobalsBoundary8616 | None = None,
     cod_metadata: CodMetadataBoundary8616 = None,
-) -> bool:
+) -> cython.bint:
     """Materialize direct global stores after symbol evidence is proven."""
+    function: object
 
     stats = SegmentedGlobalLoadStats8616()
     function = _active_function_8616(project, codegen)
@@ -1603,7 +1663,7 @@ def materialize_direct_global_symbol_stores_8616(
         _collect_synthetic_direct_global_symbol_refs_8616(synthetic_globals, summaries),
         tuple(
             DirectGlobalSymbolRef8616(ref.offset, ref.name, 0, ref.width, 0)
-            for ref in collect_annotated_direct_global_refs_8616(function, summaries)
+            for ref in builtins.iter(collect_annotated_direct_global_refs_8616(function, summaries))
         ),
         _materialized_sidecar_free_dword_update_refs_8616(codegen, summaries),
         _sidecar_free_boolean_store_refs_8616(direct_boolean_stores),
@@ -1617,11 +1677,11 @@ def materialize_direct_global_symbol_stores_8616(
                 width=ref.width,
                 canonical_name=_sanitize_identifier_8616(ref.name),
             )
-            for ref in direct_refs
+            for ref in iter(direct_refs)
         ),
     )
     codegen._inertia_direct_global_symbol_store_spans_8616 = tuple(
-        (item.offset & 0xFFFF, max(1, int(item.width))) for item in direct_refs
+        (item.offset & 0xFFFF, max(1, int(item.width))) for item in iter(direct_refs)
     )
     direct_updates = _collect_direct_global_update_evidence_8616(summaries)
     direct_call_return_stores = _collect_direct_global_call_return_store_evidence_8616(
@@ -1632,11 +1692,11 @@ def materialize_direct_global_symbol_stores_8616(
     anonymous_direct_stores = recover_direct_segmented_global_store_evidence_8616(project, function)
     _seg_global_debug_log_8616(
         "[seg-global-stores] refs=%s updates=%s anonymous=%s",
-        tuple((item.offset & 0xFFFF, item.name, item.relative_disp, item.width) for item in direct_refs),
-        tuple((item.offset & 0xFFFF, item.width, item.delta) for item in direct_updates),
+        tuple((item.offset & 0xFFFF, item.name, item.relative_disp, item.width) for item in iter(direct_refs)),
+        tuple((item.offset & 0xFFFF, item.width, item.delta) for item in iter(direct_updates)),
         tuple(
             (item.offset & 0xFFFF, item.width, item.space.value, item.ins_addr)
-            for item in anonymous_direct_stores
+            for item in iter(anonymous_direct_stores)
         ),
     )
     stats.raw_fact_count = len(summaries)
@@ -1666,13 +1726,14 @@ def materialize_direct_global_symbol_stores_8616(
 
 
 def _direct_global_symbol_name_facts_8616(
-    direct_refs: tuple[DirectGlobalSymbolRef8616, ...],
-    direct_updates: tuple[DirectGlobalUpdateEvidence8616, ...],
+    direct_refs: object,
+    direct_updates: object,
 ) -> tuple[DSGlobalSymbolNameFact8616, ...]:
     """Join named references and update-only facts into exact DS identities."""
+    update: object
     name_facts_by_storage = {
         (fact.offset, fact.width): fact
-        for fact in (
+        for fact in iter((
             DSGlobalSymbolNameFact8616(
                 offset=(
                     (ref.offset - ref.relative_disp) & 0xFFFF
@@ -1683,8 +1744,8 @@ def _direct_global_symbol_name_facts_8616(
                 width=ref.width,
                 name=_sanitize_identifier_8616(ref.name),
             )
-            for ref in direct_refs
-        )
+            for ref in iter(direct_refs)
+        ))
     }
     for update in direct_updates:
         key = (update.offset & 0xFFFF, update.width)
@@ -1697,32 +1758,36 @@ def _direct_global_symbol_name_facts_8616(
             ),
         )
     return tuple(
-        name_facts_by_storage[key] for key in sorted(name_facts_by_storage)
+        name_facts_by_storage[key] for key in builtins.iter(sorted(name_facts_by_storage))
     )
 
 
+@cython.ccall
 def _direct_store_evidence_maps_8616(
-    direct_updates: tuple[DirectGlobalUpdateEvidence8616, ...],
-    direct_boolean_stores: tuple[DirectGlobalBooleanStoreEvidence8616, ...],
-    direct_call_return_stores: tuple[DirectGlobalCallReturnStoreEvidence8616, ...],
+    direct_updates: object,
+    direct_boolean_stores: object,
+    direct_call_return_stores: object,
 ) -> tuple[
-        dict[tuple[int, int], list[DirectGlobalUpdateEvidence8616]],
-        dict[tuple[int, int], list[DirectGlobalBooleanStoreEvidence8616]],
-        dict[tuple[int, int], list[DirectGlobalCallReturnStoreEvidence8616]],
+        dict[tuple[cython.longlong, cython.longlong], list[DirectGlobalUpdateEvidence8616]],
+        dict[tuple[cython.longlong, cython.longlong], list[DirectGlobalBooleanStoreEvidence8616]],
+        dict[tuple[cython.longlong, cython.longlong], list[DirectGlobalCallReturnStoreEvidence8616]],
     ]:
     """Index update/boolean/call-return store evidence by (offset, width)."""
-    direct_update_by_offset: dict[tuple[int, int], list[DirectGlobalUpdateEvidence8616]] = {}
+    boolean_evidence: object
+    call_return_evidence: object
+    update_evidence: object
+    direct_update_by_offset: dict[tuple[cython.longlong, cython.longlong], list[DirectGlobalUpdateEvidence8616]] = {}
     for update_evidence in direct_updates:
         direct_update_by_offset.setdefault(
             (update_evidence.offset & 0xFFFF, update_evidence.width), []
         ).append(update_evidence)
-    direct_boolean_by_offset: dict[tuple[int, int], list[DirectGlobalBooleanStoreEvidence8616]] = {}
+    direct_boolean_by_offset: dict[tuple[cython.longlong, cython.longlong], list[DirectGlobalBooleanStoreEvidence8616]] = {}
     for boolean_evidence in direct_boolean_stores:
         direct_boolean_by_offset.setdefault(
             (boolean_evidence.dest_offset & 0xFFFF, boolean_evidence.dest_width),
             [],
         ).append(boolean_evidence)
-    direct_call_return_by_offset: dict[tuple[int, int], list[DirectGlobalCallReturnStoreEvidence8616]] = {}
+    direct_call_return_by_offset: dict[tuple[cython.longlong, cython.longlong], list[DirectGlobalCallReturnStoreEvidence8616]] = {}
     for call_return_evidence in direct_call_return_stores:
         direct_call_return_by_offset.setdefault(
             (call_return_evidence.offset & 0xFFFF, call_return_evidence.width),
@@ -1731,13 +1796,20 @@ def _direct_store_evidence_maps_8616(
     return direct_update_by_offset, direct_boolean_by_offset, direct_call_return_by_offset
 
 
+@cython.ccall
 def _rewrite_direct_global_assignment_lhs_8616(
     nodes: Iterable[object],
     codegen: CodegenBoundary8616,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
+    direct_by_offset: object,
     stats: SegmentedGlobalLoadStats8616,
-) -> bool:
+) -> cython.bint:
     """Rewrite assignment destinations that match proven direct-store refs."""
+    assignment: object
+    identity: object
+    ref: object
+    replacement: object
+    replacement_rhs: object
+    stmt: object
     changed = False
     for stmt in nodes:
         assignment = _assignment_statement_8616(stmt)
@@ -1773,16 +1845,17 @@ def _rewrite_direct_global_assignment_lhs_8616(
 def _materialize_direct_global_stores_in_root_8616(
     root: object,
     codegen: CodegenBoundary8616,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
-    direct_update_by_offset: dict[tuple[int, int], list[DirectGlobalUpdateEvidence8616]],
-    direct_boolean_by_offset: dict[tuple[int, int], list[DirectGlobalBooleanStoreEvidence8616]],
-    direct_call_return_by_offset: dict[tuple[int, int], list[DirectGlobalCallReturnStoreEvidence8616]],
-    direct_call_return_stores: tuple[DirectGlobalCallReturnStoreEvidence8616, ...],
+    direct_by_offset: object,
+    direct_update_by_offset: object,
+    direct_boolean_by_offset: object,
+    direct_call_return_by_offset: object,
+    direct_call_return_stores: object,
     stats: SegmentedGlobalLoadStats8616,
-) -> bool:
+) -> cython.bint:
     """Run the ordered direct-store materialization passes over one cfunc root."""
+    mutate: object
     root_changed = False
-    passes: tuple[Callable[[], bool], ...] = (
+    passes: tuple[Callable[[], cython.bint], ...] = (
         lambda: _materialize_direct_global_dword_update_from_low_word_high_bytes_8616(
             root, codegen, direct_by_offset, direct_update_by_offset, stats
         ),
@@ -1837,19 +1910,21 @@ def _materialize_direct_global_stores_in_root_8616(
 def _materialize_direct_global_stores_in_root_session_8616(
     root: object,
     codegen: CodegenBoundary8616,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
-    direct_update_by_offset: dict[tuple[int, int], list[DirectGlobalUpdateEvidence8616]],
-    direct_boolean_by_offset: dict[tuple[int, int], list[DirectGlobalBooleanStoreEvidence8616]],
-    direct_call_return_stores: tuple[DirectGlobalCallReturnStoreEvidence8616, ...],
+    direct_by_offset: object,
+    direct_update_by_offset: object,
+    direct_boolean_by_offset: object,
+    direct_call_return_stores: object,
     stats: SegmentedGlobalLoadStats8616,
-) -> bool:
+) -> cython.bint:
     """Run the query-session-tracked direct-store passes over one root."""
+    query_session: object
+    mutate: object
     root_changed = False
     query_session = (
         StructuredAstQuerySession8616(root) if isinstance(root, CStatements) else None
     )
     if isinstance(root, CStatements) and query_session is not None:
-        session_passes: tuple[Callable[[], bool], ...] = (
+        session_passes: tuple[Callable[[], cython.bint], ...] = (
             lambda: _materialize_direct_global_boolean_stores_8616(
                 root,
                 codegen,
@@ -1924,24 +1999,25 @@ def _materialize_direct_global_stores_in_root_session_8616(
 
 
 def _normalized_anonymous_direct_stores_8616(
-    anonymous_direct_stores: tuple[DirectSegmentedGlobalStoreEvidence8616, ...],
+    anonymous_direct_stores: object,
 ) -> tuple[DirectSegmentedGlobalStoreEvidence8616, ...]:
     """Deduplicate anonymous store evidence to supported widths and DS/ES spaces."""
     return tuple(
         dict.fromkeys(
             item
-            for item in anonymous_direct_stores
+            for item in iter(anonymous_direct_stores)
             if item.width in {1, 2, 4}
             and item.space in {MemSpace.DS, MemSpace.ES}
         )
     )
 
 
+@cython.ccall
 def _run_anonymous_direct_store_phase_8616(
     project: ProjectBoundary8616 | None,
     codegen: CodegenBoundary8616,
     cfunc: object,
-    anonymous_direct_stores: tuple[DirectSegmentedGlobalStoreEvidence8616, ...],
+    anonymous_direct_stores: object,
     stats: SegmentedGlobalLoadStats8616,
 ) -> tuple[tuple[DirectSegmentedGlobalStoreEvidence8616, ...], _AnonymousDirectStoreMaterializationResult8616]:
     """Normalize and materialize anonymous stores, folding counts into stats."""
@@ -1969,18 +2045,21 @@ def _run_anonymous_direct_store_phase_8616(
     return normalized_anonymous_stores, anonymous_result
 
 
+@cython.ccall
 def materialize_direct_global_symbol_stores_from_evidence_8616(
     codegen: CodegenBoundary8616,
-    direct_refs: tuple[DirectGlobalSymbolRef8616, ...],
+    direct_refs: object,
     *,
-    direct_updates: tuple[DirectGlobalUpdateEvidence8616, ...] = (),
-    direct_boolean_stores: tuple[DirectGlobalBooleanStoreEvidence8616, ...] = (),
-    direct_call_return_stores: tuple[DirectGlobalCallReturnStoreEvidence8616, ...] = (),
-    anonymous_direct_stores: tuple[DirectSegmentedGlobalStoreEvidence8616, ...] = (),
+    direct_updates: object = (),
+    direct_boolean_stores: object = (),
+    direct_call_return_stores: object = (),
+    anonymous_direct_stores: object = (),
     project: ProjectBoundary8616 | None = None,
     stats: SegmentedGlobalLoadStats8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """Materialize direct global stores from already-collected lowering evidence."""
+    cfunc: object
+    root: object
 
     if stats is None:
         stats = SegmentedGlobalLoadStats8616()
@@ -2015,7 +2094,7 @@ def materialize_direct_global_symbol_stores_from_evidence_8616(
         if not changed and not normalized_anonymous_stores:
             stats.record(SegmentedGlobalLoadDecision8616.REFUSED_NO_EVIDENCE)
         return changed
-    direct_by_offset = {(item.offset & 0xFFFF, item.width): item for item in direct_refs}
+    direct_by_offset = {(item.offset & 0xFFFF, item.width): item for item in iter(direct_refs)}
     (
         direct_update_by_offset,
         direct_boolean_by_offset,
@@ -2040,20 +2119,21 @@ def materialize_direct_global_symbol_stores_from_evidence_8616(
     return changed
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _AnonymousDirectStoreRun8616:
     """Run state for anonymous direct segmented-global store materialization."""
 
     project: ProjectBoundary8616 | None
     codegen: CodegenBoundary8616
-    evidence_items: tuple[DirectSegmentedGlobalStoreEvidence8616, ...]
-    dirty_assignments: dict[tuple[str, int | str], object]
-    by_ins_addr: dict[int, tuple[DirectSegmentedGlobalStoreEvidence8616, ...]]
-    classified: set[DirectSegmentedGlobalStoreEvidence8616] = field(default_factory=set)
-    materialized: set[DirectSegmentedGlobalStoreEvidence8616] = field(default_factory=set)
-    visited_groups: set[int] = field(default_factory=set)
-    changed: bool = False
+    evidence_items: object
+    dirty_assignments: object
+    by_ins_addr: object
+    classified: object = field(default_factory=set)
+    materialized: object = field(default_factory=set)
+    visited_groups: object = field(default_factory=set)
+    changed: cython.bint = False
 
+    @cython.ccall
     def _access_expr_for_8616(self, evidence: DirectSegmentedGlobalStoreEvidence8616) -> object | None:
         """Build the direct segmented access expr for one store evidence."""
         if self.project is None:
@@ -2071,6 +2151,9 @@ class _AnonymousDirectStoreRun8616:
 
     def process_statements_8616(self, node: object) -> None:
         """Walk dynamic third-party C statement containers."""
+        assignment: object
+        identity: object
+        ins_addr: object
         if id(node) in self.visited_groups:
             return
         self.visited_groups.add(id(node))
@@ -2093,11 +2176,11 @@ class _AnonymousDirectStoreRun8616:
                 )
                 exact_wide = tuple(
                     item
-                    for item in candidates
-                    if identity == (item.offset & 0xFFFF, item.width)
+                    for item in iter(candidates)
+                    if operator.eq(identity, (item.offset & 0xFFFF, item.width))
                     or (
                         identity is not None
-                        and identity[0] == (item.offset & 0xFFFF)
+                        and operator.eq(identity[0], (item.offset & 0xFFFF))
                         and identity[1] > item.width
                         and assignment is not None
                         and (
@@ -2111,14 +2194,13 @@ class _AnonymousDirectStoreRun8616:
                 )
                 tagged_immediate = tuple(
                     item
-                    for item in candidates
+                    for item in iter(candidates)
                     if assignment is not None
                     and isinstance(assignment.lhs, CUnaryOp)
                     and assignment.lhs.op == "Dereference"
                     and has_exact_store_projection_width_8616(assignment.lhs, item.width)
                     and item.immediate_value is not None
-                    and _constant_int_8616(assignment.rhs)
-                    == (item.immediate_value & ((1 << (item.width * 8)) - 1))
+                    and operator.eq(_constant_int_8616(assignment.rhs), (item.immediate_value & ((1 << (item.width * 8)) - 1)))
                 )
                 if assignment is not None and len(tagged_immediate) == 1:
                     self._process_tagged_immediate_8616(assignment, tagged_immediate[0])
@@ -2141,10 +2223,12 @@ class _AnonymousDirectStoreRun8616:
                 index += 1
         _walk_statement_container_children_8616(node, self.process_statements_8616)
 
+    @cython.ccall
     def _process_tagged_immediate_8616(
         self, assignment: CAssignment, evidence: DirectSegmentedGlobalStoreEvidence8616
     ) -> None:
         """Materialize an exact-width tagged immediate store."""
+        replacement: object
         self.classified.add(evidence)
         replacement = self._access_expr_for_8616(evidence)
         if replacement is not None and evidence.immediate_value is not None:
@@ -2157,10 +2241,13 @@ class _AnonymousDirectStoreRun8616:
             self.materialized.add(evidence)
             self.changed = True
 
+    @cython.ccall
     def _process_exact_wide_8616(
-        self, assignment: CAssignment, evidence: DirectSegmentedGlobalStoreEvidence8616, identity: tuple[int, int] | None
+        self, assignment: CAssignment, evidence: DirectSegmentedGlobalStoreEvidence8616, identity: object
     ) -> None:
         """Materialize an exact-or-wide store covered by anonymous evidence."""
+        projected_rhs: object
+        replacement: object
         self.classified.add(evidence)
         if isinstance(assignment.rhs, CExpression):
             projected_rhs = project_pointer_storage_value_8616(
@@ -2183,7 +2270,7 @@ class _AnonymousDirectStoreRun8616:
             rhs_is_exact_scalar = (
                 isinstance(assignment.rhs, CConstant)
                 and assignment.rhs.reference_values is None
-                and _constant_int_8616(assignment.rhs) == immediate_value
+                and operator.eq(_constant_int_8616(assignment.rhs), immediate_value)
             )
             if not rhs_is_exact_scalar:
                 assignment.rhs = CConstant(
@@ -2207,14 +2294,19 @@ class _AnonymousDirectStoreRun8616:
 
     def _process_byte_pair_8616(
         self,
-        statements: list[object],
-        index: int,
+        statements: object,
+        index: cython.longlong,
         statement: object,
-        assignment: CAssignment,
-        identity: tuple[int, int] | None,
-        candidates: tuple[DirectSegmentedGlobalStoreEvidence8616, ...],
-    ) -> bool:
+        assignment: object,
+        identity: object,
+        candidates: object,
+    ) -> cython.bint:
         """Merge a proven adjacent byte-pair store into one word store."""
+        high_assignment: object
+        high_identity: object
+        proven_immediate: object
+        replacement: object
+        word_source: object
         high_statement = statements[index + 1]
         high_assignment = _assignment_statement_8616(high_statement)
         high_ins_addr = _consistent_statement_ins_addr_8616(
@@ -2238,12 +2330,12 @@ class _AnonymousDirectStoreRun8616:
         )
         pair_candidates = tuple(
             item
-            for item in candidates
+            for item in iter(candidates)
             if item.width == 2
-            and high_ins_addr == item.ins_addr
+            and operator.eq(high_ins_addr, item.ins_addr)
             and (
-                (identity == (item.offset & 0xFFFF, 1)
-                and high_identity == (((item.offset + 1) & 0xFFFF), 1))
+                (operator.eq(identity, (item.offset & 0xFFFF, 1))
+                and operator.eq(high_identity, (((item.offset + 1) & 0xFFFF), 1)))
                 or unresolved_exact_instruction_pair
             )
         )
@@ -2266,7 +2358,7 @@ class _AnonymousDirectStoreRun8616:
             low_rhs,
             {},
         )
-        proven_immediate: int | None = evidence.immediate_value
+        proven_immediate = evidence.immediate_value
         immediate_source_safe = (
             proven_immediate is not None
             and not _rhs_has_obvious_side_effect_8616(low_rhs)
@@ -2342,21 +2434,23 @@ class _AnonymousDirectStoreRun8616:
         return False
 
 def _materialize_anonymous_direct_segmented_global_stores_8616(
-    roots: tuple[object, ...],
+    roots: object,
     project: ProjectBoundary8616 | None,
     codegen: CodegenBoundary8616,
-    evidence_items: tuple[DirectSegmentedGlobalStoreEvidence8616, ...],
+    evidence_items: object,
     *,
-    dirty_assignments: dict[tuple[str, int | str], object],
+    dirty_assignments: object,
 ) -> _AnonymousDirectStoreMaterializationResult8616:
     """Materialize exact anonymous direct stores without inventing symbols."""
+    ins_addr: object
+    root: object
 
     if not evidence_items:
         return _AnonymousDirectStoreMaterializationResult8616(False, 0, 0, 0)
-    by_ins_addr: dict[int, tuple[DirectSegmentedGlobalStoreEvidence8616, ...]] = {}
-    for ins_addr in sorted({item.ins_addr for item in evidence_items}):
+    by_ins_addr: dict[cython.longlong, tuple[DirectSegmentedGlobalStoreEvidence8616, ...]] = {}
+    for ins_addr in sorted({item.ins_addr for item in iter(evidence_items)}):
         by_ins_addr[ins_addr] = tuple(
-            item for item in evidence_items if item.ins_addr == ins_addr
+            item for item in iter(evidence_items) if operator.eq(item.ins_addr, ins_addr)
         )
     run = _AnonymousDirectStoreRun8616(
         project=project,
@@ -2377,9 +2471,10 @@ def _materialize_anonymous_direct_segmented_global_stores_8616(
 
 
 
+@cython.ccall
 def _resolve_anonymous_direct_store_byte_source_8616(
     node: object,
-    dirty_assignments: dict[tuple[str, int | str], object],
+    dirty_assignments: object,
     codegen: CodegenBoundary8616,
 ) -> object:
     """Resolve a unique dirty byte carrier without broad expression recovery."""
@@ -2395,7 +2490,8 @@ def _resolve_anonymous_direct_store_byte_source_8616(
     return CBinaryOp("Shr", lhs, node.rhs, codegen=codegen)
 
 
-def _anonymous_direct_store_byte_source_is_safe_8616(node: object) -> bool:
+@cython.ccall
+def _anonymous_direct_store_byte_source_is_safe_8616(node: object) -> cython.bint:
     """Accept byte sources that can be joined without duplicating effects."""
 
     if _constant_int_8616(node) is not None:
@@ -2403,12 +2499,14 @@ def _anonymous_direct_store_byte_source_is_safe_8616(node: object) -> bool:
     return _word_store_source_is_safe_8616(node) and not _rhs_has_obvious_side_effect_8616(node)
 
 
+@cython.ccall
 def _anonymous_segment_source_matches_8616(
     project: ProjectBoundary8616 | None,
     segment: object,
     evidence: DirectSegmentedGlobalStoreEvidence8616,
-) -> bool:
+) -> cython.bint:
     """Recurse into a proven segment-source access for the segment argument."""
+    source: object
     source = evidence.segment_source
     if source is None:
         return False
@@ -2424,19 +2522,21 @@ def _anonymous_segment_source_matches_8616(
     )
 
 
+@cython.ccall
 def _anonymous_segment_variable_matches_space_8616(
-    project: ProjectBoundary8616 | None,
+    project: object,
     segment: object,
     evidence: DirectSegmentedGlobalStoreEvidence8616,
-) -> bool:
+) -> cython.bint:
     """Match a register/variable segment argument against the evidence space."""
+    runtime_name: object
     if not isinstance(segment, CVariable):
         return False
     runtime_name = runtime_segment_name_for_variable_8616(segment.variable)
     if runtime_name is not None:
-        return bool(runtime_name == evidence.space.value)
+        return bool(operator.eq(runtime_name, evidence.space.value))
     raw_name = segment.name or segment.variable.name
-    if isinstance(raw_name, str) and raw_name.lower() == evidence.space.value:
+    if isinstance(raw_name, str) and operator.eq(raw_name.lower(), evidence.space.value):
         return True
     if project is None or not isinstance(segment.variable, SimRegisterVariable):
         return False
@@ -2445,27 +2545,29 @@ def _anonymous_segment_variable_matches_space_8616(
         register_names = typing.cast(Any, project.arch).register_names
     except AttributeError:
         return False
-    return isinstance(reg, int) and isinstance(register_names, dict) and register_names.get(reg) == evidence.space.value
+    return isinstance(reg, int) and isinstance(register_names, dict) and operator.eq(register_names.get(reg), evidence.space.value)
 
 
+@cython.ccall
 def _anonymous_direct_store_lvalue_matches_evidence_8616(
     project: ProjectBoundary8616 | None,
     node: object,
     evidence: DirectSegmentedGlobalStoreEvidence8616,
-) -> bool:
+) -> cython.bint:
     """Return whether an existing helper lvalue exactly replays store evidence."""
+    helper: object
 
     if not isinstance(node, CFunctionCall):
         return False
     helper = _segment_load_helper_8616(node)
-    if helper is None or helper.width != evidence.width:
+    if helper is None or operator.ne(helper.width, evidence.width):
         return False
     args = tuple(node.args or ())
-    if len(args) != 2 or _constant_int_8616(args[1]) != (evidence.offset & 0xFFFF):
+    if len(args) != 2 or operator.ne(_constant_int_8616(args[1]), (evidence.offset & 0xFFFF)):
         return False
     segment = args[0]
     if evidence.segment_value is not None:
-        return _constant_int_8616(segment) == (evidence.segment_value & 0xFFFF)
+        return operator.eq(_constant_int_8616(segment), (evidence.segment_value & 0xFFFF))
     if evidence.segment_source is not None:
         return _anonymous_segment_source_matches_8616(project, segment, evidence)
     return _anonymous_segment_variable_matches_space_8616(project, segment, evidence)
@@ -2474,7 +2576,7 @@ def _anonymous_direct_store_lvalue_matches_evidence_8616(
 
 
 def _sidecar_free_dword_call_return_refs_8616(
-    evidence_items: tuple[DirectGlobalCallReturnStoreEvidence8616, ...],
+    evidence_items: object,
 ) -> tuple[DirectGlobalSymbolRef8616, ...]:
     """Create honest generic globals for exact binary-proven dword return stores."""
     return tuple(
@@ -2485,18 +2587,20 @@ def _sidecar_free_dword_call_return_refs_8616(
             width=4,
             max_relative_disp=0,
         )
-        for evidence in evidence_items
+        for evidence in iter(evidence_items)
         if evidence.width == 4
     )
 
 
-def _is_dword_carry_update_pair_8616(low: InsnSummary8616, high: InsnSummary8616) -> bool:
+@cython.ccall
+def _is_dword_carry_update_pair_8616(low: InsnSummary8616, high: InsnSummary8616) -> cython.bint:
     """Match ``add/adc`` or ``sub/sbb`` word direct-mem carry pairs."""
+    expected_high_mnemonic: object
 
     low_mnemonic = str(low.mnemonic or "").lower()
     high_mnemonic = str(high.mnemonic or "").lower()
     expected_high_mnemonic = {"add": "adc", "sub": "sbb"}.get(low_mnemonic)
-    if expected_high_mnemonic != high_mnemonic:
+    if operator.ne(expected_high_mnemonic, high_mnemonic):
         return False
     return not (
         low.op0_kind != "direct_mem"
@@ -2512,11 +2616,15 @@ def _is_dword_carry_update_pair_8616(low: InsnSummary8616, high: InsnSummary8616
     )
 
 
+@cython.ccall
 def _sidecar_free_dword_update_refs_8616(
-    summaries: list[InsnSummary8616],
+    summaries: object,
 ) -> tuple[DirectGlobalSymbolRef8616, ...]:
     """Recover generic dword identity from an exact low-word carry update."""
-    dword_offsets: set[int] = set()
+    high: object
+    low: object
+    offset: object
+    dword_offsets: set[cython.longlong] = set()
     for low, high in itertools.pairwise(summaries):
         if not _is_dword_carry_update_pair_8616(low, high):
             continue
@@ -2524,7 +2632,7 @@ def _sidecar_free_dword_update_refs_8616(
         if not isinstance(low_op0, int) or not isinstance(high_op0, int):
             continue
         low_offset = low_op0 & 0xFFFF
-        if (high_op0 & 0xFFFF) != ((low_offset + 2) & 0xFFFF):
+        if operator.ne((high_op0 & 0xFFFF), ((low_offset + 2) & 0xFFFF)):
             continue
         dword_offsets.add(low_offset)
 
@@ -2549,20 +2657,22 @@ def collect_project_direct_global_width_evidence_8616(
     summaries = _function_instruction_summaries_8616(project, function)
     update_refs = tuple(
         ref
-        for ref in _sidecar_free_dword_update_refs_8616(summaries)
+        for ref in builtins.iter(_sidecar_free_dword_update_refs_8616(summaries))
         if ref.width >= 4 and ref.relative_disp == 0
     )
     instructions = _direct_global_update_ordered_insns_8616(project, function)
     call_result_facts = recover_direct_call_result_storage_facts_8616(
-        _capstone_instruction_view_8616(instruction) for instruction in instructions
+        _capstone_instruction_view_8616(instruction) for instruction in iter(instructions)
     )
     return (*update_refs, *call_result_facts)
 
 
+@cython.ccall
 def _project_direct_global_scalar_refs_8616(
     project: ProjectBoundary8616,
 ) -> tuple[DirectGlobalSymbolRef8616, ...]:
     """Create consistent generic scalar refs from project-wide wide extents."""
+    layout: object
     evidence = collect_project_direct_global_object_layout_evidence_8616(
         project,
         (collect_project_direct_global_width_evidence_8616,),
@@ -2590,10 +2700,11 @@ def _project_direct_global_scalar_refs_8616(
     return tuple(refs)
 
 
+@cython.ccall
 def _sidecar_free_project_direct_global_scalar_refs_8616(
     project: ProjectBoundary8616,
     cod_metadata: CodMetadataBoundary8616,
-) -> tuple[DirectGlobalSymbolRef8616, ...]:
+) -> object:
     """Use generic project identities only without stronger COD object refs."""
     if _cod_direct_global_refs_8616(cod_metadata):
         return ()
@@ -2602,15 +2713,18 @@ def _sidecar_free_project_direct_global_scalar_refs_8616(
 
 def _materialized_sidecar_free_dword_update_refs_8616(
     codegen: CodegenBoundary8616,
-    summaries: list[InsnSummary8616],
+    summaries: object,
 ) -> tuple[DirectGlobalSymbolRef8616, ...]:
     """Admit dword identity after update materialization and final structuring."""
+    cfunc: object
+    name: object
+    ref: object
     candidate_refs = _sidecar_free_dword_update_refs_8616(summaries)
     if not candidate_refs:
         return ()
     low_word_names = {
         fact.offset: fact.name
-        for fact in global_storage_identity_facts_8616(codegen)
+        for fact in builtins.iter(global_storage_identity_facts_8616(codegen))
         if (
             fact.space is MemSpace.DS
             and fact.width == 2
@@ -2623,8 +2737,8 @@ def _materialized_sidecar_free_dword_update_refs_8616(
     roots = tuple(_cfunc_roots_8616(cfunc)) if cfunc is not None else ()
     if not any(
         isinstance(node, CSwitchCase)
-        for root in roots
-        for node in _iter_c_statement_nodes_8616(root)
+        for root in iter(roots)
+        for node in builtins.iter(_iter_c_statement_nodes_8616(root))
     ):
         return ()
     refs: list[DirectGlobalSymbolRef8616] = []
@@ -2646,16 +2760,16 @@ def _materialized_sidecar_free_dword_update_refs_8616(
 
 
 def _sidecar_free_boolean_store_refs_8616(
-    evidence_items: tuple[DirectGlobalBooleanStoreEvidence8616, ...],
+    evidence_items: object,
 ) -> tuple[DirectGlobalSymbolRef8616, ...]:
     """Create generic scalar identities from exact binary boolean-store facts."""
     identities = {
         (evidence.source_offset & 0xFFFF, evidence.source_width)
-        for evidence in evidence_items
+        for evidence in iter(evidence_items)
     }
     identities.update(
         (evidence.dest_offset & 0xFFFF, evidence.dest_width)
-        for evidence in evidence_items
+        for evidence in iter(evidence_items)
     )
     return tuple(
         DirectGlobalSymbolRef8616(
@@ -2665,17 +2779,18 @@ def _sidecar_free_boolean_store_refs_8616(
             width=width,
             max_relative_disp=0,
         )
-        for offset, width in sorted(identities)
+        for offset, width in builtins.iter(sorted(identities))
         if width > 0
     )
 
 
+@cython.ccall
 def _materialize_scalar_direct_global_call_return_carriers_8616(
     root: CStatements,
     codegen: CodegenBoundary8616,
-    evidence_items: tuple[DirectGlobalCallReturnStoreEvidence8616, ...],
+    evidence_items: object,
     stats: SegmentedGlobalLoadStats8616,
-) -> bool:
+) -> cython.bint:
     """Reconnect standalone scalar calls to their binary-proven AX carriers.
 
     This path intentionally does not require a global symbol name.  Exact call
@@ -2683,6 +2798,7 @@ def _materialize_scalar_direct_global_call_return_carriers_8616(
     provenance prove the def-use edge.  Ambiguous calls or store carriers are
     refused without changing the structured C tree.
     """
+    evidence: object
 
     if not evidence_items:
         return False
@@ -2712,9 +2828,13 @@ def _standalone_call_sites_for_evidence_8616(
     evidence: DirectGlobalCallReturnStoreEvidence8616,
 ) -> tuple[_StandaloneCallSite8616, ...]:
     """Return exact standalone calls matching one binary callsite fact."""
+    call: object
+    index: object
+    statement: object
+    statements: object
 
     groups = [root]
-    groups.extend(node for node in _iter_c_nodes_deep_8616(root) if isinstance(node, CStatements) and node is not root)
+    groups.extend(node for node in builtins.iter(_iter_c_nodes_deep_8616(root)) if isinstance(node, CStatements) and node is not root)
     matches: list[_StandaloneCallSite8616] = []
     for statements in groups:
         for index, statement in enumerate(statements.statements):
@@ -2722,7 +2842,7 @@ def _standalone_call_sites_for_evidence_8616(
             if call is None:
                 continue
             ins_addr = _consistent_statement_ins_addr_8616(statement, call)
-            if ins_addr != evidence.source_call_ins_addr:
+            if operator.ne(ins_addr, evidence.source_call_ins_addr):
                 continue
             if not _call_matches_direct_global_return_evidence_8616(call, evidence):
                 continue
@@ -2730,6 +2850,7 @@ def _standalone_call_sites_for_evidence_8616(
     return tuple(matches)
 
 
+@cython.ccall
 def _standalone_cfunction_call_8616(statement: object) -> CFunctionCall | None:
     """Return a call only when it is a complete standalone C statement."""
 
@@ -2740,10 +2861,11 @@ def _standalone_cfunction_call_8616(statement: object) -> CFunctionCall | None:
     return None
 
 
+@cython.ccall
 def _call_matches_direct_global_return_evidence_8616(
     call: CFunctionCall,
     evidence: DirectGlobalCallReturnStoreEvidence8616,
-) -> bool:
+) -> cython.bint:
     """Match one call target without consulting symbols beyond typed evidence."""
 
     raw_target = call.callee_target
@@ -2760,32 +2882,36 @@ def _call_matches_direct_global_return_evidence_8616(
     return call_name == evidence_name
 
 
+@cython.ccall
 def _collect_scalar_store_assignments_8616(
     root: CStatements,
     low_store_ins_addr: int | None,
-) -> list[tuple[object, CAssignment]]:
+) -> object:
     """Collect deduplicated assignments at the evidenced store instruction."""
+    assignment: object
+    node: object
     assignments: list[tuple[object, CAssignment]] = []
-    seen_assignments: set[int] = set()
+    seen_assignments: set[cython.longlong] = set()
     for node in _iter_c_nodes_deep_8616(root):
         assignment = _assignment_statement_8616(node)
         if assignment is None or id(assignment) in seen_assignments:
             continue
         seen_assignments.add(id(assignment))
-        if _consistent_statement_ins_addr_8616(node, assignment) != low_store_ins_addr:
+        if operator.ne(_consistent_statement_ins_addr_8616(node, assignment), low_store_ins_addr):
             continue
         assignments.append((node, assignment))
     return assignments
 
 
+@cython.ccall
 def _classify_scalar_carrier_assignment_8616(
     project: ProjectBoundary8616,
     assignment: CAssignment,
-    offset: int,
+    offset: cython.longlong,
     evidence: DirectGlobalCallReturnStoreEvidence8616,
-    direct_candidates: list[CVariable],
-    low_byte_candidates: list[CVariable],
-    high_byte_candidates: list[object],
+    direct_candidates: object,
+    low_byte_candidates: object,
+    high_byte_candidates: object,
 ) -> None:
     """Classify one assignment's rhs into direct/split carrier buckets."""
     identity = _direct_global_lvalue_identity_8616(assignment.lhs)
@@ -2809,8 +2935,12 @@ def _scalar_call_return_carriers_for_evidence_8616(
     root: CStatements,
     codegen: CodegenBoundary8616,
     evidence: DirectGlobalCallReturnStoreEvidence8616,
-) -> tuple[CVariable, ...]:
+) -> object:
     """Return uniquely shaped AX carriers consumed by the evidenced store."""
+    project: object
+    _statement: object
+    assignment: object
+    low_carrier: object
 
     project = _codegen_project_optional_8616(codegen)
     if project is None:
@@ -2836,7 +2966,7 @@ def _scalar_call_return_carriers_for_evidence_8616(
     for low_carrier in low_byte_candidates:
         matching_high = tuple(
             high_rhs
-            for high_rhs in high_byte_candidates
+            for high_rhs in iter(high_byte_candidates)
             if _is_high_byte_of_scalar_carrier_8616(high_rhs, low_carrier)
         )
         if len(matching_high) == 1:
@@ -2845,7 +2975,8 @@ def _scalar_call_return_carriers_for_evidence_8616(
     return tuple(candidates) if len(candidates) == 1 else ()
 
 
-def _is_high_byte_of_scalar_carrier_8616(node: object, carrier: CVariable) -> bool:
+@cython.ccall
+def _is_high_byte_of_scalar_carrier_8616(node: object, carrier: CVariable) -> cython.bint:
     """Return whether one expression is the exact high byte of a word carrier."""
 
     return (
@@ -2861,7 +2992,7 @@ def _consistent_statement_ins_addr_8616(*nodes: object) -> int | None:
 
     addresses = {
         ins_addr
-        for node in nodes
+        for node in iter(nodes)
         if (ins_addr := _statement_ins_addr_8616(node)) is not None
     }
     if len(addresses) != 1:
@@ -2869,8 +3000,9 @@ def _consistent_statement_ins_addr_8616(*nodes: object) -> int | None:
     return next(iter(addresses))
 
 
-def _merged_statement_tags_8616(*nodes: object) -> dict[str, object]:
+def _merged_statement_tags_8616(*nodes: object) -> object:
     """Merge tags exposed by dynamic angr C nodes without losing call metadata."""
+    node: object
 
     merged: dict[str, object] = {}
     for node in nodes:
@@ -2886,7 +3018,7 @@ def _merged_statement_tags_8616(*nodes: object) -> dict[str, object]:
 def _direct_call_return_store_tags_8616(
     evidence: DirectGlobalCallReturnStoreEvidence8616,
     *nodes: object,
-) -> dict[str, object]:
+) -> object:
     """Preserve the typed wide-store proof on a canonical assignment."""
     tags = _merged_statement_tags_8616(*nodes)
     tags["ins_addr"] = evidence.source_call_ins_addr
@@ -2894,11 +3026,13 @@ def _direct_call_return_store_tags_8616(
     return tags
 
 
+@cython.ccall
 def _wide_call_return_store_covers_anonymous_evidence_8616(
     assignment: CAssignment,
     evidence: DirectSegmentedGlobalStoreEvidence8616,
-) -> bool:
+) -> cython.bint:
     """Prove that a canonical wide call-result store covers one raw store fact."""
+    wide_evidence: object
     tags = assignment.tags
     if not isinstance(tags, dict):
         return False
@@ -2918,24 +3052,29 @@ def _wide_call_return_store_covers_anonymous_evidence_8616(
     return required_offsets.issubset(wide_offsets)
 
 
+@cython.ccall
 def _with_replacement_tags_8616(source: object, replacement: CExpression) -> CExpression:
     """Preserve exact C-AST provenance across a Types/Lowering replacement."""
     replacement.tags = _merged_statement_tags_8616(source, replacement)
     return replacement
 
 
+@cython.ccall
 def _collect_nested_call_matches_8616(
     group: CStatements,
     evidence: DirectGlobalCallReturnStoreEvidence8616,
-) -> list[tuple[CStatements, int, object, CFunctionCall]]:
+) -> object:
     """Collect standalone/assigned calls tagged to the evidenced call site."""
-    call_matches: list[tuple[CStatements, int, object, CFunctionCall]] = []
+    assignment: object
+    standalone_call: object
+    index: object
+    stmt: object
+    call_matches: list[tuple[CStatements, cython.longlong, object, CFunctionCall]] = []
     for index, stmt in enumerate(group.statements):
         standalone_call = _standalone_cfunction_call_8616(stmt)
         if (
             standalone_call is not None
-            and _consistent_statement_ins_addr_8616(stmt, standalone_call)
-            == evidence.source_call_ins_addr
+            and operator.eq(_consistent_statement_ins_addr_8616(stmt, standalone_call), evidence.source_call_ins_addr)
             and _call_matches_direct_global_return_evidence_8616(
                 standalone_call,
                 evidence,
@@ -2948,12 +3087,11 @@ def _collect_nested_call_matches_8616(
             continue
         if (
             isinstance(assignment.rhs, CFunctionCall)
-            and _consistent_statement_ins_addr_8616(
+            and operator.eq(_consistent_statement_ins_addr_8616(
                 stmt,
                 assignment,
                 assignment.rhs,
-            )
-            == evidence.source_call_ins_addr
+            ), evidence.source_call_ins_addr)
             and _call_matches_direct_global_return_evidence_8616(
                 assignment.rhs,
                 evidence,
@@ -2967,16 +3105,20 @@ def _resolve_nested_store_match_8616(
     root: CStatements,
     group: CStatements,
     evidence: DirectGlobalCallReturnStoreEvidence8616,
-    expected_store_addrs: set[int],
-    expected_offsets: set[int],
-    debug_enabled: bool,
-) -> tuple[CStatements, int, int] | None:
+    expected_store_addrs: object,
+    expected_offsets: object,
+    debug_enabled: cython.bint,
+) -> object:
     """Resolve a contiguous proven store run in one nested group."""
-    matched_indices: list[int] = []
-    matched_store_addrs: set[int] = set()
-    tagged_assignment_indices: list[int] = []
-    tagged_assignment_addrs: set[int] = set()
-    covered_offsets: set[int] = set()
+    assignment: object
+    identity: object
+    index: object
+    stmt: object
+    matched_indices: list[cython.longlong] = []
+    matched_store_addrs: set[cython.longlong] = set()
+    tagged_assignment_indices: list[cython.longlong] = []
+    tagged_assignment_addrs: set[cython.longlong] = set()
+    covered_offsets: set[cython.longlong] = set()
     for index, stmt in enumerate(group.statements):
         assignment = _assignment_statement_8616(stmt)
         ins_addr = _statement_ins_addr_8616(stmt)
@@ -3001,14 +3143,14 @@ def _resolve_nested_store_match_8616(
         log.warning(
             "[seg-global-call-return-group] statements=%d tagged=%s covered=%s expected=%s indices=%s",
             len(group.statements),
-            tuple(hex(item) for item in sorted(matched_store_addrs)),
-            tuple(hex(item) for item in sorted(covered_offsets)),
-            tuple(hex(item) for item in sorted(expected_offsets)),
+            tuple(hex(item) for item in builtins.iter(sorted(matched_store_addrs))),
+            tuple(hex(item) for item in builtins.iter(sorted(covered_offsets))),
+            tuple(hex(item) for item in builtins.iter(sorted(expected_offsets))),
             tuple(matched_indices),
         )
     if (
         matched_indices
-        and matched_indices == list(range(matched_indices[0], matched_indices[-1] + 1))
+        and operator.eq(matched_indices, list(range(matched_indices[0], matched_indices[-1] + 1)))
         and matched_store_addrs == expected_store_addrs
         and covered_offsets == expected_offsets
     ):
@@ -3016,13 +3158,12 @@ def _resolve_nested_store_match_8616(
     elif (
         not matched_indices
         and tagged_assignment_indices
-        and tagged_assignment_indices
-        == list(
+        and operator.eq(tagged_assignment_indices, list(
             range(
                 tagged_assignment_indices[0],
                 tagged_assignment_indices[-1] + 1,
             )
-        )
+        ))
         and tagged_assignment_addrs == expected_store_addrs
     ):
         store_indices = tagged_assignment_indices
@@ -3042,10 +3183,10 @@ def _resolve_nested_store_match_8616(
 def _materialize_nested_direct_global_call_return_store_8616(
     root: CStatements,
     codegen: CodegenBoundary8616,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
-    evidence_items: tuple[DirectGlobalCallReturnStoreEvidence8616, ...],
+    direct_by_offset: object,
+    evidence_items: object,
     stats: SegmentedGlobalLoadStats8616,
-) -> bool:
+) -> cython.bint:
     """Fold an evidenced call/store sequence split across straight-line statement groups.
 
     angr may place a call carrier and the immediately following AX/DX stores
@@ -3054,17 +3195,22 @@ def _materialize_nested_direct_global_call_return_store_8616(
     control flow, calls, unrelated tagged instructions, or ambiguous matches
     are refused.
     """
+    dword_ref: object
+    lhs: object
+    store_match: object
+    evidence: object
+    group: object
 
     groups = [root]
-    groups.extend(node for node in _iter_c_nodes_deep_8616(root) if isinstance(node, CStatements) and node is not root)
+    groups.extend(node for node in builtins.iter(_iter_c_nodes_deep_8616(root)) if isinstance(node, CStatements) and node is not root)
     changed = False
     debug_enabled = bool(os.environ.get("INERTIA_DEBUG_SEGMENTED_GLOBAL_LOADS"))
     for evidence in evidence_items:
         dword_ref = direct_by_offset.get((evidence.offset & 0xFFFF, evidence.width))
         if dword_ref is None:
             continue
-        call_matches: list[tuple[CStatements, int, object, CFunctionCall]] = []
-        store_matches: list[tuple[CStatements, int, int]] = []
+        call_matches: list[tuple[CStatements, cython.longlong, object, CFunctionCall]] = []
+        store_matches: list[tuple[CStatements, cython.longlong, cython.longlong]] = []
         expected_store_addrs = set(evidence.store_ins_addrs)
         expected_offsets = {
             (evidence.offset + byte_index) & 0xFFFF
@@ -3122,18 +3268,21 @@ def _materialize_nested_direct_global_call_return_store_8616(
     return changed
 
 
+@cython.ccall
 def _dead_register_prefix_start_8616(
     root: CStatements,
     group: CStatements,
-    store_start: int,
-    store_end: int,
-) -> int:
+    store_start: cython.longlong,
+    store_end: cython.longlong,
+) -> cython.longlong:
     """Include only dead untagged register carriers preceding an exact store window."""
+    assignment: object
+    lhs_key: object
     start = store_start
     skipped_ids = {
         id(node)
-        for stmt in group.statements[store_start : store_end + 1]
-        for node in (stmt, *_iter_c_nodes_deep_8616(stmt))
+        for stmt in iter(group.statements[store_start : store_end + 1])
+        for node in iter((stmt, ) + tuple(_iter_c_nodes_deep_8616(stmt)))
     }
     while start > 0:
         candidate = group.statements[start - 1]
@@ -3149,7 +3298,7 @@ def _dead_register_prefix_start_8616(
             break
         candidate_ids = {
             id(node)
-            for node in (candidate, *_iter_c_nodes_deep_8616(candidate))
+            for node in iter((candidate, ) + tuple(_iter_c_nodes_deep_8616(candidate)))
         }
         if _cvariable_key_used_outside_ids_8616(
             root,
@@ -3162,6 +3311,7 @@ def _dead_register_prefix_start_8616(
     return start
 
 
+@cython.ccall
 def _walk_statement_container_children_8616(
     node: object,
     visit: Callable[[object], None],
@@ -3171,6 +3321,12 @@ def _walk_statement_container_children_8616(
     Loop, conditional and switch containers expose different child slots;
     absent slots are not traversed. This traversal does not recover facts.
     """
+    child: object
+    default: object
+    pairs: object
+    _condition: object
+    attr: object
+    body: object
     for attr in ("body", "else_node", "initializer", "iterator", "iteration"):
         child = getattr(node, attr, None)
         if child is not None:
@@ -3187,20 +3343,22 @@ def _walk_statement_container_children_8616(
             visit(default)
 
 
+@cython.ccall
 def _replace_matched_statements_in_tree_8616(
     root: object,
     try_match: Callable[[list[object], int], DwordUpdateMatch8616],
-) -> bool:
+) -> cython.bint:
     """Walk dynamic codegen containers, replacing statements where try_match hits."""
-    changed: list[bool] = [False]
+    changed: list[cython.bint] = [False]
     _replace_matches_in_node_8616(root, try_match, changed)
     return changed[0]
 
 
+@cython.ccall
 def _replace_matches_in_node_8616(
     node: object,
     try_match: Callable[[list[object], int], DwordUpdateMatch8616],
-    changed: list[bool],
+    changed: object,
 ) -> None:
     """Rewrite matched statements then recurse into dynamic children.
 
@@ -3208,6 +3366,8 @@ def _replace_matches_in_node_8616(
     list. Mutate only an observed list; other node variants retain their
     representation and pass through the declared child traversal.
     """
+    match: object
+    statements: object
     statements = getattr(node, "statements", None)
     if isinstance(statements, list):
         index = 0
@@ -3230,7 +3390,7 @@ def _replace_matches_in_node_8616(
 def _replace_matches_in_node_children_8616(
     node: object,
     try_match: Callable[[list[object], int], DwordUpdateMatch8616],
-    changed: list[bool],
+    changed: object,
 ) -> None:
     """Recurse into the dynamic container child surfaces."""
     _walk_statement_container_children_8616(
@@ -3242,10 +3402,10 @@ def _replace_matches_in_node_children_8616(
 def _materialize_direct_global_dword_update_from_low_word_high_bytes_8616(
     root: CStatements,
     codegen: CodegenBoundary8616,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
-    direct_update_by_offset: dict[tuple[int, int], list[DirectGlobalUpdateEvidence8616]],
+    direct_by_offset: object,
+    direct_update_by_offset: object,
     stats: SegmentedGlobalLoadStats8616,
-) -> bool:
+) -> cython.bint:
     """Rewrite dword update sequences across a dynamic boundary: angr codegen statement trees."""
 
     return _replace_matched_statements_in_tree_8616(
@@ -3265,10 +3425,10 @@ def _materialize_direct_global_dword_update_from_low_word_high_bytes_8616(
 def _materialize_direct_global_dword_update_from_scalar_preserve_8616(
     root: CStatements,
     codegen: CodegenBoundary8616,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
-    direct_update_by_offset: dict[tuple[int, int], list[DirectGlobalUpdateEvidence8616]],
+    direct_by_offset: object,
+    direct_update_by_offset: object,
     stats: SegmentedGlobalLoadStats8616,
-) -> bool:
+) -> cython.bint:
     """Rewrite scalar-preserve updates across a dynamic boundary: angr codegen statement trees."""
 
     return _replace_matched_statements_in_tree_8616(
@@ -3288,10 +3448,10 @@ def _materialize_direct_global_dword_update_from_scalar_preserve_8616(
 def _materialize_direct_global_dword_update_from_low_word_scalar_preserve_8616(
     root: CStatements,
     codegen: CodegenBoundary8616,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
-    direct_update_by_offset: dict[tuple[int, int], list[DirectGlobalUpdateEvidence8616]],
+    direct_by_offset: object,
+    direct_update_by_offset: object,
     stats: SegmentedGlobalLoadStats8616,
-) -> bool:
+) -> cython.bint:
     """Rewrite low-word scalar-preserve updates across a dynamic boundary: angr codegen statement trees."""
 
     return _replace_matched_statements_in_tree_8616(
@@ -3308,15 +3468,26 @@ def _materialize_direct_global_dword_update_from_low_word_scalar_preserve_8616(
     )
 
 
+@cython.ccall
 def _match_direct_global_dword_update_from_scalar_preserve_8616(
     root: CStatements,
-    statements: list[object],
-    index: int,
+    statements: object,
+    index: cython.longlong,
     codegen: CodegenBoundary8616,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
-    direct_update_by_offset: dict[tuple[int, int], list[DirectGlobalUpdateEvidence8616]],
+    direct_by_offset: object,
+    direct_update_by_offset: object,
     stats: SegmentedGlobalLoadStats8616,
 ) -> DwordUpdateMatch8616:
+    assignment: object
+    dword_ref: object
+    high_ref: object
+    lhs: object
+    low_ref: object
+    rhs_lhs: object
+    scalar_identity: object
+    update_candidates: object
+    update_evidence: object
+    upper_index: object
     assignment = _assignment_statement_8616(statements[index])
     if assignment is None:
         return None
@@ -3360,15 +3531,26 @@ def _match_direct_global_dword_update_from_scalar_preserve_8616(
     return CAssignment(lhs, rhs, codegen=codegen, tags=assignment.tags), last_index
 
 
+@cython.ccall
 def _match_direct_global_dword_update_from_low_word_scalar_preserve_8616(
     root: CStatements,
-    statements: list[object],
-    index: int,
+    statements: object,
+    index: cython.longlong,
     codegen: CodegenBoundary8616,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
-    direct_update_by_offset: dict[tuple[int, int], list[DirectGlobalUpdateEvidence8616]],
+    direct_by_offset: object,
+    direct_update_by_offset: object,
     stats: SegmentedGlobalLoadStats8616,
 ) -> DwordUpdateMatch8616:
+    dword_ref: object
+    high_ref: object
+    lhs: object
+    low_assignment: object
+    low_identity: object
+    low_ref: object
+    rhs_lhs: object
+    update_candidates: object
+    update_evidence: object
+    upper_index: object
     low_assignment = _assignment_statement_8616(statements[index])
     if low_assignment is None:
         return None
@@ -3439,11 +3621,14 @@ def _match_direct_global_dword_update_from_low_word_scalar_preserve_8616(
     return CAssignment(lhs, rhs, codegen=codegen, tags=low_assignment.tags), last_index
 
 
+@cython.ccall
 def _direct_global_dword_update_dependent_copy_window_end_8616(
-    statements: list[object],
-    first_index: int,
-    seed_last_index: int,
-) -> int:
+    statements: object,
+    first_index: cython.longlong,
+    seed_last_index: cython.longlong,
+) -> cython.longlong:
+    assignment: object
+    stmt: object
     consumed_keys: set[object] = set()
     for stmt in statements[first_index + 1 : seed_last_index + 1]:
         assignment = _assignment_statement_8616(stmt)
@@ -3473,20 +3658,25 @@ def _direct_global_dword_update_dependent_copy_window_end_8616(
     return last_index
 
 
-def _copy_keys_read_by_expr_8616(node: object) -> set[object]:
+@cython.ccall
+def _copy_keys_read_by_expr_8616(node: object) -> object:
+    child: object
     keys: set[object] = set()
     for child in _iter_c_nodes_deep_8616(node):
         keys.update(_copy_keys_8616(child))
     return keys
 
 
+@cython.ccall
 def _scalar_preserve_upper_word_store_index_8616(
-    statements: list[object],
-    index: int,
+    statements: object,
+    index: cython.longlong,
     codegen: CodegenBoundary8616,
     dword_ref: DirectGlobalSymbolRef8616,
 ) -> int | None:
     """Return the last consecutive scalar write that preserves the updated low word."""
+    assignment: object
+    scalar: object
     scalar = _make_direct_global_symbol_expr_8616(codegen, dword_ref, 4)
     if scalar is None:
         return None
@@ -3507,11 +3697,13 @@ def _scalar_preserve_upper_word_store_index_8616(
     return matched_index
 
 
+@cython.ccall
 def _scalar_preserve_low_word_update_delta_8616(
     expr: object,
     codegen: CodegenBoundary8616,
     dword_ref: DirectGlobalSymbolRef8616,
 ) -> int | None:
+    scalar: object
     scalar = _make_direct_global_symbol_expr_8616(codegen, dword_ref, 4)
     if scalar is None or not isinstance(expr, CBinaryOp) or expr.op != "Or":
         return None
@@ -3525,7 +3717,8 @@ def _scalar_preserve_low_word_update_delta_8616(
     return _direct_global_word_update_expr_delta_8616(updated)
 
 
-def _scalar_preserves_high_word_8616(expr: object, scalar: object) -> bool:
+@cython.ccall
+def _scalar_preserves_high_word_8616(expr: object, scalar: object) -> cython.bint:
     return (
         isinstance(expr, CBinaryOp)
         and expr.op == "And"
@@ -3534,7 +3727,8 @@ def _scalar_preserves_high_word_8616(expr: object, scalar: object) -> bool:
     )
 
 
-def _scalar_preserves_low_word_8616(expr: object, scalar: object) -> bool:
+@cython.ccall
+def _scalar_preserves_low_word_8616(expr: object, scalar: object) -> cython.bint:
     if not isinstance(expr, CBinaryOp) or expr.op != "Or":
         return False
     lhs = expr.lhs
@@ -3550,15 +3744,25 @@ def _scalar_preserves_low_word_8616(expr: object, scalar: object) -> bool:
     )
 
 
+@cython.ccall
 def _materialize_direct_global_boolean_stores_8616(
     root: CStatements,
     codegen: CodegenBoundary8616,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
-    direct_boolean_by_offset: dict[tuple[int, int], list[DirectGlobalBooleanStoreEvidence8616]],
+    direct_by_offset: object,
+    direct_boolean_by_offset: object,
     stats: SegmentedGlobalLoadStats8616,
     *,
     query_index: StructuredAstQueryIndex8616 | None = None,
-) -> bool:
+) -> cython.bint:
+    assignment: object
+    candidates: object
+    dest_ref: object
+    evidence: object
+    lhs: object
+    lhs_identity: object
+    source: object
+    source_ref: object
+    stmt: object
     consumed: set[DirectGlobalBooleanStoreEvidence8616] = set()
     changed = False
     if query_index is not None:
@@ -3601,8 +3805,8 @@ def _materialize_direct_global_boolean_stores_8616(
             existing_carrier_addrs = carrier._inertia_consumed_direct_global_boolean_carrier_ins_addrs_8616
         except AttributeError:
             existing_carrier_addrs = frozenset()
-        consumed_carrier_addrs: set[int] = {
-            address for address in existing_carrier_addrs if isinstance(address, int)
+        consumed_carrier_addrs: set[cython.longlong] = {
+            address for address in iter(existing_carrier_addrs) if isinstance(address, int)
         }
         consumed_carrier_addrs.update(evidence.carrier_ins_addrs)
         carrier._inertia_consumed_direct_global_boolean_carrier_ins_addrs_8616 = (
@@ -3617,30 +3821,34 @@ def _materialize_direct_global_boolean_stores_8616(
     return changed
 
 
+@cython.ccall
 def _select_direct_global_boolean_store_evidence_8616(
     candidates: Iterable[DirectGlobalBooleanStoreEvidence8616],
-    consumed: set[DirectGlobalBooleanStoreEvidence8616],
-    stmt_ins_addr: int | None,
+    consumed: object,
+    stmt_ins_addr: object,
 ) -> DirectGlobalBooleanStoreEvidence8616 | None:
-    available = [item for item in candidates if item not in consumed]
+    item: object
+    available = [item for item in iter(candidates) if item not in consumed]
     if not available:
         return None
     if stmt_ins_addr is not None:
         for item in available:
-            if item.store_ins_addr == stmt_ins_addr:
+            if operator.eq(item.store_ins_addr, stmt_ins_addr):
                 return item
         return None
     if len(available) == 1:
         return available[0]
-    without_addr = [item for item in available if item.store_ins_addr is None]
+    without_addr = [item for item in iter(available) if item.store_ins_addr is None]
     return without_addr[0] if len(without_addr) == 1 else None
 
 
 def _direct_global_boolean_assignment_evidence_8616(
     assignment: CAssignment,
-    direct_boolean_by_offset: dict[tuple[int, int], list[DirectGlobalBooleanStoreEvidence8616]],
+    direct_boolean_by_offset: object,
 ) -> DirectGlobalBooleanStoreEvidence8616 | None:
     """Return exact instruction evidence for one direct-global assignment."""
+    identity: object
+    ins_addr: object
     identity = _direct_global_lvalue_identity_8616(assignment.lhs)
     if identity is None:
         return None
@@ -3649,42 +3857,45 @@ def _direct_global_boolean_assignment_evidence_8616(
         return None
     matches = tuple(
         evidence
-        for evidence in direct_boolean_by_offset.get((identity[0] & 0xFFFF, identity[1]), ())
-        if evidence.store_ins_addr == ins_addr
+        for evidence in builtins.iter(direct_boolean_by_offset.get((identity[0] & 0xFFFF, identity[1]), ()))
+        if operator.eq(evidence.store_ins_addr, ins_addr)
     )
     return matches[0] if len(matches) == 1 else None
 
 
+@cython.ccall
 def _direct_global_boolean_rhs_matches_evidence_8616(
     rhs: object,
     evidence: DirectGlobalBooleanStoreEvidence8616,
-) -> bool:
+) -> cython.bint:
     """Return whether an RHS is the explicit comparison proven by evidence."""
     if not isinstance(rhs, CBinaryOp) or rhs.op != "CmpLT":
         return False
     source_identity = _direct_global_lvalue_identity_8616(rhs.lhs)
     return (
         source_identity == (evidence.source_offset & 0xFFFF, evidence.source_width)
-        and _constant_int_8616(rhs.rhs) == (evidence.compare_value & 0xFFFF)
+        and operator.eq(_constant_int_8616(rhs.rhs), (evidence.compare_value & 0xFFFF))
     )
 
 
 def _remove_duplicate_direct_global_boolean_store_artifacts_8616(
     root: CStatements,
-    direct_boolean_by_offset: dict[tuple[int, int], list[DirectGlobalBooleanStoreEvidence8616]],
+    direct_boolean_by_offset: object,
     stats: SegmentedGlobalLoadStats8616,
-) -> bool:
+) -> cython.bint:
     """Remove duplicate C assignments for one exact binary boolean store."""
     changed = False
 
     def process_statements(node: object) -> None:
         """Walk the dynamic boundary: third-party angr C AST statement containers."""
+        assignment: object
+        statements: object
         nonlocal changed
         statements = getattr(node, "statements", None)
         if isinstance(statements, list):
             canonical = {
                 evidence
-                for statement in statements
+                for statement in iter(statements)
                 if (assignment := _assignment_statement_8616(statement)) is not None
                 and (evidence := _direct_global_boolean_assignment_evidence_8616(
                     assignment,
@@ -3730,13 +3941,17 @@ def _remove_duplicate_direct_global_boolean_store_artifacts_8616(
 
 def _remove_direct_global_boolean_store_high_byte_merges_8616(
     root: CStatements,
-    direct_boolean_by_offset: dict[tuple[int, int], list[DirectGlobalBooleanStoreEvidence8616]],
+    direct_boolean_by_offset: object,
     stats: SegmentedGlobalLoadStats8616,
-) -> bool:
+) -> cython.bint:
     changed = False
 
     def process_statements(node: object) -> None:
         """Walk a dynamic boundary: angr codegen statement-node attributes."""
+        assignment: object
+        delete_index: object
+        identity: object
+        statements: object
 
         nonlocal changed
         statements = getattr(node, "statements", None)
@@ -3778,12 +3993,15 @@ def _remove_direct_global_boolean_store_high_byte_merges_8616(
     return changed
 
 
+@cython.ccall
 def _direct_global_boolean_store_high_byte_merge_index_8616(
-    statements: list[object],
-    index: int,
-    identity: tuple[int, int],
+    statements: object,
+    index: cython.longlong,
+    identity: object,
     lhs: object,
 ) -> int | None:
+    assignment: object
+    candidate_identity: object
     max_index = min(len(statements), index + 16)
     for candidate_index in range(index + 1, max_index):
         assignment = _assignment_statement_8616(statements[candidate_index])
@@ -3797,7 +4015,7 @@ def _direct_global_boolean_store_high_byte_merge_index_8616(
             if not _copy_keys_8616(candidate_lhs):
                 return None
             continue
-        if candidate_identity != identity:
+        if operator.ne(candidate_identity, identity):
             return None
         if _direct_global_boolean_high_byte_merge_rhs_8616(assignment.rhs, lhs):
             return candidate_index
@@ -3805,7 +4023,10 @@ def _direct_global_boolean_store_high_byte_merge_index_8616(
     return None
 
 
-def _direct_global_boolean_high_byte_merge_rhs_8616(rhs: object, global_lvalue: object) -> bool:
+@cython.ccall
+def _direct_global_boolean_high_byte_merge_rhs_8616(rhs: object, global_lvalue: object) -> cython.bint:
+    high_part: object
+    low_part: object
     if not isinstance(rhs, CBinaryOp) or rhs.op != "Or":
         return False
     pairs = ((rhs.lhs, rhs.rhs), (rhs.rhs, rhs.lhs))
@@ -3817,14 +4038,15 @@ def _direct_global_boolean_high_byte_merge_rhs_8616(rhs: object, global_lvalue: 
     return False
 
 
-def _direct_global_boolean_low_preserving_part_8616(node: object, global_lvalue: object) -> bool:
+def _direct_global_boolean_low_preserving_part_8616(node: object, global_lvalue: object) -> cython.bint:
     if not isinstance(node, CBinaryOp) or node.op != "And":
         return False
     pairs = ((node.lhs, node.rhs), (node.rhs, node.lhs))
-    return any(_same_c_expression_8616(value, global_lvalue) and _constant_int_8616(mask) == 0xFF for value, mask in pairs)
+    return any(_same_c_expression_8616(value, global_lvalue) and _constant_int_8616(mask) == 0xFF for value, mask in iter(pairs))
 
 
-def _direct_global_boolean_high_byte_part_8616(node: object) -> bool:
+@cython.ccall
+def _direct_global_boolean_high_byte_part_8616(node: object) -> cython.bint:
     if not isinstance(node, CBinaryOp) or node.op != "Shl":
         return False
     return _constant_int_8616(node.rhs) == 8
@@ -3833,14 +4055,17 @@ def _direct_global_boolean_high_byte_part_8616(node: object) -> bool:
 def _materialize_direct_global_dword_update_preserving_carriers_8616(
     root: CStatements,
     codegen: CodegenBoundary8616,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
-    direct_update_by_offset: dict[tuple[int, int], list[DirectGlobalUpdateEvidence8616]],
+    direct_by_offset: object,
+    direct_update_by_offset: object,
     stats: SegmentedGlobalLoadStats8616,
-) -> bool:
+) -> cython.bint:
     changed = False
 
     def process_statements(node: object) -> None:
         """Walk a dynamic boundary: angr codegen statement-node attributes."""
+        match: object
+        statements: object
+        delete_index: object
 
         nonlocal changed
         statements = getattr(node, "statements", None)
@@ -3873,10 +4098,11 @@ def _materialize_direct_global_dword_update_preserving_carriers_8616(
     return changed
 
 
+@cython.ccall
 def _dword_update_refs_8616(
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
-    direct_update_by_offset: dict[tuple[int, int], list[DirectGlobalUpdateEvidence8616]],
-    low_addr: int,
+    direct_by_offset: object,
+    direct_update_by_offset: object,
+    low_addr: cython.longlong,
 ) -> tuple[
     DirectGlobalSymbolRef8616 | None,
     DirectGlobalSymbolRef8616 | None,
@@ -3884,6 +4110,10 @@ def _dword_update_refs_8616(
     list[DirectGlobalUpdateEvidence8616],
 ]:
     """Resolve the low/high/dword refs and update candidates for one address."""
+    dword_ref: object
+    high_ref: object
+    low_ref: object
+    update_candidates: object
     low_ref = direct_by_offset.get((low_addr & 0xFFFF, 2))
     high_ref = direct_by_offset.get(((low_addr + 2) & 0xFFFF, 2))
     dword_ref = direct_by_offset.get((low_addr & 0xFFFF, 4))
@@ -3891,18 +4121,19 @@ def _dword_update_refs_8616(
     return low_ref, high_ref, dword_ref, update_candidates
 
 
+@cython.ccall
 def _dword_update_ref_gate_8616(
     low_ref: DirectGlobalSymbolRef8616,
     high_ref: DirectGlobalSymbolRef8616,
     dword_ref: DirectGlobalSymbolRef8616,
-) -> tuple[str, dict[str, object]] | None:
+) -> object:
     """Return (reason, debug kwargs) when the refs fail the dword-update gate."""
-    low_is_dword_base = int(low_ref.relative_disp) == 0 and int(dword_ref.offset) == int(low_ref.offset)
-    if not low_is_dword_base and _sanitize_identifier_8616(low_ref.name) != _sanitize_identifier_8616(high_ref.name):
+    low_is_dword_base = int(low_ref.relative_disp) == 0 and operator.eq(int(dword_ref.offset), int(low_ref.offset))
+    if not low_is_dword_base and operator.ne(_sanitize_identifier_8616(low_ref.name), _sanitize_identifier_8616(high_ref.name)):
         return "name_mismatch_high", {"low": low_ref.name, "high": high_ref.name}
     if (
         not low_is_dword_base
-        and _sanitize_identifier_8616(low_ref.name) != _sanitize_identifier_8616(dword_ref.name)
+        and operator.ne(_sanitize_identifier_8616(low_ref.name), _sanitize_identifier_8616(dword_ref.name))
     ):
         return "name_mismatch_dword", {"low": low_ref.name, "dword": dword_ref.name}
     if int(low_ref.relative_disp) != 0 or int(high_ref.relative_disp) != 2:
@@ -3910,6 +4141,7 @@ def _dword_update_ref_gate_8616(
     return None
 
 
+@cython.ccall
 def _dword_update_replacement_8616(
     codegen: CodegenBoundary8616,
     dword_ref: DirectGlobalSymbolRef8616,
@@ -3918,6 +4150,8 @@ def _dword_update_replacement_8616(
     stats: SegmentedGlobalLoadStats8616,
 ) -> CAssignment | None:
     """Build the canonical dword update assignment for a proven match."""
+    lhs: object
+    rhs_lhs: object
     lhs = _make_direct_global_symbol_expr_8616(codegen, dword_ref, 4)
     if lhs is None:
         return None
@@ -3938,14 +4172,23 @@ def _dword_update_replacement_8616(
     return CAssignment(lhs, rhs, codegen=codegen, tags=low_assignment.tags)
 
 
+@cython.ccall
 def _match_direct_global_dword_update_preserving_carriers_8616(
-    statements: list[object],
-    index: int,
+    statements: object,
+    index: cython.longlong,
     codegen: CodegenBoundary8616,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
-    direct_update_by_offset: dict[tuple[int, int], list[DirectGlobalUpdateEvidence8616]],
+    direct_by_offset: object,
+    direct_update_by_offset: object,
     stats: SegmentedGlobalLoadStats8616,
-) -> tuple[CAssignment, tuple[int, int]] | None:
+) -> object:
+    assignment: object
+    dword_ref: object
+    high_ref: object
+    low_assignment: object
+    low_identity: object
+    low_ref: object
+    match_window: object
+    update_evidence: object
     low_assignment = _assignment_statement_8616(statements[index])
     if low_assignment is None:
         return None
@@ -3978,21 +4221,25 @@ def _match_direct_global_dword_update_preserving_carriers_8616(
     return assignment, (high_low_index, high_high_index)
 
 
+@cython.ccall
 def _match_low_word_dword_update_tail_8616(
     root: CStatements,
-    statements: list[object],
-    index: int,
+    statements: object,
+    index: cython.longlong,
     codegen: CodegenBoundary8616,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
-    direct_update_by_offset: dict[tuple[int, int], list[DirectGlobalUpdateEvidence8616]],
+    direct_by_offset: object,
+    direct_update_by_offset: object,
     stats: SegmentedGlobalLoadStats8616,
     low_word_stmt: object,
     low_assignment: CAssignment,
-    low_addr: int,
+    low_addr: cython.longlong,
     dword_ref: DirectGlobalSymbolRef8616,
     update_evidence: DirectGlobalUpdateEvidence8616,
 ) -> DwordUpdateMatch8616:
     """Resolve the store window and emit the canonical dword update."""
+    assignment: object
+    match_window: object
+    upper_word_match: object
     match_window = _direct_global_dword_update_high_byte_window_8616(statements, index, low_addr)
     if match_window is None:
         upper_word_match = _match_direct_global_dword_update_from_low_word_upper_word_8616(
@@ -4030,13 +4277,21 @@ def _match_low_word_dword_update_tail_8616(
 
 def _match_direct_global_dword_update_from_low_word_high_bytes_8616(
     root: CStatements,
-    statements: list[object],
-    index: int,
+    statements: object,
+    index: cython.longlong,
     codegen: CodegenBoundary8616,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
-    direct_update_by_offset: dict[tuple[int, int], list[DirectGlobalUpdateEvidence8616]],
+    direct_by_offset: object,
+    direct_update_by_offset: object,
     stats: SegmentedGlobalLoadStats8616,
 ) -> DwordUpdateMatch8616:
+    byte_match: object
+    dword_ref: object
+    gate_failure: object
+    high_ref: object
+    low_assignment: object
+    low_identity: object
+    low_ref: object
+    update_evidence: object
     low_word_stmt = statements[index]
     low_assignment = _assignment_statement_8616(low_word_stmt)
     if low_assignment is None:
@@ -4093,7 +4348,7 @@ def _match_direct_global_dword_update_from_low_word_high_bytes_8616(
             "delta",
             low_word_stmt,
             source_delta=source_delta,
-            evidence_delta=tuple(item.delta for item in update_candidates),
+            evidence_delta=tuple(item.delta for item in iter(update_candidates)),
         )
         return None
     return _match_low_word_dword_update_tail_8616(
@@ -4114,13 +4369,13 @@ def _match_direct_global_dword_update_from_low_word_high_bytes_8616(
 
 def _match_direct_global_dword_update_from_low_word_upper_word_8616(
     root: CStatements,
-    statements: list[object],
-    index: int,
+    statements: object,
+    index: cython.longlong,
     codegen: CodegenBoundary8616,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
-    direct_update_by_offset: dict[tuple[int, int], list[DirectGlobalUpdateEvidence8616]],
+    direct_by_offset: object,
+    direct_update_by_offset: object,
     stats: SegmentedGlobalLoadStats8616,
-    low_addr: int,
+    low_addr: cython.longlong,
 ) -> DwordUpdateMatch8616:
     """Fold low-word updates plus upper-word carry stores.
 
@@ -4130,6 +4385,15 @@ def _match_direct_global_dword_update_from_low_word_upper_word_8616(
     is still word-sized; without it this matcher refuses the shape as too weak
     to widen to a dword update.
     """
+    dword_ref: object
+    high_ref: object
+    lhs: object
+    low_assignment: object
+    low_ref: object
+    rhs_lhs: object
+    update_candidates: object
+    update_evidence: object
+    upper_index: object
     low_assignment = _assignment_statement_8616(statements[index])
     if low_assignment is None:
         return None
@@ -4149,7 +4413,7 @@ def _match_direct_global_dword_update_from_low_word_upper_word_8616(
             update=bool(update_candidates),
         )
         return None
-    low_is_dword_base = int(low_ref.relative_disp) == 0 and int(dword_ref.offset) == int(low_ref.offset)
+    low_is_dword_base = int(low_ref.relative_disp) == 0 and operator.eq(int(dword_ref.offset), int(low_ref.offset))
     if not low_is_dword_base:
         _debug_direct_dword_update_refusal_8616("low_word_upper_not_dword_base", statements[index], low=low_ref.name)
         return None
@@ -4167,7 +4431,7 @@ def _match_direct_global_dword_update_from_low_word_upper_word_8616(
             "low_word_upper_delta",
             statements[index],
             source_delta=source_delta,
-            evidence_delta=tuple(item.delta for item in update_candidates),
+            evidence_delta=tuple(item.delta for item in iter(update_candidates)),
         )
         return None
     upper_index = _direct_global_dword_update_upper_word_window_8616(statements, index, low_addr)
@@ -4201,11 +4465,14 @@ def _match_direct_global_dword_update_from_low_word_upper_word_8616(
     return CAssignment(lhs, rhs, codegen=codegen, tags=low_assignment.tags), last_index
 
 
+@cython.ccall
 def _direct_global_dword_update_upper_word_window_8616(
-    statements: list[object],
-    index: int,
-    low_addr: int,
+    statements: object,
+    index: cython.longlong,
+    low_addr: cython.longlong,
 ) -> int | None:
+    assignment: object
+    identity: object
     upper_addr = (low_addr + 2) & 0xFFFF
     max_index = min(len(statements), index + 96)
     for candidate_index in range(index + 1, max_index):
@@ -4222,7 +4489,7 @@ def _direct_global_dword_update_upper_word_window_8616(
             continue
         addr, width = identity
         addr &= 0xFFFF
-        if addr == (low_addr & 0xFFFF):
+        if operator.eq(addr, (low_addr & 0xFFFF)):
             _debug_direct_dword_update_refusal_8616(
                 "low_word_upper_window_low_rewrite",
                 statements[candidate_index],
@@ -4238,23 +4505,25 @@ def _direct_global_dword_update_upper_word_window_8616(
     return None
 
 
-def _seg_global_debug_log_8616(fmt: str, *args: object) -> None:
+def _seg_global_debug_log_8616(fmt: object, *args: object) -> None:
     """Emit an opt-in segmented-global debug line."""
     if not os.environ.get("INERTIA_DEBUG_SEGMENTED_GLOBAL_LOADS"):
         return
     log.warning(fmt, *args)
 
 
-def _debug_direct_dword_update_refusal_8616(reason: str, stmt: object, **fields: object) -> None:
+def _debug_direct_dword_update_refusal_8616(reason: object, stmt: object, **fields: object) -> None:
     """Log an opt-in dword refusal without filtering by sample-specific names."""
     if not os.environ.get("INERTIA_DEBUG_SEGMENTED_GLOBAL_LOADS"):
         return
     rendered = _debug_c_repr_8616(stmt)
-    extras = " ".join(f"{key}={value}" for key, value in sorted(fields.items()))
+    extras = " ".join(f"{key}={value}" for key, value in builtins.iter(sorted(tuple(fields.items()))))
     log.warning("[seg-global-dword-update] refused reason=%s %s stmt=%s", reason, extras, rendered)
 
 
-def _debug_c_repr_8616(node: object) -> str:
+@cython.ccall
+def _debug_c_repr_8616(node: object) -> object:
+    render: object
     rendered = type(node).__name__ if node is not None else "None"
     with contextlib.suppress(Exception):
         if node is None:
@@ -4266,14 +4535,18 @@ def _debug_c_repr_8616(node: object) -> str:
     return rendered
 
 
+@cython.ccall
 def _direct_global_dword_update_high_byte_window_8616(
-    statements: list[object],
-    index: int,
-    low_addr: int,
-) -> tuple[int, int] | None:
+    statements: object,
+    index: cython.longlong,
+    low_addr: cython.longlong,
+) -> object:
+    assignment: object
+    high_low_index: object
+    identity: object
     high_low_addr = (low_addr + 2) & 0xFFFF
     high_high_addr = (low_addr + 3) & 0xFFFF
-    high_low_index: int | None = None
+    high_low_index = None
     max_index = min(len(statements), index + 96)
     for candidate_index in range(index + 1, max_index):
         assignment = _assignment_statement_8616(statements[candidate_index])
@@ -4289,7 +4562,7 @@ def _direct_global_dword_update_high_byte_window_8616(
             continue
         addr, width = identity
         addr &= 0xFFFF
-        if addr == (low_addr & 0xFFFF):
+        if operator.eq(addr, (low_addr & 0xFFFF)):
             _debug_direct_dword_update_refusal_8616(
                 "window_low_rewrite",
                 statements[candidate_index],
@@ -4314,10 +4587,12 @@ def _direct_global_dword_update_high_byte_window_8616(
     return None
 
 
+@cython.ccall
 def _direct_global_dword_update_removable_window_end_8616(
-    statements: list[object],
-    high_high_index: int,
-) -> int:
+    statements: object,
+    high_high_index: cython.longlong,
+) -> cython.longlong:
+    assignment: object
     last_index = high_high_index
     # MS C 16-bit arithmetic commonly emits a long, pure flag-reconstruction
     # suffix after a split dword update.  The later liveness gate below proves
@@ -4359,14 +4634,17 @@ def _direct_global_dword_update_removable_window_end_8616(
 
 def _direct_global_dword_update_gap_is_removable_8616(
     _root: CStatements,
-    statements: list[object],
-    first_index: int,
-    last_index: int,
-) -> bool:
+    statements: object,
+    first_index: cython.longlong,
+    last_index: cython.longlong,
+) -> cython.bint:
+    assignment: object
+    key: object
+    stmt: object
     consumed = statements[first_index : last_index + 1]
-    consumed_ids = {id(stmt) for stmt in consumed}
+    consumed_ids = {id(stmt) for stmt in iter(consumed)}
     for stmt in consumed:
-        consumed_ids.update(id(child) for child in _iter_c_nodes_deep_8616(stmt))
+        consumed_ids.update(id(child) for child in builtins.iter(_iter_c_nodes_deep_8616(stmt)))
     assigned_keys: set[object] = set()
     for stmt in statements[first_index + 1 : last_index]:
         assignment = _assignment_statement_8616(stmt)
@@ -4396,25 +4674,26 @@ def _direct_global_dword_update_gap_is_removable_8616(
     return True
 
 
-def _same_segment_pointer_helper_self_assignment_8616(lhs: object, rhs: object) -> bool:
+def _same_segment_pointer_helper_self_assignment_8616(lhs: object, rhs: object) -> cython.bint:
     if not isinstance(lhs, CFunctionCall) or not isinstance(rhs, CFunctionCall):
         return False
-    helper_names = {helper.helper_name for helper in SegmentPointerHelper8616}
+    helper_names = {helper.helper_name for helper in iter(SegmentPointerHelper8616)}
     lhs_name = (_cfunction_call_name_8616(lhs) or "").upper()
     rhs_name = (_cfunction_call_name_8616(rhs) or "").upper()
     if lhs_name != rhs_name or lhs_name not in helper_names:
         return False
     lhs_args = tuple(lhs.args or ())
     rhs_args = tuple(rhs.args or ())
-    if len(lhs_args) != len(rhs_args):
+    if operator.ne(len(lhs_args), len(rhs_args)):
         return False
     return all(
         _same_segment_pointer_helper_arg_8616(lhs_arg, rhs_arg)
-        for lhs_arg, rhs_arg in zip(lhs_args, rhs_args, strict=True)
+        for lhs_arg, rhs_arg in builtins.iter(zip(lhs_args, rhs_args, strict=True))
     )
 
 
-def _same_segment_pointer_helper_arg_8616(lhs: object, rhs: object) -> bool:
+@cython.ccall
+def _same_segment_pointer_helper_arg_8616(lhs: object, rhs: object) -> cython.bint:
     if _same_c_expression_8616(lhs, rhs):
         return True
     lhs_keys = _copy_keys_8616(lhs)
@@ -4425,11 +4704,13 @@ def _same_segment_pointer_helper_arg_8616(lhs: object, rhs: object) -> bool:
 def _remove_segment_pointer_helper_self_assignments_8616(
     root: CStatements,
     stats: SegmentedGlobalLoadStats8616,
-) -> bool:
+) -> cython.bint:
     changed = False
 
     def process_statements(node: object) -> None:
         """Walk a dynamic boundary: angr codegen statement-node attributes."""
+        assignment: object
+        statements: object
 
         nonlocal changed
         statements = getattr(node, "statements", None)
@@ -4457,14 +4738,16 @@ def _remove_segment_pointer_helper_self_assignments_8616(
 def _materialize_direct_global_word_store_pairs_8616(
     root: CStatements,
     codegen: CodegenBoundary8616,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
-    direct_update_by_offset: dict[tuple[int, int], list[DirectGlobalUpdateEvidence8616]],
+    direct_by_offset: object,
+    direct_update_by_offset: object,
     stats: SegmentedGlobalLoadStats8616,
-) -> bool:
+) -> cython.bint:
     changed = False
 
     def process_statements(node: object) -> None:
         """Walk a dynamic boundary: angr codegen statement-node attributes."""
+        replacement: object
+        statements: object
 
         nonlocal changed
         statements = getattr(node, "statements", None)
@@ -4502,14 +4785,16 @@ def _materialize_direct_global_word_store_pairs_8616(
 def _materialize_direct_global_dword_store_pairs_8616(
     root: CStatements,
     codegen: CodegenBoundary8616,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
-    direct_call_return_by_offset: dict[tuple[int, int], list[DirectGlobalCallReturnStoreEvidence8616]],
+    direct_by_offset: object,
+    direct_call_return_by_offset: object,
     stats: SegmentedGlobalLoadStats8616,
-) -> bool:
+) -> cython.bint:
     changed = False
 
     def process_statements(node: object) -> None:
         """Walk a dynamic boundary: angr codegen statement-node attributes."""
+        match: object
+        statements: object
 
         nonlocal changed
         statements = getattr(node, "statements", None)
@@ -4549,15 +4834,17 @@ def _materialize_direct_global_dword_store_pairs_8616(
     return changed
 
 
+@cython.ccall
 def _dword_store_pair_rhs_8616(
     codegen: CodegenBoundary8616,
     previous_stmt: object,
     low_assignment: CAssignment,
     high_assignment: CAssignment,
-    call_return_evidence: DirectGlobalCallReturnStoreEvidence8616 | None,
+    call_return_evidence: object,
     stats: SegmentedGlobalLoadStats8616,
-) -> tuple[object | None, bool]:
+) -> tuple[object | None, cython.bint]:
     """Resolve the dword rhs, preferring a proven call-return carrier."""
+    rhs: object
     consume_previous = False
     rhs = _make_wide_call_return_dword_store_rhs_8616(
         codegen,
@@ -4587,15 +4874,26 @@ def _dword_store_pair_rhs_8616(
     return rhs, consume_previous
 
 
+@cython.ccall
 def _match_direct_global_dword_store_pair_8616(
     previous_stmt: object,
     low_stmt: object,
     high_stmt: object,
     codegen: CodegenBoundary8616,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
-    direct_call_return_by_offset: dict[tuple[int, int], list[DirectGlobalCallReturnStoreEvidence8616]],
+    direct_by_offset: object,
+    direct_call_return_by_offset: object,
     stats: SegmentedGlobalLoadStats8616,
 ) -> DwordStorePairMatch8616:
+    call_return_evidence: object
+    dword_ref: object
+    high_assignment: object
+    high_identity: object
+    high_ref: object
+    lhs: object
+    low_assignment: object
+    low_identity: object
+    low_ref: object
+    rhs: object
     low_assignment = _assignment_statement_8616(low_stmt)
     high_assignment = _assignment_statement_8616(high_stmt)
     if low_assignment is None or high_assignment is None:
@@ -4608,16 +4906,16 @@ def _match_direct_global_dword_store_pair_8616(
         return None
     low_addr, low_width = low_identity
     high_addr, high_width = high_identity
-    if low_width != 2 or high_width != 2 or ((low_addr + 2) & 0xFFFF) != (high_addr & 0xFFFF):
+    if low_width != 2 or high_width != 2 or operator.ne(((low_addr + 2) & 0xFFFF), (high_addr & 0xFFFF)):
         return None
     low_ref = direct_by_offset.get((low_addr & 0xFFFF, 2))
     high_ref = direct_by_offset.get((high_addr & 0xFFFF, 2))
     dword_ref = direct_by_offset.get((low_addr & 0xFFFF, 4))
     if low_ref is None or high_ref is None or dword_ref is None:
         return None
-    if _sanitize_identifier_8616(low_ref.name) != _sanitize_identifier_8616(high_ref.name):
+    if operator.ne(_sanitize_identifier_8616(low_ref.name), _sanitize_identifier_8616(high_ref.name)):
         return None
-    if _sanitize_identifier_8616(low_ref.name) != _sanitize_identifier_8616(dword_ref.name):
+    if operator.ne(_sanitize_identifier_8616(low_ref.name), _sanitize_identifier_8616(dword_ref.name)):
         return None
     if int(low_ref.relative_disp) != 0 or int(high_ref.relative_disp) != 2:
         return None
@@ -4652,12 +4950,14 @@ def _match_direct_global_dword_store_pair_8616(
     return CAssignment(lhs, rhs, codegen=codegen, tags=tags), consume_previous
 
 
+@cython.ccall
 def _make_wide_call_return_dword_store_rhs_8616(
     codegen: CodegenBoundary8616,
     previous_stmt: object,
     low_rhs: object,
     high_rhs: object,
 ) -> CExpression | None:
+    previous_assignment: object
     previous_assignment = _assignment_statement_8616(previous_stmt)
     if previous_assignment is None:
         return None
@@ -4665,7 +4965,7 @@ def _make_wide_call_return_dword_store_rhs_8616(
     previous_rhs = previous_assignment.rhs
     if not isinstance(previous_rhs, CFunctionCall):
         return None
-    if _cvariable_key_8616(previous_lhs) is None or _cvariable_key_8616(previous_lhs) != _cvariable_key_8616(low_rhs):
+    if _cvariable_key_8616(previous_lhs) is None or operator.ne(_cvariable_key_8616(previous_lhs), _cvariable_key_8616(low_rhs)):
         return None
     high_reg_name = _register_name_for_dword_high_half_8616(codegen, high_rhs)
     if high_reg_name not in {"dx", "edx"}:
@@ -4673,11 +4973,15 @@ def _make_wide_call_return_dword_store_rhs_8616(
     return previous_rhs
 
 
+@cython.ccall
 def _direct_global_call_return_store_evidence_for_pair_8616(
-    candidates: tuple[DirectGlobalCallReturnStoreEvidence8616, ...] | list[DirectGlobalCallReturnStoreEvidence8616],
+    candidates: object,
     low_assignment: object,
     high_assignment: object,
 ) -> DirectGlobalCallReturnStoreEvidence8616 | None:
+    high_ins_addr: object
+    low_ins_addr: object
+    candidate: object
     if not candidates:
         return None
     low_ins_addr = _statement_ins_addr_8616(low_assignment)
@@ -4687,14 +4991,15 @@ def _direct_global_call_return_store_evidence_for_pair_8616(
     for candidate in candidates:
         if candidate.width != 4 or candidate.high_store_ins_addr is None:
             continue
-        if low_ins_addr is not None and low_ins_addr != candidate.low_store_ins_addr:
+        if low_ins_addr is not None and operator.ne(low_ins_addr, candidate.low_store_ins_addr):
             continue
-        if high_ins_addr is not None and high_ins_addr != candidate.high_store_ins_addr:
+        if high_ins_addr is not None and operator.ne(high_ins_addr, candidate.high_store_ins_addr):
             continue
         return candidate
     return None
 
 
+@cython.ccall
 def _statement_ins_addr_8616(stmt: object) -> int | None:
     """Return a C AST statement instruction address from dynamic angr codegen tags.
 
@@ -4710,11 +5015,13 @@ def _statement_ins_addr_8616(stmt: object) -> int | None:
     return int(ins_addr) if isinstance(ins_addr, int) else None
 
 
-def _cfunction_call_name_8616(node: object) -> str | None:
+@cython.ccall
+def _cfunction_call_name_8616(node: object) -> object:
     """Return a call name from dynamic angr codegen call metadata.
 
     Dynamic boundary: angr codegen call nodes expose callee metadata by runtime surface.
     """
+    raw_name: object
 
     if not isinstance(node, CFunctionCall):
         return None
@@ -4727,37 +5034,42 @@ def _cfunction_call_name_8616(node: object) -> str | None:
     return name or None
 
 
+@cython.ccall
 def _direct_global_call_return_standalone_call_8616(
     stmt: object,
-    evidence: DirectGlobalCallReturnStoreEvidence8616 | None,
+    evidence: object,
 ) -> CFunctionCall | None:
     """Return an exact standalone call proven by typed call/store evidence."""
+    call: object
 
     if evidence is None:
         return None
     call = _standalone_cfunction_call_8616(stmt)
     if call is None or not _call_matches_direct_global_return_evidence_8616(call, evidence):
         return None
-    if _consistent_statement_ins_addr_8616(stmt, call) != evidence.source_call_ins_addr:
+    if operator.ne(_consistent_statement_ins_addr_8616(stmt, call), evidence.source_call_ins_addr):
         return None
     return call
 
 
 def _filter_call_return_carrier_statements_8616(
-    statements: list[object],
+    statements: object,
     root: CStatements,
     codegen: CodegenBoundary8616,
-    active_evidence: tuple[DirectGlobalCallReturnStoreEvidence8616, ...],
+    active_evidence: object,
     stats: SegmentedGlobalLoadStats8616,
     process_statement: Callable[[object], None],
-) -> bool:
+) -> cython.bint:
     """Drop call/store carriers already consumed by call-return materialization."""
+    carrier_key: object
+    consumed_store: object
+    stmt: object
     kept = []
     changed = False
     for stmt in statements:
         if any(
             _direct_global_call_return_standalone_call_8616(stmt, evidence) is not None
-            for evidence in active_evidence
+            for evidence in iter(active_evidence)
         ):
             stats.direct_symbol_call_return_carrier_removed_count += 1
             changed = True
@@ -4786,9 +5098,9 @@ def _filter_call_return_carrier_statements_8616(
 def _remove_materialized_direct_global_call_return_carriers_8616(
     root: CStatements,
     codegen: CodegenBoundary8616,
-    evidence_items: tuple[DirectGlobalCallReturnStoreEvidence8616, ...],
+    evidence_items: object,
     stats: SegmentedGlobalLoadStats8616,
-) -> bool:
+) -> cython.bint:
     """Remove exact call/store carriers consumed by call-return materialization."""
 
     active_evidence = _materialized_direct_global_call_return_evidence_8616(root, evidence_items)
@@ -4798,6 +5110,7 @@ def _remove_materialized_direct_global_call_return_carriers_8616(
 
     def process_statements(node: object) -> None:
         """Walk a dynamic boundary: angr codegen statement-node attributes."""
+        statements: object
 
         nonlocal changed
         statements = getattr(node, "statements", None)
@@ -4811,12 +5124,18 @@ def _remove_materialized_direct_global_call_return_carriers_8616(
     return changed
 
 
+@cython.ccall
 def _direct_global_call_return_consumed_store_8616(
     codegen: CodegenBoundary8616,
     stmt: object,
-    evidence_items: tuple[DirectGlobalCallReturnStoreEvidence8616, ...],
+    evidence_items: object,
 ) -> DirectGlobalCallReturnStoreEvidence8616 | None:
     """Match an exact pure AX/DX store already represented by a canonical call assignment."""
+    assignment: object
+    ins_addr: object
+    lhs_identity: object
+    project: object
+    evidence: object
 
     assignment = _assignment_statement_8616(stmt)
     if assignment is None or not isinstance(assignment.rhs, CVariable):
@@ -4831,30 +5150,30 @@ def _direct_global_call_return_consumed_store_8616(
         offset = evidence.offset & 0xFFFF
         if (
             evidence.width == 1
-            and ins_addr == evidence.low_store_ins_addr
-            and lhs_identity == (offset, 1)
+            and operator.eq(ins_addr, evidence.low_store_ins_addr)
+            and operator.eq(lhs_identity, (offset, 1))
             and register_name == "al"
         ):
             return evidence
         if (
             evidence.width == 2
-            and ins_addr == evidence.low_store_ins_addr
-            and lhs_identity == (offset, 2)
+            and operator.eq(ins_addr, evidence.low_store_ins_addr)
+            and operator.eq(lhs_identity, (offset, 2))
             and register_name in {"ax", "eax"}
         ):
             return evidence
         if evidence.width != 4:
             continue
         if (
-            ins_addr == evidence.low_store_ins_addr
-            and lhs_identity == (offset, 2)
+            operator.eq(ins_addr, evidence.low_store_ins_addr)
+            and operator.eq(lhs_identity, (offset, 2))
             and register_name in {"ax", "eax"}
         ):
             return evidence
         if (
             evidence.high_store_ins_addr is not None
-            and ins_addr == evidence.high_store_ins_addr
-            and lhs_identity == ((offset + 2) & 0xFFFF, 2)
+            and operator.eq(ins_addr, evidence.high_store_ins_addr)
+            and operator.eq(lhs_identity, ((offset + 2) & 0xFFFF, 2))
             and register_name in {"dx", "edx"}
         ):
             return evidence
@@ -4864,20 +5183,23 @@ def _direct_global_call_return_consumed_store_8616(
 def _direct_global_call_return_stale_recombine_8616(
     codegen: CodegenBoundary8616,
     stmt: object,
-    evidence_items: tuple[DirectGlobalCallReturnStoreEvidence8616, ...],
-) -> bool:
+    evidence_items: object,
+) -> cython.bint:
+    assignment: object
+    lhs_identity: object
     assignment = _assignment_statement_8616(stmt)
     if assignment is None:
         return False
     lhs_identity = _direct_global_lvalue_identity_8616(assignment.lhs)
     if lhs_identity is None:
         return False
-    if not any((item.offset & 0xFFFF, item.width) == (lhs_identity[0] & 0xFFFF, lhs_identity[1]) for item in evidence_items):
+    if not any((item.offset & 0xFFFF, item.width) == (lhs_identity[0] & 0xFFFF, lhs_identity[1]) for item in iter(evidence_items)):
         return False
     return _rhs_is_dx_ax_return_recombine_8616(codegen, assignment.rhs)
 
 
-def _rhs_is_dx_ax_return_recombine_8616(codegen: CodegenBoundary8616, rhs: object) -> bool:
+@cython.ccall
+def _rhs_is_dx_ax_return_recombine_8616(codegen: CodegenBoundary8616, rhs: object) -> cython.bint:
     if not isinstance(rhs, CBinaryOp) or rhs.op != "Or":
         return False
     lhs = rhs.lhs
@@ -4890,7 +5212,8 @@ def _rhs_is_dx_ax_return_recombine_8616(codegen: CodegenBoundary8616, rhs: objec
     return bool(_register_name_for_dword_low_half_8616(codegen, rhs_node) in {"ax", "eax"} and _rhs_is_dx_shift_16_8616(codegen, lhs))
 
 
-def _rhs_is_dx_shift_16_8616(codegen: CodegenBoundary8616, node: object) -> bool:
+@cython.ccall
+def _rhs_is_dx_shift_16_8616(codegen: CodegenBoundary8616, node: object) -> cython.bint:
     if not isinstance(node, CBinaryOp) or node.op not in {"Shl", "LShift"}:
         return False
     if _constant_int_8616(node.rhs) != 16:
@@ -4898,13 +5221,19 @@ def _rhs_is_dx_shift_16_8616(codegen: CodegenBoundary8616, node: object) -> bool
     return _register_name_for_dword_high_half_8616(codegen, node.lhs) in {"dx", "edx"}
 
 
+@cython.ccall
 def _materialized_direct_global_call_return_evidence_8616(
     root: CStatements,
-    evidence_items: tuple[DirectGlobalCallReturnStoreEvidence8616, ...],
+    evidence_items: object,
 ) -> tuple[DirectGlobalCallReturnStoreEvidence8616, ...]:
+    assignment: object
+    item: object
+    lhs_identity: object
+    rhs_name: object
+    node: object
     if not evidence_items:
         return ()
-    by_key = {(item.offset & 0xFFFF, item.width, item.source_call_name): item for item in evidence_items}
+    by_key = {(item.offset & 0xFFFF, item.width, item.source_call_name): item for item in iter(evidence_items)}
     active: list[DirectGlobalCallReturnStoreEvidence8616] = []
     for node in _iter_c_nodes_deep_8616(root):
         assignment = _assignment_statement_8616(node)
@@ -4925,8 +5254,13 @@ def _materialized_direct_global_call_return_evidence_8616(
 def _direct_global_call_return_carrier_key_8616(
     root: CStatements,
     stmt: object,
-    evidence_items: tuple[DirectGlobalCallReturnStoreEvidence8616, ...],
-) -> str | None:
+    evidence_items: object,
+) -> object:
+    assignment: object
+    ins_addr: object
+    lhs_identity: object
+    lhs_key: object
+    rhs_name: object
     assignment = _assignment_statement_8616(stmt)
     if assignment is None:
         return None
@@ -4936,15 +5270,15 @@ def _direct_global_call_return_carrier_key_8616(
     ins_addr = _statement_ins_addr_8616(stmt)
     matching_evidence = tuple(
         item
-        for item in evidence_items
-        if item.source_call_name == rhs_name
-        and (ins_addr is None or item.source_call_ins_addr == ins_addr)
+        for item in iter(evidence_items)
+        if operator.eq(item.source_call_name, rhs_name)
+        and (ins_addr is None or operator.eq(item.source_call_ins_addr, ins_addr))
     )
     if not matching_evidence:
         return None
     lhs_identity = _direct_global_lvalue_identity_8616(assignment.lhs)
     if lhs_identity is not None and any(
-        (item.offset & 0xFFFF, item.width) == lhs_identity for item in matching_evidence
+        operator.eq((item.offset & 0xFFFF, item.width), lhs_identity) for item in iter(matching_evidence)
     ):
         return None
     lhs_key = _cvariable_key_8616(assignment.lhs)
@@ -4953,22 +5287,26 @@ def _direct_global_call_return_carrier_key_8616(
     return lhs_key
 
 
-def _cvariable_key_used_outside_statement_8616(root: CStatements, skip_stmt: object, key: str) -> bool:
+def _cvariable_key_used_outside_statement_8616(root: CStatements, skip_stmt: object, key: object) -> cython.bint:
     skip_ids = {id(skip_stmt)}
-    skip_ids.update(id(child) for child in _iter_c_nodes_deep_8616(skip_stmt))
+    skip_ids.update(id(child) for child in builtins.iter(_iter_c_nodes_deep_8616(skip_stmt)))
     return _cvariable_key_used_outside_ids_8616(root, skip_ids, key)
 
 
-def _cvariable_key_used_outside_ids_8616(root: CStatements, skip_ids: set[int], key: str) -> bool:
+@cython.ccall
+def _cvariable_key_used_outside_ids_8616(root: CStatements, skip_ids: object, key: object) -> cython.bint:
+    node: object
     for node in _iter_c_nodes_deep_8616(root):
         if id(node) in skip_ids:
             continue
-        if _cvariable_key_8616(node) == key:
+        if operator.eq(_cvariable_key_8616(node), key):
             return True
     return False
 
 
-def _copy_key_used_outside_ids_8616(root: CStatements, skip_ids: set[int], key: object) -> bool:
+@cython.ccall
+def _copy_key_used_outside_ids_8616(root: CStatements, skip_ids: object, key: object) -> cython.bint:
+    node: object
     debug_enabled = bool(os.environ.get("INERTIA_DEBUG_SEGMENTED_GLOBAL_LOADS"))
     for node in _iter_c_nodes_deep_8616(root):
         if id(node) in skip_ids:
@@ -4980,11 +5318,14 @@ def _copy_key_used_outside_ids_8616(root: CStatements, skip_ids: set[int], key: 
     return False
 
 
+@cython.ccall
 def _copy_key_used_outside_ids_in_statement_list_8616(
-    statements: list[object],
-    skip_ids: set[int],
+    statements: object,
+    skip_ids: object,
     key: object,
-) -> bool:
+) -> cython.bint:
+    node: object
+    stmt: object
     debug_enabled = bool(os.environ.get("INERTIA_DEBUG_SEGMENTED_GLOBAL_LOADS"))
     for stmt in statements:
         for node in _iter_c_nodes_deep_8616(stmt):
@@ -5001,10 +5342,11 @@ def _copy_key_used_outside_ids_in_statement_list_8616(
     return False
 
 
+@cython.ccall
 def _reuse_direct_global_call_return_store_rhs_8616(
     codegen: CodegenBoundary8616,
     previous_stmt: object,
-    evidence: DirectGlobalCallReturnStoreEvidence8616 | None,
+    evidence: object,
     low_rhs: object,
     high_rhs: object,
 ) -> CFunctionCall | None:
@@ -5023,15 +5365,19 @@ def _reuse_direct_global_call_return_store_rhs_8616(
     return _direct_global_call_return_standalone_call_8616(previous_stmt, evidence)
 
 
-def _register_name_for_dword_low_half_8616(codegen: CodegenBoundary8616, expr: object) -> str | None:
+@cython.ccall
+def _register_name_for_dword_low_half_8616(codegen: CodegenBoundary8616, expr: object) -> object:
     return _register_name_for_dword_half_8616(codegen, expr)
 
 
-def _register_name_for_dword_high_half_8616(codegen: CodegenBoundary8616, expr: object) -> str | None:
+@cython.ccall
+def _register_name_for_dword_high_half_8616(codegen: CodegenBoundary8616, expr: object) -> object:
     return _register_name_for_dword_half_8616(codegen, expr)
 
 
-def _register_name_for_dword_half_8616(codegen: CodegenBoundary8616, expr: object) -> str | None:
+@cython.ccall
+def _register_name_for_dword_half_8616(codegen: CodegenBoundary8616, expr: object) -> object:
+    project: object
     if not isinstance(expr, CVariable):
         return None
     project = _codegen_project_optional_8616(codegen)
@@ -5049,11 +5395,14 @@ def _register_name_for_dword_half_8616(codegen: CodegenBoundary8616, expr: objec
     return None
 
 
+@cython.ccall
 def _make_direct_global_dword_store_rhs_8616(
     codegen: CodegenBoundary8616,
     low_rhs: object,
     high_rhs: object,
 ) -> object | None:
+    high_constant: object
+    low_constant: object
     low_constant = _constant_int_8616(low_rhs)
     high_constant = _constant_int_8616(high_rhs)
     if low_constant is not None and high_constant is not None:
@@ -5070,17 +5419,20 @@ def _make_direct_global_dword_store_rhs_8616(
     return cast(object, CBinaryOp("Or", low_rhs, high_shifted, codegen=codegen))
 
 
+@cython.ccall
 def _emit_word_pair_normalized_8616(
     codegen: CodegenBoundary8616,
     ref: DirectGlobalSymbolRef8616,
     low_assignment: CAssignment,
     high_assignment: CAssignment,
-    direct_update_by_offset: dict[tuple[int, int], list[DirectGlobalUpdateEvidence8616]],
-    low_addr: int,
-    copies: dict[CopyKey8616, object],
+    direct_update_by_offset: object,
+    low_addr: cython.longlong,
+    copies: object,
     stats: SegmentedGlobalLoadStats8616,
 ) -> CAssignment | None:
     """Emit a word store when the byte pair normalizes to an update rhs."""
+    lhs: object
+    normalized_rhs: object
     normalized_rhs = _direct_global_word_update_rhs_from_byte_pair_8616(
         codegen,
         ref,
@@ -5102,15 +5454,18 @@ def _emit_word_pair_normalized_8616(
     return CAssignment(lhs, normalized_rhs, codegen=codegen, tags=low_assignment.tags)
 
 
+@cython.ccall
 def _emit_word_pair_safe_source_8616(
     codegen: CodegenBoundary8616,
     ref: DirectGlobalSymbolRef8616,
     low_assignment: CAssignment,
     high_assignment: CAssignment,
-    copies: dict[CopyKey8616, object],
+    copies: object,
     stats: SegmentedGlobalLoadStats8616,
 ) -> CAssignment | None:
     """Emit a word store from two provably safe byte sources."""
+    lhs: object
+    rhs: object
     low_source = _resolve_copy_8616(low_assignment.rhs, copies)
     high_source = _resolve_copy_8616(high_assignment.rhs, copies)
     if not (_word_store_source_is_safe_8616(low_source) and _word_store_source_is_safe_8616(high_source)):
@@ -5125,6 +5480,7 @@ def _emit_word_pair_safe_source_8616(
     return CAssignment(lhs, rhs, codegen=codegen, tags=low_assignment.tags)
 
 
+@cython.ccall
 def _emit_word_pair_constant_8616(
     codegen: CodegenBoundary8616,
     ref: DirectGlobalSymbolRef8616,
@@ -5132,10 +5488,13 @@ def _emit_word_pair_constant_8616(
     high_assignment: CAssignment,
     low_stmt: object,
     high_stmt: object,
-    copies: dict[CopyKey8616, object],
+    copies: object,
     stats: SegmentedGlobalLoadStats8616,
 ) -> CAssignment | None:
     """Emit a word store from two constant byte sources."""
+    high_value: object
+    lhs: object
+    low_value: object
     low_value = _constant_int_8616(_resolve_copy_8616(low_assignment.rhs, copies))
     high_value = _constant_int_8616(_resolve_copy_8616(high_assignment.rhs, copies))
     if low_value is None or high_value is None:
@@ -5164,11 +5523,18 @@ def _match_direct_global_word_store_pair_8616(
     low_stmt: object,
     high_stmt: object,
     codegen: CodegenBoundary8616,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
-    direct_update_by_offset: dict[tuple[int, int], list[DirectGlobalUpdateEvidence8616]],
+    direct_by_offset: object,
+    direct_update_by_offset: object,
     stats: SegmentedGlobalLoadStats8616,
-    copies: dict[CopyKey8616, object] | None = None,
+    copies: object = None,
 ) -> CAssignment | None:
+    assignment: object
+    high_assignment: object
+    high_identity: object
+    low_assignment: object
+    low_identity: object
+    ref: object
+    emit: object
     if copies is None:
         copies = {}
     low_assignment = _assignment_statement_8616(low_stmt)
@@ -5191,7 +5557,7 @@ def _match_direct_global_word_store_pair_8616(
         return None
     low_addr, low_width = low_identity
     high_addr, high_width = high_identity
-    if low_width != 1 or high_width != 1 or ((low_addr + 1) & 0xFFFF) != (high_addr & 0xFFFF):
+    if low_width != 1 or high_width != 1 or operator.ne(((low_addr + 1) & 0xFFFF), (high_addr & 0xFFFF)):
         _debug_direct_store_refusal_8616(
             "byte_sequence",
             low_stmt,
@@ -5232,11 +5598,14 @@ def _match_direct_global_word_store_pair_8616(
     return None
 
 
+@cython.ccall
 def _make_direct_global_word_store_rhs_from_byte_exprs_8616(
     codegen: CodegenBoundary8616,
     low_rhs: object,
     high_rhs: object,
 ) -> object:
+    high_const: object
+    low_const: object
     low_const = _constant_int_8616(low_rhs)
     high_const = _constant_int_8616(high_rhs)
     if low_const is not None and high_const is not None:
@@ -5261,13 +5630,17 @@ def _make_direct_global_word_store_rhs_from_byte_exprs_8616(
     return CBinaryOp("Or", low_expr, high_expr, codegen=codegen)
 
 
+@cython.ccall
 def _make_direct_global_store_assignment_exprs_8616(
     codegen: CodegenBoundary8616,
     ref: DirectGlobalSymbolRef8616,
-    width: int,
+    width: cython.longlong,
     rhs: object,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
+    direct_by_offset: object,
 ) -> tuple[object | None, object | None]:
+    merged_rhs: object
+    scalar: object
+    scalar_ref: object
     scalar_ref = _dword_scalar_ref_for_subword_ref_8616(ref, direct_by_offset)
     if scalar_ref is None:
         return _make_direct_global_symbol_expr_8616(codegen, ref, width), rhs
@@ -5285,8 +5658,10 @@ def _project_direct_global_subword_refs_in_expr_8616(
     codegen: CodegenBoundary8616,
     ref: DirectGlobalSymbolRef8616,
     expr: object,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
+    direct_by_offset: object,
 ) -> object:
+    direct_expr: object
+    projected_expr: object
     direct_expr = _make_direct_global_symbol_expr_8616(codegen, ref, int(ref.width or 2))
     projected_expr = _make_direct_global_symbol_or_projection_expr_8616(
         codegen,
@@ -5309,10 +5684,11 @@ def _project_direct_global_subword_refs_in_expr_8616(
     return expr
 
 
+@cython.ccall
 def _make_dword_scalar_subword_store_rhs_8616(
     codegen: CodegenBoundary8616,
     scalar: object,
-    relative_disp: int,
+    relative_disp: cython.longlong,
     word_rhs: object,
 ) -> object | None:
     if not isinstance(word_rhs, CExpression) or _rhs_has_obvious_side_effect_8616(word_rhs):
@@ -5349,14 +5725,19 @@ def _make_dword_scalar_subword_store_rhs_8616(
     return None
 
 
+@cython.ccall
 def _direct_global_word_update_rhs_from_byte_pair_8616(
     codegen: CodegenBoundary8616,
     ref: DirectGlobalSymbolRef8616,
     low_rhs: object,
     high_rhs: object,
-    update_evidence: tuple[DirectGlobalUpdateEvidence8616, ...] | list[DirectGlobalUpdateEvidence8616],
-    copies: dict[CopyKey8616, object] | None = None,
+    update_evidence: object,
+    copies: object = None,
 ) -> object | None:
+    matched_update: object
+    normalized: object
+    word_constant: object
+    word_source: object
     word_source = _word_source_for_byte_pair_store_8616(high_rhs, low_rhs, copies or {})
     if word_source is None:
         return None
@@ -5378,7 +5759,9 @@ def _direct_global_word_update_rhs_from_byte_pair_8616(
     return None
 
 
+@cython.ccall
 def _direct_global_word_update_expr_delta_8616(expr: object) -> int | None:
+    rhs_const: object
     if not isinstance(expr, CBinaryOp) or expr.op not in {"Add", "Sub"}:
         return None
     rhs_const = _constant_int_8616(expr.rhs)
@@ -5388,23 +5771,28 @@ def _direct_global_word_update_expr_delta_8616(expr: object) -> int | None:
     return delta if expr.op == "Add" else -delta
 
 
+@cython.ccall
 def _direct_global_update_evidence_for_delta_8616(
-    candidates: tuple[DirectGlobalUpdateEvidence8616, ...] | list[DirectGlobalUpdateEvidence8616],
-    delta: int | None,
+    candidates: object,
+    delta: object,
 ) -> DirectGlobalUpdateEvidence8616 | None:
+    candidate: object
     if delta is None:
         return None
     for candidate in candidates:
-        if int(candidate.delta) == int(delta):
+        if operator.eq(int(candidate.delta), int(delta)):
             return candidate
     return None
 
 
+@cython.ccall
 def _direct_global_store_lvalue_ref_8616(
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
-    addr: int,
-    width: int,
+    direct_by_offset: object,
+    addr: cython.longlong,
+    width: cython.longlong,
 ) -> DirectGlobalSymbolRef8616 | None:
+    ref: object
+    word_ref: object
     ref = direct_by_offset.get((addr & 0xFFFF, width))
     if ref is not None:
         return ref
@@ -5416,14 +5804,20 @@ def _direct_global_store_lvalue_ref_8616(
     return word_ref
 
 
+@cython.ccall
 def _materialize_direct_global_single_byte_stores_8616(
     root: CStatements,
     codegen: CodegenBoundary8616,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
+    direct_by_offset: object,
     stats: SegmentedGlobalLoadStats8616,
     *,
     query_index: StructuredAstQueryIndex8616 | None = None,
-) -> bool:
+) -> cython.bint:
+    assignment: object
+    lhs_identity: object
+    ref: object
+    rhs: object
+    stmt: object
     changed = False
     if query_index is not None:
         query_index.require_root(root)
@@ -5464,11 +5858,12 @@ def _materialize_direct_global_single_byte_stores_8616(
     return changed
 
 
+@cython.ccall
 def _make_direct_global_single_byte_store_rhs_8616(
     codegen: CodegenBoundary8616,
     base_expr: CExpression,
     byte_rhs: object,
-    byte_delta: int,
+    byte_delta: cython.longlong,
 ) -> object | None:
     if not isinstance(byte_rhs, CExpression) or _rhs_has_obvious_side_effect_8616(byte_rhs):
         return None
@@ -5502,9 +5897,10 @@ def _make_direct_global_single_byte_store_rhs_8616(
 
 
 def _direct_global_ref_covering_byte_8616(
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
-    addr: int,
+    direct_by_offset: object,
+    addr: cython.longlong,
 ) -> DirectGlobalSymbolRef8616 | None:
+    ref: object
     addr &= 0xFFFF
     candidates = []
     for ref in direct_by_offset.values():
@@ -5528,11 +5924,13 @@ def _direct_global_ref_covering_byte_8616(
     return candidates[0]
 
 
+@cython.ccall
 def _direct_global_delta_rhs_8616(
     codegen: CodegenBoundary8616,
     ref: DirectGlobalSymbolRef8616,
-    delta: int,
+    delta: cython.longlong,
 ) -> CExpression | None:
+    direct_expr: object
     direct_expr = _make_direct_global_symbol_expr_8616(codegen, ref, 2)
     if direct_expr is None or delta == 0:
         return None
@@ -5540,11 +5938,15 @@ def _direct_global_delta_rhs_8616(
     return CBinaryOp(op, direct_expr, CConstant(abs(delta), SimTypeShort(False), codegen=codegen), codegen=codegen)
 
 
+@cython.ccall
 def _normalize_direct_global_word_update_rhs_8616(
     codegen: CodegenBoundary8616,
     ref: DirectGlobalSymbolRef8616,
     expr: object,
 ) -> object | None:
+    direct_expr: object
+    lhs_const: object
+    rhs_const: object
     direct_expr = _make_direct_global_symbol_expr_8616(codegen, ref, 2)
     if direct_expr is None:
         return None
@@ -5565,11 +5967,12 @@ def _normalize_direct_global_word_update_rhs_8616(
     return None
 
 
+@cython.ccall
 def _direct_global_word_byte_pair_source_8616(
     expr: object,
     ref: DirectGlobalSymbolRef8616,
-    dirty_assignments: dict[tuple[str, int | str], object] | None = None,
-) -> bool:
+    dirty_assignments: object = None,
+) -> cython.bint:
     expr = _resolve_dirty_global_carrier_8616(expr, dirty_assignments)
     if not isinstance(expr, CBinaryOp) or expr.op not in {"Add", "Or"}:
         return False
@@ -5592,22 +5995,24 @@ def _direct_global_word_byte_pair_source_8616(
     return matched
 
 
+@cython.ccall
 def _is_direct_global_low_byte_ref_8616(
     expr: object,
     ref: DirectGlobalSymbolRef8616,
     *,
-    dirty_assignments: dict[tuple[str, int | str], object] | None = None,
-) -> bool:
+    dirty_assignments: object = None,
+) -> cython.bint:
     identity = _direct_global_lvalue_identity_8616(expr, dirty_assignments=dirty_assignments)
     return identity == (ref.offset & 0xFFFF, 1)
 
 
+@cython.ccall
 def _is_direct_global_shifted_high_byte_ref_8616(
     expr: object,
     ref: DirectGlobalSymbolRef8616,
     *,
-    dirty_assignments: dict[tuple[str, int | str], object] | None = None,
-) -> bool:
+    dirty_assignments: object = None,
+) -> cython.bint:
     expr = _resolve_dirty_global_carrier_8616(expr, dirty_assignments)
     if not isinstance(expr, CBinaryOp):
         return False
@@ -5623,11 +6028,12 @@ def _is_direct_global_shifted_high_byte_ref_8616(
     return False
 
 
+@cython.ccall
 def _direct_global_dword_word_pair_source_8616(
     expr: object,
     ref: DirectGlobalSymbolRef8616,
-    dirty_assignments: dict[tuple[str, int | str], object] | None = None,
-) -> bool:
+    dirty_assignments: object = None,
+) -> cython.bint:
     expr = _resolve_dirty_global_carrier_8616(expr, dirty_assignments)
     if not isinstance(expr, CBinaryOp) or expr.op not in {"Add", "Or"}:
         return False
@@ -5650,13 +6056,14 @@ def _direct_global_dword_word_pair_source_8616(
     return matched
 
 
+@cython.ccall
 def _debug_direct_global_load_pair_candidate_8616(
-    kind: str,
+    kind: object,
     expr: object,
     ref: DirectGlobalSymbolRef8616,
-    matched: bool,
+    matched: cython.bint,
     *,
-    dirty_assignments: dict[tuple[str, int | str], object] | None = None,
+    dirty_assignments: object = None,
 ) -> None:
     if not os.environ.get("INERTIA_DEBUG_SEGMENTED_GLOBAL_LOAD_PAIRS"):
         return
@@ -5680,22 +6087,24 @@ def _debug_direct_global_load_pair_candidate_8616(
     )
 
 
+@cython.ccall
 def _is_direct_global_low_word_ref_8616(
     expr: object,
     ref: DirectGlobalSymbolRef8616,
     *,
-    dirty_assignments: dict[tuple[str, int | str], object] | None = None,
-) -> bool:
+    dirty_assignments: object = None,
+) -> cython.bint:
     identity = _direct_global_lvalue_identity_8616(expr, dirty_assignments=dirty_assignments)
     return identity == (ref.offset & 0xFFFF, 2)
 
 
+@cython.ccall
 def _is_direct_global_shifted_high_word_ref_8616(
     expr: object,
     ref: DirectGlobalSymbolRef8616,
     *,
-    dirty_assignments: dict[tuple[str, int | str], object] | None = None,
-) -> bool:
+    dirty_assignments: object = None,
+) -> cython.bint:
     expr = _resolve_dirty_global_carrier_8616(expr, dirty_assignments)
     if not isinstance(expr, CBinaryOp):
         return False
@@ -5711,15 +6120,21 @@ def _is_direct_global_shifted_high_word_ref_8616(
     return False
 
 
+@cython.ccall
 def _materialize_direct_global_load_pair_expr_8616(
     codegen: CodegenBoundary8616,
     node: object,
-    evidence_by_offset: dict[int, NamedGlobalEvidence8616],
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
+    evidence_by_offset: object,
+    direct_by_offset: object,
     stats: SegmentedGlobalLoadStats8616,
     *,
-    dirty_assignments: dict[tuple[str, int | str], object] | None = None,
+    dirty_assignments: object = None,
 ) -> CExpression | None:
+    direct_expr: object
+    expr: object
+    item: object
+    predicate: object
+    width: object
     candidate = _resolve_dirty_global_carrier_8616(node, dirty_assignments)
     if not isinstance(candidate, CBinaryOp) or candidate.op not in {"Add", "Or"}:
         return None
@@ -5737,7 +6152,7 @@ def _materialize_direct_global_load_pair_expr_8616(
         (4, _direct_global_dword_word_pair_source_8616),
     ):
         for item in evidence_by_offset.values():
-            if int(item.width) != width:
+            if operator.ne(int(item.width), width):
                 continue
             ref = DirectGlobalSymbolRef8616(
                 offset=item.offset & 0xFFFF,
@@ -5756,14 +6171,19 @@ def _materialize_direct_global_load_pair_expr_8616(
     return None
 
 
+@cython.ccall
 def _materialize_direct_ref_load_pair_expr_8616(
     codegen: CodegenBoundary8616,
     node: object,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
+    direct_by_offset: object,
     stats: SegmentedGlobalLoadStats8616,
     *,
-    dirty_assignments: dict[tuple[str, int | str], object] | None = None,
+    dirty_assignments: object = None,
 ) -> CExpression | None:
+    expr: object
+    _offset: object
+    ref: object
+    width: object
     for (_offset, width), ref in direct_by_offset.items():
         if width == 2:
             matched = _direct_global_word_byte_pair_source_8616(node, ref, dirty_assignments)
@@ -5782,15 +6202,17 @@ def _materialize_direct_ref_load_pair_expr_8616(
     return None
 
 
+@cython.ccall
 def _prune_redundant_high_byte_stores_in_list_8616(
-    statements: list[object],
+    statements: object,
     codegen: CodegenBoundary8616,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
-    comparison_expr_by_ref: dict[DirectGlobalSymbolRef8616, CExpression | None],
+    direct_by_offset: object,
+    comparison_expr_by_ref: object,
     stats: SegmentedGlobalLoadStats8616,
     process_statement: Callable[[object], None],
-) -> bool:
+) -> cython.bint:
     """Remove adjacent proven redundant high-byte stores in one list."""
+    word_ref: object
     changed = False
     copies: dict[CopyKey8616, object] = {}
     index = 0
@@ -5834,17 +6256,18 @@ def _prune_redundant_high_byte_stores_in_list_8616(
 def _remove_direct_global_redundant_high_byte_stores_8616(
     root: CStatements,
     codegen: CodegenBoundary8616,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
+    direct_by_offset: object,
     stats: SegmentedGlobalLoadStats8616,
-) -> bool:
+) -> cython.bint:
     """Remove proven redundant high-byte stores once per mutable C-AST object."""
 
     changed = False
-    visited_nodes: set[int] = set()
+    visited_nodes: set[cython.longlong] = set()
     comparison_expr_by_ref: dict[DirectGlobalSymbolRef8616, CExpression | None] = {}
 
     def process_statements(node: object) -> None:
         """Walk a dynamic boundary: angr codegen statement-node attributes."""
+        statements: object
 
         nonlocal changed
         node_identity = id(node)
@@ -5867,14 +6290,19 @@ def _remove_direct_global_redundant_high_byte_stores_8616(
     return changed
 
 
+@cython.ccall
 def _direct_global_word_assignment_8616(
     stmt: object,
     codegen: CodegenBoundary8616,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
+    direct_by_offset: object,
     *,
-    comparison_expr_by_ref: dict[DirectGlobalSymbolRef8616, CExpression | None] | None = None,
+    comparison_expr_by_ref: object = None,
 ) -> tuple[DirectGlobalSymbolRef8616 | None, object | None]:
     """Resolve one direct word store, preferring its exact storage identity."""
+    assignment: object
+    identity: object
+    ref: object
+    replacement: object
 
     assignment = _assignment_statement_8616(stmt)
     if assignment is None:
@@ -5902,12 +6330,17 @@ def _direct_global_word_assignment_8616(
     return None, None
 
 
+@cython.ccall
 def _is_direct_global_high_byte_projection_store_8616(
     stmt: object,
     ref: DirectGlobalSymbolRef8616,
     word_rhs: object,
-    copies: dict[CopyKey8616, object] | None = None,
-) -> bool:
+    copies: object = None,
+) -> cython.bint:
+    assignment: object
+    high_identity: object
+    word_const: object
+    word_range: object
     assignment = _assignment_statement_8616(stmt)
     if assignment is None:
         return False
@@ -5915,7 +6348,7 @@ def _is_direct_global_high_byte_projection_store_8616(
     if high_identity is None:
         return False
     high_addr, high_width = high_identity
-    if high_width != 1 or (high_addr & 0xFFFF) != ((ref.offset + 1) & 0xFFFF):
+    if high_width != 1 or operator.ne((high_addr & 0xFFFF), ((ref.offset + 1) & 0xFFFF)):
         return False
     rhs = _resolve_expr_copies_8616(assignment.rhs, copies)
     rhs_const = _constant_int_8616(rhs)
@@ -5932,21 +6365,21 @@ def _is_direct_global_high_byte_projection_store_8616(
     if shift != 8:
         return False
     projected = rhs.lhs
-    return (word_rhs is not None and _same_c_expression_8616(projected, word_rhs)) or (
-        _direct_global_update_delta_8616(ref, projected) == _direct_global_update_delta_8616(ref, word_rhs)
-    )
+    return (word_rhs is not None and _same_c_expression_8616(projected, word_rhs)) or operator.eq(_direct_global_update_delta_8616(ref, projected), _direct_global_update_delta_8616(ref, word_rhs))
 
 
+@cython.ccall
 def _remove_direct_global_high_byte_for_initializer_8616(
     stmt: object,
     ref: DirectGlobalSymbolRef8616,
     word_rhs: object,
-    copies: dict[CopyKey8616, object] | None = None,
-) -> bool:
+    copies: object = None,
+) -> cython.bint:
     """Clear a dynamic angr codegen initializer that only mirrors a materialized global.
 
     Dynamic boundary: arbitrary angr codegen statement nodes expose initializer at runtime.
     """
+    initializer: object
 
     initializer = getattr(stmt, "initializer", None)
     if initializer is None:
@@ -5961,7 +6394,8 @@ def _remove_direct_global_high_byte_for_initializer_8616(
     return True
 
 
-def _resolve_expr_copies_8616(node: object, copies: dict[CopyKey8616, object] | None, depth: int = 0) -> object:
+@cython.ccall
+def _resolve_expr_copies_8616(node: object, copies: object, depth: cython.longlong = 0) -> object:
     if node is None or not copies or depth > 16:
         return node
     resolved = _resolve_copy_8616(node, copies)
@@ -5976,8 +6410,11 @@ def _resolve_expr_copies_8616(node: object, copies: dict[CopyKey8616, object] | 
     return node
 
 
-def _unsigned_and_mask_range_8616(node: CBinaryOp) -> tuple[int, int] | None:
+@cython.ccall
+def _unsigned_and_mask_range_8616(node: CBinaryOp) -> object:
     """Return the masked range when an And operand is a non-negative mask."""
+    lhs_const: object
+    rhs_const: object
     lhs_const = _constant_int_8616(node.lhs)
     rhs_const = _constant_int_8616(node.rhs)
     if lhs_const is not None and int(lhs_const) >= 0:
@@ -5987,12 +6424,14 @@ def _unsigned_and_mask_range_8616(node: CBinaryOp) -> tuple[int, int] | None:
     return None
 
 
+@cython.ccall
 def _unsigned_arith_range_8616(
     node: CBinaryOp,
-    lhs: tuple[int, int] | None,
-    rhs: tuple[int, int] | None,
-) -> tuple[int, int] | None:
+    lhs: object,
+    rhs: object,
+) -> object:
     """Combine operand ranges for the arithmetic ops we prove."""
+    shift: object
     if node.op == "Shr" and lhs is not None:
         shift = _constant_int_8616(node.rhs)
         if shift is not None and int(shift) >= 0 and lhs[0] >= 0:
@@ -6009,11 +6448,14 @@ def _unsigned_arith_range_8616(
     return None
 
 
+@cython.ccall
 def _unsigned_expr_range_8616(
     node: object,
-    copies: dict[CopyKey8616, object] | None = None,
-    depth: int = 0,
-) -> tuple[int, int] | None:
+    copies: object = None,
+    depth: cython.longlong = 0,
+) -> object:
+    const: object
+    masked: object
     if node is None or depth > 16:
         return None
     node = _resolve_expr_copies_8616(node, copies, depth)
@@ -6033,7 +6475,9 @@ def _unsigned_expr_range_8616(
     return _unsigned_arith_range_8616(node, lhs, rhs)
 
 
+@cython.ccall
 def _direct_global_update_delta_8616(ref: DirectGlobalSymbolRef8616, expr: object) -> int | None:
+    rhs_const: object
     if not isinstance(expr, CBinaryOp) or expr.op not in {"Add", "Sub"}:
         return None
     rhs_const = _constant_int_8616(expr.rhs)
@@ -6047,6 +6491,7 @@ def _direct_global_update_delta_8616(ref: DirectGlobalSymbolRef8616, expr: objec
     return delta if expr.op == "Add" else -delta
 
 
+@cython.ccall
 def _assignment_statement_8616(node: object) -> CAssignment | None:
     if isinstance(node, CAssignment):
         return node
@@ -6057,7 +6502,8 @@ def _assignment_statement_8616(node: object) -> CAssignment | None:
     return None
 
 
-def _direct_memory_cvar_identity_8616(node: object) -> tuple[int, int] | None:
+@cython.ccall
+def _direct_memory_cvar_identity_8616(node: object) -> object:
     if not isinstance(node, CVariable):
         return None
     variable = node.variable
@@ -6070,11 +6516,16 @@ def _direct_memory_cvar_identity_8616(node: object) -> tuple[int, int] | None:
     return addr, width
 
 
+@cython.ccall
 def _direct_global_lvalue_identity_8616(
     node: object,
     *,
-    dirty_assignments: dict[tuple[str, int | str], object] | None = None,
-) -> tuple[int, int] | None:
+    dirty_assignments: object = None,
+) -> object:
+    helper: object
+    identity: object
+    indexed_identity: object
+    offset: object
     node = _resolve_dirty_global_carrier_8616(node, dirty_assignments)
     identity = _direct_memory_cvar_identity_8616(node)
     if identity is not None:
@@ -6096,7 +6547,14 @@ def _direct_global_lvalue_identity_8616(
     return int(offset) & 0xFFFF, int(helper.width)
 
 
+@cython.ccall
 def _collect_unique_dirty_assignment_rhs_8616(cfunc: object) -> dict[tuple[str, int | str], object]:
+    assignment: object
+    previous: object
+    rhs: object
+    key: object
+    node: object
+    root: object
     roots = _cfunc_roots_8616(cfunc)
     if not roots:
         return {}
@@ -6122,15 +6580,18 @@ def _collect_unique_dirty_assignment_rhs_8616(cfunc: object) -> dict[tuple[str, 
                     continue
                 if key not in ambiguous:
                     assignments[key] = rhs
-    return {key: rhs for key, rhs in assignments.items() if rhs is not None and key not in ambiguous}
+    return {key: rhs for key, rhs in builtins.iter(assignments.items()) if rhs is not None and key not in ambiguous}
 
 
+@cython.ccall
 def _resolve_dirty_global_carrier_8616(
     node: object,
-    dirty_assignments: dict[tuple[str, int | str], object] | None,
+    dirty_assignments: object,
     *,
-    seen: set[tuple[str, int | str]] | None = None,
+    seen: object = None,
 ) -> object:
+    rhs: object
+    key: object
     if not dirty_assignments:
         return node
     keys = _dirty_expr_keys_8616(node)
@@ -6149,11 +6610,16 @@ def _resolve_dirty_global_carrier_8616(
     return node
 
 
+@cython.ccall
 def _dirty_expr_keys_8616(node: object) -> tuple[tuple[str, int | str], ...]:
     """Return keys from dynamic angr codegen dirty-expression metadata.
 
     Dynamic boundary: angr codegen dirty expressions expose helper identifiers at runtime.
     """
+    name: object
+    value: object
+    attr: object
+    key: object
 
     if not isinstance(node, CDirtyExpression):
         return ()
@@ -6181,6 +6647,9 @@ def _dirty_expr_keys_8616(node: object) -> tuple[tuple[str, int | str], ...]:
 
 def _debug_remaining_segmented_global_load_nodes_8616(cfunc: object) -> None:
     """Log remaining loads from a dynamic boundary: angr codegen dirty-expression metadata."""
+    helper: object
+    node: object
+    root: object
 
     if not os.environ.get("INERTIA_DEBUG_SEGMENTED_GLOBAL_LOADS"):
         return
@@ -6199,7 +6668,7 @@ def _debug_remaining_segmented_global_load_nodes_8616(cfunc: object) -> None:
                     helper.helper_name,
                     offset,
                     _debug_source_8616(node),
-                    tuple(type(arg).__name__ for arg in args),
+                    tuple(type(arg).__name__ for arg in iter(args)),
                 )
                 continue
             if not isinstance(node, CDirtyExpression):
@@ -6218,12 +6687,14 @@ def _debug_remaining_segmented_global_load_nodes_8616(cfunc: object) -> None:
                 _dirty_expr_keys_8616(node),
                 {
                     name: getattr(dirty, name, None)
-                    for name in ("name", "varid", "idx", "oident", "reg", "reg_offset", "bits", "size")
+                    for name in iter(("name", "varid", "idx", "oident", "reg", "reg_offset", "bits", "size"))
                 },
             )
 
 
-def _direct_indexed_global_identity_8616(node: object) -> tuple[int, int] | None:
+@cython.ccall
+def _direct_indexed_global_identity_8616(node: object) -> object:
+    index_value: object
     if not isinstance(node, CIndexedVariable):
         return None
     base = node.variable
@@ -6244,8 +6715,11 @@ def _direct_indexed_global_identity_8616(node: object) -> tuple[int, int] | None
 
 def _direct_ref_for_cvariable_8616(
     node: CVariable,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
+    direct_by_offset: object,
 ) -> DirectGlobalSymbolRef8616 | None:
+    exact: object
+    widened: object
+    widened_width: object
     variable = node.variable
     if not isinstance(variable, SimMemoryVariable):
         return None
@@ -6260,11 +6734,11 @@ def _direct_ref_for_cvariable_8616(
         name = variable.name
         widened_base_refs = tuple(
             ref
-            for ref in direct_by_offset.values()
+            for ref in builtins.iter(direct_by_offset.values())
             if ref.relative_disp == 0
-            and (ref.offset & 0xFFFF) == (addr & 0xFFFF)
-            and _sanitize_identifier_8616(ref.name) == name
-            and ref.width + ref.max_relative_disp == width
+            and operator.eq((ref.offset & 0xFFFF), (addr & 0xFFFF))
+            and operator.eq(_sanitize_identifier_8616(ref.name), name)
+            and operator.eq(ref.width + ref.max_relative_disp, width)
         )
         return widened_base_refs[0] if len(widened_base_refs) == 1 else None
     name = variable.name
@@ -6277,13 +6751,15 @@ def _direct_ref_for_cvariable_8616(
     return None
 
 
+@cython.ccall
 def materialize_compare_register_global_carriers_8616(
     project: ProjectBoundary8616,
     codegen: CodegenBoundary8616,
     synthetic_globals: SyntheticGlobalsBoundary8616,
     cod_metadata: CodMetadataBoundary8616 = None,
-) -> bool:
+) -> cython.bint:
     """Materialize compare-register carriers from proven global evidence."""
+    function: object
 
     stats = SegmentedGlobalLoadStats8616()
     function = _active_function_8616(project, codegen)
@@ -6310,8 +6786,11 @@ def materialize_indexed_segmented_global_loads_8616(
     project: ProjectBoundary8616,
     codegen: CodegenBoundary8616,
     cod_metadata: CodMetadataBoundary8616 = None,
-) -> bool:
+) -> cython.bint:
     """Materialize indexed DS global loads and stores from lowering evidence."""
+    function: object
+    previous_read_record: object
+    previous_record: object
 
     stats = SegmentedGlobalLoadStats8616()
     function = _active_function_8616(project, codegen)
@@ -6336,7 +6815,7 @@ def materialize_indexed_segmented_global_loads_8616(
     codegen._inertia_indexed_global_store_evidence_8616 = store_evidence
     evidence = _unify_sidecar_free_indexed_evidence_8616(
         indexed_evidence,
-        _indexed_evidence_from_direct_symbol_refs_8616((*direct_refs, *address_refs)),
+        _indexed_evidence_from_direct_symbol_refs_8616(tuple(direct_refs) + tuple(address_refs)),
         store_evidence,
     )
     layout_evidence = collect_project_global_object_layout_evidence_8616(project)
@@ -6374,7 +6853,7 @@ def materialize_indexed_segmented_global_loads_8616(
                 width=item.width,
                 canonical_name=_sanitize_identifier_8616(item.name),
             )
-            for item in evidence
+            for item in iter(evidence)
         ),
     )
     codegen._inertia_indexed_global_evidence_8616 = evidence
@@ -6395,7 +6874,7 @@ def materialize_indexed_segmented_global_loads_8616(
                 layout.field_offsets,
                 hex(layout.family_base_offset & 0xFFFF),
             )
-            for layout in layout_evidence.layouts
+            for layout in iter(layout_evidence.layouts)
         ),
         tuple(
             (
@@ -6405,7 +6884,7 @@ def materialize_indexed_segmented_global_loads_8616(
                 item.relative_disp,
                 item.aggregate_type_name,
             )
-            for item in evidence
+            for item in iter(evidence)
         ),
                 tuple(
                     (
@@ -6416,10 +6895,10 @@ def materialize_indexed_segmented_global_loads_8616(
                         hex(fact.ins_addr),
                         tuple(
                             (store.stack_offset, store.width, hex(store.ins_addr))
-                            for store in fact.stack_stores
+                            for store in iter(fact.stack_stores)
                         ),
                     )
-                    for fact in load_site_evidence
+                    for fact in iter(load_site_evidence)
                 ),
         tuple(
             (
@@ -6436,7 +6915,7 @@ def materialize_indexed_segmented_global_loads_8616(
                 fact.source_stack_offset,
                 fact.source_stack_width,
             )
-            for fact in store_evidence
+            for fact in iter(store_evidence)
         ),
     )
     stats.raw_fact_count = len(summaries)
@@ -6528,7 +7007,7 @@ def materialize_indexed_segmented_global_loads_8616(
         consumed = tuple(dict.fromkeys(consumed_load_sites))
         codegen._inertia_indexed_global_read_carrier_record_8616 = (
             IndexedGlobalReadCarrierMaterializationRecord8616(
-                evidence=tuple(dict.fromkeys((*previous_read_evidence, *consumed))),
+                evidence=tuple(dict.fromkeys(tuple(previous_read_evidence) + tuple(consumed))),
                 raw_fact_count=previous_raw + len(load_site_evidence),
                 normalized_fact_count=previous_normalized + len(load_site_evidence),
                 classified_fact_count=previous_classified + len(consumed),
@@ -6551,7 +7030,7 @@ def materialize_indexed_segmented_global_loads_8616(
         )
         codegen._inertia_indexed_global_materialization_record_8616 = (
             IndexedSegmentedGlobalMaterializationRecord8616(
-                evidence=tuple(dict.fromkeys((*previous_evidence, *evidence))),
+                evidence=tuple(dict.fromkeys(tuple(previous_evidence) + tuple(evidence))),
                 materialized_count=previous_count + stats.indexed_materialized_count,
             )
         )
@@ -6559,20 +7038,27 @@ def materialize_indexed_segmented_global_loads_8616(
     return changed
 
 
+@cython.ccall
 def recover_indexed_segmented_global_evidence_8616(
-    summaries: list[InsnSummary8616],
+    summaries: object,
     cod_metadata: CodMetadataBoundary8616,
     *,
-    near_pointer_facts: tuple[NearPointerArgumentFact8616, ...] = (),
-) -> tuple[IndexedSegmentedGlobalEvidence8616, ...]:
+    near_pointer_facts: object = (),
+) -> object:
     """Recover indexed global load evidence from instruction summaries and optional sidecar refs."""
+    actual_width: object
+    base_offset: object
+    cod_width: object
+    insn: object
+    name: object
+    relative_disp: object
 
     cod_refs = _cod_indexed_global_refs_8616(cod_metadata)
     near_pointer_accesses = {
         (fact.dereference_ins_addr, fact.access_width_bytes)
-        for fact in near_pointer_facts
+        for fact in iter(near_pointer_facts)
     }
-    binary_refs: list[tuple[int, int]] = []
+    binary_refs: list[tuple[cython.longlong, cython.longlong]] = []
     for insn in summaries:
         if (
             insn.op0_kind == "indexed_mem"
@@ -6593,7 +7079,7 @@ def recover_indexed_segmented_global_evidence_8616(
             tuple(binary_refs),
         )
         return _sidecar_free_indexed_global_evidence_8616(binary_refs)
-    if len(cod_refs) != len(binary_refs):
+    if operator.ne(len(cod_refs), len(binary_refs)):
         _seg_global_debug_log_8616(
             "[seg-global-indexed] refused mismatched sidecar join cod_refs=%s binary_refs=%s",
             cod_refs,
@@ -6613,10 +7099,13 @@ def recover_indexed_segmented_global_evidence_8616(
     return tuple(recovered)
 
 
+@cython.ccall
 def _sidecar_free_indexed_global_evidence_8616(
-    binary_refs: list[tuple[int, int]],
+    binary_refs: object,
 ) -> tuple[IndexedSegmentedGlobalEvidence8616, ...]:
     """Name exact binary-proven indexed DS identities without guessing source metadata."""
+    base_offset: object
+    width: object
 
     recovered: list[IndexedSegmentedGlobalEvidence8616] = []
     for base_offset, width in dict.fromkeys(binary_refs):
@@ -6638,24 +7127,26 @@ def _sidecar_free_indexed_global_evidence_8616(
 def _indexed_segmented_global_load_site_from_operand_8616(
     insn: CapstoneInstructionView8616,
     operand: CapstoneOperandView8616,
-    register_stack_indices: dict[str, tuple[int, int, int]],
+    register_stack_indices: object,
     *,
-    destination_register: str | None = None,
+    destination_register: object = None,
     consumer: IndexedSegmentedGlobalLoadConsumer8616 = IndexedSegmentedGlobalLoadConsumer8616.REGISTER,
 ) -> IndexedSegmentedGlobalLoadSiteEvidence8616 | None:
     """Create one exact indexed DS load fact from a typed memory operand."""
+    destination_domain: object
+    memory: object
 
     memory = operand.memory
-    if operand.kind != X86_OP_MEM or memory is None:
+    if operator.ne(operand.kind, X86_OP_MEM) or memory is None:
         return None
     segment_name = _direct_stack_move_segment_name_8616(insn.raw, memory.segment)
     base_name = _direct_stack_move_register_name_8616(insn.raw, memory.base)
     index_name = _direct_stack_move_register_name_8616(insn.raw, memory.index)
     index_sources = tuple(
         source
-        for name in (base_name, index_name)
+        for name in iter((base_name, index_name))
         if name is not None
-        for source in (register_stack_indices.get(name),)
+        for source in iter((register_stack_indices.get(name),))
         if source is not None
     )
     if (
@@ -6689,23 +7180,30 @@ def _indexed_segmented_global_load_site_from_operand_8616(
     )
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _IndexedLoadSiteCollector8616:
     """Per-block typed Capstone scan for indexed DS load-site evidence."""
 
-    recovered: list[IndexedSegmentedGlobalLoadSiteEvidence8616] = field(default_factory=list)
-    reg_stack_index: dict[str, tuple[int, int, int]] = field(default_factory=dict)
-    reg_indexed_load: dict[str, int] = field(default_factory=dict)
+    recovered: object = field(default_factory=list)
+    reg_stack_index: object = field(default_factory=dict)
+    reg_indexed_load: object = field(default_factory=dict)
 
+    @cython.ccall
     def process_block_8616(self, project: object, block: object) -> None:
         """Reset per-block carriers and scan the decoded instructions."""
+        wrapper: object
         self.reg_stack_index = {}
         self.reg_indexed_load = {}
         for wrapper in _capstone_insns_for_direct_global_update_8616(project, block):
             self.process_insn_8616(_capstone_instruction_view_8616(wrapper))
 
+    @cython.ccall
     def process_insn_8616(self, insn: CapstoneInstructionView8616) -> None:
         """Dispatch one typed instruction view to its evidence arm."""
+        comparison_load: object
+        direct_push_load: object
+        reg_name: object
+        operand: object
         operands = insn.operands
         insn_id = insn.instruction_id
         if insn_id == X86_INS_PUSH and len(operands) == 1:
@@ -6735,12 +7233,13 @@ class _IndexedLoadSiteCollector8616:
         if insn_id in {X86_INS_SHL, X86_INS_SAL} and len(operands) == 2:
             self._shift_arm_8616(insn, operands[0], operands[1])
             return
-        if operands and operands[0].kind == X86_OP_REG:
+        if operands and operator.eq(operands[0].kind, X86_OP_REG):
             reg_name = _direct_stack_move_register_name_8616(insn.raw, operands[0].register)
             if reg_name is not None:
                 self.reg_stack_index.pop(reg_name, None)
                 _invalidate_register_storage_carriers_8616(self.reg_indexed_load, reg_name)
 
+    @cython.ccall
     def _mov_arm_8616(
         self,
         insn: CapstoneInstructionView8616,
@@ -6748,7 +7247,13 @@ class _IndexedLoadSiteCollector8616:
         src: CapstoneOperandView8616,
     ) -> None:
         """Handle mov forms: stack-store append, stack seed, load, reg copy."""
-        if dst.kind != X86_OP_REG:
+        copied: object
+        dst_name: object
+        load_index: object
+        load_site: object
+        src_name: object
+        stack_slot: object
+        if operator.ne(dst.kind, X86_OP_REG):
             self._mov_stack_store_arm_8616(insn, dst, src)
             return
         dst_name = _direct_stack_move_register_name_8616(insn.raw, dst.register)
@@ -6760,7 +7265,7 @@ class _IndexedLoadSiteCollector8616:
             self.reg_stack_index[dst_name] = (stack_offset, stack_width, 0)
             _invalidate_register_storage_carriers_8616(self.reg_indexed_load, dst_name)
             return
-        if src.kind == X86_OP_MEM and src.memory is not None:
+        if operator.eq(src.kind, X86_OP_MEM) and src.memory is not None:
             load_site = _indexed_segmented_global_load_site_from_operand_8616(
                 insn,
                 src,
@@ -6775,7 +7280,7 @@ class _IndexedLoadSiteCollector8616:
                 _invalidate_register_storage_carriers_8616(self.reg_indexed_load, dst_name)
             self.reg_stack_index.pop(dst_name, None)
             return
-        if src.kind == X86_OP_REG:
+        if operator.eq(src.kind, X86_OP_REG):
             src_name = _direct_stack_move_register_name_8616(insn.raw, src.register)
             copied = self.reg_stack_index.get(src_name) if src_name is not None else None
             if copied is not None:
@@ -6789,6 +7294,7 @@ class _IndexedLoadSiteCollector8616:
         self.reg_stack_index.pop(dst_name, None)
         _invalidate_register_storage_carriers_8616(self.reg_indexed_load, dst_name)
 
+    @cython.ccall
     def _mov_stack_store_arm_8616(
         self,
         insn: CapstoneInstructionView8616,
@@ -6796,8 +7302,11 @@ class _IndexedLoadSiteCollector8616:
         src: CapstoneOperandView8616,
     ) -> None:
         """Attach a proven stack store to the register's pending load site."""
+        load_index: object
+        src_name: object
+        stack_store: object
         stack_store = _stack_mem_operand_offset_width_8616(dst.raw)
-        if stack_store is None or src.kind != X86_OP_REG:
+        if stack_store is None or operator.ne(src.kind, X86_OP_REG):
             return
         src_name = _direct_stack_move_register_name_8616(insn.raw, src.register)
         load_index = self.reg_indexed_load.get(src_name) if src_name is not None else None
@@ -6805,7 +7314,7 @@ class _IndexedLoadSiteCollector8616:
             return
         stack_offset, stack_width = stack_store
         load = self.recovered[load_index]
-        if load.width != stack_width or not isinstance(insn.address, int):
+        if operator.ne(load.width, stack_width) or not isinstance(insn.address, int):
             return
         store = IndexedSegmentedGlobalStackStore8616(
             stack_offset=int(stack_offset),
@@ -6814,9 +7323,10 @@ class _IndexedLoadSiteCollector8616:
         )
         self.recovered[load_index] = replace(
             load,
-            stack_stores=tuple(dict.fromkeys((*load.stack_stores, store))),
+            stack_stores=tuple(dict.fromkeys(tuple(load.stack_stores) + (store,))),
         )
 
+    @cython.ccall
     def _shift_arm_8616(
         self,
         insn: CapstoneInstructionView8616,
@@ -6824,7 +7334,9 @@ class _IndexedLoadSiteCollector8616:
         amount: CapstoneOperandView8616,
     ) -> None:
         """Update or drop a register's indexed stack carrier on shl/sal."""
-        if dst.kind != X86_OP_REG:
+        previous: object
+        reg_name: object
+        if operator.ne(dst.kind, X86_OP_REG):
             return
         reg_name = _direct_stack_move_register_name_8616(insn.raw, dst.register)
         previous = self.reg_stack_index.get(reg_name) if reg_name is not None else None
@@ -6839,10 +7351,11 @@ class _IndexedLoadSiteCollector8616:
 
 
 def _recover_indexed_segmented_global_load_site_evidence_uncached_8616(
-    project: object | None,
+    project: object,
     function: object,
 ) -> tuple[IndexedSegmentedGlobalLoadSiteEvidence8616, ...]:
     """Recover indexed DS load sites from one decoded binary surface."""
+    block: object
 
     if project is None or function is None:
         return ()
@@ -6853,19 +7366,20 @@ def _recover_indexed_segmented_global_load_site_evidence_uncached_8616(
     recovered.extend(collector.recovered)
     near_pointer_keys = {
         (fact.dereference_ins_addr, fact.access_width_bytes, fact.stack_offset)
-        for fact in collect_near_pointer_argument_facts_8616(function, project=project)
+        for fact in builtins.iter(collect_near_pointer_argument_facts_8616(function, project=project))
     }
     return tuple(
         fact
-        for fact in dict.fromkeys(recovered)
+        for fact in builtins.iter(dict.fromkeys(recovered))
         if (fact.ins_addr, fact.width, fact.index_stack_offset) not in near_pointer_keys
     )
 
 
+@cython.ccall
 def recover_indexed_segmented_global_load_site_evidence_8616(
     project: ProjectBoundary8616,
     function: object,
-) -> tuple[IndexedSegmentedGlobalLoadSiteEvidence8616, ...]:
+) -> object:
     """Recover or reuse exact indexed DS load-site evidence."""
 
     return cast(
@@ -6880,17 +7394,18 @@ def recover_indexed_segmented_global_load_site_evidence_8616(
 
 
 def _recover_far_pointer_segmented_load_evidence_uncached_8616(
-    project: object | None,
+    project: object,
     function: object,
 ) -> tuple[FarPointerSegmentedLoadEvidence8616, ...]:
     """Recover LES/LDS-backed segmented loads from decoded basic blocks."""
+    block: object
     if project is None or function is None:
         return ()
     recovered: list[FarPointerSegmentedLoadEvidence8616] = []
     for block in _direct_global_update_blocks_8616(project, function):
         instructions = tuple(
             _capstone_instruction_view_8616(wrapper)
-            for wrapper in _capstone_insns_for_direct_global_update_8616(project, block)
+            for wrapper in builtins.iter(_capstone_insns_for_direct_global_update_8616(project, block))
         )
         recovered.extend(
             recover_far_pointer_segmented_loads_8616(
@@ -6902,10 +7417,11 @@ def _recover_far_pointer_segmented_load_evidence_uncached_8616(
     return tuple(dict.fromkeys(recovered))
 
 
+@cython.ccall
 def recover_far_pointer_segmented_load_evidence_8616(
     project: ProjectBoundary8616,
     function: object,
-) -> tuple[FarPointerSegmentedLoadEvidence8616, ...]:
+) -> object:
     """Recover or reuse exact LES/LDS-backed segmented-load evidence."""
     return cast(
         tuple[FarPointerSegmentedLoadEvidence8616, ...],
@@ -6918,25 +7434,29 @@ def recover_far_pointer_segmented_load_evidence_8616(
     )
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _IndexedStoreEvidenceCollector8616:
     """Per-block typed Capstone scan for indexed DS store evidence."""
 
-    recovered: list[IndexedSegmentedGlobalStoreEvidence8616] = field(default_factory=list)
-    reg_stack_index: dict[str, tuple[int, int, int]] = field(default_factory=dict)
-    reg_indexed_global: dict[str, tuple[int, int, int, int]] = field(default_factory=dict)
-    reg_signed_remainder: dict[str, SignedRemainderStackSource8616] = field(default_factory=dict)
+    recovered: object = field(default_factory=list)
+    reg_stack_index: object = field(default_factory=dict)
+    reg_indexed_global: object = field(default_factory=dict)
+    reg_signed_remainder: object = field(default_factory=dict)
 
+    @cython.ccall
     def process_block_8616(self, project: object, block: object) -> None:
         """Reset per-block carriers and scan the decoded instructions."""
+        wrapper: object
         self.reg_stack_index = {}
         self.reg_indexed_global = {}
         self.reg_signed_remainder = {}
         for wrapper in _capstone_insns_for_direct_global_update_8616(project, block):
             self.process_insn_8616(_capstone_instruction_view_8616(wrapper))
 
+    @cython.ccall
     def process_insn_8616(self, insn: CapstoneInstructionView8616) -> None:
         """Dispatch one typed instruction view to its evidence arm."""
+        alias: object
         operands = insn.operands
         insn_id = insn.instruction_id
         if insn_id == X86_INS_CWD:
@@ -6949,7 +7469,7 @@ class _IndexedStoreEvidenceCollector8616:
         if (
             insn_id == X86_INS_INC
             and len(operands) == 1
-            and operands[0].kind == X86_OP_REG
+            and operator.eq(operands[0].kind, X86_OP_REG)
             and self._inc_arm_8616(insn, operands[0])
         ):
             return
@@ -6959,15 +7479,18 @@ class _IndexedStoreEvidenceCollector8616:
         if insn_id in {X86_INS_SHL, X86_INS_SAL} and len(operands) == 2:
             self._shift_arm_8616(insn, operands[0], operands[1])
             return
-        if operands and operands[0].kind == X86_OP_REG:
+        if operands and operator.eq(operands[0].kind, X86_OP_REG):
             self._invalidate_dst_reg_8616(insn, operands[0])
 
+    @cython.ccall
     def _invalidate_dst_reg_8616(
         self,
         insn: CapstoneInstructionView8616,
         dst: CapstoneOperandView8616,
     ) -> None:
         """Drop all carriers for a register overwritten by an untracked write."""
+        reg_name: object
+        alias: object
         reg_name = _direct_stack_move_register_name_8616(insn.raw, dst.register)
         if reg_name is None:
             return
@@ -6976,8 +7499,12 @@ class _IndexedStoreEvidenceCollector8616:
         for alias in _signed_remainder_register_aliases_8616(reg_name):
             self.reg_signed_remainder.pop(alias, None)
 
+    @cython.ccall
     def _idiv_arm_8616(self, operand: CapstoneOperandView8616) -> None:
         """Track a signed dx remainder after a proven idiv shape."""
+        dividend_slot: object
+        divisor_slot: object
+        alias: object
         divisor_slot = _stack_mem_operand_offset_width_8616(operand.raw)
         dividend_slot = self.reg_stack_index.get("ax")
         for alias in _signed_remainder_register_aliases_8616("dx"):
@@ -7000,8 +7527,12 @@ class _IndexedStoreEvidenceCollector8616:
         for alias in _signed_remainder_register_aliases_8616("dx"):
             self.reg_signed_remainder[alias] = remainder
 
-    def _inc_arm_8616(self, insn: CapstoneInstructionView8616, operand: CapstoneOperandView8616) -> bool:
+    @cython.ccall
+    def _inc_arm_8616(self, insn: CapstoneInstructionView8616, operand: CapstoneOperandView8616) -> cython.bint:
         """Bump a tracked signed remainder through an inc; report applied."""
+        register_name: object
+        remainder_source: object
+        alias: object
         register_name = _direct_stack_move_register_name_8616(
             insn.raw,
             operand.register,
@@ -7014,6 +7545,7 @@ class _IndexedStoreEvidenceCollector8616:
             self.reg_signed_remainder[alias] = adjusted
         return True
 
+    @cython.ccall
     def _mov_arm_8616(
         self,
         insn: CapstoneInstructionView8616,
@@ -7021,11 +7553,12 @@ class _IndexedStoreEvidenceCollector8616:
         src: CapstoneOperandView8616,
     ) -> None:
         """Handle mov dst-reg carrier updates and dst-mem store evidence."""
-        if dst.kind == X86_OP_REG:
+        if operator.eq(dst.kind, X86_OP_REG):
             self._mov_dst_reg_arm_8616(insn, dst, src)
             return
         self._mov_dst_mem_arm_8616(insn, dst, src)
 
+    @cython.ccall
     def _mov_dst_reg_arm_8616(
         self,
         insn: CapstoneInstructionView8616,
@@ -7033,6 +7566,13 @@ class _IndexedStoreEvidenceCollector8616:
         src: CapstoneOperandView8616,
     ) -> None:
         """Update register carriers for stack slots, indexed globals, copies."""
+        copied: object
+        copied_global: object
+        dst_name: object
+        mem: object
+        src_name: object
+        stack_slot: object
+        alias: object
         dst_name = _direct_stack_move_register_name_8616(insn.raw, dst.register)
         if dst_name is None:
             return
@@ -7045,10 +7585,10 @@ class _IndexedStoreEvidenceCollector8616:
             self.reg_indexed_global.pop(dst_name, None)
             return
         mem = src.memory
-        if src.kind == X86_OP_MEM and mem is not None:
+        if operator.eq(src.kind, X86_OP_MEM) and mem is not None:
             self._mov_dst_reg_mem_arm_8616(insn, dst_name, src, mem)
             return
-        if src.kind == X86_OP_REG:
+        if operator.eq(src.kind, X86_OP_REG):
             src_name = _direct_stack_move_register_name_8616(insn.raw, src.register)
             copied = self.reg_stack_index.get(src_name) if src_name is not None else None
             if copied is not None:
@@ -7063,14 +7603,17 @@ class _IndexedStoreEvidenceCollector8616:
         self.reg_stack_index.pop(dst_name, None)
         self.reg_indexed_global.pop(dst_name, None)
 
+    @cython.ccall
     def _mov_dst_reg_mem_arm_8616(
         self,
         insn: CapstoneInstructionView8616,
-        dst_name: str,
+        dst_name: object,
         src: CapstoneOperandView8616,
         mem: CapstoneMemoryView8616,
     ) -> None:
         """Seed an indexed-global carrier from a proven ds mem load."""
+        base_name: object
+        index_name: object
         segment_name = _direct_stack_move_segment_name_8616(insn.raw, mem.segment)
         displacement = mem.displacement
         access_width = src.size
@@ -7078,7 +7621,7 @@ class _IndexedStoreEvidenceCollector8616:
         index_name = _direct_stack_move_register_name_8616(insn.raw, mem.index)
         base_value = self.reg_stack_index.get(base_name) if base_name is not None else None
         index_value = self.reg_stack_index.get(index_name) if index_name is not None else None
-        index_sources = [value for value in (base_value, index_value) if value is not None]
+        index_sources = [value for value in iter((base_value, index_value)) if value is not None]
         if (
             segment_name == "ds"
             and isinstance(displacement, int)
@@ -7097,6 +7640,7 @@ class _IndexedStoreEvidenceCollector8616:
         self.reg_stack_index.pop(dst_name, None)
         self.reg_indexed_global.pop(dst_name, None)
 
+    @cython.ccall
     def _mov_dst_mem_arm_8616(
         self,
         insn: CapstoneInstructionView8616,
@@ -7104,7 +7648,10 @@ class _IndexedStoreEvidenceCollector8616:
         src: CapstoneOperandView8616,
     ) -> None:
         """Append store evidence for a proven indexed ds destination."""
-        if dst.kind != X86_OP_MEM:
+        base_name: object
+        index_name: object
+        mem: object
+        if operator.ne(dst.kind, X86_OP_MEM):
             return
         width = dst.size
         if width not in {1, 2}:
@@ -7123,23 +7670,27 @@ class _IndexedStoreEvidenceCollector8616:
         index_name = _direct_stack_move_register_name_8616(insn.raw, mem.index)
         base_value = self.reg_stack_index.get(base_name) if base_name is not None else None
         index_value = self.reg_stack_index.get(index_name) if index_name is not None else None
-        index_sources = [value for value in (base_value, index_value) if value is not None]
+        index_sources = [value for value in iter((base_value, index_value)) if value is not None]
         if len(index_sources) != 1:
             return
         stack_offset, _stack_width, shift = index_sources[0]
         self._append_store_evidence_8616(insn, src, displacement, ins_addr, width, stack_offset, shift)
 
+    @cython.ccall
     def _append_store_evidence_8616(
         self,
         insn: CapstoneInstructionView8616,
         src: CapstoneOperandView8616,
-        displacement: int,
-        ins_addr: int,
-        width: int,
-        stack_offset: int,
-        shift: int,
+        displacement: cython.longlong,
+        ins_addr: cython.longlong,
+        width: cython.longlong,
+        stack_offset: cython.longlong,
+        shift: cython.longlong,
     ) -> None:
         """Emit the typed store fact with proven source provenance."""
+        source_global: object
+        source_name: object
+        source_stack: object
         source_name = _direct_stack_move_register_name_8616(insn.raw, src.register)
         source_global = self.reg_indexed_global.get(source_name) if source_name is not None else None
         source_base_offset = None
@@ -7181,6 +7732,7 @@ class _IndexedStoreEvidenceCollector8616:
             )
         )
 
+    @cython.ccall
     def _shift_arm_8616(
         self,
         insn: CapstoneInstructionView8616,
@@ -7188,7 +7740,9 @@ class _IndexedStoreEvidenceCollector8616:
         amount: CapstoneOperandView8616,
     ) -> None:
         """Update or drop a register's indexed carrier on shl/sal."""
-        if dst.kind != X86_OP_REG:
+        previous: object
+        reg_name: object
+        if operator.ne(dst.kind, X86_OP_REG):
             return
         reg_name = _direct_stack_move_register_name_8616(insn.raw, dst.register)
         if reg_name is None:
@@ -7204,10 +7758,11 @@ class _IndexedStoreEvidenceCollector8616:
 
 
 def _recover_indexed_segmented_global_store_evidence_uncached_8616(
-    project: object | None,
+    project: object,
     function: object,
 ) -> tuple[IndexedSegmentedGlobalStoreEvidence8616, ...]:
     """Recover indexed DS stores from one decoded binary surface."""
+    block: object
 
     if project is None or function is None:
         return ()
@@ -7218,19 +7773,20 @@ def _recover_indexed_segmented_global_store_evidence_uncached_8616(
     recovered.extend(collector.recovered)
     near_pointer_keys = {
         (fact.dereference_ins_addr, fact.access_width_bytes, fact.stack_offset)
-        for fact in collect_near_pointer_argument_facts_8616(function, project=project)
+        for fact in builtins.iter(collect_near_pointer_argument_facts_8616(function, project=project))
     }
     return tuple(
         fact
-        for fact in dict.fromkeys(recovered)
+        for fact in builtins.iter(dict.fromkeys(recovered))
         if (fact.ins_addr, fact.width, fact.index_stack_offset) not in near_pointer_keys
     )
 
 
+@cython.ccall
 def recover_indexed_segmented_global_store_evidence_8616(
     project: ProjectBoundary8616,
     function: object,
-) -> tuple[IndexedSegmentedGlobalStoreEvidence8616, ...]:
+) -> object:
     """Recover or reuse exact indexed DS store evidence."""
 
     return cast(
@@ -7244,29 +7800,31 @@ def recover_indexed_segmented_global_store_evidence_8616(
     )
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _IndexedGlobalMaterializeRun8616:
     """Run state for indexed segmented-global materialization over one cfunc."""
 
     project: ProjectBoundary8616
     codegen: CodegenBoundary8616
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616]
-    literals_by_offset: dict[int, GlobalAddressLiteralEvidence8616]
-    load_sites_by_ins_addr: dict[int, IndexedSegmentedGlobalLoadSiteEvidence8616]
-    load_site_evidence: tuple[IndexedSegmentedGlobalLoadSiteEvidence8616, ...]
-    store_evidence: tuple[IndexedSegmentedGlobalStoreEvidence8616, ...]
+    evidence_by_base: object
+    literals_by_offset: object
+    load_sites_by_ins_addr: object
+    load_site_evidence: object
+    store_evidence: object
     stats: SegmentedGlobalLoadStats8616
-    consumed_load_sites: list[IndexedSegmentedGlobalLoadSiteEvidence8616] | None
-    changed: bool = False
+    consumed_load_sites: object
+    changed: cython.bint = False
 
+    @cython.ccall
     def transform_8616(
         self,
         node: object,
-        copies: dict[CopyKey8616, object] | None = None,
+        copies: object = None,
         *,
         access_kind: SegmentAccessKind = SegmentAccessKind.READ,
     ) -> object:
         """Materialize one expression node from indexed-global evidence."""
+        indexed: object
         indexed = _materialize_indexed_global_expr_node_8616(
             self.project,
             self.codegen,
@@ -7285,16 +7843,19 @@ class _IndexedGlobalMaterializeRun8616:
         self.changed = True
         return _with_replacement_tags_8616(node, indexed) if isinstance(indexed, CExpression) else indexed
 
+    @cython.ccall
     def transform_write_8616(self, node: object) -> object:
         """Materialize one node using assignment-destination access evidence."""
         return self.transform_8616(node, access_kind=SegmentAccessKind.WRITE)
 
+    @cython.ccall
     def transform_assignment_lvalues_8616(
         self,
         root: object,
         query_index: StructuredAstQueryIndex8616,
-    ) -> bool:
+    ) -> cython.bint:
         """Transform every assignment destination without losing its write role."""
+        assignment: object
         query_index.require_root(root)
         lvalues_changed = False
         for assignment in query_index.assignments:
@@ -7309,19 +7870,20 @@ class _IndexedGlobalMaterializeRun8616:
         return lvalues_changed
 
     @staticmethod
-    def _is_read_child_8616(parent: object, attr: str) -> bool:
+    def _is_read_child_8616(parent: object, attr: object) -> cython.bint:
         """Keep assignment destinations out of the generic read traversal."""
         return not (isinstance(parent, CAssignment) and attr == "lhs")
 
-    def process_root_8616(self, root: object) -> bool:
+    def process_root_8616(self, root: object) -> cython.bint:
         """Run the indexed-global pass chain over one root."""
+        run_pass: object
         query_session = StructuredAstQuerySession8616(root)
         root_changed = False
         new_root = self.transform_8616(root)
         if new_root is not root:
             root_changed = True
             query_session.record_mutation(True)
-        passes: tuple[Callable[[StructuredAstQueryIndex8616], bool], ...] = (
+        passes: tuple[Callable[[StructuredAstQueryIndex8616], cython.bint], ...] = (
             lambda q: _materialize_indexed_global_word_store_pairs_8616(
                 root,
                 self.project,
@@ -7398,15 +7960,17 @@ class _IndexedGlobalMaterializeRun8616:
 def materialize_indexed_segmented_global_loads_from_evidence_8616(
     project: ProjectBoundary8616,
     codegen: CodegenBoundary8616,
-    evidence: tuple[IndexedSegmentedGlobalEvidence8616, ...],
+    evidence: object,
     *,
-    load_site_evidence: tuple[IndexedSegmentedGlobalLoadSiteEvidence8616, ...] = (),
-    store_evidence: tuple[IndexedSegmentedGlobalStoreEvidence8616, ...] = (),
-    address_literals: tuple[GlobalAddressLiteralEvidence8616, ...] = (),
+    load_site_evidence: object = (),
+    store_evidence: object = (),
+    address_literals: object = (),
     stats: SegmentedGlobalLoadStats8616 | None = None,
-    consumed_load_sites: list[IndexedSegmentedGlobalLoadSiteEvidence8616] | None = None,
-) -> bool:
+    consumed_load_sites: object = None,
+) -> cython.bint:
     """Materialize indexed global expressions from pre-collected evidence."""
+    cfunc: object
+    root: object
 
     if stats is None:
         stats = SegmentedGlobalLoadStats8616()
@@ -7417,17 +7981,17 @@ def materialize_indexed_segmented_global_loads_from_evidence_8616(
     if cfunc is None:
         stats.record_indexed(IndexedSegmentedGlobalDecision8616.REFUSED_NO_CFUNC)
         return False
-    evidence_by_base = {(item.base_offset & 0xFFFF, item.width): item for item in evidence}
+    evidence_by_base = {(item.base_offset & 0xFFFF, item.width): item for item in iter(evidence)}
     stats.indexed_store_affine_source_raw_fact_count += sum(
         1
-        for fact in store_evidence
+        for fact in iter(store_evidence)
         if isinstance(fact.source_base_offset, int)
         and isinstance(fact.source_width, int)
         and isinstance(fact.source_index_stack_offset, int)
         and isinstance(fact.source_index_shift, int)
     )
-    load_sites_by_ins_addr = {item.ins_addr: item for item in load_site_evidence}
-    literals_by_offset = {item.offset & 0xFFFF: item for item in address_literals}
+    load_sites_by_ins_addr = {item.ins_addr: item for item in iter(load_site_evidence)}
+    literals_by_offset = {item.offset & 0xFFFF: item for item in iter(address_literals)}
     run = _IndexedGlobalMaterializeRun8616(
         project=project,
         codegen=codegen,
@@ -7463,32 +8027,37 @@ def materialize_indexed_segmented_global_loads_from_evidence_8616(
     return changed
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _IndexedGlobalExprCtx8616:
     """Shared context for indexed-global expression materialization arms."""
 
     project: ProjectBoundary8616
     codegen: CodegenBoundary8616
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616]
-    literals_by_offset: dict[int, GlobalAddressLiteralEvidence8616] | None
-    copies: dict[CopyKey8616, object] | None
+    evidence_by_base: object
+    literals_by_offset: object
+    copies: object
     stats: SegmentedGlobalLoadStats8616 | None
 
+    @cython.ccall
     def record_materialized_8616(self) -> None:
         """Record a successful indexed materialization in shared stats."""
         if self.stats is not None:
             self.stats.record_indexed(IndexedSegmentedGlobalDecision8616.MATERIALIZED)
 
+    @cython.ccall
     def record_refused_shape_8616(self) -> None:
         """Record a shape-mismatch refusal in shared stats."""
         if self.stats is not None:
             self.stats.record_indexed(IndexedSegmentedGlobalDecision8616.REFUSED_SHAPE_MISMATCH)
 
 
+@cython.ccall
 def _indexed_expr_stride_value_8616(
-    ctx: _IndexedGlobalExprCtx8616, arg_expr: object, width: int
+    ctx: _IndexedGlobalExprCtx8616, arg_expr: object, width: cython.longlong
 ) -> object | None:
     """Try stride-evidence value materialization for an offset expression."""
+    stride_matched: object
+    value_expr: object
     stride_matched = _match_indexed_offset_expr_with_stride_8616(arg_expr, copies=ctx.copies)
     if stride_matched is None:
         return None
@@ -7506,10 +8075,13 @@ def _indexed_expr_stride_value_8616(
     return value_expr
 
 
+@cython.ccall
 def _indexed_expr_tail_8616(
-    ctx: _IndexedGlobalExprCtx8616, matched: tuple[object, object, object] | tuple[object, object] | None, width: int, debug_arg: object
+    ctx: _IndexedGlobalExprCtx8616, matched: object, width: cython.longlong, debug_arg: object
 ) -> object | None:
     """Resolve a matched (base, [width,] index) tuple into the final indexed value."""
+    indexed: object
+    item: object
     if matched is None:
         _debug_indexed_expr_refusal_8616(
             "indexed_expr_shape",
@@ -7537,10 +8109,14 @@ def _indexed_expr_tail_8616(
     return indexed
 
 
+@cython.ccall
 def _indexed_direct_offset_expr_8616(
-    ctx: _IndexedGlobalExprCtx8616, arg: object, width: int
+    ctx: _IndexedGlobalExprCtx8616, arg: object, width: cython.longlong
 ) -> object | None:
     """Materialize a constant-offset segment helper argument."""
+    direct_expr: object
+    direct_offset: object
+    item: object
     direct_offset = _constant_int_8616(arg)
     if direct_offset is None:
         return None
@@ -7564,10 +8140,13 @@ def _indexed_direct_offset_expr_8616(
     return cast(object, direct_expr)
 
 
+@cython.ccall
 def _indexed_near_pointer_expr_8616(
     ctx: _IndexedGlobalExprCtx8616, arg: object
 ) -> object | None:
     """Materialize a near-pointer table element or ds load."""
+    near_pointer_element: object
+    near_pointer_load: object
     near_pointer_element = _near_pointer_table_element_from_ds_offset_8616(
         ctx.codegen,
         arg,
@@ -7589,10 +8168,13 @@ def _indexed_near_pointer_expr_8616(
     return None
 
 
+@cython.ccall
 def _indexed_stride_address_expr_8616(
     ctx: _IndexedGlobalExprCtx8616, arg: object
 ) -> object | None:
     """Materialize an indexed global address from stride evidence."""
+    address_expr: object
+    stride_matched: object
     stride_matched = _match_indexed_offset_expr_with_stride_8616(arg, copies=ctx.copies)
     if stride_matched is None:
         return None
@@ -7610,15 +8192,19 @@ def _indexed_stride_address_expr_8616(
     return address_expr
 
 
+@cython.ccall
 def _indexed_expr_segment_helper_arm_8616(
-    ctx: _IndexedGlobalExprCtx8616, args: tuple[object, ...], segment_helper: SegmentLoadHelper8616
+    ctx: _IndexedGlobalExprCtx8616, args: object, segment_helper: SegmentLoadHelper8616
 ) -> object | None:
     """Materialize a segment-load helper call into an indexed global value."""
+    direct_expr: object
+    matched: object
+    value_expr: object
     if segment_helper.width == 1:
         value_expr = _indexed_expr_stride_value_8616(ctx, args[1], segment_helper.width)
         if value_expr is not None:
             return value_expr
-    matched: tuple[int, object] | tuple[int, int, object] | None = _match_indexed_offset_expr_8616(
+    matched = _match_indexed_offset_expr_8616(
         args[1],
         segment_helper.width,
         copies=ctx.copies,
@@ -7639,10 +8225,18 @@ def _indexed_expr_segment_helper_arm_8616(
     return _indexed_expr_tail_8616(ctx, matched, width, args[1])
 
 
+@cython.ccall
 def _indexed_expr_segment_pointer_arm_8616(
-    ctx: _IndexedGlobalExprCtx8616, args: tuple[object, ...]
+    ctx: _IndexedGlobalExprCtx8616, args: object
 ) -> object | None:
     """Materialize a segment-pointer helper call into an indexed global address."""
+    address_expr: object
+    direct_offset: object
+    indexed: object
+    item: object
+    literal: object
+    matched: object
+    near_pointer_expr: object
     direct_offset = _constant_int_8616(args[1])
     if direct_offset is not None:
         literal = (ctx.literals_by_offset or {}).get(direct_offset & 0xFFFF)
@@ -7695,10 +8289,16 @@ def _indexed_expr_segment_pointer_arm_8616(
     return None
 
 
+@cython.ccall
 def _indexed_expr_memory_helper_arm_8616(
-    ctx: _IndexedGlobalExprCtx8616, args: tuple[object, ...], memory_helper: MemoryPointerHelper8616
+    ctx: _IndexedGlobalExprCtx8616, args: object, memory_helper: MemoryPointerHelper8616
 ) -> object | None:
     """Materialize a memory-pointer helper call into an indexed global value."""
+    byte_matched: object
+    matched: object
+    stride_matched: object
+    typed_field_expr: object
+    value_expr: object
     matched = _match_indexed_pointer_expr_8616(args[0], memory_helper.width, copies=ctx.copies)
     width = memory_helper.width
     if matched is None:
@@ -7744,17 +8344,19 @@ def _indexed_expr_memory_helper_arm_8616(
     return _indexed_expr_tail_8616(ctx, matched, width, args[0])
 
 
+@cython.ccall
 def _indexed_load_site_materialized_8616(
     project: ProjectBoundary8616,
     codegen: CodegenBoundary8616,
     node: object,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-    load_sites_by_ins_addr: dict[int, IndexedSegmentedGlobalLoadSiteEvidence8616] | None,
-    copies: dict[CopyKey8616, object] | None,
-    consumed_load_sites: list[IndexedSegmentedGlobalLoadSiteEvidence8616] | None,
-    stats: SegmentedGlobalLoadStats8616 | None,
+    evidence_by_base: object,
+    load_sites_by_ins_addr: object,
+    copies: object,
+    consumed_load_sites: object,
+    stats: object,
 ) -> object | None:
     """Materialize a READ node joined to an exact runtime load site."""
+    load_site_expr: object
     load_site_expr = _indexed_global_load_from_site_evidence_8616(
         project,
         codegen,
@@ -7772,14 +8374,16 @@ def _indexed_load_site_materialized_8616(
     return load_site_expr
 
 
+@cython.ccall
 def _indexed_byte_pair_load_materialized_8616(
     codegen: CodegenBoundary8616,
     node: object,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-    copies: dict[CopyKey8616, object] | None,
-    stats: SegmentedGlobalLoadStats8616 | None,
+    evidence_by_base: object,
+    copies: object,
+    stats: object,
 ) -> object | None:
     """Materialize a READ node rebuilt from a proven byte-pair load."""
+    byte_pair_load: object
     byte_pair_load = _indexed_word_load_from_byte_pair_8616(
         codegen,
         node,
@@ -7793,13 +8397,14 @@ def _indexed_byte_pair_load_materialized_8616(
     return cast(object, byte_pair_load)
 
 
+@cython.ccall
 def _indexed_helper_access_allowed_8616(
     codegen: CodegenBoundary8616,
     node: object,
-    helper_args: tuple[object, ...],
-    segment_helper: SegmentLoadHelper8616 | None,
+    helper_args: object,
+    segment_helper: object,
     access_kind: SegmentAccessKind,
-) -> bool:
+) -> cython.bint:
     """Gate helper lowering on proven entry-DS object access."""
     if segment_helper is not None:
         return may_lower_codegen_access_to_entry_ds_object_8616(
@@ -7817,18 +8422,20 @@ def _indexed_helper_access_allowed_8616(
     )
 
 
+@cython.ccall
 def _indexed_expr_node_tail_8616(
     project: ProjectBoundary8616,
     codegen: CodegenBoundary8616,
     node: object,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-    literals_by_offset: dict[int, GlobalAddressLiteralEvidence8616] | None,
-    copies: dict[CopyKey8616, object] | None,
+    evidence_by_base: object,
+    literals_by_offset: object,
+    copies: object,
     stats: SegmentedGlobalLoadStats8616 | None,
-    segment_helper: SegmentLoadHelper8616 | None,
+    segment_helper: object,
     segment_pointer_helper: object,
 ) -> object | None:
     """Dispatch a function-call node to its indexed-global arm."""
+    memory_helper: object
     if not isinstance(node, CFunctionCall):
         return None
     args: tuple[Any, ...] = tuple(cast(Iterable[Any], cast(Any, node).args or ()))
@@ -7850,20 +8457,25 @@ def _indexed_expr_node_tail_8616(
     return _indexed_expr_memory_helper_arm_8616(ctx, args, memory_helper)
 
 
+@cython.ccall
 def _materialize_indexed_global_expr_node_8616(
     project: ProjectBoundary8616,
     codegen: CodegenBoundary8616,
     node: object,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-    literals_by_offset: dict[int, GlobalAddressLiteralEvidence8616] | None = None,
+    evidence_by_base: object,
+    literals_by_offset: object = None,
     *,
-    load_sites_by_ins_addr: dict[int, IndexedSegmentedGlobalLoadSiteEvidence8616] | None = None,
-    copies: dict[CopyKey8616, object] | None = None,
+    load_sites_by_ins_addr: object = None,
+    copies: object = None,
     stats: SegmentedGlobalLoadStats8616 | None = None,
-    consumed_load_sites: list[IndexedSegmentedGlobalLoadSiteEvidence8616] | None = None,
+    consumed_load_sites: object = None,
     access_kind: SegmentAccessKind = SegmentAccessKind.READ,
 ) -> object | None:
     """Lower one segmented-global helper expression for its typed access role."""
+    byte_pair_expr: object
+    load_site_expr: object
+    segment_helper: object
+    segment_pointer_helper: object
     segment_helper = _segment_load_helper_8616(node) if isinstance(node, CFunctionCall) else None
     segment_pointer_helper = _segment_pointer_helper_8616(node) if isinstance(node, CFunctionCall) else None
     if access_kind is SegmentAccessKind.READ:
@@ -7921,11 +8533,15 @@ def _runtime_indexed_global_load_site_8616(
     project: ProjectBoundary8616,
     codegen: CodegenBoundary8616,
     node: object,
-    load_sites_by_ins_addr: dict[int, IndexedSegmentedGlobalLoadSiteEvidence8616],
+    load_sites_by_ins_addr: object,
     *,
-    copies: dict[CopyKey8616, object] | None,
-) -> tuple[IndexedSegmentedGlobalLoadSiteEvidence8616, object] | None:
+    copies: object,
+) -> object:
     """Join a runtime load site while retaining its exact index value view."""
+    helper: object
+    index_identity: object
+    matched: object
+    offset_expr: object
 
     helper = _segment_load_helper_8616(node) if isinstance(node, CFunctionCall) else None
     if helper is None:
@@ -7949,18 +8565,18 @@ def _runtime_indexed_global_load_site_8616(
     index_base, index_offset, index_adjustment = index_identity
     candidates = tuple(
         site
-        for site in load_sites_by_ins_addr.values()
-        if site.base_offset & 0xFFFF == base_offset & 0xFFFF
-        and site.width == helper.width
-        and site.index_stack_offset == index_offset
+        for site in builtins.iter(load_sites_by_ins_addr.values())
+        if operator.eq(site.base_offset & 0xFFFF, base_offset & 0xFFFF)
+        and operator.eq(site.width, helper.width)
+        and operator.eq(site.index_stack_offset, index_offset)
         and site.index_shift >= 0
-        and 1 << site.index_shift == stride
+        and operator.eq(1 << site.index_shift, stride)
         and index_base == "bp"
         and index_adjustment == 0
     )
     if not candidates:
         return None
-    candidate_ins_addrs = frozenset(site.ins_addr for site in candidates)
+    candidate_ins_addrs = frozenset(site.ins_addr for site in iter(candidates))
     if not may_lower_codegen_access_to_entry_ds_object_8616(
         codegen,
         node,
@@ -7973,17 +8589,22 @@ def _runtime_indexed_global_load_site_8616(
     return min(candidates, key=lambda site: site.ins_addr), index_expr
 
 
+@cython.ccall
 def _indexed_global_load_from_site_evidence_8616(
     project: ProjectBoundary8616,
     codegen: CodegenBoundary8616,
     node: object,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-    load_sites_by_ins_addr: dict[int, IndexedSegmentedGlobalLoadSiteEvidence8616],
+    evidence_by_base: object,
+    load_sites_by_ins_addr: object,
     *,
-    copies: dict[CopyKey8616, object] | None,
-    consumed_load_sites: list[IndexedSegmentedGlobalLoadSiteEvidence8616] | None = None,
+    copies: object,
+    consumed_load_sites: object = None,
 ) -> object | None:
     """Materialize a raw or runtime access joined to exact load-site evidence."""
+    index_expr: object
+    item: object
+    projection: object
+    runtime_match: object
 
     if not load_sites_by_ins_addr:
         return None
@@ -7999,12 +8620,12 @@ def _indexed_global_load_from_site_evidence_8616(
             return None
         ins_addrs = {
             ins_addr
-            for child in _iter_c_nodes_deep_8616(node)
+            for child in builtins.iter(_iter_c_nodes_deep_8616(node))
             if (ins_addr := _statement_ins_addr_8616(child)) is not None
         }
         matching_sites = [
             load_sites_by_ins_addr[addr]
-            for addr in ins_addrs
+            for addr in iter(ins_addrs)
             if addr in load_sites_by_ins_addr
         ]
         if (
@@ -8043,20 +8664,24 @@ def _indexed_global_load_from_site_evidence_8616(
     return projection.expression if projection is not None else None
 
 
+@cython.ccall
 def _indexed_byte_pair_candidate_8616(
     low_expr: object,
     high_expr: object,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-    copies: dict[CopyKey8616, object] | None,
-) -> tuple[IndexedSegmentedGlobalEvidence8616, object] | None:
+    evidence_by_base: object,
+    copies: object,
+) -> object:
     """Match one low/high byte-load pair against word evidence."""
+    evidence: object
+    high_match: object
+    low_match: object
     low_match = _indexed_byte_load_match_8616(low_expr, evidence_by_base, copies=copies)
     high_match = _indexed_byte_load_match_8616(high_expr, evidence_by_base, copies=copies)
     if low_match is None or high_match is None:
         return None
     low_base, low_index = low_match
     high_base, high_index = high_match
-    if ((low_base + 1) & 0xFFFF) != (high_base & 0xFFFF):
+    if operator.ne(((low_base + 1) & 0xFFFF), (high_base & 0xFFFF)):
         return None
     if not _same_c_expression_8616(low_index, high_index):
         return None
@@ -8069,10 +8694,13 @@ def _indexed_byte_pair_candidate_8616(
 def _indexed_word_load_from_byte_pair_8616(
     codegen: CodegenBoundary8616,
     node: object,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
+    evidence_by_base: object,
     *,
-    copies: dict[CopyKey8616, object] | None = None,
+    copies: object = None,
 ) -> CExpression | None:
+    candidate: object
+    high_expr: object
+    low_expr: object
     if not isinstance(node, CBinaryOp) or node.op != "Or":
         return None
 
@@ -8099,12 +8727,14 @@ def _indexed_word_load_from_byte_pair_8616(
     return None
 
 
+@cython.ccall
 def _indexed_byte_load_match_8616(
     node: object,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
+    evidence_by_base: object,
     *,
-    copies: dict[CopyKey8616, object] | None = None,
-) -> tuple[int, object] | None:
+    copies: object = None,
+) -> object:
+    matched: object
     node = _unwrap_codegen_expr_8616(node)
     memory_helper = memory_pointer_helper_8616(node)
     if memory_helper is MemoryPointerHelper8616.MEM_U8:
@@ -8125,11 +8755,13 @@ def _indexed_byte_load_match_8616(
     return _match_indexed_global_byte_address_8616(node.operand, evidence_by_base, copies=copies)
 
 
+@cython.ccall
 def _near_pointer_table_element_from_ds_offset_8616(
     codegen: CodegenBoundary8616,
     node: object,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
+    evidence_by_base: object,
 ) -> CExpression | None:
+    evidence: object
     if not isinstance(node, CIndexedVariable):
         return None
     variable_expr = node.variable
@@ -8147,7 +8779,7 @@ def _near_pointer_table_element_from_ds_offset_8616(
     if evidence is None:
         return None
     name = _sanitize_identifier_8616(raw_name)
-    if _sanitize_identifier_8616(evidence.name) != name:
+    if operator.ne(_sanitize_identifier_8616(evidence.name), name):
         return None
     record_global_declaration_spec_8616(
         codegen,
@@ -8158,14 +8790,18 @@ def _near_pointer_table_element_from_ds_offset_8616(
     return node
 
 
+@cython.ccall
 def _near_pointer_table_element_from_ds_load_8616(
     project: ProjectBoundary8616,
     codegen: CodegenBoundary8616,
     node: object,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
+    evidence_by_base: object,
     *,
-    copies: dict[CopyKey8616, object] | None = None,
+    copies: object = None,
 ) -> object | None:
+    evidence: object
+    matched: object
+    segment_helper: object
     if not isinstance(node, CFunctionCall):
         return None
     segment_helper = _segment_load_helper_8616(node)
@@ -8203,16 +8839,18 @@ def _near_pointer_table_element_from_ds_load_8616(
     return cast(object, indexed)
 
 
+@cython.ccall
 def _rewrite_indexed_word_store_pairs_in_list_8616(
-    statements: list[object],
+    statements: object,
     project: ProjectBoundary8616,
     codegen: CodegenBoundary8616,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-    store_evidence: tuple[IndexedSegmentedGlobalStoreEvidence8616, ...],
+    evidence_by_base: object,
+    store_evidence: object,
     stats: SegmentedGlobalLoadStats8616,
     runtime_context: RuntimeSegmentAccessContext8616,
-) -> tuple[list[object], bool]:
+) -> tuple[list[object], cython.bint]:
     """Merge adjacent indexed byte stores into word stores in one list."""
+    replacement: object
     copies: dict[CopyKey8616, object] = {}
     store_facts = _indexed_word_store_facts_for_pairs_8616(evidence_by_base, store_evidence)
     rewritten: list[object] = []
@@ -8329,12 +8967,13 @@ def _materialize_indexed_global_word_store_pairs_8616(
     root: object,
     project: ProjectBoundary8616,
     codegen: CodegenBoundary8616,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-    store_evidence: tuple[IndexedSegmentedGlobalStoreEvidence8616, ...],
+    evidence_by_base: object,
+    store_evidence: object,
     stats: SegmentedGlobalLoadStats8616,
     *,
     query_index: StructuredAstQueryIndex8616 | None = None,
-) -> bool:
+) -> cython.bint:
+    statements_node: object
     changed = False
     runtime_context = build_runtime_segment_access_context_8616(codegen)
     if query_index is not None:
@@ -8344,7 +8983,7 @@ def _materialize_indexed_global_word_store_pairs_8616(
         if query_index is not None
         else (
             node
-            for node in _iter_c_statement_nodes_8616(root)
+            for node in builtins.iter(_iter_c_statement_nodes_8616(root))
             if isinstance(node, CStatements)
         )
     )
@@ -8372,9 +9011,10 @@ def _materialize_indexed_global_word_store_pairs_8616(
 
 
 def _indexed_word_store_facts_for_pairs_8616(
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-    store_evidence: tuple[IndexedSegmentedGlobalStoreEvidence8616, ...],
-) -> list[IndexedSegmentedGlobalStoreEvidence8616]:
+    evidence_by_base: object,
+    store_evidence: object,
+) -> object:
+    fact: object
     facts: list[IndexedSegmentedGlobalStoreEvidence8616] = []
     for fact in sorted(store_evidence, key=lambda item: item.ins_addr):
         if fact.width != 2 or not _store_index_shift_matches_width_8616(fact):
@@ -8385,16 +9025,19 @@ def _indexed_word_store_facts_for_pairs_8616(
     return facts
 
 
+@cython.ccall
 def _consume_indexed_word_store_fact_for_pair_8616(
     low_stmt: object,
     high_stmt: object,
     project: ProjectBoundary8616,
     codegen: CodegenBoundary8616,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-    copies: dict[CopyKey8616, object],
-    store_facts: list[IndexedSegmentedGlobalStoreEvidence8616],
+    evidence_by_base: object,
+    copies: object,
+    store_facts: object,
     runtime_context: RuntimeSegmentAccessContext8616,
 ) -> None:
+    matched: object
+    selected: object
     matched = _match_indexed_word_store_pair_lvalues_8616(
         low_stmt,
         high_stmt,
@@ -8416,9 +9059,9 @@ def _consume_indexed_word_store_fact_for_pair_8616(
 
 def _select_indexed_word_store_fact_for_pair_8616(
     low_stmt: object,
-    low_base: int,
-    store_facts: list[IndexedSegmentedGlobalStoreEvidence8616],
-) -> tuple[int, IndexedSegmentedGlobalStoreEvidence8616] | None:
+    low_base: cython.longlong,
+    store_facts: object,
+) -> object:
     """Select one word-store fact by exact instruction provenance.
 
     angr may traverse structured blocks in a different order than binary
@@ -8429,30 +9072,37 @@ def _select_indexed_word_store_fact_for_pair_8616(
 
     candidates = tuple(
         (index, fact)
-        for index, fact in enumerate(store_facts)
-        if (fact.base_offset & 0xFFFF) == (low_base & 0xFFFF) and fact.width == 2
+        for index, fact in builtins.iter(enumerate(store_facts))
+        if operator.eq((fact.base_offset & 0xFFFF), (low_base & 0xFFFF)) and fact.width == 2
     )
     statement_ins_addr = _statement_ins_addr_8616(low_stmt)
     if isinstance(statement_ins_addr, int):
         candidates = tuple(
-            candidate for candidate in candidates if candidate[1].ins_addr == statement_ins_addr
+            candidate for candidate in iter(candidates) if operator.eq(candidate[1].ins_addr, statement_ins_addr)
         )
     if len(candidates) != 1:
         return None
     return candidates[0]
 
 
+@cython.ccall
 def _match_indexed_global_word_store_pair_from_store_evidence_8616(
     low_stmt: object,
     high_stmt: object,
     project: ProjectBoundary8616,
     codegen: CodegenBoundary8616,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-    copies: dict[CopyKey8616, object],
+    evidence_by_base: object,
+    copies: object,
     stats: SegmentedGlobalLoadStats8616,
-    store_facts: list[IndexedSegmentedGlobalStoreEvidence8616],
+    store_facts: object,
     runtime_context: RuntimeSegmentAccessContext8616,
 ) -> CAssignment | None:
+    index_expr: object
+    item: object
+    lhs: object
+    matched: object
+    selected: object
+    source_expr: object
     matched = _match_indexed_word_store_pair_lvalues_8616(
         low_stmt,
         high_stmt,
@@ -8492,15 +9142,18 @@ def _match_indexed_global_word_store_pair_from_store_evidence_8616(
     return CAssignment(lhs, source_expr, codegen=codegen, tags=tags)
 
 
+@cython.ccall
 def _match_indexed_word_store_pair_lvalues_8616(
     low_stmt: object,
     high_stmt: object,
     project: ProjectBoundary8616,
     codegen: CodegenBoundary8616,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-    copies: dict[CopyKey8616, object],
+    evidence_by_base: object,
+    copies: object,
     runtime_context: RuntimeSegmentAccessContext8616,
-) -> tuple[int, object] | None:
+) -> object:
+    high_match: object
+    low_match: object
     if high_stmt is None or not isinstance(low_stmt, CAssignment) or not isinstance(high_stmt, CAssignment):
         return None
     high_assignment = cast(_CAssignmentBoundary8616, high_stmt)
@@ -8524,7 +9177,7 @@ def _match_indexed_word_store_pair_lvalues_8616(
         return None
     low_base, low_index = low_match
     high_base, high_index = high_match
-    if ((low_base + 1) & 0xFFFF) != (high_base & 0xFFFF):
+    if operator.ne(((low_base + 1) & 0xFFFF), (high_base & 0xFFFF)):
         return None
     if not _same_c_expression_8616(low_index, high_index):
         return None
@@ -8534,12 +9187,17 @@ def _match_indexed_word_store_pair_lvalues_8616(
 def _materialize_indexed_global_byte_store_lvalues_8616(
     root: object,
     codegen: CodegenBoundary8616,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-    store_evidence: tuple[IndexedSegmentedGlobalStoreEvidence8616, ...],
+    evidence_by_base: object,
+    store_evidence: object,
     stats: SegmentedGlobalLoadStats8616,
     *,
     query_index: StructuredAstQueryIndex8616 | None = None,
-) -> bool:
+) -> cython.bint:
+    matched_lvalue: object
+    replacement: object
+    source: object
+    statements_node: object
+    stmt: object
     changed = False
     if query_index is not None:
         query_index.require_root(root)
@@ -8548,7 +9206,7 @@ def _materialize_indexed_global_byte_store_lvalues_8616(
         if query_index is not None
         else (
             node
-            for node in _iter_c_statement_nodes_8616(root)
+            for node in builtins.iter(_iter_c_statement_nodes_8616(root))
             if isinstance(node, CStatements)
         )
     )
@@ -8590,12 +9248,14 @@ def _materialize_indexed_global_byte_store_lvalues_8616(
     return changed
 
 
+@cython.ccall
 def _indexed_store_facts_by_ins_addr_8616(
-    store_evidence: tuple[IndexedSegmentedGlobalStoreEvidence8616, ...],
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-) -> dict[int, list[IndexedSegmentedGlobalStoreEvidence8616]]:
+    store_evidence: object,
+    evidence_by_base: object,
+) -> object:
     """Group width-proven indexed store facts by instruction address."""
-    facts_by_ins_addr: dict[int, list[IndexedSegmentedGlobalStoreEvidence8616]] = {}
+    fact: object
+    facts_by_ins_addr: dict[cython.longlong, list[IndexedSegmentedGlobalStoreEvidence8616]] = {}
     for fact in store_evidence:
         if (fact.base_offset & 0xFFFF, fact.width) not in evidence_by_base:
             continue
@@ -8605,13 +9265,15 @@ def _indexed_store_facts_by_ins_addr_8616(
     return facts_by_ins_addr
 
 
+@cython.ccall
 def _indexed_store_assignments_by_ins_addr_8616(
     assignment_nodes: Iterable[CAssignment],
-    facts_by_ins_addr: dict[int, list[IndexedSegmentedGlobalStoreEvidence8616]],
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-) -> dict[int, list[CAssignment]]:
+    facts_by_ins_addr: object,
+    evidence_by_base: object,
+) -> object:
     """Index eligible segmented-store assignments by decoded instruction."""
-    assignments_by_ins_addr: dict[int, list[CAssignment]] = {}
+    node: object
+    assignments_by_ins_addr: dict[cython.longlong, list[CAssignment]] = {}
     for node in assignment_nodes:
         ins_addr = _statement_ins_addr_8616(node)
         if ins_addr not in facts_by_ins_addr:
@@ -8629,14 +9291,17 @@ def _indexed_store_assignments_by_ins_addr_8616(
     return assignments_by_ins_addr
 
 
+@cython.ccall
 def _materialize_one_instruction_store_8616(
     codegen: CodegenBoundary8616,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
+    evidence_by_base: object,
     fact: IndexedSegmentedGlobalStoreEvidence8616,
     assignment: CAssignment,
     stats: SegmentedGlobalLoadStats8616,
-) -> bool:
+) -> cython.bint:
     """Materialize one evidence-backed store assignment; returns changed."""
+    replacement_lhs: object
+    replacement_rhs: object
 
     replacement_lhs = _indexed_global_store_lvalue_from_instruction_evidence_8616(
         codegen,
@@ -8646,7 +9311,7 @@ def _materialize_one_instruction_store_8616(
     if replacement_lhs is None:
         return False
     stats.indexed_store_instruction_classified_count += 1
-    replacement_rhs: object | None = None
+    replacement_rhs = None
     if _indexed_global_store_fact_has_source_8616(fact):
         replacement_rhs = _indexed_global_store_source_expr_8616(
             codegen,
@@ -8681,18 +9346,21 @@ def _materialize_one_instruction_store_8616(
 def _materialize_indexed_global_store_assignments_from_instruction_evidence_8616(
     root: object,
     codegen: CodegenBoundary8616,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-    store_evidence: tuple[IndexedSegmentedGlobalStoreEvidence8616, ...],
+    evidence_by_base: object,
+    store_evidence: object,
     stats: SegmentedGlobalLoadStats8616,
     *,
     query_index: StructuredAstQueryIndex8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """Materialize raw store assignments joined to one exact decoded instruction.
 
     This handles late angr ASTs whose address is still a carrier chain around a
     segmented pointer helper. Recognizable indexed lvalues remain owned by the
     existing shape-based consumers. Ambiguous instruction joins are refused.
     """
+    assignments: object
+    facts: object
+    ins_addr: object
 
     facts_by_ins_addr = _indexed_store_facts_by_ins_addr_8616(store_evidence, evidence_by_base)
     if not facts_by_ins_addr:
@@ -8705,7 +9373,7 @@ def _materialize_indexed_global_store_assignments_from_instruction_evidence_8616
         if query_index is not None
         else (
             node
-            for node in _iter_c_nodes_deep_8616(root)
+            for node in builtins.iter(_iter_c_nodes_deep_8616(root))
             if isinstance(node, CAssignment)
         )
     )
@@ -8731,21 +9399,23 @@ def _materialize_indexed_global_store_assignments_from_instruction_evidence_8616
     return changed
 
 
+@cython.ccall
 def _same_instruction_store_lvalue_8616(
     lhs: object,
     rhs: object,
-) -> bool:
+) -> cython.bint:
     """Compare instruction-backed store lvalues including typed struct fields."""
 
     if isinstance(lhs, CVariableField) and isinstance(rhs, CVariableField):
         return bool(
-            lhs.field.field == rhs.field.field
+            operator.eq(lhs.field.field, rhs.field.field)
             and _same_c_expression_8616(lhs.variable, rhs.variable)
         )
     return bool(_same_c_expression_8616(lhs, rhs))
 
 
-def _is_segmented_memory_store_lvalue_8616(node: object) -> bool:
+@cython.ccall
+def _is_segmented_memory_store_lvalue_8616(node: object) -> cython.bint:
     """Return whether a C expression is an explicit segmented-memory lvalue."""
 
     if isinstance(node, (CIndexedVariable, CVariableField)):
@@ -8760,12 +9430,16 @@ def _is_segmented_memory_store_lvalue_8616(node: object) -> bool:
     )
 
 
+@cython.ccall
 def _indexed_global_store_lvalue_from_instruction_evidence_8616(
     codegen: CodegenBoundary8616,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
+    evidence_by_base: object,
     fact: IndexedSegmentedGlobalStoreEvidence8616,
 ) -> object | None:
     """Build one indexed global lvalue from exact destination and index facts."""
+    index_expr: object
+    item: object
+    materialized: object
 
     item = evidence_by_base.get((fact.base_offset & 0xFFFF, fact.width))
     index_expr = _stack_cvar_for_offset_8616(
@@ -8785,7 +9459,7 @@ def _indexed_global_store_lvalue_from_instruction_evidence_8616(
     )
     if materialized is not None:
         return materialized
-    if stride == fact.width:
+    if operator.eq(stride, fact.width):
         return _make_indexed_global_value_expr_8616(
             codegen,
             item,
@@ -8810,9 +9484,10 @@ def _indexed_global_store_lvalue_from_instruction_evidence_8616(
     )
 
 
+@cython.ccall
 def _indexed_global_store_fact_has_source_8616(
     fact: IndexedSegmentedGlobalStoreEvidence8616,
-) -> bool:
+) -> cython.bint:
     """Return whether a decoded store fact proves its source expression."""
 
     return (
@@ -8829,10 +9504,10 @@ def _indexed_global_store_fact_has_source_8616(
 
 def _evidenced_indexed_byte_store_source_expr_8616(
     codegen: CodegenBoundary8616,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-    base_offset: int,
+    evidence_by_base: object,
+    base_offset: cython.longlong,
     statement_ins_addr: int | None,
-    store_evidence: tuple[IndexedSegmentedGlobalStoreEvidence8616, ...],
+    store_evidence: object,
     stats: SegmentedGlobalLoadStats8616,
 ) -> object | None:
     """Recover one byte-store source from one exact decoded instruction fact."""
@@ -8840,9 +9515,9 @@ def _evidenced_indexed_byte_store_source_expr_8616(
         return None
     candidates = tuple(
         fact
-        for fact in store_evidence
-        if fact.ins_addr == statement_ins_addr
-        and (fact.base_offset & 0xFFFF) == (base_offset & 0xFFFF)
+        for fact in iter(store_evidence)
+        if operator.eq(fact.ins_addr, statement_ins_addr)
+        and operator.eq((fact.base_offset & 0xFFFF), (base_offset & 0xFFFF))
         and fact.width == 1
         and fact.index_shift == 1
         and (
@@ -8860,13 +9535,18 @@ def _evidenced_indexed_byte_store_source_expr_8616(
     )
 
 
+@cython.ccall
 def _indexed_global_byte_store_lvalue_8616(
     codegen: CodegenBoundary8616,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
+    evidence_by_base: object,
     lhs: object,
-    copies: dict[CopyKey8616, object],
-    store_evidence: tuple[IndexedSegmentedGlobalStoreEvidence8616, ...],
+    copies: object,
+    store_evidence: object,
 ) -> object | None:
+    address_expr: object
+    evidenced_index_expr: object
+    helper_name: object
+    matched: object
     matched = _match_byte_store_lvalue_8616(lhs, copies=copies)
     if matched is None:
         return None
@@ -8893,17 +9573,18 @@ def _indexed_global_byte_store_lvalue_8616(
     return cast(object, CFunctionCall(helper_name, None, [address_expr], codegen=codegen))
 
 
+@cython.ccall
 def _evidenced_byte_store_index_expr_8616(
     codegen: CodegenBoundary8616,
-    base_offset: int,
-    store_evidence: tuple[IndexedSegmentedGlobalStoreEvidence8616, ...],
+    base_offset: cython.longlong,
+    store_evidence: object,
 ) -> object | None:
     """Recover a byte-store index only from one unambiguous decoded stack identity."""
 
     stack_offsets = {
         fact.index_stack_offset
-        for fact in store_evidence
-        if (fact.base_offset & 0xFFFF) == (base_offset & 0xFFFF)
+        for fact in iter(store_evidence)
+        if operator.eq((fact.base_offset & 0xFFFF), (base_offset & 0xFFFF))
         and fact.width == 1
         and fact.index_shift == 1
     }
@@ -8912,11 +9593,16 @@ def _evidenced_byte_store_index_expr_8616(
     return _stack_cvar_for_offset_8616(codegen, stack_offsets.pop())
 
 
+@cython.ccall
 def _can_move_intervening_assignment_after_word_store_8616(
     intervening_stmt: object,
     low_stmt: object,
     high_stmt: object,
-) -> bool:
+) -> cython.bint:
+    high_assignment: object
+    lhs_key: object
+    low_assignment: object
+    node: object
     if not isinstance(intervening_stmt, CAssignment):
         return False
     lhs = intervening_stmt.lhs
@@ -8943,52 +9629,58 @@ def _can_move_intervening_assignment_after_word_store_8616(
     return True
 
 
-def _expr_contains_cvariable_key_8616(node: object, key: str) -> bool:
-    if _cvariable_key_8616(node) == key:
+def _expr_contains_cvariable_key_8616(node: object, key: object) -> cython.bint:
+    if operator.eq(_cvariable_key_8616(node), key):
         return True
-    return any(child is not node and _cvariable_key_8616(child) == key for child in _iter_c_nodes_deep_8616(node))
+    return any(child is not node and operator.eq(_cvariable_key_8616(child), key) for child in builtins.iter(_iter_c_nodes_deep_8616(node)))
 
 
-def _expr_contains_stack_offset_8616(node: object, offset: int) -> bool:
+@cython.ccall
+def _expr_contains_stack_offset_8616(node: object, offset: cython.longlong) -> cython.bint:
+    child: object
     if isinstance(node, CVariable):
         variable = node.variable
-        if isinstance(variable, SimStackVariable) and variable.offset == offset:
+        if isinstance(variable, SimStackVariable) and operator.eq(variable.offset, offset):
             return True
     for child in _iter_c_nodes_deep_8616(node):
         if isinstance(child, CVariable):
             variable = child.variable
-            if isinstance(variable, SimStackVariable) and variable.offset == offset:
+            if isinstance(variable, SimStackVariable) and operator.eq(variable.offset, offset):
                 return True
     return False
 
 
 def _statement_store_candidates_8616(
     stmt: CAssignment,
-    indexed_candidates: tuple[tuple[int, tuple[IndexedSegmentedGlobalEvidence8616, IndexedSegmentedGlobalStoreEvidence8616]], ...],
-) -> tuple[tuple[int, tuple[IndexedSegmentedGlobalEvidence8616, IndexedSegmentedGlobalStoreEvidence8616]], ...]:
+    indexed_candidates: object,
+) -> object:
     """Narrow name candidates to those tagged with this statement's insn."""
     statement_ins_addr = _statement_ins_addr_8616(stmt)
     if isinstance(statement_ins_addr, int):
         return tuple(
             candidate
-            for candidate in indexed_candidates
-            if candidate[1][1].ins_addr == statement_ins_addr
+            for candidate in iter(indexed_candidates)
+            if operator.eq(candidate[1][1].ins_addr, statement_ins_addr)
         )
     if len(indexed_candidates) == 1:
         return indexed_candidates
     return ()
 
 
+@cython.ccall
 def _apply_word_store_lvalue_candidate_8616(
     stmt: CAssignment,
     codegen: CodegenBoundary8616,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
+    evidence_by_base: object,
     item: IndexedSegmentedGlobalEvidence8616,
     fact: IndexedSegmentedGlobalStoreEvidence8616,
-    lhs_name: str | None,
+    lhs_name: object,
     stats: SegmentedGlobalLoadStats8616,
-) -> bool:
+) -> cython.bint:
     """Apply one proven word-store candidate to the assignment."""
+    index_expr: object
+    replacement: object
+    source_replacement: object
     lhs = stmt.lhs
     lhs_index = lhs.index
     source_replacement = _indexed_global_store_source_expr_8616(
@@ -9028,7 +9720,7 @@ def _apply_word_store_lvalue_candidate_8616(
     if (
         isinstance(replacement, CIndexedVariable)
         and _same_c_expression_8616(lhs, replacement)
-        and lhs.type == replacement.type
+        and operator.eq(lhs.type, replacement.type)
         and lhs_already_matches
     ):
         replacement = None
@@ -9041,13 +9733,14 @@ def _apply_word_store_lvalue_candidate_8616(
     return True
 
 
+@cython.ccall
 def _word_store_facts_by_name_8616(
-    store_evidence: tuple[IndexedSegmentedGlobalStoreEvidence8616, ...],
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-) -> dict[
-    str, list[tuple[IndexedSegmentedGlobalEvidence8616, IndexedSegmentedGlobalStoreEvidence8616]]
-]:
+    store_evidence: object,
+    evidence_by_base: object,
+) -> object:
     """Group shift-proven word store facts by sanitized symbol name."""
+    item: object
+    fact: object
     facts_by_name: dict[
         str, list[tuple[IndexedSegmentedGlobalEvidence8616, IndexedSegmentedGlobalStoreEvidence8616]]
     ] = {}
@@ -9064,12 +9757,17 @@ def _word_store_facts_by_name_8616(
 def _materialize_indexed_global_word_store_lvalues_8616(
     root: object,
     codegen: CodegenBoundary8616,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-    store_evidence: tuple[IndexedSegmentedGlobalStoreEvidence8616, ...],
+    evidence_by_base: object,
+    store_evidence: object,
     stats: SegmentedGlobalLoadStats8616,
     *,
     query_index: StructuredAstQueryIndex8616 | None = None,
-) -> bool:
+) -> cython.bint:
+    candidates: object
+    candidate_index: object
+    fact: object
+    item: object
+    stmt: object
     if not store_evidence:
         return False
     facts_by_name = _word_store_facts_by_name_8616(store_evidence, evidence_by_base)
@@ -9084,7 +9782,7 @@ def _materialize_indexed_global_word_store_lvalues_8616(
         if query_index is not None
         else (
             node
-            for node in _iter_c_nodes_deep_8616(root)
+            for node in builtins.iter(_iter_c_nodes_deep_8616(root))
             if isinstance(node, CAssignment)
         )
     )
@@ -9116,7 +9814,8 @@ def _materialize_indexed_global_word_store_lvalues_8616(
     return changed
 
 
-def _same_indexed_global_storage_expr_8616(lhs: object, rhs: object) -> bool:
+@cython.ccall
+def _same_indexed_global_storage_expr_8616(lhs: object, rhs: object) -> cython.bint:
     """Compare indexed globals without depending on mutable stack presentation width."""
 
     if not isinstance(lhs, CIndexedVariable) or not isinstance(rhs, CIndexedVariable):
@@ -9129,12 +9828,13 @@ def _same_indexed_global_storage_expr_8616(lhs: object, rhs: object) -> bool:
     rhs_memory = rhs_base.variable
     if not isinstance(lhs_memory, SimMemoryVariable) or not isinstance(rhs_memory, SimMemoryVariable):
         return False
-    if lhs_memory.addr != rhs_memory.addr or lhs_memory.size != rhs_memory.size:
+    if operator.ne(lhs_memory.addr, rhs_memory.addr) or operator.ne(lhs_memory.size, rhs_memory.size):
         return False
     return _same_index_storage_expr_8616(lhs.index, rhs.index)
 
 
-def _same_index_storage_expr_8616(lhs: object, rhs: object) -> bool:
+@cython.ccall
+def _same_index_storage_expr_8616(lhs: object, rhs: object) -> cython.bint:
     """Compare an indexed-address expression by exact stack storage identity."""
 
     if isinstance(lhs, CVariable) and isinstance(rhs, CVariable):
@@ -9142,27 +9842,31 @@ def _same_index_storage_expr_8616(lhs: object, rhs: object) -> bool:
         rhs_variable = rhs.variable
         if isinstance(lhs_variable, SimStackVariable) and isinstance(rhs_variable, SimStackVariable):
             return bool(
-                lhs_variable.offset == rhs_variable.offset
-                and lhs_variable.base == rhs_variable.base
-                and lhs_variable.region == rhs_variable.region
+                operator.eq(lhs_variable.offset, rhs_variable.offset)
+                and operator.eq(lhs_variable.base, rhs_variable.base)
+                and operator.eq(lhs_variable.region, rhs_variable.region)
             )
     if isinstance(lhs, CTypeCast) and isinstance(rhs, CTypeCast):
         return _same_index_storage_expr_8616(lhs.expr, rhs.expr)
     if isinstance(lhs, CBinaryOp) and isinstance(rhs, CBinaryOp):
         return bool(
-            lhs.op == rhs.op
+            operator.eq(lhs.op, rhs.op)
             and _same_index_storage_expr_8616(lhs.lhs, rhs.lhs)
             and _same_index_storage_expr_8616(lhs.rhs, rhs.rhs)
         )
     return bool(_same_c_expression_8616(lhs, rhs))
 
 
+@cython.ccall
 def _indexed_store_source_pairs_8616(
-    store_evidence: tuple[IndexedSegmentedGlobalStoreEvidence8616, ...],
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-) -> dict[tuple[int, int], list[tuple[str, str]]]:
+    store_evidence: object,
+    evidence_by_base: object,
+) -> object:
     """Index proven source->dest name pairs by source storage key."""
-    pairs_by_source_key: dict[tuple[int, int], list[tuple[str, str]]] = {}
+    dest_item: object
+    source_item: object
+    fact: object
+    pairs_by_source_key: dict[tuple[cython.longlong, cython.longlong], list[tuple[str, str]]] = {}
     for fact in store_evidence:
         if (
             not isinstance(fact.source_base_offset, int)
@@ -9182,13 +9886,16 @@ def _indexed_store_source_pairs_8616(
     return pairs_by_source_key
 
 
+@cython.ccall
 def _drop_indexed_store_source_carriers_8616(
-    statements: list[object],
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-    pairs_by_source_key: dict[tuple[int, int], list[tuple[str, str]]],
+    statements: object,
+    evidence_by_base: object,
+    pairs_by_source_key: object,
     stats: SegmentedGlobalLoadStats8616,
-) -> tuple[list[object], bool]:
+) -> tuple[list[object], cython.bint]:
     """Drop reads whose carrier is fully consumed by a following store."""
+    assignment: object
+    read_key: object
     rewritten: list[object] = []
     idx = 0
     local_changed = False
@@ -9216,12 +9923,13 @@ def _drop_indexed_store_source_carriers_8616(
 
 def _remove_indexed_global_store_source_carriers_8616(
     root: object,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-    store_evidence: tuple[IndexedSegmentedGlobalStoreEvidence8616, ...],
+    evidence_by_base: object,
+    store_evidence: object,
     stats: SegmentedGlobalLoadStats8616,
     *,
     query_index: StructuredAstQueryIndex8616 | None = None,
-) -> bool:
+) -> cython.bint:
+    statements_node: object
     pairs_by_source_key = _indexed_store_source_pairs_8616(store_evidence, evidence_by_base)
     if not pairs_by_source_key:
         return False
@@ -9234,7 +9942,7 @@ def _remove_indexed_global_store_source_carriers_8616(
         if query_index is not None
         else (
             node
-            for node in _iter_c_nodes_deep_8616(root)
+            for node in builtins.iter(_iter_c_nodes_deep_8616(root))
             if isinstance(node, CStatements)
         )
     )
@@ -9253,10 +9961,15 @@ def _remove_indexed_global_store_source_carriers_8616(
     return changed
 
 
+@cython.ccall
 def _standalone_indexed_memory_read_key_8616(
     stmt: object,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-) -> tuple[int, int] | None:
+    evidence_by_base: object,
+) -> object:
+    indexed_key: object
+    matched: object
+    memory_helper: object
+    stride_matched: object
     expr = stmt.expr if isinstance(stmt, CExpressionStatement) else stmt
     indexed_key = _indexed_global_read_key_from_indexed_var_8616(expr, evidence_by_base)
     if indexed_key is not None:
@@ -9275,7 +9988,7 @@ def _standalone_indexed_memory_read_key_8616(
         if stride_matched is None:
             return None
         base_offset, stride, _index_expr = stride_matched
-        if stride != memory_helper.width:
+        if operator.ne(stride, memory_helper.width):
             return None
     else:
         base_offset, _index_expr = matched
@@ -9283,10 +9996,11 @@ def _standalone_indexed_memory_read_key_8616(
     return key if key in evidence_by_base else None
 
 
+@cython.ccall
 def _indexed_global_read_key_from_indexed_var_8616(
     node: object,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-) -> tuple[int, int] | None:
+    evidence_by_base: object,
+) -> object:
     if not isinstance(node, CIndexedVariable):
         return None
     base = node.variable
@@ -9306,22 +10020,26 @@ def _indexed_global_read_key_from_indexed_var_8616(
 def _assignment_matches_indexed_store_source_pair_8616(
     assignment: CAssignment,
     pairs: Iterable[tuple[str, str]],
-) -> bool:
+) -> cython.bint:
+    lhs_name: object
+    rhs_name: object
     lhs_name = _indexed_global_name_8616(assignment.lhs)
     rhs_name = _indexed_global_name_8616(assignment.rhs)
     if lhs_name is None or rhs_name is None:
         return False
-    return any(lhs_name == dest_name and rhs_name == source_name for dest_name, source_name in pairs)
+    return any(operator.eq(lhs_name, dest_name) and operator.eq(rhs_name, source_name) for dest_name, source_name in iter(pairs))
 
 
+@cython.ccall
 def _indexed_global_store_source_expr_8616(
     codegen: CodegenBoundary8616,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
+    evidence_by_base: object,
     fact: IndexedSegmentedGlobalStoreEvidence8616,
     stats: SegmentedGlobalLoadStats8616,
 ) -> object | None:
+    source: object
     if isinstance(fact.source_stack_offset, int) and isinstance(fact.source_stack_width, int):
-        if fact.source_stack_width != fact.width:
+        if operator.ne(fact.source_stack_width, fact.width):
             return None
         source = _stack_cvar_for_offset_8616(codegen, fact.source_stack_offset)
         if source is not None:
@@ -9353,11 +10071,14 @@ def _indexed_global_store_source_expr_8616(
     )
 
 
+@cython.ccall
 def _store_source_signed_remainder_expr_8616(
     codegen: CodegenBoundary8616,
     remainder: SignedRemainderStackSource8616,
 ) -> object | None:
     """Build the Mod(+/-adjust) source expression for a signed remainder."""
+    dividend: object
+    divisor: object
     dividend = _stack_cvar_for_offset_8616(codegen, remainder.dividend_stack_offset)
     divisor = _stack_cvar_for_offset_8616(codegen, remainder.divisor_stack_offset)
     if dividend is None or divisor is None or remainder.width != 2:
@@ -9380,13 +10101,17 @@ def _store_source_signed_remainder_expr_8616(
     return remainder_source_expr
 
 
+@cython.ccall
 def _indexed_store_affine_source_expr_8616(
     codegen: CodegenBoundary8616,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
+    evidence_by_base: object,
     fact: IndexedSegmentedGlobalStoreEvidence8616,
     stats: SegmentedGlobalLoadStats8616,
 ) -> object | None:
     """Build the indexed-global source expression for a proven affine store."""
+    index_expr: object
+    item: object
+    source_expr: object
     item = _sidecar_free_affine_store_source_evidence_8616(
         evidence_by_base,
         fact,
@@ -9425,7 +10150,8 @@ def _indexed_store_affine_source_expr_8616(
     return source_expr
 
 
-def _affine_store_source_facts_match_8616(fact: IndexedSegmentedGlobalStoreEvidence8616) -> bool:
+@cython.ccall
+def _affine_store_source_facts_match_8616(fact: IndexedSegmentedGlobalStoreEvidence8616) -> cython.bint:
     """Return whether a store fact carries one aligned affine source."""
 
     return bool(
@@ -9433,18 +10159,16 @@ def _affine_store_source_facts_match_8616(fact: IndexedSegmentedGlobalStoreEvide
         and isinstance(fact.source_width, int)
         and isinstance(fact.source_index_stack_offset, int)
         and isinstance(fact.source_index_shift, int)
-        and fact.source_width == fact.width
-        and fact.source_index_stack_offset == fact.index_stack_offset
-        and fact.source_index_shift == fact.index_shift
+        and operator.eq(fact.source_width, fact.width)
+        and operator.eq(fact.source_index_stack_offset, fact.index_stack_offset)
+        and operator.eq(fact.source_index_shift, fact.index_shift)
         and fact.width > 0
     )
 
 
+@cython.ccall
 def _sidecar_free_affine_store_source_evidence_8616(
-    evidence_by_base: dict[
-        tuple[int, int],
-        IndexedSegmentedGlobalEvidence8616,
-    ],
+    evidence_by_base: object,
     fact: IndexedSegmentedGlobalStoreEvidence8616,
 ) -> IndexedSegmentedGlobalEvidence8616 | None:
     """Select the exact sidecar-free source identity for one affine store.
@@ -9455,6 +10179,8 @@ def _sidecar_free_affine_store_source_evidence_8616(
     separations keep the source base as its own deterministic global identity
     instead of merging distinct storage objects.
     """
+    destination: object
+    source: object
 
     if not _affine_store_source_facts_match_8616(fact):
         return None
@@ -9474,7 +10200,7 @@ def _sidecar_free_affine_store_source_evidence_8616(
     ):
         return None
     relative_disp = int(fact.source_base_offset) - int(fact.base_offset)
-    if abs(relative_disp) != fact.width:
+    if operator.ne(abs(relative_disp), fact.width):
         return source
     return IndexedSegmentedGlobalEvidence8616(
         base_offset=fact.source_base_offset & 0xFFFF,
@@ -9484,9 +10210,10 @@ def _sidecar_free_affine_store_source_evidence_8616(
     )
 
 
+@cython.ccall
 def _is_sidecar_free_indexed_identity_8616(
     evidence: IndexedSegmentedGlobalEvidence8616,
-) -> bool:
+) -> cython.bint:
     """Return whether evidence carries only its deterministic binary identity."""
 
     normalized_base = evidence.base_offset & 0xFFFF
@@ -9496,7 +10223,8 @@ def _is_sidecar_free_indexed_identity_8616(
     )
 
 
-def _store_index_shift_matches_width_8616(fact: IndexedSegmentedGlobalStoreEvidence8616) -> bool:
+@cython.ccall
+def _store_index_shift_matches_width_8616(fact: IndexedSegmentedGlobalStoreEvidence8616) -> cython.bint:
     if fact.width == 1:
         return fact.index_shift == 0
     if fact.width == 2:
@@ -9504,7 +10232,8 @@ def _store_index_shift_matches_width_8616(fact: IndexedSegmentedGlobalStoreEvide
     return False
 
 
-def _indexed_global_name_8616(node: object) -> str | None:
+@cython.ccall
+def _indexed_global_name_8616(node: object) -> object:
     if not isinstance(node, CIndexedVariable):
         return None
     base = node.variable
@@ -9519,23 +10248,29 @@ def _indexed_global_name_8616(node: object) -> str | None:
     return None
 
 
-def _stack_cvar_for_offset_8616(codegen: CodegenBoundary8616, offset: int) -> CVariable | None:
+@cython.ccall
+def _stack_cvar_for_offset_8616(codegen: CodegenBoundary8616, offset: cython.longlong) -> CVariable | None:
     """Find a stack C variable across a dynamic boundary: angr codegen CFunction indexes."""
+    cfunc: object
+    candidate: object
+    node: object
+    root: object
 
     cfunc = _codegen_cfunc_optional_8616(codegen)
     variables_in_use = getattr(cfunc, "variables_in_use", {}) if cfunc is not None else {}
     if isinstance(variables_in_use, dict):
         for candidate in variables_in_use.values():
-            if isinstance(candidate, CVariable) and _cvar_stack_offset_8616(codegen, candidate) == offset:
+            if isinstance(candidate, CVariable) and operator.eq(_cvar_stack_offset_8616(codegen, candidate), offset):
                 return candidate
     roots = _cfunc_roots_8616(cfunc)
     for root in roots:
         for node in _iter_c_nodes_deep_8616(root):
-            if isinstance(node, CVariable) and _cvar_stack_offset_8616(codegen, node) == offset:
+            if isinstance(node, CVariable) and operator.eq(_cvar_stack_offset_8616(codegen, node), offset):
                 return node
     return None
 
 
+@cython.ccall
 def _cvar_stack_offset_8616(codegen: object, node: object) -> int | None:
     """Return a stack C variable's canonical machine-BP offset."""
     if not isinstance(node, CVariable):
@@ -9552,11 +10287,17 @@ def _match_indexed_global_word_store_pair_8616(
     high_stmt: object,
     project: ProjectBoundary8616,
     codegen: CodegenBoundary8616,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-    copies: dict[CopyKey8616, object],
+    evidence_by_base: object,
+    copies: object,
     stats: SegmentedGlobalLoadStats8616,
     runtime_context: RuntimeSegmentAccessContext8616,
 ) -> CAssignment | None:
+    high_match: object
+    item: object
+    lhs: object
+    low_match: object
+    rhs: object
+    word_source: object
     if high_stmt is None or not isinstance(low_stmt, CAssignment) or not isinstance(high_stmt, CAssignment):
         _debug_indexed_store_refusal_8616("not_assignment_pair", low_stmt, high_stmt)
         return None
@@ -9592,7 +10333,7 @@ def _match_indexed_global_word_store_pair_8616(
         return None
     low_base, low_index = low_match
     high_base, high_index = high_match
-    if ((low_base + 1) & 0xFFFF) != (high_base & 0xFFFF):
+    if operator.ne(((low_base + 1) & 0xFFFF), (high_base & 0xFFFF)):
         _debug_indexed_store_refusal_8616(
             "non_adjacent_bytes", low_stmt, high_stmt, low_base=low_base, high_base=high_base
         )
@@ -9618,7 +10359,7 @@ def _match_indexed_global_word_store_pair_8616(
             low_key=_cvariable_key_8616(low_stmt.rhs),
             resolved_high=_debug_resolved_source_8616(high_assignment.rhs, copies),
             resolved_low=_debug_source_8616(low_stmt.rhs),
-            copy_keys=",".join(str(key) for key in sorted(copies, key=str)),
+            copy_keys=",".join(str(key) for key in builtins.iter(sorted(copies, key=str))),
         )
         return None
     lhs = _make_indexed_global_expr_8616(codegen, item, low_index)
@@ -9640,10 +10381,10 @@ def _match_indexed_global_word_store_pair_8616(
     return CAssignment(lhs, rhs, codegen=codegen, tags=low_stmt.tags)
 
 
-def _debug_indexed_store_refusal_8616(reason: str, low_stmt: object, high_stmt: object, **fields: object) -> None:
+def _debug_indexed_store_refusal_8616(reason: object, low_stmt: object, high_stmt: object, **fields: object) -> None:
     if not os.environ.get("INERTIA_DEBUG_SEGMENTED_GLOBAL_LOADS"):
         return
-    extras = " ".join(f"{key}={value}" for key, value in sorted(fields.items()))
+    extras = " ".join(f"{key}={value}" for key, value in builtins.iter(sorted(tuple(fields.items()))))
     log.warning(
         "[seg-global-store] refused reason=%s %s low=%s high=%s",
         reason,
@@ -9653,10 +10394,10 @@ def _debug_indexed_store_refusal_8616(reason: str, low_stmt: object, high_stmt: 
     )
 
 
-def _debug_direct_store_refusal_8616(reason: str, low_stmt: object, high_stmt: object, **fields: object) -> None:
+def _debug_direct_store_refusal_8616(reason: object, low_stmt: object, high_stmt: object, **fields: object) -> None:
     if not os.environ.get("INERTIA_DEBUG_SEGMENTED_GLOBAL_LOADS"):
         return
-    extras = " ".join(f"{key}={value}" for key, value in sorted(fields.items()))
+    extras = " ".join(f"{key}={value}" for key, value in builtins.iter(sorted(tuple(fields.items()))))
     log.warning(
         "[seg-global-direct-store] refused reason=%s %s low=%s high=%s",
         reason,
@@ -9666,8 +10407,10 @@ def _debug_direct_store_refusal_8616(reason: str, low_stmt: object, high_stmt: o
     )
 
 
-def _debug_lvalue_8616(node: object) -> str:
+@cython.ccall
+def _debug_lvalue_8616(node: object) -> object:
     """Render lvalue diagnostics from a dynamic boundary: angr codegen call metadata."""
+    identity: object
 
     identity = _direct_global_lvalue_identity_8616(node)
     if identity is not None:
@@ -9683,12 +10426,13 @@ def _debug_lvalue_8616(node: object) -> str:
     return type(node).__name__
 
 
+@cython.ccall
 def _debug_indexed_store_lvalue_candidate_8616(
     lhs: object,
     rhs: object,
     *,
-    lhs_name: str | None,
-    lhs_already_matches: bool,
+    lhs_name: object,
+    lhs_already_matches: cython.bint,
     source_replacement: object,
     fact: IndexedSegmentedGlobalStoreEvidence8616,
 ) -> None:
@@ -9717,10 +10461,11 @@ def _debug_indexed_store_lvalue_candidate_8616(
     )
 
 
-def _debug_indexed_expr_refusal_8616(reason: str, node: object, **fields: object) -> None:
+def _debug_indexed_expr_refusal_8616(reason: object, node: object, **fields: object) -> None:
+    arg: object
     if not os.environ.get("INERTIA_DEBUG_SEGMENTED_GLOBAL_LOADS"):
         return
-    extras = " ".join(f"{key}={value}" for key, value in sorted(fields.items()))
+    extras = " ".join(f"{key}={value}" for key, value in builtins.iter(sorted(tuple(fields.items()))))
     rendered = _debug_c_repr_8616(node)
     call_name = _cfunction_call_name_8616(node)
     arg_shapes: tuple[tuple[str, str], ...] = ()
@@ -9743,13 +10488,15 @@ def _debug_indexed_expr_refusal_8616(reason: str, node: object, **fields: object
     )
 
 
+@cython.ccall
 def _record_stack_aggregate_type_fact_8616(
     codegen: object,
     stack_variable: SimStackVariable,
-    width: int,
+    width: cython.longlong,
     struct_type: SimStruct,
 ) -> None:
     """Persist one proven stack aggregate type across later CFunction rebuilds."""
+    existing: object
 
     offset = stack_variable.offset
     base = stack_variable.base
@@ -9763,10 +10510,10 @@ def _record_stack_aggregate_type_fact_8616(
         existing_facts = ()
     retained: list[StackAggregateTypeFact8616] = []
     for existing in existing_facts:
-        if existing.base != fact.base or existing.offset != fact.offset:
+        if operator.ne(existing.base, fact.base) or operator.ne(existing.offset, fact.offset):
             retained.append(existing)
             continue
-        if existing.width != fact.width or existing.struct_type != fact.struct_type:
+        if operator.ne(existing.width, fact.width) or operator.ne(existing.struct_type, fact.struct_type):
             raise PipelineHardError(
                 "conflicting stack aggregate type facts "
                 f"base={fact.base} offset={fact.offset:#x} "
@@ -9776,15 +10523,17 @@ def _record_stack_aggregate_type_fact_8616(
     typed_codegen._inertia_stack_aggregate_type_facts_8616 = tuple(dict.fromkeys(retained))
 
 
+@cython.ccall
 def _record_named_global_aggregate_type_fact_8616(
     codegen: object,
-    global_name: str,
+    global_name: object,
     struct_type: SimStruct,
-    array_len: GlobalDeclarationArrayLength8616,
+    array_len: object,
     *,
-    allow_layout_equivalent_type_upgrade: bool = False,
-) -> bool:
+    allow_layout_equivalent_type_upgrade: cython.bint = False,
+) -> cython.bint:
     """Persist one proven global aggregate across later CFunction rebuilds."""
+    existing: object
 
     normalized_name = _sanitize_identifier_8616(global_name)
     if (
@@ -9813,10 +10562,10 @@ def _record_named_global_aggregate_type_fact_8616(
     retained: list[NamedGlobalAggregateTypeFact8616] = []
     upgraded = False
     for existing in existing_facts:
-        if existing.global_name != fact.global_name:
+        if operator.ne(existing.global_name, fact.global_name):
             retained.append(existing)
             continue
-        same_type = existing.struct_type == fact.struct_type
+        same_type = operator.eq(existing.struct_type, fact.struct_type)
         layout_equivalent = _global_aggregate_layouts_equivalent_8616(
             existing.struct_type,
             fact.struct_type,
@@ -9861,12 +10610,14 @@ def _record_named_global_aggregate_type_fact_8616(
     return upgraded
 
 
+@cython.ccall
 def _preferred_named_global_aggregate_type_8616(
     codegen: object,
-    global_name: str,
+    global_name: object,
     candidate: SimStruct,
 ) -> SimStruct:
     """Reuse a stronger project-family type over an equivalent local candidate."""
+    existing: object
 
     normalized_name = _sanitize_identifier_8616(global_name)
     typed_codegen = typing.cast(_CodegenStackAggregateFactBoundary8616, codegen)
@@ -9876,7 +10627,7 @@ def _preferred_named_global_aggregate_type_8616(
         return candidate
     for existing in existing_facts:
         if (
-            existing.global_name != normalized_name
+            operator.ne(existing.global_name, normalized_name)
             or existing.identity_strength
             is not AggregateTypeIdentityStrength8616.PROJECT_COPY_FAMILY
         ):
@@ -9890,21 +10641,22 @@ def _preferred_named_global_aggregate_type_8616(
     return candidate
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _StackTypePromotionRun8616:
     """State for one stack-storage type promotion across codegen indexes."""
 
     codegen: CodegenBoundary8616
     expr: CVariable
-    width: int
+    width: cython.longlong
     target_type: SimType
     declaration_type: SimType
-    offset: int
+    offset: cython.longlong
     base: object
     stack_variable: SimStackVariable
     variable_manager: _VariableManagerTypeBoundary8616 | None
     cfunc: object
 
+    @cython.ccall
     def promote_manager_type(self, variable: SimVariable) -> None:
         """Apply the recovered type to one exact variable-manager identity."""
 
@@ -9926,30 +10678,36 @@ class _StackTypePromotionRun8616:
             all_unified=True,
         )
 
+    @cython.ccall
     def promote_cvar(self, node: object) -> None:
         """Promote one CVariable while preserving a dynamic boundary: angr codegen unification metadata."""
+        unified: object
 
         if not isinstance(node, CVariable):
             return
         node_var = node.variable
         if not isinstance(node_var, SimStackVariable):
             return
-        if node_var.offset != self.offset or node_var.base != self.stack_variable.base:
+        if operator.ne(node_var.offset, self.offset) or operator.ne(node_var.base, self.stack_variable.base):
             return
         self.promote_manager_type(node_var)
         if isinstance(node_var.size, int) and int(node_var.size) < self.width:
             with contextlib.suppress(Exception):
                 node_var.size = self.width
-        if node.variable_type != self.target_type:
+        if operator.ne(node.variable_type, self.target_type):
             with contextlib.suppress(Exception):
                 node.variable_type = self.target_type
         unified = getattr(node, "unified_variable", None)
-        if unified is not None and getattr(unified, "variable_type", None) != self.target_type:
+        if unified is not None and operator.ne(getattr(unified, "variable_type", None), self.target_type):
             with contextlib.suppress(Exception):
                 unified.variable_type = self.target_type
 
+    @cython.ccall
     def promote_variables_in_use(self) -> None:
         """Promote identities tracked by the codegen variables_in_use index."""
+        variables_in_use: object
+        cvar: object
+        indexed_variable: object
 
         # Dynamic boundary: angr CFunction variable indexes are optional on synthetic codegen surfaces.
         variables_in_use = getattr(self.cfunc, "variables_in_use", None)
@@ -9957,14 +10715,20 @@ class _StackTypePromotionRun8616:
             return
         for indexed_variable, cvar in tuple(variables_in_use.items()):
             if isinstance(indexed_variable, SimStackVariable):  # noqa: SIM102
-                if indexed_variable.offset == self.offset and indexed_variable.base == self.base:
+                if operator.eq(indexed_variable.offset, self.offset) and operator.eq(indexed_variable.base, self.base):
                     self.promote_manager_type(indexed_variable)
                     with contextlib.suppress(Exception):
                         indexed_variable.size = max(int(indexed_variable.size or 0), self.width)
             self.promote_cvar(cvar)
 
-    def promote_unified_locals(self) -> dict[object, object] | None:
+    @cython.ccall
+    def promote_unified_locals(self) -> object:
         """Promote unified local entries; returns the index for debug use."""
+        unified_locals: object
+        _vartype: object
+        cvariable: object
+        entries: object
+        variable: object
 
         # Dynamic boundary: angr CFunction unification metadata is optional across codegen versions.
         unified_locals = getattr(self.cfunc, "unified_local_vars", None)
@@ -9973,7 +10737,7 @@ class _StackTypePromotionRun8616:
         for variable, entries in tuple(unified_locals.items()):
             if not isinstance(variable, SimStackVariable):
                 continue
-            if variable.offset != self.offset or variable.base != self.base:
+            if operator.ne(variable.offset, self.offset) or operator.ne(variable.base, self.base):
                 continue
             self.promote_manager_type(variable)
             with contextlib.suppress(Exception):
@@ -9986,8 +10750,10 @@ class _StackTypePromotionRun8616:
                 unified_locals[variable] = new_entries
         return unified_locals
 
+    @cython.ccall
     def promote_manager_variables(self) -> None:
         """Promote exact identities in the manager inventory when available."""
+        managed_variable: object
 
         if self.variable_manager is None:
             return
@@ -10003,6 +10769,7 @@ class _StackTypePromotionRun8616:
 
     def debug_dump(self, unified_locals: object) -> None:
         """Emit the optional promotion trace for diagnostics."""
+        debug_variable: object
 
         manager_types: list[str] = []
         if self.variable_manager is not None:
@@ -10022,9 +10789,9 @@ class _StackTypePromotionRun8616:
         if isinstance(unified_locals, dict):
             unified_types = tuple(
                 repr(vartype)
-                for variable, entries in tuple(unified_locals.items())
+                for variable, entries in builtins.iter(tuple(unified_locals.items()))
                 if _same_stack_storage_8616(variable, self.stack_variable)
-                for _cvar, vartype in entries
+                for _cvar, vartype in iter(entries)
             )
         log.warning(
             "[seg-global-stack-type] offset=%#x width=%d target=%r declaration=%r manager=%s "
@@ -10039,13 +10806,16 @@ class _StackTypePromotionRun8616:
         )
 
 
+@cython.ccall
 def _stack_type_promotion_run_8616(
     codegen: CodegenBoundary8616,
     expr: object,
-    width: int,
+    width: cython.longlong,
     target_type: SimType,
 ) -> _StackTypePromotionRun8616 | None:
     """Resolve the promotion identity and build the run state, or refuse."""
+    cfunc: object
+    registered_type: object
 
     if width <= 0 or not isinstance(expr, CVariable):
         return None
@@ -10089,13 +10859,17 @@ def _stack_type_promotion_run_8616(
     )
 
 
+@cython.ccall
 def _promote_stack_value_expr_to_type_8616(
     codegen: CodegenBoundary8616,
     expr: object,
-    width: int,
+    width: cython.longlong,
     target_type: SimType,
 ) -> None:
     """Promote one stack storage identity across angr codegen variable indexes."""
+    run: object
+    node: object
+    root: object
 
     run = _stack_type_promotion_run_8616(codegen, expr, width, target_type)
     if run is None:
@@ -10111,7 +10885,8 @@ def _promote_stack_value_expr_to_type_8616(
         run.debug_dump(unified_locals)
 
 
-def _is_aggregate_stack_type_8616(candidate: object) -> bool:
+@cython.ccall
+def _is_aggregate_stack_type_8616(candidate: object) -> cython.bint:
     """Return whether one angr type preserves a recovered aggregate layout."""
 
     if isinstance(candidate, SimStruct):
@@ -10119,28 +10894,33 @@ def _is_aggregate_stack_type_8616(candidate: object) -> bool:
     return isinstance(candidate, TypeRef) and isinstance(candidate.type, SimStruct)
 
 
-def _stack_type_matches_fact_8616(candidate: object, fact: StackAggregateTypeFact8616) -> bool:
+@cython.ccall
+def _stack_type_matches_fact_8616(candidate: object, fact: StackAggregateTypeFact8616) -> cython.bint:
     """Return whether one declaration type matches the exact recorded layout."""
 
     resolved = candidate.type if isinstance(candidate, TypeRef) else candidate
-    return isinstance(resolved, SimStruct) and resolved == fact.struct_type
+    return isinstance(resolved, SimStruct) and operator.eq(resolved, fact.struct_type)
 
 
-def _same_stack_storage_8616(candidate: object, target: SimStackVariable) -> bool:
+@cython.ccall
+def _same_stack_storage_8616(candidate: object, target: SimStackVariable) -> cython.bint:
     """Return whether a dynamic variable denotes the same BP stack identity."""
 
     return (
         isinstance(candidate, SimStackVariable)
-        and candidate.offset == target.offset
-        and candidate.base == target.base
+        and operator.eq(candidate.offset, target.offset)
+        and operator.eq(candidate.base, target.base)
     )
 
 
+@cython.ccall
 def _variables_in_use_have_aggregate_type_8616(
     cfunc: _CFunctionTypeBoundary8616,
     stack_variable: SimStackVariable,
-) -> bool:
+) -> cython.bint:
     """Probe the variables_in_use index for an aggregate declaration."""
+    cvar: object
+    variable: object
 
     try:
         variables_in_use = cfunc.variables_in_use
@@ -10160,11 +10940,13 @@ def _variables_in_use_have_aggregate_type_8616(
     return False
 
 
+@cython.ccall
 def _managed_variables_have_aggregate_type_8616(
     cfunc: _CFunctionTypeBoundary8616,
     stack_variable: SimStackVariable,
-) -> bool:
+) -> cython.bint:
     """Probe the variable-manager inventory for an aggregate declaration."""
+    variable: object
 
     try:
         managed_variables = tuple(cfunc.variable_manager.get_variables())
@@ -10185,8 +10967,10 @@ def _managed_variables_have_aggregate_type_8616(
 def _unified_locals_have_aggregate_type_8616(
     cfunc: _CFunctionTypeBoundary8616,
     stack_variable: SimStackVariable,
-) -> bool:
+) -> cython.bint:
     """Probe unified-local entries for an aggregate declaration."""
+    entries: object
+    variable: object
 
     try:
         unified_locals = cfunc.unified_local_vars
@@ -10197,17 +10981,20 @@ def _unified_locals_have_aggregate_type_8616(
             continue
         if any(
             _is_aggregate_stack_type_8616(vartype) or _is_aggregate_stack_type_8616(cvar.variable_type)
-            for cvar, vartype in entries
+            for cvar, vartype in iter(entries)
         ):
             return True
     return False
 
 
+@cython.ccall
 def _cfunc_roots_have_aggregate_type_8616(
     cfunc: _CFunctionTypeBoundary8616,
     stack_variable: SimStackVariable,
-) -> bool:
+) -> cython.bint:
     """Probe all codegen roots for an aggregate-typed stack CVariable."""
+    node: object
+    root: object
 
     for root in _cfunc_roots_8616(cfunc):
         for node in _iter_c_nodes_deep_8616(root):
@@ -10220,8 +11007,10 @@ def _cfunc_roots_have_aggregate_type_8616(
     return False
 
 
-def _stack_storage_has_aggregate_type_8616(codegen: object, expr: CVariable) -> bool:
+@cython.ccall
+def _stack_storage_has_aggregate_type_8616(codegen: object, expr: CVariable) -> cython.bint:
     """Check all angr declaration indexes for stronger aggregate type evidence."""
+    cfunc_raw: object
 
     stack_variable = expr.variable
     if not isinstance(stack_variable, SimStackVariable):
@@ -10252,7 +11041,7 @@ def _named_global_aggregate_facts_8616(
     facts = tuple(
         dict.fromkeys(
             fact
-            for fact in raw_facts
+            for fact in iter(raw_facts)
             if isinstance(fact, NamedGlobalAggregateTypeFact8616)
             and isinstance(fact.global_name, str)
             and bool(fact.global_name)
@@ -10267,8 +11056,12 @@ def _named_global_aggregate_facts_8616(
     return facts, raw_facts
 
 
-def reapply_proven_named_global_aggregate_types_8616(codegen: object) -> bool:
+@cython.ccall
+def reapply_proven_named_global_aggregate_types_8616(codegen: object) -> cython.bint:
     """Replay Lowering-owned named aggregate declarations and expression types."""
+    cfunc: object
+    registered_type: object
+    fact: object
 
     typed_codegen = typing.cast(_CodegenStackAggregateFactBoundary8616, codegen)
     facts, raw_facts = _named_global_aggregate_facts_8616(typed_codegen)
@@ -10328,6 +11121,7 @@ def reapply_proven_named_global_aggregate_types_8616(codegen: object) -> bool:
     return changed
 
 
+@cython.ccall
 def _registered_type_store_8616(
     cfunc: object,
 ) -> _TypeStoreBoundary8616 | None:
@@ -10343,21 +11137,21 @@ def _reconcile_one_aggregate_declaration_8616(
     typed_codegen: _CodegenStackAggregateFactBoundary8616,
     codegen: object,
     type_store: _TypeStoreBoundary8616,
-    registered_types: tuple[SimType, ...],
+    registered_types: object,
     fact: NamedGlobalAggregateTypeFact8616,
-) -> tuple[bool, bool, bool]:
+) -> tuple[cython.bint, cython.bint, cython.bint]:
     """Reconcile one fact; returns (classified, materialized, changed)."""
 
     resolved_types = tuple(
         registered_type.type if isinstance(registered_type, TypeRef) else registered_type
-        for registered_type in registered_types
+        for registered_type in iter(registered_types)
     )
     if not any(
         named_global_aggregate_types_match_8616(
             candidate,
             fact.struct_type,
         )
-        for candidate in resolved_types
+        for candidate in iter(resolved_types)
     ):
         try:
             registered_type = type_store[fact.struct_type.name]
@@ -10391,11 +11185,11 @@ def _reconcile_one_aggregate_declaration_8616(
         fact,
         declaration_type,
     ):
-        return True, True, before != tuple(typed_codegen._inertia_global_declaration_specs_8616)
+        return True, True, operator.ne(before, tuple(typed_codegen._inertia_global_declaration_specs_8616))
     return True, False, False
 
 
-def reconcile_registered_named_global_aggregate_declarations_8616(codegen: object) -> bool:
+def reconcile_registered_named_global_aggregate_declarations_8616(codegen: object) -> cython.bint:
     """Reconcile rollback-restored declarations with the live angr type store.
 
     Validation rollback may restore an earlier inline declaration while
@@ -10403,6 +11197,9 @@ def reconcile_registered_named_global_aggregate_declarations_8616(codegen: objec
     This consumer uses only persistent Lowering facts and that typed registry;
     it does not inspect rendered C.
     """
+    cfunc: object
+    type_store: object
+    fact: object
 
     initialize_global_declaration_specs_8616(codegen)
     typed_codegen = typing.cast(_CodegenStackAggregateFactBoundary8616, codegen)
@@ -10449,8 +11246,8 @@ def reconcile_registered_named_global_aggregate_declarations_8616(codegen: objec
         stats.materialized_count,
         stats.failure_count,
         cfunc is not None,
-        tuple((fact.global_name, fact.struct_type.name, fact.array_len) for fact in facts),
-        tuple(repr(registered_type) for registered_type in registered_types),
+        tuple((fact.global_name, fact.struct_type.name, fact.array_len) for fact in iter(facts)),
+        tuple(repr(registered_type) for registered_type in iter(registered_types)),
         tuple(typed_codegen._inertia_global_declaration_specs_8616),
     )
     if classified > 0 and materialized == 0:
@@ -10464,15 +11261,18 @@ def reconcile_registered_named_global_aggregate_declarations_8616(codegen: objec
     return changed
 
 
+@cython.ccall
 def _global_aggregate_layouts_equivalent_8616(
     candidate: object,
     expected: SimStruct,
-) -> bool:
+) -> cython.bint:
     """Return whether two named structs have the same exact physical layout."""
+    expected_field: object
+    field_name: object
 
-    if not isinstance(candidate, SimStruct) or candidate.pack != expected.pack:
+    if not isinstance(candidate, SimStruct) or operator.ne(candidate.pack, expected.pack):
         return False
-    if tuple(candidate.fields) != tuple(expected.fields):
+    if operator.ne(tuple(candidate.fields), tuple(expected.fields)):
         return False
     for field_name, expected_field in expected.fields.items():
         candidate_field = candidate.fields[field_name]
@@ -10480,38 +11280,43 @@ def _global_aggregate_layouts_equivalent_8616(
             expected_field, SimTypeChar
         ):
             return False
-        if candidate_field.signed != expected_field.signed:
+        if operator.ne(candidate_field.signed, expected_field.signed):
             return False
     return True
 
 
+@cython.ccall
 def named_global_aggregate_types_match_8616(
     candidate: object,
     expected: SimStruct,
-) -> bool:
+) -> cython.bint:
     """Return whether two angr types carry the same exact named byte layout."""
+    expected_field: object
+    field_name: object
 
     if not isinstance(candidate, SimStruct):
         return False
-    if candidate.name != expected.name or candidate.pack != expected.pack:
+    if operator.ne(candidate.name, expected.name) or operator.ne(candidate.pack, expected.pack):
         return False
-    if tuple(candidate.fields) != tuple(expected.fields):
+    if operator.ne(tuple(candidate.fields), tuple(expected.fields)):
         return False
     for field_name, expected_field in expected.fields.items():
         candidate_field = candidate.fields[field_name]
         if not isinstance(candidate_field, SimTypeChar) or not isinstance(expected_field, SimTypeChar):
             return False
-        if candidate_field.signed != expected_field.signed:
+        if operator.ne(candidate_field.signed, expected_field.signed):
             return False
     return True
 
 
+@cython.ccall
 def _named_global_aggregate_declaration_materialized_8616(
     codegen: object,
     fact: NamedGlobalAggregateTypeFact8616,
     declaration_type: NamedAggregateDeclarationCType8616,
-) -> bool:
+) -> cython.bint:
     """Return whether the serialized declaration contains the registered view."""
+    spec: object
 
     typed_codegen = typing.cast(_CodegenStackAggregateFactBoundary8616, codegen)
     try:
@@ -10534,18 +11339,22 @@ def _named_global_aggregate_declaration_materialized_8616(
             and isinstance(array_len, int)
             and array_len >= fact.array_len
         )
-        if ctype == declaration_type.c_name and name == fact.global_name and extent_materialized:
+        if operator.eq(ctype, declaration_type.c_name) and operator.eq(name, fact.global_name) and extent_materialized:
             return True
     return False
 
 
-def reapply_proven_stack_aggregate_types_8616(codegen: object) -> bool:
+def reapply_proven_stack_aggregate_types_8616(codegen: object) -> cython.bint:
     """Replay Lowering-owned aggregate types after a CFunction lifecycle rebuild.
 
     This consumer does not infer types from rendered C or expression shape. It
     applies only persistent facts recorded when binary load-site evidence first
     classified and materialized the aggregate stack copy.
     """
+    cfunc: object
+    entries: object
+    fact: object
+    root: object
 
     typed_codegen = typing.cast(_CodegenStackAggregateFactBoundary8616, codegen)
     try:
@@ -10555,7 +11364,7 @@ def reapply_proven_stack_aggregate_types_8616(codegen: object) -> bool:
     facts = tuple(
         dict.fromkeys(
             fact
-            for fact in raw_facts
+            for fact in iter(raw_facts)
             if isinstance(fact, StackAggregateTypeFact8616)
             and isinstance(fact.base, str)
             and isinstance(fact.offset, int)
@@ -10574,24 +11383,24 @@ def reapply_proven_stack_aggregate_types_8616(codegen: object) -> bool:
             candidates.extend(typed_cfunc.variables_in_use.values())
         try:
             for entries in typed_cfunc.unified_local_vars.values():
-                candidates.extend(cvar for cvar, _vartype in entries)
+                candidates.extend(cvar for cvar, _vartype in iter(entries))
         except AttributeError:
             pass
         for root in _cfunc_roots_8616(cfunc):
-            candidates.extend(node for node in _iter_c_nodes_deep_8616(root) if isinstance(node, CVariable))
-        candidates = list({id(candidate): candidate for candidate in candidates}.values())
+            candidates.extend(node for node in builtins.iter(_iter_c_nodes_deep_8616(root)) if isinstance(node, CVariable))
+        candidates = list({id(candidate): candidate for candidate in iter(candidates)}.values())
         for fact in facts:
             matching = [
                 candidate
-                for candidate in candidates
+                for candidate in iter(candidates)
                 if isinstance(candidate.variable, SimStackVariable)
-                and candidate.variable.base == fact.base
-                and candidate.variable.offset == fact.offset
+                and operator.eq(candidate.variable.base, fact.base)
+                and operator.eq(candidate.variable.offset, fact.offset)
             ]
             if not matching:
                 continue
             classified += 1
-            was_materialized = all(_stack_type_matches_fact_8616(candidate.variable_type, fact) for candidate in matching)
+            was_materialized = all(_stack_type_matches_fact_8616(candidate.variable_type, fact) for candidate in iter(matching))
             _promote_stack_value_expr_to_type_8616(codegen, matching[0], fact.width, fact.struct_type)
             if _stack_storage_has_aggregate_type_8616(codegen, matching[0]):
                 materialized += 1
@@ -10615,36 +11424,38 @@ def reapply_proven_stack_aggregate_types_8616(codegen: object) -> bool:
     return changed
 
 
+@cython.ccall
 def _field_projection_source_8616(
     codegen: object,
     expression: object,
     fact: StackAggregateFieldProjectionFact8616,
-) -> tuple[CVariable, bool, CTypeCast | None] | None:
+) -> object:
     """Match one expression against a persistent stack field-projection fact."""
+    cast_expr: object
 
     cast_expr = expression if isinstance(expression, CTypeCast) else None
     candidate = cast_expr.expr if cast_expr is not None else expression
     already_projected = False
     if isinstance(candidate, CVariableField):
         expected_field = _two_byte_global_struct_field_name_8616(fact.field_offset)
-        if candidate.field.field != expected_field:
+        if operator.ne(candidate.field.field, expected_field):
             return None
         candidate = candidate.variable
         already_projected = True
     if not isinstance(candidate, CVariable):
         return None
     variable = candidate.variable
-    if not isinstance(variable, SimStackVariable) or variable.base != fact.source_base:
+    if not isinstance(variable, SimStackVariable) or operator.ne(variable.base, fact.source_base):
         return None
     source_offset = machine_bp_offset_for_stack_variable_8616(codegen, variable)
-    if source_offset != fact.source_offset:
+    if operator.ne(source_offset, fact.source_offset):
         return None
     return candidate, already_projected, cast_expr
 
 
 def stack_aggregate_field_projection_facts_8616(
     codegen: object,
-) -> tuple[StackAggregateFieldProjectionFact8616, ...]:
+) -> object:
     """Return the owned typed stack field-projection fact contract."""
 
     typed_codegen = typing.cast(_CodegenStackAggregateFactBoundary8616, codegen)
@@ -10658,7 +11469,7 @@ def stack_aggregate_field_projection_facts_8616(
         )
     if not all(
         isinstance(fact, StackAggregateFieldProjectionFact8616)
-        for fact in facts
+        for fact in iter(facts)
     ):
         raise TypeError(
             "stack aggregate field projection facts must contain only "
@@ -10669,7 +11480,7 @@ def stack_aggregate_field_projection_facts_8616(
 
 def named_global_aggregate_type_facts_8616(
     codegen: object,
-) -> tuple[NamedGlobalAggregateTypeFact8616, ...]:
+) -> object:
     """Return the owned typed named-global aggregate fact contract."""
 
     typed_codegen = typing.cast(_CodegenStackAggregateFactBoundary8616, codegen)
@@ -10681,7 +11492,7 @@ def named_global_aggregate_type_facts_8616(
         raise TypeError("named global aggregate type facts must be a tuple")
     if not all(
         isinstance(fact, NamedGlobalAggregateTypeFact8616)
-        for fact in facts
+        for fact in iter(facts)
     ):
         raise TypeError(
             "named global aggregate type facts must contain only "
@@ -10692,7 +11503,7 @@ def named_global_aggregate_type_facts_8616(
 
 def indexed_global_stack_aggregate_copy_facts_8616(
     codegen: object,
-) -> tuple[IndexedGlobalStackAggregateCopyFact8616, ...]:
+) -> object:
     """Return the owned typed indexed-global aggregate-copy fact contract."""
 
     typed_codegen = typing.cast(_CodegenStackAggregateFactBoundary8616, codegen)
@@ -10706,7 +11517,7 @@ def indexed_global_stack_aggregate_copy_facts_8616(
         )
     if not all(
         isinstance(fact, IndexedGlobalStackAggregateCopyFact8616)
-        for fact in facts
+        for fact in iter(facts)
     ):
         raise TypeError(
             "indexed global stack aggregate copy facts must contain only "
@@ -10715,14 +11526,17 @@ def indexed_global_stack_aggregate_copy_facts_8616(
     return facts
 
 
+@cython.ccall
 def _field_projection_matches_8616(
     codegen: object,
-    assignments: list[CAssignment],
+    assignments: object,
     fact: StackAggregateFieldProjectionFact8616,
-) -> list[tuple[CAssignment, CVariable, bool, CTypeCast | None]]:
+) -> object:
     """Collect assignments whose destination stores the projected field."""
+    source_match: object
+    assignment: object
 
-    matches: list[tuple[CAssignment, CVariable, bool, CTypeCast | None]] = []
+    matches: list[tuple[CAssignment, CVariable, cython.bint, CTypeCast | None]] = []
     for assignment in assignments:
         destination = assignment.lhs
         if not isinstance(destination, CVariable):
@@ -10735,8 +11549,8 @@ def _field_projection_matches_8616(
         )
         if (
             not isinstance(destination_variable, SimStackVariable)
-            or destination_variable.base != fact.destination_base
-            or destination_offset != fact.destination_offset
+            or operator.ne(destination_variable.base, fact.destination_base)
+            or operator.ne(destination_offset, fact.destination_offset)
         ):
             continue
         source_match = _field_projection_source_8616(codegen, assignment.rhs, fact)
@@ -10746,14 +11560,15 @@ def _field_projection_matches_8616(
     return matches
 
 
+@cython.ccall
 def _apply_field_projection_match_8616(
     codegen: object,
     fact: StackAggregateFieldProjectionFact8616,
     assignment: CAssignment,
     source: CVariable,
-    already_projected: bool,
-    cast_expr: CTypeCast | None,
-) -> bool:
+    already_projected: cython.bint,
+    cast_expr: object,
+) -> cython.bint:
     """Rewrite one matched assignment RHS to the proven field projection."""
 
     if already_projected and cast_expr is not None:
@@ -10783,15 +11598,22 @@ def _apply_field_projection_match_8616(
     return True
 
 
-def reapply_proven_stack_aggregate_field_projections_8616(codegen: object) -> bool:
+def reapply_proven_stack_aggregate_field_projections_8616(codegen: object) -> cython.bint:
     """Replay Lowering-owned field projections after a CFunction rebuild."""
+    cast_expr: object
+    cfunc: object
+    already_projected: object
+    assignment: object
+    fact: object
+    root: object
+    source: object
 
     typed_codegen = typing.cast(_CodegenStackAggregateFactBoundary8616, codegen)
     raw_facts = stack_aggregate_field_projection_facts_8616(codegen)
     facts = tuple(
         dict.fromkeys(
             fact
-            for fact in raw_facts
+            for fact in iter(raw_facts)
             if isinstance(fact, StackAggregateFieldProjectionFact8616)
             and isinstance(fact.source_base, str)
             and isinstance(fact.destination_base, str)
@@ -10804,8 +11626,8 @@ def reapply_proven_stack_aggregate_field_projections_8616(codegen: object) -> bo
     assignments: list[CAssignment] = []
     if cfunc is not None:
         for root in _cfunc_roots_8616(cfunc):
-            assignments.extend(node for node in _iter_c_nodes_deep_8616(root) if isinstance(node, CAssignment))
-    assignments = list({id(assignment): assignment for assignment in assignments}.values())
+            assignments.extend(node for node in builtins.iter(_iter_c_nodes_deep_8616(root)) if isinstance(node, CAssignment))
+    assignments = list({id(assignment): assignment for assignment in iter(assignments)}.values())
     classified = 0
     materialized = 0
     failures = 0
@@ -10846,7 +11668,8 @@ def reapply_proven_stack_aggregate_field_projections_8616(codegen: object) -> bo
     return changed
 
 
-def _promote_stack_value_expr_to_width_8616(codegen: CodegenBoundary8616, expr: object, width: int) -> None:
+@cython.ccall
+def _promote_stack_value_expr_to_width_8616(codegen: CodegenBoundary8616, expr: object, width: cython.longlong) -> None:
     """Promote stack value width across a dynamic boundary: angr codegen CFunction indexes."""
 
     if width <= 1 or not isinstance(expr, CVariable):
@@ -10864,11 +11687,15 @@ def _promote_stack_value_expr_to_width_8616(codegen: CodegenBoundary8616, expr: 
     _promote_stack_value_expr_to_type_8616(codegen, expr, width, _type_for_width_8616(codegen, width))
 
 
+@cython.ccall
 def _stack_index_identity_and_adjustment_8616(
     codegen: object,
     expression: object,
-) -> tuple[str, int, int] | None:
+) -> object:
     """Return one BP-stack index identity and its logical element adjustment."""
+    amount: object
+    base: object
+    bp_offset: object
 
     if isinstance(expression, CTypeCast):
         return _stack_index_identity_and_adjustment_8616(codegen, expression.expr)
@@ -10893,28 +11720,30 @@ def _stack_index_identity_and_adjustment_8616(
     )
 
 
+@cython.ccall
 def _aggregate_copy_site_matches_8616(
-    index_base: str,
-    index_offset: int,
-    destination_base: str,
-    logical_source_offset: int,
+    index_base: object,
+    index_offset: cython.longlong,
+    destination_base: object,
+    logical_source_offset: cython.longlong,
     load_site: IndexedSegmentedGlobalLoadSiteEvidence8616,
     store_site: IndexedSegmentedGlobalStackStore8616,
-) -> bool:
+) -> cython.bint:
     """Return whether the copy's index and site geometry prove one element."""
 
     return bool(
         index_base == "bp"
         and destination_base == "bp"
-        and index_offset == load_site.index_stack_offset
-        and load_site.width == store_site.width
+        and operator.eq(index_offset, load_site.index_stack_offset)
+        and operator.eq(load_site.width, store_site.width)
         and load_site.width > 0
         and load_site.index_shift >= 0
-        and (1 << load_site.index_shift) == load_site.width
-        and logical_source_offset == (load_site.base_offset & 0xFFFF)
+        and operator.eq((1 << load_site.index_shift), load_site.width)
+        and operator.eq(logical_source_offset, (load_site.base_offset & 0xFFFF))
     )
 
 
+@cython.ccall
 def _record_indexed_global_stack_aggregate_copy_fact_8616(
     codegen: object,
     *,
@@ -10925,6 +11754,9 @@ def _record_indexed_global_stack_aggregate_copy_fact_8616(
     store_site: IndexedSegmentedGlobalStackStore8616,
 ) -> None:
     """Persist one exact Lowering-proven whole aggregate copy."""
+    destination_bp_offset: object
+    index_identity: object
+    existing: object
 
     source_variable = source.variable
     source_storage = (
@@ -10981,8 +11813,8 @@ def _record_indexed_global_stack_aggregate_copy_fact_8616(
     retained: list[IndexedGlobalStackAggregateCopyFact8616] = []
     for existing in existing_facts:
         same_evidence = (
-            existing.load_ins_addr == fact.load_ins_addr
-            and existing.store_ins_addr == fact.store_ins_addr
+            operator.eq(existing.load_ins_addr, fact.load_ins_addr)
+            and operator.eq(existing.store_ins_addr, fact.store_ins_addr)
         )
         if same_evidence and existing != fact:
             raise PipelineHardError(
@@ -11000,7 +11832,7 @@ def _promote_one_stack_assignment_aggregate_8616(
     codegen: CodegenBoundary8616,
     node: object,
     proven_copies: Mapping[
-        tuple[int, int],
+        tuple[cython.longlong, cython.longlong],
         list[
             tuple[
                 IndexedSegmentedGlobalLoadSiteEvidence8616,
@@ -11008,9 +11840,12 @@ def _promote_one_stack_assignment_aggregate_8616(
             ]
         ],
     ],
-    promoted: set[tuple[int, int]],
+    promoted: object,
 ) -> None:
     """Promote one proven BP store destination to its aggregate type."""
+    candidate_copies: object
+    offset: object
+    source_index: object
 
     if not isinstance(node, CAssignment):
         return
@@ -11041,10 +11876,10 @@ def _promote_one_stack_assignment_aggregate_8616(
     _index_base, index_offset, _index_adjustment = source_index
     matching_copies = tuple(
         (load, store)
-        for load, store in candidate_copies
-        if load.index_stack_offset == index_offset
+        for load, store in iter(candidate_copies)
+        if operator.eq(load.index_stack_offset, index_offset)
         and load.index_shift >= 0
-        and (1 << load.index_shift) == load.width
+        and operator.eq((1 << load.index_shift), load.width)
     )
     if len(matching_copies) != 1:
         return
@@ -11059,16 +11894,20 @@ def _promote_one_stack_assignment_aggregate_8616(
     )
 
 
+@cython.ccall
 def _promote_stack_assignment_aggregate_types_8616(
     codegen: CodegenBoundary8616,
     root: object,
-    load_site_evidence: tuple[IndexedSegmentedGlobalLoadSiteEvidence8616, ...],
-) -> int:
+    load_site_evidence: object,
+) -> cython.longlong:
     """Propagate aggregate types only to exact binary-proven BP store destinations."""
+    load: object
+    node: object
+    store: object
 
-    promoted: set[tuple[int, int]] = set()
+    promoted: set[tuple[cython.longlong, cython.longlong]] = set()
     proven_copies: dict[
-        tuple[int, int],
+        tuple[cython.longlong, cython.longlong],
         list[
             tuple[
                 IndexedSegmentedGlobalLoadSiteEvidence8616,
@@ -11078,7 +11917,7 @@ def _promote_stack_assignment_aggregate_types_8616(
     ] = {}
     for load in load_site_evidence:
         for store in load.stack_stores:
-            if load.width != store.width:
+            if operator.ne(load.width, store.width):
                 continue
             proven_copies.setdefault(
                 (store.stack_offset, store.width),
@@ -11089,16 +11928,20 @@ def _promote_stack_assignment_aggregate_types_8616(
     return len(promoted)
 
 
+@cython.ccall
 def _record_stack_aggregate_field_projection_fact_8616(
     codegen: object,
     destination: CVariable,
     source: CVariable,
     struct_type: SimStruct,
-    field_offset: int,
+    field_offset: cython.longlong,
     cast_source_type: SimType | None,
     cast_destination_type: SimTypeChar,
 ) -> None:
     """Persist one typed stack field projection across CFunction rebuilds."""
+    destination_offset: object
+    source_offset: object
+    existing: object
 
     destination_variable = destination.variable
     source_variable = source.variable
@@ -11131,19 +11974,19 @@ def _record_stack_aggregate_field_projection_fact_8616(
     retained: list[StackAggregateFieldProjectionFact8616] = []
     for existing in existing_facts:
         same_storage = (
-            existing.source_base == fact.source_base
-            and existing.source_offset == fact.source_offset
-            and existing.destination_base == fact.destination_base
-            and existing.destination_offset == fact.destination_offset
+            operator.eq(existing.source_base, fact.source_base)
+            and operator.eq(existing.source_offset, fact.source_offset)
+            and operator.eq(existing.destination_base, fact.destination_base)
+            and operator.eq(existing.destination_offset, fact.destination_offset)
         )
         if not same_storage:
             retained.append(existing)
             continue
         if (
-            existing.field_offset != fact.field_offset
-            or existing.struct_type != fact.struct_type
-            or existing.cast_source_type != fact.cast_source_type
-            or existing.cast_destination_type != fact.cast_destination_type
+            operator.ne(existing.field_offset, fact.field_offset)
+            or operator.ne(existing.struct_type, fact.struct_type)
+            or operator.ne(existing.cast_source_type, fact.cast_source_type)
+            or operator.ne(existing.cast_destination_type, fact.cast_destination_type)
         ):
             raise PipelineHardError(
                 "conflicting stack aggregate projection facts "
@@ -11154,11 +11997,14 @@ def _record_stack_aggregate_field_projection_fact_8616(
     typed_codegen._inertia_stack_aggregate_field_projection_facts_8616 = tuple(dict.fromkeys(retained))
 
 
+@cython.ccall
 def _record_char_cast_field_projection_facts_8616(
     codegen: CodegenBoundary8616,
-    nodes: tuple[object, ...],
+    nodes: object,
 ) -> None:
     """Persist field-projection facts for cast assignments before rewriting."""
+    projection: object
+    assignment: object
 
     for assignment in nodes:
         if not isinstance(assignment, CAssignment):
@@ -11184,11 +12030,14 @@ def _record_char_cast_field_projection_facts_8616(
         )
 
 
+@cython.ccall
 def _project_char_cast_nodes_8616(
     codegen: CodegenBoundary8616,
-    nodes: tuple[object, ...],
-) -> int:
+    nodes: object,
+) -> cython.longlong:
     """Rewrite ``(char)aggregate`` casts to casts of their projected field."""
+    projection: object
+    node: object
 
     projected = 0
     for node in nodes:
@@ -11204,17 +12053,21 @@ def _project_char_cast_nodes_8616(
     return projected
 
 
+@cython.ccall
 def _project_byte_mask_and_nodes_8616(
     codegen: CodegenBoundary8616,
-    nodes: tuple[object, ...],
-) -> int:
+    nodes: object,
+) -> cython.longlong:
     """Rewrite ``aggregate & 0xff`` masks to their projected field."""
+    field_expr: object
+    masked_aggregate_expr: object
+    node: object
 
     projected = 0
     for node in nodes:
         if not isinstance(node, CBinaryOp) or node.op != "And":
             continue
-        masked_aggregate_expr: CExpression | None = None
+        masked_aggregate_expr = None
         if _constant_int_8616(node.rhs) == 0xFF and isinstance(node.lhs, CExpression):
             masked_aggregate_expr = node.lhs
         elif _constant_int_8616(node.lhs) == 0xFF and isinstance(node.rhs, CExpression):
@@ -11234,7 +12087,8 @@ def _project_byte_mask_and_nodes_8616(
     return projected
 
 
-def _project_two_byte_aggregate_char_casts_8616(codegen: CodegenBoundary8616, root: object) -> int:
+@cython.ccall
+def _project_two_byte_aggregate_char_casts_8616(codegen: CodegenBoundary8616, root: object) -> cython.longlong:
     """Project exact scalar byte uses after their source becomes an aggregate.
 
     A pre-promotion ``(char)word`` expression denotes the low byte.  Once the
@@ -11255,7 +12109,7 @@ def _project_two_byte_aggregate_char_casts_8616(codegen: CodegenBoundary8616, ro
 def _replay_named_global_aggregate_expression_types_8616(
     codegen: CodegenBoundary8616,
     cfunc: object,
-    facts: tuple[NamedGlobalAggregateTypeFact8616, ...],
+    facts: object,
 ) -> NamedGlobalAggregateExpressionReplayStats8616:
     """Restore aggregate element types on regenerated indexed-global nodes.
 
@@ -11264,18 +12118,23 @@ def _replay_named_global_aggregate_expression_types_8616(
     exact Lowering-owned global identity restores that type before projecting
     scalar low-byte uses. Rendered C is never inspected.
     """
+    current_type: object
+    fact: object
+    name: object
+    node: object
+    root: object
 
-    facts_by_name = {fact.global_name: fact for fact in facts}
+    facts_by_name = {fact.global_name: fact for fact in iter(facts)}
     raw_nodes: list[CIndexedVariable] = []
     for root in _cfunc_roots_8616(cfunc):
         raw_nodes.extend(
             node
-            for node in _iter_c_nodes_deep_8616(root)
+            for node in builtins.iter(_iter_c_nodes_deep_8616(root))
             if isinstance(node, CIndexedVariable)
             and isinstance(node.variable, CVariable)
             and isinstance(node.variable.variable, SimMemoryVariable)
         )
-    nodes_by_id = {id(node): node for node in raw_nodes}
+    nodes_by_id = {id(node): node for node in iter(raw_nodes)}
     classified = 0
     materialized = 0
     failures = 0
@@ -11327,12 +12186,17 @@ def _replay_named_global_aggregate_expression_types_8616(
 
 
 def recover_compare_register_global_carriers_8616(
-    summaries: list[InsnSummary8616],
+    summaries: object,
 ) -> tuple[CompareRegisterGlobalCarrierEvidence8616, ...]:
     """Recover register carriers that compare values loaded from globals."""
+    source: object
+    insn: object
+    kind: object
+    reg_name: object
+    value: object
 
-    reg_sources: dict[str, tuple[int, int]] = {}
-    recovered: dict[tuple[str, int], CompareRegisterGlobalCarrierEvidence8616] = {}
+    reg_sources: dict[str, tuple[cython.longlong, cython.longlong]] = {}
+    recovered: dict[tuple[str, cython.longlong], CompareRegisterGlobalCarrierEvidence8616] = {}
 
     for insn in summaries:
         mnemonic = insn.mnemonic.lower()
@@ -11364,16 +12228,23 @@ def recover_compare_register_global_carriers_8616(
         for reg_name in _written_registers_8616(insn):
             reg_sources.pop(reg_name, None)
 
-    return tuple(recovered[key] for key in sorted(recovered))
+    return tuple(recovered[key] for key in builtins.iter(sorted(recovered)))
 
 
 def recover_dword_global_zero_test_evidence_8616(
-    summaries: list[InsnSummary8616],
+    summaries: object,
 ) -> tuple[DwordGlobalZeroTestEvidence8616, ...]:
     """Recover MOV/OR/Jcc evidence that tests a direct dword global for zero."""
+    high_address: object
+    low_address: object
+    next_insn: object
+    prior: object
+    index: object
+    insn: object
+    reg_name: object
 
-    reg_sources: dict[str, tuple[int, int, int | None]] = {}
-    recovered: dict[tuple[int, str, int], DwordGlobalZeroTestEvidence8616] = {}
+    reg_sources: dict[str, tuple[cython.longlong, cython.longlong, int | None]] = {}
+    recovered: dict[tuple[cython.longlong, str, cython.longlong], DwordGlobalZeroTestEvidence8616] = {}
 
     for index, insn in enumerate(summaries):
         mnemonic = insn.mnemonic.lower()
@@ -11398,13 +12269,13 @@ def recover_dword_global_zero_test_evidence_8616(
                     high_offset = max(prior_offset, current_offset)
                     next_insn = summaries[index + 1] if index + 1 < len(summaries) else None
                     next_mnemonic = next_insn.mnemonic.lower() if next_insn is not None else ""
-                    if ((low_offset + 2) & 0xFFFF) == high_offset and next_mnemonic.startswith("j"):
+                    if operator.eq(((low_offset + 2) & 0xFFFF), high_offset) and next_mnemonic.startswith("j"):
                         address_by_offset = {
                             offset: address
-                            for offset, address in (
+                            for offset, address in iter((
                                 (prior_offset, prior_address),
                                 (current_offset, insn.address),
-                            )
+                            ))
                             if isinstance(address, int)
                         }
                         low_address = address_by_offset.get(low_offset)
@@ -11424,20 +12295,24 @@ def recover_dword_global_zero_test_evidence_8616(
         for reg_name in _written_registers_8616(insn):
             reg_sources.pop(reg_name, None)
 
-    return tuple(recovered[key] for key in sorted(recovered))
+    return tuple(recovered[key] for key in builtins.iter(sorted(recovered)))
 
 
+@cython.ccall
 def _replace_compare_carrier_operand_8616(
     project: ProjectBoundary8616,
     codegen: CodegenBoundary8616,
     node: CBinaryOp,
-    attr: str,
+    attr: object,
     evidence_by_reg: Mapping[str, CompareRegisterGlobalCarrierEvidence8616],
-    named_by_offset: Mapping[int, NamedGlobalEvidence8616],
-    created: dict[tuple[str, int], object],
+    named_by_offset: Mapping[cython.longlong, NamedGlobalEvidence8616],
+    created: object,
     stats: SegmentedGlobalLoadStats8616,
-) -> bool:
+) -> cython.bint:
     """Replace one compare operand with its proven global carrier expr."""
+    evidence: object
+    reg_name: object
+    replacement: object
 
     original = node.lhs if attr == "lhs" else node.rhs
     reg_name = _cvariable_register_name_8616(project, original)
@@ -11463,12 +12338,14 @@ def _replace_compare_carrier_operand_8616(
     return True
 
 
+@cython.ccall
 def _compare_carrier_materialization_cfunc_8616(
     codegen: CodegenBoundary8616,
-    compare_evidence: tuple[CompareRegisterGlobalCarrierEvidence8616, ...],
+    compare_evidence: object,
     stats: SegmentedGlobalLoadStats8616,
 ) -> object | None:
     """Gate the materializer on evidence and a live CFunction."""
+    cfunc: object
 
     if not compare_evidence:
         stats.record_compare(CompareRegisterGlobalCarrierDecision8616.REFUSED_NO_EVIDENCE)
@@ -11479,29 +12356,36 @@ def _compare_carrier_materialization_cfunc_8616(
     return cast(object, cfunc)
 
 
+@cython.ccall
 def _compare_carrier_evidence_by_reg_8616(
-    compare_evidence: tuple[CompareRegisterGlobalCarrierEvidence8616, ...],
-) -> dict[str, CompareRegisterGlobalCarrierEvidence8616]:
+    compare_evidence: object,
+) -> object:
     """Index compare-carrier evidence by register, dropping conflicts."""
+    item: object
 
     evidence_by_reg: dict[str, CompareRegisterGlobalCarrierEvidence8616] = {}
     for item in compare_evidence:
-        if item.reg_name in evidence_by_reg and evidence_by_reg[item.reg_name].offset != item.offset:
+        if item.reg_name in evidence_by_reg and operator.ne(evidence_by_reg[item.reg_name].offset, item.offset):
             evidence_by_reg.pop(item.reg_name, None)
             continue
         evidence_by_reg[item.reg_name] = item
     return evidence_by_reg
 
 
+@cython.ccall
 def materialize_compare_register_global_carriers_from_evidence_8616(
     project: ProjectBoundary8616,
     codegen: CodegenBoundary8616,
-    named_evidence: tuple[NamedGlobalEvidence8616, ...],
-    compare_evidence: tuple[CompareRegisterGlobalCarrierEvidence8616, ...],
+    named_evidence: object,
+    compare_evidence: object,
     *,
     stats: SegmentedGlobalLoadStats8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """Materialize compare-register globals from already-recovered evidence."""
+    cfunc: object
+    attr: object
+    node: object
+    root: object
 
     if stats is None:
         stats = SegmentedGlobalLoadStats8616()
@@ -11509,10 +12393,10 @@ def materialize_compare_register_global_carriers_from_evidence_8616(
     if cfunc is None:
         return False
 
-    named_by_offset = {item.offset & 0xFFFF: item for item in named_evidence}
+    named_by_offset = {item.offset & 0xFFFF: item for item in iter(named_evidence)}
     evidence_by_reg = _compare_carrier_evidence_by_reg_8616(compare_evidence)
 
-    created: dict[tuple[str, int], object] = {}
+    created: dict[tuple[str, cython.longlong], object] = {}
     changed = False
     for root in _cfunc_roots_8616(cfunc):
         for node in _iter_c_nodes_deep_8616(root):
@@ -11538,7 +12422,11 @@ def _collect_named_global_evidence_8616(
     *,
     cod_metadata: CodMetadataBoundary8616 = None,
 ) -> tuple[NamedGlobalEvidence8616, ...]:
-    items: dict[int, NamedGlobalEvidence8616] = {}
+    labels: object
+    raw_entry: object
+    raw_name: object
+    raw_offset: object
+    items: dict[cython.longlong, NamedGlobalEvidence8616] = {}
     if isinstance(synthetic_globals, dict):
         for raw_offset, raw_entry in synthetic_globals.items():
             if not isinstance(raw_offset, int) or not isinstance(raw_entry, tuple) or len(raw_entry) < 2:
@@ -11558,14 +12446,19 @@ def _collect_named_global_evidence_8616(
                 and (raw_offset & 0xFFFF) not in items
             ):
                 items[raw_offset & 0xFFFF] = NamedGlobalEvidence8616(raw_offset & 0xFFFF, raw_name, 2)
-    return tuple(items[offset] for offset in sorted(items))
+    return tuple(items[offset] for offset in builtins.iter(sorted(items)))
 
 
+@cython.ccall
 def _capstone_disasm_function_code_8616(
     project: ProjectBoundary8616,
     codegen: CodegenBoundary8616,
 ) -> tuple[object, ...]:
     """Disassemble the active function through the dynamic Capstone boundary."""
+    addr: object
+    capstone: object
+    function: object
+    size: object
 
     function = _active_function_8616(project, codegen)
     if function is None:
@@ -11592,8 +12485,10 @@ def _capstone_disasm_function_code_8616(
         return ()
 
 
+@cython.ccall
 def _word_global_load_disp_8616(insn: object) -> int | None:
     """Return a direct word-load displacement only with complete address fields."""
+    mem: object
 
     # Dynamic boundary: third-party Capstone instructions expose mnemonic/operands.
     if str(getattr(insn, "mnemonic", "")).lower() != "mov":
@@ -11603,14 +12498,14 @@ def _word_global_load_disp_8616(insn: object) -> int | None:
         return None
     dst = _capstone_operand_view_8616(operands[0])
     src = _capstone_operand_view_8616(operands[1])
-    if dst.kind != X86_OP_REG or src.kind != X86_OP_MEM:
+    if operator.ne(dst.kind, X86_OP_REG) or operator.ne(src.kind, X86_OP_MEM):
         return None
     if src.size != 2:
         return None
     mem = src.memory
     if mem is None:
         return None
-    if mem.base != X86_REG_INVALID or mem.index != X86_REG_INVALID:
+    if operator.ne(mem.base, X86_REG_INVALID) or operator.ne(mem.index, X86_REG_INVALID):
         return None
     disp = mem.displacement
     if isinstance(disp, int) and disp >= 0:
@@ -11618,11 +12513,14 @@ def _word_global_load_disp_8616(insn: object) -> int | None:
     return None
 
 
-def _direct_word_global_load_offsets_8616(project: ProjectBoundary8616, codegen: CodegenBoundary8616) -> tuple[int, ...]:
+@cython.ccall
+def _direct_word_global_load_offsets_8616(project: ProjectBoundary8616, codegen: CodegenBoundary8616) -> tuple[cython.longlong, ...]:
     """Find direct word global loads from a dynamic boundary: third-party Capstone metadata."""
+    disp: object
+    insn: object
 
     insns = _capstone_disasm_function_code_8616(project, codegen)
-    offsets: set[int] = set()
+    offsets: set[cython.longlong] = set()
     for insn in insns:
         disp = _word_global_load_disp_8616(insn)
         if disp is not None:
@@ -11648,10 +12546,15 @@ _COD_OFFSET_GLOBAL_REF_RE_8616 = re.compile(
 )
 
 
-def _cod_indexed_global_refs_8616(cod_metadata: CodMetadataBoundary8616) -> tuple[tuple[str, int, int], ...]:
+@cython.ccall
+def _cod_indexed_global_refs_8616(cod_metadata: CodMetadataBoundary8616) -> tuple[tuple[str, cython.longlong, cython.longlong], ...]:
     """Return indexed global references from a dynamic boundary: optional third-party COD metadata."""
+    name: object
+    relative_disp: object
+    width: object
+    ref: object
 
-    refs: list[tuple[str, int, int]] = []
+    refs: list[tuple[str, cython.longlong, cython.longlong]] = []
     for ref in tuple(getattr(cod_metadata, "global_refs", ()) or ()):
         if not bool(getattr(ref, "indexed", False)):
             continue
@@ -11664,25 +12567,33 @@ def _cod_indexed_global_refs_8616(cod_metadata: CodMetadataBoundary8616) -> tupl
     return tuple(refs)
 
 
+@cython.ccall
 def _collect_direct_global_symbol_refs_8616(
     cod_metadata: CodMetadataBoundary8616,
-    summaries: list[InsnSummary8616],
+    summaries: object,
 ) -> tuple[DirectGlobalSymbolRef8616, ...]:
+    _width: object
+    actual_width: object
+    cod_width: object
+    insn: object
+    name: object
+    offset: object
+    rel_disp: object
     cod_refs = _cod_direct_global_refs_8616(cod_metadata)
-    binary_refs: list[tuple[int, int]] = []
+    binary_refs: list[tuple[cython.longlong, cython.longlong]] = []
     for insn in summaries:
         if insn.op0_kind == "direct_mem" and isinstance(insn.op0_value, int):
             binary_refs.append((int(insn.op0_value) & 0xFFFF, int(insn.op0_size or 2)))
         if insn.op1_kind == "direct_mem" and isinstance(insn.op1_value, int):
             binary_refs.append((int(insn.op1_value) & 0xFFFF, int(insn.op1_size or 2)))
-    if not cod_refs or len(cod_refs) != len(binary_refs):
+    if not cod_refs or operator.ne(len(cod_refs), len(binary_refs)):
         _seg_global_debug_log_8616(
             "[seg-global-direct] refused cod_refs=%d binary_refs=%d",
             len(cod_refs),
             len(binary_refs),
         )
         return ()
-    max_by_name: dict[str, int] = {}
+    max_by_name: dict[str, cython.longlong] = {}
     for name, rel_disp, _width in cod_refs:
         max_by_name[name] = max(max_by_name.get(name, 0), int(rel_disp))
     refs: list[DirectGlobalSymbolRef8616] = []
@@ -11702,7 +12613,7 @@ def _collect_direct_global_symbol_refs_8616(
 
 def _direct_memory_read_operands_8616(
     insn: CapstoneInstructionView8616,
-) -> tuple[CapstoneOperandView8616, ...]:
+) -> object:
     """Return memory operands proven read by decoded access metadata.
 
     Synthetic and legacy Capstone wrappers may omit access metadata. Preserve
@@ -11711,8 +12622,8 @@ def _direct_memory_read_operands_8616(
 
     proven = tuple(
         operand
-        for operand in insn.operands
-        if operand.kind == X86_OP_MEM
+        for operand in iter(insn.operands)
+        if operator.eq(operand.kind, X86_OP_MEM)
         and operand.memory is not None
         and isinstance(operand.access, int)
         and bool(operand.access & CS_AC_READ)
@@ -11720,18 +12631,18 @@ def _direct_memory_read_operands_8616(
     if proven:
         return proven
     if (
-        insn.instruction_id == X86_INS_MOV
+        operator.eq(insn.instruction_id, X86_INS_MOV)
         and len(insn.operands) == 2
-        and all(operand.access is None for operand in insn.operands)
+        and all(operand.access is None for operand in iter(insn.operands))
     ):
         source = insn.operands[1]
-        if source.kind == X86_OP_MEM and source.memory is not None:
+        if operator.eq(source.kind, X86_OP_MEM) and source.memory is not None:
             return (source,)
     return ()
 
 
 def _recover_direct_segmented_global_load_evidence_uncached_8616(
-    project: object | None,
+    project: object,
     function: object,
 ) -> tuple[DirectSegmentedGlobalLoadEvidence8616, ...]:
     """Recover direct DS/ES loads from one decoded binary surface.
@@ -11740,10 +12651,15 @@ def _recover_direct_segmented_global_load_evidence_uncached_8616(
     preserves the architectural segment, offset, width, and instruction
     identity that are explicit in the binary.
     """
+    memory: object
+    space: object
+    block: object
+    source: object
+    wrapper: object
 
     if project is None or function is None:
         return ()
-    recovered: dict[tuple[int, int, MemSpace, int], DirectSegmentedGlobalLoadEvidence8616] = {}
+    recovered: dict[tuple[cython.longlong, cython.longlong, MemSpace, cython.longlong], DirectSegmentedGlobalLoadEvidence8616] = {}
     for block in _direct_global_update_blocks_8616(project, function):
         for wrapper in _capstone_insns_for_direct_global_update_8616(project, block):
             insn = _capstone_instruction_view_8616(wrapper)
@@ -11772,13 +12688,14 @@ def _recover_direct_segmented_global_load_evidence_uncached_8616(
                     ins_addr=int(insn.address),
                 )
                 recovered[(evidence.offset, evidence.width, evidence.space, evidence.ins_addr)] = evidence
-    return tuple(sorted(recovered.values(), key=lambda item: (item.ins_addr, item.offset, item.width, item.space.value)))
+    return tuple(sorted(tuple(recovered.values()), key=lambda item: (item.ins_addr, item.offset, item.width, item.space.value)))
 
 
+@cython.ccall
 def recover_direct_segmented_global_load_evidence_8616(
     project: ProjectBoundary8616,
-    function: object | None,
-) -> tuple[DirectSegmentedGlobalLoadEvidence8616, ...]:
+    function: object,
+) -> object:
     """Recover or reuse exact direct DS/ES load evidence."""
 
     if function is None:
@@ -11794,17 +12711,20 @@ def recover_direct_segmented_global_load_evidence_8616(
     )
 
 
+@cython.ccall
 def _direct_store_evidence_from_insn_8616(
     insn: CapstoneInstructionView8616,
-    segment_sources: Mapping[tuple[int, str], IRAddress],
+    segment_sources: Mapping[tuple[cython.longlong, str], IRAddress],
 ) -> DirectSegmentedGlobalStoreEvidence8616 | None:
     """Classify one decoded insn as a direct DS/ES store, or refuse."""
+    memory: object
+    space: object
 
-    if insn.instruction_id != X86_INS_MOV or len(insn.operands) != 2:
+    if operator.ne(insn.instruction_id, X86_INS_MOV) or len(insn.operands) != 2:
         return None
     destination = insn.operands[0]
     memory = destination.memory
-    if destination.kind != X86_OP_MEM or memory is None:
+    if operator.ne(destination.kind, X86_OP_MEM) or memory is None:
         return None
     if memory.base not in {None, 0, X86_REG_INVALID} or memory.index not in {
         None,
@@ -11828,7 +12748,7 @@ def _direct_store_evidence_from_insn_8616(
         ins_addr=int(insn.address),
         immediate_value=(
             int(source.immediate)
-            if source.kind == X86_OP_IMM and isinstance(source.immediate, int)
+            if operator.eq(source.kind, X86_OP_IMM) and isinstance(source.immediate, int)
             else None
         ),
         segment_source=segment_sources.get((int(insn.address), space.value)),
@@ -11836,7 +12756,7 @@ def _direct_store_evidence_from_insn_8616(
 
 
 def _recover_direct_segmented_global_store_evidence_uncached_8616(
-    project: object | None,
+    project: object,
     function: object,
 ) -> tuple[DirectSegmentedGlobalStoreEvidence8616, ...]:
     """Recover direct DS/ES stores from one decoded binary surface.
@@ -11847,22 +12767,26 @@ def _recover_direct_segmented_global_store_evidence_uncached_8616(
     memory source is retained as a typed address; other values remain the
     responsibility of the structured-C assignment.
     """
+    evidence: object
+    block: object
+    insn: object
+    item: object
 
     if project is None or function is None:
         return ()
-    recovered: dict[tuple[int, int, MemSpace, int], DirectSegmentedGlobalStoreEvidence8616] = {}
+    recovered: dict[tuple[cython.longlong, cython.longlong, MemSpace, cython.longlong], DirectSegmentedGlobalStoreEvidence8616] = {}
     for block in _direct_global_update_blocks_8616(project, function):
         instructions = tuple(
             _capstone_instruction_view_8616(wrapper)
-            for wrapper in _capstone_insns_for_direct_global_update_8616(project, block)
+            for wrapper in builtins.iter(_capstone_insns_for_direct_global_update_8616(project, block))
         )
         segment_sources = {
             (item.ins_addr, item.segment_name): item.source
-            for item in recover_segment_register_memory_sources_8616(
+            for item in builtins.iter(recover_segment_register_memory_sources_8616(
                 instructions,
                 register_name=_direct_stack_move_register_name_8616,
                 segment_name=_direct_stack_move_segment_name_8616,
-            )
+            ))
         }
         for insn in instructions:
             evidence = _direct_store_evidence_from_insn_8616(insn, segment_sources)
@@ -11885,16 +12809,17 @@ def _recover_direct_segmented_global_store_evidence_uncached_8616(
             recovered[(evidence.offset, evidence.width, evidence.space, evidence.ins_addr)] = evidence
     return tuple(
         sorted(
-            recovered.values(),
+            tuple(recovered.values()),
             key=lambda item: (item.ins_addr, item.offset, item.width, item.space.value),
         )
     )
 
 
+@cython.ccall
 def recover_direct_segmented_global_store_evidence_8616(
     project: ProjectBoundary8616,
-    function: object | None,
-) -> tuple[DirectSegmentedGlobalStoreEvidence8616, ...]:
+    function: object,
+) -> object:
     """Recover or reuse exact direct DS/ES store evidence."""
 
     if function is None:
@@ -11912,26 +12837,33 @@ def recover_direct_segmented_global_store_evidence_8616(
 
 def _normalize_direct_segmented_global_load_evidence_8616(
     evidence: Iterable[DirectSegmentedGlobalLoadEvidence8616],
-) -> dict[tuple[int, int], DirectSegmentedGlobalLoadEvidence8616]:
+) -> object:
     """Keep exact direct-load identities only when their segment is unambiguous."""
+    candidates: object
+    identity: object
+    item: object
 
-    grouped: dict[tuple[int, int], list[DirectSegmentedGlobalLoadEvidence8616]] = {}
+    grouped: dict[tuple[cython.longlong, cython.longlong], list[DirectSegmentedGlobalLoadEvidence8616]] = {}
     for item in evidence:
         grouped.setdefault((item.offset & 0xFFFF, item.width), []).append(item)
-    normalized: dict[tuple[int, int], DirectSegmentedGlobalLoadEvidence8616] = {}
+    normalized: dict[tuple[cython.longlong, cython.longlong], DirectSegmentedGlobalLoadEvidence8616] = {}
     for identity, candidates in grouped.items():
-        spaces = {item.space for item in candidates}
+        spaces = {item.space for item in iter(candidates)}
         if len(spaces) == 1:
             normalized[identity] = min(candidates, key=lambda item: item.ins_addr)
     return normalized
 
 
+@cython.ccall
 def _unambiguous_anonymous_direct_scalar_evidence_8616(
-    normalized: dict[tuple[int, int], DirectSegmentedGlobalLoadEvidence8616],
-    offset: int,
-    width: int,
+    normalized: object,
+    offset: cython.longlong,
+    width: cython.longlong,
 ) -> DirectSegmentedGlobalLoadEvidence8616 | None:
     """Return one non-overlapping exact DS scalar identity or refuse it."""
+    candidate: object
+    other_start: object
+    other_width: object
 
     key = (offset & 0xFFFF, width)
     candidate = normalized.get(key)
@@ -11950,6 +12882,7 @@ def _unambiguous_anonymous_direct_scalar_evidence_8616(
     return candidate
 
 
+@cython.ccall
 def _make_direct_segmented_global_load_expr_8616(
     project: ProjectBoundary8616,
     codegen: CodegenBoundary8616,
@@ -11967,18 +12900,21 @@ def _make_direct_segmented_global_load_expr_8616(
     )
 
 
+@cython.ccall
 def _make_direct_segmented_global_access_expr_8616(
     project: ProjectBoundary8616,
     codegen: CodegenBoundary8616,
     *,
-    offset: int,
-    width: int,
+    offset: cython.longlong,
+    width: cython.longlong,
     space: MemSpace,
     source_insn: int | None = None,
     segment_value: int | None = None,
     segment_source: IRAddress | None = None,
 ) -> CFunctionCall | None:
     """Materialize one anonymous direct access as an explicit segment helper."""
+    helper: object
+    source_expr: object
 
     helper = {
         1: SegmentLoadHelper8616.SEG_U8,
@@ -12032,12 +12968,15 @@ def _make_direct_segmented_global_access_expr_8616(
     )
 
 
+@cython.ccall
 def _synthetic_symbol_refs_for_entry_8616(
     raw_offset: object,
     raw_entry: object,
-    direct_operands: set[tuple[int, int]],
-) -> list[DirectGlobalSymbolRef8616]:
+    direct_operands: object,
+) -> object:
     """Emit symbol refs for one synthetic global against binary operands."""
+    operand_offset: object
+    operand_width: object
 
     if not isinstance(raw_offset, int) or not isinstance(raw_entry, tuple) or len(raw_entry) < 2:
         return []
@@ -12063,13 +13002,20 @@ def _synthetic_symbol_refs_for_entry_8616(
     return refs
 
 
+@cython.ccall
 def _collect_synthetic_direct_global_symbol_refs_8616(
     synthetic_globals: SyntheticGlobalsBoundary8616,
-    summaries: list[InsnSummary8616],
+    summaries: object,
 ) -> tuple[DirectGlobalSymbolRef8616, ...]:
+    insn: object
+    kind: object
+    raw_entry: object
+    raw_offset: object
+    size: object
+    value: object
     if not isinstance(synthetic_globals, dict):
         return ()
-    direct_operands: set[tuple[int, int]] = set()
+    direct_operands: set[tuple[cython.longlong, cython.longlong]] = set()
     for insn in summaries:
         for kind, value, size in (
             (insn.op0_kind, insn.op0_value, insn.op0_size),
@@ -12088,9 +13034,12 @@ def _collect_synthetic_direct_global_symbol_refs_8616(
     return tuple(refs)
 
 
+@cython.ccall
 def _collect_direct_global_update_evidence_8616(
-    summaries: list[InsnSummary8616],
+    summaries: object,
 ) -> tuple[DirectGlobalUpdateEvidence8616, ...]:
+    delta: object
+    insn: object
     updates: list[DirectGlobalUpdateEvidence8616] = []
     for insn in summaries:
         if insn.op0_kind != "direct_mem" or not isinstance(insn.op0_value, int):
@@ -12113,6 +13062,7 @@ def _collect_direct_global_update_evidence_8616(
     return tuple(dict.fromkeys(updates))
 
 
+@cython.ccall
 def _boolean_store_cmp_gate_8616(cmp_insn: InsnSummary8616) -> int | None:
     """Return the proven source width for the leading ``cmp``."""
 
@@ -12126,6 +13076,7 @@ def _boolean_store_cmp_gate_8616(cmp_insn: InsnSummary8616) -> int | None:
     return source_width if source_width == 2 else None
 
 
+@cython.ccall
 def _boolean_store_carrier_reg_8616(
     sbb_insn: InsnSummary8616,
     neg_insn: InsnSummary8616,
@@ -12134,16 +13085,17 @@ def _boolean_store_carrier_reg_8616(
 
     if str(sbb_insn.mnemonic or "").lower() != "sbb":
         return None
-    if sbb_insn.op0_kind != "reg" or sbb_insn.op1_kind != "reg" or sbb_insn.op0_value != sbb_insn.op1_value:
+    if sbb_insn.op0_kind != "reg" or sbb_insn.op1_kind != "reg" or operator.ne(sbb_insn.op0_value, sbb_insn.op1_value):
         return None
     carrier_reg = sbb_insn.op0_value
     if str(neg_insn.mnemonic or "").lower() != "neg":
         return None
-    if neg_insn.op0_kind != "reg" or neg_insn.op0_value != carrier_reg:
+    if neg_insn.op0_kind != "reg" or operator.ne(neg_insn.op0_value, carrier_reg):
         return None
     return carrier_reg
 
 
+@cython.ccall
 def _boolean_store_window_evidence_8616(
     cmp_insn: InsnSummary8616,
     sbb_insn: InsnSummary8616,
@@ -12151,6 +13103,8 @@ def _boolean_store_window_evidence_8616(
     mov_insn: InsnSummary8616,
 ) -> DirectGlobalBooleanStoreEvidence8616 | None:
     """Match one ``cmp/sbb r,r/neg r/mov`` boolean-store window."""
+    carrier_reg: object
+    source_width: object
 
     source_width = _boolean_store_cmp_gate_8616(cmp_insn)
     if source_width is None:
@@ -12165,10 +13119,10 @@ def _boolean_store_window_evidence_8616(
         return None
     if mov_insn.op0_kind != "direct_mem" or not isinstance(mov_insn.op0_value, int):
         return None
-    if mov_insn.op1_kind != "reg" or mov_insn.op1_value != carrier_reg:
+    if mov_insn.op1_kind != "reg" or operator.ne(mov_insn.op1_value, carrier_reg):
         return None
     dest_width = int(mov_insn.op0_size or 0)
-    if dest_width != source_width:
+    if operator.ne(dest_width, source_width):
         return None
     return DirectGlobalBooleanStoreEvidence8616(
         source_offset=cmp_op0 & 0xFFFF,
@@ -12183,9 +13137,11 @@ def _boolean_store_window_evidence_8616(
     )
 
 
+@cython.ccall
 def _collect_direct_global_boolean_store_evidence_8616(
-    summaries: list[InsnSummary8616],
+    summaries: object,
 ) -> tuple[DirectGlobalBooleanStoreEvidence8616, ...]:
+    evidence_item: object
     evidence: list[DirectGlobalBooleanStoreEvidence8616] = []
     for index in range(max(0, len(summaries) - 3)):
         cmp_insn = summaries[index]
@@ -12201,7 +13157,7 @@ def _collect_direct_global_boolean_store_evidence_8616(
 
 
 def _build_direct_global_instruction_views_8616(
-    project: object | None,
+    project: object,
     function: object,
 ) -> tuple[CapstoneInstructionView8616, ...]:
     """Snapshot ordered binary instructions for direct-global consumers."""
@@ -12209,14 +13165,15 @@ def _build_direct_global_instruction_views_8616(
         return ()
     return tuple(
         _capstone_instruction_view_8616(insn)
-        for insn in _direct_global_update_ordered_insns_8616(project, function)
+        for insn in builtins.iter(_direct_global_update_ordered_insns_8616(project, function))
     )
 
 
+@cython.ccall
 def _direct_global_instruction_views_8616(
     project: ProjectBoundary8616,
     function: object,
-) -> tuple[CapstoneInstructionView8616, ...]:
+) -> object:
     """Return request-cached immutable instruction views for one function."""
     return cast(
         tuple[CapstoneInstructionView8616, ...],
@@ -12230,29 +13187,34 @@ def _direct_global_instruction_views_8616(
 
 
 def _collect_direct_global_call_return_store_evidence_8616(
-    project: ProjectBoundary8616,
+    project: object,
     function: object,
-    owned_summaries: dict[int, CallsiteSummary8616] | None = None,
+    owned_summaries: object = None,
 ) -> tuple[DirectGlobalCallReturnStoreEvidence8616, ...]:
     """Collect direct global call-return stores, recovering only missing summaries."""
+    call: object
+    high: object
+    item: object
+    low: object
+    summary: object
 
     if project is None or function is None:
         return ()
     views = _direct_global_instruction_views_8616(project, function)
-    insns = tuple(view.raw for view in views)
+    insns = tuple(view.raw for view in iter(views))
     evidence: list[DirectGlobalCallReturnStoreEvidence8616] = []
     callsite_addrs = tuple(
         view.address
-        for view in views
+        for view in iter(views)
         if view.instruction_id in {X86_INS_CALL, X86_INS_LCALL} and view.address is not None
     )
     summaries = {
         callsite_addr: owned_summaries[callsite_addr]
-        for callsite_addr in callsite_addrs
+        for callsite_addr in iter(callsite_addrs)
         if owned_summaries is not None and callsite_addr in owned_summaries
     }
     missing_callsite_addrs = tuple(
-        callsite_addr for callsite_addr in callsite_addrs if callsite_addr not in summaries
+        callsite_addr for callsite_addr in iter(callsite_addrs) if callsite_addr not in summaries
     )
     if missing_callsite_addrs:
         summaries.update(
@@ -12260,7 +13222,7 @@ def _collect_direct_global_call_return_store_evidence_8616(
         )
     call_index_by_addr = {
         view.address: index
-        for index, view in enumerate(views)
+        for index, view in builtins.iter(enumerate(views))
         if view.address is not None and view.instruction_id in {X86_INS_CALL, X86_INS_LCALL}
     }
     for summary in summaries.values():
@@ -12281,7 +13243,7 @@ def _collect_direct_global_call_return_store_evidence_8616(
             continue
         low_offset, low_width, low_ins_addr = low
         high_offset, high_width, high_ins_addr = high
-        if low_width != 2 or high_width != 2 or ((low_offset + 2) & 0xFFFF) != (high_offset & 0xFFFF):
+        if low_width != 2 or high_width != 2 or operator.ne(((low_offset + 2) & 0xFFFF), (high_offset & 0xFFFF)):
             continue
         call = _direct_zero_arg_call_before_8616(project, insns, index)
         if call is None:
@@ -12303,13 +13265,20 @@ def _collect_direct_global_call_return_store_evidence_8616(
     return tuple(dict.fromkeys(evidence))
 
 
+@cython.ccall
 def _direct_global_call_return_evidence_from_summary_8616(
     project: ProjectBoundary8616,
-    views: tuple[CapstoneInstructionView8616, ...],
-    call_index_by_addr: dict[int, int],
+    views: object,
+    call_index_by_addr: object,
     summary: CallsiteSummary8616,
 ) -> DirectGlobalCallReturnStoreEvidence8616 | None:
     """Join a callsite return-store summary to its exact Capstone store identities."""
+    call_index: object
+    cleanup_amount: object
+    destination: object
+    high_store: object
+    low_store: object
+    target: object
 
     destination = summary.return_store_destination
     width = summary.return_store_width
@@ -12328,7 +13297,7 @@ def _direct_global_call_return_evidence_from_summary_8616(
         return None
     cleanup_amount = _post_call_stack_cleanup_amount_8616(views[store_index])
     if cleanup_amount is not None:
-        if summary.stack_cleanup != cleanup_amount:
+        if operator.ne(summary.stack_cleanup, cleanup_amount):
             return None
         store_index += 1
     if store_index >= len(views):
@@ -12341,7 +13310,7 @@ def _direct_global_call_return_evidence_from_summary_8616(
         source_register,
         low_width,
     )
-    if low_store is None or low_store[:2] != (offset, low_width):
+    if low_store is None or operator.ne(low_store[:2], (offset, low_width)):
         return None
     high_store_ins_addr = None
     if width == 4:
@@ -12353,7 +13322,7 @@ def _direct_global_call_return_evidence_from_summary_8616(
             X86_REG_DX,
             2,
         )
-        if high_store is None or high_store[:2] != (((offset + 2) & 0xFFFF), 2):
+        if high_store is None or operator.ne(high_store[:2], (((offset + 2) & 0xFFFF), 2)):
             return None
         high_store_ins_addr = high_store[2]
     source_call_name, _callee, resolved_target = _callee_name_for_direct_stack_move_8616(project, target)
@@ -12368,16 +13337,17 @@ def _direct_global_call_return_evidence_from_summary_8616(
     )
 
 
+@cython.ccall
 def _post_call_stack_cleanup_amount_8616(view: CapstoneInstructionView8616) -> int | None:
     """Return an exact positive ``ADD SP, imm`` cleanup amount."""
 
-    if view.instruction_id != X86_INS_ADD or len(view.operands) != 2:
+    if operator.ne(view.instruction_id, X86_INS_ADD) or len(view.operands) != 2:
         return None
     destination, amount = view.operands
     if (
-        destination.kind != X86_OP_REG
-        or destination.register != X86_REG_SP
-        or amount.kind != X86_OP_IMM
+        operator.ne(destination.kind, X86_OP_REG)
+        or operator.ne(destination.register, X86_REG_SP)
+        or operator.ne(amount.kind, X86_OP_IMM)
         or amount.immediate is None
         or amount.immediate <= 0
     ):
@@ -12385,20 +13355,22 @@ def _post_call_stack_cleanup_amount_8616(view: CapstoneInstructionView8616) -> i
     return amount.immediate
 
 
+@cython.ccall
 def _direct_global_call_return_store_operand_8616(
     insn: object,
-    source_reg: int,
-    expected_width: int,
-) -> tuple[int, int, int] | None:
+    source_reg: cython.longlong,
+    expected_width: cython.longlong,
+) -> object:
     """Return one typed direct DS store from exact Capstone metadata."""
+    memory: object
 
     view = insn if isinstance(insn, CapstoneInstructionView8616) else _capstone_instruction_view_8616(insn)
-    if view.instruction_id != X86_INS_MOV or len(view.operands) != 2:
+    if operator.ne(view.instruction_id, X86_INS_MOV) or len(view.operands) != 2:
         return None
     destination, source = view.operands
-    if source.kind != X86_OP_REG or source.register != source_reg:
+    if operator.ne(source.kind, X86_OP_REG) or operator.ne(source.register, source_reg):
         return None
-    if destination.kind != X86_OP_MEM or destination.size != expected_width:
+    if operator.ne(destination.kind, X86_OP_MEM) or operator.ne(destination.size, expected_width):
         return None
     memory = destination.memory
     if memory is None:
@@ -12417,7 +13389,10 @@ def _merge_direct_global_symbol_refs_8616(
     *groups: tuple[DirectGlobalSymbolRef8616, ...],
 ) -> tuple[DirectGlobalSymbolRef8616, ...]:
     """Merge exact refs, preferring paired named scalars over generated names."""
-    refs: dict[tuple[int, int], DirectGlobalSymbolRef8616] = {}
+    current: object
+    group: object
+    ref: object
+    refs: dict[tuple[cython.longlong, cython.longlong], DirectGlobalSymbolRef8616] = {}
     for group in groups:
         for ref in group:
             width = int(ref.width or 0)
@@ -12429,17 +13404,20 @@ def _merge_direct_global_symbol_refs_8616(
         current = refs.get(key)
         generated_name = f"g_{ref.offset & 0xFFFF:04X}"
         if current is None or (
-            _sanitize_identifier_8616(current.name).casefold() == generated_name.casefold()
-            and _sanitize_identifier_8616(ref.name).casefold() != generated_name.casefold()
+            operator.eq(_sanitize_identifier_8616(current.name).casefold(), generated_name.casefold())
+            and operator.ne(_sanitize_identifier_8616(ref.name).casefold(), generated_name.casefold())
         ):
             refs[key] = ref
-    return tuple(refs[key] for key in sorted(refs))
+    return tuple(refs[key] for key in builtins.iter(sorted(refs)))
 
 
+@cython.ccall
 def _derive_direct_global_dword_scalar_refs_8616(
-    refs: tuple[DirectGlobalSymbolRef8616, ...],
+    refs: object,
 ) -> tuple[DirectGlobalSymbolRef8616, ...]:
-    by_name_rel: dict[tuple[str, int, int], DirectGlobalSymbolRef8616] = {}
+    high_ref: object
+    ref: object
+    by_name_rel: dict[tuple[str, cython.longlong, cython.longlong], DirectGlobalSymbolRef8616] = {}
     for ref in refs:
         by_name_rel[(_sanitize_identifier_8616(ref.name), int(ref.relative_disp), int(ref.width))] = ref
 
@@ -12451,7 +13429,7 @@ def _derive_direct_global_dword_scalar_refs_8616(
         high_ref = by_name_rel.get((name, 2, 2))
         if high_ref is None:
             continue
-        if ((ref.offset + 2) & 0xFFFF) != (high_ref.offset & 0xFFFF):
+        if operator.ne(((ref.offset + 2) & 0xFFFF), (high_ref.offset & 0xFFFF)):
             continue
         derived.append(
             DirectGlobalSymbolRef8616(
@@ -12465,7 +13443,8 @@ def _derive_direct_global_dword_scalar_refs_8616(
     return tuple(dict.fromkeys(derived))
 
 
-def _insn_immediate_operand_8616(insn: InsnSummary8616) -> tuple[int, int | None] | None:
+@cython.ccall
+def _insn_immediate_operand_8616(insn: InsnSummary8616) -> object:
     """Return ``(immediate, size)`` when an insn carries an immediate operand."""
 
     if insn.op0_kind == "imm" and isinstance(insn.op0_value, int):
@@ -12477,20 +13456,24 @@ def _insn_immediate_operand_8616(insn: InsnSummary8616) -> tuple[int, int | None
 
 def _collect_global_address_symbol_refs_8616(
     cod_metadata: CodMetadataBoundary8616,
-    summaries: list[InsnSummary8616],
+    summaries: object,
 ) -> tuple[DirectGlobalSymbolRef8616, ...]:
+    immediate_operand: object
+    insn: object
+    ref: object
+    width: object
     cod_refs = _cod_offset_global_ref_records_8616(cod_metadata)
     if not cod_refs:
         return ()
     delta = _cod_to_summary_address_delta_8616(cod_metadata, summaries)
-    by_addr: dict[int, list[CodOffsetGlobalRef8616]] = {}
-    max_by_name: dict[str, int] = {}
+    by_addr: dict[cython.longlong, list[CodOffsetGlobalRef8616]] = {}
+    max_by_name: dict[str, cython.longlong] = {}
     for ref in cod_refs:
         by_addr.setdefault((ref.ins_addr + delta) & 0xFFFF, []).append(ref)
         max_by_name[ref.name] = max(max_by_name.get(ref.name, 0), int(ref.relative_disp))
 
     refs: list[DirectGlobalSymbolRef8616] = []
-    debug_imm_addrs: list[int] = []
+    debug_imm_addrs: list[cython.longlong] = []
     for insn in summaries:
         if not isinstance(insn.address, int):
             continue
@@ -12516,8 +13499,8 @@ def _collect_global_address_symbol_refs_8616(
                 )
     _seg_global_debug_log_8616(
         "[seg-global-offset] cod_refs=%s imm_addrs=%s materialized_refs=%d",
-        tuple(hex((ref.ins_addr + delta) & 0xFFFF) for ref in cod_refs),
-        tuple(hex(addr) for addr in debug_imm_addrs[:12]),
+        tuple(hex((ref.ins_addr + delta) & 0xFFFF) for ref in iter(cod_refs)),
+        tuple(hex(addr) for addr in iter(debug_imm_addrs[:12])),
         len(refs),
     )
     return tuple(refs)
@@ -12525,14 +13508,17 @@ def _collect_global_address_symbol_refs_8616(
 
 def _collect_global_address_literal_evidence_8616(
     cod_metadata: CodMetadataBoundary8616,
-    summaries: list[InsnSummary8616],
+    summaries: object,
 ) -> tuple[GlobalAddressLiteralEvidence8616, ...]:
     """Associate optional literals only with their exact rebased instruction."""
-    cod_refs = tuple(ref for ref in _cod_offset_global_ref_records_8616(cod_metadata) if ref.literal is not None)
+    immediate_operand: object
+    insn: object
+    ref: object
+    cod_refs = tuple(ref for ref in builtins.iter(_cod_offset_global_ref_records_8616(cod_metadata)) if ref.literal is not None)
     if not cod_refs:
         return ()
     delta = _cod_to_summary_address_delta_8616(cod_metadata, summaries)
-    by_addr: dict[int, list[CodOffsetGlobalRef8616]] = {}
+    by_addr: dict[cython.longlong, list[CodOffsetGlobalRef8616]] = {}
     for ref in cod_refs:
         by_addr.setdefault((ref.ins_addr + delta) & 0xFFFF, []).append(ref)
 
@@ -12554,10 +13540,15 @@ def _collect_global_address_literal_evidence_8616(
     return tuple(dict.fromkeys(evidence))
 
 
-def _cod_direct_global_refs_8616(cod_metadata: CodMetadataBoundary8616) -> tuple[tuple[str, int, int], ...]:
+@cython.ccall
+def _cod_direct_global_refs_8616(cod_metadata: CodMetadataBoundary8616) -> tuple[tuple[str, cython.longlong, cython.longlong], ...]:
     """Return direct global references from a dynamic boundary: optional third-party COD metadata."""
+    name: object
+    relative_disp: object
+    width: object
+    ref: object
 
-    refs: list[tuple[str, int, int]] = []
+    refs: list[tuple[str, cython.longlong, cython.longlong]] = []
     for ref in tuple(getattr(cod_metadata, "global_refs", ()) or ()):
         if bool(getattr(ref, "indexed", False)):
             continue
@@ -12571,17 +13562,18 @@ def _cod_direct_global_refs_8616(cod_metadata: CodMetadataBoundary8616) -> tuple
 
 
 def _lookup_cod_address_refs_8616(
-    by_addr: dict[int, list[CodOffsetGlobalRef8616]],
+    by_addr: object,
     insn: InsnSummary8616,
     *,
-    slop: int = 3,
-) -> list[CodOffsetGlobalRef8616]:
+    slop: cython.longlong = 3,
+) -> object:
+    exact: object
     if not isinstance(insn.address, int):
         return []
     normalized = insn.address & 0xFFFF
     exact = by_addr.get(normalized)
     if exact:
-        exact = [ref for ref in exact if _summary_matches_cod_offset_opcode_8616(insn, ref.opcode)]
+        exact = [ref for ref in iter(exact) if _summary_matches_cod_offset_opcode_8616(insn, ref.opcode)]
     if exact:
         return exact
     nearby: list[CodOffsetGlobalRef8616] = []
@@ -12590,13 +13582,14 @@ def _lookup_cod_address_refs_8616(
             continue
         nearby.extend(
             ref
-            for ref in by_addr.get((normalized + delta) & 0xFFFF, ())
+            for ref in builtins.iter(by_addr.get((normalized + delta) & 0xFFFF, ()))
             if _summary_matches_cod_offset_opcode_8616(insn, ref.opcode)
         )
     return nearby if len(nearby) == 1 else []
 
 
-def _summary_matches_cod_offset_opcode_8616(insn: InsnSummary8616, opcode: int | None) -> bool:
+@cython.ccall
+def _summary_matches_cod_offset_opcode_8616(insn: InsnSummary8616, opcode: object) -> cython.bint:
     if opcode is None:
         return True
     mnemonic = insn.mnemonic.lower()
@@ -12607,12 +13600,19 @@ def _summary_matches_cod_offset_opcode_8616(insn: InsnSummary8616, opcode: int |
     return True
 
 
-def _cod_offset_global_refs_8616(cod_metadata: CodMetadataBoundary8616) -> tuple[tuple[int, str, int], ...]:
-    return tuple((ref.ins_addr, ref.name, ref.relative_disp) for ref in _cod_offset_global_ref_records_8616(cod_metadata))
+def _cod_offset_global_refs_8616(cod_metadata: CodMetadataBoundary8616) -> tuple[tuple[cython.longlong, str, cython.longlong], ...]:
+    return tuple((ref.ins_addr, ref.name, ref.relative_disp) for ref in builtins.iter(_cod_offset_global_ref_records_8616(cod_metadata)))
 
 
+@cython.ccall
 def _cod_offset_global_ref_records_8616(cod_metadata: CodMetadataBoundary8616) -> tuple[CodOffsetGlobalRef8616, ...]:
     """Return offset global refs from a dynamic boundary: optional third-party COD metadata."""
+    instruction_bytes: object
+    literal: object
+    name: object
+    offset: object
+    relative_disp: object
+    ref: object
 
     records: list[CodOffsetGlobalRef8616] = []
     for ref in tuple(getattr(cod_metadata, "global_address_refs", ()) or ()):
@@ -12636,10 +13636,14 @@ def _cod_offset_global_ref_records_8616(cod_metadata: CodMetadataBoundary8616) -
     return tuple(records)
 
 
-def _cod_offset_global_literal_refs_8616(cod_metadata: CodMetadataBoundary8616) -> tuple[tuple[int, str], ...]:
+@cython.ccall
+def _cod_offset_global_literal_refs_8616(cod_metadata: CodMetadataBoundary8616) -> tuple[tuple[cython.longlong, str], ...]:
     """Return literal global refs from a dynamic boundary: optional third-party COD metadata."""
+    literal: object
+    offset: object
+    ref: object
 
-    refs: list[tuple[int, str]] = []
+    refs: list[tuple[cython.longlong, str]] = []
     for ref in tuple(getattr(cod_metadata, "global_address_refs", ()) or ()):
         offset = getattr(ref, "offset", None)
         literal = getattr(ref, "string_literal", None)
@@ -12649,25 +13653,28 @@ def _cod_offset_global_literal_refs_8616(cod_metadata: CodMetadataBoundary8616) 
     return tuple(refs)
 
 
-def _cod_instruction_offsets_8616(cod_metadata: CodMetadataBoundary8616) -> tuple[int, ...]:
+@cython.ccall
+def _cod_instruction_offsets_8616(cod_metadata: CodMetadataBoundary8616) -> tuple[cython.longlong, ...]:
     """Return instruction offsets from a dynamic boundary: optional third-party COD metadata."""
+    offset: object
 
-    offsets: list[int] = []
+    offsets: list[cython.longlong] = []
     for offset in tuple(getattr(cod_metadata, "instruction_offsets", ()) or ()):
         if isinstance(offset, int):
             offsets.append(offset)
     return tuple(offsets)
 
 
-def _cod_to_summary_address_delta_8616(cod_metadata: CodMetadataBoundary8616, summaries: list[InsnSummary8616]) -> int:
+def _cod_to_summary_address_delta_8616(cod_metadata: CodMetadataBoundary8616, summaries: object) -> cython.longlong:
     cod_offsets = _cod_instruction_offsets_8616(cod_metadata)
-    summary_addrs = tuple(insn.address for insn in summaries if isinstance(insn.address, int))
+    summary_addrs = tuple(insn.address for insn in iter(summaries) if isinstance(insn.address, int))
     if not cod_offsets or not summary_addrs:
         return 0
     return (summary_addrs[0] - cod_offsets[0]) & 0xFFFF
 
 
-def _offset_symbol_candidate_widths_8616(operand_size: int | None) -> tuple[int, ...]:
+@cython.ccall
+def _offset_symbol_candidate_widths_8616(operand_size: int | None) -> tuple[cython.longlong, ...]:
     # OFFSET operands prove the global base address, not the element width.  Seed
     # the primitive widths used by segmented pointer lowering; the actual access
     # width is still selected by the binary scale or helper width.
@@ -12678,7 +13685,8 @@ def _offset_symbol_candidate_widths_8616(operand_size: int | None) -> tuple[int,
     return (1, 2)
 
 
-def _parse_cod_global_disp_8616(text: str | None) -> int:
+@cython.ccall
+def _parse_cod_global_disp_8616(text: object) -> cython.longlong:
     if not text:
         return 0
     sign = -1 if text[0] == "-" else 1
@@ -12692,12 +13700,17 @@ def _parse_cod_global_disp_8616(text: str | None) -> int:
     return sign * value
 
 
+@cython.ccall
 def _match_indexed_offset_expr_8616(
     node: object,
-    width: int,
+    width: cython.longlong,
     *,
-    copies: dict[CopyKey8616, object] | None = None,
-) -> tuple[int, object] | None:
+    copies: object = None,
+) -> object:
+    base: object
+    scaled: object
+    maybe_base: object
+    maybe_index: object
     if not isinstance(node, CBinaryOp) or node.op != "Add":
         return None
     for maybe_base, maybe_index in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
@@ -12710,12 +13723,16 @@ def _match_indexed_offset_expr_8616(
     return None
 
 
+@cython.ccall
 def _match_indexed_offset_expr_for_evidence_8616(
     node: object,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
+    evidence_by_base: object,
     *,
-    copies: dict[CopyKey8616, object] | None = None,
-) -> tuple[int, int, object] | None:
+    copies: object = None,
+) -> object:
+    matched: object
+    _base_offset: object
+    width: object
     for _base_offset, width in sorted(evidence_by_base):
         matched = _match_indexed_offset_expr_8616(node, width, copies=copies)
         if matched is not None:
@@ -12725,12 +13742,17 @@ def _match_indexed_offset_expr_for_evidence_8616(
     return None
 
 
+@cython.ccall
 def _match_indexed_pointer_expr_8616(
     node: object,
-    width: int,
+    width: cython.longlong,
     *,
-    copies: dict[CopyKey8616, object] | None = None,
-) -> tuple[int, object] | None:
+    copies: object = None,
+) -> object:
+    base: object
+    scaled: object
+    maybe_base: object
+    maybe_index: object
     node = _unwrap_codegen_expr_8616(node)
     if not isinstance(node, CBinaryOp) or node.op != "Add":
         return None
@@ -12744,11 +13766,16 @@ def _match_indexed_pointer_expr_8616(
     return None
 
 
+@cython.ccall
 def _match_indexed_pointer_expr_with_stride_8616(
     node: object,
     *,
-    copies: dict[CopyKey8616, object] | None = None,
-) -> tuple[int, int, object] | None:
+    copies: object = None,
+) -> object:
+    base: object
+    scaled: object
+    maybe_base: object
+    maybe_index: object
     node = _unwrap_codegen_expr_8616(node)
     if not isinstance(node, CBinaryOp) or node.op != "Add":
         return None
@@ -12763,11 +13790,16 @@ def _match_indexed_pointer_expr_with_stride_8616(
     return None
 
 
+@cython.ccall
 def _match_indexed_offset_expr_with_stride_8616(
     node: object,
     *,
-    copies: dict[CopyKey8616, object] | None = None,
-) -> tuple[int, int, object] | None:
+    copies: object = None,
+) -> object:
+    base: object
+    scaled: object
+    maybe_base: object
+    maybe_index: object
     if not isinstance(node, CBinaryOp) or node.op != "Add":
         return None
     for maybe_base, maybe_index in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
@@ -12781,13 +13813,18 @@ def _match_indexed_offset_expr_with_stride_8616(
     return None
 
 
+@cython.ccall
 def _match_segmented_indexed_offset_expr_8616(
     node: object,
-    width: int,
+    width: cython.longlong,
     *,
-    copies: dict[CopyKey8616, object] | None = None,
-) -> tuple[int, object] | None:
+    copies: object = None,
+) -> object:
     """Match a proven segment-relative ``base + index * width`` offset."""
+    base: object
+    scaled: object
+    maybe_base: object
+    maybe_index: object
     node = _unwrap_codegen_expr_8616(node)
     if not isinstance(node, CBinaryOp) or node.op != "Add":
         return None
@@ -12803,15 +13840,18 @@ def _match_segmented_indexed_offset_expr_8616(
     return None
 
 
+@cython.ccall
 def _match_byte_store_lvalue_8616(
     node: object,
     *,
     project: ProjectBoundary8616 | None = None,
     codegen: CodegenBoundary8616 | None = None,
-    copies: dict[CopyKey8616, object] | None = None,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616] | None = None,
+    copies: object = None,
+    evidence_by_base: object = None,
     runtime_context: RuntimeSegmentAccessContext8616 | None = None,
-) -> tuple[int, object] | None:
+) -> object:
+    matched: object
+    offset_expr: object
     node = _unwrap_codegen_expr_8616(node)
     memory_helper = memory_pointer_helper_8616(node)
     if memory_helper is MemoryPointerHelper8616.MEM_U8:
@@ -12856,12 +13896,17 @@ def _match_byte_store_lvalue_8616(
     return _match_indexed_pointer_expr_8616(node.operand, 2, copies=copies)
 
 
+@cython.ccall
 def _match_indexed_byte_address_add_8616(
     node: CBinaryOp,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-    copies: dict[CopyKey8616, object] | None,
-) -> tuple[int, object] | None:
+    evidence_by_base: object,
+    copies: object,
+) -> object:
     """Fold a ``address + disp`` pair into the indexed byte identity."""
+    disp: object
+    matched: object
+    maybe_address: object
+    maybe_disp: object
 
     for maybe_address, maybe_disp in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
         disp = _constant_int_8616(maybe_disp)
@@ -12878,33 +13923,41 @@ def _match_indexed_byte_address_add_8616(
     return None
 
 
+@cython.ccall
 def _indexed_byte_base_from_evidence_8616(
-    base_addr: int,
-    indexed_name: str,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
+    base_addr: cython.longlong,
+    indexed_name: object,
+    evidence_by_base: object,
 ) -> int | None:
     """Resolve the byte base for a named indexed identity, or refuse."""
+    candidate_base: object
+    item: object
+    width: object
 
-    for (candidate_base, width), item in sorted(evidence_by_base.items()):
+    for (candidate_base, width), item in sorted(tuple(evidence_by_base.items())):
         if width != 2 or item.relative_disp != 0:
             continue
-        if candidate_base != (item.base_offset & 0xFFFF):
+        if operator.ne(candidate_base, (item.base_offset & 0xFFFF)):
             continue
-        if _sanitize_identifier_8616(item.name) != indexed_name:
+        if operator.ne(_sanitize_identifier_8616(item.name), indexed_name):
             continue
-        if (item.base_offset & 0xFFFF) != (base_addr & 0xFFFF):
+        if operator.ne((item.base_offset & 0xFFFF), (base_addr & 0xFFFF)):
             continue
         return item.base_offset & 0xFFFF
     return None
 
 
+@cython.ccall
 def _match_indexed_global_byte_address_8616(
     node: object,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
+    evidence_by_base: object,
     *,
-    copies: dict[CopyKey8616, object] | None = None,
-) -> tuple[int, object] | None:
+    copies: object = None,
+) -> object:
     """Match a byte address formed from an already-typed indexed global."""
+    exact_byte: object
+    indexed_name: object
+    proven_base: object
 
     node = _unwrap_codegen_expr_8616(node)
     if isinstance(node, CBinaryOp) and node.op == "Add":
@@ -12932,7 +13985,7 @@ def _match_indexed_global_byte_address_8616(
         isinstance(base_size, int)
         and base_size == 2
         and exact_byte is not None
-        and _sanitize_identifier_8616(exact_byte.name) == indexed_name
+        and operator.eq(_sanitize_identifier_8616(exact_byte.name), indexed_name)
     ):
         return base_addr & 0xFFFF, _resolve_copy_8616(node.index, copies)
     proven_base = _indexed_byte_base_from_evidence_8616(
@@ -12943,6 +13996,7 @@ def _match_indexed_global_byte_address_8616(
     return proven_base, _resolve_copy_8616(node.index, copies)
 
 
+@cython.ccall
 def _memory_reference_addr_8616(node: object) -> int | None:
     node = _unwrap_codegen_expr_8616(node)
     if isinstance(node, CUnaryOp) and node.op in {"Reference", "AddressOf"}:
@@ -12957,26 +14011,31 @@ def _memory_reference_addr_8616(node: object) -> int | None:
     return addr if isinstance(addr, int) else None
 
 
+@cython.ccall
 def _match_scaled_index_expr_8616(
     node: object,
-    width: int,
+    width: cython.longlong,
     *,
-    copies: dict[CopyKey8616, object] | None = None,
+    copies: object = None,
 ) -> object | None:
     node = _resolve_copy_8616(node, copies)
     if width == 2 and isinstance(node, CBinaryOp) and node.op == "Shl" and _constant_int_8616(node.rhs) == 1:
         return _resolve_copy_8616(node.lhs, copies)
     if isinstance(node, CBinaryOp) and node.op == "Mul":
-        if _constant_int_8616(node.lhs) == width:
+        if operator.eq(_constant_int_8616(node.lhs), width):
             return _resolve_copy_8616(node.rhs, copies)
-        if _constant_int_8616(node.rhs) == width:
+        if operator.eq(_constant_int_8616(node.rhs), width):
             return _resolve_copy_8616(node.lhs, copies)
     return None
 
 
+@cython.ccall
 def _match_scaled_index_expr_with_stride_8616(
-    node: object, *, copies: dict[CopyKey8616, object] | None = None
-) -> tuple[int, object] | None:
+    node: object, *, copies: object = None
+) -> object:
+    lhs_const: object
+    rhs_const: object
+    shift: object
     node = _resolve_copy_8616(node, copies)
     if isinstance(node, CBinaryOp) and node.op == "Shl":
         shift = _constant_int_8616(node.rhs)
@@ -12992,14 +14051,17 @@ def _match_scaled_index_expr_with_stride_8616(
     return None
 
 
+@cython.ccall
 def _make_indexed_global_byte_field_expr_from_reference_8616(
     codegen: object,
     address_expr: object,
-    byte_offset: int,
+    byte_offset: cython.longlong,
     index_expr: object,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
+    evidence_by_base: object,
 ) -> object | None:
     """Use a typed indexed-global address as proof for a byte field load."""
+    byte_evidence: object
+    indexed: object
 
     indexed = _typed_indexed_global_address_operand_8616(address_expr)
     if indexed is None:
@@ -13021,7 +14083,7 @@ def _make_indexed_global_byte_field_expr_from_reference_8616(
     if field_disp >= storage_size:
         return None
     byte_evidence = evidence_by_base.get((int(byte_offset) & 0xFFFF, 1))
-    if byte_evidence is None or _sanitize_identifier_8616(byte_evidence.name) != _sanitize_identifier_8616(storage_name):
+    if byte_evidence is None or operator.ne(_sanitize_identifier_8616(byte_evidence.name), _sanitize_identifier_8616(storage_name)):
         return None
     element_item = IndexedSegmentedGlobalEvidence8616(
         base_offset=base_addr & 0xFFFF,
@@ -13039,8 +14101,11 @@ def _make_indexed_global_byte_field_expr_from_reference_8616(
     )
 
 
+@cython.ccall
 def _typed_indexed_global_address_operand_8616(address_expr: object) -> CIndexedVariable | None:
     """Extract the indexed global operand from a typed address expression."""
+    indexed: object
+    maybe_address: object
 
     node = address_expr
     node = _unwrap_codegen_expr_8616(node)
@@ -13056,16 +14121,19 @@ def _typed_indexed_global_address_operand_8616(address_expr: object) -> CIndexed
     return node if isinstance(node, CIndexedVariable) else None
 
 
+@cython.ccall
 def _stride2_byte_element_expr_8616(
     codegen: object,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-    element_base: int,
+    evidence_by_base: object,
+    element_base: cython.longlong,
     word_item: IndexedSegmentedGlobalEvidence8616,
     item: IndexedSegmentedGlobalEvidence8616,
     index_expr: object,
-    field_disp: int,
+    field_disp: cython.longlong,
 ) -> object | None:
     """Project one byte field out of its resolved stride-2 word item."""
+    field_expr: object
+    indexed: object
 
     element_item = IndexedSegmentedGlobalEvidence8616(
         base_offset=element_base,
@@ -13101,9 +14169,10 @@ def _stride2_byte_element_expr_8616(
     return None
 
 
+@cython.ccall
 def _indexed_helper_load_expr_8616(
     codegen: object,
-    load_width: int,
+    load_width: cython.longlong,
     address_expr: object,
 ) -> object:
     """Build the untyped pointer-helper load expression for one address."""
@@ -13119,22 +14188,24 @@ def _indexed_helper_load_expr_8616(
     )
 
 
+@cython.ccall
 def _stride2_word_item_8616(
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-    element_base: int,
+    evidence_by_base: object,
+    element_base: cython.longlong,
     item: IndexedSegmentedGlobalEvidence8616,
-    low_item: IndexedSegmentedGlobalEvidence8616 | None,
-    high_item: IndexedSegmentedGlobalEvidence8616 | None,
-    field_disp: int,
+    low_item: object,
+    high_item: object,
+    field_disp: cython.longlong,
     address_expr: object,
-) -> tuple[IndexedSegmentedGlobalEvidence8616 | None, bool]:
+) -> tuple[IndexedSegmentedGlobalEvidence8616 | None, cython.bint]:
     """Resolve the enclosing word item for a stride-2 byte load.
 
     Returns ``(word_item, needs_fallback)`` — the fallback flag tells the
     caller to emit the untyped pointer-helper load instead.
     """
+    adjacent_word: object
 
-    if low_item is not None and high_item is not None and low_item.name == high_item.name:
+    if low_item is not None and high_item is not None and operator.eq(low_item.name, high_item.name):
         return (
             IndexedSegmentedGlobalEvidence8616(
                 base_offset=element_base,
@@ -13148,9 +14219,9 @@ def _stride2_word_item_8616(
     if low_item is None:
         return None, True
     adjacent_word = evidence_by_base.get(((element_base + 2) & 0xFFFF, 2))
-    if adjacent_word is not None and _sanitize_identifier_8616(
+    if adjacent_word is not None and operator.eq(_sanitize_identifier_8616(
         adjacent_word.name
-    ) == _sanitize_identifier_8616(low_item.name):
+    ), _sanitize_identifier_8616(low_item.name)):
         return (
             IndexedSegmentedGlobalEvidence8616(
                 base_offset=element_base,
@@ -13173,8 +14244,7 @@ def _stride2_word_item_8616(
             isinstance(indexed_storage, SimMemoryVariable)
             and isinstance(indexed_size, int)
             and indexed_size == 2
-            and _sanitize_identifier_8616(low_item.name)
-            == _sanitize_identifier_8616(indexed_storage.name or "")
+            and operator.eq(_sanitize_identifier_8616(low_item.name), _sanitize_identifier_8616(indexed_storage.name or ""))
         ):
             return (
                 IndexedSegmentedGlobalEvidence8616(
@@ -13189,15 +14259,19 @@ def _stride2_word_item_8616(
     return None, True
 
 
+@cython.ccall
 def _make_indexed_global_value_from_stride_evidence_8616(
     codegen: object,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-    base_offset: int,
-    stride: int,
+    evidence_by_base: object,
+    base_offset: cython.longlong,
+    stride: cython.longlong,
     index_expr: object,
-    load_width: int,
+    load_width: cython.longlong,
 ) -> object | None:
     """Build an indexed global value from stride and exact byte evidence."""
+    address_expr: object
+    element_expr: object
+    helper_name: object
 
     if stride <= 0 or load_width <= 0 or load_width > stride:
         return None
@@ -13229,15 +14303,20 @@ def _make_indexed_global_value_from_stride_evidence_8616(
     return cast(object, CFunctionCall(helper_name, None, [address_expr], codegen=codegen))
 
 
+@cython.ccall
 def _stride2_load_element_expr_8616(
     codegen: object,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-    base_offset: int,
+    evidence_by_base: object,
+    base_offset: cython.longlong,
     index_expr: object,
     address_expr: object,
-    load_width: int,
+    load_width: cython.longlong,
 ) -> object | None:
     """Resolve one stride-2 byte element load through exact byte-pair evidence."""
+    high_item: object
+    item: object
+    low_item: object
+    word_item: object
     item = _indexed_evidence_for_base_stride_8616(evidence_by_base, base_offset, 2)
     if item is None:
         return None
@@ -13273,15 +14352,15 @@ def _stride2_load_element_expr_8616(
 
 def _make_direct_global_address_from_evidence_8616(
     codegen: CodegenBoundary8616,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-    offset: int,
+    evidence_by_base: object,
+    offset: cython.longlong,
 ) -> object | None:
     """Build a typed address for an exact global object backed by evidence."""
 
     normalized_offset = offset & 0xFFFF
     candidates = [
         item
-        for (candidate_offset, width), item in evidence_by_base.items()
+        for (candidate_offset, width), item in builtins.iter(evidence_by_base.items())
         if candidate_offset == normalized_offset and width > 0
     ]
     if not candidates:
@@ -13299,14 +14378,17 @@ def _make_direct_global_address_from_evidence_8616(
     return cast(object, CUnaryOp("Reference", indexed, codegen=codegen))
 
 
+@cython.ccall
 def _make_indexed_global_address_from_stride_evidence_8616(
     codegen: CodegenBoundary8616,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-    base_offset: int,
-    stride: int,
+    evidence_by_base: object,
+    base_offset: cython.longlong,
+    stride: cython.longlong,
     index_expr: object,
 ) -> object | None:
     """Build an indexed global address while preserving proven element types."""
+    indexed: object
+    item: object
 
     item = _indexed_evidence_for_base_stride_8616(evidence_by_base, base_offset, stride)
     if item is None:
@@ -13348,22 +14430,23 @@ def _make_indexed_global_address_from_stride_evidence_8616(
 
 
 def _indexed_evidence_for_base_stride_8616(
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-    base_offset: int,
-    stride: int,
+    evidence_by_base: object,
+    base_offset: cython.longlong,
+    stride: cython.longlong,
 ) -> IndexedSegmentedGlobalEvidence8616 | None:
     """Select the strongest indexed-global evidence for an offset/stride pair."""
+    direct: object
 
     normalized_base = base_offset & 0xFFFF
     direct = evidence_by_base.get((normalized_base, stride))
     field_candidates = [
         item
-        for (candidate_base, width), item in evidence_by_base.items()
+        for (candidate_base, width), item in builtins.iter(evidence_by_base.items())
         if candidate_base == normalized_base
         and 0 < width <= stride
         and int(item.relative_disp) > 0
         and int(item.relative_disp) % stride == 0
-        and (direct is None or _sanitize_identifier_8616(item.name) == _sanitize_identifier_8616(direct.name))
+        and (direct is None or operator.eq(_sanitize_identifier_8616(item.name), _sanitize_identifier_8616(direct.name)))
     ]
     if field_candidates:
         field = max(field_candidates, key=lambda item: (int(item.relative_disp), int(item.width or 0)))
@@ -13379,7 +14462,7 @@ def _indexed_evidence_for_base_stride_8616(
         return direct
     candidates = [
         item
-        for (candidate_base, width), item in evidence_by_base.items()
+        for (candidate_base, width), item in builtins.iter(evidence_by_base.items())
         if candidate_base == normalized_base and 0 < width <= stride
     ]
     if not candidates:
@@ -13387,9 +14470,11 @@ def _indexed_evidence_for_base_stride_8616(
     return max(candidates, key=lambda item: item.width)
 
 
+@cython.ccall
 def _indexed_evidence_from_direct_symbol_refs_8616(
-    refs: tuple[DirectGlobalSymbolRef8616, ...],
+    refs: object,
 ) -> tuple[IndexedSegmentedGlobalEvidence8616, ...]:
+    ref: object
     evidence: list[IndexedSegmentedGlobalEvidence8616] = []
     for ref in refs:
         width = int(ref.width or 2)
@@ -13406,12 +14491,14 @@ def _indexed_evidence_from_direct_symbol_refs_8616(
     return tuple(evidence)
 
 
+@cython.ccall
 def _merge_indexed_global_evidence_8616(
-    primary: tuple[IndexedSegmentedGlobalEvidence8616, ...],
-    fallback: tuple[IndexedSegmentedGlobalEvidence8616, ...],
+    primary: object,
+    fallback: object,
 ) -> tuple[IndexedSegmentedGlobalEvidence8616, ...]:
-    merged: dict[tuple[int, int, str], IndexedSegmentedGlobalEvidence8616] = {}
-    for item in (*fallback, *primary):
+    item: object
+    merged: dict[tuple[cython.longlong, cython.longlong, str], IndexedSegmentedGlobalEvidence8616] = {}
+    for item in tuple(fallback) + tuple(primary):
         key = (
             item.base_offset & 0xFFFF,
             int(item.width or 0),
@@ -13421,9 +14508,10 @@ def _merge_indexed_global_evidence_8616(
     return tuple(merged.values())
 
 
+@cython.ccall
 def _normalize_sidecar_free_indexed_evidence_name_8616(
     item: IndexedSegmentedGlobalEvidence8616,
-) -> str:
+) -> object:
     """Return canonical sidecar-free evidence name for an indexed global object."""
 
     sanitized = _sanitize_identifier_8616(item.name)
@@ -13432,13 +14520,15 @@ def _normalize_sidecar_free_indexed_evidence_name_8616(
     return ""
 
 
-def _signed_16bit_delta_8616(lhs: int, rhs: int) -> int:
+@cython.ccall
+def _signed_16bit_delta_8616(lhs: cython.longlong, rhs: cython.longlong) -> cython.longlong:
     """Return the signed 16-bit ``lhs - rhs`` displacement."""
 
     return ((lhs - rhs + 0x8000) & 0xFFFF) - 0x8000
 
 
-def _copy_affinity_fact_fields_8616(fact: IndexedSegmentedGlobalStoreEvidence8616) -> bool:
+@cython.ccall
+def _copy_affinity_fact_fields_8616(fact: IndexedSegmentedGlobalStoreEvidence8616) -> cython.bint:
     """Return whether a store fact carries an aligned affine copy shape."""
 
     return bool(
@@ -13446,20 +14536,25 @@ def _copy_affinity_fact_fields_8616(fact: IndexedSegmentedGlobalStoreEvidence861
         and fact.source_width is not None
         and fact.source_index_stack_offset is not None
         and fact.source_index_shift is not None
-        and fact.source_width == int(fact.width or 0)
-        and fact.index_stack_offset == fact.source_index_stack_offset
-        and fact.index_shift == fact.source_index_shift
+        and operator.eq(fact.source_width, int(fact.width or 0))
+        and operator.eq(fact.index_stack_offset, fact.source_index_stack_offset)
+        and operator.eq(fact.index_shift, fact.source_index_shift)
         and isinstance(fact.source_base_offset, int)
     )
 
 
+@cython.ccall
 def _indexed_copy_affinity_source_to_dest_8616(
-    store_evidence: tuple[IndexedSegmentedGlobalStoreEvidence8616, ...],
-    evidence_by_key: Mapping[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-) -> dict[tuple[int, int], tuple[int, int]]:
+    store_evidence: object,
+    evidence_by_key: Mapping[tuple[cython.longlong, cython.longlong], IndexedSegmentedGlobalEvidence8616],
+) -> object:
     """Map sidecar-free source keys to their adjacent destination keys."""
+    destination: object
+    existing_destination_key: object
+    source: object
+    fact: object
 
-    source_to_dest: dict[tuple[int, int], tuple[int, int]] = {}
+    source_to_dest: dict[tuple[cython.longlong, cython.longlong], tuple[cython.longlong, cython.longlong]] = {}
     for fact in store_evidence:
         width = int(fact.width or 0)
         if width <= 0:
@@ -13475,24 +14570,28 @@ def _indexed_copy_affinity_source_to_dest_8616(
         destination_name = _normalize_sidecar_free_indexed_evidence_name_8616(destination)
         if not source_name or not destination_name:
             continue
-        if _signed_16bit_delta_8616(fact.base_offset, source_base) != width:
+        if operator.ne(_signed_16bit_delta_8616(fact.base_offset, source_base), width):
             continue
         source_key = (source_base & 0xFFFF, width)
         destination_key = (fact.base_offset & 0xFFFF, width)
         existing_destination_key = source_to_dest.get(source_key)
-        if existing_destination_key is not None and existing_destination_key != destination_key:
+        if existing_destination_key is not None and operator.ne(existing_destination_key, destination_key):
             del source_to_dest[source_key]
             continue
         source_to_dest[source_key] = destination_key
     return source_to_dest
 
 
+@cython.ccall
 def _rename_sources_to_canonical_destinations_8616(
-    evidence: tuple[IndexedSegmentedGlobalEvidence8616, ...],
-    evidence_by_key: Mapping[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
-    source_to_dest: Mapping[tuple[int, int], tuple[int, int]],
+    evidence: object,
+    evidence_by_key: Mapping[tuple[cython.longlong, cython.longlong], IndexedSegmentedGlobalEvidence8616],
+    source_to_dest: Mapping[tuple[cython.longlong, cython.longlong], tuple[cython.longlong, cython.longlong]],
 ) -> tuple[IndexedSegmentedGlobalEvidence8616, ...]:
     """Rename sidecar-free source items onto their canonical destination."""
+    canonical: object
+    canonical_key: object
+    item: object
 
     updated: list[IndexedSegmentedGlobalEvidence8616] = []
     for item in evidence:
@@ -13514,7 +14613,7 @@ def _rename_sources_to_canonical_destinations_8616(
                 width=item.width,
             )
         )
-    dedup: dict[tuple[int, int, str], IndexedSegmentedGlobalEvidence8616] = {}
+    dedup: dict[tuple[cython.longlong, cython.longlong, str], IndexedSegmentedGlobalEvidence8616] = {}
     for item in updated:
         key = (
             item.base_offset & 0xFFFF,
@@ -13526,18 +14625,18 @@ def _rename_sources_to_canonical_destinations_8616(
 
 
 def _unify_sidecar_free_indexed_evidence_8616(
-    primary: tuple[IndexedSegmentedGlobalEvidence8616, ...],
-    fallback: tuple[IndexedSegmentedGlobalEvidence8616, ...],
-    store_evidence: tuple[IndexedSegmentedGlobalStoreEvidence8616, ...],
-) -> tuple[IndexedSegmentedGlobalEvidence8616, ...]:
+    primary: object,
+    fallback: object,
+    store_evidence: object,
+) -> object:
     """Unify sidecar-free indexed identities from exact indexed copy/store affinity."""
 
-    def _signed_16bit_delta_8616(lhs: int, rhs: int) -> int:
+    def _signed_16bit_delta_8616(lhs: cython.longlong, rhs: cython.longlong) -> cython.longlong:
         return ((lhs - rhs + 0x8000) & 0xFFFF) - 0x8000
 
     evidence = _merge_indexed_global_evidence_8616(primary, fallback)
     evidence_by_key = {
-        (item.base_offset & 0xFFFF, int(item.width or 0)): item for item in evidence
+        (item.base_offset & 0xFFFF, int(item.width or 0)): item for item in iter(evidence)
     }
     source_to_dest = _indexed_copy_affinity_source_to_dest_8616(
         store_evidence, evidence_by_key
@@ -13549,23 +14648,29 @@ def _unify_sidecar_free_indexed_evidence_8616(
     )
 
 
+@cython.ccall
 def _augment_indexed_evidence_with_project_layouts_8616(
-    evidence: tuple[IndexedSegmentedGlobalEvidence8616, ...],
+    evidence: object,
     layout_evidence: GlobalObjectLayoutEvidence8616,
 ) -> tuple[IndexedSegmentedGlobalEvidence8616, ...]:
     """Add field views only for exact project-proven aggregate identities."""
+    layout: object
+    canonical: object
+    canonical_base: object
+    field_offset: object
+    item: object
 
     augmented: list[IndexedSegmentedGlobalEvidence8616] = []
     matched_layouts: dict[
-        int, tuple[IndexedSegmentedGlobalEvidence8616, GlobalObjectLayout8616]
+        cython.longlong, tuple[IndexedSegmentedGlobalEvidence8616, GlobalObjectLayout8616]
     ] = {}
-    layouts_by_base = {layout.address.offset & 0xFFFF: layout for layout in layout_evidence.layouts}
+    layouts_by_base = {layout.address.offset & 0xFFFF: layout for layout in iter(layout_evidence.layouts)}
     for item in evidence:
         width = int(item.width or 0)
         canonical_base = (int(item.base_offset) - int(item.relative_disp)) & 0xFFFF
         layout = layouts_by_base.get(canonical_base)
         matches_layout = layout is not None and (
-            width == layout.element_width
+            operator.eq(width, layout.element_width)
             or (width == 1 and int(item.relative_disp) in layout.field_offsets)
         )
         if layout is not None and matches_layout:
@@ -13589,18 +14694,21 @@ def _augment_indexed_evidence_with_project_layouts_8616(
     return tuple(dict.fromkeys(augmented))
 
 
-def _memory_pointer_helper_name_for_width_8616(width: int) -> str | None:
+@cython.ccall
+def _memory_pointer_helper_name_for_width_8616(width: cython.longlong) -> object:
+    helper: object
     for helper in MemoryPointerHelper8616:
-        if helper.width == width:
+        if operator.eq(helper.width, width):
             helper_name = helper.helper_name
             return helper_name if isinstance(helper_name, str) else None
     return None
 
 
+@cython.ccall
 def _word_source_for_byte_pair_store_8616(
     high_rhs: object,
     low_rhs: object,
-    copies: dict[CopyKey8616, object],
+    copies: object,
 ) -> object | None:
     if not isinstance(high_rhs, CBinaryOp) or high_rhs.op != "Shr" or _constant_int_8616(high_rhs.rhs) != 8:
         return None
@@ -13615,13 +14723,16 @@ def _word_source_for_byte_pair_store_8616(
     return None
 
 
-def _word_store_source_is_safe_8616(node: object) -> bool:
+@cython.ccall
+def _word_store_source_is_safe_8616(node: object) -> cython.bint:
     if isinstance(node, (CVariable, CFunctionCall, CIndexedVariable)):
         return True
     return isinstance(node, CBinaryOp) and node.op in {"Add", "Sub", "Mul", "Mull", "Mod", "Shl", "Shr", "And", "Or"}
 
 
-def _low_byte_source_is_artifact_8616(node: object, copies: dict[CopyKey8616, object]) -> bool:
+@cython.ccall
+def _low_byte_source_is_artifact_8616(node: object, copies: object) -> cython.bint:
+    key: object
     if not isinstance(node, CVariable):
         return False
     key = _cvariable_key_8616(node)
@@ -13635,24 +14746,29 @@ def _low_byte_source_is_artifact_8616(node: object, copies: dict[CopyKey8616, ob
     return bool(isinstance(variable, SimRegisterVariable))
 
 
-def _high_byte_source_key_8616(high_rhs: object) -> str | None:
+@cython.ccall
+def _high_byte_source_key_8616(high_rhs: object) -> object:
     if not isinstance(high_rhs, CBinaryOp) or high_rhs.op != "Shr":
         return None
     return _cvariable_key_8616(high_rhs.lhs)
 
 
-def _debug_resolved_source_8616(high_rhs: object, copies: dict[CopyKey8616, object]) -> str:
+@cython.ccall
+def _debug_resolved_source_8616(high_rhs: object, copies: object) -> object:
     if not isinstance(high_rhs, CBinaryOp) or high_rhs.op != "Shr":
         return "not_shr"
     return _debug_source_8616(_resolve_copy_8616(high_rhs.lhs, copies))
 
 
-def _debug_source_8616(node: object) -> str:
+@cython.ccall
+def _debug_source_8616(node: object) -> object:
+    key: object
     key = _cvariable_key_8616(node)
     return f"{type(node).__name__}:{key}" if key is not None else type(node).__name__
 
 
-def _same_word_store_source_8616(lhs: object, rhs: object) -> bool:
+def _same_word_store_source_8616(lhs: object, rhs: object) -> cython.bint:
+    lhs_key: object
     if _same_c_expression_8616(lhs, rhs):
         return True
     if isinstance(lhs, CFunctionCall) and isinstance(rhs, CFunctionCall):
@@ -13660,15 +14776,15 @@ def _same_word_store_source_8616(lhs: object, rhs: object) -> bool:
         lhs_name = lhs.callee_target
         # Dynamic boundary: angr codegen call nodes expose callee metadata by runtime surface.
         rhs_name = rhs.callee_target
-        if lhs_name == rhs_name and lhs_name in {helper.helper_name for helper in MemoryPointerHelper8616}:
+        if lhs_name == rhs_name and lhs_name in {helper.helper_name for helper in iter(MemoryPointerHelper8616)}:
             lhs_args = tuple(lhs.args or ())
             rhs_args = tuple(rhs.args or ())
-            return len(lhs_args) == len(rhs_args) and all(
-                _same_c_expression_8616(lhs_arg, rhs_arg) for lhs_arg, rhs_arg in zip(lhs_args, rhs_args, strict=True)
+            return operator.eq(len(lhs_args), len(rhs_args)) and all(
+                _same_c_expression_8616(lhs_arg, rhs_arg) for lhs_arg, rhs_arg in builtins.iter(zip(lhs_args, rhs_args, strict=True))
             )
     lhs_key = _cvariable_key_8616(lhs)
     rhs_key = _cvariable_key_8616(rhs)
-    if lhs_key is not None and lhs_key == rhs_key:
+    if lhs_key is not None and operator.eq(lhs_key, rhs_key):
         return True
     if not isinstance(lhs, CVariable) or not isinstance(rhs, CVariable):
         return False
@@ -13677,9 +14793,9 @@ def _same_word_store_source_8616(lhs: object, rhs: object) -> bool:
     if not isinstance(lvar, SimStackVariable) or not isinstance(rvar, SimStackVariable):
         return False
     return bool(
-        lvar.offset == rvar.offset
-        and lvar.base == rvar.base
-        and lvar.region == rvar.region
+        operator.eq(lvar.offset, rvar.offset)
+        and operator.eq(lvar.base, rvar.base)
+        and operator.eq(lvar.region, rvar.region)
     )
 
 
@@ -13687,27 +14803,29 @@ def _make_indexed_global_value_expr_8616(
     codegen: CodegenBoundary8616,
     evidence: IndexedSegmentedGlobalEvidence8616,
     index_expr: object,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
+    evidence_by_base: object,
     *,
-    allow_unregistered_for_address: bool = False,
+    allow_unregistered_for_address: cython.bint = False,
 ) -> object | None:
     """Build an indexed value without treating subword views as aggregate proof.
 
     Adjacent byte accesses can be projections of one scalar word. Only an
     explicit aggregate type fact may introduce a struct element type.
     """
+    declaration_ctype: object
+    registered_type: object
 
     element_type: SimType | None = None
-    declaration_ctype: NamedAggregateDeclarationCType8616 | None = None
+    declaration_ctype = None
     if int(evidence.width or 0) == 2:
         canonical_base = (int(evidence.base_offset) - int(evidence.relative_disp)) & 0xFFFF
         expected_name = _sanitize_identifier_8616(evidence.name)
         byte_field_proven = any(
             int(field_width) == 1
-            and _sanitize_identifier_8616(field_evidence.name) == expected_name
-            and (int(field_evidence.base_offset) - int(field_evidence.relative_disp)) & 0xFFFF == canonical_base
+            and operator.eq(_sanitize_identifier_8616(field_evidence.name), expected_name)
+            and operator.eq((int(field_evidence.base_offset) - int(field_evidence.relative_disp)) & 0xFFFF, canonical_base)
             and int(field_evidence.relative_disp) % 2 in {0, 1}
-            for (_field_base, field_width), field_evidence in evidence_by_base.items()
+            for (_field_base, field_width), field_evidence in builtins.iter(evidence_by_base.items())
         )
         if evidence.aggregate_type_name is not None and byte_field_proven:
             aggregate_type_name = _sanitize_identifier_8616(evidence.aggregate_type_name)
@@ -13747,13 +14865,14 @@ def _make_indexed_global_value_expr_8616(
     )
 
 
+@cython.ccall
 def _make_indexed_global_expr_8616(
     codegen: CodegenBoundary8616,
     evidence: IndexedSegmentedGlobalEvidence8616,
     index_expr: object,
     *,
     element_type: SimType | None = None,
-    declaration_ctype: NamedAggregateDeclarationCType8616 | str | None = None,
+    declaration_ctype: object = None,
 ) -> object | None:
     width = int(evidence.width or 2)
     if width <= 0 or evidence.relative_disp % width != 0:
@@ -13806,14 +14925,16 @@ def _make_indexed_global_expr_8616(
     )
 
 
+@cython.ccall
 def _make_indexed_global_byte_field_expr_8616(
     codegen: object,
     evidence: IndexedSegmentedGlobalEvidence8616,
     index_expr: object,
-    field_disp: int,
-    evidence_by_base: dict[tuple[int, int], IndexedSegmentedGlobalEvidence8616],
+    field_disp: cython.longlong,
+    evidence_by_base: object,
 ) -> CExpression | None:
     """Build a generic struct-field expression from byte subfield evidence."""
+    field_evidence: object
 
     width = int(evidence.width or 0)
     field_offset = int(field_disp)
@@ -13822,7 +14943,7 @@ def _make_indexed_global_byte_field_expr_8616(
     element_physical_base = (int(evidence.base_offset) - (int(evidence.relative_disp) % width)) & 0xFFFF
     field_base = (element_physical_base + field_offset) & 0xFFFF
     field_evidence = evidence_by_base.get((field_base, 1))
-    if field_evidence is None or _sanitize_identifier_8616(field_evidence.name) != _sanitize_identifier_8616(evidence.name):
+    if field_evidence is None or operator.ne(_sanitize_identifier_8616(field_evidence.name), _sanitize_identifier_8616(evidence.name)):
         return None
     base_addr = (int(evidence.base_offset) - int(evidence.relative_disp)) & 0xFFFF
     name = _sanitize_identifier_8616(evidence.name)
@@ -13894,23 +15015,26 @@ def _make_indexed_global_byte_field_expr_8616(
     )
 
 
-def _two_byte_global_struct_field_name_8616(field_offset: int) -> str:
+@cython.ccall
+def _two_byte_global_struct_field_name_8616(field_offset: cython.longlong) -> str:
     """Return the deterministic field name for a proven byte offset."""
 
     return f"field_{int(field_offset)}"
 
 
-def _two_byte_global_struct_ctype_8616(name: str) -> str:
+@cython.ccall
+def _two_byte_global_struct_ctype_8616(name: object) -> str:
     """Return the named C struct definition used for generic two-byte object fields."""
 
     tag = f"{_sanitize_identifier_8616(name)}_entry"
     return f"struct {tag} {{ unsigned char field_0; unsigned char field_1; }}"
 
 
+@cython.ccall
 def _two_byte_global_struct_declaration_ctype_8616(
-    name: str,
+    name: object,
     *,
-    registered: bool,
+    registered: cython.bint,
 ) -> NamedAggregateDeclarationCType8616:
     """Return typed lifecycle metadata for a proven two-byte global aggregate."""
 
@@ -13922,10 +15046,11 @@ def _two_byte_global_struct_declaration_ctype_8616(
     )
 
 
+@cython.ccall
 def _two_byte_global_struct_declaration_ctype_from_type_8616(
     struct_type: SimStruct,
     *,
-    registered: bool,
+    registered: cython.bint,
 ) -> NamedAggregateDeclarationCType8616:
     """Build declaration metadata from the proven struct type identity."""
 
@@ -13941,6 +15066,7 @@ def _two_byte_global_struct_declaration_ctype_from_type_8616(
     )
 
 
+@cython.ccall
 def _two_byte_global_struct_typedef_8616(struct_type: SimStruct) -> str:
     """Serialize the complete typedef proven by one two-byte object type."""
     if not _is_two_byte_global_struct_type_8616(struct_type) or not struct_type.name:
@@ -13954,7 +15080,8 @@ def _two_byte_global_struct_typedef_8616(struct_type: SimStruct) -> str:
     )
 
 
-def _two_byte_global_struct_type_8616(name: str) -> SimStruct:
+@cython.ccall
+def _two_byte_global_struct_type_8616(name: object) -> SimStruct:
     """Return an angr struct whose name is a tag, not a rendered C specifier."""
 
     return SimStruct(
@@ -13969,6 +15096,7 @@ def _two_byte_global_struct_type_8616(name: str) -> SimStruct:
     )
 
 
+@cython.ccall
 def _register_codegen_struct_type_8616(codegen: object, struct_type: SimStruct) -> TypeRef | None:
     """Register a recovered aggregate so angr emits its typedef before local uses.
 
@@ -13977,6 +15105,7 @@ def _register_codegen_struct_type_8616(codegen: object, struct_type: SimStruct) 
     whole-value aggregate must therefore refuse promotion when this boundary is
     unavailable; otherwise generated C contains an undefined type name.
     """
+    cfunc: object
 
     typed_codegen = typing.cast(_CodegenTypeBoundary8616, codegen)
     try:
@@ -14003,14 +15132,15 @@ def _is_two_byte_global_struct_type_8616(candidate: object) -> typing.TypeGuard[
     if not isinstance(candidate, SimStruct):
         return False
     fields = candidate.fields
-    if tuple(fields) != (
+    if operator.ne(tuple(fields), (
         _two_byte_global_struct_field_name_8616(0),
         _two_byte_global_struct_field_name_8616(1),
-    ):
+    )):
         return False
-    return all(isinstance(field_type, SimTypeChar) for field_type in fields.values())
+    return all(isinstance(field_type, SimTypeChar) for field_type in builtins.iter(fields.values()))
 
 
+@cython.ccall
 def _resolve_two_byte_global_struct_type_8616(candidate: object) -> SimStruct | None:
     """Resolve a direct or registered two-byte global aggregate type."""
 
@@ -14018,12 +15148,15 @@ def _resolve_two_byte_global_struct_type_8616(candidate: object) -> SimStruct | 
     return resolved if _is_two_byte_global_struct_type_8616(resolved) else None
 
 
+@cython.ccall
 def _make_direct_global_symbol_or_projection_expr_8616(
     codegen: CodegenBoundary8616,
     ref: DirectGlobalSymbolRef8616,
-    width: int,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
+    width: cython.longlong,
+    direct_by_offset: object,
 ) -> CExpression | None:
+    projected: object
+    scalar_ref: object
     scalar_ref = _dword_scalar_ref_for_subword_ref_8616(ref, direct_by_offset)
     if scalar_ref is not None:
         projected = _make_dword_scalar_subword_projection_expr_8616(
@@ -14037,12 +15170,14 @@ def _make_direct_global_symbol_or_projection_expr_8616(
     return expr if isinstance(expr, CExpression) else None
 
 
+@cython.ccall
 def _make_direct_global_byte_projection_expr_8616(
     codegen: CodegenBoundary8616,
     ref: DirectGlobalSymbolRef8616,
-    addr: int,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
+    addr: cython.longlong,
+    direct_by_offset: object,
 ) -> CExpression | None:
+    expr: object
     ref_width = int(ref.width or 0)
     if ref_width <= 1:
         return None
@@ -14067,28 +15202,32 @@ def _make_direct_global_byte_projection_expr_8616(
     )
 
 
+@cython.ccall
 def _dword_scalar_ref_for_subword_ref_8616(
     ref: DirectGlobalSymbolRef8616,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
+    direct_by_offset: object,
 ) -> DirectGlobalSymbolRef8616 | None:
+    scalar_ref: object
     if int(ref.width or 0) != 2 or int(ref.relative_disp) not in {0, 2}:
         return None
     base_offset = (int(ref.offset) - int(ref.relative_disp)) & 0xFFFF
     scalar_ref = direct_by_offset.get((base_offset, 4))
     if scalar_ref is None:
         return None
-    if _sanitize_identifier_8616(scalar_ref.name) != _sanitize_identifier_8616(ref.name):
+    if operator.ne(_sanitize_identifier_8616(scalar_ref.name), _sanitize_identifier_8616(ref.name)):
         return None
     if int(scalar_ref.relative_disp) != 0 or int(scalar_ref.width or 0) != 4:
         return None
     return scalar_ref
 
 
+@cython.ccall
 def _make_dword_scalar_subword_projection_expr_8616(
     codegen: CodegenBoundary8616,
     scalar_ref: DirectGlobalSymbolRef8616,
-    relative_disp: int,
+    relative_disp: cython.longlong,
 ) -> CExpression | None:
+    scalar: object
     scalar = _make_direct_global_symbol_expr_8616(codegen, scalar_ref, 4)
     if scalar is None:
         return None
@@ -14112,10 +15251,12 @@ def _make_dword_scalar_subword_projection_expr_8616(
 def _make_dword_scalar_indexed_subword_projection_expr_8616(
     codegen: CodegenBoundary8616,
     node: object,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
-    zero_test_evidence: tuple[DwordGlobalZeroTestEvidence8616, ...],
+    direct_by_offset: object,
+    zero_test_evidence: object,
 ) -> CExpression | None:
     """Project a proven word index into its scalar dword storage owner."""
+    ref: object
+    scalar_ref: object
 
     if not isinstance(node, CIndexedVariable):
         return None
@@ -14134,20 +15275,20 @@ def _make_dword_scalar_indexed_subword_projection_expr_8616(
     if index_value not in {0, 1}:
         return None
     ref = direct_by_offset.get(((base_addr + (index_value * width)) & 0xFFFF, width))
-    if ref is None or _sanitize_identifier_8616(ref.name) != _sanitize_identifier_8616(name):
+    if ref is None or operator.ne(_sanitize_identifier_8616(ref.name), _sanitize_identifier_8616(name)):
         return None
     scalar_ref = _dword_scalar_ref_for_subword_ref_8616(ref, direct_by_offset)
     if scalar_ref is None:
         return None
     fallback_instruction_addrs = frozenset(
         instruction_addr
-        for evidence in zero_test_evidence
-        if (evidence.base_offset & 0xFFFF) == (scalar_ref.offset & 0xFFFF)
-        for evidence_offset, instruction_addr in (
+        for evidence in iter(zero_test_evidence)
+        if operator.eq((evidence.base_offset & 0xFFFF), (scalar_ref.offset & 0xFFFF))
+        for evidence_offset, instruction_addr in iter((
             (evidence.low_offset, evidence.low_instruction_addr),
             (evidence.high_offset, evidence.high_instruction_addr),
-        )
-        if (evidence_offset & 0xFFFF) == (ref.offset & 0xFFFF)
+        ))
+        if operator.eq((evidence_offset & 0xFFFF), (ref.offset & 0xFFFF))
         and isinstance(instruction_addr, int)
     )
     instruction_addrs = (
@@ -14167,7 +15308,8 @@ def _make_dword_scalar_indexed_subword_projection_expr_8616(
     return _make_dword_scalar_subword_projection_expr_8616(codegen, scalar_ref, int(ref.relative_disp))
 
 
-def _flatten_or_terms_8616(node: object) -> tuple[object, ...]:
+@cython.ccall
+def _flatten_or_terms_8616(node: object) -> object:
     """Return all terms in a nested C AST OR expression."""
 
     if isinstance(node, CBinaryOp) and node.op == "Or":
@@ -14175,7 +15317,8 @@ def _flatten_or_terms_8616(node: object) -> tuple[object, ...]:
     return (node,)
 
 
-def _is_dword_scalar_low_projection_expr_8616(node: object, scalar: object) -> bool:
+@cython.ccall
+def _is_dword_scalar_low_projection_expr_8616(node: object, scalar: object) -> cython.bint:
     """Check whether an expression is the low word projection of a dword scalar."""
 
     return (
@@ -14186,7 +15329,8 @@ def _is_dword_scalar_low_projection_expr_8616(node: object, scalar: object) -> b
     )
 
 
-def _is_dword_scalar_high_projection_expr_8616(node: object, scalar: object) -> bool:
+@cython.ccall
+def _is_dword_scalar_high_projection_expr_8616(node: object, scalar: object) -> cython.bint:
     """Check whether an expression is the high word projection of a dword scalar."""
 
     return (
@@ -14200,8 +15344,8 @@ def _is_dword_scalar_high_projection_expr_8616(node: object, scalar: object) -> 
 def _materialize_direct_global_zero_test_or_expr_8616(
     codegen: object,
     node: object,
-    direct_by_offset: dict[tuple[int, int], DirectGlobalSymbolRef8616],
-    zero_test_evidence: tuple[DwordGlobalZeroTestEvidence8616, ...],
+    direct_by_offset: object,
+    zero_test_evidence: object,
 ) -> CExpression | None:
     """Replace a proven split dword OR zero-test carrier with the scalar global.
 
@@ -14210,11 +15354,14 @@ def _materialize_direct_global_zero_test_or_expr_8616(
     after its children were lowered. Both representations require the exact
     binary MOV/OR/Jcc evidence.
     """
+    scalar: object
+    scalar_ref: object
+    evidence: object
 
     if not zero_test_evidence or not isinstance(node, CBinaryOp) or node.op != "Or":
         return None
     terms = _flatten_or_terms_8616(node)
-    has_dirty_carrier = any(isinstance(term, CDirtyExpression) for term in terms)
+    has_dirty_carrier = any(isinstance(term, CDirtyExpression) for term in iter(terms))
     debug_zero_test = os.environ.get("INERTIA_DEBUG_DWORD_ZERO_TEST") == "1"
     for evidence in zero_test_evidence:
         scalar_ref = direct_by_offset.get((int(evidence.base_offset) & 0xFFFF, 4))
@@ -14223,8 +15370,8 @@ def _materialize_direct_global_zero_test_or_expr_8616(
         scalar = _make_direct_global_symbol_expr_8616(codegen, scalar_ref, 4)
         if scalar is None:
             continue
-        has_low = any(_is_dword_scalar_low_projection_expr_8616(term, scalar) for term in terms)
-        has_high = any(_is_dword_scalar_high_projection_expr_8616(term, scalar) for term in terms)
+        has_low = any(_is_dword_scalar_low_projection_expr_8616(term, scalar) for term in iter(terms))
+        has_high = any(_is_dword_scalar_high_projection_expr_8616(term, scalar) for term in iter(terms))
         if debug_zero_test and (has_low or has_high):
             log.warning(
                 "[dword-zero-test] base=%#x dirty=%s low=%s high=%s terms=%r",
@@ -14232,7 +15379,7 @@ def _materialize_direct_global_zero_test_or_expr_8616(
                 has_dirty_carrier,
                 has_low,
                 has_high,
-                tuple(_debug_c_repr_8616(term) for term in terms),
+                tuple(_debug_c_repr_8616(term) for term in iter(terms)),
             )
         if (has_low and has_high) or (has_dirty_carrier and (has_low or has_high)):
             return scalar
@@ -14242,7 +15389,7 @@ def _materialize_direct_global_zero_test_or_expr_8616(
 def _make_direct_global_symbol_expr_8616(
     codegen: CodegenBoundary8616,
     ref: DirectGlobalSymbolRef8616,
-    width: int,
+    width: cython.longlong,
 ) -> CExpression | None:
     width = int(width or ref.width or 2)
     if width <= 0:
@@ -14252,7 +15399,7 @@ def _make_direct_global_symbol_expr_8616(
     relative_disp = int(ref.relative_disp)
     region = _codegen_function_addr_8616(codegen)
 
-    def tags_for(offset: int) -> dict[str, object]:
+    def tags_for(offset: cython.longlong) -> dict[str, object]:
         return {
             _NAMED_DIRECT_SCALAR_MATERIALIZED_TAG_8616: SegmentedLoadIdentity8616(
                 space=MemSpace.DS,
@@ -14300,6 +15447,7 @@ def _make_direct_global_symbol_expr_8616(
     )
 
 
+@cython.ccall
 def _written_registers_8616(insn: InsnSummary8616) -> tuple[str, ...]:
     mnemonic = insn.mnemonic.lower()
     if insn.op0_kind != "reg":
@@ -14309,11 +15457,13 @@ def _written_registers_8616(insn: InsnSummary8616) -> tuple[str, ...]:
     return ()
 
 
-def _is_comparison_binary_op_8616(node: object) -> bool:
+@cython.ccall
+def _is_comparison_binary_op_8616(node: object) -> cython.bint:
     return isinstance(node, CBinaryOp) and str(node.op).startswith("Cmp")
 
 
-def _cvariable_register_name_8616(project: ProjectBoundary8616, node: object) -> str | None:
+@cython.ccall
+def _cvariable_register_name_8616(project: ProjectBoundary8616, node: object) -> object:
     if not isinstance(node, CVariable):
         return None
     reg_name = physical_register_name_8616(node)
@@ -14324,10 +15474,11 @@ def _cvariable_register_name_8616(project: ProjectBoundary8616, node: object) ->
     return raw_name.lower() if isinstance(raw_name, str) else None
 
 
+@cython.ccall
 def _make_global_value_expr_8616(
     project: ProjectBoundary8616,
     codegen: CodegenBoundary8616,
-    named: NamedGlobalEvidence8616 | None,
+    named: object,
     evidence: CompareRegisterGlobalCarrierEvidence8616,
 ) -> object:
     width = int(evidence.width or 2)
@@ -14364,27 +15515,34 @@ def _make_global_value_expr_8616(
     )
 
 
-def _make_segment_register_variable_8616(project: ProjectBoundary8616, codegen: CodegenBoundary8616, name: str) -> CVariable:
+@cython.ccall
+def _make_segment_register_variable_8616(project: ProjectBoundary8616, codegen: CodegenBoundary8616, name: object) -> CVariable:
     reg_offset, reg_size = project.arch.registers[name]
     return CVariable(SimRegisterVariable(reg_offset, reg_size, name=name), codegen=codegen)
 
 
+@cython.ccall
 def _codegen_function_addr_8616(codegen: CodegenBoundary8616) -> int | None:
     """Return optional function addr from a dynamic boundary: angr codegen CFunction metadata."""
 
     return getattr(codegen.cfunc, "addr", None)
 
 
+@cython.ccall
 def _active_function_8616(project: ProjectBoundary8616, codegen: CodegenBoundary8616) -> object | None:
     """Use codegen's retained owner; absent metadata cannot prove a byte extent."""
+    resolved: object
     from inertia.ir.vex_import import codegen_function_8616
 
     resolved = codegen_function_8616(project, codegen)
     return resolved[0] if resolved is not None else None
 
 
+@cython.ccall
 def _segment_load_helper_8616(node: object) -> SegmentLoadHelper8616 | None:
     """Return the segment load helper from a dynamic boundary: angr codegen call metadata."""
+    raw_name: object
+    helper: object
 
     raw_name = getattr(node, "callee_target", None)
     if not isinstance(raw_name, str):
@@ -14393,13 +15551,16 @@ def _segment_load_helper_8616(node: object) -> SegmentLoadHelper8616 | None:
         return None
     normalized = raw_name.strip().upper()
     for helper in SegmentLoadHelper8616:
-        if normalized == helper.helper_name:
+        if operator.eq(normalized, helper.helper_name):
             return helper
     return None
 
 
+@cython.ccall
 def _segment_pointer_helper_8616(node: object) -> SegmentPointerHelper8616 | None:
     """Return the segment pointer helper from a dynamic boundary: angr codegen call metadata."""
+    raw_name: object
+    helper: object
 
     raw_name = getattr(node, "callee_target", None)
     if not isinstance(raw_name, str):
@@ -14408,12 +15569,13 @@ def _segment_pointer_helper_8616(node: object) -> SegmentPointerHelper8616 | Non
         return None
     normalized = raw_name.strip().upper()
     for helper in SegmentPointerHelper8616:
-        if normalized == helper.helper_name:
+        if operator.eq(normalized, helper.helper_name):
             return helper
     return None
 
 
-def _is_ds_segment_expr_8616(project: ProjectBoundary8616, node: object) -> bool:
+@cython.ccall
+def _is_ds_segment_expr_8616(project: ProjectBoundary8616, node: object) -> cython.bint:
     if isinstance(node, CVariable):
         variable = node.variable
         if runtime_segment_name_for_variable_8616(variable) == "ds":
@@ -14428,12 +15590,14 @@ def _is_ds_segment_expr_8616(project: ProjectBoundary8616, node: object) -> bool
     return False
 
 
+@cython.ccall
 def _constant_int_8616(node: object) -> int | None:
     node = _unwrap_codegen_expr_8616(node)
     return node.value if isinstance(node, CConstant) and isinstance(node.value, int) else None
 
 
-def _cvariable_key_8616(node: object) -> str | None:
+@cython.ccall
+def _cvariable_key_8616(node: object) -> object:
     if not isinstance(node, CVariable):
         return None
     variable = node.variable
@@ -14449,7 +15613,8 @@ def _cvariable_key_8616(node: object) -> str | None:
     return None
 
 
-def _normalized_cvariable_name_8616(name: str) -> str:
+@cython.ccall
+def _normalized_cvariable_name_8616(name: object) -> object:
     if name.endswith("}"):
         brace_pos = name.find("{")
         if brace_pos >= 0:
@@ -14457,25 +15622,30 @@ def _normalized_cvariable_name_8616(name: str) -> str:
     return name
 
 
+@cython.ccall
 def _copy_keys_8616(node: object) -> tuple[CopyKey8616, ...]:
+    key: object
     key = _cvariable_key_8616(node)
     if key is not None:
         return (key,)
     return tuple(_dirty_expr_copy_keys_8616(node))
 
 
-def _dirty_expr_copy_keys_8616(node: object) -> tuple[tuple[str, int | str], ...]:
+def _dirty_expr_copy_keys_8616(node: object) -> object:
     keys = _dirty_expr_keys_8616(node)
     if not keys:
         return ()
-    precise = tuple(key for key in keys if key[0] in {"varid", "idx", "name", "expr_idx"})
+    precise = tuple(key for key in iter(keys) if key[0] in {"varid", "idx", "name", "expr_idx"})
     if precise:
         return precise
-    return tuple(key for key in keys if key[0] == "oident")
+    return tuple(key for key in iter(keys) if key[0] == "oident")
 
 
-def _resolve_copy_8616(node: object, copies: dict[CopyKey8616, object] | None) -> object:
+@cython.ccall
+def _resolve_copy_8616(node: object, copies: object) -> object:
     """Resolve SSA-like carriers without replacing mutable storage identities."""
+    replacement: object
+    key: object
 
     if isinstance(node, CVariable) and isinstance(node.variable, SimMemoryVariable):
         return node
@@ -14488,7 +15658,9 @@ def _resolve_copy_8616(node: object, copies: dict[CopyKey8616, object] | None) -
     return node
 
 
-def _record_assignment_copy_8616(stmt: object, copies: dict[CopyKey8616, object]) -> None:
+@cython.ccall
+def _record_assignment_copy_8616(stmt: object, copies: object) -> None:
+    key: object
     if not isinstance(stmt, CAssignment):
         return
     keys = _copy_keys_8616(stmt.lhs)
@@ -14502,16 +15674,19 @@ def _record_assignment_copy_8616(stmt: object, copies: dict[CopyKey8616, object]
         copies[key] = stmt.rhs
 
 
-def _rhs_has_obvious_side_effect_8616(node: object) -> bool:
+@cython.ccall
+def _rhs_has_obvious_side_effect_8616(node: object) -> cython.bint:
     """Classify side effects from a dynamic boundary: angr codegen call metadata."""
+    helper_name: object
+    child: object
 
     if isinstance(node, CFunctionCall):
         helper_name = node.callee_target
         if not isinstance(helper_name, str):
             helper_name = getattr(node.callee_func, "name", None)
         normalized = helper_name.strip().upper() if isinstance(helper_name, str) else ""
-        segment_helpers = {helper.helper_name for helper in SegmentLoadHelper8616}
-        memory_helpers = {helper.helper_name for helper in MemoryPointerHelper8616}
+        segment_helpers = {helper.helper_name for helper in iter(SegmentLoadHelper8616)}
+        memory_helpers = {helper.helper_name for helper in iter(MemoryPointerHelper8616)}
         return normalized not in segment_helpers and normalized not in memory_helpers
     for child in _iter_c_nodes_deep_8616(node):
         if child is not node and isinstance(child, CFunctionCall) and _rhs_has_obvious_side_effect_8616(child):
@@ -14519,7 +15694,8 @@ def _rhs_has_obvious_side_effect_8616(node: object) -> bool:
     return False
 
 
-def _type_for_width_8616(codegen: CodegenBoundary8616, width: int) -> SimType:
+@cython.ccall
+def _type_for_width_8616(codegen: CodegenBoundary8616, width: cython.longlong) -> SimType:
     """Return an unsigned scalar type bound to the active codegen architecture."""
     if width == 1:
         type_ = SimTypeChar(False)
@@ -14530,7 +15706,8 @@ def _type_for_width_8616(codegen: CodegenBoundary8616, width: int) -> SimType:
     return type_.with_arch(codegen.project.arch)
 
 
-def _record_global_declaration_8616(codegen: CodegenBoundary8616, width: int, name: str) -> None:
+@cython.ccall
+def _record_global_declaration_8616(codegen: CodegenBoundary8616, width: cython.longlong, name: object) -> None:
     record_global_declaration_spec_8616(
         codegen,
         ctype=ctype_for_global_width_8616(width),
@@ -14539,19 +15716,22 @@ def _record_global_declaration_8616(codegen: CodegenBoundary8616, width: int, na
     )
 
 
-def _sanitize_identifier_8616(name: str) -> str:
+def _sanitize_identifier_8616(name: object) -> object:
     source = name if re.match(r"^_S\d+_[A-Za-z_]\w*$", name) is not None else name.lstrip("_")
-    cleaned = "".join(ch if (ch.isalnum() or ch == "_") else "_" for ch in source)
+    cleaned = "".join(ch if (ch.isalnum() or ch == "_") else "_" for ch in iter(source))
     if not cleaned or cleaned[0].isdigit():
         cleaned = f"g_{cleaned}" if cleaned else "g"
     return cleaned
 
 
+@cython.ccall
 def _cfunc_roots_8616(cfunc: object) -> tuple[object, ...]:
     """Return roots from a dynamic boundary: angr codegen CFunction runtime slots."""
+    root: object
+    attr: object
 
     roots: list[object] = []
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     for attr in ("body", "statements", "stmt"):
         root = getattr(cfunc, attr, None)
         if root is None or id(root) in seen:
@@ -14561,7 +15741,8 @@ def _cfunc_roots_8616(cfunc: object) -> tuple[object, ...]:
     return tuple(roots)
 
 
-def _sync_cfunc_statement_roots_8616(cfunc: CodegenBoundary8616, root: object) -> None:
+@cython.ccall
+def _sync_cfunc_statement_roots_8616(cfunc: object, root: object) -> None:
     if cfunc is None or root is None:
         return
     with contextlib.suppress(Exception):
@@ -14575,7 +15756,8 @@ def _sync_cfunc_statement_roots_8616(cfunc: CodegenBoundary8616, root: object) -
         cfunc.stmt = root
 
 
-def _store_stats_8616(codegen: CodegenBoundary8616, stats: SegmentedGlobalLoadStats8616) -> None:
+@cython.ccall
+def _store_stats_8616(codegen: object, stats: SegmentedGlobalLoadStats8616) -> None:
     if codegen is not None:
         codegen._inertia_segmented_global_load_stats_8616 = stats
     _seg_global_debug_log_8616(

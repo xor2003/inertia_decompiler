@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Analysis-layer package exports.
 
 Layer: Analysis.
@@ -7,6 +8,7 @@ or use rendered text as proof.
 """
 
 from __future__ import annotations
+import cython
 
 from .alias import MemRange, Storage, may_alias, overlap, storage_of
 from .stack_frame_ir import (

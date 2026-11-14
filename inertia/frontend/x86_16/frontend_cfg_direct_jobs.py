@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Preserve native direct-JMP/CALL classification at angr's CFG job boundary.
 
 Layer: Frontend/CFG adapter.
@@ -7,6 +8,8 @@ Execution VEX, function-boundary heuristics for genuine indirect jumps, and
 proof semantics remain owned by their existing layers.
 """
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from functools import wraps
@@ -25,10 +28,11 @@ _CreateJobs8616 = Callable[..., list[CFGJob]]
 _Successors8616 = list[tuple[int, int | None, Any, str]]
 
 
+@cython.ccall
 def _native_job_target_8616(
-    cfg: CFGFast, target: object, jumpkind: str,
-    function_addr: int, irsb: pyvex.IRSB | None,
-    addr: int, statement_index: int | None,
+    cfg: CFGFast, target: object, jumpkind: object,
+    function_addr: cython.longlong, irsb: pyvex.IRSB | None,
+    addr: cython.longlong, statement_index: int | None,
 ) -> object:
     """Project only a source-proved default native JMP/CALL into a direct edge."""
     if not isinstance(cfg.project.arch, Arch86_16):
@@ -55,11 +59,11 @@ def _make_native_job_adapter_8616(original: _CreateJobs8616) -> _CreateJobs8616:
     """Wrap the third-party discovery call without changing its VEX argument."""
     @wraps(original)
     def create_jobs(
-        cfg: CFGFast, target: object, jumpkind: str,
-        current_function_addr: int, irsb: pyvex.IRSB | None,
-        addr: int, cfg_node: CFGNode, ins_addr: int | None,
+        cfg: CFGFast, target: object, jumpkind: object,
+        current_function_addr: cython.longlong, irsb: pyvex.IRSB | None,
+        addr: cython.longlong, cfg_node: CFGNode, ins_addr: int | None,
         stmt_idx: int | None, all_successors: _Successors8616 | None,
-    ) -> list[CFGJob]:
+    ) -> object:
         """Pass native direct-edge evidence to the existing CFG job owner."""
         projected = _native_job_target_8616(
             cfg, target, jumpkind, current_function_addr, irsb, addr, stmt_idx,
@@ -75,6 +79,7 @@ def _make_native_job_adapter_8616(original: _CreateJobs8616) -> _CreateJobs8616:
     return create_jobs
 
 
+@cython.ccall
 def register_native_direct_job_adapter_8616() -> None:
     """Install one architecture-filtered adapter at angr's discovery boundary."""
     current = CFGFast._create_jobs

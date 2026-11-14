@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Validate exact terminal return replacements from Structuring evidence.
 
 Layer: Validation.
@@ -13,6 +14,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 from collections.abc import Mapping
@@ -30,6 +33,8 @@ from .tail_validation import (
     validation_delta_touched_fields_8616,
 )
 from .tail_validation_fingerprint import _expr_fingerprint
+import dataclasses
+import operator
 
 __all__ = [
     "TerminalReturnValidationRefusal8616",
@@ -65,18 +70,18 @@ class TerminalReturnValidationRefusal8616(Enum):
     FINGERPRINT_MISMATCH = "fingerprint_mismatch"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalReturnValidationStats8616:
     """Closed evidence accounting for one terminal-return validation."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalReturnValidationResult8616:
     """Typed result of matching a validation delta to Structuring evidence."""
 
@@ -85,16 +90,17 @@ class TerminalReturnValidationResult8616:
     stats: TerminalReturnValidationStats8616
 
     @property
-    def accepted(self) -> bool:
+    def accepted(self) -> cython.bint:
         """Return whether the complete delta matches the materialization."""
         return self.status is TerminalReturnValidationStatus8616.ACCEPTED
 
 
+@cython.ccall
 def _refused_result_8616(
     refusal: TerminalReturnValidationRefusal8616,
     *,
-    raw_fact_count: int = 0,
-    normalized_fact_count: int = 0,
+    raw_fact_count: cython.longlong = 0,
+    normalized_fact_count: cython.longlong = 0,
 ) -> TerminalReturnValidationResult8616:
     """Build one typed refusal without claiming accepted evidence."""
     return TerminalReturnValidationResult8616(
@@ -108,26 +114,33 @@ def _refused_result_8616(
     )
 
 
-def _delta_tokens_8616(field: object) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+def _delta_tokens_8616(field: object) -> object:
     """Read one validation field as immutable added and removed token tuples."""
+    added: object
+    removed: object
     if not isinstance(field, Mapping):
         return None
     added = field.get("added", ())
     removed = field.get("removed", ())
     if not isinstance(added, (list, tuple)) or not isinstance(removed, (list, tuple)):
         return None
-    if not all(isinstance(item, str) for item in (*added, *removed)):
+    if not all(isinstance(item, str) for item in iter(tuple(added) + tuple(removed))):
         return None
     return tuple(added), tuple(removed)
 
 
+@cython.ccall
 def terminal_return_value_validation_delta_8616(
     project: object,
     codegen: object,
-    materialization: TerminalReturnValueMaterializationResult8616 | None,
-    validation: dict[str, object],
+    materialization: object,
+    validation: object,
 ) -> TerminalReturnValidationResult8616:
     """Accept only the exact return replacement carried by closed evidence."""
+    after: object
+    before: object
+    delta: object
+    return_tokens: object
     if materialization is None or materialization.status is not TerminalReturnValueMaterializationStatus8616.MATERIALIZED:
         return _refused_result_8616(
             TerminalReturnValidationRefusal8616.MATERIALIZATION_NOT_CLOSED,
@@ -135,9 +148,9 @@ def terminal_return_value_validation_delta_8616(
     raw_count = materialization.raw_fact_count
     if not (
         raw_count > 0
-        and materialization.normalized_fact_count == raw_count
-        and materialization.classified_fact_count == raw_count
-        and materialization.materialized_count == raw_count
+        and operator.eq(materialization.normalized_fact_count, raw_count)
+        and operator.eq(materialization.classified_fact_count, raw_count)
+        and operator.eq(materialization.materialized_count, raw_count)
         and materialization.failure_count == 0
     ):
         return _refused_result_8616(

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """CodeView NB02/NB04/NB08/NB09 parser.
 
 Layer: Optional evidence/reporting.
@@ -23,6 +24,8 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import struct
 from dataclasses import dataclass, field
@@ -31,6 +34,9 @@ from pathlib import Path
 from typing import Any
 
 from . import codeview_nb00 as _nb00
+import dataclasses
+import operator
+import builtins
 
 
 class CodeViewSymbolType(IntEnum):
@@ -89,52 +95,52 @@ _CV4_LF_FIELDLIST = 0x0204
 _CV4_LF_MEMBER = 0x0406
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class CodeViewSymbol:
     """Parsed CodeView symbol retained as optional label or debug evidence."""
 
-    type_code: int
-    name: str
-    offset: int  # Offset within segment
+    type_code: cython.longlong
+    name: object
+    offset: cython.longlong  # Offset within segment
     segment: int | None
     length: int | None = None  # For procedures
     data_type: int | None = None  # Type index
-    extra: dict[str, Any] = field(default_factory=dict)
+    extra: object = field(default_factory=dict)
 
-    def is_procedure(self) -> bool:
+    def is_procedure(self) -> cython.bint:
         """Return whether this symbol describes a 16-bit procedure."""
         return self.type_code in _PROC16_TYPES
 
-    def is_stack_var(self) -> bool:
+    def is_stack_var(self) -> cython.bint:
         """Return whether this symbol describes a BP-relative stack variable."""
-        return self.type_code == CodeViewSymbolType.S_BPREL16
+        return operator.eq(self.type_code, CodeViewSymbolType.S_BPREL16)
 
-    def is_data_symbol(self) -> bool:
+    def is_data_symbol(self) -> cython.bint:
         """Return whether this symbol describes a local or global data object."""
         return self.type_code in {CodeViewSymbolType.S_GDATA16, CodeViewSymbolType.S_LDATA16}
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class CodeViewSegment:
     """One sstSegMap entry mapping a logical segment index to an image location."""
 
-    index: int  # 1-based segment index used by symbol and line records
-    frame: int  # paragraph inside the loaded image
-    offset: int  # byte offset of the segment contribution inside the frame
-    size: int  # byte size of the segment contribution
+    index: cython.longlong  # 1-based segment index used by symbol and line records
+    frame: cython.longlong  # paragraph inside the loaded image
+    offset: cython.longlong  # byte offset of the segment contribution inside the frame
+    size: cython.longlong  # byte size of the segment contribution
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class CodeViewNB0204Info:
     """Parsed CodeView NB02/NB04/NB08/NB09 debug metadata."""
 
-    version: str  # "NB02", "NB04", "NB05", "NB08", or "NB09"
-    debug_base: int
-    code_labels: dict[int, str] = field(default_factory=dict)  # address -> function name
-    data_labels: dict[int, str] = field(default_factory=dict)  # address -> data name
+    version: object  # "NB02", "NB04", "NB05", "NB08", or "NB09"
+    debug_base: cython.longlong
+    code_labels: object = field(default_factory=dict)  # address -> function name
+    data_labels: object = field(default_factory=dict)  # address -> data name
     procedures: tuple[CodeViewSymbol, ...] = ()
-    stack_variables: dict[str, list[CodeViewSymbol]] = field(default_factory=dict)  # func_name -> vars
-    line_map: dict[int, tuple[int, int]] = field(default_factory=dict)  # code_addr -> (source_line, col)
+    stack_variables: object = field(default_factory=dict)  # func_name -> vars
+    line_map: object = field(default_factory=dict)  # code_addr -> (source_line, col)
     modules: tuple[str, ...] = ()
     source_files: tuple[str, ...] = ()
     type_record_names: tuple[str, ...] = ()
@@ -143,7 +149,8 @@ class CodeViewNB0204Info:
     segments: tuple[CodeViewSegment, ...] = ()  # sstSegMap entries, index-ordered
 
 
-def find_codeview_nb0204(data: bytes, *, signatures: list[bytes] | None = None) -> tuple[str, int] | None:
+@cython.ccall
+def find_codeview_nb0204(data: object, *, signatures: object = None) -> object:
     """Find CodeView NB02/NB04 debug info trailer in binary.
 
     Args:
@@ -153,6 +160,7 @@ def find_codeview_nb0204(data: bytes, *, signatures: list[bytes] | None = None) 
     Returns:
         (signature, debug_base) or None if not found
     """
+    sig: object
     if signatures is None:
         signatures = [b"NB09", b"NB08", b"NB04", b"NB02", b"NB05"]
 
@@ -162,7 +170,7 @@ def find_codeview_nb0204(data: bytes, *, signatures: list[bytes] | None = None) 
             continue
 
         for sig in signatures:
-            if data[trailer_offset : trailer_offset + 4] == sig:
+            if operator.eq(data[trailer_offset : trailer_offset + 4], sig):
                 # Read offset to start of CV header
                 try:
                     debug_offset = struct.unpack_from("<I", data, trailer_offset + 4)[0]
@@ -179,7 +187,8 @@ def find_codeview_nb0204(data: bytes, *, signatures: list[bytes] | None = None) 
     return None
 
 
-def parse_codeview_nb0204(binary_path: Path, *, load_base_linear: int = 0) -> CodeViewNB0204Info | None:
+@cython.ccall
+def parse_codeview_nb0204(binary_path: Path, *, load_base_linear: cython.longlong = 0) -> CodeViewNB0204Info | None:
     """Parse CodeView NB02/NB04 from binary file."""
     try:
         data = binary_path.read_bytes()
@@ -188,32 +197,36 @@ def parse_codeview_nb0204(binary_path: Path, *, load_base_linear: int = 0) -> Co
         return None
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _NB0204Collections8616:
     """Accumulating collections for NB02/NB04 subsection parsing."""
 
-    code_labels: dict[int, str] = field(default_factory=dict)
-    data_labels: dict[int, str] = field(default_factory=dict)
-    procedures: list[CodeViewSymbol] = field(default_factory=list)
-    stack_variables: dict[str, list[CodeViewSymbol]] = field(default_factory=dict)
-    modules: list[str] = field(default_factory=list)
-    source_files: list[str] = field(default_factory=list)
-    line_map: dict[int, tuple[int, int]] = field(default_factory=dict)
-    type_record_names: list[str] = field(default_factory=list)
-    type_members: list[_nb00.CodeViewNB00TypeMember] = field(default_factory=list)
-    debug_identifiers: list[str] = field(default_factory=list)
-    legacy_modules: dict[int, _nb00.CodeViewNB00Module] = field(default_factory=dict)
-    legacy_publics: list[_nb00.CodeViewNB00PublicSymbol] = field(default_factory=list)
+    code_labels: object = field(default_factory=dict)
+    data_labels: object = field(default_factory=dict)
+    procedures: object = field(default_factory=list)
+    stack_variables: object = field(default_factory=dict)
+    modules: object = field(default_factory=list)
+    source_files: object = field(default_factory=list)
+    line_map: object = field(default_factory=dict)
+    type_record_names: object = field(default_factory=list)
+    type_members: object = field(default_factory=list)
+    debug_identifiers: object = field(default_factory=list)
+    legacy_modules: object = field(default_factory=dict)
+    legacy_publics: object = field(default_factory=list)
 
 
+@cython.ccall
 def _parse_label_subsection_8616(
     sink: _NB0204Collections8616,
-    subsection_type: int,
-    blob: bytes,
-    load_base_linear: int,
-    seg_map: dict[int, CodeViewSegment] | None = None,
-) -> bool:
+    subsection_type: cython.longlong,
+    blob: object,
+    load_base_linear: cython.longlong,
+    seg_map: object = None,
+) -> cython.bint:
     """Parse label/symbol producing subsections; return False if not handled."""
+    addr: object
+    file_index: object
+    line: object
     if subsection_type in _PUBLIC_SUBSECTIONS:
         _parse_public_symbols(blob, sink.code_labels, sink.data_labels, load_base_linear)
         return True
@@ -233,11 +246,11 @@ def _parse_label_subsection_8616(
         )
         sink.debug_identifiers.extend(_parse_legacy_symbol_names(blob))
         return True
-    if subsection_type == CodeViewSubsectionType.SST_MODULE:
+    if operator.eq(subsection_type, CodeViewSubsectionType.SST_MODULE):
         # Extract module name
         sink.modules.extend(_parse_module_names(blob))
         return True
-    if subsection_type == CodeViewSubsectionType.SST_SRCMODULE:
+    if operator.eq(subsection_type, CodeViewSubsectionType.SST_SRCMODULE):
         parsed_source_files, parsed_line_map = _parse_source_module_lines(
             blob, load_base_linear=load_base_linear, seg_map=seg_map
         )
@@ -252,13 +265,15 @@ def _parse_label_subsection_8616(
     return False
 
 
+@cython.ccall
 def _parse_segmap_8616(
-    data: bytes, directory_entries: list[dict[str, int]]
-) -> dict[int, CodeViewSegment]:
+    data: object, directory_entries: object
+) -> object:
     """Parse the global sstSegMap subsection into index -> CodeViewSegment."""
-    seg_map: dict[int, CodeViewSegment] = {}
+    entry: object
+    seg_map: dict[cython.longlong, CodeViewSegment] = {}
     for entry in directory_entries:
-        if entry["type"] != _CV4_SEGMAP_SUBSECTION:
+        if operator.ne(entry["type"], _CV4_SEGMAP_SUBSECTION):
             continue
         offset = entry["offset"]
         size = entry["size"]
@@ -281,22 +296,26 @@ def _parse_segmap_8616(
     return seg_map
 
 
+@cython.ccall
 def _parse_legacy_subsection_8616(
     sink: _NB0204Collections8616,
-    entry: dict[str, Any],
-    subsection_type: int,
-    blob: bytes,
-    load_base_linear: int,
+    entry: object,
+    subsection_type: cython.longlong,
+    blob: object,
+    load_base_linear: cython.longlong,
 ) -> None:
     """Parse legacy NB00-format subsections into the sink."""
-    if subsection_type == _nb00.CodeViewSubsectionType.MODULES:
+    addr: object
+    file_index: object
+    line: object
+    if operator.eq(subsection_type, _nb00.CodeViewSubsectionType.MODULES):
         module = _nb00._parse_module_subsection(entry["module"], blob)
         sink.legacy_modules[module.module_index] = module
         if module.name:
             sink.modules.append(module.name)
-    elif subsection_type == _nb00.CodeViewSubsectionType.PUBLICS:
+    elif operator.eq(subsection_type, _nb00.CodeViewSubsectionType.PUBLICS):
         sink.legacy_publics.extend(_nb00._parse_publics_subsection(entry["module"], blob))
-    elif subsection_type == _nb00.CodeViewSubsectionType.TYPE:
+    elif operator.eq(subsection_type, _nb00.CodeViewSubsectionType.TYPE):
         definitions = _nb00._parse_type_subsection(blob)
         sink.type_record_names.extend(_nb00._collect_type_record_names(definitions))
         sink.type_members.extend(_nb00._collect_type_members(definitions))
@@ -313,17 +332,18 @@ def _parse_legacy_subsection_8616(
         sink.source_files.extend(parsed_source_files)
         for addr, (line, file_index) in parsed_line_map.items():
             sink.line_map[addr] = (line, file_index + file_base_index)
-    elif subsection_type == _nb00.CodeViewSubsectionType.SYMBOLS:
+    elif operator.eq(subsection_type, _nb00.CodeViewSubsectionType.SYMBOLS):
         sink.debug_identifiers.extend(_parse_legacy_symbol_names(blob))
 
 
-def _apply_legacy_publics_8616(sink: _NB0204Collections8616, load_base_linear: int) -> None:
+def _apply_legacy_publics_8616(sink: _NB0204Collections8616, load_base_linear: cython.longlong) -> None:
     """Fold legacy public symbols into code/data label maps."""
+    symbol: object
     if not sink.legacy_publics:
         return
     module_ranges = tuple(
         (module.linear_range(load_base_linear=load_base_linear), module.module_index)
-        for module in sink.legacy_modules.values()
+        for module in builtins.iter(sink.legacy_modules.values())
     )
     for symbol in sink.legacy_publics:
         linear = symbol.linear_addr(load_base_linear=load_base_linear)
@@ -334,8 +354,11 @@ def _apply_legacy_publics_8616(sink: _NB0204Collections8616, load_base_linear: i
             sink.data_labels.setdefault(linear, symbol.name)
 
 
-def parse_codeview_nb0204_bytes(data: bytes, *, load_base_linear: int = 0) -> CodeViewNB0204Info | None:
+@cython.ccall
+def parse_codeview_nb0204_bytes(data: object, *, load_base_linear: cython.longlong = 0) -> CodeViewNB0204Info | None:
     """Parse optional NB02/NB04 CodeView debug metadata from executable bytes."""
+    located: object
+    entry: object
     located = find_codeview_nb0204(data)
     if located is None:
         return None
@@ -398,14 +421,15 @@ def parse_codeview_nb0204_bytes(data: bytes, *, load_base_linear: int = 0) -> Co
         return None
 
 
+@cython.ccall
 def _parse_directory_entries_8616(
-    data: bytes,
-    debug_base: int,
-    offset: int,
-    count: int,
-    entry_fmt: str,
-    entry_stride: int,
-) -> list[dict[str, Any]]:
+    data: object,
+    debug_base: cython.longlong,
+    offset: cython.longlong,
+    count: cython.longlong,
+    entry_fmt: object,
+    entry_stride: cython.longlong,
+) -> object:
     """Parse a fixed-stride run of subsection directory entries."""
     entries: list[dict[str, Any]] = []
     for _ in range(count):
@@ -426,11 +450,12 @@ def _parse_directory_entries_8616(
     return entries
 
 
+@cython.ccall
 def _parse_subsection_directory(
-    data: bytes,
-    debug_base: int,
-    directory_offset: int,
-) -> list[dict[str, Any]]:
+    data: object,
+    debug_base: cython.longlong,
+    directory_offset: cython.longlong,
+) -> object:
     """Parse subsection directory entries."""
     entries: list[dict[str, Any]] = []
 
@@ -457,11 +482,12 @@ def _parse_subsection_directory(
     return entries
 
 
+@cython.ccall
 def _parse_public_symbols(
-    blob: bytes,
-    code_labels: dict[int, str],
-    data_labels: dict[int, str],
-    load_base_linear: int,
+    blob: object,
+    code_labels: object,
+    data_labels: object,
+    load_base_linear: cython.longlong,
 ) -> None:
     """Parse SST_PUBLIC symbols."""
     offset = 0
@@ -487,15 +513,17 @@ def _parse_public_symbols(
             break
 
 
-def _parse_symbol_records(blob: bytes) -> list[CodeViewSymbol]:
+@cython.ccall
+def _parse_symbol_records(blob: object) -> object:
     symbols = _parse_symbol_records_from_offset(blob, 0)
     if not symbols and len(blob) > 4:
         symbols = _parse_symbol_records_from_offset(blob, 4)
     return symbols
 
 
+@cython.ccall
 def _parse_bprel_symbol_8616(
-    record_type: int, blob: bytes, data_offset: int, record_end: int, current_procedure: str | None
+    record_type: cython.longlong, blob: object, data_offset: cython.longlong, record_end: cython.longlong, current_procedure: object
 ) -> CodeViewSymbol | None:
     """Parse one S_BPREL16 BP-relative stack variable record."""
     if data_offset + 4 > record_end:
@@ -514,8 +542,9 @@ def _parse_bprel_symbol_8616(
     )
 
 
+@cython.ccall
 def _parse_data_symbol_8616(
-    record_type: int, blob: bytes, data_offset: int, record_end: int
+    record_type: cython.longlong, blob: object, data_offset: cython.longlong, record_end: cython.longlong
 ) -> CodeViewSymbol | None:
     """Parse one S_LDATA16/S_PUB16 segmented data symbol record."""
     if data_offset + 6 > record_end:
@@ -533,7 +562,8 @@ def _parse_data_symbol_8616(
     )
 
 
-def _skip_record_padding_8616(blob: bytes, offset: int) -> int:
+@cython.ccall
+def _skip_record_padding_8616(blob: object, offset: cython.longlong) -> cython.longlong:
     """Skip 4-byte alignment padding after a record."""
     while offset < len(blob) and offset % 4:
         if blob[offset] != 0:
@@ -542,36 +572,40 @@ def _skip_record_padding_8616(blob: bytes, offset: int) -> int:
     return offset
 
 
+@cython.ccall
 def _parse_symbol_record_8616(
-    record_type: int,
-    blob: bytes,
-    data_offset: int,
-    record_end: int,
-    current_procedure: str | None,
+    record_type: cython.longlong,
+    blob: object,
+    data_offset: cython.longlong,
+    record_end: cython.longlong,
+    current_procedure: object,
 ) -> tuple[CodeViewSymbol | None, str | None]:
     """Parse one symbol record; return it plus the updated procedure context."""
+    symbol: object
     if record_type in _PROC16_TYPES:
         symbol = _parse_proc16_symbol(record_type, blob, data_offset, record_end)
         if symbol is not None:
             return symbol, symbol.name or current_procedure
         return None, current_procedure
-    if record_type == CodeViewSymbolType.S_END:
+    if operator.eq(record_type, CodeViewSymbolType.S_END):
         return None, None
-    if record_type == CodeViewSymbolType.S_BPREL16:
+    if operator.eq(record_type, CodeViewSymbolType.S_BPREL16):
         return (
             _parse_bprel_symbol_8616(record_type, blob, data_offset, record_end, current_procedure),
             current_procedure,
         )
-    if record_type in _DATA16_TYPES or record_type == CodeViewSymbolType.S_PUB16:
+    if record_type in _DATA16_TYPES or operator.eq(record_type, CodeViewSymbolType.S_PUB16):
         return _parse_data_symbol_8616(record_type, blob, data_offset, record_end), current_procedure
     return None, current_procedure
 
 
-def _parse_symbol_records_from_offset(blob: bytes, initial_offset: int) -> list[CodeViewSymbol]:
+@cython.ccall
+def _parse_symbol_records_from_offset(blob: object, initial_offset: cython.longlong) -> object:
     """Parse symbol records from SST_SYMBOLS subsection."""
+    symbol: object
     symbols: list[CodeViewSymbol] = []
     offset = initial_offset
-    current_procedure: str | None = None
+    current_procedure: object = None
 
     while offset < len(blob):
         try:
@@ -606,16 +640,18 @@ def _parse_symbol_records_from_offset(blob: bytes, initial_offset: int) -> list[
     return symbols
 
 
+@cython.ccall
 def _materialize_symbol_record_8616(
     sym: CodeViewSymbol,
-    code_labels: dict[int, str],
-    data_labels: dict[int, str],
-    procedures: list[CodeViewSymbol],
-    stack_variables: dict[str, list[CodeViewSymbol]],
-    load_base_linear: int,
-    seg_map: dict[int, CodeViewSegment] | None = None,
+    code_labels: object,
+    data_labels: object,
+    procedures: object,
+    stack_variables: object,
+    load_base_linear: cython.longlong,
+    seg_map: object = None,
 ) -> None:
     """Route one parsed symbol into its label/procedure/stack bucket."""
+    linear: object
     linear = _symbol_linear_addr(sym, load_base_linear=load_base_linear, seg_map=seg_map)
     if sym.is_procedure():
         procedures.append(sym)
@@ -632,7 +668,7 @@ def _materialize_symbol_record_8616(
         if sym.name and linear is not None:
             data_labels[linear] = sym.name
         return
-    if sym.type_code != CodeViewSymbolType.S_PUB16 or not (sym.name and linear is not None):
+    if operator.ne(sym.type_code, CodeViewSymbolType.S_PUB16) or not (sym.name and linear is not None):
         return
     if _public_name_looks_like_data(sym.name):
         data_labels.setdefault(linear, sym.name)
@@ -640,22 +676,25 @@ def _materialize_symbol_record_8616(
         code_labels.setdefault(linear, sym.name.lstrip("_"))
 
 
+@cython.ccall
 def _materialize_symbol_records(
-    syms: list[CodeViewSymbol],
-    code_labels: dict[int, str],
-    data_labels: dict[int, str],
-    procedures: list[CodeViewSymbol],
-    stack_variables: dict[str, list[CodeViewSymbol]],
-    load_base_linear: int,
-    seg_map: dict[int, CodeViewSegment] | None = None,
+    syms: object,
+    code_labels: object,
+    data_labels: object,
+    procedures: object,
+    stack_variables: object,
+    load_base_linear: cython.longlong,
+    seg_map: object = None,
 ) -> None:
+    sym: object
     for sym in syms:
         _materialize_symbol_record_8616(
             sym, code_labels, data_labels, procedures, stack_variables, load_base_linear, seg_map
         )
 
 
-def _parse_proc16_symbol(record_type: int, blob: bytes, data_offset: int, record_end: int) -> CodeViewSymbol | None:
+@cython.ccall
+def _parse_proc16_symbol(record_type: cython.longlong, blob: object, data_offset: cython.longlong, record_end: cython.longlong) -> CodeViewSymbol | None:
     if data_offset + 25 <= record_end:
         proc_length, debug_start, debug_end, proc_offset, segment, proctype = struct.unpack_from(
             "<HHHHHH", blob, data_offset + 12
@@ -687,7 +726,8 @@ def _parse_proc16_symbol(record_type: int, blob: bytes, data_offset: int, record
     return None
 
 
-def _read_pascal_string(blob: bytes, offset: int, end: int) -> str:
+@cython.ccall
+def _read_pascal_string(blob: object, offset: cython.longlong, end: cython.longlong) -> object:
     if offset >= end:
         return ""
     length = blob[offset]
@@ -698,11 +738,12 @@ def _read_pascal_string(blob: bytes, offset: int, end: int) -> str:
     return blob[start:stop].decode("ascii", errors="ignore")
 
 
+@cython.ccall
 def _symbol_linear_addr(
     symbol: CodeViewSymbol,
     *,
-    load_base_linear: int,
-    seg_map: dict[int, CodeViewSegment] | None = None,
+    load_base_linear: cython.longlong,
+    seg_map: object = None,
 ) -> int | None:
     if symbol.offset < 0:
         return None
@@ -714,20 +755,24 @@ def _symbol_linear_addr(
     return load_base_linear + (symbol.segment << 4) + symbol.offset
 
 
-def _public_name_looks_like_data(name: str) -> bool:
+@cython.ccall
+def _public_name_looks_like_data(name: object) -> cython.bint:
     lowered = name.lower().lstrip("_")
     return lowered.startswith(("dgroup@", "byte_", "word_", "dword_", "off_", "stru_", "seg_", "data_"))
 
 
+@cython.ccall
 def _collect_source_line_pairs_8616(
-    blob: bytes,
-    line_base: int,
-    line_map: dict[int, tuple[int, int]],
-    load_base_linear: int,
-    seg_map: dict[int, CodeViewSegment] | None = None,
-    file_index: int = 0,
+    blob: object,
+    line_base: cython.longlong,
+    line_map: object,
+    load_base_linear: cython.longlong,
+    seg_map: object = None,
+    file_index: cython.longlong = 0,
 ) -> None:
     """Collect offset/line pairs from one segment's line table."""
+    code_offset: object
+    source_line: object
     if line_base + 4 > len(blob):
         return
     segment, pair_count = struct.unpack_from("<HH", blob, line_base)
@@ -746,15 +791,18 @@ def _collect_source_line_pairs_8616(
         line_map[linear] = (source_line, file_index)
 
 
+@cython.ccall
 def _parse_source_file_record_8616(
-    blob: bytes,
-    file_base: int,
-    source_files: list[str],
-    line_map: dict[int, tuple[int, int]],
-    load_base_linear: int,
-    seg_map: dict[int, CodeViewSegment] | None = None,
+    blob: object,
+    file_base: cython.longlong,
+    source_files: object,
+    line_map: object,
+    load_base_linear: cython.longlong,
+    seg_map: object = None,
 ) -> None:
     """Parse one source file record's name and per-segment line tables."""
+    file_offset: object
+    line_base: object
     if file_base + 6 > len(blob):
         return
     file_segment_count = struct.unpack_from("<H", blob, file_base)[0]
@@ -781,14 +829,16 @@ def _parse_source_file_record_8616(
         )
 
 
+@cython.ccall
 def _parse_source_module_lines(
-    blob: bytes,
+    blob: object,
     *,
-    load_base_linear: int,
-    seg_map: dict[int, CodeViewSegment] | None = None,
-) -> tuple[list[str], dict[int, tuple[int, int]]]:
+    load_base_linear: cython.longlong,
+    seg_map: object = None,
+) -> tuple[list[str], dict[cython.longlong, tuple[cython.longlong, cython.longlong]]]:
+    file_base: object
     source_files: list[str] = []
-    line_map: dict[int, tuple[int, int]] = {}
+    line_map: dict[cython.longlong, tuple[cython.longlong, cython.longlong]] = {}
     if len(blob) < 4:
         return source_files, line_map
     try:
@@ -814,22 +864,24 @@ def _parse_source_module_lines(
     return source_files, line_map
 
 
-def _source_file_record_table_offset(blob: bytes, file_base: int, file_segment_count: int) -> int | None:
+def _source_file_record_table_offset(blob: object, file_base: cython.longlong, file_segment_count: cython.longlong) -> int | None:
+    file_offset: object
     for file_offset in (file_base + 4, file_base + 6):
         if file_offset + file_segment_count * 4 + file_segment_count * 8 > len(blob):
             continue
         line_bases = struct.unpack_from(f"<{file_segment_count}I", blob, file_offset) if file_segment_count else ()
-        if all(0 <= line_base < len(blob) for line_base in line_bases):
+        if all(0 <= line_base < len(blob) for line_base in iter(line_bases)):
             return file_offset
     return None
 
 
+@cython.ccall
 def _parse_legacy_source_lines(
-    blob: bytes,
-    module: _nb00.CodeViewNB00Module | None,
+    blob: object,
+    module: object,
     *,
-    load_base_linear: int,
-) -> tuple[list[str], dict[int, tuple[int, int]]]:
+    load_base_linear: cython.longlong,
+) -> tuple[list[str], dict[cython.longlong, tuple[cython.longlong, cython.longlong]]]:
     """Parse old NB02/NB00 SRCLINES/SRCLNSEG line pairs.
 
     MS C 6 NB02 uses the NB00 directory ids with a compact source-line blob:
@@ -837,8 +889,9 @@ def _parse_legacy_source_lines(
     pairs. These pairs are debug evidence only; they do not imply control-flow
     or type semantics.
     """
+    count_offset: object
     source_files: list[str] = []
-    line_map: dict[int, tuple[int, int]] = {}
+    line_map: dict[cython.longlong, tuple[cython.longlong, cython.longlong]] = {}
     if not blob:
         return source_files, line_map
 
@@ -874,7 +927,8 @@ def _parse_legacy_source_lines(
     return source_files, line_map
 
 
-def _find_legacy_line_count_offset(blob: bytes, search_start: int) -> int | None:
+@cython.ccall
+def _find_legacy_line_count_offset(blob: object, search_start: cython.longlong) -> int | None:
     for candidate in range(search_start, min(len(blob) - 1, search_start + 16)):
         pair_count = struct.unpack_from("<H", blob, candidate)[0]
         if pair_count == 0 or pair_count > 0x4000:
@@ -884,10 +938,18 @@ def _find_legacy_line_count_offset(blob: bytes, search_start: int) -> int | None
     return None
 
 
-def _collect_cv4_type_members(blob: bytes) -> tuple[_nb00.CodeViewNB00TypeMember, ...]:
+@cython.ccall
+def _collect_cv4_type_members(blob: object) -> tuple[_nb00.CodeViewNB00TypeMember, ...]:
+    _member_type_index: object
+    leaf: object
+    leaf_index: object
+    name: object
+    offset: object
+    payload: object
+    type_index: object
     records = _parse_cv4_type_records(blob)
     members: list[_nb00.CodeViewNB00TypeMember] = []
-    seen: set[tuple[int, str, int]] = set()
+    seen: set[tuple[cython.longlong, str, cython.longlong]] = set()
     for type_index, leaf, payload in records:
         if leaf != _CV4_LF_FIELDLIST:
             continue
@@ -907,22 +969,22 @@ def _collect_cv4_type_members(blob: bytes) -> tuple[_nb00.CodeViewNB00TypeMember
     return tuple(members)
 
 
-def _parse_cv4_type_records(blob: bytes) -> tuple[tuple[int, int, bytes], ...]:
-    best: tuple[tuple[int, int, bytes], ...] = ()
+def _parse_cv4_type_records(blob: object) -> object:
+    best: tuple[tuple[cython.longlong, cython.longlong, bytes], ...] = ()
     best_score = 0
     for start in range(min(len(blob), 0x40)):
         records = _parse_cv4_type_records_from_offset(blob, start)
         if not records:
             continue
-        score = len(records) + 4 * sum(1 for _type_index, leaf, _payload in records if leaf == _CV4_LF_FIELDLIST)
+        score = len(records) + 4 * sum(1 for _type_index, leaf, _payload in iter(records) if leaf == _CV4_LF_FIELDLIST)
         if score > best_score:
             best = records
             best_score = score
     return best
 
 
-def _parse_cv4_type_records_from_offset(blob: bytes, start: int) -> tuple[tuple[int, int, bytes], ...]:
-    records: list[tuple[int, int, bytes]] = []
+def _parse_cv4_type_records_from_offset(blob: object, start: cython.longlong) -> tuple[tuple[cython.longlong, cython.longlong, bytes], ...]:
+    records: list[tuple[cython.longlong, cython.longlong, bytes]] = []
     offset = start
     type_index = _CV4_FIRST_TYPE_INDEX
     while offset + 4 <= len(blob):
@@ -938,13 +1000,14 @@ def _parse_cv4_type_records_from_offset(blob: bytes, start: int) -> tuple[tuple[
     if not records:
         return ()
     trailing = blob[offset:]
-    if any(byte != 0 for byte in trailing):
+    if any(byte != 0 for byte in iter(trailing)):
         return ()
     return tuple(records)
 
 
-def _parse_cv4_fieldlist_members(payload: bytes) -> tuple[tuple[int, str, int, int], ...]:
-    members: list[tuple[int, str, int, int]] = []
+@cython.ccall
+def _parse_cv4_fieldlist_members(payload: object) -> tuple[tuple[cython.longlong, str, cython.longlong, cython.longlong], ...]:
+    members: list[tuple[cython.longlong, str, cython.longlong, cython.longlong]] = []
     offset = 0
     leaf_index = 0
     while offset + 2 <= len(payload):
@@ -972,7 +1035,10 @@ def _parse_cv4_fieldlist_members(payload: bytes) -> tuple[tuple[int, str, int, i
     return tuple(members)
 
 
-def _parse_legacy_symbol_names(blob: bytes) -> tuple[str, ...]:
+@cython.ccall
+def _parse_legacy_symbol_names(blob: object) -> tuple[str, ...]:
+    name_length: object
+    offset: object
     names: list[str] = []
     for offset, name_length in enumerate(blob):
         if name_length == 0 or name_length > 80:
@@ -990,16 +1056,17 @@ def _parse_legacy_symbol_names(blob: bytes) -> tuple[str, ...]:
     return tuple(dict.fromkeys(names))
 
 
-def _is_debug_identifier_name(name: str) -> bool:
+def _is_debug_identifier_name(name: object) -> cython.bint:
     if not name:
         return False
     allowed_extra = "_$?@"
-    if not all(ch.isalnum() or ch in allowed_extra for ch in name):
+    if not all(ch.isalnum() or ch in allowed_extra for ch in iter(name)):
         return False
-    return any(ch.isalpha() or ch == "_" for ch in name)
+    return any(ch.isalpha() or ch == "_" for ch in iter(name))
 
 
-def _parse_module_names(blob: bytes) -> list[str]:
+@cython.ccall
+def _parse_module_names(blob: object) -> object:
     """Parse module names from SST_MODULE subsection."""
     names: list[str] = []
 

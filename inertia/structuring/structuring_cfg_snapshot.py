@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Structuring.
 
 Responsibility: publish deterministic CFG snapshots from typed region graphs.
@@ -10,39 +11,43 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
 from inertia.structuring.structuring_graph_builder import build_region_graph
+import dataclasses
+import builtins
 
-type CFGStatementProvenanceKey8616 = tuple[str, int, int]
+CFGStatementProvenanceKey8616 = typing.TypeAliasType("CFGStatementProvenanceKey8616", tuple[str, int, int])
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CFGSnapshotNode:
     """One region node in the structuring CFG snapshot."""
 
-    region_id: int
+    region_id: cython.longlong
     block_addr: int | None
-    predecessor_ids: tuple[int, ...]
-    successor_ids: tuple[int, ...]
-    ownership: str
-    reachable_from_entry: bool
-    statement_ins_addrs: tuple[int, ...] = ()
+    predecessor_ids: object
+    successor_ids: object
+    ownership: object
+    reachable_from_entry: cython.bint
+    statement_ins_addrs: tuple[cython.longlong, ...] = ()
     statement_provenance_keys: tuple[CFGStatementProvenanceKey8616, ...] = ()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CFGSnapshot:
     """Deterministic snapshot of the region graph seen by structuring."""
 
     entry_region_id: int | None
-    node_count: int
-    edge_count: int
-    nodes: tuple[CFGSnapshotNode, ...]
-    shared_region_ids: tuple[int, ...] = ()
-    external_entry_region_ids: tuple[int, ...] = ()
-    indirect_site_ids: tuple[int, ...] = ()
+    node_count: cython.longlong
+    edge_count: cython.longlong
+    nodes: object
+    shared_region_ids: tuple[cython.longlong, ...] = ()
+    external_entry_region_ids: tuple[cython.longlong, ...] = ()
+    indirect_site_ids: tuple[cython.longlong, ...] = ()
 
     def summary_line(self) -> str:
         """Compact deterministic summary for diagnostics."""
@@ -58,40 +63,44 @@ class CFGSnapshot:
             "entry_region_id": hex(self.entry_region_id) if self.entry_region_id is not None else None,
             "node_count": self.node_count,
             "edge_count": self.edge_count,
-            "shared_region_ids": [hex(region_id) for region_id in self.shared_region_ids],
-            "external_entry_region_ids": [hex(region_id) for region_id in self.external_entry_region_ids],
-            "indirect_site_ids": [hex(region_id) for region_id in self.indirect_site_ids],
+            "shared_region_ids": [hex(region_id) for region_id in iter(self.shared_region_ids)],
+            "external_entry_region_ids": [hex(region_id) for region_id in iter(self.external_entry_region_ids)],
+            "indirect_site_ids": [hex(region_id) for region_id in iter(self.indirect_site_ids)],
             "nodes": [
                 {
                     "region_id": hex(node.region_id),
                     "block_addr": hex(node.block_addr) if node.block_addr is not None else None,
-                    "predecessor_ids": [hex(region_id) for region_id in node.predecessor_ids],
-                    "successor_ids": [hex(region_id) for region_id in node.successor_ids],
+                    "predecessor_ids": [hex(region_id) for region_id in iter(node.predecessor_ids)],
+                    "successor_ids": [hex(region_id) for region_id in iter(node.successor_ids)],
                     "ownership": node.ownership,
                     "reachable_from_entry": node.reachable_from_entry,
-                    "statement_ins_addrs": [hex(ins_addr) for ins_addr in node.statement_ins_addrs],
+                    "statement_ins_addrs": [hex(ins_addr) for ins_addr in iter(node.statement_ins_addrs)],
                     "statement_provenance_keys": [
                         [kind, hex(block_addr), statement_index]
-                        for kind, block_addr, statement_index in node.statement_provenance_keys
+                        for kind, block_addr, statement_index in iter(node.statement_provenance_keys)
                     ],
                 }
-                for node in self.nodes
+                for node in iter(self.nodes)
             ],
         }
 
 
-def _statement_ins_addrs_8616(metadata: dict[str, object]) -> tuple[int, ...]:
+def _statement_ins_addrs_8616(metadata: object) -> tuple[cython.longlong, ...]:
     """Copy a complete typed instruction-address tuple or refuse malformed metadata."""
+    raw_addrs: object
     raw_addrs = metadata.get("region_statement_ins_addrs", ())
-    if not isinstance(raw_addrs, tuple) or any(not isinstance(addr, int) for addr in raw_addrs):
+    if not isinstance(raw_addrs, tuple) or any(not isinstance(addr, int) for addr in iter(raw_addrs)):
         return ()
     return tuple(raw_addrs)
 
 
+@cython.ccall
 def _statement_provenance_keys_8616(
-    metadata: dict[str, object],
+    metadata: object,
 ) -> tuple[CFGStatementProvenanceKey8616, ...]:
     """Copy complete typed statement provenance or refuse malformed metadata."""
+    raw_keys: object
+    key: object
     raw_keys = metadata.get("region_statement_provenance_keys", ())
     if not isinstance(raw_keys, tuple):
         return ()
@@ -111,12 +120,15 @@ def _statement_provenance_keys_8616(
 
 def build_cfg_snapshot(codegen: object) -> CFGSnapshot | None:
     """Build a deterministic CFG snapshot from codegen."""
+    graph: object
+    region: object
+    succ: object
     result = build_region_graph(codegen)
     graph = result.graph
     if graph is None:
         return None
 
-    reachable_from_entry: set[int] = set()
+    reachable_from_entry: set[cython.longlong] = set()
     if result.entry is not None:
         worklist = [result.entry]
         seen = set()
@@ -139,10 +151,10 @@ def build_cfg_snapshot(codegen: object) -> CFGSnapshot | None:
     )
     for region in ordered_regions:
         predecessor_ids = tuple(
-            sorted(pred.region_id for pred in graph.predecessors(region) if pred.region_id is not None)
+            sorted(pred.region_id for pred in builtins.iter(graph.predecessors(region)) if pred.region_id is not None)
         )
         successor_ids = tuple(
-            sorted(succ.region_id for succ in graph.successors(region) if succ.region_id is not None)
+            sorted(succ.region_id for succ in builtins.iter(graph.successors(region)) if succ.region_id is not None)
         )
         edge_count += len(successor_ids)
         ownership = "shared" if len(predecessor_ids) > 1 else "single"
@@ -159,7 +171,7 @@ def build_cfg_snapshot(codegen: object) -> CFGSnapshot | None:
             )
         )
 
-    shared_region_ids = tuple(node.region_id for node in snapshot_nodes if node.ownership == "shared")
+    shared_region_ids = tuple(node.region_id for node in iter(snapshot_nodes) if node.ownership == "shared")
     entry_region_id = result.entry.region_id if result.entry is not None else None
     return CFGSnapshot(
         entry_region_id=entry_region_id,

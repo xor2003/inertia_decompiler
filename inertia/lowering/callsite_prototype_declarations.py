@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize typed direct-call identities and declarations.
 
 Layer: Types/lowering.
@@ -10,6 +11,8 @@ call-argument repair, or call-body mutation.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -84,6 +87,9 @@ from .return_type_evidence import (
     collect_unobserved_callee_void_evidence_8616,
 )
 from .scalar_interface_transport import current_scalar_interface_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "CallTargetIdentityStats8616",
@@ -105,7 +111,7 @@ class _CodegenSurface8616(Protocol):
 
     cfunc: object
     _inertia_callsite_summaries: object
-    _inertia_callsite_c_result_contracts_8616: dict[int, CallsiteCResultContract8616]
+    _inertia_callsite_c_result_contracts_8616: object
     _inertia_call_target_identity_stats_8616: CallTargetIdentityStats8616
 
 
@@ -132,7 +138,7 @@ class _AddressedFunctionSurface8616(Protocol):
 class _FunctionManagerSurface8616(Protocol):
     """Minimal project function lookup used at the angr boundary."""
 
-    def function(self, *, addr: int, create: bool) -> Function | None:
+    def function(self, *, addr: cython.longlong, create: cython.bint) -> Function | None:
         """Return the function at an exact target address."""
 
 
@@ -159,7 +165,7 @@ class _PrototypeFunctionSurface8616(Protocol):
 class _TargetProjectSurface8616(Protocol):
     """Minimal owned project policy used to select the generated-C ABI."""
 
-    _inertia_c_target: str
+    _inertia_c_target: object
 
 
 class _TypedExpressionSurface8616(Protocol):
@@ -168,24 +174,24 @@ class _TypedExpressionSurface8616(Protocol):
     type: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _CallsiteDeclarationInterface8616:
     """Typed callsite fields that determine one generated C declaration."""
 
     target_addr: int | None
-    argument_widths: tuple[int, ...]
-    stack_probe_helper: bool
+    argument_widths: object
+    stack_probe_helper: cython.bint
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class CallTargetIdentityStats8616:
     """Closed evidence loop for canonical direct-call identity materialization."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
 class _CallsiteReturnClass8616(Enum):
@@ -203,16 +209,18 @@ class CallsiteCResultKind8616(Enum):
     VALUE = "value"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallsiteCResultContract8616:
     """Final C result contract for one exactly resolved structured call."""
 
     kind: CallsiteCResultKind8616
-    c_type: str
+    c_type: object
 
 
+@cython.ccall
 def _structured_root_8616(cfunc: object) -> object | None:
     """Return the current structured root from the angr C function boundary."""
+    statements: object
     if cfunc is None:
         return None
     surface = cast(_CFunctionSurface8616, cfunc)
@@ -228,8 +236,10 @@ def _structured_root_8616(cfunc: object) -> object | None:
         return None
 
 
-def _call_name_8616(node: CFunctionCall) -> str | None:
+@cython.ccall
+def _call_name_8616(node: CFunctionCall) -> object:
     """Return a valid direct-call name from typed structured-call identity."""
+    callee: object
     target = node.callee_target
     if isinstance(target, str) and _C_IDENTIFIER_RE_8616.fullmatch(target) is not None:
         return target
@@ -243,13 +253,14 @@ def _call_name_8616(node: CFunctionCall) -> str | None:
     return name if isinstance(name, str) and _C_IDENTIFIER_RE_8616.fullmatch(name) is not None else None
 
 
-def _typed_summary_map_8616(value: object) -> dict[int, CallsiteSummary8616]:
+@cython.ccall
+def _typed_summary_map_8616(value: object) -> dict[cython.longlong, CallsiteSummary8616]:
     """Narrow dynamic codegen metadata to the owned typed summary contract."""
     if not isinstance(value, Mapping):
         return {}
     return {
         node_id: summary
-        for node_id, summary in value.items()
+        for node_id, summary in builtins.iter(value.items())
         if isinstance(node_id, int) and isinstance(summary, CallsiteSummary8616)
     }
 
@@ -257,17 +268,19 @@ def _typed_summary_map_8616(value: object) -> dict[int, CallsiteSummary8616]:
 def _summary_for_call_8616(
     project: object,
     node: CFunctionCall,
-    summaries: Mapping[int, CallsiteSummary8616],
+    summaries: Mapping[cython.longlong, CallsiteSummary8616],
 ) -> CallsiteSummary8616 | None:
     """Resolve exact identity or repeated summaries with one proven interface."""
+    compatible: object
+    exact: object
     exact = summaries.get(id(node))
     if exact is not None:
         return exact
     callsite_addr = _call_tag_addr_8616(node)
-    matches: tuple[CallsiteSummary8616, ...] = (
+    matches: object = (
         ()
         if not isinstance(callsite_addr, int)
-        else tuple(summary for summary in summaries.values() if summary.callsite_addr == callsite_addr)
+        else tuple(summary for summary in builtins.iter(summaries.values()) if operator.eq(summary.callsite_addr, callsite_addr))
     )
     compatible = _compatible_summary_8616(matches)
     if compatible is not None:
@@ -278,12 +291,16 @@ def _summary_for_call_8616(
     return _name_summary_8616(project, node, summaries)
 
 
+@cython.ccall
 def _name_summary_8616(
     project: object,
     node: CFunctionCall,
-    summaries: Mapping[int, CallsiteSummary8616],
+    summaries: Mapping[cython.longlong, CallsiteSummary8616],
 ) -> CallsiteSummary8616 | None:
     """Resolve a summary whose target's symbol name equals the call name."""
+    call_name: object
+    function: object
+    summary: object
     call_name = _call_name_8616(node)
     if call_name is None:
         return None
@@ -305,25 +322,27 @@ def _name_summary_8616(
             target_name = cast(_AddressedFunctionSurface8616, function).name
         except AttributeError:
             continue
-        if target_name == call_name:
+        if operator.eq(target_name, call_name):
             target_matches.append(summary)
     return _compatible_summary_8616(target_matches)
 
 
+@cython.ccall
 def _callsite_addr_8616(node: CFunctionCall) -> int | None:
     """Return one exact instruction address from a structured call."""
     callsite_addr = structured_callsite_addr_8616(node)
     return callsite_addr if isinstance(callsite_addr, int) else None
 
 
+@cython.ccall
 def _callsite_matches_summary_8616(
     project: object,
     node: CFunctionCall,
     summary: CallsiteSummary8616,
-) -> bool:
+) -> cython.bint:
     """Match exact active or rebased instruction identity to one summary."""
     callsite_addr = _callsite_addr_8616(node)
-    if callsite_addr == summary.callsite_addr:
+    if operator.eq(callsite_addr, summary.callsite_addr):
         return True
     try:
         original_delta = cast(_ProjectSurface8616, project)._inertia_original_linear_delta
@@ -332,12 +351,14 @@ def _callsite_matches_summary_8616(
     return (
         isinstance(callsite_addr, int)
         and isinstance(original_delta, int)
-        and callsite_addr + original_delta == summary.callsite_addr
+        and operator.eq(callsite_addr + original_delta, summary.callsite_addr)
     )
 
 
+@cython.ccall
 def _callee_addr_8616(node: CFunctionCall) -> int | None:
     """Return the explicit function-object address from a structured call."""
+    callee: object
     callee = node.callee_func
     if callee is None:
         return None
@@ -348,12 +369,14 @@ def _callee_addr_8616(node: CFunctionCall) -> int | None:
     return addr if isinstance(addr, int) else None
 
 
+@cython.ccall
 def _constant_register_indirect_target_addr_8616(
     project: object,
     node: CFunctionCall,
     summary: CallsiteSummary8616,
 ) -> int | None:
     """Return a proven near address from one constant register-call branch."""
+    register_name: object
     target = node.callee_target
     target_source = summary.target_source
     target_value = target.value if isinstance(target, CConstant) else None
@@ -372,13 +395,14 @@ def _constant_register_indirect_target_addr_8616(
     return normalized_target if isinstance(normalized_target, int) else None
 
 
+@cython.ccall
 def _indirect_register_call_reg_name_8616(
     summary: CallsiteSummary8616,
     node: CFunctionCall,
     target: object,
     target_source: object,
     target_value: object,
-) -> str | None:
+) -> object:
     """Return the proven near-register name, or None when unproven."""
     if (
         summary.target_addr is not None
@@ -395,17 +419,19 @@ def _indirect_register_call_reg_name_8616(
         or not 0 <= target_value <= 0xFFFF
     ):
         return None
-    if not isinstance(summary.arg_count, int) or summary.arg_count != len(
+    if not isinstance(summary.arg_count, int) or operator.ne(summary.arg_count, len(
         tuple(cast(Sequence[object], node.args or ()))
-    ):
+    )):
         return None
     return target_source[1]
 
 
+@cython.ccall
 def _storage_contract_return_decision_8616(
-    project: object, target_addr: int
-) -> tuple[bool, str | None]:
+    project: object, target_addr: cython.longlong
+) -> tuple[cython.bint, str | None]:
     """Resolve the storage-contract return lane: (decided, c_type)."""
+    storage_resolution: object
     storage_resolution = function_storage_resolution_8616(
         project,
         target_addr,
@@ -425,8 +451,10 @@ def _storage_contract_return_decision_8616(
     return False, None
 
 
-def _prototype_is_void_return_8616(project: object, target_addr: int) -> bool:
+@cython.ccall
+def _prototype_is_void_return_8616(project: object, target_addr: cython.longlong) -> cython.bint:
     """True when the target function's prototype declares a void return."""
+    function: object
     try:
         function = cast(_ProjectSurface8616, project).kb.functions.function(
             addr=target_addr,
@@ -445,8 +473,11 @@ def _prototype_is_void_return_8616(project: object, target_addr: int) -> bool:
     return False
 
 
+@cython.ccall
 def _call_tag_addr_8616(node: CFunctionCall) -> int | None:
     """Return the exact callsite instruction address recorded in node tags."""
+    value: object
+    key: object
     tags = node.tags
     callsite_addr = None
     if isinstance(tags, Mapping):
@@ -459,9 +490,10 @@ def _call_tag_addr_8616(node: CFunctionCall) -> int | None:
 
 
 def _callee_summary_8616(
-    node: CFunctionCall, summaries: Mapping[int, CallsiteSummary8616]
+    node: CFunctionCall, summaries: Mapping[cython.longlong, CallsiteSummary8616]
 ) -> CallsiteSummary8616 | None:
     """Resolve a summary by the callee's exact target address."""
+    callee: object
     callee = node.callee_func
     if callee is None:
         return None
@@ -471,15 +503,19 @@ def _callee_summary_8616(
         callee_addr = None
     if not isinstance(callee_addr, int):
         return None
-    matches = tuple(summary for summary in summaries.values() if summary.target_addr == callee_addr)
+    matches = tuple(summary for summary in builtins.iter(summaries.values()) if operator.eq(summary.target_addr, callee_addr))
     return _compatible_summary_8616(matches)
 
 
+@cython.ccall
 def canonicalize_callsite_target_identities_8616(
     project: object,
     codegen: object,
-) -> bool:
+) -> cython.bint:
     """Rebind each exact callsite to its authoritative target function and name."""
+    root: object
+    summary: object
+    node: object
     carrier = cast(_CodegenSurface8616, codegen)
     stats = CallTargetIdentityStats8616()
     carrier._inertia_call_target_identity_stats_8616 = stats
@@ -526,15 +562,17 @@ def canonicalize_callsite_target_identities_8616(
     return changed
 
 
+@cython.ccall
 def _canonicalize_call_identity_8616(
     project: object,
     functions: object,
     node: CFunctionCall,
     summary: CallsiteSummary8616,
     stats: CallTargetIdentityStats8616,
-    decisions: list[tuple[int | None, int | None, str]],
-) -> bool:
+    decisions: object,
+) -> cython.bint:
     """Rebind one call to its authoritative target identity; True when changed."""
+    constant_target_addr: object
     constant_target_addr = _constant_register_indirect_target_addr_8616(
         project,
         node,
@@ -580,7 +618,7 @@ def _canonicalize_call_identity_8616(
         stats.failure_count += 1
         decisions.append((current_addr, authoritative_target_addr, "name-missing"))
         return False
-    if node.callee_func is canonical_function and node.callee_target == canonical_name:
+    if node.callee_func is canonical_function and operator.eq(node.callee_target, canonical_name):
         decisions.append((current_addr, authoritative_target_addr, "already-canonical"))
         return False
     stats.classified_fact_count += 1
@@ -591,13 +629,15 @@ def _canonicalize_call_identity_8616(
     return True
 
 
+@cython.ccall
 def _canonical_target_identity_8616(
     functions: Any,  # noqa: ANN401
     node: CFunctionCall,
     current_addr: int | None,
-    authoritative_target_addr: int,
+    authoritative_target_addr: cython.longlong,
 ) -> tuple[object, object, str]:
     """Resolve the canonical function object and name for a proven target."""
+    canonical_function: object
     try:
         canonical_function = functions.function(
             addr=authoritative_target_addr,
@@ -619,26 +659,27 @@ def _canonical_target_identity_8616(
     return canonical_function, canonical_name, "materialized-function"
 
 
-def _summary_arg_widths_8616(summary: CallsiteSummary8616) -> tuple[int, ...] | None:
+def _summary_arg_widths_8616(summary: CallsiteSummary8616) -> object:
     """Return exact logical argument widths or refuse an incomplete summary."""
     if not isinstance(summary.arg_count, int) or summary.arg_count < 0:
         return None
     logical = summary.logical_arg_widths
     if logical:
-        normalized_logical = tuple(width for width in logical if isinstance(width, int) and width > 0)
-        if len(normalized_logical) != len(logical):
+        normalized_logical = tuple(width for width in iter(logical) if isinstance(width, int) and width > 0)
+        if operator.ne(len(normalized_logical), len(logical)):
             return None
         return normalized_logical
     widths = summary.arg_widths
-    normalized_widths = tuple(width for width in widths if isinstance(width, int) and width > 0)
-    if len(normalized_widths) != summary.arg_count or len(normalized_widths) != len(widths):
+    normalized_widths = tuple(width for width in iter(widths) if isinstance(width, int) and width > 0)
+    if operator.ne(len(normalized_widths), summary.arg_count) or operator.ne(len(normalized_widths), len(widths)):
         return None
     return normalized_widths
 
 
+@cython.ccall
 def _scalar_decl_for_width_8616(
-    width: int,
-    name: str,
+    width: cython.longlong,
+    name: object,
     signedness: StorageTrialSignedness8616 = StorageTrialSignedness8616.UNSIGNED,
 ) -> str:
     """Render a target-width scalar argument declaration."""
@@ -650,8 +691,10 @@ def _scalar_decl_for_width_8616(
     return f"{prefix}short {name}"
 
 
+@cython.ccall
 def _argument_type_8616(argument: object, *, codegen: object | None = None) -> object:
     """Return the explicit or structured-reference argument type."""
+    pointer_table_type: object
     if codegen is not None:
         pointer_table_type = callsite_pointer_table_argument_type_8616(codegen, argument)
         if pointer_table_type is not None:
@@ -673,15 +716,16 @@ def _argument_type_8616(argument: object, *, codegen: object | None = None) -> o
     return argument_type
 
 
+@cython.ccall
 def _argument_decl_8616(
     codegen: object,
     argument: object,
-    width: int,
-    index: int,
+    width: cython.longlong,
+    index: cython.longlong,
     *,
-    pointer_proven: bool,
+    pointer_proven: cython.bint,
     signedness: StorageTrialSignedness8616 = StorageTrialSignedness8616.UNSIGNED,
-) -> str:
+) -> object:
     """Render pointer class from typed AST evidence, otherwise summary width."""
     argument_type = _argument_type_8616(argument, codegen=codegen)
     if isinstance(argument_type, SimTypePointer):
@@ -696,6 +740,7 @@ def _argument_decl_8616(
     return _scalar_decl_for_width_8616(width, f"a{index}", signedness)
 
 
+@cython.ccall
 def _argument_forward_declarations_8616(codegen: object, argument: object) -> tuple[str, ...]:
     """Return file-scope tag declarations required by one typed argument."""
     argument_type = _argument_type_8616(argument, codegen=codegen)
@@ -709,6 +754,7 @@ def _argument_forward_declarations_8616(codegen: object, argument: object) -> tu
     return (f"struct {pointee.name};",)
 
 
+@cython.ccall
 def _used_return_class_8616(
     summary: CallsiteSummary8616,
 ) -> _CallsiteReturnClass8616 | None:
@@ -726,8 +772,9 @@ def _joined_return_type_8616(
     project: object,
     summary: CallsiteSummary8616,
     summaries: Sequence[CallsiteSummary8616],
-) -> str | None:
+) -> object:
     """Join caller-use evidence for one exact target or refuse ABI conflict."""
+    evidence: object
     if isinstance(summary.target_addr, int):
         decided, storage_type = _storage_contract_return_decision_8616(project, summary.target_addr)
         if decided:
@@ -755,12 +802,12 @@ def _joined_return_type_8616(
         return "void" if void_evidence.proves_void else "int"
 
     if isinstance(summary.target_addr, int):
-        related = tuple(candidate for candidate in summaries if candidate.target_addr == summary.target_addr)
+        related = tuple(candidate for candidate in iter(summaries) if operator.eq(candidate.target_addr, summary.target_addr))
     else:
         related = (summary,)
     used_classes = {
         return_class
-        for candidate in related
+        for candidate in iter(related)
         if (return_class := _used_return_class_8616(candidate)) is not None
     }
     if _CallsiteReturnClass8616.UNKNOWN in used_classes or len(used_classes) > 1:
@@ -770,10 +817,12 @@ def _joined_return_type_8616(
     return next(iter(used_classes)).value
 
 
+@cython.ccall
 def _declaration_interface_8616(
     summary: CallsiteSummary8616,
 ) -> _CallsiteDeclarationInterface8616 | None:
     """Return the declaration contract or refuse incomplete argument evidence."""
+    widths: object
     widths = _summary_arg_widths_8616(summary)
     if widths is None:
         return None
@@ -784,10 +833,13 @@ def _declaration_interface_8616(
     )
 
 
+@cython.ccall
 def _compatible_summary_8616(
     summaries: Sequence[CallsiteSummary8616],
 ) -> CallsiteSummary8616 | None:
     """Return one representative only when every summary proves one interface."""
+    expected: object
+    summary: object
     if not summaries:
         return None
     first = summaries[0]
@@ -795,25 +847,30 @@ def _compatible_summary_8616(
     if expected is None:
         return None
     for summary in summaries[1:]:
-        if _declaration_interface_8616(summary) != expected:
+        if operator.ne(_declaration_interface_8616(summary), expected):
             return None
     return first
 
 
 
+@cython.ccall
 def _process_callsite_declaration_8616(
     project: object,
     codegen: object,
     node: CFunctionCall,
-    summary: CallsiteSummary8616 | None,
-    all_summaries: tuple[CallsiteSummary8616, ...],
-    result_contracts: dict[int, CallsiteCResultContract8616],
-    desired_by_name: dict[str, str],
-    fallback_declarations_by_name: dict[str, set[str]],
-    required_forward_decls: set[str],
-    ambiguous_names: set[str],
-) -> int:
+    summary: object,
+    all_summaries: object,
+    result_contracts: object,
+    desired_by_name: object,
+    fallback_declarations_by_name: object,
+    required_forward_decls: object,
+    ambiguous_names: object,
+) -> cython.longlong:
     """Process one resolved call; returns 1 when a summary was consumed."""
+    call_name: object
+    declaration: object
+    probe_declaration: object
+    probe_name: object
     if summary is not None and summary.stack_probe_helper:
         probe_name = _call_name_8616(node)
         probe_declaration = (
@@ -862,6 +919,7 @@ def _process_callsite_declaration_8616(
     return 1
 
 
+@cython.ccall
 def _debug_callsite_unmatched_8616(node: CFunctionCall) -> None:
     """Emit the unmatched-callsite diagnostic when enabled."""
     if os.environ.get("INERTIA_DEBUG_CALLSITE_PROTOTYPE_DECLS") == "1":
@@ -873,6 +931,7 @@ def _debug_callsite_unmatched_8616(node: CFunctionCall) -> None:
         )
 
 
+@cython.ccall
 def _debug_callsite_declaration_evidence_8616(node: CFunctionCall, summary: CallsiteSummary8616) -> None:
     """Emit the per-callsite evidence diagnostic when enabled."""
     if os.environ.get("INERTIA_DEBUG_CALLSITE_PROTOTYPE_DECLS") == "1":
@@ -892,6 +951,7 @@ def _debug_callsite_declaration_evidence_8616(node: CFunctionCall, summary: Call
         )
 
 
+@cython.ccall
 def _debug_callsite_declaration_refused_8616(node: CFunctionCall, summary: CallsiteSummary8616) -> None:
     """Emit the refused-declaration diagnostic when enabled."""
     if os.environ.get("INERTIA_DEBUG_CALLSITE_PROTOTYPE_DECLS") == "1":
@@ -904,14 +964,16 @@ def _debug_callsite_declaration_refused_8616(node: CFunctionCall, summary: Calls
         )
 
 
+@cython.ccall
 def _call_return_contract_8616(
     project: object,
     summary: CallsiteSummary8616,
-    call_name: str | None,
-    all_summaries: tuple[CallsiteSummary8616, ...],
-    result_contracts: dict[int, CallsiteCResultContract8616],
-) -> str | None:
+    call_name: object,
+    all_summaries: object,
+    result_contracts: object,
+) -> object:
     """Join the call's return type and record the result contract."""
+    return_type: object
     inferred_return_type = _joined_return_type_8616(project, summary, all_summaries)
     return_type = (
         KNOWN_EXTERNAL_RETURN_TYPES_8616.get(call_name, inferred_return_type)
@@ -930,12 +992,13 @@ def _call_return_contract_8616(
     return return_type
 
 
+@cython.ccall
 def _debug_callsite_no_declarations_8616(
-    call_count: int,
-    summaries: Mapping[int, CallsiteSummary8616],
-    matched_count: int,
-    existing: tuple[str, ...],
-    ambiguous_names: set[str],
+    call_count: cython.longlong,
+    summaries: Mapping[cython.longlong, CallsiteSummary8616],
+    matched_count: cython.longlong,
+    existing: object,
+    ambiguous_names: object,
 ) -> None:
     """Emit the no-declarations diagnostic when enabled."""
     if os.environ.get("INERTIA_DEBUG_CALLSITE_PROTOTYPE_DECLS") == "1":
@@ -950,15 +1013,18 @@ def _debug_callsite_no_declarations_8616(
         )
 
 
+@cython.ccall
 def _select_call_declaration_8616(
     project: object,
     codegen: object,
     node: CFunctionCall,
     summary: CallsiteSummary8616,
-    call_name: str | None,
-    return_type: str | None,
+    call_name: object,
+    return_type: object,
 ) -> tuple[str | None, object]:
     """Choose the declaration for one call; also returns the runtime decl."""
+    declaration: object
+    inferred_declaration: object
     runtime_declaration = (
         runtime_helper_declaration_8616(call_name, _project_c_target_8616(project))
         if call_name is not None
@@ -982,10 +1048,10 @@ def _select_call_declaration_8616(
     )
     if (
         isinstance(known_helper_declaration, str)
-        and declaration == known_helper_declaration
+        and operator.eq(declaration, known_helper_declaration)
         and isinstance(call_name, str)
         and call_name
-        and _declaration_name_8616(known_helper_declaration) != call_name
+        and operator.ne(_declaration_name_8616(known_helper_declaration), call_name)
     ):
         declaration = _declaration_with_call_name_8616(known_helper_declaration, call_name)
     if declaration is None and return_type is not None:
@@ -1006,19 +1072,23 @@ def _select_call_declaration_8616(
     return declaration, runtime_declaration
 
 
+@cython.ccall
 def _record_call_declaration_8616(
     codegen: object,
     node: CFunctionCall,
     summary: CallsiteSummary8616,
-    declaration: str,
+    declaration: object,
     runtime_declaration: object,
-    return_type: str | None,
-    desired_by_name: dict[str, str],
-    fallback_declarations_by_name: dict[str, set[str]],
-    required_forward_decls: set[str],
-    ambiguous_names: set[str],
+    return_type: object,
+    desired_by_name: object,
+    fallback_declarations_by_name: object,
+    required_forward_decls: object,
+    ambiguous_names: object,
 ) -> None:
     """Record one call's declaration, forward decls, and conflicts."""
+    name: object
+    previous: object
+    argument: object
     for argument in tuple(cast(Sequence[object], node.args or ())):
         required_forward_decls.update(_argument_forward_declarations_8616(codegen, argument))
     name = _declaration_name_8616(declaration)
@@ -1027,7 +1097,7 @@ def _record_call_declaration_8616(
     if runtime_declaration is None and return_type is not None:
         fallback_declarations_by_name.setdefault(name, set()).add(f"{return_type} {name}();")
     previous = desired_by_name.get(name)
-    if previous is not None and previous != declaration:
+    if previous is not None and operator.ne(previous, declaration):
         if os.environ.get("INERTIA_DEBUG_CALLSITE_PROTOTYPE_DECLS") == "1":
             _LOGGER.warning(
                 "callsite declaration conflict: name=%s previous=%s current=%s callsite=%#x",
@@ -1042,10 +1112,11 @@ def _record_call_declaration_8616(
     desired_by_name[name] = declaration
 
 
+@cython.ccall
 def _debug_callsite_lowering_unavailable_8616(
     root: object,
-    summaries: Mapping[int, CallsiteSummary8616],
-    inventory: Mapping[int, CallsiteSummary8616],
+    summaries: Mapping[cython.longlong, CallsiteSummary8616],
+    inventory: Mapping[cython.longlong, CallsiteSummary8616],
 ) -> None:
     """Emit the lowering-unavailable diagnostic when enabled."""
     if os.environ.get("INERTIA_DEBUG_CALLSITE_PROTOTYPE_DECLS") == "1":
@@ -1060,11 +1131,13 @@ def _debug_callsite_lowering_unavailable_8616(
 def _resolved_call_summary_pairs_8616(
     project: object,
     root: object,
-    summaries: Mapping[int, CallsiteSummary8616],
-    inventory: Mapping[int, CallsiteSummary8616],
-) -> list[tuple[CFunctionCall, CallsiteSummary8616 | None]]:
+    summaries: Mapping[cython.longlong, CallsiteSummary8616],
+    inventory: Mapping[cython.longlong, CallsiteSummary8616],
+) -> object:
     """Resolve every structured call to its summary when provable."""
-    call_nodes = tuple(node for node in _iter_c_nodes_deep_8616(root) if isinstance(node, CFunctionCall))
+    summary: object
+    node: object
+    call_nodes = tuple(node for node in builtins.iter(_iter_c_nodes_deep_8616(root)) if isinstance(node, CFunctionCall))
     resolved_calls: list[tuple[CFunctionCall, CallsiteSummary8616 | None]] = []
     for node in call_nodes:
         summary = _summary_for_call_8616(project, node, summaries)
@@ -1075,28 +1148,31 @@ def _resolved_call_summary_pairs_8616(
 
 
 def _call_name_sets_8616(
-    resolved_calls: list[tuple[CFunctionCall, CallsiteSummary8616 | None]],
+    resolved_calls: object,
 ) -> tuple[frozenset[str], frozenset[str]]:
     """Return (active call names, obsolete numeric sub_ names)."""
     active_call_names = frozenset(
-        name for node, _summary in resolved_calls if (name := _call_name_8616(node)) is not None
+        name for node, _summary in iter(resolved_calls) if (name := _call_name_8616(node)) is not None
     )
     obsolete_numeric_names = frozenset(
         numeric_name
-        for node, summary in resolved_calls
+        for node, summary in iter(resolved_calls)
         if summary is not None and isinstance(summary.target_addr, int)
         and (numeric_name := f"sub_{summary.target_addr:x}") not in active_call_names
-        and _call_name_8616(node) != numeric_name
+        and operator.ne(_call_name_8616(node), numeric_name)
     )
     return active_call_names, obsolete_numeric_names
 
 
+@cython.ccall
 def _resolve_ambiguous_declarations_8616(
-    desired_by_name: dict[str, str],
-    fallback_declarations_by_name: dict[str, set[str]],
-    ambiguous_names: set[str],
+    desired_by_name: object,
+    fallback_declarations_by_name: object,
+    ambiguous_names: object,
 ) -> None:
     """Re-admit ambiguous names only when one fallback spelling survives."""
+    fallback_declarations: object
+    name: object
     for name in ambiguous_names:
         fallback_declarations = fallback_declarations_by_name.get(name, set())
         if len(fallback_declarations) == 1:
@@ -1104,12 +1180,15 @@ def _resolve_ambiguous_declarations_8616(
 
 
 def _merge_prototype_declarations_8616(
-    existing: tuple[str, ...],
-    desired_by_name: dict[str, str],
-    obsolete_numeric_names: frozenset[str],
-    required_forward_decls: set[str],
+    existing: object,
+    desired_by_name: object,
+    obsolete_numeric_names: object,
+    required_forward_decls: object,
 ) -> tuple[str, ...]:
     """Merge desired declarations into the existing surface deterministically."""
+    desired: object
+    name: object
+    declaration: object
     merged: list[str] = []
     materialized_names: set[str] = set()
     for declaration in existing:
@@ -1130,35 +1209,37 @@ def _merge_prototype_declarations_8616(
     ordered_forward_decls = tuple(sorted(required_forward_decls))
     return (
         *ordered_forward_decls,
-        *(declaration for declaration in merged if declaration not in required_forward_decls),
+        *(declaration for declaration in iter(merged) if declaration not in required_forward_decls),
     )
 
 
-def _scalar_storage_compatible_8616(contract: FunctionStorageContract8616 | None) -> bool:
+def _scalar_storage_compatible_8616(contract: object) -> cython.bint:
     """Permit C scalar interpretation only for independently proven value storage."""
     return contract is None or all(
         slot.value_class is StorageTrialValueClass8616.VALUE
-        for slot in (*contract.inputs, *(output for output in contract.outputs if output.role is StorageTrialRole8616.RETURN))
+        for slot in iter(tuple(contract.inputs) + tuple((output for output in iter(contract.outputs) if output.role is StorageTrialRole8616.RETURN)))
     )
 
 
-def _scalar_return_width_8616(contract: FunctionStorageContract8616 | None) -> int | None:
+def _scalar_return_width_8616(contract: object) -> int | None:
     """Retain the physical width of an already proven scalar return slot."""
     if contract is None:
         return None
-    returns = tuple(slot for slot in contract.outputs if slot.role is StorageTrialRole8616.RETURN)
+    returns = tuple(slot for slot in iter(contract.outputs) if slot.role is StorageTrialRole8616.RETURN)
     return returns[0].width if len(returns) == 1 else None
 
 
 def _scalar_declaration_types_8616(
-    project: object, target: int | None, widths: tuple[int, ...], return_type: str, name: str, return_width: int | None,
-) -> tuple[tuple[StorageTrialSignedness8616, ...], str, tuple[str, ...] | None] | None:
+    project: object, target: int | None, widths: object, return_type: object, name: object, return_width: object,
+) -> object:
     """Consume exact-arity scalar snapshots without overriding pointer storage."""
-    scalar_signedness = tuple(StorageTrialSignedness8616.UNSIGNED for _ in widths)
+    prototype: object
+    transported: object
+    scalar_signedness = tuple(StorageTrialSignedness8616.UNSIGNED for _ in iter(widths))
     spellings = None
     if type(target) is int:
         transported = current_scalar_interface_8616(project, target)
-        if transported is not None and tuple(item.width for item in transported.arguments) != widths:
+        if transported is not None and operator.ne(tuple(item.width for item in iter(transported.arguments)), widths):
             return None
         prototype = authoritative_function_prototype_for_address_8616(project, target, argument_count=len(widths))
         if prototype is None:
@@ -1167,19 +1248,19 @@ def _scalar_declaration_types_8616(
             except AttributeError:
                 function = None
             prototype = authoritative_function_prototype_8616(project, function, argument_count=len(widths))
-        if prototype is not None and all(isinstance(item, (SimTypeInt, SimTypeChar)) for item in prototype.args):
-            if prototype.variadic or any(item.size != width * 8 for item, width in zip(prototype.args, widths, strict=True)):
+        if prototype is not None and all(isinstance(item, (SimTypeInt, SimTypeChar)) for item in iter(prototype.args)):
+            if prototype.variadic or any(operator.ne(item.size, width * 8) for item, width in builtins.iter(zip(prototype.args, widths, strict=True))):
                 return None
             if isinstance(prototype.returnty, (SimTypeInt, SimTypeChar)):
-                if return_width is not None and prototype.returnty.size != return_width * 8:
+                if return_width is not None and operator.ne(prototype.returnty.size, return_width * 8):
                     return None
                 return_type = prototype.returnty.c_repr()
             if any(callee_pointer_argument_is_proven_8616(project, name, index) for index in range(len(widths))):
                 return None
-            spellings = tuple(item.c_repr() for item in prototype.args)
+            spellings = tuple(item.c_repr() for item in iter(prototype.args))
             scalar_signedness = tuple(
                 StorageTrialSignedness8616.SIGNED if item.signed else StorageTrialSignedness8616.UNSIGNED
-                for item in prototype.args
+                for item in iter(prototype.args)
             )
     return scalar_signedness, return_type, spellings
 
@@ -1189,9 +1270,16 @@ def _prototype_decl_8616(
     codegen: object,
     node: CFunctionCall,
     summary: CallsiteSummary8616,
-    return_type: str,
-) -> str | None:
+    return_type: object,
+) -> object:
     """Build one declaration when name, arity, widths, and arguments agree."""
+    binding: object
+    name: object
+    scalar_spellings: object
+    scalar_types: object
+    storage_contract: object
+    storage_resolution: object
+    widths: object
     name = _call_name_8616(node)
     widths = _summary_arg_widths_8616(summary)
     storage_contract = None
@@ -1208,7 +1296,7 @@ def _prototype_decl_8616(
             )
             if binding is None:
                 return None
-            widths = tuple(slot.width for slot in storage_contract.inputs)
+            widths = tuple(slot.width for slot in iter(storage_contract.inputs))
         else:
             width_contract = collect_callee_argument_width_evidence_8616(
                 project, summary.target_addr
@@ -1218,7 +1306,7 @@ def _prototype_decl_8616(
                     width_contract.argument_widths if width_contract.closes_census else None
                 )
     arguments = tuple(cast(Sequence[object], node.args or ()))
-    if name is None or widths is None or len(arguments) != len(widths):
+    if name is None or widths is None or operator.ne(len(arguments), len(widths)):
         return None
     scalar_types = _scalar_declaration_types_8616(
         project, summary.target_addr if _scalar_storage_compatible_8616(storage_contract) else None,
@@ -1245,13 +1333,15 @@ def _prototype_decl_8616(
                 else scalar_signedness[index]
             ),
         )
-        for index, (argument, width) in enumerate(zip(arguments, widths, strict=True))
+        for index, (argument, width) in builtins.iter(enumerate(zip(arguments, widths, strict=True)))
     )
     return f"{return_type} {name}({args});"
 
 
-def _has_typed_aggregate_pointer_argument_8616(node: CFunctionCall) -> bool:
+@cython.ccall
+def _has_typed_aggregate_pointer_argument_8616(node: CFunctionCall) -> cython.bint:
     """Prefer inferred declarations when a call carries a proven struct pointer."""
+    argument: object
     for argument in tuple(cast(Sequence[object], node.args or ())):
         try:
             argument_type = cast(_TypedExpressionSurface8616, argument).type
@@ -1264,12 +1354,13 @@ def _has_typed_aggregate_pointer_argument_8616(node: CFunctionCall) -> bool:
     return False
 
 
+@cython.ccall
 def _program_arity_fallback_decl_8616(
     project: object,
     summary: CallsiteSummary8616,
-    name: str,
-    return_type: str,
-) -> str | None:
+    name: object,
+    return_type: object,
+) -> object:
     """Return an unprototyped declaration for a discovered but open arity census."""
     if not isinstance(summary.target_addr, int):
         return None
@@ -1283,14 +1374,18 @@ def _program_arity_fallback_decl_8616(
     return f"{return_type} {name}();"
 
 
-def _declaration_name_8616(declaration: str) -> str | None:
+@cython.ccall
+def _declaration_name_8616(declaration: object) -> object:
     """Return the outer function name from a generated C declaration."""
+    match: object
     match = _DECLARATION_NAME_RE_8616.match(declaration)
     return match.group("name") if match is not None else None
 
 
-def _declaration_with_call_name_8616(declaration: str, call_name: str) -> str:
+@cython.ccall
+def _declaration_with_call_name_8616(declaration: object, call_name: object) -> object:
     """Spell a known helper declaration with the emitted call identifier."""
+    match: object
     match = _DECLARATION_NAME_RE_8616.match(declaration)
     if match is None:
         return declaration
@@ -1301,7 +1396,8 @@ def _declaration_with_call_name_8616(declaration: str, call_name: str) -> str:
     )
 
 
-def _project_c_target_8616(project: object) -> str | None:
+@cython.ccall
+def _project_c_target_8616(project: object) -> object:
     """Return the configured generated-C target from the project policy."""
     try:
         target = cast(_TargetProjectSurface8616, project)._inertia_c_target
@@ -1310,13 +1406,16 @@ def _project_c_target_8616(project: object) -> str | None:
     return target if isinstance(target, str) else None
 
 
-def materialize_callsite_prototype_declarations_8616(project: object, codegen: object) -> bool:
+def materialize_callsite_prototype_declarations_8616(project: object, codegen: object) -> cython.bint:
     """Store evidence-backed declaration metadata for current direct calls.
 
     This pass deliberately does not assign ``callee.prototype``. It runs after
     call-producing structuring passes, where semantic prototype mutation can
     invalidate an already materialized return call.
     """
+    root: object
+    summary: object
+    node: object
     surface = cast(_CodegenSurface8616, codegen)
     try:
         root = _structured_root_8616(surface.cfunc)
@@ -1324,7 +1423,7 @@ def materialize_callsite_prototype_declarations_8616(project: object, codegen: o
     except AttributeError:
         return False
     inventory = callsite_summary_inventory_8616(codegen)
-    all_summaries = tuple({summary.callsite_addr: summary for summary in (*summaries.values(), *inventory.values())}.values())
+    all_summaries = tuple({summary.callsite_addr: summary for summary in iter(tuple(summaries.values()) + tuple(inventory.values()))}.values())
     if root is None or not all_summaries:
         _debug_callsite_lowering_unavailable_8616(root, summaries, inventory)
         return False
@@ -1333,14 +1432,14 @@ def materialize_callsite_prototype_declarations_8616(project: object, codegen: o
     materialize_callsite_pointer_table_types_8616(
         project,
         codegen,
-        ((node, summary) for node, summary in resolved_calls if summary is not None and not summary.stack_probe_helper),
+        ((node, summary) for node, summary in iter(resolved_calls) if summary is not None and not summary.stack_probe_helper),
     )
     existing = get_codegen_sequence_attr(codegen, surface.cfunc, "_inertia_callsite_prototype_decls")
     desired_by_name: dict[str, str] = {}
     fallback_declarations_by_name: dict[str, set[str]] = {}
     required_forward_decls: set[str] = set()
     ambiguous_names: set[str] = set()
-    result_contracts: dict[int, CallsiteCResultContract8616] = {}
+    result_contracts: dict[cython.longlong, CallsiteCResultContract8616] = {}
     call_count = 0
     matched_count = 0
     for node, summary in resolved_calls:

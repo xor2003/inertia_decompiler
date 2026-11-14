@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed flag and condition semantic helpers.
 
 Layer: Semantics.
@@ -8,6 +9,7 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import cython
 
 from inertia.ir.condition_ir import (
     build_condition_ir_8616,

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Preserve AIL branch occurrences through symbolic condition interning.
 
 Layer: Structuring.
@@ -10,40 +11,43 @@ conversion boundary. Equal values do not establish identical CFG occurrences.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Protocol, cast
 
 import claripy
 from claripy.annotation import Annotation
+import dataclasses
 
 
 class _ConditionSurface(Protocol):
     """AIL expression provenance consumed at this boundary."""
 
-    tags: dict[str, object]
+    tags: object
 
 
 class _ProcessorSurface(Protocol):
     """angr's symbolic-expression provenance publication surface."""
 
-    _ast2annotations: dict[claripy.ast.Base, dict[str, object]]
+    _ast2annotations: object
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class ConditionOriginAnnotation8616:
     """Implement Claripy's annotation protocol with fully owned typed state."""
 
-    source: int
-    block: int
+    source: cython.longlong
+    block: cython.longlong
 
     @property
-    def eliminatable(self) -> bool:
+    def eliminatable(self) -> cython.bint:
         """Refuse simplifications that would erase this branch occurrence."""
         return False
 
     @property
-    def relocatable(self) -> bool:
+    def relocatable(self) -> cython.bint:
         """Do not publish an operand's origin as a composite guard's origin."""
         return False
 
@@ -52,6 +56,7 @@ class ConditionOriginAnnotation8616:
         raise ValueError("Branch-origin annotations cannot be relocated")
 
 
+@cython.ccall
 def preserve_symbolic_condition_origin_8616(
     processor: object, condition: object, result: claripy.ast.Bool,
 ) -> claripy.ast.Bool:

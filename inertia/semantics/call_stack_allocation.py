@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Retain guarded allocation identity and requests without effect authority.
 
 Layer: Semantics.
@@ -10,6 +11,8 @@ Do not infer effects from names, requested sizes, rendered C, or source sidecars
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -30,13 +33,15 @@ from inertia.semantics.compiler_helpers import (
 
 from .call_stack_effect_contracts import CallStackEffectFailure8616
 from .register_value_preservation import register_value_family_8616
+import dataclasses
+import operator
 
 _WORD_BYTES = 2
 _WORD_LIMIT = 1 << 16
 _AX_FAMILY = register_value_family_8616("ax")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallStackAllocationCandidate8616:
     """A guarded probe call's known request provenance, frame and identity.
 
@@ -48,17 +53,18 @@ class CallStackAllocationCandidate8616:
     None when no unclobbered constant AX write reaches the site.
     """
 
-    callsite_addr: int
-    target_addr: int
+    callsite_addr: cython.longlong
+    target_addr: cython.longlong
     value_instruction_addr: int | None
     allocation_size: int | None
     frame_kind: CallsiteMachineFrameKind8616
 
 
+@cython.ccall
 def resolve_call_stack_allocation_8616(
     summary: CallsiteSummary8616,
-    candidate: CallStackAllocationCandidate8616 | None,
-) -> tuple[IRCallStackEffect8616, CallStackEffectFailure8616 | None] | None:
+    candidate: object,
+) -> object:
     """Refuse guarded allocation candidates; ordinary calls keep normal handling.
 
     No authenticated owner discharges the probe's failure guards, so every
@@ -73,23 +79,27 @@ def resolve_call_stack_allocation_8616(
     return None
 
 
+@cython.ccall
 def _constant_ax_write(instruction: IRInstr) -> int | None:
     """Accept a complete direct AX constant assignment, not partial arithmetic."""
     destination = instruction.dst
     source = instruction.args[0] if instruction.args else None
-    exact_word = isinstance(destination, IRValue) and destination.name == "ax" and destination.size == _WORD_BYTES
+    exact_word = isinstance(destination, IRValue) and destination.name == "ax" and operator.eq(destination.size, _WORD_BYTES)
     if instruction.op != "MOV" or not exact_word or not isinstance(source, IRValue):
         return None
-    if source.space is not MemSpace.CONST or source.offset != 0 or source.size != _WORD_BYTES:
+    if source.space is not MemSpace.CONST or source.offset != 0 or operator.ne(source.size, _WORD_BYTES):
         return None
     value = source.const
     return value if isinstance(value, int) and 0 <= value < _WORD_LIMIT else None
 
 
+@cython.ccall
 def _binary_stack_allocation_target_frame_8616(
     project: object, instruction: IRInstr, summary: CallsiteSummary8616 | None = None,
-) -> tuple[int, CallsiteMachineFrameKind8616] | None:
+) -> object:
     """Identify the target and near/far frame; this does not prove effects."""
+    evidence: object
+    target_addr: object
     target = instruction.args[0] if instruction.args else None
     if not isinstance(target, IRValue) or target.space is not MemSpace.CONST:
         return None
@@ -99,7 +109,7 @@ def _binary_stack_allocation_target_frame_8616(
                    if summary is None else summary.target_addr)
     if target_addr is None:
         return None
-    same_target = target.const == target_addr or x86_16_call_targets_equivalent_8616(
+    same_target = operator.eq(target.const, target_addr) or x86_16_call_targets_equivalent_8616(
         project, target.const, target_addr,
     )
     if not same_target:
@@ -114,19 +124,22 @@ def _binary_stack_allocation_target_frame_8616(
     return None
 
 
+@cython.ccall
 def binary_stack_allocation_target_8616(
     project: object, instruction: IRInstr, summary: CallsiteSummary8616 | None = None,
 ) -> int | None:
     """Project the exact binary target for consumers that do not need its frame."""
+    evidence: object
     evidence = _binary_stack_allocation_target_frame_8616(project, instruction, summary)
     return None if evidence is None else evidence[0]
 
 
+@cython.ccall
 def collect_call_stack_allocation_candidates_8616(
     project: object,
     artifact: IRFunctionArtifact,
     summaries: Mapping[int, CallsiteSummary8616] | None = None,
-) -> dict[int, CallStackAllocationCandidate8616]:
+) -> object:
     """Collect guarded probe candidates; unknown paths retain normal refusal.
 
     The immediate is recovered from IR, never the summary's requested size.
@@ -138,9 +151,15 @@ def collect_call_stack_allocation_candidates_8616(
     is unknown or the summary is unmarked, so the consumer refuses explicitly
     instead of falling through to the balanced zero-argument ABI.
     """
-    candidates: dict[int, CallStackAllocationCandidate8616] = {}
+    allocation: object
+    site: object
+    summary: object
+    target_frame: object
+    block: object
+    instruction: object
+    candidates: dict[cython.longlong, CallStackAllocationCandidate8616] = {}
     for block in artifact.blocks:
-        allocation: int | None = None
+        allocation = None
         origin: int | None = None
         for instruction in block.instrs:
             destination = instruction.dst

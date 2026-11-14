@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Project semantic carry/borrow links onto exact Alias identities.
 
 Layer: Alias.
@@ -10,6 +11,8 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from inertia.ir.core import IRCallOutputProvenance8616, IRCallOutputShape8616, IRInstr, IRValue, MemSpace
 from inertia.ir.ssa_function import SSAFunctionArtifact
@@ -40,8 +43,11 @@ from .storage_fact_join import (
     SegmentedAliasRange8616,
     join_adjacent_segmented_alias_facts_8616,
 )
+import operator
+import builtins
 
 
+@cython.ccall
 def _refusal(
     semantics: CarryBorrowResolution8616 | None,
     failure: CarryBorrowAliasFailure8616,
@@ -57,35 +63,38 @@ def _refusal(
     )
 
 
-def _ssa_identity_8616(value: IRValue) -> tuple[MemSpace, str | None, int, int, int | None]:
+@cython.ccall
+def _ssa_identity_8616(value: IRValue) -> tuple[MemSpace, str | None, cython.longlong, cython.longlong, int | None]:
     """Return the exact SSA storage identity relevant to Alias projection."""
     return (value.space, value.name, value.offset, value.size, value.version)
 
 
+@cython.ccall
 def _valid_call_output_definition_8616(
     instruction: IRInstr,
     expected: IRValue,
     provenance: IRCallOutputProvenance8616,
-) -> bool:
+) -> cython.bint:
     """Check one typed CALL_OUTPUT definition without parsing diagnostic text."""
+    destination: object
     destination = instruction.dst
     if (
         instruction.op != "CALL_OUTPUT"
         or destination is None
-        or instruction.addr != provenance.callsite_addr
+        or operator.ne(instruction.addr, provenance.callsite_addr)
         or len(instruction.args) != 1
     ):
         return False
     if (
-        destination.call_output != provenance
-        or _ssa_identity_8616(destination) != _ssa_identity_8616(expected)
+        operator.ne(destination.call_output, provenance)
+        or operator.ne(_ssa_identity_8616(destination), _ssa_identity_8616(expected))
     ):
         return False
     target = instruction.args[0]
     return (
         isinstance(target, IRValue)
         and target.space is MemSpace.CONST
-        and target.const == provenance.target_addr
+        and operator.eq(target.const, provenance.target_addr)
     )
 
 
@@ -93,22 +102,25 @@ def _call_output_candidates_8616(
     function_ssa: SSAFunctionArtifact,
     expected: IRValue,
     provenance: IRCallOutputProvenance8616,
-) -> tuple[tuple[int, int, IRValue], ...]:
+) -> tuple[tuple[cython.longlong, cython.longlong, IRValue], ...]:
     """Collect exact CALL_OUTPUT definitions for one SSA register use."""
     return tuple(
         (block.addr, instr_index, instruction.dst)
-        for block in function_ssa.blocks
-        for instr_index, instruction in enumerate(block.instrs)
+        for block in iter(function_ssa.blocks)
+        for instr_index, instruction in builtins.iter(enumerate(block.instrs))
         if instruction.dst is not None
         and _valid_call_output_definition_8616(instruction, expected, provenance)
     )
 
 
+@cython.ccall
 def _resolve_lhs_call_output_8616(
-    function_ssa: SSAFunctionArtifact | None,
+    function_ssa: object,
     link: CarryBorrowLink8616,
 ) -> CarryBorrowCallOutputAlias8616 | CarryBorrowAliasFailure8616 | None:
     """Resolve a complete exact call-return identity for both arithmetic halves."""
+    high_provenance: object
+    low_provenance: object
     low_value = link.low_lhs.value
     high_value = link.high_lhs.value
     low_provenance = low_value.call_output
@@ -117,7 +129,7 @@ def _resolve_lhs_call_output_8616(
         return None
     if low_provenance is None or high_provenance is None:
         return CarryBorrowAliasFailure8616.CALL_OUTPUT_PARTIAL
-    if low_provenance != high_provenance:
+    if operator.ne(low_provenance, high_provenance):
         return CarryBorrowAliasFailure8616.CALL_OUTPUT_CONFLICT
     if (
         low_provenance.shape is not IRCallOutputShape8616.DX_AX
@@ -137,8 +149,8 @@ def _resolve_lhs_call_output_8616(
     low_block, low_index, low_output = low_candidates[0]
     high_block, high_index, high_output = high_candidates[0]
     if (
-        low_block != link.low_arithmetic.block_addr
-        or high_block != link.high_base_arithmetic.block_addr
+        operator.ne(low_block, link.low_arithmetic.block_addr)
+        or operator.ne(high_block, link.high_base_arithmetic.block_addr)
         or low_index >= link.low_arithmetic.instr_index
         or high_index >= link.high_base_arithmetic.instr_index
     ):
@@ -150,11 +162,16 @@ def _resolve_lhs_call_output_8616(
     )
 
 
+@cython.ccall
 def _result_domains_8616(
     semantics: CarryBorrowResolution8616,
     link: CarryBorrowLink8616,
-) -> tuple[DomainKey, DomainKey] | CarryBorrowAliasResolution8616:
+) -> object:
     """Prove distinct low/high result-register domains for one link."""
+    high_result: object
+    high_result_domain: object
+    low_result: object
+    low_result_domain: object
     low_result = link.low_result_write.instruction.dst
     high_result = link.high_result_write.instruction.dst
     if low_result is None or high_result is None:
@@ -165,7 +182,7 @@ def _result_domains_8616(
     high_result_domain = register_domain_for_value_8616(high_result)
     if low_result_domain is None or high_result_domain is None:
         return _refusal(semantics, CarryBorrowAliasFailure8616.WIDTH_MISMATCH)
-    if low_result_domain == high_result_domain:
+    if operator.eq(low_result_domain, high_result_domain):
         return _refusal(semantics, CarryBorrowAliasFailure8616.CARRIER_ALIAS_MISMATCH)
     return low_result_domain, high_result_domain
 
@@ -173,8 +190,9 @@ def _result_domains_8616(
 def _operand_aliases_8616(
     semantics: CarryBorrowResolution8616,
     link: CarryBorrowLink8616,
-) -> tuple[CarryBorrowOperandAlias8616, ...] | CarryBorrowAliasResolution8616:
+) -> object:
     """Resolve all four operand aliases; any operand failure aborts the link."""
+    failed_operand: object
     operand_uses = (
         (CarryBorrowOperandRole8616.LOW_LHS, link.low_lhs),
         (CarryBorrowOperandRole8616.LOW_RHS, link.low_rhs),
@@ -183,12 +201,12 @@ def _operand_aliases_8616(
     )
     alias_results = tuple(
         (role, resolve_carry_borrow_source_alias_8616(use))
-        for role, use in operand_uses
+        for role, use in iter(operand_uses)
     )
     failed_operand = next(
         (
             (role, item)
-            for role, item in alias_results
+            for role, item in iter(alias_results)
             if isinstance(item, CarryBorrowAliasFailure8616)
         ),
         None,
@@ -198,7 +216,7 @@ def _operand_aliases_8616(
         return _refusal(semantics, failure, failure_operand=role)
     aliases = tuple(
         item
-        for _role, item in alias_results
+        for _role, item in iter(alias_results)
         if isinstance(item, CarryBorrowOperandAlias8616)
     )
     if len(aliases) != 4:
@@ -206,14 +224,16 @@ def _operand_aliases_8616(
     return aliases
 
 
+@cython.ccall
 def _rhs_source_8616(
     semantics: CarryBorrowResolution8616,
     low_rhs: CarryBorrowOperandAlias8616,
     high_rhs: CarryBorrowOperandAlias8616,
-) -> tuple[SegmentedAliasRange8616 | None, int | None] | CarryBorrowAliasResolution8616:
+) -> object:
     """Join the low/high right-hand operand sources into one 32-bit source."""
+    source_memory: object
     if low_rhs.register_domain is not None and high_rhs.register_domain is not None:
-        if low_rhs.register_domain == high_rhs.register_domain:
+        if operator.eq(low_rhs.register_domain, high_rhs.register_domain):
             return _refusal(semantics, CarryBorrowAliasFailure8616.CARRIER_ALIAS_MISMATCH)
         return None, None
     if low_rhs.memory is not None and high_rhs.memory is not None:
@@ -250,9 +270,9 @@ def _project_link(
         return aliases
     low_lhs, low_rhs, high_lhs, high_rhs = aliases
     if (
-        not all(alias.complete for alias in (low_lhs, low_rhs, high_lhs, high_rhs))
-        or low_lhs.register_domain != low_result_domain
-        or high_lhs.register_domain != high_result_domain
+        not all(alias.complete for alias in iter((low_lhs, low_rhs, high_lhs, high_rhs)))
+        or operator.ne(low_lhs.register_domain, low_result_domain)
+        or operator.ne(high_lhs.register_domain, high_result_domain)
         or low_lhs.memory is not None
         or high_lhs.memory is not None
     ):
@@ -287,8 +307,8 @@ def project_carry_borrow_aliases_8616(
     function_ssa: SSAFunctionArtifact | None = None,
 ) -> CarryBorrowAliasEvidence8616:
     """Resolve exact Alias identities for all semantic carry/borrow outcomes."""
-    resolutions: tuple[CarryBorrowAliasResolution8616, ...]
-    if function_ssa is not None and function_ssa.function_addr != evidence.function_addr:
+    resolutions: object
+    if function_ssa is not None and operator.ne(function_ssa.function_addr, evidence.function_addr):
         resolutions = (
             _refusal(None, CarryBorrowAliasFailure8616.FUNCTION_SSA_MISMATCH),
         )
@@ -301,9 +321,9 @@ def project_carry_borrow_aliases_8616(
             _project_link(item, item.link, function_ssa)
             if item.verdict is CarryBorrowVerdict8616.PROVEN and item.link is not None
             else _refusal(item, CarryBorrowAliasFailure8616.SEMANTICS_REFUSED)
-            for item in evidence.resolutions
+            for item in iter(evidence.resolutions)
         )
-    materialized = sum(item.fact is not None for item in resolutions)
+    materialized = sum(item.fact is not None for item in iter(resolutions))
     return CarryBorrowAliasEvidence8616(
         function_addr=evidence.function_addr,
         resolutions=resolutions,

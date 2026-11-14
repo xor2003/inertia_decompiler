@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Cache parsed sidecar metadata as optional evidence artifacts.
 
 Layer: CLI/fallback/reporting.
@@ -5,6 +6,8 @@ Responsibility: persist optional sidecar metadata without turning debug evidence
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import hashlib
 import json
@@ -27,6 +30,8 @@ from inertia.cli.lst_extract import (
     DebugTypeReferenceEvidence,
     LSTMetadata,
 )
+import dataclasses
+import builtins
 
 _SOURCE_FORMAT_RENAMES = {
     "flair_pat": "startup_flair_pat",
@@ -38,15 +43,15 @@ _SOURCE_FORMAT_DROP_TOKENS = {
 }
 _SIDECAR_METADATA_PARSER_CACHE_VERSION = 13
 
-type PayloadSequence = tuple[object, ...]
-type PayloadPairs = tuple[tuple[object, object], ...]
-type PayloadTriples = tuple[tuple[object, object, object], ...]
+PayloadSequence = typing.TypeAliasType("PayloadSequence", tuple[object, ...])
+PayloadPairs = typing.TypeAliasType("PayloadPairs", tuple[tuple[object, object], ...])
+PayloadTriples = typing.TypeAliasType("PayloadTriples", tuple[tuple[object, object, object], ...])
 
 
 class _KnowledgeBaseLike(Protocol):
     """Project knowledge-base surface used to attach sidecar labels."""
 
-    labels: dict[int, str]
+    labels: object
 
 
 class _ProjectLike(Protocol):
@@ -54,22 +59,26 @@ class _ProjectLike(Protocol):
 
     kb: _KnowledgeBaseLike
     _inertia_lst_metadata: LSTMetadata
-    _inertia_debug_source_files: tuple[str, ...]
-    _inertia_debug_type_names: tuple[str, ...]
-    _inertia_debug_type_descriptors: tuple[DebugTypeDescriptorEvidence, ...]
-    _inertia_debug_type_references: tuple[DebugTypeReferenceEvidence, ...]
-    _inertia_debug_symbols: tuple[DebugSymbolEvidence, ...]
-    _inertia_debug_type_members: tuple[DebugTypeMemberEvidence, ...]
-    _inertia_debug_enum_members: tuple[DebugEnumMemberEvidence, ...]
-    _inertia_debug_identifiers: tuple[str, ...]
-    _inertia_debug_line_map: dict[int, tuple[int, int]]
+    _inertia_debug_source_files: object
+    _inertia_debug_type_names: object
+    _inertia_debug_type_descriptors: object
+    _inertia_debug_type_references: object
+    _inertia_debug_symbols: object
+    _inertia_debug_type_members: object
+    _inertia_debug_enum_members: object
+    _inertia_debug_identifiers: object
+    _inertia_debug_line_map: object
 
 
-def _visible_source_format(source_format: str | None) -> str:
+@cython.ccall
+def _visible_source_format(source_format: object) -> object:
     return _normalize_source_format(source_format)
 
 
-def _normalize_source_format(source_format: str | None) -> str:
+@cython.ccall
+def _normalize_source_format(source_format: object) -> object:
+    token: object
+    part: object
     raw = source_format or ""
     normalized_tokens: list[str] = []
     seen: set[str] = set()
@@ -94,17 +103,18 @@ _PROJECT_ATTR_KEYS = (
 )
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class CachedSidecarMetadata:
     """Cached sidecar metadata plus optional project-scoped signature attributes."""
 
     metadata: LSTMetadata
-    project_attrs: dict[str, tuple[str, ...]]
+    project_attrs: object
 
 
 def _maybe_rebase_stale_absolute_metadata(metadata: LSTMetadata, project: _ProjectLike) -> LSTMetadata:
     """Rebase every address projection together, retaining signature provenance."""
     def _impl() -> LSTMetadata:
+        main_object: object
         # Dynamic angr boundary: loader/main_object are supplied by the third-party Project.
         main_object = getattr(getattr(project, "loader", None), "main_object", None)
         # Dynamic angr boundary: linked_base is optional on loader main objects.
@@ -125,15 +135,15 @@ def _maybe_rebase_stale_absolute_metadata(metadata: LSTMetadata, project: _Proje
             return metadata
         shift = linked_base
         return LSTMetadata(
-            data_labels={addr + shift: name for addr, name in metadata.data_labels.items()},
-            code_labels={addr + shift: name for addr, name in metadata.code_labels.items()},
+            data_labels={addr + shift: name for addr, name in builtins.iter(metadata.data_labels.items())},
+            code_labels={addr + shift: name for addr, name in builtins.iter(metadata.code_labels.items())},
             code_ranges={
-                addr + shift: (start + shift, end + shift) for addr, (start, end) in metadata.code_ranges.items()
+                addr + shift: (start + shift, end + shift) for addr, (start, end) in builtins.iter(metadata.code_ranges.items())
             },
-            function_entry_addrs=frozenset(addr + shift for addr in metadata.function_entry_addrs),
-            signature_code_addrs=frozenset(addr + shift for addr in metadata.signature_code_addrs),
+            function_entry_addrs=frozenset(addr + shift for addr in iter(metadata.function_entry_addrs)),
+            signature_code_addrs=frozenset(addr + shift for addr in iter(metadata.signature_code_addrs)),
             signature_code_ranges={addr + shift: (start + shift, end + shift)
-                                   for addr, (start, end) in metadata.signature_code_ranges.items()},
+                                   for addr, (start, end) in builtins.iter(metadata.signature_code_ranges.items())},
             absolute_addrs=True,
             source_format=metadata.source_format,
             struct_names=metadata.struct_names,
@@ -145,26 +155,28 @@ def _maybe_rebase_stale_absolute_metadata(metadata: LSTMetadata, project: _Proje
                 replace(symbol, linear_addr=symbol.linear_addr + shift)
                 if symbol.linear_addr is not None
                 else symbol
-                for symbol in metadata.debug_symbols
+                for symbol in iter(metadata.debug_symbols)
             ),
             debug_type_members=metadata.debug_type_members,
             debug_enum_members=metadata.debug_enum_members,
             debug_identifiers=metadata.debug_identifiers,
-            debug_line_map={addr + shift: line for addr, line in metadata.debug_line_map.items()},
+            debug_line_map={addr + shift: line for addr, line in builtins.iter(metadata.debug_line_map.items())},
             cod_path=metadata.cod_path,
-            cod_proc_kinds={addr + shift: kind for addr, kind in metadata.cod_proc_kinds.items()},
+            cod_proc_kinds={addr + shift: kind for addr, kind in builtins.iter(metadata.cod_proc_kinds.items())},
         )
 
     return _impl()
 
 
+@cython.ccall
 def sidecar_metadata_cache_key(
     *,
     binary_path: Path | None,
-    pat_backend: str | None,
+    pat_backend: object,
     signature_catalog: Path | None,
-) -> dict[str, object] | None:
+) -> object:
     """Build the cache key for sidecar metadata inputs."""
+    signature_fingerprint: object
     extra: dict[str, object] = {
         "pat_backend": pat_backend or "",
         "parser_version": _SIDECAR_METADATA_PARSER_CACHE_VERSION,
@@ -175,13 +187,17 @@ def sidecar_metadata_cache_key(
     return _sidecar_metadata_cache_key(binary_path=binary_path, kind="sidecar_metadata", extra=extra)
 
 
+@cython.ccall
 def load_cached_sidecar_metadata(
     *,
     binary_path: Path | None,
-    pat_backend: str | None,
+    pat_backend: object,
     signature_catalog: Path | None,
 ) -> tuple[CachedSidecarMetadata | None, dict[str, object] | None]:
     """Load cached sidecar metadata and its cache key when available."""
+    cache_key: object
+    metadata: object
+    metadata_payload: object
     cache_key = sidecar_metadata_cache_key(
         binary_path=binary_path,
         pat_backend=pat_backend,
@@ -202,9 +218,10 @@ def load_cached_sidecar_metadata(
     return CachedSidecarMetadata(metadata=metadata, project_attrs=project_attrs), cache_key
 
 
+@cython.ccall
 def store_cached_sidecar_metadata(
     *,
-    cache_key: dict[str, object] | None,
+    cache_key: object,
     metadata: LSTMetadata,
     project: _ProjectLike,
 ) -> None:
@@ -218,8 +235,13 @@ def store_cached_sidecar_metadata(
     _store_cache_json("sidecar_metadata", cache_key, payload)
 
 
+@cython.ccall
 def apply_cached_sidecar_metadata(project: _ProjectLike, cached: CachedSidecarMetadata) -> LSTMetadata:
     """Attach cached sidecar metadata to a project and return the effective metadata."""
+    addr: object
+    key: object
+    name: object
+    values: object
     metadata = _maybe_rebase_stale_absolute_metadata(cached.metadata, project)
     project._inertia_lst_metadata = metadata
     _attach_debug_evidence_attrs(project, metadata)
@@ -233,6 +255,7 @@ def apply_cached_sidecar_metadata(project: _ProjectLike, cached: CachedSidecarMe
     return metadata
 
 
+@cython.ccall
 def _attach_debug_evidence_attrs(project: _ProjectLike, metadata: LSTMetadata) -> None:
     project._inertia_debug_source_files = metadata.debug_source_files
     project._inertia_debug_type_names = metadata.debug_type_names
@@ -245,8 +268,12 @@ def _attach_debug_evidence_attrs(project: _ProjectLike, metadata: LSTMetadata) -
     project._inertia_debug_line_map = metadata.debug_line_map
 
 
+@cython.ccall
 def emit_sidecar_metadata_debug(project: _ProjectLike, metadata: LSTMetadata) -> None:
     """Emit a compact debug summary for loaded sidecar metadata."""
+    compiler_names: object
+    flair_titles: object
+    name: object
     print(
         f"[dbg] loaded sidecar metadata: format={_visible_source_format(metadata.source_format)} "
         f"code_labels={len(metadata.code_labels)} data_labels={len(metadata.data_labels)} "
@@ -288,12 +315,12 @@ def emit_sidecar_metadata_debug(project: _ProjectLike, metadata: LSTMetadata) ->
 def _serialize_lst_metadata(metadata: LSTMetadata) -> dict[str, object]:
     """Persist optional bounds and verified signature extents independently."""
     return {
-        "data_labels": sorted(metadata.data_labels.items()),
-        "code_labels": sorted(metadata.code_labels.items()),
-        "code_ranges": sorted((addr, start, end) for addr, (start, end) in metadata.code_ranges.items()),
+        "data_labels": sorted(tuple(metadata.data_labels.items())),
+        "code_labels": sorted(tuple(metadata.code_labels.items())),
+        "code_ranges": sorted((addr, start, end) for addr, (start, end) in builtins.iter(metadata.code_ranges.items())),
         "function_entry_addrs": sorted(metadata.function_entry_addrs),
         "signature_code_addrs": sorted(metadata.signature_code_addrs),
-        "signature_code_ranges": sorted((addr, start, end) for addr, (start, end) in metadata.signature_code_ranges.items()),
+        "signature_code_ranges": sorted((addr, start, end) for addr, (start, end) in builtins.iter(metadata.signature_code_ranges.items())),
         "absolute_addrs": bool(metadata.absolute_addrs),
         "source_format": metadata.source_format,
         "struct_names": list(metadata.struct_names),
@@ -314,7 +341,7 @@ def _serialize_lst_metadata(metadata: LSTMetadata) -> dict[str, object]:
                 "upper_bound": descriptor.upper_bound,
                 "source": descriptor.source,
             }
-            for descriptor in metadata.debug_type_descriptors
+            for descriptor in iter(metadata.debug_type_descriptors)
         ],
         "debug_type_references": [
             {
@@ -323,7 +350,7 @@ def _serialize_lst_metadata(metadata: LSTMetadata) -> dict[str, object]:
                 "symbol_class": ref.symbol_class,
                 "source": ref.source,
             }
-            for ref in metadata.debug_type_references
+            for ref in iter(metadata.debug_type_references)
         ],
         "debug_symbols": [
             {
@@ -337,10 +364,10 @@ def _serialize_lst_metadata(metadata: LSTMetadata) -> dict[str, object]:
                 "length": symbol.length,
                 "type_index": symbol.type_index,
                 "owner_name": symbol.owner_name,
-                "attributes": [[key, value] for key, value in symbol.attributes],
+                "attributes": [[key, value] for key, value in iter(symbol.attributes)],
                 "source": symbol.source,
             }
-            for symbol in metadata.debug_symbols
+            for symbol in iter(metadata.debug_symbols)
         ],
         "debug_type_members": [
             {
@@ -352,7 +379,7 @@ def _serialize_lst_metadata(metadata: LSTMetadata) -> dict[str, object]:
                 "attributes": member.attributes,
                 "source": member.source,
             }
-            for member in metadata.debug_type_members
+            for member in iter(metadata.debug_type_members)
         ],
         "debug_enum_members": [
             {
@@ -362,16 +389,17 @@ def _serialize_lst_metadata(metadata: LSTMetadata) -> dict[str, object]:
                 "attributes": member.attributes,
                 "source": member.source,
             }
-            for member in metadata.debug_enum_members
+            for member in iter(metadata.debug_enum_members)
         ],
         "debug_identifiers": list(metadata.debug_identifiers),
-        "debug_line_map": sorted((addr, line, col) for addr, (line, col) in metadata.debug_line_map.items()),
+        "debug_line_map": sorted((addr, line, col) for addr, (line, col) in builtins.iter(metadata.debug_line_map.items())),
         "cod_path": metadata.cod_path,
-        "cod_proc_kinds": sorted(metadata.cod_proc_kinds.items()),
+        "cod_proc_kinds": sorted(tuple(metadata.cod_proc_kinds.items())),
     }
 
 
-def lst_metadata_content_digest_8616(metadata: LSTMetadata) -> str:
+@cython.ccall
+def lst_metadata_content_digest_8616(metadata: LSTMetadata) -> object:
     """Return deterministic identity for all attached sidecar evidence fields."""
     encoded = json.dumps(
         _serialize_lst_metadata(metadata),
@@ -381,14 +409,18 @@ def lst_metadata_content_digest_8616(metadata: LSTMetadata) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _payload_sequence(payload: dict[str, object], key: str) -> PayloadSequence:
+@cython.ccall
+def _payload_sequence(payload: object, key: object) -> PayloadSequence:
+    value: object
     value = payload.get(key, ())
     if isinstance(value, (list, tuple)):
         return tuple(value)
     return ()
 
 
-def _payload_pairs(payload: dict[str, object], key: str) -> PayloadPairs:
+@cython.ccall
+def _payload_pairs(payload: object, key: object) -> PayloadPairs:
+    item: object
     pairs: list[tuple[object, object]] = []
     for item in _payload_sequence(payload, key):
         if isinstance(item, (list, tuple)) and len(item) == 2:
@@ -396,7 +428,9 @@ def _payload_pairs(payload: dict[str, object], key: str) -> PayloadPairs:
     return tuple(pairs)
 
 
-def _payload_triples(payload: dict[str, object], key: str) -> PayloadTriples:
+@cython.ccall
+def _payload_triples(payload: object, key: object) -> PayloadTriples:
+    item: object
     triples: list[tuple[object, object, object]] = []
     for item in _payload_sequence(payload, key):
         if isinstance(item, (list, tuple)) and len(item) == 3:
@@ -404,8 +438,11 @@ def _payload_triples(payload: dict[str, object], key: str) -> PayloadTriples:
     return tuple(triples)
 
 
-def _payload_ints(payload: dict[str, object], key: str) -> tuple[int, ...]:
-    values: list[int] = []
+@cython.ccall
+def _payload_ints(payload: object, key: object) -> tuple[cython.longlong, ...]:
+    value: object
+    item: object
+    values: list[cython.longlong] = []
     for item in _payload_sequence(payload, key):
         value = _optional_int(item)
         if value is not None:
@@ -413,7 +450,8 @@ def _payload_ints(payload: dict[str, object], key: str) -> tuple[int, ...]:
     return tuple(values)
 
 
-def _coerce_cache_int(value: object) -> int:
+@cython.ccall
+def _coerce_cache_int(value: object) -> cython.longlong:
     if isinstance(value, int):
         return value
     if isinstance(value, (str, bytes, bytearray)):
@@ -421,34 +459,35 @@ def _coerce_cache_int(value: object) -> int:
     return int(str(value))
 
 
-def _deserialize_lst_metadata(payload: dict[str, object]) -> LSTMetadata | None:
+def _deserialize_lst_metadata(payload: object) -> LSTMetadata | None:
     """Restore typed evidence; older caches cannot invent verified extents."""
+    cod_path: object
     try:
-        data_labels = {_coerce_cache_int(addr): str(name) for addr, name in _payload_pairs(payload, "data_labels")}
-        code_labels = {_coerce_cache_int(addr): str(name) for addr, name in _payload_pairs(payload, "code_labels")}
+        data_labels = {_coerce_cache_int(addr): str(name) for addr, name in builtins.iter(_payload_pairs(payload, "data_labels"))}
+        code_labels = {_coerce_cache_int(addr): str(name) for addr, name in builtins.iter(_payload_pairs(payload, "code_labels"))}
         code_ranges = {
             _coerce_cache_int(addr): (_coerce_cache_int(start), _coerce_cache_int(end))
-            for addr, start, end in _payload_triples(payload, "code_ranges")
+            for addr, start, end in builtins.iter(_payload_triples(payload, "code_ranges"))
         }
         signature_code_ranges = {
             _coerce_cache_int(addr): (_coerce_cache_int(start), _coerce_cache_int(end))
-            for addr, start, end in _payload_triples(payload, "signature_code_ranges")
+            for addr, start, end in builtins.iter(_payload_triples(payload, "signature_code_ranges"))
         }
         signature_code_addrs = frozenset(_payload_ints(payload, "signature_code_addrs"))
         function_entry_addrs = frozenset(_payload_ints(payload, "function_entry_addrs"))
-        cod_proc_kinds = {_coerce_cache_int(addr): str(kind) for addr, kind in _payload_pairs(payload, "cod_proc_kinds")}
-        struct_names = tuple(str(name) for name in _payload_sequence(payload, "struct_names"))
-        debug_source_files = tuple(str(name) for name in _payload_sequence(payload, "debug_source_files"))
-        debug_type_names = tuple(str(name) for name in _payload_sequence(payload, "debug_type_names"))
+        cod_proc_kinds = {_coerce_cache_int(addr): str(kind) for addr, kind in builtins.iter(_payload_pairs(payload, "cod_proc_kinds"))}
+        struct_names = tuple(str(name) for name in builtins.iter(_payload_sequence(payload, "struct_names")))
+        debug_source_files = tuple(str(name) for name in builtins.iter(_payload_sequence(payload, "debug_source_files")))
+        debug_type_names = tuple(str(name) for name in builtins.iter(_payload_sequence(payload, "debug_type_names")))
         debug_type_descriptors = _deserialize_debug_type_descriptors(payload.get("debug_type_descriptors", ()))
         debug_type_references = _deserialize_debug_type_references(payload.get("debug_type_references", ()))
         debug_symbols = _deserialize_debug_symbols(payload.get("debug_symbols", ()))
         debug_type_members = _deserialize_debug_type_members(payload.get("debug_type_members", ()))
         debug_enum_members = _deserialize_debug_enum_members(payload.get("debug_enum_members", ()))
-        debug_identifiers = tuple(str(name) for name in _payload_sequence(payload, "debug_identifiers"))
+        debug_identifiers = tuple(str(name) for name in builtins.iter(_payload_sequence(payload, "debug_identifiers")))
         debug_line_map = {
             _coerce_cache_int(addr): (_coerce_cache_int(line), _coerce_cache_int(col))
-            for addr, line, col in _payload_triples(payload, "debug_line_map")
+            for addr, line, col in builtins.iter(_payload_triples(payload, "debug_line_map"))
         }
         cod_path = payload.get("cod_path")
         if cod_path is not None:
@@ -479,7 +518,9 @@ def _deserialize_lst_metadata(payload: dict[str, object]) -> LSTMetadata | None:
         return None
 
 
+@cython.ccall
 def _deserialize_debug_type_members(payload: object) -> tuple[DebugTypeMemberEvidence, ...]:
+    item: object
     if not isinstance(payload, list):
         return ()
     members: list[DebugTypeMemberEvidence] = []
@@ -508,7 +549,10 @@ def _deserialize_debug_type_members(payload: object) -> tuple[DebugTypeMemberEvi
     return tuple(members)
 
 
+@cython.ccall
 def _deserialize_debug_type_descriptors(payload: object) -> tuple[DebugTypeDescriptorEvidence, ...]:
+    type_index: object
+    item: object
     if not isinstance(payload, list):
         return ()
     descriptors: list[DebugTypeDescriptorEvidence] = []
@@ -538,7 +582,9 @@ def _deserialize_debug_type_descriptors(payload: object) -> tuple[DebugTypeDescr
     return tuple(descriptors)
 
 
+@cython.ccall
 def _deserialize_debug_symbols(payload: object) -> tuple[DebugSymbolEvidence, ...]:
+    item: object
     if not isinstance(payload, list):
         return ()
     symbols: list[DebugSymbolEvidence] = []
@@ -567,7 +613,9 @@ def _deserialize_debug_symbols(payload: object) -> tuple[DebugSymbolEvidence, ..
     return tuple(symbols)
 
 
+@cython.ccall
 def _deserialize_symbol_attributes(payload: object) -> tuple[tuple[str, str], ...]:
+    item: object
     if not isinstance(payload, list):
         return ()
     attrs: list[tuple[str, str]] = []
@@ -578,7 +626,10 @@ def _deserialize_symbol_attributes(payload: object) -> tuple[tuple[str, str], ..
     return tuple(attrs)
 
 
+@cython.ccall
 def _deserialize_debug_type_references(payload: object) -> tuple[DebugTypeReferenceEvidence, ...]:
+    type_index: object
+    item: object
     if not isinstance(payload, list):
         return ()
     refs: list[DebugTypeReferenceEvidence] = []
@@ -600,7 +651,10 @@ def _deserialize_debug_type_references(payload: object) -> tuple[DebugTypeRefere
     return tuple(refs)
 
 
+@cython.ccall
 def _deserialize_debug_enum_members(payload: object) -> tuple[DebugEnumMemberEvidence, ...]:
+    value: object
+    item: object
     if not isinstance(payload, list):
         return ()
     members: list[DebugEnumMemberEvidence] = []
@@ -623,6 +677,7 @@ def _deserialize_debug_enum_members(payload: object) -> tuple[DebugEnumMemberEvi
     return tuple(members)
 
 
+@cython.ccall
 def _optional_int(value: object) -> int | None:
     if value is None:
         return None
@@ -631,23 +686,28 @@ def _optional_int(value: object) -> int | None:
     return int(value)
 
 
-def _serialize_project_attrs(project: _ProjectLike) -> dict[str, list[str]]:
+@cython.ccall
+def _serialize_project_attrs(project: _ProjectLike) -> object:
+    values: object
+    key: object
     payload: dict[str, list[str]] = {}
     for key in _PROJECT_ATTR_KEYS:
         # Dynamic compatibility boundary: project signature attrs are optional third-party Project sidecars.
         values = getattr(project, key, ())
         if not isinstance(values, (tuple, list)) or not values:
             continue
-        payload[key] = [str(value) for value in values]
+        payload[key] = [str(value) for value in iter(values)]
     return payload
 
 
-def _deserialize_project_attrs(payload: object) -> dict[str, tuple[str, ...]]:
+def _deserialize_project_attrs(payload: object) -> object:
+    values: object
+    key: object
     if not isinstance(payload, dict):
         return {}
     restored: dict[str, tuple[str, ...]] = {}
     for key in _PROJECT_ATTR_KEYS:
         values = payload.get(key)
         if isinstance(values, list) and values:
-            restored[key] = tuple(str(value) for value in values)
+            restored[key] = tuple(str(value) for value in iter(values))
     return restored

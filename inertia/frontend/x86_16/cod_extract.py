@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Optional evidence/reporting.
 
 Responsibility: parse COD listings into labels, bounds, source lines, and diagnostic metadata.
@@ -5,6 +6,8 @@ Forbidden: using COD text as required proof for arguments, types, control flow, 
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 import re
@@ -12,68 +15,74 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .cod_known_objects import canonical_known_cod_object_name
+import dataclasses
+import operator
+import builtins
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class CODGlobalRef:
     """Optional COD evidence for a global memory reference in one instruction."""
 
-    offset: int
-    name: str
-    relative_disp: int
-    width: int
-    indexed: bool
-    instruction_bytes: bytes
-    source_alias: str | None = None
+    offset: cython.longlong
+    name: object
+    relative_disp: cython.longlong
+    width: cython.longlong
+    indexed: cython.bint
+    instruction_bytes: object
+    source_alias: object = None
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class CODGlobalAddressRef:
     """Optional COD evidence for an immediate global-address reference."""
 
-    offset: int
-    name: str
-    relative_disp: int
-    width: int
-    instruction_bytes: bytes
-    string_literal: str | None = None
-    source_alias: str | None = None
+    offset: cython.longlong
+    name: object
+    relative_disp: cython.longlong
+    width: cython.longlong
+    instruction_bytes: object
+    string_literal: object = None
+    source_alias: object = None
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class CODProcMetadata:
     """Optional COD procedure metadata used as labels and diagnostics only."""
 
-    stack_aliases: dict[int, str]
-    call_names: tuple[str, ...]
-    call_sources: tuple[tuple[str, str], ...]
-    global_names: tuple[str, ...]
-    source_lines: tuple[str, ...]
-    source_line_set: frozenset[str]
+    stack_aliases: object
+    call_names: object
+    call_sources: object
+    global_names: object
+    source_lines: object
+    source_line_set: object
     global_refs: tuple[CODGlobalRef, ...] = ()
     global_address_refs: tuple[CODGlobalAddressRef, ...] = ()
-    instruction_offsets: tuple[int, ...] = ()
+    instruction_offsets: tuple[cython.longlong, ...] = ()
     cod_raw_entries: tuple[dict[str, object], ...] = ()
-    cod_path: str | None = None
+    cod_path: object = None
 
-    def has_source_lines(self, required_lines: tuple[str, ...]) -> bool:
+    def has_source_lines(self, required_lines: object) -> cython.bint:
         """Return whether this COD procedure includes all required source lines."""
         if not required_lines:
             return True
         return set(required_lines).issubset(self.source_line_set)
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class CODListingMetadata:
     """Procedure labels and ranges parsed from one COD listing."""
 
-    code_labels: dict[int, str]
-    code_ranges: dict[int, tuple[int, int]]
-    proc_kinds: dict[int, str]
+    code_labels: object
+    code_ranges: object
+    proc_kinds: object
 
 
-def extract_cod_function_entries(cod_path: Path, proc_name: str, proc_kind: str = "NEAR") -> list[dict[str, object]]:
+@cython.ccall
+def extract_cod_function_entries(cod_path: Path, proc_name: object, proc_kind: object = "NEAR") -> object:
     """Extract instruction rows for a named COD procedure."""
+    match: object
+    line: object
     lines = cod_path.read_text(errors="ignore").splitlines()
     start_marker = f"{proc_name}\tPROC {proc_kind}"
     end_marker = f"{proc_name}\tENDP"
@@ -108,18 +117,24 @@ def extract_cod_function_entries(cod_path: Path, proc_name: str, proc_kind: str 
 
 def extract_cod_listing_metadata(cod_path: Path) -> CODListingMetadata:
     """Extract procedure names, ranges, and kinds from a COD listing."""
+    current_name: object
+    current_start: object
+    end_match: object
+    entry_match: object
+    proc_match: object
+    line: object
     lines = cod_path.read_text(errors="ignore").splitlines()
     proc_re = re.compile(r"^\s*(?P<name>[A-Za-z_$?@][\w$?@]*)\s+PROC\s+(?P<kind>[A-Za-z]+)\b", re.IGNORECASE)
     endp_re = re.compile(r"^\s*(?P<name>[A-Za-z_$?@][\w$?@]*)\s+ENDP\b", re.IGNORECASE)
     entry_re = re.compile(r"\*\*\*\s+(?P<offset>[0-9A-Fa-f]+)\s+(?P<bytes>(?:[0-9A-Fa-f]{2}\s+)+)")
 
-    code_labels: dict[int, str] = {}
-    code_ranges: dict[int, tuple[int, int]] = {}
-    proc_kinds: dict[int, str] = {}
+    code_labels: dict[cython.longlong, str] = {}
+    code_ranges: dict[cython.longlong, tuple[cython.longlong, cython.longlong]] = {}
+    proc_kinds: dict[cython.longlong, str] = {}
 
-    current_name: str | None = None
-    current_kind: str | None = None
-    current_start: int | None = None
+    current_name = None
+    current_kind: object = None
+    current_start = None
     current_end: int | None = None
 
     def _finalize_current() -> None:
@@ -149,7 +164,7 @@ def extract_cod_listing_metadata(cod_path: Path) -> CODListingMetadata:
         if current_name is None:
             continue
         end_match = endp_re.match(line)
-        if end_match is not None and end_match.group("name") == current_name:
+        if end_match is not None and operator.eq(end_match.group("name"), current_name):
             _finalize_current()
             continue
         entry_match = entry_re.search(line)
@@ -165,10 +180,11 @@ def extract_cod_listing_metadata(cod_path: Path) -> CODListingMetadata:
     return CODListingMetadata(code_labels=code_labels, code_ranges=code_ranges, proc_kinds=proc_kinds)
 
 
-def extract_cod_proc_metadata(cod_path: Path, proc_name: str, proc_kind: str = "NEAR") -> CODProcMetadata:
+def extract_cod_proc_metadata(cod_path: Path, proc_name: object, proc_kind: object = "NEAR") -> CODProcMetadata:
     """Extract optional COD labels and source comments for one procedure."""
 
     def _impl() -> CODProcMetadata:
+        previous_end_index: object
         lines = cod_path.read_text(errors="ignore").splitlines()
         start_index, end_index = _cod_marker_indices_8616(lines, proc_name, proc_kind, cod_path)
 
@@ -176,7 +192,7 @@ def extract_cod_proc_metadata(cod_path: Path, proc_name: str, proc_kind: str = "
             (idx for idx in range(start_index - 1, -1, -1) if lines[idx].strip().endswith("ENDP")),
             -1,
         )
-        prelude_lines = [line for line in lines[previous_end_index + 1 : start_index] if line.lstrip().startswith(";")]
+        prelude_lines = [line for line in iter(lines[previous_end_index + 1 : start_index]) if line.lstrip().startswith(";")]
 
         collected = _collect_cod_proc_body_metadata_8616(
             lines[start_index : end_index + 1],
@@ -208,7 +224,7 @@ def extract_cod_proc_metadata(cod_path: Path, proc_name: str, proc_kind: str = "
             global_refs=tuple(global_refs),
             global_address_refs=tuple(global_address_refs),
             instruction_offsets=tuple(
-                offset for entry in raw_entries if (offset := _cod_entry_offset_8616(entry)) is not None
+                offset for entry in iter(raw_entries) if (offset := _cod_entry_offset_8616(entry)) is not None
             ),
             cod_raw_entries=tuple(raw_entries),
             cod_path=str(cod_path),
@@ -218,13 +234,17 @@ def extract_cod_proc_metadata(cod_path: Path, proc_name: str, proc_kind: str = "
 
 
 def _collect_cod_proc_body_metadata_8616(
-    proc_lines: list[str],
-    prelude_lines: list[str],
-    proc_name: str,
-    proc_kind: str,
-) -> tuple[dict[int, str], list[str], list[tuple[str, str]], list[str], list[str]]:
+    proc_lines: object,
+    prelude_lines: object,
+    proc_name: object,
+    proc_kind: object,
+) -> tuple[dict[cython.longlong, str], list[str], list[tuple[str, str]], list[str], list[str]]:
+    alias_match: object
+    alias_name: object
+    entry_match: object
+    line: object
     collect = False
-    stack_aliases: dict[int, str] = {}
+    stack_aliases: dict[cython.longlong, str] = {}
     call_names: list[str] = []
     call_sources: list[tuple[str, str]] = []
     global_names: list[str] = []
@@ -243,7 +263,7 @@ def _collect_cod_proc_body_metadata_8616(
     segment_registers = {"cs", "ds", "es", "ss", "fs", "gs"}
 
     source_lines.extend(
-        _cod_source_comment_text_8616(line) for line in prelude_lines if line.lstrip().startswith(";|***")
+        _cod_source_comment_text_8616(line) for line in iter(prelude_lines) if line.lstrip().startswith(";|***")
     )
 
     for line in proc_lines:
@@ -281,28 +301,35 @@ def _collect_cod_proc_body_metadata_8616(
 
 
 def _cod_marker_indices_8616(
-    lines: list[str], proc_name: str, proc_kind: str, cod_path: Path
-) -> tuple[int, int]:
+    lines: object, proc_name: object, proc_kind: object, cod_path: Path
+) -> tuple[cython.longlong, cython.longlong]:
+    end_index: object
+    start_index: object
     start_marker = f"{proc_name}\tPROC {proc_kind}"
     end_marker = f"{proc_name}\tENDP"
-    start_index = next((idx for idx, line in enumerate(lines) if start_marker in line), None)
-    end_index = next((idx for idx, line in enumerate(lines) if end_marker in line), None)
+    start_index = next((idx for idx, line in builtins.iter(enumerate(lines)) if start_marker in line), None)
+    end_index = next((idx for idx, line in builtins.iter(enumerate(lines)) if end_marker in line), None)
     if start_index is None or end_index is None or end_index <= start_index:
         raise ValueError(f"did not find {proc_name} ({proc_kind}) in {cod_path}")
     return start_index, end_index
 
 
-def _cod_source_comment_text_8616(line: str) -> str:
+@cython.ccall
+def _cod_source_comment_text_8616(line: object) -> object:
     return re.sub(r"^\s*;\|\*+\s*", "", line).strip()
 
 
-def _canonical_cod_name_8616(name: str) -> str:
+@cython.ccall
+def _canonical_cod_name_8616(name: object) -> object:
     return canonical_known_cod_object_name(name) or name
 
 
+@cython.ccall
 def _remember_call_source_8616(
-    source_text: str, call_sources: list[tuple[str, str]], seen_call_texts: set[str]
+    source_text: object, call_sources: object, seen_call_texts: object
 ) -> None:
+    call_name: object
+    call_text: object
     for call_name, call_text in _extract_source_call_expressions(source_text):
         if call_name in {"if", "while", "for", "switch", "return"} or call_name.startswith("$"):
             continue
@@ -315,7 +342,9 @@ def _remember_call_source_8616(
 _ASM_CALL_OPERAND_MARKERS_8616 = {"BYTE", "WORD", "DWORD", "QWORD", "FWORD", "PTR", "NEAR", "FAR"}
 
 
-def _remember_asm_calls_8616(asm_text: str, call_re: re.Pattern[str], call_names: list[str]) -> None:
+@cython.ccall
+def _remember_asm_calls_8616(asm_text: object, call_re: re.Pattern[str], call_names: object) -> None:
+    call_match: object
     for call_match in call_re.finditer(asm_text):
         callee = call_match.group(1)
         if callee == "__chkstk" or callee.startswith("$") or callee.upper() in _ASM_CALL_OPERAND_MARKERS_8616:
@@ -323,14 +352,16 @@ def _remember_asm_calls_8616(asm_text: str, call_re: re.Pattern[str], call_names
         call_names.append(_canonical_cod_name_8616(callee))
 
 
+@cython.ccall
 def _remember_asm_globals_8616(
-    asm_text: str,
+    asm_text: object,
     pattern: re.Pattern[str],
-    global_names: list[str],
-    seen_globals: set[str],
-    segment_registers: set[str],
-    proc_name: str,
+    global_names: object,
+    seen_globals: object,
+    segment_registers: object,
+    proc_name: object,
 ) -> None:
+    match: object
     for match in pattern.finditer(asm_text):
         global_name = match.group(1)
         if global_name.startswith("$") or global_name == proc_name or global_name.lower() in segment_registers:
@@ -363,8 +394,11 @@ _COD_SYMBOL_ALIAS_RE = re.compile(
 )
 
 
-def _extract_cod_symbol_aliases(lines: list[str]) -> dict[str, str]:
+@cython.ccall
+def _extract_cod_symbol_aliases(lines: object) -> object:
     """Return exact compiler-symbol aliases declared by COD ``EQU`` comments."""
+    match: object
+    line: object
     aliases: dict[str, str] = {}
     for line in lines:
         match = _COD_SYMBOL_ALIAS_RE.match(line)
@@ -374,19 +408,24 @@ def _extract_cod_symbol_aliases(lines: list[str]) -> dict[str, str]:
     return aliases
 
 
-def _cod_entry_offset_8616(entry: dict[str, object]) -> int | None:
+@cython.ccall
+def _cod_entry_offset_8616(entry: object) -> int | None:
     """Return a typed COD row offset when the parsed row carries one."""
+    offset: object
     offset = entry.get("offset")
     return offset if isinstance(offset, int) else None
 
 
-def _cod_entry_bytes_8616(entry: dict[str, object]) -> bytes | None:
+@cython.ccall
+def _cod_entry_bytes_8616(entry: object) -> object:
     """Return typed COD row instruction bytes when the parsed row carries them."""
+    data: object
     data = entry.get("bytes")
     return data if isinstance(data, bytes) else None
 
 
-def _parse_cod_global_disp(text: str | None) -> int:
+@cython.ccall
+def _parse_cod_global_disp(text: object) -> cython.longlong:
     if not text:
         return 0
     sign = -1 if text[0] == "-" else 1
@@ -400,11 +439,14 @@ def _parse_cod_global_disp(text: str | None) -> int:
     return sign * value
 
 
+@cython.ccall
 def _canonical_cod_global_ref_name(
-    raw_name: str | None,
-    symbol_aliases: dict[str, str] | None = None,
-) -> str | None:
+    raw_name: object,
+    symbol_aliases: object = None,
+) -> object:
     """Canonicalize one COD global while preserving unique storage identity."""
+    alias_name: object
+    static_match: object
     if not isinstance(raw_name, str) or not raw_name:
         return None
     raw = raw_name.lstrip("_")
@@ -418,11 +460,14 @@ def _canonical_cod_global_ref_name(
     return name if re.fullmatch(r"[A-Za-z_]\w*", name) is not None else None
 
 
+@cython.ccall
 def _canonical_cod_address_ref_name(
-    raw_name: str | None,
-    symbol_aliases: dict[str, str] | None = None,
-) -> str | None:
+    raw_name: object,
+    symbol_aliases: object = None,
+) -> object:
     """Canonicalize one COD address while preserving unique storage identity."""
+    alias_name: object
+    name: object
     if not isinstance(raw_name, str) or not raw_name:
         return None
     generated = raw_name.lstrip("_")
@@ -436,11 +481,20 @@ def _canonical_cod_address_ref_name(
     return name if re.fullmatch(r"[A-Za-z_]\w*", name) is not None else None
 
 
+@cython.ccall
 def _extract_cod_global_refs_from_entries(
-    entries: list[dict[str, object]],
-    symbol_aliases: dict[str, str] | None = None,
+    entries: object,
+    symbol_aliases: object = None,
 ) -> tuple[CODGlobalRef, ...]:
     """Extract typed global references from COD instruction rows."""
+    disp_match: object
+    indexed_match: object
+    instruction_bytes: object
+    match: object
+    name: object
+    offset: object
+    width: object
+    entry: object
     width_by_name = {"BYTE": 1, "WORD": 2, "DWORD": 4}
     refs: list[CODGlobalRef] = []
     for entry in entries:
@@ -477,12 +531,18 @@ def _extract_cod_global_refs_from_entries(
     return tuple(refs)
 
 
+@cython.ccall
 def _extract_cod_global_address_refs_from_entries(
-    entries: list[dict[str, object]],
-    string_literals: dict[str, str] | None = None,
-    symbol_aliases: dict[str, str] | None = None,
+    entries: object,
+    string_literals: object = None,
+    symbol_aliases: object = None,
 ) -> tuple[CODGlobalAddressRef, ...]:
     """Extract typed global-address references from COD instruction rows."""
+    instruction_bytes: object
+    match: object
+    name: object
+    offset: object
+    entry: object
     refs: list[CODGlobalAddressRef] = []
     literals = string_literals or {}
     for entry in entries:
@@ -511,7 +571,12 @@ def _extract_cod_global_address_refs_from_entries(
     return tuple(refs)
 
 
-def _extract_cod_data_string_literals(lines: list[str]) -> dict[str, str]:
+@cython.ccall
+def _extract_cod_data_string_literals(lines: object) -> object:
+    match: object
+    name: object
+    parsed: object
+    line: object
     literals: dict[str, str] = {}
     data_re = re.compile(r"^\s*(?P<label>[A-Za-z_$?@][\w$?@]*)\s+DB\s+(?P<body>.*)$", re.IGNORECASE)
     for line in lines:
@@ -527,7 +592,8 @@ def _extract_cod_data_string_literals(lines: list[str]) -> dict[str, str]:
     return literals
 
 
-def _parse_cod_db_string_literal(body: str) -> str | None:
+@cython.ccall
+def _parse_cod_db_string_literal(body: object) -> object:
     text = body.strip()
     if not text.startswith("'"):
         return None
@@ -555,8 +621,10 @@ def _parse_cod_db_string_literal(body: str) -> str | None:
     return "".join(chars)
 
 
-def _extract_source_call_expressions(source_text: str) -> list[tuple[str, str]]:
-    def _match_call(start: int) -> tuple[str, str, int] | None:
+def _extract_source_call_expressions(source_text: object) -> object:
+    match: object
+    def _match_call(start: cython.longlong) -> object:
+        match: object
         match = re.match(r"([A-Za-z_$?@][\w$?@]*)\s*\(", source_text[start:])
         if match is None:
             return None
@@ -589,15 +657,15 @@ def _extract_source_call_expressions(source_text: str) -> list[tuple[str, str]]:
 
 
 def join_cod_entries(
-    entries: list[dict[str, object]],
+    entries: object,
     *,
     start_offset: int | None = None,
     end_offset: int | None = None,
-) -> bytes:
+) -> object:
     """Join COD instruction bytes for rows inside an optional offset range."""
     return b"".join(
         data
-        for entry in entries
+        for entry in iter(entries)
         if (offset := _cod_entry_offset_8616(entry)) is not None
         and (data := _cod_entry_bytes_8616(entry)) is not None
         and (start_offset is None or start_offset <= offset)
@@ -606,15 +674,19 @@ def join_cod_entries(
 
 
 def join_cod_entries_with_synthetic_globals(
-    entries: list[dict[str, object]],
+    entries: object,
     *,
     start_offset: int | None = None,
     end_offset: int | None = None,
-    symbol_base: int = 0x7000,
-) -> tuple[bytes, dict[int, tuple[str, int]]]:
+    symbol_base: cython.longlong = 0x7000,
+) -> object:
     """Patch COD bytes with synthetic addresses for optional global references."""
 
-    def _impl() -> tuple[bytes, dict[int, tuple[str, int]]]:
+    def _impl() -> tuple[bytes, dict[cython.longlong, tuple[str, cython.longlong]]]:
+        entry_bytes: object
+        global_match: object
+        offset_match: object
+        entry: object
         displacement_re = r"(?P<disp>[+-](?:0x[0-9A-Fa-f]+|[0-9A-Fa-f]+H|\d+))?"
         global_re = re.compile(
             rf"\b(?P<width>BYTE|WORD|DWORD)\s+PTR\s+(?P<symbol>[A-Za-z_$?@][\w$?@]*){displacement_re}",
@@ -626,7 +698,7 @@ def join_cod_entries_with_synthetic_globals(
         )
 
         symbol_order: list[str] = []
-        symbol_spans: dict[str, tuple[int, int, int]] = {}
+        symbol_spans: dict[str, tuple[cython.longlong, cython.longlong, cython.longlong]] = {}
         selected_entries = _select_cod_entries_for_patching_8616(
             entries, start_offset, end_offset, global_re, offset_global_re, symbol_order, symbol_spans
         )
@@ -676,7 +748,8 @@ _COD_INSTRUCTION_PREFIXES_8616 = {0x26, 0x2E, 0x36, 0x3E, 0x64, 0x65, 0x66, 0x67
 _COD_IMMEDIATE_ADDR_OPCODES_8616 = {0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF, 0x68}
 
 
-def _parse_cod_disp_8616(value: str | None) -> int:
+@cython.ccall
+def _parse_cod_disp_8616(value: object) -> cython.longlong:
     if not value:
         return 0
     sign = -1 if value[0] == "-" else 1
@@ -690,31 +763,36 @@ def _parse_cod_disp_8616(value: str | None) -> int:
     return sign * parsed
 
 
-def _cod_width_for_8616(name: str) -> int:
+@cython.ccall
+def _cod_width_for_8616(name: object) -> cython.longlong:
     return {"BYTE": 1, "WORD": 2, "DWORD": 4}[name.upper()]
 
 
-def _cod_prefix_len_for_chunk_8616(chunk: bytearray) -> int:
+@cython.ccall
+def _cod_prefix_len_for_chunk_8616(chunk: object) -> cython.longlong:
     prefix_len = 0
     while prefix_len < len(chunk) and chunk[prefix_len] in _COD_INSTRUCTION_PREFIXES_8616:
         prefix_len += 1
     return prefix_len
 
 
-def _canonical_cod_symbol_name_8616(symbol: str) -> str:
+@cython.ccall
+def _canonical_cod_symbol_name_8616(symbol: object) -> object:
     return canonical_known_cod_object_name(symbol) or symbol
 
 
-def _should_ignore_cod_symbol_8616(symbol: str) -> bool:
+@cython.ccall
+def _should_ignore_cod_symbol_8616(symbol: object) -> cython.bint:
     return symbol.lower() in _COD_SEGMENT_REGISTERS_8616
 
 
+@cython.ccall
 def _remember_cod_symbol_8616(
-    symbol: str,
-    displacement: int,
-    width: int,
-    symbol_order: list[str],
-    symbol_spans: dict[str, tuple[int, int, int]],
+    symbol: object,
+    displacement: cython.longlong,
+    width: cython.longlong,
+    symbol_order: object,
+    symbol_spans: object,
 ) -> None:
     if _should_ignore_cod_symbol_8616(symbol):
         return
@@ -731,15 +809,20 @@ def _remember_cod_symbol_8616(
     )
 
 
+@cython.ccall
 def _select_cod_entries_for_patching_8616(
-    entries: list[dict[str, object]],
-    start_offset: int | None,
-    end_offset: int | None,
+    entries: object,
+    start_offset: object,
+    end_offset: object,
     global_re: re.Pattern[str],
     offset_global_re: re.Pattern[str],
-    symbol_order: list[str],
-    symbol_spans: dict[str, tuple[int, int, int]],
-) -> list[dict[str, object]]:
+    symbol_order: object,
+    symbol_spans: object,
+) -> object:
+    global_match: object
+    offset: object
+    offset_match: object
+    entry: object
     selected_entries: list[dict[str, object]] = []
     for entry in entries:
         offset = _cod_entry_offset_8616(entry)
@@ -773,13 +856,15 @@ def _select_cod_entries_for_patching_8616(
     return selected_entries
 
 
+@cython.ccall
 def _assign_synthetic_symbol_addrs_8616(
-    symbol_order: list[str],
-    symbol_spans: dict[str, tuple[int, int, int]],
-    symbol_base: int,
-) -> tuple[dict[str, int], dict[int, tuple[str, int]]]:
-    symbol_addrs: dict[str, int] = {}
-    addr_to_name: dict[int, tuple[str, int]] = {}
+    symbol_order: object,
+    symbol_spans: object,
+    symbol_base: cython.longlong,
+) -> tuple[dict[str, cython.longlong], dict[cython.longlong, tuple[str, cython.longlong]]]:
+    symbol: object
+    symbol_addrs: dict[str, cython.longlong] = {}
+    addr_to_name: dict[cython.longlong, tuple[str, cython.longlong]] = {}
     next_addr = symbol_base
     for symbol in symbol_order:
         start, end, max_width = symbol_spans[symbol]
@@ -794,7 +879,8 @@ def _assign_synthetic_symbol_addrs_8616(
     return symbol_addrs, addr_to_name
 
 
-def _patch_memory_global_reference_8616(chunk: bytearray, target_addr: int) -> bool:
+@cython.ccall
+def _patch_memory_global_reference_8616(chunk: object, target_addr: cython.longlong) -> cython.bint:
     prefix_len = _cod_prefix_len_for_chunk_8616(chunk)
     if prefix_len >= len(chunk):
         return False
@@ -810,7 +896,8 @@ def _patch_memory_global_reference_8616(chunk: bytearray, target_addr: int) -> b
     return False
 
 
-def _patch_offset_immediate_reference_8616(chunk: bytearray, target_addr: int) -> bool:
+@cython.ccall
+def _patch_offset_immediate_reference_8616(chunk: object, target_addr: cython.longlong) -> cython.bint:
     prefix_len = _cod_prefix_len_for_chunk_8616(chunk)
     if prefix_len >= len(chunk):
         return False
@@ -824,12 +911,16 @@ def _patch_offset_immediate_reference_8616(chunk: bytearray, target_addr: int) -
     return False
 
 
-def infer_cod_logic_start(entries: list[dict[str, object]]) -> int | None:
+@cython.ccall
+def infer_cod_logic_start(entries: object) -> int | None:
     """Return the first likely logic instruction in a small MSC procedure.
 
     Skip a leading ``__chkstk`` call when it appears in the entry prologue so
     the decompiler can focus on the actual function body.
     """
+    entry: object
+    idx: object
+    later_entry: object
     call_re = re.compile(r"\bcall\b", re.IGNORECASE)
     chkstk_re = re.compile(r"\b(?:__)?(?:aN?|a)?chkstk\b", re.IGNORECASE)
 
@@ -848,10 +939,10 @@ def infer_cod_logic_start(entries: list[dict[str, object]]) -> int | None:
     return None
 
 
-def extract_simple_cod_logic_entries(entries: list[dict[str, object]]) -> list[dict[str, object]] | None:
+def extract_simple_cod_logic_entries(entries: object) -> object:
     """Return simple COD procedure body rows with frame scaffolding removed."""
 
-    def _impl() -> list[dict[str, object]] | None:
+    def _impl() -> object:
         """Normalize simple MSC-style framed procedures for decompilation.
 
         For straight-line helpers like ``_mset_pos`` the standard ``push bp`` /
@@ -860,6 +951,8 @@ def extract_simple_cod_logic_entries(entries: list[dict[str, object]]) -> list[d
         decompiled C. When the procedure is linear and has a conventional frame,
         strip only that scaffolding and keep the real body bytes.
         """
+        entry: object
+        idx: object
         if len(entries) < 4:
             return None
 
@@ -897,18 +990,19 @@ def extract_simple_cod_logic_entries(entries: list[dict[str, object]]) -> list[d
     return _impl()
 
 
-def extract_simple_cod_logic_bytes(entries: list[dict[str, object]]) -> bytes | None:
+def extract_simple_cod_logic_bytes(entries: object) -> object:
     """Return simple COD procedure body bytes with frame scaffolding removed."""
+    selected: object
     selected = extract_simple_cod_logic_entries(entries)
     if selected is None:
         return None
-    return b"".join(data for entry in selected if (data := _cod_entry_bytes_8616(entry)) is not None)
+    return b"".join(data for entry in iter(selected) if (data := _cod_entry_bytes_8616(entry)) is not None)
 
 
-def extract_small_two_arg_cod_logic_entries(entries: list[dict[str, object]]) -> list[dict[str, object]] | None:
+def extract_small_two_arg_cod_logic_entries(entries: object) -> object:
     """Return tiny two-argument COD body rows with frame scaffolding removed."""
 
-    def _impl() -> list[dict[str, object]] | None:
+    def _impl() -> object:
         """Normalize tiny ``bp``-framed two-argument helpers.
 
         This keeps the body bytes for small helpers that only reference
@@ -916,6 +1010,7 @@ def extract_small_two_arg_cod_logic_entries(entries: list[dict[str, object]]) ->
         saved-frame stores in the recovered C while still keeping the real
         argument-relative accesses visible.
         """
+        collected: object
         if len(entries) < 4:
             return None
 
@@ -937,11 +1032,16 @@ def extract_small_two_arg_cod_logic_entries(entries: list[dict[str, object]]) ->
     return _impl()
 
 
+@cython.ccall
 def _collect_tiny_two_arg_body_8616(
-    entries: list[dict[str, object]],
-) -> tuple[list[dict[str, object]], set[int], bool] | None:
+    entries: object,
+) -> object:
+    replacement: object
+    entry: object
+    idx: object
+    match: object
     saw_ret = False
-    arg_disps: set[int] = set()
+    arg_disps: set[cython.longlong] = set()
     body_entries: list[dict[str, object]] = []
     for idx, entry in enumerate(entries[2:], start=2):
         text = str(entry.get("text", "")).strip().lower()
@@ -965,13 +1065,16 @@ def _collect_tiny_two_arg_body_8616(
     return body_entries, arg_disps, saw_ret
 
 
-def _tiny_body_entry_refused_8616(text: str, mnemonic: str) -> bool:
+@cython.ccall
+def _tiny_body_entry_refused_8616(text: object, mnemonic: object) -> cython.bint:
     if "[bp-" in text or "sub\tsp," in text or "enter" in text:
         return True
     return mnemonic in {"call", "iret"}
 
 
-def _nop_replacement_entry_8616(entry: dict[str, object]) -> dict[str, object] | None:
+@cython.ccall
+def _nop_replacement_entry_8616(entry: object) -> object:
+    data: object
     data = _cod_entry_bytes_8616(entry)
     if data is None:
         return None
@@ -981,9 +1084,10 @@ def _nop_replacement_entry_8616(entry: dict[str, object]) -> dict[str, object] |
     return replacement
 
 
-def extract_small_two_arg_cod_logic_bytes(entries: list[dict[str, object]]) -> bytes | None:
+def extract_small_two_arg_cod_logic_bytes(entries: object) -> object:
     """Return tiny two-argument COD body bytes with frame scaffolding removed."""
+    selected: object
     selected = extract_small_two_arg_cod_logic_entries(entries)
     if selected is None:
         return None
-    return b"".join(data for entry in selected if (data := _cod_entry_bytes_8616(entry)) is not None)
+    return b"".join(data for entry in iter(selected) if (data := _cod_entry_bytes_8616(entry)) is not None)

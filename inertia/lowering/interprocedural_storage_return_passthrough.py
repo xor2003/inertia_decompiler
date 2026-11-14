@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize exact deferred return pass-through trials.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Protocol, cast
@@ -41,6 +44,8 @@ from .interprocedural_storage_return_passthrough_contracts import (
     ReturnPassThroughTrial8616,
     ReturnPassThroughTrialFailure8616,
 )
+import dataclasses
+import operator
 
 __all__ = [
     "ReturnPassThroughTrialResult8616",
@@ -48,7 +53,7 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ReturnPassThroughTrialResult8616:
     """One exact deferred trial or an atomic typed refusal."""
 
@@ -59,7 +64,7 @@ class ReturnPassThroughTrialResult8616:
     stats: StorageTrialStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether one semantic fact became one complete deferred trial."""
         return (
             self.trial is not None
@@ -75,7 +80,7 @@ class ReturnPassThroughTrialResult8616:
 class _FunctionManager8616(Protocol):
     """Third-party function lookup needed at the Lowering boundary."""
 
-    def function(self, *, addr: int, create: bool) -> object | None:
+    def function(self, *, addr: cython.longlong, create: cython.bint) -> object | None:
         """Return one exact existing function without creating a guess."""
 
 
@@ -91,12 +96,13 @@ class _ProjectSurface8616(Protocol):
     kb: _ProjectKnowledgeBase8616
 
 
+@cython.ccall
 def _refused_result_8616(
     failure: ReturnPassThroughTrialFailure8616,
     *,
     semantic_evidence: TerminalReturnPassThroughEvidence8616 | None = None,
     ssa_failure: FunctionSSAArtifactFailure8616 | None = None,
-    normalized: bool = False,
+    normalized: cython.bint = False,
 ) -> ReturnPassThroughTrialResult8616:
     """Build one atomic refusal with its upstream evidence retained."""
     return ReturnPassThroughTrialResult8616(
@@ -112,6 +118,7 @@ def _refused_result_8616(
     )
 
 
+@cython.ccall
 def _semantic_passthrough_gate_8616(
     caller_project: object | None,
     caller_function: object,
@@ -130,15 +137,15 @@ def _semantic_passthrough_gate_8616(
         )
     semantic_fact = semantic_evidence.facts[0]
     if (
-        semantic_fact.caller_addr != fact.caller_addr
-        or semantic_fact.callsite_addr != fact.callsite_addr
+        operator.ne(semantic_fact.caller_addr, fact.caller_addr)
+        or operator.ne(semantic_fact.callsite_addr, fact.callsite_addr)
     ):
         return _refused_result_8616(
             ReturnPassThroughTrialFailure8616.SEMANTIC_FACT_CONFLICT,
             semantic_evidence=semantic_evidence,
             normalized=True,
         )
-    if semantic_fact.return_instruction_addr != fact.witness_instruction_addr:
+    if operator.ne(semantic_fact.return_instruction_addr, fact.witness_instruction_addr):
         return _refused_result_8616(
             ReturnPassThroughTrialFailure8616.RETURN_WITNESS_CONFLICT,
             semantic_evidence=semantic_evidence,
@@ -148,18 +155,19 @@ def _semantic_passthrough_gate_8616(
 
 
 def _callsite_call_gate_8616(
-    caller_project: object | None,
+    caller_project: object,
     caller_function: object,
     fact: CallerReturnUseFact8616,
     semantic_evidence: TerminalReturnPassThroughEvidence8616,
-    accepted_target_addrs: tuple[int, ...],
-) -> tuple[int, int, int] | ReturnPassThroughTrialResult8616:
+    accepted_target_addrs: object,
+) -> object:
     """Bind the exact CALL to a constant or its shared native target proof.
 
     Symbolic operands require the retained semantic projection and decoded
     census. The shared binder verifies those identities without rewriting
     the CALL or guessing a selector; missing evidence remains a refusal.
     """
+    artifact: object
     ssa = semantic_function_ssa_artifact_at_address_8616(
         caller_project, fact.caller_addr, function=caller_function
     )
@@ -171,7 +179,7 @@ def _callsite_call_gate_8616(
             ssa_failure=ssa.failure,
             normalized=True,
         )
-    if artifact.function_addr != fact.caller_addr:
+    if operator.ne(artifact.function_addr, fact.caller_addr):
         return _refused_result_8616(
             ReturnPassThroughTrialFailure8616.FUNCTION_IDENTITY_CONFLICT,
             semantic_evidence=semantic_evidence,
@@ -228,12 +236,14 @@ def _callsite_call_gate_8616(
 
 def materialize_return_passthrough_trial_8616(
     project: object,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     fact: CallerReturnUseFact8616,
-    accepted_target_addrs: tuple[int, ...],
+    accepted_target_addrs: object,
     caller_context: CallerSSAContext8616 | None = None,
 ) -> ReturnPassThroughTrialResult8616:
     """Join one proven recursive return path to its exact typed SSA CALL."""
+    caller_function: object
+    caller_project: object
     if (
         fact.kind is not CallsiteReturnUseKind8616.FUNCTION_RETURN
         or not fact.excluded_recursive_passthrough
@@ -260,7 +270,7 @@ def materialize_return_passthrough_trial_8616(
     semantic_evidence = gate
     semantic_fact = semantic_evidence.facts[0]
 
-    targets = tuple(sorted(frozenset((callee_addr, *accepted_target_addrs))))
+    targets = tuple(sorted(tuple(frozenset((callee_addr, ) + tuple(accepted_target_addrs)))))
     call_gate = _callsite_call_gate_8616(
         caller_project, caller_function, fact, semantic_evidence, targets
     )
@@ -269,7 +279,7 @@ def materialize_return_passthrough_trial_8616(
     block_addr, instr_index, target_addr = call_gate
     target_matches = any(
         x86_16_call_targets_equivalent_8616(caller_project, target_addr, accepted)
-        for accepted in targets
+        for accepted in iter(targets)
     )
     semantic_target_matches = x86_16_call_targets_equivalent_8616(
         caller_project, semantic_fact.target_addr, target_addr

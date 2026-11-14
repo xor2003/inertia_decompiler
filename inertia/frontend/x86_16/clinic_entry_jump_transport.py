@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Consume a bound entry-domain proof into converted AIL terminal jumps.
 
 Layer: Frontend/runtime.
@@ -19,6 +20,8 @@ Clinic conversion, with fresh context checks before and after the proof.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -33,6 +36,11 @@ from inertia.ir.entry_jump_domain import (
     PendingTerminalJump8616,
 )
 from inertia.ir.vex_terminal_jump import TerminalJumpRefusalReason8616
+import dataclasses
+import operator
+import builtins
+ClinicScopedPartition8616 = typing.TypeVar("ClinicScopedPartition8616")
+EntryJumpTransportProof8616 = typing.TypeVar("EntryJumpTransportProof8616")
 
 if TYPE_CHECKING:
     from inertia.ir.entry_jump_transport import EntryJumpTransportProof8616
@@ -104,7 +112,7 @@ class ClinicEntryJumpTransportStatus8616(StrEnum):
     REFUSED = "refused"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ClinicConvertedBlockCapture8616:
     """One converted (native block -> AIL block) pair with a source snapshot.
 
@@ -118,15 +126,15 @@ class ClinicConvertedBlockCapture8616:
     block: object = field(compare=False)
     converted: object = field(compare=False)
     vex: object = field(compare=False)
-    addr: int
-    size: int
-    source_bytes: bytes
+    addr: cython.longlong
+    size: cython.longlong
+    source_bytes: object
     execution: ClinicVexSnapshot8616
     ail: ClinicAilSnapshot8616
-    pending: bool
+    pending: cython.bint
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ClinicEntryJumpDecision8616:
     """One pending candidate's terminal transport decision.
 
@@ -136,16 +144,16 @@ class ClinicEntryJumpDecision8616:
     transport refusal from this owner or a shared binding refusal.
     """
 
-    block_addr: int
-    head: int
-    applied: bool
+    block_addr: cython.longlong
+    head: cython.longlong
+    applied: cython.bint
     target: int | None
     refusal: (
         ClinicTerminalControlRefusal8616
         | ClinicEntryJumpTransportRefusal8616
         | None
     )
-    detail: str
+    detail: object
 
     def to_dict(self) -> dict[str, object]:
         """Serialize the decision for diagnostics and workers."""
@@ -159,7 +167,7 @@ class ClinicEntryJumpDecision8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ClinicEntryJumpTransport8616:
     """Whole-function entry-domain transport report.
 
@@ -187,11 +195,12 @@ class ClinicEntryJumpTransport8616:
             "refusal": None if self.refusal is None else self.refusal.value,
             "detail": self.detail,
             "stats": self.stats.to_dict(),
-            "decisions": [decision.to_dict() for decision in self.decisions],
+            "decisions": [decision.to_dict() for decision in iter(self.decisions)],
             "proof": None if self.proof is None else self.proof.to_dict(),
         }
 
 
+@cython.ccall
 def begin_clinic_entry_jump_conversion_8616(clinic: object) -> None:
     """Start a fresh conversion with one immutable native control snapshot."""
     from .clinic_scoped_control import prepare_clinic_universal_partition_8616
@@ -203,11 +212,17 @@ def begin_clinic_entry_jump_conversion_8616(clinic: object) -> None:
     setattr(clinic, _CONTEXT_ATTR_8616, snapshot_clinic_context_8616(clinic))
 
 
+@cython.ccall
 def _context_is_current_8616(
-    clinic: object, captures: Mapping[tuple[int, int], ClinicConvertedBlockCapture8616],
+    clinic: object, captures: Mapping[tuple[cython.longlong, cython.longlong], ClinicConvertedBlockCapture8616],
     *, scoped_partition: ClinicScopedPartition8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """Authenticate every context block, not just the jump instruction."""
+    context: object
+    retained: object
+    addr: object
+    record: object
+    size: object
     # Dynamic boundary: the context is optional on third-party angr Clinic.
     context = getattr(clinic, _CONTEXT_ATTR_8616, None)
     if not isinstance(context, ClinicConversionContext8616):
@@ -224,27 +239,28 @@ def _context_is_current_8616(
             scoped_partition = retained
     if not clinic_context_is_current_8616(clinic, context, scoped_partition=scoped_partition):
         return False
-    if tuple(sorted(captures)) != context.graph.nodes:
+    if operator.ne(tuple(sorted(captures)), context.graph.nodes):
         return False
     for (addr, size), record in captures.items():
         block = cast(_BlockBytesBoundary8616, record.block)
         identity_matches = (
             (addr, size) == (record.addr, record.size)
-            and block.addr == addr and block.size == size
+            and operator.eq(block.addr, addr) and operator.eq(block.size, size)
             and record.vex is block.vex
             and clinic_converted_object_8616(clinic, addr, size) is record.converted
         )
         execution_matches = (
             record.execution.matches(record.vex)
             and record.ail.matches(record.converted)
-            and len(record.source_bytes) == size
-            and clinic_source_bytes_8616(clinic, addr, size) == record.source_bytes
+            and operator.eq(len(record.source_bytes), size)
+            and operator.eq(clinic_source_bytes_8616(clinic, addr, size), record.source_bytes)
         )
         if not identity_matches or not execution_matches:
             return False
     return True
 
 
+@cython.ccall
 def capture_clinic_converted_block_8616(
     clinic: object, block: object, converted: object,
     *, transport: ClinicTerminalTransport8616,
@@ -256,6 +272,7 @@ def capture_clinic_converted_block_8616(
     A re-conversion of the same ``(addr, size)`` node replaces the stale
     record so the pass always binds the latest AIL object.
     """
+    captures: object
     if not isinstance(converted, ailment.Block):
         return
     block_boundary = cast("_BlockBytesBoundary8616", block)
@@ -285,21 +302,23 @@ def capture_clinic_converted_block_8616(
 class _BlockBytesBoundary8616(Protocol):
     """Structural surface of the angr block the capture consumes."""
 
-    addr: int
-    size: int
-    bytes: bytes
+    addr: cython.longlong
+    size: cython.longlong
+    bytes: object
     vex: object
 
 
-def _pending_transport_reports_8616(clinic: object) -> int:
+def _pending_transport_reports_8616(clinic: object) -> cython.longlong:
     """Count converted blocks whose retained terminal stayed window-bound."""
-    return sum(int(record.pending) for record in _captures_8616(clinic).values())
+    return sum(int(record.pending) for record in builtins.iter(_captures_8616(clinic).values()))
 
 
+@cython.ccall
 def _captures_8616(
     clinic: object,
-) -> dict[tuple[int, int], ClinicConvertedBlockCapture8616]:
+) -> object:
     """Return the conversion-time capture ledger, or an empty map."""
+    captures: object
     # Dynamic boundary: conversion captures attach to third-party angr Clinic.
     captures = getattr(clinic, CLINIC_ENTRY_JUMP_CAPTURES_ATTR_8616, None)
     if not isinstance(captures, dict):
@@ -307,17 +326,18 @@ def _captures_8616(
     return captures
 
 
+@cython.ccall
 def _decision_8616(
     candidate: PendingTerminalJump8616,
     *,
-    applied: bool = False,
+    applied: cython.bint = False,
     target: int | None = None,
     refusal: (
         ClinicTerminalControlRefusal8616
         | ClinicEntryJumpTransportRefusal8616
         | None
     ) = None,
-    detail: str = "",
+    detail: object = "",
 ) -> ClinicEntryJumpDecision8616:
     """Close one candidate decision over the consumed pending record."""
     return ClinicEntryJumpDecision8616(
@@ -330,19 +350,23 @@ def _decision_8616(
     )
 
 
+@cython.ccall
 def _refusal_for_candidate_8616(
-    product: EntryJumpTransportProof8616, block_addr: int,
-) -> str:
+    product: EntryJumpTransportProof8616, block_addr: cython.longlong,
+) -> object:
     """Return the domain proof's own refusal detail for one block, if any."""
+    proof: object
+    refusal: object
     proof = product.proof
     if proof is not None:
         for refusal in proof.refusals:
-            if refusal.block_addr == block_addr:
+            if operator.eq(refusal.block_addr, block_addr):
                 return refusal.detail
     return "entry-domain proof retained this candidate's default refusal"
 
 
-def _unconditional_8616(jump: AdmittedTerminalJump8616) -> bool:
+@cython.ccall
+def _unconditional_8616(jump: AdmittedTerminalJump8616) -> cython.bint:
     """Accept only admissions discharged by the joint-window theorem alone."""
     return (
         jump.invocation is None
@@ -351,15 +375,17 @@ def _unconditional_8616(jump: AdmittedTerminalJump8616) -> bool:
     )
 
 
+@cython.ccall
 def _transport_candidate_8616(
     clinic: object,
     product: EntryJumpTransportProof8616,
     candidate: PendingTerminalJump8616,
-    record: ClinicConvertedBlockCapture8616 | None,
-    admitted: Mapping[tuple[int, int], AdmittedTerminalJump8616],
-    next_atom: Callable[[], int],
+    record: object,
+    admitted: Mapping[tuple[cython.longlong, cython.longlong], AdmittedTerminalJump8616],
+    next_atom: Callable[[], cython.longlong],
 ) -> ClinicEntryJumpDecision8616:
     """Bind one pending candidate's AIL terminal or return its typed refusal."""
+    admission: object
     decoded = candidate.decoded
     if record is None:
         return _decision_8616(
@@ -394,7 +420,7 @@ def _transport_candidate_8616(
     offset = decoded.head - record.addr
     if (
         offset < 0
-        or offset + decoded.encoded_size != len(record.source_bytes)
+        or operator.ne(offset + decoded.encoded_size, len(record.source_bytes))
     ):
         return _decision_8616(
             candidate,
@@ -403,7 +429,7 @@ def _transport_candidate_8616(
             ),
             detail="decoded terminal does not bound the converted block extent",
         )
-    if record.source_bytes[offset:] != decoded.encoding:
+    if operator.ne(record.source_bytes[offset:], decoded.encoding):
         return _decision_8616(
             candidate,
             refusal=(
@@ -434,16 +460,16 @@ class _ClinicProjectBlocks8616(Protocol):
 
 
 def _refused_pass_8616(
-    captures: Mapping[tuple[int, int], ClinicConvertedBlockCapture8616],
+    captures: Mapping[tuple[cython.longlong, cython.longlong], ClinicConvertedBlockCapture8616],
     product: EntryJumpTransportProof8616,
     refusal: ClinicEntryJumpTransportRefusal8616,
-    detail: str,
+    detail: object,
 ) -> ClinicEntryJumpTransport8616:
     """Refuse every pending candidate under one typed transport reason."""
     pending = product.pending_terminal_jumps()
     decisions = tuple(
         _decision_8616(candidate, refusal=refusal, detail=detail)
-        for _addr, candidate in sorted(pending.items())
+        for _addr, candidate in builtins.iter(sorted(tuple(pending.items())))
     )
     return ClinicEntryJumpTransport8616(
         status=(
@@ -464,10 +490,11 @@ def _refused_pass_8616(
     )
 
 
+@cython.ccall
 def transport_clinic_entry_jumps_8616(
     clinic: object,
     *,
-    next_atom: Callable[[], int],
+    next_atom: Callable[[], cython.longlong],
 ) -> ClinicEntryJumpTransport8616:
     """Consume the bound entry-domain proof once per Clinic conversion.
 
@@ -484,9 +511,11 @@ def transport_clinic_entry_jumps_8616(
 
 
 def _transport_once_8616(
-    clinic: object, next_atom: Callable[[], int],
+    clinic: object, next_atom: Callable[[], cython.longlong],
 ) -> ClinicEntryJumpTransport8616:
     """Run the single bounded proof and consume it into captured blocks."""
+    application: object
+    partition: object
     captures = _captures_8616(clinic)
     if _pending_transport_reports_8616(clinic) == 0:
         return ClinicEntryJumpTransport8616(
@@ -539,9 +568,9 @@ def _transport_once_8616(
             captures, product, ClinicEntryJumpTransportRefusal8616.CONTEXT_STALE,
             "native context changed while the entry-domain proof ran",
         )
-    converted_census = sorted(record.addr for record in captures.values())
+    converted_census = sorted(record.addr for record in builtins.iter(captures.values()))
     imported_census = sorted(
-        block.addr for block in product.bundle.artifact.blocks
+        block.addr for block in iter(product.bundle.artifact.blocks)
     )
     if converted_census != imported_census:
         return _refused_pass_8616(
@@ -560,27 +589,30 @@ def _transport_once_8616(
             and type(partition.entry) is EntryJumpTransportProof8616):
         application = product.application
         expected_edges = (() if application is None else tuple(sorted(
-            (block.addr, target) for block in application.blocks for target in block.successor_addrs)))
-        if application is None or partition.consuming_graph.edges != expected_edges:
+            (block.addr, target) for block in iter(application.blocks) for target in iter(block.successor_addrs))))
+        if application is None or operator.ne(partition.consuming_graph.edges, expected_edges):
             return _refused_pass_8616(
                 captures, product, ClinicEntryJumpTransportRefusal8616.CONTEXT_STALE,
                 "universal partition no longer matches freshly proved native successors")
     return _consume_admissions_8616(clinic, captures, product, next_atom)
 
 
+@cython.ccall
 def _consume_admissions_8616(
     clinic: object,
-    captures: Mapping[tuple[int, int], ClinicConvertedBlockCapture8616],
+    captures: Mapping[tuple[cython.longlong, cython.longlong], ClinicConvertedBlockCapture8616],
     product: EntryJumpTransportProof8616,
-    next_atom: Callable[[], int],
+    next_atom: Callable[[], cython.longlong],
 ) -> ClinicEntryJumpTransport8616:
     """Close every pending decision after whole-context authentication."""
+    block_addr: object
+    record: object
     pending = product.pending_terminal_jumps()
     admitted = {
         (jump.block_addr, jump.head): jump
-        for jump in product.admitted_terminal_jumps()
+        for jump in builtins.iter(product.admitted_terminal_jumps())
     }
-    captures_by_addr: dict[int, ClinicConvertedBlockCapture8616] = {}
+    captures_by_addr: dict[cython.longlong, ClinicConvertedBlockCapture8616] = {}
     for record in captures.values():
         if record.addr in captures_by_addr:
             return _refused_pass_8616(
@@ -633,6 +665,7 @@ class _ClinicFunctionBoundary8616(Protocol):
     function: object
 
 
+@cython.ccall
 def record_clinic_entry_jump_transport_8616(
     clinic: object, report: ClinicEntryJumpTransport8616,
 ) -> None:
@@ -641,7 +674,8 @@ def record_clinic_entry_jump_transport_8616(
     Dynamic boundary: the ledger attribute lives on the third-party Clinic
     instance; tuple-append keeps earlier decisions immutable.
     """
+    reports: object
     reports = getattr(clinic, CLINIC_ENTRY_JUMP_TRANSPORT_ATTR_8616, ())
     if not isinstance(reports, tuple):
         reports = ()
-    setattr(clinic, CLINIC_ENTRY_JUMP_TRANSPORT_ATTR_8616, (*reports, report))
+    setattr(clinic, CLINIC_ENTRY_JUMP_TRANSPORT_ATTR_8616, tuple(reports) + (report,))

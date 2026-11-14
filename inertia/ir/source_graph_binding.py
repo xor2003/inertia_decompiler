@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Canonical shared-DAG serialization of owned IR source surfaces.
 
 Layer: IR.
@@ -13,6 +14,7 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -40,6 +42,9 @@ from .core import (
 )
 from .instruction_origin import IRInstructionOrigin8616
 from .source_graph_json import canonical_json_dumps_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "SOURCE_GRAPH_FORMAT_8616",
@@ -74,7 +79,8 @@ class SourceGraphSerializationError8616(TypeError):
     """
 
 
-def _fail(owner: str, field_name: str, value: object, expected: str) -> NoReturn:
+@cython.ccall
+def _fail(owner: object, field_name: object, value: object, expected: object) -> NoReturn:
     """Raise a typed serialization refusal naming owner, field, and payload."""
     raise SourceGraphSerializationError8616(
         f"{owner}.{field_name} must be {expected}; "
@@ -94,16 +100,17 @@ def _record_atom_8616(value: object) -> object:
     if kind is bool:
         return (bool, value)
     if type(value) is list:
-        return (list, tuple(_record_atom_8616(item) for item in value))
+        return (list, tuple(_record_atom_8616(item) for item in iter(value)))
     if isinstance(value, str):
         # JSON serializes a str subclass's contents, not its custom __str__.
         return str.__str__(value)
     _fail("source record", "value", value, "validated scalar or generated list")
 
 
+@cython.ccall
 def _record_key_8616(
-    record: dict[str, object],
-    field_orders: dict[tuple[str, ...], tuple[str, ...]] | None = None,
+    record: object,
+    field_orders: object = None,
 ) -> tuple[tuple[str, ...], tuple[object, ...]]:
     """Intern sorted JSON equality without allocating a pair for every field.
 
@@ -112,17 +119,19 @@ def _record_key_8616(
     source objects nor proof verdicts. Field names remain part of each key so
     different schemas cannot alias even when their values happen to agree.
     """
-    names: tuple[str, ...] = cython.declare(tuple)
+    value: object
+    name: object
+    names = cython.declare(tuple)
     if field_orders is None:
         names = tuple(sorted(record))
     else:
-        shape: tuple[str, ...] = cython.declare(tuple, tuple(record))
-        cached_names: tuple[str, ...] | None = cython.declare(tuple, field_orders.get(shape))
+        shape = cython.declare(tuple, tuple(record))
+        cached_names = cython.declare(tuple, field_orders.get(shape))
         if cached_names is None:
             cached_names = tuple(sorted(shape))
             field_orders[shape] = cached_names
         names = cached_names
-    values: list[object] = cython.declare(list, [])
+    values = cython.declare(list, [])
     for name in names:
         value = record[name]
         kind = type(value)
@@ -148,14 +157,14 @@ class _SourceGraphEncoder8616:
     recycled ``id`` cannot alias a live node. Nothing is cached across calls.
     """
 
-    _records: list[dict[str, object]] = cython.declare(list)
-    _record_keys: list[tuple[tuple[str, ...], tuple[object, ...]]] = cython.declare(list)
-    _interned: dict[tuple[tuple[str, ...], tuple[object, ...]], int] = cython.declare(dict)
-    _field_orders: dict[tuple[str, ...], tuple[str, ...]] = cython.declare(dict)
-    _identity: dict[int, int] = cython.declare(dict)
-    _pinned: list[object] = cython.declare(list)
-    _visiting: set[int] = cython.declare(set)
-    _retain_records: bool = cython.declare(cython.bint)
+    _records = cython.declare(list)
+    _record_keys = cython.declare(list)
+    _interned = cython.declare(dict)
+    _field_orders = cython.declare(dict)
+    _identity = cython.declare(dict)
+    _pinned = cython.declare(list)
+    _visiting = cython.declare(set)
+    _retain_records = cython.declare(cython.bint)
 
     def __init__(self, retain_records: cython.bint = True) -> None:
         self._retain_records = retain_records
@@ -167,12 +176,12 @@ class _SourceGraphEncoder8616:
         self._pinned = []
         self._visiting = set()
 
-    @cython.cfunc
-    def prepare(self, roots: tuple[IRBlock | IRInstr | IRValue, ...]) -> None:
+    def prepare(self, roots: object) -> None:
         """Encode children before parents without consuming Python stack depth."""
-        pending: list[tuple[object, bool]] = cython.declare(list, [(node, False) for node in reversed(roots)])
-        active: set[int] = cython.declare(set, set())
-        ready: bool = cython.declare(cython.bint)
+        node: object
+        pending = cython.declare(list, [(node, False) for node in builtins.iter(reversed(roots))])
+        active = cython.declare(set, set())
+        ready = cython.declare(object)
         while pending:
             node, ready = pending.pop()
             identity = id(node)
@@ -189,7 +198,7 @@ class _SourceGraphEncoder8616:
             active.add(identity)
             pending.append((node, True))
             pending.extend(
-                (child, False) for child in reversed(self._children(node))
+                (child, False) for child in builtins.iter(reversed(self._children(node)))
                 if child is not None
             )
 
@@ -217,8 +226,8 @@ class _SourceGraphEncoder8616:
         else:
             _fail("source graph", "node", node, "owned IR node")
 
-    @cython.cfunc
-    def _atom_children(self, node: object) -> tuple[object, ...]:
+    @cython.ccall
+    def _atom_children(self, node: object) -> object:
         """Retain the record builder's canonical child-field traversal order."""
         if type(node) is IRValue:
             value: IRValue = node
@@ -236,8 +245,8 @@ class _SourceGraphEncoder8616:
                 "IRCondition", "args", condition.args)
         _fail("source graph", "atom", node, "owned IR atom")
 
-    @cython.cfunc
-    def _children(self, node: object) -> tuple[object, ...]:
+    @cython.ccall
+    def _children(self, node: object) -> object:
         """Select only typed graph edges; scalar validation stays in records."""
         if type(node) in (IRValue, IRBinaryValue, IRAddress, IRCondition):
             return self._atom_children(node)
@@ -267,8 +276,8 @@ class _SourceGraphEncoder8616:
             return ()
         _fail("source graph", "node", node, "owned IR node")
 
-    @cython.cfunc
-    def _child_tuple(self, owner: str, field_name: str, value: object) -> tuple[object, ...]:
+    @cython.ccall
+    def _child_tuple(self, owner: object, field_name: object, value: object) -> object:
         """Reject malformed child containers before traversal can expand them."""
         if type(value) is not tuple:
             _fail(owner, field_name, value, "tuple of owned IR nodes")
@@ -276,7 +285,7 @@ class _SourceGraphEncoder8616:
 
 
     @property
-    def records(self) -> list[dict[str, object]]:
+    def records(self) -> object:
         """Interned shallow node records in canonical id order.
 
         Empty when this encoder was constructed with ``retain_records=False``;
@@ -295,11 +304,13 @@ class _SourceGraphEncoder8616:
         """
         return tuple(self._record_keys)
 
-    @cython.cfunc
+    @cython.ccall
     def _intern_node(
         self, node: object, build: Callable[[], dict[str, object]],
-    ) -> int:
+    ) -> cython.longlong:
         """Encode one owned node structurally, interning equal subtrees."""
+        memoized: object
+        node_id: object
         identity = id(node)
         memoized = self._identity.get(identity)
         if memoized is not None:
@@ -327,45 +338,45 @@ class _SourceGraphEncoder8616:
 
     # --- scalar field evidence -------------------------------------------
 
-    @cython.cfunc
-    def _int(self, owner: str, field_name: str, value: object) -> int:
+    @cython.ccall
+    def _int(self, owner: object, field_name: object, value: object) -> cython.longlong:
         """Require an exact ``int`` payload; ``bool`` is not an int here."""
         if type(value) is not int:
             _fail(owner, field_name, value, "int")
         return value
 
-    @cython.cfunc
-    def _int_or_none(self, owner: str, field_name: str, value: object) -> int | None:
+    @cython.ccall
+    def _int_or_none(self, owner: object, field_name: object, value: object) -> int | None:
         """Require ``None`` or an exact ``int`` payload."""
         if value is None:
             return None
         return self._int(owner, field_name, value)
 
-    @cython.cfunc
-    def _bool(self, owner: str, field_name: str, value: object) -> bool:
+    @cython.ccall
+    def _bool(self, owner: object, field_name: object, value: object) -> cython.bint:
         """Require an exact ``bool`` payload; it must not encode as ``1``."""
         if type(value) is not bool:
             _fail(owner, field_name, value, "bool")
         return value
 
-    @cython.cfunc
-    def _str(self, owner: str, field_name: str, value: object) -> str:
+    @cython.ccall
+    def _str(self, owner: object, field_name: object, value: object) -> object:
         """Require a ``str`` payload (subclasses encode as their content)."""
         if not isinstance(value, str):
             _fail(owner, field_name, value, "str")
         return value
 
-    @cython.cfunc
-    def _str_or_none(self, owner: str, field_name: str, value: object) -> str | None:
+    @cython.ccall
+    def _str_or_none(self, owner: object, field_name: object, value: object) -> object:
         """Require ``None`` or a ``str`` payload."""
         if value is None:
             return None
         return self._str(owner, field_name, value)
 
-    @cython.cfunc
+    @cython.ccall
     def _str_tuple_or_none(self,
-        owner: str, field_name: str, value: object,
-    ) -> list[str] | None:
+        owner: object, field_name: object, value: object,
+    ) -> object:
         """Require ``None`` or an immutable tuple of plain strings."""
         if value is None:
             return None
@@ -373,12 +384,13 @@ class _SourceGraphEncoder8616:
             _fail(owner, field_name, value, "tuple[str, ...] | None")
         return [
             self._str(owner, field_name, item)
-            for item in value
+            for item in iter(value)
         ]
 
-    @cython.cfunc
-    def _str_tuple(self, owner: str, field_name: str, value: object) -> list[str]:
+    @cython.ccall
+    def _str_tuple(self, owner: object, field_name: object, value: object) -> object:
         """Require an immutable tuple of plain strings."""
+        result: object
         result = self._str_tuple_or_none(
             owner, field_name, value
         )
@@ -386,20 +398,20 @@ class _SourceGraphEncoder8616:
             _fail(owner, field_name, value, "tuple[str, ...]")
         return result
 
-    @cython.cfunc
-    def _int_tuple(self, owner: str, field_name: str, value: object) -> list[int]:
+    @cython.ccall
+    def _int_tuple(self, owner: object, field_name: object, value: object) -> list[cython.longlong]:
         """Require an immutable tuple of exact ``int`` addresses."""
         if type(value) is not tuple:
             _fail(owner, field_name, value, "tuple[int, ...]")
         return [
             self._int(owner, field_name, item)
-            for item in value
+            for item in iter(value)
         ]
 
-    @cython.cfunc
+    @cython.ccall
     def _enum(self,
-        owner: str, field_name: str, value: object, kind: type[_E],
-    ) -> str:
+        owner: object, field_name: object, value: object, kind: type[_E],
+    ) -> object:
         """Require an exact member of one owned enum; emit its value."""
         if type(value) is not kind:
             _fail(owner, field_name, value, kind.__name__)
@@ -410,8 +422,8 @@ class _SourceGraphEncoder8616:
 
     # --- owned node dispatch ------------------------------------------------
 
-    @cython.cfunc
-    def _atom(self, node: IRAtom) -> int:
+    @cython.ccall
+    def _atom(self, node: IRAtom) -> cython.longlong:
         """Dispatch one typed atom by exact type; subclasses refuse."""
         if type(node) is IRValue:
             return self._value(node)
@@ -423,8 +435,8 @@ class _SourceGraphEncoder8616:
             return self._condition(node)
         _fail("IRAtom", "*", node, "owned IRAtom type")
 
-    @cython.cfunc
-    def _value_or_none(self, node: IRValue | None) -> int | None:
+    @cython.ccall
+    def _value_or_none(self, node: object) -> int | None:
         """Dispatch a declared ``IRValue | None`` child by exact type."""
         if node is None:
             return None
@@ -432,9 +444,9 @@ class _SourceGraphEncoder8616:
             _fail("IRValue", "*", node, "IRValue | None")
         return self._value(node)
 
-    @cython.cfunc
+    @cython.ccall
     def _value_or_binary_or_none(
-        self, node: IRValue | IRBinaryValue | None,
+        self, node: object,
     ) -> int | None:
         """Dispatch a declared ``IRValue | IRBinaryValue | None`` child."""
         if node is None:
@@ -445,25 +457,25 @@ class _SourceGraphEncoder8616:
             return self._binary(node)
         _fail("IRValue|IRBinaryValue", "*", node, "IRValue | IRBinaryValue | None")
 
-    @cython.cfunc
-    def _value_or_binary(self, node: IRValue | IRBinaryValue) -> int:
+    @cython.ccall
+    def _value_or_binary(self, node: IRValue | IRBinaryValue) -> cython.longlong:
         """Dispatch a declared ``IRValue | IRBinaryValue`` child."""
+        node_id: object
         node_id = self._value_or_binary_or_none(node)
         if node_id is None:
             _fail("IRValue|IRBinaryValue", "*", node, "IRValue | IRBinaryValue")
         return node_id
 
-    @cython.cfunc
-    def _atom_tuple(self, owner: str, field_name: str, nodes: object) -> list[int]:
+    @cython.ccall
+    def _atom_tuple(self, owner: object, field_name: object, nodes: object) -> list[cython.longlong]:
         """Require an immutable tuple of typed atoms."""
         if type(nodes) is not tuple:
             _fail(owner, field_name, nodes, "tuple[IRAtom, ...]")
-        return [self._atom(node) for node in nodes]
+        return [self._atom(node) for node in iter(nodes)]
 
     # --- node records --------------------------------------------------------
 
-    @cython.cfunc
-    def _value(self, node: IRValue) -> int:
+    def _value(self, node: IRValue) -> cython.longlong:
         """Intern one ``IRValue`` with its complete field surface."""
         return self._intern_node(
             node,
@@ -492,8 +504,7 @@ class _SourceGraphEncoder8616:
             },
         )
 
-    @cython.cfunc
-    def _binary(self, node: IRBinaryValue) -> int:
+    def _binary(self, node: IRBinaryValue) -> cython.longlong:
         """Intern one ``IRBinaryValue`` with both operand children."""
         return self._intern_node(
             node,
@@ -506,9 +517,8 @@ class _SourceGraphEncoder8616:
             },
         )
 
-    @cython.cfunc
     def _active_unary_or_none(
-        self, node: IRActiveUnary8616 | None,
+        self, node: object,
     ) -> int | None:
         """Intern one optional ``IRActiveUnary8616`` evidence node."""
         if node is None:
@@ -527,16 +537,15 @@ class _SourceGraphEncoder8616:
             },
         )
 
-    @cython.cfunc
-    def _unary_operand(self, node: IRValue) -> int:
+    @cython.ccall
+    def _unary_operand(self, node: IRValue) -> cython.longlong:
         """Require the declared ``IRValue`` operand of an active unary."""
         if type(node) is not IRValue:
             _fail("IRActiveUnary8616", "operand", node, "IRValue")
         return self._value(node)
 
-    @cython.cfunc
     def _call_output_or_none(
-        self, node: IRCallOutputProvenance8616 | None,
+        self, node: object,
     ) -> int | None:
         """Intern one optional call-output provenance node."""
         if node is None:
@@ -565,8 +574,7 @@ class _SourceGraphEncoder8616:
             },
         )
 
-    @cython.cfunc
-    def _address(self, node: IRAddress) -> int:
+    def _address(self, node: IRAddress) -> cython.longlong:
         """Intern one ``IRAddress`` with its complete field surface."""
         return self._intern_node(
             node,
@@ -593,11 +601,12 @@ class _SourceGraphEncoder8616:
             },
         )
 
-    @cython.cfunc
+    @cython.ccall
     def _value_tuple(
-        self, owner: str, field_name: str, nodes: object,
-    ) -> list[int]:
+        self, owner: object, field_name: object, nodes: object,
+    ) -> object:
         """Require an immutable tuple of declared ``IRValue`` children."""
+        item: object
         if type(nodes) is not tuple:
             _fail(owner, field_name, nodes, "tuple[IRValue, ...]")
         result = []
@@ -607,8 +616,7 @@ class _SourceGraphEncoder8616:
             result.append(self._value(item))
         return result
 
-    @cython.cfunc
-    def _condition(self, node: IRCondition) -> int:
+    def _condition(self, node: IRCondition) -> cython.longlong:
         """Intern one ``IRCondition`` including ``compare=False`` width."""
         return self._intern_node(
             node,
@@ -625,9 +633,8 @@ class _SourceGraphEncoder8616:
             },
         )
 
-    @cython.cfunc
     def _call_stack_effect_or_none(
-        self, node: IRCallStackEffect8616 | None,
+        self, node: object,
     ) -> int | None:
         """Intern effect fields and its finite coordinate value projection.
 
@@ -647,12 +654,13 @@ class _SourceGraphEncoder8616:
             lambda: self._call_stack_effect_record(node),
         )
 
-    @cython.cfunc
+    @cython.ccall
     def _call_stack_effect_record(self, node: IRCallStackEffect8616) -> dict[str, object]:
         """Share one immediate coordinate observation across both projections."""
+        observation: object
         observation = None if node.stack_coordinates is None else node.stack_coordinates.observe()
         current_delta = node.net_stack_delta
-        if observation is not None and observation.proven_net_sp_delta != current_delta:
+        if observation is not None and operator.ne(observation.proven_net_sp_delta, current_delta):
             current_delta = None
         return {
                 "node": "call_stack_effect",
@@ -688,11 +696,12 @@ class _SourceGraphEncoder8616:
                 ),
             }
 
-    @cython.cfunc
+    @cython.ccall
     def _address_tuple(
-        self, owner: str, field_name: str, nodes: object,
-    ) -> list[int]:
+        self, owner: object, field_name: object, nodes: object,
+    ) -> object:
         """Require an immutable tuple of declared ``IRAddress`` children."""
+        item: object
         if type(nodes) is not tuple:
             _fail(owner, field_name, nodes, "tuple[IRAddress, ...]")
         result = []
@@ -702,8 +711,7 @@ class _SourceGraphEncoder8616:
             result.append(self._address(item))
         return result
 
-    @cython.cfunc
-    def _origin_or_none(self, node: IRInstructionOrigin8616 | None) -> int | None:
+    def _origin_or_none(self, node: object) -> int | None:
         """Intern one optional instruction-origin provenance node."""
         if node is None:
             return None
@@ -740,8 +748,7 @@ class _SourceGraphEncoder8616:
             },
         )
 
-    @cython.cfunc
-    def _instr(self, node: IRInstr) -> int:
+    def _instr(self, node: IRInstr) -> cython.longlong:
         """Intern one ``IRInstr`` with effect and origin provenance."""
         return self._intern_node(
             node,
@@ -759,13 +766,11 @@ class _SourceGraphEncoder8616:
             },
         )
 
-    @cython.cfunc
-    def _refusal(self, node: IRRefusal) -> int:
+    def _refusal(self, node: IRRefusal) -> cython.longlong:
         """Intern one ``IRRefusal`` evidence record."""
         return self._intern_node(node, lambda: _refusal_record_8616(node, self))
 
-    @cython.cfunc
-    def block(self, node: IRBlock) -> int:
+    def block(self, node: IRBlock) -> cython.longlong:
         """Intern one ``IRBlock`` with instr/refusal order preserved."""
         if type(node) is not IRBlock:
             _fail("blocks", "*", node, "IRBlock")
@@ -784,11 +789,12 @@ class _SourceGraphEncoder8616:
             },
         )
 
-    @cython.cfunc
+    @cython.ccall
     def _instr_tuple(
-        self, owner: str, field_name: str, nodes: object,
-    ) -> list[int]:
+        self, owner: object, field_name: object, nodes: object,
+    ) -> object:
         """Require an immutable tuple of declared ``IRInstr`` children."""
+        item: object
         if type(nodes) is not tuple:
             _fail(owner, field_name, nodes, "tuple[IRInstr, ...]")
         result = []
@@ -798,11 +804,12 @@ class _SourceGraphEncoder8616:
             result.append(self._instr(item))
         return result
 
-    @cython.cfunc
+    @cython.ccall
     def _refusal_tuple(
-        self, owner: str, field_name: str, nodes: object,
-    ) -> list[int]:
+        self, owner: object, field_name: object, nodes: object,
+    ) -> object:
         """Require an immutable tuple of declared ``IRRefusal`` children."""
+        item: object
         if type(nodes) is not tuple:
             _fail(owner, field_name, nodes, "tuple[IRRefusal, ...]")
         result = []
@@ -813,6 +820,7 @@ class _SourceGraphEncoder8616:
         return result
 
 
+@cython.ccall
 @cython.locals(encoder=_SourceGraphEncoder8616)
 def _refusal_record_8616(node: IRRefusal, encoder: _SourceGraphEncoder8616) -> dict[str, object]:
     """Build the single validated shallow record for one ``IRRefusal``.
@@ -831,7 +839,7 @@ def _refusal_record_8616(node: IRRefusal, encoder: _SourceGraphEncoder8616) -> d
     }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FrozenSourceNodeRecord8616:
     """One interned node record frozen as sorted field names and typed atoms.
 
@@ -842,11 +850,11 @@ class FrozenSourceNodeRecord8616:
     can serve as exact refusal or node evidence in detached facts.
     """
 
-    names: tuple[str, ...]
-    values: tuple[object, ...]
+    names: object
+    values: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ImmutableSourceGraphFacts8616:
     """Deeply immutable canonical facts detached from one owned IR graph.
 
@@ -865,19 +873,20 @@ class ImmutableSourceGraphFacts8616:
     they are excluded from ``==`` and compared explicitly by the seal.
     """
 
-    function_addr: int
-    roots: tuple[int, ...]
-    records: tuple[FrozenSourceNodeRecord8616, ...]
-    function_refusals: tuple[FrozenSourceNodeRecord8616, ...] = field(
+    function_addr: cython.longlong
+    roots: object
+    records: object
+    function_refusals: object = field(
         compare=False
     )
-    block_refusals: tuple[FrozenSourceNodeRecord8616, ...] = field(
+    block_refusals: object = field(
         compare=False
     )
 
 
+@cython.ccall
 @cython.locals(encoder=_SourceGraphEncoder8616)
-def _frozen_refusal_8616(owner: str, node: object, encoder: _SourceGraphEncoder8616) -> FrozenSourceNodeRecord8616:
+def _frozen_refusal_8616(owner: object, node: object, encoder: _SourceGraphEncoder8616) -> FrozenSourceNodeRecord8616:
     """Freeze one declared ``IRRefusal`` into typed immutable evidence."""
     if type(node) is not IRRefusal:
         _fail(owner, "*", node, "IRRefusal")
@@ -886,9 +895,9 @@ def _frozen_refusal_8616(owner: str, node: object, encoder: _SourceGraphEncoder8
 
 
 def capture_immutable_source_graph_facts_8616(
-    function_addr: int,
-    blocks: tuple[IRBlock, ...],
-    function_refusals: tuple[IRRefusal, ...] = (),
+    function_addr: cython.longlong,
+    blocks: object,
+    function_refusals: object = (),
 ) -> ImmutableSourceGraphFacts8616:
     """Detach one owned IR graph into deeply immutable canonical facts.
 
@@ -919,34 +928,34 @@ def capture_immutable_source_graph_facts_8616(
             "capture_immutable_source_graph_facts_8616", "function_refusals",
             function_refusals, "tuple[IRRefusal, ...]",
         )
-    encoder: _SourceGraphEncoder8616 = cython.declare(
+    encoder = cython.declare(
         _SourceGraphEncoder8616,
         _SourceGraphEncoder8616(retain_records=False),
     )
     encoder.prepare(blocks)
     return ImmutableSourceGraphFacts8616(
         function_addr,
-        tuple(encoder.block(block) for block in blocks),
+        tuple(encoder.block(block) for block in iter(blocks)),
         tuple(
             FrozenSourceNodeRecord8616(names, values)
-            for names, values in encoder.record_keys
+            for names, values in iter(encoder.record_keys)
         ),
         tuple(
             _frozen_refusal_8616("function_refusals", refusal, encoder)
-            for refusal in function_refusals
+            for refusal in iter(function_refusals)
         ),
         tuple(
             _frozen_refusal_8616("IRBlock.refusals", refusal, encoder)
-            for block in blocks
-            for refusal in block.refusals
+            for block in iter(blocks)
+            for refusal in iter(block.refusals)
         ),
     )
 
 
 def source_graphs_equal_8616(
-    left_addr: int, left_blocks: tuple[IRBlock, ...],
-    right_addr: int, right_blocks: tuple[IRBlock, ...],
-) -> bool:
+    left_addr: cython.longlong, left_blocks: object,
+    right_addr: cython.longlong, right_blocks: object,
+) -> cython.bint:
     """Compare full canonical surfaces within one fresh, shared traversal.
 
     Structural interning gives equal nodes equal IDs in this encoder, so
@@ -956,22 +965,25 @@ def source_graphs_equal_8616(
     operation; nothing, including identity memo entries, survives this call.
     Persistent proof bindings still use ``canonical_source_graph_8616``.
     """
-    encoder: _SourceGraphEncoder8616 = cython.declare(
+    address: object
+    blocks: object
+    encoder = cython.declare(
         _SourceGraphEncoder8616,
         _SourceGraphEncoder8616(retain_records=False),
     )
-    roots: list[tuple[int, ...]] = []
+    roots: list[tuple[cython.longlong, ...]] = []
     for address, blocks in ((left_addr, left_blocks), (right_addr, right_blocks)):
         if type(address) is not int:
             _fail("source_graphs_equal_8616", "function_addr", address, "int")
         if not isinstance(blocks, (tuple, list)):
             _fail("source_graphs_equal_8616", "blocks", blocks, "tuple[IRBlock, ...]")
         encoder.prepare(blocks)
-        roots.append(tuple(encoder.block(block) for block in blocks))
-    return left_addr == right_addr and roots[0] == roots[1]
+        roots.append(tuple(encoder.block(block) for block in iter(blocks)))
+    return left_addr == right_addr and operator.eq(roots[0], roots[1])
 
 
-def canonical_call_stack_effect_8616(effect: IRCallStackEffect8616) -> str:
+@cython.ccall
+def canonical_call_stack_effect_8616(effect: IRCallStackEffect8616) -> object:
     """Encode a call effect's finite fields and live source-proof readiness.
 
     Reuse the exact effect projection used by full source graphs. Retained
@@ -981,7 +993,7 @@ def canonical_call_stack_effect_8616(effect: IRCallStackEffect8616) -> str:
     """
     if type(effect) is not IRCallStackEffect8616:
         _fail("canonical_call_stack_effect_8616", "effect", effect, "IRCallStackEffect8616")
-    encoder: _SourceGraphEncoder8616 = cython.declare(_SourceGraphEncoder8616, _SourceGraphEncoder8616())
+    encoder = cython.declare(_SourceGraphEncoder8616, _SourceGraphEncoder8616())
     payload: dict[str, object] = {
         "format": SOURCE_GRAPH_FORMAT_8616,
         "root": encoder._call_stack_effect_or_none(effect),
@@ -990,9 +1002,10 @@ def canonical_call_stack_effect_8616(effect: IRCallStackEffect8616) -> str:
     return canonical_json_dumps_8616(payload)
 
 
+@cython.ccall
 def canonical_source_graph_8616(
-    function_addr: int, blocks: tuple[IRBlock, ...],
-) -> str:
+    function_addr: cython.longlong, blocks: object,
+) -> object:
     """Serialize the exact artifact surface a domain proof consumes.
 
     The encoding is a deterministic interned node table: every owned node is
@@ -1014,36 +1027,36 @@ def canonical_source_graph_8616(
             "canonical_source_graph_8616", "blocks", blocks,
             "tuple[IRBlock, ...]",
         )
-    encoder: _SourceGraphEncoder8616 = cython.declare(_SourceGraphEncoder8616, _SourceGraphEncoder8616())
+    encoder = cython.declare(_SourceGraphEncoder8616, _SourceGraphEncoder8616())
     encoder.prepare(blocks)
     payload = {
         "format": SOURCE_GRAPH_FORMAT_8616,
         "function_addr": function_addr,
-        "roots": [encoder.block(block) for block in blocks],
+        "roots": [encoder.block(block) for block in iter(blocks)],
         "nodes": encoder.records,
     }
     return canonical_json_dumps_8616(payload)
 
 
 def canonical_ir_instruction_graph_8616(
-    instruction_groups: tuple[tuple[IRInstr, ...], ...], values: tuple[IRValue, ...],
-) -> str:
+    instruction_groups: object, values: object,
+) -> object:
     """Encode ordered instruction groups and SSA definition targets in one finite DAG.
 
     Group boundaries and value-root order are significant. The existing owned
     node encoder retains every instruction/value field and refuses opaque or
     cyclic nodes; no synthetic machine instructions or storage facts are added.
     """
-    if type(instruction_groups) is not tuple or any(type(group) is not tuple for group in instruction_groups):
+    if type(instruction_groups) is not tuple or any(type(group) is not tuple for group in iter(instruction_groups)):
         _fail("canonical_ir_instruction_graph_8616", "instruction_groups", instruction_groups, "tuple[tuple[IRInstr, ...], ...]")
-    if type(values) is not tuple or any(type(value) is not IRValue for value in values):
+    if type(values) is not tuple or any(type(value) is not IRValue for value in iter(values)):
         _fail("canonical_ir_instruction_graph_8616", "values", values, "tuple[IRValue, ...]")
-    encoder: _SourceGraphEncoder8616 = cython.declare(_SourceGraphEncoder8616, _SourceGraphEncoder8616())
-    roots = tuple(instruction for group in instruction_groups for instruction in group) + values
+    encoder = cython.declare(_SourceGraphEncoder8616, _SourceGraphEncoder8616())
+    roots = tuple(instruction for group in iter(instruction_groups) for instruction in iter(group)) + values
     encoder.prepare(roots)
     return canonical_json_dumps_8616({
         "format": "owned-ir-instruction-graph-v1",
-        "instruction_groups": [[encoder._instr(instruction) for instruction in group] for group in instruction_groups],
-        "values": [encoder._atom(value) for value in values],
+        "instruction_groups": [[encoder._instr(instruction) for instruction in iter(group)] for group in iter(instruction_groups)],
+        "values": [encoder._atom(value) for value in iter(values)],
         "nodes": encoder.records,
     })

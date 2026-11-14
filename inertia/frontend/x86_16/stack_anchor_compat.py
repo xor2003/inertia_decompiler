@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Preserve native stack address provenance when introducing SSA references.
 
 Layer: Frontend/IR adapter.
@@ -7,6 +8,8 @@ C recovery belongs here. Adjusted or ambiguous replacements remain untagged.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from typing import Any, Protocol, cast
@@ -15,6 +18,7 @@ from angr.ailment.expression import Expression, StackBaseOffset, UnaryOp, Virtua
 from angr.analyses.decompiler.ssailification.rewriting_engine import SimEngineSSARewriting
 
 from inertia.ir.native_stack_anchor import NATIVE_ENTRY_SP_ANCHOR_TAG8616, NativeStackAnchorStats8616
+import operator
 
 
 class _AnchorEvidenceBoundary8616(Protocol):
@@ -23,7 +27,8 @@ class _AnchorEvidenceBoundary8616(Protocol):
     _inertia_native_anchor_stats_8616: NativeStackAnchorStats8616
 
 
-def _is_exact_stack_reference_8616(result: Expression, offset: object) -> bool:
+@cython.ccall
+def _is_exact_stack_reference_8616(result: Expression, offset: object) -> cython.bint:
     """Match one direct SSA stack reference carrying exact source coordinates."""
     return (
         isinstance(result, UnaryOp)
@@ -31,11 +36,12 @@ def _is_exact_stack_reference_8616(result: Expression, offset: object) -> bool:
         and isinstance(result.operand, VirtualVariable)
         and result.operand.was_stack
         and type(offset) is int
-        and result.operand.stack_offset == offset
+        and operator.eq(result.operand.stack_offset, offset)
     )
 
 
-def publish_native_stack_anchor_8616(source: StackBaseOffset, result: Expression | None) -> bool:
+@cython.ccall
+def publish_native_stack_anchor_8616(source: StackBaseOffset, result: object) -> cython.bint:
     """Tag only exact direct SSA replacements, without changing either value."""
     if result is None:
         return False

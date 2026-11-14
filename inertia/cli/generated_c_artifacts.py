@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Write accepted generated C separately from CLI diagnostics.
 
 Layer: CLI/fallback/reporting.
@@ -7,6 +8,8 @@ parse, repair, or infer semantics from rendered C.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import hashlib
 import json
@@ -17,16 +20,18 @@ from pathlib import Path
 
 from inertia.cli.accepted_payload_integrity import verify_accepted_payload_integrity_8616
 from inertia.validation.tail_validation import x86_16_tail_validation_result_preserves_behavior
+import operator
 
 _SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
+@cython.ccall
 def write_generated_function_c(
     output_dir: Path,
     *,
-    address: int,
-    name: str,
-    payload: str,
+    address: cython.longlong,
+    name: object,
+    payload: object,
 ) -> Path:
     """Atomically write one validated function payload without transforming it."""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -38,11 +43,12 @@ def write_generated_function_c(
     return destination
 
 
+@cython.ccall
 def write_generated_translation_unit_c(
     output_dir: Path,
     *,
-    payload: str,
-    complete: bool,
+    payload: object,
+    complete: cython.bint,
 ) -> Path:
     """Atomically persist deterministic complete or honest partial batch C."""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -64,18 +70,23 @@ __all__ = [
 ]
 
 
+@cython.ccall
 def conditional_tail_snapshot_8616(
     snapshot: Mapping[str, object] | None,
     *, expected_stages: Sequence[str] = ("structuring", "postprocess"),
-) -> bool:
+) -> cython.bint:
     """Recognize complete same-premise conditional comparison receipts.
 
     This consumes retained comparison results, never creates live proof authority.
     Missing stages, changed effects and differing entry premises fail closed.
     """
+    current: object
+    premise: object
+    result: object
+    stage: object
     if not isinstance(snapshot, Mapping) or not expected_stages:
         return False
-    premise: object = None
+    premise = None
     for stage in expected_stages:
         result = snapshot.get(stage)
         if not isinstance(result, Mapping) or result.get("status") != "conditional":
@@ -83,16 +94,17 @@ def conditional_tail_snapshot_8616(
         if not x86_16_tail_validation_result_preserves_behavior(result):
             return False
         current = result.get("entry_premise")
-        if premise is not None and current != premise:
+        if premise is not None and operator.ne(current, premise):
             return False
         premise = current
     return premise is not None
 
 
+@cython.ccall
 def write_conditional_function_c_8616(
-    output_dir: Path, *, address: int, name: str, payload: str,
-    snapshot: Mapping[str, object], validated_payload_hash: str | None,
-    gcc_checked_payload_hash: str | None,
+    output_dir: Path, *, address: cython.longlong, name: object, payload: object,
+    snapshot: Mapping[str, object], validated_payload_hash: object,
+    gcc_checked_payload_hash: object,
 ) -> tuple[Path, Path]:
     """Write checked conditional C with its exact payload hash and premise receipts."""
     integrity = verify_accepted_payload_integrity_8616(

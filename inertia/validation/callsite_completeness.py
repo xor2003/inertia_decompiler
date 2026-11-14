@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Validation.
 
 Responsibility: classify CFG-to-AST callsite completeness improvements at validation boundaries.
@@ -7,12 +8,17 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 from typing import Protocol
+import dataclasses
+import operator
+import builtins
 
 _MISSING_CALLSITE_PREFIX_8616 = "missing-callsite:"
 
@@ -21,7 +27,7 @@ class TailValidationCallsiteSummary8616(Protocol):
     """Summary surface required for typed callsite-completeness classification."""
 
     @property
-    def helper_calls(self) -> tuple[str, ...]:
+    def helper_calls(self) -> object:
         """Read collected call fingerprints without permitting summary mutation."""
         ...
 
@@ -48,20 +54,20 @@ class CallsiteCompletenessDeltaReason8616(Enum):
     COMPLETE = "complete"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallsiteCompletenessDeltaResult8616:
     """Typed evidence loop for a CFG-proven callsite-completeness improvement."""
 
     verdict: CallsiteCompletenessDeltaVerdict8616
     reason: CallsiteCompletenessDeltaReason8616
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def accepted(self) -> bool:
+    def accepted(self) -> cython.bint:
         """Return whether the delta only removes all prior callsite deficits."""
         return self.verdict is CallsiteCompletenessDeltaVerdict8616.COMPLETE_IMPROVEMENT
 
@@ -80,33 +86,39 @@ class CallsiteCompletenessDeltaResult8616:
 
 
 def _missing_callsites_8616(summary: TailValidationCallsiteSummary8616) -> tuple[str, ...]:
-    return tuple(item for item in summary.helper_calls if item.startswith(_MISSING_CALLSITE_PREFIX_8616))
+    return tuple(item for item in iter(summary.helper_calls) if item.startswith(_MISSING_CALLSITE_PREFIX_8616))
 
 
-def _string_tuple_8616(value: object) -> tuple[str, ...] | None:
-    if not isinstance(value, (list, tuple)) or not all(isinstance(item, str) for item in value):
+def _string_tuple_8616(value: object) -> object:
+    if not isinstance(value, (list, tuple)) or not all(isinstance(item, str) for item in iter(value)):
         return None
     return tuple(value)
 
 
-def _delta_field_changed_8616(value: object) -> bool:
+@cython.ccall
+def _delta_field_changed_8616(value: object) -> cython.bint:
     if not isinstance(value, Mapping):
         return bool(value)
     return bool(value.get("added") or value.get("removed"))
 
 
+@cython.ccall
 def _delta_refusal_8616(
     validation: Mapping[str, object],
-    before_missing: tuple[str, ...],
-    after_missing: tuple[str, ...],
+    before_missing: object,
+    after_missing: object,
 ) -> CallsiteCompletenessDeltaReason8616 | None:
     """Return the refusal reason when the validation delta does not close."""
+    added: object
+    delta: object
+    helper_delta: object
+    removed: object
     delta = validation.get("delta")
     if not isinstance(delta, Mapping):
         return CallsiteCompletenessDeltaReason8616.VALIDATION_SHAPE_UNKNOWN
     if validation.get("semantic_failures"):
         return CallsiteCompletenessDeltaReason8616.SEMANTIC_FAILURE
-    touched_fields = {name for name, value in delta.items() if _delta_field_changed_8616(value)}
+    touched_fields = {name for name, value in builtins.iter(delta.items()) if _delta_field_changed_8616(value)}
     if touched_fields != {"helper_calls"}:
         return CallsiteCompletenessDeltaReason8616.OTHER_OBSERVABLE_DELTA
     helper_delta = delta.get("helper_calls")
@@ -120,7 +132,7 @@ def _delta_refusal_8616(
         return CallsiteCompletenessDeltaReason8616.ADDED_HELPER_CALL
     if after_missing:
         return CallsiteCompletenessDeltaReason8616.REMAINING_DEFICIT
-    if Counter(removed) != Counter(before_missing):
+    if operator.ne(Counter(removed), Counter(before_missing)):
         return CallsiteCompletenessDeltaReason8616.REMOVED_DEFICIT_MISMATCH
     return None
 
@@ -136,6 +148,7 @@ def classify_callsite_completeness_delta_8616(
     callsite, helper-call completeness is the sole delta, and no semantic
     failure accompanies the change.
     """
+    reason: object
     before_missing = _missing_callsites_8616(before)
     if not before_missing:
         return CallsiteCompletenessDeltaResult8616(

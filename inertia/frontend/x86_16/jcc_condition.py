@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Helper boundary.
 
 Responsibility: materialize explicit JCC branch conditions from typed IR condition facts.
@@ -5,6 +6,8 @@ Forbidden: recovering branch meaning from rendered assembly or postprocess text 
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 from collections.abc import Callable
@@ -25,6 +28,7 @@ from inertia.ir.condition_ir import (
     JCC_ULT_MNEMONICS_8616,
 )
 from inertia.ir.core import IRCondition, IRValue, MemSpace
+import operator
 
 __all__ = [
     "_condition_value_from_ir_value_8616",
@@ -69,11 +73,11 @@ class _ConditionExpr(Protocol):
 
 
 class _ConditionInstruction(Protocol):
-    def constant(self, value: int, ty: object) -> _ConditionExpr:
+    def constant(self, value: cython.longlong, ty: object) -> _ConditionExpr:
         """Return a pyvex-like constant expression."""
         ...
 
-    def get(self, name: str, ty: object) -> _ConditionExpr:
+    def get(self, name: object, ty: object) -> _ConditionExpr:
         """Return a pyvex-like register or temporary expression."""
         ...
 
@@ -93,7 +97,7 @@ def _condition_value_from_ir_value_8616(instruction: _ConditionInstruction, valu
     """Convert a typed IR value into a pyvex condition value when possible."""
 
     def _impl() -> _ConditionExpr | None:
-        if value.space == MemSpace.CONST:
+        if operator.eq(value.space, MemSpace.CONST):
             bits = max(1, int(value.size or 0) * 8 or 16)
             if bits <= 8:
                 ty = Type.int_8
@@ -102,15 +106,16 @@ def _condition_value_from_ir_value_8616(instruction: _ConditionInstruction, valu
             else:
                 ty = Type.int_32
             return instruction.constant(0 if value.const is None else int(value.const), ty)
-        if value.space == MemSpace.REG and isinstance(value.name, str) and value.name:
+        if operator.eq(value.space, MemSpace.REG) and isinstance(value.name, str) and value.name:
             return _reg_condition_value_8616(instruction, value)
-        if value.space == MemSpace.TMP and isinstance(value.name, str) and value.name:
+        if operator.eq(value.space, MemSpace.TMP) and isinstance(value.name, str) and value.name:
             return _tmp_condition_value_8616(instruction, value)
         return None
 
     return _impl()
 
 
+@cython.ccall
 def _reg_condition_value_8616(instruction: _ConditionInstruction, value: IRValue) -> _ConditionExpr | None:
     """Convert a typed register IR value into a pyvex condition value."""
     if not isinstance(value.name, str):
@@ -124,6 +129,7 @@ def _reg_condition_value_8616(instruction: _ConditionInstruction, value: IRValue
     return instruction.get(reg_name, Type.int_32)
 
 
+@cython.ccall
 def _tmp_condition_value_8616(instruction: _ConditionInstruction, value: IRValue) -> _ConditionExpr | None:
     """Convert a typed temp IR value into a pyvex condition value."""
     if not isinstance(value.name, str) or value.name == "VexValue":
@@ -142,14 +148,14 @@ def _tmp_condition_value_8616(instruction: _ConditionInstruction, value: IRValue
 
 def _direct_jcc_condition_from_last_condition_8616(
     instruction: _ConditionInstruction,
-    kind: str,
+    kind: object,
     condition: IRCondition,
 ) -> object | None:
     """Build a pyvex branch condition from the previously recorded typed IR condition."""
 
     def _impl() -> object | None:
-        args = tuple(arg for arg in condition.args if isinstance(arg, IRValue))
-        if len(args) != len(condition.args):
+        args = tuple(arg for arg in iter(condition.args) if isinstance(arg, IRValue))
+        if operator.ne(len(args), len(condition.args)):
             return None
         op = str(condition.op)
         if condition.expr and condition.expr[0] in {"update_eflags_inc", "update_eflags_dec"}:  # noqa: SIM102
@@ -170,7 +176,8 @@ def _direct_jcc_condition_from_last_condition_8616(
     return _impl()
 
 
-def _consume_last_condition_branch_8616(instruction: _ConditionInstruction, emu: object, kind: str) -> object | None:
+@cython.ccall
+def _consume_last_condition_branch_8616(instruction: _ConditionInstruction, emu: object, kind: object) -> object | None:
     """Consume the emulator's last typed condition and clear it after use.
 
     Dynamic boundary: the emulator is supplied by the pyvex/angr lifting
@@ -209,26 +216,34 @@ _JCC_COMPARE_OPS_8616: frozenset[str] = frozenset(
 )
 
 
+@cython.ccall
 def _masked_zero_result(
-    instruction: _ConditionInstruction, kind: str, args_local: tuple[IRValue, ...]
+    instruction: _ConditionInstruction, kind: object, args_local: object
 ) -> object | None:
     """Build the masked-zero equality/inequality comparison for one arg pair."""
+    lhs: object
+    rhs: object
     lhs = _condition_value_from_ir_value_8616(instruction, args_local[0])
     rhs = _condition_value_from_ir_value_8616(instruction, args_local[1]) if len(args_local) == 2 else None
     if lhs is None:
         return None
     masked = lhs if rhs is None else lhs & rhs
     if kind in JCC_EQ_MNEMONICS_8616:
-        return masked == instruction.constant(0, Type.int_16)
+        return operator.eq(masked, instruction.constant(0, Type.int_16))
     if kind in JCC_NE_MNEMONICS_8616:
-        return masked != instruction.constant(0, Type.int_16)
+        return operator.ne(masked, instruction.constant(0, Type.int_16))
     return None
 
 
+@cython.ccall
 def _binary_compare_result(
-    instruction: _ConditionInstruction, kind: str, args_local: tuple[IRValue, ...]
+    instruction: _ConditionInstruction, kind: object, args_local: object
 ) -> object | None:
     """Build the two-operand comparison for the requested JCC kind."""
+    lhs: object
+    rhs: object
+    compare: object
+    mnemonics: object
     lhs = _condition_value_from_ir_value_8616(instruction, args_local[0])
     rhs = _condition_value_from_ir_value_8616(instruction, args_local[1])
     if lhs is None or rhs is None:
@@ -239,26 +254,28 @@ def _binary_compare_result(
     return None
 
 
+@cython.ccall
 def _unary_zero_result(
-    instruction: _ConditionInstruction, kind: str, op: str, args_local: tuple[IRValue, ...]
+    instruction: _ConditionInstruction, kind: object, op: object, args_local: object
 ) -> object | None:
     """Build the one-operand zero/nonzero comparison for the requested JCC kind."""
+    value: object
     value = _condition_value_from_ir_value_8616(instruction, args_local[0])
     if value is None:
         return None
     zero = instruction.constant(0, Type.int_16)
     if op == "zero":
         return (
-            value == zero
+            operator.eq(value, zero)
             if kind in JCC_EQ_MNEMONICS_8616
-            else value != zero
+            else operator.ne(value, zero)
             if kind in JCC_NE_MNEMONICS_8616
             else None
         )
     return (
-        value != zero
+        operator.ne(value, zero)
         if kind in JCC_EQ_MNEMONICS_8616
-        else value == zero
+        else operator.eq(value, zero)
         if kind in JCC_NE_MNEMONICS_8616
         else None
     )

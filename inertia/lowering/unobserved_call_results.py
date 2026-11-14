@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Lower typed unobserved call-result carriers to standalone calls.
 
 Layer: Types/Lowering.
@@ -14,6 +15,8 @@ call itself may become redundant after fixed-frame recovery.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from typing import Any, Protocol, cast
@@ -51,6 +54,9 @@ from .structured_intrinsics import (
     is_structured_insert_intrinsic_8616,
     lower_structured_insert_call_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = (
     "UnobservedCallResultLoweringStats8616",
@@ -75,45 +81,47 @@ class _UnobservedResultCodegen8616(Protocol):
     _inertia_unobserved_call_result_lowering_stats_8616: UnobservedCallResultLoweringStats8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class UnobservedCallResultLoweringStats8616:
     """Closed evidence census for unobserved call-result lowering."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether at least one dead result assignment was lowered."""
         return self.materialized_count > 0
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every classified result was materialized or failed."""
         return bool(
             0 <= self.classified_fact_count <= self.normalized_fact_count <= self.raw_fact_count
-            and self.classified_fact_count == self.materialized_count + self.failure_count
+            and operator.eq(self.classified_fact_count, self.materialized_count + self.failure_count)
         )
 
 
-def _typed_summary_map_8616(codegen: _UnobservedResultCodegen8616) -> dict[int, CallsiteSummary8616]:
+@cython.ccall
+def _typed_summary_map_8616(codegen: _UnobservedResultCodegen8616) -> dict[cython.longlong, CallsiteSummary8616]:
     """Narrow dynamic codegen metadata to owned typed callsite summaries."""
     raw = codegen._inertia_callsite_summaries
     if not isinstance(raw, dict):
         return {}
     return {
         node_id: summary
-        for node_id, summary in raw.items()
+        for node_id, summary in builtins.iter(raw.items())
         if isinstance(node_id, int) and isinstance(summary, CallsiteSummary8616)
     }
 
 
+@cython.ccall
 def _typed_c_result_contract_map_8616(
     codegen: _UnobservedResultCodegen8616,
-) -> dict[int, CallsiteCResultContract8616]:
+) -> dict[cython.longlong, CallsiteCResultContract8616]:
     """Narrow final declaration contracts to their owned typed mapping."""
     try:
         raw = codegen._inertia_callsite_c_result_contracts_8616
@@ -123,17 +131,20 @@ def _typed_c_result_contract_map_8616(
         return {}
     return {
         callsite_addr: contract
-        for callsite_addr, contract in raw.items()
+        for callsite_addr, contract in builtins.iter(raw.items())
         if isinstance(callsite_addr, int) and isinstance(contract, CallsiteCResultContract8616)
     }
 
 
+@cython.ccall
 def _c_result_contract_for_call_8616(
     codegen: _UnobservedResultCodegen8616,
     call: CFunctionCall,
-    contracts: dict[int, CallsiteCResultContract8616],
+    contracts: object,
 ) -> CallsiteCResultContract8616 | None:
     """Resolve a final C result contract by stable active or original callsite identity."""
+    callsite_addr: object
+    contract: object
     callsite_addr = structured_callsite_addr_8616(call)
     if callsite_addr is None:
         return None
@@ -149,11 +160,13 @@ def _c_result_contract_for_call_8616(
     return contracts.get(callsite_addr + original_delta)
 
 
+@cython.ccall
 def _is_proven_unobserved_ax_result_8616(
     assignment: CAssignment,
     summary: CallsiteSummary8616,
-) -> bool:
+) -> cython.bint:
     """Classify an exact AX-family result assignment from typed binary facts."""
+    view: object
     if summary.stack_probe_helper:
         return False
     if summary.return_used is not False or summary.return_use_kind not in {
@@ -167,7 +180,7 @@ def _is_proven_unobserved_ax_result_8616(
     return view is not None and view.reg_offset == 0 and view.width in {2, 4}
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _ProjectedCallResult8616:
     """One call effect and any independent value retained by its projection."""
 
@@ -179,6 +192,7 @@ def _insert_projection_without_call_result_8616(
     node: CFunctionCall,
 ) -> _ProjectedCallResult8616 | None:
     """Split an Insert whose base call result is proven disposable later."""
+    residual: object
     if not is_structured_insert_intrinsic_8616(node):
         return None
     raw_args = node.args
@@ -189,8 +203,8 @@ def _insert_projection_without_call_result_8616(
         return None
     if any(
         isinstance(candidate, CFunctionCall)
-        for operand in (offset, value)
-        for candidate in (operand, *_iter_c_nodes_deep_8616(operand))
+        for operand in iter((offset, value))
+        for candidate in iter((operand, ) + tuple(_iter_c_nodes_deep_8616(operand)))
     ):
         return None
     base_type = base.type
@@ -210,6 +224,7 @@ def _insert_projection_without_call_result_8616(
     return _ProjectedCallResult8616(base, residual)
 
 
+@cython.ccall
 def _projected_call_result_8616(node: object) -> _ProjectedCallResult8616 | None:
     """Return the sole call in an exact generated result projection."""
     if isinstance(node, CFunctionCall):
@@ -226,10 +241,14 @@ def _projected_call_result_8616(node: object) -> _ProjectedCallResult8616 | None
     return None
 
 
+@cython.ccall
 def _masked_subregister_call_result_8616(
     assignment: CAssignment,
 ) -> _ProjectedCallResult8616 | None:
     """Recognize an exact preserved-carrier OR masked-call projection."""
+    projection: object
+    preserved: object
+    projected: object
     rhs = assignment.rhs
     if not isinstance(rhs, CBinaryOp) or rhs.op != "Or":
         return None
@@ -240,12 +259,16 @@ def _masked_subregister_call_result_8616(
     return None
 
 
+@cython.ccall
 def _masked_orientation_8616(
     assignment: CAssignment,
     preserved: object,
     projected: object,
 ) -> _ProjectedCallResult8616 | None:
     """Prove one preserved/projected operand orientation of an Or-mask."""
+    destination_view: object
+    projection: object
+    runtime_destination_view: object
     if not isinstance(preserved, CBinaryOp) or preserved.op != "And":
         return None
     if not isinstance(projected, CBinaryOp) or projected.op != "And":
@@ -272,10 +295,10 @@ def _masked_orientation_8616(
     runtime_destination_view = runtime_gp_expression_view_8616(assignment.lhs)
     runtime_preserved_view = runtime_gp_expression_view_8616(preserved_value)
     if not (
-        (destination_view is not None and preserved_view == destination_view)
+        (destination_view is not None and operator.eq(preserved_view, destination_view))
         or (
             runtime_destination_view is not None
-            and runtime_preserved_view == runtime_destination_view
+            and operator.eq(runtime_preserved_view, runtime_destination_view)
         )
     ):
         return None
@@ -290,12 +313,13 @@ def _masked_orientation_8616(
     projected_bits = int(projected_mask.value) & full_mask
     if preserved_bits & projected_bits:
         return None
-    if preserved_bits | projected_bits != full_mask:
+    if operator.ne(preserved_bits | projected_bits, full_mask):
         return None
     return projection
 
 
-def _is_proven_unobserved_projected_result_8616(summary: CallsiteSummary8616) -> bool:
+@cython.ccall
+def _is_proven_unobserved_projected_result_8616(summary: CallsiteSummary8616) -> cython.bint:
     """Classify a generated call projection from closed caller-use evidence."""
     return bool(
         not summary.stack_probe_helper
@@ -305,7 +329,8 @@ def _is_proven_unobserved_projected_result_8616(summary: CallsiteSummary8616) ->
     )
 
 
-def _is_typed_void_call_8616(call: CFunctionCall) -> bool:
+@cython.ccall
+def _is_typed_void_call_8616(call: CFunctionCall) -> cython.bint:
     """Return whether the structured call carries an explicit void contract."""
     try:
         return_type = call.prototype_returnty
@@ -317,8 +342,9 @@ def _is_typed_void_call_8616(call: CFunctionCall) -> bool:
 def _has_proven_void_interrupt_result_8616(
     codegen: _UnobservedResultCodegen8616,
     call: CFunctionCall,
-) -> bool:
+) -> cython.bint:
     """Return whether Semantics proves this exact interrupt has no register result."""
+    callsite_addr: object
     callsite_addr = structured_callsite_addr_8616(call)
     if callsite_addr is None:
         return False
@@ -328,15 +354,17 @@ def _has_proven_void_interrupt_result_8616(
         return False
     if not isinstance(artifact, SoftwareInterruptInputArtifact8616):
         return False
-    matches = tuple(fact for fact in artifact.facts if fact.callsite_addr == callsite_addr)
+    matches = tuple(fact for fact in iter(artifact.facts) if operator.eq(fact.callsite_addr, callsite_addr))
     return len(matches) == 1 and matches[0].result_register is None
 
 
 def _has_typed_void_interrupt_target_8616(
     codegen: _UnobservedResultCodegen8616,
     call: CFunctionCall,
-) -> bool:
+) -> cython.bint:
     """Return whether exact synthetic interrupt identity has a typed void result."""
+    cfg_kind: object
+    direct_kind: object
     callee = call.callee_func
     try:
         target_addr = cast(Any, callee).addr
@@ -360,8 +388,8 @@ def _has_typed_void_interrupt_target_8616(
             return cfg_kind is InterruptServiceResultKind8616.VOID
     matches = tuple(
         recovered
-        for recovered in collect_interrupt_service_calls(function)
-        if recovered.insn_addr == callsite_addr
+        for recovered in builtins.iter(collect_interrupt_service_calls(function))
+        if operator.eq(recovered.insn_addr, callsite_addr)
     )
     return len(matches) == 1 and (
         interrupt_service_result_kind_at_addr_8616(interrupt_service_addr(matches[0]))
@@ -369,21 +397,25 @@ def _has_typed_void_interrupt_target_8616(
     )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _UnobservedLowerScan8616:
     """Mutable per-statement scan state for unobserved call-result lowering."""
 
     boundary: _UnobservedResultCodegen8616
-    summaries: dict[int, CallsiteSummary8616]
-    c_result_contracts: dict[int, CallsiteCResultContract8616]
-    seen_assignments: set[int] = field(default_factory=set)
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
+    summaries: object
+    c_result_contracts: object
+    seen_assignments: object = field(default_factory=set)
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
 
+    @cython.ccall
     def process_container(self, container: CStatements) -> None:
         """Rewrite proven assignments inside one statement container."""
+        replacement: object
+        index: object
+        statement: object
         statements: list[object] = list(container.statements or ())
         changed = False
         for index, statement in enumerate(statements):
@@ -396,8 +428,15 @@ class _UnobservedLowerScan8616:
         if changed:
             cast(Any, container).statements = statements
 
-    def _replacement_8616(self, statement: object) -> list[object] | None:
+    @cython.ccall
+    def _replacement_8616(self, statement: object) -> object:
         """Return the proven replacement statement(s) or None."""
+        c_result_contract: object
+        call: object
+        direct_call: object
+        projected_call: object
+        projection: object
+        summary: object
         if not isinstance(statement, CAssignment):
             return None
         direct_call = (
@@ -469,8 +508,9 @@ class _UnobservedLowerScan8616:
         return [call_statement]
 
 
-def lower_unobserved_call_result_assignments_8616(codegen: object) -> bool:
+def lower_unobserved_call_result_assignments_8616(codegen: object) -> cython.bint:
     """Replace only typed-clobbered AX call assignments with standalone calls."""
+    container: object
     boundary = cast(_UnobservedResultCodegen8616, codegen)
     try:
         root = boundary.cfunc.statements
@@ -485,7 +525,7 @@ def lower_unobserved_call_result_assignments_8616(codegen: object) -> bool:
         c_result_contracts=c_result_contracts,
     )
     for container in tuple(
-        node for node in _iter_c_nodes_deep_8616(root) if isinstance(node, CStatements)
+        node for node in builtins.iter(_iter_c_nodes_deep_8616(root)) if isinstance(node, CStatements)
     ):
         scan.process_container(container)
 

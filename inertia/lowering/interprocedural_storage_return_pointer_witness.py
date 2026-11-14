@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Select the exact caller use that witnesses a pointer return trial.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from inertia.alias.domains import register_domain_for_name, register_view_for_name
 from inertia.ir.core import IRValue, MemSpace
@@ -18,20 +21,19 @@ from inertia.semantics.caller_return_use_contracts import CallerReturnUseFact861
 
 from .interprocedural_storage_contracts import StorageIdentity8616, StorageUseEvidence8616
 from .interprocedural_storage_return_type_contracts import ReturnPointerUseEvidence8616
+import operator
 
 
 def _register_matches_output_8616(
     value: IRValue,
-    output_storages: tuple[StorageIdentity8616, ...],
-) -> bool:
+    output_storages: object,
+) -> cython.bint:
     """Return whether one exact register is an output storage view."""
     return value.space is MemSpace.REG and any(
-        value.size == storage.width
-        and register_domain_for_name(value.name)
-        == register_domain_for_name(storage.register)
-        and register_view_for_name(value.name)
-        == register_view_for_name(storage.register)
-        for storage in output_storages
+        operator.eq(value.size, storage.width)
+        and operator.eq(register_domain_for_name(value.name), register_domain_for_name(storage.register))
+        and operator.eq(register_view_for_name(value.name), register_view_for_name(storage.register))
+        for storage in iter(output_storages)
     )
 
 
@@ -39,13 +41,13 @@ def pointer_return_witness_use_8616(
     artifact: SSAFunctionArtifact,
     fact: CallerReturnUseFact8616,
     pointer_use: ReturnPointerUseEvidence8616,
-    output_storages: tuple[StorageIdentity8616, ...],
-) -> tuple[tuple[StorageUseEvidence8616, ...] | None, bool]:
+    output_storages: object,
+) -> tuple[tuple[StorageUseEvidence8616, ...] | None, cython.bint]:
     """Select one exact register alias or stack-spill witness site."""
     aliases = tuple(
         step
-        for step in pointer_use.aliases
-        if step.instr_addr == fact.witness_instruction_addr
+        for step in iter(pointer_use.aliases)
+        if operator.eq(step.instr_addr, fact.witness_instruction_addr)
     )
     if len(aliases) == 1:
         alias = aliases[0]
@@ -65,9 +67,9 @@ def pointer_return_witness_use_8616(
 
     spills = tuple(
         transfer
-        for transfer in pointer_use.stack_transfers
+        for transfer in iter(pointer_use.stack_transfers)
         if transfer.source.kind is LogicalMemoryRegisterTransferKind8616.SPILL
-        and transfer.source.register_site.instr_addr == fact.witness_instruction_addr
+        and operator.eq(transfer.source.register_site.instr_addr, fact.witness_instruction_addr)
         and _register_matches_output_8616(
             transfer.source.register,
             output_storages,
@@ -78,7 +80,7 @@ def pointer_return_witness_use_8616(
     site = spills[0].source.register_site
     if not 0 <= site.instr_index < len(
         next(
-            (block.instrs for block in artifact.blocks if block.addr == site.block_addr),
+            (block.instrs for block in iter(artifact.blocks) if operator.eq(block.addr, site.block_addr)),
             (),
         )
     ):

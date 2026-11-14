@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Shared evidence guards for both CALL-target binder routes.
 
 Layer: Types/Lowering (staged candidate under
@@ -13,6 +14,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from inertia.ir.core import IRBlock, IRFunctionArtifact, IRInstr, IRValue
 from inertia.ir.function_ir_registry import (
@@ -33,15 +36,17 @@ from .call_target_ssa_contracts import (
     CallTargetBindVerdict8616,
     _refuse_8616,
 )
+import operator
+import builtins
 
 
 def _unique_ssa_call_8616(
     artifact: SSAFunctionArtifact,
-    caller_addr: int,
-    callsite_addr: int,
-) -> tuple[int, int, IRInstr] | CallTargetBindResult8616:
+    caller_addr: cython.longlong,
+    callsite_addr: cython.longlong,
+) -> object:
     """Return the unique well-formed SSA CALL candidate at the callsite."""
-    if artifact.function_addr != caller_addr:
+    if operator.ne(artifact.function_addr, caller_addr):
         return _refuse_8616(
             callsite_addr,
             CallTargetBindVerdict8616.CONFLICT,
@@ -49,9 +54,9 @@ def _unique_ssa_call_8616(
         )
     candidates = tuple(
         (block.addr, instr_index, instruction)
-        for block in artifact.blocks
-        for instr_index, instruction in enumerate(block.instrs)
-        if instruction.op == "CALL" and instruction.addr == callsite_addr
+        for block in iter(artifact.blocks)
+        for instr_index, instruction in builtins.iter(enumerate(block.instrs))
+        if instruction.op == "CALL" and operator.eq(instruction.addr, callsite_addr)
     )
     if not candidates:
         return _refuse_8616(
@@ -79,10 +84,11 @@ def _unique_ssa_call_8616(
     return block_addr, instr_index, instruction
 
 
+@cython.ccall
 def _registered_raw_artifact_8616(
     project: object,
-    caller_addr: int,
-    callsite_addr: int,
+    caller_addr: cython.longlong,
+    callsite_addr: cython.longlong,
     *,
     not_registered: CallTargetBindStage8616,
     conflict: CallTargetBindStage8616,
@@ -109,6 +115,7 @@ def _registered_raw_artifact_8616(
     return resolution.artifact
 
 
+@cython.ccall
 def _integrity_failure_stage_8616(
     failure: CallProducerIntegrityFailure8616,
 ) -> CallTargetBindStage8616:
@@ -131,14 +138,15 @@ def _integrity_failure_stage_8616(
 
 def _closure_or_refusal_8616(
     artifact: SSAFunctionArtifact,
-    ssa_block_addr: int,
+    ssa_block_addr: cython.longlong,
     source_block: IRBlock,
-    ssa_instr_index: int,
-    callsite_addr: int,
+    ssa_instr_index: cython.longlong,
+    callsite_addr: cython.longlong,
 ) -> SSABlock | CallTargetBindResult8616:
     """Bind the artifact block's producer closure or return the refusal."""
+    failure: object
     ssa_blocks = tuple(
-        block for block in artifact.blocks if block.addr == ssa_block_addr
+        block for block in iter(artifact.blocks) if operator.eq(block.addr, ssa_block_addr)
     )
     if len(ssa_blocks) != 1:
         return _refuse_8616(
@@ -167,8 +175,8 @@ def _closure_or_refusal_8616(
 
 
 def _unique_block_8616(
-    artifact: IRFunctionArtifact, block_addr: int
+    artifact: IRFunctionArtifact, block_addr: cython.longlong
 ) -> IRBlock | None:
     """Return the unique typed block at one address, or ``None``."""
-    blocks = tuple(block for block in artifact.blocks if block.addr == block_addr)
+    blocks = tuple(block for block in iter(artifact.blocks) if operator.eq(block.addr, block_addr))
     return blocks[0] if len(blocks) == 1 else None

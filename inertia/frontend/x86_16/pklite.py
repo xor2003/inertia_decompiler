@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Decode PKLITE containers with Deark, never by guessing executed stub effects.
 
 Layer: frontend (loader).
@@ -6,6 +7,7 @@ entry and unapplied relocation records before the ordinary DOS loader sees it.
 """
 
 from __future__ import annotations
+import cython
 
 import os
 import shutil
@@ -16,18 +18,21 @@ from pathlib import Path
 
 from .mz_image import MZHeaderView, UnpackedMZImage
 from .packed_mz import PackedMZError, PackedMZErrorKind, PackerType, detect_packer_in_bytes
+import operator
 
-_MAX_OUTPUT_BYTES: int = 32 * 1024 * 1024
-_DEARK_TIMEOUT: int = 60
+_MAX_OUTPUT_BYTES: cython.longlong = 32 * 1024 * 1024
+_DEARK_TIMEOUT: cython.longlong = 60
 _DEARK_SOURCE: str = "https://github.com/jsummers/deark"
 
 
-def _validated_image(data: bytes) -> UnpackedMZImage:
+@cython.ccall
+def _validated_image(data: object) -> UnpackedMZImage:
     """Reject truncated, still-packed, trailing-overlay or out-of-bounds output."""
+    header: object
     header = MZHeaderView.parse(data)
     if header is None:
         raise PackedMZError(PackedMZErrorKind.MALFORMED_PKLITE, "Deark output is not an MZ executable")
-    valid_extent = header.declared_file_size == len(data) and 28 <= header.header_size < len(data)
+    valid_extent = operator.eq(header.declared_file_size, len(data)) and 28 <= header.header_size < len(data)
     table_end = header.relocation_offset + header.relocation_count * 4
     valid_table = header.relocation_count == 0 or 28 <= header.relocation_offset <= table_end <= header.header_size
     if not valid_extent or not valid_table:
@@ -37,7 +42,7 @@ def _validated_image(data: bytes) -> UnpackedMZImage:
     image = data[header.header_size:]
     if (header.entry_cs << 4) + header.entry_ip >= len(image):
         raise PackedMZError(PackedMZErrorKind.MALFORMED_PKLITE, "decoded entry lies outside the load image")
-    relocations: list[tuple[int, int]] = []
+    relocations: list[tuple[cython.longlong, cython.longlong]] = []
     for index in range(header.relocation_count):
         offset, segment = struct.unpack_from("<HH", data, header.relocation_offset + index * 4)
         if (segment << 4) + offset + 2 > len(image):
@@ -47,8 +52,11 @@ def _validated_image(data: bytes) -> UnpackedMZImage:
                            header.stack_ss, header.stack_sp, header.min_alloc, header.max_alloc, header.overlay_number)
 
 
-def unpack_pklite(data: bytes) -> UnpackedMZImage:
+@cython.ccall
+def unpack_pklite(data: object) -> UnpackedMZImage:
     """Unpack a recognized PKLITE MZ with an optional native Deark installation."""
+    detection: object
+    executable: object
     detection = detect_packer_in_bytes(data)
     if detection is None or detection.packer_type is not PackerType.PKLITE:
         raise PackedMZError(PackedMZErrorKind.UNSUPPORTED_PACKER, "expected a recognized PKLITE MZ executable")

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed contracts for pointer-relative storage reaching function returns.
 
 Layer: Semantics.
@@ -10,13 +11,17 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
 
 from inertia.ir.core import AddressStatus, IRAddress, IRValue, MemSpace, SegmentOrigin
+import dataclasses
+import operator
 
-type PointerOutputKey8616 = tuple[MemSpace, str, int, int, int]
+PointerOutputKey8616 = typing.TypeAliasType("PointerOutputKey8616", tuple[MemSpace, str, int, int, int])
 
 
 class TerminalPointerOutputDisposition8616(StrEnum):
@@ -35,28 +40,28 @@ class TerminalPointerOutputFailure8616(StrEnum):
     TERMINAL_NOT_RETURN = "terminal_not_return"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalPointerStoreSite8616:
     """One exact typed STORE contributing to a pointer-relative candidate."""
 
-    block_addr: int
-    instr_index: int
-    instr_addr: int
+    block_addr: cython.longlong
+    instr_index: cython.longlong
+    instr_addr: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalPointerOutputFact8616:
     """All exact stores and terminal disposition for one versioned pointer range."""
 
     address: IRAddress
     base_value: IRValue
     disposition: TerminalPointerOutputDisposition8616
-    store_sites: tuple[TerminalPointerStoreSite8616, ...]
-    terminal_block_addrs: tuple[int, ...]
-    definitely_written_terminal_block_addrs: tuple[int, ...]
+    store_sites: object
+    terminal_block_addrs: object
+    definitely_written_terminal_block_addrs: object
 
     @property
-    def conditional_store_blocks(self) -> tuple[int, ...]:
+    def conditional_store_blocks(self) -> tuple[cython.longlong, ...]:
         """Return conservative coexecution evidence, unnecessary for must-writes.
 
         Equal terminal sets do not identify which incoming paths wrote memory.
@@ -66,7 +71,7 @@ class TerminalPointerOutputFact8616:
         """
         if self.disposition is TerminalPointerOutputDisposition8616.MUST_WRITE:
             return ()
-        return tuple(sorted({site.block_addr for site in self.store_sites}))
+        return tuple(sorted({site.block_addr for site in iter(self.store_sites)}))
 
     @property
     def segment(self) -> MemSpace:
@@ -74,7 +79,7 @@ class TerminalPointerOutputFact8616:
         return self.address.space
 
     @property
-    def base_register(self) -> str | None:
+    def base_register(self) -> object:
         """Return the exact register carried by the pointer address."""
         name = self.base_value.name
         return name if isinstance(name, str) and name else None
@@ -86,12 +91,12 @@ class TerminalPointerOutputFact8616:
         return version if isinstance(version, int) and not isinstance(version, bool) else None
 
     @property
-    def relative_offset(self) -> int:
+    def relative_offset(self) -> cython.longlong:
         """Return the signed byte offset relative to the versioned pointer."""
         return int(self.address.offset)
 
     @property
-    def width(self) -> int:
+    def width(self) -> cython.longlong:
         """Return the exact STORE width in bytes."""
         return int(self.address.size)
 
@@ -109,7 +114,7 @@ class TerminalPointerOutputFact8616:
         )
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether pointer identity, stores, and terminal coverage agree."""
         definite = self.definitely_written_terminal_block_addrs
         terminals = self.terminal_block_addrs
@@ -124,32 +129,32 @@ class TerminalPointerOutputFact8616:
             and self.address.segment_origin is SegmentOrigin.PROVEN
             and self.address.size > 0
             and len(self.address.base) == len(self.address.base_values) == 1
-            and self.address.base == (self.base_value.name,)
-            and self.address.base_values == (self.base_value,)
+            and operator.eq(self.address.base, (self.base_value.name,))
+            and operator.eq(self.address.base_values, (self.base_value,))
             and self.base_value.space is MemSpace.REG
             and self.base_value.name is not None
             and self.base_value.version is not None
             and self.store_sites
             and terminals
-            and tuple(sorted(set(terminals))) == terminals
-            and tuple(sorted(set(definite))) == definite
+            and operator.eq(tuple(sorted(tuple(set(terminals)))), terminals)
+            and operator.eq(tuple(sorted(tuple(set(definite)))), definite)
             and set(definite) <= set(terminals)
             and disposition_matches
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalPointerOutputStats8616:
     """Closed evidence accounting for pointer-relative output candidates."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every pointer candidate has one retained outcome."""
         return (
             self.raw_fact_count
@@ -160,23 +165,23 @@ class TerminalPointerOutputStats8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalPointerOutputEvidence8616:
     """Pointer-relative facts or one atomic path/alias refusal."""
 
-    function_addr: int
-    facts: tuple[TerminalPointerOutputFact8616, ...]
+    function_addr: cython.longlong
+    facts: object
     failure: TerminalPointerOutputFailure8616 | None
     stats: TerminalPointerOutputStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether all bounded pointer candidates were classified."""
         return (
             self.failure is None
             and self.stats.complete
-            and len(self.facts) == self.stats.materialized_count
-            and all(fact.complete for fact in self.facts)
+            and operator.eq(len(self.facts), self.stats.materialized_count)
+            and all(fact.complete for fact in iter(self.facts))
         )
 
     @property
@@ -184,7 +189,7 @@ class TerminalPointerOutputEvidence8616:
         """Return exact pointer ranges definitely written on every return path."""
         return tuple(
             fact
-            for fact in self.facts
+            for fact in iter(self.facts)
             if fact.disposition is TerminalPointerOutputDisposition8616.MUST_WRITE
         )
 

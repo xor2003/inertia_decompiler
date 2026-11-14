@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recompilable output.
 
 Responsibility: preserve legacy evidence helpers as inert compatibility surfaces.
@@ -11,11 +12,13 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import cython
 
 import re
 from pathlib import Path
 
 from .recompilable_cases import RecompilableSubsetCase
+import builtins
 
 __all__ = [
     "load_or_build_recompilable_source_evidence",
@@ -26,6 +29,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _EVIDENCE_SUBSET_ROOT = _REPO_ROOT / ".codex_automation" / "evidence_subset" / "cod"
 
 
+@cython.ccall
 def _evidence_dec_path(case: RecompilableSubsetCase) -> Path | None:
     if case.cod_path is None:
         return None
@@ -37,12 +41,14 @@ def _evidence_dec_path(case: RecompilableSubsetCase) -> Path | None:
     return (_EVIDENCE_SUBSET_ROOT / rel_path).with_suffix(".dec")
 
 
-def _extract_source_function_lines(source_lines: tuple[str, ...], proc_name: str) -> tuple[str, ...]:
+def _extract_source_function_lines(source_lines: object, proc_name: object) -> tuple[str, ...]:
+    start_index: object
+    line: object
     bare_name = proc_name.lstrip("_")
     start_index = next(
         (
             idx
-            for idx, line in enumerate(source_lines)
+            for idx, line in builtins.iter(enumerate(source_lines))
             if re.search(rf"(?<![A-Za-z0-9_]){re.escape(bare_name)}\s*\(", line)
         ),
         None,
@@ -66,7 +72,8 @@ def _extract_source_function_lines(source_lines: tuple[str, ...], proc_name: str
     return tuple(collected)
 
 
-def _normalize_source_evidence_text(text: str, *, proc_name: str | None = None) -> str:
+@cython.ccall
+def _normalize_source_evidence_text(text: object, *, proc_name: object = None) -> object:
     normalized = text
     normalized = re.sub(r"(?m)^static\s+int\s+loadprog\(", "int loadprog(", normalized)
     if proc_name:
@@ -98,6 +105,7 @@ def _normalize_source_evidence_text(text: str, *, proc_name: str | None = None) 
     return normalized
 
 
+@cython.ccall
 def load_or_build_recompilable_source_evidence(case: RecompilableSubsetCase) -> tuple[str | None, Path | None]:
     """Return the legacy evidence path while refusing to load or persist source text."""
     evidence_path = _evidence_dec_path(case)

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/runtime.
 
 Responsibility: provide shared opcode handlers for instruction lifting/emulation.
@@ -8,6 +9,8 @@ Dynamic value boundary: PyVEX expressions overload Python operators at runtime;
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 from collections.abc import Callable, Sequence
@@ -45,27 +48,31 @@ from .interrupt_contract import interrupt_core_addr_8616
 from .msvc_x87_interrupts import is_msvc_x87_emulation_interrupt_8616, msvc_x87_escape_opcode_8616
 from .parse import ParseInstr
 from .vex_value_contract import require_vex_value_8616 as _require_vex_value
+import operator
+Emulator = typing.TypeVar("Emulator")
 
 if TYPE_CHECKING:
     from .emulator import Emulator
 
-CHSZ_NONE: int = 0
-CHSZ_OP: int = 1
-CHSZ_AD: int = 2
+CHSZ_NONE: cython.longlong = 0
+CHSZ_OP: cython.longlong = 1
+CHSZ_AD: cython.longlong = 2
 
 
 logger: logging.Logger = logging.getLogger(__name__)
 
-type BoundOpcodeHandler = Callable[[], None]
-type OpcodeRegistrationHandler = OpcodeExecHandler | BoundOpcodeHandler
-type VexExpr = Any
+BoundOpcodeHandler = typing.TypeAliasType("BoundOpcodeHandler", Callable[[], None])
+OpcodeRegistrationHandler = typing.TypeAliasType("OpcodeRegistrationHandler", OpcodeExecHandler | BoundOpcodeHandler)
+VexExpr = typing.TypeAliasType("VexExpr", Any)
 
 
+@cython.ccall
 def _vex_expr(value: object) -> VexExpr:
     """Expose one concrete-or-PyVEX runtime value at the third-party boundary."""
     return cast(VexExpr, value)
 
 
+@cython.ccall
 def _unbound_opcode_handler(func: OpcodeRegistrationHandler) -> OpcodeExecHandler:
     """Normalize a bound or unbound owned opcode handler for table storage."""
     if isinstance(func, MethodType):
@@ -76,22 +83,24 @@ def _unbound_opcode_handler(func: OpcodeRegistrationHandler) -> OpcodeExecHandle
 class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-ignore] # dynamic frontend mixins
     """Provide shared byte-width opcode semantics for the x86 frontend runtime."""
 
-    _base_opcode_template_instrfuncs: list[OpcodeExecHandler | None] | None = None
-    _base_opcode_template_chk: list[int | InstrFlags] | None = None
+    _base_opcode_template_instrfuncs: object = None
+    _base_opcode_template_chk: object = None
 
-    def __init__(self, emu: Emulator, instr: InstrData, mode32: bool) -> None:
+    def __init__(self, emu: Emulator, instr: InstrData, mode32: cython.bint) -> None:
         """Initialize shared opcode tables for one decoded-instruction runtime."""
+        base_chk: object
+        base_funcs: object
         super().__init__(emu)
         super(ExecInstr, self).__init__(emu, instr, mode32)  # ParseInstr
         super(ParseInstr, self).__init__(emu, instr, mode32)  # EmuInstr
         self.emu = emu
         self.emu.active_instruction = self
         # Keep opcode tables in fixed-size arrays for fast indexed access.
-        self.instrfuncs: list[OpcodeExecHandler | None]
-        self.chk: list[int | InstrFlags]
-        if not isinstance(self.instrfuncs, list) or len(self.instrfuncs) != MAX_OPCODE:
+        self.instrfuncs: object
+        self.chk: object
+        if not isinstance(self.instrfuncs, list) or operator.ne(len(self.instrfuncs), MAX_OPCODE):
             self.instrfuncs = [None] * MAX_OPCODE
-        if not isinstance(self.chk, list) or len(self.chk) != MAX_OPCODE:
+        if not isinstance(self.chk, list) or operator.ne(len(self.chk), MAX_OPCODE):
             self.chk = [InstrFlags()] * MAX_OPCODE
         self.chsz_ad = False
         cls = type(self)
@@ -217,6 +226,7 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
         cls._base_opcode_template_chk = self.chk.copy()
 
     def _ite_value(self, cond: VexExpr, when_true: VexExpr, when_false: VexExpr) -> VexExpr:
+        lifter_instruction: object
         lifter_instruction = self.emu.lifter_instruction
         if lifter_instruction is None:
             raise RuntimeError("conditional VEX values require an active lifter instruction")
@@ -242,9 +252,10 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
     def _dispatch_modrm_reg(
         self,
         handlers: Sequence[BoundOpcodeHandler | None],
-        opcode: str,
+        opcode: object,
         on_missing: Callable[[int], None] | None = None,
     ) -> None:
+        handler: object
         reg = self.instr.modrm.reg
         if 0 <= reg < len(handlers):
             handler = handlers[reg]
@@ -258,10 +269,10 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
 
     def _register_opcode_range(
         self,
-        start: int,
-        end: int,
+        start: cython.longlong,
+        end: cython.longlong,
         func: OpcodeRegistrationHandler,
-        flags: int,
+        flags: cython.longlong,
     ) -> None:
         instrfuncs = self.instrfuncs
         chk = self.chk
@@ -276,13 +287,14 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
         Keeping this as an explicit dispatch table makes it easier to audit when
         a real sample trips over one of the rarely used `/digit` encodings.
         """
+        handler: object
         reg = self.instr.modrm.reg
         handler = GROUP2_BYTE_SHIFT_ROTATE_HANDLERS.get(reg)
         if handler is None:
             raise RuntimeError(f"not implemented: 0xd0_d2 /{reg}")
         handler(self)
 
-    def set_funcflag(self, opcode: int, func: OpcodeRegistrationHandler, flags: int) -> None:
+    def set_funcflag(self, opcode: cython.longlong, func: OpcodeRegistrationHandler, flags: cython.longlong) -> None:
         """Register one decoded opcode handler and its operand-presence flags."""
         if opcode >> 8 == 0x0F:
             opcode = (opcode & 0xFF) | 0x0100
@@ -559,7 +571,7 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
         """Emit the decoded ``JL`` short conditional branch."""
         branch_rel8(
             self._active_stack_emulator(),
-            self.emu.is_sign() != self.emu.is_overflow(),
+            operator.ne(self.emu.is_sign(), self.emu.is_overflow()),
             self.instr.imm8,
             self.instr.size,
         )
@@ -568,7 +580,7 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
         """Emit the decoded ``JNL`` short conditional branch."""
         branch_rel8(
             self._active_stack_emulator(),
-            ~(self.emu.is_sign() != self.emu.is_overflow()),
+            ~operator.ne(self.emu.is_sign(), self.emu.is_overflow()),
             self.instr.imm8,
             self.instr.size,
         )
@@ -577,7 +589,7 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
         """Emit the decoded ``JLE`` short conditional branch."""
         branch_rel8(
             self._active_stack_emulator(),
-            self.emu.is_zero() | (self.emu.is_sign() != self.emu.is_overflow()),
+            self.emu.is_zero() | operator.ne(self.emu.is_sign(), self.emu.is_overflow()),
             self.instr.imm8,
             self.instr.size,
         )
@@ -586,7 +598,7 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
         """Emit the decoded ``JNLE`` short conditional branch."""
         branch_rel8(
             self._active_stack_emulator(),
-            ~self.emu.is_zero() & (self.emu.is_sign() == self.emu.is_overflow()),
+            ~self.emu.is_zero() & operator.eq(self.emu.is_sign(), self.emu.is_overflow()),
             self.instr.imm8,
             self.instr.size,
         )
@@ -705,7 +717,7 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
         if of is not None:
             flags = self.emu.set_overflow(flags, of)
         flags = self.emu.set_parity(flags, self.emu.chk_parity(low))
-        flags = self.emu.set_zero(flags, low == self.emu.constant(0, Type.int_8))
+        flags = self.emu.set_zero(flags, operator.eq(low, self.emu.constant(0, Type.int_8)))
         flags = self.emu.set_sign(flags, low[7])
         self.emu.set_gpreg(reg16_t.FLAGS, flags)
 
@@ -798,7 +810,7 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
         sign = ((al >= self.emu.constant(0x7A, Type.int_8)) & (al <= self.emu.constant(0xF9, Type.int_8))).cast_to(
             Type.int_1
         )
-        zero = (new_al == self.emu.constant(0, Type.int_8)).cast_to(Type.int_1)
+        zero = operator.eq(new_al, self.emu.constant(0, Type.int_8)).cast_to(Type.int_1)
         flags = _vex_expr(self.emu.get_gpreg(reg16_t.FLAGS))
         flags = self.emu.set_flag(flags, 4, adjust)
         flags = self.emu.set_carry(flags, adjust)
@@ -849,7 +861,7 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
         flags = self.emu.set_carry(flags, adjust)
         flags = self.emu.set_overflow(flags, overflow)
         flags = self.emu.set_sign(flags, sign)
-        flags = self.emu.set_zero(flags, (pre_mask_al == self.emu.constant(0, Type.int_8)).cast_to(Type.int_1))
+        flags = self.emu.set_zero(flags, operator.eq(pre_mask_al, self.emu.constant(0, Type.int_8)).cast_to(Type.int_1))
         flags = self.emu.set_parity(flags, self.emu.chk_parity(pre_mask_al))
         self.emu.set_gpreg(reg16_t.FLAGS, flags)
 
@@ -857,7 +869,7 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
         """Retain AAM's zero-base divide error before changing AX or flags."""
         base = _vex_expr(self.emu.constant(self.instr.imm8 & 0xFF, Type.int_8))
         if self.instr.imm8 & 0xFF == 0:
-            self._divide_error_if(base == self.emu.constant(0, Type.int_8))
+            self._divide_error_if(operator.eq(base, self.emu.constant(0, Type.int_8)))
             return
         al = _vex_expr(self.emu.get_gpreg(reg8_t.AL))
         ah = al // base
@@ -891,7 +903,7 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
         """Execute decoded ``RETF_IMM16`` semantics through frontend emulator effects."""
         return_far16(self._active_stack_emulator(), self.instr.imm16)
 
-    def retf(self, _instr: dict[str, object] | None = None) -> None:
+    def retf(self, _instr: object = None) -> None:
         """Execute decoded ``RETF`` semantics through frontend emulator effects."""
         return_far16(self._active_stack_emulator())
 
@@ -902,6 +914,7 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
 
     def int_imm8(self) -> None:
         """Execute decoded ``INT_IMM8`` semantics through frontend emulator effects."""
+        lifter_instruction: object
         vector = self.instr.imm8 & 0xFF
         if self.instr.msvc_x87_escape and msvc_x87_escape_opcode_8616(vector) is not None:
             self.esc()
@@ -919,7 +932,7 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
         self.emu.set_gpreg(reg16_t.IP, self.emu.constant(vector, Type.int_16))
         lifter_instruction.jump(None, interrupt_core_addr_8616(vector), JumpKind.Call)
 
-    def iret(self, _instr: dict[str, object] | None = None) -> None:
+    def iret(self, _instr: object = None) -> None:
         """Return through the operand-size-selected real-mode interrupt frame."""
         if self.instr.operand_bits == 32:
             from inertia.frontend.x86_16.stack_helpers import return_interrupt32
@@ -1018,7 +1031,7 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
 
     def setno_rm8(self) -> None:
         """Store the decoded ``SETNO`` condition result in the byte destination."""
-        self.set_rm8(self.emu.is_overflow() == self.emu.constant(0, Type.int_1))
+        self.set_rm8(operator.eq(self.emu.is_overflow(), self.emu.constant(0, Type.int_1)))
 
     def setb_rm8(self) -> None:
         """Store the decoded ``SETB`` condition result in the byte destination."""
@@ -1026,7 +1039,7 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
 
     def setnb_rm8(self) -> None:
         """Store the decoded ``SETNB`` condition result in the byte destination."""
-        self.set_rm8(self.emu.is_carry() == self.emu.constant(0, Type.int_1))
+        self.set_rm8(operator.eq(self.emu.is_carry(), self.emu.constant(0, Type.int_1)))
 
     def setz_rm8(self) -> None:
         """Store the decoded ``SETZ`` condition result in the byte destination."""
@@ -1034,7 +1047,7 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
 
     def setnz_rm8(self) -> None:
         """Store the decoded ``SETNZ`` condition result in the byte destination."""
-        self.set_rm8(self.emu.is_zero() == self.emu.constant(0, Type.int_1))
+        self.set_rm8(operator.eq(self.emu.is_zero(), self.emu.constant(0, Type.int_1)))
 
     def setbe_rm8(self) -> None:
         """Store the decoded ``SETBE`` condition result in the byte destination."""
@@ -1043,7 +1056,7 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
     def seta_rm8(self) -> None:
         """Store the decoded ``SETA`` condition result in the byte destination."""
         carry_or_zero = _vex_expr(self.emu.is_carry()) | _vex_expr(self.emu.is_zero())
-        self.set_rm8(carry_or_zero == self.emu.constant(0, Type.int_1))
+        self.set_rm8(operator.eq(carry_or_zero, self.emu.constant(0, Type.int_1)))
 
     def sets_rm8(self) -> None:
         """Store the decoded ``SETS`` condition result in the byte destination."""
@@ -1051,7 +1064,7 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
 
     def setns_rm8(self) -> None:
         """Store the decoded ``SETNS`` condition result in the byte destination."""
-        self.set_rm8(self.emu.is_sign() == self.emu.constant(0, Type.int_1))
+        self.set_rm8(operator.eq(self.emu.is_sign(), self.emu.constant(0, Type.int_1)))
 
     def setp_rm8(self) -> None:
         """Store the decoded ``SETP`` condition result in the byte destination."""
@@ -1059,25 +1072,25 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
 
     def setnp_rm8(self) -> None:
         """Store the decoded ``SETNP`` condition result in the byte destination."""
-        self.set_rm8(self.emu.is_parity() == self.emu.constant(0, Type.int_1))
+        self.set_rm8(operator.eq(self.emu.is_parity(), self.emu.constant(0, Type.int_1)))
 
     def setl_rm8(self) -> None:
         """Store the decoded ``SETL`` condition result in the byte destination."""
-        self.set_rm8(self.emu.is_sign() != self.emu.is_overflow())
+        self.set_rm8(operator.ne(self.emu.is_sign(), self.emu.is_overflow()))
 
     def setnl_rm8(self) -> None:
         """Store the decoded ``SETNL`` condition result in the byte destination."""
-        self.set_rm8(self.emu.is_sign() == self.emu.is_overflow())
+        self.set_rm8(operator.eq(self.emu.is_sign(), self.emu.is_overflow()))
 
     def setle_rm8(self) -> None:
         """Store the decoded ``SETLE`` condition result in the byte destination."""
-        signed_less = _vex_expr(self.emu.is_sign()) != _vex_expr(self.emu.is_overflow())
+        signed_less = operator.ne(_vex_expr(self.emu.is_sign()), _vex_expr(self.emu.is_overflow()))
         self.set_rm8(_vex_expr(self.emu.is_zero()) | _vex_expr(signed_less))
 
     def setnle_rm8(self) -> None:
         """Store the decoded ``SETNLE`` condition result in the byte destination."""
-        nonzero = self.emu.is_zero() == self.emu.constant(0, Type.int_1)
-        signed_ge = _vex_expr(self.emu.is_sign()) == _vex_expr(self.emu.is_overflow())
+        nonzero = operator.eq(self.emu.is_zero(), self.emu.constant(0, Type.int_1))
+        signed_ge = operator.eq(_vex_expr(self.emu.is_sign()), _vex_expr(self.emu.is_overflow()))
         self.set_rm8(_vex_expr(nonzero) & _vex_expr(signed_ge))
 
     def code_80(self) -> None:
@@ -1148,7 +1161,7 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
     def _masked_shift_count8(self, count: VexExpr) -> VexExpr:
         return masked_shift_count(self.emu, count, 8)
 
-    def _rotate_count8(self, count: VexExpr, modulo: int) -> VexExpr:
+    def _rotate_count8(self, count: VexExpr, modulo: cython.longlong) -> VexExpr:
         return rotate_count(self.emu, count, modulo, 8)
 
     def shl_rm8(self) -> None:
@@ -1392,6 +1405,7 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
         )
 
     def _rcl_rm8(self, value: VexExpr, count: VexExpr) -> None:
+        cf: object
         result, cf, overflow = rotate_through_carry_left_state(self.emu, value, count, 8, self._ite_value)
         if cf is None:
             self.set_rm8(value)
@@ -1399,13 +1413,14 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
         self.set_rm8(result)
         flags = _vex_expr(self.emu.get_gpreg(reg16_t.FLAGS))
         flags = self.emu.set_carry(flags, cf)
-        one = (count & self.emu.constant(0x1F, Type.int_8)) == self.emu.constant(1, Type.int_8)
+        one = operator.eq((count & self.emu.constant(0x1F, Type.int_8)), self.emu.constant(1, Type.int_8))
         flags = self.emu.set_overflow(
             flags, self._ite_value(one, overflow, self.emu.get_flag(11))
         )
         self.emu.set_gpreg(reg16_t.FLAGS, flags)
 
     def _rcr_rm8(self, value: VexExpr, count: VexExpr) -> None:
+        cf: object
         result, cf, overflow = rotate_through_carry_right_state(self.emu, value, count, 8, self._ite_value)
         if cf is None:
             self.set_rm8(value)
@@ -1413,7 +1428,7 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
         self.set_rm8(result)
         flags = _vex_expr(self.emu.get_gpreg(reg16_t.FLAGS))
         flags = self.emu.set_carry(flags, cf)
-        one = (count & self.emu.constant(0x1F, Type.int_8)) == self.emu.constant(1, Type.int_8)
+        one = operator.eq((count & self.emu.constant(0x1F, Type.int_8)), self.emu.constant(1, Type.int_8))
         flags = self.emu.set_overflow(
             flags, self._ite_value(one, overflow, self.emu.get_flag(11))
         )
@@ -1457,7 +1472,7 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
         """Execute decoded ``DIV_AL_AH_RM8`` semantics through frontend emulator effects."""
         rm8 = _vex_expr(self.get_rm8()).cast_to(Type.int_16)
         ax = _vex_expr(self.emu.get_gpreg(reg16_t.AX))
-        self._divide_error_if(rm8 == self.emu.constant(0, Type.int_16))
+        self._divide_error_if(operator.eq(rm8, self.emu.constant(0, Type.int_16)))
         quotient = ax // rm8
         self._divide_error_if(quotient > self.emu.constant(0xFF, Type.int_16))
         self.emu.set_gpreg(reg8_t.AL, quotient)
@@ -1467,7 +1482,7 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
         """Execute decoded ``IDIV_AL_AH_RM8`` semantics through frontend emulator effects."""
         rm8_s = _vex_expr(self.get_rm8()).cast_to(Type.int_16, signed=True)
         ax_s = _vex_expr(self.emu.get_gpreg(reg16_t.AX)).signed
-        self._divide_error_if(rm8_s == self.emu.constant(0, Type.int_16))
+        self._divide_error_if(operator.eq(rm8_s, self.emu.constant(0, Type.int_16)))
         quotient = ax_s // rm8_s
         remainder = ax_s - quotient * rm8_s
         signed_quotient = quotient.signed
@@ -1480,6 +1495,7 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
 
     def _divide_error_if(self, condition: VexExpr) -> None:
         """Emit a native-VEX-compatible conditional x86 divide-error exit."""
+        lifter_instruction: object
         lifter_instruction = self.emu.lifter_instruction
         if lifter_instruction is None:
             raise RuntimeError("divide-error lifting requires an active lifter instruction")
@@ -1492,14 +1508,14 @@ class InstrBase(ExecInstr, ParseInstr, EmuInstr):  # type: ignore[misc, unused-i
             lifter_instruction.arch.ip_offset,
         )
 
-    def set_chsz_ad(self, ad: bool) -> None:
+    def set_chsz_ad(self, ad: cython.bint) -> None:
         """Set whether address-size override semantics are active."""
         self.chsz_ad = ad
 
 
 # Keep executable handlers in the table so owned dispatch remains statically
 # checkable; entries 4 and 6 intentionally share SHL because SAL is its alias.
-GROUP2_BYTE_SHIFT_ROTATE_HANDLERS: dict[int, Callable[[InstrBase], None]] = {
+GROUP2_BYTE_SHIFT_ROTATE_HANDLERS: dict[cython.longlong, Callable[[InstrBase], None]] = {
     0: InstrBase.rol_rm8,
     1: InstrBase.ror_rm8,
     2: InstrBase.rcl_rm8,

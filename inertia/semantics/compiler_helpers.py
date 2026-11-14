@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery metadata.
 
 Responsibility: identify and hook proven compiler helper patterns such as stack probes.
@@ -11,6 +12,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import dataclasses
 from dataclasses import dataclass
@@ -20,6 +23,8 @@ from typing import Protocol, cast
 from angr import SimProcedure
 
 from .callee_name_normalization import normalize_callee_name_8616
+import operator
+import builtins
 
 __all__ = [
     "CompilerHelperEvidence8616",
@@ -46,15 +51,15 @@ class CompilerHelperEvidenceKind8616(Enum):
     SIGNED_LONG_DIVIDE = "signed_long_divide"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CompilerHelperEvidence8616:
     """Evidence for a compiler helper recognized from binary bytes."""
 
-    addr: int
-    name: str
+    addr: cython.longlong
+    name: object
     kind: CompilerHelperEvidenceKind8616
-    pattern_name: str
-    matched_bytes: int
+    pattern_name: object
+    matched_bytes: cython.longlong
 
 
 class X86_16MscStackProbeSimProcedure8616(SimProcedure):  # type: ignore[misc, unused-ignore] # dynamic angr SimProcedure base
@@ -141,7 +146,7 @@ _MSC_ANLDIV_PATTERN_8616: tuple[int | None, ...] = tuple(
 
 
 class _ArchWithStackProbeRegistry8616(Protocol):
-    _inertia_stack_probe_helper_targets_8616: frozenset[int]
+    _inertia_stack_probe_helper_targets_8616: object
 
 
 class _ProjectArchSurface8616(Protocol):
@@ -150,7 +155,8 @@ class _ProjectArchSurface8616(Protocol):
     arch: object
 
 
-def is_x86_16_stack_probe_name_8616(name: str | None) -> bool:
+@cython.ccall
+def is_x86_16_stack_probe_name_8616(name: object) -> cython.bint:
     """Return whether a normalized symbol name is a known stack-probe spelling."""
     normalized = normalize_callee_name_8616(name)
     if not isinstance(normalized, str):
@@ -158,13 +164,18 @@ def is_x86_16_stack_probe_name_8616(name: str | None) -> bool:
     return normalized.strip().lower().lstrip("_") in _STACK_PROBE_NORMALIZED_NAMES_8616
 
 
-def _project_arch_name_8616(project: object) -> str | None:
+@cython.ccall
+def _project_arch_name_8616(project: object) -> object:
     """Read the architecture name from a dynamic angr project boundary."""
     return getattr(getattr(project, "arch", None), "name", None)
 
 
-def _load_project_bytes_8616(project: object, addr: int, size: int) -> bytes | None:
+@cython.ccall
+def _load_project_bytes_8616(project: object, addr: cython.longlong, size: cython.longlong) -> object:
     """Read bytes from a dynamic angr loader memory boundary."""
+    load: object
+    loader: object
+    memory: object
     loader = getattr(project, "loader", None)
     memories = (
         getattr(loader, "memory", None),
@@ -185,8 +196,12 @@ def _load_project_bytes_8616(project: object, addr: int, size: int) -> bytes | N
     return None
 
 
-def _main_object_addr_range_8616(project: object) -> tuple[int, int] | None:
+@cython.ccall
+def _main_object_addr_range_8616(project: object) -> object:
     """Return the main-object address range from a dynamic angr loader boundary."""
+    main_object: object
+    max_addr: object
+    min_addr: object
     main_object = getattr(getattr(project, "loader", None), "main_object", None)
     min_addr = getattr(main_object, "min_addr", None)
     max_addr = getattr(main_object, "max_addr", None)
@@ -195,10 +210,10 @@ def _main_object_addr_range_8616(project: object) -> tuple[int, int] | None:
     return min_addr, max_addr
 
 
-def _matches_masked_prefix_8616(data: bytes, pattern: tuple[int | None, ...]) -> bool:
+def _matches_masked_prefix_8616(data: object, pattern: object) -> cython.bint:
     if len(data) < len(pattern):
         return False
-    return all(not (expected is not None and data[index] != expected) for index, expected in enumerate(pattern))
+    return all(not (expected is not None and operator.ne(data[index], expected)) for index, expected in builtins.iter(enumerate(pattern)))
 
 
 _STACK_PROBE_PATTERNS_8616: tuple[
@@ -236,14 +251,24 @@ _STACK_PROBE_EVIDENCE_KINDS_8616: frozenset[CompilerHelperEvidenceKind8616] = fr
 )
 
 
+@cython.ccall
 def identify_x86_16_compiler_helper_at_8616(
     project: object, addr: int | None
 ) -> CompilerHelperEvidence8616 | None:
     """Identify a helper through binary bytes and a dynamic angr project boundary."""
+    original_delta: object
+    original_project: object
+    signed_divide_code: object
+    stack_probe_code: object
+    _kind: object
+    candidate_addr: object
+    candidate_project: object
+    pattern: object
+    template: object
     if not isinstance(addr, int) or _project_arch_name_8616(project) != "86_16":
         return None
 
-    candidates: list[tuple[object, int]] = [(project, addr)]
+    candidates: list[tuple[object, cython.longlong]] = [(project, addr)]
     original_project = getattr(project, "_inertia_original_project", None)
     original_delta = getattr(project, "_inertia_original_linear_delta", None)
     if original_project is not None:
@@ -252,7 +277,7 @@ def identify_x86_16_compiler_helper_at_8616(
         candidates.append((original_project, addr))
         if isinstance(original_delta, int):
             candidates.append((original_project, addr + original_delta))
-    seen: set[tuple[int, int]] = set()
+    seen: set[tuple[cython.longlong, cython.longlong]] = set()
     for candidate_project, candidate_addr in candidates:
         key = id(candidate_project), candidate_addr
         if key in seen:
@@ -285,19 +310,26 @@ def identify_x86_16_compiler_helper_at_8616(
     return None
 
 
-def is_x86_16_stack_probe_evidence_kind_8616(kind: CompilerHelperEvidenceKind8616) -> bool:
+@cython.ccall
+def is_x86_16_stack_probe_evidence_kind_8616(kind: CompilerHelperEvidenceKind8616) -> cython.bint:
     """Return whether an evidence kind is any binary-proven stack-probe helper."""
     return kind in _STACK_PROBE_EVIDENCE_KINDS_8616
 
 
-def is_x86_16_stack_probe_helper_at_8616(project: object, addr: int | None) -> bool:
+@cython.ccall
+def is_x86_16_stack_probe_helper_at_8616(project: object, addr: int | None) -> cython.bint:
     """Return whether binary evidence identifies exactly a stack-probe helper."""
+    evidence: object
     evidence = identify_x86_16_compiler_helper_at_8616(project, addr)
     return evidence is not None and is_x86_16_stack_probe_evidence_kind_8616(evidence.kind)
 
 
+@cython.ccall
 def hook_x86_16_compiler_helper_at_8616(project: object, addr: int | None) -> CompilerHelperEvidence8616 | None:
     """Hook a recognized compiler helper through the dynamic angr project API."""
+    evidence: object
+    hook: object
+    is_hooked: object
     evidence = identify_x86_16_compiler_helper_at_8616(project, addr)
     if evidence is None:
         return None
@@ -316,10 +348,16 @@ def hook_x86_16_compiler_helper_at_8616(project: object, addr: int | None) -> Co
     return evidence
 
 
+@cython.ccall
 def hook_x86_16_known_compiler_helpers_8616(
-    project: object, *, max_scan_bytes: int = 0x20000
+    project: object, *, max_scan_bytes: cython.longlong = 0x20000
 ) -> tuple[CompilerHelperEvidence8616, ...]:
     """Scan the main object for known compiler helpers and hook proven matches."""
+    addr_range: object
+    evidence: object
+    _kind: object
+    _template: object
+    pattern: object
     if _project_arch_name_8616(project) != "86_16":
         return ()
     addr_range = _main_object_addr_range_8616(project)
@@ -345,16 +383,19 @@ def hook_x86_16_known_compiler_helpers_8616(
     return tuple(found)
 
 
+@cython.ccall
 def _register_compiler_helper_targets_on_arch_8616(
     project: object,
-    evidence: tuple[CompilerHelperEvidence8616, ...],
+    evidence: object,
 ) -> None:
     """Register stack-probe helper addresses on the dynamic angr arch object."""
+    arch: object
+    item: object
     # Dynamic boundary: project is an angr.Project-like object with a runtime arch.
     arch = getattr(project, "arch", None)
     if arch is None:
         return
-    targets: set[int] = set()
+    targets: set[cython.longlong] = set()
     for item in evidence:
         if is_x86_16_stack_probe_evidence_kind_8616(item.kind):
             targets.add(item.addr)
@@ -364,31 +405,34 @@ def _register_compiler_helper_targets_on_arch_8616(
         registry._inertia_stack_probe_helper_targets_8616 = frozenset(sorted(targets))
 
 
-def is_x86_16_registered_stack_probe_target_8616(arch: object, target: int | None) -> bool:
+@cython.ccall
+def is_x86_16_registered_stack_probe_target_8616(arch: object, target: int | None) -> cython.bint:
     """Return whether an arch has recorded a target as a proven stack probe."""
+    targets: object
     if not isinstance(target, int):
         return False
     # Dynamic boundary: arch is an angr Arch object carrying optional runtime metadata.
-    targets: frozenset[int] = getattr(arch, "_inertia_stack_probe_helper_targets_8616", frozenset())
+    targets = getattr(arch, "_inertia_stack_probe_helper_targets_8616", frozenset())
     return target in targets or (target & 0xFFFF) in targets
 
 
-def x86_16_compiler_helper_targets_8616(project: object) -> frozenset[int]:
+def x86_16_compiler_helper_targets_8616(project: object) -> object:
     """Return binary-proven helper targets from a dynamic angr project."""
     try:
         arch = cast(_ProjectArchSurface8616, project).arch
         targets = cast(_ArchWithStackProbeRegistry8616, arch)._inertia_stack_probe_helper_targets_8616
     except AttributeError:
         return frozenset()
-    if not isinstance(targets, frozenset) or not all(isinstance(target, int) for target in targets):
+    if not isinstance(targets, frozenset) or not all(isinstance(target, int) for target in iter(targets)):
         raise TypeError("compiler-helper target evidence must be a frozenset[int]")
     return targets
 
 
+@cython.ccall
 def transfer_x86_16_compiler_helper_evidence_8616(
     source_project: object,
     destination_project: object,
-) -> int:
+) -> cython.longlong:
     """Copy binary-proven compiler-helper targets across a project boundary."""
     try:
         source_arch = cast(_ProjectArchSurface8616, source_project).arch

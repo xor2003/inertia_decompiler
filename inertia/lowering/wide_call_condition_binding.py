@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Retain proven wide predicate storage across deferred call capture.
 
 Layer: Types/Lowering.
@@ -8,29 +9,34 @@ This contract does not prove CFG polarity or permit late semantic recovery.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
 from angr.analyses.decompiler.structured_codegen.c import CFunctionCall
 
 from .wide_call_output_assignment_ast import _call_target_matches_8616
+import dataclasses
 
 WIDE_CALL_BINDING_TAG_8616: str = "inertia_wide_call_binding_8616"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideCallBinding8616:
     """Exact typed decision inputs and their accepted C storage projection."""
 
-    condition_keys: tuple[tuple[object, ...], ...]
-    callsite_addr: int
-    callee_identity: int | str
-    stack_bp_offset: int
+    condition_keys: object
+    callsite_addr: cython.longlong
+    callee_identity: object
+    stack_bp_offset: cython.longlong
     temporary_id: int | None = None
 
 
-def wide_call_identity_8616(call: CFunctionCall) -> int | str | None:
+@cython.ccall
+def wide_call_identity_8616(call: CFunctionCall) -> object:
     """Keep checked binary identity stable across naming and slice rebasing."""
+    original_target: object
     original_target = call.tags.get("inertia_target_addr_8616")
     if original_target is not None:
         if type(original_target) is not int:

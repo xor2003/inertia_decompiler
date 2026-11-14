@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Helper boundary.
 
 Responsibility: decode operands into segmented IR addresses plus execution-only linear addresses.
@@ -5,6 +6,8 @@ Forbidden: flattening SS/DS/ES into semantic storage identity.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Protocol, cast
@@ -14,6 +17,8 @@ from pyvex.lifting.util.vex_helper import Type
 from inertia.ir.core import AddressStatus, IRAddress, MemSpace, SegmentOrigin
 
 from .regs import reg16_t, reg32_t, sgreg_t
+import dataclasses
+import operator
 
 
 class _AddressValue(Protocol):
@@ -23,7 +28,7 @@ class _AddressValue(Protocol):
         """Return this address value plus another helper value."""
         ...
 
-    def __mul__(self, _other: int) -> _AddressValue:
+    def __mul__(self, _other: cython.longlong) -> _AddressValue:
         """Return this address value multiplied by a scale."""
         ...
 
@@ -31,7 +36,7 @@ class _AddressValue(Protocol):
 class _AddressingEmulator(Protocol):
     """Frontend emulator surface needed by addressing helpers."""
 
-    def constant(self, value: int, _ty: object) -> _AddressValue:
+    def constant(self, value: cython.longlong, _ty: object) -> _AddressValue:
         """Return a VEX constant wrapper."""
         ...
 
@@ -83,47 +88,50 @@ class _ExpressionFactory(Protocol):
 class _ModRM(Protocol):
     """Decoded ModRM fields consumed by addressing helpers."""
 
-    mod: int
-    rm: int
+    mod: cython.longlong
+    rm: cython.longlong
 
 
 class _SIB(Protocol):
     """Decoded SIB fields consumed by 32-bit addressing helpers."""
 
-    base: int
-    index: int
-    scale: int
+    base: cython.longlong
+    index: cython.longlong
+    scale: cython.longlong
 
 
-def operand_width_bits(mode32: bool, chsz_op: bool = False) -> int:
+@cython.ccall
+def operand_width_bits(mode32: cython.bint, chsz_op: cython.bint = False) -> cython.longlong:
     """Return the operand width after applying the operand-size override bit."""
     return 32 if mode32 ^ bool(chsz_op) else 16
 
 
-def address_width_bits(mode32: bool, chsz_ad: bool = False) -> int:
+@cython.ccall
+def address_width_bits(mode32: cython.bint, chsz_ad: cython.bint = False) -> cython.longlong:
     """Return the address width after applying the address-size override bit."""
     return 32 if mode32 ^ bool(chsz_ad) else 16
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class WidthProfile:
     """Operand/address width pair for a decode mode."""
 
-    operand_bits: int
-    address_bits: int
+    operand_bits: cython.longlong
+    address_bits: cython.longlong
 
     @property
-    def operand_bytes(self) -> int:
+    def operand_bytes(self) -> cython.longlong:
         """Return operand width in bytes."""
         return self.operand_bits // 8
 
     @property
-    def address_bytes(self) -> int:
+    def address_bytes(self) -> cython.longlong:
         """Return address width in bytes."""
         return self.address_bits // 8
 
 
-def decode_width_profile(mode32: bool, chsz_op: bool = False, chsz_ad: bool = False) -> WidthProfile:
+@cython.ccall
+def decode_width_profile(mode32: cython.bint, chsz_op: cython.bint = False, chsz_ad: cython.bint = False) -> WidthProfile:
     """Build a width profile from mode and override-prefix bits."""
     return WidthProfile(
         operand_bits=operand_width_bits(mode32, chsz_op),
@@ -131,14 +139,14 @@ def decode_width_profile(mode32: bool, chsz_op: bool = False, chsz_ad: bool = Fa
     )
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class DecodeWidthMatrixCase:
     """Named decode-width matrix row used by diagnostics and tests."""
 
-    name: str
-    mode32: bool
-    chsz_op: bool
-    chsz_ad: bool
+    name: object
+    mode32: cython.bint
+    chsz_op: cython.bint
+    chsz_ad: cython.bint
     profile: WidthProfile
 
 
@@ -150,23 +158,28 @@ DECODE_WIDTH_MATRIX: tuple[DecodeWidthMatrixCase, ...] = (
 )
 
 
-def decode_width_case(mode32: bool, chsz_op: bool = False, chsz_ad: bool = False) -> DecodeWidthMatrixCase:
+@cython.ccall
+def decode_width_case(mode32: cython.bint, chsz_op: cython.bint = False, chsz_ad: cython.bint = False) -> DecodeWidthMatrixCase:
     """Return the named width-matrix case for mode and override-prefix bits."""
+    case: object
     for case in DECODE_WIDTH_MATRIX:
-        if case.mode32 == mode32 and case.chsz_op == chsz_op and case.chsz_ad == chsz_ad:
+        if operator.eq(case.mode32, mode32) and operator.eq(case.chsz_op, chsz_op) and operator.eq(case.chsz_ad, chsz_ad):
             return case
     raise ValueError(f"unsupported width case: mode32={mode32} chsz_op={chsz_op} chsz_ad={chsz_ad}")
 
 
-def decode_width_case_for_profile(operand_bits: int, address_bits: int) -> DecodeWidthMatrixCase:
+@cython.ccall
+def decode_width_case_for_profile(operand_bits: cython.longlong, address_bits: cython.longlong) -> DecodeWidthMatrixCase:
     """Return the named width-matrix case for an explicit width profile."""
+    case: object
     for case in DECODE_WIDTH_MATRIX:
-        if case.profile.operand_bits == operand_bits and case.profile.address_bits == address_bits:
+        if operator.eq(case.profile.operand_bits, operand_bits) and operator.eq(case.profile.address_bits, address_bits):
             return case
     raise ValueError(f"unsupported width profile: operand_bits={operand_bits} address_bits={address_bits}")
 
 
-def displacement_width_bits(mod: int, rm: int, address_bits: int) -> int | None:
+@cython.ccall
+def displacement_width_bits(mod: cython.longlong, rm: cython.longlong, address_bits: cython.longlong) -> int | None:
     """Return displacement width for a ModRM memory operand, if any."""
     if address_bits == 16:
         if mod == 0 and rm == 6:
@@ -185,7 +198,8 @@ def displacement_width_bits(mod: int, rm: int, address_bits: int) -> int | None:
     return None
 
 
-def signed_displacement(value: int, width_bits: int) -> int:
+@cython.ccall
+def signed_displacement(value: cython.longlong, width_bits: cython.longlong) -> cython.longlong:
     """Sign-extend an unsigned displacement of the requested bit width."""
     mask = (1 << width_bits) - 1
     value &= mask
@@ -195,7 +209,8 @@ def signed_displacement(value: int, width_bits: int) -> int:
     return value
 
 
-def type_for_bits(width_bits: int) -> object:
+@cython.ccall
+def type_for_bits(width_bits: cython.longlong) -> object:
     """Return the VEX helper integer type for a bit width."""
     if width_bits == 8:
         return Type.int_8
@@ -206,14 +221,15 @@ def type_for_bits(width_bits: int) -> object:
     raise ValueError(f"unsupported width: {width_bits}")
 
 
-def address_step(emu: object, step_bytes: int, address_bits: int = 16) -> _AddressValue:
+@cython.ccall
+def address_step(emu: object, step_bytes: cython.longlong, address_bits: cython.longlong = 16) -> _AddressValue:
     """Return a VEX constant step for address arithmetic."""
     return cast(_AddressingEmulator, emu).constant(step_bytes, type_for_bits(address_bits))
 
 
-def describe_x86_16_decode_width_matrix() -> tuple[tuple[str, int, int], ...]:
+def describe_x86_16_decode_width_matrix() -> tuple[tuple[str, cython.longlong, cython.longlong], ...]:
     """Return compact decode-width matrix rows for diagnostics."""
-    return tuple((case.name, case.profile.operand_bits, case.profile.address_bits) for case in DECODE_WIDTH_MATRIX)
+    return tuple((case.name, case.profile.operand_bits, case.profile.address_bits) for case in iter(DECODE_WIDTH_MATRIX))
 
 
 def describe_x86_16_mixed_width_extension_surface() -> dict[str, object]:
@@ -228,16 +244,17 @@ def describe_x86_16_mixed_width_extension_surface() -> dict[str, object]:
                 "chsz_op": case.chsz_op,
                 "chsz_ad": case.chsz_ad,
             }
-            for case in DECODE_WIDTH_MATRIX
+            for case in iter(DECODE_WIDTH_MATRIX)
         ),
         "supported_pairs": tuple(
-            (case.profile.operand_bits, case.profile.address_bits) for case in DECODE_WIDTH_MATRIX
+            (case.profile.operand_bits, case.profile.address_bits) for case in iter(DECODE_WIDTH_MATRIX)
         ),
-        "address_widths": tuple(sorted({case.profile.address_bits for case in DECODE_WIDTH_MATRIX})),
-        "operand_widths": tuple(sorted({case.profile.operand_bits for case in DECODE_WIDTH_MATRIX})),
+        "address_widths": tuple(sorted({case.profile.address_bits for case in iter(DECODE_WIDTH_MATRIX)})),
+        "operand_widths": tuple(sorted({case.profile.operand_bits for case in iter(DECODE_WIDTH_MATRIX)})),
     }
 
 
+@cython.ccall
 def describe_x86_16_mixed_width_instruction_surface() -> dict[str, object]:
     """Describe how mixed-width facts are consumed by instruction helpers."""
     return {
@@ -258,40 +275,42 @@ def describe_x86_16_mixed_width_instruction_surface() -> dict[str, object]:
     }
 
 
+@cython.ccall
 def linear_address(emu: object, segment: object, offset: object) -> object:
     """Return the execution-only linear address for a segment:offset pair."""
     # EXECUTION ONLY. Forbidden for alias/type/rewrite semantics.
     return cast(_AddressingEmulator, emu).v2p(segment, offset)
 
 
+@cython.ccall
 def resolve_memory_operand_8616(
     emu: object,
     seg: object,
     addr: object,
-    width_bits: int,
+    width_bits: cython.longlong,
     *,
-    address_bits: int = 16,
+    address_bits: cython.longlong = 16,
 ) -> ResolvedMemoryOperand:
     """Resolve a memory operand into execution-linear and semantic segmented forms."""
     # EXECUTION ONLY: exec_linear is computed for the engine, not for semantics.
     # Alias/type/structuring layers MUST use operand.ir_address() instead.
     emulator = cast(_AddressingEmulator, emu)
-    if isinstance(seg, sgreg_t) and seg == sgreg_t.SS:
+    if isinstance(seg, sgreg_t) and operator.eq(seg, sgreg_t.SS):
         exec_linear = emulator.convert_ss_vaddr(addr)
     else:
         exec_linear = emulator.v2p(seg, addr)
     return ResolvedMemoryOperand(seg, addr, exec_linear, width_bits, address_bits)
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class ResolvedMemoryOperand:
     """Resolved memory operand carrying execution and semantic address views."""
 
     segment: object
     offset: object
     exec_linear: object
-    width_bits: int
-    address_bits: int
+    width_bits: cython.longlong
+    address_bits: cython.longlong
 
     @property
     def linear(self) -> object:
@@ -302,7 +321,7 @@ class ResolvedMemoryOperand:
         """
         return self.exec_linear
 
-    def ir_address(self, *, expr: tuple[str, ...] | None = None) -> IRAddress:
+    def ir_address(self, *, expr: object = None) -> IRAddress:
         """Semantic IR address — the ONLY path for alias/type/structuring layers."""
         return self.typed_address(expr=expr)
 
@@ -321,7 +340,7 @@ class ResolvedMemoryOperand:
                 layer="addressing",
             )
 
-    def _segment_address_fields(self) -> tuple[MemSpace, bool, bool, tuple[str, ...], int, SegmentOrigin]:
+    def _segment_address_fields(self) -> tuple[MemSpace, cython.bint, cython.bint, tuple[str, ...], cython.longlong, SegmentOrigin]:
         """Compute space, stability, base, size, and segment origin for this access."""
         space_map = {
             sgreg_t.SS: MemSpace.SS,
@@ -339,12 +358,12 @@ class ResolvedMemoryOperand:
             if isinstance(segment, (sgreg_t, MemSpace))
             else MemSpace.UNKNOWN
         )
-        explicit_segment = isinstance(self.segment, (sgreg_t, MemSpace)) and space != MemSpace.UNKNOWN
+        explicit_segment = isinstance(self.segment, (sgreg_t, MemSpace)) and operator.ne(space, MemSpace.UNKNOWN)
         stable = explicit_segment and space in {MemSpace.SS, MemSpace.DS, MemSpace.ES}
-        base: tuple[str, ...]
+        base: object
         if isinstance(self.segment, sgreg_t):
             base = (self.segment.name.lower(),)
-        elif isinstance(self.segment, MemSpace) and self.segment != MemSpace.UNKNOWN:
+        elif isinstance(self.segment, MemSpace) and operator.ne(self.segment, MemSpace.UNKNOWN):
             base = (self.segment.value,)
         else:
             base = ()
@@ -353,7 +372,7 @@ class ResolvedMemoryOperand:
         seg_origin = (
             SegmentOrigin.PROVEN
             if explicit_segment
-            else (SegmentOrigin.DEFAULTED if space != MemSpace.UNKNOWN else SegmentOrigin.UNKNOWN)
+            else (SegmentOrigin.DEFAULTED if operator.ne(space, MemSpace.UNKNOWN) else SegmentOrigin.UNKNOWN)
         )
         return space, explicit_segment, stable, base, size, seg_origin
 
@@ -364,6 +383,8 @@ class ResolvedMemoryOperand:
         plain expressions need neither. Missing customizer state leaves the
         expression unresolved rather than fabricating temporary definitions.
         """
+        irsb_c: object
+        offset_raw: object
         offset_raw = self.offset
         tmp_defs = None
         # Dynamic boundary: offset may be a third-party pyvex VexValue wrapper.
@@ -377,7 +398,7 @@ class ResolvedMemoryOperand:
                 offset_raw = _resolve_rdtmp_chain(offset_raw, tmp_defs)
         return offset_raw, tmp_defs
 
-    def typed_address(self, *, expr: tuple[str, ...] | None = None) -> IRAddress:
+    def typed_address(self, *, expr: object = None) -> IRAddress:
         """Return a segmented IR address for alias/type/structuring consumers.
 
         Dynamic boundary: third-party pyvex expressions expose runtime fields
@@ -386,6 +407,7 @@ class ResolvedMemoryOperand:
 
         def _impl() -> IRAddress:
             """Build an IRAddress from third-party pyvex dynamic-boundary fields."""
+            extracted: object
             space, _explicit_segment, stable, base, size, seg_origin = self._segment_address_fields()
             offset_raw, tmp_defs = self._raw_offset_and_tmp_defs()
 
@@ -406,7 +428,7 @@ class ResolvedMemoryOperand:
                 #
                 # AGENTS rule:
                 # stack activity != materializable variable
-                if space == MemSpace.SS and not base:
+                if operator.eq(space, MemSpace.SS) and not base:
                     base = ("ss",)
                 # DS/ES:int — stable memory address
                 return IRAddress(
@@ -424,7 +446,7 @@ class ResolvedMemoryOperand:
             if extracted is not None:
                 offset_val, _bp_base = extracted
                 # BP-relative stack slot: STABLE status, base = ("bp",)
-                if space == MemSpace.SS:
+                if operator.eq(space, MemSpace.SS):
                     base = ("bp",)
                 return IRAddress(
                     space=space,
@@ -450,7 +472,8 @@ class ResolvedMemoryOperand:
         return _impl()
 
 
-def default_segment_for_modrm16(mod: int, rm: int) -> sgreg_t:
+@cython.ccall
+def default_segment_for_modrm16(mod: cython.longlong, rm: cython.longlong) -> sgreg_t:
     """Return the default segment register for a 16-bit ModRM operand."""
     if rm in (2, 3):
         return sgreg_t.SS
@@ -459,7 +482,8 @@ def default_segment_for_modrm16(mod: int, rm: int) -> sgreg_t:
     return sgreg_t.DS
 
 
-def default_segment_for_modrm32(mod: int, rm: int, sib_base: int | None = None) -> sgreg_t:
+@cython.ccall
+def default_segment_for_modrm32(mod: cython.longlong, rm: cython.longlong, sib_base: int | None = None) -> sgreg_t:
     """Return the default segment register for a 32-bit ModRM/SIB operand."""
     if rm == 4 and sib_base is not None:
         if sib_base == 4 or (sib_base == 5 and mod != 0):
@@ -470,7 +494,8 @@ def default_segment_for_modrm32(mod: int, rm: int, sib_base: int | None = None) 
     return sgreg_t.DS
 
 
-def modrm16_effective_offset(emu: object, modrm: _ModRM, disp8: int, disp16: int) -> _AddressValue:
+@cython.ccall
+def modrm16_effective_offset(emu: object, modrm: _ModRM, disp8: cython.longlong, disp16: cython.longlong) -> _AddressValue:
     """Compute the 16-bit effective offset expression for a ModRM operand."""
     emulator = cast(_AddressingEmulator, emu)
     addr = emulator.constant(0, Type.int_16)
@@ -495,8 +520,9 @@ def modrm16_effective_offset(emu: object, modrm: _ModRM, disp8: int, disp16: int
     return addr
 
 
+@cython.ccall
 def modrm32_effective_offset(
-    emu: object, modrm: _ModRM, sib: _SIB, disp8: int, disp32: int
+    emu: object, modrm: _ModRM, sib: _SIB, disp8: cython.longlong, disp32: cython.longlong
 ) -> _AddressValue:
     """Compute the 32-bit effective offset expression for a ModRM/SIB operand."""
     emulator = cast(_AddressingEmulator, emu)
@@ -524,30 +550,34 @@ def modrm32_effective_offset(
     return addr + emulator.get_gpreg(reg32_t(rm))
 
 
+@cython.ccall
 def resolve_modrm16_address(
-    emu: object, modrm: _ModRM, disp8: int, disp16: int
+    emu: object, modrm: _ModRM, disp8: cython.longlong, disp16: cython.longlong
 ) -> tuple[sgreg_t, object]:
     """Resolve a 16-bit ModRM memory address to segment and offset expression."""
     segment = default_segment_for_modrm16(modrm.mod, modrm.rm)
     return segment, modrm16_effective_offset(emu, modrm, disp8, disp16)
 
 
+@cython.ccall
 def resolve_modrm32_address(
-    emu: object, modrm: _ModRM, sib: _SIB, disp8: int, disp32: int
+    emu: object, modrm: _ModRM, sib: _SIB, disp8: cython.longlong, disp32: cython.longlong
 ) -> tuple[sgreg_t, object]:
     """Resolve a 32-bit ModRM/SIB memory address to segment and offset expression."""
     segment = default_segment_for_modrm32(modrm.mod, modrm.rm, sib.base if modrm.rm == 4 else None)
     return segment, modrm32_effective_offset(emu, modrm, sib, disp8, disp32)
 
 
+@cython.ccall
 def resolve_linear_operand(
-    emu: object, segment: sgreg_t, offset: object, width_bits: int, address_bits: int
+    emu: object, segment: sgreg_t, offset: object, width_bits: cython.longlong, address_bits: cython.longlong
 ) -> ResolvedMemoryOperand:
     """Resolve an already-decoded operand while keeping linear address execution-only."""
     # EXECUTION ONLY
     return ResolvedMemoryOperand(segment, offset, linear_address(emu, segment, offset), width_bits, address_bits)
 
 
+@cython.ccall
 def load_resolved_operand(emu: object, operand: ResolvedMemoryOperand) -> object:
     """Load a value from a resolved segmented operand."""
     emulator = cast(_AddressingEmulator, emu)
@@ -560,6 +590,7 @@ def load_resolved_operand(emu: object, operand: ResolvedMemoryOperand) -> object
     raise ValueError(f"unsupported resolved operand width: {operand.width_bits}")
 
 
+@cython.ccall
 def store_resolved_operand(emu: object, operand: ResolvedMemoryOperand, value: object) -> None:
     """Store a value through a resolved segmented operand."""
     emulator = cast(_AddressingEmulator, emu)
@@ -575,8 +606,9 @@ def store_resolved_operand(emu: object, operand: ResolvedMemoryOperand, value: o
     raise ValueError(f"unsupported resolved operand width: {operand.width_bits}")
 
 
+@cython.ccall
 def load_word_pair16(
-    emu: object, segment: sgreg_t, offset: object, address_bits: int = 16
+    emu: object, segment: sgreg_t, offset: object, address_bits: cython.longlong = 16
 ) -> tuple[object, object]:
     """Load two adjacent 16-bit words from segmented memory."""
     emulator = cast(_AddressingEmulator, emu)
@@ -589,8 +621,9 @@ def load_word_pair16(
     return first, second
 
 
+@cython.ccall
 def load_far_pointer(
-    emu: object, segment: sgreg_t, offset: object, operand_bits: int, address_bits: int = 16
+    emu: object, segment: sgreg_t, offset: object, operand_bits: cython.longlong, address_bits: cython.longlong = 16
 ) -> tuple[object, object]:
     """Load a far pointer with a 16- or 32-bit offset plus 16-bit segment."""
     emulator = cast(_AddressingEmulator, emu)
@@ -608,20 +641,25 @@ def load_far_pointer(
     return far_offset, far_segment
 
 
+@cython.ccall
 def load_far_pointer16(
-    emu: object, segment: sgreg_t, offset: object, address_bits: int = 16
-) -> tuple[object, object]:
+    emu: object, segment: sgreg_t, offset: object, address_bits: cython.longlong = 16
+) -> object:
     """Load a legacy 16:16 far pointer."""
     return load_word_pair16(emu, segment, offset, address_bits=address_bits)
 
 
-def _build_tmp_defs_from_irsb(irsb_c: object) -> dict[int, object]:
+@cython.ccall
+def _build_tmp_defs_from_irsb(irsb_c: object) -> object:
     """Build a tmp_index → WrTmp statement mapping from an IRSB or IRSBCustomizer.
 
     Dynamic boundary: third-party pyvex IRSB objects expose statements and tmp
     fields dynamically.
     """
-    tmp_defs: dict[int, object] = {}
+    irsb: object
+    stmt_tmp: object
+    stmt: object
+    tmp_defs: dict[cython.longlong, object] = {}
     if irsb_c is None:
         return tmp_defs
     # Dynamic boundary: pyvex customizers and IRSBs expose statements at runtime.
@@ -636,12 +674,17 @@ def _build_tmp_defs_from_irsb(irsb_c: object) -> dict[int, object]:
     return tmp_defs
 
 
-def _resolve_rdtmp_chain(expr: object, tmp_defs: dict[int, object]) -> object:
+@cython.ccall
+def _resolve_rdtmp_chain(expr: object, tmp_defs: object) -> object:
     """Resolve RdTmp nodes to their defining expressions, recursively.
 
     Dynamic boundary: third-party pyvex expression objects expose class names,
     op, args, tmp, and statement data dynamically.
     """
+    args: object
+    class_name: object
+    stmt_expr: object
+    tmp_idx: object
     if not isinstance(tmp_defs, dict) or not tmp_defs:
         return expr
 
@@ -660,8 +703,8 @@ def _resolve_rdtmp_chain(expr: object, tmp_defs: dict[int, object]) -> object:
     # Dynamic boundary: pyvex expression args/op are runtime attributes.
     args = getattr(expr, "args", None)
     if args is not None:
-        resolved_args = [_resolve_rdtmp_chain(a, tmp_defs) for a in args]
-        if resolved_args != list(args):
+        resolved_args = [_resolve_rdtmp_chain(a, tmp_defs) for a in iter(args)]
+        if operator.ne(resolved_args, list(args)):
             factory = cast(_ExpressionFactory, type(expr))
             # Dynamic boundary: third-party pyvex expressions expose op dynamically.
             new_expr = factory(getattr(expr, "op", None), resolved_args)
@@ -671,16 +714,19 @@ def _resolve_rdtmp_chain(expr: object, tmp_defs: dict[int, object]) -> object:
 
 
 def extract_bp_relative_offset_8616(
-    offset_expr: object, *, tmp_defs: dict[int, object] | None = None
-) -> tuple[int, tuple[str, ...]] | None:
+    offset_expr: object, *, tmp_defs: object = None
+) -> object:
     """Extract a proven BP-relative constant offset from a VEX offset expression.
 
     Dynamic boundary: third-party pyvex Binop/Get/Const nodes expose op and args
     dynamically.
     """
 
-    def _impl() -> tuple[int, tuple[str, ...]] | None:
+    def _impl() -> object:
         """Match BP-relative forms through third-party pyvex dynamic-boundary fields."""
+        collected: object
+        op: object
+        arg: object
         nonlocal offset_expr
         # Resolve RdTmp → defining expression if tmp_defs available
         if tmp_defs is not None:
@@ -714,8 +760,8 @@ def extract_bp_relative_offset_8616(
         terms, const = collected
 
         # Accept: BP (+ SI/DI) + const
-        has_bp = any(_is_bp_reg(term, tmp_defs=tmp_defs) for term in terms)
-        non_reg_terms = [t for t in terms if not _is_bp_reg(t, tmp_defs=tmp_defs) and not _is_index_reg_8616(t)]
+        has_bp = any(_is_bp_reg(term, tmp_defs=tmp_defs) for term in iter(terms))
+        non_reg_terms = [t for t in iter(terms) if not _is_bp_reg(t, tmp_defs=tmp_defs) and not _is_index_reg_8616(t)]
 
         if has_bp and not non_reg_terms:
             # BP only or BP + index: accept
@@ -729,16 +775,18 @@ def extract_bp_relative_offset_8616(
 def _collect_add_sub_terms(
     expr: object,
     *,
-    tmp_defs: dict[int, object] | None = None,
-) -> tuple[list[object], int] | None:
+    tmp_defs: object = None,
+) -> object:
     """Flatten supported pyvex add/sub expression trees into terms and constants.
 
     Dynamic boundary: third-party pyvex expression trees expose op, tag, con,
     args, and register fields dynamically.
     """
 
-    def _impl() -> tuple[list[object], int] | None:
+    def _impl() -> object:
         """Flatten terms through third-party pyvex dynamic-boundary fields."""
+        op: object
+        reg_offset: object
         nonlocal expr
         # Resolve RdTmp chains through tmp_defs first
         if tmp_defs is not None:
@@ -770,9 +818,10 @@ def _collect_add_sub_terms(
     return _impl()
 
 
+@cython.ccall
 def _bp_add_sub_fallback_8616(
-    op_str: str, args: list[object], tmp_defs: dict[int, object] | None
-) -> tuple[int, tuple[str, ...]] | None:
+    op_str: object, args: object, tmp_defs: object
+) -> object:
     """Match the simple two-argument ``BP +/- const`` VEX pattern."""
     # Fallback to simple 2-arg patterns
     left, right = args[0], args[1]
@@ -787,13 +836,17 @@ def _bp_add_sub_fallback_8616(
     return None
 
 
-def _leaf_add_sub_terms(expr: object) -> tuple[list[object], int]:
+@cython.ccall
+def _leaf_add_sub_terms(expr: object) -> tuple[list[object], cython.longlong]:
     """Classify a leaf expression as a term or a folded constant.
 
     Dynamic boundary: third-party VEX expression variants expose tag/con/value
     on different surfaces. Fold only an observed integer constant; preserve
     opaque or incomplete expressions as terms instead of guessing a value.
     """
+    con: object
+    tag: object
+    val: object
     # Leaf expression: VEX Get, RdTmp, Const, or int literal.
     # These are atomic terms — return them as a single-term list.
     # Handle VEX Const objects (tag=Iex_Const, .con.value)
@@ -809,13 +862,18 @@ def _leaf_add_sub_terms(expr: object) -> tuple[list[object], int]:
     return ([expr], 0)
 
 
+@cython.ccall
 def _combine_add_sub_terms(
-    args: list[object],
+    args: object,
     *,
-    tmp_defs: dict[int, object] | None,
-    subtract: bool,
-) -> tuple[list[object], int] | None:
+    tmp_defs: object,
+    subtract: cython.bint,
+) -> object:
     """Combine both sides of an add/sub node into flattened terms and a folded constant."""
+    left_res: object
+    left_terms: object
+    right_res: object
+    right_terms: object
     left_res = _collect_add_sub_terms(args[0], tmp_defs=tmp_defs)
     right_res = _collect_add_sub_terms(args[1], tmp_defs=tmp_defs)
     if left_res is None or right_res is None:
@@ -833,7 +891,8 @@ def _combine_add_sub_terms(
     return ([args[0], args[1]], 0)
 
 
-def _is_index_reg_8616(expr: object) -> bool:
+@cython.ccall
+def _is_index_reg_8616(expr: object) -> cython.bint:
     """Check if a VEX expression is SI or DI.
 
     Dynamic boundary: third-party pyvex Get nodes expose class names and offsets
@@ -844,6 +903,9 @@ def _is_index_reg_8616(expr: object) -> bool:
       di → offset=36
     The reg16_t enum values (SI=6, DI=7) are NOT VEX guest offsets.
     """
+    class_name: object
+    offset: object
+    reg_offset: object
     # Dynamic boundary: pyvex Get nodes expose class names and offsets at runtime.
     class_name = getattr(type(expr), "__name__", "")
     if "Get" in class_name:
@@ -856,7 +918,7 @@ def _is_index_reg_8616(expr: object) -> bool:
     return bool(isinstance(reg_offset, int) and reg_offset in {6, 7})
 
 
-def _is_bp_reg(expr: object, *, tmp_defs: dict[int, object] | None = None) -> bool:
+def _is_bp_reg(expr: object, *, tmp_defs: object = None) -> cython.bint:
     """Check if a VEX expression is a BP register reference.
 
     Dynamic boundary: third-party pyvex RdTmp/Get nodes expose class names,
@@ -867,8 +929,14 @@ def _is_bp_reg(expr: object, *, tmp_defs: dict[int, object] | None = None) -> bo
     intentionally treated only as legacy rescue evidence.
     """
 
-    def _impl() -> bool:
+    def _impl() -> cython.bint:
         """Classify BP through third-party pyvex dynamic-boundary fields."""
+        class_name: object
+        offset: object
+        reg_offset: object
+        stmt: object
+        stmt_expr: object
+        tmp_idx: object
         # Dynamic boundary: pyvex RdTmp/Get nodes expose class names and fields dynamically.
         class_name = getattr(type(expr), "__name__", "")
 
@@ -895,13 +963,15 @@ def _is_bp_reg(expr: object, *, tmp_defs: dict[int, object] | None = None) -> bo
     return _impl()
 
 
-def advance_ip16(emu: object, byte_count: int) -> _AddressValue:
+@cython.ccall
+def advance_ip16(emu: object, byte_count: cython.longlong) -> _AddressValue:
     """Return IP advanced by a byte count in 16-bit mode."""
     emulator = cast(_AddressingEmulator, emu)
     return emulator.get_gpreg(reg16_t.IP) + emulator.constant(byte_count, Type.int_16)
 
 
-def advance_eip32(emu: object, byte_count: int) -> _AddressValue:
+@cython.ccall
+def advance_eip32(emu: object, byte_count: cython.longlong) -> _AddressValue:
     """Return EIP advanced by a byte count in 32-bit mode."""
     emulator = cast(_AddressingEmulator, emu)
     return emulator.get_gpreg(reg32_t.EIP) + emulator.constant(byte_count, Type.int_32)

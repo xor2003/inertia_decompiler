@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize wide call-result arithmetic from the typed widening pipeline.
 
 Layer: Types/Lowering.
@@ -9,6 +10,7 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import cython
 
 import logging
 from typing import Protocol, cast
@@ -49,6 +51,7 @@ def lower_wide_call_output_stack_assignments_8616(
     codegen: object,
 ) -> WideCallOutputAssignmentArtifact8616 | None:
     """Lower exact wide CALL_OUTPUT arithmetic after stack objects exist."""
+    source: object
     boundary = cast(_CodegenBoundary8616, codegen)
     try:
         previous_artifact = boundary._inertia_wide_call_output_assignment_artifact_8616
@@ -68,13 +71,13 @@ def lower_wide_call_output_stack_assignments_8616(
         )
     sources = tuple(
         source
-        for source in pipeline.storage_widening.values
+        for source in iter(pipeline.storage_widening.values)
         if source.value.lhs_call_output is not None
     )
     resolutions: list[WideCallOutputAssignmentResolution8616] = []
     for source in sources:
         stack_candidates = tuple(
-            candidate for candidate in wide_stack.candidates if candidate.source is source
+            candidate for candidate in iter(wide_stack.candidates) if candidate.source is source
         )
         if len(stack_candidates) != 1:
             resolutions.append(
@@ -98,7 +101,7 @@ def lower_wide_call_output_stack_assignments_8616(
         )
     materialized = sum(
         item.verdict is WideCallOutputAssignmentVerdict8616.MATERIALIZED
-        for item in resolutions
+        for item in iter(resolutions)
     )
     failures = len(resolutions) - materialized
     artifact = WideCallOutputAssignmentArtifact8616(
@@ -106,28 +109,28 @@ def lower_wide_call_output_stack_assignments_8616(
         resolutions=tuple(resolutions),
         stats=WideCallOutputAssignmentStats8616(
             raw_fact_count=len(resolutions),
-            normalized_fact_count=sum(item.fact is not None for item in resolutions),
+            normalized_fact_count=sum(item.fact is not None for item in iter(resolutions)),
             classified_fact_count=sum(
-                item.placement_classified for item in resolutions
+                item.placement_classified for item in iter(resolutions)
             ),
             materialized_count=materialized,
             failure_count=failures,
-            changed_count=sum(item.changed for item in resolutions),
+            changed_count=sum(item.changed for item in iter(resolutions)),
             already_materialized_count=sum(
-                item.already_materialized for item in resolutions
+                item.already_materialized for item in iter(resolutions)
             ),
         ),
     )
     boundary._inertia_wide_call_output_assignment_artifact_8616 = artifact
     refused = tuple(
         item.failure.value
-        for item in resolutions
+        for item in iter(resolutions)
         if item.failure is not None
     )
     previous_refused = (
         tuple(
             item.failure.value
-            for item in previous_artifact.resolutions
+            for item in iter(previous_artifact.resolutions)
             if item.failure is not None
         )
         if isinstance(previous_artifact, WideCallOutputAssignmentArtifact8616)

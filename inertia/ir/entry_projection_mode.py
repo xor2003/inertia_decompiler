@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Select which conditional entry facts a consumer explicitly requests.
 
 Layer: IR.
@@ -7,9 +8,13 @@ Owns typed Value, Address, Condition, instruction facts, and lossless normalizat
 Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 from __future__ import annotations
+import typing
+import cython
 
 from enum import StrEnum
 from typing import TYPE_CHECKING
+NearCallJumpScope8616 = typing.TypeVar("NearCallJumpScope8616")
+Real16InvocationDomain8616 = typing.TypeVar("Real16InvocationDomain8616")
 
 if TYPE_CHECKING:
     from .near_call_jump_scope import NearCallJumpScope8616
@@ -44,7 +49,7 @@ def entry_projection_mode_for_scope_8616(
         if scope.entry_call_preservations and all(
             type(record) is EntryDomainCallPreservation8616
             and record.selector_projection is not None
-            for record in scope.entry_call_preservations
+            for record in iter(scope.entry_call_preservations)
         ):
             return EntryProjectionMode8616.CALL_TARGETS
         return EntryProjectionMode8616.CONTROL_ONLY

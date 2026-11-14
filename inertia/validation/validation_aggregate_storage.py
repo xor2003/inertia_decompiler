@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Resolve typed aggregate fields to exact segmented storage locations.
 
 Layer: Tail validation.
@@ -14,6 +15,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -23,6 +26,7 @@ from angr.sim_type import SimType
 from angr.sim_variable import SimMemoryVariable
 
 from inertia.ir.core import MemSpace
+import dataclasses
 
 __all__ = [
     "AggregateFieldStorage8616",
@@ -30,15 +34,16 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class AggregateFieldStorage8616:
     """Exact byte location and width of one final aggregate field."""
 
     space: MemSpace
-    offset: int
-    width: int
+    offset: cython.longlong
+    width: cython.longlong
 
 
+@cython.ccall
 def _strip_casts_8616(node: object) -> object:
     """Return the structured expression beneath transparent C casts."""
     while isinstance(node, structured_c.CTypeCast):
@@ -46,6 +51,7 @@ def _strip_casts_8616(node: object) -> object:
     return node
 
 
+@cython.ccall
 def _field_width_8616(node: structured_c.CVariableField) -> int | None:
     """Return the architecture-bound byte width of the selected leaf field."""
     field_type = node.field.type
@@ -60,8 +66,10 @@ def _field_width_8616(node: structured_c.CVariableField) -> int | None:
     return bits // 8
 
 
+@cython.ccall
 def aggregate_field_storage_8616(node: object) -> AggregateFieldStorage8616 | None:
     """Resolve one nested non-pointer global field from typed AST structure."""
+    width: object
     current = _strip_casts_8616(node)
     if not isinstance(current, structured_c.CVariableField):
         return None

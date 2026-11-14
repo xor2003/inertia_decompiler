@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Sequence-merge eligibility helpers for region structuring.
 
 Layer: Structuring.
@@ -12,12 +13,18 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from inertia.structuring.structuring_region import DominatorInfo, Region, RegionGraph, RegionType
+import operator
 
 
-def _can_reach_region(graph: RegionGraph, src: Region, dst: Region) -> bool:
+@cython.ccall
+def _can_reach_region(graph: RegionGraph, src: Region, dst: Region) -> cython.bint:
     """Return True when `src` can reach `dst` through successor edges."""
+    region: object
+    succ: object
     worklist = [src]
     seen: set[Region] = set()
 
@@ -35,29 +42,32 @@ def _can_reach_region(graph: RegionGraph, src: Region, dst: Region) -> bool:
     return False
 
 
+@cython.ccall
 def merge_would_hide_cycle(
     graph: RegionGraph,
-    dominators: DominatorInfo | None,
+    dominators: object,
     region: Region,
     other: Region,
-) -> bool:
+) -> cython.bint:
     """Return True when merging `other` into `region` would erase a loop edge."""
     if dominators is None:
         return False
     return dominators.dominates(region, other) and _can_reach_region(graph, other, region)
 
 
-def _region_shape_blocks_merge_8616(region: Region, succ: Region) -> bool:
+@cython.ccall
+def _region_shape_blocks_merge_8616(region: Region, succ: Region) -> cython.bint:
     """Return True when region kinds or identity already forbid sequencing."""
     return (
         succ.region_type in (RegionType.Loop, RegionType.IncSwitch)
-        or region.region_type == RegionType.Condition
+        or operator.eq(region.region_type, RegionType.Condition)
         or succ == region
         or region.condition_expr is not None
     )
 
 
-def _typed_metadata_blocks_merge_8616(region: Region, succ: Region) -> bool:
+@cython.ccall
+def _typed_metadata_blocks_merge_8616(region: Region, succ: Region) -> cython.bint:
     """Return True when typed IR evidence still owns either region's flow."""
     return (
         bool(region.metadata.get("typed_ir_has_condition", False))
@@ -66,12 +76,13 @@ def _typed_metadata_blocks_merge_8616(region: Region, succ: Region) -> bool:
     )
 
 
+@cython.ccall
 def sequence_merge_is_safe(
     graph: RegionGraph,
     dominators: DominatorInfo | None,
     region: Region,
     succ: Region,
-) -> bool:
+) -> cython.bint:
     """Return True when `region -> succ` is safe to collapse as a sequence.
 
     The key guard is loop preservation: do not consume a successor that feeds a

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Durable evidence for removing surplus structured branch shells.
 
 Layer: Structuring.
@@ -9,22 +10,26 @@ Do not perform alias-state ownership, widening, type/materialization recovery, r
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
+import dataclasses
+import operator
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SurplusGuardCleanupStats8616:
     """Closed evidence accounting for one surplus-guard cleanup."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every candidate was removed or explicitly retained."""
         return (
             self.raw_fact_count
@@ -34,19 +39,19 @@ class SurplusGuardCleanupStats8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SurplusGuardCleanupEvidence8616:
     """Binary branch budget and exact kinds removed by Structuring."""
 
-    branch_count: int
-    total_if_count: int
-    noop_materialized_count: int
-    empty_return_materialized_count: int
-    identical_arms_materialized_count: int
+    branch_count: cython.longlong
+    total_if_count: cython.longlong
+    noop_materialized_count: cython.longlong
+    empty_return_materialized_count: cython.longlong
+    identical_arms_materialized_count: cython.longlong
     stats: SurplusGuardCleanupStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether the budget and materialized-kind census agree."""
         return (
             self.stats.complete
@@ -54,10 +59,9 @@ class SurplusGuardCleanupEvidence8616:
             and self.total_if_count >= self.branch_count
             and self.total_if_count - self.branch_count
             >= self.stats.materialized_count
-            and self.stats.materialized_count
-            == self.noop_materialized_count
+            and operator.eq(self.stats.materialized_count, self.noop_materialized_count
             + self.empty_return_materialized_count
-            + self.identical_arms_materialized_count
+            + self.identical_arms_materialized_count)
         )
 
 

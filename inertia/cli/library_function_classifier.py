@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify library-like function names for reporting and filtering policy.
 
 Layer: CLI/fallback/reporting.
@@ -5,6 +6,8 @@ Responsibility: classify optional library labels for reporting without proving f
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import Counter
 from collections.abc import Mapping
@@ -12,6 +15,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from inertia.cli.lst_extract import LSTMetadata
+import dataclasses
 
 
 class LibraryFunctionClass(Enum):
@@ -37,16 +41,16 @@ _LIBRARY_CLASSES = frozenset(
 )
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class LibraryLabelFilterResult:
     """Filtered labels plus per-label reporting decisions."""
 
-    labels: dict[int, str]
-    decisions: dict[int, LibraryFunctionClass]
-    skipped_by_class: Mapping[LibraryFunctionClass, int]
+    labels: object
+    decisions: object
+    skipped_by_class: Mapping[LibraryFunctionClass, cython.longlong]
 
     @property
-    def skipped_count(self) -> int:
+    def skipped_count(self) -> cython.longlong:
         """Return the number of labels hidden by library-filter policy."""
         return sum(self.skipped_by_class.values())
 
@@ -179,12 +183,13 @@ _MS_HELPER_PREFIXES = (
 )
 
 
-def normalize_library_symbol_name(name: str) -> str:
+@cython.ccall
+def normalize_library_symbol_name(name: object) -> object:
     """Normalize a symbol name for library-label comparison."""
     return (name or "").strip().lstrip("_").lower()
 
 
-def classify_library_function_name(name: str) -> LibraryFunctionClass:
+def classify_library_function_name(name: object) -> LibraryFunctionClass:
     """Classify one function name using reporting-only library heuristics."""
     raw = (name or "").strip()
     lowered = raw.lower()
@@ -199,22 +204,24 @@ def classify_library_function_name(name: str) -> LibraryFunctionClass:
         return LibraryFunctionClass.RUNTIME_KNOWN_NAME
     if lowered.startswith("_") and len(lowered) > 1 and lowered[1].isalpha():
         return LibraryFunctionClass.RUNTIME_PREFIX
-    if any(lowered.startswith(prefix) for prefix in _RUNTIME_PREFIXES):
+    if any(lowered.startswith(prefix) for prefix in iter(_RUNTIME_PREFIXES)):
         return LibraryFunctionClass.RUNTIME_PREFIX
-    if any(normalized.startswith(prefix) for prefix in _MS_HELPER_PREFIXES):
+    if any(normalized.startswith(prefix) for prefix in iter(_MS_HELPER_PREFIXES)):
         return LibraryFunctionClass.RUNTIME_PREFIX
     return LibraryFunctionClass.USER_UNCLASSIFIED
 
 
-def is_library_like_function_name(name: str) -> bool:
+@cython.ccall
+def is_library_like_function_name(name: object) -> cython.bint:
     """Return whether a name belongs to a library-like reporting class."""
     return classify_library_function_name(name) in _LIBRARY_CLASSES
 
 
+@cython.ccall
 def classify_sidecar_function_label(
-    addr: int,
-    name: str,
-    metadata: LSTMetadata | None,
+    addr: cython.longlong,
+    name: object,
+    metadata: object,
 ) -> LibraryFunctionClass:
     """Classify one sidecar label without using it as semantic proof."""
     if metadata is None:
@@ -230,13 +237,16 @@ def classify_sidecar_function_label(
     return classify_library_function_name(name)
 
 
+@cython.ccall
 def filter_code_labels_for_library_policy(
     metadata: LSTMetadata | None,
-    labels: Mapping[int, str],
+    labels: Mapping[cython.longlong, str],
 ) -> LibraryLabelFilterResult:
     """Filter sidecar labels using reporting-only library policy."""
-    kept: dict[int, str] = {}
-    decisions: dict[int, LibraryFunctionClass] = {}
+    addr: object
+    name: object
+    kept: dict[cython.longlong, str] = {}
+    decisions: dict[cython.longlong, LibraryFunctionClass] = {}
     skipped: Counter[LibraryFunctionClass] = Counter()
     for addr, name in labels.items():
         decision = classify_sidecar_function_label(int(addr), str(name), metadata)

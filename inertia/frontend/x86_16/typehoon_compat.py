@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/angr compatibility.
 
 Responsibility: patch angr Typehoon primitives so 16-bit pointer facts stay typed.
@@ -6,6 +7,8 @@ Dynamic boundary: compatibility monkeypatches touch third-party angr Typehoon in
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 import importlib
@@ -45,8 +48,10 @@ except ImportError:
 __all__ = ["apply_x86_16_typehoon_compatibility"]
 
 
+@cython.ccall
 def apply_x86_16_typehoon_compatibility() -> None:
     """Patch angr Typehoon runtime classes across a dynamic third-party compatibility boundary."""
+    lifter_dynamic: object
     solver_dynamic = cast(Any, _typehoon_simple_solver)
     translator_dynamic = cast(Any, _typehoon_translator)
     lifter_dynamic = cast(Any, _typehoon_lifter)
@@ -63,7 +68,7 @@ def _patch_stack_addr_from_offset_8616() -> None:
     """Install the 16-bit stack-address shim on VariableRecoveryStateBase."""
     _orig_stack_addr_from_offset = _variable_recovery_base.VariableRecoveryStateBase.stack_addr_from_offset
 
-    def _stack_addr_from_offset_8616(self: object, offset: int) -> int:
+    def _stack_addr_from_offset_8616(self: object, offset: cython.longlong) -> cython.longlong:
         state = cast(Any, self)
         if state.arch.bits == 16:
             return (offset + 0x7FFE) & 0xFFFF
@@ -100,7 +105,7 @@ def _install_pointer16_lattice_8616(solver_dynamic: object) -> type[Pointer]:
     class Pointer16(Pointer, TCInt16):  # type: ignore[misc, unused-ignore] # dynamic Typehoon bases
         """16-bit Typehoon pointer constant installed into angr's runtime lattice."""
 
-        def __init__(self, basetype: TypeConstant | None = None, name: str | None = None) -> None:
+        def __init__(self, basetype: TypeConstant | None = None, name: object = None) -> None:
             Pointer.__init__(self, basetype, name=name)
             TCInt16.__init__(self, name=name)
 
@@ -126,15 +131,21 @@ def _install_pointer16_lattice_8616(solver_dynamic: object) -> type[Pointer]:
     return Pointer16
 
 
+@cython.ccall
 def _init_simple_solver_16_8616(
     solver_obj: object,
     constraints: object,
     typevars: object,
-    constraint_set_degradation_threshold: int,
-    stackvar_max_sizes: dict[TypeVariable, int] | None,
-    tv_manager: TypeVariableManager | None,
+    constraint_set_degradation_threshold: cython.longlong,
+    stackvar_max_sizes: object,
+    tv_manager: object,
 ) -> None:
     """Initialize SimpleSolver state for the 16-bit lattice and degrade threshold."""
+    func_tv: object
+    repr_tv: object
+    sol: object
+    tv: object
+    tv_eq: object
     solver = cast(Any, solver_obj)
     constraints_payload = cast(Any, constraints)
     typevars_payload = cast(Any, typevars)
@@ -215,11 +226,14 @@ def _patch_simple_solver_determine_8616(solver_module: object) -> None:
         self: object,
         sketches: object,
         tvs: object,
-        equivalence_classes: dict[TypeVariable, TypeVariable],
-        solution: dict[object, object],
-        nodes: set[object] | None = None,
+        equivalence_classes: object,
+        solution: object,
+        nodes: object = None,
     ) -> None:
         """Avoid re-solving 16-bit roots already proven by a connected solve."""
+        equivalent: object
+        typevar: object
+        variable: object
         solver = cast(Any, self)
         if solver.bits != 16 or nodes is not None:
             cast(Any, _orig_determine)(
@@ -259,11 +273,11 @@ def _patch_simple_solver_init_8616(solver_module: object) -> None:
 
     def _simple_solver_init_8616(
         self: object,
-        bits: int,
+        bits: cython.longlong,
         constraints: object,
         typevars: object,
-        constraint_set_degradation_threshold: int = 150,
-        stackvar_max_sizes: dict[TypeVariable, int] | None = None,
+        constraint_set_degradation_threshold: cython.longlong = 150,
+        stackvar_max_sizes: object = None,
         tv_manager: TypeVariableManager | None = None,
     ) -> None:
         if bits != 16:
@@ -326,7 +340,7 @@ def _patch_type_lifter_8616(lifter_dynamic: object, pointer16: type[Pointer]) ->
     lifter_module = cast(Any, lifter_dynamic)
     _orig_lifter_init = lifter_module.TypeLifter.__init__
 
-    def _typelifter_init_16(self: object, bits: int) -> None:
+    def _typelifter_init_16(self: object, bits: cython.longlong) -> None:
         lifter = cast(Any, self)
         if bits not in (16, 32, 64):
             raise ValueError("TypeLifter only supports 16-bit, 32-bit, or 64-bit pointers.")

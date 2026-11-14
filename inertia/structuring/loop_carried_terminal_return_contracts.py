@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed contracts for loop-carried terminal return materialization.
 
 Layer: Structuring.
@@ -9,12 +10,15 @@ rewrite cleanup, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import Enum
 from typing import Protocol
 
 from archinfo import Arch
+import dataclasses
 
 __all__ = [
     "LoopCarriedTerminalReturnEvidence8616",
@@ -47,22 +51,22 @@ class LoopCarriedTerminalReturnRefusal8616(Enum):
     MISSING_INSTRUCTION_IDENTITY = "missing_instruction_identity"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LoopCarriedTerminalReturnEvidence8616:
     """Closed evidence accounting for one loop-carried AX projection."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LoopCarriedTerminalReturnResult8616:
     """Result of preserving one loop-carried terminal AX value."""
 
-    changed: bool
+    changed: cython.bint
     status: LoopCarriedTerminalReturnStatus8616
     refusal: LoopCarriedTerminalReturnRefusal8616
     evidence: LoopCarriedTerminalReturnEvidence8616
@@ -71,14 +75,14 @@ class LoopCarriedTerminalReturnResult8616:
 class _FunctionSurface8616(Protocol):
     """angr function fields consumed by terminal-storage Semantics."""
 
-    addr: int
-    block_addrs_set: set[int]
+    addr: cython.longlong
+    block_addrs_set: object
 
 
 class _FunctionManagerSurface8616(Protocol):
     """Function-manager lookup used at the third-party project boundary."""
 
-    def function(self, *, addr: int, create: bool) -> _FunctionSurface8616 | None:
+    def function(self, *, addr: cython.longlong, create: cython.bint) -> _FunctionSurface8616 | None:
         """Return one existing function without creating it."""
 
 
@@ -98,7 +102,7 @@ class _ProjectSurface8616(Protocol):
 class _CFunctionSurface8616(Protocol):
     """Structured function fields inspected and updated by the owner."""
 
-    addr: int
+    addr: cython.longlong
     functy: object
     statements: object
 

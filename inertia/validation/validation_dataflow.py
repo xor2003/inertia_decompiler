@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Validate structured-codegen def-use facts without repairing output.
 
 Layer: Tail validation.
@@ -14,6 +15,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -63,6 +66,8 @@ from .status_flag_preservation import PackedStatusFlagPreservationEvidence8616
 from .validation_indexed_bytes import indexed_scalar_byte_view_8616
 from .validation_predicates import PredicateToken8616, invert_predicate_token_8616
 from .validation_stack_projection import validated_stack_projection_fact_8616
+import dataclasses
+import builtins
 
 __all__ = [
     "DefUseCallOutputDefinition8616",
@@ -79,7 +84,7 @@ __all__ = [
 # The node is an angr structured-codegen object.  Keep this dynamic only at
 # the third-party AST boundary; mypyc cannot import a dataclass field typed as
 # the builtin ``object`` in this package.
-type OpaqueValidationNode8616 = Any
+OpaqueValidationNode8616 = typing.TypeAliasType("OpaqueValidationNode8616", Any)
 
 
 class StackVariableOffsetResolver8616(Protocol):
@@ -99,17 +104,17 @@ class DefUseStorageKind8616(StrEnum):
     VIRTUAL_CARRIER = "virtual-carrier"
 
 
-@dataclass(frozen=True, order=True, slots=True)
+@dataclasses.dataclass(frozen=True, order=True, )
 class DefUseStorageKey8616:
     """Stable storage identity used by the def-use validator."""
 
     kind: DefUseStorageKind8616
-    offset: int
-    width: int
+    offset: cython.longlong
+    width: cython.longlong
     region: int | None = None
     ssa_id: str = ""
-    definition_trackable: bool = field(default=True, compare=False)
-    display_name: str = field(default="", compare=False)
+    definition_trackable: cython.bint = field(default=True, compare=False)
+    display_name: object = field(default="", compare=False)
 
     def token(self) -> str:
         """Return a deterministic diagnostic token for this storage identity."""
@@ -124,14 +129,14 @@ class DefUseStorageKey8616:
         return f"{prefix}:region0x{self.region:x}:ssa-{self.ssa_id}"
 
 
-@dataclass(frozen=True, order=True, slots=True)
+@dataclasses.dataclass(frozen=True, order=True, )
 class _DefUseStorageByte8616:
     """One byte of definitely defined segmented storage."""
 
     kind: DefUseStorageKind8616
-    offset: int
+    offset: cython.longlong
     region: int | None
-    ssa_id: str
+    ssa_id: object
 
     def token(self) -> str:
         """Return a deterministic diagnostic token for this byte."""
@@ -143,15 +148,15 @@ class _DefUseStorageByte8616:
         return f"{self.kind.value}:reg+0x{self.offset:x}:region0x{self.region:x}:ssa-{self.ssa_id}"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _DefUsePredicate8616:
     """Exact structured predicate and the storage identities it evaluates."""
 
     token: PredicateToken8616
-    dependencies: frozenset[_DefUseStorageByte8616]
+    dependencies: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _DefUseValueRead8616:
     """One evaluated C node and its normalized storage identity."""
 
@@ -159,29 +164,30 @@ class _DefUseValueRead8616:
     storage: DefUseStorageKey8616
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _DefUseFlowState8616:
     """Definitely assigned bytes plus definitions guarded by exact predicates."""
 
-    defined: set[_DefUseStorageByte8616]
-    guarded: dict[_DefUsePredicate8616, set[_DefUseStorageByte8616]]
-    falls_through: bool = True
+    defined: object
+    guarded: object
+    falls_through: cython.bint = True
 
+    @cython.ccall
     def copy(self) -> _DefUseFlowState8616:
         """Return an independent state for one structured control-flow path."""
         return _DefUseFlowState8616(
             defined=set(self.defined),
-            guarded={predicate: set(definitions) for predicate, definitions in self.guarded.items()},
+            guarded={predicate: set(definitions) for predicate, definitions in builtins.iter(self.guarded.items())},
             falls_through=self.falls_through,
         )
 
 
-@dataclass(frozen=True, order=True, slots=True)
+@dataclasses.dataclass(frozen=True, order=True, )
 class DefUseIssue8616:
     """One structured read without a proven definition on every input path."""
 
     storage: DefUseStorageKey8616
-    context: str
+    context: object
 
     def token(self) -> str:
         """Return a deterministic validation fingerprint for this issue."""
@@ -192,12 +198,12 @@ class DefUseIssue8616:
         return f"uninitialized-read:{self.storage.token()}"
 
 
-@dataclass(frozen=True, order=True, slots=True)
+@dataclasses.dataclass(frozen=True, order=True, )
 class DefUseCallOutputDefinition8616:
     """One lowering-proven stack range defined by a specific call node."""
 
-    base_offset: int
-    width: int
+    base_offset: cython.longlong
+    width: cython.longlong
 
     def storage_key(self) -> DefUseStorageKey8616:
         """Return the stack storage identity defined by the call."""
@@ -208,12 +214,12 @@ class DefUseCallOutputDefinition8616:
         )
 
 
-@dataclass(frozen=True, order=True, slots=True)
+@dataclasses.dataclass(frozen=True, order=True, )
 class DefUseEntryStackRange8616:
     """One machine-BP argument range proven initialized at function entry."""
 
-    base_offset: int
-    width: int
+    base_offset: cython.longlong
+    width: cython.longlong
 
     def __post_init__(self) -> None:
         """Reject locals, frame metadata, and empty argument ranges."""
@@ -229,33 +235,33 @@ class DefUseEntryStackRange8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DefUseValidationReport8616:
     """Closed-loop counters and issues from structured def-use validation."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
     issues: tuple[DefUseIssue8616, ...] = ()
 
     @property
-    def failure_count(self) -> int:
+    def failure_count(self) -> cython.longlong:
         """Return the number of reads without a proven prior definition."""
         return len(self.issues)
 
     @property
-    def passed(self) -> bool:
+    def passed(self) -> cython.bint:
         """Return whether every classified read has a proven definition."""
         return self.failure_count == 0
 
     def issue_tokens(self) -> tuple[str, ...]:
         """Return stable issue fingerprints for tail-validation summaries."""
-        return tuple(issue.token() for issue in self.issues)
+        return tuple(issue.token() for issue in iter(self.issues))
 
     def semantic_issue_tokens(self) -> tuple[str, ...]:
         """Return issue identities without representation-specific AST paths."""
-        return tuple(issue.semantic_token() for issue in self.issues)
+        return tuple(issue.semantic_token() for issue in iter(self.issues))
 
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-compatible closed-loop evidence report."""
@@ -269,16 +275,17 @@ class DefUseValidationReport8616:
         }
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _MutableDefUseReport8616:
     """Mutable counters used only while walking one structured AST."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    issues: list[DefUseIssue8616] = field(default_factory=list)
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    issues: object = field(default_factory=list)
 
+    @cython.ccall
     def freeze(self) -> DefUseValidationReport8616:
         """Freeze counters into the public immutable validation contract."""
         return DefUseValidationReport8616(
@@ -290,10 +297,11 @@ class _MutableDefUseReport8616:
         )
 
 
+@cython.ccall
 def _stack_storage_key_8616(
     node: object,
     *,
-    include_arguments: bool = False,
+    include_arguments: cython.bint = False,
     stack_variable_offset_resolver: StackVariableOffsetResolver8616 | None = None,
 ) -> DefUseStorageKey8616 | None:
     """Return an exact BP-relative value view evaluated by one C variable."""
@@ -332,6 +340,7 @@ def _stack_storage_key_8616(
     )
 
 
+@cython.ccall
 def _type_width_bytes_8616(type_: object) -> int | None:
     """Return one positive byte width from an angr C type when available."""
     if not isinstance(type_, SimType):
@@ -345,11 +354,12 @@ def _type_width_bytes_8616(type_: object) -> int | None:
     return max(1, (type_bits + 7) // 8)
 
 
+@cython.ccall
 def _indexed_array_base_8616(
     node: object,
-    include_arguments: bool,
-    stack_variable_offset_resolver: StackVariableOffsetResolver8616 | None,
-) -> tuple[CVariable, SimStackVariable, int, str] | None:
+    include_arguments: cython.bint,
+    stack_variable_offset_resolver: object,
+) -> object:
     """Resolve an indexed node's stack array base, offset, and display name."""
     if not isinstance(node, CIndexedVariable):
         return None
@@ -379,15 +389,16 @@ def _indexed_array_base_8616(
     return base, variable, offset, name
 
 
+@cython.ccall
 def _indexed_element_key_8616(
     node: CIndexedVariable,
-    offset: int,
-    name: str,
-    element_width: int,
-    object_width: int | None,
+    offset: cython.longlong,
+    name: object,
+    element_width: cython.longlong,
+    object_width: object,
     variable: SimStackVariable,
     *,
-    dynamic_array_as_object: bool,
+    dynamic_array_as_object: cython.bint,
 ) -> DefUseStorageKey8616 | None:
     """Return the element-range or conservative full-object stack identity."""
     index = node.index.value if isinstance(node.index, CConstant) else None
@@ -417,10 +428,12 @@ def _indexed_element_key_8616(
     )
 
 
+@cython.ccall
 def _indexed_object_width_8616(
     base: CVariable, element_count: object, variable: SimStackVariable
 ) -> int | None:
     """Return the proven full-array byte width when shape matches the slot."""
+    array_element_width: object
     array_element_width = _type_width_bytes_8616(base.type.elem_type)
     return (
         array_element_width * element_count
@@ -436,7 +449,8 @@ def _indexed_object_width_8616(
     )
 
 
-def _untrackable_stack_key_8616(offset: int, width: int, name: str) -> DefUseStorageKey8616:
+@cython.ccall
+def _untrackable_stack_key_8616(offset: cython.longlong, width: cython.longlong, name: object) -> DefUseStorageKey8616:
     """Return the conservative full-object stack identity for unproven indices."""
     return DefUseStorageKey8616(
         kind=DefUseStorageKind8616.STACK_LOCAL,
@@ -447,14 +461,20 @@ def _untrackable_stack_key_8616(offset: int, width: int, name: str) -> DefUseSto
     )
 
 
+@cython.ccall
 def _indexed_stack_storage_key_8616(
     node: object,
     *,
-    dynamic_array_as_object: bool,
-    include_arguments: bool = False,
+    dynamic_array_as_object: cython.bint,
+    include_arguments: cython.bint = False,
     stack_variable_offset_resolver: StackVariableOffsetResolver8616 | None = None,
 ) -> DefUseStorageKey8616 | None:
     """Return the exact element or conservative full-object stack identity."""
+    base_facts: object
+    byte_view: object
+    element_width: object
+    object_width: object
+    storage: object
     byte_view = indexed_scalar_byte_view_8616(node)
     if byte_view is not None:
         owner, byte_index = byte_view
@@ -496,9 +516,12 @@ def _indexed_stack_storage_key_8616(
 
 def _register_storage_key_8616(
     node: object,
-    segment_register_offsets: frozenset[int],
+    segment_register_offsets: object,
 ) -> DefUseStorageKey8616 | None:
     """Return exact C-variable or AIL-virtual register storage identity."""
+    identity: object
+    variable: object
+    view: object
     if isinstance(node, CDirtyExpression):
         view = physical_register_view_8616(node)
         if view is None:
@@ -527,13 +550,13 @@ def _register_storage_key_8616(
     if not isinstance(node, CVariable):
         return None
     candidates = (node.unified_variable, node.variable)
-    variables = tuple(candidate for candidate in candidates if isinstance(candidate, SimRegisterVariable))
+    variables = tuple(candidate for candidate in iter(candidates) if isinstance(candidate, SimRegisterVariable))
     if not variables:
         return None
     variable = next(
         (
             candidate
-            for candidate in variables
+            for candidate in iter(variables)
             if isinstance(candidate.region, int)
             and isinstance(candidate.ident, (int, str))
             and isinstance(candidate.reg, int)
@@ -565,16 +588,22 @@ def _register_storage_key_8616(
     )
 
 
+@cython.ccall
 def _storage_key_8616(
     node: object,
-    segment_register_offsets: frozenset[int],
+    segment_register_offsets: object,
     *,
-    dynamic_array_as_object: bool = False,
-    include_virtual_carriers: bool = False,
-    include_stack_arguments: bool = False,
+    dynamic_array_as_object: cython.bint = False,
+    include_virtual_carriers: cython.bint = False,
+    include_stack_arguments: cython.bint = False,
     stack_variable_offset_resolver: StackVariableOffsetResolver8616 | None = None,
 ) -> DefUseStorageKey8616 | None:
     """Return one exact architectural or opt-in virtual storage identity."""
+    indexed_key: object
+    projection: object
+    register_key: object
+    stack_key: object
+    virtual_identity: object
     projection = validated_stack_projection_fact_8616(node)
     if projection is not None and (projection.view_offset < 0 or include_stack_arguments):
         return DefUseStorageKey8616(
@@ -615,14 +644,18 @@ def _storage_key_8616(
     )
 
 
+@cython.ccall
 def _semantic_partial_lvalue_storage_key_8616(
     node: object,
-    segment_register_offsets: frozenset[int],
+    segment_register_offsets: object,
     *,
-    include_stack_arguments: bool = False,
+    include_stack_arguments: cython.bint = False,
     stack_variable_offset_resolver: StackVariableOffsetResolver8616 | None = None,
 ) -> DefUseStorageKey8616 | None:
     """Resolve one exact byte-addressed semantic-cast assignment target."""
+    shifted: object
+    storage: object
+    width: object
     if not isinstance(node, CSemanticCast8616):
         return None
     width = _type_width_bytes_8616(node.dst_type)
@@ -654,6 +687,7 @@ def _semantic_partial_lvalue_storage_key_8616(
     )
 
 
+@cython.ccall
 def _shr_rhs_byte_offset_8616(shift: object) -> int | None:
     """Return the byte offset for a constant byte-aligned Shr amount."""
     if not (
@@ -667,8 +701,10 @@ def _shr_rhs_byte_offset_8616(shift: object) -> int | None:
     return shift.value // 8
 
 
-def _shr_byte_base_8616(expression: object) -> tuple[CVariable, int] | None:
+@cython.ccall
+def _shr_byte_base_8616(expression: object) -> object:
     """Match ``var >> (8 * n)`` and return the base variable plus byte offset."""
+    byte_offset: object
     if not (
         isinstance(expression, CBinaryOp)
         and expression.op == "Shr"
@@ -681,13 +717,15 @@ def _shr_byte_base_8616(expression: object) -> tuple[CVariable, int] | None:
     return expression.lhs, byte_offset
 
 
+@cython.ccall
 def _predicate_storage_key_8616(
     node: object,
-    segment_register_offsets: frozenset[int],
+    segment_register_offsets: object,
     *,
     stack_variable_offset_resolver: StackVariableOffsetResolver8616 | None = None,
 ) -> DefUseStorageKey8616 | None:
     """Return exact stack-argument, local, or register identity for a predicate."""
+    stack_key: object
     stack_key = _stack_storage_key_8616(
         node,
         include_arguments=True,
@@ -698,8 +736,12 @@ def _predicate_storage_key_8616(
     return _register_storage_key_8616(node, segment_register_offsets)
 
 
-def _visit_value_node_children_8616(node: object, nodes: list[object], active: set[int]) -> None:
+@cython.ccall
+def _visit_value_node_children_8616(node: object, nodes: object, active: object) -> None:
     """Visit a node's structured-codegen children with recursion guard."""
+    value: object
+    attr: object
+    child: object
     node_id = id(node)
     active.add(node_id)
     try:
@@ -715,8 +757,10 @@ def _visit_value_node_children_8616(node: object, nodes: list[object], active: s
         active.remove(node_id)
 
 
-def _visit_value_node_8616(node: object, nodes: list[object], active: set[int]) -> None:
+@cython.ccall
+def _visit_value_node_8616(node: object, nodes: object, active: object) -> None:
     """Collect one value-evaluated AST node and its evaluated children."""
+    argument: object
     if not _structured_codegen_node_8616(node):
         return
     node_id = id(node)
@@ -741,15 +785,17 @@ def _visit_value_node_8616(node: object, nodes: list[object], active: set[int]) 
     _visit_value_node_children_8616(node, nodes, active)
 
 
+@cython.ccall
 def _iter_value_nodes_8616(root: object) -> tuple[object, ...]:
     """Return value-evaluated AST nodes without treating ``&var`` as a read."""
     nodes: list[object] = []
-    active: set[int] = set()
+    active: set[cython.longlong] = set()
     _visit_value_node_8616(root, nodes, active)
     return tuple(nodes)
 
 
-def _debug_value_shape_8616(node: object, depth: int = 0) -> object:
+@cython.ccall
+def _debug_value_shape_8616(node: object, depth: cython.longlong = 0) -> object:
     """Render a bounded structured value shape for opt-in diagnostics."""
     if depth >= 4:
         return type(node).__name__
@@ -784,10 +830,11 @@ def _debug_call_reads_8616(expr: object) -> None:
         expr.callee_func,
         type(expr.callee_target).__name__,
         expr.callee_target,
-        tuple(_debug_value_shape_8616(argument) for argument in expr.args),
+        tuple(_debug_value_shape_8616(argument) for argument in iter(expr.args)),
     )
 
 
+@cython.ccall
 def _debug_value_read_8616(key: DefUseStorageKey8616, node: object) -> None:
     """Emit opt-in diagnostics for one collected value read."""
     if os.environ.get("INERTIA_DEBUG_DEF_USE") != "1":
@@ -803,15 +850,18 @@ def _debug_value_read_8616(key: DefUseStorageKey8616, node: object) -> None:
     )
 
 
+@cython.ccall
 def _value_read_keys_8616(
     expr: object,
-    segment_register_offsets: frozenset[int],
+    segment_register_offsets: object,
     *,
-    include_virtual_carriers: bool = False,
-    include_stack_arguments: bool = False,
+    include_virtual_carriers: cython.bint = False,
+    include_stack_arguments: cython.bint = False,
     stack_variable_offset_resolver: StackVariableOffsetResolver8616 | None = None,
 ) -> tuple[_DefUseValueRead8616, ...]:
     """Collect tracked storage views whose stored values are evaluated."""
+    key: object
+    node: object
     if expr is None:
         return ()
     _debug_call_reads_8616(expr)
@@ -845,12 +895,14 @@ def _storage_bytes_8616(key: DefUseStorageKey8616) -> frozenset[_DefUseStorageBy
     )
 
 
+@cython.ccall
 def _predicate_leaf_token_8616(
     node: CVariable | CConstant,
-    segment_register_offsets: frozenset[int],
+    segment_register_offsets: object,
     stack_variable_offset_resolver: StackVariableOffsetResolver8616 | None,
-) -> tuple[PredicateToken8616, frozenset[_DefUseStorageByte8616]] | None:
+) -> object:
     """Return the storage/constant token for a leaf node."""
+    key: object
     if isinstance(node, CVariable):
         key = _predicate_storage_key_8616(
             node,
@@ -876,13 +928,17 @@ def _predicate_leaf_token_8616(
     return (("constant", type(value).__name__, value), frozenset())
 
 
+@cython.ccall
 def _predicate_op_token_8616(
     node: CUnaryOp | CBinaryOp,
-    active: set[int],
-    segment_register_offsets: frozenset[int],
+    active: object,
+    segment_register_offsets: object,
     stack_variable_offset_resolver: StackVariableOffsetResolver8616 | None,
-) -> tuple[PredicateToken8616, frozenset[_DefUseStorageByte8616]] | None:
+) -> object:
     """Build the unary/binary operator token for a predicate node."""
+    lhs: object
+    operand: object
+    rhs: object
     if isinstance(node, CUnaryOp):
         operand = _predicate_node_token_8616(
             node.operand, active, segment_register_offsets, stack_variable_offset_resolver
@@ -905,12 +961,13 @@ def _predicate_op_token_8616(
     )
 
 
+@cython.ccall
 def _predicate_node_token_8616(
     node: object,
-    active: set[int],
-    segment_register_offsets: frozenset[int],
+    active: object,
+    segment_register_offsets: object,
     stack_variable_offset_resolver: StackVariableOffsetResolver8616 | None,
-) -> tuple[PredicateToken8616, frozenset[_DefUseStorageByte8616]] | None:
+) -> object:
     """Build a predicate token and its storage-byte dependencies."""
     node_id = id(node)
     if node_id in active:
@@ -930,14 +987,16 @@ def _predicate_node_token_8616(
         active.remove(node_id)
 
 
+@cython.ccall
 def _predicate_fact_8616(
     expression: object,
-    segment_register_offsets: frozenset[int],
+    segment_register_offsets: object,
     *,
     stack_variable_offset_resolver: StackVariableOffsetResolver8616 | None = None,
 ) -> _DefUsePredicate8616 | None:
     """Build an exact non-text predicate identity from structured C expressions."""
-    active: set[int] = set()
+    result: object
+    active: set[cython.longlong] = set()
     result = _predicate_node_token_8616(
         expression, active, segment_register_offsets, stack_variable_offset_resolver
     )
@@ -949,10 +1008,12 @@ def _predicate_fact_8616(
     return _DefUsePredicate8616(token=token, dependencies=dependencies)
 
 
+@cython.ccall
 def _intersect_defined_8616(
-    states: list[set[_DefUseStorageByte8616]],
-    fallback: set[_DefUseStorageByte8616],
-) -> set[_DefUseStorageByte8616]:
+    states: object,
+    fallback: object,
+) -> object:
+    state: object
     if not states:
         return set(fallback)
     result = set(states[0])
@@ -961,13 +1022,16 @@ def _intersect_defined_8616(
     return result
 
 
+@cython.ccall
 def _intersect_guarded_8616(
-    states: list[dict[_DefUsePredicate8616, set[_DefUseStorageByte8616]]],
-    fallback: dict[_DefUsePredicate8616, set[_DefUseStorageByte8616]],
-) -> dict[_DefUsePredicate8616, set[_DefUseStorageByte8616]]:
+    states: object,
+    fallback: object,
+) -> object:
     """Retain guarded definitions valid on every outgoing structured path."""
+    predicate: object
+    state: object
     if not states:
-        return {predicate: set(definitions) for predicate, definitions in fallback.items()}
+        return {predicate: set(definitions) for predicate, definitions in builtins.iter(fallback.items())}
     common_predicates = set(states[0])
     for state in states[1:]:
         common_predicates.intersection_update(state)
@@ -981,23 +1045,24 @@ def _intersect_guarded_8616(
     return result
 
 
+@cython.ccall
 def _intersect_flow_states_8616(
-    states: list[_DefUseFlowState8616],
+    states: object,
     fallback: _DefUseFlowState8616,
 ) -> _DefUseFlowState8616:
     """Merge structured paths using definite and guarded intersections."""
-    states = [state for state in states if state.falls_through]
+    states = [state for state in iter(states) if state.falls_through]
     if not states:
         terminated = fallback.copy()
         terminated.falls_through = False
         return terminated
     return _DefUseFlowState8616(
         defined=_intersect_defined_8616(
-            [state.defined for state in states],
+            [state.defined for state in iter(states)],
             fallback.defined,
         ),
         guarded=_intersect_guarded_8616(
-            [state.guarded for state in states],
+            [state.guarded for state in iter(states)],
             fallback.guarded,
         ),
         falls_through=True,
@@ -1006,23 +1071,25 @@ def _intersect_flow_states_8616(
 
 def _invalidate_guarded_definitions_8616(
     state: _DefUseFlowState8616,
-    written: frozenset[_DefUseStorageByte8616] | set[_DefUseStorageByte8616],
+    written: object,
 ) -> None:
     """Drop predicate proofs whose evaluated storage may have changed."""
+    predicate: object
     if not written:
         return
     invalid = tuple(
         predicate
-        for predicate in state.guarded
+        for predicate in iter(state.guarded)
         if not predicate.dependencies.isdisjoint(written)
     )
     for predicate in invalid:
         del state.guarded[predicate]
 
 
+@cython.ccall
 def _activate_guarded_definitions_8616(
     state: _DefUseFlowState8616,
-    predicate: _DefUsePredicate8616 | None,
+    predicate: object,
 ) -> None:
     """Make definitions guarded by a proven true predicate definite in its body."""
     if predicate is None:
@@ -1030,8 +1097,9 @@ def _activate_guarded_definitions_8616(
     state.defined.update(state.guarded.get(predicate, ()))
 
 
+@cython.ccall
 def _inverted_predicate_fact_8616(
-    predicate: _DefUsePredicate8616 | None,
+    predicate: object,
 ) -> _DefUsePredicate8616 | None:
     """Return the exact complementary fact while preserving its dependencies."""
     if predicate is None:
@@ -1045,13 +1113,16 @@ def _inverted_predicate_fact_8616(
 def _invalidate_call_affected_guards_8616(
     expression: object,
     state: _DefUseFlowState8616,
-    segment_register_offsets: frozenset[int],
+    segment_register_offsets: object,
     *,
     stack_variable_offset_resolver: StackVariableOffsetResolver8616 | None = None,
 ) -> None:
     """Invalidate guards when a call can overwrite their predicate storage."""
+    key: object
+    node: object
+    predicate: object
     value_nodes = _iter_value_nodes_8616(expression)
-    if not any(isinstance(node, CFunctionCall) for node in value_nodes):
+    if not any(isinstance(node, CFunctionCall) for node in iter(value_nodes)):
         return
     affected: set[_DefUseStorageByte8616] = set()
     for node in value_nodes:
@@ -1067,7 +1138,7 @@ def _invalidate_call_affected_guards_8616(
     for predicate in state.guarded:
         affected.update(
             dependency
-            for dependency in predicate.dependencies
+            for dependency in iter(predicate.dependencies)
             if dependency.kind is not DefUseStorageKind8616.STACK_LOCAL
         )
     _invalidate_guarded_definitions_8616(state, affected)
@@ -1080,19 +1151,19 @@ def _switch_case_bodies_8616(cases: object) -> tuple[object, ...]:
     if isinstance(cases, (list, tuple)):
         return tuple(
             case_body
-            for item in cases
+            for item in iter(cases)
             if isinstance(item, (list, tuple)) and len(item) == 2
-            for _case_value, case_body in (item,)
+            for _case_value, case_body in iter((item,))
         )
     return ()
 
 
 def _debug_def_use_event_8616(
-    event: str,
+    event: object,
     key: DefUseStorageKey8616,
-    defined: set[_DefUseStorageByte8616],
+    defined: object,
     *,
-    context: str,
+    context: object,
 ) -> None:
     """Log exact validator state when focused def-use diagnostics are enabled."""
     if os.environ.get("INERTIA_DEBUG_DEF_USE", "").strip().lower() not in {"1", "true", "yes", "on"}:
@@ -1102,33 +1173,36 @@ def _debug_def_use_event_8616(
         event,
         context,
         key.token(),
-        tuple(item.token() for item in sorted(defined)),
+        tuple(item.token() for item in builtins.iter(sorted(defined))),
     )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _DefUseWalker8616:
     """Flow-state walker for structured def-use validation."""
 
     report: _MutableDefUseReport8616
-    definitions_by_call: Mapping[int, tuple[DefUseCallOutputDefinition8616, ...]]
-    proofs_by_read: Mapping[int, IndexedStackReadProof8616]
-    segment_register_offsets: frozenset[int]
-    entry_defined_segment_register_offsets: frozenset[int]
+    definitions_by_call: Mapping[cython.longlong, tuple[DefUseCallOutputDefinition8616, ...]]
+    proofs_by_read: Mapping[cython.longlong, IndexedStackReadProof8616]
+    segment_register_offsets: object
+    entry_defined_segment_register_offsets: object
     packed_status_flag_preservation: PackedStatusFlagPreservationEvidence8616 | None
-    include_virtual_carriers: bool
+    include_virtual_carriers: cython.bint
     stack_variable_offset_resolver: StackVariableOffsetResolver8616 | None
-    break_exit_scopes: list[list[_DefUseFlowState8616] | None] = field(default_factory=list)
+    break_exit_scopes: object = field(default_factory=list)
 
+    @cython.ccall
     def check_reads(
         self,
         expr: OpaqueValidationNode8616,
-        defined: set[_DefUseStorageByte8616],
+        defined: object,
         *,
-        context: str,
-        architectural_live_in_register_offsets: frozenset[int] = frozenset(),
+        context: object,
+        architectural_live_in_register_offsets: object = frozenset(),
     ) -> None:
         """Record issues for reads not proven defined on this path."""
+        instruction_address: object
+        read: object
         try:
             instruction_address = expr.tags.get("ins_addr")
         except AttributeError:
@@ -1157,13 +1231,15 @@ class _DefUseWalker8616:
                 _debug_def_use_event_8616("issue", read.storage, defined, context=context)
                 self.report.issues.append(DefUseIssue8616(storage=read.storage, context=context))
 
+    @cython.ccall
     def _read_is_defined_8616(
         self,
         read: _DefUseValueRead8616,
-        defined: set[_DefUseStorageByte8616],
-        architectural_live_in_register_offsets: frozenset[int],
-    ) -> bool:
+        defined: object,
+        architectural_live_in_register_offsets: object,
+    ) -> cython.bint:
         """Return whether one collected read is proven defined here."""
+        proof: object
         key = read.storage
         proof = self.proofs_by_read.get(id(read.node))
         proof_matches = (
@@ -1188,12 +1264,13 @@ class _DefUseWalker8616:
             and _storage_bytes_8616(key).issubset(defined)
         )
 
+    @cython.ccall
     def check_lvalue_reads(
         self,
         lhs: object,
-        defined: set[_DefUseStorageByte8616],
+        defined: object,
         *,
-        context: str,
+        context: object,
     ) -> None:
         """Validate only value-evaluated operands of an assignment lvalue."""
         if isinstance(lhs, CIndexedVariable):
@@ -1208,14 +1285,17 @@ class _DefUseWalker8616:
             return
         self.check_reads(lhs, defined, context=context)
 
+    @cython.ccall
     def apply_call_output_definitions(
         self,
         expr: object,
         state: _DefUseFlowState8616,
         *,
-        context: str,
+        context: object,
     ) -> None:
         """Apply only lowering-proven output ranges after their owning call executes."""
+        definition: object
+        value_node: object
         _invalidate_call_affected_guards_8616(
             expr,
             state,
@@ -1232,12 +1312,15 @@ class _DefUseWalker8616:
                 _invalidate_guarded_definitions_8616(state, storage_bytes)
                 state.defined.update(storage_bytes)
 
+    @cython.ccall
     def _walk_assignment_8616(
-        self, node: CAssignment, state: _DefUseFlowState8616, context: str
+        self, node: CAssignment, state: _DefUseFlowState8616, context: object
     ) -> _DefUseFlowState8616:
         """Apply the def-use transfer for one CAssignment."""
+        lhs_key: object
+        predicate_lhs_key: object
         _debug_assignment_read_8616(node, context)
-        preservation_offsets: frozenset[int] = frozenset()
+        preservation_offsets: frozenset[cython.longlong] = frozenset()
         if self.packed_status_flag_preservation is not None and self.packed_status_flag_preservation.covers_instruction(
             node.tags.get("ins_addr")
         ):
@@ -1287,10 +1370,14 @@ class _DefUseWalker8616:
             state.defined.update(_storage_bytes_8616(lhs_key))
         return state
 
+    @cython.ccall
     def _walk_if_else_8616(
-        self, node: CIfElse, state: _DefUseFlowState8616, context: str
+        self, node: CIfElse, state: _DefUseFlowState8616, context: object
     ) -> _DefUseFlowState8616:
         """Merge branch def-use states for one CIfElse node."""
+        branch: object
+        condition: object
+        index: object
         branch_states: list[_DefUseFlowState8616] = []
         branch_predicates: list[_DefUsePredicate8616 | None] = []
         for index, (condition, branch) in enumerate(node.condition_and_nodes):
@@ -1336,8 +1423,9 @@ class _DefUseWalker8616:
                 )
         return merged
 
+    @cython.ccall
     def _walk_for_loop_8616(
-        self, node: CForLoop, state: _DefUseFlowState8616, context: str
+        self, node: CForLoop, state: _DefUseFlowState8616, context: object
     ) -> _DefUseFlowState8616:
         """Apply the conservative single-pass transfer for a CForLoop."""
         initialized = self.walk(node.initializer, state, context=f"{context}.for.init")
@@ -1363,8 +1451,9 @@ class _DefUseWalker8616:
         )
         return initialized
 
+    @cython.ccall
     def _walk_while_loop_8616(
-        self, node: CWhileLoop, state: _DefUseFlowState8616, context: str
+        self, node: CWhileLoop, state: _DefUseFlowState8616, context: object
     ) -> _DefUseFlowState8616:
         """Apply the single-pass transfer for a CWhileLoop."""
         self.check_reads(node.condition, state.defined, context=f"{context}.while.condition")
@@ -1396,8 +1485,9 @@ class _DefUseWalker8616:
             return _intersect_flow_states_8616(break_exit_states, state)
         return state
 
+    @cython.ccall
     def _walk_switch_8616(
-        self, node: CSwitchCase, state: _DefUseFlowState8616, context: str
+        self, node: CSwitchCase, state: _DefUseFlowState8616, context: object
     ) -> _DefUseFlowState8616:
         """Merge per-case def-use states for one CSwitchCase node."""
         self.check_reads(node.switch, state.defined, context=f"{context}.switch.selector")
@@ -1405,7 +1495,7 @@ class _DefUseWalker8616:
         try:
             branch_states = [
                 self.walk(branch, state, context=f"{context}.switch.case")
-                for branch in _switch_case_bodies_8616(node.cases)
+                for branch in builtins.iter(_switch_case_bodies_8616(node.cases))
             ]
         finally:
             self.break_exit_scopes.pop()
@@ -1419,14 +1509,17 @@ class _DefUseWalker8616:
                 self.break_exit_scopes.pop()
         return _intersect_flow_states_8616(branch_states, state)
 
+    @cython.ccall
     def walk(
         self,
         node: object,
         incoming: _DefUseFlowState8616,
         *,
-        context: str,
+        context: object,
     ) -> _DefUseFlowState8616:
         """Apply the def-use transfer for one structured statement."""
+        index: object
+        statement: object
         state = incoming.copy()
         if node is None:
             return state
@@ -1449,8 +1542,9 @@ class _DefUseWalker8616:
             return state
         return self._walk_tail_8616(node, state, context)
 
+    @cython.ccall
     def _walk_tail_8616(
-        self, node: object, state: _DefUseFlowState8616, context: str
+        self, node: object, state: _DefUseFlowState8616, context: object
     ) -> _DefUseFlowState8616:
         """Apply the transfer for break/branch/loop/switch statement kinds."""
         if isinstance(node, CBreak):
@@ -1478,7 +1572,8 @@ class _DefUseWalker8616:
         return state
 
 
-def _debug_assignment_read_8616(node: CAssignment, context: str) -> None:
+@cython.ccall
+def _debug_assignment_read_8616(node: CAssignment, context: object) -> None:
     """Emit opt-in diagnostics for one CAssignment walk step."""
     if os.environ.get("INERTIA_DEBUG_DEF_USE", "").strip().lower() not in {
         "1",
@@ -1505,17 +1600,18 @@ def _debug_assignment_read_8616(node: CAssignment, context: str) -> None:
     )
 
 
+@cython.ccall
 def validate_structured_def_use_8616(
     root: object,
     *,
     call_output_definitions: Mapping[int, tuple[DefUseCallOutputDefinition8616, ...]] | None = None,
     indexed_stack_read_proofs: Mapping[int, IndexedStackReadProof8616] | None = None,
-    entry_defined_stack_ranges: tuple[DefUseEntryStackRange8616, ...] = (),
-    entry_defined_registers: tuple[object, ...] = (),
-    segment_register_offsets: frozenset[int] = frozenset(),
-    entry_defined_segment_register_offsets: frozenset[int] = frozenset(),
+    entry_defined_stack_ranges: object = (),
+    entry_defined_registers: object = (),
+    segment_register_offsets: object = frozenset(),
+    entry_defined_segment_register_offsets: object = frozenset(),
     packed_status_flag_preservation: PackedStatusFlagPreservationEvidence8616 | None = None,
-    include_virtual_carriers: bool = False,
+    include_virtual_carriers: cython.bint = False,
     stack_variable_offset_resolver: StackVariableOffsetResolver8616 | None = None,
 ) -> DefUseValidationReport8616:
     """Validate definitely assigned stack and register reads in structured C.
@@ -1532,6 +1628,9 @@ def validate_structured_def_use_8616(
     Virtual carriers are opt-in because legal lowering regenerates their SSA
     identities; the final emission guard enables them after mutation stops.
     """
+    key: object
+    register_node: object
+    stack_range: object
     report = _MutableDefUseReport8616()
     walker = _DefUseWalker8616(
         report=report,

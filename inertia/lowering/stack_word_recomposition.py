@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Recognize syntax projections of one stack word from two byte views.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -19,13 +22,14 @@ from .runtime_memory_helpers import (
     SegmentedMemoryReadHelper8616,
     segmented_memory_read_helper_8616,
 )
+import dataclasses
 
-type StackWordByteOperand8616 = (
+StackWordByteOperand8616 = typing.TypeAliasType("StackWordByteOperand8616", (
     structured_c.CVariable | structured_c.CUnaryOp | structured_c.CFunctionCall
-)
+))
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackWordRecomposition8616:
     """One syntax-only low/high byte recomposition candidate."""
 
@@ -33,6 +37,7 @@ class StackWordRecomposition8616:
     high: StackWordByteOperand8616
 
 
+@cython.ccall
 def _strip_casts_8616(node: object) -> object:
     """Remove syntax-only casts around one byte projection."""
     while isinstance(node, structured_c.CTypeCast):
@@ -40,6 +45,7 @@ def _strip_casts_8616(node: object) -> object:
     return node
 
 
+@cython.ccall
 def _constant_value_8616(node: object) -> int | None:
     """Return the integer carried by one exact C constant."""
     node = _strip_casts_8616(node)
@@ -48,6 +54,7 @@ def _constant_value_8616(node: object) -> int | None:
     return None
 
 
+@cython.ccall
 def _masked_operand_8616(node: object) -> object:
     """Remove one exact low-byte mask from a projection operand."""
     node = _strip_casts_8616(node)
@@ -60,6 +67,7 @@ def _masked_operand_8616(node: object) -> object:
     return node
 
 
+@cython.ccall
 def _byte_operand_8616(node: object) -> StackWordByteOperand8616 | None:
     """Return one typed byte variable, dereference, or segmented read."""
     candidate = _masked_operand_8616(node)
@@ -76,12 +84,14 @@ def _byte_operand_8616(node: object) -> StackWordByteOperand8616 | None:
     return None
 
 
+@cython.ccall
 def _high_operand_8616(node: object) -> StackWordByteOperand8616 | None:
     """Return a byte variable or dereference shifted into the high byte."""
+    operand: object
     node = _strip_casts_8616(node)
     if not isinstance(node, structured_c.CBinaryOp):
         return None
-    operand: object | None = None
+    operand = None
     if node.op == "Shl" and _constant_value_8616(node.rhs) == 8:
         operand = node.lhs
     elif node.op == "Mul":
@@ -92,10 +102,15 @@ def _high_operand_8616(node: object) -> StackWordByteOperand8616 | None:
     return _byte_operand_8616(operand) if operand is not None else None
 
 
+@cython.ccall
 def recognize_stack_word_recomposition_8616(
     node: object,
 ) -> StackWordRecomposition8616 | None:
     """Return one low/high candidate without assigning semantic ownership."""
+    high: object
+    low: object
+    high_node: object
+    low_node: object
     node = _strip_casts_8616(node)
     if not isinstance(node, structured_c.CBinaryOp) or node.op != "Or":
         return None

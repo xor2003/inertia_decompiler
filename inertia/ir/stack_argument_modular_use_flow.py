@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: IR.
 
 Responsibility: close one local SSA dependency census for bit-pattern-only
@@ -7,6 +8,8 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from .core import (
     AddressStatus,
@@ -30,6 +33,8 @@ from .stack_argument_modular_use_contracts import (
     ModularArgumentUseFailure8616,
     ModularReturnRegister8616,
 )
+import operator
+import builtins
 
 _SIGN_INSENSITIVE_OPERATIONS_8616 = frozenset({
     "MOV", "Iop_Add16", "Iop_Add32", "Iop_And8", "Iop_And16", "Iop_And32",
@@ -44,9 +49,10 @@ _SIGN_DEPENDENT_OPERATIONS_8616 = frozenset({
 
 def _captured_operand_bits_8616(
     value: IRValue, definitions: ScalarDefinitionIndex8616,
-    *, block_addr: int, before_index: int,
+    *, block_addr: cython.longlong, before_index: cython.longlong,
 ) -> int | None:
     """Recover bit width from one exact pending-MOV or word-equality producer."""
+    projection: object
     reaching = reaching_scalar_definitions_8616(
         definitions, value, block_addr=block_addr, before_index=before_index,
     )
@@ -56,29 +62,31 @@ def _captured_operand_bits_8616(
     byte_result = (instruction.size == value.size == 1
                    and instruction.dst is not None and instruction.dst.size == 1)
     word_operands = (len(instruction.args) == 2
-                     and all(isinstance(arg, IRValue) and arg.size == 2 for arg in instruction.args))
+                     and all(isinstance(arg, IRValue) and arg.size == 2 for arg in iter(instruction.args)))
     if (instruction.op == "Iop_CmpEQ16" and byte_result and word_operands
-            and value.expr == (instruction.op,)):
+            and operator.eq(value.expr, (instruction.op,))):
         return 1
     if (instruction.op != "MOV" or len(instruction.args) != 1
-            or instruction.size != value.size or instruction.dst is None
-            or instruction.dst.size != value.size):
+            or operator.ne(instruction.size, value.size) or instruction.dst is None
+            or operator.ne(instruction.dst.size, value.size)):
         return None
     source = instruction.args[0]
     if not isinstance(source, IRValue):
         return None
     projection = scalar_active_unary_projection_8616(source)
-    if projection is None or source.size != value.size or source.expr != value.expr:
+    if projection is None or operator.ne(source.size, value.size) or operator.ne(source.expr, value.expr):
         return None
     return int(projection.target_bits)
 
 
-def _bitwise_not_use_8616(value: IRValue, operand_bits: int | None) -> bool:
+@cython.ccall
+def _bitwise_not_use_8616(value: IRValue, operand_bits: object) -> cython.bint:
     """Authenticate bitwise complement for dependence only, never equality."""
+    unary: object
     unary = value.active_unary
     if unary is None or value.source_tmp is not None:
         return False
-    if value.expr is not None and value.expr != (unary.op,):
+    if value.expr is not None and operator.ne(value.expr, (unary.op,)):
         return False
     bits = unary.result_bits
     if bits not in {1, 8, 16, 32, 64} or unary.op != f"Iop_Not{bits}":
@@ -91,15 +99,18 @@ def _bitwise_not_use_8616(value: IRValue, operand_bits: int | None) -> bool:
     return bool(source_bits == bits and source.size == value.size == (bits + 7) // 8)
 
 
+@cython.ccall
 def _scalar_use_tainted_8616(
     value: IRValue,
     definitions: ScalarDefinitionIndex8616,
-    tainted_sites: set[tuple[int, int]],
+    tainted_sites: object,
     *,
-    block_addr: int,
-    before_index: int,
-) -> tuple[bool, bool]:
+    block_addr: cython.longlong,
+    before_index: cython.longlong,
+) -> object:
     """Resolve a typed SSA use to one local definition or an incoming value."""
+    projection: object
+    unary: object
     unary = value.active_unary
     if unary is not None:
         operand_bits = _captured_operand_bits_8616(
@@ -138,11 +149,11 @@ def _scalar_use_tainted_8616(
 def _atom_use_tainted_8616(
     atom: IRAtom,
     definitions: ScalarDefinitionIndex8616,
-    tainted_sites: set[tuple[int, int]],
+    tainted_sites: object,
     *,
-    block_addr: int,
-    before_index: int,
-) -> tuple[bool, bool]:
+    block_addr: cython.longlong,
+    before_index: cython.longlong,
+) -> object:
     """Inspect structured value and address components, refusing gaps."""
     if isinstance(atom, IRValue):
         return _scalar_use_tainted_8616(
@@ -161,11 +172,12 @@ def _atom_use_tainted_8616(
             child, definitions, tainted_sites,
             block_addr=block_addr, before_index=before_index,
         )
-        for child in atom.base_values
+        for child in iter(atom.base_values)
     )
-    return any(item[0] for item in results), all(item[1] for item in results)
+    return any(item[0] for item in iter(results)), all(item[1] for item in iter(results))
 
 
+@cython.ccall
 def _tainted_instruction_failure_8616(
     instruction: IRInstr,
     return_register: ModularReturnRegister8616,
@@ -183,14 +195,15 @@ def _tainted_instruction_failure_8616(
 def classify_tainted_block_8616(
     artifact: SSAFunctionArtifact,
     block: SSABlock,
-    source_indices: frozenset[int],
+    source_indices: object,
     *,
     return_register: ModularReturnRegister8616 = ModularReturnRegister8616.AX,
 ) -> ModularArgumentUseFailure8616 | None:
     """Trace every local SSA use of the input bytes to the final return word."""
+    failure: object
     definitions = build_scalar_definition_index_8616(artifact)
-    tainted_sites: set[tuple[int, int]] = set()
-    return_sites: list[int] = []
+    tainted_sites: set[tuple[cython.longlong, cython.longlong]] = set()
+    return_sites: list[cython.longlong] = []
     for instr_index in range(min(source_indices), len(block.instrs)):
         instruction = block.instrs[instr_index]
         if instr_index in source_indices:
@@ -201,25 +214,25 @@ def classify_tainted_block_8616(
                 argument, definitions, tainted_sites,
                 block_addr=block.addr, before_index=instr_index,
             )
-            for argument in instruction.args
+            for argument in iter(instruction.args)
         )
-        if not all(complete for _, complete in uses):
+        if not all(complete for _, complete in iter(uses)):
             return ModularArgumentUseFailure8616.SSA_DEFINITION_UNKNOWN
-        if not any(tainted for tainted, _ in uses):
+        if not any(tainted for tainted, _ in iter(uses)):
             continue
         failure = _tainted_instruction_failure_8616(instruction, return_register)
         if failure is not None:
             return failure
         tainted_sites.add((block.addr, instr_index))
-        if instruction.dst is not None and instruction.dst.space is MemSpace.REG and instruction.dst.name == return_register.value:
+        if instruction.dst is not None and instruction.dst.space is MemSpace.REG and operator.eq(instruction.dst.name, return_register.value):
             return_sites.append(instr_index)
     return_writes = tuple(
-        index for index, instruction in enumerate(block.instrs)
+        index for index, instruction in builtins.iter(enumerate(block.instrs))
         if instruction.dst is not None
         and instruction.dst.space is MemSpace.REG
-        and instruction.dst.name == return_register.value
+        and operator.eq(instruction.dst.name, return_register.value)
     )
-    if not return_sites or not return_writes or return_writes[-1] != return_sites[-1]:
+    if not return_sites or not return_writes or operator.ne(return_writes[-1], return_sites[-1]):
         return ModularArgumentUseFailure8616.RETURN_FLOW_UNKNOWN
     return None
 

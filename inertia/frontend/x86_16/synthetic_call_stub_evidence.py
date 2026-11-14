@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Transport exact synthetic call-stub addresses from frontend image builders.
 
 Layer: Frontend.
@@ -9,9 +10,12 @@ Forbidden: inferring stubs from function names, rendered code, or call shape.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Protocol, cast
+import dataclasses
 
 __all__ = (
     "SyntheticCallStubRegistry8616",
@@ -21,19 +25,19 @@ __all__ = (
 )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SyntheticCallStubRegistry8616:
     """Exact analysis-only targets plus a closed frontend evidence census."""
 
-    addresses: frozenset[int]
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    addresses: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def closes_evidence(self) -> bool:
+    def closes_evidence(self) -> cython.bint:
         """Return whether every supplied address was classified exactly once."""
         return (
             self.raw_fact_count == self.normalized_fact_count == len(self.addresses)
@@ -48,6 +52,7 @@ class _SyntheticCallStubOwner8616(Protocol):
     _inertia_synthetic_call_stub_registry_8616: SyntheticCallStubRegistry8616
 
 
+@cython.ccall
 def synthetic_call_stub_registry_8616(owner: object) -> SyntheticCallStubRegistry8616 | None:
     """Read the typed synthetic-stub registry from a project boundary."""
     try:
@@ -59,12 +64,13 @@ def synthetic_call_stub_registry_8616(owner: object) -> SyntheticCallStubRegistr
 
 def record_synthetic_call_stubs_8616(
     owner: object,
-    addresses: frozenset[int],
+    addresses: object,
 ) -> SyntheticCallStubRegistry8616:
     """Publish exact frontend-provided synthetic call-stub addresses."""
+    existing: object
     normalized = frozenset(
         address
-        for address in addresses
+        for address in iter(addresses)
         if isinstance(address, int) and not isinstance(address, bool) and address >= 0
     )
     existing = synthetic_call_stub_registry_8616(owner)
@@ -82,7 +88,9 @@ def record_synthetic_call_stubs_8616(
     return registry
 
 
-def is_synthetic_call_stub_8616(owner: object, address: int) -> bool:
+@cython.ccall
+def is_synthetic_call_stub_8616(owner: object, address: cython.longlong) -> cython.bint:
     """Return whether frontend evidence marks ``address`` as analysis-only."""
+    registry: object
     registry = synthetic_call_stub_registry_8616(owner)
     return registry is not None and registry.closes_evidence and address in registry.addresses

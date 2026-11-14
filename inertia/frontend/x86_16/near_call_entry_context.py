@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Conditional native entry context for one authentic near CALL.
 
 Layer: frontend x86_16.
@@ -16,6 +17,8 @@ this conditional scope; the context deliberately exposes no ``complete``
 property a context-free consumer could mistake for success.
 """
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -43,6 +46,8 @@ from .near_call_selector_window import (
     NearCallSelectorWindowRefusal8616,
     project_near_call_selector_window_8616,
 )
+import dataclasses
+import operator
 
 __all__ = [
     "NativeNearCallEntry8616",
@@ -72,7 +77,7 @@ class NativeNearCallEntryFailure8616(StrEnum):
     BUDGET_EXHAUSTED = "native_near_call_entry_budget_exhausted"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NativeNearCallEntry8616:
     """Authenticated conditional entry binding for one exact near CALL.
 
@@ -98,12 +103,12 @@ class NativeNearCallEntry8616:
     callsite_index: DecodedDirectCallsiteIndex8616 = field(compare=False, repr=False)
     callee_witness: FunctionBoundaryWitness8616 = field(compare=False, repr=False)
     call_encoding: bytes = b""
-    callsite_addr: int = 0
-    next_addr: int = 0
-    target_addr: int = 0
-    callee_addr: int = 0
-    selector_low: int = 0
-    selector_high: int = 0
+    callsite_addr: cython.longlong = 0
+    next_addr: cython.longlong = 0
+    target_addr: cython.longlong = 0
+    callee_addr: cython.longlong = 0
+    selector_low: cython.longlong = 0
+    selector_high: cython.longlong = 0
 
     def to_dict(self) -> dict[str, object]:
         """Serialize this context's proven coordinates for diagnostics."""
@@ -119,7 +124,7 @@ class NativeNearCallEntry8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NativeNearCallEntryRefusal8616:
     """Honest non-result for a context that cannot be bound."""
 
@@ -141,13 +146,13 @@ class NativeNearCallEntryRefusal8616:
 class _CallsiteInstruction8616(Protocol):
     """Exact encoding exposed by one retained decoded callsite instruction."""
 
-    bytes: bytes
+    bytes: object
 
 
 class _MemoryBoundary8616(Protocol):
     """Third-party loader memory used for live byte authentication."""
 
-    def load(self, addr: int, size: int) -> bytes:
+    def load(self, addr: cython.longlong, size: cython.longlong) -> object:
         """Read exactly the requested mapped bytes."""
         ...
 
@@ -165,11 +170,12 @@ class _ProjectBoundary8616(Protocol):
     loader: _LoaderBoundary8616
 
 
+@cython.ccall
 def _refusal_8616(
     failure: NativeNearCallEntryFailure8616,
     premise: NearCallFramePremise8616 | None = None,
     *,
-    detail: str = "",
+    detail: object = "",
 ) -> NativeNearCallEntryRefusal8616:
     """Retain one typed refusal with best-effort diagnostic coordinates."""
     return NativeNearCallEntryRefusal8616(
@@ -180,7 +186,8 @@ def _refusal_8616(
     )
 
 
-def _live_encoding_8616(project: object, callsite_addr: int, size: int) -> bytes | None:
+@cython.ccall
+def _live_encoding_8616(project: object, callsite_addr: cython.longlong, size: cython.longlong) -> object:
     """Read the exact live mapped instruction bytes, or refuse honestly."""
     try:
         memory = cast(_ProjectBoundary8616, project).loader.memory
@@ -189,23 +196,26 @@ def _live_encoding_8616(project: object, callsite_addr: int, size: int) -> bytes
         return None
 
 
+@cython.ccall
 def _boundary_census_matches_8616(
     restored: ExactFunctionRangeBoundary8616,
     bound: ExactFunctionRangeBoundary8616,
-) -> bool:
+) -> cython.bint:
     """Return whether one rebuilt boundary carries the bound census exactly."""
     return bool(
-        restored.addr == bound.addr
-        and restored.block_addrs_set == bound.block_addrs_set
-        and restored.reachable_instruction_addrs == bound.reachable_instruction_addrs
-        and frozenset(restored.successor_edges) == frozenset(bound.successor_edges)
+        operator.eq(restored.addr, bound.addr)
+        and operator.eq(restored.block_addrs_set, bound.block_addrs_set)
+        and operator.eq(restored.reachable_instruction_addrs, bound.reachable_instruction_addrs)
+        and operator.eq(frozenset(restored.successor_edges), frozenset(bound.successor_edges))
     )
 
 
+@cython.ccall
 def _live_call_encoding_8616(
     project: object, frame: NearCallFramePremise8616
-) -> bytes | None:
+) -> object:
     """Return live mapped CALL bytes only when they equal the retained row."""
+    live: object
     live = _live_encoding_8616(project, frame.callsite_addr, _NEAR_CALL_SIZE_8616)
     if live is None:
         return None
@@ -215,9 +225,10 @@ def _live_call_encoding_8616(
             frame.callsite.instructions[frame.callsite.instruction_index],
         ).bytes
     )
-    return live if live == retained else None
+    return live if operator.eq(live, retained) else None
 
 
+@cython.ccall
 def _callee_witness_8616(
     project: object, bound: ExactFunctionRangeBoundary8616
 ) -> FunctionBoundaryWitness8616 | NativeNearCallEntryFailure8616:
@@ -229,7 +240,7 @@ def _callee_witness_8616(
     typed failure from an unavailable witness.
     """
     witness = capture_function_boundary_8616(project, bound)
-    if type(witness) is not FunctionBoundaryWitness8616 or witness.entry != bound.addr:
+    if type(witness) is not FunctionBoundaryWitness8616 or operator.ne(witness.entry, bound.addr):
         return NativeNearCallEntryFailure8616.BOUNDARY_WITNESS_UNAVAILABLE
     try:
         restored = restore_function_boundary_8616(project, witness)
@@ -244,6 +255,7 @@ def _callee_witness_8616(
     return witness
 
 
+@cython.ccall
 def _premise_identity_8616(
     premise: object, callsite_index: object
 ) -> NearCallFramePremise8616 | NativeNearCallEntryRefusal8616:
@@ -255,6 +267,7 @@ def _premise_identity_8616(
     coordinates must equal the offered ones — a foreign index, a lost row,
     a changed width, or forged coordinates each keep a typed refusal.
     """
+    reproven: object
     if (
         type(premise) is not NearCallFramePremise8616
         or premise.kind
@@ -295,19 +308,21 @@ def _premise_identity_8616(
     return frame
 
 
+@cython.ccall
 def _final_evidence_failure_8616(
-    project: object, frame: NearCallFramePremise8616, encoding: bytes,
+    project: object, frame: NearCallFramePremise8616, encoding: object,
 ) -> NativeNearCallEntryFailure8616 | None:
     """Recheck the CALL and deadline after callee decoding callbacks finish."""
     if direct_evidence_deadline_expired_8616(project):
         return NativeNearCallEntryFailure8616.BUDGET_EXHAUSTED
-    if _live_call_encoding_8616(project, frame) != encoding:
+    if operator.ne(_live_call_encoding_8616(project, frame), encoding):
         return NativeNearCallEntryFailure8616.CALLSITE_BYTES_UNBOUND
     if direct_evidence_deadline_expired_8616(project):
         return NativeNearCallEntryFailure8616.BUDGET_EXHAUSTED
     return None
 
 
+@cython.ccall
 def _native_source_failure_8616(
     project: object, boundary: object,
 ) -> NativeNearCallEntryFailure8616 | None:
@@ -328,6 +343,7 @@ def _native_source_failure_8616(
     return None
 
 
+@cython.ccall
 def bind_native_near_call_entry_8616(
     project: object,
     boundary: object,
@@ -347,6 +363,10 @@ def bind_native_near_call_entry_8616(
     revalidated through the boundary-transport owner. No new address
     discovery happens here; every failed check keeps its typed refusal.
     """
+    call_encoding: object
+    coordinates: object
+    failure: object
+    source_failure: object
     source_failure = _native_source_failure_8616(project, boundary)
     if source_failure is not None:
         return _refusal_8616(source_failure)
@@ -368,7 +388,7 @@ def bind_native_near_call_entry_8616(
             NativeNearCallEntryFailure8616.PREMISE_REPROOF_FAILED, frame
         )
     next_addr, target_addr = coordinates
-    if target_addr != bound.addr:
+    if operator.ne(target_addr, bound.addr):
         return _refusal_8616(
             NativeNearCallEntryFailure8616.RAW_TARGET_NOT_ENTRY, frame
         )
@@ -399,12 +419,13 @@ def bind_native_near_call_entry_8616(
     )
 
 
+@cython.ccall
 def consume_native_near_call_entry_8616(
     project: object,
     context: object,
     *,
     callsite_index: object,
-) -> bool:
+) -> cython.bint:
     """Re-authenticate a bound context against live evidence before use.
 
     The full binding proof runs again over the context's retained
@@ -431,7 +452,7 @@ def consume_native_near_call_entry_8616(
     if (
         type(bound) is not ExactFunctionRangeBoundary8616
         or bound.project is not project
-        or bound.addr != context.target_addr
+        or operator.ne(bound.addr, context.target_addr)
     ):
         return False
     authenticated = _premise_identity_8616(context.premise, callsite_index)
@@ -444,8 +465,8 @@ def consume_native_near_call_entry_8616(
         return False
     return bool(
         type(context.call_encoding) is bytes
-        and rebound.call_encoding == context.call_encoding
-        and rebound.callee_witness == context.callee_witness
+        and operator.eq(rebound.call_encoding, context.call_encoding)
+        and operator.eq(rebound.callee_witness, context.callee_witness)
         and (
             rebound.callsite_addr,
             rebound.next_addr,

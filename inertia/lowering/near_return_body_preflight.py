@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Preflight a retained scalar return before near-pointer type publication.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -22,6 +25,7 @@ from .near_return_c_ast_congruence import NearReturnOperandRole8616
 from .near_return_expression import NearReturnPointerExpressionResult8616
 from .near_return_selector import _volatile_type_8616
 from .semantic_cast import CSemanticCast8616
+import dataclasses
 
 _BODY_NODE_BUDGET_8616 = 512
 
@@ -36,7 +40,7 @@ class NearReturnBodyFailure8616(StrEnum):
     VOLATILE_OPERAND = "volatile_operand"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NearReturnBodyPreflight8616:
     """Retained body/replacement binding, not permission to mutate a signature."""
 
@@ -44,32 +48,36 @@ class NearReturnBodyPreflight8616:
     candidate: NearReturnPointerExpressionResult8616
     return_node: structured_c.CReturn | None
     failure: NearReturnBodyFailure8616 | None
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Rewalk current body and candidate so stale plans cannot be consumed."""
+        failure: object
+        node: object
         counts = (self.raw_fact_count, self.normalized_fact_count,
                   self.classified_fact_count, self.materialized_count, self.failure_count)
         if self.failure is not None or counts != (1, 1, 1, 1, 0):
             return False
-        if any(type(count) is not int for count in counts):
+        if any(type(count) is not int for count in iter(counts)):
             return False
         node, failure = _body_preflight_8616(self.body, self.candidate)
         return failure is None and node is not None and node is self.return_node
 
 
-def _body_children_8616(node: object) -> tuple[object, ...] | None:
+@cython.ccall
+def _body_children_8616(node: object) -> object:
     """Enumerate only known third-party C-node semantic fields, fail closed.
 
     Exact class matching prevents a plugin subclass's extra semantic fields
     from being silently omitted. Metadata, variable records and codegen links
     are not AST children and do not authorize storage identity.
     """
+    returned: object
     node_type = type(node)
     if node_type is structured_c.CConstant:
         # Reference substitutions may render expressions, not literal leaves.
@@ -87,7 +95,7 @@ def _body_children_8616(node: object) -> tuple[object, ...] | None:
         return assignment.lhs, assignment.rhs
     if node_type is structured_c.CReturn:
         returned = cast(structured_c.CReturn, node).retval
-        return (returned,) if returned is not None else ()
+        return tuple((returned,)) if returned is not None else tuple(())
     if node_type is structured_c.CBinaryOp:
         binary = cast(structured_c.CBinaryOp, node)
         return binary.lhs, binary.rhs
@@ -98,14 +106,17 @@ def _body_children_8616(node: object) -> tuple[object, ...] | None:
     if node_type is structured_c.CFunctionCall:
         call = cast(structured_c.CFunctionCall, node)
         target = call.callee_target
-        targets = (target,) if isinstance(target, structured_c.CExpression) else ()
+        targets = tuple((target,)) if isinstance(target, structured_c.CExpression) else tuple(())
         return targets + tuple(call.args)
     return None
 
 
-def _closed_body_walk_8616(root: object) -> tuple[object, ...] | None:
+def _closed_body_walk_8616(root: object) -> object:
     """Count semantic edges without deduplicating repeated variable occurrences."""
-    pending: list[tuple[object, frozenset[int]]] = [(root, frozenset())]
+    ancestors: object
+    children: object
+    node: object
+    pending: list[tuple[object, frozenset[cython.longlong]]] = [(root, frozenset())]
     nodes: list[object] = []
     while pending:
         node, ancestors = pending.pop()
@@ -116,48 +127,53 @@ def _closed_body_walk_8616(root: object) -> tuple[object, ...] | None:
             return None
         nodes.append(node)
         lineage = ancestors | {id(node)}
-        pending.extend((child, lineage) for child in children)
+        pending.extend((child, lineage) for child in iter(children))
     return tuple(nodes)
 
 
-def _base_variable_matches_8616(node: object, candidate: NearReturnPointerExpressionResult8616) -> bool:
+def _base_variable_matches_8616(node: object, candidate: NearReturnPointerExpressionResult8616) -> cython.bint:
     """Recognize exact canonical or registered alias identities, never offsets."""
+    base: object
     if not isinstance(node, structured_c.CVariable):
         return False
     # Role order is not authoritative; the congruence owns each role explicitly.
-    base = next(operand for operand in candidate.bound_operands if operand.role is NearReturnOperandRole8616.OFFSET_BASE)
+    base = next(operand for operand in iter(candidate.bound_operands) if operand.role is NearReturnOperandRole8616.OFFSET_BASE)
     aliases = (base.projection.variable, *base.projection.equivalent_variables)
-    return node is base.cvar or any(node.variable is alias for alias in aliases)
+    return node is base.cvar or any(node.variable is alias for alias in iter(aliases))
 
 
 def _body_preflight_8616(
     body: object, candidate: NearReturnPointerExpressionResult8616,
 ) -> tuple[structured_c.CReturn | None, NearReturnBodyFailure8616 | None]:
     """Bind the sole proven return and reject every unrelated base occurrence."""
+    nodes: object
+    returned_nodes: object
     if not candidate.complete or candidate.congruence is None:
         return None, NearReturnBodyFailure8616.CANDIDATE_UNPROVEN
-    if any(_volatile_type_8616(operand.cvar.variable_type) for operand in candidate.bound_operands):
+    if any(_volatile_type_8616(operand.cvar.variable_type) for operand in iter(candidate.bound_operands)):
         return None, NearReturnBodyFailure8616.VOLATILE_OPERAND
     nodes = _closed_body_walk_8616(body)
     if nodes is None:
         return None, NearReturnBodyFailure8616.BODY_CENSUS_UNPROVEN
-    returns = tuple(node for node in nodes if isinstance(node, structured_c.CReturn))
+    returns = tuple(node for node in iter(nodes) if isinstance(node, structured_c.CReturn))
     if len(returns) != 1 or returns[0].retval is not candidate.congruence.expression:
         return None, NearReturnBodyFailure8616.RETURN_UNBOUND
     returned_nodes = _closed_body_walk_8616(returns[0].retval)
     if returned_nodes is None:
         return None, NearReturnBodyFailure8616.BODY_CENSUS_UNPROVEN
-    body_uses = sum(_base_variable_matches_8616(node, candidate) for node in nodes)
-    return_uses = sum(_base_variable_matches_8616(node, candidate) for node in returned_nodes)
+    body_uses = sum(_base_variable_matches_8616(node, candidate) for node in iter(nodes))
+    return_uses = sum(_base_variable_matches_8616(node, candidate) for node in iter(returned_nodes))
     if not return_uses or body_uses != return_uses:
         return None, NearReturnBodyFailure8616.BASE_USE_OUTSIDE_RETURN
     return returns[0], None
 
 
+@cython.ccall
 def preflight_near_return_body_8616(
     body: object, candidate: NearReturnPointerExpressionResult8616,
 ) -> NearReturnBodyPreflight8616:
     """Prepare a replayable, nonpublishing body replacement binding or refuse."""
+    failure: object
     node, failure = _body_preflight_8616(body, candidate)
     accepted = int(failure is None)
     return NearReturnBodyPreflight8616(body, candidate, node, failure, 1, 1, accepted, accepted, 1 - accepted)

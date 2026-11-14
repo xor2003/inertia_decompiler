@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Close a bounded binary caller corpus rooted at one proved entry.
 
 Layer: Frontend instruction inventory.
@@ -29,6 +30,8 @@ corpus with ``BOUNDARY_MISSING``.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
@@ -44,6 +47,8 @@ from .frontend_direct_callsite_index import (
     build_decoded_direct_callsite_index_8616,
 )
 from .frontend_function_boundary import mapped_entry_function_boundary_8616
+import dataclasses
+import operator
 
 __all__ = [
     "InvocationInventory8616",
@@ -72,7 +77,7 @@ class InvocationInventoryStatus8616(StrEnum):
     BUDGET_ROOT_INPUTS = "budget_root_inputs"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class InvocationInventoryBudget8616:
     """Shared work limits; exhaustion supplies no corpus.
 
@@ -85,9 +90,9 @@ class InvocationInventoryBudget8616:
     so a zero budget can never look like a successful empty traversal.
     """
 
-    max_boundaries: int = 64
-    max_instructions: int = 65536
-    max_root_inputs: int = 4096
+    max_boundaries: cython.longlong = 64
+    max_instructions: cython.longlong = 65536
+    max_root_inputs: cython.longlong = 4096
 
     def __post_init__(self) -> None:
         """Require positive typed limits."""
@@ -99,7 +104,7 @@ class InvocationInventoryBudget8616:
             raise ValueError("invocation inventory requires a positive root-input budget")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class InvocationInventoryStats8616:
     """Closed traversal accounting: each examined head lands in one bucket.
 
@@ -115,26 +120,24 @@ class InvocationInventoryStats8616:
     still had queued work.
     """
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    covered_count: int
-    pending_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    covered_count: cython.longlong
+    pending_count: cython.longlong
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every examined candidate has an accounted outcome."""
         return bool(
-            self.raw_fact_count == self.normalized_fact_count
-            and self.normalized_fact_count
-            == self.materialized_count
+            operator.eq(self.raw_fact_count, self.normalized_fact_count)
+            and operator.eq(self.normalized_fact_count, self.materialized_count
             + self.failure_count
             + self.covered_count
-            + self.pending_count
-            and self.classified_fact_count
-            == self.materialized_count + self.failure_count + self.pending_count
+            + self.pending_count)
+            and operator.eq(self.classified_fact_count, self.materialized_count + self.failure_count + self.pending_count)
             and min(
                 self.raw_fact_count,
                 self.normalized_fact_count,
@@ -148,7 +151,7 @@ class InvocationInventoryStats8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class InvocationInventory8616:
     """One typed corpus result; a complete traversal may emit a partial index.
 
@@ -165,17 +168,17 @@ class InvocationInventory8616:
     """
 
     status: InvocationInventoryStatus8616
-    entry: int
-    boundary_heads: tuple[int, ...]
+    entry: cython.longlong
+    boundary_heads: object
     callsite_index: DecodedDirectCallsiteIndex8616 | None
     stats: InvocationInventoryStats8616
-    instruction_count: int
-    out_of_image_target_count: int
+    instruction_count: cython.longlong
+    out_of_image_target_count: cython.longlong
     refusal_addr: int | None
-    pending_targets: tuple[int, ...] = ()
+    pending_targets: tuple[cython.longlong, ...] = ()
 
     @property
-    def ready(self) -> bool:
+    def ready(self) -> cython.bint:
         """Return whether the corpus is closed; partial evidence never is."""
         return bool(
             self.status is InvocationInventoryStatus8616.READY
@@ -183,14 +186,14 @@ class InvocationInventory8616:
         )
 
     @property
-    def caller_evidence_ready(self) -> bool:
+    def caller_evidence_ready(self) -> cython.bint:
         """Admit closed caller evidence only with reconciled target obligations."""
         if self.callsite_index is None or not self.stats.closed or self.stats.failure_count:
             return False
         if (
-            self.stats.materialized_count != len(self.boundary_heads)
-            or self.stats.pending_count != len(self.pending_targets)
-            or len(set(self.pending_targets)) != len(self.pending_targets)
+            operator.ne(self.stats.materialized_count, len(self.boundary_heads))
+            or operator.ne(self.stats.pending_count, len(self.pending_targets))
+            or operator.ne(len(set(self.pending_targets)), len(self.pending_targets))
         ):
             return False
         if self.status is InvocationInventoryStatus8616.READY:
@@ -203,14 +206,14 @@ class InvocationInventory8616:
 class _MappedImage8616(Protocol):
     """Third-party loaded-object bounds, inclusive at the upper endpoint."""
 
-    min_addr: int
-    max_addr: int
+    min_addr: cython.longlong
+    max_addr: cython.longlong
 
 
 class _MappedLoader8616(Protocol):
     """Third-party object lookup for one independently proved address."""
 
-    def find_object_containing(self, address: int) -> object | None:
+    def find_object_containing(self, address: cython.longlong) -> object | None:
         """Return the loaded image owning this coordinate."""
         ...
 
@@ -230,11 +233,11 @@ class _BoundaryDisassembly8616(Protocol):
 class _BoundaryBlock8616(Protocol):
     """Third-party block projection consumed only at the frontend boundary."""
 
-    addr: int
+    addr: cython.longlong
     capstone: _BoundaryDisassembly8616
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _Traversal8616:
     """Mutable traversal ledger for one bounded census.
 
@@ -244,29 +247,30 @@ class _Traversal8616:
     ``pending_targets``).
     """
 
-    queue: list[int]
-    covered: set[int]
-    seen: set[int]
-    decoded_ranges: list[DecodedCallerCensus8616]
-    explicit_roots: frozenset[int] = frozenset()
-    boundary_heads: list[int] = field(default_factory=list)
-    covered_count: int = 0
-    failure_count: int = 0
-    instruction_count: int = 0
-    out_of_image_targets: set[int] = field(default_factory=set)
-    pending_targets: list[int] = field(default_factory=list)
+    queue: object
+    covered: object
+    seen: object
+    decoded_ranges: object
+    explicit_roots: frozenset[cython.longlong] = frozenset()
+    boundary_heads: object = field(default_factory=list)
+    covered_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    instruction_count: cython.longlong = 0
+    out_of_image_targets: object = field(default_factory=set)
+    pending_targets: object = field(default_factory=list)
 
 
+@cython.ccall
 def _refused_inventory_8616(
-    entry: int,
+    entry: cython.longlong,
     status: InvocationInventoryStatus8616,
     *,
     stats: InvocationInventoryStats8616 | None = None,
-    boundary_heads: tuple[int, ...] = (),
-    instruction_count: int = 0,
-    out_of_image_target_count: int = 0,
+    boundary_heads: object = (),
+    instruction_count: cython.longlong = 0,
+    out_of_image_target_count: cython.longlong = 0,
     refusal_addr: int | None = None,
-    pending_targets: tuple[int, ...] = (),
+    pending_targets: object = (),
 ) -> InvocationInventory8616:
     """Publish one typed non-result with the evidence collected so far."""
     return InvocationInventory8616(
@@ -286,10 +290,12 @@ def _refused_inventory_8616(
     )
 
 
+@cython.ccall
 def _mapped_bounds_8616(
-    project: object, entry: int
-) -> tuple[int, int] | InvocationInventoryStatus8616:
+    project: object, entry: cython.longlong
+) -> object:
     """Return the mapped image bounds for ``entry`` or a typed refusal."""
+    mapped: object
     try:
         loader = cast(_MappedProject8616, project).loader
         mapped = cast(_MappedImage8616 | None, loader.find_object_containing(entry))
@@ -303,7 +309,7 @@ def _mapped_bounds_8616(
     return lower, upper
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _RootConsumption8616:
     """Bounded root-input consumption: one deduplicated queue or a refusal.
 
@@ -315,15 +321,16 @@ class _RootConsumption8616:
     queue; the corpus is refused, never silently truncated.
     """
 
-    queue: tuple[int, ...]
-    distinct_count: int
+    queue: object
+    distinct_count: cython.longlong
     overflow_root: int | None
 
 
+@cython.ccall
 def _traversal_roots_8616(
-    entry: int,
-    extra_entries: Iterable[int],
-    max_root_inputs: int,
+    entry: cython.longlong,
+    extra_entries: Iterable[cython.longlong],
+    max_root_inputs: cython.longlong,
 ) -> _RootConsumption8616:
     """Order the validated root set deterministically, entry first.
 
@@ -333,8 +340,10 @@ def _traversal_roots_8616(
     Malformed items remain a caller contract error and fail loudly
     before the cap is consulted.
     """
-    queue: list[int] = [entry]
-    queued: set[int] = {entry}
+    drawn: object
+    head: object
+    queue: list[cython.longlong] = [entry]
+    queued: set[cython.longlong] = {entry}
     for drawn, head in enumerate(extra_entries, start=1):
         if type(head) is not int or head < 0:
             raise TypeError("invocation inventory roots must be nonnegative integers")
@@ -354,11 +363,12 @@ def _traversal_roots_8616(
     )
 
 
+@cython.ccall
 def _scan_call_targets_8616(
     traversal: _Traversal8616,
-    instructions: tuple[object, ...],
-    lower: int,
-    upper: int,
+    instructions: object,
+    lower: cython.longlong,
+    upper: cython.longlong,
     direct_target_resolver: DirectCallTargetResolver8616,
 ) -> None:
     """Fold one boundary's decoded direct-call targets into the worklist.
@@ -368,6 +378,7 @@ def _scan_call_targets_8616(
     becomes a queued root. Out-of-image targets are counted evidence, not
     caller candidates — they can never close a mapped boundary.
     """
+    instruction: object
     for instruction in instructions:
         resolved = direct_target_resolver(instruction)
         target = (
@@ -390,9 +401,9 @@ def _scan_call_targets_8616(
 
 
 def _bounded_instruction_census_8616(
-    blocks: tuple[_BoundaryBlock8616, ...],
-    remaining: int,
-) -> tuple[object, ...] | None:
+    blocks: object,
+    remaining: cython.longlong,
+) -> object:
     """Collect one boundary's decoded census within the budget left.
 
     Blocks are visited in ascending address order and each block's
@@ -404,6 +415,8 @@ def _bounded_instruction_census_8616(
     ``None`` reports exhaustion; an empty boundary inside budget still
     returns an empty census.
     """
+    block: object
+    instruction: object
     instructions: list[object] = []
     for block in sorted(blocks, key=lambda item: item.addr):
         for instruction in block.capstone.insns:
@@ -416,11 +429,11 @@ def _bounded_instruction_census_8616(
 def _traverse_inventory_8616(
     project: object,
     traversal: _Traversal8616,
-    lower: int,
-    upper: int,
+    lower: cython.longlong,
+    upper: cython.longlong,
     budget: InvocationInventoryBudget8616,
     direct_target_resolver: DirectCallTargetResolver8616,
-) -> tuple[InvocationInventoryStatus8616, int] | None:
+) -> object:
     """Close every queued head, deferring discovered targets that cannot.
 
     A discovered direct-call target whose mapped boundary returns ``None``
@@ -434,6 +447,8 @@ def _traverse_inventory_8616(
     they cannot close, as does any malformed boundary object regardless of
     provenance.
     """
+    boundary: object
+    instructions: object
     cursor = 0
     while cursor < len(traversal.queue):
         head = traversal.queue[cursor]
@@ -450,11 +465,11 @@ def _traverse_inventory_8616(
         if (
             boundary is None
             or boundary.project is not project
-            or boundary.addr != head
+            or operator.ne(boundary.addr, head)
         ):
             traversal.failure_count += 1
             return InvocationInventoryStatus8616.BOUNDARY_MISSING, head
-        blocks = tuple(cast(_BoundaryBlock8616, block) for block in boundary.blocks)
+        blocks = tuple(cast(_BoundaryBlock8616, block) for block in iter(boundary.blocks))
         instructions = _bounded_instruction_census_8616(
             blocks, budget.max_instructions - traversal.instruction_count
         )
@@ -472,9 +487,9 @@ def _traverse_inventory_8616(
 
 def build_invocation_inventory_8616(
     project: object,
-    entry: int,
+    entry: cython.longlong,
     *,
-    extra_entries: Iterable[int] = (),
+    extra_entries: Iterable[cython.longlong] = (),
     budget: InvocationInventoryBudget8616 | None = None,
     direct_target_resolver: DirectCallTargetResolver8616,
 ) -> InvocationInventory8616:
@@ -499,6 +514,7 @@ def build_invocation_inventory_8616(
     ``extra_entries`` refuses ``BUDGET_ROOT_INPUTS`` with the overflowing
     item as evidence; a corpus is never published from truncated input.
     """
+    refusal: object
     if budget is None:
         budget = InvocationInventoryBudget8616()
     if not isinstance(budget, InvocationInventoryBudget8616):
@@ -541,7 +557,7 @@ def build_invocation_inventory_8616(
     # covered evidence, not an obligation — classify it with the covered
     # count so stats and ``pending_targets`` report the same outcome.
     pending = tuple(
-        head for head in traversal.pending_targets if head not in traversal.covered
+        head for head in iter(traversal.pending_targets) if head not in traversal.covered
     )
     late_covered = len(traversal.pending_targets) - len(pending)
     stats = InvocationInventoryStats8616(

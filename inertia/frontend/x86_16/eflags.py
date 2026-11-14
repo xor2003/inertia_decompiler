@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/runtime.
 
 Responsibility: expose flag register accessors for lifter and emulator instruction behavior.
@@ -5,6 +6,8 @@ Forbidden: postprocess flag cleanup, condition recovery, or validation acceptanc
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from typing import Any, cast
@@ -19,14 +22,15 @@ from inertia.semantics.status_flag_contracts import (
     STATUS_FLAGS_8616,
     StatusFlag8616,
 )
+import operator
 
 # pyvex's VexValue operator stubs expose raw RdTmp/list results even though the
 # runtime syntax wrapper returns another value wrapper. Keep that third-party
 # mismatch isolated behind one explicit frontend boundary type.
-type VexExpr = Any
-type FlagValue = int | VexExpr
-type FlagValueFactory = Callable[[], FlagValue]
-type StatusFlagValueFactories = tuple[tuple[StatusFlag8616, FlagValueFactory], ...]
+VexExpr = typing.TypeAliasType("VexExpr", Any)
+FlagValue = typing.TypeAliasType("FlagValue", int | VexExpr)
+FlagValueFactory = typing.TypeAliasType("FlagValueFactory", Callable[[], FlagValue])
+StatusFlagValueFactories = typing.TypeAliasType("StatusFlagValueFactories", tuple[tuple[StatusFlag8616, FlagValueFactory], ...])
 
 
 class Eflags:
@@ -63,7 +67,7 @@ class Eflags:
         """Store a 16-bit FLAGS value on the host."""
         self.set_gpreg(reg16_t.FLAGS, v)
 
-    def get_flag(self, idx: int) -> VexExpr:
+    def get_flag(self, idx: cython.longlong) -> VexExpr:
         """Return one FLAGS bit as a one-bit pyvex value."""
         flags = cast(VexExpr, self.get_gpreg(reg16_t.FLAGS))
         return flags[idx].cast_to(Type.int_1)
@@ -96,7 +100,7 @@ class Eflags:
         """Return the direction flag value."""
         return self.get_flag(10)
 
-    def set_flag(self, flags: FlagValue, idx: int, value: FlagValue) -> VexExpr:
+    def set_flag(self, flags: FlagValue, idx: cython.longlong, value: FlagValue) -> VexExpr:
         """Return FLAGS with one indexed bit replaced."""
         flags16 = self.constant(flags, Type.int_16) if isinstance(flags, int) else flags.cast_to(Type.int_16)
         value16 = self.constant(value, Type.int_1) if isinstance(value, int) else value.cast_to(Type.int_1)
@@ -140,11 +144,11 @@ class Eflags:
 
     @staticmethod
     def _wider_type(ty: object) -> object:
-        if ty == Type.int_8:
+        if operator.eq(ty, Type.int_8):
             return Type.int_16
-        if ty == Type.int_16:
+        if operator.eq(ty, Type.int_16):
             return Type.int_32
-        if ty == Type.int_32:
+        if operator.eq(ty, Type.int_32):
             return Type.int_64
         raise ValueError(f"unsupported arithmetic width: {ty!r}")
 
@@ -198,11 +202,13 @@ class Eflags:
         written: StatusFlag8616 | None = None,
     ) -> VexExpr:
         """Pack live equations and zero dead bits that this instruction defines."""
-        selected = tuple((flag, value) for flag, value in values if live_writes & flag)
+        flag: object
+        value_factory: object
+        selected = tuple((flag, value) for flag, value in iter(values) if live_writes & flag)
         if not selected:
             return cast(VexExpr, flags)
         flags16 = self.constant(flags, Type.int_16) if isinstance(flags, int) else flags.cast_to(Type.int_16)
-        live_mask = sum(int(flag) for flag, _value in selected)
+        live_mask = sum(int(flag) for flag, _value in iter(selected))
         written_mask = int(written if written is not None else live_writes)
         packed = self.constant(0, Type.int_16)
         for flag, value_factory in selected:
@@ -213,14 +219,14 @@ class Eflags:
             packed & self.constant(live_mask, Type.int_16)
         )
 
-    def _status_flag_write_is_dead_8616(self, written: StatusFlag8616) -> bool:
+    def _status_flag_write_is_dead_8616(self, written: StatusFlag8616) -> cython.bint:
         """Return whether every status bit written by this instruction is dead."""
-        return bool(self._live_status_flag_writes_8616(written) == StatusFlag8616.NONE)
+        return bool(operator.eq(self._live_status_flag_writes_8616(written), StatusFlag8616.NONE))
 
     def update_eflags_inc(self, v1: VexExpr) -> None:
         """Update arithmetic flags for an increment result."""
         live_writes = self._live_status_flag_writes_8616(INCDEC_STATUS_FLAG_WRITES_8616)
-        if live_writes == StatusFlag8616.NONE:
+        if operator.eq(live_writes, StatusFlag8616.NONE):
             return
         flags = self.get_gpreg(reg16_t.FLAGS)
         size = v1.width
@@ -234,7 +240,7 @@ class Eflags:
                 (StatusFlag8616.AUXILIARY, lambda: self._adjust_flag(v1, self.constant(1, v1.ty), result)),
                 (StatusFlag8616.ZERO, lambda: result == 0),
                 (StatusFlag8616.SIGN, lambda: result[size - 1]),
-                (StatusFlag8616.OVERFLOW, lambda: v1 == self.constant((1 << (size - 1)) - 1, v1.ty)),
+                (StatusFlag8616.OVERFLOW, lambda: operator.eq(v1, self.constant((1 << (size - 1)) - 1, v1.ty))),
             ),
             written=INCDEC_STATUS_FLAG_WRITES_8616,
         )
@@ -243,7 +249,7 @@ class Eflags:
     def update_eflags_add(self, v1: VexExpr, v2: FlagValue) -> None:
         """Update arithmetic flags for an addition result."""
         live_writes = self._live_status_flag_writes_8616(STATUS_FLAGS_8616)
-        if live_writes == StatusFlag8616.NONE:
+        if operator.eq(live_writes, StatusFlag8616.NONE):
             return
         v2_expr = cast(VexExpr, self.constant(v2, v1.ty) if isinstance(v2, int) else v2)
         flags = self.get_gpreg(reg16_t.FLAGS)
@@ -279,7 +285,7 @@ class Eflags:
     def update_eflags_adc(self, v1: VexExpr, v2: FlagValue, carry: FlagValue) -> None:
         """Update arithmetic flags for addition with carry."""
         live_writes = self._live_status_flag_writes_8616(STATUS_FLAGS_8616)
-        if live_writes == StatusFlag8616.NONE:
+        if operator.eq(live_writes, StatusFlag8616.NONE):
             return
         v2_expr = cast(VexExpr, self.constant(v2, v1.ty) if isinstance(v2, int) else v2)
         carry_expr = cast(
@@ -320,7 +326,7 @@ class Eflags:
     def _update_eflags_logical_8616(self, result: VexExpr) -> None:
         """Materialize only live status bits for a logical-operation result."""
         live_writes = self._live_status_flag_writes_8616(STATUS_FLAGS_8616)
-        if live_writes == StatusFlag8616.NONE:
+        if operator.eq(live_writes, StatusFlag8616.NONE):
             return
         flags = self.get_gpreg(reg16_t.FLAGS)
         flags = self._set_live_status_flags_8616(
@@ -351,7 +357,7 @@ class Eflags:
     def update_eflags_sub(self, v1: VexExpr, v2: FlagValue) -> None:
         """Update arithmetic flags for a subtraction result."""
         live_writes = self._live_status_flag_writes_8616(STATUS_FLAGS_8616)
-        if live_writes == StatusFlag8616.NONE:
+        if operator.eq(live_writes, StatusFlag8616.NONE):
             return
         v2 = self.constant(v2, v1.ty) if isinstance(v2, int) else v2
         flags = self.get_gpreg(reg16_t.FLAGS)
@@ -381,7 +387,7 @@ class Eflags:
     def update_eflags_sbb(self, v1: VexExpr, v2: FlagValue, c: FlagValue) -> None:
         """Update arithmetic flags for subtraction with borrow."""
         live_writes = self._live_status_flag_writes_8616(STATUS_FLAGS_8616)
-        if live_writes == StatusFlag8616.NONE:
+        if operator.eq(live_writes, StatusFlag8616.NONE):
             return
         v2_expr = cast(VexExpr, self.constant(v2, v1.ty) if isinstance(v2, int) else v2)
         c_expr = cast(VexExpr, self.constant(c, v1.ty) if isinstance(c, int) else c.cast_to(v1.ty))
@@ -431,13 +437,13 @@ class Eflags:
         flags = self.set_flag(flags, 4, self._adjust_flag(zero, v2, result))
         flags = self.set_zero(flags, result == 0)
         flags = self.set_sign(flags, result[size - 1])
-        flags = self.set_overflow(flags, v2 == self.constant(1 << (size - 1), v2.ty))
+        flags = self.set_overflow(flags, operator.eq(v2, self.constant(1 << (size - 1), v2.ty)))
         self.set_gpreg(reg16_t.FLAGS, flags)
 
     def update_eflags_dec(self, v1: VexExpr) -> None:
         """Update arithmetic flags for a decrement result."""
         live_writes = self._live_status_flag_writes_8616(INCDEC_STATUS_FLAG_WRITES_8616)
-        if live_writes == StatusFlag8616.NONE:
+        if operator.eq(live_writes, StatusFlag8616.NONE):
             return
         v2 = self.constant(1, v1.ty)
         flags = self.get_gpreg(reg16_t.FLAGS)
@@ -452,7 +458,7 @@ class Eflags:
                 (StatusFlag8616.AUXILIARY, lambda: self._adjust_flag(v1, v2, result)),
                 (StatusFlag8616.ZERO, lambda: result == 0),
                 (StatusFlag8616.SIGN, lambda: result[size - 1]),
-                (StatusFlag8616.OVERFLOW, lambda: v1 == self.constant(1 << (size - 1), v1.ty)),
+                (StatusFlag8616.OVERFLOW, lambda: operator.eq(v1, self.constant(1 << (size - 1), v1.ty))),
             ),
             written=INCDEC_STATUS_FLAG_WRITES_8616,
         )
@@ -465,7 +471,7 @@ class Eflags:
         wide_type = self._wider_type(type1)
         result = v1.cast_to(wide_type) * v2.cast_to(wide_type)
         size = v1.width
-        high_nonzero = ((result >> size) != self.constant(0, wide_type)).cast_to(Type.int_1)
+        high_nonzero = operator.ne((result >> size), self.constant(0, wide_type)).cast_to(Type.int_1)
 
         flags = self.set_carry(flags, high_nonzero)
         flags = self.set_zero(flags, result.cast_to(type1) == 0)
@@ -490,13 +496,15 @@ class Eflags:
             self.constant(0, type1),
         ).cast_to(type1)
         sign_ext_ok = (high == sign_ext).cast_to(Type.int_1)
-        cfof = (sign_ext_ok == self.constant(0, Type.int_1)).cast_to(Type.int_1)
+        cfof = operator.eq(sign_ext_ok, self.constant(0, Type.int_1)).cast_to(Type.int_1)
         flags = self.set_carry(flags, cfof)
         flags = self.set_overflow(flags, cfof)
         self.set_gpreg(reg16_t.FLAGS, flags)
 
     def update_eflags_shl(self, v: VexExpr, c: FlagValue) -> None:
         """Update arithmetic flags for a logical left shift."""
+        const_count: object
+        masked_const_count: object
         const_count = self._const_u8_value(c)
         masked_const_count = None if const_count is None else const_count & 0x1F
         defined_writes = (
@@ -505,7 +513,7 @@ class Eflags:
             else SHIFT_COUNT_ONE_STATUS_FLAG_WRITES_8616
         )
         live_writes = self._live_status_flag_writes_8616(defined_writes)
-        if live_writes == StatusFlag8616.NONE:
+        if operator.eq(live_writes, StatusFlag8616.NONE):
             return
         if masked_const_count and masked_const_count <= v.width:
             flags = self.get_gpreg(reg16_t.FLAGS)
@@ -540,7 +548,7 @@ class Eflags:
         c = self._mask_shift_count(c)
         flags = self.get_gpreg(reg16_t.FLAGS)
         size = v.width
-        unchanged = c == self.constant(0, Type.int_8)
+        unchanged = operator.eq(c, self.constant(0, Type.int_8))
         result = v << c if live_writes & ~StatusFlag8616.CARRY else None
         cf = (
             (v >> (self.constant(size, Type.int_8) - c))[0].cast_to(Type.int_1)
@@ -574,7 +582,7 @@ class Eflags:
                         unchanged,
                         self.get_flag(11),
                         self._ite(
-                            c == self.constant(1, Type.int_8),
+                            operator.eq(c, self.constant(1, Type.int_8)),
                             (
                                 cast(VexExpr, result)[size - 1].cast_to(Type.int_1) ^ cast(VexExpr, cf)
                             ).cast_to(Type.int_1),
@@ -586,13 +594,13 @@ class Eflags:
         )
         self.set_gpreg(reg16_t.FLAGS, flags)
 
-    def update_eflags_double_shift(self, v: VexExpr, result: VexExpr, c: FlagValue, *, left: bool) -> None:
+    def update_eflags_double_shift(self, v: VexExpr, result: VexExpr, c: FlagValue, *, left: cython.bint) -> None:
         """Update defined SHLD/SHRD flags from the combined double-shift result."""
         count = self._mask_shift_count(c)
         width = v.width
         defined = count <= self.constant(width, Type.int_8)
-        active = defined & (count != self.constant(0, Type.int_8))
-        one = count == self.constant(1, Type.int_8)
+        active = defined & operator.ne(count, self.constant(0, Type.int_8))
+        one = operator.eq(count, self.constant(1, Type.int_8))
         if left:
             carry = (v >> (self.constant(width, Type.int_8) - count))[0].cast_to(Type.int_1)
             overflow = (result[width - 1].cast_to(Type.int_1) ^ carry).cast_to(Type.int_1)
@@ -616,7 +624,7 @@ class Eflags:
         c = masked % self.constant(size, Type.int_8)
         result = (v << c) | (v >> (self.constant(size, Type.int_8) - c))
         flags = self.get_gpreg(reg16_t.FLAGS)
-        unchanged = masked == self.constant(0, Type.int_8)
+        unchanged = operator.eq(masked, self.constant(0, Type.int_8))
         flags = self.set_carry(flags, self._ite(unchanged, self.get_flag(0), result[0].cast_to(Type.int_1)))
         flags = self.set_overflow(
             flags,
@@ -631,7 +639,7 @@ class Eflags:
         c = masked % self.constant(size, Type.int_8)
         result = (v >> c) | (v << (self.constant(size, Type.int_8) - c))
         flags = self.get_gpreg(reg16_t.FLAGS)
-        unchanged = masked == self.constant(0, Type.int_8)
+        unchanged = operator.eq(masked, self.constant(0, Type.int_8))
         flags = self.set_carry(flags, self._ite(unchanged, self.get_flag(0), result[size - 1].cast_to(Type.int_1)))
         flags = self.set_overflow(
             flags,
@@ -641,6 +649,8 @@ class Eflags:
 
     def update_eflags_shr(self, v: VexExpr, c: FlagValue) -> None:
         """Update arithmetic flags for a logical right shift."""
+        const_count: object
+        masked_const_count: object
         const_count = self._const_u8_value(c)
         masked_const_count = None if const_count is None else const_count & 0x1F
         defined_writes = (
@@ -649,7 +659,7 @@ class Eflags:
             else SHIFT_COUNT_ONE_STATUS_FLAG_WRITES_8616
         )
         live_writes = self._live_status_flag_writes_8616(defined_writes)
-        if live_writes == StatusFlag8616.NONE:
+        if operator.eq(live_writes, StatusFlag8616.NONE):
             return
         if const_count == 1:
             flags = self.get_gpreg(reg16_t.FLAGS)
@@ -672,7 +682,7 @@ class Eflags:
         c = self._mask_shift_count(c)
         flags = self.get_gpreg(reg16_t.FLAGS)
         size = v.width
-        unchanged = c == self.constant(0, Type.int_8)
+        unchanged = operator.eq(c, self.constant(0, Type.int_8))
         result = v >> c if live_writes & (StatusFlag8616.PARITY | StatusFlag8616.ZERO | StatusFlag8616.SIGN) else None
         cf = (
             (v >> (c - self.constant(1, Type.int_8)))[0].cast_to(Type.int_1)
@@ -706,7 +716,7 @@ class Eflags:
                         unchanged,
                         self.get_flag(11),
                         self._ite(
-                            c == self.constant(1, Type.int_8), v[size - 1].cast_to(Type.int_1), self.get_flag(11)
+                            operator.eq(c, self.constant(1, Type.int_8)), v[size - 1].cast_to(Type.int_1), self.get_flag(11)
                         ),
                     ),
                 ),
@@ -716,6 +726,8 @@ class Eflags:
 
     def update_eflags_sar(self, v: VexExpr, c: FlagValue) -> None:
         """Update arithmetic flags for an arithmetic right shift."""
+        const_count: object
+        masked_const_count: object
         const_count = self._const_u8_value(c)
         masked_const_count = None if const_count is None else const_count & 0x1F
         defined_writes = (
@@ -724,7 +736,7 @@ class Eflags:
             else SHIFT_COUNT_ONE_STATUS_FLAG_WRITES_8616
         )
         live_writes = self._live_status_flag_writes_8616(defined_writes)
-        if live_writes == StatusFlag8616.NONE:
+        if operator.eq(live_writes, StatusFlag8616.NONE):
             return
         if const_count == 1:
             flags = self.get_gpreg(reg16_t.FLAGS)
@@ -747,7 +759,7 @@ class Eflags:
         c = self._mask_shift_count(c)
         flags = self.get_gpreg(reg16_t.FLAGS)
         size = v.width
-        unchanged = c == self.constant(0, Type.int_8)
+        unchanged = operator.eq(c, self.constant(0, Type.int_8))
         result = v.sar(c) if live_writes & (StatusFlag8616.PARITY | StatusFlag8616.ZERO | StatusFlag8616.SIGN) else None
         cf = (
             v.sar(c - self.constant(1, Type.int_8))[0].cast_to(Type.int_1)

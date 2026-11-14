@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Group exact pointer-parameter caller effects under callee outputs.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from .interprocedural_storage_contracts import CallsiteStorageTrials8616
 from .pointer_parameter_memory_output_contracts import (
@@ -19,12 +22,15 @@ from .pointer_parameter_memory_output_contracts import (
     PointerParameterMemoryOutputView8616,
 )
 from .pointer_parameter_output_contracts import PointerParameterOutputContract8616
+import operator
+import builtins
 
 
+@cython.ccall
 def _refused_8616(
     failure: PointerParameterMemoryOutputFailure8616,
-    raw_count: int,
-    normalized_count: int,
+    raw_count: cython.longlong,
+    normalized_count: cython.longlong,
 ) -> PointerParameterMemoryOutputJoin8616:
     """Build one atomic refusal without retaining partial dynamic objects."""
     return PointerParameterMemoryOutputJoin8616(
@@ -38,6 +44,7 @@ def _refused_8616(
     )
 
 
+@cython.ccall
 def _source_order_8616(source: PointerParameterOutputContract8616) -> tuple[object, ...]:
     """Return a deterministic primitive key for one callee output source."""
     view = source.output_view
@@ -52,17 +59,20 @@ def _source_order_8616(source: PointerParameterOutputContract8616) -> tuple[obje
 
 
 def join_pointer_parameter_memory_outputs_8616(
-    callsites: tuple[CallsiteStorageTrials8616, ...],
+    callsites: object,
 ) -> PointerParameterMemoryOutputJoin8616:
     """Group every exact dynamic caller effect under one callee source."""
-    raw_count = sum(len(callsite.pointer_effects) for callsite in callsites)
+    previous: object
+    callsite: object
+    effect: object
+    raw_count = sum(len(callsite.pointer_effects) for callsite in iter(callsites))
     normalized_count = 0
     grouped: dict[
         tuple[object, ...],
         tuple[PointerParameterOutputContract8616, list[PointerParameterMemoryOutputView8616]],
     ] = {}
     for callsite in sorted(callsites, key=lambda item: (item.callsite_addr, item.caller_addr)):
-        seen: set[int] = set()
+        seen: set[cython.longlong] = set()
         for effect in sorted(callsite.pointer_effects, key=lambda item: item.logical_index):
             if not effect.complete:
                 return _refused_8616(
@@ -72,9 +82,9 @@ def join_pointer_parameter_memory_outputs_8616(
                 )
             normalized_count += 1
             if (
-                effect.callee_addr != callsite.callee_addr
-                or effect.caller_addr != callsite.caller_addr
-                or effect.callsite_addr != callsite.callsite_addr
+                operator.ne(effect.callee_addr, callsite.callee_addr)
+                or operator.ne(effect.caller_addr, callsite.caller_addr)
+                or operator.ne(effect.callsite_addr, callsite.callsite_addr)
             ):
                 return _refused_8616(
                     PointerParameterMemoryOutputFailure8616.CALLSITE_CONFLICT,
@@ -99,7 +109,7 @@ def join_pointer_parameter_memory_outputs_8616(
             previous = grouped.get(source_key)
             if previous is None:
                 grouped[source_key] = (source, [view])
-            elif previous[0] != source:
+            elif operator.ne(previous[0], source):
                 return _refused_8616(
                     PointerParameterMemoryOutputFailure8616.SOURCE_CONFLICT,
                     raw_count,
@@ -109,7 +119,7 @@ def join_pointer_parameter_memory_outputs_8616(
                 previous[1].append(view)
     objects = tuple(
         PointerParameterMemoryOutputObject8616(source, tuple(views))
-        for _key, (source, views) in sorted(grouped.items())
+        for _key, (source, views) in builtins.iter(sorted(tuple(grouped.items())))
     )
     return PointerParameterMemoryOutputJoin8616(
         objects,

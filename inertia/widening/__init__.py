@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Widening-layer exports.
 
 Layer: Widening.
@@ -9,6 +10,7 @@ CLI/reporting evidence.
 """
 
 from __future__ import annotations
+import cython
 
 from .carry_borrow_pipeline import (
     CarryBorrowWideningPipeline8616,

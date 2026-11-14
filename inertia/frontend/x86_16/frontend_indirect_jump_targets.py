@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Resolve constant real-mode indirect jumps from decoded binary evidence.
 
 Layer: Frontend.
@@ -6,6 +7,8 @@ selector transfers into DS-relative near-indirect jumps.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -13,6 +16,9 @@ from enum import Enum
 from typing import Protocol, cast
 
 from capstone.x86_const import X86_OP_IMM, X86_OP_MEM, X86_OP_REG
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "ConstantIndirectJumpArtifact8616",
@@ -25,30 +31,30 @@ __all__ = [
 class _MemoryOperandBoundary8616(Protocol):
     """Capstone memory fields consumed by the frontend resolver."""
 
-    base: int
-    index: int
-    scale: int
-    disp: int
+    base: cython.longlong
+    index: cython.longlong
+    scale: cython.longlong
+    disp: cython.longlong
 
 
 class _OperandBoundary8616(Protocol):
     """Capstone operand fields consumed by the frontend resolver."""
 
-    type: int
-    imm: int
-    reg: int
-    size: int
+    type: cython.longlong
+    imm: cython.longlong
+    reg: cython.longlong
+    size: cython.longlong
     mem: _MemoryOperandBoundary8616
 
 
 class _DecodedInstructionBoundary8616(Protocol):
     """Decoded Capstone instruction fields used at the third-party boundary."""
 
-    address: int
-    mnemonic: str
+    address: cython.longlong
+    mnemonic: object
     operands: Sequence[_OperandBoundary8616]
 
-    def reg_name(self, register_id: int) -> str:
+    def reg_name(self, register_id: cython.longlong) -> object:
         """Return Capstone's canonical register name."""
         ...
 
@@ -68,14 +74,14 @@ class _CapstoneBoundary8616(Protocol):
 class _BlockBoundary8616(Protocol):
     """angr block fields consumed by the resolver."""
 
-    addr: int
+    addr: cython.longlong
     capstone: _CapstoneBoundary8616
 
 
 class _MemoryBoundary8616(Protocol):
     """CLE memory read boundary."""
 
-    def load(self, address: int, size: int) -> bytes:
+    def load(self, address: cython.longlong, size: cython.longlong) -> object:
         """Read mapped bytes at one linear address."""
         ...
 
@@ -83,9 +89,9 @@ class _MemoryBoundary8616(Protocol):
 class _MainObjectBoundary8616(Protocol):
     """MZ loader facts required for relocation-backed segment candidates."""
 
-    mz_load_segment: int
-    mz_relocation_entries: Sequence[tuple[int, int]]
-    initial_register_values: Mapping[str, int]
+    mz_load_segment: cython.longlong
+    mz_relocation_entries: Sequence[tuple[cython.longlong, cython.longlong]]
+    initial_register_values: Mapping[str, cython.longlong]
 
 
 class _LoaderBoundary8616(Protocol):
@@ -100,7 +106,7 @@ class _ProjectBoundary8616(Protocol):
 
     loader: _LoaderBoundary8616
     _inertia_original_project: object
-    _inertia_original_linear_delta: int
+    _inertia_original_linear_delta: cython.longlong
 
 
 class ConstantIndirectJumpStatus8616(Enum):
@@ -115,14 +121,14 @@ class ConstantIndirectJumpStatus8616(Enum):
     TABLE_TARGET_AMBIGUOUS = "table_target_ambiguous"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConstantIndirectJumpRecord8616:
     """Resolution or typed refusal for one decoded indirect jump."""
 
-    site_addr: int
-    source_block_addr: int
+    site_addr: cython.longlong
+    source_block_addr: cython.longlong
     status: ConstantIndirectJumpStatus8616
-    selector_register: str | None = None
+    selector_register: object = None
     selector_byte_offset: int | None = None
     table_segment: int | None = None
     table_linear_addr: int | None = None
@@ -131,39 +137,40 @@ class ConstantIndirectJumpRecord8616:
     projected_target_addr: int | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConstantIndirectJumpArtifact8616:
     """Closed evidence counters and records for decoded indirect jump sites."""
 
-    records: tuple[ConstantIndirectJumpRecord8616, ...]
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    records: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every observed candidate resolved uniquely."""
         return (
             self.raw_fact_count > 0
-            and self.raw_fact_count == self.normalized_fact_count
-            and self.normalized_fact_count == self.classified_fact_count
-            and self.classified_fact_count == self.materialized_count + self.failure_count
+            and operator.eq(self.raw_fact_count, self.normalized_fact_count)
+            and operator.eq(self.normalized_fact_count, self.classified_fact_count)
+            and operator.eq(self.classified_fact_count, self.materialized_count + self.failure_count)
             and self.failure_count == 0
         )
 
     @property
-    def resolved_edges(self) -> tuple[tuple[int, int], ...]:
+    def resolved_edges(self) -> tuple[tuple[cython.longlong, cython.longlong], ...]:
         """Return accepted source-block to projected-target edges."""
         return tuple(
             (record.source_block_addr, record.projected_target_addr)
-            for record in self.records
+            for record in iter(self.records)
             if record.status is ConstantIndirectJumpStatus8616.RESOLVED
             and record.projected_target_addr is not None
         )
 
 
+@cython.ccall
 def _decoded_instruction_8616(instruction: object) -> _DecodedInstructionBoundary8616:
     """Unwrap one angr Capstone instruction at the dynamic boundary."""
     wrapper = cast(_InstructionBoundary8616, instruction)
@@ -180,12 +187,13 @@ def _block_instructions_8616(block: object) -> tuple[_DecodedInstructionBoundary
         instructions = tuple(boundary.capstone.insns)
     except (AttributeError, TypeError):
         return ()
-    return tuple(_decoded_instruction_8616(instruction) for instruction in instructions)
+    return tuple(_decoded_instruction_8616(instruction) for instruction in iter(instructions))
 
 
+@cython.ccall
 def _indirect_jump_shape_8616(
     block: object,
-) -> tuple[int, int, str, int] | None:
+) -> object:
     """Return ``(site, source, base-register, displacement)`` for exact JMP m16."""
     instructions = _block_instructions_8616(block)
     if not instructions:
@@ -194,7 +202,7 @@ def _indirect_jump_shape_8616(
     if jump.mnemonic.lower() != "jmp" or len(jump.operands) != 1:
         return None
     operand = jump.operands[0]
-    if operand.type != X86_OP_MEM or operand.size != 2:
+    if operator.ne(operand.type, X86_OP_MEM) or operand.size != 2:
         return None
     memory = operand.mem
     if memory.base == 0 or memory.index != 0 or memory.scale not in {0, 1}:
@@ -206,7 +214,8 @@ def _indirect_jump_shape_8616(
     return jump.address, source_addr, register_name, int(memory.disp)
 
 
-def _pop_selector_register_8616(block: object, expected_register: str) -> bool:
+@cython.ccall
+def _pop_selector_register_8616(block: object, expected_register: object) -> cython.bint:
     """Require the indirect jump to be immediately preceded by POP of its base."""
     instructions = _block_instructions_8616(block)
     if len(instructions) < 2:
@@ -215,17 +224,21 @@ def _pop_selector_register_8616(block: object, expected_register: str) -> bool:
     if pop.mnemonic.lower() != "pop" or len(pop.operands) != 1:
         return False
     operand = pop.operands[0]
-    return operand.type == X86_OP_REG and pop.reg_name(operand.reg).lower() == expected_register
+    return operator.eq(operand.type, X86_OP_REG) and operator.eq(pop.reg_name(operand.reg).lower(), expected_register)
 
 
+@cython.ccall
 def _immediate_push_for_site_8616(
-    source_addr: int,
-    blocks_by_addr: Mapping[int, object],
-    predecessors: Mapping[int, tuple[int, ...]],
+    source_addr: cython.longlong,
+    blocks_by_addr: Mapping[cython.longlong, object],
+    predecessors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
 ) -> tuple[int | None, ConstantIndirectJumpStatus8616 | None]:
     """Walk a unique predecessor chain to the LIFO PUSH immediate owner."""
+    block: object
+    incoming: object
+    instruction: object
     current = source_addr
-    visited: set[int] = set()
+    visited: set[cython.longlong] = set()
     for _depth in range(16):
         incoming = predecessors.get(current, ())
         if len(incoming) != 1:
@@ -242,7 +255,7 @@ def _immediate_push_for_site_8616(
             if mnemonic in {"call", "lcall", "callq"}:
                 continue
             if mnemonic == "push":
-                if len(instruction.operands) != 1 or instruction.operands[0].type != X86_OP_IMM:
+                if len(instruction.operands) != 1 or operator.ne(instruction.operands[0].type, X86_OP_IMM):
                     return None, ConstantIndirectJumpStatus8616.IMMEDIATE_PUSH_MISSING
                 return int(instruction.operands[0].imm) & 0xFFFF, None
             if mnemonic.startswith(("push", "pop")) or mnemonic in {"enter", "leave"}:
@@ -250,7 +263,8 @@ def _immediate_push_for_site_8616(
     return None, ConstantIndirectJumpStatus8616.IMMEDIATE_PUSH_MISSING
 
 
-def _original_project_context_8616(project: object) -> tuple[object, int]:
+@cython.ccall
+def _original_project_context_8616(project: object) -> tuple[object, cython.longlong]:
     """Return original-image project and slice-to-original linear delta."""
     boundary = cast(_ProjectBoundary8616, project)
     try:
@@ -264,8 +278,11 @@ def _original_project_context_8616(project: object) -> tuple[object, int]:
     return original, delta if isinstance(delta, int) else 0
 
 
-def _relocated_segment_candidates_8616(project: object) -> tuple[int, ...] | None:
+@cython.ccall
+def _relocated_segment_candidates_8616(project: object) -> object:
     """Read unique relocated segment words from an MZ loader image."""
+    reloc_offset: object
+    reloc_segment: object
     boundary = cast(_ProjectBoundary8616, project)
     try:
         loader = boundary.loader
@@ -277,7 +294,7 @@ def _relocated_segment_candidates_8616(project: object) -> tuple[int, ...] | Non
     if not isinstance(load_segment, int) or not relocations:
         return None
     load_base = load_segment << 4
-    values: set[int] = set()
+    values: set[cython.longlong] = set()
     for reloc_offset, reloc_segment in relocations:
         address = load_base + (int(reloc_segment) << 4) + int(reloc_offset)
         try:
@@ -289,8 +306,11 @@ def _relocated_segment_candidates_8616(project: object) -> tuple[int, ...] | Non
     return tuple(sorted(values))
 
 
-def _initialized_data_segment_candidates_8616(project: object) -> tuple[int, ...] | None:
+@cython.ccall
+def _initialized_data_segment_candidates_8616(project: object) -> object:
     """Return relocated words used by exact adjacent DS initialization instructions."""
+    reloc_offset: object
+    reloc_segment: object
     boundary = cast(_ProjectBoundary8616, project)
     try:
         loader = boundary.loader
@@ -302,7 +322,7 @@ def _initialized_data_segment_candidates_8616(project: object) -> tuple[int, ...
     if not isinstance(load_segment, int) or not relocations:
         return None
     load_base = load_segment << 4
-    candidates: set[int] = set()
+    candidates: set[cython.longlong] = set()
     for reloc_offset, reloc_segment in relocations:
         relocation_addr = load_base + (int(reloc_segment) << 4) + int(reloc_offset)
         try:
@@ -317,14 +337,14 @@ def _initialized_data_segment_candidates_8616(project: object) -> tuple[int, ...
         mov_register = mov_window[0] - 0xB8 if len(mov_window) == 5 else -1
         exact_mov_ds = (
             0 <= mov_register <= 7
-            and mov_window[1:3] == value_bytes
+            and operator.eq(mov_window[1:3], value_bytes)
             and mov_window[3] == 0x8E
-            and mov_window[4] == 0xD8 + mov_register
+            and operator.eq(mov_window[4], 0xD8 + mov_register)
         )
         exact_push_pop_ds = (
             len(push_window) == 4
             and push_window[0] == 0x68
-            and push_window[1:3] == value_bytes
+            and operator.eq(push_window[1:3], value_bytes)
             and push_window[3] == 0x1F
         )
         if exact_mov_ds or exact_push_pop_ds:
@@ -332,17 +352,21 @@ def _initialized_data_segment_candidates_8616(project: object) -> tuple[int, ...
     return tuple(sorted(candidates))
 
 
+@cython.ccall
 def _table_target_candidates_8616(
     project: object,
     *,
     projection_project: object,
-    displacement: int,
-    selector_byte_offset: int,
-    original_delta: int,
-    region_start: int,
-    region_end: int,
-) -> tuple[tuple[int, int, int, int, int], ...] | None:
+    displacement: cython.longlong,
+    selector_byte_offset: cython.longlong,
+    original_delta: cython.longlong,
+    region_start: cython.longlong,
+    region_end: cython.longlong,
+) -> object:
     """Return relocation-backed table candidates whose prefix targets stay in-region."""
+    prefix: object
+    segments: object
+    data_segment: object
     boundary = cast(_ProjectBoundary8616, project)
     try:
         loader = boundary.loader
@@ -365,7 +389,7 @@ def _table_target_candidates_8616(
         except AttributeError:
             return None
     table_offset = displacement & 0xFFFF
-    candidates: set[tuple[int, int, int, int, int]] = set()
+    candidates: set[tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong, cython.longlong]] = set()
     for data_segment in segments:
         prefix = _table_prefix_candidate_8616(
             loader,
@@ -380,27 +404,31 @@ def _table_target_candidates_8616(
         )
         if prefix is not None:
             candidates.add(
-                (data_segment, (data_segment << 4) + table_offset, *prefix)
+                (data_segment, (data_segment << 4) + table_offset, ) + tuple(prefix)
             )
     return tuple(sorted(candidates))
 
 
+@cython.ccall
 def _table_prefix_candidate_8616(
     loader: _LoaderBoundary8616,
-    projection_memory: _MemoryBoundary8616 | None,
+    projection_memory: object,
     *,
-    code_segment: int,
-    table_linear: int,
-    selector_byte_offset: int,
-    original_delta: int,
-    region_start: int,
-    region_end: int,
-    require_projected_mapping: bool,
-) -> tuple[int, int, int] | None:
+    code_segment: cython.longlong,
+    table_linear: cython.longlong,
+    selector_byte_offset: cython.longlong,
+    original_delta: cython.longlong,
+    region_start: cython.longlong,
+    region_end: cython.longlong,
+    require_projected_mapping: cython.bint,
+) -> object:
     """Return the proven last prefix target for one relocation-backed table."""
-    selected_ip: int | None = None
-    selected_linear: int | None = None
-    selected_projected: int | None = None
+    selected_ip: object
+    selected_linear: object
+    selected_projected: object
+    selected_ip = None
+    selected_linear = None
+    selected_projected = None
     for byte_offset in range(0, selector_byte_offset + 1, 2):
         try:
             data = bytes(loader.memory.load(table_linear + byte_offset, 2))
@@ -433,21 +461,27 @@ def collect_constant_indirect_jump_edges_8616(
     project: object,
     *,
     blocks: Sequence[object],
-    successor_edges: Sequence[tuple[int, int]],
-    region_start: int,
-    region_end: int,
+    successor_edges: Sequence[tuple[cython.longlong, cython.longlong]],
+    region_start: cython.longlong,
+    region_end: cython.longlong,
 ) -> ConstantIndirectJumpArtifact8616:
     """Resolve exact immediate-stack selectors into unique near jump targets."""
+    candidates: object
+    selector: object
+    shape: object
+    block_addr: object
+    source: object
+    target: object
     blocks_by_addr = {
         cast(_BlockBoundary8616, block).addr: block
-        for block in blocks
+        for block in iter(blocks)
     }
-    predecessor_lists: dict[int, list[int]] = {}
+    predecessor_lists: dict[cython.longlong, list[cython.longlong]] = {}
     for source, target in successor_edges:
         predecessor_lists.setdefault(target, []).append(source)
     predecessors = {
-        target: tuple(sorted(set(sources)))
-        for target, sources in predecessor_lists.items()
+        target: tuple(sorted(tuple(set(sources))))
+        for target, sources in builtins.iter(predecessor_lists.items())
     }
     original_project, original_delta = _original_project_context_8616(project)
     records: list[ConstantIndirectJumpRecord8616] = []
@@ -531,7 +565,7 @@ def collect_constant_indirect_jump_edges_8616(
     raw_count = len(records)
     materialized_count = sum(
         record.status is ConstantIndirectJumpStatus8616.RESOLVED
-        for record in records
+        for record in iter(records)
     )
     return ConstantIndirectJumpArtifact8616(
         records=tuple(records),

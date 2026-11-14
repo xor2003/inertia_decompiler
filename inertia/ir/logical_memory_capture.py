@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Capture typed logical-memory intent while the frontend emits execution IR.
 
 Layer: IR.
@@ -9,6 +10,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -17,9 +20,12 @@ from dataclasses import dataclass, field
 
 from .core import IRAddress
 from .logical_memory_contracts import IRMemoryAccessKind8616
+import dataclasses
+import operator
 
 
-def memory_access_kind_from_mode_8616(mode: int) -> IRMemoryAccessKind8616:
+@cython.ccall
+def memory_access_kind_from_mode_8616(mode: cython.longlong) -> IRMemoryAccessKind8616:
     """Normalize the dynamic frontend mode integer into a typed IR operation."""
     return {
         0: IRMemoryAccessKind8616.READ,
@@ -28,11 +34,11 @@ def memory_access_kind_from_mode_8616(mode: int) -> IRMemoryAccessKind8616:
     }.get(mode, IRMemoryAccessKind8616.UNKNOWN)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRLogicalMemoryCaptureRecord8616:
     """Raw typed machine-operand evidence captured during one instruction lift."""
 
-    function_addr: int
+    function_addr: cython.longlong
     block_addr: int | None
     insn_addr: int | None
     access_ordinal: int | None
@@ -41,7 +47,7 @@ class IRLogicalMemoryCaptureRecord8616:
     address: IRAddress | None
 
     @property
-    def mode(self) -> int:
+    def mode(self) -> cython.longlong:
         """Expose the legacy frontend mode for compatibility-only consumers."""
         return {
             IRMemoryAccessKind8616.READ: 0,
@@ -55,16 +61,18 @@ class IRLogicalMemoryCaptureRecord8616:
         return self.address
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class IRLogicalMemoryCaptureCollection8616:
     """Function-owned logical operands captured during one explicit lift."""
 
-    function_addr: int
-    accesses: list[IRLogicalMemoryCaptureRecord8616] = field(default_factory=list)
-    next_ordinals: dict[tuple[int, int], int] = field(default_factory=dict)
+    function_addr: cython.longlong
+    accesses: object = field(default_factory=list)
+    next_ordinals: object = field(default_factory=dict)
 
-    def allocate_ordinal(self, block_addr: int | None, insn_addr: int | None) -> int | None:
+    @cython.ccall
+    def allocate_ordinal(self, block_addr: object, insn_addr: object) -> int | None:
         """Allocate one deterministic per-instruction access ordinal when possible."""
+        ordinal: object
         if block_addr is None or insn_addr is None:
             return None
         site = (block_addr, insn_addr)
@@ -85,7 +93,7 @@ _active_block_addr: ContextVar[int | None] = ContextVar(
 
 @contextmanager
 def collect_accesses_for_function(
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> Iterator[IRLogicalMemoryCaptureCollection8616]:
     """Capture logical accesses for one function without process-global keys."""
     if not isinstance(function_addr, int):
@@ -99,7 +107,7 @@ def collect_accesses_for_function(
 
 
 @contextmanager
-def collect_accesses_for_block(block_addr: int) -> Iterator[None]:
+def collect_accesses_for_block(block_addr: cython.longlong) -> Iterator[None]:
     """Attach exact block ownership to accesses emitted by one factory lift."""
     if not isinstance(block_addr, int):
         raise TypeError("block_addr must be an integer")
@@ -110,15 +118,18 @@ def collect_accesses_for_block(block_addr: int) -> Iterator[None]:
         _active_block_addr.reset(token)
 
 
+@cython.ccall
 def get_current_function_addr() -> int | None:
     """Return the function owned by the active logical-memory collection."""
+    collection: object
     collection = _active_collection.get()
     return collection.function_addr if collection is not None else None
 
 
+@cython.ccall
 def record_access(
-    function_addr: int,
-    mode: int,
+    function_addr: cython.longlong,
+    mode: cython.longlong,
     addr: object,
     *,
     block_addr: int | None = None,
@@ -126,8 +137,9 @@ def record_access(
     address_bits: int | None = None,
 ) -> None:
     """Record one access only when the active collection owns its function."""
+    collection: object
     collection = _active_collection.get()
-    if collection is None or collection.function_addr != function_addr:
+    if collection is None or operator.ne(collection.function_addr, function_addr):
         return
     owned_block_addr = block_addr if block_addr is not None else _active_block_addr.get()
     ordinal = collection.allocate_ordinal(owned_block_addr, insn_addr)

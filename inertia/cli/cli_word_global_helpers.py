@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: preserve legacy CLI helper surface while delegating semantic proof to X86_16 layers.
@@ -5,6 +6,8 @@ Forbidden: owning decompiler semantics, source-backed recovery, or postprocess s
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from typing import Protocol
@@ -15,14 +18,15 @@ from angr.sim_variable import SimMemoryVariable
 
 
 class _CodegenFunctionLike(Protocol):
-    addr: int
+    addr: cython.longlong
 
 
 class _CodegenLike(Protocol):
     cfunc: _CodegenFunctionLike
 
 
-def _make_word_global(codegen: _CodegenLike, addr: int, name: str) -> structured_c.CVariable:
+@cython.ccall
+def _make_word_global(codegen: _CodegenLike, addr: cython.longlong, name: object) -> structured_c.CVariable:
     return structured_c.CVariable(
         SimMemoryVariable(addr, 2, name=name, region=codegen.cfunc.addr),
         variable_type=SimTypeShort(False),
@@ -30,15 +34,18 @@ def _make_word_global(codegen: _CodegenLike, addr: int, name: str) -> structured
     )
 
 
+@cython.ccall
 def _synthetic_word_global_variable(
     codegen: _CodegenLike,
-    synthetic_globals: dict[int, tuple[str, int]] | None,
-    addr: int,
+    synthetic_globals: object,
+    addr: cython.longlong,
     *,
     synthetic_global_entry: Callable[[dict[int, tuple[str, int]] | None, int], tuple[str, int] | None],
     sanitize_cod_identifier: Callable[[str], str],
-    created: dict[int, structured_c.CVariable] | None = None,
+    created: object = None,
 ) -> structured_c.CVariable | None:
+    existing: object
+    symbol: object
     if created is not None:
         existing = created.get(addr)
         if existing is not None:

@@ -690,3 +690,69 @@ def test_body_digest_retains_ssa_definition_and_group_coordinates(changed: str) 
     original = function_artifact_body_digest_8616(baseline)
     assert original is not None
     assert function_artifact_body_digest_8616(replace(baseline, blocks=blocks)) != original
+
+
+def test_immutable_code_encoding_reuses_without_changing_values() -> None:
+    """Identical immutable code constants keep identical encodings across calls."""
+    from inertia.ir.function_readiness_contracts import (
+        _immutable_code_encodings_8616,
+        _implementation_constant_8616,
+    )
+
+    def producer(flag: int = 3) -> int:
+        return flag + len("constant")
+
+    _immutable_code_encodings_8616.clear()
+    first = _implementation_constant_8616(producer.__code__)
+    entries = dict(_immutable_code_encodings_8616)
+    assert (id(producer.__code__), 0) in entries
+    second = _implementation_constant_8616(producer.__code__)
+    assert first is not None and second == first
+    # A fresh immutable code object at the same depth encodes identically but
+    # is a distinct cache slot — equal content is not conflated identity.
+    clone = producer.__code__.replace()
+    _implementation_constant_8616(clone)
+    assert (id(clone), 0) in _immutable_code_encodings_8616
+    assert _immutable_code_encodings_8616[(id(clone), 0)][1] == first
+
+
+def test_mutable_constant_graph_stays_fresh_and_uncached() -> None:
+    """Manually constructed mutable co_consts keep fresh behavior and no slot."""
+
+    from inertia.ir.function_readiness_contracts import (
+        _immutable_code_encodings_8616,
+        _implementation_constant_8616,
+    )
+
+    def template() -> None:
+        return None
+
+    box = {"payload": 1}
+    constructed = template.__code__.replace(co_consts=(None, box))
+    _immutable_code_encodings_8616.clear()
+    before = _implementation_constant_8616(constructed)
+    assert before is not None
+    assert (id(constructed), 0) not in _immutable_code_encodings_8616
+    box["payload"] = 2
+    after = _implementation_constant_8616(constructed)
+    assert after is not None and after != before
+    assert (id(constructed), 0) not in _immutable_code_encodings_8616
+
+
+def test_code_encoding_cache_respects_depth_refusal() -> None:
+    """A cached shallow success cannot launder a too-deep re-observation."""
+    from inertia.ir.function_readiness_contracts import (
+        _immutable_code_encodings_8616,
+        _implementation_constant_8616,
+    )
+
+    def producer() -> int:
+        return 1
+
+    _immutable_code_encodings_8616.clear()
+    assert _implementation_constant_8616(producer.__code__) is not None
+    assert _implementation_constant_8616(producer.__code__, depth=65) is None
+    # Depth-dependent refusal is recomputed per (code, depth) key.
+    deep = _implementation_constant_8616((producer.__code__,), depth=63)
+    shallow = _implementation_constant_8616((producer.__code__,))
+    assert deep is None and shallow is not None

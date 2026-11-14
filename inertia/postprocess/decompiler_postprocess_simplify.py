@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Structured-C cleanup pass; keep semantic proof outside this module.
 
 Layer: Rewrite/Postprocess cleanup.
@@ -38,6 +39,8 @@ rendered text, COD, source, or CLI/reporting evidence here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 import logging
@@ -81,19 +84,21 @@ from inertia.postprocess.flags_cleanup import _bool_cite_values_8616
 from inertia.semantics.alias_query import _storage_domain_for_expr
 from inertia.widening.register_widening import join_adjacent_register_slices
 from inertia.widening.widening_model import prove_adjacent_storage_slices
+import dataclasses
+import builtins
 
 _log = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SingleUseTemporaryEliminationStats8616:
     """Closed-loop evidence counters for cleanup-only temporary elimination."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
 class _SingleUseTemporaryCodegen8616(Protocol):
@@ -144,7 +149,8 @@ __all__ = [
 ]
 
 
-def describe_x86_16_projection_cleanup_rules() -> tuple[tuple[str, str], ...]:
+@cython.ccall
+def describe_x86_16_projection_cleanup_rules() -> object:
     """Describe cleanup-only projection simplification rules for architecture checks."""
     return PROJECTION_CLEANUP_RULES
 
@@ -152,8 +158,11 @@ def describe_x86_16_projection_cleanup_rules() -> tuple[tuple[str, str], ...]:
 _TRANSFORM_FALLTHROUGH_8616: Any = object()
 
 
-def _iter_seq_children_8616(node: object, attr: str) -> Iterator[tuple[str, object]]:
+def _iter_seq_children_8616(node: object, attr: object) -> Iterator[tuple[str, object]]:
     """Yield structured children held by one sequence attribute."""
+    seq: object
+    item: object
+    subitem: object
     seq = getattr(node, attr, None)
     if not seq:
         return
@@ -168,6 +177,12 @@ def _iter_seq_children_8616(node: object, attr: str) -> Iterator[tuple[str, obje
 
 def _iter_structured_children_8616(node: object) -> Iterator[tuple[str, object]]:
     """Yield ``(attr, child)`` pairs for structured codegen children of a node."""
+    child: object
+    pairs: object
+    attr: object
+    body: object
+    cond: object
+    subitem: object
     for attr in ("lhs", "rhs", "operand", "cond", "iftrue", "iffalse", "expr", "condition", "retval", "else_node"):
         child = getattr(node, attr, None)
         if _structured_codegen_node_8616(child):
@@ -182,7 +197,8 @@ def _iter_structured_children_8616(node: object) -> Iterator[tuple[str, object]]
                     yield "condition_and_nodes", subitem
 
 
-def _dirty_attr_8616(obj: object, attr: str) -> object | None:
+@cython.ccall
+def _dirty_attr_8616(obj: object, attr: object) -> object | None:
     """Read one dirty-expression attribute defensively."""
     try:
         return getattr(obj, attr, None)
@@ -190,8 +206,10 @@ def _dirty_attr_8616(obj: object, attr: str) -> object | None:
         return None
 
 
-def _dirty_reg_key_8616(dirty: object) -> tuple[str, object] | None:
+@cython.ccall
+def _dirty_reg_key_8616(dirty: object) -> object:
     """Build the register-location key for a dirty expression."""
+    attr: object
     reg_offset = None
     for attr in ("reg_offset", "reg", "variable_offset"):
         value = _dirty_attr_8616(dirty, attr)
@@ -208,7 +226,9 @@ def _dirty_reg_key_8616(dirty: object) -> tuple[str, object] | None:
     return None
 
 
+@cython.ccall
 def _virtual_expr_keys_8616(node: object) -> tuple[tuple[str, object], ...]:
+    reg_key: object
     keys: list[tuple[str, object]] = []
     if isinstance(node, CDirtyExpression) and (dirty := node.dirty) is not None:
         if isinstance(dirty, str) and dirty:
@@ -233,14 +253,15 @@ def _virtual_expr_keys_8616(node: object) -> tuple[tuple[str, object], ...]:
     return tuple(dict.fromkeys(keys))
 
 
-def _virtual_expr_key_8616(node: object) -> tuple[str, object] | None:
+@cython.ccall
+def _virtual_expr_key_8616(node: object) -> object:
     keys = _virtual_expr_keys_8616(node)
     if keys:
         return keys[0]
     return None
 
 
-def _virtual_inline_identity_keys_8616(keys: tuple[tuple[str, object], ...]) -> tuple[tuple[str, object], ...]:
+def _virtual_inline_identity_keys_8616(keys: object) -> object:
     """Return keys that identify one virtual value, not the register it occupies.
 
     A CDirtyExpression often carries both SSA-like identity (varid/tmp/name) and
@@ -248,31 +269,32 @@ def _virtual_inline_identity_keys_8616(keys: tuple[tuple[str, object], ...]) -> 
     across lowered blocks, so they are fallback identities only when no stable
     varid/name key is present.
     """
-    stable_keys = tuple(key for key in keys if key[0] in {"dirty-name", "dirty-varid", "virtual-name"})
+    stable_keys = tuple(key for key in iter(keys) if key[0] in {"dirty-name", "dirty-varid", "virtual-name"})
     if stable_keys:
         return stable_keys
-    tmp_keys = tuple(key for key in keys if key[0] == "dirty-tmp")
+    tmp_keys = tuple(key for key in iter(keys) if key[0] == "dirty-tmp")
     return tmp_keys or keys
 
 
-def _virtual_definition_has_disposable_storage_8616(node: object) -> bool:
+def _virtual_definition_has_disposable_storage_8616(node: object) -> cython.bint:
     """Require explicit virtual or register storage before deleting a definition."""
     keys = _virtual_expr_keys_8616(node)
     if isinstance(node, CDirtyExpression):
-        return any(key_kind == "dirty-reg" for key_kind, _value in keys)
+        return any(key_kind == "dirty-reg" for key_kind, _value in iter(keys))
     return isinstance(node, CVariable) and any(
-        key_kind == "virtual-name" for key_kind, _value in keys
+        key_kind == "virtual-name" for key_kind, _value in iter(keys)
     )
 
 
-def _debug_c_repr_8616(node: object) -> str:
+def _debug_c_repr_8616(node: object) -> object:
     try:
-        return "".join(str(text) for text, _obj in cast(Any, node).c_repr_chunks(asexpr=True))
+        return "".join(str(text) for text, _obj in builtins.iter(cast(Any, node).c_repr_chunks(asexpr=True)))
     except Exception:
         return repr(node)
 
 
-def _pure_virtual_inline_rhs_8616(expr: object) -> bool:
+@cython.ccall
+def _pure_virtual_inline_rhs_8616(expr: object) -> cython.bint:
     """Require a replayable tree; unversioned memory reads keep their capture."""
     if isinstance(expr, CVariable):
         # A global read has no side effect, but replaying it after a write can
@@ -303,7 +325,10 @@ def _pure_virtual_inline_rhs_8616(expr: object) -> bool:
     return False
 
 
-def _expr_contains_virtual_key_8616(node: object, target_key: tuple[str, object]) -> bool:
+@cython.ccall
+def _expr_contains_virtual_key_8616(node: object, target_key: object) -> cython.bint:
+    _attr: object
+    child: object
     if node is None:
         return False
     if _virtual_expr_key_8616(node) == target_key:
@@ -314,7 +339,7 @@ def _expr_contains_virtual_key_8616(node: object, target_key: tuple[str, object]
     return False
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _VirtualInlineRun8616:
     """Inline pure SSA-like virtual definitions by structural AST evidence.
 
@@ -326,14 +351,15 @@ class _VirtualInlineRun8616:
     codegen: object
     cfunc: object = None
     root: object = None
-    definitions: dict[tuple[str, object], object | None] = field(default_factory=dict)
-    replacements: dict[tuple[str, object], object] = field(default_factory=dict)
-    changed: bool = False
-    protected_refused_count: int = 0
-    candidate_count: int = 0
-    refused_count: int = 0
-    _pruned: int = 0
+    definitions: object = field(default_factory=dict)
+    replacements: object = field(default_factory=dict)
+    changed: cython.bint = False
+    protected_refused_count: cython.longlong = 0
+    candidate_count: cython.longlong = 0
+    refused_count: cython.longlong = 0
+    _pruned: cython.longlong = 0
 
+    @cython.ccall
     def run(self) -> object:
         """Inline pure SSA-like virtual definitions by structural AST evidence.
 
@@ -349,7 +375,7 @@ class _VirtualInlineRun8616:
         self.candidate_count = 0
         self.refused_count = 0
         self._collect_virtual_definitions_8616()
-        self.replacements = {key: rhs for key, rhs in self.definitions.items() if rhs is not None}
+        self.replacements = {key: rhs for key, rhs in builtins.iter(self.definitions.items()) if rhs is not None}
         if not self.replacements:
             self._publish_refusal_stats_8616()
             return False
@@ -380,6 +406,8 @@ class _VirtualInlineRun8616:
 
     def _collect_virtual_definitions_8616(self) -> None:
         """Collect unique pure virtual definitions keyed by identity."""
+        key: object
+        node: object
         for node in self._walk(self.root):
             if not isinstance(node, CAssignment):
                 continue
@@ -397,12 +425,12 @@ class _VirtualInlineRun8616:
                     _debug_c_repr_8616(node.lhs),
                     _debug_c_repr_8616(rhs),
                 )
-            if not _pure_virtual_inline_rhs_8616(rhs) or any(_expr_contains_virtual_key_8616(rhs, key) for key in keys):
+            if not _pure_virtual_inline_rhs_8616(rhs) or any(_expr_contains_virtual_key_8616(rhs, key) for key in iter(keys)):
                 for key in keys:
                     self.definitions[key] = None
                 self.refused_count += 1
                 continue
-            if any(key in self.definitions for key in keys):
+            if any(key in self.definitions for key in iter(keys)):
                 for key in keys:
                     self.definitions[key] = None
                 self.refused_count += 1
@@ -410,6 +438,7 @@ class _VirtualInlineRun8616:
             for key in keys:
                 self.definitions[key] = rhs
 
+    @cython.ccall
     def _publish_refusal_stats_8616(self) -> None:
         """Publish candidate/refusal counters when nothing was inlined."""
         if not self.candidate_count:
@@ -422,6 +451,8 @@ class _VirtualInlineRun8616:
         )
 
     def _walk(self, node: object) -> Iterator[object]:
+        _attr: object
+        child: object
         if node is None:
             return
         yield node
@@ -432,13 +463,15 @@ class _VirtualInlineRun8616:
         self,
         node: object,
         *,
-        protected_address_context: bool,
-        resolving_keys: set[tuple[str, object]],
+        protected_address_context: cython.bint,
+        resolving_keys: object,
     ) -> object:
         """Resolve a virtual-key replacement for the node or fall through."""
+        key: object
+        replacement: object
         raw_keys = _virtual_expr_keys_8616(node)
         keys = _virtual_inline_identity_keys_8616(raw_keys)
-        key = next((candidate_key for candidate_key in keys if candidate_key in self.replacements), None)
+        key = next((candidate_key for candidate_key in iter(keys) if candidate_key in self.replacements), None)
         replacement = self.replacements.get(key) if key is not None else None
         if replacement is not None:
             if key is None:
@@ -483,13 +516,15 @@ class _VirtualInlineRun8616:
             )
         return _TRANSFORM_FALLTHROUGH_8616
 
+    @cython.ccall
     def _transform(self,
         node: object,
         *,
-        assignment_lhs: bool = False,
-        protected_address_context: bool = False,
-        resolving_keys: set[tuple[str, object]] | None = None,
+        assignment_lhs: cython.bint = False,
+        protected_address_context: cython.bint = False,
+        resolving_keys: object = None,
     ) -> object:
+        attr: object
         if node is None:
             return node
         if resolving_keys is None:
@@ -510,8 +545,11 @@ class _VirtualInlineRun8616:
         self._transform_pair_children(node, protected_address_context=protected_address_context)
         return node
 
-    def _transform_scalar_children(self, node: object, *, protected_address_context: bool) -> None:
+    @cython.ccall
+    def _transform_scalar_children(self, node: object, *, protected_address_context: cython.bint) -> None:
         """Recurse into single-valued structured child attributes."""
+        child: object
+        attr: object
         for attr in ("lhs", "rhs", "operand", "cond", "iftrue", "iffalse", "expr", "condition", "retval", "else_node"):
             child = getattr(node, attr, None)
             if not _structured_codegen_node_8616(child):
@@ -527,8 +565,11 @@ class _VirtualInlineRun8616:
             if new_child is not child:
                 setattr(cast(Any, node), attr, new_child)
 
-    def _transform_seq_children(self, node: object, attr: str, *, protected_address_context: bool) -> None:
+    @cython.ccall
+    def _transform_seq_children(self, node: object, attr: object, *, protected_address_context: cython.bint) -> None:
         """Recurse into sequence attributes and rebuild changed lists."""
+        seq: object
+        item: object
         seq = getattr(node, attr, None)
         if not seq:
             return
@@ -544,8 +585,12 @@ class _VirtualInlineRun8616:
         if seq_changed:
             setattr(cast(Any, node), attr, new_seq)
 
-    def _transform_pair_children(self, node: object, *, protected_address_context: bool) -> None:
+    @cython.ccall
+    def _transform_pair_children(self, node: object, *, protected_address_context: cython.bint) -> None:
         """Recurse into condition_and_nodes pairs and rebuild changed lists."""
+        pairs: object
+        body: object
+        cond: object
         pairs = getattr(node, "condition_and_nodes", None)
         if not pairs:
             return
@@ -567,14 +612,19 @@ class _VirtualInlineRun8616:
         if pair_changed:
             cast(Any, node).condition_and_nodes = new_pairs
 
+    @cython.ccall
     def _collect_virtual_key_use_counts_8616(self,
         node: object,
-        tracked_keys: set[tuple[str, object]],
+        tracked_keys: object,
         *,
-        assignment_lhs: bool = False,
-        seen: set[int] | None = None,
-    ) -> dict[tuple[str, object], int]:
-        counts: dict[tuple[str, object], int] = {}
+        assignment_lhs: cython.bint = False,
+        seen: object = None,
+    ) -> object:
+        attr: object
+        child: object
+        count: object
+        key: object
+        counts: dict[tuple[str, object], cython.longlong] = {}
         if node is None or not tracked_keys:
             return counts
         if not _structured_codegen_node_8616(node):
@@ -603,13 +653,16 @@ class _VirtualInlineRun8616:
 
         return counts
 
+    @cython.ccall
     def _visit_prune_container_8616(
         self,
         container: object,
-        use_counts: dict[tuple[str, object], int],
-        visited: set[int],
+        use_counts: object,
+        visited: object,
     ) -> None:
         """Remove consumed virtual definitions inside one container."""
+        statements: object
+        statement: object
         if not _structured_codegen_node_8616(container):
             return
         container_id = id(container)
@@ -625,13 +678,19 @@ class _VirtualInlineRun8616:
                 self._visit_prune_container_8616(statement, use_counts, visited)
         self._visit_prune_children_8616(container, use_counts, visited)
 
+    @cython.ccall
     def _visit_prune_children_8616(
         self,
         container: object,
-        use_counts: dict[tuple[str, object], int],
-        visited: set[int],
+        use_counts: object,
+        visited: object,
     ) -> None:
         """Recurse into a container's nested bodies."""
+        child: object
+        pairs: object
+        _cond: object
+        attr: object
+        body: object
         for attr in ("body", "else_node"):
             child = getattr(container, attr, None)
             if _structured_codegen_node_8616(child):
@@ -644,10 +703,11 @@ class _VirtualInlineRun8616:
 
     def _filter_consumed_definitions_8616(
         self,
-        statements: list[object],
-        use_counts: dict[tuple[str, object], int],
-    ) -> list[object]:
+        statements: object,
+        use_counts: object,
+    ) -> object:
         """Keep statements whose virtual definitions are still live."""
+        statement: object
         kept = []
         for statement in statements:
             if not isinstance(statement, CAssignment):
@@ -656,17 +716,18 @@ class _VirtualInlineRun8616:
             keys = _virtual_inline_identity_keys_8616(_virtual_expr_keys_8616(statement.lhs))
             if (
                 keys
-                and any(key in self.replacements for key in keys)
+                and any(key in self.replacements for key in iter(keys))
                 and _virtual_definition_has_disposable_storage_8616(statement.lhs)
                 and _pure_virtual_inline_rhs_8616(statement.rhs)
-                and all(use_counts.get(key, 0) == 0 for key in keys)
+                and all(use_counts.get(key, 0) == 0 for key in iter(keys))
             ):
                 self._pruned += 1
                 continue
             kept.append(statement)
         return kept
 
-    def _prune_consumed_virtual_definitions_8616(self, node: object) -> int:
+    @cython.ccall
+    def _prune_consumed_virtual_definitions_8616(self, node: object) -> cython.longlong:
         self._pruned = 0
         replacement_keys = set(self.replacements)
         use_counts = self._collect_virtual_key_use_counts_8616(self.root, replacement_keys)
@@ -674,10 +735,11 @@ class _VirtualInlineRun8616:
         return self._pruned
 
 
-def _inline_single_assignment_virtual_expressions_8616(codegen: object) -> bool:
+@cython.ccall
+def _inline_single_assignment_virtual_expressions_8616(codegen: object) -> cython.bint:
     """Inline unique pure virtual definitions in-place across the structured AST."""
     return bool(_VirtualInlineRun8616(codegen=codegen).run())
-def _simplify_boolean_cites_8616(codegen: object) -> bool:
+def _simplify_boolean_cites_8616(codegen: object) -> cython.bint:
     if getattr(codegen, "cfunc", None) is None:
         return False
 
@@ -710,6 +772,7 @@ def _simplify_boolean_cites_8616(codegen: object) -> bool:
     return changed
 
 
+@cython.ccall
 def _arithmetic_candidate_pairs_8616(expr: object) -> list[tuple[object, object]]:
     """Operand orders to try for an Add/Sub update: both orders for Add, one for Sub."""
     if not isinstance(expr, CBinaryOp):
@@ -724,7 +787,7 @@ def _arithmetic_candidate_pairs_8616(expr: object) -> list[tuple[object, object]
 _STACK_FLAGS_REGISTER_NAMES_8616: frozenset[str] = frozenset({"sp", "bp", "esp", "ebp", "eflags", "flags"})
 
 
-_PURE_BINARY_FOLDS_8616: dict[str, Callable[[int, int], int]] = {
+_PURE_BINARY_FOLDS_8616: dict[str, Callable[[int, int], cython.longlong]] = {
     "Add": operator.add,
     "Sub": operator.sub,
     "Mul": operator.mul,
@@ -739,14 +802,17 @@ _PURE_BINARY_FOLDS_8616: dict[str, Callable[[int, int], int]] = {
 }
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _SimplifyExpressionRun8616:
     """Run context for structured-expression simplification over the codegen cfunc."""
+    changed_local: cython.bint
 
     codegen: object
 
-    def run(self) -> bool:
+    @cython.ccall
+    def run(self) -> cython.bint:
         """Run expression simplification over the cfunc roots; return changed."""
+        root: object
         if getattr(self.codegen, "cfunc", None) is None:
             return False
         roots = self._collect_cfunc_roots_8616()
@@ -765,10 +831,13 @@ class _SimplifyExpressionRun8616:
                 changed = True
         return changed
 
-    def _collect_cfunc_roots_8616(self) -> list[tuple[list[str], object]]:
+    @cython.ccall
+    def _collect_cfunc_roots_8616(self) -> object:
         """Collect unique top-level cfunc roots with the attribute paths that name them."""
+        root: object
+        attr: object
         roots: list[tuple[list[str], object]] = []
-        seen_roots: dict[int, list[str]] = {}
+        seen_roots: dict[cython.longlong, list[str]] = {}
         for attr in ("body", "statements", "stmt"):
             root = getattr(cast(Any, self.codegen).cfunc, attr, None)
             if root is None:
@@ -782,10 +851,14 @@ class _SimplifyExpressionRun8616:
             roots.append((attrs, root))
         return roots
 
+    @cython.ccall
     def _apply_root_transforms_8616(
-        self, roots: list[tuple[list[str], object]]
-    ) -> tuple[bool, list[object]]:
+        self, roots: object
+    ) -> tuple[cython.bint, list[object]]:
         """Transform each root, write replacements back through every alias attribute."""
+        attr: object
+        attrs: object
+        root: object
         changed = False
         active_roots: list[object] = []
         for attrs, root in roots:
@@ -802,7 +875,8 @@ class _SimplifyExpressionRun8616:
             active_roots.append(root)
         return changed, active_roots
 
-    def _refresh_root_children_8616(self, root: object) -> bool:
+    @cython.ccall
+    def _refresh_root_children_8616(self, root: object) -> cython.bint:
         """Re-transform children until stable, then restore shift conditions and word ops."""
         changed = False
         for _ in range(3):
@@ -814,11 +888,13 @@ class _SimplifyExpressionRun8616:
             changed = True
         return changed
 
-    def _bump_stat_8616(self, attr: str) -> None:
+    @cython.ccall
+    def _bump_stat_8616(self, attr: object) -> None:
         """Increment a numeric debug/stat counter on the dynamic codegen boundary."""
         setattr(cast(Any, self.codegen), attr, int(getattr(self.codegen, attr, 0) or 0) + 1)
 
-    def _invert_cmp_op_8616(self, op: str) -> str | None:
+    @cython.ccall
+    def _invert_cmp_op_8616(self, op: object) -> object:
         return {
             "CmpGT": "CmpLE",
             "CmpGE": "CmpLT",
@@ -828,25 +904,31 @@ class _SimplifyExpressionRun8616:
             "CmpNE": "CmpEQ",
         }.get(op)
 
-    def _is_c_constant_int_8616(self, expr: object, value: int) -> bool:
+    @cython.ccall
+    def _is_c_constant_int_8616(self, expr: object, value: cython.longlong) -> cython.bint:
         return isinstance(expr, CConstant) and isinstance(expr.value, int) and expr.value == value
 
+    @cython.ccall
     def _c_constant_int_value_8616(self, expr: object) -> int | None:
         if isinstance(expr, CConstant) and isinstance(expr.value, int):
             return int(expr.value)
         return None
 
+    @cython.ccall
     def _unwrap_c_casts_8616(self, expr: object) -> object:
         while isinstance(expr, CTypeCast):
             expr = expr.expr
         return expr
 
-    def _constant_result_type_8616(self, node: CBinaryOp | CUnaryOp, value: int) -> object:
+    @cython.ccall
+    def _constant_result_type_8616(self, node: CBinaryOp | CUnaryOp, value: cython.longlong) -> object:
         if value < 0 or value > 0xFFFF:
             return SimTypeLong(value < 0)
         return node.type or SimTypeShort(False)
 
-    def _fold_pure_constant_binary_8616(self, op: str, lhs: int, rhs: int) -> int | None:
+    @cython.ccall
+    def _fold_pure_constant_binary_8616(self, op: object, lhs: cython.longlong, rhs: cython.longlong) -> int | None:
+        fold: object
         if op in {"Div", "Mod"} and rhs == 0:
             return None
         if op in {"Shl", "Shr", "Sar"} and (rhs < 0 or rhs > 63):
@@ -854,7 +936,11 @@ class _SimplifyExpressionRun8616:
         fold = _PURE_BINARY_FOLDS_8616.get(op)
         return None if fold is None else fold(lhs, rhs)
 
+    @cython.ccall
     def _pure_constant_expr_value_8616(self, expr: object) -> int | None:
+        lhs: object
+        operand: object
+        rhs: object
         expr = self._unwrap_c_casts_8616(expr)
         if isinstance(expr, CConstant) and isinstance(expr.value, int):
             return int(expr.value)
@@ -877,7 +963,9 @@ class _SimplifyExpressionRun8616:
             return self._fold_pure_constant_binary_8616(str(expr.op), lhs, rhs)
         return None
 
-    def _flatten_offset_terms_8616(self, expr: object, sign: int = 1) -> tuple[int, tuple[tuple[int, object], ...]]:
+    @cython.ccall
+    def _flatten_offset_terms_8616(self, expr: object, sign: cython.longlong = 1) -> tuple[cython.longlong, tuple[tuple[cython.longlong, object], ...]]:
+        const_value: object
         expr = self._unwrap_c_casts_8616(expr)
         const_value = self._pure_constant_expr_value_8616(expr)
         if const_value is not None:
@@ -892,10 +980,17 @@ class _SimplifyExpressionRun8616:
             return lhs_const + rhs_const, lhs_terms + rhs_terms
         return 0, ((sign, expr),)
 
+    @cython.ccall
     def _same_signed_term_multiset_8616(self,
-        lhs_terms: tuple[tuple[int, object], ...],
-        rhs_terms: tuple[tuple[int, object], ...],
-    ) -> bool:
+        lhs_terms: object,
+        rhs_terms: object,
+    ) -> cython.bint:
+        found_index: object
+        idx: object
+        lhs_expr: object
+        lhs_sign: object
+        rhs_expr: object
+        rhs_sign: object
         unmatched = list(rhs_terms)
         for lhs_sign, lhs_expr in lhs_terms:
             found_index = None
@@ -908,6 +1003,7 @@ class _SimplifyExpressionRun8616:
             del unmatched[found_index]
         return not unmatched
 
+    @cython.ccall
     def _global_byte_reference_addr_8616(self, expr: object) -> int | None:
         expr = self._unwrap_c_casts_8616(expr)
         if not isinstance(expr, CUnaryOp) or expr.op != "Reference":
@@ -923,9 +1019,13 @@ class _SimplifyExpressionRun8616:
         addr = variable.addr
         return addr if isinstance(addr, int) else None
 
-    def _global_byte_address_terms_8616(self, expr: object) -> tuple[int, tuple[tuple[int, object], ...], bool]:
+    @cython.ccall
+    def _global_byte_address_terms_8616(self, expr: object) -> tuple[cython.longlong, tuple[tuple[cython.longlong, object], ...], cython.bint]:
+        ref_addr: object
+        sign: object
+        term: object
         const_value, terms = self._flatten_offset_terms_8616(expr)
-        normalized_terms: list[tuple[int, object]] = []
+        normalized_terms: list[tuple[cython.longlong, object]] = []
         saw_global_byte_ref = False
         for sign, term in terms:
             ref_addr = self._global_byte_reference_addr_8616(term)
@@ -936,7 +1036,8 @@ class _SimplifyExpressionRun8616:
             normalized_terms.append((sign, term))
         return const_value, tuple(normalized_terms), saw_global_byte_ref
 
-    def _byte_deref_address_info_8616(self, expr: object) -> tuple[object, int, tuple[tuple[int, object], ...]] | None:
+    @cython.ccall
+    def _byte_deref_address_info_8616(self, expr: object) -> object:
         expr = self._unwrap_c_casts_8616(expr)
         if not isinstance(expr, CUnaryOp) or expr.op != "Dereference":
             return None
@@ -946,9 +1047,13 @@ class _SimplifyExpressionRun8616:
             return None
         return addr_expr, const_value, terms
 
+    @cython.ccall
     def _shifted_byte_deref_high_info_8616(self,
         expr: object,
-    ) -> tuple[object, int, tuple[tuple[int, object], ...]] | None:
+    ) -> object:
+        maybe_deref: object
+        maybe_scale: object
+        maybe_shift: object
         expr = self._unwrap_c_casts_8616(expr)
         if not isinstance(expr, CBinaryOp):
             return None
@@ -962,6 +1067,7 @@ class _SimplifyExpressionRun8616:
                     return self._byte_deref_address_info_8616(maybe_deref)
         return None
 
+    @cython.ccall
     def _make_word_deref_from_addr_expr_8616(self, addr_expr: object) -> CFunctionCall:
         return CFunctionCall(
             "MEM_U16",
@@ -971,7 +1077,12 @@ class _SimplifyExpressionRun8616:
             tags={"inertia_x86_16_runtime_pointer_helper": "MEM_U16"},
         )
 
+    @cython.ccall
     def _fold_global_byte_deref_pair_8616(self, expr: object) -> object | None:
+        high_info: object
+        low_info: object
+        maybe_high: object
+        maybe_low: object
         if not isinstance(expr, CBinaryOp) or expr.op not in {"Or", "Add"}:
             return None
         for maybe_low, maybe_high in ((expr.lhs, expr.rhs), (expr.rhs, expr.lhs)):
@@ -988,24 +1099,28 @@ class _SimplifyExpressionRun8616:
             return cast(object | None, self._make_word_deref_from_addr_expr_8616(low_addr_expr))
         return None
 
-    def _is_power_of_two_minus_one_8616(self, value: int) -> bool:
+    @cython.ccall
+    def _is_power_of_two_minus_one_8616(self, value: cython.longlong) -> cython.bint:
         """Check if value is of form 2^n - 1 (all bits set up to position n-1)."""
         if value <= 0:
             return False
         return (value & (value + 1)) == 0
 
-    def _bit_position_of_power_of_two_8616(self, value: int) -> int | None:
+    @cython.ccall
+    def _bit_position_of_power_of_two_8616(self, value: cython.longlong) -> int | None:
         """Return n if value == 2^n, else None."""
         if value <= 0 or (value & (value - 1)) != 0:
             return None
         return (value - 1).bit_length()
 
-    def _leading_set_bits_8616(self, value: int) -> int:
+    @cython.ccall
+    def _leading_set_bits_8616(self, value: cython.longlong) -> cython.longlong:
         """Return position of highest set bit (1-indexed, so 0xFF -> 8)."""
         if value == 0:
             return 0
         return value.bit_length()
 
+    @cython.ccall
     def _extract_same_zero_compare_expr_8616(self, expr: object) -> object | None:
         if not isinstance(expr, CBinaryOp) or expr.op != "CmpEQ":
             return None
@@ -1015,8 +1130,14 @@ class _SimplifyExpressionRun8616:
             return cast(object | None, expr.rhs)
         return None
 
+    @cython.ccall
     def _extract_scaled_zero_flag_source_8616(self, expr: CBinaryOp) -> object | None:
         """Recover a zero-compare source hidden behind a ``x & mask == 0 << 6`` scaling."""
+        lhs_expr: object
+        rhs_expr: object
+        source_expr: object
+        maybe_logic: object
+        maybe_scale: object
         for maybe_logic, maybe_scale in ((expr.lhs, expr.rhs), (expr.rhs, expr.lhs)):
             if not self._is_c_constant_int_8616(maybe_scale, 64):
                 continue
@@ -1031,8 +1152,11 @@ class _SimplifyExpressionRun8616:
                 return lhs_expr
         return None
 
-    def _extract_zero_flag_source_from_children_8616(self, children: tuple[object, ...]) -> object | None:
+    @cython.ccall
+    def _extract_zero_flag_source_from_children_8616(self, children: object) -> object | None:
         """Recurse into structured child expressions for a zero-flag source."""
+        extracted: object
+        child: object
         for child in children:
             if _structured_codegen_node_8616(child):
                 extracted = self._extract_zero_flag_source_expr_8616(child)
@@ -1040,7 +1164,9 @@ class _SimplifyExpressionRun8616:
                     return extracted
         return None
 
+    @cython.ccall
     def _extract_zero_flag_source_expr_8616(self, expr: object) -> object | None:
+        source_expr: object
         if isinstance(expr, CBinaryOp):
             if expr.op == "Mul":
                 source_expr = self._extract_scaled_zero_flag_source_8616(expr)
@@ -1055,21 +1181,30 @@ class _SimplifyExpressionRun8616:
 
         return None
 
-    def _stack_or_flags_offsets_8616(self) -> frozenset[int]:
+    @cython.ccall
+    def _stack_or_flags_offsets_8616(self) -> frozenset[cython.longlong]:
         """Collect arch register offsets that identify stack or flags storage."""
+        arch: object
+        register_info: object
+        register_name: object
         arch = getattr(getattr(self.codegen, "project", None), "arch", None)
         registers = getattr(arch, "registers", {}) if arch is not None else {}
-        offsets: set[int] = set()
+        offsets: set[cython.longlong] = set()
         for register_name in _STACK_FLAGS_REGISTER_NAMES_8616:
             register_info = registers.get(register_name)
             if isinstance(register_info, tuple) and register_info and isinstance(register_info[0], int):
                 offsets.add(register_info[0])
         return frozenset(offsets)
 
-    def _expr_contains_stack_or_flags_register_8616(self, expr: object) -> bool:
+    @cython.ccall
+    def _expr_contains_stack_or_flags_register_8616(self, expr: object) -> cython.bint:
         return self._stack_or_flags_register_in_node_8616(expr, self._stack_or_flags_offsets_8616())
 
-    def _stack_or_flags_register_in_node_8616(self, node: object, offsets: frozenset[int]) -> bool:
+    @cython.ccall
+    def _stack_or_flags_register_in_node_8616(self, node: object, offsets: object) -> cython.bint:
+        child: object
+        offset: object
+        attr: object
         node = self._unwrap_c_casts_8616(node)
         if isinstance(node, CVariable):
             variable = node.variable
@@ -1093,6 +1228,10 @@ class _SimplifyExpressionRun8616:
 
     def _seq_structured_children_8616(self, node: object) -> Iterator[object]:
         """Yield structured children from sequence-valued attributes (operands/args/tuples)."""
+        seq: object
+        attr: object
+        item: object
+        subitem: object
         for attr in ("operands", "args"):
             seq = getattr(node, attr, None)
             if not seq:
@@ -1105,13 +1244,14 @@ class _SimplifyExpressionRun8616:
                         if _structured_codegen_node_8616(subitem):
                             yield subitem
 
-    def _seq_contains_stack_or_flags_8616(self, node: object, offsets: frozenset[int]) -> bool:
+    def _seq_contains_stack_or_flags_8616(self, node: object, offsets: object) -> cython.bint:
         """Scan sequence-valued attributes (operands, args, and tuple items) for stack/flags."""
         return any(
             self._stack_or_flags_register_in_node_8616(child, offsets)
-            for child in self._seq_structured_children_8616(node)
+            for child in builtins.iter(self._seq_structured_children_8616(node))
         )
 
+    @cython.ccall
     def _shifted_high_byte_source_8616(self, expr: object) -> object | None:
         while isinstance(expr, CTypeCast):
             expr = expr.expr
@@ -1125,14 +1265,19 @@ class _SimplifyExpressionRun8616:
             return cast(object | None, expr.rhs)
         return None
 
+    @cython.ccall
     def _or_terms_8616(self, expr: object) -> list[object]:
         if isinstance(expr, CBinaryOp) and expr.op == "Or":
             return [*self._or_terms_8616(expr.lhs), *self._or_terms_8616(expr.rhs)]
         return [expr]
 
+    @cython.ccall
     def _match_word_or_carrier_expr_8616(self, expr: object, target: object) -> int | None:
+        const_value: object
+        shifted: object
+        term: object
         terms = self._or_terms_8616(expr)
-        constant_terms: list[int] = []
+        constant_terms: list[cython.longlong] = []
         saw_target = False
         saw_shifted_target = False
         for term in terms:
@@ -1155,9 +1300,13 @@ class _SimplifyExpressionRun8616:
             return None
         return value
 
+    @cython.ccall
     def _match_word_or_carrier_expr_pair_8616(self, expr: object, low_target: object, high_target: object) -> int | None:
+        const_value: object
+        shifted: object
+        term: object
         terms = self._or_terms_8616(expr)
-        constant_terms: list[int] = []
+        constant_terms: list[cython.longlong] = []
         saw_low = False
         saw_shifted_high = False
         for term in terms:
@@ -1180,6 +1329,7 @@ class _SimplifyExpressionRun8616:
             return None
         return value
 
+    @cython.ccall
     def _match_word_or_carrier_shift_8616(self, expr: object, target: object) -> int | None:
         if not isinstance(expr, CBinaryOp) or expr.op != "Shr":
             return None
@@ -1187,6 +1337,7 @@ class _SimplifyExpressionRun8616:
             return None
         return self._match_word_or_carrier_expr_8616(expr.lhs, target)
 
+    @cython.ccall
     def _match_word_or_carrier_pair_shift_8616(self, expr: object, low_target: object, high_target: object) -> int | None:
         if not isinstance(expr, CBinaryOp) or expr.op != "Shr":
             return None
@@ -1194,7 +1345,10 @@ class _SimplifyExpressionRun8616:
             return None
         return self._match_word_or_carrier_expr_pair_8616(expr.lhs, low_target, high_target)
 
-    def _stack_word_contains_high_byte_8616(self, word_expr: object, high_expr: object) -> bool:
+    @cython.ccall
+    def _stack_word_contains_high_byte_8616(self, word_expr: object, high_expr: object) -> cython.bint:
+        high_slot: object
+        word_slot: object
         word_domain = _storage_domain_for_expr(word_expr)
         high_domain = _storage_domain_for_expr(high_expr)
         if word_domain.space != "stack" or high_domain.space != "stack":
@@ -1213,8 +1367,10 @@ class _SimplifyExpressionRun8616:
             return False
         return int(word_domain.width or 0) == 2 and high_offset == word_offset + 1
 
+    @cython.ccall
     def _materialize_joined_word_expr_8616(self, low_expr: object, high_expr: object) -> object | None:
         """Consume register-view joins; never invent stack or memory C objects."""
+        alias_state: object
         if not (
             isinstance(low_expr, CVariable) and isinstance(high_expr, CVariable)
             and isinstance(low_expr.variable, SimRegisterVariable)
@@ -1229,7 +1385,9 @@ class _SimplifyExpressionRun8616:
             low_expr, high_expr, self.codegen, alias_state=alias_state, proof=proof,
         ))
 
+    @cython.ccall
     def _simplify_zero_flag_comparison_8616(self, expr: object) -> object:
+        source_expr: object
         if not isinstance(expr, CBinaryOp) or expr.op not in {"CmpEQ", "CmpNE"}:
             return expr
 
@@ -1250,6 +1408,7 @@ class _SimplifyExpressionRun8616:
             return source_expr
         return CUnaryOp("Not", cast(Any, source_expr), codegen=self.codegen)
 
+    @cython.ccall
     def _restore_not_shift_zero_flag_source_8616(self, source_expr: object) -> object | None:
         source_expr = self._unwrap_c_casts_8616(source_expr)
         if not isinstance(source_expr, CBinaryOp) or source_expr.op not in {"Shr", "Sar"}:
@@ -1273,7 +1432,8 @@ class _SimplifyExpressionRun8616:
             tags=lhs.tags or source_expr.tags,
         ))
 
-    def _restore_not_shift_in_binary_8616(self, expr: CBinaryOp) -> tuple[object, bool]:
+    @cython.ccall
+    def _restore_not_shift_in_binary_8616(self, expr: CBinaryOp) -> tuple[object, cython.bint]:
         lhs, lhs_changed = self._restore_not_shift_condition_expr_8616(expr.lhs)
         rhs, rhs_changed = self._restore_not_shift_condition_expr_8616(expr.rhs)
         if lhs_changed:
@@ -1289,7 +1449,8 @@ class _SimplifyExpressionRun8616:
                     return restored, True
         return expr, lhs_changed or rhs_changed
 
-    def _restore_not_shift_condition_expr_8616(self, expr: object) -> tuple[object, bool]:
+    @cython.ccall
+    def _restore_not_shift_condition_expr_8616(self, expr: object) -> object:
         expr = self._unwrap_c_casts_8616(expr)
         if isinstance(expr, CBinaryOp):
             return self._restore_not_shift_in_binary_8616(expr)
@@ -1305,8 +1466,12 @@ class _SimplifyExpressionRun8616:
             return expr, inner_changed
         return expr, False
 
-    def _restore_not_shift_in_pairs_8616(self, node: object, changed_local: bool) -> bool:
+    @cython.ccall
+    def _restore_not_shift_in_pairs_8616(self, node: object, changed_local: cython.bint) -> cython.bint:
         """Rewrite ``condition_and_nodes`` pair conditions in place when any changed."""
+        pairs: object
+        body: object
+        condition: object
         pairs = getattr(node, "condition_and_nodes", None)
         if not pairs:
             return changed_local
@@ -1325,8 +1490,13 @@ class _SimplifyExpressionRun8616:
             return True
         return changed_local
 
-    def _restore_not_shift_in_children_8616(self, node: object, changed_local: bool) -> bool:
+    @cython.ccall
+    def _restore_not_shift_in_children_8616(self, node: object, changed_local: cython.bint) -> cython.bint:
         """Recurse into body/else branches and statement lists."""
+        child: object
+        statements: object
+        attr: object
+        statement: object
         for attr in ("body", "else_node"):
             child = getattr(node, attr, None)
             if _structured_codegen_node_8616(child):
@@ -1338,7 +1508,10 @@ class _SimplifyExpressionRun8616:
                     changed_local = self._restore_not_shift_conditions_in_node_8616(statement) or changed_local
         return changed_local
 
-    def _restore_not_shift_conditions_in_node_8616(self, node: object) -> bool:
+    @cython.ccall
+    def _restore_not_shift_conditions_in_node_8616(self, node: object) -> cython.bint:
+        condition: object
+        attr: object
         if not _structured_codegen_node_8616(node):
             return False
         changed_local = False
@@ -1353,8 +1526,11 @@ class _SimplifyExpressionRun8616:
         changed_local = self._restore_not_shift_in_pairs_8616(node, changed_local)
         return self._restore_not_shift_in_children_8616(node, changed_local)
 
+    @cython.ccall
     def _fold_stat_counted_8616(self, node: object) -> object | None:
         """Folds that bump a codegen counter: global byte pairs and pure constants."""
+        folded_constant: object
+        folded_global_word: object
         if isinstance(node, CBinaryOp) and node.op in {"Or", "Add"}:
             folded_global_word = self._fold_global_byte_deref_pair_8616(node)
             if folded_global_word is not None:
@@ -1375,8 +1551,13 @@ class _SimplifyExpressionRun8616:
                 )
         return None
 
+    @cython.ccall
     def transform(self, node: object) -> object:
         """Apply the simplification arms to one node; identity when nothing folds."""
+        counted: object
+        folded_binary: object
+        folded_not: object
+        folded_tail: object
         counted = self._fold_stat_counted_8616(node)
         if counted is not None:
             return counted
@@ -1405,8 +1586,11 @@ class _SimplifyExpressionRun8616:
                 return folded_tail
         return node
 
+    @cython.ccall
     def _fold_tail_binary_8616(self, node: CBinaryOp) -> object | None:
         """Last-chance binary folds: same-operand dedup, zero-compare, and self-cancel."""
+        folded_cmp: object
+        type_: object
         if node.op in {"LogicalAnd", "LogicalOr", "And", "Or"} and _same_c_expression_8616(node.lhs, node.rhs):
             return cast(object, node.lhs)
         if node.op in {"CmpEQ", "CmpNE"}:
@@ -1419,6 +1603,7 @@ class _SimplifyExpressionRun8616:
                 return cast(object, CConstant(0, type_, codegen=self.codegen))
         return None
 
+    @cython.ccall
     def _fold_binary_transform_8616(self, node: CBinaryOp) -> object | None:
         """Dispatch the pure binary-operator folds; None means no fold applied."""
         if node.op == "Concat":
@@ -1431,7 +1616,12 @@ class _SimplifyExpressionRun8616:
             return self._fold_or_word_or_zero_8616(node)
         return None
 
+    @cython.ccall
     def _fold_concat_8616(self, node: CBinaryOp) -> object:
+        lhs_bits: object
+        lhs_val: object
+        rhs_bits: object
+        rhs_val: object
         lhs_val = _c_constant_value_8616(node.lhs)
         rhs_val = _c_constant_value_8616(node.rhs)
         rhs_bits = getattr(node.rhs.type, "size", None)
@@ -1451,14 +1641,20 @@ class _SimplifyExpressionRun8616:
             tags=node.tags,
         )
 
+    @cython.ccall
     def _fold_zero_operand_binary_8616(self, node: CBinaryOp) -> object | None:
+        type_: object
         if self._is_c_constant_int_8616(node.lhs, 0) or self._is_c_constant_int_8616(node.rhs, 0):
             type_ = node.type or node.lhs.type or node.rhs.type
             if type_ is not None:
                 return cast(object, CConstant(0, type_, codegen=self.codegen))
         return None
 
+    @cython.ccall
     def _fold_or_word_or_zero_8616(self, node: CBinaryOp) -> object | None:
+        folded: object
+        shifted_lhs: object
+        shifted_rhs: object
         shifted_rhs = self._shifted_high_byte_source_8616(node.rhs)
         if shifted_rhs is not None:
             folded = self._materialize_joined_word_expr_8616(node.lhs, shifted_rhs)
@@ -1475,7 +1671,10 @@ class _SimplifyExpressionRun8616:
             return cast(object, node.lhs)
         return None
 
+    @cython.ccall
     def _fold_not_transform_8616(self, node: CUnaryOp) -> object | None:
+        inverted: object
+        operand_type: object
         operand = node.operand
         if isinstance(operand, CUnaryOp) and operand.op == "Not":
             return cast(object, operand.operand)
@@ -1505,8 +1704,11 @@ class _SimplifyExpressionRun8616:
                 )
         return None
 
+    @cython.ccall
     def _fold_cmp_against_zero_8616(self, node: CBinaryOp) -> object | None:
         """Reduce ``(x - C) cmp0`` to ``x cmp C`` on either operand side."""
+        other: object
+        probe: object
         for probe, other in ((node.rhs, node.lhs), (node.lhs, node.rhs)):
             if not (isinstance(probe, CConstant) and probe.value == 0):
                 continue
@@ -1514,7 +1716,8 @@ class _SimplifyExpressionRun8616:
                 return cast(object, CBinaryOp(node.op, other.lhs, other.rhs, codegen=self.codegen, tags=node.tags))
         return None
 
-    def _materialize_word_or_update_statements_8616(self, root_node: object) -> bool:
+    @cython.ccall
+    def _materialize_word_or_update_statements_8616(self, root_node: object) -> cython.bint:
         self.changed_local = False
 
         self._visit_word_or_node_8616(root_node)
@@ -1523,22 +1726,28 @@ class _SimplifyExpressionRun8616:
 
 
 
+    @cython.ccall
     def _unwrap_expr_8616(self, expr: object) -> object:
         while isinstance(expr, CTypeCast):
             expr = expr.expr
         return expr
 
-    def _virtual_assignment_key_8616(self, stmt: object) -> tuple[str, object] | None:
+    @cython.ccall
+    def _virtual_assignment_key_8616(self, stmt: object) -> object:
         if not isinstance(stmt, CAssignment):
             return None
         return _virtual_expr_key_8616(stmt.lhs)
 
-    def _virtual_assignment_keys_8616(self, stmt: object) -> tuple[tuple[str, object], ...]:
+    @cython.ccall
+    def _virtual_assignment_keys_8616(self, stmt: object) -> object:
         if not isinstance(stmt, CAssignment):
             return ()
         return _virtual_expr_keys_8616(stmt.lhs)
 
-    def _copy_alias_map_8616(self, statements: list[object]) -> dict[tuple[str, object], object]:
+    @cython.ccall
+    def _copy_alias_map_8616(self, statements: object) -> object:
+        candidate: object
+        key: object
         aliases: dict[tuple[str, object], object] = {}
         for candidate in statements:
             if not isinstance(candidate, CAssignment):
@@ -1555,19 +1764,22 @@ class _SimplifyExpressionRun8616:
                 aliases[key] = rhs
         return aliases
 
-    def _debug_aliases_8616(self, aliases: dict[tuple[str, object], object]) -> list[str]:
+    @cython.ccall
+    def _debug_aliases_8616(self, aliases: object) -> list[str]:
         if not os.environ.get("INERTIA_DEBUG_WORD_OR_UPDATE"):
             return []
-        return [f"{key}={_debug_c_repr_8616(value)}" for key, value in sorted(aliases.items(), key=str)]
+        return [f"{key}={_debug_c_repr_8616(value)}" for key, value in builtins.iter(sorted(tuple(aliases.items()), key=str))]
 
     def _resolve_copy_alias_expr_8616(self,
-        expr: object, aliases: dict[tuple[str, object], object], used: set[tuple[str, object]]
+        expr: object, aliases: object, used: object
     ) -> object:
+        key: object
+        replacement: object
         expr = self._unwrap_expr_8616(expr)
         keys = _virtual_expr_keys_8616(expr)
         if not keys:
             return expr
-        key = next((candidate_key for candidate_key in keys if candidate_key in aliases), None)
+        key = next((candidate_key for candidate_key in iter(keys) if candidate_key in aliases), None)
         if key is None:
             return expr
         replacement = aliases.get(key)
@@ -1579,13 +1791,17 @@ class _SimplifyExpressionRun8616:
             return expr
         return self._resolve_copy_alias_expr_8616(replacement, aliases, used)
 
+    @cython.ccall
     def _match_joined_stack_word_base_8616(self,
         expr: object,
         word_target: object,
         high_target: object,
-        aliases: dict[tuple[str, object], object],
-        used: set[tuple[str, object]],
+        aliases: object,
+        used: object,
     ) -> object | None:
+        shifted: object
+        maybe_high: object
+        maybe_low: object
         expr = self._unwrap_expr_8616(expr)
         if not isinstance(expr, CBinaryOp) or expr.op != "Or":
             return None
@@ -1599,17 +1815,20 @@ class _SimplifyExpressionRun8616:
                 return word_target
         return None
 
+    @cython.ccall
     def _same_after_copy_alias_8616(self,
         left: object,
         right: object,
-        aliases: dict[tuple[str, object], object],
-        used: set[tuple[str, object]],
-    ) -> bool:
+        aliases: object,
+        used: object,
+    ) -> cython.bint:
         left_resolved = self._resolve_copy_alias_expr_8616(left, aliases, used)
         right_resolved = self._resolve_copy_alias_expr_8616(right, aliases, used)
         return bool(_same_c_expression_8616(left_resolved, right_resolved))
 
-    def _contains_unresolved_virtual_expr_8616(self, expr: object) -> bool:
+    def _contains_unresolved_virtual_expr_8616(self, expr: object) -> cython.bint:
+        child: object
+        attr: object
         if expr is None:
             return False
         if _virtual_expr_key_8616(expr) is not None:
@@ -1620,17 +1839,18 @@ class _SimplifyExpressionRun8616:
                 return True
         return any(
             self._contains_unresolved_virtual_expr_8616(child)
-            for child in self._seq_structured_children_8616(expr)
+            for child in builtins.iter(self._seq_structured_children_8616(expr))
         )
 
+    @cython.ccall
     def _log_arithmetic_pair_refuse_8616(
         self,
-        reason: str,
+        reason: object,
         low_rhs: object,
         high_rhs: object,
         word_target: object,
         high_target: object,
-        aliases: dict[tuple[str, object], object],
+        aliases: object,
     ) -> None:
         if os.environ.get("INERTIA_DEBUG_WORD_OR_UPDATE"):
             _log.warning(
@@ -1644,14 +1864,15 @@ class _SimplifyExpressionRun8616:
                 self._debug_aliases_8616(aliases),
             )
 
+    @cython.ccall
     def _gate_arithmetic_update_pair_8616(
         self,
         low_rhs: object,
         high_rhs: object,
         word_target: object,
         high_target: object,
-        aliases: dict[tuple[str, object], object],
-    ) -> tuple[CBinaryOp, CBinaryOp] | None:
+        aliases: object,
+    ) -> object:
         """Unwrap and gate the ``word op delta`` low/high pair before matching."""
         low_rhs = self._unwrap_expr_8616(low_rhs)
         high_rhs = self._unwrap_expr_8616(high_rhs)
@@ -1679,6 +1900,7 @@ class _SimplifyExpressionRun8616:
             return None
         return update_expr, high_update_expr
 
+    @cython.ccall
     def _match_arithmetic_delta_8616(
         self,
         maybe_base: object,
@@ -1688,9 +1910,12 @@ class _SimplifyExpressionRun8616:
         high_rhs: object,
         word_target: object,
         high_target: object,
-        aliases: dict[tuple[str, object], object],
-    ) -> tuple[object, set[tuple[str, object]]] | None:
+        aliases: object,
+    ) -> object:
         """Match one low-side ``base op delta`` candidate against the high update."""
+        matched_used: object
+        high_base: object
+        high_delta: object
         low_used: set[tuple[str, object]] = set()
         if (
             self._match_joined_stack_word_base_8616(maybe_base, word_target, high_target, aliases, low_used)
@@ -1698,7 +1923,7 @@ class _SimplifyExpressionRun8616:
         ):
             return None
         delta = self._resolve_copy_alias_expr_8616(maybe_delta, aliases, low_used)
-        matched_used: set[tuple[str, object]] | None = None
+        matched_used = None
         for high_base, high_delta in _arithmetic_candidate_pairs_8616(high_update_expr):
             high_used = set(low_used)
             if (
@@ -1730,8 +1955,12 @@ class _SimplifyExpressionRun8616:
         high_rhs: object,
         word_target: object,
         high_target: object,
-        aliases: dict[tuple[str, object], object],
-    ) -> tuple[str, object, set[tuple[str, object]]] | None:
+        aliases: object,
+    ) -> object:
+        gated: object
+        matched: object
+        maybe_base: object
+        maybe_delta: object
         low_rhs = self._unwrap_expr_8616(low_rhs)
         high_rhs = self._unwrap_expr_8616(high_rhs)
         gated = self._gate_arithmetic_update_pair_8616(low_rhs, high_rhs, word_target, high_target, aliases)
@@ -1760,7 +1989,7 @@ class _SimplifyExpressionRun8616:
                     word_target,
                     high_target,
                     delta,
-                    sorted(str(key) for key in matched_used),
+                    sorted(str(key) for key in iter(matched_used)),
                 )
             return update_expr.op, delta, matched_used
         self._log_arithmetic_pair_refuse_8616(
@@ -1768,12 +1997,13 @@ class _SimplifyExpressionRun8616:
         )
         return None
 
+    @cython.ccall
     def _log_duplicate_shift_refuse_8616(
         self,
-        reason: str,
+        reason: object,
         rhs: object,
         word_target: object,
-        aliases: dict[tuple[str, object], object],
+        aliases: object,
     ) -> None:
         if os.environ.get("INERTIA_DEBUG_WORD_OR_UPDATE"):
             _log.warning(
@@ -1787,11 +2017,12 @@ class _SimplifyExpressionRun8616:
                 self._debug_aliases_8616(aliases),
             )
 
+    @cython.ccall
     def _gate_duplicate_shift_update_8616(
         self,
         rhs: object,
         word_target: object,
-        aliases: dict[tuple[str, object], object],
+        aliases: object,
     ) -> CBinaryOp | None:
         """Gate ``(x|x<<8) op delta >> 8`` shape down to its Add/Sub update expr."""
         target_domain = _storage_domain_for_expr(word_target)
@@ -1810,14 +2041,18 @@ class _SimplifyExpressionRun8616:
             return None
         return update_expr
 
+    @cython.ccall
     def _match_duplicate_or_base_8616(
         self,
         base: object,
         word_target: object,
-        aliases: dict[tuple[str, object], object],
-        candidate_used: set[tuple[str, object]],
-    ) -> bool:
+        aliases: object,
+        candidate_used: object,
+    ) -> cython.bint:
         """Check that ``base`` is an Or of the target word with its shifted self."""
+        shifted: object
+        maybe_high: object
+        maybe_low: object
         base = self._unwrap_expr_8616(base)
         if not isinstance(base, CBinaryOp) or base.op != "Or":
             return False
@@ -1834,8 +2069,11 @@ class _SimplifyExpressionRun8616:
     def _match_duplicate_word_arithmetic_shift_8616(self,
         rhs: object,
         word_target: object,
-        aliases: dict[tuple[str, object], object],
-    ) -> tuple[str, object, set[tuple[str, object]]] | None:
+        aliases: object,
+    ) -> object:
+        update_expr: object
+        maybe_base: object
+        maybe_delta: object
         rhs = self._unwrap_expr_8616(rhs)
         update_expr = self._gate_duplicate_shift_update_8616(rhs, word_target, aliases)
         if update_expr is None:
@@ -1854,24 +2092,31 @@ class _SimplifyExpressionRun8616:
                     update_expr.op,
                     word_target,
                     delta,
-                    sorted(str(key) for key in candidate_used),
+                    sorted(str(key) for key in iter(candidate_used)),
                 )
             return update_expr.op, delta, candidate_used
         self._log_duplicate_shift_refuse_8616("base-not-duplicate-word", rhs, word_target, aliases)
         return None
 
-    def _delete_tail_virtual_aliases_8616(self, statements: list[object], used_keys: set[tuple[str, object]]) -> None:
+    def _delete_tail_virtual_aliases_8616(self, statements: object, used_keys: object) -> None:
+        statement: object
         if not used_keys:
             return
         kept: list[object] = []
         for statement in statements:
             keys = self._virtual_assignment_keys_8616(statement)
-            if keys and any(key in used_keys for key in keys):
+            if keys and any(key in used_keys for key in iter(keys)):
                 continue
             kept.append(statement)
         statements[:] = kept
 
+    @cython.ccall
     def _visit_word_or_node_8616(self, node: object) -> None:
+        child: object
+        pairs: object
+        _cond: object
+        attr: object
+        body: object
         if isinstance(node, list):
             replacement = self._rewrite_statement_list_8616(node)
             if replacement is not node:
@@ -1892,7 +2137,8 @@ class _SimplifyExpressionRun8616:
             if _structured_codegen_node_8616(child):
                 self._visit_word_or_node_8616(child)
 
-    def _log_word_or_seq_8616(self, i: int, stmt: object, next_stmt: object) -> None:
+    @cython.ccall
+    def _log_word_or_seq_8616(self, i: cython.longlong, stmt: object, next_stmt: object) -> None:
         if os.environ.get("INERTIA_DEBUG_WORD_OR_UPDATE"):  # noqa: SIM102
             if isinstance(stmt, CAssignment) or isinstance(next_stmt, CAssignment):
                 same_lhs = (
@@ -1912,10 +2158,12 @@ class _SimplifyExpressionRun8616:
                     type(next_stmt.rhs).__name__ if isinstance(next_stmt, CAssignment) else None,
                 )
 
+    @cython.ccall
     def _probe_word_or_pair_8616(
         self, stmt: object, next_stmt: object
     ) -> tuple[object | None, int | None, int | None]:
         """Classify an adjacent assignment pair for word-or joining."""
+        joined_lhs: object
         replacement_lhs: object | None = None
         immediate: int | None = None
         shifted_immediate: int | None = None
@@ -1951,13 +2199,15 @@ class _SimplifyExpressionRun8616:
                     self._bump_stat_8616("_inertia_word_or_update_candidates")
         return replacement_lhs, immediate, shifted_immediate
 
+    @cython.ccall
     def _try_duplicate_shift_8616(
         self,
         stmt: object,
-        copy_aliases: dict[tuple[str, object], object],
-        new_statements: list[object],
+        copy_aliases: object,
+        new_statements: object,
     ) -> int | None:
         """Fold ``x = (x|x<<8) op delta >> 8`` into a single arithmetic update."""
+        duplicate_shift: object
         if not (isinstance(stmt, CAssignment) and isinstance(stmt.lhs, CVariable)):
             return None
         with contextlib.suppress(Exception):
@@ -1973,15 +2223,17 @@ class _SimplifyExpressionRun8616:
             self._bump_stat_8616("_inertia_word_arithmetic_shift_materialized_count")
         return 1
 
+    @cython.ccall
     def _try_arithmetic_pair_update_8616(
         self,
         stmt: object,
         next_stmt: object,
-        replacement_lhs: object | None,
-        copy_aliases: dict[tuple[str, object], object],
-        new_statements: list[object],
+        replacement_lhs: object,
+        copy_aliases: object,
+        new_statements: object,
     ) -> int | None:
         """Fold a low/high arithmetic update pair into one word-width update."""
+        arithmetic_update: object
         if not (
             replacement_lhs is not None
             and isinstance(stmt, CAssignment)
@@ -2009,13 +2261,14 @@ class _SimplifyExpressionRun8616:
             self._bump_stat_8616("_inertia_word_arithmetic_update_materialized_count")
         return 2
 
+    @cython.ccall
     def _try_word_or_update_8616(
         self,
         stmt: object,
-        replacement_lhs: object | None,
-        immediate: int | None,
+        replacement_lhs: object,
+        immediate: object,
         shifted_immediate: int | None,
-        new_statements: list[object],
+        new_statements: object,
     ) -> int | None:
         """Fold ``low = v; high = v>>8`` or-style carriers into ``word |= imm``."""
         if not (
@@ -2036,9 +2289,11 @@ class _SimplifyExpressionRun8616:
             self._bump_stat_8616("_inertia_word_or_update_materialized_count")
         return 2
 
+    @cython.ccall
     def _log_word_or_refused_8616(
         self, stmt: CAssignment, next_stmt: CAssignment, immediate: int | None, shifted_immediate: int | None
     ) -> None:
+        term: object
         if os.environ.get("INERTIA_DEBUG_WORD_OR_UPDATE"):
             term_debug = []
             for term in self._or_terms_8616(stmt.rhs):
@@ -2066,7 +2321,10 @@ class _SimplifyExpressionRun8616:
         with contextlib.suppress(Exception):
             self._bump_stat_8616("_inertia_word_or_update_refused")
 
-    def _rewrite_statement_list_8616(self, statements: list[object]) -> list[object]:
+    @cython.ccall
+    def _rewrite_statement_list_8616(self, statements: object) -> object:
+        consumed: object
+        replacement_lhs: object
         new_statements: list[object] = []
         i = 0
         while i < len(statements):
@@ -2095,19 +2353,23 @@ class _SimplifyExpressionRun8616:
             i += 1
         return new_statements
 
-def _simplify_structured_expressions_8616(codegen: object) -> bool:
+@cython.ccall
+def _simplify_structured_expressions_8616(codegen: object) -> cython.bint:
     return _SimplifyExpressionRun8616(codegen=codegen).run()
-def _is_virtual_register_temporary_8616(lhs: object) -> bool:
+@cython.ccall
+def _is_virtual_register_temporary_8616(lhs: object) -> cython.bint:
     """Accept only register-backed carriers, never stack or memory storage."""
     return isinstance(lhs, CVariable) and isinstance(lhs.variable, SimRegisterVariable)
 
 
-def _crosses_nested_execution_scope_8616(stmt: object) -> bool:
+@cython.ccall
+def _crosses_nested_execution_scope_8616(stmt: object) -> cython.bint:
     """Refuse moving a definition into control flow with different frequency."""
     return isinstance(stmt, (CDoWhileLoop, CForLoop, CIfElse, CSwitchCase, CWhileLoop))
 
 
-def _safe_inline_expr_8616(expr: object) -> bool:
+@cython.ccall
+def _safe_inline_expr_8616(expr: object) -> cython.bint:
     """Return whether an expression is free of direct memory reads and calls."""
     if isinstance(expr, (CConstant, CVariable)):
         return True
@@ -2128,8 +2390,11 @@ def _safe_inline_expr_8616(expr: object) -> bool:
     return False
 
 
-def _count_var_uses_seq_8616(seq: Iterable[object], target: object) -> int:
+@cython.ccall
+def _count_var_uses_seq_8616(seq: Iterable[object], target: object) -> cython.longlong:
     """Sum temporary uses inside one sequence attribute."""
+    item: object
+    subitem: object
     total = 0
     for item in seq:
         if _structured_codegen_node_8616(item):
@@ -2141,8 +2406,11 @@ def _count_var_uses_seq_8616(seq: Iterable[object], target: object) -> int:
     return total
 
 
-def _count_var_uses_pairs_8616(pairs: Iterable[tuple[object, object]], target: object) -> int:
+@cython.ccall
+def _count_var_uses_pairs_8616(pairs: Iterable[tuple[object, object]], target: object) -> cython.longlong:
     """Sum temporary uses inside condition/body pairs."""
+    body: object
+    cond: object
     total = 0
     for cond, body in pairs:
         if _structured_codegen_node_8616(cond):
@@ -2152,8 +2420,13 @@ def _count_var_uses_pairs_8616(pairs: Iterable[tuple[object, object]], target: o
     return total
 
 
-def _count_var_uses_8616(node: object, target: object, *, assignment_lhs: bool = False) -> int:
+@cython.ccall
+def _count_var_uses_8616(node: object, target: object, *, assignment_lhs: cython.bint = False) -> cython.longlong:
     """Count structural uses of one temporary across the dynamic angr AST."""
+    child: object
+    pairs: object
+    seq: object
+    attr: object
     if node is None:
         return 0
     if isinstance(node, CVariable):
@@ -2178,8 +2451,10 @@ def _count_var_uses_8616(node: object, target: object, *, assignment_lhs: bool =
     return total
 
 
-def _replace_var_use_in_seq_8616(seq: Iterable[object], target: object, replacement: object) -> tuple[list[object], bool]:
+@cython.ccall
+def _replace_var_use_in_seq_8616(seq: Iterable[object], target: object, replacement: object) -> tuple[list[object], cython.bint]:
     """Rewrite uses inside one sequence attribute, returning the rebuilt list."""
+    item: object
     new_seq: list[object] = []
     seq_changed = False
     for item in seq:
@@ -2192,10 +2467,13 @@ def _replace_var_use_in_seq_8616(seq: Iterable[object], target: object, replacem
     return new_seq, seq_changed
 
 
+@cython.ccall
 def _replace_var_use_in_pairs_8616(
     pairs: Iterable[tuple[object, object]], target: object, replacement: object
-) -> tuple[list[tuple[object, object]], bool]:
+) -> tuple[list[tuple[object, object]], cython.bint]:
     """Rewrite uses inside condition/body pairs, returning the rebuilt pairs."""
+    body: object
+    cond: object
     new_pairs: list[tuple[object, object]] = []
     pair_changed = False
     for cond, body in pairs:
@@ -2214,10 +2492,13 @@ def _replace_var_use_in_pairs_8616(
     return new_pairs, pair_changed
 
 
+@cython.ccall
 def _replace_var_use_in_attrs_8616(
-    node: object, target: object, replacement: object, assignment_lhs: bool
-) -> bool:
+    node: object, target: object, replacement: object, assignment_lhs: cython.bint
+) -> cython.bint:
     """Rewrite uses in scalar child attributes, tracking the assignment-lhs guard."""
+    child: object
+    attr: object
     changed = False
     for attr in ("lhs", "rhs", "operand", "cond", "iftrue", "iffalse", "expr", "condition", "retval", "else_node"):
         child = getattr(node, attr, None)
@@ -2235,14 +2516,18 @@ def _replace_var_use_in_attrs_8616(
     return changed
 
 
+@cython.ccall
 def _replace_var_use_8616(
     node: object,
     target: object,
     replacement: object,
     *,
-    assignment_lhs: bool = False,
-) -> tuple[object, bool]:
+    assignment_lhs: cython.bint = False,
+) -> tuple[object, cython.bint]:
     """Replace one temporary use across the dynamic angr AST."""
+    pairs: object
+    seq: object
+    attr: object
     if isinstance(node, CVariable):
         if not assignment_lhs and _same_c_expression_8616(node, target):
             return replacement, True
@@ -2267,19 +2552,20 @@ def _replace_var_use_8616(
     return node, changed_local
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _SingleUseTemporaryRun8616:
     """Mutable accumulator driving the single-use-temporary elimination pass."""
 
     codegen: object
-    changed: bool = False
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    changed: cython.bint = False
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
-    def run(self) -> bool:
+    @cython.ccall
+    def run(self) -> cython.bint:
         """Visit the cfunc statement list and publish the closed-loop stats."""
         typed_codegen = cast(_SingleUseTemporaryCodegen8616, self.codegen)
         if getattr(self.codegen, "cfunc", None) is None:
@@ -2299,8 +2585,8 @@ class _SingleUseTemporaryRun8616:
         return self.changed
 
     def _try_eliminate_carrier_8616(
-        self, stmt: CAssignment, next_stmt: object, later_statements: list[object]
-    ) -> bool:
+        self, stmt: CAssignment, next_stmt: object, later_statements: object
+    ) -> cython.bint:
         """Attempt to inline ``stmt.rhs`` into its single use in ``next_stmt``."""
         self.raw_fact_count += 1
         if not _is_virtual_register_temporary_8616(stmt.lhs):
@@ -2311,7 +2597,7 @@ class _SingleUseTemporaryRun8616:
             self.failure_count += 1
             return False
         immediate_uses = _count_var_uses_8616(next_stmt, stmt.lhs)
-        later_uses = sum(_count_var_uses_8616(rest, stmt.lhs) for rest in later_statements)
+        later_uses = sum(_count_var_uses_8616(rest, stmt.lhs) for rest in iter(later_statements))
         if not (immediate_uses == 1 and later_uses == 0):
             self.failure_count += 1
             return False
@@ -2324,8 +2610,10 @@ class _SingleUseTemporaryRun8616:
         self.materialized_count += 1
         return True
 
+    @cython.ccall
     def _visit(self, node: object) -> None:
         """Visit one statement block and eliminate locally proven carriers."""
+        next_stmt: object
         if not isinstance(node, CStatements):
             return
 
@@ -2354,12 +2642,14 @@ class _SingleUseTemporaryRun8616:
             cast(Any, node).statements = new_statements
 
 
-def _eliminate_single_use_temporaries_8616(codegen: object) -> bool:
+@cython.ccall
+def _eliminate_single_use_temporaries_8616(codegen: object) -> cython.bint:
     """Inline one-use register carriers without crossing storage or control scope."""
     return _SingleUseTemporaryRun8616(codegen=codegen).run()
 
 
-def _maybe_eliminate_single_use_temporaries_8616(project: object, codegen: object) -> bool:
+@cython.ccall
+def _maybe_eliminate_single_use_temporaries_8616(project: object, codegen: object) -> cython.bint:
     if not getattr(project, "_inertia_postprocess_single_use_temporaries_enabled", False):
         return False
     return _eliminate_single_use_temporaries_8616(codegen)

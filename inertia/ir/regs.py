@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Register offset and segment-space helpers for IR construction.
 
 Layer: IR.
@@ -8,6 +9,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 __all__ = [
     "REG8_OFFSET_MAP",
@@ -18,7 +21,7 @@ __all__ = [
 ]
 
 
-REG8_OFFSET_MAP: dict[int, str] = {
+REG8_OFFSET_MAP: dict[cython.longlong, str] = {
     0: "al",
     1: "ah",
     4: "cl",
@@ -30,7 +33,7 @@ REG8_OFFSET_MAP: dict[int, str] = {
 }
 
 
-REG16_OFFSET_MAP: dict[int, str] = {
+REG16_OFFSET_MAP: dict[cython.longlong, str] = {
     0: "ax",
     4: "cx",
     8: "dx",
@@ -49,7 +52,7 @@ REG16_OFFSET_MAP: dict[int, str] = {
     50: "ss",
 }
 
-REG32_OFFSET_MAP: dict[int, str] = {
+REG32_OFFSET_MAP: dict[cython.longlong, str] = {
     0: "eax",
     4: "ecx",
     8: "edx",
@@ -66,7 +69,8 @@ REG32_OFFSET_MAP: dict[int, str] = {
 }
 
 
-def register_name_from_offset(offset: int, size: int = 2) -> str:
+@cython.ccall
+def register_name_from_offset(offset: cython.longlong, size: cython.longlong = 2) -> object:
     """Return the width-correct register view for a VEX offset and byte size."""
     offset_value = int(offset)
     if size == 1 and offset_value in REG8_OFFSET_MAP:
@@ -76,7 +80,8 @@ def register_name_from_offset(offset: int, size: int = 2) -> str:
     return REG16_OFFSET_MAP.get(offset_value, f"r{offset}")
 
 
-def segment_space_for_base(name: str | None) -> str:
+@cython.ccall
+def segment_space_for_base(name: object) -> str:
     """Return the default segment space implied by a base register name."""
     if name in {"bp", "sp"}:
         return "ss"

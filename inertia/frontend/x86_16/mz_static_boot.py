@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Static-header MZ boot input for source-authenticated invocation proofs.
 
 Layer: Frontend.
@@ -15,12 +16,16 @@ simulation, solver, typed edge, or success verdict.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import hashlib
 from dataclasses import dataclass
 
 from .mz_invocation_source import mz_invocation_source_8616
 from .mz_load_source import parse_mz
+import dataclasses
+import operator
 
 __all__ = [
     "MzStaticBoot8616",
@@ -32,7 +37,7 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class MzStaticBootPoint8616:
     """Typed segmented point projected from the MZ header.
 
@@ -40,10 +45,10 @@ class MzStaticBootPoint8616:
     20-bit real-mode range.
     """
 
-    segment: int
-    offset: int
+    segment: cython.longlong
+    offset: cython.longlong
 
-    def linear(self) -> int:
+    def linear(self) -> cython.longlong:
         """Return the 20-bit linear address of ``segment:offset``."""
         linear = self.segment * 16 + self.offset
         if not 0 <= linear < 0x100000:
@@ -51,14 +56,14 @@ class MzStaticBootPoint8616:
         return linear
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class MzStaticBootRange8616:
     """Typed linear byte range projected onto the loaded module."""
 
-    address: int
-    size: int
+    address: cython.longlong
+    size: cython.longlong
 
-    def contains(self, address: int, size: int = 1) -> bool:
+    def contains(self, address: cython.longlong, size: cython.longlong = 1) -> cython.bint:
         """Return whether ``[address, address+size)`` lies inside this range."""
         return (
             size >= 0
@@ -67,7 +72,7 @@ class MzStaticBootRange8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class MzStaticBootImage8616:
     """Declared image surface for a static-header boot input.
 
@@ -80,16 +85,16 @@ class MzStaticBootImage8616:
     range, ``"declared"`` means the caller supplied explicit spans.
     """
 
-    chunks: tuple[tuple[int, bytes], ...]
-    code_ranges: tuple[MzStaticBootRange8616, ...]
-    load_segment: int
-    file_sha256: str
-    image_sha256: str
-    reloc_sha256: str
-    code_scope: str
+    chunks: object
+    code_ranges: object
+    load_segment: cython.longlong
+    file_sha256: object
+    image_sha256: object
+    reloc_sha256: object
+    code_scope: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class MzStaticBoot8616:
     """Static-header invocation input projected from retained MZ bytes.
 
@@ -102,14 +107,14 @@ class MzStaticBoot8616:
     other register may acquire a value through this input.
     """
 
-    source: bytes
+    source: object
     entry: MzStaticBootPoint8616
     stack: MzStaticBootPoint8616
     image: MzStaticBootImage8616
-    boot_sha256: str
+    boot_sha256: object
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether re-deriving this input reproduces it exactly.
 
         The recompute consumes only ``source``, ``load_segment`` and the
@@ -117,17 +122,23 @@ class MzStaticBoot8616:
         field was forged after construction.
         """
         try:
-            return recompute_mz_static_boot_8616(self) == self
+            return operator.eq(recompute_mz_static_boot_8616(self), self)
         except (TypeError, ValueError):
             return False
 
 
+@cython.ccall
 def _static_identity_8616(
-    entry_linear: int,
-    stack_linear: int,
+    entry_linear: cython.longlong,
+    stack_linear: cython.longlong,
     image: MzStaticBootImage8616,
-) -> str:
+) -> object:
     """Compute the stable digest of one static-header input's typed fields."""
+    address: object
+    bound: object
+    chunk: object
+    tag: object
+    value: object
     digest = hashlib.sha256()
     digest.update(b"static")
     for value in (entry_linear, stack_linear, image.load_segment):
@@ -149,10 +160,10 @@ def _static_identity_8616(
 
 
 def mz_static_boot_8616(
-    source: bytes,
-    load_segment: int,
+    source: object,
+    load_segment: cython.longlong,
     *,
-    code_ranges: tuple[MzStaticBootRange8616, ...] = (),
+    code_ranges: object = (),
 ) -> MzStaticBoot8616:
     """Construct one static-header input from source bytes and load paragraph.
 
@@ -163,6 +174,9 @@ def mz_static_boot_8616(
     flag state is invented. ``code_ranges`` scopes native fetches; when
     omitted, the whole module is declared in scope.
     """
+    bound: object
+    reloc_offset: object
+    reloc_segment: object
     if not isinstance(load_segment, int) or not 0 <= load_segment <= 0xFFFF:
         raise TypeError("real16 static boot requires a declared load paragraph")
     projection = mz_invocation_source_8616(source, load_segment)
@@ -172,7 +186,7 @@ def mz_static_boot_8616(
     module_base = projection.module_base
     module_end = module_base + len(projection.module)
     if code_ranges:
-        if not all(type(bound) is MzStaticBootRange8616 for bound in code_ranges):
+        if not all(type(bound) is MzStaticBootRange8616 for bound in iter(code_ranges)):
             raise TypeError("real16 static code ranges must be typed bounds")
         for bound in code_ranges:
             if bound.size < 0 or bound.address < module_base or bound.address + bound.size > module_end:
@@ -218,6 +232,7 @@ def mz_static_boot_8616(
     )
 
 
+@cython.ccall
 def recompute_mz_static_boot_8616(boot: object) -> MzStaticBoot8616:
     """Reconstruct the static input from its retained source bytes.
 

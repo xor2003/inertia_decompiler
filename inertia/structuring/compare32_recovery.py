@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Recover 32-bit comparison structure from decoded instruction evidence.
 
 Layer: Structuring.
@@ -8,15 +9,20 @@ rewrite cleanup, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Protocol, cast
+import dataclasses
+import operator
+import builtins
 
 
 class _CapstoneInstructionLike8616(Protocol):
     """Structural view of a dynamic third-party Capstone instruction boundary."""
 
-    def reg_name(self, _reg_id: int) -> str:
+    def reg_name(self, _reg_id: cython.longlong) -> object:
         """Return a register name for a Capstone register id."""
         ...
 
@@ -30,26 +36,26 @@ class _AngrProjectLike8616(Protocol):
 class _AngrBlockFactoryLike8616(Protocol):
     """Structural view of the dynamic angr block factory boundary."""
 
-    def block(self, addr: int) -> object:
+    def block(self, addr: cython.longlong) -> object:
         """Return a decoded block object for an address."""
         ...
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class Operand8616:
     """Decoded operand summary used by the 32-bit compare recognizer."""
 
-    kind: str | None
-    value: int | str | None
+    kind: object
+    value: object
     size: int | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class Instruction8616:
     """Decoded instruction summary used by the 32-bit compare recognizer."""
 
-    addr: int
-    mnemonic: str
+    addr: cython.longlong
+    mnemonic: object
     op0: Operand8616 = Operand8616(None, None, None)
     op1: Operand8616 = Operand8616(None, None, None)
 
@@ -59,15 +65,18 @@ _UNSIGNED_HIGH_JCC = frozenset({"jae", "jbe", "ja", "jb"})
 _LOW_WORD_JCC = frozenset({"ja", "jae", "jb", "jbe"})
 
 
-def _sanitize_c_identifier_8616(name: str) -> str:
-    cleaned = "".join(ch if (ch.isalnum() or ch == "_") else "_" for ch in str(name or ""))
+def _sanitize_c_identifier_8616(name: object) -> object:
+    cleaned = "".join(ch if (ch.isalnum() or ch == "_") else "_" for ch in builtins.iter(str(name or "")))
     if not cleaned or cleaned[0].isdigit():
         cleaned = f"sub_{cleaned}" if cleaned else "sub_func"
     return cleaned
 
 
-def _operand_from_capstone_8616(insn: object, index: int) -> Operand8616:
+@cython.ccall
+def _operand_from_capstone_8616(insn: object, index: cython.longlong) -> Operand8616:
     """Decode one operand from a dynamic third-party Capstone boundary."""
+    mem: object
+    size: object
     typed_insn = cast(_CapstoneInstructionLike8616, insn)
     operands = tuple(getattr(insn, "operands", ()) or ())
     if index >= len(operands):
@@ -87,6 +96,7 @@ def _operand_from_capstone_8616(insn: object, index: int) -> Operand8616:
     return Operand8616(None, None, size)
 
 
+@cython.ccall
 def _instruction_from_capstone_8616(insn: object) -> Instruction8616:
     """Convert a dynamic third-party Capstone boundary instruction or decoded summary to evidence."""
     if isinstance(insn, Instruction8616):
@@ -99,18 +109,21 @@ def _instruction_from_capstone_8616(insn: object) -> Instruction8616:
     )
 
 
+@cython.ccall
 def _decoded_block_instructions_8616(block: object) -> list[Instruction8616]:
     """Return decoded instruction summaries for one basic block."""
     return [
         # Dynamic angr/capstone compatibility boundary.
         _instruction_from_capstone_8616(getattr(insn, "insn", insn))
         # Dynamic angr block compatibility boundary.
-        for insn in getattr(getattr(block, "capstone", None), "insns", ()) or ()
+        for insn in iter(getattr(getattr(block, "capstone", None), "insns", ()) or ())
     ]
 
 
-def _function_block_objects_8616(project: object, function: object) -> tuple[object, ...]:
+def _function_block_objects_8616(project: object, function: object) -> object:
     """Return known basic blocks across a dynamic angr function/project boundary."""
+    addr: object
+    block_addr: object
     typed_project = cast(_AngrProjectLike8616, project)
     try:
         # Dynamic angr Function compatibility boundary.
@@ -124,7 +137,7 @@ def _function_block_objects_8616(project: object, function: object) -> tuple[obj
     if not isinstance(addr, int):
         return ()
     # Dynamic angr Function compatibility boundary.
-    block_addrs = tuple(sorted(block_addr for block_addr in getattr(function, "block_addrs_set", ()) or ()))
+    block_addrs = tuple(sorted(block_addr for block_addr in iter(getattr(function, "block_addrs_set", ()) or ())))
     if not block_addrs:
         block_addrs = (addr,)
     result: list[object] = []
@@ -137,8 +150,10 @@ def _function_block_objects_8616(project: object, function: object) -> tuple[obj
     return tuple(result)
 
 
-def _function_instructions_8616(project: object, function: object, *, max_size: int = 0x300) -> list[Instruction8616]:
+@cython.ccall
+def _function_instructions_8616(project: object, function: object, *, max_size: cython.longlong = 0x300) -> object:
     """Return decoded instruction summaries for all known blocks in a function."""
+    block: object
     instructions: list[Instruction8616] = []
     for block in _function_block_objects_8616(project, function):
         instructions.extend(_decoded_block_instructions_8616(block))
@@ -147,22 +162,26 @@ def _function_instructions_8616(project: object, function: object, *, max_size: 
     return instructions
 
 
-def _is_load_reg_bp(insn: Instruction8616, reg: str, disp: int) -> bool:
+@cython.ccall
+def _is_load_reg_bp(insn: Instruction8616, reg: object, disp: cython.longlong) -> cython.bint:
     return (
         insn.mnemonic == "mov"
         and insn.op0.kind == "reg"
-        and insn.op0.value == reg
+        and operator.eq(insn.op0.value, reg)
         and insn.op1.kind == "bp_mem"
-        and insn.op1.value == disp
+        and operator.eq(insn.op1.value, disp)
     )
 
 
-def _is_mov_ax_imm(insn: Instruction8616) -> bool:
+@cython.ccall
+def _is_mov_ax_imm(insn: Instruction8616) -> cython.bint:
     return insn.mnemonic == "mov" and insn.op0.kind == "reg" and insn.op0.value == "ax" and insn.op1.kind == "imm"
 
 
-def _constant_returns_8616(insns: list[Instruction8616]) -> set[int]:
-    values: set[int] = set()
+@cython.ccall
+def _constant_returns_8616(insns: object) -> object:
+    insn: object
+    values: set[cython.longlong] = set()
     for insn in insns:
         if _is_mov_ax_imm(insn):
             value = int(insn.op1.value or 0) & 0xFFFF
@@ -170,8 +189,11 @@ def _constant_returns_8616(insns: list[Instruction8616]) -> set[int]:
     return values
 
 
-def _stack_pair_returns_8616(insns: list[Instruction8616]) -> set[int]:
-    returns: set[int] = set()
+@cython.ccall
+def _stack_pair_returns_8616(insns: object) -> object:
+    index: object
+    insn: object
+    returns: set[cython.longlong] = set()
     for index, insn in enumerate(insns[:-1]):
         if not (
             insn.mnemonic == "mov"
@@ -188,14 +210,14 @@ def _stack_pair_returns_8616(insns: list[Instruction8616]) -> set[int]:
     return returns
 
 
-def _has_32bit_arg_compare_evidence_8616(insns: list[Instruction8616], left: int, right: int) -> bool:
+def _has_32bit_arg_compare_evidence_8616(insns: object, left: cython.longlong, right: cython.longlong) -> cython.bint:
     has_high_cmp = any(
         insn.mnemonic == "cmp"
         and insn.op0.kind == "bp_mem"
         and insn.op0.value in {left + 2, right + 2}
         and insn.op1.kind == "reg"
         and insn.op1.value == "dx"
-        for insn in insns
+        for insn in iter(insns)
     )
     has_low_cmp = any(
         insn.mnemonic == "cmp"
@@ -203,15 +225,16 @@ def _has_32bit_arg_compare_evidence_8616(insns: list[Instruction8616], left: int
         and insn.op0.value in {left, right}
         and insn.op1.kind == "reg"
         and insn.op1.value == "ax"
-        for insn in insns
+        for insn in iter(insns)
     )
-    has_ax_load = any(_is_load_reg_bp(insn, "ax", left) or _is_load_reg_bp(insn, "ax", right) for insn in insns)
-    has_dx_load = any(_is_load_reg_bp(insn, "dx", left + 2) or _is_load_reg_bp(insn, "dx", right + 2) for insn in insns)
+    has_ax_load = any(_is_load_reg_bp(insn, "ax", left) or _is_load_reg_bp(insn, "ax", right) for insn in iter(insns))
+    has_dx_load = any(_is_load_reg_bp(insn, "dx", left + 2) or _is_load_reg_bp(insn, "dx", right + 2) for insn in iter(insns))
     return has_high_cmp and has_low_cmp and has_ax_load and has_dx_load
 
 
-def _comparison_signedness_8616(insns: list[Instruction8616]) -> str | None:
-    mnemonics = {insn.mnemonic for insn in insns}
+@cython.ccall
+def _comparison_signedness_8616(insns: object) -> object:
+    mnemonics = {insn.mnemonic for insn in iter(insns)}
     has_signed_high = bool(mnemonics & _SIGNED_HIGH_JCC)
     has_unsigned_high = bool(mnemonics & _UNSIGNED_HIGH_JCC)
     has_low_word = bool(mnemonics & _LOW_WORD_JCC)
@@ -222,8 +245,10 @@ def _comparison_signedness_8616(insns: list[Instruction8616]) -> str | None:
     return None
 
 
-def _or_mask_constants_8616(insns: list[Instruction8616]) -> set[int]:
-    constants: set[int] = set()
+@cython.ccall
+def _or_mask_constants_8616(insns: object) -> object:
+    insn: object
+    constants: set[cython.longlong] = set()
     for insn in insns:
         if insn.mnemonic == "or" and insn.op1.kind == "imm":
             value = int(insn.op1.value or 0)
@@ -232,7 +257,8 @@ def _or_mask_constants_8616(insns: list[Instruction8616]) -> set[int]:
     return constants
 
 
-def _emit_compare_constant_function_8616(func_name: str, signedness: str) -> str:
+@cython.ccall
+def _emit_compare_constant_function_8616(func_name: object, signedness: object) -> str:
     arg_type = "long" if signedness == "signed" else "unsigned long"
     return (
         f"int {func_name}({arg_type} a, {arg_type} b)\n"
@@ -251,7 +277,8 @@ def _emit_compare_constant_function_8616(func_name: str, signedness: str) -> str
     )
 
 
-def _emit_select_max_function_8616(func_name: str, signedness: str) -> str:
+@cython.ccall
+def _emit_select_max_function_8616(func_name: object, signedness: object) -> str:
     arg_type = "long" if signedness == "signed" else "unsigned long"
     return (
         f"{arg_type} {func_name}({arg_type} a, {arg_type} b)\n"
@@ -264,7 +291,8 @@ def _emit_select_max_function_8616(func_name: str, signedness: str) -> str:
     )
 
 
-def _emit_clamp_window_function_8616(func_name: str, signedness: str) -> str:
+@cython.ccall
+def _emit_clamp_window_function_8616(func_name: object, signedness: object) -> str:
     arg_type = "long" if signedness == "signed" else "unsigned long"
     return (
         f"{arg_type} {func_name}({arg_type} value, {arg_type} low, {arg_type} high)\n"
@@ -280,7 +308,8 @@ def _emit_clamp_window_function_8616(func_name: str, signedness: str) -> str:
     )
 
 
-def _emit_mask_rel_function_8616(func_name: str, signedness: str) -> str:
+@cython.ccall
+def _emit_mask_rel_function_8616(func_name: object, signedness: object) -> str:
     arg_type = "long" if signedness == "signed" else "unsigned long"
     return (
         f"int {func_name}({arg_type} a, {arg_type} b)\n"
@@ -311,12 +340,14 @@ def _emit_mask_rel_function_8616(func_name: str, signedness: str) -> str:
     )
 
 
+@cython.ccall
 def recover_32bit_compare_c_from_instructions_8616(
-    insns: list[Instruction8616],
+    insns: object,
     *,
-    function_name: str,
-) -> str | None:
+    function_name: object,
+) -> object:
     """Recover a source-shaped 32-bit compare helper from instruction evidence."""
+    signedness: object
     if not insns:
         return None
     signedness = _comparison_signedness_8616(insns)
@@ -339,7 +370,8 @@ def recover_32bit_compare_c_from_instructions_8616(
     return None
 
 
-def recover_32bit_compare_c_8616(project: object, function: object) -> str | None:
+@cython.ccall
+def recover_32bit_compare_c_8616(project: object, function: object) -> object:
     """Recover a source-shaped helper across a dynamic angr project/function boundary."""
     insns = _function_instructions_8616(project, function)
     return recover_32bit_compare_c_from_instructions_8616(

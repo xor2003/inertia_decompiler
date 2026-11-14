@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Exact CFG, write, and guard helpers for indexed range candidates.
 
 Layer: IR.
@@ -9,6 +10,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from .condition_ir import ConditionIR
 from .core import IRValue
@@ -30,6 +33,7 @@ from .ssa_cfg import (
     compute_ssa_dominators_8616,
 )
 from .ssa_function import SSAFunctionArtifact
+import operator
 
 __all__ = [
     "collect_ssa_natural_loops_8616",
@@ -52,21 +56,22 @@ def collect_ssa_natural_loops_8616(
         return (), dominators
     loops = tuple(
         loop
-        for source, target in snapshot.edges
+        for source, target in iter(snapshot.edges)
         if dominators.dominates(target, source) is True
-        for loop in (
+        for loop in iter((
             classify_ssa_natural_loop_8616(
                 snapshot,
                 dominators,
                 target,
                 source,
             ),
-        )
+        ))
         if loop.complete
     )
     return tuple(sorted(loops, key=lambda item: (item.header, item.latch))), dominators
 
 
+@cython.ccall
 def project_ssa_loop_witness_8616(
     loop: SSANaturalLoop8616,
 ) -> IndexedNaturalLoopWitness8616:
@@ -78,18 +83,19 @@ def project_ssa_loop_witness_8616(
         loop.latch,
         loop.header,
         bool(loop.entry_edges),
-        loop.backedges == ((loop.latch, loop.header),),
+        operator.eq(loop.backedges, ((loop.latch, loop.header),)),
         loop.entry_edges,
         loop.exit_edges,
     )
 
 
+@cython.ccall
 def logical_write_matches_induction_8616(
     write: LogicalWordWriteValueFact8616,
     identity: IndexedInductionSourceIdentity8616,
-) -> bool:
+) -> cython.bint:
     """Return whether one proven write owns the exact induction storage."""
-    return canonical_induction_source_identity_8616(write.access.address) == identity
+    return operator.eq(canonical_induction_source_identity_8616(write.access.address), identity)
 
 
 def logical_write_proof_site_8616(
@@ -97,7 +103,7 @@ def logical_write_proof_site_8616(
 ) -> IndexedLoopProofSite8616:
     """Return the first exact byte execution position for one logical write."""
     first = min(
-        (lane.execution_slice for lane in write.lanes),
+        (lane.execution_slice for lane in iter(write.lanes)),
         key=lambda item: item.instr_index,
     )
     return IndexedLoopProofSite8616(
@@ -107,24 +113,27 @@ def logical_write_proof_site_8616(
     )
 
 
+@cython.ccall
 def _condition_value_matches_8616(
     value: object,
     identity: IndexedInductionSourceIdentity8616,
-) -> bool:
+) -> cython.bint:
     """Match the relifted condition's canonical stack-value projection."""
     return bool(
         isinstance(value, IRValue)
         and value.space is identity.space
-        and value.offset == identity.offset
-        and value.size == identity.width
+        and operator.eq(value.offset, identity.offset)
+        and operator.eq(value.size, identity.width)
     )
 
 
+@cython.ccall
 def normalize_indexed_guard_relation_8616(
     condition: ConditionIR,
     identity: IndexedInductionSourceIdentity8616,
-) -> tuple[IndexedLoopGuardRelation8616, object] | None:
+) -> object:
     """Normalize strict bound forms while preserving comparison signedness."""
+    relation: object
     if _condition_value_matches_8616(condition.lhs, identity):
         relation = {
             "ult": IndexedLoopGuardRelation8616.UNSIGNED_LT,
@@ -144,11 +153,14 @@ def normalize_indexed_guard_relation_8616(
     return None
 
 
+@cython.ccall
 def indexed_guard_polarity_8616(
     condition: ConditionIR,
     loop: SSANaturalLoop8616,
-) -> tuple[IndexedLoopGuardPolarity8616, int, int] | None:
+) -> object:
     """Return the unique continued and exited branch edge of one loop guard."""
+    fallthrough: object
+    taken: object
     taken = condition.taken_target
     fallthrough = condition.fallthrough_target
     if taken is None or fallthrough is None:
@@ -162,6 +174,7 @@ def indexed_guard_polarity_8616(
     return IndexedLoopGuardPolarity8616.CONTINUE_WHEN_FALSE, fallthrough, taken
 
 
+@cython.ccall
 def indexed_guard_proof_site_8616(
     condition: ConditionIR,
     block: SSABlock,

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bounded known-bits edge feasibility for the real-mode invocation census.
 
 Layer: IR (invocation/control proof).
@@ -44,6 +45,8 @@ so no reachable byte obligation is silently dropped.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import heapq
 import re
@@ -93,6 +96,9 @@ from .scalar_instruction_effects import (
 from .scalar_instruction_effects import (
     scalar_select_result_bits_8616 as scalar_select_result_bits_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "EdgeFeasibilityProducerBindings8616",
@@ -113,7 +119,7 @@ _KbTmps8616 = dict[int, _Kb8616]
 # word-wide.
 _KB_WORD_MASK_8616 = 0xFFFF
 # Precision refinement is bounded independently of each must-state fixpoint.
-_EDGE_REFINEMENT_ROUND_LIMIT_8616: int = 8
+_EDGE_REFINEMENT_ROUND_LIMIT_8616: cython.longlong = 8
 
 _CONVERSION_OP_8616 = re.compile(r"^Iop_(\d+)(U|S)?to(\d+)$")
 _BINOP_8616 = re.compile(r"^Iop_([A-Za-z]+?)(\d+)([US])?$")
@@ -127,17 +133,17 @@ _BINOP_TAG_8616 = re.compile(
 )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class Real16CallCutRequest8616:
     """Select one exact terminal CALL; this request grants no authority."""
 
     artifact: IRFunctionArtifact
     block: IRBlock
-    index: int
+    index: cython.longlong
     instruction: IRInstr
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class Real16CallCutState8616:
     """Detached pre-CALL snapshot data from the final committed current round.
 
@@ -147,35 +153,36 @@ class Real16CallCutState8616:
 
     artifact: IRFunctionArtifact
     block: IRBlock
-    index: int
+    index: cython.longlong
     instruction: IRInstr
-    registers: tuple[tuple[str, int], ...]
-    memory_known: tuple[tuple[int, int], ...]
-    memory_unknown: tuple[int, ...]
+    registers: object
+    memory_known: object
+    memory_unknown: object
     direction: bool | None
 
 
 def _call_cut_owned_8616(
     request: Real16CallCutRequest8616, artifact: IRFunctionArtifact,
-    dangerous: frozenset[int], head: int, budget: list[int], deadline: float,
-    dead: frozenset[tuple[int, int]] = frozenset(),
-) -> bool:
+    dangerous: object, head: cython.longlong, budget: object, deadline: cython.double,
+    dead: object = frozenset(),
+) -> cython.bint:
     """Charge exact row geometry and CFG reachability before optional capture."""
+    addr: object
     budget[0] -= len(artifact.blocks) + len(request.block.instrs) + 1
     if budget[0] < 0 or time.monotonic() > deadline:
         return False
     block, index = request.block, request.index
     if request.artifact is not artifact or type(index) is not int or index < 0:
         return False
-    if index != len(block.instrs) - 1 or block.instrs[index] is not request.instruction:
+    if operator.ne(index, len(block.instrs) - 1) or block.instrs[index] is not request.instruction:
         return False
     if request.instruction.op != "CALL":
         return False
-    if (sum(owned is block for owned in artifact.blocks) != 1
-        or sum(owned.addr == block.addr for owned in artifact.blocks) != 1
-        or any(row.op in ("RET", "JMP", "CJMP") for row in block.instrs[:index])):
+    if (sum(owned is block for owned in iter(artifact.blocks)) != 1
+        or sum(operator.eq(owned.addr, block.addr) for owned in iter(artifact.blocks)) != 1
+        or any(row.op in ("RET", "JMP", "CJMP") for row in iter(block.instrs[:index]))):
         return False
-    blocks = {owned.addr: owned for owned in artifact.blocks}
+    blocks = {owned.addr: owned for owned in iter(artifact.blocks)}
     ready, seen = [head], set()
     while ready:
         if budget[0] < 0 or time.monotonic() > deadline:
@@ -186,13 +193,14 @@ def _call_cut_owned_8616(
         seen.add(addr)
         successors = blocks[addr].successor_addrs
         budget[0] -= len(successors) + 1
-        ready.extend(successor for successor in successors if (addr, successor) not in dead)
+        ready.extend(successor for successor in iter(successors) if (addr, successor) not in dead)
     return budget[0] >= 0 and block.addr in seen
 
 
+@cython.ccall
 def _admit_call_cut_8616(
-    request: Real16CallCutRequest8616 | None, artifact: IRFunctionArtifact,
-    dangerous: frozenset[int], head: int, budget: list[int], deadline: float,
+    request: object, artifact: IRFunctionArtifact,
+    dangerous: object, head: cython.longlong, budget: object, deadline: cython.double,
 ) -> Real16CallCutRequest8616 | None:
     """Normalize an optional exact selection without granting admission."""
     if request is None:
@@ -202,23 +210,24 @@ def _admit_call_cut_8616(
 
 def _capture_call_cut_8616(
     request: Real16CallCutRequest8616, registers: _KbRegs8616,
-    memory: PathMemory8616, budget: list[int],
+    memory: PathMemory8616, budget: object,
 ) -> Real16CallCutState8616 | None:
     """Prepay bounded projection and sorting; retain no mutable scalar alias."""
     lengths = (len(registers), len(memory.known), len(memory.unknown))
-    budget[0] -= sum(n * (n.bit_length() + 2) for n in lengths) + 1
+    budget[0] -= sum(n * (n.bit_length() + 2) for n in iter(lengths)) + 1
     if budget[0] < 0 or memory.tainted:
         return None
     return Real16CallCutState8616(
         request.artifact, request.block, request.index, request.instruction,
-        tuple(sorted(_kb_known_registers_8616(registers).items())),
-        tuple(sorted(memory.known.items())), tuple(sorted(memory.unknown)),
+        tuple(sorted(tuple(_kb_known_registers_8616(registers).items()))),
+        tuple(sorted(tuple(memory.known.items()))), tuple(sorted(memory.unknown)),
         direction_fact_8616(registers),
     )
 
 
+@cython.ccall
 def _current_call_cut_8616(
-    cut: Real16CallCutState8616 | None, budget: list[int], deadline: float,
+    cut: object, budget: object, deadline: cython.double,
 ) -> Real16CallCutState8616 | None:
     """Drop optional data on expiry after all validation and result sorting."""
     if cut is None:
@@ -226,12 +235,14 @@ def _current_call_cut_8616(
     return cut if budget[0] >= 0 and time.monotonic() <= deadline else None
 
 
+@cython.ccall
 def _observe_call_cut_8616(
-    request: Real16CallCutRequest8616 | None, instruction: IRInstr,
-    registers: _KbRegs8616, memory: PathMemory8616, budget: list[int],
-    states: list[Real16CallCutState8616] | None,
+    request: object, instruction: IRInstr,
+    registers: _KbRegs8616, memory: PathMemory8616, budget: object,
+    states: object,
 ) -> None:
     """Observe only the requested row without invoking any effect callback."""
+    captured: object
     if request is None or instruction is not request.instruction or states is None:
         return
     captured = _capture_call_cut_8616(request, registers, memory, budget)
@@ -239,7 +250,7 @@ def _observe_call_cut_8616(
         states.append(captured)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class Real16EdgeFeasibility8616:
     """Typed per-edge feasibility result for one invocation census scope.
 
@@ -261,26 +272,26 @@ class Real16EdgeFeasibility8616:
     census budget.
     """
 
-    live_blocks: frozenset[int]
-    infeasible_edges: tuple[tuple[int, int], ...]
-    evaluated_cjmps: int
-    proven_edges: int
-    converged: bool
-    work_units: int
+    live_blocks: object
+    infeasible_edges: object
+    evaluated_cjmps: cython.longlong
+    proven_edges: cython.longlong
+    converged: cython.bint
+    work_units: cython.longlong
     call_cut: Real16CallCutState8616 | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class Real16InvocationOrder8616:
     """One fresh CFG projection; no order on cycles or resource exhaustion."""
 
-    blocks: tuple[int, ...] | None
-    work_units: int
+    blocks: object
+    work_units: cython.longlong
 
     @classmethod
-    def from_walk(cls, order: list[int], scope: frozenset[int], work: int) -> Real16InvocationOrder8616:
+    def from_walk(cls, order: object, scope: object, work: cython.longlong) -> Real16InvocationOrder8616:
         """Reject a cyclic partial walk without publishing a partial order."""
-        return cls(tuple(order) if len(order) == len(scope) else None, work)
+        return cls(tuple(order) if operator.eq(len(order), len(scope)) else None, work)
 
 
 class LoadSnapshotReplay8616(Enum):
@@ -307,20 +318,22 @@ class BranchSnapshotReplay8616(Enum):
     PURE_TRANSFER = "pure_transfer"
 
 
+@cython.ccall
 def invocation_transfer_order_8616(
-    scope: frozenset[int], proposed: tuple[int, ...] | None,
-) -> tuple[int, ...] | None:
+    scope: object, proposed: object,
+) -> object:
     """Keep sorted default traversal or require exact coverage without duplicates."""
     if proposed is None:
         return tuple(sorted(scope))
-    if len(proposed) != len(scope) or frozenset(proposed) != scope:
+    if operator.ne(len(proposed), len(scope)) or operator.ne(frozenset(proposed), scope):
         return None
     return proposed
 
 
+@cython.ccall
 def acyclic_invocation_order_8616(
-    scope: frozenset[int], predecessors: Mapping[int, Iterable[int]], *,
-    deadline: float, work_limit: int,
+    scope: object, predecessors: Mapping[cython.longlong, Iterable[cython.longlong]], *,
+    deadline: cython.double, work_limit: cython.longlong,
 ) -> Real16InvocationOrder8616:
     """Order an acyclic scope deterministically, charging node/edge visits.
 
@@ -331,8 +344,10 @@ def acyclic_invocation_order_8616(
     Strictly increasing in-scope edges establish the sorted order during
     collection, so that case needs no second node/edge walk through the heap.
     """
+    addr: object
+    pred: object
     degree = dict.fromkeys(scope, 0)
-    successors: dict[int, list[int]] = {addr: [] for addr in scope}
+    successors: dict[cython.longlong, list[cython.longlong]] = {addr: [] for addr in iter(scope)}
     work = 0
     sorted_scope = sorted(scope)
     forward_only = True
@@ -356,19 +371,21 @@ def acyclic_invocation_order_8616(
     )
 
 
+@cython.ccall
 def _walk_acyclic_invocation_order_8616(
-    scope: frozenset[int],
-    degree: dict[int, int],
-    successors: dict[int, list[int]],
-    work: int,
+    scope: object,
+    degree: object,
+    successors: object,
+    work: cython.longlong,
     *,
-    deadline: float,
-    work_limit: int,
+    deadline: cython.double,
+    work_limit: cython.longlong,
 ) -> Real16InvocationOrder8616:
     """Consume the fresh predecessor counts with a bounded deterministic Kahn walk."""
-    pending = [addr for addr, count in degree.items() if count == 0]
+    successor: object
+    pending = [addr for addr, count in builtins.iter(degree.items()) if count == 0]
     heapq.heapify(pending)
-    order: list[int] = []
+    order: list[cython.longlong] = []
     while pending:
         work += 1
         if _invocation_order_budget_exhausted_8616(work, work_limit, deadline):
@@ -385,11 +402,13 @@ def _walk_acyclic_invocation_order_8616(
     return Real16InvocationOrder8616.from_walk(order, scope, work)
 
 
-def _invocation_order_budget_exhausted_8616(work: int, limit: int, deadline: float) -> bool:
+@cython.ccall
+def _invocation_order_budget_exhausted_8616(work: cython.longlong, limit: cython.longlong, deadline: cython.double) -> cython.bint:
     """Keep preparation inside its original charged-work and absolute-time bounds."""
     return work > limit or time.monotonic() > deadline
 
 
+@cython.ccall
 def _kb_width_mask_8616(size: object) -> int | None:
     """Return the wrap mask for one byte width, else ``None``."""
     if type(size) is not int or size not in (1, 2, 4, 8):
@@ -397,7 +416,8 @@ def _kb_width_mask_8616(size: object) -> int | None:
     return (1 << (size * 8)) - 1
 
 
-def _kb_lowest_unknown_8616(mask: int, width_mask: int) -> int:
+@cython.ccall
+def _kb_lowest_unknown_8616(mask: cython.longlong, width_mask: cython.longlong) -> cython.longlong:
     """Return the count of contiguous known low bits inside ``width_mask``."""
     unknown = (~mask) & width_mask
     if unknown == 0:
@@ -405,7 +425,8 @@ def _kb_lowest_unknown_8616(mask: int, width_mask: int) -> int:
     return (unknown & -unknown).bit_length() - 1
 
 
-def _kb_add_8616(a: _Kb8616, b: _Kb8616, width_mask: int) -> _Kb8616:
+@cython.ccall
+def _kb_add_8616(a: _Kb8616, b: _Kb8616, width_mask: cython.longlong) -> _Kb8616:
     """Add two known-bits values: result bits stay known below the lowest
     unknown operand bit because carries only ripple upward."""
     boundary = min(
@@ -416,7 +437,8 @@ def _kb_add_8616(a: _Kb8616, b: _Kb8616, width_mask: int) -> _Kb8616:
     return (mask, (a[1] + b[1]) & mask)
 
 
-def _kb_sub_8616(a: _Kb8616, b: _Kb8616, width_mask: int) -> _Kb8616:
+@cython.ccall
+def _kb_sub_8616(a: _Kb8616, b: _Kb8616, width_mask: cython.longlong) -> _Kb8616:
     """Subtract with the same upward-ripple known-bit bound as addition."""
     boundary = min(
         _kb_lowest_unknown_8616(a[0], width_mask),
@@ -426,33 +448,38 @@ def _kb_sub_8616(a: _Kb8616, b: _Kb8616, width_mask: int) -> _Kb8616:
     return (mask, (a[1] - b[1]) & mask)
 
 
-def _kb_and_8616(a: _Kb8616, b: _Kb8616, width_mask: int) -> _Kb8616:
+@cython.ccall
+def _kb_and_8616(a: _Kb8616, b: _Kb8616, width_mask: cython.longlong) -> _Kb8616:
     """Bitwise AND: a bit is known when either side is known-zero or both
     sides are known."""
     mask = (((~a[1]) & a[0]) | ((~b[1]) & b[0]) | (a[0] & b[0])) & width_mask
     return (mask, (a[1] & b[1]) & mask)
 
 
-def _kb_or_8616(a: _Kb8616, b: _Kb8616, width_mask: int) -> _Kb8616:
+@cython.ccall
+def _kb_or_8616(a: _Kb8616, b: _Kb8616, width_mask: cython.longlong) -> _Kb8616:
     """Bitwise OR: a bit is known when either side is known-one or both
     sides are known."""
     mask = ((a[1] & a[0]) | (b[1] & b[0]) | (a[0] & b[0])) & width_mask
     return (mask, (a[1] | b[1]) & mask)
 
 
-def _kb_xor_8616(a: _Kb8616, b: _Kb8616, width_mask: int) -> _Kb8616:
+@cython.ccall
+def _kb_xor_8616(a: _Kb8616, b: _Kb8616, width_mask: cython.longlong) -> _Kb8616:
     """Bitwise XOR: a bit is known only when both sides are known."""
     mask = (a[0] & b[0]) & width_mask
     return (mask, (a[1] ^ b[1]) & mask)
 
 
-def _kb_not_8616(a: _Kb8616, width_mask: int) -> _Kb8616:
+@cython.ccall
+def _kb_not_8616(a: _Kb8616, width_mask: cython.longlong) -> _Kb8616:
     """Bitwise NOT preserves exactly the known bits."""
     return (a[0] & width_mask, (~a[1]) & a[0] & width_mask)
 
 
+@cython.ccall
 def _kb_shift_8616(
-    a: _Kb8616, b: _Kb8616, width_mask: int, left: bool, count_bits: int | None
+    a: _Kb8616, b: _Kb8616, width_mask: cython.longlong, left: cython.bint, count_bits: object
 ) -> _Kb8616:
     """Shift by a fully-known amount; unknown amounts stay unknown.
 
@@ -466,7 +493,7 @@ def _kb_shift_8616(
     if count_bits is None or count_bits <= 0:
         return (0, 0)
     count_mask = (1 << count_bits) - 1
-    if b[0] != count_mask:
+    if operator.ne(b[0], count_mask):
         return (0, 0)
     bits = width_mask.bit_length()
     count = b[1] & count_mask
@@ -482,31 +509,35 @@ def _kb_shift_8616(
     return ((a[0] >> count) | (fill & width_mask), (a[1] >> count) & width_mask)
 
 
-def _kb_cmp_eq_8616(a: _Kb8616, b: _Kb8616, width_mask: int) -> _Kb8616:
+@cython.ccall
+def _kb_cmp_eq_8616(a: _Kb8616, b: _Kb8616, width_mask: cython.longlong) -> _Kb8616:
     """Equality: proven when both sides are known, disproven on any known
     bit disagreement."""
-    if a[0] == width_mask and b[0] == width_mask:
-        return (1, 1 if a[1] == b[1] else 0)
+    if operator.eq(a[0], width_mask) and operator.eq(b[0], width_mask):
+        return (1, 1 if operator.eq(a[1], b[1]) else 0)
     if (a[0] & b[0]) & (a[1] ^ b[1]):
         return (1, 0)
     return (0, 0)
 
 
-def _kb_cmp_ne_8616(a: _Kb8616, b: _Kb8616, width_mask: int) -> _Kb8616:
+@cython.ccall
+def _kb_cmp_ne_8616(a: _Kb8616, b: _Kb8616, width_mask: cython.longlong) -> _Kb8616:
     """Inequality mirrors equality with the result bit inverted."""
     equal = _kb_cmp_eq_8616(a, b, width_mask)
     return (equal[0], 1 - equal[1]) if equal[0] else equal
 
 
+@cython.ccall
 def _kb_cmp_order_8616(
-    name: str, a: _Kb8616, b: _Kb8616, width_mask: int, signed: bool
+    name: object, a: _Kb8616, b: _Kb8616, width_mask: cython.longlong, signed: cython.bint
 ) -> _Kb8616:
     """Ordered comparisons need both operands fully known."""
-    if a[0] != width_mask or b[0] != width_mask:
+    result: object
+    if operator.ne(a[0], width_mask) or operator.ne(b[0], width_mask):
         return (0, 0)
     bits = width_mask.bit_length()
-    left: int = a[1]
-    right: int = b[1]
+    left: cython.longlong = a[1]
+    right: cython.longlong = b[1]
     if signed:
         sign = 1 << (bits - 1)
         left -= (left & sign) << 1
@@ -520,7 +551,8 @@ def _kb_cmp_order_8616(
     return (0, 0) if result is None else (1, int(result))
 
 
-def _kb_mul_8616(a: _Kb8616, b: _Kb8616, width_mask: int) -> _Kb8616:
+@cython.ccall
+def _kb_mul_8616(a: _Kb8616, b: _Kb8616, width_mask: cython.longlong) -> _Kb8616:
     """Product bit i depends only on operand bits 0..i — the same upward
     dependency bound as addition, applied to the product value."""
     boundary = min(
@@ -543,9 +575,10 @@ _KB_BINOP_PLAIN_8616: FrozenDispatch[str, Callable[[_Kb8616, _Kb8616, int], _Kb8
 )
 
 
+@cython.ccall
 def _kb_binary_op_8616(
-    op: str, a: _Kb8616, b: _Kb8616, count_bits: int | None = None, *,
-    operands: tuple[object, object] | None = None, result_size: int | None = None,
+    op: object, a: _Kb8616, b: _Kb8616, count_bits: int | None = None, *,
+    operands: object = None, result_size: int | None = None,
 ) -> _Kb8616 | None:
     """Apply one exact-whitelisted VEX integer binop in known-bits form.
 
@@ -555,10 +588,14 @@ def _kb_binary_op_8616(
     ``count_bits`` is the shift-count operand's own authoritative bit
     width; shifts without it evaluate to unknown.
     """
+    match: object
+    plain: object
+    shape: object
+    value: object
     shape = wide_multiply_shape_8616(op)
     if shape is not None:
         bits, _signed = shape
-        if a[0] != (1 << bits) - 1 or b[0] != (1 << bits) - 1:
+        if operator.ne(a[0], (1 << bits) - 1) or operator.ne(b[0], (1 << bits) - 1):
             return None
         value = wide_multiply_value_8616(op, a[1], b[1], operands, result_size)
         return None if value is None else ((1 << (bits * 2)) - 1, value)
@@ -577,8 +614,10 @@ def _kb_binary_op_8616(
     return None
 
 
-def _kb_unary_op_8616(op: str, a: _Kb8616) -> _Kb8616 | None:
+@cython.ccall
+def _kb_unary_op_8616(op: object, a: _Kb8616) -> _Kb8616 | None:
     """Apply a whitelisted unary op (``Iop_Not<width>`` only)."""
+    match: object
     match = _BINOP_8616.fullmatch(op)
     if match is None or match.group(1) != "Not":
         return None
@@ -591,8 +630,9 @@ _UNARY_NOT_OP_8616 = re.compile(r"^Iop_Not(\d+)$")
 _UNARY_DEPTH_LIMIT_8616 = 8
 
 
+@cython.ccall
 def _kb_unary_evidence_8616(
-    op: str, a: _Kb8616, result_bits: int
+    op: object, a: _Kb8616, result_bits: cython.longlong
 ) -> _Kb8616 | None:
     """Apply one authoritative ``active_unary`` op in known-bits form.
 
@@ -604,6 +644,9 @@ def _kb_unary_evidence_8616(
     declared result width must equal ``result_bits``; anything else is
     unknown.
     """
+    hi_match: object
+    match: object
+    not_match: object
     if type(result_bits) is not int or result_bits <= 0:
         return None
     not_match = _UNARY_NOT_OP_8616.fullmatch(op)
@@ -616,7 +659,7 @@ def _kb_unary_evidence_8616(
     if hi_match is not None:
         src_bits = int(hi_match.group(1))
         dst_bits = int(hi_match.group(2))
-        if dst_bits != result_bits or src_bits != 2 * dst_bits:
+        if dst_bits != result_bits or operator.ne(src_bits, 2 * dst_bits):
             return None
         dst_mask = (1 << dst_bits) - 1
         return ((a[0] >> dst_bits) & dst_mask, (a[1] >> dst_bits) & dst_mask)
@@ -629,7 +672,8 @@ def _kb_unary_evidence_8616(
     return _kb_convert_token_8616(op, a[0], a[1])
 
 
-def _kb_expr_provenance_only_8616(value: IRValue) -> bool:
+@cython.ccall
+def _kb_expr_provenance_only_8616(value: IRValue) -> cython.bint:
     """Return whether an unpinned value's ``expr`` is safe provenance.
 
     Binary-fold tags describe an already-folded displacement; non-``Iop_``
@@ -638,6 +682,7 @@ def _kb_expr_provenance_only_8616(value: IRValue) -> bool:
     ``active_unary`` evidence — an unverifiable projection that must not
     silently evaluate as the raw register value.
     """
+    token: object
     for token in value.expr or ():
         if not token.startswith("Iop_"):
             continue
@@ -646,12 +691,14 @@ def _kb_expr_provenance_only_8616(value: IRValue) -> bool:
     return True
 
 
+@cython.ccall
 def _kb_convert_token_8616(
-    token: str, mask: int, result: int
-) -> tuple[int, int] | None:
+    token: object, mask: cython.longlong, result: cython.longlong
+) -> object:
     """Apply one width-conversion ``expr`` token, or ``None`` when the
     token is not a conversion. The declared input width bounds what the
     conversion consumes — truncate first, then extend."""
+    match: object
     match = _CONVERSION_OP_8616.fullmatch(token)
     if match is None:
         return None
@@ -686,13 +733,18 @@ def _kb_convert_token_8616(
     return (mask, result)
 
 
-def _kb_read_register_8616(name: str, regs: _KbRegs8616) -> _Kb8616 | None:
+@cython.ccall
+def _kb_read_register_8616(name: object, regs: _KbRegs8616) -> _Kb8616 | None:
     """Read one register view, recomposing wider views from stored lanes.
 
     Mirrors the effect census's lane tiling: every known bit of the
     requested view must be covered by family members that know it;
     overlapping contributors that disagree revoke only the shared bits.
     """
+    lane: object
+    projection: object
+    stored: object
+    member: object
     projection = register_value_projection_8616(name, name)
     if projection is None:
         return None
@@ -718,8 +770,9 @@ def _kb_read_register_8616(name: str, regs: _KbRegs8616) -> _Kb8616 | None:
     return (covered & view_mask, value & covered & view_mask)
 
 
+@cython.ccall
 def _kb_write_register_8616(
-    name: str, dst_size: object, kb: _Kb8616 | None, regs: _KbRegs8616
+    name: object, dst_size: object, kb: object, regs: _KbRegs8616
 ) -> None:
     """Apply one register write through the lane model in known-bits form.
 
@@ -729,13 +782,20 @@ def _kb_write_register_8616(
     untouched. An unknown or width-mismatched write drops only the written
     bits — a partially-known write preserves exactly its proven coverage.
     """
+    contained: object
+    contains: object
+    member_projection: object
+    old: object
+    projection: object
+    width: object
+    member: object
     projection = register_value_projection_8616(name, name)
     width = None if projection is None else projection[1]
     if (
         kb is not None
         and width is not None
         and type(dst_size) is int
-        and dst_size * 8 == width
+        and operator.eq(dst_size * 8, width)
     ):
         name_mask = (1 << width) - 1
         known = (kb[0] & name_mask, kb[1] & name_mask)
@@ -781,11 +841,12 @@ def _kb_write_register_8616(
         regs.pop(name, None)
 
 
+@cython.ccall
 def _kb_eval_value_8616(
     value: object,
     regs: _KbRegs8616,
     tmps: _KbTmps8616,
-    depth: int = 0,
+    depth: cython.longlong = 0,
 ) -> _Kb8616 | None:
     """Evaluate one typed IR value in known-bits form.
 
@@ -800,6 +861,7 @@ def _kb_eval_value_8616(
     (``_kb_expr_provenance_only_8616``); constants are exact and register
     views read the abstract state plus their folded displacement.
     """
+    operand: object
     if depth > _UNARY_DEPTH_LIMIT_8616:
         return None
     if not isinstance(value, IRValue):
@@ -822,6 +884,7 @@ def _kb_eval_value_8616(
     return _kb_eval_plain_8616(value, regs)
 
 
+@cython.ccall
 def _kb_eval_plain_8616(
     value: IRValue, regs: _KbRegs8616
 ) -> _Kb8616 | None:
@@ -830,6 +893,9 @@ def _kb_eval_plain_8616(
     ``expr`` must be pure provenance (``_kb_expr_provenance_only_8616``);
     the folded ``offset`` is added at the declared byte width.
     """
+    base: object
+    const_mask: object
+    width_mask: object
     if not _kb_expr_provenance_only_8616(value):
         return None
     if value.space is MemSpace.CONST:
@@ -858,8 +924,10 @@ def _kb_eval_plain_8616(
     return base
 
 
-def _kb_fit_width_8616(size: object, kb: _Kb8616 | None) -> _Kb8616 | None:
+@cython.ccall
+def _kb_fit_width_8616(size: object, kb: object) -> _Kb8616 | None:
     """Mask a looked-up value to its declared byte width."""
+    mask: object
     if kb is None:
         return None
     mask = _kb_width_mask_8616(size)
@@ -868,8 +936,12 @@ def _kb_fit_width_8616(size: object, kb: _Kb8616 | None) -> _Kb8616 | None:
     return (kb[0] & mask, kb[1] & mask)
 
 
-def _kb_seed_state_8616(seed: Mapping[str, int]) -> _KbRegs8616:
+@cython.ccall
+def _kb_seed_state_8616(seed: Mapping[str, cython.longlong]) -> _KbRegs8616:
     """Convert the census's integer register seed into fully-known lanes."""
+    projection: object
+    name: object
+    value: object
     state: _KbRegs8616 = {}
     for name, value in seed.items():
         projection = register_value_projection_8616(name, name)
@@ -880,9 +952,13 @@ def _kb_seed_state_8616(seed: Mapping[str, int]) -> _KbRegs8616:
     return state
 
 
+@cython.ccall
 def _kb_meet_8616(states: Iterable[_KbRegs8616]) -> _KbRegs8616:
     """Must-meet register states: a bit survives only when every path
     knows it and agrees on its value."""
+    theirs: object
+    name: object
+    state: object
     iterator = iter(states)
     try:
         merged = dict(next(iterator))
@@ -903,7 +979,7 @@ def _kb_meet_8616(states: Iterable[_KbRegs8616]) -> _KbRegs8616:
     return merged
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _KbPathState8616:
     """One feasibility path position: known-bits registers + path memory.
 
@@ -923,27 +999,33 @@ def _kb_meet_state_8616(
     """Meet whole path states componentwise under the must discipline."""
     items = list(states)
     return _KbPathState8616(
-        registers=_kb_meet_8616(state.registers for state in items),
-        memory=meet_path_memory_8616(state.memory for state in items),
+        registers=_kb_meet_8616(state.registers for state in iter(items)),
+        memory=meet_path_memory_8616(state.memory for state in iter(items)),
     )
 
 
-def _kb_known_registers_8616(regs: _KbRegs8616) -> dict[str, int]:
+@cython.ccall
+def _kb_known_registers_8616(regs: _KbRegs8616) -> object:
     """Project the fully-known register lanes for the declared-service
     crossing, which consumes the integer register dictionary."""
-    known: dict[str, int] = {}
+    projection: object
+    mask: object
+    name: object
+    value: object
+    known: dict[str, cython.longlong] = {}
     for name, (mask, value) in regs.items():
         projection = register_value_projection_8616(name, name)
-        if projection is not None and mask == (1 << projection[1]) - 1:
+        if projection is not None and operator.eq(mask, (1 << projection[1]) - 1):
             known[name] = value
     return known
 
 
+@cython.ccall
 def _kb_poison_destination_8616(
     instruction: IRInstr,
     regs: _KbRegs8616,
     tmps: _KbTmps8616,
-    dirty: set[str],
+    dirty: object,
     entry: _KbRegs8616,
 ) -> None:
     """Conservatively drop the storage an unsupported row may write.
@@ -970,7 +1052,8 @@ def _kb_poison_destination_8616(
         _kb_dirty_all_8616(entry, dirty)
 
 
-def _kb_dirty_write_8616(name: str, dirty: set[str]) -> None:
+@cython.ccall
+def _kb_dirty_write_8616(name: object, dirty: object) -> None:
     """Mark the register lanes one row wrote inside this instruction.
 
     Mirrors the census's ``_apply_register_write_8616`` dirty discipline:
@@ -978,6 +1061,7 @@ def _kb_dirty_write_8616(name: str, dirty: set[str]) -> None:
     through the instruction-entry snapshot, so a later STORE row in the
     same machine instruction never evaluates against a stale constant.
     """
+    member: object
     for member in register_value_family_8616(name):
         if member == name:
             continue
@@ -990,18 +1074,21 @@ def _kb_dirty_write_8616(name: str, dirty: set[str]) -> None:
     dirty.add(name)
 
 
-def _kb_dirty_all_8616(entry: _KbRegs8616, dirty: set[str]) -> None:
+@cython.ccall
+def _kb_dirty_all_8616(entry: _KbRegs8616, dirty: object) -> None:
     """Dirty every proven lane — an unbounded clobber may write any of them."""
+    name: object
     for name in tuple(entry):
         dirty.update(register_value_family_8616(name))
 
 
+@cython.ccall
 def _kb_eval_base_8616(
     value: object,
     entry: _KbRegs8616,
-    dirty: set[str],
+    dirty: object,
     tmps: _KbTmps8616,
-    depth: int = 0,
+    depth: cython.longlong = 0,
 ) -> int | None:
     """Evaluate one captured address base to a concrete 16-bit value.
 
@@ -1013,6 +1100,8 @@ def _kb_eval_base_8616(
     only a fully-proven value is useful — a partially-known address bit
     cannot bound a written span.
     """
+    kb: object
+    operand: object
     if depth > _UNARY_DEPTH_LIMIT_8616:
         return None
     if (
@@ -1026,7 +1115,7 @@ def _kb_eval_base_8616(
         if value.active_unary is not None:
             return None
         kb = tmps.get(value.source_tmp)
-        return None if kb is None or kb[0] != _KB_WORD_MASK_8616 else kb[1]
+        return None if kb is None or operator.ne(kb[0], _KB_WORD_MASK_8616) else kb[1]
     if value.active_unary is not None:
         operand = _kb_eval_base_8616(
             value.active_unary.operand, entry, dirty, tmps, depth + 1
@@ -1039,14 +1128,16 @@ def _kb_eval_base_8616(
             value.active_unary.result_bits,
         )
         full = (1 << value.active_unary.result_bits) - 1
-        return None if kb is None or kb[0] != full else kb[1] & _KB_WORD_MASK_8616
+        return None if kb is None or operator.ne(kb[0], full) else kb[1] & _KB_WORD_MASK_8616
     return _kb_eval_base_plain_8616(value, entry, dirty)
 
 
+@cython.ccall
 def _kb_eval_base_plain_8616(
-    value: IRValue, entry: _KbRegs8616, dirty: set[str],
+    value: IRValue, entry: _KbRegs8616, dirty: object,
 ) -> int | None:
     """Read a provenance-only base from the unchanged instruction-entry state."""
+    kb: object
     if not _kb_expr_provenance_only_8616(value) or type(value.offset) is not int:
         return None
     if value.space is MemSpace.REG and value.name is not None:
@@ -1055,7 +1146,7 @@ def _kb_eval_base_plain_8616(
         kb = _kb_read_register_8616(value.name, entry)
         return (
             None
-            if kb is None or kb[0] != _KB_WORD_MASK_8616
+            if kb is None or operator.ne(kb[0], _KB_WORD_MASK_8616)
             else (kb[1] + value.offset) & _KB_WORD_MASK_8616
         )
     if value.space is MemSpace.CONST and type(value.const) is int:
@@ -1067,15 +1158,19 @@ def _kb_store_span_8616(
     instruction: IRInstr,
     address: object,
     entry: _KbRegs8616,
-    dirty: set[str],
+    dirty: object,
     tmps: _KbTmps8616,
-) -> tuple[int, int] | None:
+) -> object:
     """Resolve one STORE's exact linear [base, base+size) in kb form.
 
     Mirrors ``_store_span_8616`` under the identical instruction-entry
     snapshot and dirty-name discipline; every component must be fully
     proven or the span is unbounded.
     """
+    base_value: object
+    segment: object
+    segment_kb: object
+    value: object
     if not isinstance(address, IRAddress) or type(address.offset) is not int:
         return None
     size = (
@@ -1099,10 +1194,10 @@ def _kb_store_span_8616(
     if segment is None or segment in dirty:
         return None
     segment_kb = _kb_read_register_8616(segment, entry)
-    if segment_kb is None or segment_kb[0] != _KB_WORD_MASK_8616:
+    if segment_kb is None or operator.ne(segment_kb[0], _KB_WORD_MASK_8616):
         return None
     bases = address.base_values or tuple(
-        IRValue(MemSpace.REG, name=name, size=2) for name in address.base
+        IRValue(MemSpace.REG, name=name, size=2) for name in iter(address.base)
     )
     offset_total = 0
     for value in bases:
@@ -1114,12 +1209,15 @@ def _kb_store_span_8616(
     return (segment_kb[1] << SEGMENT_SHIFT_8616) + offset16, size
 
 
+@cython.ccall
 def _kb_eval_atom_8616(
     atom: object,
     regs: _KbRegs8616,
     tmps: _KbTmps8616,
 ) -> _Kb8616 | None:
     """Evaluate one typed atom in known-bits form, or ``None``."""
+    left: object
+    right: object
     if isinstance(atom, IRValue):
         return _kb_eval_value_8616(atom, regs, tmps)
     if isinstance(atom, IRBinaryValue):
@@ -1139,13 +1237,14 @@ def _kb_eval_atom_8616(
     return None
 
 
+@cython.ccall
 def _kb_store_data_8616(
     instruction: IRInstr,
     entry: _KbRegs8616,
-    dirty: set[str],
+    dirty: object,
     tmps: _KbTmps8616,
-    size: int,
-) -> bytes | None:
+    size: cython.longlong,
+) -> object:
     """Return the exact bytes one STORE writes, or ``None``.
 
     Mirrors ``_store_data_bytes_8616``: the atom is evaluated under the
@@ -1154,20 +1253,23 @@ def _kb_store_data_8616(
     register modified inside this machine instruction — records
     ``None`` (span proven, bytes unknown) instead of a guessed constant.
     """
+    full: object
+    kb: object
     atom = instruction.args[1]
     if not store_atom_clean_8616(atom, dirty):
         return None
     kb = _kb_eval_atom_8616(atom, entry, tmps)
     full = _kb_width_mask_8616(size)
-    if kb is None or full is None or kb[0] != full:
+    if kb is None or full is None or operator.ne(kb[0], full):
         return None
     return (kb[1] & full).to_bytes(size, "little")
 
 
+@cython.ccall
 def _kb_store_row_8616(
     instruction: IRInstr,
     entry: _KbRegs8616,
-    dirty: set[str],
+    dirty: object,
     tmps: _KbTmps8616,
     memory: PathMemory8616,
 ) -> None:
@@ -1178,6 +1280,7 @@ def _kb_store_row_8616(
     must never depend on unproven memory. A proven span records its
     bytes; unproven data records unknown contents, never initial bytes.
     """
+    span: object
     if len(instruction.args) != 2 or instruction.dst is not None:
         memory.taint()
         return
@@ -1193,10 +1296,16 @@ def _kb_store_row_8616(
     )
 
 
+@cython.ccall
 def _kb_select_value_8616(
     instruction: IRInstr, regs: _KbRegs8616, tmps: _KbTmps8616,
 ) -> _Kb8616 | None:
     """Select one known arm, or retain only bits proven equal in both arms."""
+    false_value: object
+    guard: object
+    select_bits: object
+    selected: object
+    true_value: object
     select_bits = scalar_select_result_bits_8616(instruction)
     if select_bits is None:
         return None
@@ -1221,6 +1330,7 @@ def _kb_select_value_8616(
     return evaluated
 
 
+@cython.ccall
 def _kb_tmp_write_8616(
     instruction: IRInstr,
     dst: IRValue,
@@ -1228,9 +1338,13 @@ def _kb_tmp_write_8616(
     tmps: _KbTmps8616,
 ) -> None:
     """Evaluate one tmp-producing row in known-bits form."""
+    arg: object
+    evaluated: object
+    left: object
+    right: object
     if dst.source_tmp is None:
         return
-    evaluated: _Kb8616 | None = None
+    evaluated = None
     if instruction.op == "MOV" and len(instruction.args) == 1:
         evaluated = _kb_eval_value_8616(instruction.args[0], regs, tmps)
     elif instruction.op.startswith("Iop_") and len(instruction.args) == 2:
@@ -1264,6 +1378,7 @@ _SIGNED_ORDER_OPS_8616 = frozenset({"slt", "sle", "sgt", "sge"})
 _UNSIGNED_ORDER_OPS_8616 = frozenset({"ult", "ule", "ugt", "uge"})
 
 
+@cython.ccall
 def _kb_eval_condition_8616(
     condition: IRCondition,
     regs: _KbRegs8616,
@@ -1278,6 +1393,7 @@ def _kb_eval_condition_8616(
     consumes, never a re-interpretation of machine bytes. Anything the
     lattice cannot prove returns ``None`` so the edge stays live.
     """
+    inner: object
     args = condition.args
     # Two-operand masked forms keep their conjunctive semantics before
     # normalization maps ``masked_zero``/``masked_nonzero`` onto the
@@ -1299,12 +1415,16 @@ def _kb_eval_condition_8616(
     return None
 
 
+@cython.ccall
 def _kb_eval_masked_8616(
     condition: IRCondition,
     regs: _KbRegs8616,
     tmps: _KbTmps8616,
 ) -> bool | None:
     """Conjunctive ``masked_zero``/``masked_nonzero`` truth."""
+    left: object
+    right: object
+    width_mask: object
     args = condition.args
     if len(args) != 2:
         return None
@@ -1317,21 +1437,24 @@ def _kb_eval_masked_8616(
     if left is None or right is None or width_mask is None:
         return None
     conjunct = _kb_and_8616(left, right, width_mask)
-    op: str = condition.op
+    op: object = condition.op
     if conjunct[0] & conjunct[1]:
         return op == "masked_nonzero"
-    if conjunct[0] == width_mask and conjunct[1] == 0:
+    if operator.eq(conjunct[0], width_mask) and conjunct[1] == 0:
         return op == "masked_zero"
     return None
 
 
+@cython.ccall
 def _kb_eval_truth_8616(
-    op: str,
+    op: object,
     atom: object,
     regs: _KbRegs8616,
     tmps: _KbTmps8616,
 ) -> bool | None:
     """``zero``/``nonzero`` truth over one typed value."""
+    kb: object
+    width_mask: object
     if not isinstance(atom, IRValue):
         return None
     kb = _kb_eval_value_8616(atom, regs, tmps)
@@ -1340,14 +1463,15 @@ def _kb_eval_truth_8616(
         return None
     if kb[0] & kb[1]:
         return op != "zero"
-    if kb[0] == width_mask and kb[1] == 0:
+    if operator.eq(kb[0], width_mask) and kb[1] == 0:
         return op == "zero"
     return None
 
 
+@cython.ccall
 def _kb_eval_junction_8616(
-    op: str,
-    args: tuple[object, ...],
+    op: object,
+    args: object,
     regs: _KbRegs8616,
     tmps: _KbTmps8616,
 ) -> bool | None:
@@ -1356,7 +1480,7 @@ def _kb_eval_junction_8616(
         _kb_eval_condition_8616(arg, regs, tmps)
         if isinstance(arg, IRCondition)
         else None
-        for arg in args
+        for arg in iter(args)
     ]
     if op == "and":
         if False in sides:
@@ -1367,13 +1491,18 @@ def _kb_eval_junction_8616(
     return False if sides == [False, False] else None
 
 
+@cython.ccall
 def _kb_eval_equality_8616(
     condition: IRCondition,
-    op: str,
+    op: object,
     regs: _KbRegs8616,
     tmps: _KbTmps8616,
 ) -> bool | None:
     """``eq``/``ne`` at the comparison's authoritative width only."""
+    left: object
+    left_mask: object
+    right: object
+    right_mask: object
     args = condition.args
     if len(args) != 2:
         return None
@@ -1394,7 +1523,7 @@ def _kb_eval_equality_8616(
     else:
         left_mask = _kb_width_mask_8616(left_arg.size)
         right_mask = _kb_width_mask_8616(right_arg.size)
-        if left_mask is None or right_mask is None or left_mask != right_mask:
+        if left_mask is None or right_mask is None or operator.ne(left_mask, right_mask):
             return None
         width_mask = left_mask
     # Narrow both operands to the comparison width — a 1-bit ``eq`` must
@@ -1408,13 +1537,18 @@ def _kb_eval_equality_8616(
     return result if op == "eq" else not result
 
 
+@cython.ccall
 def _kb_eval_order_8616(
-    op: str,
-    args: tuple[object, ...],
+    op: object,
+    args: object,
     regs: _KbRegs8616,
     tmps: _KbTmps8616,
 ) -> bool | None:
     """Signed/unsigned ordering needs both operands fully known."""
+    left: object
+    left_mask: object
+    right: object
+    right_mask: object
     if len(args) != 2:
         return None
     left_arg, right_arg = args
@@ -1428,7 +1562,7 @@ def _kb_eval_order_8616(
         return None
     if left_mask is None or right_mask is None:
         return None
-    if left[0] != left_mask or right[0] != right_mask:
+    if operator.ne(left[0], left_mask) or operator.ne(right[0], right_mask):
         return None
     left_value, right_value = left[1], right[1]
     if op in _SIGNED_ORDER_OPS_8616:
@@ -1445,9 +1579,10 @@ def _kb_eval_order_8616(
     }[stem]
 
 
+@cython.ccall
 def _cjmp_live_successor_8616(
     instruction: IRInstr,
-    successors: Sequence[int],
+    successors: Sequence[cython.longlong],
     regs: _KbRegs8616,
     tmps: _KbTmps8616,
 ) -> int | None:
@@ -1459,6 +1594,7 @@ def _cjmp_live_successor_8616(
     condition proves true the exit target is the live edge; proven false,
     the other successor is. Anything unproven keeps both edges.
     """
+    verdict: object
     if len(instruction.args) != 2 or len(successors) != 2:
         return None
     condition, target = instruction.args
@@ -1471,14 +1607,15 @@ def _cjmp_live_successor_8616(
     exit_target = target.const
     if exit_target not in successors:
         return None
-    other = successors[0] if successors[1] == exit_target else successors[1]
+    other = successors[0] if operator.eq(successors[1], exit_target) else successors[1]
     verdict = _kb_eval_condition_8616(condition, regs, tmps)
     if verdict is None:
         return None
     return exit_target if verdict else other
 
 
-def _ordinary_call_target_8616(instruction: IRInstr) -> bool:
+@cython.ccall
+def _ordinary_call_target_8616(instruction: IRInstr) -> cython.bint:
     """Admit typed native targets; the callback owns resolution and proof."""
     if instruction.op != "CALL" or instruction.dst is not None or len(instruction.args) != 1:
         return False
@@ -1494,11 +1631,12 @@ def _ordinary_call_target_8616(instruction: IRInstr) -> bool:
     return target.space is MemSpace.REG and type(target.name) is str and bool(target.name)
 
 
+@cython.ccall
 def _kb_call_row_8616(
     instruction: IRInstr,
     registers: _KbRegs8616,
     memory: PathMemory8616,
-    apply_service: Callable[[IRInstr, dict[str, int], PathMemory8616], bool],
+    apply_service: Callable[[IRInstr, dict[str, int], PathMemory8616], cython.bint],
     apply_call: Callable[[IRInstr, dict[str, int], PathMemory8616], bool] | None = None,
 ) -> _KbRegs8616:
     """Known-bits transfer for one CALL row.
@@ -1530,18 +1668,21 @@ def _kb_call_row_8616(
     return {}
 
 
+@cython.ccall
 def _kb_transfer_effect_8616(
     instruction: IRInstr,
     registers: _KbRegs8616,
     memory: PathMemory8616,
     tmps: _KbTmps8616,
-    dirty: set[str],
+    dirty: object,
     instruction_entry: _KbRegs8616,
-    apply_service: Callable[[IRInstr, dict[str, int], PathMemory8616], bool],
+    apply_service: Callable[[IRInstr, dict[str, int], PathMemory8616], cython.bint],
     read_load: Callable[[IRInstr, tuple[int, int] | None, PathMemory8616], int | None] | None = None,
     apply_call: Callable[[IRInstr, dict[str, int], PathMemory8616], bool] | None = None,
 ) -> _KbRegs8616:
     """Transfer a store, call or data row using one instruction-entry snapshot."""
+    mask: object
+    value: object
     if instruction.op == "STORE":
         _kb_store_row_8616(instruction, instruction_entry, dirty, tmps, memory)
         return registers
@@ -1569,12 +1710,15 @@ def _kb_transfer_effect_8616(
     return registers
 
 
+@cython.ccall
 def _kb_repeat_exit_8616(
     block: IRBlock, registers: _KbRegs8616, memory: PathMemory8616,
-    budget: list[int],
-    apply_repeat: Callable[[IRBlock, dict[str, int], PathMemory8616, bool | None], RepeatedStoreStatus8616] | None,
+    budget: object,
+    apply_repeat: object,
 ) -> _KbPathState8616 | None:
     """Consume an authenticated repeat while preserving unrelated known bits."""
+    value: object
+    name: object
     if apply_repeat is None:
         return None
     known = _kb_known_registers_8616(registers)
@@ -1590,21 +1734,65 @@ def _kb_repeat_exit_8616(
     return _KbPathState8616(registers, memory)
 
 
+@cython.ccall
+def _captured_terminal_call_unobserved_8616(
+    block: IRBlock, instruction: IRInstr, request: object,
+    states: object,
+    verdict: object,
+) -> cython.bint:
+    """Omit only a confined terminal effect after its fresh pre-CALL capture.
+
+    This permission is for a discarded snapshot walk only. It never removes
+    the mandatory fixpoint transfer, the prefix rows or the cut observation.
+    """
+    if request is None or not states or verdict is None:
+        return False
+    if (request.block is not block or request.instruction is not instruction
+        or instruction is not block.instrs[-1] or instruction.op != "CALL"):
+        return False
+    return states[-1].instruction is instruction and verdict(instruction)
+
+
+@cython.ccall
+def _observe_snapshot_cut_8616(
+    block: IRBlock, instruction: IRInstr, request: object,
+    registers: _KbRegs8616, memory: PathMemory8616, budget: object,
+    states: object,
+    verdict: Callable[[IRInstr], bool] | None,
+) -> cython.bint:
+    """Capture first; permit omission only with a successful bounded observation."""
+    if request is None:
+        return False
+    before = len(states) if states is not None else 0
+    _observe_call_cut_8616(request, instruction, registers, memory, budget, states)
+    return (
+        budget[0] >= 0 and states is not None and operator.eq(len(states), before + 1)
+        and _captured_terminal_call_unobserved_8616(block, instruction, request, states, verdict)
+    )
+
+
+@cython.ccall
 def _kb_block_exit_8616(
     block: IRBlock,
     entry: _KbPathState8616,
-    apply_service: Callable[[IRInstr, dict[str, int], PathMemory8616], bool],
+    apply_service: Callable[[IRInstr, dict[str, int], PathMemory8616], cython.bint],
     *,
-    stop_after: int | None,
+    stop_after: object,
     sink: Callable[[IRInstr, _KbRegs8616, _KbTmps8616], None] | None,
-    budget: list[int],
+    budget: object,
     read_load: Callable[[IRInstr, tuple[int, int] | None, PathMemory8616], int | None] | None = None,
     apply_repeat: Callable[[IRBlock, dict[str, int], PathMemory8616, bool | None], RepeatedStoreStatus8616] | None = None,
     apply_call: Callable[[IRInstr, dict[str, int], PathMemory8616], bool] | None = None,
     call_cut: Real16CallCutRequest8616 | None = None,
-    cut_states: list[Real16CallCutState8616] | None = None,
+    cut_states: object = None,
+    captured_terminal_call_unobserved: Callable[[IRInstr], bool] | None = None,
 ) -> _KbPathState8616:
     """Walk one block's rows in known-bits form; return the exit state.
+
+    ``captured_terminal_call_unobserved`` is reserved for discarded snapshot
+    walks: a current confinement verdict may omit the last CALL effect only
+    after its fresh pre-CALL state has been captured within budget. Consumers
+    of the block exit, including the fixpoint, must leave this verdict absent.
 
     Tmp values persist across instruction rows exactly as the effect
     census models them (VEX tmps are block-local), and the
@@ -1620,6 +1808,8 @@ def _kb_block_exit_8616(
     rows carry no register effect and CJMP rows additionally report to
     ``sink``.
     """
+    repeated: object
+    instruction: object
     registers = dict(entry.registers)
     memory = entry.memory.copy()
     repeated = _kb_repeat_exit_8616(block, registers, memory, budget, apply_repeat)
@@ -1637,13 +1827,16 @@ def _kb_block_exit_8616(
         if stop_after is not None and instruction.addr > stop_after:
             break
         budget[0] -= 1
-        if call_cut is not None:
-            _observe_call_cut_8616(call_cut, instruction, registers, memory, budget, cut_states)
+        if _observe_snapshot_cut_8616(
+            block, instruction, call_cut, registers, memory, budget, cut_states,
+            captured_terminal_call_unobserved,
+        ):
+            continue
         if budget[0] < 0:
             registers.clear()
             memory.taint()
             return _KbPathState8616(registers, memory)
-        if instruction.addr != current_addr:
+        if operator.ne(instruction.addr, current_addr):
             current_addr = instruction.addr
             instruction_entry = dict(registers)
             dirty = set()
@@ -1658,6 +1851,7 @@ def _kb_block_exit_8616(
     return _KbPathState8616(registers, memory)
 
 
+@cython.ccall
 def _kb_cjmp_path_exit_8616(
     instruction: IRInstr, block: IRBlock, registers: _KbRegs8616,
     tmps: _KbTmps8616, memory: PathMemory8616,
@@ -1669,13 +1863,14 @@ def _kb_cjmp_path_exit_8616(
     return _KbPathState8616(registers, memory)
 
 
+@cython.ccall
 def _kb_cjmp_exit_8616(
     instruction: IRInstr,
     block: IRBlock,
     registers: _KbRegs8616,
     tmps: _KbTmps8616,
-    sink: Callable[[IRInstr, _KbRegs8616, _KbTmps8616], None] | None,
-) -> bool:
+    sink: object,
+) -> cython.bint:
     """Handle one conditional exit row; ``True`` means invalidate.
 
     A non-terminal CJMP cannot share one exit state between taken and
@@ -1696,11 +1891,12 @@ def _kb_cjmp_exit_8616(
     return False
 
 
+@cython.ccall
 def _kb_data_row_8616(
     instruction: IRInstr,
     registers: _KbRegs8616,
     tmps: _KbTmps8616,
-    dirty: set[str],
+    dirty: object,
     instruction_entry: _KbRegs8616,
 ) -> None:
     """Apply one non-control row's known-bits transfer.
@@ -1712,6 +1908,7 @@ def _kb_data_row_8616(
     register-less no-write rows are inert; any other shape
     conservatively poisons only its destination storage.
     """
+    dst: object
     effect = scalar_instruction_effect_8616(instruction)
     dst = instruction.dst
     if (
@@ -1748,35 +1945,37 @@ def _kb_data_row_8616(
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _BranchTransferObservation8616:
     """Provisional edge verdict from one block's latest entry state."""
 
-    infeasible_edges: tuple[tuple[int, int], ...]
-    evaluated_cjmps: int
+    infeasible_edges: object
+    evaluated_cjmps: cython.longlong
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _BranchTransferCollector8616:
     """Consume a terminal branch immediately without retaining machine-state maps."""
 
     block: IRBlock
-    observations: dict[int, _BranchTransferObservation8616]
-    budget: list[int]
+    observations: object
+    budget: object
 
     def __call__(self, instruction: IRInstr, registers: _KbRegs8616, tmps: _KbTmps8616) -> None:
         """Record only the first, terminal branch admitted by the normal walker."""
+        live: object
         successors = sorted(self.block.successor_addrs)
         self.budget[0] -= len(successors) + 1
         live = _cjmp_live_successor_8616(instruction, successors, registers, tmps)
-        edges = tuple((self.block.addr, successor) for successor in successors
-                      if live is not None and successor != live)
+        edges = tuple((self.block.addr, successor) for successor in iter(successors)
+                      if live is not None and operator.ne(successor, live))
         self.observations[self.block.addr] = _BranchTransferObservation8616(edges, 1)
 
 
+@cython.ccall
 def _branch_transfer_collector_8616(
-    observations: dict[int, _BranchTransferObservation8616] | None,
-    block: IRBlock, budget: list[int],
+    observations: object,
+    block: IRBlock, budget: object,
 ) -> _BranchTransferCollector8616 | None:
     """Replace provisional observations whenever the block entry changes."""
     if observations is None:
@@ -1786,13 +1985,13 @@ def _branch_transfer_collector_8616(
 
 
 def _kb_entry_chain_edges_8616(
-    blocks: Mapping[int, IRBlock], scope: frozenset[int],
-    predecessors: Mapping[int, Iterable[int]], head: int, terminal: int,
-    stop: int, seed: _KbPathState8616,
-    apply_service: Callable[[IRInstr, dict[str, int], PathMemory8616], bool],
+    blocks: Mapping[cython.longlong, IRBlock], scope: object,
+    predecessors: Mapping[cython.longlong, Iterable[cython.longlong]], head: cython.longlong, terminal: cython.longlong,
+    stop: cython.longlong, seed: _KbPathState8616,
+    apply_service: Callable[[IRInstr, dict[str, int], PathMemory8616], cython.bint],
     read_load: Callable[[IRInstr, tuple[int, int] | None, PathMemory8616], int | None] | None,
-    deadline: float, budget: list[int],
-) -> frozenset[tuple[int, int]] | None:
+    deadline: cython.double, budget: object,
+) -> object:
     """Evaluate an entry chain with no joins or backedges under pure effects.
 
     The entry must have no in-scope predecessors. Every subsequent block must
@@ -1801,20 +2000,21 @@ def _kb_entry_chain_edges_8616(
     without a loop fixpoint. Only edge candidates escape; the caller still
     requires its complete converged transfer before publishing observations.
     """
+    previous: object
     addr, previous, state = head, None, seed
-    visited: set[int] = set()
-    dead: set[tuple[int, int]] = set()
+    visited: set[cython.longlong] = set()
+    dead: set[tuple[cython.longlong, cython.longlong]] = set()
     while addr in scope and addr not in visited:
         incoming = tuple(predecessors.get(addr, ()))
         budget[0] -= len(incoming) + 1
         if budget[0] <= 0 or time.monotonic() > deadline:
             return None
-        required: set[int] = set() if previous is None else {previous}
-        if {pred for pred in incoming if pred in scope} != required:
+        required: object = set() if previous is None else {previous}
+        if operator.ne({pred for pred in iter(incoming) if pred in scope}, required):
             break
         visited.add(addr)
         block = blocks[addr]
-        observations: dict[int, _BranchTransferObservation8616] = {}
+        observations: dict[cython.longlong, _BranchTransferObservation8616] = {}
         state = _kb_block_exit_8616(
             block, state, apply_service,
             stop_after=stop if addr == terminal else None,
@@ -1824,7 +2024,7 @@ def _kb_entry_chain_edges_8616(
         if budget[0] < 0 or time.monotonic() > deadline:
             return None
         dead.update(observations[addr].infeasible_edges)
-        successors = tuple(target for target in block.successor_addrs
+        successors = tuple(target for target in iter(block.successor_addrs)
                            if (addr, target) not in dead)
         budget[0] -= len(block.successor_addrs)
         if addr == terminal or len(successors) != 1:
@@ -1833,21 +2033,24 @@ def _kb_entry_chain_edges_8616(
     return frozenset(dead)
 
 
+@cython.ccall
 def _kb_entry_chain_scope_8616(
-    blocks: Mapping[int, IRBlock], scope: frozenset[int],
-    predecessors: Mapping[int, Iterable[int]], head: int, terminal: int,
-    stop: int, seed: _KbPathState8616,
-    apply_service: Callable[[IRInstr, dict[str, int], PathMemory8616], bool],
+    blocks: Mapping[cython.longlong, IRBlock], scope: object,
+    predecessors: Mapping[cython.longlong, Iterable[cython.longlong]], head: cython.longlong, terminal: cython.longlong,
+    stop: cython.longlong, seed: _KbPathState8616,
+    apply_service: Callable[[IRInstr, dict[str, int], PathMemory8616], cython.bint],
     read_load: Callable[[IRInstr, tuple[int, int] | None, PathMemory8616], int | None] | None,
-    deadline: float, budget: list[int], dead: frozenset[tuple[int, int]],
-    *, enabled: bool,
-) -> tuple[frozenset[int], frozenset[tuple[int, int]]] | None:
+    deadline: cython.double, budget: object, dead: object,
+    *, enabled: cython.bint,
+) -> object:
     """Restrict the first pure transfer by independently final entry guards.
 
     Three-block and smaller callees retain the single transfer to avoid
     adding a cone walk to the common short leaf path.
     Refined rounds already exclude the guard edges and need no extra replay.
     """
+    entry_dead: object
+    surviving: object
     if not enabled or dead or len(scope) <= 3:
         return scope, dead
     entry_dead = _kb_entry_chain_edges_8616(
@@ -1864,12 +2067,13 @@ def _kb_entry_chain_scope_8616(
     return None if surviving is None else (surviving, entry_dead)
 
 
+@cython.ccall
 def _kb_ready_entry_8616(
-    predecessors: Sequence[int], exits: Mapping[int, _KbPathState8616],
-    seed: _KbPathState8616 | None,
+    predecessors: Sequence[cython.longlong], exits: Mapping[cython.longlong, _KbPathState8616],
+    seed: object,
 ) -> _KbPathState8616 | None:
     """Meet ready predecessors and an optional entry seed; defer pending nodes."""
-    ready = [exits[pred] for pred in predecessors if pred in exits]
+    ready = [exits[pred] for pred in iter(predecessors) if pred in exits]
     if seed is not None:
         ready.insert(0, _KbPathState8616(dict(seed.registers), seed.memory))
     elif predecessors and not ready:
@@ -1877,7 +2081,7 @@ def _kb_ready_entry_8616(
     return _kb_meet_state_8616(ready)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _KbFixpointResult8616:
     """Completed local round and the exact CFG inputs used for its transfers.
 
@@ -1887,29 +2091,29 @@ class _KbFixpointResult8616:
     No record escapes an incomplete round or survives this feasibility call.
     """
 
-    entries: dict[int, _KbPathState8616]
-    live_blocks: frozenset[int]
-    infeasible_edges: frozenset[tuple[int, int]]
+    entries: object
+    live_blocks: object
+    infeasible_edges: object
 
 
 def _kb_fixpoint_8616(
-    blocks_by_addr: Mapping[int, IRBlock],
-    dangerous: frozenset[int],
-    predecessor_map: Mapping[int, Iterable[int]],
-    head_addr: int,
-    call_block_addr: int,
-    callsite_addr: int,
+    blocks_by_addr: Mapping[cython.longlong, IRBlock],
+    dangerous: object,
+    predecessor_map: Mapping[cython.longlong, Iterable[cython.longlong]],
+    head_addr: cython.longlong,
+    call_block_addr: cython.longlong,
+    callsite_addr: cython.longlong,
     seed_state: _KbPathState8616,
-    apply_service: Callable[[IRInstr, dict[str, int], PathMemory8616], bool],
-    iteration_limit: int,
-    deadline: float,
-    budget: list[int],
+    apply_service: Callable[[IRInstr, dict[str, int], PathMemory8616], cython.bint],
+    iteration_limit: cython.longlong,
+    deadline: cython.double,
+    budget: object,
     read_load: Callable[[IRInstr, tuple[int, int] | None, PathMemory8616], int | None] | None = None,
     apply_repeat: Callable[[IRBlock, dict[str, int], PathMemory8616, bool | None], RepeatedStoreStatus8616] | None = None,
-    infeasible_edges: frozenset[tuple[int, int]] = frozenset(),
+    infeasible_edges: object = frozenset(),
     apply_call: Callable[[IRInstr, dict[str, int], PathMemory8616], bool] | None = None,
-    transfer_order: tuple[int, ...] | None = None,
-    branch_snapshots: dict[int, _BranchTransferObservation8616] | None = None,
+    transfer_order: object = None,
+    branch_snapshots: object = None,
 ) -> _KbFixpointResult8616 | None:
     """Iterate the must-meet transfer to convergence, or ``None``.
 
@@ -1921,6 +2125,10 @@ def _kb_fixpoint_8616(
     returns ``None`` — no partial state. Only earlier fully proved dead
     edges may be excluded from predecessor meets during refinement.
     """
+    entry: object
+    initial: object
+    order: object
+    addr: object
     order = invocation_transfer_order_8616(dangerous, transfer_order)
     if order is None:
         return None
@@ -1934,16 +2142,16 @@ def _kb_fixpoint_8616(
         if initial is None:
             return None
         dangerous, infeasible_edges = initial
-        order = tuple(addr for addr in order if addr in dangerous)
-    entries: dict[int, _KbPathState8616] = {}
-    exits: dict[int, _KbPathState8616] = {}
+        order = tuple(addr for addr in iter(order) if addr in dangerous)
+    entries: dict[cython.longlong, _KbPathState8616] = {}
+    exits: dict[cython.longlong, _KbPathState8616] = {}
     for _ in range(iteration_limit):
         if time.monotonic() > deadline or budget[0] <= 0:
             return None
         changed = False
         for addr in order:
             predecessors = [
-                pred for pred in predecessor_map.get(addr, ())
+                pred for pred in builtins.iter(predecessor_map.get(addr, ()))
                 if pred in dangerous and (pred, addr) not in infeasible_edges
             ]
             entry = _kb_ready_entry_8616(
@@ -1951,7 +2159,7 @@ def _kb_fixpoint_8616(
             )
             if entry is None:
                 continue
-            if entries.get(addr) == entry and addr in exits:
+            if operator.eq(entries.get(addr), entry) and addr in exits:
                 continue
             entries[addr] = entry
             exits[addr] = _kb_block_exit_8616(
@@ -1971,11 +2179,12 @@ def _kb_fixpoint_8616(
     return None
 
 
+@cython.ccall
 def _kb_snapshot_observed_8616(
-    block: IRBlock, *, has_load_hook: bool,
+    block: IRBlock, *, has_load_hook: cython.bint,
     exempt_call: IRInstr | None = None,
     call_replay_unobserved: Callable[[IRInstr], bool] | None = None,
-) -> bool:
+) -> cython.bint:
     """Keep branch/hook replay; pure owned transfers have no snapshot observer.
 
     This classification is fresh at consumption, never retained across hooks.
@@ -1992,6 +2201,7 @@ def _kb_snapshot_observed_8616(
     second consultation cannot publish a new retained effect. A declined or
     absent verdict keeps every CALL row, and thus the block, observed.
     """
+    instruction: object
     if type(block) is not IRBlock:
         return True
     for instruction in block.instrs:
@@ -2013,18 +2223,19 @@ def _kb_snapshot_observed_8616(
     return False
 
 
+@cython.ccall
 def _snapshot_terminal_exemption_8616(
-    block: IRBlock, call_block_addr: int, callsite_addr: int,
-    terminal_call_noop: Callable[[IRInstr], bool] | None,
-    call_cut: Real16CallCutRequest8616 | None,
+    block: IRBlock, call_block_addr: cython.longlong, callsite_addr: cython.longlong,
+    terminal_call_noop: object,
+    call_cut: object,
 ) -> IRInstr | None:
     """Select one inert last CALL without losing a requested pre-CALL cut."""
-    if (terminal_call_noop is None or block.addr != call_block_addr
+    if (terminal_call_noop is None or operator.ne(block.addr, call_block_addr)
             or type(block.instrs) is not tuple or not block.instrs):
         return None
     instruction = block.instrs[-1]
     if (type(instruction) is not IRInstr or instruction.op != "CALL"
-            or instruction.addr != callsite_addr):
+            or operator.ne(instruction.addr, callsite_addr)):
         return None
     if call_cut is not None and call_cut.block is block:
         return None
@@ -2032,14 +2243,14 @@ def _snapshot_terminal_exemption_8616(
 
 
 def _kb_cjmp_snapshots_8616(
-    blocks_by_addr: Mapping[int, IRBlock],
-    dangerous: frozenset[int],
-    entries: Mapping[int, _KbPathState8616],
-    call_block_addr: int,
-    callsite_addr: int,
-    apply_service: Callable[[IRInstr, dict[str, int], PathMemory8616], bool],
-    deadline: float,
-    budget: list[int],
+    blocks_by_addr: Mapping[cython.longlong, IRBlock],
+    dangerous: object,
+    entries: Mapping[cython.longlong, _KbPathState8616],
+    call_block_addr: cython.longlong,
+    callsite_addr: cython.longlong,
+    apply_service: Callable[[IRInstr, dict[str, int], PathMemory8616], cython.bint],
+    deadline: cython.double,
+    budget: object,
     read_load: Callable[[IRInstr, tuple[int, int] | None, PathMemory8616], int | None] | None = None,
     apply_repeat: Callable[[IRBlock, dict[str, int], PathMemory8616, bool | None], RepeatedStoreStatus8616] | None = None,
     apply_call: Callable[[IRInstr, dict[str, int], PathMemory8616], bool] | None = None,
@@ -2049,9 +2260,14 @@ def _kb_cjmp_snapshots_8616(
     terminal_call_noop: Callable[[IRInstr], bool] | None = None,
     call_replay_unobserved: Callable[[IRInstr], bool] | None = None,
     call_cut: Real16CallCutRequest8616 | None = None,
-    cut_states: list[Real16CallCutState8616] | None = None,
-) -> list[tuple[int, IRInstr, _KbRegs8616, _KbTmps8616]] | None:
+    captured_terminal_call_unobserved: Callable[[IRInstr], bool] | None = None,
+    cut_states: object = None,
+) -> object:
     """Freshly replay branch/hook blocks, discarding unobserved pure exits.
+
+    An explicit ``captured_terminal_call_unobserved`` verdict may omit only
+    the final CALL effect after fresh cut capture; the cut block still runs.
+    Missing or declined verdicts preserve its ordinary observable replay.
 
     Charge one selection unit per classified block. Full row transfer charges
     remain for every replayed block; omitted transfers publish no state.
@@ -2074,7 +2290,8 @@ def _kb_cjmp_snapshots_8616(
     ``False`` verdict or a missing predicate retains the unconditional
     replay, including the repeat and call consultations.
     """
-    snapshots: list[tuple[int, IRInstr, _KbRegs8616, _KbTmps8616]] = []
+    addr: object
+    snapshots: list[tuple[cython.longlong, IRInstr, _KbRegs8616, _KbTmps8616]] = []
     for addr in sorted(dangerous):
         if time.monotonic() > deadline or budget[0] <= 0:
             return None
@@ -2109,7 +2326,7 @@ def _kb_cjmp_snapshots_8616(
             instruction: IRInstr,
             regs: _KbRegs8616,
             tmps: _KbTmps8616,
-            at: int = addr,
+            at: cython.longlong = addr,
         ) -> None:
             """Retain a branch state with its current block's address."""
             snapshots.append((at, instruction, regs, tmps))
@@ -2126,6 +2343,7 @@ def _kb_cjmp_snapshots_8616(
             apply_call=apply_call,
             call_cut=call_cut if cut_block else None,
             cut_states=cut_states,
+            captured_terminal_call_unobserved=captured_terminal_call_unobserved,
         )
     if time.monotonic() > deadline or budget[0] < 0:
         return None
@@ -2133,21 +2351,27 @@ def _kb_cjmp_snapshots_8616(
 
 
 def _kb_infeasible_edges_8616(
-    snapshots: Iterable[tuple[int, IRInstr, _KbRegs8616, _KbTmps8616]],
-    blocks_by_addr: Mapping[int, IRBlock],
-) -> list[tuple[int, int]]:
+    snapshots: Iterable[tuple[cython.longlong, IRInstr, _KbRegs8616, _KbTmps8616]],
+    blocks_by_addr: Mapping[cython.longlong, IRBlock],
+) -> object:
     """Publish per-edge verdicts only from terminal single-CJMP blocks.
 
     An earlier CJMP cannot decide edges a later exit may still take, and
     post-exit rows would need edge-local transfer state — those shapes
     keep every edge rather than publish a wrong verdict.
     """
-    infeasible: list[tuple[int, int]] = []
+    live: object
+    block_addr: object
+    instruction: object
+    regs: object
+    successor: object
+    tmps: object
+    infeasible: list[tuple[cython.longlong, cython.longlong]] = []
     for block_addr, instruction, regs, tmps in snapshots:
         block = blocks_by_addr[block_addr]
         if (
             block.instrs[-1] is not instruction
-            or sum(1 for row in block.instrs if row.op == "CJMP") != 1
+            or sum(1 for row in iter(block.instrs) if row.op == "CJMP") != 1
         ):
             continue
         successors = sorted(block.successor_addrs)
@@ -2157,23 +2381,27 @@ def _kb_infeasible_edges_8616(
         if live is None:
             continue
         for successor in successors:
-            if successor != live:
+            if operator.ne(successor, live):
                 infeasible.append((block_addr, successor))
     return infeasible
 
 
+@cython.ccall
 def _kb_surviving_cone_8616(
-    blocks_by_addr: Mapping[int, IRBlock],
-    dangerous: frozenset[int],
-    predecessor_map: Mapping[int, Iterable[int]],
-    head_addr: int,
-    call_block_addr: int,
-    dead: frozenset[tuple[int, int]],
-    deadline: float,
-    budget: list[int],
-) -> frozenset[int] | None:
+    blocks_by_addr: Mapping[cython.longlong, IRBlock],
+    dangerous: object,
+    predecessor_map: Mapping[cython.longlong, Iterable[cython.longlong]],
+    head_addr: cython.longlong,
+    call_block_addr: cython.longlong,
+    dead: object,
+    deadline: cython.double,
+    budget: object,
+) -> object:
     """Live scope = entry-reachable ∩ backward callsite cone, minus
     proven-dead edges. ``None`` on budget/deadline exhaustion."""
+    addr: object
+    predecessor: object
+    successor: object
     reachable = {head_addr}
     pending = [head_addr]
     while pending:
@@ -2213,12 +2441,13 @@ def _kb_surviving_cone_8616(
     return frozenset(live_blocks)
 
 
+@cython.ccall
 def _kb_refinement_inputs_changed_8616(
-    previous_live: frozenset[int],
-    surviving: frozenset[int],
-    new_dead: frozenset[tuple[int, int]],
-    deadline: float,
-    budget: list[int],
+    previous_live: object,
+    surviving: object,
+    new_dead: object,
+    deadline: cython.double,
+    budget: object,
 ) -> bool | None:
     """Require another transfer only for changed cone blocks or internal edges.
 
@@ -2228,6 +2457,8 @@ def _kb_refinement_inputs_changed_8616(
     reuses a proof nor omits a hook from a requested transfer. None means the
     bounded selection did not finish, so only the committed round may survive.
     """
+    source: object
+    target: object
     if time.monotonic() > deadline or budget[0] <= 0:
         return None
     budget[0] -= 1
@@ -2245,27 +2476,28 @@ def _kb_refinement_inputs_changed_8616(
 def invocation_feasible_scope_8616(
     *,
     artifact: IRFunctionArtifact,
-    dangerous: frozenset[int],
-    predecessor_map: Mapping[int, Iterable[int]],
-    head_addr: int,
-    call_block_addr: int,
-    callsite_addr: int,
-    seed: Mapping[str, int],
+    dangerous: object,
+    predecessor_map: Mapping[cython.longlong, Iterable[cython.longlong]],
+    head_addr: cython.longlong,
+    call_block_addr: cython.longlong,
+    callsite_addr: cython.longlong,
+    seed: Mapping[str, cython.longlong],
     seed_memory: PathMemory8616,
-    apply_service: Callable[[IRInstr, dict[str, int], PathMemory8616], bool],
-    iteration_limit: int,
-    deadline: float,
-    work_limit: int,
+    apply_service: Callable[[IRInstr, dict[str, int], PathMemory8616], cython.bint],
+    iteration_limit: cython.longlong,
+    deadline: cython.double,
+    work_limit: cython.longlong,
     read_load: Callable[[IRInstr, tuple[int, int] | None, PathMemory8616], int | None] | None = None,
     apply_repeat: Callable[[IRBlock, dict[str, int], PathMemory8616, bool | None], RepeatedStoreStatus8616] | None = None,
     apply_call: Callable[[IRInstr, dict[str, int], PathMemory8616], bool] | None = None,
-    transfer_order: tuple[int, ...] | None = None,
+    transfer_order: object = None,
     load_snapshot_replay: LoadSnapshotReplay8616 = LoadSnapshotReplay8616.OBSERVABLE,
     repeat_consult_noop: Callable[[IRBlock], bool] | None = None,
     load_reader_readonly: Callable[[], bool] | None = None,
     terminal_call_noop: Callable[[IRInstr], bool] | None = None,
     call_replay_unobserved: Callable[[IRInstr], bool] | None = None,
     call_cut: Real16CallCutRequest8616 | None = None,
+    captured_terminal_call_unobserved: Callable[[IRInstr], bool] | None = None,
     branch_snapshot_replay: BranchSnapshotReplay8616 = BranchSnapshotReplay8616.OBSERVABLE,
 ) -> Real16EdgeFeasibility8616:
     """Prove which dangerous-cone edges are untraversable on this invocation.
@@ -2312,16 +2544,25 @@ def invocation_feasible_scope_8616(
     Only blocks whose every CALL row earns that verdict lose their replay;
     interrupt/service rows, foreign consult chains and cut-carrying blocks
     always retain it.
+    ``captured_terminal_call_unobserved`` separately permits omitting a cut's
+    terminal CALL effect after its fresh pre-CALL snapshot has been collected.
+    It requires a current confinement verdict and never suppresses the cut
+    prefix, capture, branch observations or mandatory fixpoint transfer.
     """
-    blocks_by_addr = {block.addr: block for block in artifact.blocks}
+    branch_snapshots: object
+    completed: object
+    requested_order: object
+    snapshots: object
+    surviving: object
+    blocks_by_addr = {block.addr: block for block in iter(artifact.blocks)}
     budget = [work_limit]
 
     live = frozenset(dangerous)
-    dead: frozenset[tuple[int, int]] = frozenset()
+    dead: frozenset[tuple[cython.longlong, cython.longlong]] = frozenset()
     evaluated = 0
     call_cut = _admit_call_cut_8616(call_cut, artifact, dangerous, head_addr, budget, deadline)
 
-    def finish(converged: bool, cut: Real16CallCutState8616 | None = None) -> Real16EdgeFeasibility8616:
+    def finish(converged: cython.bint, cut: Real16CallCutState8616 | None = None) -> Real16EdgeFeasibility8616:
         """Publish only fully committed rounds, including their consumed work."""
         if cut is not None and call_cut is not None and not _call_cut_owned_8616(
             call_cut, artifact, live, head_addr, budget, deadline, dead,
@@ -2340,10 +2581,10 @@ def invocation_feasible_scope_8616(
         )
 
     requested_order = invocation_transfer_order_8616(dangerous, transfer_order)
-    if requested_order is None or any(addr not in blocks_by_addr for addr in dangerous):
+    if requested_order is None or any(addr not in blocks_by_addr for addr in iter(dangerous)):
         return finish(False)
     for _ in range(_EDGE_REFINEMENT_ROUND_LIMIT_8616):
-        branch_snapshots: dict[int, _BranchTransferObservation8616] | None = (
+        branch_snapshots = (
             {} if branch_snapshot_replay is BranchSnapshotReplay8616.PURE_TRANSFER
             and apply_call is None and apply_repeat is None and call_cut is None
             and (read_load is None or load_snapshot_replay is LoadSnapshotReplay8616.READ_ONLY_OWNED)
@@ -2365,7 +2606,7 @@ def invocation_feasible_scope_8616(
             apply_repeat,
             infeasible_edges=dead,
             apply_call=apply_call,
-            transfer_order=tuple(addr for addr in requested_order if addr in live),
+            transfer_order=tuple(addr for addr in iter(requested_order) if addr in live),
             branch_snapshots=branch_snapshots,
         )
         if completed is None:
@@ -2390,17 +2631,18 @@ def invocation_feasible_scope_8616(
                 load_reader_readonly=load_reader_readonly,
                 terminal_call_noop=terminal_call_noop,
                 call_replay_unobserved=call_replay_unobserved,
+                captured_terminal_call_unobserved=captured_terminal_call_unobserved,
                 call_cut=call_cut, cut_states=cut_states,
             )
         )
         if snapshots is None or time.monotonic() > deadline or budget[0] < 0:
             return finish(bool(dead))
         observed_dead = (
-            frozenset(edge for observation in branch_snapshots.values() for edge in observation.infeasible_edges)
+            frozenset(edge for observation in builtins.iter(branch_snapshots.values()) for edge in iter(observation.infeasible_edges))
             if branch_snapshots is not None else frozenset(_kb_infeasible_edges_8616(snapshots, blocks_by_addr))
         )
         candidate = dead | observed_dead
-        observations = (sum(row.evaluated_cjmps for row in branch_snapshots.values())
+        observations = (sum(row.evaluated_cjmps for row in builtins.iter(branch_snapshots.values()))
                         if branch_snapshots is not None else len(snapshots))
         if candidate == dead:
             evaluated += observations
@@ -2431,14 +2673,17 @@ def invocation_feasible_scope_8616(
     return finish(bool(dead))
 
 
+@cython.ccall
 def direction_fact_8616(registers: _KbRegs8616) -> bool | None:
     """Read DF only when its own bit is proven; other flags stay unknown."""
+    flags: object
     flags = _kb_read_register_8616("flags", registers)
     if flags is None or not flags[0] & 0x400:
         return None
     return bool(flags[1] & 0x400)
 
 
+@cython.cclass
 class DirectionTracker8616:
     """Carry one DF fact using the existing typed known-bits row evaluator.
 
@@ -2447,8 +2692,13 @@ class DirectionTracker8616:
     Calls restart from their proven returned lanes; an untransported partial
     DF is conservatively lost. Joins belong to the enclosing path state.
     """
+    address = cython.declare(object, visibility = "public")
+    dirty = cython.declare(set, visibility = "public")
+    entry = cython.declare(dict, visibility = "public")
+    registers = cython.declare(object, visibility = "public")
+    tmps = cython.declare(dict, visibility = "public")
 
-    def __init__(self, registers: Mapping[str, int], direction: bool | None) -> None:
+    def __init__(self, registers: Mapping[str, cython.longlong], direction: object) -> None:
         """Seed exact register lanes and, separately, the single known DF bit."""
         self.registers = _kb_seed_state_8616(registers)
         if direction is not None:
@@ -2459,9 +2709,11 @@ class DirectionTracker8616:
         self.dirty: set[str] = set()
         self.address: int | None = None
 
-    def step(self, instruction: IRInstr, registers: Mapping[str, int], tmps: Mapping[int, int]) -> None:
+    @cython.ccall
+    def step(self, instruction: IRInstr, registers: Mapping[str, cython.longlong], tmps: Mapping[cython.longlong, cython.longlong]) -> None:
         """Consume one already-authenticated row after its exact scalar transfer."""
-        if instruction.addr != self.address:
+        mask: object
+        if operator.ne(instruction.addr, self.address):
             self.address = instruction.addr
             self.entry = dict(self.registers)
             self.dirty.clear()
@@ -2479,6 +2731,7 @@ class DirectionTracker8616:
             if mask is not None:
                 self.tmps[dst.source_tmp] = (mask, tmps[dst.source_tmp] & mask)
 
+    @cython.ccall
     def direction(self) -> bool | None:
         """Return the proven DF bit, without asserting a complete FLAGS word."""
         return direction_fact_8616(self.registers)

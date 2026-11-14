@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Normalize frontend memory micro-operations to indexed machine accesses.
 
 Layer: IR.
@@ -8,12 +9,17 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, replace
 
 from .core import IRAddress, IRInstr, MemSpace
 from .indexed_address_contracts import IndexedAddressFailureKind8616
 from .ssa_function import SSAFunctionArtifact
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "IndexedAddressAccessNormalization8616",
@@ -22,22 +28,22 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NormalizedIndexedAddressAccess8616:
     """One indexed machine access or one exact normalization refusal."""
 
-    block_addr: int
-    instr_index: int
-    instr_addr: int
-    op: str
+    block_addr: cython.longlong
+    instr_index: cython.longlong
+    instr_addr: cython.longlong
+    op: object
     address: IRAddress
-    access_size: int
-    raw_fact_count: int
-    member_instr_indices: tuple[int, ...]
+    access_size: cython.longlong
+    raw_fact_count: cython.longlong
+    member_instr_indices: object
     failure: IndexedAddressFailureKind8616 | None = None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether this record owns one nonempty raw access group."""
         return bool(
             self.block_addr >= 0
@@ -48,32 +54,32 @@ class NormalizedIndexedAddressAccess8616:
             and self.address.base
             and self.access_size > 0
             and self.raw_fact_count > 0
-            and len(self.member_instr_indices) == self.raw_fact_count
-            and self.member_instr_indices == tuple(sorted(set(self.member_instr_indices)))
+            and operator.eq(len(self.member_instr_indices), self.raw_fact_count)
+            and operator.eq(self.member_instr_indices, tuple(sorted(tuple(set(self.member_instr_indices)))))
             and self.instr_index in self.member_instr_indices
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAddressAccessNormalization8616:
     """Closed raw-to-machine indexed access normalization artifact."""
 
-    accesses: tuple[NormalizedIndexedAddressAccess8616, ...]
-    raw_fact_count: int
-    normalized_fact_count: int
-    coalesced_fact_count: int
+    accesses: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    coalesced_fact_count: cython.longlong
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every raw micro-operation has one grouped owner."""
         return bool(
-            self.raw_fact_count
-            == self.normalized_fact_count + self.coalesced_fact_count
-            and self.normalized_fact_count == len(self.accesses)
-            and all(access.complete for access in self.accesses)
+            operator.eq(self.raw_fact_count, self.normalized_fact_count + self.coalesced_fact_count)
+            and operator.eq(self.normalized_fact_count, len(self.accesses))
+            and all(access.complete for access in iter(self.accesses))
         )
 
 
+@cython.ccall
 def _indexed_address_8616(instruction: IRInstr) -> IRAddress | None:
     """Return the indexed DS/ES address carried by one IR memory operation."""
     address = instruction.args[0] if instruction.args else None
@@ -99,10 +105,11 @@ def _base_value_key_8616(address: IRAddress) -> tuple[tuple[object, ...], ...]:
             value.version,
             value.source_tmp,
         )
-        for value in address.base_values
+        for value in iter(address.base_values)
     )
 
 
+@cython.ccall
 def _group_key_8616(instruction: IRInstr, address: IRAddress) -> tuple[object, ...]:
     """Return the machine-site and segmented-base identity for one micro-op."""
     return (
@@ -117,8 +124,8 @@ def _group_key_8616(instruction: IRInstr, address: IRAddress) -> tuple[object, .
 
 
 def _exact_little_endian_pair_8616(
-    entries: tuple[tuple[int, IRInstr, IRAddress], ...],
-) -> tuple[int, IRInstr, IRAddress] | None:
+    entries: object,
+) -> object:
     """Return the low-byte entry for one exact contiguous word micro-op pair."""
     if len(entries) != 2:
         return None
@@ -128,24 +135,26 @@ def _exact_little_endian_pair_8616(
     # IR. Exact same-instruction adjacency, not that carrier width, proves the
     # pair owns one little-endian 16-bit machine access.
     if (
-        low[1].size != low[2].size
-        or high[1].size != high[2].size
-        or low[1].size != high[1].size
+        operator.ne(low[1].size, low[2].size)
+        or operator.ne(high[1].size, high[2].size)
+        or operator.ne(low[1].size, high[1].size)
         or low[1].size not in {1, 2}
-        or high[2].offset != low[2].offset + 1
+        or operator.ne(high[2].offset, low[2].offset + 1)
     ):
         return None
     return low
 
 
 def _normalize_group_8616(
-    block_addr: int,
-    entries: tuple[tuple[int, IRInstr, IRAddress], ...],
+    block_addr: cython.longlong,
+    entries: object,
 ) -> NormalizedIndexedAddressAccess8616:
     """Normalize one exact machine-site group or retain a typed refusal."""
+    instr_addr: object
+    low: object
     first_index, first_instruction, first_address = min(entries, key=lambda item: item[0])
     instr_addr = first_instruction.addr
-    if instr_addr is None or any(item[1].addr != instr_addr for item in entries):
+    if instr_addr is None or any(operator.ne(item[1].addr, instr_addr) for item in iter(entries)):
         raise ValueError("indexed-address group requires one known machine instruction")
     if len(entries) == 1:
         return NormalizedIndexedAddressAccess8616(
@@ -169,7 +178,7 @@ def _normalize_group_8616(
             replace(low_address, size=2),
             2,
             len(entries),
-            tuple(sorted(item[0] for item in entries)),
+            tuple(sorted(item[0] for item in iter(entries))),
         )
     return NormalizedIndexedAddressAccess8616(
         block_addr,
@@ -179,7 +188,7 @@ def _normalize_group_8616(
         first_address,
         first_instruction.size,
         len(entries),
-        tuple(sorted(item[0] for item in entries)),
+        tuple(sorted(item[0] for item in iter(entries))),
         IndexedAddressFailureKind8616.ACCESS_MICRO_OP_CONFLICT,
     )
 
@@ -188,10 +197,14 @@ def normalize_indexed_address_accesses_8616(
     artifact: SSAFunctionArtifact,
 ) -> IndexedAddressAccessNormalization8616:
     """Group exact indexed frontend micro-operations by machine instruction."""
+    address: object
+    block: object
+    instr_index: object
+    instruction: object
     accesses: list[NormalizedIndexedAddressAccess8616] = []
     raw_count = 0
     for block in sorted(artifact.blocks, key=lambda item: item.addr):
-        groups: dict[tuple[object, ...], list[tuple[int, IRInstr, IRAddress]]] = {}
+        groups: dict[tuple[object, ...], list[tuple[cython.longlong, IRInstr, IRAddress]]] = {}
         for instr_index, instruction in enumerate(block.instrs):
             address = _indexed_address_8616(instruction)
             if address is None:
@@ -202,7 +215,7 @@ def normalize_indexed_address_accesses_8616(
             )
         accesses.extend(
             _normalize_group_8616(block.addr, tuple(entries))
-            for entries in groups.values()
+            for entries in builtins.iter(groups.values())
         )
     ordered = tuple(sorted(accesses, key=lambda item: (item.block_addr, item.instr_index)))
     result = IndexedAddressAccessNormalization8616(

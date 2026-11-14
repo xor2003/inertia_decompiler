@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Deterministic identity and eligibility policy for direct CLI result reuse.
 
 Layer: CLI/fallback/reporting.
@@ -6,6 +7,8 @@ and refuse fast reuse when live diagnostic artifacts are requested.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import os
 from dataclasses import dataclass
@@ -14,31 +17,33 @@ from pathlib import Path
 from inertia.cli.cache import _cache_file_fingerprint, _recovery_cache_key
 from inertia.cli.cache_runtime_contract import live_decompilation_diagnostics_requested_8616
 from inertia.cli.cli_arg_parser import CliArguments
+import dataclasses
+import builtins
 
 DIRECT_REQUEST_CACHE_NAMESPACE_8616: str = "direct_accepted_result"
-DIRECT_REQUEST_CACHE_SCHEMA_8616: int = 1
+DIRECT_REQUEST_CACHE_SCHEMA_8616: cython.longlong = 1
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectRequestCacheInputs8616:
     """Complete deterministic identity for one direct-address CLI request."""
 
     binary_path: Path
-    requested_addr: int
-    blob: bool
-    base_addr: int
-    entry_point: int
-    window: int
-    c_target: str
-    api_style: str
-    pat_backend: str
-    function_discovery_backend: str
-    seed_engine: str
-    alternate_source_c: bool
-    ignore_local_sidecar_hints: bool
-    include_library_functions: bool
-    proc_name: str | None
-    proc_kind: str
+    requested_addr: cython.longlong
+    blob: cython.bint
+    base_addr: cython.longlong
+    entry_point: cython.longlong
+    window: cython.longlong
+    c_target: object
+    api_style: object
+    pat_backend: object
+    function_discovery_backend: object
+    seed_engine: object
+    alternate_source_c: cython.bint
+    ignore_local_sidecar_hints: cython.bint
+    include_library_functions: cython.bint
+    proc_name: object
+    proc_kind: object
     signature_catalog: Path | None
     declared_call_effects: tuple[Path, ...] = ()
     real16_declared_input: Path | None = None
@@ -76,11 +81,11 @@ class DirectRequestCacheInputs8616:
         )
 
 
-def direct_request_cache_enabled_8616(args: CliArguments) -> bool:
+def direct_request_cache_enabled_8616(args: CliArguments) -> cython.bint:
     """Return whether this request needs no live diagnostic artifacts."""
     telemetry_requested = any(
         value is not None
-        for value in (
+        for value in iter((
             args.otel_spans,
             args.otel_top_n,
             args.otel_min_ms,
@@ -93,8 +98,8 @@ def direct_request_cache_enabled_8616(args: CliArguments) -> bool:
             args.otel_force_flush_ms,
             args.otel_endpoint,
             args.otel_span_file,
-        )
-    ) or any(name.startswith("INERTIA_OTEL_") for name in os.environ)
+        ))
+    ) or any(name.startswith("INERTIA_OTEL_") for name in iter(os.environ))
     clean_worker_transport = bool(os.environ.get("INERTIA_SERIAL_CLEAN_WORKER_RESULT"))
     return (
         args.real16_declared_input is None
@@ -107,9 +112,10 @@ def direct_request_cache_enabled_8616(args: CliArguments) -> bool:
     )
 
 
+@cython.ccall
 def build_direct_request_cache_key_8616(
     inputs: DirectRequestCacheInputs8616,
-) -> dict[str, object] | None:
+) -> object:
     """Build request identity; declaration fingerprints never prove consumption.
 
     A matching key still requires current live admission authentication before
@@ -138,10 +144,10 @@ def build_direct_request_cache_key_8616(
             "signature_catalog": _cache_file_fingerprint(inputs.signature_catalog),
             "real16_declared_input": _cache_file_fingerprint(inputs.real16_declared_input),
             "declared_call_effects": [
-                _cache_file_fingerprint(path) for path in inputs.declared_call_effects
+                _cache_file_fingerprint(path) for path in iter(inputs.declared_call_effects)
             ],
         },
     )
     if not isinstance(key, dict):
         return None
-    return {str(name): value for name, value in key.items()}
+    return {str(name): value for name, value in builtins.iter(key.items())}

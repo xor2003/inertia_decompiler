@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify how terminal AX values are consumed by decoded instructions.
 
 Layer: Semantics.
@@ -9,6 +10,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -17,6 +20,8 @@ from typing import Protocol, cast
 
 from capstone import CS_AC_READ, CS_AC_WRITE, CsError
 from capstone.x86_const import X86_OP_MEM, X86_OP_REG
+import dataclasses
+import operator
 
 __all__ = [
     "TerminalAxReturnEvidence8616",
@@ -37,12 +42,12 @@ class TerminalAxReturnLane8616(IntFlag):
     WORD = LOW | HIGH
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalReturnStorageState8616:
     """Return-carrier state proven along one entry-reachable terminal path."""
 
     ax_lanes: TerminalAxReturnLane8616
-    dx_ax_pair_proven: bool
+    dx_ax_pair_proven: cython.bint
     call_output_lanes: TerminalAxReturnLane8616 = TerminalAxReturnLane8616.NONE
     local_pointer_output_lanes: TerminalAxReturnLane8616 = TerminalAxReturnLane8616.NONE
 
@@ -52,70 +57,69 @@ class TerminalReturnStorageState8616:
         return self.ax_lanes & ~self.call_output_lanes
 
     @property
-    def call_output_only(self) -> bool:
+    def call_output_only(self) -> cython.bint:
         """Return whether every defined AX lane still comes only from a call."""
-        return self.ax_lanes is not TerminalAxReturnLane8616.NONE and self.call_output_lanes == self.ax_lanes
+        return self.ax_lanes is not TerminalAxReturnLane8616.NONE and operator.eq(self.call_output_lanes, self.ax_lanes)
 
     @property
-    def local_pointer_output_carrier(self) -> bool:
+    def local_pointer_output_carrier(self) -> cython.bint:
         """Return whether every explicit AX lane carries a local pointer output."""
         explicit_lanes = self.explicit_ax_lanes
         return (
             bool(explicit_lanes)
             and not self.call_output_lanes
-            and int(self.local_pointer_output_lanes & explicit_lanes)
-            == int(explicit_lanes)
+            and operator.eq(int(self.local_pointer_output_lanes & explicit_lanes), int(explicit_lanes))
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalAxReturnEvidence8616:
     """Closed accounting for entry-reachable binary terminal AX paths."""
 
-    storage_states: frozenset[TerminalReturnStorageState8616]
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    storage_states: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
     def states(self) -> frozenset[TerminalAxReturnLane8616]:
         """Derive the compatibility AX-lane projection from storage states."""
-        return frozenset(state.ax_lanes for state in self.storage_states)
+        return frozenset(state.ax_lanes for state in iter(self.storage_states))
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every discovered terminal-path fact was classified."""
         return (
             self.raw_fact_count > 0
-            and self.normalized_fact_count == self.raw_fact_count
-            and self.classified_fact_count == self.raw_fact_count
-            and self.materialized_count == self.classified_fact_count
+            and operator.eq(self.normalized_fact_count, self.raw_fact_count)
+            and operator.eq(self.classified_fact_count, self.raw_fact_count)
+            and operator.eq(self.materialized_count, self.classified_fact_count)
             and self.failure_count == 0
         )
 
     @property
-    def proves_missing_value_path(self) -> bool:
+    def proves_missing_value_path(self) -> cython.bint:
         """Return whether a complete census includes a path with no AX definition."""
         return self.complete and TerminalAxReturnLane8616.NONE in self.states
 
     @property
-    def proves_wide_return(self) -> bool:
+    def proves_wide_return(self) -> cython.bint:
         """Return whether every terminal path proves the same DX:AX carrier pair."""
         return (
             self.complete
             and bool(self.storage_states)
-            and all(state.dx_ax_pair_proven for state in self.storage_states)
+            and all(state.dx_ax_pair_proven for state in iter(self.storage_states))
         )
 
     @property
-    def proves_local_pointer_output_carrier(self) -> bool:
+    def proves_local_pointer_output_carrier(self) -> cython.bint:
         """Return whether all terminal AX values are proven local pointer outputs."""
         return (
             self.complete
             and bool(self.storage_states)
-            and all(state.local_pointer_output_carrier for state in self.storage_states)
+            and all(state.local_pointer_output_carrier for state in iter(self.storage_states))
         )
 
 
@@ -128,7 +132,7 @@ class TerminalAxUseKind8616(Enum):
     UNKNOWN_REFUSE = "unknown_refuse"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalAxUse8616:
     """One decoded instruction's use of live AX lanes."""
 
@@ -139,17 +143,17 @@ class TerminalAxUse8616:
 class _Operand8616(Protocol):
     """Capstone operand fields used by terminal-value semantics."""
 
-    type: int
-    reg: int
-    access: int
+    type: cython.longlong
+    reg: cython.longlong
+    access: cython.longlong
     mem: _MemoryOperand8616
 
 
 class _MemoryOperand8616(Protocol):
     """Capstone addressing fields used to distinguish indirect writes."""
 
-    base: int
-    index: int
+    base: cython.longlong
+    index: cython.longlong
 
 
 class _DecodedInstruction8616(Protocol):
@@ -157,10 +161,10 @@ class _DecodedInstruction8616(Protocol):
 
     operands: Sequence[_Operand8616]
 
-    def reg_name(self, register_id: int) -> str:
+    def reg_name(self, register_id: cython.longlong) -> object:
         """Return the canonical name for one Capstone register id."""
 
-    def regs_access(self) -> tuple[Sequence[int], Sequence[int]]:
+    def regs_access(self) -> object:
         """Return implicit and explicit register reads and writes."""
 
 
@@ -170,6 +174,7 @@ class _InstructionWrapper8616(Protocol):
     insn: _DecodedInstruction8616
 
 
+@cython.ccall
 def _decoded_instruction_8616(instruction: object) -> _DecodedInstruction8616:
     """Return the dynamic third-party Capstone detail surface."""
     wrapper = cast(_InstructionWrapper8616, instruction)
@@ -179,7 +184,8 @@ def _decoded_instruction_8616(instruction: object) -> _DecodedInstruction8616:
         return cast(_DecodedInstruction8616, instruction)
 
 
-def _register_lane_8616(name: str) -> TerminalAxReturnLane8616:
+@cython.ccall
+def _register_lane_8616(name: object) -> TerminalAxReturnLane8616:
     """Map one exact Capstone register name to its AX lanes."""
     return {
         "ax": TerminalAxReturnLane8616.WORD,
@@ -188,11 +194,13 @@ def _register_lane_8616(name: str) -> TerminalAxReturnLane8616:
     }.get(name.lower(), TerminalAxReturnLane8616.NONE)
 
 
+@cython.ccall
 def _register_lanes_8616(
     instruction: _DecodedInstruction8616,
-    register_ids: Sequence[int],
+    register_ids: Sequence[cython.longlong],
 ) -> TerminalAxReturnLane8616:
     """Return the union of AX lanes named by Capstone register ids."""
+    register_id: object
     lanes = TerminalAxReturnLane8616.NONE
     for register_id in register_ids:
         try:
@@ -204,6 +212,7 @@ def _register_lanes_8616(
     return lanes
 
 
+@cython.ccall
 def terminal_ax_use_8616(instruction: object) -> TerminalAxUse8616:
     """Classify whether one instruction consumes the current AX definition.
 
@@ -212,6 +221,7 @@ def terminal_ax_use_8616(instruction: object) -> TerminalAxUse8616:
     operand. Implicit memory operations and read-modify-write AX operations
     refuse the side-effect-only classification.
     """
+    operand: object
     decoded = _decoded_instruction_8616(instruction)
     try:
         read_ids, write_ids = decoded.regs_access()
@@ -222,12 +232,12 @@ def terminal_ax_use_8616(instruction: object) -> TerminalAxUse8616:
             TerminalAxReturnLane8616.WORD,
         )
     read_lanes = _register_lanes_8616(decoded, read_ids)
-    if read_lanes == TerminalAxReturnLane8616.NONE:
+    if operator.eq(read_lanes, TerminalAxReturnLane8616.NONE):
         return TerminalAxUse8616(
             TerminalAxUseKind8616.NONE,
             TerminalAxReturnLane8616.NONE,
         )
-    if _register_lanes_8616(decoded, write_ids) != TerminalAxReturnLane8616.NONE:
+    if operator.ne(_register_lanes_8616(decoded, write_ids), TerminalAxReturnLane8616.NONE):
         return TerminalAxUse8616(TerminalAxUseKind8616.OTHER, read_lanes)
 
     indirect_memory_write = False
@@ -235,9 +245,9 @@ def terminal_ax_use_8616(instruction: object) -> TerminalAxUse8616:
     try:
         for operand in operands:
             access = int(operand.access)
-            if operand.type == X86_OP_MEM and access & CS_AC_WRITE:
+            if operator.eq(operand.type, X86_OP_MEM) and access & CS_AC_WRITE:
                 indirect_memory_write = bool(operand.mem.base or operand.mem.index)
-            elif operand.type == X86_OP_REG and access & CS_AC_READ:
+            elif operator.eq(operand.type, X86_OP_REG) and access & CS_AC_READ:
                 name = decoded.reg_name(operand.reg)
                 if isinstance(name, str):
                     source_lanes |= _register_lane_8616(name)

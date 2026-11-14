@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize proven terminal register-lane values as structured C.
 
 Layer: Structuring.
@@ -9,6 +10,8 @@ rewrite cleanup, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 from collections.abc import Callable, Iterable, Sequence
@@ -25,6 +28,9 @@ from inertia.lowering.stack_variable_coordinates import (
     machine_bp_offset_for_stack_variable_8616,
     stack_variable_coordinate_registry_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "TerminalReturnValueMaterializationRefusal8616",
@@ -42,7 +48,7 @@ class _TerminalReturnCodegenSurface8616(Protocol):
     """Third-party codegen fields consumed by terminal return Structuring."""
 
     cfunc: object | None
-    _inertia_missing_terminal_ax_return_terminal_value_block_count_8616: int
+    _inertia_missing_terminal_ax_return_terminal_value_block_count_8616: cython.longlong
 
 
 class _TerminalReturnCFunctionSurface8616(Protocol):
@@ -70,7 +76,7 @@ class _TerminalReturnTypeSurface8616(Protocol):
     """Third-party return-type fields consumed by terminal return Structuring."""
 
     size: int | None
-    label: str | None
+    label: object
 
 
 class TerminalReturnValueMaterializationStatus8616(Enum):
@@ -95,32 +101,33 @@ class TerminalReturnValueMaterializationRefusal8616(Enum):
     RETURN_COUNT = "return_count"
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TerminalReturnValueMaterializationResult8616:
     """Closed evidence result for one terminal return-value materialization."""
 
     status: TerminalReturnValueMaterializationStatus8616
     refusal: TerminalReturnValueMaterializationRefusal8616
-    changed: bool
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    changed: cython.bint
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
     replaced_return_value: CExpression | None = None
     materialized_return_value: CExpression | None = None
 
     @property
-    def accepted(self) -> bool:
+    def accepted(self) -> cython.bint:
         """Return whether the proven value is present in the structured return."""
         return self.status is not TerminalReturnValueMaterializationStatus8616.REFUSED
 
 
+@cython.ccall
 def _refused_result_8616(
     refusal: TerminalReturnValueMaterializationRefusal8616,
     *,
-    raw_fact_count: int = 0,
-    normalized_fact_count: int = 0,
+    raw_fact_count: cython.longlong = 0,
+    normalized_fact_count: cython.longlong = 0,
 ) -> TerminalReturnValueMaterializationResult8616:
     """Build one typed refusal without claiming classified or consumed evidence."""
     return TerminalReturnValueMaterializationResult8616(
@@ -135,13 +142,14 @@ def _refused_result_8616(
     )
 
 
-def terminal_ax_value_supports_widths_8616(return_widths: Iterable[int | None]) -> bool:
+def terminal_ax_value_supports_widths_8616(return_widths: Iterable[int | None]) -> cython.bint:
     """Return whether AX alone satisfies every owned return-width projection."""
     widths = tuple(return_widths)
-    return bool(widths) and all(isinstance(bits, int) and 0 < bits <= 16 for bits in widths)
+    return bool(widths) and all(isinstance(bits, int) and 0 < bits <= 16 for bits in iter(widths))
 
 
-def _prototype_return_type_8616(prototype: object | None) -> object | None:
+@cython.ccall
+def _prototype_return_type_8616(prototype: object) -> object | None:
     """Read one return type through the explicit third-party prototype surface."""
     if prototype is None:
         return None
@@ -151,6 +159,7 @@ def _prototype_return_type_8616(prototype: object | None) -> object | None:
         return None
 
 
+@cython.ccall
 def _return_type_width_8616(return_type: object) -> int | None:
     """Read one return width through the explicit third-party type surface."""
     try:
@@ -159,7 +168,8 @@ def _return_type_width_8616(return_type: object) -> int | None:
         return None
 
 
-def _is_explicit_void_return_type_8616(return_type: object) -> bool:
+@cython.ccall
+def _is_explicit_void_return_type_8616(return_type: object) -> cython.bint:
     """Recognize an explicit third-party void type without text-based inference."""
     if type(return_type) is not SimTypeBottom:
         return False
@@ -169,11 +179,12 @@ def _is_explicit_void_return_type_8616(return_type: object) -> bool:
         return False
 
 
+@cython.ccall
 def proven_terminal_value_extends_existing_8616(
     existing_value: object,
     proven_value: CExpression,
-    expressions_equivalent: Callable[[object, object], bool],
-) -> bool:
+    expressions_equivalent: Callable[[object, object], cython.bint],
+) -> cython.bint:
     """Require a proven AX read-modify-write lineage to extend the existing value."""
     candidate: object = proven_value
     while isinstance(candidate, CBinaryOp):
@@ -188,8 +199,9 @@ def _proven_terminal_stack_value_replaces_stale_carrier_8616(
     existing_value: object,
     proven_value: CExpression,
     return_widths: Sequence[int | None],
-) -> bool:
+) -> cython.bint:
     """Accept an exact projected stack owner over a narrower stale carrier."""
+    projection: object
     if not isinstance(existing_value, CVariable) or not isinstance(proven_value, CVariable):
         return False
     existing_variable = existing_value.variable
@@ -202,23 +214,24 @@ def _proven_terminal_stack_value_replaces_stale_carrier_8616(
         return False
     if existing_variable.size >= proven_variable.size:
         return False
-    if not return_widths or any(width != proven_variable.size * 8 for width in return_widths):
+    if not return_widths or any(operator.ne(width, proven_variable.size * 8) for width in iter(return_widths)):
         return False
     registry = stack_variable_coordinate_registry_8616(codegen)
     projection = registry.for_entry_sp_range(proven_variable.offset, proven_variable.size)
-    if projection is None or projection.size != proven_variable.size:
+    if projection is None or operator.ne(projection.size, proven_variable.size):
         return False
     existing_bp_offset = machine_bp_offset_for_stack_variable_8616(codegen, existing_variable)
     proven_bp_offset = machine_bp_offset_for_stack_variable_8616(codegen, proven_variable)
     return bool(existing_bp_offset == proven_bp_offset == projection.bp_offset)
 
 
+@cython.ccall
 def materialize_proven_terminal_return_value_8616(
     return_nodes: Sequence[CReturn],
     proven_value: CExpression,
     *,
-    terminal_value_block_count: int,
-    expressions_equivalent: Callable[[object, object], bool],
+    terminal_value_block_count: cython.longlong,
+    expressions_equivalent: Callable[[object, object], cython.bint],
 ) -> TerminalReturnValueMaterializationResult8616:
     """Install one fully proven terminal register value into one C return node."""
     raw_fact_count = max(1, terminal_value_block_count)
@@ -267,12 +280,11 @@ def materialize_proven_terminal_return_value_8616(
 
 def _materialization_context_8616(
     codegen_surface: _TerminalReturnCodegenSurface8616,
-    function: object | None,
-) -> (
-    tuple[_TerminalReturnCFunctionSurface8616, object, tuple[CReturn, ...]]
-    | TerminalReturnValueMaterializationResult8616
-):
+    function: object,
+) -> object:
     """Resolve cfunc, AST root, and return nodes or produce the refusal."""
+    cfunc_value: object
+    root: object
     try:
         cfunc_value = codegen_surface.cfunc
     except AttributeError:
@@ -293,7 +305,7 @@ def _materialization_context_8616(
         return _refused_result_8616(TerminalReturnValueMaterializationRefusal8616.MISSING_ROOT)
     if function is None:
         return _refused_result_8616(TerminalReturnValueMaterializationRefusal8616.MISSING_FUNCTION)
-    return_nodes = tuple(node for node in _iter_c_nodes_deep_8616(root) if isinstance(node, CReturn))
+    return_nodes = tuple(node for node in builtins.iter(_iter_c_nodes_deep_8616(root)) if isinstance(node, CReturn))
     if len(return_nodes) != 1:
         return _refused_result_8616(
             TerminalReturnValueMaterializationRefusal8616.RETURN_COUNT,
@@ -305,7 +317,7 @@ def _materialization_context_8616(
 def _return_widths_8616(
     function_surface: _TerminalReturnFunctionSurface8616,
     cfunc: _TerminalReturnCFunctionSurface8616,
-) -> tuple[int | None, ...] | TerminalReturnValueMaterializationResult8616:
+) -> object:
     """Collect concrete return widths or produce the width refusal."""
     try:
         function_prototype = function_surface.prototype
@@ -321,12 +333,12 @@ def _return_widths_8616(
         cfunc_prototype = None
     return_types = tuple(
         return_type
-        for candidate in (function_prototype, cfunc_functy, cfunc_prototype)
+        for candidate in iter((function_prototype, cfunc_functy, cfunc_prototype))
         if (return_type := _prototype_return_type_8616(candidate)) is not None
     )
-    concrete_return_types = tuple(return_type for return_type in return_types if type(return_type) is not SimTypeBottom)
-    return_widths = tuple(_return_type_width_8616(return_type) for return_type in concrete_return_types)
-    explicit_void = any(_is_explicit_void_return_type_8616(return_type) for return_type in return_types)
+    concrete_return_types = tuple(return_type for return_type in iter(return_types) if type(return_type) is not SimTypeBottom)
+    return_widths = tuple(_return_type_width_8616(return_type) for return_type in iter(concrete_return_types))
+    explicit_void = any(_is_explicit_void_return_type_8616(return_type) for return_type in iter(return_types))
     if explicit_void or not terminal_ax_value_supports_widths_8616(return_widths):
         return _refused_result_8616(
             TerminalReturnValueMaterializationRefusal8616.RETURN_WIDTH,
@@ -336,13 +348,14 @@ def _return_widths_8616(
     return return_widths
 
 
+@cython.ccall
 def materialize_linear_terminal_return_value_8616(
     project: object,
     codegen: object,
     function: object | None,
     *,
     recover_proven_value: Callable[[object, object, object], object | None],
-    expressions_equivalent: Callable[[object, object], bool],
+    expressions_equivalent: Callable[[object, object], cython.bint],
 ) -> TerminalReturnValueMaterializationResult8616:
     """Consume one linear terminal-register proof at the Structuring boundary."""
     codegen_surface = cast(_TerminalReturnCodegenSurface8616, codegen)
@@ -403,6 +416,7 @@ def materialize_linear_terminal_return_value_8616(
     return result
 
 
+@cython.ccall
 def compose_ax_byte_lanes_8616(
     codegen: object,
     low_value: CExpression,

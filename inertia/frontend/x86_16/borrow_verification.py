@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify borrowed real-mode instruction cases for exhaustive verification.
 
 Layer: Frontend verification.
@@ -6,12 +7,16 @@ is already symbolically proven by pyvex comparison, or has undefined results.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
 from inertia.frontend.x86_16.coverage_manifest import COMPARE_VERIFIED_MOO_OPCODES
+import dataclasses
+import builtins
 
 
 class BorrowCaseDisposition(StrEnum):
@@ -24,12 +29,12 @@ class BorrowCaseDisposition(StrEnum):
     ORACLE_DEFECT_EXCLUDED = "oracle_defect_excluded"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class BorrowCaseClassification:
     """Typed classification and durable reason for one corpus case."""
 
     disposition: BorrowCaseDisposition
-    reason: str
+    reason: object
 
 
 _PREFIX_BYTES = frozenset({0x26, 0x2E, 0x36, 0x3E, 0x64, 0x65, 0x66, 0x67, 0xF0, 0xF2, 0xF3})
@@ -46,9 +51,9 @@ _PREFIX_GROUPS = (
 )
 
 
-def _instruction_opcode(case: dict[str, Any]) -> tuple[int, int | None]:
+def _instruction_opcode(case: object) -> tuple[cython.longlong, int | None]:
     """Return the first architectural opcode byte and optional 0F extension."""
-    raw = bytes(int(value) for value in case.get("bytes", []))
+    raw = bytes(int(value) for value in builtins.iter(case.get("bytes", [])))
     index = 0
     while index < len(raw) and raw[index] in _PREFIX_BYTES:
         index += 1
@@ -57,9 +62,9 @@ def _instruction_opcode(case: dict[str, Any]) -> tuple[int, int | None]:
     return first, second
 
 
-def _has_unusable_lock_prefix(case: dict[str, Any]) -> bool:
+def _has_unusable_lock_prefix(case: object) -> cython.bint:
     """Return whether LOCK is applied to a form ordinary DOS code cannot use."""
-    raw = bytes(int(value) for value in case.get("bytes", []))
+    raw = bytes(int(value) for value in builtins.iter(case.get("bytes", [])))
     index = 0
     has_lock = False
     while index < len(raw) and raw[index] in _PREFIX_BYTES:
@@ -79,9 +84,12 @@ def _has_unusable_lock_prefix(case: dict[str, Any]) -> bool:
     return mnemonic not in _LOCKABLE_RMW_MNEMONICS or "[" not in destination
 
 
-def _has_duplicate_prefix_group(case: dict[str, Any]) -> bool:
+def _has_duplicate_prefix_group(case: object) -> cython.bint:
     """Return whether the instruction repeats a prefix from one architectural group."""
-    raw = bytes(int(value) for value in case.get("bytes", []))
+    group: object
+    index: object
+    value: object
+    raw = bytes(int(value) for value in builtins.iter(case.get("bytes", [])))
     counts = [0] * len(_PREFIX_GROUPS)
     for value in raw:
         if value not in _PREFIX_BYTES:
@@ -90,12 +98,13 @@ def _has_duplicate_prefix_group(case: dict[str, Any]) -> bool:
             if value in group:
                 counts[index] += 1
                 break
-    return any(count > 1 for count in counts)
+    return any(count > 1 for count in iter(counts))
 
 
-def _has_pathological_enter_frame_overlap(case: dict[str, Any]) -> bool:
+def _has_pathological_enter_frame_overlap(case: object) -> cython.bint:
     """Return whether nested ENTER copies from the stack slots it is creating."""
-    raw = bytes(int(value) for value in case.get("bytes", []))
+    registers: object
+    raw = bytes(int(value) for value in builtins.iter(case.get("bytes", [])))
     opcode_index = 0
     while opcode_index < len(raw) and raw[opcode_index] in _PREFIX_BYTES:
         opcode_index += 1
@@ -110,9 +119,10 @@ def _has_pathological_enter_frame_overlap(case: dict[str, Any]) -> bool:
     return bp == sp
 
 
-def _far_pointer_crosses_segment_end(case: dict[str, Any]) -> bool:
+def _far_pointer_crosses_segment_end(case: object) -> cython.bint:
     """Return whether an address-size-16 far pointer object straddles offset FFFFh."""
-    raw = bytes(int(value) for value in case.get("bytes", []))
+    registers: object
+    raw = bytes(int(value) for value in builtins.iter(case.get("bytes", [])))
     opcode_index = 0
     address_size_32 = False
     operand_size_32 = False
@@ -146,7 +156,7 @@ def _far_pointer_crosses_segment_end(case: dict[str, Any]) -> bool:
             return False
         offset = raw[cursor] | (raw[cursor + 1] << 8)
     else:
-        offset = sum(int(registers.get(name, 0)) for name in bases[rm])
+        offset = sum(int(registers.get(name, 0)) for name in iter(bases[rm]))
         if mode == 1:
             if cursor >= len(raw):
                 return False
@@ -161,9 +171,9 @@ def _far_pointer_crosses_segment_end(case: dict[str, Any]) -> bool:
     return (offset & 0xFFFF) > 0x10000 - pointer_size
 
 
-def _double_shift_width_and_count(case: dict[str, Any]) -> tuple[int, int] | None:
+def _double_shift_width_and_count(case: object) -> object:
     """Return SHLD/SHRD operand width and masked count, or ``None``."""
-    raw = bytes(int(value) for value in case.get("bytes", []))
+    raw = bytes(int(value) for value in builtins.iter(case.get("bytes", [])))
     if raw.endswith(b"\xf4"):
         raw = raw[:-1]
     index = 0
@@ -186,9 +196,9 @@ def _double_shift_width_and_count(case: dict[str, Any]) -> tuple[int, int] | Non
     return width, count
 
 
-def _has_suppressed_sib_index_oracle_defect(case: dict[str, Any]) -> bool:
+def _has_suppressed_sib_index_oracle_defect(case: object) -> cython.bint:
     """Return whether a 386E witness incorrectly materializes SIB index field 100."""
-    raw = bytes(int(value) for value in case.get("bytes", []))
+    raw = bytes(int(value) for value in builtins.iter(case.get("bytes", [])))
     index = 0
     address32 = False
     while index < len(raw) and raw[index] in _PREFIX_BYTES:
@@ -214,10 +224,14 @@ def _has_suppressed_sib_index_oracle_defect(case: dict[str, Any]) -> bool:
     return ((sib >> 3) & 7) == 4
 
 
+@cython.ccall
 def _idiv8_divisor_byte_8616(
-    case: dict[str, Any], modrm: int, regs: dict[str, Any]
+    case: object, modrm: cython.longlong, regs: object
 ) -> int | None:
     """Resolve the raw unsigned divisor byte for one IDIV r/m8 form."""
+    divisor: object
+    effective_address: object
+    initial: object
     if (modrm >> 6) == 3:
         register_values = (
             int(regs.get("eax", 0)),
@@ -239,7 +253,8 @@ def _idiv8_divisor_byte_8616(
     return int(divisor) & 0xFF
 
 
-def _idiv8_quotient_overflows_8616(divisor_raw: int, dividend_raw: int) -> bool:
+@cython.ccall
+def _idiv8_quotient_overflows_8616(divisor_raw: cython.longlong, dividend_raw: cython.longlong) -> cython.bint:
     """Return whether signed IDIV8 semantics must fault for these operands."""
     divisor_signed = divisor_raw - 0x100 if divisor_raw & 0x80 else divisor_raw
     dividend_signed = dividend_raw - 0x10000 if dividend_raw & 0x8000 else dividend_raw
@@ -251,9 +266,13 @@ def _idiv8_quotient_overflows_8616(divisor_raw: int, dividend_raw: int) -> bool:
     return not -0x80 <= quotient <= 0x7F
 
 
-def _has_missing_idiv8_fault_oracle_defect(case: dict[str, Any]) -> bool:
+def _has_missing_idiv8_fault_oracle_defect(case: object) -> cython.bint:
     """Return whether a 386E IDIV8 trace omits a mandatory divide error."""
-    raw = bytes(int(value) for value in case.get("bytes", []))
+    divisor_raw: object
+    exception: object
+    initial: object
+    regs: object
+    raw = bytes(int(value) for value in builtins.iter(case.get("bytes", [])))
     index = 0
     while index < len(raw) and raw[index] in _PREFIX_BYTES:
         index += 1
@@ -277,8 +296,9 @@ def _has_missing_idiv8_fault_oracle_defect(case: dict[str, Any]) -> bool:
     return _idiv8_quotient_overflows_8616(divisor_raw, dividend_raw)
 
 
+@cython.ccall
 def _classify_scope_exclusion_8616(
-    case: dict[str, Any],
+    case: object,
 ) -> BorrowCaseClassification | None:
     """Return the out-of-scope or undefined exclusion that applies, if any."""
     if _has_unusable_lock_prefix(case):
@@ -304,10 +324,12 @@ def _classify_scope_exclusion_8616(
     return None
 
 
+@cython.ccall
 def _classify_80386_case_8616(
-    case: dict[str, Any],
+    case: object,
 ) -> BorrowCaseClassification | None:
     """Return the 80386-specific oracle defect or scope verdict, if any."""
+    double_shift: object
     if _has_missing_idiv8_fault_oracle_defect(case):
         return BorrowCaseClassification(
             BorrowCaseDisposition.ORACLE_DEFECT_EXCLUDED,
@@ -347,8 +369,12 @@ def _classify_80386_case_8616(
     return None
 
 
-def classify_borrow_case(cpu: str, opcode: str, case: dict[str, Any]) -> BorrowCaseClassification:
+@cython.ccall
+def classify_borrow_case(cpu: object, opcode: object, case: object) -> BorrowCaseClassification:
     """Classify one 80286 or 80386 corpus case without executing it."""
+    classified: object
+    exception: object
+    scope_exclusion: object
     normalized_cpu = cpu.strip().lower()
     normalized_opcode = opcode.upper()
     scope_exclusion = _classify_scope_exclusion_8616(case)

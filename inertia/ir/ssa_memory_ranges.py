@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Canonicalize exact stack-memory ranges into disjoint byte cells.
 
 Layer: IR.
@@ -9,6 +10,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import itertools
 from dataclasses import dataclass, replace
@@ -21,8 +24,11 @@ from .ssa_memory_contracts import (
     SSAMemoryOverlap8616,
     SSAMemoryOverlapRelation8616,
 )
+import dataclasses
+import operator
+import builtins
 
-type StackMemoryAccessInput8616 = tuple[int, int, IRAddress]
+StackMemoryAccessInput8616 = typing.TypeAliasType("StackMemoryAccessInput8616", tuple[int, int, IRAddress])
 
 
 class StackCoordinateAgreement8616(StrEnum):
@@ -32,7 +38,7 @@ class StackCoordinateAgreement8616(StrEnum):
     CONFLICT = "conflicting_stack_coordinates"
 
 
-def stack_coordinate_agreement_8616(blocks: tuple[SSABlock, ...]) -> StackCoordinateAgreement8616:
+def stack_coordinate_agreement_8616(blocks: object) -> StackCoordinateAgreement8616:
     """Refuse shared BP geometry when one block observes different BP definitions.
 
     Scalar versions are block-local: comparing version numbers from different
@@ -41,14 +47,17 @@ def stack_coordinate_agreement_8616(blocks: tuple[SSABlock, ...]) -> StackCoordi
     Rebased coordinates require an explicit normalization proof before ranges
     can be compared; different textual offsets do not establish disjointness.
     """
+    address: object
+    block: object
+    instruction: object
     for block in blocks:
-        versions: set[int] = set()
+        versions: set[cython.longlong] = set()
         for instruction in block.instrs:
             address = stack_memory_access_8616(instruction)
             if address is None or address.base != ("bp",):
                 continue
             versions.update(
-                value.version for value in address.base_values
+                value.version for value in iter(address.base_values)
                 if value.space is MemSpace.REG and value.name == "bp" and value.version is not None
             )
         if len(versions) > 1:
@@ -56,31 +65,32 @@ def stack_coordinate_agreement_8616(blocks: tuple[SSABlock, ...]) -> StackCoordi
     return StackCoordinateAgreement8616.NO_CONFLICT_OBSERVED
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackMemoryRangeCells8616:
     """One observed exact range and its canonical disjoint byte cells."""
 
     key: MemoryRangeKey8616
     address: IRAddress
-    cells: tuple[IRAddress, ...]
+    cells: object
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether ordered cells cover the original range exactly once."""
+        cell: object
         expected_offset = self.address.offset
         for cell in self.cells:
             if (
                 cell.space is not self.address.space
-                or cell.base != self.address.base
-                or cell.offset != expected_offset
+                or operator.ne(cell.base, self.address.base)
+                or operator.ne(cell.offset, expected_offset)
                 or cell.size <= 0
             ):
                 return False
             expected_offset += cell.size
-        return bool(self.cells and expected_offset == self.address.offset + self.address.size)
+        return bool(self.cells and operator.eq(expected_offset, self.address.offset + self.address.size))
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackMemoryCellLayout8616:
     """Canonical cell layout shared by every exact stack access in a function."""
 
@@ -89,11 +99,12 @@ class StackMemoryCellLayout8616:
     overlaps: tuple[SSAMemoryOverlap8616, ...] = ()
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every observed range has one exact cell covering."""
-        return all(item.complete for item in self.ranges)
+        return all(item.complete for item in iter(self.ranges))
 
 
+@cython.ccall
 def memory_range_key_8616(address: IRAddress) -> MemoryRangeKey8616 | None:
     """Return one versionable exact ``SS:BP`` range identity."""
     if (
@@ -107,28 +118,30 @@ def memory_range_key_8616(address: IRAddress) -> MemoryRangeKey8616 | None:
 
 
 def close_refused_stack_ranges_8616(
-    refused_ranges: set[MemoryRangeKey8616],
-    cells_by_range: dict[MemoryRangeKey8616, tuple[MemoryRangeKey8616, ...]],
+    refused_ranges: object,
+    cells_by_range: object,
 ) -> frozenset[MemoryRangeKey8616]:
     """Refuse every stack range sharing a canonical cell with a refusal."""
     closed = set(refused_ranges)
     while True:
-        refused_cells = {cell for key in closed for cell in cells_by_range[key]}
+        refused_cells = {cell for key in iter(closed) for cell in iter(cells_by_range[key])}
         expanded = {
             key
-            for key, cells in cells_by_range.items()
-            if any(cell in refused_cells for cell in cells)
+            for key, cells in builtins.iter(cells_by_range.items())
+            if any(cell in refused_cells for cell in iter(cells))
         }
         if expanded <= closed:
             return frozenset(closed)
         closed.update(expanded)
 
 
-def versioned_memory_address_8616(address: IRAddress, version: int) -> IRAddress:
+@cython.ccall
+def versioned_memory_address_8616(address: IRAddress, version: cython.longlong) -> IRAddress:
     """Preserve all address evidence while assigning one SSA version."""
     return replace(address, version=version)
 
 
+@cython.ccall
 def stack_memory_access_8616(instruction: IRInstr) -> IRAddress | None:
     """Return the memory operand for one typed stack LOAD or STORE."""
     if instruction.op not in {"LOAD", "STORE"} or not instruction.args:
@@ -138,20 +151,21 @@ def stack_memory_access_8616(instruction: IRInstr) -> IRAddress | None:
 
 
 def collect_stack_memory_accesses_8616(
-    blocks: tuple[SSABlock, ...],
+    blocks: object,
 ) -> tuple[StackMemoryAccessInput8616, ...]:
     """Collect stack accesses in deterministic instruction order."""
     return tuple(
         (block.addr, index, address)
-        for block in sorted(blocks, key=lambda item: item.addr)
-        for index, instruction in enumerate(block.instrs)
+        for block in builtins.iter(sorted(blocks, key=lambda item: item.addr))
+        for index, instruction in builtins.iter(enumerate(block.instrs))
         if (address := stack_memory_access_8616(instruction)) is not None
     )
 
 
+@cython.ccall
 def memory_overlap_8616(left: IRAddress, right: IRAddress) -> SSAMemoryOverlap8616 | None:
     """Return the exact intersection of two canonical non-identical ranges."""
-    if left.space is not right.space or left.base != right.base:
+    if left.space is not right.space or operator.ne(left.base, right.base):
         return None
     start = max(left.offset, right.offset)
     end = min(left.offset + left.size, right.offset + right.size)
@@ -177,11 +191,17 @@ def memory_overlap_8616(left: IRAddress, right: IRAddress) -> SSAMemoryOverlap86
 
 
 def build_stack_memory_cell_layout_8616(
-    accesses: tuple[StackMemoryAccessInput8616, ...],
+    accesses: object,
 ) -> StackMemoryCellLayout8616:
     """Partition all proven ranges at every observed byte boundary."""
+    key: object
+    _block_addr: object
+    _instr_index: object
+    address: object
+    end: object
+    start: object
     representatives: dict[MemoryRangeKey8616, IRAddress] = {}
-    boundaries: dict[tuple[str, tuple[str, ...]], set[int]] = {}
+    boundaries: dict[tuple[str, tuple[str, ...]], set[cython.longlong]] = {}
     for _block_addr, _instr_index, address in accesses:
         key = memory_range_key_8616(address)
         if key is None:
@@ -193,12 +213,12 @@ def build_stack_memory_cell_layout_8616(
 
     canonical_cells: dict[MemoryRangeKey8616, IRAddress] = {}
     ranges: list[StackMemoryRangeCells8616] = []
-    for key, address in sorted(representatives.items()):
+    for key, address in sorted(tuple(representatives.items())):
         points = (
             address.offset,
             *sorted(
                 point
-                for point in boundaries[(key[0], key[1])]
+                for point in iter(boundaries[(key[0], key[1])])
                 if address.offset < point < address.offset + address.size
             ),
             address.offset + address.size,
@@ -223,13 +243,13 @@ def build_stack_memory_cell_layout_8616(
     ordered_ranges = tuple(ranges)
     overlaps = tuple(
         overlap
-        for index, left in enumerate(ordered_ranges)
-        for right in ordered_ranges[index + 1 :]
+        for index, left in builtins.iter(enumerate(ordered_ranges))
+        for right in iter(ordered_ranges[index + 1 :])
         if (overlap := memory_overlap_8616(left.address, right.address)) is not None
     )
     return StackMemoryCellLayout8616(
         ranges=ordered_ranges,
-        cells=tuple(canonical_cells[key] for key in sorted(canonical_cells)),
+        cells=tuple(canonical_cells[key] for key in builtins.iter(sorted(canonical_cells))),
         overlaps=overlaps,
     )
 

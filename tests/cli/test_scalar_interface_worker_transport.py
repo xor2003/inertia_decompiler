@@ -8,7 +8,7 @@ import pytest
 
 from inertia.cli import cli_core
 from inertia.cli.cache import DECOMPILATION_CACHE_SOURCE_FILES, _cache_source_digest
-from inertia.cli.work_items import FunctionWorkResult
+from inertia.cli.work_items import FunctionWorkExecutionOrigin8616, FunctionWorkResult
 from inertia.lowering.scalar_interface_transport import current_scalar_interface_8616
 from tests.lowering.test_scalar_interface_transport import _world
 
@@ -115,3 +115,38 @@ def test_accepted_worker_interface_reaches_storage_bound_caller_without_callee(t
 
     assert _prototype_decl_8616(caller, codegen, call, _summary(0x1010, arg_count=1),
                                 'unsigned short') == 'int combine(short a0);'
+
+
+@pytest.mark.parametrize(('from_cache', 'origin'), [
+    (True, FunctionWorkExecutionOrigin8616.IN_PROCESS),
+    (False, FunctionWorkExecutionOrigin8616.CLEAN_PROCESS),
+    (True, FunctionWorkExecutionOrigin8616.CLEAN_PROCESS),
+])
+def test_transported_identity_does_not_publish_a_new_scalar_interface(tmp_path, from_cache, origin):
+    """Transported identity metadata cannot authorize a new prototype export."""
+    project, function, _ = _world(tmp_path)
+    identity = SimpleNamespace(addr=function.addr, name='cached', project=project)
+    cached = replace(_accepted(identity), from_cache=from_cache, execution_origin=origin,
+                     scalar_interface_generation='unbound-generation')
+    result = cli_core._with_scalar_interface_8616(cached, project)
+    assert result.payload == cached.payload
+    assert result.validated_payload_hash == cached.validated_payload_hash
+    assert result.gcc_checked_payload_hash == cached.gcc_checked_payload_hash
+    assert result.scalar_interface is None
+    assert result.scalar_interface_generation is None
+
+
+@pytest.mark.parametrize('stale', [False, True])
+def test_cached_scalar_receipt_still_requires_current_generation(tmp_path, stale):
+    """Cache provenance cannot bypass validation of a transported interface."""
+    project, function, _ = _world(tmp_path)
+    accepted = cli_core._with_scalar_interface_8616(_accepted(function), project)
+    cached = replace(accepted, from_cache=True, function=None,
+                     execution_origin=FunctionWorkExecutionOrigin8616.CLEAN_PROCESS)
+    if stale:
+        cached = replace(cached, scalar_interface_generation='0' * 64)
+        with pytest.raises(ValueError, match='stale'):
+            cli_core._with_scalar_interface_8616(cached, project)
+    else:
+        restored = cli_core._with_scalar_interface_8616(cached, project)
+        assert restored.scalar_interface == accepted.scalar_interface

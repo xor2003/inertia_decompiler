@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/runtime.
 
 Responsibility: provide debug printing helpers for the frontend emulator/lifter code.
@@ -8,20 +9,22 @@ with a recoverable LiftingException or silently continue decoding.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import sys
 import traceback
 from typing import TextIO
 
 # Constants for debug message types
-F_ASSERT: int = 0
-F_ERROR: int = 1
-F_WARN: int = 2
-F_INFO: int = 3
-F_MSG: int = 4
+F_ASSERT: cython.longlong = 0
+F_ERROR: cython.longlong = 1
+F_WARN: cython.longlong = 2
+F_INFO: cython.longlong = 3
+F_MSG: cython.longlong = 4
 
 # Global debug level
-debug_level: int = 0
+debug_level: cython.longlong = 0
 
 __all__ = [
     "ASSERT",
@@ -42,22 +45,23 @@ __all__ = [
 _DebugCaller = tuple[str, str, int]
 
 
+@cython.ccall
 def _debug_caller() -> _DebugCaller:
     frame = traceback.extract_stack()[-3]
     return frame.filename, frame.name, frame.lineno or 0
 
 
 def debug_print(
-    message_type: int,
-    file: str,
-    function: str,
-    line: int,
-    level: int,
-    fmt: str,
+    message_type: cython.longlong,
+    file: object,
+    function: object,
+    line: cython.longlong,
+    level: cython.longlong,
+    fmt: object,
     *args: object,
 ) -> None:
     """Prints debug messages based on the message type and debug level."""
-    typeset: dict[int, tuple[str | None, TextIO, bool]] = {
+    typeset: dict[cython.longlong, tuple[str | None, TextIO, cython.bint]] = {
         F_ASSERT: ("ASSERT", sys.stderr, True),
         F_ERROR: ("ERROR", sys.stderr, True),
         F_WARN: ("WARN", sys.stderr, False),
@@ -77,38 +81,40 @@ def debug_print(
             raise SystemExit(1)
 
 
+@cython.ccall
 def ASSERT(cond: object) -> None:
     """Assert a condition; a failure prints the location and exits with status 1."""
     if not cond:
         debug_print(F_ASSERT, *_debug_caller(), 0, "assertion failed: %s", cond)
 
 
-def ERROR(fmt: str, *args: object) -> None:
+def ERROR(fmt: object, *args: object) -> None:
     """Print a fatal frontend error and exit with status 1."""
     debug_print(F_ERROR, *_debug_caller(), 0, fmt, *args)
 
 
-def WARN(fmt: str, *args: object) -> None:
+def WARN(fmt: object, *args: object) -> None:
     """Prints a warning message."""
     debug_print(F_WARN, *_debug_caller(), 0, fmt, *args)
 
 
-def INFO(level: int, fmt: str, *args: object) -> None:
+def INFO(level: cython.longlong, fmt: object, *args: object) -> None:
     """Prints an informational message based on the debug level."""
     debug_print(F_INFO, *_debug_caller(), level, fmt, *args)
 
 
-def DEBUG_MSG(level: int, fmt: str, *args: object) -> None:
+def DEBUG_MSG(level: cython.longlong, fmt: object, *args: object) -> None:
     """Prints a debug message based on the debug level."""
     debug_print(F_MSG, *_debug_caller(), level, fmt, *args)
 
 
-def MSG(fmt: str, *args: object) -> None:
+def MSG(fmt: object, *args: object) -> None:
     """Prints a regular message to stdout."""
     print(fmt % args, file=sys.stdout)
 
 
-def set_debuglv(verbose: int | str) -> None:
+@cython.ccall
+def set_debuglv(verbose: object) -> None:
     """Sets the global debug level."""
     global debug_level
     debug_level = int(verbose)

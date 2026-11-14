@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Clean stack declaration maps from exact storage-ownership evidence.
 
 Layer: Types/Lowering.
@@ -11,6 +12,8 @@ Unknown or overlapping storage is retained.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -24,16 +27,18 @@ from inertia.alias.alias_model_impl import _stack_slot_identity_for_variable
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 
 from .stack_variable_coordinates import machine_bp_offset_for_stack_variable_8616
+import dataclasses
+import operator
 
-_FIRST_BP_ARGUMENT_OFFSET_8616: int = 4
-_DECLARATION_ENTRY_FIELD_COUNT_8616: int = 2
+_FIRST_BP_ARGUMENT_OFFSET_8616: cython.longlong = 4
+_DECLARATION_ENTRY_FIELD_COUNT_8616: cython.longlong = 2
 
 
 class _StackSlotIdentityLike8616(Protocol):
     """Typed projection of the canonical Alias stack identity."""
 
-    base: str
-    offset: int
+    base: object
+    offset: cython.longlong
     width: int | None
     region: int | None
 
@@ -55,11 +60,11 @@ class _StackDeclarationCodegen8616(Protocol):
     """Dynamic angr codegen fields consumed by declaration cleanup."""
 
     cfunc: _StackDeclarationCFunction8616 | None
-    _inertia_codegen_decl_refresh_required_8616: bool
+    _inertia_codegen_decl_refresh_required_8616: cython.bint
     _inertia_pre_argument_declaration_stats_8616: (
         PreArgumentStackDeclarationStats8616
     )
-    _inertia_return_selector_materialized_8616: bool
+    _inertia_return_selector_materialized_8616: cython.bint
 
 
 class PreArgumentStackDeclarationDecision8616(Enum):
@@ -72,18 +77,19 @@ class PreArgumentStackDeclarationDecision8616(Enum):
     UNKNOWN_REFUSE = "unknown_refuse"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PreArgumentStackDeclarationStats8616:
     """Closed evidence counts for pre-argument declaration cleanup."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    refusal_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    refusal_count: cython.longlong = 0
 
 
+@cython.ccall
 def _stack_variable_8616(node: object) -> SimStackVariable | None:
     """Return exact stack storage exposed by one structured-C variable node."""
     if not isinstance(node, structured_c.CVariable):
@@ -92,19 +98,22 @@ def _stack_variable_8616(node: object) -> SimStackVariable | None:
     return variable if isinstance(variable, SimStackVariable) else None
 
 
+@cython.ccall
 def declaration_members_are_argument_owned_8616(
-    entries: object, argument_variable_ids: frozenset[int],
-) -> bool:
+    entries: object, argument_variable_ids: object,
+) -> cython.bint:
     """Recognize a stale declaration whose members all belong to one formal.
 
     This proves member ownership only. The caller must separately refuse a key
     still used by the body; byte/word proximity and matching names are not proof.
     """
+    variable: object
+    entry: object
     if not isinstance(entries, (list, tuple, set)) or not entries:
         return False
-    owners: set[int] = set()
+    owners: set[cython.longlong] = set()
     for entry in entries:
-        if not isinstance(entry, tuple) or len(entry) != _DECLARATION_ENTRY_FIELD_COUNT_8616:
+        if not isinstance(entry, tuple) or operator.ne(len(entry), _DECLARATION_ENTRY_FIELD_COUNT_8616):
             return False
         variable = _stack_variable_8616(entry[0])
         if variable is None or id(variable) not in argument_variable_ids:
@@ -113,11 +122,13 @@ def declaration_members_are_argument_owned_8616(
     return len(owners) == 1
 
 
+@cython.ccall
 def body_declaration_owner_ids_8616(
-    root: object, argument_variable_ids: frozenset[int],
-) -> frozenset[int]:
+    root: object, argument_variable_ids: object,
+) -> frozenset[cython.longlong]:
     """Keep physical and unified body owners, excluding stale formal indexes."""
-    owners: set[int] = set()
+    node: object
+    owners: set[cython.longlong] = set()
     for node in _iter_c_nodes_deep_8616(root):
         if not isinstance(node, structured_c.CVariable):
             continue
@@ -127,18 +138,24 @@ def body_declaration_owner_ids_8616(
     return frozenset(owners)
 
 
+@cython.ccall
 def _stack_identity_8616(
     variable: SimStackVariable,
 ) -> _StackSlotIdentityLike8616 | None:
     """Project the canonical Alias identity onto this typed consumer contract."""
+    identity: object
     identity = _stack_slot_identity_for_variable(variable)
     return None if identity is None else cast(_StackSlotIdentityLike8616, identity)
 
 
+@cython.ccall
 def _stack_identities_in_tree_8616(
     root: object,
 ) -> frozenset[_StackSlotIdentityLike8616]:
     """Collect exact stack identities referenced by one structured-C tree."""
+    identity: object
+    variable: object
+    node: object
     identities: set[_StackSlotIdentityLike8616] = set()
     for node in _iter_c_nodes_deep_8616(root):
         variable = _stack_variable_8616(node)
@@ -150,14 +167,17 @@ def _stack_identities_in_tree_8616(
     return frozenset(identities)
 
 
+@cython.ccall
 def _stack_identities_overlap_8616(
     lhs: _StackSlotIdentityLike8616,
     rhs: _StackSlotIdentityLike8616,
-) -> bool:
+) -> cython.bint:
     """Return whether two exact stack ranges may own any common byte."""
-    if lhs.base != rhs.base:
+    lhs_end: object
+    rhs_end: object
+    if operator.ne(lhs.base, rhs.base):
         return False
-    if lhs.region is not None and rhs.region is not None and lhs.region != rhs.region:
+    if lhs.region is not None and rhs.region is not None and operator.ne(lhs.region, rhs.region):
         return False
     lhs_end = lhs.end_offset()
     rhs_end = rhs.end_offset()
@@ -169,9 +189,9 @@ def _stack_identities_overlap_8616(
 def _pre_argument_declaration_decision_8616(
     identity: _StackSlotIdentityLike8616,
     *,
-    bp_offset: int | None,
-    body_identities: frozenset[_StackSlotIdentityLike8616],
-    header_identities: frozenset[_StackSlotIdentityLike8616],
+    bp_offset: object,
+    body_identities: object,
+    header_identities: object,
 ) -> PreArgumentStackDeclarationDecision8616:
     """Classify in machine-BP coordinates; compare ownership in native storage coordinates."""
     if bp_offset is None:
@@ -182,11 +202,11 @@ def _pre_argument_declaration_decision_8616(
         return PreArgumentStackDeclarationDecision8616.UNKNOWN_REFUSE
     if any(
         _stack_identities_overlap_8616(identity, owned)
-        for owned in header_identities
+        for owned in iter(header_identities)
     ):
         return PreArgumentStackDeclarationDecision8616.KEEP_HEADER_OWNED
     if any(
-        _stack_identities_overlap_8616(identity, owned) for owned in body_identities
+        _stack_identities_overlap_8616(identity, owned) for owned in iter(body_identities)
     ):
         return PreArgumentStackDeclarationDecision8616.KEEP_BODY_OWNED
     return PreArgumentStackDeclarationDecision8616.REMOVE_UNREFERENCED
@@ -196,7 +216,9 @@ def _declaration_variables_8616(
     *mappings: object,
 ) -> tuple[SimStackVariable, ...]:
     """Return unique stack declaration keys from dynamic angr maps."""
-    declarations: dict[int, SimStackVariable] = {}
+    mapping: object
+    variable: object
+    declarations: dict[cython.longlong, SimStackVariable] = {}
     for mapping in mappings:
         if not isinstance(mapping, dict):
             continue
@@ -206,18 +228,20 @@ def _declaration_variables_8616(
     return tuple(declarations.values())
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _DeclarationSurface8616:
     """Snapshot the angr declaration maps and their ownership roots."""
 
-    arguments: tuple[object, ...]
+    arguments: object
     statements: object
     variables_in_use: object
     unified_local_vars: object
 
 
+@cython.ccall
 def _declaration_surface_8616(codegen: object) -> _DeclarationSurface8616 | None:
     """Read the dynamic angr surface, refusing incomplete ownership roots."""
+    cfunc: object
     typed_codegen = cast(_StackDeclarationCodegen8616, codegen)
     try:
         cfunc = typed_codegen.cfunc
@@ -246,8 +270,9 @@ def _declaration_surface_8616(codegen: object) -> _DeclarationSurface8616 | None
     return _DeclarationSurface8616(argument_list, statements, variables_in_use, unified_local_vars)
 
 
-def _remove_declaration_variable_8616(variable: SimStackVariable, *mappings: object) -> bool:
+def _remove_declaration_variable_8616(variable: SimStackVariable, *mappings: object) -> cython.bint:
     """Remove one classified declaration from every available map."""
+    mapping: object
     removed = False
     for mapping in mappings:
         if isinstance(mapping, dict) and variable in mapping:
@@ -256,8 +281,11 @@ def _remove_declaration_variable_8616(variable: SimStackVariable, *mappings: obj
     return removed
 
 
-def prune_unreferenced_pre_argument_declarations_8616(codegen: object) -> bool:
+def prune_unreferenced_pre_argument_declarations_8616(codegen: object) -> cython.bint:
     """Remove unowned BP control-slot declarations and retain uncertain views."""
+    identity: object
+    surface: object
+    variable: object
     surface = _declaration_surface_8616(codegen)
     if surface is None:
         return False
@@ -268,7 +296,7 @@ def prune_unreferenced_pre_argument_declarations_8616(codegen: object) -> bool:
     body_identities = _stack_identities_in_tree_8616(surface.statements)
     header_identities = frozenset(
         identity
-        for candidate in surface.arguments
+        for candidate in iter(surface.arguments)
         if (variable := _stack_variable_8616(candidate)) is not None
         if (identity := _stack_identity_8616(variable)) is not None
     )

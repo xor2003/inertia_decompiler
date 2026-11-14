@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Runtime startup guard for decompiler architecture constraints.
 
 Layer: CLI/fallback/reporting.
@@ -5,6 +6,8 @@ Responsibility: owns startup enforcement of architecture guard checks.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import hashlib
 import os
@@ -14,6 +17,7 @@ from pathlib import Path
 from inertia.cli import architecture_import_attestation
 from tools.dev import check_decompiler_architecture as architecture_check
 from tools.dev.check_decompiler_architecture import ArchitectureViolation
+import operator
 
 __all__ = [
     "ARCHITECTURE_GUARD_VERIFIED_PARENT_PID_ENV",
@@ -52,10 +56,11 @@ def format_decompiler_architecture_guard_error(violations: Iterable[Architecture
         "",
         "Violations:",
     ]
-    lines.extend(f"- {violation.format()}" for violation in violations)
+    lines.extend(f"- {violation.format()}" for violation in iter(violations))
     return "\n".join(lines)
 
 
+@cython.ccall
 def _runtime_import_violations(
     root: Path,
     cli_path: Path,
@@ -71,11 +76,13 @@ def _runtime_import_violations(
 _RUNTIME_IMPORT_VIOLATIONS_IMPL = _runtime_import_violations
 
 
+@cython.ccall
 def _architecture_guard_source_fingerprint(
     root: Path,
     cli_path: Path,
-) -> str:
+) -> object:
     """Hash every source that can change runtime import-guard conclusions."""
+    path: object
     paths = {
         *architecture_check._owned_contract_source_paths(root),
         cli_path,
@@ -96,24 +103,27 @@ def _architecture_guard_source_fingerprint(
     return digest.hexdigest()
 
 
-def _architecture_guard_cache_is_clean(fingerprint: str) -> bool:
+@cython.ccall
+def _architecture_guard_cache_is_clean(fingerprint: object) -> cython.bint:
     """Return whether the persistent attestation matches current source bytes."""
-    is_clean: bool = architecture_import_attestation.architecture_guard_cache_is_clean(
+    is_clean: cython.bint = architecture_import_attestation.architecture_guard_cache_is_clean(
         _ARCHITECTURE_GUARD_CACHE_PATH,
         fingerprint,
     )
     return is_clean
 
 
-def _architecture_guard_checker_fingerprint() -> str:
+@cython.ccall
+def _architecture_guard_checker_fingerprint() -> object:
     """Hash rule and cache implementations that determine stored verdicts."""
-    fingerprint: str = architecture_import_attestation.architecture_guard_checker_fingerprint(
+    fingerprint: object = architecture_import_attestation.architecture_guard_checker_fingerprint(
         Path(__file__),
     )
     return fingerprint
 
 
-def cached_decompiler_architecture_import_violations() -> tuple[ArchitectureViolation, ...]:
+@cython.ccall
+def cached_decompiler_architecture_import_violations() -> object:
     """Return default-tree import violations using the persistent attestation."""
     global _ARCHITECTURE_GUARD_VERIFIED_PROCESS_PID
     root_path = architecture_check.X86_16_ROOT
@@ -147,17 +157,19 @@ def cached_decompiler_architecture_import_violations() -> tuple[ArchitectureViol
     )
     if not evaluation.violations:
         _ARCHITECTURE_GUARD_VERIFIED_PROCESS_PID = process_pid
-    violations: tuple[ArchitectureViolation, ...] = evaluation.violations
+    violations: object = evaluation.violations
     return violations
 
 
-def cached_decompiler_startup_architecture_violations() -> tuple[ArchitectureViolation, ...]:
+@cython.ccall
+def cached_decompiler_startup_architecture_violations() -> object:
     """Return the exact cached default-tree startup verdict or evaluate it."""
+    cached: object
     fingerprint = architecture_import_attestation.architecture_startup_source_fingerprint(
         architecture_check.X86_16_ROOT,
         architecture_check.REPO_ROOT,
     )
-    cached: tuple[ArchitectureViolation, ...] | None = (
+    cached = (
         architecture_import_attestation.load_startup_architecture_verdict(
             _ARCHITECTURE_STARTUP_CACHE_PATH,
             fingerprint,
@@ -166,7 +178,7 @@ def cached_decompiler_startup_architecture_violations() -> tuple[ArchitectureVio
     if cached is not None:
         return cached
     import_violations = cached_decompiler_architecture_import_violations()
-    violations: tuple[ArchitectureViolation, ...] = architecture_check.check_decompiler_startup_architecture(
+    violations: object = architecture_check.check_decompiler_startup_architecture(
         architecture_check.X86_16_ROOT,
         architecture_check.CLI_DECOMPILATION,
         architecture_check.REPO_ROOT,
@@ -192,15 +204,20 @@ def cached_decompiler_startup_architecture_violations() -> tuple[ArchitectureVio
     return violations
 
 
+@cython.ccall
 def assert_decompiler_architecture_clean() -> None:
     """Stop decompiler startup if runtime import-layer guardrails are violated."""
+    cli: object
+    repo_root: object
+    root: object
+    verified_parent_pid: object
     root = os.environ.get("INERTIA_ARCH_GUARD_X86_16_ROOT")
     cli = os.environ.get("INERTIA_ARCH_GUARD_CLI")
     repo_root = os.environ.get("INERTIA_ARCH_GUARD_REPO_ROOT")
     verified_parent_pid = os.environ.get(ARCHITECTURE_GUARD_VERIFIED_PARENT_PID_ENV)
     if not (root or cli or repo_root) and verified_parent_pid is not None:
         try:
-            if int(verified_parent_pid) == os.getppid():
+            if operator.eq(int(verified_parent_pid), os.getppid()):
                 return
         except ValueError:
             pass

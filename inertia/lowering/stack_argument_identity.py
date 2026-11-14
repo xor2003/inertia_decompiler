@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Canonicalize positive-BP argument storage after typed pointer lowering.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ prototype and alias facts already materialized by earlier pipeline owners.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -30,6 +33,9 @@ from .stack_variable_coordinates import (
     machine_bp_offset_for_stack_variable_8616,
     record_stack_variable_coordinate_alias_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 
 class _ArgumentIdentityCFunction8616(Protocol):
@@ -46,27 +52,29 @@ class _ArgumentIdentityCodegen8616(Protocol):
 
     cfunc: _ArgumentIdentityCFunction8616 | None
     _inertia_arg_stack_identity_stats_8616: StackArgumentIdentityStats8616
-    _inertia_arg_stack_identity_unified_8616: int
-    _inertia_codegen_decl_refresh_required_8616: bool
-    _inertia_return_selector_materialized_8616: bool
+    _inertia_arg_stack_identity_unified_8616: cython.longlong
+    _inertia_codegen_decl_refresh_required_8616: cython.bint
+    _inertia_return_selector_materialized_8616: cython.bint
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackArgumentIdentityStats8616:
     """Closed evidence counts for one argument-storage identity pass."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
+@cython.ccall
 def machine_bp_stack_identity_8616(
     codegen: object,
     variable: SimStackVariable,
 ) -> _StackSlotIdentity | None:
     """Project one Alias identity onto its authoritative machine-BP offset."""
+    identity: object
     identity = _stack_slot_identity_for_variable(variable)
     if identity is None or identity.base != "bp":
         return None
@@ -76,12 +84,14 @@ def machine_bp_stack_identity_8616(
     return _StackSlotIdentity(identity.base, bp_offset, identity.width, identity.region)
 
 
+@cython.ccall
 def _machine_bp_stack_binding_identity_8616(
     codegen: object,
     variable: SimStackVariable,
     cvar: object,
 ) -> _StackSlotIdentity | None:
     """Bind an angr declaration-map key to its canonical projected C variable."""
+    canonical_identity: object
     canonical_variable = (
         cvar.variable if isinstance(cvar, structured_c.CVariable) else None
     )
@@ -92,7 +102,7 @@ def _machine_bp_stack_binding_identity_8616(
         canonical_identity is not None
         and canonical_variable is not variable
         and isinstance(canonical_variable.size, int)
-        and canonical_variable.size == variable.size
+        and operator.eq(canonical_variable.size, variable.size)
     ):
         record_stack_variable_coordinate_alias_8616(
             codegen,
@@ -103,11 +113,13 @@ def _machine_bp_stack_binding_identity_8616(
     return machine_bp_stack_identity_8616(codegen, variable)
 
 
+@cython.ccall
 def _positive_stack_variable_8616(
     codegen: object,
     node: object,
 ) -> SimStackVariable | None:
     """Return a positive-BP stack variable exposed by one structured-C node."""
+    identity: object
     if not isinstance(node, structured_c.CVariable):
         return None
     variable = node.variable
@@ -123,6 +135,7 @@ def _positive_stack_variable_8616(
     return variable
 
 
+@cython.ccall
 def _indexed_stack_base_argument_offset_8616(node: object) -> int | None:
     """Return an exact positive argument offset from angr's stack-base view."""
     if not isinstance(node, structured_c.CIndexedVariable):
@@ -140,6 +153,7 @@ def _indexed_stack_base_argument_offset_8616(node: object) -> int | None:
     return index.value
 
 
+@cython.ccall
 def _mark_stack_identity_change_8616(
     codegen: _ArgumentIdentityCodegen8616,
 ) -> None:
@@ -152,6 +166,7 @@ def _mark_stack_identity_change_8616(
     codegen._inertia_arg_stack_identity_unified_8616 = unified_count + 1
 
 
+@cython.ccall
 def _clone_argument_reference_8616(
     argument: structured_c.CVariable,
 ) -> structured_c.CVariable:
@@ -165,20 +180,22 @@ def _clone_argument_reference_8616(
     return clone
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _ArgumentBoundary8616:
     """Normalized cfunc boundary pieces consumed by the identity pass."""
 
     cfunc: _ArgumentIdentityCFunction8616
-    argument_list: tuple[object, ...]
+    argument_list: object
     variables_in_use: object
     unified_local_vars: object
 
 
+@cython.ccall
 def _argument_boundary_8616(
     typed_codegen: _ArgumentIdentityCodegen8616,
 ) -> _ArgumentBoundary8616 | None:
     """Return the normalized boundary pieces, or None when unavailable."""
+    cfunc: object
     try:
         cfunc = typed_codegen.cfunc
     except AttributeError:
@@ -212,14 +229,19 @@ def _argument_boundary_8616(
     )
 
 
+@cython.ccall
 def _canonical_arguments_8616(
     typed_codegen: _ArgumentIdentityCodegen8616,
-    argument_list: tuple[object, ...],
+    argument_list: object,
 ) -> tuple[
     dict[_StackSlotIdentity, structured_c.CVariable],
-    dict[int, structured_c.CVariable],
+    dict[cython.longlong, structured_c.CVariable],
 ]:
     """Collect canonical argument references by identity and BP offset."""
+    identity: object
+    variable: object
+    argument: object
+    candidate: object
     arguments_by_identity: dict[_StackSlotIdentity, list[structured_c.CVariable]] = {}
     for candidate in argument_list:
         if not isinstance(candidate, structured_c.CVariable):
@@ -232,10 +254,10 @@ def _canonical_arguments_8616(
             arguments_by_identity.setdefault(identity, []).append(candidate)
     canonical_by_identity = {
         identity: arguments[0]
-        for identity, arguments in arguments_by_identity.items()
+        for identity, arguments in builtins.iter(arguments_by_identity.items())
         if len(arguments) == 1
     }
-    arguments_by_offset: dict[int, list[structured_c.CVariable]] = {}
+    arguments_by_offset: dict[cython.longlong, list[structured_c.CVariable]] = {}
     for argument in canonical_by_identity.values():
         variable = _positive_stack_variable_8616(typed_codegen, argument)
         if variable is not None:
@@ -244,27 +266,32 @@ def _canonical_arguments_8616(
                 arguments_by_offset.setdefault(identity.offset, []).append(argument)
     canonical_by_offset = {
         offset: arguments[0]
-        for offset, arguments in arguments_by_offset.items()
+        for offset, arguments in builtins.iter(arguments_by_offset.items())
         if len(arguments) == 1
     }
     return canonical_by_identity, canonical_by_offset
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _ArgumentUnification8616:
     """Mutable transform state for one argument-identity rewrite pass."""
 
     codegen: _ArgumentIdentityCodegen8616
     canonical_by_identity: Mapping[_StackSlotIdentity, structured_c.CVariable]
-    canonical_by_offset: Mapping[int, structured_c.CVariable]
-    changed: bool = False
-    raw_count: int = 0
-    normalized_count: int = 0
-    classified_count: int = 0
-    materialized_count: int = 0
+    canonical_by_offset: Mapping[cython.longlong, structured_c.CVariable]
+    changed: cython.bint = False
+    raw_count: cython.longlong = 0
+    normalized_count: cython.longlong = 0
+    classified_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
 
+    @cython.ccall
     def transform(self, node: object) -> object:
         """Rewrite one node to its canonical argument reference."""
+        argument: object
+        identity: object
+        indexed_offset: object
+        variable: object
         variable = _positive_stack_variable_8616(self.codegen, node)
         indexed_offset = _indexed_stack_base_argument_offset_8616(node)
         if variable is None and indexed_offset is None:
@@ -288,13 +315,18 @@ class _ArgumentUnification8616:
         return _clone_argument_reference_8616(argument)
 
 
+@cython.ccall
 def _merge_variables_in_use_8616(
     typed_codegen: _ArgumentIdentityCodegen8616,
-    variables_in_use: dict[object, object],
+    variables_in_use: object,
     canonical_by_identity: Mapping[_StackSlotIdentity, structured_c.CVariable],
-    canonical_variables: frozenset[object],
-) -> bool:
+    canonical_variables: object,
+) -> cython.bint:
     """Retarget or drop declaration-map entries bound to canonical arguments."""
+    argument: object
+    identity: object
+    cvar: object
+    variable: object
     changed = False
     for variable, cvar in tuple(variables_in_use.items()):
         if not isinstance(variable, SimStackVariable):
@@ -321,13 +353,14 @@ def _merge_variables_in_use_8616(
 
 def _merge_unified_local_vars_8616(
     typed_codegen: _ArgumentIdentityCodegen8616,
-    unified_local_vars: dict[object, object],
+    unified_local_vars: object,
     canonical_by_identity: Mapping[_StackSlotIdentity, structured_c.CVariable],
-    canonical_variables: frozenset[object],
+    canonical_variables: object,
     statements: object,
-) -> bool:
+) -> cython.bint:
     """Drop unified declaration entries proven argument-owned."""
-    argument_variable_ids = frozenset(id(variable) for variable in canonical_variables)
+    variable: object
+    argument_variable_ids = frozenset(id(variable) for variable in iter(canonical_variables))
     body_variable_ids = body_declaration_owner_ids_8616(statements, argument_variable_ids)
     changed = False
     for variable in tuple(unified_local_vars):
@@ -346,8 +379,9 @@ def _merge_unified_local_vars_8616(
 
 def unify_positive_bp_argument_identity_8616(
     codegen: object,
-) -> bool:
+) -> cython.bint:
     """Join body references to exact canonical positive-BP argument storage."""
+    boundary: object
     typed_codegen = cast(_ArgumentIdentityCodegen8616, codegen)
     boundary = _argument_boundary_8616(typed_codegen)
     if boundary is None:
@@ -376,7 +410,7 @@ def unify_positive_bp_argument_identity_8616(
         unification.changed = True
 
     canonical_variables = frozenset(
-        argument.variable for argument in canonical_by_identity.values()
+        argument.variable for argument in builtins.iter(canonical_by_identity.values())
     )
     if isinstance(boundary.variables_in_use, dict):
         changed = (

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Instruction semantics and their typed contracts.
 
 Layer: Semantics.
@@ -8,3 +9,4 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import cython

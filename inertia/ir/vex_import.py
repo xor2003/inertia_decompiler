@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Import VEX block data into typed x86-16 IR artifacts.
 
 Layer: IR.
@@ -8,6 +9,9 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import dataclasses
+import typing
+import cython
 
 from collections.abc import Callable, Iterable, Mapping, MutableMapping
 from copy import deepcopy
@@ -137,6 +141,14 @@ from .vex_terminal_jump import (
     terminal_direct_jump_evidence_8616,
 )
 from .vex_types import vex_expr_size_bytes
+import operator
+import builtins
+DeclaredEntryInput8616 = typing.TypeVar("DeclaredEntryInput8616")
+ImmutableSourceGraphFacts8616 = typing.TypeVar("ImmutableSourceGraphFacts8616")
+NativeNearCallPipeline8616 = typing.TypeVar("NativeNearCallPipeline8616")
+Real16InvocationDomain8616 = typing.TypeVar("Real16InvocationDomain8616")
+ScopedFunctionIRView8616 = typing.TypeVar("ScopedFunctionIRView8616")
+ScopedNearReturnContinuationView8616 = typing.TypeVar("ScopedNearReturnContinuationView8616")
 
 if TYPE_CHECKING:
     from .declared_entry_pipeline import DeclaredEntryInput8616
@@ -290,17 +302,19 @@ class _CodegenBoundary(Protocol):
     _inertia_raw_vex_ir_frame_8616: object
     _inertia_raw_vex_ir_function_ssa_8616: SSAFunctionArtifact
     _inertia_vex_ir_artifact: IRFunctionArtifact
-    _inertia_vex_ir_summary: dict[str, object]
+    _inertia_vex_ir_summary: object
     _inertia_vex_ir_frame: object
     _inertia_vex_ir_function_ssa: object
 
 
-def _external_int(value: object) -> int:
+@cython.ccall
+def _external_int(value: object) -> cython.longlong:
     """Coerce external pyvex/angr integer-like values without owning their type."""
     return int(cast(Any, value))
 
 
-def _expr_tag(expr: object | None) -> str:
+@cython.ccall
+def _expr_tag(expr: object) -> str:
     """Return a VEX expression tag from the pyvex boundary."""
     if expr is None:
         return ""
@@ -310,12 +324,14 @@ def _expr_tag(expr: object | None) -> str:
         return ""
 
 
-def _expr_tmp(expr: object) -> int:
+@cython.ccall
+def _expr_tmp(expr: object) -> cython.longlong:
     """Return a VEX temporary id from the pyvex boundary."""
     return _external_int(cast(_VexExprBoundary, expr).tmp)
 
 
-def _expr_offset(expr: object, default: int = -1) -> int:
+@cython.ccall
+def _expr_offset(expr: object, default: cython.longlong = -1) -> cython.longlong:
     """Return a VEX register offset from the pyvex boundary."""
     try:
         return _external_int(cast(_VexExprBoundary, expr).offset)
@@ -323,7 +339,8 @@ def _expr_offset(expr: object, default: int = -1) -> int:
         return default
 
 
-def _expr_op(expr: object | None, default: str = "") -> str:
+@cython.ccall
+def _expr_op(expr: object, default: object = "") -> object:
     """Return a VEX expression op from the pyvex boundary."""
     if expr is None:
         return default
@@ -333,8 +350,10 @@ def _expr_op(expr: object | None, default: str = "") -> str:
         return default
 
 
-def _expr_args(expr: object | None) -> tuple[object, ...]:
+@cython.ccall
+def _expr_args(expr: object) -> tuple[object, ...]:
     """Return VEX expression args from the pyvex boundary."""
+    args: object
     if expr is None:
         return ()
     try:
@@ -346,7 +365,8 @@ def _expr_args(expr: object | None) -> tuple[object, ...]:
     return tuple(cast(Iterable[object], args))
 
 
-def _expr_addr(expr: object | None) -> object | None:
+@cython.ccall
+def _expr_addr(expr: object) -> object | None:
     """Return a VEX load address expression from the pyvex boundary."""
     if expr is None:
         return None
@@ -356,7 +376,8 @@ def _expr_addr(expr: object | None) -> object | None:
         return None
 
 
-def _expr_const(expr: object | None) -> _VexConstBoundary | None:
+@cython.ccall
+def _expr_const(expr: object) -> _VexConstBoundary | None:
     """Return a VEX constant wrapper from the pyvex boundary."""
     if expr is None:
         return None
@@ -366,7 +387,8 @@ def _expr_const(expr: object | None) -> _VexConstBoundary | None:
         return None
 
 
-def _stmt_tag(stmt: object | None) -> str:
+@cython.ccall
+def _stmt_tag(stmt: object) -> str:
     """Return a VEX statement tag from the pyvex boundary."""
     if stmt is None:
         return ""
@@ -376,12 +398,14 @@ def _stmt_tag(stmt: object | None) -> str:
         return ""
 
 
-def _stmt_tmp(stmt: object) -> int:
+@cython.ccall
+def _stmt_tmp(stmt: object) -> cython.longlong:
     """Return a VEX statement temporary id from the pyvex boundary."""
     return _external_int(cast(_VexStmtBoundary, stmt).tmp)
 
 
-def _stmt_data(stmt: object | None) -> object | None:
+@cython.ccall
+def _stmt_data(stmt: object) -> object | None:
     """Return a VEX statement data expression from the pyvex boundary."""
     if stmt is None:
         return None
@@ -391,12 +415,14 @@ def _stmt_data(stmt: object | None) -> object | None:
         return None
 
 
-def _stmt_offset(stmt: object) -> int:
+@cython.ccall
+def _stmt_offset(stmt: object) -> cython.longlong:
     """Return a VEX Put statement register offset."""
     return _external_int(cast(_VexStmtBoundary, stmt).offset)
 
 
-def _stmt_addr(stmt: object | None) -> object | None:
+@cython.ccall
+def _stmt_addr(stmt: object) -> object | None:
     """Return a VEX Store statement address expression."""
     if stmt is None:
         return None
@@ -406,6 +432,7 @@ def _stmt_addr(stmt: object | None) -> object | None:
         return None
 
 
+@cython.ccall
 def _stmt_instruction_addr(stmt: object) -> int | None:
     """Return the effective guest address carried by a VEX instruction mark."""
     boundary = cast(_VexStmtBoundary, stmt)
@@ -415,6 +442,7 @@ def _stmt_instruction_addr(stmt: object) -> int | None:
         return None
 
 
+@cython.ccall
 def _stmt_instruction_size(stmt: object) -> int | None:
     """Return the decoded byte length carried by a VEX instruction mark."""
     try:
@@ -424,7 +452,8 @@ def _stmt_instruction_size(stmt: object) -> int | None:
     return size if size >= 0 else None
 
 
-def _stmt_guard(stmt: object | None) -> object | None:
+@cython.ccall
+def _stmt_guard(stmt: object) -> object | None:
     """Return a VEX Exit guard expression."""
     if stmt is None:
         return None
@@ -434,7 +463,8 @@ def _stmt_guard(stmt: object | None) -> object | None:
         return None
 
 
-def _stmt_dst(stmt: object | None) -> object | None:
+@cython.ccall
+def _stmt_dst(stmt: object) -> object | None:
     """Return a VEX Exit destination expression."""
     if stmt is None:
         return None
@@ -444,6 +474,7 @@ def _stmt_dst(stmt: object | None) -> object | None:
         return None
 
 
+@cython.ccall
 def _block_vex(block: object) -> _VexBlockBoundary | None:
     """Return the VEX payload from an angr block boundary."""
     try:
@@ -452,7 +483,8 @@ def _block_vex(block: object) -> _VexBlockBoundary | None:
         return None
 
 
-def _block_addr(block: object) -> int:
+@cython.ccall
+def _block_addr(block: object) -> cython.longlong:
     """Return the address from an angr block boundary."""
     try:
         return _external_int(cast(_BlockBoundary, block).addr)
@@ -460,8 +492,10 @@ def _block_addr(block: object) -> int:
         return 0
 
 
-def _vex_statements(vex: _VexBlockBoundary | None) -> tuple[object, ...]:
+@cython.ccall
+def _vex_statements(vex: object) -> tuple[object, ...]:
     """Return VEX statements as a stable tuple."""
+    statements: object
     if vex is None:
         return ()
     try:
@@ -473,7 +507,8 @@ def _vex_statements(vex: _VexBlockBoundary | None) -> tuple[object, ...]:
     return tuple(cast(Iterable[object], statements))
 
 
-def _vex_next(vex: _VexBlockBoundary | None) -> object | None:
+@cython.ccall
+def _vex_next(vex: object) -> object | None:
     """Return the VEX default successor expression."""
     if vex is None:
         return None
@@ -483,7 +518,8 @@ def _vex_next(vex: _VexBlockBoundary | None) -> object | None:
         return None
 
 
-def _vex_type_environment(vex: _VexBlockBoundary | None) -> object | None:
+@cython.ccall
+def _vex_type_environment(vex: object) -> object | None:
     """Return the external IRSB type environment used by VEX width methods."""
     if vex is None:
         return None
@@ -493,7 +529,8 @@ def _vex_type_environment(vex: _VexBlockBoundary | None) -> object | None:
         return None
 
 
-def _vex_jumpkind(vex: _VexBlockBoundary | None) -> str:
+@cython.ccall
+def _vex_jumpkind(vex: object) -> str:
     """Return the VEX block jumpkind from the pyvex boundary."""
     if vex is None:
         return ""
@@ -503,7 +540,8 @@ def _vex_jumpkind(vex: _VexBlockBoundary | None) -> str:
         return ""
 
 
-def _function_addr(function: object) -> int:
+@cython.ccall
+def _function_addr(function: object) -> cython.longlong:
     """Return an angr function address from the boundary object."""
     try:
         return _external_int(cast(_FunctionBoundary, function).addr)
@@ -513,20 +551,23 @@ def _function_addr(function: object) -> int:
 
 def _function_block_addrs(function: object) -> tuple[object, ...]:
     """Return a deterministic tuple of function block addresses."""
+    block_addrs: object
     try:
         block_addrs = cast(_FunctionBoundary, function).block_addrs_set
     except AttributeError:
         return ()
     if block_addrs is None:
         return ()
-    return tuple(sorted(_external_int(block_addr) for block_addr in cast(Iterable[object], block_addrs)))
+    return tuple(sorted(_external_int(block_addr) for block_addr in builtins.iter(cast(Iterable[object], block_addrs))))
 
 
-def _graph_edge_addresses_8616(edge: object) -> tuple[int, int] | None:
+@cython.ccall
+def _graph_edge_addresses_8616(edge: object) -> object:
     """Resolve one raw graph edge to its two node addresses."""
+    node: object
     if not isinstance(edge, (tuple, list)) or len(edge) < 2:
         return None
-    addresses: list[int] = []
+    addresses: list[cython.longlong] = []
     for node in edge[:2]:
         raw_address = node if isinstance(node, int) else cast(_FunctionGraphNodeBoundary, node).addr
         try:
@@ -538,19 +579,24 @@ def _graph_edge_addresses_8616(edge: object) -> tuple[int, int] | None:
     return addresses[0], addresses[1]
 
 
+@cython.ccall
 def _function_graph_successors(
     function: object,
-    block_addrs: frozenset[int],
-) -> dict[int, tuple[int, ...]] | None:
+    block_addrs: object,
+) -> object:
     """Read exact Frontend or recovered angr in-function CFG edges."""
+    addresses: object
+    edge: object
+    source: object
+    target: object
     if isinstance(function, ExactFunctionRangeBoundary8616):
-        exact_successors: dict[int, set[int]] = {address: set() for address in block_addrs}
+        exact_successors: dict[cython.longlong, set[cython.longlong]] = {address: set() for address in iter(block_addrs)}
         for source, target in function.successor_edges:
             if source in block_addrs and target in block_addrs:
                 exact_successors[source].add(target)
         return {
             address: tuple(sorted(targets))
-            for address, targets in sorted(exact_successors.items())
+            for address, targets in builtins.iter(sorted(tuple(exact_successors.items())))
         }
     try:
         graph = cast(_FunctionBoundary, function).graph
@@ -558,7 +604,7 @@ def _function_graph_successors(
     except AttributeError:
         return None
     raw_edges = edges() if callable(edges) else edges
-    successors: dict[int, set[int]] = {address: set() for address in block_addrs}
+    successors: dict[cython.longlong, set[cython.longlong]] = {address: set() for address in iter(block_addrs)}
     try:
         edge_items = tuple(cast(Iterable[object], raw_edges))
     except TypeError:
@@ -571,10 +617,11 @@ def _function_graph_successors(
             successors[addresses[0]].add(addresses[1])
     return {
         address: tuple(sorted(targets))
-        for address, targets in sorted(successors.items())
+        for address, targets in builtins.iter(sorted(tuple(successors.items())))
     }
 
 
+@cython.ccall
 def _function_info(function: object) -> MutableMapping[str, object] | None:
     """Return mutable angr function info metadata when available."""
     try:
@@ -584,8 +631,10 @@ def _function_info(function: object) -> MutableMapping[str, object] | None:
     return cast(MutableMapping[str, object], info) if isinstance(info, MutableMapping) else None
 
 
+@cython.ccall
 def _const(expr: object | None) -> int | None:
     """Return a wrapped expression or direct VEX constant value when present."""
+    con: object
     con = _expr_const(expr)
     if con is not None:
         return _external_int(con.value)
@@ -595,20 +644,22 @@ def _const(expr: object | None) -> int | None:
         return None
 
 
+@cython.ccall
 def _int_size(
     expr: object | None,
-    default: int = 2,
+    default: cython.longlong = 2,
     *,
     type_environment: object | None = None,
-) -> int:
+) -> cython.longlong:
     """Return the byte width advertised by a VEX expression boundary."""
     return int(vex_expr_size_bytes(
         expr, type_environment=type_environment, default=default,
     ))
 
 
+@cython.ccall
 def _binary_value_from_operands_8616(
-    op: str,
+    op: object,
     left: IRValue,
     right: IRValue,
 ) -> IRValue:
@@ -619,6 +670,8 @@ def _binary_value_from_operands_8616(
     folding it into a fresh register view would replay it against the
     wrong register state.
     """
+    cond: object
+    displacement: object
     cond = build_condition_from_binop(op, left, right)
     if cond is not None:
         return IRValue(MemSpace.TMP, name=f"cond:{cond.op}", size=1, expr=(op,))
@@ -628,8 +681,8 @@ def _binary_value_from_operands_8616(
         return IRValue(MemSpace.TMP, name=f"expr:{op}", size=max(left.size, right.size), expr=(op,))
     displacement = (
         right.const
-        if left.space == MemSpace.REG and left.source_tmp is None
-        and right.space == MemSpace.CONST and right.source_tmp is None
+        if operator.eq(left.space, MemSpace.REG) and left.source_tmp is None
+        and operator.eq(right.space, MemSpace.CONST) and right.source_tmp is None
         else None
     )
     if "Add" in op and displacement is not None:
@@ -648,7 +701,7 @@ def _binary_value_from_operands_8616(
             size=left.size,
             expr=(op,),
         )
-    if "Add" in op and left.space == MemSpace.REG and right.space == MemSpace.REG and left.name and right.name:
+    if "Add" in op and operator.eq(left.space, MemSpace.REG) and operator.eq(right.space, MemSpace.REG) and left.name and right.name:
         return IRValue(
             MemSpace.TMP,
             name=f"addr:{left.name}+{right.name}",
@@ -670,6 +723,7 @@ def _binary_value_from_operands_8616(
     )
 
 
+@cython.ccall
 def _expr_to_value(
     expr: object,
     tmps: _TmpValues,
@@ -682,9 +736,10 @@ def _expr_to_value(
     return _expr_to_value_impl_8616(expr, tmps, conditions, convert, type_environment)
 
 
+@cython.ccall
 def _unop_result_bits_8616(
-    expr: object, type_environment: object | None, size_bytes: int
-) -> int:
+    expr: object, type_environment: object, size_bytes: cython.longlong
+) -> cython.longlong:
     """Return the authoritative bit width of one Unop result.
 
     Real pyvex expressions expose ``result_size(type_environment)`` in
@@ -707,6 +762,7 @@ def _unop_result_bits_8616(
     return size_bytes * 8
 
 
+@cython.ccall
 def _unop_ir_value_8616(
     expr: object,
     tmps: _TmpValues,
@@ -744,6 +800,7 @@ def _unop_ir_value_8616(
     )
 
 
+@cython.ccall
 def _binop_ir_value_8616(
     expr: object,
     tmps: _TmpValues,
@@ -760,6 +817,7 @@ def _binop_ir_value_8616(
     return _binary_value_from_operands_8616(op, left, right)
 
 
+@cython.ccall
 def _expr_to_value_impl_8616(
     expr: object,
     tmps: _TmpValues,
@@ -811,7 +869,7 @@ def _expr_to_value_impl_8616(
     return IRValue(MemSpace.UNKNOWN, name=tag or "expr")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _StmtImportContext8616:
     """Shared statement-import context for per-tag conversion helpers."""
 
@@ -823,11 +881,12 @@ class _StmtImportContext8616:
     condition_demand: VexConditionDemand8616
 
 
+@cython.ccall
 def _wrtmp_load_instr_8616(
     data: object,
-    tmp_id: int,
+    tmp_id: cython.longlong,
     dst: IRValue,
-    data_size: int,
+    data_size: cython.longlong,
     tmps: _MutableTmpValues,
     conditions: _MutableTmpConditions,
     ctx: _StmtImportContext8616,
@@ -860,9 +919,9 @@ def _wrtmp_load_instr_8616(
 
 def _wrtmp_binop_instr_8616(
     data: object,
-    tmp_id: int,
+    tmp_id: cython.longlong,
     dst: IRValue,
-    data_size: int,
+    data_size: cython.longlong,
     tmps: _MutableTmpValues,
     conditions: _MutableTmpConditions,
     ctx: _StmtImportContext8616,
@@ -874,6 +933,7 @@ def _wrtmp_binop_instr_8616(
     Operand widths remain independent: comparison predicates occupy one byte,
     and shift counts need not share the data operand's width.
     """
+    cond: object
     op = _expr_op(data, "BINOP")
     args = _expr_args(data)
     if len(args) != 2:
@@ -882,7 +942,7 @@ def _wrtmp_binop_instr_8616(
     right = ctx.convert(args[1], tmps, conditions)
     if "Cmp" in op or (
         ctx.condition_demand.requires_eager_condition(tmp_id)
-        and any(token in op for token in ("And", "Or"))
+        and any(token in op for token in iter(("And", "Or")))
     ):
         conditions[tmp_id] = expr_to_condition(
             data,
@@ -916,9 +976,10 @@ def _wrtmp_binop_instr_8616(
     )
 
 
+@cython.ccall
 def _wrtmp_ite_condition_8616(
     data: object,
-    tmp_id: int,
+    tmp_id: cython.longlong,
     tmps: _MutableTmpValues,
     conditions: _MutableTmpConditions,
     ctx: _StmtImportContext8616,
@@ -931,17 +992,19 @@ def _wrtmp_ite_condition_8616(
         cond.op == "nonzero"
         and len(cond.args) == 1
         and isinstance(cond.args[0], IRValue)
-        and cond.args[0].space == MemSpace.UNKNOWN
+        and operator.eq(cond.args[0].space, MemSpace.UNKNOWN)
         and cond.args[0].name == "Iex_ITE"
     ):
         conditions[tmp_id] = cond
 
 
+@cython.ccall
 def _bound_select_atom_8616(
     expr: object, tmps: _TmpValues, conditions: _TmpConditions,
     ctx: _StmtImportContext8616,
 ) -> IRValue | None:
     """Convert an atomic select input without hiding nested computations."""
+    value: object
     tag = _expr_tag(expr)
     if tag == "Iex_RdTmp":
         value = tmps.get(_expr_tmp(expr))
@@ -955,7 +1018,7 @@ def _bound_select_atom_8616(
 
 
 def _wrtmp_select_instr_8616(
-    data: object, tmp_id: int, dst: IRValue,
+    data: object, tmp_id: cython.longlong, dst: IRValue,
     tmps: _MutableTmpValues, conditions: _TmpConditions,
     ctx: _StmtImportContext8616,
 ) -> IRInstr | None:
@@ -965,6 +1028,9 @@ def _wrtmp_select_instr_8616(
     a literal value. Unbound inputs and nested expressions keep the existing
     explicit UNKNOWN import until their complete semantics can be represented.
     """
+    false_expr: object
+    guard_expr: object
+    true_expr: object
     if ctx.type_environment is None:
         return None
     guard_expr, true_expr, false_expr = _expr_cond(data), _expr_iftrue(data), _expr_iffalse(data)
@@ -972,21 +1038,22 @@ def _wrtmp_select_instr_8616(
         return None
     bits = _unop_result_bits_8616(data, ctx.type_environment, 0)
     widths = tuple(_unop_result_bits_8616(expr, ctx.type_environment, 0)
-                   for expr in (guard_expr, true_expr, false_expr))
+                   for expr in iter((guard_expr, true_expr, false_expr)))
     if bits not in {1, 8, 16, 32, 64} or widths != (1, bits, bits):
         return None
     args = tuple(_bound_select_atom_8616(expr, tmps, conditions, ctx)
-                 for expr in (guard_expr, true_expr, false_expr))
-    if any(value is None for value in args):
+                 for expr in iter((guard_expr, true_expr, false_expr)))
+    if any(value is None for value in iter(args)):
         return None
     operands = cast(tuple[IRValue, IRValue, IRValue], args)
-    if tuple(value.size for value in operands) != (1, dst.size, dst.size):
+    if operator.ne(tuple(value.size for value in iter(operands)), (1, dst.size, dst.size)):
         return None
     tmps[tmp_id] = dst
     return IRInstr(op=f"SELECT{bits}", dst=dst, args=operands, size=dst.size,
                    addr=ctx.instruction_addr)
 
 
+@cython.ccall
 def _wrtmp_instr_8616(
     stmt: object,
     tmps: _MutableTmpValues,
@@ -1002,6 +1069,8 @@ def _wrtmp_instr_8616(
     already names the computed result, so re-carrying the operation on the
     captured reference would apply it twice.
     """
+    instr: object
+    selection: object
     data = _stmt_data(stmt)
     tmp_id = _stmt_tmp(stmt)
     data_tag = _expr_tag(data)
@@ -1041,6 +1110,7 @@ def _wrtmp_instr_8616(
     return IRInstr(op="MOV", dst=dst, args=(value,), size=data_size, addr=ctx.instruction_addr)
 
 
+@cython.ccall
 def _put_instr_8616(
     stmt: object,
     tmps: _MutableTmpValues,
@@ -1058,6 +1128,7 @@ def _put_instr_8616(
     return IRInstr(op="MOV", dst=dst, args=(src,), size=src.size or dst.size, addr=ctx.instruction_addr)
 
 
+@cython.ccall
 def _store_instr_8616(
     stmt: object,
     tmps: _MutableTmpValues,
@@ -1079,6 +1150,7 @@ def _store_instr_8616(
     return IRInstr(op="STORE", dst=None, args=(addr, data), size=data.size, addr=ctx.instruction_addr)
 
 
+@cython.ccall
 def _exit_instr_8616(
     stmt: object,
     tmps: _MutableTmpValues,
@@ -1093,6 +1165,7 @@ def _exit_instr_8616(
     return IRInstr(op="CJMP", dst=None, args=(cond, target), size=0, addr=ctx.instruction_addr)
 
 
+@cython.ccall
 def _stmt_to_instr(
     stmt: object,
     tmps: _MutableTmpValues,
@@ -1125,10 +1198,11 @@ def _stmt_to_instr(
     return None
 
 
+@cython.ccall
 def _observe_imark_8616(
     block: object,
-    pending_mark: tuple[int, int, int] | None,
-    statement_index: int,
+    pending_mark: object,
+    statement_index: cython.longlong,
     stmt: object,
 ) -> tuple[IRInstr | None, tuple[int, int, int] | None, int | None, int | None]:
     """Close the prior empty span, then open the new instruction mark.
@@ -1151,7 +1225,7 @@ def _observe_imark_8616(
                 next_addr=mark_addr if type(mark_addr) is int else None,
             ),
         )
-    new_pending: tuple[int, int, int] | None = None
+    new_pending: object = None
     if (
         type(mark_addr) is int
         and mark_addr >= 0
@@ -1162,6 +1236,7 @@ def _observe_imark_8616(
     return no_effect, new_pending, mark_addr, mark_size
 
 
+@cython.ccall
 def _block_statement_instrs_8616(
     statements: Iterable[object],
     tmps: _MutableTmpValues,
@@ -1172,7 +1247,7 @@ def _block_statement_instrs_8616(
     type_environment: object | None,
     transport: VexConditionTransportNormalizer8616,
     block: object,
-    addr: int,
+    addr: cython.longlong,
 ) -> tuple[
     list[IRInstr],
     list[IRRefusal],
@@ -1189,11 +1264,18 @@ def _block_statement_instrs_8616(
     The trailing mark, if any, is returned so the caller can bind it to the
     block's terminal fallthrough instead of a following mark.
     """
+    instr: object
+    loaded_value: object
+    no_effect: object
+    pending_mark: object
+    replacement: object
+    statement_index: object
+    stmt: object
     instrs: list[IRInstr] = []
     refusals: list[IRRefusal] = []
     instruction_addr: int | None = None
     instruction_size: int | None = None
-    pending_mark: tuple[int, int, int] | None = None
+    pending_mark = None
     for statement_index, stmt in enumerate(statements):
         tag = _stmt_tag(stmt)
         if tag == "Ist_IMark":
@@ -1242,11 +1324,12 @@ def _block_statement_instrs_8616(
     return instrs, refusals, instruction_addr, instruction_size, trailing_mark
 
 
+@cython.ccall
 def _block_successor_addrs_8616(
     vex: _VexBlockBoundary | None,
     statements: Iterable[object],
     terminal_target: int | None = None,
-) -> tuple[int, ...]:
+) -> tuple[cython.longlong, ...]:
     """Collect constant exit targets plus the block's fallthrough next.
 
     ``terminal_target`` is a loader-linear destination already proven by the
@@ -1254,7 +1337,10 @@ def _block_successor_addrs_8616(
     literal ``next`` constant held before faithful lifting made the near-jump
     composition explicit. Unproven symbolic destinations add nothing.
     """
-    successor_addrs: list[int] = []
+    const_dst: object
+    next_const: object
+    stmt: object
+    successor_addrs: list[cython.longlong] = []
     for stmt in statements:
         if _stmt_tag(stmt) == "Ist_Exit":
             dst = _stmt_dst(stmt)
@@ -1266,14 +1352,15 @@ def _block_successor_addrs_8616(
         successor_addrs.append(int(next_const))
     if terminal_target is not None:
         successor_addrs.append(int(terminal_target))
-    return tuple(sorted(dict.fromkeys(successor_addrs)))
+    return tuple(sorted(tuple(dict.fromkeys(successor_addrs))))
 
 
+@cython.ccall
 def _block_to_ir(
     block: object,
     *,
-    return_terminal: bool = False,
-    indirect_terminal_pending: bool = False,
+    return_terminal: cython.bint = False,
+    indirect_terminal_pending: cython.bint = False,
 ) -> tuple[IRBlock, VexConditionTransportStats8616, TerminalJumpEvidence8616 | None]:
     """Import one angr block boundary into a typed IR block.
 
@@ -1291,6 +1378,10 @@ def _block_to_ir(
     cannot lift the expected Boring transfer the claim refuses rather
     than silently dropping the exit.
     """
+    no_effect: object
+    terminal: object
+    trailing_mark: object
+    vex: object
     vex = _block_vex(block)
     addr = _block_addr(block)
     if vex is None:
@@ -1401,10 +1492,11 @@ class _NativeCensusGuardSurface8616(Protocol):
     into premise construction.
     """
 
-    _inertia_real16_native_census_8616: int
+    _inertia_real16_native_census_8616: cython.longlong
 
 
-def _native_census_import_active_8616(project: object) -> bool:
+@cython.ccall
+def _native_census_import_active_8616(project: object) -> cython.bint:
     """Return whether this import is a bound invocation-census re-derivation."""
     try:
         depth = cast(
@@ -1420,7 +1512,7 @@ def _native_census_import_active_8616(project: object) -> bool:
 def _entry_domain_call_preservations_8616(
     project: object,
     function: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     domain_artifact: IRFunctionArtifact,
 ) -> tuple[EntryDomainCallPreservation8616, ...]:
     """Collect bound callsite CS-preservation evidence for the entry proof.
@@ -1431,12 +1523,13 @@ def _entry_domain_call_preservations_8616(
     default refusal. The decoded target resolver is the existing analysis
     owner, imported lazily to keep this module outside its dependency fan-in.
     """
+    boundary: object
     if _native_census_import_active_8616(project):
         return ()
     if not any(
         instruction.op == "CALL"
-        for block in domain_artifact.blocks
-        for instruction in block.instrs
+        for block in iter(domain_artifact.blocks)
+        for instruction in iter(block.instrs)
     ):
         return ()
     boundary = entry_domain_caller_boundary_8616(project, function, function_addr)
@@ -1454,7 +1547,7 @@ def _entry_domain_call_preservations_8616(
     ))
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _X86_16ImportedSurface8616:
     """Lifted pre-discharge function surface plus normalization inputs.
 
@@ -1465,19 +1558,19 @@ class _X86_16ImportedSurface8616:
     surface the route finalized.
     """
 
-    function_addr: int
-    blocks: tuple[IRBlock, ...]
-    refusals: tuple[IRRefusal, ...]
-    terminal_evidence: Mapping[int, TerminalJumpEvidence8616]
-    transport_reports: tuple[VexConditionTransportStats8616, ...]
-    condition_blocks: tuple[ConditionReliftBlock8616, ...]
-    captured_accesses: tuple[IRLogicalMemoryCaptureRecord8616, ...]
+    function_addr: cython.longlong
+    blocks: object
+    refusals: object
+    terminal_evidence: Mapping[cython.longlong, TerminalJumpEvidence8616]
+    transport_reports: object
+    condition_blocks: object
+    captured_accesses: object
     ownership: IRBlockOwnershipArtifact8616
     condition_capture: ConditionLiftCaptureSession8616
     dead_temporary_normalization: DeadTemporarySurfaceNormalizationResult8616 | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RawIRFunctionImportBundle8616:
     """Pre-discharge typed import product for one function surface.
 
@@ -1496,7 +1589,7 @@ class RawIRFunctionImportBundle8616:
     """
 
     artifact: IRFunctionArtifact
-    terminal_evidence: Mapping[int, TerminalJumpEvidence8616]
+    terminal_evidence: Mapping[cython.longlong, TerminalJumpEvidence8616]
 
     def __post_init__(self) -> None:
         """Freeze the retained evidence map into the bundle's own view."""
@@ -1507,6 +1600,7 @@ class RawIRFunctionImportBundle8616:
         )
 
 
+@cython.ccall
 def _import_x86_16_function_surface_8616(
     project: object, function: object,
 ) -> _X86_16ImportedSurface8616:
@@ -1520,6 +1614,7 @@ def _import_x86_16_function_surface_8616(
     )
 
 
+@cython.ccall
 def _native_import_boundary_8616(project: object, function: object) -> object:
     """Recover native block splits only within authenticated supplied extents.
 
@@ -1530,6 +1625,8 @@ def _native_import_boundary_8616(project: object, function: object) -> object:
     An unavailable witness leaves the existing import/refusal path unchanged;
     it never authorizes a larger function or overrides an exact boundary.
     """
+    boundary: object
+    witness: object
     if isinstance(function, ExactFunctionRangeBoundary8616) or direct_evidence_deadline_expired_8616(project):
         return function
     witness = capture_function_boundary_8616(project, function)
@@ -1539,6 +1636,7 @@ def _native_import_boundary_8616(project: object, function: object) -> object:
     return function if boundary is None else boundary
 
 
+@cython.ccall
 def _native_import_producers_8616() -> tuple[object, ...]:
     """Name the authoritative producers for raw lifting and cached projections."""
     return (
@@ -1558,6 +1656,7 @@ def _native_import_producers_8616() -> tuple[object, ...]:
     )
 
 
+@cython.ccall
 def _copy_native_surface_8616(surface: _X86_16ImportedSurface8616) -> _X86_16ImportedSurface8616:
     """Detach the complete native graph while preserving its internal sharing.
 
@@ -1568,6 +1667,7 @@ def _copy_native_surface_8616(surface: _X86_16ImportedSurface8616) -> _X86_16Imp
     other objects retain standard deepcopy behavior. Admission already
     rejects opaque condition operands.
     """
+    result: object
     memo = seed_native_copy_memo_8616(surface.blocks)
     if surface.dead_temporary_normalization is not None:
         for result in surface.dead_temporary_normalization.results:
@@ -1577,15 +1677,16 @@ def _copy_native_surface_8616(surface: _X86_16ImportedSurface8616) -> _X86_16Imp
 
 def _native_surface_copyable_8616(
     surface: _X86_16ImportedSurface8616, boundary: ExactFunctionRangeBoundary8616,
-) -> bool:
+) -> cython.bint:
     """Retain complete lift inventories, never transient decode failures."""
     return (
-        surface.condition_capture._successful_blocks == boundary.block_addrs_set
-        and sum(len(block.instrs) for block in surface.blocks) <= 16384
+        operator.eq(surface.condition_capture._successful_blocks, boundary.block_addrs_set)
+        and sum(len(block.instrs) for block in iter(surface.blocks)) <= 16384
         and native_capture_copyable_8616(surface.condition_capture)
     )
 
 
+@cython.ccall
 def _native_surface_facts_8616(
     surface: _X86_16ImportedSurface8616,
 ) -> ImmutableSourceGraphFacts8616 | None:
@@ -1606,9 +1707,10 @@ def _native_surface_facts_8616(
         surface.function_addr, surface.blocks, surface.refusals)
 
 
+@cython.ccall
 def _detached_terminal_evidence_8616(
     surface: _X86_16ImportedSurface8616,
-) -> Mapping[int, TerminalJumpEvidence8616]:
+) -> Mapping[cython.longlong, TerminalJumpEvidence8616]:
     """Detach terminal evidence for one authenticated raw rebinding.
 
     The retained record's surface stays private; every authenticated rebind
@@ -1618,11 +1720,12 @@ def _detached_terminal_evidence_8616(
     return deepcopy(surface.terminal_evidence)
 
 
+@cython.ccall
 def _normalize_native_temporaries_8616(
-    project: object, blocks: tuple[IRBlock, ...],
+    project: object, blocks: object,
     condition_capture: ConditionLiftCaptureSession8616,
-    captured_accesses: tuple[IRLogicalMemoryCaptureRecord8616, ...],
-    terminal_evidence: Mapping[int, TerminalJumpEvidence8616],
+    captured_accesses: object,
+    terminal_evidence: Mapping[cython.longlong, TerminalJumpEvidence8616],
 ) -> DeadTemporarySurfaceNormalizationResult8616 | None:
     """Retain partial deadline diagnostics without starting normalization."""
     if direct_evidence_deadline_expired_8616(project):
@@ -1644,22 +1747,27 @@ def _lift_x86_16_function_surface_8616(
     runs here. Expiry stops further block lifts while retaining collected facts;
     each finishing route must mark this partial surface as deadline-refused.
     """
+    dead_temporary_normalization: object
+    exact_block_sizes: object
+    graph_successors: object
+    terminal_evidence: object
+    block_addr: object
     from .status_flag_lift_context import status_flag_native_source_scope_8616
 
     function_addr = _function_addr(function)
     blocks: list[IRBlock] = []
     refusals: list[IRRefusal] = []
-    terminal_evidence_by_block: dict[int, TerminalJumpEvidence8616] = {}
+    terminal_evidence_by_block: dict[cython.longlong, TerminalJumpEvidence8616] = {}
     transport_reports: list[VexConditionTransportStats8616] = []
     condition_blocks: list[ConditionReliftBlock8616] = []
-    exact_block_sizes: dict[int, int] | None = None
-    proven_return_block_addrs: frozenset[int] = frozenset()
-    pending_indirect_blocks: frozenset[int] = frozenset()
+    exact_block_sizes = None
+    proven_return_block_addrs: frozenset[cython.longlong] = frozenset()
+    pending_indirect_blocks: frozenset[cython.longlong] = frozenset()
     if isinstance(function, ExactFunctionRangeBoundary8616):
-        pending_indirect_blocks = frozenset(edge.block_addr for edge in function.conditional_edges)
+        pending_indirect_blocks = frozenset(edge.block_addr for edge in iter(function.conditional_edges))
         exact_block_sizes = {
             _block_addr(block): _external_int(cast(_BlockBoundary, block).size)
-            for block in function.blocks
+            for block in iter(function.blocks)
         }
         if function.near_return_continuations is not None:
             proven_return_block_addrs = (
@@ -1713,7 +1821,7 @@ def _lift_x86_16_function_surface_8616(
             refusals.extend(ir_block.refusals)
     graph_successors = _function_graph_successors(
         function,
-        frozenset(block.addr for block in blocks),
+        frozenset(block.addr for block in iter(blocks)),
     )
     if graph_successors is not None:
         blocks = [
@@ -1723,7 +1831,7 @@ def _lift_x86_16_function_surface_8616(
                 refusals=block.refusals,
                 successor_addrs=graph_successors[block.addr],
             )
-            for block in blocks
+            for block in iter(blocks)
         ]
     dead_temporary_normalization = _normalize_native_temporaries_8616(
         project, tuple(blocks), condition_capture, tuple(captured.accesses), terminal_evidence_by_block,
@@ -1747,8 +1855,8 @@ def _lift_x86_16_function_surface_8616(
 def _finalize_x86_16_ir_artifact_8616(
     project: object,
     surface: _X86_16ImportedSurface8616,
-    blocks: tuple[IRBlock, ...],
-    refusals: tuple[IRRefusal, ...],
+    blocks: object,
+    refusals: object,
     *,
     entry_jump_domain: EntryJumpDomainProof8616 | None = None,
     entry_jump_application: EntryJumpDomainApplication8616 | None = None,
@@ -1761,14 +1869,15 @@ def _finalize_x86_16_ir_artifact_8616(
     universal builder — so the artifact a scope owns is always the final
     normalized body, never an earlier pre-normalization view.
     """
+    condition_evidence: object
     captured_accesses = surface.captured_accesses
     removed_capture_sites = frozenset(
         (removal.source_block_addr, removal.instr_addr)
-        for removal in surface.ownership.removals
+        for removal in iter(surface.ownership.removals)
     )
     owned_captures = tuple(
         capture
-        for capture in captured_accesses
+        for capture in iter(captured_accesses)
         if (capture.block_addr, capture.insn_addr) not in removed_capture_sites
     )
     logical_memory = resolve_logical_memory_accesses_8616(
@@ -1777,10 +1886,10 @@ def _finalize_x86_16_ir_artifact_8616(
         owned_captures,
     )
     expected_condition_blocks = frozenset(
-        block.addr for block in blocks if len(block.successor_addrs) > 1
+        block.addr for block in iter(blocks) if len(block.successor_addrs) > 1
     )
     captured_condition_source = surface.condition_capture.complete_artifact(
-        frozenset(block.addr for block in blocks),
+        frozenset(block.addr for block in iter(blocks)),
         expected_condition_blocks,
     )
     condition_evidence = build_ir_function_condition_artifact_8616(
@@ -1820,7 +1929,7 @@ def _finalize_x86_16_ir_artifact_8616(
             ),
             **{
                 f"logical_memory_{name}": count
-                for name, count in logical_memory.stats.to_dict().items()
+                for name, count in builtins.iter(logical_memory.stats.to_dict().items())
             },
             **(
                 {}
@@ -1843,6 +1952,7 @@ def _finalize_x86_16_ir_artifact_8616(
     )
 
 
+@cython.ccall
 def _import_raw_x86_16_function_bundle_8616(
     project: object, function: object,
 ) -> RawIRFunctionImportBundle8616:
@@ -1932,14 +2042,14 @@ def raw_x86_16_import_bundle_for_artifact_8616(
     rederived = _import_x86_16_function_surface_8616(project, resolved)
     if direct_evidence_deadline_expired_8616(project):
         return None
-    if artifact.function_addr != rederived.function_addr:
+    if operator.ne(artifact.function_addr, rederived.function_addr):
         return None
     if not source_graphs_equal_8616(
         artifact.function_addr, artifact.blocks,
         rederived.function_addr, rederived.blocks,
     ):
         return None
-    if artifact.refusals != rederived.refusals or direct_evidence_deadline_expired_8616(project):
+    if operator.ne(artifact.refusals, rederived.refusals) or direct_evidence_deadline_expired_8616(project):
         return None
     return RawIRFunctionImportBundle8616(
         artifact=artifact,
@@ -1976,10 +2086,10 @@ def native_census_facts_rebind_8616(
     canonical = _CANONICAL_CENSUS_FINISHING_PRODUCERS_8616
     if (
         real16_native_census_import_8616 is not _CANONICAL_NATIVE_CENSUS_IMPORT_8616
-        or len(finishing) != len(canonical)
+        or operator.ne(len(finishing), len(canonical))
         or any(
             offered is not required
-            for offered, required in zip(finishing, canonical, strict=True)
+            for offered, required in builtins.iter(zip(finishing, canonical, strict=True))
         )
     ):
         return NativeFactRebind8616(NativeFactRebindState8616.UNRESOLVED)
@@ -1995,6 +2105,7 @@ def native_census_facts_rebind_8616(
     )
 
 
+@cython.ccall
 def raw_x86_16_function_bundle_8616(
     project: object, function: object,
 ) -> RawIRFunctionImportBundle8616:
@@ -2008,7 +2119,8 @@ def raw_x86_16_function_bundle_8616(
     return _import_raw_x86_16_function_bundle_8616(project, function)
 
 
-def native_census_import_active_8616(project: object) -> bool:
+@cython.ccall
+def native_census_import_active_8616(project: object) -> cython.bint:
     """Expose the census re-derivation marker for transport-time gates."""
     return _native_census_import_active_8616(project)
 
@@ -2018,7 +2130,8 @@ _UNIVERSAL_CENSUS_PROOF_PRODUCERS_8616 = (
 )
 
 
-def _universal_census_producers_current_8616() -> bool:
+@cython.ccall
+def _universal_census_producers_current_8616() -> cython.bint:
     """Keep independent normalization tied to its canonical proof producers."""
     from . import entry_jump_domain as owner
 
@@ -2031,7 +2144,7 @@ def _universal_census_producers_current_8616() -> bool:
 
 def universally_normalized_census_blocks_8616(
     project: object, boundary: ExactFunctionRangeBoundary8616,
-) -> tuple[tuple[IRBlock, ...], tuple[IRBlock, ...]] | None:
+) -> object:
     """Reprove a leaf's universal jump normalization without caller premises.
 
     Return fresh raw and normalized rows for the census to bind independently.
@@ -2044,14 +2157,14 @@ def universally_normalized_census_blocks_8616(
         return None
     bundle = raw_x86_16_function_bundle_8616(project, boundary)
     artifact = bundle.artifact
-    if any(row.op == "CALL" for block in artifact.blocks for row in block.instrs):
+    if any(row.op == "CALL" for block in iter(artifact.blocks) for row in iter(block.instrs)):
         return None
     proof = prove_entry_jump_domains_8616(artifact, bundle.terminal_evidence, project=project)
     application = apply_entry_jump_domain_8616(artifact, proof)
     if proof.invocation_scope is not None or proof.near_call_scope is not None:
         return None
     if (application.status is not EntryJumpDomainApplicationStatus8616.APPLIED
-            or application.refusals or any(block.refusals for block in application.blocks)):
+            or application.refusals or any(block.refusals for block in iter(application.blocks))):
         return None
     if (direct_evidence_deadline_expired_8616(project)
             or not _universal_census_producers_current_8616()):
@@ -2076,8 +2189,8 @@ def _scoped_call_preservations_8616(
         return ()
     if not any(
         instruction.op == "CALL"
-        for block in artifact.blocks
-        for instruction in block.instrs
+        for block in iter(artifact.blocks)
+        for instruction in iter(block.instrs)
     ):
         return ()
     from inertia.lowering.analysis_helpers import resolve_direct_call_target_from_instruction_8616
@@ -2092,6 +2205,7 @@ def _scoped_call_preservations_8616(
     ))
 
 
+@cython.ccall
 def prove_scoped_x86_16_ir_function_view_8616(
     project: object,
     bundle: RawIRFunctionImportBundle8616,
@@ -2099,7 +2213,7 @@ def prove_scoped_x86_16_ir_function_view_8616(
     *,
     invocation_scope: Real16InvocationDomain8616 | None = None,
     near_call_scope: NearCallJumpScope8616 | None = None,
-    call_preservations: tuple[EntryDomainCallPreservation8616, ...] | None = None,
+    call_preservations: object = None,
 ) -> ScopedFunctionIRView8616:
     """Construct the scoped CFG view for one authenticated consuming entry.
 
@@ -2146,7 +2260,7 @@ def _prove_scoped_x86_16_ir_function_view_8616(
     *,
     invocation_scope: Real16InvocationDomain8616 | None = None,
     near_call_scope: NearCallJumpScope8616 | None = None,
-    call_preservations: tuple[EntryDomainCallPreservation8616, ...] | None = None,
+    call_preservations: object = None,
 ) -> ScopedFunctionIRView8616:
     """Revalidate scoped proofs while sharing only request-local native facts."""
     if type(bundle) is not RawIRFunctionImportBundle8616:
@@ -2163,7 +2277,7 @@ def _prove_scoped_x86_16_ir_function_view_8616(
     if (
         invocation_scope is not None
         and boundary.project is project
-        and boundary.addr == artifact.function_addr
+        and operator.eq(boundary.addr, artifact.function_addr)
     ):
         records = (
             _scoped_call_preservations_8616(project, artifact, boundary)
@@ -2198,7 +2312,8 @@ def _prove_scoped_x86_16_ir_function_view_8616(
         invocation_resolver=invocation_resolver,
         near_call_scope=near_call_scope,
         offered_invocation_scope=(invocation_scope if any(
-            record.selector_projection is not None for record in records) else None),
+            record.selector_projection is not None or record.required_scope is not None
+            for record in iter(records)) else None),
     )
     from .scoped_function_ir_view import prove_scoped_function_ir_view_8616
 
@@ -2208,13 +2323,14 @@ def _prove_scoped_x86_16_ir_function_view_8616(
     )
 
 
+@cython.ccall
 def prove_scoped_control_obligations_view_8616(
     project: object,
     bundle: RawIRFunctionImportBundle8616,
     boundary: ExactFunctionRangeBoundary8616,
     *,
-    invocation_scope: Real16InvocationDomain8616 | None,
-    call_preservations: tuple[EntryDomainCallPreservation8616, ...] | None = None,
+    invocation_scope: object,
+    call_preservations: object = None,
 ) -> ScopedNearReturnContinuationView8616:
     """Compose both conditional discharges for a premise-derived surface.
 
@@ -2246,7 +2362,7 @@ def prove_scoped_control_obligations_view_8616(
     if (
         invocation_scope is not None
         and boundary.project is project
-        and boundary.addr == artifact.function_addr
+        and operator.eq(boundary.addr, artifact.function_addr)
     ):
         records = (
             _scoped_call_preservations_8616(project, artifact, boundary)
@@ -2278,19 +2394,21 @@ def prove_scoped_control_obligations_view_8616(
     )
 
 
+@cython.ccall
 def _deadline_refused_ir_import_8616(surface: _X86_16ImportedSurface8616) -> IRFunctionArtifact:
     """Retain the unnormalized raw import and refuse publication after expiry."""
     return IRFunctionArtifact(
         function_addr=surface.function_addr,
         blocks=surface.blocks,
-        refusals=(*surface.refusals, IRRefusal(
+        refusals=tuple(surface.refusals) + (IRRefusal(
             IRImportRefusalReason8616.DIRECT_EVIDENCE_DEADLINE_EXPIRED.value,
             "direct-evidence deadline elapsed before IR normalization completed",
             surface.function_addr,
-        )),
+        ),),
     )
 
 
+@cython.ccall
 def build_x86_16_ir_function_artifact(project: object, function: object) -> IRFunctionArtifact:
     """Retain the native owner before decoding, then build from fresh facts."""
     from .function_readiness_contracts import bind_function_source_owner_8616
@@ -2302,7 +2420,7 @@ def build_x86_16_ir_function_artifact(project: object, function: object) -> IRFu
         return _build_x86_16_ir_function_artifact_8616(project, function)
 
 
-def _census_raw_native_blocks_8616(project: object, function: object) -> tuple[IRBlock, ...] | None:
+def _census_raw_native_blocks_8616(project: object, function: object) -> object:
     """Expose unchanged raw blocks only under the canonical census producers.
 
     Census imports skip entry discharge. Their finalizer adds annotations and
@@ -2312,13 +2430,14 @@ def _census_raw_native_blocks_8616(project: object, function: object) -> tuple[I
     """
     current = _census_finishing_producers_8616()
     canonical = _CANONICAL_CENSUS_FINISHING_PRODUCERS_8616
-    if len(current) != len(canonical) or any(
-        offered is not required for offered, required in zip(current, canonical, strict=True)
+    if operator.ne(len(current), len(canonical)) or any(
+        offered is not required for offered, required in builtins.iter(zip(current, canonical, strict=True))
     ):
         return None
     return _import_x86_16_function_surface_8616(project, function).blocks
 
 
+@cython.ccall
 def _census_finishing_producers_8616() -> tuple[object, ...]:
     """Name every direct producer skipped by the raw census projection."""
     return (
@@ -2331,6 +2450,7 @@ def _census_finishing_producers_8616() -> tuple[object, ...]:
     )
 
 
+@cython.ccall
 def _import_source_revision_8616(
     project: object,
     function: object,
@@ -2354,11 +2474,12 @@ def _import_source_revision_8616(
     )
 
 
+@cython.ccall
 def _bind_import_source_revision_8616(
     project: object,
     function: object,
     artifact: IRFunctionArtifact,
-    before: FunctionSourceRevision8616 | None,
+    before: object,
 ) -> IRFunctionArtifact:
     """Attest one finalized artifact to the exact generation it consumed.
 
@@ -2368,19 +2489,18 @@ def _bind_import_source_revision_8616(
     the artifact but marks it refused; an unobservable generation leaves it
     unattested, so publication records only an observed binding.
     """
+    after: object
+    body_digest: object
     after = _import_source_revision_8616(project, function)
     if before is None or after is None:
         return artifact
-    if before != after:
+    if operator.ne(before, after):
         return replace(
             artifact,
-            refusals=(
-                *artifact.refusals,
-                IRRefusal(
+            refusals=tuple(artifact.refusals) + (IRRefusal(
                     "source_revision_changed",
                     "function source generation changed during IR import",
-                ),
-            ),
+                ),),
         )
     stamped = replace(artifact, source_revision=after)
     body_digest = function_artifact_body_digest_8616(stamped)
@@ -2407,6 +2527,7 @@ def _build_x86_16_ir_function_artifact_8616(project: object, function: object) -
     Its separate application summary retains the diagnostic without changing
     the native surface that scoped consumers must independently authenticate.
     """
+    caller_boundary: object
     before_revision = _import_source_revision_8616(project, function)
     surface = _import_x86_16_function_surface_8616(project, function)
     if direct_evidence_deadline_expired_8616(project):
@@ -2470,13 +2591,12 @@ def _build_x86_16_ir_function_artifact_8616(project: object, function: object) -
         ):
             blocks = list(entry_jump_application.blocks)
             discharged_blocks = frozenset(
-                jump.block_addr for jump in entry_jump_application.applied
+                jump.block_addr for jump in iter(entry_jump_application.applied)
             )
             refusals = [
-                refusal for refusal in refusals
+                refusal for refusal in iter(refusals)
                 if not (
-                    refusal.kind
-                    == TerminalJumpRefusalReason8616.SELECTOR_WINDOW_UNPROVED.value
+                    operator.eq(refusal.kind, TerminalJumpRefusalReason8616.SELECTOR_WINDOW_UNPROVED.value)
                     and refusal.block_addr in discharged_blocks
                 )
             ]
@@ -2497,24 +2617,24 @@ def _build_x86_16_ir_function_artifact_8616(project: object, function: object) -
     )
 
 
-@dataclass
+@dataclasses.dataclass
 class _ArtifactSummaryTally8616:
     """Mutable census state for one IR artifact summary pass."""
 
-    space_counts: dict[str, int] = field(default_factory=lambda: {space.value: 0 for space in MemSpace})
-    address_space_counts: dict[str, int] = field(default_factory=lambda: {space.value: 0 for space in MemSpace})
-    stable_address_space_counts: dict[str, int] = field(
-        default_factory=lambda: {space.value: 0 for space in MemSpace}
+    space_counts: object = field(default_factory=lambda: {space.value: 0 for space in iter(MemSpace)})
+    address_space_counts: object = field(default_factory=lambda: {space.value: 0 for space in iter(MemSpace)})
+    stable_address_space_counts: object = field(
+        default_factory=lambda: {space.value: 0 for space in iter(MemSpace)}
     )
-    address_status_counts: dict[str, int] = field(
-        default_factory=lambda: {status.value: 0 for status in AddressStatus}
+    address_status_counts: object = field(
+        default_factory=lambda: {status.value: 0 for status in iter(AddressStatus)}
     )
-    segment_origin_counts: dict[str, int] = field(
-        default_factory=lambda: {origin.value: 0 for origin in SegmentOrigin}
+    segment_origin_counts: object = field(
+        default_factory=lambda: {origin.value: 0 for origin in iter(SegmentOrigin)}
     )
-    condition_counts: dict[str, int] = field(default_factory=dict)
-    ssa_binding_count: int = 0
-    aliasable_values: int = 0
+    condition_counts: object = field(default_factory=dict)
+    ssa_binding_count: cython.longlong = 0
+    aliasable_values: cython.longlong = 0
 
     def record_value_atom(self, atom: IRValue | IRBinaryValue | IRAddress) -> None:
         """Count one value atom, descending into binary operands."""
@@ -2527,7 +2647,7 @@ class _ArtifactSummaryTally8616:
             self.address_space_counts[atom.space.value] = (
                 self.address_space_counts.get(atom.space.value, 0) + 1
             )
-            if atom.status == AddressStatus.STABLE:
+            if operator.eq(atom.status, AddressStatus.STABLE):
                 self.stable_address_space_counts[atom.space.value] = (
                     self.stable_address_space_counts.get(atom.space.value, 0) + 1
                 )
@@ -2542,6 +2662,7 @@ class _ArtifactSummaryTally8616:
 
     def record_condition_atom(self, cond: IRCondition) -> None:
         """Count one condition op and every atom in its arguments."""
+        item: object
         self.condition_counts[cond.op] = self.condition_counts.get(cond.op, 0) + 1
         for item in cond.args:
             if isinstance(item, IRCondition):
@@ -2552,11 +2673,14 @@ class _ArtifactSummaryTally8616:
 
 def build_x86_16_ir_function_artifact_summary(artifact: IRFunctionArtifact) -> dict[str, object]:
     """Summarize typed IR import facts for diagnostics and downstream gates."""
+    atom: object
+    block: object
+    instr: object
     tally = _ArtifactSummaryTally8616()
     for block in artifact.blocks:
         tally.ssa_binding_count += _block_local_ssa_binding_count_8616(block)
         for instr in block.instrs:
-            atoms: tuple[IRAtom, ...] = instr.args + (() if instr.dst is None else (instr.dst,))
+            atoms: object = instr.args + (tuple(()) if instr.dst is None else tuple((instr.dst,)))
             for atom in atoms:
                 if isinstance(atom, IRCondition):
                     tally.record_condition_atom(atom)
@@ -2565,14 +2689,14 @@ def build_x86_16_ir_function_artifact_summary(artifact: IRFunctionArtifact) -> d
     frame = build_x86_16_ir_frame_access_artifact(artifact)
     return {
         "block_count": len(artifact.blocks),
-        "instruction_count": sum(len(block.instrs) for block in artifact.blocks),
+        "instruction_count": sum(len(block.instrs) for block in iter(artifact.blocks)),
         "refusal_count": len(artifact.refusals),
-        "space_counts": dict(sorted(tally.space_counts.items())),
-        "address_space_counts": dict(sorted(tally.address_space_counts.items())),
-        "stable_address_space_counts": dict(sorted(tally.stable_address_space_counts.items())),
-        "address_status_counts": dict(sorted(tally.address_status_counts.items())),
-        "segment_origin_counts": dict(sorted(tally.segment_origin_counts.items())),
-        "condition_counts": dict(sorted(tally.condition_counts.items())),
+        "space_counts": dict(sorted(tuple(tally.space_counts.items()))),
+        "address_space_counts": dict(sorted(tuple(tally.address_space_counts.items()))),
+        "stable_address_space_counts": dict(sorted(tuple(tally.stable_address_space_counts.items()))),
+        "address_status_counts": dict(sorted(tuple(tally.address_status_counts.items()))),
+        "segment_origin_counts": dict(sorted(tuple(tally.segment_origin_counts.items()))),
+        "condition_counts": dict(sorted(tuple(tally.condition_counts.items()))),
         "aliasable_value_count": tally.aliasable_values,
         "ssa_binding_count": tally.ssa_binding_count,
         "frame_slot_count": len(frame.slots),
@@ -2580,10 +2704,11 @@ def build_x86_16_ir_function_artifact_summary(artifact: IRFunctionArtifact) -> d
     }
 
 
-def _retained_codegen_function_8616(function: object, project: object, func_addr: int) -> object:
+@cython.ccall
+def _retained_codegen_function_8616(function: object, project: object, func_addr: cython.longlong) -> object:
     """Validate codegen's exact function owner before importing its instruction facts."""
     boundary = cast(_FunctionBoundary, function)
-    if boundary.addr != func_addr:
+    if operator.ne(boundary.addr, func_addr):
         raise PipelineHardError("codegen retained function address differs from C function", layer="ir")
     try:
         kb = function_knowledge_base_8616(project, function)
@@ -2594,13 +2719,16 @@ def _retained_codegen_function_8616(function: object, project: object, func_addr
     return function
 
 
-def codegen_function_8616(project: object, codegen: object) -> tuple[object, int] | None:
+@cython.ccall
+def codegen_function_8616(project: object, codegen: object) -> object:
     """Resolve codegen's retained function for coherent IR and semantic consumers.
 
     Real angr codegen retains the exact function and its analysis owner. Only
     address-only adapters lacking that field use the default project lookup.
     A retained function with a conflicting address or owner is a hard error.
     """
+    cfunc: object
+    function: object
     codegen_boundary = cast(_CodegenBoundary, codegen)
     try:
         cfunc = codegen_boundary.cfunc
@@ -2638,9 +2766,10 @@ def codegen_function_8616(project: object, codegen: object) -> tuple[object, int
 def _existing_artifacts_current_8616(
     codegen_boundary: _CodegenBoundary,
     function: object,
-    func_addr: int,
-) -> bool:
+    func_addr: cython.longlong,
+) -> cython.bint:
     """Reuse matching attachments except imports refused by an expired deadline."""
+    existing_frame: object
     try:
         existing_source = codegen_boundary._inertia_vex_ir_source_function_8616
         existing_artifact = codegen_boundary._inertia_raw_vex_ir_artifact_8616
@@ -2651,21 +2780,22 @@ def _existing_artifacts_current_8616(
     return (
         existing_source is function
         and isinstance(existing_artifact, IRFunctionArtifact)
-        and existing_artifact.function_addr == func_addr
+        and operator.eq(existing_artifact.function_addr, func_addr)
         and all(
-            refusal.kind != IRImportRefusalReason8616.DIRECT_EVIDENCE_DEADLINE_EXPIRED.value
-            for refusal in existing_artifact.refusals
+            operator.ne(refusal.kind, IRImportRefusalReason8616.DIRECT_EVIDENCE_DEADLINE_EXPIRED.value)
+            for refusal in iter(existing_artifact.refusals)
         )
         and existing_frame is not None
         and isinstance(existing_ssa, SSAFunctionArtifact)
-        and existing_ssa.function_addr == func_addr
+        and operator.eq(existing_ssa.function_addr, func_addr)
     )
 
 
+@cython.ccall
 def _attach_vex_ir_surface_8616(
     project: object, codegen_boundary: _CodegenBoundary, function: object,
-    artifact: IRFunctionArtifact, function_ssa: SSAFunctionArtifact | None,
-    declared_entry: DeclaredEntryInput8616 | None,
+    artifact: IRFunctionArtifact, function_ssa: object,
+    declared_entry: object,
 ) -> None:
     """Attach the shared raw/frame/SSA surface to one codegen.
 
@@ -2673,6 +2803,7 @@ def _attach_vex_ir_surface_8616(
     entry input attaches conditionally to this one consumer and is
     re-retained as the identical object — never published or promoted.
     """
+    info: object
     from .declared_entry_pipeline import retain_declared_entry_pipeline_8616
     from .function_ssa_registry import (
         FunctionSSAArtifactStage8616,
@@ -2714,6 +2845,7 @@ def _attach_vex_ir_surface_8616(
         info["x86_16_vex_ir_function_ssa"] = function_ssa.to_dict()
 
 
+@cython.ccall
 def _apply_retained_native_entry_artifact_8616(
     project: object, codegen: object,
 ) -> NativeNearCallPipeline8616 | None:
@@ -2729,6 +2861,8 @@ def _apply_retained_native_entry_artifact_8616(
     public attach route owns the request. The canonical full-scope
     consume stays with ``call_stack_effects``.
     """
+    entry: object
+    resolved: object
     from .declared_entry_pipeline import _retained_input_8616, _retained_native_entry_for_8616
     from .near_call_entry_pipeline import NativeNearCallPipeline8616
 
@@ -2751,8 +2885,12 @@ def _apply_retained_native_entry_artifact_8616(
     return entry
 
 
-def apply_x86_16_vex_ir_artifact(project: object, codegen: object) -> bool:
+@cython.ccall
+def apply_x86_16_vex_ir_artifact(project: object, codegen: object) -> cython.bint:
     """Attach or reuse typed IR for one immutable codegen function snapshot."""
+    artifact: object
+    declared_entry: object
+    resolved: object
     codegen_boundary = cast(_CodegenBoundary, codegen)
     resolved = codegen_function_8616(project, codegen)
     if resolved is None:

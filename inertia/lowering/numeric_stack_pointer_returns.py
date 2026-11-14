@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize previously proved numeric frame values at their exact C returns.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ Consumes alias, widening, and typed facts
 Do not recover semantics from COD, source, assembly, or rendered C text
 """
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import asdict, dataclass
 from enum import StrEnum
@@ -32,6 +35,9 @@ from .entry_stack_pointer_capture import (
     is_entry_stack_pointer_projection_8616,
     prepare_entry_stack_pointer_capture_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 
 class NumericStackPointerLoweringStatus8616(StrEnum):
@@ -51,19 +57,19 @@ class NumericStackPointerLoweringFailure8616(StrEnum):
     NO_ENTRY_SEQUENCE = "no_entry_sequence"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NumericStackPointerLoweringStats8616:
     """Closed ledger for actual C-return projections, separate from proof publication."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    changed_count: int = 0
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    changed_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NumericStackPointerLoweringResult8616:
     """Materialization outcome with no persistent source-authority cache."""
 
@@ -74,7 +80,7 @@ class NumericStackPointerLoweringResult8616:
     source_function_addr: int | None = None
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether a capture or return expression actually changed."""
         return self.stats.changed_count > 0
 
@@ -92,19 +98,19 @@ class _Codegen8616(Protocol):
     _inertia_numeric_stack_pointer_return_lowering_8616: NumericStackPointerLoweringResult8616 | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _ReturnPlans8616:
     """Ephemeral C bindings and the ledger they must close in this operation."""
 
-    raw: int
-    normalized: int
-    entries: tuple[tuple[c.CReturn, NumericStackPointerReturn8616], ...]
-    function_addr: int
-    source_function_addr: int
+    raw: cython.longlong
+    normalized: cython.longlong
+    entries: object
+    function_addr: cython.longlong
+    source_function_addr: cython.longlong
 
     def outcome(
         self, failure: NumericStackPointerLoweringFailure8616 | None = None,
-        *, changed: int = 0,
+        *, changed: cython.longlong = 0,
     ) -> NumericStackPointerLoweringResult8616:
         """Close current C obligations without disguising classified failures."""
         status = NumericStackPointerLoweringStatus8616.REFUSED
@@ -120,10 +126,13 @@ class _ReturnPlans8616:
 
 
 def _collect_return_plans(
-    inventory: NumericStackPointerReturnInventory8616, returns: tuple[c.CReturn, ...], function_addr: int,
+    inventory: NumericStackPointerReturnInventory8616, returns: object, function_addr: cython.longlong,
 ) -> _ReturnPlans8616:
     """Bind exact transported RET identities without interpreting native values."""
-    proofs = {(item.block_addr, item.return_addr): item.proof for item in inventory.observations
+    origin: object
+    proof: object
+    statement: object
+    proofs = {(item.block_addr, item.return_addr): item.proof for item in iter(inventory.observations)
               if item.proof is not None}
     plans: list[tuple[c.CReturn, NumericStackPointerReturn8616]] = []
     normalized = 0
@@ -132,7 +141,7 @@ def _collect_return_plans(
         if (origin is None or origin.width_bits != 16
                 or origin.return_block_addr is None or origin.return_instruction_addr is None):
             continue
-        if any(isinstance(node, c.CFunctionCall) for node in _iter_c_nodes_deep_8616(statement.retval)):
+        if any(isinstance(node, c.CFunctionCall) for node in builtins.iter(_iter_c_nodes_deep_8616(statement.retval))):
             continue
         normalized += 1
         proof = proofs.get((origin.return_block_addr, origin.return_instruction_addr))
@@ -141,10 +150,13 @@ def _collect_return_plans(
     return _ReturnPlans8616(len(returns), normalized, tuple(plans), function_addr, inventory.source_ir.function_addr)
 
 
+@cython.ccall
 def _project_returns(
     codegen: object, plans: _ReturnPlans8616, value: c.CVariable,
-) -> int:
+) -> cython.longlong:
     """Materialize only source-owned scalar values, preserving surrounding calls."""
+    proof: object
+    statement: object
     changed = 0
     for statement, proof in plans.entries:
         if not is_entry_stack_pointer_projection_8616(statement.retval, value, proof.assignment.entry_sp_offset):
@@ -157,18 +169,21 @@ def lower_numeric_stack_pointer_returns_8616(
     codegen: object,
 ) -> NumericStackPointerLoweringResult8616 | None:
     """Consume current published proofs; preserve unknown returns and every call."""
+    captured: object
+    function: object
+    inventory: object
     inventory = numeric_stack_pointer_return_inventory_8616(codegen)
     function = cast(_Codegen8616, codegen).cfunc
     if inventory is None or function is None:
         return None
     nodes = tuple(_iter_c_nodes_deep_8616(function.statements))
-    returns = tuple(node for node in nodes if isinstance(node, c.CReturn))
+    returns = tuple(node for node in iter(nodes) if isinstance(node, c.CReturn))
     plans = _collect_return_plans(inventory, returns, function.addr)
-    if function.addr != inventory.source_ir.function_addr:
+    if operator.ne(function.addr, inventory.source_ir.function_addr):
         return plans.outcome(NumericStackPointerLoweringFailure8616.FUNCTION_SCOPE_MISMATCH)
     if not numeric_stack_pointer_return_inventory_is_current_8616(inventory):
         return plans.outcome(NumericStackPointerLoweringFailure8616.SOURCE_CHANGED)
-    proofs = tuple(proof for _, proof in plans.entries)
+    proofs = tuple(proof for _, proof in iter(plans.entries))
     captured = prepare_entry_stack_pointer_capture_8616(codegen, inventory.source_ir, proofs)
     if captured is None:
         return plans.outcome()
@@ -189,10 +204,12 @@ def lower_numeric_stack_pointer_returns_8616(
     return plans.outcome(changed=changed)
 
 
+@cython.ccall
 def apply_numeric_stack_pointer_return_lowering_8616(
     codegen: object,
 ) -> NumericStackPointerLoweringResult8616 | None:
     """Publish current C obligations as diagnostics, never cached proof authority."""
+    result: object
     result = lower_numeric_stack_pointer_returns_8616(codegen)
     cast(_Codegen8616, codegen)._inertia_numeric_stack_pointer_return_lowering_8616 = result
     if result is not None and result.stats.failure_count:

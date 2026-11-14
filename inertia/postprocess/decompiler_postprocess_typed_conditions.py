@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed-condition C rewrite consumer.
 
 Layer: Rewrite/Postprocess cleanup.
@@ -44,6 +45,7 @@ rendered text, COD, source, or CLI/reporting evidence here.
 """
 
 from __future__ import annotations
+import cython
 
 import builtins
 import contextlib
@@ -101,6 +103,8 @@ from inertia.structuring.condition_lowering import (
 from inertia.structuring.condition_register_expression import condition_register_expression_8616
 from inertia.structuring.condition_trace import record_materialized_condition_trace_8616
 from inertia.validation.tail_validation_fingerprint import _expr_fingerprint
+import dataclasses
+import operator
 
 __all__ = [
     "_apply_typed_condition_stack_arg_signedness_8616",
@@ -118,18 +122,22 @@ _SignedStackArgTypeSnapshot8616 = tuple[
 ]
 
 
-def _dynamic_typed_condition_getattr_8616(obj: object, name: str, default: object = None) -> Any:  # noqa: ANN401
+@cython.ccall
+def _dynamic_typed_condition_getattr_8616(obj: object, name: object, default: object = None) -> Any:  # noqa: ANN401
     """Read an attribute across the dynamic angr/C-AST typed-condition boundary."""
     return builtins.getattr(obj, name, default)
 
 
+@cython.ccall
 def _project_arch_8616(project: object) -> Any:  # noqa: ANN401
     """Return the dynamic angr architecture object attached to a project."""
     return _dynamic_typed_condition_getattr_8616(project, "arch")
 
 
+@cython.ccall
 def _iter_switch_case_bodies_8616(cases: object) -> tuple[object, ...]:
     """Return only case bodies from angr's dict-style or pair-list switch cases."""
+    case: object
     if cases is None:
         return ()
     if isinstance(cases, dict):
@@ -144,8 +152,11 @@ def _iter_switch_case_bodies_8616(cases: object) -> tuple[object, ...]:
     return tuple(bodies)
 
 
-def _build_reg_var(project: object, reg_name: str, codegen: object, size: int = 2) -> CVariable | None:
+@cython.ccall
+def _build_reg_var(project: object, reg_name: object, codegen: object, size: cython.longlong = 2) -> CVariable | None:
     """Build a CVariable for an x86-16 register by name."""
+    reg: object
+    variable_type: object
     normalized_name = reg_name.lower()
     reg = _project_arch_8616(project).registers.get(normalized_name)
     if reg is None:
@@ -177,7 +188,9 @@ def _build_reg_var(project: object, reg_name: str, codegen: object, size: int = 
     )
 
 
-def _assignment_lhs_register_info_8616(project: object, lhs: object) -> tuple[int, int] | None:
+@cython.ccall
+def _assignment_lhs_register_info_8616(project: object, lhs: object) -> object:
+    reg: object
     variable = _dynamic_typed_condition_getattr_8616(lhs, "variable", None) if isinstance(lhs, CVariable) else None
     if isinstance(variable, SimRegisterVariable):
         return int(variable.reg), int(_dynamic_typed_condition_getattr_8616(variable, "size", 0) or 0)
@@ -192,36 +205,44 @@ def _assignment_lhs_register_info_8616(project: object, lhs: object) -> tuple[in
 def _register_exprs_from_assignment_8616(
     project: object,
     node: CAssignment,
-    ins_addr: int,
-    reg_exprs: dict[tuple[int, str, int], object],
+    ins_addr: cython.longlong,
+    reg_exprs: object,
 ) -> None:
     """Record the defining expression for each register written by ``node``."""
+    lhs_reg_info: object
+    reg_name: object
+    reg_offset: object
+    reg_size: object
     lhs_reg_info = _assignment_lhs_register_info_8616(project, node.lhs)
     if lhs_reg_info is None:
         return
     lhs_reg_offset, var_size = lhs_reg_info
     for reg_name, (reg_offset, reg_size) in _project_arch_8616(project).registers.items():
-        if int(reg_offset) != int(lhs_reg_offset):
+        if operator.ne(int(reg_offset), int(lhs_reg_offset)):
             continue
-        if var_size and int(reg_size) != var_size:
+        if var_size and operator.ne(int(reg_size), var_size):
             continue
         rhs = _dynamic_typed_condition_getattr_8616(node, "rhs", None)
         expr = (
             node.lhs
-            if any(isinstance(child, CFunctionCall) for child in _iter_c_nodes_deep_8616(rhs))
+            if any(isinstance(child, CFunctionCall) for child in builtins.iter(_iter_c_nodes_deep_8616(rhs)))
             else rhs
         )
         reg_exprs[(ins_addr, reg_name.lower(), int(reg_size))] = expr
 
 
-def _register_exprs_by_ins_addr_8616(codegen: object, project: object) -> dict[tuple[int, str, int], object]:
+@cython.ccall
+def _register_exprs_by_ins_addr_8616(codegen: object, project: object) -> object:
+    tags: object
+    node: object
+    root: object
     cache = _dynamic_typed_condition_getattr_8616(codegen, "_inertia_typed_condition_register_exprs_by_ins_addr_8616", None)
     if isinstance(cache, dict):
         return cache
-    reg_exprs: dict[tuple[int, str, int], object] = {}
+    reg_exprs: dict[tuple[cython.longlong, str, cython.longlong], object] = {}
     cfunc = _dynamic_typed_condition_getattr_8616(codegen, "cfunc", None)
     roots = (cfunc, _dynamic_typed_condition_getattr_8616(cfunc, "statements", None), _dynamic_typed_condition_getattr_8616(cfunc, "body", None))
-    seen_nodes: set[int] = set()
+    seen_nodes: set[cython.longlong] = set()
     for root in roots:
         for node in _iter_c_nodes_deep_8616(root):
             node_id = id(node)
@@ -240,7 +261,8 @@ def _register_exprs_by_ins_addr_8616(codegen: object, project: object) -> dict[t
     return reg_exprs
 
 
-def _type_for_operand_size_8616(size: int, *, signed: bool = False) -> object:
+@cython.ccall
+def _type_for_operand_size_8616(size: cython.longlong, *, signed: cython.bint = False) -> object:
     """Return the scalar C type for a typed-condition operand width."""
     if size <= 1:
         return SimTypeChar(signed=signed)
@@ -249,7 +271,11 @@ def _type_for_operand_size_8616(size: int, *, signed: bool = False) -> object:
     return SimTypeShort(signed=signed)
 
 
+@cython.ccall
 def _build_segmented_operand_expr_8616(project: object, operand: IRValue, codegen: object) -> CFunctionCall | None:
+    helper: object
+    segment: object
+    segment_name: object
     space_to_segment = {
         MemSpace.DS: "ds",
         MemSpace.ES: "es",
@@ -282,6 +308,7 @@ def _build_indexed_segmented_operand_expr_8616(
     cond: ConditionIR | None = None,
 ) -> CFunctionCall | None:
     """Build indexed segmented memory while preserving condition bind context."""
+    segment: object
     if operand.index is None:
         return None
     segment = _build_reg_var(project, "ds", codegen, size=2)
@@ -305,8 +332,10 @@ def _build_indexed_segmented_operand_expr_8616(
     )
 
 
-def _clone_stack_expr_with_condition_signedness_8616(expr: object, cond: ConditionIR | None, codegen: object) -> object:
+@cython.ccall
+def _clone_stack_expr_with_condition_signedness_8616(expr: object, cond: object, codegen: object) -> object:
     """Build a signed expression view when ConditionIR proves signed comparison."""
+    projected: object
     if cond is None or not cond.is_signed or not isinstance(expr, CVariable):
         return expr
     projected = materialize_condition_stack_declaration_view_8616(
@@ -317,14 +346,16 @@ def _clone_stack_expr_with_condition_signedness_8616(expr: object, cond: Conditi
     return projected if projected is not None else expr
 
 
+@cython.ccall
 def _reg_operand_expr_8616(
     project: object,
     operand: IRValue,
     codegen: object,
-    cond: ConditionIR | None,
-    apply_condition_value_view: bool,
+    cond: object,
+    apply_condition_value_view: cython.bint,
 ) -> object | None:
     """Bind a ``MemSpace.REG`` operand to its reaching-definition expression."""
+    expr: object
     if not isinstance(operand.name, str) or not operand.name:
         return None
     bind_addr = cond.operand_bind_insn if cond is not None else None
@@ -351,17 +382,21 @@ def _reg_operand_expr_8616(
     return _build_reg_var(project, operand.name, codegen, size=max(1, int(operand.size or 2)))
 
 
+@cython.ccall
 def _ir_value_operand_expr_8616(
     project: object,
     operand: IRValue,
     codegen: object,
     cond: ConditionIR | None,
-    apply_condition_value_view: bool,
+    apply_condition_value_view: cython.bint,
 ) -> object | None:
     """Convert one ``IRValue`` operand to a C AST node by memory space."""
-    if operand.space == MemSpace.CONST:
+    condition_view: object
+    indexed_expr: object
+    stack_expr: object
+    if operator.eq(operand.space, MemSpace.CONST):
         return cast(object, CConstant(int(operand.const or 0), SimTypeInt(signed=False, label="int"), codegen=codegen))
-    if operand.space == MemSpace.REG and isinstance(operand.name, str) and operand.name:
+    if operator.eq(operand.space, MemSpace.REG) and isinstance(operand.name, str) and operand.name:
         return _reg_operand_expr_8616(project, operand, codegen, cond, apply_condition_value_view)
     if operand.space in {MemSpace.DS, MemSpace.ES}:
         indexed_expr = _build_indexed_segmented_operand_expr_8616(
@@ -373,7 +408,7 @@ def _ir_value_operand_expr_8616(
         if indexed_expr is not None:
             return cast(object, indexed_expr)
         return _build_segmented_operand_expr_8616(project, operand, codegen)
-    if operand.space == MemSpace.SS:
+    if operator.eq(operand.space, MemSpace.SS):
         condition_view = cond if apply_condition_value_view else None
         stack_expr = _build_stack_operand_expr_8616(
             operand,
@@ -385,8 +420,10 @@ def _ir_value_operand_expr_8616(
     return None
 
 
+@cython.ccall
 def _compat_operand_expr_8616(project: object, operand: object, codegen: object) -> object | None:
     """Compatibility lane: resolve VexValue-like wrappers by reg/const evidence."""
+    reg_label: object
     try:
         value_const = _dynamic_typed_condition_getattr_8616(operand, "value", None)
     except Exception:
@@ -415,7 +452,7 @@ def __build_c_expr_for_operand___impl(
     operand: object,
     codegen: object,
     cond: ConditionIR | None,
-    apply_condition_value_view: bool,
+    apply_condition_value_view: cython.bint,
 ) -> object | None:
     """Convert a ConditionIR operand (reg name string or int) to a C AST node."""
     if isinstance(operand, IRBinaryValue):
@@ -431,19 +468,21 @@ def __build_c_expr_for_operand___impl(
     return _compat_operand_expr_8616(project, operand, codegen)
 
 
+@cython.ccall
 def _build_c_expr_for_operand(
     project: object,
     operand: object,
     codegen: object,
     cond: ConditionIR | None = None,
     *,
-    apply_condition_value_view: bool = True,
+    apply_condition_value_view: cython.bint = True,
 ) -> object | None:
     """Lower typed condition IR, keeping address indices at their proven width."""
     return __build_c_expr_for_operand___impl(project, operand, codegen, cond, apply_condition_value_view)
 
 
-def _signed_type_for_operand_size_8616(size: int) -> SimType:
+@cython.ccall
+def _signed_type_for_operand_size_8616(size: cython.longlong) -> SimType:
     if size <= 1:
         return SimTypeChar(signed=True)
     if size >= 4:
@@ -451,7 +490,8 @@ def _signed_type_for_operand_size_8616(size: int) -> SimType:
     return SimTypeShort(signed=True)
 
 
-def _type_size_bytes_8616(type_: object, *, default: int = 2) -> int:
+@cython.ccall
+def _type_size_bytes_8616(type_: object, *, default: cython.longlong = 2) -> cython.longlong:
     if isinstance(type_, SimTypeChar):
         return 1
     if isinstance(type_, SimTypeShort):
@@ -467,7 +507,9 @@ def _type_size_bytes_8616(type_: object, *, default: int = 2) -> int:
     return default
 
 
+@cython.ccall
 def _bind_type_to_arch_8616(project: object, type_: SimType) -> SimType:
+    arch: object
     arch = _dynamic_typed_condition_getattr_8616(project, "arch", None)
     if arch is not None and hasattr(type_, "with_arch"):
         with contextlib.suppress(Exception):
@@ -475,12 +517,16 @@ def _bind_type_to_arch_8616(project: object, type_: SimType) -> SimType:
     return type_
 
 
-def _return_expr_reads_signed_stack_arg_8616(cfunc: object, signed_offsets: dict[int, int]) -> bool:
+@cython.ccall
+def _return_expr_reads_signed_stack_arg_8616(cfunc: object, signed_offsets: object) -> cython.bint:
     """Return whether any emitted return value reads a proven-signed stack arg."""
+    child: object
+    node: object
+    root: object
     if not signed_offsets:
         return False
     roots = (_dynamic_typed_condition_getattr_8616(cfunc, "statements", None), _dynamic_typed_condition_getattr_8616(cfunc, "body", None))
-    seen_nodes: set[int] = set()
+    seen_nodes: set[cython.longlong] = set()
     for root in roots:
         for node in _iter_c_nodes_deep_8616(root):
             node_id = id(node)
@@ -505,8 +551,9 @@ def _return_expr_reads_signed_stack_arg_8616(cfunc: object, signed_offsets: dict
     return False
 
 
+@cython.ccall
 def _signed_return_type_from_stack_arg_evidence_8616(
-    project: object, cfunc: object, return_type: SimType | None, signed_offsets: dict[int, int]
+    project: object, cfunc: object, return_type: SimType | None, signed_offsets: object
 ) -> SimType | None:
     """Promote a 16-bit return type when returns read proven-signed stack args."""
     if not _return_expr_reads_signed_stack_arg_8616(cfunc, signed_offsets):
@@ -516,20 +563,21 @@ def _signed_return_type_from_stack_arg_evidence_8616(
     return return_type
 
 
+@cython.ccall
 def _stack_arg_offset_from_condition_operand_8616(
     project: object,
     codegen: object,
     cond: ConditionIR,
     operand: object,
-) -> tuple[int, int] | None:
+) -> object:
     if not isinstance(operand, IRValue):
         return None
-    if operand.space == MemSpace.SS and operand.name == "bp":
+    if operator.eq(operand.space, MemSpace.SS) and operand.name == "bp":
         offset = int(operand.offset)
         if offset >= 4:
             return offset, max(1, int(operand.size or 2))
         return None
-    if operand.space != MemSpace.REG or not isinstance(operand.name, str) or not operand.name:
+    if operator.ne(operand.space, MemSpace.REG) or not isinstance(operand.name, str) or not operand.name:
         return None
     bind_addr = cond.producer_insn if isinstance(cond.producer_insn, int) else cond.src_insn
     if not isinstance(bind_addr, int):
@@ -551,15 +599,20 @@ def _stack_arg_offset_from_condition_operand_8616(
     return offset, max(1, int(operand.size or _dynamic_typed_condition_getattr_8616(variable, "size", 2) or 2))
 
 
+@cython.ccall
 def _signed_stack_arg_offsets_from_conditions_8616(
     project: object,
     codegen: object,
     conditions: object,
-) -> dict[int, int]:
+) -> object:
+    stack_arg: object
+    cond: object
+    offset: object
+    operand: object
     if not isinstance(conditions, (list, tuple)):
         return {}
-    signed_offsets: dict[int, int] = {}
-    unsigned_offsets: set[int] = set()
+    signed_offsets: dict[cython.longlong, cython.longlong] = {}
+    unsigned_offsets: set[cython.longlong] = set()
     for cond in conditions:
         if not isinstance(cond, ConditionIR):
             continue
@@ -577,14 +630,18 @@ def _signed_stack_arg_offsets_from_conditions_8616(
     return signed_offsets
 
 
+@cython.ccall
 def _unsigned_stack_arg_offsets_from_conditions_8616(
     project: object,
     codegen: object,
     conditions: object,
-) -> set[int]:
+) -> object:
+    stack_arg: object
+    cond: object
+    operand: object
     if not isinstance(conditions, (list, tuple)):
         return set()
-    unsigned_offsets: set[int] = set()
+    unsigned_offsets: set[cython.longlong] = set()
     for cond in conditions:
         if not isinstance(cond, ConditionIR) or not cond.is_unsigned:
             continue
@@ -596,7 +653,8 @@ def _unsigned_stack_arg_offsets_from_conditions_8616(
     return unsigned_offsets
 
 
-def _stack_arg_offset_from_c_expr_8616(expr: object) -> tuple[int, int] | None:
+@cython.ccall
+def _stack_arg_offset_from_c_expr_8616(expr: object) -> object:
     if not isinstance(expr, CVariable):
         return None
     variable = _dynamic_typed_condition_getattr_8616(expr, "variable", None)
@@ -609,11 +667,15 @@ def _stack_arg_offset_from_c_expr_8616(expr: object) -> tuple[int, int] | None:
     return offset, size
 
 
+@cython.ccall
 def _propagate_signed_stack_arg_comparison_peers_8616(
     codegen: object,
-    signed_offsets: dict[int, int],
-    unsigned_offsets: set[int],
-) -> dict[int, int]:
+    signed_offsets: object,
+    unsigned_offsets: object,
+) -> object:
+    lhs: object
+    rhs: object
+    node: object
     if not signed_offsets:
         return signed_offsets
     propagated = dict(signed_offsets)
@@ -639,9 +701,11 @@ def _propagate_signed_stack_arg_comparison_peers_8616(
     return propagated
 
 
-def _stack_arg_offsets_read_by_expr_8616(expr: object) -> frozenset[int]:
+@cython.ccall
+def _stack_arg_offsets_read_by_expr_8616(expr: object) -> frozenset[cython.longlong]:
     """Return positive BP stack-argument offsets read by a C expression tree."""
-    offsets: set[int] = set()
+    node: object
+    offsets: set[cython.longlong] = set()
     for node in _iter_c_nodes_deep_8616(expr):
         if not isinstance(node, CVariable):
             continue
@@ -655,9 +719,11 @@ def _stack_arg_offsets_read_by_expr_8616(expr: object) -> frozenset[int]:
     return frozenset(offsets)
 
 
-def _comparison_fingerprints_by_node_8616(cfunc: object, project: object) -> dict[int, tuple[str, frozenset[int]]]:
+@cython.ccall
+def _comparison_fingerprints_by_node_8616(cfunc: object, project: object) -> object:
     """Fingerprint comparison nodes and the stack arguments each comparison reads."""
-    fingerprints: dict[int, tuple[str, frozenset[int]]] = {}
+    node: object
+    fingerprints: dict[cython.longlong, tuple[str, frozenset[cython.longlong]]] = {}
     for node in _iter_c_nodes_deep_8616(cfunc):
         if not isinstance(node, CBinaryOp) or not str(_dynamic_typed_condition_getattr_8616(node, "op", "")).startswith("Cmp"):
             continue
@@ -667,16 +733,19 @@ def _comparison_fingerprints_by_node_8616(cfunc: object, project: object) -> dic
 
 
 def _condition_fingerprint_changes_are_owned_by_stack_args_8616(
-    before: dict[int, tuple[str, frozenset[int]]],
-    after: dict[int, tuple[str, frozenset[int]]],
-    signed_offsets: dict[int, int],
-) -> bool:
+    before: object,
+    after: object,
+    signed_offsets: object,
+) -> cython.bint:
     """Decide whether signedness changed only conditions reading proven stack args."""
+    before_fingerprint: object
+    before_offsets: object
+    node_id: object
     if not signed_offsets:
         return False
-    if before.keys() != after.keys():
+    if operator.ne(before.keys(), after.keys()):
         return False
-    signed = frozenset(int(offset) for offset in signed_offsets)
+    signed = frozenset(int(offset) for offset in iter(signed_offsets))
     for node_id, (before_fingerprint, before_offsets) in before.items():
         after_fingerprint, after_offsets = after[node_id]
         if before_fingerprint == after_fingerprint:
@@ -686,7 +755,8 @@ def _condition_fingerprint_changes_are_owned_by_stack_args_8616(
     return True
 
 
-def _remember_signedness_cvar_8616(node: object, nodes: list[CVariable], seen: set[int]) -> None:
+@cython.ccall
+def _remember_signedness_cvar_8616(node: object, nodes: object, seen: object) -> None:
     """Record ``node`` when it is a positive-BP stack variable surface."""
     if not isinstance(node, CVariable):
         return
@@ -703,10 +773,16 @@ def _remember_signedness_cvar_8616(node: object, nodes: list[CVariable], seen: s
     nodes.append(node)
 
 
+@cython.ccall
 def _iter_signedness_stack_arg_cvars_8616(cfunc: object) -> tuple[CVariable, ...]:
     """Return every known positive-BP CVariable surface that may drive argument rebuilding."""
+    arg: object
+    entries: object
+    entry: object
+    node: object
+    root: object
     nodes: list[CVariable] = []
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
 
     for arg in tuple(_dynamic_typed_condition_getattr_8616(cfunc, "arg_list", ()) or ()):
         _remember_signedness_cvar_8616(arg, nodes, seen)
@@ -726,8 +802,11 @@ def _iter_signedness_stack_arg_cvars_8616(cfunc: object) -> tuple[CVariable, ...
     return tuple(nodes)
 
 
+@cython.ccall
 def _snapshot_unified_signed_stack_arg_types_8616(cfunc: object) -> tuple[tuple[dict[object, object], object, object], ...]:
     """Capture unified-local entries whose stored type may be signedness-adjusted."""
+    key: object
+    value: object
     unified = _dynamic_typed_condition_getattr_8616(cfunc, "unified_local_vars", None)
     if not isinstance(unified, dict):
         return ()
@@ -737,10 +816,14 @@ def _snapshot_unified_signed_stack_arg_types_8616(cfunc: object) -> tuple[tuple[
     return tuple(rows)
 
 
+@cython.ccall
 def _restore_unified_signed_stack_arg_types_8616(
-    snapshot: tuple[tuple[dict[object, object], object, object], ...],
+    snapshot: object,
 ) -> None:
     """Restore unified-local type entries after rejected signedness propagation."""
+    key: object
+    mapping: object
+    value: object
     for mapping, key, value in snapshot:
         with contextlib.suppress(Exception):
             mapping[key] = value
@@ -751,12 +834,16 @@ def _snapshot_signed_stack_arg_type_state_8616(
     codegen: object,
 ) -> _SignedStackArgTypeSnapshot8616:
     """Capture mutable type state touched by signed stack-argument propagation."""
+    cfunc: object
+    function: object
+    functions: object
+    prototype: object
     cfunc = _dynamic_typed_condition_getattr_8616(codegen, "cfunc", None)
     nodes: list[tuple[CVariable, object]] = []
     unified_snapshot: _UnifiedTypeSnapshot8616 = ()
 
     if cfunc is not None:
-        nodes.extend((node, _dynamic_typed_condition_getattr_8616(node, "variable_type", None)) for node in _iter_signedness_stack_arg_cvars_8616(cfunc))
+        nodes.extend((node, _dynamic_typed_condition_getattr_8616(node, "variable_type", None)) for node in builtins.iter(_iter_signedness_stack_arg_cvars_8616(cfunc)))
         unified_snapshot = _snapshot_unified_signed_stack_arg_types_8616(cfunc)
     prototype = _dynamic_typed_condition_getattr_8616(cfunc, "functy", None) if cfunc is not None else None
     if prototype is None and cfunc is not None:
@@ -771,12 +858,18 @@ def _snapshot_signed_stack_arg_type_state_8616(
     return tuple(nodes), (prototype, function_prototype), unified_snapshot
 
 
+@cython.ccall
 def _restore_signed_stack_arg_type_state_8616(
     project: object,
     codegen: object,
     snapshot: _SignedStackArgTypeSnapshot8616,
 ) -> None:
     """Restore mutable type state after an unsafe signedness propagation."""
+    cfunc: object
+    function: object
+    functions: object
+    node: object
+    variable_type: object
     nodes, prototypes, unified_snapshot = snapshot
     for node, variable_type in nodes:
         with contextlib.suppress(Exception):
@@ -798,15 +891,17 @@ def _restore_signed_stack_arg_type_state_8616(
                 function.prototype = function_prototype
 
 
+@cython.ccall
 def _retag_body_stack_arg_cvars_8616(
     project: object,
-    stack_nodes: tuple[CVariable, ...],
-    signed_offsets: dict[int, int],
-    changed_fields: set[str],
-    changed_offsets: set[int],
-    changed_nodes: list[tuple[int, str | None, str]],
-) -> bool:
+    stack_nodes: object,
+    signed_offsets: object,
+    changed_fields: object,
+    changed_offsets: object,
+    changed_nodes: object,
+) -> cython.bint:
     """Apply signed types to body CVariable nodes whose offsets are proven."""
+    node: object
     changed = False
     for node in stack_nodes:
         variable = _dynamic_typed_condition_getattr_8616(node, "variable", None)
@@ -814,7 +909,7 @@ def _retag_body_stack_arg_cvars_8616(
         if not isinstance(offset, int) or offset not in signed_offsets:
             continue
         signed_type = _bind_type_to_arch_8616(project, _signed_type_for_operand_size_8616(signed_offsets[offset]))
-        if _dynamic_typed_condition_getattr_8616(node, "variable_type", None) != signed_type:
+        if operator.ne(_dynamic_typed_condition_getattr_8616(node, "variable_type", None), signed_type):
             node.variable_type = cast(SimType | None, signed_type)
             changed = True
             changed_fields.add("body_cvar")
@@ -827,13 +922,17 @@ def _retag_body_stack_arg_cvars_8616(
     return changed
 
 
+@cython.ccall
 def _retag_unified_local_vars_8616(
     project: object,
     cfunc: object,
-    signed_offsets: dict[int, int],
-    changed_fields: set[str],
-) -> bool:
+    signed_offsets: object,
+    changed_fields: object,
+) -> cython.bint:
     """Apply signed types inside ``unified_local_vars`` entries."""
+    entries: object
+    entry: object
+    key: object
     unified = _dynamic_typed_condition_getattr_8616(cfunc, "unified_local_vars", None)
     if not isinstance(unified, dict):
         return False
@@ -868,15 +967,19 @@ def _retag_unified_local_vars_8616(
     return changed
 
 
+@cython.ccall
 def _retag_arg_list_cvars_8616(
     project: object,
-    arg_list: list[object],
-    signed_offsets: dict[int, int],
-    changed_fields: set[str],
-    changed_offsets: set[int],
-) -> bool:
+    arg_list: object,
+    signed_offsets: object,
+    changed_fields: object,
+    changed_offsets: object,
+) -> cython.bint:
     """Apply signed types to ``arg_list`` CVariables at proven offsets."""
-    arg_by_offset: dict[int, CVariable] = {}
+    arg: object
+    offset: object
+    size: object
+    arg_by_offset: dict[cython.longlong, CVariable] = {}
     for arg in arg_list:
         variable = _dynamic_typed_condition_getattr_8616(arg, "variable", None)
         offset = _dynamic_typed_condition_getattr_8616(variable, "offset", None)
@@ -888,7 +991,7 @@ def _retag_arg_list_cvars_8616(
         if arg is None:
             continue
         signed_type = _bind_type_to_arch_8616(project, _signed_type_for_operand_size_8616(size))
-        if _dynamic_typed_condition_getattr_8616(arg, "variable_type", None) != signed_type:
+        if operator.ne(_dynamic_typed_condition_getattr_8616(arg, "variable_type", None), signed_type):
             arg.variable_type = cast(SimType | None, signed_type)
             changed = True
             changed_fields.add("arg_cvar")
@@ -896,17 +999,20 @@ def _retag_arg_list_cvars_8616(
     return changed
 
 
+@cython.ccall
 def _rebuild_args_from_arg_list_8616(
     project: object,
     prototype: object,
-    arg_list: list[object],
-    old_args: list[object],
-    old_names: list[object],
-    signed_offsets: dict[int, int],
-    changed_fields: set[str],
-    changed_offsets: set[int],
-) -> tuple[list[SimType], list[str], bool]:
+    arg_list: object,
+    old_args: object,
+    old_names: object,
+    signed_offsets: object,
+    changed_fields: object,
+    changed_offsets: object,
+) -> tuple[list[SimType], list[str], cython.bint]:
     """Rebuild prototype args from ``arg_list``, applying signed overrides."""
+    arg: object
+    index: object
     args: list[SimType] = []
     arg_names: list[str] = []
     changed = False
@@ -927,7 +1033,7 @@ def _rebuild_args_from_arg_list_8616(
         )
         if isinstance(offset, int) and offset in signed_offsets:
             signed_type = _bind_type_to_arch_8616(project, _signed_type_for_operand_size_8616(signed_offsets[offset]))
-            if args[-1] != signed_type:
+            if operator.ne(args[-1], signed_type):
                 args[-1] = signed_type
                 changed = True
                 changed_fields.add("prototype_arg")
@@ -935,24 +1041,27 @@ def _rebuild_args_from_arg_list_8616(
     return args, arg_names, changed
 
 
+@cython.ccall
 def _rebuild_args_from_old_prototype_8616(
     project: object,
-    old_args: list[object],
-    old_names: list[object],
-    signed_offsets: dict[int, int],
-    changed_fields: set[str],
-    changed_offsets: set[int],
-) -> tuple[list[SimType], list[str], bool]:
+    old_args: object,
+    old_names: object,
+    signed_offsets: object,
+    changed_fields: object,
+    changed_offsets: object,
+) -> tuple[list[SimType], list[str], cython.bint]:
     """Rebuild prototype args by BP-offset cursor when no ``arg_list`` exists."""
-    args = [cast(SimType, arg_type) for arg_type in old_args]
-    arg_names: list[str] = [cast(str, name) for name in old_names]
+    arg_type: object
+    index: object
+    args = [cast(SimType, arg_type) for arg_type in iter(old_args)]
+    arg_names: list[str] = [cast(str, name) for name in iter(old_names)]
     changed = False
     cursor = 4
     for index, arg_type in enumerate(args):
         width = max(2, _type_size_bytes_8616(arg_type))
         if cursor in signed_offsets:
             signed_type = _bind_type_to_arch_8616(project, _signed_type_for_operand_size_8616(signed_offsets[cursor]))
-            if args[index] != signed_type:
+            if operator.ne(args[index], signed_type):
                 args[index] = signed_type
                 changed = True
                 changed_fields.add("prototype_arg")
@@ -961,20 +1070,23 @@ def _rebuild_args_from_old_prototype_8616(
     return args, arg_names, changed
 
 
+@cython.ccall
 def _publish_signed_arg_prototype_8616(
     project: object,
     codegen: object,
     cfunc: object,
     prototype: object,
-    args: list[SimType],
-    arg_names: list[str],
+    args: object,
+    arg_names: object,
     return_type: SimType,
-    signed_offsets: dict[int, int],
-    changed_fields: set[str],
-    changed_offsets: set[int],
-    changed_nodes: list[tuple[int, str | None, str]],
+    signed_offsets: object,
+    changed_fields: object,
+    changed_offsets: object,
+    changed_nodes: object,
 ) -> None:
     """Install the rebuilt prototype and publish signedness counters."""
+    function: object
+    functions: object
     new_prototype = SimTypeFunction(
         args,
         return_type,
@@ -1001,7 +1113,7 @@ def _publish_signed_arg_prototype_8616(
         log.warning(
             "[typed-condition-signedness] stage=%r offsets=%r changed_offsets=%r fields=%r arg_names=%r nodes=%r",
             _dynamic_typed_condition_getattr_8616(project, "_inertia_decompiler_stage", None),
-            dict(sorted(signed_offsets.items())),
+            dict(sorted(tuple(signed_offsets.items()))),
             tuple(sorted(changed_offsets)),
             tuple(sorted(changed_fields)),
             tuple(arg_names),
@@ -1009,21 +1121,23 @@ def _publish_signed_arg_prototype_8616(
         )
 
 
-def _apply_signed_stack_arg_types_to_prototype_8616(project: object, codegen: object, signed_offsets: dict[int, int]) -> bool:
+def _apply_signed_stack_arg_types_to_prototype_8616(project: object, codegen: object, signed_offsets: object) -> cython.bint:
     """Apply sign-only type changes authorized by complete storage-owner proof."""
+    cfunc: object
+    prototype: object
     cfunc = _dynamic_typed_condition_getattr_8616(codegen, "cfunc", None)
     if cfunc is None or not signed_offsets:
         return False
     stack_nodes = _iter_signedness_stack_arg_cvars_8616(cfunc)
     signed_offsets = complete_storage_signedness_requests_8616(
         signed_offsets,
-        (node.variable for node in stack_nodes if isinstance(node.variable, SimStackVariable)),
+        (node.variable for node in iter(stack_nodes) if isinstance(node.variable, SimStackVariable)),
     )
     if not signed_offsets:
         return False
     changed_fields: set[str] = set()
-    changed_offsets: set[int] = set()
-    changed_nodes: list[tuple[int, str | None, str]] = []
+    changed_offsets: set[cython.longlong] = set()
+    changed_nodes: list[tuple[cython.longlong, str | None, str]] = []
     arg_list = list(_dynamic_typed_condition_getattr_8616(cfunc, "arg_list", ()) or ())
     changed = _retag_body_stack_arg_cvars_8616(
         project, stack_nodes, signed_offsets, changed_fields, changed_offsets, changed_nodes
@@ -1060,15 +1174,19 @@ def _apply_signed_stack_arg_types_to_prototype_8616(project: object, codegen: ob
     return True
 
 
-def _signed_stack_arg_type_debug_state_8616(codegen: object) -> tuple[tuple[str, int, str | None, bool | None], ...]:
+def _signed_stack_arg_type_debug_state_8616(codegen: object) -> tuple[tuple[str, cython.longlong, str | None, bool | None], ...]:
     """Return signedness state for positive BP CVariables on emitted surfaces."""
+    cfunc: object
+    arg: object
+    node: object
+    root_name: object
     cfunc = _dynamic_typed_condition_getattr_8616(codegen, "cfunc", None)
     if cfunc is None:
         return ()
-    rows: list[tuple[str, int, str | None, bool | None]] = []
-    seen: set[int] = set()
+    rows: list[tuple[str, cython.longlong, str | None, bool | None]] = []
+    seen: set[cython.longlong] = set()
 
-    def _record(surface: str, node: object) -> None:
+    def _record(surface: object, node: object) -> None:
         if not isinstance(node, CVariable):
             return
         marker = id(node)
@@ -1092,7 +1210,8 @@ def _signed_stack_arg_type_debug_state_8616(codegen: object) -> tuple[tuple[str,
     return tuple(rows)
 
 
-def _apply_typed_condition_stack_arg_signedness_8616(project: SimpleNamespace, codegen: SimpleNamespace) -> bool:
+@cython.ccall
+def _apply_typed_condition_stack_arg_signedness_8616(project: SimpleNamespace, codegen: SimpleNamespace) -> cython.bint:
     """Propagate signed ConditionIR comparison evidence into stack-argument types."""
     conditions = _dynamic_typed_condition_getattr_8616(codegen, "_inertia_typed_conditions", None)
     signed_offsets = _signed_stack_arg_offsets_from_conditions_8616(
@@ -1147,6 +1266,9 @@ def _build_c_condition_expr(
     *, operand_builder: Callable[[object], object | None] | None = None,
 ) -> CBinaryOp | None:
     """Build comparison syntax from operands supplied by the owning proof consumer."""
+    lhs_expr: object
+    rhs_expr: object
+    structured_op: object
     build_operand = operand_builder or (lambda value: _build_c_expr_for_operand(project, value, codegen, cond))
     lhs_expr = build_operand(cond.lhs)
     if lhs_expr is None:
@@ -1181,11 +1303,14 @@ def _build_c_condition_expr(
     return expression
 
 
-def _condition_key_from_tags(node: object) -> tuple[int, int] | None:
+def _condition_key_from_tags(node: object) -> object:
     """Extract a match key (ins_addr, block_addr) from node tags."""
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
 
-    def _walk(current: object) -> tuple[int, int] | None:
+    def _walk(current: object) -> object:
+        block_addr: object
+        cond: object
+        ins_addr: object
         if current is None:
             return None
         marker = id(current)
@@ -1213,8 +1338,10 @@ def _condition_key_from_tags(node: object) -> tuple[int, int] | None:
     return _walk(node)
 
 
-def _index_conditions_by_tag(conditions: list[ConditionIR]) -> dict[tuple[Any, ...], ConditionIR]:
+@cython.ccall
+def _index_conditions_by_tag(conditions: object) -> object:
     """Index ConditionIR objects by their (ins_addr, block_addr) key."""
+    cond: object
     index: dict[tuple[Any, ...], ConditionIR] = {}
     for cond in conditions:
         if not isinstance(cond.src_insn, int) or not isinstance(cond.block_addr, int):
@@ -1225,9 +1352,11 @@ def _index_conditions_by_tag(conditions: list[ConditionIR]) -> dict[tuple[Any, .
 
 
 def _resolve_condition_by_tag_with_delta(
-    project: object, index: dict[tuple[Any, ...], ConditionIR], key: tuple[Any, ...] | None
+    project: object, index: object, key: object
 ) -> ConditionIR | None:
     def _impl() -> ConditionIR | None:
+        cond: object
+        signed: object
         if key is None:
             return None
         cond = index.get(key)
@@ -1251,8 +1380,11 @@ def _resolve_condition_by_tag_with_delta(
     return _impl()
 
 
-def _has_flag_carrier_name_8616(current: object) -> bool:
+def _has_flag_carrier_name_8616(current: object) -> cython.bint:
     """True when ``current`` carries a flag-like name fragment."""
+    obj: object
+    value: object
+    attr: object
     fragments: list[str] = []
     with contextlib.suppress(Exception):
         fragments.append(str(current).lower())
@@ -1267,10 +1399,11 @@ def _has_flag_carrier_name_8616(current: object) -> bool:
                 fragments.append(str(value).lower())
         with contextlib.suppress(Exception):
             fragments.append(str(obj).lower())
-    return any("flags" in text or "tmp" in text or "vvar_" in text for text in fragments)
+    return any("flags" in text or "tmp" in text or "vvar_" in text for text in iter(fragments))
 
 
-def _flag_cvar_is_flag_based_8616(node: object) -> bool:
+@cython.ccall
+def _flag_cvar_is_flag_based_8616(node: object) -> cython.bint:
     """True when a ``CVariable`` looks like a flags register carrier."""
     if _has_flag_carrier_name_8616(node):
         return True
@@ -1282,8 +1415,10 @@ def _flag_cvar_is_flag_based_8616(node: object) -> bool:
     return False
 
 
-def __is_flag_based_condition_node___impl(node: object) -> bool:
+@cython.ccall
+def __is_flag_based_condition_node___impl(node: object) -> cython.bint:
     """Detect if a condition node is flag-based (tmp_* or flags mask pattern)."""
+    cond: object
     if isinstance(node, CITE):
         cond = _dynamic_typed_condition_getattr_8616(node, "cond", None) or _dynamic_typed_condition_getattr_8616(node, "condition", None)
         if cond is not None:
@@ -1307,11 +1442,13 @@ def __is_flag_based_condition_node___impl(node: object) -> bool:
     return False
 
 
-def _is_flag_based_condition_node(node: object) -> bool:
+@cython.ccall
+def _is_flag_based_condition_node(node: object) -> cython.bint:
     return __is_flag_based_condition_node___impl(node)
 
 
-def _debug_condition_candidate_8616(label: str, cond: object, key: tuple[Any, ...] | None, flag_based: bool) -> None:
+@cython.ccall
+def _debug_condition_candidate_8616(label: object, cond: object, key: object, flag_based: cython.bint) -> None:
     if not os.environ.get("INERTIA_DEBUG_TYPED_CONDITIONS"):
         return
     try:
@@ -1330,7 +1467,8 @@ def _debug_condition_candidate_8616(label: str, cond: object, key: tuple[Any, ..
     )
 
 
-def _contains_flag_mask_operator_8616(node: object) -> bool:
+@cython.ccall
+def _contains_flag_mask_operator_8616(node: object) -> cython.bint:
     if node is None or not _structured_codegen_node_8616(node):
         return False
     if isinstance(node, CBinaryOp):
@@ -1344,7 +1482,8 @@ def _contains_flag_mask_operator_8616(node: object) -> bool:
     return False
 
 
-def _contains_cite_node_8616(node: object) -> bool:
+@cython.ccall
+def _contains_cite_node_8616(node: object) -> cython.bint:
     if node is None or not _structured_codegen_node_8616(node):
         return False
     if isinstance(node, CITE):
@@ -1358,6 +1497,13 @@ def _contains_cite_node_8616(node: object) -> bool:
 
 def _typed_condition_carrier_polarity_8616(node: object) -> bool | None:
     """Return whether a tagged boolean carrier has direct typed-condition polarity."""
+    false_value: object
+    lhs_polarity: object
+    lhs_truth: object
+    operand_polarity: object
+    rhs_polarity: object
+    rhs_truth: object
+    true_value: object
 
     def _constant_truth(expr: object) -> bool | None:
         if not isinstance(expr, CConstant) or not isinstance(expr.value, int):
@@ -1367,7 +1513,7 @@ def _typed_condition_carrier_polarity_8616(node: object) -> bool | None:
     if isinstance(node, CITE):
         true_value = _constant_truth(node.iftrue)
         false_value = _constant_truth(node.iffalse)
-        if true_value is None or false_value is None or true_value == false_value:
+        if true_value is None or false_value is None or operator.eq(true_value, false_value):
             return None
         return true_value and not false_value
     if isinstance(node, CUnaryOp) and node.op == "Not":
@@ -1377,17 +1523,18 @@ def _typed_condition_carrier_polarity_8616(node: object) -> bool | None:
         lhs_polarity = _typed_condition_carrier_polarity_8616(node.lhs)
         rhs_truth = _constant_truth(node.rhs)
         if lhs_polarity is not None and rhs_truth is not None:
-            preserve = (node.op == "CmpEQ") == rhs_truth
+            preserve = operator.eq((node.op == "CmpEQ"), rhs_truth)
             return lhs_polarity if preserve else not lhs_polarity
         rhs_polarity = _typed_condition_carrier_polarity_8616(node.rhs)
         lhs_truth = _constant_truth(node.lhs)
         if rhs_polarity is not None and lhs_truth is not None:
-            preserve = (node.op == "CmpEQ") == lhs_truth
+            preserve = operator.eq((node.op == "CmpEQ"), lhs_truth)
             return rhs_polarity if preserve else not rhs_polarity
     return None
 
 
-def _is_literal_condition_8616(expr: object) -> bool:
+@cython.ccall
+def _is_literal_condition_8616(expr: object) -> cython.bint:
     """True when ``expr`` is a constant literal under ``Not`` wrappers."""
     node = expr
     while isinstance(node, CUnaryOp) and _dynamic_typed_condition_getattr_8616(node, "op", None) == "Not":
@@ -1395,22 +1542,24 @@ def _is_literal_condition_8616(expr: object) -> bool:
     return isinstance(node, CConstant) and isinstance(_dynamic_typed_condition_getattr_8616(node, "value", None), int)
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _TypedConditionApplyCtx8616:
     """State for typed-condition application across the C AST."""
 
     project: object
     codegen: object
-    condition_index: dict[tuple[Any, ...], ConditionIR]
-    matched_condition_keys: set[tuple[Any, ...]]
-    visited_nodes: set[int]
-    changed: bool = False
+    condition_index: object
+    matched_condition_keys: object
+    visited_nodes: object
+    changed: cython.bint = False
 
 
+@cython.ccall
 def _resolve_typed_condition_for_key_8616(
-    project: object, condition_index: dict[tuple[Any, ...], ConditionIR], key: tuple[Any, ...], cond: object
+    project: object, condition_index: object, key: object, cond: object
 ) -> ConditionIR | None:
     """Resolve the ConditionIR for ``key``; log unresolved keys in debug mode."""
+    typed_cond: object
     typed_cond = _resolve_condition_by_tag_with_delta(project, condition_index, key)
     if typed_cond is not None:
         return typed_cond
@@ -1423,7 +1572,8 @@ def _resolve_typed_condition_for_key_8616(
     return None
 
 
-def _condition_replacement_allowed_8616(cond: object) -> bool:
+@cython.ccall
+def _condition_replacement_allowed_8616(cond: object) -> cython.bint:
     """Refuse replacements owned by loop/composite ownership or call effects."""
     from inertia.structuring.condition_ownership import requires_composite_condition_ownership_8616
     from inertia.structuring.loop_condition_identity import is_owned_loop_continuation_8616
@@ -1435,7 +1585,8 @@ def _condition_replacement_allowed_8616(cond: object) -> bool:
     return not classify_condition_call_effects_8616(cond).has_semantic_call
 
 
-def _requires_comparison_polarity_proof_8616(cond: object) -> bool:
+@cython.ccall
+def _requires_comparison_polarity_proof_8616(cond: object) -> cython.bint:
     """Return whether a structured comparison guard needs operand polarity proof.
 
     A plain relational/equality ``Cmp*`` guard already encodes a structured
@@ -1451,10 +1602,14 @@ def _requires_comparison_polarity_proof_8616(cond: object) -> bool:
     )
 
 
+@cython.ccall
 def _materialize_typed_condition_8616(
-    cond: object, key: tuple[Any, ...], ctx: _TypedConditionApplyCtx8616
+    cond: object, key: object, ctx: _TypedConditionApplyCtx8616
 ) -> object | None:
     """Build and sanity-check the typed comparison for ``key``."""
+    carrier_polarity: object
+    new_cond: object
+    typed_cond: object
     typed_cond = _resolve_typed_condition_for_key_8616(ctx.project, ctx.condition_index, key, cond)
     if typed_cond is None:
         return None
@@ -1463,7 +1618,7 @@ def _materialize_typed_condition_8616(
         return None
     if _same_c_expression_8616(new_cond.lhs, new_cond.rhs):
         return None
-    if _expr_fingerprint(new_cond, ctx.project) == _expr_fingerprint(cond, ctx.project):
+    if operator.eq(_expr_fingerprint(new_cond, ctx.project), _expr_fingerprint(cond, ctx.project)):
         return None
     if _same_c_expression_8616(new_cond, cond):
         return None
@@ -1482,8 +1637,11 @@ def _materialize_typed_condition_8616(
     return cast(object, new_cond)
 
 
+@cython.ccall
 def _replacement_for_condition_node_8616(cond: object, ctx: _TypedConditionApplyCtx8616) -> object | None:
     """Return the explicit comparison replacing a flag-based condition node."""
+    key: object
+    new_cond: object
     if not _condition_replacement_allowed_8616(cond):
         return None
     key = _condition_key_from_tags(cond)
@@ -1506,8 +1664,11 @@ def _replacement_for_condition_node_8616(cond: object, ctx: _TypedConditionApply
     return new_cond
 
 
+@cython.ccall
 def _rewrite_condition_pairs_8616(node: object, ctx: _TypedConditionApplyCtx8616) -> None:
     """Rebuild ``condition_and_nodes`` pairs with replacement conditions."""
+    new_pair_cond: object
+    cond_pair: object
     cond_pairs = _dynamic_typed_condition_getattr_8616(node, "condition_and_nodes", None)
     if not cond_pairs:
         return
@@ -1537,8 +1698,11 @@ def _rewrite_condition_pairs_8616(node: object, ctx: _TypedConditionApplyCtx8616
             ctx.changed = True
 
 
+@cython.ccall
 def _rewrite_ifelse_condition_8616(node: object, ctx: _TypedConditionApplyCtx8616) -> None:
     """Replace the primary condition and pair conditions of a ``CIfElse``."""
+    cond: object
+    new_cond: object
     cond = _dynamic_typed_condition_getattr_8616(node, "condition", None)
     if cond is not None:
         new_cond = _replacement_for_condition_node_8616(cond, ctx)
@@ -1548,8 +1712,11 @@ def _rewrite_ifelse_condition_8616(node: object, ctx: _TypedConditionApplyCtx861
     _rewrite_condition_pairs_8616(node, ctx)
 
 
+@cython.ccall
 def _rewrite_loop_condition_8616(node: object, ctx: _TypedConditionApplyCtx8616) -> None:
     """Replace flag-based conditions on loop-like nodes."""
+    condition_key: object
+    new_cond: object
     cond = _dynamic_typed_condition_getattr_8616(node, "condition", None)
     condition_key = _condition_key_from_tags(cond)
     typed_comparison = (
@@ -1564,8 +1731,13 @@ def _rewrite_loop_condition_8616(node: object, ctx: _TypedConditionApplyCtx8616)
             ctx.changed = True
 
 
+@cython.ccall
 def _walk_typed_condition_children_8616(node: object, ctx: _TypedConditionApplyCtx8616) -> None:
     """Recurse into the structural children of ``node``."""
+    child: object
+    attr: object
+    case_body: object
+    cond_pair: object
     if hasattr(node, "statements"):
         _walk_typed_condition_statements_8616(node, ctx)
     for attr in ("body", "else_node", "iftrue", "iffalse"):
@@ -1582,6 +1754,7 @@ def _walk_typed_condition_children_8616(node: object, ctx: _TypedConditionApplyC
             _walk_typed_condition_node_8616(case_body, ctx)
 
 
+@cython.ccall
 def _walk_typed_condition_node_8616(node: object, ctx: _TypedConditionApplyCtx8616) -> None:
     """Visit one node, rewriting flag-based conditions to typed comparisons."""
     if node is None or not _structured_codegen_node_8616(node):
@@ -1603,8 +1776,10 @@ def _walk_typed_condition_node_8616(node: object, ctx: _TypedConditionApplyCtx86
     _walk_typed_condition_children_8616(node, ctx)
 
 
+@cython.ccall
 def _walk_typed_condition_statements_8616(statements_obj: object, ctx: _TypedConditionApplyCtx8616) -> None:
     """Walk each statement held by a ``statements`` container."""
+    stmt: object
     raw = _dynamic_typed_condition_getattr_8616(statements_obj, "statements", ()) or ()
     raw_statements = _dynamic_typed_condition_getattr_8616(raw, "statements", raw) or ()
     stmts = (raw_statements,) if _structured_codegen_node_8616(raw_statements) else tuple(raw_statements)
@@ -1612,8 +1787,9 @@ def _walk_typed_condition_statements_8616(statements_obj: object, ctx: _TypedCon
         _walk_typed_condition_node_8616(stmt, ctx)
 
 
+@cython.ccall
 def _publish_condition_lane_counts_8616(
-    codegen: object, matched_condition_keys: set[tuple[Any, ...]]
+    codegen: object, matched_condition_keys: object
 ) -> None:
     """Update CONDITION lane contract counters after replacements."""
     lane = _dynamic_typed_condition_getattr_8616(codegen, "_inertia_condition_lane", None)
@@ -1624,13 +1800,15 @@ def _publish_condition_lane_counts_8616(
     typing.cast(typing.Any, codegen)._inertia_semantic_condition_materialized_count = len(matched_condition_keys)
 
 
-def _apply_typed_conditions_to_codegen_8616(project: SimpleNamespace, codegen: SimpleNamespace) -> bool:
+@cython.ccall
+def _apply_typed_conditions_to_codegen_8616(project: SimpleNamespace, codegen: SimpleNamespace) -> cython.bint:
     """Replace flag-based conditions in C AST with explicit comparisons from ConditionIR.
 
     Compatibility consumer invoked by Structuring, not a Rewrite semantic
     recovery pass. A single fact cannot replace a compound condition; its
     complete CFG ownership belongs to Structuring's chain materializer.
     """
+    cfunc: object
     conditions = _dynamic_typed_condition_getattr_8616(codegen, "_inertia_typed_conditions", None)
     if not conditions:
         return False

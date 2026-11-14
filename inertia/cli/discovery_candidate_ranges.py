@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bound selected entries independently of library-body inclusion policy.
 
 Layer: CLI/fallback/reporting.
@@ -7,6 +8,8 @@ Candidate windows alone are not proof of function semantics.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from bisect import bisect_right
 from collections.abc import Iterable
@@ -14,26 +17,27 @@ from collections.abc import Iterable
 from inertia.frontend.x86_16.frontend_function_boundary import (
     exact_function_range_boundary_8616,
 )
+import operator
 
 
 def pre_entry_candidate_ranges(
-    selected: Iterable[int], signature_entries: Iterable[int], *, end: int,
-) -> dict[int, tuple[int, int]]:
+    selected: Iterable[cython.longlong], signature_entries: Iterable[cython.longlong], *, end: cython.longlong,
+) -> dict[cython.longlong, tuple[cython.longlong, cython.longlong]]:
     """Stop each selected candidate at the next known entry or image limit."""
-    starts = sorted(set(selected))
-    if any(start >= end for start in starts):
+    starts = sorted(tuple(set(selected)))
+    if any(start >= end for start in iter(starts)):
         raise ValueError("Selected pre-entry candidate must precede its end bound")
-    boundaries = sorted({*starts, *(addr for addr in signature_entries if addr < end), end})
-    return {start: (start, boundaries[bisect_right(boundaries, start)]) for start in starts}
+    boundaries = sorted(set(starts) | set((addr for addr in iter(signature_entries) if addr < end)) | {end})
+    return {start: (start, boundaries[bisect_right(boundaries, start)]) for start in iter(starts)}
 
 
 def pre_entry_caller_ranges_8616(
     project: object,
-    selected: Iterable[int],
-    signature_entries: Iterable[int],
+    selected: Iterable[cython.longlong],
+    signature_entries: Iterable[cython.longlong],
     *,
-    end: int,
-) -> dict[int, tuple[int, int]]:
+    end: cython.longlong,
+) -> object:
     """Keep caller bodies that independently prove a signature hint is interior.
 
     The next selected entry and startup/image end supply the bounded binary
@@ -42,6 +46,10 @@ def pre_entry_caller_ranges_8616(
     next unreachable or unproven neighboring entry. Unavailable/open binary
     proof keeps the original limit. Library recovery windows remain unchanged.
     """
+    boundary: object
+    _start: object
+    hinted_end: object
+    start: object
     starts = tuple(selected)
     hint_entries = tuple(signature_entries)
     ranges = pre_entry_candidate_ranges(starts, hint_entries, end=end)
@@ -54,12 +62,12 @@ def pre_entry_caller_ranges_8616(
         if (
             boundary is not None
             and boundary.project is project
-            and boundary.addr == start
-            and boundary.size == binary_end - start
+            and operator.eq(boundary.addr, start)
+            and operator.eq(boundary.size, binary_end - start)
             and hinted_end in boundary.reachable_instruction_addrs
         ):
             remaining_hints = (
-                addr for addr in hint_entries
+                addr for addr in iter(hint_entries)
                 if addr not in boundary.reachable_instruction_addrs
             )
             ranges[start] = pre_entry_candidate_ranges(

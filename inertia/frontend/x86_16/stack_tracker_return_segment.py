@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Consume proven machine frames and return segments in native stack tracking.
 
 Layer: Frontend/angr compatibility.
@@ -7,6 +8,8 @@ from PUSH CS alone or alter aliases, C storage, or rendered output.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -38,37 +41,42 @@ from inertia.semantics.terminal_stack_cleanup import TerminalReturnFrameKind8616
 
 from .frontend_block_inventory import collect_decoded_block_evidence_8616
 from .frontend_direct_callsite_index import DecodedDirectCallsite8616
+import dataclasses
+import operator
 
 _WORD_BITS = 16
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NativeMachineCallFrameResult8616:
     """Closed census for one native machine-frame reconciliation."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
     frame: MachineCallFrame8616 | None
     adjustment: int | None
 
 
+@cython.ccall
 def apply_native_machine_call_frame_8616(
     tracker: StackPointerTracker, vex: pyvex.IRSB,
-    state: StackPointerTrackerState, callsite: int | None,
+    state: StackPointerTrackerState, callsite: object,
 ) -> NativeMachineCallFrameResult8616:
     """Replace native fixed-word return popping with the encoded CALL frame.
 
     This accounts only for the machine frame on the existing returning-call
     transfer. It proves neither callee argument cleanup nor register preservation.
     """
+    current: object
+    frame: object
     arch = tracker.project.arch
     if arch.name != "86_16" or vex.jumpkind != "Ijk_Call" or arch.sp_offset not in tracker.reg_offsets:
         return NativeMachineCallFrameResult8616(0, 0, 0, 0, 0, None, None)
     frame = None if callsite is None else decode_machine_call_frame_8616(tracker.project, callsite)
-    if frame is None or frame.return_addr != vex.addr + vex.size:
+    if frame is None or operator.ne(frame.return_addr, vex.addr + vex.size):
         state.put(arch.sp_offset, None, force=True)
         return NativeMachineCallFrameResult8616(1, 0, 0, 0, 1, frame, None)
     adjustment = frame.frame_bytes - (arch.bytes if arch.call_pushes_ret else 0)
@@ -87,24 +95,24 @@ class _ExactSliceBoundary8616(Protocol):
     """Original-image attachment identifying an exact-region project."""
 
     _inertia_original_project: Project
-    _inertia_original_linear_delta: int
+    _inertia_original_linear_delta: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _NativeBlock8616:
     """Existing VEX block surface for the owned IR importer; never relift."""
 
-    addr: int
+    addr: cython.longlong
     vex: pyvex.IRSB
 
 
 class _DecodedCallsiteInstruction8616(Protocol):
     """Decoded native instruction fields consumed at the Capstone boundary."""
 
-    address: int
-    size: int
-    mnemonic: str
-    bytes: bytes
+    address: cython.longlong
+    size: cython.longlong
+    mnemonic: object
+    bytes: object
     insn: object
 
 
@@ -117,11 +125,11 @@ class _RawInsnOperands8616(Protocol):
 class _DecodedImmediateOperand8616(Protocol):
     """Raw Capstone operand fields for one immediate coordinate."""
 
-    type: int
-    imm: int
+    type: cython.longlong
+    imm: cython.longlong
 
 
-def _imported_terminal_call_8616(vex: pyvex.IRSB) -> tuple[IRBlock, IRInstr] | None:
+def _imported_terminal_call_8616(vex: pyvex.IRSB) -> object:
     """Import the tracker's own VEX block and expose its terminal CALL.
 
     The importer stamps block-``next`` origin provenance on the terminal
@@ -130,14 +138,14 @@ def _imported_terminal_call_8616(vex: pyvex.IRSB) -> tuple[IRBlock, IRInstr] | N
     compares against.
     """
     block, _transport, _terminal_evidence = _block_to_ir(_NativeBlock8616(vex.addr, vex))
-    calls = tuple(instruction for instruction in block.instrs if instruction.op == "CALL")
+    calls = tuple(instruction for instruction in iter(block.instrs) if instruction.op == "CALL")
     if len(calls) != 1 or calls[0] is not block.instrs[-1]:
         return None
     return block, calls[0]
 
 
 def _decoded_callsite_entry_8616(
-    project: Project, callsite: int,
+    project: Project, callsite: cython.longlong,
 ) -> DecodedDirectCallsite8616 | None:
     """Retain the decoded direct-call coordinate fact for one callsite.
 
@@ -146,6 +154,7 @@ def _decoded_callsite_entry_8616(
     can independently re-verify it against the operand DAG and the mapped
     ``E8`` bytes. Indirect and far forms return ``None``.
     """
+    instruction: object
     try:
         evidence = collect_decoded_block_evidence_8616(project, callsite, opt_level=0)
     except (KeyError, SimEngineError, SimTranslationError, ValueError):
@@ -153,8 +162,8 @@ def _decoded_callsite_entry_8616(
     instruction = next(
         (
             insn
-            for insn in evidence.instructions
-            if cast(_DecodedCallsiteInstruction8616, insn).address == callsite
+            for insn in iter(evidence.instructions)
+            if operator.eq(cast(_DecodedCallsiteInstruction8616, insn).address, callsite)
         ),
         None,
     )
@@ -179,9 +188,10 @@ def _decoded_callsite_entry_8616(
     )
 
 
+@cython.ccall
 def _bound_terminal_direct_call_8616(
     project: Project, vex: pyvex.IRSB,
-) -> tuple[IRBlock, IRInstr, int] | None:
+) -> object:
     """Import the terminal CALL and return its proven active-domain target.
 
     A symbolic CALL operand is admitted only when the direct-near binding
@@ -190,6 +200,8 @@ def _bound_terminal_direct_call_8616(
     mapped ``E8`` bytes. An unproven or foreign operand returns ``None``
     untouched; a decoded address alone is never evidence.
     """
+    decoded: object
+    imported: object
     imported = _imported_terminal_call_8616(vex)
     if imported is None:
         return None
@@ -210,13 +222,14 @@ def _bound_terminal_direct_call_8616(
     return _original_image_bound_target_8616(project, callsite, decoded, block, instruction)
 
 
+@cython.ccall
 def _original_image_bound_target_8616(
     project: Project,
-    callsite: int,
+    callsite: cython.longlong,
     decoded: DecodedDirectCallsite8616,
     block: IRBlock,
     instruction: IRInstr,
-) -> tuple[IRBlock, IRInstr, int] | None:
+) -> object:
     """Prove an exact-slice call through the authenticated original image.
 
     Reaching this stage means the slice-domain binding verified the
@@ -229,6 +242,8 @@ def _original_image_bound_target_8616(
     slice's coordinate domain so downstream evidence owners rebase the
     address exactly once.
     """
+    imported: object
+    original_decoded: object
     boundary = cast(_ExactSliceBoundary8616, project)
     try:
         original = boundary._inertia_original_project
@@ -275,12 +290,13 @@ def _original_image_bound_target_8616(
     )
     if (
         not binding.complete
-        or binding.target_addr != decoded.target_addr + delta
+        or operator.ne(binding.target_addr, decoded.target_addr + delta)
     ):
         return None
     return block, instruction, decoded.target_addr
 
 
+@cython.ccall
 def _cleanup_target_8616(project: Project, vex: pyvex.IRSB) -> int | None:
     """Return the proven direct-call target in the active coordinate domain.
 
@@ -290,6 +306,7 @@ def _cleanup_target_8616(project: Project, vex: pyvex.IRSB) -> int | None:
     additionally requires the authenticated original-image binding so the
     downstream evidence owner still rebases the target exactly once.
     """
+    bound: object
     try:
         original = cast(_ExactSliceBoundary8616, project)._inertia_original_project
     except AttributeError:
@@ -304,12 +321,15 @@ def _cleanup_target_8616(project: Project, vex: pyvex.IRSB) -> int | None:
     return target
 
 
-def _native_cleanup_bytes(tracker: StackPointerTracker, node: object) -> int:
+def _native_cleanup_bytes(tracker: StackPointerTracker, node: object) -> cython.longlong:
     """Mirror the installed angr cleanup projection so it is not counted twice.
 
     This is backend compatibility, not evidence of the binary's convention.
     angr selects the first callee with a cleanup convention and a prototype.
     """
+    convention: object
+    prototype: object
+    callee: object
     callees = [] if tracker._func is None else tracker._find_callees(node)
     for callee in callees:
         convention = callee.calling_convention
@@ -319,15 +339,19 @@ def _native_cleanup_bytes(tracker: StackPointerTracker, node: object) -> int:
         if callee.prototype_libname:
             prototype = dereference_simtype_by_lib(prototype, callee.prototype_libname)
         locations = convention.arg_locs(prototype)
-        return int(tracker.project.arch.bytes) * sum(isinstance(location, SimStackArg) for location in locations)
+        return int(tracker.project.arch.bytes) * sum(isinstance(location, SimStackArg) for location in iter(locations))
     return 0
 
 
+@cython.ccall
 def apply_native_argument_cleanup_8616(
     tracker: StackPointerTracker, node: object, vex: pyvex.IRSB,
     state: StackPointerTrackerState,
 ) -> None:
     """Replace prototype-derived near cleanup with a complete binary proof."""
+    cleanup: object
+    current: object
+    target: object
     if tracker.project.arch.name != "86_16" or vex.jumpkind != "Ijk_Call":
         return
     sp_offset = tracker.project.arch.sp_offset
@@ -340,7 +364,7 @@ def apply_native_argument_cleanup_8616(
     compatible_frame = (
         evidence.complete
         and evidence.consistent_return_frame_kind is TerminalReturnFrameKind8616.NEAR
-        and evidence.consistent_return_operand_bits == _WORD_BITS
+        and operator.eq(evidence.consistent_return_operand_bits, _WORD_BITS)
     )
     cleanup = evidence.consistent_cleanup
     if not compatible_frame or cleanup is None:
@@ -356,11 +380,14 @@ def apply_native_argument_cleanup_8616(
         state.put(sp_offset, current + Constant(adjustment), force=True)
 
 
+@cython.ccall
 def apply_native_return_segment_8616(
     tracker: StackPointerTracker, vex: pyvex.IRSB,
-    state: StackPointerTrackerState, callsite: int | None,
+    state: StackPointerTrackerState, callsite: object,
 ) -> None:
     """Consume a proved extra CS slot without repeating return-kind inference."""
+    adjustment: object
+    current: object
     if tracker.project.arch.name != "86_16" or vex.jumpkind != "Ijk_Call" or callsite is None:
         return
     sp_offset = tracker.project.arch.sp_offset

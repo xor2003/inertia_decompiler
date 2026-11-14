@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Widening compatibility.
 
 Responsibility: preserve flat widening_model callers while delegating proof to widening.stack_widening.
@@ -9,6 +10,8 @@ Do not join values from rendered text, cosmetic shape, postprocess, or CLI/repor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from inertia.alias.state import AliasState
 from inertia.widening.stack_widening import (
@@ -34,6 +37,7 @@ from inertia.widening.stack_widening import (
 _register_version_for_expr = _canonical_register_version_for_expr
 
 
+@cython.ccall
 def prove_adjacent_storage_slices(
     low_expr: object,
     high_expr: object,
@@ -49,6 +53,7 @@ def prove_adjacent_storage_slices(
     )
 
 
+@cython.ccall
 def analyze_adjacent_storage_slices(
     low_expr: object,
     high_expr: object,
@@ -66,10 +71,12 @@ def can_join_adjacent_storage_slices(
     high_expr: object,
     *,
     alias_state: AliasState | None = None,
-) -> bool:
+) -> cython.bint:
     """Return whether adjacent storage slices are proven safe to join."""
 
-    def _impl() -> bool:
+    def _impl() -> cython.bint:
+        high_candidate: object
+        low_candidate: object
         proof = prove_adjacent_storage_slices(low_expr, high_expr, alias_state=alias_state)
         if not proof.ok:
             return False
@@ -102,6 +109,7 @@ def can_join_adjacent_storage_slices(
     return _impl()
 
 
+@cython.ccall
 def merge_storage_slice_domains(
     low_expr: object,
     high_expr: object,

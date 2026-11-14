@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed return effects and decoded scalar operand interpretation.
 
 Layer: Semantics.
@@ -13,6 +14,8 @@ allowed only at that boundary.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import Enum
@@ -20,6 +23,8 @@ from enum import Enum
 from capstone.x86_const import X86_OP_IMM, X86_OP_MEM, X86_OP_REG, X86_REG_DS, X86_REG_SS
 
 from inertia.frontend.x86_16.msvc_x87_interrupts import is_msvc_x87_emulation_interrupt_8616
+import dataclasses
+import operator
 
 _BINARY_OPERAND_COUNT_8616 = 2
 
@@ -67,57 +72,62 @@ class TerminalAxReturnOperandKind8616(Enum):
     DIRECT_GLOBAL = "direct_global"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class BranchTargetReturnEffect8616:
     """Typed effect extracted from one branch-target instruction."""
 
     kind: BranchTargetReturnEffectKind8616
-    dst_reg: str | None = None
+    dst_reg: object = None
     imm: int | None = None
-    op: str | None = None
+    op: object = None
     mem_disp: int | None = None
     mem_size: int | None = None
     jump_target: int | None = None
-    src_reg: str | None = None
+    src_reg: object = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalAxReturnEffect8616:
     """Typed effect extracted from one terminal AX-return instruction."""
 
     kind: TerminalAxReturnEffectKind8616
-    dst_reg: str | None = None
+    dst_reg: object = None
     rhs_kind: TerminalAxReturnOperandKind8616 | None = None
-    rhs_reg: str | None = None
+    rhs_reg: object = None
     imm: int | None = None
-    op: str | None = None
+    op: object = None
     mem_disp: int | None = None
     mem_size: int | None = None
 
 
-def _operand_kind_8616(operand: object) -> int:
+@cython.ccall
+def _operand_kind_8616(operand: object) -> cython.longlong:
     """Return a capstone operand kind from the dynamic capstone boundary."""
     # Dynamic third-party capstone boundary: operand kind is decoded by capstone wrappers.
     return int(getattr(operand, "type", -1))
 
 
+@cython.ccall
 def _is_software_interrupt_boundary_8616(
-    mnemonic: str,
-    operands: tuple[object, ...],
-) -> bool:
+    mnemonic: object,
+    operands: object,
+) -> cython.bint:
     """Classify software interrupts while excluding Microsoft x87 escapes."""
     if mnemonic not in {"int", "int1", "int3", "into"}:
         return False
     return not (
         mnemonic == "int"
         and len(operands) == 1
-        and _operand_kind_8616(operands[0]) == X86_OP_IMM
+        and operator.eq(_operand_kind_8616(operands[0]), X86_OP_IMM)
         and is_msvc_x87_emulation_interrupt_8616(int(getattr(operands[0], "imm", -1)))
     )
 
 
-def _register_name_8616(insn: object, operand: object) -> str:
+@cython.ccall
+def _register_name_8616(insn: object, operand: object) -> object:
     """Return the lower-case register name for a capstone register operand."""
+    reg: object
+    reg_name: object
     # Dynamic third-party capstone boundary: register ids are decoded by capstone wrappers.
     reg = getattr(operand, "reg", None)
     # Dynamic third-party capstone boundary: register-name rendering is provided by capstone.
@@ -127,8 +137,10 @@ def _register_name_8616(insn: object, operand: object) -> str:
     return str(reg_name(reg)).lower()
 
 
-def _memory_base_index_8616(insn: object, mem: object) -> tuple[str | None, int, int]:
+@cython.ccall
+def _memory_base_index_8616(insn: object, mem: object) -> tuple[str | None, cython.longlong, cython.longlong]:
     """Return memory base register name plus raw base/index ids from capstone."""
+    reg_name: object
     # Dynamic third-party capstone boundary: memory operand base is decoded by capstone wrappers.
     base = int(getattr(mem, "base", 0) or 0)
     # Dynamic third-party capstone boundary: memory operand index is decoded by capstone wrappers.
@@ -139,24 +151,27 @@ def _memory_base_index_8616(insn: object, mem: object) -> tuple[str | None, int,
     return base_name, base, index
 
 
-def _memory_uses_segment_8616(mem: object, expected: int) -> bool:
+@cython.ccall
+def _memory_uses_segment_8616(mem: object, expected: cython.longlong) -> cython.bint:
     """Require the implicit default or its matching explicit segment override."""
     # Dynamic Capstone boundary: absent segment means the addressing-mode default.
     return getattr(mem, "segment", 0) in {0, expected}
 
 
+@cython.ccall
 def _terminal_value_operand_8616(
     insn: object,
     operand: object,
-) -> tuple[TerminalAxReturnOperandKind8616, int | None, int | None, int | None, str | None] | None:
+) -> object:
     """Classify a register, immediate, BP-stack, or direct-global operand."""
-    if _operand_kind_8616(operand) == X86_OP_REG:
+    mem: object
+    if operator.eq(_operand_kind_8616(operand), X86_OP_REG):
         register = _register_name_8616(insn, operand)
         return (TerminalAxReturnOperandKind8616.REGISTER, None, None, None, register) if register else None
-    if _operand_kind_8616(operand) == X86_OP_IMM:
+    if operator.eq(_operand_kind_8616(operand), X86_OP_IMM):
         # Dynamic third-party capstone boundary: immediate payload is decoded by capstone.
         return TerminalAxReturnOperandKind8616.IMM, int(getattr(operand, "imm", 0) or 0), None, None, None
-    if _operand_kind_8616(operand) != X86_OP_MEM:
+    if operator.ne(_operand_kind_8616(operand), X86_OP_MEM):
         return None
     # Dynamic third-party capstone boundary: memory operand payload is decoded by capstone.
     mem = getattr(operand, "mem", None)
@@ -175,30 +190,32 @@ def _terminal_value_operand_8616(
 
 
 def _self_cleared_register_8616(
-    insn: object, mnemonic: str, operands: tuple[object, ...],
-) -> str | None:
+    insn: object, mnemonic: object, operands: object,
+) -> object:
     """Identify SUB/XOR of one register with itself, independent of flags.
 
     This classifies only the resulting register value. It does not authorize
     deleting the instruction or ignoring its flag effects.
     """
-    if mnemonic not in {"sub", "xor"} or len(operands) != _BINARY_OPERAND_COUNT_8616:
+    if mnemonic not in {"sub", "xor"} or operator.ne(len(operands), _BINARY_OPERAND_COUNT_8616):
         return None
-    if any(_operand_kind_8616(operand) != X86_OP_REG for operand in operands):
+    if any(operator.ne(_operand_kind_8616(operand), X86_OP_REG) for operand in iter(operands)):
         return None
     destination = _register_name_8616(insn, operands[0])
     source = _register_name_8616(insn, operands[1])
     return destination if destination and destination == source else None
 
 
+@cython.ccall
 def _terminal_value_arithmetic_effect_8616(
-    insn: object, mnemonic: str, operands: tuple[object, ...],
+    insn: object, mnemonic: object, operands: object,
 ) -> TerminalAxReturnEffect8616 | None:
     """Classify return arithmetic with a decoded scalar source."""
+    value_operand: object
     if (
         mnemonic in {"add", "sub", "xor"}
-        and len(operands) == _BINARY_OPERAND_COUNT_8616
-        and _operand_kind_8616(operands[0]) == X86_OP_REG
+        and operator.eq(len(operands), _BINARY_OPERAND_COUNT_8616)
+        and operator.eq(_operand_kind_8616(operands[0]), X86_OP_REG)
         and _register_name_8616(insn, operands[0]) == "al"
     ):
         value_operand = _terminal_value_operand_8616(insn, operands[1])
@@ -217,8 +234,8 @@ def _terminal_value_arithmetic_effect_8616(
         )
     if (
         mnemonic in {"add", "sub"}
-        and len(operands) == _BINARY_OPERAND_COUNT_8616
-        and _operand_kind_8616(operands[0]) == X86_OP_REG
+        and operator.eq(len(operands), _BINARY_OPERAND_COUNT_8616)
+        and operator.eq(_operand_kind_8616(operands[0]), X86_OP_REG)
         and _register_name_8616(insn, operands[0]) == "ax"
     ):
         value_operand = _terminal_value_operand_8616(insn, operands[1])

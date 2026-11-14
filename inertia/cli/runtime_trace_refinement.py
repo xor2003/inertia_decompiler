@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery metadata.
 
 Responsibility: summarize optional runtime trace refinement of already-collected IR readiness.
@@ -11,12 +12,15 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
 
 from inertia.structuring.ir_readiness import summarize_x86_16_ir_readiness
 from inertia.structuring.ir_recovery_summary import IRRecoverySource
+import dataclasses
 
 __all__ = [
     "RuntimeTraceRefinementSummary",
@@ -26,22 +30,22 @@ __all__ = [
 _SEGMENT_REGS = frozenset({"cs", "ds", "es", "ss", "fs", "gs"})
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RuntimeTraceRefinementSummary:
     """Runtime-trace refinement summary for already-collected IR readiness."""
 
     provenance: str = "none"
-    segment_register_values: dict[str, int] | None = None
-    refined_unknown_segment_count: int = 0
-    remaining_unknown_segment_count: int = 0
-    memory_read_count: int = 0
-    memory_write_count: int = 0
+    segment_register_values: object = None
+    refined_unknown_segment_count: cython.longlong = 0
+    remaining_unknown_segment_count: cython.longlong = 0
+    memory_read_count: cython.longlong = 0
+    memory_write_count: cython.longlong = 0
 
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-compatible runtime refinement payload."""
         return {
             "provenance": self.provenance,
-            "segment_register_values": dict(sorted((self.segment_register_values or {}).items())),
+            "segment_register_values": dict(sorted(tuple((self.segment_register_values or {}).items()))),
             "refined_unknown_segment_count": self.refined_unknown_segment_count,
             "remaining_unknown_segment_count": self.remaining_unknown_segment_count,
             "memory_read_count": self.memory_read_count,
@@ -49,19 +53,22 @@ class RuntimeTraceRefinementSummary:
         }
 
 
-def _value(source: IRRecoverySource, name: str, default: object = None) -> object:
+@cython.ccall
+def _value(source: IRRecoverySource, name: object, default: object = None) -> object:
     return source.get(name, default)
 
 
+@cython.ccall
 def summarize_x86_16_runtime_trace_refinement(source: IRRecoverySource) -> RuntimeTraceRefinementSummary:
     """Summarize optional runtime trace refinement without using it as proof."""
+    segment_registers: object
     trace = _value(source, "runtime_trace", None)
     if not isinstance(trace, Mapping):
         return RuntimeTraceRefinementSummary()
     segment_registers = trace.get("segment_registers", {})
     segment_values = {
         str(name).lower(): int(value)
-        for name, value in (segment_registers.items() if isinstance(segment_registers, Mapping) else ())
+        for name, value in iter((segment_registers.items() if isinstance(segment_registers, Mapping) else ()))
         if str(name).lower() in _SEGMENT_REGS and isinstance(value, int)
     }
     memory_reads = tuple(trace.get("memory_reads", ()) or ())
@@ -70,7 +77,7 @@ def summarize_x86_16_runtime_trace_refinement(source: IRRecoverySource) -> Runti
     refined = min(readiness.unknown_segment_count, len(segment_values))
     return RuntimeTraceRefinementSummary(
         provenance="runtime_trace",
-        segment_register_values=dict(sorted(segment_values.items())),
+        segment_register_values=dict(sorted(tuple(segment_values.items()))),
         refined_unknown_segment_count=refined,
         remaining_unknown_segment_count=max(0, readiness.unknown_segment_count - refined),
         memory_read_count=len(memory_reads),

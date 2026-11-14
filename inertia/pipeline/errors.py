@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Hard failure infrastructure for the Inertia pipeline.
 
 Layer: Pipeline governance.
@@ -14,6 +15,7 @@ in the pipeline with deterministic, actionable failures.
 """
 
 from __future__ import annotations
+import cython
 
 __all__ = ["PipelineHardError"]
 
@@ -33,7 +35,7 @@ class PipelineHardError(Exception):
     """
 
     def __init__(
-        self, message: str, *, layer: str = "", function_addr: int | None = None, details: object = None
+        self, message: object, *, layer: object = "", function_addr: int | None = None, details: object = None
     ) -> None:
         """Create a hard pipeline failure with layer and function context."""
         super().__init__(message)

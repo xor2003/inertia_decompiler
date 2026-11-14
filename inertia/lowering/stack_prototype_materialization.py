@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Types/Lowering.
 
 Responsibility: materialize stack-prototype facts before rewrite.
@@ -8,6 +9,7 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import cython
 
 import contextlib
 import itertools
@@ -59,6 +61,9 @@ from .wide_stack_argument_views import (
     WideStackArgumentOwner8616,
     materialize_wide_stack_argument_subviews_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "FunctionParameterWidthFact8616",
@@ -70,17 +75,19 @@ __all__ = [
 ]
 
 
+@cython.ccall
 def align_pointer_flags_to_stack_argument_widths_8616(
-    source_pointer_flags: tuple[bool, ...],
-    argument_offsets: tuple[int, ...],
-    argument_widths: Mapping[int, int],
-) -> tuple[bool, ...]:
+    source_pointer_flags: object,
+    argument_offsets: object,
+    argument_widths: Mapping[cython.longlong, cython.longlong],
+) -> object:
     """Align physical stack-word classes with logical typed arguments."""
-    if len(source_pointer_flags) == len(argument_offsets):
+    offset: object
+    if operator.eq(len(source_pointer_flags), len(argument_offsets)):
         return source_pointer_flags
     if len(source_pointer_flags) < len(argument_offsets):
         return ()
-    aligned: list[bool] = []
+    aligned: list[cython.bint] = []
     source_index = 0
     for offset in argument_offsets:
         width = max(2, argument_widths.get(offset, 2))
@@ -90,7 +97,7 @@ def align_pointer_flags_to_stack_argument_widths_8616(
             return ()
         aligned.append(any(source_pointer_flags[source_index:next_source_index]))
         source_index = next_source_index
-    return tuple(aligned) if source_index == len(source_pointer_flags) else ()
+    return tuple(aligned) if operator.eq(source_index, len(source_pointer_flags)) else ()
 
 
 class _PrototypeFunction8616(Protocol):
@@ -99,9 +106,10 @@ class _PrototypeFunction8616(Protocol):
     info: object
     prototype: object
     prototype_source: PrototypeSource
-    is_prototype_guessed: bool
+    is_prototype_guessed: cython.bint
 
 
+@cython.ccall
 def _prototype_source_8616(function: _PrototypeFunction8616) -> PrototypeSource:
     """Read provenance across legacy third-party Function test adapters."""
     try:
@@ -114,10 +122,11 @@ def _prototype_source_8616(function: _PrototypeFunction8616) -> PrototypeSource:
         )
 
 
+@cython.ccall
 def _raise_prototype_source_8616(
     function: _PrototypeFunction8616,
     source: PrototypeSource,
-) -> bool:
+) -> cython.bint:
     """Raise explicit provenance without invoking angr's legacy bool setter."""
     try:
         current = function.prototype_source
@@ -138,13 +147,13 @@ class _StackPrototypeCodegen8616(Protocol):
 
     cfunc: object
     next_ident: Callable[[str], str]
-    next_node_idx: Callable[[], int]
-    _inertia_annotated_stack_prototype_materialized_8616: int
-    _inertia_authoritative_zero_arg_prototype_8616: bool
+    next_node_idx: Callable[[], cython.longlong]
+    _inertia_annotated_stack_prototype_materialized_8616: cython.longlong
+    _inertia_authoritative_zero_arg_prototype_8616: cython.bint
     _inertia_callsite_summaries: object
     _inertia_callee_argument_width_evidence_8616: CalleeArgumentWidthEvidence8616
-    _inertia_codegen_decl_refresh_required_8616: bool
-    _inertia_function_parameter_width_facts_8616: tuple[FunctionParameterWidthFact8616, ...]
+    _inertia_codegen_decl_refresh_required_8616: cython.bint
+    _inertia_function_parameter_width_facts_8616: object
     _inertia_stack_prototype_width_stats_8616: StackPrototypeWidthStats8616
     _inertia_wide_stack_argument_width_evidence_8616: WideStackArgumentWidthEvidence8616
 
@@ -152,8 +161,8 @@ class _StackPrototypeCodegen8616(Protocol):
 class _StackPrototypeCFunction8616(Protocol):
     """C-function fields consumed after the dynamic codegen entry boundary."""
 
-    addr: int
-    arg_list: list[structured_c.CVariable]
+    addr: cython.longlong
+    arg_list: object
     functy: object
     unified_local_vars: object
     variables_in_use: object
@@ -169,7 +178,7 @@ class _ProjectArch8616(Protocol):
 class _ArchBytes8616(Protocol):
     """Target architecture field that defines the C ABI word size."""
 
-    bytes: int
+    bytes: cython.longlong
 
 
 class _KnowledgeBase8616(Protocol):
@@ -181,7 +190,7 @@ class _KnowledgeBase8616(Protocol):
 class _FunctionManager8616(Protocol):
     """angr function-manager surface required by stack prototype lowering."""
 
-    def function(self, *, addr: int, create: bool) -> object:
+    def function(self, *, addr: cython.longlong, create: cython.bint) -> object:
         """Return an existing function by address."""
         ...
 
@@ -189,7 +198,7 @@ class _FunctionManager8616(Protocol):
 class _SizedType8616(Protocol):
     """Third-party type surface used to query an architecture-sized width."""
 
-    size: int
+    size: cython.longlong
 
 
 class _ArchBindableType8616(Protocol):
@@ -203,32 +212,33 @@ class _ArchBindableType8616(Protocol):
 class _CallsiteSummary8616(Protocol):
     """Typed callsite fields consumed from the semantics layer."""
 
-    arg_widths: tuple[int, ...]
-    push_arg_sources: tuple[tuple[str, int] | None, ...]
+    arg_widths: object
+    push_arg_sources: object
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class StackPrototypeWidthStats8616:
     """Evidence accounting for exact stack-slot argument-width constraints."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, order=True, slots=True)
+@dataclasses.dataclass(frozen=True, order=True, )
 class FunctionParameterWidthFact8616:
     """Exact binary/IR-backed width of one positive BP function parameter."""
 
-    stack_offset: int
-    width_bytes: int
+    stack_offset: cython.longlong
+    width_bytes: cython.longlong
 
 
+@cython.ccall
 def _debug_parameter_width_facts_8616(
-    phase: str,
-    facts: tuple[FunctionParameterWidthFact8616, ...],
+    phase: object,
+    facts: object,
 ) -> None:
     """Log parameter-width fact lifecycle when prototype diagnostics are enabled."""
     if os.environ.get("INERTIA_DEBUG_X87_PROTO") != "1":
@@ -240,8 +250,10 @@ def _debug_parameter_width_facts_8616(
     )
 
 
+@cython.ccall
 def _function_for_codegen_8616(project: object, codegen: object) -> object | None:
     """Return metadata through the dynamic third-party angr project/codegen boundary."""
+    cfunc: object
     cfunc = cast(_StackPrototypeCodegen8616, codegen).cfunc
     if cfunc is None:
         return None
@@ -253,21 +265,24 @@ def _function_for_codegen_8616(project: object, codegen: object) -> object | Non
     return None
 
 
-def positive_stack_specs_8616(func: object) -> tuple[tuple[int, str | None], ...]:
+def positive_stack_specs_8616(func: object) -> tuple[tuple[cython.longlong, str | None], ...]:
     """Return positive stack annotations in canonical machine-BP coordinates."""
+    spec: object
+    spec_name: object
+    raw_offset: object
     info = cast(_PrototypeFunction8616, func).info
     annotations = info.get(ANNOTATION_KEY) if isinstance(info, Mapping) else None
     if not isinstance(annotations, Mapping):
         return ()
     stack_specs = stack_layout_annotation_specs_8616(annotations)
-    positive_offsets = sorted(offset for offset in stack_specs if isinstance(offset, int) and offset > 0)
+    positive_offsets = sorted(offset for offset in iter(stack_specs) if isinstance(offset, int) and offset > 0)
     if not positive_offsets:
         return ()
     normalized = positive_offsets[0] == 2
-    entries: list[tuple[int, str | None]] = []
+    entries: list[tuple[cython.longlong, str | None]] = []
     for raw_offset in positive_offsets:
         spec = stack_specs.get(raw_offset)
-        name: str | None = None
+        name: object = None
         if isinstance(spec, str):
             name = spec
         elif isinstance(spec, Mapping):
@@ -280,13 +295,16 @@ def positive_stack_specs_8616(func: object) -> tuple[tuple[int, str | None], ...
     return tuple(entries)
 
 
-def _existing_stack_cvars_by_offset_8616(codegen: object) -> dict[int, structured_c.CVariable]:
+@cython.ccall
+def _existing_stack_cvars_by_offset_8616(codegen: object) -> object:
     """Read stack C variables through the dynamic third-party angr codegen boundary."""
+    cfunc: object
+    cvar: object
     cfunc = cast(_StackPrototypeCodegen8616, codegen).cfunc
     if cfunc is None:
         return {}
     typed_cfunc = cast(_StackPrototypeCFunction8616, cfunc)
-    cvars: dict[int, structured_c.CVariable] = {}
+    cvars: dict[cython.longlong, structured_c.CVariable] = {}
     variables_in_use = typed_cfunc.variables_in_use
     if isinstance(variables_in_use, Mapping):
         for cvar in variables_in_use.values():
@@ -296,10 +314,11 @@ def _existing_stack_cvars_by_offset_8616(codegen: object) -> dict[int, structure
     return cvars
 
 
+@cython.ccall
 def _collect_stack_cvar_by_offset_8616(
     codegen: object,
     cvar: object,
-    cvars: dict[int, structured_c.CVariable],
+    cvars: object,
 ) -> None:
     """Record one stack C variable under its machine BP offset."""
     if not isinstance(cvar, structured_c.CVariable):
@@ -312,14 +331,16 @@ def _collect_stack_cvar_by_offset_8616(
         cvars.setdefault(offset, cvar)
 
 
-def _iter_existing_stack_cvars_at_offset_8616(codegen: object, offset: int) -> tuple[structured_c.CVariable, ...]:
+def _iter_existing_stack_cvars_at_offset_8616(codegen: object, offset: cython.longlong) -> tuple[structured_c.CVariable, ...]:
     """Iterate stack C variables through the dynamic third-party angr codegen boundary."""
+    cfunc: object
+    cvar: object
     cfunc = cast(_StackPrototypeCodegen8616, codegen).cfunc
     if cfunc is None:
         return ()
     typed_cfunc = cast(_StackPrototypeCFunction8616, cfunc)
     cvars: list[structured_c.CVariable] = []
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
 
     def _append(cvar: object) -> None:
         """Read stack variables through the dynamic third-party angr boundary."""
@@ -328,7 +349,7 @@ def _iter_existing_stack_cvars_at_offset_8616(codegen: object, offset: int) -> t
         variable = cvar.variable
         if (
             not isinstance(variable, SimStackVariable)
-            or machine_bp_offset_for_stack_variable_8616(codegen, variable) != offset
+            or operator.ne(machine_bp_offset_for_stack_variable_8616(codegen, variable), offset)
         ):
             return
         identity = id(cvar)
@@ -346,36 +367,41 @@ def _iter_existing_stack_cvars_at_offset_8616(codegen: object, offset: int) -> t
     return tuple(cvars)
 
 
-def _apply_arg_cvar_surface_8616(cvar: structured_c.CVariable, *, name: str, variable_type: object) -> bool:
+@cython.ccall
+def _apply_arg_cvar_surface_8616(cvar: structured_c.CVariable, *, name: object, variable_type: object) -> cython.bint:
     """Apply argument surface updates across the dynamic third-party angr C AST boundary."""
+    unified_variable: object
     changed = False
     variable = cvar.variable
-    if isinstance(variable, SimStackVariable) and variable.name != name:
+    if isinstance(variable, SimStackVariable) and operator.ne(variable.name, name):
         variable.name = name
         changed = True
-    if cvar.variable_type != variable_type:
+    if operator.ne(cvar.variable_type, variable_type):
         typing.cast(typing.Any, cvar).variable_type = variable_type
         changed = True
     unified_variable = cvar.unified_variable
-    if unified_variable is not None and unified_variable.name != name:
+    if unified_variable is not None and operator.ne(unified_variable.name, name):
         unified_variable.name = name
         changed = True
     return changed
 
 
-def _is_generated_argument_name_8616(name: object) -> bool:
+@cython.ccall
+def _is_generated_argument_name_8616(name: object) -> cython.bint:
     """Return whether a parameter name is an Inertia/angr placeholder."""
     return isinstance(name, str) and bool(
         re.fullmatch(r"(?:arg_[0-9a-fA-F]+|arg_n[0-9a-fA-F]+|a[0-9]+)", name)
     )
 
 
+@cython.ccall
 def _reconciled_positive_arg_name_8616(
     variable: SimStackVariable,
-    prototype_name: str | None,
-    bp_offset: int,
-) -> str:
+    prototype_name: object,
+    bp_offset: cython.longlong,
+) -> object:
     """Replace provisional local names once a positive BP slot is proven an argument."""
+    candidate: object
     variable_name = variable.name
     for candidate in (prototype_name, variable_name):
         if _is_usable_arg_name_8616(candidate):
@@ -383,6 +409,7 @@ def _reconciled_positive_arg_name_8616(
     return f"arg_{bp_offset:x}" if bp_offset >= 0 else f"arg_n{abs(bp_offset):x}"
 
 
+@cython.ccall
 def _is_usable_arg_name_8616(candidate: object) -> TypeGuard[str]:
     """Return whether a candidate is a concrete, non-generated argument name."""
     if not isinstance(candidate, str) or not candidate:
@@ -396,11 +423,11 @@ def _is_usable_arg_name_8616(candidate: object) -> TypeGuard[str]:
 
 
 def _exact_incoming_argument_selection_8616(
-    arg_cvars: tuple[structured_c.CVariable, ...],
-    incoming_layout: Mapping[int, int],
-    body_access_widths: Mapping[int, int],
+    arg_cvars: object,
+    incoming_layout: Mapping[cython.longlong, cython.longlong],
+    body_access_widths: Mapping[cython.longlong, cython.longlong],
     codegen: object,
-) -> tuple[int, ...] | None:
+) -> object:
     """Select codegen arguments matching one closed incoming stack layout.
 
     Surplus codegen parameters are removable only when every accepted input
@@ -408,43 +435,46 @@ def _exact_incoming_argument_selection_8616(
     by the accepted ranges. Missing owners, overlaps, or out-of-layout accesses
     refuse the projection without mutating codegen.
     """
-    layout = tuple(sorted(incoming_layout.items()))
-    if not layout or any(offset < 4 or width <= 0 for offset, width in layout):
+    _width: object
+    offset: object
+    layout = tuple(sorted(tuple(incoming_layout.items())))
+    if not layout or any(offset < 4 or width <= 0 for offset, width in iter(layout)):
         return None
-    if any(right_offset < left_offset + left_width for (left_offset, left_width), (right_offset, _) in itertools.pairwise(layout)):
+    if any(right_offset < left_offset + left_width for (left_offset, left_width), (right_offset, _) in builtins.iter(itertools.pairwise(layout))):
         return None
     cvar_offsets = tuple(
         canonical_stack_offset_8616(machine_bp_offset_for_stack_variable_8616(codegen, cvar.variable))
         if isinstance(cvar.variable, SimStackVariable)
         else None
-        for cvar in arg_cvars
+        for cvar in iter(arg_cvars)
     )
-    selected: list[int] = []
+    selected: list[cython.longlong] = []
     for offset, _width in layout:
-        matching = tuple(index for index, cvar_offset in enumerate(cvar_offsets) if cvar_offset == offset)
+        matching = tuple(index for index, cvar_offset in builtins.iter(enumerate(cvar_offsets)) if cvar_offset == offset)
         if len(matching) != 1:
             return None
         selected.append(matching[0])
-    if len(set(selected)) != len(selected):
+    if operator.ne(len(set(selected)), len(selected)):
         return None
     positive_accesses = tuple(
         (offset, width)
-        for offset, width in body_access_widths.items()
+        for offset, width in builtins.iter(body_access_widths.items())
         if offset >= 4 and width > 0
     )
     if any(
         not any(
             argument_offset <= access_offset
             and access_offset + access_width <= argument_offset + argument_width
-            for argument_offset, argument_width in layout
+            for argument_offset, argument_width in iter(layout)
         )
-        for access_offset, access_width in positive_accesses
+        for access_offset, access_width in iter(positive_accesses)
     ):
         return None
     return tuple(selected)
 
 
-def _abi_word_size_8616(arch: object | None) -> int:
+@cython.ccall
+def _abi_word_size_8616(arch: object | None) -> cython.longlong:
     """Return the target C ABI word size, independent of VEX register width."""
     try:
         width = cast(_ArchBytes8616, arch).bytes
@@ -453,12 +483,13 @@ def _abi_word_size_8616(arch: object | None) -> int:
     return width if isinstance(width, int) and width > 0 else 2
 
 
+@cython.ccall
 def _type_size_bytes_8616(
     type_: object,
     *,
     arch: object | None = None,
-    default: int = 2,
-) -> int:
+    default: cython.longlong = 2,
+) -> cython.longlong:
     """Read one x86-16 ABI type width at the dynamic angr type boundary.
 
     ``Arch86_16.bits`` is intentionally 32 for VEX compatibility, while its C
@@ -477,19 +508,22 @@ def _type_size_bytes_8616(
     return default
 
 
+@cython.ccall
 def _exact_stack_slot_width_8616(
     codegen: object,
-    offset: int,
+    offset: cython.longlong,
     *,
     arch: object,
 ) -> int | None:
     """Return the binary-derived width of an exact C stack slot."""
+    cvar: object
     cvar = _existing_stack_cvars_by_offset_8616(codegen).get(offset)
     if cvar is None or not isinstance(cvar.variable, SimStackVariable):
         return None
     return _exact_typed_cvar_width_8616(cvar, arch)
 
 
+@cython.ccall
 def _exact_typed_cvar_width_8616(cvar: structured_c.CVariable, arch: object) -> int | None:
     """Return an exact argument width from its typed stack storage.
 
@@ -517,11 +551,13 @@ def _exact_typed_cvar_width_8616(cvar: structured_c.CVariable, arch: object) -> 
     return max(1, (bits + 7) // 8)
 
 
+@cython.ccall
 def _parameter_width_fact_8616(
     codegen: object, cvar: structured_c.CVariable, arg_type: SimType, arch: object,
-    body_widths: Mapping[int, int], incoming_widths: Mapping[int, int], callsite_widths: Mapping[int, int],
+    body_widths: Mapping[cython.longlong, cython.longlong], incoming_widths: Mapping[cython.longlong, cython.longlong], callsite_widths: Mapping[cython.longlong, cython.longlong],
 ) -> FunctionParameterWidthFact8616 | None:
     """Resolve one proposed argument range without changing its storage or type."""
+    width: object
     if not isinstance(arg_type, SimType):
         return None
     variable = cvar.variable
@@ -536,9 +572,11 @@ def _parameter_width_fact_8616(
     return None if width is None else FunctionParameterWidthFact8616(offset, width)
 
 
-def _arg_stack_object_widths_8616(cfunc: object) -> dict[int, int]:
+@cython.ccall
+def _arg_stack_object_widths_8616(cfunc: object) -> object:
     """Positive-BP arg_list object extents for grouped-width reconciliation."""
-    widths: dict[int, int] = {}
+    cvar: object
+    widths: dict[cython.longlong, cython.longlong] = {}
     for cvar in tuple(cast(_StackPrototypeCFunction8616, cfunc).arg_list or ()):
         variable = cvar.variable
         if (
@@ -552,7 +590,8 @@ def _arg_stack_object_widths_8616(cfunc: object) -> dict[int, int]:
     return widths
 
 
-def _bp_source_width_8616(source: object, width: object) -> bool:
+@cython.ccall
+def _bp_source_width_8616(source: object, width: object) -> cython.bint:
     """Return whether one typed callsite source is a positive BP slice."""
     if not (
         isinstance(source, tuple)
@@ -566,12 +605,17 @@ def _bp_source_width_8616(source: object, width: object) -> bool:
 
 def _collect_summary_source_widths_8616(
     summary: _CallsiteSummary8616,
-    stack_object_widths: dict[int, int],
-    widths_by_offset: dict[int, set[int]],
-    grouped_widths_by_offset: dict[int, set[int]],
+    stack_object_widths: object,
+    widths_by_offset: object,
+    grouped_widths_by_offset: object,
 ) -> None:
     """Accumulate per-offset and fully-tiled object widths from one summary."""
-    source_slices: set[tuple[int, int]] = set()
+    source: object
+    object_offset: object
+    object_width: object
+    offset: object
+    width: object
+    source_slices: set[tuple[cython.longlong, cython.longlong]] = set()
     for source, width in zip(tuple(summary.push_arg_sources or ()), tuple(summary.arg_widths or ()), strict=False):
         if source is not None and _bp_source_width_8616(source, width):
             widths_by_offset.setdefault(source[1], set()).add(width)
@@ -580,7 +624,7 @@ def _collect_summary_source_widths_8616(
         object_end = object_offset + object_width
         contained = sorted(
             (offset, width)
-            for offset, width in source_slices
+            for offset, width in iter(source_slices)
             if object_offset <= offset and offset + width <= object_end
         )
         cursor = object_offset
@@ -592,8 +636,11 @@ def _collect_summary_source_widths_8616(
             grouped_widths_by_offset.setdefault(object_offset, set()).add(object_width)
 
 
-def _callsite_stack_arg_widths_8616(codegen: object) -> dict[int, int]:
+@cython.ccall
+def _callsite_stack_arg_widths_8616(codegen: object) -> object:
     """Return unambiguous BP-source widths from typed callsite summaries."""
+    cfunc: object
+    summary_value: object
     typed_codegen = cast(_StackPrototypeCodegen8616, codegen)
     try:
         summaries = typed_codegen._inertia_callsite_summaries
@@ -603,8 +650,8 @@ def _callsite_stack_arg_widths_8616(codegen: object) -> dict[int, int]:
         return {}
     cfunc = typed_codegen.cfunc
     stack_object_widths = _arg_stack_object_widths_8616(cfunc) if cfunc is not None else {}
-    widths_by_offset: dict[int, set[int]] = {}
-    grouped_widths_by_offset: dict[int, set[int]] = {}
+    widths_by_offset: dict[cython.longlong, set[cython.longlong]] = {}
+    grouped_widths_by_offset: dict[cython.longlong, set[cython.longlong]] = {}
     for summary_value in summaries.values():
         _collect_summary_source_widths_8616(
             cast(_CallsiteSummary8616, summary_value),
@@ -614,36 +661,40 @@ def _callsite_stack_arg_widths_8616(codegen: object) -> dict[int, int]:
         )
     widths = {
         offset: next(iter(widths))
-        for offset, widths in widths_by_offset.items()
+        for offset, widths in builtins.iter(widths_by_offset.items())
         if len(widths) == 1
     }
     widths.update(
         {
             offset: next(iter(grouped_widths))
-            for offset, grouped_widths in grouped_widths_by_offset.items()
+            for offset, grouped_widths in builtins.iter(grouped_widths_by_offset.items())
             if len(grouped_widths) == 1
         }
     )
     return widths
 
 
+@cython.ccall
 def _normalized_header_arg_widths_8616(
     codegen: object,
-    entries: tuple[tuple[int, str | None], ...],
+    entries: object,
     *,
     arch: object,
-) -> tuple[int, ...]:
+) -> tuple[cython.longlong, ...]:
     """Return widths when the entire angr header omits the return-address word."""
+    _name: object
+    cvar: object
+    expected_offset: object
     cfunc = cast(_StackPrototypeCFunction8616, cast(_StackPrototypeCodegen8616, codegen).cfunc)
     arg_list = tuple(cfunc.arg_list or ())
-    if len(arg_list) != len(entries):
+    if operator.ne(len(arg_list), len(entries)):
         return ()
-    widths: list[int] = []
+    widths: list[cython.longlong] = []
     for cvar, (expected_offset, _name) in zip(arg_list, entries, strict=False):
         variable = cvar.variable
         if (
             not isinstance(variable, SimStackVariable)
-            or variable.offset + 2 != expected_offset
+            or operator.ne(variable.offset + 2, expected_offset)
             or not isinstance(variable.size, int)
             or variable.size <= 0
         ):
@@ -653,11 +704,15 @@ def _normalized_header_arg_widths_8616(
     return tuple(widths)
 
 
+@cython.ccall
 def _annotated_stack_object_widths_8616(
-    entries: tuple[tuple[int, str | None], ...],
-) -> dict[int, int]:
+    entries: object,
+) -> object:
     """Derive exact 2/4-byte object widths from adjacent structured BP starts."""
-    widths: dict[int, int] = {}
+    _name: object
+    index: object
+    offset: object
+    widths: dict[cython.longlong, cython.longlong] = {}
     for index, (offset, _name) in enumerate(entries[:-1]):
         next_offset = entries[index + 1][0]
         distance = next_offset - offset
@@ -666,19 +721,20 @@ def _annotated_stack_object_widths_8616(
     return widths
 
 
+@cython.ccall
 def _constrain_scalar_arg_type_to_stack_slot_8616(
     arg_type: SimType,
     *,
-    slot_width: int | None,
+    slot_width: object,
     arch: object,
-) -> tuple[SimType, bool, bool]:
+) -> tuple[SimType, cython.bint, cython.bint]:
     """Materialize a scalar type from exact non-overlapping stack storage."""
     if isinstance(arg_type, SimTypePointer):
         return arg_type, False, False
     if slot_width is None:
         return arg_type, False, False
     type_width = _type_size_bytes_8616(arg_type, arch=arch)
-    if type_width == slot_width:
+    if operator.eq(type_width, slot_width):
         return arg_type, False, False
     if not isinstance(arg_type, (SimTypeChar, SimTypeInt, SimTypeLong)):
         return arg_type, False, True
@@ -691,15 +747,18 @@ def _constrain_scalar_arg_type_to_stack_slot_8616(
     return cast(SimType, _with_arch_8616(materialized, arch)), True, False
 
 
+@cython.ccall
 def _ensure_arg_cvar_8616(
     *,
     codegen: object,
-    offset: int,
-    name: str,
+    offset: cython.longlong,
+    name: object,
     variable_type: object,
-    width: int,
-) -> tuple[structured_c.CVariable | None, bool]:
+    width: cython.longlong,
+) -> tuple[structured_c.CVariable | None, cython.bint]:
     """Materialize a BP argument variable through the dynamic third-party angr codegen boundary."""
+    cfunc: object
+    cvar: object
     typed_codegen = cast(_StackPrototypeCodegen8616, codegen)
     cfunc = typed_codegen.cfunc
     if cfunc is None:
@@ -715,7 +774,7 @@ def _ensure_arg_cvar_8616(
     if (
         cvar is not None
         and isinstance(entry_sp_offset, int)
-        and cast(SimStackVariable, cvar.variable).offset != entry_sp_offset
+        and operator.ne(cast(SimStackVariable, cvar.variable).offset, entry_sp_offset)
     ):
         cvar = None
     changed = False
@@ -739,7 +798,7 @@ def _ensure_arg_cvar_8616(
             unified[stack_var] = {(cvar, variable_type)}
         changed = True
     variable = cvar.variable
-    if isinstance(variable, SimStackVariable) and variable.size != width:
+    if isinstance(variable, SimStackVariable) and operator.ne(variable.size, width):
         variable.size = width
         changed = True
     changed = _apply_arg_cvar_surface_8616(cvar, name=name, variable_type=variable_type) or changed
@@ -753,20 +812,22 @@ def _ensure_arg_cvar_8616(
     return cvar, changed
 
 
+@cython.ccall
 def _prune_stack_slots_covered_by_wide_args_8616(
     codegen: object,
-    owned_ranges: Mapping[int, int],
-    owner_variables: set[SimStackVariable],
-    retained_variables: frozenset[SimStackVariable] = frozenset(),
-) -> bool:
+    owned_ranges: Mapping[cython.longlong, cython.longlong],
+    owner_variables: object,
+    retained_variables: object = frozenset(),
+) -> cython.bint:
     """Prune stack slots through the dynamic third-party angr codegen boundary."""
+    cfunc: object
     cfunc = cast(_StackPrototypeCodegen8616, codegen).cfunc
     if cfunc is None:
         return False
     typed_cfunc = cast(_StackPrototypeCFunction8616, cfunc)
     covered_offsets = {
         covered
-        for base_offset, width in owned_ranges.items()
+        for base_offset, width in builtins.iter(owned_ranges.items())
         if width > 2
         for covered in range(base_offset + 2, base_offset + width, 2)
     }
@@ -789,14 +850,16 @@ def _prune_stack_slots_covered_by_wide_args_8616(
     return changed
 
 
+@cython.ccall
 def _prune_covered_stack_variables_8616(
     codegen: object,
     variables: object,
-    owner_variables: set[SimStackVariable],
-    retained_variables: frozenset[SimStackVariable],
-    covered_offsets: set[int],
-) -> bool:
+    owner_variables: object,
+    retained_variables: object,
+    covered_offsets: object,
+) -> cython.bint:
     """Drop non-owned stack variables covered by proven wide-argument ranges."""
+    variable: object
     if not isinstance(variables, dict):
         return False
     changed = False
@@ -809,6 +872,7 @@ def _prune_covered_stack_variables_8616(
     return changed
 
 
+@cython.ccall
 def _with_arch_8616(type_: object, arch: object) -> object:
     """Attach architecture through the dynamic third-party angr type boundary."""
     with contextlib.suppress(Exception):
@@ -816,25 +880,27 @@ def _with_arch_8616(type_: object, arch: object) -> object:
     return type_
 
 
-def _prototype_equivalent_8616(left: object, right: object) -> bool:
+@cython.ccall
+def _prototype_equivalent_8616(left: object, right: object) -> cython.bint:
     """Compare prototypes through the dynamic third-party angr type boundary."""
     if left is right:
         return True
     if left is None or right is None:
         return False
     with contextlib.suppress(Exception):
-        return bool(left == right)
+        return bool(operator.eq(left, right))
     return False
 
 
+@cython.ccall
 def materialize_exact_trailing_stack_argument_8616(
     project: object,
     codegen: object,
     *,
     candidate: structured_c.CVariable,
-    stack_offset: int,
+    stack_offset: cython.longlong,
     argument_type: SimType,
-    width: int,
+    width: cython.longlong,
 ) -> structured_c.CVariable | None:
     """Append one evidence-proven contiguous trailing BP argument.
 
@@ -845,6 +911,9 @@ def materialize_exact_trailing_stack_argument_8616(
     malformed interfaces, and authoritative zero-argument contracts are
     refused without mutation.
     """
+    arg_names: object
+    gate: object
+    sibling: object
     typed_codegen = cast(_StackPrototypeCodegen8616, codegen)
     gate = _trailing_stack_arg_gate_8616(typed_codegen, candidate, stack_offset, width)
     if gate is None:
@@ -867,18 +936,21 @@ def materialize_exact_trailing_stack_argument_8616(
         typed_cfunc,
         prototype,
         argument_type,
-        (*arg_names, name),
+        tuple(arg_names) + (name,),
     )
     return candidate
 
 
+@cython.ccall
 def _trailing_stack_arg_gate_8616(
     typed_codegen: _StackPrototypeCodegen8616,
     candidate: structured_c.CVariable,
-    stack_offset: int,
-    width: int,
-) -> tuple[_StackPrototypeCFunction8616, SimTypeFunction, tuple[SimType, ...], tuple[structured_c.CVariable, ...], SimStackVariable] | None:
+    stack_offset: cython.longlong,
+    width: cython.longlong,
+) -> object:
     """Validate the contiguous trailing-slot contract; return context or refuse."""
+    cfunc: object
+    existing: object
     cfunc = typed_codegen.cfunc
     if cfunc is None:
         return None
@@ -893,12 +965,12 @@ def _trailing_stack_arg_gate_8616(
         return None
     prototype_args = tuple(prototype.args or ())
     existing_args = tuple(typed_cfunc.arg_list or ())
-    if len(existing_args) != len(prototype_args):
+    if operator.ne(len(existing_args), len(prototype_args)):
         return None
     candidate_variable = candidate.variable
     if (
         not isinstance(candidate_variable, SimStackVariable)
-        or candidate_variable.offset != stack_offset
+        or operator.ne(candidate_variable.offset, stack_offset)
         or stack_offset < 4
     ):
         return None
@@ -910,7 +982,7 @@ def _trailing_stack_arg_gate_8616(
             or not isinstance(variable.offset, int)
             or not isinstance(variable.size, int)
             or variable.size <= 0
-            or variable.offset != expected_offset
+            or operator.ne(variable.offset, expected_offset)
         ):
             return None
         expected_offset += max(2, variable.size)
@@ -919,13 +991,15 @@ def _trailing_stack_arg_gate_8616(
     return typed_cfunc, prototype, prototype_args, existing_args, candidate_variable
 
 
+@cython.ccall
 def _trailing_arg_names_8616(
     prototype: SimTypeFunction,
-    existing_args: tuple[structured_c.CVariable, ...],
-) -> tuple[str, ...] | None:
+    existing_args: object,
+) -> object:
     """Prototype arg names, recovered from variable names when the arity drifts."""
+    existing: object
     arg_names = tuple(prototype.arg_names or ())
-    if len(arg_names) == len(existing_args):
+    if operator.eq(len(arg_names), len(existing_args)):
         return arg_names
     recovered_names: list[str] = []
     for existing in existing_args:
@@ -936,18 +1010,20 @@ def _trailing_arg_names_8616(
     return tuple(recovered_names)
 
 
+@cython.ccall
 def _publish_trailing_arg_prototype_8616(
     project: object,
     typed_codegen: _StackPrototypeCodegen8616,
     typed_cfunc: _StackPrototypeCFunction8616,
     prototype: SimTypeFunction,
     argument_type: SimType,
-    arg_names: tuple[str, ...],
+    arg_names: object,
 ) -> None:
     """Publish the extended prototype to the cfunc and owning angr function."""
+    func: object
     arch = cast(_ProjectArch8616, project).arch
     new_prototype = SimTypeFunction(
-        [*tuple(prototype.args or ()), argument_type],
+        list(tuple(prototype.args or ())) + [argument_type],
         prototype.returnty,
         arg_names=arg_names,
         variadic=prototype.variadic,
@@ -960,14 +1036,17 @@ def _publish_trailing_arg_prototype_8616(
     typed_codegen._inertia_codegen_decl_refresh_required_8616 = True
 
 
+@cython.ccall
 def _materialize_annotated_zero_arg_prototype_8616(
     *,
     project: object,
     codegen: object,
     func: object,
     prototype: SimTypeFunction,
-) -> bool:
+) -> cython.bint:
     """Materialize an explicit zero-argument annotation as the authoritative typed contract."""
+    arch: object
+    cfunc: object
     typed_codegen = cast(_StackPrototypeCodegen8616, codegen)
     cfunc = typed_codegen.cfunc
     if cfunc is None:
@@ -994,25 +1073,27 @@ def _materialize_annotated_zero_arg_prototype_8616(
     return changed
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _ReconcileEvidence8616:
     """Typed width evidence collected before per-argument reconciliation."""
 
-    callsite_widths: dict[int, int]
-    incoming_widths: dict[int, int]
-    body_widths: dict[int, int]
-    body_access_widths: Mapping[int, int]
+    callsite_widths: object
+    incoming_widths: object
+    body_widths: object
+    body_access_widths: Mapping[cython.longlong, cython.longlong]
     wide_evidence: WideStackArgumentWidthEvidence8616
     incoming_width_evidence: CalleeArgumentWidthEvidence8616
 
 
+@cython.ccall
 def _reconcile_width_evidence_8616(
     project: object,
     codegen: object,
     typed_cfunc: _StackPrototypeCFunction8616,
-    func: object | None,
+    func: object,
 ) -> _ReconcileEvidence8616:
     """Collect callsite, incoming, wide, and body width evidence once."""
+    accepted_layout: object
     callsite_widths = _callsite_stack_arg_widths_8616(codegen)
     incoming_width_evidence = (
         CalleeArgumentWidthEvidence8616(-1, CalleeArgumentWidthVerdict8616.UNKNOWN)
@@ -1042,43 +1123,45 @@ def _reconcile_width_evidence_8616(
     )
 
 
+@cython.ccall
 def _conflicting_body_offsets_8616(
-    body_widths: Mapping[int, int],
-    incoming_widths: Mapping[int, int],
-    callsite_widths: Mapping[int, int],
-) -> set[int]:
+    body_widths: Mapping[cython.longlong, cython.longlong],
+    incoming_widths: Mapping[cython.longlong, cython.longlong],
+    callsite_widths: Mapping[cython.longlong, cython.longlong],
+) -> set[cython.longlong]:
     """Body-decoded widths that contradict incoming or callsite evidence."""
     return {
         offset
-        for offset, width in body_widths.items()
-        if (offset in incoming_widths and incoming_widths[offset] != width)
+        for offset, width in builtins.iter(body_widths.items())
+        if (offset in incoming_widths and operator.ne(incoming_widths[offset], width))
         or (
             not incoming_widths
             and offset in callsite_widths
-            and callsite_widths[offset] != width
+            and operator.ne(callsite_widths[offset], width)
         )
     }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _ReconcileArgResult8616:
     """Per-argument reconciliation outcome shared back to the caller."""
 
     reconciled: SimType
-    name: str
-    failed: bool
+    name: object
+    failed: cython.bint
     wide_offset: int | None
-    changed: bool
-    debug_row: tuple[object, ...]
+    changed: cython.bint
+    debug_row: object
 
 
+@cython.ccall
 def _reconcile_one_arg_8616(
     codegen: object,
     arg_type: SimType,
     cvar: structured_c.CVariable,
     fact: FunctionParameterWidthFact8616,
-    prototype_name: str | None,
-    body_widths: Mapping[int, int],
+    prototype_name: object,
+    body_widths: Mapping[cython.longlong, cython.longlong],
     arch: object,
 ) -> _ReconcileArgResult8616:
     """Reconcile one argument surface, type, size, and coordinate binding."""
@@ -1102,7 +1185,7 @@ def _reconcile_one_arg_8616(
     )
     wide_offset = (
         canonical_offset
-        if not failed and canonical_offset in body_widths and exact_width == body_widths[canonical_offset]
+        if not failed and canonical_offset in body_widths and operator.eq(exact_width, body_widths[canonical_offset])
         else None
     )
     reconciled_width = _type_size_bytes_8616(reconciled, arch=arch)
@@ -1110,7 +1193,7 @@ def _reconcile_one_arg_8616(
         materialized
         or isinstance(reconciled, SimTypePointer)
         or reconciled_width == exact_width
-    ) and cvar.variable_type != reconciled:
+    ) and operator.ne(cvar.variable_type, reconciled):
         typing.cast(typing.Any, cvar).variable_type = reconciled
         changed = True
     debug_row = (
@@ -1125,7 +1208,7 @@ def _reconcile_one_arg_8616(
     if (
         not failed
         and reconciled_width == exact_width
-        and variable.size != exact_width
+        and operator.ne(variable.size, exact_width)
     ):
         variable.size = exact_width
         changed = True
@@ -1139,13 +1222,14 @@ def _reconcile_one_arg_8616(
 def _select_incoming_args_8616(
     typed_codegen: _StackPrototypeCodegen8616,
     codegen: object,
-    args: tuple[SimType, ...],
-    arg_cvars: tuple[structured_c.CVariable, ...],
-    prototype_names: tuple[str | None, ...],
+    args: object,
+    arg_cvars: object,
+    prototype_names: object,
     evidence: _ReconcileEvidence8616,
-    original_arg_count: int,
-) -> tuple[tuple[SimType, ...], tuple[structured_c.CVariable, ...], tuple[str | None, ...], int] | None:
+    original_arg_count: cython.longlong,
+) -> object:
     """Prune args to the closed incoming layout; refuse ambiguous selections."""
+    selection: object
     if not evidence.incoming_widths:
         return args, arg_cvars, prototype_names, 0
     selection = _exact_incoming_argument_selection_8616(
@@ -1163,25 +1247,29 @@ def _select_incoming_args_8616(
         )
         return None
     return (
-        tuple(args[index] for index in selection),
-        tuple(arg_cvars[index] for index in selection),
+        tuple(args[index] for index in iter(selection)),
+        tuple(arg_cvars[index] for index in iter(selection)),
         tuple(
             prototype_names[index] if index < len(prototype_names) else None
-            for index in selection
+            for index in iter(selection)
         ),
         original_arg_count - len(selection),
     )
 
 
+@cython.ccall
 def _reconcile_width_facts_8616(
     codegen: object,
     typed_codegen: _StackPrototypeCodegen8616,
-    args: tuple[SimType, ...],
-    arg_cvars: tuple[structured_c.CVariable, ...],
+    args: object,
+    arg_cvars: object,
     arch: object,
     evidence: _ReconcileEvidence8616,
-) -> list[FunctionParameterWidthFact8616] | None:
+) -> object:
     """Compute per-argument width facts; refuse conflicting layouts."""
+    fact: object
+    arg_type: object
+    cvar: object
     conflicting_offsets = _conflicting_body_offsets_8616(
         evidence.body_widths, evidence.incoming_widths, evidence.callsite_widths
     )
@@ -1201,37 +1289,42 @@ def _reconcile_width_facts_8616(
         if fact is None:
             return None
         width_facts.append(fact)
-    proposed_layout = {fact.stack_offset: fact.width_bytes for fact in width_facts}
-    if _exact_incoming_argument_selection_8616(
+    proposed_layout = {fact.stack_offset: fact.width_bytes for fact in iter(width_facts)}
+    if operator.ne(_exact_incoming_argument_selection_8616(
         arg_cvars, proposed_layout, evidence.body_access_widths, codegen,
-    ) != tuple(range(len(arg_cvars))):
+    ), tuple(range(len(arg_cvars)))):
         return None
     return width_facts
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _ReconciledArgs8616:
     """Accumulated per-argument reconciliation results."""
 
-    reconciled_args: list[SimType]
-    reconciled_names: list[str]
-    debug_rows: list[tuple[object, ...]]
-    materialized_wide_offsets: set[int]
-    classified_count: int
-    failure_count: int
-    changed: bool
+    reconciled_args: object
+    reconciled_names: object
+    debug_rows: object
+    materialized_wide_offsets: object
+    classified_count: cython.longlong
+    failure_count: cython.longlong
+    changed: cython.bint
 
 
+@cython.ccall
 def _reconcile_args_8616(
     codegen: object,
-    args: tuple[SimType, ...],
-    arg_cvars: tuple[structured_c.CVariable, ...],
-    width_facts: list[FunctionParameterWidthFact8616],
-    prototype_names: tuple[str | None, ...],
-    body_widths: Mapping[int, int],
+    args: object,
+    arg_cvars: object,
+    width_facts: object,
+    prototype_names: object,
+    body_widths: Mapping[cython.longlong, cython.longlong],
     arch: object,
 ) -> _ReconciledArgs8616:
     """Reconcile every argument surface and collect stats/debug rows."""
+    arg_type: object
+    cvar: object
+    fact: object
+    index: object
     state = _ReconciledArgs8616([], [], [], set(), 0, 0, False)
     for index, (arg_type, cvar, fact) in enumerate(zip(args, arg_cvars, width_facts, strict=True)):
         result = _reconcile_one_arg_8616(
@@ -1254,13 +1347,18 @@ def _reconcile_args_8616(
     return state
 
 
-def reconcile_exact_stack_argument_prototype_8616(project: object, codegen: object) -> bool:
+@cython.ccall
+def reconcile_exact_stack_argument_prototype_8616(project: object, codegen: object) -> cython.bint:
     """Reconcile a prototype with exact typed argument C variables.
 
     Resolve native entry-SP variables through the authoritative BP registry.
     Only constrain numeric types when every argument has one exact,
     non-overlapping stack slot; unresolved or unsupported shapes are refused.
     """
+    cfunc: object
+    selected: object
+    storage_resolution: object
+    width_facts: object
     typed_codegen = cast(_StackPrototypeCodegen8616, codegen)
     cfunc = typed_codegen.cfunc
     if cfunc is None:
@@ -1271,7 +1369,7 @@ def reconcile_exact_stack_argument_prototype_8616(project: object, codegen: obje
         return False
     args = tuple(prototype.args or ())
     arg_cvars = tuple(typed_cfunc.arg_list or ())
-    if not args or len(args) != len(arg_cvars):
+    if not args or operator.ne(len(args), len(arg_cvars)):
         return False
     original_arg_count = len(arg_cvars)
     prototype_names = tuple(prototype.arg_names or ())
@@ -1353,16 +1451,16 @@ def reconcile_exact_stack_argument_prototype_8616(project: object, codegen: obje
 def _publish_reconciled_prototype_8616(
     typed_codegen: _StackPrototypeCodegen8616,
     typed_cfunc: _StackPrototypeCFunction8616,
-    func: object | None,
+    func: object,
     prototype: SimTypeFunction,
-    arg_cvars: tuple[object, ...],
-    width_facts: list[FunctionParameterWidthFact8616],
-    reconciled_args: list[SimType],
-    reconciled_names: list[str],
+    arg_cvars: object,
+    width_facts: object,
+    reconciled_args: object,
+    reconciled_names: object,
     arch: object,
-    pruned_arg_count: int,
-    changed: bool,
-) -> bool:
+    pruned_arg_count: cython.longlong,
+    changed: cython.bint,
+) -> cython.bint:
     """Publish the reconciled prototype, wide subviews, and pruned arg list."""
     if pruned_arg_count:
         typed_cfunc.arg_list = list(arg_cvars)
@@ -1381,7 +1479,7 @@ def _publish_reconciled_prototype_8616(
     )
     if (
         not _prototype_equivalent_8616(typed_cfunc.functy, new_prototype)
-        or cfunc_names != tuple(reconciled_names)
+        or operator.ne(cfunc_names, tuple(reconciled_names))
     ):
         typed_cfunc.functy = new_prototype
         changed = True
@@ -1394,7 +1492,7 @@ def _publish_reconciled_prototype_8616(
         )
         if (
             not _prototype_equivalent_8616(typed_func.prototype, new_prototype)
-            or function_names != tuple(reconciled_names)
+            or operator.ne(function_names, tuple(reconciled_names))
         ):
             typed_func.prototype = new_prototype
             changed = True
@@ -1405,7 +1503,7 @@ def _publish_reconciled_prototype_8616(
             changed = True
     subview_owners = tuple(
         WideStackArgumentOwner8616(fact.stack_offset, fact.width_bytes, cvar)
-        for cvar, fact in zip(arg_cvars, width_facts, strict=True)
+        for cvar, fact in builtins.iter(zip(arg_cvars, width_facts, strict=True))
     )
     changed = materialize_wide_stack_argument_subviews_8616(typed_codegen, subview_owners).changed or changed
     if changed:
@@ -1413,7 +1511,8 @@ def _publish_reconciled_prototype_8616(
     return changed
 
 
-def reconcile_callsite_interface_declarations_8616(project: object, codegen: object) -> bool:
+@cython.ccall
+def reconcile_callsite_interface_declarations_8616(project: object, codegen: object) -> cython.bint:
     """Run the owned publication, prototype, helper, and declaration lifecycle."""
     from .interprocedural_storage_pipeline import publish_and_reconcile_callsite_interfaces_8616
 
@@ -1424,8 +1523,8 @@ def materialize_annotated_stack_prototype_8616(
     project: object,
     codegen: object,
     *,
-    fallback_to_positive_bp: bool = True,
-) -> bool:
+    fallback_to_positive_bp: cython.bint = True,
+) -> cython.bint:
     """Materialize positive BP stack annotations as typed codegen arguments.
 
     Structured annotations take precedence. Without them, optionally replay
@@ -1434,6 +1533,8 @@ def materialize_annotated_stack_prototype_8616(
     third-party angr boundary; owned Inertia state is written via typed protocol
     casts.
     """
+    cfunc: object
+    func: object
     typed_codegen = cast(_StackPrototypeCodegen8616, codegen)
     cfunc = typed_codegen.cfunc
     if cfunc is None:
@@ -1481,7 +1582,7 @@ def materialize_annotated_stack_prototype_8616(
         current_surfaces_by_offset=current_surfaces_by_offset,
         current_args=tuple(current_args),
         current_arg_names=current_arg_names,
-        annotated_names=tuple(name for _offset, name in entries),
+        annotated_names=tuple(name for _offset, name in iter(entries)),
         normalized_header_widths=_normalized_header_arg_widths_8616(codegen, entries, arch=arch),
         annotated_object_widths=_annotated_stack_object_widths_8616(entries),
     )
@@ -1498,10 +1599,12 @@ def materialize_annotated_stack_prototype_8616(
     )
 
 
+@cython.ccall
 def _current_prototype_surface_8616(
     current_proto: object,
-) -> tuple[list[SimType], tuple[str | None, ...], SimType, bool]:
+) -> tuple[list[SimType], tuple[str | None, ...], SimType, cython.bint]:
     """Decompose the current prototype surface, defaulting when absent."""
+    return_type: object
     if isinstance(current_proto, SimTypeFunction):
         current_args = list(current_proto.args or ())
         current_arg_names = tuple(current_proto.arg_names or ())
@@ -1517,30 +1620,34 @@ def _current_prototype_surface_8616(
     return current_args, current_arg_names, return_type, variadic
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _AnnotatedMaterialization8616:
     """Accumulated annotated-entry materialization results."""
 
-    arg_cvars: list[structured_c.CVariable]
-    arg_types: list[SimType]
-    arg_names: list[str]
-    owned_ranges: dict[int, int]
-    owner_variables: set[SimStackVariable]
-    wide_argument_owners: list[WideStackArgumentOwner8616]
+    arg_cvars: object
+    arg_types: object
+    arg_names: object
+    owned_ranges: object
+    owner_variables: object
+    wide_argument_owners: object
     width_stats: StackPrototypeWidthStats8616
-    width_facts: list[FunctionParameterWidthFact8616]
-    changed: bool
+    width_facts: object
+    changed: cython.bint
 
 
+@cython.ccall
 def _materialize_annotated_entries_8616(
     ctx: _AnnotatedEntryCtx8616,
-    entries: tuple[tuple[int, str | None], ...],
+    entries: object,
 ) -> _AnnotatedMaterialization8616:
     """Materialize all annotated entries, accumulating stats and evidence."""
+    index: object
+    maybe_name: object
+    offset: object
     arg_cvars: list[structured_c.CVariable] = []
     arg_types: list[SimType] = []
     arg_names: list[str] = []
-    owned_ranges: dict[int, int] = {}
+    owned_ranges: dict[cython.longlong, cython.longlong] = {}
     owner_variables: set[SimStackVariable] = set()
     wide_argument_owners: list[WideStackArgumentOwner8616] = []
     width_stats = StackPrototypeWidthStats8616()
@@ -1580,6 +1687,7 @@ def _materialize_annotated_entries_8616(
     )
 
 
+@cython.ccall
 def _commit_annotated_materialization_8616(
     typed_codegen: _StackPrototypeCodegen8616,
     typed_cfunc: _StackPrototypeCFunction8616,
@@ -1587,9 +1695,9 @@ def _commit_annotated_materialization_8616(
     codegen: object,
     outcome: _AnnotatedMaterialization8616,
     return_type: object,
-    variadic: bool,
+    variadic: cython.bint,
     arch: object,
-) -> bool:
+) -> cython.bint:
     """Publish stats, subviews, pruning, and the annotated prototype."""
     changed = outcome.changed
     typed_codegen._inertia_stack_prototype_width_stats_8616 = outcome.width_stats
@@ -1623,14 +1731,17 @@ def _commit_annotated_materialization_8616(
     )
 
 
+@cython.ccall
 def _current_arg_surfaces_8616(
     codegen: object,
     typed_cfunc: _StackPrototypeCFunction8616,
-    current_args: list[SimType],
-    current_arg_names: tuple[str | None, ...],
-) -> dict[int, tuple[SimType, str | None]]:
+    current_args: object,
+    current_arg_names: object,
+) -> object:
     """Map existing positive-BP args to their current type/name surfaces."""
-    surfaces: dict[int, tuple[SimType, str | None]] = {}
+    current_cvar: object
+    physical_index: object
+    surfaces: dict[cython.longlong, tuple[SimType, str | None]] = {}
     for physical_index, current_cvar in enumerate(typed_cfunc.arg_list):
         if physical_index >= len(current_args):
             break
@@ -1646,44 +1757,45 @@ def _current_arg_surfaces_8616(
     return surfaces
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _AnnotatedEntryCtx8616:
     """Read-only annotation context shared by per-entry materialization."""
 
     codegen: _StackPrototypeCodegen8616
     arch: _ArchBytes8616 | None
-    current_surfaces_by_offset: Mapping[int, tuple[SimType, str | None]]
-    current_args: tuple[SimType, ...]
-    current_arg_names: tuple[str | None, ...]
-    annotated_names: tuple[str | None, ...]
-    normalized_header_widths: tuple[int, ...]
-    annotated_object_widths: Mapping[int, int]
+    current_surfaces_by_offset: Mapping[cython.longlong, tuple[SimType, str | None]]
+    current_args: object
+    current_arg_names: object
+    annotated_names: object
+    normalized_header_widths: object
+    annotated_object_widths: Mapping[cython.longlong, cython.longlong]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _AnnotatedEntryResult8616:
     """One materialized annotated entry shared back to the materializer."""
 
     cvar: structured_c.CVariable | None
     variable: SimVariable | None
     arg_type: SimType
-    name: str
-    width: int
-    changed: bool
-    raw_width_fact: int
-    normalized_width_fact: int
-    width_classified: bool
-    width_failure: bool
+    name: object
+    width: cython.longlong
+    changed: cython.bint
+    raw_width_fact: cython.longlong
+    normalized_width_fact: cython.longlong
+    width_classified: cython.bint
+    width_failure: cython.bint
     width_fact: FunctionParameterWidthFact8616 | None
 
 
+@cython.ccall
 def _annotated_entry_name_8616(
     ctx: _AnnotatedEntryCtx8616,
-    index: int,
-    offset: int,
+    index: cython.longlong,
+    offset: cython.longlong,
     maybe_name: object,
-    current_surface: tuple[SimType, str | None] | None,
-) -> str:
+    current_surface: object,
+) -> object:
     """Pick the proven prototype, annotated, or generated argument name."""
     prototype_name = (
         current_surface[1]
@@ -1700,7 +1812,8 @@ def _annotated_entry_name_8616(
     return f"arg_{offset:x}"
 
 
-def _is_usable_annotated_name_8616(candidate: object) -> bool:
+@cython.ccall
+def _is_usable_annotated_name_8616(candidate: object) -> cython.bint:
     """Return whether an annotated name is a concrete C identifier."""
     if not isinstance(candidate, str) or not candidate:
         return False
@@ -1713,10 +1826,10 @@ def _is_usable_annotated_name_8616(candidate: object) -> bool:
 
 def _annotated_entry_arg_type_8616(
     ctx: _AnnotatedEntryCtx8616,
-    index: int,
-    offset: int,
+    index: cython.longlong,
+    offset: cython.longlong,
     slot_width: int | None,
-    current_surface: tuple[SimType, str | None] | None,
+    current_surface: object,
 ) -> SimType:
     """Resolve the annotated entry type, honoring exact existing surfaces."""
     arg_type = (
@@ -1730,10 +1843,10 @@ def _annotated_entry_arg_type_8616(
         arg_type = SimTypeShort(False)
     exact_existing_types = tuple(
         cvar.variable_type
-        for cvar in _iter_existing_stack_cvars_at_offset_8616(ctx.codegen, offset)
+        for cvar in builtins.iter(_iter_existing_stack_cvars_at_offset_8616(ctx.codegen, offset))
         if isinstance(cvar.variable_type, SimType)
         and (
-            _exact_typed_cvar_width_8616(cvar, ctx.arch) == slot_width
+            operator.eq(_exact_typed_cvar_width_8616(cvar, ctx.arch), slot_width)
             or (
                 isinstance(cvar.variable_type, SimTypeChar)
                 and isinstance(slot_width, int)
@@ -1741,21 +1854,27 @@ def _annotated_entry_arg_type_8616(
             )
         )
     )
-    if _type_size_bytes_8616(arg_type, arch=ctx.arch) != slot_width and exact_existing_types and all(
-        candidate == exact_existing_types[0] for candidate in exact_existing_types[1:]
+    if operator.ne(_type_size_bytes_8616(arg_type, arch=ctx.arch), slot_width) and exact_existing_types and all(
+        operator.eq(candidate, exact_existing_types[0]) for candidate in iter(exact_existing_types[1:])
     ):
         arg_type = exact_existing_types[0]
     return arg_type
 
 
+@cython.ccall
 def _materialize_annotated_entry_8616(
     ctx: _AnnotatedEntryCtx8616,
-    index: int,
-    offset: int,
+    index: cython.longlong,
+    offset: cython.longlong,
     maybe_name: object,
-    arg_names: list[str],
+    arg_names: object,
 ) -> _AnnotatedEntryResult8616:
     """Materialize one annotated entry's name, type, width fact, and cvar."""
+    current_surface: object
+    cvar: object
+    slot_width: object
+    value_width: object
+    sibling_cvar: object
     current_surface = ctx.current_surfaces_by_offset.get(offset)
     name = _annotated_entry_name_8616(ctx, index, offset, maybe_name, current_surface)
     slot_width = (
@@ -1830,17 +1949,17 @@ def _publish_annotated_prototype_8616(
     typed_codegen: _StackPrototypeCodegen8616,
     typed_cfunc: _StackPrototypeCFunction8616,
     typed_func: _PrototypeFunction8616,
-    arg_cvars: list[structured_c.CVariable],
-    arg_types: list[SimType],
-    arg_names: list[str],
+    arg_cvars: object,
+    arg_types: object,
+    arg_names: object,
     return_type: object,
-    variadic: bool,
+    variadic: cython.bint,
     arch: object,
-    changed: bool,
-) -> bool:
+    changed: cython.bint,
+) -> cython.bint:
     """Publish the annotated arg list and prototype across angr boundaries."""
     existing_args = list(typed_cfunc.arg_list or ())
-    if len(existing_args) != len(arg_cvars) or any(existing is not desired for existing, desired in zip(existing_args, arg_cvars, strict=False)):
+    if operator.ne(len(existing_args), len(arg_cvars)) or any(existing is not desired for existing, desired in builtins.iter(zip(existing_args, arg_cvars, strict=False))):
         typed_cfunc.arg_list = arg_cvars
         changed = True
     new_proto = SimTypeFunction(arg_types, return_type, arg_names=arg_names, variadic=variadic)
@@ -1851,7 +1970,7 @@ def _publish_annotated_prototype_8616(
         if isinstance(typed_func.prototype, SimTypeFunction)
         else ()
     )
-    if not _prototype_equivalent_8616(typed_func.prototype, new_proto) or function_names != tuple(arg_names):
+    if not _prototype_equivalent_8616(typed_func.prototype, new_proto) or operator.ne(function_names, tuple(arg_names)):
         typed_func.prototype = new_proto
         _raise_prototype_source_8616(
             typed_func,
@@ -1863,7 +1982,7 @@ def _publish_annotated_prototype_8616(
         if isinstance(typed_cfunc.functy, SimTypeFunction)
         else ()
     )
-    if not _prototype_equivalent_8616(typed_cfunc.functy, new_proto) or cfunc_names != tuple(arg_names):
+    if not _prototype_equivalent_8616(typed_cfunc.functy, new_proto) or operator.ne(cfunc_names, tuple(arg_names)):
         typed_cfunc.functy = new_proto
         changed = True
     try:

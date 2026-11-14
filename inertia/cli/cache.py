@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Content-addressed cache keys for decompiler recovery artifacts.
 
 Layer: CLI/fallback/reporting.
@@ -5,6 +6,8 @@ Responsibility: derive cache keys from binary, sidecar, and implementation finge
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import hashlib
 import json
@@ -47,10 +50,12 @@ from inertia.cli.cache_source_manifest import (
     RecoveryCacheSourceScope8616,
 )
 from inertia.cli.external_unpacker_cache import deark_cache_identity as deark_cache_identity
+import operator
+import builtins
 
 _ROOT = Path(__file__).resolve().parents[2]
 
-DECOMPILATION_CACHE_SCHEMA: int = 9
+DECOMPILATION_CACHE_SCHEMA: cython.longlong = 9
 DECOMPILATION_CACHE_DIR: Path = _ROOT / ".inertia_decomp_cache"
 _CACHE_NON_SEMANTIC_ENVIRONMENT_NAMES: frozenset[str] = frozenset(
     {
@@ -166,6 +171,7 @@ BASE_DECOMPILATION_CACHE_SOURCE_FILES: tuple[Path, ...] = (
 )
 
 
+@cython.ccall
 def _production_decompiler_source_files() -> tuple[Path, ...]:
     """Return every production Python module that can affect decompilation."""
     assert inertia.__file__ is not None
@@ -173,46 +179,52 @@ def _production_decompiler_source_files() -> tuple[Path, ...]:
         Path(inertia.__file__).resolve().parent,
     )
     discovered = {
-        path for package_root in package_roots for path in package_root.rglob("*.py") if "__pycache__" not in path.parts
+        path for package_root in iter(package_roots) for path in builtins.iter(package_root.rglob("*.py")) if "__pycache__" not in path.parts
     }
     discovered.add(_ROOT / "decompile.py")
     return tuple(sorted(discovered))
 
 
-_PRODUCTION_DECOMPILER_SOURCE_FILES: tuple[Path, ...] = _production_decompiler_source_files()
+_PRODUCTION_DECOMPILER_SOURCE_FILES: object = _production_decompiler_source_files()
 RECOVERY_CACHE_SOURCE_FILES: tuple[Path, ...] = tuple(
-    sorted({*BASE_RECOVERY_CACHE_SOURCE_FILES, *_PRODUCTION_DECOMPILER_SOURCE_FILES})
+    sorted(set(BASE_RECOVERY_CACHE_SOURCE_FILES) | set(_PRODUCTION_DECOMPILER_SOURCE_FILES))
 )
 DECOMPILATION_CACHE_SOURCE_FILES: tuple[Path, ...] = tuple(
-    sorted({*BASE_DECOMPILATION_CACHE_SOURCE_FILES, *_PRODUCTION_DECOMPILER_SOURCE_FILES})
+    sorted(set(BASE_DECOMPILATION_CACHE_SOURCE_FILES) | set(_PRODUCTION_DECOMPILER_SOURCE_FILES))
 )
 
 
-def _cache_sha256_file(path: Path) -> str:
+@cython.ccall
+def _cache_sha256_file(path: Path) -> object:
     """Return an exact content digest with bounded process-local reuse."""
     return cache_file_digest_8616(path).sha256
 
 
-def _cache_file_fingerprint(path: Path | None) -> dict[str, object] | None:
+@cython.ccall
+def _cache_file_fingerprint(path: Path | None) -> object:
     """Preserve the cache module's path-qualified fingerprint contract."""
     return cache_file_fingerprint_8616(path)
 
 
-def _cache_content_fingerprint(path: Path | None) -> dict[str, object] | None:
+@cython.ccall
+def _cache_content_fingerprint(path: Path | None) -> object:
     """Preserve the cache module's path-independent fingerprint contract."""
     return cache_content_fingerprint_8616(path)
 
 
-def is_non_semantic_cache_environment_name(name: str) -> bool:
+@cython.ccall
+def is_non_semantic_cache_environment_name(name: object) -> cython.bint:
     """Return whether an Inertia variable controls transport or diagnostics only."""
     return name in _CACHE_NON_SEMANTIC_ENVIRONMENT_NAMES or name.startswith(_CACHE_NON_SEMANTIC_ENVIRONMENT_PREFIXES)
 
 
-def _cache_runtime_environment() -> dict[str, str]:
+@cython.ccall
+def _cache_runtime_environment() -> object:
     """Capture runtime switches that can change recovery or emitted diagnostics."""
+    decoder_digest: object
     environment = {
         name: value
-        for name, value in sorted(os.environ.items())
+        for name, value in builtins.iter(sorted(tuple(os.environ.items())))
         if name.startswith("INERTIA_") and not is_non_semantic_cache_environment_name(name)
     }
     decoder_digest = deark_cache_identity()
@@ -221,12 +233,14 @@ def _cache_runtime_environment() -> dict[str, str]:
     return environment
 
 
-def _cache_sha256_bytes(data: bytes) -> str:
+@cython.ccall
+def _cache_sha256_bytes(data: object) -> object:
     return hashlib.sha256(data).hexdigest()
 
 
 @lru_cache(maxsize=8)
-def _cache_source_digest(paths: tuple[Path, ...]) -> str:
+def _cache_source_digest(paths: object) -> object:
+    path: object
     digest = hashlib.sha256()
     for path in paths:
         try:
@@ -241,24 +255,28 @@ def _cache_source_digest(paths: tuple[Path, ...]) -> str:
     return digest.hexdigest()
 
 
-def _case_insensitive_sibling_path(binary_path: Path, suffix: str) -> Path | None:
+def _case_insensitive_sibling_path(binary_path: Path, suffix: object) -> Path | None:
+    sibling: object
     direct = binary_path.with_suffix(suffix)
     if direct.exists():
         return direct
     parent = binary_path.parent
     try:
-        siblings = sorted(parent.iterdir(), key=lambda path: path.name.lower())
+        siblings = sorted(tuple(parent.iterdir()), key=lambda path: path.name.lower())
     except OSError:
         return None
     wanted_stem = binary_path.stem.lower()
     wanted_suffix = suffix.lower()
     for sibling in siblings:
-        if sibling.stem.lower() == wanted_stem and sibling.suffix.lower() == wanted_suffix:
+        if operator.eq(sibling.stem.lower(), wanted_stem) and operator.eq(sibling.suffix.lower(), wanted_suffix):
             return sibling
     return None
 
 
-def _cache_sidecar_fingerprints(binary_path: Path | None) -> dict[str, dict[str, object]]:
+@cython.ccall
+def _cache_sidecar_fingerprints(binary_path: object) -> object:
+    fingerprint: object
+    suffix: object
     if binary_path is None:
         return {}
     sidecars: dict[str, dict[str, object]] = {}
@@ -270,22 +288,24 @@ def _cache_sidecar_fingerprints(binary_path: Path | None) -> dict[str, dict[str,
     return sidecars
 
 
-def _cache_json_path(namespace: str, key: dict[str, object]) -> Path:
+@cython.ccall
+def _cache_json_path(namespace: object, key: object) -> Path:
     encoded = json.dumps(key, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return DECOMPILATION_CACHE_DIR / namespace / f"{_cache_sha256_bytes(encoded)}.json"
 
 
-def _load_cache_json(namespace: str, key: dict[str, object]) -> dict[str, object] | None:
+@cython.ccall
+def _load_cache_json(namespace: object, key: object) -> object:
     """Load one cache record through the checked JSON I/O owner."""
     return load_cache_json_path(namespace, _cache_json_path(namespace, key), key_context=key)
 
 
 @contextmanager
 def _cache_key_lock(
-    namespace: str,
-    key: dict[str, object],
+    namespace: object,
+    key: object,
     *,
-    timeout_seconds: float = 600.0,
+    timeout_seconds: cython.double = 600.0,
 ) -> Iterator[None]:
     """Serialize producers for one cache key while allowing readers to retry."""
     lock_path = _cache_json_path(namespace, key).with_suffix(".lock")
@@ -293,28 +313,31 @@ def _cache_key_lock(
         yield
 
 
-def _store_cache_json(namespace: str, key: dict[str, object], payload: dict[str, object]) -> dict[str, object] | None:
+@cython.ccall
+def _store_cache_json(namespace: object, key: object, payload: object) -> object:
     """Store one cache record with an atomic final-path replacement."""
     store_cache_json_path(namespace, _cache_json_path(namespace, key), payload, key_context=key)
     return None
 
 
+@cython.ccall
 def _function_decompilation_cache_key(
     *,
     binary_path: Path | None,
-    function_addr: int,
-    active_function_addr: int,
+    function_addr: cython.longlong,
+    active_function_addr: cython.longlong,
     recovery_addr: int | None,
-    function_name: str | None,
-    api_style: str,
-    c_target: str,
-    sidecar_metadata_digest: str | None,
-    recovery_shape_digest: str,
-    annotation_evidence_digest: str,
-    project_evidence_digest: str,
-    enable_structured_simplify: bool,
-    enable_postprocess: bool,
-) -> dict[str, object] | None:
+    function_name: object,
+    api_style: object,
+    c_target: object,
+    sidecar_metadata_digest: object,
+    recovery_shape_digest: object,
+    annotation_evidence_digest: object,
+    project_evidence_digest: object,
+    enable_structured_simplify: cython.bint,
+    enable_postprocess: cython.bint,
+) -> object:
+    binary_fingerprint: object
     if not cache_runtime_contract_8616().allows_semantic_cache:
         return None
     binary_fingerprint = _cache_content_fingerprint(binary_path)
@@ -346,14 +369,17 @@ def _function_decompilation_cache_key(
     }
 
 
+@cython.ccall
 def _recovery_cache_key(
     *,
     binary_path: Path | None,
-    kind: str,
-    extra: dict[str, object] | None = None,
+    kind: object,
+    extra: object = None,
     source_scope: RecoveryCacheSourceScope8616 = RecoveryCacheSourceScope8616.FULL_DECOMPILATION,
-) -> dict[str, object] | None:
+) -> object:
     """Build recovery identity, excluding sidecar policy when no sidecar exists."""
+    binary_fingerprint: object
+    source_files: object
     if not cache_runtime_contract_8616().allows_semantic_cache:
         return None
     binary_fingerprint = _cache_content_fingerprint(binary_path)
@@ -385,12 +411,14 @@ def _recovery_cache_key(
     return payload
 
 
+@cython.ccall
 def _sidecar_metadata_cache_key(
     *,
     binary_path: Path | None,
-    kind: str,
-    extra: dict[str, object] | None = None,
-) -> dict[str, object] | None:
+    kind: object,
+    extra: object = None,
+) -> object:
+    binary_fingerprint: object
     binary_fingerprint = _cache_file_fingerprint(binary_path)
     if binary_fingerprint is None:
         return None

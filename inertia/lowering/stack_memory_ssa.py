@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize exact stack-memory SSA storage through Lowering.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ text. Do not perform structuring, rewrite, postprocess, or CLI/reporting work he
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Protocol, cast
 
@@ -39,8 +42,9 @@ from .stack_memory_ssa_contracts import (
     StackMemorySSALoweringRefusalKind8616,
     StackMemorySSALoweringStats8616,
 )
+import operator
 
-type _StorageKey8616 = tuple[str, tuple[str, ...], int, int]
+_StorageKey8616 = typing.TypeAliasType("_StorageKey8616", tuple[str, tuple[str, ...], int, int])
 
 __all__ = [
     "StackMemoryObjectKind8616",
@@ -61,20 +65,23 @@ class _CodegenBoundary8616(Protocol):
     _inertia_stack_memory_ssa_lowering_artifact: StackMemorySSALoweringArtifact8616
     _inertia_wide_carry_borrow_stack_artifact: WideCarryBorrowStackArtifact8616
     _inertia_carry_borrow_widening_pipeline_8616: CarryBorrowWideningPipeline8616
-    _inertia_semantic_alias_facts: list[object]
+    _inertia_semantic_alias_facts: object
     _inertia_vex_ir_frame: object
 
 
+@cython.ccall
 def _storage_key_8616(fact: StackMemorySSAAliasFact8616) -> _StorageKey8616:
     """Return exact segmented storage identity without its SSA version."""
     return _address_key_8616(fact.address)
 
 
+@cython.ccall
 def _address_key_8616(address: IRAddress) -> _StorageKey8616:
     """Return exact segmented range identity without an SSA version."""
     return (address.space.value, address.base, address.offset, address.size)
 
 
+@cython.ccall
 def _unversioned_address_8616(address: IRAddress) -> IRAddress:
     """Project a versioned access back to its exact storage-range identity."""
     return IRAddress(
@@ -88,12 +95,13 @@ def _unversioned_address_8616(address: IRAddress) -> IRAddress:
     )
 
 
+@cython.ccall
 def _classify_object_8616(
     address: IRAddress,
     storage: AliasStorageFacts,
-    versions: tuple[int, ...],
-    kinds: tuple[StackMemoryAliasFactKind8616, ...],
-    bp_entry_sp_delta: int | None,
+    versions: object,
+    kinds: object,
+    bp_entry_sp_delta: object,
 ) -> StackMemorySSALoweringCandidate8616 | StackMemorySSALoweringRefusal8616:
     """Classify one Widening-owned range without rediscovering its storage."""
     offset = address.offset
@@ -128,16 +136,18 @@ def _classify_object_8616(
 def _widening_outcomes_8616(
     object_widening: StackMemoryObjectWideningArtifact8616,
     bp_entry_sp_delta: int | None,
-    covered_keys: set[_StorageKey8616],
+    covered_keys: object,
 ) -> tuple[
     list[StackMemorySSALoweringCandidate8616],
     list[StackMemorySSALoweringRefusal8616],
 ]:
     """Classify widening candidates and retain every widening refusal."""
+    candidate: object
+    refusal: object
     candidates: list[StackMemorySSALoweringCandidate8616] = []
     refusals: list[StackMemorySSALoweringRefusal8616] = []
     for candidate in object_widening.candidates:
-        covered_keys.update(_address_key_8616(address) for address in candidate.covered_addresses)
+        covered_keys.update(_address_key_8616(address) for address in iter(candidate.covered_addresses))
         outcome = _classify_object_8616(
             candidate.address,
             candidate.storage,
@@ -150,7 +160,7 @@ def _widening_outcomes_8616(
         else:
             refusals.append(outcome)
     for refusal in object_widening.refusals:
-        covered_keys.update(_address_key_8616(address) for address in refusal.addresses)
+        covered_keys.update(_address_key_8616(address) for address in iter(refusal.addresses))
         refusals.append(
             StackMemorySSALoweringRefusal8616(
                 StackMemorySSALoweringRefusalKind8616.SOURCE_WIDENING_REFUSAL,
@@ -163,19 +173,19 @@ def _widening_outcomes_8616(
 
 
 def _classify_fact_group_8616(
-    facts: list[StackMemorySSAAliasFact8616],
+    facts: object,
     bp_entry_sp_delta: int | None,
 ) -> StackMemorySSALoweringCandidate8616 | StackMemorySSALoweringRefusal8616:
     """Classify one uncovered SSA group or refuse with typed evidence."""
     representative = facts[0]
-    if any(fact.storage != representative.storage for fact in facts[1:]):
+    if any(operator.ne(fact.storage, representative.storage) for fact in iter(facts[1:])):
         return StackMemorySSALoweringRefusal8616(
             StackMemorySSALoweringRefusalKind8616.INCONSISTENT_ALIAS_STORAGE,
             "SSA versions for one range have different Alias storage identities",
             representative.address,
         )
-    kinds = tuple(sorted({fact.kind for fact in facts}, key=lambda item: item.value))
-    if all(kind is StackMemoryAliasFactKind8616.PHI for kind in kinds):
+    kinds = tuple(sorted({fact.kind for fact in iter(facts)}, key=lambda item: item.value))
+    if all(kind is StackMemoryAliasFactKind8616.PHI for kind in iter(kinds)):
         return StackMemorySSALoweringRefusal8616(
             StackMemorySSALoweringRefusalKind8616.PHI_WITHOUT_ACCESS,
             "memory phi has no concrete load or store",
@@ -184,21 +194,24 @@ def _classify_fact_group_8616(
     return _classify_object_8616(
         representative.address,
         representative.storage,
-        tuple(sorted({cast(int, fact.address.version) for fact in facts})),
+        tuple(sorted({cast(int, fact.address.version) for fact in iter(facts)})),
         kinds,
         bp_entry_sp_delta,
     )
 
 
+@cython.ccall
 def _classify_storage_groups_8616(
     source: StackMemorySSAAliasArtifact8616,
-    object_widening: StackMemoryObjectWideningArtifact8616 | None,
+    object_widening: object,
     bp_entry_sp_delta: int | None,
 ) -> tuple[
     list[StackMemorySSALoweringCandidate8616],
     list[StackMemorySSALoweringRefusal8616],
 ]:
     """Collapse SSA versions only when their exact Alias storage agrees."""
+    fact: object
+    key: object
     groups: dict[_StorageKey8616, list[StackMemorySSAAliasFact8616]] = {}
     for fact in source.facts:
         groups.setdefault(_storage_key_8616(fact), []).append(fact)
@@ -209,7 +222,7 @@ def _classify_storage_groups_8616(
             refusal.detail,
             refusal.address,
         )
-        for refusal in source.refusals
+        for refusal in iter(source.refusals)
     ]
     covered_keys: set[_StorageKey8616] = set()
     if object_widening is not None:
@@ -231,6 +244,7 @@ def _classify_storage_groups_8616(
     return candidates, refusals
 
 
+@cython.ccall
 def _required_source_alias_8616(
     boundary: _CodegenBoundary8616,
 ) -> StackMemorySSAAliasArtifact8616 | None:
@@ -249,6 +263,7 @@ def _required_source_alias_8616(
     return source
 
 
+@cython.ccall
 def _required_object_widening_8616(
     boundary: _CodegenBoundary8616,
     source: StackMemorySSAAliasArtifact8616,
@@ -275,8 +290,10 @@ def _required_object_widening_8616(
     return candidate_widening
 
 
+@cython.ccall
 def _bp_entry_sp_delta_8616(boundary: _CodegenBoundary8616) -> int | None:
     """Return the proven BP-to-entry-SP coordinate delta, if any."""
+    bp_coordinate: object
     try:
         frame = boundary._inertia_vex_ir_frame
     except AttributeError:
@@ -292,9 +309,9 @@ def _bp_entry_sp_delta_8616(boundary: _CodegenBoundary8616) -> int | None:
 def _merge_wide_carry_stack_8616(
     boundary: _CodegenBoundary8616,
     source: StackMemorySSAAliasArtifact8616,
-    candidates: list[StackMemorySSALoweringCandidate8616],
+    candidates: object,
     bp_entry_sp_delta: int | None,
-) -> list[StackMemorySSALoweringCandidate8616]:
+) -> object:
     """Replace covered SSA candidates with proven wide carry-stack locals."""
     try:
         carry_pipeline = boundary._inertia_carry_borrow_widening_pipeline_8616
@@ -313,10 +330,10 @@ def _merge_wide_carry_stack_8616(
     )
     covered = {
         _address_key_8616(address)
-        for candidate in wide_stack.candidates
-        for address in candidate.source_ranges
+        for candidate in iter(wide_stack.candidates)
+        for address in iter(candidate.source_ranges)
     }
-    merged = [candidate for candidate in candidates if _address_key_8616(candidate.address) not in covered]
+    merged = [candidate for candidate in iter(candidates) if _address_key_8616(candidate.address) not in covered]
     merged.extend(
         StackMemorySSALoweringCandidate8616(
             StackMemoryObjectKind8616.LOCAL,
@@ -326,7 +343,7 @@ def _merge_wide_carry_stack_8616(
             candidate.source.source_versions,
             (StackMemoryAliasFactKind8616.STORE,),
         )
-        for candidate in wide_stack.candidates
+        for candidate in iter(wide_stack.candidates)
     )
     boundary._inertia_wide_carry_borrow_stack_artifact = wide_stack
     return merged
@@ -336,6 +353,7 @@ def lower_x86_16_stack_memory_ssa_alias_artifact(
     codegen: object,
 ) -> StackMemorySSALoweringArtifact8616 | None:
     """Materialize exact SSA storage through the existing Lowering consumer."""
+    source: object
     boundary = cast(_CodegenBoundary8616, codegen)
     source = _required_source_alias_8616(boundary)
     if source is None:
@@ -356,33 +374,33 @@ def lower_x86_16_stack_memory_ssa_alias_artifact(
     if candidates:
         reset_local_stack_coordinate_projections_8616(
             codegen,
-            replaced_bp_ranges=frozenset((candidate.address.offset, candidate.address.size) for candidate in candidates),
+            replaced_bp_ranges=frozenset((candidate.address.offset, candidate.address.size) for candidate in iter(candidates)),
         )
-    boundary._inertia_semantic_alias_facts = [candidate.storage for candidate in candidates]
+    boundary._inertia_semantic_alias_facts = [candidate.storage for candidate in iter(candidates)]
     result = (
         lower_stack_accesses_from_alias_facts_8616(
             codegen,
             list(boundary._inertia_semantic_alias_facts),
             required_bp_ranges=frozenset(
-                (candidate.address.offset, candidate.address.size) for candidate in candidates
+                (candidate.address.offset, candidate.address.size) for candidate in iter(candidates)
             ),
             entry_sp_offsets_by_bp_range={
                 (candidate.address.offset, candidate.address.size): candidate.entry_sp_offset
-                for candidate in candidates
+                for candidate in iter(candidates)
             },
         )
         if candidates
         else StackLoweringResult(status=StackLoweringStatus.OK)
     )
-    materialized_offsets = {offset for offset, _name in result.materialized}
-    missing = [candidate for candidate in candidates if candidate.address.offset not in materialized_offsets]
+    materialized_offsets = {offset for offset, _name in iter(result.materialized)}
+    missing = [candidate for candidate in iter(candidates) if candidate.address.offset not in materialized_offsets]
     refusals.extend(
         StackMemorySSALoweringRefusal8616(
             StackMemorySSALoweringRefusalKind8616.MATERIALIZATION_FAILED,
             "canonical stack Lowering did not materialize the exact range",
             candidate.address,
         )
-        for candidate in missing
+        for candidate in iter(missing)
     )
     artifact = StackMemorySSALoweringArtifact8616(
         function_addr=source.function_addr,

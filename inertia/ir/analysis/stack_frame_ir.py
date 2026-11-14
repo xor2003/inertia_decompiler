@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Analysis.
 
 Responsibility: summarize SS frame accesses from typed IR artifacts.
@@ -10,6 +11,8 @@ Forbidden: inventing locals/args without segmented SS:BP/SP evidence.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -21,6 +24,8 @@ from inertia.ir.scalar_affine_trace import trace_scalar_affine_expression_8616
 from inertia.ir.ssa import build_x86_16_block_local_ssa
 from inertia.ir.ssa_function import SSAFunctionArtifact, build_x86_16_ir_predecessor_map
 from inertia.ir.ssa_memory_ranges import StackCoordinateAgreement8616, stack_coordinate_agreement_8616
+import dataclasses
+import operator
 
 _FIRST_NEAR_ARGUMENT_OFFSET = 4
 
@@ -42,26 +47,26 @@ class FrameCoordinateStatus8616(StrEnum):
     CONFLICT = "conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FrameCoordinateStats8616:
     """Closed evidence accounting for one frame-coordinate proof."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every normalized relation has one outcome."""
         return (
             self.raw_fact_count >= self.normalized_fact_count
-            and self.normalized_fact_count == self.classified_fact_count
-            and self.classified_fact_count == self.materialized_count + self.failure_count
+            and operator.eq(self.normalized_fact_count, self.classified_fact_count)
+            and operator.eq(self.classified_fact_count, self.materialized_count + self.failure_count)
         )
 
-    def to_dict(self) -> dict[str, int]:
+    def to_dict(self) -> dict[str, cython.longlong]:
         """Return the mandatory five evidence counters."""
         return {
             "raw_fact_count": self.raw_fact_count,
@@ -72,7 +77,7 @@ class FrameCoordinateStats8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class BPFrameCoordinateEvidence8616:
     """Proven relation from machine BP to angr's entry-SP coordinate."""
 
@@ -82,11 +87,11 @@ class BPFrameCoordinateEvidence8616:
     stats: FrameCoordinateStats8616 = FrameCoordinateStats8616()
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether counters close and the typed state is coherent."""
         if not self.stats.complete:
             return False
-        return (self.status is FrameCoordinateStatus8616.PROVEN) == isinstance(self.bp_entry_sp_delta, int)
+        return operator.eq((self.status is FrameCoordinateStatus8616.PROVEN), isinstance(self.bp_entry_sp_delta, int))
 
     def to_dict(self) -> dict[str, object]:
         """Serialize the coordinate proof for diagnostics and gates."""
@@ -99,14 +104,14 @@ class BPFrameCoordinateEvidence8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackFrameSlot:
     """Evidence-backed SS:BP/SP stack-frame access."""
 
-    base: str
-    offset: int
-    role: str
-    size: int
+    base: object
+    offset: cython.longlong
+    role: object
+    size: cython.longlong
 
     def to_dict(self) -> dict[str, object]:
         """Serialize this stack-frame slot for diagnostics and artifacts."""
@@ -118,7 +123,7 @@ class StackFrameSlot:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FrameAccessArtifact:
     """Summary of stack-frame accesses recovered from typed IR."""
 
@@ -129,13 +134,14 @@ class FrameAccessArtifact:
     def to_dict(self) -> dict[str, object]:
         """Serialize the frame-access artifact for diagnostics and artifacts."""
         return {
-            "slots": [item.to_dict() for item in self.slots],
+            "slots": [item.to_dict() for item in iter(self.slots)],
             "refusals": list(self.refusals),
             "bp_coordinate": self.bp_coordinate.to_dict(),
         }
 
 
-def _slot_role(base: str, offset: int) -> str:
+@cython.ccall
+def _slot_role(base: object, offset: cython.longlong) -> str:
     """Classify one exact frame slot without naming it."""
     if base == "bp":
         if offset >= _FIRST_NEAR_ARGUMENT_OFFSET:
@@ -146,20 +152,22 @@ def _slot_role(base: str, offset: int) -> str:
     return "sp_relative"
 
 
-def _writes_register_8616(instruction: IRInstr, register: str) -> bool:
+@cython.ccall
+def _writes_register_8616(instruction: IRInstr, register: object) -> cython.bint:
     """Return whether one typed instruction writes the exact register."""
     destination = instruction.dst
-    return isinstance(destination, IRValue) and destination.space is MemSpace.REG and destination.name == register
+    return isinstance(destination, IRValue) and destination.space is MemSpace.REG and operator.eq(destination.name, register)
 
 
-def _bp_access_8616(instruction: IRInstr) -> bool:
+def _bp_access_8616(instruction: IRInstr) -> cython.bint:
     """Return whether one instruction accesses exact SS:BP storage."""
     return any(
         isinstance(argument, IRAddress) and argument.space is MemSpace.SS and argument.base == ("bp",)
-        for argument in instruction.args
+        for argument in iter(instruction.args)
     )
 
 
+@cython.ccall
 def _sp_relative_value_8616(instruction: IRInstr) -> IRValue | None:
     """Return a direct SP read; captured temporaries require SSA provenance."""
     if instruction.op != "MOV" or len(instruction.args) != 1:
@@ -175,8 +183,11 @@ def _sp_relative_value_8616(instruction: IRInstr) -> IRValue | None:
     return None
 
 
-def _traced_entry_sp_delta_8616(ssa_artifact: SSAFunctionArtifact, index: int) -> int | None:
+@cython.ccall
+def _traced_entry_sp_delta_8616(ssa_artifact: SSAFunctionArtifact, index: cython.longlong) -> int | None:
     """Resolve indirect setup through exact entry-block SSA provenance."""
+    expression: object
+    root: object
     block = ssa_artifact.blocks[0]
     root = block.instrs[index].dst
     if root is None:
@@ -197,8 +208,13 @@ def _traced_entry_sp_delta_8616(ssa_artifact: SSAFunctionArtifact, index: int) -
     return (expression.constant + 0x8000) % 0x10000 - 0x8000
 
 
-def _reaching_bp_delta_8616(entry_block: IRBlock, ssa_artifact: SSAFunctionArtifact) -> tuple[int | None, int]:
+@cython.ccall
+def _reaching_bp_delta_8616(entry_block: IRBlock, ssa_artifact: SSAFunctionArtifact) -> tuple[int | None, cython.longlong]:
     """Follow setup until first BP use, retaining the last reaching definition."""
+    recovered: object
+    source: object
+    index: object
+    instruction: object
     sp_delta = 0
     sp_delta_known = True
     bp_delta: int | None = None
@@ -226,11 +242,13 @@ def _reaching_bp_delta_8616(entry_block: IRBlock, ssa_artifact: SSAFunctionArtif
 
 def _build_bp_coordinate_evidence_8616(artifact: IRFunctionArtifact) -> BPFrameCoordinateEvidence8616:
     """Prove BP's entry-SP delta from typed register effects before first use."""
-    has_bp_access = any(_bp_access_8616(instruction) for block in artifact.blocks for instruction in block.instrs)
+    bp_delta: object
+    entry_block: object
+    has_bp_access = any(_bp_access_8616(instruction) for block in iter(artifact.blocks) for instruction in iter(block.instrs))
     if not has_bp_access:
         return BPFrameCoordinateEvidence8616()
 
-    entry_block = next((block for block in artifact.blocks if block.addr == artifact.function_addr), None)
+    entry_block = next((block for block in iter(artifact.blocks) if operator.eq(block.addr, artifact.function_addr)), None)
     if entry_block is None:
         stats = FrameCoordinateStats8616(1, 1, 1, 0, 1)
         return BPFrameCoordinateEvidence8616(
@@ -247,8 +265,8 @@ def _build_bp_coordinate_evidence_8616(artifact: IRFunctionArtifact) -> BPFrameC
 
     coordinate_blocks = (
         build_x86_16_block_local_ssa(entry_block),
-        *(build_x86_16_block_local_ssa(block) for block in artifact.blocks
-          if block.addr != entry_block.addr),
+        *(build_x86_16_block_local_ssa(block) for block in iter(artifact.blocks)
+          if operator.ne(block.addr, entry_block.addr)),
     )
     if stack_coordinate_agreement_8616(coordinate_blocks) is StackCoordinateAgreement8616.CONFLICT:
         return BPFrameCoordinateEvidence8616(
@@ -284,7 +302,9 @@ def build_x86_16_ir_frame_access_artifact(artifact: IRFunctionArtifact) -> Frame
     """Build stack-frame access evidence from SS addresses in typed IR."""
 
     def _impl() -> FrameAccessArtifact:
-        slots: dict[tuple[str, int, int], StackFrameSlot] = {}
+        size: object
+        value: object
+        slots: dict[tuple[str, cython.longlong, cython.longlong], StackFrameSlot] = {}
         refusals: list[str] = []
         for value, size in frame_memory_accesses_8616(artifact):
             base = value.base[0] if len(value.base) == 1 else None
@@ -295,8 +315,8 @@ def build_x86_16_ir_frame_access_artifact(artifact: IRFunctionArtifact) -> Frame
             slots.setdefault(key, StackFrameSlot(base=base, offset=value.offset,
                                                 role=_slot_role(base, value.offset), size=size))
         return FrameAccessArtifact(
-            slots=tuple(sorted(slots.values(), key=lambda item: (item.base, item.offset, item.size))),
-            refusals=tuple(sorted(set(refusals))),
+            slots=tuple(sorted(tuple(slots.values()), key=lambda item: (item.base, item.offset, item.size))),
+            refusals=tuple(sorted(tuple(set(refusals)))),
             bp_coordinate=_build_bp_coordinate_evidence_8616(artifact),
         )
 

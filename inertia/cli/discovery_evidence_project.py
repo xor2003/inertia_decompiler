@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Create isolated projects for mutating discovery evidence scans.
 
 Layer: CLI/fallback/reporting.
@@ -5,6 +6,8 @@ Responsibility: keep caller-evidence discovery mutations out of the target decom
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from pathlib import Path
 from typing import Protocol, cast
@@ -13,6 +16,7 @@ import angr
 
 from inertia.cli.lst_extract import LSTMetadata
 from inertia.cli.project_loading import _build_project_cached, declared_input_path_8616
+import builtins
 
 
 class _DiscoverySignaturePolicy(Protocol):
@@ -22,6 +26,7 @@ class _DiscoverySignaturePolicy(Protocol):
     _inertia_include_library_functions: object
 
 
+@cython.ccall
 def _copy_signature_policy(source: angr.Project, target: angr.Project) -> None:
     """Copy matched-address evidence, never mutable source/debug metadata."""
     source_policy = cast(_DiscoverySignaturePolicy, source)
@@ -40,8 +45,8 @@ def _copy_signature_policy(source: angr.Project, target: angr.Project) -> None:
         addresses = metadata.signature_code_addrs
         copied = LSTMetadata(
             data_labels={},
-            code_labels={addr: name for addr, name in metadata.code_labels.items() if addr in addresses},
-            code_ranges={addr: span for addr, span in metadata.code_ranges.items() if addr in addresses},
+            code_labels={addr: name for addr, name in builtins.iter(metadata.code_labels.items()) if addr in addresses},
+            code_ranges={addr: span for addr, span in builtins.iter(metadata.code_ranges.items()) if addr in addresses},
             signature_code_ranges=dict(metadata.signature_code_ranges),
             signature_code_addrs=addresses, absolute_addrs=metadata.absolute_addrs,
             source_format=metadata.source_format,
@@ -50,6 +55,7 @@ def _copy_signature_policy(source: angr.Project, target: angr.Project) -> None:
     target_policy._inertia_include_library_functions = bool(include_libraries)
 
 
+@cython.ccall
 def isolated_discovery_evidence_project_8616(project: angr.Project) -> angr.Project:
     """Return a separate project for scans that mutate angr's knowledge base."""
     try:

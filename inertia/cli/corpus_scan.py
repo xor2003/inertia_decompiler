@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery/reporting.
 
 Responsibility: scan corpora and report decompilation, readability, and validation outcomes.
@@ -11,6 +12,8 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import builtins
 import io
@@ -42,9 +45,13 @@ from inertia.validation.tail_validation import (
 )
 
 from .readability_goals import classify_readability_cluster
+import dataclasses
+import operator
 
 
+@cython.ccall
 def _silence_scan_loggers() -> None:
+    name: object
     for name in (
         "angr.state_plugins.unicorn_engine",
         "angr.analyses.analysis",
@@ -59,13 +66,16 @@ def _silence_scan_loggers() -> None:
 _silence_scan_loggers()
 
 
-def _dynamic_corpus_scan_getattr_8616(obj: object, name: str, default: object = None) -> Any:  # noqa: ANN401
+@cython.ccall
+def _dynamic_corpus_scan_getattr_8616(obj: object, name: object, default: object = None) -> Any:  # noqa: ANN401
     """Read an attribute across the dynamic angr/Capstone/codegen boundary."""
     return builtins.getattr(obj, name, default)
 
 
-def _dynamic_corpus_scan_tuple_attr_8616(obj: object, name: str) -> tuple[object, ...]:
+@cython.ccall
+def _dynamic_corpus_scan_tuple_attr_8616(obj: object, name: object) -> tuple[object, ...]:
     """Read tuple-like data across the dynamic angr/Capstone/codegen boundary."""
+    value: object
     value = _dynamic_corpus_scan_getattr_8616(obj, name, ())
     if value is None:
         return ()
@@ -75,20 +85,26 @@ def _dynamic_corpus_scan_tuple_attr_8616(obj: object, name: str) -> tuple[object
         return ()
 
 
-def _counter_payload_8616(payload: dict[str, object], key: str) -> Counter[object]:
+@cython.ccall
+def _counter_payload_8616(payload: object, key: object) -> Counter[object]:
     """Return a counter payload produced by the scan summary builders."""
+    value: object
     value = payload.get(key)
     return value if isinstance(value, Counter) else Counter()
 
 
-def _int_payload_8616(payload: dict[str, object], key: str) -> int:
+@cython.ccall
+def _int_payload_8616(payload: object, key: object) -> cython.longlong:
     """Return an integer payload produced by the scan summary builders."""
+    value: object
     value = payload.get(key, 0)
     return value if isinstance(value, int) else 0
 
 
-def _dict_payload_8616(payload: dict[str, object], key: str) -> dict[str, object]:
+@cython.ccall
+def _dict_payload_8616(payload: object, key: object) -> object:
     """Return a dictionary payload produced by scan aggregation helpers."""
+    value: object
     value = payload.get(key)
     return value if isinstance(value, dict) else {}
 
@@ -96,62 +112,62 @@ ENTRY_RE: re.Pattern[str] = re.compile(r"\*\*\*\s+([0-9A-Fa-f]+)\s+((?:[0-9A-Fa-
 PROC_RE: re.Pattern[str] = re.compile(r"^([^\s]+)\tPROC (NEAR|FAR)$")
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class StageResult:
     """Single scan pipeline stage verdict."""
 
-    stage: str
-    ok: bool
-    reason: str | None = None
-    detail: str | None = None
+    stage: object
+    ok: cython.bint
+    reason: object = None
+    detail: object = None
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class FunctionScanResult:
     """Structured per-function corpus scan result."""
 
-    cod_file: str
-    proc_name: str
-    proc_kind: str
-    byte_len: int
-    has_near_call_reloc: bool
-    has_far_call_reloc: bool
-    ok: bool = False
+    cod_file: object
+    proc_name: object
+    proc_kind: object
+    byte_len: cython.longlong
+    has_near_call_reloc: cython.bint
+    has_far_call_reloc: cython.bint
+    ok: cython.bint = False
     stage_reached: str = "init"
-    failure_class: str | None = None
-    reason: str | None = None
-    fallback_kind: str | None = None
-    function_count: int = 0
-    decompiled_count: int = 0
-    interrupt_dos_helper_count: int = 0
-    interrupt_bios_helper_count: int = 0
-    interrupt_wrapper_call_count: int = 0
-    interrupt_unresolved_wrapper_count: int = 0
-    semantic_family: str | None = None
-    semantic_family_reason: str | None = None
-    readability_cluster: str | None = None
-    readability_cluster_reason: str | None = None
-    last_postprocess_pass: str | None = None
-    rewrite_failed: bool = False
-    rewrite_failure_pass: str | None = None
-    rewrite_failure_reason: str | None = None
-    regeneration_failed: bool = False
-    regeneration_failure_pass: str | None = None
-    regeneration_failure_reason: str | None = None
-    structuring_failed: bool = False
-    structuring_failure_pass: str | None = None
-    structuring_failure_reason: str | None = None
-    last_structuring_pass: str | None = None
-    confidence_status: str | None = None
-    confidence_scan_safe_classification: str | None = None
-    confidence_evidence_count: int = 0
-    confidence_assumption_count: int = 0
-    confidence_diagnostic_count: int = 0
+    failure_class: object = None
+    reason: object = None
+    fallback_kind: object = None
+    function_count: cython.longlong = 0
+    decompiled_count: cython.longlong = 0
+    interrupt_dos_helper_count: cython.longlong = 0
+    interrupt_bios_helper_count: cython.longlong = 0
+    interrupt_wrapper_call_count: cython.longlong = 0
+    interrupt_unresolved_wrapper_count: cython.longlong = 0
+    semantic_family: object = None
+    semantic_family_reason: object = None
+    readability_cluster: object = None
+    readability_cluster_reason: object = None
+    last_postprocess_pass: object = None
+    rewrite_failed: cython.bint = False
+    rewrite_failure_pass: object = None
+    rewrite_failure_reason: object = None
+    regeneration_failed: cython.bint = False
+    regeneration_failure_pass: object = None
+    regeneration_failure_reason: object = None
+    structuring_failed: cython.bint = False
+    structuring_failure_pass: object = None
+    structuring_failure_reason: object = None
+    last_structuring_pass: object = None
+    confidence_status: object = None
+    confidence_scan_safe_classification: object = None
+    confidence_evidence_count: cython.longlong = 0
+    confidence_assumption_count: cython.longlong = 0
+    confidence_diagnostic_count: cython.longlong = 0
     confidence_evidence_kinds: tuple[str, ...] = ()
     confidence_assumption_kinds: tuple[str, ...] = ()
     confidence_diagnostics: tuple[str, ...] = ()
-    tail_validation: dict[str, object] | None = None
-    stages: list[StageResult] = field(default_factory=list)
+    tail_validation: object = None
+    stages: object = field(default_factory=list)
 
 
 class ScanTimeout(Exception):
@@ -179,11 +195,12 @@ def _patch_scan_destructors() -> None:
 _patch_scan_destructors()
 
 
-_SCAN_ACTIVE: bool = False
-_SCAN_TIMEOUT_FINALIZER_RETRY_SECONDS: float = 0.01
+_SCAN_ACTIVE: cython.bint = False
+_SCAN_TIMEOUT_FINALIZER_RETRY_SECONDS: cython.double = 0.01
 
 
-def _alarm_handler(_signum: int, frame: FrameType | None) -> None:
+@cython.ccall
+def _alarm_handler(_signum: cython.longlong, frame: object) -> None:
     """Raise a scan timeout outside Python finalizers.
 
     Asynchronous exceptions raised inside ``__del__`` become unraisable and
@@ -201,6 +218,7 @@ def _alarm_handler(_signum: int, frame: FrameType | None) -> None:
     raise ScanTimeout("timed out")
 
 
+@cython.ccall
 def _clear_alarm() -> None:
     signal.alarm(0)
 
@@ -214,14 +232,16 @@ def _finish_scan(result: FunctionScanResult) -> FunctionScanResult:
     result.confidence_evidence_count = len(confidence.evidence)
     result.confidence_assumption_count = len(confidence.assumptions)
     result.confidence_diagnostic_count = len(confidence.diagnostics)
-    result.confidence_evidence_kinds = tuple(item.kind for item in confidence.evidence)
-    result.confidence_assumption_kinds = tuple(item.kind for item in confidence.assumptions)
+    result.confidence_evidence_kinds = tuple(item.kind for item in iter(confidence.evidence))
+    result.confidence_assumption_kinds = tuple(item.kind for item in iter(confidence.assumptions))
     result.confidence_diagnostics = confidence.diagnostics
     _clear_alarm()
     return result
 
 
+@cython.ccall
 def _interrupt_api_helper_names() -> tuple[set[str], set[str]]:
+    spec: object
     dos_names: set[str] = set()
     bios_names: set[str] = set()
     for spec in INT21_SERVICE_SPECS.values():
@@ -310,24 +330,27 @@ _ALU_HELPER_NAMES = {
 }
 
 
-def _count_named_helper_calls(text: str, names: set[str]) -> int:
+def _count_named_helper_calls(text: object, names: object) -> cython.longlong:
     if not text or not names:
         return 0
     pattern = re.compile(
-        r"(?<![A-Za-z0-9_])(?:" + "|".join(re.escape(name) for name in sorted(names, key=len, reverse=True)) + r")\s*\("
+        r"(?<![A-Za-z0-9_])(?:" + "|".join(re.escape(name) for name in builtins.iter(sorted(names, key=len, reverse=True))) + r")\s*\("
     )
     return len(pattern.findall(text))
 
 
-def _count_interrupt_wrapper_calls(text: str) -> int:
+@cython.ccall
+def _count_interrupt_wrapper_calls(text: object) -> cython.longlong:
     if not text:
         return 0
     return len(re.findall(r"(?<![A-Za-z0-9_])(?:int86x?|intdosx?)\s*\(", text))
 
 
 def _classify_semantic_family_from_text(
-    text: str, result: FunctionScanResult | None = None
+    text: object, result: FunctionScanResult | None = None
 ) -> tuple[str | None, str | None]:
+    family: object
+    markers: object
     if result is not None and (
         result.interrupt_dos_helper_count or result.interrupt_bios_helper_count or result.interrupt_wrapper_call_count
     ):
@@ -348,21 +371,21 @@ def _classify_semantic_family_from_text(
         ("alu", _ALU_HELPER_NAMES),
     )
     for family, markers in family_markers:
-        if any(marker.lower() in text_lower for marker in markers):
+        if any(marker.lower() in text_lower for marker in iter(markers)):
             return family, f"{family} helper markers detected"
     return None, None
 
 
-def _classify_semantic_family_from_failure(result: FunctionScanResult) -> tuple[str | None, str | None]:
+def _classify_semantic_family_from_failure(result: FunctionScanResult) -> object:
     def _impl() -> tuple[str | None, str | None]:
+        family: object
+        markers: object
+        reason: object
         parts = " ".join(
             part.lower()
-            for part in (
-                result.failure_class,
+            for part in iter((result.failure_class,
                 result.reason,
-                *(stage.reason or "" for stage in result.stages),
-                *(stage.detail or "" for stage in result.stages),
-            )
+                ) + tuple((stage.reason or "" for stage in iter(result.stages))) + tuple((stage.detail or "" for stage in iter(result.stages))))
             if part
         )
         if not parts:
@@ -387,14 +410,15 @@ def _classify_semantic_family_from_failure(result: FunctionScanResult) -> tuple[
             ("alu", "failure text points at alu family", ("flag", "shift", "rotate", "alu")),
         )
         for family, reason, markers in families:
-            if any(marker in parts for marker in markers):
+            if any(marker in parts for marker in iter(markers)):
                 return family, reason
         return None, None
 
     return _impl()
 
 
-def set_memory_limit(max_memory_mb: int) -> None:
+@cython.ccall
+def set_memory_limit(max_memory_mb: cython.longlong) -> None:
     """Set an address-space limit for corpus scanning when requested."""
     if max_memory_mb <= 0:
         return
@@ -402,8 +426,12 @@ def set_memory_limit(max_memory_mb: int) -> None:
     resource.setrlimit(resource.RLIMIT_AS, (limit_bytes, limit_bytes))
 
 
-def extract_cod_functions(cod_path: Path) -> list[tuple[str, str, bytes]]:
+@cython.ccall
+def extract_cod_functions(cod_path: Path) -> object:
     """Extract COD procedures as normalized byte blobs for corpus scanning."""
+    entry_match: object
+    proc_match: object
+    line: object
     lines = cod_path.read_text(errors="ignore").splitlines()
     out: list[tuple[str, str, bytes]] = []
     collect = False
@@ -444,7 +472,8 @@ def extract_cod_functions(cod_path: Path) -> list[tuple[str, str, bytes]]:
     return out
 
 
-def project_from_bytes(code: bytes) -> angr.Project:
+@cython.ccall
+def project_from_bytes(code: object) -> angr.Project:
     """Build a bounded blob project for one normalized COD procedure."""
     return angr.Project(
         io.BytesIO(code),
@@ -457,7 +486,8 @@ def project_from_bytes(code: bytes) -> angr.Project:
     )
 
 
-def _stage_failure_class_8616(stage: str) -> str:
+@cython.ccall
+def _stage_failure_class_8616(stage: object) -> object:
     """Map a pipeline stage name onto its stable failure class."""
     stage_failure_classes = {
         "load": "load_failure",
@@ -468,7 +498,8 @@ def _stage_failure_class_8616(stage: str) -> str:
     return stage_failure_classes.get(stage, "analysis_failure")
 
 
-def _failure_class_from_message_8616(stage: str, message: str) -> tuple[str, str]:
+@cython.ccall
+def _failure_class_from_message_8616(stage: object, message: object) -> tuple[str, str]:
     """Classify a failure by its exception message text."""
     lowered = message.lower()
     if "recursion" in lowered or "maximum recursion depth" in lowered:
@@ -482,14 +513,15 @@ def _failure_class_from_message_8616(stage: str, message: str) -> tuple[str, str
     return _stage_failure_class_8616(stage), message
 
 
+@cython.ccall
 def classify_failure(
-    stage: str,
-    exc: Exception | None,
+    stage: object,
+    exc: object,
     *,
-    empty_codegen: bool = False,
-    rewrite_failed: bool = False,
-    regeneration_failed: bool = False,
-) -> tuple[str, str]:
+    empty_codegen: cython.bint = False,
+    rewrite_failed: cython.bint = False,
+    regeneration_failed: cython.bint = False,
+) -> object:
     """Classify a scan failure into stable reporting buckets."""
     if empty_codegen:
         if rewrite_failed:
@@ -511,14 +543,16 @@ def classify_failure(
     return _failure_class_from_message_8616(stage, str(exc))
 
 
+@cython.ccall
 def _mark_stage(
-    result: FunctionScanResult, stage: str, ok: bool, *, reason: str | None = None, detail: str | None = None
+    result: FunctionScanResult, stage: object, ok: cython.bint, *, reason: object = None, detail: object = None
 ) -> None:
     result.stages.append(StageResult(stage=stage, ok=ok, reason=reason, detail=detail))
     result.stage_reached = stage
 
 
-def _ugly_cluster_from_details_8616(details: str) -> str | None:
+@cython.ccall
+def _ugly_cluster_from_details_8616(details: object) -> object:
     """Match the aggregated failure details onto a stable cluster name."""
     if "empty codegen" in details or "no_code_produced" in details:
         return "empty_codegen"
@@ -535,7 +569,8 @@ def _ugly_cluster_from_details_8616(details: str) -> str | None:
     return None
 
 
-def _ugly_cluster_from_fallback_8616(fallback_kind: str | None) -> str | None:
+@cython.ccall
+def _ugly_cluster_from_fallback_8616(fallback_kind: object) -> object:
     """Map a fallback kind onto its recovery cluster name."""
     fallback_clusters = {
         "cfg_only": "cfg_only_recovery",
@@ -547,15 +582,16 @@ def _ugly_cluster_from_fallback_8616(fallback_kind: str | None) -> str | None:
     return fallback_clusters.get(fallback_kind)
 
 
-def _classify_ugly_cluster(result: FunctionScanResult) -> str | None:
+def _classify_ugly_cluster(result: FunctionScanResult) -> object:
+    cluster: object
     parts: list[str] = []
     if result.reason:
         parts.append(result.reason)
     if result.failure_class:
         parts.append(result.failure_class)
-    parts.extend(stage.reason for stage in result.stages if stage.reason)
-    parts.extend(stage.detail for stage in result.stages if stage.detail)
-    details = " ".join(part.lower() for part in parts)
+    parts.extend(stage.reason for stage in iter(result.stages) if stage.reason)
+    parts.extend(stage.detail for stage in iter(result.stages) if stage.detail)
+    details = " ".join(part.lower() for part in iter(parts))
 
     if result.failure_class == "timeout":
         return "timeout_hotspot"
@@ -572,20 +608,21 @@ def _classify_ugly_cluster(result: FunctionScanResult) -> str | None:
     return None
 
 
-def _classify_readability_cluster(result: FunctionScanResult, text: str | None) -> tuple[str | None, str | None]:
+def _classify_readability_cluster(result: FunctionScanResult, text: object) -> object:
     if not result.ok or result.fallback_kind not in (None, "none"):
         return None, None
     classification = classify_readability_cluster(text)
     if (
         isinstance(classification, tuple)
         and len(classification) == 2
-        and all(item is None or isinstance(item, str) for item in classification)
+        and all(item is None or isinstance(item, str) for item in iter(classification))
     ):
         return classification
     return None, None
 
 
-def _scan_cfg(project: angr.Project, code_len: int) -> object:
+@cython.ccall
+def _scan_cfg(project: angr.Project, code_len: cython.longlong) -> object:
     return project.analyses.CFGFast(
         normalize=True,
         force_complete_scan=False,
@@ -595,16 +632,18 @@ def _scan_cfg(project: angr.Project, code_len: int) -> object:
     )
 
 
-def _should_skip_scan_safe_decompile(code_len: int, mode: str, max_decompile_bytes: int) -> bool:
+@cython.ccall
+def _should_skip_scan_safe_decompile(code_len: cython.longlong, mode: object, max_decompile_bytes: cython.longlong) -> cython.bint:
     return mode == "scan-safe" and max_decompile_bytes > 0 and code_len > max_decompile_bytes
 
 
-def _should_skip_scan_safe_cfg(code_len: int, mode: str, max_cfg_bytes: int) -> bool:
+@cython.ccall
+def _should_skip_scan_safe_cfg(code_len: cython.longlong, mode: object, max_cfg_bytes: cython.longlong) -> cython.bint:
     return mode == "scan-safe" and max_cfg_bytes > 0 and code_len > max_cfg_bytes
 
 
-def _probe_scan_safe_lift(code: bytes, mode: str, max_cfg_bytes: int, probe_bytes: int = 16) -> bytes | None:
-    def _impl() -> bytes | None:
+def _probe_scan_safe_lift(code: object, mode: object, max_cfg_bytes: cython.longlong, probe_bytes: cython.longlong = 16) -> object:
+    def _impl() -> object:
         if mode != "scan-safe" or not code:
             return None
 
@@ -634,7 +673,8 @@ def _probe_scan_safe_lift(code: bytes, mode: str, max_cfg_bytes: int, probe_byte
     return _impl()
 
 
-def _decode_scan_safe_prefix_insns(code: bytes, mode: str, max_bytes: int) -> tuple[object, ...]:
+@cython.ccall
+def _decode_scan_safe_prefix_insns(code: object, mode: object, max_bytes: cython.longlong) -> tuple[object, ...]:
     if mode != "scan-safe" or max_bytes <= 0 or not code:
         return ()
 
@@ -643,9 +683,11 @@ def _decode_scan_safe_prefix_insns(code: bytes, mode: str, max_bytes: int) -> tu
     return tuple(arch.capstone.disasm(code[: min(len(code), max_bytes)], 0x1000))
 
 
+@cython.ccall
 def _should_skip_scan_safe_call_chain(
-    capstone_block: object, mode: str, max_cfg_bytes: int, min_call_count: int = 3
-) -> bool:
+    capstone_block: object, mode: object, max_cfg_bytes: cython.longlong, min_call_count: cython.longlong = 3
+) -> cython.bint:
+    insn: object
     if mode != "scan-safe" or max_cfg_bytes <= 0:
         return False
 
@@ -663,9 +705,11 @@ def _should_skip_scan_safe_call_chain(
     return False
 
 
+@cython.ccall
 def _should_skip_scan_safe_call_chain_from_insns(
-    insns: Sequence[object], mode: str, max_cfg_bytes: int, min_call_count: int = 3
-) -> bool:
+    insns: Sequence[object], mode: object, max_cfg_bytes: cython.longlong, min_call_count: cython.longlong = 3
+) -> cython.bint:
+    insn: object
     if mode != "scan-safe" or max_cfg_bytes <= 0:
         return False
 
@@ -679,10 +723,13 @@ def _should_skip_scan_safe_call_chain_from_insns(
     return False
 
 
+@cython.ccall
 def _tiny_guard_pre_call_ok_8616(
-    insns: Sequence[object], call_idx: int, conditional_jump_idx: int
-) -> bool:
+    insns: Sequence[object], call_idx: cython.longlong, conditional_jump_idx: cython.longlong
+) -> cython.bint:
     """Check that pre-call instructions stay within the allowed guard set."""
+    idx: object
+    insn: object
     allowed_pre_call = {"cmp", "test", "push", "mov", "lea", "xor", "or", "and", "sub"}
     for idx, insn in enumerate(insns[:call_idx]):
         if idx == conditional_jump_idx:
@@ -692,8 +739,10 @@ def _tiny_guard_pre_call_ok_8616(
     return True
 
 
-def _tiny_guard_post_call_ok_8616(insns: Sequence[object], call_idx: int) -> bool:
+@cython.ccall
+def _tiny_guard_post_call_ok_8616(insns: Sequence[object], call_idx: cython.longlong) -> cython.bint:
     """Check that post-call instructions are nops or sp-restoring adds."""
+    insn: object
     for insn in insns[call_idx + 1 : -1]:
         mnemonic = _dynamic_corpus_scan_getattr_8616(insn, "mnemonic", "").lower()
         if mnemonic == "nop":
@@ -704,8 +753,9 @@ def _tiny_guard_post_call_ok_8616(insns: Sequence[object], call_idx: int) -> boo
 
 
 def _should_skip_scan_safe_tiny_guard_call_helper(
-    insns: Sequence[object], mode: str, max_cfg_bytes: int, max_insns: int = 8
-) -> bool:
+    insns: Sequence[object], mode: object, max_cfg_bytes: cython.longlong, max_insns: cython.longlong = 8
+) -> cython.bint:
+    conditional_jump_idx: object
     if mode != "scan-safe" or max_cfg_bytes <= 0 or not insns:
         return False
 
@@ -713,17 +763,17 @@ def _should_skip_scan_safe_tiny_guard_call_helper(
     if len(local_insns) > max_insns:
         return False
 
-    total_bytes = sum(len(_dynamic_corpus_scan_getattr_8616(insn, "bytes", b"")) or 1 for insn in local_insns)
+    total_bytes = sum(len(_dynamic_corpus_scan_getattr_8616(insn, "bytes", b"")) or 1 for insn in iter(local_insns))
     if total_bytes > max_cfg_bytes:
         return False
 
-    calls = [idx for idx, insn in enumerate(local_insns) if _dynamic_corpus_scan_getattr_8616(insn, "mnemonic", "").lower() == "call"]
+    calls = [idx for idx, insn in builtins.iter(enumerate(local_insns)) if _dynamic_corpus_scan_getattr_8616(insn, "mnemonic", "").lower() == "call"]
     if len(calls) != 1:
         return False
     call_idx = calls[0]
 
-    rets = [idx for idx, insn in enumerate(insns) if _dynamic_corpus_scan_getattr_8616(insn, "mnemonic", "").lower().startswith("ret")]
-    if len(rets) != 1 or rets[0] != len(insns) - 1:
+    rets = [idx for idx, insn in builtins.iter(enumerate(insns)) if _dynamic_corpus_scan_getattr_8616(insn, "mnemonic", "").lower().startswith("ret")]
+    if len(rets) != 1 or operator.ne(rets[0], len(insns) - 1):
         return False
     conditional_jump_idx = _tiny_guard_conditional_jump_index_8616(insns, call_idx)
     if conditional_jump_idx is None:
@@ -734,8 +784,12 @@ def _should_skip_scan_safe_tiny_guard_call_helper(
     return _tiny_guard_post_call_ok_8616(insns, call_idx)
 
 
-def _tiny_guard_conditional_jump_index_8616(insns: Sequence[object], call_idx: int) -> int | None:
+def _tiny_guard_conditional_jump_index_8616(insns: Sequence[object], call_idx: cython.longlong) -> int | None:
     def _impl() -> int | None:
+        conditional_jump_idx: object
+        target: object
+        idx: object
+        insn: object
         ret_addr = _dynamic_corpus_scan_getattr_8616(insns[-1], "address", None)
         if not isinstance(ret_addr, int):
             return None
@@ -754,7 +808,7 @@ def _tiny_guard_conditional_jump_index_8616(insns: Sequence[object], call_idx: i
             target = _dynamic_corpus_scan_getattr_8616(operands[0], "imm", None)
             if target is None and hasattr(operands[0], "value"):
                 target = _dynamic_corpus_scan_getattr_8616(operands[0].value, "imm", None)
-            if target != ret_addr or idx >= call_idx:
+            if operator.ne(target, ret_addr) or idx >= call_idx:
                 return None
             conditional_jump_idx = idx
         return conditional_jump_idx
@@ -772,14 +826,17 @@ _SCAN_SAFE_KNOWN_HOTSPOTS = {
 }
 
 
-def _should_skip_scan_safe_known_hotspot(cod_file: str, proc_name: str, mode: str) -> bool:
+@cython.ccall
+def _should_skip_scan_safe_known_hotspot(cod_file: object, proc_name: object, mode: object) -> cython.bint:
     if mode != "scan-safe":
         return False
     return (cod_file, proc_name) in _SCAN_SAFE_KNOWN_HOTSPOTS
 
 
-def _should_skip_scan_safe_back_edge(capstone_block: object, mode: str, max_loop_bytes: int) -> bool:
-    def _impl() -> bool:
+def _should_skip_scan_safe_back_edge(capstone_block: object, mode: object, max_loop_bytes: cython.longlong) -> cython.bint:
+    def _impl() -> cython.bint:
+        target: object
+        insn: object
         if mode != "scan-safe" or max_loop_bytes <= 0:
             return False
 
@@ -810,8 +867,9 @@ def _should_skip_scan_safe_back_edge(capstone_block: object, mode: str, max_loop
 
 
 def _should_skip_scan_safe_decompile_for_cfg_shape(
-    cfg: object, mode: str, max_cfg_blocks: int, max_cfg_insns: int
-) -> bool:
+    cfg: object, mode: object, max_cfg_blocks: cython.longlong, max_cfg_insns: cython.longlong
+) -> cython.bint:
+    func: object
     if mode != "scan-safe" or (max_cfg_blocks <= 0 and max_cfg_insns <= 0):
         return False
     cfg_any = cast(Any, cfg)
@@ -820,18 +878,19 @@ def _should_skip_scan_safe_decompile_for_cfg_shape(
         return False
     blocks = list(func.blocks)
     block_count = len(blocks)
-    insn_count = sum(len(block.capstone.insns) for block in blocks)
+    insn_count = sum(len(block.capstone.insns) for block in iter(blocks))
     return (max_cfg_blocks > 0 and block_count > max_cfg_blocks) or (max_cfg_insns > 0 and insn_count > max_cfg_insns)
 
 
+@cython.ccall
 def _fail_scan_stage(
     result: FunctionScanResult,
     *,
-    stage: str,
-    failure_class: str,
-    reason: str,
-    fallback_kind: str | None = None,
-    classify_family: bool = False,
+    stage: object,
+    failure_class: object,
+    reason: object,
+    fallback_kind: object = None,
+    classify_family: cython.bint = False,
 ) -> FunctionScanResult:
     result.failure_class = failure_class
     result.reason = reason
@@ -843,15 +902,16 @@ def _fail_scan_stage(
     return _finish_scan(result)
 
 
+@cython.ccall
 def _finish_scan_safe_skip(
     result: FunctionScanResult,
     *,
-    fallback_kind: str,
-    family: str,
-    family_reason: str,
-    stage: str,
-    detail: str,
-    mark_lift_decode: bool = False,
+    fallback_kind: object,
+    family: object,
+    family_reason: object,
+    stage: object,
+    detail: object,
+    mark_lift_decode: cython.bint = False,
 ) -> FunctionScanResult:
     result.function_count = 1
     result.ok = True
@@ -864,39 +924,44 @@ def _finish_scan_safe_skip(
     return _finish_scan(result)
 
 
-def _scan_has_fallback_kind_8616(result: FunctionScanResult) -> bool:
+@cython.ccall
+def _scan_has_fallback_kind_8616(result: FunctionScanResult) -> cython.bint:
     return result.fallback_kind not in (None, "none")
 
 
-def _sorted_top_8616(counter: Counter[Any], key_name: str) -> list[dict[str, object]]:
+def _sorted_top_8616(counter: Counter[Any], key_name: object) -> list[dict[str, object]]:
     return [
-        {key_name: key, "count": count} for key, count in sorted(counter.items(), key=lambda item: (-item[1], item[0]))
+        {key_name: key, "count": count} for key, count in builtins.iter(sorted(tuple(counter.items()), key=lambda item: (-item[1], item[0])))
     ]
 
 
-def _sorted_top_tuples_8616(counter: Counter[Any], field_names: tuple[str, ...]) -> list[dict[str, object]]:
+def _sorted_top_tuples_8616(counter: Counter[Any], field_names: object) -> object:
+    count: object
+    keys: object
     rows: list[dict[str, object]] = []
-    for keys, count in sorted(counter.items(), key=lambda item: (-item[1], item[0])):
+    for keys, count in sorted(tuple(counter.items()), key=lambda item: (-item[1], item[0])):
         row: dict[str, object] = dict(zip(field_names, keys, strict=False))
         row["count"] = count
         rows.append(row)
     return rows
 
 
-def _classify_scan_files_8616(results: list[FunctionScanResult]) -> tuple[list[str], list[str], list[str]]:
-    per_file: dict[str, dict[str, int]] = defaultdict(lambda: {"scanned": 0, "ok": 0})
+def _classify_scan_files_8616(results: object) -> tuple[list[str], list[str], list[str]]:
+    result: object
+    per_file: object = defaultdict(lambda: {"scanned": 0, "ok": 0})
     for result in results:
         per_file[result.cod_file]["scanned"] += 1
         if result.ok:
             per_file[result.cod_file]["ok"] += 1
-    files_zero_success = sorted(name for name, stats in per_file.items() if stats["ok"] == 0)
-    files_scan_clean = sorted(name for name, stats in per_file.items() if stats["ok"] == stats["scanned"])
-    files_partial_success = sorted(name for name, stats in per_file.items() if 0 < stats["ok"] < stats["scanned"])
+    files_zero_success = sorted(name for name, stats in builtins.iter(per_file.items()) if stats["ok"] == 0)
+    files_scan_clean = sorted(name for name, stats in builtins.iter(per_file.items()) if operator.eq(stats["ok"], stats["scanned"]))
+    files_partial_success = sorted(name for name, stats in builtins.iter(per_file.items()) if 0 < stats["ok"] < stats["scanned"])
     return files_zero_success, files_scan_clean, files_partial_success
 
 
+@cython.ccall
 def _aggregate_scan_tail_validation_8616(
-    results: list[FunctionScanResult],
+    results: object,
 ) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
     tail_validation_records = [
         {
@@ -906,7 +971,7 @@ def _aggregate_scan_tail_validation_8616(
             "structuring": (result.tail_validation or {}).get("structuring"),
             "postprocess": (result.tail_validation or {}).get("postprocess"),
         }
-        for result in results
+        for result in iter(results)
     ]
     aggregate = build_x86_16_tail_validation_aggregate(tail_validation_records, scanned=len(results))
     return (
@@ -919,67 +984,68 @@ def _aggregate_scan_tail_validation_8616(
     )
 
 
-def _scan_rate_8616(count: int, total: int) -> float:
+@cython.ccall
+def _scan_rate_8616(count: cython.longlong, total: cython.longlong) -> cython.double:
     if total <= 0:
         return 0.0
     return round(count / total, 6)
 
 
-def _scan_summary_counters_8616(results: list[FunctionScanResult]) -> dict[str, object]:
+def _scan_summary_counters_8616(results: object) -> object:
     def _impl() -> dict[str, object]:
-        confidence_summaries = [classify_x86_16_recovery_confidence(asdict(result)) for result in results]
+        confidence_summaries = [classify_x86_16_recovery_confidence(asdict(result)) for result in iter(results)]
         return {
             "confidence_summaries": confidence_summaries,
-            "failure_counter": Counter(result.failure_class for result in results if result.failure_class is not None),
+            "failure_counter": Counter(result.failure_class for result in iter(results) if result.failure_class is not None),
             "fallback_counter": Counter(
-                result.fallback_kind for result in results if _scan_has_fallback_kind_8616(result)
+                result.fallback_kind for result in iter(results) if _scan_has_fallback_kind_8616(result)
             ),
             "stage_failure_counter": Counter(
-                stage.stage for result in results for stage in result.stages if not stage.ok
+                stage.stage for result in iter(results) for stage in iter(result.stages) if not stage.ok
             ),
             "timeout_stage_counter": Counter(
                 stage.stage
-                for result in results
-                for stage in result.stages
+                for result in iter(results)
+                for stage in iter(result.stages)
                 if not stage.ok and (stage.reason == "timeout" or result.failure_class == "timeout")
             ),
             "failure_file_counter": Counter(
-                result.cod_file for result in results if not result.ok and result.failure_class is not None
+                result.cod_file for result in iter(results) if not result.ok and result.failure_class is not None
             ),
             "failure_function_counter": Counter(
                 (result.cod_file, result.proc_name, result.proc_kind, result.failure_class)
-                for result in results
+                for result in iter(results)
                 if not result.ok and result.failure_class is not None
             ),
             "fallback_file_counter": Counter(
-                result.cod_file for result in results if _scan_has_fallback_kind_8616(result)
+                result.cod_file for result in iter(results) if _scan_has_fallback_kind_8616(result)
             ),
             "fallback_function_counter": Counter(
                 (result.cod_file, result.proc_name, result.proc_kind, result.fallback_kind)
-                for result in results
+                for result in iter(results)
                 if _scan_has_fallback_kind_8616(result)
             ),
             "family_counter": Counter(
-                result.semantic_family for result in results if result.semantic_family is not None
+                result.semantic_family for result in iter(results) if result.semantic_family is not None
             ),
             "family_failure_counter": Counter(
-                result.semantic_family for result in results if not result.ok and result.semantic_family is not None
+                result.semantic_family for result in iter(results) if not result.ok and result.semantic_family is not None
             ),
             "family_fallback_counter": Counter(
                 result.semantic_family
-                for result in results
+                for result in iter(results)
                 if _scan_has_fallback_kind_8616(result) and result.semantic_family is not None
             ),
             "family_cluster_counter": Counter(
                 (result.semantic_family, cluster)
-                for result in results
+                for result in iter(results)
                 if (cluster := _classify_ugly_cluster(result)) is not None and result.semantic_family is not None
             ),
             "readability_cluster_counter": Counter(
-                result.readability_cluster for result in results if result.readability_cluster is not None
+                result.readability_cluster for result in iter(results) if result.readability_cluster is not None
             ),
             "ugly_cluster_counter": Counter(
-                cluster for result in results if (cluster := _classify_ugly_cluster(result)) is not None
+                cluster for result in iter(results) if (cluster := _classify_ugly_cluster(result)) is not None
             ),
         }
 
@@ -987,41 +1053,41 @@ def _scan_summary_counters_8616(results: list[FunctionScanResult]) -> dict[str, 
 
 
 def _scan_summary_totals_8616(
-    results: list[FunctionScanResult], confidence_summaries: list[RecoveryConfidenceSummary]
-) -> dict[str, object]:
+    results: object, confidence_summaries: object
+) -> object:
     def _impl() -> dict[str, object]:
-        fallback_results = [result for result in results if _scan_has_fallback_kind_8616(result)]
+        fallback_results = [result for result in iter(results) if _scan_has_fallback_kind_8616(result)]
         return {
             "files": _classify_scan_files_8616(results),
-            "full_decompile_count": sum(1 for result in results if result.decompiled_count > 0),
-            "cfg_only_count": sum(1 for result in results if result.fallback_kind == "cfg_only"),
-            "lift_only_count": sum(1 for result in results if result.fallback_kind == "lift_only"),
-            "block_lift_count": sum(1 for result in results if result.fallback_kind == "block_lift"),
-            "rewrite_failure_count": sum(1 for result in results if result.rewrite_failed),
-            "structuring_failure_count": sum(1 for result in results if result.structuring_failed),
-            "regeneration_failure_count": sum(1 for result in results if result.regeneration_failed),
-            "confidence_status_counter": Counter(summary.status for summary in confidence_summaries),
+            "full_decompile_count": sum(1 for result in iter(results) if result.decompiled_count > 0),
+            "cfg_only_count": sum(1 for result in iter(results) if result.fallback_kind == "cfg_only"),
+            "lift_only_count": sum(1 for result in iter(results) if result.fallback_kind == "lift_only"),
+            "block_lift_count": sum(1 for result in iter(results) if result.fallback_kind == "block_lift"),
+            "rewrite_failure_count": sum(1 for result in iter(results) if result.rewrite_failed),
+            "structuring_failure_count": sum(1 for result in iter(results) if result.structuring_failed),
+            "regeneration_failure_count": sum(1 for result in iter(results) if result.regeneration_failed),
+            "confidence_status_counter": Counter(summary.status for summary in iter(confidence_summaries)),
             "confidence_scan_safe_counter": Counter(
-                summary.scan_safe_classification for summary in confidence_summaries
+                summary.scan_safe_classification for summary in iter(confidence_summaries)
             ),
             "confidence_assumption_counter": Counter(
-                item.kind for summary in confidence_summaries for item in summary.assumptions
+                item.kind for summary in iter(confidence_summaries) for item in iter(summary.assumptions)
             ),
             "confidence_evidence_counter": Counter(
-                item.kind for summary in confidence_summaries for item in summary.evidence
+                item.kind for summary in iter(confidence_summaries) for item in iter(summary.evidence)
             ),
             "confidence_diagnostic_counter": Counter(
-                diagnostic for summary in confidence_summaries for diagnostic in summary.diagnostics
+                diagnostic for summary in iter(confidence_summaries) for diagnostic in iter(summary.diagnostics)
             ),
-            "interrupt_dos_helper_count": sum(result.interrupt_dos_helper_count for result in results),
-            "interrupt_bios_helper_count": sum(result.interrupt_bios_helper_count for result in results),
-            "interrupt_wrapper_call_count": sum(result.interrupt_wrapper_call_count for result in results),
-            "interrupt_unresolved_wrapper_count": sum(result.interrupt_unresolved_wrapper_count for result in results),
-            "fallback_only_count": sum(1 for result in fallback_results if result.ok),
-            "true_failure_count": sum(1 for result in results if not result.ok),
+            "interrupt_dos_helper_count": sum(result.interrupt_dos_helper_count for result in iter(results)),
+            "interrupt_bios_helper_count": sum(result.interrupt_bios_helper_count for result in iter(results)),
+            "interrupt_wrapper_call_count": sum(result.interrupt_wrapper_call_count for result in iter(results)),
+            "interrupt_unresolved_wrapper_count": sum(result.interrupt_unresolved_wrapper_count for result in iter(results)),
+            "fallback_only_count": sum(1 for result in iter(fallback_results) if result.ok),
+            "true_failure_count": sum(1 for result in iter(results) if not result.ok),
             "unclassified_failure_count": sum(
                 1
-                for result in results
+                for result in iter(results)
                 if not result.ok and result.failure_class in {"analysis_failure", "unknown_failure"}
             ),
         }
@@ -1030,8 +1096,9 @@ def _scan_summary_totals_8616(
 
 
 def _scan_summary_output_8616(
-    results: list[FunctionScanResult], mode: str, counters: dict[str, object], totals: dict[str, object]
+    results: object, mode: object, counters: object, totals: object
 ) -> dict[str, object]:
+    files_payload: object
     failure_counter = _counter_payload_8616(counters, "failure_counter")
     fallback_counter = _counter_payload_8616(counters, "fallback_counter")
     stage_failure_counter = _counter_payload_8616(counters, "stage_failure_counter")
@@ -1083,14 +1150,14 @@ def _scan_summary_output_8616(
     return {
         "mode": mode,
         "scanned": len(results),
-        "ok": sum(1 for result in results if result.ok),
-        "failed": sum(1 for result in results if not result.ok),
-        "failure_counts": dict(sorted(failure_counter.items())),
-        "fallback_counts": dict(sorted(fallback_counter.items())),
+        "ok": sum(1 for result in iter(results) if result.ok),
+        "failed": sum(1 for result in iter(results) if not result.ok),
+        "failure_counts": dict(sorted(tuple(failure_counter.items()))),
+        "fallback_counts": dict(sorted(tuple(fallback_counter.items()))),
         "top_failure_classes": top_failure_classes,
         "top_fallback_kinds": top_fallback_kinds,
         "top_failure_stages": top_failure_stages,
-        "timeout_stage_counts": dict(sorted(timeout_stage_counter.items())),
+        "timeout_stage_counts": dict(sorted(tuple(timeout_stage_counter.items()))),
         "top_failure_files": top_failure_files,
         "top_failure_functions": top_failure_functions,
         "top_fallback_files": top_fallback_files,
@@ -1125,19 +1192,19 @@ def _scan_summary_output_8616(
             "wrapper_calls": _int_payload_8616(totals, "interrupt_wrapper_call_count"),
             "unresolved_wrappers": _int_payload_8616(totals, "interrupt_unresolved_wrapper_count"),
         },
-        "confidence": summarize_recovery_confidence([asdict(result) for result in results]),
-        "confidence_status_counts": dict(sorted(_counter_payload_8616(totals, "confidence_status_counter").items())),
+        "confidence": summarize_recovery_confidence([asdict(result) for result in iter(results)]),
+        "confidence_status_counts": dict(sorted(tuple(_counter_payload_8616(totals, "confidence_status_counter").items()))),
         "confidence_scan_safe_counts": dict(
-            sorted(_counter_payload_8616(totals, "confidence_scan_safe_counter").items())
+            sorted(tuple(_counter_payload_8616(totals, "confidence_scan_safe_counter").items()))
         ),
         "confidence_assumption_counts": dict(
-            sorted(_counter_payload_8616(totals, "confidence_assumption_counter").items())
+            sorted(tuple(_counter_payload_8616(totals, "confidence_assumption_counter").items()))
         ),
         "confidence_evidence_counts": dict(
-            sorted(_counter_payload_8616(totals, "confidence_evidence_counter").items())
+            sorted(tuple(_counter_payload_8616(totals, "confidence_evidence_counter").items()))
         ),
         "confidence_diagnostic_counts": dict(
-            sorted(_counter_payload_8616(totals, "confidence_diagnostic_counter").items())
+            sorted(tuple(_counter_payload_8616(totals, "confidence_diagnostic_counter").items()))
         ),
         "tail_validation": tail_validation_summary,
         "tail_validation_surface": tail_validation_surface,
@@ -1154,16 +1221,16 @@ def _scan_summary_output_8616(
             "recovery": fallback_only_count,
             "readability": full_decompile_count,
         },
-        "results": [asdict(result) for result in results],
+        "results": [asdict(result) for result in iter(results)],
     }
 
 
 def _scan_safe_prefix_skip_result_8616(
     result: FunctionScanResult,
     *,
-    code_len: int,
-    mode: str,
-    max_cfg_bytes: int,
+    code_len: cython.longlong,
+    mode: object,
+    max_cfg_bytes: cython.longlong,
     prefix_insns: Sequence[object],
     cod_file: Path,
 ) -> FunctionScanResult | None:
@@ -1176,7 +1243,7 @@ def _scan_safe_prefix_skip_result_8616(
             and not should_skip_call_chain
             and _should_skip_scan_safe_call_chain_from_insns(prefix_insns, mode, max_cfg_bytes)
         ):
-            call_count = sum(1 for insn in prefix_insns if _dynamic_corpus_scan_getattr_8616(insn, "mnemonic", "").lower() == "call")
+            call_count = sum(1 for insn in iter(prefix_insns) if _dynamic_corpus_scan_getattr_8616(insn, "mnemonic", "").lower() == "call")
             return _finish_scan_safe_skip(
                 result,
                 fallback_kind="cfg_only",
@@ -1231,10 +1298,11 @@ def _scan_safe_prefix_skip_result_8616(
     return _impl()
 
 
+@cython.ccall
 def _lift_block_scan_stage_8616(
     result: FunctionScanResult,
     project: angr.Project,
-    code: bytes,
+    code: object,
 ) -> FunctionScanResult | None:
     """Lift the whole blob to VEX; return a failure result or None."""
     try:
@@ -1246,11 +1314,12 @@ def _lift_block_scan_stage_8616(
     return None
 
 
+@cython.ccall
 def _scan_safe_probe_lift_8616(
     result: FunctionScanResult,
-    code: bytes,
-    mode: str,
-    max_cfg_bytes: int,
+    code: object,
+    mode: object,
+    max_cfg_bytes: cython.longlong,
 ) -> FunctionScanResult | None:
     """Run the bounded scan-safe lift probe; return a failure result or None."""
     if mode != "scan-safe" or max_cfg_bytes <= 0:
@@ -1266,12 +1335,13 @@ def _scan_safe_probe_lift_8616(
 def _scan_safe_cfg_preflight_8616(
     result: FunctionScanResult,
     project: angr.Project,
-    code: bytes,
-    mode: str,
-    max_cfg_bytes: int,
-    max_loop_bytes: int,
+    code: object,
+    mode: object,
+    max_cfg_bytes: cython.longlong,
+    max_loop_bytes: cython.longlong,
 ) -> FunctionScanResult | None:
     """Return an early skip result for relocation/loop/call-heavy helpers."""
+    loop_block: object
     if mode == "decompile-reloc-free" and (result.has_near_call_reloc or result.has_far_call_reloc):
         return _fail_scan_stage(
             result,
@@ -1305,7 +1375,7 @@ def _scan_safe_cfg_preflight_8616(
     if loop_block is not None and _should_skip_scan_safe_call_chain(loop_block.capstone, mode, max_cfg_bytes):
         call_count = sum(
             1
-            for insn in _dynamic_corpus_scan_getattr_8616(loop_block.capstone, "insns", ())
+            for insn in builtins.iter(_dynamic_corpus_scan_getattr_8616(loop_block.capstone, "insns", ()))
             if _dynamic_corpus_scan_getattr_8616(insn, "mnemonic", "").lower() == "call"
         )
         return _finish_scan_safe_skip(
@@ -1320,14 +1390,15 @@ def _scan_safe_cfg_preflight_8616(
     return None
 
 
+@cython.ccall
 def _cfg_shape_scan_skip_8616(
     result: FunctionScanResult,
     cfg: object,
-    code: bytes,
-    mode: str,
-    max_cfg_blocks: int,
-    max_cfg_insns: int,
-    max_decompile_bytes: int,
+    code: object,
+    mode: object,
+    max_cfg_blocks: cython.longlong,
+    max_cfg_insns: cython.longlong,
+    max_decompile_bytes: cython.longlong,
 ) -> FunctionScanResult | None:
     """Return a cfg_only result when CFG shape or size blocks decompile."""
     if _should_skip_scan_safe_decompile_for_cfg_shape(cfg, mode, max_cfg_blocks, max_cfg_insns):
@@ -1364,6 +1435,7 @@ def _cfg_shape_scan_skip_8616(
     return None
 
 
+@cython.ccall
 def _record_codegen_diagnostics_8616(result: FunctionScanResult, codegen: object) -> None:
     """Copy structuring/rewrite/regeneration failure diagnostics off codegen."""
     if codegen is None:
@@ -1381,7 +1453,8 @@ def _record_codegen_diagnostics_8616(result: FunctionScanResult, codegen: object
     result.regeneration_failure_reason = _dynamic_corpus_scan_getattr_8616(codegen, "_inertia_regeneration_error", None)
 
 
-def _empty_codegen_scan_result_8616(result: FunctionScanResult, mode: str) -> FunctionScanResult:
+@cython.ccall
+def _empty_codegen_scan_result_8616(result: FunctionScanResult, mode: object) -> FunctionScanResult:
     """Resolve the decompile stage when codegen produced no text."""
     failure_class, reason = classify_failure(
         "decompile",
@@ -1405,14 +1478,16 @@ def _empty_codegen_scan_result_8616(result: FunctionScanResult, mode: str) -> Fu
     return _finish_scan(result)
 
 
+@cython.ccall
 def _decompile_scan_result_8616(
     result: FunctionScanResult,
     project: angr.Project,
     func: object,
     cfg: object,
-    mode: str,
+    mode: object,
 ) -> FunctionScanResult:
     """Run the decompile stage and record its evidence on the result."""
+    codegen: object
     dec = project.analyses.Decompiler(func, cfg=cast(Any, cfg))
     codegen = _dynamic_corpus_scan_getattr_8616(dec, "codegen", None)
     func_info = _dynamic_corpus_scan_getattr_8616(func, "info", None)
@@ -1439,18 +1514,24 @@ def _decompile_scan_result_8616(
     return _finish_scan(result)
 
 
+@cython.ccall
 def _scan_function_stages_8616(
     result: FunctionScanResult,
     cod_file: Path,
-    code: bytes,
-    mode: str,
-    max_cfg_bytes: int,
-    max_cfg_blocks: int,
-    max_cfg_insns: int,
-    max_decompile_bytes: int,
-    max_loop_bytes: int,
+    code: object,
+    mode: object,
+    max_cfg_bytes: cython.longlong,
+    max_cfg_blocks: cython.longlong,
+    max_cfg_insns: cython.longlong,
+    max_decompile_bytes: cython.longlong,
+    max_loop_bytes: cython.longlong,
 ) -> FunctionScanResult:
     """Run load/lift/cfg/decompile stages under the scan alarm window."""
+    cfg_skip: object
+    lift_failure: object
+    prefix_skip: object
+    probe_skip: object
+    scan_safe_skip: object
     try:
         project = project_from_bytes(code)
         _mark_stage(result, "load", True)
@@ -1534,18 +1615,19 @@ def _scan_function_stages_8616(
         return _finish_scan(result)
 
 
+@cython.ccall
 def scan_function(
     cod_file: Path,
-    proc_name: str,
-    proc_kind: str,
-    code: bytes,
-    timeout_sec: int,
-    mode: str,
-    max_cfg_bytes: int = 192,
-    max_cfg_blocks: int = 8,
-    max_cfg_insns: int = 200,
-    max_decompile_bytes: int = 384,
-    max_loop_bytes: int = 128,
+    proc_name: object,
+    proc_kind: object,
+    code: object,
+    timeout_sec: cython.longlong,
+    mode: object,
+    max_cfg_bytes: cython.longlong = 192,
+    max_cfg_blocks: cython.longlong = 8,
+    max_cfg_insns: cython.longlong = 200,
+    max_decompile_bytes: cython.longlong = 384,
+    max_loop_bytes: cython.longlong = 128,
 ) -> FunctionScanResult:
     """Scan a single COD procedure and return structured recovery/reporting status."""
     global _SCAN_ACTIVE
@@ -1585,8 +1667,10 @@ def scan_function(
         signal.signal(signal.SIGALRM, old_handler)
 
 
-def summarize_results(results: list[FunctionScanResult], mode: str) -> dict[str, object]:
+@cython.ccall
+def summarize_results(results: object, mode: object) -> object:
     """Summarize structured corpus scan results for reporting."""
+    confidence_summaries: object
     counters = _scan_summary_counters_8616(results)
     confidence_summaries = counters.get("confidence_summaries", [])
     totals = _scan_summary_totals_8616(

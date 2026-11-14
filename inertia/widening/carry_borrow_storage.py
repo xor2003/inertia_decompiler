@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Widen Alias-proven carry-result stores into one typed stack destination.
 
 Layer: Widening.
@@ -9,6 +10,8 @@ Do not join values from rendered text, cosmetic shape, postprocess, or CLI/repor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -28,6 +31,8 @@ from .carry_borrow_values import (
     WideCarryBorrowValue8616,
 )
 from .pair_type_contracts import WidePairEvidence8616
+import dataclasses
+import operator
 
 
 class WideCarryBorrowStorageVerdict8616(StrEnum):
@@ -47,7 +52,7 @@ class WideCarryBorrowStorageFailure8616(StrEnum):
     VALUE_PROVENANCE_MISMATCH = "value_provenance_mismatch"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideCarryBorrowStorage8616:
     """One wide arithmetic value stored into an exact four-byte stack range."""
 
@@ -55,7 +60,7 @@ class WideCarryBorrowStorage8616:
     destination: CarryBorrowDestinationAliasFact8616
     address: IRAddress
     storage: AliasStorageFacts
-    source_versions: tuple[int, ...]
+    source_versions: object
 
     @property
     def pair(self) -> WidePairEvidence8616:
@@ -63,7 +68,7 @@ class WideCarryBorrowStorage8616:
         return self.value.pair
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideCarryBorrowStorageResolution8616:
     """Materialized wide storage or typed refusal for one Alias destination."""
 
@@ -73,45 +78,46 @@ class WideCarryBorrowStorageResolution8616:
     failure: WideCarryBorrowStorageFailure8616 | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideCarryBorrowStorageStats8616:
     """Closed evidence accounting for wide destination candidates."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every Alias destination has one retained outcome."""
         return (
-            self.raw_fact_count == self.normalized_fact_count
-            and self.raw_fact_count == self.materialized_count + self.failure_count
-            and self.classified_fact_count == self.materialized_count
+            operator.eq(self.raw_fact_count, self.normalized_fact_count)
+            and operator.eq(self.raw_fact_count, self.materialized_count + self.failure_count)
+            and operator.eq(self.classified_fact_count, self.materialized_count)
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideCarryBorrowStorageEvidence8616:
     """Function-level wide destinations and explicit refusals."""
 
-    function_addr: int
-    resolutions: tuple[WideCarryBorrowStorageResolution8616, ...]
+    function_addr: cython.longlong
+    resolutions: object
     stats: WideCarryBorrowStorageStats8616
 
     @property
     def values(self) -> tuple[WideCarryBorrowStorage8616, ...]:
         """Return materialized wide destinations in deterministic order."""
-        return tuple(item.value for item in self.resolutions if item.value is not None)
+        return tuple(item.value for item in iter(self.resolutions) if item.value is not None)
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether resolution count and evidence accounting are closed."""
-        return self.stats.complete and len(self.resolutions) == self.stats.raw_fact_count
+        return self.stats.complete and operator.eq(len(self.resolutions), self.stats.raw_fact_count)
 
 
+@cython.ccall
 def _refusal(
     alias: CarryBorrowDestinationAliasResolution8616,
     failure: WideCarryBorrowStorageFailure8616,
@@ -127,7 +133,7 @@ def _wide_value_for_alias(
     evidence: WideCarryBorrowEvidence8616,
     fact: CarryBorrowDestinationAliasFact8616,
 ) -> WideCarryBorrowValue8616 | None:
-    matches = tuple(value for value in evidence.values if value.provenance is fact.carry.link)
+    matches = tuple(value for value in iter(evidence.values) if value.provenance is fact.carry.link)
     return matches[0] if len(matches) == 1 else None
 
 
@@ -136,6 +142,8 @@ def _materialize(
     alias: CarryBorrowDestinationAliasResolution8616,
     fact: CarryBorrowDestinationAliasFact8616,
 ) -> WideCarryBorrowStorageResolution8616:
+    storage: object
+    value: object
     value = _wide_value_for_alias(wide_values, fact)
     if value is None:
         return _refusal(alias, WideCarryBorrowStorageFailure8616.VALUE_PROVENANCE_MISMATCH)
@@ -146,13 +154,13 @@ def _materialize(
         fact.high_store.storage,
     )
     source_versions = fact.low_store.versions + fact.high_store.versions
-    if storage is None or len(source_versions) != low.size + high.size:
+    if storage is None or operator.ne(len(source_versions), low.size + high.size):
         return _refusal(alias, WideCarryBorrowStorageFailure8616.STORAGE_JOIN_FAILED)
     owners = (fact.low_store, fact.high_store)
     if any(
         not storage.contains(owner.storage)
-        or any(not owner.storage.contains(item.storage) for item in owner.slices)
-        for owner in owners
+        or any(not owner.storage.contains(item.storage) for item in iter(owner.slices))
+        for owner in iter(owners)
     ):
         return _refusal(
             alias,
@@ -185,10 +193,10 @@ def widen_carry_borrow_storage_8616(
     aliases: CarryBorrowDestinationAliasEvidence8616,
 ) -> WideCarryBorrowStorageEvidence8616:
     """Join every exact Alias-proven destination while preserving refusals."""
-    if wide_values.function_addr != aliases.function_addr:
+    if operator.ne(wide_values.function_addr, aliases.function_addr):
         resolutions = tuple(
             _refusal(item, WideCarryBorrowStorageFailure8616.FUNCTION_IDENTITY_MISMATCH)
-            for item in aliases.resolutions
+            for item in iter(aliases.resolutions)
         )
     else:
         resolutions = tuple(
@@ -196,9 +204,9 @@ def widen_carry_borrow_storage_8616(
             if item.verdict is CarryBorrowDestinationAliasVerdict8616.PROVEN
             and item.fact is not None
             else _refusal(item, WideCarryBorrowStorageFailure8616.ALIAS_REFUSED)
-            for item in aliases.resolutions
+            for item in iter(aliases.resolutions)
         )
-    materialized = sum(item.value is not None for item in resolutions)
+    materialized = sum(item.value is not None for item in iter(resolutions))
     return WideCarryBorrowStorageEvidence8616(
         function_addr=aliases.function_addr,
         resolutions=resolutions,

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Run bounded IR arithmetic normalization around native SSA simplification.
 
 Layer: Frontend/IR adapter.
@@ -7,6 +8,8 @@ or type recovery and does not relax semantic or recompilation validation.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from typing import Protocol, cast
@@ -22,7 +25,7 @@ from inertia.ir.ail_register_displacement import RegisterDisplacementReport8616,
 class _Architecture8616(Protocol):
     """Architecture identity at the native analysis boundary."""
 
-    name: str
+    name: object
 
 
 class _Project8616(Protocol):
@@ -38,7 +41,7 @@ class _Clinic8616(Protocol):
     _ail_graph: nx.DiGraph[Block]
     _ail_manager: Manager
     reaching_definitions: object | None
-    _inertia_register_displacement_reports_8616: tuple[RegisterDisplacementReport8616, ...]
+    _inertia_register_displacement_reports_8616: object
 
 
 def apply_register_displacement_compatibility_8616() -> None:

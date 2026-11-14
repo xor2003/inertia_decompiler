@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Recover a complete function catalog for program-scoped evidence.
 
 Layer: CLI/fallback/reporting orchestration.
@@ -7,6 +8,8 @@ does not classify IR, Alias, Widening, call arguments, or rendered C.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 import logging
@@ -34,26 +37,30 @@ from .program_callsite_cache import (
     program_callsite_evidence_from_project_8616,
     store_program_callsite_cache_8616,
 )
+import dataclasses
 
 log: logging.Logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RecoveredIndexedAliasCatalog8616:
     """One isolated evidence project and its complete function boundaries."""
 
     evidence_project: object
-    functions: tuple[object, ...]
+    functions: object
     ir_ssa_cache: FunctionIRSSACatalogResult8616
 
 
 def recover_direct_indexed_alias_catalog_8616(
     source_project: object,
     *,
-    timeout: int,
-    window: int,
+    timeout: cython.longlong,
+    window: cython.longlong,
 ) -> RecoveredIndexedAliasCatalog8616 | None:
     """Recover a complete catalog, refusing incomplete discovery evidence."""
+    catalog: object
+    _cfg: object
+    function: object
     evidence_project = isolated_discovery_evidence_project_8616(
         cast(angr.Project, source_project)
     )
@@ -76,7 +83,7 @@ def recover_direct_indexed_alias_catalog_8616(
     # native manager while its discovery context is still strongly owned.
     for _cfg, function in recovered:
         bind_function_source_owner_8616(evidence_project, function)
-    functions = tuple(function for _cfg, function in recovered)
+    functions = tuple(function for _cfg, function in iter(recovered))
     hydration = hydrate_function_ir_ssa_catalog_8616(
         evidence_project,
         functions,
@@ -90,14 +97,15 @@ def recover_direct_indexed_alias_catalog_8616(
     )
 
 
+@cython.ccall
 def publish_recovered_program_callsites_8616(
     catalog: RecoveredIndexedAliasCatalog8616,
     target_project: object,
     source_project: object,
     *,
-    cache_key: dict[str, object] | None,
-    already_ready: bool,
-) -> bool:
+    cache_key: object,
+    already_ready: cython.bint,
+) -> cython.bint:
     """Publish complete callsites when required and return readiness."""
     if already_ready:
         return True

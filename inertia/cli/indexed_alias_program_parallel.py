@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Build independent Alias function evidence in bounded fork workers.
 
 Layer: CLI/fallback/reporting orchestration.
@@ -10,6 +11,8 @@ does not classify Alias facts or infer semantic evidence.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import functools
 import logging
@@ -42,10 +45,13 @@ from inertia.ir.function_ssa_registry import (
 from inertia.ir.ssa_function import build_x86_16_function_ssa
 
 from .runtime_support import PreforkJobPool
+import dataclasses
+import operator
+import builtins
 
 log: logging.Logger = logging.getLogger(__name__)
 
-_MAX_INDEXED_ALIAS_WORKERS_8616: int = 3
+_MAX_INDEXED_ALIAS_WORKERS_8616: cython.longlong = 3
 _INDEXED_ALIAS_WORKERS_ENV_8616: str = "INERTIA_INDEXED_ALIAS_WORKERS"
 
 
@@ -61,7 +67,7 @@ class _FunctionAddressBoundary8616(Protocol):
     addr: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _IndexedAliasFunctionBundle8616:
     """One worker's Alias result and its exact reusable raw IR."""
 
@@ -69,12 +75,15 @@ class _IndexedAliasFunctionBundle8616:
     raw_ir: IRFunctionArtifact | None
 
 
+@cython.ccall
 def indexed_alias_program_worker_count_8616(
-    function_count: int,
+    function_count: cython.longlong,
     *,
     max_workers: int | None = None,
-) -> int:
+) -> cython.longlong:
     """Return explicit bounded concurrency, or one worker by default."""
+    configured: object
+    requested: object
     if function_count <= 1:
         return 1
     available = max(1, (os.cpu_count() or 1) - 1)
@@ -91,6 +100,7 @@ def indexed_alias_program_worker_count_8616(
     return min(function_count, available, requested, _MAX_INDEXED_ALIAS_WORKERS_8616)
 
 
+@cython.ccall
 def indexed_alias_function_selection_8616(
     function: object,
 ) -> IndexedAliasFunctionSelection8616:
@@ -104,8 +114,10 @@ def indexed_alias_function_selection_8616(
     return IndexedAliasFunctionSelection8616(function_addr, function)
 
 
-def _selection_cost_8616(selection: IndexedAliasFunctionSelection8616) -> int:
+@cython.ccall
+def _selection_cost_8616(selection: IndexedAliasFunctionSelection8616) -> cython.longlong:
     """Return a deterministic block-count scheduling estimate."""
+    function: object
     function = selection.function
     if function is None:
         return 0
@@ -119,6 +131,7 @@ def _selection_cost_8616(selection: IndexedAliasFunctionSelection8616) -> int:
         return 0
 
 
+@cython.ccall
 def _publish_parent_artifacts_8616(
     project: object,
     bundle: _IndexedAliasFunctionBundle8616,
@@ -143,9 +156,10 @@ def _publish_parent_artifacts_8616(
         raise ValueError("parallel IR-stage SSA publication conflicted on parent project")
 
 
+@cython.ccall
 def _indexed_alias_worker_8616(
     project: object,
-    by_addr: dict[int, IndexedAliasFunctionSelection8616],
+    by_addr: object,
     payload: object,
 ) -> object:
     """Build one function using the fork-inherited immutable project view."""
@@ -170,26 +184,29 @@ def _indexed_alias_worker_8616(
 
 def _run_parallel_bundles_8616(
     project: object,
-    ordered: tuple[IndexedAliasFunctionSelection8616, ...],
-    worker_count: int,
-    by_addr: dict[int, IndexedAliasFunctionSelection8616],
-) -> dict[int, _IndexedAliasFunctionBundle8616] | None:
+    ordered: object,
+    worker_count: cython.longlong,
+    by_addr: object,
+) -> object:
     """Run the bounded worker pool; return per-address bundles or None."""
+    pool: object
+    job_id: object
+    payload: object
     jobs: list[tuple[object, object]] = [
         (selection.function_addr, selection.function_addr)
-        for selection in sorted(
+        for selection in builtins.iter(sorted(
             ordered,
             key=lambda item: (-_selection_cost_8616(item), item.function_addr),
-        )
+        ))
     ]
-    pool: PreforkJobPool | None = None
+    pool = None
     try:
         pool = PreforkJobPool(
             max_workers=worker_count,
             worker_func=functools.partial(_indexed_alias_worker_8616, project, by_addr),
             name_prefix="indexed_alias",
         )
-        bundles_by_addr: dict[int, _IndexedAliasFunctionBundle8616] = {}
+        bundles_by_addr: dict[cython.longlong, _IndexedAliasFunctionBundle8616] = {}
         for job_id, payload in pool.run_unordered(jobs):
             if not isinstance(job_id, int) or not isinstance(
                 payload, _IndexedAliasFunctionBundle8616
@@ -203,7 +220,7 @@ def _run_parallel_bundles_8616(
         if pool is not None:
             pool.shutdown()
 
-    if set(bundles_by_addr) != set(by_addr):
+    if operator.ne(set(bundles_by_addr), set(by_addr)):
         log.warning("parallel indexed Alias census returned an incomplete job set")
         return None
     return bundles_by_addr
@@ -216,6 +233,8 @@ def build_indexed_alias_program_evidence_bounded_8616(
     max_workers: int | None = None,
 ) -> IndexedAliasProgramEvidence8616:
     """Build one closed Alias census with deterministic bounded fork workers."""
+    bundles_by_addr: object
+    bundle: object
     ordered = tuple(sorted(selections, key=lambda item: item.function_addr))
     worker_count = indexed_alias_program_worker_count_8616(
         len(ordered),
@@ -223,20 +242,20 @@ def build_indexed_alias_program_evidence_bounded_8616(
     )
     if worker_count <= 1:
         return build_indexed_alias_program_evidence_8616(project, ordered)
-    by_addr = {selection.function_addr: selection for selection in ordered}
-    if len(by_addr) != len(ordered):
+    by_addr = {selection.function_addr: selection for selection in iter(ordered)}
+    if operator.ne(len(by_addr), len(ordered)):
         return build_indexed_alias_program_evidence_8616(project, ordered)
 
     bundles_by_addr = _run_parallel_bundles_8616(project, ordered, worker_count, by_addr)
     if bundles_by_addr is None:
         return build_indexed_alias_program_evidence_8616(project, ordered)
-    bundles = tuple(bundles_by_addr[selection.function_addr] for selection in ordered)
+    bundles = tuple(bundles_by_addr[selection.function_addr] for selection in iter(ordered))
     try:
         for bundle in bundles:
             _publish_parent_artifacts_8616(project, bundle)
         return assemble_indexed_alias_program_evidence_8616(
-            tuple(bundle.result for bundle in bundles),
-            tuple(selection.function_addr for selection in ordered),
+            tuple(bundle.result for bundle in iter(bundles)),
+            tuple(selection.function_addr for selection in iter(ordered)),
         )
     except (TypeError, ValueError) as error:
         log.warning("parallel indexed Alias evidence refused: %s", error)
@@ -250,7 +269,7 @@ def build_discovered_indexed_alias_program_bounded_8616(
     max_workers: int | None = None,
 ) -> IndexedAliasProgramEvidence8616:
     """Build a bounded census from exact discovered function boundaries."""
-    selections = tuple(indexed_alias_function_selection_8616(item) for item in functions)
+    selections = tuple(indexed_alias_function_selection_8616(item) for item in iter(functions))
     return build_indexed_alias_program_evidence_bounded_8616(
         project,
         selections,

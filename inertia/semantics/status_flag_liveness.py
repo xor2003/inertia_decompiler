@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed status-flag liveness for decoded x86 instructions.
 
 Layer: Semantics.
@@ -10,6 +11,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Sequence
 from typing import Protocol, cast
@@ -28,19 +31,20 @@ from .status_flag_contracts import (
     StatusFlagLivenessStats8616,
     StatusFlagLivenessVerdict8616,
 )
+import operator
 
 
 class _CapstoneOperandBoundary8616(Protocol):
     """Third-party Capstone operand fields used by the decode adapter."""
 
-    type: int
-    imm: int
+    type: cython.longlong
+    imm: cython.longlong
 
 
 class _CapstoneInstructionBoundary8616(Protocol):
     """Third-party Capstone instruction fields used by the decode adapter."""
 
-    mnemonic: str
+    mnemonic: object
     operands: Sequence[object]
 
 
@@ -118,8 +122,10 @@ _LAHF_FLAGS_8616 = (
 )
 
 
+@cython.ccall
 def decoded_status_flag_instruction_8616(instruction: object) -> DecodedStatusFlagInstruction8616 | None:
     """Project a pyvex/Capstone instruction boundary into typed evidence."""
+    prefix: object
     try:
         decoded = cast(_FutureInstructionBoundary8616, instruction).cs
         mnemonic_parts = str(decoded.mnemonic).lower().split()
@@ -141,14 +147,15 @@ def decoded_status_flag_instruction_8616(instruction: object) -> DecodedStatusFl
         if len(operands) >= 2:
             count_operand = cast(_CapstoneOperandBoundary8616, operands[-1])
             try:
-                if count_operand.type == CS_OP_IMM:
+                if operator.eq(count_operand.type, CS_OP_IMM):
                     immediate_count = int(count_operand.imm)
             except (AttributeError, TypeError, ValueError):
                 immediate_count = None
     return DecodedStatusFlagInstruction8616(mnemonic, immediate_count, repeat_prefix)
 
 
-def binop_status_flag_writes_8616(op_name: str) -> StatusFlag8616 | None:
+@cython.ccall
+def binop_status_flag_writes_8616(op_name: object) -> StatusFlag8616 | None:
     """Return status bits written by one simple-lifter binary operation."""
     if op_name in {"add", "sub"}:
         return STATUS_FLAGS_8616
@@ -157,9 +164,13 @@ def binop_status_flag_writes_8616(op_name: str) -> StatusFlag8616 | None:
     return None
 
 
-def _condition_reads_8616(mnemonic: str) -> StatusFlag8616 | None:
+@cython.ccall
+def _condition_reads_8616(mnemonic: object) -> StatusFlag8616 | None:
     """Return status bits read by a Jcc, SETcc, or CMOVcc mnemonic."""
-    suffix: str | None = None
+    suffix: object
+    aliases: object
+    reads: object
+    suffix = None
     if mnemonic.startswith("cmov"):
         suffix = mnemonic[4:]
     elif mnemonic.startswith("set"):
@@ -187,8 +198,10 @@ def _condition_reads_8616(mnemonic: str) -> StatusFlag8616 | None:
     return None
 
 
+@cython.ccall
 def status_flag_effect_8616(instruction: DecodedStatusFlagInstruction8616) -> StatusFlagEffect8616 | None:
     """Classify one decoded instruction, refusing unknown flag behavior."""
+    condition_reads: object
     mnemonic = instruction.mnemonic
     condition_reads = _condition_reads_8616(mnemonic)
     if condition_reads is not None:
@@ -213,6 +226,7 @@ def status_flag_effect_8616(instruction: DecodedStatusFlagInstruction8616) -> St
     return _fixed_mnemonic_effect_8616(mnemonic)
 
 
+@cython.ccall
 def _counted_shift_effect_8616(
     instruction: DecodedStatusFlagInstruction8616,
 ) -> StatusFlagEffect8616:
@@ -230,6 +244,7 @@ def _counted_shift_effect_8616(
     return StatusFlagEffect8616(overwrites=writes)
 
 
+@cython.ccall
 def _counted_rotate_effect_8616(
     instruction: DecodedStatusFlagInstruction8616,
 ) -> StatusFlagEffect8616 | None:
@@ -270,17 +285,19 @@ _FIXED_MNEMONIC_EFFECTS_8616 = {
 }
 
 
-def _fixed_mnemonic_effect_8616(mnemonic: str) -> StatusFlagEffect8616 | None:
+@cython.ccall
+def _fixed_mnemonic_effect_8616(mnemonic: object) -> StatusFlagEffect8616 | None:
     """Return the fixed flag effect for one mnemonic, if any."""
     return _FIXED_MNEMONIC_EFFECTS_8616.get(mnemonic)
 
 
+@cython.ccall
 def _status_flag_liveness_decision_8616(
     written: StatusFlag8616,
     remaining: StatusFlag8616,
     verdict: StatusFlagLivenessVerdict8616,
     *,
-    failed: bool = False,
+    failed: cython.bint = False,
 ) -> StatusFlagLivenessDecision8616:
     """Materialize one final typed decision with closed evidence accounting."""
     return StatusFlagLivenessDecision8616(
@@ -291,11 +308,14 @@ def _status_flag_liveness_decision_8616(
     )
 
 
+@cython.ccall
 def decide_status_flag_liveness_8616(
     written: StatusFlag8616,
     future_instructions: Sequence[DecodedStatusFlagInstruction8616],
 ) -> StatusFlagLivenessDecision8616:
     """Classify and materialize one conservative keep-or-suppress decision."""
+    effect: object
+    instruction: object
     remaining = written & STATUS_FLAGS_8616
     if int(remaining) == 0:
         return _status_flag_liveness_decision_8616(
@@ -341,10 +361,11 @@ def decide_status_flag_liveness_8616(
     )
 
 
+@cython.ccall
 def status_flags_dead_before_use_8616(
     written: StatusFlag8616,
     future_instructions: Sequence[DecodedStatusFlagInstruction8616],
-) -> bool:
+) -> cython.bint:
     """Return whether the closed liveness decision suppresses the flag write."""
     return bool(decide_status_flag_liveness_8616(written, future_instructions).suppresses_write)
 

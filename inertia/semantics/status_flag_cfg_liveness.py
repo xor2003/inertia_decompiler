@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Function-level status-flag liveness over typed CFG evidence.
 
 Layer: Semantics.
@@ -11,6 +12,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -21,76 +24,79 @@ from .status_flag_contracts import (
     StatusFlagLivenessStats8616,
     StatusFlagLivenessVerdict8616,
 )
+import dataclasses
+import operator
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StatusFlagCFGInstruction8616:
     """One decoded instruction projected to a proven or unknown flag effect."""
 
-    address: int
+    address: cython.longlong
     effect: StatusFlagEffect8616 | None
-    suppression_supported: bool = True
+    suppression_supported: cython.bint = True
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StatusFlagCFGBlock8616:
     """One function-owned block with complete intraprocedural successors."""
 
-    address: int
-    instructions: tuple[StatusFlagCFGInstruction8616, ...]
-    successor_addresses: tuple[int, ...] = ()
-    successors_complete: bool = True
+    address: cython.longlong
+    instructions: object
+    successor_addresses: tuple[cython.longlong, ...] = ()
+    successors_complete: cython.bint = True
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StatusFlagCFGDecision8616:
     """Per-instruction dead-write decision from the converged CFG solution."""
 
-    block_address: int
-    instruction_index: int
-    instruction_address: int
+    block_address: cython.longlong
+    instruction_index: cython.longlong
+    instruction_address: cython.longlong
     written: StatusFlag8616
     live_after: StatusFlag8616
     dead_writes: StatusFlag8616
     verdict: StatusFlagLivenessVerdict8616
-    suppression_supported: bool
+    suppression_supported: cython.bint
 
     @property
-    def suppresses_write(self) -> bool:
+    def suppresses_write(self) -> cython.bint:
         """Return whether every status bit written by this instruction is dead."""
         return bool(
             self.verdict is StatusFlagLivenessVerdict8616.SUPPRESS_DEAD
             and self.suppression_supported
             and int(self.written) != 0
-            and self.dead_writes == self.written
+            and operator.eq(self.dead_writes, self.written)
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StatusFlagCFGLivenessArtifact8616:
     """Converged liveness maps, decisions, and closed evidence counters."""
 
-    entry_address: int
-    live_in_by_block: tuple[tuple[int, StatusFlag8616], ...]
-    live_out_by_block: tuple[tuple[int, StatusFlag8616], ...]
-    decisions: tuple[StatusFlagCFGDecision8616, ...]
+    entry_address: cython.longlong
+    live_in_by_block: object
+    live_out_by_block: object
+    decisions: object
     stats: StatusFlagLivenessStats8616
 
     def live_at_entry(self) -> StatusFlag8616:
         """Return status bits required at the selected function entry."""
         return dict(self.live_in_by_block).get(self.entry_address, STATUS_FLAGS_8616)
 
-    def suppressed_instruction_addresses(self) -> frozenset[int]:
+    def suppressed_instruction_addresses(self) -> frozenset[cython.longlong]:
         """Return addresses whose complete status write is proven dead."""
         return frozenset(
             decision.instruction_address
-            for decision in self.decisions
+            for decision in iter(self.decisions)
             if decision.suppresses_write
         )
 
 
+@cython.ccall
 def _transfer_effect_8616(
-    effect: StatusFlagEffect8616 | None,
+    effect: object,
     live_after: StatusFlag8616,
 ) -> StatusFlag8616:
     """Transfer one instruction backward; unknown effects preserve everything."""
@@ -99,24 +105,28 @@ def _transfer_effect_8616(
     return effect.reads | (live_after & ~effect.overwrites)
 
 
+@cython.ccall
 def _block_live_in_8616(
     block: StatusFlagCFGBlock8616,
     live_out: StatusFlag8616,
 ) -> StatusFlag8616:
     """Transfer one complete block backward from its live-out mask."""
+    instruction: object
     live = live_out
     for instruction in reversed(block.instructions):
         live = _transfer_effect_8616(instruction.effect, live)
     return live & STATUS_FLAGS_8616
 
 
+@cython.ccall
 def _block_live_out_8616(
     block: StatusFlagCFGBlock8616,
-    live_in: dict[int, StatusFlag8616],
-    block_by_addr: dict[int, StatusFlagCFGBlock8616],
+    live_in: object,
+    block_by_addr: object,
     exit_live: StatusFlag8616,
-) -> tuple[StatusFlag8616, int]:
+) -> tuple[StatusFlag8616, cython.longlong]:
     """Join successor live-ins; incomplete edges force full liveness."""
+    successor: object
     if not block.successors_complete:
         return STATUS_FLAGS_8616, 1
     if not block.successor_addresses:
@@ -132,14 +142,16 @@ def _block_live_out_8616(
     return live_out, missing
 
 
+@cython.ccall
 def _converged_live_sets_8616(
-    blocks: tuple[StatusFlagCFGBlock8616, ...],
-    block_by_addr: dict[int, StatusFlagCFGBlock8616],
+    blocks: object,
+    block_by_addr: object,
     exit_live: StatusFlag8616,
-) -> tuple[dict[int, StatusFlag8616], dict[int, StatusFlag8616], int]:
+) -> tuple[dict[cython.longlong, StatusFlag8616], dict[cython.longlong, StatusFlag8616], cython.longlong]:
     """Solve live-in/live-out to a fixed point over the complete CFG."""
-    live_in = {block.address: StatusFlag8616.NONE for block in blocks}
-    live_out = {block.address: StatusFlag8616.NONE for block in blocks}
+    block: object
+    live_in = {block.address: StatusFlag8616.NONE for block in iter(blocks)}
+    live_out = {block.address: StatusFlag8616.NONE for block in iter(blocks)}
     missing_successor_count = 0
     changed = True
     while changed:
@@ -154,20 +166,24 @@ def _converged_live_sets_8616(
             )
             missing_successor_count += missing
             block_live_in = _block_live_in_8616(block, block_live_out)
-            if live_out[block.address] != block_live_out:
+            if operator.ne(live_out[block.address], block_live_out):
                 live_out[block.address] = block_live_out
                 changed = True
-            if live_in[block.address] != block_live_in:
+            if operator.ne(live_in[block.address], block_live_in):
                 live_in[block.address] = block_live_in
                 changed = True
     return live_in, live_out, missing_successor_count
 
 
+@cython.ccall
 def _block_decisions_8616(
     block: StatusFlagCFGBlock8616,
     live_after_block: StatusFlag8616,
-) -> tuple[list[StatusFlagCFGDecision8616], int]:
+) -> tuple[list[StatusFlagCFGDecision8616], cython.longlong]:
     """Materialize per-instruction decisions for one block, backward."""
+    effect: object
+    instruction: object
+    reverse_index: object
     live = live_after_block
     reversed_decisions: list[StatusFlagCFGDecision8616] = []
     unknown_count = 0
@@ -204,9 +220,9 @@ def _block_decisions_8616(
 
 
 def analyze_status_flag_cfg_liveness_8616(
-    blocks: tuple[StatusFlagCFGBlock8616, ...],
+    blocks: object,
     *,
-    entry_address: int,
+    entry_address: cython.longlong,
     exit_live: StatusFlag8616 = STATUS_FLAGS_8616,
 ) -> StatusFlagCFGLivenessArtifact8616:
     """Solve per-bit liveness to a fixed point and materialize every decision.
@@ -215,7 +231,8 @@ def analyze_status_flag_cfg_liveness_8616(
     preserves all architectural status bits. A caller may pass ``NONE`` only
     after a typed function-output contract proves flags are unobservable.
     """
-    block_by_addr = {block.address: block for block in blocks}
+    block: object
+    block_by_addr = {block.address: block for block in iter(blocks)}
     live_in, live_out, missing_successor_count = _converged_live_sets_8616(
         blocks,
         block_by_addr,
@@ -246,8 +263,8 @@ def analyze_status_flag_cfg_liveness_8616(
         raise RuntimeError("status-flag CFG liveness evidence did not close")
     return StatusFlagCFGLivenessArtifact8616(
         entry_address=entry_address,
-        live_in_by_block=tuple(sorted(live_in.items())),
-        live_out_by_block=tuple(sorted(live_out.items())),
+        live_in_by_block=tuple(sorted(tuple(live_in.items()))),
+        live_out_by_block=tuple(sorted(tuple(live_out.items()))),
         decisions=tuple(
             sorted(
                 decisions,
@@ -259,26 +276,30 @@ def analyze_status_flag_cfg_liveness_8616(
 
 
 def _closed_block_map_8616(
-    blocks: tuple[StatusFlagCFGBlock8616, ...],
-    entry_address: int,
-) -> dict[int, StatusFlagCFGBlock8616] | None:
+    blocks: object,
+    entry_address: cython.longlong,
+) -> object:
     """Return the block map only when the CFG is complete from entry."""
-    block_by_addr = {block.address: block for block in blocks}
+    block: object
+    block_by_addr = {block.address: block for block in iter(blocks)}
     if entry_address not in block_by_addr:
         return None
     for block in blocks:
         if not block.successors_complete or any(
-            successor not in block_by_addr for successor in block.successor_addresses
+            successor not in block_by_addr for successor in iter(block.successor_addresses)
         ):
             return None
     return block_by_addr
 
 
+@cython.ccall
 def _reachable_addresses_8616(
-    block_by_addr: dict[int, StatusFlagCFGBlock8616],
-    entry_address: int,
-) -> set[int]:
+    block_by_addr: object,
+    entry_address: cython.longlong,
+) -> object:
     """Return every block reachable from the function entry."""
+    current: object
+    successor: object
     reachable = {entry_address}
     pending = [entry_address]
     while pending:
@@ -290,12 +311,15 @@ def _reachable_addresses_8616(
     return reachable
 
 
+@cython.ccall
 def _reachable_predecessors_8616(
-    block_by_addr: dict[int, StatusFlagCFGBlock8616],
-    reachable: set[int],
-) -> dict[int, set[int]]:
+    block_by_addr: object,
+    reachable: object,
+) -> object:
     """Return the reachable predecessor map over the closed CFG."""
-    predecessors: dict[int, set[int]] = {address: set() for address in reachable}
+    address: object
+    successor: object
+    predecessors: dict[cython.longlong, set[cython.longlong]] = {address: set() for address in iter(reachable)}
     for address in reachable:
         for successor in block_by_addr[address].successor_addresses:
             if successor in reachable:
@@ -303,13 +327,15 @@ def _reachable_predecessors_8616(
     return predecessors
 
 
+@cython.ccall
 def _must_block_in_8616(
-    address: int,
-    predecessors: dict[int, set[int]],
-    must_out: dict[int, StatusFlag8616],
-    entry_address: int,
+    address: cython.longlong,
+    predecessors: object,
+    must_out: object,
+    entry_address: cython.longlong,
 ) -> StatusFlag8616:
     """Meet predecessor must-out bits; entry and orphan blocks start empty."""
+    predecessor: object
     if address == entry_address:
         return StatusFlag8616.NONE
     incoming = predecessors[address]
@@ -321,11 +347,13 @@ def _must_block_in_8616(
     return block_in
 
 
+@cython.ccall
 def _must_block_out_8616(
     block: StatusFlagCFGBlock8616,
     block_in: StatusFlag8616,
 ) -> StatusFlag8616:
     """Accumulate definite overwrites forward across one block."""
+    instruction: object
     block_out = block_in
     for instruction in block.instructions:
         if instruction.effect is not None:
@@ -333,18 +361,20 @@ def _must_block_out_8616(
     return block_out & STATUS_FLAGS_8616
 
 
+@cython.ccall
 def _must_overwrite_sets_8616(
-    block_by_addr: dict[int, StatusFlagCFGBlock8616],
-    reachable: set[int],
-    predecessors: dict[int, set[int]],
-    entry_address: int,
-) -> dict[int, StatusFlag8616]:
+    block_by_addr: object,
+    reachable: object,
+    predecessors: object,
+    entry_address: cython.longlong,
+) -> object:
     """Solve definite-overwrite must-in/must-out to a fixed point."""
+    address: object
     must_in = {
         address: (
             StatusFlag8616.NONE if address == entry_address else STATUS_FLAGS_8616
         )
-        for address in reachable
+        for address in iter(reachable)
     }
     must_out = dict(must_in)
     changed = True
@@ -358,21 +388,23 @@ def _must_overwrite_sets_8616(
                 entry_address,
             )
             block_out = _must_block_out_8616(block_by_addr[address], block_in)
-            if must_in[address] != block_in:
+            if operator.ne(must_in[address], block_in):
                 must_in[address] = block_in
                 changed = True
-            if must_out[address] != block_out:
+            if operator.ne(must_out[address], block_out):
                 must_out[address] = block_out
                 changed = True
     return must_out
 
 
 def _definitely_overwritten_on_all_exits_8616(
-    blocks: tuple[StatusFlagCFGBlock8616, ...],
+    blocks: object,
     *,
-    entry_address: int,
+    entry_address: cython.longlong,
 ) -> StatusFlag8616:
     """Return bits overwritten on every complete path from entry to return."""
+    block_by_addr: object
+    address: object
     block_by_addr = _closed_block_map_8616(blocks, entry_address)
     if block_by_addr is None:
         return StatusFlag8616.NONE
@@ -387,7 +419,7 @@ def _definitely_overwritten_on_all_exits_8616(
 
     exits = tuple(
         address
-        for address in reachable
+        for address in iter(reachable)
         if not block_by_addr[address].successor_addresses
     )
     if not exits:
@@ -398,10 +430,11 @@ def _definitely_overwritten_on_all_exits_8616(
     return definitely_overwritten
 
 
+@cython.ccall
 def summarize_status_flag_cfg_effect_8616(
-    blocks: tuple[StatusFlagCFGBlock8616, ...],
+    blocks: object,
     *,
-    entry_address: int,
+    entry_address: cython.longlong,
 ) -> StatusFlagEffect8616:
     """Summarize callee entry reads and all-return definite overwrites."""
     reads_artifact = analyze_status_flag_cfg_liveness_8616(

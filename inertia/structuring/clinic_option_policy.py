@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Protect X86-16 CFG shape from non-control flag expressions.
 
 Layer: Structuring.
@@ -23,6 +24,8 @@ angr's default until ITE provenance can be selected individually.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Iterable
 from typing import Any, Protocol, cast
@@ -33,7 +36,7 @@ from angr.analyses.decompiler.optimization_passes.optimization_pass import BaseO
 
 from inertia.frontend.x86_16.function_knowledge_base import function_knowledge_base_8616
 
-type ClinicOption8616 = tuple[str, object]
+ClinicOption8616 = typing.TypeAliasType("ClinicOption8616", tuple[str, object])
 
 _ITE_DIAMOND_OPTION = "rewrite_ites_to_diamonds"
 
@@ -46,7 +49,7 @@ class _ClinicGraphBoundary8616(Protocol):
         """Return graph nodes in the order exposed by angr/networkx."""
         ...
 
-    def out_degree(self, node: object) -> int:
+    def out_degree(self, node: object) -> cython.longlong:
         """Return the number of outgoing CFG edges for one graph node."""
         ...
 
@@ -64,15 +67,17 @@ def enforce_x86_16_clinic_options_8616(
     options: Iterable[ClinicOption8616] | None,
     *,
     function: object,
-) -> list[ClinicOption8616]:
+) -> object:
     """Inspect the dynamic angr CFG and disable ITE diamonds only when straight-line."""
+    name: object
+    value: object
     try:
         graph = cast(_ClinicFunctionBoundary8616, function).graph
         nodes = graph.nodes
     except AttributeError:
         return list(options or ())
     try:
-        if any(graph.out_degree(node) > 1 for node in nodes):
+        if any(graph.out_degree(node) > 1 for node in iter(nodes)):
             return list(options or ())
     except (AttributeError, TypeError, ValueError):
         return list(options or ())

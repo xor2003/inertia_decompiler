@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Expression-facing alias queries over typed alias storage facts.
 
 Layer: Semantics.
@@ -8,6 +9,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Any
 
@@ -21,13 +24,17 @@ from inertia.alias.alias_model_impl import (
 from inertia.semantics.expression_analysis import _mk_fp_components, _unwrap_c_casts
 
 
-def _dynamic_attr_8616(obj: object, name: str, default: object = None) -> Any:  # noqa: ANN401
+@cython.ccall
+def _dynamic_attr_8616(obj: object, name: object, default: object = None) -> Any:  # noqa: ANN401
     """Dynamic C-AST boundary: read optional third-party codegen attributes."""
     return getattr(obj, name, default)
 
 
+@cython.ccall
 def _binary_op_domain_8616(expr: object) -> _StorageDomainSignature:
     """Join the operand domains of one binary expression."""
+    joined: object
+    child: object
     from angr.analyses.decompiler.structured_codegen import c as structured_c
 
     assert isinstance(expr, structured_c.CBinaryOp)
@@ -52,8 +59,11 @@ def _binary_op_domain_8616(expr: object) -> _StorageDomainSignature:
     return _StorageDomainSignature("mixed")
 
 
+@cython.ccall
 def _storage_domain_for_expr(expr: object) -> _StorageDomainSignature:
     """Return the alias storage domain represented by a structured C expression."""
+    mk_fp_components: object
+    variable: object
     expr = _unwrap_c_casts(expr)
     from angr.analyses.decompiler.structured_codegen import c as structured_c
 
@@ -74,8 +84,11 @@ def _storage_domain_for_expr(expr: object) -> _StorageDomainSignature:
     return _StorageDomainSignature("unknown")
 
 
+@cython.ccall
 def describe_alias_storage(expr: object) -> AliasStorageFacts:
     """Describe the alias storage facts proven for a structured C expression."""
+    mk_fp_components: object
+    variable: object
     domain = _storage_domain_for_expr(expr)
     identity = None
     expr = _unwrap_c_casts(expr)
@@ -92,27 +105,32 @@ def describe_alias_storage(expr: object) -> AliasStorageFacts:
     return AliasStorageFacts(domain, identity)
 
 
-def same_alias_storage_domain(lhs: object, rhs: object) -> bool:
+@cython.ccall
+def same_alias_storage_domain(lhs: object, rhs: object) -> cython.bint:
     """Return whether two expressions have the same alias storage domain."""
     return describe_alias_storage(lhs).same_domain(describe_alias_storage(rhs))
 
 
-def compatible_alias_storage_views(lhs: object, rhs: object) -> bool:
+@cython.ccall
+def compatible_alias_storage_views(lhs: object, rhs: object) -> cython.bint:
     """Return whether two expression storage views are adjacent or compatible."""
     return describe_alias_storage(lhs).compatible_view(describe_alias_storage(rhs))
 
 
-def needs_alias_synthesis(expr: object) -> bool:
+@cython.ccall
+def needs_alias_synthesis(expr: object) -> cython.bint:
     """Return whether the expression needs explicit synthesized alias storage."""
     return describe_alias_storage(expr).needs_synthesis()
 
 
-def can_join_alias_storage(lhs: object, rhs: object) -> bool:
+@cython.ccall
+def can_join_alias_storage(lhs: object, rhs: object) -> cython.bint:
     """Return whether two expression storage facts can be joined safely."""
     return describe_alias_storage(lhs).can_join(describe_alias_storage(rhs))
 
 
-def contains_alias_storage(container: object, subview: object) -> bool:
+@cython.ccall
+def contains_alias_storage(container: object, subview: object) -> cython.bint:
     """Return whether one expression's proven storage contains another view."""
     return describe_alias_storage(container).contains(describe_alias_storage(subview))
 

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Recover typed conditions from x86-16 flag and test instruction evidence.
 
 Layer: Semantics.
@@ -8,10 +9,14 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import dataclasses
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
+import operator
 
 if TYPE_CHECKING:
     pass
@@ -50,7 +55,8 @@ _FLAG_SF = 0x80
 _FLAG_OF = 0x800
 
 
-def _dynamic_boundary_attr_8616(obj: object, name: str, default: object = None) -> object:
+@cython.ccall
+def _dynamic_boundary_attr_8616(obj: object, name: object, default: object = None) -> object:
     """Dynamic angr/codegen boundary: read optional decoded operand or C AST attributes."""
     return getattr(obj, name, default)
 
@@ -64,27 +70,27 @@ class ConditionConfidence(Enum):
     UNKNOWN = "unknown"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RecoveredCondition:
     """A typed condition recovered from instruction evidence."""
 
     condition: IRCondition
     confidence: ConditionConfidence = ConditionConfidence.PROVEN
-    signed: bool = False
-    operand_count: int = 2
+    signed: cython.bint = False
+    operand_count: cython.longlong = 2
 
     @property
-    def is_proven(self) -> bool:
+    def is_proven(self) -> cython.bint:
         """Return whether the recovered condition is proven by instruction evidence."""
-        return self.confidence == ConditionConfidence.PROVEN
+        return operator.eq(self.confidence, ConditionConfidence.PROVEN)
 
     @property
-    def is_likely(self) -> bool:
+    def is_likely(self) -> cython.bint:
         """Return whether the condition is at least likely enough to consume."""
         return self.confidence in {ConditionConfidence.PROVEN, ConditionConfidence.LIKELY}
 
 
-def _ir_value_from_vex_expr(expr: object, size_hint: int = 0) -> IRValue:
+def _ir_value_from_vex_expr(expr: object, size_hint: cython.longlong = 0) -> IRValue:
     def _impl() -> IRValue:
         """Best-effort conversion of a VEX-style expression operand into IRValue."""
         if expr is None:
@@ -113,7 +119,8 @@ def _ir_value_from_vex_expr(expr: object, size_hint: int = 0) -> IRValue:
     return _impl()
 
 
-def _size_for_int(value: int) -> int:
+@cython.ccall
+def _size_for_int(value: cython.longlong) -> cython.longlong:
     """Determine byte size for a constant integer."""
     abs_val = abs(value)
     if abs_val < 256:
@@ -123,6 +130,7 @@ def _size_for_int(value: int) -> int:
     return 4
 
 
+@cython.ccall
 def _c_constant_int_value_8616(node: object) -> int | None:
     """Extract integer value from a structured-codegen CConstant node."""
     if node is None:
@@ -136,8 +144,12 @@ def _c_constant_int_value_8616(node: object) -> int | None:
     return None
 
 
-def _c_variable_register_name_8616(node: object) -> str | None:
+@cython.ccall
+def _c_variable_register_name_8616(node: object) -> object:
     """Extract register name from a CVariable or its nested variable attribute."""
+    candidate: object
+    variable: object
+    attr: object
     if node is None:
         return None
     cls_name = type(node).__name__
@@ -160,7 +172,8 @@ def _c_variable_register_name_8616(node: object) -> str | None:
     return name if isinstance(name, str) else None
 
 
-def classify_flag_mask_bit_8616(mask: int) -> tuple[str | None, int | None]:
+@cython.ccall
+def classify_flag_mask_bit_8616(mask: cython.longlong) -> tuple[str | None, int | None]:
     """Classify a flag bitmask into (flag_name, bit_value)."""
     if mask & _FLAG_ZF:
         return "ZF", mask
@@ -175,10 +188,10 @@ def classify_flag_mask_bit_8616(mask: int) -> tuple[str | None, int | None]:
 
 def build_typed_condition_from_flag_mask_8616(
     flag_var: object,
-    mask: int,
-    negate: bool,
+    mask: cython.longlong,
+    negate: cython.bint,
     *,
-    operands: tuple[object, ...] | None = None,
+    operands: object = None,
 ) -> RecoveredCondition | None:
     """Recover a typed condition from a flag mask test like ``(flags & ZF) != 0``."""
 
@@ -194,6 +207,7 @@ def build_typed_condition_from_flag_mask_8616(
         Returns:
             RecoveredCondition or None if recovery fails
         """
+        flag_name: object
         flag_name, _ = classify_flag_mask_bit_8616(mask)
         if flag_name is None:
             return None
@@ -247,11 +261,12 @@ def build_typed_condition_from_flag_mask_8616(
     return _impl()
 
 
+@cython.ccall
 def build_typed_condition_from_cmp_pair_8616(
     lhs_node: object,
     rhs_node: object,
     *,
-    jcc_mnemonic: str | None = None,
+    jcc_mnemonic: object = None,
 ) -> RecoveredCondition | None:
     """Recover a typed condition from a CMP-style pair of operands.
 
@@ -288,10 +303,11 @@ def build_typed_condition_from_cmp_pair_8616(
     )
 
 
+@cython.ccall
 def build_typed_condition_from_test_self_8616(operand: object) -> RecoveredCondition | None:
     """Recover a nonzero test from a TEST/OR self pattern."""
     op_val = _ir_value_from_vex_expr(operand)
-    if op_val.space == MemSpace.UNKNOWN:
+    if operator.eq(op_val.space, MemSpace.UNKNOWN):
         return None
     return RecoveredCondition(
         build_condition_ir_8616("nonzero", op_val, expr=("test_self",)),
@@ -299,7 +315,8 @@ def build_typed_condition_from_test_self_8616(operand: object) -> RecoveredCondi
     )
 
 
-def _same_operand_test_8616(lhs: object, rhs: object) -> bool:
+@cython.ccall
+def _same_operand_test_8616(lhs: object, rhs: object) -> cython.bint:
     """Check if two operands represent the same register (test/or self)."""
     lhs_reg = _dynamic_boundary_attr_8616(lhs, "reg")
     rhs_reg = _dynamic_boundary_attr_8616(rhs, "reg")
@@ -330,8 +347,12 @@ _JCC_COMPARE_OP_8616: dict[str, ConditionOp] = {
 }
 
 
-def _jcc_to_condition_op_8616(mnemonic: str | None, lhs: object, rhs: object) -> ConditionOp:
+@cython.ccall
+def _jcc_to_condition_op_8616(mnemonic: object, lhs: object, rhs: object) -> ConditionOp:
     """Map a JCC mnemonic to a ConditionOp, defaulting to unsigned."""
+    compare: object
+    signed: object
+    unsigned: object
     if isinstance(mnemonic, str):
         mnemonic = mnemonic.lower().strip()
         unsigned = _JCC_UNSIGNED_OP_8616.get(mnemonic)
@@ -346,7 +367,8 @@ def _jcc_to_condition_op_8616(mnemonic: str | None, lhs: object, rhs: object) ->
     return "compare"
 
 
-def _jcc_to_condition_op_with_zero_8616(mnemonic: str | None, lhs: object, rhs: object) -> ConditionOp:
+@cython.ccall
+def _jcc_to_condition_op_with_zero_8616(mnemonic: object, lhs: object, rhs: object) -> ConditionOp:
     """Map a JCC against zero to the appropriate condition op."""
     if not isinstance(mnemonic, str):
         return "ne"

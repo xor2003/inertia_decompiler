@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Rewrite/Postprocess cleanup.
 
 Responsibility: collect reads of already-proven local storage from structured C.
@@ -6,6 +7,8 @@ Do not recover new semantics, storage identity, types, call signatures, control 
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from typing import Protocol
@@ -19,22 +22,25 @@ from inertia.postprocess.decompiler_postprocess_utils import (
 
 from .local_liveness import local_liveness_key_8616
 
-type LocalReadKey8616 = tuple[object, ...]
+LocalReadKey8616 = typing.TypeAliasType("LocalReadKey8616", tuple[object, ...])
 
 
 class AliasReadStorage8616(Protocol):
     """Existing alias identity consumed without reinterpreting storage."""
 
-    identity: tuple[object, ...] | None
+    identity: object
 
 
+@cython.ccall
 def _collect_variable_keys_8616(
     node: structured_c.CVariable,
-    keys: set[LocalReadKey8616],
-    allow_variable_read: bool,
+    keys: object,
+    allow_variable_read: cython.bint,
     describe_alias_storage: Callable[[object], AliasReadStorage8616],
 ) -> None:
     """Record variable, unified, storage, and liveness keys for one read."""
+    identity: object
+    liveness: object
     if not allow_variable_read or node.variable is None:
         return
     keys.add(("var", id(node.variable)))
@@ -48,12 +54,15 @@ def _collect_variable_keys_8616(
         keys.add(("liveness", liveness))
 
 
+@cython.ccall
 def _collect_dirty_keys_8616(
     node: structured_c.CDirtyExpression,
-    keys: set[LocalReadKey8616],
-    allow_variable_read: bool,
+    keys: object,
+    allow_variable_read: cython.bint,
 ) -> None:
     """Record dirty payload identity keys for one read."""
+    name: object
+    varid: object
     dirty = node.dirty
     # Dynamic codegen boundary: dirty payload identity fields vary by angr version.
     varid = getattr(dirty, "varid", None)
@@ -68,14 +77,17 @@ def _collect_dirty_keys_8616(
 
 def collect_local_read_keys_8616(
     node: object,
-    keys: set[LocalReadKey8616],
-    seen: set[int] | None = None,
+    keys: object,
+    seen: object = None,
     *,
-    allow_variable_read: bool = True,
-    structured_codegen_node: Callable[[object], bool],
+    allow_variable_read: cython.bint = True,
+    structured_codegen_node: Callable[[object], cython.bint],
     describe_alias_storage: Callable[[object], AliasReadStorage8616],
 ) -> None:
     """Collect value reads, including array operands and every loop component."""
+    value: object
+    attr: object
+    child: object
     if not structured_codegen_node(node):
         return
     if seen is None:
@@ -85,7 +97,7 @@ def collect_local_read_keys_8616(
         return
     seen.add(marker)
 
-    def collect(child: object, *, value_read: bool = True) -> None:
+    def collect(child: object, *, value_read: cython.bint = True) -> None:
         """Keep the assignment destination/value distinction during recursion."""
         collect_local_read_keys_8616(
             child, keys, seen, allow_variable_read=value_read,

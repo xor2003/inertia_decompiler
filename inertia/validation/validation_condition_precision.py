@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Validate exact condition precision changes from Structuring evidence.
 
 Layer: Validation.
@@ -14,6 +15,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -34,6 +37,9 @@ from .validation_control_condition_delta import control_condition_delta_matches_
 from .validation_observable_compaction import (
     compact_normalized_validation_observable_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "ConditionPrecisionEvidence8616",
@@ -50,36 +56,36 @@ __all__ = [
 class _ConditionPrecisionCodegen8616(Protocol):
     """Owned validation metadata attached at the dynamic codegen boundary."""
 
-    _inertia_condition_precision_evidence_8616: tuple[ConditionPrecisionEvidence8616, ...]
+    _inertia_condition_precision_evidence_8616: object
     _inertia_condition_precision_validation_result_8616: ConditionPrecisionValidationResult8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionPrecisionEvidence8616:
     """One immutable condition fingerprint replacement proven by Structuring."""
 
-    before: str
-    after: str
+    before: object
+    after: object
     jcc_addr: int | None = None
-    after_integer_view: str | None = None
+    after_integer_view: object = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionPrecisionValidationStats8616:
     """Closed evidence accounting for one condition precision validation."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionPrecisionValidationResult8616:
     """Result of matching a validation delta to exact Structuring evidence."""
 
-    accepted: bool
+    accepted: cython.bint
     stats: ConditionPrecisionValidationStats8616
 
 
@@ -88,8 +94,9 @@ def record_condition_precision_evidence_8616(
     codegen: object,
     before: CExpression,
     after: CExpression,
-) -> bool:
+) -> cython.bint:
     """Record one exact, nontrivial C-AST condition replacement."""
+    jcc_addr: object
     # The identity bridge also materializes ConditionIR; defer its import until
     # Structuring has initialized.
     from .validation_condition_identity import condition_precision_view_fingerprint_8616
@@ -129,14 +136,15 @@ def condition_precision_evidence_8616(
         return ()
     return tuple(
         item
-        for item in evidence
+        for item in iter(evidence)
         if isinstance(item, ConditionPrecisionEvidence8616)
     )
 
 
+@cython.ccall
 def matches_recorded_condition_precision_8616(
-    codegen: object, jcc_addr: int, fingerprint: str,
-) -> bool:
+    codegen: object, jcc_addr: cython.longlong, fingerprint: object,
+) -> cython.bint:
     """Require the current predicate to match one unambiguous proven branch view.
 
     This is the same exact after-token check used by final branch validation.
@@ -144,26 +152,29 @@ def matches_recorded_condition_precision_8616(
     """
     candidates = {
         evidence.after
-        for evidence in condition_precision_evidence_8616(codegen)
-        if evidence.jcc_addr == jcc_addr
+        for evidence in builtins.iter(condition_precision_evidence_8616(codegen))
+        if operator.eq(evidence.jcc_addr, jcc_addr)
     }
     return candidates == {condition_precision_token_8616(fingerprint)}
 
 
-def _delta_tokens_8616(field: object) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+def _delta_tokens_8616(field: object) -> object:
     """Read one validation field as immutable added and removed token tuples."""
+    added_value: object
+    removed_value: object
     if not isinstance(field, dict):
         return (), ()
     added_value = field.get("added", ())
     removed_value = field.get("removed", ())
     if not isinstance(added_value, (list, tuple)) or not isinstance(removed_value, (list, tuple)):
         return None
-    if not all(isinstance(item, str) for item in (*added_value, *removed_value)):
+    if not all(isinstance(item, str) for item in iter(tuple(added_value) + tuple(removed_value))):
         return None
     return tuple(added_value), tuple(removed_value)
 
 
-def condition_precision_token_8616(token: str) -> str:
+@cython.ccall
+def condition_precision_token_8616(token: object) -> object:
     """Normalize and compact a raw condition fingerprint for precision matching.
 
     Stored evidence already contains these tokens. Consumers must tokenize the
@@ -183,24 +194,25 @@ def condition_precision_token_8616(token: str) -> str:
 
 
 def _evidence_covers_delta_8616(
-    evidence: tuple[ConditionPrecisionEvidence8616, ...],
-    removed: tuple[str, ...],
-    added: tuple[str, ...],
-    control_removed: tuple[str, ...],
-    control_added: tuple[str, ...],
-) -> bool:
+    evidence: object,
+    removed: object,
+    added: object,
+    control_removed: object,
+    control_added: object,
+) -> cython.bint:
     """Return whether evidence provides a complete one-to-one delta matching."""
-    if not removed or len(removed) != len(added):
+    if not removed or operator.ne(len(removed), len(added)):
         return False
     pair_counts = Counter(
         (condition_precision_token_8616(item.before), condition_precision_token_8616(item.after))
-        for item in evidence
+        for item in iter(evidence)
     )
 
     chosen_pairs: list[tuple[str, str]] = []
 
-    def _match(index: int, remaining_added: Counter[str]) -> bool:
-        if index == len(removed):
+    def _match(index: cython.longlong, remaining_added: Counter[str]) -> cython.bint:
+        after: object
+        if operator.eq(index, len(removed)):
             return not remaining_added and control_condition_delta_matches_8616(
                 control_removed, control_added, tuple(chosen_pairs),
             )
@@ -226,9 +238,12 @@ def _evidence_covers_delta_8616(
 
 def condition_precision_validation_delta_8616(
     codegen: object,
-    validation: dict[str, object],
+    validation: object,
 ) -> ConditionPrecisionValidationResult8616:
     """Accept only exact condition and control deltas covered by typed evidence."""
+    condition_tokens: object
+    control_tokens: object
+    delta: object
     surface = cast(_ConditionPrecisionCodegen8616, codegen)
     evidence = condition_precision_evidence_8616(codegen)
     raw_count = len(evidence)
@@ -242,9 +257,9 @@ def condition_precision_validation_delta_8616(
         return result
     parsed = {
         field_name: _delta_tokens_8616(field_delta)
-        for field_name, field_delta in delta.items()
+        for field_name, field_delta in builtins.iter(delta.items())
     }
-    if any(value is None for value in parsed.values()):
+    if any(value is None for value in builtins.iter(parsed.values())):
         result = ConditionPrecisionValidationResult8616(
             False,
             ConditionPrecisionValidationStats8616(raw_fact_count=raw_count, failure_count=1),
@@ -253,7 +268,7 @@ def condition_precision_validation_delta_8616(
         return result
     touched = {
         field_name
-        for field_name, value in parsed.items()
+        for field_name, value in builtins.iter(parsed.items())
         if value is not None and (value[0] or value[1])
     }
     if touched != {"conditions", "control_flow_effects"}:
@@ -267,8 +282,8 @@ def condition_precision_validation_delta_8616(
     control_tokens = parsed["control_flow_effects"]
     if condition_tokens is None or control_tokens is None:
         raise AssertionError("validated condition fields must be present")
-    condition_added = tuple(condition_precision_token_8616(item) for item in condition_tokens[0])
-    condition_removed = tuple(condition_precision_token_8616(item) for item in condition_tokens[1])
+    condition_added = tuple(condition_precision_token_8616(item) for item in iter(condition_tokens[0]))
+    condition_removed = tuple(condition_precision_token_8616(item) for item in iter(condition_tokens[1]))
     control_added = control_tokens[0]
     control_removed = control_tokens[1]
     normalized_count = len(condition_added) + len(condition_removed)

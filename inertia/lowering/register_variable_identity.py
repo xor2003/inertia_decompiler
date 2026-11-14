@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Project typed x86-16 register identities from structured C variables.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 
@@ -46,13 +49,17 @@ _REGISTER_OFFSET_NAMES_8616 = {
 }
 
 
-def capstone_register_name_8616(register_id: int) -> str | None:
+@cython.ccall
+def capstone_register_name_8616(register_id: cython.longlong) -> object:
     """Return the canonical word-register name for one Capstone identifier."""
     return _CAPSTONE_REGISTER_NAMES_8616.get(int(register_id))
 
 
-def register_cvar_name_8616(value: object) -> str | None:
+@cython.ccall
+def register_cvar_name_8616(value: object) -> object:
     """Return the canonical word-register name carried by one C variable."""
+    coordinate: object
+    field_name: object
     while isinstance(value, structured_c.CTypeCast):
         value = value.expr
     if not isinstance(value, structured_c.CVariable):
@@ -73,6 +80,6 @@ def register_cvar_names_8616(variables: Iterable[object]) -> frozenset[str]:
     """Return every canonical register identity present in an AST inventory."""
     return frozenset(
         name
-        for variable in variables
+        for variable in iter(variables)
         if (name := register_cvar_name_8616(variable)) is not None
     )

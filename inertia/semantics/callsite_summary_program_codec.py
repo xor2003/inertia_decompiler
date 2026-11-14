@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Encode retained program callsite summaries for clean workers.
 
 Layer: Traits/summaries/confidence.
@@ -12,6 +13,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from .callsite_summary_codec import (
     callsite_summary_from_record_8616,
@@ -28,6 +31,7 @@ __all__ = [
 ]
 
 
+@cython.ccall
 def program_callsite_summary_evidence_record_8616(
     evidence: ProgramCallsiteSummaryEvidence8616,
 ) -> dict[str, object]:
@@ -44,7 +48,7 @@ def program_callsite_summary_evidence_record_8616(
                     else callsite_summary_record_8616(fact.summary)
                 ),
             }
-            for fact in evidence.facts
+            for fact in iter(evidence.facts)
         ],
         "raw_fact_count": evidence.raw_fact_count,
         "normalized_fact_count": evidence.normalized_fact_count,
@@ -54,17 +58,22 @@ def program_callsite_summary_evidence_record_8616(
     }
 
 
-def _nonnegative_int_8616(value: object, label: str) -> int:
+@cython.ccall
+def _nonnegative_int_8616(value: object, label: object) -> cython.longlong:
     """Decode one exact nonnegative integer or reject malformed JSON."""
     if not isinstance(value, int) or isinstance(value, bool) or value < 0:
         raise ValueError(f"{label} must be a nonnegative integer")
     return value
 
 
+@cython.ccall
 def program_callsite_summary_evidence_from_record_8616(
     value: object,
 ) -> ProgramCallsiteSummaryEvidence8616:
     """Decode and validate one lossless program summary artifact."""
+    raw_caller: object
+    raw_summary: object
+    raw_fact: object
     if not isinstance(value, dict) or set(value) != {
         "facts",
         "raw_fact_count",

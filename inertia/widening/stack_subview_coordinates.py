@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Read published coordinates for structured stack-view materialization.
 
 Layer: Widening.
@@ -11,17 +12,20 @@ Do not infer coordinates from generated names or overwrite published bindings.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Protocol, cast
 
 from angr.sim_variable import SimStackVariable
+import operator
 
 
 class _CoordinateBinding8616(Protocol):
     """Read-only coordinate field of an existing immutable binding."""
 
     @property
-    def bp_offset(self) -> int:
+    def bp_offset(self) -> cython.longlong:
         """Return the bound machine-BP displacement."""
         ...
 
@@ -44,12 +48,15 @@ class _CodegenCoordinates8616(Protocol):
     _inertia_stack_variable_coordinate_registry_8616: _CoordinateRegistry8616
 
 
+@cython.ccall
 def published_stack_variable_range_8616(
     codegen: object,
     variable: object,
-    function_addr: int,
-) -> tuple[int, int] | None:
+    function_addr: cython.longlong,
+) -> object:
     """Return an explicit binding without deriving a new coordinate domain."""
+    binding: object
+    raw_range: object
     raw_range = stack_variable_range_8616(variable, function_addr)
     if raw_range is None or not isinstance(variable, SimStackVariable):
         return None
@@ -63,16 +70,18 @@ def published_stack_variable_range_8616(
     return (binding.bp_offset, raw_range[1]) if binding is not None else None
 
 
+@cython.ccall
 def stack_variable_range_8616(
     variable: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     *,
     codegen: object | None = None,
-) -> tuple[int, int] | None:
+) -> object:
     """Read a bound machine range, retaining legacy syntax only when unbound."""
+    bound: object
     if not isinstance(variable, SimStackVariable):
         return None
-    if variable.base != "bp" or variable.region != function_addr:
+    if variable.base != "bp" or operator.ne(variable.region, function_addr):
         return None
     if not isinstance(variable.offset, int) or not isinstance(variable.size, int) or variable.size <= 0:
         return None

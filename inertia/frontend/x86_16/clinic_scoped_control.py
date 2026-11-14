@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/runtime.
 Responsibility: consume conditional native control in a private Clinic CFG.
 
@@ -5,6 +6,8 @@ The declaration stays attached to this consumer. Neither execution VEX nor the
 unconditional Function graph receives the scoped successors.
 """
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, cast
@@ -19,6 +22,18 @@ from .clinic_terminal_control import (
     _terminal_instruction_mark_8616,
     rebind_terminal_jump_8616,
 )
+import dataclasses
+import operator
+import builtins
+AdmittedScopedCallTarget8616 = typing.TypeVar("AdmittedScopedCallTarget8616")
+AdmittedTerminalJump8616 = typing.TypeVar("AdmittedTerminalJump8616")
+DeclaredEntryInput8616 = typing.TypeVar("DeclaredEntryInput8616")
+DeclaredEntryPipeline8616 = typing.TypeVar("DeclaredEntryPipeline8616")
+EntryJumpTransportProof8616 = typing.TypeVar("EntryJumpTransportProof8616")
+NativeNearCallPipeline8616 = typing.TypeVar("NativeNearCallPipeline8616")
+ailment = typing.TypeVar("ailment")
+nx = typing.TypeVar("nx")
+pyvex = typing.TypeVar("pyvex")
 
 if TYPE_CHECKING:
     import networkx as nx
@@ -32,8 +47,8 @@ if TYPE_CHECKING:
 
 class _Node8616(Protocol):
     """Native graph node coordinates at the third-party Clinic boundary."""
-    addr: int
-    size: int
+    addr: cython.longlong
+    size: cython.longlong
 
 
 class _ScopedProjectLike8616(Protocol):
@@ -57,7 +72,7 @@ class _Function8616(_Node8616, Protocol):
 
 class _Manager8616(Protocol):
     """Third-party atom allocator used by the existing binding owner."""
-    def next_atom(self) -> int:
+    def next_atom(self) -> cython.longlong:
         """Allocate a new AIL atom identity."""
         ...
 
@@ -67,7 +82,7 @@ class _Clinic8616(Protocol):
     project: object
     function: _Function8616
     _func_graph: nx.DiGraph
-    _blocks_by_addr_and_size: dict[tuple[int, int], ailment.Block]
+    _blocks_by_addr_and_size: object
     _ail_manager: _Manager8616
     _inertia_clinic_scoped_partition_8616: ClinicScopedPartition8616
 
@@ -83,6 +98,10 @@ def transport_clinic_scoped_control_8616(
     their captured native AIL calls remain unchanged. Native near-call entries
     separately request authenticated outgoing-target rewrites.
     """
+    projection: object
+    receipt: object
+    source: object
+    target: object
     from inertia.ir.declared_entry_pipeline import (
         DeclaredEntryPipeline8616 as _DeclaredEntryPipeline8616,
     )
@@ -100,7 +119,7 @@ def transport_clinic_scoped_control_8616(
     if (entry.scope.project is not boundary.project
             or entry.view.boundary.project is not boundary.project
             or entry.bundle.artifact is not entry.view.source_artifact
-            or boundary.function.addr != entry.bundle.artifact.function_addr):
+            or operator.ne(boundary.function.addr, entry.bundle.artifact.function_addr)):
         raise PipelineHardError("scoped Clinic authority differs", layer="frontend")
     # Dynamic third-party boundary: this optional receipt attaches to angr Clinic.
     receipt = getattr(clinic, "_inertia_clinic_scoped_partition_8616", None)
@@ -109,14 +128,14 @@ def transport_clinic_scoped_control_8616(
     if projection is None or not _context_is_current_8616(clinic, captures, scoped_partition=receipt):
         raise PipelineHardError("scoped Clinic control source changed", layer="frontend")
     graph = boundary._func_graph.copy()
-    nodes = {node.addr: node for node in graph.nodes}
-    expected = {block.addr for block in projection.blocks}
-    if (len(nodes) != len(graph.nodes) or set(nodes) != expected
+    nodes = {node.addr: node for node in iter(graph.nodes)}
+    expected = {block.addr for block in iter(projection.blocks)}
+    if (operator.ne(len(nodes), len(graph.nodes)) or operator.ne(set(nodes), expected)
             or any(projection.pending.values())):
         raise PipelineHardError("scoped Clinic block census differs", layer="frontend")
-    edges = {(addr, target) for addr, targets in projection.successors.items() for target in targets}
-    if any(target not in nodes for _, target in edges) or any(
-        (source.addr, target.addr) not in edges for source, target in graph.edges
+    edges = {(addr, target) for addr, targets in builtins.iter(projection.successors.items()) for target in iter(targets)}
+    if any(target not in nodes for _, target in iter(edges)) or any(
+        (source.addr, target.addr) not in edges for source, target in iter(graph.edges)
     ):
         raise PipelineHardError("scoped Clinic successor census differs", layer="frontend")
     converted = _bound_blocks_8616(boundary, entry, projection.applied, captures, nodes)
@@ -129,13 +148,18 @@ def transport_clinic_scoped_control_8616(
     retain_declared_entry_pipeline_8616(clinic, entry)
 
 
+@cython.ccall
 def _bound_blocks_8616(
     boundary: _Clinic8616, entry: DeclaredEntryPipeline8616 | NativeNearCallPipeline8616,
-    admissions: tuple[AdmittedTerminalJump8616, ...],
-    captures: dict[tuple[int, int], ClinicConvertedBlockCapture8616],
-    nodes: dict[int, _Node8616],
-) -> dict[tuple[int, int], ailment.Block]:
+    admissions: object,
+    captures: object,
+    nodes: object,
+) -> object:
     """Stage converted copies; a failed terminal binding cannot escape."""
+    decoded: object
+    node: object
+    record: object
+    admission: object
     converted = dict(boundary._blocks_by_addr_and_size)
     for admission in admissions:
         node = nodes.get(admission.block_addr)
@@ -143,10 +167,10 @@ def _bound_blocks_8616(
         if record is None:
             raise PipelineHardError("scoped Clinic native block is absent", layer="frontend")
         decoded = entry.bundle.terminal_evidence[admission.block_addr].decoded
-        if decoded is None or decoded.head != admission.head:
+        if decoded is None or operator.ne(decoded.head, admission.head):
             raise PipelineHardError("scoped Clinic decoded terminal differs", layer="frontend")
         offset = decoded.head - record.addr
-        if offset < 0 or record.source_bytes[offset:] != decoded.encoding:
+        if offset < 0 or operator.ne(record.source_bytes[offset:], decoded.encoding):
             raise PipelineHardError("scoped Clinic terminal bytes changed", layer="frontend")
         original = cast("ailment.Block", record.converted)
         block = original.copy(statements=list(original.statements))
@@ -161,12 +185,13 @@ def _bound_blocks_8616(
     return converted
 
 
+@cython.ccall
 def _bind_call_targets_8616(
     boundary: _Clinic8616,
-    calls: tuple[AdmittedScopedCallTarget8616, ...],
-    captures: dict[tuple[int, int], ClinicConvertedBlockCapture8616],
-    converted: dict[tuple[int, int], ailment.Block],
-    nodes: dict[int, _Node8616],
+    calls: object,
+    captures: object,
+    converted: object,
+    nodes: object,
 ) -> None:
     """Stage only the exact VEX-next CALL target under the retained premise.
 
@@ -175,6 +200,10 @@ def _bind_call_targets_8616(
     byte encoding and instruction mark. Nothing changes call prototypes or
     the unconditional function graph.
     """
+    mark: object
+    node: object
+    record: object
+    call: object
     import pyvex
     from angr import ailment
 
@@ -191,8 +220,8 @@ def _bind_call_targets_8616(
             raise PipelineHardError("scoped Clinic CALL terminal absent", layer="frontend")
         if (not isinstance(terminal.expr, ailment.Expr.Call)
                 or vex.jumpkind != "Ijk_Call" or mark is None
-                or mark[0] != call.instruction.addr
-                or terminal.tags.get("ins_addr") != call.instruction.addr):
+                or operator.ne(mark[0], call.instruction.addr)
+                or operator.ne(terminal.tags.get("ins_addr"), call.instruction.addr)):
             raise PipelineHardError("scoped Clinic CALL source differs", layer="frontend")
         expression = terminal.expr
         carrier = ailment.Stmt.Jump(terminal.idx, expression.target)
@@ -201,8 +230,8 @@ def _bind_call_targets_8616(
         offset = mark[0] - record.addr
         encoding = record.source_bytes[offset:]
         if (len(encoding) != 3 or encoding[0] != 0xE8
-                or call.next_addr != mark[0] + 3
-                or call.target != call.next_addr + int.from_bytes(encoding[1:], "little", signed=True)):
+                or operator.ne(call.next_addr, mark[0] + 3)
+                or operator.ne(call.target, call.next_addr + int.from_bytes(encoding[1:], "little", signed=True))):
             raise PipelineHardError("scoped Clinic CALL encoding differs", layer="frontend")
         replacement = expression.copy()
         replacement.target = ailment.Expr.Const(
@@ -211,7 +240,7 @@ def _bind_call_targets_8616(
         statement = terminal.copy()
         statement.expr = replacement
         converted[(record.addr, record.size)] = original.copy(
-            statements=[*original.statements[:-1], statement],
+            statements=list(original.statements[:-1]) + [statement],
         )
 
 
@@ -224,6 +253,11 @@ def prepare_clinic_scoped_partition_8616(
     unscoped block. Only the native boundary's independently decoded partition
     can split it; no converted statement or rendered text supplies authority.
     """
+    projection: object
+    addr: object
+    node: object
+    target: object
+    targets: object
     from angr.codenode import BlockNode
 
     from inertia.ir.declared_entry_pipeline import (
@@ -241,7 +275,7 @@ def prepare_clinic_scoped_partition_8616(
     if (entry.scope.project is not boundary.project
             or entry.view.boundary.project is not boundary.project
             or entry.bundle.artifact is not entry.view.source_artifact
-            or boundary.function.addr != entry.bundle.artifact.function_addr):
+            or operator.ne(boundary.function.addr, entry.bundle.artifact.function_addr)):
         raise PipelineHardError("scoped Clinic partition authority differs", layer="frontend")
     if projection is None or any(projection.pending.values()):
         raise PipelineHardError("scoped Clinic partition is unproved", layer="frontend")
@@ -252,9 +286,9 @@ def prepare_clinic_scoped_partition_8616(
             raise PipelineHardError("scoped Clinic original block is foreign", layer="frontend")
     graph = boundary._func_graph.copy()
     graph.clear()
-    decoded_blocks = (cast(_Node8616, block) for block in native.blocks)
-    nodes = {block.addr: BlockNode(block.addr, block.size) for block in decoded_blocks}
-    if len(nodes) != len(native.blocks) or set(nodes) != set(projection.successors):
+    decoded_blocks = (cast(_Node8616, block) for block in iter(native.blocks))
+    nodes = {block.addr: BlockNode(block.addr, block.size) for block in iter(decoded_blocks)}
+    if operator.ne(len(nodes), len(native.blocks)) or operator.ne(set(nodes), set(projection.successors)):
         raise PipelineHardError("scoped Clinic native partition differs", layer="frontend")
     graph.add_nodes_from(nodes.values())
     for addr, targets in projection.successors.items():
@@ -270,6 +304,7 @@ def prepare_clinic_scoped_partition_8616(
     retain_declared_entry_pipeline_8616(clinic, entry)
 
 
+@cython.ccall
 def handoff_clinic_declared_entry_8616(clinic: object, codegen: object, project: object) -> None:
     """Rebind a Clinic-consumed conditional entry to the fresh structuring codegen.
 
@@ -284,6 +319,10 @@ def handoff_clinic_declared_entry_8616(clinic: object, codegen: object, project:
     foreign or copied binding refuses; a Clinic that consumed no entry keeps
     the ordinary unscoped route untouched.
     """
+    destination: object
+    entry: object
+    existing: object
+    installed: object
     from inertia.ir.declared_entry_pipeline import (
         _retained_input_8616,
         retain_declared_entry_pipeline_8616,
@@ -298,12 +337,12 @@ def handoff_clinic_declared_entry_8616(clinic: object, codegen: object, project:
     if boundary.project is not project or entry.view.boundary.project is not project:
         raise PipelineHardError("scoped Clinic entry handoff project differs", layer="frontend",
                                 function_addr=function_addr)
-    if boundary.function.addr != function_addr:
+    if operator.ne(boundary.function.addr, function_addr):
         raise PipelineHardError("scoped Clinic entry handoff function differs", layer="frontend",
                                 function_addr=function_addr)
     # Dynamic third-party boundary: a real codegen always retains ``cfunc``.
     destination = getattr(getattr(codegen, "cfunc", None), "addr", None)
-    if type(destination) is not int or destination != function_addr:
+    if type(destination) is not int or operator.ne(destination, function_addr):
         raise PipelineHardError("declared entry handoff destination differs", layer="frontend",
                                 function_addr=function_addr)
     if entry.bundle.artifact is not entry.view.source_artifact:
@@ -324,6 +363,7 @@ def handoff_clinic_declared_entry_8616(clinic: object, codegen: object, project:
     retain_declared_entry_pipeline_8616(codegen, entry)
 
 
+@cython.ccall
 def _require_handoff_scope_8616(
     clinic: object, entry: DeclaredEntryInput8616, project: object,
 ) -> None:
@@ -357,6 +397,7 @@ def _require_handoff_scope_8616(
                                     function_addr=function_addr)
 
 
+@cython.ccall
 def _require_handoff_partition_8616(
     clinic: object, entry: DeclaredEntryPipeline8616 | NativeNearCallPipeline8616,
 ) -> None:
@@ -366,17 +407,18 @@ def _require_handoff_partition_8616(
     consumer still authenticates current native bytes before consuming it;
     post-Clinic optimized AIL is not mistaken for the original source graph.
     """
+    receipt: object
     boundary = cast(_Clinic8616, clinic)
     # Dynamic third-party boundary: older/unscoped Clinic objects lack a receipt.
     receipt = getattr(clinic, "_inertia_clinic_scoped_partition_8616", None)
     if (type(receipt) is not ClinicScopedPartition8616
             or receipt.entry is not entry or receipt.project is not boundary.project
             or receipt.function is not boundary.function
-            or receipt.source_graph != _graph_surface(boundary.function.graph)):
+            or operator.ne(receipt.source_graph, _graph_surface(boundary.function.graph))):
         raise PipelineHardError("Clinic entry handoff partition differs", layer="frontend")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ClinicScopedPartition8616:
     """Bind unchanged source and consuming graphs to one explicit native entry."""
     entry: DeclaredEntryPipeline8616 | NativeNearCallPipeline8616 | EntryJumpTransportProof8616
@@ -385,7 +427,7 @@ class ClinicScopedPartition8616:
     source_graph: ClinicControlSurface8616
     consuming_graph: ClinicControlSurface8616
 
-    def authenticates(self, clinic: object, context: ClinicConversionContext8616) -> bool:
+    def authenticates(self, clinic: object, context: ClinicConversionContext8616) -> cython.bint:
         """Check both graph snapshots and their exact typed entry authority."""
         boundary = cast(_Clinic8616, clinic)
         from inertia.ir.entry_jump_transport import EntryJumpTransportProof8616
@@ -397,7 +439,7 @@ class ClinicScopedPartition8616:
         identities = (boundary.project is self.project is context.project
                       and boundary.function is self.function is context.function
                       and authority_project is self.project)
-        surfaces = (_graph_surface(boundary.function.graph) == self.source_graph
+        surfaces = (operator.eq(_graph_surface(boundary.function.graph), self.source_graph)
                     and _graph_surface(boundary._func_graph) == self.consuming_graph == context.graph)
         return identities and surfaces
 
@@ -410,6 +452,8 @@ def prepare_clinic_universal_partition_8616(clinic: object) -> None:
     context binds both graphs, and outgoing transport freshly proves the native
     graph again before any terminal target can be consumed.
     """
+    native: object
+    witness: object
     from angr.codenode import BlockNode
 
     from inertia.ir.entry_jump_transport import prove_entry_jump_transport_8616
@@ -434,34 +478,34 @@ def prepare_clinic_universal_partition_8616(clinic: object) -> None:
     assert product.application is not None
     graph = boundary._func_graph.copy()
     graph.clear()
-    decoded_blocks = (cast(_Node8616, block) for block in native.blocks)
-    nodes = {block.addr: BlockNode(block.addr, block.size) for block in decoded_blocks}
+    decoded_blocks = (cast(_Node8616, block) for block in iter(native.blocks))
+    nodes = {block.addr: BlockNode(block.addr, block.size) for block in iter(decoded_blocks)}
     blocks = product.application.blocks
-    if len(nodes) != len(blocks) or set(nodes) != {block.addr for block in blocks}:
+    if operator.ne(len(nodes), len(blocks)) or operator.ne(set(nodes), {block.addr for block in iter(blocks)}):
         return
-    if any(target not in nodes for block in blocks for target in block.successor_addrs):
+    if any(target not in nodes for block in iter(blocks) for target in iter(block.successor_addrs)):
         return
     graph.add_nodes_from(nodes.values())
     graph.add_edges_from((nodes[block.addr], nodes[target])
-                         for block in blocks for target in block.successor_addrs)
-    if (source_graph != _graph_surface(boundary.function.graph)
-            or original_graph != _graph_surface(boundary._func_graph)
-            or capture_function_boundary_8616(boundary.project, boundary.function) != witness):
+                         for block in iter(blocks) for target in iter(block.successor_addrs))
+    if (operator.ne(source_graph, _graph_surface(boundary.function.graph))
+            or operator.ne(original_graph, _graph_surface(boundary._func_graph))
+            or operator.ne(capture_function_boundary_8616(boundary.project, boundary.function), witness)):
         raise PipelineHardError("universal Clinic partition source changed", layer="frontend")
-    if original_graph == _graph_surface(graph):
+    if operator.eq(original_graph, _graph_surface(graph)):
         return
     boundary._func_graph = graph
     boundary._inertia_clinic_scoped_partition_8616 = ClinicScopedPartition8616(
         product, boundary.project, boundary.function, source_graph, _graph_surface(graph))
 
 
-def _universal_product_complete_8616(product: EntryJumpTransportProof8616) -> bool:
+def _universal_product_complete_8616(product: EntryJumpTransportProof8616) -> cython.bint:
     """Require every candidate to have an unconditional source-bound admission."""
     if product.refusal is not None or product.proof is None or product.application is None:
         return False
     admitted = product.admitted_terminal_jumps()
     return (not product.proof.stats.failure_count and bool(admitted)
-            and len(admitted) == len(product.pending_terminal_jumps())
+            and operator.eq(len(admitted), len(product.pending_terminal_jumps()))
             and all(jump.invocation_scope is None and jump.invocation is None
                     and jump.near_call_scope is None and not jump.call_dependencies
-                    for jump in admitted))
+                    for jump in iter(admitted)))

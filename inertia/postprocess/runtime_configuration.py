@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Configure one guarded postprocess run from typed runtime policy.
 
 Layer: Rewrite/Postprocess cleanup.
@@ -11,9 +12,12 @@ Dynamic boundary: project, codegen, and CFunction are third-party angr objects.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Protocol, cast
+X86_16TailValidationSummary = typing.TypeVar("X86_16TailValidationSummary")
 
 if TYPE_CHECKING:
     from inertia.validation.tail_validation import X86_16TailValidationSummary
@@ -29,33 +33,36 @@ from .validation_contracts import PostprocessFunctionComplexity8616
 
 __all__ = ["configure_postprocess_runtime_8616"]
 
-type ComplexityResolver8616 = Callable[
+ComplexityResolver8616 = typing.TypeAliasType("ComplexityResolver8616", Callable[
     [object, object, int | None],
     PostprocessFunctionComplexity8616,
-]
-type BaselineSummaryCollector8616 = Callable[[object, object], X86_16TailValidationSummary]
+])
+BaselineSummaryCollector8616 = typing.TypeAliasType("BaselineSummaryCollector8616", Callable[[object, object], X86_16TailValidationSummary])
 
 
 class _CodegenRuntimeBoundary8616(Protocol):
     """Third-party codegen metadata configured for guarded postprocess."""
 
     cfunc: object
-    _inertia_allow_large_function_flag_dce_after_seqnode_replacement_8616: bool
-    _inertia_postprocess_pre_validation_cost_ms_8616: int
+    _inertia_allow_large_function_flag_dce_after_seqnode_replacement_8616: cython.bint
+    _inertia_postprocess_pre_validation_cost_ms_8616: cython.longlong
     _inertia_postprocess_pre_validation_summary: X86_16TailValidationSummary | None
-    _inertia_skip_per_pass_validation_large_function: bool
-    _inertia_postprocess_function_complexity_8616: dict[str, object]
-    _inertia_postprocess_passes: tuple[str, ...]
-    _inertia_postprocess_optional_reject_budget_8616: int
+    _inertia_skip_per_pass_validation_large_function: cython.bint
+    _inertia_postprocess_function_complexity_8616: object
+    _inertia_postprocess_passes: object
+    _inertia_postprocess_optional_reject_budget_8616: cython.longlong
 
 
-def _nonnegative_int_8616(value: object) -> int:
+@cython.ccall
+def _nonnegative_int_8616(value: object) -> cython.longlong:
     """Return a bounded policy integer without accepting booleans."""
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
 
 
+@cython.ccall
 def _function_addr_8616(codegen: object) -> int | None:
     """Return the active address at the explicit third-party CFunction boundary."""
+    addr: object
     try:
         cfunc = cast(_CodegenRuntimeBoundary8616, codegen).cfunc
     except AttributeError:
@@ -72,14 +79,18 @@ def configure_postprocess_runtime_8616(
     *,
     complexity_resolver: ComplexityResolver8616,
     baseline_summary_collector: BaselineSummaryCollector8616,
-    fact_backed_stack_normalize_enabled: bool,
+    fact_backed_stack_normalize_enabled: cython.bint,
 ) -> PostprocessRuntimeConfig8616:
     """Publish dynamic runtime metadata and return immutable pass policy."""
+    baseline_summary: object
+    delta: object
+    func_addr: object
+    replacement_records: object
     surface = cast(_CodegenRuntimeBoundary8616, codegen)
     func_addr = _function_addr_8616(codegen)
     # Dynamic boundary: these are optional project plugin fields.
     delta = getattr(project, "_inertia_original_linear_delta", None)
-    func_addr_candidates: set[int] = set()
+    func_addr_candidates: set[cython.longlong] = set()
     if func_addr is not None:
         func_addr_candidates.add(func_addr)
         if isinstance(delta, int):
@@ -96,7 +107,7 @@ def configure_postprocess_runtime_8616(
             and record.get("function_addr") in func_addr_candidates
             and record.get("changed") is True
             and _nonnegative_int_8616(record.get("replaced_count")) > 0
-            for record in replacement_records
+            for record in iter(replacement_records)
         )
 
     validation_enabled = bool(
@@ -130,7 +141,7 @@ def configure_postprocess_runtime_8616(
         "expensive_validation_baseline": expensive_validation_baseline,
     }
 
-    baseline_summary: X86_16TailValidationSummary | None = None
+    baseline_summary = None
     if validation_enabled:
         try:
             baseline_summary = surface._inertia_postprocess_pre_validation_summary
@@ -139,7 +150,7 @@ def configure_postprocess_runtime_8616(
         if baseline_summary is None:
             baseline_summary = baseline_summary_collector(project, codegen)
 
-    surface._inertia_postprocess_passes = tuple(spec.name for spec in pass_specs)
+    surface._inertia_postprocess_passes = tuple(spec.name for spec in iter(pass_specs))
     surface._inertia_postprocess_optional_reject_budget_8616 = (
         postprocess_optional_reject_budget_8616()
     )

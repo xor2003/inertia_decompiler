@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Transport proven native terminal JMP targets into converted AIL blocks.
 
 Layer: Frontend/runtime.
@@ -13,6 +14,8 @@ structuring, or rewrite-stage semantics are recovered here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -30,6 +33,9 @@ from inertia.ir.vex_terminal_jump import (
 
 from .control_coordinates import ControlWidth
 from .relative_control_edge import DecodedRelativeEdge
+import dataclasses
+import operator
+import builtins
 
 __all__ = (
     "CLINIC_TERMINAL_TRANSPORT_ATTR_8616",
@@ -60,7 +66,7 @@ class ClinicTerminalControlRefusal8616(StrEnum):
     UNPROVEN_TARGET = "clinic_terminal_unproven_target"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ClinicTerminalControlStats8616:
     """Closed five-stage ledger for one converted block terminal.
 
@@ -73,14 +79,14 @@ class ClinicTerminalControlStats8616:
     counted failure, never a silent drop.
     """
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Every classified candidate either materialized or was refused."""
         counts = (
             self.raw_fact_count,
@@ -89,16 +95,15 @@ class ClinicTerminalControlStats8616:
             self.materialized_count,
             self.failure_count,
         )
-        if not all(type(count) is int and count >= 0 for count in counts):
+        if not all(type(count) is int and count >= 0 for count in iter(counts)):
             return False
         return bool(
             self.normalized_fact_count <= self.raw_fact_count
             and self.classified_fact_count <= self.normalized_fact_count
-            and self.classified_fact_count
-            == self.materialized_count + self.failure_count
+            and operator.eq(self.classified_fact_count, self.materialized_count + self.failure_count)
         )
 
-    def to_dict(self) -> dict[str, int]:
+    def to_dict(self) -> dict[str, cython.longlong]:
         """Serialize the transport ledger for diagnostics and workers."""
         return {
             "raw_fact_count": self.raw_fact_count,
@@ -109,7 +114,7 @@ class ClinicTerminalControlStats8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ClinicTerminalTransport8616:
     """Closed transport decision for one converted AIL block.
 
@@ -120,15 +125,15 @@ class ClinicTerminalTransport8616:
     bound. Whenever ``applied`` is False the symbolic operand is preserved.
     """
 
-    applied: bool
+    applied: cython.bint
     proven_target: int | None
     refusal: ClinicTerminalControlRefusal8616 | None
-    detail: str
+    detail: object
     stats: ClinicTerminalControlStats8616
     evidence: TerminalJumpEvidence8616 | None
 
     @property
-    def refusals(self) -> tuple[IRRefusal, ...]:
+    def refusals(self) -> object:
         """Return the proof owner's refusals for this block, if evidence ran."""
         return () if self.evidence is None else self.evidence.refusals
 
@@ -153,13 +158,14 @@ class _AngrBlockBoundary8616(Protocol):
 class _VexExitBoundary8616(Protocol):
     """Third-party IRSB surface required before the proof owner is invoked."""
 
-    addr: int
+    addr: cython.longlong
     jumpkind: object
     next: object
     statements: object
     tyenv: object
 
 
+@cython.ccall
 def _block_vex_8616(block: object) -> object | None:
     """Return the converted block's own VEX, or None when absent."""
     try:
@@ -168,7 +174,8 @@ def _block_vex_8616(block: object) -> object | None:
         return None
 
 
-def _is_boring_8616(vex: object) -> bool:
+@cython.ccall
+def _is_boring_8616(vex: object) -> cython.bint:
     """Restrict transport to unconditional-exit block tails."""
     try:
         jumpkind = cast(_VexExitBoundary8616, vex).jumpkind
@@ -177,6 +184,7 @@ def _is_boring_8616(vex: object) -> bool:
     return str(jumpkind) == "Ijk_Boring"
 
 
+@cython.ccall
 def _vex_statements_8616(vex: object) -> tuple[object, ...]:
     """Return the IRSB statement list, or empty when the surface is absent."""
     try:
@@ -189,10 +197,11 @@ def _vex_statements_8616(vex: object) -> tuple[object, ...]:
         return ()
 
 
-def _terminal_instruction_mark_8616(vex: object) -> tuple[int, int] | None:
+@cython.ccall
+def _terminal_instruction_mark_8616(vex: object) -> object:
     """Return ``(addr, size)`` of the last decoded instruction, if recorded."""
     marks = [
-        row for row in _vex_statements_8616(vex) if isinstance(row, pyvex.stmt.IMark)
+        row for row in builtins.iter(_vex_statements_8616(vex)) if isinstance(row, pyvex.stmt.IMark)
     ]
     if not marks:
         return None
@@ -203,15 +212,17 @@ def _terminal_instruction_mark_8616(vex: object) -> tuple[int, int] | None:
         return None
 
 
-def _tmp_exprs_8616(vex: object) -> dict[int, object]:
+@cython.ccall
+def _tmp_exprs_8616(vex: object) -> dict[cython.longlong, object]:
     """Collect ``WrTmp`` producers exactly as the IR and CFG consumers do."""
     return {
         row.tmp: row.data
-        for row in _vex_statements_8616(vex)
+        for row in builtins.iter(_vex_statements_8616(vex))
         if isinstance(row, pyvex.stmt.WrTmp)
     }
 
 
+@cython.ccall
 def _type_environment_8616(vex: object) -> object | None:
     """Return the IRSB type environment for segment-leaf sizing."""
     try:
@@ -220,6 +231,7 @@ def _type_environment_8616(vex: object) -> object | None:
         return None
 
 
+@cython.ccall
 def _skipped_8616() -> ClinicTerminalTransport8616:
     """Return the closed non-candidate decision: nothing was examined."""
     return ClinicTerminalTransport8616(
@@ -232,13 +244,14 @@ def _skipped_8616() -> ClinicTerminalTransport8616:
     )
 
 
+@cython.ccall
 def _result_8616(
     *,
-    applied: bool,
+    applied: cython.bint,
     proven_target: int | None,
     evidence: TerminalJumpEvidence8616,
-    refusal: ClinicTerminalControlRefusal8616 | None,
-    detail: str,
+    refusal: object,
+    detail: object,
 ) -> ClinicTerminalTransport8616:
     """Close one evaluated decision with transport-adjusted counters."""
     stats = evidence.stats
@@ -258,6 +271,7 @@ def _result_8616(
     )
 
 
+@cython.ccall
 def _bound_next_operand_8616(
     jump: ailment.Stmt.Jump, next_expr: object, type_environment: object,
 ) -> bool | None:
@@ -270,23 +284,24 @@ def _bound_next_operand_8616(
     """
     target = jump.target
     if isinstance(next_expr, pyvex.expr.RdTmp):
-        if target.bits != next_expr.result_size(cast(pyvex.IRTypeEnv, type_environment)):
+        if operator.ne(target.bits, next_expr.result_size(cast(pyvex.IRTypeEnv, type_environment))):
             return False
         return (
             isinstance(target, ailment.Expr.Tmp)
-            and target.tmp_idx == next_expr.tmp
+            and operator.eq(target.tmp_idx, next_expr.tmp)
         )
     if isinstance(next_expr, pyvex.expr.Const):
-        if target.bits != next_expr.result_size(cast(pyvex.IRTypeEnv, type_environment)):
+        if operator.ne(target.bits, next_expr.result_size(cast(pyvex.IRTypeEnv, type_environment))):
             return False
         return (
             isinstance(target, ailment.Expr.Const)
-            and target.value == next_expr.con.value
+            and operator.eq(target.value, next_expr.con.value)
         )
     return None
 
 
-def _decoded_edge_target_8616(decoded: DecodedRelativeEdge) -> int:
+@cython.ccall
+def _decoded_edge_target_8616(decoded: DecodedRelativeEdge) -> cython.longlong:
     """Recompute the proven destination from the retained exact bytes."""
     target = decoded.next_head + decoded.displacement
     if decoded.width is ControlWidth.DWORD:
@@ -294,7 +309,7 @@ def _decoded_edge_target_8616(decoded: DecodedRelativeEdge) -> int:
     return target
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ClinicTerminalBinding8616:
     """Shared AIL terminal rebinding outcome for both transport owners.
 
@@ -304,18 +319,19 @@ class ClinicTerminalBinding8616:
     stayed symbolic and ``detail`` carries its human-readable form.
     """
 
-    applied: bool
+    applied: cython.bint
     refusal: ClinicTerminalControlRefusal8616 | None
-    detail: str
+    detail: object
 
 
+@cython.ccall
 def rebind_terminal_jump_8616(
     converted: object,
     vex: object,
-    decoded: DecodedRelativeEdge | None,
-    target: int,
+    decoded: object,
+    target: cython.longlong,
     *,
-    next_atom: Callable[[], int],
+    next_atom: Callable[[], cython.longlong],
 ) -> ClinicTerminalBinding8616:
     """Repoint the exact ``next``-carrying terminal Jump at ``target``.
 
@@ -328,6 +344,8 @@ def rebind_terminal_jump_8616(
     not recompute from the retained bytes keeps the symbolic operand
     under a typed refusal.
     """
+    bound: object
+    mark: object
     if not isinstance(converted, ailment.Block):
         return ClinicTerminalBinding8616(
             applied=False,
@@ -361,9 +379,9 @@ def rebind_terminal_jump_8616(
         )
     mark = _terminal_instruction_mark_8616(vex)
     if (
-        converted.addr != cast(_VexExitBoundary8616, vex).addr
+        operator.ne(converted.addr, cast(_VexExitBoundary8616, vex).addr)
         or mark is None
-        or jump.tags.get("ins_addr") != mark[0]
+        or operator.ne(jump.tags.get("ins_addr"), mark[0])
     ):
         return ClinicTerminalBinding8616(
             applied=False,
@@ -397,11 +415,12 @@ def rebind_terminal_jump_8616(
     return ClinicTerminalBinding8616(applied=True, refusal=None, detail="")
 
 
+@cython.ccall
 def transport_terminal_direct_jump_8616(
     block: object,
     converted: object,
     *,
-    next_atom: Callable[[], int],
+    next_atom: Callable[[], cython.longlong],
 ) -> ClinicTerminalTransport8616:
     """Bind the converted block's proven terminal JMP target, or refuse.
 
@@ -412,6 +431,8 @@ def transport_terminal_direct_jump_8616(
     destination for the block's own terminal bytes. Every other outcome keeps
     the operand symbolic and records a typed non-result under closed counters.
     """
+    mark: object
+    vex: object
     if not isinstance(converted, ailment.Block):
         return _skipped_8616()
     vex = _block_vex_8616(block)
@@ -452,11 +473,12 @@ def transport_terminal_direct_jump_8616(
     return _bind_proven_terminal_8616(converted, vex, evidence, next_atom)
 
 
+@cython.ccall
 def _bind_proven_terminal_8616(
     converted: ailment.Block,
     vex: object,
     evidence: TerminalJumpEvidence8616,
-    next_atom: Callable[[], int],
+    next_atom: Callable[[], cython.longlong],
 ) -> ClinicTerminalTransport8616:
     """Repoint the exact ``next``-carrying terminal Jump at the proven target.
 
@@ -484,6 +506,7 @@ def _bind_proven_terminal_8616(
     )
 
 
+@cython.ccall
 def record_clinic_terminal_transport_8616(
     clinic: object, report: ClinicTerminalTransport8616,
 ) -> None:
@@ -492,7 +515,8 @@ def record_clinic_terminal_transport_8616(
     Dynamic boundary: the ledger attribute lives on the third-party Clinic
     instance; tuple-append keeps earlier per-block decisions immutable.
     """
+    reports: object
     reports = getattr(clinic, CLINIC_TERMINAL_TRANSPORT_ATTR_8616, ())
     if not isinstance(reports, tuple):
         reports = ()
-    setattr(clinic, CLINIC_TERMINAL_TRANSPORT_ATTR_8616, (*reports, report))
+    setattr(clinic, CLINIC_TERMINAL_TRANSPORT_ATTR_8616, tuple(reports) + (report,))

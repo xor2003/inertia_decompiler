@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Resolve stack-address anchors across angr and machine coordinates.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from typing import Protocol, cast
@@ -21,6 +24,7 @@ from inertia.ir.analysis.stack_frame_ir import FrameAccessArtifact, FrameCoordin
 from inertia.ir.native_stack_anchor import native_stack_anchor_8616
 
 from .stack_variable_coordinates import stack_variable_coordinate_registry_8616
+import builtins
 
 
 class _CodegenBoundary8616(Protocol):
@@ -29,16 +33,20 @@ class _CodegenBoundary8616(Protocol):
     _inertia_vex_ir_frame: object
 
 
+@cython.ccall
 def native_entry_sp_offset_for_anchor_8616(node: object) -> int | None:
     """Read a published entry-SP origin without inventing a machine-BP relation."""
+    anchor: object
     if not isinstance(node, structured_c.CUnaryOp) or node.op != "Reference":
         return None
     anchor = native_stack_anchor_8616(node.tags)
     return anchor.entry_sp_offset if anchor is not None else None
 
 
+@cython.ccall
 def machine_bp_offset_for_native_anchor_8616(codegen: object, node: object) -> int | None:
     """Translate an explicitly published source anchor using complete frame proof."""
+    anchor: object
     if not isinstance(node, structured_c.CUnaryOp) or node.op != "Reference":
         return None
     anchor = native_stack_anchor_8616(node.tags)
@@ -58,6 +66,7 @@ def machine_bp_offset_for_native_anchor_8616(codegen: object, node: object) -> i
     return anchor.entry_sp_offset - frame.bp_coordinate.bp_entry_sp_delta
 
 
+@cython.ccall
 def machine_bp_offset_for_entry_sp_anchor_8616(
     codegen: object,
     node: object,
@@ -104,10 +113,11 @@ def machine_bp_offset_for_entry_sp_anchor_8616(
     return variable.offset - frame.bp_coordinate.bp_entry_sp_delta
 
 
+@cython.ccall
 def absolute_machine_bp_offset_from_wrapped_anchor_8616(
     node: object,
-    encoded_offset: int,
-    known_bp_offsets: set[int],
+    encoded_offset: cython.longlong,
+    known_bp_offsets: object,
 ) -> int | None:
     """Return a wrapped direct BP displacement carried beside a frame anchor."""
     if not isinstance(node, structured_c.CUnaryOp) or node.op != "Reference":
@@ -124,23 +134,27 @@ def absolute_machine_bp_offset_from_wrapped_anchor_8616(
 
 def consume_indexed_stack_frame_terms_8616(
     codegen: object,
-    terms: tuple[tuple[int, object], ...],
+    terms: object,
     *,
     segment_name: Callable[[object], str | None],
-) -> tuple[tuple[int, object], ...] | None:
+) -> object:
     """Remove one proven SS/BP-zero frame from an indexed linear address.
 
     A local C pointer already embodies its frame. Preserve index/lane terms,
     but refuse foreign segments and ambiguous or unproven frame anchors.
     Offset-only input remains owned by the caller's existing indexed proof.
     """
-    segments = [(index, sign, segment_name(term)) for index, (sign, term) in enumerate(terms)]
-    segments = [entry for entry in segments if entry[2] is not None]
+    projection: object
+    index: object
+    sign: object
+    term: object
+    segments = [(index, sign, segment_name(term)) for index, (sign, term) in builtins.iter(enumerate(terms))]
+    segments = [entry for entry in iter(segments) if entry[2] is not None]
     if not segments:
         return terms
     if len(segments) != 1 or segments[0][1:] != (1, "ss"):
         return None
-    anchors: list[int] = []
+    anchors: list[cython.longlong] = []
     registry = stack_variable_coordinate_registry_8616(codegen)
     for index, (sign, term) in enumerate(terms):
         if not isinstance(term, structured_c.CUnaryOp) or term.op != "Reference":
@@ -159,7 +173,7 @@ def consume_indexed_stack_frame_terms_8616(
     if len(anchors) != 1:
         return None
     consumed = {segments[0][0], anchors[0]}
-    return tuple(term for index, term in enumerate(terms) if index not in consumed)
+    return tuple(term for index, term in builtins.iter(enumerate(terms)) if index not in consumed)
 
 
 __all__ = [

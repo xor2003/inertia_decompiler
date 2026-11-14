@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Fold exact byte-lane recompositions at the Widening layer.
 
 Layer: Widening.
@@ -11,6 +12,8 @@ CLI/reporting evidence.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Protocol, cast
@@ -29,18 +32,21 @@ from inertia.lowering.semantic_cast import CSemanticCast8616
 from inertia.pipeline.errors import PipelineHardError
 from inertia.semantics.alias_query import describe_alias_storage
 from inertia.semantics.expression_analysis import describe_virtual_value_identity_8616
+import dataclasses
+import operator
+import builtins
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class WordProjectionRecompositionStats8616:
     """Closed evidence counters for word-projection recomposition."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    identity_elided_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    identity_elided_count: cython.longlong = 0
 
 
 class _CFunctionSurface8616(Protocol):
@@ -55,6 +61,7 @@ class _CodegenSurface8616(Protocol):
     cfunc: _CFunctionSurface8616
 
 
+@cython.ccall
 def _unwrap_casts_8616(node: object) -> object:
     """Remove syntax-only casts from a structured expression."""
     while isinstance(node, structured_c.CTypeCast):
@@ -62,16 +69,18 @@ def _unwrap_casts_8616(node: object) -> object:
     return node
 
 
-def _constant_is_8616(node: object, expected: int) -> bool:
+@cython.ccall
+def _constant_is_8616(node: object, expected: cython.longlong) -> cython.bint:
     """Return whether a structured node is one exact integer constant."""
     node = _unwrap_casts_8616(node)
     return (
         isinstance(node, structured_c.CConstant)
         and isinstance(node.value, int)
-        and node.value == expected
+        and operator.eq(node.value, expected)
     )
 
 
+@cython.ccall
 def _masked_byte_source_8616(node: object) -> object | None:
     """Return the source beneath one or more exact low-byte masks."""
     current = _unwrap_casts_8616(node)
@@ -89,8 +98,10 @@ def _masked_byte_source_8616(node: object) -> object | None:
     return current if masked else None
 
 
+@cython.ccall
 def _high_byte_source_8616(node: object) -> object | None:
     """Return the source of one exact high-byte projection."""
+    shifted: object
     node = _unwrap_casts_8616(node)
     if (
         not isinstance(node, structured_c.CBinaryOp)
@@ -109,8 +120,14 @@ def _high_byte_source_8616(node: object) -> object | None:
     return _unwrap_casts_8616(shifted.lhs)
 
 
-def _word_projection_sources_8616(node: object) -> tuple[object, object] | None:
+@cython.ccall
+def _word_projection_sources_8616(node: object) -> object:
     """Return low/high sources from one complete 16-bit recomposition."""
+    high_source: object
+    low_source: object
+    typed_sources: object
+    high_node: object
+    low_node: object
     typed_sources = _typed_word_projection_sources_8616(node)
     if typed_sources is not None:
         return typed_sources
@@ -125,7 +142,8 @@ def _word_projection_sources_8616(node: object) -> tuple[object, object] | None:
     return None
 
 
-def _unsigned_integer_width_8616(type_: object, width: int) -> bool:
+@cython.ccall
+def _unsigned_integer_width_8616(type_: object, width: cython.longlong) -> cython.bint:
     """Recognize explicit unsigned scalar widths without pointer coercion."""
     if type(type_) not in (SimTypeChar, SimTypeShort, SimTypeNum):
         return False
@@ -136,9 +154,10 @@ def _unsigned_integer_width_8616(type_: object, width: int) -> bool:
         return width == 8
     if type(type_) is SimTypeShort:
         return width == 16
-    return bool(scalar.size == width)
+    return bool(operator.eq(scalar.size, width))
 
 
+@cython.ccall
 def _required_byte_source_8616(node: object) -> structured_c.CExpression | None:
     """Consume a required unsigned word-to-byte conversion, not cosmetic casts."""
     if (
@@ -150,7 +169,8 @@ def _required_byte_source_8616(node: object) -> structured_c.CExpression | None:
     return None
 
 
-def _exact_byte_shift_8616(node: object) -> bool:
+@cython.ccall
+def _exact_byte_shift_8616(node: object) -> cython.bint:
     """Require the literal byte-lane displacement without stripping casts."""
     return (
         isinstance(node, structured_c.CConstant)
@@ -159,13 +179,16 @@ def _exact_byte_shift_8616(node: object) -> bool:
     )
 
 
-def _typed_word_projection_sources_8616(node: object) -> tuple[object, object] | None:
+def _typed_word_projection_sources_8616(node: object) -> object:
     """Prove required byte lanes reconstruct an explicitly unsigned machine word.
 
     The shift's explicit machine type is required: arbitrary C byte shifts can
     overflow signed-int promotion on a sixteen-bit host. No semantic cast is
     stripped outside this exact word/byte conversion chain.
     """
+    low_source: object
+    high: object
+    low: object
     if not isinstance(node, structured_c.CBinaryOp) or node.op != "Or":
         return None
     if not _unsigned_integer_width_8616(node.type, 16):
@@ -176,7 +199,7 @@ def _typed_word_projection_sources_8616(node: object) -> tuple[object, object] |
             continue
         if not _unsigned_integer_width_8616(low_source.type, 16):
             continue
-        if not all(_unsigned_integer_width_8616(type_, 16) for type_ in (high.src_type, high.dst_type)):
+        if not all(_unsigned_integer_width_8616(type_, 16) for type_ in iter((high.src_type, high.dst_type))):
             continue
         shift = high.expr
         if (
@@ -198,7 +221,8 @@ def _typed_word_projection_sources_8616(node: object) -> tuple[object, object] |
     return None
 
 
-def _side_effect_free_source_8616(node: object) -> bool:
+@cython.ccall
+def _side_effect_free_source_8616(node: object) -> cython.bint:
     """Accept only recursively pure value expressions for deduplication."""
     node = _unwrap_casts_8616(node)
     if isinstance(node, (structured_c.CConstant, structured_c.CVariable)):
@@ -214,7 +238,8 @@ def _side_effect_free_source_8616(node: object) -> bool:
     return False
 
 
-def _word_destination_proven_8616(node: object) -> bool:
+@cython.ccall
+def _word_destination_proven_8616(node: object) -> cython.bint:
     """Return whether Alias or typed virtual identity proves one word destination."""
     facts = describe_alias_storage(node)
     if facts.domain.width == 2 and not facts.needs_synthesis():
@@ -231,12 +256,14 @@ def _word_destination_proven_8616(node: object) -> bool:
         return False
 
 
+@cython.ccall
 def _process_assignment_8616(
     assignment: structured_c.CAssignment,
     stats: WordProjectionRecompositionStats8616,
-    identity_assignment_ids: set[int],
+    identity_assignment_ids: object,
 ) -> None:
     """Fold one assignment when both word halves share one proven source."""
+    sources: object
     sources = _word_projection_sources_8616(assignment.rhs)
     if sources is None:
         return
@@ -258,24 +285,27 @@ def _process_assignment_8616(
         identity_assignment_ids.add(id(assignment))
 
 
+@cython.ccall
 def _elide_identity_assignments_8616(
     root: object,
-    identity_assignment_ids: set[int],
+    identity_assignment_ids: object,
     stats: WordProjectionRecompositionStats8616,
 ) -> None:
     """Drop folded self-assignments from every statement container."""
+    node: object
     if not identity_assignment_ids:
         return
     for node in _iter_c_nodes_deep_8616(root):
         if not isinstance(node, structured_c.CStatements):
             continue
-        retained = [statement for statement in node.statements if id(statement) not in identity_assignment_ids]
+        retained = [statement for statement in iter(node.statements) if id(statement) not in identity_assignment_ids]
         stats.identity_elided_count += len(node.statements) - len(retained)
         node.statements[:] = retained
 
 
-def materialize_word_projection_recompositions_8616(codegen: object) -> bool:
+def materialize_word_projection_recompositions_8616(codegen: object) -> cython.bint:
     """Fold complete word projections while preserving destination truncation."""
+    assignment: object
     surface = cast(_CodegenSurface8616, codegen)
     try:
         root = surface.cfunc.statements
@@ -284,10 +314,10 @@ def materialize_word_projection_recompositions_8616(codegen: object) -> bool:
     stats = WordProjectionRecompositionStats8616()
     assignments = tuple(
         node
-        for node in _iter_c_nodes_deep_8616(root)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(root))
         if isinstance(node, structured_c.CAssignment)
     )
-    identity_assignment_ids: set[int] = set()
+    identity_assignment_ids: set[cython.longlong] = set()
     for assignment in assignments:
         _process_assignment_8616(assignment, stats, identity_assignment_ids)
     _elide_identity_assignments_8616(root, identity_assignment_ids, stats)

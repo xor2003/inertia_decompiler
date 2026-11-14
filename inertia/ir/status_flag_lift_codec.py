@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Serialize durable status-flag lift evidence for angr FunctionInfo.
 
 Layer: IR.
@@ -12,6 +13,7 @@ work here.
 """
 
 from __future__ import annotations
+import cython
 
 from collections.abc import Mapping
 
@@ -23,11 +25,13 @@ from .status_flag_lift_context import (
 )
 
 
+@cython.ccall
 def _plain_int_8616(value: object) -> int | None:
     """Return one non-boolean integer from a serialized artifact field."""
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+@cython.ccall
 def encode_status_flag_lift_artifact_8616(
     artifact: StatusFlagLiftArtifact8616,
 ) -> dict[str, object]:
@@ -40,21 +44,32 @@ def encode_status_flag_lift_artifact_8616(
                 "written": int(candidate.written),
                 "dead_writes": int(candidate.dead_writes),
             }
-            for candidate in artifact.candidates
+            for candidate in iter(artifact.candidates)
         ],
         "packed_preservation_addresses": sorted(artifact.packed_preservation_addresses),
         "original_linear_delta": artifact.original_linear_delta,
         "callee_effects": [
             {"target": target, "reads": int(effect.reads), "overwrites": int(effect.overwrites)}
-            for target, effect in artifact.callee_effects
+            for target, effect in iter(artifact.callee_effects)
         ],
     }
 
 
+@cython.ccall
 def decode_status_flag_lift_artifact_8616(
     payload: object,
 ) -> StatusFlagLiftArtifact8616 | None:
     """Decode a complete artifact, refusing any malformed structured field."""
+    address: object
+    candidate_payloads: object
+    dead_writes: object
+    function_address: object
+    instruction_address: object
+    original_linear_delta: object
+    preservation_payload: object
+    written: object
+    item: object
+    value: object
     if not isinstance(payload, Mapping):
         return None
     function_address = _plain_int_8616(payload.get("function_address"))
@@ -84,7 +99,7 @@ def decode_status_flag_lift_artifact_8616(
                 dead_writes=StatusFlag8616(dead_writes),
             )
         )
-    preservation_addresses: set[int] = set()
+    preservation_addresses: set[cython.longlong] = set()
     for value in preservation_payload:
         address = _plain_int_8616(value)
         if address is None:
@@ -99,11 +114,16 @@ def decode_status_flag_lift_artifact_8616(
     )
 
 
-def _decode_callee_effects_8616(payload: object) -> tuple[tuple[int, StatusFlagEffect8616], ...]:
+@cython.ccall
+def _decode_callee_effects_8616(payload: object) -> tuple[tuple[cython.longlong, StatusFlagEffect8616], ...]:
     """Refuse malformed or conflicting summaries without promoting evidence."""
+    overwrites: object
+    reads: object
+    target: object
+    entry: object
     if not isinstance(payload, list):
         return ()
-    effects: dict[int, StatusFlagEffect8616] = {}
+    effects: dict[cython.longlong, StatusFlagEffect8616] = {}
     for entry in payload:
         if not isinstance(entry, Mapping):
             return ()
@@ -116,7 +136,7 @@ def _decode_callee_effects_8616(payload: object) -> tuple[tuple[int, StatusFlagE
         if target < 0 or invalid_mask or target in effects:
             return ()
         effects[target] = StatusFlagEffect8616(StatusFlag8616(reads), StatusFlag8616(overwrites))
-    return tuple(sorted(effects.items()))
+    return tuple(sorted(tuple(effects.items())))
 
 
 __all__ = [

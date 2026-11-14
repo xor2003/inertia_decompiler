@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Helper boundary.
 
 Responsibility: merge proven field-access evidence into shared structure layout candidates.
@@ -11,6 +12,7 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import cython
 
 import logging
 import typing
@@ -19,6 +21,9 @@ from typing import TYPE_CHECKING
 
 from inertia.ir.core import IRAddress
 from inertia.lowering.type_storage_object_bridge import load_storage_object_bridge
+import dataclasses
+import operator
+import builtins
 
 if TYPE_CHECKING:
     pass
@@ -26,11 +31,18 @@ if TYPE_CHECKING:
 logger: logging.Logger = logging.getLogger(__name__)
 
 
-def _typed_ir_struct_candidates(codegen: object) -> dict[tuple[str, tuple[str, ...]], dict[str, object]]:
+def _typed_ir_struct_candidates(codegen: object) -> object:
     """Collect typed IR field-offset candidates for structure layout recovery."""
 
-    def _impl() -> dict[tuple[str, tuple[str, ...]], dict[str, object]]:
+    def _impl() -> object:
         """Read optional typed IR from the dynamic third-party angr codegen boundary."""
+        artifact: object
+        function_ssa: object
+        atom: object
+        block: object
+        instr: object
+        key: object
+        offsets: object
         artifact = getattr(codegen, "_inertia_vex_ir_artifact", None)
         function_ssa = getattr(codegen, "_inertia_vex_ir_function_ssa", None)
         if artifact is None or not hasattr(artifact, "blocks"):
@@ -38,11 +50,11 @@ def _typed_ir_struct_candidates(codegen: object) -> dict[tuple[str, tuple[str, .
 
         phi_registers = {
             phi.target.name
-            for phi in tuple(function_ssa.phi_nodes if function_ssa is not None else ())
+            for phi in builtins.iter(tuple(function_ssa.phi_nodes if function_ssa is not None else ()))
             if phi.target.name is not None
         }
-        offsets_by_key: dict[tuple[str, tuple[str, ...]], set[int]] = {}
-        widths_by_key: dict[tuple[str, tuple[str, ...]], set[int]] = {}
+        offsets_by_key: dict[tuple[str, tuple[str, ...]], set[cython.longlong]] = {}
+        widths_by_key: dict[tuple[str, tuple[str, ...]], set[cython.longlong]] = {}
         for block in tuple(artifact.blocks or ()):
             for instr in tuple(block.instrs or ()):
                 for atom in tuple(instr.args or ()):
@@ -55,14 +67,14 @@ def _typed_ir_struct_candidates(codegen: object) -> dict[tuple[str, tuple[str, .
                     widths_by_key.setdefault(key, set()).add(int(atom.size or 0))
 
         candidates: dict[tuple[str, tuple[str, ...]], dict[str, object]] = {}
-        for key, offsets in sorted(offsets_by_key.items()):
+        for key, offsets in sorted(tuple(offsets_by_key.items())):
             if len(offsets) < 2:
                 continue
             candidates[key] = {
                 "space": key[0],
                 "base": key[1],
                 "candidate_offsets": tuple(sorted(offsets)),
-                "candidate_widths": tuple(sorted(widths_by_key.get(key, {0}))),
+                "candidate_widths": tuple(sorted(tuple(widths_by_key.get(key, {0})))),
                 "has_phi_evidence": True,
             }
         return candidates
@@ -70,50 +82,53 @@ def _typed_ir_struct_candidates(codegen: object) -> dict[tuple[str, tuple[str, .
     return _impl()
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class StructField:
     """Represents a recovered struct field."""
 
-    name: str
-    offset: int  # Bytes from struct start
-    width: int  # Bit width (8, 16, 32, etc.)
-    field_type: str  # "int", "char", "ptr", "struct", etc.
-    access_count: int = 0  # How many times accessed
-    functions: set[str] = field(default_factory=set)  # Functions accessing this field
+    name: object
+    offset: cython.longlong  # Bytes from struct start
+    width: cython.longlong  # Bit width (8, 16, 32, etc.)
+    field_type: object  # "int", "char", "ptr", "struct", etc.
+    access_count: cython.longlong = 0  # How many times accessed
+    functions: object = field(default_factory=set)  # Functions accessing this field
 
     def __repr__(self) -> str:
         """Render a compact deterministic field description."""
         return f"{self.name}@+{self.offset}:{self.field_type}({self.width}b)"
 
-    def overlaps_with(self, other: StructField) -> bool:
+    @cython.ccall
+    def overlaps_with(self, other: StructField) -> cython.bint:
         """Check if this field overlaps with another."""
         my_end = self.offset + (self.width // 8)
         other_end = other.offset + (other.width // 8)
         return not (my_end <= other.offset or self.offset >= other_end)
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class StructType:
     """Recovered struct type definition."""
 
-    name: str
-    struct_id: int
-    fields: dict[int, StructField] = field(default_factory=dict)  # offset -> StructField
-    total_size: int = 0  # Union size if fields overlap
-    is_union: bool = False  # True if fields overlap
-    confidence: float = 0.5  # 0.0-1.0 based on evidence consistency
+    name: object
+    struct_id: cython.longlong
+    fields: object = field(default_factory=dict)  # offset -> StructField
+    total_size: cython.longlong = 0  # Union size if fields overlap
+    is_union: cython.bint = False  # True if fields overlap
+    confidence: cython.double = 0.5  # 0.0-1.0 based on evidence consistency
 
+    @cython.ccall
     def add_field(self, field: StructField) -> None:
         """Add a field to this struct."""
         if field.offset in self.fields:
             existing = self.fields[field.offset]
-            if existing.name != field.name:
+            if operator.ne(existing.name, field.name):
                 # Field name conflict - possible union
                 self.is_union = True
         else:
             self.fields[field.offset] = field
             self.total_size = max(self.total_size, field.offset + (field.width // 8))
 
+    @cython.ccall
     def merge_field(self, other_field: StructField) -> None:
         """Merge another struct's field into this one."""
         if other_field.offset not in self.fields:
@@ -129,16 +144,16 @@ class StructType:
         return f"{kind} {self.name} {{ {len(self.fields)} fields, size={self.total_size} }}"
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class FieldAccessPattern:
     """Observed field access from decompiled code."""
 
-    struct_base: str  # Pointer to struct
-    field_offset: int  # Bytes from base
-    field_width: int  # Bit width accessed
-    field_name: str | None  # If known
-    access_type: str  # "read", "write", "mixed"
-    function: str  # Where accessed
+    struct_base: object  # Pointer to struct
+    field_offset: cython.longlong  # Bytes from base
+    field_width: cython.longlong  # Bit width accessed
+    field_name: object  # If known
+    access_type: object  # "read", "write", "mixed"
+    function: object  # Where accessed
     line_number: int | None  # For tracking
 
     def __repr__(self) -> str:
@@ -147,28 +162,35 @@ class FieldAccessPattern:
         return f"{self.struct_base}{name_str}:{self.access_type}"
 
 
+@cython.cclass
 class FieldAccessCollector:
     """Collects field access patterns from multiple functions."""
+    patterns = cython.declare(list, visibility = "public")
 
     def __init__(self) -> None:
         """Initialize an empty field-access collection."""
         self.patterns: list[FieldAccessPattern] = []
 
-    def collect_from_function(self, func_name: str, accesses: list[FieldAccessPattern]) -> None:
+    @cython.ccall
+    def collect_from_function(self, func_name: object, accesses: object) -> None:
         """Collect field access patterns from a function."""
+        access: object
         for access in accesses:
             access.function = func_name
             self.patterns.append(access)
 
-    def get_patterns_for_base(self, base_ptr: str) -> list[FieldAccessPattern]:
+    @cython.ccall
+    def get_patterns_for_base(self, base_ptr: object) -> list[FieldAccessPattern]:
         """Get all patterns for a specific base pointer."""
-        return [p for p in self.patterns if p.struct_base == base_ptr]
+        return [p for p in iter(self.patterns) if operator.eq(p.struct_base, base_ptr)]
 
-    def get_patterns_by_function(self, func_name: str) -> list[FieldAccessPattern]:
+    @cython.ccall
+    def get_patterns_by_function(self, func_name: object) -> list[FieldAccessPattern]:
         """Get all patterns accessed in a function."""
-        return [p for p in self.patterns if p.function == func_name]
+        return [p for p in iter(self.patterns) if operator.eq(p.function, func_name)]
 
 
+@cython.cclass
 class StructureFieldMerger:
     """Merges field access patterns into struct type definitions.
 
@@ -179,14 +201,18 @@ class StructureFieldMerger:
     4. Synthesize struct definitions with confidence scoring
     5. Merge compatible structs across functions
     """
+    base_ptr_to_struct = cython.declare(dict, visibility = "public")
+    next_struct_id = cython.declare(cython.longlong, visibility = "public")
+    structs = cython.declare(dict, visibility = "public")
 
     def __init__(self) -> None:
         """Initialize empty structure merge state."""
         self.next_struct_id = 0
         self.structs: dict[str, StructType] = {}
-        self.base_ptr_to_struct: dict[str, int] = {}  # base_ptr -> struct_id
+        self.base_ptr_to_struct: dict[str, cython.longlong] = {}  # base_ptr -> struct_id
 
-    def merge_structs(self, patterns: list[FieldAccessPattern]) -> dict[str, StructType]:
+    @cython.ccall
+    def merge_structs(self, patterns: object) -> object:
         """Merge patterns into struct definitions.
 
         Args:
@@ -195,6 +221,10 @@ class StructureFieldMerger:
         Returns:
             Dictionary mapping struct name to StructType
         """
+        base_patterns: object
+        base_ptr: object
+        existing_field: object
+        pattern: object
         # Stage 1: Group patterns by base pointer
         by_base: dict[str, list[FieldAccessPattern]] = {}
         for pattern in patterns:
@@ -240,8 +270,14 @@ class StructureFieldMerger:
 
         return self.structs
 
+    @cython.ccall
     def merge_compatible_structs(self) -> None:
         """Merge structs that have compatible layouts."""
+        field: object
+        i: object
+        j: object
+        struct1: object
+        struct2: object
         # Find structs with same field patterns
         merged = set()
 
@@ -260,9 +296,11 @@ class StructureFieldMerger:
                         struct1.merge_field(field)
                     merged.add(j)
 
-    def _are_compatible(self, struct1: StructType, struct2: StructType) -> bool:
+    @cython.ccall
+    def _are_compatible(self, struct1: StructType, struct2: StructType) -> cython.bint:
         """Check if two structs have compatible layouts."""
-        if struct1.is_union != struct2.is_union:
+        offset: object
+        if operator.ne(struct1.is_union, struct2.is_union):
             return False
 
         # Check field overlap
@@ -270,14 +308,20 @@ class StructureFieldMerger:
         for offset in common_offsets:
             field1 = struct1.fields[offset]
             field2 = struct2.fields[offset]
-            if field1.width != field2.width:
+            if operator.ne(field1.width, field2.width):
                 return False
 
         return True
 
 
+@cython.cclass
 class StructRecoveryInfo:
     """High-level struct recovery metadata."""
+    confidence = cython.declare(object, visibility = "public")
+    fields = cython.declare(object, visibility = "public")
+    is_union = cython.declare(object, visibility = "public")
+    name = cython.declare(object, visibility = "public")
+    size = cython.declare(object, visibility = "public")
 
     def __init__(self, struct_type: StructType) -> None:
         """Snapshot user-facing metadata from a recovered structure type."""
@@ -292,11 +336,14 @@ class StructRecoveryInfo:
         return f"{self.name} (size={self.size}, confidence={self.confidence:.1%})"
 
 
-def apply_x86_16_structure_field_merging(codegen: object) -> bool:
+def apply_x86_16_structure_field_merging(codegen: object) -> cython.bint:
     """Collect structure field metadata without modifying generated C text."""
 
-    def _impl() -> bool:
+    def _impl() -> cython.bint:
         """Attach optional struct-merging metadata across the dynamic third-party angr codegen boundary."""
+        bridge: object
+        function_addr: object
+        project: object
         if getattr(codegen, "cfunc", None) is None:
             return False
 
@@ -320,7 +367,7 @@ def apply_x86_16_structure_field_merging(codegen: object) -> bool:
             typing.cast(typing.Any, codegen)._inertia_struct_merging_stats = {
                 "field_accesses": 0
                 if bridge is None
-                else sum(len(fact.candidate_offsets) for fact in bridge.facts_by_base.values()),
+                else sum(len(fact.candidate_offsets) for fact in builtins.iter(bridge.facts_by_base.values())),
                 "structs_synthesized": (0 if bridge is None else len(bridge.facts_by_base)) + len(typed_ir_facts),
                 "structs_merged": 0,
                 "member_facts": 0 if bridge is None else len(bridge.member_facts),

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery/reporting.
 
 Responsibility: attach confidence markers that expose IR assumptions and unknowns.
@@ -11,6 +12,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -20,17 +23,18 @@ from inertia.lowering.codegen_metadata import append_codegen_sequence_attr
 
 from .ir_readiness import IRReadinessSummary, summarize_x86_16_ir_readiness
 from .ir_recovery_summary import IRRecoverySource
+import dataclasses
 
 __all__ = ["IRConfidenceMarkerArtifact", "apply_x86_16_ir_confidence_markers"]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRConfidenceMarkerArtifact:
     """Confidence marker payload derived from already-collected typed IR facts."""
 
     readiness: IRReadinessSummary
-    assumptions: tuple[str, ...]
-    critical_unknowns: tuple[str, ...]
+    assumptions: object
+    critical_unknowns: object
 
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-compatible confidence marker payload."""
@@ -46,12 +50,16 @@ class _CodegenWithConfidenceMarkers(Protocol):
     _inertia_ir_confidence_markers: IRConfidenceMarkerArtifact
 
 
-def _append_unique(items: list[str], value: str) -> None:
+@cython.ccall
+def _append_unique(items: object, value: object) -> None:
     if value not in items:
         items.append(value)
 
 
+@cython.ccall
 def _ir_recovery_source_from_codegen(codegen: object) -> IRRecoverySource:
+    summary: object
+    codegen_type: object
     summary = vars(codegen).get("_inertia_vex_ir_summary", {})
     if not isinstance(summary, Mapping) or not summary:
         for codegen_type in type(codegen).mro():
@@ -61,12 +69,14 @@ def _ir_recovery_source_from_codegen(codegen: object) -> IRRecoverySource:
     return {"_inertia_vex_ir_summary": summary if isinstance(summary, Mapping) else {}}
 
 
+@cython.ccall
 def _cfunc_from_codegen(codegen: object) -> object | None:
     if not hasattr(codegen, "cfunc"):
         return None
     return cast(_CodegenWithConfidenceMarkers, codegen).cfunc
 
 
+@cython.ccall
 def _build_ir_confidence_marker_artifact(codegen: object) -> IRConfidenceMarkerArtifact:
     readiness = summarize_x86_16_ir_readiness(_ir_recovery_source_from_codegen(codegen))
     assumptions: list[str] = []
@@ -92,8 +102,10 @@ def _build_ir_confidence_marker_artifact(codegen: object) -> IRConfidenceMarkerA
     )
 
 
-def apply_x86_16_ir_confidence_markers(codegen: object) -> bool:
+@cython.ccall
+def apply_x86_16_ir_confidence_markers(codegen: object) -> cython.bint:
     """Attach typed-IR readiness assumptions to codegen side metadata."""
+    cfunc: object
     cfunc = _cfunc_from_codegen(codegen)
     if cfunc is None:
         return False

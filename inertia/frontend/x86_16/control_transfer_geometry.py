@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed closed near-transfer coordinate checks under authenticated CS.
 
 Layer: frontend x86_16.
@@ -13,10 +14,14 @@ or ESP fact is established).
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from enum import StrEnum
+import dataclasses
+import operator
 
 _SHIFT = 4
 _WORD_SPAN = 0x10000
@@ -43,24 +48,26 @@ class ControlVerdict8616(StrEnum):
     REFUSED = "refused"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ControlCheck8616:
     """One typed coordinate verdict with the bound target and fallthrough."""
 
     verdict: ControlVerdict8616
     kind: ControlKind8616
-    addr: int
+    addr: cython.longlong
     target: int | None
     fallthrough: int | None
-    detail: str
+    detail: object
 
 
-def _refused(kind: ControlKind8616, addr: int, detail: str) -> ControlCheck8616:
+@cython.ccall
+def _refused(kind: ControlKind8616, addr: cython.longlong, detail: object) -> ControlCheck8616:
     """One honest refusal row; unknown control never preserves by default."""
     return ControlCheck8616(ControlVerdict8616.REFUSED, kind, addr, None, None, detail)
 
 
-def _opcode_index(encoded: bytes) -> tuple[int, str | None]:
+@cython.ccall
+def _opcode_index(encoded: object) -> tuple[cython.longlong, str | None]:
     """Return the opcode byte index, or the typed size-prefix refusal."""
     index = 0
     while index < len(encoded):
@@ -75,12 +82,14 @@ def _opcode_index(encoded: bytes) -> tuple[int, str | None]:
     return index, "prefix_only"
 
 
-def _ip_target(addr: int, size: int, displacement: int, csbase: int) -> int:
+@cython.ccall
+def _ip_target(addr: cython.longlong, size: cython.longlong, displacement: cython.longlong, csbase: cython.longlong) -> cython.longlong:
     """IP-relative target with 16-bit wrap, projected back to linear."""
     return csbase + ((addr - csbase + size + displacement) & 0xFFFF)
 
 
-def _fetch_fits(addr: int, size: int, csbase: int) -> str | None:
+@cython.ccall
+def _fetch_fits(addr: cython.longlong, size: cython.longlong, csbase: cython.longlong) -> object:
     """The whole encoded instruction must sit in the CS window below 1MiB."""
     if type(addr) is not int or type(size) is not int or size <= 0:
         return "invalid_fetch_extent"
@@ -91,7 +100,8 @@ def _fetch_fits(addr: int, size: int, csbase: int) -> str | None:
     return None
 
 
-def _wrapped_or_refused(addr: int, size: int, disp: int, csbase: int) -> tuple[int, str | None]:
+@cython.ccall
+def _wrapped_or_refused(addr: cython.longlong, size: cython.longlong, disp: cython.longlong, csbase: cython.longlong) -> tuple[cython.longlong, str | None]:
     """Compute one wrapped IP target; refuse when the target is A20-ambiguous."""
     target = _ip_target(addr, size, disp, csbase)
     if target >= _PHYSICAL_LIMIT:
@@ -99,47 +109,51 @@ def _wrapped_or_refused(addr: int, size: int, disp: int, csbase: int) -> tuple[i
     return target, ""
 
 
+@cython.ccall
 def _single_byte_branch(
-    addr: int, encoded: bytes, index: int, csbase: int,
-    forms: dict[int, int],
-) -> tuple[int, str | None]:
+    addr: cython.longlong, encoded: object, index: cython.longlong, csbase: cython.longlong,
+    forms: object,
+) -> object:
     """Decode ``opcode + displacement`` forms where disp follows the opcode."""
+    width: object
     width = forms.get(encoded[index])
-    if width is None or len(encoded) - index != width + 1:
+    if width is None or operator.ne(len(encoded) - index, width + 1):
         return 0, "unsupported_near_form"
     disp = int.from_bytes(encoded[index + 1:index + 1 + width], "little", signed=True)
     return _wrapped_or_refused(addr, len(encoded), disp, csbase)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _ControlContext8616:
     """Validated shared geometry for one control-instruction check."""
 
-    addr: int
-    encoded: bytes
-    index: int
+    addr: cython.longlong
+    encoded: object
+    index: cython.longlong
     kind: ControlKind8616
-    csbase: int
-    fallthrough: int
-    successors: tuple[int, ...] | None
+    csbase: cython.longlong
+    fallthrough: cython.longlong
+    successors: object
     call_target: int | None
-    census_addrs: AbstractSet[int]
+    census_addrs: AbstractSet[cython.longlong]
 
 
-def _agree(ctx: _ControlContext8616, want: set[int]) -> str | None:
+@cython.ccall
+def _agree(ctx: _ControlContext8616, want: object) -> object:
     """Require the candidate edges to match CFG or retained census exactly."""
     if ctx.successors is None:
         return None if want <= set(ctx.census_addrs) else "edge_not_retained"
-    return None if frozenset(ctx.successors) == frozenset(want) else "cfg_mismatch"
+    return None if operator.eq(frozenset(ctx.successors), frozenset(want)) else "cfg_mismatch"
 
 
+@cython.ccall
 def _check_call(ctx: _ControlContext8616) -> ControlCheck8616:
     """An E8 CALL binds its wrapped target to the mapped callee target."""
     target, bad = _single_byte_branch(ctx.addr, ctx.encoded, ctx.index,
                                       ctx.csbase, {0xE8: 2})
     if bad:
         return _refused(ctx.kind, ctx.addr, bad)
-    if ctx.call_target is None or target != ctx.call_target:
+    if ctx.call_target is None or operator.ne(target, ctx.call_target):
         return _refused(ctx.kind, ctx.addr, "call_target_mismatch")
     if ctx.fallthrough not in ctx.census_addrs:
         return _refused(ctx.kind, ctx.addr, "call_fallthrough_unbound")
@@ -147,8 +161,10 @@ def _check_call(ctx: _ControlContext8616) -> ControlCheck8616:
                             ctx.addr, target, ctx.fallthrough, "e8_bound")
 
 
+@cython.ccall
 def _check_jmp(ctx: _ControlContext8616) -> ControlCheck8616:
     """A direct near JMP's wrapped target must equal the sole CFG edge."""
+    miss: object
     target, bad = _single_byte_branch(ctx.addr, ctx.encoded, ctx.index,
                                       ctx.csbase, {0xE9: 2, 0xEB: 1})
     if bad:
@@ -160,8 +176,10 @@ def _check_jmp(ctx: _ControlContext8616) -> ControlCheck8616:
                             ctx.addr, target, None, "near_jmp_bound")
 
 
+@cython.ccall
 def _check_cjmp(ctx: _ControlContext8616) -> ControlCheck8616:
     """A conditional near branch must bind BOTH wrapped edges exactly."""
+    miss: object
     if ctx.encoded[ctx.index] == 0x0F:
         if (ctx.index + 1 >= len(ctx.encoded)
                 or not 0x80 <= ctx.encoded[ctx.index + 1] <= 0x8F
@@ -174,7 +192,7 @@ def _check_cjmp(ctx: _ControlContext8616) -> ControlCheck8616:
     else:
         target, bad = _single_byte_branch(
             ctx.addr, ctx.encoded, ctx.index, ctx.csbase,
-            dict.fromkeys((*range(0x70, 0x80), *range(0xE0, 0xE4)), 1))
+            dict.fromkeys(tuple(range(0x70, 0x80)) + tuple(range(0xE0, 0xE4)), 1))
     if bad:
         return _refused(ctx.kind, ctx.addr, bad)
     miss = _agree(ctx, {target, ctx.fallthrough})
@@ -184,6 +202,7 @@ def _check_cjmp(ctx: _ControlContext8616) -> ControlCheck8616:
                             ctx.addr, target, ctx.fallthrough, "near_cjmp_bound")
 
 
+@cython.ccall
 def _check_ret(ctx: _ControlContext8616) -> ControlCheck8616:
     """A near RET retains only CS preservation; frame/SP stay obligations."""
     opcode = ctx.encoded[ctx.index]
@@ -209,15 +228,16 @@ _HANDLERS = {
 }
 
 
+@cython.ccall
 def check_control_transfer_8616(
     *,
-    addr: int,
-    encoded: bytes,
-    known_cs: int,
-    ir_op: str,
-    successors: tuple[int, ...] | None,
+    addr: cython.longlong,
+    encoded: object,
+    known_cs: cython.longlong,
+    ir_op: object,
+    successors: object,
     call_target: int | None,
-    census_addrs: AbstractSet[int],
+    census_addrs: AbstractSet[cython.longlong],
 ) -> ControlCheck8616:
     """Bind one control instruction's coordinates to exact CFG evidence.
 
@@ -227,6 +247,10 @@ def check_control_transfer_8616(
     conditional guards are kept: a missing taken or fallthrough edge is
     a refusal, never an assumed successor.
     """
+    fit: object
+    handler: object
+    kind: object
+    refusal: object
     kind = _KINDS.get(ir_op, ControlKind8616.CALL)
     if type(known_cs) is not int or not 0 <= known_cs <= 0xFFFF:
         return _refused(kind, addr, "cs_unbound")
@@ -248,15 +272,17 @@ def check_control_transfer_8616(
     return handler(ctx)
 
 
+@cython.ccall
 def check_block_fallthrough_8616(
     *,
-    last_addr: int,
-    last_size: int,
-    successors: tuple[int, ...],
-    census_addrs: AbstractSet[int],
-    known_cs: int,
+    last_addr: cython.longlong,
+    last_size: cython.longlong,
+    successors: object,
+    census_addrs: AbstractSet[cython.longlong],
+    known_cs: cython.longlong,
 ) -> ControlCheck8616:
     """A non-control terminal's only edge is the exact native end address."""
+    fit: object
     kind = ControlKind8616.FALLTHROUGH
     if type(known_cs) is not int or not 0 <= known_cs <= 0xFFFF:
         return _refused(kind, last_addr, "cs_unbound")
@@ -267,7 +293,7 @@ def check_block_fallthrough_8616(
     end = _ip_target(last_addr, last_size, 0, csbase)
     if end >= _PHYSICAL_LIMIT:
         return _refused(kind, last_addr, "fallthrough_a20_ambiguous")
-    if frozenset(successors) != frozenset({end}) or end not in census_addrs:
+    if operator.ne(frozenset(successors), frozenset({end})) or end not in census_addrs:
         return _refused(kind, last_addr, "fallthrough_mismatch")
     return ControlCheck8616(ControlVerdict8616.CLOSED, kind,
                             last_addr, None, end, "implicit_fallthrough_bound")

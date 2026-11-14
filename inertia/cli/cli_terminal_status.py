@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Versioned terminal-status transport for external CLI consumers.
 
 Layer: CLI/fallback/reporting.
@@ -9,13 +10,15 @@ semantic repair.
 """
 
 from __future__ import annotations
+import cython
 
 import json
 import sys
 from enum import StrEnum
+import operator
 
 TERMINAL_RECORD_PREFIX: str = "[inertia-terminal] "
-TERMINAL_RECORD_SCHEMA: int = 1
+TERMINAL_RECORD_SCHEMA: cython.longlong = 1
 
 
 class CliTerminalStatus(StrEnum):
@@ -25,26 +28,30 @@ class CliTerminalStatus(StrEnum):
     CONDITIONAL = "conditional"
 
 
+@cython.ccall
 def emit_terminal_status(status: CliTerminalStatus) -> None:
     """Flush one typed record before the CLI returns or performs a hard exit."""
     record = {"schema": TERMINAL_RECORD_SCHEMA, "status": status.value}
     print(TERMINAL_RECORD_PREFIX + json.dumps(record, sort_keys=True), file=sys.stderr, flush=True)
 
 
-def read_terminal_status(diagnostics: str) -> CliTerminalStatus | None:
+@cython.ccall
+def read_terminal_status(diagnostics: object) -> CliTerminalStatus | None:
     """Decode explicit records; reject malformed transport instead of guessing.
 
     Unrelated diagnostic lines are not evidence. Repeated identical records are
     allowed when a wrapper forwards output from a terminal child.
     """
-    status: CliTerminalStatus | None = None
+    status: object
+    line: object
+    status = None
     for line in diagnostics.splitlines():
         if not line.startswith(TERMINAL_RECORD_PREFIX):
             continue
         record = json.loads(line[len(TERMINAL_RECORD_PREFIX):])
         if not isinstance(record, dict) or set(record) != {"schema", "status"}:
             raise ValueError("Invalid CLI terminal record fields")
-        if type(record["schema"]) is not int or record["schema"] != TERMINAL_RECORD_SCHEMA:
+        if type(record["schema"]) is not int or operator.ne(record["schema"], TERMINAL_RECORD_SCHEMA):
             raise ValueError("Unsupported CLI terminal record schema")
         decoded = CliTerminalStatus(record["status"])
         if status is not None and status is not decoded:

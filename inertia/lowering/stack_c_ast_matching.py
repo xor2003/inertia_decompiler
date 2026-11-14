@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Lowering-owned C AST matchers for proven stack-address forms.
 
 Layer: Types/Lowering.
@@ -12,6 +13,8 @@ only as an input to lowering-owned stack-slot materialization.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import re
 from collections.abc import Callable, Iterator, Mapping
@@ -31,19 +34,21 @@ from angr.sim_variable import SimRegisterVariable, SimStackVariable
 from inertia.lowering.c_ast_utils import _replace_c_children_8616, _same_c_expression_8616
 
 from .real_mode_linear import _stack_base_bp_bias_8616, _stack_pointer_carrier_offset_8616
+import dataclasses
+import operator
 
 _SEGMENT_REGISTER_NAMES_8616 = {"cs", "ds", "es", "ss"}
 _LINEAR_TEMP_NAME_RE_8616 = re.compile(r"(?:v\d+|vvar_\d+|ir_\d+|tmp_\d+)(?:\{[^}]+\})?$")
 
 
-def _stack_variable_read_offsets_8616(root: object) -> frozenset[int]:
+def _stack_variable_read_offsets_8616(root: object) -> frozenset[cython.longlong]:
     """Return BP-stack offsets used as values across the dynamic angr C AST boundary.
 
     Assignment destinations are storage writes, not high-byte projection reads.
     Keeping that distinction here prevents prototype lowering from classifying
     an unrewritable lvalue as a readable ``word >> 8`` expression.
     """
-    offsets: set[int] = set()
+    offsets: set[cython.longlong] = set()
 
     def _collect(node: object) -> object:
         if not isinstance(node, CVariable):
@@ -53,7 +58,7 @@ def _stack_variable_read_offsets_8616(root: object) -> frozenset[int]:
             offsets.add(variable.offset)
         return node
 
-    def _is_read_child(parent: object, attr: str) -> bool:
+    def _is_read_child(parent: object, attr: object) -> cython.bint:
         if isinstance(parent, CAssignment) and attr == "lhs":
             return False
         return attr != "variable"
@@ -65,7 +70,7 @@ def _stack_variable_read_offsets_8616(root: object) -> frozenset[int]:
 class _ArchRegisterNames8616(Protocol):
     """Project architecture view needed for C AST boundary matching."""
 
-    register_names: Mapping[int, str]
+    register_names: Mapping[cython.longlong, str]
 
 
 class _ProjectArch8616(Protocol):
@@ -74,7 +79,8 @@ class _ProjectArch8616(Protocol):
     arch: _ArchRegisterNames8616
 
 
-def _strip_typed_name_suffix_8616(name: object) -> str | None:
+@cython.ccall
+def _strip_typed_name_suffix_8616(name: object) -> object:
     if not isinstance(name, str):
         return None
     if name.endswith("}"):
@@ -84,19 +90,23 @@ def _strip_typed_name_suffix_8616(name: object) -> str | None:
     return name
 
 
-def _is_linear_temp_name_8616(name: object) -> bool:
+@cython.ccall
+def _is_linear_temp_name_8616(name: object) -> cython.bint:
     normalized = _strip_typed_name_suffix_8616(name)
     return isinstance(normalized, str) and _LINEAR_TEMP_NAME_RE_8616.fullmatch(normalized) is not None
 
 
+@cython.ccall
 def _c_constant_value_8616(node: object) -> int | None:
     if isinstance(node, CConstant) and isinstance(node.value, int):
         return node.value
     return None
 
 
-def _segment_reg_name_8616(node: object, project: _ProjectArch8616) -> str | None:
+@cython.ccall
+def _segment_reg_name_8616(node: object, project: _ProjectArch8616) -> object:
     """Read a segment register name across the dynamic angr C AST boundary."""
+    reg_name: object
     if not isinstance(node, CVariable):
         return None
     variable = node.variable
@@ -108,8 +118,15 @@ def _segment_reg_name_8616(node: object, project: _ProjectArch8616) -> str | Non
     return None
 
 
-def _push_statement_node_children_8616(current: object, stack: list[object]) -> None:
+@cython.ccall
+def _push_statement_node_children_8616(current: object, stack: object) -> None:
     """Push structured-codegen children through the dynamic angr boundary."""
+    body: object
+    condition_and_nodes: object
+    else_node: object
+    nested_statements: object
+    item: object
+    pair: object
     nested_statements = getattr(current, "statements", None)
     if isinstance(nested_statements, (list, tuple)):
         for item in reversed(tuple(nested_statements)):
@@ -133,8 +150,9 @@ def _push_statement_node_children_8616(current: object, stack: list[object]) -> 
 
 def _iter_statement_nodes_8616(node: object) -> Iterator[object]:
     """Walk children through the dynamic angr structured-codegen boundary."""
+    current: object
     stack = [node]
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     while stack:
         current = stack.pop()
         if not type(current).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
@@ -147,8 +165,12 @@ def _iter_statement_nodes_8616(node: object) -> Iterator[object]:
         _push_statement_node_children_8616(current, stack)
 
 
+@cython.ccall
 def _single_assignment_expr_for_variable_8616(codegen: object, target: object) -> object | None:
     """Find one assignment through the dynamic angr codegen/C AST boundary."""
+    cfunc: object
+    root: object
+    stmt: object
     cfunc = getattr(codegen, "cfunc", None)
     root = getattr(cfunc, "statements", None)
     if root is None:
@@ -169,11 +191,12 @@ def _single_assignment_expr_for_variable_8616(codegen: object, target: object) -
     return matches[0] if len(matches) == 1 else None
 
 
+@cython.ccall
 def _resolve_stack_bp_term_8616(
     node: object,
     project: _ProjectArch8616 | None = None,
     codegen: object | None = None,
-    seen: set[int] | None = None,
+    seen: object = None,
 ) -> object:
     """Resolve stack BP carriers across the dynamic angr C AST/codegen boundary."""
     if seen is None:
@@ -192,13 +215,17 @@ def _resolve_stack_bp_term_8616(
     return _resolve_bp_variable_term_8616(node, project, codegen, seen)
 
 
+@cython.ccall
 def _resolve_bp_variable_term_8616(
     node: CVariable,
     project: _ProjectArch8616 | None,
     codegen: object,
-    seen: set[int],
+    seen: object,
 ) -> object:
     """Resolve one CVariable through a single assignment when proven."""
+    replacement: object
+    stack_disp: object
+    variable: object
     variable = node.variable
     if variable is None:
         return node
@@ -220,18 +247,22 @@ def _resolve_bp_variable_term_8616(
     return resolved_replacement
 
 
+@cython.ccall
 def _scaled_segment_name_8616(
     node: object,
-    scale_by_op: dict[str, int],
+    scale_by_op: object,
     project: _ProjectArch8616,
     resolve: Callable[[object], object],
-) -> str | None:
+) -> object:
     """Match ``seg * scale``/``scale * seg`` and return the segment name."""
+    seg_name: object
+    maybe_scale: object
+    maybe_seg: object
     if not isinstance(node, CBinaryOp) or node.op not in scale_by_op:
         return None
     scale = scale_by_op[node.op]
     for maybe_seg, maybe_scale in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
-        if _c_constant_value_8616(maybe_scale) != scale:
+        if operator.ne(_c_constant_value_8616(maybe_scale), scale):
             continue
         seg_name = _segment_reg_name_8616(resolve(maybe_seg), project)
         if seg_name is not None:
@@ -244,6 +275,10 @@ def _match_real_mode_linear_expr_8616(
     project: _ProjectArch8616,
     codegen: object | None = None,
 ) -> tuple[str | None, int | None]:
+    linear: object
+    seg_name: object
+    maybe_const: object
+    maybe_mul: object
     def _maybe_resolve(term: object) -> object:
         if codegen is None:
             return term
@@ -267,18 +302,19 @@ def _match_real_mode_linear_expr_8616(
     return None, None
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _StackBpDisplacement8616:
     """Accumulator for BP-relative displacement term collection."""
 
-    stack_offsets: list[int] = field(default_factory=list)
-    total: int = 0
-    found_stack_ref: bool = False
+    stack_offsets: object = field(default_factory=list)
+    total: cython.longlong = 0
+    found_stack_ref: cython.bint = False
 
 
+@cython.ccall
 def _collect_stack_variable_term_8616(
     acc: _StackBpDisplacement8616, term: object, codegen: object | None
-) -> bool:
+) -> cython.bint:
     """Collect a stack-base bias from a plain CVariable term."""
     if not isinstance(term, CVariable):
         return False
@@ -290,7 +326,8 @@ def _collect_stack_variable_term_8616(
     return True
 
 
-def _collect_reference_term_8616(acc: _StackBpDisplacement8616, term: object, codegen: object | None) -> bool:
+@cython.ccall
+def _collect_reference_term_8616(acc: _StackBpDisplacement8616, term: object, codegen: object | None) -> cython.bint:
     """Collect the stack offset from a ``&stack_var`` reference term."""
     if not isinstance(term, CUnaryOp) or term.op != "Reference":
         return False
@@ -310,14 +347,16 @@ def _collect_reference_term_8616(acc: _StackBpDisplacement8616, term: object, co
     return True
 
 
+@cython.ccall
 def _collect_additive_term_8616(
     acc: _StackBpDisplacement8616,
     term: object,
-    project: _ProjectArch8616 | None,
+    project: object,
     codegen: object | None,
-    seen: set[int],
+    seen: object,
 ) -> None:
     """Collect offsets from Add/Sub trees; reject scaled segment terms."""
+    rhs_const: object
     if isinstance(term, CBinaryOp) and term.op == "Add":
         _collect_stack_bp_term_8616(acc, term.lhs, project, codegen, seen)
         _collect_stack_bp_term_8616(acc, term.rhs, project, codegen, seen)
@@ -339,14 +378,16 @@ def _collect_additive_term_8616(
         return
 
 
+@cython.ccall
 def _collect_stack_bp_term_8616(
     acc: _StackBpDisplacement8616,
     term: object,
-    project: _ProjectArch8616 | None,
-    codegen: object | None,
-    seen: set[int],
+    project: object,
+    codegen: object,
+    seen: object,
 ) -> None:
     """Collect offsets from terms crossing the dynamic angr C AST boundary."""
+    const: object
     term = _resolve_stack_bp_term_8616(term, project, codegen, seen)
 
     if isinstance(term, CTypeCast):
@@ -374,11 +415,12 @@ def _collect_stack_bp_term_8616(
     _collect_additive_term_8616(acc, term, project, codegen, seen)
 
 
+@cython.ccall
 def _stack_bp_displacement_8616(
     node: object,
     project: _ProjectArch8616 | None = None,
     codegen: object | None = None,
-    seen: set[int] | None = None,
+    seen: object = None,
 ) -> int | None:
     if seen is None:
         seen = set()
@@ -391,7 +433,8 @@ def _stack_bp_displacement_8616(
     return acc.stack_offsets[0] + acc.total
 
 
-def _flatten_add_sub_terms_8616(term: object, sign: int = 1) -> list[tuple[object, int]]:
+@cython.ccall
+def _flatten_add_sub_terms_8616(term: object, sign: cython.longlong = 1) -> object:
     """Flatten an Add/Sub tree into signed leaf terms."""
     while isinstance(term, CTypeCast):
         term = term.expr
@@ -402,15 +445,19 @@ def _flatten_add_sub_terms_8616(term: object, sign: int = 1) -> list[tuple[objec
     return [(term, sign)]
 
 
+@cython.ccall
 def _classify_deref_terms_8616(
-    terms: list[tuple[object, int]],
+    terms: object,
     project: _ProjectArch8616,
     codegen: object | None,
-) -> tuple[int, bool, list[tuple[object, int]]]:
+) -> tuple[cython.longlong, cython.bint, list[tuple[object, cython.longlong]]]:
     """Split flattened terms into constants, the SS segment, and other terms."""
+    value: object
+    sign: object
+    term: object
     const_total = 0
     has_ss_segment = False
-    non_segment_terms: list[tuple[object, int]] = []
+    non_segment_terms: list[tuple[object, cython.longlong]] = []
     for term, sign in terms:
         value = _c_constant_value_8616(term)
         if value is not None:
@@ -426,11 +473,13 @@ def _classify_deref_terms_8616(
     return const_total, has_ss_segment, non_segment_terms
 
 
+@cython.ccall
 def _match_bp_stack_dereference_8616(
     node: object,
     project: _ProjectArch8616,
     codegen: object | None = None,
 ) -> int | None:
+    base_disp: object
     while isinstance(node, CTypeCast):
         node = node.expr
     if not isinstance(node, CUnaryOp) or node.op != "Dereference":

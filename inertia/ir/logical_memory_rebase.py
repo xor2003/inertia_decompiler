@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Keep logical-memory execution sites coherent after typed IR insertion.
 
 Layer: IR.
@@ -11,6 +12,7 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import cython
 
 from collections.abc import Mapping
 from dataclasses import replace
@@ -24,6 +26,7 @@ from .logical_memory_contracts import (
     IRMemoryAccessKind8616,
     IRMemoryExecutionSlice8616,
 )
+import operator
 
 
 class LogicalMemoryRebaseFailure8616(StrEnum):
@@ -36,14 +39,16 @@ class LogicalMemoryRebaseFailure8616(StrEnum):
     OPERATION_MISMATCH = "operation_mismatch"
 
 
+@cython.ccall
 def _rebase_execution_slice_8616(
     execution_slice: IRMemoryExecutionSlice8616,
     *,
     kind: IRMemoryAccessKind8616,
-    prefix_lengths: Mapping[int, int],
-    blocks: Mapping[int, IRBlock],
+    prefix_lengths: Mapping[cython.longlong, cython.longlong],
+    blocks: Mapping[cython.longlong, IRBlock],
 ) -> IRMemoryExecutionSlice8616:
     """Rebase and validate one exact execution slice."""
+    block: object
     prefix_length = int(prefix_lengths.get(execution_slice.block_addr, 0))
     if prefix_length < 0:
         failure = LogicalMemoryRebaseFailure8616.NEGATIVE_PREFIX
@@ -58,9 +63,9 @@ def _rebase_execution_slice_8616(
             else:
                 instruction = block.instrs[rebased_index]
                 expected_op = "LOAD" if kind is IRMemoryAccessKind8616.READ else "STORE"
-                if instruction.addr != execution_slice.insn_addr:
+                if operator.ne(instruction.addr, execution_slice.insn_addr):
                     failure = LogicalMemoryRebaseFailure8616.MACHINE_INSTRUCTION_MISMATCH
-                elif instruction.op != expected_op:
+                elif operator.ne(instruction.op, expected_op):
                     failure = LogicalMemoryRebaseFailure8616.OPERATION_MISMATCH
                 else:
                     return replace(execution_slice, instr_index=rebased_index)
@@ -77,15 +82,15 @@ def _rebase_execution_slice_8616(
 
 
 def rebase_logical_memory_prefix_insertions_8616(
-    logical_memory: IRLogicalMemoryArtifact8616 | None,
+    logical_memory: object,
     *,
-    prefix_lengths: Mapping[int, int],
-    rewritten_blocks: tuple[IRBlock, ...],
+    prefix_lengths: Mapping[cython.longlong, cython.longlong],
+    rewritten_blocks: object,
 ) -> IRLogicalMemoryArtifact8616 | None:
     """Return logical-memory evidence rebased onto prefix-extended IR blocks."""
     if logical_memory is None or not logical_memory.accesses or not any(prefix_lengths.values()):
         return logical_memory
-    blocks = {block.addr: block for block in rewritten_blocks}
+    blocks = {block.addr: block for block in iter(rewritten_blocks)}
     accesses = tuple(
         replace(
             access,
@@ -96,10 +101,10 @@ def rebase_logical_memory_prefix_insertions_8616(
                     prefix_lengths=prefix_lengths,
                     blocks=blocks,
                 )
-                for execution_slice in access.execution_slices
+                for execution_slice in iter(access.execution_slices)
             ),
         )
-        for access in logical_memory.accesses
+        for access in iter(logical_memory.accesses)
     )
     rebased = replace(logical_memory, accesses=accesses)
     if logical_memory.closed and not rebased.closed:

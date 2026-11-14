@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Collect optional rizin function discovery candidates for CLI orchestration.
 
 Layer: CLI/fallback/reporting.
@@ -5,6 +6,8 @@ Responsibility: collect optional rizin function seeds without making them semant
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 import json
@@ -18,6 +21,8 @@ from typing import cast
 
 from .cache import _load_cache_json, _recovery_cache_key, _store_cache_json
 from .cache_source_manifest import RecoveryCacheSourceScope8616
+import dataclasses
+import operator
 
 _RIZIN_FUNCTION_ANALYSIS_COMMAND = "aa;aflj"
 _RIZIN_DISCOVERY_POLICY_SCHEMA = 4
@@ -41,21 +46,23 @@ class RizinDiscoveryStatus(Enum):
     EMPTY = "empty"
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class RizinDiscoveryResult:
     """Rizin function-seed discovery result."""
 
     status: RizinDiscoveryStatus
-    offsets: tuple[int, ...]
-    elapsed_ms: float
+    offsets: object
+    elapsed_ms: cython.double
     detail: str = ""
 
 
-def _rizin_available() -> bool:
+@cython.ccall
+def _rizin_available() -> cython.bint:
     return shutil.which("rizin") is not None
 
 
-def _json_int(value: object, default: int = 0) -> int:
+@cython.ccall
+def _json_int(value: object, default: cython.longlong = 0) -> cython.longlong:
     """Return an integer from a JSON scalar, or a fallback for non-scalars."""
     if isinstance(value, bool):
         return int(value)
@@ -67,7 +74,8 @@ def _json_int(value: object, default: int = 0) -> int:
     return default
 
 
-def _score_aflj_entry(entry: dict[str, object]) -> tuple[int, int]:
+@cython.ccall
+def _score_aflj_entry(entry: object) -> tuple[cython.longlong, cython.longlong]:
     name = str(entry.get("name", "") or "")
     size = _json_int(entry.get("size"))
     nbbs = _json_int(entry.get("nbbs"))
@@ -78,7 +86,8 @@ def _score_aflj_entry(entry: dict[str, object]) -> tuple[int, int]:
     return score, -offset
 
 
-def _rizin_offset_to_inertia_addr(binary_path: Path, offset: int) -> int:
+@cython.ccall
+def _rizin_offset_to_inertia_addr(binary_path: Path, offset: cython.longlong) -> cython.longlong:
     """Translate a Rizin load-module offset into Inertia's DOS MZ address space.
 
     Rizin's MZ backend reports ``aflj`` offsets relative to the DOS load module,
@@ -92,7 +101,8 @@ def _rizin_offset_to_inertia_addr(binary_path: Path, offset: int) -> int:
     return _DOS_MZ_LOAD_BASE + offset if is_mz else offset
 
 
-def _cache_key(binary_path: Path, *, timeout_sec: int, max_count: int | None) -> dict[str, object] | None:
+@cython.ccall
+def _cache_key(binary_path: Path, *, timeout_sec: cython.longlong, max_count: int | None) -> object:
     key = _recovery_cache_key(
         binary_path=binary_path,
         kind="rizin_aflj_function_seeds",
@@ -106,7 +116,8 @@ def _cache_key(binary_path: Path, *, timeout_sec: int, max_count: int | None) ->
     return key if isinstance(key, dict) else None
 
 
-def _run_rizin_json(binary_path: Path, command: str, *, timeout_sec: int) -> object:
+@cython.ccall
+def _run_rizin_json(binary_path: Path, command: object, *, timeout_sec: cython.longlong) -> object:
     """Return decoded optional rizin JSON, or None when the probe cannot complete."""
     cmd = ["rizin", "-2", "-q", "-c", command, str(binary_path)]
     try:
@@ -127,9 +138,11 @@ def _run_rizin_json(binary_path: Path, command: str, *, timeout_sec: int) -> obj
         return None
 
 
-def _mz_executable_segments(segments: list[object]) -> list[tuple[int, int, int]]:
+@cython.ccall
+def _mz_executable_segments(segments: object) -> object:
     """Return executable (paddr, vaddr, vsize) triples from a rizin segment map."""
-    executable_segments: list[tuple[int, int, int]] = []
+    seg: object
+    executable_segments: list[tuple[cython.longlong, cython.longlong, cython.longlong]] = []
     for seg in segments:
         if not isinstance(seg, dict):
             continue
@@ -146,10 +159,12 @@ def _mz_executable_segments(segments: list[object]) -> list[tuple[int, int, int]
 
 
 def _mz_scan_base(
-    segments: list[object],
-    executable_segments: list[tuple[int, int, int]],
-) -> tuple[int, int] | None:
+    segments: object,
+    executable_segments: object,
+) -> object:
     """Choose the physical/virtual base used for linear prologue mapping."""
+    chosen: object
+    seg: object
     if not executable_segments:
         # Fallback: keep prior behavior for binaries with sparse rizin segment metadata.
         chosen = None
@@ -165,7 +180,7 @@ def _mz_scan_base(
         return int(chosen["paddr"]), int(chosen["vaddr"])
     # Prefer largest executable segment with known code size, otherwise first encountered.
     exec_vsize, pbase, vbase = max(
-        ((vsize, paddr, vaddr) for paddr, vaddr, vsize in executable_segments),
+        ((vsize, paddr, vaddr) for paddr, vaddr, vsize in iter(executable_segments)),
         key=lambda item: (item[0], item[1]),
     )
     if exec_vsize <= 0:
@@ -174,10 +189,12 @@ def _mz_scan_base(
     return pbase, vbase
 
 
-def _mz_prologue_candidates(data: bytes, pbase: int, vbase: int) -> list[int]:
+@cython.ccall
+def _mz_prologue_candidates(data: object, pbase: cython.longlong, vbase: cython.longlong) -> object:
     """Scan raw bytes for standard x16 frame prologues mapped to load addresses."""
+    pat: object
     patterns = (b"\x55\x8b\xec", b"\x55\x89\xe5")
-    candidates: list[int] = []
+    candidates: list[cython.longlong] = []
     for pat in patterns:
         start = 0
         while True:
@@ -195,6 +212,7 @@ def _mz_prologue_candidates(data: bytes, pbase: int, vbase: int) -> list[int]:
     return candidates
 
 
+@cython.ccall
 def _mz_entrypoint_probe(binary_path: Path) -> int | None:
     """Probe rizin for the executable entrypoint as one extra candidate."""
     try:
@@ -217,8 +235,12 @@ def _mz_entrypoint_probe(binary_path: Path) -> int | None:
     return None
 
 
-def _mz_linear_candidates_from_prologues(binary_path: Path) -> tuple[list[int], str]:
+@cython.ccall
+def _mz_linear_candidates_from_prologues(binary_path: Path) -> tuple[list[cython.longlong], str]:
     """Collect MZ prologue candidates even when optional entrypoint probing times out."""
+    base: object
+    entry_candidate: object
+    addr: object
     data = binary_path.read_bytes()
     segments = _run_rizin_json(binary_path, "iSj", timeout_sec=3)
     if not isinstance(segments, list):
@@ -232,8 +254,8 @@ def _mz_linear_candidates_from_prologues(binary_path: Path) -> tuple[list[int], 
     entry_candidate = _mz_entrypoint_probe(binary_path)
     if entry_candidate is not None:
         candidates.append(entry_candidate)
-    dedup: set[int] = set()
-    ordered: list[int] = []
+    dedup: set[cython.longlong] = set()
+    ordered: list[cython.longlong] = []
     for addr in sorted(candidates):
         if addr in dedup:
             continue
@@ -242,20 +264,22 @@ def _mz_linear_candidates_from_prologues(binary_path: Path) -> tuple[list[int], 
     return ordered, "mz_prologue_fallback"
 
 
-def _cached_discovery_result(key: dict[str, object], started: float) -> RizinDiscoveryResult | None:
+def _cached_discovery_result(key: object, started: cython.double) -> RizinDiscoveryResult | None:
     """Return a persisted discovery result for one cache key when present."""
+    offsets_raw: object
+    status: object
     cached = _load_cache_json("recovery", key)
     if not isinstance(cached, dict):
         return None
     cached_status_raw = str(cached.get("status", "") or "").strip().lower()
     cached_detail = str(cached.get("detail", "") or "")
     offsets_raw = cached.get("offsets")
-    cached_offsets: tuple[int, ...]
-    cached_offsets = tuple(_json_int(x) for x in offsets_raw) if isinstance(offsets_raw, list) else ()
+    cached_offsets: object
+    cached_offsets = tuple(_json_int(x) for x in iter(offsets_raw)) if isinstance(offsets_raw, list) else ()
     if not cached_status_raw:
         return None
     for status in RizinDiscoveryStatus:
-        if status.value == cached_status_raw:
+        if operator.eq(status.value, cached_status_raw):
             return RizinDiscoveryResult(
                 status,
                 cached_offsets,
@@ -265,7 +289,8 @@ def _cached_discovery_result(key: dict[str, object], started: float) -> RizinDis
     return None
 
 
-def _cached_error_result(key: dict[str, object] | None, started: float, detail: str) -> RizinDiscoveryResult:
+@cython.ccall
+def _cached_error_result(key: object, started: cython.double, detail: object) -> RizinDiscoveryResult:
     """Build, persist, and return one ERROR discovery result."""
     error_result = RizinDiscoveryResult(
         RizinDiscoveryStatus.ERROR,
@@ -280,7 +305,8 @@ def _cached_error_result(key: dict[str, object] | None, started: float, detail: 
     return error_result
 
 
-def _empty_result(key: dict[str, object] | None, started: float, detail: str) -> RizinDiscoveryResult:
+@cython.ccall
+def _empty_result(key: object, started: cython.double, detail: object) -> RizinDiscoveryResult:
     """Build, persist, and return one EMPTY discovery result."""
     empty_result = RizinDiscoveryResult(
         RizinDiscoveryStatus.EMPTY,
@@ -295,8 +321,10 @@ def _empty_result(key: dict[str, object] | None, started: float, detail: str) ->
     return empty_result
 
 
-def _call_target_candidates(binary_path: Path, timeout_sec: int) -> list[dict[str, object]]:
+@cython.ccall
+def _call_target_candidates(binary_path: Path, timeout_sec: cython.longlong) -> object:
     """Collect direct CALL xref targets as extra function-entry seeds."""
+    item: object
     xrefs_payload = _run_rizin_json(binary_path, "aa;axlj", timeout_sec=timeout_sec)
     candidates: list[dict[str, object]] = []
     if isinstance(xrefs_payload, list):
@@ -320,8 +348,9 @@ def _call_target_candidates(binary_path: Path, timeout_sec: int) -> list[dict[st
     return candidates
 
 
+@cython.ccall
 def _mz_fallback_result(
-    key: dict[str, object] | None, started: float, binary_path: Path
+    key: object, started: cython.double, binary_path: Path
 ) -> RizinDiscoveryResult:
     """Return a linear MZ prologue result when rizin found no candidates."""
     mz_fallback, fallback_detail = _mz_linear_candidates_from_prologues(binary_path)
@@ -346,8 +375,9 @@ def _mz_fallback_result(
     )
 
 
+@cython.ccall
 def _run_function_analysis(
-    binary_path: Path, key: dict[str, object] | None, started: float, timeout_sec: int
+    binary_path: Path, key: object, started: cython.double, timeout_sec: cython.longlong
 ) -> tuple[subprocess.CompletedProcess[str] | None, RizinDiscoveryResult | None]:
     """Run rizin's conservative analysis; return (process, early_result)."""
     cmd = ["rizin", "-2", "-q", "-c", _RIZIN_FUNCTION_ANALYSIS_COMMAND, str(binary_path)]
@@ -378,13 +408,15 @@ def _run_function_analysis(
     return completed, None
 
 
+@cython.ccall
 def _normalize_candidate_offsets(
-    candidates: list[dict[str, object]], binary_path: Path
-) -> list[int]:
+    candidates: object, binary_path: Path
+) -> object:
     """Map candidate offsets to Inertia addresses, sorted and deduplicated."""
+    item: object
     ordered = sorted(candidates, key=_score_aflj_entry, reverse=True)
-    dedup: set[int] = set()
-    offsets: list[int] = []
+    dedup: set[cython.longlong] = set()
+    offsets: list[cython.longlong] = []
     for item in ordered:
         raw_offset = _json_int(item.get("offset"))
         if raw_offset < 0:
@@ -397,8 +429,12 @@ def _normalize_candidate_offsets(
     return offsets
 
 
-def discover_rizin_function_entries(binary_path: Path, *, timeout_sec: int = 8) -> RizinDiscoveryResult:
+@cython.ccall
+def discover_rizin_function_entries(binary_path: Path, *, timeout_sec: cython.longlong = 8) -> RizinDiscoveryResult:
     """Discover candidate function entry offsets with rizin."""
+    cached_result: object
+    early: object
+    key: object
     started = time.perf_counter()
     if not _rizin_available():
         return RizinDiscoveryResult(RizinDiscoveryStatus.UNAVAILABLE, (), 0.0, "rizin not found")
@@ -423,7 +459,7 @@ def discover_rizin_function_entries(binary_path: Path, *, timeout_sec: int = 8) 
         return _cached_error_result(key, started, "invalid JSON")
     if not isinstance(payload, list):
         return _cached_error_result(key, started, "aflj payload is not a list")
-    candidates: list[dict[str, object]] = [item for item in payload if isinstance(item, dict)]
+    candidates: list[dict[str, object]] = [item for item in iter(payload) if isinstance(item, dict)]
     # Rizin may merge a large 16-bit segmented call graph into one function even
     # though its xref engine still identifies the direct CALL destinations.  A
     # direct call target is a stronger function-entry seed than the resulting
@@ -448,11 +484,12 @@ def discover_rizin_function_entries(binary_path: Path, *, timeout_sec: int = 8) 
     )
 
 
+@cython.ccall
 def discover_function_offsets_with_rizin(
     binary_path: Path,
     *,
     max_count: int | None = None,
-) -> tuple[list[int], str]:
+) -> tuple[list[cython.longlong], str]:
     """Return optional rizin function offsets and a status/detail label."""
     result = discover_rizin_function_entries(binary_path, timeout_sec=8)
     if result.status is not RizinDiscoveryStatus.OK:

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/runtime.
 
 Responsibility: provide deterministic x86 dirty I/O SimProcedure stubs for lifting/runtime.
@@ -5,6 +6,8 @@ Forbidden: inferring decompiler semantics from port names, host devices, or I/O 
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Protocol, cast
 
@@ -14,16 +17,17 @@ __all__ = ["X86DirtyIN", "X86DirtyOUT"]
 
 
 class _DirtyIOSolver(Protocol):
-    def eval(self, _expression: object) -> int:
+    def eval(self, _expression: object) -> cython.longlong:
         """Evaluate a symbolic or concrete width expression."""
         ...
 
-    def BVV(self, _value: int, _bits: int) -> object:
+    def BVV(self, _value: cython.longlong, _bits: cython.longlong) -> object:
         """Build a bit-vector value for the requested width."""
         ...
 
 
-def _size_bits_from_solver(size: object, solver: _DirtyIOSolver) -> int:
+@cython.ccall
+def _size_bits_from_solver(size: object, solver: _DirtyIOSolver) -> cython.longlong:
     try:
         # size may be a claripy BV or a Python scalar.
         if hasattr(size, "concrete") or hasattr(size, "size"):
@@ -42,7 +46,7 @@ class X86DirtyIN(SimProcedure):  # type: ignore[misc, unused-ignore] # dynamic a
     Signature (size_bits, port)
     """
 
-    def run(self, size: object, port: object | None = None) -> object:
+    def run(self, size: object, port = None) -> object:
         """Return the deterministic unconstrained-port value for the requested width."""
         del port
         solver = cast(_DirtyIOSolver, self.state.solver)
@@ -62,7 +66,7 @@ class X86DirtyOUT(SimProcedure):  # type: ignore[misc, unused-ignore] # dynamic 
     This is a no-op when no port device is present.
     """
 
-    def run(self, size: object, port: object, value: object) -> None:
+    def run(self, size, port, value) -> None:
         """Ignore an OUT operation when no frontend port device is present."""
         del size, port, value
         return None

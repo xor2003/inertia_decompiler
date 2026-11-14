@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Collect exact terminal call-result pass-through evidence.
 
 Layer: Semantics.
@@ -11,6 +12,8 @@ This module does not infer return storage or types and does not mutate codegen.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -22,6 +25,7 @@ from .terminal_call_paths import (
     angr_terminal_call_path_callbacks_8616,
     prove_terminal_call_path_8616,
 )
+import dataclasses
 
 __all__ = [
     "TerminalReturnPassThroughEvidence8616",
@@ -43,18 +47,18 @@ class TerminalReturnPassThroughFailureKind8616(StrEnum):
     RETURN_IDENTITY_UNKNOWN = "return_identity_unknown"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalReturnPassThroughFact8616:
     """One direct call whose result reaches an exact function-return boundary."""
 
-    caller_addr: int
-    callsite_addr: int
-    target_addr: int
-    return_instruction_addr: int
-    path_block_addrs: tuple[int, ...]
+    caller_addr: cython.longlong
+    callsite_addr: cython.longlong
+    target_addr: cython.longlong
+    return_instruction_addr: cython.longlong
+    path_block_addrs: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalReturnPassThroughFailure8616:
     """One retained candidate refusal with its Semantics path verdict."""
 
@@ -63,21 +67,21 @@ class TerminalReturnPassThroughFailure8616:
     path_status: TerminalCallPathStatus8616 | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalReturnPassThroughEvidence8616:
     """Closed accounting for caller-selected terminal pass-through candidates."""
 
     function_addr: int | None
-    facts: tuple[TerminalReturnPassThroughFact8616, ...]
-    failures: tuple[TerminalReturnPassThroughFailure8616, ...]
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    facts: object
+    failures: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every supplied candidate produced one exact fact."""
         return (
             self.raw_fact_count > 0
@@ -93,15 +97,17 @@ class TerminalReturnPassThroughEvidence8616:
 class _FunctionSurface8616(Protocol):
     """Owned function identity consumed before the dynamic angr adapter."""
 
-    addr: int
+    addr: cython.longlong
 
 
 def collect_terminal_return_passthrough_evidence_8616(
     project: object,
     function: object,
-    candidate_callsite_addrs: Iterable[int],
+    candidate_callsite_addrs: Iterable[cython.longlong],
 ) -> TerminalReturnPassThroughEvidence8616:
     """Prove every selected call-to-return relation without inferring a type."""
+    valid_function_addr: object
+    candidate: object
     candidates = tuple(candidate_callsite_addrs)
     try:
         function_addr = cast(_FunctionSurface8616, function).addr
@@ -117,7 +123,7 @@ def collect_terminal_return_passthrough_evidence_8616(
     failures: list[TerminalReturnPassThroughFailure8616] = []
     normalized_count = 0
     classified_count = 0
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
 
     for candidate in candidates:
         if not isinstance(candidate, int) or isinstance(candidate, bool) or candidate < 0:

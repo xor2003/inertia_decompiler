@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Expression-shape interpretation used by semantic query layers.
 
 Layer: Semantics.
@@ -8,6 +9,7 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import cython
 
 from dataclasses import dataclass
 from enum import Enum
@@ -15,6 +17,7 @@ from typing import Any
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_variable import SimTemporaryVariable
+import dataclasses
 
 
 class VirtualValueIdentityKind8616(Enum):
@@ -27,19 +30,21 @@ class VirtualValueIdentityKind8616(Enum):
     TEMPORARY_ID = "tmp_id"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class VirtualValueIdentity8616:
     """Typed identity for an unresolved virtual value at the C-AST boundary."""
 
     kind: VirtualValueIdentityKind8616
-    value: int | str
+    value: object
 
 
-def _dynamic_attr_8616(obj: object, name: str, default: object = None) -> Any:  # noqa: ANN401
+@cython.ccall
+def _dynamic_attr_8616(obj: object, name: object, default: object = None) -> Any:  # noqa: ANN401
     """Dynamic C-AST boundary: read optional third-party codegen attributes."""
     return getattr(obj, name, default)
 
 
+@cython.ccall
 def _unwrap_c_casts(expr: object) -> object:
     """Return the innermost expression after removing C type casts."""
     while isinstance(expr, structured_c.CTypeCast):
@@ -47,6 +52,7 @@ def _unwrap_c_casts(expr: object) -> object:
     return expr
 
 
+@cython.ccall
 def _constant_int_value(expr: object) -> int | None:
     """Return an integer C constant value after removing semantic casts."""
     expr = _unwrap_c_casts(expr)
@@ -55,8 +61,11 @@ def _constant_int_value(expr: object) -> int | None:
     return None
 
 
-def _mk_fp_components(expr: object) -> tuple[int, int] | None:
+@cython.ccall
+def _mk_fp_components(expr: object) -> object:
     """Return constant MK_FP segment/offset components when fully proven."""
+    off: object
+    seg: object
     expr = _unwrap_c_casts(expr)
     if not isinstance(expr, structured_c.CFunctionCall) or _dynamic_attr_8616(expr, "callee_target", None) != "MK_FP":
         return None
@@ -70,6 +79,7 @@ def _mk_fp_components(expr: object) -> tuple[int, int] | None:
     return seg, off
 
 
+@cython.ccall
 def describe_virtual_value_identity_8616(expr: object) -> VirtualValueIdentity8616 | None:
     """Return the strongest structured identity for an angr virtual value.
 
@@ -77,6 +87,8 @@ def describe_virtual_value_identity_8616(expr: object) -> VirtualValueIdentity86
     codegen identity fields may prove that two virtual-value occurrences are
     the same SSA carrier.
     """
+    kind: object
+    value: object
     expr = _unwrap_c_casts(expr)
     if isinstance(expr, structured_c.CVariable) and isinstance(
         expr.variable, SimTemporaryVariable

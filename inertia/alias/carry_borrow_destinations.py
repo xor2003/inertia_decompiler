@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bind carry-linked register results to exact Alias-proven stack stores.
 
 Layer: Alias.
@@ -9,6 +10,8 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -32,6 +35,9 @@ from .logical_stack_memory_projection import LogicalStackMemoryAliasAccess8616
 from .stack_memory_ssa_contracts import (
     StackMemorySSAAliasArtifact8616,
 )
+import dataclasses
+import operator
+import builtins
 
 
 class CarryBorrowDestinationAliasVerdict8616(StrEnum):
@@ -58,7 +64,7 @@ class CarryBorrowDestinationAliasFailure8616(StrEnum):
     VALUE_FLOW_MISMATCH = "value_flow_mismatch"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CarryBorrowDestinationAliasFact8616:
     """Exact low/high result stores retaining source carry and stack Alias facts."""
 
@@ -67,7 +73,7 @@ class CarryBorrowDestinationAliasFact8616:
     high_store: LogicalStackMemoryAliasAccess8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CarryBorrowDestinationAliasResolution8616:
     """Proven destination pair or typed refusal for one observed store flow."""
 
@@ -77,51 +83,54 @@ class CarryBorrowDestinationAliasResolution8616:
     failure: CarryBorrowDestinationAliasFailure8616 | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CarryBorrowDestinationAliasStats8616:
     """Closed accounting for observed destination-store candidates."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every observed candidate has one retained outcome."""
         return (
-            self.raw_fact_count == self.normalized_fact_count
-            and self.raw_fact_count == self.materialized_count + self.failure_count
-            and self.classified_fact_count == self.materialized_count
+            operator.eq(self.raw_fact_count, self.normalized_fact_count)
+            and operator.eq(self.raw_fact_count, self.materialized_count + self.failure_count)
+            and operator.eq(self.classified_fact_count, self.materialized_count)
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CarryBorrowDestinationAliasEvidence8616:
     """Function-level destination pairs and explicit refusals."""
 
-    function_addr: int
-    resolutions: tuple[CarryBorrowDestinationAliasResolution8616, ...]
+    function_addr: cython.longlong
+    resolutions: object
     stats: CarryBorrowDestinationAliasStats8616
 
     @property
     def facts(self) -> tuple[CarryBorrowDestinationAliasFact8616, ...]:
         """Return proven destination pairs in deterministic order."""
-        return tuple(item.fact for item in self.resolutions if item.fact is not None)
+        return tuple(item.fact for item in iter(self.resolutions) if item.fact is not None)
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether result count and evidence accounting are closed."""
-        return self.stats.complete and len(self.resolutions) == self.stats.raw_fact_count
+        return self.stats.complete and operator.eq(len(self.resolutions), self.stats.raw_fact_count)
 
 
-def _captured_lane_read_matches_8616(value: IRValue, definition: IRInstr) -> bool:
+@cython.ccall
+def _captured_lane_read_matches_8616(value: IRValue, definition: IRInstr) -> cython.bint:
     """Require a width-preserving read of the exact retained producer."""
+    destination: object
+    projection: object
     destination = definition.dst
     if destination is None or destination.active_unary is not None:
         return False
-    if value.size != destination.size or definition.size != value.size:
+    if operator.ne(value.size, destination.size) or operator.ne(definition.size, value.size):
         return False
     if value.offset != 0 or value.index is not None:
         return False
@@ -133,15 +142,19 @@ def _captured_lane_read_matches_8616(value: IRValue, definition: IRInstr) -> boo
 
 
 def _value_reaches_result_lane(
-    instructions: tuple[IRInstr, ...],
-    before_index: int,
+    instructions: object,
+    before_index: cython.longlong,
     value: IRValue,
     expected: IRValue,
     expected_domain: DomainKey,
-    required_shift: int,
-    visited: frozenset[int] = frozenset(),
-) -> bool:
+    required_shift: cython.longlong,
+    visited: object = frozenset(),
+) -> cython.bint:
     """Trace one byte value to an exact register version and byte lane."""
+    projection: object
+    source_tmp: object
+    step_value: object
+    unary: object
     unary = value.active_unary
     if unary is not None:
         projection = scalar_active_unary_projection_8616(value)
@@ -153,7 +166,7 @@ def _value_reaches_result_lane(
         )
     plain_register = (
         value.source_tmp is None
-        and value.size == expected.size
+        and operator.eq(value.size, expected.size)
         and value.offset == 0
         and value.index is None
         and value.expr in {None, ()}
@@ -161,8 +174,8 @@ def _value_reaches_result_lane(
     if (
         plain_register and
         value.space is MemSpace.REG
-        and register_domain_for_name(value.name) == expected_domain
-        and value.version == expected.version
+        and operator.eq(register_domain_for_name(value.name), expected_domain)
+        and operator.eq(value.version, expected.version)
     ):
         return required_shift == 0
     source_tmp = value.source_tmp
@@ -170,8 +183,8 @@ def _value_reaches_result_lane(
         return False
     definitions = tuple(
         (index, instruction)
-        for index, instruction in enumerate(instructions[:before_index])
-        if instruction.dst is not None and instruction.dst.source_tmp == source_tmp
+        for index, instruction in builtins.iter(enumerate(instructions[:before_index]))
+        if instruction.dst is not None and operator.eq(instruction.dst.source_tmp, source_tmp)
     )
     if len(definitions) != 1:
         return False
@@ -203,7 +216,8 @@ def _value_reaches_result_lane(
     return False
 
 
-def _shr16_by_8_shape_8616(definition: IRInstr) -> bool:
+@cython.ccall
+def _shr16_by_8_shape_8616(definition: IRInstr) -> cython.bint:
     """Return True when ``definition`` is exactly ``Shr16(x, 8)``."""
     return (
         definition.op == "Iop_Shr16"
@@ -214,7 +228,8 @@ def _shr16_by_8_shape_8616(definition: IRInstr) -> bool:
     )
 
 
-def _shr8_step_value_8616(definition: IRInstr, required_shift: int) -> IRValue | None:
+@cython.ccall
+def _shr8_step_value_8616(definition: IRInstr, required_shift: cython.longlong) -> IRValue | None:
     """Return the Shr16-by-8 source when the step consumes 8 bits."""
     if (
         not _shr16_by_8_shape_8616(definition)
@@ -225,14 +240,16 @@ def _shr8_step_value_8616(definition: IRInstr, required_shift: int) -> IRValue |
     return definition.args[0]
 
 
+@cython.ccall
 def _logical_store_value_paths(
-    instructions: tuple[IRInstr, ...],
+    instructions: object,
     owner: LogicalStackMemoryAliasAccess8616,
     expected: IRValue,
     expected_domain: DomainKey,
-) -> tuple[bool, ...]:
+) -> tuple[cython.bint, ...]:
     """Return exact low/high byte-path verdicts for one logical WRITE owner."""
-    paths: list[bool] = []
+    item: object
+    paths: list[cython.bint] = []
     for item in owner.slices:
         index = item.raw_access.instr_index
         instruction = instructions[index]
@@ -251,14 +268,17 @@ def _logical_store_value_paths(
     return tuple(paths)
 
 
+@cython.ccall
 def _stores_for_result(
     function_ssa: SSAFunctionArtifact,
     stack_aliases: StackMemorySSAAliasArtifact8616,
     result: IRValue,
     domain: DomainKey,
-) -> tuple[tuple[LogicalStackMemoryAliasAccess8616, ...], bool]:
+) -> tuple[tuple[LogicalStackMemoryAliasAccess8616, ...], cython.bint]:
     """Return exact logical word stores plus whether a partial path exists."""
-    blocks = {block.addr: block for block in function_ssa.blocks}
+    block: object
+    owner: object
+    blocks = {block.addr: block for block in iter(function_ssa.blocks)}
     stores: list[LogicalStackMemoryAliasAccess8616] = []
     partial = False
     for owner in stack_aliases.logical_accesses:
@@ -277,6 +297,7 @@ def _stores_for_result(
     return tuple(stores), partial
 
 
+@cython.ccall
 def _refusal(
     carry: CarryBorrowAliasFact8616,
     failure: CarryBorrowDestinationAliasFailure8616,
@@ -288,17 +309,18 @@ def _refusal(
     )
 
 
-def _adjacent_word_lanes_8616(low_address: IRAddress, high_address: IRAddress) -> bool:
+@cython.ccall
+def _adjacent_word_lanes_8616(low_address: IRAddress, high_address: IRAddress) -> cython.bint:
     """Return whether two addresses are adjacent word lanes of one object."""
     if (
         low_address.space is not high_address.space
-        or low_address.base != high_address.base
-        or low_address.size != high_address.size
+        or operator.ne(low_address.base, high_address.base)
+        or operator.ne(low_address.size, high_address.size)
         or low_address.size != 2
     ):
         return False
     return (
-        high_address.offset == low_address.offset + low_address.size
+        operator.eq(high_address.offset, low_address.offset + low_address.size)
         and low_address.status is high_address.status
         and low_address.segment_origin is high_address.segment_origin
     )
@@ -309,6 +331,8 @@ def _resolve_destination(
     stack_aliases: StackMemorySSAAliasArtifact8616,
     carry: CarryBorrowAliasFact8616,
 ) -> CarryBorrowDestinationAliasResolution8616:
+    high_result: object
+    low_result: object
     link = carry.link
     low_result = link.low_result_write.instruction.dst
     high_result = link.high_result_write.instruction.dst
@@ -339,10 +363,10 @@ def _resolve_destination(
     if len(low_stores) != 1 or len(high_stores) != 1:
         return _refusal(carry, CarryBorrowDestinationAliasFailure8616.AMBIGUOUS_STORE)
     low_store, high_store = low_stores[0], high_stores[0]
-    if low_store.block_addr != high_store.block_addr or low_store.block_addr != link.high_result_write.block_addr:
+    if operator.ne(low_store.block_addr, high_store.block_addr) or operator.ne(low_store.block_addr, link.high_result_write.block_addr):
         return _refusal(carry, CarryBorrowDestinationAliasFailure8616.CROSS_BLOCK_FLOW)
-    low_index = max(item.raw_access.instr_index for item in low_store.slices)
-    high_index = min(item.raw_access.instr_index for item in high_store.slices)
+    low_index = max(item.raw_access.instr_index for item in iter(low_store.slices))
+    high_index = min(item.raw_access.instr_index for item in iter(high_store.slices))
     if (
         low_index <= link.high_result_write.instr_index
         or high_index <= low_index
@@ -367,28 +391,28 @@ def _resolve_destination(
 def project_carry_borrow_destination_aliases_8616(
     function_ssa: SSAFunctionArtifact,
     carry_aliases: CarryBorrowAliasEvidence8616,
-    stack_aliases: StackMemorySSAAliasArtifact8616 | None,
+    stack_aliases: object,
 ) -> CarryBorrowDestinationAliasEvidence8616:
     """Project observed direct result stores onto exact stack Alias pairs."""
     if stack_aliases is None:
         resolutions = tuple(
             _refusal(fact, CarryBorrowDestinationAliasFailure8616.STACK_ALIAS_MISSING)
-            for fact in carry_aliases.facts
+            for fact in iter(carry_aliases.facts)
         )
     elif (
-        function_ssa.function_addr != carry_aliases.function_addr
-        or function_ssa.function_addr != stack_aliases.function_addr
+        operator.ne(function_ssa.function_addr, carry_aliases.function_addr)
+        or operator.ne(function_ssa.function_addr, stack_aliases.function_addr)
     ):
         resolutions = tuple(
             _refusal(fact, CarryBorrowDestinationAliasFailure8616.FUNCTION_IDENTITY_MISMATCH)
-            for fact in carry_aliases.facts
+            for fact in iter(carry_aliases.facts)
         )
     else:
         resolutions = tuple(
             _resolve_destination(function_ssa, stack_aliases, fact)
-            for fact in carry_aliases.facts
+            for fact in iter(carry_aliases.facts)
         )
-    materialized = sum(item.fact is not None for item in resolutions)
+    materialized = sum(item.fact is not None for item in iter(resolutions))
     return CarryBorrowDestinationAliasEvidence8616(
         function_addr=function_ssa.function_addr,
         resolutions=resolutions,

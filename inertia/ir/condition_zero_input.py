@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Project proven word-result zero tests onto their input register.
 
 Layer: IR.
@@ -11,25 +12,30 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
 from .condition_ir import ConditionIR
 from .core import IRValue, MemSpace
+import dataclasses
+import operator
 
-_WORD_BITS: int = 16
-_WORD_MASK: int = (1 << _WORD_BITS) - 1
-_INPUT_ZERO_VALUES: dict[str, int] = {"inc_reg16": _WORD_MASK, "dec_reg16": 1}
+_WORD_BITS: cython.longlong = 16
+_WORD_MASK: cython.longlong = (1 << _WORD_BITS) - 1
+_INPUT_ZERO_VALUES: dict[str, cython.longlong] = {"inc_reg16": _WORD_MASK, "dec_reg16": 1}
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RegisterZeroInput8616:
     """Input value whose proven register update produces a zero word."""
 
     register: IRValue
-    constant: int
+    constant: cython.longlong
 
 
+@cython.ccall
 def project_register_zero_input_8616(condition: ConditionIR) -> RegisterZeroInput8616 | None:
     """Return exact input equality evidence for a bound INC/DEC zero test.
 
@@ -37,13 +43,13 @@ def project_register_zero_input_8616(condition: ConditionIR) -> RegisterZeroInpu
     pre-update operand bindings and mismatched storage refuse this projection.
     """
     result_test = condition.op in {"zero", "nonzero"} and condition.rhs is None
-    if not result_test or condition.width_bits != _WORD_BITS:
+    if not result_test or operator.ne(condition.width_bits, _WORD_BITS):
         return None
     binding_is_result = (
         isinstance(condition.producer_insn, int)
         and isinstance(condition.src_insn, int)
         and condition.producer_insn < condition.src_insn
-        and condition.operand_bind_insn == condition.src_insn
+        and operator.eq(condition.operand_bind_insn, condition.src_insn)
     )
     if not binding_is_result:
         return None
@@ -60,9 +66,9 @@ def project_register_zero_input_8616(condition: ConditionIR) -> RegisterZeroInpu
         return None
     same_word_register = (
         register.space is MemSpace.REG
-        and register.size == _WORD_BITS // 8
+        and operator.eq(register.size, _WORD_BITS // 8)
         and isinstance(register_name, str)
-        and register.name == register_name
+        and operator.eq(register.name, register_name)
     )
     if not same_word_register:
         return None

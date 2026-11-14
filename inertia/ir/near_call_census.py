@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Batched fresh outgoing-CALL preservation census under one caller.
 
 Layer: IR.
@@ -16,6 +17,8 @@ Owns typed Value, Address, Condition, instruction facts, and lossless normalizat
 Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 from __future__ import annotations
+import typing
+import cython
 
 import json
 from dataclasses import dataclass, field, replace
@@ -69,9 +72,12 @@ from inertia.semantics.conditional_near_call_target import (
 from inertia.semantics.direct_near_call_target_binding import (
     DirectNearCallCoordinates8616,
 )
+import dataclasses
+import operator
+import builtins
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _CensusCall8616:
     """One decoded outgoing-CALL surface for the batched census.
 
@@ -85,7 +91,7 @@ class _CensusCall8616:
     coordinates: DirectNearCallCoordinates8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _StagedCensusCall8616:
     """Staged census evidence for one CALL; not admission authority.
 
@@ -98,27 +104,28 @@ class _StagedCensusCall8616:
     theorem: ConditionalNearCallTargetTheorem8616 = field(compare=False)
     snapshot: _DetachedCallerFacts8616
     callee: SegmentEffectClosureResult8616 = field(compare=False)
-    callee_addr: int
-    candidates: tuple[int, ...]
-    dependency_pin: str
-    callee_native_key: tuple[object, ...]
-    callee_native_authorities: tuple[object, ...] = field(
+    callee_addr: cython.longlong
+    candidates: object
+    dependency_pin: object
+    callee_native_key: object
+    callee_native_authorities: object = field(
         compare=False, repr=False,
     )
 
-    def __bool__(self) -> bool:
+    def __bool__(self) -> cython.bint:
         """Reject staged evidence used as an admitted proof."""
         raise TypeError(
             "staged census call requires the final whole-census seal"
         )
 
 
+@cython.ccall
 def _staged_dependency_pin_8616(
     theorem: ConditionalNearCallTargetTheorem8616,
     obligation: ConditionalCallsiteSelectorObligation8616 | None,
     callee: SegmentEffectClosureResult8616,
     callee_addr: int | None,
-) -> str:
+) -> object:
     """Freeze one staged step's dependent projections for final reconcile.
 
     Same pinned surfaces as the consumer's ``_dependency_facts_8616``:
@@ -138,7 +145,8 @@ def _staged_dependency_pin_8616(
     }, sort_keys=True)
 
 
-def _census_entry_valid_8616(call: object) -> bool:
+@cython.ccall
+def _census_entry_valid_8616(call: object) -> cython.bint:
     """Require one typed census entry bound to its exact CALL surface."""
     if (
         type(call) is not _CensusCall8616
@@ -149,7 +157,7 @@ def _census_entry_valid_8616(call: object) -> bool:
         return False
     return bool(
         call.instruction.op == "CALL"
-        and call.instruction.addr == call.coordinates.callsite_addr
+        and operator.eq(call.instruction.addr, call.coordinates.callsite_addr)
     )
 
 
@@ -159,17 +167,18 @@ def _artifact_call_identities_8616(
     """Enumerate the artifact's CALL surfaces in canonical order."""
     return tuple(
         (block, instruction)
-        for block in artifact.blocks
-        for instruction in block.instrs
+        for block in iter(artifact.blocks)
+        for instruction in iter(block.instrs)
         if instruction.op == "CALL"
     )
 
 
+@cython.ccall
 def _final_census_reconcile_8616(
-    census: tuple[_CensusCall8616, ...],
+    census: object,
     artifact: IRFunctionArtifact,
-    staged: tuple[_StagedCensusCall8616, ...],
-) -> bool:
+    staged: object,
+) -> cython.bint:
     """Reconcile census and staged steps against the artifact CALLs.
 
     Callbacks may mutate census entries mid-flight, so the final seal
@@ -178,8 +187,12 @@ def _final_census_reconcile_8616(
     same block and instruction objects, same exact coordinates. Pure
     owned reads only; no native callback and no graph traversal.
     """
+    block: object
+    call: object
+    instruction: object
+    step: object
     expected = _artifact_call_identities_8616(artifact)
-    if len(census) != len(expected) or len(staged) != len(census):
+    if operator.ne(len(census), len(expected)) or operator.ne(len(staged), len(census)):
         return False
     for call, (block, instruction), step in zip(
         census, expected, staged, strict=True,
@@ -191,14 +204,15 @@ def _final_census_reconcile_8616(
         if (
             step.theorem.block is not call.block
             or step.theorem.instruction is not call.instruction
-            or step.theorem.callsite_addr != call.coordinates.callsite_addr
-            or step.theorem.next_addr != call.coordinates.next_addr
-            or step.theorem.target_addr != call.coordinates.target_addr
+            or operator.ne(step.theorem.callsite_addr, call.coordinates.callsite_addr)
+            or operator.ne(step.theorem.next_addr, call.coordinates.next_addr)
+            or operator.ne(step.theorem.target_addr, call.coordinates.target_addr)
         ):
             return False
     return True
 
 
+@cython.ccall
 def _stage_census_call_8616(
     project: object,
     artifact: IRFunctionArtifact,
@@ -219,6 +233,15 @@ def _stage_census_call_8616(
     callee live-source pin, then the canonical scoped evidence seal. The
     staged record owes the final whole-census seal; it is never a proof.
     """
+    bound_failure: object
+    callee: object
+    callee_addr: object
+    callee_native: object
+    census_failure: object
+    entry: object
+    seal_failure: object
+    snapshot: object
+    surface_failure: object
     failure = ConditionalNearCallPreservationFailure8616
     if direct_evidence_deadline_expired_8616(project):
         return failure.REQUEST_EXPIRED
@@ -284,13 +307,14 @@ def _stage_census_call_8616(
     )
 
 
+@cython.ccall
 def _final_native_seal_8616(
     project: object,
     context: NativeNearCallEntry8616,
     boundary: ExactFunctionRangeBoundary8616,
-    staged: tuple[_StagedCensusCall8616, ...],
-    incoming: bytes,
-    caller_key: tuple[object, ...],
+    staged: object,
+    incoming: object,
+    caller_key: object,
 ) -> ConditionalNearCallPreservationFailure8616 | None:
     """Replay the entry once, then compare every pinned live-source fact.
 
@@ -299,6 +323,9 @@ def _final_native_seal_8616(
     for the caller root and every bound callee must equal the facts pinned
     before and during staging. Any drift refuses as changed source.
     """
+    callee_after: object
+    caller_after: object
+    step: object
     failure = ConditionalNearCallPreservationFailure8616
     if not consume_native_near_call_entry_8616(
         project, context, callsite_index=context.callsite_index,
@@ -306,14 +333,14 @@ def _final_native_seal_8616(
         return failure.THEOREM_NOT_AUTHENTICATED
     if direct_evidence_deadline_expired_8616(project):
         return failure.REQUEST_EXPIRED
-    if _live_call_encoding_8616(project, context.premise) != incoming:
+    if operator.ne(_live_call_encoding_8616(project, context.premise), incoming):
         return failure.SEAL_SOURCE_CHANGED
     caller_after = _native_surface_key_8616(
         project, boundary, build_x86_16_ir_function_artifact,
     )
     if direct_evidence_deadline_expired_8616(project):
         return failure.REQUEST_EXPIRED
-    if caller_after is None or caller_after[0] != caller_key:
+    if caller_after is None or operator.ne(caller_after[0], caller_key):
         return failure.SEAL_SOURCE_CHANGED
     for step in staged:
         callee_after = _native_surface_key_8616(
@@ -322,15 +349,16 @@ def _final_native_seal_8616(
         )
         if direct_evidence_deadline_expired_8616(project):
             return failure.REQUEST_EXPIRED
-        if callee_after is None or callee_after[0] != step.callee_native_key:
+        if callee_after is None or operator.ne(callee_after[0], step.callee_native_key):
             return failure.SEAL_SOURCE_CHANGED
     return None
 
 
+@cython.ccall
 def _final_owned_seal_8616(
     project: object,
     artifact: IRFunctionArtifact,
-    staged: tuple[_StagedCensusCall8616, ...],
+    staged: object,
 ) -> ConditionalNearCallPreservationFailure8616 | None:
     """Seal owned caller and dependency facts after the last callback.
 
@@ -338,6 +366,8 @@ def _final_owned_seal_8616(
     reconciles every step's detached snapshot; each step's dependency pin
     then re-compares its staged theorem/callee projections.
     """
+    shared_after: object
+    step: object
     failure = ConditionalNearCallPreservationFailure8616
     shared_after = _shared_caller_graph_8616(artifact)
     if shared_after is None:
@@ -347,23 +377,24 @@ def _final_owned_seal_8616(
             project, step.theorem, step.snapshot, shared_fresh=shared_after,
         ):
             return failure.SEAL_SOURCE_CHANGED
-        if step.dependency_pin != _staged_dependency_pin_8616(
+        if operator.ne(step.dependency_pin, _staged_dependency_pin_8616(
             step.theorem, step.theorem.obligation, step.callee,
             step.callee_addr,
-        ):
+        )):
             return failure.SEAL_SOURCE_CHANGED
     return None
 
 
+@cython.ccall
 def _final_census_seal_8616(
     project: object,
     artifact: IRFunctionArtifact,
     context: NativeNearCallEntry8616,
     boundary: ExactFunctionRangeBoundary8616,
-    census: tuple[_CensusCall8616, ...],
-    staged: tuple[_StagedCensusCall8616, ...],
-    incoming: bytes,
-    caller_key: tuple[object, ...],
+    census: object,
+    staged: object,
+    incoming: object,
+    caller_key: object,
 ) -> ConditionalNearCallPreservationFailure8616 | None:
     """Run the whole-census final seals before any step promotes.
 
@@ -382,6 +413,10 @@ def _final_census_seal_8616(
     callback — including a callee check — can mutate native bytes,
     caller or dependency facts and escape detection.
     """
+    chain_failure: object
+    native: object
+    owned: object
+    step: object
     failure = ConditionalNearCallPreservationFailure8616
     for step in staged:
         chain_failure, _owner = _callee_chain_failure_8616(
@@ -413,7 +448,7 @@ def _final_census_seal_8616(
 
 def _census_caller_bound_8616(
     project: object,
-    census: tuple[_CensusCall8616, ...],
+    census: object,
     artifact: object,
     context: object,
 ) -> ExactFunctionRangeBoundary8616 | ConditionalNearCallPreservationFailure8616:
@@ -443,24 +478,25 @@ def _census_caller_bound_8616(
         type(boundary) is not ExactFunctionRangeBoundary8616
         or bound_context.project is not project
         or boundary.project is not project
-        or boundary.addr != bound_artifact.function_addr
-        or bound_artifact.function_addr != bound_context.target_addr
+        or operator.ne(boundary.addr, bound_artifact.function_addr)
+        or operator.ne(bound_artifact.function_addr, bound_context.target_addr)
     ):
         return failure.CALLER_MISMATCH
-    if not all(_census_entry_valid_8616(call) for call in census):
+    if not all(_census_entry_valid_8616(call) for call in iter(census)):
         return failure.CALLER_MISMATCH
     expected = _artifact_call_identities_8616(bound_artifact)
-    if len(census) != len(expected) or any(
+    if operator.ne(len(census), len(expected)) or any(
         call.block is not block or call.instruction is not instruction
-        for call, (block, instruction) in zip(census, expected, strict=True)
+        for call, (block, instruction) in builtins.iter(zip(census, expected, strict=True))
     ):
         return failure.CALLER_MISMATCH
     return boundary
 
 
+@cython.ccall
 def _entry_context_equal_8616(
     current: NativeNearCallEntry8616, initial: NativeNearCallEntry8616,
-) -> bool:
+) -> cython.bint:
     """Compare entry values and excluded identities against the pre-callback copy.
 
     The dataclass equality owns the scalar/byte projection. Identity checks
@@ -475,15 +511,13 @@ def _entry_context_equal_8616(
     ))
 
 
+@cython.ccall
 def _census_entry_auth_8616(
     project: object,
     artifact: IRFunctionArtifact,
     context: NativeNearCallEntry8616,
     boundary: ExactFunctionRangeBoundary8616,
-) -> (
-    tuple[bytes, tuple[object, ...], _SharedCallerGraph8616]
-    | ConditionalNearCallPreservationFailure8616
-):
+) -> object:
     """Pin census facts, then authenticate root and context exactly once.
 
     The shared caller graph and the live native facts (incoming CALL
@@ -493,6 +527,9 @@ def _census_entry_auth_8616(
     Returns ``(incoming, caller_key, shared)`` for the staged pass and the
     final whole-census seal.
     """
+    caller_native: object
+    incoming: object
+    shared: object
     failure = ConditionalNearCallPreservationFailure8616
     shared = _shared_caller_graph_8616(artifact)
     if shared is None:
@@ -516,20 +553,19 @@ def _census_entry_auth_8616(
     return incoming, caller_native[0], shared
 
 
+@cython.ccall
 def _stage_complete_census_8616(
     project: object,
     artifact: IRFunctionArtifact,
     context: NativeNearCallEntry8616,
     boundary: ExactFunctionRangeBoundary8616,
-    census: tuple[_CensusCall8616, ...],
+    census: object,
     shared: _SharedCallerGraph8616,
     resolver: DirectCallTargetResolver8616,
     resolution: _CalleeResolution8616 | None,
-) -> (
-    tuple[_StagedCensusCall8616, ...]
-    | ConditionalNearCallPreservationFailure8616
-):
+) -> object:
     """Stage every CALL under the caller's owned resolution session."""
+    call: object
     staged: list[_StagedCensusCall8616] = []
     with _resolution_scope_8616(project, resolver, resolution) as session:
         for call in census:
@@ -544,7 +580,7 @@ def _stage_complete_census_8616(
 
 
 def _promote_census_steps_8616(
-    staged: tuple[_StagedCensusCall8616, ...],
+    staged: object,
 ) -> tuple[ConditionalNearCallPreservation8616, ...]:
     """Materialize sealed staged evidence into the canonical step records.
 
@@ -555,21 +591,19 @@ def _promote_census_steps_8616(
     """
     return tuple(
         _conditional_preservation_record_8616(step.theorem, step.callee, step.callee_addr)
-        for step in staged
+        for step in iter(staged)
     )
 
+@cython.ccall
 def prove_near_call_preservation_census_8616(
     project: object,
-    census: tuple[_CensusCall8616, ...],
+    census: object,
     *,
     artifact: object,
     context: object,
     direct_target_resolver: DirectCallTargetResolver8616,
     resolution: _CalleeResolution8616 | None = None,
-) -> (
-    tuple[ConditionalNearCallPreservation8616, ...]
-    | ConditionalNearCallPreservationFailure8616
-):
+) -> object:
     """Produce every conditional preservation step in one owned census.
 
     The census must name every CALL instruction in ``artifact.blocks``
@@ -586,6 +620,7 @@ def prove_near_call_preservation_census_8616(
     the preservation failure evidence; no partial census is ever
     published.
     """
+    seal_failure: object
     failure = ConditionalNearCallPreservationFailure8616
     if resolution is not None and type(resolution) is not _CalleeResolution8616:
         raise TypeError(

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove DS and SS hold the same runtime segment value at one direct CALL.
 
 Layer: IR.
@@ -20,6 +21,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -39,6 +42,9 @@ from .direct_call_segment_entry_binding import (
 from .ir_boundary_cfg import closed_ir_boundary_cfg_8616
 from .real16_invocation_domain import Real16InvocationDomain8616
 from .segment_state_transfer import SegmentRestoreSource
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "DirectCallSegmentEntryCandidate8616",
@@ -110,13 +116,13 @@ _BINDING_FAILURE_REFUSAL_8616: dict[
 }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectCallSegmentEntryCandidate8616:
     """One proposed DS==SS equality site at an exact direct CALL."""
 
-    caller_start: int
-    callsite_addr: int
-    callee_addr: int
+    caller_start: cython.longlong
+    callsite_addr: cython.longlong
+    callee_addr: cython.longlong
 
     def __post_init__(self) -> None:
         """Reject malformed identities instead of weakening them downstream."""
@@ -128,28 +134,27 @@ class DirectCallSegmentEntryCandidate8616:
             raise ValueError(f"invalid callee_addr: {self.callee_addr!r}")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectCallSegmentEntryStats8616:
     """Closed five-stage accounting for one evaluated candidate."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether the candidate fully resolved to proof or refusal."""
         return bool(
             self.raw_fact_count == self.normalized_fact_count == 1
-            and self.normalized_fact_count
-            == self.materialized_count + self.failure_count
-            and self.classified_fact_count == self.materialized_count
+            and operator.eq(self.normalized_fact_count, self.materialized_count + self.failure_count)
+            and operator.eq(self.classified_fact_count, self.materialized_count)
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectCallSegmentEntryProof8616:
     """Verdict and exact evidence identities for one evaluated candidate.
 
@@ -165,18 +170,21 @@ class DirectCallSegmentEntryProof8616:
     stats: DirectCallSegmentEntryStats8616
     block_addr: int | None = None
     saved_instruction_addr: int | None = None
-    saved_register: str | None = None
+    saved_register: object = None
     restore_instruction_addr: int | None = None
-    restore_register: str | None = None
+    restore_register: object = None
     invocation: Real16InvocationDomain8616 | None = None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Require closed, ordered evidence before a caller consumes this proof.
 
         This checks the retained value contract; a consumer must additionally
         bind it to the exact project-owned IR and caller/callee boundaries.
         """
+        block_addr: object
+        restore_addr: object
+        saved_addr: object
         block_addr = self.block_addr
         saved_addr = self.saved_instruction_addr
         restore_addr = self.restore_instruction_addr
@@ -185,13 +193,13 @@ class DirectCallSegmentEntryProof8616:
         return bool(
             self.verdict is DirectCallSegmentEntryVerdict8616.PROVEN
             and self.refusal is None
-            and self.stats == DirectCallSegmentEntryStats8616(1, 1, 1, 1, 0)
+            and operator.eq(self.stats, DirectCallSegmentEntryStats8616(1, 1, 1, 1, 0))
             and self.stats.closed
-            and self.saved_register == _SAVED_SEGMENT_REGISTER
-            and self.restore_register == _RESTORED_SEGMENT_REGISTER
+            and operator.eq(self.saved_register, _SAVED_SEGMENT_REGISTER)
+            and operator.eq(self.restore_register, _RESTORED_SEGMENT_REGISTER)
             and all(
                 type(site) is int
-                for site in (block_addr, saved_addr, restore_addr)
+                for site in iter((block_addr, saved_addr, restore_addr))
             )
             and block_addr <= saved_addr < restore_addr < self.candidate.callsite_addr
             and (self.invocation is None or self.invocation.complete)
@@ -225,6 +233,7 @@ class DirectCallSegmentEntryProof8616:
         }
 
 
+@cython.ccall
 def _refuse_8616(
     candidate: DirectCallSegmentEntryCandidate8616,
     refusal: DirectCallSegmentEntryRefusal8616,
@@ -246,6 +255,7 @@ def _refuse_8616(
     )
 
 
+@cython.ccall
 def _identity_refusal_8616(
     candidate: DirectCallSegmentEntryCandidate8616,
     caller_boundary: ExactFunctionRangeBoundary8616,
@@ -253,10 +263,10 @@ def _identity_refusal_8616(
     artifact: IRFunctionArtifact,
 ) -> DirectCallSegmentEntryRefusal8616 | None:
     """Require exact caller/callee identities on one binary image."""
-    if candidate.caller_start != caller_boundary.addr or artifact.function_addr != caller_boundary.addr:
+    if operator.ne(candidate.caller_start, caller_boundary.addr) or operator.ne(artifact.function_addr, caller_boundary.addr):
         return DirectCallSegmentEntryRefusal8616.CALLER_IDENTITY_CONFLICT
     if (
-        candidate.callee_addr != callee_boundary.addr
+        operator.ne(candidate.callee_addr, callee_boundary.addr)
         or candidate.callee_addr not in callee_boundary.reachable_instruction_addrs
     ):
         return DirectCallSegmentEntryRefusal8616.CALLEE_IDENTITY_CONFLICT
@@ -271,7 +281,7 @@ def _closed_caller_refusal_8616(
     artifact: IRFunctionArtifact,
 ) -> DirectCallSegmentEntryRefusal8616 | None:
     """Require refusal-free IR and the exact closed caller CFG."""
-    if artifact.refusals or any(block.refusals for block in artifact.blocks):
+    if artifact.refusals or any(block.refusals for block in iter(artifact.blocks)):
         return DirectCallSegmentEntryRefusal8616.IR_REFUSAL_PRESENT
     if not _closed_caller_cfg_8616(caller_boundary, artifact):
         return DirectCallSegmentEntryRefusal8616.CFG_NOT_CLOSED
@@ -280,10 +290,11 @@ def _closed_caller_refusal_8616(
     return None
 
 
+@cython.ccall
 def _closed_caller_cfg_8616(
     caller_boundary: ExactFunctionRangeBoundary8616,
     artifact: IRFunctionArtifact,
-) -> bool:
+) -> cython.bint:
     """Match the exact reachable CFG without restricting earlier branches.
 
     Equality is re-established by the save/restore pair on every entrance to
@@ -296,13 +307,13 @@ def _closed_caller_cfg_8616(
 def _unique_call_8616(
     candidate: DirectCallSegmentEntryCandidate8616,
     artifact: IRFunctionArtifact,
-) -> tuple[IRBlock, int] | DirectCallSegmentEntryRefusal8616:
+) -> object:
     """Require exactly one CALL instruction at the candidate address."""
     call_sites = tuple(
         (block, instruction_index)
-        for block in artifact.blocks
-        for instruction_index, instruction in enumerate(block.instrs)
-        if instruction.op == "CALL" and instruction.addr == candidate.callsite_addr
+        for block in iter(artifact.blocks)
+        for instruction_index, instruction in builtins.iter(enumerate(block.instrs))
+        if instruction.op == "CALL" and operator.eq(instruction.addr, candidate.callsite_addr)
     )
     if not call_sites:
         return DirectCallSegmentEntryRefusal8616.CALL_MISSING
@@ -321,7 +332,7 @@ def _decoded_entry_8616(
         return DirectCallSegmentEntryRefusal8616.TARGET_INDEX_INCOMPLETE
     index_entries = tuple(
         entry
-        for entry in callsite_index.for_target(candidate.callee_addr)
+        for entry in builtins.iter(callsite_index.for_target(candidate.callee_addr))
         if _index_entry_matches_caller_8616(caller_boundary, candidate.callsite_addr, entry)
     )
     if not index_entries:
@@ -333,29 +344,31 @@ def _decoded_entry_8616(
         return DirectCallSegmentEntryRefusal8616.CALL_NOT_DIRECT_NEAR
     # The near index permits low-word lookup aliases. An exact entry relation
     # must not promote a different physical code segment through that lookup.
-    if entry.target_addr != candidate.callee_addr:
+    if operator.ne(entry.target_addr, candidate.callee_addr):
         return DirectCallSegmentEntryRefusal8616.TARGET_MISMATCH
     return entry
 
 
+@cython.ccall
 def _index_entry_matches_caller_8616(
     caller_boundary: ExactFunctionRangeBoundary8616,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     entry: DecodedDirectCallsite8616,
-) -> bool:
+) -> cython.bint:
     """Require the decoded entry to name this exact caller and instruction."""
     return bool(
-        entry.callsite_addr == callsite_addr
+        operator.eq(entry.callsite_addr, callsite_addr)
         and (
-            entry.caller_start == caller_boundary.addr
+            operator.eq(entry.caller_start, caller_boundary.addr)
             or (
                 entry.entry_identity is not None
-                and entry.entry_identity.decode_start == caller_boundary.addr
+                and operator.eq(entry.entry_identity.decode_start, caller_boundary.addr)
             )
         )
     )
 
 
+@cython.ccall
 def _call_target_evidence_8616(
     candidate: DirectCallSegmentEntryCandidate8616,
     call_instruction: IRInstr,
@@ -376,7 +389,7 @@ def _call_target_evidence_8616(
     if not isinstance(target, IRValue):
         return DirectCallSegmentEntryRefusal8616.CALL_NOT_DIRECT_NEAR, None
     if target.space is MemSpace.CONST:
-        if type(target.const) is not int or target.const != candidate.callee_addr:
+        if type(target.const) is not int or operator.ne(target.const, candidate.callee_addr):
             return DirectCallSegmentEntryRefusal8616.TARGET_MISMATCH, None
         return None, None
     # Resolve the Semantics owner after package initialization, as in the
@@ -395,8 +408,8 @@ def _call_target_evidence_8616(
         DirectNearCallTargetBindingFailure8616.DISPLACEMENT_MISMATCH,
     ):
         return DirectCallSegmentEntryRefusal8616.TARGET_MISMATCH, None
-    if (not binding.complete or binding.callsite_addr != candidate.callsite_addr
-            or binding.target_addr != candidate.callee_addr):
+    if (not binding.complete or operator.ne(binding.callsite_addr, candidate.callsite_addr)
+            or operator.ne(binding.target_addr, candidate.callee_addr)):
         return DirectCallSegmentEntryRefusal8616.CALL_NOT_DIRECT_NEAR, None
     used_invocation = None if binding.invocation is None else binding.invocation.premise
     return None, used_invocation
@@ -404,15 +417,15 @@ def _call_target_evidence_8616(
 
 def _alias_copy_source_8616(
     call_block: IRBlock,
-    restore_sources: tuple[SegmentRestoreSource, ...],
+    restore_sources: object,
 ) -> SegmentRestoreSource | DirectCallSegmentEntryRefusal8616:
     """Require one unique Alias-proved SS->DS stack copy in the call block."""
     matching_sources = tuple(
         source
-        for source in restore_sources
-        if source.block_addr == call_block.addr
-        and source.saved_register == _SAVED_SEGMENT_REGISTER
-        and source.restore_register == _RESTORED_SEGMENT_REGISTER
+        for source in iter(restore_sources)
+        if operator.eq(source.block_addr, call_block.addr)
+        and operator.eq(source.saved_register, _SAVED_SEGMENT_REGISTER)
+        and operator.eq(source.restore_register, _RESTORED_SEGMENT_REGISTER)
     )
     if not matching_sources:
         return DirectCallSegmentEntryRefusal8616.ALIAS_SOURCE_MISSING
@@ -421,34 +434,37 @@ def _alias_copy_source_8616(
     return matching_sources[0]
 
 
-def _is_register_write_8616(instruction: IRInstr, register: str) -> bool:
+@cython.ccall
+def _is_register_write_8616(instruction: IRInstr, register: object) -> cython.bint:
     """Return whether one typed instruction writes the named register."""
     destination = instruction.dst
     return (
         isinstance(destination, IRValue)
         and destination.space is MemSpace.REG
-        and destination.name == register
+        and operator.eq(destination.name, register)
     )
 
 
 def _instruction_positions_8616(
     artifact: IRFunctionArtifact,
     call_block: IRBlock,
-) -> tuple[dict[int, int], dict[int, int]] | None:
+) -> object:
     """Map first/last instruction-list positions per address in the call block.
 
     Returns None when any instruction in the artifact lacks an exact address:
     an unaddressed instruction cannot be bounded inside or outside the proof
     window.
     """
+    instruction: object
+    position: object
     if any(
         not isinstance(instruction.addr, int)
-        for block in artifact.blocks
-        for instruction in block.instrs
+        for block in iter(artifact.blocks)
+        for instruction in iter(block.instrs)
     ):
         return None
-    first_index: dict[int, int] = {}
-    last_index: dict[int, int] = {}
+    first_index: dict[cython.longlong, cython.longlong] = {}
+    last_index: dict[cython.longlong, cython.longlong] = {}
     for position, instruction in enumerate(call_block.instrs):
         address = instruction.addr
         if not isinstance(address, int):
@@ -458,12 +474,13 @@ def _instruction_positions_8616(
     return first_index, last_index
 
 
+@cython.ccall
 def _window_ordering_refusal_8616(
     candidate: DirectCallSegmentEntryCandidate8616,
     caller_boundary: ExactFunctionRangeBoundary8616,
-    call_op_index: int,
+    call_op_index: cython.longlong,
     source: SegmentRestoreSource,
-    positions: tuple[dict[int, int], dict[int, int]],
+    positions: object,
 ) -> DirectCallSegmentEntryRefusal8616 | None:
     """Require saved -> restored -> callsite as one exact in-block order."""
     first_index, last_index = positions
@@ -478,7 +495,7 @@ def _window_ordering_refusal_8616(
         saved_addr < restored_addr < candidate.callsite_addr
         and last_index[saved_addr] < first_index[restored_addr]
         and last_index[restored_addr] < call_op_index
-        and call_op_index == last_index[candidate.callsite_addr]
+        and operator.eq(call_op_index, last_index[candidate.callsite_addr])
     )
     if not ordered:
         return DirectCallSegmentEntryRefusal8616.ORDERING_VIOLATION
@@ -489,30 +506,31 @@ def _window_path_refusal_8616(
     candidate: DirectCallSegmentEntryCandidate8616,
     artifact: IRFunctionArtifact,
     call_block: IRBlock,
-    first_index: dict[int, int],
-    saved_addr: int,
+    first_index: object,
+    saved_addr: cython.longlong,
 ) -> DirectCallSegmentEntryRefusal8616 | None:
     """Refuse any second block that could own or enter the proof window."""
+    block: object
     window_addrs = frozenset(
         address
-        for address in first_index
+        for address in iter(first_index)
         if saved_addr <= address <= candidate.callsite_addr
     )
     for block in artifact.blocks:
         if block is call_block:
             continue
         if block.addr in window_addrs or any(
-            instruction.addr in window_addrs for instruction in block.instrs
+            instruction.addr in window_addrs for instruction in iter(block.instrs)
         ):
             return DirectCallSegmentEntryRefusal8616.AMBIGUOUS_BLOCK_PATH
     return None
 
 
 def _window_effects_refusal_8616(
-    instructions: tuple[IRInstr, ...],
-    first_index: dict[int, int],
-    last_index: dict[int, int],
-    call_op_index: int,
+    instructions: object,
+    first_index: object,
+    last_index: object,
+    call_op_index: cython.longlong,
     source: SegmentRestoreSource,
 ) -> DirectCallSegmentEntryRefusal8616 | None:
     """Bind the Alias restore to its IR write and refuse all later clobbers.
@@ -526,12 +544,12 @@ def _window_effects_refusal_8616(
     restored_first = first_index[source.restore_instruction_addr]
     restored_last = last_index[source.restore_instruction_addr]
     if any(
-        instruction.op == "CALL" for instruction in instructions[saved_first:call_op_index]
+        instruction.op == "CALL" for instruction in iter(instructions[saved_first:call_op_index])
     ):
         return DirectCallSegmentEntryRefusal8616.INTERVENING_CALL
     if any(
         _is_register_write_8616(instruction, _SAVED_SEGMENT_REGISTER)
-        for instruction in instructions[saved_first:call_op_index + 1]
+        for instruction in iter(instructions[saved_first:call_op_index + 1])
     ):
         return DirectCallSegmentEntryRefusal8616.SS_WRITE_AFTER_SAVE
     restore_writes = tuple(
@@ -542,22 +560,28 @@ def _window_effects_refusal_8616(
         return DirectCallSegmentEntryRefusal8616.ALIAS_RESTORE_WRITE_MISSING
     if any(
         _is_register_write_8616(instruction, _RESTORED_SEGMENT_REGISTER)
-        for instruction in instructions[restore_writes[0] + 1:call_op_index + 1]
+        for instruction in iter(instructions[restore_writes[0] + 1:call_op_index + 1])
     ):
         return DirectCallSegmentEntryRefusal8616.DS_WRITE_AFTER_RESTORE
     return None
 
 
+@cython.ccall
 def _prove_block_window_8616(
     candidate: DirectCallSegmentEntryCandidate8616,
     caller_boundary: ExactFunctionRangeBoundary8616,
     artifact: IRFunctionArtifact,
     call_block: IRBlock,
-    call_op_index: int,
+    call_op_index: cython.longlong,
     source: SegmentRestoreSource,
     invocation: Real16InvocationDomain8616 | None = None,
 ) -> DirectCallSegmentEntryProof8616:
     """Prove the Alias copy still holds inside the call block at the CALL."""
+    binding_failure: object
+    effects_refusal: object
+    ordering_refusal: object
+    path_refusal: object
+    positions: object
     positions = _instruction_positions_8616(artifact, call_block)
     if positions is None:
         return _refuse_8616(
@@ -622,6 +646,7 @@ def _prove_block_window_8616(
     return proof
 
 
+@cython.ccall
 def prove_x86_16_direct_call_segment_entry_8616(
     candidate: DirectCallSegmentEntryCandidate8616,
     *,
@@ -629,7 +654,7 @@ def prove_x86_16_direct_call_segment_entry_8616(
     callee_boundary: ExactFunctionRangeBoundary8616,
     artifact: IRFunctionArtifact,
     callsite_index: DecodedDirectCallsiteIndex8616,
-    restore_sources: tuple[SegmentRestoreSource, ...] = (),
+    restore_sources: object = (),
     invocation: Real16InvocationDomain8616 | None = None,
 ) -> DirectCallSegmentEntryProof8616:
     """Prove DS == SS at one exact direct near CALL, or refuse with a reason.
@@ -645,6 +670,9 @@ def prove_x86_16_direct_call_segment_entry_8616(
     CALL-target selector-window obligation for this exact callsite and is
     revalidated whenever the retained proof is consumed.
     """
+    identity_refusal: object
+    path_refusal: object
+    target_refusal: object
     identity_refusal = _identity_refusal_8616(
         candidate, caller_boundary, callee_boundary, artifact
     )

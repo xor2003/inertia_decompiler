@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed return-target evidence for orienting one structured branch.
 
 Layer: Structuring.
@@ -10,18 +11,22 @@ Forbidden: instruction decoding, condition inference, text matching, or AST muta
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
 from inertia.ir.condition_ir import ConditionIR
+import dataclasses
+import operator
 
-type ExpressionEquivalent8616 = Callable[[object, object], bool]
-type TargetOrientationClassifier8616 = Callable[
+ExpressionEquivalent8616 = typing.TypeAliasType("ExpressionEquivalent8616", Callable[[object, object], bool])
+TargetOrientationClassifier8616 = typing.TypeAliasType("TargetOrientationClassifier8616", Callable[
     [ConditionIR, int, dict[int, tuple[int, ...]]],
     bool | None,
-]
+])
 
 __all__ = (
     "SingleBranchReturnOrientation8616",
@@ -51,30 +56,30 @@ class SingleBranchReturnOrientation8616(StrEnum):
         return None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SingleBranchReturnOrientationEvidence8616:
     """Closed evidence record for one return-expression ownership decision."""
 
     orientation: SingleBranchReturnOrientation8616
-    matching_targets: tuple[int, ...]
-    taken_owned_targets: tuple[int, ...]
-    fallthrough_owned_targets: tuple[int, ...]
-    ambiguous_targets: tuple[int, ...]
+    matching_targets: object
+    taken_owned_targets: object
+    fallthrough_owned_targets: object
+    ambiguous_targets: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StructuredArmOrientationEvidence8616:
     """Closed CFG ownership census for one structured branch arm."""
 
     orientation: SingleBranchReturnOrientation8616
-    exclusive_taken_targets: tuple[int, ...]
-    exclusive_fallthrough_targets: tuple[int, ...]
-    shared_targets: tuple[int, ...]
-    unreachable_targets: tuple[int, ...]
-    direct_shared_orientations: tuple[bool, ...]
+    exclusive_taken_targets: object
+    exclusive_fallthrough_targets: object
+    shared_targets: object
+    unreachable_targets: object
+    direct_shared_orientations: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StructuredBinaryArmOrientationEvidence8616:
     """Closed evidence for complementary true/false structured CFG arms."""
 
@@ -82,10 +87,10 @@ class StructuredBinaryArmOrientationEvidence8616:
     false_arm: StructuredArmOrientationEvidence8616
     true_polarity: bool | None
     false_polarity: bool | None
-    inferred_empty_arm_count: int
+    inferred_empty_arm_count: cython.longlong
 
     @property
-    def is_complementary(self) -> bool:
+    def is_complementary(self) -> cython.bint:
         """Return whether both arms have proven opposite edge ownership."""
         return (
             self.true_polarity is not None
@@ -94,17 +99,18 @@ class StructuredBinaryArmOrientationEvidence8616:
         )
 
 
+@cython.ccall
 def classify_direct_or_one_hop_target_orientation_8616(
     condition: ConditionIR,
-    body_target: int,
-    successors: Mapping[int, tuple[int, ...]],
+    body_target: cython.longlong,
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
 ) -> bool | None:
     """Classify one body reached directly by exactly one condition edge."""
     if not isinstance(condition.taken_target, int) or not isinstance(condition.fallthrough_target, int):
         return None
-    taken_owns = body_target == condition.taken_target or body_target in successors.get(condition.taken_target, ())
+    taken_owns = operator.eq(body_target, condition.taken_target) or body_target in successors.get(condition.taken_target, ())
     fallthrough_owns = (
-        body_target == condition.fallthrough_target
+        operator.eq(body_target, condition.fallthrough_target)
         or body_target in successors.get(condition.fallthrough_target, ())
     )
     if taken_owns == fallthrough_owns:
@@ -112,40 +118,44 @@ def classify_direct_or_one_hop_target_orientation_8616(
     return taken_owns
 
 
+@cython.ccall
 def _cfg_reaches_target_8616(
-    successors: Mapping[int, tuple[int, ...]],
-    start: int,
-    target: int,
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
+    start: cython.longlong,
+    target: cython.longlong,
     *,
     stop_at: int | None,
-) -> bool:
+) -> cython.bint:
     """Return whether one bounded CFG path reaches a target."""
+    address: object
     pending = [start]
-    visited: set[int] = set()
+    visited: set[cython.longlong] = set()
     while pending and len(visited) < 128:
         address = pending.pop()
-        if address == target:
+        if operator.eq(address, target):
             return True
-        if address == stop_at or address in visited:
+        if operator.eq(address, stop_at) or address in visited:
             continue
         visited.add(address)
         pending.extend(successors.get(address, ()))
     return False
 
 
+@cython.ccall
 def _classify_targets_8616(
     condition: ConditionIR,
-    body_targets: Iterable[int],
-    successors: Mapping[int, tuple[int, ...]],
-) -> tuple[list[int], list[int], list[int], list[int]]:
+    body_targets: Iterable[cython.longlong],
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
+) -> tuple[list[cython.longlong], list[cython.longlong], list[cython.longlong], list[cython.longlong]]:
     """Bucket each body target by exclusive or shared reachability."""
+    target: object
     assert isinstance(condition.taken_target, int)
     assert isinstance(condition.fallthrough_target, int)
-    taken: list[int] = []
-    fallthrough: list[int] = []
-    shared: list[int] = []
-    unreachable: list[int] = []
-    for target in sorted(set(body_targets)):
+    taken: list[cython.longlong] = []
+    fallthrough: list[cython.longlong] = []
+    shared: list[cython.longlong] = []
+    unreachable: list[cython.longlong] = []
+    for target in sorted(tuple(set(body_targets))):
         taken_reaches = _cfg_reaches_target_8616(
             successors,
             condition.taken_target,
@@ -171,8 +181,8 @@ def _classify_targets_8616(
 
 def classify_cfg_arm_orientation_8616(
     condition: ConditionIR,
-    body_targets: Iterable[int],
-    successors: Mapping[int, tuple[int, ...]],
+    body_targets: Iterable[cython.longlong],
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
 ) -> StructuredArmOrientationEvidence8616:
     """Classify one whole arm from exclusive reachability or an immediate shared exit."""
     if not isinstance(condition.taken_target, int) or not isinstance(condition.fallthrough_target, int):
@@ -181,7 +191,7 @@ def classify_cfg_arm_orientation_8616(
             (),
             (),
             (),
-            tuple(sorted(set(body_targets))),
+            tuple(sorted(tuple(set(body_targets)))),
             (),
         )
     taken, fallthrough, shared, unreachable = _classify_targets_8616(
@@ -190,7 +200,7 @@ def classify_cfg_arm_orientation_8616(
         successors,
     )
     orientation = SingleBranchReturnOrientation8616.UNKNOWN_REFUSE
-    direct_shared: tuple[bool, ...] = ()
+    direct_shared: tuple[cython.bint, ...] = ()
     if unreachable:
         orientation = SingleBranchReturnOrientation8616.UNKNOWN_REFUSE
     elif taken and not fallthrough:
@@ -200,7 +210,7 @@ def classify_cfg_arm_orientation_8616(
     elif not taken and not fallthrough:
         direct_shared = tuple(
             direct
-            for target in shared
+            for target in iter(shared)
             if (
                 direct := classify_direct_or_one_hop_target_orientation_8616(
                     condition,
@@ -210,7 +220,7 @@ def classify_cfg_arm_orientation_8616(
             )
             is not None
         )
-        if direct_shared and all(item is direct_shared[0] for item in direct_shared):
+        if direct_shared and all(item is direct_shared[0] for item in iter(direct_shared)):
             orientation = (
                 SingleBranchReturnOrientation8616.TAKEN
                 if direct_shared[0]
@@ -226,15 +236,18 @@ def classify_cfg_arm_orientation_8616(
     )
 
 
+@cython.ccall
 def classify_cfg_binary_arm_orientation_8616(
     condition: ConditionIR,
-    true_body_targets: Iterable[int],
-    false_body_targets: Iterable[int],
-    successors: Mapping[int, tuple[int, ...]],
+    true_body_targets: Iterable[cython.longlong],
+    false_body_targets: Iterable[cython.longlong],
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
 ) -> StructuredBinaryArmOrientationEvidence8616:
     """Classify two arms, inferring only an empty arm's proven complement."""
-    true_targets = tuple(sorted(set(true_body_targets)))
-    false_targets = tuple(sorted(set(false_body_targets)))
+    false_polarity: object
+    true_polarity: object
+    true_targets = tuple(sorted(tuple(set(true_body_targets))))
+    false_targets = tuple(sorted(tuple(set(false_body_targets))))
     true_arm = classify_cfg_arm_orientation_8616(condition, true_targets, successors)
     false_arm = classify_cfg_arm_orientation_8616(condition, false_targets, successors)
     true_polarity = true_arm.orientation.as_taken_polarity()
@@ -259,20 +272,23 @@ def classify_cfg_binary_arm_orientation_8616(
     )
 
 
+@cython.ccall
 def classify_single_branch_return_orientation_8616(
     condition: ConditionIR,
     expected_return: object,
-    exit_expressions: Mapping[int, object | None],
-    successors: dict[int, tuple[int, ...]],
+    exit_expressions: Mapping[cython.longlong, object | None],
+    successors: object,
     expressions_equivalent: ExpressionEquivalent8616,
     classify_target_orientation: TargetOrientationClassifier8616,
 ) -> SingleBranchReturnOrientationEvidence8616:
     """Classify return-body ownership from equivalent target returns and CFG reachability."""
-    matching: list[int] = []
-    taken: list[int] = []
-    fallthrough: list[int] = []
-    ambiguous: list[int] = []
-    for target, recovered_return in sorted(exit_expressions.items()):
+    recovered_return: object
+    target: object
+    matching: list[cython.longlong] = []
+    taken: list[cython.longlong] = []
+    fallthrough: list[cython.longlong] = []
+    ambiguous: list[cython.longlong] = []
+    for target, recovered_return in sorted(tuple(exit_expressions.items())):
         if recovered_return is None or not expressions_equivalent(recovered_return, expected_return):
             continue
         matching.append(target)

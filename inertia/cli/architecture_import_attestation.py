@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Content-addressed runtime import-guard attestations.
 
 Layer: CLI/fallback/reporting.
@@ -5,6 +6,8 @@ Responsibility: cache exact per-file import-ownership verdicts for startup guard
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import hashlib
 import json
@@ -15,6 +18,9 @@ from pathlib import Path
 
 from tools.dev import check_decompiler_architecture as architecture_check
 from tools.dev.check_decompiler_architecture import ArchitectureViolation
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "RuntimeImportGuardEvaluation",
@@ -27,8 +33,8 @@ __all__ = [
     "store_startup_architecture_verdict",
 ]
 
-ARCHITECTURE_GUARD_CACHE_SCHEMA: int = 2
-STARTUP_ARCHITECTURE_CACHE_SCHEMA: int = 1
+ARCHITECTURE_GUARD_CACHE_SCHEMA: cython.longlong = 2
+STARTUP_ARCHITECTURE_CACHE_SCHEMA: cython.longlong = 1
 
 
 class _RuntimeImportGuardRule(Enum):
@@ -39,23 +45,24 @@ class _RuntimeImportGuardRule(Enum):
     CLI = "cli"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _RuntimeImportFileAttestation:
     """Content-addressed runtime import-guard verdict for one source file."""
 
-    digest: str
-    violations: tuple[ArchitectureViolation, ...]
+    digest: object
+    violations: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RuntimeImportGuardEvaluation:
     """Closed per-file runtime import-guard evaluation for one source snapshot."""
 
-    files: tuple[tuple[str, _RuntimeImportFileAttestation], ...]
-    violations: tuple[ArchitectureViolation, ...]
+    files: object
+    violations: object
 
 
-def architecture_guard_cache_is_clean(cache_path: Path, fingerprint: str) -> bool:
+@cython.ccall
+def architecture_guard_cache_is_clean(cache_path: Path, fingerprint: object) -> cython.bint:
     """Return whether the persistent attestation matches current source bytes."""
     try:
         payload: object = json.loads(cache_path.read_text(encoding="utf-8"))
@@ -63,8 +70,8 @@ def architecture_guard_cache_is_clean(cache_path: Path, fingerprint: str) -> boo
         return False
     return (
         isinstance(payload, dict)
-        and payload.get("schema") == ARCHITECTURE_GUARD_CACHE_SCHEMA
-        and payload.get("fingerprint") == fingerprint
+        and operator.eq(payload.get("schema"), ARCHITECTURE_GUARD_CACHE_SCHEMA)
+        and operator.eq(payload.get("fingerprint"), fingerprint)
         and payload.get("clean") is True
     )
 
@@ -74,6 +81,7 @@ def _runtime_import_rule_paths(
     cli_path: Path,
 ) -> dict[Path, tuple[_RuntimeImportGuardRule, ...]]:
     """Return every guarded file with its authoritative import rules."""
+    path: object
     mutable: dict[Path, set[_RuntimeImportGuardRule]] = {}
     for path in architecture_check._postprocess_import_paths(root):
         mutable.setdefault(path, set()).add(_RuntimeImportGuardRule.POSTPROCESS)
@@ -82,11 +90,12 @@ def _runtime_import_rule_paths(
     mutable.setdefault(cli_path, set()).add(_RuntimeImportGuardRule.CLI)
     return {
         path: tuple(sorted(rules, key=lambda rule: rule.value))
-        for path, rules in sorted(mutable.items(), key=lambda item: str(item[0]))
+        for path, rules in builtins.iter(sorted(tuple(mutable.items()), key=lambda item: str(item[0])))
     }
 
 
-def _runtime_import_source_digest(path: Path) -> str:
+@cython.ccall
+def _runtime_import_source_digest(path: Path) -> object:
     """Return a stable digest for one guarded source path."""
     try:
         data = path.read_bytes()
@@ -95,8 +104,10 @@ def _runtime_import_source_digest(path: Path) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def architecture_guard_checker_fingerprint(runtime_guard_path: Path) -> str:
+@cython.ccall
+def architecture_guard_checker_fingerprint(runtime_guard_path: Path) -> object:
     """Hash rule and cache implementations that determine stored verdicts."""
+    path: object
     digest = hashlib.sha256()
     for path in sorted(
         (
@@ -112,8 +123,10 @@ def architecture_guard_checker_fingerprint(runtime_guard_path: Path) -> str:
     return digest.hexdigest()
 
 
-def architecture_startup_source_fingerprint(root: Path, repo_root: Path) -> str:
+@cython.ccall
+def architecture_startup_source_fingerprint(root: Path, repo_root: Path) -> object:
     """Hash every source that can change default startup-check conclusions."""
+    path: object
     paths = {
         *architecture_check._owned_contract_source_paths(root),
         *(repo_root / "inertia" / "cli").rglob("*.py"),
@@ -133,8 +146,12 @@ def architecture_startup_source_fingerprint(root: Path, repo_root: Path) -> str:
     return digest.hexdigest()
 
 
+@cython.ccall
 def _decode_cached_violation(value: object) -> ArchitectureViolation | None:
     """Decode one structured violation from the untrusted JSON cache boundary."""
+    detail: object
+    path: object
+    rule: object
     if not isinstance(value, dict):
         return None
     path = value.get("path")
@@ -147,27 +164,28 @@ def _decode_cached_violation(value: object) -> ArchitectureViolation | None:
 
 def load_startup_architecture_verdict(
     cache_path: Path,
-    fingerprint: str,
-) -> tuple[ArchitectureViolation, ...] | None:
+    fingerprint: object,
+) -> object:
     """Load one exact startup verdict, returning ``None`` on stale evidence."""
     try:
         payload: object = json.loads(cache_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    if not isinstance(payload, dict) or payload.get("schema") != STARTUP_ARCHITECTURE_CACHE_SCHEMA:
+    if not isinstance(payload, dict) or operator.ne(payload.get("schema"), STARTUP_ARCHITECTURE_CACHE_SCHEMA):
         return None
-    if payload.get("fingerprint") != fingerprint or not isinstance(payload.get("violations"), list):
+    if operator.ne(payload.get("fingerprint"), fingerprint) or not isinstance(payload.get("violations"), list):
         return None
-    violations = tuple(_decode_cached_violation(value) for value in payload["violations"])
-    return None if any(value is None for value in violations) else tuple(
-        value for value in violations if value is not None
+    violations = tuple(_decode_cached_violation(value) for value in iter(payload["violations"]))
+    return None if any(value is None for value in iter(violations)) else tuple(
+        value for value in iter(violations) if value is not None
     )
 
 
+@cython.ccall
 def store_startup_architecture_verdict(
     cache_path: Path,
-    fingerprint: str,
-    violations: tuple[ArchitectureViolation, ...],
+    fingerprint: object,
+    violations: object,
 ) -> None:
     """Atomically persist one complete content-addressed startup verdict."""
     temporary = cache_path.with_name(f".{cache_path.name}.{os.getpid()}.tmp")
@@ -180,7 +198,7 @@ def store_startup_architecture_verdict(
                     "fingerprint": fingerprint,
                     "violations": [
                         {"path": item.path, "rule": item.rule, "detail": item.detail}
-                        for item in violations
+                        for item in iter(violations)
                     ],
                 },
                 sort_keys=True,
@@ -192,13 +210,18 @@ def store_startup_architecture_verdict(
         temporary.unlink(missing_ok=True)
 
 
+@cython.ccall
 def _load_runtime_import_attestations(
     cache_path: Path,
     root: Path,
     cli_path: Path,
-    checker_fingerprint: str,
-) -> dict[str, _RuntimeImportFileAttestation]:
+    checker_fingerprint: object,
+) -> object:
     """Load compatible per-file verdicts from the persistent guard cache."""
+    attestation: object
+    files: object
+    encoded: object
+    path: object
     try:
         payload: object = json.loads(cache_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -220,23 +243,29 @@ def _load_runtime_import_attestations(
     return attestations
 
 
+@cython.ccall
 def _compatible_guard_payload(
-    payload: dict[str, object],
+    payload: object,
     root: Path,
     cli_path: Path,
-    checker_fingerprint: str,
-) -> bool:
+    checker_fingerprint: object,
+) -> cython.bint:
     """Return True when the persisted guard cache matches this environment."""
     return (
-        payload.get("schema") == ARCHITECTURE_GUARD_CACHE_SCHEMA
-        and payload.get("checker_fingerprint") == checker_fingerprint
-        and payload.get("root") == str(root.resolve())
-        and payload.get("cli") == str(cli_path.resolve())
+        operator.eq(payload.get("schema"), ARCHITECTURE_GUARD_CACHE_SCHEMA)
+        and operator.eq(payload.get("checker_fingerprint"), checker_fingerprint)
+        and operator.eq(payload.get("root"), str(root.resolve()))
+        and operator.eq(payload.get("cli"), str(cli_path.resolve()))
     )
 
 
-def _decode_cached_file_attestation(encoded: dict[object, object]) -> _RuntimeImportFileAttestation | None:
+@cython.ccall
+def _decode_cached_file_attestation(encoded: object) -> _RuntimeImportFileAttestation | None:
     """Decode one cached per-file attestation, or None when malformed."""
+    digest: object
+    encoded_violations: object
+    violation: object
+    encoded_violation: object
     digest = encoded.get("digest")
     encoded_violations = encoded.get("violations")
     if not isinstance(digest, str) or not isinstance(encoded_violations, list):
@@ -253,12 +282,14 @@ def _decode_cached_file_attestation(encoded: dict[object, object]) -> _RuntimeIm
     )
 
 
+@cython.ccall
 def _evaluate_runtime_import_path(
     root: Path,
     path: Path,
-    rules: tuple[_RuntimeImportGuardRule, ...],
+    rules: object,
 ) -> tuple[ArchitectureViolation, ...]:
     """Evaluate all authoritative import rules assigned to one source file."""
+    rule: object
     violations: list[ArchitectureViolation] = []
     for rule in rules:
         if rule is _RuntimeImportGuardRule.POSTPROCESS:
@@ -275,13 +306,17 @@ def _evaluate_runtime_import_path(
     return tuple(violations)
 
 
+@cython.ccall
 def evaluate_runtime_import_snapshot(
     cache_path: Path,
     root: Path,
     cli_path: Path,
-    checker_fingerprint: str,
+    checker_fingerprint: object,
 ) -> RuntimeImportGuardEvaluation:
     """Reuse exact file verdicts and evaluate only changed guarded sources."""
+    attestation: object
+    path: object
+    rules: object
     cached = _load_runtime_import_attestations(
         cache_path,
         root,
@@ -294,7 +329,7 @@ def evaluate_runtime_import_snapshot(
         source_path = str(path.resolve())
         digest = _runtime_import_source_digest(path)
         attestation = cached.get(source_path)
-        if attestation is None or attestation.digest != digest:
+        if attestation is None or operator.ne(attestation.digest, digest):
             attestation = _RuntimeImportFileAttestation(
                 digest=digest,
                 violations=_evaluate_runtime_import_path(root, path, rules),
@@ -307,10 +342,11 @@ def evaluate_runtime_import_snapshot(
     )
 
 
+@cython.ccall
 def store_architecture_guard_cache(
     cache_path: Path,
-    fingerprint: str,
-    checker_fingerprint: str,
+    fingerprint: object,
+    checker_fingerprint: object,
     root: Path,
     cli_path: Path,
     evaluation: RuntimeImportGuardEvaluation,
@@ -337,10 +373,10 @@ def store_architecture_guard_cache(
                                     "rule": violation.rule,
                                     "detail": violation.detail,
                                 }
-                                for violation in attestation.violations
+                                for violation in iter(attestation.violations)
                             ],
                         }
-                        for source_path, attestation in evaluation.files
+                        for source_path, attestation in iter(evaluation.files)
                     },
                 },
                 sort_keys=True,

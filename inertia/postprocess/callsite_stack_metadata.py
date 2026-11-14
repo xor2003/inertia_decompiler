@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery metadata.
 
 Responsibility: prune and report already-materialized callsite stack/segment metadata.
@@ -11,6 +12,8 @@ rendered text, COD, source, or CLI/reporting evidence here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import builtins
 import enum
@@ -27,32 +30,37 @@ from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 from inertia.lowering.stack_c_ast_matching import _match_real_mode_linear_expr_8616, _segment_reg_name_8616
 from inertia.lowering.stack_probe_return_facts import TypedStackProbeReturnFact8616
 from inertia.semantics.callsite_summary import CallsiteSummary8616
+import operator
 
 __all__ = ["prune_materialized_callsite_segment_metadata_8616"]
 
 logger: logging.Logger = logging.getLogger(__name__)
 _PHYSICAL_REGISTER_VERSION_RE_8616 = re.compile(r"^(?:[abcd][xhl]|[sb]p|[sd]i|[cdefgs]s)(?:_\d+)?$")
-type _DynamicCodegenValue8616 = Any
+_DynamicCodegenValue8616 = typing.TypeAliasType("_DynamicCodegenValue8616", Any)
 
 
+@cython.ccall
 def _dynamic_codegen_getattr_8616(
     obj: object,
-    name: str,
+    name: object,
     default: object = None,
 ) -> _DynamicCodegenValue8616:
     """Read an attribute across the dynamic angr codegen/C AST boundary."""
     return builtins.getattr(obj, name, default)
 
 
-def _dynamic_codegen_setattr_8616(obj: object, name: str, value: object) -> None:
+@cython.ccall
+def _dynamic_codegen_setattr_8616(obj: object, name: object, value: object) -> None:
     """Set an attribute across the dynamic angr codegen/C AST boundary."""
     builtins.setattr(obj, name, value)
 
 
-def _is_plain_statement_block_8616(node: object) -> bool:
+@cython.ccall
+def _is_plain_statement_block_8616(node: object) -> cython.bint:
     return node.__class__.__name__ == "CStatements"
 
 
+@cython.ccall
 def _call_from_statement_8616(stmt: object) -> CFunctionCall | None:
     if isinstance(stmt, CFunctionCall):
         return stmt
@@ -62,7 +70,9 @@ def _call_from_statement_8616(stmt: object) -> CFunctionCall | None:
     return None
 
 
+@cython.ccall
 def _assignment_lhs_rhs_8616(node: object) -> tuple[object, object]:
+    lhs: object
     lhs = _dynamic_codegen_getattr_8616(node, "lhs", None)
     rhs = _dynamic_codegen_getattr_8616(node, "rhs", None)
     if lhs is None and hasattr(node, "dst"):
@@ -71,7 +81,8 @@ def _assignment_lhs_rhs_8616(node: object) -> tuple[object, object]:
     return lhs, rhs
 
 
-def _is_assignment_node_8616(node: object) -> bool:
+@cython.ccall
+def _is_assignment_node_8616(node: object) -> cython.bint:
     class_name = node.__class__.__name__
     return (
         class_name == "CAssignment"
@@ -80,7 +91,9 @@ def _is_assignment_node_8616(node: object) -> bool:
     )
 
 
+@cython.ccall
 def _assignment_nodes_8616(stmt: object) -> tuple[object, ...]:
+    node: object
     candidates: list[object] = []
     if _is_assignment_node_8616(stmt):
         candidates.append(stmt)
@@ -90,7 +103,9 @@ def _assignment_nodes_8616(stmt: object) -> tuple[object, ...]:
     return tuple(candidates)
 
 
-def _lhs_writes_memory_8616(lhs: object) -> bool:
+@cython.ccall
+def _lhs_writes_memory_8616(lhs: object) -> cython.bint:
+    raw_node: object
     if lhs is None:
         return False
     nodes = (lhs, *_iter_c_nodes_deep_8616(lhs))
@@ -105,7 +120,8 @@ def _lhs_writes_memory_8616(lhs: object) -> bool:
     return False
 
 
-def _segment_register_value_expr_8616(expr: object, project: object) -> bool:
+@cython.ccall
+def _segment_register_value_expr_8616(expr: object, project: object) -> cython.bint:
     node = expr
     while isinstance(node, CTypeCast):
         node = node.expr
@@ -120,7 +136,9 @@ def _segment_register_value_expr_8616(expr: object, project: object) -> bool:
     return _segment_reg_name_8616(node, cast(Any, project)) in {"cs", "ds", "es", "ss"}
 
 
-def _lhs_has_ss_address_evidence_8616(lhs: object, project: object) -> bool:
+@cython.ccall
+def _lhs_has_ss_address_evidence_8616(lhs: object, project: object) -> cython.bint:
+    raw_node: object
     nodes = (lhs, *_iter_c_nodes_deep_8616(lhs))
     for raw_node in nodes:
         node = raw_node
@@ -132,7 +150,8 @@ def _lhs_has_ss_address_evidence_8616(lhs: object, project: object) -> bool:
     return False
 
 
-def _segment_metadata_store_8616(stmt: object, project: object, *, allow_carried_high_byte: bool) -> bool:
+@cython.ccall
+def _segment_metadata_store_8616(stmt: object, project: object, *, allow_carried_high_byte: cython.bint) -> cython.bint:
     assignments = _assignment_nodes_8616(stmt)
     if not assignments:
         return False
@@ -144,35 +163,36 @@ def _segment_metadata_store_8616(stmt: object, project: object, *, allow_carried
     return allow_carried_high_byte or _lhs_has_ss_address_evidence_8616(lhs, project)
 
 
-def _typed_callsite_summary_map_8616(codegen: object) -> dict[int, CallsiteSummary8616]:
+@cython.ccall
+def _typed_callsite_summary_map_8616(codegen: object) -> dict[cython.longlong, CallsiteSummary8616]:
     """Return typed callsite summaries across the dynamic angr codegen boundary."""
     summary_map = _dynamic_codegen_getattr_8616(codegen, "_inertia_callsite_summaries", None)
     if not isinstance(summary_map, dict):
         return {}
     return {
         key: value
-        for key, value in summary_map.items()
+        for key, value in builtins.iter(summary_map.items())
         if isinstance(key, int) and isinstance(value, CallsiteSummary8616)
     }
 
 
-type CarrierKey8616 = tuple[str, str | int]
+CarrierKey8616 = typing.TypeAliasType("CarrierKey8616", tuple[str, str | int])
 
 
 @runtime_checkable
 class _CallsiteMaterializationStatsLike8616(Protocol):
     """Structural view of the owned callsite materialization stats contract."""
 
-    call_target_fact_count: int
-    call_target_materialized_count: int
-    call_arg_fact_count: int
-    call_arg_materialized_count: int
+    call_target_fact_count: cython.longlong
+    call_target_materialized_count: cython.longlong
+    call_arg_fact_count: cython.longlong
+    call_arg_materialized_count: cython.longlong
 
 
 class _StatementBlockLike8616(Protocol):
     """Structural view of dynamic angr C statement blocks."""
 
-    statements: list[object] | tuple[object, ...]
+    statements: object
 
 
 class StackCarrierPruneDecision8616(enum.Enum):
@@ -197,6 +217,7 @@ class SafeDeadCarrierPruneMode8616(enum.Enum):
 
 def _safe_dead_carrier_prune_mode_8616(codegen: object | None) -> SafeDeadCarrierPruneMode8616:
     def _impl() -> SafeDeadCarrierPruneMode8616:
+        resolved: object
         resolved = _env_dead_carrier_prune_mode_8616() or _codegen_dead_carrier_prune_mode_8616(codegen)
         # Conservative default keeps proof and avoids semantic regression.
         return resolved if resolved is not None else SafeDeadCarrierPruneMode8616.DIAGNOSTIC
@@ -204,6 +225,7 @@ def _safe_dead_carrier_prune_mode_8616(codegen: object | None) -> SafeDeadCarrie
     return _impl()
 
 
+@cython.ccall
 def _env_dead_carrier_prune_mode_8616() -> SafeDeadCarrierPruneMode8616 | None:
     mode = os.environ.get("INERTIA_SAFE_DEAD_CARRIER_PRUNE_MODE", "").strip().lower()
     if mode in {"disabled", "off", "0", "false", "no"}:
@@ -225,7 +247,8 @@ def _env_dead_carrier_prune_mode_8616() -> SafeDeadCarrierPruneMode8616 | None:
     return None
 
 
-def _codegen_dead_carrier_prune_mode_8616(codegen: object | None) -> SafeDeadCarrierPruneMode8616 | None:
+@cython.ccall
+def _codegen_dead_carrier_prune_mode_8616(codegen: object) -> SafeDeadCarrierPruneMode8616 | None:
     if codegen is None:
         return None
     explicit_mode = _dynamic_codegen_getattr_8616(codegen, "_inertia_safe_dead_carrier_prune_mode", None)
@@ -245,13 +268,15 @@ def _codegen_dead_carrier_prune_mode_8616(codegen: object | None) -> SafeDeadCar
     return None
 
 
-def _safe_dead_carrier_prune_enabled_8616(codegen: object | None) -> bool:
+@cython.ccall
+def _safe_dead_carrier_prune_enabled_8616(codegen: object | None) -> cython.bint:
     # Emergency kill switch.
     mode = _safe_dead_carrier_prune_mode_8616(codegen)
-    return mode == SafeDeadCarrierPruneMode8616.PRODUCTION
+    return operator.eq(mode, SafeDeadCarrierPruneMode8616.PRODUCTION)
 
 
-def _callsite_materialization_complete_8616(codegen: object | None) -> bool:
+@cython.ccall
+def _callsite_materialization_complete_8616(codegen: object) -> cython.bint:
     if codegen is None:
         return False
     stats = _dynamic_codegen_getattr_8616(codegen, "_inertia_callsite_materialization_stats", None)
@@ -264,13 +289,16 @@ def _callsite_materialization_complete_8616(codegen: object | None) -> bool:
     return target_mat >= target_fact and arg_mat >= arg_fact
 
 
-def _bump_dead_setup_counter_8616(codegen: object | None, name: str, inc: int = 1) -> None:
+@cython.ccall
+def _bump_dead_setup_counter_8616(codegen: object, name: object, inc: cython.longlong = 1) -> None:
     if codegen is None:
         return
     _dynamic_codegen_setattr_8616(codegen, name, int(_dynamic_codegen_getattr_8616(codegen, name, 0)) + int(inc))
 
 
-def _generic_stack_carrier_name_8616(node: object) -> str | None:
+@cython.ccall
+def _generic_stack_carrier_name_8616(node: object) -> object:
+    name: object
     while isinstance(node, CTypeCast):
         node = node.expr
     variable = _dynamic_codegen_getattr_8616(node, "variable", None)
@@ -280,8 +308,10 @@ def _generic_stack_carrier_name_8616(node: object) -> str | None:
     return None
 
 
+@cython.ccall
 def _stack_carrier_key_8616(node: object) -> CarrierKey8616 | None:
     """Return a stable AST-local key for a stack-address carrier variable."""
+    name: object
     name = _generic_stack_carrier_name_8616(node)
     if name is not None:
         return ("name", name)
@@ -296,24 +326,29 @@ def _stack_carrier_key_8616(node: object) -> CarrierKey8616 | None:
     return None
 
 
-def _generic_stack_carrier_keys_8616(node: object) -> set[CarrierKey8616]:
+@cython.ccall
+def _generic_stack_carrier_keys_8616(node: object) -> object:
+    key: object
+    raw_node: object
     names: set[CarrierKey8616] = set()
-    for raw_node in (node, *_iter_c_nodes_deep_8616(node)):
+    for raw_node in (node, ) + tuple(_iter_c_nodes_deep_8616(node)):
         key = _stack_carrier_key_8616(raw_node)
         if key is not None:
             names.add(key)
     return names
 
 
-def _stmt_has_call_8616(stmt: object) -> bool:
+def _stmt_has_call_8616(stmt: object) -> cython.bint:
     if stmt is None:
         return False
     if _call_from_statement_8616(stmt) is not None:
         return True
-    return any(isinstance(node, CFunctionCall) for node in _iter_c_nodes_deep_8616(stmt))
+    return any(isinstance(node, CFunctionCall) for node in builtins.iter(_iter_c_nodes_deep_8616(stmt)))
 
 
-def _stmt_has_memory_write_8616(stmt: object) -> bool:
+@cython.ccall
+def _stmt_has_memory_write_8616(stmt: object) -> cython.bint:
+    assign: object
     for assign in _assignment_nodes_8616(stmt):
         lhs, _rhs = _assignment_lhs_rhs_8616(assign)
         if _lhs_writes_memory_8616(lhs):
@@ -321,11 +356,15 @@ def _stmt_has_memory_write_8616(stmt: object) -> bool:
     return False
 
 
-def _stmt_uses_carrier_key_8616(stmt: object, key: CarrierKey8616) -> bool:
+@cython.ccall
+def _stmt_uses_carrier_key_8616(stmt: object, key: CarrierKey8616) -> cython.bint:
     return key in _generic_stack_carrier_keys_8616(stmt)
 
 
-def _carrier_key_protected_8616(lhs_key: CarrierKey8616, codegen: object | None) -> bool:
+@cython.ccall
+def _carrier_key_protected_8616(lhs_key: CarrierKey8616, codegen: object) -> cython.bint:
+    value: object
+    attr: object
     if codegen is None:
         return False
     for attr in (
@@ -349,14 +388,15 @@ def _classify_dead_carrier_candidate_8616(
     lhs_key: CarrierKey8616,
     rhs: object,
     *,
-    live: set[CarrierKey8616],
-    known_carriers: set[CarrierKey8616],
-    call_indices: set[int],
-    stmt_index: int,
-    statements: list[object],
+    live: object,
+    known_carriers: object,
+    call_indices: object,
+    stmt_index: cython.longlong,
+    statements: object,
     codegen: object | None,
 ) -> StackCarrierPruneDecision8616:
     def _impl() -> StackCarrierPruneDecision8616:
+        near: object
         if _stmt_has_memory_write_8616(stmt):
             return StackCarrierPruneDecision8616.LIVE_MEMORY_WRITE
         if lhs_key in live:
@@ -388,10 +428,11 @@ def _classify_dead_carrier_candidate_8616(
 
 def _expr_is_pure_stack_address_carrier_8616(
     expr: object,
-    known_carriers: set[CarrierKey8616] | None = None,
-) -> bool:
-    def _impl() -> bool:
+    known_carriers: object = None,
+) -> cython.bint:
+    def _impl() -> cython.bint:
         """Return true for side-effect-free stack-address shuttle expressions."""
+        key: object
         node = expr
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -417,10 +458,12 @@ def _expr_is_pure_stack_address_carrier_8616(
     return _impl()
 
 
+@cython.ccall
 def _dead_stack_carrier_assignment_8616(
     stmt: object,
-    known_carriers: set[CarrierKey8616],
-) -> tuple[CarrierKey8616, object] | None:
+    known_carriers: object,
+) -> object:
+    lhs_key: object
     if not _is_assignment_node_8616(stmt):
         return None
     lhs, rhs = _assignment_lhs_rhs_8616(stmt)
@@ -434,8 +477,11 @@ def _dead_stack_carrier_assignment_8616(
     return lhs_key, rhs
 
 
-def _collect_stack_carrier_assignments_8616(block: object) -> set[CarrierKey8616]:
+@cython.ccall
+def _collect_stack_carrier_assignments_8616(block: object) -> object:
     """Collect variables proven to carry stack addresses within this block."""
+    lhs_key: object
+    stmt: object
     known: set[CarrierKey8616] = set()
     if not _is_plain_statement_block_8616(block):
         return known
@@ -454,9 +500,12 @@ def _collect_stack_carrier_assignments_8616(block: object) -> set[CarrierKey8616
     return known
 
 
-def _prune_dead_stack_carrier_assignments_8616(block: object, codegen: object | None = None) -> bool:
-    def _impl() -> bool:
+def _prune_dead_stack_carrier_assignments_8616(block: object, codegen: object | None = None) -> cython.bint:
+    def _impl() -> cython.bint:
         """Remove dead generic address carriers left after call arguments are materialized."""
+        carrier: object
+        stmt: object
+        stmt_index: object
         if not _dead_carrier_prune_gate_8616(codegen):
             return False
         changed = False
@@ -471,7 +520,7 @@ def _prune_dead_stack_carrier_assignments_8616(block: object, codegen: object | 
         # Dynamic angr codegen boundary: CStatements exposes statements structurally.
         statement_list: list[object] = list(_dynamic_codegen_getattr_8616(block, "statements", ()) or ())
         known_carriers = _collect_stack_carrier_assignments_8616(block)
-        call_indices = {idx for idx, stmt in enumerate(statement_list) if _stmt_has_call_8616(stmt)}
+        call_indices = {idx for idx, stmt in builtins.iter(enumerate(statement_list)) if _stmt_has_call_8616(stmt)}
         live: set[CarrierKey8616] = set()
         kept_reversed: list[object] = []
         removed = 0
@@ -512,7 +561,8 @@ def _prune_dead_stack_carrier_assignments_8616(block: object, codegen: object | 
     return _impl()
 
 
-def _dead_carrier_prune_gate_8616(codegen: object | None) -> bool:
+@cython.ccall
+def _dead_carrier_prune_gate_8616(codegen: object | None) -> cython.bint:
     """Gate dead-carrier pruning on mode and callsite materialization completeness."""
     prune_mode = _safe_dead_carrier_prune_mode_8616(codegen)
     if prune_mode in {SafeDeadCarrierPruneMode8616.DISABLED, SafeDeadCarrierPruneMode8616.DIAGNOSTIC}:
@@ -536,9 +586,13 @@ _DEAD_CARRIER_DECISION_COUNTERS_8616: dict[StackCarrierPruneDecision8616, str] =
 }
 
 
+@cython.ccall
 def _prune_dead_carriers_in_child_blocks_8616(
-    statements: list[object] | tuple[object, ...], codegen: object | None
-) -> bool:
+    statements: object, codegen: object | None
+) -> cython.bint:
+    child: object
+    pair: object
+    stmt: object
     changed = False
     for stmt in list(statements):
         for child in (
@@ -555,18 +609,20 @@ def _prune_dead_carriers_in_child_blocks_8616(
     return changed
 
 
+@cython.ccall
 def _prune_dead_carrier_candidate_8616(
     stmt: object,
-    stmt_index: int,
-    carrier: tuple[CarrierKey8616, object],
-    live: set[CarrierKey8616],
-    kept_reversed: list[object],
-    known_carriers: set[CarrierKey8616],
-    call_indices: set[int],
-    statement_list: list[object],
+    stmt_index: cython.longlong,
+    carrier: object,
+    live: object,
+    kept_reversed: object,
+    known_carriers: object,
+    call_indices: object,
+    statement_list: object,
     codegen: object | None,
-) -> bool:
+) -> cython.bint:
     """Classify one dead-carrier candidate; return True when the statement is pruned."""
+    counter: object
     lhs_key, rhs = carrier
     _bump_dead_setup_counter_8616(codegen, "dead_setup_candidates")
     _bump_dead_setup_counter_8616(codegen, "dead_setup_raw_fact_count")
@@ -592,7 +648,7 @@ def _prune_dead_carrier_candidate_8616(
             _dynamic_codegen_getattr_8616(stmt, "tags", None),
             decision.name,
         )
-    if decision == StackCarrierPruneDecision8616.DEFINITELY_DEAD:
+    if operator.eq(decision, StackCarrierPruneDecision8616.DEFINITELY_DEAD):
         _bump_dead_setup_counter_8616(codegen, "dead_setup_pruned")
         _bump_dead_setup_counter_8616(codegen, "dead_setup_materialized_count")
         return True
@@ -605,7 +661,8 @@ def _prune_dead_carrier_candidate_8616(
     return False
 
 
-def _prune_trailing_segment_metadata_8616(statements: list[object], project: object) -> bool:
+@cython.ccall
+def _prune_trailing_segment_metadata_8616(statements: object, project: object) -> cython.bint:
     changed = False
     removed_store = False
     while statements:
@@ -628,7 +685,7 @@ def _prune_trailing_segment_metadata_8616(statements: list[object], project: obj
     return changed
 
 
-def prune_materialized_callsite_segment_metadata_8616(project: object, codegen: object) -> bool:
+def prune_materialized_callsite_segment_metadata_8616(project: object, codegen: object) -> cython.bint:
     """Drop stack-probe segment metadata stores after their call args are materialized."""
     cfunc = _dynamic_codegen_getattr_8616(codegen, "cfunc", None)
     root = _dynamic_codegen_getattr_8616(cfunc, "statements", None) or _dynamic_codegen_getattr_8616(cfunc, "body", None)
@@ -642,7 +699,9 @@ def prune_materialized_callsite_segment_metadata_8616(project: object, codegen: 
 
     changed = False
 
-    def rewrite_block(block: object, inherited_stack_probe_address_seen: bool = False) -> bool:
+    def rewrite_block(block: object, inherited_stack_probe_address_seen: cython.bint = False) -> cython.bint:
+        call: object
+        stmt: object
         nonlocal changed
         if not _is_plain_statement_block_8616(block):
             return inherited_stack_probe_address_seen
@@ -681,7 +740,7 @@ def prune_materialized_callsite_segment_metadata_8616(project: object, codegen: 
                 changed = True
             new_statements.append(stmt)
 
-        if new_statements != list(statements):
+        if operator.ne(new_statements, list(statements)):
             cast(_StatementBlockLike8616, block).statements = (
                 new_statements if isinstance(statements, list) else tuple(new_statements)
             )
@@ -696,11 +755,11 @@ def prune_materialized_callsite_segment_metadata_8616(project: object, codegen: 
 
 
 def _stack_probe_address_seen_8616(
-    inherited_stack_probe_address_seen: bool,
-    use_typed_facts: bool,
-    typed_fact_map: dict[int, object],
-    summary_map: dict[int, CallsiteSummary8616],
-) -> bool:
+    inherited_stack_probe_address_seen: cython.bint,
+    use_typed_facts: cython.bint,
+    typed_fact_map: object,
+    summary_map: object,
+) -> cython.bint:
     if inherited_stack_probe_address_seen:
         return True
     if use_typed_facts:
@@ -709,17 +768,18 @@ def _stack_probe_address_seen_8616(
         item.stack_probe_helper
         and item.helper_return_state == "stack_address"
         and item.helper_return_space in {None, "ss"}
-        for item in summary_map.values()
+        for item in builtins.iter(summary_map.values())
     )
 
 
+@cython.ccall
 def _refresh_probe_seen_for_call_8616(
-    call: object | None,
-    summary: CallsiteSummary8616 | None,
-    use_typed_facts: bool,
-    typed_fact_map: dict[int, object],
-    stack_probe_address_seen: bool,
-) -> bool:
+    call: object,
+    summary: object,
+    use_typed_facts: cython.bint,
+    typed_fact_map: object,
+    stack_probe_address_seen: cython.bint,
+) -> cython.bint:
     if call is None or summary is None or not summary.stack_probe_helper:
         return stack_probe_address_seen
     if use_typed_facts:
@@ -730,13 +790,13 @@ def _refresh_probe_seen_for_call_8616(
 
 
 def _prune_recorded_metadata_statements_8616(
-    call: object | None,
-    summary: CallsiteSummary8616 | None,
-    stack_probe_address_seen: bool,
-    materialized_metadata_ids: dict[int, tuple[int, ...]],
+    call: object,
+    summary: object,
+    stack_probe_address_seen: cython.bint,
+    materialized_metadata_ids: object,
     project: object,
-    new_statements: list[object],
-) -> bool:
+    new_statements: object,
+) -> cython.bint:
     has_materialized_metadata = call is not None and bool(materialized_metadata_ids.get(id(call), ()))
     if not (
         call is not None
@@ -746,35 +806,35 @@ def _prune_recorded_metadata_statements_8616(
         return False
     # Dynamic angr codegen boundary: CFunctionCall exposes args structurally.
     args: tuple[object, ...] = tuple(_dynamic_codegen_getattr_8616(call, "args", ()) or ())
-    if not (args and all(not _segment_register_value_expr_8616(arg, project) for arg in args)):
+    if not (args and all(not _segment_register_value_expr_8616(arg, project) for arg in iter(args))):
         return False
     prunable_ids = set(materialized_metadata_ids.get(id(call), ()))
     if not prunable_ids:
         return False
-    kept_statements = [old_stmt for old_stmt in new_statements if id(old_stmt) not in prunable_ids]
-    if len(kept_statements) == len(new_statements):
+    kept_statements = [old_stmt for old_stmt in iter(new_statements) if id(old_stmt) not in prunable_ids]
+    if operator.eq(len(kept_statements), len(new_statements)):
         return False
     new_statements[:] = kept_statements
     return True
 
 
 def _prune_call_frame_metadata_stores_8616(
-    call: object | None,
-    materialized_metadata_ids: dict[int, tuple[int, ...]],
+    call: object,
+    materialized_metadata_ids: object,
     project: object,
-    new_statements: list[object],
-) -> bool:
+    new_statements: object,
+) -> cython.bint:
     # Far calls push CS + IP as a far return frame BEFORE the call.
     # The stores look like: *(vvar_N + 1) = cs >> 8;
     # Detect any preceding memory store whose rhs is a segment register
     # value, then prune it and its carrier-temp feeders.
     # Only prune stores recorded in materialized_metadata_ids for this call.
     # Dynamic angr codegen boundary: CFunctionCall exposes args structurally.
-    _call_args: tuple[object, ...] = tuple(_dynamic_codegen_getattr_8616(call, "args", ()) or ()) if call is not None else ()
+    _call_args: object = tuple(_dynamic_codegen_getattr_8616(call, "args", ()) or ()) if call is not None else ()
     if not (
         call is not None
         and _call_args
-        and all(not _segment_register_value_expr_8616(arg, project) for arg in _call_args)
+        and all(not _segment_register_value_expr_8616(arg, project) for arg in iter(_call_args))
     ):
         return False
     call_metadata_ids = set(materialized_metadata_ids.get(id(call), ())) if call is not None else set()
@@ -787,31 +847,36 @@ def _prune_call_frame_metadata_stores_8616(
     return True
 
 
-def _normalized_typed_probe_facts_8616(codegen: object) -> dict[int, object]:
+@cython.ccall
+def _normalized_typed_probe_facts_8616(codegen: object) -> dict[cython.longlong, object]:
     typed_fact_map = _dynamic_codegen_getattr_8616(codegen, "_inertia_typed_stack_probe_return_facts", None)
     if not isinstance(typed_fact_map, dict):
         return {}
     return {
         key: value
-        for key, value in typed_fact_map.items()
+        for key, value in builtins.iter(typed_fact_map.items())
         if isinstance(key, int) and isinstance(value, TypedStackProbeReturnFact8616)
     }
 
 
-def _normalized_materialized_metadata_ids_8616(codegen: object) -> dict[int, tuple[int, ...]]:
+def _normalized_materialized_metadata_ids_8616(codegen: object) -> object:
+    key: object
+    value: object
     # Dynamic angr codegen boundary: metadata IDs are attached by earlier materialization.
     raw_materialized_metadata_ids = _dynamic_codegen_getattr_8616(codegen, "_inertia_materialized_callsite_metadata_ids", None)
-    materialized_metadata_ids: dict[int, tuple[int, ...]] = {}
+    materialized_metadata_ids: dict[cython.longlong, tuple[cython.longlong, ...]] = {}
     if isinstance(raw_materialized_metadata_ids, dict):
         for key, value in raw_materialized_metadata_ids.items():
             if isinstance(key, int) and isinstance(value, (list, tuple, set, frozenset)):
-                materialized_metadata_ids[key] = tuple(item for item in value if isinstance(item, int))
+                materialized_metadata_ids[key] = tuple(item for item in iter(value) if isinstance(item, int))
     return materialized_metadata_ids
 
 
+@cython.ccall
 def _count_prunable_metadata_stores_8616(
-    new_statements: list[object], call_metadata_ids: set[int], project: object
-) -> int:
+    new_statements: object, call_metadata_ids: object, project: object
+) -> cython.longlong:
+    lhs: object
     removed = 0
     scan = len(new_statements) - 1
     while scan >= 0:
@@ -841,11 +906,15 @@ def _count_prunable_metadata_stores_8616(
     return removed
 
 
+@cython.ccall
 def _rewrite_nested_blocks_8616(
     block: object,
-    stack_probe_address_seen: bool,
-    rewrite_block: Callable[[object, bool], bool],
+    stack_probe_address_seen: cython.bint,
+    rewrite_block: Callable[[object, bool], cython.bint],
 ) -> None:
+    child: object
+    pair: object
+    stmt: object
     for stmt in _dynamic_codegen_getattr_8616(block, "statements", ()) or ():
         for child in (
             _dynamic_codegen_getattr_8616(stmt, "body", None),

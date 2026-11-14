@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Decode CFG-owned function blocks directly from exact loaded bytes.
 
 Layer: Frontend.
@@ -6,6 +7,8 @@ CFG-owned extents without entering VEX lifting or assigning semantic effects.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import hashlib
 from collections.abc import Iterable, Sequence
@@ -15,13 +18,15 @@ from enum import Enum
 from typing import Any, Protocol, cast
 
 from .frontend_capstone_decode import decode_exact_capstone_block_8616
+import dataclasses
+import operator
 
 
 class _GraphNodeBoundary8616(Protocol):
     """Exact CFG block coordinates exposed by an angr function graph."""
 
-    addr: int
-    size: int
+    addr: cython.longlong
+    size: cython.longlong
 
 
 class _GraphBoundary8616(Protocol):
@@ -33,15 +38,15 @@ class _GraphBoundary8616(Protocol):
 class _FunctionBoundary8616(Protocol):
     """Narrow third-party function surface used by direct block decoding."""
 
-    addr: int
-    block_addrs_set: Iterable[int]
+    addr: cython.longlong
+    block_addrs_set: Iterable[cython.longlong]
     graph: _GraphBoundary8616
 
 
 class _LoaderMemoryBoundary8616(Protocol):
     """Loaded-memory byte reader used at the Frontend boundary."""
 
-    def load(self, address: int, size: int) -> object:
+    def load(self, address: cython.longlong, size: cython.longlong) -> object:
         """Read one exact loaded address range."""
 
 
@@ -55,10 +60,7 @@ class _ProjectBoundary8616(Protocol):
     """Project fields and cache owned by exact function block decoding."""
 
     loader: _LoaderBoundary8616
-    _inertia_function_block_decode_artifacts_8616: dict[
-        int,
-        FunctionBlockDecodeArtifact8616,
-    ]
+    _inertia_function_block_decode_artifacts_8616: object
 
 
 class FunctionBlockDecodeStatus8616(Enum):
@@ -78,7 +80,7 @@ class FunctionBlockDecodeFailureReason8616(Enum):
     DECODE_INCOMPLETE = "decode_incomplete"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionBlockDecodeFailure8616:
     """One exact block or function-level decode refusal."""
 
@@ -87,56 +89,57 @@ class FunctionBlockDecodeFailure8616:
     detail: str = ""
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionDecodedBlock8616:
     """Immutable Capstone instruction evidence for one exact CFG block."""
 
-    address: int
-    size: int
-    code: bytes
-    instructions: tuple[object, ...]
+    address: cython.longlong
+    size: cython.longlong
+    code: object
+    instructions: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionBlockDecodeArtifact8616:
     """Closed direct-decode artifact for one exact function block surface."""
 
     function_entry: int | None
-    blocks: tuple[FunctionDecodedBlock8616, ...]
-    content_identity: bytes | None
+    blocks: object
+    content_identity: object
     status: FunctionBlockDecodeStatus8616
-    failures: tuple[FunctionBlockDecodeFailure8616, ...]
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    failures: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every CFG block was decoded from exact bytes."""
         return (
             self.status is FunctionBlockDecodeStatus8616.COMPLETE
             and self.raw_fact_count > 0
-            and self.raw_fact_count == self.normalized_fact_count
-            and self.normalized_fact_count == self.classified_fact_count
-            and self.classified_fact_count == self.materialized_count
+            and operator.eq(self.raw_fact_count, self.normalized_fact_count)
+            and operator.eq(self.normalized_fact_count, self.classified_fact_count)
+            and operator.eq(self.classified_fact_count, self.materialized_count)
             and self.failure_count == 0
             and not self.failures
             and self.content_identity is not None
         )
 
-    def instructions_by_block(self) -> dict[int, tuple[object, ...]]:
+    def instructions_by_block(self) -> dict[cython.longlong, tuple[object, ...]]:
         """Return exact block-address instruction ownership."""
-        return {block.address: block.instructions for block in self.blocks}
+        return {block.address: block.instructions for block in iter(self.blocks)}
 
 
+@cython.ccall
 def _refused_artifact_8616(
     function_entry: int | None,
     reason: FunctionBlockDecodeFailureReason8616,
     *,
     block_addr: int | None = None,
-    detail: str = "",
+    detail: object = "",
 ) -> FunctionBlockDecodeArtifact8616:
     """Build one closed typed refusal for an unavailable decode boundary."""
     return FunctionBlockDecodeArtifact8616(
@@ -155,8 +158,9 @@ def _refused_artifact_8616(
 
 def _function_block_extents_8616(
     function: object,
-) -> tuple[int | None, tuple[tuple[int, int], ...]] | FunctionBlockDecodeArtifact8616:
+) -> object:
     """Return graph extents only when they exactly cover owned block addresses."""
+    node: object
     boundary = cast(_FunctionBoundary8616, function)
     try:
         entry = int(boundary.addr)
@@ -166,7 +170,7 @@ def _function_block_extents_8616(
             FunctionBlockDecodeFailureReason8616.MISSING_FUNCTION_IDENTITY,
         )
     try:
-        owned_addrs = frozenset(int(address) for address in boundary.block_addrs_set)
+        owned_addrs = frozenset(int(address) for address in iter(boundary.block_addrs_set))
     except (AttributeError, TypeError, ValueError):
         owned_addrs = frozenset()
     if not owned_addrs:
@@ -178,7 +182,7 @@ def _function_block_extents_8616(
         graph_nodes = tuple(boundary.graph.nodes)
     except (AttributeError, TypeError):
         graph_nodes = ()
-    extents: dict[int, int] = {}
+    extents: dict[cython.longlong, cython.longlong] = {}
     for node in graph_nodes:
         try:
             address = int(node.addr)
@@ -195,20 +199,24 @@ def _function_block_extents_8616(
                 block_addr=address,
                 detail=f"conflicting sizes {previous} and {size}",
             )
-    if frozenset(extents) != owned_addrs:
+    if operator.ne(frozenset(extents), owned_addrs):
         return _refused_artifact_8616(
             entry,
             FunctionBlockDecodeFailureReason8616.INCOHERENT_GRAPH_EXTENTS,
             detail="CFG graph extents do not cover the owned block surface",
         )
-    return entry, tuple(sorted(extents.items()))
+    return entry, tuple(sorted(tuple(extents.items())))
 
 
+@cython.ccall
 def _content_identity_8616(
-    entry: int,
-    block_bytes: Sequence[tuple[int, int, bytes]],
-) -> bytes:
+    entry: cython.longlong,
+    block_bytes: Sequence[tuple[cython.longlong, cython.longlong, bytes]],
+) -> object:
     """Return a deterministic content identity for exact block coordinates."""
+    address: object
+    code: object
+    size: object
     digest = hashlib.sha256()
     digest.update((entry & 0xFFFFFFFFFFFFFFFF).to_bytes(8, "little", signed=False))
     for address, size, code in block_bytes:
@@ -218,13 +226,16 @@ def _content_identity_8616(
     return digest.digest()
 
 
+@cython.ccall
 def _read_function_block_bytes_8616(
     boundary: _ProjectBoundary8616,
-    entry: int,
-    extents: tuple[tuple[int, int], ...],
-) -> list[tuple[int, int, bytes]] | FunctionBlockDecodeArtifact8616:
+    entry: cython.longlong,
+    extents: object,
+) -> object:
     """Load exact bytes for every graph extent or return a typed refusal."""
-    block_bytes: list[tuple[int, int, bytes]] = []
+    address: object
+    size: object
+    block_bytes: list[tuple[cython.longlong, cython.longlong, bytes]] = []
     for address, size in extents:
         try:
             code = bytes(cast(Any, boundary.loader.memory.load(address, size)))
@@ -235,7 +246,7 @@ def _read_function_block_bytes_8616(
                 block_addr=address,
                 detail=f"{type(error).__name__}: {error}",
             )
-        if len(code) != size:
+        if operator.ne(len(code), size):
             return _refused_artifact_8616(
                 entry,
                 FunctionBlockDecodeFailureReason8616.BYTE_READ_FAILED,
@@ -246,11 +257,18 @@ def _read_function_block_bytes_8616(
     return block_bytes
 
 
+@cython.ccall
 def collect_function_block_decode_artifact_8616(
     project: object,
     function: object,
 ) -> FunctionBlockDecodeArtifact8616:
     """Decode exact CFG block bytes directly, with mutation-aware reuse."""
+    block: object
+    cached: object
+    entry: object
+    address: object
+    code: object
+    size: object
     extents_or_refusal = _function_block_extents_8616(function)
     if isinstance(extents_or_refusal, FunctionBlockDecodeArtifact8616):
         return extents_or_refusal
@@ -271,7 +289,7 @@ def collect_function_block_decode_artifact_8616(
     if not isinstance(cache, dict):
         cache = {}
     cached = cache.get(entry)
-    if cached is not None and cached.content_identity == content_identity:
+    if cached is not None and operator.eq(cached.content_identity, content_identity):
         return cached
     decoded_blocks: list[FunctionDecodedBlock8616] = []
     failures: list[FunctionBlockDecodeFailure8616] = []
@@ -298,7 +316,7 @@ def collect_function_block_decode_artifact_8616(
         content_identity=content_identity,
         status=(
             FunctionBlockDecodeStatus8616.COMPLETE
-            if not failures and len(decoded_blocks) == fact_count
+            if not failures and operator.eq(len(decoded_blocks), fact_count)
             else FunctionBlockDecodeStatus8616.REFUSED
         ),
         failures=tuple(failures),

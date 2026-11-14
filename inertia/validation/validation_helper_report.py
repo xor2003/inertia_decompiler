@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Validation.
 
 Responsibility: present typed helper-family validation summaries without changing verdicts.
@@ -9,29 +10,32 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from inertia.validation.recovery_confidence import summarize_recovery_confidence
+import dataclasses
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ValidationHelperFamilyRow:
     """Describe one helper-family validation signal for report consumers."""
 
-    family: str
-    count: int
-    likely_layer: str
-    next_root_cause_file: str
-    signal: str
+    family: object
+    count: cython.longlong
+    likely_layer: object
+    next_root_cause_file: object
+    signal: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ValidationHelperReport:
     """Carry typed helper-family rows without changing validation verdicts."""
 
-    rows: tuple[ValidationHelperFamilyRow, ...]
+    rows: object
 
     def as_rows(self) -> tuple[dict[str, object], ...]:
         """Return serializable helper-family rows for milestone reports."""
@@ -43,11 +47,13 @@ class ValidationHelperReport:
                 "next_root_cause_file": row.next_root_cause_file,
                 "signal": row.signal,
             }
-            for row in self.rows
+            for row in iter(self.rows)
         )
 
 
-def _row_count(item: Mapping[str, object]) -> int:
+@cython.ccall
+def _row_count(item: Mapping[str, object]) -> cython.longlong:
+    count: object
     count = item.get("count", 0)
     if isinstance(count, bool):
         return int(count)
@@ -59,16 +65,22 @@ def _row_count(item: Mapping[str, object]) -> int:
 
 
 def _helper_family_rows(summary: Mapping[str, object]) -> tuple[Mapping[str, object], ...]:
+    rows: object
     rows = summary.get("helper_family_rows", ())
     if not isinstance(rows, list | tuple):
         return ()
-    return tuple(item for item in rows if isinstance(item, Mapping))
+    return tuple(item for item in iter(rows) if isinstance(item, Mapping))
 
 
 def build_x86_16_validation_helper_report(results: Sequence[Mapping[str, object]]) -> ValidationHelperReport:
     """Build the typed helper-family validation report from confidence rows."""
 
     def _impl() -> ValidationHelperReport:
+        family: object
+        likely_layer: object
+        next_root_cause_file: object
+        signal: object
+        item: object
         summary = summarize_recovery_confidence(list(results))
         rows: list[ValidationHelperFamilyRow] = []
         for item in _helper_family_rows(summary):
@@ -98,6 +110,7 @@ def build_x86_16_validation_helper_report(results: Sequence[Mapping[str, object]
     return _impl()
 
 
+@cython.ccall
 def describe_x86_16_validation_helper_report_surface() -> dict[str, object]:
     """Return the deterministic validation-helper report surface contract."""
     return {

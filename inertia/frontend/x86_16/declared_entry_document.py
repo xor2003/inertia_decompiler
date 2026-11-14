@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Decode explicit function-entry documents without inventing machine state.
 
 Layer: Frontend.
@@ -7,6 +8,8 @@ canonical declared_function_entry owner.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from inertia.frontend.x86_16.declared_function_entry import (
     DeclaredEntryMemory8616,
@@ -14,6 +17,7 @@ from inertia.frontend.x86_16.declared_function_entry import (
     DeclaredEntryReturnKind8616,
     DeclaredFunctionEntrySpec8616,
 )
+import operator
 
 _FIELDS: frozenset[str] = frozenset({
     "version", "source_sha256", "relocated_sha256", "load_segment",
@@ -23,32 +27,37 @@ _FIELDS: frozenset[str] = frozenset({
 })
 
 
-def _object(value: object, fields: frozenset[str], label: str) -> dict[str, object]:
+@cython.ccall
+def _object(value: object, fields: object, label: object) -> object:
     """Require a closed JSON object, retaining every supplied field."""
-    if not isinstance(value, dict) or set(value) != fields:
+    if not isinstance(value, dict) or operator.ne(set(value), fields):
         raise ValueError(f"{label} requires exactly {sorted(fields)}")
     return value
 
 
-def _integer(value: object, label: str) -> int:
+@cython.ccall
+def _integer(value: object, label: object) -> cython.longlong:
     """Decode an integer without accepting Boolean or string coercions."""
     if type(value) is not int:
         raise ValueError(f"{label} must be an integer")
     return value
 
 
-def _text(value: object, label: str) -> str:
+@cython.ccall
+def _text(value: object, label: object) -> object:
     """Decode a string; semantic restrictions belong to admission."""
     if not isinstance(value, str):
         raise ValueError(f"{label} must be a string")
     return value
 
 
-def _registers(value: object) -> tuple[tuple[str, int], ...]:
+@cython.ccall
+def _registers(value: object) -> tuple[tuple[str, cython.longlong], ...]:
     """Preserve ordered register constraints, including duplicates for rejection."""
+    item: object
     if not isinstance(value, list):
         raise ValueError("registers must be a list")
-    pairs: list[tuple[str, int]] = []
+    pairs: list[tuple[str, cython.longlong]] = []
     for item in value:
         if not isinstance(item, list) or len(item) != 2:
             raise ValueError("registers must contain name/value pairs")
@@ -56,8 +65,10 @@ def _registers(value: object) -> tuple[tuple[str, int], ...]:
     return tuple(pairs)
 
 
+@cython.ccall
 def _memory(value: object) -> tuple[DeclaredEntryMemory8616, ...]:
     """Decode explicit byte spans without deriving any initial memory values."""
+    item: object
     if not isinstance(value, list):
         raise ValueError("memory must be a list")
     spans: list[DeclaredEntryMemory8616] = []
@@ -68,12 +79,13 @@ def _memory(value: object) -> tuple[DeclaredEntryMemory8616, ...]:
             data = bytes.fromhex(encoded)
         except ValueError as error:
             raise ValueError("memory data must be hexadecimal bytes") from error
-        if data.hex() != encoded:
+        if operator.ne(data.hex(), encoded):
             raise ValueError("memory data must be canonical lowercase hexadecimal bytes")
         spans.append(DeclaredEntryMemory8616(_integer(row["address"], "memory address"), data))
     return tuple(spans)
 
 
+@cython.ccall
 def parse_declared_function_entry_spec_8616(document: object) -> DeclaredFunctionEntrySpec8616:
     """Decode one serialized specification; this grants no admitted authority."""
     root = _object(document, _FIELDS, "function entry")

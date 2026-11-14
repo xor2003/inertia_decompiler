@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed inventory for postprocess quarantine.
 
 Layer: Rewrite/Postprocess cleanup.
@@ -24,11 +25,14 @@ rendered text, COD, source, or CLI/reporting evidence here.
 """
 
 from __future__ import annotations
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
 
 from inertia.postprocess.decompiler_postprocess_stage import DECOMPILER_POSTPROCESS_PASSES
+import dataclasses
+import operator
 
 __all__ = [
     "DecompilerPostprocessPassInventoryItem",
@@ -56,23 +60,23 @@ class DecompilerPostprocessPassMigrationStatus8616(StrEnum):
     GUARDED_COMPATIBILITY_FALLBACK = "guarded-compatibility-fallback"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DecompilerPostprocessPassInventoryItem:
     """Typed ownership inventory row for postprocess quarantine."""
 
-    name: str
+    name: object
     kind: DecompilerPostprocessPassKind8616
-    owner: str
+    owner: object
     migration_status: DecompilerPostprocessPassMigrationStatus8616
     required_evidence_counters: tuple[str, ...] = ()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DecompilerPostprocessPassInventoryViolation:
     """Structured postprocess inventory contract violation."""
 
-    name: str
-    reason: str
+    name: object
+    reason: object
 
 
 _DYNAMIC_POSTPROCESS_PASS_NAMES_8616 = (
@@ -226,7 +230,8 @@ _SEMANTIC_EVIDENCE_COUNTERS_8616 = (
 )
 
 
-def _semantic_owner_by_name_8616(name: str) -> str:
+@cython.ccall
+def _semantic_owner_by_name_8616(name: object) -> str:
     if "jcc" in name or "condition" in name or "flag" in name or "interval_guard" in name:
         return "Step 8: move condition/flag recovery to semantics and structuring"
     if "callsite" in name or "call" in name or "prototype" in name or "stdlib" in name:
@@ -242,7 +247,8 @@ def _semantic_owner_by_name_8616(name: str) -> str:
     return "Step 4: classified semantic materialization debt pending owner split"
 
 
-def _postprocess_pass_kind_8616(name: str) -> DecompilerPostprocessPassKind8616:
+@cython.ccall
+def _postprocess_pass_kind_8616(name: object) -> DecompilerPostprocessPassKind8616:
     if name in _POSTPROCESS_SEMANTIC_MATERIALIZATION_PASS_NAMES_8616:
         return DecompilerPostprocessPassKind8616.SEMANTIC_MATERIALIZATION
     if "dead_code_elimination" in name or name.startswith("optimization:"):
@@ -254,7 +260,8 @@ def _postprocess_pass_kind_8616(name: str) -> DecompilerPostprocessPassKind8616:
     return DecompilerPostprocessPassKind8616.CLEANUP
 
 
-def _postprocess_pass_owner_8616(name: str, kind: DecompilerPostprocessPassKind8616) -> str:
+@cython.ccall
+def _postprocess_pass_owner_8616(name: object, kind: DecompilerPostprocessPassKind8616) -> object:
     if name in _POSTPROCESS_PASS_OWNER_8616:
         return _POSTPROCESS_PASS_OWNER_8616[name]
     if kind is DecompilerPostprocessPassKind8616.SEMANTIC_MATERIALIZATION:
@@ -266,13 +273,15 @@ def _postprocess_pass_owner_8616(name: str, kind: DecompilerPostprocessPassKind8
     return "postprocess orchestration/cleanup"
 
 
-def _postprocess_required_evidence_counters_8616(kind: DecompilerPostprocessPassKind8616) -> tuple[str, ...]:
+@cython.ccall
+def _postprocess_required_evidence_counters_8616(kind: DecompilerPostprocessPassKind8616) -> object:
     if kind is DecompilerPostprocessPassKind8616.SEMANTIC_MATERIALIZATION:
         return _SEMANTIC_EVIDENCE_COUNTERS_8616
     return ()
 
 
-def _postprocess_migration_status_8616(name: str) -> DecompilerPostprocessPassMigrationStatus8616:
+@cython.ccall
+def _postprocess_migration_status_8616(name: object) -> DecompilerPostprocessPassMigrationStatus8616:
     """Return the quarantine migration state for a postprocess pass name."""
     if name in _POSTPROCESS_GUARDED_FALLBACK_PASS_NAMES_8616:
         return DecompilerPostprocessPassMigrationStatus8616.GUARDED_COMPATIBILITY_FALLBACK
@@ -281,7 +290,8 @@ def _postprocess_migration_status_8616(name: str) -> DecompilerPostprocessPassMi
 
 def describe_x86_16_decompiler_postprocess_inventory_8616() -> tuple[DecompilerPostprocessPassInventoryItem, ...]:
     """Return typed postprocess pass ownership inventory for quarantine checks."""
-    names = (*_DYNAMIC_POSTPROCESS_PASS_NAMES_8616, *(spec.name for spec in DECOMPILER_POSTPROCESS_PASSES))
+    name: object
+    names = (*_DYNAMIC_POSTPROCESS_PASS_NAMES_8616, *(spec.name for spec in iter(DECOMPILER_POSTPROCESS_PASSES)))
     items: list[DecompilerPostprocessPassInventoryItem] = []
     for name in names:
         kind = _postprocess_pass_kind_8616(name)
@@ -297,8 +307,10 @@ def describe_x86_16_decompiler_postprocess_inventory_8616() -> tuple[DecompilerP
     return tuple(items)
 
 
+@cython.ccall
 def validate_x86_16_decompiler_postprocess_inventory_8616() -> tuple[DecompilerPostprocessPassInventoryViolation, ...]:
     """Validate the postprocess quarantine inventory contract."""
+    item: object
     inventory = describe_x86_16_decompiler_postprocess_inventory_8616()
     violations: list[DecompilerPostprocessPassInventoryViolation] = []
     seen_names: set[str] = set()
@@ -322,7 +334,7 @@ def validate_x86_16_decompiler_postprocess_inventory_8616() -> tuple[DecompilerP
                 )
             )
         if item.kind is DecompilerPostprocessPassKind8616.SEMANTIC_MATERIALIZATION:
-            if item.required_evidence_counters != _SEMANTIC_EVIDENCE_COUNTERS_8616:
+            if operator.ne(item.required_evidence_counters, _SEMANTIC_EVIDENCE_COUNTERS_8616):
                 violations.append(
                     DecompilerPostprocessPassInventoryViolation(
                         name=item.name,

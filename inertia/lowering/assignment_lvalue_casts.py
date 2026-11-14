@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Normalize proven scalar assignment destinations into valid C lvalues.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -20,6 +23,8 @@ from angr.sim_type import SimTypeChar, SimTypeInt, SimTypeLong, SimTypeShort
 
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 from inertia.lowering.structured_tags import copy_structured_tags_8616
+import dataclasses
+import operator
 
 
 class AssignmentLvalueCastStatus8616(StrEnum):
@@ -32,27 +37,27 @@ class AssignmentLvalueCastStatus8616(StrEnum):
     WIDTH_MISMATCH = "width-mismatch"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class AssignmentLvalueCastDecision8616:
     """Classification of one cast-wrapped assignment destination."""
 
     status: AssignmentLvalueCastStatus8616
 
     @property
-    def materialized(self) -> bool:
+    def materialized(self) -> cython.bint:
         """Return whether the destination can become a direct C lvalue."""
         return self.status is AssignmentLvalueCastStatus8616.MATERIALIZED
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class AssignmentLvalueCastStats8616:
     """Closed evidence counters for assignment-lvalue cast normalization."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
 class _CFunctionBoundary8616(Protocol):
@@ -65,13 +70,14 @@ class _CodegenBoundary8616(Protocol):
     """Third-party codegen fields read and published by this pass."""
 
     cfunc: _CFunctionBoundary8616 | None
-    _inertia_assignment_lvalue_cast_decisions_8616: tuple[AssignmentLvalueCastDecision8616, ...]
+    _inertia_assignment_lvalue_cast_decisions_8616: object
     _inertia_assignment_lvalue_cast_stats_8616: AssignmentLvalueCastStats8616
 
 
 _SCALAR_INTEGER_TYPES_8616 = (SimTypeChar, SimTypeShort, SimTypeInt, SimTypeLong)
 
 
+@cython.ccall
 def _integer_width_bits_8616(type_: object) -> int | None:
     """Return one supported scalar integer width in bits."""
     if not isinstance(type_, _SCALAR_INTEGER_TYPES_8616):
@@ -84,7 +90,9 @@ def _classify_lvalue_cast_8616(
     lhs: structured_c.CTypeCast,
 ) -> tuple[AssignmentLvalueCastDecision8616, structured_c.CVariable | None]:
     """Classify one cast chain and return its direct variable when proven safe."""
-    widths: list[int] = []
+    storage_width: object
+    width: object
+    widths: list[cython.longlong] = []
     node: structured_c.CExpression = lhs
     while isinstance(node, structured_c.CTypeCast):
         width = _integer_width_bits_8616(node.dst_type)
@@ -117,13 +125,17 @@ def _classify_lvalue_cast_8616(
             else AssignmentLvalueCastStatus8616.NON_SCALAR_INTEGER
         )
         return AssignmentLvalueCastDecision8616(status), None
-    if any(width != storage_width for width in widths):
+    if any(operator.ne(width, storage_width) for width in iter(widths)):
         return AssignmentLvalueCastDecision8616(AssignmentLvalueCastStatus8616.WIDTH_MISMATCH), None
     return AssignmentLvalueCastDecision8616(AssignmentLvalueCastStatus8616.MATERIALIZED), node
 
 
-def normalize_scalar_assignment_lvalues_8616(codegen: object) -> bool:
+def normalize_scalar_assignment_lvalues_8616(codegen: object) -> cython.bint:
     """Replace proven signedness-only assignment casts with direct C lvalues."""
+    cfunc: object
+    root: object
+    variable: object
+    node: object
     boundary = cast(_CodegenBoundary8616, codegen)
     cfunc = boundary.cfunc
     root = cfunc.statements if cfunc is not None else None
@@ -145,7 +157,7 @@ def normalize_scalar_assignment_lvalues_8616(codegen: object) -> bool:
             node.tags = {**cast_tags, **assignment_tags}
             node.lhs = variable
             changed = True
-    materialized_count = sum(decision.materialized for decision in decisions)
+    materialized_count = sum(decision.materialized for decision in iter(decisions))
     boundary._inertia_assignment_lvalue_cast_decisions_8616 = tuple(decisions)
     boundary._inertia_assignment_lvalue_cast_stats_8616 = AssignmentLvalueCastStats8616(
         raw_fact_count=len(decisions),

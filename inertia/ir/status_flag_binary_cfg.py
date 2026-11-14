@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Recover bounded binary evidence for direct-callee status-flag effects.
 
 Layer: IR.
@@ -13,6 +14,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import deque
 from collections.abc import Callable
@@ -32,39 +35,41 @@ from inertia.semantics.status_flag_contracts import (
     StatusFlag8616,
     StatusFlagEffect8616,
 )
+import dataclasses
+import operator
 
 
 class _InstructionBoundary8616(Protocol):
     """Exact address on a third-party Capstone instruction wrapper."""
 
-    address: int
+    address: cython.longlong
 
 
 class _CapstoneBlockBoundary8616(Protocol):
     """Third-party angr disassembly collection."""
 
-    insns: tuple[object, ...]
+    insns: object
 
 
 class _BlockBoundary8616(Protocol):
     """Third-party angr block fields consumed by bounded read recovery."""
 
-    size: int
+    size: cython.longlong
     capstone: _CapstoneBlockBoundary8616
 
 
 class _FactoryBoundary8616(Protocol):
     """Third-party angr block factory used at exact binary addresses."""
 
-    def block(self, address: int, *, opt_level: int = 0) -> _BlockBoundary8616:
+    def block(self, address: cython.longlong, *, opt_level: cython.longlong = 0) -> _BlockBoundary8616:
         """Decode one exact basic block."""
 
 
 class _MainObjectBoundary8616(Protocol):
     """Third-party loaded-object address range."""
 
-    min_addr: int
-    max_addr: int
+    min_addr: cython.longlong
+    max_addr: cython.longlong
 
 
 class _LoaderBoundary8616(Protocol):
@@ -80,28 +85,29 @@ class _ProjectBoundary8616(Protocol):
     loader: _LoaderBoundary8616
 
 
-type InstructionEffectProjector8616 = Callable[[object], StatusFlagEffect8616 | None]
+InstructionEffectProjector8616 = typing.TypeAliasType("InstructionEffectProjector8616", Callable[[object], StatusFlagEffect8616 | None])
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class BinaryStatusFlagReadSummary8616:
     """Incoming reads, proven overwrites, and bounded traversal accounting."""
 
     reads: StatusFlag8616
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
     overwrites: StatusFlag8616 = StatusFlag8616.NONE
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every flag-relevant path had complete evidence."""
         return self.failure_count == 0
 
 
-def _loaded_image_bounds_8616(project: object) -> tuple[int, int] | None:
+@cython.ccall
+def _loaded_image_bounds_8616(project: object) -> object:
     """Return the main object's inclusive/exclusive loaded address interval."""
     try:
         main_object = cast(_ProjectBoundary8616, project).loader.main_object
@@ -112,34 +118,38 @@ def _loaded_image_bounds_8616(project: object) -> tuple[int, int] | None:
     return (start, end) if 0 <= start < end else None
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _FlagReadScan8616:
     """Mutable worklist state for the prefix-CFG flag-read scan."""
 
-    pending: dict[int, StatusFlag8616]
-    queue: deque[int]
-    processed: dict[int, StatusFlag8616]
-    prefixes: dict[int, StatusFlagCFGBlock8616]
-    visited: set[int]
-    failed: set[int]
+    pending: object
+    queue: deque[cython.longlong]
+    processed: object
+    prefixes: object
+    visited: object
+    failed: object
     reads: StatusFlag8616 = StatusFlag8616.NONE
-    instruction_count: int = 0
+    instruction_count: cython.longlong = 0
 
-    def mark_read_failed(self, address: int, carried: StatusFlag8616) -> StatusFlag8616:
+    @cython.ccall
+    def mark_read_failed(self, address: cython.longlong, carried: StatusFlag8616) -> StatusFlag8616:
         """Record every still-carried bit as read and drop it from the carry."""
         self.reads |= carried
         self.failed.add(address)
         return StatusFlag8616.NONE
 
+    @cython.ccall
     def scan_instructions(
         self,
-        address: int,
+        address: cython.longlong,
         carried: StatusFlag8616,
-        wrapped_instructions: tuple[object, ...],
+        wrapped_instructions: object,
         instruction_effect: InstructionEffectProjector8616,
-        max_instructions: int,
+        max_instructions: cython.longlong,
     ) -> tuple[StatusFlag8616, list[StatusFlagCFGInstruction8616]]:
         """Decode one block prefix; unknown effects refuse the carried bits."""
+        effect: object
+        wrapped: object
         instructions: list[StatusFlagCFGInstruction8616] = []
         for wrapped in wrapped_instructions:
             if self.instruction_count >= max_instructions:
@@ -160,17 +170,19 @@ class _FlagReadScan8616:
                 break
         return carried, instructions
 
+    @cython.ccall
     def record_prefix(
         self,
-        address: int,
-        instructions: list[StatusFlagCFGInstruction8616],
-        successors: set[int],
-        successor_unresolved: bool,
-    ) -> tuple[set[int], bool]:
+        address: cython.longlong,
+        instructions: object,
+        successors: object,
+        successor_unresolved: cython.bint,
+    ) -> tuple[set[cython.longlong], cython.bint]:
         """Retain the longest decoded prefix and merge repeat-visit edges."""
+        previous: object
         previous = self.prefixes.get(address)
         # A later visit may carry fewer bits and stop earlier at the same block.
-        if previous is not None and len(instructions) == len(previous.instructions):
+        if previous is not None and operator.eq(len(instructions), len(previous.instructions)):
             successors.update(previous.successor_addresses)
             successor_unresolved |= not previous.successors_complete
         if previous is None or len(instructions) >= len(previous.instructions):
@@ -182,12 +194,14 @@ class _FlagReadScan8616:
             )
         return successors, successor_unresolved
 
+    @cython.ccall
     def propagate_successors(
         self,
         carried: StatusFlag8616,
-        successors: set[int],
+        successors: object,
     ) -> None:
         """Enqueue unseen carried bits to each reachable successor."""
+        successor: object
         for successor in sorted(successors):
             unseen = carried & ~self.processed.get(successor, StatusFlag8616.NONE)
             if int(unseen) == 0:
@@ -198,15 +212,17 @@ class _FlagReadScan8616:
             if successor not in self.queue:
                 self.queue.append(successor)
 
+    @cython.ccall
     def visit_block(
         self,
         boundary: _ProjectBoundary8616,
         instruction_effect: InstructionEffectProjector8616,
-        region_start: int,
-        region_end: int,
-        max_instructions: int,
+        region_start: cython.longlong,
+        region_end: cython.longlong,
+        max_instructions: cython.longlong,
     ) -> None:
         """Consume one queued block and propagate its surviving flags."""
+        incoming: object
         address = self.queue.popleft()
         incoming = self.pending.pop(address, StatusFlag8616.NONE)
         new_incoming = incoming & ~self.processed.get(address, StatusFlag8616.NONE)
@@ -250,13 +266,14 @@ class _FlagReadScan8616:
         self.propagate_successors(carried, successors)
 
 
+@cython.ccall
 def summarize_binary_status_flag_entry_reads_8616(
     project: object,
     *,
-    entry_address: int,
+    entry_address: cython.longlong,
     instruction_effect: InstructionEffectProjector8616,
-    max_blocks: int = 512,
-    max_instructions: int = 4096,
+    max_blocks: cython.longlong = 512,
+    max_instructions: cython.longlong = 4096,
 ) -> BinaryStatusFlagReadSummary8616:
     """Find incoming status bits observed before a binary callee kills them.
 
@@ -268,6 +285,8 @@ def summarize_binary_status_flag_entry_reads_8616(
     A prefix ends at return or when no incoming bits remain, not at an arbitrary
     instruction budget. Any failed path refuses overwrite publication.
     """
+    bounds: object
+    remaining: object
     bounds = _loaded_image_bounds_8616(project)
     if (
         bounds is None or not (bounds[0] <= entry_address < bounds[1])

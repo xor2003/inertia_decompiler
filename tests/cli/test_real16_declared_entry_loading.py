@@ -89,3 +89,32 @@ def test_installed_source_reauthenticates_mutable_request(loaded_entry, mutation
         request.source = request.source[:-1] + b'\x90'
     assert not request.validate_installed_source_8616(project, source)
     assert project._inertia_real16_invocation_source_8616 is None
+
+
+def test_declared_entry_defers_universal_indexed_probe(loaded_entry, monkeypatch):
+    """A declared request reaches scoped preparation without universal SSA preflight."""
+    import inertia.cli.indexed_alias_program_context as context
+    from inertia.ir.function_ir_registry import registered_function_ir_artifact_8616
+
+    project, spec = loaded_entry
+    def forbidden_universal_probe(*args, **kwargs):
+        pytest.fail("declared entry attempted universal indexed-Alias construction")
+
+    monkeypatch.setattr(context, "build_cached_direct_indexed_alias_local_evidence_8616", forbidden_universal_probe)
+    result = context.prepare_direct_indexed_alias_program_context_8616(
+        project, project, SimpleNamespace(addr=spec.range_start), timeout=60, window=0,
+    )
+    assert result.status is context.IndexedAliasProgramContextStatus8616.DECLARED_ENTRY_DEFERRED
+    assert result.program is None and result.requirement is None
+    entry = prepare_declared_entry_pipeline_8616(project, SimpleNamespace(), spec.range_start)
+    assert entry is not None and entry.admission.spec == spec
+    assert registered_function_ir_artifact_8616(project, spec.range_start).artifact is None
+
+
+def test_declared_entry_probe_deferral_requires_the_exact_head(loaded_entry):
+    """A declaration for one entry cannot defer another function's universal probe."""
+    from inertia.ir.declared_entry_pipeline import declared_entry_pipeline_requested_8616
+
+    project, spec = loaded_entry
+    assert declared_entry_pipeline_requested_8616(project, spec.range_start)
+    assert not declared_entry_pipeline_requested_8616(project, spec.range_start + 1)

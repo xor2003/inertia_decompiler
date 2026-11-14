@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Immutable static dispatch entries and their direct lookup.
 
 Layer: IR.
@@ -10,13 +11,18 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
+K = typing.TypeVar("K")
+V = typing.TypeVar("V")
 
-type FrozenDispatch[K, V] = tuple[tuple[K, V], ...]
+FrozenDispatch = typing.TypeAliasType("FrozenDispatch", tuple[tuple[K, V], ...], type_params = (K, V, ))
 """An authoritative ordered tuple of immutable key-handler entry pairs."""
 
 
-def frozen_dispatch_lookup[K, V](
-    registry: FrozenDispatch[K, V] | dict[K, V], key: K,
+@cython.ccall
+def frozen_dispatch_lookup(
+    registry: object, key: K,
 ) -> V | None:
     """Return the exact first matching handler, or None for an absent key.
 
@@ -29,6 +35,7 @@ def frozen_dispatch_lookup[K, V](
     freeze handler internals.
     Every call reads the authoritative entries directly, without a cache.
     """
+    entry: object
     if type(registry) is dict:
         return registry.get(key)
     if type(registry) is not tuple:

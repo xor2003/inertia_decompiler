@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Six-stage function evidence readiness governance.
 
 Layer: Pipeline governance.
@@ -18,6 +19,8 @@ Do not recover semantic facts or perform IR, alias, widening, lowering/materiali
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import hashlib
 import json
@@ -68,6 +71,10 @@ from inertia.pipeline.structured_ast_output import (
 )
 
 from .errors import PipelineHardError
+import dataclasses
+import operator
+import builtins
+KeyT = typing.TypeVar("KeyT")
 
 __all__ = [
     "assert_function_ast_consumer_ready_8616",
@@ -85,7 +92,7 @@ __all__ = [
 ]
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _EvidenceFingerprintWalk8616:
     """Track active paths and memoized content within one observation only.
 
@@ -94,12 +101,13 @@ class _EvidenceFingerprintWalk8616:
     No memo survives a new observation of potentially mutable evidence.
     """
 
-    active: set[int] = field(default_factory=set)
-    memo: dict[int, tuple[object, str | None]] = field(default_factory=dict)
-    outputs: dict[int, tuple[object, str | None]] = field(default_factory=dict)
+    active: object = field(default_factory=set)
+    memo: object = field(default_factory=dict)
+    outputs: object = field(default_factory=dict)
 
 
-def _scalar_fingerprint_8616(value: object) -> str | None:
+@cython.ccall
+def _scalar_fingerprint_8616(value: object) -> object:
     """Encode plain scalar leaves while retaining enum type identity separately."""
     if isinstance(value, Enum):
         return None
@@ -109,11 +117,11 @@ def _scalar_fingerprint_8616(value: object) -> str | None:
 
 
 def _sequence_fingerprint_8616(
-    values: Iterable[object], walk: _EvidenceFingerprintWalk8616, *, unordered: bool,
-) -> str | None:
+    values: Iterable[object], walk: _EvidenceFingerprintWalk8616, *, unordered: cython.bint,
+) -> object:
     """Encode complete ordered or unordered container contents."""
-    parts = tuple(_structural_fingerprint_8616(item, walk) for item in values)
-    if any(part is None for part in parts):
+    parts = tuple(_structural_fingerprint_8616(item, walk) for item in iter(values))
+    if any(part is None for part in iter(parts)):
         return None
     complete = cast(tuple[str, ...], parts)
     if unordered:
@@ -121,8 +129,10 @@ def _sequence_fingerprint_8616(
     return "seq:(" + ",".join(complete) + ")"
 
 
-def _compound_fingerprint_8616(value: object, walk: _EvidenceFingerprintWalk8616) -> str | None:
+@cython.ccall
+def _compound_fingerprint_8616(value: object, walk: _EvidenceFingerprintWalk8616) -> object:
     """Dispatch structured evidence without treating implementation identity as content."""
+    snapshot: object
     if isinstance(value, StructuredASTPublication8616):
         snapshot = value.current_snapshot()
         return None if snapshot is None else f"structured_ast:{snapshot.function_addr}:{snapshot.digest}"
@@ -137,11 +147,14 @@ def _compound_fingerprint_8616(value: object, walk: _EvidenceFingerprintWalk8616
     return _members_fingerprint_8616(value, walk)
 
 
+@cython.ccall
 def _typed_evidence_fingerprint_8616(
     value: IRFunctionArtifact | SSAFunctionArtifact | IRValue | IRCallStackEffect8616 | Enum,
     walk: _EvidenceFingerprintWalk8616,
-) -> str | None:
+) -> object:
     """Use owned body and enum encodings without traversing implementation state."""
+    digest: object
+    payload: object
     if isinstance(value, IRCallStackEffect8616):
         try:
             encoded = canonical_call_stack_effect_8616(value)
@@ -164,10 +177,14 @@ def _typed_evidence_fingerprint_8616(
     return f"enum:{kind.__module__}.{kind.__qualname__}:{value.name}:{payload}"
 
 
-def _mapping_fingerprint_8616[KeyT](
+def _mapping_fingerprint_8616(
     value: Mapping[KeyT, object], walk: _EvidenceFingerprintWalk8616,
-) -> str | None:
+) -> object:
     """Encode every mapping key and value with deterministic ordering."""
+    item_fp: object
+    key_fp: object
+    item: object
+    key: object
     parts: list[tuple[str, str]] = []
     for key, item in value.items():
         key_fp = _structural_fingerprint_8616(key, walk)
@@ -175,13 +192,16 @@ def _mapping_fingerprint_8616[KeyT](
         if key_fp is None or item_fp is None:
             return None
         parts.append((key_fp, item_fp))
-    return "map:{" + ",".join(sorted(f"{key}={item}" for key, item in parts)) + "}"
+    return "map:{" + ",".join(sorted(f"{key}={item}" for key, item in iter(parts))) + "}"
 
 
+@cython.ccall
 def _structural_fingerprint_8616(
     value: object, walk: _EvidenceFingerprintWalk8616 | None = None,
-) -> str | None:
+) -> object:
     """Encode evidence content, refusing cycles without truncating finite provenance."""
+    cached: object
+    scalar: object
     scalar = _scalar_fingerprint_8616(value)
     if scalar is not None:
         return scalar
@@ -204,11 +224,14 @@ def _structural_fingerprint_8616(
 class _SlottedEvidenceType8616(Protocol):
     """Describe slot declarations supplied by native codegen evidence types."""
 
-    __slots__: str | Iterable[str]
+    __slots__: object
 
 
-def _slotted_evidence_members_8616(value: object) -> dict[str, object]:
+@cython.ccall
+def _slotted_evidence_members_8616(value: object) -> object:
     """Collect native carrier slots, including their inherited declarations."""
+    name: object
+    owner: object
     members: dict[str, object] = {}
     for owner in type(value).__mro__:
         try:
@@ -227,8 +250,10 @@ def _slotted_evidence_members_8616(value: object) -> dict[str, object]:
     return members
 
 
-def _members_fingerprint_8616(value: object, walk: _EvidenceFingerprintWalk8616) -> str | None:
+@cython.ccall
+def _members_fingerprint_8616(value: object, walk: _EvidenceFingerprintWalk8616) -> object:
     """Fingerprint dynamic boundary members without counting an artificial mapping level."""
+    encoded: object
     try:
         members = dict(vars(value))
     except TypeError:
@@ -241,10 +266,12 @@ def _members_fingerprint_8616(value: object, walk: _EvidenceFingerprintWalk8616)
     return f"obj:{type(value).__qualname__}:[{encoded}]"
 
 
+@cython.ccall
 def _evidence_fingerprint_8616(
     value: object, walk: _EvidenceFingerprintWalk8616 | None = None,
-) -> str | None:
+) -> object:
     """Observe each live output once within one caller-owned observation."""
+    cached: object
     state = _EvidenceFingerprintWalk8616() if walk is None else walk
     marker = id(value)
     cached = state.outputs.get(marker)
@@ -255,9 +282,10 @@ def _evidence_fingerprint_8616(
     return fingerprint
 
 
+@cython.ccall
 def _encode_evidence_fingerprint_8616(
     value: object, walk: _EvidenceFingerprintWalk8616,
-) -> str | None:
+) -> object:
     """Fingerprint the content of one real evidence object, never its identity.
 
     Owned contracts contribute their ``to_dict`` projection; mutable
@@ -265,6 +293,8 @@ def _encode_evidence_fingerprint_8616(
     values, so in-place mutation is visible. Unsupported evidence yields
     ``None`` — a typed non-result, never a guessed fingerprint.
     """
+    structural: object
+    to_dict: object
     if isinstance(value, StructuredASTPublication8616):
         # Diagnostics describe the receipt; only the version contract observes
         # the live output. Never fingerprint its diagnostic serialization.
@@ -290,9 +320,10 @@ def _encode_evidence_fingerprint_8616(
     return hashlib.sha256(structural.encode("utf-8")).hexdigest()
 
 
+@cython.ccall
 def _current_function_source_revision_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> FunctionSourceRevision8616 | None:
     """Resolve one coherent live source scope from the authoritative IR bodies."""
     raw = registered_function_ir_artifact_8616(project, function_addr)
@@ -304,29 +335,29 @@ def _current_function_source_revision_8616(
 
 def _registered_bodies_source_revision_8616(
     project: object,
-    function_addr: int,
-    bodies: tuple[IRFunctionArtifact | SSAFunctionArtifact | None, ...],
+    function_addr: cython.longlong,
+    bodies: object,
 ) -> FunctionSourceRevision8616 | None:
     """Reobserve coherent source scopes from bodies resolved in this observation."""
     revisions = tuple(
         artifact.source_revision
-        for artifact in bodies
+        for artifact in iter(bodies)
         if artifact is not None and artifact.source_revision is not None
     )
     if not revisions:
         return observed_function_source_revision_8616(project, function_addr)
     source = revisions[0]
-    if any(revision != source for revision in revisions[1:]):
+    if any(revision != source for revision in iter(revisions[1:])):
         return None
     return reobserve_function_source_revision_8616(project, source)
 
 
 def record_function_stage_evidence_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     stage: FunctionLifecycleStage8616,
     *,
-    producer: str,
+    producer: object,
     source_revision: FunctionSourceRevision8616 | None = None,
     upstream: Iterable[tuple[FunctionLifecycleStage8616, object]] = (),
     outputs: Iterable[object] = (),
@@ -339,6 +370,10 @@ def record_function_stage_evidence_8616(
     ``outputs`` are the actual evidence objects this stage produced, so later
     replacement of those objects invalidates every recorded dependent.
     """
+    declared: object
+    fingerprint: object
+    input_stage: object
+    item: object
     if stage not in FUNCTION_LIFECYCLE_STAGES_8616:
         raise TypeError(f"unknown function lifecycle stage: {stage!r}")
     state = function_lifecycle_state_8616(project, function_addr)
@@ -348,16 +383,16 @@ def record_function_stage_evidence_8616(
     output_items = tuple(outputs)
     output_fingerprints = tuple(
         fingerprint
-        for item in output_items
+        for item in iter(output_items)
         if (fingerprint := _evidence_fingerprint_8616(item)) is not None
     )
-    unsupported = len(output_fingerprints) != len(output_items)
+    unsupported = operator.ne(len(output_fingerprints), len(output_items))
     # Every recorded earlier stage is a bound input: its aggregate output
     # fingerprint is captured, so replacing or dropping that evidence
     # invalidates this record even under an unchanged source generation.
     inputs: dict[FunctionLifecycleStage8616, FunctionStageInput8616] = {
         prior: FunctionStageInput8616(prior, prior_evidence.outputs_digest)
-        for prior, prior_evidence in evidence_map.items()
+        for prior, prior_evidence in builtins.iter(evidence_map.items())
         if prior in FUNCTION_LIFECYCLE_STAGES_8616
         and FUNCTION_LIFECYCLE_STAGES_8616.index(prior)
         < FUNCTION_LIFECYCLE_STAGES_8616.index(stage)
@@ -374,7 +409,7 @@ def record_function_stage_evidence_8616(
             )
         else:
             inputs[input_stage] = FunctionStageInput8616(
-                input_stage, declared.digest, (*declared.items, fingerprint)
+                input_stage, declared.digest, tuple(declared.items) + (fingerprint,)
             )
     evidence = FunctionStageEvidence8616(
         stage=stage,
@@ -384,27 +419,29 @@ def record_function_stage_evidence_8616(
         producer=producer,
         live_outputs=output_items,
         failure=(FunctionStageFailure8616.EVIDENCE_NOT_REPRESENTABLE if unsupported else None),
-        ast_outputs=tuple(item for item in output_items if isinstance(item, StructuredASTPublication8616)),
+        ast_outputs=tuple(item for item in iter(output_items) if isinstance(item, StructuredASTPublication8616)),
     )
     state.record(evidence)
     return evidence
 
 
+@cython.ccall
 def record_function_ast_stage_evidence_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     stage: FunctionLifecycleStage8616,
     codegen: object,
     *,
-    producer: str,
+    producer: object,
     outputs: Iterable[object] = (),
 ) -> FunctionStageEvidence8616:
     """Publish the actual final AST version with its producer's other evidence."""
+    snapshot: object
     if stage not in {FunctionLifecycleStage8616.STRUCTURING, FunctionLifecycleStage8616.REWRITE}:
         raise ValueError("only Structuring and Rewrite publish structured AST versions")
     publication = publish_structured_ast_output_8616(codegen)
     snapshot = publication.observation.snapshot
-    if snapshot is not None and snapshot.function_addr != function_addr:
+    if snapshot is not None and operator.ne(snapshot.function_addr, function_addr):
         raise PipelineHardError(
             "AST publication belongs to another function",
             layer=producer,
@@ -413,14 +450,16 @@ def record_function_ast_stage_evidence_8616(
         )
     return record_function_stage_evidence_8616(
         project, function_addr, stage, producer=producer,
-        outputs=(publication, *outputs),
+        outputs=(publication, ) + tuple(outputs),
     )
 
 
 def handoff_function_ast_to_rewrite_8616(
-    project: object, function_addr: int, codegen: object,
+    project: object, function_addr: cython.longlong, codegen: object,
 ) -> None:
     """Validate the actual Structuring output before Rewrite takes ownership."""
+    evidence: object
+    failure: object
     assert_function_stage_ready_8616(
         project, function_addr, FunctionLifecycleStage8616.STRUCTURING,
         layer="postprocess_codegen:structuring_handoff",
@@ -431,7 +470,7 @@ def handoff_function_ast_to_rewrite_8616(
         FunctionLifecycleStage8616.STRUCTURING,
     )
     publications = () if evidence is None else tuple(
-        item for item in evidence.live_outputs if isinstance(item, StructuredASTPublication8616)
+        item for item in iter(evidence.live_outputs) if isinstance(item, StructuredASTPublication8616)
     )
     if len(publications) != 1:
         raise PipelineHardError(
@@ -461,9 +500,10 @@ def handoff_function_ast_to_rewrite_8616(
     drop_function_stage_evidence_8616(project, function_addr, FunctionLifecycleStage8616.REWRITE)
 
 
+@cython.ccall
 def drop_function_stage_evidence_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     stage: FunctionLifecycleStage8616 | None = None,
 ) -> None:
     """Drop recorded evidence for one stage, or all stages when omitted.
@@ -471,25 +511,31 @@ def drop_function_stage_evidence_8616(
     Dropping earlier-stage evidence changes every dependent's upstream digest,
     which revokes their CURRENT verdict without deleting their records.
     """
+    state: object
     state = existing_function_lifecycle_state_8616(project, function_addr)
     if state is not None:
         state.drop(stage)
 
 
+@cython.ccall
 def function_stage_evidence_map_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> Mapping[FunctionLifecycleStage8616, FunctionStageEvidence8616]:
     """Return a read-only view of recorded stage evidence for one function."""
+    state: object
     state = existing_function_lifecycle_state_8616(project, function_addr)
     return {} if state is None else dict(state.publications)
 
 
+@cython.ccall
 def _live_fingerprints_8616(
     evidence: FunctionStageEvidence8616,
     walk: _EvidenceFingerprintWalk8616 | None = None,
-) -> tuple[str, ...] | None:
+) -> object:
     """Re-fingerprint recorded live outputs to catch in-place mutation."""
+    fingerprint: object
+    item: object
     state = _EvidenceFingerprintWalk8616() if walk is None else walk
     live: list[str] = []
     for item in evidence.live_outputs:
@@ -500,14 +546,15 @@ def _live_fingerprints_8616(
     return tuple(live)
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _StageOutputObservation8616:
     """Share one output snapshot across dependencies in one readiness call."""
 
     walk: _EvidenceFingerprintWalk8616 = field(default_factory=_EvidenceFingerprintWalk8616)
-    outputs: dict[FunctionLifecycleStage8616, tuple[str, ...] | None] = field(default_factory=dict)
+    outputs: object = field(default_factory=dict)
 
-    def observe(self, evidence: FunctionStageEvidence8616) -> tuple[str, ...] | None:
+    @cython.ccall
+    def observe(self, evidence: FunctionStageEvidence8616) -> object:
         """Observe shared bodies once; retain no state for the next admission."""
         if evidence.stage not in self.outputs:
             self.outputs[evidence.stage] = _live_fingerprints_8616(evidence, self.walk)
@@ -515,15 +562,17 @@ class _StageOutputObservation8616:
 
 
 def _ir_authority_alive_8616(
-    bodies: tuple[IRFunctionArtifact | SSAFunctionArtifact | None, ...],
+    bodies: object,
     items: Iterable[str],
     walk: _EvidenceFingerprintWalk8616,
-) -> bool:
+) -> cython.bint:
     """Match declared IR inputs against bodies resolved in this observation.
 
     The registered IR/SSA artifacts are the real IR-stage evidence; no
     synthetic ledger record is required for them.
     """
+    artifact: object
+    fingerprint: object
     authority: list[str] = []
     for artifact in bodies:
         if artifact is None:
@@ -531,10 +580,10 @@ def _ir_authority_alive_8616(
         fingerprint = _evidence_fingerprint_8616(artifact, walk)
         if fingerprint is not None:
             authority.append(fingerprint)
-    return bool(authority) and all(item in authority for item in items)
+    return bool(authority) and all(item in authority for item in iter(items))
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _PriorBlock8616:
     """One dead prior-stage outcome for the readiness loop."""
 
@@ -542,11 +591,12 @@ class _PriorBlock8616:
     failure: FunctionStageFailure8616 | None
 
 
+@cython.ccall
 def _prior_evidence_block_8616(
     evidence: FunctionStageEvidence8616,
     prior: FunctionLifecycleStage8616,
-    current: FunctionSourceRevision8616 | None,
-    input_alive: Callable[[FunctionStageInput8616], bool],
+    current: object,
+    input_alive: Callable[[FunctionStageInput8616], cython.bint],
     observe_outputs: Callable[[FunctionStageEvidence8616], tuple[str, ...] | None],
 ) -> _PriorBlock8616 | None:
     """Evaluate one recorded prior stage; ``None`` means it stays alive.
@@ -556,6 +606,8 @@ def _prior_evidence_block_8616(
     upstream input is STALE. ``input_alive`` verifies each declared upstream
     binding against the producer's live fingerprints.
     """
+    live: object
+    declared: object
     if evidence.source_revision is None:
         return _PriorBlock8616(FunctionStageVerdict8616.UNKNOWN_REFUSE, None)
     if current is None:
@@ -563,7 +615,7 @@ def _prior_evidence_block_8616(
             FunctionStageVerdict8616.UNKNOWN_REFUSE,
             FunctionStageFailure8616.SOURCE_UNAVAILABLE,
         )
-    if evidence.source_revision != current:
+    if operator.ne(evidence.source_revision, current):
         return _PriorBlock8616(
             FunctionStageVerdict8616.STALE,
             FunctionStageFailure8616.SOURCE_REVISION_CHANGED,
@@ -576,7 +628,7 @@ def _prior_evidence_block_8616(
             FunctionStageVerdict8616.UNKNOWN_REFUSE,
             FunctionStageFailure8616.EVIDENCE_NOT_REPRESENTABLE,
         )
-    if live != evidence.outputs:
+    if operator.ne(live, evidence.outputs):
         return _PriorBlock8616(
             FunctionStageVerdict8616.STALE,
             FunctionStageFailure8616.UPSTREAM_EVIDENCE_CHANGED,
@@ -591,16 +643,16 @@ def _prior_evidence_block_8616(
 
 
 def _unrecorded_stage_readiness_8616(
-    function_addr: int,
+    function_addr: cython.longlong,
     stage: FunctionLifecycleStage8616,
-    current: FunctionSourceRevision8616 | None,
-    bodies: tuple[IRFunctionArtifact | SSAFunctionArtifact | None, ...],
+    current: object,
+    bodies: object,
 ) -> FunctionStageReadiness8616:
     """Recognize the actual IR registries without inventing later producers."""
     if (
         stage is FunctionLifecycleStage8616.IR
         and current is not None
-        and any(artifact is not None for artifact in bodies)
+        and any(artifact is not None for artifact in iter(bodies))
     ):
         return FunctionStageReadiness8616(
             function_addr, stage, FunctionStageVerdict8616.CURRENT,
@@ -612,7 +664,7 @@ def _unrecorded_stage_readiness_8616(
 
 def _evaluate_function_stage_readiness_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     stage: FunctionLifecycleStage8616,
 ) -> FunctionStageReadiness8616:
     """Evaluate one stage's readiness from recorded evidence only.
@@ -621,6 +673,10 @@ def _evaluate_function_stage_readiness_8616(
     recorded evidence is dead blocks every dependent stage. A stage with no
     recorded evidence is UNTTRACKED — never promoted, never refused.
     """
+    blocked: object
+    evidence: object
+    own: object
+    prior: object
     evidence_map = function_stage_evidence_map_8616(project, function_addr)
     # The SSA registry binding is the authoritative IR-stage evidence: its
     # typed stale refusal invalidates every recorded dependent stage.
@@ -641,8 +697,10 @@ def _evaluate_function_stage_readiness_8616(
 
     def _input_stage_alive_8616(
         declared: FunctionStageInput8616,
-    ) -> bool:
+    ) -> cython.bint:
         """Verify one declared upstream binding against live producer truth."""
+        input_evidence: object
+        live_fingerprints: object
         input_evidence = evidence_map.get(declared.stage)
         live_fingerprints = (
             None
@@ -656,11 +714,11 @@ def _evaluate_function_stage_readiness_8616(
             return _ir_authority_alive_8616(bodies, declared.items, observation.walk)
         if input_evidence is None or live_fingerprints is None:
             return False
-        if declared.digest and declared.digest != function_stage_outputs_digest_8616(
+        if declared.digest and operator.ne(declared.digest, function_stage_outputs_digest_8616(
             live_fingerprints
-        ):
+        )):
             return False
-        return all(item in live_fingerprints for item in declared.items)
+        return all(item in live_fingerprints for item in iter(declared.items))
 
     for prior in FUNCTION_LIFECYCLE_STAGES_8616[: target_index + 1]:
         evidence = evidence_map.get(prior)
@@ -687,15 +745,18 @@ def _evaluate_function_stage_readiness_8616(
     )
 
 
+@cython.ccall
 def _observe_function_readiness_8616(project: object, readiness: FunctionStageReadiness8616) -> None:
     """Transport checked currency or refusal into the canonical function state."""
+    state: object
     state = existing_function_lifecycle_state_8616(project, readiness.function_addr)
     if state is not None:
         state.observe(readiness)
 
 
+@cython.ccall
 def function_stage_readiness_8616(
-    project: object, function_addr: int, stage: FunctionLifecycleStage8616,
+    project: object, function_addr: cython.longlong, stage: FunctionLifecycleStage8616,
 ) -> FunctionStageReadiness8616:
     """Observe producer currency; diagnostics alone cannot promote native maturity."""
     readiness = _evaluate_function_stage_readiness_8616(project, function_addr, stage)
@@ -706,20 +767,22 @@ def function_stage_readiness_8616(
 
 def _native_ast_publication_failure_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     required: FunctionLifecycleStage8616,
     target: FunctionLifecycleStage8616,
 ) -> FunctionStageFailure8616 | None:
     """Require one correctly bound AST version and the producer/consumer handoff."""
+    evidence: object
+    snapshot: object
     evidence = function_stage_evidence_map_8616(project, function_addr).get(required)
     publications = () if evidence is None else tuple(
-        item for item in evidence.live_outputs if isinstance(item, StructuredASTPublication8616)
+        item for item in iter(evidence.live_outputs) if isinstance(item, StructuredASTPublication8616)
     )
     if len(publications) != 1:
         return FunctionStageFailure8616.AST_PUBLICATION_UNAVAILABLE
     publication = publications[0]
     snapshot = publication.observation.snapshot
-    if snapshot is None or snapshot.function_addr != function_addr:
+    if snapshot is None or operator.ne(snapshot.function_addr, function_addr):
         return FunctionStageFailure8616.AST_PUBLICATION_UNAVAILABLE
     if (
         required is FunctionLifecycleStage8616.REWRITE
@@ -735,12 +798,15 @@ def _native_ast_publication_failure_8616(
     return None
 
 
+@cython.ccall
 def _native_stage_admission_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     stage: FunctionLifecycleStage8616,
 ) -> FunctionStageReadiness8616:
     """Require completed native producers in the canonical dependency order."""
+    failure: object
+    required: object
     target = function_stage_readiness_8616(project, function_addr, stage)
     if target.verdict is FunctionStageVerdict8616.STALE:
         return target
@@ -772,11 +838,11 @@ def _native_stage_admission_8616(
 
 def assert_function_ast_consumer_ready_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     stage: FunctionLifecycleStage8616,
     codegen: object,
     *,
-    layer: str,
+    layer: object,
 ) -> FunctionStageReadiness8616:
     """Check producer currency and the actual AST this consumer will use."""
     readiness = assert_function_stage_ready_8616(project, function_addr, stage, layer=layer)
@@ -786,12 +852,12 @@ def assert_function_ast_consumer_ready_8616(
         return readiness
     evidence = function_stage_evidence_map_8616(project, function_addr)[stage]
     publications = tuple(
-        item for item in evidence.live_outputs if isinstance(item, StructuredASTPublication8616)
+        item for item in iter(evidence.live_outputs) if isinstance(item, StructuredASTPublication8616)
     )
     # Native admission above requires exactly one actual AST publication.
     publication = publications[0]
     current = observe_structured_ast_output_8616(codegen)
-    if not current.complete or current.snapshot != publication.observation.snapshot:
+    if not current.complete or operator.ne(current.snapshot, publication.observation.snapshot):
         refusal = FunctionStageReadiness8616(
             function_addr, stage, FunctionStageVerdict8616.UNKNOWN_REFUSE,
             blocking_stage=stage, failure=FunctionStageFailure8616.AST_CONSUMER_CHANGED,
@@ -810,12 +876,13 @@ def assert_function_ast_consumer_ready_8616(
     return readiness
 
 
+@cython.ccall
 def assert_function_stage_ready_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     stage: FunctionLifecycleStage8616,
     *,
-    layer: str,
+    layer: object,
 ) -> FunctionStageReadiness8616:
     """Require native stage producers; preserve independent model obligations.
 
@@ -843,32 +910,32 @@ def assert_function_stage_ready_8616(
     return readiness
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _RewriteCompletionRequest8616:
     """Retain one producer's completion evidence until its actual output exists."""
 
-    producer: str
-    outputs: tuple[object, ...]
+    producer: object
+    outputs: object
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _FunctionProductionScope8616:
     """Temporary, process-local authority to render one producer's pending AST."""
 
     project: object
-    function_addr: int
+    function_addr: cython.longlong
     codegen: object
     source_evidence: FunctionStageEvidence8616 | None
     input_stage: FunctionLifecycleStage8616
-    process_id: int
-    active: bool = True
+    process_id: cython.longlong
+    active: cython.bint = True
     completion: _RewriteCompletionRequest8616 | None = None
 
 
 class _RewriteFunctionAddress8616(Protocol):
     """Third-party generated function coordinate used by the rendering boundary."""
 
-    addr: int
+    addr: cython.longlong
 
 
 class _RewriteFunctionCodegen8616(Protocol):
@@ -882,9 +949,10 @@ _ACTIVE_FUNCTION_PRODUCTION_8616: ContextVar[_FunctionProductionScope8616 | None
 )
 
 
+@cython.ccall
 def record_function_rewrite_completion_8616(
-    project: object, function_addr: int, codegen: object, *,
-    producer: str, outputs: Iterable[object] = (),
+    project: object, function_addr: cython.longlong, codegen: object, *,
+    producer: object, outputs: Iterable[object] = (),
 ) -> None:
     """Record standalone output or defer it until the matching producer finishes.
 
@@ -894,6 +962,7 @@ def record_function_rewrite_completion_8616(
     AST. An exception discards the request. A foreign, inherited, inactive or
     duplicate completion request is an API error, never publication authority.
     """
+    scope: object
     scope = _ACTIVE_FUNCTION_PRODUCTION_8616.get()
     if scope is None:
         record_function_ast_stage_evidence_8616(
@@ -902,8 +971,8 @@ def record_function_rewrite_completion_8616(
         )
         return
     if (
-        not scope.active or scope.process_id != getpid()
-        or scope.project is not project or scope.function_addr != function_addr
+        not scope.active or operator.ne(scope.process_id, getpid())
+        or scope.project is not project or operator.ne(scope.function_addr, function_addr)
         or scope.codegen is not codegen
     ):
         raise ValueError("Rewrite completion does not belong to the active producer")
@@ -914,12 +983,15 @@ def record_function_rewrite_completion_8616(
     scope.completion = _RewriteCompletionRequest8616(producer, tuple(outputs))
 
 
+@cython.ccall
 def _commit_function_rewrite_completion_8616(scope: _FunctionProductionScope8616) -> None:
     """Seal requested output only while its identical consumed input is current."""
+    current: object
+    request: object
     request = scope.completion
     if request is None:
         return
-    if not scope.active or scope.process_id != getpid():
+    if not scope.active or operator.ne(scope.process_id, getpid()):
         raise ValueError("Rewrite completion requires its live producing process")
     current = function_stage_evidence_map_8616(scope.project, scope.function_addr).get(scope.input_stage)
     if current is not scope.source_evidence:
@@ -941,7 +1013,7 @@ def _commit_function_rewrite_completion_8616(scope: _FunctionProductionScope8616
 
 @contextmanager
 def function_rewrite_production_scope_8616(
-    project: object, function_addr: int, codegen: object,
+    project: object, function_addr: cython.longlong, codegen: object,
 ) -> Iterator[None]:
     """Own pending Rewrite output after a checked Structuring handoff.
 
@@ -952,6 +1024,7 @@ def function_rewrite_production_scope_8616(
     restoring any enclosing producer; publication supplies no semantic verdict.
     Final consumers still require the actual completed Rewrite publication.
     """
+    evidence: object
     handoff_function_ast_to_rewrite_8616(project, function_addr, codegen)
     evidence = function_stage_evidence_map_8616(project, function_addr).get(
         FunctionLifecycleStage8616.STRUCTURING,
@@ -971,13 +1044,14 @@ def function_rewrite_production_scope_8616(
 
 @contextmanager
 def function_structuring_production_scope_8616(
-    project: object, function_addr: int, codegen: object,
+    project: object, function_addr: cython.longlong, codegen: object,
 ) -> Iterator[None]:
     """Render pending Structuring output from the exact checked Types input.
 
     This lease grants no completed Structuring or Rewrite evidence. It expires
     on exit and rejects replaced input evidence, foreign generators and forks.
     """
+    evidence: object
     assert_function_stage_ready_8616(
         project, function_addr, FunctionLifecycleStage8616.TYPES,
         layer="pipeline_contract:structuring_internal_render",
@@ -996,6 +1070,7 @@ def function_structuring_production_scope_8616(
         _ACTIVE_FUNCTION_PRODUCTION_8616.reset(token)
 
 
+@cython.ccall
 def function_render_required_stage_8616(
     project: object, codegen: object,
 ) -> FunctionLifecycleStage8616:
@@ -1004,9 +1079,11 @@ def function_render_required_stage_8616(
     Foreign generators, changed input versions, expired or inherited process
     contexts and final rendering all retain the full Rewrite requirement.
     """
+    current: object
+    scope: object
     scope = _ACTIVE_FUNCTION_PRODUCTION_8616.get()
     if (
-        scope is None or not scope.active or scope.process_id != getpid()
+        scope is None or not scope.active or operator.ne(scope.process_id, getpid())
         or scope.project is not project or scope.codegen is not codegen
     ):
         return FunctionLifecycleStage8616.REWRITE
@@ -1014,7 +1091,7 @@ def function_render_required_stage_8616(
         addr = cast(_RewriteFunctionCodegen8616, codegen).cfunc.addr
     except AttributeError:
         return FunctionLifecycleStage8616.REWRITE
-    if addr != scope.function_addr:
+    if operator.ne(addr, scope.function_addr):
         return FunctionLifecycleStage8616.REWRITE
     current = function_stage_evidence_map_8616(project, addr).get(
         scope.input_stage,

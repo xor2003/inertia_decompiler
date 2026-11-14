@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove segment-register restoration through exact SS stack fragments.
 
 Layer: Alias.
@@ -11,6 +12,8 @@ names, rendered assembly, or C shape.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -43,6 +46,9 @@ from .stack_restore_state import (
 from .stack_restore_state import (
     stack_restore_state_8616 as _stack_state,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "SegmentStackRestoreArtifact8616",
@@ -73,16 +79,16 @@ class SegmentStackRestoreVerdict8616(StrEnum):
     UNKNOWN_REFUSE = "unknown_refuse"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentStackRestoreFact8616:
     """Exact stack-byte evidence for one segment-register write."""
 
-    block_addr: int
-    restore_instruction_addr: int
-    restore_register: str
+    block_addr: cython.longlong
+    restore_instruction_addr: cython.longlong
+    restore_register: object
     saved_instruction_addr: int | None
-    saved_register: str | None
-    stack_offsets: tuple[int, ...]
+    saved_register: object
+    stack_offsets: object
     verdict: SegmentStackRestoreVerdict8616
     constant_value: int | None = None
 
@@ -100,7 +106,7 @@ class SegmentStackRestoreFact8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentStackRestoreArtifact8616:
     """Alias-proved stack restoration facts and IR restore relations.
 
@@ -112,10 +118,10 @@ class SegmentStackRestoreArtifact8616:
 
     facts: tuple[SegmentStackRestoreFact8616, ...] = ()
     restore_sources: tuple[SegmentRestoreSource, ...] = ()
-    summary: dict[str, int] = field(default_factory=dict)
+    summary: object = field(default_factory=dict)
     source_artifact: IRFunctionArtifact | None = field(default=None, compare=False, repr=False)
 
-    def is_bound_to(self, artifact: IRFunctionArtifact) -> bool:
+    def is_bound_to(self, artifact: IRFunctionArtifact) -> cython.bint:
         """Require the exact retained IR object, never merely equal addresses.
 
         This establishes provenance only, not whole-function preservation or
@@ -129,7 +135,7 @@ class SegmentStackRestoreArtifact8616:
             "source_function_addr": (
                 None if self.source_artifact is None else self.source_artifact.function_addr
             ),
-            "facts": [fact.to_dict() for fact in self.facts],
+            "facts": [fact.to_dict() for fact in iter(self.facts)],
             "restore_sources": [
                 {
                     "block_addr": source.block_addr,
@@ -143,7 +149,7 @@ class SegmentStackRestoreArtifact8616:
                         else source.source_artifact.function_addr
                     ),
                 }
-                for source in self.restore_sources
+                for source in iter(self.restore_sources)
             ],
             "summary": dict(self.summary),
         }
@@ -154,28 +160,32 @@ StackRegisterRestoreFact8616: Final[type[SegmentStackRestoreFact8616]] = Segment
 StackRegisterRestoreArtifact8616: Final[type[SegmentStackRestoreArtifact8616]] = SegmentStackRestoreArtifact8616
 
 
-def _predecessor_map(artifact: IRFunctionArtifact) -> dict[int, tuple[int, ...]]:
+@cython.ccall
+def _predecessor_map(artifact: IRFunctionArtifact) -> dict[cython.longlong, tuple[cython.longlong, ...]]:
     """Build deterministic in-function predecessors from typed IR edges."""
-    block_addrs = {block.addr for block in artifact.blocks}
-    predecessors: dict[int, list[int]] = {addr: [] for addr in block_addrs}
+    block: object
+    successor: object
+    block_addrs = {block.addr for block in iter(artifact.blocks)}
+    predecessors: dict[cython.longlong, list[cython.longlong]] = {addr: [] for addr in iter(block_addrs)}
     for block in artifact.blocks:
         for successor in block.successor_addrs:
             if successor in predecessors:
                 predecessors[successor].append(block.addr)
-    return {addr: tuple(sorted(values)) for addr, values in predecessors.items()}
+    return {addr: tuple(sorted(values)) for addr, values in builtins.iter(predecessors.items())}
 
 
+@cython.ccall
 def _track_value_fragments_8616(
     instruction: IRInstr,
-    values: dict[str | int, SegmentStackFragments8616],
-    constants: IRConstantFlow8616 | None,
+    values: object,
+    constants: object,
     stack_pointers: StackPointerSnapshots8616,
-    stack_bytes: dict[int, SegmentStackByteOrigin8616],
+    stack_bytes: object,
     sp_delta: int | None,
     bp_delta: int | None,
-    tracked_registers: frozenset[str],
+    tracked_registers: object,
     *,
-    instruction_addr: int,
+    instruction_addr: cython.longlong,
 ) -> None:
     """Record fragments at the exact address selected by the transfer owner."""
     if instruction.op == "LOAD" and isinstance(instruction.dst, IRValue) and instruction.args:
@@ -190,7 +200,7 @@ def _track_value_fragments_8616(
             if instruction.dst.source_tmp is not None:
                 values[instruction.dst.source_tmp] = fragments
     elif instruction.op == "STORE" and len(instruction.args) >= 2:
-        address, value = instruction.args[:2]
+        address, value = tuple(instruction.args[:2])
         if isinstance(address, IRAddress) and isinstance(value, IRValue):
             store_stack_fragments_8616(
                 address,
@@ -219,15 +229,18 @@ def _track_value_fragments_8616(
             values[f"expr:{instruction.op}"] = fragments
 
 
+@cython.ccall
 def _restore_fact_for_write_8616(
-    block_addr: int,
+    block_addr: cython.longlong,
     instruction: IRInstr,
-    values: dict[str | int, SegmentStackFragments8616],
-    tracked_registers: frozenset[str],
+    values: object,
+    tracked_registers: object,
     *,
-    instruction_addr: int,
+    instruction_addr: cython.longlong,
 ) -> SegmentStackRestoreFact8616 | None:
     """Classify a register write at the transfer owner's known address."""
+    complete: object
+    saved_constant: object
     dst = instruction.dst
     if not (
         isinstance(dst, IRValue)
@@ -273,11 +286,16 @@ def _restore_fact_for_write_8616(
     return None
 
 
+@cython.ccall
 def _call_effect_stack_state_8616(
     instruction: IRInstr,
     instruction_entry_state: _SegmentStackAliasState8616,
-) -> tuple[int | None, dict[int, SegmentStackByteOrigin8616], int | None]:
+) -> tuple[int | None, dict[cython.longlong, SegmentStackByteOrigin8616], int | None]:
     """Return (sp_delta, stack_bytes, bp_delta) after one CALL boundary."""
+    call_entry_sp: object
+    coordinate_delta: object
+    coordinates: object
+    effect: object
     effect = instruction.call_stack_effect
     bp_delta = (
         instruction_entry_state.bp_delta
@@ -294,12 +312,12 @@ def _call_effect_stack_state_8616(
         target = instruction.args[0] if instruction.args else None
         target_bound = coordinates.source is not None and coordinates.source.matches_call(instruction)
         if isinstance(target, IRValue) and target.space is MemSpace.CONST and type(target.const) is int:
-            target_bound = target_bound and coordinates.target_addr == target.const
+            target_bound = target_bound and operator.eq(coordinates.target_addr, target.const)
         coordinate_delta = (
             coordinates.net_sp_delta
-            if coordinates.callsite_addr == instruction.addr
+            if operator.eq(coordinates.callsite_addr, instruction.addr)
             and coordinates.net_sp_delta is not None
-            and coordinates.net_sp_delta == effect.net_stack_delta
+            and operator.eq(coordinates.net_sp_delta, effect.net_stack_delta)
             and target_bound
             and coordinates.has_proven_sp_delta
             else None
@@ -331,6 +349,7 @@ def _call_effect_stack_state_8616(
     return None, {}, bp_delta
 
 
+@cython.ccall
 def _ignore_call_positions(_instruction: IRInstr, _before: int | None, _entry: int | None) -> None:
     """Leave optional CALL-position observation disabled during ordinary transfer."""
 
@@ -338,11 +357,12 @@ def _ignore_call_positions(_instruction: IRInstr, _before: int | None, _entry: i
 _SNAPSHOT_WORD_REGISTERS: Final[tuple[str, ...]] = ("ax", "bx", "cx", "dx", "si", "di")
 
 
+@cython.ccall
 def _block_constant_flow_8616(
     entry_state: _SegmentStackAliasState8616,
-    tracked_registers: frozenset[str],
-    allow_constant_values: bool,
-    persistent_constants: bool,
+    tracked_registers: object,
+    allow_constant_values: cython.bint,
+    persistent_constants: cython.bint,
 ) -> IRConstantFlow8616 | None:
     """Create the per-block constant flow and seed persistent entry facts."""
     want = persistent_constants or (
@@ -356,16 +376,19 @@ def _block_constant_flow_8616(
     return constants
 
 
+@cython.ccall
 def _call_exit_state_8616(
     instruction: IRInstr,
     instruction_entry_state: _SegmentStackAliasState8616,
-    call_deltas: Mapping[int, int] | None,
-) -> tuple[int | None, dict[int, SegmentStackByteOrigin8616], int | None]:
+    call_deltas: object,
+) -> object:
     """Apply one CALL's callee effect: scoped overlay or universal fields.
 
     A scoped caller-visible delta applies only to SP: the callee body's byte
     identities and BP coordinate stay unproven under scoped-only evidence.
     """
+    entry_sp: object
+    overlay: object
     overlay = (
         call_deltas.get(instruction.addr)
         if call_deltas is not None and isinstance(instruction.addr, int)
@@ -377,14 +400,15 @@ def _call_exit_state_8616(
     return _call_effect_stack_state_8616(instruction, instruction_entry_state)
 
 
+@cython.ccall
 def _transfer_block(
-    block_addr: int,
-    instructions: tuple[IRInstr, ...],
+    block_addr: cython.longlong,
+    instructions: object,
     entry_state: _SegmentStackAliasState8616,
-    tracked_registers: frozenset[str] = SEGMENT_REGISTER_SET,
+    tracked_registers: object = SEGMENT_REGISTER_SET,
     *,
-    allow_constant_values: bool = False,
-    persistent_constants: bool = False,
+    allow_constant_values: cython.bint = False,
+    persistent_constants: cython.bint = False,
     call_deltas: Mapping[int, int] | None = None,
     value_observer: Callable[[IRInstr, StackPointerSnapshots8616, int | None, int | None], None] | None = None,
     call_observer: Callable[[IRInstr, int | None, int | None], None] = _ignore_call_positions,
@@ -398,6 +422,11 @@ def _transfer_block(
     same constant-flow owner and published on the exit state; SP-relative
     coordinates remain a separate fact kind.
     """
+    constants: object
+    destination: object
+    instruction_addr: object
+    restore_fact: object
+    instruction: object
     values: dict[str | int, SegmentStackFragments8616] = {}
     constants = _block_constant_flow_8616(
         entry_state, tracked_registers, allow_constant_values, persistent_constants,
@@ -421,7 +450,7 @@ def _transfer_block(
             continue
         if constants is not None:
             constants.observe(instruction)
-        if instruction.addr != machine_instruction_addr:
+        if operator.ne(instruction.addr, machine_instruction_addr):
             machine_instruction_addr = instruction.addr
             instruction_entry_state = _stack_state(sp_delta, stack_bytes, bp_delta, stack_pointers.register_offsets)
         stack_pointers.observe(instruction, sp_delta, bp_delta, constants=constants)
@@ -464,13 +493,14 @@ def _transfer_block(
     )
 
 
+@cython.ccall
 def _block_exit_state_8616(
     sp_delta: int | None,
-    stack_bytes: dict[int, SegmentStackByteOrigin8616],
+    stack_bytes: object,
     bp_delta: int | None,
     stack_pointers: StackPointerSnapshots8616,
-    constants: IRConstantFlow8616 | None,
-    persistent_constants: bool,
+    constants: object,
+    persistent_constants: cython.bint,
 ) -> _SegmentStackAliasState8616:
     """Freeze the block exit, publishing proven constants only when scoped."""
     out_constants = (
@@ -483,40 +513,44 @@ def _block_exit_state_8616(
     )
 
 
+@cython.ccall
 def _scoped_predecessors_8616(
-    block_addrs: frozenset[int], successors: Mapping[int, Sequence[int]],
-) -> dict[int, tuple[int, ...]]:
+    block_addrs: object, successors: Mapping[cython.longlong, Sequence[cython.longlong]],
+) -> dict[cython.longlong, tuple[cython.longlong, ...]]:
     """Invert one scoped successor map restricted to the live block set."""
-    predecessors: dict[int, list[int]] = {addr: [] for addr in block_addrs}
+    block_addr: object
+    successor: object
+    predecessors: dict[cython.longlong, list[cython.longlong]] = {addr: [] for addr in iter(block_addrs)}
     for block_addr in block_addrs:
         for successor in successors.get(block_addr, ()):
             if successor in predecessors:
                 predecessors[successor].append(block_addr)
-    return {addr: tuple(sorted(values)) for addr, values in predecessors.items()}
+    return {addr: tuple(sorted(values)) for addr, values in builtins.iter(predecessors.items())}
 
 
 def _solve_stack_states(
     artifact: IRFunctionArtifact,
-    tracked_registers: frozenset[str] = SEGMENT_REGISTER_SET,
+    tracked_registers: object = SEGMENT_REGISTER_SET,
     *,
     entry_constants: Mapping[str, int] | None = None,
-    scoped_blocks: tuple[IRBlock, ...] | None = None,
+    scoped_blocks: object = None,
     scoped_successors: Mapping[int, Sequence[int]] | None = None,
     call_deltas: Mapping[int, int] | None = None,
-) -> dict[int, _SegmentStackAliasState8616]:
+) -> dict[cython.longlong, _SegmentStackAliasState8616]:
     """Reach a deterministic must-state fixed point across typed IR edges.
 
     The optional scoped graph parameters restrict the solved surface to one
     authenticated projection without touching the shared artifact; the
     universal path supplies neither and keeps its original behavior.
     """
+    block_addr: object
     if scoped_blocks is None or scoped_successors is None:
-        blocks_by_addr = {block.addr: block for block in artifact.blocks}
+        blocks_by_addr = {block.addr: block for block in iter(artifact.blocks)}
         predecessors = _predecessor_map(artifact)
     else:
-        blocks_by_addr = {block.addr: block for block in scoped_blocks}
+        blocks_by_addr = {block.addr: block for block in iter(scoped_blocks)}
         predecessors = _scoped_predecessors_8616(frozenset(blocks_by_addr), scoped_successors)
-    complete_ir = not any(block.refusals for block in blocks_by_addr.values())
+    complete_ir = not any(block.refusals for block in builtins.iter(blocks_by_addr.values()))
     persistent = entry_constants is not None
     entry_seed = (
         _SegmentStackAliasState8616(0)
@@ -526,13 +560,13 @@ def _solve_stack_states(
     unknown = _SegmentStackAliasState8616(None)
     # An unvisited edge is not an analyzed unknown value. Seeding loop edges
     # with unknown would erase entry evidence before the first back-edge visit.
-    exit_states: dict[int, _SegmentStackAliasState8616] = {}
+    exit_states: dict[cython.longlong, _SegmentStackAliasState8616] = {}
     changed = True
     while changed:
         changed = False
         for block_addr in sorted(blocks_by_addr):
-            incoming = tuple(exit_states[pred] for pred in predecessors[block_addr] if pred in exit_states)
-            if block_addr == artifact.function_addr:
+            incoming = tuple(exit_states[pred] for pred in iter(predecessors[block_addr]) if pred in exit_states)
+            if operator.eq(block_addr, artifact.function_addr):
                 incoming = (entry_seed, *incoming)
             if not incoming:
                 continue
@@ -546,20 +580,21 @@ def _solve_stack_states(
                 persistent_constants=persistent,
                 call_deltas=call_deltas,
             )[1]
-            if new_exit != exit_states.get(block_addr):
+            if operator.ne(new_exit, exit_states.get(block_addr)):
                 exit_states[block_addr] = new_exit
                 changed = True
-    return {addr: exit_states.get(addr, unknown) for addr in blocks_by_addr}
+    return {addr: exit_states.get(addr, unknown) for addr in iter(blocks_by_addr)}
 
 
+@cython.ccall
 def _facts_for_block_8616(
-    block_addr: int,
-    instructions: tuple[IRInstr, ...],
+    block_addr: cython.longlong,
+    instructions: object,
     entry_state: _SegmentStackAliasState8616,
-    tracked_registers: frozenset[str] = SEGMENT_REGISTER_SET,
+    tracked_registers: object = SEGMENT_REGISTER_SET,
     *,
-    allow_constant_values: bool = False,
-) -> list[SegmentStackRestoreFact8616]:
+    allow_constant_values: cython.bint = False,
+) -> object:
     """Prove block-local stack bytes without publishing an arbitrary SP origin.
 
     An unknown incoming SP forbids cross-block byte identity, but an exact
@@ -587,25 +622,25 @@ def build_x86_16_segment_stack_restore_artifact(artifact: IRFunctionArtifact) ->
     predecessors = _predecessor_map(artifact)
     instruction_blocks = {
         instruction.addr: block.addr
-        for block in artifact.blocks
-        for instruction in block.instrs
+        for block in iter(artifact.blocks)
+        for instruction in iter(block.instrs)
         if instruction.addr is not None
     }
     facts = tuple(
         fact
-        for block in artifact.blocks
-        for fact in _facts_for_block_8616(
+        for block in iter(artifact.blocks)
+        for fact in builtins.iter(_facts_for_block_8616(
             block.addr,
             block.instrs,
             _join_stack_states(
                 
-                    ((_SegmentStackAliasState8616(0),) if block.addr == artifact.function_addr else ())
-                    + tuple(exit_states[pred] for pred in predecessors[block.addr])
+                    (tuple((_SegmentStackAliasState8616(0),)) if operator.eq(block.addr, artifact.function_addr) else tuple(()))
+                    + tuple(exit_states[pred] for pred in iter(predecessors[block.addr]))
                 
             ),
-        )
+        ))
     )
-    proven = tuple(fact for fact in facts if fact.verdict is SegmentStackRestoreVerdict8616.PROVEN)
+    proven = tuple(fact for fact in iter(facts) if fact.verdict is SegmentStackRestoreVerdict8616.PROVEN)
     restore_sources = tuple(
         SegmentRestoreSource(
             fact.block_addr,
@@ -615,7 +650,7 @@ def build_x86_16_segment_stack_restore_artifact(artifact: IRFunctionArtifact) ->
             fact.saved_register,
             source_artifact=artifact,
         )
-        for fact in proven
+        for fact in iter(proven)
         if fact.saved_instruction_addr is not None and fact.saved_register is not None
     )
     return SegmentStackRestoreArtifact8616(
@@ -630,8 +665,8 @@ def build_x86_16_segment_stack_restore_artifact(artifact: IRFunctionArtifact) ->
             "failure_count": len(facts) - len(proven),
             "cross_block_restore_count": sum(
                 fact.saved_instruction_addr is not None
-                and instruction_blocks.get(fact.saved_instruction_addr) != fact.block_addr
-                for fact in proven
+                and operator.ne(instruction_blocks.get(fact.saved_instruction_addr), fact.block_addr)
+                for fact in iter(proven)
             ),
         },
     )
@@ -640,33 +675,33 @@ def build_x86_16_segment_stack_restore_artifact(artifact: IRFunctionArtifact) ->
 def build_x86_16_stack_register_restore_artifact_8616(
     artifact: IRFunctionArtifact,
     *,
-    tracked_registers: frozenset[str],
+    tracked_registers: object,
 ) -> SegmentStackRestoreArtifact8616:
     """Build exact stack save/restore facts for selected 16-bit registers."""
-    complete_ir = not any(block.refusals for block in artifact.blocks)
+    complete_ir = not any(block.refusals for block in iter(artifact.blocks))
     exit_states = _solve_stack_states(artifact, tracked_registers)
     predecessors = _predecessor_map(artifact)
     instruction_blocks = {
         instruction.addr: block.addr
-        for block in artifact.blocks
-        for instruction in block.instrs
+        for block in iter(artifact.blocks)
+        for instruction in iter(block.instrs)
         if instruction.addr is not None
     }
     facts = tuple(
         fact
-        for block in artifact.blocks
-        for fact in _facts_for_block_8616(
+        for block in iter(artifact.blocks)
+        for fact in builtins.iter(_facts_for_block_8616(
             block.addr,
             block.instrs,
             _join_stack_states(
-                ((_SegmentStackAliasState8616(0),) if block.addr == artifact.function_addr else ())
-                + tuple(exit_states[pred] for pred in predecessors[block.addr])
+                (tuple((_SegmentStackAliasState8616(0),)) if operator.eq(block.addr, artifact.function_addr) else tuple(()))
+                + tuple(exit_states[pred] for pred in iter(predecessors[block.addr]))
             ),
             tracked_registers,
             allow_constant_values=complete_ir,
-        )
+        ))
     )
-    proven = tuple(fact for fact in facts if fact.verdict is SegmentStackRestoreVerdict8616.PROVEN)
+    proven = tuple(fact for fact in iter(facts) if fact.verdict is SegmentStackRestoreVerdict8616.PROVEN)
     return SegmentStackRestoreArtifact8616(
         source_artifact=artifact,
         facts=facts,
@@ -678,14 +713,15 @@ def build_x86_16_stack_register_restore_artifact_8616(
             "failure_count": len(facts) - len(proven),
             "cross_block_restore_count": sum(
                 fact.saved_instruction_addr is not None
-                and instruction_blocks.get(fact.saved_instruction_addr) != fact.block_addr
-                for fact in proven
+                and operator.ne(instruction_blocks.get(fact.saved_instruction_addr), fact.block_addr)
+                for fact in iter(proven)
             ),
         },
     )
 
 
-def apply_x86_16_segment_stack_restore_artifact(project: object, codegen: object) -> bool:
+@cython.ccall
+def apply_x86_16_segment_stack_restore_artifact(project: object, codegen: object) -> cython.bint:
     """Attach Alias-proved segment stack restoration before segment-state transfer."""
     boundary = cast(_CodegenBoundary8616, codegen)
     try:
@@ -698,8 +734,9 @@ def apply_x86_16_segment_stack_restore_artifact(project: object, codegen: object
     return False
 
 
-def apply_x86_16_stack_register_restore_artifact_8616(project: object, codegen: object) -> bool:
+def apply_x86_16_stack_register_restore_artifact_8616(project, codegen: object) -> cython.bint:
     """Attach exact 16-bit GP save/restore evidence at the codegen boundary."""
+    block: object
     del project
     boundary = cast(_CodegenBoundary8616, codegen)
     try:
@@ -719,7 +756,7 @@ def apply_x86_16_stack_register_restore_artifact_8616(project: object, codegen: 
         logging.getLogger(__name__).warning(
             "[gp-stack-restore-alias] function=%#x blocks=%s summary=%s facts=%s",
             artifact.function_addr,
-            tuple((block.addr, block.successor_addrs) for block in artifact.blocks),
+            tuple((block.addr, block.successor_addrs) for block in iter(artifact.blocks)),
             restoration.summary,
             restoration.facts,
         )
@@ -729,7 +766,7 @@ def apply_x86_16_stack_register_restore_artifact_8616(project: object, codegen: 
                 block.addr,
                 tuple(
                     (instruction.addr, instruction.call_stack_effect)
-                    for instruction in block.instrs
+                    for instruction in iter(block.instrs)
                     if instruction.op == "CALL"
                 ),
             )

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed outcomes for production interprocedural storage-trial collection.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -21,6 +24,7 @@ from .interprocedural_storage_contracts import (
 from .interprocedural_storage_reaching_contracts import (
     CallArgumentDefinitionFailure8616,
 )
+import dataclasses
 
 __all__ = [
     "FunctionInputStorageTrialCollection8616",
@@ -56,12 +60,12 @@ class StorageTrialCollectionFailureKind8616(StrEnum):
     VALUE_CLASS_CONFLICT = "value_class_conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StorageTrialCollectionFailure8616:
     """One exact callsite or argument refusal retained for diagnostics."""
 
     kind: StorageTrialCollectionFailureKind8616
-    callee_addr: int
+    callee_addr: cython.longlong
     caller_addr: int | None
     callsite_addr: int | None
     logical_index: int | None = None
@@ -69,17 +73,17 @@ class StorageTrialCollectionFailure8616:
     reaching_failure: CallArgumentDefinitionFailure8616 | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionInputStorageTrialCollection8616:
     """Complete input trials or typed refusals for one callee census."""
 
     verdict: StorageTrialCollectionVerdict8616
     trials: FunctionStorageTrials8616
-    failures: tuple[StorageTrialCollectionFailure8616, ...]
+    failures: object
     stats: StorageTrialStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every caller became one proof-bearing callsite."""
         return (
             self.verdict is StorageTrialCollectionVerdict8616.PROVEN

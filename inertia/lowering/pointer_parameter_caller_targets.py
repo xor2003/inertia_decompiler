@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Publish exact caller targets for pointer-parameter memory outputs.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Protocol, cast
 
@@ -47,19 +50,19 @@ from .pointer_parameter_output_contracts import (
     PointerParameterOutputEvidence8616,
 )
 from .pointer_parameter_outputs import publish_pointer_parameter_outputs_8616
+import operator
 
 
 class _ProjectSurface8616(Protocol):
     """Owned project registry for immutable caller-target evidence."""
 
-    _inertia_pointer_parameter_caller_targets_8616: dict[
-        int, PointerParameterCallerTargetEvidence8616
-    ]
+    _inertia_pointer_parameter_caller_targets_8616: object
 
 
+@cython.ccall
 def _registry_8616(
     project: object,
-) -> dict[int, PointerParameterCallerTargetEvidence8616]:
+) -> object:
     """Return the owned per-project caller-target registry."""
     surface = cast(_ProjectSurface8616, project)
     try:
@@ -72,14 +75,16 @@ def _registry_8616(
     return registry
 
 
+@cython.ccall
 def _publish_8616(
     project: object,
     evidence: PointerParameterCallerTargetEvidence8616,
 ) -> PointerParameterCallerTargetEvidence8616:
     """Publish once, replay equal evidence, and reject conflicting truth."""
+    existing: object
     registry = _registry_8616(project)
     existing = registry.get(evidence.callee_addr)
-    if existing is not None and existing != evidence:
+    if existing is not None and operator.ne(existing, evidence):
         raise PipelineHardError(
             PointerParameterCallerTargetFailure8616.PUBLICATION_CONFLICT.value,
             layer="types/lowering",
@@ -89,15 +94,16 @@ def _publish_8616(
     return evidence
 
 
+@cython.ccall
 def _refused_8616(
     project: object,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     failure: PointerParameterCallerTargetFailure8616,
     *,
     outputs: PointerParameterOutputEvidence8616,
     census: CalleeCallsiteCensus8616,
-    raw_count: int,
-    normalized_count: int = 0,
+    raw_count: cython.longlong,
+    normalized_count: cython.longlong = 0,
     caller_addr: int | None = None,
     callsite_addr: int | None = None,
     logical_index: int | None = None,
@@ -127,28 +133,32 @@ def _refused_8616(
     )
 
 
+@cython.ccall
 def pointer_parameter_caller_target_evidence_8616(
     project: object,
-    callee_addr: int,
+    callee_addr: cython.longlong,
 ) -> PointerParameterCallerTargetEvidence8616 | None:
     """Return one published exact-callee caller-target result."""
     return _registry_8616(project).get(callee_addr)
 
 
+@cython.ccall
 def _output_target_8616(
     project: object,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     caller: CalleeCallsiteFact8616,
-    caller_addr: int,
+    caller_addr: cython.longlong,
     summary: CallsiteSummary8616,
     artifact: SSAFunctionArtifact,
     output: PointerParameterOutputContract8616,
     outputs: PointerParameterOutputEvidence8616,
     census: CalleeCallsiteCensus8616,
-    expected_count: int,
-    normalized_count: int,
+    expected_count: cython.longlong,
+    normalized_count: cython.longlong,
 ) -> tuple[PointerParameterCallerTarget8616 | None, PointerParameterCallerTargetEvidence8616 | None]:
     """Project one callee output through one proven caller callsite."""
+    failure: object
+    near_offset: object
     reaching = resolve_call_argument_reaching_definition_8616(
         artifact,
         summary,
@@ -188,7 +198,7 @@ def _output_target_8616(
             logical_index=output.logical_index,
         )
     view = output.output_view
-    if near_offset.width != output.argument_storage.size:
+    if operator.ne(near_offset.width, output.argument_storage.size):
         failure = PointerParameterCallerTargetFailure8616.TARGET_WIDTH_CONFLICT
     elif not view.complete:
         failure = PointerParameterCallerTargetFailure8616.TARGET_SEGMENT_UNPROVEN
@@ -236,16 +246,22 @@ def _output_target_8616(
     return target, None
 
 
+@cython.ccall
 def _caller_targets_8616(
     project: object,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     caller: CalleeCallsiteFact8616,
     outputs: PointerParameterOutputEvidence8616,
     census: CalleeCallsiteCensus8616,
-    expected_count: int,
-    normalized_count: int,
+    expected_count: cython.longlong,
+    normalized_count: cython.longlong,
 ) -> tuple[tuple[PointerParameterCallerTarget8616, ...], PointerParameterCallerTargetEvidence8616 | None]:
     """Project every callee output through one proven caller callsite."""
+    caller_addr: object
+    refusal: object
+    summary: object
+    target: object
+    output: object
     summary = caller.summary
     caller_addr = caller.caller_addr
     if summary is None or caller_addr is None:
@@ -300,14 +316,17 @@ def _caller_targets_8616(
     return tuple(targets), None
 
 
+@cython.ccall
 def publish_pointer_parameter_caller_targets_8616(
     project: object,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     *,
     function: object | None = None,
     outputs: PointerParameterOutputEvidence8616 | None = None,
 ) -> PointerParameterCallerTargetEvidence8616:
     """Project every pointer output through every exact direct callsite."""
+    refusal: object
+    caller: object
     if outputs is None:
         outputs = publish_pointer_parameter_outputs_8616(
             project,

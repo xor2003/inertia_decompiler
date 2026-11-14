@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Represent indexed global identities consumed by segmented lowering.
 
 Layer: Types/Lowering.
@@ -8,33 +9,40 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, replace
 
 from .callee_global_object_sources import GlobalObjectSourceEvidence8616
+import dataclasses
+import builtins
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedSegmentedGlobalEvidence8616:
     """Indexed global load evidence keyed by base offset and width."""
 
-    base_offset: int
-    name: str
-    relative_disp: int
-    width: int
-    aggregate_type_name: str | None = None
+    base_offset: cython.longlong
+    name: object
+    relative_disp: cython.longlong
+    width: cython.longlong
+    aggregate_type_name: object = None
 
 
 def merge_global_object_source_evidence_8616(
-    evidence: tuple[IndexedSegmentedGlobalEvidence8616, ...],
+    evidence: object,
     source_evidence: GlobalObjectSourceEvidence8616,
 ) -> tuple[
     tuple[IndexedSegmentedGlobalEvidence8616, ...],
     GlobalObjectSourceEvidence8616,
 ]:
     """Merge complete source families while retaining stronger symbol names."""
+    canonical_item: object
+    fact: object
+    view: object
     merged = {
-        (item.base_offset & 0xFFFF, int(item.width)): item for item in evidence
+        (item.base_offset & 0xFFFF, int(item.width)): item for item in iter(evidence)
     }
     materialized_count = 0
     failure_count = source_evidence.failure_count
@@ -43,7 +51,7 @@ def merge_global_object_source_evidence_8616(
         canonical_base = fact.canonical_base_offset & 0xFFFF
         canonical_candidates = (
             item
-            for (base_offset, _width), item in merged.items()
+            for (base_offset, _width), item in builtins.iter(merged.items())
             if base_offset == canonical_base
         )
         canonical_item = max(
@@ -75,12 +83,12 @@ def merge_global_object_source_evidence_8616(
                     width=1,
                     aggregate_type_name=aggregate_name,
                 )
-                for field_offset in fact.field_offsets
+                for field_offset in iter(fact.field_offsets)
             ),
         )
         conflicts = any(
             existing.aggregate_type_name not in {None, aggregate_name}
-            for view in views
+            for view in iter(views)
             if (existing := merged.get((view.base_offset, view.width))) is not None
         )
         if conflicts:

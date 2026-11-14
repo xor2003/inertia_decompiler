@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed contracts for exact-byte condition-cache relifting.
 
 Layer: IR.
@@ -9,11 +10,15 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
 
 from .condition_ir import ConditionIR, ConditionSource
+import dataclasses
+import operator
 
 __all__ = (
     "ConditionCacheReliftArtifact8616",
@@ -24,12 +29,12 @@ __all__ = (
 )
 
 
-@dataclass(frozen=True, slots=True, order=True)
+@dataclasses.dataclass(frozen=True, order=True)
 class ConditionReliftBlock8616:
     """One exact current-function block range to pass through the lifter."""
 
-    address: int
-    size: int
+    address: cython.longlong
+    size: cython.longlong
 
 
 class ConditionCacheReliftFailureReason8616(StrEnum):
@@ -42,49 +47,49 @@ class ConditionCacheReliftFailureReason8616(StrEnum):
     CONDITION_RECOVERY_FAILED = "condition_recovery_failed"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionCacheReliftFailure8616:
     """One exact block-level condition-cache relift refusal."""
 
-    block_addr: int
+    block_addr: cython.longlong
     reason: ConditionCacheReliftFailureReason8616
     detail: str = ""
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionCacheReliftStats8616:
     """Closed evidence counters for expected conditional block owners."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every expected owner produced typed evidence."""
         return bool(
-            self.raw_fact_count == self.normalized_fact_count
-            and self.normalized_fact_count == self.classified_fact_count
-            and self.classified_fact_count == self.materialized_count
+            operator.eq(self.raw_fact_count, self.normalized_fact_count)
+            and operator.eq(self.normalized_fact_count, self.classified_fact_count)
+            and operator.eq(self.classified_fact_count, self.materialized_count)
             and self.failure_count == 0
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionCacheReliftArtifact8616:
     """Isolated typed condition and pending-source evidence from one relift."""
 
-    conditions_by_block: tuple[tuple[int, tuple[ConditionIR, ...]], ...]
-    pending_sources_by_addr: tuple[tuple[int, ConditionSource], ...]
-    failures: tuple[ConditionCacheReliftFailure8616, ...]
+    conditions_by_block: object
+    pending_sources_by_addr: object
+    failures: object
     stats: ConditionCacheReliftStats8616
 
-    def condition_cache(self) -> dict[int, list[ConditionIR]]:
+    def condition_cache(self) -> dict[cython.longlong, list[ConditionIR]]:
         """Return a mutable cache projection for the existing transfer consumer."""
-        return {address: list(conditions) for address, conditions in self.conditions_by_block}
+        return {address: list(conditions) for address, conditions in iter(self.conditions_by_block)}
 
-    def pending_source_cache(self) -> dict[int, ConditionSource]:
+    def pending_source_cache(self) -> dict[cython.longlong, ConditionSource]:
         """Return a mutable pending-source projection for edge collection."""
         return dict(self.pending_sources_by_addr)

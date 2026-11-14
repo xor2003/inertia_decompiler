@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify and lower typed segmented-address C AST carriers.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
 from dataclasses import dataclass, field
@@ -18,20 +21,22 @@ from angr.sim_variable import SimRegisterVariable, SimStackVariable
 
 from .physical_registers import physical_register_name_8616, physical_register_view_8616
 from .segment_register_state import runtime_segment_name_for_variable_8616
+import dataclasses
+import operator
 
-type _CacheMap8616 = MutableMapping[str, MutableMapping[int, object]]
-type _ProjectRewriteCache8616 = Callable[[object], _CacheMap8616]
-type _UnaryObjectCallback8616 = Callable[[object], object]
-type _ConstantValueCallback8616 = Callable[[object], int | None]
-type _NormalizeOffsetCallback8616 = Callable[[object], int]
-type _StackMatchCallback8616 = Callable[[object], tuple[object, object] | None]
-type _StackIdentityCallback8616 = Callable[[SimStackVariable], object | None]
+_CacheMap8616 = typing.TypeAliasType("_CacheMap8616", MutableMapping[str, MutableMapping[int, object]])
+_ProjectRewriteCache8616 = typing.TypeAliasType("_ProjectRewriteCache8616", Callable[[object], _CacheMap8616])
+_UnaryObjectCallback8616 = typing.TypeAliasType("_UnaryObjectCallback8616", Callable[[object], object])
+_ConstantValueCallback8616 = typing.TypeAliasType("_ConstantValueCallback8616", Callable[[object], int | None])
+_NormalizeOffsetCallback8616 = typing.TypeAliasType("_NormalizeOffsetCallback8616", Callable[[object], int])
+_StackMatchCallback8616 = typing.TypeAliasType("_StackMatchCallback8616", Callable[[object], tuple[object, object] | None])
+_StackIdentityCallback8616 = typing.TypeAliasType("_StackIdentityCallback8616", Callable[[SimStackVariable], object | None])
 
 
 class _ArchRegisterNames8616(Protocol):
     """Minimal project.arch contract needed for segmented lowering."""
 
-    register_names: Mapping[int, str]
+    register_names: Mapping[cython.longlong, str]
 
 
 class _ProjectArch8616(Protocol):
@@ -44,7 +49,7 @@ class _ProjectArch8616(Protocol):
 class _JoinableStackIdentity8616(Protocol):
     """Owned stack-slot identity contract that can merge compatible slots."""
 
-    def can_join(self, other: object) -> bool:
+    def can_join(self, other: object) -> cython.bint:
         """Return whether this identity can join with another identity."""
         ...
 
@@ -53,7 +58,8 @@ class _JoinableStackIdentity8616(Protocol):
         ...
 
 
-def _dynamic_c_attr_8616(obj: object | None, name: str, default: object | None = None) -> object | None:
+@cython.ccall
+def _dynamic_c_attr_8616(obj: object, name: object, default: object | None = None) -> object | None:
     """Dynamic third-party angr/codegen boundary: read optional C AST attributes."""
     if obj is None:
         return default
@@ -64,35 +70,35 @@ def _dynamic_c_attr_8616(obj: object | None, name: str, default: object | None =
         return default
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class _SegmentedAccess:
-    kind: str
-    seg_name: str | None
+    kind: object
+    seg_name: object
     assoc_kind: str = "unknown"
     assoc_state: _SegmentAssociationState | None = None
     linear: int | None = None
     cvar: structured_c.CVariable | None = None
     stack_var: SimStackVariable | None = None
-    extra_offset: int = 0
+    extra_offset: cython.longlong = 0
     addr_expr: object | None = None
 
-    def allows_object_rewrite(self) -> bool:
+    def allows_object_rewrite(self) -> cython.bint:
         """Return whether this classified access may be rewritten as an object access."""
         if self.assoc_state is not None:
             return not self.assoc_state.is_over_associated()
         return self.assoc_kind != "over"
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class _SegmentAssociationState:
-    seg_name: str | None
-    base_terms: int = 0
-    other_terms: int = 0
-    const_offset: int = 0
+    seg_name: object
+    base_terms: cython.longlong = 0
+    other_terms: cython.longlong = 0
+    const_offset: cython.longlong = 0
     stack_slots: tuple[object, ...] = ()
 
     @property
-    def assoc_kind(self) -> str:
+    def assoc_kind(self) -> object:
         """Return the segment association classification for this address expression."""
         if self.seg_name is None:
             return "unknown"
@@ -104,18 +110,20 @@ class _SegmentAssociationState:
             return "over"
         return "single"
 
-    def is_over_associated(self) -> bool:
+    def is_over_associated(self) -> cython.bint:
         """Return whether the expression mixes segment identity with unrelated terms."""
         return self.assoc_kind == "over"
 
 
-def _merge_stack_slot_identity_8616(stack_slots: list[object], identity: object | None) -> None:
+@cython.ccall
+def _merge_stack_slot_identity_8616(stack_slots: object, identity: object) -> None:
+    joined_identity: object
     if identity is None:
         return
     if not stack_slots:
         stack_slots.append(identity)
         return
-    if stack_slots[0] == identity:
+    if operator.eq(stack_slots[0], identity):
         return
     existing = stack_slots[0]
     if isinstance(existing, _JoinableStackIdentity8616) and existing.can_join(identity):
@@ -126,12 +134,14 @@ def _merge_stack_slot_identity_8616(stack_slots: list[object], identity: object 
     stack_slots.append(identity)
 
 
+@cython.ccall
 def _segment_reg_name(
     node: object,
     project: _ProjectArch8616,
     *,
     project_rewrite_cache: _ProjectRewriteCache8616,
-) -> str | None:
+) -> object:
+    result: object
     cache = project_rewrite_cache(project).setdefault("segment_reg_name", {})
     key = id(node)
     if key in cache:
@@ -148,8 +158,11 @@ def _segment_reg_name(
     return result
 
 
+@cython.ccall
 def _register_offset_for_node_8616(node: object) -> int | None:
     """Return an exact physical-register offset from one structured-C node."""
+    register_view: object
+    attr: object
     register_view = physical_register_view_8616(node)
     if register_view is not None:
         reg_offset = register_view.reg_offset
@@ -168,8 +181,10 @@ def _register_offset_for_node_8616(node: object) -> int | None:
     return None
 
 
+@cython.ccall
 def _register_size_for_node_8616(node: object) -> int | None:
     """Return an exact physical-register width in bytes from one structured-C node."""
+    register_view: object
     register_view = physical_register_view_8616(node)
     if register_view is not None:
         width = register_view.width
@@ -191,8 +206,9 @@ def _register_size_for_node_8616(node: object) -> int | None:
 
 def _iter_statement_nodes_8616(root: object) -> Iterator[structured_c.CConstruct]:
     """Yield all C constructs under one root via the dynamic codegen boundary."""
+    current: object
     stack = [root]
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     while stack:
         current = stack.pop()
         if not isinstance(current, structured_c.CConstruct):
@@ -205,8 +221,12 @@ def _iter_statement_nodes_8616(root: object) -> Iterator[structured_c.CConstruct
         stack.extend(_c_child_nodes_8616(current))
 
 
-def _c_child_nodes_8616(current: object) -> list[object]:
+@cython.ccall
+def _c_child_nodes_8616(current: object) -> object:
     """Return the known child nodes of one C construct."""
+    body: object
+    else_node: object
+    pair: object
     children: list[object] = []
     nested_statements = _dynamic_c_attr_8616(current, "statements")
     if isinstance(nested_statements, (list, tuple)):
@@ -225,6 +245,7 @@ def _c_child_nodes_8616(current: object) -> list[object]:
     return children
 
 
+@cython.ccall
 def _same_assignment_lhs_8616(
     lhs: object,
     *,
@@ -232,7 +253,7 @@ def _same_assignment_lhs_8616(
     term_name: object,
     term_reg: object,
     term_size: object,
-) -> bool:
+) -> cython.bint:
     """Return whether a candidate lhs names the same variable identity."""
     if not isinstance(lhs, structured_c.CVariable):
         return False
@@ -254,8 +275,11 @@ def _same_assignment_lhs_8616(
     )
 
 
+@cython.ccall
 def _single_assignment_rhs_for_cvar_8616(term: object) -> object | None:
     """Return the unique single-assignment rhs for a CVariable, or None."""
+    root: object
+    stmt: object
     if not isinstance(term, structured_c.CVariable):
         return None
     term_var = _dynamic_c_attr_8616(term, "variable")
@@ -283,7 +307,7 @@ def _single_assignment_rhs_for_cvar_8616(term: object) -> object | None:
     return matches[0] if len(matches) == 1 else None
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _SegmentedAddrClassifier8616:
     """Mutable classify state for one segmented-address expression."""
 
@@ -294,16 +318,17 @@ class _SegmentedAddrClassifier8616:
     match_stack_cvar_and_offset: _StackMatchCallback8616
     normalize_16bit_signed_offset: _NormalizeOffsetCallback8616
     stack_slot_identity_for_variable: _StackIdentityCallback8616
-    seg_name: str | None = None
+    seg_name: object = None
     cvar: object | None = None
     stack_var: SimStackVariable | None = None
-    const_offset: int = 0
-    other_terms: list[object] = field(default_factory=list)
-    base_terms: int = 0
-    stack_slots: list[object] = field(default_factory=list)
-    resolved_term_cache: dict[int, object] = field(default_factory=dict)
+    const_offset: cython.longlong = 0
+    other_terms: object = field(default_factory=list)
+    base_terms: cython.longlong = 0
+    stack_slots: object = field(default_factory=list)
+    resolved_term_cache: object = field(default_factory=dict)
 
-    def _synthetic_sp_anchor(self, term: object) -> tuple[structured_c.CVariable, int] | None:
+    @cython.ccall
+    def _synthetic_sp_anchor(self, term: object) -> object:
         """Return a synthetic sp/bp stack-slot anchor for one term."""
         reg_name = physical_register_name_8616(term)
         if reg_name not in {"bp", "sp"}:
@@ -322,8 +347,14 @@ class _SegmentedAddrClassifier8616:
             synthetic, variable_type=_dynamic_c_attr_8616(term, "variable_type"), codegen=codegen
         ), 0
 
-    def _synthetic_sp_match(self, term: object) -> tuple[structured_c.CVariable, int] | None:
+    @cython.ccall
+    def _synthetic_sp_match(self, term: object) -> object:
         """Return a synthetic sp/bp match for one term or binary add/sub."""
+        lhs: object
+        lhs_const: object
+        rhs: object
+        rhs_const: object
+        synthetic: object
         synthetic = self._synthetic_sp_anchor(term)
         if synthetic is not None:
             return synthetic
@@ -341,8 +372,12 @@ class _SegmentedAddrClassifier8616:
             return base, offset + lhs_const
         return None
 
-    def _segment_scale_name(self, term: object) -> str | None:
+    @cython.ccall
+    def _segment_scale_name(self, term: object) -> object:
         """Return the segment name for a *16 or <<4 scaled term."""
+        local_seg: object
+        maybe_scale: object
+        maybe_seg: object
         if not isinstance(term, structured_c.CBinaryOp):
             return None
         if term.op == "Mul":
@@ -370,8 +405,12 @@ class _SegmentedAddrClassifier8616:
                     return local_seg
         return None
 
+    @cython.ccall
     def _constant_term_value(self, term: object) -> int | None:
         """Fold one term into a constant value when possible."""
+        constant: object
+        lhs: object
+        rhs: object
         term = self.unwrap_c_casts(term)
         constant = self.c_constant_value(term)
         if constant is not None:
@@ -384,10 +423,12 @@ class _SegmentedAddrClassifier8616:
             return None
         return lhs + rhs if term.op == "Add" else lhs - rhs
 
+    @cython.ccall
     def _resolve_term_aliases(self, term: object) -> object:
         """Resolve single-assignment aliases for one term."""
+        rhs: object
         current = self.unwrap_c_casts(term)
-        seen_ids: set[int] = set()
+        seen_ids: set[cython.longlong] = set()
         while isinstance(current, structured_c.CVariable):
             key = id(current)
             if key in self.resolved_term_cache:
@@ -405,12 +446,13 @@ class _SegmentedAddrClassifier8616:
             current = rhs_unwrapped
         return current
 
+    @cython.ccall
     def _consume_stack_match(
         self,
         matched_cvar: object,
         stack_offset: object,
         term: object,
-    ) -> tuple[bool, object | None, SimStackVariable | None, int, int]:
+    ) -> tuple[cython.bint, object | None, SimStackVariable | None, cython.longlong, cython.longlong]:
         """Consume one matched stack view, updating the base state."""
         stack_offset = self.normalize_16bit_signed_offset(stack_offset)
         if not isinstance(matched_cvar, structured_c.CVariable):
@@ -434,8 +476,12 @@ class _SegmentedAddrClassifier8616:
         self.other_terms.append(term)
         return False, self.cvar, self.stack_var, 0, 0
 
+    @cython.ccall
     def consume_term(self, term: object) -> None:
         """Fold one add-term into the classification state."""
+        constant: object
+        local_seg: object
+        matched_stack: object
         inner = self._resolve_term_aliases(term)
         local_seg = self._segment_scale_name(inner)
         if local_seg is not None:
@@ -456,6 +502,7 @@ class _SegmentedAddrClassifier8616:
                 return
         self.other_terms.append(term)
 
+    @cython.ccall
     def build_result(self, node: object) -> _SegmentedAccess | None:
         """Build the classified access from the consumed state."""
         if self.seg_name is None:
@@ -513,6 +560,7 @@ class _SegmentedAddrClassifier8616:
         )
 
 
+@cython.ccall
 def _classify_segmented_addr_expr(
     node: object,
     project: _ProjectArch8616,
@@ -525,6 +573,7 @@ def _classify_segmented_addr_expr(
     normalize_16bit_signed_offset: _NormalizeOffsetCallback8616,
     stack_slot_identity_for_variable: _StackIdentityCallback8616,
 ) -> _SegmentedAccess | None:
+    term: object
     cache = project_rewrite_cache(project).setdefault("segmented_addr_expr", {})
     key = id(node)
     if key in cache:
@@ -547,6 +596,7 @@ def _classify_segmented_addr_expr(
     return result
 
 
+@cython.ccall
 def _classify_segmented_dereference(
     node: object,
     project: _ProjectArch8616,
@@ -571,13 +621,15 @@ def _classify_segmented_dereference(
     return result
 
 
+@cython.ccall
 def _match_real_mode_linear_expr(
     node: object,
     project: _ProjectArch8616,
     *,
     project_rewrite_cache: _ProjectRewriteCache8616,
     classify_segmented_addr_expr: Callable[[object, _ProjectArch8616], _SegmentedAccess | None],
-) -> tuple[str | None, int | None]:
+) -> object:
+    classified: object
     cache = project_rewrite_cache(project).setdefault("real_mode_linear_expr", {})
     key = id(node)
     if key in cache:
@@ -593,13 +645,15 @@ def _match_real_mode_linear_expr(
     return result
 
 
+@cython.ccall
 def _match_segmented_dereference(
     node: object,
     project: _ProjectArch8616,
     *,
     project_rewrite_cache: _ProjectRewriteCache8616,
     classify_segmented_dereference: Callable[[object, _ProjectArch8616], _SegmentedAccess | None],
-) -> tuple[str | None, int | None]:
+) -> object:
+    classified: object
     cache = project_rewrite_cache(project).setdefault("segmented_dereference", {})
     key = id(node)
     if key in cache:

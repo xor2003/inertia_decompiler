@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Source-bound function readiness and lifecycle contracts.
 
 Layer: IR.
@@ -15,6 +16,8 @@ text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import hashlib
 import inspect
@@ -33,6 +36,8 @@ from inertia.frontend.x86_16.frontend_function_boundary import (
     ExactFunctionRangeBoundary8616,
     exact_function_range_boundary_8616,
 )
+import dataclasses
+import operator
 
 __all__ = [
     "FUNCTION_LIFECYCLE_STAGES_8616",
@@ -92,13 +97,13 @@ class FunctionSourceBindingProvenance8616(StrEnum):
     OBSERVED = "observed"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionSourceBlock8616:
     """Exact bytes of one boundary block consumed by a function artifact."""
 
-    addr: int
-    size: int
-    sha256: str
+    addr: cython.longlong
+    size: cython.longlong
+    sha256: object
 
     def to_dict(self) -> dict[str, object]:
         """Serialize this source block digest for diagnostics and artifacts."""
@@ -112,7 +117,7 @@ class FunctionSourceScope8616(StrEnum):
     EXACT_RANGE = "exact_range"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionSourceRevision8616:
     """One exact source generation: entry, boundary bytes, and CFG edges.
 
@@ -121,9 +126,9 @@ class FunctionSourceRevision8616:
     to any consumed byte, block extent, or edge yields a different revision.
     """
 
-    function_addr: int
-    blocks: tuple[FunctionSourceBlock8616, ...]
-    edges: tuple[tuple[int, int], ...] = ()
+    function_addr: cython.longlong
+    blocks: object
+    edges: tuple[tuple[cython.longlong, cython.longlong], ...] = ()
     arch_key: str = ""
     producer_key: str = ""
     scope: FunctionSourceScope8616 = FunctionSourceScope8616.CURRENT_FUNCTION
@@ -133,8 +138,8 @@ class FunctionSourceRevision8616:
         """Serialize this source revision for diagnostics and artifacts."""
         return {
             "function_addr": self.function_addr,
-            "blocks": [block.to_dict() for block in self.blocks],
-            "edges": [list(edge) for edge in self.edges],
+            "blocks": [block.to_dict() for block in iter(self.blocks)],
+            "edges": [list(edge) for edge in iter(self.edges)],
             "arch_key": self.arch_key,
             "producer_key": self.producer_key,
             "scope": self.scope.value,
@@ -142,7 +147,7 @@ class FunctionSourceRevision8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionSourceBinding8616:
     """Recorded binding between one published artifact and its source input.
 
@@ -153,7 +158,7 @@ class FunctionSourceBinding8616:
 
     revision: FunctionSourceRevision8616
     provenance: FunctionSourceBindingProvenance8616
-    producer: str
+    producer: object
     inputs: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
@@ -169,7 +174,7 @@ class FunctionSourceBinding8616:
 class _FunctionManager8616(Protocol):
     """Third-party function-manager surface used for exact lookup."""
 
-    def function(self, *, addr: int, create: bool = False) -> object | None:
+    def function(self, *, addr: cython.longlong, create: cython.bint = False) -> object | None:
         """Return an existing function without inventing a boundary."""
         ...
 
@@ -183,7 +188,7 @@ class _KnowledgeBase8616(Protocol):
 class _MemorySurface8616(Protocol):
     """Third-party loader memory needed for exact block bytes."""
 
-    def load(self, addr: int, size: int) -> bytes | bytearray | memoryview:
+    def load(self, addr: cython.longlong, size: cython.longlong) -> object:
         """Read concrete loaded bytes."""
         ...
 
@@ -202,15 +207,15 @@ class _ProjectSurface8616(Protocol):
     kb: _KnowledgeBase8616
     loader: _LoaderSurface8616
     arch: Arch
-    _inertia_caller_function_ranges_8616: tuple[tuple[int, int], ...]
-    _inertia_function_source_owners_8616: dict[int, _FunctionManager8616]
+    _inertia_caller_function_ranges_8616: object
+    _inertia_function_source_owners_8616: object
 
 
 class _BlockNode8616(Protocol):
     """Third-party CFG block identity without lifting the block."""
 
-    addr: int
-    size: int
+    addr: cython.longlong
+    size: cython.longlong
 
 
 class _GraphSurface8616(Protocol):
@@ -229,18 +234,20 @@ class _GraphBoundary8616(Protocol):
 class _RangeBoundary8616(Protocol):
     """Owned range boundary carrying one contiguous framed extent."""
 
-    addr: int
-    size: int
-    successor_edges: tuple[tuple[int, int], ...]
+    addr: cython.longlong
+    size: cython.longlong
+    successor_edges: object
 
 
-def function_source_boundary_8616(project: object, function_addr: int) -> object | None:
+def function_source_boundary_8616(project: object, function_addr: cython.longlong) -> object | None:
     """Return the canonical exact boundary for one function address.
 
     A producer's explicit CFG function manager takes precedence over the default
     project KB. Once bound, its missing function is a refusal, never permission
     to borrow another manager's frame. Pure lookup: never creates KB state.
     """
+    function: object
+    owner: object
     surface = cast(_ProjectSurface8616, project)
     try:
         owners = surface._inertia_function_source_owners_8616
@@ -264,7 +271,7 @@ def function_source_boundary_8616(project: object, function_addr: int) -> object
         ranges = ()
     matching = tuple(
         (start, end)
-        for start, end in ranges
+        for start, end in iter(ranges)
         if isinstance(start, int) and isinstance(end, int) and start == function_addr and end > start
     )
     if len(matching) != 1:
@@ -273,6 +280,7 @@ def function_source_boundary_8616(project: object, function_addr: int) -> object
     return cast(object | None, exact_function_range_boundary_8616(project, start, end))
 
 
+@cython.ccall
 def bind_function_source_owner_8616(project: object, boundary: object) -> None:
     """Retain the real producer's live function manager, without copying its CFG.
 
@@ -281,6 +289,7 @@ def bind_function_source_owner_8616(project: object, boundary: object) -> None:
     observations see replacement, removal and graph changes. Model boundaries
     and functions belonging to another project grant no new authority here.
     """
+    manager: object
     from angr.knowledge_plugins.functions.function import Function
 
     if not isinstance(boundary, Function) or boundary.project is not project:
@@ -301,10 +310,14 @@ def bind_function_source_owner_8616(project: object, boundary: object) -> None:
     owners[boundary.addr] = cast(_FunctionManager8616, manager)
 
 
+@cython.ccall
 def _graph_block_edges_8616(
     boundary: object,
-) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, int], ...]] | None:
+) -> object:
     """Extract per-block extents and edges from a graph-carrying boundary."""
+    raw_node: object
+    raw_source: object
+    raw_target: object
     try:
         graph = cast(_GraphBoundary8616, boundary).graph
         raw_nodes = tuple(graph.nodes)
@@ -313,8 +326,8 @@ def _graph_block_edges_8616(
         return None
     if not raw_nodes:
         return None
-    coords: dict[int, int] = {}
-    edges: set[tuple[int, int]] = set()
+    coords: dict[cython.longlong, cython.longlong] = {}
+    edges: set[tuple[cython.longlong, cython.longlong]] = set()
     for raw_node in raw_nodes:
         node = cast(_BlockNode8616, raw_node)
         try:
@@ -333,12 +346,13 @@ def _graph_block_edges_8616(
             continue
         if edge[0] in coords and edge[1] in coords:
             edges.add(edge)
-    return tuple(sorted(coords.items())), tuple(sorted(edges))
+    return tuple(sorted(tuple(coords.items()))), tuple(sorted(edges))
 
 
+@cython.ccall
 def _range_block_edges_8616(
     boundary: object,
-) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, int], ...]] | None:
+) -> object:
     """Extract the contiguous framed extent and proven edges of a range boundary."""
     range_boundary = cast(_RangeBoundary8616, boundary)
     try:
@@ -354,7 +368,7 @@ def _range_block_edges_8616(
         raw_successors = ()
     proven_edges = {
         (src, dst)
-        for src, dst in raw_successors
+        for src, dst in iter(raw_successors)
         if isinstance(src, int)
         and isinstance(dst, int)
         and start <= src < start + size
@@ -363,24 +377,27 @@ def _range_block_edges_8616(
     return ((start, size),), tuple(sorted(proven_edges))
 
 
+@cython.ccall
 def _boundary_block_edges_8616(
     boundary: object,
-) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, int], ...]] | None:
+) -> object:
     """Extract exact block coordinates and intra-function edges.
 
     Returns ``(coords, edges)`` with sorted ``(addr, size)`` block extents and
     sorted ``(src, dst)`` edges, or ``None`` when the boundary surface cannot
     name its consumed blocks.
     """
+    graph_surface: object
     graph_surface = _graph_block_edges_8616(boundary)
     if graph_surface is not None:
         return graph_surface
     return _range_block_edges_8616(boundary)
 
 
+@cython.ccall
 def observed_function_source_revision_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     *,
     boundary: object | None = None,
 ) -> FunctionSourceRevision8616 | None:
@@ -390,6 +407,10 @@ def observed_function_source_revision_8616(
     whenever evidence is incomplete (no boundary, no loader, unreadable bytes),
     so callers record "no observation" instead of guessing a generation.
     """
+    extracted: object
+    identity_keys: object
+    addr: object
+    size: object
     if boundary is None:
         boundary = function_source_boundary_8616(project, function_addr)
     if boundary is None:
@@ -405,7 +426,7 @@ def observed_function_source_revision_8616(
             data = bytes(surface.loader.memory.load(addr, size))
         except (AttributeError, KeyError, TypeError, ValueError):
             return None
-        if len(data) != size:
+        if operator.ne(len(data), size):
             return None
         blocks.append(FunctionSourceBlock8616(addr=addr, size=size, sha256=hashlib.sha256(data).hexdigest()))
     identity_keys = _source_identity_keys_8616(project)
@@ -431,6 +452,7 @@ def observed_function_source_revision_8616(
     )
 
 
+@cython.ccall
 def reobserve_function_source_revision_8616(
     project: object,
     revision: FunctionSourceRevision8616,
@@ -441,6 +463,7 @@ def reobserve_function_source_revision_8616(
     Reconstruct their current native inventory rather than trusting saved blocks.
     Manager-framed sources still require their live canonical boundary.
     """
+    boundary: object
     if revision.scope is FunctionSourceScope8616.CURRENT_FUNCTION:
         if revision.range_end is not None:
             return None
@@ -458,9 +481,10 @@ def reobserve_function_source_revision_8616(
     )
 
 
+@cython.ccall
 def observed_function_artifact_source_revision_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     artifact: object,
 ) -> FunctionSourceRevision8616 | None:
     """Observe the scope of an exact attested body, otherwise the live function.
@@ -468,6 +492,8 @@ def observed_function_artifact_source_revision_8616(
     Bare revision fields never authorize an explicit scope: only the owning
     builder's recorded body attestation selects that scope for re-observation.
     """
+    binding: object
+    digest: object
     digest = function_artifact_body_digest_8616(artifact)
     binding = (
         None if digest is None
@@ -478,19 +504,86 @@ def observed_function_artifact_source_revision_8616(
     return observed_function_source_revision_8616(project, function_addr)
 
 
-def _implementation_constant_8616(value: object, depth: int = 0) -> str | None:
+_CODE_ENCODE_CACHE_LIMIT_8616: cython.longlong = 4096
+
+
+# Successful encodings of code objects whose entire constant graph was proven
+# immutable at encode time, keyed by ``(id(code), entry depth)``. ``CodeType``
+# fields are read-only, so a proven-immutable ``co_consts`` graph makes the
+# whole encoded value a pure function of the exact code object and the depth
+# budget; storing the depth in the key keeps the >64 refusal identical.
+# The stored reference pins each code object so ids cannot be recycled into
+# a false hit. Mutable or unsupported constants never enter the map, so they
+# retain fresh behavior on every observation. Nothing else is cached: no
+# functions, classes, defaults, closures, projects, artifacts, digests, or
+# verdicts.
+_immutable_code_encodings_8616: dict[tuple[cython.longlong, cython.longlong], tuple[CodeType, str]] = {}
+
+
+def _code_value_graph_immutable_8616(value: object, seen: object) -> cython.bint:
+    """Prove every reachable constant is an exact immutable scalar/collection.
+
+    ``co_consts`` of manually constructed code may contain mutable objects;
+    only a closed walk over exact immutable types makes a code encoding a
+    pure function of the code identity. ``None``/``Ellipsis``/scalars and
+    code objects with equally immutable constants qualify; anything else —
+    dicts, sets, lists, functions, unknown objects — disqualifies the whole
+    graph. ``frozenset`` membership still cannot contain unhashables, but a
+    contained unsupported value must disqualify rather than be skipped.
+    """
+    if (
+        value is None or value is Ellipsis
+        or type(value) in (bool, int, float, complex, str, bytes)
+    ):
+        return True
+    if type(value) not in (tuple, frozenset, CodeType):
+        return False
+    marker = id(value)
+    if marker in seen:
+        return True
+    seen.add(marker)
+    items: object
+    if type(value) is CodeType:
+        items = value.co_consts
+    else:
+        # Guarded above: only exact tuple/frozenset reach this branch.
+        items = cast(tuple[object, ...] | frozenset[object], value)
+    return all(_code_value_graph_immutable_8616(item, seen) for item in iter(items))
+
+
+@cython.ccall
+def _implementation_code_constant_8616(value: CodeType, depth: cython.longlong) -> object:
+    """Encode one code object, reusing only proven-immutable exact encodings."""
+    encoded: object
+    retained: object
+    key = (id(value), depth)
+    retained = _immutable_code_encodings_8616.get(key)
+    if retained is not None and retained[0] is value:
+        return retained[1]
+    fields = (
+        "code", value.co_argcount, value.co_posonlyargcount,
+        value.co_kwonlyargcount, value.co_nlocals, value.co_stacksize,
+        value.co_flags, value.co_code, value.co_consts, value.co_names,
+        value.co_varnames, value.co_freevars, value.co_cellvars,
+        value.co_exceptiontable,
+    )
+    encoded = _implementation_constant_8616(fields, depth + 1)
+    if (
+        encoded is not None
+        and len(_immutable_code_encodings_8616) < _CODE_ENCODE_CACHE_LIMIT_8616
+        and _code_value_graph_immutable_8616(value, set())
+    ):
+        _immutable_code_encodings_8616[key] = (value, encoded)
+    return encoded
+
+
+@cython.ccall
+def _implementation_constant_8616(value: object, depth: cython.longlong = 0) -> object:
     """Encode supported CPython code constants without identity/name fallbacks."""
     if depth > 64:
         return None
     if isinstance(value, CodeType):
-        fields = (
-            "code", value.co_argcount, value.co_posonlyargcount,
-            value.co_kwonlyargcount, value.co_nlocals, value.co_stacksize,
-            value.co_flags, value.co_code, value.co_consts, value.co_names,
-            value.co_varnames, value.co_freevars, value.co_cellvars,
-            value.co_exceptiontable,
-        )
-        return _implementation_constant_8616(fields, depth + 1)
+        return _implementation_code_constant_8616(value, depth)
     if isinstance(value, FunctionType):
         return _function_implementation_constant_8616(value, depth + 1)
     if value is None:
@@ -506,11 +599,14 @@ def _implementation_constant_8616(value: object, depth: int = 0) -> str | None:
     return _implementation_collection_8616(value, depth)
 
 
+@cython.ccall
 def _function_implementation_constant_8616(
     producer: FunctionType,
-    depth: int,
-) -> str | None:
+    depth: cython.longlong,
+) -> object:
     """Bind function code, defaults and supported captured values structurally."""
+    encoded: object
+    cell: object
     captured: list[str] = []
     if producer.__closure__ is not None:
         for cell in producer.__closure__:
@@ -529,12 +625,16 @@ def _function_implementation_constant_8616(
     return _implementation_constant_8616(fields, depth + 1)
 
 
-def _implementation_collection_8616(value: object, depth: int) -> str | None:
+@cython.ccall
+def _implementation_collection_8616(value: object, depth: cython.longlong) -> object:
     """Hash each structural node so nested encodings never multiply escaping.
 
     Every observation still reads current code, defaults and captured values;
     no cached digest supplies authority after a mutable producer changes.
     """
+    encoded: object
+    item: object
+    key: object
     if isinstance(value, (tuple, frozenset)):
         items: list[str] = []
         for item in value:
@@ -560,8 +660,10 @@ def _implementation_collection_8616(value: object, depth: int) -> str | None:
     return None
 
 
-def _implementation_digest_8616(producer: object) -> str | None:
+@cython.ccall
+def _implementation_digest_8616(producer: object) -> object:
     """Bind Python code/defaults or a defining module; unknown is not proof."""
+    payload: object
     if isinstance(producer, FunctionType):
         payload = _implementation_constant_8616(producer)
         if payload is None:
@@ -572,13 +674,18 @@ def _implementation_digest_8616(producer: object) -> str | None:
     return None
 
 
-def _class_implementation_digest_8616(producer: type[object]) -> str | None:
+@cython.ccall
+def _class_implementation_digest_8616(producer: type[object]) -> object:
     """Freshly stream module bytes and bind live Python method code.
 
     Streaming preserves the exact concatenated-content digest while avoiding
     two complete module allocations on every source observation. No module
     contents or file metadata are retained as authority between observations.
     """
+    encoded: object
+    module: object
+    member: object
+    name: object
     module = inspect.getmodule(producer)
     if module is None:
         return None
@@ -607,7 +714,8 @@ def _class_implementation_digest_8616(producer: type[object]) -> str | None:
     return "module:" + digest.hexdigest()
 
 
-def _source_identity_keys_8616(project: object) -> tuple[str, str] | None:
+@cython.ccall
+def _source_identity_keys_8616(project: object) -> object:
     """Bind real architecture and producer identities, never name strings.
 
     The architecture key reuses the canonical native arch authority, which
@@ -617,6 +725,8 @@ def _source_identity_keys_8616(project: object) -> tuple[str, str] | None:
     its module and qualified name — invalidates every revision built under
     it.
     """
+    digest: object
+    producer: object
     from inertia.frontend.x86_16.lift_86_16 import Lifter86_16
     from inertia.ir.raw_boot_blocked_prefix import _architecture_key_8616
 
@@ -654,7 +764,8 @@ class _OriginalSourceProject8616(Protocol):
     _inertia_original_project: object
 
 
-def requires_function_source_observation_8616(project: object) -> bool:
+@cython.ccall
+def requires_function_source_observation_8616(project: object) -> cython.bint:
     """Keep native binary scopes distinct from independent model-only scopes.
 
     Native projects and their original-project adapters cannot acquire model
@@ -665,7 +776,7 @@ def requires_function_source_observation_8616(project: object) -> bool:
     from angr.project import Project
 
     current = project
-    visited: set[int] = set()
+    visited: set[cython.longlong] = set()
     while id(current) not in visited:
         if isinstance(current, Project):
             return True
@@ -678,7 +789,8 @@ def requires_function_source_observation_8616(project: object) -> bool:
     return True
 
 
-def function_artifact_body_digest_8616(artifact: object) -> str | None:
+@cython.ccall
+def function_artifact_body_digest_8616(artifact: object) -> object:
     """Digest current owned bodies as finite DAGs, excluding lifecycle authority."""
     from .function_artifact import IRFunctionArtifact
     from .source_graph_binding import SourceGraphSerializationError8616, canonical_source_graph_8616
@@ -714,17 +826,16 @@ def function_artifact_body_digest_8616(artifact: object) -> str | None:
 class _BuildAttestationSurface8616(Protocol):
     """Project-owned build attestation ledger extension."""
 
-    _inertia_function_build_attestations_8616: dict[
-        tuple[int, str], FunctionSourceBinding8616
-    ]
+    _inertia_function_build_attestations_8616: object
 
 
+@cython.ccall
 def record_function_build_attestation_8616(
     project: object,
-    function_addr: int,
-    body_digest: str,
+    function_addr: cython.longlong,
+    body_digest: object,
     revision: FunctionSourceRevision8616,
-    producer: str,
+    producer: object,
     *,
     inputs: Iterable[str] = (),
     boundary: object | None = None,
@@ -758,10 +869,11 @@ def record_function_build_attestation_8616(
     return binding
 
 
+@cython.ccall
 def function_build_attestation_8616(
     project: object,
-    function_addr: int,
-    body_digest: str,
+    function_addr: cython.longlong,
+    body_digest: object,
 ) -> FunctionSourceBinding8616 | None:
     """Return the recorded build attestation for one exact artifact body."""
     surface = cast(_BuildAttestationSurface8616, project)

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Capture one architectural entry-SP scalar for independent Types consumers.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ Consumes alias, widening, and typed facts
 Do not recover semantics from COD, source, assembly, or rendered C text
 """
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import MutableMapping
 from dataclasses import dataclass
@@ -33,6 +36,9 @@ from inertia.semantics.numeric_stack_pointer_returns import (
 
 from .c_ast_utils import _iter_c_nodes_deep_8616
 from .gp_register_state import _record_runtime_gp_global_8616, runtime_gp_state_expr_8616
+import dataclasses
+import operator
+import builtins
 
 _CAPTURE_TAG = "inertia_entry_sp_capture_8616"
 _WORD_MASK = 0xffff
@@ -64,17 +70,17 @@ class ScopedCallPositionAuthority8616:
         """Project coordinates for layout; consumption still requires revalidation."""
         return self.result.proof
 
-    def _identity_key(self) -> tuple[CallStackPosition8616 | None, int, int, int, int, int, int]:
+    def _identity_key(self) -> tuple[CallStackPosition8616 | None, cython.longlong, cython.longlong, cython.longlong, cython.longlong, cython.longlong, cython.longlong]:
         """Distinguish proof ownership even when all scalar coordinates agree."""
         result = self.result
         return (self.position, id(result.artifact), id(result.call), id(result.carrier),
                 id(result.caller_scope), id(result.callee_scope), id(result.context))
 
-    def __eq__(self, other: object) -> bool:
+    def __eq__(self, other: object) -> cython.bint:
         """Compare coordinates and every retained provenance identity."""
-        return type(other) is ScopedCallPositionAuthority8616 and self._identity_key() == other._identity_key()
+        return type(other) is ScopedCallPositionAuthority8616 and operator.eq(self._identity_key(), other._identity_key())
 
-    def __hash__(self) -> int:
+    def __hash__(self) -> cython.longlong:
         """Use the same live provenance identity as equality."""
         return hash(self._identity_key())
 
@@ -82,7 +88,7 @@ class ScopedCallPositionAuthority8616:
         """Keep the live authority when copying syntax in this process."""
         return self
 
-    def __deepcopy__(self, memo: dict[int, object]) -> ScopedCallPositionAuthority8616:
+    def __deepcopy__(self, memo: object) -> ScopedCallPositionAuthority8616:
         """Copy syntax without cloning or downgrading its proof capability."""
         memo[id(self)] = self
         return self
@@ -93,10 +99,12 @@ class ScopedCallPositionAuthority8616:
 
     def is_current_for(
         self, source: IRFunctionArtifact, *,
-        scoped_context: ScopedCallStackContext8616 | None,
+        scoped_context: object,
         scoped_caller_scope: Real16InvocationDomain8616 | None,
-    ) -> bool:
+    ) -> cython.bint:
         """Authenticate retained and offered proof contexts against current Alias."""
+        binding: object
+        position: object
         result, position = self.result, self.position
         if position is None or result.artifact is not source:
             return False
@@ -105,7 +113,7 @@ class ScopedCallPositionAuthority8616:
         binding = scoped_context.for_callsite(position.callsite_addr)
         if binding is None or binding.carrier is not result.carrier:
             return False
-        if result.position_for(scoped_caller_scope, binding.callee_scope) != position:
+        if operator.ne(result.position_for(scoped_caller_scope, binding.callee_scope), position):
             return False
         if scoped_context is result.context:
             return True
@@ -113,14 +121,14 @@ class ScopedCallPositionAuthority8616:
             source, result.block_addr, result.instruction_index,
             scoped_caller_scope, binding.callee_scope, context=scoped_context,
         )
-        return fresh.failure is None and fresh.proof == position
+        return fresh.failure is None and operator.eq(fresh.proof, position)
 
 
-type EntryStackPointerUse8616 = (
+EntryStackPointerUse8616 = typing.TypeAliasType("EntryStackPointerUse8616", (
     NumericStackPointerReturn8616
     | CallStackPosition8616
     | ScopedCallPositionAuthority8616
-)
+))
 
 
 class EntryStackPointerCaptureFailure8616(StrEnum):
@@ -132,21 +140,21 @@ class EntryStackPointerCaptureFailure8616(StrEnum):
     NO_ENTRY_SEQUENCE = "no_entry_sequence"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class EntryStackPointerCapture8616:
     """Candidate capture scope and uses; current source and initializer must verify."""
 
-    function_addr: int
-    uses: tuple[EntryStackPointerUse8616, ...]
+    function_addr: cython.longlong
+    uses: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class EntryStackPointerCaptureResult8616:
     """Closed outcome of one capture request without serializing native objects."""
 
     value: c.CVariable | None
-    changed_count: int
-    source_proven: bool
+    changed_count: cython.longlong
+    source_proven: cython.bint
     failure: EntryStackPointerCaptureFailure8616 | None
 
     def to_dict(self) -> dict[str, object]:
@@ -176,7 +184,7 @@ class _VariableManager8616(Protocol):
 class StackPointerCaptureFunction8616(Protocol):
     """Native function declaration and entry-sequence boundary."""
 
-    addr: int
+    addr: cython.longlong
     statements: object
     variables_in_use: MutableMapping[SimVariable, c.CVariable]
     variable_manager: _VariableManager8616
@@ -186,15 +194,17 @@ class StackPointerCaptureFunction8616(Protocol):
 
 
 
-def _unsigned_width(expression: c.CExpression, bits: int) -> bool:
+@cython.ccall
+def _unsigned_width(expression: c.CExpression, bits: cython.longlong) -> cython.bint:
     """Check an architecture-bound native unsigned scalar type."""
     type_ = expression.type
     return (isinstance(type_, SimTypeInt) and not type_.signed
-            and type_._arch is not None and type_.size == bits)
+            and type_._arch is not None and operator.eq(type_.size, bits))
 
 
 
-def _same_runtime_read(actual: object, expected: object, depth: int = 0) -> bool:
+@cython.ccall
+def _same_runtime_read(actual: object, expected: object, depth: cython.longlong = 0) -> cython.bint:
     """Validate only the canonical runtime helper's bounded expression shape."""
     if depth > 3 or type(actual) is not type(expected):
         return False
@@ -205,44 +215,47 @@ def _same_runtime_read(actual: object, expected: object, depth: int = 0) -> bool
                 and (left.addr, left.size, left.name, left.region, left.category)
                 == (right.addr, right.size, right.name, right.region, right.category))
     if isinstance(actual, c.CConstant) and isinstance(expected, c.CConstant):
-        return actual.value == expected.value and _unsigned_width(actual, 32)
+        return operator.eq(actual.value, expected.value) and _unsigned_width(actual, 32)
     if isinstance(actual, c.CBinaryOp) and isinstance(expected, c.CBinaryOp):
-        return (actual.op == expected.op
+        return (operator.eq(actual.op, expected.op)
                 and _same_runtime_read(actual.lhs, expected.lhs, depth + 1)
                 and _same_runtime_read(actual.rhs, expected.rhs, depth + 1))
     return False
 
 
 
-def _same_local(node: object, value: c.CVariable) -> bool:
+@cython.ccall
+def _same_local(node: object, value: c.CVariable) -> cython.bint:
     """Match exact local temporary storage, never an architectural register name."""
     return (isinstance(node, c.CVariable) and isinstance(node.variable, SimTemporaryVariable)
             and isinstance(value.variable, SimTemporaryVariable)
-            and node.variable.tmp_id == value.variable.tmp_id
+            and operator.eq(node.variable.tmp_id, value.variable.tmp_id)
             and node.variable.size == value.variable.size == 2
             and node.unified_variable is None and _unsigned_width(node, 16))
 
 
 
-def _capture_is_immutable(root: object, assignment: c.CAssignment) -> bool:
+def _capture_is_immutable(root: object, assignment: c.CAssignment) -> cython.bint:
     """Require one dominating definition and no address-taking of the local."""
+    node: object
     value = assignment.lhs
     if not isinstance(value, c.CVariable) or not _same_local(value, value):
         return False
-    writes = [node for node in _iter_c_nodes_deep_8616(root)
+    writes = [node for node in builtins.iter(_iter_c_nodes_deep_8616(root))
               if isinstance(node, c.CAssignment) and _same_local(node.lhs, value)]
     if writes != [assignment]:
         return False
     for node in _iter_c_nodes_deep_8616(root):
         if isinstance(node, c.CUnaryOp) and any(
-            _same_local(child, value) for child in _iter_c_nodes_deep_8616(node)
+            _same_local(child, value) for child in builtins.iter(_iter_c_nodes_deep_8616(node))
         ):
             return False
     return True
 
 
 
-def entry_stack_pointer_projection_8616(value: c.CVariable, offset: int, codegen: object) -> c.CBinaryOp:
+@cython.ccall
+def entry_stack_pointer_projection_8616(value: c.CVariable, offset: cython.longlong, codegen: object) -> c.CBinaryOp:
     """Emit exact modulo-16 addition without signed promotion or pointer recovery."""
     wide = SimTypeLong(False)
     added = c.CBinaryOp("Add", value, c.CConstant(offset & _WORD_MASK, wide, codegen=codegen), codegen=codegen)
@@ -250,7 +263,8 @@ def entry_stack_pointer_projection_8616(value: c.CVariable, offset: int, codegen
 
 
 
-def is_entry_stack_pointer_projection_8616(expression: object, value: c.CVariable, offset: int) -> bool:
+@cython.ccall
+def is_entry_stack_pointer_projection_8616(expression: object, value: c.CVariable, offset: cython.longlong) -> cython.bint:
     """Recognize only an already materialized exact owned scalar projection."""
     if not isinstance(expression, c.CBinaryOp) or expression.op != "And":
         return False
@@ -258,13 +272,14 @@ def is_entry_stack_pointer_projection_8616(expression: object, value: c.CVariabl
     if not isinstance(added, c.CBinaryOp) or added.op != "Add":
         return False
     delta = added.rhs
-    return (isinstance(mask, c.CConstant) and mask.value == _WORD_MASK
-            and isinstance(delta, c.CConstant) and delta.value == (offset & _WORD_MASK)
+    return (isinstance(mask, c.CConstant) and operator.eq(mask.value, _WORD_MASK)
+            and isinstance(delta, c.CConstant) and operator.eq(delta.value, (offset & _WORD_MASK))
             and _same_local(added.lhs, value) and _unsigned_width(mask, 32)
             and _unsigned_width(delta, 32))
 
 
 
+@cython.ccall
 def _existing_capture_value_8616(
     function: StackPointerCaptureFunction8616, assignment: c.CAssignment, expected: c.CExpression,
 ) -> c.CVariable | None:
@@ -275,17 +290,19 @@ def _existing_capture_value_8616(
             or root.statements[0] is not assignment):
         return None
     if (not isinstance(marker, EntryStackPointerCapture8616)
-            or marker.function_addr != function.addr or not _same_runtime_read(assignment.rhs, expected)
+            or operator.ne(marker.function_addr, function.addr) or not _same_runtime_read(assignment.rhs, expected)
             or not _capture_is_immutable(root, assignment)):
         return None
     return cast(c.CVariable, assignment.lhs)
 
 
 def _prepare_entry_capture(
-    codegen: object, function: StackPointerCaptureFunction8616, nodes: tuple[object, ...],
-    captures: list[c.CAssignment], ordered_proofs: tuple[EntryStackPointerUse8616, ...],
-) -> tuple[c.CVariable | None, int, EntryStackPointerCaptureFailure8616 | None]:
+    codegen: object, function: StackPointerCaptureFunction8616, nodes: object,
+    captures: object, ordered_proofs: object,
+) -> tuple[c.CVariable | None, cython.longlong, EntryStackPointerCaptureFailure8616 | None]:
     """Verify an existing entry capture or publish one fresh scalar local."""
+    expected: object
+    value: object
     root = function.statements
     expected = runtime_gp_state_expr_8616("sp", codegen=codegen, function_addr=function.addr)
     if expected is None:
@@ -296,15 +313,15 @@ def _prepare_entry_capture(
         value = _existing_capture_value_8616(function, assignment, expected)
         if value is None or not isinstance(marker, EntryStackPointerCapture8616):
             return None, 0, EntryStackPointerCaptureFailure8616.INVALID_CAPTURE
-        changed = int(marker.uses != ordered_proofs)
+        changed = int(operator.ne(marker.uses, ordered_proofs))
         if changed:
             assignment.tags[_CAPTURE_TAG] = EntryStackPointerCapture8616(function.addr, ordered_proofs)
     else:
         if not isinstance(root, c.CStatement):
             return None, 0, EntryStackPointerCaptureFailure8616.NO_ENTRY_SEQUENCE
-        used = {node.variable.tmp_id for node in nodes
+        used = {node.variable.tmp_id for node in iter(nodes)
                 if isinstance(node, c.CVariable) and isinstance(node.variable, SimTemporaryVariable)}
-        used.update(var.tmp_id for var in function.variables_in_use if isinstance(var, SimTemporaryVariable))
+        used.update(var.tmp_id for var in iter(function.variables_in_use) if isinstance(var, SimTemporaryVariable))
         temporary = SimTemporaryVariable(max(used, default=-1) + 1, 2)
         word_type = SimTypeShort(False)
         value = c.CVariable(temporary, variable_type=word_type, codegen=codegen)
@@ -330,7 +347,8 @@ class _CodegenCapture8616(Protocol):
     _inertia_vex_ir_artifact: IRFunctionArtifact | None
 
 
-def _published_source_is_current_8616(codegen: object, source: IRFunctionArtifact) -> bool:
+@cython.ccall
+def _published_source_is_current_8616(codegen: object, source: IRFunctionArtifact) -> cython.bint:
     """Require the current source publication at the dynamic native boundary."""
     try:
         published = cast(_CodegenCapture8616, codegen)._inertia_vex_ir_artifact
@@ -339,6 +357,7 @@ def _published_source_is_current_8616(codegen: object, source: IRFunctionArtifac
     return published is source
 
 
+@cython.ccall
 def _use_position(use: EntryStackPointerUse8616) -> CallStackPosition8616 | None:
     """Project scalar coordinates for ordering; never authority by itself."""
     if isinstance(use, ScopedCallPositionAuthority8616):
@@ -348,8 +367,10 @@ def _use_position(use: EntryStackPointerUse8616) -> CallStackPosition8616 | None
     return None
 
 
-def _use_order(use: EntryStackPointerUse8616) -> tuple[int, int, int, int, int]:
+@cython.ccall
+def _use_order(use: EntryStackPointerUse8616) -> tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong, cython.longlong]:
     """Order uniquely reproduced source occurrences without caller iteration order."""
+    position: object
     if isinstance(use, NumericStackPointerReturn8616):
         assignment = use.assignment
         return (0, assignment.block_addr, assignment.instruction_index, assignment.instruction_addr, use.path.return_addr)
@@ -359,12 +380,13 @@ def _use_order(use: EntryStackPointerUse8616) -> tuple[int, int, int, int, int]:
     return (1, position.block_addr, position.instruction_index, position.callsite_addr, position.target_addr)
 
 
+@cython.ccall
 def _use_is_current(
     source: IRFunctionArtifact,
     use: EntryStackPointerUse8616,
     scoped_context: ScopedCallStackContext8616 | None,
     scoped_caller_scope: Real16InvocationDomain8616 | None,
-) -> bool:
+) -> cython.bint:
     """Delegate current authority to the owning source proof, never the marker."""
     if isinstance(use, NumericStackPointerReturn8616):
         current = prove_numeric_stack_pointer_return_8616(source, use.assignment.block_addr, use.path.return_addr)
@@ -377,7 +399,7 @@ def _use_is_current(
     return call_stack_position_is_current_8616(source, use)
 
 
-def _retained_uses(captures: list[c.CAssignment]) -> tuple[EntryStackPointerUse8616, ...] | None:
+def _retained_uses(captures: object) -> object:
     """Admit at most one explicit owned marker, preserving every prior consumer."""
     if not captures:
         return ()
@@ -387,13 +409,13 @@ def _retained_uses(captures: list[c.CAssignment]) -> tuple[EntryStackPointerUse8
     if not isinstance(marker, EntryStackPointerCapture8616) or not isinstance(marker.uses, tuple):
         return None
     if not all(isinstance(use, (NumericStackPointerReturn8616, CallStackPosition8616,
-                                ScopedCallPositionAuthority8616)) for use in marker.uses):
+                                ScopedCallPositionAuthority8616)) for use in iter(marker.uses)):
         return None
     return marker.uses
 
 
 def prepare_entry_stack_pointer_capture_8616(
-    codegen: object, source: IRFunctionArtifact, uses: tuple[EntryStackPointerUse8616, ...],
+    codegen: object, source: IRFunctionArtifact, uses: object,
     *,
     scoped_context: ScopedCallStackContext8616 | None = None,
     scoped_caller_scope: Real16InvocationDomain8616 | None = None,
@@ -407,16 +429,19 @@ def prepare_entry_stack_pointer_capture_8616(
     domain — omitting either keeps every retained scoped use unproven and
     refuses the capture.
     """
+    function: object
+    retained: object
+    value: object
     function = cast(_CodegenCapture8616, codegen).cfunc
     if function is None:
         return None if not uses else EntryStackPointerCaptureResult8616(
             None, 0, False, EntryStackPointerCaptureFailure8616.NO_ENTRY_SEQUENCE,
         )
     nodes = tuple(_iter_c_nodes_deep_8616(function.statements))
-    captures = [node for node in nodes if isinstance(node, c.CAssignment) and _CAPTURE_TAG in node.tags]
+    captures = [node for node in iter(nodes) if isinstance(node, c.CAssignment) and _CAPTURE_TAG in node.tags]
     if not captures and not uses:
         return None
-    if function.addr != source.function_addr:
+    if operator.ne(function.addr, source.function_addr):
         return EntryStackPointerCaptureResult8616(None, 0, False, EntryStackPointerCaptureFailure8616.FUNCTION_SCOPE_MISMATCH)
     if not _published_source_is_current_8616(codegen, source):
         return EntryStackPointerCaptureResult8616(None, 0, False, EntryStackPointerCaptureFailure8616.SOURCE_CHANGED)
@@ -425,7 +450,7 @@ def prepare_entry_stack_pointer_capture_8616(
         return EntryStackPointerCaptureResult8616(None, 0, False, EntryStackPointerCaptureFailure8616.INVALID_CAPTURE)
     combined_uses = {*retained, *uses}
     if not combined_uses or not all(
-            _use_is_current(source, use, scoped_context, scoped_caller_scope) for use in combined_uses):
+            _use_is_current(source, use, scoped_context, scoped_caller_scope) for use in iter(combined_uses)):
         return EntryStackPointerCaptureResult8616(None, 0, False, EntryStackPointerCaptureFailure8616.SOURCE_CHANGED)
     combined = tuple(sorted(combined_uses, key=_use_order))
     value, changed, failure = _prepare_entry_capture(codegen, function, nodes, captures, combined)
@@ -434,13 +459,13 @@ def prepare_entry_stack_pointer_capture_8616(
     return EntryStackPointerCaptureResult8616(value, changed, True, failure)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class EntryStackPointerCaptureObservation8616:
     """Pure validated view for consumers that must never materialize or repair."""
 
     assignment: c.CAssignment
     value: c.CVariable
-    uses: tuple[EntryStackPointerUse8616, ...]
+    uses: object
 
 
 def observe_entry_stack_pointer_capture_8616(
@@ -455,14 +480,17 @@ def observe_entry_stack_pointer_capture_8616(
     and caller domain; without both a capture carrying scoped evidence
     observes as unproven.
     """
+    expected: object
+    function: object
+    value: object
     function = cast(_CodegenCapture8616, codegen).cfunc
-    if function is None or function.addr != source.function_addr or not _published_source_is_current_8616(codegen, source):
+    if function is None or operator.ne(function.addr, source.function_addr) or not _published_source_is_current_8616(codegen, source):
         return None
-    captures = [node for node in _iter_c_nodes_deep_8616(function.statements)
+    captures = [node for node in builtins.iter(_iter_c_nodes_deep_8616(function.statements))
                 if isinstance(node, c.CAssignment) and _CAPTURE_TAG in node.tags]
     uses = _retained_uses(captures)
     if (len(captures) != 1 or not uses or not all(
-            _use_is_current(source, use, scoped_context, scoped_caller_scope) for use in uses)):
+            _use_is_current(source, use, scoped_context, scoped_caller_scope) for use in iter(uses))):
         return None
     expected = runtime_gp_state_expr_8616("sp", codegen=codegen, function_addr=function.addr)
     if expected is None:

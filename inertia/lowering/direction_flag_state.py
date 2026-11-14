@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Lower unresolved direction-step inputs to explicit runtime state.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -21,6 +24,9 @@ from angr.sim_variable import SimMemoryVariable, SimRegisterVariable
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 
 from .global_declarations import GlobalDeclarationCType8616, record_global_declaration_spec_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = ["DirectionFlagStateStats8616", "lower_direction_flag_state_8616"]
 
@@ -31,7 +37,7 @@ _RUNTIME_DIRECTION_NAME_8616 = "inertia_direction"
 class _DirectionArch8616(Protocol):
     """Architecture register map consumed at the third-party boundary."""
 
-    registers: Mapping[str, tuple[int, int]]
+    registers: Mapping[str, tuple[cython.longlong, cython.longlong]]
 
 
 class _DirectionProject8616(Protocol):
@@ -43,7 +49,7 @@ class _DirectionProject8616(Protocol):
 class _DirectionCFunction8616(Protocol):
     """Structured function surface mutated by direction-state lowering."""
 
-    addr: int
+    addr: cython.longlong
     statements: object
 
 
@@ -55,19 +61,21 @@ class _DirectionCodegen8616(Protocol):
     _inertia_direction_flag_state_stats_8616: DirectionFlagStateStats8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectionFlagStateStats8616:
     """Closed evidence counters for direction-state materialization."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-def _register_shape_8616(node: object) -> tuple[int, int] | None:
+@cython.ccall
+def _register_shape_8616(node: object) -> object:
     """Return one exact structured register view."""
+    variable: object
     if not isinstance(node, structured_c.CVariable):
         return None
     for variable in (node.unified_variable, node.variable):
@@ -76,12 +84,13 @@ def _register_shape_8616(node: object) -> tuple[int, int] | None:
     return None
 
 
-def _contains_unrenderable_input_8616(node: object) -> bool:
+def _contains_unrenderable_input_8616(node: object) -> cython.bint:
     """Return whether one expression contains angr's opaque dirty placeholder."""
-    return any(isinstance(item, structured_c.CDirtyExpression) for item in _iter_c_nodes_deep_8616(node))
+    return any(isinstance(item, structured_c.CDirtyExpression) for item in builtins.iter(_iter_c_nodes_deep_8616(node)))
 
 
-def _runtime_direction_cvar_8616(codegen: object, function_addr: int) -> structured_c.CVariable:
+@cython.ccall
+def _runtime_direction_cvar_8616(codegen: object, function_addr: cython.longlong) -> structured_c.CVariable:
     """Build the explicit signed direction-step runtime variable."""
     return structured_c.CVariable(
         SimMemoryVariable(
@@ -96,8 +105,13 @@ def _runtime_direction_cvar_8616(codegen: object, function_addr: int) -> structu
     )
 
 
-def lower_direction_flag_state_8616(codegen: object) -> bool:
+@cython.ccall
+def lower_direction_flag_state_8616(codegen: object) -> cython.bint:
     """Replace only opaque DF-derived ``d`` assignments with runtime state."""
+    cfunc: object
+    direction_shape: object
+    project: object
+    node: object
     boundary = cast(_DirectionCodegen8616, codegen)
     project = boundary.project
     cfunc = boundary.cfunc
@@ -113,7 +127,7 @@ def lower_direction_flag_state_8616(codegen: object) -> bool:
     raw = 0
     materialized = 0
     for node in _iter_c_nodes_deep_8616(cfunc.statements):
-        if not isinstance(node, structured_c.CAssignment) or _register_shape_8616(node.lhs) != direction_shape[:2]:
+        if not isinstance(node, structured_c.CAssignment) or operator.ne(_register_shape_8616(node.lhs), direction_shape[:2]):
             continue
         raw += 1
         if not _contains_unrenderable_input_8616(node.rhs):

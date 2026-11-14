@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Semantics.
 Responsibility: authenticate conditional raw-IR to call-Semantics projections.
 
@@ -8,6 +9,8 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
@@ -29,6 +32,11 @@ from inertia.ir.scoped_function_ir_view import (
 from inertia.ir.source_graph_binding import source_graphs_equal_8616
 from inertia.ir.ssa_function import SSAFunctionArtifact
 from inertia.pipeline.errors import PipelineHardError
+import dataclasses
+import operator
+import builtins
+CallOutputArtifact8616 = typing.TypeVar("CallOutputArtifact8616")
+CallStackEffectArtifact8616 = typing.TypeVar("CallStackEffectArtifact8616")
 
 if TYPE_CHECKING:
     from .call_outputs import CallOutputArtifact8616
@@ -43,9 +51,12 @@ def scoped_call_blocks_8616(
     This synchronous projection adds no authority; retained consumers must
     reauthenticate the owning view. Raw and CFG instructions remain unchanged.
     """
+    call: object
+    block: object
+    instruction: object
     targets = {(call.block.addr, call.instruction.addr): call
-               for call in projection.call_targets}
-    if len(targets) != len(projection.call_targets):
+               for call in iter(projection.call_targets)}
+    if operator.ne(len(targets), len(projection.call_targets)):
         raise PipelineHardError("ambiguous scoped CALL census", layer="semantics")
     result: list[IRBlock] = []
     for block in projection.blocks:
@@ -57,12 +68,12 @@ def scoped_call_blocks_8616(
                     raise PipelineHardError("scoped CALL premise differs", layer="semantics")
                 instruction = replace(instruction, args=(IRValue(MemSpace.CONST, const=call.target, size=4),))
             instructions.append(instruction)
-        result.append(block if all(a is b for a, b in zip(instructions, block.instrs, strict=True))
+        result.append(block if all(a is b for a, b in builtins.iter(zip(instructions, block.instrs, strict=True)))
                       else replace(block, instrs=tuple(instructions)))
     return tuple(result)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ScopedCallSemanticInput8616:
     """Exact native source, authenticated control projection and consuming entry."""
 
@@ -78,8 +89,9 @@ class ScopedCallSemanticInput8616:
         """Derive the request from retained typed authority on every consumption."""
         return entry_projection_mode_for_scope_8616(self.scope)
 
-    def authenticate(self) -> bool:
+    def authenticate(self) -> cython.bint:
         """Recheck the whole source/control census without universal publication."""
+        projection: object
         if self.scope.project is not self.project or self.view.source_artifact is not self.source_ir:
             return False
         consumption = consume_scoped_ir_boundary_projection_8616(
@@ -96,7 +108,7 @@ class ScopedCallSemanticInput8616:
         return (
             self.input_ir.summary is self.source_ir.summary
             and self.input_ir.condition_evidence is self.source_ir.condition_evidence
-            and self.input_ir.function_addr == self.source_ir.function_addr
+            and operator.eq(self.input_ir.function_addr, self.source_ir.function_addr)
             and source_graphs_equal_8616(
                 self.input_ir.function_addr, self.input_ir.blocks,
                 self.source_ir.function_addr, scoped_call_blocks_8616(projection),
@@ -106,7 +118,7 @@ class ScopedCallSemanticInput8616:
     def authenticates_outputs(
         self, effects: CallStackEffectArtifact8616, outputs: CallOutputArtifact8616,
         function_ssa: SSAFunctionArtifact,
-    ) -> bool:
+    ) -> cython.bint:
         """Recompute owned transforms, rejecting forged or changed output artifacts."""
         from .call_stack_effect_pipeline import build_semantic_function_ssa_8616
 
@@ -125,45 +137,55 @@ class ScopedCallSemanticInput8616:
                 and effects.function.condition_evidence is self.input_ir.condition_evidence
                 and outputs.function.condition_evidence is self.input_ir.condition_evidence
                 and function_ssa.condition_evidence is self.input_ir.condition_evidence
-                and effects.to_dict() == current_effects.to_dict()
-                and outputs.to_dict() == current_outputs.to_dict()
-                and outputs.function.to_dict() == current_outputs.function.to_dict()
-                and effects.function.to_dict() == current_effects.function.to_dict()
-                and function_ssa.to_dict() == current_ssa.to_dict()
+                and operator.eq(effects.to_dict(), current_effects.to_dict())
+                and operator.eq(outputs.to_dict(), current_outputs.to_dict())
+                and operator.eq(outputs.function.to_dict(), current_outputs.function.to_dict())
+                and operator.eq(effects.function.to_dict(), current_effects.function.to_dict())
+                and operator.eq(function_ssa.to_dict(), current_ssa.to_dict())
             )
 
     def _proofs_bound(
         self, effects: CallStackEffectArtifact8616, current: CallStackEffectArtifact8616,
-    ) -> bool:
+    ) -> cython.bint:
         """Authenticate retained proof identities omitted from diagnostics."""
+        bp: object
+        fresh_bp: object
+        fresh_target: object
+        invocation: object
+        target: object
+        fresh: object
+        retained: object
         for retained, fresh in zip(effects.facts, current.facts, strict=False):
             bp, fresh_bp = retained.bp_preservation, fresh.bp_preservation
             if (bp is None) != (fresh_bp is None):
                 return False
             if (bp is not None and fresh_bp is not None
-                    and (bp.project is not self.project or bp != fresh_bp or bp.complete != fresh_bp.complete)):
+                    and (bp.project is not self.project or operator.ne(bp, fresh_bp) or operator.ne(bp.complete, fresh_bp.complete))):
                 return False
             target, fresh_target = retained.target_binding, fresh.target_binding
             if (target is None) != (fresh_target is None):
                 return False
             if target is not None and fresh_target is not None:
-                if target != fresh_target or target.to_dict() != fresh_target.to_dict():
+                if operator.ne(target, fresh_target) or operator.ne(target.to_dict(), fresh_target.to_dict()):
                     return False
-                if target.complete != fresh_target.complete:
+                if operator.ne(target.complete, fresh_target.complete):
                     return False
                 invocation = target.invocation
                 if invocation is not None and (
                     invocation.project is not self.project
-                    or not any(invocation.block is block for block in self.input_ir.blocks)
+                    or not any(invocation.block is block for block in iter(self.input_ir.blocks))
                 ):
                     return False
         return True
 
 
+@cython.ccall
 def scoped_call_semantic_input_8616(
     project: object, codegen: object, function: object, source_ir: IRFunctionArtifact,
 ) -> ScopedCallSemanticInput8616 | None:
     """Consume an explicitly prepared entry at the earliest call-Semantics stage."""
+    entry: object
+    projection: object
     entry = _retained_input_8616(codegen)
     if entry is None:
         return None

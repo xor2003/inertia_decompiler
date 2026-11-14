@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bind an unscaled byte index using exact pointer-carrier evidence.
 
 Layer: Types/Lowering.
@@ -9,6 +10,7 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import cython
 
 from collections.abc import Callable, Sequence
 
@@ -17,21 +19,25 @@ from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CExpression
 from .gp_register_state import runtime_gp_expression_view_8616
 from .near_pointer_argument import NearPointerArgumentFact8616
 from .physical_registers import physical_register_name_8616
+import operator
 
 
 def bind_byte_pointer_index_8616(
     expression: object,
     facts: Sequence[NearPointerArgumentFact8616],
-    instruction_addrs: frozenset[int],
+    instruction_addrs: object,
     arguments: Sequence[CVariable],
     argument_offset: Callable[[object], int | None],
     *,
     codegen: object,
 ) -> CBinaryOp | None:
     """Replace only a uniquely proven unchanged carrier, preserving its index."""
+    runtime: object
+    base: object
+    index: object
     if not isinstance(expression, CBinaryOp) or expression.op != "Add":
         return None
-    matches = tuple(fact for fact in facts if fact.access_width_bytes == 1
+    matches = tuple(fact for fact in iter(facts) if fact.access_width_bytes == 1
                     and fact.dereference_ins_addr in instruction_addrs)
     if len(matches) != 1:
         return None
@@ -43,12 +49,12 @@ def bind_byte_pointer_index_8616(
     for base, index in ((expression.lhs, expression.rhs), (expression.rhs, expression.lhs)):
         runtime = runtime_gp_expression_view_8616(base)
         name = runtime.register_name if runtime is not None else physical_register_name_8616(base)
-        if name == fact.carrier_register_name and isinstance(index, CExpression):
+        if operator.eq(name, fact.carrier_register_name) and isinstance(index, CExpression):
             indices.append(index)
     if len(indices) != 1:
         return None
-    pointers = tuple(argument for argument in arguments
-                     if isinstance(argument, CVariable) and argument_offset(argument) == fact.stack_offset)
+    pointers = tuple(argument for argument in iter(arguments)
+                     if isinstance(argument, CVariable) and operator.eq(argument_offset(argument), fact.stack_offset))
     if len(pointers) != 1:
         return None
     return CBinaryOp("Add", pointers[0], indices[0], codegen=codegen, tags=dict(expression.tags or {}))

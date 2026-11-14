@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Encode worker-local segment facts without moving semantic ownership to CLI.
 
 Layer: function/program summaries.
@@ -12,6 +13,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import cast
 
@@ -31,6 +34,7 @@ from .segment_program_layout_contract import (
     SegmentProgramFunctionEvidence8616,
     validated_segment_program_counts_8616,
 )
+import operator
 
 
 def segment_program_function_evidence_8616(
@@ -53,7 +57,7 @@ def segment_program_function_evidence_8616(
                 physical_source=fact.physical_source,
                 verdict=fact.verdict,
             )
-            for fact in local.accesses
+            for fact in iter(local.accesses)
         ),
         local_clobbered_registers=tuple(sorted(local.clobbered_registers)),
         restored_registers=tuple(sorted(local.restored_registers)),
@@ -65,7 +69,8 @@ def segment_program_function_evidence_8616(
     )
 
 
-def _int_8616(value: object, *, field_name: str, optional: bool = False) -> int | None:
+@cython.ccall
+def _int_8616(value: object, *, field_name: object, optional: cython.bint = False) -> int | None:
     """Parse a strict nonnegative integer field."""
     if optional and value is None:
         return None
@@ -74,30 +79,35 @@ def _int_8616(value: object, *, field_name: str, optional: bool = False) -> int 
     return value
 
 
-def _strings_8616(value: object, *, field_name: str) -> tuple[str, ...]:
+def _strings_8616(value: object, *, field_name: object) -> object:
     """Parse a deterministic string-list field."""
-    if not isinstance(value, list) or not all(isinstance(item, str) and item for item in value):
+    if not isinstance(value, list) or not all(isinstance(item, str) and item for item in iter(value)):
         raise ValueError(f"segment program evidence has invalid {field_name}")
     parsed = tuple(value)
-    if parsed != tuple(sorted(set(parsed))):
+    if operator.ne(parsed, tuple(sorted(tuple(set(parsed))))):
         raise ValueError(f"segment program evidence has non-canonical {field_name}")
     return parsed
 
 
-def _string_8616(value: object, *, field_name: str) -> str:
+@cython.ccall
+def _string_8616(value: object, *, field_name: object) -> object:
     """Parse a required nonempty string before enum or contract construction."""
     if not isinstance(value, str) or not value:
         raise ValueError(f"segment program evidence has invalid {field_name}")
     return value
 
 
-def _optional_string_8616(value: object, *, field_name: str) -> str | None:
+@cython.ccall
+def _optional_string_8616(value: object, *, field_name: object) -> object:
     """Parse a strict optional nonempty string field."""
     return None if value is None else _string_8616(value, field_name=field_name)
 
 
 def segment_program_function_evidence_from_record_8616(record: object) -> SegmentProgramFunctionEvidence8616:
     """Validate one clean-worker program-function evidence record."""
+    raw_accesses: object
+    raw_consumptions: object
+    raw_transfers: object
     if not isinstance(record, dict) or _int_8616(record.get("schema"), field_name="schema") != 1:
         raise ValueError("segment program function evidence has an unsupported schema")
     raw_accesses = record.get("accesses")
@@ -118,10 +128,10 @@ def segment_program_function_evidence_from_record_8616(record: object) -> Segmen
             ),
             verdict=SegmentFactVerdict(_string_8616(item.get("verdict"), field_name="access verdict")),
         )
-        for item in raw_accesses
+        for item in iter(raw_accesses)
         if isinstance(item, dict)
     )
-    if len(accesses) != len(raw_accesses):
+    if operator.ne(len(accesses), len(raw_accesses)):
         raise ValueError("segment program function evidence has a non-object access")
     transfers = tuple(
         SegmentControlTransferFact8616(
@@ -132,19 +142,19 @@ def segment_program_function_evidence_from_record_8616(record: object) -> Segmen
             return_addr=_int_8616(item.get("return_addr"), field_name="transfer return", optional=True),
             verdict=SegmentFactVerdict(_string_8616(item.get("verdict"), field_name="transfer verdict")),
         )
-        for item in raw_transfers
+        for item in iter(raw_transfers)
         if isinstance(item, dict)
     )
-    if len(transfers) != len(raw_transfers):
+    if operator.ne(len(transfers), len(raw_transfers)):
         raise ValueError("segment program function evidence has a non-object transfer")
     raw_consumptions = record.get("declared_call_consumptions")
     if not isinstance(raw_consumptions, list):
         raise ValueError("segment program function evidence has invalid declared consumptions")
     consumptions = tuple(
         declared_call_effect_consumption_from_record_8616(item)
-        for item in raw_consumptions
+        for item in iter(raw_consumptions)
     )
-    if len({fact.callsite_addr for fact in consumptions}) != len(consumptions):
+    if operator.ne(len({fact.callsite_addr for fact in iter(consumptions)}), len(consumptions)):
         raise ValueError("segment program function evidence has duplicate declared consumptions")
     counts = validated_segment_program_counts_8616(
         record.get("summary"),

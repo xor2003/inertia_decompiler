@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Pre-rewrite invariant checks for semantic correctness.
 
 Layer: Pipeline governance.
@@ -13,6 +14,8 @@ Forbidden: semantic recovery, type inference, condition reconstruction.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -20,6 +23,8 @@ from enum import Enum
 from typing import Any, cast
 
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
+import dataclasses
+import operator
 
 __all__ = [
     "InvariantCheck",
@@ -30,7 +35,8 @@ __all__ = [
 ]
 
 
-def _dynamic_attr_8616(obj: object, name: str, default: object = None) -> Any:  # noqa: ANN401
+@cython.ccall
+def _dynamic_attr_8616(obj: object, name: object, default: object = None) -> Any:  # noqa: ANN401
     """Dynamic codegen/C-AST boundary: read optional third-party attributes."""
     return getattr(obj, name, default)
 
@@ -44,41 +50,42 @@ class InvariantStatus(Enum):
     UNCERTAIN = "uncertain"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class InvariantCheck:
     """One invariant verdict plus compact evidence for diagnostics."""
 
-    name: str
+    name: object
     status: InvariantStatus
     detail: str = ""
     evidence: tuple[str, ...] = ()
 
     @property
-    def is_blocking(self) -> bool:
+    def is_blocking(self) -> cython.bint:
         """Return whether this check must block rewrite."""
-        return self.status == InvariantStatus.FAILED
+        return operator.eq(self.status, InvariantStatus.FAILED)
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class InvariantReport:
     """Aggregate pre-rewrite invariant status for one function."""
 
-    function_addr: int = 0
+    function_addr: cython.longlong = 0
     function_name: str = ""
-    checks: list[InvariantCheck] = field(default_factory=list)
-    rewrite_blocked: bool = False
+    checks: object = field(default_factory=list)
+    rewrite_blocked: cython.bint = False
     skip_reason: str = ""
 
     @property
-    def all_passed(self) -> bool:
+    def all_passed(self) -> cython.bint:
         """Return whether no failed invariant blocks rewrite."""
-        return not self.rewrite_blocked and all(c.status != InvariantStatus.FAILED for c in self.checks)
+        return not self.rewrite_blocked and all(operator.ne(c.status, InvariantStatus.FAILED) for c in iter(self.checks))
 
     @property
     def failed_checks(self) -> list[InvariantCheck]:
         """Return checks that should block rewrite."""
-        return [c for c in self.checks if c.is_blocking]
+        return [c for c in iter(self.checks) if c.is_blocking]
 
+    @cython.ccall
     def to_dict(self) -> dict[str, object]:
         """Serialize the report for JSON diagnostics."""
         return {
@@ -93,7 +100,7 @@ class InvariantReport:
                     "detail": c.detail,
                     "evidence": list(c.evidence),
                 }
-                for c in self.checks
+                for c in iter(self.checks)
             ],
         }
 
@@ -101,7 +108,7 @@ class InvariantReport:
 def validate_before_rewrite_8616(
     codegen: object,
     *,
-    c_text: str = "",
+    c_text: object = "",
     project: object | None = None,
 ) -> InvariantReport:
     """Run pre-rewrite invariant checks against a function ready for rewrite.
@@ -117,6 +124,7 @@ def validate_before_rewrite_8616(
     Returns InvariantReport.  If ``rewrite_blocked`` is True, the caller MUST skip
     rewrite/formatting and emit honest partial output.
     """
+    cfunc: object
     report = InvariantReport()
     cfunc = _dynamic_attr_8616(codegen, "cfunc", None)
     if cfunc is not None:
@@ -154,19 +162,21 @@ def validate_before_rewrite_8616(
     failed = report.failed_checks
     if failed:
         report.rewrite_blocked = True
-        report.skip_reason = f"{len(failed)} invariant(s) failed: " + ", ".join(c.name for c in failed)
+        report.skip_reason = f"{len(failed)} invariant(s) failed: " + ", ".join(c.name for c in iter(failed))
 
     return report
 
 
+@cython.ccall
 def format_invariant_report_8616(report: InvariantReport) -> str:
     """Format an invariant report for diagnostic output."""
+    c: object
     lines: list[str] = [
         f"Pre-rewrite invariant report ({report.function_name or hex(report.function_addr)})",
         "=" * 60,
     ]
     for c in report.checks:
-        status_mark = "PASS" if c.status == InvariantStatus.PASSED else c.status.value.upper()
+        status_mark = "PASS" if operator.eq(c.status, InvariantStatus.PASSED) else c.status.value.upper()
         lines.append(f"  [{status_mark:>8}] {c.name}")
         if c.detail:
             lines.append(f"           {c.detail}")
@@ -182,7 +192,8 @@ def format_invariant_report_8616(report: InvariantReport) -> str:
 # ── individual check implementations ──
 
 
-def _check_no_ss_linear_expr(c_text: str, report: InvariantReport) -> None:
+@cython.ccall
+def _check_no_ss_linear_expr(c_text: object, report: InvariantReport) -> None:
     """Check: no ``(ss << 4)`` linear expressions in generated C."""
     import re
 
@@ -201,7 +212,8 @@ def _check_no_ss_linear_expr(c_text: str, report: InvariantReport) -> None:
         report.checks.append(InvariantCheck(name="no_ss_linear_expr", status=InvariantStatus.PASSED))
 
 
-def _check_no_stack_indexing(c_text: str, report: InvariantReport) -> None:
+@cython.ccall
+def _check_no_stack_indexing(c_text: object, report: InvariantReport) -> None:
     """Check: no ``stack[...]`` syntax in output — all SS:BP mapped to named variables."""
     import re
 
@@ -220,7 +232,8 @@ def _check_no_stack_indexing(c_text: str, report: InvariantReport) -> None:
         report.checks.append(InvariantCheck(name="no_stack_indexing", status=InvariantStatus.PASSED))
 
 
-def _check_no_tmp_conditions(c_text: str, codegen: object, report: InvariantReport) -> None:
+@cython.ccall
+def _check_no_tmp_conditions(c_text: object, codegen: object, report: InvariantReport) -> None:
     """Check: no ``if (tmp_*)`` when typed ConditionIR is available."""
     import re
 
@@ -238,7 +251,7 @@ def _check_no_tmp_conditions(c_text: str, codegen: object, report: InvariantRepo
                 name="no_tmp_conditions",
                 status=InvariantStatus.FAILED,
                 detail=f"found {len(matches)} tmp-based condition(s) despite available typed conditions",
-                evidence=tuple(sorted(set(matches))[:5]),
+                evidence=tuple(sorted(tuple(set(matches)))[:5]),
             )
         )
     elif matches:
@@ -253,7 +266,8 @@ def _check_no_tmp_conditions(c_text: str, codegen: object, report: InvariantRepo
         report.checks.append(InvariantCheck(name="no_tmp_conditions", status=InvariantStatus.PASSED))
 
 
-def _check_no_raw_flag_conditions(c_text: str, report: InvariantReport) -> None:
+@cython.ccall
+def _check_no_raw_flag_conditions(c_text: object, report: InvariantReport) -> None:
     """Check: no ``if (flags & ...)`` raw flag conditions."""
     import re
 
@@ -272,6 +286,7 @@ def _check_no_raw_flag_conditions(c_text: str, report: InvariantReport) -> None:
         report.checks.append(InvariantCheck(name="no_raw_flag_conditions", status=InvariantStatus.PASSED))
 
 
+@cython.ccall
 def _check_validation_not_uncollected(codegen: object, report: InvariantReport) -> None:
     """Check: uncollected validation is not treated as success."""
     validation_passed = bool(_dynamic_attr_8616(codegen, "_inertia_validation_passed", False))
@@ -303,6 +318,7 @@ def _check_validation_not_uncollected(codegen: object, report: InvariantReport) 
         )
 
 
+@cython.ccall
 def _canonical_stack_offset_8616(offset: object) -> object:
     """Normalize a stack offset into the canonical negative-spill range."""
     if not isinstance(offset, int):
@@ -315,8 +331,10 @@ def _canonical_stack_offset_8616(offset: object) -> object:
 def _collect_unmaterialized_stack_slots_8616(
     codegen: object,
     semantic_alias_facts: object,
-) -> list[str]:
+) -> object:
     """Collect stack slots whose proven identities were never materialized."""
+    offset: object
+    fact: object
     from inertia.alias.alias_model_impl import AliasFailure, AliasStorageFacts, _StackSlotIdentity
 
     failures: list[str] = []
@@ -347,8 +365,8 @@ def _collect_unmaterialized_stack_slots_8616(
 
                     found = any(
                         isinstance(v, SimStackVariable)
-                        and _canonical_stack_offset_8616(_dynamic_attr_8616(v, "offset", None)) == offset
-                        for v in variables
+                        and operator.eq(_canonical_stack_offset_8616(_dynamic_attr_8616(v, "offset", None)), offset)
+                        for v in iter(variables)
                     )
                     if not found:
                         failures.append(
@@ -357,6 +375,7 @@ def _collect_unmaterialized_stack_slots_8616(
     return failures
 
 
+@cython.ccall
 def _check_stack_slots_materialized(codegen: object, report: InvariantReport) -> None:
     """Check: all proven SS stack slots have been materialized as named variables."""
     semantic_alias_facts = _dynamic_attr_8616(codegen, "_inertia_semantic_alias_facts", None)
@@ -385,6 +404,7 @@ def _check_stack_slots_materialized(codegen: object, report: InvariantReport) ->
         report.checks.append(InvariantCheck(name="stack_slots_materialized", status=InvariantStatus.PASSED))
 
 
+@cython.ccall
 def _check_stack_facts_consumed(codegen: object, report: InvariantReport) -> None:
     """Quantitative gate: if stack alias facts exist, at least one must be materialized.
 
@@ -422,6 +442,7 @@ def _check_stack_facts_consumed(codegen: object, report: InvariantReport) -> Non
         )
 
 
+@cython.ccall
 def _check_condition_facts_consumed(codegen: object, report: InvariantReport) -> None:
     """Quantitative gate: if condition facts exist, at least one must be consumed.
 
@@ -459,12 +480,14 @@ def _check_condition_facts_consumed(codegen: object, report: InvariantReport) ->
         )
 
 
+@cython.ccall
 def _mapped_goto_label_8616(
     map_addr_to_label: object,
-    target: int,
+    target: cython.longlong,
     target_idx: object,
 ) -> object | None:
     """Return the mapped label for one goto target, or None."""
+    mapped_label: object
     if not isinstance(map_addr_to_label, dict):
         return None
     mapped_label = map_addr_to_label.get((target, target_idx))
@@ -473,14 +496,18 @@ def _mapped_goto_label_8616(
     return mapped_label
 
 
+@cython.ccall
 def _collect_unresolved_goto_targets_8616(
     root: object,
     cfunc: object,
-    defined_labels: set[str],
-    defined_all: set[str],
+    defined_labels: object,
+    defined_all: object,
     map_addr_to_label: object,
-) -> list[str]:
+) -> object:
     """Collect goto targets with no emitted label."""
+    mapped_label: object
+    mapped_name: object
+    node: object
     from angr.analyses.decompiler.structured_codegen.c import CGoto
 
     unresolved: list[str] = []
@@ -511,8 +538,11 @@ def _collect_unresolved_goto_targets_8616(
     return unresolved
 
 
+@cython.ccall
 def _check_goto_targets_resolved(codegen: object, report: InvariantReport) -> None:
     """Check: every CGoto target resolves to an emitted C label."""
+    cfunc: object
+    root: object
     cfunc = _dynamic_attr_8616(codegen, "cfunc", None)
     root = _find_cfunc_root_8616(cfunc)
     if root is None:
@@ -547,8 +577,11 @@ def _check_goto_targets_resolved(codegen: object, report: InvariantReport) -> No
         report.checks.append(InvariantCheck(name="goto_targets_resolved", status=InvariantStatus.PASSED))
 
 
+@cython.ccall
 def _find_cfunc_root_8616(cfunc: object) -> object | None:
     """Return the first known C function body/root field."""
+    value: object
+    attr: object
     if cfunc is None:
         return None
     for attr in ("body", "statements", "stmt"):
@@ -558,8 +591,10 @@ def _find_cfunc_root_8616(cfunc: object) -> object | None:
     return None
 
 
-def _collect_cfunc_label_names_8616(root: object) -> set[str]:
+@cython.ccall
+def _collect_cfunc_label_names_8616(root: object) -> object:
     """Collect explicit CLabel names from an AST subtree."""
+    node: object
     from angr.analyses.decompiler.structured_codegen.c import CLabel
 
     labels: set[str] = set()
@@ -571,8 +606,10 @@ def _collect_cfunc_label_names_8616(root: object) -> set[str]:
     return labels
 
 
-def _collect_cfunc_map_addr_label_names_8616(codegen: object) -> list[str]:
+@cython.ccall
+def _collect_cfunc_map_addr_label_names_8616(codegen: object) -> object:
     """Collect label names from codegen address-to-label maps."""
+    node: object
     mapping = _dynamic_attr_8616(codegen, "map_addr_to_label", None) if codegen is not None else None
     if not isinstance(mapping, dict):
         return []
@@ -584,11 +621,13 @@ def _collect_cfunc_map_addr_label_names_8616(codegen: object) -> list[str]:
     return names
 
 
-def _format_legacy_goto_label_name_8616(target: int) -> str:
+@cython.ccall
+def _format_legacy_goto_label_name_8616(target: cython.longlong) -> str:
     return f"LABEL_{target:#x}"
 
 
-def classify_stack_blocker_8616(diag: dict[str, int]) -> str | None:
+@cython.ccall
+def classify_stack_blocker_8616(diag: object) -> object:
     """Classify stack-materialization blockers from diagnostics.
 
     Returns a human-readable blocker label, or None if no hard blocker is found.

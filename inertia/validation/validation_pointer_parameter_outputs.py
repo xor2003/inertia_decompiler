@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Validate proven pointer-parameter writes against final structured C.
 
 Layer: Tail validation.
@@ -13,6 +14,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import Counter
 from collections.abc import Sequence
@@ -34,12 +37,13 @@ from .validation_pointer_parameter_output_contracts import (
     PointerParameterOutputValidationReport8616,
     PointerParameterWriteRequirement8616,
 )
+import operator
 
 
 class _CFunctionSurface8616(Protocol):
     """Third-party C-function fields used by this read-only validator."""
 
-    addr: int
+    addr: cython.longlong
     arg_list: Sequence[object] | None
 
 
@@ -55,6 +59,7 @@ class _ProjectSurface8616(Protocol):
     arch: Arch
 
 
+@cython.ccall
 def _strip_casts_8616(node: object) -> object:
     """Return the expression beneath transparent structured-C casts."""
     while isinstance(node, structured_c.CTypeCast):
@@ -62,6 +67,7 @@ def _strip_casts_8616(node: object) -> object:
     return node
 
 
+@cython.ccall
 def _constant_int_8616(node: object) -> int | None:
     """Return one exact structured-C integer constant."""
     node = _strip_casts_8616(node)
@@ -71,6 +77,7 @@ def _constant_int_8616(node: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+@cython.ccall
 def _type_width_8616(project: object, type_: object) -> int | None:
     """Return one architecture-bound structured-C type width in bytes."""
     if not isinstance(type_, SimType):
@@ -91,12 +98,14 @@ def _type_width_8616(project: object, type_: object) -> int | None:
     return bits // arch.byte_width
 
 
+@cython.ccall
 def _argument_index_8616(
     codegen: object,
     node: object,
-    requirements_by_stack_offset: dict[int, int],
+    requirements_by_stack_offset: object,
 ) -> int | None:
     """Resolve one C variable to its evidence-owned logical argument index."""
+    stack_offset: object
     node = _strip_casts_8616(node)
     if not isinstance(node, structured_c.CVariable):
         return None
@@ -107,12 +116,18 @@ def _argument_index_8616(
     return requirements_by_stack_offset.get(stack_offset) if stack_offset is not None else None
 
 
+@cython.ccall
 def _pointer_expression_8616(
     codegen: object,
     node: object,
-    requirements_by_stack_offset: dict[int, int],
-) -> tuple[int, int] | None:
+    requirements_by_stack_offset: object,
+) -> object:
     """Resolve a pointer argument expression and constant byte displacement."""
+    constant: object
+    direct: object
+    logical_index: object
+    displacement: object
+    pointer: object
     node = _strip_casts_8616(node)
     direct = _argument_index_8616(codegen, node, requirements_by_stack_offset)
     if direct is not None:
@@ -131,8 +146,10 @@ def _pointer_expression_8616(
     return None
 
 
-def _helper_target_8616(node: structured_c.CFunctionCall) -> str | None:
+@cython.ccall
+def _helper_target_8616(node: structured_c.CFunctionCall) -> object:
     """Return the exact third-party helper target name when available."""
+    callee: object
     target = node.callee_target
     if isinstance(target, str):
         return target.upper()
@@ -140,16 +157,24 @@ def _helper_target_8616(node: structured_c.CFunctionCall) -> str | None:
     return callee.name.upper() if callee is not None and isinstance(callee.name, str) else None
 
 
+@cython.ccall
 def _pointer_lvalue_range_8616(
     project: object,
     codegen: object,
     lvalue: object,
-    requirements_by_stack_offset: dict[int, int],
-) -> tuple[int, int, int] | None:
+    requirements_by_stack_offset: object,
+) -> object:
     """Classify one final lvalue as a logical pointer-parameter byte range."""
+    element_width: object
+    field_width: object
+    helper: object
+    index: object
+    logical_index: object
+    pointer: object
+    width: object
     node = _strip_casts_8616(lvalue)
     field_offset = 0
-    field_width: int | None = None
+    field_width = None
     pointer_field = False
     while isinstance(node, structured_c.CVariableField):
         offset = node.field.offset
@@ -206,15 +231,18 @@ def validate_pointer_parameter_write_requirements_8616(
     project: object,
     codegen: object,
     root: object,
-    requirements: tuple[PointerParameterWriteRequirement8616, ...],
+    requirements: object,
 ) -> PointerParameterOutputValidationReport8616:
     """Validate normalized requirements against exact final AST write owners."""
+    write: object
+    node: object
+    requirement: object
     requirements_by_stack_offset = {
         requirement.stack_offset: requirement.logical_index
-        for requirement in requirements
+        for requirement in iter(requirements)
     }
-    interface_valid = len(requirements_by_stack_offset) == len(requirements)
-    available: Counter[tuple[int, int]] = Counter()
+    interface_valid = operator.eq(len(requirements_by_stack_offset), len(requirements))
+    available: Counter[tuple[cython.longlong, cython.longlong]] = Counter()
     if interface_valid:
         for node in _iter_c_nodes_deep_8616(root):
             if not isinstance(node, structured_c.CAssignment):
@@ -247,7 +275,7 @@ def validate_pointer_parameter_write_requirements_8616(
             (requirement.logical_index, requirement.relative_offset + byte_index)
             for byte_index in range(requirement.width)
         )
-        if all(available[item] > 0 for item in required_bytes):
+        if all(available[item] > 0 for item in iter(required_bytes)):
             available.subtract(required_bytes)
             materialized += 1
             continue
@@ -273,6 +301,8 @@ def validate_pointer_parameter_outputs_8616(
     root: object,
 ) -> PointerParameterOutputValidationReport8616:
     """Validate every complete published pointer-output contract for a function."""
+    cfunc: object
+    evidence: object
     boundary = cast(_CodegenSurface8616, codegen)
     try:
         cfunc = boundary.cfunc
@@ -296,7 +326,7 @@ def validate_pointer_parameter_outputs_8616(
             relative_offset=fact.output_view.relative_offset,
             width=fact.output_view.width,
         )
-        for fact in evidence.facts
+        for fact in iter(evidence.facts)
     )
     return validate_pointer_parameter_write_requirements_8616(
         project,

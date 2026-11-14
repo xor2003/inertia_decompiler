@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize proven indexed segmented values in structured conditions.
 
 Layer: Structuring.
@@ -10,6 +11,8 @@ rewrite cleanup, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from typing import TYPE_CHECKING
@@ -18,6 +21,7 @@ from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CConstant, 
 from angr.sim_type import SimTypeShort
 
 from inertia.ir.core import IRBinaryValue, IRValue
+CExpression = typing.TypeVar("CExpression")
 
 if TYPE_CHECKING:
     from angr.analyses.decompiler.structured_codegen.c import CExpression
@@ -25,6 +29,7 @@ if TYPE_CHECKING:
 __all__ = ["materialize_indexed_segmented_condition_value_8616"]
 
 
+@cython.ccall
 def materialize_indexed_segmented_condition_value_8616(
     operand: IRValue,
     segment: CExpression,
@@ -33,6 +38,8 @@ def materialize_indexed_segmented_condition_value_8616(
     build_tags: Callable[[IRValue, str], dict[str, object]],
 ) -> CFunctionCall | None:
     """Build a segmented load from an exact typed affine index."""
+    helper: object
+    index: object
     if operand.index is None or operand.index_shift < 0:
         return None
     index = lower_index(operand.index)

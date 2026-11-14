@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: run bounded fallback lanes and report their validation outcome.
@@ -7,6 +8,7 @@ Guard: this CLI boundary must not become the owner of decompiler semantics.
 
 # AUTO-GENERATED split from cli_runtime_shared.py
 from __future__ import annotations
+import cython
 
 import contextlib
 import functools as functools
@@ -24,6 +26,9 @@ from typing import Protocol as Protocol
 from typing import runtime_checkable as runtime_checkable
 
 import angr
+import dataclasses
+import operator
+import builtins
 
 # Static named reexports keep the legacy CLI facade's names explicit for type checkers; runtime bindings and __all__ are unchanged.
 if _cli_compat_typing.TYPE_CHECKING:
@@ -157,7 +162,7 @@ class _SidecarFunctionBoundary8616(Protocol):
 
 def _call_decompile_function_with_stats(
     *args: object, **kwargs: object
-) -> tuple[str, str, str | None, int, int, float, TerminalDecompileFailure8616 | None]:
+) -> object:
     """Forward run statistics and terminal provenance without dropping fields."""
     decompile_function = typing.cast(_DecompileFunctionWithStats, _decompile_function_with_stats)
     return decompile_function(*args, **kwargs)
@@ -175,22 +180,23 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class NonOptimizedSliceOutcome:
     """Result for non-optimized fallback decompilation attempts."""
 
-    rendered: str | None
-    status: str
-    payload: str
-    partial_payload: str | None = None
-    failure_detail: str | None = None
+    rendered: object
+    status: object
+    payload: object
+    partial_payload: object = None
+    failure_detail: object = None
     attempt_failures: tuple[str, ...] = ()
     verdict: BoundedSliceVerdict | None = None
 
 
+@cython.ccall
 def _non_optimized_slice_rendered(
-    outcome: NonOptimizedSliceOutcome | str | None,
-) -> str | None:
+    outcome: object,
+) -> object:
     if outcome is None:
         return None
     if isinstance(outcome, NonOptimizedSliceOutcome):
@@ -198,9 +204,10 @@ def _non_optimized_slice_rendered(
     return outcome
 
 
+@cython.ccall
 def _non_optimized_slice_failure_detail(
-    outcome: NonOptimizedSliceOutcome | str | None,
-) -> str | None:
+    outcome: object,
+) -> object:
     if not isinstance(outcome, NonOptimizedSliceOutcome):
         return None
     return outcome.failure_detail
@@ -215,10 +222,10 @@ class _SidecarSliceFallback8616:
         self,
         project: angr.Project,
         lst_metadata: LSTMetadata | None,
-        addr: int,
-        name: str,
-        timeout: int,
-        api_style: str,
+        addr: cython.longlong,
+        name: object,
+        timeout: cython.longlong,
+        api_style: object,
         binary_path: Path | None,
         failure_family_state: FailureFamilyState | None,
     ) -> None:
@@ -248,7 +255,7 @@ class _SidecarSliceFallback8616:
             return result
         return None
 
-    def run_8616_part0(self) -> tuple[bool, object]:
+    def run_8616_part0(self) -> tuple[cython.bint, object]:
         """Phase 0: bound the LST code region and load its bytes into run state."""
         self.region = _lst_code_region(self.lst_metadata, self.addr)
         if self.region is None:
@@ -268,6 +275,9 @@ class _SidecarSliceFallback8616:
         return False, None
 
     def _recover_and_decompile(self) -> SliceRecoveryAttemptOutcome:
+        arch_name: object
+        slice_plan: object
+        attempt: object
         # Dynamic angr boundary: project architecture metadata is supplied by angr.
         arch_name = getattr(getattr(self.project, "arch", None), "name", None)
         slice_plan = (
@@ -326,7 +336,9 @@ class _SidecarSliceFallback8616:
             )
         return outcomes[-1]
 
-    def _decompile_attempt(self, attempt_name: str, slice_project: angr.Project, cfg: object, func: object, *, slice_plan: X86ExactSlicePlan | None, slice_entry: int, slice_end: int)-> SliceRecoveryAttemptOutcome:
+    def _decompile_attempt(self, attempt_name: object, slice_project: angr.Project, cfg: object, func: object, *, slice_plan: object, slice_entry: cython.longlong, slice_end: cython.longlong)-> SliceRecoveryAttemptOutcome:
+        block: object
+        instruction: object
             # Dynamic angr boundary: recovered functions expose mutable names through angr.
         typing.cast(typing.Any, func).name = self.name
         if slice_plan is not None:
@@ -355,11 +367,11 @@ class _SidecarSliceFallback8616:
             function_boundary = typing.cast(_SidecarFunctionBoundary8616, func)
             cfg_blocks = tuple(
                 block
-                for block in typing.cast(typing.Any, function_boundary.blocks)
+                for block in builtins.iter(typing.cast(typing.Any, function_boundary.blocks))
                 if isinstance(block, _SidecarCfgBlockBoundary8616)
             )
             inventory_base_instructions: tuple[object, ...] = ()
-            cfg_instruction_addrs: set[int] = set()
+            cfg_instruction_addrs: set[cython.longlong] = set()
             for block in cfg_blocks:
                 for instruction in typing.cast(
                     typing.Any, block.capstone.insns
@@ -379,7 +391,7 @@ class _SidecarSliceFallback8616:
                 max_bytes=_SIDECAR_SLICE_MAX_INSTRUCTION_BYTES_8616,
                 exact_end=slice_end,
             )
-            missing_instruction_addrs: list[int] = []
+            missing_instruction_addrs: list[cython.longlong] = []
             for instruction in inventory.sequential_instructions:
                 instruction_boundary = typing.cast(
                     _SidecarCfgInstructionBoundary8616,
@@ -395,7 +407,7 @@ class _SidecarSliceFallback8616:
                 status = "error"
                 payload = (
                     f"{attempt_name} sidecar slice omitted exact instructions: "
-                    + ", ".join(f"{address:#x}" for address in missing_instruction_addrs)
+                    + ", ".join(f"{address:#x}" for address in iter(missing_instruction_addrs))
                 )
         snapshot = _tail_validation_snapshot_for_function_run(slice_project, func)
         return SliceRecoveryAttemptOutcome(
@@ -405,7 +417,7 @@ class _SidecarSliceFallback8616:
             snapshot=dict(snapshot) if snapshot else None,
         )
 
-    def _inherit_slice_runtime_policy(self, slice_project: angr.Project, *, slice_plan: X86ExactSlicePlan | None, slice_start: int)-> None:
+    def _inherit_slice_runtime_policy(self, slice_project: angr.Project, *, slice_plan: object, slice_start: cython.longlong)-> None:
         if slice_plan is not None:
             typing.cast(typing.Any, slice_project)._inertia_original_project = self.project
             typing.cast(typing.Any, slice_project)._inertia_original_linear_delta = self.start - slice_start
@@ -416,7 +428,7 @@ class _SidecarSliceFallback8616:
         transfer_project_evidence_8616(self.project, slice_project)
 
 
-    def run_8616_part1(self) -> tuple[bool, object]:
+    def run_8616_part1(self) -> tuple[cython.bint, object]:
         """Phase 1: run the bounded slice decompile, wrapping timeout/error outcomes."""
         try:
             self.runner_timeout = max(2, min(self.timeout, _SIDECAR_SLICE_RUNNER_TIMEOUT_CAP_8616))
@@ -473,14 +485,15 @@ class _SidecarSliceFallback8616:
                 + (str(self.fork_error) if self.fork_error is not None else _describe_exception(ex)),
             )
 
+@cython.ccall
 def _try_decompile_sidecar_slice(
     project: angr.Project,
     lst_metadata: LSTMetadata | None,
-    addr: int,
-    name: str,
+    addr: cython.longlong,
+    name: object,
     *,
-    timeout: int,
-    api_style: str,
+    timeout: cython.longlong,
+    api_style: object,
     binary_path: Path | None,
     failure_family_state: FailureFamilyState | None = None,
 ) -> SliceRecoveryAttemptOutcome | None:
@@ -501,14 +514,14 @@ class _NonOptimizedSliceFallback8616:
     def __init__(
         self,
         project: angr.Project,
-        addr: int,
-        name: str,
-        timeout: int,
-        api_style: str,
+        addr: cython.longlong,
+        name: object,
+        timeout: cython.longlong,
+        api_style: object,
         binary_path: Path | None,
         lst_metadata: LSTMetadata | None,
         cod_metadata: CODProcMetadata | None,
-        allow_fresh_project_retry: bool,
+        allow_fresh_project_retry: cython.bint,
         failure_family_state: FailureFamilyState | None,
         original_addr: int | None,
     ) -> None:
@@ -541,7 +554,7 @@ class _NonOptimizedSliceFallback8616:
             return result
         return None
 
-    def run_8616_part0(self) -> tuple[bool, object]:
+    def run_8616_part0(self) -> tuple[cython.bint, object]:
         """Phase 0: emit a known runtime-helper fallback when the name matches."""
         self.helper_fallback = _try_emit_known_runtime_helper_c(name=self.name)
         if self.helper_fallback is not None:
@@ -556,13 +569,19 @@ class _NonOptimizedSliceFallback8616:
             )
         return False, None
 
-    def _attempt(self, slice_source_project: angr.Project, *, label: str) -> NonOptimizedSliceOutcome:
+    def _attempt(self, slice_source_project: angr.Project, *, label: object) -> NonOptimizedSliceOutcome:
+        arch_name: object
+        linked_base: object
+        main_object: object
+        max_addr: object
+        region: object
+        slice_plan: object
         # Dynamic angr boundary: project architecture metadata is supplied by angr.
         arch_name = getattr(getattr(slice_source_project, "arch", None), "name", None)
         region = _lst_code_region(self.lst_metadata, self.addr)
         if region is None:
             # Dynamic angr boundary: project entry point is supplied by angr.
-            if arch_name == "86_16" and self.addr == getattr(slice_source_project, "entry", None):
+            if arch_name == "86_16" and operator.eq(self.addr, getattr(slice_source_project, "entry", None)):
                 # Dynamic angr boundary: loader objects expose backend-specific main object metadata.
                 main_object = getattr(slice_source_project.loader, "main_object", None)
                 # Dynamic angr boundary: backend main objects expose linked image base.
@@ -600,7 +619,7 @@ class _NonOptimizedSliceFallback8616:
         slice_end = slice_plan.slice_end if slice_plan is not None else end
         reuse_existing_slice_project = (
             # Dynamic angr boundary: project entry point is supplied by angr.
-            self.lst_metadata is None and arch_name == "86_16" and self.addr == getattr(slice_source_project, "entry", None)
+            self.lst_metadata is None and arch_name == "86_16" and operator.eq(self.addr, getattr(slice_source_project, "entry", None))
         )
         recovery_attempts = build_default_slice_recovery_attempts(
             slice_start,
@@ -667,8 +686,10 @@ class _NonOptimizedSliceFallback8616:
             )
         return outcome
 
-    def _decompile_attempt(self, attempt_name: str, slice_project: angr.Project, cfg: object, func: object, *, arch_name: str | None, slice_plan: X86ExactSlicePlan | None, slice_start: int, start: int)-> SliceRecoveryAttemptOutcome:
+    def _decompile_attempt(self, attempt_name: object, slice_project: angr.Project, cfg: object, func: object, *, arch_name: object, slice_plan: object, slice_start: cython.longlong, start: cython.longlong)-> SliceRecoveryAttemptOutcome:
         """Run one exact-slice rescue attempt without skipping semantic stages."""
+        effective_cod_metadata: object
+        snapshot: object
         # Dynamic angr boundary: recovered functions expose addresses through angr.
         if not isinstance(getattr(func, "addr", None), int):
             # Dynamic angr boundary: recovered functions expose mutable addresses through angr.
@@ -747,7 +768,7 @@ class _NonOptimizedSliceFallback8616:
             snapshot=dict(snapshot) if isinstance(snapshot, dict) else None,
         )
 
-    def _run_bounded_attempt(self, attempt_name: str, job: Callable[[], SliceRecoveryAttemptOutcome], trace_snapshot: Callable[[], SliceRecoveryAttemptTrace], *, slice_source_project: angr.Project, slice_start: int, slice_end: int)-> SliceRecoveryAttemptOutcome:
+    def _run_bounded_attempt(self, attempt_name: object, job: Callable[[], SliceRecoveryAttemptOutcome], trace_snapshot: Callable[[], SliceRecoveryAttemptTrace], *, slice_source_project: angr.Project, slice_start: cython.longlong, slice_end: cython.longlong)-> SliceRecoveryAttemptOutcome:
         attempt_timeout = bounded_non_optimized_attempt_timeout(
             max(
                 1,
@@ -801,7 +822,7 @@ class _NonOptimizedSliceFallback8616:
                 attempt_trace=trace_snapshot(),
             )
 
-    def _inherit_nonoptimized_slice_runtime_policy(self, slice_project: angr.Project, *, slice_plan: X86ExactSlicePlan | None, slice_source_project: angr.Project, start: int, slice_start: int)-> None:
+    def _inherit_nonoptimized_slice_runtime_policy(self, slice_project: angr.Project, *, slice_plan: object, slice_source_project: angr.Project, start: cython.longlong, slice_start: cython.longlong)-> None:
         if slice_plan is not None:
             typing.cast(typing.Any, slice_project)._inertia_original_project = slice_source_project
             typing.cast(typing.Any, slice_project)._inertia_original_linear_delta = start - slice_start
@@ -811,7 +832,7 @@ class _NonOptimizedSliceFallback8616:
         _inherit_tail_validation_runtime_policy(slice_project, slice_source_project)
         transfer_project_evidence_8616(slice_source_project, slice_project)
 
-    def _attempt_failure_detail(self, attempt: SliceRecoveryAttemptOutcome, *, label: str)-> str:
+    def _attempt_failure_detail(self, attempt: SliceRecoveryAttemptOutcome, *, label: object) -> object:
         detail = f"{label} {attempt.attempt_name}: {attempt.status}: {attempt.payload}"
         if attempt.verdict is None:
             return detail
@@ -824,9 +845,11 @@ class _NonOptimizedSliceFallback8616:
             detail += f" ({', '.join(tags)})"
         return detail
 
-    def _recover_and_summarize(self, *, outcomes: tuple[SliceRecoveryAttemptOutcome, ...], recovery_attempts: Sequence[tuple[str, SliceRecoverCallable]], snapshot_holder: dict[str, dict[str, object] | None], label: str)-> NonOptimizedSliceOutcome:
+    def _recover_and_summarize(self, *, outcomes: object, recovery_attempts: Sequence[tuple[str, SliceRecoverCallable]], snapshot_holder: object, label: object)-> NonOptimizedSliceOutcome:
+        best_partial: object
+        attempt: object
         failure_details: list[str] = []
-        best_partial: SliceRecoveryAttemptOutcome | None = None
+        best_partial = None
         final_verdict: BoundedSliceVerdict | None = None
         for attempt in outcomes:
             if isinstance(attempt.snapshot, dict):
@@ -848,7 +871,7 @@ class _NonOptimizedSliceFallback8616:
             outcomes
             and outcomes[-1].verdict is not None
             and not outcomes[-1].verdict.can_widen_locally
-            and outcomes[-1].attempt_name != recovery_attempts[-1][0]
+            and operator.ne(outcomes[-1].attempt_name, recovery_attempts[-1][0])
         ):
             pruned_lane = recovery_attempts[len(outcomes)][0]
             failure_details.append(
@@ -865,7 +888,7 @@ class _NonOptimizedSliceFallback8616:
                 attempt_failures=tuple(failure_details),
                 verdict=best_partial.verdict,
             )
-        summary_detail: str | None = "; ".join(failure_details[:3]) if failure_details else None
+        summary_detail: object = "; ".join(failure_details[:3]) if failure_details else None
         return NonOptimizedSliceOutcome(
             rendered=None,
             status="error",
@@ -876,7 +899,7 @@ class _NonOptimizedSliceFallback8616:
         )
 
 
-    def run_8616_part1(self) -> tuple[bool, object]:
+    def run_8616_part1(self) -> tuple[cython.bint, object]:
         """Phase 1: attempt the shared-project slice, then a fresh-project retry lane."""
         self.outcome = self._attempt(self.project, label="shared-project slice")
         if self.outcome.rendered is not None:
@@ -920,7 +943,7 @@ class _NonOptimizedSliceFallback8616:
             attempt_failures=tuple(self.retry_failures),
             verdict=self.outcome.verdict,
         )
-    def _fresh_project_retry_lane_8616(self) -> bool:
+    def _fresh_project_retry_lane_8616(self) -> cython.bint:
         """Attempt the fresh-project retry lane; return True when it produced output."""
         assert self.binary_path is not None
         try:
@@ -954,17 +977,18 @@ class _NonOptimizedSliceFallback8616:
         return False
 
 
+@cython.ccall
 def _try_decompile_non_optimized_slice(
     project: angr.Project,
-    addr: int,
-    name: str,
+    addr: cython.longlong,
+    name: object,
     *,
-    timeout: int,
-    api_style: str,
+    timeout: cython.longlong,
+    api_style: object,
     binary_path: Path | None,
     lst_metadata: LSTMetadata | None,
     cod_metadata: CODProcMetadata | None = None,
-    allow_fresh_project_retry: bool = True,
+    allow_fresh_project_retry: cython.bint = True,
     failure_family_state: FailureFamilyState | None = None,
     original_addr: int | None = None,
 ) -> NonOptimizedSliceOutcome:
@@ -979,19 +1003,22 @@ def _try_decompile_non_optimized_slice(
     )
 
 
+@cython.ccall
 def _try_decompile_non_optimized_known_function(
     project: angr.Project,
     cfg: object,
     function: object,
     *,
-    timeout: int,
-    api_style: str,
+    timeout: cython.longlong,
+    api_style: object,
     binary_path: Path | None,
     lst_metadata: LSTMetadata | None,
     cod_metadata: CODProcMetadata | None = None,
-    synthetic_globals: dict[int, tuple[str, int]] | None = None,
+    synthetic_globals: object = None,
     failure_family_state: FailureFamilyState | None = None,
 ) -> NonOptimizedSliceOutcome:
+    helper_fallback: object
+    partial_payload: object
     # Dynamic angr boundary: function names are supplied by angr knowledge-base objects.
     helper_fallback = _try_emit_known_runtime_helper_c(name=getattr(function, "name", ""))
     if helper_fallback is not None:
@@ -1073,29 +1100,33 @@ def _try_decompile_non_optimized_known_function(
     )
 
 
+@cython.ccall
 def _try_emit_trivial_sidecar_c(
     project: angr.Project,
     lst_metadata: LSTMetadata | None,
-    addr: int,
-    name: str,
-) -> str | None:
+    addr: cython.longlong,
+    name: object,
+) -> object:
+    region: object
     region = _lst_code_region(lst_metadata, addr)
     if region is None:
         return None
     asm = _format_asm_range(project, region[0], region[1], max_instructions=8)
-    lines = [line.strip() for line in asm.splitlines() if line.strip()]
+    lines = [line.strip() for line in builtins.iter(asm.splitlines()) if line.strip()]
     if len(lines) == 1 and lines[0].endswith(": ret"):
         return f"void {name}(void)\n{{\n}}\n"
     return None
 
 
+@cython.ccall
 def _try_emit_string_intrinsic_c(
     project: angr.Project,
     *,
-    start: int,
-    end: int,
-    name: str,
-) -> str | None:
+    start: cython.longlong,
+    end: cython.longlong,
+    name: object,
+) -> object:
+    fallback: object
     try:
         fallback = _cli_string_timeout_fallback.try_render_x86_16_string_timeout_fallback(
             project,
@@ -1119,7 +1150,8 @@ def _try_emit_string_intrinsic_c(
     return c_text if isinstance(c_text, str) else None
 
 
-def _mark_helper_fallback_tail_validation_passed(project: angr.Project, *, reason: str) -> None:
+@cython.ccall
+def _mark_helper_fallback_tail_validation_passed(project: angr.Project, *, reason: object) -> None:
     snapshot = {
         "structuring": {
             "status": "stable",
@@ -1143,10 +1175,13 @@ def _mark_helper_fallback_tail_validation_passed(project: angr.Project, *, reaso
 
 
 
+@cython.ccall
 def _runtime_helper_match_8616(
-    entries: tuple[tuple[object, object], ...], lowered: str, normalized: str
-) -> str | None:
+    entries: object, lowered: object, normalized: object
+) -> object:
     """Return stub C text for the first matching entry; entry order is authoritative."""
+    matcher: object
+    render: object
     for matcher, render in entries:
         hit = lowered in matcher if isinstance(matcher, frozenset) else typing.cast(typing.Any, matcher)(lowered)
         if hit:
@@ -1277,7 +1312,7 @@ class _RuntimeHelperEmitter8616:
 
     def __init__(
         self,
-        name: str,
+        name: object,
     ) -> None:
         self.name: typing.Any = name
         self.lowered: typing.Any = None
@@ -1291,8 +1326,9 @@ class _RuntimeHelperEmitter8616:
             return result
         return None
 
-    def run_8616_part0(self) -> tuple[bool, object]:
+    def run_8616_part0(self) -> tuple[cython.bint, object]:
         """Match normalized helper name against the ordered stub table."""
+        text: object
         self.normalized = (self.name or "").strip()
         if not self.normalized:
             return True, None
@@ -1305,10 +1341,11 @@ class _RuntimeHelperEmitter8616:
             return True, text
         return True, _try_emit_known_runtime_helper_c_tail_8616(normalized=self.normalized, lowered=self.lowered)
 
+@cython.ccall
 def _try_emit_known_runtime_helper_c(
     *,
-    name: str,
-) -> str | None:
+    name: object,
+) -> object:
     return typing.cast("str | None", _RuntimeHelperEmitter8616(name).run_8616())
 
 
@@ -1384,8 +1421,8 @@ class _RuntimeHelperTail8616:
 
     def __init__(
         self,
-        normalized: str,
-        lowered: str,
+        normalized: object,
+        lowered: object,
     ) -> None:
         self.normalized: typing.Any = normalized
         self.lowered: typing.Any = lowered
@@ -1397,14 +1434,16 @@ class _RuntimeHelperTail8616:
             return result
         return None
 
-    def run_8616_part0(self) -> tuple[bool, object]:
+    def run_8616_part0(self) -> tuple[cython.bint, object]:
         """Match normalized helper name against the ordered stub table."""
+        text: object
         text = _runtime_helper_match_8616(_RUNTIME_HELPER_TAIL_8616, self.lowered, self.normalized)
         if text is not None:
             return True, text
         return True, _try_emit_known_runtime_helper_c_tail2_8616(normalized=self.normalized, lowered=self.lowered)
 
-def _try_emit_known_runtime_helper_c_tail_8616(*, normalized: str, lowered: str) -> str | None:
+@cython.ccall
+def _try_emit_known_runtime_helper_c_tail_8616(*, normalized: object, lowered: object) -> object:
     return typing.cast("str | None", _RuntimeHelperTail8616(normalized, lowered).run_8616())
 
 
@@ -1666,8 +1705,8 @@ class _RuntimeHelperTail2_8616:
 
     def __init__(
         self,
-        normalized: str,
-        lowered: str,
+        normalized: object,
+        lowered: object,
     ) -> None:
         self.normalized: typing.Any = normalized
         self.lowered: typing.Any = lowered
@@ -1680,12 +1719,14 @@ class _RuntimeHelperTail2_8616:
             return result
         return None
 
-    def run_8616_part0(self) -> tuple[bool, object]:
+    def run_8616_part0(self) -> tuple[cython.bint, object]:
         """Match normalized helper name against the ordered stub table."""
+        text: object
         text = _runtime_helper_match_8616(_RUNTIME_HELPER_TAIL2_8616, self.lowered, self.normalized)
         if text is not None:
             return True, text
         return True, None
 
-def _try_emit_known_runtime_helper_c_tail2_8616(*, normalized: str, lowered: str) -> str | None:
+@cython.ccall
+def _try_emit_known_runtime_helper_c_tail2_8616(*, normalized: object, lowered: object) -> object:
     return typing.cast("str | None", _RuntimeHelperTail2_8616(normalized, lowered).run_8616())

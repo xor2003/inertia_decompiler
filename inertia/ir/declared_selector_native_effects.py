@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed per-row native effect classification over source-bound raw IR.
 
 Layer: IR.
@@ -18,6 +19,8 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -30,6 +33,8 @@ from .scalar_instruction_effects import (
     scalar_instruction_effect_8616,
 )
 from .segment_state_transfer import SEGMENT_REGISTER_SET
+import dataclasses
+import operator
 
 
 class NativeRowClass8616(StrEnum):
@@ -43,18 +48,18 @@ class NativeRowClass8616(StrEnum):
     UNCLASSIFIED = "unclassified"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NativeRowJudgement8616:
     """One classified bound row and its exact typed lane."""
 
     addr: int | None
-    op: str
+    op: object
     row_class: NativeRowClass8616
-    segment: str | None
-    detail: str
+    segment: object
+    detail: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NativeSelectorBlock8616:
     """Sparse selector transfer rows emitted by the full native census visit.
 
@@ -64,26 +69,27 @@ class NativeSelectorBlock8616:
     """
 
     block: IRBlock
-    rows: tuple[IRInstr, ...]
+    rows: object
     record_rows: tuple[IRInstr, ...] = ()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NativeEffectSurvey8616:
     """Closed per-instruction survey with five-stage accounting."""
 
-    judgements: tuple[NativeRowJudgement8616, ...]
-    instruction_addrs: frozenset[int]
-    expected_addrs: frozenset[int] | None
+    judgements: object
+    instruction_addrs: object
+    expected_addrs: object
     census_covered: bool | None
-    raw: int
-    classified: int
-    unclassified: int
-    segment_writes: int
+    raw: cython.longlong
+    classified: cython.longlong
+    unclassified: cython.longlong
+    segment_writes: cython.longlong
     selector_blocks: tuple[NativeSelectorBlock8616, ...] = ()
-    segment_identity_transfer: bool = False
+    segment_identity_transfer: cython.bint = False
 
 
+@cython.ccall
 def classify_native_row_8616(instruction: IRInstr) -> NativeRowJudgement8616:
     """Classify one bound IR row in the canonical census order.
 
@@ -128,10 +134,13 @@ def classify_native_row_8616(instruction: IRInstr) -> NativeRowJudgement8616:
         effect.detail or op)
 
 
+@cython.ccall
 def _recording_row_required_8616(
-    instruction: IRInstr, verdict: NativeRowJudgement8616, fetched: set[int],
-) -> bool:
+    instruction: IRInstr, verdict: NativeRowJudgement8616, fetched: object,
+) -> cython.bint:
     """Keep each native head and every potentially selector-visible effect."""
+    address: object
+    dst: object
     address = verdict.addr
     if address is None:
         return True
@@ -154,8 +163,11 @@ def survey_native_effects_8616(
     equality: an unbound or non-integer row address never counts, and a
     decoded instruction with no classified row fails coverage loudly.
     """
+    expected: object
+    block: object
+    instr: object
     judgements: list[NativeRowJudgement8616] = []
-    addrs: set[int] = set()
+    addrs: set[cython.longlong] = set()
     selector_blocks: list[NativeSelectorBlock8616] = []
     identity_transfer = True
     relevant = frozenset({NativeRowClass8616.CALL_EDGE,
@@ -164,7 +176,7 @@ def survey_native_effects_8616(
     for block in blocks:
         selector_rows: list[IRInstr] = []
         record_rows: list[IRInstr] = []
-        fetched: set[int] = set()
+        fetched: set[cython.longlong] = set()
         for instr in block.instrs:
             verdict = classify_native_row_8616(instr)
             identity_transfer = identity_transfer and (
@@ -183,13 +195,13 @@ def survey_native_effects_8616(
             block, tuple(selector_rows), tuple(record_rows)))
     expected = (
         None if expected_addrs is None
-        else frozenset(a for a in expected_addrs if type(a) is int)
+        else frozenset(a for a in iter(expected_addrs) if type(a) is int)
     )
-    covered = None if expected is None else frozenset(addrs) == expected
+    covered = None if expected is None else operator.eq(frozenset(addrs), expected)
     return NativeEffectSurvey8616(
         tuple(judgements), frozenset(addrs), expected, covered,
         len(judgements), len(judgements),
-        sum(1 for v in judgements if v.row_class is NativeRowClass8616.UNCLASSIFIED),
-        sum(1 for v in judgements if v.row_class is NativeRowClass8616.SEGMENT_WRITE),
+        sum(1 for v in iter(judgements) if v.row_class is NativeRowClass8616.UNCLASSIFIED),
+        sum(1 for v in iter(judgements) if v.row_class is NativeRowClass8616.SEGMENT_WRITE),
         tuple(selector_blocks), identity_transfer,
     )

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Exact local constant values and proven bit lanes for typed instruction consumers.
 
 Layer: IR.
@@ -11,6 +12,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import operator
 from collections.abc import Callable, Collection, Mapping
@@ -29,8 +32,9 @@ from .scalar_value_projection import (
     scalar_produced_decoration_8616,
     scalar_read_projection_8616,
 )
+import dataclasses
 
-_BINARY: dict[ScalarBinaryKind8616, Callable[[int, int], int]] = {
+_BINARY: dict[ScalarBinaryKind8616, Callable[[int, int], cython.longlong]] = {
     ScalarBinaryKind8616.ADD: operator.add,
     ScalarBinaryKind8616.SUB: operator.sub,
     ScalarBinaryKind8616.AND: operator.and_,
@@ -41,12 +45,12 @@ _BINARY: dict[ScalarBinaryKind8616, Callable[[int, int], int]] = {
 }
 
 _ACTIVE_UNARY_DEPTH_LIMIT_8616 = 8
-_UNARY_COMPLEMENT_OPS_8616: dict[str, int] = {
-    f"Iop_Not{bits}": bits for bits in (8, 16, 32, 64)
+_UNARY_COMPLEMENT_OPS_8616: dict[str, cython.longlong] = {
+    f"Iop_Not{bits}": bits for bits in iter((8, 16, 32, 64))
 }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _Value:
     """One immutable width-bounded definition with proven bit lanes.
 
@@ -58,10 +62,10 @@ class _Value:
     distinguished from an unearned conversion claim.
     """
 
-    identity: int
-    bits: int
-    known: int
-    value: int
+    identity: cython.longlong
+    bits: cython.longlong
+    known: cython.longlong
+    value: cython.longlong
     produced: tuple[str, ...] = ()
 
     @property
@@ -70,21 +74,23 @@ class _Value:
         return self.value if self.known == (1 << self.bits) - 1 else None
 
 
-def _storage_parent_8616(name: str) -> str:
+def _storage_parent_8616(name: object) -> object:
     """Return the family member whose architectural view covers all others."""
-    family: frozenset[str] = register_value_family_8616(name)
+    candidate: object
+    family: object = register_value_family_8616(name)
     for candidate in sorted(family):
         if all(
             register_value_projection_8616(candidate, member) is not None
-            for member in family
+            for member in iter(family)
         ):
             return candidate
     return name
 
 
+@cython.ccall
 def _boolean_lanes_8616(
-    name: ScalarBinaryKind8616, bits: int, left: _Value, right: _Value,
-) -> tuple[int, int]:
+    name: ScalarBinaryKind8616, bits: cython.longlong, left: _Value, right: _Value,
+) -> tuple[cython.longlong, cython.longlong]:
     """Return proven (known, value) lanes for one And/Or/Xor operation.
 
     A result bit is proven only when the Boolean rule determines it from
@@ -104,9 +110,10 @@ def _boolean_lanes_8616(
     return known & full, value & full
 
 
+@cython.ccall
 def _shift_lanes_8616(
-    name: ScalarBinaryKind8616, bits: int, operand: _Value, count: int,
-) -> tuple[int, int]:
+    name: ScalarBinaryKind8616, bits: cython.longlong, operand: _Value, count: cython.longlong,
+) -> tuple[cython.longlong, cython.longlong]:
     """Return proven (known, value) lanes for a logical shift by ``count``.
 
     ``count`` must already be a proven in-range constant; the vacated bits
@@ -122,7 +129,8 @@ def _shift_lanes_8616(
     return known & full, value & full
 
 
-def _produced_8616(instruction: IRInstr) -> tuple[str, ...]:
+@cython.ccall
+def _produced_8616(instruction: IRInstr) -> object:
     """Retain the importer's exact producing decoration for later TMP reads.
 
     Delegates to the scalar-projection adapter, which owns the single
@@ -132,7 +140,8 @@ def _produced_8616(instruction: IRInstr) -> tuple[str, ...]:
     return scalar_produced_decoration_8616(instruction)
 
 
-def _convert_lanes_8616(value: _Value, source: int, target: int, signed: bool) -> tuple[int, int]:
+@cython.ccall
+def _convert_lanes_8616(value: _Value, source: cython.longlong, target: cython.longlong, signed: cython.bint) -> tuple[cython.longlong, cython.longlong]:
     """Return proven (known, value) lanes through one integer conversion.
 
     Truncation keeps only the target's low bits. Unsigned extension proves
@@ -154,30 +163,37 @@ def _convert_lanes_8616(value: _Value, source: int, target: int, signed: bool) -
     return known | high, lanes
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class IRConstantFlow8616:
     """Consume instructions in order; create a fresh instance per IR block."""
 
-    _registers: dict[str, _Value] = field(default_factory=dict)
-    _views: dict[str, tuple[int, _Value]] = field(default_factory=dict)
-    _temporaries: dict[int, _Value] = field(default_factory=dict)
-    _identity: int = 0
+    _registers: object = field(default_factory=dict)
+    _views: object = field(default_factory=dict)
+    _temporaries: object = field(default_factory=dict)
+    _identity: cython.longlong = 0
 
-    def _new(self, bits: int, constant: int | None = None) -> _Value:
+    @cython.ccall
+    def _new(self, bits: cython.longlong, constant: int | None = None) -> _Value:
         """Allocate an immutable width-normalized definition."""
         self._identity += 1
         if constant is None:
             return _Value(self._identity, bits, 0, 0)
         return _Value(self._identity, bits, (1 << bits) - 1, constant & ((1 << bits) - 1))
 
-    def _new_lanes(self, bits: int, known: int, value: int) -> _Value:
+    @cython.ccall
+    def _new_lanes(self, bits: cython.longlong, known: cython.longlong, value: cython.longlong) -> _Value:
         """Allocate a partial definition; unproven bits carry no contents."""
         self._identity += 1
         known &= (1 << bits) - 1
         return _Value(self._identity, bits, known, value & known)
 
-    def _register(self, name: str) -> _Value | None:
+    @cython.ccall
+    def _register(self, name: object) -> _Value | None:
         """Read an exact register view from the authoritative storage layout."""
+        cached: object
+        entry: object
+        lane: object
+        parent_view: object
         name = name.lower()
         if register_value_projection_8616(name, name) is None:
             return None
@@ -201,7 +217,8 @@ class IRConstantFlow8616:
         self._views[name] = (entry.identity, view)
         return view
 
-    def _read(self, value: object, _depth: int = 0) -> _Value | None:
+    @cython.ccall
+    def _read(self, value: object, _depth: cython.longlong = 0) -> _Value | None:
         """Prefer the original temporary definition over its register label.
 
         A ``source_tmp``-pinned read names an already-computed captured
@@ -212,6 +229,7 @@ class IRConstantFlow8616:
         ``active_unary`` is the pending operation's result: only the typed
         operation evidence describes it, never the projected storage fields.
         """
+        result: object
         if not isinstance(value, IRValue) or value.index is not None or value.call_output is not None:
             return None
         if value.size not in {1, 2, 4, 8}:
@@ -234,7 +252,8 @@ class IRConstantFlow8616:
             return None
         return self._project(value, result)
 
-    def _read_active_unary_8616(self, value: IRValue, depth: int) -> _Value | None:
+    @cython.ccall
+    def _read_active_unary_8616(self, value: IRValue, depth: cython.longlong) -> _Value | None:
         """Evaluate one pending active unary against captured operand evidence.
 
         The operand may be a pinned temporary (already computed — never
@@ -246,6 +265,9 @@ class IRConstantFlow8616:
         contradictions, decoration mismatches and unsupported operations
         refuse rather than guessing from the projected REG/CONST fields.
         """
+        operand: object
+        result: object
+        unary: object
         unary = value.active_unary
         if unary is None or depth >= _ACTIVE_UNARY_DEPTH_LIMIT_8616:
             return None
@@ -263,8 +285,11 @@ class IRConstantFlow8616:
             return result
         return self._new_lanes(value.size * 8, result.known, result.value)
 
+    @cython.ccall
     def _apply_active_unary_8616(self, unary: IRActiveUnary8616, operand: _Value) -> _Value | None:
         """Apply one authenticated unary operation to retained operand lanes."""
+        bits: object
+        decision: object
         decision = scalar_read_projection_8616(
             read_expr=(unary.op,),
             read_bits=unary.result_bits,
@@ -281,6 +306,7 @@ class IRConstantFlow8616:
             return None
         return self._new_lanes(bits, operand.known, ~operand.value)
 
+    @cython.ccall
     def _project(self, value: IRValue, result: _Value) -> _Value | None:
         """Apply one explicit conversion or match earned re-decoration.
 
@@ -295,6 +321,7 @@ class IRConstantFlow8616:
         unsupported or multiple labels refuse. The final width check never
         manufactures an implicit widening or truncation.
         """
+        decision: object
         decision = scalar_read_projection_8616(
             read_expr=value.expr,
             read_bits=value.size * 8,
@@ -310,13 +337,16 @@ class IRConstantFlow8616:
             return self._new_lanes(decision.target_bits, known, lanes)
         return result
 
+    @cython.ccall
     def constant(self, value: object) -> int | None:
         """Read a proven value at the current program point; never guess zero."""
+        result: object
         result = self._read(value)
         return None if result is None else result.constant
 
+    @cython.ccall
     def seed_register_constants_8616(
-        self, constants: Mapping[str, int],
+        self, constants: Mapping[str, cython.longlong],
     ) -> frozenset[str]:
         """Seed proven register values from externally authenticated entry state.
 
@@ -329,8 +359,13 @@ class IRConstantFlow8616:
         Returns the register names actually applied; malformed names or values
         are skipped so callers can count what was refused.
         """
+        entry: object
+        lane: object
+        parent_view: object
+        view: object
+        name: object
         applied: set[str] = set()
-        rejected: dict[str, int] = {}
+        rejected: dict[str, cython.longlong] = {}
         for name in sorted(constants):
             word = constants[name]
             if type(name) is not str or type(word) is not int or word < 0:
@@ -364,12 +399,15 @@ class IRConstantFlow8616:
         self._views.clear()
         return frozenset(applied)
 
+    @cython.ccall
     def register_constants_8616(
         self, names: Collection[str],
-    ) -> dict[str, int]:
+    ) -> object:
         """Snapshot complete proven constants for the requested register names."""
-        snapshot: dict[str, int] = {}
-        for name in sorted(set(names)):
+        value: object
+        name: object
+        snapshot: dict[str, cython.longlong] = {}
+        for name in sorted(tuple(set(names))):
             if type(name) is not str:
                 continue
             value = self._register(name)
@@ -379,13 +417,17 @@ class IRConstantFlow8616:
 
     def _result(self, instruction: IRInstr) -> _Value | None:
         """Evaluate only explicitly supported pure bitvector operations."""
+        count: object
+        left: object
+        operation: object
+        right: object
         arguments = instruction.args
         if instruction.op == "MOV" and len(arguments) == 1:
             return self._read(arguments[0])
         operation = scalar_binary_operation_8616(instruction.op)
         if operation is None or len(arguments) != 2:
             return None
-        left, right = (self._read(argument) for argument in arguments)
+        left, right = (self._read(argument) for argument in iter(arguments))
         if left is None or right is None:
             return None
         name, bits = operation.kind, operation.bits
@@ -407,6 +449,7 @@ class IRConstantFlow8616:
             return None
         return self._new(bits, _BINARY[name](left.constant, right.constant))
 
+    @cython.ccall
     def _merge_register_8616(self, instruction: IRInstr, destination: IRValue) -> None:
         """Merge proven bits into the storage parent; never invent other bits.
 
@@ -417,6 +460,11 @@ class IRConstantFlow8616:
         parent whose own layout is unknown, refuses rather than allocating an
         assumed-width storage object.
         """
+        entry: object
+        lane: object
+        parent_view: object
+        result: object
+        view: object
         if destination.name is None:
             return
         name = destination.name.lower()
@@ -443,6 +491,7 @@ class IRConstantFlow8616:
         value = (entry.value & ~lane_mask) | ((result.value << shift) & lane_mask)
         self._registers[parent] = self._new_lanes(parent_view[1], known, value)
 
+    @cython.ccall
     def observe(self, instruction: IRInstr) -> None:
         """Publish each definition after reading operands from the old state.
 
@@ -450,6 +499,7 @@ class IRConstantFlow8616:
         definition, so only register and view knowledge is invalidated while
         pre-call immutable temporary definitions stay untouched.
         """
+        result: object
         if instruction.op == "CALL":
             self._registers.clear()
             self._views.clear()

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove that a materialized argument PUSH leaves no observed runtime SP value.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from enum import StrEnum
 
@@ -25,6 +28,7 @@ from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 
 from .gp_register_state import runtime_gp_expression_view_8616
 from .physical_registers import physical_register_view_8616
+import builtins
 
 
 class RuntimePushCarrierVerdict8616(StrEnum):
@@ -36,8 +40,10 @@ class RuntimePushCarrierVerdict8616(StrEnum):
     UNOBSERVED = "unobserved"
 
 
-def _linear_statements_8616(root: CStatements) -> list[object]:
+@cython.ccall
+def _linear_statements_8616(root: CStatements) -> object:
     """Flatten sequence wrappers without entering conditional or loop bodies."""
+    statement: object
     result: list[object] = []
     for statement in root.statements:
         if isinstance(statement, CStatements):
@@ -48,7 +54,7 @@ def _linear_statements_8616(root: CStatements) -> list[object]:
 
 
 def classify_runtime_push_carrier_8616(
-    root: object, assignment: CAssignment, arguments: tuple[object, ...], *, sp_offset: int,
+    root: object, assignment: CAssignment, arguments: object, *, sp_offset: cython.longlong,
 ) -> RuntimePushCarrierVerdict8616:
     """Check a top-level runtime ESP write against arguments and its full suffix.
 
@@ -56,14 +62,19 @@ def classify_runtime_push_carrier_8616(
     anywhere because structured order alone cannot establish their use order.
     Native physical-register and owned runtime-register views share this check.
     """
+    physical: object
+    runtime: object
+    view: object
+    expression: object
+    node: object
     view = runtime_gp_expression_view_8616(assignment.lhs)
     if view is None or view.parent_name != "esp" or view.width != 4 or view.bit_shift != 0:
         return RuntimePushCarrierVerdict8616.NOT_APPLICABLE
     if not arguments or not isinstance(root, CStatements):
         return RuntimePushCarrierVerdict8616.UNKNOWN_REFUSE
     statements = _linear_statements_8616(root)
-    positions = [index for index, item in enumerate(statements) if item is assignment]
-    if len(positions) != 1 or any(isinstance(node, (CLoop, CGoto)) for node in _iter_c_nodes_deep_8616(root)):
+    positions = [index for index, item in builtins.iter(enumerate(statements)) if item is assignment]
+    if len(positions) != 1 or any(isinstance(node, (CLoop, CGoto)) for node in builtins.iter(_iter_c_nodes_deep_8616(root))):
         return RuntimePushCarrierVerdict8616.UNKNOWN_REFUSE
     suffix = (*arguments, *statements[positions[0] + 1:])
     for expression in suffix:

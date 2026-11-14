@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Validate immutable values retained by GP register capture.
 
 Layer: Tail validation.
@@ -10,6 +11,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from angr.analyses.decompiler.structured_codegen.c import (
     CAssignment,
@@ -28,6 +31,8 @@ from inertia.lowering.c_ast_utils import (
 )
 from inertia.lowering.gp_register_versions import _CAPTURE_TAG
 from inertia.validation.typed_constant_values import constant_integer_value_8616, integer_bounds_8616
+import operator
+import builtins
 
 
 class _CaptureTraversalRefused8616(Exception):
@@ -39,7 +44,8 @@ def _occurrences(root: object) -> tuple[object, ...]:
     result: list[object] = []
     visited_edges = 0
 
-    def walk(value: object, active: frozenset[int]) -> None:
+    def walk(value: object, active: object) -> None:
+        child: object
         nonlocal visited_edges
         structured = _structured_codegen_node_8616(value)
         container = isinstance(value, (dict, list, tuple))
@@ -56,7 +62,7 @@ def _occurrences(root: object) -> tuple[object, ...]:
         else:
             result.append(value)
             # Dynamic boundary: schema-owned fields belong to third-party angr C nodes.
-            children = tuple(getattr(value, attr, None) for attr in _structured_slot_names_8616(value))
+            children = tuple(getattr(value, attr, None) for attr in builtins.iter(_structured_slot_names_8616(value)))
         for child in children:
             walk(child, child_active)
 
@@ -64,8 +70,10 @@ def _occurrences(root: object) -> tuple[object, ...]:
     return tuple(result)
 
 
+@cython.ccall
 def _bounded_linear_sequence(root: CStatements) -> tuple[object, ...]:
     """Flatten unconditional grouping only with bounded work, including malformed cycles."""
+    item: object
     pending: list[object] = [root]
     result: list[object] = []
     visited = 0
@@ -83,6 +91,7 @@ def _bounded_linear_sequence(root: CStatements) -> tuple[object, ...]:
     return tuple(result)
 
 
+@cython.ccall
 def resolve_gp_capture_constant_8616(node: object) -> CConstant | None:
     """Resolve a current immutable capture, refusing incomplete AST coverage."""
     try:
@@ -91,6 +100,7 @@ def resolve_gp_capture_constant_8616(node: object) -> CConstant | None:
         return None
 
 
+@cython.ccall
 def _resolve_current_capture(node: object) -> CConstant | None:
     """Resolve a current GP capture read only when all its uses follow one constant definition.
 
@@ -100,6 +110,8 @@ def _resolve_current_capture(node: object) -> CConstant | None:
     The root sequence flattens unconditional grouping, matching the producer;
     definitions inside a branch or loop are outside this small proof.
     """
+    cfunc: object
+    root: object
     if not isinstance(node, CVariable) or not isinstance(node.variable, SimTemporaryVariable):
         return None
     # Dynamic boundary: angr CVariable/codegen can be partially constructed.
@@ -119,16 +131,17 @@ def _resolve_current_capture(node: object) -> CConstant | None:
 
 
 def _prove_current_capture(
-    root: CStatements, linear: tuple[object, ...], node: CVariable, variable: SimTemporaryVariable,
+    root: CStatements, linear: object, node: CVariable, variable: SimTemporaryVariable,
 ) -> CConstant | None:
     """Complete the current-tree identity, definition and dominance proof for a candidate."""
+    value: object
     occurrences = _occurrences(root)
-    uses = tuple(item for item in occurrences if isinstance(item, CVariable) and item.variable is variable)
-    if not any(item is node for item in uses):
+    uses = tuple(item for item in iter(occurrences) if isinstance(item, CVariable) and item.variable is variable)
+    if not any(item is node for item in iter(uses)):
         return None
     if not _capture_uses_are_read_only(occurrences, variable):
         return None
-    definitions = tuple(item for item in occurrences if isinstance(item, CAssignment)
+    definitions = tuple(item for item in iter(occurrences) if isinstance(item, CAssignment)
                         and isinstance(item.lhs, CVariable) and item.lhs.variable is variable)
     if len(definitions) != 1:
         return None
@@ -136,50 +149,54 @@ def _prove_current_capture(
     value = _capture_literal(definition, node, variable)
     if value is None:
         return None
-    positions = tuple(index for index, item in enumerate(linear) if item is definition)
+    positions = tuple(index for index, item in builtins.iter(enumerate(linear)) if item is definition)
     if len(positions) != 1:
         return None
     later_uses = sum(
         isinstance(item, CVariable) and item.variable is variable
-        for statement in linear[positions[0] + 1:]
-        for item in _occurrences(statement)
+        for statement in iter(linear[positions[0] + 1:])
+        for item in builtins.iter(_occurrences(statement))
     )
-    if len(uses) != later_uses + 1:
+    if operator.ne(len(uses), later_uses + 1):
         return None
     return value
 
 
-def _has_literal_candidate(linear: tuple[object, ...], node: CVariable, variable: SimTemporaryVariable) -> bool:
+def _has_literal_candidate(linear: object, node: CVariable, variable: SimTemporaryVariable) -> cython.bint:
     """Require one unconditional literal capture before paying for a complete AST census."""
-    candidates = tuple(item for item in linear if isinstance(item, CAssignment)
+    candidates = tuple(item for item in iter(linear) if isinstance(item, CAssignment)
                        and isinstance(item.lhs, CVariable) and item.lhs.variable is variable)
     return len(candidates) == 1 and _capture_literal(candidates[0], node, variable) is not None
 
 
-def _capture_uses_are_read_only(occurrences: tuple[object, ...], variable: SimTemporaryVariable) -> bool:
+def _capture_uses_are_read_only(occurrences: object, variable: SimTemporaryVariable) -> cython.bint:
     """Refuse collisions, control bypass and address-taking/mutating unary uses."""
+    item: object
     if any(isinstance(item, CVariable) and isinstance(item.variable, SimTemporaryVariable)
-           and item.variable.tmp_id == variable.tmp_id and item.variable is not variable
-           for item in occurrences):
+           and operator.eq(item.variable.tmp_id, variable.tmp_id) and item.variable is not variable
+           for item in iter(occurrences)):
         return False
-    if any(isinstance(item, (CGoto, CLabel)) for item in occurrences):
+    if any(isinstance(item, (CGoto, CLabel)) for item in iter(occurrences)):
         return False
     for item in occurrences:
         if (isinstance(item, CUnaryOp) and item.op not in {"Neg", "Not", "LogicalNot", "BitwiseNeg"}
                 and any(isinstance(child, CVariable) and child.variable is variable
-                        for child in _occurrences(item))):
+                        for child in builtins.iter(_occurrences(item)))):
             return False
     return True
 
 
+@cython.ccall
 def _capture_literal(definition: CAssignment, node: CVariable, variable: SimTemporaryVariable) -> CConstant | None:
     """Prove an exact integer conversion into the capture type without truncation."""
-    if definition.tags.get(_CAPTURE_TAG) is not True or node.type != definition.lhs.type:
+    bounds: object
+    value: object
+    if definition.tags.get(_CAPTURE_TAG) is not True or operator.ne(node.type, definition.lhs.type):
         return None
     value = constant_integer_value_8616(definition.rhs)
     bounds = integer_bounds_8616(node.type, variable.size * 8)
     if value is None or bounds is None or not bounds[0] <= value <= bounds[1]:
         return None
-    if isinstance(definition.rhs, CConstant) and definition.rhs.type == node.type:
+    if isinstance(definition.rhs, CConstant) and operator.eq(definition.rhs.type, node.type):
         return definition.rhs
     return CConstant(value, node.type, codegen=node.codegen)

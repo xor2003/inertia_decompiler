@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Structured-AST ancestry evidence for shared-tail call ownership.
 
 Layer: Structuring.
@@ -12,6 +13,8 @@ rewrite cleanup, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from enum import Enum
@@ -20,6 +23,9 @@ from typing import Any, cast
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = (
     "SharedTailCallOccurrence8616",
@@ -29,15 +35,15 @@ __all__ = (
 )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _ControlPathStep8616:
     """One structured control arm and its position in the enclosing sequence."""
 
-    owner_id: int
-    parent_statements_id: int
-    owner_index: int
-    arm_kind: str
-    arm_index: int
+    owner_id: cython.longlong
+    parent_statements_id: cython.longlong
+    owner_index: cython.longlong
+    arm_kind: object
+    arm_index: cython.longlong
     parent: structured_c.CStatements = field(compare=False, repr=False)
 
 
@@ -50,7 +56,7 @@ class SharedTailCallOccurrenceKind8616(Enum):
     STANDALONE = "standalone"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SharedTailCallOccurrence8616:
     """One writable exact call occurrence at the third-party AST boundary."""
 
@@ -58,16 +64,19 @@ class SharedTailCallOccurrence8616:
     call: structured_c.CFunctionCall
     statement: object
     parent: structured_c.CStatements
-    statement_index: int
-    control_path: tuple[_ControlPathStep8616, ...]
+    statement_index: cython.longlong
+    control_path: object
     destination_variable: object | None = None
 
 
+@cython.ccall
 def _ifelse_arms_8616(
     statement: structured_c.CIfElse,
-) -> tuple[tuple[str, int, structured_c.CStatements], ...]:
+) -> tuple[tuple[str, cython.longlong, structured_c.CStatements], ...]:
     """Return writable statement-list arms from one third-party if/else node."""
-    result: list[tuple[str, int, structured_c.CStatements]] = []
+    index: object
+    pair: object
+    result: list[tuple[str, cython.longlong, structured_c.CStatements]] = []
     pairs = statement.condition_and_nodes
     if isinstance(pairs, (list, tuple)):
         for index, pair in enumerate(pairs):
@@ -78,13 +87,16 @@ def _ifelse_arms_8616(
     return tuple(result)
 
 
+@cython.ccall
 def _child_statement_arms_8616(
     statement: structured_c.CStatement,
-) -> tuple[tuple[str, int, structured_c.CStatements], ...]:
+) -> object:
     """Return supported structured child arms without interpreting conditions."""
+    case: object
+    index: object
     if isinstance(statement, structured_c.CIfElse):
         return _ifelse_arms_8616(statement)
-    result: list[tuple[str, int, structured_c.CStatements]] = []
+    result: list[tuple[str, cython.longlong, structured_c.CStatements]] = []
     if isinstance(statement, (structured_c.CDoWhileLoop, structured_c.CForLoop, structured_c.CWhileLoop)):  # noqa: SIM102
         if isinstance(statement.body, structured_c.CStatements):
             result.append(("body", 0, statement.body))
@@ -110,7 +122,7 @@ def _condition_calls_8616(
         if isinstance(pairs, (list, tuple)):
             expressions.extend(
                 pair[0]
-                for pair in pairs
+                for pair in iter(pairs)
                 if isinstance(pair, tuple)
                 and len(pair) == 2
                 and isinstance(pair[0], structured_c.CExpression)
@@ -127,19 +139,24 @@ def _condition_calls_8616(
         expressions.append(statement.condition)
     return tuple(
         node
-        for expression in expressions
-        for node in _iter_c_nodes_deep_8616(expression)
+        for expression in iter(expressions)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(expression))
         if isinstance(node, structured_c.CFunctionCall)
     )
 
 
+@cython.ccall
 def collect_shared_tail_call_occurrences_8616(
     root: structured_c.CStatements,
 ) -> tuple[SharedTailCallOccurrence8616, ...]:
     """Collect supported call occurrences with exact structured ancestry."""
+    control_path: object
+    parent: object
+    index: object
+    statement: object
     occurrences: list[SharedTailCallOccurrence8616] = []
     pending: list[tuple[structured_c.CStatements, tuple[_ControlPathStep8616, ...]]] = [(root, ())]
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     while pending:
         parent, control_path = pending.pop()
         if id(parent) in seen:
@@ -163,12 +180,16 @@ def collect_shared_tail_call_occurrences_8616(
 def _collect_statement_8616(
     statement: object,
     parent: structured_c.CStatements,
-    index: int,
-    control_path: tuple[_ControlPathStep8616, ...],
-    occurrences: list[SharedTailCallOccurrence8616],
-    pending: list[tuple[structured_c.CStatements, tuple[_ControlPathStep8616, ...]]],
+    index: cython.longlong,
+    control_path: object,
+    occurrences: object,
+    pending: object,
 ) -> None:
     """Collect call occurrences for one statement and queue its children."""
+    kinded: object
+    arm_index: object
+    arm_kind: object
+    child: object
     if isinstance(statement, structured_c.CFunctionCall):
         occurrences.append(
             SharedTailCallOccurrence8616(
@@ -196,7 +217,7 @@ def _collect_statement_8616(
             index,
             control_path,
         )
-        for call in _condition_calls_8616(statement)
+        for call in builtins.iter(_condition_calls_8616(statement))
     )
     kinded = _kinded_occurrence_8616(statement, parent, index, control_path)
     if kinded is not None:
@@ -213,11 +234,12 @@ def _collect_statement_8616(
         pending.append((child, (*control_path, step)))
 
 
+@cython.ccall
 def _kinded_occurrence_8616(
     statement: structured_c.CStatement,
     parent: structured_c.CStatements,
-    index: int,
-    control_path: tuple[_ControlPathStep8616, ...],
+    index: cython.longlong,
+    control_path: object,
 ) -> SharedTailCallOccurrence8616 | None:
     """Return the call occurrence carried by one statement's kind, if any."""
     if isinstance(statement, structured_c.CReturn) and isinstance(
@@ -265,18 +287,20 @@ def _kinded_occurrence_8616(
 def standalone_follows_nested_clone_8616(
     nested: SharedTailCallOccurrence8616,
     standalone: SharedTailCallOccurrence8616,
-) -> bool:
+) -> cython.bint:
     """Prove that one trailing call statement follows a nested occurrence."""
+    nested_step: object
+    standalone_step: object
     if standalone.kind not in (
         SharedTailCallOccurrenceKind8616.RETURN_CARRIER,
         SharedTailCallOccurrenceKind8616.STANDALONE,
     ):
         return False
-    nested_controls = tuple(step for step in nested.control_path if step.arm_kind != "statements")
-    standalone_controls = tuple(step for step in standalone.control_path if step.arm_kind != "statements")
+    nested_controls = tuple(step for step in iter(nested.control_path) if step.arm_kind != "statements")
+    standalone_controls = tuple(step for step in iter(standalone.control_path) if step.arm_kind != "statements")
     if len(nested_controls) <= len(standalone_controls):
         return False
-    if nested_controls[: len(standalone_controls)] != standalone_controls:
+    if operator.ne(nested_controls[: len(standalone_controls)], standalone_controls):
         return False
     common_length = 0
     for nested_step, standalone_step in zip(nested.control_path, standalone.control_path, strict=False):
@@ -291,7 +315,7 @@ def standalone_follows_nested_clone_8616(
     else:
         standalone_parent = standalone.parent
         standalone_index = standalone.statement_index
-    if nested_boundary.parent_statements_id != id(standalone_parent):
+    if operator.ne(nested_boundary.parent_statements_id, id(standalone_parent)):
         return False
     if nested_boundary.owner_index >= standalone_index:
         return False
@@ -301,5 +325,5 @@ def standalone_follows_nested_clone_8616(
     intervening = statements[nested_boundary.owner_index + 1 : standalone_index]
     return not any(
         isinstance(item, (structured_c.CBreak, structured_c.CGoto, structured_c.CReturn))
-        for item in intervening
+        for item in iter(intervening)
     )

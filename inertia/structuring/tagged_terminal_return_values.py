@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Reconcile structured returns with their exact terminal CFG paths.
 
 Layer: Structuring.
@@ -11,6 +12,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -25,19 +28,22 @@ from .branch_return_expressions import (
     recover_branch_target_return_expression_8616,
 )
 from .return_chains import terminal_value_block_addrs_8616
+import dataclasses
+import operator
+import builtins
 
 
 class _BlockFactory8616(Protocol):
     """Dynamic angr block-factory boundary used by CFG return ownership."""
 
-    def block(self, addr: int, *, opt_level: int = 0) -> object:
+    def block(self, addr: cython.longlong, *, opt_level: cython.longlong = 0) -> object:
         """Return one decoded block at an exact CFG address."""
 
 
 class _CapstoneInstruction8616(Protocol):
     """Typed view of one third-party Capstone instruction."""
 
-    address: int
+    address: cython.longlong
 
 
 class _CapstoneBlock8616(Protocol):
@@ -61,7 +67,7 @@ class _Project8616(Protocol):
 class _Function8616(Protocol):
     """Dynamic angr function boundary used by CFG return ownership."""
 
-    block_addrs_set: Iterable[int]
+    block_addrs_set: Iterable[cython.longlong]
 
 
 class _CFunction8616(Protocol):
@@ -77,24 +83,24 @@ class _Codegen8616(Protocol):
     _inertia_tagged_terminal_return_value_result_8616: TaggedTerminalReturnValueResult8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TaggedTerminalReturnValueResult8616:
     """Closed evidence for path-specific terminal return materialization."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    replacement_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    replacement_count: cython.longlong
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether at least one stale return expression was replaced."""
         return self.replacement_count > 0
 
 
-def _instruction_addresses_8616(block: object) -> frozenset[int]:
+def _instruction_addresses_8616(block: object) -> frozenset[cython.longlong]:
     """Return decoded instruction addresses at the Capstone boundary."""
     typed_block = cast(_DecodedBlock8616, block)
     try:
@@ -102,27 +108,31 @@ def _instruction_addresses_8616(block: object) -> frozenset[int]:
     except (AttributeError, TypeError):
         return frozenset()
     return frozenset(
-        int(instruction.address) for instruction in instructions if isinstance(instruction.address, int)
+        int(instruction.address) for instruction in iter(instructions) if isinstance(instruction.address, int)
     )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _TaggedReturnScan8616:
     """Mutable per-return-node materialization scan state."""
 
     project: object
     codegen: object
-    terminal_blocks: tuple[int, ...] | frozenset[int]
-    decoded_addresses: dict[int, frozenset[int]]
-    expressions_equivalent: Callable[[object, object], bool]
-    normalized: int = 0
-    classified: int = 0
-    materialized: int = 0
-    failures: int = 0
-    replacements: int = 0
+    terminal_blocks: object
+    decoded_addresses: object
+    expressions_equivalent: Callable[[object, object], cython.bint]
+    normalized: cython.longlong = 0
+    classified: cython.longlong = 0
+    materialized: cython.longlong = 0
+    failures: cython.longlong = 0
+    replacements: cython.longlong = 0
 
+    @cython.ccall
     def process(self, return_node: CReturn) -> None:
         """Materialize one tagged return node's proven value."""
+        block_addr: object
+        candidate: object
+        instruction_addr: object
         expression = return_node.retval
         if not isinstance(expression, CExpression):
             return
@@ -136,8 +146,8 @@ class _TaggedReturnScan8616:
         self.normalized += 1
         candidates = {
             candidate
-            for candidate in self.terminal_blocks
-            if candidate == block_addr
+            for candidate in iter(self.terminal_blocks)
+            if operator.eq(candidate, block_addr)
             or (
                 isinstance(instruction_addr, int)
                 and instruction_addr in self.decoded_addresses.get(candidate, frozenset())
@@ -166,11 +176,14 @@ class _TaggedReturnScan8616:
 def materialize_tagged_terminal_return_values_8616(
     project: object,
     codegen: object,
-    function: object | None,
+    function: object,
     *,
-    expressions_equivalent: Callable[[object, object], bool],
+    expressions_equivalent: Callable[[object, object], cython.bint],
 ) -> TaggedTerminalReturnValueResult8616:
     """Materialize each exactly tagged return from its own terminal block."""
+    cfunc: object
+    root: object
+    return_node: object
     typed_codegen = cast(_Codegen8616, codegen)
     cfunc = typed_codegen.cfunc
     root = cfunc.statements if cfunc is not None else None
@@ -182,7 +195,7 @@ def materialize_tagged_terminal_return_values_8616(
     typed_project = cast(_Project8616, project)
     typed_function = cast(_Function8616, function)
 
-    def load_block(addr: int) -> object | None:
+    def load_block(addr: cython.longlong) -> object | None:
         """Load one exact block and refuse third-party decode failures."""
         try:
             return typed_project.factory.block(addr, opt_level=0)
@@ -196,11 +209,11 @@ def materialize_tagged_terminal_return_values_8616(
     )
     decoded_addresses = {
         block_addr: _instruction_addresses_8616(block)
-        for block_addr in terminal_blocks
+        for block_addr in iter(terminal_blocks)
         if (block := load_block(block_addr)) is not None
     }
     return_nodes = tuple(
-        node for node in _iter_c_nodes_deep_8616(root) if isinstance(node, CReturn)
+        node for node in builtins.iter(_iter_c_nodes_deep_8616(root)) if isinstance(node, CReturn)
     )
     scan = _TaggedReturnScan8616(
         project,

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Authenticate the native context consumed by one Clinic conversion.
 
 Layer: Frontend/runtime.
@@ -7,11 +8,17 @@ a function-entry proof. No target is inferred or changed here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol, cast
+import dataclasses
+import operator
+import builtins
+ClinicScopedPartition8616 = typing.TypeVar("ClinicScopedPartition8616")
 
 if TYPE_CHECKING:
     from .clinic_scoped_control import ClinicScopedPartition8616
@@ -23,8 +30,8 @@ from angr import ailment
 class _Node(Protocol):
     """Native graph node coordinates at the angr boundary."""
 
-    addr: int
-    size: int
+    addr: cython.longlong
+    size: cython.longlong
 
 
 class _Graph(Protocol):
@@ -48,7 +55,7 @@ class _Function(Protocol):
 class _Memory(Protocol):
     """Mapped executable bytes, independently of cached block objects."""
 
-    def load(self, addr: int, size: int) -> bytes:
+    def load(self, addr: cython.longlong, size: cython.longlong) -> object:
         """Read the exact mapped byte extent."""
         ...
 
@@ -71,18 +78,18 @@ class _Clinic(Protocol):
     project: _Project
     function: _Function
     _func_graph: _Graph
-    _blocks_by_addr_and_size: Mapping[tuple[int, int], object]
+    _blocks_by_addr_and_size: Mapping[tuple[cython.longlong, cython.longlong], object]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ClinicControlSurface8616:
     """Immutable partition and successor coordinates for one control graph."""
 
-    nodes: tuple[tuple[int, int], ...]
-    edges: tuple[tuple[int, int], ...]
+    nodes: object
+    edges: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ClinicConversionContext8616:
     """The exact native function and graph being converted this time."""
 
@@ -91,68 +98,69 @@ class ClinicConversionContext8616:
     graph: ClinicControlSurface8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ClinicVexSnapshot8616:
     """Private deep execution snapshot with explicit temporary widths."""
 
     vex: pyvex.IRSB = field(compare=False)
-    types: tuple[str, ...]
+    types: object
 
-    def matches(self, vex: object) -> bool:
+    def matches(self, vex: object) -> cython.bint:
         """Reject replacement, mutation or a changed temporary type domain."""
         return (
             isinstance(vex, pyvex.IRSB)
-            and self.vex == vex
-            and self.types == tuple(vex.tyenv.types)
+            and operator.eq(self.vex, vex)
+            and operator.eq(self.types, tuple(vex.tyenv.types))
         )
 
 
-def _semantic_ail_statements(block: ailment.Block, ip_offset: int) -> tuple[ailment.Stmt.Statement, ...]:
+def _semantic_ail_statements(block: ailment.Block, ip_offset: cython.longlong) -> tuple[ailment.Stmt.Statement, ...]:
     """Exclude only the constant-PC assignments Clinic itself removes."""
     return tuple(
-        stmt for stmt in block.statements
+        stmt for stmt in iter(block.statements)
         if not (
             isinstance(stmt, ailment.Stmt.Assignment)
             and isinstance(stmt.dst, ailment.Expr.Register)
-            and stmt.dst.reg_offset == ip_offset
+            and operator.eq(stmt.dst.reg_offset, ip_offset)
             and isinstance(stmt.src, ailment.Expr.Const)
         )
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ClinicAilSnapshot8616:
     """Frozen converted effects used to bind the native function theorem."""
 
-    statements: tuple[ailment.Stmt.Statement, ...] = field(compare=False)
-    indices: tuple[int | None, ...]
-    ip_offset: int
+    statements: object = field(compare=False)
+    indices: object
+    ip_offset: cython.longlong
 
-    def matches(self, block: object) -> bool:
+    def matches(self, block: object) -> cython.bint:
         """Reject in-place changes to earlier converted register effects."""
         if not isinstance(block, ailment.Block):
             return False
         current = _semantic_ail_statements(block, self.ip_offset)
-        if len(current) != len(self.statements):
+        if operator.ne(len(current), len(self.statements)):
             return False
         # Rust AIL equality compares allocations; likes compares typed effects.
         # Instruction coordinates are additionally bound, independent of likes.
         return all(
             saved.likes(actual)
-            and index == actual.idx
-            and saved.tags.get("ins_addr") == actual.tags.get("ins_addr")
-            for saved, index, actual in zip(self.statements, self.indices, current, strict=True)
+            and operator.eq(index, actual.idx)
+            and operator.eq(saved.tags.get("ins_addr"), actual.tags.get("ins_addr"))
+            for saved, index, actual in builtins.iter(zip(self.statements, self.indices, current, strict=True))
         )
 
 
-def snapshot_clinic_ail_8616(block: ailment.Block, ip_offset: int) -> ClinicAilSnapshot8616:
+def snapshot_clinic_ail_8616(block: ailment.Block, ip_offset: cython.longlong) -> ClinicAilSnapshot8616:
     """Freeze converted effects while retaining Clinic's known PC cleanup."""
     statements = _semantic_ail_statements(block, ip_offset)
     # Rust AIL deepcopy allocates fresh statement indices. Bind the original
     # coordinates separately from the copied semantic effects.
-    return ClinicAilSnapshot8616(deepcopy(statements), tuple(stmt.idx for stmt in statements), ip_offset)
+    return ClinicAilSnapshot8616(deepcopy(statements), tuple(stmt.idx for stmt in iter(statements)), ip_offset)
 
 
+@cython.ccall
 def snapshot_clinic_vex_8616(vex: pyvex.IRSB) -> ClinicVexSnapshot8616:
     """Freeze execution fields without rendered text or target inference."""
     return ClinicVexSnapshot8616(deepcopy(vex), tuple(vex.tyenv.types))
@@ -160,21 +168,23 @@ def snapshot_clinic_vex_8616(vex: pyvex.IRSB) -> ClinicVexSnapshot8616:
 
 def _graph_surface(graph: _Graph) -> ClinicControlSurface8616:
     """Capture only coordinates consumed by the native control proof."""
-    nodes = tuple(sorted((cast(_Node, n).addr, cast(_Node, n).size) for n in graph.nodes()))
-    edges = tuple(sorted((cast(_Node, a).addr, cast(_Node, b).addr) for a, b in graph.edges()))
+    nodes = tuple(sorted((cast(_Node, n).addr, cast(_Node, n).size) for n in builtins.iter(graph.nodes())))
+    edges = tuple(sorted((cast(_Node, a).addr, cast(_Node, b).addr) for a, b in builtins.iter(graph.edges())))
     return ClinicControlSurface8616(nodes, edges)
 
 
+@cython.ccall
 def snapshot_clinic_context_8616(clinic: object) -> ClinicConversionContext8616:
     """Bind one conversion to its recovered function and Clinic graph."""
     boundary = cast(_Clinic, clinic)
     return ClinicConversionContext8616(boundary.project, boundary.function, _graph_surface(boundary._func_graph))
 
 
+@cython.ccall
 def clinic_context_is_current_8616(
     clinic: object, context: ClinicConversionContext8616,
     *, scoped_partition: ClinicScopedPartition8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """Require identical context and native/converted successor relations."""
     boundary = cast(_Clinic, clinic)
     if scoped_partition is not None:
@@ -185,16 +195,18 @@ def clinic_context_is_current_8616(
     return (
         boundary.project is context.project
         and boundary.function is context.function
-        and _graph_surface(boundary._func_graph) == context.graph
-        and _graph_surface(boundary.function.graph) == context.graph
+        and operator.eq(_graph_surface(boundary._func_graph), context.graph)
+        and operator.eq(_graph_surface(boundary.function.graph), context.graph)
     )
 
 
-def clinic_source_bytes_8616(clinic: object, addr: int, size: int) -> bytes:
+@cython.ccall
+def clinic_source_bytes_8616(clinic: object, addr: cython.longlong, size: cython.longlong) -> bytes:
     """Read live mapped bytes, bypassing cached block byte projections."""
     return bytes(cast(_Clinic, clinic).project.loader.memory.load(addr, size))
 
 
-def clinic_converted_object_8616(clinic: object, addr: int, size: int) -> object | None:
+@cython.ccall
+def clinic_converted_object_8616(clinic: object, addr: cython.longlong, size: cython.longlong) -> object | None:
     """Find the exact converted object that subsequent SSA will consume."""
     return cast(_Clinic, clinic)._blocks_by_addr_and_size.get((addr, size))

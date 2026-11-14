@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Load optional binary signatures without consulting source/debug sidecars.
 
 Layer: CLI/fallback/reporting.
@@ -6,6 +7,8 @@ contract; do not infer call semantics from library names or source listings.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from pathlib import Path
 from typing import Any, cast
@@ -16,11 +19,14 @@ from inertia.cli.lst_extract import LSTMetadata
 from inertia.cli.sidecar_parsers import _detect_flair_metadata
 
 
+@cython.ccall
 def load_binary_signature_metadata(
-    binary: Path, project: angr.Project, *, pat_backend: str | None = None,
+    binary: Path, project: angr.Project, *, pat_backend: object = None,
     signature_catalog: Path | None = None,
 ) -> LSTMetadata | None:
     """Attach signature evidence only, leaving debug/source fields empty."""
+    addr: object
+    name: object
     labels, ranges, formats = _detect_flair_metadata(
         binary, project, pat_backend=pat_backend, signature_catalog=signature_catalog,
     )

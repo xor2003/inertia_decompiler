@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bind a source-initialized real16 invocation to one exact CS domain.
 
 Layer: IR.
@@ -111,6 +112,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import hashlib
 import re
@@ -267,6 +270,13 @@ from .segment_call_preservation import SegmentCallPreservationResult8616
 from .segment_effect_closure import SegmentEffectClosureResult8616
 from .segment_state_transfer import bound_call_preservation_at_instruction_8616
 from .ssa_function import build_x86_16_ir_predecessor_map
+import dataclasses
+import operator
+import builtins
+DeclaredFunctionEntryAdmission8616 = typing.TypeVar("DeclaredFunctionEntryAdmission8616")
+DeclaredSegmentInvariant = typing.TypeVar("DeclaredSegmentInvariant")
+DirectNearCallTargetBinding8616 = typing.TypeVar("DirectNearCallTargetBinding8616")
+NativeCensusSourceBinding8616 = typing.TypeVar("NativeCensusSourceBinding8616")
 
 if TYPE_CHECKING:
     from inertia.frontend.x86_16.declared_function_entry import DeclaredFunctionEntryAdmission8616
@@ -306,14 +316,15 @@ _SEGMENT_SHIFT_8616 = 4
 # against one deadline started when the proof begins; exceeding either
 # refuses as ``census_work_exceeded``/``census_deadline_exceeded``.
 _CENSUS_WORK_LIMIT_8616 = 20000
+_CALLEE_UNORDERED_FEASIBILITY_WORK_DIVISOR_8616: cython.longlong = 2
 _CENSUS_DEADLINE_SECONDS_8616 = 40.0
 _OWNED_CALLEE_ORDER_8616: Callable[..., kb_owner_8616.Real16InvocationOrder8616] = acyclic_invocation_order_8616
-_CALLEE_ORDER_ADVICE_LIMIT_8616: int = 64
+_CALLEE_ORDER_ADVICE_LIMIT_8616: cython.longlong = 64
 # x86 legacy prefix opcodes that may precede a real-mode opcode byte. A
 # 0x67 byte anywhere in this run selects 32-bit effective addressing for
 # that instruction; the IR address offsets it produces are no longer the
 # 16-bit domain this domain models.
-_LEGACY_PREFIX_BYTES_8616: frozenset[int] = frozenset(
+_LEGACY_PREFIX_BYTES_8616: frozenset[cython.longlong] = frozenset(
     {0x26, 0x2E, 0x36, 0x3E, 0x64, 0x65, 0x66, 0x67, 0xF0, 0xF2, 0xF3}
 )
 # Named decode-boundary failure types only: the frontend decode owner
@@ -485,7 +496,7 @@ class Real16InvocationKind8616(StrEnum):
     ENCLOSED_ENTRY = "enclosed_entry"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DeclaredFunctionEntryLink8616:
     """Bind an explicit conditional entry declaration to its native census surface.
 
@@ -502,16 +513,16 @@ class _BootEntrySurface8616(Protocol):
     """Typed entry/stack contract consumed from the boot authority."""
 
     @property
-    def segment(self) -> int:
+    def segment(self) -> cython.longlong:
         """Read the source-authenticated segment without mutating the boot."""
         ...
 
     @property
-    def offset(self) -> int:
+    def offset(self) -> cython.longlong:
         """Read the source-authenticated offset without mutating the boot."""
         ...
 
-    def linear(self) -> int:
+    def linear(self) -> cython.longlong:
         """Return the entry linear address."""
         ...
 
@@ -519,7 +530,7 @@ class _BootEntrySurface8616(Protocol):
 class _BootRangeSurface8616(Protocol):
     """Typed code-range contract consumed from the boot authority."""
 
-    def contains(self, address: int, size: int = 1) -> bool:
+    def contains(self, address: cython.longlong, size: cython.longlong = 1) -> cython.bint:
         """Return whether [address, address + size) is declared code."""
         ...
 
@@ -528,37 +539,37 @@ class _BootImageSurface8616(Protocol):
     """Typed loaded-image contract consumed from the boot authority."""
 
     @property
-    def chunks(self) -> tuple[tuple[int, bytes], ...]:
+    def chunks(self) -> object:
         """Read the retained relocated load-module chunks."""
         ...
 
     @property
-    def code_ranges(self) -> tuple[_BootRangeSurface8616, ...]:
+    def code_ranges(self) -> object:
         """Read the declared fetch ranges through their containment contract."""
         ...
 
     @property
-    def load_segment(self) -> int:
+    def load_segment(self) -> cython.longlong:
         """Read the paragraph used to relocate the retained module."""
         ...
 
     @property
-    def file_sha256(self) -> str:
+    def file_sha256(self) -> object:
         """Read the retained MZ source identity."""
         ...
 
     @property
-    def image_sha256(self) -> str:
+    def image_sha256(self) -> object:
         """Read the relocated image identity."""
         ...
 
     @property
-    def reloc_sha256(self) -> str:
+    def reloc_sha256(self) -> object:
         """Read the source relocation-table identity."""
         ...
 
     @property
-    def code_scope(self) -> str:
+    def code_scope(self) -> object:
         """Read how the declared fetch ranges were selected."""
         ...
 
@@ -571,10 +582,10 @@ class _BootEnvironmentSurface8616(Protocol):
     caller-declared; only those typed fields seed the path simulation.
     """
 
-    psp_segment: int
-    registers: tuple[tuple[str, int], ...]
-    fs: int
-    gs: int
+    psp_segment: cython.longlong
+    registers: object
+    fs: cython.longlong
+    gs: cython.longlong
 
 
 class _BootSurface8616(Protocol):
@@ -587,19 +598,19 @@ class _BootSurface8616(Protocol):
     authority decides what "authentic" means.
     """
 
-    source: bytes
+    source: object
     entry: _BootEntrySurface8616
     stack: _BootEntrySurface8616
     image: _BootImageSurface8616
     environment: _BootEnvironmentSurface8616
-    boot_sha256: str
+    boot_sha256: object
 
 
 class _DecodedInstructionSurface8616(Protocol):
     """Typed fields of decoded instructions consumed for byte binding."""
 
-    address: int
-    size: int
+    address: cython.longlong
+    size: cython.longlong
 
 
 class _PersistentBytesOwnerLike8616(Protocol):
@@ -610,79 +621,74 @@ class _PersistentBytesOwnerLike8616(Protocol):
     only the producer census entry point this consumer invokes.
     """
 
-    def persistent_bytes_producers_8616(self) -> tuple[object, ...]:
+    def persistent_bytes_producers_8616(self) -> object:
         """Return the persistent-bytes production callables."""
         ...
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _BootEvidence8616:
     """Normalized typed boot surface extracted for derivation."""
 
-    source: bytes
-    entry_segment: int
-    entry_offset: int
-    entry_linear: int
-    stack_segment: int
-    stack_offset: int
-    load_segment: int
+    source: object
+    entry_segment: cython.longlong
+    entry_offset: cython.longlong
+    entry_linear: cython.longlong
+    stack_segment: cython.longlong
+    stack_offset: cython.longlong
+    load_segment: cython.longlong
     image: _BootImageSurface8616
-    boot_sha256: str
-    register_seed: tuple[tuple[str, int], ...]
-    entry_assumptions: tuple[Real16InvocationAssumption8616, ...]
-    environment_digest: str | None
+    boot_sha256: object
+    register_seed: object
+    entry_assumptions: object
+    environment_digest: object
     #: The declared environment object itself — the census re-derives the
     #: canonical service surface from it at every consumption, never
     #: trusting the presented relation's effect fields.
     environment: object | None
     #: Declared allocation ``[start, end)``; a DOS entry inside it is a
     #: program-owned handler, not an external declared service.
-    arena: tuple[int, int] | None
+    arena: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _DerivedDomain8616:
     """The recomputed product of one successful derivation."""
 
-    minimum_selector: int
-    maximum_selector: int
-    entry_segment: int
-    entry_offset: int
-    stack_segment: int
-    stack_offset: int
-    load_segment: int
-    source_sha256: str
-    path_block_addrs: tuple[int, ...]
-    fetched_range_count: int
-    checked_store_count: int
-    assumptions: tuple[Real16InvocationAssumption8616, ...]
+    minimum_selector: cython.longlong
+    maximum_selector: cython.longlong
+    entry_segment: cython.longlong
+    entry_offset: cython.longlong
+    stack_segment: cython.longlong
+    stack_offset: cython.longlong
+    load_segment: cython.longlong
+    source_sha256: object
+    path_block_addrs: object
+    fetched_range_count: cython.longlong
+    checked_store_count: cython.longlong
+    assumptions: object
     callsite_artifact: IRFunctionArtifact | None
     callsite_boundary: ExactFunctionRangeBoundary8616 | None
-    callsite_call_state: tuple[tuple[str, int], ...]
+    callsite_call_state: object
     #: The callsite-row memory overlay's frozen image — the identical
     #: bytes the transported register state was proven under, so a
     #: chained or enclosed seed consumes the same memory, never a
     #: silently reset initial image. ``None`` when the census never
     #: reached its callsite row.
     callsite_memory: PathMemorySnapshot8616 | None
-    service_consumptions: tuple[
-        DeclaredServiceConsumption8616
-        | DeclaredResizeConsumption8616
-        | DeclaredVectorConsumption8616,
-        ...,
-    ]
+    service_consumptions: object
     #: ``(block_addr, successor_addr)`` edges proven untraversable by the
     #: invocation-local known-bits feasibility pass; empty when nothing
     #: was proven dead.
-    infeasible_edges: tuple[tuple[int, int], ...] = ()
+    infeasible_edges: tuple[tuple[cython.longlong, cython.longlong], ...] = ()
 
 
 class _DecodedNativeInstruction8616(Protocol):
     """Third-party decoded instruction carrying native byte evidence."""
 
-    address: int
-    size: int
-    bytes: bytes
+    address: cython.longlong
+    size: cython.longlong
+    bytes: object
 
 
 class _CensusImportGuard8616(Protocol):
@@ -695,10 +701,10 @@ class _CensusImportGuard8616(Protocol):
     must not recurse into premise construction.
     """
 
-    _inertia_real16_native_census_8616: int
+    _inertia_real16_native_census_8616: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class Real16InvocationRefusalSite8616:
     """The exact classified census row that first returned a typed failure.
 
@@ -711,12 +717,12 @@ class Real16InvocationRefusalSite8616:
     never reach a row keep ``None`` on the derivation.
     """
 
-    function_addr: int
-    block_addr: int
-    instruction_addr: int
+    function_addr: cython.longlong
+    block_addr: cython.longlong
+    instruction_addr: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _NestedRefusal8616:
     """A link-seed refusal carrying the nested derivation's real row site.
 
@@ -748,7 +754,7 @@ class _EntryCallPoolConsultation8616(StrEnum):
     READ = "read"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _Derivation8616:
     """One derivation attempt: the domain, the refusal, and real counts.
 
@@ -761,15 +767,15 @@ class _Derivation8616:
 
     domain: _DerivedDomain8616 | None
     failure: Real16InvocationFailure8616 | None
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
     refusal_site: Real16InvocationRefusalSite8616 | None = None
     #: Edges the invocation-local feasibility pass proved untraversable
     #: before the refusal; diagnostic evidence, never universal.
-    infeasible_edges: tuple[tuple[int, int], ...] = ()
+    infeasible_edges: tuple[tuple[cython.longlong, cython.longlong], ...] = ()
     #: Actual resolved edge from a synchronous construction, never a pending request.
     constructed_chain: Real16CallChainLink8616 | None = None
     #: Observed entry-call evidence-pool dependency. Only the canonical
@@ -782,6 +788,7 @@ class _Derivation8616:
     prefix_census: _OwnedPrefixCensus8616 | None = field(default=None, compare=False, repr=False)
 
 
+@cython.ccall
 def _early_derivation_8616(
     failure: Real16InvocationFailure8616,
     *,
@@ -808,7 +815,8 @@ def _early_derivation_8616(
     )
 
 
-def _normalize_instruction_8616(instruction: object) -> tuple[int, int] | None:
+@cython.ccall
+def _normalize_instruction_8616(instruction: object) -> object:
     """Return (address, size) for one decoded instruction or ``None``."""
     try:
         boundary = cast(_DecodedInstructionSurface8616, instruction)
@@ -820,8 +828,11 @@ def _normalize_instruction_8616(instruction: object) -> tuple[int, int] | None:
     return address, size
 
 
-def _image_slice_8616(image: _BootImageSurface8616, addr: int, size: int) -> bytes | None:
+@cython.ccall
+def _image_slice_8616(image: _BootImageSurface8616, addr: cython.longlong, size: cython.longlong) -> object:
     """Return the exact image bytes at ``[addr, addr+size)`` or ``None``."""
+    base: object
+    data: object
     for base, data in image.chunks:
         if type(base) is not int or not isinstance(data, bytes | bytearray):
             continue
@@ -833,7 +844,7 @@ def _image_slice_8616(image: _BootImageSurface8616, addr: int, size: int) -> byt
 class _LoaderMemorySurface8616(Protocol):
     """Dynamic angr loader-memory read boundary (``Clemory.load``)."""
 
-    def load(self, addr: int, n: int) -> bytes:
+    def load(self, addr: cython.longlong, n: cython.longlong) -> object:
         """Read up to ``n`` bytes; short reads stop at unallocated regions."""
         ...
 
@@ -856,7 +867,8 @@ class _ProjectLoaderSurface8616(Protocol):
         ...
 
 
-def _loaded_bytes_8616(project: object, addr: int, size: int) -> bytes | None:
+@cython.ccall
+def _loaded_bytes_8616(project: object, addr: cython.longlong, size: cython.longlong) -> object:
     """Read the project's currently loaded bytes, ``None`` when unreadable.
 
     The frontend decode cache keys on address and decode options, not byte
@@ -874,11 +886,14 @@ def _loaded_bytes_8616(project: object, addr: int, size: int) -> bytes | None:
     if not isinstance(loaded, bytes | bytearray | memoryview):
         return None
     live = bytes(loaded)
-    return live if len(live) == size else None
+    return live if operator.eq(len(live), size) else None
 
 
-def _instruction_bytes_8616(instruction: object) -> bytes | None:
+@cython.ccall
+def _instruction_bytes_8616(instruction: object) -> object:
     """Read bytes across the dynamic angr/Capstone instruction boundary."""
+    insn: object
+    raw: object
     try:
         # Third-party Capstone and angr wrappers expose bytes at different
         # depths; dynamic lookup is confined to that external boundary.
@@ -893,22 +908,24 @@ def _instruction_bytes_8616(instruction: object) -> bytes | None:
         return None
 
 
-def _writes_segment_register_8616(instruction: IRInstr, register: str) -> bool:
+@cython.ccall
+def _writes_segment_register_8616(instruction: IRInstr, register: object) -> cython.bint:
     """Return whether the instruction directly writes ``register``."""
     dst = instruction.dst
     return (
         isinstance(dst, IRValue)
-        and dst.space == MemSpace.REG
-        and dst.name == register
+        and operator.eq(dst.space, MemSpace.REG)
+        and operator.eq(dst.name, register)
     )
 
 
-def _word_8616(value: object) -> bool:
+@cython.ccall
+def _word_8616(value: object) -> cython.bint:
     """Return whether ``value`` is an exact 16-bit word."""
     return type(value) is int and 0 <= value <= _WORD_LIMIT_8616
 
 
-def _environment_seed_8616(environment: object) -> tuple[tuple[str, int], ...] | None:
+def _environment_seed_8616(environment: object) -> object:
     """Validate the declared environment into a 16-bit register seed.
 
     Only documented loader-owned or caller-declared fields are consumed:
@@ -917,6 +934,8 @@ def _environment_seed_8616(environment: object) -> tuple[tuple[str, int], ...] |
     lanes. ``esp``/``eflags`` are not seeded: header SS:SP and CS:IP stay
     authoritative. Anything but an exact typed declaration is malformed.
     """
+    lane: object
+    pair: object
     try:
         boundary = cast(_BootEnvironmentSurface8616, environment)
         psp_segment = boundary.psp_segment
@@ -927,9 +946,9 @@ def _environment_seed_8616(environment: object) -> tuple[tuple[str, int], ...] |
         return None
     if not isinstance(registers, tuple):
         return None
-    if not all(_word_8616(value) for value in (psp_segment, fs, gs)):
+    if not all(_word_8616(value) for value in iter((psp_segment, fs, gs))):
         return None
-    seed: dict[str, int] = {"ds": psp_segment, "es": psp_segment}
+    seed: dict[str, cython.longlong] = {"ds": psp_segment, "es": psp_segment}
     for pair in registers:
         if not isinstance(pair, tuple) or len(pair) != 2:
             return None
@@ -944,16 +963,21 @@ def _environment_seed_8616(environment: object) -> tuple[tuple[str, int], ...] |
         if lane is not None:
             seed[lane] = value & _WORD_LIMIT_8616
     _environment_byte_fanout_8616(seed)
-    return tuple(sorted(seed.items()))
+    return tuple(sorted(tuple(seed.items())))
 
 
-def _environment_byte_fanout_8616(seed: dict[str, int]) -> None:
+@cython.ccall
+def _environment_byte_fanout_8616(seed: object) -> None:
     """Fan each declared 16-bit lane into its contained byte lanes.
 
     The declaration is a complete constant, so ``al``/``ah`` projections are
     pure evidence, not inference. Without them a proven ``mov ah,imm`` would
     leave the declared AL unprovable at a later boundary.
     """
+    projection: object
+    lane_name: object
+    lane_value: object
+    member: object
     for lane_name, lane_value in tuple(seed.items()):
         if lane_name in ("ds", "es"):
             continue
@@ -965,7 +989,8 @@ def _environment_byte_fanout_8616(seed: dict[str, int]) -> None:
             seed[member] = (lane_value >> shift) & ((1 << bits) - 1)
 
 
-def _boot_point_valid_8616(point: object) -> bool:
+@cython.ccall
+def _boot_point_valid_8616(point: object) -> cython.bint:
     """Return whether one typed entry/stack coordinate is self-consistent."""
     if point is None:
         return False
@@ -980,11 +1005,11 @@ def _boot_point_valid_8616(point: object) -> bool:
         _word_8616(segment)
         and _word_8616(offset)
         and type(linear) is int
-        and linear == (segment << _SEGMENT_SHIFT_8616) + offset
+        and operator.eq(linear, (segment << _SEGMENT_SHIFT_8616) + offset)
     )
 
 
-def _boot_image_valid_8616(image: object) -> bool:
+def _boot_image_valid_8616(image: object) -> cython.bint:
     """Return whether the declared image surface has typed evidence fields."""
     try:
         boundary = cast(_BootImageSurface8616, image)
@@ -1000,37 +1025,39 @@ def _boot_image_valid_8616(image: object) -> bool:
         return False
     if not all(
         isinstance(digest, str)
-        for digest in (file_sha256, image_sha256, reloc_sha256)
+        for digest in iter((file_sha256, image_sha256, reloc_sha256))
     ):
         return False
     if not isinstance(chunks, tuple) or not isinstance(code_ranges, tuple):
         return False
     return bool(chunks) and all(
         type(base) is int and isinstance(data, bytes | bytearray)
-        for base, data in chunks
+        for base, data in iter(chunks)
     )
 
 
+@cython.ccall
 def _boot_fields_reproduced_8616(
     entry: _BootEntrySurface8616,
     stack: _BootEntrySurface8616,
     image: _BootImageSurface8616,
     derived: MzInvocationSource8616,
-) -> bool:
+) -> cython.bint:
     """Return whether declared boot fields equal the source-derived ones."""
     points_match = (
-        entry.segment == derived.entry_segment
-        and entry.offset == derived.entry_offset
-        and stack.segment == derived.stack_segment
-        and stack.offset == derived.stack_offset
+        operator.eq(entry.segment, derived.entry_segment)
+        and operator.eq(entry.offset, derived.entry_offset)
+        and operator.eq(stack.segment, derived.stack_segment)
+        and operator.eq(stack.offset, derived.stack_offset)
     )
     image_match = (
-        image.chunks == ((derived.module_base, derived.module),)
-        and image.file_sha256 == derived.file_sha256
+        operator.eq(image.chunks, ((derived.module_base, derived.module),))
+        and operator.eq(image.file_sha256, derived.file_sha256)
     )
     return points_match and image_match
 
 
+@cython.ccall
 def _boot_evidence_8616(boot: object) -> _BootEvidence8616 | Real16InvocationFailure8616:
     """Extract and validate the normalized boot surface.
 
@@ -1038,6 +1065,8 @@ def _boot_evidence_8616(boot: object) -> _BootEvidence8616 | Real16InvocationFai
     bytes through the shared Frontend owner. Caller callbacks cannot grant
     an invented selector or relocated image.
     """
+    environment: object
+    register_seed: object
     if boot is None:
         return Real16InvocationFailure8616.BOOT_UNBOUND
     try:
@@ -1085,6 +1114,7 @@ def _boot_evidence_8616(boot: object) -> _BootEvidence8616 | Real16InvocationFai
     )
 
 
+@cython.ccall
 def _static_boot_evidence_8616(
     boot: MzStaticBoot8616,
 ) -> _BootEvidence8616 | Real16InvocationFailure8616:
@@ -1143,6 +1173,7 @@ def _static_boot_evidence_8616(
     )
 
 
+@cython.ccall
 def _invocation_boot_evidence_8616(
     boot: object,
 ) -> _BootEvidence8616 | Real16InvocationFailure8616:
@@ -1158,6 +1189,7 @@ def _invocation_boot_evidence_8616(
     return _boot_evidence_8616(boot)
 
 
+@cython.ccall
 def _recompute_boot_8616(
     boot: object,
     boot_recompute: Callable[[object], object] | None,
@@ -1169,9 +1201,10 @@ def _recompute_boot_8616(
     return _recompute_validated_boot_8616(boot, boot_recompute)
 
 
+@cython.ccall
 def _recompute_validated_boot_8616(
     boot: object,
-    boot_recompute: Callable[[object], object] | None,
+    boot_recompute: object,
 ) -> Real16InvocationFailure8616 | None:
     """Replay the callback immediately after this operation validates the source.
 
@@ -1192,13 +1225,13 @@ def _recompute_validated_boot_8616(
 
 def _callsite_block_8616(
     artifact: IRFunctionArtifact,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
 ) -> IRBlock | Real16InvocationFailure8616:
     """Return the unique artifact block containing the callsite."""
     owners = [
         block
-        for block in artifact.blocks
-        if any(instruction.addr == callsite_addr for instruction in block.instrs)
+        for block in iter(artifact.blocks)
+        if any(operator.eq(instruction.addr, callsite_addr) for instruction in iter(block.instrs))
     ]
     if not owners:
         return Real16InvocationFailure8616.CALLSITE_UNBOUND
@@ -1207,10 +1240,13 @@ def _callsite_block_8616(
     return owners[0]
 
 
+@cython.ccall
 def _dangerous_block_addrs_8616(
     artifact: IRFunctionArtifact, call_block: IRBlock
-) -> frozenset[int]:
+) -> frozenset[cython.longlong]:
     """Return the set of blocks that can reach the callsite block."""
+    addr: object
+    predecessor: object
     predecessor_map = build_x86_16_ir_predecessor_map(artifact)
     pending = [call_block.addr]
     reached = {call_block.addr}
@@ -1223,7 +1259,7 @@ def _dangerous_block_addrs_8616(
     return frozenset(reached)
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False)
 class _PrefixTerminalCall8616:
     """Core-private terminal continuation; scalar containers move out of the walk.
 
@@ -1234,24 +1270,24 @@ class _PrefixTerminalCall8616:
 
     artifact: IRFunctionArtifact
     block: IRBlock
-    index: int
+    index: cython.longlong
     instruction: IRInstr
     direction: bool | None
-    tmps: dict[int, int]
-    dirty: set[str]
-    instruction_entry: dict[str, int]
-    current_addr: int
+    tmps: object
+    dirty: object
+    instruction_entry: object
+    current_addr: cython.longlong
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _PrefixSourceBindings8616:
     """Shared capture metadata; scratch scopes cannot hide missing authority."""
 
-    bindings: dict[int, NativeCensusSourceBinding8616] = field(default_factory=dict)
-    complete: bool = True
+    bindings: object = field(default_factory=dict)
+    complete: cython.bint = True
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False)
 class _PrefixConsumedCall8616:
     """Exact successful ordinary CALL consumption, never callback authority."""
 
@@ -1260,10 +1296,10 @@ class _PrefixConsumedCall8616:
     instruction: IRInstr
     proof: _BoundaryProof8616
     scope: Real16InvocationDomain8616 | None
-    preserved_registers: tuple[str, ...]
+    preserved_registers: object
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False)
 class _OwnedPrefixCensus8616:
     """Private successful-census data, requiring fresh admission before any reuse.
 
@@ -1276,15 +1312,15 @@ class _OwnedPrefixCensus8616:
     artifact: IRFunctionArtifact = field(repr=False)
     boundary: ExactFunctionRangeBoundary8616 = field(repr=False)
     boot_recompute: Callable[[object], object] | None = field(repr=False)
-    counts: tuple[int, int, int, int, int] = (0, 0, 0, 0, 0)
-    stores: int = 0
-    producers: tuple[object, ...] = field(default=(), repr=False)
-    simulation_work: int = 0
+    counts: tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong, cython.longlong] = (0, 0, 0, 0, 0)
+    stores: cython.longlong = 0
+    producers: object = field(default=(), repr=False)
+    simulation_work: cython.longlong = 0
     fact_ownership: CensusFactOwnership8616 | None = field(default=None, repr=False)
-    consumed_calls: tuple[_PrefixConsumedCall8616, ...] = field(default=(), repr=False)
+    consumed_calls: object = field(default=(), repr=False)
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _PathCensusContext8616:
     """Shared authority for one root-to-callsite raw-effect census.
 
@@ -1338,54 +1374,50 @@ class _PathCensusContext8616:
     """
 
     project: object
-    selector: int
+    selector: cython.longlong
     image: _BootImageSurface8616
     boot: object
     chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | RawBootEntrySurface8616 | DeclaredFunctionEntryLink8616 | None
-    call_preservations: tuple[SegmentCallPreservationResult8616, ...]
-    entry_call_preservations: tuple[object, ...]
-    declared_services: tuple[DeclaredInterruptService8616, ...]
-    environment_digest: str | None
+    call_preservations: object
+    entry_call_preservations: object
+    declared_services: object
+    environment_digest: object
     #: The boot's declared environment object — the consumption re-derives
     #: the canonical service surface from it, so a relation whose effect
     #: fields were replaced under an unchanged digest still refuses.
     environment: object | None
     #: Declared allocation ``[start, end)`` for program-owned-handler checks.
-    arena: tuple[int, int] | None
-    service_consumptions: list[
-        DeclaredServiceConsumption8616
-        | DeclaredResizeConsumption8616
-        | DeclaredVectorConsumption8616
-    ]
+    arena: object
+    service_consumptions: object
     stop_block_addr: int | None
     callsite_addr: int | None
-    callsite_call_state: dict[str, int] | None
+    callsite_call_state: object
     #: The callsite-row memory overlay captured beside
     #: ``callsite_call_state`` — the callee's exact entry memory, so a
     #: transported premise's seed carries the same bytes the register
     #: state was proven under.
     callsite_memory: PathMemory8616 | None
-    manifest: set[tuple[int, int]]
-    machine_bytes: dict[int, bytes]
-    native_blocks: dict[int, dict[int, IRBlock]]
-    checked_stores: int
-    censused_callees: set[int]
-    raw_facts: set[tuple[int, int]]
-    normalized_facts: set[tuple[int, int]]
-    classified_facts: set[tuple[int, int]]
-    materialized_facts: set[tuple[int, int]]
-    failures: int
-    work_units: int
-    work_limit: int
-    deadline: float
+    manifest: object
+    machine_bytes: object
+    native_blocks: object
+    checked_stores: cython.longlong
+    censused_callees: object
+    raw_facts: object
+    normalized_facts: object
+    classified_facts: object
+    materialized_facts: object
+    failures: cython.longlong
+    work_units: cython.longlong
+    work_limit: cython.longlong
+    deadline: cython.double
     #: Count every authenticated fetched-span admission, including repeats;
     #: protection uses the distinct manifest, while public replay/counts retain
     #: the original admission multiplicity.
-    fetched_span_admissions: int = 0
+    fetched_span_admissions: cython.longlong = 0
     #: Exact raw terminals whose current callee projection proves a return.
     #: Scoped to synchronous callee replay; never inherited by another body.
     callee_return_rows: tuple[IRInstr, ...] = ()
-    accounted_work_units: int = 0
+    accounted_work_units: cython.longlong = 0
     #: The first classified instruction row the census refused — real
     #: diagnostic evidence for the exact failing site, never a guess.
     first_failure_site: Real16InvocationRefusalSite8616 | None = None
@@ -1400,15 +1432,15 @@ class _PathCensusContext8616:
     #: counts as a read. Feasibility scratch copies propagate it back to
     #: the owning context on every exit so a scratch-only consultation is
     #: never reported as unused.
-    entry_call_pool_consulted: bool = False
+    entry_call_pool_consulted: cython.bint = False
     #: Opt-in private diagnostics, never proof authority; scratch work cannot
     #: retain the requested CALL because it clears callsite_addr.
-    prefix_capture_requested: bool = False
-    prefix_consumed: bool = False
-    prefix_simulation_work: int = 0
+    prefix_capture_requested: cython.bint = False
+    prefix_consumed: cython.bint = False
+    prefix_simulation_work: cython.longlong = 0
     prefix_boot_recompute: Callable[[object], object] | None = field(default=None, repr=False)
     prefix_terminal_call: _PrefixTerminalCall8616 | None = None
-    prefix_call_consumptions: list[_PrefixConsumedCall8616] = field(default_factory=list, repr=False)
+    prefix_call_consumptions: object = field(default_factory=list, repr=False)
     #: Existing immutable import keys retained only for opt-in capture. Missing
     #: or changed authority keeps the data ineligible for future continuation.
     prefix_sources: _PrefixSourceBindings8616 = field(default_factory=_PrefixSourceBindings8616)
@@ -1417,12 +1449,11 @@ class _PathCensusContext8616:
     #: than a whole block. Whole-block consumers (repeated stores) re-derive
     #: the full block through the recorded authenticated boundary before
     #: binding; never a proof or reuse authority on its own.
-    prefix_native_entries: dict[
-        tuple[int, int], tuple[ExactFunctionRangeBoundary8616, int],
-    ] = field(default_factory=dict, repr=False)
+    prefix_native_entries: object = field(default_factory=dict, repr=False)
 
 
-def _census_work_exceeded_8616(ctx: _PathCensusContext8616) -> bool:
+@cython.ccall
+def _census_work_exceeded_8616(ctx: _PathCensusContext8616) -> cython.bint:
     """Charge nested census work to the ambient replay budget as well as locally."""
     from .segment_call_preservation import segment_call_dependency_traversal_scope_8616
 
@@ -1435,6 +1466,7 @@ def _census_work_exceeded_8616(ctx: _PathCensusContext8616) -> bool:
         )
 
 
+@cython.ccall
 def _census_resource_failure_8616(
     ctx: _PathCensusContext8616,
 ) -> Real16InvocationFailure8616 | None:
@@ -1446,16 +1478,21 @@ def _census_resource_failure_8616(
     return None
 
 
-def _census_deadline_8616() -> float:
+@cython.ccall
+def _census_deadline_8616() -> cython.double:
     """Share the original deadline across nested domain and preservation replay."""
+    deadline: object
     from .segment_call_preservation import segment_call_dependency_traversal_scope_8616
 
     with segment_call_dependency_traversal_scope_8616() as traversal:
         if traversal.census_deadline is None:
             traversal.census_deadline = time.monotonic() + _CENSUS_DEADLINE_SECONDS_8616
-        return traversal.census_deadline
+        deadline = traversal.effective_census_deadline_8616
+        assert deadline is not None
+        return deadline
 
 
+@cython.ccall
 def _census_reimport_8616(
     ctx: _PathCensusContext8616,
     boundary: ExactFunctionRangeBoundary8616,
@@ -1492,13 +1529,14 @@ def _census_reimport_8616(
 _CANONICAL_CENSUS_REIMPORT_8616 = _census_reimport_8616
 
 
+@cython.ccall
 def _native_effect_blocks_8616(
     ctx: _PathCensusContext8616,
     boundary: ExactFunctionRangeBoundary8616,
     *,
-    selected_blocks: frozenset[int] | None = None,
-    terminal: tuple[int, int] | None = None,
-) -> dict[int, IRBlock] | Real16InvocationFailure8616:
+    selected_blocks: object = None,
+    terminal: object = None,
+) -> object:
     """Re-derive one artifact's native blocks through the authoritative importer.
 
     The importer lifts the project's loaded bytes — already proven equal
@@ -1513,6 +1551,7 @@ def _native_effect_blocks_8616(
     ``ctx.prefix_native_entries`` so whole-block consumers re-derive or
     decline; suffix rows are never authorized.
     """
+    selected: object
     if time.monotonic() > ctx.deadline:
         return Real16InvocationFailure8616.CENSUS_DEADLINE_EXCEEDED
     if boundary.project is not ctx.project:
@@ -1529,11 +1568,8 @@ def _native_effect_blocks_8616(
             selected = _request_native_census_blocks_8616(
                 ctx.project, boundary, _census_raw_native_blocks_8616,
                 selected_blocks=selected_blocks,
-                producers=(
-                    _census_reimport_8616,
-                    *_census_finishing_producers_8616(),
-                    *_native_import_producers_8616(),
-                ),
+                producers=(_census_reimport_8616,
+                    ) + tuple(_census_finishing_producers_8616()) + tuple(_native_import_producers_8616()),
                 terminal=terminal,
                 allow_conditional_source=ctx.prefix_capture_requested,
             )
@@ -1555,9 +1591,10 @@ def _native_effect_blocks_8616(
     return result
 
 
+@cython.ccall
 def _record_native_prefix_selection_8616(
     ctx: _PathCensusContext8616, boundary: ExactFunctionRangeBoundary8616,
-    blocks: dict[int, IRBlock], prefix_rows: tuple[tuple[int, int], ...],
+    blocks: object, prefix_rows: object,
 ) -> None:
     """Replace cutoff metadata for the actual detached blocks being returned.
 
@@ -1565,17 +1602,21 @@ def _record_native_prefix_selection_8616(
     never weaken later whole-block binding. Other selected block entries and
     other functions retain their independently bound records.
     """
+    block_addr: object
+    stop_after: object
     for block_addr in blocks:
         ctx.prefix_native_entries.pop((boundary.addr, block_addr), None)
     for block_addr, stop_after in prefix_rows:
         ctx.prefix_native_entries[(boundary.addr, block_addr)] = (boundary, stop_after)
 
 
+@cython.ccall
 def _retain_prefix_source_binding_8616(
     ctx: _PathCensusContext8616, boundary: ExactFunctionRangeBoundary8616,
-    binding: NativeCensusSourceBinding8616 | None,
+    binding: object,
 ) -> None:
     """Retain existing source keys without rescanning facts or granting reuse."""
+    previous: object
     if not ctx.prefix_capture_requested:
         return
     retained = ctx.prefix_sources
@@ -1591,8 +1632,9 @@ def _retain_prefix_source_binding_8616(
 def _uncached_native_effect_blocks_8616(
     ctx: _PathCensusContext8616,
     boundary: ExactFunctionRangeBoundary8616,
-) -> dict[int, IRBlock] | Real16InvocationFailure8616:
+) -> object:
     """Retain the full authoritative import for unsupported/custom producers."""
+    block: object
     if time.monotonic() > ctx.deadline:
         return Real16InvocationFailure8616.CENSUS_DEADLINE_EXCEEDED
     relifted = _census_reimport_8616(ctx, boundary)
@@ -1601,13 +1643,13 @@ def _uncached_native_effect_blocks_8616(
     if not isinstance(relifted, IRFunctionArtifact):
         return Real16InvocationFailure8616.NATIVE_EFFECT_UNPROVEN
     ctx.work_units += len(relifted.blocks) + sum(
-        len(block.instrs) for block in relifted.blocks
+        len(block.instrs) for block in iter(relifted.blocks)
     )
     if _census_work_exceeded_8616(ctx):
         return Real16InvocationFailure8616.CENSUS_WORK_EXCEEDED
     if time.monotonic() > ctx.deadline:
         return Real16InvocationFailure8616.CENSUS_DEADLINE_EXCEEDED
-    blocks: dict[int, IRBlock] = {}
+    blocks: dict[cython.longlong, IRBlock] = {}
     for block in relifted.blocks:
         if type(block.addr) is not int or block.addr in blocks:
             return Real16InvocationFailure8616.NATIVE_EFFECT_UNPROVEN
@@ -1703,13 +1745,15 @@ class _NativeTermMemo8616:
 
     def __init__(self) -> None:
         """Create an empty per-comparison memo."""
-        self._true_depths: dict[tuple[int, int], int] = {}
-        self._false_depths: dict[tuple[int, int], int] = {}
-        self._pins: dict[tuple[int, int], tuple[object, object]] = {}
+        self._true_depths: dict[tuple[cython.longlong, cython.longlong], cython.longlong] = {}
+        self._false_depths: dict[tuple[cython.longlong, cython.longlong], cython.longlong] = {}
+        self._pins: dict[tuple[cython.longlong, cython.longlong], tuple[object, object]] = {}
         self._schemas: dict[type, frozenset[str]] = {}
 
-    def lookup(self, key: tuple[int, int], depth: int) -> bool | None:
+    def lookup(self, key: object, depth: cython.longlong) -> bool | None:
         """Return a stored verdict still valid at ``depth``, else ``None``."""
+        proven: object
+        refused: object
         proven = self._true_depths.get(key)
         if proven is not None and depth <= proven:
             return True
@@ -1720,13 +1764,14 @@ class _NativeTermMemo8616:
 
     def store(
         self,
-        key: tuple[int, int],
+        key: object,
         left: object,
         right: object,
-        depth: int,
-        result: bool,
+        depth: cython.longlong,
+        result: cython.bint,
     ) -> None:
         """Record ``result`` at ``depth`` and pin both keyed objects."""
+        previous: object
         if key not in self._pins:
             if len(self._pins) >= _NATIVE_BINDING_MEMO_MAX_PAIRS_8616:
                 return
@@ -1740,55 +1785,61 @@ class _NativeTermMemo8616:
             if previous is None or previous > depth:
                 self._false_depths[key] = depth
 
-    def declared_fields(self, node_type: type) -> frozenset[str]:
+    def declared_fields(self, node_type: type) -> object:
         """Return the dataclass field names declared by ``node_type``."""
+        declared: object
         declared = self._schemas.get(node_type)
         if declared is None:
             declared = frozenset(
-                member.name for member in fields(node_type)
+                member.name for member in builtins.iter(fields(node_type))
             )
             self._schemas[node_type] = declared
         return declared
 
 
+@cython.ccall
 def _native_fields_current_8616(
-    node: object, expected: frozenset[str], memo: _NativeTermMemo8616
-) -> bool:
+    node: object, expected: object, memo: _NativeTermMemo8616
+) -> cython.bint:
     """Return whether ``node`` still declares exactly the owned field set."""
-    return is_dataclass(node) and memo.declared_fields(type(node)) == expected
+    return is_dataclass(node) and operator.eq(memo.declared_fields(type(node)), expected)
 
 
+@cython.ccall
 def _native_sequence_equal_8616(
-    left: tuple[object, ...] | list[object],
-    right: tuple[object, ...] | list[object],
-    depth: int,
+    left: object,
+    right: object,
+    depth: cython.longlong,
     memo: _NativeTermMemo8616,
-) -> bool:
+) -> cython.bint:
     """Compare sequence fields without recursive calls for exact scalar leaves.
 
     Scalar leaves still consume the ordinary child depth. Subclasses, enums
     and owned nodes take the full comparator, including its refusal and memo
     rules; identical containers never bypass validation of their contents.
     """
-    if len(left) != len(right):
+    item_left: object
+    item_right: object
+    if operator.ne(len(left), len(right)):
         return False
     for item_left, item_right in zip(left, right, strict=True):
         leaf_type = type(item_left)
         scalar = leaf_type is int or leaf_type is str or leaf_type is bool or item_left is None
         if scalar and leaf_type is type(item_right):
-            if depth >= _NATIVE_BINDING_DEPTH_LIMIT_8616 or item_left != item_right:
+            if depth >= _NATIVE_BINDING_DEPTH_LIMIT_8616 or operator.ne(item_left, item_right):
                 return False
         elif not _native_term_equal_8616(item_left, item_right, depth + 1, memo):
             return False
     return True
 
 
+@cython.ccall
 def _native_term_equal_8616(
     left: object,
     right: object,
-    depth: int,
+    depth: cython.longlong,
     memo: _NativeTermMemo8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """Compare two packed binding terms exactly.
 
     ``False`` covers both a real difference and a structure the
@@ -1796,6 +1847,8 @@ def _native_term_equal_8616(
     not a pass. ``memo`` scopes identity memoization to one top-level
     comparison; omitted, it is created fresh.
     """
+    comparator: object
+    hit: object
     if memo is None:
         memo = _NativeTermMemo8616()
     if depth > _NATIVE_BINDING_DEPTH_LIMIT_8616 or type(left) is not type(right):
@@ -1817,12 +1870,13 @@ def _native_term_equal_8616(
     return not is_dataclass(left) and left == right
 
 
+@cython.ccall
 def _native_value_equal_8616(
     left: IRValue,
     right: IRValue,
-    depth: int,
+    depth: cython.longlong,
     memo: _NativeTermMemo8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """All-field binding equality for one IRValue, capture ids included."""
     if memo is None:
         memo = _NativeTermMemo8616()
@@ -1846,12 +1900,13 @@ def _native_value_equal_8616(
     )
 
 
+@cython.ccall
 def _native_active_unary_equal_8616(
     left: IRActiveUnary8616,
     right: IRActiveUnary8616,
-    depth: int,
+    depth: cython.longlong,
     memo: _NativeTermMemo8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """All-field binding equality for one active unary evidence node."""
     if memo is None:
         memo = _NativeTermMemo8616()
@@ -1865,12 +1920,13 @@ def _native_active_unary_equal_8616(
     )
 
 
+@cython.ccall
 def _native_binary_value_equal_8616(
     left: IRBinaryValue,
     right: IRBinaryValue,
-    depth: int,
+    depth: cython.longlong,
     memo: _NativeTermMemo8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """All-field binding equality for one typed binary value expression."""
     if memo is None:
         memo = _NativeTermMemo8616()
@@ -1884,12 +1940,13 @@ def _native_binary_value_equal_8616(
     )
 
 
+@cython.ccall
 def _native_address_equal_8616(
     left: IRAddress,
     right: IRAddress,
-    depth: int,
+    depth: cython.longlong,
     memo: _NativeTermMemo8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """All-field binding equality for one typed segmented address."""
     if memo is None:
         memo = _NativeTermMemo8616()
@@ -1910,12 +1967,13 @@ def _native_address_equal_8616(
     )
 
 
+@cython.ccall
 def _native_condition_equal_8616(
     left: IRCondition,
     right: IRCondition,
-    depth: int,
+    depth: cython.longlong,
     memo: _NativeTermMemo8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """All-field binding equality for one typed branch condition."""
     if memo is None:
         memo = _NativeTermMemo8616()
@@ -1929,13 +1987,18 @@ def _native_condition_equal_8616(
     )
 
 
+@cython.ccall
 def _native_call_effect_equal_8616(
     left: IRCallStackEffect8616,
     right: IRCallStackEffect8616,
-    depth: int,
+    depth: cython.longlong,
     memo: _NativeTermMemo8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """All-field binding equality for one typed call stack effect."""
+    left_coordinates: object
+    left_source: object
+    right_coordinates: object
+    right_source: object
     if memo is None:
         memo = _NativeTermMemo8616()
     if not _native_fields_current_8616(left, _IR_CALL_EFFECT_FIELDS_8616, memo):
@@ -1970,12 +2033,13 @@ def _native_call_effect_equal_8616(
     )
 
 
+@cython.ccall
 def _native_call_output_equal_8616(
     left: IRCallOutputProvenance8616,
     right: IRCallOutputProvenance8616,
-    depth: int,
+    depth: cython.longlong,
     memo: _NativeTermMemo8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """All-field binding equality for one call-output provenance record."""
     if memo is None:
         memo = _NativeTermMemo8616()
@@ -1989,12 +2053,13 @@ def _native_call_output_equal_8616(
     )
 
 
+@cython.ccall
 def _native_origin_equal_8616(
     left: IRInstructionOrigin8616,
     right: IRInstructionOrigin8616,
-    depth: int,
+    depth: cython.longlong,
     memo: _NativeTermMemo8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """All-field binding equality for one instruction origin tag."""
     if memo is None:
         memo = _NativeTermMemo8616()
@@ -2014,12 +2079,13 @@ def _native_origin_equal_8616(
     )
 
 
+@cython.ccall
 def _native_refusal_equal_8616(
     left: IRRefusal,
     right: IRRefusal,
-    depth: int,
+    depth: cython.longlong,
     memo: _NativeTermMemo8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """All-field binding equality for one typed IR refusal."""
     if memo is None:
         memo = _NativeTermMemo8616()
@@ -2033,12 +2099,13 @@ def _native_refusal_equal_8616(
     )
 
 
+@cython.ccall
 def _native_instr_equal_8616(
     left: IRInstr,
     right: IRInstr,
-    depth: int,
+    depth: cython.longlong,
     memo: _NativeTermMemo8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """All-field binding equality for one typed instruction row."""
     if memo is None:
         memo = _NativeTermMemo8616()
@@ -2058,12 +2125,13 @@ def _native_instr_equal_8616(
     )
 
 
+@cython.ccall
 def _native_block_equal_8616(
     left: IRBlock,
     right: IRBlock,
-    depth: int,
+    depth: cython.longlong,
     memo: _NativeTermMemo8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """All-field binding equality for one typed IR block."""
     if memo is None:
         memo = _NativeTermMemo8616()
@@ -2077,7 +2145,7 @@ def _native_block_equal_8616(
     )
 
 
-_NATIVE_COMPARATORS_8616: FrozenDispatch[type, Callable[..., bool]] = (
+_NATIVE_COMPARATORS_8616: FrozenDispatch[type, Callable[..., cython.bint]] = (
     (IRBlock, _native_block_equal_8616),
     (IRInstr, _native_instr_equal_8616),
     (IRValue, _native_value_equal_8616),
@@ -2092,8 +2160,11 @@ _NATIVE_COMPARATORS_8616: FrozenDispatch[type, Callable[..., bool]] = (
 )
 
 
-def _native_prefix_count_8616(block: IRBlock, stop_after: int) -> int | None:
+@cython.ccall
+def _native_prefix_count_8616(block: IRBlock, stop_after: cython.longlong) -> int | None:
     """Select exactly the same ordered native prefix the effect walker consumes."""
+    index: object
+    instruction: object
     if type(stop_after) is not int or type(block.addr) is not int or stop_after < block.addr:
         return None
     for index, instruction in enumerate(block.instrs):
@@ -2104,9 +2175,10 @@ def _native_prefix_count_8616(block: IRBlock, stop_after: int) -> int | None:
     return len(block.instrs)
 
 
+@cython.ccall
 def _native_block_bound_8616(
     native: object, block: IRBlock | None, *, stop_after: int | None = None,
-) -> bool:
+) -> cython.bint:
     """Return whether ``block`` is the exact re-derived native block.
 
     An absent root block refuses through the same exact-type gate as missing
@@ -2119,13 +2191,14 @@ def _native_block_bound_8616(
     and all block metadata; no suffix row is consumed or authorized. Whole-block
     consumers, including repeated stores, retain the default full binding.
     """
+    count: object
     if type(native) is not IRBlock or type(block) is not IRBlock:
         return False
     if stop_after is None:
         return _native_block_equal_8616(native, block, 0)
     count = _native_prefix_count_8616(block, stop_after)
     native_count = _native_prefix_count_8616(native, stop_after)
-    if count is None or count != native_count:
+    if count is None or operator.ne(count, native_count):
         return False
     memo = _NativeTermMemo8616()
     if not _native_fields_current_8616(native, _IR_BLOCK_FIELDS_8616, memo):
@@ -2137,9 +2210,10 @@ def _native_block_bound_8616(
     )
 
 
+@cython.ccall
 def _machine_census_8616(
-    ctx: _PathCensusContext8616, block_addr: int
-) -> dict[int, tuple[int, bytes]] | Real16InvocationFailure8616:
+    ctx: _PathCensusContext8616, block_addr: cython.longlong
+) -> object:
     """Decode and dedupe one block's machine instructions with exact bytes.
 
     Only the named frontend decode-boundary failure types translate to a
@@ -2147,6 +2221,9 @@ def _machine_census_8616(
     ``IndexError``, ``KeyError``, ...) is a census defect and propagates
     loudly.
     """
+    encoded: object
+    normalized: object
+    raw_instruction: object
     if time.monotonic() > ctx.deadline:
         return Real16InvocationFailure8616.CENSUS_DEADLINE_EXCEEDED
     try:
@@ -2156,7 +2233,7 @@ def _machine_census_8616(
     ctx.work_units += len(decoded)
     if _census_work_exceeded_8616(ctx):
         return Real16InvocationFailure8616.CENSUS_WORK_EXCEEDED
-    machine_addrs: dict[int, tuple[int, bytes]] = {}
+    machine_addrs: dict[cython.longlong, tuple[cython.longlong, bytes]] = {}
     for raw_instruction in decoded:
         normalized = _normalize_instruction_8616(raw_instruction)
         if normalized is None:
@@ -2165,13 +2242,13 @@ def _machine_census_8616(
         if address in machine_addrs:
             return Real16InvocationFailure8616.PATH_DECODE_MISMATCH
         encoded = _instruction_bytes_8616(raw_instruction)
-        if encoded is None or len(encoded) != size:
+        if encoded is None or operator.ne(len(encoded), size):
             return Real16InvocationFailure8616.PATH_DECODE_MISMATCH
         machine_addrs[address] = (size, encoded)
     return machine_addrs
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _FetchedByteExtent8616:
     """Half-open envelope covering every instruction byte the binding bound.
 
@@ -2186,14 +2263,14 @@ class _FetchedByteExtent8616:
     """
 
     low: int | None = None
-    high: int = 0
+    high: cython.longlong = 0
 
 
 def _bind_fetched_bytes_8616(
-    machine_addrs: dict[int, tuple[int, bytes]],
-    in_scope: frozenset[int] | set[int],
+    machine_addrs: object,
+    in_scope: object,
     *,
-    selector: int,
+    selector: cython.longlong,
     image: _BootImageSurface8616,
     project: object,
     fetched_extent: _FetchedByteExtent8616 | None = None,
@@ -2212,9 +2289,13 @@ def _bind_fetched_bytes_8616(
     a caller-side disjointness envelope, never a substitute for the
     per-instruction authentication above.
     """
+    extent_low: object
+    image_slice: object
+    live: object
+    address: object
     window_base = selector << _SEGMENT_SHIFT_8616
     window_end = window_base + _WORD_LIMIT_8616
-    extent_low: int | None = None
+    extent_low = None
     extent_high = 0
     for address in sorted(in_scope):
         size, encoded = machine_addrs[address]
@@ -2225,14 +2306,14 @@ def _bind_fetched_bytes_8616(
         if address + size > extent_high:
             extent_high = address + size
         if not any(
-            code_range.contains(address, size) for code_range in image.code_ranges
+            code_range.contains(address, size) for code_range in iter(image.code_ranges)
         ):
             return Real16InvocationFailure8616.CODE_SCOPE_VIOLATION
         image_slice = _image_slice_8616(image, address, size)
-        if image_slice is None or image_slice != encoded:
+        if image_slice is None or operator.ne(image_slice, encoded):
             return Real16InvocationFailure8616.NATIVE_BYTES_MISMATCH
         live = _loaded_bytes_8616(project, address, size)
-        if live is None or live != image_slice:
+        if live is None or operator.ne(live, image_slice):
             return Real16InvocationFailure8616.NATIVE_BYTES_MISMATCH
     if fetched_extent is not None and extent_low is not None:
         fetched_extent.low = extent_low
@@ -2243,20 +2324,23 @@ def _bind_fetched_bytes_8616(
 class _CensusBlockExtent8616(Protocol):
     """Frontend partition block geometry at the dynamic decode boundary."""
 
-    addr: int
-    size: int
+    addr: cython.longlong
+    size: cython.longlong
 
 
 def _partition_machine_census_8616(
-    machine: dict[int, tuple[int, bytes]],
+    machine: object,
     boundary: ExactFunctionRangeBoundary8616,
-    block_addr: int,
-) -> dict[int, tuple[int, bytes]] | Real16InvocationFailure8616:
+    block_addr: cython.longlong,
+) -> object:
     """Use the authenticated frontend extent, never the claimed IR suffix."""
+    _encoded: object
+    addr: object
+    length: object
     matches = tuple(
         cast(_CensusBlockExtent8616, candidate)
-        for candidate in boundary.blocks
-        if cast(_CensusBlockExtent8616, candidate).addr == block_addr
+        for candidate in iter(boundary.blocks)
+        if operator.eq(cast(_CensusBlockExtent8616, candidate).addr, block_addr)
     )
     if len(matches) != 1:
         return Real16InvocationFailure8616.PATH_DECODE_MISMATCH
@@ -2264,9 +2348,9 @@ def _partition_machine_census_8616(
     if type(size) is not int or size <= 0:
         return Real16InvocationFailure8616.PATH_DECODE_MISMATCH
     end = block_addr + size
-    selected = {addr: row for addr, row in machine.items() if block_addr <= addr < end}
+    selected = {addr: row for addr, row in builtins.iter(machine.items()) if block_addr <= addr < end}
     cursor = block_addr
-    for addr, (length, _encoded) in sorted(selected.items()):
+    for addr, (length, _encoded) in sorted(tuple(selected.items())):
         if addr != cursor:
             return Real16InvocationFailure8616.PATH_DECODE_MISMATCH
         cursor = addr + length
@@ -2279,7 +2363,7 @@ def _census_block_bytes_8616(
     ctx: _PathCensusContext8616,
     block: IRBlock,
     *,
-    stop_after: int | None,
+    stop_after: object,
     boundary: ExactFunctionRangeBoundary8616 | None = None,
 ) -> Real16InvocationFailure8616 | None:
     """Census current block bytes before adding distinct protected spans.
@@ -2290,6 +2374,9 @@ def _census_block_bytes_8616(
     A claimed IR suffix cannot shorten that partition. Without an explicit
     boundary, retain the full natural decode rather than guessing an extent.
     """
+    failure: object
+    address: object
+    successor: object
     window_base = ctx.selector << _SEGMENT_SHIFT_8616
     window_end = window_base + _WORD_LIMIT_8616
     for successor in block.successor_addrs:
@@ -2304,22 +2391,22 @@ def _census_block_bytes_8616(
             return machine_addrs
     artifact_addrs = {
         instruction.addr
-        for instruction in block.instrs
+        for instruction in iter(block.instrs)
         if type(instruction.addr) is int
     }
     if stop_after is None:
         in_scope = set(machine_addrs)
         expected = artifact_addrs
     else:
-        in_scope = {address for address in machine_addrs if address <= stop_after}
-        expected = {addr for addr in artifact_addrs if addr <= stop_after}
+        in_scope = {address for address in iter(machine_addrs) if address <= stop_after}
+        expected = {addr for addr in iter(artifact_addrs) if addr <= stop_after}
     if in_scope != expected:
         return Real16InvocationFailure8616.PATH_DECODE_MISMATCH
     failure = _bind_census_fetched_bytes_8616(ctx, machine_addrs, in_scope)
     if failure is not None:
         return failure
     ctx.manifest.update(
-        (address, machine_addrs[address][0]) for address in sorted(in_scope)
+        (address, machine_addrs[address][0]) for address in builtins.iter(sorted(in_scope))
     )
     ctx.fetched_span_admissions += len(in_scope)
     for address in sorted(in_scope):
@@ -2327,9 +2414,10 @@ def _census_block_bytes_8616(
     return None
 
 
+@cython.ccall
 def _bind_census_fetched_bytes_8616(
     ctx: _PathCensusContext8616,
-    machine: dict[int, tuple[int, bytes]], in_scope: set[int],
+    machine: object, in_scope: object,
 ) -> Real16InvocationFailure8616 | None:
     """Protect every fetched body from declared data, including descendants.
 
@@ -2346,6 +2434,9 @@ def _bind_census_fetched_bytes_8616(
     per-instruction billing and overlap checks. Every envelope determination
     is charged, including an intersecting span's check before the exact walk.
     """
+    authority: object
+    failure: object
+    span: object
     extent = _FetchedByteExtent8616()
     failure = _bind_fetched_bytes_8616(
         machine, in_scope, selector=ctx.selector, image=ctx.image, project=ctx.project,
@@ -2376,14 +2467,17 @@ def _bind_census_fetched_bytes_8616(
     return None
 
 
+@cython.ccall
 def _check_fetched_data_overlap_8616(
     ctx: _PathCensusContext8616,
-    machine: dict[int, tuple[int, bytes]],
-    in_scope: set[int],
-    span_start: int,
-    span_end: int,
+    machine: object,
+    in_scope: object,
+    span_start: cython.longlong,
+    span_end: cython.longlong,
 ) -> Real16InvocationFailure8616 | None:
     """Check a possibly intersecting data span against every actual fetched row."""
+    failure: object
+    address: object
     for address in in_scope:
         ctx.work_units += 1
         failure = _census_resource_failure_8616(ctx)
@@ -2394,12 +2488,15 @@ def _check_fetched_data_overlap_8616(
     return None
 
 
+@cython.ccall
 def _eval_atom_8616(
     atom: object,
-    registers: dict[str, int],
-    tmps: dict[int, int],
+    registers: object,
+    tmps: object,
 ) -> int | None:
     """Evaluate one typed atom to an exact value or ``None`` (unknown)."""
+    left: object
+    right: object
     if isinstance(atom, IRValue):
         return _eval_value_8616(atom, registers, tmps)
     if isinstance(atom, IRBinaryValue):
@@ -2411,6 +2508,7 @@ def _eval_atom_8616(
     return None
 
 
+@cython.ccall
 def _value_mask_8616(size: object) -> int | None:
     """Return the wrap mask for one declared byte width, else ``None``.
 
@@ -2422,13 +2520,16 @@ def _value_mask_8616(size: object) -> int | None:
     return (1 << (size * 8)) - 1
 
 
-def _register_width_8616(name: str) -> int | None:
+@cython.ccall
+def _register_width_8616(name: object) -> int | None:
     """Return the authoritative bit width of one register name, or ``None``."""
+    projection: object
     projection = register_value_projection_8616(name, name)
     return None if projection is None else projection[1]
 
 
-def _register_tile_8616(name: str, width: int, state: dict[str, int]) -> int | None:
+@cython.ccall
+def _register_tile_8616(name: object, width: cython.longlong, state: object) -> int | None:
     """Tile one register view from proven contained family lanes.
 
     Every bit of ``name``'s view must be covered by a proven family member
@@ -2436,6 +2537,9 @@ def _register_tile_8616(name: str, width: int, state: dict[str, int]) -> int | N
     must agree on shared bits. Missing or conflicting lanes return
     ``None``.
     """
+    lane: object
+    source: object
+    member: object
     covered = 0
     value = 0
     for member in register_value_family_8616(name):
@@ -2448,17 +2552,18 @@ def _register_tile_8616(name: str, width: int, state: dict[str, int]) -> int | N
         shift, bits = lane
         lane_mask = ((1 << bits) - 1) << shift
         if covered & lane_mask:
-            if (value >> shift) & ((1 << bits) - 1) != source & ((1 << bits) - 1):
+            if operator.ne((value >> shift) & ((1 << bits) - 1), source & ((1 << bits) - 1)):
                 return None
             continue
         value |= (source & ((1 << bits) - 1)) << shift
         covered |= lane_mask
-    if covered != (1 << width) - 1:
+    if operator.ne(covered, (1 << width) - 1):
         return None
     return value
 
 
-def _register_read_8616(name: str, state: dict[str, int]) -> int | None:
+@cython.ccall
+def _register_read_8616(name: object, state: object) -> int | None:
     """Read one register, recomposing wider views from proven lanes only.
 
     Uses the authoritative ``register_value_projection_8616`` lane model:
@@ -2467,6 +2572,11 @@ def _register_read_8616(name: str, state: dict[str, int]) -> int | None:
     (``al``+``ah`` for ``ax``) and must cover every bit without
     disagreement. Missing or conflicting lanes leave the read unknown.
     """
+    container: object
+    direct: object
+    source: object
+    width: object
+    member: object
     direct = state.get(name)
     if direct is not None:
         return direct
@@ -2495,7 +2605,8 @@ _UNARY_NOT_OP_8616 = re.compile(r"^Iop_Not(\d+)$")
 _UNARY_DEPTH_LIMIT_8616 = 8
 
 
-def _eval_unary_op_8616(op: str, operand: int, result_bits: int) -> int | None:
+@cython.ccall
+def _eval_unary_op_8616(op: object, operand: cython.longlong, result_bits: cython.longlong) -> int | None:
     """Apply one typed active unary op to a concrete operand value.
 
     Only exact VEX op identities are interpreted: ``Not`` at its declared
@@ -2504,6 +2615,8 @@ def _eval_unary_op_8616(op: str, operand: int, result_bits: int) -> int | None:
     half extraction. The op's declared result width must equal the
     evidence's authoritative ``result_bits``; anything else is unknown.
     """
+    match: object
+    not_match: object
     if type(result_bits) is not int or result_bits <= 0:
         return None
     not_match = _UNARY_NOT_OP_8616.fullmatch(op)
@@ -2518,8 +2631,9 @@ def _eval_unary_op_8616(op: str, operand: int, result_bits: int) -> int | None:
     return _eval_convert_unary_8616(match, operand, result_bits)
 
 
+@cython.ccall
 def _eval_convert_unary_8616(
-    match: re.Match[str], operand: int, result_bits: int
+    match: re.Match[str], operand: cython.longlong, result_bits: cython.longlong
 ) -> int | None:
     """Apply one concrete ``<src>[U|S|HI]to<dst>`` conversion operand."""
     src_bits = int(match.group(1))
@@ -2530,7 +2644,7 @@ def _eval_convert_unary_8616(
     src_mask = (1 << src_bits) - 1
     operand &= src_mask
     if sign == "HI":
-        if src_bits != 2 * dst_bits:
+        if operator.ne(src_bits, 2 * dst_bits):
             return None
         return (operand >> dst_bits) & ((1 << dst_bits) - 1)
     if src_bits > dst_bits:
@@ -2542,20 +2656,22 @@ def _eval_convert_unary_8616(
     return operand
 
 
+@cython.ccall
 def _eval_value_8616(
     value: IRValue,
-    registers: dict[str, int],
-    tmps: dict[int, int],
+    registers: object,
+    tmps: object,
 ) -> int | None:
     """Evaluate one typed value against the abstract invocation state."""
     return _eval_value_inner_8616(value, registers, tmps, 0)
 
 
+@cython.ccall
 def _eval_value_inner_8616(
     value: IRValue,
-    registers: dict[str, int],
-    tmps: dict[int, int],
-    depth: int,
+    registers: object,
+    tmps: object,
+    depth: cython.longlong,
 ) -> int | None:
     """Evaluate one typed value, honoring capture identity and unary ops.
 
@@ -2568,6 +2684,9 @@ def _eval_value_inner_8616(
     binop fold tags pass, any other ``Iop_*`` unary projection cannot be
     authenticated and refuses.
     """
+    captured: object
+    mask: object
+    operand: object
     if depth > _UNARY_DEPTH_LIMIT_8616:
         return None
     if value.index is not None or value.index_shift:
@@ -2594,25 +2713,29 @@ def _eval_value_inner_8616(
     return _eval_plain_value_8616(value, registers)
 
 
-def _expr_provenance_only_8616(value: IRValue) -> bool:
+@cython.ccall
+def _expr_provenance_only_8616(value: IRValue) -> cython.bint:
     """Return whether every ``Iop_*`` ``expr`` token is a binop fold tag."""
+    token: object
     for token in value.expr or ():
         if token.startswith("Iop_") and token not in _BINARY_OPS_8616:
             return False
     return True
 
 
+@cython.ccall
 def _eval_plain_value_8616(
-    value: IRValue, registers: dict[str, int]
+    value: IRValue, registers: object
 ) -> int | None:
     """Evaluate a provenance-only CONST/REG view plus its folded offset.
 
     Any ``Iop_*`` ``expr`` token that is not a whitelisted binop fold tag
     is an unauthenticated unary projection and refuses.
     """
+    base: object
+    mask: object
     if not _expr_provenance_only_8616(value):
         return None
-    base: int | None
     if value.space is MemSpace.CONST:
         if type(value.const) is not int:
             return None
@@ -2637,14 +2760,16 @@ def _eval_plain_value_8616(
 _BINARY_OPS_8616: frozenset[str] = frozenset(
     {
         f"Iop_{name}{width}"
-        for name in ("Add", "Sub", "Mul", "And", "Or", "Xor", "Shl", "Shr")
-        for width in (8, 16, 32, 64)
+        for name in iter(("Add", "Sub", "Mul", "And", "Or", "Xor", "Shl", "Shr"))
+        for width in iter((8, 16, 32, 64))
     }
 )
 
 
-def _binary_parts_8616(op: str) -> tuple[str, int]:
+@cython.ccall
+def _binary_parts_8616(op: object) -> tuple[str, cython.longlong]:
     """Split a whitelisted ``Iop_<name><width>`` into exact name and width."""
+    char: object
     digits = ""
     for char in reversed(op):
         if not char.isdigit():
@@ -2653,11 +2778,14 @@ def _binary_parts_8616(op: str) -> tuple[str, int]:
     return op[4 : len(op) - len(digits)], int(digits)
 
 
+@cython.ccall
 def _eval_comparison_or_product_8616(
-    op: str, left: int, right: int,
-    operands: tuple[object, object] | None, result_size: int | None,
+    op: object, left: cython.longlong, right: cython.longlong,
+    operands: object, result_size: int | None,
 ) -> int | None:
     """Reuse canonical comparison semantics only for fully known operands."""
+    bits: object
+    compared: object
     bits = scalar_owner_8616._COMPARISON_OPS_8616.get(op)
     if bits is None:
         return wide_multiply_value_8616(op, left, right, operands, result_size)
@@ -2668,9 +2796,10 @@ def _eval_comparison_or_product_8616(
     return compared[1] if compared is not None and compared[0] == 1 else None
 
 
+@cython.ccall
 def _eval_binary_op_8616(
-    op: str, left: int, right: int, *,
-    operands: tuple[object, object] | None = None, result_size: int | None = None,
+    op: object, left: cython.longlong, right: cython.longlong, *,
+    operands: object = None, result_size: int | None = None,
 ) -> int | None:
     """Apply an exact-whitelisted VEX integer binop at its declared width."""
     if op not in _BINARY_OPS_8616:
@@ -2698,17 +2827,19 @@ def _eval_binary_op_8616(
     return None
 
 
-def _binary_width_digits_8616(op: str) -> int:
+@cython.ccall
+def _binary_width_digits_8616(op: object) -> cython.longlong:
     """Return the exact declared bit width suffix of a whitelisted op."""
     return int(op.rsplit("_", 1)[-1])
 
 
+@cython.ccall
 def _eval_base_value_8616(
     value: IRValue,
-    instruction_entry: dict[str, int],
-    dirty: frozenset[str] | set[str],
-    tmps: dict[int, int],
-    depth: int = 0,
+    instruction_entry: object,
+    dirty: object,
+    tmps: object,
+    depth: cython.longlong = 0,
 ) -> int | None:
     """Evaluate one captured base-register read of a typed address.
 
@@ -2721,6 +2852,9 @@ def _eval_base_value_8616(
     instruction-entry state is the authoritative value; unauthenticated
     unary ``expr`` projections on unpinned views refuse.
     """
+    base: object
+    evaluated: object
+    operand: object
     if depth > _UNARY_DEPTH_LIMIT_8616:
         return None
     if not isinstance(value, IRValue) or value.index is not None or value.index_shift:
@@ -2745,16 +2879,18 @@ def _eval_base_value_8616(
     return _eval_base_plain_8616(value, instruction_entry, dirty)
 
 
+@cython.ccall
 def _eval_base_plain_8616(
     value: IRValue,
-    instruction_entry: dict[str, int],
-    dirty: frozenset[str] | set[str],
+    instruction_entry: object,
+    dirty: object,
 ) -> int | None:
     """Evaluate a provenance-only address base against instruction-entry state.
 
     A register modified inside the machine instruction cannot use the
     entry snapshot; unauthenticated unary ``expr`` projections refuse.
     """
+    base: object
     if not _expr_provenance_only_8616(value):
         return None
     if value.space is MemSpace.REG and value.name is not None:
@@ -2770,11 +2906,15 @@ def _eval_base_plain_8616(
 def _store_span_8616(
     instruction: IRInstr,
     address: object,
-    instruction_entry: dict[str, int],
-    dirty: set[str],
-    tmps: dict[int, int],
-) -> tuple[int, int] | None:
+    instruction_entry: object,
+    dirty: object,
+    tmps: object,
+) -> object:
     """Return the exact physical [base, base+size) one STORE writes."""
+    base_value: object
+    segment: object
+    segment_value: object
+    value: object
     if not isinstance(address, IRAddress) or type(address.offset) is not int:
         return None
     size = address.size if type(address.size) is int and address.size > 0 else instruction.size
@@ -2793,7 +2933,7 @@ def _store_span_8616(
     if segment_value is None:
         return None
     bases = address.base_values or tuple(
-        IRValue(MemSpace.REG, name=name, size=2) for name in address.base
+        IRValue(MemSpace.REG, name=name, size=2) for name in iter(address.base)
     )
     offset_total = 0
     for value in bases:
@@ -2805,8 +2945,11 @@ def _store_span_8616(
     return (segment_value << _SEGMENT_SHIFT_8616) + offset16, size
 
 
-def _meet_registers_8616(states: Iterable[dict[str, int]]) -> dict[str, int]:
+@cython.ccall
+def _meet_registers_8616(states: Iterable[dict[str, cython.longlong]]) -> object:
     """Join predecessor exit states: a value is kept iff all paths agree."""
+    name: object
+    state: object
     iterator = iter(states)
     try:
         merged = dict(next(iterator))
@@ -2814,12 +2957,12 @@ def _meet_registers_8616(states: Iterable[dict[str, int]]) -> dict[str, int]:
         return {}
     for state in iterator:
         for name in tuple(merged):
-            if state.get(name) != merged[name]:
+            if operator.ne(state.get(name), merged[name]):
                 del merged[name]
     return merged
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _PathState8616:
     """One abstract path position: proven register lanes + memory overlay.
 
@@ -2831,7 +2974,7 @@ class _PathState8616:
     ``PathMemory8616`` overlay from ``real16_path_memory8616``.
     """
 
-    registers: dict[str, int]
+    registers: object
     memory: PathMemory8616
     #: Proven DF only, independent of the unknown remainder of FLAGS.
     direction: bool | None = None
@@ -2841,18 +2984,19 @@ def _meet_path_state_8616(states: Iterable[_PathState8616]) -> _PathState8616:
     """Meet whole path states componentwise under the must discipline."""
     items = list(states)
     return _PathState8616(
-        registers=_meet_registers_8616(state.registers for state in items),
-        memory=meet_path_memory_8616(state.memory for state in items),
-        direction=(items[0].direction if items and all(state.direction == items[0].direction for state in items) else None),
+        registers=_meet_registers_8616(state.registers for state in iter(items)),
+        memory=meet_path_memory_8616(state.memory for state in iter(items)),
+        direction=(items[0].direction if items and all(operator.eq(state.direction, items[0].direction) for state in iter(items)) else None),
     )
 
 
+@cython.ccall
 def _apply_register_write_8616(
-    name: str,
+    name: object,
     dst_size: object,
-    value: int | None,
-    registers: dict[str, int],
-    dirty: set[str],
+    value: object,
+    registers: object,
+    dirty: object,
 ) -> None:
     """Apply one register write through the authoritative lane model.
 
@@ -2863,13 +3007,18 @@ def _apply_register_write_8616(
     stale ``ax`` constant. Disjoint lanes of the same storage (``al`` vs
     ``ah``) keep their values.
     """
+    contained: object
+    contains: object
+    known: object
+    width: object
+    member: object
     width = _register_width_8616(name)
     known = (
         value
         if value is not None
         and width is not None
         and type(dst_size) is int
-        and dst_size * 8 == width
+        and operator.eq(dst_size * 8, width)
         else None
     )
     for member in register_value_family_8616(name):
@@ -2893,12 +3042,13 @@ def _apply_register_write_8616(
         registers[name] = known & ((1 << width) - 1)
 
 
+@cython.ccall
 def _simulate_reg_write_8616(
     instruction: IRInstr,
     dst: IRValue,
-    registers: dict[str, int],
-    tmps: dict[int, int],
-    dirty: set[str],
+    registers: object,
+    tmps: object,
+    dirty: object,
 ) -> Real16InvocationFailure8616 | None:
     """Apply one register-writing effect through the lane model."""
     if dst.name is None:
@@ -2910,16 +3060,22 @@ def _simulate_reg_write_8616(
     return None
 
 
+@cython.ccall
 def _simulate_tmp_write_8616(
     instruction: IRInstr,
     dst: IRValue,
-    registers: dict[str, int],
-    tmps: dict[int, int],
+    registers: object,
+    tmps: object,
 ) -> None:
     """Apply one tmp-writing effect; unevaluable results stay unknown."""
+    evaluated: object
+    guard: object
+    left: object
+    right: object
+    selected: object
     if type(dst.source_tmp) is not int:
         return
-    evaluated: int | None = None
+    evaluated = None
     if instruction.op == "MOV" and len(instruction.args) == 1:
         evaluated = _eval_atom_8616(instruction.args[0], registers, tmps)
     elif instruction.op.startswith("Iop_") and len(instruction.args) == 2:
@@ -2943,12 +3099,14 @@ def _simulate_tmp_write_8616(
         tmps[dst.source_tmp] = evaluated
 
 
+@cython.ccall
 def _simulate_census_tmp_write_8616(
     ctx: _PathCensusContext8616, instruction: IRInstr, dst: IRValue,
-    instruction_entry: dict[str, int], dirty: set[str], tmps: dict[int, int],
-    memory: PathMemory8616, registers: dict[str, int],
+    instruction_entry: object, dirty: object, tmps: object,
+    memory: PathMemory8616, registers: object,
 ) -> None:
     """Transfer a native tmp row, reading only authenticated initialized bytes."""
+    value: object
     if instruction.op != "LOAD":
         _simulate_tmp_write_8616(instruction, dst, registers, tmps)
         return
@@ -2969,8 +3127,8 @@ def _transfer_row_failure_8616(
     ctx: _PathCensusContext8616,
     instruction: IRInstr,
     block: IRBlock,
-    registers: dict[str, int],
-    tmps: dict[int, int],
+    registers: object,
+    tmps: object,
 ) -> Real16InvocationFailure8616 | None:
     """Classify one CJMP/JMP/RET row's effect on the path state.
 
@@ -2981,14 +3139,15 @@ def _transfer_row_failure_8616(
     Targets use the owned typed-atom evaluator: unresolved expressions refuse
     instead of reading fields belonging only to scalar ``IRValue`` objects.
     """
+    target: object
     if instruction.op == "CJMP" and instruction is not block.instrs[-1]:
         # A single linear pass cannot establish effects after an internal
         # exit (notably every iteration of REP). Require an authenticated
         # complete transfer; visiting the rows once can miss later code writes.
         return Real16InvocationFailure8616.PATH_EFFECT_UNPROVEN
-    if instruction.addr == ctx.callsite_addr:
+    if operator.eq(instruction.addr, ctx.callsite_addr):
         return None
-    if any(instruction is row for row in ctx.callee_return_rows):
+    if any(instruction is row for row in iter(ctx.callee_return_rows)):
         # Native binding still precedes transfer. The scoped projection,
         # authenticated at callee entry, owns this JMP-to-RET interpretation.
         return None
@@ -2996,24 +3155,25 @@ def _transfer_row_failure_8616(
         if instruction.op != "JMP" or len(instruction.args) != 1:
             return Real16InvocationFailure8616.PATH_EFFECT_UNPROVEN
         target = _eval_atom_8616(instruction.args[0], registers, tmps)
-        if target is None or block.successor_addrs != (target,):
+        if target is None or operator.ne(block.successor_addrs, (target,)):
             return Real16InvocationFailure8616.CS_PATH_UNPROVEN
     if instruction.dst is not None:
         return Real16InvocationFailure8616.PATH_EFFECT_UNPROVEN
     return None
 
 
+@cython.ccall
 def _simulate_instruction_8616(
     ctx: _PathCensusContext8616,
     artifact: IRFunctionArtifact,
     block: IRBlock,
     instruction: IRInstr,
-    registers: dict[str, int],
-    tmps: dict[int, int],
-    instruction_entry: dict[str, int],
-    dirty: set[str],
+    registers: object,
+    tmps: object,
+    instruction_entry: object,
+    dirty: object,
     memory: PathMemory8616,
-    row: tuple[int, int],
+    row: object,
 ) -> Real16InvocationFailure8616 | None:
     """Apply one in-path instruction's typed effect to the abstract state.
 
@@ -3024,6 +3184,7 @@ def _simulate_instruction_8616(
     materialized or counted once in ``failures``. Budget exhaustion is a
     census-level refusal and is deliberately *not* a row failure.
     """
+    failure: object
     ctx.raw_facts.add(row)
     ctx.work_units += 1
     if _census_work_exceeded_8616(ctx):
@@ -3031,7 +3192,6 @@ def _simulate_instruction_8616(
     ctx.normalized_facts.add(row)
     ctx.classified_facts.add(row)
     op = instruction.op
-    failure: Real16InvocationFailure8616 | None
     if _writes_segment_register_8616(instruction, "cs"):
         failure = Real16InvocationFailure8616.CS_PATH_UNPROVEN
     elif op == "STORE":
@@ -3098,6 +3258,7 @@ def _simulate_instruction_8616(
     return None
 
 
+@cython.ccall
 def _record_first_failure_site_8616(
     ctx: _PathCensusContext8616,
     artifact: IRFunctionArtifact,
@@ -3127,7 +3288,8 @@ def _record_first_failure_site_8616(
     )
 
 
-def _address_domain16_8616(encoded: bytes) -> bool:
+@cython.ccall
+def _address_domain16_8616(encoded: object) -> cython.bint:
     """Return whether fetched bytes keep the 16-bit effective-address domain.
 
     Only the leading legacy-prefix run can change the address size: a
@@ -3142,13 +3304,14 @@ def _address_domain16_8616(encoded: bytes) -> bool:
     return True
 
 
+@cython.ccall
 def _store_data_bytes_8616(
     instruction: IRInstr,
-    instruction_entry: dict[str, int],
-    dirty: set[str],
-    tmps: dict[int, int],
-    size: int,
-) -> bytes | None:
+    instruction_entry: object,
+    dirty: object,
+    tmps: object,
+    size: cython.longlong,
+) -> object:
     """Return the exact bytes one proven STORE writes, or ``None``.
 
     The value is evaluated under the same instruction-entry state and
@@ -3157,6 +3320,8 @@ def _store_data_bytes_8616(
     instruction — records ``None`` (span proven, bytes unknown) instead
     of a guessed constant.
     """
+    evaluated: object
+    mask: object
     atom = instruction.args[1]
     if not store_atom_clean_8616(atom, dirty):
         return None
@@ -3167,12 +3332,13 @@ def _store_data_bytes_8616(
     return (evaluated & mask).to_bytes(size, "little")
 
 
+@cython.ccall
 def _native_store_span_8616(
     instruction: IRInstr,
-    instruction_entry: dict[str, int],
-    dirty: set[str],
-    tmps: dict[int, int],
-) -> tuple[int, int] | None:
+    instruction_entry: object,
+    dirty: object,
+    tmps: object,
+) -> object:
     """Bind a raw STORE span to its already evaluated native address.
 
     The census authenticates the whole native block, including each exact
@@ -3185,6 +3351,9 @@ def _native_store_span_8616(
     that segment state is unavailable, without granting a guessed alias.
     Contradictory spans refuse; absence of both proofs refuses.
     """
+    captured: object
+    logical: object
+    origin: object
     address = instruction.args[0]
     if not isinstance(address, IRAddress):
         return None
@@ -3202,16 +3371,17 @@ def _native_store_span_8616(
         return None
     native = (captured, size)
     if logical is not None:
-        return logical if logical == native else None
+        return logical if operator.eq(logical, native) else None
     return native
 
 
+@cython.ccall
 def _census_store_8616(
     ctx: _PathCensusContext8616,
     instruction: IRInstr,
-    instruction_entry: dict[str, int],
-    dirty: set[str],
-    tmps: dict[int, int],
+    instruction_entry: object,
+    dirty: object,
+    tmps: object,
     memory: PathMemory8616,
 ) -> Real16InvocationFailure8616 | None:
     """Require one raw STORE to be provably disjoint from fetched code.
@@ -3221,6 +3391,10 @@ def _census_store_8616(
     is proven — so joins meet the store under the identical
     per-predecessor must discipline as register facts.
     """
+    encoded: object
+    span: object
+    extent: object
+    start: object
     if len(instruction.args) != 2 or instruction.dst is not None:
         return Real16InvocationFailure8616.PATH_EFFECT_UNPROVEN
     if type(instruction.addr) is not int:
@@ -3263,24 +3437,24 @@ class _BoundaryProof8616(Protocol):
         ...
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Revalidate the retained evidence chain end to end."""
         ...
 
     def complete_for(
         self, invocation_scope: Real16InvocationDomain8616 | None
-    ) -> bool:
+    ) -> cython.bint:
         """Revalidate only under the authenticated consuming entry."""
         ...
 
     @property
-    def preserved_registers(self) -> tuple[str, ...]:
+    def preserved_registers(self) -> object:
         """Project segment identities proven at entry and every RET exit."""
         ...
 
     def preserved_registers_for(
         self, invocation_scope: Real16InvocationDomain8616 | None
-    ) -> tuple[str, ...]:
+    ) -> object:
         """Replay completeness for the entry; return empty for incomplete evidence."""
         ...
 
@@ -3290,11 +3464,12 @@ class _BoundaryProof8616(Protocol):
         ...
 
 
+@cython.ccall
 def _derivation_scope_bound_8616(
     ctx: _PathCensusContext8616,
     artifact: IRFunctionArtifact,
-    required: Real16InvocationDomain8616 | None,
-) -> bool:
+    required: object,
+) -> cython.bint:
     """Authenticate one conditional record's scope against this census.
 
     The census's consuming scope is the domain under construction, which
@@ -3307,6 +3482,7 @@ def _derivation_scope_bound_8616(
     stays refused; the produced domain's own ``complete`` replay re-runs
     this check on every replay.
     """
+    chain: object
     if required is None:
         return True
     if type(required) is not Real16InvocationDomain8616:
@@ -3314,7 +3490,7 @@ def _derivation_scope_bound_8616(
     if not (
         required.project is ctx.project
         and required.boot is ctx.boot
-        and required.source_sha256 == ctx.image.file_sha256
+        and operator.eq(required.source_sha256, ctx.image.file_sha256)
     ):
         return False
     chain = ctx.chain
@@ -3340,6 +3516,7 @@ def _derivation_scope_bound_8616(
     return _in_flight_scopes_coterminous_8616(required.chain, chain, 0)
 
 
+@cython.ccall
 def _selector_scope_for_proof_8616(proof: _BoundaryProof8616) -> DeclaredSegmentInvariant | None:
     """Read the distinct weak premise only from its canonical entry-record owner."""
     from .entry_domain_call_preservation import EntryDomainCallPreservation8616
@@ -3349,11 +3526,14 @@ def _selector_scope_for_proof_8616(proof: _BoundaryProof8616) -> DeclaredSegment
     return proof.selector_scope
 
 
+@cython.ccall
 def _selector_derivation_bound_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact,
     proof: _BoundaryProof8616, scope: DeclaredSegmentInvariant,
-) -> bool:
+) -> cython.bint:
     """Bind weak selector evidence to the identical declared root and incoming CS."""
+    projection: object
+    source: object
     from .declared_selector_invariant import DeclaredSegmentInvariant
     from .entry_domain_call_preservation import EntryDomainCallPreservation8616
 
@@ -3369,11 +3549,12 @@ def _selector_derivation_bound_8616(
             or artifact is not root.artifact or record.boundary is not root.boundary):
         return False
     if (record.artifact is not artifact or root.admission is not scope.admission
-            or root.boundary.project is not ctx.project or projection.incoming_cs != ctx.selector):
+            or root.boundary.project is not ctx.project or operator.ne(projection.incoming_cs, ctx.selector)):
         return False
     return projection.scope is scope and record.required_scope is None
 
 
+@cython.ccall
 def _ctx_consuming_scope_8616(
     ctx: _PathCensusContext8616,
     artifact: IRFunctionArtifact,
@@ -3389,6 +3570,8 @@ def _ctx_consuming_scope_8616(
     means the record's required entry provenance differs from the scope
     this census derives, so the evidence cannot cross this path.
     """
+    required: object
+    selector: object
     selector = _selector_scope_for_proof_8616(proof)
     if selector is not None:
         return None if _selector_derivation_bound_8616(ctx, artifact, proof, selector) else _CTX_SCOPE_REFUSE_8616
@@ -3403,20 +3586,22 @@ def _ctx_consuming_scope_8616(
 _CTX_SCOPE_REFUSE_8616: object = object()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _ConsumedCallBoundary8616:
     """Synchronous call authentication result; never retained across phases."""
 
     proof: _BoundaryProof8616
     scope: Real16InvocationDomain8616 | None
-    preserved_registers: tuple[str, ...] | None
+    preserved_registers: object
     selector_scope: DeclaredSegmentInvariant | None = None
 
 
+@cython.ccall
 def _selector_incoming_state_bound_8616(
-    consumed: _ConsumedCallBoundary8616, registers: dict[str, int],
-) -> bool:
+    consumed: _ConsumedCallBoundary8616, registers: object,
+) -> cython.bint:
     """Require the actual caller CS before using a weak selector projection."""
+    projection: object
     if consumed.selector_scope is None:
         return True
     from .entry_domain_call_preservation import EntryDomainCallPreservation8616
@@ -3425,16 +3610,18 @@ def _selector_incoming_state_bound_8616(
     if type(proof) is not EntryDomainCallPreservation8616:
         return False
     projection = proof.selector_projection
-    return projection is not None and registers.get("cs") == projection.incoming_cs
+    return projection is not None and operator.eq(registers.get("cs"), projection.incoming_cs)
 
 
-def _call_scope_uses_owned_identity_8616(ctx: _PathCensusContext8616) -> bool:
+@cython.ccall
+def _call_scope_uses_owned_identity_8616(ctx: _PathCensusContext8616) -> cython.bint:
     """Restrict immediate reuse to scopes whose matching cannot replay parents."""
     return ctx.chain is None or type(ctx.chain) in (
         DeclaredFunctionEntryLink8616, RawBootEntrySurface8616,
     )
 
 
+@cython.ccall
 def _call_boundary_proof_8616(
     ctx: _PathCensusContext8616,
     artifact: IRFunctionArtifact,
@@ -3442,6 +3629,7 @@ def _call_boundary_proof_8616(
     instruction: IRInstr,
 ) -> _BoundaryProof8616 | None:
     """Select one currently authenticated CALL proof without retaining replay."""
+    consumed: object
     consumed = _consume_call_boundary_8616(ctx, artifact, block, instruction)
     if consumed is None or consumed.selector_scope is not None:
         # Bare-proof consumers have no slot to retain weak provenance.
@@ -3459,7 +3647,7 @@ def _consume_call_boundary_8616(
     block: IRBlock,
     instruction: IRInstr,
     *,
-    project_registers: bool = False,
+    project_registers: cython.bint = False,
 ) -> _ConsumedCallBoundary8616 | None:
     """Select the bound complete call proof for one in-path CALL row.
 
@@ -3471,6 +3659,7 @@ def _consume_call_boundary_8616(
     authenticated consuming entry — a stale, forged, or foreign-scope
     record is refused rather than inherited.
     """
+    proof: object
     proof = bound_call_preservation_at_instruction_8616(
         artifact, block, instruction, ctx.call_preservations
     )
@@ -3478,16 +3667,16 @@ def _consume_call_boundary_8616(
         names = proof.preserved_registers_for(None) if project_registers else None
         return _ConsumedCallBoundary8616(proof, None, names)
     if instruction.op == "CALL" and any(
-        candidate is block for candidate in artifact.blocks
+        candidate is block for candidate in iter(artifact.blocks)
     ):
         # Conditional registry evidence only counts under an authenticated
         # scope: exactly one bound record must own this row, and its
         # required entry must authenticate against this derivation.
         scoped = tuple(
             proof
-            for proof in ctx.call_preservations
+            for proof in iter(ctx.call_preservations)
             if proof.caller.artifact is artifact
-            and proof.callsite_addr == instruction.addr
+            and operator.eq(proof.callsite_addr, instruction.addr)
             and proof.required_scope is not None
         )
         if len(scoped) == 1:
@@ -3510,12 +3699,12 @@ def _consume_call_boundary_8616(
 
     candidates = tuple(
         record
-        for record in ctx.entry_call_preservations
+        for record in iter(ctx.entry_call_preservations)
         if type(record) is EntryDomainCallPreservation8616
         and record.artifact is artifact
         and record.block is block
         and record.instruction is instruction
-        and record.callsite_addr == instruction.addr
+        and operator.eq(record.callsite_addr, instruction.addr)
     )
     if len(candidates) != 1:
         return None
@@ -3534,11 +3723,12 @@ def _consume_call_boundary_8616(
     )
 
 
+@cython.ccall
 def _consume_entry_call_record_8616(
     record: _BoundaryProof8616,
-    scope: Real16InvocationDomain8616 | None,
+    scope: object,
     *,
-    project_registers: bool,
+    project_registers: cython.bint,
     selector_scope: DeclaredSegmentInvariant | None = None,
 ) -> _ConsumedCallBoundary8616 | None:
     """Authenticate either the record or its immediate segment projection once."""
@@ -3573,7 +3763,7 @@ def _consume_entry_call_record_8616(
 def _declared_service_frame_8616(
     ctx: _PathCensusContext8616,
     bound: DeclaredInterruptService8616,
-    registers: dict[str, int],
+    registers: object,
     artifact: IRFunctionArtifact,
 ) -> int | Real16InvocationFailure8616:
     """Validate the architectural INT frame span against proven SS:SP.
@@ -3587,6 +3777,10 @@ def _declared_service_frame_8616(
     linear base on success. Every frame byte requires declared memory coverage;
     header stack containment cannot authorize an arbitrary runtime SS:SP.
     """
+    sp: object
+    ss: object
+    block: object
+    fetched: object
     ss = _register_read_8616("ss", registers)
     sp = _register_read_8616("sp", registers)
     if ss is None or sp is None or sp < bound.frame_bytes:
@@ -3598,7 +3792,7 @@ def _declared_service_frame_8616(
         return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
     if any(
         frame_linear < start + extent and start < frame_end
-        for start, extent in ctx.manifest
+        for start, extent in iter(ctx.manifest)
     ):
         return Real16InvocationFailure8616.CODE_WRITE_VIOLATION
     for block in artifact.blocks:
@@ -3636,10 +3830,14 @@ def _declared_service_frame_8616(
 def _declared_dosbox_entry_writes_8616(
     ctx: _PathCensusContext8616,
     bound: DeclaredInterruptService8616,
-    registers: dict[str, int],
+    registers: object,
     artifact: IRFunctionArtifact,
-) -> tuple[DosBoxInt21Write8616, ...] | Real16InvocationFailure8616:
+) -> object:
     """Validate every explicit backend write before committing ordered effects."""
+    policy: object
+    sp: object
+    ss: object
+    write: object
     policy = bound.dosbox_int21_entry_policy
     if policy is None:
         return ()
@@ -3649,7 +3847,7 @@ def _declared_dosbox_entry_writes_8616(
         return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
     saved = DosBoxInt21Registers8616(*(
         _register_read_8616(name, registers)
-        for name in ("ax", "bx", "cx", "dx", "si", "di", "bp", "ds", "es")
+        for name in iter(("ax", "bx", "cx", "dx", "si", "di", "bp", "ds", "es"))
     ))
     effects = dosbox_int21_frame_effects_8616(
         psp_segment=policy.psp_segment, ss=ss, sp=sp, registers=saved,
@@ -3659,7 +3857,7 @@ def _declared_dosbox_entry_writes_8616(
     # The shared architectural frame is consumed separately exactly once.
     writes = effects.writes[1:]
     spans = [*ctx.manifest]
-    spans.extend((row.addr, row.size) for block in artifact.blocks for row in block.instrs
+    spans.extend((row.addr, row.size) for block in iter(artifact.blocks) for row in iter(block.instrs)
                  if row.addr is not None and row.size is not None)
     for write in writes:
         start, end = write.linear, write.linear + write.size
@@ -3667,7 +3865,7 @@ def _declared_dosbox_entry_writes_8616(
             return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
         if start < 0x400:
             return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
-        if any(start < base + size and base < end for base, size in spans):
+        if any(start < base + size and base < end for base, size in iter(spans)):
             return Real16InvocationFailure8616.CODE_WRITE_VIOLATION
         frame = effects.writes[0]
         if start < frame.linear + frame.size and frame.linear < end:
@@ -3677,31 +3875,35 @@ def _declared_dosbox_entry_writes_8616(
     return writes
 
 
-def _dosbox_metadata_alias_8616(bound: DeclaredInterruptService8616, start: int, end: int) -> bool:
+def _dosbox_metadata_alias_8616(bound: DeclaredInterruptService8616, start: cython.longlong, end: cython.longlong) -> cython.bint:
     """Keep entry writes from invalidating the allocator's authenticated input."""
+    surface: object
     surface = bound.resize
     if surface is not None and surface.dosbox is not None:
         return any(start < entry.address + len(entry.image) and entry.address < end
-                   for entry in surface.dosbox.chain)
+                   for entry in iter(surface.dosbox.chain))
     return (surface is not None and start < surface.metadata_linear + len(surface.metadata)
             and surface.metadata_linear < end)
 
 
+@cython.ccall
 def _commit_dosbox_entry_writes_8616(
     ctx: _PathCensusContext8616, memory: PathMemory8616,
-    writes: tuple[DosBoxInt21Write8616, ...],
+    writes: object,
 ) -> None:
     """Materialize native store order; unknown words revoke stale byte facts."""
+    write: object
     for write in writes:
         memory.apply_write(write.linear, write.size, write.data)
         ctx.checked_stores += 1
 
 
+@cython.ccall
 def _declared_service_crossing_8616(
     ctx: _PathCensusContext8616,
     artifact: IRFunctionArtifact,
     instruction: IRInstr,
-    registers: dict[str, int],
+    registers: object,
     memory: PathMemory8616,
 ) -> Real16InvocationFailure8616 | None:
     """Apply services only under an explicit application memory baseline.
@@ -3711,6 +3913,7 @@ def _declared_service_crossing_8616(
     unless their conditional declaration explicitly includes that baseline.
     Ordinary CALLs are not services and retain their call-boundary refusal.
     """
+    authority: object
     if interrupt_call_vector_8616(instruction) is None:
         return Real16InvocationFailure8616.CALL_BOUNDARY_UNPROVEN
     authority = _declared_entry_authority_8616(ctx.chain)
@@ -3721,11 +3924,12 @@ def _declared_service_crossing_8616(
     return _cross_authenticated_declared_service_8616(ctx, artifact, instruction, registers, memory)
 
 
+@cython.ccall
 def _cross_authenticated_declared_service_8616(
     ctx: _PathCensusContext8616,
     artifact: IRFunctionArtifact,
     instruction: IRInstr,
-    registers: dict[str, int],
+    registers: object,
     memory: PathMemory8616,
 ) -> Real16InvocationFailure8616 | None:
     """Cross one interrupt-service boundary under an exact declared relation.
@@ -3747,6 +3951,9 @@ def _cross_authenticated_declared_service_8616(
     preserved is dropped, and the consumption is recorded on the census.
     Anything insufficient refuses; a declaration never proves itself.
     """
+    ah: object
+    al: object
+    vector: object
 
 
     vector = interrupt_call_vector_8616(instruction)
@@ -3806,8 +4013,8 @@ def _cross_authenticated_declared_service_8616(
 def _declared_version_service_apply_8616(
     ctx: _PathCensusContext8616,
     bound: DeclaredInterruptService8616,
-    registers: dict[str, int],
-    frame_linear: int,
+    registers: object,
+    frame_linear: cython.longlong,
     memory: PathMemory8616,
 ) -> None:
     """Commit one declared version crossing under the bound relation.
@@ -3818,6 +4025,8 @@ def _declared_version_service_apply_8616(
     lane the relation neither writes nor declares preserved drops to
     unknown.
     """
+    answer: object
+    name: object
     # The architectural frame is a real write: it joins the path overlay
     # exactly like a censused STORE so later evidence sees the six
     # written bytes rather than stale initial memory. Its contents are
@@ -3838,7 +4047,7 @@ def _declared_version_service_apply_8616(
     for name in tuple(registers):
         covered = any(
             register_value_projection_8616(lane, name) is not None
-            for lane in accounted
+            for lane in iter(accounted)
         )
         if not covered:
             # An unaccounted lane loses its constant honestly rather than
@@ -3847,8 +4056,8 @@ def _declared_version_service_apply_8616(
 
 
 def _declared_ivt_revoked_8616(
-    memory: PathMemory8616, vector: int
-) -> bool:
+    memory: PathMemory8616, vector: cython.longlong
+) -> cython.bint:
     """Return whether any path may have written the declared IVT slot.
 
     Conservative over the path overlay: a byte provably written on every
@@ -3867,11 +4076,12 @@ def _declared_ivt_revoked_8616(
     )
 
 
+@cython.ccall
 def _vector_current_slot_8616(
     memory: PathMemory8616,
     surface: DeclaredVectorSurface8616,
-    number: int,
-) -> bytes | None:
+    number: cython.longlong,
+) -> object:
     """Recompute the live four bytes of IVT slot ``number`` on this path.
 
     Reads the *path's* must-meet byte overlay, never a visitation-order
@@ -3899,11 +4109,12 @@ def _vector_current_slot_8616(
     return bytes(slot)
 
 
+@cython.ccall
 def _vector_slot_write_8616(
     ctx: _PathCensusContext8616,
     artifact: IRFunctionArtifact,
-    slot_linear: int,
-    slot_after: bytes,
+    slot_linear: cython.longlong,
+    slot_after: object,
     memory: PathMemory8616,
 ) -> Real16InvocationFailure8616 | None:
     """Serialize one canonical IVT slot write into the path memory overlay.
@@ -3913,6 +4124,10 @@ def _vector_slot_write_8616(
     AH=35h query on this path reads them rather than the declared initial
     image.
     """
+    block: object
+    extent: object
+    fetched: object
+    start: object
     write_end = slot_linear + len(slot_after)
     for start, extent in ctx.manifest:
         if slot_linear < start + extent and start < write_end:
@@ -3932,9 +4147,10 @@ def _vector_slot_write_8616(
     return None
 
 
+@cython.ccall
 def _vector_register_effects_8616(
     response: VectorResponseEffect8616,
-    registers: dict[str, int],
+    registers: object,
 ) -> None:
     """Apply only the canonical ES/BX word writes; retain untouched lane facts.
 
@@ -3942,6 +4158,7 @@ def _vector_register_effects_8616(
     EBX value preserves its high word when the BX result is installed; an
     unknown EBX stays unknown rather than acquiring invented upper bits.
     """
+    prior_ebx: object
     if response.es is None or response.bx is None:
         return
     prior_ebx = _register_read_8616("ebx", registers)
@@ -3952,14 +4169,15 @@ def _vector_register_effects_8616(
         registers["ebx"] = (prior_ebx & 0xFFFF0000) | response.bx
 
 
+@cython.ccall
 def _declared_vector_service_apply_8616(
     ctx: _PathCensusContext8616,
     bound: DeclaredInterruptService8616,
     surface: DeclaredVectorSurface8616,
-    registers: dict[str, int],
+    registers: object,
     artifact: IRFunctionArtifact,
     memory: PathMemory8616,
-    number: int,
+    number: cython.longlong,
 ) -> Real16InvocationFailure8616 | None:
     """Commit one declared get/set-vector crossing under the bound relation.
 
@@ -3976,6 +4194,10 @@ def _declared_vector_service_apply_8616(
     The write still requires code/frame disjointness and joins the census.
     A later dispatch may conservatively refuse because its slot was written.
     """
+    ds: object
+    dx: object
+    failure: object
+    slot_before: object
     frame_linear = _declared_service_frame_8616(
         ctx, bound, registers, artifact
     )
@@ -3998,7 +4220,7 @@ def _declared_vector_service_apply_8616(
     if slot_before is None:
         return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
     ds = dx = None
-    if bound.function == INT21_SET_VECTOR_8616:
+    if operator.eq(bound.function, INT21_SET_VECTOR_8616):
         ds = _register_read_8616("ds", registers)
         dx = _register_read_8616("dx", registers)
         if ds is None or dx is None:
@@ -4041,10 +4263,11 @@ def _declared_vector_service_apply_8616(
     return None
 
 
+@cython.ccall
 def _resize_current_metadata_8616(
     memory: PathMemory8616,
     surface: DeclaredResizeSurface8616,
-) -> bytes | None:
+) -> object:
     """Recompute the current MCB bytes at a declared resize boundary.
 
     Reads the *path's* must-meet byte overlay, never a visitation-order
@@ -4066,13 +4289,14 @@ def _resize_current_metadata_8616(
     return bytes(mcb)
 
 
+@cython.ccall
 def _resize_metadata_write_8616(
     ctx: _PathCensusContext8616,
     artifact: IRFunctionArtifact,
     bound: DeclaredInterruptService8616,
     surface: DeclaredResizeSurface8616,
-    current: bytes,
-    updated: bytes,
+    current: object,
+    updated: object,
     memory: PathMemory8616,
 ) -> Real16InvocationFailure8616 | None:
     """Serialize the canonical MCB write into the path's memory overlay.
@@ -4084,10 +4308,14 @@ def _resize_metadata_write_8616(
     evidence reads them rather than stale initial memory. An unchanged
     response records no write.
     """
+    block: object
+    extent: object
+    fetched: object
+    start: object
     if updated == current:
         return None
     changed = [
-        index for index in range(len(current)) if updated[index] != current[index]
+        index for index in range(len(current)) if operator.ne(updated[index], current[index])
     ]
     write_base = surface.metadata_linear + changed[0]
     write = updated[changed[0] : changed[-1] + 1]
@@ -4117,10 +4345,10 @@ def _resize_metadata_write_8616(
 
 def _resize_register_effects_8616(
     bound: DeclaredInterruptService8616,
-    response_ax: int,
-    response_bx: int,
-    carry: bool,
-    registers: dict[str, int],
+    response_ax: cython.longlong,
+    response_bx: cython.longlong,
+    carry: cython.bint,
+    registers: object,
 ) -> None:
     """Apply the canonical AX/BX/CF effects through the lane model.
 
@@ -4132,6 +4360,9 @@ def _resize_register_effects_8616(
     on an undeclared preservation claim. Any lane the relation neither
     writes nor declares preserved drops to unknown.
     """
+    eflags: object
+    flags: object
+    name: object
     dirty: set[str] = set()
     _apply_register_write_8616("ax", 2, response_ax, registers, dirty)
     _apply_register_write_8616("bx", 2, response_bx, registers, dirty)
@@ -4151,7 +4382,7 @@ def _resize_register_effects_8616(
     for name in tuple(registers):
         covered = any(
             register_value_projection_8616(lane, name) is not None
-            for lane in accounted
+            for lane in iter(accounted)
         )
         if not covered:
             del registers[name]
@@ -4159,17 +4390,19 @@ def _resize_register_effects_8616(
 
 def _dosbox_resize_code_spans_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact,
-) -> tuple[tuple[int, int], ...]:
+) -> tuple[tuple[cython.longlong, cython.longlong], ...]:
     """Protect every previously fetched and retained native instruction byte."""
     return (*sorted(ctx.manifest), *((row.addr, row.size)
-            for block in artifact.blocks for row in block.instrs
+            for block in iter(artifact.blocks) for row in iter(block.instrs)
             if type(row.addr) is int and type(row.size) is int and row.size > 0))
 
 
+@cython.ccall
 def _dosbox_resize_metadata_after_8616(
     surface: DeclaredResizeSurface8616, effects: DosboxResizeEffects8616,
 ) -> bytes:
     """Project exact final-header effects without dropping other ordered writes."""
+    write: object
     updated = bytearray(effects.current_chain[-1])
     for write in effects.response.writes:
         if surface.metadata_linear <= write.address < surface.metadata_linear + len(updated):
@@ -4180,12 +4413,18 @@ def _dosbox_resize_metadata_after_8616(
 
 def _declared_dosbox_resize_apply_8616(
     ctx: _PathCensusContext8616, bound: DeclaredInterruptService8616,
-    surface: DeclaredResizeSurface8616, registers: dict[str, int],
+    surface: DeclaredResizeSurface8616, registers: object,
     artifact: IRFunctionArtifact, memory: PathMemory8616,
 ) -> Real16InvocationFailure8616 | None:
     """Stage the entire native prefix and allocator effect before committing it."""
+    ax: object
+    bx: object
+    es: object
+    policy: object
+    allocator_write: object
+    write: object
     policy = surface.dosbox
-    ax, es, bx = (_register_read_8616(name, registers) for name in ("ax", "es", "bx"))
+    ax, es, bx = (_register_read_8616(name, registers) for name in iter(("ax", "es", "bx")))
     if policy is None or ax is None or es is None or bx is None:
         return Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
     frame = _declared_service_frame_8616(ctx, bound, registers, artifact)
@@ -4205,7 +4444,7 @@ def _declared_dosbox_resize_apply_8616(
         segment=es, paragraphs=bx, ax=ax,
         code_spans=_dosbox_resize_code_spans_8616(ctx, artifact),
         frame_spans=((frame, bound.frame_bytes),
-                     *((write.linear, write.size) for write in entry[1:])),
+                     ) + tuple(((write.linear, write.size) for write in iter(entry[1:]))),
     )
     if isinstance(effects, DosboxResizeEffectsRefusal8616):
         return (Real16InvocationFailure8616.CODE_WRITE_VIOLATION
@@ -4230,11 +4469,12 @@ def _declared_dosbox_resize_apply_8616(
     return None
 
 
+@cython.ccall
 def _declared_resize_service_apply_8616(
     ctx: _PathCensusContext8616,
     bound: DeclaredInterruptService8616,
     surface: DeclaredResizeSurface8616,
-    registers: dict[str, int],
+    registers: object,
     artifact: IRFunctionArtifact,
     memory: PathMemory8616,
 ) -> Real16InvocationFailure8616 | None:
@@ -4250,6 +4490,11 @@ def _declared_resize_service_apply_8616(
     response: its typed OTHER_BLOCK/CHAIN refusals refuse the crossing,
     its effects are serialized by the helpers above.
     """
+    ax: object
+    bx: object
+    current: object
+    es: object
+    failure: object
     if surface.dosbox is not None:
         return _declared_dosbox_resize_apply_8616(ctx, bound, surface, registers, artifact, memory)
     ax = _register_read_8616("ax", registers)
@@ -4315,6 +4560,7 @@ def _declared_resize_service_apply_8616(
     return None
 
 
+@cython.ccall
 def _consume_cross_call_boundary_8616(
     ctx: _PathCensusContext8616,
     artifact: IRFunctionArtifact,
@@ -4322,6 +4568,7 @@ def _consume_cross_call_boundary_8616(
     instruction: IRInstr,
 ) -> _ConsumedCallBoundary8616 | None:
     """Share immediate authentication only when scope matching has no callbacks."""
+    proof: object
     if _call_scope_uses_owned_identity_8616(ctx):
         return _consume_call_boundary_8616(
             ctx, artifact, block, instruction, project_registers=True,
@@ -4337,15 +4584,18 @@ def _consume_cross_call_boundary_8616(
     return _ConsumedCallBoundary8616(proof, typed_scope, names)
 
 
+@cython.ccall
 def _cross_call_8616(
     ctx: _PathCensusContext8616,
     artifact: IRFunctionArtifact,
     block: IRBlock,
     instruction: IRInstr,
-    registers: dict[str, int],
+    registers: object,
     memory: PathMemory8616,
 ) -> Real16InvocationFailure8616 | None:
     """Close one interior CALL boundary or the proved callsite itself."""
+    consumed: object
+    failure: object
     if ctx.callsite_addr is None:
         # A native interrupt has a separate source-bound declared effect.
         # Consume its frame, memory and register evidence in callee walks too;
@@ -4355,7 +4605,7 @@ def _cross_call_8616(
             if interrupt_call_vector_8616(instruction) is not None
             else Real16InvocationFailure8616.CALLEE_WRITE_UNPROVEN
         )
-    if instruction.addr == ctx.callsite_addr:
+    if operator.eq(instruction.addr, ctx.callsite_addr):
         # The proven callsite: its own stack push was already censused as a
         # STORE row. The register and memory state at this row — after that
         # machine instruction's push effects — is the callee's exact entry
@@ -4411,11 +4661,13 @@ def _cross_call_8616(
     return failure
 
 
+@cython.ccall
 def _record_prefix_call_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact, block: IRBlock,
     instruction: IRInstr, consumed: _ConsumedCallBoundary8616,
 ) -> None:
     """Charge optional exact consumption retention without revoking success."""
+    names: object
     from .segment_call_preservation import segment_call_dependency_traversal_scope_8616
 
     if consumed.selector_scope is not None:
@@ -4437,14 +4689,16 @@ def _record_prefix_call_8616(
         ))
 
 
+@cython.ccall
 def _unbound_call_failure_8616(
     ctx: _PathCensusContext8616,
     artifact: IRFunctionArtifact,
     instruction: IRInstr,
-    registers: dict[str, int],
+    registers: object,
     memory: PathMemory8616,
 ) -> Real16InvocationFailure8616 | None:
     """Preserve exhausted proof resources before admitting service fallback."""
+    failure: object
     failure = _census_resource_failure_8616(ctx)
     if failure is not None:
         return failure
@@ -4455,14 +4709,16 @@ def _unbound_call_failure_8616(
 
 def _reconcile_call_exit_8616(
     proof: _BoundaryProof8616,
-    scope: Real16InvocationDomain8616 | None,
+    scope: object,
     callee: SegmentEffectClosureResult8616,
-    callee_exits: dict[int, _PathState8616],
-    registers: dict[str, int],
+    callee_exits: object,
+    registers: object,
     memory: PathMemory8616,
     *, selector_scope: DeclaredSegmentInvariant | None = None,
 ) -> Real16InvocationFailure8616 | None:
     """Reauthenticate after simulation before transporting any callee effects."""
+    width: object
+    name: object
     if selector_scope is not None:
         from .entry_domain_call_preservation import EntryDomainCallPreservation8616
 
@@ -4491,8 +4747,8 @@ def _reconcile_call_exit_8616(
 
 def _post_call_registers_8616(
     callee: SegmentEffectClosureResult8616,
-    callee_exits: dict[int, _PathState8616],
-) -> dict[str, int]:
+    callee_exits: object,
+) -> object:
     """Meet source-bound return values independently across every return exit.
 
     Normalize overlapping register views through the canonical lane owner
@@ -4500,20 +4756,22 @@ def _post_call_registers_8616(
     AX. Missing or disagreeing values stay unknown independently, including
     SP. Callee IP/EIP describe its return transfer, never caller data state.
     """
+    name: object
+    state: object
     if not callee.return_block_addrs or any(
-        address not in callee_exits for address in callee.return_block_addrs
+        address not in callee_exits for address in iter(callee.return_block_addrs)
     ):
         return {}
-    states = [callee_exits[address].registers for address in callee.return_block_addrs]
+    states = [callee_exits[address].registers for address in iter(callee.return_block_addrs)]
     candidates = {
         member
-        for register in Arch86_16.register_list
+        for register in iter(Arch86_16.register_list)
         if register.general_purpose
-        for member in register_value_family_8616(register.name)
+        for member in builtins.iter(register_value_family_8616(register.name))
     }
-    normalized: list[dict[str, int]] = []
+    normalized: list[dict[str, cython.longlong]] = []
     for state in states:
-        projected: dict[str, int] = {}
+        projected: dict[str, cython.longlong] = {}
         for name in sorted(candidates):
             value = _register_read_8616(name, state)
             if type(value) is int:
@@ -4524,7 +4782,7 @@ def _post_call_registers_8616(
 
 def _post_call_memory_8616(
     callee: SegmentEffectClosureResult8616,
-    callee_exits: dict[int, _PathState8616],
+    callee_exits: object,
 ) -> PathMemory8616:
     """Return the bound callee's must-met post-return memory overlay.
 
@@ -4536,42 +4794,64 @@ def _post_call_memory_8616(
     """
     if not callee.return_block_addrs or any(
         return_addr not in callee_exits
-        for return_addr in callee.return_block_addrs
+        for return_addr in iter(callee.return_block_addrs)
     ):
         return path_memory_tainted_8616()
     return meet_path_memory_8616(
         callee_exits[return_addr].memory
-        for return_addr in callee.return_block_addrs
+        for return_addr in iter(callee.return_block_addrs)
     )
 
 
 def _universal_callee_native_blocks_8616(
     ctx: _PathCensusContext8616, callee: SegmentEffectClosureResult8616,
-    native: dict[int, IRBlock],
-) -> dict[int, IRBlock] | Real16InvocationFailure8616:
+    native: object,
+) -> object:
     """Bind published leaf normalization to an independently proved native copy."""
+    failure: object
+    normalized: object
+    view: object
     artifact = callee.coverage.artifact
     view = callee.coverage.scoped_view
     if (view is None and not callee.callsite_addrs
             and any(not _native_block_bound_8616(native.get(block.addr), block)
-                    for block in artifact.blocks)):
+                    for block in iter(artifact.blocks))):
         from .vex_import import universally_normalized_census_blocks_8616
 
         normalized = universally_normalized_census_blocks_8616(ctx.project, callee.coverage.boundary)
         if normalized is None:
             return Real16InvocationFailure8616.NATIVE_EFFECT_UNPROVEN
         raw_blocks, normalized_blocks = normalized
-        ctx.work_units += sum(1 + len(block.instrs) for block in (*raw_blocks, *normalized_blocks))
+        ctx.work_units += sum(1 + len(block.instrs) for block in iter(tuple(raw_blocks) + tuple(normalized_blocks)))
         failure = _census_resource_failure_8616(ctx)
         if failure is not None:
             return failure
-        if (set(native) != {block.addr for block in raw_blocks}
-                or any(not _native_block_bound_8616(native.get(block.addr), block) for block in raw_blocks)):
+        if (operator.ne(set(native), {block.addr for block in iter(raw_blocks)})
+                or any(not _native_block_bound_8616(native.get(block.addr), block) for block in iter(raw_blocks))):
             return Real16InvocationFailure8616.NATIVE_EFFECT_UNPROVEN
         # Only the canonical fresh universal theorem changes this reference.
         # The actual callee still binds every complete row before simulation.
-        native = {block.addr: block for block in normalized_blocks}
+        native = {block.addr: block for block in iter(normalized_blocks)}
     return native
+
+
+def _callee_selected_native_blocks_8616(
+    callee: SegmentEffectClosureResult8616, artifact: IRFunctionArtifact,
+) -> object:
+    """Select scoped native blocks only under the callee's exact invocation authority."""
+    projection: object
+    scope: object
+    view: object
+    view = callee.coverage.scoped_view
+    if view is None:
+        return None
+    scope = callee.state.invocation_scope
+    if scope is None:
+        return Real16InvocationFailure8616.CALLEE_WRITE_UNPROVEN
+    projection = view.cfg_projection_for(scope)
+    if projection is None or projection.source_artifact is not artifact:
+        return Real16InvocationFailure8616.CALLEE_WRITE_UNPROVEN
+    return frozenset(block.addr for block in iter(artifact.blocks)) - projection.unreachable_block_addrs
 
 
 def _census_callee_bytes_8616(
@@ -4587,6 +4867,9 @@ def _census_callee_bytes_8616(
     All raw bytes remain protected, and simulation independently establishes
     its live scope and binds every executed row to the selected native IR.
     """
+    failure: object
+    selected_blocks: object
+    block: object
     callee = proof.callee
     if type(callee) is not SegmentEffectClosureResult8616:
         return Real16InvocationFailure8616.CALLEE_WRITE_UNPROVEN
@@ -4597,13 +4880,9 @@ def _census_callee_bytes_8616(
     callee_addr = artifact.function_addr
     if callee_addr in ctx.censused_callees:
         return None
-    selected_blocks: frozenset[int] | None = None
-    view = callee.coverage.scoped_view
-    if view is not None:
-        projection = view.cfg_projection_for(callee.state.invocation_scope)
-        if projection is None or projection.source_artifact is not artifact:
-            return Real16InvocationFailure8616.CALLEE_WRITE_UNPROVEN
-        selected_blocks = frozenset(block.addr for block in artifact.blocks) - projection.unreachable_block_addrs
+    selected_blocks = _callee_selected_native_blocks_8616(callee, artifact)
+    if isinstance(selected_blocks, Real16InvocationFailure8616):
+        return selected_blocks
     native = (
         _native_effect_blocks_8616(ctx, callee.coverage.boundary)
         if selected_blocks is None else
@@ -4627,47 +4906,62 @@ def _census_callee_bytes_8616(
     return None
 
 
+@cython.ccall
+def _callee_feasibility_work_limit_8616(
+    ctx: _PathCensusContext8616, transfer_order: object,
+) -> cython.longlong:
+    """Reserve work for mandatory simulation when optional ordering is absent."""
+    remaining = max(0, ctx.work_limit - ctx.work_units)
+    return (remaining if transfer_order is not None
+            else remaining // _CALLEE_UNORDERED_FEASIBILITY_WORK_DIVISOR_8616)
+
+
 def _callee_feasible_scope_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact,
-    returns: frozenset[int], seed: _PathState8616,
-    *, transfer_order: tuple[int, ...] | None = None,
-) -> tuple[frozenset[int], frozenset[tuple[int, int]]] | Real16InvocationFailure8616:
+    returns: object, seed: _PathState8616,
+    *, transfer_order: object = None,
+) -> object:
     """Prune a shared-return callee under its own seed without dropping required exits."""
+    native: object
     if time.monotonic() > ctx.deadline:
         return Real16InvocationFailure8616.CENSUS_DEADLINE_EXCEEDED
     if _census_work_exceeded_8616(ctx):
         return Real16InvocationFailure8616.CENSUS_WORK_EXCEEDED
-    scope = frozenset(block.addr for block in artifact.blocks)
-    dead_edges: frozenset[tuple[int, int]] = frozenset()
+    scope = frozenset(block.addr for block in iter(artifact.blocks))
+    dead_edges: frozenset[tuple[cython.longlong, cython.longlong]] = frozenset()
     # The return-summary consumer still requires every original return exit.
     # Restrict this optimization to the shared-return shape, preserving the
     # existing complete scope for multiple-return and malformed closures.
     if len(returns) == 1 and returns <= scope and any(
-        row.op == "CJMP" for block in artifact.blocks for row in block.instrs
+        row.op == "CJMP" for block in iter(artifact.blocks) for row in iter(block.instrs)
     ):
-        blocks = {block.addr: block for block in artifact.blocks}
+        blocks = {block.addr: block for block in iter(artifact.blocks)}
         terminal = blocks[next(iter(returns))]
         if terminal.instrs and type(terminal.instrs[-1].addr) is int:
             native = ctx.native_blocks.get(artifact.function_addr, {})
             load_rows = {
                 id(row): (row, native_row)
-                for block in artifact.blocks
-                if any(type(row) is IRInstr and row.op == "LOAD" for row in block.instrs)
+                for block in iter(artifact.blocks)
+                if any(type(row) is IRInstr and row.op == "LOAD" for row in iter(block.instrs))
                 if _native_block_bound_8616(native.get(block.addr), block)
-                for row, native_row in zip(block.instrs, native[block.addr].instrs, strict=True)
+                for row, native_row in builtins.iter(zip(block.instrs, native[block.addr].instrs, strict=True))
                 if row.op == "LOAD"
             }
 
             def read_load(
-                instruction: IRInstr, span: tuple[int, int] | None, memory: PathMemory8616,
+                instruction: IRInstr, span: object, memory: PathMemory8616,
             ) -> int | None:
                 """Publish callee LOAD constants only from native-bound rows and live memory."""
+                pair: object
                 pair = load_rows.get(id(instruction))
                 if pair is None or pair[0] is not instruction or not _native_instr_equal_8616(instruction, pair[1], 0):
                     return None
                 value = path_load_value_8616(instruction, span, memory, ctx.initial_memory)
                 return value if type(value) is int else None
 
+            # Unordered refinement is optional. Offer only part of the
+            # remaining work so the required callee census can still run.
+            # Actual work, including any boundary overshoot, stays charged.
             feasible = invocation_feasible_scope_8616(
                 artifact=artifact, dangerous=scope,
                 predecessor_map=build_x86_16_ir_predecessor_map(artifact),
@@ -4676,7 +4970,7 @@ def _callee_feasible_scope_8616(
                 seed=seed.registers, seed_memory=seed.memory, read_load=read_load,
                 apply_service=lambda _instruction, _registers, _memory: False,
                 iteration_limit=_PATH_STATE_ITERATION_LIMIT_8616,
-                deadline=ctx.deadline, work_limit=max(0, ctx.work_limit - ctx.work_units),
+                deadline=ctx.deadline, work_limit=_callee_feasibility_work_limit_8616(ctx, transfer_order),
                 transfer_order=transfer_order,
                 load_snapshot_replay=(
                     LoadSnapshotReplay8616.READ_ONLY_OWNED
@@ -4701,18 +4995,27 @@ def _callee_feasible_scope_8616(
     return scope, dead_edges
 
 
+@cython.ccall
 def _projected_callee_return_rows_8616(
     callee: SegmentEffectClosureResult8616,
-) -> tuple[IRInstr, ...] | None:
+) -> object:
     """Bind raw return terminals to the current authenticated callee projection."""
+    projected: object
+    projection: object
+    scope: object
+    view: object
+    block: object
     view = callee.coverage.scoped_view
     if view is None:
         return ()
-    projection = view.cfg_projection_for(callee.state.invocation_scope)
+    scope = callee.state.invocation_scope
+    if scope is None:
+        return None
+    projection = view.cfg_projection_for(scope)
     artifact = callee.coverage.artifact
     if projection is None or projection.source_artifact is not artifact:
         return None
-    effective = {block.addr: block for block in projection.blocks}
+    effective = {block.addr: block for block in iter(projection.blocks)}
     rows: list[IRInstr] = []
     for block in artifact.blocks:
         if block.addr not in callee.return_block_addrs:
@@ -4729,13 +5032,14 @@ def _projected_callee_return_rows_8616(
 
 def _callee_transfer_order_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact,
-) -> tuple[int, ...] | Real16InvocationFailure8616 | None:
+) -> object:
     """Attempt optional ordering once after a cycle, without retaining proof.
 
     Advice only selects the ordinary bounded fixpoint. It cannot supply an
     order, eliminate an edge or replace native effect authentication. Keep
     custom producers observable and check budgets even when advice is used.
     """
+    failure: object
     from .segment_call_preservation import segment_call_dependency_traversal_scope_8616
 
     failure = _census_resource_failure_8616(ctx)
@@ -4746,7 +5050,7 @@ def _callee_transfer_order_8616(
         if owned and artifact.function_addr in traversal.callee_default_order:
             return None
         ordered = acyclic_invocation_order_8616(
-            frozenset(block.addr for block in artifact.blocks),
+            frozenset(block.addr for block in iter(artifact.blocks)),
             build_x86_16_ir_predecessor_map(artifact), deadline=ctx.deadline,
             work_limit=max(0, ctx.work_limit - ctx.work_units),
         )
@@ -4757,7 +5061,7 @@ def _callee_transfer_order_8616(
         if (owned and ordered.blocks is None
                 and len(traversal.callee_default_order) < _CALLEE_ORDER_ADVICE_LIMIT_8616):
             traversal.callee_default_order.add(artifact.function_addr)
-        blocks: tuple[int, ...] | None = ordered.blocks
+        blocks: object = ordered.blocks
         return blocks
 
 
@@ -4765,7 +5069,7 @@ def _simulate_callee_8616(
     ctx: _PathCensusContext8616,
     proof: _BoundaryProof8616,
     seed: _PathState8616,
-) -> dict[int, _PathState8616] | Real16InvocationFailure8616:
+) -> object:
     """Census a complete leaf callee's raw effects under the call state.
 
     The preservation result guarantees a leaf (no nested calls). Callee
@@ -4778,6 +5082,8 @@ def _simulate_callee_8616(
     returned: the post-call continuation state is evidence the bound
     simulation computed, never a caller-side guess.
     """
+    return_rows: object
+    transfer_order: object
     callee = proof.callee
     if type(callee) is not SegmentEffectClosureResult8616:
         return Real16InvocationFailure8616.CALLEE_WRITE_UNPROVEN
@@ -4785,7 +5091,7 @@ def _simulate_callee_8616(
     artifact = callee.coverage.artifact
     if not isinstance(artifact, IRFunctionArtifact):
         return Real16InvocationFailure8616.CALLEE_WRITE_UNPROVEN
-    transfer_order: tuple[int, ...] | None = None
+    transfer_order = None
     if not callee.callsite_addrs and ctx.work_units < ctx.work_limit:
         order = _callee_transfer_order_8616(ctx, artifact)
         if isinstance(order, Real16InvocationFailure8616):
@@ -4816,7 +5122,7 @@ def _simulate_callee_8616(
                 callsite_addr=None,
                 infeasible_edges=dead_edges,
                 transfer_order=(
-                    tuple(addr for addr in transfer_order if addr in scope)
+                    tuple(addr for addr in iter(transfer_order) if addr in scope)
                     if transfer_order is not None else None
                 ),
             )
@@ -4824,11 +5130,12 @@ def _simulate_callee_8616(
         ctx.callee_return_rows = prior_return_rows
 
 
+@cython.ccall
 def _refuse_unbound_block_rows_8616(
     ctx: _PathCensusContext8616,
     artifact: IRFunctionArtifact,
     block: IRBlock,
-    stop_after: int | None,
+    stop_after: object,
 ) -> None:
     """Stage every in-scope row of an unbound block as classified-refused.
 
@@ -4843,6 +5150,8 @@ def _refuse_unbound_block_rows_8616(
     classified refusals, so the diagnostic names the exact instruction
     whose block failed native binding.
     """
+    index: object
+    instruction: object
     for index, instruction in enumerate(block.instrs):
         if type(instruction.addr) is not int:
             break
@@ -4857,6 +5166,7 @@ def _refuse_unbound_block_rows_8616(
         _record_first_failure_site_8616(ctx, artifact, block, instruction)
 
 
+@cython.ccall
 def _repeated_store_native_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact, block: IRBlock,
 ) -> tuple[object, Real16InvocationFailure8616 | None]:
@@ -4868,6 +5178,7 @@ def _repeated_store_native_8616(
     prefix record is consumed. ``(None, failure)`` refuses; ``(block,
     None)`` leaves the ordinary whole-block binding unchanged.
     """
+    entry: object
     entry = ctx.prefix_native_entries.get((artifact.function_addr, block.addr))
     if entry is None:
         return ctx.native_blocks.get(artifact.function_addr, {}).get(block.addr), None
@@ -4882,10 +5193,14 @@ def _repeated_store_native_8616(
 
 def _apply_repeated_store_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact, block: IRBlock,
-    registers: dict[str, int], memory: PathMemory8616, direction: bool | None,
-    *, count_store: bool = True,
+    registers: object, memory: PathMemory8616, direction: bool | None,
+    *, count_store: cython.bint = True,
 ) -> tuple[RepeatedStoreStatus8616, Real16InvocationFailure8616 | None]:
     """Bind and consume one whole REP effect, including all fetched-byte checks."""
+    effect: object
+    encoded: object
+    prefix_failure: object
+    repeat: object
     encoded = ctx.machine_bytes.get(block.addr)
     if encoded is None:
         return RepeatedStoreStatus8616.NOT_APPLICABLE, None
@@ -4907,7 +5222,7 @@ def _apply_repeated_store_8616(
         return RepeatedStoreStatus8616.REFUSED, Real16InvocationFailure8616.CENSUS_WORK_EXCEEDED
     if time.monotonic() > ctx.deadline:
         return RepeatedStoreStatus8616.REFUSED, Real16InvocationFailure8616.CENSUS_DEADLINE_EXCEEDED
-    if effect.size and any(effect.base < start + size and start < effect.base + effect.size for start, size in ctx.manifest):
+    if effect.size and any(effect.base < start + size and start < effect.base + effect.size for start, size in iter(ctx.manifest)):
         return RepeatedStoreStatus8616.REFUSED, Real16InvocationFailure8616.CODE_WRITE_VIOLATION
     memory.apply_write(effect.base, effect.size, effect.data)
     if effect.size:
@@ -4919,11 +5234,14 @@ def _apply_repeated_store_8616(
     return RepeatedStoreStatus8616.APPLIED, None
 
 
+@cython.ccall
 def _record_repeated_store_rows_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact, block: IRBlock,
-    failure: Real16InvocationFailure8616 | None,
+    failure: object,
 ) -> None:
     """Close the row ledger for a native instruction consumed as one effect."""
+    index: object
+    instruction: object
     for index, instruction in enumerate(block.instrs):
         row = (block.addr, index)
         ctx.raw_facts.add(row)
@@ -4937,6 +5255,7 @@ def _record_repeated_store_rows_8616(
             _record_first_failure_site_8616(ctx, artifact, block, instruction)
 
 
+@cython.ccall
 def _simulate_path_block_8616(
     ctx: _PathCensusContext8616,
     artifact: IRFunctionArtifact,
@@ -4946,10 +5265,11 @@ def _simulate_path_block_8616(
     stop_after: int | None,
 ) -> _PathState8616 | Real16InvocationFailure8616:
     """Bind then simulate one block's ordered effects; return exit state."""
+    fused: object
+    prefix: object
     fused = _try_active_fused_callee_transfer_8616(ctx, artifact, block, entry, stop_after)
     if fused is not None:
         return fused
-    prefix: FusedCallerPrefix8616 | _PathState8616 | Real16InvocationFailure8616 | None
     prefix = _try_fused_caller_prefix_8616(ctx, artifact, block, entry, stop_after)
     if prefix is None:
         prefix = _prepare_ordinary_path_block_8616(ctx, artifact, block, entry, stop_after)
@@ -4959,11 +5279,14 @@ def _simulate_path_block_8616(
     return _resume_path_block_8616(ctx, artifact, block, prefix, stop_after)
 
 
+@cython.ccall
 def _prepare_ordinary_path_block_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact, block: IRBlock,
     entry: _PathState8616, stop_after: int | None,
 ) -> FusedCallerPrefix8616 | _PathState8616 | Real16InvocationFailure8616:
     """Preserve ordinary bind-before-effects ordering, including repeated stores."""
+    binding_failure: object
+    failure: object
     binding_failure = _bind_path_block_before_transfer_8616(ctx, artifact, block, stop_after)
     if binding_failure is not None:
         return binding_failure
@@ -4981,24 +5304,26 @@ def _prepare_ordinary_path_block_8616(
     )
 
 
+@cython.ccall
 def _resume_path_block_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact, block: IRBlock,
-    state: FusedCallerPrefix8616, stop_after: int | None,
+    state: FusedCallerPrefix8616, stop_after: object,
 ) -> _PathState8616 | Real16InvocationFailure8616:
     """Execute only the bound suffix, retaining the complete scalar prefix state."""
+    failure: object
     for index in range(state.next_index, len(block.instrs)):
         instruction = block.instrs[index]
         if type(instruction.addr) is not int:
             return Real16InvocationFailure8616.PATH_DECODE_MISMATCH
         if stop_after is not None and instruction.addr > stop_after:
             break
-        if instruction.addr != state.current_addr:
+        if operator.ne(instruction.addr, state.current_addr):
             state.current_addr = instruction.addr
             state.instruction_entry = dict(state.registers)
             state.dirty = set()
         capture_terminal = (
             ctx.prefix_capture_requested and instruction.op == "CALL"
-            and instruction.addr == ctx.callsite_addr and index == len(block.instrs) - 1
+            and operator.eq(instruction.addr, ctx.callsite_addr) and operator.eq(index, len(block.instrs) - 1)
         )
         direction_before_call = state.direction.direction() if capture_terminal else None
         failure = _simulate_instruction_8616(
@@ -5026,25 +5351,26 @@ _CANONICAL_TERMINAL_CONTINUATION_8616: tuple[object, ...] = (
 
 def _terminal_call_owned_8616(
     artifact: IRFunctionArtifact, terminal: _PrefixTerminalCall8616,
-) -> bool:
+) -> cython.bint:
     """Require the exact physical-last CALL row before any continuation work."""
     block = terminal.block
     index = terminal.index
-    if type(index) is not int or index < 0 or index != len(block.instrs) - 1:
+    if type(index) is not int or index < 0 or operator.ne(index, len(block.instrs) - 1):
         return False
-    if terminal.artifact is not artifact or not any(owned is block for owned in artifact.blocks):
+    if terminal.artifact is not artifact or not any(owned is block for owned in iter(artifact.blocks)):
         return False
     return (
         block.instrs[index] is terminal.instruction
         and terminal.instruction.op == "CALL"
-        and terminal.current_addr == terminal.instruction.addr
+        and operator.eq(terminal.current_addr, terminal.instruction.addr)
     )
 
 
+@cython.ccall
 def _prefix_cut_state_matches_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact,
     terminal: _PrefixTerminalCall8616, state: _PathState8616,
-) -> bool:
+) -> cython.bint:
     """Compare current converged cut data with the complete ordinary state.
 
     This prerequisite grants no native/source, seed, callback or fact-ledger
@@ -5053,6 +5379,7 @@ def _prefix_cut_state_matches_8616(
     tainted memory and duplicate projection entries. Comparison consumes this
     operation's existing work/deadline allowance before touching containers.
     """
+    feasible: object
     feasible = ctx.edge_feasibility
     if feasible is None or not feasible.converged or feasible.call_cut is None:
         return False
@@ -5069,20 +5396,20 @@ def _prefix_cut_state_matches_8616(
     direction_bound = cut.direction is state.direction and terminal.direction is state.direction
     if (
         cut.artifact is not artifact or cut.block is not terminal.block
-        or cut.instruction is not terminal.instruction or cut.index != terminal.index
+        or cut.instruction is not terminal.instruction or operator.ne(cut.index, terminal.index)
         or not direction_bound
     ):
         return False
     if (
-        len(cut.registers) != len(state.registers)
-        or len(cut.memory_known) != len(state.memory.known)
-        or len(cut.memory_unknown) != len(state.memory.unknown)
+        operator.ne(len(cut.registers), len(state.registers))
+        or operator.ne(len(cut.memory_known), len(state.memory.known))
+        or operator.ne(len(cut.memory_unknown), len(state.memory.unknown))
     ):
         return False
     equal = (
-        dict(cut.registers) == state.registers
-        and dict(cut.memory_known) == state.memory.known
-        and set(cut.memory_unknown) == state.memory.unknown
+        operator.eq(dict(cut.registers), state.registers)
+        and operator.eq(dict(cut.memory_known), state.memory.known)
+        and operator.eq(set(cut.memory_unknown), state.memory.unknown)
     )
     return equal and _census_resource_failure_8616(ctx) is None
 
@@ -5099,6 +5426,7 @@ def _resume_terminal_call_8616(
     operation's complete manifest here. CALL's prior push rows are not rerun;
     the ordinary CALL interpreter authenticates and applies its callee afresh.
     """
+    failure: object
     if time.monotonic() > ctx.deadline:
         return Real16InvocationFailure8616.CENSUS_DEADLINE_EXCEEDED
     ctx.work_units += len(artifact.blocks) + 1
@@ -5117,7 +5445,7 @@ def _resume_terminal_call_8616(
     if not _feasibility_code_unmodified_8616(ctx, state.memory):
         return _census_resource_failure_8616(ctx) or Real16InvocationFailure8616.CODE_WRITE_VIOLATION
     current = (_simulate_instruction_8616, _resume_path_block_8616, DirectionTracker8616.step)
-    if not all(left is right for left, right in zip(current, _CANONICAL_TERMINAL_CONTINUATION_8616, strict=True)):
+    if not all(left is right for left, right in builtins.iter(zip(current, _CANONICAL_TERMINAL_CONTINUATION_8616, strict=True))):
         return Real16InvocationFailure8616.NATIVE_EFFECT_UNPROVEN
     registers = dict(state.registers)
     # This exact final CALL cannot write scalar temporaries, dirty lanes or
@@ -5129,22 +5457,23 @@ def _resume_terminal_call_8616(
         terminal.tmps, terminal.dirty, terminal.instruction_entry,
         terminal.current_addr,
     )
-    stop = ctx.callsite_addr if terminal.block.addr == ctx.stop_block_addr else None
+    stop = ctx.callsite_addr if operator.eq(terminal.block.addr, ctx.stop_block_addr) else None
     return _resume_path_block_8616(ctx, artifact, terminal.block, continuation, stop)
 
 
+@cython.ccall
 def _scope_path_entry_8616(
-    addr: int,
-    head: int,
-    predecessors: list[int],
-    exits: dict[int, _PathState8616],
+    addr: cython.longlong,
+    head: cython.longlong,
+    predecessors: object,
+    exits: object,
     seed: _PathState8616,
 ) -> _PathState8616 | None:
     """Meet available predecessors, including backedges into the seeded head."""
-    ready = [exits[pred] for pred in predecessors if pred in exits]
+    ready = [exits[pred] for pred in iter(predecessors) if pred in exits]
     if addr == head:
         return _meet_path_state_8616(
-            [_PathState8616(dict(seed.registers), seed.memory, seed.direction), *ready]
+            [_PathState8616(dict(seed.registers), seed.memory, seed.direction), ] + list(ready)
         )
     if predecessors and not ready:
         # Wait for a contributing predecessor; an empty meet would lose facts.
@@ -5155,16 +5484,16 @@ def _scope_path_entry_8616(
 def _simulate_scope_8616(
     ctx: _PathCensusContext8616,
     artifact: IRFunctionArtifact,
-    scope: frozenset[int],
-    head: int,
+    scope: object,
+    head: cython.longlong,
     seed: _PathState8616,
     *,
     stop_after: int | None,
     callsite_addr: int | None,
-    infeasible_edges: frozenset[tuple[int, int]] = frozenset(),
-    transfer_order: tuple[int, ...] | None = None,
-    prefix_exit: tuple[int, _PathState8616] | None = None,
-) -> dict[int, _PathState8616] | Real16InvocationFailure8616:
+    infeasible_edges: object = frozenset(),
+    transfer_order: object = None,
+    prefix_exit: object = None,
+) -> object:
     """Fixpoint-simulate every in-scope block's effects under the seed.
 
     Returns the per-block exit state map on success so a callee-scope
@@ -5187,13 +5516,16 @@ def _simulate_scope_8616(
     simulated at least once: an unvisited block's effects were never
     checked.
     """
+    entry: object
+    order: object
+    addr: object
     order = invocation_transfer_order_8616(scope, transfer_order)
     if order is None:
         return Real16InvocationFailure8616.PATH_EFFECT_UNPROVEN
-    blocks_by_addr = {block.addr: block for block in artifact.blocks}
+    blocks_by_addr = {block.addr: block for block in iter(artifact.blocks)}
     predecessor_map = build_x86_16_ir_predecessor_map(artifact)
-    entries: dict[int, _PathState8616] = {}
-    exits: dict[int, _PathState8616] = {} if prefix_exit is None else {prefix_exit[0]: prefix_exit[1]}
+    entries: dict[cython.longlong, _PathState8616] = {}
+    exits: object = {} if prefix_exit is None else {prefix_exit[0]: prefix_exit[1]}
     scope_callsite = ctx.callsite_addr
     ctx.callsite_addr = callsite_addr
     try:
@@ -5203,18 +5535,18 @@ def _simulate_scope_8616(
             changed = False
             for addr in order:
                 predecessors = [
-                    pred for pred in predecessor_map.get(addr, ())
-                    if (pred in scope or (prefix_exit is not None and pred == prefix_exit[0]))
+                    pred for pred in builtins.iter(predecessor_map.get(addr, ()))
+                    if (pred in scope or (prefix_exit is not None and operator.eq(pred, prefix_exit[0])))
                     and (pred, addr) not in infeasible_edges
                 ]
                 entry = _scope_path_entry_8616(addr, head, predecessors, exits, seed)
                 if entry is None:
                     continue
-                if entries.get(addr) == entry and addr in exits:
+                if operator.eq(entries.get(addr), entry) and addr in exits:
                     continue
                 entries[addr] = entry
                 block = blocks_by_addr[addr]
-                stop = stop_after if addr == ctx.stop_block_addr else None
+                stop = stop_after if operator.eq(addr, ctx.stop_block_addr) else None
                 exit_state = _simulate_path_block_8616(
                     ctx, artifact, block, entry, stop_after=stop
                 )
@@ -5228,12 +5560,13 @@ def _simulate_scope_8616(
             return Real16InvocationFailure8616.PATH_EFFECT_UNPROVEN
     finally:
         ctx.callsite_addr = scope_callsite
-    if any(addr not in exits for addr in scope):
+    if any(addr not in exits for addr in iter(scope)):
         return Real16InvocationFailure8616.PATH_EFFECT_UNPROVEN
     return exits
 
 
-def _invocation_seed_8616(evidence: _BootEvidence8616) -> dict[str, int]:
+@cython.ccall
+def _invocation_seed_8616(evidence: _BootEvidence8616) -> object:
     """Return the initialized invocation register state for the path."""
     seed = dict(evidence.register_seed)
     seed["cs"] = evidence.entry_segment
@@ -5242,13 +5575,14 @@ def _invocation_seed_8616(evidence: _BootEvidence8616) -> dict[str, int]:
     return seed
 
 
+@cython.ccall
 def _feasibility_apply_service_8616(
     ctx: _PathCensusContext8616,
     artifact: IRFunctionArtifact,
     instruction: IRInstr,
-    registers: dict[str, int],
+    registers: object,
     memory: PathMemory8616,
-) -> bool:
+) -> cython.bint:
     """Apply a declared interrupt-service answer for edge feasibility.
 
     Runs the identical authenticated crossing — relation binding, IVT
@@ -5264,6 +5598,7 @@ def _feasibility_apply_service_8616(
     and the caller must conservatively drop the state — the real census
     will refuse the same row honestly if the block stays live.
     """
+    result: object
     before = ctx.work_units
     scratch = replace(
         ctx,
@@ -5286,10 +5621,11 @@ def _feasibility_apply_service_8616(
     return result is None
 
 
+@cython.ccall
 def _feasibility_caller_range_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
-) -> tuple[int, int] | None:
+) -> object:
     """Protect the closed native interval after charged block-extent checks.
 
     Frontend closure partitions every decoded block into contiguous positive
@@ -5298,15 +5634,17 @@ def _feasibility_caller_range_8616(
     every native instruction into all its IR rows. Including intervening gaps
     is conservative protection, never evidence authorizing effects.
     """
+    block: object
+    candidate: object
     ctx.work_units += 1
     if time.monotonic() > ctx.deadline or _census_work_exceeded_8616(ctx):
         return None
-    if type(boundary) is not ExactFunctionRangeBoundary8616 or boundary.project is not ctx.project or boundary.addr != artifact.function_addr:
+    if type(boundary) is not ExactFunctionRangeBoundary8616 or boundary.project is not ctx.project or operator.ne(boundary.addr, artifact.function_addr):
         return None
     start, end = boundary.decode_start, boundary.decode_end
     if type(start) is not int or type(end) is not int or not 0 <= start <= boundary.addr < end:
         return None
-    native_heads: set[int] = set()
+    native_heads: set[cython.longlong] = set()
     for candidate in boundary.blocks:
         ctx.work_units += 1
         if time.monotonic() > ctx.deadline or _census_work_exceeded_8616(ctx):
@@ -5315,18 +5653,18 @@ def _feasibility_caller_range_8616(
         if type(native_block.addr) is not int or type(native_block.size) is not int or native_block.size <= 0 or native_block.addr in native_heads or not start <= native_block.addr < native_block.addr + native_block.size <= end:
             return None
         native_heads.add(native_block.addr)
-    artifact_heads: set[int] = set()
+    artifact_heads: set[cython.longlong] = set()
     for block in artifact.blocks:
         ctx.work_units += 1
         if time.monotonic() > ctx.deadline or _census_work_exceeded_8616(ctx) or type(block.addr) is not int or block.addr in artifact_heads:
             return None
         artifact_heads.add(block.addr)
-    if not native_heads or native_heads != boundary.block_addrs_set or artifact_heads != native_heads:
+    if not native_heads or operator.ne(native_heads, boundary.block_addrs_set) or artifact_heads != native_heads:
         return None
     return start, end
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _FeasibilityCallBinding8616:
     """Owned callable over one private call map and captured native geometry.
 
@@ -5337,34 +5675,36 @@ class _FeasibilityCallBinding8616:
     ctx: _PathCensusContext8616
     artifact: IRFunctionArtifact
     boundary: ExactFunctionRangeBoundary8616
-    selected_rows: dict[int, tuple[IRBlock, IRInstr]]
-    blocks: tuple[IRBlock, ...]
+    selected_rows: object
+    blocks: object
     native_blocks: object
-    captured: tuple[int, int]
+    captured: object
 
     def __call__(
-        self, instruction: IRInstr, registers: dict[str, int], memory: PathMemory8616,
-    ) -> bool:
+        self, instruction: IRInstr, registers: object, memory: PathMemory8616,
+    ) -> cython.bint:
         """Bind current native geometry before fresh callee scratch effects."""
+        pair: object
         ctx = self.ctx
         if time.monotonic() > ctx.deadline or _census_work_exceeded_8616(ctx):
             return False
         pair = self.selected_rows.get(id(instruction))
         if self.artifact.blocks is not self.blocks or self.boundary.blocks is not self.native_blocks:
             return False
-        if self.boundary.project is not ctx.project or self.boundary.addr != self.artifact.function_addr or (self.boundary.decode_start, self.boundary.decode_end) != self.captured:
+        if self.boundary.project is not ctx.project or operator.ne(self.boundary.addr, self.artifact.function_addr) or operator.ne((self.boundary.decode_start, self.boundary.decode_end), self.captured):
             return False
         if pair is None or pair[1] is not instruction:
             return False
         start, end = self.captured
         return _feasibility_call_scratch_8616(
             ctx, self.artifact, pair[0], instruction, registers, memory,
-            (*ctx.manifest, (start, end - start)),
+            tuple(ctx.manifest) + ((start, end - start),),
             caller_range=ScratchCallerRange8616(start, end),
         )
 
-    def terminal_noop(self, instruction: IRInstr) -> bool:
+    def terminal_noop(self, instruction: IRInstr) -> cython.bint:
         """Prove this handler rejects the exact row before scratch effects."""
+        pair: object
         if type(self.selected_rows) is not dict:
             return False
         pair = self.selected_rows.get(id(instruction))
@@ -5373,10 +5713,11 @@ class _FeasibilityCallBinding8616:
         return type(pair) is tuple and len(pair) == 2 and pair[1] is not instruction
 
 
+@cython.ccall
 def _feasibility_call_handler_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
-    call_rows: dict[int, tuple[IRBlock, IRInstr]],
+    call_rows: object,
 ) -> _FeasibilityCallBinding8616 | None:
     """Capture a conservative native range and a detached private call map.
 
@@ -5384,6 +5725,7 @@ def _feasibility_call_handler_8616(
     including gaps between reachable blocks. Current fetched spans and all
     call/native proofs remain fresh per crossing.
     """
+    captured: object
     if ctx.callsite_addr is None or not call_rows or time.monotonic() > ctx.deadline or _census_work_exceeded_8616(ctx):
         return None
     captured = _feasibility_caller_range_8616(ctx, artifact, boundary)
@@ -5398,11 +5740,11 @@ def _feasibility_call_handler_8616(
 
 
 def _feasibility_call_rows_8616(
-    blocks: dict[int, IRBlock], native: dict[int, IRBlock],
-    dangerous: frozenset[int], callsite_addr: int,
+    blocks: object, native: object,
+    dangerous: object, callsite_addr: cython.longlong,
     *, call_cut: kb_owner_8616.Real16CallCutRequest8616 | None = None,
-    prefix_blocks: frozenset[int] = frozenset(),
-) -> dict[int, tuple[IRBlock, IRInstr]]:
+    prefix_blocks: object = frozenset(),
+) -> dict[cython.longlong, tuple[IRBlock, IRInstr]]:
     """Name native-bound interior CALLs for fresh branch or requested-cut state.
 
     An exact optional cut also needs current callee effects in a branchless
@@ -5411,31 +5753,32 @@ def _feasibility_call_rows_8616(
     ``prefix_blocks`` names blocks whose native copy is a consumed-row prefix;
     they bind at the exact ``callsite_addr`` cutoff, never as whole blocks.
     """
-    if call_cut is None and not any(row.op == "CJMP" for address in dangerous for row in blocks[address].instrs):
+    if call_cut is None and not any(row.op == "CJMP" for address in iter(dangerous) for row in iter(blocks[address].instrs)):
         # This pass only proves branch edges. Ordinary census simulation still
         # applies callee effects when a straight-line caller has no edge to prune.
         return {}
     return {
         id(row): (block, row)
-        for address in dangerous
-        for block in (blocks[address],)
-        if any(type(row) is IRInstr and row.op == "CALL" and row.addr != callsite_addr for row in block.instrs)
+        for address in iter(dangerous)
+        for block in iter((blocks[address],))
+        if any(type(row) is IRInstr and row.op == "CALL" and operator.ne(row.addr, callsite_addr) for row in iter(block.instrs))
         if _native_block_bound_8616(
             native.get(address), block,
             stop_after=callsite_addr if address in prefix_blocks else None,
         )
-        for row in (
+        for row in iter((
             block.instrs[:len(native[address].instrs)]
             if address in prefix_blocks else block.instrs
-        )
-        if row.op == "CALL" and row.addr != callsite_addr
+        ))
+        if row.op == "CALL" and operator.ne(row.addr, callsite_addr)
     }
 
 
+@cython.ccall
 def _feasibility_protected_union_8616(
     ctx: _PathCensusContext8616, *, caller_range: ScratchCallerRange8616 | None = None,
-    disjoint_outside: tuple[int, int] | None = None,
-) -> tuple[tuple[int, int], ...] | None:
+    disjoint_outside: object = None,
+) -> object:
     """Build an operation-local exact interval union under the census budget.
 
     Each input-span insertion and each unique-span merge charges one work
@@ -5451,6 +5794,10 @@ def _feasibility_protected_union_8616(
     unobservable to the caller. Intersecting or unproven envelopes keep the
     original charged merge unchanged.
     """
+    envelope: object
+    intervals: object
+    end: object
+    start: object
     intervals, envelope = _feasibility_union_inputs_8616(ctx, caller_range)
     if intervals is None:
         return None
@@ -5458,7 +5805,7 @@ def _feasibility_protected_union_8616(
         exact_bounds = type(disjoint_outside[0]) is int and type(disjoint_outside[1]) is int
         if exact_bounds and (disjoint_outside[1] <= envelope[0] or envelope[1] <= disjoint_outside[0]):
             return ()
-    merged: list[tuple[int, int]] = []
+    merged: list[tuple[cython.longlong, cython.longlong]] = []
     for start, end in sorted(intervals):
         ctx.work_units += 1
         if time.monotonic() > ctx.deadline or _census_work_exceeded_8616(ctx):
@@ -5471,10 +5818,11 @@ def _feasibility_protected_union_8616(
     return tuple(merged)
 
 
+@cython.ccall
 def _feasibility_code_unmodified_8616(
     ctx: _PathCensusContext8616, memory: PathMemory8616,
     *, caller_range: ScratchCallerRange8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """Check exact code/write overlap using the cheaper bounded query lane.
 
     Union construction is charged by its owner. Each span-size inspection,
@@ -5491,6 +5839,9 @@ def _feasibility_code_unmodified_8616(
     intersecting, unbounded or oversized ledgers keep the original exact
     lanes, paying at most this one bounded extra pass.
     """
+    spans: object
+    end: object
+    start: object
     if memory.tainted or time.monotonic() > ctx.deadline or _census_work_exceeded_8616(ctx):
         return False
     written_bytes = len(memory.known) + len(memory.unknown)
@@ -5521,11 +5872,14 @@ def _feasibility_code_unmodified_8616(
     return _feasibility_code_byte_walk_8616(ctx, memory, spans)
 
 
+@cython.ccall
 def _feasibility_sparse_code_walk_8616(
     ctx: _PathCensusContext8616, memory: PathMemory8616,
-    spans: tuple[tuple[int, int], ...],
-) -> bool:
+    spans: object,
+) -> cython.bint:
     """Check each written byte against the sorted union under the census budget."""
+    address: object
+    written: object
     for written in (memory.known, memory.unknown):
         for address in written:
             if not _feasibility_written_byte_outside_code_8616(ctx, spans, address):
@@ -5533,9 +5887,10 @@ def _feasibility_sparse_code_walk_8616(
     return True
 
 
+@cython.ccall
 def _feasibility_written_byte_outside_code_8616(
-    ctx: _PathCensusContext8616, spans: tuple[tuple[int, int], ...], address: int,
-) -> bool:
+    ctx: _PathCensusContext8616, spans: object, address: cython.longlong,
+) -> cython.bint:
     """Charge each search comparison and exact half-open containment query."""
     lower, upper = 0, len(spans)
     while lower < upper:
@@ -5553,11 +5908,14 @@ def _feasibility_written_byte_outside_code_8616(
     return not lower or address >= spans[lower - 1][1]
 
 
+@cython.ccall
 def _feasibility_code_byte_walk_8616(
     ctx: _PathCensusContext8616, memory: PathMemory8616,
-    spans: tuple[tuple[int, int], ...],
-) -> bool:
+    spans: object,
+) -> cython.bint:
     """Retain the dense lane's charged protected-byte membership queries."""
+    end: object
+    start: object
     for start, end in spans:
         for address in range(start, end):
             ctx.work_units += 1
@@ -5568,10 +5926,12 @@ def _feasibility_code_byte_walk_8616(
     return True
 
 
+@cython.ccall
 def _feasibility_callsite_bytes_current_8616(
     ctx: _PathCensusContext8616, instruction: IRInstr,
-) -> bool:
+) -> cython.bint:
     """Rebind the exact caller CALL bytes after callee-side callbacks."""
+    encoded: object
     address = instruction.addr
     if type(address) is not int:
         return False
@@ -5587,12 +5947,14 @@ def _feasibility_callsite_bytes_current_8616(
     ) is None
 
 
+@cython.ccall
 def _feasibility_call_effect_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact, block: IRBlock,
     instruction: IRInstr, state: _PathState8616,
     *, caller_range: ScratchCallerRange8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """Authenticate, byte-bind and simulate one nonrecursive leaf call."""
+    consumed: object
     consumed = _consume_cross_call_boundary_8616(ctx, artifact, block, instruction)
     if consumed is None or consumed.preserved_registers is None or "cs" not in consumed.preserved_registers:
         return False
@@ -5621,14 +5983,15 @@ def _feasibility_call_effect_8616(
     ) is None
 
 
+@cython.ccall
 def _feasibility_apply_call_8616(
     ctx: _PathCensusContext8616,
     artifact: IRFunctionArtifact,
     block: IRBlock,
     instruction: IRInstr,
-    registers: dict[str, int],
+    registers: object,
     memory: PathMemory8616,
-) -> bool:
+) -> cython.bint:
     """Apply one current bound leaf call without publishing speculative census.
 
     Native bytes and the full caller/callee code manifest precede simulation;
@@ -5637,7 +6000,7 @@ def _feasibility_apply_call_8616(
     work is charged through the original resource owner, but its receipts,
     manifests and row ledgers never enter the real census.
     """
-    if ctx.callsite_addr is None or instruction.addr == ctx.callsite_addr:
+    if ctx.callsite_addr is None or operator.eq(instruction.addr, ctx.callsite_addr):
         return False
     if time.monotonic() > ctx.deadline or _census_work_exceeded_8616(ctx):
         return False
@@ -5647,19 +6010,20 @@ def _feasibility_apply_call_8616(
     )
 
 
+@cython.ccall
 def _feasibility_call_scratch_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact, block: IRBlock,
-    instruction: IRInstr, registers: dict[str, int], memory: PathMemory8616,
-    caller_spans: tuple[tuple[int, int], ...] | frozenset[tuple[int, int]],
+    instruction: IRInstr, registers: object, memory: PathMemory8616,
+    caller_spans: object,
     *, caller_range: ScratchCallerRange8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """Run unchanged fresh call authentication over detached protective data.
 
     Prepared coordinates are not evidence: the canonical call proof, native
     callee binding, caller bytes and late preservation still authenticate every
     crossing. This private scratch consumer never publishes its manifest.
     """
-    if ctx.callsite_addr is None or instruction.addr == ctx.callsite_addr:
+    if ctx.callsite_addr is None or operator.eq(instruction.addr, ctx.callsite_addr):
         return False
     if time.monotonic() > ctx.deadline or _census_work_exceeded_8616(ctx):
         return False
@@ -5709,6 +6073,7 @@ def _feasibility_call_scratch_8616(
         )
 
 
+@cython.ccall
 def _prefix_execution_producers_8616() -> tuple[object, ...]:
     """Name current ordinary effect owners, including mutable dispatch owners."""
     return (*_fused_callee_producers_8616(), _simulate_scope_8616, _resume_path_block_8616,
@@ -5719,7 +6084,8 @@ def _prefix_execution_producers_8616() -> tuple[object, ...]:
             new_census_fact_sets_8616, census_fact_ownership_8616, census_fact_ownership_current_8616)
 
 
-def _prefix_root_bound_8616(old: _PathCensusContext8616, current: _PathCensusContext8616) -> bool:
+@cython.ccall
+def _prefix_root_bound_8616(old: _PathCensusContext8616, current: _PathCensusContext8616) -> cython.bint:
     """Require the same authenticated root declaration and callback inputs."""
     left, right = old.chain, current.chain
     if type(left) is DeclaredFunctionEntryLink8616 and type(right) is DeclaredFunctionEntryLink8616:
@@ -5728,25 +6094,30 @@ def _prefix_root_bound_8616(old: _PathCensusContext8616, current: _PathCensusCon
     elif type(left) is not RawBootEntrySurface8616 or type(right) is not RawBootEntrySurface8616:
         return False
     return (old.project is current.project and old.boot is current.boot
-            and old.selector == current.selector and old.environment is current.environment
-            and old.environment_digest == current.environment_digest
-            and old.arena == current.arena)
+            and operator.eq(old.selector, current.selector) and old.environment is current.environment
+            and operator.eq(old.environment_digest, current.environment_digest)
+            and operator.eq(old.arena, current.arena))
 
 
+@cython.ccall
 def _prefix_initial_memory_equal_8616(
-    ctx: _PathCensusContext8616, left: InvocationInitialMemory8616 | None,
-    right: InvocationInitialMemory8616 | None,
-) -> bool:
+    ctx: _PathCensusContext8616, left: object,
+    right: object,
+) -> cython.bint:
     """Charge byte comparisons when fresh equivalent snapshots do not share bytes."""
+    address: object
+    current: object
+    current_address: object
+    old: object
     if left is None or right is None:
         return left is right
     ctx.work_units += len(left.chunks) + len(left.write_ranges) + 1
     if _census_resource_failure_8616(ctx) is not None:
         return False
-    if left.write_ranges != right.write_ranges or len(left.chunks) != len(right.chunks):
+    if operator.ne(left.write_ranges, right.write_ranges) or operator.ne(len(left.chunks), len(right.chunks)):
         return False
     for (address, old), (current_address, current) in zip(left.chunks, right.chunks, strict=True):
-        if address != current_address or len(old) != len(current):
+        if address != current_address or operator.ne(len(old), len(current)):
             return False
         if old is not current:
             ctx.work_units += len(old)
@@ -5755,9 +6126,10 @@ def _prefix_initial_memory_equal_8616(
     return _census_resource_failure_8616(ctx) is None
 
 
+@cython.ccall
 def _prefix_inputs_equal_8616(
     ctx: _PathCensusContext8616, data: _OwnedPrefixCensus8616, seed: _PathState8616,
-) -> bool:
+) -> cython.bint:
     """Charge and match exact seeds, immutable initial bytes and proof pools."""
     old = data.context
     ctx.work_units += (len(seed.registers) + len(data.seed.registers)
@@ -5767,40 +6139,43 @@ def _prefix_inputs_equal_8616(
     if _census_resource_failure_8616(ctx) is not None:
         return False
     if (data.boot_recompute is not ctx.prefix_boot_recompute or old.service_consumptions
-        or not _prefix_root_bound_8616(old, ctx) or data.seed != seed):
+        or not _prefix_root_bound_8616(old, ctx) or operator.ne(data.seed, seed)):
         return False
     if not _prefix_call_pools_bound_8616(ctx, data):
         return False
     return _prefix_initial_memory_equal_8616(ctx, old.initial_memory, ctx.initial_memory)
 
 
-def _prefix_call_pools_bound_8616(ctx: _PathCensusContext8616, data: _OwnedPrefixCensus8616) -> bool:
+def _prefix_call_pools_bound_8616(ctx: _PathCensusContext8616, data: _OwnedPrefixCensus8616) -> cython.bint:
     """Match used CALL identities, preserving strict registry/service influence.
 
     Only entry-pool permutations and unused record regeneration are supported.
     Registry priority and service fallback retain their original identity order.
     A new proof object for a used CALL never substitutes the old authority.
     """
+    callee: object
+    consumed: object
     old = data.context
     pools = ((old.call_preservations, ctx.call_preservations), (old.declared_services, ctx.declared_services))
-    ctx.work_units += sum(len(a) for a, _ in pools) + len(data.consumed_calls) * (
+    ctx.work_units += sum(len(a) for a, _ in iter(pools)) + len(data.consumed_calls) * (
         len(ctx.call_preservations) + len(ctx.entry_call_preservations) + 1)
     if _census_resource_failure_8616(ctx) is not None:
         return False
-    if any(len(a) > len(b) or any(x is not y for x, y in zip(a, b[:len(a)], strict=True)) for a, b in pools):
+    if any(len(a) > len(b) or any(x is not y for x, y in builtins.iter(zip(a, b[:len(a)], strict=True))) for a, b in iter(pools)):
         return False
     for consumed in data.consumed_calls:
         callee = consumed.proof.callee
         if (consumed.artifact is not data.artifact or callee is None or type(callee) is not SegmentEffectClosureResult8616
             or callee.callsite_addrs):
             return False
-        if not any(proof is consumed.proof for proof in ctx.call_preservations) and not any(
-            proof is consumed.proof for proof in ctx.entry_call_preservations
+        if not any(proof is consumed.proof for proof in iter(ctx.call_preservations)) and not any(
+            proof is consumed.proof for proof in iter(ctx.entry_call_preservations)
         ):
             return False
     return True
 
 
+@cython.ccall
 def _prefix_structural_extension_lower_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
@@ -5812,6 +6187,7 @@ def _prefix_structural_extension_lower_8616(
     costs can only decline an unprofitable optimization; admitted extensions
     still require the full independent structural and native checks.
     """
+    block: object
     lower = 6 * len(artifact.blocks) + 5 * len(boundary.successor_edges) + 3
     if _census_resource_failure_8616(ctx) is not None:
         return None
@@ -5828,16 +6204,22 @@ def _prefix_structural_extension_lower_8616(
     return lower
 
 
+@cython.ccall
 def _prefix_extension_profitable_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616, data: _OwnedPrefixCensus8616,
-) -> bool:
+) -> cython.bint:
     """Charge a conservative extension-only lower bound; grant no authority.
 
     Header lengths count mandatory structural prepayment/global census and
     retained native rebinding. Ordinary shared feasibility/native work is not
     included. Advice may only choose whether independent proof checks run.
     """
+    lower: object
+    address: object
+    block: object
+    blocks: object
+    function: object
     lower = _prefix_structural_extension_lower_8616(ctx, artifact, boundary, reject_at=data.simulation_work)
     if lower is None:
         return False
@@ -5852,16 +6234,21 @@ def _prefix_extension_profitable_8616(
             ctx.work_units += 1
             if _census_resource_failure_8616(ctx) is not None or type(block) is not IRBlock:
                 return False
-            if function != data.artifact.function_addr or address in old.edge_feasibility.live_blocks:
+            if operator.ne(function, data.artifact.function_addr) or address in old.edge_feasibility.live_blocks:
                 lower += len(block.instrs) + 1
     return lower < data.simulation_work and _census_resource_failure_8616(ctx) is None
 
 
+@cython.ccall
 def _select_prefix_extension_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact,
-    boundary: ExactFunctionRangeBoundary8616, seed: _PathState8616, callsite_addr: int,
+    boundary: ExactFunctionRangeBoundary8616, seed: _PathState8616, callsite_addr: cython.longlong,
 ) -> _OwnedPrefixCensus8616 | None:
     """Select guarded private data; selection grants no continuation authority."""
+    domain: object
+    selected: object
+    data: object
+    identity: object
     from .segment_call_preservation import segment_call_dependency_traversal_scope_8616
 
     if type(ctx.chain) not in (DeclaredFunctionEntryLink8616, RawBootEntrySurface8616):
@@ -5885,7 +6272,7 @@ def _select_prefix_extension_8616(
             if old.edge_feasibility is None or ctx.stop_block_addr in old.edge_feasibility.live_blocks:
                 continue
             if (old.prefix_consumed or data.artifact is not artifact or data.boundary is not boundary
-                or old.callsite_addr == callsite_addr or not _prefix_terminal_data_bound_8616(data)):
+                or operator.eq(old.callsite_addr, callsite_addr) or not _prefix_terminal_data_bound_8616(data)):
                 continue
             if (_prefix_extension_profitable_8616(ctx, artifact, boundary, data)
                 and _prefix_inputs_equal_8616(ctx, data, seed)
@@ -5894,10 +6281,12 @@ def _select_prefix_extension_8616(
     return selected
 
 
+@cython.ccall
 def _prefix_feasibility_request_8616(
-    data: _OwnedPrefixCensus8616 | None,
+    data: object,
 ) -> kb_owner_8616.Real16CallCutRequest8616 | None:
     """Observe the selected row during the existing current feasibility walk."""
+    terminal: object
     terminal = None if data is None else data.context.prefix_terminal_call
     if terminal is None:
         return None
@@ -5908,13 +6297,17 @@ def _prefix_feasibility_request_8616(
 
 def _prefix_suffix_scope_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact, data: _OwnedPrefixCensus8616,
-) -> frozenset[int] | None:
+) -> object:
     """Charge the existing live graph's suffix and require unchanged prefix joins."""
+    addr: object
+    feasible: object
+    old_feasible: object
+    terminal: object
     feasible, old_feasible = ctx.edge_feasibility, data.context.edge_feasibility
     terminal = data.context.prefix_terminal_call
     if feasible is None or old_feasible is None or terminal is None:
         return None
-    blocks = {block.addr: block for block in artifact.blocks}
+    blocks = {block.addr: block for block in iter(artifact.blocks)}
     pending, suffix = list(terminal.block.successor_addrs), set()
     dead = frozenset(feasible.infeasible_edges)
     while pending:
@@ -5926,17 +6319,20 @@ def _prefix_suffix_scope_8616(
             continue
         suffix.add(addr)
         ctx.work_units += len(blocks[addr].successor_addrs)
-        pending.extend(next_addr for next_addr in blocks[addr].successor_addrs if (addr, next_addr) not in dead)
+        pending.extend(next_addr for next_addr in iter(blocks[addr].successor_addrs) if (addr, next_addr) not in dead)
     prefix = feasible.live_blocks - suffix
-    if prefix != old_feasible.live_blocks or terminal.block.addr in suffix:
+    if operator.ne(prefix, old_feasible.live_blocks) or terminal.block.addr in suffix:
         return None
-    old_dead = frozenset(edge for edge in old_feasible.infeasible_edges if edge[0] in prefix and edge[1] in prefix)
-    current_dead = frozenset(edge for edge in feasible.infeasible_edges if edge[0] in prefix and edge[1] in prefix)
+    old_dead = frozenset(edge for edge in iter(old_feasible.infeasible_edges) if edge[0] in prefix and edge[1] in prefix)
+    current_dead = frozenset(edge for edge in iter(feasible.infeasible_edges) if edge[0] in prefix and edge[1] in prefix)
     return frozenset(suffix) if old_dead == current_dead else None
 
 
-def _prefix_sources_current_8616(ctx: _PathCensusContext8616, data: _OwnedPrefixCensus8616) -> bool:
+def _prefix_sources_current_8616(ctx: _PathCensusContext8616, data: _OwnedPrefixCensus8616) -> cython.bint:
     """Reauthenticate all retained byte/producer keys after current callbacks."""
+    current: object
+    address: object
+    binding: object
     from .native_import_surface_cache import native_census_source_current_8616
     from .vex_import import (
         _census_finishing_producers_8616,
@@ -5962,14 +6358,15 @@ def _prefix_sources_current_8616(ctx: _PathCensusContext8616, data: _OwnedPrefix
     actual = _prefix_execution_producers_8616()
     ctx.work_units += len(actual)
     return (len(actual) == len(data.producers) == len(_CANONICAL_PREFIX_EXECUTION_PRODUCERS_8616)
-            and all(a is b is c for a, b, c in zip(
-                actual, data.producers, _CANONICAL_PREFIX_EXECUTION_PRODUCERS_8616, strict=True))
+            and all(a is b is c for a, b, c in builtins.iter(zip(
+                actual, data.producers, _CANONICAL_PREFIX_EXECUTION_PRODUCERS_8616, strict=True)))
             and _census_resource_failure_8616(ctx) is None)
 
 
+@cython.ccall
 def _prefix_block_facts_bound_8616(
     ctx: _PathCensusContext8616, data: _OwnedPrefixCensus8616,
-    root_blocks: dict[int, IRBlock], function: int, address: int, block: IRBlock,
+    root_blocks: object, function: cython.longlong, address: cython.longlong, block: IRBlock,
 ) -> int | None:
     """Rebind native rows, comparing an identical root owner only once.
 
@@ -5977,11 +6374,13 @@ def _prefix_block_facts_bound_8616(
     repeating those exact inputs adds no evidence. Distinct root objects keep
     independent binding and work; post-callback freshness stays separate.
     """
+    native: object
+    root: object
     native = ctx.native_blocks.get(function, {}).get(address)
     ctx.work_units += len(block.instrs) + 1
     if _census_resource_failure_8616(ctx) is not None or not _native_block_bound_8616(native, block):
         return None
-    if function == data.artifact.function_addr:
+    if operator.eq(function, data.artifact.function_addr):
         root = root_blocks.get(address)
         if root is not block:
             ctx.work_units += len(block.instrs) + 1
@@ -5991,8 +6390,12 @@ def _prefix_block_facts_bound_8616(
     return len(block.instrs)
 
 
-def _prefix_native_rows_current_8616(ctx: _PathCensusContext8616, data: _OwnedPrefixCensus8616) -> bool:
+@cython.ccall
+def _prefix_native_rows_current_8616(ctx: _PathCensusContext8616, data: _OwnedPrefixCensus8616) -> cython.bint:
     """Rebind retained root IR after callbacks without reopening transferred ledgers."""
+    native: object
+    old_feasible: object
+    block: object
     old_feasible = data.context.edge_feasibility
     if old_feasible is None:
         return False
@@ -6008,8 +6411,10 @@ def _prefix_native_rows_current_8616(ctx: _PathCensusContext8616, data: _OwnedPr
 
 def _prefix_call_bound_8616(
     ctx: _PathCensusContext8616, data: _OwnedPrefixCensus8616, block: IRBlock, row: IRInstr,
-) -> bool:
+) -> cython.bint:
     """Close one ordinary proof callback under the exact consuming scope."""
+    callee: object
+    consumed: object
     consumed = _consume_cross_call_boundary_8616(ctx, data.artifact, block, row)
     if consumed is None or consumed.selector_scope is not None:
         return False
@@ -6018,13 +6423,13 @@ def _prefix_call_bound_8616(
     if (_call_scope_uses_owned_identity_8616(ctx)
         and _ctx_consuming_scope_8616(ctx, data.artifact, consumed.proof) is not consumed.scope):
         return False
-    retained = tuple(record for record in data.consumed_calls if record.instruction is row)
+    retained = tuple(record for record in iter(data.consumed_calls) if record.instruction is row)
     ctx.work_units += len(data.consumed_calls)
     if _census_resource_failure_8616(ctx) is not None or not retained:
         return False
     if any(record.artifact is not data.artifact or record.block is not block
            or record.proof is not consumed.proof or record.scope is not consumed.scope
-           or record.preserved_registers != consumed.preserved_registers for record in retained):
+           or operator.ne(record.preserved_registers, consumed.preserved_registers) for record in iter(retained)):
         return False
     callee = consumed.proof.callee
     if (callee is None or type(callee) is not SegmentEffectClosureResult8616
@@ -6035,13 +6440,17 @@ def _prefix_call_bound_8616(
     return address in data.context.native_blocks and address in ctx.native_blocks
 
 
-def _prefix_calls_current_8616(ctx: _PathCensusContext8616, data: _OwnedPrefixCensus8616) -> bool:
+def _prefix_calls_current_8616(ctx: _PathCensusContext8616, data: _OwnedPrefixCensus8616) -> cython.bint:
     """Perform ordinary fresh proof authentication for every skipped earlier CALL."""
+    feasible: object
+    terminal: object
+    block: object
+    row: object
     feasible = data.context.edge_feasibility
     terminal = data.context.prefix_terminal_call
     if feasible is None or terminal is None:
         return False
-    rows: set[int] = set()
+    rows: set[cython.longlong] = set()
     for block in data.artifact.blocks:
         if block.addr not in feasible.live_blocks:
             continue
@@ -6055,13 +6464,17 @@ def _prefix_calls_current_8616(ctx: _PathCensusContext8616, data: _OwnedPrefixCe
             if not _prefix_call_bound_8616(ctx, data, block, row):
                 return False
     ctx.work_units += len(data.consumed_calls)
-    if any(id(record.instruction) not in rows for record in data.consumed_calls):
+    if any(id(record.instruction) not in rows for record in iter(data.consumed_calls)):
         return False
     return _census_resource_failure_8616(ctx) is None
 
 
-def _prefix_enrolled_current_8616(ctx: _PathCensusContext8616, data: _OwnedPrefixCensus8616) -> bool:
+@cython.ccall
+def _prefix_enrolled_current_8616(ctx: _PathCensusContext8616, data: _OwnedPrefixCensus8616) -> cython.bint:
     """Require the exact still-guarded canonical enrollment at consumption."""
+    domain: object
+    identity: object
+    retained: object
     from .segment_call_preservation import segment_call_dependency_traversal_scope_8616
 
     with segment_call_dependency_traversal_scope_8616() as traversal:
@@ -6077,7 +6490,8 @@ def _prefix_enrolled_current_8616(ctx: _PathCensusContext8616, data: _OwnedPrefi
     return False
 
 
-def _prefix_facts_bound_8616(ctx: _PathCensusContext8616, data: _OwnedPrefixCensus8616) -> bool:
+@cython.ccall
+def _prefix_facts_bound_8616(ctx: _PathCensusContext8616, data: _OwnedPrefixCensus8616) -> cython.bint:
     """Authenticate unchanged owned ledgers and independently rebind native rows.
 
     Guarded successful enrollment and pinned canonical producers establish the
@@ -6085,8 +6499,12 @@ def _prefix_facts_bound_8616(ctx: _PathCensusContext8616, data: _OwnedPrefixCens
     ledger edits. Native maps can include unvisited callee blocks, so their row
     union is not a second definition of the completed census fact set.
     """
+    address: object
+    block: object
+    blocks: object
+    function: object
     old = data.context
-    if data.counts != _census_counts_8616(old) or data.stores != old.checked_stores or old.failures:
+    if operator.ne(data.counts, _census_counts_8616(old)) or operator.ne(data.stores, old.checked_stores) or old.failures:
         return False
     ctx.work_units += 32
     if _census_resource_failure_8616(ctx) is not None:
@@ -6098,17 +6516,18 @@ def _prefix_facts_bound_8616(ctx: _PathCensusContext8616, data: _OwnedPrefixCens
     if old.edge_feasibility is None:
         return False
     ctx.work_units += len(data.artifact.blocks)
-    root_blocks = {block.addr: block for block in data.artifact.blocks}
+    root_blocks = {block.addr: block for block in iter(data.artifact.blocks)}
     for function, blocks in old.native_blocks.items():
         for address, block in blocks.items():
-            if function == data.artifact.function_addr and address not in old.edge_feasibility.live_blocks:
+            if operator.eq(function, data.artifact.function_addr) and address not in old.edge_feasibility.live_blocks:
                 continue
             if _prefix_block_facts_bound_8616(ctx, data, root_blocks, function, address, block) is None:
                 return False
     return _census_resource_failure_8616(ctx) is None
 
 
-def _prefix_work_allowance_8616(ctx: _PathCensusContext8616) -> int:
+@cython.ccall
+def _prefix_work_allowance_8616(ctx: _PathCensusContext8616) -> cython.longlong:
     """Respect the same local and ambient allowance before structural work."""
     from .segment_call_preservation import segment_call_dependency_traversal_scope_8616
 
@@ -6122,32 +6541,38 @@ def _prefix_after_callbacks_8616(
     ctx: _PathCensusContext8616, data: _OwnedPrefixCensus8616,
 ) -> Real16InvocationFailure8616 | None:
     """Fail closed after ownership transfer if callbacks invalidate old sources."""
+    failure: object
     ctx.work_units += len(data.context.prefix_sources.bindings)
     failure = _census_resource_failure_8616(ctx)
     if failure is not None:
         return failure
     if any(binding.boundary.near_return_continuations is not None
-           for binding in data.context.prefix_sources.bindings.values()) and not _prefix_calls_current_8616(ctx, data):
+           for binding in builtins.iter(data.context.prefix_sources.bindings.values())) and not _prefix_calls_current_8616(ctx, data):
         return _census_resource_failure_8616(ctx) or Real16InvocationFailure8616.CALL_BOUNDARY_UNPROVEN
     if _prefix_sources_current_8616(ctx, data) and _prefix_native_rows_current_8616(ctx, data):
         return None
     return _census_resource_failure_8616(ctx) or Real16InvocationFailure8616.NATIVE_EFFECT_UNPROVEN
 
 
+@cython.ccall
 def _prefix_extension_inputs_8616(
     ctx: _PathCensusContext8616, data: _OwnedPrefixCensus8616, seed: _PathState8616,
-) -> bool:
+) -> cython.bint:
     """Keep completion, ownership and admission checks before any data move."""
     return (_census_counts_8616(ctx) == (0, 0, 0, 0, 0) and ctx.checked_stores == 0
             and not ctx.service_consumptions and _prefix_enrolled_current_8616(ctx, data)
             and _prefix_inputs_equal_8616(ctx, data, seed))
 
 
+@cython.ccall
 def _try_prefix_extension_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616, seed: _PathState8616, data: _OwnedPrefixCensus8616,
 ) -> bool | Real16InvocationFailure8616:
     """Authenticate once, transfer exact ledgers, then run fresh CALL and suffix."""
+    feasible: object
+    suffix: object
+    terminal: object
     from .real16_prefix_cut import PrefixCallRow8616, PrefixCutBudget8616, PrefixCutExtent8616, admit_prefix_cut_8616
 
     old, terminal = data.context, data.context.prefix_terminal_call
@@ -6158,8 +6583,8 @@ def _try_prefix_extension_8616(
     later = _callsite_block_8616(artifact, ctx.callsite_addr)
     if isinstance(later, Real16InvocationFailure8616):
         return False
-    rows = [(index, row) for index, row in enumerate(later.instrs) if row.op == "CALL" and row.addr == ctx.callsite_addr]
-    if len(rows) != 1 or ctx.stop_block_addr != later.addr:
+    rows = [(index, row) for index, row in builtins.iter(enumerate(later.instrs)) if row.op == "CALL" and operator.eq(row.addr, ctx.callsite_addr)]
+    if len(rows) != 1 or operator.ne(ctx.stop_block_addr, later.addr):
         return False
     budget = PrefixCutBudget8616(_prefix_work_allowance_8616(ctx), ctx.deadline)
     structural = admit_prefix_cut_8616(
@@ -6192,11 +6617,15 @@ def _try_prefix_extension_8616(
     return _execute_prefix_extension_8616(ctx, artifact, seed, data, state, suffix)
 
 
+@cython.ccall
 def _execute_prefix_extension_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact, seed: _PathState8616,
-    data: _OwnedPrefixCensus8616, state: _PathState8616, suffix: frozenset[int],
+    data: _OwnedPrefixCensus8616, state: _PathState8616, suffix: object,
 ) -> bool | Real16InvocationFailure8616:
     """Move single-use facts and execute only current ordinary CALL/suffix effects."""
+    failure: object
+    feasible: object
+    terminal: object
     old, terminal, feasible = data.context, data.context.prefix_terminal_call, ctx.edge_feasibility
     if terminal is None or feasible is None:
         return False
@@ -6230,10 +6659,11 @@ def _execute_prefix_extension_8616(
     return failure if failure is not None else True
 
 
+@cython.ccall
 def _complete_prefix_extension_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616, seed: _PathState8616,
-    prefix: _OwnedPrefixCensus8616 | None,
+    prefix: object,
 ) -> bool | Real16InvocationFailure8616:
     """Keep optional absence on the ordinary path without fabricating facts."""
     return False if prefix is None else _try_prefix_extension_8616(ctx, artifact, boundary, seed, prefix)
@@ -6243,9 +6673,9 @@ def _census_invocation_8616(
     ctx: _PathCensusContext8616,
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
-    dangerous: frozenset[int],
+    dangerous: object,
     call_block: IRBlock,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     seed: _PathState8616,
 ) -> Real16InvocationFailure8616 | None:
     """Run the full root-to-callsite raw-effect census in three phases.
@@ -6262,6 +6692,11 @@ def _census_invocation_8616(
     requires each raw STORE to be exactly evaluated and disjoint from the
     whole fetched-byte manifest.
     """
+    call_binding: object
+    failure: object
+    omission: object
+    repeat_consult_noop: object
+    addr: object
     prefix = _select_prefix_extension_8616(ctx, artifact, boundary, seed, callsite_addr)
     native = _native_effect_blocks_8616(
         ctx, boundary, selected_blocks=dangerous,
@@ -6272,7 +6707,7 @@ def _census_invocation_8616(
         # stays untouched — the typed failure is the report.
         return native
     ctx.native_blocks[artifact.function_addr] = native
-    blocks_by_addr = {block.addr: block for block in artifact.blocks}
+    blocks_by_addr = {block.addr: block for block in iter(artifact.blocks)}
     for addr in sorted(dangerous):
         if time.monotonic() > ctx.deadline:
             return Real16InvocationFailure8616.CENSUS_DEADLINE_EXCEEDED
@@ -6290,35 +6725,36 @@ def _census_invocation_8616(
     # pruning only skips obligations for blocks no converged must-state
     # can reach. An unproven edge changes nothing.
     truncated = frozenset(
-        address for function, address in ctx.prefix_native_entries
-        if function == artifact.function_addr
+        address for function, address in iter(ctx.prefix_native_entries)
+        if operator.eq(function, artifact.function_addr)
     )
     load_rows = {
         id(row): (row, native_row)
-        for addr in dangerous
-        if any(type(row) is IRInstr and row.op == "LOAD" for row in blocks_by_addr[addr].instrs)
+        for addr in iter(dangerous)
+        if any(type(row) is IRInstr and row.op == "LOAD" for row in iter(blocks_by_addr[addr].instrs))
         if _native_block_bound_8616(
             native.get(addr), blocks_by_addr[addr],
             stop_after=callsite_addr if addr in truncated else None,
         )
-        for row, native_row in zip(
+        for row, native_row in builtins.iter(zip(
             blocks_by_addr[addr].instrs[:len(native[addr].instrs)],
             native[addr].instrs, strict=True,
-        )
+        ))
         if row.op == "LOAD"
     }
 
     def read_load(
-        instruction: IRInstr, span: tuple[int, int] | None, memory: PathMemory8616,
+        instruction: IRInstr, span: object, memory: PathMemory8616,
     ) -> int | None:
         """Bind native LOAD identity before publishing any feasibility constant."""
+        pair: object
         pair = load_rows.get(id(instruction))
         if pair is None or pair[0] is not instruction or not _native_instr_equal_8616(instruction, pair[1], 0):
             return None
         return path_load_value_8616(instruction, span, memory, ctx.initial_memory)
 
     def apply_repeat(
-        block: IRBlock, registers: dict[str, int], memory: PathMemory8616,
+        block: IRBlock, registers: object, memory: PathMemory8616,
         direction: bool | None,
     ) -> RepeatedStoreStatus8616:
         """Consume the identical source-bound repeat before any edge pruning."""
@@ -6373,6 +6809,7 @@ def _census_invocation_8616(
         load_reader_readonly=load_reader_readonly,
         terminal_call_noop=terminal_call_noop,
         call_replay_unobserved=call_replay_unobserved,
+        captured_terminal_call_unobserved=call_replay_unobserved,
         apply_service=(
             lambda instruction, registers, memory: (
                 _feasibility_apply_service_8616(
@@ -6393,12 +6830,14 @@ def _census_invocation_8616(
     return _finish_invocation_scope_8616(ctx, artifact, boundary, seed, callsite_addr, prefix)
 
 
+@cython.ccall
 def _finish_invocation_scope_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616, seed: _PathState8616,
-    callsite_addr: int, prefix: _OwnedPrefixCensus8616 | None,
+    callsite_addr: cython.longlong, prefix: _OwnedPrefixCensus8616 | None,
 ) -> Real16InvocationFailure8616 | None:
     """Use admitted continuation or retain the ordinary full scope walk."""
+    feasible: object
     feasible = ctx.edge_feasibility
     if feasible is None:
         return Real16InvocationFailure8616.PATH_EFFECT_UNPROVEN
@@ -6424,12 +6863,13 @@ def _finish_invocation_scope_8616(
     return None
 
 
+@cython.ccall
 def _census_feasible_path_callees_8616(
     ctx: _PathCensusContext8616,
     artifact: IRFunctionArtifact,
-    blocks_by_addr: dict[int, IRBlock],
+    blocks_by_addr: object,
     feasibility: Real16EdgeFeasibility8616,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
 ) -> Real16InvocationFailure8616 | None:
     """Account feasibility work before admitting further callee-proof consumers.
 
@@ -6437,6 +6877,7 @@ def _census_feasible_path_callees_8616(
     A resource refusal must survive instead of becoming missing-call evidence
     through further authentication after budget or deadline exhaustion.
     """
+    failure: object
     ctx.work_units += feasibility.work_units
     failure = _census_resource_failure_8616(ctx)
     if failure is not None:
@@ -6446,12 +6887,13 @@ def _census_feasible_path_callees_8616(
     )
 
 
+@cython.ccall
 def _census_path_callees_8616(
     ctx: _PathCensusContext8616,
     artifact: IRFunctionArtifact,
-    blocks_by_addr: dict[int, IRBlock],
-    dangerous: frozenset[int],
-    callsite_addr: int,
+    blocks_by_addr: object,
+    dangerous: object,
+    callsite_addr: cython.longlong,
 ) -> Real16InvocationFailure8616 | None:
     """Bind interior callee bytes only within the authenticated terminal prefix.
 
@@ -6459,11 +6901,15 @@ def _census_path_callees_8616(
     exactly as the caller byte census does. Other predecessor blocks remain
     complete even when their addresses exceed that terminal coordinate.
     """
+    consumed: object
+    failure: object
+    addr: object
+    instruction: object
     for addr in sorted(dangerous):
         for instruction in blocks_by_addr[addr].instrs:
-            if instruction.op != "CALL" or instruction.addr == callsite_addr:
+            if instruction.op != "CALL" or operator.eq(instruction.addr, callsite_addr):
                 continue
-            if (addr == ctx.stop_block_addr and type(instruction.addr) is int
+            if (operator.eq(addr, ctx.stop_block_addr) and type(instruction.addr) is int
                     and instruction.addr > callsite_addr):
                 continue
             consumed = _consume_call_boundary_8616(
@@ -6486,7 +6932,8 @@ def _census_path_callees_8616(
     return None
 
 
-def _census_counts_8616(ctx: _PathCensusContext8616) -> tuple[int, int, int, int, int]:
+@cython.ccall
+def _census_counts_8616(ctx: _PathCensusContext8616) -> tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong, cython.longlong]:
     """Return the actual five-stage census counts from the context."""
     return (
         len(ctx.raw_facts),
@@ -6497,9 +6944,10 @@ def _census_counts_8616(ctx: _PathCensusContext8616) -> tuple[int, int, int, int
     )
 
 
+@cython.ccall
 def _retained_parent_census_surface_8616(
     parent: Real16InvocationDomain8616 | None,
-) -> tuple[IRFunctionArtifact, ExactFunctionRangeBoundary8616] | None:
+) -> object:
     """Name the exact artifact/boundary objects a parent premise censused.
 
     Ordinary proven coverage is the retained surface. A
@@ -6512,6 +6960,7 @@ def _retained_parent_census_surface_8616(
     surface reached by its link, not the earlier caller surface. Other kinds
     without an explicit retained surface still return ``None``.
     """
+    coverage: object
     if type(parent) is not Real16InvocationDomain8616:
         return None
     coverage = parent.coverage
@@ -6535,7 +6984,7 @@ def _retained_parent_census_surface_8616(
     return None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class Real16CallChainLink8616:
     """Retained transport edge from a parent premise's proved callsite
     into a chained callee-head domain.
@@ -6577,14 +7026,14 @@ class Real16CallChainLink8616:
     callsite: DecodedDirectCallsite8616
     callsite_artifact: IRFunctionArtifact
     callsite_boundary: ExactFunctionRangeBoundary8616
-    call_state: tuple[tuple[str, int], ...]
+    call_state: object
     callee_artifact: IRFunctionArtifact
     callee_boundary: ExactFunctionRangeBoundary8616
     edge: object | None = None
     entry_binding: DirectNearCallTargetBinding8616 | None = None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Replay the parent premise and re-check the retained identities.
 
         The replayed-capture equality against ``call_state`` is enforced
@@ -6592,6 +7041,7 @@ class Real16CallChainLink8616:
         confirms every retained object identity still binds the same
         caller edge and callee head.
         """
+        parent_surface: object
         parent = self.parent
         if (
             type(parent) is not Real16InvocationDomain8616
@@ -6614,8 +7064,8 @@ class Real16CallChainLink8616:
         if type(callsite) is not DecodedDirectCallsite8616 or callsite.is_far:
             return False
         if (
-            callsite.callsite_addr != parent.callsite_addr
-            or callsite.caller_start != parent_artifact.function_addr
+            operator.ne(callsite.callsite_addr, parent.callsite_addr)
+            or operator.ne(callsite.caller_start, parent_artifact.function_addr)
         ):
             return False
         callee_artifact = self.callee_artifact
@@ -6624,7 +7074,7 @@ class Real16CallChainLink8616:
             type(callee_artifact) is not IRFunctionArtifact
             or not isinstance(callee_boundary, ExactFunctionRangeBoundary8616)
             or callee_boundary.project is not parent.project
-            or callee_boundary.addr != callee_artifact.function_addr
+            or operator.ne(callee_boundary.addr, callee_artifact.function_addr)
         ):
             return False
         if not _bound_callsite_entry_8616(
@@ -6636,7 +7086,7 @@ class Real16CallChainLink8616:
         return _transported_call_state_8616(self.call_state) is not None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class Real16EnclosedEntryLink8616:
     """Retained transport edge into an *enclosing* entry, not the callee head.
 
@@ -6677,7 +7127,7 @@ class Real16EnclosedEntryLink8616:
     callsite: DecodedDirectCallsite8616
     callsite_artifact: IRFunctionArtifact
     callsite_boundary: ExactFunctionRangeBoundary8616
-    call_state: tuple[tuple[str, int], ...]
+    call_state: object
     enclosing_artifact: IRFunctionArtifact
     enclosing_boundary: ExactFunctionRangeBoundary8616
     callee_artifact: IRFunctionArtifact
@@ -6685,7 +7135,7 @@ class Real16EnclosedEntryLink8616:
     edge: object | None = None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Replay the parent premise and re-check every retained identity.
 
         The replayed-capture equality against ``call_state`` is enforced
@@ -6704,7 +7154,7 @@ class Real16EnclosedEntryLink8616:
             or type(enclosing_boundary)
             is not ExactFunctionRangeBoundary8616
             or enclosing_boundary.project is not parent.project
-            or enclosing_boundary.addr != enclosing_artifact.function_addr
+            or operator.ne(enclosing_boundary.addr, enclosing_artifact.function_addr)
         ):
             return False
         if not _enclosed_surface_bound_8616(
@@ -6725,9 +7175,10 @@ class Real16EnclosedEntryLink8616:
         return _transported_call_state_8616(self.call_state) is not None
 
 
+@cython.ccall
 def _enclosed_parent_bound_8616(
     link: Real16EnclosedEntryLink8616,
-) -> bool:
+) -> cython.bint:
     """Re-check the retained parent premise and callsite row identity.
 
     The parent must still replay complete and name the identical retained
@@ -6735,6 +7186,7 @@ def _enclosed_parent_bound_8616(
     decoded index, and the retained row must be the exact in-index row
     at the parent's proven callsite inside the parent's proven head.
     """
+    parent_surface: object
     parent = link.parent
     if (
         type(parent) is not Real16InvocationDomain8616
@@ -6759,8 +7211,8 @@ def _enclosed_parent_bound_8616(
     if type(callsite) is not DecodedDirectCallsite8616 or callsite.is_far:
         return False
     return (
-        callsite.callsite_addr == parent.callsite_addr
-        and callsite.caller_start == parent_artifact.function_addr
+        operator.eq(callsite.callsite_addr, parent.callsite_addr)
+        and operator.eq(callsite.caller_start, parent_artifact.function_addr)
     )
 
 
@@ -6769,29 +7221,32 @@ def _bound_callsite_entry_8616(
     parent: Real16InvocationDomain8616,
     index: DecodedDirectCallsiteIndex8616,
     callsite: DecodedDirectCallsite8616,
-    entry: int,
-) -> bool:
+    entry: cython.longlong,
+) -> cython.bint:
     """Bind lookup membership and execution target to the parent's native CALL.
 
     A normalized lookup row cannot certify entry after an unexecuted prefix.
     A counterfeit index cannot replace bytes from the parent's native census.
     The caller separately replays the parent against its source-bound boot.
     """
+    encoded: object
+    parent_surface: object
     parent_surface = _retained_parent_census_surface_8616(parent)
     if parent_surface is None:
         return False
     encoded = callsite.bound_near_coordinates(parent_surface[1])
     return (
-        encoded is not None and encoded[1] == entry
-        and any(row is callsite for row in index.for_target(callsite.target_addr))
+        encoded is not None and operator.eq(encoded[1], entry)
+        and any(row is callsite for row in builtins.iter(index.for_target(callsite.target_addr)))
     )
 
 
+@cython.ccall
 def _enclosed_surface_bound_8616(
     enclosing_boundary: ExactFunctionRangeBoundary8616,
     callee_artifact: object,
     callee_boundary: object,
-) -> bool:
+) -> cython.bint:
     """Prove the callee surface is strictly enclosed by the boundary.
 
     The enclosed head must sit strictly inside the enclosing boundary —
@@ -6810,8 +7265,8 @@ def _enclosed_surface_bound_8616(
         type(callee_artifact) is not IRFunctionArtifact
         or type(callee_boundary) is not ExactFunctionRangeBoundary8616
         or callee_boundary.project is not enclosing_boundary.project
-        or callee_boundary.addr != callee_artifact.function_addr
-        or callee_artifact.function_addr == enclosing_boundary.addr
+        or operator.ne(callee_boundary.addr, callee_artifact.function_addr)
+        or operator.eq(callee_artifact.function_addr, enclosing_boundary.addr)
     ):
         return False
     reachable = enclosing_boundary.reachable_instruction_addrs
@@ -6823,13 +7278,14 @@ def _enclosed_surface_bound_8616(
     )
 
 
+@cython.ccall
 def _edge_proof_bound_8616(
     proof: object,
     callsite_artifact: IRFunctionArtifact,
-    callsite_addr: int,
-    callee_head: int,
+    callsite_addr: cython.longlong,
+    callee_head: cython.longlong,
     consuming_scope: Real16InvocationDomain8616 | None,
-) -> bool:
+) -> cython.bint:
     """Return whether one retained record binds this exact call edge.
 
     A bound edge proof must be complete under the consuming entry,
@@ -6852,7 +7308,7 @@ def _edge_proof_bound_8616(
         if proof.artifact is not callsite_artifact:
             return False
         callee = proof.callee
-    if proof.callsite_addr != callsite_addr:
+    if operator.ne(proof.callsite_addr, callsite_addr):
         return False
     if not proof.complete_for(consuming_scope):
         return False
@@ -6861,16 +7317,16 @@ def _edge_proof_bound_8616(
     return bool(
         type(callee) is SegmentEffectClosureResult8616
         and type(callee.coverage.artifact) is IRFunctionArtifact
-        and callee.coverage.artifact.function_addr == callee_head
+        and operator.eq(callee.coverage.artifact.function_addr, callee_head)
     )
 
 
 def _chain_edge_bound_8616(
     parent: Real16InvocationDomain8616,
     callsite_artifact: IRFunctionArtifact,
-    callee_head: int,
-    edge: object | None,
-) -> bool:
+    callee_head: cython.longlong,
+    edge: object,
+) -> cython.bint:
     """Enforce the retained-edge proof rule for the parent callsite.
 
     Any evidence the caller supplies — the link's retained ``edge`` or
@@ -6883,6 +7339,7 @@ def _chain_edge_bound_8616(
     claims only the callee *entry* state, and a near ``CALL`` transports
     CS unchanged by machine semantics.
     """
+    proof: object
     pools: tuple[object, ...] = (
         *parent.call_preservations,
         *parent.entry_call_preservations,
@@ -6901,7 +7358,7 @@ def _chain_edge_bound_8616(
                 continue
             if proof.artifact is not callsite_artifact:
                 continue
-        if proof.callsite_addr == parent.callsite_addr:
+        if operator.eq(proof.callsite_addr, parent.callsite_addr):
             found.append(proof)
     if edge is not None and not _edge_proof_bound_8616(
         edge, callsite_artifact, parent.callsite_addr, callee_head, parent
@@ -6911,20 +7368,22 @@ def _chain_edge_bound_8616(
         _edge_proof_bound_8616(
             proof, callsite_artifact, parent.callsite_addr, callee_head, parent
         )
-        for proof in found
+        for proof in iter(found)
     )
 
 
+@cython.ccall
 def _transported_call_state_8616(
-    state: tuple[tuple[str, int], ...],
-) -> dict[str, int] | None:
+    state: object,
+) -> object:
     """Normalize a retained call-row state into a seed map or ``None``.
 
     Every retained row must be a ``(name, word)`` pair; ``cs`` and ``sp``
     are mandatory because the transported premise cannot prove a selector
     or stack window without them.
     """
-    registers: dict[str, int] = {}
+    item: object
+    registers: dict[str, cython.longlong] = {}
     for item in state:
         if (
             not isinstance(item, tuple)
@@ -6943,13 +7402,14 @@ def _transported_call_state_8616(
 def _near_call_entry_binding_bound_8616(
     chain: Real16CallChainLink8616,
     consumer: Callable[[Real16CallInvocation8616], bool] | None = None,
-) -> bool:
+) -> cython.bint:
     """Reauthenticate entry-only control evidence against the native CALL.
 
     This certificate proves the unconsumed near-CALL transports entry state;
     it proves no callee return or preservation effects. The parent pool stays
     intact, including this candidate's unfinished preservation record.
     """
+    binding: object
     from inertia.semantics.direct_near_call_target_binding import (
         DirectNearCallTargetBinding8616,
         _consume_direct_near_call_target_binding_from_decoded_8616,
@@ -6969,11 +7429,11 @@ def _near_call_entry_binding_bound_8616(
     ):
         return False
     if (
-        binding.callsite_addr != parent.callsite_addr
-        or binding.target_addr != chain.callee_artifact.function_addr
-        or invocation.callsite_addr != binding.callsite_addr
-        or invocation.target_addr != binding.target_addr
-        or not any(block is invocation.block for block in chain.callsite_artifact.blocks)
+        operator.ne(binding.callsite_addr, parent.callsite_addr)
+        or operator.ne(binding.target_addr, chain.callee_artifact.function_addr)
+        or operator.ne(invocation.callsite_addr, binding.callsite_addr)
+        or operator.ne(invocation.target_addr, binding.target_addr)
+        or not any(block is invocation.block for block in iter(chain.callsite_artifact.blocks))
     ):
         return False
     if not (
@@ -6982,12 +7442,12 @@ def _near_call_entry_binding_bound_8616(
     ):
         return False
     instructions = tuple(
-        row for row in invocation.block.instrs
-        if row.op == "CALL" and row.addr == parent.callsite_addr
+        row for row in iter(invocation.block.instrs)
+        if row.op == "CALL" and operator.eq(row.addr, parent.callsite_addr)
     )
     if len(instructions) != 1:
         return False
-    def revalidate(candidate: Real16CallInvocation8616) -> bool:
+    def revalidate(candidate: Real16CallInvocation8616) -> cython.bint:
         """Retain the transporting premise even when the target needs none."""
         return candidate.complete
 
@@ -7005,7 +7465,8 @@ def _near_call_entry_binding_bound_8616(
 
 
 
-def _chain_call_entry_bound_8616(chain: Real16CallChainLink8616) -> bool:
+@cython.ccall
+def _chain_call_entry_bound_8616(chain: Real16CallChainLink8616) -> cython.bint:
     """Select entry-only control or the unchanged retained-return contract."""
     if chain.entry_binding is None:
         return _chain_edge_bound_8616(
@@ -7019,6 +7480,7 @@ def _chain_call_entry_bound_8616(chain: Real16CallChainLink8616) -> bool:
     return _near_call_entry_binding_bound_8616(chain)
 
 
+@cython.ccall
 def _chain_link_owned_identity_8616(
     project: object,
     artifact: IRFunctionArtifact,
@@ -7030,6 +7492,7 @@ def _chain_link_owned_identity_8616(
     Native encoding, lookup membership and edge proof belong to the wrapper;
     this subset executes no native getter, loader callback or parent replay.
     """
+    parent_surface: object
     parent = chain.parent
     if (
         type(parent) is not Real16InvocationDomain8616
@@ -7054,8 +7517,8 @@ def _chain_link_owned_identity_8616(
     if type(callsite) is not DecodedDirectCallsite8616 or callsite.is_far:
         return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN
     if (
-        callsite.callsite_addr != parent.callsite_addr
-        or callsite.caller_start != parent_artifact.function_addr
+        operator.ne(callsite.callsite_addr, parent.callsite_addr)
+        or operator.ne(callsite.caller_start, parent_artifact.function_addr)
     ):
         return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN
     if (
@@ -7066,13 +7529,14 @@ def _chain_link_owned_identity_8616(
     return None
 
 
+@cython.ccall
 def _chain_link_identity_8616(
     project: object,
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
     chain: Real16CallChainLink8616,
     *,
-    validate_entry: bool = True,
+    validate_entry: cython.bint = True,
 ) -> Real16InvocationFailure8616 | None:
     """Bind the retained link's static identities before any replay.
 
@@ -7085,6 +7549,7 @@ def _chain_link_identity_8616(
     identity, and the bound-edge proof rule. Any divergence refuses
     ``chain_link_unproven``.
     """
+    failure: object
     failure = _chain_link_owned_identity_8616(project, artifact, boundary, chain)
     if failure is not None:
         return failure
@@ -7100,8 +7565,9 @@ def _chain_link_identity_8616(
     return None
 
 
+@cython.ccall
 def _derive_parent_for_chain_8616(
-    parent: Real16InvocationDomain8616, chain_depth: int,
+    parent: Real16InvocationDomain8616, chain_depth: cython.longlong,
 ) -> _Derivation8616:
     """Force one current parent derivation without admitting a cached verdict."""
     return _derive_invocation_domain_8616(
@@ -7114,15 +7580,16 @@ def _derive_parent_for_chain_8616(
 
 
 def _consume_chain_parent_8616(
-    chain: Real16CallChainLink8616, chain_depth: int,
+    chain: Real16CallChainLink8616, chain_depth: cython.longlong,
 ) -> _Derivation8616 | None:
     """Capture the one forced parent replay performed after native CALL gates."""
-    captured: _Derivation8616 | None = None
+    captured: object
+    captured = None
     parent = chain.parent
 
-    def consume(invocation: Real16CallInvocation8616) -> bool:
+    def consume(invocation: Real16CallInvocation8616) -> cython.bint:
         """Force this exact parent capture inside the ordinary admission guard."""
-        def verify() -> bool:
+        def verify() -> cython.bint:
             """Capture source-bound effects while the parent remains active."""
             nonlocal captured
             captured = _derive_parent_for_chain_8616(parent, chain_depth)
@@ -7151,17 +7618,14 @@ def _consume_chain_parent_8616(
     return None
 
 
+@cython.ccall
 def _chain_link_seed_8616(
     project: object,
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
     chain: Real16CallChainLink8616,
-    chain_depth: int,
-) -> (
-    tuple[dict[str, int], PathMemory8616]
-    | Real16InvocationFailure8616
-    | _NestedRefusal8616
-):
+    chain_depth: cython.longlong,
+) -> object:
     """Validate one retained chain edge and return the transported seed.
 
     Every leg of the edge is independently replayed: the parent premise
@@ -7176,6 +7640,9 @@ def _chain_link_seed_8616(
     captured at the exact callsite row. Any divergence refuses
     ``chain_link_unproven``; nothing about the callee entry is assumed.
     """
+    derived: object
+    identity_failure: object
+    retained_state: object
     if _chain_link_depth_exceeded_8616(chain_depth):
         return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN
     consume_entry = chain.entry_binding is not None and chain.edge is None
@@ -7197,16 +7664,18 @@ def _chain_link_seed_8616(
     return _chain_seed_from_capture_8616(chain, derived, retained_state)
 
 
+@cython.ccall
 def _chain_seed_from_capture_8616(
     chain: Real16CallChainLink8616, derived: _Derivation8616,
-    retained_state: dict[str, int] | None = None,
-) -> tuple[dict[str, int], PathMemory8616] | Real16InvocationFailure8616 | _NestedRefusal8616:
+    retained_state: object = None,
+) -> object:
     """Consume exact caller state and memory without callbacks or another replay."""
+    current_state: object
     parent = chain.parent
     current_state = _transported_call_state_8616(chain.call_state)
     # Native binding callbacks run after the initial retained-state read.
     # That earlier copy cannot authenticate a link changed by a callback.
-    if current_state is None or (retained_state is not None and retained_state != current_state):
+    if current_state is None or (retained_state is not None and operator.ne(retained_state, current_state)):
         return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN
     retained_state = current_state
     if derived.failure is not None or derived.domain is None:
@@ -7218,11 +7687,11 @@ def _chain_seed_from_capture_8616(
     if not _replayed_domain_equal_8616(derived, parent):
         return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN
     captured = dict(replayed.callsite_call_state)
-    if captured != retained_state:
+    if operator.ne(captured, retained_state):
         # A retained state that disagrees with the freshly replayed
         # capture is forged or stale evidence, never a valid seed.
         return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN
-    if captured["cs"] != parent.entry_segment:
+    if operator.ne(captured["cs"], parent.entry_segment):
         # The captured call-row CS must be exactly the selector the
         # parent premise proved; anything else means the path state
         # diverged from the premise's own claim.
@@ -7238,11 +7707,13 @@ def _chain_seed_from_capture_8616(
     return captured, restore_path_memory_8616(replayed.callsite_memory)
 
 
-def _chain_link_depth_exceeded_8616(chain_depth: int) -> bool:
+@cython.ccall
+def _chain_link_depth_exceeded_8616(chain_depth: cython.longlong) -> cython.bint:
     """Return whether the recursive chain replay exceeded its bound."""
     return chain_depth >= _CHAIN_DEPTH_LIMIT_8616
 
 
+@cython.ccall
 def _enclosed_link_identity_8616(
     project: object,
     artifact: IRFunctionArtifact,
@@ -7258,6 +7729,7 @@ def _enclosed_link_identity_8616(
     exact near row, bound-edge proof — matches the chained rule. Any
     divergence refuses ``enclosed_link_unproven``.
     """
+    parent_surface: object
     parent = link.parent
     parent_surface = _retained_parent_census_surface_8616(parent)
     if (
@@ -7278,14 +7750,14 @@ def _enclosed_link_identity_8616(
     if type(callsite) is not DecodedDirectCallsite8616 or callsite.is_far:
         return Real16InvocationFailure8616.ENCLOSED_LINK_UNPROVEN
     if (
-        callsite.callsite_addr != parent.callsite_addr
-        or callsite.caller_start != parent_artifact.function_addr
+        operator.ne(callsite.callsite_addr, parent.callsite_addr)
+        or operator.ne(callsite.caller_start, parent_artifact.function_addr)
     ):
         return Real16InvocationFailure8616.ENCLOSED_LINK_UNPROVEN
     if (
         link.enclosing_artifact is not artifact
         or link.enclosing_boundary is not boundary
-        or boundary.addr != artifact.function_addr
+        or operator.ne(boundary.addr, artifact.function_addr)
     ):
         return Real16InvocationFailure8616.ENCLOSED_LINK_UNPROVEN
     if not _enclosed_surface_bound_8616(
@@ -7305,17 +7777,14 @@ def _enclosed_link_identity_8616(
     return None
 
 
+@cython.ccall
 def _enclosed_link_seed_8616(
     project: object,
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
     link: Real16EnclosedEntryLink8616,
-    chain_depth: int,
-) -> (
-    tuple[dict[str, int], PathMemory8616]
-    | Real16InvocationFailure8616
-    | _NestedRefusal8616
-):
+    chain_depth: cython.longlong,
+) -> object:
     """Validate one retained enclosed edge and return the transported seed.
 
     The replay contract is the chained one verbatim — the parent premise
@@ -7327,6 +7796,8 @@ def _enclosed_link_seed_8616(
     Any divergence refuses ``enclosed_link_unproven``; nothing about the
     enclosed entry is assumed.
     """
+    identity_failure: object
+    retained_state: object
     if _chain_link_depth_exceeded_8616(chain_depth):
         return Real16InvocationFailure8616.ENCLOSED_LINK_UNPROVEN
     identity_failure = _enclosed_link_identity_8616(
@@ -7359,11 +7830,11 @@ def _enclosed_link_seed_8616(
     if not _replayed_domain_equal_8616(derived, parent):
         return Real16InvocationFailure8616.ENCLOSED_LINK_UNPROVEN
     captured = dict(replayed.callsite_call_state)
-    if captured != retained_state:
+    if operator.ne(captured, retained_state):
         # A retained state that disagrees with the freshly replayed
         # capture is forged or stale evidence, never a valid seed.
         return Real16InvocationFailure8616.ENCLOSED_LINK_UNPROVEN
-    if captured["cs"] != parent.entry_segment:
+    if operator.ne(captured["cs"], parent.entry_segment):
         # The captured call-row CS must be exactly the selector the
         # parent premise proved; anything else means the path state
         # diverged from the premise's own claim.
@@ -7373,45 +7844,44 @@ def _enclosed_link_seed_8616(
     return captured, restore_path_memory_8616(replayed.callsite_memory)
 
 
+@cython.ccall
 def _replayed_domain_equal_8616(
     derived: _Derivation8616,
     domain: Real16InvocationDomain8616,
-) -> bool:
+) -> cython.bint:
     """Return whether a fresh derivation reproduces the retained domain."""
+    replayed: object
     replayed = derived.domain
     return (
         replayed is not None
-        and replayed.minimum_selector == domain.minimum_selector
-        and replayed.maximum_selector == domain.maximum_selector
-        and replayed.entry_segment == domain.entry_segment
-        and replayed.entry_offset == domain.entry_offset
-        and replayed.stack_segment == domain.stack_segment
-        and replayed.stack_offset == domain.stack_offset
-        and replayed.load_segment == domain.load_segment
-        and replayed.source_sha256 == domain.source_sha256
-        and replayed.path_block_addrs == tuple(domain.path_block_addrs)
-        and replayed.fetched_range_count == domain.fetched_range_count
-        and replayed.checked_store_count == domain.checked_store_count
-        and replayed.assumptions == domain.assumptions
-        and replayed.callsite_call_state == tuple(domain.callsite_call_state)
-        and replayed.callsite_memory == domain.callsite_memory
-        and replayed.service_consumptions == tuple(domain.service_consumptions)
-        and derived.raw_fact_count == domain.raw_fact_count
-        and derived.normalized_fact_count == domain.normalized_fact_count
-        and derived.classified_fact_count == domain.classified_fact_count
-        and derived.materialized_count == domain.materialized_count
-        and derived.failure_count == domain.failure_count
-        and domain.materialized_count == domain.classified_fact_count
+        and operator.eq(replayed.minimum_selector, domain.minimum_selector)
+        and operator.eq(replayed.maximum_selector, domain.maximum_selector)
+        and operator.eq(replayed.entry_segment, domain.entry_segment)
+        and operator.eq(replayed.entry_offset, domain.entry_offset)
+        and operator.eq(replayed.stack_segment, domain.stack_segment)
+        and operator.eq(replayed.stack_offset, domain.stack_offset)
+        and operator.eq(replayed.load_segment, domain.load_segment)
+        and operator.eq(replayed.source_sha256, domain.source_sha256)
+        and operator.eq(replayed.path_block_addrs, tuple(domain.path_block_addrs))
+        and operator.eq(replayed.fetched_range_count, domain.fetched_range_count)
+        and operator.eq(replayed.checked_store_count, domain.checked_store_count)
+        and operator.eq(replayed.assumptions, domain.assumptions)
+        and operator.eq(replayed.callsite_call_state, tuple(domain.callsite_call_state))
+        and operator.eq(replayed.callsite_memory, domain.callsite_memory)
+        and operator.eq(replayed.service_consumptions, tuple(domain.service_consumptions))
+        and operator.eq(derived.raw_fact_count, domain.raw_fact_count)
+        and operator.eq(derived.normalized_fact_count, domain.normalized_fact_count)
+        and operator.eq(derived.classified_fact_count, domain.classified_fact_count)
+        and operator.eq(derived.materialized_count, domain.materialized_count)
+        and operator.eq(derived.failure_count, domain.failure_count)
+        and operator.eq(domain.materialized_count, domain.classified_fact_count)
         and domain.classified_fact_count > 0
     )
 
 
 def _census_link_surface_8616(
     chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | RawBootEntrySurface8616 | DeclaredFunctionEntryLink8616,
-) -> (
-    tuple[object, object, object, object, Real16InvocationFailure8616]
-    | Real16InvocationFailure8616
-):
+) -> object:
     """Name one retained link's census surface, anchor pair, and refusal.
 
     The *census surface* is the artifact/boundary pair the path proof
@@ -7427,7 +7897,7 @@ def _census_link_surface_8616(
     """
     if type(chain) is DeclaredFunctionEntryLink8616:
         pending = RawBootEntrySurface8616(chain.artifact, chain.boundary)
-        refusals = (*chain.artifact.refusals, *(row for block in chain.artifact.blocks for row in block.refusals))
+        refusals = (*chain.artifact.refusals, *(row for block in iter(chain.artifact.blocks) for row in iter(block.refusals)))
         if refusals and not raw_boot_entry_surface_pending_8616(pending):
             return Real16InvocationFailure8616.COVERAGE_UNBOUND
         return (chain.artifact, chain.boundary, chain.artifact, chain.boundary,
@@ -7461,13 +7931,11 @@ def _census_link_surface_8616(
     return Real16InvocationFailure8616.CHAIN_LINK_UNPROVEN
 
 
+@cython.ccall
 def _derive_census_surface_8616(
-    coverage: IRBoundaryCoverageResult8616 | None,
-    chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | RawBootEntrySurface8616 | DeclaredFunctionEntryLink8616 | None,
-) -> (
-    tuple[IRFunctionArtifact, ExactFunctionRangeBoundary8616]
-    | Real16InvocationFailure8616
-):
+    coverage: object,
+    chain: object,
+) -> object:
     """Resolve the identical artifact/boundary pair this census consumes.
 
     Complete registry-bound coverage is the ordinary surface for a
@@ -7485,11 +7953,12 @@ def _derive_census_surface_8616(
     else is ``coverage_unbound`` or, for a mismatched coverage/link
     pair, the link's own typed refusal.
     """
+    link_failure: object
     surface_artifact: object = None
     surface_boundary: object = None
     anchor_artifact: object = None
     anchor_boundary: object = None
-    link_failure: Real16InvocationFailure8616 | None = None
+    link_failure = None
     if chain is not None:
         link_surface = _census_link_surface_8616(chain)
         if isinstance(link_surface, Real16InvocationFailure8616):
@@ -7539,19 +8008,21 @@ def _derive_census_surface_8616(
     return Real16InvocationFailure8616.COVERAGE_UNBOUND
 
 
+@cython.ccall
 def _declared_function_entry_seed_8616(
     project: object,
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
     evidence: _BootEvidence8616,
     link: DeclaredFunctionEntryLink8616,
-) -> tuple[int, _PathState8616, int, int, int, int, tuple[Real16InvocationAssumption8616, ...]] | Real16InvocationFailure8616:
+) -> object:
     """Authenticate declared application state without traversing original startup.
 
     Source image bytes authenticate native instructions, not writable data at
     the application entry. Only the explicit baseline premise and overlays
     initialize memory; absent register lanes remain unknown.
     """
+    span: object
     from inertia.frontend.x86_16.declared_function_entry import (
         DeclaredFunctionEntryAdmission8616,
         revalidate_declared_function_entry_8616,
@@ -7561,7 +8032,7 @@ def _declared_function_entry_seed_8616(
         return Real16InvocationFailure8616.DECLARED_ENTRY_UNPROVEN
     specification = link.admission.spec
     chunks = evidence.image.chunks
-    if len(chunks) != 1 or chunks[0][0] != evidence.load_segment << _SEGMENT_SHIFT_8616:
+    if len(chunks) != 1 or operator.ne(chunks[0][0], evidence.load_segment << _SEGMENT_SHIFT_8616):
         return Real16InvocationFailure8616.DECLARED_ENTRY_UNPROVEN
     base, module = chunks[0]
     if (
@@ -7573,14 +8044,14 @@ def _declared_function_entry_seed_8616(
     ):
         return Real16InvocationFailure8616.DECLARED_ENTRY_UNPROVEN
     if (
-        _loaded_bytes_8616(project, base, len(module)) != module
-        or specification.load_segment != evidence.load_segment
-        or specification.range_start != boundary.addr
-        or specification.range_end != boundary.addr + boundary.size
+        operator.ne(_loaded_bytes_8616(project, base, len(module)), module)
+        or operator.ne(specification.load_segment, evidence.load_segment)
+        or operator.ne(specification.range_start, boundary.addr)
+        or operator.ne(specification.range_end, boundary.addr + boundary.size)
     ):
         return Real16InvocationFailure8616.DECLARED_ENTRY_UNPROVEN
     if (
-        (specification.entry_segment << _SEGMENT_SHIFT_8616) + specification.entry_offset != artifact.function_addr
+        operator.ne((specification.entry_segment << _SEGMENT_SHIFT_8616) + specification.entry_offset, artifact.function_addr)
         or link.artifact is not artifact or link.boundary is not boundary
     ):
         return Real16InvocationFailure8616.DECLARED_ENTRY_UNPROVEN
@@ -7604,26 +8075,15 @@ def _declared_function_entry_seed_8616(
     )
 
 
+@cython.ccall
 def _invocation_entry_seed_8616(
     project: object,
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
     evidence: _BootEvidence8616,
-    chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | RawBootEntrySurface8616 | DeclaredFunctionEntryLink8616 | None,
-    chain_depth: int,
-) -> (
-    tuple[
-        int,
-        _PathState8616,
-        int,
-        int,
-        int,
-        int,
-        tuple[Real16InvocationAssumption8616, ...],
-    ]
-    | Real16InvocationFailure8616
-    | _NestedRefusal8616
-):
+    chain: object,
+    chain_depth: cython.longlong,
+) -> object:
     """Resolve the census selector/seed/entry coordinate for this domain.
 
     A ``None`` chain keeps the boot-entry rule — and a retained
@@ -7643,7 +8103,7 @@ def _invocation_entry_seed_8616(
     if type(chain) is DeclaredFunctionEntryLink8616:
         return _declared_function_entry_seed_8616(project, artifact, boundary, evidence, chain)
     if chain is None or type(chain) is RawBootEntrySurface8616:
-        if evidence.entry_linear != artifact.function_addr:
+        if operator.ne(evidence.entry_linear, artifact.function_addr):
             return Real16InvocationFailure8616.ENTRY_NOT_FUNCTION_HEAD
         return (
             evidence.entry_segment,
@@ -7656,7 +8116,7 @@ def _invocation_entry_seed_8616(
             evidence.stack_offset,
             evidence.entry_assumptions,
         )
-    if boundary.addr != artifact.function_addr:
+    if operator.ne(boundary.addr, artifact.function_addr):
         return Real16InvocationFailure8616.ENTRY_NOT_FUNCTION_HEAD
     if type(chain) is Real16CallChainLink8616:
         seed = _chain_link_seed_8616(
@@ -7692,15 +8152,11 @@ def _invocation_entry_seed_8616(
     )
 
 
+@cython.ccall
 def _service_assumption_8616(
-    assumptions: tuple[Real16InvocationAssumption8616, ...],
-    consumptions: tuple[
-        DeclaredServiceConsumption8616
-        | DeclaredResizeConsumption8616
-        | DeclaredVectorConsumption8616,
-        ...,
-    ],
-) -> tuple[Real16InvocationAssumption8616, ...]:
+    assumptions: object,
+    consumptions: object,
+) -> object:
     """Mark the consumed declared-service evidence on the proven premise."""
     if not consumptions:
         return assumptions
@@ -7710,20 +8166,21 @@ def _service_assumption_8616(
     )
 
 
+@cython.ccall
 def _derive_invocation_domain_8616(
     project: object,
     coverage: IRBoundaryCoverageResult8616 | None,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     boot: object,
     boot_recompute: Callable[[object], object] | None,
-    call_preservations: tuple[SegmentCallPreservationResult8616, ...],
+    call_preservations: object,
     *,
     chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | RawBootEntrySurface8616 | DeclaredFunctionEntryLink8616 | None = None,
-    entry_call_preservations: tuple[object, ...] = (),
-    declared_services: tuple[DeclaredInterruptService8616, ...] = (),
-    chain_depth: int = 0,
+    entry_call_preservations: object = (),
+    declared_services: object = (),
+    chain_depth: cython.longlong = 0,
     construction: _DeclaredCallChainConstruction8616 | None = None,
-    prefix_capture: bool = False,
+    prefix_capture: cython.bint = False,
 ) -> _Derivation8616:
     """Share the replay budget; optionally retain private diagnostic census data.
 
@@ -7745,6 +8202,7 @@ def _derive_invocation_domain_8616(
         )
 
 
+@cython.ccall
 def _seeded_refusal_derivation_8616(
     seeded: Real16InvocationFailure8616 | _NestedRefusal8616,
 ) -> _Derivation8616:
@@ -7762,6 +8220,7 @@ def _seeded_refusal_derivation_8616(
     return _early_derivation_8616(seeded)
 
 
+@cython.ccall
 def _declared_entry_authority_8616(
     chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | RawBootEntrySurface8616 | DeclaredFunctionEntryLink8616 | None,
 ) -> DeclaredFunctionEntryAdmission8616 | Real16InvocationFailure8616 | None:
@@ -7788,6 +8247,8 @@ def _invocation_initial_memory_for_entry_8616(
     The callsite snapshot transports known overlays. A descendant must not
     resurrect undeclared module/global bytes from the original loader state.
     """
+    authority: object
+    initialized: object
     authority = _declared_entry_authority_8616(chain)
     if isinstance(authority, Real16InvocationFailure8616):
         return None
@@ -7806,28 +8267,29 @@ def _invocation_initial_memory_for_entry_8616(
     )
     write_ranges = (
         () if initialized is None
-        else tuple((base, len(data)) for base, data in initialized.chunks)
+        else tuple((base, len(data)) for base, data in iter(initialized.chunks))
     )
     return InvocationInitialMemory8616(
-        chunks + tuple((span.address, span.data) for span in authority.spec.memory),
+        chunks + tuple((span.address, span.data) for span in iter(authority.spec.memory)),
         write_ranges=write_ranges,
     )
 
 
+@cython.ccall
 def _derive_invocation_domain_body_8616(
     project: object,
     coverage: IRBoundaryCoverageResult8616 | None,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     boot: object,
     boot_recompute: Callable[[object], object] | None,
-    call_preservations: tuple[SegmentCallPreservationResult8616, ...],
+    call_preservations: object,
     *,
     chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | RawBootEntrySurface8616 | DeclaredFunctionEntryLink8616 | None = None,
-    entry_call_preservations: tuple[object, ...] = (),
-    declared_services: tuple[DeclaredInterruptService8616, ...] = (),
-    chain_depth: int = 0,
+    entry_call_preservations: object = (),
+    declared_services: object = (),
+    chain_depth: cython.longlong = 0,
     construction: _DeclaredCallChainConstruction8616 | None = None,
-    prefix_capture: bool = False,
+    prefix_capture: cython.bint = False,
 ) -> _Derivation8616:
     """Derive the exact CS selector domain, or a typed refusal + counts.
 
@@ -7840,6 +8302,7 @@ def _derive_invocation_domain_body_8616(
     pair for ``CALL_CHAINED`` or its enclosing pair for
     ``ENCLOSED_ENTRY``.
     """
+    failure: object
     surface = _construction_census_surface_8616(coverage, chain, construction)
     if isinstance(surface, Real16InvocationFailure8616):
         return _early_derivation_8616(surface)
@@ -7854,10 +8317,7 @@ def _derive_invocation_domain_body_8616(
     failure = _recompute_validated_boot_8616(boot, boot_recompute)
     if failure is not None:
         return _early_derivation_8616(failure)
-    if (
-        hashlib.sha256(evidence.source).hexdigest()
-        != evidence.image.file_sha256
-    ):
+    if operator.ne(hashlib.sha256(evidence.source).hexdigest(), evidence.image.file_sha256):
         return _early_derivation_8616(Real16InvocationFailure8616.BOOT_NOT_REPRODUCED)
     seeded, chain = _construction_entry_seed_8616(
         project, artifact, boundary, evidence, chain, chain_depth, construction,
@@ -7973,7 +8433,7 @@ def _derive_invocation_domain_body_8616(
             callsite_call_state=(
                 ()
                 if ctx.callsite_call_state is None
-                else tuple(sorted(ctx.callsite_call_state.items()))
+                else tuple(sorted(tuple(ctx.callsite_call_state.items())))
             ),
             callsite_memory=(
                 None
@@ -7998,6 +8458,7 @@ def _derive_invocation_domain_body_8616(
     )
 
 
+@cython.ccall
 def _retain_prefix_census_8616(
     ctx: _PathCensusContext8616, seed: _PathState8616,
     artifact: IRFunctionArtifact, boundary: ExactFunctionRangeBoundary8616,
@@ -8008,6 +8469,7 @@ def _retain_prefix_census_8616(
     Called only after ordinary census success. A capture miss keeps that success;
     it grants no authentication, replay verdict or extension permission.
     """
+    lower: object
     if ctx.prefix_consumed or not ctx.prefix_capture_requested or ctx.prefix_terminal_call is None:
         return None
     from .segment_call_preservation import segment_call_dependency_traversal_scope_8616
@@ -8043,13 +8505,14 @@ def _retain_prefix_census_8616(
         )
 
 
+@cython.ccall
 def _service_consumption_dict_8616(
     consumption: (
         DeclaredServiceConsumption8616
         | DeclaredResizeConsumption8616
         | DeclaredVectorConsumption8616
     ),
-) -> dict[str, object]:
+) -> object:
     """Serialize one consumed declared-service record with its kind tag."""
     if isinstance(consumption, DeclaredVectorConsumption8616):
         return {
@@ -8105,11 +8568,11 @@ def _service_consumption_dict_8616(
     if consumption.dosbox_writes is not None:
         record["dosbox_writes"] = [
             {"address": write.address, "data_hex": write.data.hex()}
-            for write in consumption.dosbox_writes
+            for write in iter(consumption.dosbox_writes)
         ]
         record["dosbox_current_chain"] = (
             None if consumption.dosbox_current_chain is None
-            else [image.hex() for image in consumption.dosbox_current_chain]
+            else [image.hex() for image in iter(consumption.dosbox_current_chain)]
         )
         record["dosbox_new_header_before_hex"] = (
             None if consumption.dosbox_new_header_before is None
@@ -8118,7 +8581,7 @@ def _service_consumption_dict_8616(
     return record
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class Real16InvocationDomain8616:
     """A typed, immutable, invocation-local proof of one CS domain.
 
@@ -8133,35 +8596,35 @@ class Real16InvocationDomain8616:
     coverage: IRBoundaryCoverageResult8616 | None
     boot: object | None
     boot_recompute: Callable[[object], object] | None = field(compare=False)
-    callsite_addr: int
-    entry_segment: int
-    entry_offset: int
-    stack_segment: int
-    stack_offset: int
-    load_segment: int
-    source_sha256: str
-    minimum_selector: int
-    maximum_selector: int
+    callsite_addr: cython.longlong
+    entry_segment: cython.longlong
+    entry_offset: cython.longlong
+    stack_segment: cython.longlong
+    stack_offset: cython.longlong
+    load_segment: cython.longlong
+    source_sha256: object
+    minimum_selector: cython.longlong
+    maximum_selector: cython.longlong
     kind: Real16InvocationKind8616
-    path_block_addrs: tuple[int, ...]
-    fetched_range_count: int
-    checked_store_count: int
-    assumptions: tuple[Real16InvocationAssumption8616, ...]
-    call_preservations: tuple[SegmentCallPreservationResult8616, ...]
+    path_block_addrs: object
+    fetched_range_count: cython.longlong
+    checked_store_count: cython.longlong
+    assumptions: object
+    call_preservations: object
     failure: Real16InvocationFailure8616 | None
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
     project: object = field(compare=False, repr=False)
     chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | RawBootEntrySurface8616 | DeclaredFunctionEntryLink8616 | None = field(
         default=None, compare=False
     )
-    entry_call_preservations: tuple[object, ...] = field(
+    entry_call_preservations: object = field(
         default=(), compare=False
     )
-    callsite_call_state: tuple[tuple[str, int], ...] = ()
+    callsite_call_state: tuple[tuple[str, cython.longlong], ...] = ()
     #: Frozen callsite-row memory overlay captured beside
     #: ``callsite_call_state``; replayed-equality transport evidence for
     #: chained and enclosed seeds.
@@ -8180,24 +8643,24 @@ class Real16InvocationDomain8616:
     #: ``(block_addr, successor_addr)`` edges proven untraversable under
     #: this exact invocation by the converged known-bits feasibility pass.
     #: Invocation-local evidence only — never a universal dead-code claim.
-    infeasible_edges: tuple[tuple[int, int], ...] = ()
+    infeasible_edges: tuple[tuple[cython.longlong, cython.longlong], ...] = ()
 
     #: Historical canonical consultation is scheduling advice only. Sharing
     #: still requires a fresh UNUSED receipt, not this retained observation.
     entry_call_pool_advice: _EntryCallPoolConsultation8616 = _EntryCallPoolConsultation8616.UNKNOWN
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Replay once per shared bounded traversal; cyclic evidence refuses."""
         return self._complete_with_fresh_derivation_8616(None)
 
-    def _complete_with_fresh_derivation_8616(self, derived: _Derivation8616 | None) -> bool:
+    def _complete_with_fresh_derivation_8616(self, derived: _Derivation8616 | None) -> cython.bint:
         """Apply the normal traversal gate to replay or an immediate derivation.
 
         Checked factories supply ``derived`` synchronously; public completeness
         supplies ``None`` and reauthenticates through its ordinary replay.
         """
-        def verify() -> bool:
+        def verify() -> cython.bint:
             """Consume the immediate derivation or perform ordinary replay."""
             if derived is None:
                 return self._replay_complete_8616()
@@ -8206,8 +8669,8 @@ class Real16InvocationDomain8616:
         return self._consume_completion_8616(verify)
 
     def _consume_completion_8616(
-        self, verify: Callable[[], bool], *, force_current: bool = False,
-    ) -> bool:
+        self, verify: Callable[[], cython.bint], *, force_current: cython.bint = False,
+    ) -> cython.bint:
         """Run ordinary or forced-current verification inside one shared guard.
 
         Ordinary completeness retains its per-traversal verdict behavior. A
@@ -8217,7 +8680,7 @@ class Real16InvocationDomain8616:
         """
         return _consume_invocation_admission_8616(self, verify, force_current=force_current)
 
-    def _replay_complete_8616(self) -> bool:
+    def _replay_complete_8616(self) -> cython.bint:
         """Recompute the retained domain only after entering the shared guard."""
         if self.failure is not None:
             return False
@@ -8247,7 +8710,7 @@ class Real16InvocationDomain8616:
         return True
 
     @property
-    def domain_interval(self) -> tuple[int, int] | None:
+    def domain_interval(self) -> object:
         """Return the proven linear target interval or ``None``."""
         if not self.complete:
             return None
@@ -8257,6 +8720,7 @@ class Real16InvocationDomain8616:
 
     def to_dict(self) -> dict[str, object]:
         """Serialize the typed proof for receipts and logging."""
+        authority: object
         authority = _declared_entry_authority_8616(self.chain)
         return {
             "verdict": "proven" if self.complete else "unknown_refuse",
@@ -8281,7 +8745,7 @@ class Real16InvocationDomain8616:
             "minimum_selector": self.minimum_selector,
             "maximum_selector": self.maximum_selector,
             "path_block_addrs": list(self.path_block_addrs),
-            "infeasible_edges": [list(edge) for edge in self.infeasible_edges],
+            "infeasible_edges": [list(edge) for edge in iter(self.infeasible_edges)],
             "entry_call_pool_advice": self.entry_call_pool_advice.value,
             "fetched_range_count": self.fetched_range_count,
             "checked_store_count": self.checked_store_count,
@@ -8311,16 +8775,16 @@ class Real16InvocationDomain8616:
                 None
                 if self.callsite_memory is None
                 else {
-                    "known": [list(pair) for pair in self.callsite_memory.known],
+                    "known": [list(pair) for pair in iter(self.callsite_memory.known)],
                     "unknown": list(self.callsite_memory.unknown),
                     "tainted": self.callsite_memory.tainted,
                 }
             ),
             "service_consumptions": [
                 _service_consumption_dict_8616(consumption)
-                for consumption in self.service_consumptions
+                for consumption in iter(self.service_consumptions)
             ],
-            "assumptions": [assumption.value for assumption in self.assumptions],
+            "assumptions": [assumption.value for assumption in iter(self.assumptions)],
             "raw_fact_count": self.raw_fact_count,
             "normalized_fact_count": self.normalized_fact_count,
             "classified_fact_count": self.classified_fact_count,
@@ -8329,13 +8793,13 @@ class Real16InvocationDomain8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _DeclaredInvocationConstruction8616:
     """Resource-admission target for a fresh prefix; never a proof claim."""
 
     project: object
     surface: DeclaredFunctionEntryLink8616 | Real16CallChainLink8616
-    callsite_addr: int
+    callsite_addr: cython.longlong
     boot: object
     boot_recompute: Callable[[object], object] | None
     coverage: IRBoundaryCoverageResult8616 | None = None
@@ -8365,7 +8829,7 @@ class _DeclaredNearBindingProvider8616(Protocol):
         ...
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _DeclaredCallChainConstruction8616:
     """Operation-local inputs; grants neither a premise nor a retained edge."""
 
@@ -8383,17 +8847,18 @@ _InvocationEntrySeed8616 = tuple[
     int, _PathState8616, int, int, int, int,
     tuple[Real16InvocationAssumption8616, ...],
 ]
-type _RetainedInvocationLink8616 = (
+_RetainedInvocationLink8616 = typing.TypeAliasType("_RetainedInvocationLink8616", (
     Real16CallChainLink8616 | Real16EnclosedEntryLink8616
     | RawBootEntrySurface8616 | DeclaredFunctionEntryLink8616 | None
-)
+))
 
 
+@cython.ccall
 def _construction_census_surface_8616(
     coverage: IRBoundaryCoverageResult8616 | None,
     chain: _RetainedInvocationLink8616,
-    request: _DeclaredCallChainConstruction8616 | None,
-) -> tuple[IRFunctionArtifact, ExactFunctionRangeBoundary8616] | Real16InvocationFailure8616:
+    request: object,
+) -> object:
     """Select only the raw native intake surface before a pending edge exists."""
     if request is None:
         return _derive_census_surface_8616(coverage, chain)
@@ -8403,13 +8868,15 @@ def _construction_census_surface_8616(
     return request.callee_artifact, request.callee_boundary
 
 
+@cython.ccall
 def _construction_entry_seed_8616(
     project: object, artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616, evidence: _BootEvidence8616,
-    chain: _RetainedInvocationLink8616, chain_depth: int,
-    request: _DeclaredCallChainConstruction8616 | None,
+    chain: _RetainedInvocationLink8616, chain_depth: cython.longlong,
+    request: object,
 ) -> tuple[_InvocationEntrySeed8616 | Real16InvocationFailure8616 | _NestedRefusal8616, _RetainedInvocationLink8616]:
     """Resolve a pending edge only after boot callbacks, transporting pure capture."""
+    resolved: object
     if request is None:
         return _invocation_entry_seed_8616(project, artifact, boundary, evidence, chain, chain_depth), chain
     if _chain_link_depth_exceeded_8616(chain_depth):
@@ -8435,8 +8902,11 @@ def _construction_entry_seed_8616(
 
 def _construct_declared_chain_entry_8616(
     request: _DeclaredCallChainConstruction8616,
-) -> tuple[Real16CallChainLink8616, _Derivation8616] | None:
+) -> object:
     """Bind native row/provenance first, then capture one guarded caller prefix."""
+    captured: object
+    encoded: object
+    invocation: object
     target = request.caller
     row = request.callsite
     artifact, boundary = target.artifact, target.boundary
@@ -8445,16 +8915,16 @@ def _construct_declared_chain_entry_8616(
         return None
     encoded = row.bound_near_coordinates(boundary)
     if (
-        encoded is None or encoded[1] != request.callee_artifact.function_addr
-        or row.callsite_addr != target.callsite_addr
-        or row.caller_start != artifact.function_addr
+        encoded is None or operator.ne(encoded[1], request.callee_artifact.function_addr)
+        or operator.ne(row.callsite_addr, target.callsite_addr)
+        or operator.ne(row.caller_start, artifact.function_addr)
         or not request.callsite_index.stats.closed
     ):
         return None
-    if not any(item is row for item in request.callsite_index.for_target(row.target_addr)):
+    if not any(item is row for item in builtins.iter(request.callsite_index.for_target(row.target_addr))):
         return None
-    captured: tuple[Real16InvocationDomain8616, _Derivation8616] | None = None
-    invocation: Real16CallInvocation8616 | None = None
+    captured = None
+    invocation = None
 
     def construct() -> Real16CallInvocation8616 | None:
         """Authenticate after the provider's last native callback, once only."""
@@ -8493,10 +8963,12 @@ def _construct_declared_chain_entry_8616(
     return chain, derived
 
 
+@cython.ccall
 def _construct_declared_chained_invocation_domain_8616(
     request: _DeclaredCallChainConstruction8616,
-) -> tuple[DirectNearCallTargetBinding8616, Real16InvocationDomain8616] | None:
+) -> object:
     """Validate callee boot first, then construct its caller and pure entry transport."""
+    chain: object
     target = request.caller
     derived = _derive_invocation_domain_8616(
         target.project, None, request.callee_artifact.function_addr,
@@ -8516,11 +8988,12 @@ def _construct_declared_chained_invocation_domain_8616(
     return chain.entry_binding, domain
 
 
+@cython.ccall
 def _consume_invocation_admission_8616(
     subject: Real16InvocationDomain8616 | _DeclaredInvocationConstruction8616,
-    verify: Callable[[], bool],
-    *, force_current: bool = False,
-) -> bool:
+    verify: Callable[[], cython.bint],
+    *, force_current: cython.bint = False,
+) -> cython.bint:
     """Own the single active/depth/deadline/domain guard for replay and construction.
 
     Construction tokens acquire resource admission only. They neither retain a
@@ -8572,8 +9045,10 @@ def _consume_invocation_admission_8616(
         return verdict
 
 
+@cython.ccall
 def _nested_scope_inputs_8616(subject: Real16InvocationDomain8616) -> tuple[object, ...]:
     """Pin one operation's owned scope fields without equality callbacks."""
+    memory: object
     memory = subject.callsite_memory
     return (
         subject.project, subject.coverage, subject.boot, subject.boot_recompute,
@@ -8590,12 +9065,14 @@ def _nested_scope_inputs_8616(subject: Real16InvocationDomain8616) -> tuple[obje
     )
 
 
-def _nested_chain_inputs_8616(chain: Real16CallChainLink8616) -> tuple[object, ...] | None:
+@cython.ccall
+def _nested_chain_inputs_8616(chain: Real16CallChainLink8616) -> object:
     """Pin bounded ancestry fields across the same synchronous native operation."""
+    current: object
     from inertia.frontend.x86_16.declared_function_entry import DeclaredFunctionEntryAdmission8616
 
     captured: list[object] = []
-    current: _RetainedInvocationLink8616 = chain
+    current = chain
     for _ in range(_CHAIN_DEPTH_LIMIT_8616):
         if current is None:
             captured.append(None)
@@ -8625,7 +9102,8 @@ def _nested_chain_inputs_8616(chain: Real16CallChainLink8616) -> tuple[object, .
     return None
 
 
-def _nested_capture_admitted_8616(units: int) -> bool:
+@cython.ccall
+def _nested_capture_admitted_8616(units: cython.longlong) -> cython.bint:
     """Charge synchronous identity snapshots to the unchanged ambient allowance."""
     from .segment_call_preservation import segment_call_dependency_traversal_scope_8616
 
@@ -8637,8 +9115,10 @@ def _nested_capture_admitted_8616(units: int) -> bool:
 
 def _derive_construction_target_8616(
     target: _DeclaredInvocationConstruction8616,
-) -> tuple[Real16InvocationDomain8616, _Derivation8616] | None:
+) -> object:
     """Authenticate the original scope before one fresh caller construction."""
+    chain_capture: object
+    current_chain: object
     surface = target.surface
     if type(surface) is DeclaredFunctionEntryLink8616:
         return _derive_declared_function_entry_domain_8616(
@@ -8671,22 +9151,23 @@ def _derive_construction_target_8616(
     current_chain = _nested_chain_inputs_8616(surface)
     if current_chain is None or not _nested_capture_admitted_8616(len(current) + len(current_chain)):
         return None
-    if (not all(left is right for left, right in zip(captured, current, strict=True))
-        or len(chain_capture) != len(current_chain)
-        or not all(left is right for left, right in zip(chain_capture, current_chain, strict=True))):
+    if (not all(left is right for left, right in builtins.iter(zip(captured, current, strict=True)))
+        or operator.ne(len(chain_capture), len(current_chain))
+        or not all(left is right for left, right in builtins.iter(zip(chain_capture, current_chain, strict=True)))):
         return None
-    if target.surface is not surface or derived[0].source_sha256 != required.source_sha256:
+    if target.surface is not surface or operator.ne(derived[0].source_sha256, required.source_sha256):
         return None
     return derived
 
 
 def _construct_declared_invocation_domain_8616(
     target: _DeclaredInvocationConstruction8616,
-) -> tuple[Real16InvocationDomain8616, _Derivation8616] | None:
+) -> object:
     """Derive exactly once after normal admission, returning only current facts."""
-    captured: tuple[Real16InvocationDomain8616, _Derivation8616] | None = None
+    captured: object
+    captured = None
 
-    def verify() -> bool:
+    def verify() -> cython.bint:
         """Run the canonical producer while construction remains active."""
         nonlocal captured
         captured = _derive_construction_target_8616(target)
@@ -8709,23 +9190,26 @@ def _construct_declared_invocation_domain_8616(
     return captured
 
 
-def _prefix_terminal_data_bound_8616(data: _OwnedPrefixCensus8616) -> bool:
+@cython.ccall
+def _prefix_terminal_data_bound_8616(data: _OwnedPrefixCensus8616) -> cython.bint:
     """Bind terminal metadata to its captured row without claiming native proof."""
+    terminal: object
     ctx = data.context
     terminal = ctx.prefix_terminal_call
     if terminal is None:
         return False
     index = terminal.index
-    if type(index) is not int or index < 0 or index != len(terminal.block.instrs) - 1:
+    if type(index) is not int or index < 0 or operator.ne(index, len(terminal.block.instrs) - 1):
         return False
     return (
         terminal.artifact is data.artifact
-        and ctx.stop_block_addr == terminal.block.addr
+        and operator.eq(ctx.stop_block_addr, terminal.block.addr)
         and terminal.block.instrs[index] is terminal.instruction
-        and terminal.instruction.addr == ctx.callsite_addr
+        and operator.eq(terminal.instruction.addr, ctx.callsite_addr)
     )
 
 
+@cython.ccall
 def _enroll_prefix_census_data_8616(
     subject: Real16InvocationDomain8616, derived: _Derivation8616,
 ) -> None:
@@ -8735,6 +9219,8 @@ def _enroll_prefix_census_data_8616(
     does not authenticate carried effects or permit callback/continuation reuse.
     Missing capture authority leaves the ordinary completed proof unchanged.
     """
+    data: object
+    source: object
     data = derived.prefix_census
     if derived.failure is not None or derived.domain is None or data is None:
         return
@@ -8757,7 +9243,7 @@ def _enroll_prefix_census_data_8616(
         return
     if (
         source.project is not subject.project or source.boundary is not data.boundary
-        or ctx.callsite_addr != subject.callsite_addr
+        or operator.ne(ctx.callsite_addr, subject.callsite_addr)
     ):
         return
     from .segment_call_preservation import segment_call_dependency_traversal_scope_8616
@@ -8771,7 +9257,8 @@ def _enroll_prefix_census_data_8616(
         traversal.invocation_prefixes[identity] = data
 
 
-def _retained_domain_kind_bound_8616(domain: Real16InvocationDomain8616) -> bool:
+@cython.ccall
+def _retained_domain_kind_bound_8616(domain: Real16InvocationDomain8616) -> cython.bint:
     """Require the retained provenance link to match its typed domain kind."""
     if domain.kind is Real16InvocationKind8616.DECLARED_FUNCTION_ENTRY:
         link_bound = type(domain.chain) is DeclaredFunctionEntryLink8616
@@ -8788,7 +9275,7 @@ def _retained_domain_kind_bound_8616(domain: Real16InvocationDomain8616) -> bool
     return link_bound
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class Real16CallInvocation8616:
     """A premise bound to one exact project/block/callsite/target use.
 
@@ -8797,13 +9284,13 @@ class Real16CallInvocation8616:
     """
 
     premise: Real16InvocationDomain8616
-    callsite_addr: int
-    target_addr: int
+    callsite_addr: cython.longlong
+    target_addr: cython.longlong
     project: object = field(compare=False, repr=False)
     block: IRBlock = field(compare=False, repr=False)
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Re-validate the premise and this exact consumption binding."""
         return real16_invocation_discharges_8616(
             self.premise,
@@ -8814,6 +9301,7 @@ class Real16CallInvocation8616:
         )
 
 
+@cython.ccall
 def _discharge_consuming_artifact_8616(
     premise: Real16InvocationDomain8616,
     project: object,
@@ -8828,6 +9316,7 @@ def _discharge_consuming_artifact_8616(
     over the enclosing pair. Project identity is part of the anchor; a
     foreign project has no consuming surface.
     """
+    coverage: object
     coverage = premise.coverage
     if coverage is not None:
         if coverage.boundary.project is not project:
@@ -8846,14 +9335,15 @@ def _discharge_consuming_artifact_8616(
     return link.callee_artifact
 
 
+@cython.ccall
 def real16_invocation_discharges_8616(
-    premise: Real16InvocationDomain8616 | None,
+    premise: object,
     *,
     project: object,
     block: IRBlock,
-    callsite_addr: int,
-    target_addr: int,
-) -> bool:
+    callsite_addr: cython.longlong,
+    target_addr: cython.longlong,
+) -> cython.bint:
     """Return whether the proven exact domain keeps ``target_addr`` fixed.
 
     Requires a complete premise bound to this exact callsite, the supplied
@@ -8874,30 +9364,32 @@ def real16_invocation_discharges_8616(
 
 def _invocation_use_bound_8616(
     premise: Real16InvocationDomain8616,
-    *, project: object, block: IRBlock, callsite_addr: int, target_addr: int,
-) -> bool:
+    *, project: object, block: IRBlock, callsite_addr: cython.longlong, target_addr: cython.longlong,
+) -> cython.bint:
     """Check pure consumption coordinates after current premise authentication."""
-    if premise.callsite_addr != callsite_addr:
+    artifact: object
+    if operator.ne(premise.callsite_addr, callsite_addr):
         return False
     artifact = _discharge_consuming_artifact_8616(premise, project)
     if artifact is None:
         return False
-    if not any(owner is block for owner in artifact.blocks):
+    if not any(owner is block for owner in iter(artifact.blocks)):
         return False
     base = premise.maximum_selector << _SEGMENT_SHIFT_8616
     end = (premise.minimum_selector << _SEGMENT_SHIFT_8616) + _WORD_LIMIT_8616
     return base <= target_addr <= end
 
 
+@cython.ccall
 def _domain_from_derivation_8616(
     project: object,
     coverage: IRBoundaryCoverageResult8616 | None,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     boot: object | None,
     boot_recompute: Callable[[object], object] | None,
-    preservations: tuple[SegmentCallPreservationResult8616, ...],
-    entry_preservations: tuple[object, ...],
-    declared_services: tuple[DeclaredInterruptService8616, ...],
+    preservations: object,
+    entry_preservations: object,
+    declared_services: object,
     kind: Real16InvocationKind8616,
     chain: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | RawBootEntrySurface8616 | DeclaredFunctionEntryLink8616 | None,
     derived: _Derivation8616,
@@ -8979,10 +9471,11 @@ def _domain_from_derivation_8616(
     )
 
 
+@cython.ccall
 def prove_real16_invocation_domain_8616(
     project: object,
     coverage: IRBoundaryCoverageResult8616 | None,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     *,
     boot: object | None,
     boot_recompute: Callable[[object], object] | None,
@@ -9038,17 +9531,18 @@ def prove_real16_invocation_domain_8616(
     )
 
 
+@cython.ccall
 def _derive_declared_function_entry_domain_8616(
     project: object,
     surface: DeclaredFunctionEntryLink8616 | None,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     *,
     boot: object,
     boot_recompute: Callable[[object], object] | None,
     coverage: IRBoundaryCoverageResult8616 | None = None,
     entry_call_preservations: Sequence[object] = (),
     declared_services: Sequence[DeclaredInterruptService8616] = (),
-    prefix_capture: bool = False,
+    prefix_capture: cython.bint = False,
 ) -> tuple[Real16InvocationDomain8616, _Derivation8616]:
     """Prove a local native prefix under one explicit conditional entry authority.
 
@@ -9072,10 +9566,11 @@ def _derive_declared_function_entry_domain_8616(
     return domain, derived
 
 
+@cython.ccall
 def prove_real16_declared_function_entry_domain_8616(
     project: object,
     surface: DeclaredFunctionEntryLink8616 | None,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     *,
     boot: object,
     boot_recompute: Callable[[object], object] | None,
@@ -9092,10 +9587,11 @@ def prove_real16_declared_function_entry_domain_8616(
     return domain
 
 
+@cython.ccall
 def prove_fresh_real16_declared_function_entry_domain_8616(
     project: object,
     surface: DeclaredFunctionEntryLink8616 | None,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     *,
     boot: object,
     boot_recompute: Callable[[object], object] | None,
@@ -9109,6 +9605,7 @@ def prove_fresh_real16_declared_function_entry_domain_8616(
     the same fresh result. No derived evidence or positive cache is exported:
     later public ``domain.complete`` still invokes native/source replay.
     """
+    captured: object
     if type(surface) is not DeclaredFunctionEntryLink8616:
         return None
     captured = _construct_declared_invocation_domain_8616(
@@ -9120,10 +9617,11 @@ def prove_fresh_real16_declared_function_entry_domain_8616(
     return None if captured is None else captured[0]
 
 
+@cython.ccall
 def prove_real16_raw_boot_invocation_domain_8616(
     project: object,
     surface: RawBootEntrySurface8616,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     *,
     boot: object,
     boot_recompute: Callable[[object], object] | None,
@@ -9144,10 +9642,11 @@ def prove_real16_raw_boot_invocation_domain_8616(
     )
 
 
+@cython.ccall
 def _derive_chained_invocation_domain_8616(
     project: object,
     coverage: IRBoundaryCoverageResult8616 | None,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     *,
     boot: object | None,
     boot_recompute: Callable[[object], object] | None,
@@ -9202,10 +9701,11 @@ def _derive_chained_invocation_domain_8616(
     return domain, derived
 
 
+@cython.ccall
 def prove_real16_chained_invocation_domain_8616(
     project: object,
     coverage: IRBoundaryCoverageResult8616 | None,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     *,
     boot: object | None,
     boot_recompute: Callable[[object], object] | None,
@@ -9223,10 +9723,11 @@ def prove_real16_chained_invocation_domain_8616(
     return domain
 
 
+@cython.ccall
 def prove_fresh_real16_chained_invocation_domain_8616(
     project: object,
     coverage: IRBoundaryCoverageResult8616 | None,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     *,
     boot: object | None,
     boot_recompute: Callable[[object], object] | None,
@@ -9251,10 +9752,11 @@ def prove_fresh_real16_chained_invocation_domain_8616(
 
 
 
+@cython.ccall
 def prove_real16_enclosed_invocation_domain_8616(
     project: object,
     coverage: IRBoundaryCoverageResult8616 | None,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     *,
     boot: object | None,
     boot_recompute: Callable[[object], object] | None,
@@ -9310,6 +9812,7 @@ def prove_real16_enclosed_invocation_domain_8616(
     )
 
 
+@cython.ccall
 def real16_native_census_import_8616(
     project: object,
     boundary: ExactFunctionRangeBoundary8616,
@@ -9353,10 +9856,11 @@ def real16_native_census_import_8616(
 _CANONICAL_NATIVE_CENSUS_IMPORT_8616 = real16_native_census_import_8616
 
 
+@cython.ccall
 def _link_scope_anchor_8616(
     left: Real16CallChainLink8616 | Real16EnclosedEntryLink8616,
     right: Real16CallChainLink8616 | Real16EnclosedEntryLink8616,
-) -> bool:
+) -> cython.bint:
     """Bind two retained transport links to the same proven edge.
 
     The identical decoded row and index objects anchor the edge to the
@@ -9368,14 +9872,16 @@ def _link_scope_anchor_8616(
     is used only for value-typed witnesses two derivations legitimately
     rebuild.
     """
+    left_binding: object
+    right_binding: object
     if not (
         left.callsite is right.callsite
         and left.callsite_index is right.callsite_index
         and left.callsite_artifact is right.callsite_artifact
-        and left.callsite_boundary == right.callsite_boundary
+        and operator.eq(left.callsite_boundary, right.callsite_boundary)
         and left.callee_artifact is right.callee_artifact
-        and left.callee_boundary == right.callee_boundary
-        and left.call_state == right.call_state
+        and operator.eq(left.callee_boundary, right.callee_boundary)
+        and operator.eq(left.call_state, right.call_state)
     ):
         return False
     if type(left) is Real16EnclosedEntryLink8616:
@@ -9383,16 +9889,16 @@ def _link_scope_anchor_8616(
             return False
         return (
             left.enclosing_artifact is right.enclosing_artifact
-            and left.enclosing_boundary == right.enclosing_boundary
+            and operator.eq(left.enclosing_boundary, right.enclosing_boundary)
         )
     if isinstance(left, Real16CallChainLink8616) and isinstance(right, Real16CallChainLink8616):
         left_binding, right_binding = left.entry_binding, right.entry_binding
         if left_binding is None or right_binding is None:
             return left_binding is right_binding
         return (
-            left_binding.callsite_addr == right_binding.callsite_addr
-            and left_binding.target_addr == right_binding.target_addr
-            and left_binding.shape == right_binding.shape
+            operator.eq(left_binding.callsite_addr, right_binding.callsite_addr)
+            and operator.eq(left_binding.target_addr, right_binding.target_addr)
+            and operator.eq(left_binding.shape, right_binding.shape)
             and left_binding.invocation is not None
             and right_binding.invocation is not None
             and left_binding.invocation.block is right_binding.invocation.block
@@ -9401,11 +9907,12 @@ def _link_scope_anchor_8616(
     return True
 
 
+@cython.ccall
 def _in_flight_scopes_coterminous_8616(
     left: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | RawBootEntrySurface8616 | DeclaredFunctionEntryLink8616 | None,
     right: Real16CallChainLink8616 | Real16EnclosedEntryLink8616 | RawBootEntrySurface8616 | DeclaredFunctionEntryLink8616 | None,
-    depth: int,
-) -> bool:
+    depth: cython.longlong,
+) -> cython.bint:
     """Authenticate two unregistered scopes through retained transport edges.
 
     An in-flight surface carries no registry coverage, so its entry
@@ -9451,10 +9958,11 @@ def _in_flight_scopes_coterminous_8616(
     return _same_scope_8616(left_link.parent, right_link.parent, depth + 1)
 
 
+@cython.ccall
 def _shared_replay_inputs_8616(
     offered: Real16InvocationDomain8616,
     required: Real16InvocationDomain8616,
-) -> bool:
+) -> cython.bint:
     """Require exact root replay inputs, including entry-call pool identity."""
     return (
         _shared_root_replay_inputs_8616(offered, required)
@@ -9465,7 +9973,7 @@ def _shared_replay_inputs_8616(
 def _shared_root_replay_inputs_8616(
     offered: Real16InvocationDomain8616,
     required: Real16InvocationDomain8616,
-) -> bool:
+) -> cython.bint:
     """Bind root replay inputs apart from the separately observed entry pool.
 
     A single replay may stand in for ``offered.complete`` and
@@ -9479,8 +9987,8 @@ def _shared_root_replay_inputs_8616(
     parent, edge, binding and call-state surfaces, even for one shared link.
     """
     def _same_consumables(
-        left: tuple[object, ...], right: tuple[object, ...],
-    ) -> bool:
+        left: object, right: object,
+    ) -> cython.bint:
         """Share only exact tuple identities or genuine empty immutable tuples."""
         return type(left) is tuple and type(right) is tuple and (
             left is right or (len(left) == 0 and len(right) == 0)
@@ -9491,7 +9999,7 @@ def _shared_root_replay_inputs_8616(
         and offered.boot is required.boot
         and offered.boot_recompute is required.boot_recompute
         and offered.coverage is required.coverage
-        and offered.callsite_addr == required.callsite_addr
+        and operator.eq(offered.callsite_addr, required.callsite_addr)
         and _same_consumables(offered.call_preservations, required.call_preservations)
         and type(offered.entry_call_preservations) is tuple
         and type(required.entry_call_preservations) is tuple
@@ -9518,27 +10026,30 @@ def _shared_root_replay_inputs_8616(
     return False
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _EntryPoolGateScan8616:
     """One charged row scan's unique owner, CALL blocks and CFG edge census."""
 
     owner: IRBlock
-    other_calls: frozenset[int]
-    edges: frozenset[tuple[int, int]]
-    block_addrs: frozenset[int]
-    successor_count: int
+    other_calls: object
+    edges: object
+    block_addrs: object
+    successor_count: cython.longlong
 
 
 def _scan_entry_pool_gate_8616(
-    artifact: IRFunctionArtifact, callsite_addr: int,
+    artifact: IRFunctionArtifact, callsite_addr: cython.longlong,
 ) -> _EntryPoolGateScan8616 | None:
     """Inspect each row once, retaining owner uniqueness and suffix CALL facts."""
+    owner: object
+    block: object
+    instruction: object
     from .segment_call_preservation import segment_call_dependency_traversal_scope_8616
 
-    owner: IRBlock | None = None
-    other_calls: set[int] = set()
-    edges: set[tuple[int, int]] = set()
-    block_addrs: set[int] = set()
+    owner = None
+    other_calls: set[cython.longlong] = set()
+    edges: set[tuple[cython.longlong, cython.longlong]] = set()
+    block_addrs: set[cython.longlong] = set()
     successor_count = 0
     with segment_call_dependency_traversal_scope_8616() as traversal:
         deadline = _census_deadline_8616()
@@ -9548,14 +10059,14 @@ def _scan_entry_pool_gate_8616(
                 return None
             block_addrs.add(block.addr)
             successor_count += len(block.successor_addrs)
-            edges.update((block.addr, successor) for successor in block.successor_addrs)
+            edges.update((block.addr, successor) for successor in iter(block.successor_addrs))
             owns_callsite = False
             for instruction in block.instrs:
                 traversal.census_work_units += 1
                 if traversal.census_work_units > traversal.census_work_limit or time.monotonic() > deadline:
                     return None
-                owns_callsite = owns_callsite or instruction.addr == callsite_addr
-                if instruction.op == "CALL" and instruction.addr != callsite_addr:
+                owns_callsite = owns_callsite or operator.eq(instruction.addr, callsite_addr)
+                if instruction.op == "CALL" and operator.ne(instruction.addr, callsite_addr):
                     other_calls.add(block.addr)
             if owns_callsite:
                 if owner is not None:
@@ -9569,13 +10080,14 @@ def _scan_entry_pool_gate_8616(
         return _EntryPoolGateScan8616(owner, frozenset(other_calls), frozenset(edges), frozenset(block_addrs), successor_count)
 
 
-def _entry_pool_unused_prefix_8616(subject: Real16InvocationDomain8616) -> bool:
+def _entry_pool_unused_prefix_8616(subject: Real16InvocationDomain8616) -> cython.bint:
     """Charge one row scan and canonical CFG discovery for pool independence.
 
     The stop block's suffix is included. Graph construction does not scan
     instruction rows, so its block/edge visits are charged separately from
     the single owner/CALL row walk; no proof budget or deadline is renewed.
     """
+    scan: object
     from .segment_call_preservation import segment_call_dependency_traversal_scope_8616
 
     chain = subject.chain
@@ -9601,31 +10113,32 @@ def _entry_pool_unused_prefix_8616(subject: Real16InvocationDomain8616) -> bool:
         if traversal.census_work_units > traversal.census_work_limit or time.monotonic() > deadline:
             return False
         traversal.census_work_units += len(dangerous) + sum(
-            1 for source, target in scan.edges if source in scan.block_addrs and target in dangerous
+            1 for source, target in iter(scan.edges) if source in scan.block_addrs and target in dangerous
         ) + len(scan.other_calls)
         if traversal.census_work_units > traversal.census_work_limit or time.monotonic() > deadline:
             return False
         return dangerous.isdisjoint(scan.other_calls)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _SharedReplayCapture8616:
     """Retain exact replay input identities before any native callback executes."""
 
-    identities: tuple[object, ...]
-    root_surface: tuple[object, ...]
-    callsite_addr: int
+    identities: object
+    root_surface: object
+    callsite_addr: cython.longlong
     kind: Real16InvocationKind8616
 
-    def binds(self, subject: Real16InvocationDomain8616) -> bool:
+    def binds(self, subject: Real16InvocationDomain8616) -> cython.bint:
         """Reject replacement inputs even when both subjects changed identically."""
+        current: object
         current = _capture_shared_replay_8616(subject)
         return (
             current is not None
-            and self.callsite_addr == current.callsite_addr
+            and operator.eq(self.callsite_addr, current.callsite_addr)
             and self.kind is current.kind
-            and all(left is right for left, right in zip(self.identities, current.identities, strict=True))
-            and all(left is right for left, right in zip(self.root_surface, current.root_surface, strict=True))
+            and all(left is right for left, right in builtins.iter(zip(self.identities, current.identities, strict=True)))
+            and all(left is right for left, right in builtins.iter(zip(self.root_surface, current.root_surface, strict=True)))
         )
 
 
@@ -9641,7 +10154,7 @@ def _capture_shared_replay_8616(
         subject.failure is not None
         or not _retained_domain_kind_bound_8616(subject)
         or type(subject.callsite_addr) is not int
-        or any(type(value) is not tuple for value in consumables)
+        or any(type(value) is not tuple for value in iter(consumables))
     ):
         return None
     chain = subject.chain
@@ -9656,16 +10169,17 @@ def _capture_shared_replay_8616(
         return None
     return _SharedReplayCapture8616(
         (subject.project, subject.coverage, subject.boot, subject.boot_recompute,
-         subject.chain, *consumables),
+         subject.chain, ) + tuple(consumables),
         root_surface, subject.callsite_addr, subject.kind,
     )
 
 
+@cython.ccall
 def _consume_required_pool_result_8616(
     required: Real16InvocationDomain8616,
     derived: _Derivation8616,
-    captures_bound: Callable[[], bool],
-) -> bool:
+    captures_bound: Callable[[], cython.bint],
+) -> cython.bint:
     """Share an observed unused pool or authenticate required independently.
 
     The caller owns required's existing active guard; offered has already
@@ -9679,8 +10193,8 @@ def _consume_required_pool_result_8616(
 def _complete_shared_replay_8616(
     offered: Real16InvocationDomain8616,
     required: Real16InvocationDomain8616,
-    *, require_unused_entry_pool: bool = False,
-) -> bool:
+    *, require_unused_entry_pool: cython.bint = False,
+) -> cython.bint:
     """Authenticate two input-identical domains with one current derivation.
 
     Both identities acquire ordinary resource admission, including cached
@@ -9688,13 +10202,15 @@ def _complete_shared_replay_8616(
     cached positive from skipping the pair check. Per-subject input captures
     bind the replay after callbacks, before either fresh result is consumed.
     """
+    offered_capture: object
+    required_capture: object
     offered_capture = _capture_shared_replay_8616(offered)
     required_capture = _capture_shared_replay_8616(required)
     if offered_capture is None or required_capture is None:
         return False
     derived: _Derivation8616 | None = None
 
-    def derive_offered() -> bool:
+    def derive_offered() -> cython.bint:
         """Derive once, authenticate offered and preserve both exact captures."""
         nonlocal derived
         if not offered_capture.binds(offered) or not required_capture.binds(required):
@@ -9721,15 +10237,15 @@ def _complete_shared_replay_8616(
             _enroll_prefix_census_data_8616(offered, derived)
         return accepted
 
-    def verify_both() -> bool:
+    def verify_both() -> cython.bint:
         """Bind exact-input peers to one current derivation."""
         return derive_offered() and derived is not None and _replayed_domain_equal_8616(derived, required)
 
-    def admit_required() -> bool:
+    def admit_required() -> cython.bint:
         """Keep the peer independently active while deriving the common result."""
         return required._consume_completion_8616(verify_both, force_current=True)
 
-    def verify_required_pool() -> bool:
+    def verify_required_pool() -> cython.bint:
         """Share UNUSED or retain independent replay after offered leaves active."""
         if not offered._consume_completion_8616(derive_offered, force_current=True) or derived is None:
             return False
@@ -9743,9 +10259,10 @@ def _complete_shared_replay_8616(
     return offered._consume_completion_8616(admit_required, force_current=True)
 
 
+@cython.ccall
 def _self_scope_forces_root_parent_8616(
-    scope: Real16InvocationDomain8616, depth: int,
-) -> bool:
+    scope: Real16InvocationDomain8616, depth: cython.longlong,
+) -> cython.bint:
     """Select exact-self transport whose ordinary replay authenticates its root.
 
     This grants no proof: the caller must still consume ``scope.complete``.
@@ -9769,11 +10286,12 @@ def _self_scope_forces_root_parent_8616(
     )
 
 
+@cython.ccall
 def _same_scope_8616(
-    offered: Real16InvocationDomain8616 | None,
-    required: Real16InvocationDomain8616 | None,
-    depth: int,
-) -> bool:
+    offered: object,
+    required: object,
+    depth: cython.longlong,
+) -> cython.bint:
     """Authenticate shared entry provenance; selector coincidence is insufficient."""
     if required is None:
         return offered is None
@@ -9784,7 +10302,7 @@ def _same_scope_8616(
         and offered.boot is required.boot
         and offered.boot_recompute is required.boot_recompute
         and offered.kind is required.kind
-        and offered.source_sha256 == required.source_sha256
+        and operator.eq(offered.source_sha256, required.source_sha256)
     ):
         return False
     if offered is required and _self_scope_forces_root_parent_8616(offered, depth):
@@ -9819,7 +10337,8 @@ def _same_scope_8616(
     return offered.complete and required.complete
 
 
-def _unused_pool_replay_selected_8616(subject: Real16InvocationDomain8616) -> bool:
+@cython.ccall
+def _unused_pool_replay_selected_8616(subject: Real16InvocationDomain8616) -> cython.bint:
     """Use prior consultation only to select work; fresh replay owns sharing.
 
     READ keeps independent replay. UNUSED avoids the redundant static scan,
@@ -9832,10 +10351,11 @@ def _unused_pool_replay_selected_8616(subject: Real16InvocationDomain8616) -> bo
     return advice is _EntryCallPoolConsultation8616.UNUSED or _entry_pool_unused_prefix_8616(subject)
 
 
+@cython.ccall
 def same_real16_entry_scope_8616(
     offered: Real16InvocationDomain8616 | None,
     required: Real16InvocationDomain8616 | None,
-) -> bool:
+) -> cython.bint:
     """Authenticate shared entry provenance; selector coincidence is insufficient."""
     from .segment_call_preservation import segment_call_dependency_traversal_scope_8616
 
@@ -9843,12 +10363,13 @@ def same_real16_entry_scope_8616(
         return _same_scope_8616(offered, required, 0)
 
 
+@cython.ccall
 def real16_scope_crosses_call_8616(
     caller: Real16InvocationDomain8616 | None,
     callee: Real16InvocationDomain8616,
     coverage: IRBoundaryCoverageResult8616,
-    callsite_addr: int,
-) -> bool:
+    callsite_addr: cython.longlong,
+) -> cython.bint:
     """Authenticate retained caller-to-callee transport for a scoped summary.
 
     In-flight scopes retain their identical callee surface on the native-bound
@@ -9863,21 +10384,22 @@ def real16_scope_crosses_call_8616(
         return False
     return (
         same_real16_entry_scope_8616(caller, link.parent)
-        and link.parent.callsite_addr == callsite_addr
+        and operator.eq(link.parent.callsite_addr, callsite_addr)
         and link.callsite_artifact is coverage.artifact
         and link.complete
         and callee.complete
     )
 
 
+@cython.ccall
 def _fused_callee_header_equal_8616(
     native: IRBlock, block: IRBlock, memo: _NativeTermMemo8616,
-) -> bool:
+) -> cython.bint:
     """Bind whole-block metadata at the original comparator nesting depth."""
     return (
         type(native) is IRBlock and type(block) is IRBlock
         and type(native.instrs) is tuple and type(block.instrs) is tuple
-        and len(native.instrs) == len(block.instrs)
+        and operator.eq(len(native.instrs), len(block.instrs))
         and _native_fields_current_8616(native, _IR_BLOCK_FIELDS_8616, memo)
         and _native_term_equal_8616(
             (native.addr, native.refusals, native.successor_addrs),
@@ -9886,6 +10408,7 @@ def _fused_callee_header_equal_8616(
     )
 
 
+@cython.ccall
 def _fused_callee_producers_8616() -> tuple[object, ...]:
     """Capture every evaluator/reader/store boundary allowed in pure transfer."""
     from .call_stack_coordinates import IRCallStackCoordinates8616
@@ -9992,6 +10515,7 @@ def _fused_callee_producers_8616() -> tuple[object, ...]:
     )
 
 
+@cython.ccall
 def _make_fused_callee_operations_8616() -> FusedCalleeOperations8616:
     """Retain exact canonical producers before tests/plugins can replace them."""
     return FusedCalleeOperations8616(
@@ -10014,6 +10538,7 @@ _BASE_FUSED_CALLEE_OPERATIONS_8616 = _make_fused_callee_operations_8616()
 _CANONICAL_PREFIX_EXECUTION_PRODUCERS_8616 = _prefix_execution_producers_8616()
 
 
+@cython.ccall
 def _try_fused_caller_prefix_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact, block: IRBlock,
     entry: _PathState8616, stop_after: int | None,
@@ -10038,6 +10563,7 @@ def _try_fused_caller_prefix_8616(
     )
 
 
+@cython.ccall
 def _try_active_fused_callee_transfer_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact, block: IRBlock,
     entry: _PathState8616, stop_after: int | None,
@@ -10064,11 +10590,14 @@ def _try_active_fused_callee_transfer_8616(
     )
 
 
+@cython.ccall
 def _bind_path_block_before_transfer_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact,
-    block: IRBlock, stop_after: int | None,
+    block: IRBlock, stop_after: object,
 ) -> Real16InvocationFailure8616 | None:
     """Preserve the original charged whole-block binding for ordinary transfers."""
+    native_blocks: object
+    prefix_count: object
     if time.monotonic() > ctx.deadline:
         return Real16InvocationFailure8616.CENSUS_DEADLINE_EXCEEDED
     prefix_count = None if stop_after is None else _native_prefix_count_8616(block, stop_after)
@@ -10094,8 +10623,9 @@ def _bind_path_block_before_transfer_8616(
     return None
 
 
+@cython.ccall
 def _feasibility_union_inputs_8616(
-    ctx: _PathCensusContext8616, caller_range: ScratchCallerRange8616 | None,
+    ctx: _PathCensusContext8616, caller_range: object,
 ) -> tuple[set[tuple[int, int]] | None, tuple[int, int] | None]:
     """Collect the original or exactly equivalent temporary interval input.
 
@@ -10105,14 +10635,16 @@ def _feasibility_union_inputs_8616(
     exact ``int`` or when no positive extent exists; a caller may only use
     it as conservative evidence, never as admission.
     """
+    envelope_low: object
+    span: object
     if caller_range is not None:
         selection = select_caller_intervals_8616(ctx, ctx.manifest, caller_range, _census_work_exceeded_8616)
         if selection.status is CallerIntervalSelectionStatus8616.REFUSED:
             return None, None
         if selection.status is CallerIntervalSelectionStatus8616.SELECTED:
             return selection.intervals, selection.envelope
-    intervals: set[tuple[int, int]] = set()
-    envelope_low: int | None = None
+    intervals: set[tuple[cython.longlong, cython.longlong]] = set()
+    envelope_low = None
     envelope_high = 0
     envelope_exact = True
     for span in ctx.manifest:
@@ -10139,7 +10671,7 @@ def _feasibility_union_inputs_8616(
 
 def _snapshot_omission_hooks_8616(
     ctx: _PathCensusContext8616,
-) -> tuple[Callable[[IRBlock], bool], Callable[[], bool]] | None:
+) -> object:
     """Per-moment no-op proofs for the root census's discarded snapshot replays.
 
     The first predicate answers whether the canonical repeat hook is a
@@ -10159,8 +10691,9 @@ def _snapshot_omission_hooks_8616(
         return None
     project = ctx.project
 
-    def repeat_consult_noop(block: IRBlock) -> bool:
+    def repeat_consult_noop(block: IRBlock) -> cython.bint:
         """True only while the repeat hook provably returns before any effect."""
+        encoded: object
         machine_bytes = ctx.machine_bytes
         if type(machine_bytes) is not dict or ctx.project is not project:
             return False
@@ -10174,8 +10707,9 @@ def _snapshot_omission_hooks_8616(
                 return False
         return _CANONICAL_SNAPSHOT_CHECK_8616()
 
-    def load_reader_readonly() -> bool:
+    def load_reader_readonly() -> cython.bint:
         """True only while the census LOAD reader remains side-effect-free."""
+        initial: object
         if not _CANONICAL_SNAPSHOT_CHECK_8616():
             return False
         initial = ctx.initial_memory
@@ -10200,7 +10734,7 @@ def _snapshot_terminal_noop_8616(
     if not _CANONICAL_SNAPSHOT_CHECK_8616():
         return None
 
-    def terminal_call_noop(instruction: IRInstr) -> bool:
+    def terminal_call_noop(instruction: IRInstr) -> cython.bint:
         """True only while this exact CALL row's consult is provably inert."""
         if type(instruction) is not IRInstr or type(instruction.op) is not str:
             return False
@@ -10237,14 +10771,16 @@ def _snapshot_call_unobserved_8616(
     that consult was already produced by the mandatory first pass. Interrupt
     or service rows, non-ordinary targets, and foreign or rebound consult
     chains always decline to the ordinary observable replay. The verdict
-    grants no exemption on a block carrying a requested call cut; the walk
-    withholds it there before consulting.
+    grants no exemption from replaying a requested cut's prefix and capturing
+    its fresh state. Only afterward may the snapshot consumer use the same
+    verdict to omit a terminal CALL whose exit state would be discarded.
     """
     if not _CANONICAL_SNAPSHOT_CHECK_8616():
         return None
 
-    def call_replay_unobserved(instruction: IRInstr) -> bool:
+    def call_replay_unobserved(instruction: IRInstr) -> cython.bint:
         """True only while this exact CALL row's replay consult is confined."""
+        initial_memory: object
         if type(instruction) is not IRInstr or type(instruction.op) is not str:
             return False
         if not _CANONICAL_SNAPSHOT_CHECK_8616():
@@ -10265,7 +10801,8 @@ def _snapshot_call_unobserved_8616(
     return call_replay_unobserved
 
 
-def _snapshot_bindings_check_8616() -> bool:
+@cython.ccall
+def _snapshot_bindings_check_8616() -> cython.bint:
     """Current self-check via the captured canonical verifier only."""
     return (
         _snapshot_bindings_check_8616 is _CANONICAL_SNAPSHOT_CHECK_8616
@@ -10274,7 +10811,7 @@ def _snapshot_bindings_check_8616() -> bool:
     )
 
 
-def _snapshot_bindings_current_8616() -> bool:
+def _snapshot_bindings_current_8616() -> cython.bint:
     """Every consulted snapshot boundary still denotes the owned implementation.
 
     The builder identities are compared before either is invoked so a
@@ -10287,12 +10824,13 @@ def _snapshot_bindings_current_8616() -> bool:
             or _FeasibilityCallBinding8616 is not _CANONICAL_FEASIBILITY_BINDING_CLASS_8616):
         return False
     actual = _CANONICAL_SNAPSHOT_PRODUCER_BUILDER_8616()
-    return len(actual) == len(_BASE_SNAPSHOT_PRODUCERS_8616) and all(
+    return operator.eq(len(actual), len(_BASE_SNAPSHOT_PRODUCERS_8616)) and all(
         left is right
-        for left, right in zip(actual, _BASE_SNAPSHOT_PRODUCERS_8616, strict=True)
+        for left, right in builtins.iter(zip(actual, _BASE_SNAPSHOT_PRODUCERS_8616, strict=True))
     )
 
 
+@cython.ccall
 def _snapshot_omission_producers_8616() -> tuple[object, ...]:
     """Every evaluator/hook boundary a discarded snapshot replay may reach.
 
@@ -10329,6 +10867,12 @@ def _snapshot_omission_producers_8616() -> tuple[object, ...]:
         kb_owner_8616.BranchSnapshotReplay8616,
         kb_owner_8616._snapshot_terminal_exemption_8616,
         kb_owner_8616._kb_block_exit_8616,
+        kb_owner_8616._observe_snapshot_cut_8616,
+        kb_owner_8616._captured_terminal_call_unobserved_8616,
+        kb_owner_8616._observe_call_cut_8616,
+        kb_owner_8616._capture_call_cut_8616,
+        kb_owner_8616.Real16CallCutState8616,
+        kb_owner_8616.Real16CallCutState8616.__init__,
         kb_owner_8616._kb_repeat_exit_8616,
         kb_owner_8616._kb_known_registers_8616,
         kb_owner_8616._kb_transfer_effect_8616,
@@ -10356,6 +10900,7 @@ def _snapshot_omission_producers_8616() -> tuple[object, ...]:
         _feasibility_call_effect_8616,
         _consume_cross_call_boundary_8616,
         _census_callee_bytes_8616,
+        _callee_selected_native_blocks_8616,
         _feasibility_code_unmodified_8616,
         _feasibility_callsite_bytes_current_8616,
         _simulate_callee_8616,

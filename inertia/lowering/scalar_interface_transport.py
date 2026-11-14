@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Types/lowering.
 
 Responsibility: transport an accepted scalar callee interface, bound to its
@@ -8,6 +9,9 @@ Consumes alias, widening, and typed facts
 Do not recover semantics from COD, source, assembly, or rendered C text
 """
 from __future__ import annotations
+import dataclasses
+import typing
+import cython
 
 import hashlib
 from dataclasses import asdict, dataclass
@@ -23,12 +27,14 @@ from .authoritative_function_prototypes import (
     authoritative_function_prototype_8616,
     publish_authoritative_function_prototype_8616,
 )
+import operator
+import builtins
 
 
 class _Memory(Protocol):
     """Current loader memory boundary."""
 
-    def load(self, addr: int, size: int) -> bytes:
+    def load(self, addr: cython.longlong, size: cython.longlong) -> object:
         """Read current loaded native bytes."""
         ...
 
@@ -36,10 +42,10 @@ class _Memory(Protocol):
 class _Object(Protocol):
     """Original native source identity boundary."""
 
-    binary: str | None
-    mapped_base: int
-    min_addr: int
-    max_addr: int
+    binary: object
+    mapped_base: cython.longlong
+    min_addr: cython.longlong
+    max_addr: cython.longlong
 
 
 class _Loader(Protocol):
@@ -52,7 +58,7 @@ class _Loader(Protocol):
 class _Functions(Protocol):
     """Existing function lookup boundary."""
 
-    def function(self, *, addr: int, create: bool = False) -> object | None:
+    def function(self, *, addr: cython.longlong, create: cython.bint = False) -> object | None:
         """Look up the exact existing callee."""
         ...
 
@@ -69,18 +75,18 @@ class _Project(Protocol):
     arch: Arch
     loader: _Loader
     kb: _KB
-    _inertia_scalar_interfaces_8616: dict[int, ScalarInterface8616]
+    _inertia_scalar_interfaces_8616: object
 
 
 class _Function(Protocol):
     """Native function extent and published prototype."""
 
-    addr: int
-    size: int
+    addr: cython.longlong
+    size: cython.longlong
     prototype: object
-    block_addrs_set: set[int]
+    block_addrs_set: object
 
-    def get_block_size(self, addr: int) -> int | None:
+    def get_block_size(self, addr: cython.longlong) -> int | None:
         """Return the retained exact native block size without relifting."""
         ...
 
@@ -94,35 +100,37 @@ class ScalarKind8616(StrEnum):
     LONG = "long"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ScalarType8616:
     """One exact native scalar width and C signed interpretation."""
-    width: int
-    signed: bool
+    width: cython.longlong
+    signed: cython.bint
     kind: ScalarKind8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ScalarInterface8616:
     """Accepted callee interface; never authorizes effects or termination."""
-    target: int
-    source_sha256: str
-    mapped_base: int
-    arch_name: str
-    arch_bits: int
-    native_size: int
-    native_sha256: str
-    payload_sha256: str
-    arguments: tuple[ScalarType8616, ...]
+    target: cython.longlong
+    source_sha256: object
+    mapped_base: cython.longlong
+    arch_name: object
+    arch_bits: cython.longlong
+    native_size: cython.longlong
+    native_sha256: object
+    payload_sha256: object
+    arguments: object
     result: ScalarType8616
 
-    def to_record(self) -> dict[str, object]:
+    def to_record(self) -> object:
         """Encode strict scalar records on the existing JSON transport."""
         return asdict(self)
 
 
-def _source(project: _Project) -> str:
+@cython.ccall
+def _source(project: _Project) -> object:
     """Bind the original file bytes, not a mutable filename alone."""
+    binary: object
     main_object = project.loader.main_object
     binary = main_object.binary
     if binary is not None:
@@ -133,8 +141,10 @@ def _source(project: _Project) -> str:
     return hashlib.sha256(project.loader.memory.load(main_object.min_addr, size)).hexdigest()
 
 
+@cython.ccall
 def _scalar(value: object) -> ScalarType8616 | None:
     """Admit only concrete scalar machine types with known signedness."""
+    kind: object
     kind = {SimTypeChar: ScalarKind8616.CHAR, SimTypeShort: ScalarKind8616.SHORT,
             SimTypeInt: ScalarKind8616.INT, SimTypeLong: ScalarKind8616.LONG}.get(type(value))
     if kind is None:
@@ -145,10 +155,12 @@ def _scalar(value: object) -> ScalarType8616 | None:
     return ScalarType8616(value.size // 8, value.signed, kind)
 
 
-def _native_extent(function: _Function, target: int) -> int | None:
+@cython.ccall
+def _native_extent(function: _Function, target: cython.longlong) -> int | None:
     """Cover every retained block, including gaps which Function.size omits."""
+    addr: object
     addresses = function.block_addrs_set
-    if function.addr != target or not addresses or target not in addresses or len(addresses) > 4096:
+    if operator.ne(function.addr, target) or not addresses or target not in addresses or len(addresses) > 4096:
         return None
     end = target
     for addr in addresses:
@@ -160,9 +172,12 @@ def _native_extent(function: _Function, target: int) -> int | None:
 
 
 def scalar_interface_for_result_8616(
-    project: object, target: int, payload: str, *, function: object | None = None,
+    project: object, target: cython.longlong, payload: object, *, function: object | None = None,
 ) -> ScalarInterface8616 | None:
     """Export only an already published exact-arity scalar interface."""
+    native_size: object
+    prototype: object
+    result: object
     surface = cast(_Project, project)
     if function is None:
         function = surface.kb.functions.function(addr=target, create=False)
@@ -176,12 +191,12 @@ def scalar_interface_for_result_8616(
     native_size = _native_extent(callee, target)
     if prototype is None or prototype.variadic or native_size is None:
         return None
-    args = tuple(_scalar(item) for item in prototype.args)
+    args = tuple(_scalar(item) for item in iter(prototype.args))
     result = _scalar(prototype.returnty)
-    if any(item is None for item in args) or result is None:
+    if any(item is None for item in iter(args)) or result is None:
         return None
     data = surface.loader.memory.load(target, native_size)
-    if len(data) != native_size:
+    if operator.ne(len(data), native_size):
         return None
     return ScalarInterface8616(
         target, _source(surface), surface.loader.main_object.mapped_base,
@@ -190,17 +205,19 @@ def scalar_interface_for_result_8616(
     )
 
 
-def _validate_interface_digests(record: dict[str, object]) -> None:
+def _validate_interface_digests(record: object) -> None:
     """Require exact SHA-256 values at the JSON boundary."""
+    name: object
     for name in ('source_sha256', 'native_sha256', 'payload_sha256'):
         digest = record[name]
-        if type(digest) is not str or len(digest) != 64 or any(c not in '0123456789abcdef' for c in digest):
+        if type(digest) is not str or len(digest) != 64 or any(c not in '0123456789abcdef' for c in iter(digest)):
             raise ValueError('invalid scalar interface digest')
 
 
 def scalar_interface_from_record_8616(record: object) -> ScalarInterface8616:
     """Reject malformed, partial or non-scalar interface records."""
-    if not isinstance(record, dict) or set(record) != set(ScalarInterface8616.__dataclass_fields__):
+    name: object
+    if not isinstance(record, dict) or operator.ne(set(record), set(ScalarInterface8616.__dataclass_fields__)):
         raise ValueError('invalid scalar interface fields')
     for name in ('target', 'mapped_base', 'arch_bits', 'native_size'):
         if type(record[name]) is not int or record[name] < 0:
@@ -220,16 +237,17 @@ def scalar_interface_from_record_8616(record: object) -> ScalarInterface8616:
     return ScalarInterface8616(
         record['target'], record['source_sha256'], record['mapped_base'], record['arch_name'],
         record['arch_bits'], record['native_size'], record['native_sha256'], record['payload_sha256'],
-        tuple(scalar(item) for item in record['arguments']), scalar(record['result']),
+        tuple(scalar(item) for item in iter(record['arguments'])), scalar(record['result']),
     )
 
 
 def attach_scalar_interface_8616(project: object, receipt: ScalarInterface8616) -> None:
     """Rebind current native source before importing accepted type evidence."""
+    prior: object
     surface = cast(_Project, project)
-    if (receipt.source_sha256 != _source(surface) or receipt.mapped_base != surface.loader.main_object.mapped_base
-        or receipt.arch_name != surface.arch.name or receipt.arch_bits != surface.arch.bits
-        or hashlib.sha256(surface.loader.memory.load(receipt.target, receipt.native_size)).hexdigest() != receipt.native_sha256):
+    if (operator.ne(receipt.source_sha256, _source(surface)) or operator.ne(receipt.mapped_base, surface.loader.main_object.mapped_base)
+        or operator.ne(receipt.arch_name, surface.arch.name) or operator.ne(receipt.arch_bits, surface.arch.bits)
+        or operator.ne(hashlib.sha256(surface.loader.memory.load(receipt.target, receipt.native_size)).hexdigest(), receipt.native_sha256)):
         raise ValueError('stale scalar interface source or ABI')
     try:
         registry = surface._inertia_scalar_interfaces_8616
@@ -237,21 +255,21 @@ def attach_scalar_interface_8616(project: object, receipt: ScalarInterface8616) 
         registry = {}
         surface._inertia_scalar_interfaces_8616 = registry
     prior = registry.get(receipt.target)
-    if prior is not None and prior != receipt:
+    if prior is not None and operator.ne(prior, receipt):
         raise ValueError('conflicting scalar interface')
     def simtype(value: ScalarType8616) -> SimTypeInt | SimTypeChar:
         """Build the existing target-width SimType representation."""
         constructor = {ScalarKind8616.CHAR: SimTypeChar, ScalarKind8616.SHORT: SimTypeShort,
                        ScalarKind8616.INT: SimTypeInt, ScalarKind8616.LONG: SimTypeLong}[value.kind]
         result = constructor(value.signed).with_arch(surface.arch)
-        if result.size != value.width * 8:
+        if operator.ne(result.size, value.width * 8):
             raise ValueError("scalar kind/width contradict target ABI")
         return result
-    prototype = SimTypeFunction(tuple(simtype(item) for item in receipt.arguments), simtype(receipt.result)).with_arch(surface.arch)
+    prototype = SimTypeFunction(tuple(simtype(item) for item in iter(receipt.arguments)), simtype(receipt.result)).with_arch(surface.arch)
     published = publish_authoritative_function_prototype_8616(
         surface, receipt.target, prototype, source=PrototypeSource.CCA_DECOMPILER,
     )
-    if published.prototype != prototype:
+    if operator.ne(published.prototype, prototype):
         raise ValueError("accepted scalar interface conflicts with stronger prototype")
     registry[receipt.target] = receipt
 
@@ -262,16 +280,19 @@ def scalar_interfaces_8616(project: object) -> tuple[ScalarInterface8616, ...]:
         registry = cast(_Project, project)._inertia_scalar_interfaces_8616
     except AttributeError:
         return ()
-    return tuple(registry[key] for key in sorted(registry))
+    return tuple(registry[key] for key in builtins.iter(sorted(registry)))
 
 
+@cython.ccall
 def scalar_interface_records_8616(project: object) -> list[dict[str, object]]:
     """Export only the accepted project-local interface inventory."""
-    return [receipt.to_record() for receipt in scalar_interfaces_8616(project)]
+    return [receipt.to_record() for receipt in builtins.iter(scalar_interfaces_8616(project))]
 
 
-def current_scalar_interface_8616(project: object, target: int) -> ScalarInterface8616 | None:
+@cython.ccall
+def current_scalar_interface_8616(project: object, target: cython.longlong) -> ScalarInterface8616 | None:
     """Revalidate a transported source before its declaration is consumed."""
+    receipt: object
     try:
         receipt = cast(_Project, project)._inertia_scalar_interfaces_8616.get(target)
     except AttributeError:

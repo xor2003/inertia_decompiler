@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Resolve external VEX expression widths without changing their semantics.
 
 Layer: IR.
@@ -8,6 +9,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Protocol, cast
 
@@ -36,7 +39,7 @@ class _VexExpressionBoundary(Protocol):
     ty: object
 
 
-_VEX_TYPE_BYTES: dict[str, int] = {
+_VEX_TYPE_BYTES: dict[str, cython.longlong] = {
     "Ity_I1": 1,
     "Ity_I8": 1,
     "Ity_I16": 2,
@@ -47,8 +50,11 @@ _VEX_TYPE_BYTES: dict[str, int] = {
 }
 
 
+@cython.ccall
 def _type_token_size(expr: object) -> int | None:
     """Resolve expression or constant type tokens at the pyvex boundary."""
+    constant: object
+    type_size: object
     boundary = cast(_VexExpressionBoundary, expr)
     try:
         expression_type = boundary.ty
@@ -70,7 +76,8 @@ def _type_token_size(expr: object) -> int | None:
         return None
 
 
-def _callable_result_size_bits(expr: object, type_environment: object | None) -> int | None:
+@cython.ccall
+def _callable_result_size_bits(expr: object, type_environment: object) -> int | None:
     """Call pyvex's result-size method when its owning type environment exists."""
     if type_environment is None:
         return None
@@ -88,18 +95,21 @@ def _callable_result_size_bits(expr: object, type_environment: object | None) ->
     return bits if bits > 0 else None
 
 
+@cython.ccall
 def vex_expr_size_bytes(
-    expr: object | None,
+    expr: object,
     *,
     type_environment: object | None = None,
-    default: int = 2,
-) -> int:
+    default: cython.longlong = 2,
+) -> cython.longlong:
     """Return one external VEX expression width in bytes.
 
     Real pyvex ``result_size`` methods return bits and require the IRSB type
     environment. Numeric ``result_size`` fields are retained as byte-valued
     compatibility input for synthetic test boundaries.
     """
+    bits: object
+    type_size: object
     if expr is None:
         return default
     bits = _callable_result_size_bits(expr, type_environment)

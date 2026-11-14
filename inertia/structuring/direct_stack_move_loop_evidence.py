@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Recover binary loop-entry evidence for direct stack moves.
 
 Layer: Structuring.
@@ -12,6 +13,8 @@ rendered C, source text, symbols, or variable names.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -19,20 +22,24 @@ from typing import Any, cast
 
 from capstone import CS_GRP_CALL, CS_GRP_JUMP, CS_GRP_RET
 from capstone.x86_const import X86_OP_IMM
+import dataclasses
+import operator
+import builtins
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectStackMoveLoopEntryEdge8616:
     """One backward edge that repeats the instruction sequence containing a move."""
 
-    move_addr: int
-    entry_addr: int
-    jump_addr: int
+    move_addr: cython.longlong
+    entry_addr: cython.longlong
+    jump_addr: cython.longlong
 
 
+@cython.ccall
 def _boundary_attr_8616(
     value: object | None,
-    name: str,
+    name: object,
     default: object | None = None,
 ) -> object | None:
     """Read one optional field from a heterogeneous angr/Capstone boundary object."""
@@ -40,6 +47,7 @@ def _boundary_attr_8616(
     return getattr(value, name, default)
 
 
+@cython.ccall
 def boundary_tuple_8616(value: object) -> tuple[Any, ...]:
     """Convert one dynamic angr collection to a stable tuple."""
     if value is None:
@@ -47,7 +55,8 @@ def boundary_tuple_8616(value: object) -> tuple[Any, ...]:
     return tuple(cast(Iterable[Any], value))
 
 
-def candidate_addresses_8616(project: object, address: int) -> frozenset[int]:
+@cython.ccall
+def candidate_addresses_8616(project: object, address: cython.longlong) -> frozenset[cython.longlong]:
     """Return current and original address-domain candidates."""
     candidates = {address}
     delta = _boundary_attr_8616(project, "_inertia_original_linear_delta")
@@ -58,9 +67,9 @@ def candidate_addresses_8616(project: object, address: int) -> frozenset[int]:
 
 def comparable_address_8616(
     project: object,
-    address: int,
-    reference_addr: int,
-) -> int:
+    address: cython.longlong,
+    reference_addr: cython.longlong,
+) -> cython.longlong:
     """Normalize one dynamic address to the fact's coordinate domain."""
     return min(
         candidate_addresses_8616(project, address),
@@ -70,39 +79,44 @@ def comparable_address_8616(
 
 def _function_instructions_8616(function: object) -> tuple[tuple[object, ...], ...]:
     """Return authoritative Capstone sequences from the function's binary blocks."""
+    block: object
     blocks = boundary_tuple_8616(_boundary_attr_8616(function, "blocks", ()) or ())
     sequences: list[tuple[object, ...]] = []
     for block in blocks:
         capstone = _boundary_attr_8616(block, "capstone")
         instructions = tuple(
             _boundary_attr_8616(wrapper, "insn", wrapper)
-            for wrapper in boundary_tuple_8616(
+            for wrapper in builtins.iter(boundary_tuple_8616(
                 _boundary_attr_8616(capstone, "insns", ()) or ()
-            )
+            ))
         )
         if instructions:
             sequences.append(instructions)
     return tuple(sequences)
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _SequenceEdgeCensus8616:
     """Mutable census of sequence entries and jump instructions for one move."""
 
     project: object
-    move_addr: int
-    sequence_entries: set[int]
-    jump_instructions: list[object]
+    move_addr: cython.longlong
+    sequence_entries: object
+    jump_instructions: object
 
-    def collect(self, instructions: tuple[object, ...]) -> None:
+    @cython.ccall
+    def collect(self, instructions: object) -> None:
         """Collect one instruction sequence's entries and jumps."""
+        index: object
+        instruction: object
         for index, instruction in enumerate(instructions):
             self._collect_one(instructions, index, instruction)
 
+    @cython.ccall
     def _collect_one(
         self,
-        instructions: tuple[object, ...],
-        index: int,
+        instructions: object,
+        index: cython.longlong,
         instruction: object,
     ) -> None:
         """Record one instruction's jump membership and backward entries."""
@@ -114,17 +128,17 @@ class _SequenceEdgeCensus8616:
             self.jump_instructions.append(instruction)
         if (
             not isinstance(address, int)
-            or comparable_address_8616(self.project, address, self.move_addr)
-            != self.move_addr
+            or operator.ne(comparable_address_8616(self.project, address, self.move_addr), self.move_addr)
         ):
             return
         self.sequence_entries.add(self.move_addr)
         self._extend_backward(instructions, index)
 
+    @cython.ccall
     def _extend_backward(
         self,
-        instructions: tuple[object, ...],
-        index: int,
+        instructions: object,
+        index: cython.longlong,
     ) -> None:
         """Walk backward from the move until a control-flow boundary."""
         for previous_index in range(index - 1, -1, -1):
@@ -148,11 +162,12 @@ class _SequenceEdgeCensus8616:
             self.sequence_entries.add(comparable_previous)
 
 
+@cython.ccall
 def _jump_edge_8616(
     project: object,
     instruction: object,
-    move_addr: int,
-    sequence_entries: set[int],
+    move_addr: cython.longlong,
+    sequence_entries: object,
 ) -> DirectStackMoveLoopEntryEdge8616 | None:
     """Return the proven backward edge for one jump, if any."""
     jump_addr = _boundary_attr_8616(instruction, "address")
@@ -163,7 +178,7 @@ def _jump_edge_8616(
         return None
     operand = operands[0]
     target = _boundary_attr_8616(operand, "imm")
-    if _boundary_attr_8616(operand, "type") != X86_OP_IMM or not isinstance(
+    if operator.ne(_boundary_attr_8616(operand, "type"), X86_OP_IMM) or not isinstance(
         target, int
     ):
         return None
@@ -180,12 +195,16 @@ def _jump_edge_8616(
     )
 
 
+@cython.ccall
 def repeated_sequence_edges_8616(
     project: object,
     function: object,
-    move_addr: int,
+    move_addr: cython.longlong,
 ) -> tuple[DirectStackMoveLoopEntryEdge8616, ...]:
     """Recover exact backward edges whose target repeats one direct move."""
+    edge: object
+    instruction: object
+    instructions: object
     census = _SequenceEdgeCensus8616(project, move_addr, set(), [])
     for instructions in _function_instructions_8616(function):
         census.collect(instructions)

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Join every binary far-result caller to one exact paired-use proof.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -39,6 +42,9 @@ from .far_return_pointer_use_contracts import (
 from .interprocedural_storage_contracts import StorageIdentity8616
 from .interprocedural_storage_return_defs import resolve_call_output_definitions_8616
 from .interprocedural_storage_return_trial_materialization import return_output_storages_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "FarReturnPointerCensusFailure8616",
@@ -74,22 +80,22 @@ class FarReturnPointerCensusFailure8616(StrEnum):
     CALL_OUTPUT_UNPROVEN = "call_output_unproven"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FarReturnPointerCensusResult8616:
     """Atomic all-caller proof or one typed, nonpublishing refusal."""
 
     census: CallerReturnUseEvidence8616
     verdict: FarReturnPointerCensusVerdict8616
     failure: FarReturnPointerCensusFailure8616 | None
-    uses: tuple[FarReturnPointerUseEvidence8616, ...]
+    uses: object
     stats: FarReturnPointerUseStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Recheck the census, each exact AX witness and five-stage accounting."""
         facts = tuple(sorted(self.census.facts, key=lambda fact: (fact.callsite_addr, fact.caller_addr)))
         count = len(facts)
-        fact_keys = tuple((fact.caller_addr, fact.callsite_addr) for fact in facts)
+        fact_keys = tuple((fact.caller_addr, fact.callsite_addr) for fact in iter(facts))
         return bool(
             self.verdict is FarReturnPointerCensusVerdict8616.PROVEN
             and self.failure is None
@@ -99,30 +105,31 @@ class FarReturnPointerCensusResult8616:
             and self.census.excluded_callsite_count == 0
             and self.census.used_callsite_count == count > 0
             and self.census.unused_callsite_count == 0
-            and len(set(fact_keys)) == count
-            and self.stats == FarReturnPointerUseStats8616(count, count, count, count, 0)
-            and len(self.uses) == count
+            and operator.eq(len(set(fact_keys)), count)
+            and operator.eq(self.stats, FarReturnPointerUseStats8616(count, count, count, count, 0))
+            and operator.eq(len(self.uses), count)
             and all(
                 fact.verdict is CallerReturnUseVerdict8616.USED
                 and fact.kind is CallsiteReturnUseKind8616.VALUE
                 and fact.observed_value_view is AxValueView8616.AX
                 and fact.classified
                 and use.complete
-                and use.callee_addr == self.census.target_addr
+                and operator.eq(use.callee_addr, self.census.target_addr)
                 and (fact.caller_addr, fact.callsite_addr)
                 == (use.caller_addr, use.callsite_addr)
-                and fact.witness_instruction_addr == use.offset_copy.instr_addr
-                for fact, use in zip(facts, self.uses, strict=True)
+                and operator.eq(fact.witness_instruction_addr, use.offset_copy.instr_addr)
+                for fact, use in builtins.iter(zip(facts, self.uses, strict=True))
             )
         )
 
 
+@cython.ccall
 def _refuse_8616(
     census: CallerReturnUseEvidence8616,
     failure: FarReturnPointerCensusFailure8616,
     *,
-    normalized: bool = False,
-    classified_count: int = 0,
+    normalized: cython.bint = False,
+    classified_count: cython.longlong = 0,
 ) -> FarReturnPointerCensusResult8616:
     """Retain the failed census as an atomic refusal with closed counters."""
     raw_count = max(1, census.raw_fact_count)
@@ -143,18 +150,18 @@ def _refuse_8616(
 
 def _validate_census_8616(
     census: CallerReturnUseEvidence8616,
-    facts: tuple[CallerReturnUseFact8616, ...],
+    facts: object,
 ) -> FarReturnPointerCensusFailure8616 | None:
     """Require a unique, closed inventory of classified AX value uses."""
-    fact_keys = {(fact.caller_addr, fact.callsite_addr) for fact in facts}
+    fact_keys = {(fact.caller_addr, fact.callsite_addr) for fact in iter(facts)}
     if not (
         census.fact_census_complete
         and facts
         and census.failure_count == 0
         and census.excluded_callsite_count == 0
-        and census.used_callsite_count == len(facts)
+        and operator.eq(census.used_callsite_count, len(facts))
         and census.unused_callsite_count == 0
-        and len(fact_keys) == len(facts)
+        and operator.eq(len(fact_keys), len(facts))
         and census.verdict is CallerReturnUseVerdict8616.USED
     ):
         return FarReturnPointerCensusFailure8616.CENSUS_INCOMPLETE
@@ -163,20 +170,23 @@ def _validate_census_8616(
         or fact.kind is not CallsiteReturnUseKind8616.VALUE
         or fact.observed_value_view is not AxValueView8616.AX
         or not fact.classified
-        for fact in facts
+        for fact in iter(facts)
     ):
         return FarReturnPointerCensusFailure8616.RETURN_USE_NOT_VALUE
     return None
 
 
+@cython.ccall
 def _index_proofs_8616(
-    proofs: tuple[FarReturnPointerUseResult8616, ...],
+    proofs: object,
 ) -> tuple[
-    dict[tuple[int, int], FarReturnPointerUseResult8616],
+    dict[tuple[cython.longlong, cython.longlong], FarReturnPointerUseResult8616],
     FarReturnPointerCensusFailure8616 | None,
 ]:
     """Index exact caller/callsite proofs and refuse missing or duplicate identities."""
-    indexed: dict[tuple[int, int], FarReturnPointerUseResult8616] = {}
+    use: object
+    proof: object
+    indexed: dict[tuple[cython.longlong, cython.longlong], FarReturnPointerUseResult8616] = {}
     for proof in proofs:
         use = proof.evidence
         if use is None:
@@ -188,24 +198,29 @@ def _index_proofs_8616(
     return indexed, None
 
 
+@cython.ccall
 def _use_match_failure_8616(
     census: CallerReturnUseEvidence8616,
     fact: CallerReturnUseFact8616,
     use: FarReturnPointerUseEvidence8616,
 ) -> FarReturnPointerCensusFailure8616 | None:
     """Require the paired witness to name this exact callee and AX-use site."""
-    if use.callee_addr != census.target_addr:
+    if operator.ne(use.callee_addr, census.target_addr):
         return FarReturnPointerCensusFailure8616.TARGET_MISMATCH
-    if fact.witness_instruction_addr != use.offset_copy.instr_addr:
+    if operator.ne(fact.witness_instruction_addr, use.offset_copy.instr_addr):
         return FarReturnPointerCensusFailure8616.WITNESS_MISMATCH
     return None
 
 
 def join_far_return_pointer_census_8616(
     census: CallerReturnUseEvidence8616,
-    proofs: tuple[FarReturnPointerUseResult8616, ...],
+    proofs: object,
 ) -> FarReturnPointerCensusResult8616:
     """Join all direct callers to paired-use witnesses without changing C."""
+    census_failure: object
+    mismatch: object
+    proof_failure: object
+    fact: object
     facts = tuple(sorted(census.facts, key=lambda fact: (fact.callsite_addr, fact.caller_addr)))
     census_failure = _validate_census_8616(census, facts)
     if census_failure is FarReturnPointerCensusFailure8616.CENSUS_INCOMPLETE:
@@ -218,7 +233,7 @@ def join_far_return_pointer_census_8616(
     proofs_by_callsite, proof_failure = _index_proofs_8616(proofs)
     if proof_failure is not None:
         return _refuse_8616(census, proof_failure, normalized=True)
-    fact_keys = {(fact.caller_addr, fact.callsite_addr) for fact in facts}
+    fact_keys = {(fact.caller_addr, fact.callsite_addr) for fact in iter(facts)}
     if set(proofs_by_callsite) - fact_keys:
         return _refuse_8616(census, FarReturnPointerCensusFailure8616.PROOF_EXTRA, normalized=True)
     if fact_keys - set(proofs_by_callsite):
@@ -253,12 +268,14 @@ def join_far_return_pointer_census_8616(
     return result
 
 
+@cython.ccall
 def _caller_artifact_8616(
     project: object,
-    caller_addr: int,
-    caller_range: tuple[int, int] | None,
+    caller_addr: cython.longlong,
+    caller_range: object,
 ) -> tuple[SSAFunctionArtifact | None, FarReturnPointerCensusFailure8616 | None]:
     """Resolve one exact caller boundary and Semantics SSA, or a typed refusal."""
+    boundary: object
     boundary = (
         exact_function_range_boundary_8616(project, *caller_range)
         if caller_range is not None else None
@@ -273,11 +290,13 @@ def _caller_artifact_8616(
     return resolution.artifact, None
 
 
+@cython.ccall
 def _callee_output_storages_8616(
     project: object,
-    callee_range: tuple[int, int] | None,
+    callee_range: object,
 ) -> tuple[tuple[StorageIdentity8616, ...], FarReturnPointerCensusFailure8616 | None]:
     """Require the callee's complete binary terminal paths to prove DX:AX."""
+    boundary: object
     boundary = (
         exact_function_range_boundary_8616(project, *callee_range)
         if callee_range is not None else None
@@ -292,8 +311,8 @@ def _callee_output_storages_8616(
 
 def collect_far_return_pointer_census_8616(
     project: object,
-    callee_addr: int,
-    function_ranges: tuple[tuple[int, int], ...],
+    callee_addr: cython.longlong,
+    function_ranges: object,
 ) -> FarReturnPointerCensusResult8616:
     """Collect every caller's paired use from binary CFG/SSA without publishing C.
 
@@ -301,12 +320,19 @@ def collect_far_return_pointer_census_8616(
     Function ranges bound binary discovery; they do not supply value, pointer-type,
     or call-result evidence.
     """
+    artifact: object
+    callee_failure: object
+    census_failure: object
+    failure: object
+    end: object
+    fact: object
+    start: object
     census = collect_caller_return_use_evidence_8616(project, callee_addr, function_ranges)
     facts = tuple(sorted(census.facts, key=lambda fact: (fact.callsite_addr, fact.caller_addr)))
     census_failure = _validate_census_8616(census, facts)
     if census_failure is not None:
         return _refuse_8616(census, census_failure)
-    ranges_by_start: dict[int, tuple[int, int]] = {}
+    ranges_by_start: dict[cython.longlong, tuple[cython.longlong, cython.longlong]] = {}
     for start, end in function_ranges:
         if start in ranges_by_start:
             return _refuse_8616(
@@ -322,7 +348,7 @@ def collect_far_return_pointer_census_8616(
             census, callee_failure,
             normalized=True,
         )
-    artifacts: dict[int, SSAFunctionArtifact] = {}
+    artifacts: dict[cython.longlong, SSAFunctionArtifact] = {}
     proofs: list[FarReturnPointerUseResult8616] = []
     for fact in facts:
         artifact = artifacts.get(fact.caller_addr)

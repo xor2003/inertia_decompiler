@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify exact natural-loop topology from a typed CFG view.
 
 Layer: Structuring.
@@ -10,6 +11,8 @@ Forbidden: graph mutation, region collapse, semantic inference, or C mutation.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -19,6 +22,9 @@ from typing import Protocol
 import networkx as nx
 
 from inertia.pipeline.errors import PipelineHardError
+import dataclasses
+import operator
+import builtins
 
 __all__ = (
     "LoopTopologyStats8616",
@@ -27,7 +33,7 @@ __all__ = (
     "classify_natural_loop_topology_8616",
 )
 
-type LoopTopologyEdge8616 = tuple[int, int]
+LoopTopologyEdge8616 = typing.TypeAliasType("LoopTopologyEdge8616", tuple[int, int])
 
 
 class LoopTopologyVerdict8616(Enum):
@@ -37,15 +43,15 @@ class LoopTopologyVerdict8616(Enum):
     UNKNOWN_REFUSE = "unknown_refuse"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LoopTopologyStats8616:
     """Closed evidence counters for one topology classification."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     def __post_init__(self) -> None:
         """Reject open accounting and classified-but-unmaterialized evidence."""
@@ -55,7 +61,7 @@ class LoopTopologyStats8616:
             raise ValueError("natural-loop topology counters do not close")
 
     @property
-    def is_closed(self) -> bool:
+    def is_closed(self) -> cython.bint:
         """Return whether every raw candidate ended in materialization or refusal."""
         counters = (
             self.raw_fact_count,
@@ -65,34 +71,35 @@ class LoopTopologyStats8616:
             self.failure_count,
         )
         return (
-            all(count >= 0 for count in counters)
+            all(count >= 0 for count in iter(counters))
             and self.raw_fact_count >= self.normalized_fact_count
             and self.normalized_fact_count >= self.classified_fact_count
             and self.classified_fact_count >= self.materialized_count
-            and self.raw_fact_count == self.materialized_count + self.failure_count
+            and operator.eq(self.raw_fact_count, self.materialized_count + self.failure_count)
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NaturalLoopTopology8616:
     """Immutable exact topology, or an empty fail-closed refusal artifact."""
 
-    header: int
-    latch: int
-    body: tuple[int, ...]
-    entry_edges: tuple[LoopTopologyEdge8616, ...]
-    backedges: tuple[LoopTopologyEdge8616, ...]
-    exit_edges: tuple[LoopTopologyEdge8616, ...]
+    header: cython.longlong
+    latch: cython.longlong
+    body: object
+    entry_edges: object
+    backedges: object
+    exit_edges: object
     verdict: LoopTopologyVerdict8616
     stats: LoopTopologyStats8616
-    refusal_reason: str | None = None
+    refusal_reason: object = None
 
     def __post_init__(self) -> None:
         """Enforce deterministic ordering and exact proven-loop cardinalities."""
-        if self.body != tuple(sorted(set(self.body))):
+        edges: object
+        if operator.ne(self.body, tuple(sorted(tuple(set(self.body))))):
             raise ValueError("natural-loop body must be sorted and unique")
         for edges in (self.entry_edges, self.backedges, self.exit_edges):
-            if edges != tuple(sorted(set(edges))):
+            if operator.ne(edges, tuple(sorted(tuple(set(edges))))):
                 raise ValueError("natural-loop edges must be sorted and unique")
         if self.verdict is LoopTopologyVerdict8616.UNKNOWN_REFUSE:
             if self.body or self.entry_edges or self.backedges or self.exit_edges:
@@ -101,7 +108,7 @@ class NaturalLoopTopology8616:
         _validate_proven_topology_8616(self)
 
     @property
-    def is_proven(self) -> bool:
+    def is_proven(self) -> cython.bint:
         """Return whether all narrow-slice topology requirements were proven."""
         return self.verdict is LoopTopologyVerdict8616.PROVEN
 
@@ -112,34 +119,35 @@ def _validate_proven_topology_8616(topology: NaturalLoopTopology8616) -> None:
         raise ValueError("proven natural-loop topology cannot carry a refusal reason")
     if topology.header not in topology.body or topology.latch not in topology.body:
         raise ValueError("proven natural-loop topology must contain header and latch")
-    if topology.backedges != ((topology.latch, topology.header),):
+    if operator.ne(topology.backedges, ((topology.latch, topology.header),)):
         raise ValueError("proven natural-loop topology requires one exact backedge")
-    if any(target != topology.header for _, target in topology.entry_edges):
+    if any(operator.ne(target, topology.header) for _, target in iter(topology.entry_edges)):
         raise ValueError("proven natural-loop topology has a non-header entry")
-    if len({target for _, target in topology.exit_edges}) != 1:
+    if len({target for _, target in iter(topology.exit_edges)}) != 1:
         raise ValueError("proven natural-loop topology requires one exit target")
-    if topology.stats != LoopTopologyStats8616(1, 1, 1, 1, 0):
+    if operator.ne(topology.stats, LoopTopologyStats8616(1, 1, 1, 1, 0)):
         raise ValueError("proven natural-loop topology requires closed materialization counters")
 
 
 class _NaturalLoopGraph8616(Protocol):
     """Minimal integer-node CFG boundary consumed by the topology owner."""
 
-    def successors(self, node: int) -> Iterable[int]:
+    def successors(self, node: cython.longlong) -> Iterable[cython.longlong]:
         """Return direct successor node ids."""
         ...
 
-    def predecessors(self, node: int) -> Iterable[int]:
+    def predecessors(self, node: cython.longlong) -> Iterable[cython.longlong]:
         """Return direct predecessor node ids."""
         ...
 
 
+@cython.ccall
 def _unknown_topology_8616(
-    header: int,
-    latch: int,
-    reason: str,
+    header: cython.longlong,
+    latch: cython.longlong,
+    reason: object,
     *,
-    normalized: bool,
+    normalized: cython.bint,
 ) -> NaturalLoopTopology8616:
     """Build one closed refusal without publishing partial topology as exact."""
     return NaturalLoopTopology8616(
@@ -156,12 +164,13 @@ def _unknown_topology_8616(
 
 
 def _header_dominated_nodes_8616(
-    entry: int, header: int, successors: Callable[[int], tuple[int, ...]],
-) -> frozenset[int]:
+    entry: cython.longlong, header: cython.longlong, successors: Callable[[int], tuple[cython.longlong, ...]],
+) -> frozenset[cython.longlong]:
     """Use entry-rooted dominance to exclude enclosing-loop re-entry paths."""
+    source: object
     snapshot = nx.DiGraph()
     pending = [entry]
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     while pending:
         source = pending.pop()
         if source in seen:
@@ -169,7 +178,7 @@ def _header_dominated_nodes_8616(
         seen.add(source)
         targets = successors(source)
         snapshot.add_node(source)
-        snapshot.add_edges_from((source, target) for target in targets)
+        snapshot.add_edges_from((source, target) for target in iter(targets))
         pending.extend(targets)
     dominators = nx.immediate_dominators(snapshot, entry)
     dominators[entry] = entry
@@ -177,34 +186,35 @@ def _header_dominated_nodes_8616(
         return frozenset()
     tree = nx.DiGraph()
     tree.add_nodes_from(dominators)
-    tree.add_edges_from((parent, node) for node, parent in dominators.items() if parent != node)
+    tree.add_edges_from((parent, node) for node, parent in builtins.iter(dominators.items()) if parent != node)
     return frozenset({header} | nx.descendants(tree, header))
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _OrderedNeighborCache8616:
     """Validated deterministic adjacency cache for one integer-node CFG."""
 
     graph: _NaturalLoopGraph8616
-    successor_cache: dict[int, tuple[int, ...]] = field(default_factory=dict)
-    predecessor_cache: dict[int, tuple[int, ...]] = field(default_factory=dict)
+    successor_cache: object = field(default_factory=dict)
+    predecessor_cache: object = field(default_factory=dict)
 
-    def ordered(self, node: int, *, predecessors: bool) -> tuple[int, ...]:
+    def ordered(self, node: cython.longlong, *, predecessors: cython.bint) -> object:
         """Read, validate, deduplicate, and sort one adjacency list."""
         cache = self.predecessor_cache if predecessors else self.successor_cache
         if node in cache:
             return cache[node]
         values = self.graph.predecessors(node) if predecessors else self.graph.successors(node)
         observed = tuple(values)
-        if any(not isinstance(value, int) or isinstance(value, bool) for value in observed):
+        if any(not isinstance(value, int) or isinstance(value, bool) for value in iter(observed)):
             raise TypeError("natural-loop topology requires integer CFG node ids")
-        ordered = tuple(sorted(set(observed)))
+        ordered = tuple(sorted(tuple(set(observed))))
         cache[node] = ordered
         return ordered
 
-    def forward_without_header_return(self, header: int) -> set[int]:
+    def forward_without_header_return(self, header: cython.longlong) -> object:
         """Collect nodes reachable from the header before taking a backedge."""
-        visited: set[int] = set()
+        node: object
+        visited: set[cython.longlong] = set()
         pending = [header]
         while pending:
             node = pending.pop()
@@ -215,23 +225,25 @@ class _OrderedNeighborCache8616:
                 reversed(
                     tuple(
                         target
-                        for target in self.ordered(node, predecessors=False)
+                        for target in builtins.iter(self.ordered(node, predecessors=False))
                         if target != header
                     )
                 )
             )
         return visited
 
-    def reverse_to_latch(self, latch: int, header: int) -> set[int]:
+    @cython.ccall
+    def reverse_to_latch(self, latch: cython.longlong, header: cython.longlong) -> object:
         """Collect nodes that can reach the latch without crossing the header."""
-        visited: set[int] = set()
+        node: object
+        visited: set[cython.longlong] = set()
         pending = [latch]
         while pending:
             node = pending.pop()
             if node in visited:
                 continue
             visited.add(node)
-            if node == header:
+            if operator.eq(node, header):
                 continue
             pending.extend(reversed(self.ordered(node, predecessors=True)))
         return visited
@@ -239,14 +251,16 @@ class _OrderedNeighborCache8616:
 
 def _boundary_edges_8616(
     cache: _OrderedNeighborCache8616,
-    header: int,
-    latch: int,
-    body_set: set[int],
-    latch_candidates: frozenset[int] | set[int],
-) -> tuple[set[LoopTopologyEdge8616], set[LoopTopologyEdge8616]] | str:
+    header: cython.longlong,
+    latch: cython.longlong,
+    body_set: object,
+    latch_candidates: object,
+) -> object:
     """Return ``(entry_edges, exit_edges)`` or a refusal reason string."""
+    source: object
+    target: object
     latches = tuple(
-        source for source in cache.ordered(header, predecessors=True) if source in latch_candidates
+        source for source in builtins.iter(cache.ordered(header, predecessors=True)) if source in latch_candidates
     )
     if latches != (latch,):
         return "non-unique-latch"
@@ -262,8 +276,8 @@ def _boundary_edges_8616(
 
     exit_edges = {
         (source, target)
-        for source in body_set
-        for target in cache.ordered(source, predecessors=False)
+        for source in iter(body_set)
+        for target in builtins.iter(cache.ordered(source, predecessors=False))
         if target not in body_set
     }
     return entry_edges, exit_edges
@@ -271,8 +285,8 @@ def _boundary_edges_8616(
 
 def classify_natural_loop_topology_8616(
     graph: _NaturalLoopGraph8616,
-    header: int,
-    latch: int,
+    header: cython.longlong,
+    latch: cython.longlong,
     entry: int | None = None,
 ) -> NaturalLoopTopology8616:
     """Classify one exact single-latch, single-exit-target natural loop.
@@ -311,7 +325,7 @@ def classify_natural_loop_topology_8616(
         return _unknown_topology_8616(header, latch, boundary, normalized=True)
     entry_edges, exit_edges = boundary
 
-    if len({target for _, target in exit_edges}) != 1:
+    if len({target for _, target in iter(exit_edges)}) != 1:
         return _unknown_topology_8616(header, latch, "non-unique-exit-target", normalized=True)
 
     return NaturalLoopTopology8616(

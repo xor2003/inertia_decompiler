@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Retain one exact BP definition across the supplied function SSA graph.
 
 Layer: IR.
@@ -13,6 +14,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 
@@ -28,32 +31,36 @@ from .scalar_affine_contracts import (
 from .scalar_definitions import ScalarDefinition8616, scalar_definition_key_8616
 from .ssa import SSABlock
 from .ssa_function import SSAFunctionArtifact
+import dataclasses
+import operator
+import builtins
 
 _FRAME_FAMILIES = {
-    name: frozenset({register.name, *(view for view, _offset, _size in register.subregisters)})
-    for name in ("bp", "sp") for register in Arch86_16.register_list
-    if name in {register.name, *(view for view, _offset, _size in register.subregisters)}
+    name: frozenset({register.name, } | set((view for view, _offset, _size in iter(register.subregisters))))
+    for name in iter(("bp", "sp")) for register in iter(Arch86_16.register_list)
+    if name in {register.name, *(view for view, _offset, _size in iter(register.subregisters))}
 }
 _BP_FAMILY = _FRAME_FAMILIES["bp"]
 
 
-def frame_register_family_8616(register: str) -> frozenset[str]:
+@cython.ccall
+def frame_register_family_8616(register: object) -> object:
     """Derive frame-register overlap names from the authoritative architecture."""
     return _FRAME_FAMILIES.get(register, frozenset())
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FrameRegisterDefinitionTrace8616:
     """Exact reaching BP definition, entry leaf, or closed atomic refusal."""
 
     definition: ScalarDefinition8616 | None
-    preservation_sites: tuple[IndexedAddressDefinitionSite8616, ...]
+    preservation_sites: object
     failure: ScalarAffineFailure8616 | None
     stats: ScalarAffineTraceStats8616
     entry_register: ScalarAffineEntryRegister8616 | None = None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Require one retained result and exact preservation-site identities."""
         source_complete = (
             self.definition.complete if self.definition is not None and self.entry_register is None
@@ -61,20 +68,21 @@ class FrameRegisterDefinitionTrace8616:
             and self.entry_register.complete and self.entry_register.register_name == "bp"
         )
         return bool(source_complete and self.failure is None and self.stats.complete and all(
-            site.complete for site in self.preservation_sites
+            site.complete for site in iter(self.preservation_sites)
         ))
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _ReachingEvidence8616:
     """Finite graph-walk state retaining every observed source and CALL."""
 
-    definitions: dict[tuple[int, int], ScalarDefinition8616] = field(default_factory=dict)
-    calls: dict[tuple[int, int], IndexedAddressDefinitionSite8616] = field(default_factory=dict)
-    entry_leaf: bool = False
+    definitions: object = field(default_factory=dict)
+    calls: object = field(default_factory=dict)
+    entry_leaf: cython.bint = False
 
 
-def is_bare_word_bp_read_8616(value: IRValue) -> bool:
+@cython.ccall
+def is_bare_word_bp_read_8616(value: IRValue) -> cython.bint:
     """Return whether a read names current BP rather than an immutable capture."""
     return bool(
         value.space is MemSpace.REG and value.name == "bp" and value.size == 2
@@ -86,15 +94,19 @@ def is_bare_word_bp_read_8616(value: IRValue) -> bool:
     )
 
 
+@cython.ccall
 def _refuse_8616(failure: ScalarAffineFailure8616) -> FrameRegisterDefinitionTrace8616:
     """Retain one refused transport obligation without a partial definition."""
     return FrameRegisterDefinitionTrace8616(None, (), failure, ScalarAffineTraceStats8616(1, 1, 1, 0, 1))
 
 
+@cython.ccall
 def _scan_prefix_8616(
-    block: SSABlock, limit: int, evidence: _ReachingEvidence8616,
-) -> tuple[bool, ScalarAffineFailure8616 | None]:
+    block: SSABlock, limit: cython.longlong, evidence: _ReachingEvidence8616,
+) -> tuple[cython.bint, ScalarAffineFailure8616 | None]:
     """Scan backwards until a BP definition or the predecessor boundary."""
+    destination: object
+    effect: object
     for index in range(limit - 1, -1, -1):
         instruction = block.instrs[index]
         if instruction.op == "CALL":
@@ -116,12 +128,15 @@ def _scan_prefix_8616(
 
 
 def _walk_predecessors_8616(
-    artifact: SSAFunctionArtifact, blocks: dict[int, SSABlock],
-    block_addr: int, before_index: int, evidence: _ReachingEvidence8616,
+    artifact: SSAFunctionArtifact, blocks: object,
+    block_addr: cython.longlong, before_index: cython.longlong, evidence: _ReachingEvidence8616,
 ) -> ScalarAffineFailure8616 | None:
     """Close the finite backward slice, including preserving loop edges."""
+    address: object
+    failure: object
+    limit: object
     pending = [(block_addr, before_index)]
-    visited: set[tuple[int, int]] = set()
+    visited: set[tuple[cython.longlong, cython.longlong]] = set()
     while pending:
         address, limit = pending.pop()
         if (address, limit) in visited:
@@ -133,34 +148,35 @@ def _walk_predecessors_8616(
         if found:
             continue
         predecessors = artifact.predecessor_map[address]
-        if address == artifact.function_addr:
-            if address != block_addr or predecessors:
+        if operator.eq(address, artifact.function_addr):
+            if operator.ne(address, block_addr) or predecessors:
                 return ScalarAffineFailure8616.SOURCE_UNPROVEN
             evidence.entry_leaf = True
         elif not predecessors:
             return ScalarAffineFailure8616.SOURCE_UNPROVEN
-        pending.extend((pred, len(blocks[pred].instrs)) for pred in reversed(predecessors))
+        pending.extend((pred, len(blocks[pred].instrs)) for pred in builtins.iter(reversed(predecessors)))
     return None
 
 
-def _graph_blocks_8616(artifact: SSAFunctionArtifact, block_addr: int) -> dict[int, SSABlock] | None:
+def _graph_blocks_8616(artifact: SSAFunctionArtifact, block_addr: cython.longlong) -> object:
     """Validate supplied predecessor identities and refuse incomplete blocks."""
-    blocks = {block.addr: block for block in artifact.blocks}
-    if (len(blocks) != len(artifact.blocks) or artifact.function_addr not in blocks
-            or block_addr not in blocks or set(artifact.predecessor_map) != set(blocks)):
+    blocks = {block.addr: block for block in iter(artifact.blocks)}
+    if (operator.ne(len(blocks), len(artifact.blocks)) or artifact.function_addr not in blocks
+            or block_addr not in blocks or operator.ne(set(artifact.predecessor_map), set(blocks))):
         return None
-    if any(block.refusals for block in artifact.blocks) or any(
-        pred not in blocks for preds in artifact.predecessor_map.values() for pred in preds
+    if any(block.refusals for block in iter(artifact.blocks)) or any(
+        pred not in blocks for preds in builtins.iter(artifact.predecessor_map.values()) for pred in iter(preds)
     ):
         return None
     return blocks
 
 
 def _local_definition_trace_8616(
-    block: SSABlock, value: IRValue, before_index: int,
-    entry_register: ScalarAffineEntryRegister8616 | None,
+    block: SSABlock, value: IRValue, before_index: cython.longlong,
+    entry_register: object,
 ) -> FrameRegisterDefinitionTrace8616 | None:
     """Retain local definitions without inventing a whole-function CFG claim."""
+    failure: object
     evidence = _ReachingEvidence8616()
     found, failure = _scan_prefix_8616(block, before_index, evidence)
     if failure is not None:
@@ -172,15 +188,17 @@ def _local_definition_trace_8616(
     if value.version != 0:
         return _refuse_8616(ScalarAffineFailure8616.DEFINITION_CONFLICT)
     return FrameRegisterDefinitionTrace8616(
-        None, tuple(evidence.calls[key] for key in sorted(evidence.calls)), None,
+        None, tuple(evidence.calls[key] for key in builtins.iter(sorted(evidence.calls))), None,
         ScalarAffineTraceStats8616(1, 1, 1, 1, 0), entry_register,
     )
 
 
 def _finish_trace_8616(
-    evidence: _ReachingEvidence8616, value: IRValue, block_addr: int,
+    evidence: _ReachingEvidence8616, value: IRValue, block_addr: cython.longlong,
 ) -> FrameRegisterDefinitionTrace8616:
     """Publish only a unique definition with coherent local SSA identity."""
+    definition: object
+    destination: object
     if len(evidence.definitions) > 1 or (evidence.definitions and evidence.entry_leaf):
         return _refuse_8616(ScalarAffineFailure8616.DEFINITION_CONFLICT)
     definition = next(iter(evidence.definitions.values()), None)
@@ -191,18 +209,18 @@ def _finish_trace_8616(
     if definition is not None:
         destination = definition.instruction.dst
         assert destination is not None
-        if definition.block_addr == block_addr and scalar_definition_key_8616(value) != scalar_definition_key_8616(destination):
+        if operator.eq(definition.block_addr, block_addr) and operator.ne(scalar_definition_key_8616(value), scalar_definition_key_8616(destination)):
             return _refuse_8616(ScalarAffineFailure8616.DEFINITION_CONFLICT)
-        if definition.block_addr != block_addr and value.version != 0:
+        if operator.ne(definition.block_addr, block_addr) and value.version != 0:
             return _refuse_8616(ScalarAffineFailure8616.DEFINITION_CONFLICT)
     return FrameRegisterDefinitionTrace8616(
-        definition, tuple(evidence.calls[key] for key in sorted(evidence.calls)), None,
+        definition, tuple(evidence.calls[key] for key in builtins.iter(sorted(evidence.calls))), None,
         ScalarAffineTraceStats8616(1, 1, 1, 1, 0),
     )
 
 
 def resolve_bp_reaching_definition_8616(
-    artifact: SSAFunctionArtifact, value: IRValue, *, block_addr: int, before_index: int,
+    artifact: SSAFunctionArtifact, value: IRValue, *, block_addr: cython.longlong, before_index: cython.longlong,
 ) -> FrameRegisterDefinitionTrace8616:
     """Prove one exact BP origin on every supplied incoming path.
 
@@ -211,16 +229,19 @@ def resolve_bp_reaching_definition_8616(
     absent. Cycles close only when the whole slice reaches a unique definition;
     an entry-register leaf is admitted solely in the actual entry block.
     """
+    blocks: object
+    failure: object
+    local: object
     if not is_bare_word_bp_read_8616(value):
         return _refuse_8616(ScalarAffineFailure8616.ROOT_UNPROVEN)
-    candidates = tuple(block for block in artifact.blocks if block.addr == block_addr)
+    candidates = tuple(block for block in iter(artifact.blocks) if operator.eq(block.addr, block_addr))
     if len(candidates) != 1 or candidates[0].refusals:
         return _refuse_8616(ScalarAffineFailure8616.SOURCE_UNPROVEN)
     if not 0 <= before_index <= len(candidates[0].instrs):
         return _refuse_8616(ScalarAffineFailure8616.ROOT_UNPROVEN)
     entry_register = (
         ScalarAffineEntryRegister8616(artifact.function_addr, "bp", 2)
-        if block_addr == artifact.function_addr and artifact.predecessor_map.get(block_addr) == ()
+        if operator.eq(block_addr, artifact.function_addr) and artifact.predecessor_map.get(block_addr) == ()
         else None
     )
     local = _local_definition_trace_8616(candidates[0], value, before_index, entry_register)

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Per-block transfer state for the entry-word transport proof.
 
 Layer: Widening.
@@ -18,6 +19,8 @@ Do not join values from rendered text, cosmetic shape, postprocess, or CLI/repor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from typing import TypeGuard
@@ -43,9 +46,12 @@ from .entry_word_transport_snapshots import (
     captured_word_8616,
     snapshot_capture_view_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class TransportDefinition8616:
     """One tracked definition: SSA version, word flag, and capture view.
 
@@ -54,11 +60,12 @@ class TransportDefinition8616:
     """
 
     version: int | None
-    word: bool
+    word: cython.bint
     capture: SnapshotCapture8616 | None = None
 
 
-def plain_word_read_8616(value: IRValue) -> bool:
+@cython.ccall
+def plain_word_read_8616(value: IRValue) -> cython.bint:
     """Require an exact read view of one word-width scalar operand.
 
     A REG name carrying source_tmp is still plain here; its historical capture
@@ -76,12 +83,14 @@ def plain_word_read_8616(value: IRValue) -> bool:
     )
 
 
-def full_word_register_8616(name: str | None) -> bool:
+@cython.ccall
+def full_word_register_8616(name: object) -> cython.bint:
     """A seed/target register must be a complete architectural 16-bit view."""
     return name is not None and register_value_projection_8616(name, name) == (0, 16)
 
 
-def plain_destination_8616(value: IRValue) -> bool:
+@cython.ccall
+def plain_destination_8616(value: IRValue) -> cython.bint:
     """A definition site is exact storage, never a displaced/decorated view."""
     if value.const is not None:
         return False
@@ -97,18 +106,20 @@ def plain_destination_8616(value: IRValue) -> bool:
     )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class TransportRun8616:
     """Per-block transfer state; TMP producer scope is strictly block-local."""
 
-    regs: dict[str, TransportDefinition8616] = field(default_factory=dict)
-    temps: dict[int, TransportDefinition8616] = field(default_factory=dict)
-    refusals: list[EntryWordTransportRefusal8616] = field(default_factory=list)
-    raw: int = 0
-    normalized: int = 0
+    regs: object = field(default_factory=dict)
+    temps: object = field(default_factory=dict)
+    refusals: object = field(default_factory=list)
+    raw: cython.longlong = 0
+    normalized: cython.longlong = 0
 
+    @cython.ccall
     def read_word(self, value: IRValue) -> bool | None:
         """Resolve one operand to the tracked word; None marks a bad view."""
+        definition: object
         if not plain_word_read_8616(value):
             return None
         if value.space is MemSpace.TMP:
@@ -123,7 +134,7 @@ class TransportRun8616:
             definition = self.regs.get(value.name.lower())
         if definition is None:
             return False
-        if definition.version != value.version:
+        if operator.ne(definition.version, value.version):
             self.refusals.append(EntryWordTransportRefusal8616(
                 Refusal.STALE_TMP_VERSION,
                 "read version differs from retained producer",
@@ -131,8 +142,11 @@ class TransportRun8616:
             return False
         return definition.word
 
-    def _read_capture_8616(self, value: IRValue, source_tmp: int) -> bool:
+    @cython.ccall
+    def _read_capture_8616(self, value: IRValue, source_tmp: cython.longlong) -> cython.bint:
         """Resolve a captured REG view through its block-local TMP producer."""
+        definition: object
+        refusal: object
         definition = self.temps.get(source_tmp)
         word, refusal = captured_word_8616(
             None if definition is None else definition.capture, value,
@@ -142,6 +156,7 @@ class TransportRun8616:
         return word
 
 
+@cython.ccall
 def _plain_literal_8616(value: object) -> TypeGuard[IRValue]:
     """An exact CONST literal with no decoration or captured provenance."""
     if not isinstance(value, IRValue) or value.space is not MemSpace.CONST:
@@ -154,18 +169,20 @@ def _plain_literal_8616(value: object) -> TypeGuard[IRValue]:
     )
 
 
+@cython.ccall
 def _apply_branch_8616(
     run: TransportRun8616,
-    control_target: int | None,
-    successor_addrs: tuple[int, ...],
-    block_addr: int,
-    index: int,
+    control_target: object,
+    successor_addrs: object,
+    block_addr: cython.longlong,
+    index: cython.longlong,
 ) -> None:
     """A proven control transfer kills the architectural IP family only.
 
     The typed ``control_target`` supplied by the IR effect owner must be a
     recorded successor of this block; data registers survive untouched.
     """
+    member: object
     for member in register_value_family_8616("ip"):
         run.regs.pop(member, None)
     if control_target is None or control_target not in successor_addrs:
@@ -176,11 +193,12 @@ def _apply_branch_8616(
         ))
 
 
+@cython.ccall
 def _tail_write_check_8616(
     instruction: IRInstr,
     destination: IRValue,
-    successor_addrs: tuple[int, ...],
-) -> tuple[Refusal, str] | None:
+    successor_addrs: object,
+) -> object:
     """Refuse post-control writes the taken edge never executes.
 
     Only the fallthrough path observes the tail: block-local TMP writes are
@@ -203,13 +221,15 @@ def _tail_write_check_8616(
     return None
 
 
+@cython.ccall
 def _apply_unknown_8616(
     run: TransportRun8616,
     instruction: IRInstr,
-    block_addr: int,
-    index: int,
+    block_addr: cython.longlong,
+    index: cython.longlong,
 ) -> None:
     """Kill register evidence; a non-CALL TMP producer is also forgotten."""
+    destination: object
     run.regs.clear()
     effect = scalar_instruction_effect_8616(instruction)
     run.refusals.append(EntryWordTransportRefusal8616(
@@ -224,12 +244,14 @@ def _apply_unknown_8616(
         run.temps.pop(destination.source_tmp, None)
 
 
+@cython.ccall
 def _written_word_8616(
     run: TransportRun8616,
     instruction: IRInstr,
     destination: IRValue,
-) -> tuple[bool, SnapshotCapture8616 | None]:
+) -> tuple[cython.bint, SnapshotCapture8616 | None]:
     """Resolve the MOV source word and retain its exact register capture."""
+    view: object
     if not (
         instruction.op == "MOV"
         and destination.size == 2
@@ -249,12 +271,14 @@ def _written_word_8616(
     return word, capture
 
 
+@cython.ccall
 def _write_register_8616(
     run: TransportRun8616,
     destination: IRValue,
-    word: bool,
+    word: cython.bint,
 ) -> None:
     """Clobber the whole architectural family, then bind the new version."""
+    member: object
     if destination.name is None:
         run.regs.clear()
         return
@@ -265,15 +289,17 @@ def _write_register_8616(
     )
 
 
+@cython.ccall
 def _write_temporary_8616(
     run: TransportRun8616,
     destination: IRValue,
-    word: bool,
+    word: cython.bint,
     capture: SnapshotCapture8616 | None,
-    block_addr: int,
-    index: int,
+    block_addr: cython.longlong,
+    index: cython.longlong,
 ) -> None:
     """Bind one block-local TMP producer; redefinition refuses the word."""
+    tmp: object
     tmp = destination.source_tmp
     if tmp is None:
         return
@@ -287,20 +313,21 @@ def _write_temporary_8616(
     run.temps[tmp] = TransportDefinition8616(destination.version, word, capture)
 
 
+@cython.ccall
 def _enforce_seed_8616(
     run: TransportRun8616,
     destination: IRValue,
-    block_addr: int,
-    index: int,
-    seed_name: str,
+    block_addr: cython.longlong,
+    index: cython.longlong,
+    seed_name: object,
     seed_version: int | None,
 ) -> None:
     """The seed site must define the proven full-word register version."""
     if (
         destination.space is not MemSpace.REG
         or destination.name is None
-        or destination.name.lower() != seed_name
-        or destination.version != seed_version
+        or operator.ne(destination.name.lower(), seed_name)
+        or operator.ne(destination.version, seed_version)
     ):
         run.refusals.append(EntryWordTransportRefusal8616(
             Refusal.SEED_NOT_PROVEN,
@@ -311,18 +338,21 @@ def _enforce_seed_8616(
         run.regs[seed_name] = TransportDefinition8616(destination.version, True)
 
 
+@cython.ccall
 def _write_closed_8616(
     run: TransportRun8616,
     instruction: IRInstr,
-    block_addr: int,
-    index: int,
+    block_addr: cython.longlong,
+    index: cython.longlong,
     seed_index: int | None,
-    seed_name: str,
+    seed_name: object,
     seed_version: int | None,
-    controlled: bool,
-    successor_addrs: tuple[int, ...],
+    controlled: cython.bint,
+    successor_addrs: object,
 ) -> None:
     """Apply one closed register-write effect to the transfer state."""
+    destination: object
+    tail_refusal: object
     destination = instruction.dst
     if destination is None or not plain_destination_8616(destination):
         run.regs.clear()
@@ -354,16 +384,17 @@ def _write_closed_8616(
         )
 
 
+@cython.ccall
 def transfer_block_8616(
     *,
-    block_addr: int,
-    ssa_instrs: tuple[IRInstr, ...],
-    entry_regs: dict[str, bool] | None,
-    stop_index: int,
+    block_addr: cython.longlong,
+    ssa_instrs: object,
+    entry_regs: object,
+    stop_index: cython.longlong,
     seed_index: int | None,
-    seed_name: str,
+    seed_name: object,
     seed_version: int | None,
-    successor_addrs: tuple[int, ...],
+    successor_addrs: object,
 ) -> tuple[TransportRun8616, dict[str, bool] | None]:
     """Run the closed typed transfer over one block (or a target prefix).
 
@@ -372,6 +403,10 @@ def transfer_block_8616(
     A proven control transfer starts the conservative safe tail. Returns the
     final state plus the exit word-map (None when poisoned).
     """
+    index: object
+    instruction: object
+    name: object
+    word: object
     run = TransportRun8616()
     if entry_regs is not None:
         for name, word in entry_regs.items():
@@ -400,6 +435,6 @@ def transfer_block_8616(
     exit_regs = (
         None
         if entry_regs is None
-        else {name: definition.word for name, definition in run.regs.items()}
+        else {name: definition.word for name, definition in builtins.iter(run.regs.items())}
     )
     return run, exit_regs

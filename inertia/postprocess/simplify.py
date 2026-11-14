@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Compatibility exports for final simplification cleanup.
 
 Layer: Rewrite/Postprocess cleanup.
@@ -9,5 +10,6 @@ flow, or facts from rendered text, COD, source, or CLI/reporting evidence here.
 """
 
 from __future__ import annotations
+import cython
 
 from inertia.postprocess.decompiler_postprocess_simplify import *  # noqa: F403

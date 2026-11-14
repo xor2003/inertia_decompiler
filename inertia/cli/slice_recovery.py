@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Run bounded slice recovery attempts and record their outcomes.
 
 Layer: CLI/fallback/reporting.
@@ -5,48 +6,52 @@ Responsibility: orchestrate bounded slice fallback attempts without accepting th
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import time
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import asdict, dataclass, replace
 from typing import Any
+import dataclasses
+import operator
 
-type SliceRecoverCallable = Callable[[Any], tuple[Any, Any]]
-type SliceRecoveryRunner = Callable[
+SliceRecoverCallable = typing.TypeAliasType("SliceRecoverCallable", Callable[[Any], tuple[Any, Any]])
+SliceRecoveryRunner = typing.TypeAliasType("SliceRecoveryRunner", Callable[
     [str, Callable[[], "SliceRecoveryAttemptOutcome"], Callable[[], "SliceRecoveryAttemptTrace"]],
     "SliceRecoveryAttemptOutcome",
-]
+])
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class SliceRecoveryAttemptTrace:
     """Timing and failure-stage trace for one slice recovery attempt."""
 
-    failure_stage: str
+    failure_stage: object
     build_ms: int | None = None
     recover_ms: int | None = None
     decompile_ms: int | None = None
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class BoundedSliceVerdict:
     """Structured retry verdict for a bounded slice recovery attempt."""
 
-    stage: str | None
-    stop_family: str | None
-    can_widen_locally: bool
-    can_retry_with_fresh_project: bool
+    stage: object
+    stop_family: object
+    can_widen_locally: cython.bint
+    can_retry_with_fresh_project: cython.bint
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class SliceRecoveryAttemptOutcome:
     """Outcome payload and retry metadata for one slice recovery attempt."""
 
-    attempt_name: str
-    status: str
-    payload: str
-    partial_payload: str | None = None
-    snapshot: dict[str, object] | None = None
+    attempt_name: object
+    status: object
+    payload: object
+    partial_payload: object = None
+    snapshot: object = None
     attempt_trace: SliceRecoveryAttemptTrace | None = None
     verdict: BoundedSliceVerdict | None = None
 
@@ -55,11 +60,11 @@ class SliceRecoveryAttemptOutcome:
         yield self.status
         yield self.payload
 
-    def __len__(self) -> int:
+    def __len__(self) -> cython.longlong:
         """Return the legacy tuple-compatible item count."""
         return 2
 
-    def __getitem__(self, index: int) -> str:
+    def __getitem__(self, index: cython.longlong) -> object:
         """Return status or payload for legacy tuple-indexing callers."""
         if index == 0:
             return self.status
@@ -67,20 +72,21 @@ class SliceRecoveryAttemptOutcome:
             return self.payload
         raise IndexError(index)
 
-    def __eq__(self, other: object) -> bool:
+    def __eq__(self, other: object) -> cython.bint:
         """Compare with either another outcome or a legacy status/payload tuple."""
         if isinstance(other, tuple):
             return (self.status, self.payload) == other
         if isinstance(other, SliceRecoveryAttemptOutcome):
-            return asdict(self) == asdict(other)
+            return operator.eq(asdict(self), asdict(other))
         return NotImplemented
 
 
+@cython.ccall
 def _build_bounded_slice_verdict(
-    trace: SliceRecoveryAttemptTrace | None,
+    trace: object,
     *,
-    status: str,
-    partial_payload: str | None,
+    status: object,
+    partial_payload: object,
 ) -> BoundedSliceVerdict:
     stage = trace.failure_stage if trace is not None else None
     normalized_status = status.strip().lower()
@@ -128,9 +134,9 @@ def _stabilize_bounded_slice_verdict(
         return verdict
     repeated_family = any(
         prior.verdict is not None
-        and prior.verdict.stage == verdict.stage
-        and prior.verdict.stop_family == verdict.stop_family
-        for prior in prior_outcomes
+        and operator.eq(prior.verdict.stage, verdict.stage)
+        and operator.eq(prior.verdict.stop_family, verdict.stop_family)
+        for prior in iter(prior_outcomes)
     )
     if not repeated_family or not verdict.can_widen_locally:
         return verdict
@@ -143,8 +149,8 @@ def _stabilize_bounded_slice_verdict(
 
 
 def build_default_slice_recovery_attempts(
-    start: int,
-    end: int,
+    start: cython.longlong,
+    end: cython.longlong,
     *,
     entry: int | None = None,
     pick_function_lean: Callable[..., tuple[Any, Any]],
@@ -199,6 +205,9 @@ def run_bounded_slice_recovery(
     run_attempt: SliceRecoveryRunner | None = None,
 ) -> tuple[SliceRecoveryAttemptOutcome, ...]:
     """Run bounded slice recovery attempts until success or a stable stop verdict."""
+    outcome: object
+    attempt_name: object
+    recover: object
     outcomes: list[SliceRecoveryAttemptOutcome] = []
     for attempt_name, recover in attempts:
         trace_state: dict[str, int | str | None] = {
@@ -275,12 +284,12 @@ def run_bounded_slice_recovery(
 
 def bounded_slice_runner_timeout(
     *,
-    timeout: int,
-    attempt_count: int,
-    per_attempt_timeout_cap: int,
-    setup_slack: int = 1,
-    max_timeout: int,
-) -> int:
+    timeout: cython.longlong,
+    attempt_count: cython.longlong,
+    per_attempt_timeout_cap: cython.longlong,
+    setup_slack: cython.longlong = 1,
+    max_timeout: cython.longlong,
+) -> cython.longlong:
     """Compute the timeout budget for bounded slice recovery attempts."""
     per_attempt_timeout = max(1, min(timeout, per_attempt_timeout_cap))
     return max(2, min(attempt_count * (per_attempt_timeout + setup_slack), max_timeout))

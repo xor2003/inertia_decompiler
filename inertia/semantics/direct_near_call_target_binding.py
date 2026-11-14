@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove a symbolic CS-relative near CALL target matches exact native bytes.
 
 Layer: Semantics (staged candidate; promote to ``semantics/`` on acceptance).
@@ -37,6 +38,8 @@ CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -83,6 +86,10 @@ from .direct_ret_call_effect import (
     direct_near_call_encoding_is_bound_8616,
     direct_near_call_target_is_bound_8616,
 )
+import dataclasses
+import operator
+import builtins
+DeclaredSelectorCallsite8616 = typing.TypeVar("DeclaredSelectorCallsite8616")
 
 if TYPE_CHECKING:
     from inertia.ir.declared_selector_invariant import DeclaredSelectorCallsite8616
@@ -109,7 +116,7 @@ _CS_SEGMENT_REGISTER_8616 = "cs"
 class _DirectNearInvocationConsumer8616(Protocol):
     """Synchronous owner that authenticates one exact invocation after native gates."""
 
-    def __call__(self, invocation: Real16CallInvocation8616, /) -> bool:
+    def __call__(self, invocation: Real16CallInvocation8616, /) -> cython.bint:
         """Return whether a freshly replayed premise discharges this exact use."""
         ...
 
@@ -162,7 +169,7 @@ class DirectNearCallTargetBindingFailure8616(StrEnum):
     PENDING_SOURCE_CHANGED = "pending_source_changed"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectNearCallTargetShape8616:
     """Exact facts recovered from a matched relative-continuation operand DAG.
 
@@ -172,10 +179,10 @@ class DirectNearCallTargetShape8616:
     both CS-composition sites; ``control_bits`` is the retained dword width.
     """
 
-    segment_register: str
-    next_linear_addr: int
-    displacement: int
-    control_bits: int
+    segment_register: object
+    next_linear_addr: cython.longlong
+    displacement: cython.longlong
+    control_bits: cython.longlong
 
     def to_dict(self) -> dict[str, object]:
         """Serialize recovered shape facts for diagnostics and workers."""
@@ -190,21 +197,21 @@ class DirectNearCallTargetShape8616:
 class _DecodedNativeCallsiteInstruction8616(Protocol):
     """Third-party decoded instruction surface consumed as native evidence."""
 
-    address: int
-    size: int
-    bytes: bytes
+    address: cython.longlong
+    size: cython.longlong
+    bytes: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _DecodedInstructionEvidence8616:
     """Native facts extracted at the third-party instruction boundary."""
 
-    address: int
-    size: int
-    encoding: bytes
+    address: cython.longlong
+    size: cython.longlong
+    encoding: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectNearCallCoordinates8616:
     """Exact callsite coordinates for one direct near CALL binding proof.
 
@@ -215,19 +222,19 @@ class DirectNearCallCoordinates8616:
     rather than being normalized into a guessed proof.
     """
 
-    callsite_addr: int
-    next_addr: int
-    target_addr: int
+    callsite_addr: cython.longlong
+    next_addr: cython.longlong
+    target_addr: cython.longlong
 
     def __post_init__(self) -> None:
         """Reject malformed coordinates instead of repairing foreign facts."""
         values = (self.callsite_addr, self.next_addr, self.target_addr)
-        if any(type(value) is not int or value < 0 for value in values):
+        if any(type(value) is not int or value < 0 for value in iter(values)):
             raise ValueError("direct near-call coordinates require nonnegative integers")
         if self.next_addr <= self.callsite_addr:
             raise ValueError("direct near-call continuation must follow the callsite")
 
-    def to_dict(self) -> dict[str, int]:
+    def to_dict(self) -> dict[str, cython.longlong]:
         """Serialize the coordinate triple for diagnostics and workers."""
         return {
             "callsite_addr": self.callsite_addr,
@@ -236,30 +243,29 @@ class DirectNearCallCoordinates8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectNearCallTargetBindingStats8616:
     """Closed five-stage accounting for one evaluated CALL target."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether the candidate resolved to one proof or refusal."""
         counts = (self.raw_fact_count, self.normalized_fact_count, self.classified_fact_count,
                   self.materialized_count, self.failure_count)
-        if not all(type(count) is int and count >= 0 for count in counts):
+        if not all(type(count) is int and count >= 0 for count in iter(counts)):
             return False
         return bool(
             self.raw_fact_count == self.normalized_fact_count == 1
-            and self.normalized_fact_count
-            == self.materialized_count + self.failure_count
+            and operator.eq(self.normalized_fact_count, self.materialized_count + self.failure_count)
         )
 
-    def to_dict(self) -> dict[str, int]:
+    def to_dict(self) -> dict[str, cython.longlong]:
         """Serialize the evidence ledger for diagnostics."""
         return {
             "raw_fact_count": self.raw_fact_count,
@@ -270,7 +276,7 @@ class DirectNearCallTargetBindingStats8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectNearCallTargetBinding8616:
     """Verdict and retained shape for one symbolic direct near CALL target.
 
@@ -289,7 +295,7 @@ class DirectNearCallTargetBinding8616:
     selector_binding: DeclaredSelectorCallsite8616 | None = None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether the binding closed with one exact target proof."""
         return bool(
             self.verdict is DirectNearCallTargetBindingVerdict8616.PROVEN
@@ -299,8 +305,7 @@ class DirectNearCallTargetBinding8616:
                 self.callsite_addr, self.target_addr, self.invocation,
                 self.selector_binding,
             )
-            and self.stats
-            == DirectNearCallTargetBindingStats8616(1, 1, 1, 1, 0)
+            and operator.eq(self.stats, DirectNearCallTargetBindingStats8616(1, 1, 1, 1, 0))
             and self.stats.closed
         )
 
@@ -332,13 +337,14 @@ class DirectNearCallTargetBinding8616:
         }
 
 
+@cython.ccall
 def _refuse_8616(
     callsite_addr: int | None,
     target_addr: int | None,
     failure: DirectNearCallTargetBindingFailure8616,
     *,
-    normalized: bool = False,
-    classified: bool = False,
+    normalized: cython.bint = False,
+    classified: cython.bint = False,
     shape: DirectNearCallTargetShape8616 | None = None,
 ) -> DirectNearCallTargetBinding8616:
     """Retain one refused binding obligation in the five-stage evidence count."""
@@ -354,7 +360,8 @@ def _refuse_8616(
     )
 
 
-def _target_in_all_fetch_windows_8616(head: int, target: int) -> bool:
+@cython.ccall
+def _target_in_all_fetch_windows_8616(head: cython.longlong, target: cython.longlong) -> cython.bint:
     """Require one target across every selector capable of fetching the head.
 
     This arithmetic is conditional on the native instruction-fetch coordinate
@@ -368,27 +375,29 @@ def _target_in_all_fetch_windows_8616(head: int, target: int) -> bool:
 
 
 def _retained_coordinate_facts_8616(
-    callsite: int | None, target: int | None, shape: DirectNearCallTargetShape8616 | None,
-) -> bool:
+    callsite: int | None, target: int | None, shape: object,
+) -> cython.bint:
     """Recheck coordinate consistency when a retained result is consumed."""
     if type(callsite) is not int or type(target) is not int or shape is None:
         return False
     if callsite < 0 or target < 0:
         return False
-    if not all(type(value) is int for value in (shape.control_bits, shape.next_linear_addr, shape.displacement)):
+    if not all(type(value) is int for value in iter((shape.control_bits, shape.next_linear_addr, shape.displacement))):
         return False
-    if (shape.segment_register != _CS_SEGMENT_REGISTER_8616 or shape.control_bits != 32
-            or shape.next_linear_addr != callsite + 3):
+    if (operator.ne(shape.segment_register, _CS_SEGMENT_REGISTER_8616) or shape.control_bits != 32
+            or operator.ne(shape.next_linear_addr, callsite + 3)):
         return False
     return (0 <= shape.displacement <= 0xFFFF
-            and target == shape.next_linear_addr + _signed16_8616(shape.displacement))
+            and operator.eq(target, shape.next_linear_addr + _signed16_8616(shape.displacement)))
 
 
 def _retained_binding_fields_equal_8616(
     binding: DirectNearCallTargetBinding8616,
     replayed: DirectNearCallTargetBinding8616,
-) -> bool:
+) -> cython.bint:
     """Reconcile owned primitive fields without running callbacks after replay."""
+    checked: object
+    offered: object
     if not _binding_record_primitives_8616(binding) or not _binding_record_primitives_8616(replayed):
         return False
     offered, checked = binding.invocation, replayed.invocation
@@ -400,23 +409,24 @@ def _retained_binding_fields_equal_8616(
             and type(checked) is Real16CallInvocation8616
             and offered.project is checked.project and offered.block is checked.block
             and offered.premise is checked.premise
-            and all(type(value) is int for value in (
+            and all(type(value) is int for value in iter((
                 offered.callsite_addr, offered.target_addr, checked.callsite_addr, checked.target_addr,
-            ))
-            and offered.callsite_addr == checked.callsite_addr
-            and offered.target_addr == checked.target_addr
+            )))
+            and operator.eq(offered.callsite_addr, checked.callsite_addr)
+            and operator.eq(offered.target_addr, checked.target_addr)
         )
     return (
         invocation_equal
         and binding.selector_binding is replayed.selector_binding
-        and binding.stats == replayed.stats
-        and binding.shape == replayed.shape
-        and binding.callsite_addr == replayed.callsite_addr
-        and binding.target_addr == replayed.target_addr
+        and operator.eq(binding.stats, replayed.stats)
+        and operator.eq(binding.shape, replayed.shape)
+        and operator.eq(binding.callsite_addr, replayed.callsite_addr)
+        and operator.eq(binding.target_addr, replayed.target_addr)
     )
 
 
-def _binding_record_primitives_8616(binding: DirectNearCallTargetBinding8616) -> bool:
+@cython.ccall
+def _binding_record_primitives_8616(binding: DirectNearCallTargetBinding8616) -> cython.bint:
     """Require exact owned records and scalar fields before pure reconciliation."""
     if type(binding) is not DirectNearCallTargetBinding8616:
         return False
@@ -432,10 +442,11 @@ def _binding_record_primitives_8616(binding: DirectNearCallTargetBinding8616) ->
     )
 
 
+@cython.ccall
 def _selector_projection_types_8616(
 ) -> tuple[
     type[DeclaredSelectorCallsite8616],
-    Callable[[object, DeclaredSelectorCallsite8616], bool],
+    Callable[[object, DeclaredSelectorCallsite8616], cython.bint],
 ]:
     """Lazily resolve the canonical declared-selector producer surface.
 
@@ -451,17 +462,19 @@ def _selector_projection_types_8616(
     return DeclaredSelectorCallsite8616, consume_declared_selector_callsite_8616
 
 
+@cython.ccall
 def _retained_selector_projection_8616(
-    callsite: int,
-    target: int,
+    callsite: cython.longlong,
+    target: cython.longlong,
     projection: DeclaredSelectorCallsite8616,
-) -> bool:
+) -> cython.bint:
     """Revalidate a retained declared-selector projection at consumption.
 
     The producer alone authenticates the current certificate, root, native,
     and authority state for the projection's retained scope project; the
     same projection object must still name this exact callsite/target pair.
     """
+    scope: object
     callsite_type, consume = _selector_projection_types_8616()
     if type(projection) is not callsite_type:
         return False
@@ -469,18 +482,19 @@ def _retained_selector_projection_8616(
     if scope is None or scope.project is None:
         return False
     return bool(
-        projection.callsite_addr == callsite
-        and projection.target_addr == target
+        operator.eq(projection.callsite_addr, callsite)
+        and operator.eq(projection.target_addr, target)
         and consume(scope.project, projection)
     )
 
 
+@cython.ccall
 def _retained_selector_domain_8616(
     callsite: int | None,
     target: int | None,
-    invocation: Real16CallInvocation8616 | None,
+    invocation: object,
     selector_binding: DeclaredSelectorCallsite8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """Recheck the selector-window obligation when a result is consumed.
 
     The default all-fetch-windows bound is always authoritative. A bound
@@ -498,15 +512,16 @@ def _retained_selector_domain_8616(
         return True
     return bool(
         invocation is not None
-        and invocation.callsite_addr == callsite
-        and invocation.target_addr == target
+        and operator.eq(invocation.callsite_addr, callsite)
+        and operator.eq(invocation.target_addr, target)
         and invocation.complete
     )
 
 
+@cython.ccall
 def _native_terminal_failure_8616(
-    project: object, block: IRBlock, origin: IRInstructionOrigin8616, callsite: int,
-    next_addr: int,
+    project: object, block: IRBlock, origin: IRInstructionOrigin8616, callsite: cython.longlong,
+    next_addr: cython.longlong,
 ) -> DirectNearCallTargetBindingFailure8616 | None:
     """Check native terminal identity in the active or architectural flag view.
 
@@ -516,6 +531,7 @@ def _native_terminal_failure_8616(
     exists; both attempts retain exact origin coordinates and next-temporary
     checks. Never accept merely because the instruction addresses match.
     """
+    failure: object
     if not isinstance(project, angr.Project) or not isinstance(project.arch, Arch86_16):
         return DirectNearCallTargetBindingFailure8616.CONTROL_DOMAIN_UNPROVED
     if project.arch.control_address_domain is not ControlAddressDomain.LOADER_LINEAR:
@@ -536,7 +552,7 @@ def _native_terminal_failure_8616(
     return _native_terminal_facts_failure_8616(facts, origin)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _NativeTerminalFacts8616:
     """Immutable detached terminal facts; never the mutable lifted IRSB.
 
@@ -547,12 +563,12 @@ class _NativeTerminalFacts8616:
     """
 
     jumpkind: object
-    statement_count: int
-    next_is_rdtmp: bool
+    statement_count: cython.longlong
+    next_is_rdtmp: cython.bint
     next_tmp: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _NativeTerminalFactRecord8616:
     """One request-scoped record binding an exact byte range to its facts."""
 
@@ -566,6 +582,7 @@ class _NativeTerminalFactRecord8616:
 _NATIVE_TERMINAL_FACT_RECORD_LIMIT_8616 = 16
 
 
+@cython.ccall
 def _terminal_fact_producers_8616() -> tuple[object, ...]:
     """Resolve the live decoder authority so attribute swaps invalidate.
 
@@ -582,6 +599,7 @@ def _terminal_fact_producers_8616() -> tuple[object, ...]:
 
 
 
+@cython.ccall
 def _flag_view_session_8616() -> object | None:
     """Return the active status-flag lift session keeping both views distinct."""
     from inertia.ir.status_flag_lift_context import _active_session
@@ -589,6 +607,7 @@ def _flag_view_session_8616() -> object | None:
     return cast("object | None", _active_session.get())
 
 
+@cython.ccall
 def _detach_native_terminal_facts_8616(native: object) -> _NativeTerminalFacts8616 | None:
     """Detach the immutable terminal scalars from one freshly lifted IRSB."""
     if not isinstance(native, pyvex.IRSB):
@@ -603,19 +622,21 @@ def _detach_native_terminal_facts_8616(native: object) -> _NativeTerminalFacts86
     )
 
 
+@cython.ccall
 def _native_terminal_facts_failure_8616(
-    facts: _NativeTerminalFacts8616 | None, origin: IRInstructionOrigin8616,
+    facts: object, origin: IRInstructionOrigin8616,
 ) -> DirectNearCallTargetBindingFailure8616 | None:
     """Require the exact native terminal position and temporary in one view."""
     if facts is None or facts.jumpkind != "Ijk_Call":
         return DirectNearCallTargetBindingFailure8616.NATIVE_TERMINAL_MISMATCH
-    if type(origin.statement_index) is not int or origin.statement_index != facts.statement_count:
+    if type(origin.statement_index) is not int or operator.ne(origin.statement_index, facts.statement_count):
         return DirectNearCallTargetBindingFailure8616.TERMINAL_POSITION_MISMATCH
-    if not facts.next_is_rdtmp or facts.next_tmp != origin.block_next_tmp:
+    if not facts.next_is_rdtmp or operator.ne(facts.next_tmp, origin.block_next_tmp):
         return DirectNearCallTargetBindingFailure8616.NATIVE_TERMINAL_MISMATCH
     return None
 
 
+@cython.ccall
 def _native_terminal_identity_failure_8616(
     native: object, origin: IRInstructionOrigin8616,
 ) -> DirectNearCallTargetBindingFailure8616 | None:
@@ -625,7 +646,7 @@ def _native_terminal_identity_failure_8616(
 
 
 def _terminal_fact_source_binding_8616(
-    project: angr.Project, addr: int, size: int, producers: tuple[object, ...],
+    project: angr.Project, addr: cython.longlong, size: cython.longlong, producers: object,
 ) -> NativeCensusSourceBinding8616 | None:
     """Bind the exact lifted byte range through the shared source key.
 
@@ -634,11 +655,13 @@ def _terminal_fact_source_binding_8616(
     producers make a retained record unusable. Unsupported sources return
     ``None`` and the caller follows the original lift path.
     """
+    block: object
+    keyed: object
     try:
         code = bytes(project.loader.memory.load(addr, size))
     except (AttributeError, KeyError, TypeError, ValueError):
         return None
-    if len(code) != size:
+    if operator.ne(len(code), size):
         return None
     decoded = cast(
         CapstoneBlockDecodeArtifact8616,
@@ -652,7 +675,7 @@ def _terminal_fact_source_binding_8616(
         block_addrs_set=frozenset({addr}),
         reachable_instruction_addrs=frozenset(
             cast(DirectCapstoneInstruction8616, instruction).address
-            for instruction in block.instructions),
+            for instruction in iter(block.instructions)),
         successor_edges=(), blocks=(block,), info={})
     keyed = _source_key_8616(project, boundary, producers)
     if keyed is None or direct_evidence_deadline_expired_8616(project):
@@ -660,8 +683,9 @@ def _terminal_fact_source_binding_8616(
     return NativeCensusSourceBinding8616(project, boundary, keyed[0], keyed[1])
 
 
+@cython.ccall
 def _lift_native_terminal_facts_8616(
-    project: angr.Project, block_addr: int, size: int,
+    project: angr.Project, block_addr: cython.longlong, size: cython.longlong,
 ) -> _NativeTerminalFacts8616 | None:
     """Lift once through the canonical producer and detach terminal facts."""
     native = project.factory.block(
@@ -670,8 +694,9 @@ def _lift_native_terminal_facts_8616(
     return _detach_native_terminal_facts_8616(native)
 
 
+@cython.ccall
 def _native_terminal_facts_for_8616(
-    project: angr.Project, block_addr: int, size: int,
+    project: angr.Project, block_addr: cython.longlong, size: cython.longlong,
 ) -> _NativeTerminalFacts8616 | None:
     """Return detached terminal facts under request-scoped source-key reuse.
 
@@ -685,6 +710,12 @@ def _native_terminal_facts_for_8616(
     re-authenticated AFTER, so a source mutation during the canonical lift
     is served to this caller but never retained for later requests.
     """
+    binding: object
+    entry: object
+    facts: object
+    record: object
+    store: object
+    view: object
     store = native_terminal_fact_store_8616()
     if store is None or direct_evidence_deadline_expired_8616(project):
         return _lift_native_terminal_facts_8616(project, block_addr, size)
@@ -711,15 +742,18 @@ def _native_terminal_facts_for_8616(
     return facts
 
 
+@cython.ccall
 def _tmp_producers_8616(
     block: IRBlock,
-) -> dict[int, IRInstr] | None:
+) -> object:
     """Index the block's typed temporary producers or refuse an ambiguous ledger.
 
     VEX temporaries are block-local; a duplicate destination identity would
     mean the IR no longer records one definition per temporary.
     """
-    producers: dict[int, IRInstr] = {}
+    destination: object
+    instruction: object
+    producers: dict[cython.longlong, IRInstr] = {}
     for instruction in block.instrs:
         destination = instruction.dst
         if (
@@ -734,8 +768,9 @@ def _tmp_producers_8616(
     return producers
 
 
+@cython.ccall
 def _tmp_producer_8616(
-    producers: dict[int, IRInstr],
+    producers: object,
     value: IRValue,
 ) -> IRInstr | None:
     """Resolve one temporary-typed value to its unique producer instruction."""
@@ -744,8 +779,9 @@ def _tmp_producer_8616(
     return producers.get(value.source_tmp)
 
 
+@cython.ccall
 def _operand_8616(
-    producers: dict[int, IRInstr],
+    producers: object,
     value: IRValue,
 ) -> IRInstr | IRValue | None:
     """Resolve one operand position to a producer instruction or a leaf value."""
@@ -758,12 +794,13 @@ def _operand_8616(
     return None
 
 
-def _const_int_8616(value: IRValue, size: int) -> int | None:
+@cython.ccall
+def _const_int_8616(value: IRValue, size: cython.longlong) -> int | None:
     """Return the exact integer of one constant operand at a required width."""
     if (
         value.space is not MemSpace.CONST
         or type(value.const) is not int
-        or value.size != size
+        or operator.ne(value.size, size)
     ):
         return None
     if (value.active_unary is not None or value.source_tmp is not None
@@ -774,21 +811,25 @@ def _const_int_8616(value: IRValue, size: int) -> int | None:
     return value.const
 
 
+@cython.ccall
 def _conversion_operand_8616(
-    producers: dict[int, IRInstr],
+    producers: object,
     value: IRValue,
-    conversion: str,
+    conversion: object,
 ) -> IRInstr | IRValue | None:
     """Resolve a captured conversion result through its exact active computation."""
+    inner: object
+    producer: object
+    widths: object
     widths = {"Iop_16Uto32": (2, 4), "Iop_32to16": (4, 2)}.get(conversion)
-    if widths is None or value.expr != (conversion,) or value.active_unary is not None:
+    if widths is None or operator.ne(value.expr, (conversion,)) or value.active_unary is not None:
         return None
     producer = _tmp_producer_8616(producers, value)
     if producer is None or producer.op != "MOV" or len(producer.args) != 1:
         return None
-    if value.size != widths[1] or producer.size != widths[1]:
+    if operator.ne(value.size, widths[1]) or operator.ne(producer.size, widths[1]):
         return None
-    if (producer.dst is None or producer.dst.size != widths[1]
+    if (producer.dst is None or operator.ne(producer.dst.size, widths[1])
             or producer.dst.active_unary is not None):
         return None
     source = producer.args[0]
@@ -798,29 +839,33 @@ def _conversion_operand_8616(
     return None if inner is None else _operand_8616(producers, inner)
 
 
-def _active_conversion_source_8616(value: IRValue, conversion: str) -> IRValue | None:
+@cython.ccall
+def _active_conversion_source_8616(value: IRValue, conversion: object) -> IRValue | None:
     """Validate one supported active conversion, including both exact widths."""
+    active: object
+    widths: object
     widths = {"Iop_16Uto32": (2, 4), "Iop_32to16": (4, 2)}.get(conversion)
     active = value.active_unary
     if widths is None or active is None or value.source_tmp is not None:
         return None
     if (not _plain_register_coordinates_8616(value)
-            or value.expr != (conversion,) or active.op != conversion):
+            or operator.ne(value.expr, (conversion,)) or operator.ne(active.op, conversion)):
         return None
-    if (value.size != widths[1] or type(active.result_bits) is not int
-            or active.result_bits != widths[1] * 8):
+    if (operator.ne(value.size, widths[1]) or type(active.result_bits) is not int
+            or operator.ne(active.result_bits, widths[1] * 8)):
         return None
-    if active.operand.size != widths[0] or active.operand.active_unary is not None:
+    if operator.ne(active.operand.size, widths[0]) or active.operand.active_unary is not None:
         return None
     return active.operand
 
 
+@cython.ccall
 def _reg_leaf_name_8616(
-    producers: dict[int, IRInstr],
+    producers: object,
     operand: IRInstr | IRValue,
     *,
-    depth: int = 0,
-) -> str | None:
+    depth: cython.longlong = 0,
+) -> object:
     """Reduce temporary copies and conversions to one 16-bit register leaf."""
     if depth > _MAX_ALIAS_DEPTH_8616:
         return None
@@ -829,26 +874,29 @@ def _reg_leaf_name_8616(
     return _reg_leaf_instr_name_8616(producers, operand, depth=depth)
 
 
-def _plain_register_coordinates_8616(operand: IRValue) -> bool:
+def _plain_register_coordinates_8616(operand: IRValue) -> cython.bint:
     """Reject arithmetic and access decorations before reducing a register leaf."""
     coordinates_plain = (
         type(operand.offset) is int and operand.offset == 0
         and type(operand.index_shift) is int and operand.index_shift == 0
     )
-    annotations_empty = all(value is None for value in (
+    annotations_empty = all(value is None for value in iter((
         operand.const, operand.version, operand.index, operand.memory_access_size,
         operand.memory_access_insn, operand.call_output,
-    ))
+    )))
     return coordinates_plain and annotations_empty
 
 
+@cython.ccall
 def _reg_leaf_value_name_8616(
-    producers: dict[int, IRInstr],
+    producers: object,
     operand: IRValue,
     *,
-    depth: int,
-) -> str | None:
+    depth: cython.longlong,
+) -> object:
     """Reduce one register or conversion leaf value to its register name."""
+    inner: object
+    producer: object
     if (operand.space is not MemSpace.REG or not operand.name
             or not _plain_register_coordinates_8616(operand)
             or operand.expr not in (None, ("Iop_16Uto32",))):
@@ -862,13 +910,16 @@ def _reg_leaf_value_name_8616(
     return operand.name if operand.expr is None and operand.size == 2 else None
 
 
+@cython.ccall
 def _reg_leaf_instr_name_8616(
-    producers: dict[int, IRInstr],
+    producers: object,
     operand: IRInstr,
     *,
-    depth: int,
-) -> str | None:
+    depth: cython.longlong,
+) -> object:
     """Reduce one copy producer instruction to its 16-bit register leaf."""
+    inner: object
+    node: object
     if operand.op != "MOV" or len(operand.args) != 1:
         return None
     arg = operand.args[0]
@@ -891,11 +942,14 @@ def _reg_leaf_instr_name_8616(
     return None
 
 
+@cython.ccall
 def _segment_base_name_8616(
-    producers: dict[int, IRInstr],
+    producers: object,
     value: IRValue,
-) -> str | None:
+) -> object:
     """Match ``Shl32(16Uto32(seg), 4)`` and return the segment register name."""
+    node: object
+    operand: object
     node = _tmp_producer_8616(producers, value)
     if node is None or node.op != "Iop_Shl32" or node.size != 4 or len(node.args) != 2:
         return None
@@ -910,8 +964,9 @@ def _segment_base_name_8616(
     return _reg_leaf_name_8616(producers, operand)
 
 
+@cython.ccall
 def _match_relative_continuation_8616(
-    producers: dict[int, IRInstr],
+    producers: object,
     target: IRValue,
 ) -> DirectNearCallTargetShape8616 | None:
     """Match the exact ``relative_continuation`` loader-linear composition.
@@ -927,6 +982,11 @@ def _match_relative_continuation_8616(
     The outer sum must retain dword width; the only narrowing is the
     architectural 32to16 IP projection followed by the Add16 displacement.
     """
+    add: object
+    displacement: object
+    next_linear: object
+    second_segment: object
+    segment: object
     if target.space is not MemSpace.TMP or target.size != 4:
         return None
     add = _tmp_producer_8616(producers, target)
@@ -964,7 +1024,7 @@ def _match_relative_continuation_8616(
     if (
         segment is None
         or second_segment is None
-        or segment != second_segment
+        or operator.ne(segment, second_segment)
         or next_linear is None
         or displacement is None
     ):
@@ -977,14 +1037,15 @@ def _match_relative_continuation_8616(
     )
 
 
-def _signed16_8616(value: int) -> int:
+@cython.ccall
+def _signed16_8616(value: cython.longlong) -> cython.longlong:
     """Interpret a 16-bit displacement with its explicit sign, never modulo."""
     return value - 0x10000 if value & 0x8000 else value
 
 
 def _call_identity_8616(
     instruction: IRInstr,
-    expected_callsite: int,
+    expected_callsite: cython.longlong,
     refusal_target: int | None,
     block: IRBlock,
 ) -> int | DirectNearCallTargetBinding8616:
@@ -1005,7 +1066,7 @@ def _call_identity_8616(
             callsite_addr, refusal_target,
             DirectNearCallTargetBindingFailure8616.CALLSITE_MISMATCH,
         )
-    if not any(item is instruction or item == instruction for item in block.instrs):
+    if not any(item is instruction or item == instruction for item in iter(block.instrs)):
         return _refuse_8616(
             callsite_addr, refusal_target,
             DirectNearCallTargetBindingFailure8616.INSTRUCTION_NOT_IN_BLOCK,
@@ -1013,8 +1074,9 @@ def _call_identity_8616(
     return callsite_addr
 
 
+@cython.ccall
 def _summary_call_coordinates_8616(
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     summary: CallsiteSummary8616,
 ) -> DirectNearCallCoordinates8616 | DirectNearCallTargetBinding8616:
     """Derive binding coordinates from an authoritative callsite summary.
@@ -1030,7 +1092,7 @@ def _summary_call_coordinates_8616(
             normalized=True,
         )
     next_addr = summary.return_addr
-    if type(next_addr) is not int or next_addr != callsite_addr + 3:
+    if type(next_addr) is not int or operator.ne(next_addr, callsite_addr + 3):
         return _refuse_8616(
             callsite_addr, summary.target_addr,
             DirectNearCallTargetBindingFailure8616.RETURN_ADDRESS_MISMATCH,
@@ -1046,6 +1108,7 @@ def _summary_call_coordinates_8616(
     return DirectNearCallCoordinates8616(callsite_addr, next_addr, target_addr)
 
 
+@cython.ccall
 def _decoded_call_coordinates_8616(
     decoded: DecodedDirectCallsite8616,
 ) -> DirectNearCallCoordinates8616 | DirectNearCallTargetBinding8616:
@@ -1081,7 +1144,7 @@ def _decoded_call_coordinates_8616(
     evidence = _decoded_entry_instruction_8616(decoded)
     if isinstance(evidence, DirectNearCallTargetBinding8616):
         return evidence
-    if evidence.address != callsite_addr:
+    if operator.ne(evidence.address, callsite_addr):
         return _refuse_8616(
             callsite_addr, target_addr,
             DirectNearCallTargetBindingFailure8616.CALLSITE_MISMATCH,
@@ -1093,7 +1156,7 @@ def _decoded_call_coordinates_8616(
         )
     next_addr = evidence.address + evidence.size
     displacement = int.from_bytes(evidence.encoding[1:3], "little")
-    if next_addr + _signed16_8616(displacement) != target_addr:
+    if operator.ne(next_addr + _signed16_8616(displacement), target_addr):
         return _refuse_8616(
             callsite_addr, target_addr,
             DirectNearCallTargetBindingFailure8616.DECODED_TARGET_MISMATCH,
@@ -1103,10 +1166,12 @@ def _decoded_call_coordinates_8616(
     return DirectNearCallCoordinates8616(callsite_addr, next_addr, target_addr)
 
 
+@cython.ccall
 def _decoded_entry_instruction_8616(
     decoded: DecodedDirectCallsite8616,
 ) -> _DecodedInstructionEvidence8616 | DirectNearCallTargetBinding8616:
     """Extract the entry's native instruction facts with typed refusal."""
+    instruction: object
     callsite_addr = decoded.callsite_addr
     target_addr = decoded.target_addr
     refusal_callsite = callsite_addr if type(callsite_addr) is int else None
@@ -1143,9 +1208,10 @@ def _decoded_entry_instruction_8616(
     return evidence
 
 
+@cython.ccall
 def _control_operand_8616(
-    callsite_addr: int,
-    target_addr: int,
+    callsite_addr: cython.longlong,
+    target_addr: cython.longlong,
     instruction: IRInstr,
 ) -> IRValue | DirectNearCallTargetBinding8616:
     """Validate the typed control operand position for a symbolic binding.
@@ -1180,6 +1246,7 @@ def _control_operand_8616(
     return target
 
 
+@cython.ccall
 def _owned_origin_provenance_8616(
     block: IRBlock,
     instruction: IRInstr,
@@ -1194,6 +1261,7 @@ def _owned_origin_provenance_8616(
     is deliberately not part of this helper — only callers owning a fresh
     final-state pass may run it without one.
     """
+    origin: object
     callsite_addr = coordinates.callsite_addr
     target_addr = coordinates.target_addr
     origin = instruction.origin
@@ -1209,7 +1277,7 @@ def _owned_origin_provenance_8616(
             DirectNearCallTargetBindingFailure8616.ORIGIN_NOT_BLOCK_NEXT,
             normalized=True,
         )
-    if type(origin.block_addr) is not int or origin.block_addr != block.addr:
+    if type(origin.block_addr) is not int or operator.ne(origin.block_addr, block.addr):
         return _refuse_8616(
             callsite_addr, target_addr,
             DirectNearCallTargetBindingFailure8616.ORIGIN_BLOCK_MISMATCH,
@@ -1217,7 +1285,7 @@ def _owned_origin_provenance_8616(
         )
     if (
         type(origin.block_next_tmp) is not int
-        or origin.block_next_tmp != target.source_tmp
+        or operator.ne(origin.block_next_tmp, target.source_tmp)
     ):
         return _refuse_8616(
             callsite_addr, target_addr,
@@ -1227,6 +1295,7 @@ def _owned_origin_provenance_8616(
     return origin
 
 
+@cython.ccall
 def _origin_provenance_8616(
     project: object,
     block: IRBlock,
@@ -1240,6 +1309,7 @@ def _origin_provenance_8616(
     foreign control domain, truncated fetch window, or mismatched terminal
     is refused rather than discharged as a selector-domain receipt.
     """
+    native_failure: object
     origin = _owned_origin_provenance_8616(block, instruction, target, coordinates)
     if isinstance(origin, DirectNearCallTargetBinding8616):
         return origin
@@ -1254,6 +1324,7 @@ def _origin_provenance_8616(
     return origin
 
 
+@cython.ccall
 def _shape_coordinate_failure_8616(
     coordinates: DirectNearCallCoordinates8616,
     shape: DirectNearCallTargetShape8616,
@@ -1273,7 +1344,7 @@ def _shape_coordinate_failure_8616(
             normalized=True,
             classified=True,
         )
-    if shape.segment_register != _CS_SEGMENT_REGISTER_8616:
+    if operator.ne(shape.segment_register, _CS_SEGMENT_REGISTER_8616):
         return _refuse_8616(
             callsite_addr, target_addr,
             DirectNearCallTargetBindingFailure8616.SEGMENT_DOMAIN_MISMATCH,
@@ -1281,7 +1352,7 @@ def _shape_coordinate_failure_8616(
             classified=True,
             shape=shape,
         )
-    if shape.next_linear_addr != coordinates.next_addr:
+    if operator.ne(shape.next_linear_addr, coordinates.next_addr):
         return _refuse_8616(
             callsite_addr, target_addr,
             DirectNearCallTargetBindingFailure8616.NEXT_ADDRESS_MISMATCH,
@@ -1289,7 +1360,7 @@ def _shape_coordinate_failure_8616(
             classified=True,
             shape=shape,
         )
-    if target_addr != shape.next_linear_addr + _signed16_8616(shape.displacement):
+    if operator.ne(target_addr, shape.next_linear_addr + _signed16_8616(shape.displacement)):
         return _refuse_8616(
             callsite_addr, target_addr,
             DirectNearCallTargetBindingFailure8616.DISPLACEMENT_MISMATCH,
@@ -1300,6 +1371,7 @@ def _shape_coordinate_failure_8616(
     return None
 
 
+@cython.ccall
 def _bound_selector_invocation_8616(
     project: object,
     block: IRBlock,
@@ -1313,8 +1385,8 @@ def _bound_selector_invocation_8616(
         constructed = factory()
         if (type(constructed) is Real16CallInvocation8616
                 and constructed.project is project and constructed.block is block
-                and constructed.callsite_addr == coordinates.callsite_addr
-                and constructed.target_addr == coordinates.target_addr):
+                and operator.eq(constructed.callsite_addr, coordinates.callsite_addr)
+                and operator.eq(constructed.target_addr, coordinates.target_addr)):
             return constructed
         return None
     if consumer is None and _target_in_all_fetch_windows_8616(
@@ -1335,10 +1407,11 @@ def _bound_selector_invocation_8616(
     return None
 
 
+@cython.ccall
 def _selector_projection_coordinates_8616(
     projection: DeclaredSelectorCallsite8616,
     coordinates: DirectNearCallCoordinates8616,
-) -> bool:
+) -> cython.bint:
     """Require the offered projection to name this exact coordinate triple."""
     return bool(
         type(projection.callsite_addr) is int
@@ -1346,18 +1419,19 @@ def _selector_projection_coordinates_8616(
         and type(projection.next_addr) is int
         and type(projection.incoming_cs) is int
         and 0 <= projection.incoming_cs <= 0xFFFF
-        and projection.callsite_addr == coordinates.callsite_addr
-        and projection.target_addr == coordinates.target_addr
-        and projection.next_addr == coordinates.next_addr
+        and operator.eq(projection.callsite_addr, coordinates.callsite_addr)
+        and operator.eq(projection.target_addr, coordinates.target_addr)
+        and operator.eq(projection.next_addr, coordinates.next_addr)
     )
 
 
+@cython.ccall
 def _selector_projection_identity_8616(
     project: object,
     block: IRBlock,
     instruction: IRInstr,
     projection: DeclaredSelectorCallsite8616,
-) -> bool:
+) -> cython.bint:
     """Require exact retained scope, block, and instruction identities."""
     return bool(
         projection.scope is not None
@@ -1367,6 +1441,7 @@ def _selector_projection_identity_8616(
     )
 
 
+@cython.ccall
 def _bound_declared_selector_8616(
     project: object,
     block: IRBlock,
@@ -1395,11 +1470,12 @@ def _bound_declared_selector_8616(
     return projection
 
 
+@cython.ccall
 def _target_bytes_bound_8616(
     project: object,
     coordinates: DirectNearCallCoordinates8616,
     kind: _TargetBindingKind8616,
-) -> bool:
+) -> cython.bint:
     """Apply the explicit target policy before shared current-byte binding."""
     if kind is _TargetBindingKind8616.DECLARED_STUB:
         return is_synthetic_call_stub_8616(project, coordinates.target_addr) and (
@@ -1414,6 +1490,7 @@ def _target_bytes_bound_8616(
     )
 
 
+@cython.ccall
 def _selector_window_outcome_8616(
     project: object,
     block: IRBlock,
@@ -1421,15 +1498,12 @@ def _selector_window_outcome_8616(
     coordinates: DirectNearCallCoordinates8616,
     shape: DirectNearCallTargetShape8616,
     *,
-    invocation: Real16InvocationDomain8616 | None,
+    invocation: object,
     target_kind: _TargetBindingKind8616,
-    invocation_consumer: _DirectNearInvocationConsumer8616 | None,
-    invocation_factory: Callable[[], Real16CallInvocation8616 | None] | None,
-    selector_binding: DeclaredSelectorCallsite8616 | None,
-) -> tuple[
-    Real16CallInvocation8616 | None,
-    DeclaredSelectorCallsite8616 | None,
-] | DirectNearCallTargetBinding8616:
+    invocation_consumer: object,
+    invocation_factory: object,
+    selector_binding: object,
+) -> object:
     """Discharge the selector-window obligation or return the refusal.
 
     Conflicting full-invocation and declared-selector authorizations refuse
@@ -1438,6 +1512,8 @@ def _selector_window_outcome_8616(
     the existing invocation path; a refused projection leaves the window
     unproved even when the target would fit every fetch window.
     """
+    bound_invocation: object
+    bound_selector: object
     callsite_addr = coordinates.callsite_addr
     target_addr = coordinates.target_addr
     if selector_binding is not None and (
@@ -1466,8 +1542,8 @@ def _selector_window_outcome_8616(
             classified=True,
             shape=shape,
         )
-    bound_invocation: Real16CallInvocation8616 | None = None
-    bound_selector: DeclaredSelectorCallsite8616 | None = None
+    bound_invocation = None
+    bound_selector = None
     if selector_binding is not None:
         bound_selector = _bound_declared_selector_8616(
             project, block, instruction, coordinates, selector_binding,
@@ -1495,12 +1571,16 @@ def _selector_window_outcome_8616(
     return bound_invocation, bound_selector
 
 
+@cython.ccall
 def _operand_shape_outcome_8616(
     block: IRBlock,
     operand: IRValue,
     coordinates: DirectNearCallCoordinates8616,
 ) -> DirectNearCallTargetShape8616 | DirectNearCallTargetBinding8616:
     """Apply one shared, callback-free operand DAG and coordinate analysis."""
+    producers: object
+    shape: object
+    shape_failure: object
     callsite_addr = coordinates.callsite_addr
     target_addr = coordinates.target_addr
     producers = _tmp_producers_8616(block)
@@ -1524,6 +1604,7 @@ def _operand_shape_outcome_8616(
     return shape
 
 
+@cython.ccall
 def _prove_binding_core_8616(
     project: object,
     block: IRBlock,
@@ -1583,7 +1664,7 @@ def _prove_binding_core_8616(
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectNearCallTargetBindingPending8616:
     """Non-proof analysis retained only until synchronous batch admission.
 
@@ -1603,17 +1684,18 @@ class DirectNearCallTargetBindingPending8616:
     selector_binding: DeclaredSelectorCallsite8616
     selector_type: type[DeclaredSelectorCallsite8616]
     selector_scope: object
-    incoming_cs: int
+    incoming_cs: cython.longlong
     shape: DirectNearCallTargetShape8616
-    coordinate_facts: tuple[int, int, int]
-    shape_facts: tuple[str, int, int, int]
-    source_graph: str
-    instructions: tuple[IRInstr, ...]
-    instruction_index: int
+    coordinate_facts: object
+    shape_facts: object
+    source_graph: object
+    instructions: object
+    instruction_index: cython.longlong
     verdict: DirectNearCallTargetBindingVerdict8616 = DirectNearCallTargetBindingVerdict8616.PENDING
 
 
-def _pending_source_graph_8616(block: IRBlock) -> str | None:
+@cython.ccall
+def _pending_source_graph_8616(block: IRBlock) -> object:
     """Capture complete owned source facts without loader or proof callbacks."""
     try:
         return canonical_source_graph_8616(block.addr, (block,))
@@ -1625,14 +1707,14 @@ def _offered_pending_projection_8616(
     project: object, block: IRBlock, instruction: IRInstr,
     projection: DeclaredSelectorCallsite8616,
     coordinates: DirectNearCallCoordinates8616,
-    *, instructions: tuple[IRInstr, ...] | None = None,
+    *, instructions: object = None,
     instruction_index: int | None = None,
-) -> bool:
+) -> cython.bint:
     """Check canonical projection and exact offer identity without consumption."""
     if instructions is None:
         instructions = block.instrs
     if instruction_index is None:
-        instruction_index = next((index for index, row in enumerate(instructions)
+        instruction_index = next((index for index, row in builtins.iter(enumerate(instructions))
                                   if row is instruction), None)
     if instruction_index is None:
         return False
@@ -1645,9 +1727,10 @@ def _offered_pending_projection_8616(
     )
 
 
+@cython.ccall
 def _pending_instruction_slot_current_8616(
-    block: IRBlock, instruction: IRInstr, instructions: tuple[IRInstr, ...], index: int,
-) -> bool:
+    block: IRBlock, instruction: IRInstr, instructions: object, index: cython.longlong,
+) -> cython.bint:
     """Reconcile an exact stream and slot, without granting source-graph proof."""
     return (block.instrs is instructions and type(index) is int
             and 0 <= index < len(instructions) and instructions[index] is instruction)
@@ -1667,9 +1750,11 @@ def prepare_declared_near_call_target_binding_pending_8616(
     its current authority. The canonical IR batch owner must admit that exact
     projection after all callbacks, then immediately run the pure finalizer.
     """
+    instruction_index: object
+    source_graph: object
     callsite, target = coordinates.callsite_addr, coordinates.target_addr
     instructions = block.instrs
-    instruction_index = next((index for index, row in enumerate(instructions)
+    instruction_index = next((index for index, row in builtins.iter(enumerate(instructions))
                               if row is instruction), None)
     if not _offered_pending_projection_8616(
         project, block, instruction, selector_binding, coordinates,
@@ -1700,7 +1785,7 @@ def prepare_declared_near_call_target_binding_pending_8616(
         return _refuse_8616(
             callsite, target, DirectNearCallTargetBindingFailure8616.TARGET_BYTES_MISMATCH,
             normalized=True, classified=True, shape=shape)
-    if source_graph != _pending_source_graph_8616(block):
+    if operator.ne(source_graph, _pending_source_graph_8616(block)):
         return _refuse_8616(
             callsite, target, DirectNearCallTargetBindingFailure8616.PENDING_SOURCE_CHANGED,
             normalized=True, classified=True, shape=shape)
@@ -1708,7 +1793,7 @@ def prepare_declared_near_call_target_binding_pending_8616(
             project, block, instruction, selector_binding, coordinates,
             instructions=instructions, instruction_index=instruction_index)
             or selector_binding.scope is not selector_scope
-            or selector_binding.incoming_cs != incoming_cs):
+            or operator.ne(selector_binding.incoming_cs, incoming_cs)):
         return _refuse_8616(
             callsite, target, DirectNearCallTargetBindingFailure8616.SELECTOR_WINDOW_UNPROVED)
     return DirectNearCallTargetBindingPending8616(
@@ -1721,31 +1806,33 @@ def prepare_declared_near_call_target_binding_pending_8616(
         instructions=instructions, instruction_index=instruction_index)
 
 
-def _pending_projection_facts_8616(pending: DirectNearCallTargetBindingPending8616) -> bool:
+@cython.ccall
+def _pending_projection_facts_8616(pending: DirectNearCallTargetBindingPending8616) -> cython.bint:
     """Reconcile retained scope and exact projection identity without imports."""
     projection = pending.selector_binding
     return bool(
         type(projection) is pending.selector_type
         and projection.scope is pending.selector_scope
-        and projection.incoming_cs == pending.incoming_cs
+        and operator.eq(projection.incoming_cs, pending.incoming_cs)
         and _selector_projection_identity_8616(
             pending.project, pending.block, pending.instruction, projection)
         and _selector_projection_coordinates_8616(projection, pending.coordinates)
     )
 
 
-def _pending_coordinate_facts_8616(pending: DirectNearCallTargetBindingPending8616) -> bool:
+@cython.ccall
+def _pending_coordinate_facts_8616(pending: DirectNearCallTargetBindingPending8616) -> cython.bint:
     """Reconcile immutable coordinates and retained instruction membership."""
     coordinates = pending.coordinates
     return bool(
-        (coordinates.callsite_addr, coordinates.next_addr, coordinates.target_addr)
-        == pending.coordinate_facts
+        operator.eq((coordinates.callsite_addr, coordinates.next_addr, coordinates.target_addr), pending.coordinate_facts)
         and _pending_instruction_slot_current_8616(
             pending.block, pending.instruction, pending.instructions, pending.instruction_index)
     )
 
 
-def _pending_semantic_identity_8616(pending: DirectNearCallTargetBindingPending8616) -> bool:
+@cython.ccall
+def _pending_semantic_identity_8616(pending: DirectNearCallTargetBindingPending8616) -> cython.bint:
     """Require exact retained operand/origin and immutable recovered shape facts."""
     instruction, shape = pending.instruction, pending.shape
     return bool(
@@ -1753,15 +1840,15 @@ def _pending_semantic_identity_8616(pending: DirectNearCallTargetBindingPending8
         and len(instruction.args) == 1
         and instruction.args[0] is pending.operand
         and instruction.origin is pending.origin
-        and (shape.segment_register, shape.next_linear_addr, shape.displacement, shape.control_bits)
-        == pending.shape_facts
+        and operator.eq((shape.segment_register, shape.next_linear_addr, shape.displacement, shape.control_bits), pending.shape_facts)
     )
 
 
+@cython.ccall
 def _seal_declared_selector_binding_8616(
     pending: DirectNearCallTargetBindingPending8616,
     *,
-    admitted: bool,
+    admitted: cython.bint,
 ) -> DirectNearCallTargetBinding8616:
     """Materialize immediate batch admission after a callback-free source seal.
 
@@ -1779,7 +1866,7 @@ def _seal_declared_selector_binding_8616(
     if (not _pending_projection_facts_8616(pending)
             or not _pending_coordinate_facts_8616(pending)
             or not _pending_semantic_identity_8616(pending)
-            or _pending_source_graph_8616(pending.block) != pending.source_graph):
+            or operator.ne(_pending_source_graph_8616(pending.block), pending.source_graph)):
         return _refuse_8616(
             callsite, target, DirectNearCallTargetBindingFailure8616.PENDING_SOURCE_CHANGED,
             normalized=True, classified=True, shape=pending.shape)
@@ -1790,6 +1877,7 @@ def _seal_declared_selector_binding_8616(
         shape=pending.shape, selector_binding=projection)
 
 
+@cython.ccall
 def prove_direct_near_call_target_binding_at_coordinates_8616(
     project: object,
     *,
@@ -1836,7 +1924,7 @@ def prove_declared_direct_near_call_target_binding_at_coordinates_8616(
     preservation. Consumers must rerun this function on every use: the
     result complete property is not a mutable-source authentication cache.
     """
-    if not any(item is instruction for item in block.instrs):
+    if not any(item is instruction for item in iter(block.instrs)):
         return _refuse_8616(
             coordinates.callsite_addr, coordinates.target_addr,
             DirectNearCallTargetBindingFailure8616.INSTRUCTION_NOT_IN_BLOCK,
@@ -1852,6 +1940,7 @@ def prove_declared_direct_near_call_target_binding_at_coordinates_8616(
     )
 
 
+@cython.ccall
 def _consume_direct_near_call_target_binding_from_decoded_8616(
     project: object,
     *,
@@ -1880,6 +1969,7 @@ def _consume_direct_near_call_target_binding_from_decoded_8616(
 
 
 
+@cython.ccall
 def _construct_direct_near_call_target_binding_from_decoded_8616(
     project: object,
     *, block: IRBlock, instruction: IRInstr,
@@ -1903,6 +1993,7 @@ def _construct_direct_near_call_target_binding_from_decoded_8616(
     )
 
 
+@cython.ccall
 def prove_direct_near_call_target_binding_from_decoded_8616(
     project: object,
     *,
@@ -1927,6 +2018,7 @@ def prove_direct_near_call_target_binding_from_decoded_8616(
     )
 
 
+@cython.ccall
 def prove_direct_near_call_target_binding_8616(
     project: object,
     *,

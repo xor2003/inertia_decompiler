@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/runtime.
 
 Responsibility: implement 16-bit opcode lifting and emulator-side instruction behavior.
@@ -5,6 +6,8 @@ Forbidden: decompiler postprocess repair, source/COD-backed semantics, or valida
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 
@@ -71,8 +74,9 @@ from .exception import EXP_UD
 from .exec import OpcodeExecHandler
 from .instr_base import InstrBase, VexExpr, _vex_expr
 from .instruction import CHK_IMM8, CHK_IMM16, CHK_MODRM, CHK_MOFFS, CHK_PTR16, InstrData, InstrFlags
+import operator
 
-X86_16_OPCODE_HELPERS: tuple[tuple[int, int, str, int], ...] = (
+X86_16_OPCODE_HELPERS: tuple[tuple[cython.longlong, cython.longlong, str, cython.longlong], ...] = (
     (0x40, 0x47, "inc_r16", 0),
     (0x48, 0x4F, "dec_r16", 0),
     (0x50, 0x57, "push_r16", 0),
@@ -85,11 +89,18 @@ X86_16_OPCODE_HELPERS: tuple[tuple[int, int, str, int], ...] = (
 class Instr16(InstrBase):
     """Implement operand-size-16 instruction effects for the x86 frontend."""
 
-    _opcode_template_instrfuncs: list[OpcodeExecHandler | None] | None = None
-    _opcode_template_chk: list[int | InstrFlags] | None = None
+    _opcode_template_instrfuncs: object = None
+    _opcode_template_chk: object = None
 
     def __init__(self, emu: Emulator, instr: InstrData) -> None:
         """Initialize 16-bit opcode handlers for one decoded instruction."""
+        template_chk: object
+        template_funcs: object
+        _name: object
+        end: object
+        flags: object
+        handler: object
+        start: object
         super().__init__(emu, instr, mode32=False)  # X86Instruction
         cls = type(self)
         template_funcs = cls._opcode_template_instrfuncs
@@ -290,7 +301,7 @@ class Instr16(InstrBase):
         counter_type = Type.int_32 if self.instr.address_bits == 32 else Type.int_16
         branch_rel8(
             self._active_stack_emulator(),
-            self.emu.get_gpreg(counter_reg) == self.emu.constant(0, counter_type),
+            operator.eq(self.emu.get_gpreg(counter_reg), self.emu.constant(0, counter_type)),
             self.instr.imm8,
             self.instr.size,
         )
@@ -301,10 +312,11 @@ class Instr16(InstrBase):
         counter_type = Type.int_32 if self.instr.address_bits == 32 else Type.int_16
         counter = self.emu.get_gpreg(counter_reg) - self.emu.constant(1, counter_type)
         self.emu.set_gpreg(counter_reg, counter)
-        return _vex_expr(counter != self.emu.constant(0, counter_type)).cast_to(Type.int_1)
+        return _vex_expr(operator.ne(counter, self.emu.constant(0, counter_type))).cast_to(Type.int_1)
 
     def loop16(self) -> None:
         """Execute decoded ``LOOP16`` semantics through frontend emulator effects."""
+        lifter_instruction: object
         lifter_instruction = self.emu.lifter_instruction
         if lifter_instruction is None:
             raise RuntimeError("LOOP condition publication requires an active lifter instruction")
@@ -323,7 +335,7 @@ class Instr16(InstrBase):
 
     def loop16ne(self) -> None:
         """Execute decoded ``LOOP16NE`` semantics through frontend emulator effects."""
-        condition = self._loop_counter_nonzero() & (self.emu.is_zero() == self.emu.constant(0, Type.int_1))
+        condition = self._loop_counter_nonzero() & operator.eq(self.emu.is_zero(), self.emu.constant(0, Type.int_1))
         branch_rel8(self._active_stack_emulator(), condition, self.instr.imm8, self.instr.size)
 
     def code_8f(self) -> None:
@@ -625,6 +637,7 @@ class Instr16(InstrBase):
 
     def bound_r16_m16(self) -> None:
         """Execute decoded ``BOUND_R16_M16`` semantics through frontend emulator effects."""
+        lifter_instruction: object
         if self.instr.modrm.mod == 3:
             raise Exception(EXP_UD)
         reg = _vex_expr(self.get_r16()).signed
@@ -765,6 +778,7 @@ class Instr16(InstrBase):
 
     def into(self) -> None:
         """Execute decoded ``INTO`` semantics through frontend emulator effects."""
+        lifter_instruction: object
         lifter_instruction = self.emu.lifter_instruction
         if lifter_instruction is None:
             raise RuntimeError("INTO exception emission requires an active lifter instruction")
@@ -791,6 +805,7 @@ class Instr16(InstrBase):
 
     def movsb_m8_m8(self) -> None:
         """Execute decoded ``MOVSB_M8_M8`` semantics through frontend emulator effects."""
+        repeat_cond: object
         repeat_cond = repeat_prefix_cond(self._active_string_emulator(), self.instr)
 
         si_reg, di_reg = self._string_index_regs()
@@ -805,6 +820,7 @@ class Instr16(InstrBase):
 
     def stosb_m8_al(self) -> None:
         """Execute decoded ``STOSB_M8_AL`` semantics through frontend emulator effects."""
+        repeat_cond: object
         repeat_cond = repeat_prefix_cond(self._active_string_emulator(), self.instr)
 
         _, di_reg = self._string_index_regs()
@@ -817,6 +833,7 @@ class Instr16(InstrBase):
 
     def stosw_m16_ax(self) -> None:
         """Execute decoded ``STOSW_M16_AX`` semantics through frontend emulator effects."""
+        repeat_cond: object
         repeat_cond = repeat_prefix_cond(self._active_string_emulator(), self.instr)
 
         _, di_reg = self._string_index_regs()
@@ -829,6 +846,7 @@ class Instr16(InstrBase):
 
     def lodsb_al_m8(self) -> None:
         """Execute decoded ``LODSB_AL_M8`` semantics through frontend emulator effects."""
+        repeat_cond: object
         repeat_cond = repeat_prefix_cond(self._active_string_emulator(), self.instr)
 
         si_reg, _ = self._string_index_regs()
@@ -842,6 +860,7 @@ class Instr16(InstrBase):
 
     def lodsw_ax_m16(self) -> None:
         """Execute decoded ``LODSW_AX_M16`` semantics through frontend emulator effects."""
+        repeat_cond: object
         repeat_cond = repeat_prefix_cond(self._active_string_emulator(), self.instr)
 
         si_reg, _ = self._string_index_regs()
@@ -855,6 +874,7 @@ class Instr16(InstrBase):
 
     def scasb_al_m8(self) -> None:
         """Execute decoded ``SCASB_AL_M8`` semantics through frontend emulator effects."""
+        repeat_cond: object
         repeat_cond = repeat_prefix_cond(self._active_string_emulator(), self.instr)
 
         _, di_reg = self._string_index_regs()
@@ -868,6 +888,7 @@ class Instr16(InstrBase):
 
     def scasw_ax_m16(self) -> None:
         """Execute decoded ``SCASW_AX_M16`` semantics through frontend emulator effects."""
+        repeat_cond: object
         repeat_cond = repeat_prefix_cond(self._active_string_emulator(), self.instr)
 
         _, di_reg = self._string_index_regs()
@@ -881,6 +902,7 @@ class Instr16(InstrBase):
 
     def cmps_m8_m8(self) -> None:
         """Execute decoded ``CMPS_M8_M8`` semantics through frontend emulator effects."""
+        repeat_cond: object
         repeat_cond = repeat_prefix_cond(self._active_string_emulator(), self.instr)
 
         si_reg, di_reg = self._string_index_regs()
@@ -896,6 +918,7 @@ class Instr16(InstrBase):
 
     def cmps_m16_m16(self) -> None:
         """Execute decoded ``CMPS_M16_M16`` semantics through frontend emulator effects."""
+        repeat_cond: object
         repeat_cond = repeat_prefix_cond(self._active_string_emulator(), self.instr)
 
         si_reg, di_reg = self._string_index_regs()
@@ -911,6 +934,7 @@ class Instr16(InstrBase):
 
     def movsw_m16_m16(self) -> None:
         """Execute decoded ``MOVSW_M16_M16`` semantics through frontend emulator effects."""
+        repeat_cond: object
         repeat_cond = repeat_prefix_cond(self._active_string_emulator(), self.instr)
 
         si_reg, di_reg = self._string_index_regs()
@@ -925,6 +949,7 @@ class Instr16(InstrBase):
 
     def insb_m8_dx(self) -> None:
         """Execute decoded ``INSB_M8_DX`` semantics through frontend emulator effects."""
+        repeat_cond: object
         repeat_cond = repeat_prefix_cond(self._active_string_emulator(), self.instr)
 
         _, di_reg = self._string_index_regs()
@@ -938,6 +963,7 @@ class Instr16(InstrBase):
 
     def insw_m16_dx(self) -> None:
         """Execute decoded ``INSW_M16_DX`` semantics through frontend emulator effects."""
+        repeat_cond: object
         repeat_cond = repeat_prefix_cond(self._active_string_emulator(), self.instr)
 
         _, di_reg = self._string_index_regs()
@@ -951,6 +977,7 @@ class Instr16(InstrBase):
 
     def outsb_dx_m8(self) -> None:
         """Execute decoded ``OUTSB_DX_M8`` semantics through frontend emulator effects."""
+        repeat_cond: object
         repeat_cond = repeat_prefix_cond(self._active_string_emulator(), self.instr)
 
         si_reg, _ = self._string_index_regs()
@@ -966,6 +993,7 @@ class Instr16(InstrBase):
 
     def outsw_dx_m16(self) -> None:
         """Execute decoded ``OUTSW_DX_M16`` semantics through frontend emulator effects."""
+        repeat_cond: object
         repeat_cond = repeat_prefix_cond(self._active_string_emulator(), self.instr)
 
         si_reg, _ = self._string_index_regs()
@@ -1120,7 +1148,7 @@ class Instr16(InstrBase):
         """Execute decoded ``JL_REL16`` semantics through frontend emulator effects."""
         branch_rel16(
             self._active_stack_emulator(),
-            self._branch_cond_8616("jl", self.emu.is_sign() != self.emu.is_overflow()),
+            self._branch_cond_8616("jl", operator.ne(self.emu.is_sign(), self.emu.is_overflow())),
             self.instr.imm16,
             self.instr.size,
         )
@@ -1129,7 +1157,7 @@ class Instr16(InstrBase):
         """Execute decoded ``JNL_REL16`` semantics through frontend emulator effects."""
         branch_rel16(
             self._active_stack_emulator(),
-            self._branch_cond_8616("jge", self.emu.is_sign() == self.emu.is_overflow()),
+            self._branch_cond_8616("jge", operator.eq(self.emu.is_sign(), self.emu.is_overflow())),
             self.instr.imm16,
             self.instr.size,
         )
@@ -1138,7 +1166,7 @@ class Instr16(InstrBase):
         """Execute decoded ``JLE_REL16`` semantics through frontend emulator effects."""
         branch_rel16(
             self._active_stack_emulator(),
-            self._branch_cond_8616("jle", self.emu.is_zero() or (self.emu.is_sign() != self.emu.is_overflow())),
+            self._branch_cond_8616("jle", self.emu.is_zero() or operator.ne(self.emu.is_sign(), self.emu.is_overflow())),
             self.instr.imm16,
             self.instr.size,
         )
@@ -1147,7 +1175,7 @@ class Instr16(InstrBase):
         """Execute decoded ``JNLE_REL16`` semantics through frontend emulator effects."""
         branch_rel16(
             self._active_stack_emulator(),
-            self._branch_cond_8616("jg", not (self.emu.is_zero() or (self.emu.is_sign() != self.emu.is_overflow()))),
+            self._branch_cond_8616("jg", not (self.emu.is_zero() or operator.ne(self.emu.is_sign(), self.emu.is_overflow()))),
             self.instr.imm16,
             self.instr.size,
         )
@@ -1177,18 +1205,18 @@ class Instr16(InstrBase):
         """Load a 16:16 pointer and its selector into GS."""
         self._load_pointer_segment16(sgreg_t.GS)
 
-    def _double_shift16(self, *, left: bool, count: VexExpr | int) -> None:
+    def _double_shift16(self, *, left: cython.bint, count: VexExpr | int) -> None:
         """Execute a 16-bit SHLD/SHRD operation with a masked 80386 count."""
         dst = _vex_expr(self.get_rm16())
         src = _vex_expr(self.get_r16())
         masked = self._shift_count(count)
         inverse = self.emu.constant(16, Type.int_8) - masked
         shifted = (dst << masked) | (src >> inverse) if left else (dst >> masked) | (src << inverse)
-        result = self._ite_value(masked == self.emu.constant(0, Type.int_8), dst, shifted.cast_to(Type.int_16))
+        result = self._ite_value(operator.eq(masked, self.emu.constant(0, Type.int_8)), dst, shifted.cast_to(Type.int_16))
         self.set_rm16(result)
         self.emu.update_eflags_double_shift(dst, result, masked, left=left)
 
-    def _bit_operation16(self, operation: str, *, immediate: bool = False) -> None:
+    def _bit_operation16(self, operation: object, *, immediate: cython.bint = False) -> None:
         """Apply one 16-bit BT-family operation, including memory bit strings."""
         index = _vex_expr(
             self.emu.constant(self.instr.imm8 & 0xFF, Type.int_16)
@@ -1288,16 +1316,17 @@ class Instr16(InstrBase):
         """Double-precision right shift using CL."""
         self._double_shift16(left=False, count=self.emu.get_gpreg(reg8_t.CL))
 
-    def _bit_scan16(self, *, reverse: bool) -> None:
+    def _bit_scan16(self, *, reverse: cython.bint) -> None:
         """Scan a 16-bit source and update the destination and zero flag."""
+        index: object
         src = _vex_expr(self.get_rm16())
         old = _vex_expr(self.get_r16())
         result = old
         indices = range(16) if reverse else range(15, -1, -1)
         for index in indices:
             bit = src & self.emu.constant(1 << index, Type.int_16)
-            result = self._ite_value(bit != self.emu.constant(0, Type.int_16), self.emu.constant(index, Type.int_16), result)
-        is_zero = src == self.emu.constant(0, Type.int_16)
+            result = self._ite_value(operator.ne(bit, self.emu.constant(0, Type.int_16)), self.emu.constant(index, Type.int_16), result)
+        is_zero = operator.eq(src, self.emu.constant(0, Type.int_16))
         self.set_r16(self._ite_value(is_zero, old, result))
         flags = self.emu.get_gpreg(reg16_t.FLAGS)
         self.emu.set_gpreg(reg16_t.FLAGS, self.emu.set_zero(flags, is_zero))
@@ -1698,7 +1727,7 @@ class Instr16(InstrBase):
         cl = self.emu.get_gpreg(reg8_t.CL)
         self.rcr(rm16, cl)
 
-    def _rot_count(self, count: VexExpr | int, modulo: int) -> VexExpr:
+    def _rot_count(self, count: VexExpr | int, modulo: cython.longlong) -> VexExpr:
         """Normalize a rotate count at the PyVEX expression boundary."""
         count_v = _vex_expr(self.emu.constant(count, Type.int_8)) if isinstance(count, int) else count
         return (count_v.cast_to(Type.int_8) & _vex_expr(self.emu.constant(0x1F, Type.int_8))) % _vex_expr(
@@ -1724,7 +1753,7 @@ class Instr16(InstrBase):
         count = masked % self.emu.constant(16, Type.int_8)
         inv_count = self.emu.constant(16, Type.int_8) - count
         rotated = ((a << count) | (a >> inv_count)) & self.emu.constant(0xFFFF, Type.int_16)
-        result = self._ite_value(masked == self.emu.constant(0, Type.int_8), a, rotated)
+        result = self._ite_value(operator.eq(masked, self.emu.constant(0, Type.int_8)), a, rotated)
         self.set_rm16(result)
         self.emu.update_eflags_rol(a, masked)
 
@@ -1786,12 +1815,13 @@ class Instr16(InstrBase):
         count = masked % self.emu.constant(16, Type.int_8)
         inv_count = self.emu.constant(16, Type.int_8) - count
         rotated = ((a >> count) | (a << inv_count)) & self.emu.constant(0xFFFF, Type.int_16)
-        result = self._ite_value(masked == self.emu.constant(0, Type.int_8), a, rotated)
+        result = self._ite_value(operator.eq(masked, self.emu.constant(0, Type.int_8)), a, rotated)
         self.set_rm16(result)
         self.emu.update_eflags_ror(a, masked)
 
     def rcl(self, a: VexExpr, b: VexExpr | int) -> None:
         """Execute decoded ``RCL`` semantics through frontend emulator effects."""
+        carry: object
         masked = self._shift_count(b)
         count_value = self.emu._const_u8_value(masked)
         result, carry, overflow = rotate_through_carry_left_state(self.emu, a, masked, 16, self._ite_value)
@@ -1806,12 +1836,13 @@ class Instr16(InstrBase):
         else:
             flags = self.emu.set_overflow(
                 flags,
-                self._ite_value(masked == self.emu.constant(1, Type.int_8), overflow, self.emu.get_flag(11)),
+                self._ite_value(operator.eq(masked, self.emu.constant(1, Type.int_8)), overflow, self.emu.get_flag(11)),
             )
         self.emu.set_gpreg(reg16_t.FLAGS, flags)
 
     def rcr(self, a: VexExpr, b: VexExpr | int) -> None:
         """Execute decoded ``RCR`` semantics through frontend emulator effects."""
+        carry: object
         masked = self._shift_count(b)
         count_value = self.emu._const_u8_value(masked)
         result, carry, overflow = rotate_through_carry_right_state(self.emu, a, masked, 16, self._ite_value)
@@ -1826,7 +1857,7 @@ class Instr16(InstrBase):
         else:
             flags = self.emu.set_overflow(
                 flags,
-                self._ite_value(masked == self.emu.constant(1, Type.int_8), overflow, self.emu.get_flag(11)),
+                self._ite_value(operator.eq(masked, self.emu.constant(1, Type.int_8)), overflow, self.emu.get_flag(11)),
             )
         self.emu.set_gpreg(reg16_t.FLAGS, flags)
 
@@ -1918,7 +1949,7 @@ class Instr16(InstrBase):
         val = (_vex_expr(self.emu.get_gpreg(reg16_t.DX)).cast_to(Type.int_32) << 16) | _vex_expr(
             self.emu.get_gpreg(reg16_t.AX)
         ).cast_to(Type.int_32)
-        self._divide_error_if(rm16 == self.emu.constant(0, Type.int_32))
+        self._divide_error_if(operator.eq(rm16, self.emu.constant(0, Type.int_32)))
         quotient = val // rm16
         self._divide_error_if(quotient > self.emu.constant(0xFFFF, Type.int_32))
         self.emu.set_gpreg(reg16_t.AX, quotient.cast_to(Type.int_16))
@@ -1933,7 +1964,7 @@ class Instr16(InstrBase):
             (_vex_expr(self.emu.get_gpreg(reg16_t.DX)).cast_to(Type.int_32, signed=True) << 16)
             | _vex_expr(self.emu.get_gpreg(reg16_t.AX)).cast_to(Type.int_32)
         ).signed
-        self._divide_error_if(rm16_s == self.emu.constant(0, Type.int_32))
+        self._divide_error_if(operator.eq(rm16_s, self.emu.constant(0, Type.int_32)))
         quotient = val_s // rm16_s
         remainder = val_s - quotient * rm16_s
         signed_quotient = quotient.signed
@@ -1993,8 +2024,10 @@ class Instr16(InstrBase):
         level &= 0x1F
         enter16(self._active_stack_emulator(), bytes_, level)
 
-    def _branch_cond_8616(self, kind: str, fallback: VexExpr) -> VexExpr:
+    def _branch_cond_8616(self, kind: object, fallback: VexExpr) -> VexExpr:
         """Prefer a transferred typed branch condition over the flag fallback."""
+        direct: object
+        lifter_instruction: object
         lifter_instruction = self.emu.lifter_instruction
         if lifter_instruction is None:
             raise RuntimeError("conditional branch recovery requires an active lifter instruction")

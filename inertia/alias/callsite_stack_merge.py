@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Merge physical call-argument stack traces at CFG joins.
 
 Layer: Alias.
@@ -9,8 +10,13 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "CallsitePredecessorStackMerge8616",
@@ -22,76 +28,76 @@ __all__ = [
     "merge_callsite_register_join_traces_8616",
 ]
 
-type CallsiteSource8616 = tuple[object, ...]
+CallsiteSource8616 = typing.TypeAliasType("CallsiteSource8616", tuple[object, ...])
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallsitePushTrace8616:
     """One predecessor path's physical pushes in execution order."""
 
-    widths: tuple[int, ...]
-    sources: tuple[CallsiteSource8616 | None, ...]
-    instruction_addrs: tuple[int, ...]
+    widths: object
+    sources: object
+    instruction_addrs: object
     predecessor_addr: int | None = None
 
-    def is_well_formed(self) -> bool:
+    def is_well_formed(self) -> cython.bint:
         """Return whether every physical push has width, source, and address slots."""
         return bool(self.widths) and len(self.widths) == len(self.sources) == len(self.instruction_addrs)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallsiteRegisterJoinTrace8616:
     """One predecessor's exact source for a register pushed at the join."""
 
-    predecessor_addr: int
-    register: str
+    predecessor_addr: cython.longlong
+    register: object
     source: CallsiteSource8616 | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallsiteRegisterJoin8616:
     """Path-indexed sources for one register value consumed after a CFG join."""
 
-    register: str
-    push_instruction_addr: int
-    traces: tuple[CallsiteRegisterJoinTrace8616, ...]
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    register: object
+    push_instruction_addr: cython.longlong
+    traces: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallsitePredecessorStackMerge8616:
     """Closed evidence loop for one predecessor stack-trace merge."""
 
-    widths: tuple[int, ...]
-    sources: tuple[CallsiteSource8616 | None, ...]
-    representative_instruction_addrs: tuple[int, ...]
-    alternative_instruction_addrs: tuple[tuple[int, ...], ...]
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    widths: object
+    sources: object
+    representative_instruction_addrs: object
+    alternative_instruction_addrs: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
     register_join: CallsiteRegisterJoin8616 | None = None
     traces: tuple[CallsitePushTrace8616, ...] = ()
 
 
 def merge_callsite_register_join_traces_8616(
-    traces: tuple[CallsiteRegisterJoinTrace8616, ...],
+    traces: object,
     *,
-    push_instruction_addr: int,
+    push_instruction_addr: cython.longlong,
 ) -> CallsiteRegisterJoin8616 | None:
     """Accept a join only when every predecessor resolves the same register."""
-    if not traces or any(trace.source is None for trace in traces):
+    if not traces or any(trace.source is None for trace in iter(traces)):
         return None
     register = traces[0].register
-    if not register or any(trace.register != register for trace in traces[1:]):
+    if not register or any(operator.ne(trace.register, register) for trace in iter(traces[1:])):
         return None
-    predecessor_addrs = tuple(trace.predecessor_addr for trace in traces)
-    if len(set(predecessor_addrs)) != len(predecessor_addrs):
+    predecessor_addrs = tuple(trace.predecessor_addr for trace in iter(traces))
+    if operator.ne(len(set(predecessor_addrs)), len(predecessor_addrs)):
         return None
     return CallsiteRegisterJoin8616(
         register=register,
@@ -106,28 +112,28 @@ def merge_callsite_register_join_traces_8616(
 
 
 def merge_callsite_predecessor_stack_traces_8616(
-    traces: tuple[CallsitePushTrace8616, ...],
+    traces: object,
     *,
     register_join: CallsiteRegisterJoin8616 | None = None,
 ) -> CallsitePredecessorStackMerge8616 | None:
     """Merge pushes only when every direct predecessor proves equal widths."""
     raw_count = len(traces)
-    normalized = tuple(trace for trace in traces if trace.is_well_formed())
-    if raw_count == 0 or len(normalized) != raw_count:
+    normalized = tuple(trace for trace in iter(traces) if trace.is_well_formed())
+    if raw_count == 0 or operator.ne(len(normalized), raw_count):
         return None
     widths = normalized[0].widths
-    if any(trace.widths != widths for trace in normalized[1:]):
+    if any(operator.ne(trace.widths, widths) for trace in iter(normalized[1:])):
         return None
     merged_sources = tuple(
-        lane_sources[0] if all(source == lane_sources[0] for source in lane_sources[1:]) else None
-        for lane_sources in zip(*(trace.sources for trace in normalized), strict=True)
+        lane_sources[0] if all(operator.eq(source, lane_sources[0]) for source in iter(lane_sources[1:])) else None
+        for lane_sources in builtins.iter(zip(*(trace.sources for trace in iter(normalized)), strict=True))
     )
-    address_lanes = tuple(zip(*(trace.instruction_addrs for trace in normalized), strict=True))
+    address_lanes = tuple(zip(*(trace.instruction_addrs for trace in iter(normalized)), strict=True))
     return CallsitePredecessorStackMerge8616(
         widths=widths,
         sources=merged_sources,
-        representative_instruction_addrs=tuple(min(lane) for lane in address_lanes),
-        alternative_instruction_addrs=tuple(tuple(sorted(set(lane))) for lane in address_lanes),
+        representative_instruction_addrs=tuple(min(lane) for lane in iter(address_lanes)),
+        alternative_instruction_addrs=tuple(tuple(sorted(tuple(set(lane)))) for lane in iter(address_lanes)),
         raw_fact_count=raw_count,
         normalized_fact_count=len(normalized),
         classified_fact_count=1,

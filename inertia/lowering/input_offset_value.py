@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Preserve exact numeric 16-bit input values bound to one logical PUSH root.
 
 Layer: Types/Lowering.
@@ -11,6 +12,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -28,6 +31,8 @@ from .interprocedural_storage_contracts import (
 from .interprocedural_storage_logical_input_contracts import (
     LogicalInputRootBinding8616,
 )
+import dataclasses
+import operator
 
 __all__ = [
     "InputOffsetValue8616",
@@ -53,18 +58,18 @@ class InputOffsetValueFailure8616(StrEnum):
     TRACE_REFUSED = "trace_refused"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class InputOffsetValueStats8616:
     """Count numeric facts; only complete affine traces classify/materialize."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether one input became one retained traced expression."""
         return bool(
             self.raw_fact_count
@@ -76,15 +81,17 @@ class InputOffsetValueStats8616:
         )
 
 
-def _covers_whole_word_8616(binding: LogicalInputRootBinding8616) -> bool:
+@cython.ccall
+def _covers_whole_word_8616(binding: LogicalInputRootBinding8616) -> cython.bint:
     """Return whether the bound root alone covers the complete 16-bit input."""
     return bool(
         binding.covers_logical_argument
-        and binding.width == _WORD_BYTES_8616
-        and binding.argument_storage.size == _WORD_BYTES_8616
+        and operator.eq(binding.width, _WORD_BYTES_8616)
+        and operator.eq(binding.argument_storage.size, _WORD_BYTES_8616)
     )
 
 
+@cython.ccall
 def _push_block_8616(
     artifact: SSAFunctionArtifact,
     binding: LogicalInputRootBinding8616,
@@ -94,10 +101,13 @@ def _push_block_8616(
     Slice sites must name this artifact's exact block and instruction objects;
     equal-shaped copies from another artifact are foreign evidence.
     """
-    blocks = {block.addr: block for block in artifact.blocks}
-    if len(blocks) != len(artifact.blocks):
+    block: object
+    push_block: object
+    item: object
+    blocks = {block.addr: block for block in iter(artifact.blocks)}
+    if operator.ne(len(blocks), len(artifact.blocks)):
         return None
-    push_block: SSABlock | None = None
+    push_block = None
     for item in binding.slices:
         site = item.site
         block = blocks.get(site.block.addr)
@@ -107,7 +117,7 @@ def _push_block_8616(
             return None
         if block.instrs[site.instr_index] is not site.instr:
             return None
-        if site.instr.addr != binding.push_addr:
+        if operator.ne(site.instr.addr, binding.push_addr):
             return None
         if push_block is None:
             push_block = block
@@ -116,10 +126,11 @@ def _push_block_8616(
     return push_block
 
 
+@cython.ccall
 def _definition_matches_8616(
     binding: LogicalInputRootBinding8616,
-    definition: StorageReachingDefinition8616 | None,
-) -> bool:
+    definition: object,
+) -> cython.bint:
     """Return whether the reaching definition is this root's exact slice."""
     return bool(
         definition is not None
@@ -131,13 +142,14 @@ def _definition_matches_8616(
 def _use_in_artifact_8616(
     artifact: SSAFunctionArtifact,
     binding: LogicalInputRootBinding8616,
-    use: StorageUseEvidence8616 | None,
-) -> bool:
+    use: object,
+) -> cython.bint:
     """Return whether the bound CALL use is the exact artifact instruction."""
-    if use is None or use != binding.call_use or not use.is_complete:
+    block: object
+    if use is None or operator.ne(use, binding.call_use) or not use.is_complete:
         return False
     block = next(
-        (block for block in artifact.blocks if block.addr == use.block_addr),
+        (block for block in iter(artifact.blocks) if operator.eq(block.addr, use.block_addr)),
         None,
     )
     if block is None or not 0 <= use.instr_index < len(block.instrs):
@@ -149,22 +161,24 @@ def _use_in_artifact_8616(
     )
 
 
+@cython.ccall
 def _trace_proves_root_8616(
     binding: LogicalInputRootBinding8616,
-    trace: ScalarAffineTrace8616 | None,
-) -> bool:
+    trace: object,
+) -> cython.bint:
     """Return whether the retained upstream trace proves this exact root."""
+    expression: object
     if trace is None or not trace.complete:
         return False
     expression = trace.expression
     return bool(
         expression is not None
         and expression.root is binding.root
-        and expression.width == _WORD_BYTES_8616
+        and operator.eq(expression.width, _WORD_BYTES_8616)
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class InputOffsetValue8616:
     """One proven numeric caller input value or one atomic typed refusal.
 
@@ -183,8 +197,11 @@ class InputOffsetValue8616:
     stats: InputOffsetValueStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Recheck owned scope, root, site, definition, use, and trace proof."""
+        artifact: object
+        binding: object
+        block: object
         binding = self.binding
         artifact = self.artifact
         if self.failure is not None or not self.stats.complete:
@@ -193,7 +210,7 @@ class InputOffsetValue8616:
             return False
         scope_agrees = (
             _covers_whole_word_8616(binding)
-            and artifact.function_addr == binding.caller_addr
+            and operator.eq(artifact.function_addr, binding.caller_addr)
         )
         evidence_agrees = (
             scope_agrees
@@ -207,10 +224,10 @@ class InputOffsetValue8616:
         assert block is not None
         current = trace_scalar_affine_expression_8616(
             artifact, binding.root, block_addr=block.addr,
-            before_index=min(item.site.instr_index for item in binding.slices),
+            before_index=min(item.site.instr_index for item in iter(binding.slices)),
             allow_entry_registers=True,
         )
-        return current.complete and current == self.trace
+        return current.complete and operator.eq(current, self.trace)
 
     @property
     def value(self) -> IRValue | None:
@@ -235,8 +252,8 @@ def _refuse_8616(
     definition: StorageReachingDefinition8616 | None,
     use: StorageUseEvidence8616 | None,
     trace: ScalarAffineTrace8616 | None = None,
-    normalized: bool,
-    classified: bool = False,
+    normalized: cython.bint,
+    classified: cython.bint = False,
 ) -> InputOffsetValue8616:
     """Build one atomic refusal that retains every input for diagnosis."""
     return InputOffsetValue8616(
@@ -257,7 +274,7 @@ def _refuse_8616(
 
 
 def collect_input_offset_value_8616(
-    binding: LogicalInputRootBinding8616 | None,
+    binding: object,
     *,
     artifact: SSAFunctionArtifact,
     definition: StorageReachingDefinition8616 | None,
@@ -270,6 +287,7 @@ def collect_input_offset_value_8616(
     numeric. Any malformed, split, foreign, mismatched, or untraceable input
     refuses atomically rather than degrading to a partial value.
     """
+    push_block: object
     if binding is None:
         return _refuse_8616(
             InputOffsetValueFailure8616.MISSING_LOGICAL_ROOT,
@@ -297,7 +315,7 @@ def collect_input_offset_value_8616(
             use=use,
             normalized=True,
         )
-    if binding.width != _WORD_BYTES_8616:
+    if operator.ne(binding.width, _WORD_BYTES_8616):
         return _refuse_8616(
             InputOffsetValueFailure8616.WIDTH_CONFLICT,
             binding=binding,
@@ -306,7 +324,7 @@ def collect_input_offset_value_8616(
             use=use,
             normalized=True,
         )
-    if artifact.function_addr != binding.caller_addr:
+    if operator.ne(artifact.function_addr, binding.caller_addr):
         return _refuse_8616(
             InputOffsetValueFailure8616.FOREIGN_CALLER_ARTIFACT,
             binding=binding,
@@ -347,7 +365,7 @@ def collect_input_offset_value_8616(
         artifact,
         binding.root,
         block_addr=push_block.addr,
-        before_index=min(item.site.instr_index for item in binding.slices),
+        before_index=min(item.site.instr_index for item in iter(binding.slices)),
         allow_entry_registers=True,
     )
     if not _trace_proves_root_8616(binding, trace):

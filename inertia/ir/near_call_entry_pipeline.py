@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Produce private conditional IR from one indexed native near-CALL entry.
 
 Layer: IR.
@@ -9,6 +10,8 @@ Owns typed Value, Address, Condition, instruction facts, and lossless normalizat
 Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -52,6 +55,9 @@ from .vex_import import (
     raw_x86_16_function_bundle_8616,
     raw_x86_16_import_bundle_for_artifact_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 
 class NearCallEntryPipelineStatus8616(StrEnum):
@@ -83,8 +89,10 @@ class _SourceHolder8616(Protocol):
     _inertia_real16_invocation_source_8616: Real16InvocationSource8616 | None
 
 
+@cython.ccall
 def _installed_source_8616(project: object) -> Real16InvocationSource8616 | None:
     """Read installed authority without triggering boot/deferred intake."""
+    source: object
     try:
         source = cast(_SourceHolder8616, project)._inertia_real16_invocation_source_8616
     except AttributeError:
@@ -97,17 +105,17 @@ def _installed_source_8616(project: object) -> Real16InvocationSource8616 | None
 
 
 def _incoming_rows_8616(
-    source: Real16InvocationSource8616, target: int,
+    source: Real16InvocationSource8616, target: cython.longlong,
 ) -> tuple[DecodedDirectCallsite8616, ...]:
     """Select exact encoded near destinations without trusting lookup aliases."""
     return tuple(
-        row for row in source.callsite_index.for_target(target)
+        row for row in builtins.iter(source.callsite_index.for_target(target))
         if (coordinates := row.encoded_near_coordinates()) is not None
-        and coordinates[1] == target
+        and operator.eq(coordinates[1], target)
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NativeNearCallPipeline8616:
     """Private raw input and conditional view for one exact native incoming edge."""
 
@@ -122,7 +130,7 @@ class NativeNearCallPipeline8616:
         """Expose the typed conditional discriminator for pipeline diagnostics."""
         return NearCallEntryPipelineStatus8616.CONDITIONAL
 
-    def authenticates(self, project: object) -> bool:
+    def authenticates(self, project: object) -> cython.bint:
         """Reconsume installed lookup membership and native conditional view."""
         if not self._source_current(project):
             return False
@@ -133,8 +141,9 @@ class NativeNearCallPipeline8616:
             return False
         return self._source_current(project)
 
-    def _source_current(self, project: object) -> bool:
+    def _source_current(self, project: object) -> cython.bint:
         """Check used source identities and ambiguity without native callbacks."""
+        installed: object
         installed = _installed_source_8616(project)
         if (installed is None or installed is not self.source
                 or self.scope.project is not project
@@ -144,7 +153,7 @@ class NativeNearCallPipeline8616:
         return len(rows) == 1 and rows[0] is self.incoming
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NearCallEntryPipelineResult8616:
     """Closed typed result of attempting one private conditional input."""
 
@@ -164,6 +173,7 @@ class NearCallEntryPipelineResult8616:
         }
 
 
+@cython.ccall
 def _refused_8616(failure: NearCallEntryPipelineFailure8616) -> NearCallEntryPipelineResult8616:
     """Close one failed preparation without publishing partial authority."""
     return NearCallEntryPipelineResult8616(
@@ -172,12 +182,17 @@ def _refused_8616(failure: NearCallEntryPipelineFailure8616) -> NearCallEntryPip
     )
 
 
+@cython.ccall
 def _call_steps_8616(
     project: object, boundary: ExactFunctionRangeBoundary8616,
     bundle: RawIRFunctionImportBundle8616, context: NativeNearCallEntry8616,
     resolver: DirectCallTargetResolver8616,
-) -> tuple[ConditionalNearCallPreservation8616, ...] | NearCallEntryPipelineFailure8616:
+) -> object:
     """Prove all raw CALLs using exact native indexed word-E8 coordinates."""
+    coordinates: object
+    row: object
+    block: object
+    instruction: object
     indexed = decoded_callsite_index_for_boundary_8616(
         project, boundary, direct_target_resolver=resolver,
     )
@@ -211,11 +226,13 @@ def _call_steps_8616(
         return proved
 
 
+@cython.ccall
 def _bind_context_8616(
     project: object, boundary: ExactFunctionRangeBoundary8616,
     source: Real16InvocationSource8616,
-) -> tuple[DecodedDirectCallsite8616, NativeNearCallEntry8616] | NearCallEntryPipelineFailure8616:
+) -> object:
     """Bind precisely one indexed incoming native word CALL."""
+    premise: object
     rows = _incoming_rows_8616(source, boundary.addr)
     if not rows:
         return NearCallEntryPipelineFailure8616.ENTRY_MISSING
@@ -232,11 +249,14 @@ def _bind_context_8616(
     return rows[0], context
 
 
+@cython.ccall
 def _prepare_8616(
     project: object, boundary: ExactFunctionRangeBoundary8616,
-    bundle: RawIRFunctionImportBundle8616 | None,
+    bundle: object,
 ) -> NearCallEntryPipelineResult8616:
     """Compose exact native owners within the caller's existing request budget."""
+    current: object
+    source: object
     source = _installed_source_8616(project)
     if source is None:
         return _refused_8616(NearCallEntryPipelineFailure8616.SOURCE_MISSING)
@@ -271,6 +291,7 @@ def _prepare_8616(
     )
 
 
+@cython.ccall
 def prepare_near_call_entry_pipeline_8616(
     project: object, boundary: ExactFunctionRangeBoundary8616, *,
     bundle: RawIRFunctionImportBundle8616 | None = None,

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed evidence contracts for caller-frame effects across machine calls.
 
 Layer: Semantics.
@@ -9,12 +10,17 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from inertia.ir.core import IRCallStackEffect8616
+import dataclasses
+BPCallPreservationResult8616 = typing.TypeVar("BPCallPreservationResult8616")
+DirectNearCallTargetBinding8616 = typing.TypeVar("DirectNearCallTargetBinding8616")
 
 if TYPE_CHECKING:
     from .bp_call_preservation import BPCallPreservationResult8616
@@ -49,12 +55,12 @@ class CallStackEffectFailure8616(StrEnum):
     TARGET_UNRESOLVED = "target_unresolved"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallStackEffectFact8616:
     """One exact CALL and its proven effect or conservative refusal."""
 
-    block_addr: int
-    instr_index: int
+    block_addr: cython.longlong
+    instr_index: cython.longlong
     callsite_addr: int | None
     target_addr: int | None
     verdict: CallStackEffectVerdict8616
@@ -66,18 +72,18 @@ class CallStackEffectFact8616:
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallStackEffectStats8616:
     """Closed accounting for every CALL seen in one IR function."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every raw CALL has one durable typed outcome."""
         return (
             self.raw_fact_count
@@ -87,11 +93,11 @@ class CallStackEffectStats8616:
         )
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether all retained outcomes are positive proofs."""
         return self.closed and self.failure_count == 0
 
-    def to_dict(self) -> dict[str, int]:
+    def to_dict(self) -> dict[str, cython.longlong]:
         """Return deterministic diagnostics for the closed evidence loop."""
         return {
             "raw_fact_count": self.raw_fact_count,

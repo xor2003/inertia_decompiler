@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed binary caller return-use evidence contracts.
 
 Layer: Recovery metadata.
@@ -14,6 +15,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -22,6 +25,8 @@ from inertia.semantics.register_value_preservation import (
     AxValueView8616,
     ByteReturnExtensionKind8616,
 )
+import dataclasses
+import operator
 
 __all__ = [
     "AxValueView8616",
@@ -50,22 +55,22 @@ class CallerReturnUseVerdict8616(StrEnum):
     UNKNOWN = "unknown"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallerReturnUseFact8616:
     """One exact direct-call observation before function-contract recovery."""
 
-    caller_addr: int
-    callsite_addr: int
+    caller_addr: cython.longlong
+    callsite_addr: cython.longlong
     verdict: CallerReturnUseVerdict8616
     kind: CallsiteReturnUseKind8616 | None
     witness_instruction_addr: int | None
-    excluded_recursive_passthrough: bool = False
+    excluded_recursive_passthrough: cython.bint = False
     byte_extension: ByteReturnExtensionKind8616 | None = None
     byte_extension_instruction_addr: int | None = None
     observed_value_view: AxValueView8616 | None = None
 
     @property
-    def extension_complete(self) -> bool:
+    def extension_complete(self) -> cython.bint:
         """Return whether optional byte-extension provenance is internally closed."""
         if self.byte_extension is None:
             return self.byte_extension_instruction_addr is None
@@ -76,7 +81,7 @@ class CallerReturnUseFact8616:
         )
 
     @property
-    def classified(self) -> bool:
+    def classified(self) -> cython.bint:
         """Return whether this retained fact has an exact usable witness."""
         return (
             not self.excluded_recursive_passthrough
@@ -89,36 +94,35 @@ class CallerReturnUseFact8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallerReturnUseEvidence8616:
     """Closed evidence loop for one function's binary caller census."""
 
-    target_addr: int
+    target_addr: cython.longlong
     verdict: CallerReturnUseVerdict8616
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    used_callsite_count: int
-    unused_callsite_count: int
-    callsite_addrs: tuple[int, ...]
-    excluded_callsite_count: int = 0
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    used_callsite_count: cython.longlong
+    unused_callsite_count: cython.longlong
+    callsite_addrs: object
+    excluded_callsite_count: cython.longlong = 0
     facts: tuple[CallerReturnUseFact8616, ...] = ()
 
     @property
-    def fact_census_complete(self) -> bool:
+    def fact_census_complete(self) -> cython.bint:
         """Return whether exact retained facts account for every raw callsite."""
         included = tuple(
-            fact for fact in self.facts if not fact.excluded_recursive_passthrough
+            fact for fact in iter(self.facts) if not fact.excluded_recursive_passthrough
         )
         return (
             len(self.facts) == self.raw_fact_count == self.normalized_fact_count
-            and tuple(fact.callsite_addr for fact in self.facts) == self.callsite_addrs
-            and sum(fact.excluded_recursive_passthrough for fact in self.facts)
-            == self.excluded_callsite_count
-            and sum(fact.classified for fact in included)
+            and operator.eq(tuple(fact.callsite_addr for fact in iter(self.facts)), self.callsite_addrs)
+            and operator.eq(sum(fact.excluded_recursive_passthrough for fact in iter(self.facts)), self.excluded_callsite_count)
+            and sum(fact.classified for fact in iter(included))
             == self.classified_fact_count
             == self.materialized_count
-            and sum(not fact.classified for fact in included) == self.failure_count
+            and operator.eq(sum(not fact.classified for fact in iter(included)), self.failure_count)
         )

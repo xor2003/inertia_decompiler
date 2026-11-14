@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Compute the four distinct register roles of one exact CALL.
 
 Layer: Semantics.
@@ -12,6 +13,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -70,6 +73,11 @@ from .register_value_preservation import (
     decoded_register_bit_effects_8616,
     register_value_family_8616,
 )
+import dataclasses
+import operator
+import builtins
+CallOutputArtifact8616 = typing.TypeVar("CallOutputArtifact8616")
+CallsiteSummary8616 = typing.TypeVar("CallsiteSummary8616")
 
 if TYPE_CHECKING:
     # Type-only imports: callsite_summary and call_outputs transitively
@@ -85,11 +93,11 @@ __all__ = (
 )
 
 _DOMAIN_COUNT_8616 = len(TRACKED_REGISTER_DOMAIN_NAMES_8616)
-_DOMAIN_INDEX_8616: dict[str, int] = {
-    name: index for index, name in enumerate(TRACKED_REGISTER_DOMAIN_NAMES_8616)
+_DOMAIN_INDEX_8616: dict[str, cython.longlong] = {
+    name: index for index, name in builtins.iter(enumerate(TRACKED_REGISTER_DOMAIN_NAMES_8616))
 }
 _DOMAIN_QUERY_NAMES_8616: tuple[str, ...] = tuple(
-    name.lower() for name in TRACKED_REGISTER_DOMAIN_NAMES_8616
+    name.lower() for name in iter(TRACKED_REGISTER_DOMAIN_NAMES_8616)
 )
 _RETURN_MNEMONICS_8616 = frozenset({"ret", "retf", "retw", "iret", "iretq"})
 
@@ -97,8 +105,8 @@ _RETURN_MNEMONICS_8616 = frozenset({"ret", "retf", "retw", "iret", "iretq"})
 class _LoaderObject8616(Protocol):
     """Loaded image bounds exposed at the dynamic angr boundary."""
 
-    min_addr: int
-    max_addr: int
+    min_addr: cython.longlong
+    max_addr: cython.longlong
 
 
 class _Loader8616(Protocol):
@@ -116,8 +124,8 @@ class _Project8616(Protocol):
 class _Instruction8616(Protocol):
     """Decoded instruction fields consumed by register-role analysis."""
 
-    address: int
-    mnemonic: str
+    address: cython.longlong
+    mnemonic: object
 
 
 def _refused_role_8616(
@@ -142,18 +150,18 @@ def _refused_role_8616(
 def _role_evidence_8616(
     kind: CallRegisterRoleKind8616,
     *,
-    complete: bool,
-    known: Sequence[int],
-    role: Sequence[int],
-    witnesses: set[int],
-    failures: tuple[CallRegisterRoleFailure8616, ...],
+    complete: cython.bint,
+    known: Sequence[cython.longlong],
+    role: Sequence[cython.longlong],
+    witnesses: object,
+    failures: object,
 ) -> CallRegisterRoleEvidence8616:
     """Assemble closed per-domain evidence from decided bit masks."""
     domains = tuple(
         CallRegisterDomainBits8616(name, known[index], role[index])
-        for index, name in enumerate(TRACKED_REGISTER_DOMAIN_NAMES_8616)
+        for index, name in builtins.iter(enumerate(TRACKED_REGISTER_DOMAIN_NAMES_8616))
     )
-    decided = sum(entry.known_bits != 0 for entry in domains)
+    decided = sum(entry.known_bits != 0 for entry in iter(domains))
     coverage = (
         CallRegisterRoleCoverage8616.COMPLETE
         if complete
@@ -179,25 +187,25 @@ def _instruction_domain_effects_8616(
     """Return per-domain (read, write) 16-bit masks, or None when undecided."""
     return tuple(
         decoded_register_bit_effects_8616(instruction, name)
-        for name in _DOMAIN_QUERY_NAMES_8616
+        for name in iter(_DOMAIN_QUERY_NAMES_8616)
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _BlockDomainScan8616:
     """Per-domain block-local masks with unsupported-transfer witnesses."""
 
-    incoming_reads: tuple[int, ...]
-    writes: tuple[int, ...]
-    unsupported: tuple[int, ...]
-    nested_call: bool
+    incoming_reads: object
+    writes: object
+    unsupported: object
+    nested_call: cython.bint
 
 
 def _scan_instructions_8616(
-    instructions: tuple[object, ...],
-    start_index: int = 0,
+    instructions: object,
+    start_index: cython.longlong = 0,
     initial_incoming: Sequence[int] | None = None,
-    read_witnesses: set[int] | None = None,
+    read_witnesses: object = None,
 ) -> _BlockDomainScan8616:
     """Scan instructions in read-before-write order for every tracked domain.
 
@@ -206,6 +214,7 @@ def _scan_instructions_8616(
     nested call or an instruction without decided effects conservatively
     reads and writes every still-live bit of every domain.
     """
+    instruction: object
     incoming = [0] * _DOMAIN_COUNT_8616
     writes = [0] * _DOMAIN_COUNT_8616
     still_incoming = (
@@ -213,7 +222,7 @@ def _scan_instructions_8616(
         if initial_incoming is not None
         else [FULL_DOMAIN_MASK_8616] * _DOMAIN_COUNT_8616
     )
-    unsupported: list[int] = []
+    unsupported: list[cython.longlong] = []
     nested_call = False
     for instruction in instructions[start_index:]:
         boundary = cast(_Instruction8616, instruction)
@@ -225,14 +234,14 @@ def _scan_instructions_8616(
             address = -1
         if is_x86_16_call_mnemonic_8616(mnemonic):
             nested_call = True
-            effects: tuple[tuple[int, int] | None, ...] = (None,) * _DOMAIN_COUNT_8616
+            effects: object = (None,) * _DOMAIN_COUNT_8616
         else:
             effects = _instruction_domain_effects_8616(instruction)
-        if any(item is None for item in effects):
+        if any(item is None for item in iter(effects)):
             unsupported.append(address)
             effects = tuple(
                 item if item is not None else (FULL_DOMAIN_MASK_8616, FULL_DOMAIN_MASK_8616)
-                for item in effects
+                for item in iter(effects)
             )
         for index in range(_DOMAIN_COUNT_8616):
             read_bits, write_bits = effects[index] or (0, 0)
@@ -244,19 +253,20 @@ def _scan_instructions_8616(
     return _BlockDomainScan8616(
         tuple(incoming),
         tuple(writes),
-        tuple(sorted(set(unsupported))),
+        tuple(sorted(tuple(set(unsupported)))),
         nested_call,
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _DecodedBlock8616:
     """Normalized decoded block surface consumed by role analysis."""
 
-    block_addr: int
-    instructions: tuple[object, ...]
+    block_addr: cython.longlong
+    instructions: object
 
 
+@cython.ccall
 def _normalize_decoded_block_8616(block: object) -> _DecodedBlock8616 | None:
     """Project an angr or direct Capstone block into decoded instructions."""
     try:
@@ -273,7 +283,8 @@ def _normalize_decoded_block_8616(block: object) -> _DecodedBlock8616 | None:
     return _DecodedBlock8616(block_addr, instructions)
 
 
-def _callee_region_8616(project: object) -> tuple[int, int] | None:
+@cython.ccall
+def _callee_region_8616(project: object) -> object:
     """Return the loaded main-object bounds for bounded callee traversal."""
     boundary = cast(_Project8616, project)
     try:
@@ -286,11 +297,13 @@ def _callee_region_8616(project: object) -> tuple[int, int] | None:
     return region_start, region_end
 
 
+@cython.ccall
 def _callee_reachability_8616(
     project: object,
-    target_addr: int,
+    target_addr: cython.longlong,
 ) -> InstructionReachabilityEvidence8616 | None:
     """Collect bounded binary reachability from the exact call target."""
+    region: object
     region = _callee_region_8616(project)
     if region is None:
         return None
@@ -305,15 +318,17 @@ def _callee_reachability_8616(
         return None
 
 
-def _fixpoint_pass_limit_8616(block_count: int) -> int:
+@cython.ccall
+def _fixpoint_pass_limit_8616(block_count: cython.longlong) -> cython.longlong:
     """Bound monotone mask fixpoints by the number of settable bits."""
     return block_count * _DOMAIN_COUNT_8616 * 16 + 2
 
 
+@cython.ccall
 def _single_block_leaf_8616(
     project: object,
-    target_addr: int,
-) -> tuple[tuple[object, ...], bool]:
+    target_addr: cython.longlong,
+) -> tuple[tuple[object, ...], cython.bint]:
     """Decode the exact target as one block when no bounded CFG exists."""
     try:
         instructions = decoded_block_instructions_8616(
@@ -335,11 +350,12 @@ def _single_block_leaf_8616(
     return tuple(instructions), True
 
 
+@cython.ccall
 def _callee_roles_8616(
-    project: object | None,
+    project: object,
     callsite_addr: int | None,
-    target_addr: int | None,
-) -> tuple[CallRegisterRoleEvidence8616, CallRegisterRoleEvidence8616]:
+    target_addr: object,
+) -> object:
     """Compute callee-side input/pass and possible-clobber role evidence."""
     if project is None or target_addr is None:
         failure = (
@@ -357,10 +373,12 @@ def _callee_roles_8616(
 
 def _synthetic_callee_roles_8616(
     project: object,
-    callsite_addr: int | None,
-    target_addr: int,
+    callsite_addr: object,
+    target_addr: cython.longlong,
 ) -> tuple[CallRegisterRoleEvidence8616, CallRegisterRoleEvidence8616]:
     """Map the registered synthetic-call ABI onto its proven 16-bit views."""
+    index: object
+    name: object
     input_role = _refused_role_8616(
         CallRegisterRoleKind8616.INPUT,
         CallRegisterRoleFailure8616.CALLEE_EVIDENCE_MISSING,
@@ -392,7 +410,7 @@ def _synthetic_callee_roles_8616(
             CallRegisterRoleKind8616.MAY_CLOBBER,
             CallRegisterRoleFailure8616.CALLEE_EVIDENCE_MISSING,
         )
-    if any(bits != FULL_DOMAIN_MASK_8616 for bits in known):
+    if any(bits != FULL_DOMAIN_MASK_8616 for bits in iter(known)):
         failures.append(CallRegisterRoleFailure8616.CALLEE_COVERAGE_PARTIAL)
     clobber_role = _role_evidence_8616(
         CallRegisterRoleKind8616.MAY_CLOBBER,
@@ -405,18 +423,23 @@ def _synthetic_callee_roles_8616(
     return input_role, clobber_role
 
 
+@cython.ccall
 def _reachable_callee_graph_8616(
     reachability: InstructionReachabilityEvidence8616,
-    target_addr: int,
-    failure_reasons: list[CallRegisterRoleFailure8616],
-) -> tuple[dict[int, _DecodedBlock8616], dict[int, set[int]], bool]:
+    target_addr: cython.longlong,
+    failure_reasons: object,
+) -> tuple[dict[cython.longlong, _DecodedBlock8616], dict[cython.longlong, set[cython.longlong]], cython.bint]:
     """Normalize bounded callee reachability into blocks and successors."""
-    blocks: dict[int, _DecodedBlock8616] = {}
+    normalized: object
+    destination: object
+    raw_block: object
+    source: object
+    blocks: dict[cython.longlong, _DecodedBlock8616] = {}
     for raw_block in reachability.blocks:
         normalized = _normalize_decoded_block_8616(raw_block)
         if normalized is not None and normalized.instructions:
             blocks[normalized.block_addr] = normalized
-    successors: dict[int, set[int]] = {addr: set() for addr in blocks}
+    successors: dict[cython.longlong, set[cython.longlong]] = {addr: set() for addr in iter(blocks)}
     edge_gaps = False
     for source, destination in reachability.successor_edges:
         if source in successors and destination in blocks:
@@ -429,9 +452,10 @@ def _reachable_callee_graph_8616(
     return blocks, successors, complete and target_addr in blocks
 
 
+@cython.ccall
 def _binary_callee_roles_8616(
     project: object,
-    target_addr: int,
+    target_addr: cython.longlong,
 ) -> tuple[CallRegisterRoleEvidence8616, CallRegisterRoleEvidence8616]:
     """Compute callee roles from exact bounded binary reachability.
 
@@ -439,6 +463,9 @@ def _binary_callee_roles_8616(
     effects are real may-evidence while their complement remains undecided.
     Absence-of-write is provable only with complete callee coverage.
     """
+    reachability: object
+    block: object
+    block_addr: object
     reachability = _callee_reachability_8616(project, target_addr)
     failure_reasons: list[CallRegisterRoleFailure8616] = []
     if reachability is not None:
@@ -475,7 +502,7 @@ def _binary_callee_roles_8616(
         complete = False
         failure_reasons.append(CallRegisterRoleFailure8616.CALLEE_COVERAGE_PARTIAL)
 
-    input_witnesses: set[int] = set()
+    input_witnesses: set[cython.longlong] = set()
     for block_addr, block in blocks.items():
         _scan_instructions_8616(
             block.instructions,
@@ -519,14 +546,17 @@ def _binary_callee_roles_8616(
     return input_role, clobber_role
 
 
+@cython.ccall
 def _scan_callee_blocks_8616(
-    blocks: dict[int, _DecodedBlock8616],
-    successors: dict[int, set[int]],
-    complete: bool,
-    failure_reasons: list[CallRegisterRoleFailure8616],
-) -> tuple[dict[int, _BlockDomainScan8616], bool]:
+    blocks: object,
+    successors: object,
+    complete: cython.bint,
+    failure_reasons: object,
+) -> tuple[dict[cython.longlong, _BlockDomainScan8616], cython.bint]:
     """Scan callee blocks and flag unsupported transfers or bad sinks."""
-    scans: dict[int, _BlockDomainScan8616] = {}
+    block: object
+    block_addr: object
+    scans: dict[cython.longlong, _BlockDomainScan8616] = {}
     unsupported_seen = False
     nested_seen = False
     for block_addr, block in blocks.items():
@@ -557,17 +587,21 @@ def _scan_callee_blocks_8616(
     return scans, complete
 
 
-def _union_writes(scans: dict[int, _BlockDomainScan8616], index: int) -> int:
+@cython.ccall
+def _union_writes(scans: object, index: cython.longlong) -> cython.longlong:
     """Union one domain's write mask across every decoded callee block."""
+    scan: object
     mask = 0
     for scan in scans.values():
         mask |= scan.writes[index]
     return mask
 
 
-def _write_witnesses_8616(blocks: dict[int, _DecodedBlock8616]) -> set[int]:
+def _write_witnesses_8616(blocks: object) -> object:
     """Return addresses of instructions that may write a tracked domain."""
-    witnesses: set[int] = set()
+    block: object
+    instruction: object
+    witnesses: set[cython.longlong] = set()
     for block in blocks.values():
         for instruction in block.instructions:
             boundary = cast(_Instruction8616, instruction)
@@ -579,33 +613,38 @@ def _write_witnesses_8616(blocks: dict[int, _DecodedBlock8616]) -> set[int]:
                 witnesses.add(address)
                 continue
             effects = _instruction_domain_effects_8616(instruction)
-            if any(item is None for item in effects) or any(
-                item is not None and item[1] for item in effects
+            if any(item is None for item in iter(effects)) or any(
+                item is not None and item[1] for item in iter(effects)
             ):
                 witnesses.add(address)
     witnesses.discard(-1)
     return witnesses
 
 
+@cython.ccall
 def _incoming_input_bits_8616(
-    blocks: dict[int, _DecodedBlock8616],
-    scans: dict[int, _BlockDomainScan8616],
-    successors: dict[int, set[int]],
-    entry_addr: int,
-) -> tuple[list[int], dict[int, list[int]], bool]:
+    blocks: object,
+    scans: object,
+    successors: object,
+    entry_addr: cython.longlong,
+) -> tuple[list[cython.longlong], dict[cython.longlong, list[cython.longlong]], cython.bint]:
     """Propagate still-incoming bits forward to bound input reads.
 
     The callee entry keeps every bit live: the caller's incoming value
     reaches a block while no dominating write has covered it. The join is a
     union so partial writes and converging paths retain may-input bits.
     """
-    predecessors: dict[int, set[int]] = {addr: set() for addr in blocks}
+    block_addr: object
+    source: object
+    target: object
+    targets: object
+    predecessors: dict[cython.longlong, set[cython.longlong]] = {addr: set() for addr in iter(blocks)}
     for source, targets in successors.items():
         for target in targets:
             if target in predecessors:
                 predecessors[target].add(source)
-    live_in: dict[int, list[int]] = {
-        addr: [0] * _DOMAIN_COUNT_8616 for addr in blocks
+    live_in: dict[cython.longlong, list[cython.longlong]] = {
+        addr: [0] * _DOMAIN_COUNT_8616 for addr in iter(blocks)
     }
     if entry_addr in live_in:
         live_in[entry_addr] = [FULL_DOMAIN_MASK_8616] * _DOMAIN_COUNT_8616
@@ -620,14 +659,17 @@ def _incoming_input_bits_8616(
     return input_bits, live_in, converged
 
 
+@cython.ccall
 def _propagate_incoming_8616(
-    blocks: dict[int, _DecodedBlock8616],
-    scans: dict[int, _BlockDomainScan8616],
-    predecessors: dict[int, set[int]],
-    live_in: dict[int, list[int]],
-    entry_addr: int,
-) -> bool:
+    blocks: object,
+    scans: object,
+    predecessors: object,
+    live_in: object,
+    entry_addr: cython.longlong,
+) -> cython.bint:
     """Iterate the may-incoming join until the masks converge."""
+    block_addr: object
+    predecessor: object
     for _pass in range(_fixpoint_pass_limit_8616(len(blocks))):
         changed = False
         for block_addr in sorted(blocks):
@@ -639,7 +681,7 @@ def _propagate_incoming_8616(
                 source = live_in[predecessor]
                 for index in range(_DOMAIN_COUNT_8616):
                     joined[index] |= source[index] & ~scan.writes[index]
-            if joined != live_in[block_addr]:
+            if operator.ne(joined, live_in[block_addr]):
                 live_in[block_addr] = joined
                 changed = True
         if not changed:
@@ -647,19 +689,23 @@ def _propagate_incoming_8616(
     return False
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _ContinuationStart8616:
     """Exact start of the caller continuation after one CALL."""
 
-    block_addr: int
-    start_index: int
+    block_addr: cython.longlong
+    start_index: cython.longlong
 
 
+@cython.ccall
 def _locate_call_8616(
-    blocks: dict[int, _DecodedBlock8616],
-    callsite_addr: int | None,
-) -> tuple[int, int] | None:
+    blocks: object,
+    callsite_addr: object,
+) -> object:
     """Find the block and index of the exact decoded call instruction."""
+    block_addr: object
+    index: object
+    instruction: object
     if callsite_addr is None:
         return None
     for block_addr in sorted(blocks):
@@ -668,32 +714,34 @@ def _locate_call_8616(
                 address = cast(_Instruction8616, instruction).address
             except AttributeError:
                 continue
-            if address == callsite_addr:
+            if operator.eq(address, callsite_addr):
                 return block_addr, index
     return None
 
 
+@cython.ccall
 def _continuation_start_8616(
-    blocks: dict[int, _DecodedBlock8616],
-    successors: dict[int, set[int]],
+    blocks: object,
+    successors: object,
     callsite_addr: int | None,
-    call_block_addr: int | None,
-    return_block_addr: int | None,
+    call_block_addr: object,
+    return_block_addr: object,
 ) -> _ContinuationStart8616 | None:
     """Resolve the exact continuation after the CALL, or refuse."""
+    located: object
     located = _locate_call_8616(blocks, callsite_addr)
     if located is None:
         if return_block_addr is not None and return_block_addr in blocks:
             return _ContinuationStart8616(return_block_addr, 0)
         return None
     block_addr, index = located
-    if call_block_addr is not None and block_addr != call_block_addr:
+    if call_block_addr is not None and operator.ne(block_addr, call_block_addr):
         return None
     if index + 1 < len(blocks[block_addr].instructions):
-        if return_block_addr is not None and return_block_addr != block_addr:
+        if return_block_addr is not None and operator.ne(return_block_addr, block_addr):
             return None
         return _ContinuationStart8616(block_addr, index + 1)
-    targets = tuple(sorted(successors.get(block_addr, ())))
+    targets = tuple(sorted(tuple(successors.get(block_addr, ()))))
     if return_block_addr is not None:
         if return_block_addr not in targets:
             return None
@@ -703,20 +751,23 @@ def _continuation_start_8616(
     return _ContinuationStart8616(targets[0], 0)
 
 
+@cython.ccall
 def _caller_liveness_8616(
-    reachable: set[int],
-    scans: dict[int, _BlockDomainScan8616],
-    successors: dict[int, set[int]],
-) -> tuple[dict[int, list[int]], dict[int, list[int]], bool]:
+    reachable: object,
+    scans: object,
+    successors: object,
+) -> tuple[dict[cython.longlong, list[cython.longlong]], dict[cython.longlong, list[cython.longlong]], cython.bint]:
     """Backward liveness over caller continuation blocks.
 
     Exit blocks expose every still-live bit to an unknown outer caller, so
     nothing live there can ever be caller-dead.
     """
-    live_in: dict[int, list[int]] = {
-        addr: [0] * _DOMAIN_COUNT_8616 for addr in reachable
+    block_addr: object
+    target: object
+    live_in: dict[cython.longlong, list[cython.longlong]] = {
+        addr: [0] * _DOMAIN_COUNT_8616 for addr in iter(reachable)
     }
-    live_out: dict[int, list[int]] = {}
+    live_out: dict[cython.longlong, list[cython.longlong]] = {}
     converged = False
     for _pass in range(_fixpoint_pass_limit_8616(len(reachable))):
         changed = False
@@ -731,7 +782,7 @@ def _caller_liveness_8616(
                         outgoing[index] |= source[index]
             else:
                 outgoing = [FULL_DOMAIN_MASK_8616] * _DOMAIN_COUNT_8616
-            if live_out.get(block_addr) != outgoing:
+            if operator.ne(live_out.get(block_addr), outgoing):
                 live_out[block_addr] = outgoing
                 changed = True
             scan = scans[block_addr]
@@ -740,7 +791,7 @@ def _caller_liveness_8616(
                 | (live_out[block_addr][index] & ~scan.writes[index])
                 for index in range(_DOMAIN_COUNT_8616)
             ]
-            if incoming != live_in[block_addr]:
+            if operator.ne(incoming, live_in[block_addr]):
                 live_in[block_addr] = incoming
                 changed = True
         if not changed:
@@ -749,22 +800,25 @@ def _caller_liveness_8616(
     return live_in, live_out, converged
 
 
+@cython.ccall
 def _caller_graph_8616(
-    inventory: RegisterSourceBlockInventory8616 | None,
-    function_addr: int | None,
-) -> tuple[dict[int, _DecodedBlock8616], dict[int, set[int]], bool] | None:
+    inventory: object,
+    function_addr: object,
+) -> object:
     """Normalize the caller inventory into blocks, successors and gaps."""
+    evidence: object
+    predecessor: object
     if (
         inventory is None
         or not inventory.blocks
-        or (function_addr is not None and inventory.function_addr != function_addr)
+        or (function_addr is not None and operator.ne(inventory.function_addr, function_addr))
     ):
         return None
     blocks = {
         evidence.block_addr: _DecodedBlock8616(evidence.block_addr, evidence.instructions)
-        for evidence in inventory.blocks
+        for evidence in iter(inventory.blocks)
     }
-    successors: dict[int, set[int]] = {addr: set() for addr in blocks}
+    successors: dict[cython.longlong, set[cython.longlong]] = {addr: set() for addr in iter(blocks)}
     gaps = not inventory.complete
     for evidence in inventory.blocks:
         for predecessor in evidence.predecessors:
@@ -775,13 +829,15 @@ def _caller_graph_8616(
     return blocks, successors, gaps
 
 
+@cython.ccall
 def _continuation_reachable_8616(
-    start_addr: int,
-    blocks: dict[int, _DecodedBlock8616],
-    successors: dict[int, set[int]],
-) -> set[int]:
+    start_addr: cython.longlong,
+    blocks: object,
+    successors: object,
+) -> object:
     """Collect every continuation block reachable after the CALL."""
-    reachable: set[int] = set()
+    current: object
+    reachable: set[cython.longlong] = set()
     queue = [start_addr]
     while queue:
         current = queue.pop()
@@ -792,14 +848,16 @@ def _continuation_reachable_8616(
     return reachable
 
 
+@cython.ccall
 def _continuation_obstacles_8616(
-    reachable: set[int],
-    scans: dict[int, _BlockDomainScan8616],
-    successors: dict[int, set[int]],
-    blocks: dict[int, _DecodedBlock8616],
-    gaps: bool,
-) -> tuple[bool, bool, bool]:
+    reachable: object,
+    scans: object,
+    successors: object,
+    blocks: object,
+    gaps: cython.bint,
+) -> tuple[cython.bint, cython.bint, cython.bint]:
     """Detect evidence gaps, unsupported transfers and nested calls."""
+    block_addr: object
     unsupported_seen = False
     nested_seen = False
     for block_addr in reachable:
@@ -837,6 +895,8 @@ def _caller_dead_role_8616(
     edges, unreadable blocks or an unproved fixpoint keep bits undecided —
     none of them can prove a bit dead.
     """
+    caller_graph: object
+    start: object
     kind = CallRegisterRoleKind8616.CALLER_DEAD
     caller_graph = _caller_graph_8616(inventory, function_addr)
     if caller_graph is None:
@@ -858,9 +918,9 @@ def _caller_dead_role_8616(
             CallRegisterRoleFailure8616.CALLER_CONTINUATION_MISSING,
         )
 
-    scans: dict[int, _BlockDomainScan8616] = {
+    scans: dict[cython.longlong, _BlockDomainScan8616] = {
         block_addr: _scan_instructions_8616(block.instructions)
-        for block_addr, block in blocks.items()
+        for block_addr, block in builtins.iter(blocks.items())
     }
     # The analyzed CALL itself sits before the continuation inside the start
     # block; its effects never reach the return-edge value.
@@ -872,7 +932,7 @@ def _caller_dead_role_8616(
 
     reachable = _continuation_reachable_8616(start.block_addr, blocks, successors)
     reentered = start.start_index > 0 and any(
-        start.block_addr in successors[other] for other in reachable
+        start.block_addr in successors[other] for other in iter(reachable)
     )
     if reentered:
         # A back-edge to the block head re-executes the pre-CALL prefix; its
@@ -910,8 +970,8 @@ def _caller_dead_role_8616(
             known[index] = live_at_start[index]
     witnesses = {
         witness
-        for block_addr in reachable
-        for witness in scans[block_addr].unsupported
+        for block_addr in iter(reachable)
+        for witness in iter(scans[block_addr].unsupported)
         if witness >= 0
     }
     return _role_evidence_8616(
@@ -924,13 +984,14 @@ def _caller_dead_role_8616(
     )
 
 
+@cython.ccall
 def _result_role_8616(
-    callsite_addr: int | None,
+    callsite_addr: object,
     call_block_addr: int | None,
     call_instr_index: int | None,
-    target_addr: int | None,
-    return_block_addr: int | None,
-    output_fact: CallOutputFact8616 | None,
+    target_addr: object,
+    return_block_addr: object,
+    output_fact: object,
 ) -> tuple[CallRegisterRoleEvidence8616, tuple[CallRegisterRoleResult8616, ...]]:
     """Bind proven output registers to the exact call identity.
 
@@ -938,6 +999,10 @@ def _result_role_8616(
     proven result; an unsupported register view refuses instead of
     truncating into a narrower tracked domain.
     """
+    domain: object
+    view: object
+    name: object
+    output: object
     kind = CallRegisterRoleKind8616.RESULT
     if output_fact is None:
         return _refused_role_8616(
@@ -950,11 +1015,11 @@ def _result_role_8616(
             CallRegisterRoleFailure8616.OUTPUT_FACT_REFUSED,
         ), ()
     identity_matches = (
-        output_fact.call_block_addr == call_block_addr
-        and output_fact.call_instr_index == call_instr_index
-        and output_fact.callsite_addr == callsite_addr
-        and output_fact.target_addr == target_addr
-        and output_fact.return_block_addr == return_block_addr
+        operator.eq(output_fact.call_block_addr, call_block_addr)
+        and operator.eq(output_fact.call_instr_index, call_instr_index)
+        and operator.eq(output_fact.callsite_addr, callsite_addr)
+        and operator.eq(output_fact.target_addr, target_addr)
+        and operator.eq(output_fact.return_block_addr, return_block_addr)
     )
     if not identity_matches:
         return _refused_role_8616(
@@ -969,7 +1034,7 @@ def _result_role_8616(
                 if failure is CallOutputFailure8616.OUTPUT_WIDTH_MISMATCH
                 else CallRegisterRoleFailure8616.OUTPUT_FACT_MISMATCH
             )
-            for failure in inconsistent
+            for failure in iter(inconsistent)
         }
         return _refused_role_8616(kind, *sorted(mapped)), ()
     assert callsite_addr is not None
@@ -979,7 +1044,7 @@ def _result_role_8616(
     role = [0] * _DOMAIN_COUNT_8616
     results: list[CallRegisterRoleResult8616] = []
     failures: list[CallRegisterRoleFailure8616] = []
-    witnesses: set[int] = set()
+    witnesses: set[cython.longlong] = set()
     for output in output_fact.outputs:
         if output.space is not MemSpace.REG or output.name is None:
             continue
@@ -990,7 +1055,7 @@ def _result_role_8616(
             family = register_value_family_8616(register)
             affected = {
                 name_domain.name
-                for name in family
+                for name in iter(family)
                 if (name_domain := register_domain_for_name(name)) is not None
             }
             for name in affected or set(TRACKED_REGISTER_DOMAIN_NAMES_8616):
@@ -1062,7 +1127,7 @@ def build_callsite_register_role_fact_8616(
     )
     roles = {
         evidence.kind: evidence
-        for evidence in (input_role, clobber_role, dead_role, result_role)
+        for evidence in iter((input_role, clobber_role, dead_role, result_role))
     }
     return CallRegisterRolesFact8616(
         call_block_addr,
@@ -1070,16 +1135,17 @@ def build_callsite_register_role_fact_8616(
         callsite_addr,
         target_addr,
         return_block_addr,
-        tuple(roles[kind] for kind in CALL_REGISTER_ROLE_KINDS_8616),
+        tuple(roles[kind] for kind in iter(CALL_REGISTER_ROLE_KINDS_8616)),
         results,
     )
 
 
+@cython.ccall
 def build_call_register_roles_8616(
     project: object | None,
-    function: object | None,
+    function: object,
     artifact: IRFunctionArtifact,
-    summaries: Mapping[int, CallsiteSummary8616],
+    summaries: Mapping[cython.longlong, CallsiteSummary8616],
     outputs: CallOutputArtifact8616,
 ) -> CallRegisterRolesArtifact8616:
     """Build the register-role artifact for every CALL in one function IR.
@@ -1093,14 +1159,21 @@ def build_call_register_roles_8616(
     caller CFG inventory when available; results bind only to output facts
     whose identity matches the call.
     """
+    callsite_addr: object
+    output_fact: object
+    summary: object
+    block: object
+    evidence: object
+    instr_index: object
+    instruction: object
     caller_inventory = (
         collect_register_source_block_inventory_8616(function)
         if function is not None
         else None
     )
-    facts_by_call: dict[tuple[int, int], CallOutputFact8616] = {
+    facts_by_call: dict[tuple[cython.longlong, cython.longlong], CallOutputFact8616] = {
         (fact.call_block_addr, fact.call_instr_index): fact
-        for fact in outputs.facts
+        for fact in iter(outputs.facts)
     }
     source = (
         artifact
@@ -1121,7 +1194,7 @@ def build_call_register_roles_8616(
             target_addr = summary.target_addr if summary is not None else None
             return_block_addr = summary.return_addr if summary is not None else None
             output_fact = facts_by_call.get((block.addr, instr_index))
-            if output_fact is not None and output_fact.callsite_addr != callsite_addr:
+            if output_fact is not None and operator.ne(output_fact.callsite_addr, callsite_addr):
                 output_fact = None
             fact = build_callsite_register_role_fact_8616(
                 project,

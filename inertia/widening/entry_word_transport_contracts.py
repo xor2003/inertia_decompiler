@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed contracts for cross-block entry-word value transport.
 
 Layer: Widening.
@@ -12,6 +13,8 @@ Do not join values from rendered text, cosmetic shape, postprocess, or CLI/repor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -19,6 +22,7 @@ from enum import StrEnum
 from inertia.ir.core import IRFunctionArtifact, MemSpace
 
 from .entry_stack_word_value_contracts import EntryStackWordProof8616
+import dataclasses
 
 
 class EntryWordTransportVerdict8616(StrEnum):
@@ -72,12 +76,12 @@ class EntryWordTransportRefusalKind8616(StrEnum):
     UNTRACKED_IP_WRITE = "untracked_ip_write"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class EntryWordSite8616:
     """One exact block/instruction site inside the transport cone."""
 
-    block_addr: int
-    instr_index: int
+    block_addr: cython.longlong
+    instr_index: cython.longlong
     instruction_addr: int | None = None
 
     def to_dict(self) -> dict[str, object]:
@@ -89,7 +93,7 @@ class EntryWordSite8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class EntryWordTransport8616:
     """One proven transport of the captured immutable word to a MOV destination.
 
@@ -100,13 +104,13 @@ class EntryWordTransport8616:
 
     source: EntryWordSite8616
     target: EntryWordSite8616
-    seed_register: str
+    seed_register: object
     target_space: MemSpace
     target_tmp: int | None
-    target_name: str | None
+    target_name: object
     target_version: int | None
-    traversed_blocks: tuple[int, ...]
-    retained_exits: tuple[int, ...]
+    traversed_blocks: object
+    retained_exits: object
 
     def to_dict(self) -> dict[str, object]:
         """Serialize this fact deterministically; identity stays object-bound."""
@@ -123,12 +127,12 @@ class EntryWordTransport8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class EntryWordTransportRefusal8616:
     """One typed refusal against the targeted transport proof."""
 
     kind: EntryWordTransportRefusalKind8616
-    detail: str
+    detail: object
     block_addr: int | None = None
     instr_index: int | None = None
 
@@ -142,7 +146,7 @@ class EntryWordTransportRefusal8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class EntryWordTraversalStats8616:
     """Instruction observations, separate from the selected relation census.
 
@@ -151,11 +155,11 @@ class EntryWordTraversalStats8616:
     refuse the same single requested relation.
     """
 
-    observed_instruction_count: int = 0
-    closed_effect_count: int = 0
-    refusal_count: int = 0
+    observed_instruction_count: cython.longlong = 0
+    closed_effect_count: cython.longlong = 0
+    refusal_count: cython.longlong = 0
 
-    def to_dict(self) -> dict[str, int]:
+    def to_dict(self) -> dict[str, cython.longlong]:
         """Serialize the unchanged instruction/refusal observations."""
         return {
             "observed_instruction_count": self.observed_instruction_count,
@@ -164,7 +168,7 @@ class EntryWordTraversalStats8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class EntryWordTransportProof8616:
     """Closed-count result of one targeted entry-word transport proof.
 
@@ -181,11 +185,11 @@ class EntryWordTransportProof8616:
     scope: EntryWordTransportScope8616 = EntryWordTransportScope8616.KNOWN_ACYCLIC_TARGET_CONE
     fact: EntryWordTransport8616 | None = None
     refusals: tuple[EntryWordTransportRefusal8616, ...] = ()
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
     traversal: EntryWordTraversalStats8616 = EntryWordTraversalStats8616()
 
     def to_dict(self) -> dict[str, object]:
@@ -202,5 +206,5 @@ class EntryWordTransportProof8616:
             "failure_count": self.failure_count,
             "traversal": self.traversal.to_dict(),
             "fact": None if self.fact is None else self.fact.to_dict(),
-            "refusals": [refusal.to_dict() for refusal in self.refusals],
+            "refusals": [refusal.to_dict() for refusal in iter(self.refusals)],
         }

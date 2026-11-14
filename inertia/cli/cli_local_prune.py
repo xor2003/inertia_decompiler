@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: preserve legacy CLI helper surface while delegating semantic proof to X86_16 layers.
@@ -5,6 +6,8 @@ Forbidden: owning decompiler semantics, source-backed recovery, or postprocess s
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import re
 from collections.abc import Callable, Iterable
@@ -32,16 +35,21 @@ class _CodegenLike(Protocol):
 
 
 
-def _is_linear_temp_name(name: str | None) -> bool:
+@cython.ccall
+def _is_linear_temp_name(name: object) -> cython.bint:
     return isinstance(name, str) and _LINEAR_TEMP_NAME_RE.fullmatch(name) is not None
 
 
+@cython.ccall
 def _collect_used_variable_ids_8616(
     cfunc: _CFunctionLike,
     iter_c_nodes_deep: Callable[[object], Iterable[object]],
-) -> set[int]:
+) -> object:
     """Collect object identities of variables referenced by C nodes."""
-    used_variables: set[int] = set()
+    unified: object
+    variable: object
+    node: object
+    used_variables: set[cython.longlong] = set()
     for node in iter_c_nodes_deep(cfunc.statements):
         if not isinstance(node, structured_c.CVariable):
             continue
@@ -56,11 +64,13 @@ def _collect_used_variable_ids_8616(
     return used_variables
 
 
+@cython.ccall
 def _drop_unused_linear_vars_in_use_8616(
     cfunc: _CFunctionLike,
-    used_variables: set[int],
-) -> bool:
+    used_variables: object,
+) -> cython.bint:
     """Drop unused linear-temp register variables from variables_in_use."""
+    variable: object
     changed = False
     variables_in_use = cfunc.variables_in_use
     if not isinstance(variables_in_use, dict):
@@ -80,9 +90,10 @@ def _drop_unused_linear_vars_in_use_8616(
 
 def _drop_unused_linear_unified_8616(
     cfunc: _CFunctionLike,
-    used_variables: set[int],
-) -> bool:
+    used_variables: object,
+) -> cython.bint:
     """Drop unused linear-temp register variables from unified_local_vars."""
+    variable: object
     changed = False
     unified_locals = cfunc.unified_local_vars
     if not isinstance(unified_locals, dict):
@@ -95,18 +106,20 @@ def _drop_unused_linear_unified_8616(
             continue
         entries = unified_locals[variable]
         # dynamic codegen boundary: CVariable entries are supplied by angr.
-        if any(id(getattr(cvariable, "variable", None)) in used_variables for cvariable, _vartype in entries):
+        if any(id(getattr(cvariable, "variable", None)) in used_variables for cvariable, _vartype in iter(entries)):
             continue
         del unified_locals[variable]
         changed = True
     return changed
 
 
+@cython.ccall
 def _prune_unused_linear_register_declarations(
     codegen: _CodegenLike,
     *,
     iter_c_nodes_deep: Callable[[object], Iterable[object]],
-) -> bool:
+) -> cython.bint:
+    cfunc: object
     cfunc = codegen.cfunc
     if cfunc is None:
         return False

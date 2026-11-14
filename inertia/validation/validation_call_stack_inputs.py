@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Check actual architectural SP call inputs against fresh source positions.
 
 Layer: Validation.
@@ -9,6 +10,8 @@ Owns canonical equivalence checking and validation diagnostics
 Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-backed proof
 """
 from __future__ import annotations
+import typing
+import cython
 
 from copy import copy
 from dataclasses import dataclass
@@ -46,6 +49,9 @@ from inertia.lowering.entry_stack_pointer_capture import (
 )
 from inertia.lowering.gp_register_state import runtime_gp_expression_view_8616
 from inertia.semantics.callsite_summary import structured_callsite_addr_8616
+import dataclasses
+import operator
+import builtins
 
 
 class _ActualCodegenRoot8616(Protocol):
@@ -63,7 +69,7 @@ class CallStackInputIssueKind8616(StrEnum):
     INVALID = "call_stack_input_invalid"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallStackInputIssue8616:
     """One typed input failure retaining its exact source scope."""
 
@@ -76,36 +82,38 @@ class CallStackInputIssue8616:
         return f"{self.kind.value}@{suffix}"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _CallStackInputObservation8616:
     """Neutral observation shared by the universal and scoped verdict types."""
 
     root: object
-    raw_fact_count: int
-    materialized_count: int
-    issues: tuple[CallStackInputIssue8616, ...]
+    raw_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    issues: object
 
     def issue_tokens(self) -> tuple[str, ...]:
         """Export all failures without filtering a stable observable delta."""
-        return tuple(issue.token() for issue in self.issues)
+        return tuple(issue.token() for issue in iter(self.issues))
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallStackInputValidation8616(_CallStackInputObservation8616):
     """Pure logical view and the census that authorizes each projected context."""
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _SpEquation8616:
     """Independent symbolic entry and current values for one word-state equation."""
 
-    entry_id: int
+    entry_id: cython.longlong
     entry: z3.BitVecRef
     current: z3.BitVecRef
 
 
+@cython.ccall
 def _sp_leaf(expression: object, equation: _SpEquation8616) -> z3.BitVecRef | None:
     """Interpret constants and canonical storage, never local names as proof."""
+    view: object
     if call_stack_temporary_8616(expression, equation.entry_id):
         return equation.entry & 0xffff
     if isinstance(expression, c.CConstant) and type(expression.value) is int:
@@ -117,8 +125,13 @@ def _sp_leaf(expression: object, equation: _SpEquation8616) -> z3.BitVecRef | No
     return None
 
 
-def _sp_value(expression: object, equation: _SpEquation8616, depth: int = 0) -> z3.BitVecRef | None:
+def _sp_value(expression: object, equation: _SpEquation8616, depth: cython.longlong = 0) -> z3.BitVecRef | None:
     """Interpret supported unsigned operations and exact signed/unsigned casts."""
+    leaf: object
+    left: object
+    operation: object
+    right: object
+    value: object
     if depth > 16:
         return None
     leaf = _sp_leaf(expression, equation)
@@ -147,14 +160,16 @@ def _sp_value(expression: object, equation: _SpEquation8616, depth: int = 0) -> 
     return None if operation is None else operation()
 
 
+@cython.ccall
 def _authority_is_current_8616(
     marker: CallStackInputBinding8616,
     source: IRFunctionArtifact,
     capture: EntryStackPointerCaptureObservation8616,
     scoped_context: ScopedCallStackContext8616 | None,
     scoped_caller_scope: Real16InvocationDomain8616 | None,
-) -> bool:
+) -> cython.bint:
     """Reprove the retained authority variant against the current source."""
+    position: object
     authority = marker.authority
     if type(authority) is ScopedCallPositionAuthority8616:
         return (authority.is_current_for(
@@ -165,16 +180,19 @@ def _authority_is_current_8616(
     if type(authority) is not CallStackPosition8616 or position is None:
         return False
     fresh = prove_call_stack_position_8616(source, position.block_addr, position.instruction_index).proof
-    return bool(fresh == position and authority in capture.uses)
+    return bool(operator.eq(fresh, position) and authority in capture.uses)
 
 
+@cython.ccall
 def _verify_context(codegen: object, wrapper: c.CMultiStatementExpression, source: IRFunctionArtifact,
-                    capture: EntryStackPointerCaptureObservation8616 | None,
+                    capture: object,
                     value_use: CallStackValueUse8616,
                     scoped_context: ScopedCallStackContext8616 | None = None,
                     scoped_caller_scope: Real16InvocationDomain8616 | None = None,
                     ) -> _VerifiedContext8616 | None:
     """Close source, immutable input, ordered layout and independent SP equations."""
+    layout: object
+    position: object
     layout = call_stack_context_layout_8616(wrapper, value_use=value_use)
     if layout is None or capture is None:
         return None
@@ -185,7 +203,7 @@ def _verify_context(codegen: object, wrapper: c.CMultiStatementExpression, sourc
         return None
     if not call_stack_temporary_8616(capture.value, marker.entry_tmp_id):
         return None
-    if structured_callsite_addr_8616(layout.call) != position.callsite_addr or direct_call_target_8616(codegen, layout.call) != position.target_addr:
+    if operator.ne(structured_callsite_addr_8616(layout.call), position.callsite_addr) or operator.ne(direct_call_target_8616(codegen, layout.call), position.target_addr):
         return None
     if not _sp_write(layout.pre_write, marker.entry_tmp_id, position.callee_entry_offset):
         return None
@@ -196,14 +214,17 @@ def _verify_context(codegen: object, wrapper: c.CMultiStatementExpression, sourc
     return _VerifiedContext8616(wrapper, marker, logical)
 
 
-def _unowned_sp_use(root: object, capture: EntryStackPointerCaptureObservation8616 | None,
-                    contexts: list[_VerifiedContext8616]) -> bool:
+def _unowned_sp_use(root: object, capture: object,
+                    contexts: object) -> cython.bint:
     """Refuse retained/current SP observations not proved compatible with the ABI."""
-    allowed: set[int] = set()
+    view: object
+    context: object
+    node: object
+    allowed: set[cython.longlong] = set()
     if capture is not None:
-        allowed.update(id(node) for node in _iter_c_nodes_deep_8616(capture.assignment))
+        allowed.update(id(node) for node in builtins.iter(_iter_c_nodes_deep_8616(capture.assignment)))
     for context in contexts:
-        allowed.update(id(node) for node in _iter_c_nodes_deep_8616(context.wrapper))
+        allowed.update(id(node) for node in builtins.iter(_iter_c_nodes_deep_8616(context.wrapper)))
     for node in _iter_c_nodes_deep_8616(root):
         if isinstance(node, c.CVariable) and id(node) not in allowed:
             view = runtime_gp_expression_view_8616(node)
@@ -211,8 +232,11 @@ def _unowned_sp_use(root: object, capture: EntryStackPointerCaptureObservation86
                 return True
     return False
 
-def _sp_write(statement: object, entry_id: int, offset: int) -> bool:
+@cython.ccall
+def _sp_write(statement: object, entry_id: cython.longlong, offset: cython.longlong) -> cython.bint:
     """Prove the exact source entry value and preservation of arbitrary upper ESP."""
+    actual: object
+    view: object
     if not isinstance(statement, c.CAssignment) or not isinstance(statement.lhs, c.CVariable):
         return False
     view = runtime_gp_expression_view_8616(statement.lhs)
@@ -225,25 +249,29 @@ def _sp_write(statement: object, entry_id: int, offset: int) -> bool:
     expected = (current & 0xffff0000) | ((entry + offset) & 0xffff)
     solver = z3.Solver()
     solver.set(timeout=1000)
-    solver.add(actual != expected)
-    return bool(solver.check() == z3.unsat)
+    solver.add(operator.ne(actual, expected))
+    return bool(operator.eq(solver.check(), z3.unsat))
 
 
+@cython.ccall
 def _declared_temporaries_8616(codegen: object, wrapper: c.CMultiStatementExpression,
-                              marker: CallStackInputBinding8616) -> bool:
+                              marker: CallStackInputBinding8616) -> cython.bint:
     """Require protocol uses to match the actual owned C local declarations."""
+    function: object
+    node: object
+    value: object
     function = cast(_ActualCodegenRoot8616, codegen).cfunc
     if function is None:
         return False
     identities = {marker.entry_tmp_id, *marker.argument_tmp_ids}
     if marker.result_tmp_id is not None:
         identities.add(marker.result_tmp_id)
-    declarations = {variable.tmp_id: value for variable, value in function.variables_in_use.items()
+    declarations = {variable.tmp_id: value for variable, value in builtins.iter(function.variables_in_use.items())
                     if isinstance(variable, SimTemporaryVariable) and variable.tmp_id in identities}
-    if len(declarations) != len(identities):
+    if operator.ne(len(declarations), len(identities)):
         return False
     for value in declarations.values():
-        if function.variable_manager.get_variable_type(value.variable) != value.type:
+        if operator.ne(function.variable_manager.get_variable_type(value.variable), value.type):
             return False
     for node in _iter_c_nodes_deep_8616(wrapper):
         if isinstance(node, c.CVariable) and isinstance(node.variable, SimTemporaryVariable) and node.variable.tmp_id in identities:
@@ -254,7 +282,7 @@ def _declared_temporaries_8616(codegen: object, wrapper: c.CMultiStatementExpres
     return True
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _VerifiedContext8616:
     """Ephemeral original-call projection after all protocol obligations close."""
 
@@ -263,10 +291,10 @@ class _VerifiedContext8616:
     logical_call: c.CFunctionCall
 
 
-def _logical_view(root: object, contexts: list[_VerifiedContext8616]) -> object:
+def _logical_view(root: object, contexts: object) -> object:
     """Copy only the declared C graph, retaining immutable external metadata."""
-    replacements = {id(item.wrapper): item.logical_call for item in contexts}
-    copies: dict[int, object] = {}
+    replacements = {id(item.wrapper): item.logical_call for item in iter(contexts)}
+    copies: dict[cython.longlong, object] = {}
 
     def project(node: object) -> object:
         """Retain unchanged identities and copy only ancestors of replaced contexts."""
@@ -292,9 +320,9 @@ def _unknown_source_8616(codegen: object, root: object) -> _CallStackInputObserv
         source = cast(_ActualCodegenRoot8616, codegen)._inertia_vex_ir_artifact
     except AttributeError:
         source = None
-    raw = (sum(instruction.op == "CALL" for block in source.blocks for instruction in block.instrs)
+    raw = (sum(instruction.op == "CALL" for block in iter(source.blocks) for instruction in iter(block.instrs))
            if isinstance(source, IRFunctionArtifact) else 0)
-    issues = (CallStackInputIssue8616(CallStackInputIssueKind8616.SOURCE, None),) if raw else ()
+    issues = tuple((CallStackInputIssue8616(CallStackInputIssueKind8616.SOURCE, None),)) if raw else tuple(())
     return _CallStackInputObservation8616(root, raw, 0, issues)
 
 
@@ -304,15 +332,20 @@ def _validate_call_inputs_8616(
     scoped_caller_scope: Real16InvocationDomain8616 | None,
 ) -> _CallStackInputObservation8616:
     """Shared validation walk parameterized by the offered context and domain."""
+    function: object
+    source: object
+    verified: object
+    call: object
+    wrapper: object
     source = current_call_stack_source_8616(codegen)
     if source is None:
         return _unknown_source_8616(codegen, root)
-    calls = [instruction for block in source.blocks for instruction in block.instrs if instruction.op == "CALL"]
+    calls = [instruction for block in iter(source.blocks) for instruction in iter(block.instrs) if instruction.op == "CALL"]
     function = cast(_ActualCodegenRoot8616, codegen).cfunc
     if calls and (function is None or function.statements is not root):
         return _CallStackInputObservation8616(root, len(calls), 0,
             (CallStackInputIssue8616(CallStackInputIssueKind8616.SOURCE, None),))
-    wrappers = [node for node in _iter_c_nodes_deep_8616(root)
+    wrappers = [node for node in builtins.iter(_iter_c_nodes_deep_8616(root))
                 if isinstance(node, c.CMultiStatementExpression) and CALL_STACK_INPUT_BINDING_TAG_8616 in node.tags]
     capture = (observe_entry_stack_pointer_capture_8616(
         codegen, source, scoped_context=scoped_context,
@@ -333,8 +366,8 @@ def _validate_call_inputs_8616(
     for call in calls:
         count = sum(
             item.marker.position is not None
-            and item.marker.position.callsite_addr == call.addr
-            for item in contexts)
+            and operator.eq(item.marker.position.callsite_addr, call.addr)
+            for item in iter(contexts))
         if count != 1:
             issues.append(CallStackInputIssue8616(CallStackInputIssueKind8616.MISSING, call.addr))
     if contexts and _unowned_sp_use(root, capture, contexts):
@@ -343,6 +376,7 @@ def _validate_call_inputs_8616(
     return _CallStackInputObservation8616(logical, len(calls), len(contexts), tuple(issues))
 
 
+@cython.ccall
 def validate_call_stack_inputs_8616(codegen: object, root: object) -> CallStackInputValidation8616:
     """Require one independently verified architectural input per real source CALL."""
     observed = _validate_call_inputs_8616(codegen, root, None, None)
@@ -351,7 +385,7 @@ def validate_call_stack_inputs_8616(codegen: object, root: object) -> CallStackI
         observed.materialized_count, observed.issues)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ScopedCallStackInputValidation8616(_CallStackInputObservation8616):
     """Scope-restricted verdict; never substitutable for universal validation.
 
@@ -366,13 +400,14 @@ class ScopedCallStackInputValidation8616(_CallStackInputObservation8616):
     context: ScopedCallStackContext8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Scoped success: every source CALL verified under the offered scope."""
         return (not self.issues
-                and self.materialized_count == self.raw_fact_count
+                and operator.eq(self.materialized_count, self.raw_fact_count)
                 and self.raw_fact_count > 0)
 
 
+@cython.ccall
 def validate_scoped_call_stack_inputs_8616(
     codegen: object,
     root: object,

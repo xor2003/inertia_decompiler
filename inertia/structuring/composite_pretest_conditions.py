@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bind complete short-circuit pretest exits to their typed CFG conditions.
 
 Layer: Structuring.
@@ -10,6 +11,8 @@ work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
@@ -35,6 +38,9 @@ from inertia.structuring.condition_call_effects import classify_condition_call_e
 from .condition_exit_normalization import transparent_condition_exit_8616
 from .loop_condition_ownership import _condition_tag_pairs_8616
 from .pretest_condition_surface import pretest_condition_surface_8616
+import dataclasses
+import operator
+import builtins
 
 _MIN_COMPOSITE_FACTS = 2
 _BINARY_OUTCOMES = 2
@@ -43,39 +49,40 @@ _BINARY_OUTCOMES = 2
 class _TaggedNode8616(Protocol):
     """Third-party C-AST identity tags consumed at this boundary."""
 
-    tags: dict[str, object]
+    tags: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CompositePretestPlan8616:
     """Exact branch set and two outcomes owned by a leading break guard."""
 
     guard: CIfBreak | CIfElse
     root_condition: ConditionIR
-    conditions: tuple[ConditionIR, ...]
-    body_target: int
-    exit_target: int
+    conditions: object
+    body_target: cython.longlong
+    exit_target: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CompositePretestStats8616:
     """Closed evidence accounting for composite pretest condition replacement."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    changed_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    changed_count: cython.longlong = 0
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether a guard was materialized."""
         return self.changed_count > 0
 
 
 def _statements_8616(node: object) -> Iterator[object]:
     """Flatten statement-list wrappers without crossing executable nodes."""
+    statement: object
     if isinstance(node, CStatements):
         for statement in node.statements:
             yield from _statements_8616(statement)
@@ -83,7 +90,8 @@ def _statements_8616(node: object) -> Iterator[object]:
         yield node
 
 
-def _tags_8616(node: object) -> dict[str, object]:
+@cython.ccall
+def _tags_8616(node: object) -> object:
     """Read optional tags from third-party structured statements."""
     try:
         return cast(_TaggedNode8616, node).tags or {}
@@ -91,8 +99,10 @@ def _tags_8616(node: object) -> dict[str, object]:
         return {}
 
 
-def _effect_free_guard_8616(expression: CExpression) -> bool:
+@cython.ccall
+def _effect_free_guard_8616(expression: CExpression) -> cython.bint:
     """Refuse calls, dirty operations and every executable embedded statement."""
+    node: object
     if classify_condition_call_effects_8616(expression).has_semantic_call:
         return False
     for node in _iter_c_nodes_deep_8616(expression):
@@ -105,11 +115,12 @@ def _effect_free_guard_8616(expression: CExpression) -> bool:
 
 def _guard_facts_8616(
     guard: CIfBreak | CIfElse,
-    typed_conditions: tuple[ConditionIR, ...],
+    typed_conditions: object,
 ) -> tuple[ConditionIR, ...]:
     """Require a unique typed fact for each branch identity in the guard."""
+    condition: object
     keys = _condition_tag_pairs_8616(guard)
-    matched: dict[tuple[int, int], ConditionIR] = {}
+    matched: dict[tuple[cython.longlong, cython.longlong], ConditionIR] = {}
     for condition in typed_conditions:
         key = (condition.src_insn, condition.block_addr)
         if key not in keys:
@@ -117,25 +128,27 @@ def _guard_facts_8616(
         if key in matched:
             return ()
         matched[key] = condition
-    return tuple(matched[key] for key in sorted(matched))
+    return tuple(matched[key] for key in builtins.iter(sorted(matched)))
 
 
 def _outcomes_8616(
-    facts: tuple[ConditionIR, ...],
-    body_target: int,
-    successors: Mapping[int, tuple[int, ...]],
+    facts: object,
+    body_target: cython.longlong,
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
     artifact: SSAFunctionArtifact | None,
-) -> set[int]:
+) -> object:
     """Collect exact outcomes without bypassing any SSA effects."""
-    blocks = frozenset(cast(int, fact.block_addr) for fact in facts)
+    fact: object
+    target: object
+    blocks = frozenset(cast(int, fact.block_addr) for fact in iter(facts))
     if body_target in blocks:
         return set()
-    outcomes: set[int] = set()
+    outcomes: set[cython.longlong] = set()
     for fact in facts:
         targets = (fact.taken_target, fact.fallthrough_target)
-        if any(not isinstance(target, int) for target in targets):
+        if any(not isinstance(target, int) for target in iter(targets)):
             return set()
-        if set(targets) != set(successors.get(cast(int, fact.block_addr), ())):
+        if operator.ne(set(targets), set(successors.get(cast(int, fact.block_addr), ()))):
             return set()
         for target in targets:
             normalized = transparent_condition_exit_8616(
@@ -149,11 +162,13 @@ def _outcomes_8616(
 
 def classify_composite_pretest_condition_8616(
     loop: CWhileLoop,
-    typed_conditions: tuple[ConditionIR, ...],
-    successors: Mapping[int, tuple[int, ...]],
+    typed_conditions: object,
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
     artifact: SSAFunctionArtifact | None,
 ) -> CompositePretestPlan8616 | None:
     """Prove one complete, effect-free break guard with exact CFG outcomes."""
+    body_target: object
+    guard: object
     if not isinstance(loop.condition, CConstant) or loop.condition.value != 1:
         return None
     surface = pretest_condition_surface_8616(loop)
@@ -171,26 +186,31 @@ def classify_composite_pretest_condition_8616(
         return None
     guard_tags = _tags_8616(guard)
     owners = {guard_tags.get("vex_block_addr"), guard_tags.get("ins_addr")}
-    roots = tuple(fact for fact in facts if fact.block_addr in owners)
+    roots = tuple(fact for fact in iter(facts) if fact.block_addr in owners)
     if len(roots) != 1:
         return None
     outcomes = _outcomes_8616(facts, body_target, successors, artifact)
-    if len(outcomes) != _BINARY_OUTCOMES or body_target not in outcomes:
+    if operator.ne(len(outcomes), _BINARY_OUTCOMES) or body_target not in outcomes:
         return None
     return CompositePretestPlan8616(
         guard, roots[0], facts, body_target, next(iter(outcomes - {body_target})),
     )
 
 
+@cython.ccall
 def materialize_composite_pretest_conditions_8616(
     root: object,
-    typed_conditions: tuple[ConditionIR, ...],
-    successors: Mapping[int, tuple[int, ...]],
+    typed_conditions: object,
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
     artifact: SSAFunctionArtifact | None,
     lower_chain: Callable[[CompositePretestPlan8616], CExpression | None],
-    record_precision: Callable[[CExpression, CExpression], bool],
+    record_precision: Callable[[CExpression, CExpression], cython.bint],
 ) -> CompositePretestStats8616:
     """Materialize complete exit predicates without moving any loop statements."""
+    guard: object
+    plan: object
+    replacement: object
+    node: object
     # Every admitted guard needs two distinct facts from this input. With fewer,
     # even the raw candidate count is zero; no AST scan can add an obligation.
     if len(typed_conditions) < _MIN_COMPOSITE_FACTS:

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Emit original COD assembly and C source as comment blocks in .dec output.
 
 Layer: Optional evidence/reporting.
@@ -14,11 +15,13 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-type CODCommentEntry = Mapping[str, object]
+CODCommentEntry = typing.TypeAliasType("CODCommentEntry", Mapping[str, object])
 
 __all__ = (
     "CODCommentEntry",
@@ -27,7 +30,8 @@ __all__ = (
 )
 
 
-def _cod_comment_offset(entry: CODCommentEntry) -> int:
+@cython.ccall
+def _cod_comment_offset(entry: CODCommentEntry) -> cython.longlong:
     value = entry["offset"]
     if isinstance(value, int):
         return value
@@ -36,11 +40,11 @@ def _cod_comment_offset(entry: CODCommentEntry) -> int:
 
 def format_cod_comment_block(
     *,
-    func_name: str,
-    proc_kind: str = "NEAR",
-    cod_path: str | None = None,
+    func_name: object,
+    proc_kind: object = "NEAR",
+    cod_path: object = None,
     entries: Sequence[CODCommentEntry] | None = None,
-    source_lines: tuple[str, ...] = (),
+    source_lines: object = (),
 ) -> str:
     """Produce a ``/// ORIGINAL: ...`` comment block for a function.
 
@@ -51,6 +55,8 @@ def format_cod_comment_block(
         entries: List of ``{"offset": int, "bytes": bytes, "text": str}``.
         source_lines: Original C source lines from the COD prelude/proc header.
     """
+    entry: object
+    src_line: object
     lines: list[str] = []
 
     cod_source = Path(cod_path).name if cod_path else "unknown.COD"
@@ -76,7 +82,7 @@ def format_cod_comment_block(
             if not isinstance(raw_bytes, bytes):
                 raw_bytes = bytes(raw_bytes) if isinstance(raw_bytes, Sequence) else b""
             asm_text = str(entry.get("text", "")).strip()
-            hex_bytes = " ".join(f"{b:02X}" for b in raw_bytes)
+            hex_bytes = " ".join(f"{b:02X}" for b in iter(raw_bytes))
             # Pad hex bytes to 16 chars for alignment
             hex_padded = hex_bytes.ljust(16)
             lines.append(f"///   {offset:04X}  {hex_padded}  {asm_text}")
@@ -85,14 +91,15 @@ def format_cod_comment_block(
     return "\n".join(lines)
 
 
+@cython.ccall
 def format_cod_comment_block_from_proc_metadata(
     *,
-    func_name: str,
-    proc_kind: str = "NEAR",
-    cod_path: str | None = None,
+    func_name: object,
+    proc_kind: object = "NEAR",
+    cod_path: object = None,
     entries: Sequence[CODCommentEntry] | None = None,
-    source_lines: tuple[str, ...] = (),
-) -> str:
+    source_lines: object = (),
+) -> object:
     """Return the COD comment block for direct ``CODProcMetadata`` field callers."""
     return format_cod_comment_block(
         func_name=func_name,

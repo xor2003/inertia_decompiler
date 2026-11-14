@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery/reporting.
 
 Responsibility: cache recovery artifacts by validation-style content descriptors.
@@ -11,12 +12,14 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import cython
 
 import json
 from collections.abc import Mapping
 from pathlib import Path
 
 from inertia.validation.tail_validation import build_x86_16_validation_cache_descriptor
+import operator
 
 __all__ = [
     "cache_x86_16_recovery_artifact",
@@ -24,13 +27,15 @@ __all__ = [
 ]
 
 
+@cython.ccall
 def cache_x86_16_recovery_artifact(
-    namespace: str,
+    namespace: object,
     artifact: Mapping[str, object],
     *,
-    cache_path: str | Path | None,
+    cache_path: object,
 ) -> dict[str, object]:
     """Return a stable cache entry for a recovery artifact payload."""
+    cached_artifact: object
     descriptor = build_x86_16_validation_cache_descriptor(namespace, artifact)
     payload = {
         "cache_key": descriptor.cache_key,
@@ -47,7 +52,7 @@ def cache_x86_16_recovery_artifact(
     path = Path(cache_path)
     try:
         cached = json.loads(path.read_text(encoding="utf-8"))
-        if cached.get("cache_key") == descriptor.cache_key:
+        if operator.eq(cached.get("cache_key"), descriptor.cache_key):
             cached_artifact = cached.get("artifact", {})
             return {
                 "cache_key": descriptor.cache_key,
@@ -71,6 +76,7 @@ def cache_x86_16_recovery_artifact(
     }
 
 
+@cython.ccall
 def describe_x86_16_recovery_artifact_cache_surface() -> dict[str, object]:
     """Describe the deterministic recovery-artifact cache contract."""
     return {

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Project stored call-return conditions into tail-validation identities.
 
 Layer: Tail Validation.
@@ -13,6 +14,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -41,6 +44,9 @@ from inertia.semantics.callsite_summary import (
     CallsiteSummary8616,
     structured_callsite_addr_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "DirectCallReturnConditionProjection8616",
@@ -69,19 +75,19 @@ class _DirectReturnCodegen8616(Protocol):
     """Owned typed call and condition evidence consumed by Validation."""
 
     _inertia_typed_conditions: object
-    _inertia_callsite_summary_inventory_8616: dict[int, CallsiteSummary8616]
-    _inertia_callsite_summaries: dict[int, CallsiteSummary8616]
+    _inertia_callsite_summary_inventory_8616: object
+    _inertia_callsite_summaries: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectCallReturnConditionProjection8616:
     """Validation identity for one exact direct-call return predicate."""
 
     comparison: StoredCallReturnComparison8616
-    jcc_addr: int
-    block_addr: int
-    callsite_addr: int
-    target_addr: int
+    jcc_addr: cython.longlong
+    block_addr: cython.longlong
+    callsite_addr: cython.longlong
+    target_addr: cython.longlong
 
     @property
     def call_identity(self) -> str:
@@ -94,16 +100,16 @@ class DirectCallReturnConditionProjection8616:
         return f"{self.comparison.value}({self.call_identity},const:0)"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StoredCallReturnConditionProjection8616:
     """Validation identity derived from one exact typed storage transfer."""
 
     kind: StoredCallReturnConditionKind8616
     comparison: StoredCallReturnComparison8616
-    jcc_addr: int
-    block_addr: int
-    stack_offset: int
-    width: int
+    jcc_addr: cython.longlong
+    block_addr: cython.longlong
+    stack_offset: cython.longlong
+    width: cython.longlong
 
     @property
     def stack_location(self) -> str:
@@ -117,7 +123,8 @@ class StoredCallReturnConditionProjection8616:
         return f"{self.comparison.value}({self.stack_location},const:0)"
 
 
-def _canonical_stack_offset_8616(offset: int) -> int:
+@cython.ccall
+def _canonical_stack_offset_8616(offset: cython.longlong) -> cython.longlong:
     """Normalize one 16-bit BP displacement to its signed identity."""
     normalized = offset & 0xFFFF
     return normalized - 0x10000 if normalized >= 0x8000 else normalized
@@ -126,7 +133,7 @@ def _canonical_stack_offset_8616(offset: int) -> int:
 def _direct_return_summary_8616(
     codegen: _DirectReturnCodegen8616,
     *,
-    block_addr: int,
+    block_addr: cython.longlong,
 ) -> CallsiteSummary8616 | None:
     """Return the unique exact callsite whose return reaches one branch block."""
     inventory = codegen._inertia_callsite_summary_inventory_8616
@@ -134,9 +141,9 @@ def _direct_return_summary_8616(
         raise TypeError("callsite summary inventory must be a dict")
     matches = tuple(
         summary
-        for summary in inventory.values()
+        for summary in builtins.iter(inventory.values())
         if isinstance(summary, CallsiteSummary8616)
-        and summary.return_addr == block_addr
+        and operator.eq(summary.return_addr, block_addr)
         and summary.return_used is True
         and summary.return_use_kind is CallsiteReturnUseKind8616.CONDITION
         and isinstance(summary.target_addr, int)
@@ -150,19 +157,20 @@ def _direct_return_fact_8616(
     codegen: _DirectReturnCodegen8616,
     summary: CallsiteSummary8616,
     *,
-    jcc_addr: int,
-    block_addr: int,
+    jcc_addr: cython.longlong,
+    block_addr: cython.longlong,
 ) -> ConditionIR | None:
     """Return the unique typed zero test of one exact call return register."""
+    register: object
     conditions = codegen._inertia_typed_conditions
     if not isinstance(conditions, (list, tuple)):
         return None
     matches = tuple(
         condition
-        for condition in conditions
+        for condition in iter(conditions)
         if isinstance(condition, ConditionIR)
-        and condition.src_insn == jcc_addr
-        and condition.block_addr == block_addr
+        and operator.eq(condition.src_insn, jcc_addr)
+        and operator.eq(condition.block_addr, block_addr)
     )
     if len(matches) != 1 or summary.return_register is None:
         return None
@@ -171,7 +179,7 @@ def _direct_return_fact_8616(
     if register is None or condition.op not in {"eq", "ne", "zero", "nonzero"}:
         return None
 
-    def _is_return_register(value: object) -> bool:
+    def _is_return_register(value: object) -> cython.bint:
         return (
             isinstance(value, IRValue)
             and value.space is MemSpace.REG
@@ -179,7 +187,7 @@ def _direct_return_fact_8616(
             == (int(register[0]), int(register[1]))
         )
 
-    def _is_zero(value: object) -> bool:
+    def _is_zero(value: object) -> cython.bint:
         return isinstance(value, IRValue) and value.space is MemSpace.CONST and value.const == 0
 
     if condition.op in {"zero", "nonzero"}:
@@ -190,6 +198,7 @@ def _direct_return_fact_8616(
     ) else None
 
 
+@cython.ccall
 def _boolean_arms_inverted_8616(condition: CITE) -> bool | None:
     """Read complementary literal Boolean arms, refusing other effects/values."""
     if not isinstance(condition.iftrue, CConstant) or not isinstance(condition.iffalse, CConstant):
@@ -200,8 +209,11 @@ def _boolean_arms_inverted_8616(condition: CITE) -> bool | None:
     return arms == (0, 1)
 
 
-def _zero_comparison_operand_8616(condition: object) -> tuple[object, bool] | None:
+@cython.ccall
+def _zero_comparison_operand_8616(condition: object) -> object:
     """Extract the nonzero operand and orientation of an explicit zero test."""
+    value: object
+    zero: object
     if not isinstance(condition, CBinaryOp) or condition.op not in {"CmpEQ", "CmpNE"}:
         return None
     for value, zero in ((condition.lhs, condition.rhs), (condition.rhs, condition.lhs)):
@@ -210,15 +222,19 @@ def _zero_comparison_operand_8616(condition: object) -> tuple[object, bool] | No
     return None
 
 
+@cython.ccall
 def _direct_zero_predicate_8616(
-    condition: object, depth: int = 0,
-) -> tuple[object, bool] | None:
+    condition: object, depth: cython.longlong = 0,
+) -> object:
     """Read bounded Boolean wrappers without modifying the structured tree.
 
     The Boolean marks equality with zero. Only complementary literal 0/1
     ternary arms are transparent; arbitrary values and side effects refuse.
     This helper supplies no call identity or register authority.
     """
+    compared: object
+    inner: object
+    inverted: object
     if depth >= 16:
         return None
     if isinstance(condition, (CFunctionCall, CVariable)):
@@ -238,9 +254,10 @@ def _direct_zero_predicate_8616(
     if compared is None:
         return None
     inner = _direct_zero_predicate_8616(compared[0], depth + 1)
-    return None if inner is None else (inner[0], inner[1] != compared[1])
+    return None if inner is None else (inner[0], operator.ne(inner[1], compared[1]))
 
 
+@cython.ccall
 def _direct_structured_comparison_8616(
     project: _StoredReturnProject8616,
     codegen: _DirectReturnCodegen8616,
@@ -248,6 +265,9 @@ def _direct_structured_comparison_8616(
     summary: CallsiteSummary8616,
 ) -> StoredCallReturnComparison8616 | None:
     """Validate and preserve one structured direct-call zero-test orientation."""
+    bound_summary: object
+    predicate: object
+    register: object
     predicate = _direct_zero_predicate_8616(condition)
     if predicate is None or summary.return_register is None:
         return None
@@ -265,8 +285,8 @@ def _direct_structured_comparison_8616(
             raise TypeError("structured callsite summary map must be a dict")
         bound_summary = summaries.get(id(value))
         storage_matches = (
-            bound_summary == summary
-            and structured_callsite_addr_8616(value) == summary.callsite_addr
+            operator.eq(bound_summary, summary)
+            and operator.eq(structured_callsite_addr_8616(value), summary.callsite_addr)
         )
     if not storage_matches:
         return None
@@ -277,12 +297,13 @@ def _direct_structured_comparison_8616(
     )
 
 
+@cython.ccall
 def direct_call_return_condition_projection_8616(
     project: object,
-    codegen: object | None,
+    codegen: object,
     *,
-    jcc_addr: int,
-    block_addr: int,
+    jcc_addr: cython.longlong,
+    block_addr: cython.longlong,
     structured_condition: object,
 ) -> DirectCallReturnConditionProjection8616 | None:
     """Project one proven direct-call return condition for validation.
@@ -291,6 +312,9 @@ def direct_call_return_condition_projection_8616(
     callee rather than by rendered arguments. Argument values and classes are
     validated by their separate exact-callsite contracts.
     """
+    comparison: object
+    fact: object
+    summary: object
     if codegen is None:
         return None
     typed_project = cast(_StoredReturnProject8616, project)
@@ -333,6 +357,7 @@ def _structured_comparison_8616(
     evidence: StoredCallReturnConditionEvidence8616,
 ) -> StoredCallReturnComparison8616 | None:
     """Preserve an exact structured zero-test orientation over proven storage."""
+    register: object
     node = condition
     inverted = False
     while isinstance(node, CUnaryOp) and node.op == "Not":
@@ -342,12 +367,12 @@ def _structured_comparison_8616(
         return None
     constants = tuple(
         operand
-        for operand in (node.lhs, node.rhs)
+        for operand in iter((node.lhs, node.rhs))
         if isinstance(operand, CConstant) and operand.value == 0
     )
     variables = tuple(
         operand
-        for operand in (node.lhs, node.rhs)
+        for operand in iter((node.lhs, node.rhs))
         if isinstance(operand, CVariable)
     )
     if len(constants) != 1 or len(variables) != 1:
@@ -358,14 +383,14 @@ def _structured_comparison_8616(
         isinstance(variable, SimStackVariable)
         and variable.base == "bp"
         and isinstance(variable.offset, int)
-        and _canonical_stack_offset_8616(variable.offset) == _canonical_stack_offset_8616(store.dst_offset)
-        and int(variable.size) == store.width
+        and operator.eq(_canonical_stack_offset_8616(variable.offset), _canonical_stack_offset_8616(store.dst_offset))
+        and operator.eq(int(variable.size), store.width)
     )
     if isinstance(variable, SimRegisterVariable):
         register = cast(_StoredReturnProject8616, project).arch.registers.get(store.source_register_name)
         storage_matches = (
             register is not None
-            and int(variable.reg) == int(register[0])
+            and operator.eq(int(variable.reg), int(register[0]))
             and int(variable.size) == int(register[1]) == store.width
         )
     if not storage_matches:
@@ -380,12 +405,13 @@ def _structured_comparison_8616(
     )
 
 
+@cython.ccall
 def stored_call_return_condition_projection_8616(
     project: object,
     codegen: object | None,
     *,
-    jcc_addr: int,
-    block_addr: int,
+    jcc_addr: cython.longlong,
+    block_addr: cython.longlong,
     structured_condition: object | None = None,
 ) -> StoredCallReturnConditionProjection8616 | None:
     """Project one proven call-return stack condition for validation.
@@ -394,6 +420,8 @@ def stored_call_return_condition_projection_8616(
     evidence. Validation only joins their exact machine identities so a stale
     structured register carrier cannot resolve through a later assignment.
     """
+    comparison: object
+    evidence: object
     evidence = classify_stored_call_return_condition_8616(
         project,
         codegen,

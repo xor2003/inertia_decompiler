@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: IR.
 Responsibility: admit only owned condition operands to private native fact copies.
 Owns typed Value, Address, Condition, instruction facts, and lossless normalization
@@ -5,6 +6,8 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from .condition_ir import ConditionFailure, ConditionIR, ConditionSource
 from .condition_lift_capture import ConditionLiftCaptureSession8616
@@ -13,7 +16,7 @@ from .core import IRAddress, IRBinaryValue, IRValue
 _MAX_OPERANDS = 16384
 
 
-def _owned_operand(value: object, seen: set[int]) -> bool:
+def _owned_operand(value: object, seen: object) -> cython.bint:
     """Reject opaque third-party values at the legacy Any-typed capture boundary."""
     if value is None or type(value) in (int, str, bool, bytes):
         return True
@@ -23,7 +26,7 @@ def _owned_operand(value: object, seen: set[int]) -> bool:
         return False
     seen.add(id(value))
     if type(value) is tuple:
-        return all(_owned_operand(item, seen) for item in value)
+        return all(_owned_operand(item, seen) for item in iter(value))
     if type(value) is IRValue:
         return (
             _owned_operand(value.index, seen) and _owned_operand(value.expr, seen)
@@ -36,24 +39,27 @@ def _owned_operand(value: object, seen: set[int]) -> bool:
     return False
 
 
-def native_capture_copyable_8616(capture: ConditionLiftCaptureSession8616) -> bool:
+def native_capture_copyable_8616(capture: ConditionLiftCaptureSession8616) -> cython.bint:
     """Allow private copies only when every untyped condition payload is owned IR."""
-    seen: set[int] = set()
+    row: object
+    rows: object
+    source: object
+    seen: set[cython.longlong] = set()
     for rows in capture.condition_cache.values():
         for row in rows:
             if type(row) is ConditionFailure:
                 continue
             if type(row) is not ConditionIR or not all(
                 _owned_operand(value, seen)
-                for value in (row.lhs, row.rhs, row.producer_semantics)
+                for value in iter((row.lhs, row.rhs, row.producer_semantics))
             ):
                 return False
     for source in capture.pending_sources.values():
         if type(source) is not ConditionSource or not all(
-            _owned_operand(value, seen) for value in (
+            _owned_operand(value, seen) for value in iter((
                 source.lhs, source.rhs, source.normalized_lhs,
                 source.normalized_rhs, source.semantics,
-            )
+            ))
         ):
             return False
     return True

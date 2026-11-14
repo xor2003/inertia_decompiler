@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Recognize structured statements backed by proven register overwrites.
 
 Layer: Types/Lowering.
@@ -8,12 +9,15 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Sequence
 from typing import Protocol
 
 from angr.analyses.decompiler.structured_codegen.c import CAssignment, CForLoop, CStatements, CVariable
 from angr.sim_variable import SimStackVariable
+import operator
 
 __all__ = ["stack_initializer_overwrites_register_8616"]
 
@@ -21,12 +25,13 @@ __all__ = ["stack_initializer_overwrites_register_8616"]
 class StackMoveRegisterOverwriteFact8616(Protocol):
     """Direct stack-move fields required for register-overwrite proof."""
 
-    dst_offset: int
-    width: int
-    ins_addr: int
+    dst_offset: cython.longlong
+    width: cython.longlong
+    ins_addr: cython.longlong
     source_register_offset: int | None
 
 
+@cython.ccall
 def _single_initializer_assignment_8616(statement: object) -> CAssignment | None:
     """Return the assignment that executes first in a bounded initializer."""
     initializer = statement.initializer if isinstance(statement, CForLoop) else statement
@@ -38,11 +43,13 @@ def _single_initializer_assignment_8616(statement: object) -> CAssignment | None
 def stack_initializer_overwrites_register_8616(
     statement: object,
     *,
-    register_offset: int,
-    register_width: int,
+    register_offset: cython.longlong,
+    register_width: cython.longlong,
     facts: Sequence[StackMoveRegisterOverwriteFact8616],
-) -> bool:
+) -> cython.bint:
     """Return whether the first initializer has an exact register-load fact."""
+    assignment: object
+    ins_addr: object
     assignment = _single_initializer_assignment_8616(statement)
     if assignment is None or not isinstance(assignment.lhs, CVariable):
         return False
@@ -53,9 +60,9 @@ def stack_initializer_overwrites_register_8616(
     if not isinstance(ins_addr, int):
         return False
     return any(
-        fact.source_register_offset == register_offset
-        and fact.width == register_width
-        and fact.dst_offset == variable.offset
-        and fact.ins_addr == ins_addr
-        for fact in facts
+        operator.eq(fact.source_register_offset, register_offset)
+        and operator.eq(fact.width, register_width)
+        and operator.eq(fact.dst_offset, variable.offset)
+        and operator.eq(fact.ins_addr, ins_addr)
+        for fact in iter(facts)
     )

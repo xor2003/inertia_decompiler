@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery metadata.
 
 Responsibility: normalize recovered callee labels for comparison and reporting.
@@ -11,6 +12,7 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import cython
 
 import re
 
@@ -20,8 +22,10 @@ __all__ = ["normalize_callee_name_8616"]
 _CALLEE_NAMESPACE_RE_8616 = re.compile(r"^::0x[0-9a-fA-F]+::(?P<name>[A-Za-z_]\w*)$")
 
 
-def normalize_callee_name_8616(name: str | None) -> str | None:
+@cython.ccall
+def normalize_callee_name_8616(name: object) -> object:
     """Return a comparison/reporting label without treating it as proof."""
+    match: object
     if not isinstance(name, str):
         return None
     normalized = name.strip()

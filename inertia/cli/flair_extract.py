@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Optional evidence/reporting.
 
 Responsibility: read optional FLAIR signature metadata for startup and library reporting.
@@ -11,6 +12,8 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import re
 import subprocess
@@ -19,44 +22,51 @@ from functools import lru_cache
 from pathlib import Path
 
 from tools.signatures.signature_matching_policy import signature_matching_disabled
+import dataclasses
+import operator
+import builtins
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class FlairStartupPattern:
     """Optional FLAIR startup pattern match reported as non-semantic evidence."""
 
-    pat_path: str
-    public_names: tuple[tuple[int, str], ...]
-    compiler_tag: str | None
-    library_tag: str | None
+    pat_path: object
+    public_names: object
+    compiler_tag: object
+    library_tag: object
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class FlairSigLibrary:
     """Optional FLAIR signature-library metadata reported for diagnostics."""
 
-    sig_path: str
-    title: str
-    os_types: str
-    app_types: str
-    file_types: str
+    sig_path: object
+    title: object
+    os_types: object
+    app_types: object
+    file_types: object
 
 
 _PUBLIC_NAME_RE = re.compile(r":(?P<offset>-?[0-9A-Fa-f]{4})\s+(?P<name>[A-Za-z_$?@][\w$?@]*)")
 _TAG_RE = re.compile(r":(?P<key>[a-z])=(?P<value>[^:\s]+)")
 
 
+@cython.ccall
 def match_flair_startup_entry(
-    entry_bytes: bytes,
+    entry_bytes: object,
     flair_root: Path,
     *,
-    limit: int = 8,
+    limit: cython.longlong = 8,
 ) -> tuple[FlairStartupPattern, ...]:
     """Return optional startup-pattern matches without treating names as semantic proof."""
+    parsed: object
+    line: object
+    pat_path: object
     if signature_matching_disabled():
         return ()
     matches: list[FlairStartupPattern] = []
-    for pat_path in sorted((flair_root / "startup").rglob("*.pat")):
+    for pat_path in sorted(tuple((flair_root / "startup").rglob("*.pat"))):
         try:
             for line in pat_path.read_text(errors="ignore").splitlines():
                 parsed = _parse_pat_line(line)
@@ -80,15 +90,18 @@ def match_flair_startup_entry(
     return tuple(matches)
 
 
-def list_flair_sig_libraries(flair_root: Path) -> tuple[FlairSigLibrary, ...]:
+@cython.ccall
+def list_flair_sig_libraries(flair_root: Path) -> object:
     """List optional FLAIR signature libraries for reporting only."""
     if signature_matching_disabled():
         return ()
     return _list_flair_sig_libraries_cached(str(flair_root))
 
 
-def _dumpsig_header_8616(stdout: str) -> tuple[str, str, str, str]:
+@cython.ccall
+def _dumpsig_header_8616(stdout: object) -> tuple[str, str, str, str]:
     """Extract signature title and type fields from one dumpsig listing."""
+    line: object
     title = ""
     os_types = ""
     app_types = ""
@@ -108,13 +121,14 @@ def _dumpsig_header_8616(stdout: str) -> tuple[str, str, str, str]:
 
 
 @lru_cache(maxsize=2)
-def _list_flair_sig_libraries_cached(flair_root: str) -> tuple[FlairSigLibrary, ...]:
+def _list_flair_sig_libraries_cached(flair_root: object) -> tuple[FlairSigLibrary, ...]:
+    sig_path: object
     root = Path(flair_root)
     dumpsig = root / "bin" / "linux" / "dumpsig"
     if not dumpsig.exists():
         return ()
     libraries: list[FlairSigLibrary] = []
-    for sig_path in sorted(root.rglob("*.sig")):
+    for sig_path in sorted(tuple(root.rglob("*.sig"))):
         try:
             proc = subprocess.run(
                 [str(dumpsig), str(sig_path)],
@@ -141,9 +155,10 @@ def _list_flair_sig_libraries_cached(flair_root: str) -> tuple[FlairSigLibrary, 
     return tuple(libraries)
 
 
+@cython.ccall
 def _parse_pat_line(
-    line: str,
-) -> tuple[list[int | None], list[tuple[int, str]], dict[str, str]] | None:
+    line: object,
+) -> object:
     stripped = line.strip()
     if not stripped or stripped == "---":
         return None
@@ -158,18 +173,21 @@ def _parse_pat_line(
         token = pattern_text[index : index + 2]
         pattern_bytes.append(None if token == ".." else int(token, 16))
     public_names = [
-        (int(match.group("offset"), 16), match.group("name")) for match in _PUBLIC_NAME_RE.finditer(stripped)
+        (int(match.group("offset"), 16), match.group("name")) for match in builtins.iter(_PUBLIC_NAME_RE.finditer(stripped))
     ]
-    tags = {match.group("key"): match.group("value") for match in _TAG_RE.finditer(stripped)}
+    tags = {match.group("key"): match.group("value") for match in builtins.iter(_TAG_RE.finditer(stripped))}
     return pattern_bytes, public_names, tags
 
 
-def _pattern_matches(entry_bytes: bytes, pattern_bytes: list[int | None]) -> bool:
+@cython.ccall
+def _pattern_matches(entry_bytes: object, pattern_bytes: object) -> cython.bint:
+    expected: object
+    actual: object
     if len(entry_bytes) < len(pattern_bytes):
         return False
     for actual, expected in zip(entry_bytes, pattern_bytes, strict=False):
         if expected is None:
             continue
-        if actual != expected:
+        if operator.ne(actual, expected):
             return False
     return True

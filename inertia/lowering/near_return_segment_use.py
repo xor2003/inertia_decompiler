@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bind one returned near offset to the callee-entry data segment.
 
 Layer: Types/Lowering.
@@ -11,6 +12,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -21,6 +24,8 @@ from inertia.ir.segment_call_preservation import SegmentCallPreservationResult86
 from inertia.ir.segment_state import build_x86_16_segment_state_artifact
 
 from .interprocedural_storage_return_type_contracts import ReturnPointerUseEvidence8616
+import dataclasses
+import operator
 
 
 class NearReturnSegmentUseFailure8616(StrEnum):
@@ -34,29 +39,29 @@ class NearReturnSegmentUseFailure8616(StrEnum):
     CALLER_CONTEXT_UNBOUND = "caller_context_unbound"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NearReturnSegmentUse8616:
     """One replayable DS result-use binding, never pointer representation proof."""
 
     pointer_use: ReturnPointerUseEvidence8616
     call_preservation: SegmentCallPreservationResult8616
-    caller_preservations: tuple[SegmentCallPreservationResult8616, ...]
+    caller_preservations: object
     failure: NearReturnSegmentUseFailure8616 | None
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
     caller_entry_context: SegmentEntryContext8616 | None = None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Replay raw segment transfer and exact call binding before consumption."""
         counts = (self.raw_fact_count, self.normalized_fact_count,
                   self.classified_fact_count, self.materialized_count, self.failure_count)
         if self.failure is not None or counts != (1, 1, 1, 1, 0):
             return False
-        if any(type(count) is not int for count in counts):
+        if any(type(count) is not int for count in iter(counts)):
             return False
         return _segment_use_failure_8616(
             self.pointer_use, self.call_preservation, self.caller_preservations, self.caller_entry_context,
@@ -66,7 +71,7 @@ class NearReturnSegmentUse8616:
 def _call_binding_failure_8616(
     use: ReturnPointerUseEvidence8616,
     preservation: SegmentCallPreservationResult8616,
-    proofs: tuple[SegmentCallPreservationResult8616, ...],
+    proofs: object,
 ) -> NearReturnSegmentUseFailure8616 | None:
     """Bind complete preservation and pointer-use coordinates to the same caller."""
     if not use.complete or use.address.space not in {MemSpace.DS, MemSpace.SS, MemSpace.ES}:
@@ -74,12 +79,12 @@ def _call_binding_failure_8616(
     if not preservation.complete:
         return NearReturnSegmentUseFailure8616.CALL_PRESERVATION_UNPROVEN
     caller = preservation.caller
-    if use.caller_addr != caller.artifact.function_addr or use.callsite_addr != preservation.callsite_addr:
+    if operator.ne(use.caller_addr, caller.artifact.function_addr) or operator.ne(use.callsite_addr, preservation.callsite_addr):
         return NearReturnSegmentUseFailure8616.CALL_UNBOUND
     sites = caller.boundary.reachable_instruction_addrs
     if use.witness_instruction_addr not in sites or use.dereference_instruction_addr not in sites:
         return NearReturnSegmentUseFailure8616.CALL_UNBOUND
-    matches = tuple(proof for proof in proofs if proof.callsite_addr == preservation.callsite_addr)
+    matches = tuple(proof for proof in iter(proofs) if operator.eq(proof.callsite_addr, preservation.callsite_addr))
     if len(matches) != 1 or matches[0] is not preservation:
         return NearReturnSegmentUseFailure8616.CALL_PRESERVATION_UNPROVEN
     if "ds" not in preservation.preserved_registers:
@@ -87,10 +92,11 @@ def _call_binding_failure_8616(
     return None
 
 
+@cython.ccall
 def _segment_use_failure_8616(
     use: ReturnPointerUseEvidence8616,
     preservation: SegmentCallPreservationResult8616,
-    proofs: tuple[SegmentCallPreservationResult8616, ...],
+    proofs: object,
     entry_context: SegmentEntryContext8616 | None = None,
 ) -> NearReturnSegmentUseFailure8616 | None:
     """Compare entry DS with the actual dereference selector's must-state.
@@ -100,6 +106,9 @@ def _segment_use_failure_8616(
     a selector spelling is not permission to assume a small-model invariant.
     Input source-selector/native-pointer encoding is a separate obligation.
     """
+    consumed: object
+    entry: object
+    failure: object
     failure = _call_binding_failure_8616(use, preservation, proofs)
     if failure is not None:
         return failure
@@ -115,19 +124,21 @@ def _segment_use_failure_8616(
     if entry is None or consumed is None:
         return NearReturnSegmentUseFailure8616.DATA_SEGMENT_LIFETIME_UNPROVEN
     proven = entry.origin is SegmentOrigin.PROVEN and consumed.origin is SegmentOrigin.PROVEN
-    if not proven or entry.source is None or entry.source != consumed.source:
+    if not proven or entry.source is None or operator.ne(entry.source, consumed.source):
         return NearReturnSegmentUseFailure8616.DATA_SEGMENT_LIFETIME_UNPROVEN
     return None
 
 
+@cython.ccall
 def bind_near_return_data_segment_use_8616(
     pointer_use: ReturnPointerUseEvidence8616,
     call_preservation: SegmentCallPreservationResult8616,
-    caller_preservations: tuple[SegmentCallPreservationResult8616, ...],
+    caller_preservations: object,
     *,
     caller_entry_context: SegmentEntryContext8616 | None = None,
 ) -> NearReturnSegmentUse8616:
     """Bind the caller's selector to callee-entry DS, or retain refusal."""
+    failure: object
     failure = _segment_use_failure_8616(pointer_use, call_preservation, caller_preservations, caller_entry_context)
     accepted = int(failure is None)
     return NearReturnSegmentUse8616(

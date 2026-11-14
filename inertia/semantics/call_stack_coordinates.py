@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove per-call machine-SP coordinates from binary terminal evidence.
 
 Layer: Semantics.
@@ -15,6 +16,8 @@ Forbidden: source/COD/name evidence, rendered-text recovery, or prototype repair
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Any, cast
 
@@ -52,14 +55,16 @@ from .terminal_stack_cleanup import (
     TerminalStackCleanupEvidence8616,
     terminal_stack_cleanup_at_address_8616,
 )
+import operator
+import builtins
 
 __all__ = ["prove_call_stack_coordinates_8616"]
 
 
-_WORD_SP_MASK_8616: int = 0xFFFF
-_WORD_SP_SIGN_BIT_8616: int = 0x8000
-_OPERAND_BITS_WORD_8616: int = 16
-_IMM_OPERAND_TYPE_8616: int = 2
+_WORD_SP_MASK_8616: cython.longlong = 0xFFFF
+_WORD_SP_SIGN_BIT_8616: cython.longlong = 0x8000
+_OPERAND_BITS_WORD_8616: cython.longlong = 16
+_IMM_OPERAND_TYPE_8616: cython.longlong = 2
 
 # Typed terminal-frame to callsite-frame correspondence: the machine return
 # shape a callee census must agree with for the admitted call frame kind.
@@ -71,6 +76,7 @@ _TERMINAL_TO_CALLSITE_FRAME_8616: dict[
 }
 
 
+@cython.ccall
 def _inner_instruction_8616(insn: object) -> object:
     """Return a dynamic Capstone instruction beneath an optional angr wrapper."""
     try:
@@ -79,7 +85,8 @@ def _inner_instruction_8616(insn: object) -> object:
         return cast(Any, insn)
 
 
-def _mnemonic_8616(insn: object) -> str:
+@cython.ccall
+def _mnemonic_8616(insn: object) -> object:
     """Return a normalized mnemonic across the dynamic Capstone boundary."""
     try:
         return str(cast(Any, insn).mnemonic or "").lower()
@@ -90,8 +97,10 @@ def _mnemonic_8616(insn: object) -> str:
             return ""
 
 
+@cython.ccall
 def _instruction_addr_8616(insn: object) -> int | None:
     """Return one instruction address across the dynamic Capstone boundary."""
+    candidate: object
     for candidate in (insn, _inner_instruction_8616(insn)):
         try:
             address = cast(Any, candidate).address
@@ -102,8 +111,10 @@ def _instruction_addr_8616(insn: object) -> int | None:
     return None
 
 
+@cython.ccall
 def _instruction_size_8616(insn: object) -> int | None:
     """Return the decoded instruction byte length across the Capstone boundary."""
+    candidate: object
     for candidate in (insn, _inner_instruction_8616(insn)):
         try:
             size = cast(Any, candidate).size
@@ -114,6 +125,7 @@ def _instruction_size_8616(insn: object) -> int | None:
     return None
 
 
+@cython.ccall
 def _operands_8616(insn: object) -> tuple[object, ...]:
     """Return decoded operand objects across the dynamic Capstone boundary."""
     try:
@@ -122,6 +134,7 @@ def _operands_8616(insn: object) -> tuple[object, ...]:
         return ()
 
 
+@cython.ccall
 def _imm_operand_value_8616(insn: object) -> int | None:
     """Return the single immediate operand value, or None when not unary-imm."""
     operands = _operands_8616(insn)
@@ -138,16 +151,18 @@ def _imm_operand_value_8616(insn: object) -> int | None:
     return imm if isinstance(imm, int) and not isinstance(imm, bool) else None
 
 
-def _signed_word_delta_8616(byte_count: int) -> int:
+@cython.ccall
+def _signed_word_delta_8616(byte_count: cython.longlong) -> cython.longlong:
     """Project a modular 16-bit SP byte delta into the affine offset model."""
     masked = byte_count & _WORD_SP_MASK_8616
     return masked - 0x10000 if masked >= _WORD_SP_SIGN_BIT_8616 else masked
 
 
+@cython.ccall
 def _caller_block_heads_8616(
     project: object,
     block: IRBlock,
-) -> tuple[object, ...] | None:
+) -> object:
     """Decode the real head inventory of the CALL's own IR block."""
     try:
         return tuple(decoded_block_instructions_8616(project, block.addr, opt_level=0))
@@ -159,19 +174,21 @@ def _caller_block_heads_8616(
 
 
 def _admitted_call_head_8616(
-    heads: tuple[object, ...],
+    heads: object,
     instruction: IRInstr,
     summary: CallsiteSummary8616,
-    refusals: list[CallStackCoordinateRefusal8616],
-) -> bool:
+    refusals: object,
+) -> cython.bint:
     """Bind the summary's return edge to the decoded CALL head.
 
     The callsite must be a real decoded head, decode as a machine CALL, and
     the summary's ``return_addr`` must equal the physical fallthrough of that
     head. A wrong return hint cannot ride along to the SP projection.
     """
+    call_head: object
+    size: object
     call_head = next(
-        (insn for insn in heads if _instruction_addr_8616(insn) == summary.callsite_addr),
+        (insn for insn in iter(heads) if operator.eq(_instruction_addr_8616(insn), summary.callsite_addr)),
         None,
     )
     if call_head is None or not is_x86_16_call_mnemonic_8616(_mnemonic_8616(call_head)):
@@ -182,10 +199,10 @@ def _admitted_call_head_8616(
         refusals.append(CallStackCoordinateRefusal8616.CALL_OPERAND_WIDTH_UNPROVEN)
         return False
     size = _instruction_size_8616(call_head)
-    if size is None or summary.return_addr != summary.callsite_addr + size:
+    if size is None or operator.ne(summary.return_addr, summary.callsite_addr + size):
         refusals.append(CallStackCoordinateRefusal8616.RETURN_ADDRESS_MISMATCH)
         return False
-    if instruction.addr != summary.callsite_addr:
+    if operator.ne(instruction.addr, summary.callsite_addr):
         refusals.append(CallStackCoordinateRefusal8616.CALL_IDENTITY_UNPROVEN)
         return False
     return True
@@ -193,30 +210,32 @@ def _admitted_call_head_8616(
 
 def _bound_target_8616(
     project: object,
-    heads: tuple[object, ...],
+    heads: object,
     instruction: IRInstr,
     block: IRBlock,
     summary: CallsiteSummary8616,
-    refusals: list[CallStackCoordinateRefusal8616],
-) -> bool:
+    refusals: object,
+) -> cython.bint:
     """Authenticate the summary target against the real decoded CALL."""
+    call_head: object
+    imm_target: object
     if summary.target_addr is None:
         refusals.append(CallStackCoordinateRefusal8616.CALL_TARGET_UNRESOLVED)
         return False
     call_head = next(
-        (insn for insn in heads if _instruction_addr_8616(insn) == summary.callsite_addr),
+        (insn for insn in iter(heads) if operator.eq(_instruction_addr_8616(insn), summary.callsite_addr)),
         None,
     )
     imm_target = None if call_head is None else _imm_operand_value_8616(call_head)
     if imm_target is not None:
-        bound = imm_target == summary.target_addr
+        bound = operator.eq(imm_target, summary.target_addr)
     else:
         arg = instruction.args[0] if instruction.args else None
         bound = (
             isinstance(arg, IRValue)
             and arg.space is MemSpace.CONST
             and type(arg.const) is int
-            and arg.const == summary.target_addr
+            and operator.eq(arg.const, summary.target_addr)
         )
         if not bound:
             binding = prove_direct_near_call_target_binding_8616(
@@ -228,18 +247,20 @@ def _bound_target_8616(
     return bound
 
 
+@cython.ccall
 def _callee_purge_and_frame_extra_8616(
-    terminal: TerminalStackCleanupEvidence8616 | None,
-    frame_kind: CallsiteMachineFrameKind8616 | None,
-    return_frame: ReturnSegmentFrame8616 | None,
+    terminal: object,
+    frame_kind: object,
+    return_frame: object,
     summary: CallsiteSummary8616,
-    refusals: list[CallStackCoordinateRefusal8616],
+    refusals: object,
 ) -> tuple[int | None, int | None]:
     """Classify callee purge and linked return extra from terminal evidence.
 
     The caller's own post-call cleanup can never prove a zero callee purge;
     only the closed callee return census establishes ``callee_purged_bytes``.
     """
+    extra: object
     if terminal is None:
         refusals.append(
             CallStackCoordinateRefusal8616.CALLEE_TERMINAL_EVIDENCE_UNAVAILABLE
@@ -250,7 +271,7 @@ def _callee_purge_and_frame_extra_8616(
             CallStackCoordinateRefusal8616.CALLEE_TERMINAL_EVIDENCE_INCOMPLETE
         )
         return None, None
-    if terminal.consistent_return_operand_bits != _OPERAND_BITS_WORD_8616:
+    if operator.ne(terminal.consistent_return_operand_bits, _OPERAND_BITS_WORD_8616):
         refusals.append(
             CallStackCoordinateRefusal8616.CALLEE_RETURN_OPERAND_WIDTH_UNPROVEN
         )
@@ -275,7 +296,7 @@ def _callee_purge_and_frame_extra_8616(
         frame_kind is CallsiteMachineFrameKind8616.NEAR
         and terminal_kind is TerminalReturnFrameKind8616.FAR
         and return_frame is not None
-        and return_frame.callsite_addr == summary.callsite_addr
+        and operator.eq(return_frame.callsite_addr, summary.callsite_addr)
         and return_frame.refusal is None
     ):
         extra = return_frame.additional_return_bytes
@@ -285,7 +306,8 @@ def _callee_purge_and_frame_extra_8616(
     return purge, None
 
 
-def _decoded_add_sp_amount_8616(head: object | None) -> int | None:
+@cython.ccall
+def _decoded_add_sp_amount_8616(head: object) -> int | None:
     """Return the proven immediate of a decoded ``add sp, imm`` head."""
     if head is None or _mnemonic_8616(head) != "add":
         return None
@@ -308,11 +330,12 @@ def _decoded_add_sp_amount_8616(head: object | None) -> int | None:
     return amount
 
 
+@cython.ccall
 def _caller_cleanup_8616(
-    project: object | None,
+    project: object,
     summary: CallsiteSummary8616,
-    return_bound: bool,
-    refusals: list[CallStackCoordinateRefusal8616],
+    return_bound: cython.bint,
+    refusals: object,
 ) -> tuple[int | None, int | None]:
     """Classify caller post-call cleanup from the decoded return-edge head.
 
@@ -320,6 +343,9 @@ def _caller_cleanup_8616(
     return address decodes as ``add sp, imm`` and the summary claim agrees on
     both the instruction address and the amount. Anything else is refused.
     """
+    claimed_addr: object
+    decoded_amount: object
+    head: object
     if project is None or not return_bound or summary.return_addr is None:
         refusals.append(CallStackCoordinateRefusal8616.CALLER_CLEANUP_UNPROVEN)
         return None, None
@@ -341,15 +367,16 @@ def _caller_cleanup_8616(
             return None, None
         return decoded_amount, summary.return_addr
     if (
-        claimed_addr != summary.return_addr
+        operator.ne(claimed_addr, summary.return_addr)
         or decoded_amount is None
-        or summary.stack_cleanup != decoded_amount
+        or operator.ne(summary.stack_cleanup, decoded_amount)
     ):
         refusals.append(CallStackCoordinateRefusal8616.CALLER_CLEANUP_EVIDENCE_CONFLICT)
         return None, None
     return decoded_amount, claimed_addr
 
 
+@cython.ccall
 def _argument_window_push_width_8616(insn: object) -> int | None:
     """Return the proven stack width of one decoded single-operand PUSH head."""
     if _mnemonic_8616(insn) != "push" or len(_operands_8616(insn)) != 1:
@@ -361,9 +388,9 @@ def _argument_window_push_width_8616(insn: object) -> int | None:
 
 
 def _argument_top_8616(
-    heads: tuple[object, ...] | None,
+    heads: object,
     summary: CallsiteSummary8616,
-    refusals: list[CallStackCoordinateRefusal8616],
+    refusals: object,
 ) -> IRCallArgumentTop8616 | None:
     """Prove the contiguous argument-region top above caller-entry SP.
 
@@ -373,6 +400,9 @@ def _argument_top_8616(
     with the summary width, in execution order. Operand-interior addresses,
     group pushes, and hints without head evidence stay unknown.
     """
+    arg_count: object
+    call_index: object
+    extent: object
     arg_count = summary.arg_count
     if arg_count is None:
         refusals.append(CallStackCoordinateRefusal8616.ARGUMENT_COUNT_UNKNOWN)
@@ -381,8 +411,8 @@ def _argument_top_8616(
         refusals.append(CallStackCoordinateRefusal8616.ARGUMENT_WINDOW_DECODE_REFUSED)
         return None
     call_index = next(
-        (index for index, insn in enumerate(heads)
-         if _instruction_addr_8616(insn) == summary.callsite_addr),
+        (index for index, insn in builtins.iter(enumerate(heads))
+         if operator.eq(_instruction_addr_8616(insn), summary.callsite_addr)),
         None,
     )
     if call_index is None:
@@ -396,8 +426,8 @@ def _argument_top_8616(
     push_addrs = summary.push_arg_instruction_addrs
     widths = summary.arg_widths
     if (
-        len(push_addrs) != arg_count
-        or len(widths) != arg_count
+        operator.ne(len(push_addrs), arg_count)
+        or operator.ne(len(widths), arg_count)
         or arg_count > call_index
     ):
         refusals.append(CallStackCoordinateRefusal8616.ARGUMENT_SETUP_INCOMPLETE)
@@ -415,34 +445,39 @@ def _argument_top_8616(
     )
 
 
+@cython.ccall
 def _proven_window_extent_8616(
-    window: tuple[object, ...],
-    push_addrs: tuple[int, ...],
-    widths: tuple[int, ...],
-    refusals: list[CallStackCoordinateRefusal8616],
+    window: object,
+    push_addrs: object,
+    widths: object,
+    refusals: object,
 ) -> int | None:
     """Verify the head window is exactly the recorded contiguous PUSH run."""
+    push_width: object
+    index: object
+    insn: object
     extent = 0
     for index, insn in enumerate(window):
-        if _instruction_addr_8616(insn) != push_addrs[index]:
+        if operator.ne(_instruction_addr_8616(insn), push_addrs[index]):
             refusals.append(CallStackCoordinateRefusal8616.ARGUMENT_REGION_AMBIGUOUS)
             return None
         push_width = _argument_window_push_width_8616(insn)
         if push_width is None:
             refusals.append(CallStackCoordinateRefusal8616.ARGUMENT_OPERAND_WIDTH_UNPROVEN)
             return None
-        if push_width != widths[index]:
+        if operator.ne(push_width, widths[index]):
             refusals.append(CallStackCoordinateRefusal8616.ARGUMENT_REGION_AMBIGUOUS)
             return None
         extent += push_width
     return extent
 
 
+@cython.ccall
 def _admitted_body_sp_proof_8616(
-    project: object | None, summary: CallsiteSummary8616,
-    frame_kind: CallsiteMachineFrameKind8616 | None, target_bound: bool,
-    retained: CalleeStackCallResult8616 | None,
-    recheck_retained: bool,
+    project: object, summary: CallsiteSummary8616,
+    frame_kind: CallsiteMachineFrameKind8616 | None, target_bound: cython.bint,
+    retained: object,
+    recheck_retained: cython.bint,
 ) -> CalleeStackCallResult8616 | None:
     """Produce body evidence once; rechecks consume only the retained scope."""
     if project is None or not target_bound:
@@ -461,14 +496,14 @@ def _admitted_body_sp_proof_8616(
 
 
 def prove_call_stack_coordinates_8616(
-    project: object | None,
+    project: object,
     summary: CallsiteSummary8616,
     *,
     instruction: IRInstr | None = None,
     block: IRBlock | None = None,
     return_frame: ReturnSegmentFrame8616 | None = None,
     _retained_body_sp_proof: CalleeStackCallResult8616 | None = None,
-    _recheck_retained_body: bool = False,
+    _recheck_retained_body: cython.bint = False,
 ) -> IRCallStackCoordinates8616:
     """Prove independently evidenced SP coordinates for one exact CALL.
 
@@ -479,17 +514,23 @@ def prove_call_stack_coordinates_8616(
     argument top from the caller block's real head inventory. Without the
     actual CALL instruction and its block, hint fields are not re-certified.
     """
+    additional_return: object
+    callee_return_delta: object
+    callee_sp_proof: object
+    frame_kind: object
+    heads: object
+    return_frame_bytes: object
     refusals: list[CallStackCoordinateRefusal8616] = []
 
     frame_kind = callsite_machine_frame_kind_8616(summary)
 
-    heads: tuple[object, ...] | None = None
+    heads = None
     call_bound = False
     target_bound = False
     admitted_ir = bool(
         instruction is not None and block is not None
         and instruction.op == "CALL"
-        and any(row is instruction for row in block.instrs)
+        and any(row is instruction for row in iter(block.instrs))
     )
     if project is not None and instruction is not None and block is not None and admitted_ir:
         heads = _caller_block_heads_8616(project, block)
@@ -506,7 +547,7 @@ def prove_call_stack_coordinates_8616(
 
     # The frame width is published only once the call is admitted; a bare
     # summary kind spelling is not physical return-frame proof.
-    return_frame_bytes: int | None = None
+    return_frame_bytes = None
     if frame_kind is None:
         refusals.append(CallStackCoordinateRefusal8616.CALL_FRAME_KIND_UNKNOWN)
     elif call_bound:
@@ -551,7 +592,7 @@ def prove_call_stack_coordinates_8616(
         argument_top,
         callee_return_delta,
     )
-    materialized = sum(slot is not None for slot in slots)
+    materialized = sum(slot is not None for slot in iter(slots))
     return IRCallStackCoordinates8616(
         callsite_addr=summary.callsite_addr,
         target_addr=summary.target_addr,

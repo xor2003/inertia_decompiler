@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Define typed postprocess pass and runtime policy contracts.
 
 Layer: Rewrite/Postprocess cleanup.
@@ -9,12 +10,17 @@ flow, or facts from rendered text, COD, source, or CLI/reporting evidence here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, NamedTuple
+import dataclasses
+import builtins
+X86_16TailValidationSummary = typing.TypeVar("X86_16TailValidationSummary")
 
 if TYPE_CHECKING:
     from inertia.validation.tail_validation import X86_16TailValidationSummary
@@ -37,14 +43,14 @@ class CallArgumentAstEffect8616(Enum):
     REBUILDS = "rebuilds"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DecompilerPostprocessPassSpec:
     """Describe one ordered postprocess command and its AST effect."""
 
-    name: str
-    func: Callable[..., bool]
-    needs_project: bool
-    callsite_final_gate: bool = False
+    name: object
+    func: Callable[..., cython.bint]
+    needs_project: cython.bint
+    callsite_final_gate: cython.bint = False
     call_argument_effect: CallArgumentAstEffect8616 = (
         CallArgumentAstEffect8616.PRESERVES
     )
@@ -54,20 +60,22 @@ class PostprocessRuntimeConfig8616(NamedTuple):
     """Compatibility-shaped runtime configuration for one postprocess run."""
 
     pass_timeout_seconds: int | None
-    validation_enabled: bool
-    per_pass_validation_enabled: bool
-    skip_names: set[str]
+    validation_enabled: cython.bint
+    per_pass_validation_enabled: cython.bint
+    skip_names: object
     baseline_summary: X86_16TailValidationSummary | None
 
 
-def _environment(env: Mapping[str, str] | None) -> Mapping[str, str]:
+@cython.ccall
+def _environment(env: object) -> Mapping[str, str]:
     """Return an explicit environment mapping for deterministic policy tests."""
     return os.environ if env is None else env
 
 
+@cython.ccall
 def postprocess_optional_reject_budget_8616(
     env: Mapping[str, str] | None = None,
-) -> int:
+) -> cython.longlong:
     """Parse the bounded optional-pass rejection budget."""
     environment = _environment(env)
     raw = environment.get("INERTIA_POSTPROCESS_OPTIONAL_REJECT_BUDGET", "").strip()
@@ -79,12 +87,13 @@ def postprocess_optional_reject_budget_8616(
         return PASS_REJECT_BUDGET_DEFAULT_8616
 
 
+@cython.ccall
 def build_postprocess_runtime_config_8616(
     *,
-    validation_enabled: bool,
-    per_pass_validation_requested: bool,
-    large_function_for_per_pass_validation: bool,
-    fact_backed_stack_normalize_enabled: bool,
+    validation_enabled: cython.bint,
+    per_pass_validation_requested: cython.bint,
+    large_function_for_per_pass_validation: cython.bint,
+    fact_backed_stack_normalize_enabled: cython.bint,
     baseline_summary: X86_16TailValidationSummary | None,
     env: Mapping[str, str] | None = None,
 ) -> PostprocessRuntimeConfig8616:
@@ -103,7 +112,7 @@ def build_postprocess_runtime_config_8616(
 
     skip_names = {
         name.strip()
-        for name in environment.get("INERTIA_SKIP_POSTPROCESS_PASSES", "").split(",")
+        for name in builtins.iter(environment.get("INERTIA_SKIP_POSTPROCESS_PASSES", "").split(","))
         if name.strip()
     }
     if not fact_backed_stack_normalize_enabled:

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Structuring-based code generation for control flow.
 
 Layer: Structuring.
@@ -18,6 +19,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -45,6 +48,9 @@ from inertia.semantics.callsite_summary import (
 from inertia.structuring.condition_lowering import lower_ir_value_to_c_expr_8616
 from inertia.structuring.condition_rendering import render_condition_operand_8616
 from inertia.structuring.structuring_region import Region, RegionGraph, RegionType
+import dataclasses
+import operator
+import builtins
 
 if TYPE_CHECKING:
     pass
@@ -53,6 +59,7 @@ logger: logging.Logger = logging.getLogger(__name__)
 _MAX_DOMINANT_SWITCH_REPLACEMENT_SPAN_8616 = 64
 
 
+@cython.ccall
 def _metadata_sequence_8616(value: object) -> tuple[object, ...]:
     """Return tuple metadata only when the region metadata value is sequence-like."""
     if isinstance(value, (list, tuple)):
@@ -60,16 +67,19 @@ def _metadata_sequence_8616(value: object) -> tuple[object, ...]:
     return ()
 
 
-def _metadata_str_8616(value: object) -> str | None:
+@cython.ccall
+def _metadata_str_8616(value: object) -> object:
     """Return string metadata values without guessing from arbitrary objects."""
     return value if isinstance(value, str) else None
 
 
-def _metadata_bool_8616(value: object) -> bool:
+@cython.ccall
+def _metadata_bool_8616(value: object) -> cython.bint:
     """Return boolean metadata values without truthiness coercion."""
     return value if isinstance(value, bool) else False
 
 
+@cython.ccall
 def _metadata_region_8616(value: object) -> Region | None:
     """Return region metadata values after narrowing to Region."""
     return value if isinstance(value, Region) else None
@@ -77,17 +87,19 @@ def _metadata_region_8616(value: object) -> Region | None:
 
 def _metadata_regions_8616(value: object) -> tuple[Region, ...]:
     """Return only Region values from sequence-like metadata."""
-    return tuple(item for item in _metadata_sequence_8616(value) if isinstance(item, Region))
+    return tuple(item for item in builtins.iter(_metadata_sequence_8616(value)) if isinstance(item, Region))
 
 
-def _metadata_ints_8616(value: object) -> tuple[int, ...]:
+def _metadata_ints_8616(value: object) -> tuple[cython.longlong, ...]:
     """Return only integer values from sequence-like metadata."""
-    return tuple(item for item in _metadata_sequence_8616(value) if isinstance(item, int))
+    return tuple(item for item in builtins.iter(_metadata_sequence_8616(value)) if isinstance(item, int))
 
 
-def _metadata_provenance_keys_8616(value: object) -> tuple[tuple[str, int, int], ...]:
+@cython.ccall
+def _metadata_provenance_keys_8616(value: object) -> tuple[tuple[str, cython.longlong, cython.longlong], ...]:
     """Return typed provenance keys from sequence-like metadata."""
-    result: list[tuple[str, int, int]] = []
+    item: object
+    result: list[tuple[str, cython.longlong, cython.longlong]] = []
     for item in _metadata_sequence_8616(value):
         if (
             isinstance(item, tuple)
@@ -100,7 +112,8 @@ def _metadata_provenance_keys_8616(value: object) -> tuple[tuple[str, int, int],
     return tuple(result)
 
 
-def _debug_list_8616(mapping: dict[str, object], key: str) -> list[object]:
+@cython.ccall
+def _debug_list_8616(mapping: object, key: object) -> object:
     """Return a list-valued debug field without relying on object truthiness."""
     value = mapping.setdefault(key, [])
     if isinstance(value, list):
@@ -110,16 +123,19 @@ def _debug_list_8616(mapping: dict[str, object], key: str) -> list[object]:
     return replacement
 
 
-def _c_statements_items_8616(node: structured_c.CStatements) -> tuple[object, ...]:
+@cython.ccall
+def _c_statements_items_8616(node: structured_c.CStatements) -> object:
     """Return child statements from a third-party angr C AST statements boundary."""
     statements = node.statements
     return tuple(statements) if isinstance(statements, (list, tuple)) else ()
 
 
+@cython.ccall
 def _c_ifelse_pairs_8616(
     node: structured_c.CIfElse,
 ) -> tuple[tuple[structured_c.CExpression, structured_c.CStatement | None], ...]:
     """Return condition/body pairs from a third-party angr C AST if/else boundary."""
+    pair: object
     pairs = node.condition_and_nodes
     if not isinstance(pairs, (list, tuple)):
         return ()
@@ -135,8 +151,11 @@ def _c_ifelse_pairs_8616(
     return tuple(result)
 
 
+@cython.ccall
 def _c_switch_cases_8616(node: object) -> tuple[tuple[object, object], ...]:
     """Return switch case/body pairs from a third-party angr C AST boundary."""
+    cases: object
+    case: object
     cases = getattr(cast(Any, node), "cases", ())
     if not isinstance(cases, (list, tuple)):
         return ()
@@ -162,54 +181,54 @@ class TypedEdgeSwitchLoweringStatus8616(Enum):
     BlockedPostCAst = "blocked_post_c_ast"
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class LoopCodegenInfo:
     """Information for rendering a loop region as C code."""
 
-    loop_type: str  # "while", "do_while", "for"
-    condition_expr: str | None  # Condition to evaluate
-    init_stmt: str | None  # Initialization (for loops)
-    increment_stmt: str | None  # Increment (for loops)
-    body_regions: list[Region]  # Regions in loop body
-    exit_label: str | None  # Label for break target (if needed)
-    uses_goto: bool  # True if fallback gotos needed
-    structuring_variables: tuple[str, ...]  # Explicit abnormal loop selectors
+    loop_type: object  # "while", "do_while", "for"
+    condition_expr: object  # Condition to evaluate
+    init_stmt: object  # Initialization (for loops)
+    increment_stmt: object  # Increment (for loops)
+    body_regions: object  # Regions in loop body
+    exit_label: object  # Label for break target (if needed)
+    uses_goto: cython.bint  # True if fallback gotos needed
+    structuring_variables: object  # Explicit abnormal loop selectors
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class SwitchCodegenInfo:
     """Information for rendering a switch region as C code."""
 
-    switch_expr: str | None  # Expression being switched on
-    case_targets: dict[str, Region]  # Constant->Region mapping
+    switch_expr: object  # Expression being switched on
+    case_targets: object  # Constant->Region mapping
     default_target: Region | None  # Default case target
-    uses_fallthrough: bool  # True if case fallthrough
-    uses_goto: bool  # True if complex gotos needed
+    uses_fallthrough: cython.bint  # True if case fallthrough
+    uses_goto: cython.bint  # True if complex gotos needed
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TypedEdgeSwitchAstMaterializationResult8616:
     """Result of building typed edge-guard switch AST artifacts."""
 
-    attempted_count: int
-    materialized_count: int
-    refused_count: int
-    refusal_reasons: tuple[str, ...]
+    attempted_count: cython.longlong
+    materialized_count: cython.longlong
+    refused_count: cython.longlong
+    refusal_reasons: object
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return True when production C AST was modified."""
         return False
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TypedEdgeSwitchReplacementSafetyResult8616:
     """Dry-run verdict for replacing top-level C AST with typed switch artifacts."""
 
-    attempted_count: int
-    safe_count: int
-    refused_count: int
-    refusal_reasons: tuple[str, ...]
+    attempted_count: cython.longlong
+    safe_count: cython.longlong
+    refused_count: cython.longlong
+    refusal_reasons: object
 
     @property
     def status(self) -> TypedEdgeSwitchSafetyStatus8616:
@@ -221,33 +240,34 @@ class TypedEdgeSwitchReplacementSafetyResult8616:
         return TypedEdgeSwitchSafetyStatus8616.Blocked
 
     @property
-    def blocker_layer(self) -> str | None:
+    def blocker_layer(self) -> object:
         """Return the owning layer when replacement is blocked."""
         if self.status is not TypedEdgeSwitchSafetyStatus8616.Blocked:
             return None
         return "structuring.codegen.c_ast_replacement"
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return True when production C AST was modified."""
         return False
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TypedEdgeSwitchAstReplacementResult8616:
     """Result of replacing safe typed edge-guard cascades in the C AST."""
 
-    attempted_count: int
-    replaced_count: int
-    refused_count: int
-    refusal_reasons: tuple[str, ...]
+    attempted_count: cython.longlong
+    replaced_count: cython.longlong
+    refused_count: cython.longlong
+    refusal_reasons: object
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return True when production C AST was modified."""
         return self.replaced_count > 0
 
 
+@cython.cclass
 class StructuringCodegenPass:
     """Convertstructured regions to C code.
 
@@ -255,6 +275,7 @@ class StructuringCodegenPass:
     For Phase 1.3, this is a demonstration pass. Full integration with codegen
     happens in later phases.
     """
+    stats = cython.declare(dict, visibility = "public")
 
     def __init__(self) -> None:
         """Initialize the codegen pass."""
@@ -264,7 +285,8 @@ class StructuringCodegenPass:
             "gotos_emitted": 0,
         }
 
-    def render_loop(self, region: Region) -> str:
+    @cython.ccall
+    def render_loop(self, region: Region) -> object:
         """Render a loop region as C code.
 
         Args:
@@ -302,7 +324,8 @@ class StructuringCodegenPass:
         self.stats["loops_rendered"] += 1
         return code
 
-    def render_switch(self, region: Region) -> str:
+    @cython.ccall
+    def render_switch(self, region: Region) -> object:
         """Render a switch region as C code.
 
         Args:
@@ -311,6 +334,7 @@ class StructuringCodegenPass:
         Returns:
             C code string for the switch
         """
+        case_label: object
         switch_info = self._extract_switch_info(region)
 
         code = f"switch ({switch_info.switch_expr or 'value'}) {{\n"
@@ -337,7 +361,8 @@ class StructuringCodegenPass:
         return code
 
     def _extract_loop_info(self, region: Region) -> LoopCodegenInfo:
-        def _condition_expr_from_metadata() -> str:
+        def _condition_expr_from_metadata() -> object:
+            candidate: object
             edge_guard_hints = _metadata_sequence_8616(region.metadata.get("typed_condition_edge_guard_hints"))
             edge_guard_hint = _metadata_str_8616(edge_guard_hints[0]) if edge_guard_hints else None
             for candidate in (
@@ -359,6 +384,8 @@ class StructuringCodegenPass:
             Returns:
                 LoopCodegenInfo with rendering parameters
             """
+            abnormal_plan: object
+            loop_meta: object
             loop_meta = region.metadata.get("loop_info")
             exit_label = None
 
@@ -378,7 +405,7 @@ class StructuringCodegenPass:
             abnormal_plan = region.metadata.get("abnormal_loop_plan", {})
             structuring_variables = tuple(
                 item
-                for item in _metadata_sequence_8616(region.metadata.get("structuring_variables"))
+                for item in builtins.iter(_metadata_sequence_8616(region.metadata.get("structuring_variables")))
                 if isinstance(item, str)
             )
             uses_goto = len(unstructured_exits) > 0 or len(unstructured_entries) > 0
@@ -390,7 +417,7 @@ class StructuringCodegenPass:
             if loop_meta and hasattr(loop_meta, "body_regions"):
                 loop_meta_dynamic = cast(Any, loop_meta)
                 body_regions = [
-                    item for item in _metadata_sequence_8616(loop_meta_dynamic.body_regions) if isinstance(item, Region)
+                    item for item in builtins.iter(_metadata_sequence_8616(loop_meta_dynamic.body_regions)) if isinstance(item, Region)
                 ]
 
             return LoopCodegenInfo(
@@ -406,6 +433,7 @@ class StructuringCodegenPass:
 
         return _impl()
 
+    @cython.ccall
     def _extract_switch_info(self, region: Region) -> SwitchCodegenInfo:
         """Extract switch information from an IncSwitch region.
 
@@ -415,15 +443,17 @@ class StructuringCodegenPass:
         Returns:
             SwitchCodegenInfo with rendering parameters
         """
+        switch_expr: object
+        switch_lhs: object
         switch_candidates = _metadata_sequence_8616(region.metadata.get("switch_candidates"))
         case_values = _metadata_sequence_8616(region.metadata.get("switch_case_values"))
-        if len(case_values) == len(switch_candidates):
+        if operator.eq(len(case_values), len(switch_candidates)):
             raw_case_targets = {
-                str(value): target for value, target in zip(case_values, switch_candidates, strict=True)
+                str(value): target for value, target in builtins.iter(zip(case_values, switch_candidates, strict=True))
             }
         else:
-            raw_case_targets = {f"0x{i:x}": target for i, target in enumerate(switch_candidates)}
-        case_targets = {label: target for label, target in raw_case_targets.items() if isinstance(target, Region)}
+            raw_case_targets = {f"0x{i:x}": target for i, target in builtins.iter(enumerate(switch_candidates))}
+        case_targets = {label: target for label, target in builtins.iter(raw_case_targets.items()) if isinstance(target, Region)}
         uses_goto = _metadata_bool_8616(region.metadata.get("uses_goto"))
         switch_lhs = region.metadata.get("switch_condition_lhs")
         switch_expr = _metadata_str_8616(region.metadata.get("switch_expr")) or _metadata_str_8616(
@@ -440,7 +470,8 @@ class StructuringCodegenPass:
             uses_goto=uses_goto,
         )
 
-    def apply(self, graph: RegionGraph) -> str:
+    @cython.ccall
+    def apply(self, graph: RegionGraph) -> object:
         """Apply codegen to a structured region graph.
 
         Args:
@@ -449,12 +480,13 @@ class StructuringCodegenPass:
         Returns:
             Generated C code (simplified representation)
         """
+        region: object
         code = []
 
         for region in graph.nodes:
-            if region.region_type == RegionType.Loop:
+            if operator.eq(region.region_type, RegionType.Loop):
                 code.append(self.render_loop(region))
-            elif region.region_type == RegionType.IncSwitch:
+            elif operator.eq(region.region_type, RegionType.IncSwitch):
                 code.append(self.render_switch(region))
 
         result = "\n".join(code)
@@ -464,11 +496,12 @@ class StructuringCodegenPass:
         return result
 
 
-def _typed_edge_switch_regions_8616(graph: RegionGraph | None) -> tuple[Region, ...]:
+def _typed_edge_switch_regions_8616(graph: object) -> tuple[Region, ...]:
     if graph is None:
         return ()
 
-    def _is_ready_typed_edge_switch(region: Region) -> bool:
+    def _is_ready_typed_edge_switch(region: Region) -> cython.bint:
+        artifact: object
         artifact = region.metadata.get("typed_edge_switch_region_artifact")
         if isinstance(artifact, dict):
             return artifact.get("status") == "ready"
@@ -476,11 +509,12 @@ def _typed_edge_switch_regions_8616(graph: RegionGraph | None) -> tuple[Region, 
 
     return tuple(
         region
-        for region in graph.nodes
-        if region.region_type == RegionType.IncSwitch and _is_ready_typed_edge_switch(region)
+        for region in iter(graph.nodes)
+        if operator.eq(region.region_type, RegionType.IncSwitch) and _is_ready_typed_edge_switch(region)
     )
 
 
+@cython.ccall
 def _statements_node_from_region_8616(region: Region, codegen: object) -> structured_c.CStatements | None:
     statements = tuple(region.statements or ())
     if not statements:
@@ -490,25 +524,33 @@ def _statements_node_from_region_8616(region: Region, codegen: object) -> struct
     return structured_c.CStatements(list(statements), addr=region.block_addr, codegen=codegen)
 
 
-def _region_by_id_8616(graph: RegionGraph | None, region_id: object) -> Region | None:
+@cython.ccall
+def _region_by_id_8616(graph: object, region_id: object) -> Region | None:
+    region: object
     if graph is None or not isinstance(region_id, int):
         return None
     for region in graph.nodes:
-        if region.region_id == region_id:
+        if operator.eq(region.region_id, region_id):
             return region
     return None
 
 
-def _typed_edge_switch_case_values_8616(region: Region) -> tuple[int, ...]:
+def _typed_edge_switch_case_values_8616(region: Region) -> tuple[cython.longlong, ...]:
+    artifact: object
+    values: object
     artifact = region.metadata.get("typed_edge_switch_region_artifact")
     if isinstance(artifact, dict):
         values = artifact.get("case_values")
-        if isinstance(values, (list, tuple)) and all(isinstance(value, int) for value in values):
-            return tuple(int(value) for value in values)
-    return tuple(int(value) for value in _metadata_sequence_8616(region.metadata.get("switch_case_values")) if isinstance(value, int))
+        if isinstance(values, (list, tuple)) and all(isinstance(value, int) for value in iter(values)):
+            return tuple(int(value) for value in iter(values))
+    return tuple(int(value) for value in builtins.iter(_metadata_sequence_8616(region.metadata.get("switch_case_values"))) if isinstance(value, int))
 
 
+@cython.ccall
 def _typed_edge_switch_default_region_8616(graph: RegionGraph | None, region: Region) -> Region | None:
+    artifact: object
+    default_region: object
+    legacy_default: object
     artifact = region.metadata.get("typed_edge_switch_region_artifact")
     if isinstance(artifact, dict):
         default_region = _region_by_id_8616(graph, artifact.get("default_region_id"))
@@ -519,6 +561,8 @@ def _typed_edge_switch_default_region_8616(graph: RegionGraph | None, region: Re
 
 
 def _iter_non_statement_children_8616(node: object) -> tuple[object, ...]:
+    child: object
+    attr: object
     children: list[object] = []
     for attr in (
         "args",
@@ -538,14 +582,17 @@ def _iter_non_statement_children_8616(node: object) -> tuple[object, ...]:
         if child is not None:
             children.append(child)
     if isinstance(node, structured_c.CIfElse):
-        children.extend(condition for condition, _ in _c_ifelse_pairs_8616(node))
+        children.extend(condition for condition, _ in builtins.iter(_c_ifelse_pairs_8616(node)))
     return tuple(children)
 
 
-def _c_statement_owned_ins_addrs_8616(stmt: structured_c.CStatement) -> tuple[int, ...]:
-    addrs: list[int] = []
+@cython.ccall
+def _c_statement_owned_ins_addrs_8616(stmt: structured_c.CStatement) -> tuple[cython.longlong, ...]:
+    current: object
+    tags: object
+    addrs: list[cython.longlong] = []
     pending: list[object] = [stmt]
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     while pending:
         current = pending.pop()
         if current is None:
@@ -566,7 +613,14 @@ def _c_statement_owned_ins_addrs_8616(stmt: structured_c.CStatement) -> tuple[in
     return tuple(dict.fromkeys(addrs))
 
 
-def _c_node_provenance_key_8616(node: object) -> tuple[str, int, int] | None:
+@cython.ccall
+def _c_node_provenance_key_8616(node: object) -> object:
+    block_idx: object
+    ins_addr: object
+    stmt_idx: object
+    tags: object
+    vex_block_addr: object
+    vex_stmt_idx: object
     tags = getattr(node, "tags", None)
     if not isinstance(tags, dict):
         return None
@@ -584,12 +638,15 @@ def _c_node_provenance_key_8616(node: object) -> tuple[str, int, int] | None:
     return None
 
 
+@cython.ccall
 def _c_statement_owned_provenance_keys_8616(
     stmt: structured_c.CStatement,
-) -> tuple[tuple[str, int, int], ...]:
-    keys: list[tuple[str, int, int]] = []
+) -> tuple[tuple[str, cython.longlong, cython.longlong], ...]:
+    current: object
+    key: object
+    keys: list[tuple[str, cython.longlong, cython.longlong]] = []
     pending: list[object] = [stmt]
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     while pending:
         current = pending.pop()
         if current is None:
@@ -615,6 +672,11 @@ def _iter_statement_tree_8616(node: object) -> tuple[structured_c.CStatement, ..
     result: list[structured_c.CStatement] = []
 
     def _visit(current: object) -> None:
+        _: object
+        attr: object
+        branch: object
+        case_body: object
+        child: object
         if isinstance(current, structured_c.CStatements):
             for child in _c_statements_items_8616(current):
                 _visit(child)
@@ -636,7 +698,13 @@ def _iter_statement_tree_8616(node: object) -> tuple[structured_c.CStatement, ..
     return tuple(result)
 
 
+@cython.ccall
 def _iter_child_statement_lists_8616(stmt: structured_c.CStatement) -> tuple[structured_c.CStatements, ...]:
+    child: object
+    _: object
+    attr: object
+    branch: object
+    case_body: object
     if isinstance(stmt, structured_c.CStatements):
         return (stmt,)
     children: list[structured_c.CStatements] = []
@@ -657,15 +725,24 @@ def _iter_child_statement_lists_8616(stmt: structured_c.CStatement) -> tuple[str
     return tuple(children)
 
 
+@cython.ccall
 def _iter_child_statement_paths_8616(
     stmt: structured_c.CStatement,
-    control_path: tuple[tuple[int, str, int], ...],
-) -> tuple[tuple[structured_c.CStatements, tuple[tuple[int, str, int], ...]], ...]:
+    control_path: object,
+) -> tuple[tuple[structured_c.CStatements, tuple[tuple[cython.longlong, str, cython.longlong], ...]], ...]:
     """Return child statement lists and distinguish control-flow alternatives."""
+    child: object
+    _: object
+    attr: object
+    branch: object
+    branch_index: object
+    case_body: object
+    case_index: object
+    child_index: object
     if isinstance(stmt, structured_c.CStatements):
         return ((stmt, control_path),)
 
-    children: list[tuple[structured_c.CStatements, tuple[tuple[int, str, int], ...]]] = []
+    children: list[tuple[structured_c.CStatements, tuple[tuple[cython.longlong, str, cython.longlong], ...]]] = []
     marker = id(stmt)
     if isinstance(stmt, structured_c.CIfElse):
         for branch_index, (_, branch) in enumerate(_c_ifelse_pairs_8616(stmt)):
@@ -683,14 +760,19 @@ def _iter_child_statement_paths_8616(
     return tuple(children)
 
 
+@cython.ccall
 def _c_statement_list_positions_8616(
     codegen: object,
-) -> dict[int, tuple[list[object], int]]:
+) -> object:
+    cfunc: object
+    current: object
+    index: object
+    stmt: object
     cfunc = getattr(codegen, "cfunc", None)
     root = getattr(cfunc, "statements", None) if cfunc is not None else None
-    pending: list[structured_c.CStatements] = [root] if isinstance(root, structured_c.CStatements) else []
-    positions: dict[int, tuple[list[object], int]] = {}
-    seen_lists: set[int] = set()
+    pending: object = [root] if isinstance(root, structured_c.CStatements) else []
+    positions: dict[cython.longlong, tuple[list[object], cython.longlong]] = {}
+    seen_lists: set[cython.longlong] = set()
     while pending:
         current = pending.pop()
         statements = current.statements
@@ -711,14 +793,19 @@ def _c_statement_list_positions_8616(
     return positions
 
 
+@cython.ccall
 def _c_statements_node_positions_8616(
     codegen: object,
-) -> dict[int, tuple[list[object], int]]:
+) -> object:
+    cfunc: object
+    current: object
+    index: object
+    stmt: object
     cfunc = getattr(codegen, "cfunc", None)
     root = getattr(cfunc, "statements", None) if cfunc is not None else None
-    pending: list[structured_c.CStatements] = [root] if isinstance(root, structured_c.CStatements) else []
-    positions: dict[int, tuple[list[object], int]] = {}
-    seen_lists: set[int] = set()
+    pending: object = [root] if isinstance(root, structured_c.CStatements) else []
+    positions: dict[cython.longlong, tuple[list[object], cython.longlong]] = {}
+    seen_lists: set[cython.longlong] = set()
     while pending:
         current = pending.pop()
         statements = current.statements
@@ -741,13 +828,17 @@ def _c_statements_node_positions_8616(
 
 def _c_statement_list_paths_8616(
     codegen: object,
-) -> dict[int, tuple[str, ...]]:
+) -> object:
+    cfunc: object
     cfunc = getattr(codegen, "cfunc", None)
     root = getattr(cfunc, "statements", None) if cfunc is not None else None
-    paths: dict[int, tuple[str, ...]] = {}
-    seen_nodes: set[int] = set()
+    paths: dict[cython.longlong, tuple[str, ...]] = {}
+    seen_nodes: set[cython.longlong] = set()
 
-    def _visit(current: object, path: tuple[str, ...]) -> None:
+    def _visit(current: object, path: object) -> None:
+        child: object
+        child_list: object
+        index: object
         if not isinstance(current, structured_c.CStatements):
             return
         marker = id(current)
@@ -759,25 +850,30 @@ def _c_statement_list_paths_8616(
             paths[id(statements)] = path
         for index, child in enumerate(_c_statements_items_8616(current)):
             if isinstance(child, structured_c.CStatements):
-                _visit(child, (*path, f"CStatements[{index}]"))
+                _visit(child, tuple(path) + (f"CStatements[{index}]",))
                 continue
             if not isinstance(child, structured_c.CStatement):
                 continue
             for child_list in _iter_child_statement_lists_8616(child):
-                _visit(child_list, (*path, f"{type(child).__name__}[{index}]", "child"))
+                _visit(child_list, tuple(path) + (f"{type(child).__name__}[{index}]", "child"))
 
     _visit(root, ("root",))
     return paths
 
 
+@cython.ccall
 def _c_statement_container_shapes_8616(
     codegen: object,
-) -> dict[int, dict[str, object]]:
+) -> object:
+    cfunc: object
+    current: object
+    index: object
+    stmt: object
     cfunc = getattr(codegen, "cfunc", None)
     root = getattr(cfunc, "statements", None) if cfunc is not None else None
-    pending: list[structured_c.CStatements] = [root] if isinstance(root, structured_c.CStatements) else []
-    shapes: dict[int, dict[str, object]] = {}
-    seen_lists: set[int] = set()
+    pending: object = [root] if isinstance(root, structured_c.CStatements) else []
+    shapes: dict[cython.longlong, dict[str, object]] = {}
+    seen_lists: set[cython.longlong] = set()
     while pending:
         current = pending.pop()
         statements = current.statements
@@ -802,19 +898,26 @@ def _c_statement_container_shapes_8616(
     return shapes
 
 
+@cython.ccall
 def _walk_c_statement_paths_8616(
     current: object,
-    path: tuple[str, ...],
-    paths: dict[int, tuple[str, ...]],
-    seen: set[int],
+    path: object,
+    paths: object,
+    seen: object,
 ) -> None:
     """Record the structured-C parent path for each reachable statement."""
+    _: object
+    attr: object
+    branch: object
+    case_body: object
+    child: object
+    index: object
     if current is None:
         return
     if isinstance(current, structured_c.CStatements):
         statements = _c_statements_items_8616(current)
         for index, child in enumerate(statements):
-            _walk_c_statement_paths_8616(child, (*path, f"CStatements[{index}]"), paths, seen)
+            _walk_c_statement_paths_8616(child, tuple(path) + (f"CStatements[{index}]",), paths, seen)
         return
     if not isinstance(current, structured_c.CStatement):
         return
@@ -825,35 +928,45 @@ def _walk_c_statement_paths_8616(
     paths[marker] = (*path, type(current).__name__)
     if isinstance(current, structured_c.CIfElse):
         for index, (_, branch) in enumerate(_c_ifelse_pairs_8616(current)):
-            _walk_c_statement_paths_8616(branch, (*paths[marker], f"if_branch[{index}]"), paths, seen)
-        _walk_c_statement_paths_8616(current.else_node, (*paths[marker], "else"), paths, seen)
+            _walk_c_statement_paths_8616(branch, tuple(paths[marker]) + (f"if_branch[{index}]",), paths, seen)
+        _walk_c_statement_paths_8616(current.else_node, tuple(paths[marker]) + ("else",), paths, seen)
         return
     for attr in ("body", "default"):
-        _walk_c_statement_paths_8616(getattr(current, attr, None), (*paths[marker], attr), paths, seen)
+        _walk_c_statement_paths_8616(getattr(current, attr, None), tuple(paths[marker]) + (attr,), paths, seen)
     for index, (_, case_body) in enumerate(_c_switch_cases_8616(current)):
-        _walk_c_statement_paths_8616(case_body, (*paths[marker], f"case[{index}]"), paths, seen)
+        _walk_c_statement_paths_8616(case_body, tuple(paths[marker]) + (f"case[{index}]",), paths, seen)
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _CStatementOwnership8616:
     """Address/provenance ownership maps built during one statement walk."""
 
-    by_addr: dict[int, list[structured_c.CStatement]] = field(default_factory=dict)
-    by_key: dict[tuple[str, int, int], list[structured_c.CStatement]] = field(default_factory=dict)
+    by_addr: object = field(default_factory=dict)
+    by_key: object = field(default_factory=dict)
 
+    @cython.ccall
     def _record(self, owner: structured_c.CStatement, stmt: structured_c.CStatement) -> None:
+        ins_addr: object
+        key: object
         for ins_addr in _c_statement_owned_ins_addrs_8616(stmt):
             self.by_addr.setdefault(ins_addr, []).append(owner)
         for key in _c_statement_owned_provenance_keys_8616(stmt):
             self.by_key.setdefault(key, []).append(owner)
 
+    @cython.ccall
     def visit(
         self,
         current: object,
         positioned_owner: structured_c.CStatement | None,
-        statement_positions: dict[int, tuple[list[object], int]],
+        statement_positions: object,
     ) -> None:
         """Attribute each statement to the nearest positioned owner."""
+        owner: object
+        _: object
+        attr: object
+        branch: object
+        case_body: object
+        child: object
         if isinstance(current, structured_c.CStatements):
             for child in _c_statements_items_8616(current):
                 self.visit(child, positioned_owner, statement_positions)
@@ -874,24 +987,28 @@ class _CStatementOwnership8616:
             self.visit(case_body, owner, statement_positions)
 
 
+@cython.ccall
 def _c_statement_parent_paths_8616(
     codegen: object,
-) -> dict[int, tuple[str, ...]]:
+) -> object:
+    cfunc: object
     cfunc = getattr(codegen, "cfunc", None)
     root = getattr(cfunc, "statements", None) if cfunc is not None else None
-    paths: dict[int, tuple[str, ...]] = {}
-    seen: set[int] = set()
+    paths: dict[cython.longlong, tuple[str, ...]] = {}
+    seen: set[cython.longlong] = set()
     _walk_c_statement_paths_8616(root, ("root",), paths, seen)
     return paths
 
 
+@cython.ccall
 def _c_positioned_statement_ownership_8616(
     codegen: object,
-    statement_positions: dict[int, tuple[list[object], int]],
+    statement_positions: object,
 ) -> tuple[
-    dict[int, tuple[structured_c.CStatement, ...]],
-    dict[tuple[str, int, int], tuple[structured_c.CStatement, ...]],
+    dict[cython.longlong, tuple[structured_c.CStatement, ...]],
+    dict[tuple[str, cython.longlong, cython.longlong], tuple[structured_c.CStatement, ...]],
 ]:
+    top_level_statement: object
     top_level_statements = _top_level_c_statements_8616(codegen)
     ownership = _CStatementOwnership8616()
     for top_level_statement in top_level_statements:
@@ -901,23 +1018,27 @@ def _c_positioned_statement_ownership_8616(
     return (
         {
             addr: _dedupe_c_statements_by_identity_8616(tuple(statements))
-            for addr, statements in statements_by_addr.items()
+            for addr, statements in builtins.iter(statements_by_addr.items())
         },
         {
             key: _dedupe_c_statements_by_identity_8616(tuple(statements))
-            for key, statements in statements_by_key.items()
+            for key, statements in builtins.iter(statements_by_key.items())
         },
     )
 
 
 def _statement_scope_debug_summary_8616(
-    covered_statements: tuple[structured_c.CStatement, ...],
-    statement_positions: dict[int, tuple[list[object], int]],
+    covered_statements: object,
+    statement_positions: object,
     *,
-    top_level_statements: tuple[structured_c.CStatement, ...],
+    top_level_statements: object,
 ) -> tuple[dict[str, object], ...]:
-    groups: dict[int, dict[str, Any]] = {}
-    top_level_ids = {id(stmt) for stmt in top_level_statements}
+    position: object
+    addr: object
+    group: object
+    stmt: object
+    groups: dict[cython.longlong, dict[str, Any]] = {}
+    top_level_ids = {id(stmt) for stmt in iter(top_level_statements)}
     for stmt in covered_statements:
         position = statement_positions.get(id(stmt))
         if position is None:
@@ -945,16 +1066,16 @@ def _statement_scope_debug_summary_8616(
         if _structured_control_statement_8616(stmt):
             group["structured_count"] = int(group["structured_count"]) + 1
         for addr in _c_statement_owned_ins_addrs_8616(stmt):
-            addr_counts: dict[int, int] = group["addr_counts"]
+            addr_counts: object = group["addr_counts"]
             addr_counts[int(addr)] = int(addr_counts.get(int(addr), 0) or 0) + 1
     result: list[dict[str, object]] = []
-    for group in sorted(groups.values(), key=lambda item: int(item["count"]), reverse=True)[:8]:
+    for group in sorted(tuple(groups.values()), key=lambda item: int(item["count"]), reverse=True)[:8]:
         indexes = sorted(group["indexes"])
         addr_counts = group["addr_counts"]
-        top_addrs = sorted(addr_counts.items(), key=lambda item: (-int(item[1]), int(item[0])))[:12]
+        top_addrs = sorted(tuple(addr_counts.items()), key=lambda item: (-int(item[1]), int(item[0])))[:12]
         result.append(
             {
-                "addr_counts": [[int(addr), int(count)] for addr, count in top_addrs],
+                "addr_counts": [[int(addr), int(count)] for addr, count in iter(top_addrs)],
                 "count": int(group["count"]),
                 "index_count": len(indexes),
                 "span": [indexes[0], indexes[-1] + 1] if indexes else None,
@@ -965,14 +1086,17 @@ def _statement_scope_debug_summary_8616(
     return tuple(result)
 
 
+@cython.ccall
 def _owner_node_position_8616(
-    statements_node_positions: dict[int, tuple[list[object], int]],
-    container: list[object],
-) -> tuple[list[object], int] | None:
+    statements_node_positions: object,
+    container: object,
+) -> object:
     """Find the CStatements node whose ``statements`` list is ``container``."""
+    node_id: object
+    position: object
     for node_id, position in statements_node_positions.items():
         candidate_parent, candidate_index = position
-        if 0 <= candidate_index < len(candidate_parent) and id(candidate_parent[candidate_index]) == node_id:
+        if 0 <= candidate_index < len(candidate_parent) and operator.eq(id(candidate_parent[candidate_index]), node_id):
             candidate_node = candidate_parent[candidate_index]
             if isinstance(candidate_node, structured_c.CStatements) and candidate_node.statements is container:
                 return (candidate_parent, int(candidate_index))
@@ -980,12 +1104,17 @@ def _owner_node_position_8616(
 
 
 def _statement_container_parent_span_8616(
-    covered_statements: tuple[structured_c.CStatement, ...],
-    statement_positions: dict[int, tuple[list[object], int]],
-    statements_node_positions: dict[int, tuple[list[object], int]],
-) -> dict[str, object] | None:
-    container_by_id: dict[int, list[object]] = {}
-    covered_by_container: dict[int, set[int]] = {}
+    covered_statements: object,
+    statement_positions: object,
+    statements_node_positions: object,
+) -> object:
+    owner_node_position: object
+    position: object
+    container: object
+    container_id: object
+    stmt: object
+    container_by_id: dict[cython.longlong, list[object]] = {}
+    covered_by_container: dict[cython.longlong, set[cython.longlong]] = {}
     for stmt in covered_statements:
         position = statement_positions.get(id(stmt))
         if position is None:
@@ -996,7 +1125,7 @@ def _statement_container_parent_span_8616(
     if not container_by_id:
         return None
 
-    parent_positions: list[tuple[list[object], int, list[object], int, int, int]] = []
+    parent_positions: list[tuple[list[object], cython.longlong, list[object], cython.longlong, cython.longlong, cython.longlong]] = []
     for container_id, container in container_by_id.items():
         owner_node_position = _owner_node_position_8616(statements_node_positions, container)
         if owner_node_position is None:
@@ -1005,12 +1134,12 @@ def _statement_container_parent_span_8616(
         parent, parent_index = owner_node_position
         parent_positions.append((parent, parent_index, container, min(indexes), max(indexes) + 1, len(indexes)))
 
-    parent_ids = {id(item[0]) for item in parent_positions}
+    parent_ids = {id(item[0]) for item in iter(parent_positions)}
     if len(parent_ids) != 1:
         return None
     parent = parent_positions[0][0]
-    parent_indexes = sorted(item[1] for item in parent_positions)
-    if set(parent_indexes) != set(range(parent_indexes[0], parent_indexes[-1] + 1)):
+    parent_indexes = sorted(item[1] for item in iter(parent_positions))
+    if operator.ne(set(parent_indexes), set(range(parent_indexes[0], parent_indexes[-1] + 1))):
         return None
     return {
         "parent": parent,
@@ -1023,18 +1152,25 @@ def _statement_container_parent_span_8616(
                 "covered_count": int(count),
                 "container_len": len(container),
             }
-            for _, parent_index, container, start, end, count in sorted(parent_positions, key=lambda item: item[1])
+            for _, parent_index, container, start, end, count in builtins.iter(sorted(parent_positions, key=lambda item: item[1]))
         ],
     }
 
 
+@cython.ccall
 def _statement_container_path_summary_8616(
-    covered_statements: tuple[structured_c.CStatement, ...],
-    statement_positions: dict[int, tuple[list[object], int]],
-    statement_list_paths: dict[int, tuple[str, ...]],
+    covered_statements: object,
+    statement_positions: object,
+    statement_list_paths: object,
 ) -> dict[str, object]:
-    containers: dict[int, list[object]] = {}
-    counts: Counter[int] = Counter()
+    path: object
+    position: object
+    container_id: object
+    count: object
+    parts: object
+    stmt: object
+    containers: dict[cython.longlong, list[object]] = {}
+    counts: Counter[cython.longlong] = Counter()
     paths: list[tuple[str, ...]] = []
     for stmt in covered_statements:
         position = statement_positions.get(id(stmt))
@@ -1070,7 +1206,11 @@ def _statement_container_path_summary_8616(
     }
 
 
-def _container_path_summary_has_divergent_structured_children_8616(summary: dict[str, object]) -> bool:
+def _container_path_summary_has_divergent_structured_children_8616(summary: object) -> cython.bint:
+    common_prefix_len: object
+    path_tail: object
+    samples: object
+    sample: object
     common_prefix_len = summary.get("common_prefix_len")
     if not isinstance(common_prefix_len, int) or common_prefix_len > 1:
         return False
@@ -1084,24 +1224,30 @@ def _container_path_summary_has_divergent_structured_children_8616(summary: dict
         path_tail = sample.get("path_tail")
         if not isinstance(path_tail, list):
             continue
-        if any(isinstance(part, str) and part.startswith(structured_markers) for part in path_tail):
+        if any(isinstance(part, str) and part.startswith(structured_markers) for part in iter(path_tail)):
             return True
     return False
 
 
+@cython.ccall
 def _debug_tag_value_8616(value: object) -> object:
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     if isinstance(value, (list, tuple)):
-        return [_debug_tag_value_8616(item) for item in tuple(value)[:8]]
+        return [_debug_tag_value_8616(item) for item in iter(tuple(value)[:8])]
     return type(value).__name__
 
 
 def _statement_provenance_debug_summary_8616(
-    covered_statements: tuple[structured_c.CStatement, ...],
-    statement_positions: dict[int, tuple[list[object], int]],
+    covered_statements: object,
+    statement_positions: object,
 ) -> dict[str, object]:
-    class_counts: Counter[str] = Counter(type(stmt).__name__ for stmt in covered_statements)
+    idx_value: object
+    position: object
+    tags: object
+    ordinal: object
+    stmt: object
+    class_counts: Counter[str] = Counter(type(stmt).__name__ for stmt in iter(covered_statements))
     tag_key_counts: Counter[str] = Counter()
     idx_counts: Counter[object] = Counter()
     samples: list[dict[str, object]] = []
@@ -1110,7 +1256,7 @@ def _statement_provenance_debug_summary_8616(
         tags = getattr(stmt, "tags", None)
         tag_keys: tuple[str, ...] = ()
         if isinstance(tags, dict):
-            tag_keys = tuple(sorted(str(key) for key in tags))
+            tag_keys = tuple(sorted(str(key) for key in iter(tags)))
             tag_key_counts.update(tag_keys)
         idx_value = getattr(stmt, "idx", None)
         idx_counts[_debug_tag_value_8616(idx_value)] += 1
@@ -1126,13 +1272,13 @@ def _statement_provenance_debug_summary_8616(
         if position is not None:
             sample["position"] = [int(position[1])]
         if isinstance(tags, dict):
-            sample["tags"] = {str(key): _debug_tag_value_8616(value) for key, value in sorted(tags.items())}
+            sample["tags"] = {str(key): _debug_tag_value_8616(value) for key, value in builtins.iter(sorted(tuple(tags.items())))}
         samples.append(sample)
-    top_idx_counts = sorted(idx_counts.items(), key=lambda item: (-int(item[1]), str(item[0])))[:16]
+    top_idx_counts = sorted(tuple(idx_counts.items()), key=lambda item: (-int(item[1]), str(item[0])))[:16]
     return {
-        "class_counts": dict(sorted(class_counts.items())),
-        "tag_key_counts": dict(sorted(tag_key_counts.items())),
-        "idx_counts_top": {str(key): int(value) for key, value in top_idx_counts},
+        "class_counts": dict(sorted(tuple(class_counts.items()))),
+        "tag_key_counts": dict(sorted(tuple(tag_key_counts.items()))),
+        "idx_counts_top": {str(key): int(value) for key, value in iter(top_idx_counts)},
         "idx_unique_count": len(idx_counts),
         "samples": samples,
         "sample_limit": sample_budget,
@@ -1140,14 +1286,20 @@ def _statement_provenance_debug_summary_8616(
     }
 
 
+@cython.ccall
 def _statement_position_debug_samples_8616(
-    statements: tuple[structured_c.CStatement, ...],
-    statement_positions: dict[int, tuple[list[object], int]],
-    statement_container_shapes: dict[int, dict[str, object]],
-    statement_parent_paths: dict[int, tuple[str, ...]],
+    statements: object,
+    statement_positions: object,
+    statement_container_shapes: object,
+    statement_parent_paths: object,
     *,
-    limit: int = 8,
-) -> list[dict[str, object]]:
+    limit: cython.longlong = 8,
+) -> object:
+    parent_path: object
+    position: object
+    shape: object
+    ordinal: object
+    stmt: object
     samples: list[dict[str, object]] = []
     for ordinal, stmt in enumerate(statements[:limit]):
         position = statement_positions.get(id(stmt))
@@ -1170,17 +1322,23 @@ def _statement_position_debug_samples_8616(
     return samples
 
 
+@cython.ccall
 def _c_statement_ownership_8616(
     codegen: object,
 ) -> tuple[
-    dict[int, tuple[structured_c.CStatement, ...]],
-    dict[tuple[str, int, int], tuple[structured_c.CStatement, ...]],
-    dict[int, int],
+    dict[cython.longlong, tuple[structured_c.CStatement, ...]],
+    dict[tuple[str, cython.longlong, cython.longlong], tuple[structured_c.CStatement, ...]],
+    dict[cython.longlong, cython.longlong],
 ]:
+    ins_addr: object
+    key: object
+    stmt: object
+    top_level_index: object
+    top_level_statement: object
     top_level_statements = _top_level_c_statements_8616(codegen)
-    statements_by_addr: dict[int, list[structured_c.CStatement]] = {}
-    statements_by_key: dict[tuple[str, int, int], list[structured_c.CStatement]] = {}
-    owner_index_by_statement_id: dict[int, int] = {}
+    statements_by_addr: dict[cython.longlong, list[structured_c.CStatement]] = {}
+    statements_by_key: dict[tuple[str, cython.longlong, cython.longlong], list[structured_c.CStatement]] = {}
+    owner_index_by_statement_id: dict[cython.longlong, cython.longlong] = {}
     for top_level_index, top_level_statement in enumerate(top_level_statements):
         for stmt in _iter_statement_tree_8616(top_level_statement):
             owner_index_by_statement_id[id(stmt)] = top_level_index
@@ -1189,26 +1347,31 @@ def _c_statement_ownership_8616(
             for key in _c_statement_owned_provenance_keys_8616(stmt):
                 statements_by_key.setdefault(key, []).append(stmt)
     return (
-        {addr: tuple(statements) for addr, statements in statements_by_addr.items()},
-        {key: tuple(statements) for key, statements in statements_by_key.items()},
+        {addr: tuple(statements) for addr, statements in builtins.iter(statements_by_addr.items())},
+        {key: tuple(statements) for key, statements in builtins.iter(statements_by_key.items())},
         owner_index_by_statement_id,
     )
 
 
 def _top_level_c_statements_8616(codegen: object) -> tuple[structured_c.CStatement, ...]:
+    cfunc: object
     cfunc = getattr(codegen, "cfunc", None)
     root = getattr(cfunc, "statements", None) if cfunc is not None else None
     if not isinstance(root, structured_c.CStatements):
         return ()
     return tuple(
         stmt
-        for stmt in tuple(root.statements or ())
+        for stmt in builtins.iter(tuple(root.statements or ()))
         if isinstance(stmt, structured_c.CStatement)
     )
 
 
-def _switch_case_target_regions_8616(graph: RegionGraph) -> list[Region]:
+@cython.ccall
+def _switch_case_target_regions_8616(graph: RegionGraph) -> object:
     """Collect switch case and default regions hidden outside graph nodes."""
+    default_region: object
+    case_region: object
+    switch_region: object
     regions: list[Region] = []
     for switch_region in _typed_edge_switch_regions_8616(graph):
         for case_region in _metadata_regions_8616(switch_region.metadata.get("switch_candidates")):
@@ -1221,11 +1384,11 @@ def _switch_case_target_regions_8616(graph: RegionGraph) -> list[Region]:
 
 def _populate_linear_region_statements_8616(
     region: Region,
-    statements_by_addr: dict[int, tuple[structured_c.CStatement, ...]],
-    statements_by_key: dict[tuple[str, int, int], tuple[structured_c.CStatement, ...]],
-) -> bool:
+    statements_by_addr: object,
+    statements_by_key: object,
+) -> cython.bint:
     """Attach owned statements to one empty linear region; return success."""
-    if region.region_type != RegionType.Linear or region.block_addr is None:
+    if operator.ne(region.region_type, RegionType.Linear) or region.block_addr is None:
         return False
     if _region_raw_statements_8616(region):
         return False
@@ -1233,12 +1396,12 @@ def _populate_linear_region_statements_8616(
     region_addrs = _metadata_ints_8616(region.metadata.get("region_statement_ins_addrs"))
     if not region_addrs:
         region_addrs = (int(region.block_addr),)
-    statements = tuple(stmt for key in region_keys for stmt in statements_by_key.get(key, ()))
+    statements = tuple(stmt for key in iter(region_keys) for stmt in builtins.iter(statements_by_key.get(key, ())))
     if not statements:
         statements = tuple(
             stmt
-            for addr in region_addrs
-            for stmt in statements_by_addr.get(int(addr), ())
+            for addr in iter(region_addrs)
+            for stmt in builtins.iter(statements_by_addr.get(int(addr), ()))
         )
     if not statements:
         return False
@@ -1246,7 +1409,7 @@ def _populate_linear_region_statements_8616(
     return True
 
 
-def _populate_region_statements_from_cfunc_8616(graph: RegionGraph, codegen: object) -> int:
+def _populate_region_statements_from_cfunc_8616(graph: RegionGraph, codegen: object) -> cython.longlong:
     """Attach exact-address C statements to empty linear regions.
 
     This is a guarded bridge from the current decompiler C AST into the
@@ -1254,6 +1417,7 @@ def _populate_region_statements_from_cfunc_8616(graph: RegionGraph, codegen: obj
     tags that exactly match a region block address; rendered C and AIL
     statements are refused until region span evidence exists.
     """
+    region: object
     statements_by_addr, statements_by_key, _ = _c_statement_ownership_8616(codegen)
     if not statements_by_addr and not statements_by_key:
         return 0
@@ -1262,14 +1426,17 @@ def _populate_region_statements_from_cfunc_8616(graph: RegionGraph, codegen: obj
     regions.extend(_switch_case_target_regions_8616(graph))
 
     populated = 0
-    for region in sorted(dict.fromkeys(regions), key=lambda item: int(item.region_id or 0)):
+    for region in sorted(tuple(dict.fromkeys(regions)), key=lambda item: int(item.region_id or 0)):
         populated += int(
             _populate_linear_region_statements_8616(region, statements_by_addr, statements_by_key)
         )
     return populated
 
 
-def _populate_switch_expr_ast_from_typed_lhs_8616(region: Region, codegen: object) -> bool:
+@cython.ccall
+def _populate_switch_expr_ast_from_typed_lhs_8616(region: Region, codegen: object) -> cython.bint:
+    lhs: object
+    project: object
     if isinstance(region.metadata.get("switch_expr_ast"), structured_c.CExpression):
         return False
     lhs = region.metadata.get("switch_condition_lhs")
@@ -1287,12 +1454,13 @@ def _populate_switch_expr_ast_from_typed_lhs_8616(region: Region, codegen: objec
 
 
 def _region_raw_statements_8616(region: Region) -> tuple[structured_c.CStatement, ...]:
+    stmt: object
     result: list[structured_c.CStatement] = []
     for stmt in tuple(region.statements or ()):
         if isinstance(stmt, structured_c.CStatements):
             result.extend(
                 child
-                for child in tuple(stmt.statements or ())
+                for child in builtins.iter(tuple(stmt.statements or ()))
                 if isinstance(child, structured_c.CStatement)
             )
         elif isinstance(stmt, structured_c.CStatement):
@@ -1300,10 +1468,13 @@ def _region_raw_statements_8616(region: Region) -> tuple[structured_c.CStatement
     return tuple(result)
 
 
+@cython.ccall
 def _top_level_statements_for_addrs_8616(
-    statements_by_addr: dict[int, tuple[structured_c.CStatement, ...]],
-    addrs: tuple[int, ...],
-) -> tuple[structured_c.CStatement, ...] | None:
+    statements_by_addr: object,
+    addrs: object,
+) -> object:
+    statements: object
+    addr: object
     result: list[structured_c.CStatement] = []
     for addr in addrs:
         statements = statements_by_addr.get(int(addr), ())
@@ -1313,31 +1484,37 @@ def _top_level_statements_for_addrs_8616(
     return tuple(result)
 
 
+@cython.ccall
 def _available_statements_for_addrs_8616(
-    statements_by_addr: dict[int, tuple[structured_c.CStatement, ...]],
-    addrs: tuple[int, ...],
-) -> tuple[structured_c.CStatement, ...] | None:
+    statements_by_addr: object,
+    addrs: object,
+) -> object:
+    addr: object
     result: list[structured_c.CStatement] = []
     for addr in addrs:
         result.extend(statements_by_addr.get(int(addr), ()))
     return tuple(result) if result else None
 
 
+@cython.ccall
 def _available_statements_for_keys_8616(
-    statements_by_key: dict[tuple[str, int, int], tuple[structured_c.CStatement, ...]],
-    keys: tuple[tuple[str, int, int], ...],
-) -> tuple[structured_c.CStatement, ...] | None:
+    statements_by_key: object,
+    keys: object,
+) -> object:
+    key: object
     result: list[structured_c.CStatement] = []
     for key in keys:
         result.extend(statements_by_key.get(key, ()))
     return tuple(result) if result else None
 
 
+@cython.ccall
 def _dedupe_c_statements_by_identity_8616(
-    statements: tuple[structured_c.CStatement, ...],
+    statements: object,
 ) -> tuple[structured_c.CStatement, ...]:
+    stmt: object
     result: list[structured_c.CStatement] = []
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     for stmt in statements:
         marker = id(stmt)
         if marker in seen:
@@ -1347,29 +1524,29 @@ def _dedupe_c_statements_by_identity_8616(
     return tuple(result)
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class SharedCallOccurrenceStats8616:
     """Evidence loop for shared call-expression occurrence normalization."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class DistinctConditionCallOccurrenceStats8616:
     """Evidence loop for separating distinct binary calls aliased in one C AST node."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _ConditionRoot8616:
     """One writable condition-expression root at the third-party C AST boundary."""
 
@@ -1388,14 +1565,15 @@ class _SharedCallCodegenSurface8616(Protocol):
     """Typed view of angr codegen fields used by shared-call normalization."""
 
     cfunc: _SharedCallCFunctionSurface8616
-    _inertia_callsite_summaries: dict[int, CallsiteSummary8616]
-    _inertia_callsite_summary_inventory_8616: dict[int, CallsiteSummary8616]
+    _inertia_callsite_summaries: object
+    _inertia_callsite_summary_inventory_8616: object
     _inertia_distinct_condition_call_occurrence_stats_8616: (
         DistinctConditionCallOccurrenceStats8616
     )
     _inertia_shared_call_occurrence_stats_8616: SharedCallOccurrenceStats8616
 
 
+@cython.ccall
 def _direct_statement_call_8616(
     statement: structured_c.CStatement,
 ) -> structured_c.CFunctionCall | None:
@@ -1407,11 +1585,13 @@ def _direct_statement_call_8616(
     return None
 
 
+@cython.ccall
 def _expression_calls_8616(expression: object) -> tuple[structured_c.CFunctionCall, ...]:
     """Return calls from a typed subset of the third-party angr expression tree."""
+    current: object
     calls: list[structured_c.CFunctionCall] = []
     pending: list[object] = [expression]
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     while pending:
         current = pending.pop()
         if current is None:
@@ -1439,7 +1619,7 @@ def _condition_roots_8616(statement: structured_c.CStatement) -> tuple[_Conditio
     if isinstance(statement, structured_c.CIfElse):
         return tuple(
             _ConditionRoot8616(statement, branch_index, condition)
-            for branch_index, (condition, _branch) in enumerate(_c_ifelse_pairs_8616(statement))
+            for branch_index, (condition, _branch) in builtins.iter(enumerate(_c_ifelse_pairs_8616(statement)))
         )
     if isinstance(
         statement,
@@ -1454,7 +1634,7 @@ def _condition_roots_8616(statement: structured_c.CStatement) -> tuple[_Conditio
     return ()
 
 
-def _condition_calls_8616(statement: structured_c.CStatement) -> tuple[structured_c.CFunctionCall, ...]:
+def _condition_calls_8616(statement: structured_c.CStatement) -> object:
     """Return calls embedded in one structured statement condition."""
     if isinstance(statement, structured_c.CStatements):
         children = _c_statements_items_8616(statement)
@@ -1463,16 +1643,18 @@ def _condition_calls_8616(statement: structured_c.CStatement) -> tuple[structure
         return ()
     return tuple(
         call
-        for condition_root in _condition_roots_8616(statement)
-        for call in _expression_calls_8616(condition_root.expression)
+        for condition_root in builtins.iter(_condition_roots_8616(statement))
+        for call in builtins.iter(_expression_calls_8616(condition_root.expression))
     )
 
 
+@cython.ccall
 def _replace_condition_root_8616(
     root: _ConditionRoot8616,
     replacement: structured_c.CExpression,
-) -> bool:
+) -> cython.bint:
     """Replace one complete condition subtree at its third-party owner."""
+    branch_index: object
     statement = root.statement
     if isinstance(statement, structured_c.CIfElse):
         branch_index = root.branch_index
@@ -1499,10 +1681,13 @@ def _replace_condition_root_8616(
     return False
 
 
+@cython.ccall
 def _validated_callsite_inventory_8616(
     carrier: _SharedCallCodegenSurface8616,
-) -> dict[int, CallsiteSummary8616]:
+) -> object:
     """Return the authoritative owned callsite inventory or fail its contract."""
+    callsite_addr: object
+    summary: object
     try:
         inventory = carrier._inertia_callsite_summary_inventory_8616
     except AttributeError:
@@ -1512,17 +1697,18 @@ def _validated_callsite_inventory_8616(
     for callsite_addr, summary in inventory.items():
         if not isinstance(callsite_addr, int) or not isinstance(summary, CallsiteSummary8616):
             raise TypeError("callsite summary inventory contains an invalid owned contract")
-        if summary.callsite_addr != callsite_addr:
+        if operator.ne(summary.callsite_addr, callsite_addr):
             raise TypeError(
                 "callsite summary inventory key does not match the summary callsite address"
             )
     return inventory
 
 
+@cython.ccall
 def _summary_for_direct_call_occurrence_8616(
     call: structured_c.CFunctionCall,
-    summary_map: dict[int, CallsiteSummary8616],
-    inventory: Mapping[int, CallsiteSummary8616],
+    summary_map: object,
+    inventory: Mapping[cython.longlong, CallsiteSummary8616],
 ) -> CallsiteSummary8616 | None:
     """Resolve one call occurrence from node identity or an exact instruction tag.
 
@@ -1530,6 +1716,8 @@ def _summary_for_direct_call_occurrence_8616(
     machine-call inventory remains authoritative in that case; target names and
     source order are deliberately insufficient evidence.
     """
+    callsite_addr: object
+    summary: object
     summary = summary_map.get(id(call))
     if summary is not None:
         return summary
@@ -1544,15 +1732,15 @@ def _summary_for_direct_call_occurrence_8616(
 
 
 def _inventory_has_unique_target_callsite_8616(
-    inventory: Mapping[int, CallsiteSummary8616],
-    target_addr: int,
-) -> bool:
+    inventory: Mapping[cython.longlong, CallsiteSummary8616],
+    target_addr: cython.longlong,
+) -> cython.bint:
     """Return whether one machine callsite uniquely owns a direct target."""
     return (
         sum(
             1
-            for inventory_summary in inventory.values()
-            if inventory_summary.target_addr == target_addr
+            for inventory_summary in builtins.iter(inventory.values())
+            if operator.eq(inventory_summary.target_addr, target_addr)
         )
         == 1
     )
@@ -1561,7 +1749,7 @@ def _inventory_has_unique_target_callsite_8616(
 def _same_regenerated_call_surface_8616(
     lhs: structured_c.CFunctionCall,
     rhs: structured_c.CFunctionCall,
-) -> bool:
+) -> cython.bint:
     """Compare a bound call with a clone that lost only its angr Function carrier.
 
     Equal string targets are clone evidence here, not semantic target recovery:
@@ -1573,17 +1761,18 @@ def _same_regenerated_call_surface_8616(
     if (
         not isinstance(lhs.callee_target, str)
         or not lhs.callee_target
-        or lhs.callee_target != rhs.callee_target
+        or operator.ne(lhs.callee_target, rhs.callee_target)
     ):
         return False
     lhs_args = tuple(lhs.args or ())
     rhs_args = tuple(rhs.args or ())
-    return len(lhs_args) == len(rhs_args) and all(
+    return operator.eq(len(lhs_args), len(rhs_args)) and all(
         _same_c_expression_8616(lhs_arg, rhs_arg)
-        for lhs_arg, rhs_arg in zip(lhs_args, rhs_args, strict=True)
+        for lhs_arg, rhs_arg in builtins.iter(zip(lhs_args, rhs_args, strict=True))
     )
 
 
+@cython.ccall
 def _retag_cloned_callsite_8616(
     call: structured_c.CFunctionCall,
     inherited_summary: CallsiteSummary8616,
@@ -1597,12 +1786,18 @@ def _retag_cloned_callsite_8616(
     )
 
 
+@cython.ccall
 def _collect_condition_call_occurrences_8616(
     block: structured_c.CStatements,
-    occurrences_by_call: dict[int, list[tuple[_ConditionRoot8616, structured_c.CFunctionCall]]],
-    seen_statement_lists: set[int],
+    occurrences_by_call: object,
+    seen_statement_lists: object,
 ) -> None:
     """Collect condition calls in deterministic structured execution order."""
+    _control_path: object
+    call: object
+    child: object
+    condition_root: object
+    statement: object
     statements = block.statements
     if not isinstance(statements, list) or id(statements) in seen_statement_lists:
         return
@@ -1623,19 +1818,17 @@ def _collect_condition_call_occurrences_8616(
             _collect_condition_call_occurrences_8616(child, occurrences_by_call, seen_statement_lists)
 
 
+@cython.ccall
 def _clone_occurrence_conditions_8616(
-    occurrences: list[tuple[_ConditionRoot8616, structured_c.CFunctionCall]],
+    occurrences: object,
     existing_summary: CallsiteSummary8616,
-    candidates: tuple[CallsiteSummary8616, ...],
-) -> list[
-    tuple[
-        _ConditionRoot8616,
-        structured_c.CExpression,
-        structured_c.CFunctionCall,
-        CallsiteSummary8616,
-    ]
-]:
+    candidates: object,
+) -> object:
     """Clone each extra occurrence's condition and retag its callsite."""
+    clone: object
+    condition_root: object
+    original: object
+    summary: object
     replacements: list[
         tuple[
             _ConditionRoot8616,
@@ -1649,7 +1842,7 @@ def _clone_occurrence_conditions_8616(
         candidates[1:],
         strict=True,
     ):
-        clone_memo: dict[int, object] = {}
+        clone_memo: dict[cython.longlong, object] = {}
         cloned_condition = _clone_c_ast_tree_8616(
             condition_root.expression,
             clone_memo,
@@ -1666,15 +1859,20 @@ def _clone_occurrence_conditions_8616(
 
 
 def _split_call_occurrences_8616(
-    call_id: int,
-    occurrences: list[tuple[_ConditionRoot8616, structured_c.CFunctionCall]],
-    summary_map: dict[int, CallsiteSummary8616],
-    inventory: Mapping[int, CallsiteSummary8616],
-    represented_elsewhere: set[int],
+    call_id: cython.longlong,
+    occurrences: object,
+    summary_map: object,
+    inventory: Mapping[cython.longlong, CallsiteSummary8616],
+    represented_elsewhere: object,
     stats: DistinctConditionCallOccurrenceStats8616,
-    debug_groups: list[tuple[int, int, int | None, tuple[int, ...], str]],
-) -> bool:
+    debug_groups: object,
+) -> cython.bint:
     """Split one call's occurrences; return True when materialized."""
+    existing_summary: object
+    _cloned_condition: object
+    _condition_root: object
+    clone: object
+    summary: object
     if len(occurrences) < 2:
         return False
     stats.raw_fact_count += 1
@@ -1685,19 +1883,19 @@ def _split_call_occurrences_8616(
         return False
     candidates = tuple(
         summary
-        for callsite_addr, summary in sorted(inventory.items())
-        if summary.target_addr == existing_summary.target_addr
+        for callsite_addr, summary in builtins.iter(sorted(tuple(inventory.items())))
+        if operator.eq(summary.target_addr, existing_summary.target_addr)
         and callsite_addr not in represented_elsewhere
     )
 
-    def _fail(reason: str) -> bool:
+    def _fail(reason: object) -> cython.bint:
         stats.failure_count += 1
         debug_groups.append(
             (
                 call_id,
                 len(occurrences),
                 existing_summary.callsite_addr,
-                tuple(summary.callsite_addr for summary in candidates),
+                tuple(summary.callsite_addr for summary in iter(candidates)),
                 reason,
             )
         )
@@ -1706,17 +1904,17 @@ def _split_call_occurrences_8616(
     if existing_summary not in candidates:
         return _fail("existing-summary-not-candidate")
     stats.normalized_fact_count += 1
-    if len(candidates) != len(occurrences) or candidates[0] != existing_summary:
+    if operator.ne(len(candidates), len(occurrences)) or operator.ne(candidates[0], existing_summary):
         return _fail("ambiguous-candidates")
     stats.classified_fact_count += 1
     bind_structured_callsite_identity_8616(occurrences[0][1], existing_summary)
 
     replacements = _clone_occurrence_conditions_8616(occurrences, existing_summary, candidates)
-    if len(replacements) != len(occurrences) - 1:
+    if operator.ne(len(replacements), len(occurrences) - 1):
         return _fail("clone-failed")
     if not all(
         _replace_condition_root_8616(condition_root, cloned_condition)
-        for condition_root, cloned_condition, _clone, _summary in replacements
+        for condition_root, cloned_condition, _clone, _summary in iter(replacements)
     ):
         return _fail("replacement-failed")
     for _condition_root, _cloned_condition, clone, summary in replacements:
@@ -1727,14 +1925,14 @@ def _split_call_occurrences_8616(
             call_id,
             len(occurrences),
             existing_summary.callsite_addr,
-            tuple(summary.callsite_addr for summary in candidates),
+            tuple(summary.callsite_addr for summary in iter(candidates)),
             "materialized",
         )
     )
     return True
 
 
-def split_distinct_condition_call_occurrences_8616(codegen: object) -> bool:
+def split_distinct_condition_call_occurrences_8616(codegen: object) -> cython.bint:
     """Give distinct proven binary condition calls independent C AST nodes.
 
     angr may reuse one mutable ``CFunctionCall`` object in multiple structured
@@ -1746,6 +1944,8 @@ def split_distinct_condition_call_occurrences_8616(codegen: object) -> bool:
     Dynamic boundary: the input and condition mutation are third-party angr
     C-AST operations. Summary and inventory fields are owned typed contracts.
     """
+    call_id: object
+    occurrences: object
     carrier = cast(_SharedCallCodegenSurface8616, codegen)
     stats = DistinctConditionCallOccurrenceStats8616()
     carrier._inertia_distinct_condition_call_occurrence_stats_8616 = stats
@@ -1758,7 +1958,7 @@ def split_distinct_condition_call_occurrences_8616(codegen: object) -> bool:
         raise TypeError("callsite summary carrier must be a dict")
     if any(
         not isinstance(key, int) or not isinstance(summary, CallsiteSummary8616)
-        for key, summary in summary_map.items()
+        for key, summary in builtins.iter(summary_map.items())
     ):
         raise TypeError("callsite summary carrier contains an invalid owned contract")
     inventory = _validated_callsite_inventory_8616(carrier)
@@ -1769,21 +1969,21 @@ def split_distinct_condition_call_occurrences_8616(codegen: object) -> bool:
         return False
 
     occurrences_by_call: dict[
-        int,
+        cython.longlong,
         list[tuple[_ConditionRoot8616, structured_c.CFunctionCall]],
     ] = {}
     _collect_condition_call_occurrences_8616(root, occurrences_by_call, set())
     represented_elsewhere = {
         summary.callsite_addr
-        for node_id, summary in summary_map.items()
+        for node_id, summary in builtins.iter(summary_map.items())
         if node_id not in {
             call_id
-            for call_id, occurrences in occurrences_by_call.items()
+            for call_id, occurrences in builtins.iter(occurrences_by_call.items())
             if len(occurrences) > 1
         }
     }
     changed = False
-    debug_groups: list[tuple[int, int, int | None, tuple[int, ...], str]] = []
+    debug_groups: list[tuple[cython.longlong, cython.longlong, int | None, tuple[cython.longlong, ...], str]] = []
     for call_id, occurrences in occurrences_by_call.items():
         changed = _split_call_occurrences_8616(
             call_id,
@@ -1813,24 +2013,28 @@ def split_distinct_condition_call_occurrences_8616(codegen: object) -> bool:
     return changed
 
 
+@cython.ccall
 def _same_zero_argument_call_target_8616(
     lhs: structured_c.CFunctionCall,
     rhs: structured_c.CFunctionCall,
-) -> bool:
+) -> cython.bint:
     """Return whether two zero-argument calls have the same explicit target."""
+    lhs_target: object
     if tuple(lhs.args or ()) or tuple(rhs.args or ()):
         return False
     if lhs.callee_func is not None and lhs.callee_func is rhs.callee_func:
         return True
     lhs_target = _explicit_call_target_key_8616(lhs)
     rhs_target = _explicit_call_target_key_8616(rhs)
-    return lhs_target is not None and lhs_target == rhs_target
+    return lhs_target is not None and operator.eq(lhs_target, rhs_target)
 
 
+@cython.ccall
 def _explicit_call_target_key_8616(
     call: structured_c.CFunctionCall,
-) -> tuple[str, int | str] | None:
+) -> object:
     """Return explicit address or symbolic identity from an angr call node."""
+    callee_func: object
     callee_func = call.callee_func
     if callee_func is not None and isinstance(callee_func.addr, int):
         return ("address", callee_func.addr)
@@ -1848,6 +2052,7 @@ def _explicit_call_target_key_8616(
     return None
 
 
+@cython.ccall
 def _condition_return_carrier_call_8616(
     statement: structured_c.CStatement,
 ) -> structured_c.CFunctionCall | None:
@@ -1878,18 +2083,18 @@ def _same_callsite_statement_effect_8616(
     rhs_statement: structured_c.CStatement,
     rhs_call: structured_c.CFunctionCall,
     rhs_summary: CallsiteSummary8616,
-) -> bool:
+) -> cython.bint:
     """Compare two regenerated occurrences of one typed machine callsite."""
     if (
         not isinstance(lhs_summary.target_addr, int)
-        or lhs_summary.target_addr != rhs_summary.target_addr
+        or operator.ne(lhs_summary.target_addr, rhs_summary.target_addr)
     ):
         return False
     lhs_args = tuple(lhs_call.args or ())
     rhs_args = tuple(rhs_call.args or ())
-    if len(lhs_args) != len(rhs_args) or any(
+    if operator.ne(len(lhs_args), len(rhs_args)) or any(
         not _same_c_expression_8616(lhs_arg, rhs_arg)
-        for lhs_arg, rhs_arg in zip(lhs_args, rhs_args, strict=True)
+        for lhs_arg, rhs_arg in builtins.iter(zip(lhs_args, rhs_args, strict=True))
     ):
         return False
     if isinstance(lhs_statement, structured_c.CExpressionStatement):
@@ -1902,38 +2107,29 @@ def _same_callsite_statement_effect_8616(
     return False
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _SharedCallCoalesce8616:
     """Scan state for shared-callsite occurrence coalescing."""
 
-    summary_map: dict[int, CallsiteSummary8616]
-    inventory: Mapping[int, CallsiteSummary8616]
+    summary_map: object
+    inventory: Mapping[cython.longlong, CallsiteSummary8616]
     stats: SharedCallOccurrenceStats8616
-    changed: bool = False
-    pending: list[tuple[structured_c.CStatements, tuple[tuple[int, str, int], ...]]] = field(
+    changed: cython.bint = False
+    pending: object = field(
         default_factory=list
     )
-    seen_statement_lists: set[int] = field(default_factory=set)
-    debug_duplicates: list[tuple[str, int, bool, bool | None]] = field(default_factory=list)
-    seen_call_locations: dict[
-        tuple[tuple[tuple[int, str, int], ...], int],
-        tuple[
-            structured_c.CStatement,
-            structured_c.CFunctionCall,
-            CallsiteSummary8616 | None,
-        ],
-    ] = field(default_factory=dict)
-    seen_typed_callsites: dict[
-        tuple[tuple[tuple[int, str, int], ...], int],
-        tuple[structured_c.CStatement, structured_c.CFunctionCall, CallsiteSummary8616],
-    ] = field(default_factory=dict)
+    seen_statement_lists: object = field(default_factory=set)
+    debug_duplicates: object = field(default_factory=list)
+    seen_call_locations: object = field(default_factory=dict)
+    seen_typed_callsites: object = field(default_factory=dict)
 
+    @cython.ccall
     def _debug_shared_scan_8616(
         self,
         statement: structured_c.CStatement,
-        statements: list[structured_c.CStatement],
-        statement_index: int,
-        summary: CallsiteSummary8616 | None,
+        statements: object,
+        statement_index: cython.longlong,
+        summary: object,
         condition_carrier_call_id: int | None,
     ) -> None:
         """Emit opt-in diagnostics for one scanned statement."""
@@ -1955,12 +2151,13 @@ class _SharedCallCoalesce8616:
             else None,
         )
 
+    @cython.ccall
     def _debug_direct_call_8616(
         self,
         statement: structured_c.CStatement,
         call: structured_c.CFunctionCall,
-        call_id: int,
-        summary: CallsiteSummary8616 | None,
+        call_id: cython.longlong,
+        summary: object,
     ) -> None:
         """Emit opt-in diagnostics for one direct call statement."""
         if not os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"):
@@ -1988,12 +2185,13 @@ class _SharedCallCoalesce8616:
     def _bind_condition_carrier_8616(
         self,
         statement: structured_c.CStatement,
-        statements: list[structured_c.CStatement],
-        statement_index: int,
-        condition_carrier_call: structured_c.CFunctionCall | None,
-        summary: CallsiteSummary8616 | None,
-    ) -> bool:
+        statements: object,
+        statement_index: cython.longlong,
+        condition_carrier_call: object,
+        summary: object,
+    ) -> cython.bint:
         """Bind a CONDITION return-use carrier to the next statement's call."""
+        condition_summary: object
         if not _condition_carrier_bind_candidate_8616(
             condition_carrier_call, summary, statements, statement_index
         ):
@@ -2005,14 +2203,14 @@ class _SharedCallCoalesce8616:
         self.stats.raw_fact_count += 1
         matches = tuple(
             condition_call
-            for condition_call in condition_calls
+            for condition_call in iter(condition_calls)
             if _same_zero_argument_call_target_8616(condition_carrier_call, condition_call)
         )
         if len(matches) == 1:
             self.stats.normalized_fact_count += 1
             condition_call = matches[0]
             condition_summary = self.summary_map.get(id(condition_call))
-            if condition_summary is None or condition_summary.callsite_addr == summary.callsite_addr:
+            if condition_summary is None or operator.eq(condition_summary.callsite_addr, summary.callsite_addr):
                 self.summary_map[id(condition_call)] = summary
                 self.stats.classified_fact_count += 1
                 self.stats.materialized_count += 1
@@ -2028,8 +2226,8 @@ class _SharedCallCoalesce8616:
         self,
         statement: structured_c.CStatement,
         call: structured_c.CFunctionCall,
-        control_path: tuple[tuple[int, str, int], ...],
-    ) -> bool:
+        control_path: object,
+    ) -> cython.bint:
         """Adopt a proven prior typed callsite; return True to drop the statement."""
         prior_matches = tuple(
             (previous_statement, previous_call, previous_summary)
@@ -2037,7 +2235,7 @@ class _SharedCallCoalesce8616:
                 previous_statement,
                 previous_call,
                 previous_summary,
-            ) in self.seen_typed_callsites.items()
+            ) in builtins.iter(self.seen_typed_callsites.items())
             if previous_path == control_path
             and _same_regenerated_call_surface_8616(previous_call, call)
             and _same_callsite_statement_effect_8616(
@@ -2054,7 +2252,7 @@ class _SharedCallCoalesce8616:
         self.stats.raw_fact_count += 1
         normalized_matches = tuple(
             match
-            for match in prior_matches
+            for match in iter(prior_matches)
             if isinstance(match[2].target_addr, int)
             and _inventory_has_unique_target_callsite_8616(
                 self.inventory,
@@ -2072,15 +2270,17 @@ class _SharedCallCoalesce8616:
         self.stats.failure_count += 1
         return False
 
+    @cython.ccall
     def _coalesce_call_location_8616(
         self,
         statement: structured_c.CStatement,
         call: structured_c.CFunctionCall,
-        call_id: int,
-        summary: CallsiteSummary8616 | None,
-        control_path: tuple[tuple[int, str, int], ...],
-    ) -> bool:
+        call_id: cython.longlong,
+        summary: object,
+        control_path: object,
+    ) -> cython.bint:
         """Drop duplicate occurrences at one call location; False to continue."""
+        previous_occurrence: object
         call_location = (control_path, call_id)
         previous_occurrence = self.seen_call_locations.get(call_location)
         if previous_occurrence is None:
@@ -2116,15 +2316,17 @@ class _SharedCallCoalesce8616:
         self.stats.failure_count += 1
         return True
 
+    @cython.ccall
     def _coalesce_typed_callsite_8616(
         self,
         statement: structured_c.CStatement,
         call: structured_c.CFunctionCall,
-        call_id: int,
-        summary: CallsiteSummary8616 | None,
-        control_path: tuple[tuple[int, str, int], ...],
-    ) -> bool:
+        call_id: cython.longlong,
+        summary: object,
+        control_path: object,
+    ) -> cython.bint:
         """Coalesce regenerated occurrences of one typed callsite; True = keep."""
+        previous: object
         if summary is None or not isinstance(summary.callsite_addr, int):
             return True
         callsite_location = (control_path, summary.callsite_addr)
@@ -2158,14 +2360,18 @@ class _SharedCallCoalesce8616:
         self.stats.failure_count += 1
         return True
 
+    @cython.ccall
     def process_statement(
         self,
         statement: structured_c.CStatement,
-        statement_index: int,
-        statements: list[structured_c.CStatement],
-        control_path: tuple[tuple[int, str, int], ...],
-    ) -> bool:
+        statement_index: cython.longlong,
+        statements: object,
+        control_path: object,
+    ) -> cython.bint:
         """Process one statement; return True to retain it in the block."""
+        call: object
+        condition_carrier_call: object
+        summary: object
         call = _direct_statement_call_8616(statement)
         condition_carrier_call = _condition_return_carrier_call_8616(statement)
         condition_carrier_call_id = id(condition_carrier_call) if condition_carrier_call is not None else None
@@ -2196,19 +2402,22 @@ class _SharedCallCoalesce8616:
             return False
         return self._coalesce_typed_callsite_8616(statement, call, call_id, summary, control_path)
 
+    @cython.ccall
     def process_block(
         self,
         block: structured_c.CStatements,
-        control_path: tuple[tuple[int, str, int], ...],
+        control_path: object,
     ) -> None:
         """Coalesce duplicate call statements inside one block."""
+        statement: object
+        statement_index: object
         statements = block.statements
         if not isinstance(statements, list) or id(statements) in self.seen_statement_lists:
             return
         self.seen_statement_lists.add(id(statements))
         retained: list[structured_c.CStatement] = []
         child_statement_paths: list[
-            tuple[structured_c.CStatements, tuple[tuple[int, str, int], ...]]
+            tuple[structured_c.CStatements, tuple[tuple[cython.longlong, str, cython.longlong], ...]]
         ] = []
         for statement_index, statement in enumerate(statements):
             if not isinstance(
@@ -2222,17 +2431,18 @@ class _SharedCallCoalesce8616:
             child_statement_paths.extend(_iter_child_statement_paths_8616(statement, control_path))
             if self.process_statement(statement, statement_index, statements, control_path):
                 retained.append(statement)
-        if len(retained) != len(statements):
+        if operator.ne(len(retained), len(statements)):
             block.statements = retained
         self.pending.extend(reversed(child_statement_paths))
 
 
+@cython.ccall
 def _condition_carrier_bind_candidate_8616(
-    condition_carrier_call: structured_c.CFunctionCall | None,
-    summary: CallsiteSummary8616 | None,
-    statements: list[structured_c.CStatement],
-    statement_index: int,
-) -> bool:
+    condition_carrier_call: object,
+    summary: object,
+    statements: object,
+    statement_index: cython.longlong,
+) -> cython.bint:
     """Gate for binding a CONDITION return-use carrier to the next statement."""
     return (
         condition_carrier_call is not None
@@ -2244,14 +2454,15 @@ def _condition_carrier_bind_candidate_8616(
     )
 
 
+@cython.ccall
 def _same_drop_surface_8616(
     statement: structured_c.CStatement,
     previous_statement: structured_c.CStatement,
     call: structured_c.CFunctionCall,
     previous_call: structured_c.CFunctionCall,
-    summary: CallsiteSummary8616 | None,
-    previous_summary_optional: CallsiteSummary8616 | None,
-) -> bool:
+    summary: object,
+    previous_summary_optional: object,
+) -> cython.bint:
     """Return whether a duplicate call can be dropped for an earlier occurrence."""
     if not (
         summary is not None
@@ -2270,12 +2481,14 @@ def _same_drop_surface_8616(
     )
 
 
-def coalesce_shared_call_side_effect_statements_8616(codegen: object) -> bool:
+def coalesce_shared_call_side_effect_statements_8616(codegen: object) -> cython.bint:
     """Keep one physical AST occurrence for one proven binary callsite.
 
     Dynamic boundary: the input is a third-party angr codegen/C-AST graph.
     Typed callsite summaries are owned contracts and use direct attributes.
     """
+    block: object
+    control_path: object
     carrier = cast(_SharedCallCodegenSurface8616, codegen)
     stats = SharedCallOccurrenceStats8616()
     carrier._inertia_shared_call_occurrence_stats_8616 = stats
@@ -2288,7 +2501,7 @@ def coalesce_shared_call_side_effect_statements_8616(codegen: object) -> bool:
         raise TypeError("callsite summary carrier must be a dict")
     if any(
         not isinstance(key, int) or not isinstance(summary, CallsiteSummary8616)
-        for key, summary in summary_map.items()
+        for key, summary in builtins.iter(summary_map.items())
     ):
         raise TypeError("callsite summary carrier contains an invalid owned contract")
     inventory = _validated_callsite_inventory_8616(carrier)
@@ -2320,7 +2533,8 @@ def coalesce_shared_call_side_effect_statements_8616(codegen: object) -> bool:
     return scan.changed
 
 
-def _structured_control_statement_8616(stmt: object) -> bool:
+@cython.ccall
+def _structured_control_statement_8616(stmt: object) -> cython.bint:
     return isinstance(
         stmt,
         (
@@ -2333,52 +2547,54 @@ def _structured_control_statement_8616(stmt: object) -> bool:
     )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _OwnedRegionStatements8616:
     """Resolved owned statements for one switch region participant."""
 
-    addrs: tuple[int, ...]
-    keys: tuple[tuple[str, int, int], ...]
-    statements: tuple[structured_c.CStatement, ...]
-    raw_key_statements: tuple[structured_c.CStatement, ...]
-    raw_addr_statements: tuple[structured_c.CStatement, ...]
+    addrs: object
+    keys: object
+    statements: object
+    raw_key_statements: object
+    raw_addr_statements: object
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _SwitchSafetyScan8616:
     """Indexed C-AST evidence for one replacement-safety dry run."""
 
-    statements_by_addr: dict[int, tuple[structured_c.CStatement, ...]]
-    statements_by_key: dict[tuple[str, int, int], tuple[structured_c.CStatement, ...]]
-    owner_index_by_statement_id: dict[int, int]
-    statement_positions: dict[int, tuple[list[object], int]]
-    statements_node_positions: dict[int, tuple[list[object], int]]
-    statement_list_paths: dict[int, tuple[str, ...]]
-    statement_container_shapes: dict[int, dict[str, object]]
-    statement_parent_paths: dict[int, tuple[str, ...]]
-    positioned_statements_by_addr: dict[int, tuple[structured_c.CStatement, ...]]
-    positioned_statements_by_key: dict[tuple[str, int, int], tuple[structured_c.CStatement, ...]]
-    top_level_statements: tuple[structured_c.CStatement, ...]
-    root_statements: list[structured_c.CStatement] | None
-    safe_count: int = 0
-    refusal_reasons: list[str] = field(default_factory=list)
-    debug_regions: list[dict[str, object]] = field(default_factory=list)
-    replacement_spans: list[dict[str, object]] = field(default_factory=list)
+    statements_by_addr: object
+    statements_by_key: object
+    owner_index_by_statement_id: object
+    statement_positions: object
+    statements_node_positions: object
+    statement_list_paths: object
+    statement_container_shapes: object
+    statement_parent_paths: object
+    positioned_statements_by_addr: object
+    positioned_statements_by_key: object
+    top_level_statements: object
+    root_statements: object
+    safe_count: cython.longlong = 0
+    refusal_reasons: object = field(default_factory=list)
+    debug_regions: object = field(default_factory=list)
+    replacement_spans: object = field(default_factory=list)
 
     @property
-    def top_level_statement_ids(self) -> set[int]:
+    def top_level_statement_ids(self) -> set[cython.longlong]:
         """Return the identity set of top-level statements."""
-        return {id(stmt) for stmt in self.top_level_statements}
+        return {id(stmt) for stmt in iter(self.top_level_statements)}
 
-    def _refuse(self, reason: str, debug_region: dict[str, object]) -> None:
+    @cython.ccall
+    def _refuse(self, reason: object, debug_region: object) -> None:
         """Record one refusal reason on the region and the scan."""
         self.refusal_reasons.append(reason)
         debug_region["refusal_reason"] = reason
         self.debug_regions.append(debug_region)
 
+    @cython.ccall
     def _resolve_owned_statements_8616(
-        self, region: Region, *, provenance_backed_span: bool
-    ) -> tuple[_OwnedRegionStatements8616, bool]:
+        self, region: Region, *, provenance_backed_span: cython.bint
+    ) -> tuple[_OwnedRegionStatements8616, cython.bint]:
         """Resolve a region's owned statements through keys then addresses."""
         addrs = _metadata_ints_8616(region.metadata.get("region_statement_ins_addrs"))
         if not addrs and isinstance(region.block_addr, int):
@@ -2405,7 +2621,7 @@ class _SwitchSafetyScan8616:
         self,
         case_region: Region,
         owned: _OwnedRegionStatements8616,
-        debug_region: dict[str, object],
+        debug_region: object,
     ) -> None:
         """Record per-case statement coverage diagnostics."""
         _debug_list_8616(debug_region, "case_statement_counts").append(len(owned.statements))
@@ -2430,20 +2646,23 @@ class _SwitchSafetyScan8616:
         _debug_list_8616(debug_region, "case_region_types").append(case_region.region_type.value)
         _debug_list_8616(debug_region, "case_statement_addrs").append(list(owned.addrs))
         if owned.addrs:
-            start = min(int(addr) for addr in owned.addrs)
-            end = max(int(addr) for addr in owned.addrs) + 0x20
+            start = min(int(addr) for addr in iter(owned.addrs))
+            end = max(int(addr) for addr in iter(owned.addrs)) + 0x20
             _debug_list_8616(debug_region, "case_available_statement_addrs").append(
-                [addr for addr in sorted(self.positioned_statements_by_addr) if start <= addr <= end]
+                [addr for addr in builtins.iter(sorted(self.positioned_statements_by_addr)) if start <= addr <= end]
             )
 
+    @cython.ccall
     def _collect_body_statements_8616(
         self,
         region: Region,
-        switch_candidates: tuple[Region, ...],
-        provenance_backed_span: bool,
-        debug_region: dict[str, object],
-    ) -> tuple[list[structured_c.CStatement], bool, bool, bool]:
+        switch_candidates: object,
+        provenance_backed_span: cython.bint,
+        debug_region: object,
+    ) -> tuple[list[structured_c.CStatement], cython.bint, cython.bint, cython.bint]:
         """Collect case/default body statements; report missing coverage."""
+        default_region: object
+        case_region: object
         body_statements: list[structured_c.CStatement] = []
         missing_body_statement = False
         missing_positioned_body_statement = False
@@ -2487,7 +2706,7 @@ class _SwitchSafetyScan8616:
                 start = min(owned.addrs)
                 end = max(owned.addrs) + 0x20
                 debug_region["default_available_statement_addrs"] = [
-                    addr for addr in sorted(self.positioned_statements_by_addr) if start <= addr <= end
+                    addr for addr in builtins.iter(sorted(self.positioned_statements_by_addr)) if start <= addr <= end
                 ]
             if not owned.statements:
                 if owned.raw_key_statements or owned.raw_addr_statements:
@@ -2498,12 +2717,12 @@ class _SwitchSafetyScan8616:
 
     def _single_container_span_8616(
         self,
-        container: list[object],
-        concrete_positions: list[tuple[list[object], int]],
-        debug_region: dict[str, object],
-    ) -> bool:
+        container: object,
+        concrete_positions: object,
+        debug_region: object,
+    ) -> cython.bint:
         """Classify a span contained in one statement list; True = handled."""
-        child_indexes = [int(position[1]) for position in concrete_positions]
+        child_indexes = [int(position[1]) for position in iter(concrete_positions)]
         unique_child_indexes = set(child_indexes)
         if len(unique_child_indexes) == 1:
             index = child_indexes[0]
@@ -2519,7 +2738,7 @@ class _SwitchSafetyScan8616:
         start_index = min(child_indexes)
         end_index = max(child_indexes) + 1
         if container is self.root_statements and any(
-            _structured_control_statement_8616(stmt) for stmt in container[start_index:end_index]
+            _structured_control_statement_8616(stmt) for stmt in iter(container[start_index:end_index])
         ):
             self._refuse("structured_control_in_switch_span_unmaterialized", debug_region)
             debug_region["span"] = [start_index, end_index]
@@ -2536,7 +2755,7 @@ class _SwitchSafetyScan8616:
                     structured_c.CWhileLoop,
                 ),
             )
-            for stmt in container[start_index:end_index]
+            for stmt in iter(container[start_index:end_index])
         ):
             self._refuse("loop_control_in_switch_span_unmaterialized", debug_region)
             debug_region["span"] = [start_index, end_index]
@@ -2567,22 +2786,23 @@ class _SwitchSafetyScan8616:
 
     def _dominant_container_span_8616(
         self,
-        container_ids: set[int],
-        concrete_positions: list[tuple[list[object], int]],
-        debug_region: dict[str, object],
-    ) -> bool:
+        container_ids: object,
+        concrete_positions: object,
+        debug_region: object,
+    ) -> cython.bint:
         """Classify via the largest valid non-root container span."""
-        dominant_spans: list[tuple[int, list[object], int, int, int]] = []
+        container_id: object
+        dominant_spans: list[tuple[cython.longlong, list[object], cython.longlong, cython.longlong, cython.longlong]] = []
         for container_id in container_ids:
             container_positions = [
-                position for position in concrete_positions if id(position[0]) == container_id
+                position for position in iter(concrete_positions) if operator.eq(id(position[0]), container_id)
             ]
             if not container_positions:
                 continue
             container = container_positions[0][0]
             if container is self.root_statements:
                 continue
-            child_indexes = [int(position[1]) for position in container_positions]
+            child_indexes = [int(position[1]) for position in iter(container_positions)]
             unique_child_indexes = set(child_indexes)
             if len(unique_child_indexes) <= 1:
                 continue
@@ -2591,7 +2811,7 @@ class _SwitchSafetyScan8616:
                 continue
             start_index = min(child_indexes)
             end_index = max(child_indexes) + 1
-            if any(_structured_control_statement_8616(stmt) for stmt in container[start_index:end_index]):
+            if any(_structured_control_statement_8616(stmt) for stmt in iter(container[start_index:end_index])):
                 continue
             dominant_spans.append((len(unique_child_indexes), container, start_index, end_index, len(child_indexes)))
         if not dominant_spans:
@@ -2625,15 +2845,16 @@ class _SwitchSafetyScan8616:
 
     def _owner_index_span_8616(
         self,
-        covered_statements: tuple[structured_c.CStatement, ...],
-        debug_region: dict[str, object],
+        covered_statements: object,
+        debug_region: object,
     ) -> None:
         """Classify the covered span via top-level owner indexes."""
-        covered_indexes = [self.owner_index_by_statement_id.get(id(stmt)) for stmt in covered_statements]
-        if any(index is None for index in covered_indexes):
+        index: object
+        covered_indexes = [self.owner_index_by_statement_id.get(id(stmt)) for stmt in iter(covered_statements)]
+        if any(index is None for index in iter(covered_indexes)):
             self._refuse("non_top_level_switch_statement", debug_region)
             return
-        concrete_indexes = [int(index) for index in covered_indexes if index is not None]
+        concrete_indexes = [int(index) for index in iter(covered_indexes) if index is not None]
         unique_indexes = set(concrete_indexes)
         if len(unique_indexes) == 1:
             index = concrete_indexes[0]
@@ -2642,7 +2863,7 @@ class _SwitchSafetyScan8616:
             debug_region["statement_count"] = len(concrete_indexes)
             debug_region["span_source"] = (
                 "top_level_single_statement"
-                if all(id(stmt) in self.top_level_statement_ids for stmt in covered_statements)
+                if all(id(stmt) in self.top_level_statement_ids for stmt in iter(covered_statements))
                 else "nested_top_level_owner"
             )
             return
@@ -2652,7 +2873,7 @@ class _SwitchSafetyScan8616:
             return
         start_index = min(concrete_indexes)
         end_index = max(concrete_indexes) + 1
-        if any(_structured_control_statement_8616(stmt) for stmt in self.top_level_statements[start_index:end_index]):
+        if any(_structured_control_statement_8616(stmt) for stmt in iter(self.top_level_statements[start_index:end_index])):
             self._refuse("structured_control_in_switch_span_unmaterialized", debug_region)
             debug_region["span"] = [start_index, end_index]
             debug_region["statement_count"] = len(concrete_indexes)
@@ -2665,10 +2886,11 @@ class _SwitchSafetyScan8616:
         self.debug_regions.append(debug_region)
         self.safe_count += 1
 
+    @cython.ccall
     def _classify_covered_span_8616(
         self,
-        covered_statements: tuple[structured_c.CStatement, ...],
-        debug_region: dict[str, object],
+        covered_statements: object,
+        debug_region: object,
     ) -> None:
         """Classify the covered statement span into safe/refused outcomes."""
         container_parent_span = _statement_container_parent_span_8616(
@@ -2679,7 +2901,7 @@ class _SwitchSafetyScan8616:
         if isinstance(container_parent_span, dict):
             debug_region["container_parent_span"] = {
                 key: value
-                for key, value in container_parent_span.items()
+                for key, value in builtins.iter(container_parent_span.items())
                 if key != "parent"
             }
         container_path_summary = _statement_container_path_summary_8616(
@@ -2693,11 +2915,11 @@ class _SwitchSafetyScan8616:
                 covered_statements,
                 self.statement_positions,
             )
-        covered_positions = [self.statement_positions.get(id(stmt)) for stmt in covered_statements]
-        concrete_positions = [position for position in covered_positions if position is not None]
+        covered_positions = [self.statement_positions.get(id(stmt)) for stmt in iter(covered_statements)]
+        concrete_positions = [position for position in iter(covered_positions) if position is not None]
         debug_region["missing_statement_position_count"] = len(covered_positions) - len(concrete_positions)
         if concrete_positions:
-            container_ids = {id(position[0]) for position in concrete_positions}
+            container_ids = {id(position[0]) for position in iter(concrete_positions)}
             if len(container_ids) > 1 and not isinstance(container_parent_span, dict):
                 reason = (
                     "switch_spans_divergent_structured_children"
@@ -2718,6 +2940,7 @@ class _SwitchSafetyScan8616:
 
     def evaluate_region_8616(self, region: Region) -> None:
         """Evaluate one typed edge-guard switch region's replacement safety."""
+        guard_statements: object
         guard_addrs = _metadata_ints_8616(region.metadata.get("switch_guard_statement_ins_addrs"))
         guard_keys = _metadata_provenance_keys_8616(region.metadata.get("switch_guard_statement_provenance_keys"))
         switch_candidates = _metadata_regions_8616(region.metadata.get("switch_candidates"))
@@ -2725,7 +2948,7 @@ class _SwitchSafetyScan8616:
             "region_addr": region.block_addr,
             "guard_addrs": list(guard_addrs),
             "guard_key_count": len(guard_keys),
-            "case_addrs": [case_region.block_addr for case_region in switch_candidates],
+            "case_addrs": [case_region.block_addr for case_region in iter(switch_candidates)],
             "default_addr": getattr(region.metadata.get("switch_default_target"), "block_addr", None),
         }
         provenance_backed_span = bool(guard_keys)
@@ -2733,7 +2956,7 @@ class _SwitchSafetyScan8616:
             self._refuse("missing_switch_guard_statement_span", debug_region)
             return
         missing_guard_addrs = tuple(
-            addr for addr in guard_addrs if int(addr) not in self.positioned_statements_by_addr
+            addr for addr in iter(guard_addrs) if int(addr) not in self.positioned_statements_by_addr
         )
         debug_region["missing_guard_addrs"] = list(missing_guard_addrs)
         guard_statements = _available_statements_for_keys_8616(self.positioned_statements_by_key, guard_keys)
@@ -2762,10 +2985,10 @@ class _SwitchSafetyScan8616:
 
         covered_statements = _dedupe_c_statements_by_identity_8616(tuple(guard_statements) + tuple(body_statements))
         debug_region["provenance_backed_span"] = provenance_backed_span
-        if any(id(stmt) not in self.top_level_statement_ids for stmt in covered_statements):
+        if any(id(stmt) not in self.top_level_statement_ids for stmt in iter(covered_statements)):
             covered_statements = tuple(
                 stmt
-                for stmt in covered_statements
+                for stmt in iter(covered_statements)
                 if not (id(stmt) in self.top_level_statement_ids and _structured_control_statement_8616(stmt))
             )
         debug_region["covered_statement_count"] = len(covered_statements)
@@ -2779,10 +3002,14 @@ class _SwitchSafetyScan8616:
         self._classify_covered_span_8616(covered_statements, debug_region)
 
 
+@cython.ccall
 def evaluate_typed_edge_switch_replacement_safety_8616(
     codegen: object,
 ) -> TypedEdgeSwitchReplacementSafetyResult8616:
     """Dry-run whether typed switch artifacts have enough evidence to replace C AST."""
+    cfunc: object
+    graph: object
+    region: object
     graph = getattr(codegen, "_inertia_grouped_structuring_graph", None)
     regions = _typed_edge_switch_regions_8616(graph if isinstance(graph, RegionGraph) else None)
     cfunc = getattr(codegen, "cfunc", None)
@@ -2839,10 +3066,13 @@ def evaluate_typed_edge_switch_replacement_safety_8616(
     return result
 
 
+@cython.ccall
 def _record_typed_edge_switch_replacement_safety_stats_8616(
     codegen: object,
     result: TypedEdgeSwitchReplacementSafetyResult8616,
 ) -> None:
+    cfunc: object
+    stats: object
     payload = {
         "attempted_count": result.attempted_count,
         "safe_count": result.safe_count,
@@ -2867,11 +3097,13 @@ def _record_typed_edge_switch_replacement_safety_stats_8616(
     stats["typed_edge_switch_replacement_safety"] = dict(payload)
 
 
+@cython.ccall
 def _transform_blocker_reasons_8616(
-    mapped_artifacts: tuple[object, ...],
-) -> dict[str, int]:
+    mapped_artifacts: object,
+) -> object:
     """Count transform blocker reasons across normalized-ready mappings."""
-    blocker_reasons: dict[str, int] = {}
+    mapping: object
+    blocker_reasons: dict[str, cython.longlong] = {}
     for mapping in mapped_artifacts:
         if not isinstance(mapping, dict) or mapping.get("expanded_root_normalization_ready") is not True:
             continue
@@ -2883,12 +3115,15 @@ def _transform_blocker_reasons_8616(
     return blocker_reasons
 
 
+@cython.ccall
 def _loop_break_blocker_reasons_8616(
-    stage_mappings: tuple[object, ...],
-) -> tuple[int, dict[str, int]]:
+    stage_mappings: object,
+) -> tuple[cython.longlong, dict[str, cython.longlong]]:
     """Count candidate loop-break-default plans and their blockers."""
+    plan: object
+    record: object
     candidate_count = 0
-    blocker_reasons: dict[str, int] = {}
+    blocker_reasons: dict[str, cython.longlong] = {}
     for record in stage_mappings:
         if not isinstance(record, dict):
             continue
@@ -2906,13 +3141,14 @@ def _loop_break_blocker_reasons_8616(
 
 def _pre_codegen_probe_counts_8616(
     project: object,
-    normalization_ready_artifact_count: int,
-) -> tuple[int, int, dict[str, int], int, dict[str, int]]:
+    normalization_ready_artifact_count: cython.longlong,
+) -> tuple[cython.longlong, cython.longlong, dict[str, cython.longlong], cython.longlong, dict[str, cython.longlong]]:
     """Merge the latest pre-codegen probe's readiness/blocker counts."""
+    pre_codegen_records: object
     pre_codegen_transform_ready_artifact_count = 0
-    pre_codegen_transform_blocker_reasons: dict[str, int] = {}
+    pre_codegen_transform_blocker_reasons: dict[str, cython.longlong] = {}
     loop_break_default_candidate_count = 0
-    loop_break_default_blocker_reasons: dict[str, int] = {}
+    loop_break_default_blocker_reasons: dict[str, cython.longlong] = {}
     pre_codegen_records = getattr(project, "_inertia_pre_codegen_seqnode_probe_8616", None)
     if not (isinstance(pre_codegen_records, list) and pre_codegen_records):
         return (
@@ -2934,7 +3170,7 @@ def _pre_codegen_probe_counts_8616(
     mapped_artifacts = tuple(latest_probe.get("pre_codegen_grouped_switch_artifact_mappings", ()) or ())
     mapped_ready_artifact_count = sum(
         1
-        for mapping in mapped_artifacts
+        for mapping in iter(mapped_artifacts)
         if isinstance(mapping, dict)
         and isinstance(mapping.get("decision_tree_summary"), dict)
         and isinstance(
@@ -2949,7 +3185,7 @@ def _pre_codegen_probe_counts_8616(
     )
     pre_codegen_transform_ready_artifact_count = sum(
         1
-        for mapping in mapped_artifacts
+        for mapping in iter(mapped_artifacts)
         if isinstance(mapping, dict) and mapping.get("expanded_root_transform_ready") is True
     )
     pre_codegen_transform_blocker_reasons = _transform_blocker_reasons_8616(mapped_artifacts)
@@ -2968,20 +3204,24 @@ def _pre_codegen_probe_counts_8616(
 
 def _record_typed_edge_switch_lowering_status_8616(codegen: object) -> None:
     """Record whether this pass can production-lower typed switch artifacts."""
+    cfunc: object
+    graph: object
+    project: object
+    typed_graph: object
     graph = getattr(codegen, "_inertia_grouped_structuring_graph", None)
     typed_graph = graph if isinstance(graph, RegionGraph) else None
     regions = _typed_edge_switch_regions_8616(typed_graph)
     all_artifacts: tuple[dict[str, Any], ...] = tuple(
         cast(dict[str, Any], artifact)
-        for region in tuple(typed_graph.nodes if typed_graph is not None else ())
+        for region in builtins.iter(tuple(typed_graph.nodes if typed_graph is not None else ()))
         if isinstance((artifact := region.metadata.get("typed_edge_switch_region_artifact")), dict)
     )
     artifact_count = len(all_artifacts)
-    partial_artifact_count = sum(1 for artifact in all_artifacts if artifact.get("status") == "partial_ladder")
-    ready_artifact_count = sum(1 for artifact in all_artifacts if artifact.get("status") == "ready")
+    partial_artifact_count = sum(1 for artifact in iter(all_artifacts) if artifact.get("status") == "partial_ladder")
+    ready_artifact_count = sum(1 for artifact in iter(all_artifacts) if artifact.get("status") == "ready")
     normalization_ready_artifact_count = sum(
         1
-        for artifact in all_artifacts
+        for artifact in iter(all_artifacts)
         if isinstance(artifact.get("decision_tree_summary"), dict)
         and isinstance(artifact["decision_tree_summary"].get("expanded_root_normalization_readiness"), dict)
         and artifact["decision_tree_summary"]["expanded_root_normalization_readiness"].get("ready") is True
@@ -3011,13 +3251,13 @@ def _record_typed_edge_switch_lowering_status_8616(codegen: object) -> None:
     payload.update(
         {
             "artifact_count": artifact_count,
-            "loop_break_default_blocker_reasons": dict(sorted(loop_break_default_blocker_reasons.items())),
+            "loop_break_default_blocker_reasons": dict(sorted(tuple(loop_break_default_blocker_reasons.items()))),
             "loop_break_default_candidate_count": loop_break_default_candidate_count,
             "partial_artifact_count": partial_artifact_count,
             "ready_artifact_count": ready_artifact_count,
             "normalization_ready_artifact_count": normalization_ready_artifact_count,
             "pre_codegen_transform_ready_artifact_count": pre_codegen_transform_ready_artifact_count,
-            "pre_codegen_transform_blocker_reasons": dict(sorted(pre_codegen_transform_blocker_reasons.items())),
+            "pre_codegen_transform_blocker_reasons": dict(sorted(tuple(pre_codegen_transform_blocker_reasons.items()))),
             "changed": False,
             "owner": "structuring.codegen",
         }
@@ -3037,22 +3277,28 @@ def _record_typed_edge_switch_lowering_status_8616(codegen: object) -> None:
     stats["typed_edge_switch_lowering_status"] = dict(payload)
 
 
+@cython.ccall
 def _materialize_edge_switch_node_8616(
     region: Region,
     typed_graph: RegionGraph | None,
     codegen: object,
-) -> structured_c.CSwitchCase | str:
+) -> object:
     """Build one region's CSwitchCase or return its refusal reason."""
+    case_body: object
+    default_body: object
+    switch_expr: object
+    case_region: object
+    case_value: object
     switch_expr = region.metadata.get("switch_expr_ast")
     if not isinstance(switch_expr, structured_c.CExpression):
         return "missing_switch_expr_ast"
 
     switch_candidates = _metadata_regions_8616(region.metadata.get("switch_candidates"))
     case_values = _typed_edge_switch_case_values_8616(region)
-    if len(switch_candidates) != len(case_values):
+    if operator.ne(len(switch_candidates), len(case_values)):
         return "case_value_count_mismatch"
 
-    cases: list[tuple[int, structured_c.CStatements]] = []
+    cases: list[tuple[cython.longlong, structured_c.CStatements]] = []
     missing_case_body = False
     for case_value, case_region in zip(case_values, switch_candidates, strict=True):
         case_body = _statements_node_from_region_8616(case_region, codegen)
@@ -3078,8 +3324,12 @@ def _materialize_edge_switch_node_8616(
     )
 
 
+@cython.ccall
 def materialize_typed_edge_switch_ast_8616(codegen: object) -> TypedEdgeSwitchAstMaterializationResult8616:
     """Build CSwitchCase artifacts for typed edge-guard switch regions when safe."""
+    graph: object
+    typed_graph: object
+    region: object
     graph = getattr(codegen, "_inertia_grouped_structuring_graph", None)
     typed_graph = graph if isinstance(graph, RegionGraph) else None
     if typed_graph is not None:
@@ -3123,6 +3373,11 @@ def materialize_typed_edge_switch_ast_8616(codegen: object) -> TypedEdgeSwitchAs
 
 def replace_typed_edge_switch_ast_8616(codegen: object) -> TypedEdgeSwitchAstReplacementResult8616:
     """Replace safe top-level C AST spans with typed switch artifacts."""
+    ast_node: object
+    end: object
+    replacement_span: object
+    start: object
+    statements: object
     safety = evaluate_typed_edge_switch_replacement_safety_8616(codegen)
     if safety.safe_count <= 0:
         result = TypedEdgeSwitchAstReplacementResult8616(
@@ -3145,7 +3400,7 @@ def replace_typed_edge_switch_ast_8616(codegen: object) -> TypedEdgeSwitchAstRep
     materialization = materialize_typed_edge_switch_ast_8616(codegen)
     ast_nodes = tuple(getattr(codegen, "_inertia_typed_edge_switch_ast_nodes_8616", ()) or ())
     replacement_spans = tuple(getattr(codegen, "_inertia_typed_edge_switch_replacement_spans_8616", ()) or ())
-    replacements: list[tuple[list[object], int, int, structured_c.CSwitchCase]] = []
+    replacements: list[tuple[list[object], cython.longlong, cython.longlong, structured_c.CSwitchCase]] = []
     refusal_reasons: list[str] = list(materialization.refusal_reasons)
     for replacement_span, ast_node in zip(replacement_spans, ast_nodes, strict=False):
         span = (
@@ -3196,7 +3451,8 @@ def replace_typed_edge_switch_ast_8616(codegen: object) -> TypedEdgeSwitchAstRep
     return result
 
 
-def apply_structuring_codegen_8616(codegen: object) -> bool:
+@cython.ccall
+def apply_structuring_codegen_8616(codegen: object) -> cython.bint:
     """Apply structuring-based code generation pass to codegen.
 
     This is the entry point for the decompiler framework integration,
@@ -3213,6 +3469,7 @@ def apply_structuring_codegen_8616(codegen: object) -> bool:
         It generates information about loop/switch rendering but does not
         directly modify C text at this stage (that happens in simplification).
     """
+    cfunc: object
     # Get the codegen cfunc if available
     cfunc = getattr(codegen, "cfunc", None)
     if cfunc is None:

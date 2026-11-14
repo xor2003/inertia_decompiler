@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Transport return-value origins across native AIL-to-C conversion.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -17,11 +20,12 @@ from typing import Protocol, cast
 
 from angr import ailment
 from angr.analyses.decompiler.structured_codegen.c import CReturn, CStructuredCodeGenerator
+import dataclasses
 
 _ORIGIN_TAG = "inertia_x86_16_return_value_origin"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ReturnValueOrigin8616:
     """Value origin and independently observed return site for one C use.
 
@@ -30,9 +34,9 @@ class ReturnValueOrigin8616:
     be inferred from that expression location.
     """
 
-    instruction_addr: int
-    block_addr: int
-    width_bits: int
+    instruction_addr: cython.longlong
+    block_addr: cython.longlong
+    width_bits: cython.longlong
     return_instruction_addr: int | None = None
     return_block_addr: int | None = None
 
@@ -44,6 +48,7 @@ class _ValueSurface8616(Protocol):
     bits: object
 
 
+@cython.ccall
 def _nonnegative_integer(value: object) -> int | None:
     """Reject malformed metadata, including Boolean values disguised as integers."""
     if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
@@ -51,8 +56,12 @@ def _nonnegative_integer(value: object) -> int | None:
     return None
 
 
+@cython.ccall
 def _ail_value_origin(statement: ailment.Stmt.Return) -> ReturnValueOrigin8616 | None:
     """Read complete source metadata for exactly one returned AIL value."""
+    block: object
+    instruction: object
+    width: object
     if len(statement.ret_exprs) != 1:
         return None
     value = cast(_ValueSurface8616, statement.ret_exprs[0])
@@ -71,8 +80,10 @@ def _ail_value_origin(statement: ailment.Stmt.Return) -> ReturnValueOrigin8616 |
     )
 
 
+@cython.ccall
 def return_value_origin_8616(statement: CReturn) -> ReturnValueOrigin8616 | None:
     """Read transported source identity without treating it as value-flow proof."""
+    origin: object
     origin = statement.tags.get(_ORIGIN_TAG)
     return origin if isinstance(origin, ReturnValueOrigin8616) else None
 
@@ -88,6 +99,7 @@ def apply_codegen_return_origin_8616() -> None:
         self: CStructuredCodeGenerator, statement: ailment.Stmt.Return, **kwargs: object,
     ) -> CReturn:
         """Keep native values and copy source metadata onto the owning return use."""
+        origin: object
         result = original(self, statement, **kwargs)
         if self.project.arch.name != "86_16":
             return result

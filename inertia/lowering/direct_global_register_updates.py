@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize proven register-carried direct-global logical updates.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import os
 import sys
@@ -34,9 +37,11 @@ from .direct_global_register_update_contracts import (
 )
 from .real_mode_linear import _capstone_insns_for_direct_global_update_8616, _direct_global_update_blocks_8616
 from .segment_access_policy import instruction_addrs_from_node_8616
+import operator
+import builtins
 
-type ProjectBoundary8616 = Any
-type CodegenBoundary8616 = Any
+ProjectBoundary8616 = typing.TypeAliasType("ProjectBoundary8616", Any)
+CodegenBoundary8616 = typing.TypeAliasType("CodegenBoundary8616", Any)
 
 
 class _FunctionLookupBoundary8616(Protocol):
@@ -46,15 +51,18 @@ class _FunctionLookupBoundary8616(Protocol):
         """Return one function by address without creating it."""
 
 
-def _boundary_attr_8616(value: object, name: str, default: object = None) -> object:
+@cython.ccall
+def _boundary_attr_8616(value: object, name: object, default: object = None) -> object:
     """Read one dynamic third-party angr or Capstone boundary attribute."""
     # Dynamic boundary: angr and Capstone objects expose version-dependent fields.
     return getattr(value, name, default)
 
 
-def _direct_memory_identity_8616(operand: object) -> tuple[int, int] | None:
+@cython.ccall
+def _direct_memory_identity_8616(operand: object) -> object:
     """Return an unindexed direct-memory offset and byte width."""
-    if _boundary_attr_8616(operand, "type", None) != X86_OP_MEM:
+    memory: object
+    if operator.ne(_boundary_attr_8616(operand, "type", None), X86_OP_MEM):
         return None
     memory = _boundary_attr_8616(operand, "mem", None)
     width = _boundary_attr_8616(operand, "size", None)
@@ -74,11 +82,18 @@ def _direct_memory_identity_8616(operand: object) -> tuple[int, int] | None:
     return displacement & 0xFFFF, width
 
 
+@cython.ccall
 def collect_direct_global_register_updates_8616(
     project: ProjectBoundary8616,
     function: object,
 ) -> tuple[DirectGlobalRegisterUpdate8616, ...]:
     """Collect exact adjacent MOV-load plus logical-memory-update facts."""
+    destination: object
+    operation: object
+    source: object
+    block: object
+    previous_wrapper: object
+    update_wrapper: object
     operations = {
         X86_INS_AND: DirectGlobalRegisterUpdateOp8616.AND,
         X86_INS_OR: DirectGlobalRegisterUpdateOp8616.OR,
@@ -93,12 +108,12 @@ def collect_direct_global_register_updates_8616(
             operation = operations.get(_boundary_attr_8616(update, "id", None))
             previous_operands_value = _boundary_attr_8616(previous, "operands", ())
             update_operands_value = _boundary_attr_8616(update, "operands", ())
-            previous_operands: tuple[object, ...] = (
+            previous_operands: object = (
                 tuple(previous_operands_value)
                 if isinstance(previous_operands_value, Iterable)
                 else ()
             )
-            update_operands: tuple[object, ...] = (
+            update_operands: object = (
                 tuple(update_operands_value)
                 if isinstance(update_operands_value, Iterable)
                 else ()
@@ -131,40 +146,43 @@ def collect_direct_global_register_updates_8616(
     return tuple(dict.fromkeys(facts))
 
 
+@cython.ccall
 def _mov_update_shape_8616(
     previous: object,
-    previous_operands: tuple[object, ...],
-    update_operands: tuple[object, ...],
-    operation: DirectGlobalRegisterUpdateOp8616 | None,
-) -> bool:
+    previous_operands: object,
+    update_operands: object,
+    operation: object,
+) -> cython.bint:
     """Check the adjacent pair has the MOV-load plus 2-operand-update shape."""
     return (
         operation is not None
-        and _boundary_attr_8616(previous, "id", None) == X86_INS_MOV
+        and operator.eq(_boundary_attr_8616(previous, "id", None), X86_INS_MOV)
         and _update_operand_shape_8616(previous_operands, update_operands)
     )
 
 
+@cython.ccall
 def _update_operand_shape_8616(
-    previous_operands: tuple[object, ...], update_operands: tuple[object, ...]
-) -> bool:
+    previous_operands: object, update_operands: object
+) -> cython.bint:
     """Check both instructions expose the expected 2-operand register slots."""
     return (
         len(previous_operands) == 2
         and len(update_operands) == 2
-        and _boundary_attr_8616(previous_operands[0], "type", None) == X86_OP_REG
-        and _boundary_attr_8616(update_operands[1], "type", None) == X86_OP_REG
+        and operator.eq(_boundary_attr_8616(previous_operands[0], "type", None), X86_OP_REG)
+        and operator.eq(_boundary_attr_8616(update_operands[1], "type", None), X86_OP_REG)
     )
 
 
+@cython.ccall
 def _direct_update_facts_match_8616(
-    source: tuple[int, int] | None,
-    destination: tuple[int, int] | None,
+    source: object,
+    destination: object,
     register_id: object,
     update_register_id: object,
     previous_address: object,
     update_address: object,
-) -> bool:
+) -> cython.bint:
     """Check memory identity, register, and address facts all align."""
     return (
         _mem_identities_align_8616(source, destination)
@@ -175,13 +193,15 @@ def _direct_update_facts_match_8616(
     )
 
 
+@cython.ccall
 def _mem_identities_align_8616(
-    source: tuple[int, int] | None, destination: tuple[int, int] | None
-) -> bool:
+    source: object, destination: object
+) -> cython.bint:
     """Check both memory operands resolved to the same segment space."""
-    return source is not None and destination is not None and source[1] == destination[1]
+    return source is not None and destination is not None and operator.eq(source[1], destination[1])
 
 
+@cython.ccall
 def _source_variable_8616(
     project: ProjectBoundary8616,
     codegen: CodegenBoundary8616,
@@ -190,6 +210,7 @@ def _source_variable_8616(
     variable_type: object,
 ) -> structured_c.CExpression | None:
     """Create a named source or an exact segmented-helper fallback."""
+    entry: object
     if isinstance(synthetic_globals, dict):
         entry = synthetic_globals.get(fact.source_offset)
         if isinstance(entry, tuple) and len(entry) >= 2 and isinstance(entry[0], str):
@@ -221,10 +242,11 @@ def _source_variable_8616(
     )
 
 
+@cython.ccall
 def _replace_unsupported_carrier_8616(
     expression: object,
     replacement: structured_c.CExpression,
-) -> int:
+) -> cython.longlong:
     """Replace unsupported leaves while preserving the existing projection tree."""
     if isinstance(expression, structured_c.CDirtyExpression):
         return -1
@@ -258,8 +280,12 @@ def materialize_direct_global_register_updates_8616(
     synthetic_globals: object,
     *,
     query_session: StructuredAstQuerySession8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """Replace exact tagged update RHSs using one copied assignment projection."""
+    function: object
+    functions: object
+    query_index: object
+    fact: object
     cfunc = _boundary_attr_8616(codegen, "cfunc", None)
     function_addr = _boundary_attr_8616(cfunc, "addr", None)
     functions = _boundary_attr_8616(_boundary_attr_8616(project, "kb", None), "functions", None)
@@ -287,7 +313,7 @@ def materialize_direct_global_register_updates_8616(
     all_assignments = (
         query_index.assignments
         if query_index is not None
-        else tuple(node for node in _iter_c_nodes_deep_8616(root) if isinstance(node, structured_c.CAssignment))
+        else tuple(node for node in builtins.iter(_iter_c_nodes_deep_8616(root)) if isinstance(node, structured_c.CAssignment))
         if facts
         else ()
     )
@@ -314,7 +340,7 @@ def materialize_direct_global_register_updates_8616(
 
 
 def _debug_dump_update_candidates_8616(
-    facts: tuple[DirectGlobalRegisterUpdate8616, ...],
+    facts: object,
     all_assignments: Iterable[structured_c.CAssignment],
 ) -> None:
     """Emit the fact/assignment census used for debug correlation."""
@@ -322,14 +348,14 @@ def _debug_dump_update_candidates_8616(
         (
             _boundary_attr_8616(_boundary_attr_8616(node, "lhs", None), "variable", None),
             type(_boundary_attr_8616(node, "lhs", None)).__name__,
-            sorted(instruction_addrs_from_node_8616(node)),
+            sorted(tuple(instruction_addrs_from_node_8616(node))),
             type(_boundary_attr_8616(node, "rhs", None)).__name__,
             sum(
                 isinstance(item, structured_c.CDirtyExpression)
-                for item in _iter_c_nodes_deep_8616(_boundary_attr_8616(node, "rhs", None))
+                for item in builtins.iter(_iter_c_nodes_deep_8616(_boundary_attr_8616(node, "rhs", None)))
             ),
         )
-        for node in all_assignments
+        for node in iter(all_assignments)
     ]
     print(f"[direct-global-register-update] facts={facts!r} assignments={candidates!r}", file=sys.stderr)
 
@@ -337,11 +363,11 @@ def _debug_dump_update_candidates_8616(
 def _fact_match_assignments_8616(
     fact: DirectGlobalRegisterUpdate8616,
     all_assignments: Iterable[structured_c.CAssignment],
-) -> tuple[structured_c.CAssignment, ...] | None:
+) -> object:
     """Find the assignments covering every destination byte lane of a fact."""
     direct_lane_matches = [
         node
-        for node in all_assignments
+        for node in iter(all_assignments)
         if fact.update_insn_addr in instruction_addrs_from_node_8616(node)
         and isinstance(node.lhs, structured_c.CVariable)
         and isinstance(node.lhs.variable, SimMemoryVariable)
@@ -352,31 +378,35 @@ def _fact_match_assignments_8616(
     ]
     segmented_store_matches = [
         node
-        for node in all_assignments
+        for node in iter(all_assignments)
         if fact.update_insn_addr in instruction_addrs_from_node_8616(node)
         and isinstance(node.lhs, structured_c.CFunctionCall)
         and any(
             isinstance(item, structured_c.CDirtyExpression)
-            for item in _iter_c_nodes_deep_8616(node.rhs)
+            for item in builtins.iter(_iter_c_nodes_deep_8616(node.rhs))
         )
     ]
-    lanes = {int(node.lhs.variable.addr) & 0xFFFF: node for node in direct_lane_matches}
+    lanes = {int(node.lhs.variable.addr) & 0xFFFF: node for node in iter(direct_lane_matches)}
     expected_lanes = set(range(fact.destination_offset, fact.destination_offset + fact.width))
-    if set(lanes) == expected_lanes and len(direct_lane_matches) == fact.width:
+    if operator.eq(set(lanes), expected_lanes) and operator.eq(len(direct_lane_matches), fact.width):
         return tuple(lanes.values())
-    if len(segmented_store_matches) == fact.width:
+    if operator.eq(len(segmented_store_matches), fact.width):
         return tuple(segmented_store_matches)
     return None
 
 
+@cython.ccall
 def _apply_update_fact_8616(
     project: ProjectBoundary8616,
     codegen: CodegenBoundary8616,
     synthetic_globals: object,
     fact: DirectGlobalRegisterUpdate8616,
     all_assignments: Iterable[structured_c.CAssignment],
-) -> tuple[bool, bool]:
+) -> tuple[cython.bint, cython.bint]:
     """Apply one update fact; return (materialized, ast_changed)."""
+    matched_assignments: object
+    source: object
+    assignment: object
     matched_assignments = _fact_match_assignments_8616(fact, all_assignments)
     if matched_assignments is None:
         return False, False

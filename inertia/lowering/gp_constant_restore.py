@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Publish constant GP restores whose addressing use was folded.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from enum import Enum
 
@@ -28,6 +31,7 @@ from .gp_stack_restore_identity import (
     _runtime_restore_word_8616,
 )
 from .segment_access_policy import instruction_addrs_from_node_8616
+import operator
 
 
 class ConstantRestorePublication8616(Enum):
@@ -38,24 +42,30 @@ class ConstantRestorePublication8616(Enum):
     INSERTED = "inserted"
 
 
-def _constant_write_matches(statement: c.CAssignment, fact: SegmentStackRestoreFact8616) -> bool:
+@cython.ccall
+def _constant_write_matches(statement: c.CAssignment, fact: SegmentStackRestoreFact8616) -> cython.bint:
     """Recognize an exact word write, including a simplified zero low word."""
+    target: object
     word = _runtime_restore_word_8616(statement, fact.restore_register)
     if isinstance(word, c.CConstant):
-        return bool(word.value == fact.constant_value)
+        return bool(operator.eq(word.value, fact.constant_value))
     target = runtime_gp_expression_view_8616(statement.lhs)
     source = runtime_gp_expression_view_8616(_masked_value_8616(statement.rhs, 0xFFFF0000))
     return (fact.constant_value == 0 and target is not None and target.width == 4
-            and target.register_name == runtime_gp_live_in_name_8616(fact.restore_register)
-            and source == target)
+            and operator.eq(target.register_name, runtime_gp_live_in_name_8616(fact.restore_register))
+            and operator.eq(source, target))
 
 
+@cython.ccall
 def _publication_site(
-    containers: tuple[c.CStatements, ...],
+    containers: object,
     fact: SegmentStackRestoreFact8616,
-) -> tuple[c.CStatements, int, bool] | None:
+) -> object:
     """Find one pure segment sibling, refusing conflicting GP publications."""
-    anchors: list[tuple[c.CStatements, int]] = []
+    container: object
+    index: object
+    statement: object
+    anchors: list[tuple[c.CStatements, cython.longlong]] = []
     existing = False
     for container in containers:
         for index, statement in enumerate(container.statements):
@@ -77,17 +87,20 @@ def _publication_site(
     return container, index, existing
 
 
+@cython.ccall
 def publish_constant_gp_restore_8616(
     codegen: object,
-    containers: tuple[c.CStatements, ...],
+    containers: object,
     fact: SegmentStackRestoreFact8616,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> ConstantRestorePublication8616:
     """Publish only at a unique pure segment sibling of the proven restore.
 
     A same-instruction non-segment effect is a conflict unless it is already
     the exact constant write. Aggregate control-flow tags are not anchors.
     """
+    publication: object
+    site: object
     if fact.verdict is not SegmentStackRestoreVerdict8616.PROVEN or fact.constant_value is None:
         return ConstantRestorePublication8616.REFUSED
     site = _publication_site(containers, fact)

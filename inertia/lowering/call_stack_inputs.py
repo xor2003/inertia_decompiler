@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize source-proved architectural SP inputs at generated calls.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ Consumes alias, widening, and typed facts
 Do not recover semantics from COD, source, assembly, or rendered C text
 """
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Protocol, cast
@@ -54,6 +57,9 @@ from .entry_stack_pointer_capture import (
 )
 from .gp_register_state import runtime_gp_state_assignment_8616
 from .semantic_cast import CSemanticCast8616
+import dataclasses
+import operator
+import builtins
 
 
 class _CodegenBindings8616(Protocol):
@@ -63,25 +69,27 @@ class _CodegenBindings8616(Protocol):
     _inertia_call_stack_input_lowering_8616: CallStackInputResult8616 | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _CallPlan8616:
     """One complete preflight plan before any argument or tree changes."""
 
     call: c.CFunctionCall
     authority: CallStackInputAuthority8616
-    arguments: tuple[c.CExpression, ...]
+    arguments: object
     value_use: CallStackValueUse8616
 
     @property
     def position(self) -> CallStackPosition8616:
         """Project scalar coordinates for SP writes; never proof by itself."""
+        position: object
         position = call_stack_authority_position_8616(self.authority)
         assert position is not None
         return position
 
 
-def _outcome(raw: int, normalized: int, failure: CallStackInputFailure8616 | None = None,
-             *, changed: int = 0, classified: int | None = None) -> CallStackInputResult8616:
+@cython.ccall
+def _outcome(raw: cython.longlong, normalized: cython.longlong, failure: CallStackInputFailure8616 | None = None,
+             *, changed: cython.longlong = 0, classified: int | None = None) -> CallStackInputResult8616:
     """Close one atomic function attempt without claiming partial publication."""
     known = normalized if failure is None else (classified or 0)
     status = CallStackInputStatus8616.REFUSED if failure is not None else (
@@ -93,8 +101,11 @@ def _outcome(raw: int, normalized: int, failure: CallStackInputFailure8616 | Non
     ), failure)
 
 
+@cython.ccall
 def _plan_failure(call: c.CFunctionCall) -> CallStackInputFailure8616 | None:
     """Require declared storage and transparent argument computations."""
+    value_type: object
+    argument: object
     if call_stack_value_size_8616(call.type) is None:
         return CallStackInputFailure8616.TYPE_UNPROVEN
     for argument in call.args or []:
@@ -106,9 +117,11 @@ def _plan_failure(call: c.CFunctionCall) -> CallStackInputFailure8616 | None:
     return None
 
 
+@cython.ccall
 def _sp_write(codegen: object, function: StackPointerCaptureFunction8616, entry: c.CVariable,
-              offset: int) -> c.CAssignment:
+              offset: cython.longlong) -> c.CAssignment:
     """Delegate the word write, including upper-lane preservation, to its owner."""
+    assignment: object
     expression = entry_stack_pointer_projection_8616(entry, offset, codegen)
     assignment = runtime_gp_state_assignment_8616("sp", expression, codegen=codegen, function_addr=function.addr)
     if assignment is None:
@@ -119,38 +132,43 @@ def _sp_write(codegen: object, function: StackPointerCaptureFunction8616, entry:
 
 def _existing_binding_is_current(codegen: object, function: StackPointerCaptureFunction8616,
                                  wrapper: object, entry: c.CVariable, authority: CallStackInputAuthority8616,
-                                 *, value_use: CallStackValueUse8616) -> bool:
+                                 *, value_use: CallStackValueUse8616) -> cython.bint:
     """Check the canonical producer layout; validation separately proves equations."""
+    layout: object
+    position: object
     layout = call_stack_context_layout_8616(wrapper, value_use=value_use)
-    if layout is None or layout.marker.authority != authority:
+    if layout is None or operator.ne(layout.marker.authority, authority):
         return False
     position = call_stack_authority_position_8616(authority)
     if position is None:
         return False
-    if not isinstance(entry.variable, SimTemporaryVariable) or layout.marker.entry_tmp_id != entry.variable.tmp_id:
+    if not isinstance(entry.variable, SimTemporaryVariable) or operator.ne(layout.marker.entry_tmp_id, entry.variable.tmp_id):
         return False
     pairs = ((layout.pre_write, position.callee_entry_offset), (layout.post_write, position.caller_after_offset))
     return all(_same_c_expression_8616(actual.lhs, expected.lhs) and _same_c_expression_8616(actual.rhs, expected.rhs)
-               for actual, offset in pairs if (expected := _sp_write(codegen, function, entry, offset)) is not None)
+               for actual, offset in iter(pairs) if (expected := _sp_write(codegen, function, entry, offset)) is not None)
 
 
-def _has_unowned_sp(root: object, allowed: tuple[object, ...]) -> bool:
+def _has_unowned_sp(root: object, allowed: object) -> cython.bint:
     """Require all remaining runtime-SP observations to have a proved owner."""
-    allowed_ids = {id(node) for item in allowed for node in _iter_c_nodes_deep_8616(item)}
+    allowed_ids = {id(node) for item in iter(allowed) for node in builtins.iter(_iter_c_nodes_deep_8616(item))}
     return any(id(node) not in allowed_ids and isinstance(node, c.CVariable)
-               and call_stack_has_runtime_sp_8616(node) for node in _iter_c_nodes_deep_8616(root))
+               and call_stack_has_runtime_sp_8616(node) for node in builtins.iter(_iter_c_nodes_deep_8616(root)))
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _Locals8616:
     """Function-scoped temporary publication with collision-free native IDs."""
 
     codegen: object
     function: StackPointerCaptureFunction8616
-    next_identity: int
+    next_identity: cython.longlong
 
+    @cython.ccall
     def create(self, type_: SimType) -> c.CVariable:
         """Allocate exactly the declared C value storage and type."""
+        actual_type: object
+        size: object
         size = call_stack_value_size_8616(type_)
         if size is None or size == 0:
             raise PipelineHardError(layer="types:call_stack_inputs", message="Preflight lost a declared temporary type",
@@ -165,7 +183,8 @@ class _Locals8616:
         return value
 
 
-def _temporary_identity_8616(value: c.CVariable) -> int:
+@cython.ccall
+def _temporary_identity_8616(value: c.CVariable) -> cython.longlong:
     """Retain the declared storage identity guaranteed by the local factory."""
     variable = value.variable
     assert isinstance(variable, SimTemporaryVariable)
@@ -175,6 +194,9 @@ def _temporary_identity_8616(value: c.CVariable) -> int:
 def _materialize_context(codegen: object, function: StackPointerCaptureFunction8616, plan: _CallPlan8616,
                          entry: c.CVariable, locals_: _Locals8616) -> c.CMultiStatementExpression:
     """Evaluate arguments, enter the callee, invoke once, then restore continuation."""
+    argument_type: object
+    result: object
+    argument: object
     statements: list[object] = []
     arguments = []
     for argument in plan.arguments:
@@ -198,17 +220,19 @@ def _materialize_context(codegen: object, function: StackPointerCaptureFunction8
     statements.append(_sp_write(codegen, function, entry, plan.position.caller_after_offset))
     assert isinstance(entry.variable, SimTemporaryVariable)
     marker = CallStackInputBinding8616(plan.authority, entry.variable.tmp_id,
-        tuple(_temporary_identity_8616(item) for item in arguments), _temporary_identity_8616(result) if result is not None else None)
+        tuple(_temporary_identity_8616(item) for item in iter(arguments)), _temporary_identity_8616(result) if result is not None else None)
     return c.CMultiStatementExpression(c.CStatements(statements, codegen=codegen), expression,
         codegen=codegen, tags={CALL_STACK_INPUT_BINDING_TAG_8616: marker})
 
 
+@cython.ccall
 def _site_authority_8616(
-    source: IRFunctionArtifact, block: IRBlock, index: int,
-    scoped_context: ScopedCallStackContext8616 | None,
+    source: IRFunctionArtifact, block: IRBlock, index: cython.longlong,
+    scoped_context: object,
     scoped_caller_scope: Real16InvocationDomain8616 | None,
 ) -> CallStackInputAuthority8616 | None:
     """Authenticate one CALL's position under universal or scoped evidence."""
+    binding: object
     if scoped_context is None:
         return prove_call_stack_position_8616(source, block.addr, index).proof
     call = block.instrs[index]
@@ -224,18 +248,26 @@ def _site_authority_8616(
     return ScopedCallPositionAuthority8616(result)
 
 
+@cython.ccall
 def _collect_plans_8616(
-    codegen: object, source: IRFunctionArtifact, nodes: tuple[object, ...],
-    sites: list[tuple[IRBlock, int, IRInstr]],
-    value_uses: dict[int, CallStackValueUse8616],
+    codegen: object, source: IRFunctionArtifact, nodes: object,
+    sites: object,
+    value_uses: object,
     scoped_context: ScopedCallStackContext8616 | None,
     scoped_caller_scope: Real16InvocationDomain8616 | None,
 ) -> tuple[tuple[_CallPlan8616, ...], CallStackInputFailure8616 | None]:
     """Require a complete function-wide set of source- and type-bound calls."""
+    authority: object
+    failure: object
+    position: object
+    value_use: object
+    block: object
+    index: object
+    instruction: object
     plans: list[_CallPlan8616] = []
     for block, index, instruction in sites:
-        matches = [node for node in nodes if isinstance(node, c.CFunctionCall)
-                   and structured_callsite_addr_8616(node) == instruction.addr]
+        matches = [node for node in iter(nodes) if isinstance(node, c.CFunctionCall)
+                   and operator.eq(structured_callsite_addr_8616(node), instruction.addr)]
         if len(matches) != 1:
             return tuple(plans), CallStackInputFailure8616.CALL_IDENTITY
         authority = _site_authority_8616(
@@ -244,7 +276,7 @@ def _collect_plans_8616(
         if authority is None or position is None:
             return tuple(plans), CallStackInputFailure8616.POSITION_UNPROVEN
         call = matches[0]
-        if direct_call_target_8616(codegen, call) != position.target_addr:
+        if operator.ne(direct_call_target_8616(codegen, call), position.target_addr):
             return tuple(plans), CallStackInputFailure8616.CALL_IDENTITY
         failure = _plan_failure(call)
         if failure is not None:
@@ -271,11 +303,16 @@ def lower_call_stack_inputs_8616(
     caller domain before any argument, temporary or AST change — scoped
     evidence is never projected through the universal path.
     """
+    capture: object
+    captured: object
+    failure: object
+    function: object
+    source: object
     function = cast(_CodegenBindings8616, codegen).cfunc
     source = current_call_stack_source_8616(codegen)
     if function is None or source is None:
         return None
-    sites = [(block, index, instruction) for block in source.blocks for index, instruction in enumerate(block.instrs)
+    sites = [(block, index, instruction) for block in iter(source.blocks) for index, instruction in builtins.iter(enumerate(block.instrs))
              if instruction.op == "CALL"]
     if not sites:
         return None
@@ -284,12 +321,12 @@ def lower_call_stack_inputs_8616(
     if not scoped:
         scoped_context, scoped_caller_scope = None, None
     nodes = tuple(_iter_c_nodes_deep_8616(function.statements))
-    wrappers = [node for node in nodes if isinstance(node, c.CMultiStatementExpression)
+    wrappers = [node for node in iter(nodes) if isinstance(node, c.CMultiStatementExpression)
                 and CALL_STACK_INPUT_BINDING_TAG_8616 in node.tags]
     capture = observe_entry_stack_pointer_capture_8616(
         codegen, source, scoped_context=scoped_context,
         scoped_caller_scope=scoped_caller_scope)
-    allowed = ((capture.assignment,) if capture is not None else ()) + tuple(wrappers)
+    allowed = (tuple((capture.assignment,)) if capture is not None else tuple(())) + tuple(wrappers)
     if _has_unowned_sp(function.statements, allowed):
         return _outcome(len(sites), 0, CallStackInputFailure8616.UNOWNED_SP_USE)
     value_uses = call_stack_value_uses_8616(function.statements)
@@ -298,31 +335,32 @@ def lower_call_stack_inputs_8616(
     if failure is not None:
         return _outcome(len(sites), len(plans), failure)
     if wrappers:
-        valid = capture is not None and len(wrappers) == len(plans)
+        valid = capture is not None and operator.eq(len(wrappers), len(plans))
         if valid and capture is not None:
             valid = all(any(_existing_binding_is_current(codegen, function, wrapper, capture.value, plan.authority,
                                                          value_use=value_uses.get(id(wrapper), CallStackValueUse8616.UNKNOWN))
-                            for wrapper in wrappers) for plan in plans)
+                            for wrapper in iter(wrappers)) for plan in iter(plans))
         return _outcome(len(sites), len(plans), None if valid else CallStackInputFailure8616.INVALID_BINDING,
                         classified=len(plans))
     captured = prepare_entry_stack_pointer_capture_8616(
-        codegen, source, tuple(plan.authority for plan in plans),
+        codegen, source, tuple(plan.authority for plan in iter(plans)),
         scoped_context=scoped_context,
         scoped_caller_scope=scoped_caller_scope)
     if captured is None or captured.failure is not None or captured.value is None:
         return _outcome(len(sites), len(plans), CallStackInputFailure8616.ENTRY_CAPTURE, classified=len(plans))
-    used = [node.variable.tmp_id for node in _iter_c_nodes_deep_8616(function.statements)
+    used = [node.variable.tmp_id for node in builtins.iter(_iter_c_nodes_deep_8616(function.statements))
             if isinstance(node, c.CVariable) and isinstance(node.variable, SimTemporaryVariable)]
-    used.extend(var.tmp_id for var in function.variables_in_use if isinstance(var, SimTemporaryVariable))
+    used.extend(var.tmp_id for var in iter(function.variables_in_use) if isinstance(var, SimTemporaryVariable))
     locals_ = _Locals8616(codegen, function, max(used, default=-1) + 1)
-    replacements = {id(plan.call): _materialize_context(codegen, function, plan, captured.value, locals_) for plan in plans}
-    opaque_ids = {id(value) for value in replacements.values()}
+    replacements = {id(plan.call): _materialize_context(codegen, function, plan, captured.value, locals_) for plan in iter(plans)}
+    opaque_ids = {id(value) for value in builtins.iter(replacements.values())}
     _replace_c_children_8616(function.statements, lambda node: replacements.get(id(node), node),
                            should_process_child=lambda node, _field: id(node) not in opaque_ids)
     function.refresh()
     return _outcome(len(sites), len(plans), changed=len(plans) + captured.changed_count)
 
 
+@cython.ccall
 def apply_call_stack_input_lowering_8616(
     codegen: object,
     *,
@@ -330,6 +368,7 @@ def apply_call_stack_input_lowering_8616(
     scoped_caller_scope: Real16InvocationDomain8616 | None = None,
 ) -> CallStackInputResult8616 | None:
     """Publish the real outcome and fail loudly for classified unmaterialized calls."""
+    result: object
     result = lower_call_stack_inputs_8616(
         codegen, scoped_context=scoped_context, scoped_caller_scope=scoped_caller_scope)
     cast(_CodegenBindings8616, codegen)._inertia_call_stack_input_lowering_8616 = result

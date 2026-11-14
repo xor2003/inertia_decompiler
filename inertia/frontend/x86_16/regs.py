@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: IR compatibility.
 
 Responsibility: stable register enums for legacy and migrated 16-bit x86 code.
@@ -5,8 +6,11 @@ Forbidden: semantic recovery, alias ownership, lowering, structuring, or rewrite
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from enum import Enum, IntEnum
+E = typing.TypeVar("E")
 
 
 class reg32_t(IntEnum):
@@ -75,7 +79,8 @@ class dtreg_t(IntEnum):
     DTREGS_COUNT = 4
 
 
-def _coerce_enum[E: IntEnum](enum_cls: type[E], value: object) -> E:
+@cython.ccall
+def _coerce_enum(enum_cls: type[E], value: object) -> E:
     """Coerce a numeric register identifier while retaining its enum type."""
     if isinstance(value, enum_cls):
         return value
@@ -90,27 +95,32 @@ def _coerce_enum[E: IntEnum](enum_cls: type[E], value: object) -> E:
     raise ValueError(f"Register {value!r} does not exist")
 
 
+@cython.ccall
 def coerce_reg32_t(value: object) -> reg32_t:
     """Return a 32-bit register enum from an enum member or numeric index."""
     return _coerce_enum(reg32_t, value)
 
 
+@cython.ccall
 def coerce_reg16_t(value: object) -> reg16_t:
     """Return a 16-bit register enum from an enum member or numeric index."""
     return _coerce_enum(reg16_t, value)
 
 
+@cython.ccall
 def coerce_reg8_t(value: object) -> reg8_t:
     """Return an 8-bit register enum from an enum member or numeric index."""
     return _coerce_enum(reg8_t, value)
 
 
+@cython.ccall
 def coerce_sgreg_t(value: object) -> sgreg_t:
     """Return a segment register enum from an enum member or numeric index."""
     return _coerce_enum(sgreg_t, value)
 
 
-def register_name_8616(value: object) -> str:
+@cython.ccall
+def register_name_8616(value: object) -> object:
     """Return the lowercase canonical name for a known 86:16 register."""
     if isinstance(value, Enum):
         return value.name.lower()

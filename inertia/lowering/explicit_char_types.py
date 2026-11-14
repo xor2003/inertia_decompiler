@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize explicit C spellings for proven scalar character signedness.
 
 Layer: Types/Lowering.
@@ -15,6 +16,8 @@ pointee and aggregate element types remain untouched.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Protocol, cast
@@ -23,6 +26,8 @@ from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimType, SimTypeChar, SimTypeFunction
 
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
+import dataclasses
+import operator
 
 __all__ = [
     "ExplicitScalarCharTypeStats8616",
@@ -31,24 +36,24 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ExplicitScalarCharTypeStats8616:
     """Closed evidence counters for explicit scalar character type spelling."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
 class _CFunctionExplicitCharTypes8616(Protocol):
     """Third-party structured C function fields consumed by this lowering."""
 
     statements: object | None
-    variables_in_use: dict[object, structured_c.CVariable]
-    unified_local_vars: dict[object, set[tuple[structured_c.CVariable, object]]]
-    arg_list: list[structured_c.CVariable]
+    variables_in_use: object
+    unified_local_vars: object
+    arg_list: object
     functy: SimTypeFunction
 
 
@@ -59,12 +64,13 @@ class _CodegenExplicitCharTypes8616(Protocol):
     _inertia_explicit_scalar_char_type_stats_8616: ExplicitScalarCharTypeStats8616
 
 
+@cython.ccall
 def explicit_scalar_char_type_8616(type_: object) -> object:
     """Return an explicitly rendered equivalent of one scalar character type."""
     if not isinstance(type_, SimTypeChar) or not isinstance(type_.signed, bool):
         return type_
     label = "signed char" if type_.signed else "unsigned char"
-    if type_.label == label:
+    if operator.eq(type_.label, label):
         return type_
     explicit = SimTypeChar(
         signed=type_.signed,
@@ -76,16 +82,17 @@ def explicit_scalar_char_type_8616(type_: object) -> object:
     return explicit
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _ExplicitCharTypeStats8616:
     """Mutable closed counters collected while normalizing scalar type slots."""
 
-    raw_count: int = 0
-    normalized_count: int = 0
-    classified_count: int = 0
-    materialized_count: int = 0
-    changed: bool = False
+    raw_count: cython.longlong = 0
+    normalized_count: cython.longlong = 0
+    classified_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    changed: cython.bint = False
 
+    @cython.ccall
     def normalize(self, type_: object) -> object:
         """Normalize one scalar type slot and update the closed counters."""
         if not isinstance(type_, SimTypeChar):
@@ -103,11 +110,14 @@ class _ExplicitCharTypeStats8616:
         return explicit
 
 
+@cython.ccall
 def _char_typed_cvariables_8616(
     cfunc: _CFunctionExplicitCharTypes8616,
-) -> dict[int, structured_c.CVariable]:
+) -> object:
     """Collect every reachable ``CVariable`` surface by object identity."""
-    cvariables: dict[int, structured_c.CVariable] = {}
+    cvar: object
+    node: object
+    cvariables: dict[cython.longlong, structured_c.CVariable] = {}
     for cvar in cfunc.variables_in_use.values():
         cvariables[id(cvar)] = cvar
     for cvar in cfunc.arg_list:
@@ -119,8 +129,13 @@ def _char_typed_cvariables_8616(
     return cvariables
 
 
-def materialize_explicit_scalar_char_types_8616(codegen: object) -> bool:
+def materialize_explicit_scalar_char_types_8616(codegen: object) -> cython.bint:
     """Preserve known scalar character signedness in structured C declarations."""
+    cfunc: object
+    cvar: object
+    entries: object
+    variable: object
+    variable_type: object
     typed_codegen = cast(_CodegenExplicitCharTypes8616, codegen)
     cfunc = typed_codegen.cfunc
     if cfunc is None:
@@ -142,7 +157,7 @@ def materialize_explicit_scalar_char_types_8616(codegen: object) -> bool:
 
     cfunc.functy.returnty = cast(SimType | None, stats.normalize(cfunc.functy.returnty))
     cfunc.functy.args = tuple(
-        cast(SimType, stats.normalize(arg_type)) for arg_type in cfunc.functy.args
+        cast(SimType, stats.normalize(arg_type)) for arg_type in iter(cfunc.functy.args)
     )
 
     typed_codegen._inertia_explicit_scalar_char_type_stats_8616 = ExplicitScalarCharTypeStats8616(

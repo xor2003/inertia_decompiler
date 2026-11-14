@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prune unread pure virtual condition carriers after condition materialization.
 
 Layer: Rewrite/Postprocess cleanup.
@@ -13,6 +14,8 @@ Unknown, live, non-SSA, and side-effecting candidates are retained.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -39,6 +42,9 @@ from inertia.lowering.c_ast_utils import (
 )
 
 from .dce_purity import PURE_LOCAL_BINARY_OPS_8616, PURE_LOCAL_UNARY_OPS_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "DeadConditionCarrierStats8616",
@@ -52,27 +58,27 @@ _CONDITION_OPS_8616: frozenset[str] = frozenset({"CmpEQ", "CmpGE", "CmpGT", "Cmp
 log: logging.Logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class VirtualConditionCarrierIdentity8616:
     """Stable SSA identity for one dynamic angr virtual variable."""
 
-    vvar_id: int
+    vvar_id: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DeadConditionCarrierStats8616:
     """Closed evidence accounting for unread virtual condition carriers."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    live_refusal_count: int = 0
-    side_effect_refusal_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    live_refusal_count: cython.longlong = 0
+    side_effect_refusal_count: cython.longlong = 0
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether at least one dead carrier was removed."""
         return self.materialized_count > 0
 
@@ -102,6 +108,7 @@ class _DeadConditionCarrierCFunction8616(Protocol):
     statements: object
 
 
+@cython.ccall
 def _carrier_identity_8616(node: object) -> VirtualConditionCarrierIdentity8616 | None:
     """Return an exact virtual-variable identity without using rendered names."""
     if isinstance(node, CVariable) and isinstance(node.vvar_id, int):
@@ -111,7 +118,8 @@ def _carrier_identity_8616(node: object) -> VirtualConditionCarrierIdentity8616 
     return None
 
 
-def _is_pure_expression_8616(node: object) -> bool:
+@cython.ccall
+def _is_pure_expression_8616(node: object) -> cython.bint:
     """Return whether an expression has no calls, memory access, or address effects."""
     if isinstance(node, (CConstant, CVariable)):
         return True
@@ -132,28 +140,35 @@ def _is_pure_expression_8616(node: object) -> bool:
 
 def _statement_blocks_8616(root: object) -> tuple[CStatements, ...]:
     """Return each dynamic structured-C statement block exactly once."""
-    return tuple(node for node in _iter_c_nodes_deep_8616(root) if isinstance(node, CStatements))
+    return tuple(node for node in builtins.iter(_iter_c_nodes_deep_8616(root)) if isinstance(node, CStatements))
 
 
+@cython.ccall
 def _read_counts_8616(
     root: object,
-    definitions: dict[VirtualConditionCarrierIdentity8616, int],
-) -> dict[VirtualConditionCarrierIdentity8616, int]:
+    definitions: object,
+) -> dict[VirtualConditionCarrierIdentity8616, cython.longlong]:
     """Count whole-tree identity occurrences after removing direct definitions."""
-    occurrences: dict[VirtualConditionCarrierIdentity8616, int] = {}
+    identity: object
+    node: object
+    occurrences: dict[VirtualConditionCarrierIdentity8616, cython.longlong] = {}
     for node in _iter_c_nodes_deep_8616(root):
         identity = _carrier_identity_8616(node)
         if identity is not None:
             occurrences[identity] = occurrences.get(identity, 0) + 1
     return {
         identity: max(count - definitions.get(identity, 0), 0)
-        for identity, count in occurrences.items()
+        for identity, count in builtins.iter(occurrences.items())
     }
 
 
-def _definition_counts_8616(blocks: tuple[CStatements, ...]) -> dict[VirtualConditionCarrierIdentity8616, int]:
+@cython.ccall
+def _definition_counts_8616(blocks: object) -> object:
     """Count direct virtual-variable definitions across the structured function."""
-    definitions: dict[VirtualConditionCarrierIdentity8616, int] = {}
+    identity: object
+    block: object
+    statement: object
+    definitions: dict[VirtualConditionCarrierIdentity8616, cython.longlong] = {}
     for block in blocks:
         for statement in block.statements:
             if not isinstance(statement, CAssignment):
@@ -164,9 +179,11 @@ def _definition_counts_8616(blocks: tuple[CStatements, ...]) -> dict[VirtualCond
     return definitions
 
 
-def _debug_identity_filter_8616() -> frozenset[int]:
+@cython.ccall
+def _debug_identity_filter_8616() -> frozenset[cython.longlong]:
     """Return optional virtual IDs selected for detailed diagnostics."""
-    selected: set[int] = set()
+    item: object
+    selected: set[cython.longlong] = set()
     for item in os.environ.get("INERTIA_DEBUG_DEAD_CONDITION_CARRIER_IDS", "").split(","):
         try:
             selected.add(int(item.strip(), 0))
@@ -175,11 +192,16 @@ def _debug_identity_filter_8616() -> frozenset[int]:
     return frozenset(selected)
 
 
+@cython.ccall
 def _identity_parent_contexts_8616(
     root: object,
     identity: VirtualConditionCarrierIdentity8616,
 ) -> tuple[str, ...]:
     """Describe direct C-AST parents of one virtual identity for diagnostics."""
+    value: object
+    attr: object
+    child: object
+    parent: object
     contexts: set[str] = set()
     for parent in _iter_c_nodes_deep_8616(root):
         for attr in _structured_slot_names_8616(parent):
@@ -189,32 +211,36 @@ def _identity_parent_contexts_8616(
             except (AttributeError, TypeError):
                 continue
             for child in _iter_c_node_children_8616(value, set()):
-                if _carrier_identity_8616(child) == identity:
+                if operator.eq(_carrier_identity_8616(child), identity):
                     contexts.add(f"{type(parent).__name__}.{attr}")
     return tuple(sorted(contexts))
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _CarrierPruneScan8616:
     """Mutable per-statement prune verdicts and evidence counters."""
 
     root: object
-    debug_identity_filter: frozenset[int]
-    raw: int = 0
-    normalized: int = 0
-    classified: int = 0
-    materialized: int = 0
-    failures: int = 0
-    live_refusals: int = 0
-    side_effect_refusals: int = 0
+    debug_identity_filter: object
+    raw: cython.longlong = 0
+    normalized: cython.longlong = 0
+    classified: cython.longlong = 0
+    materialized: cython.longlong = 0
+    failures: cython.longlong = 0
+    live_refusals: cython.longlong = 0
+    side_effect_refusals: cython.longlong = 0
 
+    @cython.ccall
     def keep(
         self,
         statement: object,
-        definitions: Mapping[VirtualConditionCarrierIdentity8616, int],
-        reads: Mapping[VirtualConditionCarrierIdentity8616, int],
-    ) -> bool:
+        definitions: Mapping[VirtualConditionCarrierIdentity8616, cython.longlong],
+        reads: Mapping[VirtualConditionCarrierIdentity8616, cython.longlong],
+    ) -> cython.bint:
         """Return whether one statement survives the carrier prune."""
+        definition_count: object
+        identity: object
+        read_count: object
         if not isinstance(statement, CAssignment) or not isinstance(statement.rhs, CBinaryOp):
             return True
         if statement.rhs.op not in _CONDITION_OPS_8616:
@@ -257,8 +283,11 @@ class _CarrierPruneScan8616:
         return False
 
 
+@cython.ccall
 def prune_unread_pure_condition_carriers_8616(codegen: object) -> DeadConditionCarrierStats8616:
     """Remove uniquely defined, unread, pure virtual comparison assignments."""
+    root: object
+    block: object
     boundary = cast(_DeadConditionCarrierCodegen8616, codegen)
     try:
         root = boundary.cfunc.statements
@@ -275,10 +304,10 @@ def prune_unread_pure_condition_carriers_8616(codegen: object) -> DeadConditionC
     for block in blocks:
         kept = [
             statement
-            for statement in block.statements
+            for statement in iter(block.statements)
             if scan.keep(statement, definitions, reads)
         ]
-        if len(kept) != len(block.statements):
+        if operator.ne(len(kept), len(block.statements)):
             block.statements = kept
 
     current = DeadConditionCarrierStats8616(
@@ -298,6 +327,7 @@ def prune_unread_pure_condition_carriers_8616(codegen: object) -> DeadConditionC
     return current
 
 
-def prune_unread_pure_condition_carriers_pass_8616(codegen: object) -> bool:
+@cython.ccall
+def prune_unread_pure_condition_carriers_pass_8616(codegen: object) -> cython.bint:
     """Run dead condition-carrier cleanup as a typed optimization pass."""
     return prune_unread_pure_condition_carriers_8616(codegen).changed

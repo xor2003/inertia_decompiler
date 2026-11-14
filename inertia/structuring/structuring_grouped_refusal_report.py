@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Structuring.
 
 Responsibility: report explicit grouped-entry refusal reasons to validation consumers.
@@ -10,27 +11,31 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
 from inertia.structuring.structuring_grouped_units import build_x86_16_cross_entry_grouped_units
+import dataclasses
+import builtins
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StructuringGroupedRefusalReportRow:
     """Summarize one explicit cross-entry grouping refusal reason."""
 
-    refusal_reason: str
-    count: int
-    likely_layer: str
-    next_root_cause_file: str
+    refusal_reason: object
+    count: cython.longlong
+    likely_layer: object
+    next_root_cause_file: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StructuringGroupedRefusalReport:
     """Carry cross-entry grouping refusal rows without treating them as success."""
 
-    rows: tuple[StructuringGroupedRefusalReportRow, ...]
+    rows: object
 
     def to_dict(self) -> dict[str, object]:
         """Return a stable serialization for validation reports."""
@@ -42,17 +47,19 @@ class StructuringGroupedRefusalReport:
                     "likely_layer": row.likely_layer,
                     "next_root_cause_file": row.next_root_cause_file,
                 }
-                for row in self.rows
+                for row in iter(self.rows)
             ]
         }
 
 
 def build_x86_16_structuring_grouped_refusal_report(codegen: object) -> StructuringGroupedRefusalReport | None:
     """Build a validation report from already-collected grouped-unit refusals."""
+    artifact: object
+    refusal: object
     artifact = build_x86_16_cross_entry_grouped_units(codegen)
     if artifact is None:
         return None
-    counts: dict[str, int] = {}
+    counts: dict[str, cython.longlong] = {}
     for refusal in artifact.refusals:
         counts[refusal.refusal_reason] = counts.get(refusal.refusal_reason, 0) + 1
     rows = tuple(
@@ -62,11 +69,12 @@ def build_x86_16_structuring_grouped_refusal_report(codegen: object) -> Structur
             likely_layer="cross_entry_grouping",
             next_root_cause_file="inertia/structuring/structuring_grouped_units.py",
         )
-        for refusal_reason in sorted(counts)
+        for refusal_reason in builtins.iter(sorted(counts))
     )
     return StructuringGroupedRefusalReport(rows=rows)
 
 
+@cython.ccall
 def describe_x86_16_structuring_grouped_refusal_report_surface() -> dict[str, object]:
     """Return the deterministic grouped-refusal report contract."""
     return {

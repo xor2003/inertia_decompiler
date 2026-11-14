@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Publish proven register locals to angr structured codegen.
 
 Layer: Types/Lowering.
@@ -12,6 +13,8 @@ contract.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Protocol, cast
@@ -24,6 +27,9 @@ from angr.sim_variable import SimRegisterVariable
 
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616, _replace_c_children_8616
 from inertia.pipeline.errors import PipelineHardError
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "RegisterLocalDeclarationResult8616",
@@ -58,7 +64,7 @@ class _ProjectArchBoundary8616(Protocol):
 class _ArchRegistersBoundary8616(Protocol):
     """Third-party architecture register-name and shape maps."""
 
-    registers: dict[str, tuple[int, int]]
+    registers: object
 
 
 class _VariableManagerBoundary8616(Protocol):
@@ -80,29 +86,29 @@ class _RegisterLocalResultBoundary8616(Protocol):
     _inertia_register_local_declaration_result_8616: RegisterLocalDeclarationResult8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RegisterLocalDeclarationResult8616:
     """Closed evidence counters for one typed register-local replay."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    changed_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    changed_count: cython.longlong = 0
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether declaration metadata changed."""
         return self.changed_count > 0
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every observed register use has one terminal lane."""
         return bool(
-            self.raw_fact_count == self.normalized_fact_count + self.failure_count
-            and self.normalized_fact_count == self.classified_fact_count
-            and self.classified_fact_count == self.materialized_count
+            operator.eq(self.raw_fact_count, self.normalized_fact_count + self.failure_count)
+            and operator.eq(self.normalized_fact_count, self.classified_fact_count)
+            and operator.eq(self.classified_fact_count, self.materialized_count)
             and 0 <= self.changed_count <= self.materialized_count
         )
 
@@ -112,8 +118,10 @@ _NONLOCAL_REGISTER_NAMES_8616 = frozenset(
 )
 
 
-def _register_scalar_type_8616(size: int, arch: object) -> object | None:
+@cython.ccall
+def _register_scalar_type_8616(size: cython.longlong, arch: object) -> object | None:
     """Return the exact unsigned scalar type for one physical register width."""
+    scalar_type: object
     scalar_type = {
         1: SimTypeChar(False),
         2: SimTypeShort(False),
@@ -122,22 +130,23 @@ def _register_scalar_type_8616(size: int, arch: object) -> object | None:
     return scalar_type.with_arch(arch) if scalar_type is not None else None
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _RegisterCarrierContext8616:
     """Shared boundary and evidence state for the carrier rebinding pass."""
 
     codegen: object
     project: _ProjectArchBoundary8616
-    region: int
-    exact_registers: set[tuple[int, int, str]]
-    declarations: dict[tuple[int, int, str], structured_c.CVariable]
-    register_variables: dict[tuple[int, int, str], SimRegisterVariable]
-    changed_count: int = 0
+    region: cython.longlong
+    exact_registers: object
+    declarations: object
+    register_variables: object
+    changed_count: cython.longlong = 0
 
 
+@cython.ccall
 def _carrier_boundary_8616(
     codegen: object,
-) -> tuple[_ProjectArchBoundary8616, dict[str, tuple[int, int]], _CFunctionDeclarationBoundary8616] | None:
+) -> object:
     """Resolve the typed codegen boundary for register materialization."""
     try:
         boundary = cast(_CodegenDeclarationBoundary8616, codegen)
@@ -152,6 +161,7 @@ def _carrier_boundary_8616(
     return project, registers, cfunc
 
 
+@cython.ccall
 def _declaration_region_8616(cfunc: object, root: object) -> int | None:
     """Resolve the owning region address from the function or root node."""
     try:
@@ -166,11 +176,12 @@ def _declaration_region_8616(cfunc: object, root: object) -> int | None:
     return region if isinstance(region, int) else None
 
 
-def _exact_register_keys_8616(registers: object) -> set[tuple[int, int, str]]:
+@cython.ccall
+def _exact_register_keys_8616(registers: object) -> set[tuple[cython.longlong, cython.longlong, str]]:
     """Collect exact (offset, size, lowercase-name) register identities."""
     return {
         (shape[0], shape[1], name.lower())
-        for name, shape in cast(dict[object, object], registers).items()
+        for name, shape in builtins.iter(cast(dict[object, object], registers).items())
         if isinstance(name, str)
         and isinstance(shape, tuple)
         and len(shape) >= 2
@@ -179,10 +190,12 @@ def _exact_register_keys_8616(registers: object) -> set[tuple[int, int, str]]:
     }
 
 
+@cython.ccall
 def _shared_register_variable_8616(
-    ctx: _RegisterCarrierContext8616, offset: int, size: int, normalized_name: str
+    ctx: _RegisterCarrierContext8616, offset: cython.longlong, size: cython.longlong, normalized_name: object
 ) -> SimRegisterVariable:
     """Return the shared SimRegisterVariable for one exact register lane."""
+    shared: object
     key = (offset, size, normalized_name)
     shared = ctx.register_variables.get(key)
     if shared is None:
@@ -197,8 +210,10 @@ def _shared_register_variable_8616(
     return shared
 
 
+@cython.ccall
 def _rebind_c_variable_8616(ctx: _RegisterCarrierContext8616, node: object) -> object | None:
     """Rebind one direct CVariable register carrier, or None."""
+    normalized_name: object
     if not isinstance(node, structured_c.CVariable) or not isinstance(node.variable, SimRegisterVariable):
         return None
     variable = node.variable
@@ -218,10 +233,12 @@ def _rebind_c_variable_8616(ctx: _RegisterCarrierContext8616, node: object) -> o
     return cast(object, node)
 
 
+@cython.ccall
 def _virtual_dirty_key_8616(
-    virtual: Expr.VirtualVariable, exact_registers: set[tuple[int, int, str]]
-) -> tuple[int, int, str] | None:
+    virtual: Expr.VirtualVariable, exact_registers: object
+) -> object:
     """Resolve a dirty virtual register to its exact register-set key."""
+    name: object
     if virtual.category is not VirtualVariableCategory.REGISTER:
         return None
     offset = virtual.oident
@@ -232,7 +249,7 @@ def _virtual_dirty_key_8616(
     if not isinstance(name, str):
         matching_names = {
             register_name
-            for register_offset, register_size, register_name in exact_registers
+            for register_offset, register_size, register_name in iter(exact_registers)
             if register_offset == offset and register_size == size
         }
         if len(matching_names) != 1:
@@ -245,8 +262,12 @@ def _virtual_dirty_key_8616(
     return key
 
 
+@cython.ccall
 def _rebind_virtual_dirty_8616(ctx: _RegisterCarrierContext8616, node: object) -> object:
     """Rebind one register-origin dirty virtual carrier to a typed local."""
+    declaration: object
+    key: object
+    variable_type: object
     if not isinstance(node, structured_c.CDirtyExpression) or not isinstance(node.dirty, Expr.VirtualVariable):
         return node
     key = _virtual_dirty_key_8616(node.dirty, ctx.exact_registers)
@@ -270,8 +291,10 @@ def _rebind_virtual_dirty_8616(ctx: _RegisterCarrierContext8616, node: object) -
     return declaration
 
 
-def _materialize_register_virtual_carriers_8616(codegen: object, root: object) -> int:
+def _materialize_register_virtual_carriers_8616(codegen: object, root: object) -> cython.longlong:
     """Rebind exact general-register virtual carriers to typed C locals."""
+    boundary: object
+    region: object
     boundary = _carrier_boundary_8616(codegen)
     if boundary is None:
         return 0
@@ -290,6 +313,7 @@ def _materialize_register_virtual_carriers_8616(codegen: object, root: object) -
 
     def _transform(node: object) -> object:
         """Replace one exact register-origin virtual carrier."""
+        result: object
         result = _rebind_c_variable_8616(ctx, node)
         if result is not None:
             return result
@@ -299,16 +323,17 @@ def _materialize_register_virtual_carriers_8616(codegen: object, root: object) -
     return ctx.changed_count
 
 
+@cython.ccall
 def _remove_declaration_entries_8616(
-    entries: set[object],
+    entries: object,
     declaration: structured_c.CVariable,
     *,
-    keep: tuple[object, object] | None = None,
-) -> bool:
+    keep: object = None,
+) -> cython.bint:
     """Remove stale entries for one declaration without dropping its peers."""
     stale_entries = {
         entry
-        for entry in entries
+        for entry in iter(entries)
         if isinstance(entry, tuple)
         and bool(entry)
         and entry[0] is declaration
@@ -320,6 +345,7 @@ def _remove_declaration_entries_8616(
     return True
 
 
+@cython.ccall
 def _unified_register_identity_8616(
     cfunc: _CFunctionDeclarationBoundary8616,
     variable: SimRegisterVariable,
@@ -333,6 +359,7 @@ def _unified_register_identity_8616(
     return unified if isinstance(unified, SimRegisterVariable) else variable
 
 
+@cython.ccall
 def _register_declaration_maps_8616(
     codegen: object,
 ) -> tuple[
@@ -358,12 +385,15 @@ def _register_declaration_maps_8616(
     return cfunc, variables_in_use, unified_local_vars
 
 
+@cython.ccall
 def _sync_variables_in_use_8616(
-    variables_in_use: dict[object, object],
+    variables_in_use: object,
     variable: SimRegisterVariable,
     declaration: structured_c.CVariable,
-) -> bool:
+) -> cython.bint:
     """Drop stale aliases and bind the declaration under its variable."""
+    prior_declaration: object
+    prior_variable: object
     changed = False
     for prior_variable, prior_declaration in tuple(variables_in_use.items()):
         if prior_declaration is declaration and prior_variable is not variable:
@@ -375,13 +405,16 @@ def _sync_variables_in_use_8616(
     return changed
 
 
+@cython.ccall
 def _sync_unified_local_vars_8616(
-    unified_local_vars: dict[object, object],
+    unified_local_vars: object,
     declaration_identity: SimRegisterVariable,
     declaration: structured_c.CVariable,
     variable_type: object,
-) -> bool:
+) -> cython.bint:
     """Keep the identity's typed-entry set holding exactly this declaration."""
+    entries: object
+    prior_variable: object
     changed = False
     typed_entry = (declaration, variable_type)
     for prior_variable, entries in tuple(unified_local_vars.items()):
@@ -405,16 +438,18 @@ def _sync_unified_local_vars_8616(
     return changed
 
 
+@cython.ccall
 def register_typed_register_local_8616(
     codegen: object,
     declaration: structured_c.CVariable,
-) -> bool:
+) -> cython.bint:
     """Register one exact typed register local and return whether maps changed.
 
     A proven register assignment is not recompilable until the same storage
     identity is present in both angr declaration maps. Missing maps are a hard
     pipeline contract failure, not permission to emit an undeclared variable.
     """
+    variable_type: object
     variable = declaration.variable
     if not isinstance(variable, SimRegisterVariable):
         raise PipelineHardError(
@@ -443,8 +478,11 @@ def register_typed_register_local_8616(
     return changed
 
 
+@cython.ccall
 def materialize_typed_register_locals_8616(codegen: object) -> RegisterLocalDeclarationResult8616:
     """Publish every typed live register local after a Lowering/AST replay."""
+    variable_type: object
+    node: object
     try:
         boundary = cast(_CodegenDeclarationBoundary8616, codegen)
         cfunc = cast(_CFunctionDeclarationBoundary8616, boundary.cfunc)
@@ -463,7 +501,7 @@ def materialize_typed_register_locals_8616(codegen: object) -> RegisterLocalDecl
     materialized_count = 0
     failure_count = 0
     changed_count = 0
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     for node in _iter_c_nodes_deep_8616(root):
         if not isinstance(node, structured_c.CVariable) or id(node) in seen:
             continue

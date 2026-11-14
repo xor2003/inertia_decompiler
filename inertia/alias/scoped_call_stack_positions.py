@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Scope-bound caller CALL positions from authenticated call evidence.
 
 Layer: Alias.
@@ -15,6 +16,8 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -43,6 +46,8 @@ from .stack_restore_state import (
     StackRestoreState8616,
     join_stack_restore_states_8616,
 )
+import dataclasses
+import operator
 
 __all__ = [
     "ScopedCallStackPositionFailure8616",
@@ -65,7 +70,7 @@ class ScopedCallStackPositionFailure8616(StrEnum):
     FRAME_MISMATCH = "frame_mismatch"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ScopedCallStackPositionResult8616:
     """Scope-bound position proof, or one explicit refusal.
 
@@ -92,18 +97,18 @@ class ScopedCallStackPositionResult8616:
     context: ScopedCallStackContext8616 | None = field(
         default=None, compare=False, repr=False,
     )
-    block_addr: int = 0
-    instruction_index: int = 0
+    block_addr: cython.longlong = 0
+    instruction_index: cython.longlong = 0
     proof: CallStackPosition8616 | None = None
     failure: ScopedCallStackPositionFailure8616 | None = None
     detail: str = ""
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 1
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 1
 
-    def _retained_position_is_accepted(self) -> bool:
+    def _retained_position_is_accepted(self) -> cython.bint:
         """Require an accepted publication, independent of current source."""
         counts = (
             self.raw_fact_count, self.normalized_fact_count,
@@ -112,11 +117,11 @@ class ScopedCallStackPositionResult8616:
         )
         return bool(
             self.failure is None and counts == (1, 1, 1, 1, 0)
-            and all(type(count) is int for count in counts)
+            and all(type(count) is int for count in iter(counts))
         )
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Scoped evidence is never context-free; see ``position_for``."""
         return self.complete_for(None, None)
 
@@ -124,7 +129,7 @@ class ScopedCallStackPositionResult8616:
         self,
         offered_caller_scope: object,
         offered_callee_scope: object,
-    ) -> bool:
+    ) -> cython.bint:
         """Re-run the scoped proof under the offered domains.
 
         The offered scopes must share provenance with both retained domains,
@@ -149,7 +154,7 @@ class ScopedCallStackPositionResult8616:
             offered_caller_scope, offered_callee_scope,
             context=self.context,
         )
-        return fresh.failure is None and fresh.proof == self.proof
+        return fresh.failure is None and operator.eq(fresh.proof, self.proof)
 
     def position_for(
         self,
@@ -165,16 +170,17 @@ class ScopedCallStackPositionResult8616:
 
 def _scoped_call_target_8616(
     artifact: IRFunctionArtifact,
-    block_addr: int,
-    instruction_index: int,
+    block_addr: cython.longlong,
+    instruction_index: cython.longlong,
 ) -> tuple[IRBlock | None, IRInstr | None, ScopedCallStackPositionFailure8616 | None]:
     """Validate the raw artifact and resolve the exact CALL row."""
-    blocks = {block.addr: block for block in artifact.blocks}
-    if (artifact.refusals or len(blocks) != len(artifact.blocks)
+    block: object
+    blocks = {block.addr: block for block in iter(artifact.blocks)}
+    if (artifact.refusals or operator.ne(len(blocks), len(artifact.blocks))
             or artifact.function_addr not in blocks
-            or any(block.refusals for block in artifact.blocks)
-            or any(successor not in blocks for block in artifact.blocks
-                   for successor in block.successor_addrs)):
+            or any(block.refusals for block in iter(artifact.blocks))
+            or any(successor not in blocks for block in iter(artifact.blocks)
+                   for successor in iter(block.successor_addrs))):
         return None, None, ScopedCallStackPositionFailure8616.INVALID_SOURCE
     block = blocks.get(block_addr)
     if block is None or not 0 <= instruction_index < len(block.instrs):
@@ -185,6 +191,7 @@ def _scoped_call_target_8616(
     return block, call, None
 
 
+@cython.ccall
 def _scoped_position_evidence_8616(
     call: IRInstr,
     context: ScopedCallStackContext8616,
@@ -196,6 +203,8 @@ def _scoped_position_evidence_8616(
     ScopedCallStackPositionFailure8616 | None,
 ]:
     """Authenticate the callsite binding and project the scoped net delta."""
+    binding: object
+    net: object
     binding = context.for_callsite(call.addr)
     if binding is None or type(binding) is not ScopedCallEntryBinding8616:
         return None, None, ScopedCallStackPositionFailure8616.CONTEXT_UNBOUND
@@ -214,13 +223,14 @@ def _scoped_position_evidence_8616(
     return carrier, net, None
 
 
+@cython.ccall
 def _failure_result_8616(
     artifact: IRFunctionArtifact,
     call: IRInstr | None,
-    block_addr: int,
-    instruction_index: int,
+    block_addr: cython.longlong,
+    instruction_index: cython.longlong,
     failure: ScopedCallStackPositionFailure8616,
-    detail: str = "",
+    detail: object = "",
     *,
     carrier: IRScopedCallStackCoordinates8616 | None = None,
     caller_scope: Real16InvocationDomain8616 | None = None,
@@ -234,12 +244,13 @@ def _failure_result_8616(
     )
 
 
+@cython.ccall
 def solve_scoped_stack_states_8616(
     artifact: IRFunctionArtifact,
     offered_caller_scope: object,
     *,
     context: ScopedCallStackContext8616,
-) -> dict[int, StackRestoreState8616] | None:
+) -> object:
     """Run the shared solver with the context's fully-projected delta map.
 
     The offered caller domain must share provenance with every bound caller
@@ -247,6 +258,7 @@ def solve_scoped_stack_states_8616(
     a foreign artifact, foreign domain or unprojectable binding refuses
     the whole solve rather than silently dropping a call's effect.
     """
+    deltas: object
     if type(context) is not ScopedCallStackContext8616:
         return None
     deltas = context.call_deltas_for(offered_caller_scope, artifact)
@@ -257,8 +269,8 @@ def solve_scoped_stack_states_8616(
 
 def prove_scoped_call_stack_position_8616(
     artifact: IRFunctionArtifact,
-    block_addr: int,
-    instruction_index: int,
+    block_addr: cython.longlong,
+    instruction_index: cython.longlong,
     caller_scope: Real16InvocationDomain8616 | None,
     callee_scope: Real16InvocationDomain8616 | None,
     *,
@@ -273,6 +285,16 @@ def prove_scoped_call_stack_position_8616(
     callee's caller-visible effect at the exact instruction — downstream
     instructions see the real post-call SP.
     """
+    before: object
+    block: object
+    call: object
+    call_failure: object
+    carrier: object
+    coordinates: object
+    entry: object
+    evidence_failure: object
+    net: object
+    states: object
     if (
         type(caller_scope) is not Real16InvocationDomain8616
         or type(callee_scope) is not Real16InvocationDomain8616
@@ -322,8 +344,8 @@ def prove_scoped_call_stack_position_8616(
             carrier=carrier, context=context,
         )
     predecessors = _predecessor_map(artifact)
-    incoming = tuple(states[pred] for pred in predecessors[block_addr])
-    if block_addr == artifact.function_addr:
+    incoming = tuple(states[pred] for pred in iter(predecessors[block_addr]))
+    if operator.eq(block_addr, artifact.function_addr):
         incoming = (StackRestoreState8616(0), *incoming)
     if not incoming:
         return _failure_result_8616(
@@ -346,7 +368,7 @@ def prove_scoped_call_stack_position_8616(
             caller_scope=caller_scope, callee_scope=callee_scope,
             carrier=carrier, context=context,
         )
-    if (entry - before) & 0xFFFF != (-coordinates.return_frame_bytes) & 0xFFFF:
+    if operator.ne((entry - before) & 0xFFFF, (-coordinates.return_frame_bytes) & 0xFFFF):
         return _failure_result_8616(
             artifact, call, block_addr, instruction_index,
             ScopedCallStackPositionFailure8616.FRAME_MISMATCH,

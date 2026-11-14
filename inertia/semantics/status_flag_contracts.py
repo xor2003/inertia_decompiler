@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed contracts for x86 status-flag liveness decisions.
 
 Layer: Semantics.
@@ -9,9 +10,12 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import IntFlag, StrEnum
+import dataclasses
 
 
 class StatusFlag8616(IntFlag):
@@ -42,16 +46,16 @@ SHIFT_COUNT_MANY_STATUS_FLAG_WRITES_8616: StatusFlag8616 = (
 )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DecodedStatusFlagInstruction8616:
     """Decoded flag evidence, including REP's possible zero-iteration path."""
 
-    mnemonic: str
+    mnemonic: object
     immediate_count: int | None = None
-    repeat_prefix: bool = False
+    repeat_prefix: cython.bint = False
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StatusFlagEffect8616:
     """Status flags read and definitely overwritten by one instruction."""
 
@@ -67,15 +71,15 @@ class StatusFlagLivenessVerdict8616(StrEnum):
     SUPPRESS_DEAD = "suppress_dead"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StatusFlagLivenessStats8616:
     """Closed accounting for one final keep-or-suppress decision."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     def __post_init__(self) -> None:
         """Reject a classified decision that was not materialized."""
@@ -83,7 +87,7 @@ class StatusFlagLivenessStats8616:
             raise ValueError("classified status-flag decision was not materialized")
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether the candidate has one materialized typed outcome."""
         return (
             self.raw_fact_count
@@ -93,11 +97,11 @@ class StatusFlagLivenessStats8616:
         )
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether the decision closed without unknown instruction effects."""
         return self.closed and self.failure_count == 0
 
-    def to_dict(self) -> dict[str, int]:
+    def to_dict(self) -> dict[str, cython.longlong]:
         """Return the JSON-safe counter projection used by angr diagnostics."""
         return {
             "raw_fact_count": self.raw_fact_count,
@@ -108,7 +112,7 @@ class StatusFlagLivenessStats8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StatusFlagLivenessDecision8616:
     """Typed liveness outcome for one status-flag definition."""
 
@@ -118,7 +122,7 @@ class StatusFlagLivenessDecision8616:
     stats: StatusFlagLivenessStats8616
 
     @property
-    def suppresses_write(self) -> bool:
+    def suppresses_write(self) -> cython.bint:
         """Return whether frontend flag materialization may be omitted."""
         return self.verdict is StatusFlagLivenessVerdict8616.SUPPRESS_DEAD
 

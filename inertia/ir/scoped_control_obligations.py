@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Source-bound composition of premise-derived conditional obligations.
 
 Layer: IR / control-domain transport.
@@ -32,6 +33,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Mapping
 from types import MappingProxyType
@@ -72,6 +75,10 @@ from .vex_terminal_jump import (
     TerminalJumpEvidence8616,
     TerminalJumpRefusalReason8616,
 )
+import operator
+import builtins
+EntryDomainCallPreservation8616 = typing.TypeVar("EntryDomainCallPreservation8616")
+Real16InvocationDomain8616 = typing.TypeVar("Real16InvocationDomain8616")
 
 if TYPE_CHECKING:
     from .entry_domain_call_preservation import EntryDomainCallPreservation8616
@@ -89,7 +96,7 @@ _SELECTOR_WINDOW_PENDING_KIND_8616 = (
 )
 
 
-def mixed_pending_obligations_8616(artifact: object) -> bool:
+def mixed_pending_obligations_8616(artifact: object) -> cython.bint:
     """Return whether one raw surface carries non-continuation refusals.
 
     A premise-derived artifact whose every refusal is the continuation
@@ -101,30 +108,30 @@ def mixed_pending_obligations_8616(artifact: object) -> bool:
     if type(artifact) is not IRFunctionArtifact:
         return False
     return any(
-        refusal.kind != NEAR_RETURN_CONTINUATION_PENDING_KIND_8616
-        for block in artifact.blocks
-        for refusal in block.refusals
+        operator.ne(refusal.kind, NEAR_RETURN_CONTINUATION_PENDING_KIND_8616)
+        for block in iter(artifact.blocks)
+        for refusal in iter(block.refusals)
     ) or any(
-        refusal.kind != NEAR_RETURN_CONTINUATION_PENDING_KIND_8616
-        for refusal in artifact.refusals
+        operator.ne(refusal.kind, NEAR_RETURN_CONTINUATION_PENDING_KIND_8616)
+        for refusal in iter(artifact.refusals)
     )
 
 
 def _continuation_marker_blocks_8616(
     artifact: IRFunctionArtifact,
-) -> frozenset[int]:
+) -> frozenset[cython.longlong]:
     """Enumerate every block carrying a continuation pending marker."""
     return frozenset(
         block.addr
-        for block in artifact.blocks
+        for block in iter(artifact.blocks)
         if any(
-            refusal.kind == NEAR_RETURN_CONTINUATION_PENDING_KIND_8616
-            for refusal in block.refusals
+            operator.eq(refusal.kind, NEAR_RETURN_CONTINUATION_PENDING_KIND_8616)
+            for refusal in iter(block.refusals)
         )
     )
 
 
-def _continuation_marker_count_8616(artifact: IRFunctionArtifact) -> int:
+def _continuation_marker_count_8616(artifact: IRFunctionArtifact) -> cython.longlong:
     """Count every distinct continuation obligation exactly.
 
     A function-level marker that merely mirrors a block-level marker on
@@ -135,18 +142,18 @@ def _continuation_marker_count_8616(artifact: IRFunctionArtifact) -> int:
     block_marked = _continuation_marker_blocks_8616(artifact)
     return sum(
         1
-        for block in artifact.blocks
-        for refusal in block.refusals
-        if refusal.kind == NEAR_RETURN_CONTINUATION_PENDING_KIND_8616
+        for block in iter(artifact.blocks)
+        for refusal in iter(block.refusals)
+        if operator.eq(refusal.kind, NEAR_RETURN_CONTINUATION_PENDING_KIND_8616)
     ) + sum(
         1
-        for refusal in artifact.refusals
-        if refusal.kind == NEAR_RETURN_CONTINUATION_PENDING_KIND_8616
+        for refusal in iter(artifact.refusals)
+        if operator.eq(refusal.kind, NEAR_RETURN_CONTINUATION_PENDING_KIND_8616)
         and refusal.block_addr not in block_marked
     )
 
 
-def _selector_marker_count_8616(artifact: IRFunctionArtifact) -> int:
+def _selector_marker_count_8616(artifact: IRFunctionArtifact) -> cython.longlong:
     """Count every distinct selector-window obligation exactly.
 
     Mirrors ``_continuation_marker_count_8616``: function-level markers
@@ -156,25 +163,25 @@ def _selector_marker_count_8616(artifact: IRFunctionArtifact) -> int:
     block_marked = _selector_marker_blocks_8616(artifact)
     return sum(
         1
-        for block in artifact.blocks
-        for refusal in block.refusals
-        if refusal.kind == _SELECTOR_WINDOW_PENDING_KIND_8616
+        for block in iter(artifact.blocks)
+        for refusal in iter(block.refusals)
+        if operator.eq(refusal.kind, _SELECTOR_WINDOW_PENDING_KIND_8616)
     ) + sum(
         1
-        for refusal in artifact.refusals
-        if refusal.kind == _SELECTOR_WINDOW_PENDING_KIND_8616
+        for refusal in iter(artifact.refusals)
+        if operator.eq(refusal.kind, _SELECTOR_WINDOW_PENDING_KIND_8616)
         and refusal.block_addr not in block_marked
     )
 
 
-def _selector_marker_blocks_8616(artifact: IRFunctionArtifact) -> frozenset[int]:
+def _selector_marker_blocks_8616(artifact: IRFunctionArtifact) -> frozenset[cython.longlong]:
     """Enumerate every block carrying a selector-window pending marker."""
     return frozenset(
         block.addr
-        for block in artifact.blocks
+        for block in iter(artifact.blocks)
         if any(
-            refusal.kind == _SELECTOR_WINDOW_PENDING_KIND_8616
-            for refusal in block.refusals
+            operator.eq(refusal.kind, _SELECTOR_WINDOW_PENDING_KIND_8616)
+            for refusal in iter(block.refusals)
         )
     )
 
@@ -186,7 +193,7 @@ def _obligation_surface_failure_8616(
     ScopedNearReturnContinuationViewFailure8616 | None,
     str,
     NearCallFramePremise8616 | None,
-    frozenset[int],
+    frozenset[cython.longlong],
 ]:
     """Audit the pending surface the composed view may discharge.
 
@@ -198,10 +205,15 @@ def _obligation_surface_failure_8616(
     belong to the same two classes. Any other refusal is an unrelated
     raw defect no consuming entry may waive.
     """
+    block_failure: object
+    continuations: object
+    level_failure: object
+    premise: object
+    block: object
     if (
         type(artifact) is not IRFunctionArtifact
         or not isinstance(boundary, ExactFunctionRangeBoundary8616)
-        or boundary.addr != artifact.function_addr
+        or operator.ne(boundary.addr, artifact.function_addr)
     ):
         return (
             ScopedNearReturnContinuationViewFailure8616.SURFACE_MISMATCH,
@@ -221,7 +233,7 @@ def _obligation_surface_failure_8616(
     proven = frozenset() if continuations is None else (
         continuations.proven_block_addrs
     )
-    if not proven or premise.callee_addr != artifact.function_addr:
+    if not proven or operator.ne(premise.callee_addr, artifact.function_addr):
         return (
             ScopedNearReturnContinuationViewFailure8616.SURFACE_MISMATCH,
             "premise binds a foreign callee head or proves nothing",
@@ -235,8 +247,8 @@ def _obligation_surface_failure_8616(
             premise,
             frozenset(),
         )
-    blocks_by_addr = {block.addr: block for block in artifact.blocks}
-    if any(addr not in blocks_by_addr for addr in proven):
+    blocks_by_addr = {block.addr: block for block in iter(artifact.blocks)}
+    if any(addr not in blocks_by_addr for addr in iter(proven)):
         return (
             ScopedNearReturnContinuationViewFailure8616.SURFACE_MISMATCH,
             "proven continuation block is absent from the raw census",
@@ -255,8 +267,8 @@ def _obligation_surface_failure_8616(
 
 def _obligation_block_failure_8616(
     block: IRBlock,
-    proven: frozenset[int],
-) -> tuple[ScopedNearReturnContinuationViewFailure8616, str] | None:
+    proven: object,
+) -> object:
     """Audit one block's markers against the joint obligation census.
 
     A proven block must keep its raw ``JMP`` terminal and at least one
@@ -265,6 +277,8 @@ def _obligation_block_failure_8616(
     marker; anything else is an unrelated raw defect no consuming entry
     may waive.
     """
+    terminal: object
+    refusal: object
     if block.addr in proven:
         terminal = block.instrs[-1] if block.instrs else None
         if terminal is None or terminal.op != "JMP":
@@ -274,8 +288,8 @@ def _obligation_block_failure_8616(
                 "proven block lost its retained raw JMP terminal",
             )
         if not any(
-            refusal.kind == NEAR_RETURN_CONTINUATION_PENDING_KIND_8616
-            for refusal in block.refusals
+            operator.eq(refusal.kind, NEAR_RETURN_CONTINUATION_PENDING_KIND_8616)
+            for refusal in iter(block.refusals)
         ):
             return (
                 ScopedNearReturnContinuationViewFailure8616
@@ -284,10 +298,10 @@ def _obligation_block_failure_8616(
             )
     for refusal in block.refusals:
         continuation = (
-            refusal.kind == NEAR_RETURN_CONTINUATION_PENDING_KIND_8616
+            operator.eq(refusal.kind, NEAR_RETURN_CONTINUATION_PENDING_KIND_8616)
             and block.addr in proven
         )
-        selector = refusal.kind == _SELECTOR_WINDOW_PENDING_KIND_8616
+        selector = operator.eq(refusal.kind, _SELECTOR_WINDOW_PENDING_KIND_8616)
         if not continuation and not selector:
             return (
                 ScopedNearReturnContinuationViewFailure8616
@@ -299,10 +313,11 @@ def _obligation_block_failure_8616(
     return None
 
 
+@cython.ccall
 def _obligation_level_failure_8616(
     artifact: IRFunctionArtifact,
-    proven: frozenset[int],
-) -> tuple[ScopedNearReturnContinuationViewFailure8616, str] | None:
+    proven: object,
+) -> object:
     """Audit every function-level marker against the joint census.
 
     A function-level conditional marker only authenticates as the
@@ -312,14 +327,15 @@ def _obligation_level_failure_8616(
     marker anywhere else is a raw defect, never evidence the joint
     census can fold into a block admission.
     """
+    refusal: object
     selector_blocks = _selector_marker_blocks_8616(artifact)
     for refusal in artifact.refusals:
         continuation = (
-            refusal.kind == NEAR_RETURN_CONTINUATION_PENDING_KIND_8616
+            operator.eq(refusal.kind, NEAR_RETURN_CONTINUATION_PENDING_KIND_8616)
             and refusal.block_addr in proven
         )
         selector = (
-            refusal.kind == _SELECTOR_WINDOW_PENDING_KIND_8616
+            operator.eq(refusal.kind, _SELECTOR_WINDOW_PENDING_KIND_8616)
             and refusal.block_addr in selector_blocks
         )
         if not continuation and not selector:
@@ -332,9 +348,9 @@ def _obligation_level_failure_8616(
 
 
 def _continuation_effective_blocks_8616(
-    blocks: tuple[IRBlock, ...],
-    proven: frozenset[int],
-) -> tuple[IRBlock, ...] | None:
+    blocks: object,
+    proven: object,
+) -> object:
     """Derive the continuation-effective surface (S1) deterministically.
 
     Every proven continuation block is rebuilt with its terminal ``JMP``
@@ -346,6 +362,8 @@ def _continuation_effective_blocks_8616(
     refusal the continuation class cannot own; the composition refuses
     rather than fabricate a surface.
     """
+    terminal: object
+    block: object
     effective: list[IRBlock] = []
     for block in blocks:
         if block.addr not in proven:
@@ -353,23 +371,20 @@ def _continuation_effective_blocks_8616(
             continue
         terminal = block.instrs[-1] if block.instrs else None
         if terminal is None or terminal.op != "JMP" or any(
-            refusal.kind != NEAR_RETURN_CONTINUATION_PENDING_KIND_8616
-            for refusal in block.refusals
+            operator.ne(refusal.kind, NEAR_RETURN_CONTINUATION_PENDING_KIND_8616)
+            for refusal in iter(block.refusals)
         ):
             return None
         effective.append(
             IRBlock(
                 addr=block.addr,
-                instrs=(
-                    *block.instrs[:-1],
-                    IRInstr(
+                instrs=tuple(block.instrs[:-1]) + (IRInstr(
                         op="RET",
                         dst=None,
                         args=(),
                         addr=terminal.addr,
                         origin=terminal.origin,
-                    ),
-                ),
+                    ),),
                 refusals=(),
                 successor_addrs=block.successor_addrs,
             )
@@ -379,27 +394,28 @@ def _continuation_effective_blocks_8616(
 
 def _discharged_selector_markers_8616(
     artifact: IRFunctionArtifact,
-    proof: EntryJumpDomainProof8616 | None,
-) -> int:
+    proof: object,
+) -> cython.longlong:
     """Count selector markers the retained proof's admissions discharge."""
     if proof is None:
         return 0
-    admitted = {jump.block_addr for jump in proof.admitted}
+    admitted = {jump.block_addr for jump in iter(proof.admitted)}
     return sum(
         1
-        for block in artifact.blocks
+        for block in iter(artifact.blocks)
         if block.addr in admitted
-        for refusal in block.refusals
-        if refusal.kind == _SELECTOR_WINDOW_PENDING_KIND_8616
+        for refusal in iter(block.refusals)
+        if operator.eq(refusal.kind, _SELECTOR_WINDOW_PENDING_KIND_8616)
     )
 
 
+@cython.ccall
 def _obligation_counts_8616(
     artifact: IRFunctionArtifact,
     proof: EntryJumpDomainProof8616 | None,
     *,
-    authenticated: bool,
-) -> tuple[int, int, int, int, int]:
+    authenticated: cython.bint,
+) -> tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong, cython.longlong]:
     """Recompute the joint obligation ledger over one raw surface."""
     continuations = _continuation_marker_count_8616(artifact)
     selectors = _selector_marker_count_8616(artifact)
@@ -415,11 +431,12 @@ def _obligation_counts_8616(
     )
 
 
+@cython.ccall
 def scoped_obligations_expected_counts_8616(
     view: ScopedNearReturnContinuationView8616,
     *,
-    authenticated: bool,
-) -> tuple[int, int, int, int, int]:
+    authenticated: cython.bint,
+) -> object:
     """Recompute the joint obligation ledger from retained evidence.
 
     The ledger counts every conditional marker on the retained raw
@@ -435,13 +452,14 @@ def scoped_obligations_expected_counts_8616(
     )
 
 
+@cython.ccall
 def _joint_admission_failure_8616(
     invocation_scope: Real16InvocationDomain8616 | None,
     premise: NearCallFramePremise8616,
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
     s1_artifact: IRFunctionArtifact,
-    s1_blocks: tuple[IRBlock, ...],
+    s1_blocks: object,
     proof: EntryJumpDomainProof8616,
 ) -> tuple[
     ScopedNearReturnContinuationViewFailure8616 | None,
@@ -458,6 +476,8 @@ def _joint_admission_failure_8616(
     delta, or an unrelated residual refusal each yields its typed
     non-result with the application record retained where produced.
     """
+    delta: object
+    residual: object
     from .real16_invocation_domain import Real16InvocationDomain8616
 
     if type(invocation_scope) is not Real16InvocationDomain8616:
@@ -517,10 +537,10 @@ def _joint_admission_failure_8616(
 def prove_scoped_control_obligations_8616(
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
-    terminal_evidence: Mapping[int, TerminalJumpEvidence8616],
+    terminal_evidence: Mapping[cython.longlong, TerminalJumpEvidence8616],
     *,
     project: object | None = None,
-    call_preservations: tuple[EntryDomainCallPreservation8616, ...] = (),
+    call_preservations: object = (),
     invocation_resolver: (
         Callable[[int], Real16InvocationDomain8616 | None] | None
     ) = None,
@@ -540,12 +560,16 @@ def prove_scoped_control_obligations_8616(
     untouched: the conditional body stays unpublished, and every
     projection is a per-consumption replay.
     """
+    application: object
+    failure: object
+    premise: object
+    s1_blocks: object
 
     def refuse(
         failure: ScopedNearReturnContinuationViewFailure8616,
-        detail: str,
+        detail: object,
         premise: NearCallFramePremise8616 | None,
-        proven: frozenset[int],
+        proven: object,
         proof: EntryJumpDomainProof8616 | None,
         application: EntryJumpDomainApplication8616 | None = None,
     ) -> ScopedNearReturnContinuationView8616:
@@ -599,10 +623,10 @@ def prove_scoped_control_obligations_8616(
     # classified exactly the marker census — a marker with no recorded
     # candidate or a candidate with no marker means the bound evidence
     # does not describe this surface.
-    if _selector_marker_blocks_8616(artifact) != frozenset(
+    if operator.ne(_selector_marker_blocks_8616(artifact), frozenset(
         candidate.block_addr
-        for candidate in proof.source_binding.pending
-    ):
+        for candidate in iter(proof.source_binding.pending)
+    )):
         return refuse(
             ScopedNearReturnContinuationViewFailure8616.RESIDUAL_REFUSAL,
             "selector marker census diverges from the proof's "
@@ -645,6 +669,7 @@ def prove_scoped_control_obligations_8616(
     )
 
 
+@cython.ccall
 def _joint_replay_8616(
     view: ScopedNearReturnContinuationView8616,
     consuming_scope: Real16InvocationDomain8616,
@@ -661,6 +686,9 @@ def _joint_replay_8616(
     carry no unrelated residual refusal; only then is its effective
     surface returned.
     """
+    proof: object
+    retained: object
+    s1_blocks: object
     proof = view.selector_proof
     retained = view.selector_application
     if proof is None or retained is None:
@@ -677,7 +705,7 @@ def _joint_replay_8616(
         audit[0] is not None
         or audit[2] is None
         or audit[2] is not view.premise
-        or audit[3] != view.proven_block_addrs
+        or operator.ne(audit[3], view.proven_block_addrs)
     ):
         return None
     s1_blocks = _continuation_effective_blocks_8616(
@@ -693,10 +721,10 @@ def _joint_replay_8616(
     )
     binding = proof.source_binding
     if (
-        proof.function_addr != function_addr
-        or binding.function_addr != function_addr
-        or binding.block_count != len(s1_blocks)
-        or binding.digest != _source_digest_8616(function_addr, s1_blocks)
+        operator.ne(proof.function_addr, function_addr)
+        or operator.ne(binding.function_addr, function_addr)
+        or operator.ne(binding.block_count, len(s1_blocks))
+        or operator.ne(binding.digest, _source_digest_8616(function_addr, s1_blocks))
     ):
         return None
     if not _application_authentic_8616(retained, proof):
@@ -713,15 +741,16 @@ def _joint_replay_8616(
         is not None
     ):
         return None
-    if _canonical_source_8616(
+    if operator.ne(_canonical_source_8616(
         function_addr, retained.blocks
-    ) != _canonical_source_8616(function_addr, fresh.blocks):
+    ), _canonical_source_8616(function_addr, fresh.blocks)):
         return None
     if _residual_refusal_failure_8616(fresh.blocks) is not None:
         return None
     return fresh
 
 
+@cython.ccall
 def scoped_obligations_projection_8616(
     view: ScopedNearReturnContinuationView8616,
     consuming_scope: Real16InvocationDomain8616,
@@ -736,17 +765,20 @@ def scoped_obligations_projection_8616(
     bounded traversal. Only the fresh replay builds the projection;
     residual selector markers stay visible as pending holes.
     """
+    fresh: object
+    block: object
+    target: object
     function_addr = view.source_artifact.function_addr
     with segment_call_dependency_traversal_scope_8616():
         fresh = _joint_replay_8616(view, consuming_scope)
         if fresh is None:
             return None
-        census = {block.addr for block in fresh.blocks}
-        successors: dict[int, tuple[int, ...]] = {}
-        predecessor_lists: dict[int, list[int]] = {
-            addr: [] for addr in census
+        census = {block.addr for block in iter(fresh.blocks)}
+        successors: dict[cython.longlong, tuple[cython.longlong, ...]] = {}
+        predecessor_lists: dict[cython.longlong, list[cython.longlong]] = {
+            addr: [] for addr in iter(census)
         }
-        pending: dict[int, tuple[IRRefusal, ...]] = {}
+        pending: dict[cython.longlong, tuple[IRRefusal, ...]] = {}
         for block in fresh.blocks:
             pending[block.addr] = block.refusals
             if not block.refusals:
@@ -764,7 +796,7 @@ def scoped_obligations_projection_8616(
             predecessors=MappingProxyType(
                 {
                     addr: tuple(sorted(sources))
-                    for addr, sources in predecessor_lists.items()
+                    for addr, sources in builtins.iter(predecessor_lists.items())
                 }
             ),
             pending=MappingProxyType(pending),

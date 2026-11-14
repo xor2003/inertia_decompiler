@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery metadata.
 
 Responsibility: attach readable interface summaries from recovered function-state facts.
@@ -11,6 +12,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import re
 from collections.abc import Callable, Mapping
@@ -24,25 +27,25 @@ from .function_state_summary import FunctionStateSummary, summarize_x86_16_funct
 __all__ = ["apply_x86_16_function_interface_surface"]
 
 _PROTOTYPE_RE = re.compile(r"^\s*[A-Za-z_][\w\s\*\[\]]*?\s+[A-Za-z_][\w$?@]*\s*\([^)]*\)\s*;\s*$")
-type _RenderText = Callable[[object], object]
+_RenderText = typing.TypeAliasType("_RenderText", Callable[[object], object])
 
 
 class _FunctionInfoSurface(Protocol):
     """Owned function metadata consumed by this reporting-only surface."""
 
-    addr: int
-    name: str
+    addr: cython.longlong
+    name: object
     info: Mapping[str, object]
 
 
-type _FunctionLookup = Callable[..., _FunctionInfoSurface | None]
+_FunctionLookup = typing.TypeAliasType("_FunctionLookup", Callable[..., _FunctionInfoSurface | None])
 
 
 class _CodegenFunctionSurface(Protocol):
     """Codegen function fields needed to identify the current function."""
 
-    addr: int
-    name: str
+    addr: cython.longlong
+    name: object
 
 
 class _FunctionLookupSurface(Protocol):
@@ -68,38 +71,41 @@ class _CodegenSurface(Protocol):
 
     cfunc: _CodegenFunctionSurface
     render_text: _RenderText
-    _inertia_function_interface_surface_installed: bool
+    _inertia_function_interface_surface_installed: cython.bint
     _inertia_function_interface_original_render_text: _RenderText
 
 
-def _bp_disp(offset: int) -> str:
+@cython.ccall
+def _bp_disp(offset: cython.longlong) -> str:
     if offset == 0:
         return "[bp]"
     sign = "+" if offset > 0 else "-"
     return f"[bp{sign}0x{abs(offset):x}]"
 
 
-def _join(items: tuple[str, ...] | tuple[int, ...], *, ints: bool = False) -> str:
+def _join(items: object, *, ints: cython.bint = False) -> str:
     if not items:
         return "-"
     if ints:
-        return ", ".join(_bp_disp(int(item)) for item in items)
-    return ", ".join(str(item) for item in items)
+        return ", ".join(_bp_disp(int(item)) for item in iter(items))
+    return ", ".join(str(item) for item in iter(items))
 
 
+@cython.ccall
 def _summary_from_source(source: _FunctionInfoSurface) -> FunctionStateSummary:
     if source.info:
         return summarize_x86_16_function_state(source.info)
     return summarize_x86_16_function_state({})
 
 
-def _format_memory_summary(items: tuple[str, ...]) -> str:
+def _format_memory_summary(items: object) -> str:
     if not items:
         return "-"
-    return ", ".join(format_x86_16_low_memory_access(str(item)) for item in items)
+    return ", ".join(format_x86_16_low_memory_access(str(item)) for item in iter(items))
 
 
-def _has_surface_data(summary: FunctionStateSummary) -> bool:
+@cython.ccall
+def _has_surface_data(summary: FunctionStateSummary) -> cython.bint:
     return any(
         (
             summary.gp_register_inputs,
@@ -117,7 +123,8 @@ def _has_surface_data(summary: FunctionStateSummary) -> bool:
     )
 
 
-def _function_header_lines(name: str, summary: FunctionStateSummary) -> list[str]:
+@cython.ccall
+def _function_header_lines(name: object, summary: FunctionStateSummary) -> object:
     if not _has_surface_data(summary):
         return []
     inputs = (*summary.gp_register_inputs, *summary.segment_register_inputs, *summary.flag_inputs)
@@ -139,7 +146,8 @@ def _function_header_lines(name: str, summary: FunctionStateSummary) -> list[str
     return lines
 
 
-def _call_comment(name: str, summary: FunctionStateSummary) -> str | None:
+@cython.ccall
+def _call_comment(name: object, summary: FunctionStateSummary) -> object:
     if not _has_surface_data(summary):
         return None
     inputs = (*summary.gp_register_inputs, *summary.segment_register_inputs, *summary.flag_inputs)
@@ -147,7 +155,8 @@ def _call_comment(name: str, summary: FunctionStateSummary) -> str | None:
     return f"/* io {name}: in={_join(inputs)}; out={_join(outputs)}; ret={summary.return_kind} */"
 
 
-def _prepend_header(rendered: str, header_lines: list[str]) -> str:
+@cython.ccall
+def _prepend_header(rendered: object, header_lines: object) -> object:
     if not header_lines:
         return rendered
     header = "\n".join(header_lines)
@@ -156,8 +165,11 @@ def _prepend_header(rendered: str, header_lines: list[str]) -> str:
     return f"{header}\n{rendered}"
 
 
-def _annotate_call_lines(rendered: str, call_comments: dict[str, str]) -> str:
-    def _impl() -> str:
+def _annotate_call_lines(rendered: object, call_comments: object) -> object:
+    def _impl() -> object:
+        comment: object
+        line: object
+        name: object
         if not call_comments:
             return rendered
         lines = rendered.splitlines()
@@ -187,7 +199,12 @@ def _annotate_call_lines(rendered: str, call_comments: dict[str, str]) -> str:
     return _impl()
 
 
-def _render_with_interface_surface(project: _ProjectSurface, codegen: _CodegenSurface, rendered: str) -> str:
+@cython.ccall
+def _render_with_interface_surface(project: _ProjectSurface, codegen: _CodegenSurface, rendered: object) -> object:
+    callee: object
+    comment: object
+    function: object
+    seed: object
     cfunc = codegen.cfunc
     function = project.kb.functions.function(addr=cfunc.addr, create=False)
     if function is None:
@@ -210,7 +227,7 @@ def _render_with_interface_surface(project: _ProjectSurface, codegen: _CodegenSu
     return _annotate_call_lines(rendered, call_comments)
 
 
-def apply_x86_16_function_interface_surface(project: _ProjectSurface, codegen: _CodegenSurface) -> bool:
+def apply_x86_16_function_interface_surface(project: _ProjectSurface, codegen: _CodegenSurface) -> cython.bint:
     """Install readable interface annotations from already-recovered state facts."""
     original = codegen.render_text
     if bool(vars(codegen).get("_inertia_function_interface_surface_installed", False)):

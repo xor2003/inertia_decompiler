@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove near-CALL continuations for indirect decoded block terminals.
 
 Layer: Frontend.
@@ -36,6 +37,8 @@ into a return without the full provenance chain.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -46,6 +49,11 @@ from capstone import CS_ERR_DETAIL, CsError
 
 from .frontend_capstone_block import DirectCapstoneBlock8616
 from .frontend_instruction_kinds import is_x86_16_call_mnemonic_8616
+import dataclasses
+import operator
+import builtins
+DecodedDirectCallsite8616 = typing.TypeVar("DecodedDirectCallsite8616")
+DecodedDirectCallsiteIndex8616 = typing.TypeVar("DecodedDirectCallsiteIndex8616")
 
 if TYPE_CHECKING:
     from .frontend_direct_callsite_index import (
@@ -105,7 +113,7 @@ class NearReturnContinuationFailure8616(StrEnum):
     PREMISE_STALE = "near_return_continuation_premise_stale"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NearCallFramePremise8616:
     """Source-bound entry-frame premise for one exact callee head.
 
@@ -128,10 +136,10 @@ class NearCallFramePremise8616:
     callsite_index: DecodedDirectCallsiteIndex8616 = field(
         compare=False, repr=False
     )
-    callee_addr: int = 0
-    callsite_addr: int = 0
-    caller_start: int = 0
-    return_addr: int = 0
+    callee_addr: cython.longlong = 0
+    callsite_addr: cython.longlong = 0
+    caller_start: cython.longlong = 0
+    return_addr: cython.longlong = 0
 
     def to_dict(self) -> dict[str, object]:
         """Serialize this premise's decoded coordinates for diagnostics."""
@@ -144,7 +152,8 @@ class NearCallFramePremise8616:
         }
 
 
-def _near_call_word_evidence_8616(instruction: object) -> bool:
+@cython.ccall
+def _near_call_word_evidence_8616(instruction: object) -> cython.bint:
     """Return whether decoded facts prove a word-width return push.
 
     The premise's claim — a near CALL pushed exactly one return word —
@@ -172,7 +181,7 @@ def _near_call_word_evidence_8616(instruction: object) -> bool:
     except CsError as error:
         # Detail-disabled Capstone objects signal missing evidence this way,
         # including during wrapper inspection. Other decoder errors stay loud.
-        if error.errno != CS_ERR_DETAIL:
+        if operator.ne(error.errno, CS_ERR_DETAIL):
             raise
         return False
     return (
@@ -184,7 +193,7 @@ def _near_call_word_evidence_8616(instruction: object) -> bool:
     )
 
 
-def near_call_frame_premise_stale_8616(premise: NearCallFramePremise8616) -> bool:
+def near_call_frame_premise_stale_8616(premise: NearCallFramePremise8616) -> cython.bint:
     """Return whether the retained index no longer authenticates this row.
 
     A premise is stale when its retained callsite index no longer carries
@@ -197,7 +206,7 @@ def near_call_frame_premise_stale_8616(premise: NearCallFramePremise8616) -> boo
     """
     if not any(
         row is premise.callsite
-        for row in premise.callsite_index.for_target(premise.callee_addr)
+        for row in builtins.iter(premise.callsite_index.for_target(premise.callee_addr))
     ):
         return True
     instructions = premise.callsite.instructions
@@ -214,7 +223,7 @@ def near_call_frame_premise_stale_8616(premise: NearCallFramePremise8616) -> boo
 def prove_near_call_frame_premise_8616(
     callsite: object,
     index: object,
-    callee_addr: int,
+    callee_addr: cython.longlong,
 ) -> NearCallFramePremise8616 | None:
     """Bind the entry-frame premise to one exact decoded near-CALL row.
 
@@ -243,7 +252,7 @@ def prove_near_call_frame_premise_8616(
     if (
         type(callee_addr) is not int
         or callee_addr < 0
-        or callsite.target_addr != callee_addr
+        or operator.ne(callsite.target_addr, callee_addr)
         or type(callsite.callsite_addr) is not int
         or type(callsite.caller_start) is not int
     ):
@@ -260,7 +269,7 @@ def prove_near_call_frame_premise_8616(
         _DecodedCallsiteInstruction8616, instructions[instruction_index]
     )
     if (
-        instruction.address != callsite.callsite_addr
+        operator.ne(instruction.address, callsite.callsite_addr)
         or type(instruction.size) is not int
         or instruction.size <= 0
     ):
@@ -268,7 +277,7 @@ def prove_near_call_frame_premise_8616(
     if not _near_call_word_evidence_8616(instruction):
         return None
     if not any(
-        row is callsite for row in index.for_target(callee_addr)
+        row is callsite for row in builtins.iter(index.for_target(callee_addr))
     ):
         return None
     return NearCallFramePremise8616(
@@ -297,7 +306,7 @@ _FAILURE_PRIORITY_8616: tuple[NearReturnContinuationFailure8616, ...] = (
 # Sixteen-bit GPR provenance order; ``sp`` is value-tracked separately as a
 # stack delta and never a valid continuation carrier.
 _GPR_ORDER_8616: tuple[str, ...] = ("ax", "bx", "cx", "dx", "si", "di", "bp")
-_GPR_INDEX_8616: Mapping[str, int] = {name: index for index, name in enumerate(_GPR_ORDER_8616)}
+_GPR_INDEX_8616: Mapping[str, cython.longlong] = {name: index for index, name in builtins.iter(enumerate(_GPR_ORDER_8616))}
 
 _GPR_ALIASES_8616: Mapping[str, str] = {
     "eax": "ax", "ebx": "bx", "ecx": "cx", "edx": "dx",
@@ -336,10 +345,10 @@ _OPERAND_SIZE_PREFIX_8616 = 0x66
 # ``pusha``/``popa`` family totals in bytes; Capstone spells the 16-bit
 # forms ``pushaw``/``popaw`` and the operand-size-overridden forms
 # ``pushal``/``popal``.
-_PUSHA_TOTAL_8616: Mapping[str, int] = {
+_PUSHA_TOTAL_8616: Mapping[str, cython.longlong] = {
     "pusha": 16, "pushaw": 16, "pushad": 32, "pushal": 32,
 }
-_POPA_TOTAL_8616: Mapping[str, int] = {
+_POPA_TOTAL_8616: Mapping[str, cython.longlong] = {
     "popa": 16, "popaw": 16, "popad": 32, "popal": 32,
 }
 _PUSHF_MNEMONICS_8616: frozenset[str] = frozenset({"pushf", "pushfd"})
@@ -389,36 +398,36 @@ _ANOMALOUS_TERMINALS_8616: frozenset[str] = frozenset(
 class _MemoryOperandBoundary8616(Protocol):
     """Capstone memory fields consumed by the continuation proof."""
 
-    base: int
-    index: int
-    segment: int
-    disp: int
+    base: cython.longlong
+    index: cython.longlong
+    segment: cython.longlong
+    disp: cython.longlong
 
 
 class _OperandBoundary8616(Protocol):
     """Capstone operand fields consumed by the continuation proof."""
 
-    type: int
-    reg: int
-    imm: int
-    size: int
-    access: int
+    type: cython.longlong
+    reg: cython.longlong
+    imm: cython.longlong
+    size: cython.longlong
+    access: cython.longlong
     mem: _MemoryOperandBoundary8616
 
 
 class _DecodedInstructionBoundary8616(Protocol):
     """Decoded Capstone instruction fields used at the backend boundary."""
 
-    address: int
-    mnemonic: str
+    address: cython.longlong
+    mnemonic: object
     operands: Sequence[_OperandBoundary8616]
-    prefix: Sequence[int]
+    prefix: Sequence[cython.longlong]
 
-    def reg_name(self, register_id: int) -> str:
+    def reg_name(self, register_id: cython.longlong) -> object:
         """Return Capstone's canonical register name."""
         ...
 
-    def regs_access(self) -> tuple[Sequence[int], Sequence[int]]:
+    def regs_access(self) -> object:
         """Return registers read and written, including implicit effects."""
         ...
 
@@ -437,10 +446,10 @@ class _DecodedCallsiteInstruction8616(Protocol):
     is proved from them, never inferred from the near/far flag alone.
     """
 
-    address: int
-    size: int
-    mnemonic: str
-    prefix: Sequence[int]
+    address: cython.longlong
+    size: cython.longlong
+    mnemonic: object
+    prefix: Sequence[cython.longlong]
     operands: Sequence[_OperandBoundary8616]
 
 
@@ -453,24 +462,24 @@ class _CapstoneBoundary8616(Protocol):
 class _BlockBoundary8616(Protocol):
     """Decoded block surface consumed by the continuation proof."""
 
-    addr: int
+    addr: cython.longlong
     capstone: _CapstoneBoundary8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _InsnFacts8616:
     """One decoded instruction reduced to the facts this proof consumes."""
 
-    address: int
-    mnemonic: str
-    operands: tuple[_OperandBoundary8616, ...]
-    reads: tuple[str, ...]
-    writes: tuple[str, ...]
-    decode_failed: bool
+    address: cython.longlong
+    mnemonic: object
+    operands: object
+    reads: object
+    writes: object
+    decode_failed: cython.bint
     insn: _DecodedInstructionBoundary8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _PathState8616:
     """Bounded per-path provenance lattice over the decoded block CFG.
 
@@ -481,23 +490,23 @@ class _PathState8616:
     it is consumed; ``poisons`` unions every path-level refusal reason.
     """
 
-    origins: tuple[bool, ...]
+    origins: object
     sp_delta: int | None
     bp_delta: int | None
-    slot_mutated: bool
-    poisons: frozenset[NearReturnContinuationFailure8616]
+    slot_mutated: cython.bint
+    poisons: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NearReturnContinuationRecord8616:
     """Proof or typed refusal for one indirect block terminal."""
 
-    block_addr: int
-    terminal_addr: int
+    block_addr: cython.longlong
+    terminal_addr: cython.longlong
     verdict: NearReturnContinuationVerdict8616
     failure: NearReturnContinuationFailure8616 | None
     kind: NearReturnContinuationKind8616 | None = None
-    register: str | None = None
+    register: object = None
 
     def to_dict(self) -> dict[str, object]:
         """Serialize this record for diagnostics."""
@@ -511,7 +520,7 @@ class NearReturnContinuationRecord8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NearReturnContinuationArtifact8616:
     """Closed census of continuation proofs for one region's candidates.
 
@@ -520,33 +529,33 @@ class NearReturnContinuationArtifact8616:
     must re-authenticate, so it is excluded from equality and the repr.
     """
 
-    records: tuple[NearReturnContinuationRecord8616, ...]
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    records: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
     premise: NearCallFramePremise8616 | None = field(
         default=None, compare=False, repr=False
     )
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every observed candidate proved its continuation."""
         return (
             self.raw_fact_count > 0
-            and self.raw_fact_count == self.normalized_fact_count
-            and self.normalized_fact_count == self.classified_fact_count
-            and self.classified_fact_count == self.materialized_count + self.failure_count
+            and operator.eq(self.raw_fact_count, self.normalized_fact_count)
+            and operator.eq(self.normalized_fact_count, self.classified_fact_count)
+            and operator.eq(self.classified_fact_count, self.materialized_count + self.failure_count)
             and self.failure_count == 0
         )
 
     @property
-    def proven_block_addrs(self) -> frozenset[int]:
+    def proven_block_addrs(self) -> frozenset[cython.longlong]:
         """Return block addresses whose indirect terminal is a proven return."""
         return frozenset(
             record.block_addr
-            for record in self.records
+            for record in iter(self.records)
             if record.verdict is NearReturnContinuationVerdict8616.PROVEN
         )
 
@@ -556,7 +565,7 @@ class NearReturnContinuationArtifact8616:
             "premise": (
                 None if self.premise is None else self.premise.to_dict()
             ),
-            "records": [record.to_dict() for record in self.records],
+            "records": [record.to_dict() for record in iter(self.records)],
             "raw_fact_count": self.raw_fact_count,
             "normalized_fact_count": self.normalized_fact_count,
             "classified_fact_count": self.classified_fact_count,
@@ -566,8 +575,8 @@ class NearReturnContinuationArtifact8616:
 
 
 def _merge_states_8616(
-    left: _PathState8616 | None,
-    right: _PathState8616 | None,
+    left: object,
+    right: object,
 ) -> _PathState8616 | None:
     """Join two path states; continuation survives only on every path."""
     if left is None:
@@ -576,10 +585,10 @@ def _merge_states_8616(
         return left
     origins = tuple(
         left_value and right_value
-        for left_value, right_value in zip(left.origins, right.origins, strict=True)
+        for left_value, right_value in builtins.iter(zip(left.origins, right.origins, strict=True))
     )
-    sp_delta = left.sp_delta if left.sp_delta == right.sp_delta else None
-    bp_delta = left.bp_delta if left.bp_delta == right.bp_delta else None
+    sp_delta = left.sp_delta if operator.eq(left.sp_delta, right.sp_delta) else None
+    bp_delta = left.bp_delta if operator.eq(left.bp_delta, right.bp_delta) else None
     return _PathState8616(
         origins=origins,
         sp_delta=sp_delta,
@@ -589,12 +598,14 @@ def _merge_states_8616(
     )
 
 
-def _normalize_gpr_8616(name: str) -> str:
+@cython.ccall
+def _normalize_gpr_8616(name: object) -> object:
     """Normalize 32-bit and byte register spellings to their 16-bit parent."""
     lowered = name.lower()
     return _GPR_ALIASES_8616.get(lowered, lowered)
 
 
+@cython.ccall
 def _poisoned_8616(
     state: _PathState8616, reason: NearReturnContinuationFailure8616,
 ) -> _PathState8616:
@@ -610,14 +621,16 @@ def _poisoned_8616(
     )
 
 
-def _bounded_delta_8616(delta: int | None) -> int | None:
+@cython.ccall
+def _bounded_delta_8616(delta: object) -> int | None:
     """Widen an unbounded entry-relative delta to unknown."""
     if delta is None or abs(delta) > _DELTA_BOUND_8616:
         return None
     return delta
 
 
-def _reg_name_8616(insn: _DecodedInstructionBoundary8616, register_id: int) -> str:
+@cython.ccall
+def _reg_name_8616(insn: _DecodedInstructionBoundary8616, register_id: cython.longlong) -> object:
     """Return one normalized register name or an empty marker."""
     try:
         name = insn.reg_name(register_id)
@@ -626,9 +639,10 @@ def _reg_name_8616(insn: _DecodedInstructionBoundary8616, register_id: int) -> s
     return name.lower() if isinstance(name, str) else ""
 
 
+@cython.ccall
 def _effective_segment_8616(
     insn: _DecodedInstructionBoundary8616, memory: _MemoryOperandBoundary8616,
-) -> str:
+) -> object:
     """Return the effective segment name for one memory operand."""
     if memory.segment:
         return _reg_name_8616(insn, memory.segment)
@@ -639,6 +653,7 @@ def _effective_segment_8616(
     return "ds"
 
 
+@cython.ccall
 def _stack_slot_8616(
     state: _PathState8616,
     insn: _DecodedInstructionBoundary8616,
@@ -652,6 +667,7 @@ def _stack_slot_8616(
     spellings are frame-relative carriers: an address-size-overridden
     ``esp``/``ebp`` base is a 32-bit address this proof does not track.
     """
+    delta: object
     if _effective_segment_8616(insn, memory) != "ss" or memory.index:
         return None
     base_name = _reg_name_8616(insn, memory.base)
@@ -666,6 +682,7 @@ def _stack_slot_8616(
     return delta + int(memory.disp)
 
 
+@cython.ccall
 def _operand_width_8616(operand: _OperandBoundary8616) -> int | None:
     """Return the decoder-reported access width of one operand, if sane."""
     try:
@@ -675,6 +692,7 @@ def _operand_width_8616(operand: _OperandBoundary8616) -> int | None:
     return size if size > 0 else None
 
 
+@cython.ccall
 def _operand_size_override_8616(
     insn: _DecodedInstructionBoundary8616,
 ) -> bool | None:
@@ -690,12 +708,14 @@ def _operand_size_override_8616(
         return None
 
 
-def _slot_is_return_word_8616(slot: int | None) -> bool:
+@cython.ccall
+def _slot_is_return_word_8616(slot: object) -> cython.bint:
     """Return whether ``slot`` names exactly the entry return word."""
     return slot is not None and slot % _SLOT_MOD_8616 == 0
 
 
-def _store_overlaps_return_word_8616(slot: int | None, width: int | None) -> bool:
+@cython.ccall
+def _store_overlaps_return_word_8616(slot: object, width: object) -> cython.bint:
     """Return whether a ``width``-byte store at ``slot`` may touch the word.
 
     The return word is the byte range ``{0, 1}`` in entry-relative,
@@ -711,6 +731,7 @@ def _store_overlaps_return_word_8616(slot: int | None, width: int | None) -> boo
     return start < 2 or end > _SLOT_MOD_8616
 
 
+@cython.ccall
 def _stack_item_width_8616(facts: _InsnFacts8616) -> int | None:
     """Return the per-item byte width of a push/pop-style stack access.
 
@@ -719,20 +740,24 @@ def _stack_item_width_8616(facts: _InsnFacts8616) -> int | None:
     prefix. Contradictory or absent evidence yields ``None`` rather than
     guessing a 2-byte stack slot.
     """
+    operand: object
+    override: object
+    prefix_width: object
     operand = facts.operands[0] if facts.operands else None
     size = _operand_width_8616(operand) if operand is not None else None
     override = _operand_size_override_8616(facts.insn)
     prefix_width = None if override is None else (4 if override else 2)
     if size in (2, 4):
-        if prefix_width is not None and prefix_width != size:
+        if prefix_width is not None and operator.ne(prefix_width, size):
             return None
         return size
     return prefix_width
 
 
+@cython.ccall
 def _memory_write_mutates_8616(
     state: _PathState8616, facts: _InsnFacts8616,
-) -> bool:
+) -> cython.bint:
     """Return whether this instruction may overwrite the entry top slot.
 
     Only a provably SS-relative store whose byte range provably misses
@@ -749,8 +774,8 @@ def _memory_write_mutates_8616(
 
 
 def _apply_origins_8616(
-    state: _PathState8616, assigned: Mapping[str, bool], writes: Sequence[str],
-) -> tuple[bool, ...]:
+    state: _PathState8616, assigned: Mapping[str, cython.bint], writes: Sequence[str],
+) -> tuple[cython.bint, ...]:
     """Fold one instruction's register writes into the origin vector.
 
     Assigned origins win over the write audit so implicit writes the
@@ -758,21 +783,23 @@ def _apply_origins_8616(
     still degrade; every reported GPR write without an assigned
     provenance drops to non-continuation.
     """
-    written = {_normalize_gpr_8616(name) for name in writes}
+    written = {_normalize_gpr_8616(name) for name in iter(writes)}
     return tuple(
         assigned[name]
         if name in assigned
         else False
         if name in written
         else state.origins[index]
-        for index, name in enumerate(_GPR_ORDER_8616)
+        for index, name in builtins.iter(enumerate(_GPR_ORDER_8616))
     )
 
 
+@cython.ccall
 def _audit_writes_8616(
     state: _PathState8616, facts: _InsnFacts8616,
 ) -> _PathState8616:
     """Poison CS/SS clobbers and unclassified written registers."""
+    name: object
     result = state
     for name in facts.writes:
         normalized = _normalize_gpr_8616(name)
@@ -798,11 +825,12 @@ def _audit_writes_8616(
     return result
 
 
+@cython.ccall
 def _delta_state_8616(
     state: _PathState8616,
     sp_delta: int | None,
     bp_delta: int | None,
-    mutated: bool,
+    mutated: cython.bint,
 ) -> _PathState8616:
     """Return a state copy with updated deltas and slot mutation."""
     return _PathState8616(
@@ -810,9 +838,10 @@ def _delta_state_8616(
     )
 
 
+@cython.ccall
 def _step_pop_8616(
     state: _PathState8616, facts: _InsnFacts8616,
-) -> tuple[_PathState8616, Mapping[str, bool]]:
+) -> tuple[_PathState8616, Mapping[str, cython.bint]]:
     """Fold one ``pop``: slot-0 word loads bind continuation provenance.
 
     Only the 16-bit pop binds a carrier: a 32-bit pop advances ``SP`` by
@@ -820,6 +849,8 @@ def _step_pop_8616(
     Popping ``bp`` also destroys the frame delta — the register no longer
     names the entry frame — and popping ``sp`` leaves an unknown pointer.
     """
+    delta: object
+    operand: object
     operand = facts.operands[0] if facts.operands else None
     width = _stack_item_width_8616(facts)
     if operand is None or width not in (2, 4):
@@ -830,7 +861,7 @@ def _step_pop_8616(
     delta = state.sp_delta
     bp_delta = state.bp_delta
     mutated = state.slot_mutated
-    assigned: dict[str, bool] = {}
+    assigned: dict[str, cython.bint] = {}
     pop_into_sp = False
     if operand.type == 1:
         name = _normalize_gpr_8616(_reg_name_8616(facts.insn, operand.reg))
@@ -853,6 +884,7 @@ def _step_pop_8616(
     return _delta_state_8616(state, new_delta, bp_delta, mutated), assigned
 
 
+@cython.ccall
 def _step_push_8616(
     state: _PathState8616, facts: _InsnFacts8616,
 ) -> _PathState8616:
@@ -862,6 +894,8 @@ def _step_push_8616(
     pointer; ``pushf``/``pushfd`` take their width from the ``0x66``
     prefix because they carry no explicit operand.
     """
+    delta: object
+    width: object
     width = _stack_item_width_8616(facts)
     if width is None:
         result = _poisoned_8616(
@@ -878,10 +912,13 @@ def _step_push_8616(
     )
 
 
+@cython.ccall
 def _step_popf_8616(
     state: _PathState8616, facts: _InsnFacts8616,
 ) -> _PathState8616:
     """Fold one ``popf``/``popfd``: a flag pop that only advances SP."""
+    delta: object
+    width: object
     width = _stack_item_width_8616(facts)
     if width is None:
         result = _poisoned_8616(
@@ -897,8 +934,10 @@ def _step_popf_8616(
     )
 
 
-def _step_pusha_8616(state: _PathState8616, total: int) -> _PathState8616:
+@cython.ccall
+def _step_pusha_8616(state: _PathState8616, total: cython.longlong) -> _PathState8616:
     """Fold one ``pusha``/``pushal``: ``total`` bytes written below SP."""
+    delta: object
     delta = state.sp_delta
     slot = None if delta is None else delta - total
     return _delta_state_8616(
@@ -909,8 +948,10 @@ def _step_pusha_8616(state: _PathState8616, total: int) -> _PathState8616:
     )
 
 
-def _step_popa_8616(state: _PathState8616, total: int) -> _PathState8616:
+@cython.ccall
+def _step_popa_8616(state: _PathState8616, total: cython.longlong) -> _PathState8616:
     """Fold one ``popa``/``popal``: every GPR loses continuation provenance."""
+    delta: object
     delta = state.sp_delta
     return _delta_state_8616(
         state,
@@ -920,9 +961,10 @@ def _step_popa_8616(state: _PathState8616, total: int) -> _PathState8616:
     )
 
 
+@cython.ccall
 def _step_enter_8616(
     state: _PathState8616, facts: _InsnFacts8616,
-) -> tuple[_PathState8616, Mapping[str, bool]]:
+) -> tuple[_PathState8616, Mapping[str, cython.bint]]:
     """Fold one ``enter N, 0``: the frame push plus the allocation size.
 
     Only the flat, unoverridden form is admitted. A nonzero nesting level
@@ -930,6 +972,9 @@ def _step_enter_8616(
     ``0x66`` operand-size prefix widens the pushed frame pointer — both
     refuse rather than pretend a delta.
     """
+    alloc: object
+    delta: object
+    frame_delta: object
     operands = facts.operands
     if _operand_size_override_8616(facts.insn) is not False:
         result = _poisoned_8616(
@@ -939,7 +984,7 @@ def _step_enter_8616(
             _delta_state_8616(result, None, None, result.slot_mutated),
             {"bp": False},
         )
-    alloc: int | None = None
+    alloc = None
     nesting: int | None = None
     if (
         len(operands) == 2
@@ -972,9 +1017,10 @@ def _step_enter_8616(
     ), {"bp": False}
 
 
+@cython.ccall
 def _step_leave_8616(
     state: _PathState8616, facts: _InsnFacts8616,
-) -> tuple[_PathState8616, Mapping[str, bool]]:
+) -> tuple[_PathState8616, Mapping[str, cython.bint]]:
     """Fold one ``leave``: SP adopts the frame delta, BP is reloaded.
 
     Only the unprefixed 16-bit form is admitted: a ``0x66`` operand-size
@@ -999,9 +1045,10 @@ def _step_leave_8616(
     ), {"bp": False}
 
 
+@cython.ccall
 def _step_stack_forms_8616(
     state: _PathState8616, facts: _InsnFacts8616,
-) -> tuple[_PathState8616, Mapping[str, bool], bool]:
+) -> tuple[_PathState8616, Mapping[str, cython.bint], cython.bint]:
     """Handle push/pop/enter/leave frame effects.
 
     Returns ``(state, assigned, handled)`` where ``assigned`` maps GPR
@@ -1032,6 +1079,7 @@ def _step_stack_forms_8616(
     return state, {}, False
 
 
+@cython.ccall
 def _lea_target_delta_8616(
     state: _PathState8616,
     insn: _DecodedInstructionBoundary8616,
@@ -1042,6 +1090,7 @@ def _lea_target_delta_8616(
     Only a single ``sp``/``bp`` base with no index keeps a delta; the
     computed value is the base delta plus the displacement, bounded.
     """
+    delta: object
     if memory.index:
         return None
     base_name = _reg_name_8616(insn, memory.base)
@@ -1056,16 +1105,17 @@ def _lea_target_delta_8616(
     return _bounded_delta_8616(delta + int(memory.disp))
 
 
+@cython.ccall
 def _step_lea_8616(
     state: _PathState8616, facts: _InsnFacts8616,
-) -> tuple[Mapping[str, bool], int | None, int | None, bool]:
+) -> tuple[Mapping[str, cython.bint], int | None, int | None, cython.bint]:
     """Fold one ``lea``: computed addresses never carry continuation.
 
     ``lea`` into ``sp``/``bp`` is an effective-address computation, so the
     pointer's tracked delta is recomputed from the source operand rather
     than left stale; partial destination aliases widen to unknown.
     """
-    assigned: dict[str, bool] = {}
+    assigned: dict[str, cython.bint] = {}
     sp_delta = state.sp_delta
     bp_delta = state.bp_delta
     operands = facts.operands
@@ -1087,12 +1137,13 @@ def _step_lea_8616(
     return assigned, sp_delta, bp_delta, state.slot_mutated
 
 
+@cython.ccall
 def _step_mov_reg_dest_8616(
     state: _PathState8616,
     facts: _InsnFacts8616,
     destination: _OperandBoundary8616,
     source: _OperandBoundary8616,
-) -> tuple[Mapping[str, bool], int | None, int | None, bool]:
+) -> tuple[Mapping[str, cython.bint], int | None, int | None, cython.bint]:
     """Fold one ``mov r, src`` transfer into provenance state.
 
     Tracked deltas move only through whole-pointer transfers: ``mov sp,
@@ -1100,7 +1151,7 @@ def _step_mov_reg_dest_8616(
     and every other write — including partial aliases such as a byte
     spelling — widens the destination delta to unknown.
     """
-    assigned: dict[str, bool] = {}
+    assigned: dict[str, cython.bint] = {}
     sp_delta = state.sp_delta
     bp_delta = state.bp_delta
     raw_dest = _reg_name_8616(facts.insn, destination.reg)
@@ -1138,9 +1189,10 @@ def _step_mov_reg_dest_8616(
     return assigned, sp_delta, bp_delta, state.slot_mutated
 
 
+@cython.ccall
 def _step_mov_8616(
     state: _PathState8616, facts: _InsnFacts8616,
-) -> tuple[Mapping[str, bool], int | None, int | None, bool]:
+) -> object:
     """Classify one ``mov``/``xchg``/``lea`` transfer.
 
     Returns ``(assigned, sp_delta, bp_delta, mutated)``; an unchanged
@@ -1163,9 +1215,10 @@ def _step_mov_8616(
     return _step_mov_reg_dest_8616(state, facts, destination, source)
 
 
+@cython.ccall
 def _mov_source_origin_8616(
     state: _PathState8616, facts: _InsnFacts8616, source: _OperandBoundary8616,
-) -> bool:
+) -> cython.bint:
     """Return continuation provenance for one ``mov`` source operand.
 
     A memory source binds only when its access provably reads the whole
@@ -1188,8 +1241,9 @@ def _mov_source_origin_8616(
     return False
 
 
+@cython.ccall
 def _xchg_delta_after_swap_8616(
-    state: _PathState8616, receives: Mapping[str, str], target: str,
+    state: _PathState8616, receives: Mapping[str, str], target: object,
 ) -> int | None:
     """Return ``target``'s delta after a register swap, or the old delta.
 
@@ -1198,8 +1252,9 @@ def _xchg_delta_after_swap_8616(
     exchanges deltas, a self-swap keeps it, and any other source widens
     the tracked delta to unknown.
     """
+    source: object
     source = receives.get(target)
-    if source is None or source == target:
+    if source is None or operator.eq(source, target):
         return state.sp_delta if target == "sp" else state.bp_delta
     if source == "sp":
         return state.sp_delta
@@ -1208,9 +1263,10 @@ def _xchg_delta_after_swap_8616(
     return None
 
 
+@cython.ccall
 def _step_xchg_8616(
     state: _PathState8616, facts: _InsnFacts8616,
-) -> tuple[Mapping[str, bool], int | None, int | None, bool]:
+) -> tuple[Mapping[str, cython.bint], int | None, int | None, cython.bint]:
     """Fold one ``xchg`` swap into provenance state.
 
     Register-to-register swaps exchange continuation provenance only at
@@ -1219,7 +1275,10 @@ def _step_xchg_8616(
     memory participant both reads and writes its slot, so overlap with
     the return word is a mutation and no provenance is bound.
     """
-    assigned: dict[str, bool] = {}
+    memory_operand: object
+    width: object
+    operand: object
+    assigned: dict[str, cython.bint] = {}
     sp_delta = state.sp_delta
     bp_delta = state.bp_delta
     mutated = state.slot_mutated
@@ -1266,8 +1325,9 @@ def _step_xchg_8616(
     return assigned, sp_delta, bp_delta, mutated
 
 
+@cython.ccall
 def _tracked_pointer_delta_8616(
-    state: _PathState8616, facts: _InsnFacts8616, target: str,
+    state: _PathState8616, facts: _InsnFacts8616, target: object,
 ) -> int | None:
     """Return the post-instruction delta for one tracked stack pointer.
 
@@ -1276,6 +1336,7 @@ def _tracked_pointer_delta_8616(
     write form (partial aliases included) widens to unknown so no stale
     frame delta can survive an unmodeled write.
     """
+    delta: object
     mnemonic = facts.mnemonic
     operands = facts.operands
     delta = state.sp_delta if target == "sp" else state.bp_delta
@@ -1285,8 +1346,7 @@ def _tracked_pointer_delta_8616(
         mnemonic in {"add", "sub"}
         and len(operands) == 2
         and operands[0].type == 1
-        and _normalize_gpr_8616(_reg_name_8616(facts.insn, operands[0].reg))
-        == target
+        and operator.eq(_normalize_gpr_8616(_reg_name_8616(facts.insn, operands[0].reg)), target)
         and operands[1].type == 2
     ):
         try:
@@ -1300,8 +1360,7 @@ def _tracked_pointer_delta_8616(
         mnemonic in {"inc", "dec"}
         and len(operands) == 1
         and operands[0].type == 1
-        and _normalize_gpr_8616(_reg_name_8616(facts.insn, operands[0].reg))
-        == target
+        and operator.eq(_normalize_gpr_8616(_reg_name_8616(facts.insn, operands[0].reg)), target)
     ):
         return _bounded_delta_8616(
             delta + 1 if mnemonic == "inc" else delta - 1
@@ -1309,23 +1368,26 @@ def _tracked_pointer_delta_8616(
     return None
 
 
-def _pointer_written_8616(facts: _InsnFacts8616, names: frozenset[str]) -> bool:
+def _pointer_written_8616(facts: _InsnFacts8616, names: object) -> cython.bint:
     """Return whether the instruction writes any alias of ``names``."""
     return any(
-        _normalize_gpr_8616(name) in names for name in facts.writes
+        _normalize_gpr_8616(name) in names for name in iter(facts.writes)
     )
 
 
-def _sp_written_8616(facts: _InsnFacts8616) -> bool:
+@cython.ccall
+def _sp_written_8616(facts: _InsnFacts8616) -> cython.bint:
     """Return whether the instruction writes any SP alias."""
     return _pointer_written_8616(facts, _SP_NAMES_8616)
 
 
-def _bp_written_8616(facts: _InsnFacts8616) -> bool:
+@cython.ccall
+def _bp_written_8616(facts: _InsnFacts8616) -> cython.bint:
     """Return whether the instruction writes any BP alias."""
     return _pointer_written_8616(facts, _BP_NAMES_8616)
 
 
+@cython.ccall
 def _segment_clobber_8616(
     state: _PathState8616, facts: _InsnFacts8616,
 ) -> _PathState8616:
@@ -1336,6 +1398,7 @@ def _segment_clobber_8616(
     for ``cs`` or ``ss`` is still a clobber claim; unknown access refuses
     rather than trusting a silent segment mutation.
     """
+    operand: object
     result = state
     for operand in facts.operands:
         if operand.type != 1:
@@ -1358,15 +1421,17 @@ def _segment_clobber_8616(
     return result
 
 
-def _string_write_mnemonic_8616(mnemonic: str) -> bool:
+@cython.ccall
+def _string_write_mnemonic_8616(mnemonic: object) -> cython.bint:
     """Return whether a possibly REP-prefixed mnemonic writes string memory."""
     parts = mnemonic.split()
     base = parts[-1] if parts else mnemonic
     return base in _STRING_WRITE_MNEMONICS_8616
 
 
+@cython.ccall
 def _control_refusal_8616(
-    facts: _InsnFacts8616, terminal: bool,
+    facts: _InsnFacts8616, terminal: cython.bint,
 ) -> NearReturnContinuationFailure8616 | None:
     """Classify control-transfer mnemonics into path poisons."""
     mnemonic = facts.mnemonic
@@ -1383,10 +1448,12 @@ def _control_refusal_8616(
     return None
 
 
+@cython.ccall
 def _step_instruction_8616(
-    state: _PathState8616, facts: _InsnFacts8616, *, terminal: bool,
+    state: _PathState8616, facts: _InsnFacts8616, *, terminal: cython.bint,
 ) -> _PathState8616:
     """Advance one path state across one decoded instruction."""
+    refusal: object
     if facts.decode_failed:
         return _poisoned_8616(
             state, NearReturnContinuationFailure8616.UNKNOWN_EFFECT_ON_PATH
@@ -1436,7 +1503,8 @@ def _step_instruction_8616(
     )
 
 
-def _is_branch_terminal_8616(facts: _InsnFacts8616) -> bool:
+@cython.ccall
+def _is_branch_terminal_8616(facts: _InsnFacts8616) -> cython.bint:
     """Return whether a terminal instruction is a pure edge producer.
 
     ``loop``/``jcxz`` variants are excluded: ``loop`` decrements ``cx``
@@ -1449,9 +1517,10 @@ def _is_branch_terminal_8616(facts: _InsnFacts8616) -> bool:
     return mnemonic.startswith("j") and mnemonic not in {"jcxz", "jecxz"}
 
 
+@cython.ccall
 def _unknown_memory_write_8616(
     state: _PathState8616, facts: _InsnFacts8616,
-) -> bool:
+) -> cython.bint:
     """Return whether any memory operand may be a store needing slot proof.
 
     Every memory operand is audited, not only operand 0: a reported
@@ -1461,6 +1530,7 @@ def _unknown_memory_write_8616(
     ``mov``/``xchg``/``lea`` memory operands are resolved by their own
     transfer rules upstream.
     """
+    operand: object
     if (
         facts.mnemonic in _MEM_READ_MNEMONICS_8616
         or facts.mnemonic in {"mov", "xchg", "lea"}
@@ -1481,10 +1551,13 @@ def _unknown_memory_write_8616(
     return False
 
 
+@cython.ccall
 def _transfer_block_state_8616(
     entry_state: _PathState8616, instructions: Sequence[_InsnFacts8616],
 ) -> _PathState8616:
     """Fold one block's instruction facts into its exit state."""
+    facts: object
+    index: object
     state = entry_state
     last_index = len(instructions) - 1
     for index, facts in enumerate(instructions):
@@ -1510,11 +1583,11 @@ def _decode_instruction_8616(instruction: object) -> _InsnFacts8616 | None:
         reads_raw, writes_raw = insn.regs_access()
         reads = tuple(
             _normalize_gpr_8616(_reg_name_8616(insn, reg_id))
-            for reg_id in reads_raw
+            for reg_id in iter(reads_raw)
         )
         writes = tuple(
             _normalize_gpr_8616(_reg_name_8616(insn, reg_id))
-            for reg_id in writes_raw
+            for reg_id in iter(writes_raw)
         )
     except (AttributeError, TypeError, ValueError):
         decode_failed = True
@@ -1530,8 +1603,11 @@ def _decode_instruction_8616(instruction: object) -> _InsnFacts8616 | None:
     )
 
 
+@cython.ccall
 def _block_facts_8616(block: object) -> tuple[_InsnFacts8616, ...]:
     """Return the decoded instruction facts for one census block."""
+    decoded: object
+    instruction: object
     boundary = cast(_BlockBoundary8616, block)
     if isinstance(block, DirectCapstoneBlock8616):
         instructions = tuple(block.instructions)
@@ -1548,6 +1624,7 @@ def _block_facts_8616(block: object) -> tuple[_InsnFacts8616, ...]:
     return tuple(facts)
 
 
+@cython.ccall
 def _indirect_terminal_operand_8616(
     facts: _InsnFacts8616,
 ) -> _OperandBoundary8616 | None:
@@ -1561,31 +1638,34 @@ def _indirect_terminal_operand_8616(
 
 
 def _propagate_states_8616(
-    blocks_by_addr: Mapping[int, tuple[_InsnFacts8616, ...]],
-    predecessors: Mapping[int, tuple[int, ...]],
-    entry: int,
-) -> dict[int, _PathState8616] | None:
+    blocks_by_addr: Mapping[cython.longlong, tuple[_InsnFacts8616, ...]],
+    predecessors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
+    entry: cython.longlong,
+) -> object:
     """Run the bounded join fixpoint and return per-block entry states."""
+    merged: object
+    addr: object
+    pred: object
     entry_state = _PathState8616(
-        origins=tuple(False for _ in _GPR_ORDER_8616),
+        origins=tuple(False for _ in iter(_GPR_ORDER_8616)),
         sp_delta=0,
         bp_delta=None,
         slot_mutated=False,
         poisons=frozenset(),
     )
-    ins: dict[int, _PathState8616] = {}
-    outs: dict[int, _PathState8616] = {}
+    ins: dict[cython.longlong, _PathState8616] = {}
+    outs: dict[cython.longlong, _PathState8616] = {}
     max_passes = 4 * (len(blocks_by_addr) + 2)
     for _ in range(max_passes):
         changed = False
         for addr in sorted(blocks_by_addr):
-            merged: _PathState8616 | None = entry_state if addr == entry else None
+            merged = entry_state if addr == entry else None
             for pred in predecessors.get(addr, ()):
                 merged = _merge_states_8616(merged, outs.get(pred))
             if merged is None:
                 continue
             new_out = _transfer_block_state_8616(merged, blocks_by_addr[addr])
-            if ins.get(addr) != merged or outs.get(addr) != new_out:
+            if operator.ne(ins.get(addr), merged) or operator.ne(outs.get(addr), new_out):
                 ins[addr] = merged
                 outs[addr] = new_out
                 changed = True
@@ -1594,16 +1674,19 @@ def _propagate_states_8616(
     return None
 
 
+@cython.ccall
 def _reported_failure_8616(
-    poisons: frozenset[NearReturnContinuationFailure8616],
+    poisons: object,
 ) -> NearReturnContinuationFailure8616 | None:
     """Pick the deterministic representative of merged path poisons."""
+    reason: object
     for reason in _FAILURE_PRIORITY_8616:
         if reason in poisons:
             return reason
     return None
 
 
+@cython.ccall
 def _terminal_operand_width_8616(
     facts: _InsnFacts8616, operand: _OperandBoundary8616,
 ) -> int | None:
@@ -1616,7 +1699,9 @@ def _terminal_operand_width_8616(
     target, because a wide jump observes upper bits this proof never
     constrains.
     """
-    signals: set[int] = set()
+    override: object
+    size: object
+    signals: set[cython.longlong] = set()
     size = _operand_width_8616(operand)
     if size is not None:
         signals.add(size)
@@ -1636,11 +1721,12 @@ def _terminal_operand_width_8616(
     return next(iter(signals))
 
 
+@cython.ccall
 def _evaluate_candidate_8616(
-    block_addr: int,
-    instructions: tuple[_InsnFacts8616, ...],
+    block_addr: cython.longlong,
+    instructions: object,
     operand: _OperandBoundary8616,
-    state: _PathState8616 | None,
+    state: object,
 ) -> NearReturnContinuationRecord8616:
     """Decide one indirect terminal under its merged path state.
 
@@ -1648,6 +1734,7 @@ def _evaluate_candidate_8616(
     width before provenance is consulted: a wider ``jmp`` observes upper
     bits or far frames this model does not constrain.
     """
+    poison: object
     terminal_addr = instructions[-1].address
     if state is None:
         return NearReturnContinuationRecord8616(
@@ -1712,9 +1799,10 @@ def _evaluate_candidate_8616(
     )
 
 
+@cython.ccall
 def _premise_failure_8616(
-    premise: NearCallFramePremise8616 | None,
-    entry: int,
+    premise: object,
+    entry: cython.longlong,
 ) -> NearReturnContinuationFailure8616 | None:
     """Classify the source-bound premise for one exact callee head."""
     if (
@@ -1723,23 +1811,29 @@ def _premise_failure_8616(
         or premise.kind is not EntryTopSlotKind8616.NEAR_CALL_CONTINUATION
     ):
         return NearReturnContinuationFailure8616.PREMISE_ABSENT
-    if premise.callee_addr != entry:
+    if operator.ne(premise.callee_addr, entry):
         return NearReturnContinuationFailure8616.PREMISE_FOREIGN
     if near_call_frame_premise_stale_8616(premise):
         return NearReturnContinuationFailure8616.PREMISE_STALE
     return None
 
 
+@cython.ccall
 def _candidate_records_8616(
-    candidates: Mapping[int, tuple[_InsnFacts8616, ...]],
-    facts_by_addr: Mapping[int, tuple[_InsnFacts8616, ...]],
-    predecessors: Mapping[int, tuple[int, ...]],
-    entry: int,
-) -> list[NearReturnContinuationRecord8616]:
+    candidates: Mapping[cython.longlong, tuple[_InsnFacts8616, ...]],
+    facts_by_addr: Mapping[cython.longlong, tuple[_InsnFacts8616, ...]],
+    predecessors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
+    entry: cython.longlong,
+) -> object:
     """Evaluate every candidate block under the proven entry states."""
+    entry_states: object
+    operand: object
+    state: object
+    addr: object
+    facts: object
     entry_states = _propagate_states_8616(facts_by_addr, predecessors, entry)
     records: list[NearReturnContinuationRecord8616] = []
-    for addr, facts in sorted(candidates.items()):
+    for addr, facts in sorted(tuple(candidates.items())):
         if entry_states is None:
             records.append(
                 NearReturnContinuationRecord8616(
@@ -1766,9 +1860,9 @@ def _candidate_records_8616(
 
 def prove_near_return_continuations_8616(
     blocks: Sequence[object],
-    successor_edges: Sequence[tuple[int, int]],
+    successor_edges: Sequence[tuple[cython.longlong, cython.longlong]],
     *,
-    entry: int,
+    entry: cython.longlong,
     premise: NearCallFramePremise8616 | None,
 ) -> NearReturnContinuationArtifact8616:
     """Prove indirect terminals that continue to the near-CALL return word.
@@ -1785,7 +1879,13 @@ def prove_near_return_continuations_8616(
     unclassified effect on any path. Everything else keeps a typed
     refusal.
     """
-    facts_by_addr: dict[int, tuple[_InsnFacts8616, ...]] = {}
+    premise_failure: object
+    addr: object
+    block: object
+    facts: object
+    source: object
+    target: object
+    facts_by_addr: dict[cython.longlong, tuple[_InsnFacts8616, ...]] = {}
     for block in blocks:
         boundary = cast(_BlockBoundary8616, block)
         try:
@@ -1795,22 +1895,22 @@ def prove_near_return_continuations_8616(
         facts = _block_facts_8616(block)
         if facts:
             facts_by_addr[block_addr] = facts
-    predecessor_lists: dict[int, list[int]] = {}
+    predecessor_lists: dict[cython.longlong, list[cython.longlong]] = {}
     for source, target in successor_edges:
         predecessor_lists.setdefault(target, []).append(source)
     predecessors = {
-        target: tuple(sorted(set(sources)))
-        for target, sources in predecessor_lists.items()
+        target: tuple(sorted(tuple(set(sources))))
+        for target, sources in builtins.iter(predecessor_lists.items())
     }
     candidates = {
         addr: facts
-        for addr, facts in facts_by_addr.items()
+        for addr, facts in builtins.iter(facts_by_addr.items())
         if facts and _indirect_terminal_operand_8616(facts[-1]) is not None
     }
     records: list[NearReturnContinuationRecord8616] = []
     premise_failure = _premise_failure_8616(premise, entry)
     if premise_failure is not None:
-        for addr, facts in sorted(candidates.items()):
+        for addr, facts in sorted(tuple(candidates.items())):
             records.append(
                 NearReturnContinuationRecord8616(
                     addr,
@@ -1828,7 +1928,7 @@ def prove_near_return_continuations_8616(
     count = len(records)
     proven = sum(
         record.verdict is NearReturnContinuationVerdict8616.PROVEN
-        for record in records
+        for record in iter(records)
     )
     return NearReturnContinuationArtifact8616(
         records=tuple(records),

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Validation.
 
 Responsibility: assert generic semantic invariants over recovered output and pipeline state.
@@ -9,6 +10,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import re
 from collections.abc import Iterator
@@ -16,6 +19,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from inertia.pipeline.errors import PipelineHardError
+import dataclasses
+import builtins
 
 __all__ = [
     "KnownCallArgKind8616",
@@ -34,7 +39,7 @@ class KnownCallArgKind8616(Enum):
     VALUE = "value"
 
 
-_KNOWN_CALL_ARG_KINDS_8616: dict[str, dict[int, KnownCallArgKind8616]] = {
+_KNOWN_CALL_ARG_KINDS_8616: dict[str, dict[cython.longlong, KnownCallArgKind8616]] = {
 }
 
 _CALL_STMT_RE_8616 = re.compile(r"^(?P<name>[A-Za-z_]\w*)\s*\((?P<args>.*)\)\s*;\s*$")
@@ -55,31 +60,32 @@ _UNRESOLVED_STACK_BASE_ACCESS_RE_8616 = re.compile(
 _IDENT_RE_8616 = re.compile(r"\b[A-Za-z_]\w*\b")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class KnownCallSemanticIssue8616:
     """Validation issue for one known call or segmented-memory invariant."""
 
-    callee: str
+    callee: object
     arg_index: int | None
-    arg_text: str | None
-    message: str
+    arg_text: object
+    message: object
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class ValidationSemanticsReport8616:
     """Counters and issues produced by final semantic validation checks."""
 
-    checked_call_count: int = 0
-    checked_arg_count: int = 0
-    pointer_arg_count: int = 0
-    value_arg_count: int = 0
-    segment_linearization_issue_count: int = 0
-    failure_count: int = 0
-    issues: list[KnownCallSemanticIssue8616] = field(default_factory=list)
+    checked_call_count: cython.longlong = 0
+    checked_arg_count: cython.longlong = 0
+    pointer_arg_count: cython.longlong = 0
+    value_arg_count: cython.longlong = 0
+    segment_linearization_issue_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    issues: object = field(default_factory=list)
 
 
-def _split_c_args_8616(arg_text: str) -> tuple[str, ...]:
+def _split_c_args_8616(arg_text: object) -> object:
     def _impl() -> tuple[str, ...]:
+        ch: object
         text = str(arg_text or "").strip()
         if not text or text == "void":
             return ()
@@ -106,7 +112,9 @@ def _split_c_args_8616(arg_text: str) -> tuple[str, ...]:
     return _impl()
 
 
-def _iter_statement_calls_8616(c_text: str) -> Iterator[tuple[str, tuple[str, ...], str]]:
+def _iter_statement_calls_8616(c_text: object) -> Iterator[tuple[str, tuple[str, ...], str]]:
+    match: object
+    raw_line: object
     for raw_line in str(c_text or "").splitlines():
         stripped = raw_line.strip()
         if not stripped or not stripped.endswith(";"):
@@ -119,12 +127,14 @@ def _iter_statement_calls_8616(c_text: str) -> Iterator[tuple[str, tuple[str, ..
         yield match.group("name"), _split_c_args_8616(match.group("args")), stripped
 
 
-def _has_stack_placeholder_8616(arg_text: str) -> bool:
+@cython.ccall
+def _has_stack_placeholder_8616(arg_text: object) -> cython.bint:
     text = str(arg_text or "")
     return bool(_PLACEHOLDER_STACK_RE_8616.search(text) or "&(&" in text)
 
 
-def _is_pointer_like_8616(arg_text: str) -> bool:
+@cython.ccall
+def _is_pointer_like_8616(arg_text: object) -> cython.bint:
     text = str(arg_text or "").strip()
     if not text:
         return False
@@ -133,7 +143,7 @@ def _is_pointer_like_8616(arg_text: str) -> bool:
     return re.search(r"&\s*[A-Za-z_]\w*(?:\[[^\]]+\])?", text) is not None
 
 
-def _is_value_like_8616(arg_text: str) -> bool:
+def _is_value_like_8616(arg_text: object) -> cython.bint:
     text = str(arg_text or "").strip()
     if not text:
         return False
@@ -141,10 +151,12 @@ def _is_value_like_8616(arg_text: str) -> bool:
         return False
     if _has_stack_placeholder_8616(text):
         return False
-    return not any(token in text for token in ("ds << 4", "es << 4", "ss << 4", "stack["))
+    return not any(token in text for token in iter(("ds << 4", "es << 4", "ss << 4", "stack[")))
 
 
-def _normalized_non_preprocessor_lines_8616(c_text: str) -> tuple[str, ...]:
+@cython.ccall
+def _normalized_non_preprocessor_lines_8616(c_text: object) -> tuple[str, ...]:
+    raw_line: object
     lines: list[str] = []
     text = re.sub(r"/\*.*?\*/", "", str(c_text or ""), flags=re.DOTALL)
     for raw_line in text.splitlines():
@@ -155,16 +167,17 @@ def _normalized_non_preprocessor_lines_8616(c_text: str) -> tuple[str, ...]:
     return tuple(lines)
 
 
-def _strip_comments_for_placeholder_scan_8616(c_text: str) -> str:
+def _strip_comments_for_placeholder_scan_8616(c_text: object) -> str:
     text = re.sub(r"/\*.*?\*/", "", str(c_text or ""), flags=re.DOTALL)
-    return "\n".join(line.split("//", 1)[0] for line in text.splitlines())
+    return "\n".join(line.split("//", 1)[0] for line in builtins.iter(text.splitlines()))
 
 
-def _dangerous_segment_linearization_expr_8616(expr_text: str, tainted_names: set[str]) -> bool:
+def _dangerous_segment_linearization_expr_8616(expr_text: object, tainted_names: object) -> cython.bint:
+    name: object
     text = str(expr_text or "").strip()
     if not text or any(
         helper in text
-        for helper in (
+        for helper in iter((
             "SEG_PTR(",
             "SEG_U8(",
             "SEG_U16(",
@@ -173,11 +186,11 @@ def _dangerous_segment_linearization_expr_8616(expr_text: str, tainted_names: se
             "MEM_U8(",
             "MEM_U16(",
             "MEM_U32(",
-        )
+        ))
     ):
         return False
     lowered = text.lower()
-    for name in {"ss", "ds", "es", *tainted_names}:
+    for name in {"ss", "ds", "es", } | set(tainted_names):
         escaped = re.escape(name)
         if re.search(rf"\b{escaped}\b\s*<<\s*4\b", lowered, flags=re.IGNORECASE):
             return True
@@ -188,8 +201,11 @@ def _dangerous_segment_linearization_expr_8616(expr_text: str, tainted_names: se
     return False
 
 
-def check_segment_linearization_laundering_8616(c_text: str) -> str | None:
+@cython.ccall
+def check_segment_linearization_laundering_8616(c_text: object) -> object:
     """Return a failure reason when segment registers leak into linear arithmetic."""
+    match: object
+    line: object
     tainted_names: set[str] = set()
     for line in _normalized_non_preprocessor_lines_8616(c_text):
         if _dangerous_segment_linearization_expr_8616(line, tainted_names):
@@ -214,13 +230,14 @@ def check_segment_linearization_laundering_8616(c_text: str) -> str | None:
     return None
 
 
+@cython.ccall
 def _record_issue_8616(
     report: ValidationSemanticsReport8616,
     *,
-    callee: str,
+    callee: object,
     arg_index: int | None,
-    arg_text: str | None,
-    message: str,
+    arg_text: object,
+    message: object,
 ) -> None:
     if "segment register value escaped into linearized arithmetic" in message:
         report.segment_linearization_issue_count += 1
@@ -235,17 +252,21 @@ def _record_issue_8616(
     )
 
 
+@cython.ccall
 def _validate_known_call_arg_kinds_8616(
     report: ValidationSemanticsReport8616,
     *,
-    callee: str,
-    args: tuple[str, ...],
+    callee: object,
+    args: object,
 ) -> None:
+    kinds: object
+    arg_index: object
+    kind: object
     kinds = _KNOWN_CALL_ARG_KINDS_8616.get(callee)
     if not kinds:
         return
     report.checked_call_count += 1
-    for arg_index, kind in sorted(kinds.items()):
+    for arg_index, kind in sorted(tuple(kinds.items())):
         if arg_index >= len(args):
             _record_issue_8616(
                 report,
@@ -279,12 +300,17 @@ def _validate_known_call_arg_kinds_8616(
                 )
 
 
+@cython.ccall
 def validate_known_call_semantics_8616(
-    c_text: str,
+    c_text: object,
     *,
     function_addr: int | None = None,
 ) -> ValidationSemanticsReport8616:
     """Validate final C text against generic known-call semantic contracts."""
+    segment_laundering_issue: object
+    _line: object
+    args: object
+    callee: object
     _ = function_addr
     report = ValidationSemanticsReport8616()
     segment_laundering_issue = check_segment_linearization_laundering_8616(c_text)
@@ -301,7 +327,8 @@ def validate_known_call_semantics_8616(
     return report
 
 
-def assert_known_call_semantics_8616(c_text: str, *, function_addr: int | None = None) -> None:
+@cython.ccall
+def assert_known_call_semantics_8616(c_text: object, *, function_addr: int | None = None) -> None:
     """Raise a hard pipeline failure when final C violates semantic contracts."""
     report = validate_known_call_semantics_8616(c_text, function_addr=function_addr)
     semantic_text = _strip_comments_for_placeholder_scan_8616(c_text)

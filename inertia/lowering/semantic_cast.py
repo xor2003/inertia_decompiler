@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Render casts whose conversion is part of proven machine semantics.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -21,6 +24,9 @@ from angr.sim_type import SimType, SimTypeChar, SimTypeInt, SimTypeLong, SimType
 from angr.sim_variable import SimVariable
 
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
+import dataclasses
+import operator
+import builtins
 
 
 class CSemanticCast8616(
@@ -30,8 +36,8 @@ class CSemanticCast8616(
 
     def c_repr_chunks(
         self,
-        indent: int = 0,
-        asexpr: bool = False,
+        indent = 0,
+        asexpr = False,
     ) -> Iterator[tuple[str, object]]:
         """Render the required C conversion independently of ``show_casts``."""
         del indent, asexpr
@@ -68,12 +74,15 @@ class RequiredAssignmentCastReconcileStatus8616(StrEnum):
 class _DeclarationTypeSurface8616(Protocol):
     """Native C-function declaration inventory consumed without name recovery."""
 
-    arg_list: list[structured_c.CVariable]
-    unified_local_vars: dict[SimVariable, set[tuple[structured_c.CVariable, SimType]]]
+    arg_list: object
+    unified_local_vars: object
 
 
+@cython.ccall
 def declared_variable_type_8616(expression: structured_c.CVariable) -> SimType | None:
     """Use a unique emitted declaration type for the exact variable identity."""
+    cfunc: object
+    entries: object
     try:
         cfunc = cast(_DeclarationTypeSurface8616 | None, expression.codegen.cfunc)
     except AttributeError:
@@ -88,16 +97,17 @@ def declared_variable_type_8616(expression: structured_c.CVariable) -> SimType |
         return expression.variable_type
     argument_types = {
         argument.variable_type
-        for argument in arguments
+        for argument in iter(arguments)
         if isinstance(argument, structured_c.CVariable)
-        and (argument.unified_variable or argument.variable) == identity
+        and operator.eq((argument.unified_variable or argument.variable), identity)
     }
     entries = locals_.get(identity, ())
-    types = argument_types or {type_ for _, type_ in entries}
+    types = argument_types or {type_ for _, type_ in iter(entries)}
     return next(iter(types)) if len(types) == 1 else None
 
 
-def is_identity_semantic_variable_cast_8616(node: CSemanticCast8616) -> bool:
+@cython.ccall
+def is_identity_semantic_variable_cast_8616(node: CSemanticCast8616) -> cython.bint:
     """Prove a same-width cast is redundant against its current variable type.
 
     Declaration refinement can leave a cast's source metadata behind. Only
@@ -129,17 +139,17 @@ def is_identity_semantic_variable_cast_8616(node: CSemanticCast8616) -> bool:
         return False
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RequiredAssignmentCastReconcileResult8616:
     """Closed evidence result for one required assignment cast."""
 
     status: RequiredAssignmentCastReconcileStatus8616
-    assignment_count: int
-    destination_count: int
-    candidate_count: int
+    assignment_count: cython.longlong
+    destination_count: cython.longlong
+    candidate_count: cython.longlong
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether the required cast was applied."""
         return self.status is RequiredAssignmentCastReconcileStatus8616.APPLIED
 
@@ -148,8 +158,8 @@ def reconcile_required_assignment_cast_8616(
     root: object,
     expected: structured_c.CAssignment,
     *,
-    same_destination: Callable[[object, object], bool],
-    same_source: Callable[[object, object], bool],
+    same_destination: Callable[[object, object], cython.bint],
+    same_source: Callable[[object, object], cython.bint],
 ) -> RequiredAssignmentCastReconcileResult8616:
     """Restore one evidence-backed cast onto a unique stale assignment."""
     expected_rhs = expected.rhs
@@ -162,17 +172,17 @@ def reconcile_required_assignment_cast_8616(
         )
     assignments = tuple(
         node
-        for node in _iter_c_nodes_deep_8616(root)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(root))
         if isinstance(node, structured_c.CAssignment)
     )
     destinations = tuple(
-        node for node in assignments if same_destination(node.lhs, expected.lhs)
+        node for node in iter(assignments) if same_destination(node.lhs, expected.lhs)
     )
     already_present = tuple(
         node
-        for node in destinations
+        for node in iter(destinations)
         if isinstance(node.rhs, CSemanticCast8616)
-        and node.rhs.dst_type == expected_rhs.dst_type
+        and operator.eq(node.rhs.dst_type, expected_rhs.dst_type)
         and same_source(node.rhs.expr, expected_rhs.expr)
     )
     if len(already_present) == 1:
@@ -191,7 +201,7 @@ def reconcile_required_assignment_cast_8616(
         )
     candidates = tuple(
         node
-        for node in destinations
+        for node in iter(destinations)
         if not isinstance(node.rhs, CSemanticCast8616)
         and same_source(node.rhs, expected_rhs.expr)
     )

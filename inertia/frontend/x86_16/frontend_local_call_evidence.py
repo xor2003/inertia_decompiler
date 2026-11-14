@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Retain conditional near-CALL frame evidence from a refused inventory.
 
 Layer: Frontend instruction inventory.
@@ -25,6 +26,8 @@ bytes revoke the evidence rather than serving stale rows.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import hashlib
 from collections.abc import Sequence
@@ -48,6 +51,8 @@ from .frontend_invocation_inventory import (
     InvocationInventoryStatus8616,
 )
 from .mz_invocation_source import MzInvocationSource8616
+import dataclasses
+import operator
 
 __all__ = [
     "LocalCallEvidenceStats8616",
@@ -68,7 +73,7 @@ _GLOBAL_INSTALL_STATUSES_8616: frozenset[InvocationInventoryStatus8616] = frozen
 )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LocalCallEvidenceStats8616:
     """Closed evidence-loop accounting for one local census collection.
 
@@ -82,21 +87,19 @@ class LocalCallEvidenceStats8616:
     honestly instead of claiming a complete re-census.
     """
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every recorded head reached an accounted outcome."""
         return bool(
-            self.raw_fact_count == self.normalized_fact_count
-            and self.normalized_fact_count
-            == self.materialized_count + self.failure_count
-            and self.classified_fact_count
-            == self.materialized_count + self.failure_count
+            operator.eq(self.raw_fact_count, self.normalized_fact_count)
+            and operator.eq(self.normalized_fact_count, self.materialized_count + self.failure_count)
+            and operator.eq(self.classified_fact_count, self.materialized_count + self.failure_count)
             and min(
                 self.raw_fact_count,
                 self.normalized_fact_count,
@@ -108,7 +111,7 @@ class LocalCallEvidenceStats8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LocalCallFrameEvidence8616:
     """Source-authenticated conditional near-CALL frame evidence.
 
@@ -137,16 +140,16 @@ class LocalCallFrameEvidence8616:
 
     project: object = field(repr=False, compare=False)
     architecture: object = field(repr=False, compare=False)
-    source_sha256: str
-    load_segment: int
-    entry_linear: int
-    image_base: int
-    image_size: int
-    image_sha256: str
+    source_sha256: object
+    load_segment: cython.longlong
+    entry_linear: cython.longlong
+    image_base: cython.longlong
+    image_size: cython.longlong
+    image_sha256: object
     inventory_status: InvocationInventoryStatus8616
-    boundary_heads: tuple[int, ...]
+    boundary_heads: object
     callsite_index: DecodedDirectCallsiteIndex8616
-    pending_targets: tuple[int, ...]
+    pending_targets: object
     stats: LocalCallEvidenceStats8616
 
 
@@ -159,7 +162,7 @@ class _LocalCallEvidenceHolder8616(Protocol):
 class _MappedLoaderMemory8616(Protocol):
     """Third-party loader memory used for mapped-byte reauthentication."""
 
-    def load(self, addr: int, size: int) -> object:
+    def load(self, addr: cython.longlong, size: cython.longlong) -> object:
         """Return the mapped bytes for one linear range."""
         ...
 
@@ -169,13 +172,13 @@ class _MappedProject8616(Protocol):
 
     loader: _MappedLoaderSurface8616
     arch: object
-    entry: int
+    entry: cython.longlong
 
 
 class _MappedMainObject8616(Protocol):
     """Authenticated DOS loader paragraph used to project native bytes."""
 
-    mz_load_segment: int
+    mz_load_segment: cython.longlong
 
 
 class _MappedLoaderSurface8616(Protocol):
@@ -192,9 +195,9 @@ class _RetainedStaticIntake8616(Protocol):
 
 
 def _bounded_boundary_census_8616(
-    blocks: tuple[object, ...],
-    remaining: int,
-) -> tuple[object, ...] | None:
+    blocks: object,
+    remaining: cython.longlong,
+) -> object:
     """Collect one re-closed boundary's decoded census within the budget left.
 
     Blocks are visited in ascending address order and each block's
@@ -204,6 +207,8 @@ def _bounded_boundary_census_8616(
     have materialized its instruction list; this bounds our additional
     census, not that decoder's work.
     """
+    block: object
+    instruction: object
     instructions: list[object] = []
     for block in sorted(blocks, key=lambda item: cast(_CensusBlock8616, item).addr):
         for instruction in cast(_CensusBlock8616, block).capstone.insns:
@@ -222,15 +227,17 @@ class _CensusDisassembly8616(Protocol):
 class _CensusBlock8616(Protocol):
     """Third-party block projection consumed only at the frontend boundary."""
 
-    addr: int
+    addr: cython.longlong
     capstone: _CensusDisassembly8616
 
 
+@cython.ccall
 def _census_instruction_addresses_8616(
-    instructions: tuple[object, ...],
-) -> frozenset[int]:
+    instructions: object,
+) -> frozenset[cython.longlong]:
     """Return the decoded address set of one census instruction stream."""
-    addresses: set[int] = set()
+    instruction: object
+    addresses: set[cython.longlong] = set()
     for instruction in instructions:
         address = _boundary_instruction_address_8616(instruction)
         if type(address) is not int:
@@ -239,7 +246,7 @@ def _census_instruction_addresses_8616(
     return frozenset(addresses)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _Recensus8616:
     """Outcome of re-closing the refused inventory's recorded heads.
 
@@ -248,15 +255,16 @@ class _Recensus8616:
     ``failures`` counts heads whose re-closure or census bound refused.
     """
 
-    censuses: tuple[DecodedCallerCensus8616, ...]
-    heads: tuple[int, ...]
-    normalized: int
-    failures: int
+    censuses: object
+    heads: object
+    normalized: cython.longlong
+    failures: cython.longlong
 
 
+@cython.ccall
 def _reclosed_censuses_8616(
     project: object,
-    heads: tuple[int, ...],
+    heads: object,
     budget: InvocationInventoryBudget8616,
 ) -> _Recensus8616:
     """Re-close each recorded head and census it within the shared budget.
@@ -268,8 +276,10 @@ def _reclosed_censuses_8616(
     whose decoded addresses diverge from the boundary's own reachable set
     is a contract error and fails loudly.
     """
+    instructions: object
+    head: object
     censuses: list[DecodedCallerCensus8616] = []
-    kept_heads: list[int] = []
+    kept_heads: list[cython.longlong] = []
     instruction_count = 0
     normalized = 0
     failures = 0
@@ -279,7 +289,7 @@ def _reclosed_censuses_8616(
         if (
             type(boundary) is not ExactFunctionRangeBoundary8616
             or boundary.project is not project
-            or boundary.addr != head
+            or operator.ne(boundary.addr, head)
         ):
             failures += 1
             continue
@@ -289,9 +299,9 @@ def _reclosed_censuses_8616(
         if instructions is None:
             failures += 1
             break
-        if _census_instruction_addresses_8616(instructions) != frozenset(
+        if operator.ne(_census_instruction_addresses_8616(instructions), frozenset(
             boundary.reachable_instruction_addrs
-        ):
+        )):
             raise ValueError("re-closed boundary census does not match")
         instruction_count += len(instructions)
         censuses.append(
@@ -337,7 +347,7 @@ def collect_local_call_frame_evidence_8616(
         not projection.complete
         or already_global
         or inventory.callsite_index is not None
-        or inventory.entry != projection.entry_linear
+        or operator.ne(inventory.entry, projection.entry_linear)
     ):
         return None
     if budget is None:
@@ -346,8 +356,8 @@ def collect_local_call_frame_evidence_8616(
     if (
         not heads
         or len(heads) > budget.max_boundaries
-        or len(set(heads)) != len(heads)
-        or any(type(head) is not int or head < 0 for head in heads)
+        or operator.ne(len(set(heads)), len(heads))
+        or any(type(head) is not int or head < 0 for head in iter(heads))
     ):
         return None
     if not callable(direct_target_resolver):
@@ -383,9 +393,10 @@ def collect_local_call_frame_evidence_8616(
     )
 
 
+@cython.ccall
 def install_local_call_frame_evidence_8616(
     project: object,
-    evidence: LocalCallFrameEvidence8616 | None,
+    evidence: object,
 ) -> None:
     """Install or clear the project's local frame-evidence surface.
 
@@ -396,6 +407,9 @@ def install_local_call_frame_evidence_8616(
     proved caller's coordinates. ``None`` clears the slot so a failed
     collection never leaks a stale authority into later demands.
     """
+    instructions: object
+    row: object
+    rows: object
     if evidence is not None:
         if type(evidence) is not LocalCallFrameEvidence8616:
             raise TypeError("local call frame evidence must be a typed record")
@@ -408,16 +422,13 @@ def install_local_call_frame_evidence_8616(
         heads = frozenset(evidence.boundary_heads)
         census_instructions = {
             census.entry_addr: census.instructions
-            for census in index.caller_censuses
+            for census in iter(index.caller_censuses)
         }
-        if not heads or frozenset(census_instructions) != heads:
+        if not heads or operator.ne(frozenset(census_instructions), heads):
             raise ValueError("local evidence census does not cover its heads")
         if evidence.inventory_status in _GLOBAL_INSTALL_STATUSES_8616:
             raise ValueError("local evidence cannot claim a closed corpus")
-        for rows in (
-            *index._entries_by_normalized_target.values(),
-            *index._entries_by_exact_far_target.values(),
-        ):
+        for rows in tuple(index._entries_by_normalized_target.values()) + tuple(index._entries_by_exact_far_target.values()):
             for row in rows:
                 instructions = census_instructions.get(row.caller_start)
                 if instructions is None or row.instructions is not instructions:
@@ -427,10 +438,11 @@ def install_local_call_frame_evidence_8616(
     )._inertia_local_call_frame_evidence_8616 = evidence
 
 
+@cython.ccall
 def _project_still_authentic_8616(
     project: object,
     evidence: LocalCallFrameEvidence8616,
-) -> bool:
+) -> cython.bint:
     """Reject transferred evidence or a changed decoding/loading context.
 
     Matching bytes alone do not establish the original loader projection or
@@ -443,17 +455,18 @@ def _project_still_authentic_8616(
     try:
         return bool(
             surface.arch is evidence.architecture
-            and surface.entry == evidence.entry_linear
-            and surface.loader.main_object.mz_load_segment == evidence.load_segment
+            and operator.eq(surface.entry, evidence.entry_linear)
+            and operator.eq(surface.loader.main_object.mz_load_segment, evidence.load_segment)
         )
     except AttributeError:
         return False
 
 
+@cython.ccall
 def _mapped_image_still_authentic_8616(
     project: object,
     evidence: LocalCallFrameEvidence8616,
-) -> bool:
+) -> cython.bint:
     """Reauthenticate the retained census against current native bytes.
 
     The mapped span recorded at collection is re-read and re-digested;
@@ -462,6 +475,7 @@ def _mapped_image_still_authentic_8616(
     bytes, a replaced or malformed request, a missing loader surface —
     revokes the evidence rather than serving stale rows.
     """
+    request: object
     bounds_sane = (
         type(evidence.image_base) is int
         and evidence.image_base >= 0
@@ -481,7 +495,7 @@ def _mapped_image_still_authentic_8616(
         return False
     if not isinstance(image, (bytes, bytearray)):
         return False
-    if hashlib.sha256(bytes(image)).hexdigest() != evidence.image_sha256:
+    if operator.ne(hashlib.sha256(bytes(image)).hexdigest(), evidence.image_sha256):
         return False
     # A present request must still authenticate the same source, while an
     # absent one leaves the image digest authoritative.
@@ -494,13 +508,13 @@ def _mapped_image_still_authentic_8616(
             retained_source = None
         if (
             type(retained_source) is not bytes
-            or hashlib.sha256(retained_source).hexdigest()
-            != evidence.source_sha256
+            or operator.ne(hashlib.sha256(retained_source).hexdigest(), evidence.source_sha256)
         ):
             return False
     return True
 
 
+@cython.ccall
 def local_call_frame_evidence_8616(
     project: object,
 ) -> LocalCallFrameEvidence8616 | None:
@@ -511,6 +525,7 @@ def local_call_frame_evidence_8616(
     bytes, a changed retained source, or a lost loader surface clear the
     slot and report ``None`` — stale evidence is never served.
     """
+    evidence: object
     surface = cast(_LocalCallEvidenceHolder8616, project)
     try:
         evidence = surface._inertia_local_call_frame_evidence_8616
@@ -526,10 +541,11 @@ def local_call_frame_evidence_8616(
     return evidence
 
 
+@cython.ccall
 def local_call_frame_evidence_epoch_matches_8616(
     retained: LocalCallFrameEvidence8616,
     collected: LocalCallFrameEvidence8616,
-) -> bool:
+) -> cython.bint:
     """Return whether a recollection carries the retained census epoch.
 
     A refused-inventory demand re-collects the closed-caller census on

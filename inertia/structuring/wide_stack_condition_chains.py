@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Recover direct wide comparisons from typed word-condition CFG chains.
 
 Layer: Structuring.
@@ -13,6 +14,9 @@ instruction decoding, rendered-text matching, or function-specific recovery.
 """
 
 from __future__ import annotations
+import dataclasses
+import typing
+import cython
 
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -24,26 +28,28 @@ from inertia.ir.condition_ir import ConditionIR, ConditionOp
 from inertia.ir.core import IRValue
 
 from . import wide_condition_ordering
+import operator
+import builtins
 
-type WideStackPairProver8616 = Callable[[IRValue, IRValue], bool]
+WideStackPairProver8616 = typing.TypeAliasType("WideStackPairProver8616", Callable[[IRValue, IRValue], bool])
 
-_WORD_BYTES: int = 2
-_MAX_EVALUATED_BLOCKS: int = 24
-_MAX_DISCOVERED_BLOCKS: int = 48
+_WORD_BYTES: cython.longlong = 2
+_MAX_EVALUATED_BLOCKS: cython.longlong = 24
+_MAX_DISCOVERED_BLOCKS: cython.longlong = 48
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideStackConditionChainStats8616:
     """Account for wide-condition classification and materialization."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideStackConditionChainResult8616:
     """Return one proven wide condition plus its evidence accounting."""
 
@@ -51,7 +57,7 @@ class WideStackConditionChainResult8616:
     stats: WideStackConditionChainStats8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideStackOperandPair8616:
     """Describe one anchored high/low operand pairing for CFG proof."""
 
@@ -60,23 +66,25 @@ class WideStackOperandPair8616:
     high_right: IRValue
     low_right: IRValue
     signed: bool | None
-    left_pair_proven: bool
-    right_pair_proven: bool
+    left_pair_proven: cython.bint
+    right_pair_proven: cython.bint
 
 
 _SIGNED_OPS_8616: frozenset[ConditionOp] = frozenset({"slt", "sle", "sgt", "sge"})
 _UNSIGNED_OPS_8616: frozenset[ConditionOp] = frozenset({"ult", "ule", "ugt", "uge"})
 
 
+@cython.ccall
 def _stack_word_8616(value: object) -> IRValue | None:
     """Return one exact typed BP-relative stack word."""
     if not isinstance(value, IRValue):
         return None
-    if value.name != "bp" or value.size != _WORD_BYTES:
+    if value.name != "bp" or operator.ne(value.size, _WORD_BYTES):
         return None
     return value
 
 
+@cython.ccall
 def _condition_signedness_8616(condition: ConditionIR) -> bool | None:
     """Return the ordering family of one comparison condition."""
     if condition.op in _SIGNED_OPS_8616:
@@ -86,20 +94,28 @@ def _condition_signedness_8616(condition: ConditionIR) -> bool | None:
     return None
 
 
-def _adjacent_stack_words_8616(high: IRValue, low: IRValue) -> bool:
+@cython.ccall
+def _adjacent_stack_words_8616(high: IRValue, low: IRValue) -> cython.bint:
     """Require exact typed adjacency before propagating a peer widening proof."""
     return (
         isinstance(high.offset, int)
         and isinstance(low.offset, int)
-        and high.offset == low.offset + _WORD_BYTES
+        and operator.eq(high.offset, low.offset + _WORD_BYTES)
     )
 
 
+@cython.ccall
 def candidate_wide_stack_operand_pairs_8616(
-    conditions: tuple[ConditionIR, ...],
+    conditions: object,
     prove_pair: WideStackPairProver8616,
 ) -> tuple[WideStackOperandPair8616, ...]:
     """Collect pairs anchored by Widening; peer propagation requires CFG proof."""
+    high_left: object
+    high_right: object
+    low_left: object
+    low_right: object
+    high_condition: object
+    low_condition: object
     candidates: list[WideStackOperandPair8616] = []
     for high_condition in conditions:
         high_left = _stack_word_8616(
@@ -142,6 +158,7 @@ def candidate_wide_stack_operand_pairs_8616(
     return tuple(candidates)
 
 
+@cython.ccall
 def _pair_orientations_8616(
     high_left: IRValue,
     high_right: IRValue,
@@ -149,9 +166,11 @@ def _pair_orientations_8616(
     low_right: IRValue,
     signed: bool | None,
     prove_pair: WideStackPairProver8616,
-    candidates: list[WideStackOperandPair8616],
+    candidates: object,
 ) -> None:
     """Append proven oriented candidates for one (high, low) word pair."""
+    paired_left: object
+    paired_right: object
     for paired_left, paired_right in ((low_left, low_right), (low_right, low_left)):
         if not _adjacent_stack_words_8616(
             high_left, paired_left
@@ -176,18 +195,19 @@ def _pair_orientations_8616(
 
 
 def _merge_candidate_8616(
-    candidates: list[WideStackOperandPair8616],
+    candidates: object,
     candidate: WideStackOperandPair8616,
 ) -> None:
     """Append or replace one candidate while preserving operand dedup."""
+    same_operands: object
     same_operands = next(
         (
             index
-            for index, existing in enumerate(candidates)
-            if existing.high_left == candidate.high_left
-            and existing.low_left == candidate.low_left
-            and existing.high_right == candidate.high_right
-            and existing.low_right == candidate.low_right
+            for index, existing in builtins.iter(enumerate(candidates))
+            if operator.eq(existing.high_left, candidate.high_left)
+            and operator.eq(existing.low_left, candidate.low_left)
+            and operator.eq(existing.high_right, candidate.high_right)
+            and operator.eq(existing.low_right, candidate.low_right)
         ),
         None,
     )
@@ -198,16 +218,17 @@ def _merge_candidate_8616(
     elif (
         candidate.signed is not None
         and candidates[same_operands].signed is not None
-        and candidates[same_operands].signed != candidate.signed
+        and operator.ne(candidates[same_operands].signed, candidate.signed)
     ):
         candidates.append(candidate)
 
 
+@cython.ccall
 def relation_for_wide_stack_condition_8616(
     condition: ConditionIR,
     pair: WideStackOperandPair8616,
-    high_relation: int,
-    low_relation: int,
+    high_relation: cython.longlong,
+    low_relation: cython.longlong,
 ) -> int | None:
     """Map one condition to the abstract relation of its proven word pair."""
     operands = (
@@ -225,24 +246,30 @@ def relation_for_wide_stack_condition_8616(
     return None
 
 
-def wide_stack_operator_result_8616(op: ConditionOp, relation: int) -> bool | None:
+@cython.ccall
+def wide_stack_operator_result_8616(op: ConditionOp, relation: cython.longlong) -> bool | None:
     """Evaluate a typed comparison operator over an abstract relation."""
     return wide_condition_ordering.wide_operator_result_8616(op, relation)
 
 
+@cython.ccall
 def _chain_outcome_8616(
     root: ConditionIR,
     pair: WideStackOperandPair8616,
-    conditions_by_block: dict[int, ConditionIR],
-    successors: dict[int, tuple[int, ...]],
-    true_target: int,
-    false_target: int,
-    high_relation: int,
-    low_relation: int,
+    conditions_by_block: object,
+    successors: object,
+    true_target: cython.longlong,
+    false_target: cython.longlong,
+    high_relation: cython.longlong,
+    low_relation: cython.longlong,
 ) -> bool | None:
     """Evaluate one typed CFG chain without materializing a C expression."""
+    decision: object
+    next_condition: object
+    relation: object
+    verdict: object
     condition = root
-    visited: set[int] = set()
+    visited: set[cython.longlong] = set()
     while len(visited) < _MAX_EVALUATED_BLOCKS:
         relation = relation_for_wide_stack_condition_8616(
             condition, pair, high_relation, low_relation
@@ -275,14 +302,17 @@ def _chain_outcome_8616(
     return None
 
 
+@cython.ccall
 def _chain_step_8616(
-    target: int,
-    conditions_by_block: dict[int, ConditionIR],
-    successors: dict[int, tuple[int, ...]],
-    true_target: int,
-    false_target: int,
+    target: cython.longlong,
+    conditions_by_block: object,
+    successors: object,
+    true_target: cython.longlong,
+    false_target: cython.longlong,
 ) -> tuple[bool | None, ConditionIR | None]:
     """Resolve one chain hop to ``(verdict, next)``; ``(None, None)`` refuses."""
+    next_addrs: object
+    next_condition: object
     next_condition = conditions_by_block.get(target)
     if next_condition is not None:
         return None, next_condition
@@ -297,23 +327,29 @@ def _chain_step_8616(
     return None, conditions_by_block.get(hop)
 
 
-def candidate_wide_stack_ops_8616(signed: bool | None) -> tuple[ConditionOp, ...]:
+@cython.ccall
+def candidate_wide_stack_ops_8616(signed: bool | None) -> object:
     """Return possible direct operators for one high-word family."""
     return wide_condition_ordering.candidate_wide_ops_8616(signed)
 
 
+@cython.ccall
 def reachable_wide_stack_conditions_8616(
     root: ConditionIR,
-    conditions_by_block: dict[int, ConditionIR],
-    successors: dict[int, tuple[int, ...]],
+    conditions_by_block: object,
+    successors: object,
     *,
-    stop_targets: frozenset[int] = frozenset(),
+    stop_targets: object = frozenset(),
 ) -> tuple[ConditionIR, ...]:
     """Collect typed conditions before proven decision-surface exits."""
+    condition: object
+    next_addrs: object
+    next_condition: object
+    initial_target: object
     pending = [root]
     result: list[ConditionIR] = []
-    seen_conditions: set[int] = set()
-    visited: set[int] = set()
+    seen_conditions: set[cython.longlong] = set()
+    visited: set[cython.longlong] = set()
     while pending and len(visited) < _MAX_DISCOVERED_BLOCKS:
         condition = pending.pop()
         condition_identity = id(condition)
@@ -342,13 +378,14 @@ def reachable_wide_stack_conditions_8616(
 
 def recover_wide_stack_condition_chain_8616(
     root: ConditionIR,
-    conditions_by_block: dict[int, ConditionIR],
-    successors: dict[int, tuple[int, ...]],
-    true_target: int,
-    false_target: int,
+    conditions_by_block: object,
+    successors: object,
+    true_target: cython.longlong,
+    false_target: cython.longlong,
     prove_pair: WideStackPairProver8616,
 ) -> WideStackConditionChainResult8616:
     """Recover one direct wide comparison only after exhaustive CFG proof."""
+    operator: object
     conditions = reachable_wide_stack_conditions_8616(
         root,
         conditions_by_block,
@@ -384,7 +421,7 @@ def recover_wide_stack_condition_chain_8616(
         # Keep source addresses, but not obsolete word-register operand bindings.
         producer_semantics=None,
         register_bindings=(),
-        source=(*root.source, "wide-stack-condition-chain"),
+        source=tuple(root.source) + ("wide-stack-condition-chain",),
     )
     return WideStackConditionChainResult8616(
         condition=condition,

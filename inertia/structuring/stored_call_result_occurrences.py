@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Own regenerated standalone calls superseded by exact result stores.
 
 Layer: Structuring.
@@ -12,6 +13,8 @@ duplicate.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import defaultdict
 from dataclasses import dataclass
@@ -38,6 +41,9 @@ from .stored_call_result_contracts import (
     StoredCallResultRefusal8616,
     StoredCallResultRefusalReason8616,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = ("materialize_stored_call_result_occurrences_8616",)
 
@@ -52,32 +58,34 @@ class _CodegenSurface8616(Protocol):
     """Owned and third-party codegen fields consumed or published here."""
 
     cfunc: _CFunctionSurface8616
-    _inertia_callsite_summaries: dict[int, CallsiteSummary8616]
+    _inertia_callsite_summaries: object
     _inertia_stored_call_result_occurrences_8616: StoredCallResultOccurrenceResult8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _DirectCallOccurrence8616:
     """One direct standalone or assigned call at an exact list position."""
 
     call: CFunctionCall
     statement: CExpressionStatement | CAssignment
     parent: CStatements
-    statement_index: int
+    statement_index: cython.longlong
 
     @property
-    def is_standalone(self) -> bool:
+    def is_standalone(self) -> cython.bint:
         """Return whether this occurrence evaluates a discarded call result."""
         return isinstance(self.statement, CExpressionStatement)
 
 
-def _canonical_stack_offset_8616(offset: int) -> int:
+@cython.ccall
+def _canonical_stack_offset_8616(offset: cython.longlong) -> cython.longlong:
     """Normalize one 16-bit BP displacement to signed storage identity."""
     normalized = offset & 0xFFFF
     return normalized - 0x10000 if normalized >= 0x8000 else normalized
 
 
-def _exact_object_destination_8616(destination: object, width: object) -> bool:
+@cython.ccall
+def _exact_object_destination_8616(destination: object, width: object) -> cython.bint:
     """Return whether the pair is an exact ``(str-base, int-offset)`` + positive width."""
     return (
         isinstance(destination, tuple)
@@ -89,7 +97,8 @@ def _exact_object_destination_8616(destination: object, width: object) -> bool:
     )
 
 
-def _is_exact_summary_destination_8616(expression: object, summary: CallsiteSummary8616) -> bool:
+@cython.ccall
+def _is_exact_summary_destination_8616(expression: object, summary: CallsiteSummary8616) -> cython.bint:
     """Match one C lvalue to the summary's exact object and width."""
     current = expression
     while isinstance(current, CTypeCast):
@@ -106,37 +115,42 @@ def _is_exact_summary_destination_8616(expression: object, summary: CallsiteSumm
         return (
             variable.base == "bp"
             and isinstance(variable.offset, int)
-            and _canonical_stack_offset_8616(variable.offset)
-            == _canonical_stack_offset_8616(destination[1])
-            and int(variable.size) == width
+            and operator.eq(_canonical_stack_offset_8616(variable.offset), _canonical_stack_offset_8616(destination[1]))
+            and operator.eq(int(variable.size), width)
         )
     return (
         destination[0] == "global"
         and isinstance(variable, SimMemoryVariable)
         and not isinstance(variable, SimStackVariable)
         and isinstance(variable.addr, int)
-        and variable.addr == destination[1]
-        and int(variable.size) == width
+        and operator.eq(variable.addr, destination[1])
+        and operator.eq(int(variable.size), width)
     )
 
 
+@cython.ccall
 def _statement_containers_8616(root: object) -> tuple[CStatements, ...]:
     """Return identity-deduplicated statement containers in one C AST."""
     return tuple(
         {
             id(node): node
-            for node in (root, *_iter_c_nodes_deep_8616(root))
+            for node in iter((root, ) + tuple(_iter_c_nodes_deep_8616(root)))
             if isinstance(node, CStatements)
         }.values()
     )
 
 
-def _direct_occurrences_8616(root: object) -> dict[int, list[_DirectCallOccurrence8616]]:
+@cython.ccall
+def _direct_occurrences_8616(root: object) -> dict[cython.longlong, list[_DirectCallOccurrence8616]]:
     """Group direct call statements by exact machine callsite tag."""
-    grouped: defaultdict[int, list[_DirectCallOccurrence8616]] = defaultdict(list)
+    call: object
+    index: object
+    parent: object
+    statement: object
+    grouped: defaultdict[cython.longlong, list[_DirectCallOccurrence8616]] = defaultdict(list)
     for parent in _statement_containers_8616(root):
         for index, statement in enumerate(tuple(parent.statements or ())):
-            call: CFunctionCall | None = None
+            call = None
             if isinstance(statement, CExpressionStatement) and isinstance(
                 statement.expr,
                 CFunctionCall,
@@ -157,6 +171,7 @@ def _direct_occurrences_8616(root: object) -> dict[int, list[_DirectCallOccurren
     return dict(grouped)
 
 
+@cython.ccall
 def _summary_evidence_key_8616(summary: CallsiteSummary8616) -> tuple[object, ...]:
     """Return the exact summary facts needed by this ownership decision."""
     return (
@@ -168,31 +183,34 @@ def _summary_evidence_key_8616(summary: CallsiteSummary8616) -> tuple[object, ..
     )
 
 
-def _unique_summary_inventory_8616(summary_map: dict[int, CallsiteSummary8616]) -> dict[int, CallsiteSummary8616]:
+@cython.ccall
+def _unique_summary_inventory_8616(summary_map: object) -> dict[cython.longlong, CallsiteSummary8616]:
     """Return callsites whose stored-result evidence is complete and unique."""
-    grouped: defaultdict[int, list[CallsiteSummary8616]] = defaultdict(list)
+    summary: object
+    grouped: defaultdict[cython.longlong, list[CallsiteSummary8616]] = defaultdict(list)
     for summary in summary_map.values():
         grouped[summary.callsite_addr].append(summary)
     return {
         callsite_addr: summaries[0]
-        for callsite_addr, summaries in grouped.items()
-        if len({_summary_evidence_key_8616(summary) for summary in summaries}) == 1
+        for callsite_addr, summaries in builtins.iter(grouped.items())
+        if len({_summary_evidence_key_8616(summary) for summary in iter(summaries)}) == 1
     }
 
 
-def _contains_identity_8616(root: object, target: object) -> bool:
+def _contains_identity_8616(root: object, target: object) -> cython.bint:
     """Return whether one structured subtree contains an exact target node."""
-    return root is target or any(node is target for node in _iter_c_nodes_deep_8616(root))
+    return root is target or any(node is target for node in builtins.iter(_iter_c_nodes_deep_8616(root)))
 
 
 def _has_unique_adjacent_order_witness_8616(
     root: object,
     standalone: _DirectCallOccurrence8616,
     assignment: _DirectCallOccurrence8616,
-) -> bool:
+) -> cython.bint:
     """Prove that the discarded call immediately precedes its stored result."""
+    container: object
     if standalone.parent is assignment.parent:
-        return assignment.statement_index == standalone.statement_index + 1
+        return operator.eq(assignment.statement_index, standalone.statement_index + 1)
     if len(tuple(standalone.parent.statements or ())) != 1 or len(
         tuple(assignment.parent.statements or ())
     ) != 1:
@@ -202,18 +220,18 @@ def _has_unique_adjacent_order_witness_8616(
         statements = tuple(container.statements or ())
         standalone_indices = tuple(
             index
-            for index, statement in enumerate(statements)
+            for index, statement in builtins.iter(enumerate(statements))
             if _contains_identity_8616(statement, standalone.statement)
         )
         assignment_indices = tuple(
             index
-            for index, statement in enumerate(statements)
+            for index, statement in builtins.iter(enumerate(statements))
             if _contains_identity_8616(statement, assignment.statement)
         )
         if (
             len(standalone_indices) == 1
             and len(assignment_indices) == 1
-            and assignment_indices[0] == standalone_indices[0] + 1
+            and operator.eq(assignment_indices[0], standalone_indices[0] + 1)
         ):
             witnesses += 1
     return witnesses == 1
@@ -222,20 +240,21 @@ def _has_unique_adjacent_order_witness_8616(
 def _same_call_surface_8616(
     standalone: CFunctionCall,
     assignment: CFunctionCall,
-) -> bool:
+) -> cython.bint:
     """Compare exact argument values on two clones of one typed callsite."""
     standalone_args = tuple(standalone.args or ())
     assignment_args = tuple(assignment.args or ())
-    return len(standalone_args) == len(assignment_args) and all(
+    return operator.eq(len(standalone_args), len(assignment_args)) and all(
         _same_c_expression_8616(lhs, rhs)
-        for lhs, rhs in zip(standalone_args, assignment_args, strict=True)
+        for lhs, rhs in builtins.iter(zip(standalone_args, assignment_args, strict=True))
     )
 
 
+@cython.ccall
 def _refuse_8616(
     stats: StoredCallResultOccurrenceStats8616,
-    refusals: list[StoredCallResultRefusal8616],
-    callsite_addr: int,
+    refusals: object,
+    callsite_addr: cython.longlong,
     reason: StoredCallResultRefusalReason8616,
 ) -> None:
     """Record one typed fail-closed ownership refusal."""
@@ -247,7 +266,7 @@ def _remove_standalone_8616(occurrence: _DirectCallOccurrence8616) -> None:
     """Remove one still-uniquely-owned standalone statement or hard-fail."""
     statements = list(occurrence.parent.statements or ())
     matching_indices = tuple(
-        index for index, statement in enumerate(statements) if statement is occurrence.statement
+        index for index, statement in builtins.iter(enumerate(statements)) if statement is occurrence.statement
     )
     if len(matching_indices) != 1:
         raise PipelineHardError("classified stored-call occurrence lost unique ownership")
@@ -255,18 +274,20 @@ def _remove_standalone_8616(occurrence: _DirectCallOccurrence8616) -> None:
     occurrence.parent.statements = statements
 
 
+@cython.ccall
 def _process_callsite_8616(
     root: object,
-    callsite_addr: int,
-    occurrences: list[_DirectCallOccurrence8616],
-    standalone: tuple[_DirectCallOccurrence8616, ...],
-    assigned: tuple[_DirectCallOccurrence8616, ...],
-    summary_inventory: dict[int, CallsiteSummary8616],
-    summary_map: dict[int, CallsiteSummary8616],
+    callsite_addr: cython.longlong,
+    occurrences: object,
+    standalone: object,
+    assigned: object,
+    summary_inventory: object,
+    summary_map: object,
     stats: StoredCallResultOccurrenceStats8616,
-    refusals: list[StoredCallResultRefusal8616],
+    refusals: object,
 ) -> None:
     """Apply the clone-removal evidence ladder to one callsite group."""
+    summary: object
     stats.raw_fact_count += 1
     if len(occurrences) != 2 or len(standalone) != 1 or len(assigned) != 1:
         _refuse_8616(
@@ -328,6 +349,8 @@ def materialize_stored_call_result_occurrences_8616(
     codegen: object,
 ) -> StoredCallResultOccurrenceResult8616:
     """Remove only a proven adjacent standalone clone of one stored call."""
+    callsite_addr: object
+    occurrences: object
     boundary = cast(_CodegenSurface8616, codegen)
     stats = StoredCallResultOccurrenceStats8616()
     refusals: list[StoredCallResultRefusal8616] = []
@@ -344,14 +367,14 @@ def materialize_stored_call_result_occurrences_8616(
         return result
     if not isinstance(summary_map, dict) or any(
         not isinstance(key, int) or not isinstance(summary, CallsiteSummary8616)
-        for key, summary in summary_map.items()
+        for key, summary in builtins.iter(summary_map.items())
     ):
         raise TypeError("callsite summary carrier contains an invalid owned contract")
 
     summary_inventory = _unique_summary_inventory_8616(summary_map)
-    for callsite_addr, occurrences in sorted(_direct_occurrences_8616(root).items()):
-        standalone = tuple(occurrence for occurrence in occurrences if occurrence.is_standalone)
-        assigned = tuple(occurrence for occurrence in occurrences if not occurrence.is_standalone)
+    for callsite_addr, occurrences in sorted(tuple(_direct_occurrences_8616(root).items())):
+        standalone = tuple(occurrence for occurrence in iter(occurrences) if occurrence.is_standalone)
+        assigned = tuple(occurrence for occurrence in iter(occurrences) if not occurrence.is_standalone)
         if not standalone or not assigned:
             continue
         _process_callsite_8616(

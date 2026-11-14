@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bind callee-entry DS to an owned structured-C runtime selector.
 
 Layer: Types/Lowering.
@@ -14,6 +15,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -43,6 +46,8 @@ from .segment_register_state import (
     runtime_segment_state_cvar_8616,
     runtime_segment_state_variable_matches_8616,
 )
+import dataclasses
+import operator
 
 __all__ = [
     "NearReturnEntrySelector8616",
@@ -79,7 +84,7 @@ _UNNORMALIZED_FAILURES_8616: frozenset[NearReturnEntrySelectorFailure8616] = fro
 )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NearReturnEntrySelector8616:
     """Replayable callee-entry-DS runtime-selector binding or typed refusal.
 
@@ -93,21 +98,23 @@ class NearReturnEntrySelector8616:
     """
 
     segment_use: NearReturnSegmentUse8616
-    callee_addr: int
+    callee_addr: cython.longlong
     codegen: object | None
     selector: structured_c.CVariable | None
     selector_type: SimType | None
     failure: NearReturnEntrySelectorFailure8616 | None
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
     upstream_failure: NearReturnSegmentUseFailure8616 | None = None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Re-prove the bound receipt, codegen surface and selector subtree."""
+        codegen: object
+        selector: object
         if self.failure is not None or self.upstream_failure is not None or not _counts_bound_8616(self):
             return False
         codegen = self.codegen
@@ -122,7 +129,7 @@ class NearReturnEntrySelector8616:
         )
 
 
-def _counts_bound_8616(result: NearReturnEntrySelector8616) -> bool:
+def _counts_bound_8616(result: NearReturnEntrySelector8616) -> cython.bint:
     """Return whether the result retains the exact-int bound accounting."""
     counts = (
         result.raw_fact_count,
@@ -131,13 +138,14 @@ def _counts_bound_8616(result: NearReturnEntrySelector8616) -> bool:
         result.materialized_count,
         result.failure_count,
     )
-    return all(type(count) is int for count in counts) and counts == (1, 1, 1, 1, 0)
+    return all(type(count) is int for count in iter(counts)) and counts == (1, 1, 1, 1, 0)
 
 
+@cython.ccall
 def _binding_failure_8616(
     codegen: object,
     segment_use: NearReturnSegmentUse8616,
-    callee_addr: int,
+    callee_addr: cython.longlong,
 ) -> NearReturnEntrySelectorFailure8616 | None:
     """Replay the receipt, callee codegen identity, registry and live-in.
 
@@ -149,12 +157,15 @@ def _binding_failure_8616(
     Dynamic angr codegen boundary: optional cfunc, addr and project attributes
     may be absent on incomplete third-party surfaces, requiring refusal reads.
     """
+    cfunc: object
+    function_addr: object
+    project: object
     if not segment_use.complete:
         return _F8616.SEGMENT_USE_INCOMPLETE
     preservation = segment_use.call_preservation
     callee = preservation.callee
     artifact = callee.coverage.artifact
-    if type(callee_addr) is not int or callee_addr != artifact.function_addr:
+    if type(callee_addr) is not int or operator.ne(callee_addr, artifact.function_addr):
         return _F8616.CALLEE_MISMATCH
     # Dynamic third-party codegen boundary: incomplete surfaces may carry no
     # cfunc or project, so the reads use getattr defaults rather than the dot
@@ -164,7 +175,7 @@ def _binding_failure_8616(
     project = getattr(codegen, "project", None)
     if type(function_addr) is not int or function_addr < 0 or project is None:
         return _F8616.CODEGEN_SURFACE_UNPROVEN
-    if function_addr != callee_addr:
+    if operator.ne(function_addr, callee_addr):
         return _F8616.CALLEE_MISMATCH
     if (
         project is not preservation.caller.boundary.project
@@ -182,11 +193,12 @@ def _binding_failure_8616(
     return None
 
 
+@cython.ccall
 def _selector_failure_8616(
     selector: object,
     codegen: object,
-    callee_addr: int,
-    selector_type: SimType | None,
+    callee_addr: cython.longlong,
+    selector_type: object,
 ) -> NearReturnEntrySelectorFailure8616 | None:
     """Replay the retained selector's owned identity, type and DS carrier.
 
@@ -225,15 +237,16 @@ def _selector_failure_8616(
     return None
 
 
+@cython.ccall
 def _refuse_8616(
     segment_use: NearReturnSegmentUse8616,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     codegen: object | None,
     selector: structured_c.CVariable | None,
     selector_type: SimType | None,
     failure: NearReturnEntrySelectorFailure8616,
     *,
-    normalized: bool,
+    normalized: cython.bint,
     upstream: NearReturnSegmentUseFailure8616 | None = None,
 ) -> NearReturnEntrySelector8616:
     """Retain one refused binding with closed zero-classification accounting.
@@ -258,6 +271,7 @@ def _refuse_8616(
     )
 
 
+@cython.ccall
 def bind_near_return_entry_selector_8616(
     codegen: object,
     segment_use: NearReturnSegmentUse8616,
@@ -270,6 +284,8 @@ def bind_near_return_entry_selector_8616(
     prototypes and callsites remain unchanged. Consumers
     must publish through ``complete`` so every obligation is replayed.
     """
+    failure: object
+    selector: object
     preservation = segment_use.call_preservation
     callee_addr = preservation.callee.coverage.artifact.function_addr
     failure = _binding_failure_8616(codegen, segment_use, callee_addr)

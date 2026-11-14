@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Single-owner contract for the declared DOS tail-resize service response.
 
 Layer: Frontend/runtime package surface — shared service contract.
@@ -16,11 +17,15 @@ state this contract does not declare and return a typed refusal.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
 
 from inertia.frontend.real16_version_response8616 import INT21_VERSION_VECTOR_8616
+import dataclasses
+import operator
 
 __all__ = [
     "INT21_RESIZE_FUNCTION_8616",
@@ -38,29 +43,31 @@ __all__ = [
 
 # INT 21h is the DOS service vector this declared contract binds — the
 # constant projects the shared version owner's architectural name once.
-INT21_RESIZE_VECTOR_8616: int = INT21_VERSION_VECTOR_8616
+INT21_RESIZE_VECTOR_8616: cython.longlong = INT21_VERSION_VECTOR_8616
 
 # AH=4Ah is Resize Memory Block (SETBLOCK). AL carries no selector: every
 # proven AL value is admitted and AX returns unchanged on success.
-INT21_RESIZE_FUNCTION_8616: int = 0x4A
+INT21_RESIZE_FUNCTION_8616: cython.longlong = 0x4A
 
 # The declared native profile models exactly one first/final Kvikdos MCB
 # (16 bytes) ahead of the loader PSP at segment 0x100, below the
 # conventional-memory ceiling at paragraph 0xA000.
-RESIZE_MCB_BYTES_8616: int = 16
-RESIZE_NATIVE_PSP_SEGMENT_8616: int = 0x100
-RESIZE_NATIVE_PROCESS_ID_8616: int = 0x192
+RESIZE_MCB_BYTES_8616: cython.longlong = 16
+RESIZE_NATIVE_PSP_SEGMENT_8616: cython.longlong = 0x100
+RESIZE_NATIVE_PROCESS_ID_8616: cython.longlong = 0x192
 RESIZE_NATIVE_SIGNATURE_8616: bytes = b"\xb2KV1KPR0G"
-RESIZE_CONVENTIONAL_END_8616: int = 0xA000
+RESIZE_CONVENTIONAL_END_8616: cython.longlong = 0xA000
 
 
-def _resize_word_8616(value: int, field: str) -> None:
+@cython.ccall
+def _resize_word_8616(value: cython.longlong, field: object) -> None:
     """Reject truncated or Boolean machine-word declarations."""
     if type(value) is not int or not 0 <= value <= 0xFFFF:
         raise ValueError(f"{field} must be a 16-bit integer")
 
 
-def resize_metadata_error_8616(mcb: bytes, maximum: int) -> bool:
+@cython.ccall
+def resize_metadata_error_8616(mcb: object, maximum: cython.longlong) -> cython.bint:
     """Check the native first/final MCB invariants, before any update.
 
     A complete 16-byte MCB must carry the declared signature, process id,
@@ -69,9 +76,9 @@ def resize_metadata_error_8616(mcb: bytes, maximum: int) -> bool:
     or repairs a corrupted declaration.
     """
     return (
-        len(mcb) != RESIZE_MCB_BYTES_8616
-        or mcb[7:] != RESIZE_NATIVE_SIGNATURE_8616
-        or int.from_bytes(mcb[1:3], "little") != RESIZE_NATIVE_PROCESS_ID_8616
+        operator.ne(len(mcb), RESIZE_MCB_BYTES_8616)
+        or operator.ne(mcb[7:], RESIZE_NATIVE_SIGNATURE_8616)
+        or operator.ne(int.from_bytes(mcb[1:3], "little"), RESIZE_NATIVE_PROCESS_ID_8616)
         or mcb[5:7] != b"\0\0"
         or int.from_bytes(mcb[3:5], "little") > maximum
         or mcb[0] not in (ord("Z"), ord("M"))
@@ -85,24 +92,25 @@ class ResizeRefusal8616(StrEnum):
     CHAIN = "resize_nonterminal_chain_undeclared"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ResizeResponse8616:
     """Complete low-register response and replacement MCB, staged before commit."""
 
-    ax: int
-    bx: int
-    carry: bool
-    metadata: bytes
+    ax: cython.longlong
+    bx: cython.longlong
+    carry: cython.bint
+    metadata: object
 
 
+@cython.ccall
 def resize_response_8616(
     *,
-    block_segment: int,
-    maximum: int,
-    segment: int,
-    paragraphs: int,
-    ax: int,
-    metadata: bytes,
+    block_segment: cython.longlong,
+    maximum: cython.longlong,
+    segment: cython.longlong,
+    paragraphs: cython.longlong,
+    ax: cython.longlong,
+    metadata: object,
 ) -> ResizeResponse8616 | ResizeRefusal8616:
     """Stage native final-block resize or an exact DOS error without mutation.
 
@@ -117,19 +125,21 @@ def resize_response_8616(
     Only the size word at bytes 3..5 ever changes. OTHER_BLOCK and CHAIN
     are typed refusals, never DOS error results.
     """
+    field: object
+    value: object
     for field, value in (("ES", segment), ("BX", paragraphs), ("AX", ax)):
         _resize_word_8616(value, field)
     _resize_word_8616(block_segment, "resize block segment")
     _resize_word_8616(maximum, "resize maximum")
-    if ax >> 8 != INT21_RESIZE_FUNCTION_8616:
+    if operator.ne(ax >> 8, INT21_RESIZE_FUNCTION_8616):
         raise ValueError("resize requires INT21/AH4A")
-    if len(metadata) != RESIZE_MCB_BYTES_8616:
+    if operator.ne(len(metadata), RESIZE_MCB_BYTES_8616):
         raise ValueError("resize requires every current MCB byte")
     if segment != block_segment:
         return ResizeRefusal8616.OTHER_BLOCK
     if resize_metadata_error_8616(metadata, maximum):
         return ResizeResponse8616(7, paragraphs, True, metadata)
-    if metadata[0] != ord("Z"):
+    if operator.ne(metadata[0], ord("Z")):
         return ResizeRefusal8616.CHAIN
     if paragraphs > maximum:
         return ResizeResponse8616(8, maximum, True, metadata)

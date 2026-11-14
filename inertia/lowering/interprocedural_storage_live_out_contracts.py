@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed contracts for direct segmented-memory live-out collection.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -42,6 +45,8 @@ from .pointer_parameter_caller_target_contracts import (
     PointerParameterCallerTarget8616,
     PointerParameterCallerTargetFailure8616,
 )
+import dataclasses
+import operator
 
 
 class MemoryLiveOutCollectionVerdict8616(StrEnum):
@@ -83,7 +88,7 @@ class MemoryLiveOutFailureKind8616(StrEnum):
     POINTER_TARGET_CONFLICT = "pointer_target_conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class MemoryLiveOutUseFact8616:
     """One exact storage candidate and its bounded caller-use outcome."""
 
@@ -105,15 +110,15 @@ class MemoryLiveOutUseFact8616:
         return self.alias_output.terminal_output
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether this fact retains every field required by its verdict."""
         output_matches = bool(
             self.output_view.complete
-            and self.storage.address == self.output_view.address
+            and operator.eq(self.storage.address, self.output_view.address)
         )
         if self.disposition is MemoryLiveOutUseDisposition8616.NOT_REACHED:
             return self.storage.is_exact and output_matches and all(
-                item is None for item in (self.use, self.signedness, self.condition)
+                item is None for item in iter((self.use, self.signedness, self.condition))
             )
         return bool(
             self.storage.is_exact
@@ -125,21 +130,21 @@ class MemoryLiveOutUseFact8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class MemoryLiveOutCandidateResult8616:
     """Inactive candidate, closed use fact/trial, or one typed refusal."""
 
-    activated: bool
+    activated: cython.bint
     fact: MemoryLiveOutUseFact8616 | None = None
     trial: StorageTrial8616 | None = None
     failure: MemoryLiveOutFailureKind8616 | None = None
     definition_failure: CallOutputDefinitionFailure8616 | None = None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether this activated candidate has one durable outcome."""
         if not self.activated:
-            return (self.fact, self.trial, self.failure, self.definition_failure) == (None,) * 4
+            return operator.eq((self.fact, self.trial, self.failure, self.definition_failure), (None,) * 4)
         if self.failure is not None:
             return self.fact is None and self.trial is None
         if self.fact is None or not self.fact.complete or self.definition_failure is not None:
@@ -154,24 +159,24 @@ class MemoryLiveOutCandidateResult8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallsiteMemoryLiveOutEvidence8616:
     """Closed direct-memory facts and materialized trials for one callsite."""
 
-    caller_addr: int
-    callee_addr: int
-    callsite_addr: int
+    caller_addr: cython.longlong
+    callee_addr: cython.longlong
+    callsite_addr: cython.longlong
     facts: tuple[MemoryLiveOutUseFact8616, ...] = ()
     trials: tuple[StorageTrial8616, ...] = ()
     pointer_effects: tuple[PointerParameterCallerTarget8616, ...] = ()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class MemoryLiveOutFailure8616:
     """One exact refusal retaining all available upstream typed evidence."""
 
     kind: MemoryLiveOutFailureKind8616
-    callee_addr: int
+    callee_addr: cython.longlong
     caller_addr: int | None = None
     callsite_addr: int | None = None
     storage_key: MemoryOutputKey8616 | None = None
@@ -183,34 +188,35 @@ class MemoryLiveOutFailure8616:
     pointer_failure: PointerParameterCallerTargetFailure8616 | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionMemoryLiveOutCollection8616:
     """Function-wide direct-memory live-outs or atomic typed refusals."""
 
     verdict: MemoryLiveOutCollectionVerdict8616
-    callsites: tuple[CallsiteMemoryLiveOutEvidence8616, ...]
-    failures: tuple[MemoryLiveOutFailure8616, ...]
+    callsites: object
+    failures: object
     stats: StorageTrialStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every activated candidate has one retained outcome."""
         return (
             self.verdict is MemoryLiveOutCollectionVerdict8616.PROVEN
             and not self.failures
             and self.stats.complete
-            and all(fact.complete for site in self.callsites for fact in site.facts)
-            and all(trial.is_complete for site in self.callsites for trial in site.trials)
+            and all(fact.complete for site in iter(self.callsites) for fact in iter(site.facts))
+            and all(trial.is_complete for site in iter(self.callsites) for trial in iter(site.trials))
             and all(
-                effect.complete for site in self.callsites for effect in site.pointer_effects
+                effect.complete for site in iter(self.callsites) for effect in iter(site.pointer_effects)
             )
         )
 
 
+@cython.ccall
 def refused_memory_live_out_collection_8616(
     failure: MemoryLiveOutFailure8616,
-    raw: int,
-    normalized: int,
+    raw: cython.longlong,
+    normalized: cython.longlong,
 ) -> FunctionMemoryLiveOutCollection8616:
     """Build one atomic typed refusal without publishing partial live-out trials."""
     conflict = failure.kind in {

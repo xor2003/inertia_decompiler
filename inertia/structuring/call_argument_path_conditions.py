@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Build typed condition expressions for predecessor-indexed call values.
 
 Layer: Structuring.
@@ -10,6 +11,8 @@ Do not perform alias-state ownership, widening, type/materialization recovery, r
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -26,6 +29,9 @@ from .condition_materialization import (
     condition_chain_successors_8616,
     materialize_condition_ir_expression_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "CallArgumentPathConditionResult8616",
@@ -49,7 +55,7 @@ class CallArgumentPathConditionStatus8616(Enum):
     REFUSED_CONDITION = "refused_condition"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallArgumentPathConditionResult8616:
     """Return materialized lane expressions or one exact refusal category."""
 
@@ -57,11 +63,11 @@ class CallArgumentPathConditionResult8616:
     expressions: tuple[CExpression, ...] = ()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _PathLeaf8616:
     """One direct call-block predecessor selected by the decision tree."""
 
-    predecessor_addr: int
+    predecessor_addr: cython.longlong
 
 
 class _NoCallPath8616(Enum):
@@ -70,7 +76,7 @@ class _NoCallPath8616(Enum):
     VALUE = "no_call"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _PathDecision8616:
     """One typed branch and its recursively classified CFG edges."""
 
@@ -79,49 +85,52 @@ class _PathDecision8616:
     fallthrough: _PathNode8616
 
 
-type _PathNode8616 = _PathLeaf8616 | _PathDecision8616 | _NoCallPath8616
+_PathNode8616 = typing.TypeAliasType("_PathNode8616", _PathLeaf8616 | _PathDecision8616 | _NoCallPath8616)
 
 
 def _call_block_predecessors_8616(
     summary: CallsiteSummary8616,
-    successors: dict[int, tuple[int, ...]],
-) -> frozenset[int] | None:
+    successors: object,
+) -> object:
     """Return the exact direct predecessors of the block owning the callsite."""
-    candidates = tuple(addr for addr in successors if addr <= summary.callsite_addr)
+    candidates = tuple(addr for addr in iter(successors) if addr <= summary.callsite_addr)
     if not candidates:
         return None
     call_block = max(candidates)
-    return frozenset(source for source, targets in successors.items() if call_block in targets)
+    return frozenset(source for source, targets in builtins.iter(successors.items()) if call_block in targets)
 
 
-def _conditions_by_block_8616(codegen: object) -> dict[int, ConditionIR] | None:
+def _conditions_by_block_8616(codegen: object) -> object:
     """Return one unambiguous typed condition for each condition block."""
+    condition: object
     typed_codegen = cast(_PathConditionCodegen8616, codegen)
     try:
         conditions = tuple(
             condition
-            for condition in cast(tuple[object, ...], typed_codegen._inertia_typed_conditions)
+            for condition in builtins.iter(cast(tuple[object, ...], typed_codegen._inertia_typed_conditions))
             if isinstance(condition, ConditionIR) and isinstance(condition.block_addr, int)
         )
     except (AttributeError, TypeError):
         return None
-    grouped: dict[int, list[ConditionIR]] = {}
+    grouped: dict[cython.longlong, list[ConditionIR]] = {}
     for condition in conditions:
         grouped.setdefault(cast(int, condition.block_addr), []).append(condition)
-    if any(len(group) != 1 for group in grouped.values()):
+    if any(len(group) != 1 for group in builtins.iter(grouped.values())):
         return None
-    return {block: group[0] for block, group in grouped.items()}
+    return {block: group[0] for block, group in builtins.iter(grouped.items())}
 
 
+@cython.ccall
 def _resolve_path_target_8616(
-    target: int,
+    target: cython.longlong,
     *,
-    trace_predecessors: frozenset[int],
-    conditions: dict[int, ConditionIR],
-    successors: dict[int, tuple[int, ...]],
-    visited: frozenset[int],
+    trace_predecessors: object,
+    conditions: object,
+    successors: object,
+    visited: object,
 ) -> _PathNode8616 | None:
     """Follow one edge through unique non-condition blocks to a typed frontier."""
+    next_blocks: object
     current = target
     walked = set(visited)
     while current not in walked:
@@ -145,11 +154,12 @@ def _resolve_path_target_8616(
     return None
 
 
+@cython.ccall
 def _path_decision_key_8616(
     condition: ConditionIR,
-    successors: dict[int, tuple[int, ...]],
-    visited: frozenset[int],
-) -> tuple[int, int, int] | None:
+    successors: object,
+    visited: object,
+) -> object:
     """Return the proven ``(block, taken, fallthrough)`` int triple or None."""
     block_addr = condition.block_addr
     taken_target = condition.taken_target
@@ -163,21 +173,25 @@ def _path_decision_key_8616(
         return None
     if (
         taken_target == fallthrough_target
-        or set(successors.get(block_addr, ())) != {taken_target, fallthrough_target}
+        or operator.ne(set(successors.get(block_addr, ())), {taken_target, fallthrough_target})
     ):
         return None
     return block_addr, taken_target, fallthrough_target
 
 
+@cython.ccall
 def _build_path_decision_8616(
     condition: ConditionIR,
     *,
-    trace_predecessors: frozenset[int],
-    conditions: dict[int, ConditionIR],
-    successors: dict[int, tuple[int, ...]],
-    visited: frozenset[int],
+    trace_predecessors: object,
+    conditions: object,
+    successors: object,
+    visited: object,
 ) -> _PathDecision8616 | None:
     """Build one acyclic decision from exact typed branch successors."""
+    fallthrough: object
+    key: object
+    taken: object
     key = _path_decision_key_8616(condition, successors, visited)
     if key is None:
         return None
@@ -202,7 +216,8 @@ def _build_path_decision_8616(
     return _PathDecision8616(condition, taken, fallthrough)
 
 
-def _trace_leaves_8616(node: _PathNode8616) -> tuple[int, ...]:
+@cython.ccall
+def _trace_leaves_8616(node: _PathNode8616) -> object:
     """Return predecessor leaves reached by one partial decision tree."""
     if isinstance(node, _PathLeaf8616):
         return (node.predecessor_addr,)
@@ -211,12 +226,15 @@ def _trace_leaves_8616(node: _PathNode8616) -> tuple[int, ...]:
     return ()
 
 
+@cython.ccall
 def _select_path_tree_8616(
-    conditions: dict[int, ConditionIR],
-    trace_predecessors: frozenset[int],
-    successors: dict[int, tuple[int, ...]],
+    conditions: object,
+    trace_predecessors: object,
+    successors: object,
 ) -> _PathDecision8616 | None:
     """Select the unique root partitioning every call predecessor path."""
+    tree: object
+    condition: object
     matches: list[_PathDecision8616] = []
     for condition in conditions.values():
         tree = _build_path_decision_8616(
@@ -230,8 +248,8 @@ def _select_path_tree_8616(
             continue
         leaves = _trace_leaves_8616(tree)
         if (
-            len(leaves) == len(trace_predecessors)
-            and frozenset(leaves) == trace_predecessors
+            operator.eq(len(leaves), len(trace_predecessors))
+            and operator.eq(frozenset(leaves), trace_predecessors)
             and _trace_leaves_8616(tree.taken)
             and _trace_leaves_8616(tree.fallthrough)
         ):
@@ -239,13 +257,17 @@ def _select_path_tree_8616(
     return matches[0] if len(matches) == 1 else None
 
 
+@cython.ccall
 def _materialize_path_expression_8616(
     project: object,
     codegen: object,
     node: _PathNode8616,
-    expressions: Mapping[int, CExpression],
+    expressions: Mapping[cython.longlong, CExpression],
 ) -> CExpression | None:
     """Select caller-supplied typed leaves on the proven call-executing domain."""
+    condition: object
+    fallthrough: object
+    taken: object
     if isinstance(node, _PathLeaf8616):
         return expressions[node.predecessor_addr]
     if node is _NoCallPath8616.VALUE:
@@ -264,17 +286,23 @@ def _materialize_path_expression_8616(
     return CITE(condition, taken, fallthrough, codegen=codegen)
 
 
+@cython.ccall
 def materialize_call_argument_path_expressions_8616(
     project: object,
     codegen: object,
     summary: CallsiteSummary8616,
-    values_by_predecessor: dict[int, tuple[int, ...]],
-    varying_lanes: tuple[int, ...],
+    values_by_predecessor: object,
+    varying_lanes: object,
 ) -> CallArgumentPathConditionResult8616:
     """Materialize one expression per varying lane from an exact path tree."""
+    conditions: object
+    expression: object
+    tree: object
+    _physical_lane: object
+    value_index: object
     successors = condition_chain_successors_8616(project, codegen)
     trace_predecessors = frozenset(values_by_predecessor)
-    if _call_block_predecessors_8616(summary, successors) != trace_predecessors:
+    if operator.ne(_call_block_predecessors_8616(summary, successors), trace_predecessors):
         return CallArgumentPathConditionResult8616(
             CallArgumentPathConditionStatus8616.REFUSED_TOPOLOGY
         )
@@ -294,7 +322,7 @@ def materialize_call_argument_path_expressions_8616(
             predecessor: CConstant(
                 lane_values[value_index], SimTypeShort(False), codegen=codegen
             )
-            for predecessor, lane_values in values_by_predecessor.items()
+            for predecessor, lane_values in builtins.iter(values_by_predecessor.items())
         }
         expression = _materialize_path_expression_8616(project, codegen, tree, typed_leaves)
         if expression is None:
@@ -308,20 +336,24 @@ def materialize_call_argument_path_expressions_8616(
     )
 
 
+@cython.ccall
 def materialize_call_argument_typed_path_expression_8616(
     project: object,
     codegen: object,
     summary: CallsiteSummary8616,
-    expressions_by_predecessor: dict[int, CExpression],
+    expressions_by_predecessor: object,
 ) -> CallArgumentPathConditionResult8616:
     """Select already-typed predecessor values with one exact ConditionIR tree.
 
     The caller owns each value's proof and type. Structuring proves only that
     the CFG and typed conditions select those values on every call path.
     """
+    conditions: object
+    expression: object
+    tree: object
     successors = condition_chain_successors_8616(project, codegen)
     trace_predecessors = frozenset(expressions_by_predecessor)
-    if _call_block_predecessors_8616(summary, successors) != trace_predecessors:
+    if operator.ne(_call_block_predecessors_8616(summary, successors), trace_predecessors):
         return CallArgumentPathConditionResult8616(
             CallArgumentPathConditionStatus8616.REFUSED_TOPOLOGY
         )

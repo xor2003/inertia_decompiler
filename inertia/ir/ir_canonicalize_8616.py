@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Lossless local algebraic normalization for IR expressions.
 
 Layer: IR.
@@ -8,12 +9,16 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import dataclasses
+import typing
+import cython
 
 # Equivalent to LLVM: tiny subset of InstCombine/Reassociate.
 from dataclasses import dataclass
 from typing import Protocol, cast
 
 from .condition_fingerprint_masks import is_proven_full_width_mask_8616
+import operator
 
 __all__ = [
     "_ir_canonicalize_expr_8616",
@@ -21,10 +26,10 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class _ConstReassoc:
-    terms: tuple[object, ...]
-    const: int
+    terms: object
+    const: cython.longlong
 
 
 class _CExprBoundary(Protocol):
@@ -46,6 +51,7 @@ class _CVariableBoundary(Protocol):
     size: object
 
 
+@cython.ccall
 def _c_op(expr: object) -> str:
     try:
         op = cast(_CExprBoundary, expr).op
@@ -54,15 +60,18 @@ def _c_op(expr: object) -> str:
     return str(op or "")
 
 
+@cython.ccall
 def _c_lhs(expr: object) -> object:
     return cast(_CExprBoundary, expr).lhs
 
 
+@cython.ccall
 def _c_rhs(expr: object) -> object:
     return cast(_CExprBoundary, expr).rhs
 
 
-def _c_codegen(expr: object | None) -> object | None:
+@cython.ccall
+def _c_codegen(expr: object) -> object | None:
     if expr is None:
         return None
     try:
@@ -71,7 +80,8 @@ def _c_codegen(expr: object | None) -> object | None:
         return None
 
 
-def _c_type(expr: object | None) -> object | None:
+@cython.ccall
+def _c_type(expr: object) -> object | None:
     if expr is None:
         return None
     try:
@@ -80,6 +90,7 @@ def _c_type(expr: object | None) -> object | None:
         return None
 
 
+@cython.ccall
 def _c_width_bytes(expr: object) -> int | None:
     try:
         size = cast(_CVariableBoundary, cast(_CExprBoundary, expr).variable).size
@@ -88,7 +99,8 @@ def _c_width_bytes(expr: object) -> int | None:
     return size if isinstance(size, int) and size > 0 else None
 
 
-def canonicalize_expr_8616(expr: object, *, max_rounds: int = 4) -> object:
+@cython.ccall
+def canonicalize_expr_8616(expr: object, *, max_rounds: cython.longlong = 4) -> object:
     """Canonicalize a local expression until fixed point."""
     current = expr
     for _ in range(max_rounds):
@@ -99,12 +111,14 @@ def canonicalize_expr_8616(expr: object, *, max_rounds: int = 4) -> object:
     return current
 
 
+@cython.ccall
 def _ir_canonicalize_expr_8616(expr: object) -> object:
     """Backward-compatible public entry point."""
     return canonicalize_expr_8616(expr)
 
 
-def _canonicalize_binop_dispatch_8616(op: str, lhs: object, rhs: object, expr: object) -> object | None:
+@cython.ccall
+def _canonicalize_binop_dispatch_8616(op: object, lhs: object, rhs: object, expr: object) -> object | None:
     """Dispatch to the per-op canonicalizer."""
     if op in {"Add", "Sub"}:
         return _canonicalize_add_sub_8616(lhs, rhs, op, expr)
@@ -117,8 +131,11 @@ def _canonicalize_binop_dispatch_8616(op: str, lhs: object, rhs: object, expr: o
     return None
 
 
+@cython.ccall
 def __ir_canonicalize_expr_once_8616___impl(expr: object) -> object:
     """Single canonicalization pass over one binary expression."""
+    folded: object
+    out: object
     from angr.analyses.decompiler.structured_codegen import c as structured_c
 
     if not isinstance(expr, structured_c.CBinaryOp):
@@ -144,12 +161,14 @@ def __ir_canonicalize_expr_once_8616___impl(expr: object) -> object:
     return _rebuild_binary_8616(expr, op, lhs, rhs)
 
 
+@cython.ccall
 def _ir_canonicalize_expr_once_8616(expr: object) -> object:
     return __ir_canonicalize_expr_once_8616___impl(expr)
 
 
-def _canonicalize_add_sub_8616(lhs: object, rhs: object, op: str, template: object) -> object | None:
+def _canonicalize_add_sub_8616(lhs: object, rhs: object, op: object, template: object) -> object | None:
     def _impl() -> object | None:
+        flattened: object
         rhs_val = _c_constant_value(rhs)
         lhs_val = _c_constant_value(lhs)
 
@@ -182,11 +201,11 @@ def _canonicalize_add_sub_8616(lhs: object, rhs: object, op: str, template: obje
     return _impl()
 
 
-def _flatten_add_sub_8616(lhs: object, rhs: object, op: str) -> _ConstReassoc | None:
+def _flatten_add_sub_8616(lhs: object, rhs: object, op: object) -> _ConstReassoc | None:
     terms: list[object] = []
     const = 0
 
-    def walk(node: object, sign: int) -> None:
+    def walk(node: object, sign: cython.longlong) -> None:
         nonlocal const
         value = _c_constant_value(node)
         if isinstance(value, int):
@@ -263,7 +282,8 @@ def _canonicalize_mul_8616(lhs: object, rhs: object, template: object) -> object
     return _make_binop_8616("Mul", base, _make_const_8616(const, template), template)
 
 
-def _assoc_combine_8616(op: str, a: int, b: int) -> int:
+@cython.ccall
+def _assoc_combine_8616(op: object, a: cython.longlong, b: cython.longlong) -> cython.longlong:
     """Fold ``a`` and ``b`` with the associative ``op``."""
     if op == "And":
         return a & b
@@ -272,21 +292,23 @@ def _assoc_combine_8616(op: str, a: int, b: int) -> int:
     raise AssertionError(op)
 
 
-def _assoc_walk_8616(node: object, op: str, terms: list[object], const: int | None) -> int | None:
+@cython.ccall
+def _assoc_walk_8616(node: object, op: object, terms: object, const: object) -> int | None:
     """Flatten ``op``-chained binops; return the folded constant accumulator."""
     value = _c_constant_value(node)
     if isinstance(value, int):
         return value if const is None else _assoc_combine_8616(op, const, value)
     from angr.analyses.decompiler.structured_codegen import c as structured_c
 
-    if isinstance(node, structured_c.CBinaryOp) and _c_op(node) == op:
+    if isinstance(node, structured_c.CBinaryOp) and operator.eq(_c_op(node), op):
         const = _assoc_walk_8616(_c_lhs(node), op, terms, const)
         return _assoc_walk_8616(_c_rhs(node), op, terms, const)
     terms.append(node)
     return const
 
 
-def _assoc_const_gate_8616(lhs: object, rhs: object, op: str, template: object) -> object | None:
+@cython.ccall
+def _assoc_const_gate_8616(lhs: object, rhs: object, op: object, template: object) -> object | None:
     """Constant-elimination gates for ``And``/``Or``; None means flatten."""
     lhs_val = _c_constant_value(lhs)
     rhs_val = _c_constant_value(rhs)
@@ -305,7 +327,8 @@ def _assoc_const_gate_8616(lhs: object, rhs: object, op: str, template: object) 
     return None
 
 
-def _assoc_rebuild_8616(terms: list[object], const: int, op: str, template: object) -> object:
+@cython.ccall
+def _assoc_rebuild_8616(terms: object, const: cython.longlong, op: object, template: object) -> object:
     """Rebuild the flattened ``terms`` plus folded ``const`` under ``op``."""
     if not terms:
         return _make_const_8616(const, template)
@@ -317,10 +340,13 @@ def _assoc_rebuild_8616(terms: list[object], const: int, op: str, template: obje
     return _make_binop_8616(op, base, _make_const_8616(const, template), template)
 
 
+@cython.ccall
 def __canonicalize_bitwise_assoc_8616___impl(
-    lhs: object, rhs: object, op: str, template: object
+    lhs: object, rhs: object, op: object, template: object
 ) -> object | None:
     """Canonicalize an ``And``/``Or``-assoc expression."""
+    const: object
+    gated: object
     gated = _assoc_const_gate_8616(lhs, rhs, op, template)
     if gated is not None:
         return gated
@@ -333,12 +359,16 @@ def __canonicalize_bitwise_assoc_8616___impl(
     return _assoc_rebuild_8616(terms, const, op, template)
 
 
-def _canonicalize_bitwise_assoc_8616(lhs: object, rhs: object, op: str, template: object) -> object | None:
+@cython.ccall
+def _canonicalize_bitwise_assoc_8616(lhs: object, rhs: object, op: object, template: object) -> object | None:
     return __canonicalize_bitwise_assoc_8616___impl(lhs, rhs, op, template)
 
 
-def _xor_walk_8616(node: object, terms: list[object], const: int) -> int:
+@cython.ccall
+def _xor_walk_8616(node: object, terms: object, const: cython.longlong) -> cython.longlong:
     """Flatten ``Xor``-chains; remove same-expr pairs; return folded const."""
+    existing: object
+    idx: object
     value = _c_constant_value(node)
     if isinstance(value, int):
         return const ^ value
@@ -357,6 +387,7 @@ def _xor_walk_8616(node: object, terms: list[object], const: int) -> int:
     return const
 
 
+@cython.ccall
 def _canonicalize_xor_8616(lhs: object, rhs: object, template: object) -> object | None:
     lhs_val = _c_constant_value(lhs)
     rhs_val = _c_constant_value(rhs)
@@ -393,7 +424,8 @@ _CONST_FOLD_TABLE_8616 = {
 }
 
 
-def _fold_const_pair_8616(op: str, lhs_val: int, rhs_val: int) -> int | None:
+@cython.ccall
+def _fold_const_pair_8616(op: object, lhs_val: cython.longlong, rhs_val: cython.longlong) -> int | None:
     """Compute ``lhs_val OP rhs_val``; return None when unsafe or unknown."""
     if op in _CONST_FOLD_TABLE_8616:
         return int(_CONST_FOLD_TABLE_8616[op](lhs_val, rhs_val))
@@ -408,10 +440,12 @@ def _fold_const_pair_8616(op: str, lhs_val: int, rhs_val: int) -> int | None:
     return None
 
 
+@cython.ccall
 def __fold_binary_constants_8616___impl(
-    op: str, lhs_val: int | None, rhs_val: int | None, template: object
+    op: object, lhs_val: int | None, rhs_val: int | None, template: object
 ) -> object | None:
     """Fold a binary op when both operands are constants."""
+    value: object
     if not isinstance(lhs_val, int) or not isinstance(rhs_val, int):
         return None
     try:
@@ -423,11 +457,14 @@ def __fold_binary_constants_8616___impl(
     return _make_const_8616(value, template)
 
 
-def _fold_binary_constants_8616(op: str, lhs_val: int | None, rhs_val: int | None, template: object) -> object | None:
+@cython.ccall
+def _fold_binary_constants_8616(op: object, lhs_val: int | None, rhs_val: int | None, template: object) -> object | None:
     return __fold_binary_constants_8616___impl(op, lhs_val, rhs_val, template)
 
 
-def _rebuild_left_assoc_8616(terms: tuple[object, ...], op: str, template: object) -> object:
+@cython.ccall
+def _rebuild_left_assoc_8616(terms: object, op: object, template: object) -> object:
+    term: object
     if not terms:
         return _make_const_8616(0, template)
 
@@ -437,7 +474,8 @@ def _rebuild_left_assoc_8616(terms: tuple[object, ...], op: str, template: objec
     return current
 
 
-def _make_binop_8616(op: str, lhs: object, rhs: object, template: object) -> object:
+@cython.ccall
+def _make_binop_8616(op: object, lhs: object, rhs: object, template: object) -> object:
     from angr.analyses.decompiler.structured_codegen import c as structured_c
 
     return structured_c.CBinaryOp(
@@ -448,13 +486,15 @@ def _make_binop_8616(op: str, lhs: object, rhs: object, template: object) -> obj
     )
 
 
-def _rebuild_binary_8616(template: object, op: str, lhs: object, rhs: object) -> object:
+@cython.ccall
+def _rebuild_binary_8616(template: object, op: object, lhs: object, rhs: object) -> object:
     if lhs is _c_lhs(template) and rhs is _c_rhs(template):
         return template
     return _make_binop_8616(op, lhs, rhs, template)
 
 
-def _make_const_8616(value: int, template: object | None = None) -> object:
+@cython.ccall
+def _make_const_8616(value: cython.longlong, template: object | None = None) -> object:
     from angr.analyses.decompiler.structured_codegen import c as structured_c
     from angr.sim_type import SimType, SimTypeInt
 
@@ -469,6 +509,7 @@ def _make_const_8616(value: int, template: object | None = None) -> object:
     )
 
 
+@cython.ccall
 def _c_constant_value(expr: object) -> int | None:
     try:
         value = cast(_CExprBoundary, expr).value
@@ -487,13 +528,14 @@ def _c_constant_value(expr: object) -> int | None:
     return None
 
 
-def _same_c_expr_8616(lhs: object, rhs: object) -> bool:
+@cython.ccall
+def _same_c_expr_8616(lhs: object, rhs: object) -> cython.bint:
     if lhs is rhs:
         return True
     if type(lhs) is not type(rhs):
         return False
 
     if _c_constant_value(lhs) is not None or _c_constant_value(rhs) is not None:
-        return _c_constant_value(lhs) == _c_constant_value(rhs)
+        return operator.eq(_c_constant_value(lhs), _c_constant_value(rhs))
 
-    return repr(lhs) == repr(rhs)
+    return operator.eq(repr(lhs), repr(rhs))

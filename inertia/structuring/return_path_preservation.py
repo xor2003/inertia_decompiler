@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove bounded return-register preservation through decoded CFG tails.
 
 Layer: Structuring.
@@ -9,6 +10,8 @@ rewrite cleanup, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Iterable, Sequence
 from typing import Protocol, cast
@@ -20,12 +23,13 @@ from inertia.semantics.branch_target_return import (
     branch_target_return_effect_8616,
 )
 from inertia.semantics.return_register_preservation import instruction_preserves_return_registers_8616
+import operator
 
 
 class _Operand8616(Protocol):
     """Third-party Capstone fields needed to identify a direct branch."""
 
-    type: int
+    type: cython.longlong
     imm: object
 
 
@@ -47,11 +51,12 @@ class _Block8616(Protocol):
     capstone: _CapstoneBlock8616
 
 
+@cython.ccall
 def branch_target_imm_8616(insn: object) -> int | None:
     """Read an exact direct target at the third-party Capstone boundary."""
     try:
         operands = tuple(cast(_Instruction8616, insn).operands or ())
-        if len(operands) != 1 or operands[0].type != X86_OP_IMM:
+        if len(operands) != 1 or operator.ne(operands[0].type, X86_OP_IMM):
             return None
         value = operands[0].imm
     except (AttributeError, TypeError):
@@ -59,15 +64,18 @@ def branch_target_imm_8616(insn: object) -> int | None:
     return value if isinstance(value, int) else None
 
 
+@cython.ccall
 def return_path_preserves_return_registers_8616(
-    target_addr: int,
+    target_addr: cython.longlong,
     load_block: Callable[[int], object | None],
     *,
-    max_depth: int = 4,
-) -> bool:
+    max_depth: cython.longlong = 4,
+) -> cython.bint:
     """Prove a complete bounded jump tail without changing AX or DX."""
+    index: object
+    insn: object
     target = target_addr
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     for _ in range(max_depth + 1):
         if target in seen:
             return False
@@ -83,7 +91,7 @@ def return_path_preserves_return_registers_8616(
             if instruction_preserves_return_registers_8616(insn):
                 continue
             effect = branch_target_return_effect_8616(insn, branch_target_imm_8616)
-            terminal = index == len(insns) - 1
+            terminal = operator.eq(index, len(insns) - 1)
             if effect.kind is BranchTargetReturnEffectKind8616.RETURN:
                 return terminal
             if (

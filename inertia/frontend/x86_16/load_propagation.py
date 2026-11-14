@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/angr compatibility.
 
 Responsibility: preserve captured load values across native AIL memory effects.
@@ -7,6 +8,8 @@ Forbidden: variable recovery, guessed non-aliasing, or rendered-C repair.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
@@ -16,21 +19,24 @@ from angr.ailment.expression import Expression, Load, Tmp
 from angr.ailment.statement import Assignment, SideEffectStatement, Store
 from angr.code_location import AILCodeLocation
 from angr.utils.ssa import AILBlacklistExprTypeWalker
+import dataclasses
+import operator
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LoadPropagationStats8616:
     """Account for native load candidates and consumed ordering refusals."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    refused_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    refused_count: cython.longlong
 
 
-def _has_memory_barrier_8616(block: Block, temporary: Tmp, use_index: int) -> bool:
+@cython.ccall
+def _has_memory_barrier_8616(block: Block, temporary: Tmp, use_index: cython.longlong) -> cython.bint:
     """Stop at the nearest definition or barrier without copying block prefixes."""
     statements = block.statements
     for index in range(use_index - 1, -1, -1):
@@ -39,15 +45,16 @@ def _has_memory_barrier_8616(block: Block, temporary: Tmp, use_index: int) -> bo
             return True
         is_definition = (
             isinstance(statement, Assignment) and isinstance(statement.dst, Tmp)
-            and statement.dst.tmp_idx == temporary.tmp_idx
+            and operator.eq(statement.dst.tmp_idx, temporary.tmp_idx)
         )
         if is_definition:
             return False
     return True
 
 
+@cython.ccall
 def refuse_reordered_loads_8616(
-    blocks: Mapping[tuple[int, int | None], Block],
+    blocks: Mapping[tuple[cython.longlong, int | None], Block],
     replacements: MutableMapping[AILCodeLocation, MutableMapping[Expression, Expression]],
 ) -> LoadPropagationStats8616:
     """Filter load-bearing temporary substitutions in block and function models.
@@ -63,9 +70,16 @@ def refuse_reordered_loads_8616(
     ``Assignment(None, old, new)`` exactly (``walk_expression`` is the upstream
     expression entrypoint, as used by ``has_ite_expr``).
     """
+    block: object
+    cached: object
+    use_index: object
+    entries: object
+    location: object
+    new: object
+    old: object
     inspected = refused = missing = 0
     walker = AILBlacklistExprTypeWalker((Load,))
-    load_verdicts: dict[int, tuple[Expression, bool]] = {}
+    load_verdicts: dict[cython.longlong, tuple[Expression, cython.bint]] = {}
     for location, entries in replacements.items():
         block = blocks.get((location.block_addr, location.block_idx))
         for old, new in tuple(entries.items()):

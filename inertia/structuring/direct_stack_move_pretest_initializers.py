@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Restore binary-proven stack initializers before structured pretest loops.
 
 Layer: Structuring.
@@ -15,6 +16,8 @@ Missing or ambiguous binary/AST evidence leaves the original AST unchanged.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -42,50 +45,54 @@ from .direct_stack_move_ownership import (
 )
 from .pretest_condition_surface import pretest_condition_surface_8616
 from .pretest_initializer_placement import place_pretest_initializer_8616 as _place_pretest_initializer_8616
+import dataclasses
+import operator
+import builtins
 
 log: logging.Logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectStackMovePretestInitializerEvidence8616:
     """One exact machine pretest-loop initializer control-flow shape."""
 
-    move_addr: int
-    entry_jump_addr: int
-    condition_entry_addr: int
-    condition_branch_addrs: tuple[int, ...]
-    iterator_entry_addr: int
-    backedge_addr: int
+    move_addr: cython.longlong
+    entry_jump_addr: cython.longlong
+    condition_entry_addr: cython.longlong
+    condition_branch_addrs: object
+    iterator_entry_addr: cython.longlong
+    backedge_addr: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectStackMovePretestInitializerSite8616:
     """One structured pretest loop and its owning statement list."""
 
-    statements: list[Any]
+    statements: object
     loop: structured_c.CForLoop | structured_c.CWhileLoop
-    depth: int
+    depth: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectStackMovePretestInitializerStats8616:
     """Closed evidence counters for pretest-loop initializer placement."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    already_materialized_count: int
-    refused_no_evidence_count: int
-    refused_no_site_count: int
-    refused_assignment_count: int
-    refused_branch_owner_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    already_materialized_count: cython.longlong
+    refused_no_evidence_count: cython.longlong
+    refused_no_site_count: cython.longlong
+    refused_assignment_count: cython.longlong
+    refused_branch_owner_count: cython.longlong
 
 
+@cython.ccall
 def _boundary_field_8616(
     value: object | None,
-    name: str,
+    name: object,
     default: object | None = None,
 ) -> object | None:
     """Read an optional field from a heterogeneous angr/Capstone boundary."""
@@ -93,13 +100,16 @@ def _boundary_field_8616(
     return getattr(value, name, default)
 
 
+@cython.ccall
 def _ordered_instructions_8616(
     project: object,
     function: object,
-    reference_addr: int,
-) -> tuple[tuple[int, object], ...]:
+    reference_addr: cython.longlong,
+) -> tuple[tuple[cython.longlong, object], ...]:
     """Return deterministic unique Capstone instructions in fact coordinates."""
-    instructions: dict[int, object] = {}
+    block: object
+    wrapped: object
+    instructions: dict[cython.longlong, object] = {}
     blocks = boundary_tuple_8616(_boundary_field_8616(function, "blocks", ()) or ())
     for block in blocks:
         capstone = _boundary_field_8616(block, "capstone")
@@ -113,16 +123,16 @@ def _ordered_instructions_8616(
                 continue
             comparable = comparable_address_8616(project, address, reference_addr)
             instructions.setdefault(comparable, instruction)
-    return tuple(sorted(instructions.items()))
+    return tuple(sorted(tuple(instructions.items())))
 
 
 def _jump_target_8616(instruction: object) -> int | None:
     """Return one direct jump target from a decoded Capstone instruction."""
     groups = frozenset(
         group
-        for group in boundary_tuple_8616(
+        for group in builtins.iter(boundary_tuple_8616(
             _boundary_field_8616(instruction, "groups", ()) or ()
-        )
+        ))
         if isinstance(group, int)
     )
     operands = boundary_tuple_8616(
@@ -134,7 +144,7 @@ def _jump_target_8616(instruction: object) -> int | None:
     target = _boundary_field_8616(operand, "imm")
     return (
         target
-        if _boundary_field_8616(operand, "type") == X86_OP_IMM
+        if operator.eq(_boundary_field_8616(operand, "type"), X86_OP_IMM)
         and isinstance(target, int)
         else None
     )
@@ -143,19 +153,21 @@ def _jump_target_8616(instruction: object) -> int | None:
 def pretest_initializer_evidence_8616(
     project: object,
     function: object,
-    move_addr: int,
+    move_addr: cython.longlong,
 ) -> tuple[DirectStackMovePretestInitializerEvidence8616, ...]:
     """Recover exact one-time initializer jumps leading to pretest loops."""
+    backedge: object
+    backedge_addr: object
     instructions = _ordered_instructions_8616(project, function, move_addr)
     move_indexes = tuple(
-        index for index, (address, _instruction) in enumerate(instructions) if address == move_addr
+        index for index, (address, _instruction) in builtins.iter(enumerate(instructions)) if address == move_addr
     )
     if len(move_indexes) != 1 or move_indexes[0] + 1 >= len(instructions):
         return ()
     entry_jump_addr, entry_jump = instructions[move_indexes[0] + 1]
     condition_target = _jump_target_8616(entry_jump)
     if (
-        _boundary_field_8616(entry_jump, "id") != X86_INS_JMP
+        operator.ne(_boundary_field_8616(entry_jump, "id"), X86_INS_JMP)
         or not isinstance(condition_target, int)
     ):
         return ()
@@ -171,7 +183,7 @@ def pretest_initializer_evidence_8616(
     for backedge_addr, backedge in instructions:
         target = _jump_target_8616(backedge)
         if (
-            _boundary_field_8616(backedge, "id") != X86_INS_JMP
+            operator.ne(_boundary_field_8616(backedge, "id"), X86_INS_JMP)
             or not isinstance(target, int)
             or backedge_addr <= condition_entry_addr
         ):
@@ -181,9 +193,9 @@ def pretest_initializer_evidence_8616(
             continue
         condition_branches = tuple(
             address
-            for address, instruction in instructions
+            for address, instruction in iter(instructions)
             if condition_entry_addr <= address < backedge_addr
-            and _boundary_field_8616(instruction, "id") != X86_INS_JMP
+            and operator.ne(_boundary_field_8616(instruction, "id"), X86_INS_JMP)
             and _jump_target_8616(instruction) is not None
         )
         if not condition_branches:
@@ -201,21 +213,27 @@ def pretest_initializer_evidence_8616(
     return tuple(dict.fromkeys(evidence))
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _PretestInitSiteScan8616:
     """Visit owned statement lists and correlate proven pretest loops."""
 
     project: object
     codegen: object
     evidence: DirectStackMovePretestInitializerEvidence8616
-    dst_offset: int
-    sites: list[DirectStackMovePretestInitializerSite8616] = field(
+    dst_offset: cython.longlong
+    sites: object = field(
         default_factory=list,
     )
-    seen: set[int] = field(default_factory=set)
+    seen: object = field(default_factory=set)
 
-    def visit(self, node: object, depth: int) -> None:
+    @cython.ccall
+    def visit(self, node: object, depth: cython.longlong) -> None:
         """Visit each owned statement list and correlate its pretest loops."""
+        child: object
+        _condition: object
+        attr: object
+        guarded_body: object
+        statement: object
         if node is None or id(node) in self.seen:
             return
         self.seen.add(id(node))
@@ -236,8 +254,8 @@ class _PretestInitSiteScan8616:
     def _match_statement(
         self,
         statement: object,
-        statements: list[object],
-        depth: int,
+        statements: object,
+        depth: cython.longlong,
     ) -> None:
         """Record one pretest loop that owns the proven machine range."""
         if not isinstance(
@@ -249,23 +267,23 @@ class _PretestInitSiteScan8616:
         body = statement.body
         condition_addresses = {
             comparable_address_8616(self.project, address, self.evidence.move_addr)
-            for condition in surface.conditions
-            for address in _tree_tag_addresses_8616(condition)
+            for condition in iter(surface.conditions)
+            for address in builtins.iter(_tree_tag_addresses_8616(condition))
         }
         body_addresses = {
             comparable_address_8616(self.project, address, self.evidence.move_addr)
-            for address in _tree_tag_addresses_8616(body)
+            for address in builtins.iter(_tree_tag_addresses_8616(body))
         }
         owns_condition = any(
             self.evidence.condition_entry_addr
             <= address
             <= max(self.evidence.condition_branch_addrs)
-            for address in condition_addresses
+            for address in iter(condition_addresses)
         )
         owns_body = any(
             branch_addr < address < self.evidence.backedge_addr
-            for branch_addr in self.evidence.condition_branch_addrs
-            for address in body_addresses
+            for branch_addr in iter(self.evidence.condition_branch_addrs)
+            for address in iter(body_addresses)
         )
         if (
             owns_condition
@@ -276,7 +294,7 @@ class _PretestInitSiteScan8616:
                     condition,
                     self.dst_offset,
                 )
-                for condition in surface.conditions
+                for condition in iter(surface.conditions)
             )
         ):
             self.sites.append(
@@ -288,12 +306,13 @@ class _PretestInitSiteScan8616:
             )
 
 
+@cython.ccall
 def _pretest_initializer_sites_8616(
     project: object,
     codegen: object,
     root: object,
     evidence: DirectStackMovePretestInitializerEvidence8616,
-    dst_offset: int,
+    dst_offset: cython.longlong,
 ) -> tuple[DirectStackMovePretestInitializerSite8616, ...]:
     """Find the unique structured pretest loop owned by machine evidence."""
     scan = _PretestInitSiteScan8616(project, codegen, evidence, dst_offset)
@@ -301,14 +320,17 @@ def _pretest_initializer_sites_8616(
     return tuple(scan.sites)
 
 
+@cython.ccall
 def place_direct_stack_move_pretest_initializer_assignment_8616(
     project: object,
     codegen: object,
     function: object,
     move_fact: DirectStackMoveFact8616,
     assignment: structured_c.CAssignment,
-) -> bool:
+) -> cython.bint:
     """Place one Lowering-built assignment at its proven pretest-loop scope."""
+    location: object
+    root: object
     if move_fact.ins_addr in direct_stack_move_branch_owned_addresses_8616(
         project,
         codegen,
@@ -365,30 +387,31 @@ class _PretestInitOutcome8616(Enum):
     MATERIALIZED = "materialized"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _PretestInitResult8616:
     """Outcome plus the flags the stats contract folds over."""
 
     outcome: _PretestInitOutcome8616
-    failure: bool = False
-    already: bool = False
+    failure: cython.bint = False
+    already: cython.bint = False
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _PretestInitTally8616:
     """Fold per-fact outcomes into the placement stats contract."""
 
-    normalized: int = 0
-    classified: int = 0
-    materialized: int = 0
-    failures: int = 0
-    already_materialized: int = 0
-    refused_no_evidence: int = 0
-    refused_no_site: int = 0
-    refused_assignment: int = 0
-    refused_branch_owner: int = 0
-    changed: bool = False
+    normalized: cython.longlong = 0
+    classified: cython.longlong = 0
+    materialized: cython.longlong = 0
+    failures: cython.longlong = 0
+    already_materialized: cython.longlong = 0
+    refused_no_evidence: cython.longlong = 0
+    refused_no_site: cython.longlong = 0
+    refused_assignment: cython.longlong = 0
+    refused_branch_owner: cython.longlong = 0
+    changed: cython.bint = False
 
+    @cython.ccall
     def record(self, result: _PretestInitResult8616) -> None:
         """Apply one fact's outcome to the counters in the original order."""
         outcome = result.outcome
@@ -419,13 +442,14 @@ class _PretestInitTally8616:
         self.changed = self.changed or not result.already
 
 
+@cython.ccall
 def _process_pretest_init_fact_8616(
     fact: DirectStackMoveFact8616,
     project: object,
     codegen: object,
     function: object,
     root: object,
-    branch_owned: frozenset[int],
+    branch_owned: object,
 ) -> _PretestInitResult8616:
     """Run one fact through the evidence/site/assignment gate ladder."""
     if fact.ins_addr in branch_owned:
@@ -470,8 +494,9 @@ def materialize_direct_stack_move_pretest_initializers_8616(
     project: object,
     codegen: object,
     function: object,
-) -> bool:
+) -> cython.bint:
     """Relocate tagged direct-stack assignments to proven pretest-loop scope."""
+    fact: object
     codegen_contract = cast(Any, codegen)
     try:
         root = codegen_contract.cfunc.statements
@@ -480,7 +505,7 @@ def materialize_direct_stack_move_pretest_initializers_8616(
         return False
     facts = tuple(
         fact
-        for fact in boundary_tuple_8616(raw_facts or ())
+        for fact in builtins.iter(boundary_tuple_8616(raw_facts or ()))
         if isinstance(fact, DirectStackMoveFact8616)
     )
     tally = _PretestInitTally8616()

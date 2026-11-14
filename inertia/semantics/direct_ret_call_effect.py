@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Semantics.
 
 Responsibility: authenticate mapped word CALL coordinates and prove register
@@ -10,6 +11,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -20,6 +23,8 @@ from cle.backends.externs import ExternObject
 from inertia.frontend.x86_16.stack_helpers import far_linear_target_8616
 from inertia.frontend.x86_16.synthetic_call_stub_evidence import synthetic_call_stub_registry_8616
 from inertia.semantics.callsite_summary import CallsiteMachineFrameKind8616
+import dataclasses
+import operator
 
 
 class DirectRetCallEffectVerdict8616(StrEnum):
@@ -29,21 +34,21 @@ class DirectRetCallEffectVerdict8616(StrEnum):
     UNKNOWN_REFUSE = "unknown_refuse"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectRetCallEffect8616:
     """A closed one-target instruction-body proof or explicit refusal."""
 
     callsite_addr: int | None
     target_addr: int | None
     verdict: DirectRetCallEffectVerdict8616
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether one exact target yielded one preservation fact."""
         return (
             self.verdict is DirectRetCallEffectVerdict8616.PRESERVED
@@ -59,7 +64,7 @@ class DirectRetCallEffect8616:
 class _MemorySurface8616(Protocol):
     """Third-party loader memory API used for exact mapped bytes."""
 
-    def load(self, address: int, size: int) -> bytes:
+    def load(self, address: cython.longlong, size: cython.longlong) -> object:
         """Read a mapped byte range or raise for an unmapped address."""
         ...
 
@@ -69,7 +74,7 @@ class _LoaderSurface8616(Protocol):
 
     memory: _MemorySurface8616
 
-    def find_object_containing(self, address: int) -> object | None:
+    def find_object_containing(self, address: cython.longlong) -> object | None:
         """Return the loaded object containing this address, if any."""
         ...
 
@@ -77,7 +82,7 @@ class _LoaderSurface8616(Protocol):
 class _ArchSurface8616(Protocol):
     """Third-party architecture identity used at the decoding boundary."""
 
-    name: str
+    name: object
 
 
 class _ProjectSurface8616(Protocol):
@@ -87,8 +92,9 @@ class _ProjectSurface8616(Protocol):
     loader: _LoaderSurface8616
 
 
+@cython.ccall
 def _refuse_8616(
-    callsite_addr: int | None, target_addr: int | None, *, normalized: bool = False,
+    callsite_addr: int | None, target_addr: int | None, *, normalized: cython.bint = False,
 ) -> DirectRetCallEffect8616:
     """Retain one failed body obligation without claiming preservation."""
     return DirectRetCallEffect8616(
@@ -97,15 +103,17 @@ def _refuse_8616(
     )
 
 
+@cython.ccall
 def direct_near_call_target_is_bound_8616(
     project: object, callsite_addr: int | None, return_addr: int | None,
     target_addr: int | None, frame_kind: CallsiteMachineFrameKind8616 | None,
-) -> bool:
+) -> cython.bint:
     """Match a real mapped E8 transfer to one exact same-image target.
 
     This establishes the call coordinate only, not any callee effect or ABI.
     Synthetic targets and absent/malformed third-party loader surfaces refuse.
     """
+    synthetic: object
     synthetic = synthetic_call_stub_registry_8616(project)
     if synthetic is not None and (not synthetic.closes_evidence or target_addr in synthetic.addresses):
         return False
@@ -114,18 +122,20 @@ def direct_near_call_target_is_bound_8616(
     )
 
 
+@cython.ccall
 def direct_near_call_encoding_is_bound_8616(
     project: object, callsite_addr: int | None, return_addr: int | None,
     target_addr: int | None, frame_kind: CallsiteMachineFrameKind8616 | None,
-) -> bool:
+) -> cython.bint:
     """Bind current E8 bytes to an exact same-image target, without effects.
 
     This neutral encoding predicate does not authorize synthetic behavior or
     prove a real callee body. Its consumer must enforce its target policy.
     """
+    loaded: object
     if frame_kind is not CallsiteMachineFrameKind8616.NEAR:
         return False
-    if type(callsite_addr) is not int or callsite_addr < 0 or return_addr != callsite_addr + 3:
+    if type(callsite_addr) is not int or callsite_addr < 0 or operator.ne(return_addr, callsite_addr + 3):
         return False
     if type(target_addr) is not int or target_addr < 0:
         return False
@@ -139,26 +149,29 @@ def direct_near_call_encoding_is_bound_8616(
     except (AttributeError, KeyError, TypeError, ValueError):
         return False
     return bool(len(call_bytes) == 3 and call_bytes[0] == 0xE8
-                and callsite_addr + 3 + int.from_bytes(call_bytes[1:], "little", signed=True) == target_addr)
+                and operator.eq(callsite_addr + 3 + int.from_bytes(call_bytes[1:], "little", signed=True), target_addr))
 
 
+@cython.ccall
 def direct_call_target_is_bound_8616(
     project: object, callsite_addr: int | None, return_addr: int | None,
     target_addr: int | None, frame_kind: CallsiteMachineFrameKind8616 | None,
-) -> bool:
+) -> cython.bint:
     """Bind mapped word near or immediate far CALL bytes to their real target.
 
     This authenticates transfer coordinates only. Far returns, register
     effects and SP displacement still require their independent body proofs.
     Prefixed wide calls, indirect targets and different-image targets refuse.
     """
+    loaded: object
+    synthetic: object
     if frame_kind is CallsiteMachineFrameKind8616.NEAR:
         return direct_near_call_target_is_bound_8616(
             project, callsite_addr, return_addr, target_addr, frame_kind,
         )
     if frame_kind is not CallsiteMachineFrameKind8616.FAR:
         return False
-    if type(callsite_addr) is not int or callsite_addr < 0 or return_addr != callsite_addr + 5:
+    if type(callsite_addr) is not int or callsite_addr < 0 or operator.ne(return_addr, callsite_addr + 5):
         return False
     if type(target_addr) is not int or target_addr < 0:
         return False
@@ -176,11 +189,12 @@ def direct_call_target_is_bound_8616(
         return False
     if len(call_bytes) != 5 or call_bytes[0] != 0x9A:
         return False
-    return far_linear_target_8616(
+    return operator.eq(far_linear_target_8616(
         int.from_bytes(call_bytes[3:5], "little"), int.from_bytes(call_bytes[1:3], "little"),
-    ) == target_addr
+    ), target_addr)
 
 
+@cython.ccall
 def prove_direct_near_ret_only_effect_8616(
     project: object,
     callsite_addr: int | None,
@@ -197,7 +211,7 @@ def prove_direct_near_ret_only_effect_8616(
         return _refuse_8616(callsite_addr, target_addr)
     if not isinstance(callsite_addr, int) or isinstance(callsite_addr, bool) or callsite_addr < 0:
         return _refuse_8616(callsite_addr, target_addr)
-    if return_addr != callsite_addr + 3:
+    if operator.ne(return_addr, callsite_addr + 3):
         return _refuse_8616(callsite_addr, target_addr)
     if not isinstance(target_addr, int) or isinstance(target_addr, bool) or target_addr < 0:
         return _refuse_8616(callsite_addr, target_addr)

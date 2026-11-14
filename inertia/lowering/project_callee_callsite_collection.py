@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Collect the complete project direct-caller census once.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -36,6 +39,9 @@ from .callee_callsite_contracts import (
     callee_callsite_censuses_by_addr_8616,
 )
 from .callee_range_callsite_facts import collect_range_callsite_facts_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "ProjectCalleeCallsiteCollection8616",
@@ -46,30 +52,30 @@ __all__ = [
 class _FunctionSurface8616(Protocol):
     """Third-party function entry; executable bounds belong to Frontend."""
 
-    addr: int
+    addr: cython.longlong
 
 
 class _CallerRangeSurface8616(Protocol):
     """Optional exact caller ranges already attached to a project."""
 
-    _inertia_caller_function_ranges_8616: tuple[tuple[int, int], ...]
+    _inertia_caller_function_ranges_8616: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ProjectCalleeCallsiteCollection8616:
     """Closed accounting for one complete project callsite collection."""
 
-    target_addrs: tuple[int, ...]
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    target_addrs: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
     summary_request_stats: CallsiteSummaryRequestStats8616
 
     def validate(self) -> None:
         """Reject noncanonical targets or open fact accounting."""
-        if self.target_addrs != tuple(sorted(set(self.target_addrs))):
+        if operator.ne(self.target_addrs, tuple(sorted(tuple(set(self.target_addrs))))):
             raise ValueError("project callee callsite targets are not canonical")
         counts = (
             self.raw_fact_count,
@@ -78,18 +84,18 @@ class ProjectCalleeCallsiteCollection8616:
             self.materialized_count,
             self.failure_count,
         )
-        if any(count < 0 for count in counts):
+        if any(count < 0 for count in iter(counts)):
             raise ValueError("project callee callsite counters must be nonnegative")
         if not (
-            self.raw_fact_count == self.normalized_fact_count
-            and self.normalized_fact_count
-            == self.materialized_count + self.failure_count
-            and self.classified_fact_count == self.materialized_count
+            operator.eq(self.raw_fact_count, self.normalized_fact_count)
+            and operator.eq(self.normalized_fact_count, self.materialized_count + self.failure_count)
+            and operator.eq(self.classified_fact_count, self.materialized_count)
         ):
             raise ValueError("project callee callsite accounting does not close")
         self.summary_request_stats.validate()
 
 
+@cython.ccall
 def _function_addr_8616(function: object) -> int | None:
     """Read one exact third-party function address."""
     try:
@@ -102,8 +108,10 @@ def _function_addr_8616(function: object) -> int | None:
 def _function_ranges_8616(
     project: object,
     functions: Sequence[object],
-) -> tuple[tuple[int, int], ...]:
+) -> tuple[tuple[cython.longlong, cython.longlong], ...]:
     """Use explicit ranges or closed Frontend witnesses, never summed CFG size."""
+    witness: object
+    function: object
     try:
         attached = cast(
             _CallerRangeSurface8616,
@@ -116,27 +124,27 @@ def _function_ranges_8616(
             raise TypeError("project caller function ranges must be a tuple")
         return tuple(
             (start, end)
-            for start, end in attached
+            for start, end in iter(attached)
             if isinstance(start, int)
             and isinstance(end, int)
             and start >= 0
             and end > start
         )
-    ranges: list[tuple[int, int]] = []
+    ranges: list[tuple[cython.longlong, cython.longlong]] = []
     for function in functions:
         witness = capture_function_boundary_8616(project, function)
         if witness is not None:
             ranges.append((witness.entry, witness.end))
-    return tuple(sorted(set(ranges)))
+    return tuple(sorted(tuple(set(ranges))))
 
 
 def _build_census_8616(
-    target_addr: int,
-    facts: dict[int, CalleeCallsiteFact8616],
+    target_addr: cython.longlong,
+    facts: object,
 ) -> CalleeCallsiteCensus8616:
     """Build one deterministic closed census from callsite-keyed facts."""
-    ordered = tuple(facts[callsite] for callsite in sorted(facts))
-    normalized = sum(fact.summary is not None for fact in ordered)
+    ordered = tuple(facts[callsite] for callsite in builtins.iter(sorted(facts)))
+    normalized = sum(fact.summary is not None for fact in iter(ordered))
     census = CalleeCallsiteCensus8616(
         target_addr=target_addr,
         facts=ordered,
@@ -153,7 +161,11 @@ def collect_complete_project_callee_callsites_8616(
     functions: Sequence[object],
 ) -> ProjectCalleeCallsiteCollection8616:
     """Scan one complete function catalog and publish every callee census."""
-    facts_by_target: dict[int, dict[int, CalleeCallsiteFact8616]] = {}
+    summary: object
+    fact: object
+    function: object
+    target: object
+    facts_by_target: dict[cython.longlong, dict[cython.longlong, CalleeCallsiteFact8616]] = {}
     request_cache = CallsiteSummaryRequestCache8616()
     for function in functions:
         caller_addr = _function_addr_8616(function)
@@ -180,8 +192,8 @@ def collect_complete_project_callee_callsites_8616(
             )
     classified_keys = frozenset(
         (target_addr, callsite_addr)
-        for target_addr, facts in facts_by_target.items()
-        for callsite_addr, fact in facts.items()
+        for target_addr, facts in builtins.iter(facts_by_target.items())
+        for callsite_addr, fact in builtins.iter(facts.items())
         if fact.summary is not None
     )
     for fact in collect_range_callsite_facts_8616(
@@ -194,7 +206,7 @@ def collect_complete_project_callee_callsites_8616(
         ] = fact
     collected = {
         target_addr: _build_census_8616(target_addr, facts)
-        for target_addr, facts in sorted(facts_by_target.items())
+        for target_addr, facts in builtins.iter(sorted(tuple(facts_by_target.items())))
     }
     program_summaries = program_callsite_summary_evidence_from_facts_8616(
         ProgramCallsiteSummaryFact8616(
@@ -202,17 +214,17 @@ def collect_complete_project_callee_callsites_8616(
             callsite_addr=fact.callsite_addr,
             summary=fact.summary,
         )
-        for facts in facts_by_target.values()
-        for fact in facts.values()
+        for facts in builtins.iter(facts_by_target.values())
+        for fact in builtins.iter(facts.values())
     )
     attach_program_callsite_summary_evidence_8616(project, program_summaries)
     retained = dict(callee_callsite_censuses_by_addr_8616(project))
     retained.update(collected)
     attach_callee_callsite_censuses_8616(project, retained)
     materialized = sum(
-        census.normalized_fact_count for census in collected.values()
+        census.normalized_fact_count for census in builtins.iter(collected.values())
     )
-    failures = sum(census.failure_count for census in collected.values())
+    failures = sum(census.failure_count for census in builtins.iter(collected.values()))
     result = ProjectCalleeCallsiteCollection8616(
         target_addrs=tuple(collected),
         raw_fact_count=materialized + failures,

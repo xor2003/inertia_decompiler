@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Place binary-proven stack definitions inside structured pretest loops.
 
 Layer: Structuring.
@@ -13,6 +14,8 @@ their structured execution scope and refuses missing or ambiguous evidence.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -48,6 +51,9 @@ from .direct_stack_move_pretest_body_evidence import (
     recover_direct_stack_move_pretest_body_evidence_8616,
 )
 from .pretest_condition_surface import pretest_condition_surface_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = (
     "DirectStackMovePretestBodyStats8616",
@@ -68,31 +74,31 @@ _PRETEST_BODY_SOURCE_KINDS_8616 = frozenset(
 )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _DirectStackMovePretestBodySite8616:
     """One structured loop body uniquely matched to exact CFG evidence."""
 
-    statements: list[Any]
-    depth: int
+    statements: object
+    depth: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectStackMovePretestBodyStats8616:
     """Closed evidence counters for pretest-loop body placement."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    already_materialized_count: int
-    refused_no_evidence_count: int
-    refused_no_site_count: int
-    refused_assignment_count: int
-    refused_branch_owner_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    already_materialized_count: cython.longlong
+    refused_no_evidence_count: cython.longlong
+    refused_no_site_count: cython.longlong
+    refused_assignment_count: cython.longlong
+    refused_branch_owner_count: cython.longlong
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every raw fact materialized or refused explicitly."""
         counters = (
             self.raw_fact_count,
@@ -102,17 +108,18 @@ class DirectStackMovePretestBodyStats8616:
             self.failure_count,
         )
         return (
-            all(counter >= 0 for counter in counters)
+            all(counter >= 0 for counter in iter(counters))
             and self.raw_fact_count >= self.normalized_fact_count
             and self.normalized_fact_count >= self.classified_fact_count
             and self.classified_fact_count >= self.materialized_count
-            and self.raw_fact_count == self.materialized_count + self.failure_count
+            and operator.eq(self.raw_fact_count, self.materialized_count + self.failure_count)
         )
 
 
+@cython.ccall
 def _ast_field_8616(
     node: object | None,
-    name: str,
+    name: object,
     default: object | None = None,
 ) -> object | None:
     """Read one optional field from a heterogeneous angr structured-C node."""
@@ -120,19 +127,25 @@ def _ast_field_8616(
     return getattr(node, name, default)
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _PretestBodySiteScan8616:
     """Walk owned structured nodes and collect exact pretest-loop matches."""
 
     project: object
     codegen: object
     evidence: DirectStackMovePretestBodyEvidence8616
-    dst_offset: int
-    matches: list[_DirectStackMovePretestBodySite8616] = field(default_factory=list)
-    seen: set[int] = field(default_factory=set)
+    dst_offset: cython.longlong
+    matches: object = field(default_factory=list)
+    seen: object = field(default_factory=set)
 
-    def visit(self, node: object, depth: int) -> None:
+    @cython.ccall
+    def visit(self, node: object, depth: cython.longlong) -> None:
         """Walk owned structured nodes and collect exact pretest-loop matches."""
+        child: object
+        _condition: object
+        attr: object
+        guarded_body: object
+        statement: object
         if node is None or id(node) in self.seen:
             return
         self.seen.add(id(node))
@@ -160,19 +173,19 @@ class _PretestBodySiteScan8616:
         self,
         node: object,
         body: object,
-        statements: list[object],
-        depth: int,
+        statements: object,
+        depth: cython.longlong,
     ) -> None:
         """Record one structured loop when its exact block origins match."""
         surface = pretest_condition_surface_8616(node)
         condition_tags = frozenset(
             comparable_address_8616(self.project, address, self.evidence.move_addr)
-            for condition in surface.conditions
-            for address in _tree_tag_addresses_8616(condition)
+            for condition in iter(surface.conditions)
+            for address in builtins.iter(_tree_tag_addresses_8616(condition))
         )
         body_tags = frozenset(
             comparable_address_8616(self.project, address, self.evidence.move_addr)
-            for address in _tree_tag_addresses_8616(body)
+            for address in builtins.iter(_tree_tag_addresses_8616(body))
         )
         if (
             condition_tags & frozenset(self.evidence.header_instruction_addrs)
@@ -191,17 +204,18 @@ def _pretest_body_sites_8616(
     codegen: object,
     root: object,
     evidence: DirectStackMovePretestBodyEvidence8616,
-    dst_offset: int,
+    dst_offset: cython.longlong,
 ) -> tuple[_DirectStackMovePretestBodySite8616, ...]:
     """Find the unique deepest structured loop matching exact block origins."""
     scan = _PretestBodySiteScan8616(project, codegen, evidence, dst_offset)
     scan.visit(root, 0)
     if not scan.matches:
         return ()
-    deepest = max(site.depth for site in scan.matches)
-    return tuple(site for site in scan.matches if site.depth == deepest)
+    deepest = max(site.depth for site in iter(scan.matches))
+    return tuple(site for site in iter(scan.matches) if operator.eq(site.depth, deepest))
 
 
+@cython.ccall
 def _place_pretest_body_assignment_8616(
     project: object,
     codegen: object,
@@ -209,7 +223,7 @@ def _place_pretest_body_assignment_8616(
     move_fact: DirectStackMoveFact8616,
     assignment: structured_c.CAssignment,
     location: DirectStackMoveAssignmentLocation8616 | None,
-) -> tuple[bool, bool]:
+) -> tuple[cython.bint, cython.bint]:
     """Place one assignment in machine/data order within its loop body."""
     result = place_assignment_8616(
         project,
@@ -222,14 +236,17 @@ def _place_pretest_body_assignment_8616(
     return bool(result[0]), bool(result[1])
 
 
+@cython.ccall
 def place_direct_stack_move_pretest_body_assignment_8616(
     project: object,
     codegen: object,
     function: object,
     move_fact: DirectStackMoveFact8616,
     assignment: structured_c.CAssignment,
-) -> bool:
+) -> cython.bint:
     """Place one Lowering-built assignment at its proven loop-body entry."""
+    location: object
+    root: object
     if move_fact.source_kind not in _PRETEST_BODY_SOURCE_KINDS_8616:
         return False
     if move_fact.ins_addr in direct_stack_move_branch_owned_addresses_8616(
@@ -291,20 +308,21 @@ class _PretestBodyOutcome8616(Enum):
     MATERIALIZED = "materialized"
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _PretestBodyTally8616:
     """Accumulated stats for the pretest-body placement pass."""
 
-    normalized: int = 0
-    classified: int = 0
-    materialized: int = 0
-    already_materialized: int = 0
-    refused_no_evidence: int = 0
-    refused_no_site: int = 0
-    refused_assignment: int = 0
-    refused_branch_owner: int = 0
-    changed: bool = False
+    normalized: cython.longlong = 0
+    classified: cython.longlong = 0
+    materialized: cython.longlong = 0
+    already_materialized: cython.longlong = 0
+    refused_no_evidence: cython.longlong = 0
+    refused_no_site: cython.longlong = 0
+    refused_assignment: cython.longlong = 0
+    refused_branch_owner: cython.longlong = 0
+    changed: cython.bint = False
 
+    @cython.ccall
     def record(self, outcome: _PretestBodyOutcome8616) -> None:
         """Fold one fact outcome into the placement stats."""
         if outcome in {
@@ -342,13 +360,14 @@ class _PretestBodyTally8616:
             )
 
 
+@cython.ccall
 def _process_pretest_fact_8616(
     fact: DirectStackMoveFact8616,
     project: object,
     codegen: object,
     function: object,
     root: object,
-    branch_owned: frozenset[int],
+    branch_owned: object,
 ) -> _PretestBodyOutcome8616:
     """Place one pretest-body move fact at its unique proven site."""
     if fact.ins_addr in branch_owned:
@@ -393,8 +412,9 @@ def materialize_direct_stack_move_pretest_body_ownership_8616(
     project: object,
     codegen: object,
     function: object,
-) -> bool:
+) -> cython.bint:
     """Relocate tagged stack assignments to proven pretest-loop body entries."""
+    fact: object
     codegen_boundary = cast(Any, codegen)
     try:
         root = codegen_boundary.cfunc.statements
@@ -403,7 +423,7 @@ def materialize_direct_stack_move_pretest_body_ownership_8616(
         return False
     facts = tuple(
         fact
-        for fact in boundary_tuple_8616(raw_facts or ())
+        for fact in builtins.iter(boundary_tuple_8616(raw_facts or ()))
         if isinstance(fact, DirectStackMoveFact8616)
         and fact.source_kind in _PRETEST_BODY_SOURCE_KINDS_8616
     )

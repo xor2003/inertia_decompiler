@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Applicability probe for the x86-16 array-expression matching pass.
 
 Layer: Types/Lowering.
@@ -19,6 +20,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from angr.analyses.decompiler.structured_codegen.c import CForLoop, CWhileLoop
 
@@ -55,6 +58,7 @@ def _rewrite_target_present_8616(codegen: object) -> bool | None:
     ``None`` means the shared traversal could not prove coverage; the caller
     must keep the pass applicable.
     """
+    cfunc: object
     # Dynamic boundary: third-party angr codegen exposes cfunc optionally.
     cfunc = getattr(codegen, "cfunc", None)
     if cfunc is None:
@@ -81,7 +85,7 @@ def _rewrite_target_present_8616(codegen: object) -> bool | None:
     return False
 
 
-def array_expression_matching_applicable_8616(codegen: object) -> bool:
+def array_expression_matching_applicable_8616(codegen: object) -> cython.bint:
     """Return ``False`` only when the array-matching pass is a proven no-op.
 
     A missing ``cfunc`` mirrors the pass's own early return with no side
@@ -92,6 +96,7 @@ def array_expression_matching_applicable_8616(codegen: object) -> bool:
     pass inapplicable. Unknown traversal state and metadata-publication failure all stay applicable so
     the real pass retains its error and validation behavior.
     """
+    cfunc: object
     # Dynamic boundary: third-party angr codegen exposes cfunc optionally.
     cfunc = getattr(codegen, "cfunc", None)
     if cfunc is None:
@@ -103,8 +108,9 @@ def array_expression_matching_applicable_8616(codegen: object) -> bool:
     original_root = cfunc.statements
     rewrite_reached = False
 
-    def _loop_free_rewrite_step_8616(target_codegen: object) -> bool:
+    def _loop_free_rewrite_step_8616(target_codegen: object) -> cython.bint:
         """Recheck the same AST after metadata callbacks; never change it."""
+        current_cfunc: object
         nonlocal rewrite_reached
         # Dynamic boundary: third-party angr codegen can replace its cfunc.
         current_cfunc = getattr(target_codegen, "cfunc", None)

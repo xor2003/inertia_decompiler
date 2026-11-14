@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Collapse return guards whose alternatives are proved identical.
 
 Layer: Structuring.
@@ -14,6 +15,8 @@ evidence-aware DCE; it never repairs or reinterprets those carriers.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -33,6 +36,9 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616, _same_c_expression_8616
+import dataclasses
+import operator
+import builtins
 
 _PURE_BINARY_OPS_8616 = frozenset(
     {
@@ -74,48 +80,48 @@ class IdenticalReturnGuardShape8616(Enum):
     FALLTHROUGH_RETURN = "fallthrough_return"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IdenticalReturnGuardRefusal8616:
     """One conservatively retained guard and alternate path."""
 
-    statement_index: int
+    statement_index: cython.longlong
     reason: IdenticalReturnGuardRefusalReason8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IdenticalReturnGuardMaterialization8616:
     """Durable shape evidence for one removed return guard."""
 
-    statement_index: int
+    statement_index: cython.longlong
     shape: IdenticalReturnGuardShape8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IdenticalReturnGuardCollapseStats8616:
     """Closed evidence accounting for pure identical-return guard collapse."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every raw candidate reached acceptance or refusal."""
         return bool(
-            self.raw_fact_count == self.materialized_count + self.failure_count
-            and self.classified_fact_count == self.materialized_count
+            operator.eq(self.raw_fact_count, self.materialized_count + self.failure_count)
+            and operator.eq(self.classified_fact_count, self.materialized_count)
             and self.raw_fact_count >= self.normalized_fact_count
             and self.normalized_fact_count >= self.classified_fact_count
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IdenticalReturnGuardCollapseResult8616:
     """Typed mutation result for pure identical-return guard collapse."""
 
-    collapsed_guard_count: int = 0
+    collapsed_guard_count: cython.longlong = 0
     stats: IdenticalReturnGuardCollapseStats8616 = (
         IdenticalReturnGuardCollapseStats8616()
     )
@@ -123,13 +129,15 @@ class IdenticalReturnGuardCollapseResult8616:
     refusals: tuple[IdenticalReturnGuardRefusal8616, ...] = ()
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether at least one redundant guard was removed."""
         return self.collapsed_guard_count > 0
 
 
-def _condition_is_proven_pure_8616(condition: object) -> bool:
+@cython.ccall
+def _condition_is_proven_pure_8616(condition: object) -> cython.bint:
     """Accept only a bounded C-expression subset with no observable effects."""
+    node: object
     for node in _iter_c_nodes_deep_8616(condition):
         if isinstance(node, (CConstant, CVariable, CTypeCast, CITE)):
             continue
@@ -141,6 +149,7 @@ def _condition_is_proven_pure_8616(condition: object) -> bool:
     return True
 
 
+@cython.ccall
 def _single_return_8616(node: object) -> CReturn | None:
     """Unwrap statement containers only when they contain one exact return."""
     current = node
@@ -152,22 +161,25 @@ def _single_return_8616(node: object) -> CReturn | None:
     return current if isinstance(current, CReturn) else None
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _GuardCandidate8616:
     """One resolved identical-return guard shape awaiting collapse."""
 
     alternate_node: object
     alternate_return: CReturn
-    consumed_count: int
+    consumed_count: cython.longlong
     shape: IdenticalReturnGuardShape8616
 
 
+@cython.ccall
 def _guard_candidate_8616(
-    statements: list[object],
-    index: int,
+    statements: object,
+    index: cython.longlong,
     guard: CIfElse,
 ) -> _GuardCandidate8616 | None:
     """Resolve the else/fallthrough alternate return shape or skip."""
+    alternate_return: object
+    else_node: object
     else_node = guard.else_node
     alternate_return = _single_return_8616(else_node)
     if alternate_return is not None and else_node is not None:
@@ -188,14 +200,16 @@ def _guard_candidate_8616(
     )
 
 
+@cython.ccall
 def _collapse_one_guard_8616(
-    statements: list[object],
-    index: int,
+    statements: object,
+    index: cython.longlong,
     guard: CIfElse,
     candidate: _GuardCandidate8616,
-    refusals: list[IdenticalReturnGuardRefusal8616],
-) -> tuple[int, int, int, int]:
+    refusals: object,
+) -> tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong]:
     """Validate one guard and splice it, returning index and count deltas."""
+    branch_return: object
     arms = tuple(guard.condition_and_nodes or ())
     if len(arms) != 1:
         refusals.append(
@@ -242,12 +256,14 @@ def collapse_pure_identical_return_guards_8616(
     root: object,
 ) -> IdenticalReturnGuardCollapseResult8616:
     """Collapse identical pure-guard return paths without semantic recovery."""
+    candidate: object
+    container: object
     raw_count = normalized_count = classified_count = materialized_count = 0
     materializations: list[IdenticalReturnGuardMaterialization8616] = []
     refusals: list[IdenticalReturnGuardRefusal8616] = []
     containers = tuple(
         node
-        for node in _iter_c_nodes_deep_8616(root)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(root))
         if isinstance(node, CStatements)
     )
 

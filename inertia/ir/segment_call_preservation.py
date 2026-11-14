@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bind proved segment preservation to one exact near CALL, leaf or chained.
 
 Layer: IR.
@@ -24,6 +25,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import time
 from collections.abc import Iterator
@@ -41,6 +44,13 @@ from inertia.frontend.x86_16.frontend_direct_callsite_index import (
 from .core import IRBlock, IRFunctionArtifact, IRInstr, IRValue, MemSpace, SegmentOrigin
 from .ir_boundary_cfg import IRBoundaryCoverageResult8616
 from .segment_state_transfer import SEGMENT_REGISTERS
+import dataclasses
+import operator
+import builtins
+Real16CallInvocation8616 = typing.TypeVar("Real16CallInvocation8616")
+Real16InvocationDomain8616 = typing.TypeVar("Real16InvocationDomain8616")
+SegmentEffectClosureResult8616 = typing.TypeVar("SegmentEffectClosureResult8616")
+_OwnedPrefixCensus8616 = typing.TypeVar("_OwnedPrefixCensus8616")
 
 if TYPE_CHECKING:
     from .real16_invocation_domain import (
@@ -54,7 +64,7 @@ if TYPE_CHECKING:
 class _DecodedInstructionSurface8616(Protocol):
     """Third-party decoded instruction coordinate consumed from the frontend."""
 
-    address: int
+    address: cython.longlong
 
 
 class SegmentCallPreservationFailure8616(StrEnum):
@@ -79,12 +89,12 @@ class SegmentCallPreservationFailure8616(StrEnum):
     DEPENDENCY_BUDGET_EXHAUSTED = "dependency_budget_exhausted"
 
 
-_SEGMENT_CALL_DEPENDENCY_MAX_DEPTH_8616: int = 16
-_SEGMENT_CALL_DEPENDENCY_MAX_CLOSURES_8616: int = 64
-_SEGMENT_CALL_DEPENDENCY_MAX_PROOFS_8616: int = 256
+_SEGMENT_CALL_DEPENDENCY_MAX_DEPTH_8616: cython.longlong = 16
+_SEGMENT_CALL_DEPENDENCY_MAX_CLOSURES_8616: cython.longlong = 64
+_SEGMENT_CALL_DEPENDENCY_MAX_PROOFS_8616: cython.longlong = 256
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DeclaredInvocationConstructionKey8616:
     """Active-only coordinates for one pending declared prefix construction.
 
@@ -92,12 +102,12 @@ class DeclaredInvocationConstructionKey8616:
     project/function/callsite. This key grants no proof or cached verdict.
     """
 
-    project_identity: int
-    function_addr: int
-    callsite_addr: int
+    project_identity: cython.longlong
+    function_addr: cython.longlong
+    callsite_addr: cython.longlong
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class SegmentCallDependencyTraversal8616:
     """Bounded one-shot traversal state for dependency-closure evaluation.
 
@@ -110,35 +120,41 @@ class SegmentCallDependencyTraversal8616:
     DAG are revalidated once instead of exponentially.
     """
 
-    active_domains: set[int | DeclaredInvocationConstructionKey8616] = field(default_factory=set)
-    domain_verdicts: dict[int, bool] = field(default_factory=dict)
-    retained_domains: dict[int, Real16InvocationDomain8616] = field(default_factory=dict)
+    active_domains: object = field(default_factory=set)
+    domain_verdicts: object = field(default_factory=dict)
+    retained_domains: object = field(default_factory=dict)
     #: Data-only current construction/replay captures. The same retained domain
     #: pins each key; no callback or semantic reuse is authorized by this map.
-    invocation_prefixes: dict[int, _OwnedPrefixCensus8616] = field(default_factory=dict)
-    remaining_domains: int = _SEGMENT_CALL_DEPENDENCY_MAX_CLOSURES_8616
+    invocation_prefixes: object = field(default_factory=dict)
+    remaining_domains: cython.longlong = _SEGMENT_CALL_DEPENDENCY_MAX_CLOSURES_8616
     #: Explicit shared request allowance; independent of local operation limits.
-    census_work_limit: int = 20000
+    census_work_limit: cython.longlong = 20000
     #: Local selector-batch allowance, inherited without nested renewal.
-    selector_batch_work_limit: int = 20000
-    census_work_units: int = 0
+    selector_batch_work_limit: cython.longlong = 20000
+    census_work_units: cython.longlong = 0
     census_deadline: float | None = None
-    active_closures: set[int] = field(default_factory=set)
-    active_proofs: set[int] = field(default_factory=set)
-    closure_verdicts: dict[int, SegmentCallPreservationFailure8616 | None] = field(default_factory=dict)
-    proof_verdicts: dict[
-        int,
-        tuple[
-            SegmentCallPreservationFailure8616 | None,
-            Real16CallInvocation8616 | None,
-        ],
-    ] = field(default_factory=dict)
-    remaining_closures: int = _SEGMENT_CALL_DEPENDENCY_MAX_CLOSURES_8616
-    remaining_proofs: int = _SEGMENT_CALL_DEPENDENCY_MAX_PROOFS_8616
+    #: Temporary operation cap; never replaces or renews the request deadline.
+    census_local_deadline: float | None = None
+    active_closures: object = field(default_factory=set)
+    active_proofs: object = field(default_factory=set)
+    closure_verdicts: object = field(default_factory=dict)
+    proof_verdicts: object = field(default_factory=dict)
+    remaining_closures: cython.longlong = _SEGMENT_CALL_DEPENDENCY_MAX_CLOSURES_8616
+    remaining_proofs: cython.longlong = _SEGMENT_CALL_DEPENDENCY_MAX_PROOFS_8616
     #: Request-local advice to use the ordinary bounded fixpoint after an
     #: unsuccessful optional ordering attempt. No graph, state or verdict is
     #: retained; even changed geometry remains safe on the ordinary path.
-    callee_default_order: set[int] = field(default_factory=set)
+    callee_default_order: object = field(default_factory=set)
+
+
+    @property
+    def effective_census_deadline_8616(self) -> float | None:
+        """Return the tighter request/local bound without changing either owner."""
+        if self.census_deadline is None:
+            return self.census_local_deadline
+        if self.census_local_deadline is None:
+            return self.census_deadline
+        return min(self.census_deadline, self.census_local_deadline)
 
 
 _AMBIENT_DEPENDENCY_TRAVERSAL_8616: ContextVar[SegmentCallDependencyTraversal8616 | None] = ContextVar(
@@ -146,7 +162,8 @@ _AMBIENT_DEPENDENCY_TRAVERSAL_8616: ContextVar[SegmentCallDependencyTraversal861
 )
 
 
-def _validate_request_work_limit_8616(value: int | None, name: str) -> None:
+@cython.ccall
+def _validate_request_work_limit_8616(value: object, name: object) -> None:
     """Reject noninteger or nonpositive explicitly configured work allowances."""
     if value is not None:
         if type(value) is not int:
@@ -158,7 +175,7 @@ def _validate_request_work_limit_8616(value: int | None, name: str) -> None:
 @contextmanager
 def segment_call_dependency_traversal_scope_8616(
     *, census_work_limit: int | None = None, selector_batch_work_limit: int | None = None,
-    inherit_existing_limits: bool = False,
+    inherit_existing_limits: cython.bint = False,
 ) -> Iterator[SegmentCallDependencyTraversal8616]:
     """Reuse the ambient bounded traversal, or open one fresh bounded scope.
 
@@ -174,15 +191,16 @@ def segment_call_dependency_traversal_scope_8616(
     allowance instead of applying its root defaults; no ambient limit changes.
     Deadlines and local proof limits remain independent.
     """
+    ambient: object
     _validate_request_work_limit_8616(census_work_limit, "census_work_limit")
     _validate_request_work_limit_8616(selector_batch_work_limit, "selector_batch_work_limit")
     ambient = _AMBIENT_DEPENDENCY_TRAVERSAL_8616.get()
     if ambient is not None:
         if (not inherit_existing_limits and census_work_limit is not None
-                and census_work_limit != ambient.census_work_limit):
+                and operator.ne(census_work_limit, ambient.census_work_limit)):
             raise ValueError("census_work_limit differs from the ambient request")
         if (not inherit_existing_limits and selector_batch_work_limit is not None
-                and selector_batch_work_limit != ambient.selector_batch_work_limit):
+                and operator.ne(selector_batch_work_limit, ambient.selector_batch_work_limit)):
             raise ValueError("selector_batch_work_limit differs from the ambient request")
         yield ambient
         return
@@ -195,6 +213,35 @@ def segment_call_dependency_traversal_scope_8616(
         yield traversal
     finally:
         _AMBIENT_DEPENDENCY_TRAVERSAL_8616.reset(token)
+
+
+@contextmanager
+def segment_call_deadline_scope_8616(project: object, deadline: cython.double) -> Iterator[None]:
+    """Bound nested census/import work, restoring the enclosing operation cap.
+
+    The request's original deadline and charged work are never reset. A
+    tighter project deadline also constrains census loops, while the same
+    temporary cap reaches native imports through the ordinary project scope.
+    """
+    active: object
+    parent: object
+    from .direct_evidence_deadline import (
+        active_direct_evidence_deadline_8616,
+        direct_evidence_deadline_scope_8616,
+    )
+
+    with segment_call_dependency_traversal_scope_8616() as traversal:
+        previous = traversal.census_local_deadline
+        parent = traversal.effective_census_deadline_8616
+        limit = deadline if parent is None else min(deadline, parent)
+        with direct_evidence_deadline_scope_8616(project, limit):
+            active = active_direct_evidence_deadline_8616(project)
+            assert active is not None
+            traversal.census_local_deadline = active
+            try:
+                yield
+            finally:
+                traversal.census_local_deadline = previous
 
 
 @contextmanager
@@ -215,20 +262,20 @@ def declared_entry_dependency_traversal_scope_8616() -> Iterator[SegmentCallDepe
         yield traversal
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentCallPreservationResult8616:
     """Exact retained evidence; preserved registers are derived, never guessed."""
 
     caller: IRBoundaryCoverageResult8616
     callee: SegmentEffectClosureResult8616
     index: DecodedDirectCallsiteIndex8616
-    callsite_addr: int
+    callsite_addr: cython.longlong
     failure: SegmentCallPreservationFailure8616 | None
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
     # The consumed source-bound invocation premise the Semantics-owned
     # target binding retained when the all-fetch-selector window could not
     # prove this call's target — bound to the exact caller block, project,
@@ -248,13 +295,14 @@ class SegmentCallPreservationResult8616:
         source-bound premise the consumed target binding retained. A
         ``None`` result is universal evidence any scope may consume.
         """
+        required: object
         required = self.invocation_scope
         if required is None and self.invocation is not None:
             required = self.invocation.premise
         return required
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Require closed accounting and still-bound caller/callee evidence.
 
         Revalidation recomputes the same proof from retained inputs under one
@@ -266,13 +314,13 @@ class SegmentCallPreservationResult8616:
         """
         return self.complete_for(None)
 
-    def complete_for(self, invocation_scope: Real16InvocationDomain8616 | None) -> bool:
+    def complete_for(self, invocation_scope: Real16InvocationDomain8616 | None) -> cython.bint:
         """Revalidate only within the retained authenticated invocation domain."""
         with segment_call_dependency_traversal_scope_8616() as traversal:
             return _scoped_preservation_failure_8616(self, invocation_scope, traversal) is None
 
     @property
-    def preserved_registers(self) -> tuple[str, ...]:
+    def preserved_registers(self) -> object:
         """Project only exact identities shared by entry and every return exit.
 
         For an admitted non-leaf callee these exits already carry the
@@ -290,13 +338,13 @@ class SegmentCallPreservationResult8616:
         state = self.callee.state
         entry = state.entry_states[self.callee.coverage.artifact.function_addr]
         return tuple(
-            register for register in SEGMENT_REGISTERS
+            register for register in iter(SEGMENT_REGISTERS)
             if entry[register].origin is SegmentOrigin.PROVEN
             and entry[register].source is not None
             and all(
                 state.exit_states[block_addr][register].origin is SegmentOrigin.PROVEN
-                and state.exit_states[block_addr][register].source == entry[register].source
-                for block_addr in self.callee.return_block_addrs
+                and operator.eq(state.exit_states[block_addr][register].source, entry[register].source)
+                for block_addr in iter(self.callee.return_block_addrs)
             )
         )
 
@@ -324,15 +372,16 @@ def _census_surface_8616(
     if (len(census) > _SEGMENT_CALL_DEPENDENCY_MAX_PROOFS_8616
             or len(supplied) > _SEGMENT_CALL_DEPENDENCY_MAX_PROOFS_8616):
         return SegmentCallPreservationFailure8616.DEPENDENCY_BUDGET_EXHAUSTED
-    if any(type(site) is not int for site in census):
+    if any(type(site) is not int for site in iter(census)):
         return SegmentCallPreservationFailure8616.DEPENDENCY_STALE
     return closure.coverage.artifact
 
 
+@cython.ccall
 def _supplied_proof_bound_8616(
     proof: object,
     artifact: IRFunctionArtifact,
-    census_set: frozenset[int],
+    census_set: object,
 ) -> TypeGuard[SegmentCallPreservationResult8616]:
     """Accept only a typed result bound to this artifact inside the census."""
     return (
@@ -345,6 +394,7 @@ def _supplied_proof_bound_8616(
     )
 
 
+@cython.ccall
 def _scoped_preservation_failure_8616(
     result: SegmentCallPreservationResult8616,
     invocation_scope: Real16InvocationDomain8616 | None,
@@ -356,6 +406,7 @@ def _scoped_preservation_failure_8616(
     Both public completeness and dependency traversal consume this typed result
     so authenticating a premise never collapses another refusal into staleness.
     """
+    required: object
     from .real16_invocation_domain import same_real16_entry_scope_8616
 
     required = result.required_scope
@@ -364,6 +415,7 @@ def _scoped_preservation_failure_8616(
     return _preservation_result_failure_8616(result, traversal)[0]
 
 
+@cython.ccall
 def _dependency_census_failure_8616(
     closure: SegmentEffectClosureResult8616,
     traversal: SegmentCallDependencyTraversal8616,
@@ -374,12 +426,16 @@ def _dependency_census_failure_8616(
     supplied proof bound to the identical caller artifact; supplied proofs at
     foreign artifacts, foreign types, or sites outside the census are stale.
     """
+    bound: object
+    verdict: object
+    proof: object
+    site: object
     artifact = _census_surface_8616(closure)
     if not isinstance(artifact, IRFunctionArtifact):
         return artifact
     census = closure.callsite_addrs
     census_set = frozenset(census)
-    by_site: dict[int, list[SegmentCallPreservationResult8616]] = {}
+    by_site: dict[cython.longlong, list[SegmentCallPreservationResult8616]] = {}
     for proof in closure.state.call_preservations:
         if not _supplied_proof_bound_8616(proof, artifact, census_set):
             return SegmentCallPreservationFailure8616.DEPENDENCY_STALE
@@ -399,6 +455,7 @@ def _dependency_census_failure_8616(
     return None
 
 
+@cython.ccall
 def _dependency_closure_failure_8616(
     closure: SegmentEffectClosureResult8616,
     traversal: SegmentCallDependencyTraversal8616,
@@ -432,10 +489,7 @@ def _preservation_result_verdict_8616(
     result: SegmentCallPreservationResult8616,
     traversal: SegmentCallDependencyTraversal8616,
     offered: Real16InvocationDomain8616 | None = None,
-) -> tuple[
-    SegmentCallPreservationFailure8616 | None,
-    Real16CallInvocation8616 | None,
-]:
+) -> object:
     """Recompute one proof's retained accounting and evidence verdict.
 
     ``offered`` carries a source-bound invocation domain only on the initial
@@ -444,13 +498,14 @@ def _preservation_result_verdict_8616(
     discharged its selector window through a premise replays that premise
     under the current source authority on every read.
     """
+    expected: object
     if result.failure is not None:
         if type(result.failure) is not SegmentCallPreservationFailure8616:
             return SegmentCallPreservationFailure8616.DEPENDENCY_STALE, None
         return result.failure, None
     counts = (result.raw_fact_count, result.normalized_fact_count,
               result.classified_fact_count, result.materialized_count, result.failure_count)
-    if counts != (1, 1, 1, 1, 0) or any(type(count) is not int for count in counts):
+    if counts != (1, 1, 1, 1, 0) or any(type(count) is not int for count in iter(counts)):
         return SegmentCallPreservationFailure8616.ACCOUNTING_INCOMPLETE, None
     expected = result.invocation
     if expected is not None:
@@ -471,14 +526,12 @@ def _preservation_result_verdict_8616(
     )
 
 
+@cython.ccall
 def _preservation_result_failure_8616(
     result: SegmentCallPreservationResult8616,
     traversal: SegmentCallDependencyTraversal8616,
     offered: Real16InvocationDomain8616 | None = None,
-) -> tuple[
-    SegmentCallPreservationFailure8616 | None,
-    Real16CallInvocation8616 | None,
-]:
+) -> object:
     """Revalidate one bound dependency proof inside the bounded traversal.
 
     Returns the typed failure (``None`` on a bound verdict) plus the
@@ -515,14 +568,14 @@ def _call_entry_8616(
     caller: IRBoundaryCoverageResult8616,
     callee: SegmentEffectClosureResult8616,
     index: DecodedDirectCallsiteIndex8616,
-    site: int,
+    site: cython.longlong,
 ) -> DecodedDirectCallsite8616 | None:
     """Require one exact indexed near-call coordinate in the caller boundary."""
     target = callee.coverage.artifact.function_addr
     entries = tuple(
-        entry for entry in index.for_target(target)
-        if entry.caller_start == caller.artifact.function_addr
-        and entry.callsite_addr == site and entry.target_addr == target
+        entry for entry in builtins.iter(index.for_target(target))
+        if operator.eq(entry.caller_start, caller.artifact.function_addr)
+        and operator.eq(entry.callsite_addr, site) and operator.eq(entry.target_addr, target)
         and not entry.is_far
     )
     if len(entries) != 1:
@@ -540,22 +593,23 @@ def _call_entry_8616(
 
 def _caller_call_instruction_8616(
     caller: IRBoundaryCoverageResult8616,
-    site: int,
-) -> tuple[IRBlock, IRInstr] | None:
+    site: cython.longlong,
+) -> object:
     """Return the unique CALL instruction and its owning block at ``site``."""
     calls = tuple(
         (block, instruction)
-        for block in caller.artifact.blocks
-        for instruction in block.instrs
-        if instruction.op == "CALL" and instruction.addr == site
+        for block in iter(caller.artifact.blocks)
+        for instruction in iter(block.instrs)
+        if instruction.op == "CALL" and operator.eq(instruction.addr, site)
     )
     return calls[0] if len(calls) == 1 else None
 
 
+@cython.ccall
 def _consumed_invocation_match_8616(
-    fresh: Real16CallInvocation8616 | None,
+    fresh: object,
     expected: Real16CallInvocation8616,
-) -> bool:
+) -> cython.bint:
     """Require the replayed consumption to bind the identical retained use.
 
     The premise, project, and block bind by object identity; the callsite
@@ -569,31 +623,33 @@ def _consumed_invocation_match_8616(
         fresh is not None
         and type(fresh) is Real16CallInvocation8616
         and fresh.premise is expected.premise
-        and fresh.callsite_addr == expected.callsite_addr
-        and fresh.target_addr == expected.target_addr
+        and operator.eq(fresh.callsite_addr, expected.callsite_addr)
+        and operator.eq(fresh.target_addr, expected.target_addr)
         and fresh.project is expected.project
         and fresh.block is expected.block
     )
 
 
+@cython.ccall
 def _constant_call_target_failure_8616(
     target: IRValue,
-    callee_addr: int,
-    expected: Real16CallInvocation8616 | None,
+    callee_addr: cython.longlong,
+    expected: object,
 ) -> SegmentCallPreservationFailure8616 | None:
     """A constant target binds exactly and cannot consume invocation evidence."""
     if expected is not None:
         return SegmentCallPreservationFailure8616.DEPENDENCY_STALE
-    if type(target.const) is not int or target.const != callee_addr:
+    if type(target.const) is not int or operator.ne(target.const, callee_addr):
         return SegmentCallPreservationFailure8616.TARGET_MISMATCH
     return None
 
 
+@cython.ccall
 def _call_target_failure_8616(
     caller: IRBoundaryCoverageResult8616,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     entry: DecodedDirectCallsite8616,
-    site: int,
+    site: cython.longlong,
     *,
     invocation: Real16InvocationDomain8616 | None = None,
     expected: Real16CallInvocation8616 | None = None,
@@ -615,13 +671,14 @@ def _call_target_failure_8616(
     binding retained (``None`` when the unconditional window bound
     sufficed or a CONST operand needed no premise).
     """
+    call_pair: object
     if expected is not None:
         from .real16_invocation_domain import Real16CallInvocation8616
 
         if (
             type(expected) is not Real16CallInvocation8616
-            or expected.callsite_addr != site
-            or expected.target_addr != callee_addr
+            or operator.ne(expected.callsite_addr, site)
+            or operator.ne(expected.target_addr, callee_addr)
             or expected.project is not caller.boundary.project
         ):
             return SegmentCallPreservationFailure8616.DEPENDENCY_STALE, None
@@ -653,8 +710,8 @@ def _call_target_failure_8616(
     )
     if (
         not binding.complete
-        or binding.callsite_addr != site
-        or binding.target_addr != callee_addr
+        or operator.ne(binding.callsite_addr, site)
+        or operator.ne(binding.target_addr, callee_addr)
     ):
         return SegmentCallPreservationFailure8616.TARGET_MISMATCH, None
     consumed = binding.invocation
@@ -665,13 +722,15 @@ def _call_target_failure_8616(
     return None, consumed
 
 
+@cython.ccall
 def _callee_complete_in_scope_8616(
     caller: IRBoundaryCoverageResult8616,
     callee: SegmentEffectClosureResult8616,
-    site: int,
+    site: cython.longlong,
     invocation: Real16InvocationDomain8616 | None,
-) -> bool:
+) -> cython.bint:
     """Require authenticated cross-call transport before using scoped effects."""
+    scope: object
     from .real16_invocation_domain import real16_scope_crosses_call_8616
 
     scope = callee.state.invocation_scope
@@ -680,19 +739,17 @@ def _callee_complete_in_scope_8616(
     return callee.complete_for(scope)
 
 
+@cython.ccall
 def _preservation_failure_8616(
     caller: IRBoundaryCoverageResult8616,
     callee: SegmentEffectClosureResult8616,
     index: DecodedDirectCallsiteIndex8616,
-    site: int,
+    site: cython.longlong,
     traversal: SegmentCallDependencyTraversal8616,
     *,
     invocation: Real16InvocationDomain8616 | None = None,
     expected: Real16CallInvocation8616 | None = None,
-) -> tuple[
-    SegmentCallPreservationFailure8616 | None,
-    Real16CallInvocation8616 | None,
-]:
+) -> object:
     """Validate caller coverage, dependency closure and exact target binding.
 
     The callee's local closure evidence is consulted only after its recorded
@@ -706,6 +763,8 @@ def _preservation_failure_8616(
     proof must reproduce. Returns the typed failure plus the consumed
     invocation record so the caller can retain it as bound evidence.
     """
+    dependency_failure: object
+    entry: object
     if not caller.complete_for(invocation):
         return SegmentCallPreservationFailure8616.COVERAGE_INCOMPLETE, None
     surface = _census_surface_8616(callee)
@@ -733,11 +792,12 @@ def _preservation_failure_8616(
     )
 
 
+@cython.ccall
 def prove_segment_call_preservation_8616(
     caller: IRBoundaryCoverageResult8616,
     callee: SegmentEffectClosureResult8616,
     index: DecodedDirectCallsiteIndex8616,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     *,
     invocation: Real16InvocationDomain8616 | None = None,
 ) -> SegmentCallPreservationResult8616:
@@ -753,6 +813,8 @@ def prove_segment_call_preservation_8616(
     revalidation, so a conditional binding never escapes as an unconditional
     claim. An unused premise leaves no residue.
     """
+    consumed: object
+    failure: object
     candidate = SegmentCallPreservationResult8616(
         caller, callee, index, callsite_addr, None, 1, 1, 1, 1, 0,
     )

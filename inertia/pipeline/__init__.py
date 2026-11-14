@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Pipeline governance package exports.
 
 Layer: Pipeline governance.
@@ -8,3 +9,4 @@ work here.
 """
 
 from __future__ import annotations
+import cython

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Collect optional telemetry spans and compact runtime summaries.
 
 Layer: CLI/fallback/reporting.
@@ -8,6 +9,8 @@ OpenTelemetry compatibility objects.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import atexit
 import contextlib
@@ -26,6 +29,13 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Protocol, cast, overload
+import dataclasses
+import operator
+import builtins
+P = typing.TypeVar("P")
+R = typing.TypeVar("R")
+args = typing.TypeVar("args")
+kwargs = typing.TypeVar("kwargs")
 
 TRACE_ENABLE_ENV: str = "INERTIA_OTEL_SPANS"
 TRACE_FILE_ENV: str = "INERTIA_OTEL_SPAN_FILE"
@@ -56,7 +66,7 @@ class TraceOutputFormat(Enum):
 class _OtelSpan(Protocol):
     """Minimal optional OpenTelemetry span surface used by this module."""
 
-    def set_attribute(self, key: str, value: object) -> None:
+    def set_attribute(self, key: object, value: object) -> None:
         """Attach one attribute to the active OpenTelemetry span."""
         ...
 
@@ -64,7 +74,7 @@ class _OtelSpan(Protocol):
 class _OtelTracer(Protocol):
     """Minimal optional OpenTelemetry tracer surface used by this module."""
 
-    def start_as_current_span(self, name: str) -> contextlib.AbstractContextManager[_OtelSpan]:
+    def start_as_current_span(self, name: object) -> contextlib.AbstractContextManager[_OtelSpan]:
         """Return an OpenTelemetry span context manager."""
         ...
 
@@ -72,7 +82,7 @@ class _OtelTracer(Protocol):
 class _OtelTraceModule(Protocol):
     """Minimal optional OpenTelemetry trace module surface used here."""
 
-    def get_tracer(self, name: str) -> _OtelTracer:
+    def get_tracer(self, name: object) -> _OtelTracer:
         """Return a tracer by instrumentation name."""
         ...
 
@@ -88,7 +98,7 @@ class _OtelProvider(Protocol):
         """Register a span processor."""
         ...
 
-    def force_flush(self, *, timeout_millis: int) -> None:
+    def force_flush(self, *, timeout_millis: cython.longlong) -> None:
         """Flush queued spans."""
         ...
 
@@ -100,7 +110,7 @@ class _OtelProvider(Protocol):
 class _ResourceFactory(Protocol):
     """Factory protocol for optional OpenTelemetry resources."""
 
-    def create(self, _attributes: dict[str, str]) -> object:
+    def create(self, _attributes: object) -> object:
         """Create an OpenTelemetry resource object."""
         ...
 
@@ -129,7 +139,9 @@ class _ExporterFactory(Protocol):
         ...
 
 
-def _env_bool(name: str, default: bool = False) -> bool:
+@cython.ccall
+def _env_bool(name: object, default: cython.bint = False) -> cython.bint:
+    value: object
     value = os.environ.get(name)
     if value is None:
         return default
@@ -141,7 +153,9 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return default
 
 
-def _env_int(name: str, default: int) -> int:
+@cython.ccall
+def _env_int(name: object, default: cython.longlong) -> cython.longlong:
+    value: object
     value = os.environ.get(name)
     if value is None:
         return default
@@ -151,7 +165,9 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-def _env_float(name: str, default: float) -> float:
+@cython.ccall
+def _env_float(name: object, default: cython.double) -> cython.double:
+    value: object
     value = os.environ.get(name)
     if value is None:
         return default
@@ -161,6 +177,7 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+@cython.ccall
 def _compact_attr(value: object) -> object:
     if value is None or isinstance(value, bool | int | float):
         return value
@@ -171,47 +188,48 @@ def _compact_attr(value: object) -> object:
     return value
 
 
-def _compact_attrs(attrs: dict[str, object]) -> dict[str, object]:
-    return {str(key): _compact_attr(value) for key, value in attrs.items() if value is not None}
+@cython.ccall
+def _compact_attrs(attrs: object) -> dict[str, object]:
+    return {str(key): _compact_attr(value) for key, value in builtins.iter(attrs.items()) if value is not None}
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _SpanRecord:
-    span_id: int
+    span_id: cython.longlong
     parent_id: int | None
-    name: str
-    start_ns: int
-    attrs: dict[str, object] = field(default_factory=dict)
+    name: object
+    start_ns: cython.longlong
+    attrs: object = field(default_factory=dict)
     end_ns: int | None = None
     status: str = "ok"
 
     @property
-    def duration_ms(self) -> float:
+    def duration_ms(self) -> cython.double:
         """Return elapsed span duration in milliseconds."""
         end_ns = self.end_ns if self.end_ns is not None else time.perf_counter_ns()
         return max(0.0, (end_ns - self.start_ns) / 1_000_000.0)
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _TelemetryState:
-    enabled: bool = False
-    configured: bool = False
-    emitted: bool = False
-    top_n: int = 16
-    min_ms: float = 1.0
+    enabled: cython.bint = False
+    configured: cython.bint = False
+    emitted: cython.bint = False
+    top_n: cython.longlong = 16
+    min_ms: cython.double = 1.0
     file_path: Path | None = None
-    stderr_summary: bool = True
-    full_jsonl: bool = False
+    stderr_summary: cython.bint = True
+    full_jsonl: cython.bint = False
     output_format: TraceOutputFormat = TraceOutputFormat.TEXT
-    text_max_spans: int = 200
-    records: list[_SpanRecord] = field(default_factory=list)
-    next_id: int = 1
+    text_max_spans: cython.longlong = 200
+    records: object = field(default_factory=list)
+    next_id: cython.longlong = 1
     lock: threading.Lock = field(default_factory=threading.Lock)
     otel_tracer: _OtelTracer | None = None
     otel_provider: _OtelProvider | None = None
-    otel_export_status: str | None = None
-    otel_shutdown: bool = False
-    signal_handlers_installed: bool = False
+    otel_export_status: object = None
+    otel_shutdown: cython.bint = False
+    signal_handlers_installed: cython.bint = False
 
 
 _STATE = _TelemetryState()
@@ -242,21 +260,22 @@ _AUTO_ATTR_NAMES = {
 }
 
 
+@cython.ccall
 def configure_telemetry_from_env(
     *,
     enabled: bool | None = None,
-    file_path: Path | str | None = None,
+    file_path: object = None,
     top_n: int | None = None,
     min_ms: float | None = None,
     full_jsonl: bool | None = None,
     stderr_summary: bool | None = None,
-    output_format: str | TraceOutputFormat | None = None,
+    output_format: object = None,
     text_max_spans: int | None = None,
     otlp_export: bool | None = None,
-    service_name: str | None = None,
+    service_name: object = None,
     force_flush_ms: int | None = None,
-    otlp_endpoint: str | None = None,
-) -> bool:
+    otlp_endpoint: object = None,
+) -> cython.bint:
     """Configure optional trace collection from explicit arguments and environment variables."""
     requested = _env_bool(TRACE_ENABLE_ENV) if enabled is None else bool(enabled)
     if not requested:
@@ -297,12 +316,13 @@ def configure_telemetry_from_env(
     return True
 
 
+@cython.ccall
 def _publish_env_overrides(
     *,
-    otlp_export: bool | None,
-    otlp_endpoint: str | None,
-    service_name: str | None,
-    force_flush_ms: int | None,
+    otlp_export: object,
+    otlp_endpoint: object,
+    service_name: object,
+    force_flush_ms: object,
 ) -> None:
     """Publish explicit configuration arguments into OTLP env variables."""
     if otlp_export is not None:
@@ -323,10 +343,11 @@ def _publish_env_overrides(
 
 def _install_signal_handlers() -> None:
     """Flush compact diagnostics before an external timeout kills the process."""
+    signum: object
     if _STATE.signal_handlers_installed:
         return
 
-    def _handle_signal(signum: int, _frame: object | None) -> None:
+    def _handle_signal(signum: cython.longlong, _frame: object | None) -> None:
         try:
             emit_compact_summary()
         finally:
@@ -340,13 +361,17 @@ def _install_signal_handlers() -> None:
     _STATE.signal_handlers_installed = True
 
 
-def telemetry_enabled() -> bool:
+@cython.ccall
+def telemetry_enabled() -> cython.bint:
     """Return whether optional telemetry collection is active."""
     return _STATE.enabled
 
 
-def caller_span_name(stacklevel: int = 1) -> str:
+@cython.ccall
+def caller_span_name(stacklevel: cython.longlong = 1) -> object:
     """Return a stable module-qualified span name for the caller frame."""
+    frame: object
+    module_name: object
     try:
         frame = inspect.currentframe()
         for _ in range(max(1, int(stacklevel))):
@@ -364,6 +389,7 @@ def caller_span_name(stacklevel: int = 1) -> str:
         return "unknown"
 
 
+@cython.ccall
 def _optional_otel_tracer() -> _OtelTracer | None:
     """Load optional OpenTelemetry tracing through a dynamic third-party boundary."""
     try:
@@ -384,19 +410,23 @@ def _optional_otel_tracer() -> _OtelTracer | None:
         return None
 
 
-def _otlp_export_requested() -> bool:
+@cython.ccall
+def _otlp_export_requested() -> cython.bint:
+    explicit: object
     explicit = os.environ.get(TRACE_OTLP_ENABLE_ENV)
     if explicit is not None:
         return _env_bool(TRACE_OTLP_ENABLE_ENV, False)
     return False
 
 
+@cython.ccall
 def _resolve_output_format(
     file_path: Path | None,
-    full_jsonl: bool,
+    full_jsonl: cython.bint,
     *,
-    explicit_format: str | TraceOutputFormat | None = None,
+    explicit_format: object = None,
 ) -> TraceOutputFormat:
+    explicit: object
     if isinstance(explicit_format, TraceOutputFormat):
         return explicit_format
     explicit = explicit_format if explicit_format is not None else os.environ.get(TRACE_FORMAT_ENV)
@@ -415,6 +445,7 @@ def _resolve_output_format(
     return TraceOutputFormat.TEXT
 
 
+@cython.ccall
 def _configure_otlp_exporter() -> tuple[_OtelProvider | None, str]:
     """Configure optional OTLP export through a dynamic third-party boundary."""
     try:
@@ -451,7 +482,10 @@ def _configure_otlp_exporter() -> tuple[_OtelProvider | None, str]:
         return None, f"configure_failed:{type(ex).__name__}"
 
 
-def _auto_span_attrs(target: Callable[..., object], args: tuple[object, ...], kwargs: dict[str, object]) -> dict[str, object]:
+@cython.ccall
+def _auto_span_attrs(target: Callable[..., object], args: object, kwargs: object) -> object:
+    name: object
+    value: object
     attrs: dict[str, object] = {}
     try:
         signature = inspect.signature(target)
@@ -459,7 +493,7 @@ def _auto_span_attrs(target: Callable[..., object], args: tuple[object, ...], kw
         bound.apply_defaults()
         values = dict(bound.arguments)
     except Exception:
-        values = {f"arg{index}": value for index, value in enumerate(args[:4])}
+        values = {f"arg{index}": value for index, value in builtins.iter(enumerate(args[:4]))}
         values.update(kwargs)
 
     for name, value in values.items():
@@ -468,7 +502,8 @@ def _auto_span_attrs(target: Callable[..., object], args: tuple[object, ...], kw
     return attrs
 
 
-def _collect_auto_attr(attrs: dict[str, object], name: str, value: object) -> None:
+@cython.ccall
+def _collect_auto_attr(attrs: object, name: object, value: object) -> None:
     if value is None:
         return
     if name in _AUTO_ATTR_NAMES:
@@ -488,7 +523,8 @@ def _collect_auto_attr(attrs: dict[str, object], name: str, value: object) -> No
         return
 
 
-def _collect_path_attr(attrs: dict[str, object], value: object) -> None:
+@cython.ccall
+def _collect_path_attr(attrs: object, value: object) -> None:
     """Record a path/file_path payload as binary name plus path."""
     if isinstance(value, Path):
         attrs.setdefault("binary", value.name)
@@ -498,8 +534,11 @@ def _collect_path_attr(attrs: dict[str, object], value: object) -> None:
         attrs["path"] = Path(value).name
 
 
-def _collect_item_attrs(attrs: dict[str, object], value: object) -> None:
+@cython.ccall
+def _collect_item_attrs(attrs: object, value: object) -> None:
     """Record function/index attributes from a queued work item."""
+    item_function: object
+    item_index: object
     # Dynamic third-party payload boundary: queued work items are not owned contracts.
     item_function = getattr(value, "function", None)
     if item_function is not None:
@@ -510,7 +549,11 @@ def _collect_item_attrs(attrs: dict[str, object], value: object) -> None:
         attrs.setdefault("index", item_index)
 
 
-def _collect_function_attrs(attrs: dict[str, object], function: object) -> None:
+@cython.ccall
+def _collect_function_attrs(attrs: object, function: object) -> None:
+    addr: object
+    block_addrs: object
+    name: object
     # Dynamic third-party payload boundary: angr function objects provide optional fields.
     addr = getattr(function, "addr", None)
     if isinstance(addr, int):
@@ -526,7 +569,12 @@ def _collect_function_attrs(attrs: dict[str, object], function: object) -> None:
             attrs.setdefault("blocks", len(block_addrs))
 
 
-def _collect_project_attrs(attrs: dict[str, object], project: object) -> None:
+@cython.ccall
+def _collect_project_attrs(attrs: object, project: object) -> None:
+    arch: object
+    arch_name: object
+    entry: object
+    filename: object
     # Dynamic third-party payload boundary: angr projects expose optional metadata fields.
     filename = getattr(project, "filename", None)
     if isinstance(filename, str) and filename:
@@ -543,7 +591,8 @@ def _collect_project_attrs(attrs: dict[str, object], project: object) -> None:
         attrs.setdefault("arch", arch_name)
 
 
-def _format_auto_value(name: str, value: object) -> object:
+@cython.ccall
+def _format_auto_value(name: object, value: object) -> object:
     if isinstance(value, Path):
         return value.name
     if isinstance(value, int) and ("addr" in name or name in {"entry_point", "image_end"}):
@@ -554,8 +603,9 @@ def _format_auto_value(name: str, value: object) -> object:
 
 
 @contextlib.contextmanager
-def span(span_name: str, **attrs: object) -> Iterator[None]:
+def span(span_name: object, **attrs: object) -> Iterator[None]:
     """Collect a timing span around a decompiler operation when telemetry is enabled."""
+    parent_id: object
     if not _STATE.enabled:
         yield
         return
@@ -595,6 +645,8 @@ def span(span_name: str, **attrs: object) -> Iterator[None]:
 
 def annotate_current_span(**attrs: object) -> None:
     """Attach compact attributes to the currently active telemetry span."""
+    span_id: object
+    record: object
     if not _STATE.enabled:
         return
     span_id = _CURRENT_SPAN_ID.get()
@@ -603,7 +655,7 @@ def annotate_current_span(**attrs: object) -> None:
     compact = _compact_attrs(attrs)
     with _STATE.lock:
         for record in reversed(_STATE.records):
-            if record.span_id == span_id:
+            if operator.eq(record.span_id, span_id):
                 record.attrs.update(compact)
                 return
 
@@ -616,43 +668,43 @@ def span_here(**attrs: object) -> contextlib.AbstractContextManager[None]:
 
 
 @overload
-def trace_function[**P, R](
+def trace_function(
     func: None = None,
     *,
-    name: str | None = None,
-    attrs: dict[str, object] | None = None,
+    name: object = None,
+    attrs: object = None,
     attr_factory: None = None,
 ) -> Callable[[Callable[P, R]], Callable[P, R]]:
     """Return a decorator configured for a function discovered later."""
 
 
 @overload
-def trace_function[**P, R](
+def trace_function(
     func: None = None,
     *,
-    name: str | None = None,
-    attrs: dict[str, object] | None = None,
+    name: object = None,
+    attrs: object = None,
     attr_factory: Callable[P, dict[str, object] | None],
 ) -> Callable[[Callable[P, R]], Callable[P, R]]:
     """Bind arguments from an attribute factory while preserving result type."""
 
 
 @overload
-def trace_function[**P, R](
+def trace_function(
     func: Callable[P, R],
     *,
-    name: str | None = None,
-    attrs: dict[str, object] | None = None,
+    name: object = None,
+    attrs: object = None,
     attr_factory: Callable[P, dict[str, object] | None] | None = None,
 ) -> Callable[P, R]:
     """Decorate an already supplied function with an optional telemetry span."""
 
 
-def trace_function[**P, R](
+def trace_function(
     func: Callable[P, R] | None = None,
     *,
-    name: str | None = None,
-    attrs: dict[str, object] | None = None,
+    name: object = None,
+    attrs: object = None,
     attr_factory: Callable[P, dict[str, object] | None] | None = None,
 ) -> Callable[P, R] | Callable[[Callable[P, R]], Callable[P, R]]:
     """Decorate a function so calls are wrapped in optional telemetry spans."""
@@ -684,7 +736,10 @@ def trace_function[**P, R](
 
 
 @contextlib.contextmanager
-def _otel_span_context(span_name: str, attrs: dict[str, object]) -> Iterator[None]:
+def _otel_span_context(span_name: object, attrs: object) -> Iterator[None]:
+    tracer: object
+    key: object
+    value: object
     tracer = _STATE.otel_tracer
     if tracer is None:
         yield
@@ -703,8 +758,9 @@ def _otel_span_context(span_name: str, attrs: dict[str, object]) -> Iterator[Non
         yield
 
 
-def build_compact_summary() -> dict[str, object]:
+def build_compact_summary() -> object:
     """Build a parser-friendly aggregate summary for collected telemetry spans."""
+    record: object
     with _STATE.lock:
         records = list(_STATE.records)
     if not records:
@@ -720,10 +776,10 @@ def build_compact_summary() -> dict[str, object]:
         return summary
 
     current_ns = time.perf_counter_ns()
-    first_start = min(record.start_ns for record in records)
-    last_end = max(record.end_ns or current_ns for record in records)
+    first_start = min(record.start_ns for record in iter(records))
+    last_end = max(record.end_ns or current_ns for record in iter(records))
     total_ms = max(0.0, (last_end - first_start) / 1_000_000.0)
-    visible = [record for record in records if record.duration_ms >= _STATE.min_ms]
+    visible = [record for record in iter(records) if record.duration_ms >= _STATE.min_ms]
     top = sorted(visible, key=lambda record: record.duration_ms, reverse=True)[: _STATE.top_n]
 
     aggregate: dict[str, dict[str, float | int]] = {}
@@ -735,7 +791,7 @@ def build_compact_summary() -> dict[str, object]:
     agg_rows = sorted(
         (
             [name, int(data["count"]), round(float(data["cum_ms"]), 1), round(float(data["max_ms"]), 1)]
-            for name, data in aggregate.items()
+            for name, data in builtins.iter(aggregate.items())
         ),
         key=lambda row: (row[2], row[3]),
         reverse=True,
@@ -750,12 +806,12 @@ def build_compact_summary() -> dict[str, object]:
                 round(record.duration_ms, 1),
                 _summary_attrs(record.attrs),
             ]
-            for record in top
+            for record in iter(top)
         ],
         "agg": agg_rows,
         "errors": [
             [record.name, round(record.duration_ms, 1), _summary_attrs(record.attrs)]
-            for record in records
+            for record in iter(records)
             if record.status == "error"
         ][: _STATE.top_n],
     }
@@ -764,8 +820,12 @@ def build_compact_summary() -> dict[str, object]:
     return summary
 
 
-def build_agent_trace_text() -> str:
+def build_agent_trace_text() -> object:
     """Render collected spans as compact text suitable for agent handoff and stderr."""
+    errors_value: object
+    otel_status: object
+    name: object
+    name_id: object
     with _STATE.lock:
         records = list(_STATE.records)
     summary = build_compact_summary()
@@ -789,15 +849,18 @@ def build_agent_trace_text() -> str:
     name_ids = _agent_trace_name_dictionary(shown)
     if name_ids:
         lines.append("names:")
-        for name, name_id in sorted(name_ids.items(), key=lambda item: item[1]):
+        for name, name_id in sorted(tuple(name_ids.items()), key=lambda item: item[1]):
             lines.append(f"{name_id}={name}")
         lines[1] = "schema: id|parent|ms|n|attrs"
-    lines.extend(_format_agent_trace_record(record, name_ids=name_ids) for record in shown)
+    lines.extend(_format_agent_trace_record(record, name_ids=name_ids) for record in iter(shown))
     return "\n".join(lines) + "\n"
 
 
-def build_agent_slow_trace_text() -> str:
+def build_agent_slow_trace_text() -> object:
     """Render the slowest visible spans as compact text for profiling decompiler runs."""
+    errors_value: object
+    otel_status: object
+    record: object
     with _STATE.lock:
         records = list(_STATE.records)
     summary = build_compact_summary()
@@ -809,7 +872,7 @@ def build_agent_slow_trace_text() -> str:
     lines = [
         (f"trace total={summary.get('total_ms', 0.0)}ms spans={len(records)} otel={otel_status} errors={len(errors)}")
     ]
-    visible = [record for record in records if record.duration_ms >= _STATE.min_ms]
+    visible = [record for record in iter(records) if record.duration_ms >= _STATE.min_ms]
     top = sorted(visible, key=lambda record: record.duration_ms, reverse=True)[: max(1, int(_STATE.top_n))]
     for record in top:
         attrs_dict = dict(record.attrs)
@@ -822,24 +885,26 @@ def build_agent_slow_trace_text() -> str:
     return "\n".join(lines) + "\n"
 
 
-def _agent_trace_name_dictionary(records: list[_SpanRecord]) -> dict[str, int] | None:
+def _agent_trace_name_dictionary(records: object) -> object:
+    record: object
     if len(records) < 16:
         return None
-    names: dict[str, int] = {}
+    names: dict[str, cython.longlong] = {}
     for record in records:
         if record.name not in names:
             names[record.name] = len(names)
     if len(names) >= len(records):
         return None
-    raw_name_chars = sum(len(record.name) for record in records)
-    dict_name_chars = sum(len(str(name_id)) + 1 + len(name) for name, name_id in names.items())
-    row_name_chars = sum(len(str(names[record.name])) for record in records)
+    raw_name_chars = sum(len(record.name) for record in iter(records))
+    dict_name_chars = sum(len(str(name_id)) + 1 + len(name) for name, name_id in builtins.iter(names.items()))
+    row_name_chars = sum(len(str(names[record.name])) for record in iter(records))
     if dict_name_chars + row_name_chars + len("names:\n") + 32 >= raw_name_chars:
         return None
     return names
 
 
-def _format_agent_trace_record(record: _SpanRecord, *, name_ids: dict[str, int] | None = None) -> str:
+@cython.ccall
+def _format_agent_trace_record(record: _SpanRecord, *, name_ids: object = None) -> str:
     parent = "-" if record.parent_id is None else str(record.parent_id)
     attrs_dict = dict(record.attrs)
     if record.end_ns is None:
@@ -851,7 +916,8 @@ def _format_agent_trace_record(record: _SpanRecord, *, name_ids: dict[str, int] 
     return f"{record.span_id}|{parent}|{round(record.duration_ms, 3)}|{name}|{attrs}"
 
 
-def _format_agent_attrs(attrs: dict[str, object]) -> str:
+def _format_agent_attrs(attrs: object) -> str:
+    key: object
     if not attrs:
         return ""
     preferred = (
@@ -890,14 +956,14 @@ def _format_agent_attrs(attrs: dict[str, object]) -> str:
         if key in attrs:
             parts.append(f"{aliases.get(key, key)}={_format_agent_attr_value(attrs[key])}")
             seen.add(key)
-    for key in sorted(str(key) for key in attrs):
+    for key in sorted(str(key) for key in iter(attrs)):
         if key in seen:
             continue
         parts.append(f"{aliases.get(key, key)}={_format_agent_attr_value(attrs[key])}")
     return " ".join(parts)
 
 
-def _format_agent_attr_value(value: object) -> str:
+def _format_agent_attr_value(value: object) -> object:
     if isinstance(value, bool):
         return "1" if value else "0"
     if value is None:
@@ -905,13 +971,16 @@ def _format_agent_attr_value(value: object) -> str:
     text = str(value)
     if not text:
         return "-"
-    if any(ch.isspace() for ch in text):
+    if any(ch.isspace() for ch in iter(text)):
         text = "_".join(text.split())
     return text.replace("|", "/")
 
 
-def _summary_attrs(attrs: dict[str, object]) -> dict[str, object]:
+@cython.ccall
+def _summary_attrs(attrs: object) -> object:
     """Select bounded diagnostic attributes for compact span reports."""
+    value: object
+    key: object
     preferred = (
         "binary",
         "addr",
@@ -937,6 +1006,7 @@ def _summary_attrs(attrs: dict[str, object]) -> dict[str, object]:
     return out
 
 
+@cython.ccall
 def emit_compact_summary() -> None:
     """Emit the compact telemetry summary once to stderr and the configured file."""
     if not _STATE.enabled or _STATE.emitted:
@@ -946,9 +1016,9 @@ def emit_compact_summary() -> None:
     if summary["span_count"] == 0:
         return
 
-    if _STATE.output_format == TraceOutputFormat.TEXT:
+    if operator.eq(_STATE.output_format, TraceOutputFormat.TEXT):
         encoded = build_agent_trace_text().rstrip("\n")
-    elif _STATE.output_format == TraceOutputFormat.SLOW:
+    elif operator.eq(_STATE.output_format, TraceOutputFormat.SLOW):
         encoded = build_agent_slow_trace_text().rstrip("\n")
     else:
         encoded = json.dumps(summary, sort_keys=True, separators=(",", ":"))
@@ -957,11 +1027,12 @@ def emit_compact_summary() -> None:
     _flush_and_shutdown_otel()
 
 
+@cython.ccall
 def _emit_stderr_summary() -> None:
     """Emit the compact text summary to the stderr agent surface."""
     if not _STATE.stderr_summary:
         return
-    if _STATE.output_format == TraceOutputFormat.SLOW:
+    if operator.eq(_STATE.output_format, TraceOutputFormat.SLOW):
         stderr_encoded = build_agent_slow_trace_text().rstrip("\n")
     else:
         # Stderr is an agent-facing surface. Keep it compact text even
@@ -971,23 +1042,26 @@ def _emit_stderr_summary() -> None:
     sys.stderr.flush()
 
 
-def _write_compact_summary_file(encoded: str) -> None:
+@cython.ccall
+def _write_compact_summary_file(encoded: object) -> None:
     """Write the summary to the configured file in its output format."""
     if _STATE.file_path is None:
         return
     _STATE.file_path.parent.mkdir(parents=True, exist_ok=True)
-    if _STATE.output_format == TraceOutputFormat.JSONL:
+    if operator.eq(_STATE.output_format, TraceOutputFormat.JSONL):
         _write_full_jsonl(_STATE.file_path)
-    elif _STATE.output_format == TraceOutputFormat.TEXT:
+    elif operator.eq(_STATE.output_format, TraceOutputFormat.TEXT):
         _STATE.file_path.write_text(build_agent_trace_text(), encoding="utf-8")
-    elif _STATE.output_format == TraceOutputFormat.SLOW:
+    elif operator.eq(_STATE.output_format, TraceOutputFormat.SLOW):
         _STATE.file_path.write_text(build_agent_slow_trace_text(), encoding="utf-8")
     else:
         _STATE.file_path.write_text(encoded + "\n", encoding="utf-8")
 
 
+@cython.ccall
 def _flush_and_shutdown_otel() -> None:
     """Flush and shut down once, passing the provider a positive millisecond limit."""
+    provider: object
     provider = _STATE.otel_provider
     if provider is None or _STATE.otel_shutdown:
         return
@@ -1003,7 +1077,9 @@ def _flush_and_shutdown_otel() -> None:
         _STATE.otel_export_status = f"shutdown_failed:{type(ex).__name__}"
 
 
+@cython.ccall
 def _write_full_jsonl(path: Path) -> None:
+    record: object
     with _STATE.lock:
         records = list(_STATE.records)
     with path.open("w", encoding="utf-8") as fp:
@@ -1028,6 +1104,7 @@ def _write_full_jsonl(path: Path) -> None:
             )
 
 
+@cython.ccall
 def reset_telemetry_for_tests() -> None:
     """Reset module-level telemetry state between focused tests."""
     with _STATE.lock:

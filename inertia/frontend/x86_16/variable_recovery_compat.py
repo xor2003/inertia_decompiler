@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Install exact stack-subrange association at angr's publication boundary.
 
 Layer: Frontend/Alias adapter.
@@ -7,6 +8,8 @@ delegate unchanged. No C rewriting or frame-coordinate guessing is allowed.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from angr.ailment.expression import Atom
 from angr.code_location import CodeLocation
@@ -20,11 +23,13 @@ from inertia.alias.stack_reference_offsets import (
 )
 
 
+@cython.ccall
 def _checked_offset_8616(
     manager: VariableManagerInternal, location: CodeLocation,
     variable: SimVariable, offset: int | None, atom: Atom | None,
 ) -> int | None:
     """Validate before publication and report the responsible function/access."""
+    kb: object
     kb = manager.manager._kb
     if kb is None or kb._project is None or kb._project.arch.name != "86_16":
         return offset
@@ -48,7 +53,7 @@ def apply_stack_reference_compatibility_8616() -> None:
         location: CodeLocation,
         variable: SimVariable,
         offset: int | None,
-        overwrite: bool = False,
+        overwrite: cython.bint = False,
         atom: Atom | None = None,
     ) -> None:
         """Publish the exact displacement consistently in all native indexes."""
@@ -60,11 +65,11 @@ def apply_stack_reference_compatibility_8616() -> None:
 
     def _record_stack_access_8616(
         self: VariableManagerInternal,
-        sort: int,
+        sort: cython.longlong,
         variable: SimVariable,
         offset: int | None,
         location: CodeLocation,
-        overwrite: bool = False,
+        overwrite: cython.bint = False,
         atom: Atom | None = None,
     ) -> None:
         """Keep durable read/write/reference records coherent with their indexes."""

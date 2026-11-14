@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Grouped region-based structuring pass for the 16-bit decompiler.
 
 Layer: Structuring.
@@ -12,6 +13,7 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import cython
 
 import traceback
 import typing
@@ -21,20 +23,26 @@ from inertia.ir.condition_ir import ConditionIR
 from inertia.structuring.structuring_abnormal_loops import AbnormalLoopStructureAnalysis
 from inertia.structuring.structuring_analysis import Region, RegionBasedStructuringPass, RegionGraph, RegionType
 from inertia.structuring.structuring_grouped_graph_builder import build_grouped_region_graph
+import operator
+import builtins
 
 
 def _edge_guard_graph_summary_8616(graph: object) -> dict[str, object]:
     """Summarize typed edge-guard evidence from a dynamic angr/codegen compatibility boundary graph."""
+    continuation: object
+    current: object
+    region: object
+    succ: object
     guarded_regions = 0
     eq_guarded_regions = 0
     two_way_heads_with_eq_guarded_successor = 0
     sample_regions: list[dict[str, object]] = []
     candidate_heads: list[dict[str, object]] = []
     dynamic_graph = cast(Any, graph)
-    for region in sorted(dynamic_graph.nodes or (), key=lambda item: int(getattr(item, "region_id", 0) or 0)):
+    for region in sorted(tuple(dynamic_graph.nodes or ()), key=lambda item: int(getattr(item, "region_id", 0) or 0)):
         guards = tuple(getattr(region, "metadata", {}).get("typed_condition_edge_guards", ()) or ())
-        typed_guards = tuple(guard for guard in guards if isinstance(guard, ConditionIR))
-        eq_guards = tuple(guard for guard in typed_guards if guard.op == "eq")
+        typed_guards = tuple(guard for guard in iter(guards) if isinstance(guard, ConditionIR))
+        eq_guards = tuple(guard for guard in iter(typed_guards) if guard.op == "eq")
         if typed_guards:
             guarded_regions += 1
         if eq_guards:
@@ -43,17 +51,17 @@ def _edge_guard_graph_summary_8616(graph: object) -> dict[str, object]:
         successor_eq_count = 0
         for succ in successors:
             succ_guards = tuple(getattr(succ, "metadata", {}).get("typed_condition_edge_guards", ()) or ())
-            if any(isinstance(guard, ConditionIR) and guard.op == "eq" for guard in succ_guards):
+            if any(isinstance(guard, ConditionIR) and guard.op == "eq" for guard in iter(succ_guards)):
                 successor_eq_count += 1
         if len(successors) == 2 and successor_eq_count == 1:
             two_way_heads_with_eq_guarded_successor += 1
             continuation = next(
                 (
                     succ
-                    for succ in successors
+                    for succ in iter(successors)
                     if not any(
                         isinstance(guard, ConditionIR) and guard.op == "eq"
-                        for guard in tuple(getattr(succ, "metadata", {}).get("typed_condition_edge_guards", ()) or ())
+                        for guard in builtins.iter(tuple(getattr(succ, "metadata", {}).get("typed_condition_edge_guards", ()) or ()))
                     )
                 ),
                 None,
@@ -72,15 +80,15 @@ def _edge_guard_graph_summary_8616(graph: object) -> dict[str, object]:
                 {
                     "addr": getattr(region, "block_addr", None),
                     "continuation_chain": chain,
-                    "successor_addrs": [getattr(succ, "block_addr", None) for succ in successors],
+                    "successor_addrs": [getattr(succ, "block_addr", None) for succ in iter(successors)],
                 }
             )
         if (typed_guards or successor_eq_count) and len(sample_regions) < 12:
             sample_regions.append(
                 {
                     "addr": getattr(region, "block_addr", None),
-                    "guard_ops": [guard.op for guard in typed_guards],
-                    "successor_addrs": [getattr(succ, "block_addr", None) for succ in successors],
+                    "guard_ops": [guard.op for guard in iter(typed_guards)],
+                    "successor_addrs": [getattr(succ, "block_addr", None) for succ in iter(successors)],
                     "successor_eq_guard_count": successor_eq_count,
                 }
             )
@@ -93,16 +101,19 @@ def _edge_guard_graph_summary_8616(graph: object) -> dict[str, object]:
     }
 
 
+@cython.ccall
 def _structured_region_artifacts_8616(
     structured: object,
 ) -> tuple[list[dict[str, object]], list[object], list[dict[str, object]]]:
     """Collect non-linear region, loop-plan, and switch artifacts."""
+    switch_artifact: object
+    region: object
     structured_regions: list[dict[str, object]] = []
     abnormal_loop_regions: list[object] = []
     typed_edge_switch_region_artifacts: list[dict[str, object]] = []
     dynamic_structured = cast(Any, structured)
     for region in dynamic_structured.nodes:
-        if region.region_type != RegionType.Linear:
+        if operator.ne(region.region_type, RegionType.Linear):
             structured_regions.append(
                 {
                     "addr": region.block_addr,
@@ -118,8 +129,10 @@ def _structured_region_artifacts_8616(
     return structured_regions, abnormal_loop_regions, typed_edge_switch_region_artifacts
 
 
-def _merge_cfunc_stats_8616(codegen: object, stats: dict[str, object]) -> None:
+@cython.ccall
+def _merge_cfunc_stats_8616(codegen: object, stats: object) -> None:
     """Merge the pass stats record into the cfunc stats surface."""
+    cfunc_stats: object
     codegen_dynamic = cast(Any, codegen)
     cfunc = codegen_dynamic.cfunc
     cfunc_stats = getattr(cfunc, "_structuring_stats", None)
@@ -135,8 +148,9 @@ def _merge_cfunc_stats_8616(codegen: object, stats: dict[str, object]) -> None:
 
 class GroupedRegionBasedStructuringPass(RegionBasedStructuringPass):
     """Run region structuring on grouped region graphs with typed evidence."""
+    stats: object
 
-    def __call__(self, codegen: object) -> bool:
+    def __call__(self, codegen: object) -> cython.bint:
         """Apply grouped region-based structuring to codegen."""
         if getattr(codegen, "cfunc", None) is None:
             return False
@@ -145,7 +159,7 @@ class GroupedRegionBasedStructuringPass(RegionBasedStructuringPass):
     def _stats_record_8616(
         self,
         structured: object,
-        initial_graph_summary: dict[str, object],
+        initial_graph_summary: object,
     ) -> dict[str, object]:
         """Build the grouped-structuring stats record for this run."""
         structured_regions, abnormal_loop_regions, switch_artifacts = (
@@ -165,8 +179,10 @@ class GroupedRegionBasedStructuringPass(RegionBasedStructuringPass):
             "typed_edge_switch_region_artifacts": switch_artifacts,
         }
 
-    def _apply(self, codegen: object) -> bool:
+    def _apply(self, codegen: object) -> cython.bint:
         """Apply grouped structuring across the dynamic codegen boundary."""
+        entry: object
+        graph: object
         try:
             graph, entry = self._build_region_graph(codegen)
             if graph is None or entry is None or len(graph.nodes) < 2:
@@ -197,7 +213,8 @@ class GroupedRegionBasedStructuringPass(RegionBasedStructuringPass):
         return result.graph_result.graph, result.graph_result.entry
 
 
-def apply_grouped_region_based_structuring(codegen: object) -> bool:
+@cython.ccall
+def apply_grouped_region_based_structuring(codegen: object) -> cython.bint:
     """Apply grouped region-based structuring to codegen."""
     import os
 
@@ -208,6 +225,7 @@ def apply_grouped_region_based_structuring(codegen: object) -> bool:
     return pass_instance(codegen)
 
 
+@cython.ccall
 def describe_x86_16_grouped_structuring_pass_surface() -> dict[str, object]:
     """Describe the grouped structuring pass integration surface."""
     return {

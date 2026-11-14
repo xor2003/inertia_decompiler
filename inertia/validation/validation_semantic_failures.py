@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify semantic failures for final and intermediate validation gates.
 
 Layer: Tail Validation.
@@ -14,11 +15,13 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import cython
 
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from enum import Enum
 from typing import Protocol
+import builtins
 
 
 class TailSemanticFailureScope8616(Enum):
@@ -32,53 +35,55 @@ class TailSemanticIssueSurface8616(Protocol):
     """Owned semantic-issue fields consumed from a validation summary."""
 
     @property
-    def def_use_issues(self) -> tuple[str, ...]:
+    def def_use_issues(self) -> object:
         """Return structured def-use failures."""
         ...
 
     @property
-    def missing_required_calls(self) -> tuple[str, ...]:
+    def missing_required_calls(self) -> object:
         """Return missing binary-required calls."""
         ...
 
     @property
-    def callsite_multiplicity_issues(self) -> tuple[str, ...]:
+    def callsite_multiplicity_issues(self) -> object:
         """Return exact machine-callsite overmaterialization failures."""
         ...
 
     @property
-    def call_interface_issues(self) -> tuple[str, ...]:
+    def call_interface_issues(self) -> object:
         """Return call-interface failures."""
         ...
 
     @property
-    def call_argument_class_issues(self) -> tuple[str, ...]:
+    def call_argument_class_issues(self) -> object:
         """Return value-versus-pointer argument failures."""
         ...
 
     @property
-    def function_parameter_issues(self) -> tuple[str, ...]:
+    def function_parameter_issues(self) -> object:
         """Return function-parameter failures."""
         ...
 
     @property
-    def function_return_class_issues(self) -> tuple[str, ...]:
+    def function_return_class_issues(self) -> object:
         """Return function-return-class failures."""
         ...
 
     @property
-    def control_flow_issues(self) -> tuple[str, ...]:
+    def control_flow_issues(self) -> object:
         """Return control-flow failures."""
         ...
 
     @property
-    def storage_identity_issues(self) -> tuple[str, ...]:
+    def storage_identity_issues(self) -> object:
         """Return storage-identity failures."""
         ...
 
 
-def _introduced_issues_8616(before: tuple[str, ...], after: tuple[str, ...]) -> tuple[str, ...]:
+@cython.ccall
+def _introduced_issues_8616(before: object, after: object) -> tuple[str, ...]:
     """Return deterministic multiset additions from ``before`` to ``after``."""
+    issue: object
     remaining = Counter(before)
     introduced: list[str] = []
     for issue in after:
@@ -89,13 +94,17 @@ def _introduced_issues_8616(before: tuple[str, ...], after: tuple[str, ...]) -> 
     return tuple(introduced)
 
 
+@cython.ccall
 def collect_tail_semantic_failures_8616(
     after: TailSemanticIssueSurface8616,
     *,
     before: TailSemanticIssueSurface8616 | None = None,
     scope: TailSemanticFailureScope8616 = TailSemanticFailureScope8616.ALL_AFTER,
-) -> dict[str, tuple[str, ...]]:
+) -> object:
     """Collect semantic failures according to one explicit validation scope."""
+    after_issues: object
+    family: object
+    prior_issues: object
     after_fields = (
         ("def_use", after.def_use_issues),
         ("required_calls", after.missing_required_calls),
@@ -131,8 +140,10 @@ def collect_tail_semantic_failures_8616(
     return failures
 
 
-def normalize_tail_semantic_failures_8616(value: object) -> dict[str, tuple[str, ...]]:
+def normalize_tail_semantic_failures_8616(value: object) -> object:
     """Normalize the serialized semantic-failure contract for reporting."""
+    family: object
+    raw_issues: object
     if not isinstance(value, Mapping):
         return {}
     normalized: dict[str, tuple[str, ...]] = {}
@@ -141,7 +152,7 @@ def normalize_tail_semantic_failures_8616(value: object) -> dict[str, tuple[str,
             continue
         if not isinstance(raw_issues, Sequence):
             continue
-        issues = tuple(issue for issue in raw_issues if isinstance(issue, str) and issue)
+        issues = tuple(issue for issue in iter(raw_issues) if isinstance(issue, str) and issue)
         if issues:
             normalized[family] = issues
     return normalized
@@ -149,7 +160,7 @@ def normalize_tail_semantic_failures_8616(value: object) -> dict[str, tuple[str,
 
 def format_tail_semantic_failures_8616(failures: Mapping[str, Sequence[str]]) -> tuple[str, ...]:
     """Format deterministic semantic-failure families for a validation verdict."""
-    return tuple(f"{family}: {', '.join(issues)}" for family, issues in failures.items() if issues)
+    return tuple(f"{family}: {', '.join(issues)}" for family, issues in builtins.iter(failures.items()) if issues)
 
 
 __all__ = [

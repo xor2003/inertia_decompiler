@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bind condition register expressions to exact Alias definition proofs.
 
 Layer: Structuring.
@@ -10,22 +11,28 @@ rewrite cleanup, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from inertia.alias.condition_register_definition import resolve_condition_register_definition_8616
 from inertia.ir.vex_import import codegen_function_8616
 from inertia.semantics import register_source_block_inventory as register_source_block_inventory
+import operator
+import builtins
 
 
+@cython.ccall
 def condition_register_expression_8616(
     project: object,
     codegen: object,
-    expressions: dict[tuple[int, str, int], object],
+    expressions: object,
     *,
-    instruction_addr: int,
-    register: str,
-    size: int,
+    instruction_addr: cython.longlong,
+    register: object,
+    size: cython.longlong,
 ) -> object | None:
     """Select only a definition proven to reach this exact condition boundary."""
+    resolved: object
     try:
         resolved = codegen_function_8616(project, codegen)
     except (AttributeError, TypeError):
@@ -35,8 +42,8 @@ def condition_register_expression_8616(
     function, _ = resolved
     candidates = {
         address: expression
-        for (address, name, width), expression in expressions.items()
-        if name == register.lower() and width == size
+        for (address, name, width), expression in builtins.iter(expressions.items())
+        if operator.eq(name, register.lower()) and width == size
     }
     inventory = register_source_block_inventory.collect_register_source_block_inventory_8616(function)
     proof = resolve_condition_register_definition_8616(

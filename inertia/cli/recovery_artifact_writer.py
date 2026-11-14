@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery/reporting.
 
 Responsibility: persist already-built recovery artifacts as JSON.
@@ -11,6 +12,8 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import json
 from collections.abc import Mapping, Sequence
@@ -23,6 +26,7 @@ from .recovery_artifacts import (
     build_x86_16_corpus_recovery_artifact,
     build_x86_16_function_recovery_artifact,
 )
+import dataclasses
 
 __all__ = [
     "RecoveryArtifactWriteResult",
@@ -31,13 +35,13 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RecoveryArtifactWriteResult:
     """Metadata for one persisted recovery artifact write."""
 
     path: Path
-    artifact_kind: str
-    row_count: int
+    artifact_kind: object
+    row_count: cython.longlong
 
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-compatible write result."""
@@ -48,13 +52,15 @@ class RecoveryArtifactWriteResult:
         }
 
 
+@cython.ccall
 def _write_payload(path: Path, payload: Mapping[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+@cython.ccall
 def write_x86_16_function_recovery_artifact(
-    source: Mapping[str, object], path: str | Path
+    source: Mapping[str, object], path: object
 ) -> RecoveryArtifactWriteResult:
     """Persist one already-produced function recovery artifact as JSON."""
     artifact: FunctionRecoveryArtifact = build_x86_16_function_recovery_artifact(source)
@@ -67,8 +73,9 @@ def write_x86_16_function_recovery_artifact(
     )
 
 
+@cython.ccall
 def write_x86_16_corpus_recovery_artifact(
-    results: Sequence[Mapping[str, object]], path: str | Path
+    results: Sequence[Mapping[str, object]], path: object
 ) -> RecoveryArtifactWriteResult:
     """Persist an already-produced corpus recovery artifact as JSON."""
     artifact: CorpusRecoveryArtifact = build_x86_16_corpus_recovery_artifact(list(results))

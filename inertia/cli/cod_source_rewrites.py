@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Optional evidence/reporting.
 
 Responsibility: expose inactive source-backed rewrite debt as an explicit compatibility surface.
@@ -11,6 +12,8 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import ItemsView, Iterator, KeysView, Mapping, ValuesView
 from dataclasses import dataclass
@@ -18,6 +21,7 @@ from enum import StrEnum
 from types import MappingProxyType
 
 from inertia.frontend.x86_16.cod_extract import CODProcMetadata
+import dataclasses
 
 __all__ = [
     "COD_SOURCE_REWRITE_REGISTRY",
@@ -59,18 +63,18 @@ class CODSourceRewriteStatusKind(StrEnum):
         return cls(str(value))
 
     @property
-    def is_active(self) -> bool:
+    def is_active(self) -> cython.bint:
         """Return whether this status still represents active rewrite debt."""
         return self in {self.TEMPORARY_RESCUE, self.PERMANENT_GUARDED_ORACLE}
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class CODSourceRewriteSpec:
     """Disabled source-backed rewrite specification retained as explicit debt."""
 
-    name: str
-    header_regex: str
-    rewritten: str
+    name: object
+    header_regex: object
+    rewritten: object
     rewrite_status: CODSourceRewriteStatusKind = CODSourceRewriteStatusKind.TEMPORARY_RESCUE
     required_lines: tuple[str, ...] = ()
 
@@ -78,7 +82,7 @@ class CODSourceRewriteSpec:
         """Normalize the stored rewrite status after dataclass initialization."""
         object.__setattr__(self, "rewrite_status", CODSourceRewriteStatusKind.coerce(self.rewrite_status))
 
-    def apply(self, c_text: str, metadata: CODProcMetadata | None) -> str:
+    def apply(self, c_text: object, metadata: CODProcMetadata | None) -> object:
         """Apply this disabled compatibility spec; currently returns text unchanged."""
         return rewrite_cod_proc_from_source(
             c_text,
@@ -97,11 +101,11 @@ class CODSourceRewriteSpec:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CODSourceRewriteStatus:
     """Serializable status row for source-backed rewrite debt reporting."""
 
-    name: str
+    name: object
     rewrite_status: CODSourceRewriteStatusKind
     required_lines: tuple[str, ...] = ()
     header_regex: str = ""
@@ -112,18 +116,18 @@ class CODSourceRewriteStatus:
         object.__setattr__(self, "rewrite_status", CODSourceRewriteStatusKind.coerce(self.rewrite_status))
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class CODSourceRewriteRegistry:
     """Immutable registry for disabled source-backed rewrite specs."""
 
-    specs: tuple[CODSourceRewriteSpec, ...]
+    specs: object
     by_name: Mapping[str, CODSourceRewriteSpec]
 
-    def apply(self, c_text: str, metadata: CODProcMetadata | None) -> str:
+    def apply(self, c_text: object, metadata: CODProcMetadata | None) -> object:
         """Apply registered disabled rewrites; source-backed rewrites are intentionally inert."""
         return c_text
 
-    def get(self, name: str) -> CODSourceRewriteSpec:
+    def get(self, name: object) -> CODSourceRewriteSpec:
         """Return the disabled rewrite spec for an exact name."""
         return self.by_name[name]
 
@@ -143,11 +147,11 @@ class CODSourceRewriteRegistry:
         """Return registry item view for mapping-compatible callers."""
         return self.by_name.items()
 
-    def __getitem__(self, name: str) -> CODSourceRewriteSpec:
+    def __getitem__(self, name: object) -> CODSourceRewriteSpec:
         """Return the disabled rewrite spec for mapping-style access."""
         return self.get(name)
 
-    def __contains__(self, name: object) -> bool:
+    def __contains__(self, name: object) -> cython.bint:
         """Return whether a disabled rewrite spec name is registered."""
         return isinstance(name, str) and name in self.by_name
 
@@ -155,28 +159,29 @@ class CODSourceRewriteRegistry:
         """Iterate disabled rewrite specs in deterministic order."""
         return iter(self.specs)
 
-    def __len__(self) -> int:
+    def __len__(self) -> cython.longlong:
         """Return the disabled rewrite spec count."""
         return len(self.specs)
 
     def summary(self) -> dict[str, object]:
         """Summarize disabled source-backed rewrite debt for architecture reports."""
+        row: object
         rows = _source_backed_rewrite_status_rows_8616(self.specs)
-        status_counts: dict[str, int] = {}
+        status_counts: dict[str, cython.longlong] = {}
         for row in rows:
             status = row.rewrite_status.value
             status_counts[status] = status_counts.get(status, 0) + 1
         return {
             "count": len(rows),
-            "names": tuple(row.name for row in rows),
-            "status_counts": dict(sorted(status_counts.items())),
-            "active_count": sum(1 for row in rows if row.rewrite_status.is_active),
+            "names": tuple(row.name for row in iter(rows)),
+            "status_counts": dict(sorted(tuple(status_counts.items()))),
+            "active_count": sum(1 for row in iter(rows) if row.rewrite_status.is_active),
             "oracle_count": sum(
-                1 for row in rows if row.rewrite_status is CODSourceRewriteStatusKind.PERMANENT_GUARDED_ORACLE
+                1 for row in iter(rows) if row.rewrite_status is CODSourceRewriteStatusKind.PERMANENT_GUARDED_ORACLE
             ),
             "subsumed_count": sum(
                 1
-                for row in rows
+                for row in iter(rows)
                 if row.rewrite_status is CODSourceRewriteStatusKind.ALREADY_SUBSUMED_BY_GENERAL_RECOVERY
             ),
         }
@@ -186,7 +191,7 @@ class CODSourceRewriteRegistry:
         rows = _source_backed_rewrite_status_rows_8616(self.specs)
         return {
             "count": len(rows),
-            "names": tuple(row.name for row in rows),
+            "names": tuple(row.name for row in iter(rows)),
             "specs": tuple(
                 {
                     "name": row.name,
@@ -195,7 +200,7 @@ class CODSourceRewriteRegistry:
                     "header_regex": row.header_regex,
                     "owner": row.owner,
                 }
-                for row in rows
+                for row in iter(rows)
             ),
         }
 
@@ -207,7 +212,7 @@ class CODSourceRewriteRegistry:
 COD_SOURCE_REWRITE_SPECS: tuple[CODSourceRewriteSpec, ...] = ()
 
 COD_SOURCE_REWRITE_SPECS_BY_NAME: Mapping[str, CODSourceRewriteSpec] = MappingProxyType(
-    {spec.name: spec for spec in COD_SOURCE_REWRITE_SPECS}
+    {spec.name: spec for spec in iter(COD_SOURCE_REWRITE_SPECS)}
 )
 
 COD_SOURCE_REWRITE_REGISTRY: CODSourceRewriteRegistry = CODSourceRewriteRegistry(
@@ -217,7 +222,7 @@ COD_SOURCE_REWRITE_REGISTRY: CODSourceRewriteRegistry = CODSourceRewriteRegistry
 
 
 def _source_backed_rewrite_status_rows_8616(
-    specs: tuple[CODSourceRewriteSpec, ...]
+    specs: object
 ) -> tuple[CODSourceRewriteStatus, ...]:
     """Build typed status rows for disabled source-backed rewrite specs."""
     return tuple(
@@ -228,40 +233,47 @@ def _source_backed_rewrite_status_rows_8616(
             header_regex=spec.header_regex,
             owner="disabled source-backed rewrite registry",
         )
-        for spec in specs
+        for spec in iter(specs)
     )
 
 
-def get_cod_source_rewrite_spec(name: str) -> CODSourceRewriteSpec:
+@cython.ccall
+def get_cod_source_rewrite_spec(name: object) -> CODSourceRewriteSpec:
     """Return a disabled COD source rewrite spec by name."""
     return COD_SOURCE_REWRITE_REGISTRY.get(name)
 
 
-def apply_cod_source_rewrites(c_text: str, metadata: CODProcMetadata | None) -> str:
+@cython.ccall
+def apply_cod_source_rewrites(c_text: object, metadata: CODProcMetadata | None) -> object:
     """Apply the disabled COD source rewrite stage without changing generated C."""
     return rewrite_cod_source_stage(c_text, metadata)
 
 
-def rewrite_cod_source_stage(c_text: str, metadata: CODProcMetadata | None) -> str:
+@cython.ccall
+def rewrite_cod_source_stage(c_text: object, metadata: CODProcMetadata | None) -> object:
     """Keep generated C unchanged because source-backed rewrites are forbidden."""
     return c_text
 
 
-def cod_source_rewrite_summary() -> dict[str, object]:
+@cython.ccall
+def cod_source_rewrite_summary() -> object:
     """Return summary counters for disabled source-backed rewrite debt."""
     return COD_SOURCE_REWRITE_REGISTRY.summary()
 
 
-def cod_source_rewrite_description() -> dict[str, object]:
+@cython.ccall
+def cod_source_rewrite_description() -> object:
     """Return detailed rows for disabled source-backed rewrite debt."""
     return COD_SOURCE_REWRITE_REGISTRY.describe()
 
 
-def cod_source_rewrite_names() -> tuple[str, ...]:
+@cython.ccall
+def cod_source_rewrite_names() -> object:
     """Return disabled source-backed rewrite names in deterministic order."""
     return COD_SOURCE_REWRITE_REGISTRY.names()
 
 
+@cython.ccall
 def describe_x86_16_source_backed_rewrite_status() -> dict[str, object]:
     """Describe the disabled source-backed rewrite compatibility surface."""
     registry_description = COD_SOURCE_REWRITE_REGISTRY.describe()
@@ -281,13 +293,13 @@ def describe_x86_16_source_backed_rewrite_debt() -> dict[str, object]:
     """Return architecture-debt details for disabled source-backed rewrites."""
     summary = COD_SOURCE_REWRITE_REGISTRY.summary()
     rows = _source_backed_rewrite_status_rows_8616(COD_SOURCE_REWRITE_REGISTRY.specs)
-    active_names = tuple(row.name for row in rows if row.rewrite_status.is_active)
+    active_names = tuple(row.name for row in iter(rows) if row.rewrite_status.is_active)
     oracle_names = tuple(
-        row.name for row in rows if row.rewrite_status is CODSourceRewriteStatusKind.PERMANENT_GUARDED_ORACLE
+        row.name for row in iter(rows) if row.rewrite_status is CODSourceRewriteStatusKind.PERMANENT_GUARDED_ORACLE
     )
     subsumed_names = tuple(
         row.name
-        for row in rows
+        for row in iter(rows)
         if row.rewrite_status is CODSourceRewriteStatusKind.ALREADY_SUBSUMED_BY_GENERAL_RECOVERY
     )
     return {
@@ -298,28 +310,32 @@ def describe_x86_16_source_backed_rewrite_debt() -> dict[str, object]:
     }
 
 
+@cython.ccall
 def rewrite_cod_proc_from_source(
-    c_text: str,
+    c_text: object,
     metadata: CODProcMetadata | None,
     *,
-    header_regex: str,
-    rewritten: str,
-    required_lines: tuple[str, ...] = (),
-) -> str:
+    header_regex: object,
+    rewritten: object,
+    required_lines: object = (),
+) -> object:
     """Refuse source-backed procedure replacement and return generated C unchanged."""
     return c_text
 
 
-def rewrite_known_cod_object_fields_from_source(c_text: str, metadata: CODProcMetadata | None) -> str:
+@cython.ccall
+def rewrite_known_cod_object_fields_from_source(c_text: object, metadata: CODProcMetadata | None) -> object:
     """Refuse source-backed object-field rewrites and return generated C unchanged."""
     return c_text
 
 
-def rewrite_known_cod_object_bindings_from_source(c_text: str, metadata: CODProcMetadata | None) -> str:
+@cython.ccall
+def rewrite_known_cod_object_bindings_from_source(c_text: object, metadata: CODProcMetadata | None) -> object:
     """Refuse source-backed object-binding rewrites and return generated C unchanged."""
     return c_text
 
 
-def rewrite_known_cod_object_condition_blocks_from_source(c_text: str, metadata: CODProcMetadata | None) -> str:
+@cython.ccall
+def rewrite_known_cod_object_condition_blocks_from_source(c_text: object, metadata: CODProcMetadata | None) -> object:
     """Refuse source-backed condition-block rewrites and return generated C unchanged."""
     return c_text

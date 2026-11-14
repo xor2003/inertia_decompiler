@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bind optional declared external-call segment relations to exact evidence.
 
 Layer: Frontend.
@@ -14,6 +15,8 @@ register, flag, or return-value semantics.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import hashlib
 import json
@@ -23,6 +26,9 @@ from pathlib import Path
 from typing import NoReturn, Protocol, cast
 
 from .synthetic_call_stub_evidence import is_synthetic_call_stub_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = (
     "DECLARED_EXTERNAL_CALL_EFFECT_SCHEMA_8616",
@@ -39,11 +45,11 @@ __all__ = (
     "declared_external_call_registry_8616",
 )
 
-DECLARED_EXTERNAL_CALL_EFFECT_SCHEMA_8616: int = 1
-_DECLARED_CALL_SITE_RECORD_SCHEMA_8616: int = 1
-_HEX_DIGEST_LENGTH_8616: int = 64
-_MAX_DECLARED_CALL_EFFECT_FILES_8616: int = 16
-_MAX_DECLARED_CALLS_PER_FILE_8616: int = 256
+DECLARED_EXTERNAL_CALL_EFFECT_SCHEMA_8616: cython.longlong = 1
+_DECLARED_CALL_SITE_RECORD_SCHEMA_8616: cython.longlong = 1
+_HEX_DIGEST_LENGTH_8616: cython.longlong = 64
+_MAX_DECLARED_CALL_EFFECT_FILES_8616: cython.longlong = 16
+_MAX_DECLARED_CALLS_PER_FILE_8616: cython.longlong = 256
 
 
 class DeclaredExternalCallRelation8616(StrEnum):
@@ -80,28 +86,28 @@ class DeclaredCallAdmissionFailure8616(StrEnum):
 class DeclaredExternalCallAdmissionError8616(ValueError):
     """A declaration file or binding refused under the typed contract."""
 
-    def __init__(self, failure: DeclaredCallAdmissionFailure8616, detail: str) -> None:
+    def __init__(self, failure: DeclaredCallAdmissionFailure8616, detail: object) -> None:
         """Retain the typed failure and a human-readable detail."""
         super().__init__(f"declared external-call admission refused: {failure.value}: {detail}")
         self.failure = failure
         self.detail = detail
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DeclaredExternalCallSpec8616:
     """One parsed declaration before it binds to the current image."""
 
-    caller_start: int
-    caller_end: int
-    caller_sha256: str
-    callsite_addr: int
-    target_addr: int
-    is_far: bool
-    relations: frozenset[DeclaredExternalCallRelation8616]
-    label: str | None = None
+    caller_start: cython.longlong
+    caller_end: cython.longlong
+    caller_sha256: object
+    callsite_addr: cython.longlong
+    target_addr: cython.longlong
+    is_far: cython.bint
+    relations: object
+    label: object = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DeclaredCallAdmission8616:
     """A declaration bound to the exact current image, caller, site and target.
 
@@ -118,26 +124,26 @@ class DeclaredCallAdmission8616:
     minted without them (``None``) cannot authorize consumption.
     """
 
-    image_sha256: str
-    caller_addr: int
-    caller_end: int
-    caller_sha256: str
-    callsite_addr: int
-    target_addr: int
-    is_far: bool
-    retained_registers: tuple[str, ...]
-    declaration_sha256: str
-    label: str | None = None
+    image_sha256: object
+    caller_addr: cython.longlong
+    caller_end: cython.longlong
+    caller_sha256: object
+    callsite_addr: cython.longlong
+    target_addr: cython.longlong
+    is_far: cython.bint
+    retained_registers: object
+    declaration_sha256: object
+    label: object = None
     image_base: int | None = None
     image_size: int | None = None
     project: object | None = field(default=None, compare=False, repr=False)
 
-    def binds_callsite(self, function_addr: int, callsite_addr: int) -> bool:
+    def binds_callsite(self, function_addr: cython.longlong, callsite_addr: cython.longlong) -> cython.bint:
         """Return whether this admission authorizes exactly one CALL site."""
-        return self.caller_addr == function_addr and self.callsite_addr == callsite_addr
+        return operator.eq(self.caller_addr, function_addr) and operator.eq(self.callsite_addr, callsite_addr)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DeclaredCallEffectConsumption8616:
     """Immutable replayable receipt for one consumed declared call boundary.
 
@@ -148,14 +154,14 @@ class DeclaredCallEffectConsumption8616:
     """
 
     assumption: DeclaredCallAssumption8616
-    declaration_sha256: str
-    image_sha256: str
-    caller_addr: int
-    caller_sha256: str
-    callsite_addr: int
-    target_addr: int
-    is_far: bool
-    retained_registers: tuple[str, ...]
+    declaration_sha256: object
+    image_sha256: object
+    caller_addr: cython.longlong
+    caller_sha256: object
+    callsite_addr: cython.longlong
+    target_addr: cython.longlong
+    is_far: cython.bint
+    retained_registers: object
 
     @classmethod
     def from_admission_8616(
@@ -175,9 +181,9 @@ class DeclaredCallEffectConsumption8616:
             retained_registers=admission.retained_registers,
         )
 
-    def binds_callsite(self, function_addr: int, callsite_addr: int) -> bool:
+    def binds_callsite(self, function_addr: cython.longlong, callsite_addr: cython.longlong) -> cython.bint:
         """Return whether this receipt describes one exact call boundary."""
-        return self.caller_addr == function_addr and self.callsite_addr == callsite_addr
+        return operator.eq(self.caller_addr, function_addr) and operator.eq(self.callsite_addr, callsite_addr)
 
     def to_record(self) -> dict[str, object]:
         """Serialize the receipt into a deterministic strict record."""
@@ -195,29 +201,29 @@ class DeclaredCallEffectConsumption8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DeclaredExternalCallRegistry8616:
     """Closed set of admitted declarations plus their evidence census."""
 
-    admissions: tuple[DeclaredCallAdmission8616, ...]
-    image_sha256: str
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    admissions: object
+    image_sha256: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     def admissions_for_function_8616(
         self,
-        function_addr: int,
+        function_addr: cython.longlong,
     ) -> tuple[DeclaredCallAdmission8616, ...]:
         """Return admissions bound to one exact caller function address."""
         return tuple(
-            admission for admission in self.admissions if admission.caller_addr == function_addr
+            admission for admission in iter(self.admissions) if operator.eq(admission.caller_addr, function_addr)
         )
 
     @property
-    def closes_evidence(self) -> bool:
+    def closes_evidence(self) -> cython.bint:
         """Return whether every supplied declaration was admitted exactly once."""
         return (
             self.raw_fact_count == self.normalized_fact_count == len(self.admissions)
@@ -235,7 +241,7 @@ class _DeclaredExternalCallOwner8616(Protocol):
 class _LoaderMemorySurface8616(Protocol):
     """Third-party loader memory API used for exact mapped bytes."""
 
-    def load(self, address: int, size: int) -> bytes:
+    def load(self, address: cython.longlong, size: cython.longlong) -> object:
         """Read a mapped byte range or raise for an unmapped address."""
         ...
 
@@ -252,7 +258,8 @@ class _ProjectLoaderBoundary8616(Protocol):
     loader: _LoaderSurface8616
 
 
-def _loaded_image_equals_8616(project: object, image_base: int, image_code: bytes) -> bool:
+@cython.ccall
+def _loaded_image_equals_8616(project: object, image_base: cython.longlong, image_code: object) -> cython.bint:
     """Return whether the entire currently loaded image equals ``image_code``.
 
     The whole supplied window — caller bytes and synthetic stub bytes alike —
@@ -267,6 +274,7 @@ def _loaded_image_equals_8616(project: object, image_base: int, image_code: byte
     return loaded == image_code
 
 
+@cython.ccall
 def declared_external_call_registry_8616(
     owner: object,
 ) -> DeclaredExternalCallRegistry8616 | None:
@@ -280,18 +288,19 @@ def declared_external_call_registry_8616(
     return registry if isinstance(registry, DeclaredExternalCallRegistry8616) else None
 
 
-def _fail_8616(failure: DeclaredCallAdmissionFailure8616, detail: str) -> NoReturn:
+@cython.ccall
+def _fail_8616(failure: DeclaredCallAdmissionFailure8616, detail: object) -> NoReturn:
     """Raise the typed admission refusal."""
     raise DeclaredExternalCallAdmissionError8616(failure, detail)
 
 
-def _hex_digest_8616(value: object, *, field_name: str) -> str:
+def _hex_digest_8616(value: object, *, field_name: object) -> object:
     """Parse one exact lowercase hex SHA-256 field."""
     if (
         not isinstance(value, str)
-        or len(value) != _HEX_DIGEST_LENGTH_8616
-        or value != value.lower()
-        or any(char not in "0123456789abcdef" for char in value)
+        or operator.ne(len(value), _HEX_DIGEST_LENGTH_8616)
+        or operator.ne(value, value.lower())
+        or any(char not in "0123456789abcdef" for char in iter(value))
     ):
         _fail_8616(
             DeclaredCallAdmissionFailure8616.FIELD_MALFORMED,
@@ -300,7 +309,8 @@ def _hex_digest_8616(value: object, *, field_name: str) -> str:
     return value
 
 
-def _nonnegative_int_8616(value: object, *, field_name: str) -> int:
+@cython.ccall
+def _nonnegative_int_8616(value: object, *, field_name: object) -> cython.longlong:
     """Parse one strict nonnegative integer from int or 0x-prefixed text."""
     if isinstance(value, bool):
         _fail_8616(
@@ -330,8 +340,10 @@ def _nonnegative_int_8616(value: object, *, field_name: str) -> int:
     return parsed
 
 
+@cython.ccall
 def _relations_8616(value: object) -> frozenset[DeclaredExternalCallRelation8616]:
     """Parse and admit only the enumerated DS-preservation relation set."""
+    item: object
     if not isinstance(value, list):
         _fail_8616(
             DeclaredCallAdmissionFailure8616.FIELD_MALFORMED,
@@ -359,8 +371,11 @@ def _relations_8616(value: object) -> frozenset[DeclaredExternalCallRelation8616
     return frozenset(relations)
 
 
+@cython.ccall
 def _spec_from_record_8616(record: object) -> DeclaredExternalCallSpec8616:
     """Parse one declaration entry under the strict schema."""
+    is_far: object
+    label: object
     if not isinstance(record, dict):
         _fail_8616(
             DeclaredCallAdmissionFailure8616.FIELD_MALFORMED,
@@ -394,6 +409,7 @@ def _specs_from_file_8616(
     path: Path,
 ) -> tuple[str, tuple[DeclaredExternalCallSpec8616, ...]]:
     """Parse one declaration file into its image digest and strict specs."""
+    raw_declarations: object
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -404,7 +420,7 @@ def _specs_from_file_8616(
     if (
         not isinstance(document, dict)
         or type(document.get("schema")) is not int
-        or document.get("schema") != DECLARED_EXTERNAL_CALL_EFFECT_SCHEMA_8616
+        or operator.ne(document.get("schema"), DECLARED_EXTERNAL_CALL_EFFECT_SCHEMA_8616)
     ):
         _fail_8616(
             DeclaredCallAdmissionFailure8616.SCHEMA_UNSUPPORTED,
@@ -422,15 +438,16 @@ def _specs_from_file_8616(
             "declarations must be a bounded list",
         )
     return declared_image_sha256, tuple(
-        _spec_from_record_8616(item) for item in raw_declarations
+        _spec_from_record_8616(item) for item in iter(raw_declarations)
     )
 
 
+@cython.ccall
 def _decoded_call_target_8616(
-    image_code: bytes,
-    image_base: int,
-    callsite_addr: int,
-) -> tuple[bool, int, int] | None:
+    image_code: object,
+    image_base: cython.longlong,
+    callsite_addr: cython.longlong,
+) -> object:
     """Decode one direct CALL at ``callsite_addr``; refuse anything else.
 
     Returns ``(is_far, target_addr, instruction_size)`` for a bare ``E8``
@@ -457,34 +474,34 @@ def _decoded_call_target_8616(
 
 
 def _declaration_digest_8616(
-    image_sha256: str,
+    image_sha256: object,
     spec: DeclaredExternalCallSpec8616,
-) -> str:
+) -> object:
     """Compute the canonical digest of one fully bound declaration."""
     canonical = "|".join(
-        (
-            image_sha256,
+        (image_sha256,
             hex(spec.caller_start),
             hex(spec.caller_end),
             spec.caller_sha256,
             hex(spec.callsite_addr),
             hex(spec.target_addr),
             "far" if spec.is_far else "near",
-            *(relation.value for relation in sorted(spec.relations)),
-        )
+            ) + tuple((relation.value for relation in builtins.iter(sorted(spec.relations))))
     )
     return hashlib.sha256(canonical.encode("ascii")).hexdigest()
 
 
+@cython.ccall
 def _admit_one_8616(
     project: object,
     spec: DeclaredExternalCallSpec8616,
     *,
-    image_code: bytes,
-    image_base: int,
-    image_sha256: str,
+    image_code: object,
+    image_base: cython.longlong,
+    image_sha256: object,
 ) -> DeclaredCallAdmission8616:
     """Bind one parsed declaration to exact current image and stub evidence."""
+    decoded: object
     if not spec.caller_start <= spec.callsite_addr < spec.caller_end:
         _fail_8616(
             DeclaredCallAdmissionFailure8616.CALLSITE_OUT_OF_CALLER,
@@ -500,7 +517,7 @@ def _admit_one_8616(
             "is outside the input image",
         )
     caller_digest = hashlib.sha256(image_code[caller_offset_start:caller_offset_end]).hexdigest()
-    if caller_digest != spec.caller_sha256:
+    if operator.ne(caller_digest, spec.caller_sha256):
         _fail_8616(
             DeclaredCallAdmissionFailure8616.CALLER_DIGEST_MISMATCH,
             "caller byte digest does not match the current image",
@@ -519,13 +536,13 @@ def _admit_one_8616(
             f"{spec.caller_end:#x}; the caller range must contain the entire "
             "CALL instruction",
         )
-    if decoded_is_far != spec.is_far:
+    if operator.ne(decoded_is_far, spec.is_far):
         _fail_8616(
             DeclaredCallAdmissionFailure8616.DISTANCE_MISMATCH,
             f"callsite {spec.callsite_addr:#x} decodes "
             f"{'far' if decoded_is_far else 'near'}, not the declared distance",
         )
-    if decoded_target != spec.target_addr:
+    if operator.ne(decoded_target, spec.target_addr):
         _fail_8616(
             DeclaredCallAdmissionFailure8616.TARGET_MISMATCH,
             f"callsite {spec.callsite_addr:#x} decodes to "
@@ -557,9 +574,9 @@ def _admit_one_8616(
 def admit_declared_external_call_files_8616(
     project: object,
     *,
-    image_code: bytes,
-    image_base: int,
-    paths: tuple[Path, ...],
+    image_code: object,
+    image_base: cython.longlong,
+    paths: object,
 ) -> DeclaredExternalCallRegistry8616 | None:
     """Parse and admit optional declared external-call segment relations.
 
@@ -570,6 +587,8 @@ def admit_declared_external_call_files_8616(
     unbound declaration refuses the whole input rather than weakening it.
     ``None`` is returned when no declaration input was supplied at all.
     """
+    existing: object
+    spec: object
     if not paths:
         return None
     if len(paths) > _MAX_DECLARED_CALL_EFFECT_FILES_8616:
@@ -582,10 +601,10 @@ def admit_declared_external_call_files_8616(
             DeclaredCallAdmissionFailure8616.FIELD_MALFORMED,
             "image_code must be bytes and image_base a nonnegative integer",
         )
-    parsed = tuple(_specs_from_file_8616(path) for path in paths)
-    specs = tuple(spec for _digest, file_specs in parsed for spec in file_specs)
+    parsed = tuple(_specs_from_file_8616(path) for path in iter(paths))
+    specs = tuple(spec for _digest, file_specs in iter(parsed) for spec in iter(file_specs))
     image_sha256 = hashlib.sha256(image_code).hexdigest()
-    if any(digest != image_sha256 for digest, _file_specs in parsed):
+    if any(digest != image_sha256 for digest, _file_specs in iter(parsed)):
         _fail_8616(
             DeclaredCallAdmissionFailure8616.IMAGE_DIGEST_MISMATCH,
             "declaration image digest does not match the current input image",
@@ -596,7 +615,7 @@ def admit_declared_external_call_files_8616(
             "the currently loaded image bytes differ from the supplied image",
         )
     admissions: list[DeclaredCallAdmission8616] = []
-    seen_callsites: dict[int, DeclaredCallAdmission8616] = {}
+    seen_callsites: dict[cython.longlong, DeclaredCallAdmission8616] = {}
     for spec in specs:
         admission = _admit_one_8616(
             project,
@@ -609,7 +628,7 @@ def admit_declared_external_call_files_8616(
         if existing is not None:
             _fail_8616(
                 DeclaredCallAdmissionFailure8616.DUPLICATE_CALLSITE
-                if existing == admission
+                if operator.eq(existing, admission)
                 else DeclaredCallAdmissionFailure8616.CONTRADICTORY_DECLARATION,
                 f"callsite {admission.callsite_addr:#x} is declared more than once",
             )
@@ -634,20 +653,23 @@ def declared_call_effect_consumption_from_record_8616(
     record: object,
 ) -> DeclaredCallEffectConsumption8616:
     """Validate one serialized consumption receipt strictly."""
+    assumption: object
+    is_far: object
+    retained: object
     if (
         not isinstance(record, dict)
         or type(record.get("schema")) is not int
-        or record.get("schema") != _DECLARED_CALL_SITE_RECORD_SCHEMA_8616
+        or operator.ne(record.get("schema"), _DECLARED_CALL_SITE_RECORD_SCHEMA_8616)
     ):
         raise ValueError("declared call consumption has an unsupported schema")
     assumption = record.get("assumption")
-    if assumption != DeclaredCallAssumption8616.DECLARED_EXTERNAL_CALL_EFFECT.value:
+    if operator.ne(assumption, DeclaredCallAssumption8616.DECLARED_EXTERNAL_CALL_EFFECT.value):
         raise ValueError("declared call consumption carries an unknown assumption")
     retained = record.get("retained_registers")
     if (
         not isinstance(retained, list)
-        or any(item not in {"ds"} for item in retained)
-        or tuple(retained) != tuple(sorted(set(retained)))
+        or any(item not in {"ds"} for item in iter(retained))
+        or operator.ne(tuple(retained), tuple(sorted(tuple(set(retained)))))
         or not retained
     ):
         raise ValueError("declared call consumption has invalid retained registers")

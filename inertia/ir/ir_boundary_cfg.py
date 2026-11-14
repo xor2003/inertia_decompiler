@@ -1,19 +1,20 @@
+# cython: language_level=3, infer_types=True
 """Match raw IR control flow to the authoritative frontend boundary.
 
 Layer: IR.
 Responsibility: share CFG census agreement and bind full instruction coverage
 to the existing raw IR registry and frontend boundary. CFG agreement alone
 does not authorize instruction completeness; neither result proves effects.
-A second explicit route covers conditionally transformed bodies: a retained
-``ScopedFunctionIRView8616`` may certify the effective CFG for one
+A second explicit route covers conditionally transformed bodies: an owned
+scoped view may certify the effective CFG for one
 authenticated consuming entry through ``complete_for`` while the raw
 artifact, the context-free ``complete`` verdict, and the universal registry
 contract stay unchanged. The consuming entry is the view's own retained
 scope — either a ``Real16InvocationDomain8616`` or the distinct
 ``NearCallJumpScope8616`` carried on the view's ``near_call_scope`` field;
 the near-call premise is never laundered into the invocation-domain
-contract, and the near-return continuation view stays invocation-domain
-only.
+contract. Near-return continuation and indirect-target views stay
+invocation-domain only.
 Owns typed Value, Address, Condition, instruction facts, and lossless
 normalization.
 Do not perform alias-state ownership, widening, lowering/materialization,
@@ -21,6 +22,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import Counter
 from collections.abc import Callable
@@ -47,6 +50,15 @@ from .source_graph_binding import (
     ImmutableSourceGraphFacts8616,
     capture_immutable_source_graph_facts_8616,
 )
+import dataclasses
+import operator
+import builtins
+EntryJumpConsumingScope8616 = typing.TypeVar("EntryJumpConsumingScope8616")
+Real16InvocationDomain8616 = typing.TypeVar("Real16InvocationDomain8616")
+ScopedFunctionCFGProjection8616 = typing.TypeVar("ScopedFunctionCFGProjection8616")
+ScopedFunctionIRView8616 = typing.TypeVar("ScopedFunctionIRView8616")
+ScopedIndirectTargetView8616 = typing.TypeVar("ScopedIndirectTargetView8616")
+ScopedNearReturnContinuationView8616 = typing.TypeVar("ScopedNearReturnContinuationView8616")
 
 if TYPE_CHECKING:
     from .near_return_continuation_view import (
@@ -57,16 +69,18 @@ if TYPE_CHECKING:
         ScopedFunctionCFGProjection8616,
         ScopedFunctionIRView8616,
     )
+    from .scoped_indirect_target_view import ScopedIndirectTargetView8616
 
 
+@cython.ccall
 def _typed_scoped_view_8616(
     scoped_view: object,
-) -> ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None:
+) -> ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | ScopedIndirectTargetView8616 | None:
     """Return the offered object when it is a typed owned scoped view.
 
-    The scoped coverage route is conditional-evidence only; two typed
-    view owners may carry it: the retained-application view and the
-    premise-derived near-return continuation view. Both expose
+    The scoped coverage route admits only owned retained-application,
+    near-return continuation, and invocation-proven indirect-target views.
+    Each exposes
     ``invocation_scope`` and ``cfg_projection_for`` with the same
     scope-authenticated contract. Anything else is not evidence and the
     caller refuses through its typed reason.
@@ -75,25 +89,30 @@ def _typed_scoped_view_8616(
         ScopedNearReturnContinuationView8616 as _NearView8616,
     )
     from .scoped_function_ir_view import ScopedFunctionIRView8616
+    from .scoped_indirect_target_view import ScopedIndirectTargetView8616
 
-    if type(scoped_view) is ScopedFunctionIRView8616 or type(
-        scoped_view
-    ) is _NearView8616:
+    if (
+        type(scoped_view) is ScopedFunctionIRView8616
+        or type(scoped_view) is _NearView8616
+        or type(scoped_view) is ScopedIndirectTargetView8616
+    ):
         return scoped_view
     return None
 
 
-def _unmetered_cfg_work_8616(units: int) -> None:
+@cython.ccall
+def _unmetered_cfg_work_8616(units: cython.longlong) -> None:
     """Keep the existing unbudgeted CFG consumers unchanged."""
 
 
+@cython.ccall
 def _closed_boundary_census_8616(
-    function_addr: int,
+    function_addr: cython.longlong,
     boundary: ExactFunctionRangeBoundary8616,
-    block_addrs: frozenset[int],
-    edges: frozenset[tuple[int, int]],
+    block_addrs: object,
+    edges: object,
     *, charge: Callable[[int], None] = _unmetered_cfg_work_8616,
-) -> bool:
+) -> cython.bint:
     """Require identical closed, entry-reachable block and edge censuses.
 
     This is the single census owner shared by the universal artifact route
@@ -101,10 +120,13 @@ def _closed_boundary_census_8616(
     block membership, exact edge set with no foreign endpoints, and closed
     reachability from the boundary root.
     """
+    current: object
+    source_addr: object
+    target_addr: object
     charge(len(block_addrs) + 1)
     if (
-        function_addr != boundary.addr
-        or block_addrs != boundary.block_addrs_set
+        operator.ne(function_addr, boundary.addr)
+        or operator.ne(block_addrs, boundary.block_addrs_set)
         or boundary.addr not in block_addrs
     ):
         return False
@@ -114,13 +136,13 @@ def _closed_boundary_census_8616(
     if edges != boundary_edges:
         return False
     charge(len(block_addrs))
-    successors: dict[int, list[int]] = {addr: [] for addr in block_addrs}
+    successors: dict[cython.longlong, list[cython.longlong]] = {addr: [] for addr in iter(block_addrs)}
     for source_addr, target_addr in boundary_edges:
         charge(1)
         if source_addr not in block_addrs or target_addr not in block_addrs:
             return False
         successors[source_addr].append(target_addr)
-    reachable: set[int] = set()
+    reachable: set[cython.longlong] = set()
     pending = [boundary.addr]
     while pending:
         charge(1)
@@ -136,14 +158,14 @@ def _closed_boundary_census_8616(
 def closed_ir_boundary_cfg_8616(
     boundary: ExactFunctionRangeBoundary8616,
     artifact: IRFunctionArtifact,
-) -> bool:
+) -> cython.bint:
     """Require identical closed, entry-reachable block and edge censuses.
 
     This deliberately proves only CFG agreement. Consumers must separately
     establish registered artifact identity, instruction coverage, and effects.
     """
-    block_addrs = frozenset(block.addr for block in artifact.blocks)
-    if len(block_addrs) != len(artifact.blocks):
+    block_addrs = frozenset(block.addr for block in iter(artifact.blocks))
+    if operator.ne(len(block_addrs), len(artifact.blocks)):
         return False
     return _closed_boundary_census_8616(
         artifact.function_addr,
@@ -151,8 +173,8 @@ def closed_ir_boundary_cfg_8616(
         block_addrs,
         frozenset(
             (block.addr, successor)
-            for block in artifact.blocks
-            for successor in block.successor_addrs
+            for block in iter(artifact.blocks)
+            for successor in iter(block.successor_addrs)
         ),
     )
 
@@ -177,7 +199,7 @@ class IRBoundaryCoverageFailure8616(StrEnum):
     SCOPED_NATIVE_MISMATCH = "scoped_native_mismatch"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRBoundaryCoverageResult8616:
     """Coverage proof retaining its exact raw IR and frontend authority.
 
@@ -205,17 +227,17 @@ class IRBoundaryCoverageResult8616:
     artifact: IRFunctionArtifact
     boundary: ExactFunctionRangeBoundary8616
     failure: IRBoundaryCoverageFailure8616 | None
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
     scoped_view: (
-        ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None
+        ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | ScopedIndirectTargetView8616 | None
     ) = field(default=None, compare=False, repr=False)
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Require closed accounting and still-matching retained evidence.
 
         Delegates to ``complete_for(None)``: a result carrying scoped
@@ -226,7 +248,7 @@ class IRBoundaryCoverageResult8616:
 
     def complete_for(
         self, consuming_scope: EntryJumpConsumingScope8616 | None
-    ) -> bool:
+    ) -> cython.bint:
         """Return the coverage verdict under one explicit consuming entry.
 
         The universal branch is unchanged: without a retained scoped view
@@ -245,7 +267,7 @@ class IRBoundaryCoverageResult8616:
                 self.classified_fact_count, self.materialized_count,
                 self.failure_count,
             )
-            if any(type(count) is not int for count in counts) or counts != (1, 1, 1, 1, 0):
+            if any(type(count) is not int for count in iter(counts)) or counts != (1, 1, 1, 1, 0):
                 return False
             return _coverage_failure_8616(
                 self.boundary.project, self.boundary, self.artifact
@@ -253,10 +275,11 @@ class IRBoundaryCoverageResult8616:
         return _scoped_coverage_failure_8616(self, consuming_scope) is None
 
 
+@cython.ccall
 def _instruction_census_matches_8616(
     boundary: ExactFunctionRangeBoundary8616,
     artifact: IRFunctionArtifact,
-) -> bool:
+) -> cython.bint:
     """Require every IR instruction to belong to the nonempty binary census.
 
     Multiple IR operations may share one machine instruction address. Comparing
@@ -270,13 +293,16 @@ def _instruction_census_matches_8616(
     instruction. Only immutable exact-byte lift facts may be cached; all
     current-byte and boundary binding checks run on every evaluation.
     """
-    addresses: set[int] = set()
-    bound_blocks: dict[int, BoundNoEffectBlock8616 | None] = {}
+    context: object
+    block: object
+    instruction: object
+    addresses: set[cython.longlong] = set()
+    bound_blocks: dict[cython.longlong, BoundNoEffectBlock8616 | None] = {}
     for block in artifact.blocks:
         for instruction in block.instrs:
             if type(instruction.addr) is not int:
                 return False
-            if instruction.op == NO_EFFECT_INSTRUCTION_OP_8616:
+            if operator.eq(instruction.op, NO_EFFECT_INSTRUCTION_OP_8616):
                 if block.addr not in bound_blocks:
                     bound_blocks[block.addr] = bound_no_effect_block_8616(
                         boundary, block.addr
@@ -287,9 +313,10 @@ def _instruction_census_matches_8616(
                 ):
                     return False
             addresses.add(instruction.addr)
-    return bool(addresses) and frozenset(addresses) == boundary.reachable_instruction_addrs
+    return bool(addresses) and operator.eq(frozenset(addresses), boundary.reachable_instruction_addrs)
 
 
+@cython.ccall
 def _universal_native_census_failure_8616(
     boundary: ExactFunctionRangeBoundary8616,
 ) -> IRBoundaryCoverageFailure8616 | None:
@@ -299,6 +326,7 @@ def _universal_native_census_failure_8616(
     bound-block owner authenticates decoded extents and exact native bytes;
     universal coverage must perform that check for effectful rows too.
     """
+    block_addr: object
     from .real16_invocation_domain import _nested_capture_admitted_8616
 
     units = len(boundary.block_addrs_set) + len(boundary.reachable_instruction_addrs)
@@ -322,7 +350,7 @@ def _coverage_failure_8616(
     if (resolution.verdict is not FunctionIRArtifactVerdict8616.PROVEN
             or resolution.artifact is None or resolution.artifact is not artifact):
         return IRBoundaryCoverageFailure8616.IR_NOT_PROJECT_OWNED
-    if any(block.refusals for block in artifact.blocks):
+    if any(block.refusals for block in iter(artifact.blocks)):
         return IRBoundaryCoverageFailure8616.IR_REFUSAL
     if not closed_ir_boundary_cfg_8616(boundary, artifact):
         return IRBoundaryCoverageFailure8616.CFG_MISMATCH
@@ -346,20 +374,22 @@ def _scoped_projection_census_failure_8616(
     the raw instruction address census exactly: a dropped, extra, or
     foreign instruction on the transformed surface is a census mismatch.
     """
-    block_addrs = frozenset(block.addr for block in projection.blocks)
-    if len(block_addrs) != len(projection.blocks):
+    successors: object
+    block: object
+    block_addrs = frozenset(block.addr for block in iter(projection.blocks))
+    if operator.ne(len(block_addrs), len(projection.blocks)):
         return IRBoundaryCoverageFailure8616.SCOPED_CFG_MISMATCH
-    edge_list: list[tuple[int, int]] = []
+    edge_list: list[tuple[cython.longlong, cython.longlong]] = []
     for block in projection.blocks:
         if block.addr in projection.unreachable_block_addrs:
             continue
         successors = projection.successors.get(block.addr)
         if successors is None:
             return IRBoundaryCoverageFailure8616.SCOPED_CFG_MISMATCH
-        edge_list.extend((block.addr, target) for target in successors)
-    if len(edge_list) != len(frozenset(edge_list)):
+        edge_list.extend((block.addr, target) for target in iter(successors))
+    if operator.ne(len(edge_list), len(frozenset(edge_list))):
         return IRBoundaryCoverageFailure8616.SCOPED_CFG_MISMATCH
-    if len(boundary.successor_edges) != len(frozenset(boundary.successor_edges)):
+    if operator.ne(len(boundary.successor_edges), len(frozenset(boundary.successor_edges))):
         return IRBoundaryCoverageFailure8616.SCOPED_CFG_MISMATCH
     closed = (
         _closed_reachable_projection_8616(boundary, block_addrs, frozenset(edge_list), projection)
@@ -370,34 +400,35 @@ def _scoped_projection_census_failure_8616(
     )
     if not closed:
         return IRBoundaryCoverageFailure8616.SCOPED_CFG_MISMATCH
-    if Counter(
-        instruction.addr for block in projection.blocks for instruction in block.instrs
-    ) != Counter(
-        instruction.addr for block in artifact.blocks for instruction in block.instrs
-    ):
+    if operator.ne(Counter(
+        instruction.addr for block in iter(projection.blocks) for instruction in iter(block.instrs)
+    ), Counter(
+        instruction.addr for block in iter(artifact.blocks) for instruction in iter(block.instrs)
+    )):
         return IRBoundaryCoverageFailure8616.SCOPED_CENSUS_MISMATCH
     return None
 
 
 def _closed_reachable_projection_8616(
-    boundary: ExactFunctionRangeBoundary8616, block_addrs: frozenset[int],
-    edges: frozenset[tuple[int, int]], projection: ScopedFunctionCFGProjection8616,
-) -> bool:
+    boundary: ExactFunctionRangeBoundary8616, block_addrs: object,
+    edges: object, projection: ScopedFunctionCFGProjection8616,
+) -> cython.bint:
     """Check the partition supplied by a freshly authenticated scoped producer.
 
     Raw membership remains complete. Only the producer's proven dead blocks
     may lack outgoing claims; all surviving edges must be native boundary edges
     and every live block must remain reachable from the original root.
     """
-    dead = projection.unreachable_block_addrs
+    addr: object
+    dead: object = projection.unreachable_block_addrs
     live = block_addrs - dead
-    if (block_addrs != boundary.block_addrs_set or not dead <= block_addrs
-            or boundary.addr not in live or set(projection.successors) != live
+    if (operator.ne(block_addrs, boundary.block_addrs_set) or not dead <= block_addrs
+            or boundary.addr not in live or operator.ne(set(projection.successors), live)
             or not edges <= frozenset(boundary.successor_edges)):
         return False
-    if any(source not in live or target not in live for source, target in edges):
+    if any(source not in live or target not in live for source, target in iter(edges)):
         return False
-    reachable: set[int] = set()
+    reachable: set[cython.longlong] = set()
     pending = [boundary.addr]
     while pending:
         addr = pending.pop()
@@ -411,6 +442,7 @@ def _native_boundary_facts_8616(
     boundary: ExactFunctionRangeBoundary8616,
 ) -> tuple[object, ...]:
     """Detach all owned boundary coordinates without invoking loader callbacks."""
+    continuations: object
     continuations = boundary.near_return_continuations
     # The premise is identity-bound authority, excluded from artifact equality
     # and freshly authenticated by the scoped owner. It contains native decoder
@@ -418,11 +450,11 @@ def _native_boundary_facts_8616(
     detached = None if continuations is None else deepcopy(replace(continuations, premise=None))
     return (id(boundary.project), boundary.addr, boundary.size, boundary.block_addrs_set,
             boundary.reachable_instruction_addrs, boundary.successor_edges,
-            tuple(id(block) for block in boundary.blocks), deepcopy(boundary.info),
+            tuple(id(block) for block in iter(boundary.blocks)), deepcopy(boundary.info),
             detached, boundary.decode_lower_bound)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ScopedNativeSurfaceSnapshot8616:
     """Pre-callback immutable graph facts and detached boundary coordinates.
 
@@ -435,9 +467,10 @@ class ScopedNativeSurfaceSnapshot8616:
     """
 
     graph: ImmutableSourceGraphFacts8616
-    boundary_facts: tuple[object, ...]
+    boundary_facts: object
 
 
+@cython.ccall
 def _capture_scoped_native_surface_8616(
     boundary: ExactFunctionRangeBoundary8616, artifact: IRFunctionArtifact,
 ) -> ScopedNativeSurfaceSnapshot8616:
@@ -449,7 +482,7 @@ def _capture_scoped_native_surface_8616(
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ScopedNativeRebindFacts8616:
     """Detached immutable native facts and authenticated no-effect census.
 
@@ -460,7 +493,7 @@ class ScopedNativeRebindFacts8616:
 
     boundary: ExactFunctionRangeBoundary8616
     graph: ImmutableSourceGraphFacts8616 | None
-    reachable: frozenset[int]
+    reachable: object
     failure: IRBoundaryCoverageFailure8616 | None
 
 
@@ -526,6 +559,7 @@ def _rebind_scoped_native_facts_8616(
     )
 
 
+@cython.ccall
 def _prepare_scoped_native_rebind_8616(
     project: object,
     boundary: ExactFunctionRangeBoundary8616,
@@ -538,16 +572,19 @@ def _prepare_scoped_native_rebind_8616(
     facts instead of a second whole import; a missing, stale or replaced
     authority falls back to the guarded census import unchanged.
     """
+    rebound: object
+    rederived: object
     if caller is not None:
         rebound = _rebind_scoped_native_facts_8616(project, boundary, caller)
         if rebound is not None:
             return rebound
     from .real16_invocation_domain import real16_native_census_import_8616
 
-    rederived: IRFunctionArtifact | None = real16_native_census_import_8616(project, boundary)
+    rederived = real16_native_census_import_8616(project, boundary)
     if (
-        type(rederived) is not IRFunctionArtifact
-        or rederived.function_addr != boundary.addr
+        rederived is None
+        or type(rederived) is not IRFunctionArtifact
+        or operator.ne(rederived.function_addr, boundary.addr)
     ):
         return ScopedNativeRebindFacts8616(
             boundary, None, boundary.reachable_instruction_addrs,
@@ -575,19 +612,20 @@ def _scoped_native_rebind_failure_8616(
     canonical facts, then compared against the pre-callback capture and the
     freshly detached native facts; detached graphs are never re-walked.
     """
+    native: object
     if facts.failure is not None:
         return facts.failure
     native = facts.graph
     if (facts.boundary is not boundary or native is None
-            or boundary.reachable_instruction_addrs != facts.reachable
-            or artifact.function_addr != boundary.addr):
+            or operator.ne(boundary.reachable_instruction_addrs, facts.reachable)
+            or operator.ne(artifact.function_addr, boundary.addr)):
         return IRBoundaryCoverageFailure8616.SCOPED_NATIVE_MISMATCH
     current = capture_immutable_source_graph_facts_8616(
         artifact.function_addr, artifact.blocks, artifact.refusals)
     if before is not None and (
-        before.graph.function_addr != current.function_addr
-        or before.graph.function_refusals != current.function_refusals
-        or before.boundary_facts != _native_boundary_facts_8616(boundary)
+        operator.ne(before.graph.function_addr, current.function_addr)
+        or operator.ne(before.graph.function_refusals, current.function_refusals)
+        or operator.ne(before.boundary_facts, _native_boundary_facts_8616(boundary))
     ):
         return IRBoundaryCoverageFailure8616.SCOPED_NATIVE_MISMATCH
     # Importers mirror block refusals at function level. Only those already
@@ -595,26 +633,28 @@ def _scoped_native_rebind_failure_8616(
     # function-only failures are absent from the canonical block digest.
     if any(
         Counter(graph.function_refusals) - Counter(graph.block_refusals)
-        for graph in (current, native)
+        for graph in iter((current, native))
     ):
         return IRBoundaryCoverageFailure8616.SCOPED_REFUSAL
-    if current != native or (before is not None and before.graph != current):
+    if operator.ne(current, native) or (before is not None and operator.ne(before.graph, current)):
         return IRBoundaryCoverageFailure8616.SCOPED_NATIVE_MISMATCH
     addresses = frozenset(
         instruction.addr
-        for block in artifact.blocks for instruction in block.instrs
+        for block in iter(artifact.blocks) for instruction in iter(block.instrs)
     )
-    if not addresses or addresses != facts.reachable:
+    if not addresses or operator.ne(addresses, facts.reachable):
         return IRBoundaryCoverageFailure8616.SCOPED_CENSUS_MISMATCH
     return None
 
 
+@cython.ccall
 def _scoped_native_failure_8616(
     project: object,
     boundary: ExactFunctionRangeBoundary8616,
     artifact: IRFunctionArtifact,
 ) -> IRBoundaryCoverageFailure8616 | None:
     """Re-derive native facts and seal every retained IR field and census freshly."""
+    facts: object
     before = _capture_scoped_native_surface_8616(boundary, artifact)
     facts = _rebind_scoped_native_facts_8616(project, boundary, artifact, before.graph)
     if facts is None:
@@ -622,9 +662,10 @@ def _scoped_native_failure_8616(
     return _scoped_native_rebind_failure_8616(boundary, artifact, facts, before)
 
 
+@cython.ccall
 def _scoped_evidence_failure_8616(
     project: object, boundary: ExactFunctionRangeBoundary8616, artifact: IRFunctionArtifact,
-    scoped_view: ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None,
+    scoped_view: ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | ScopedIndirectTargetView8616 | None,
     consuming_scope: EntryJumpConsumingScope8616 | None,
 ) -> IRBoundaryCoverageFailure8616 | None:
     """Recheck scoped evidence while discarding its ephemeral CFG projection."""
@@ -639,9 +680,9 @@ def _scoped_evidence_projection_8616(
     boundary: ExactFunctionRangeBoundary8616,
     artifact: IRFunctionArtifact,
     scoped_view: (
-        ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None
+        ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | ScopedIndirectTargetView8616 | None
     ),
-    consuming_scope: EntryJumpConsumingScope8616 | None,
+    consuming_scope: object,
     *, projection_mode: EntryProjectionMode8616 = EntryProjectionMode8616.CONTROL_ONLY,
 ) -> tuple[IRBoundaryCoverageFailure8616 | None, ScopedFunctionCFGProjection8616 | None]:
     """Authenticate the full scoped evidence chain under one entry.
@@ -658,6 +699,9 @@ def _scoped_evidence_projection_8616(
     the invocation domain only — the near-call record is never accepted as
     a ``Real16InvocationDomain8616`` stand-in.
     """
+    census_failure: object
+    native_failure: object
+    view: object
     # Deferred: the scoped route binds the view/domain/scope owners lazily
     # so loading this universal coverage owner cannot deadlock the package
     # on the sibling imports that depend on it.
@@ -698,10 +742,10 @@ def _scoped_evidence_projection_8616(
     if (
         projection.source_artifact is not artifact
         or projection.scope is not consuming_scope
-        or projection.function_addr != artifact.function_addr
+        or operator.ne(projection.function_addr, artifact.function_addr)
     ):
         return IRBoundaryCoverageFailure8616.SCOPED_SURFACE_MISMATCH, None
-    if any(refusals for addr, refusals in projection.pending.items()
+    if any(refusals for addr, refusals in builtins.iter(projection.pending.items())
            if addr not in projection.unreachable_block_addrs):
         return IRBoundaryCoverageFailure8616.SCOPED_REFUSAL, None
     census_failure = _scoped_projection_census_failure_8616(
@@ -715,7 +759,7 @@ def _scoped_evidence_projection_8616(
 
 def _scoped_coverage_failure_8616(
     coverage: IRBoundaryCoverageResult8616,
-    consuming_scope: EntryJumpConsumingScope8616 | None,
+    consuming_scope: object,
 ) -> IRBoundaryCoverageFailure8616 | None:
     """Re-run the scoped verdict on the retained result under one entry.
 
@@ -737,7 +781,7 @@ def _scoped_coverage_failure_8616(
         coverage.classified_fact_count, coverage.materialized_count,
         coverage.failure_count,
     )
-    if any(type(count) is not int for count in counts) or counts != (1, 1, 1, 1, 0):
+    if any(type(count) is not int for count in iter(counts)) or counts != (1, 1, 1, 1, 0):
         return IRBoundaryCoverageFailure8616.SCOPED_EVIDENCE_INCONSISTENT
     from .real16_invocation_domain import Real16InvocationDomain8616
 
@@ -756,12 +800,14 @@ def _scoped_coverage_failure_8616(
     )
 
 
+@cython.ccall
 def prove_ir_boundary_coverage_8616(
     project: object,
     boundary: ExactFunctionRangeBoundary8616,
     artifact: IRFunctionArtifact,
 ) -> IRBoundaryCoverageResult8616:
     """Produce a nonpublishing raw-IR coverage proof or typed refusal."""
+    failure: object
     failure = _coverage_failure_8616(project, boundary, artifact)
     accepted = int(failure is None)
     return IRBoundaryCoverageResult8616(
@@ -769,12 +815,13 @@ def prove_ir_boundary_coverage_8616(
     )
 
 
+@cython.ccall
 def prove_scoped_ir_boundary_coverage_8616(
     project: object,
     boundary: ExactFunctionRangeBoundary8616,
     artifact: IRFunctionArtifact,
     scoped_view: (
-        ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None
+        ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | ScopedIndirectTargetView8616 | None
     ),
 ) -> IRBoundaryCoverageResult8616:
     """Produce a scoped coverage proof bound to one consuming entry.
@@ -782,8 +829,9 @@ def prove_scoped_ir_boundary_coverage_8616(
     The result retains the identical raw ``artifact`` — never a
     transformed body — the exact ``boundary``, and the typed
     ``scoped_view`` as its only conditional evidence. A retained
-    application view and a premise-derived near-return continuation view
-    are both accepted; any other object is not evidence. Construction
+    application view, a premise-derived near-return continuation view, or
+    an invocation-proven indirect-target view is accepted; any other
+    object is not evidence. Construction
     evaluates the whole scoped surface once under the view's own retained
     entry — the application view's distinct ``near_call_scope`` when it
     carries one, else its ``invocation_scope`` — so a stale or forged
@@ -792,6 +840,8 @@ def prove_scoped_ir_boundary_coverage_8616(
     conditional body: ``complete`` remains context-free-false and only
     ``complete_for(scope)`` re-authenticates.
     """
+    failure: object
+    typed_view: object
     from .scoped_function_ir_view import ScopedFunctionIRView8616
 
     typed_view = _typed_scoped_view_8616(scoped_view)
@@ -816,7 +866,7 @@ def prove_scoped_ir_boundary_coverage_8616(
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ScopedIRBoundaryConsumption8616:
     """Fresh coverage ledger and CFG projection for one synchronous consumption.
 
@@ -828,9 +878,10 @@ class ScopedIRBoundaryConsumption8616:
     projection: ScopedFunctionCFGProjection8616 | None
 
 
+@cython.ccall
 def consume_scoped_ir_boundary_projection_8616(
     project: object, boundary: ExactFunctionRangeBoundary8616, artifact: IRFunctionArtifact,
-    scoped_view: ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None,
+    scoped_view: ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | ScopedIndirectTargetView8616 | None,
     consuming_scope: EntryJumpConsumingScope8616 | None,
     *, projection_mode: EntryProjectionMode8616 = EntryProjectionMode8616.CONTROL_ONLY,
 ) -> ScopedIRBoundaryConsumption8616:
@@ -839,7 +890,7 @@ def consume_scoped_ir_boundary_projection_8616(
     The exact same source, scope, refusal, instruction census and native-byte
     checks used by retained coverage run here. No proof is cached or published.
     """
-    failure: IRBoundaryCoverageFailure8616 | None
+    failure: object
     projection: ScopedFunctionCFGProjection8616 | None
     if boundary.project is not project:
         failure, projection = IRBoundaryCoverageFailure8616.PROJECT_MISMATCH, None

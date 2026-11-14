@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed outcomes for deterministic return storage-trial collection.
 
 Layer: Types/Lowering.
@@ -11,6 +12,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -34,6 +37,7 @@ from .interprocedural_storage_return_passthrough_contracts import (
 from .interprocedural_storage_return_type_contracts import (
     ReturnStorageTypeFailure8616,
 )
+import dataclasses
 
 __all__ = [
     "FunctionReturnStorageTrialCollection8616",
@@ -65,12 +69,12 @@ class ReturnStorageTrialCollectionFailureKind8616(StrEnum):
     MEMORY_LIVE_OUT_CONFLICT = "memory_live_out_conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ReturnStorageTrialCollectionFailure8616:
     """One exact return callsite refusal with retained upstream evidence."""
 
     kind: ReturnStorageTrialCollectionFailureKind8616
-    callee_addr: int
+    callee_addr: cython.longlong
     caller_addr: int | None = None
     callsite_addr: int | None = None
     ssa_failure: FunctionSSAArtifactFailure8616 | None = None
@@ -80,17 +84,17 @@ class ReturnStorageTrialCollectionFailure8616:
     live_out_failure: MemoryLiveOutFailure8616 | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionReturnStorageTrialCollection8616:
     """Merged input and return trials or typed refusals for one callee."""
 
     verdict: StorageTrialCollectionVerdict8616
     trials: FunctionStorageTrials8616
-    failures: tuple[ReturnStorageTrialCollectionFailure8616, ...]
+    failures: object
     stats: StorageTrialStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every retained callsite has a closed return outcome."""
         return (
             self.verdict is StorageTrialCollectionVerdict8616.PROVEN

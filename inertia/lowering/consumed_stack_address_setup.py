@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Consume proven machine setup after typed stack arguments are materialized.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -32,17 +35,20 @@ from inertia.semantics.register_entry_overwrite import ConsumedStackAddressSetup
 
 from .gp_register_state import runtime_gp_name_for_variable_8616
 from .stack_variable_coordinates import stack_variable_coordinate_registry_8616
+import dataclasses
+import operator
+import builtins
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class ConsumedStackSetupCensus8616:
     """Closed count of candidate carriers, proven deletions and refusals."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
 class _SetupCodegen8616(Protocol):
@@ -51,7 +57,8 @@ class _SetupCodegen8616(Protocol):
     _inertia_consumed_stack_setup_census_8616: ConsumedStackSetupCensus8616
 
 
-def _pure_address_expression_8616(expression: object) -> bool:
+@cython.ccall
+def _pure_address_expression_8616(expression: object) -> cython.bint:
     """Refuse loads/calls/dirty values in the numeric carrier being removed."""
     if isinstance(expression, c.CConstant):
         return True
@@ -70,7 +77,8 @@ def _pure_address_expression_8616(expression: object) -> bool:
     return False
 
 
-def _masked_word_parent_8616(statement: object) -> str | None:
+@cython.ccall
+def _masked_word_parent_8616(statement: object) -> object:
     """Recognize only the canonical low-word write preserving the upper word."""
     if not isinstance(statement, c.CAssignment) or not isinstance(statement.lhs, c.CVariable):
         return None
@@ -84,7 +92,7 @@ def _masked_word_parent_8616(statement: object) -> str | None:
     if not (
         isinstance(preserved, c.CBinaryOp) and preserved.op == "And"
         and isinstance(preserved.lhs, c.CVariable)
-        and runtime_gp_name_for_variable_8616(preserved.lhs.variable) == parent
+        and operator.eq(runtime_gp_name_for_variable_8616(preserved.lhs.variable), parent)
         and isinstance(preserved.rhs, c.CConstant) and preserved.rhs.value == 0xFFFF0000
         and isinstance(inserted, c.CBinaryOp) and inserted.op == "And"
         and isinstance(inserted.rhs, c.CConstant) and inserted.rhs.value == 0xFFFF
@@ -94,8 +102,10 @@ def _masked_word_parent_8616(statement: object) -> str | None:
     return parent
 
 
+@cython.ccall
 def _stack_argument_bp_8616(codegen: object, argument: object) -> int | None:
     """Require the exact registered stack projection of an address argument."""
+    projection: object
     if (
         isinstance(argument, c.CUnaryOp) and argument.op in {"Reference", "AddressOf"}
         and isinstance(argument.operand, c.CVariable)
@@ -113,30 +123,33 @@ def _stack_argument_bp_8616(codegen: object, argument: object) -> int | None:
 
 def _setup_request_8616(
     codegen: object, call: c.CFunctionCall, summary: CallsiteSummary8616,
-    statement: c.CAssignment, parent: str,
+    statement: c.CAssignment, parent: object,
 ) -> ConsumedStackAddressSetup8616 | None:
     """Match physical PUSH order to the already materialized argument list."""
+    producer: object
+    source: object
+    index: object
     producer = statement.tags.get("ins_addr")
     sources, pushes = summary.push_arg_sources, summary.push_arg_instruction_addrs
     if not (
         isinstance(producer, int) and summary.target_addr is not None
-        and structured_callsite_addr_8616(call) == summary.callsite_addr
-        and structured_callsite_target_addr_8616(call) == summary.target_addr
+        and operator.eq(structured_callsite_addr_8616(call), summary.callsite_addr)
+        and operator.eq(structured_callsite_target_addr_8616(call), summary.target_addr)
         and call.args is not None
         and len(sources) == len(pushes) == len(call.args) == summary.arg_count
     ):
         return None
     if any(
-        isinstance(node, c.CVariable) and runtime_gp_name_for_variable_8616(node.variable) == parent
-        for node in _iter_c_nodes_deep_8616(call)
+        isinstance(node, c.CVariable) and operator.eq(runtime_gp_name_for_variable_8616(node.variable), parent)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(call))
     ):
         return None
     requests: list[ConsumedStackAddressSetup8616] = []
     for index, source in enumerate(sources):
-        if source is None or len(source) != 2 or source[0] != CallsitePushSourceKind8616.BP_ADDRESS.value:
+        if source is None or len(source) != 2 or operator.ne(source[0], CallsitePushSourceKind8616.BP_ADDRESS.value):
             continue
         offset = source[1]
-        if isinstance(offset, int) and _stack_argument_bp_8616(codegen, call.args[-1 - index]) == offset:
+        if isinstance(offset, int) and operator.eq(_stack_argument_bp_8616(codegen, call.args[-1 - index]), offset):
             requests.append(ConsumedStackAddressSetup8616(
                 producer, pushes[index], summary.callsite_addr, summary.target_addr, offset, parent[1:],
             ))
@@ -147,12 +160,15 @@ def _proven_setup_deletion_8616(
     project: Project,
     codegen: object,
     sequence: c.CStatements,
-    index: int,
+    index: cython.longlong,
     statement: c.CAssignment,
-    parent: str,
-    inventory: Mapping[int, CallsiteSummary8616],
-) -> tuple[int, int]:
+    parent: object,
+    inventory: Mapping[cython.longlong, CallsiteSummary8616],
+) -> tuple[cython.longlong, cython.longlong]:
     """Return ``(normalized, classified)`` deltas for one masked-word carrier."""
+    request: object
+    summary: object
+    later: object
     for later in sequence.statements[index + 1:]:
         call = later.expr if isinstance(later, c.CExpressionStatement) else later
         if isinstance(call, c.CFunctionCall):
@@ -167,8 +183,8 @@ def _proven_setup_deletion_8616(
                 return 1, 1
             return 1, 0
         if any(
-            isinstance(node, c.CVariable) and runtime_gp_name_for_variable_8616(node.variable) == parent
-            for node in _iter_c_nodes_deep_8616(later)
+            isinstance(node, c.CVariable) and operator.eq(runtime_gp_name_for_variable_8616(node.variable), parent)
+            for node in builtins.iter(_iter_c_nodes_deep_8616(later))
         ):
             return 0, 0
         if not isinstance(later, c.CAssignment):
@@ -176,15 +192,20 @@ def _proven_setup_deletion_8616(
     return 0, 0
 
 
+@cython.ccall
 def prune_consumed_stack_address_setup_8616(
-    project: Project, codegen: object, root: object, inventory: Mapping[int, CallsiteSummary8616],
-) -> bool:
+    project: Project, codegen: object, root: object, inventory: Mapping[cython.longlong, CallsiteSummary8616],
+) -> cython.bint:
     """Delete only machine-proven carriers with exact materialized storage."""
+    parent: object
+    index: object
+    sequence: object
+    statement: object
     raw = normalized = classified = materialized = 0
     for sequence in _iter_c_nodes_deep_8616(root):
         if not isinstance(sequence, c.CStatements):
             continue
-        deletions: set[int] = set()
+        deletions: set[cython.longlong] = set()
         for index, statement in enumerate(sequence.statements):
             parent = _masked_word_parent_8616(statement)
             if parent is None or not isinstance(statement, c.CAssignment):

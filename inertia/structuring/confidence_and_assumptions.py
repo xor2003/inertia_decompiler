@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery/reporting.
 
 Responsibility: attach confidence and assumption reporting metadata from already-collected recovery facts.
@@ -35,6 +36,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from enum import Enum
@@ -49,6 +52,9 @@ from .confidence_evidence import (
     StructEvidenceItem,
     load_confidence_evidence,
 )
+import dataclasses
+import operator
+ItemT = typing.TypeVar("ItemT")
 
 __all__ = [
     "ConfidenceLevel",
@@ -69,30 +75,31 @@ class ConfidenceLevel(Enum):
     LOW = "LOW"  # Guessed or assumed
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConfidenceMarker:
     """Confidence marker attached to recovered facts."""
 
-    fact_kind: str  # 'struct', 'array', 'pointer', 'type', 'loop', 'switch'
-    fact_detail: str  # Description of what was recovered
+    fact_kind: object  # 'struct', 'array', 'pointer', 'type', 'loop', 'switch'
+    fact_detail: object  # Description of what was recovered
     confidence: ConfidenceLevel
-    evidence_count: int  # Number of sources supporting this
-    reason: str | None = None  # Why we chose this confidence level
+    evidence_count: cython.longlong  # Number of sources supporting this
+    reason: object = None  # Why we chose this confidence level
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class ConfidenceTracker:
     """Aggregates confidence markers from recovery stages."""
 
-    markers: list[ConfidenceMarker] = field(default_factory=list)
+    markers: object = field(default_factory=list)
 
+    @cython.ccall
     def add_marker(
         self,
-        fact_kind: str,
-        fact_detail: str,
+        fact_kind: object,
+        fact_detail: object,
         confidence: ConfidenceLevel,
-        evidence_count: int = 1,
-        reason: str | None = None,
+        evidence_count: cython.longlong = 1,
+        reason: object = None,
     ) -> None:
         """Add a confidence marker."""
         marker = ConfidenceMarker(
@@ -104,22 +111,24 @@ class ConfidenceTracker:
         )
         self.markers.append(marker)
 
-    def high_count(self) -> int:
+    def high_count(self) -> cython.longlong:
         """Count HIGH confidence markers."""
-        return sum(1 for m in self.markers if m.confidence == ConfidenceLevel.HIGH)
+        return sum(1 for m in iter(self.markers) if operator.eq(m.confidence, ConfidenceLevel.HIGH))
 
-    def medium_count(self) -> int:
+    def medium_count(self) -> cython.longlong:
         """Count MEDIUM confidence markers."""
-        return sum(1 for m in self.markers if m.confidence == ConfidenceLevel.MEDIUM)
+        return sum(1 for m in iter(self.markers) if operator.eq(m.confidence, ConfidenceLevel.MEDIUM))
 
-    def low_count(self) -> int:
+    def low_count(self) -> cython.longlong:
         """Count LOW confidence markers."""
-        return sum(1 for m in self.markers if m.confidence == ConfidenceLevel.LOW)
+        return sum(1 for m in iter(self.markers) if operator.eq(m.confidence, ConfidenceLevel.LOW))
 
-    def total_count(self) -> int:
+    @cython.ccall
+    def total_count(self) -> cython.longlong:
         """Total marker count."""
         return len(self.markers)
 
+    @cython.ccall
     def to_dict(self) -> dict[str, object]:
         """Convert to dictionary representation."""
         return {
@@ -135,29 +144,32 @@ class ConfidenceTracker:
                     "evidence_count": m.evidence_count,
                     "reason": m.reason,
                 }
-                for m in self.markers
+                for m in iter(self.markers)
             ],
         }
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class FunctionConfidenceReport:
     """Confidence report for a single function."""
 
-    func_addr: int
-    func_name: str
+    func_addr: cython.longlong
+    func_name: object
     confidence_tracker: ConfidenceTracker
-    assumptions: list[str] = field(default_factory=list)
-    critical_unknowns: list[str] = field(default_factory=list)
+    assumptions: object = field(default_factory=list)
+    critical_unknowns: object = field(default_factory=list)
 
-    def add_assumption(self, assumption: str) -> None:
+    @cython.ccall
+    def add_assumption(self, assumption: object) -> None:
         """Record an assumption."""
         self.assumptions.append(assumption)
 
-    def add_critical_unknown(self, unknown: str) -> None:
+    @cython.ccall
+    def add_critical_unknown(self, unknown: object) -> None:
         """Record a critical unknown (may affect correctness)."""
         self.critical_unknowns.append(unknown)
 
+    @cython.ccall
     def overall_confidence(self) -> ConfidenceLevel:
         """Determine overall function confidence."""
         # Critical unknowns always lower confidence to LOW
@@ -181,8 +193,11 @@ class FunctionConfidenceReport:
         else:
             return ConfidenceLevel.MEDIUM
 
+    @cython.ccall
     def comment_header(self) -> str:
         """Generate function comment header with confidence breakdown."""
+        assumption: object
+        unknown: object
         lines = [
             f"// {self.func_name} @ {hex(self.func_addr)}",
             f"// Confidence: {self.overall_confidence().value}",
@@ -209,6 +224,7 @@ class FunctionConfidenceReport:
 
         return "\n".join(lines)
 
+    @cython.ccall
     def to_dict(self) -> dict[str, object]:
         """Convert to dictionary representation."""
         return {
@@ -223,25 +239,26 @@ class FunctionConfidenceReport:
         }
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class ScanConfidenceSummary:
     """Summary of confidence levels across multiple functions."""
 
-    total_functions: int = 0
-    high_confidence_count: int = 0
-    medium_confidence_count: int = 0
-    low_confidence_count: int = 0
-    total_assumptions: int = 0
-    total_critical_unknowns: int = 0
+    total_functions: cython.longlong = 0
+    high_confidence_count: cython.longlong = 0
+    medium_confidence_count: cython.longlong = 0
+    low_confidence_count: cython.longlong = 0
+    total_assumptions: cython.longlong = 0
+    total_critical_unknowns: cython.longlong = 0
 
+    @cython.ccall
     def add_function_report(self, report: FunctionConfidenceReport) -> None:
         """Add a function report to the summary."""
         self.total_functions += 1
         confidence = report.overall_confidence()
 
-        if confidence == ConfidenceLevel.HIGH:
+        if operator.eq(confidence, ConfidenceLevel.HIGH):
             self.high_confidence_count += 1
-        elif confidence == ConfidenceLevel.MEDIUM:
+        elif operator.eq(confidence, ConfidenceLevel.MEDIUM):
             self.medium_confidence_count += 1
         else:
             self.low_confidence_count += 1
@@ -249,12 +266,14 @@ class ScanConfidenceSummary:
         self.total_assumptions += len(report.assumptions)
         self.total_critical_unknowns += len(report.critical_unknowns)
 
-    def high_confidence_ratio(self) -> float:
+    @cython.ccall
+    def high_confidence_ratio(self) -> cython.double:
         """Percentage of high-confidence functions."""
         if self.total_functions == 0:
             return 0.0
         return self.high_confidence_count / self.total_functions
 
+    @cython.ccall
     def scan_classification(self) -> str:
         """Overall scan classification based on confidence distribution."""
         if self.total_functions == 0:
@@ -270,6 +289,7 @@ class ScanConfidenceSummary:
         else:
             return "partial"
 
+    @cython.ccall
     def to_dict(self) -> dict[str, object]:
         """Convert to dictionary representation."""
         return {
@@ -284,12 +304,13 @@ class ScanConfidenceSummary:
         }
 
 
+@cython.ccall
 def build_function_with_confidence_markers(
-    cfunc: object | None,
+    cfunc: object,
     confidence_report: FunctionConfidenceReport,
     *,
     codegen: object | None = None,
-) -> bool:
+) -> cython.bint:
     """Attach confidence markers across the dynamic third-party decompiler object boundary.
 
     Args:
@@ -300,6 +321,7 @@ def build_function_with_confidence_markers(
     Returns:
         True if markers were successfully attached
     """
+    cfunc_metadata: object
     if cfunc is None:
         return False
 
@@ -332,10 +354,10 @@ def build_function_with_confidence_markers(
     return True
 
 
-def apply_x86_16_confidence_and_assumptions(codegen: object) -> bool:
+def apply_x86_16_confidence_and_assumptions(codegen: object) -> cython.bint:
     """Attach confidence metadata without marking structuring as changed."""
 
-    def _impl() -> bool:
+    def _impl() -> cython.bint:
         """Attach confidence markers through the dynamic third-party angr codegen boundary.
 
         This pass:
@@ -355,6 +377,11 @@ def apply_x86_16_confidence_and_assumptions(codegen: object) -> bool:
             by the producer-evidence projection propagates unchanged; absent or
             malformed evidence is reported, never fabricated.
         """
+        cfunc: object
+        func_addr: object
+        func_name: object
+        assumption: object
+        unknown: object
         # Dynamic codegen boundary: angr codegen supplies cfunc at runtime.
         codegen_dynamic = cast(Any, codegen)
         cfunc = getattr(codegen_dynamic, "cfunc", None)
@@ -397,23 +424,28 @@ def apply_x86_16_confidence_and_assumptions(codegen: object) -> bool:
     return _impl()
 
 
-def _record_channel_diagnostics_8616[ItemT](
+@cython.ccall
+def _record_channel_diagnostics_8616(
     report: FunctionConfidenceReport,
-    channel_name: str,
+    channel_name: object,
     channel: EvidenceChannel[ItemT],
 ) -> None:
     """Record producer errors and malformed evidence as explicit assumptions."""
+    malformed: object
     if channel.error is not None:
         report.add_assumption(f"{channel_name} producer reported an error: {channel.error}")
     for malformed in channel.malformed:
         report.add_assumption(f"ignored malformed {channel_name} evidence: {malformed}")
 
 
+@cython.ccall
 def _collect_struct_confidence_8616(
     tracker: ConfidenceTracker,
     channel: EvidenceChannel[StructEvidenceItem],
 ) -> None:
     """Record confidence markers for projected struct evidence (Phase 2.3)."""
+    item: object
+    refusal: object
     for item in channel.items:
         if item.refusal_reason is not None or not item.segmented_allowed:
             confidence = ConfidenceLevel.LOW
@@ -438,11 +470,14 @@ def _collect_struct_confidence_8616(
         )
 
 
+@cython.ccall
 def _collect_array_confidence_8616(
     tracker: ConfidenceTracker,
     channel: EvidenceChannel[ArrayEvidenceItem],
 ) -> None:
     """Record confidence markers for projected array evidence (Phase 2.2)."""
+    item: object
+    refusal: object
     for item in channel.items:
         confidence = ConfidenceLevel.HIGH if item.evidence_count >= 3 else ConfidenceLevel.MEDIUM
         tracker.add_marker(
@@ -462,7 +497,8 @@ def _collect_array_confidence_8616(
         )
 
 
-def _segment_association_confidence_8616(stability: float) -> ConfidenceLevel:
+@cython.ccall
+def _segment_association_confidence_8616(stability: cython.double) -> ConfidenceLevel:
     """Map segment-association stability to a confidence level."""
     if stability >= 0.8:
         return ConfidenceLevel.HIGH
@@ -471,11 +507,13 @@ def _segment_association_confidence_8616(stability: float) -> ConfidenceLevel:
     return ConfidenceLevel.LOW
 
 
+@cython.ccall
 def _collect_segmented_memory_confidence_8616(
     tracker: ConfidenceTracker,
     channel: EvidenceChannel[SegmentEvidenceItem],
 ) -> None:
     """Record confidence markers for projected segment associations (Phase 3)."""
+    item: object
     for item in channel.items:
         tracker.add_marker(
             fact_kind="segmented_memory",

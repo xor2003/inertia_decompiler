@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Consume exact stack projection facts during final validation.
 
 Layer: Tail validation.
@@ -12,6 +13,7 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import cython
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_variable import SimStackVariable
@@ -21,14 +23,17 @@ from inertia.lowering.condition_stack_projection_contracts import (
     condition_stack_projection_fact_8616,
 )
 from inertia.lowering.stack_variable_coordinates import machine_bp_offset_for_stack_variable_8616
+import operator
 
 _BITS_PER_BYTE = 8
 
 
+@cython.ccall
 def validated_stack_projection_fact_8616(
     expression: object,
 ) -> ConditionStackProjectionFact8616 | None:
     """Return one internally consistent BP-relative projection fact."""
+    fact: object
     if not isinstance(expression, structured_c.CExpression):
         return None
     fact = condition_stack_projection_fact_8616(expression)
@@ -45,14 +50,16 @@ def validated_stack_projection_fact_8616(
     return fact
 
 
-def proven_stack_projection_fingerprint_8616(expression: object) -> str | None:
+@cython.ccall
+def proven_stack_projection_fingerprint_8616(expression: object) -> object:
     """Identify a contained word only when its AST implements the typed view."""
+    fact: object
     fact = validated_stack_projection_fact_8616(expression)
     if fact is None or not isinstance(expression, structured_c.CBinaryOp):
         return None
     mask = expression.rhs
     expected_mask = (1 << (fact.view_size * _BITS_PER_BYTE)) - 1
-    if expression.op != "And" or not isinstance(mask, structured_c.CConstant) or mask.value != expected_mask:
+    if expression.op != "And" or not isinstance(mask, structured_c.CConstant) or operator.ne(mask.value, expected_mask):
         return None
     owner = expression.lhs
     shift_bits = (fact.view_offset - fact.owner_offset) * _BITS_PER_BYTE
@@ -60,18 +67,18 @@ def proven_stack_projection_fingerprint_8616(expression: object) -> str | None:
         if not isinstance(owner, structured_c.CBinaryOp) or owner.op != "Shr":
             return None
         shift = owner.rhs
-        if not isinstance(shift, structured_c.CConstant) or shift.value != shift_bits:
+        if not isinstance(shift, structured_c.CConstant) or operator.ne(shift.value, shift_bits):
             return None
         owner = owner.lhs
     if not isinstance(owner, structured_c.CVariable) or not isinstance(owner.variable, SimStackVariable):
         return None
     variable = owner.variable
-    if variable.base != "bp" or variable.size != fact.owner_size:
+    if variable.base != "bp" or operator.ne(variable.size, fact.owner_size):
         return None
-    if machine_bp_offset_for_stack_variable_8616(owner.codegen, variable) != fact.owner_offset:
+    if operator.ne(machine_bp_offset_for_stack_variable_8616(owner.codegen, variable), fact.owner_offset):
         return None
     # A stale narrowed C type could discard the high word before the shift.
-    if owner.variable_type is None or owner.variable_type.size != fact.owner_size * _BITS_PER_BYTE:
+    if owner.variable_type is None or operator.ne(owner.variable_type.size, fact.owner_size * _BITS_PER_BYTE):
         return None
     return f"stack_slot:SS:BP{fact.view_offset:+#x}:size{fact.view_size}"
 

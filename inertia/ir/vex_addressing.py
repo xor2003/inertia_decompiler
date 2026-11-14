@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Lift VEX address expressions into typed IR addresses.
 
 Layer: IR.
@@ -10,6 +11,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
@@ -29,6 +32,8 @@ from .scalar_value_projection import (
     ScalarProjectionKind8616,
     scalar_read_projection_8616,
 )
+import dataclasses
+import operator
 
 __all__ = [
     "block_segment_hints",
@@ -36,10 +41,10 @@ __all__ = [
 ]
 
 
-def _infer_address_space(base: tuple[str, ...]) -> tuple[MemSpace, AddressStatus, SegmentOrigin]:
+def _infer_address_space(base: object) -> tuple[MemSpace, AddressStatus, SegmentOrigin]:
     if not base:
         return MemSpace.UNKNOWN, AddressStatus.UNKNOWN, SegmentOrigin.UNKNOWN
-    if any(name in {"bp", "sp"} for name in base):
+    if any(name in {"bp", "sp"} for name in iter(base)):
         return MemSpace.SS, AddressStatus.STABLE, SegmentOrigin.PROVEN
     return MemSpace.DS, AddressStatus.PROVISIONAL, SegmentOrigin.DEFAULTED
 
@@ -78,7 +83,9 @@ class _VexExprBoundary(Protocol):
     con: _VexConstBoundary
 
 
-def _parse_string_family(mnemonic: str) -> str | None:
+@cython.ccall
+def _parse_string_family(mnemonic: object) -> object:
+    family: object
     text = mnemonic.strip().lower()
     if not text:
         return None
@@ -90,19 +97,20 @@ def _parse_string_family(mnemonic: str) -> str | None:
     return None
 
 
-type SegmentHintMap = dict[tuple[str, ...], tuple[MemSpace, AddressStatus, SegmentOrigin]]
+SegmentHintMap = typing.TypeAliasType("SegmentHintMap", dict[tuple[str, ...], tuple[MemSpace, AddressStatus, SegmentOrigin]])
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _AddressParts8616:
     """Lossless segmented components recovered from a VEX linear address."""
 
-    segment: str | None = None
+    segment: object = None
     base: tuple[str, ...] = ()
-    offset: int = 0
+    offset: cython.longlong = 0
     base_values: tuple[IRValue, ...] = ()
 
 
+@cython.ccall
 def _vex_tag(expr: object) -> str:
     try:
         tag = cast(_VexExprBoundary, expr).tag
@@ -111,17 +119,20 @@ def _vex_tag(expr: object) -> str:
     return str(tag or "")
 
 
-def _external_int(value: object, default: int = 0) -> int:
+@cython.ccall
+def _external_int(value: object, default: cython.longlong = 0) -> cython.longlong:
     try:
         return int(cast(Any, value))
     except (TypeError, ValueError):
         return default
 
 
-def _vex_tmp(expr: object) -> int:
+@cython.ccall
+def _vex_tmp(expr: object) -> cython.longlong:
     return _external_int(cast(_VexExprBoundary, expr).tmp)
 
 
+@cython.ccall
 def _vex_op(expr: object) -> str:
     try:
         op = cast(_VexExprBoundary, expr).op
@@ -130,6 +141,7 @@ def _vex_op(expr: object) -> str:
     return str(op or "")
 
 
+@cython.ccall
 def _vex_args(expr: object) -> tuple[object, ...]:
     try:
         args = cast(_VexExprBoundary, expr).args
@@ -138,7 +150,8 @@ def _vex_args(expr: object) -> tuple[object, ...]:
     return tuple(args or ())
 
 
-def _vex_const_value(expr: object) -> int:
+@cython.ccall
+def _vex_const_value(expr: object) -> cython.longlong:
     try:
         value = cast(_VexExprBoundary, expr).con.value
     except AttributeError:
@@ -146,8 +159,10 @@ def _vex_const_value(expr: object) -> int:
     return _external_int(value)
 
 
+@cython.ccall
 def block_segment_hints(block: object) -> SegmentHintMap:
     """Infer segment defaults from external Capstone string-instruction metadata."""
+    insn: object
     try:
         capstone = cast(_CapstoneBlockBoundary, block).capstone
         insns = tuple(cast(_CapstoneInsnListBoundary, capstone).insns or ())
@@ -168,14 +183,14 @@ def block_segment_hints(block: object) -> SegmentHintMap:
 
 
 def _address_from_parts(
-    base: tuple[str, ...],
-    offset: int = 0,
+    base: object,
+    offset: cython.longlong = 0,
     *,
-    size: int = 0,
-    expr: tuple[str, ...] | None = None,
+    size: cython.longlong = 0,
+    expr: object = None,
     segment_hints: SegmentHintMap | None = None,
-    explicit_segment: str | None = None,
-    base_values: tuple[IRValue, ...] = (),
+    explicit_segment: object = None,
+    base_values: object = (),
 ) -> IRAddress:
     """Retain captured reads and the producer's explicit segment choice.
 
@@ -183,6 +198,8 @@ def _address_from_parts(
     unknown. Register defaults and contextual hints cannot replace it with
     another segment: that would change alias identity and the memory effect.
     """
+    hinted: object
+    space: object
     explicit_spaces = {"cs": MemSpace.CS, "ss": MemSpace.SS, "ds": MemSpace.DS, "es": MemSpace.ES}
     if explicit_segment is not None:
         space = explicit_spaces.get(explicit_segment, MemSpace.UNKNOWN)
@@ -204,24 +221,25 @@ def _address_from_parts(
         segment_origin=segment_origin,
         expr=expr,
         base_values=base_values or tuple(
-            IRValue(MemSpace.REG, name=name, size=2) for name in base
+            IRValue(MemSpace.REG, name=name, size=2) for name in iter(base)
         ),
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _VexAddressContext8616:
     """Shared external-expression inputs for one address lift."""
 
-    tmps: Mapping[int, IRValue]
-    conditions: Mapping[int, IRCondition]
+    tmps: Mapping[cython.longlong, IRValue]
+    conditions: Mapping[cython.longlong, IRCondition]
     expr_to_value: Callable[[object, Mapping[int, IRValue], Mapping[int, IRCondition]], IRValue]
-    size: int = 0
+    size: cython.longlong = 0
     segment_hints: SegmentHintMap | None = None
     tmp_exprs: Mapping[int, object] | None = None
 
 
-def _vex_unknown_8616(ctx: _VexAddressContext8616, expr_tag: tuple[str, ...]) -> IRAddress:
+@cython.ccall
+def _vex_unknown_8616(ctx: _VexAddressContext8616, expr_tag: object) -> IRAddress:
     """Return an unknown-space address tagged with the refused expression."""
     return IRAddress(
         MemSpace.UNKNOWN,
@@ -232,7 +250,8 @@ def _vex_unknown_8616(ctx: _VexAddressContext8616, expr_tag: tuple[str, ...]) ->
     )
 
 
-def _pure_segment_8616(parts: _AddressParts8616) -> str | None:
+@cython.ccall
+def _pure_segment_8616(parts: _AddressParts8616) -> object:
     """Return the segment register when the parts are a bare segment read."""
     if parts.segment is None and parts.offset == 0 and len(parts.base) == 1:
         register = parts.base[0]
@@ -241,7 +260,8 @@ def _pure_segment_8616(parts: _AddressParts8616) -> str | None:
     return None
 
 
-def _wrapped_displacement_8616(value: int, op: str) -> int:
+@cython.ccall
+def _wrapped_displacement_8616(value: cython.longlong, op: object) -> cython.longlong:
     """Wrap a 16-bit displacement into its signed machine offset."""
     if "16" in op:
         value &= 0xFFFF
@@ -250,12 +270,13 @@ def _wrapped_displacement_8616(value: int, op: str) -> int:
 
 
 _UNARY_FOLD_DEPTH_LIMIT_8616 = 8
-_UNARY_COMPLEMENT_OPS_8616: dict[str, int] = {
-    f"Iop_Not{bits}": bits for bits in (8, 16, 32, 64)
+_UNARY_COMPLEMENT_OPS_8616: dict[str, cython.longlong] = {
+    f"Iop_Not{bits}": bits for bits in iter((8, 16, 32, 64))
 }
 
 
-def _unary_conversion_8616(unary: IRActiveUnary8616, operand_bits: int) -> ScalarProjection8616 | None:
+@cython.ccall
+def _unary_conversion_8616(unary: IRActiveUnary8616, operand_bits: cython.longlong) -> ScalarProjection8616 | None:
     """Authenticate an active unary as an exact conversion via the adapter.
 
     The scalar-projection adapter owns the single conversion-name truth;
@@ -263,6 +284,7 @@ def _unary_conversion_8616(unary: IRActiveUnary8616, operand_bits: int) -> Scala
     width must equal the operand's actual width and the declared target must
     equal the authoritative VEX result width.
     """
+    decision: object
     decision = scalar_read_projection_8616(
         read_expr=(unary.op,),
         read_bits=unary.result_bits,
@@ -274,10 +296,12 @@ def _unary_conversion_8616(unary: IRActiveUnary8616, operand_bits: int) -> Scala
     return decision
 
 
+@cython.ccall
 def _fold_const_conversion_8616(
-    operand: IRValue, decision: ScalarProjection8616, size: int,
+    operand: IRValue, decision: ScalarProjection8616, size: cython.longlong,
 ) -> IRValue | None:
     """Fold one exact-constant operand through an authenticated conversion."""
+    const: object
     const = operand.const
     if operand.source_tmp is not None or const is None or const < 0:
         return None
@@ -293,7 +317,8 @@ def _fold_const_conversion_8616(
     return IRValue(MemSpace.CONST, const=folded, size=size)
 
 
-def _fold_unary_operand_8616(unary: IRActiveUnary8616, operand: IRValue, size: int) -> IRValue | None:
+@cython.ccall
+def _fold_unary_operand_8616(unary: IRActiveUnary8616, operand: IRValue, size: cython.longlong) -> IRValue | None:
     """Fold one authenticated unary over a resolved operand.
 
     Over an exact constant the operation folds to its exact integer at the
@@ -301,6 +326,8 @@ def _fold_unary_operand_8616(unary: IRActiveUnary8616, operand: IRValue, size: i
     the operand through unchanged — it preserves the numeric value; sign
     extension and truncation alter it and refuse.
     """
+    bits: object
+    decision: object
     decision = _unary_conversion_8616(unary, operand.size * 8)
     if decision is not None:
         if operand.space is MemSpace.CONST and operand.const is not None and operand.offset == 0:
@@ -309,7 +336,7 @@ def _fold_unary_operand_8616(unary: IRActiveUnary8616, operand: IRValue, size: i
             return None
         return operand
     bits = _UNARY_COMPLEMENT_OPS_8616.get(unary.op)
-    if bits is None or unary.result_bits != bits or operand.size * 8 != bits:
+    if bits is None or operator.ne(unary.result_bits, bits) or operator.ne(operand.size * 8, bits):
         return None
     if operand.space is not MemSpace.CONST or operand.const is None or operand.offset != 0:
         return None
@@ -319,7 +346,8 @@ def _fold_unary_operand_8616(unary: IRActiveUnary8616, operand: IRValue, size: i
     return IRValue(MemSpace.CONST, const=(~operand.const) & mask, size=size)
 
 
-def _resolved_active_operand_8616(value: IRValue, depth: int) -> IRValue | None:
+@cython.ccall
+def _resolved_active_operand_8616(value: IRValue, depth: cython.longlong) -> IRValue | None:
     """Resolve one operand to a view carrying no pending unary operation.
 
     A ``source_tmp``-pinned value names an already-computed definition and
@@ -327,6 +355,8 @@ def _resolved_active_operand_8616(value: IRValue, depth: int) -> IRValue | None:
     must be consumed here, never read from the projected REG/CONST fields.
     Contradictory or unsupported operations refuse instead of guessing.
     """
+    operand: object
+    unary: object
     if (value.index is not None or value.call_output is not None
             or (value.space is MemSpace.CONST and value.source_tmp is not None)):
         # CONST is a producer projection, not the captured result.
@@ -336,7 +366,7 @@ def _resolved_active_operand_8616(value: IRValue, depth: int) -> IRValue | None:
         return value
     if value.source_tmp is not None or depth >= _UNARY_FOLD_DEPTH_LIMIT_8616:
         return None
-    if value.expr is not None and value.expr != (unary.op,):
+    if value.expr is not None and operator.ne(value.expr, (unary.op,)):
         return None
     operand = _resolved_active_operand_8616(unary.operand, depth + 1)
     if operand is None:
@@ -344,6 +374,7 @@ def _resolved_active_operand_8616(value: IRValue, depth: int) -> IRValue | None:
     return _fold_unary_operand_8616(unary, operand, value.size)
 
 
+@cython.ccall
 def _base_capture_8616(value: IRValue) -> IRValue:
     """Return the address-base evidence view of one operand.
 
@@ -356,7 +387,8 @@ def _base_capture_8616(value: IRValue) -> IRValue:
     return replace(value, offset=0)
 
 
-def _operand_displacement_8616(value: IRValue) -> int:
+@cython.ccall
+def _operand_displacement_8616(value: IRValue) -> cython.longlong:
     """Return the offset contribution of one base operand.
 
     A pinned operand's offset is provenance inside its captured temporary
@@ -369,14 +401,14 @@ def _operand_displacement_8616(value: IRValue) -> int:
 def _combine_add_8616(
     left: _AddressParts8616,
     right: _AddressParts8616,
-    op: str,
+    op: object,
 ) -> _AddressParts8616 | None:
     """Merge two decomposed sides of an Add into one address part."""
     if left.segment is not None and right.segment is not None:
         return None
     segment = left.segment or right.segment
     base = (*left.base, *right.base)
-    if len(base) > 2 or any(name in {"cs", "ds", "es", "ss"} for name in base):
+    if len(base) > 2 or any(name in {"cs", "ds", "es", "ss"} for name in iter(base)):
         return None
     left_offset = _wrapped_displacement_8616(left.offset, op) if not left.base and left.segment is None else left.offset
     right_offset = (
@@ -384,16 +416,19 @@ def _combine_add_8616(
     )
     return _AddressParts8616(
         segment=segment, base=base, offset=left_offset + right_offset,
-        base_values=(*left.base_values, *right.base_values),
+        base_values=tuple(left.base_values) + tuple(right.base_values),
     )
 
 
 def _decompose_rdtmp_8616(
     ctx: _VexAddressContext8616,
     current: object,
-    seen_tmps: frozenset[int],
+    seen_tmps: object,
 ) -> _AddressParts8616 | None:
     """Decompose one register/constant temporary read into address parts."""
+    decomposed: object
+    defining_expr: object
+    tmp_value: object
     tmp_id = _vex_tmp(current)
     if ctx.tmp_exprs is not None and tmp_id not in seen_tmps:
         defining_expr = ctx.tmp_exprs.get(tmp_id)
@@ -402,40 +437,46 @@ def _decompose_rdtmp_8616(
             if decomposed is not None:
                 if _vex_tag(defining_expr) == "Iex_Get":
                     decomposed = replace(decomposed, base_values=tuple(
-                        replace(value, source_tmp=tmp_id) for value in decomposed.base_values
+                        replace(value, source_tmp=tmp_id) for value in iter(decomposed.base_values)
                     ))
                 return decomposed
     tmp_value = ctx.tmps.get(tmp_id)
     if tmp_value is None or tmp_value.active_unary is not None:
         return None
-    if tmp_value.space == MemSpace.REG and tmp_value.name is not None:
+    if operator.eq(tmp_value.space, MemSpace.REG) and tmp_value.name is not None:
         return _AddressParts8616(
             base=(tmp_value.name,), offset=_operand_displacement_8616(tmp_value),
             base_values=(_base_capture_8616(tmp_value),),
         )
-    if (tmp_value.space == MemSpace.CONST and tmp_value.const is not None
+    if (operator.eq(tmp_value.space, MemSpace.CONST) and tmp_value.const is not None
             and tmp_value.source_tmp is None):
         return _AddressParts8616(offset=int(tmp_value.const))
     return None
 
 
-def _is_const_offset_8616(parts: _AddressParts8616, offset: int) -> bool:
+@cython.ccall
+def _is_const_offset_8616(parts: _AddressParts8616, offset: cython.longlong) -> cython.bint:
     """Return whether the parts are a bare constant offset."""
-    return parts.segment is None and not parts.base and parts.offset == offset
+    return parts.segment is None and not parts.base and operator.eq(parts.offset, offset)
 
 
+@cython.ccall
 def _segment_part_8616(parts: _AddressParts8616) -> _AddressParts8616 | None:
     """Return a segment-only part when the side is a pure segment register."""
+    segment: object
     segment = _pure_segment_8616(parts)
     return None if segment is None else _AddressParts8616(segment=segment)
 
 
+@cython.ccall
 def _decompose_binop_8616(
     ctx: _VexAddressContext8616,
     current: object,
-    seen_tmps: frozenset[int],
+    seen_tmps: object,
 ) -> _AddressParts8616 | None:
     """Decompose one VEX binary operator into combined address parts."""
+    left: object
+    right: object
     op = _vex_op(current)
     args = _vex_args(current)
     if len(args) != 2:
@@ -464,12 +505,14 @@ def _decompose_binop_8616(
     return None
 
 
+@cython.ccall
 def _decompose_address_8616(
     ctx: _VexAddressContext8616,
     current: object,
-    seen_tmps: frozenset[int] = frozenset(),
+    seen_tmps: object = frozenset(),
 ) -> _AddressParts8616 | None:
     """Decompose one VEX expression into segmented address parts."""
+    resolved: object
     current_tag = _vex_tag(current)
     if current_tag == "Iex_RdTmp":
         return _decompose_rdtmp_8616(ctx, current, seen_tmps)
@@ -500,7 +543,8 @@ def _decompose_address_8616(
     return _decompose_binop_8616(ctx, current, seen_tmps)
 
 
-def _zero_extension_8616(ctx: _VexAddressContext8616, current: object, operand_expr: object) -> bool:
+@cython.ccall
+def _zero_extension_8616(ctx: _VexAddressContext8616, current: object, operand_expr: object) -> cython.bint:
     """Whether one Unop is an exact value-preserving zero extension.
 
     Only unsigned widening keeps every decomposed lane exact; sign extension
@@ -509,6 +553,7 @@ def _zero_extension_8616(ctx: _VexAddressContext8616, current: object, operand_e
     converted operand width and the authoritative VEX result width — never
     the rendered operation text alone.
     """
+    decision: object
     operand = ctx.expr_to_value(operand_expr, ctx.tmps, ctx.conditions)
     wrapper = ctx.expr_to_value(current, ctx.tmps, ctx.conditions)
     result_bits = (
@@ -530,15 +575,17 @@ def _zero_extension_8616(ctx: _VexAddressContext8616, current: object, operand_e
     )
 
 
+@cython.ccall
 def _address_from_rdtmp_8616(ctx: _VexAddressContext8616, expr: object) -> IRAddress:
     """Lift one register temporary read into a typed IR address."""
+    tmp_value: object
     tmp_id = _vex_tmp(expr)
     tmp_value = ctx.tmps.get(tmp_id)
     if tmp_value is None:
         return _vex_unknown_8616(ctx, ("rdtmp", f"t{tmp_id}"))
     if tmp_value.active_unary is not None:
         return _vex_unknown_8616(ctx, ("active_tmp", f"t{tmp_id}"))
-    if tmp_value.space == MemSpace.REG and tmp_value.name is not None:
+    if operator.eq(tmp_value.space, MemSpace.REG) and tmp_value.name is not None:
         return _address_from_parts(
             (tmp_value.name,),
             _operand_displacement_8616(tmp_value),
@@ -564,6 +611,8 @@ def _address_from_binop_8616(ctx: _VexAddressContext8616, expr: object) -> IRAdd
     REG/CONST fields. Base values keep their temporary capture identity so
     consumers bind the captured register version, not current storage.
     """
+    left: object
+    right: object
     op = _vex_op(expr)
     args = _vex_args(expr)
     if len(args) != 2:
@@ -578,8 +627,8 @@ def _address_from_binop_8616(ctx: _VexAddressContext8616, expr: object) -> IRAdd
         return _vex_unknown_8616(ctx, (op, "active_operand"))
     if (
         "Add" in op
-        and left.space == MemSpace.REG
-        and right.space == MemSpace.CONST
+        and operator.eq(left.space, MemSpace.REG)
+        and operator.eq(right.space, MemSpace.CONST)
         and right.const is not None
         and left.name
     ):
@@ -593,8 +642,8 @@ def _address_from_binop_8616(ctx: _VexAddressContext8616, expr: object) -> IRAdd
         )
     if (
         "Sub" in op
-        and left.space == MemSpace.REG
-        and right.space == MemSpace.CONST
+        and operator.eq(left.space, MemSpace.REG)
+        and operator.eq(right.space, MemSpace.CONST)
         and right.const is not None
         and left.name
     ):
@@ -606,7 +655,7 @@ def _address_from_binop_8616(ctx: _VexAddressContext8616, expr: object) -> IRAdd
             segment_hints=ctx.segment_hints,
             base_values=(_base_capture_8616(left),),
         )
-    if "Add" in op and left.space == MemSpace.REG and right.space == MemSpace.REG and left.name and right.name:
+    if "Add" in op and operator.eq(left.space, MemSpace.REG) and operator.eq(right.space, MemSpace.REG) and left.name and right.name:
         ordered = sorted((left, right), key=lambda operand: operand.name or "")
         return _address_from_parts(
             (ordered[0].name or "", ordered[1].name or ""),
@@ -619,17 +668,19 @@ def _address_from_binop_8616(ctx: _VexAddressContext8616, expr: object) -> IRAdd
     return _vex_unknown_8616(ctx, (op,))
 
 
+@cython.ccall
 def expr_to_address(
     expr: object,
-    tmps: Mapping[int, IRValue],
-    conditions: Mapping[int, IRCondition],
+    tmps: Mapping[cython.longlong, IRValue],
+    conditions: Mapping[cython.longlong, IRCondition],
     *,
     expr_to_value: Callable[[object, Mapping[int, IRValue], Mapping[int, IRCondition]], IRValue],
-    size: int = 0,
+    size: cython.longlong = 0,
     segment_hints: SegmentHintMap | None = None,
     tmp_exprs: Mapping[int, object] | None = None,
 ) -> IRAddress:
     """Lift one external VEX address expression into the typed IR address model."""
+    parts: object
     ctx = _VexAddressContext8616(
         tmps, conditions, expr_to_value,
         size=size, segment_hints=segment_hints, tmp_exprs=tmp_exprs,
@@ -653,7 +704,7 @@ def expr_to_address(
     if tag == "Iex_Get":
         value = expr_to_value(expr, tmps, conditions)
         return _address_from_parts(
-            () if value.name is None else (value.name,),
+            tuple(()) if value.name is None else tuple((value.name,)),
             value.offset,
             size=size,
             expr=("register_get", value.name or ""),

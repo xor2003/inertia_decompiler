@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Immutable evidence for binary terminal stack effects.
 
 Layer: Semantics.
@@ -9,13 +10,17 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, cast
+import dataclasses
+import operator
 
-_DECODED_PREFIX_SLOTS: int = 4
-_OPERAND_SIZE_OVERRIDE: int = 0x66
+_DECODED_PREFIX_SLOTS: cython.longlong = 4
+_OPERAND_SIZE_OVERRIDE: cython.longlong = 0x66
 
 
 class TerminalReturnFrameKind8616(StrEnum):
@@ -26,27 +31,27 @@ class TerminalReturnFrameKind8616(StrEnum):
     INTERRUPT = "interrupt"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalStackCleanupEvidence8616:
     """Closed accounting for distinct reachable returns and incomplete edges."""
 
-    cleanup_amounts: frozenset[int]
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    cleanup_amounts: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
     return_frame_kinds: frozenset[TerminalReturnFrameKind8616] = frozenset()
     return_operand_bits: frozenset[int | None] = frozenset()
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every reachable terminal fact has a valid cleanup amount."""
         return (
             self.raw_fact_count > 0
-            and self.normalized_fact_count == self.raw_fact_count
-            and self.classified_fact_count == self.raw_fact_count
-            and self.materialized_count == self.classified_fact_count
+            and operator.eq(self.normalized_fact_count, self.raw_fact_count)
+            and operator.eq(self.classified_fact_count, self.raw_fact_count)
+            and operator.eq(self.materialized_count, self.classified_fact_count)
             and self.failure_count == 0
         )
 
@@ -75,15 +80,16 @@ class TerminalStackCleanupEvidence8616:
 class _DecodedReturnBoundary8616(Protocol):
     """Capstone prefix field at the instruction decoder boundary."""
 
-    prefix: list[int]
+    prefix: object
 
 
+@cython.ccall
 def decoded_return_operand_bits_8616(instruction: object) -> int | None:
     """Read operand size from decoded prefixes in the 16-bit default mode."""
     try:
         prefixes = cast(_DecodedReturnBoundary8616, instruction).prefix
     except AttributeError:
         return None
-    if not isinstance(prefixes, (list, tuple)) or len(prefixes) != _DECODED_PREFIX_SLOTS:
+    if not isinstance(prefixes, (list, tuple)) or operator.ne(len(prefixes), _DECODED_PREFIX_SLOTS):
         return None
     return 32 if _OPERAND_SIZE_OVERRIDE in prefixes else 16

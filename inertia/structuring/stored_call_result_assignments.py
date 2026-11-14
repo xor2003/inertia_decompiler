@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize exact stored call results as structured assignments.
 
 Layer: Structuring.
@@ -14,6 +15,8 @@ preserve its value immediately: later reads may outlive the destination slot.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -37,6 +40,9 @@ from .stored_call_result_assignment_ast import (
     stored_call_result_summary_for_occurrence_8616,
 )
 from .stored_call_result_registers import is_stored_call_return_register_destination_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = ("materialize_stored_call_result_assignments_8616",)
 
@@ -56,35 +62,35 @@ class StoredCallResultAssignmentRefusalReason8616(StrEnum):
     RETURN_REGISTER_CONFLICT = "return_register_conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StoredCallResultAssignmentRefusal8616:
     """One refused callsite and its typed reason."""
 
-    callsite_addr: int
+    callsite_addr: cython.longlong
     reason: StoredCallResultAssignmentRefusalReason8616
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class StoredCallResultAssignmentStats8616:
     """Closed evidence-loop counters for stored call-result assignments."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StoredCallResultAssignmentResult8616:
     """Materialization result published on the active code generator."""
 
     verdict: StoredCallResultAssignmentVerdict8616
     stats: StoredCallResultAssignmentStats8616
-    refusals: tuple[StoredCallResultAssignmentRefusal8616, ...]
+    refusals: object
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether at least one structured assignment was created."""
         return self.stats.materialized_count > 0
 
@@ -99,22 +105,24 @@ class _CodegenSurface8616(Protocol):
     """Codegen fields consumed and published by this Structuring owner."""
 
     cfunc: _CFunctionSurface8616
-    _inertia_callsite_summaries: dict[int, CallsiteSummary8616]
+    _inertia_callsite_summaries: object
     _inertia_stored_call_result_assignments_8616: StoredCallResultAssignmentResult8616
 
 
-def _canonical_stack_offset_8616(offset: int) -> int:
+@cython.ccall
+def _canonical_stack_offset_8616(offset: cython.longlong) -> cython.longlong:
     """Normalize one 16-bit BP displacement to signed storage identity."""
     normalized = offset & 0xFFFF
     return normalized - 0x10000 if normalized >= 0x8000 else normalized
 
 
+@cython.ccall
 def _statement_containers_8616(root: object) -> tuple[CStatements, ...]:
     """Return identity-deduplicated statement containers in traversal order."""
     return tuple(
         {
             id(node): node
-            for node in (root, *_iter_c_nodes_deep_8616(root))
+            for node in iter((root, ) + tuple(_iter_c_nodes_deep_8616(root)))
             if isinstance(node, CStatements)
         }.values()
     )
@@ -122,28 +130,30 @@ def _statement_containers_8616(root: object) -> tuple[CStatements, ...]:
 
 def _store_artifacts_8616(
     root: object,
-    store_ins_addr: int,
+    store_ins_addr: cython.longlong,
 ) -> tuple[tuple[CStatements, CAssignment], ...]:
     """Return store artifacts without consuming scalar register definitions."""
+    parent: object
     artifacts: list[tuple[CStatements, CAssignment]] = []
     for parent in _statement_containers_8616(root):
         artifacts.extend(
             (parent, statement)
-            for statement in tuple(parent.statements or ())
+            for statement in builtins.iter(tuple(parent.statements or ()))
             if (
                 isinstance(statement, CAssignment)
                 and not (
                     isinstance(statement.lhs, CVariable)
                     and isinstance(statement.lhs.variable, SimRegisterVariable)
                 )
-                and not any(isinstance(node, CFunctionCall) for node in _iter_c_nodes_deep_8616(statement.rhs))
-                and statement.tags.get("ins_addr") == store_ins_addr
+                and not any(isinstance(node, CFunctionCall) for node in builtins.iter(_iter_c_nodes_deep_8616(statement.rhs)))
+                and operator.eq(statement.tags.get("ins_addr"), store_ins_addr)
             )
         )
     return tuple(artifacts)
 
 
-def _exact_bp_destination_8616(destination: object, width: object) -> bool:
+@cython.ccall
+def _exact_bp_destination_8616(destination: object, width: object) -> cython.bint:
     """Return whether the pair is an exact ``("bp", int-offset)`` + positive width."""
     return (
         isinstance(destination, tuple)
@@ -155,7 +165,8 @@ def _exact_bp_destination_8616(destination: object, width: object) -> bool:
     )
 
 
-def _stored_stack_destination_8616(summary: CallsiteSummary8616) -> tuple[int, int] | None:
+@cython.ccall
+def _stored_stack_destination_8616(summary: CallsiteSummary8616) -> object:
     """Return one exact BP destination and width from a value-return summary."""
     destination = summary.return_store_destination
     width = summary.return_store_width
@@ -169,12 +180,14 @@ def _stored_stack_destination_8616(summary: CallsiteSummary8616) -> tuple[int, i
     return _canonical_stack_offset_8616(destination[1]), width
 
 
+@cython.ccall
 def _stack_destination_variable_8616(
     codegen: object,
     root: object,
-    destination: tuple[int, int],
+    destination: object,
 ) -> CVariable | None:
     """Find an existing C variable with the exact BP storage identity."""
+    node: object
     offset, width = destination
     matches: list[CVariable] = []
     for node in _iter_c_nodes_deep_8616(root):
@@ -183,33 +196,35 @@ def _stack_destination_variable_8616(
         variable = node.variable
         if (
             variable.base == "bp"
-            and machine_bp_offset_for_stack_variable_8616(codegen, variable) == offset
-            and int(variable.size) == width
+            and operator.eq(machine_bp_offset_for_stack_variable_8616(codegen, variable), offset)
+            and operator.eq(int(variable.size), width)
         ):
             matches.append(node)
     return matches[0] if matches else None
 
 
+@cython.ccall
 def _is_exact_stack_destination_8616(
     codegen: object,
     expression: object,
-    destination: tuple[int, int],
-) -> bool:
+    destination: object,
+) -> cython.bint:
     """Return whether one C lvalue owns the exact BP storage identity."""
     if not isinstance(expression, CVariable) or not isinstance(expression.variable, SimStackVariable):
         return False
     variable = expression.variable
     return (
         variable.base == "bp"
-        and machine_bp_offset_for_stack_variable_8616(codegen, variable) == destination[0]
-        and int(variable.size) == destination[1]
+        and operator.eq(machine_bp_offset_for_stack_variable_8616(codegen, variable), destination[0])
+        and operator.eq(int(variable.size), destination[1])
     )
 
 
+@cython.ccall
 def _refuse_8616(
     stats: StoredCallResultAssignmentStats8616,
-    refusals: list[StoredCallResultAssignmentRefusal8616],
-    callsite_addr: int,
+    refusals: object,
+    callsite_addr: cython.longlong,
     reason: StoredCallResultAssignmentRefusalReason8616,
 ) -> None:
     """Record one typed refusal without mutating the C AST."""
@@ -217,17 +232,21 @@ def _refuse_8616(
     refusals.append(StoredCallResultAssignmentRefusal8616(callsite_addr, reason))
 
 
+@cython.ccall
 def _process_occurrence_8616(
     codegen: object,
     root: object,
     occurrence: StoredCallResultAssignmentOccurrence8616,
-    summary_map: dict[int, CallsiteSummary8616],
+    summary_map: object,
     stats: StoredCallResultAssignmentStats8616,
-    refusals: list[StoredCallResultAssignmentRefusal8616],
-    artifacts_to_remove: dict[int, tuple[CStatements, CAssignment]],
-    owned_call_ids: set[int],
+    refusals: object,
+    artifacts_to_remove: object,
+    owned_call_ids: object,
 ) -> None:
     """Apply the binding evidence ladder to one stored call occurrence."""
+    destination: object
+    destination_variable: object
+    summary: object
     call_id = id(occurrence.call)
     if call_id in owned_call_ids:
         return
@@ -256,7 +275,7 @@ def _process_occurrence_8616(
     stats.normalized_fact_count += 1
     exact_store_statement = (
         isinstance(summary.return_store_instruction_addr, int)
-        and occurrence.statement.tags.get("ins_addr") == summary.return_store_instruction_addr
+        and operator.eq(occurrence.statement.tags.get("ins_addr"), summary.return_store_instruction_addr)
     )
     if (
         isinstance(occurrence.statement, CAssignment)
@@ -291,19 +310,22 @@ def _process_occurrence_8616(
     stats.materialized_count += 1
 
 
+@cython.ccall
 def _bind_occurrence_8616(
     codegen: object,
     root: object,
     occurrence: StoredCallResultAssignmentOccurrence8616,
     summary: CallsiteSummary8616,
-    call_id: int,
-    destination: tuple[int, int],
+    call_id: cython.longlong,
+    destination: object,
     destination_variable: object,
-    summary_map: dict[int, CallsiteSummary8616],
-    artifacts_to_remove: dict[int, tuple[CStatements, CAssignment]],
-    owned_call_ids: set[int],
+    summary_map: object,
+    artifacts_to_remove: object,
+    owned_call_ids: object,
 ) -> None:
     """Bind one proven occurrence to its stack destination variable."""
+    artifact: object
+    parent: object
     lhs = cast(CVariable, _clone_c_ast_tree_8616(destination_variable))
     if isinstance(occurrence.statement, CAssignment):
         previous_lhs = occurrence.statement.lhs
@@ -311,7 +333,7 @@ def _bind_occurrence_8616(
         if (
             isinstance(previous_lhs, CVariable)
             and isinstance(previous_lhs.variable, SimRegisterVariable)
-            and previous_lhs.variable.size == destination[1]
+            and operator.eq(previous_lhs.variable.size, destination[1])
         ):
             capture = CAssignment(
                 previous_lhs, _clone_c_ast_tree_8616(lhs),
@@ -342,6 +364,9 @@ def materialize_stored_call_result_assignments_8616(
     codegen: object,
 ) -> StoredCallResultAssignmentResult8616:
     """Bind exact stored call results to existing BP stack variables."""
+    artifact: object
+    occurrence: object
+    parent: object
     boundary = cast(_CodegenSurface8616, codegen)
     stats = StoredCallResultAssignmentStats8616()
     refusals: list[StoredCallResultAssignmentRefusal8616] = []
@@ -356,12 +381,12 @@ def materialize_stored_call_result_assignments_8616(
         return result
     if not isinstance(summary_map, dict) or any(
         not isinstance(key, int) or not isinstance(summary, CallsiteSummary8616)
-        for key, summary in summary_map.items()
+        for key, summary in builtins.iter(summary_map.items())
     ):
         raise TypeError("callsite summary carrier contains an invalid owned contract")
 
-    artifacts_to_remove: dict[int, tuple[CStatements, CAssignment]] = {}
-    owned_call_ids: set[int] = set()
+    artifacts_to_remove: dict[cython.longlong, tuple[CStatements, CAssignment]] = {}
+    owned_call_ids: set[cython.longlong] = set()
     for occurrence in stored_call_result_assignment_occurrences_8616(root):
         _process_occurrence_8616(
             codegen,
@@ -376,7 +401,7 @@ def materialize_stored_call_result_assignments_8616(
 
     for parent, artifact in artifacts_to_remove.values():
         parent.statements = [
-            statement for statement in tuple(parent.statements or ()) if statement is not artifact
+            statement for statement in builtins.iter(tuple(parent.statements or ())) if statement is not artifact
         ]
 
     verdict = (

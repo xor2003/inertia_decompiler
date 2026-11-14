@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Index read-only structured-C query keys for one mutation request.
 
 Layer: Pipeline governance.
@@ -10,6 +11,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -17,6 +20,8 @@ from angr.analyses.decompiler.structured_codegen import c as structured_c
 
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 from inertia.lowering.structured_tags import copy_structured_tags_8616
+import dataclasses
+import operator
 
 __all__ = [
     "StructuredAstQueryIndex8616",
@@ -27,17 +32,17 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StructuredAstQueryIndex8616:
     """Nodes and identities from one immutable structured-C query request."""
 
     root: object
-    nodes: tuple[object, ...]
-    node_ids: frozenset[int]
-    statement_blocks: tuple[structured_c.CStatements, ...]
-    assignments: tuple[structured_c.CAssignment, ...]
-    calls: tuple[structured_c.CFunctionCall, ...]
-    variables: tuple[structured_c.CVariable, ...]
+    nodes: object
+    node_ids: object
+    statement_blocks: object
+    assignments: object
+    calls: object
+    variables: object
 
     @classmethod
     def build(cls, root: object) -> StructuredAstQueryIndex8616:
@@ -46,22 +51,22 @@ class StructuredAstQueryIndex8616:
         return cls(
             root=root,
             nodes=nodes,
-            node_ids=frozenset(id(node) for node in nodes),
+            node_ids=frozenset(id(node) for node in iter(nodes)),
             statement_blocks=tuple(
-                node for node in nodes if isinstance(node, structured_c.CStatements)
+                node for node in iter(nodes) if isinstance(node, structured_c.CStatements)
             ),
             assignments=tuple(
-                node for node in nodes if isinstance(node, structured_c.CAssignment)
+                node for node in iter(nodes) if isinstance(node, structured_c.CAssignment)
             ),
             calls=tuple(
-                node for node in nodes if isinstance(node, structured_c.CFunctionCall)
+                node for node in iter(nodes) if isinstance(node, structured_c.CFunctionCall)
             ),
             variables=tuple(
-                node for node in nodes if isinstance(node, structured_c.CVariable)
+                node for node in iter(nodes) if isinstance(node, structured_c.CVariable)
             ),
         )
 
-    def contains(self, node: object) -> bool:
+    def contains(self, node: object) -> cython.bint:
         """Return whether ``node`` occurs by identity in this request."""
         return id(node) in self.node_ids
 
@@ -71,20 +76,20 @@ class StructuredAstQueryIndex8616:
             raise ValueError("structured AST query index belongs to a different root")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StructuredAstQuerySessionStats8616:
     """Closed accounting for one mutation-aware AST query session."""
 
-    request_count: int
-    build_count: int
-    hit_count: int
-    invalidation_count: int
+    request_count: cython.longlong
+    build_count: cython.longlong
+    hit_count: cython.longlong
+    invalidation_count: cython.longlong
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every request built or reused exactly one index."""
         return bool(
-            self.request_count == self.build_count + self.hit_count
+            operator.eq(self.request_count, self.build_count + self.hit_count)
             and min(
                 self.request_count,
                 self.build_count,
@@ -95,17 +100,18 @@ class StructuredAstQuerySessionStats8616:
         )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class StructuredAstQuerySession8616:
     """Reuse one query index until its caller reports an AST mutation."""
 
     root: object
     _index: StructuredAstQueryIndex8616 | None = None
-    _request_count: int = 0
-    _build_count: int = 0
-    _hit_count: int = 0
-    _invalidation_count: int = 0
+    _request_count: cython.longlong = 0
+    _build_count: cython.longlong = 0
+    _hit_count: cython.longlong = 0
+    _invalidation_count: cython.longlong = 0
 
+    @cython.ccall
     def current(self) -> StructuredAstQueryIndex8616:
         """Return the current index, rebuilding only after invalidation."""
         self._request_count += 1
@@ -116,13 +122,15 @@ class StructuredAstQuerySession8616:
             self._hit_count += 1
         return self._index
 
-    def record_mutation(self, changed: bool) -> bool:
+    @cython.ccall
+    def record_mutation(self, changed: cython.bint) -> cython.bint:
         """Invalidate cached projections and return the reported mutation state."""
         if changed:
             self._index = None
             self._invalidation_count += 1
         return changed
 
+    @cython.ccall
     def stats(self) -> StructuredAstQuerySessionStats8616:
         """Return immutable closed accounting for this request session."""
         result = StructuredAstQuerySessionStats8616(
@@ -136,36 +144,36 @@ class StructuredAstQuerySession8616:
         return result
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TaggedAssignmentAddressQueryStats8616:
     """Closed accounting for exact-address prefilter queries."""
 
-    query_count: int
-    hit_count: int
-    miss_count: int
-    record_count: int
+    query_count: cython.longlong
+    hit_count: cython.longlong
+    miss_count: cython.longlong
+    record_count: cython.longlong
 
     def __post_init__(self) -> None:
         """Reject incomplete query accounting at the owning boundary."""
-        if self.query_count != self.hit_count + self.miss_count:
+        if operator.ne(self.query_count, self.hit_count + self.miss_count):
             raise ValueError("tagged-assignment query accounting is not closed")
         if min(self.query_count, self.hit_count, self.miss_count, self.record_count) < 0:
             raise ValueError("tagged-assignment query counters must be non-negative")
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class TaggedAssignmentAddressIndex8616:
     """Instruction addresses carried by assignments in one current C-AST."""
 
-    addresses: set[int]
+    addresses: object
     tagged_assignments: tuple[
-        tuple[structured_c.CAssignment, frozenset[int]], ...
+        tuple[structured_c.CAssignment, frozenset[cython.longlong]], ...
     ] = ()
-    complete: bool = True
-    query_count: int = 0
-    hit_count: int = 0
-    miss_count: int = 0
-    record_count: int = 0
+    complete: cython.bint = True
+    query_count: cython.longlong = 0
+    hit_count: cython.longlong = 0
+    miss_count: cython.longlong = 0
+    record_count: cython.longlong = 0
 
     @classmethod
     def build(cls, root: object) -> TaggedAssignmentAddressIndex8616:
@@ -178,15 +186,19 @@ class TaggedAssignmentAddressIndex8616:
         query_index: StructuredAstQueryIndex8616,
     ) -> TaggedAssignmentAddressIndex8616:
         """Project exact assignment tags from one current AST query index."""
-        addresses: set[int] = set()
+        address: object
+        tags: object
+        name: object
+        node: object
+        addresses: set[cython.longlong] = set()
         tagged_assignments: list[
-            tuple[structured_c.CAssignment, frozenset[int]]
+            tuple[structured_c.CAssignment, frozenset[cython.longlong]]
         ] = []
         for node in query_index.assignments:
             tags = copy_structured_tags_8616(node.tags)
             if tags is None:
                 continue
-            assignment_addresses: set[int] = set()
+            assignment_addresses: set[cython.longlong] = set()
             for name in ("ins_addr", "inertia_relocated_from_ins_addr"):
                 address = tags.get(name)
                 if isinstance(address, int):
@@ -196,7 +208,8 @@ class TaggedAssignmentAddressIndex8616:
                 tagged_assignments.append((node, frozenset(assignment_addresses)))
         return cls(addresses, tuple(tagged_assignments))
 
-    def intersects(self, candidate_addresses: frozenset[int]) -> bool:
+    @cython.ccall
+    def intersects(self, candidate_addresses: object) -> cython.bint:
         """Return whether any exact candidate address has a tagged assignment."""
         self.query_count += 1
         intersects = not self.addresses.isdisjoint(candidate_addresses)
@@ -208,8 +221,8 @@ class TaggedAssignmentAddressIndex8616:
 
     def candidate_assignments(
         self,
-        candidate_addresses: frozenset[int],
-    ) -> tuple[structured_c.CAssignment, ...] | None:
+        candidate_addresses: object,
+    ) -> object:
         """Return exact tagged candidates, or ``None`` after an unindexed mutation."""
         self.query_count += 1
         if not self.complete:
@@ -217,7 +230,7 @@ class TaggedAssignmentAddressIndex8616:
             return None
         candidates = tuple(
             assignment
-            for assignment, assignment_addresses in self.tagged_assignments
+            for assignment, assignment_addresses in iter(self.tagged_assignments)
             if not assignment_addresses.isdisjoint(candidate_addresses)
         )
         if candidates:
@@ -226,12 +239,14 @@ class TaggedAssignmentAddressIndex8616:
             self.miss_count += 1
         return candidates
 
-    def record(self, candidate_addresses: frozenset[int]) -> None:
+    @cython.ccall
+    def record(self, candidate_addresses: object) -> None:
         """Mark an inserted assignment as an unindexed mutation for later queries."""
         self.addresses.update(candidate_addresses)
         self.complete = False
         self.record_count += 1
 
+    @cython.ccall
     def stats(self) -> TaggedAssignmentAddressQueryStats8616:
         """Return immutable closed accounting for the current request."""
         return TaggedAssignmentAddressQueryStats8616(

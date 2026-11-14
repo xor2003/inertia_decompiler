@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Check every raw STORE during an indexed induction lifetime.
 
 Layer: IR.
@@ -12,6 +13,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, replace
 from enum import StrEnum
@@ -24,10 +27,13 @@ from .logical_memory_contracts import IRMemoryExecutionSlice8616
 from .logical_memory_write_value import LogicalWordWriteValueFact8616
 from .scalar_instruction_effects import ScalarInstructionEffectKind8616, scalar_instruction_effect_8616
 from .ssa_function import SSAFunctionArtifact
+import dataclasses
+import operator
+import builtins
 
 # A wide EBP write changes the low BP word just as surely as a BP write.
 # Register overlap is architectural evidence, not a spelling convention.
-_FRAME_STORAGE_FAMILY: frozenset[str] = (
+_FRAME_STORAGE_FAMILY: object = (
     register_value_family_8616("bp") | register_value_family_8616("ss")
 )
 
@@ -39,122 +45,122 @@ class IndexedInductionEffectVerdict8616(StrEnum):
     REFUSED = "refused"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedInductionEffect8616:
     """Retain the raw instruction and its exact lifetime census site."""
 
-    block_addr: int
-    instr_index: int
+    block_addr: cython.longlong
+    instr_index: cython.longlong
     instruction: IRInstr
     verdict: IndexedInductionEffectVerdict8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedInductionWriteCensus8616:
     """Closed raw-effect accounting, not a caller-bound address-range proof."""
 
     induction_source: IndexedInductionSourceIdentity8616
-    expected_lanes: tuple[IRMemoryExecutionSlice8616, ...]
-    raw_sites: tuple[tuple[int, int], ...]
-    effects: tuple[IndexedInductionEffect8616, ...]
-    region: tuple[int, ...]
-    checked_blocks: tuple[int, ...]
-    refused_blocks: tuple[int, ...]
-    header: int
-    loop_blocks: tuple[int, ...]
-    initializer_block: int
-    initializer_dominates_header: bool
-    function_addr: int
+    expected_lanes: object
+    raw_sites: object
+    effects: object
+    region: object
+    checked_blocks: object
+    refused_blocks: object
+    header: cython.longlong
+    loop_blocks: object
+    initializer_block: cython.longlong
+    initializer_dominates_header: cython.bint
+    function_addr: cython.longlong
 
     @property
-    def raw_fact_count(self) -> int:
+    def raw_fact_count(self) -> cython.longlong:
         """Count every retained raw instruction in the induction lifetime."""
         return len(self.raw_sites)
 
     @property
-    def normalized_fact_count(self) -> int:
+    def normalized_fact_count(self) -> cython.longlong:
         """Normalization preserves every exact raw instruction site."""
         return len(self.effects)
 
     @property
-    def classified_fact_count(self) -> int:
+    def classified_fact_count(self) -> cython.longlong:
         """Count effects whose disposition was explicitly classified."""
         return len(self.effects)
 
     @property
-    def materialized_count(self) -> int:
+    def materialized_count(self) -> cython.longlong:
         """Count effects proven to preserve the exact induction storage."""
         return sum(effect.verdict is IndexedInductionEffectVerdict8616.ACCOUNTED
-                   for effect in self.effects)
+                   for effect in iter(self.effects))
 
     @property
-    def failure_count(self) -> int:
+    def failure_count(self) -> cython.longlong:
         """Keep every refused effect visible in the original denominator."""
         return self.raw_fact_count - self.materialized_count
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Recheck retained effect classifications and expected write sites."""
-        expected = {(lane.block_addr, lane.instr_index): lane for lane in self.expected_lanes}
-        sites = {(effect.block_addr, effect.instr_index) for effect in self.effects}
-        if self.refused_blocks or self.region != self.checked_blocks:
+        expected = {(lane.block_addr, lane.instr_index): lane for lane in iter(self.expected_lanes)}
+        sites = {(effect.block_addr, effect.instr_index) for effect in iter(self.effects)}
+        if self.refused_blocks or operator.ne(self.region, self.checked_blocks):
             return False
         if not self.initializer_dominates_header or self.header not in self.loop_blocks:
             return False
-        if not expected or len(sites) != len(self.effects) or not set(expected) <= sites:
+        if not expected or operator.ne(len(sites), len(self.effects)) or not set(expected) <= sites:
             return False
-        if sites != set(self.raw_sites) or len(sites) != self.raw_fact_count:
+        if operator.ne(sites, set(self.raw_sites)) or operator.ne(len(sites), self.raw_fact_count):
             return False
         return self.failure_count == 0 and all(
             _instruction_accounted_8616(
                 effect.instruction, (effect.block_addr, effect.instr_index),
                 expected, self.induction_source,
-            ) for effect in self.effects
+            ) for effect in iter(self.effects)
         )
 
     def matches_lifetime(
-        self, function_addr: int, identity: IndexedInductionSourceIdentity8616,
+        self, function_addr: cython.longlong, identity: IndexedInductionSourceIdentity8616,
         init_write: LogicalWordWriteValueFact8616,
         step_write: LogicalWordWriteValueFact8616,
-        loop_blocks: tuple[int, ...], header: int,
-    ) -> bool:
+        loop_blocks: object, header: cython.longlong,
+    ) -> cython.bint:
         """Bind this census to the exact induction, byte writes and loop."""
-        expected = tuple(lane.execution_slice for write in (init_write, step_write)
-                         for lane in write.lanes)
+        expected = tuple(lane.execution_slice for write in iter((init_write, step_write))
+                         for lane in iter(write.lanes))
         return (
-            self.complete and self.induction_source == identity
-            and self.function_addr == function_addr
-            and init_write.access.key.function_addr == function_addr
-            and step_write.access.key.function_addr == function_addr
-            and self.expected_lanes == expected and self.header == header
-            and self.loop_blocks == loop_blocks
-            and self.initializer_block == init_write.access.key.block_addr
+            self.complete and operator.eq(self.induction_source, identity)
+            and operator.eq(self.function_addr, function_addr)
+            and operator.eq(init_write.access.key.function_addr, function_addr)
+            and operator.eq(step_write.access.key.function_addr, function_addr)
+            and operator.eq(self.expected_lanes, expected) and operator.eq(self.header, header)
+            and operator.eq(self.loop_blocks, loop_blocks)
+            and operator.eq(self.initializer_block, init_write.access.key.block_addr)
             and {self.initializer_block, *loop_blocks} <= set(self.region)
         )
 
 
-def _same_pre_ssa_lane_8616(raw: IRAddress, logical: IRAddress) -> bool:
+def _same_pre_ssa_lane_8616(raw: IRAddress, logical: IRAddress) -> cython.bint:
     """Bind retained pre-SSA lanes across only the owner's earned renaming.
 
     Logical execution slices precede SSA version assignment. Preserve all
     address decorations and VEX temporary identity; erase only new versions.
     """
-    if len(raw.base_values) != len(logical.base_values):
+    if operator.ne(len(raw.base_values), len(logical.base_values)):
         return False
     temporary_identity = all(
-        left.source_tmp == right.source_tmp
-        and left.memory_access_insn == right.memory_access_insn
-        for left, right in zip(raw.base_values, logical.base_values, strict=True)
+        operator.eq(left.source_tmp, right.source_tmp)
+        and operator.eq(left.memory_access_insn, right.memory_access_insn)
+        for left, right in builtins.iter(zip(raw.base_values, logical.base_values, strict=True))
     )
     original = replace(raw, version=None, base_values=tuple(
-        replace(value, version=None) for value in raw.base_values
+        replace(value, version=None) for value in iter(raw.base_values)
     ))
     return temporary_identity and original == logical
 
 
 def _disjoint_stack_bytes_8616(
     address: IRAddress, identity: IndexedInductionSourceIdentity8616,
-) -> bool:
+) -> cython.bint:
     """Prove separation only for exact offsets in the same BP stack frame."""
     canonical = (
         address.space is MemSpace.SS and address.base == ("bp",)
@@ -170,11 +176,13 @@ def _disjoint_stack_bytes_8616(
                for offset in range(address.size))
 
 
+@cython.ccall
 def _initialization_region_8616(
-    artifact: SSAFunctionArtifact, loop_blocks: tuple[int, ...],
-    header: int, initializer: int,
-) -> set[int]:
+    artifact: SSAFunctionArtifact, loop_blocks: object,
+    header: cython.longlong, initializer: cython.longlong,
+) -> object:
     """Retain every preheader path back to the dominating initializer."""
+    node: object
     region = {initializer, *loop_blocks}
     pending = list(artifact.predecessor_map[header])
     while pending:
@@ -186,12 +194,14 @@ def _initialization_region_8616(
     return region
 
 
+@cython.ccall
 def _instruction_accounted_8616(
-    instruction: IRInstr, site: tuple[int, int],
-    expected: dict[tuple[int, int], IRMemoryExecutionSlice8616],
+    instruction: IRInstr, site: object,
+    expected: object,
     identity: IndexedInductionSourceIdentity8616,
-) -> bool:
+) -> cython.bint:
     """Bind one expected STORE or prove its effect cannot mutate induction."""
+    lane: object
     frame_changed = (instruction.dst is not None and instruction.dst.space is MemSpace.REG
                      and instruction.dst.name in _FRAME_STORAGE_FAMILY)
     if instruction.op == "CALL" or frame_changed:
@@ -205,17 +215,17 @@ def _instruction_accounted_8616(
     lane = expected.get(site)
     if lane is None:
         return _disjoint_stack_bytes_8616(address, identity)
-    return instruction.addr == lane.insn_addr and _same_pre_ssa_lane_8616(address, lane.address)
+    return operator.eq(instruction.addr, lane.insn_addr) and _same_pre_ssa_lane_8616(address, lane.address)
 
 
 def collect_indexed_induction_write_census_8616(
     artifact: SSAFunctionArtifact,
     identity: IndexedInductionSourceIdentity8616,
-    loop_blocks: tuple[int, ...],
-    header: int,
+    loop_blocks: object,
+    header: cython.longlong,
     init_write: LogicalWordWriteValueFact8616,
     step_write: LogicalWordWriteValueFact8616,
-    *, initializer_dominates_header: bool,
+    *, initializer_dominates_header: cython.bint,
 ) -> IndexedInductionWriteCensus8616:
     """Check raw effects, not just successfully classified logical word writes.
 
@@ -224,16 +234,19 @@ def collect_indexed_induction_write_census_8616(
     induction storage. Unknown calls, frame changes and cross-selector stores
     require additional proof and are refused here rather than guessed safe.
     """
+    block: object
+    index: object
+    instruction: object
     expected = {
         (lane.execution_slice.block_addr, lane.execution_slice.instr_index): lane.execution_slice
-        for write in (init_write, step_write) for lane in write.lanes
+        for write in iter((init_write, step_write)) for lane in iter(write.lanes)
     }
     init_block = init_write.access.key.block_addr
-    init_start = min(lane.execution_slice.instr_index for lane in init_write.lanes)
+    init_start = min(lane.execution_slice.instr_index for lane in iter(init_write.lanes))
     region = _initialization_region_8616(artifact, loop_blocks, header, init_block)
     effects: list[IndexedInductionEffect8616] = []
-    checked_blocks: list[int] = []
-    refused_blocks: list[int] = []
+    checked_blocks: list[cython.longlong] = []
+    refused_blocks: list[cython.longlong] = []
     for block in artifact.blocks:
         if block.addr not in region:
             continue
@@ -241,7 +254,7 @@ def collect_indexed_induction_write_census_8616(
         if block.refusals:
             refused_blocks.append(block.addr)
         for index, instruction in enumerate(block.instrs):
-            if block.addr == init_block and index < init_start:
+            if operator.eq(block.addr, init_block) and index < init_start:
                 continue
             site = (block.addr, index)
             accounted = _instruction_accounted_8616(instruction, site, expected, identity)
@@ -250,7 +263,7 @@ def collect_indexed_induction_write_census_8616(
             effects.append(IndexedInductionEffect8616(block.addr, index, instruction, verdict))
     return IndexedInductionWriteCensus8616(
         identity, tuple(expected.values()),
-        tuple((effect.block_addr, effect.instr_index) for effect in effects),
+        tuple((effect.block_addr, effect.instr_index) for effect in iter(effects)),
         tuple(effects), tuple(sorted(region)),
         tuple(sorted(checked_blocks)), tuple(sorted(refused_blocks)),
         header, loop_blocks, init_block, initializer_dominates_header,

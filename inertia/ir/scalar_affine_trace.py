@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Trace exact modular affine scalar expressions through function SSA.
 
 Layer: IR.
@@ -16,6 +17,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -52,20 +55,22 @@ from .scalar_value_projection import (
     scalar_read_projection_8616,
 )
 from .ssa_function import SSAFunctionArtifact
+import dataclasses
+import operator
 
-type _AffineVisitKey8616 = tuple[int, ScalarDefinitionKey8616]
+_AffineVisitKey8616 = typing.TypeAliasType("_AffineVisitKey8616", tuple[int, ScalarDefinitionKey8616])
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _AffineNode8616:
     """Internal normalized expression before the root contract is attached."""
 
-    constant: int
-    terms: tuple[ScalarAffineTerm8616, ...]
-    path: tuple[IndexedAddressDefinitionSite8616, ...]
+    constant: cython.longlong
+    terms: object
+    path: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _NodeTrace8616:
     """Internal successful node or one typed refusal."""
 
@@ -73,6 +78,7 @@ class _NodeTrace8616:
     failure: ScalarAffineFailure8616 | None
 
 
+@cython.ccall
 def _refusal_8616(failure: ScalarAffineFailure8616) -> ScalarAffineTrace8616:
     """Build one atomic trace refusal with closed failure accounting."""
     return ScalarAffineTrace8616(
@@ -82,6 +88,7 @@ def _refusal_8616(failure: ScalarAffineFailure8616) -> ScalarAffineTrace8616:
     )
 
 
+@cython.ccall
 def _site_8616(
     definition: ScalarDefinition8616,
 ) -> IndexedAddressDefinitionSite8616 | None:
@@ -97,12 +104,13 @@ def _site_8616(
     )
 
 
+@cython.ccall
 def _definition_8616(
     definitions: ScalarDefinitionIndex8616,
     value: IRValue,
     *,
-    block_addr: int,
-    before_index: int,
+    block_addr: cython.longlong,
+    before_index: cython.longlong,
 ) -> tuple[ScalarDefinition8616 | None, ScalarAffineFailure8616 | None]:
     """Return one exact same-block reaching definition or a typed refusal."""
     candidates = reaching_scalar_definitions_8616(
@@ -118,6 +126,7 @@ def _definition_8616(
     return candidates[0], None
 
 
+@cython.ccall
 def _logical_failure_8616(
     failure: IndexedAddressFailureKind8616 | None,
 ) -> ScalarAffineFailure8616:
@@ -133,51 +142,53 @@ def _logical_failure_8616(
 
 def _scale_node_8616(
     node: _AffineNode8616,
-    factor: int,
-    mask: int,
+    factor: cython.longlong,
+    mask: cython.longlong,
 ) -> _AffineNode8616:
     """Apply one modular constant scale without losing term provenance."""
     terms = tuple(
         ScalarAffineTerm8616(term.value, term.source, coefficient)
-        for term in node.terms
+        for term in iter(node.terms)
         if (coefficient := term.coefficient * factor & mask) != 0
     )
     return _AffineNode8616(node.constant * factor & mask, terms, node.path)
 
 
+@cython.ccall
 def _combine_nodes_8616(
     left: _AffineNode8616,
     right: _AffineNode8616,
     *,
-    sign: int,
-    mask: int,
+    sign: cython.longlong,
+    mask: cython.longlong,
 ) -> _AffineNode8616:
     """Combine two affine nodes under modular addition or subtraction."""
     scaled_right = _scale_node_8616(right, sign, mask)
     return _AffineNode8616(
         (left.constant + scaled_right.constant) & mask,
-        (*left.terms, *scaled_right.terms),
-        (*left.path, *scaled_right.path),
+        tuple(left.terms) + tuple(scaled_right.terms),
+        tuple(left.path) + tuple(scaled_right.path),
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _AffineTraceContext8616:
     """Shared recursion state for exact scalar affine normalization."""
 
     artifact: SSAFunctionArtifact
     definitions: ScalarDefinitionIndex8616
-    block_addr: int
-    width: int
-    mask: int
-    allow_entry_registers: bool
+    block_addr: cython.longlong
+    width: cython.longlong
+    mask: cython.longlong
+    allow_entry_registers: cython.bint
 
 
+@cython.ccall
 def _trace_argument_8616(
     ctx: _AffineTraceContext8616,
     argument: IRValue,
     definition: ScalarDefinition8616,
-    seen: frozenset[_AffineVisitKey8616],
+    seen: object,
 ) -> _NodeTrace8616:
     """Recurse into one exact scalar argument at the definition boundary."""
     return _trace_value_8616(
@@ -193,16 +204,22 @@ def _trace_argument_8616(
     )
 
 
+@cython.ccall
 def _proven_affine_definition_8616(
     artifact: SSAFunctionArtifact,
     definitions: ScalarDefinitionIndex8616,
     value: IRValue,
     *,
-    block_addr: int,
-    before_index: int,
-    allow_entry_registers: bool,
-) -> tuple[ScalarDefinition8616, IndexedAddressDefinitionSite8616] | _NodeTrace8616:
+    block_addr: cython.longlong,
+    before_index: cython.longlong,
+    allow_entry_registers: cython.bint,
+) -> object:
     """Resolve the unique reaching definition or the entry-register leaf."""
+    definition: object
+    failure: object
+    site: object
+    sites: object
+    term: object
     definition, failure = _definition_8616(
         definitions,
         value,
@@ -224,10 +241,15 @@ def _proven_affine_definition_8616(
 
 
 def _entry_leaf_preservation_sites_8616(
-    artifact: SSAFunctionArtifact, value: IRValue, block_addr: int, before_index: int,
-) -> tuple[IndexedAddressDefinitionSite8616, ...] | None:
+    artifact: SSAFunctionArtifact, value: IRValue, block_addr: cython.longlong, before_index: cython.longlong,
+) -> object:
     """Retain exact CALL sites or refuse unproved entry-register transport."""
-    block = next((item for item in artifact.blocks if item.addr == block_addr), None)
+    block: object
+    destination: object
+    effect: object
+    index: object
+    instruction: object
+    block = next((item for item in iter(artifact.blocks) if operator.eq(item.addr, block_addr)), None)
     if block is None or block.refusals or not 0 <= before_index <= len(block.instrs):
         return None
     sites: list[IndexedAddressDefinitionSite8616] = []
@@ -248,12 +270,14 @@ def _entry_leaf_preservation_sites_8616(
     return tuple(sites)
 
 
+@cython.ccall
 def _leaf_term_trace_8616(
     ctx: _AffineTraceContext8616,
     definition: ScalarDefinition8616,
     site: IndexedAddressDefinitionSite8616,
 ) -> _NodeTrace8616 | None:
     """Return the leaf term for direct stack loads or closed word reads."""
+    source: object
     instruction = definition.instruction
     source = stack_affine_source_8616(instruction, ctx.width)
     if source is not None and instruction.dst is not None:
@@ -273,16 +297,17 @@ def _leaf_term_trace_8616(
         return _NodeTrace8616(None, _logical_failure_8616(logical.failure))
     term = ScalarAffineTerm8616(instruction.dst, logical.source, 1)
     return _NodeTrace8616(
-        _AffineNode8616(0, (term,), (site, *logical.definition_path)),
+        _AffineNode8616(0, (term,), (site, ) + tuple(logical.definition_path)),
         None,
     )
 
 
+@cython.ccall
 def _mov_copy_trace_8616(
     ctx: _AffineTraceContext8616,
     definition: ScalarDefinition8616,
     site: IndexedAddressDefinitionSite8616,
-    next_seen: frozenset[_AffineVisitKey8616],
+    next_seen: object,
 ) -> _NodeTrace8616:
     """Trace through one exact MOV copy, retaining the copy site."""
     argument = definition.instruction.args[0]
@@ -295,17 +320,18 @@ def _mov_copy_trace_8616(
         _AffineNode8616(
             traced.node.constant,
             traced.node.terms,
-            (site, *traced.node.path),
+            (site, ) + tuple(traced.node.path),
         ),
         None,
     )
 
 
+@cython.ccall
 def _addsub_trace_8616(
     ctx: _AffineTraceContext8616,
     definition: ScalarDefinition8616,
     site: IndexedAddressDefinitionSite8616,
-    next_seen: frozenset[_AffineVisitKey8616],
+    next_seen: object,
 ) -> _NodeTrace8616:
     """Combine both operand traces under modular addition or subtraction."""
     instruction = definition.instruction
@@ -327,16 +353,17 @@ def _addsub_trace_8616(
         mask=ctx.mask,
     )
     return _NodeTrace8616(
-        _AffineNode8616(combined.constant, combined.terms, (site, *combined.path)),
+        _AffineNode8616(combined.constant, combined.terms, (site, ) + tuple(combined.path)),
         None,
     )
 
 
+@cython.ccall
 def _shl_trace_8616(
     ctx: _AffineTraceContext8616,
     definition: ScalarDefinition8616,
     site: IndexedAddressDefinitionSite8616,
-    next_seen: frozenset[_AffineVisitKey8616],
+    next_seen: object,
 ) -> _NodeTrace8616:
     """Trace through one constant left shift as a modular scale."""
     argument, amount = definition.instruction.args
@@ -352,24 +379,27 @@ def _shl_trace_8616(
         return traced
     scaled = _scale_node_8616(traced.node, 1 << amount.const, ctx.mask)
     return _NodeTrace8616(
-        _AffineNode8616(scaled.constant, scaled.terms, (site, *scaled.path)),
+        _AffineNode8616(scaled.constant, scaled.terms, (site, ) + tuple(scaled.path)),
         None,
     )
 
 
+@cython.ccall
 def _bp_transport_trace_8616(
     artifact: SSAFunctionArtifact, definitions: ScalarDefinitionIndex8616, value: IRValue,
-    *, block_addr: int, before_index: int, width: int, mask: int,
-    seen: frozenset[_AffineVisitKey8616],
-) -> _NodeTrace8616 | tuple[IndexedAddressDefinitionSite8616, ...]:
+    *, block_addr: cython.longlong, before_index: cython.longlong, width: cython.longlong, mask: cython.longlong,
+    seen: object,
+) -> object:
     """Consume exact BP transport, never infer preservation from absent writes."""
+    definition: object
+    source: object
     proof = resolve_bp_reaching_definition_8616(
         artifact, value, block_addr=block_addr, before_index=before_index,
     )
     if not proof.complete:
         return _NodeTrace8616(None, proof.failure or ScalarAffineFailure8616.SOURCE_UNPROVEN)
     definition = proof.definition
-    if definition is None or definition.block_addr == block_addr:
+    if definition is None or operator.eq(definition.block_addr, block_addr):
         return tuple(proof.preservation_sites)
     source = definition.instruction.dst
     assert source is not None
@@ -382,16 +412,18 @@ def _bp_transport_trace_8616(
         return traced
     return _NodeTrace8616(_AffineNode8616(
         traced.node.constant, traced.node.terms,
-        (*proof.preservation_sites, *traced.node.path),
+        tuple(proof.preservation_sites) + tuple(traced.node.path),
     ), None)
 
 
+@cython.ccall
 def _definition_trace_8616(
     ctx: _AffineTraceContext8616, definition: ScalarDefinition8616,
-    site: IndexedAddressDefinitionSite8616, next_seen: frozenset[_AffineVisitKey8616],
+    site: IndexedAddressDefinitionSite8616, next_seen: object,
 ) -> _NodeTrace8616:
     """Normalize one resolved producer under the existing affine operations."""
-    if definition.instruction.size != ctx.width:
+    leaf: object
+    if operator.ne(definition.instruction.size, ctx.width):
         return _NodeTrace8616(None, ScalarAffineFailure8616.WIDTH_CONFLICT)
     leaf = _leaf_term_trace_8616(ctx, definition, site)
     if leaf is not None:
@@ -407,20 +439,22 @@ def _definition_trace_8616(
     return _NodeTrace8616(None, ScalarAffineFailure8616.EXPRESSION_UNSUPPORTED)
 
 
+@cython.ccall
 def _trace_value_8616(
     artifact: SSAFunctionArtifact,
     definitions: ScalarDefinitionIndex8616,
     value: IRValue,
     *,
-    block_addr: int,
-    before_index: int,
-    width: int,
-    mask: int,
-    allow_entry_registers: bool = False,
-    seen: frozenset[_AffineVisitKey8616] = frozenset(),
+    block_addr: cython.longlong,
+    before_index: cython.longlong,
+    width: cython.longlong,
+    mask: cython.longlong,
+    allow_entry_registers: cython.bint = False,
+    seen: object = frozenset(),
 ) -> _NodeTrace8616:
     """Normalize exact scalar values, crossing only proven BP transports."""
-    if value.size != width:
+    projection: object
+    if operator.ne(value.size, width):
         return _NodeTrace8616(None, ScalarAffineFailure8616.WIDTH_CONFLICT)
     if isinstance(value.const, int):
         if value.expr:
@@ -468,17 +502,18 @@ def _trace_value_8616(
         return traced
     return _NodeTrace8616(_AffineNode8616(
         traced.node.constant, traced.node.terms,
-        (*preservation_sites, *traced.node.path),
+        tuple(preservation_sites) + tuple(traced.node.path),
     ), None)
 
 
+@cython.ccall
 def trace_scalar_affine_expression_8616(
     artifact: SSAFunctionArtifact,
     root: IRValue,
     *,
-    block_addr: int,
-    before_index: int,
-    allow_entry_registers: bool = False,
+    block_addr: cython.longlong,
+    before_index: cython.longlong,
+    allow_entry_registers: cython.bint = False,
 ) -> ScalarAffineTrace8616:
     """Trace modular terms; entry-register origins and BP transport are opt-in."""
     width = root.size

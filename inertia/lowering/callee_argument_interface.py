@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Reconcile generated function headers with binary caller arity evidence.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -22,6 +25,8 @@ from .callee_argument_count_evidence import CalleeArgumentCountEvidence8616, Cal
 from .callee_argument_width_evidence import collect_callee_argument_width_evidence_8616
 from .near_pointer_type import near_pointer_type_8616
 from .stack_prototype_materialization import materialize_exact_trailing_stack_argument_8616
+import dataclasses
+import operator
 
 
 class CalleeArgumentInterfaceDecision8616(StrEnum):
@@ -32,31 +37,31 @@ class CalleeArgumentInterfaceDecision8616(StrEnum):
     MATERIALIZED_ZERO = "materialized-zero"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CalleeArgumentInterfaceResult8616:
     """Evidence, decision, and mutation result for one interface join."""
 
     evidence: CalleeArgumentCountEvidence8616
     decision: CalleeArgumentInterfaceDecision8616
-    changed: bool = False
+    changed: cython.bint = False
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CalleePointerInterfaceResult8616:
     """Closed evidence counts for pointer-backed C-interface materialization."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    changed: bool = False
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    changed: cython.bint = False
 
 
 class _CFunctionSurface8616(Protocol):
     """angr generated-function fields updated at the dynamic boundary."""
 
-    addr: int
+    addr: cython.longlong
     arg_list: Sequence[object] | None
     functy: object
 
@@ -65,15 +70,15 @@ class _CodegenSurface8616(Protocol):
     """angr codegen fields plus owned Inertia evidence metadata."""
 
     cfunc: _CFunctionSurface8616 | None
-    _inertia_authoritative_zero_arg_prototype_8616: bool
+    _inertia_authoritative_zero_arg_prototype_8616: cython.bint
     _inertia_callee_argument_count_evidence_8616: CalleeArgumentCountEvidence8616
-    _inertia_codegen_decl_refresh_required_8616: bool
+    _inertia_codegen_decl_refresh_required_8616: cython.bint
 
 
 class _FunctionManagerSurface8616(Protocol):
     """angr function lookup used at the third-party project boundary."""
 
-    def function(self, *, addr: int, create: bool) -> _FunctionSurface8616 | None:
+    def function(self, *, addr: cython.longlong, create: cython.bint) -> _FunctionSurface8616 | None:
         """Return an existing function without creating a new one."""
 
 
@@ -94,58 +99,62 @@ class _FunctionSurface8616(Protocol):
     """angr function prototype fields updated by typed Lowering."""
 
     prototype: object
-    is_prototype_guessed: bool
+    is_prototype_guessed: cython.bint
 
 
 class _PointerEvidenceSurface8616(Protocol):
     """Owned binary pointer evidence consumed by interface lowering."""
 
     @property
-    def target_addr(self) -> int:
+    def target_addr(self) -> cython.longlong:
         """Return the binary callee address."""
         ...
 
     @property
-    def raw_fact_count(self) -> int:
+    def raw_fact_count(self) -> cython.longlong:
         """Return the number of collected pointer facts."""
         ...
 
     @property
-    def normalized_fact_count(self) -> int:
+    def normalized_fact_count(self) -> cython.longlong:
         """Return the number of normalized pointer facts."""
         ...
 
     @property
-    def classified_fact_count(self) -> int:
+    def classified_fact_count(self) -> cython.longlong:
         """Return the number of classified pointer facts."""
         ...
 
     @property
-    def failure_count(self) -> int:
+    def failure_count(self) -> cython.longlong:
         """Return the number of pointer evidence failures."""
         ...
 
     @property
-    def pointer_stack_offsets(self) -> tuple[int, ...]:
+    def pointer_stack_offsets(self) -> object:
         """Return proven pointer-bearing callee stack offsets."""
         ...
 
     @property
-    def pointer_argument_indices(self) -> tuple[int, ...]:
+    def pointer_argument_indices(self) -> object:
         """Return proven pointer argument indices."""
         ...
 
 
+@cython.ccall
 def materialize_callee_pointer_codegen_interface_8616(
     project: object,
     codegen: object,
     evidence: _PointerEvidenceSurface8616,
 ) -> CalleePointerInterfaceResult8616:
     """Materialize exact binary-proven BP pointer slots in the active C header."""
+    cfunc: object
+    argument_index: object
+    stack_offset: object
     typed_project = cast(_ProjectSurface8616, project)
     typed_codegen = cast(_CodegenSurface8616, codegen)
     cfunc = typed_codegen.cfunc
-    if len(evidence.pointer_argument_indices) != len(evidence.pointer_stack_offsets):
+    if operator.ne(len(evidence.pointer_argument_indices), len(evidence.pointer_stack_offsets)):
         return CalleePointerInterfaceResult8616(
             evidence.raw_fact_count,
             evidence.normalized_fact_count,
@@ -157,9 +166,9 @@ def materialize_callee_pointer_codegen_interface_8616(
     classified_count = evidence.classified_fact_count
     if (
         cfunc is None
-        or cfunc.addr != evidence.target_addr
+        or operator.ne(cfunc.addr, evidence.target_addr)
         or evidence.failure_count
-        or len(pairs) != classified_count
+        or operator.ne(len(pairs), classified_count)
     ):
         return CalleePointerInterfaceResult8616(
             evidence.raw_fact_count,
@@ -179,12 +188,12 @@ def materialize_callee_pointer_codegen_interface_8616(
             if (
                 not isinstance(argument, CVariable)
                 or not isinstance(argument.variable, SimStackVariable)
-                or argument.variable.offset != stack_offset
+                or operator.ne(argument.variable.offset, stack_offset)
             ):
                 break
             materialized_count += 1
             continue
-        if argument_index != len(arguments) or stack_offset != 4 + 2 * argument_index:
+        if operator.ne(argument_index, len(arguments)) or operator.ne(stack_offset, 4 + 2 * argument_index):
             break
         candidate = CVariable(
             SimStackVariable(
@@ -225,16 +234,17 @@ def materialize_callee_pointer_codegen_interface_8616(
 def materialize_callee_pointer_prefix_prototype_8616(
     project: object,
     function: object,
-    pointer_argument_indices: Sequence[int],
-) -> int:
+    pointer_argument_indices: Sequence[cython.longlong],
+) -> cython.longlong:
     """Materialize callee-proven pointer slots in an existing prototype.
 
     A short prototype may be extended only when every missing slot belongs to
     a contiguous pointer prefix beginning at ``BP+4``. Existing non-prefix
     slots are never invented or reclassified without their own binary proof.
     """
+    index: object
     indices = tuple(pointer_argument_indices)
-    if not indices or indices != tuple(sorted(set(indices))):
+    if not indices or operator.ne(indices, tuple(sorted(tuple(set(indices))))):
         return 0
     typed_function = cast(_FunctionSurface8616, function)
     prototype = typed_function.prototype
@@ -243,7 +253,7 @@ def materialize_callee_pointer_prefix_prototype_8616(
     argument_types: list[SimType] = list(prototype.args or ())
     required_count = indices[-1] + 1
     if required_count > len(argument_types):
-        if indices != tuple(range(required_count)):
+        if operator.ne(indices, tuple(range(required_count))):
             return 0
         argument_types.extend(
             SimTypeShort(False) for _ in range(required_count - len(argument_types))
@@ -265,7 +275,8 @@ def materialize_callee_pointer_prefix_prototype_8616(
     return len(indices)
 
 
-def _function_for_address_8616(project: object, address: int) -> _FunctionSurface8616 | None:
+@cython.ccall
+def _function_for_address_8616(project: object, address: cython.longlong) -> _FunctionSurface8616 | None:
     """Resolve one existing angr function through the third-party boundary."""
     try:
         function = cast(_ProjectSurface8616, project).kb.functions.function(addr=address, create=False)
@@ -274,12 +285,14 @@ def _function_for_address_8616(project: object, address: int) -> _FunctionSurfac
     return function
 
 
+@cython.ccall
 def _materialize_zero_argument_interface_8616(
     project: object,
     codegen: _CodegenSurface8616,
     cfunc: _CFunctionSurface8616,
-) -> bool:
+) -> cython.bint:
     """Apply a caller-proven zero-argument header without deleting body facts."""
+    function: object
     current = cfunc.functy
     return_type = current.returnty if isinstance(current, SimTypeFunction) else SimTypeShort(False)
     prototype = SimTypeFunction([], return_type)
@@ -287,12 +300,12 @@ def _materialize_zero_argument_interface_8616(
     changed = bool(cfunc.arg_list)
     if cfunc.arg_list:
         cfunc.arg_list = []
-    if cfunc.functy != prototype:
+    if operator.ne(cfunc.functy, prototype):
         cfunc.functy = prototype
         changed = True
     function = _function_for_address_8616(project, cfunc.addr)
     if function is not None:
-        if function.prototype != prototype:
+        if operator.ne(function.prototype, prototype):
             function.prototype = prototype
             changed = True
         if function.is_prototype_guessed:
@@ -304,13 +317,15 @@ def _materialize_zero_argument_interface_8616(
     return changed
 
 
+@cython.ccall
 def reconcile_callee_argument_interface_8616(
     project: object,
     codegen: object,
     *,
-    candidate_count: int,
+    candidate_count: cython.longlong,
 ) -> CalleeArgumentInterfaceResult8616:
     """Join a candidate header with all available binary caller evidence."""
+    cfunc: object
     typed_codegen = cast(_CodegenSurface8616, codegen)
     cfunc = typed_codegen.cfunc
     storage_evidence = collect_callee_argument_width_evidence_8616(
@@ -327,7 +342,7 @@ def reconcile_callee_argument_interface_8616(
         return CalleeArgumentInterfaceResult8616(evidence, CalleeArgumentInterfaceDecision8616.REFUSE)
     if evidence.verdict is not CalleeArgumentCountVerdict8616.CONSISTENT:
         return CalleeArgumentInterfaceResult8616(evidence, CalleeArgumentInterfaceDecision8616.ACCEPT)
-    if evidence.argument_count == candidate_count:
+    if operator.eq(evidence.argument_count, candidate_count):
         return CalleeArgumentInterfaceResult8616(evidence, CalleeArgumentInterfaceDecision8616.ACCEPT)
     if evidence.argument_count == 0:
         changed = _materialize_zero_argument_interface_8616(project, typed_codegen, cfunc)

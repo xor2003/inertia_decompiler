@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Restore split instruction statements before logical storage materialization.
 
 Layer: Structuring.
@@ -13,6 +14,8 @@ Ambiguous provenance or paths leave the tree unchanged for the lowering guard.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -22,21 +25,23 @@ from angr.analyses.decompiler.structured_codegen.c import CAssignment, CForLoop,
 
 from inertia.ir.condition_ir import ConditionIR
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
+import dataclasses
+import operator
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class InstructionFragmentOrigin8616:
     """Exact statement provenance within one lifted machine instruction."""
 
-    instruction: int
-    block: int
-    statement: int
+    instruction: cython.longlong
+    block: cython.longlong
+    statement: cython.longlong
 
 
 class _TaggedNode8616(Protocol):
     """Third-party angr node tag boundary."""
 
-    tags: dict[str, object] | None
+    tags: object
 
 
 class _FunctionBoundary8616(Protocol):
@@ -49,19 +54,19 @@ class _CodegenBoundary8616(Protocol):
     """Typed evidence and statistics carried on the active codegen object."""
 
     cfunc: _FunctionBoundary8616
-    _inertia_typed_conditions: tuple[ConditionIR, ...]
+    _inertia_typed_conditions: object
     _inertia_instruction_fragment_placement_8616: InstructionFragmentPlacementStats8616
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class InstructionFragmentPlacementStats8616:
     """Evidence accounting for restored instruction scopes."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
 def _origin(node: object) -> InstructionFragmentOrigin8616 | None:
@@ -69,17 +74,19 @@ def _origin(node: object) -> InstructionFragmentOrigin8616 | None:
     tags = cast(_TaggedNode8616, node).tags
     if not isinstance(tags, dict):
         return None
-    values = tuple(tags.get(key) for key in ("ins_addr", "vex_block_addr", "vex_stmt_idx"))
-    if not all(type(value) is int for value in values):
+    values = tuple(tags.get(key) for key in iter(("ins_addr", "vex_block_addr", "vex_stmt_idx")))
+    if not all(type(value) is int for value in iter(values)):
         return None
     instruction, block, statement = cast(tuple[int, int, int], values)
     return InstructionFragmentOrigin8616(instruction, block, statement)
 
 
+@cython.ccall
 def _reaches_before(
-    successors: Mapping[int, tuple[int, ...]], start: int, target: int, stops: frozenset[int],
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]], start: cython.longlong, target: cython.longlong, stops: object,
 ) -> bool | None:
     """Test reachability without traversing the next loop/condition evaluation."""
+    current: object
     pending = [start]
     seen = set(stops)
     incomplete = False
@@ -87,7 +94,7 @@ def _reaches_before(
         current = pending.pop()
         if current in seen:
             continue
-        if current == target:
+        if operator.eq(current, target):
             return True
         seen.add(current)
         incomplete = incomplete or current not in successors
@@ -95,28 +102,38 @@ def _reaches_before(
     return None if incomplete else False
 
 
+@cython.ccall
 def _conditional_block(
-    condition: ConditionIR, block: int, header: int, successors: Mapping[int, tuple[int, ...]],
-) -> bool:
+    condition: ConditionIR, block: cython.longlong, header: cython.longlong, successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
+) -> cython.bint:
     """Require exactly one binary branch edge to reach this instruction group."""
+    fallthrough: object
+    fallthrough_reaches: object
+    source: object
+    taken: object
+    taken_reaches: object
     source = condition.block_addr
     taken, fallthrough = condition.taken_target, condition.fallthrough_target
-    if source is None or taken is None or fallthrough is None or taken == fallthrough:
+    if source is None or taken is None or fallthrough is None or operator.eq(taken, fallthrough):
         return False
-    if set(successors.get(source, ())) != {taken, fallthrough}:
+    if operator.ne(set(successors.get(source, ())), {taken, fallthrough}):
         return False
     stops = frozenset((source, header))
     taken_reaches = _reaches_before(successors, taken, block, stops)
     fallthrough_reaches = _reaches_before(successors, fallthrough, block, stops)
-    return taken_reaches is not None and fallthrough_reaches is not None and taken_reaches != fallthrough_reaches
+    return taken_reaches is not None and fallthrough_reaches is not None and operator.ne(taken_reaches, fallthrough_reaches)
 
 
-def _ordered_group(body: object, origin: InstructionFragmentOrigin8616) -> bool:
+@cython.ccall
+def _ordered_group(body: object, origin: InstructionFragmentOrigin8616) -> cython.bint:
     """Require a contiguous instruction suffix preceding the iterator fragment."""
+    candidate: object
+    index: object
+    statement: object
     if not isinstance(body, CStatements) or not body.statements:
         return False
-    indexes: list[int] = []
-    positions: list[int] = []
+    indexes: list[cython.longlong] = []
+    positions: list[cython.longlong] = []
     for index, statement in enumerate(body.statements):
         if not isinstance(statement, CAssignment):
             continue
@@ -124,16 +141,20 @@ def _ordered_group(body: object, origin: InstructionFragmentOrigin8616) -> bool:
         if candidate is not None and (candidate.instruction, candidate.block) == (origin.instruction, origin.block):
             indexes.append(index)
             positions.append(candidate.statement)
-    if not indexes or indexes != list(range(indexes[0], len(body.statements))):
+    if not indexes or operator.ne(indexes, list(range(indexes[0], len(body.statements)))):
         return False
-    return positions == sorted(set(positions)) and positions[-1] < origin.statement
+    return operator.eq(positions, sorted(tuple(set(positions)))) and positions[-1] < origin.statement
 
 
 def _branch_sites(
-    body: CStatements, origin: InstructionFragmentOrigin8616, header: int,
-    conditions: tuple[ConditionIR, ...], successors: Mapping[int, tuple[int, ...]],
-) -> list[CStatements]:
+    body: CStatements, origin: InstructionFragmentOrigin8616, header: cython.longlong,
+    conditions: object, successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
+) -> object:
     """Find exact conditional instruction suffixes in this loop, excluding nested loops."""
+    branch_origin: object
+    arm: object
+    branch: object
+    expression: object
     sites: list[CStatements] = []
     for branch in body.statements:
         if not isinstance(branch, CIfElse):
@@ -142,20 +163,24 @@ def _branch_sites(
             branch_origin = _origin(expression)
             if branch_origin is None or not _ordered_group(arm, origin):
                 continue
-            facts = tuple(fact for fact in conditions if (
-                fact.src_insn == branch_origin.instruction and fact.block_addr == branch_origin.block
+            facts = tuple(fact for fact in iter(conditions) if (
+                operator.eq(fact.src_insn, branch_origin.instruction) and operator.eq(fact.block_addr, branch_origin.block)
             ))
             if len(facts) == 1 and _conditional_block(facts[0], origin.block, header, successors):
                 sites.append(cast(CStatements, arm))
     return sites
 
 
+@cython.ccall
 def restore_instruction_fragment_placement_8616(
     root: object,
-    conditions: tuple[ConditionIR, ...],
-    successors: Mapping[int, tuple[int, ...]],
+    conditions: object,
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
 ) -> InstructionFragmentPlacementStats8616:
     """Restore uniquely proven conditional instruction groups without changing values."""
+    header: object
+    origin: object
+    loop: object
     stats = InstructionFragmentPlacementStats8616()
     for loop in _iter_c_nodes_deep_8616(root):
         if not isinstance(loop, CForLoop) or not isinstance(loop.iterator, CAssignment):
@@ -179,7 +204,8 @@ def restore_instruction_fragment_placement_8616(
     return stats
 
 
-def apply_instruction_fragment_placement_8616(project: object, codegen: object) -> bool:
+@cython.ccall
+def apply_instruction_fragment_placement_8616(project: object, codegen: object) -> cython.bint:
     """Restore instruction scopes before Lowering merges logical storage updates."""
     from .condition_materialization import condition_chain_successors_8616
 

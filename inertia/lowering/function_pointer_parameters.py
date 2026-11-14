@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Recover stack parameters used as indirect call targets.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -53,6 +56,8 @@ from .stack_variable_coordinates import (
     machine_bp_offset_for_stack_variable_8616,
     publish_selected_stack_cvar_projection_8616,
 )
+import operator
+import builtins
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -65,9 +70,9 @@ class _VariableManager8616(Protocol):
         variable: object,
         type_: SimType,
         *,
-        name: str | None = None,
-        override_bot: bool = True,
-        all_unified: bool = False,
+        name: object = None,
+        override_bot: cython.bint = True,
+        all_unified: cython.bint = False,
     ) -> None:
         """Persist one exact variable type across codegen regeneration."""
 
@@ -75,7 +80,7 @@ class _VariableManager8616(Protocol):
 class _CFunction8616(Protocol):
     """angr CFunction fields consumed by parameter type materialization."""
 
-    addr: int
+    addr: cython.longlong
     arg_list: Sequence[object]
     functy: SimTypeFunction
     variable_manager: _VariableManager8616
@@ -85,13 +90,13 @@ class _Function8616(Protocol):
     """angr function prototype retained across regeneration."""
 
     prototype: object
-    is_prototype_guessed: bool
+    is_prototype_guessed: cython.bint
 
 
 class _FunctionManager8616(Protocol):
     """angr function lookup surface."""
 
-    def function(self, *, addr: int, create: bool = False) -> _Function8616 | None:
+    def function(self, *, addr: cython.longlong, create: cython.bint = False) -> _Function8616 | None:
         """Return one existing function without guessing a contract."""
 
 
@@ -115,11 +120,12 @@ class _Codegen8616(Protocol):
     project: _Project8616
     _func_args: Sequence[SimStackVariable]
     _inertia_callsite_summaries: object
-    _inertia_codegen_decl_refresh_required_8616: bool
+    _inertia_codegen_decl_refresh_required_8616: cython.bint
     _inertia_function_pointer_parameter_evidence_8616: FunctionPointerParameterEvidence8616
 
 
-def _integer_type_8616(width: int, arch: Arch) -> SimType:
+@cython.ccall
+def _integer_type_8616(width: cython.longlong, arch: Arch) -> SimType:
     """Build one unsigned scalar type from an exact binary width."""
     if width == 1:
         type_: SimType = SimTypeChar(signed=False)
@@ -130,6 +136,7 @@ def _integer_type_8616(width: int, arch: Arch) -> SimType:
     return cast(SimType, type_.with_arch(arch))
 
 
+@cython.ccall
 def _function_pointer_type_8616(
     fact: FunctionPointerParameterFact8616,
     arch: Arch,
@@ -140,7 +147,7 @@ def _function_pointer_type_8616(
     2-byte operand proves a near one. The storage width follows the type.
     """
     prototype = SimTypeFunction(
-        [_integer_type_8616(width, arch) for width in fact.argument_widths],
+        [_integer_type_8616(width, arch) for width in iter(fact.argument_widths)],
         _integer_type_8616(fact.return_width, arch),
         variadic=False,
     ).with_arch(arch)
@@ -168,8 +175,8 @@ def materialized_function_pointer_slots_8616(
     if (
         evidence.failure_count != 0
         or evidence.failures
-        or evidence.materialized_count != len(evidence.facts)
-        or evidence.classified_fact_count != len(evidence.facts)
+        or operator.ne(evidence.materialized_count, len(evidence.facts))
+        or operator.ne(evidence.classified_fact_count, len(evidence.facts))
     ):
         return ()
     return tuple(
@@ -178,7 +185,7 @@ def materialized_function_pointer_slots_8616(
             fact.pointer_width,
             _function_pointer_type_8616(fact, arch),
         )
-        for fact in evidence.facts
+        for fact in iter(evidence.facts)
     )
 
 
@@ -189,7 +196,7 @@ def _typed_summary_values_8616(codegen: _Codegen8616) -> tuple[CallsiteSummary86
         return ()
     return tuple(
         summary
-        for key, summary in summary_map.items()
+        for key, summary in builtins.iter(summary_map.items())
         if isinstance(key, int) and isinstance(summary, CallsiteSummary8616)
     )
 
@@ -200,9 +207,11 @@ def _debug_parameter_surface_8616(
     evidence: FunctionPointerParameterEvidence8616,
 ) -> None:
     """Report the typed ABI surface only when explicit diagnostics are enabled."""
+    argument: object
+    index: object
     if not os.environ.get("INERTIA_DEBUG_FUNCTION_POINTER_PARAMETERS"):
         return
-    layout: list[tuple[int, int | None, int | None, str | None]] = []
+    layout: list[tuple[cython.longlong, int | None, int | None, str | None]] = []
     for index, argument in enumerate(cfunc.arg_list):
         if isinstance(argument, CVariable) and isinstance(argument.variable, SimStackVariable):
             layout.append(
@@ -223,7 +232,7 @@ def _debug_parameter_surface_8616(
     log.warning(
         "[function-pointer-parameters] function=%#x facts=%r prototype_count=%r bp_delta=%r arg_layout=%r",
         cfunc.addr,
-        tuple(fact.stack_offset for fact in evidence.facts),
+        tuple(fact.stack_offset for fact in iter(evidence.facts)),
         prototype_count,
         proven_bp_entry_sp_delta_8616(codegen),
         tuple(layout),
@@ -233,10 +242,11 @@ def _debug_parameter_surface_8616(
 def _stack_argument_at_offset_8616(
     codegen: _Codegen8616,
     cfunc: _CFunction8616,
-    offset: int,
-    storage_width: int,
-) -> tuple[int, CVariable] | None:
+    offset: cython.longlong,
+    storage_width: cython.longlong,
+) -> object:
     """Resolve one machine-BP slot through the authoritative frame layout."""
+    argument: object
     layout = stack_prototype_argument_layout_8616(
         cfunc.functy,
         codegen.project.arch,
@@ -244,15 +254,15 @@ def _stack_argument_at_offset_8616(
     )
     slots = tuple(
         (index, slot)
-        for index, slot in enumerate(layout)
-        if slot.offset == offset and slot.storage_width == storage_width
+        for index, slot in builtins.iter(enumerate(layout))
+        if operator.eq(slot.offset, offset) and operator.eq(slot.storage_width, storage_width)
     )
     if os.environ.get("INERTIA_DEBUG_FUNCTION_POINTER_PARAMETERS"):
         log.warning(
             "[function-pointer-parameters] resolve offset=%d width=%d layout=%r slot_count=%d",
             offset,
             storage_width,
-            tuple((slot.offset, slot.storage_width) for slot in layout),
+            tuple((slot.offset, slot.storage_width) for slot in iter(layout)),
             len(slots),
         )
     if len(slots) != 1:
@@ -272,8 +282,8 @@ def _stack_argument_at_offset_8616(
 def _stack_argument_index_at_offset_8616(
     codegen: _Codegen8616,
     cfunc: _CFunction8616,
-    offset: int,
-) -> tuple[int, StackPrototypeArgument8616] | None:
+    offset: cython.longlong,
+) -> object:
     """Return the argument index and slot whose storage begins at one machine-BP offset.
 
     Unlike the exact resolver this ignores the slot's current storage width,
@@ -286,8 +296,8 @@ def _stack_argument_index_at_offset_8616(
     )
     slots = tuple(
         (index, slot)
-        for index, slot in enumerate(layout)
-        if slot.offset == offset
+        for index, slot in builtins.iter(enumerate(layout))
+        if operator.eq(slot.offset, offset)
     )
     return slots[0] if len(slots) == 1 else None
 
@@ -296,7 +306,7 @@ def _reflow_argument_surface_8616(
     project: _Project8616,
     codegen: _Codegen8616,
     cfunc: _CFunction8616,
-    index: int,
+    index: cython.longlong,
     pointer_type: SimType,
 ) -> CVariable | None:
     """Join contained argument words into a proven pointer without moving storage.
@@ -305,6 +315,10 @@ def _reflow_argument_surface_8616(
     The pointer consumes fully contained slots; a crossing slot refuses the
     join. Later parameters retain both their coordinates and CVariable identity.
     """
+    candidate: object
+    width: object
+    slot: object
+    slot_index: object
     if not isinstance(cfunc.functy, SimTypeFunction):
         return None
     old_layout = stack_prototype_argument_layout_8616(
@@ -317,37 +331,37 @@ def _reflow_argument_surface_8616(
     if index >= len(old_layout) or not isinstance(delta, int) or width is None:
         return None
     pointer_end = old_layout[index].offset + width
-    if any(slot.offset < pointer_end < slot.offset + slot.storage_width for slot in old_layout[index:]):
+    if any(slot.offset < pointer_end < slot.offset + slot.storage_width for slot in iter(old_layout[index:])):
         return None
     retained = tuple(
-        position for position, slot in enumerate(old_layout)
+        position for position, slot in builtins.iter(enumerate(old_layout))
         if position <= index or slot.offset >= pointer_end
     )
     arg_names = tuple(cfunc.functy.arg_names or ())
     existing = tuple(cfunc.arg_list or ())
-    if len(existing) != len(old_layout):
+    if operator.ne(len(existing), len(old_layout)):
         return None
     layout = tuple(
         StackPrototypeArgument8616(slot.offset, width, pointer_type) if position == index else slot
-        for position, slot in enumerate(old_layout) if position in retained
+        for position, slot in builtins.iter(enumerate(old_layout)) if position in retained
     )
     new_functy = cast(SimTypeFunction, SimTypeFunction(
-        [slot.argument_type for slot in layout],
+        [slot.argument_type for slot in iter(layout)],
         cfunc.functy.returnty,
-        arg_names=tuple(arg_names[position] if position < len(arg_names) else None for position in retained),
+        arg_names=tuple(arg_names[position] if position < len(arg_names) else None for position in iter(retained)),
         variadic=cfunc.functy.variadic,
     ).with_arch(project.arch))
     desired: list[CVariable] = []
     for slot_index, slot in zip(retained, layout, strict=True):
-        candidate: CVariable | None = None
+        candidate = None
         if slot_index < len(existing):
             current = existing[slot_index]
             if (
                 isinstance(current, CVariable)
                 and isinstance(current.variable, SimStackVariable)
                 and current.variable.base == "bp"
-                and current.variable.offset == slot.offset + delta
-                and current.variable.size == slot.storage_width
+                and operator.eq(current.variable.offset, slot.offset + delta)
+                and operator.eq(current.variable.size, slot.storage_width)
             ):
                 candidate = current
         if candidate is None:
@@ -379,13 +393,14 @@ def _reflow_argument_surface_8616(
     # angr rebuilds the CFunction from this separate argument-storage surface.
     # Updating only arg_list lets a later _analyze restore the old slot widths
     # and offsets even though the retained prototype already owns a far pointer.
-    codegen._func_args = [cast(SimStackVariable, argument.variable) for argument in desired]
+    codegen._func_args = [cast(SimStackVariable, argument.variable) for argument in iter(desired)]
     return desired[index] if index < len(desired) else None
 
 
+@cython.ccall
 def _replace_prototype_argument_8616(
     prototype: SimTypeFunction,
-    index: int,
+    index: cython.longlong,
     argument_type: SimType,
     arch: Arch,
 ) -> SimTypeFunction:
@@ -405,14 +420,15 @@ def _replace_prototype_argument_8616(
     )
 
 
+@cython.ccall
 def _resolve_argument_slot_8616(
     project: _Project8616,
     codegen: _Codegen8616,
     cfunc: _CFunction8616,
     fact: FunctionPointerParameterFact8616,
     pointer_type: SimType,
-    pointer_storage_width: int,
-) -> tuple[int, CVariable] | None:
+    pointer_storage_width: cython.longlong,
+) -> object:
     """Resolve a classified pointer slot, joining its contained words when proven.
 
     The exact resolver wins when the layout and CVariables already agree with
@@ -422,6 +438,9 @@ def _resolve_argument_slot_8616(
     mismatch (for example a misordered codegen argument list) is refused
     loudly rather than silently repaired.
     """
+    argument: object
+    matched: object
+    matched_slot: object
     matched = _stack_argument_at_offset_8616(
         codegen,
         cfunc,
@@ -444,6 +463,7 @@ def _resolve_argument_slot_8616(
     return reflow_index, argument
 
 
+@cython.ccall
 def _pointer_storage_width_8616(pointer_type: SimType, arch: Arch) -> int | None:
     """Return the even storage width in bytes of one proven pointer type."""
     try:
@@ -462,13 +482,16 @@ def _pointer_storage_width_8616(pointer_type: SimType, arch: Arch) -> int | None
     return max(2, ((pointer_bits // byte_width) + 1) & ~1)
 
 
+@cython.ccall
 def _materialize_fact_8616(
     project: _Project8616,
     codegen: _Codegen8616,
     cfunc: _CFunction8616,
     fact: FunctionPointerParameterFact8616,
-) -> tuple[bool, FunctionPointerParameterFailure8616 | None]:
+) -> tuple[cython.bint, FunctionPointerParameterFailure8616 | None]:
     """Persist one classified fact to the argument, AST, manager, and prototypes."""
+    pointer_storage_width: object
+    resolved: object
     if not isinstance(cfunc.functy, SimTypeFunction):
         return False, FunctionPointerParameterFailure8616.PARAMETER_SLOT_MISSING
     original_prototype = cfunc.functy
@@ -499,17 +522,21 @@ def _materialize_fact_8616(
     # Slot resolution may already have joined pointer words in the declaration.
     # Persistence can then be a no-op, but codegen must still
     # refresh the changed interface even when the KB prototype already agrees.
-    return changed or cfunc.functy != original_prototype, failure
+    return changed or operator.ne(cfunc.functy, original_prototype), failure
 
 
+@cython.ccall
 def _persist_pointer_argument_type_8616(
     project: _Project8616,
     cfunc: _CFunction8616,
-    index: int,
+    index: cython.longlong,
     argument: CVariable,
     pointer_type: SimType,
-) -> tuple[bool, FunctionPointerParameterFailure8616 | None]:
+) -> tuple[cython.bint, FunctionPointerParameterFailure8616 | None]:
     """Persist one proven pointer type across the argument, AST, and prototypes."""
+    function: object
+    node: object
+    root: object
     argument_offset = argument.variable.offset
     try:
         cfunc.variable_manager.set_variable_type(
@@ -520,11 +547,11 @@ def _persist_pointer_argument_type_8616(
         )
     except (AttributeError, KeyError, TypeError, ValueError):
         return False, FunctionPointerParameterFailure8616.VARIABLE_MANAGER_REJECTED
-    changed = argument.variable_type != pointer_type
+    changed = operator.ne(argument.variable_type, pointer_type)
     argument.variable_type = pointer_type
 
     new_cfunc_type = _replace_prototype_argument_8616(cfunc.functy, index, pointer_type, project.arch)
-    if new_cfunc_type != cfunc.functy:
+    if operator.ne(new_cfunc_type, cfunc.functy):
         cfunc.functy = new_cfunc_type
         changed = True
     for root in cfunc_roots_8616(cfunc):
@@ -532,9 +559,9 @@ def _persist_pointer_argument_type_8616(
             if (
                 isinstance(node, CVariable)
                 and isinstance(node.variable, SimStackVariable)
-                and node.variable.offset == argument_offset
+                and operator.eq(node.variable.offset, argument_offset)
                 and node.variable.base == "bp"
-                and node.variable_type != pointer_type
+                and operator.ne(node.variable_type, pointer_type)
             ):
                 node.variable_type = pointer_type
                 changed = True
@@ -544,13 +571,14 @@ def _persist_pointer_argument_type_8616(
         # Publish the complete selected surface: replacing only one KB type
         # would resurrect the contained segment word as a separate argument.
         new_function_type = cfunc.functy
-        if new_function_type != function.prototype:
+        if operator.ne(new_function_type, function.prototype):
             function.prototype = new_function_type
             changed = True
         function.is_prototype_guessed = False
     return changed, None
 
 
+@cython.ccall
 def _call_target_parameter_8616(
     codegen: _Codegen8616,
     cfunc: _CFunction8616,
@@ -563,13 +591,14 @@ def _call_target_parameter_8616(
     machine operand; the stack coordinate owner must independently associate
     the projected C variable with that same parameter before it is consumed.
     """
+    resolved: object
     value, mask = target.lhs, target.rhs
     if isinstance(value, CConstant):
         value, mask = mask, value
     if not isinstance(mask, CConstant) or mask.value != 0xffff or not isinstance(value, CVariable):
         return None
     variable = value.variable
-    if not isinstance(variable, SimStackVariable) or variable.base != "bp" or variable.region != cfunc.addr:
+    if not isinstance(variable, SimStackVariable) or variable.base != "bp" or operator.ne(variable.region, cfunc.addr):
         return None
     if variable.size not in {2, fact.pointer_width}:
         return None
@@ -581,10 +610,10 @@ def _call_target_parameter_8616(
     # when an existing near parameter needs no new coordinate publication.
     if (
         variable is not argument.variable
-        and machine_bp_offset_for_stack_variable_8616(codegen, variable) != fact.stack_offset
+        and operator.ne(machine_bp_offset_for_stack_variable_8616(codegen, variable), fact.stack_offset)
     ):
         return None
-    if value.variable_type != argument.variable_type:
+    if operator.ne(value.variable_type, argument.variable_type):
         return None
     return argument
 
@@ -595,8 +624,11 @@ def _materialize_parameter_call_targets_8616(
     facts: Sequence[FunctionPointerParameterFact8616],
 ) -> FunctionPointerCallTargetStats8616:
     """Consume only exact callsite/slot-proven masks, preserving unknown targets."""
+    argument: object
+    node: object
+    root: object
     raw = normalized = classified = materialized = failures = 0
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     for root in cfunc_roots_8616(cfunc):
         for node in _iter_c_nodes_deep_8616(root):
             if not isinstance(node, CFunctionCall) or id(node) in seen:
@@ -607,7 +639,7 @@ def _materialize_parameter_call_targets_8616(
                 continue
             raw += 1
             address = structured_callsite_addr_8616(node)
-            matches = tuple(fact for fact in facts if address in fact.callsite_addresses)
+            matches = tuple(fact for fact in iter(facts) if address in fact.callsite_addresses)
             if len(matches) != 1:
                 failures += 1
                 continue
@@ -622,8 +654,11 @@ def _materialize_parameter_call_targets_8616(
     return FunctionPointerCallTargetStats8616(raw, normalized, classified, materialized, failures)
 
 
-def materialize_function_pointer_parameters_8616(project_raw: object, codegen_raw: object) -> bool:
+def materialize_function_pointer_parameters_8616(project_raw: object, codegen_raw: object) -> cython.bint:
     """Persist all consistent BP-indirect call target parameter types."""
+    cfunc: object
+    failure: object
+    fact: object
     project = cast(_Project8616, project_raw)
     codegen = cast(_Codegen8616, codegen_raw)
     try:
@@ -662,7 +697,7 @@ def materialize_function_pointer_parameters_8616(project_raw: object, codegen_ra
     if evidence.classified_fact_count > 0 and evidence.materialized_count == 0:
         raise PipelineHardError(
             "function-pointer parameter facts were classified but not materialized "
-            f"at {cfunc.addr:#x}; failures={tuple(failure.value for failure in evidence.failures)!r}"
+            f"at {cfunc.addr:#x}; failures={tuple(failure.value for failure in iter(evidence.failures))!r}"
         )
     if changed:
         codegen._inertia_codegen_decl_refresh_required_8616 = True

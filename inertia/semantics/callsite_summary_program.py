@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Retain caller-indexed callsite summaries across project boundaries.
 
 Layer: Traits/summaries/confidence.
@@ -13,6 +14,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -22,6 +25,9 @@ from .callsite_summary import (
     CallsiteSummary8616,
     build_callsite_summary_inventory_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "ProgramCallsiteSummaryEvidence8616",
@@ -34,29 +40,30 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ProgramCallsiteSummaryFact8616:
     """One exact caller/callsite coordinate and its optional typed summary."""
 
     caller_addr: int | None
-    callsite_addr: int
+    callsite_addr: cython.longlong
     summary: CallsiteSummary8616 | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ProgramCallsiteSummaryEvidence8616:
     """Closed accounting for retained caller-indexed summary facts."""
 
-    facts: tuple[ProgramCallsiteSummaryFact8616, ...]
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    facts: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     def validate(self) -> None:
         """Reject duplicate coordinates, mismatched summaries, or open counts."""
-        keys: list[tuple[int | None, int]] = []
+        fact: object
+        keys: list[tuple[int | None, cython.longlong]] = []
         normalized = 0
         classified = 0
         for fact in self.facts:
@@ -72,12 +79,12 @@ class ProgramCallsiteSummaryEvidence8616:
                 or fact.callsite_addr < 0
             ):
                 raise ValueError("program callsite address is invalid")
-            if fact.summary is not None and fact.summary.callsite_addr != fact.callsite_addr:
+            if fact.summary is not None and operator.ne(fact.summary.callsite_addr, fact.callsite_addr):
                 raise ValueError("program callsite summary address disagrees with its fact")
             keys.append((fact.caller_addr, fact.callsite_addr))
             normalized += int(fact.caller_addr is not None)
             classified += int(fact.caller_addr is not None and fact.summary is not None)
-        if len(set(keys)) != len(keys):
+        if operator.ne(len(set(keys)), len(keys)):
             raise ValueError("program callsite summary evidence contains duplicate facts")
         counts = (
             self.raw_fact_count,
@@ -86,14 +93,14 @@ class ProgramCallsiteSummaryEvidence8616:
             self.materialized_count,
             self.failure_count,
         )
-        if any(count < 0 for count in counts):
+        if any(count < 0 for count in iter(counts)):
             raise ValueError("program callsite summary counters must be nonnegative")
         if not (
-            self.raw_fact_count == len(self.facts)
-            and self.normalized_fact_count == normalized
-            and self.classified_fact_count == classified
-            and self.materialized_count == classified
-            and self.failure_count == self.raw_fact_count - classified
+            operator.eq(self.raw_fact_count, len(self.facts))
+            and operator.eq(self.normalized_fact_count, normalized)
+            and operator.eq(self.classified_fact_count, classified)
+            and operator.eq(self.materialized_count, classified)
+            and operator.eq(self.failure_count, self.raw_fact_count - classified)
         ):
             raise ValueError("program callsite summary accounting does not close")
 
@@ -107,9 +114,10 @@ class _ProgramSummaryOwner8616(Protocol):
 class _FunctionSurface8616(Protocol):
     """Third-party function coordinate consumed by exact summary lookup."""
 
-    addr: int
+    addr: cython.longlong
 
 
+@cython.ccall
 def program_callsite_summary_evidence_8616(
     project: object,
 ) -> ProgramCallsiteSummaryEvidence8616 | None:
@@ -127,6 +135,7 @@ def program_callsite_summary_evidence_8616(
     return evidence
 
 
+@cython.ccall
 def attach_program_callsite_summary_evidence_8616(
     project: object,
     evidence: ProgramCallsiteSummaryEvidence8616,
@@ -143,23 +152,25 @@ def program_callsite_summary_evidence_from_facts_8616(
     facts: Iterable[ProgramCallsiteSummaryFact8616],
 ) -> ProgramCallsiteSummaryEvidence8616:
     """Normalize exact facts into one deterministic closed artifact."""
-    by_coordinate: dict[tuple[int | None, int], ProgramCallsiteSummaryFact8616] = {}
+    previous: object
+    fact: object
+    by_coordinate: dict[tuple[int | None, cython.longlong], ProgramCallsiteSummaryFact8616] = {}
     for fact in facts:
         key = (fact.caller_addr, fact.callsite_addr)
         previous = by_coordinate.get(key)
-        if previous is not None and previous != fact:
+        if previous is not None and operator.ne(previous, fact):
             raise ValueError("program callsite coordinate has conflicting summaries")
         by_coordinate[key] = fact
     ordered = tuple(
         by_coordinate[key]
-        for key in sorted(
+        for key in builtins.iter(sorted(
             by_coordinate,
             key=lambda item: (-1 if item[0] is None else item[0], item[1]),
-        )
+        ))
     )
-    normalized = sum(fact.caller_addr is not None for fact in ordered)
+    normalized = sum(fact.caller_addr is not None for fact in iter(ordered))
     classified = sum(
-        fact.caller_addr is not None and fact.summary is not None for fact in ordered
+        fact.caller_addr is not None and fact.summary is not None for fact in iter(ordered)
     )
     evidence = ProgramCallsiteSummaryEvidence8616(
         facts=ordered,
@@ -173,13 +184,15 @@ def program_callsite_summary_evidence_from_facts_8616(
     return evidence
 
 
+@cython.ccall
 def retained_program_callsite_summary_inventory_8616(
     project: object,
     function: object,
-    callsite_addrs: Iterable[int],
-) -> dict[int, CallsiteSummary8616]:
+    callsite_addrs: Iterable[cython.longlong],
+) -> dict[cython.longlong, CallsiteSummary8616]:
     """Return exact transported summaries without rebuilding missing calls."""
-    requested = tuple(sorted(set(callsite_addrs)))
+    evidence: object
+    requested = tuple(sorted(tuple(set(callsite_addrs))))
     try:
         function_addr = cast(_FunctionSurface8616, function).addr
     except AttributeError:
@@ -187,8 +200,8 @@ def retained_program_callsite_summary_inventory_8616(
     evidence = program_callsite_summary_evidence_8616(project)
     return {
         fact.callsite_addr: fact.summary
-        for fact in (() if evidence is None else evidence.facts)
-        if fact.caller_addr == function_addr
+        for fact in iter((() if evidence is None else evidence.facts))
+        if operator.eq(fact.caller_addr, function_addr)
         and fact.callsite_addr in requested
         and fact.summary is not None
     }
@@ -197,16 +210,16 @@ def retained_program_callsite_summary_inventory_8616(
 def build_callsite_summary_inventory_with_program_evidence_8616(
     project: object,
     function: object,
-    callsite_addrs: Iterable[int],
-) -> dict[int, CallsiteSummary8616]:
+    callsite_addrs: Iterable[cython.longlong],
+) -> dict[cython.longlong, CallsiteSummary8616]:
     """Reuse exact transported summaries and build only unrepresented calls."""
-    requested = tuple(sorted(set(callsite_addrs)))
+    requested = tuple(sorted(tuple(set(callsite_addrs))))
     retained = retained_program_callsite_summary_inventory_8616(
         project,
         function,
         requested,
     )
-    missing = tuple(addr for addr in requested if addr not in retained)
+    missing = tuple(addr for addr in iter(requested) if addr not in retained)
     if missing:
         retained.update(build_callsite_summary_inventory_8616(function, missing))
-    return {address: retained[address] for address in requested if address in retained}
+    return {address: retained[address] for address in iter(requested) if address in retained}

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify and materialize deliberate near-return-frame discards.
 
 Layer: Types/Lowering.
@@ -14,6 +15,8 @@ objects expose version-dependent compatibility attributes.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -24,23 +27,25 @@ from angr.analyses.decompiler.structured_codegen import c as structured_c
 from capstone.x86_const import X86_INS_POP, X86_INS_PUSH, X86_INS_RET, X86_OP_REG
 
 from inertia.lowering.structured_tags import copy_structured_tags_8616
+import dataclasses
+import operator
 
 
 class _Operand8616(Protocol):
     """Decoded operand fields required by escape classification."""
 
-    type: int
-    reg: int
+    type: cython.longlong
+    reg: cython.longlong
 
 
 class _Instruction8616(Protocol):
     """Decoded instruction fields required by escape classification."""
 
-    address: int
-    id: int
-    operands: tuple[_Operand8616, ...]
+    address: cython.longlong
+    id: cython.longlong
+    operands: object
 
-    def reg_name(self, reg_id: int) -> str:
+    def reg_name(self, reg_id: cython.longlong) -> object:
         """Return the architecture register name for one operand id."""
         ...
 
@@ -51,32 +56,32 @@ class ControlStackEscapeKind8616(Enum):
     DISCARD_NEAR_RETURN_FRAME = "discard_near_return_frame"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ControlStackEscapeFact8616:
     """Describe one exact extra near-return-frame unwind."""
 
-    function_addr: int
-    pop_addr: int
-    terminal_ret_addr: int
-    popped_register: str
-    discarded_frame_width: int
-    extra_unwind_depth: int
+    function_addr: cython.longlong
+    pop_addr: cython.longlong
+    terminal_ret_addr: cython.longlong
+    popped_register: object
+    discarded_frame_width: cython.longlong
+    extra_unwind_depth: cython.longlong
     kind: ControlStackEscapeKind8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ControlStackEscapeRecord8616:
     """Closed evidence census for one materialized control-stack escape."""
 
     fact: ControlStackEscapeFact8616
-    raw_fact_count: int = 1
-    normalized_fact_count: int = 1
-    classified_fact_count: int = 1
-    materialized_count: int = 1
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 1
+    normalized_fact_count: cython.longlong = 1
+    classified_fact_count: cython.longlong = 1
+    materialized_count: cython.longlong = 1
+    failure_count: cython.longlong = 0
 
     @property
-    def closes_evidence(self) -> bool:
+    def closes_evidence(self) -> cython.bint:
         """Return whether the one classified escape was materialized."""
         return (
             self.raw_fact_count
@@ -90,11 +95,13 @@ class ControlStackEscapeRecord8616:
 
 def classify_control_stack_escape_8616(
     instructions: Iterable[object],
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> ControlStackEscapeFact8616 | None:
     """Classify an entry GP POP followed by an uncompensated terminal RET."""
+    terminal_ret: object
+    instruction: object
     ordered: list[_Instruction8616] = []
-    seen: set[tuple[int, int]] = set()
+    seen: set[tuple[cython.longlong, cython.longlong]] = set()
     for instruction in instructions:
         decoded = cast(_Instruction8616, instruction)
         try:
@@ -105,9 +112,9 @@ def classify_control_stack_escape_8616(
             continue
         seen.add(key)
         ordered.append(decoded)
-        if decoded.id == X86_INS_RET:
+        if operator.eq(decoded.id, X86_INS_RET):
             break
-    if not ordered or ordered[0].id != X86_INS_POP:
+    if not ordered or operator.ne(ordered[0].id, X86_INS_POP):
         return None
     entry_pop = ordered[0]
     try:
@@ -115,12 +122,12 @@ def classify_control_stack_escape_8616(
         register_name = entry_pop.reg_name(operand.reg).lower()
     except (AttributeError, IndexError, TypeError):
         return None
-    if operand.type != X86_OP_REG or register_name not in {"ax", "bx", "cx", "dx", "si", "di"}:
+    if operator.ne(operand.type, X86_OP_REG) or register_name not in {"ax", "bx", "cx", "dx", "si", "di"}:
         return None
-    terminal_ret = next((instruction for instruction in ordered[1:] if instruction.id == X86_INS_RET), None)
+    terminal_ret = next((instruction for instruction in iter(ordered[1:]) if operator.eq(instruction.id, X86_INS_RET)), None)
     if terminal_ret is None:
         return None
-    if any(instruction.id in {X86_INS_PUSH, X86_INS_POP} for instruction in ordered[1:-1]):
+    if any(instruction.id in {X86_INS_PUSH, X86_INS_POP} for instruction in iter(ordered[1:-1])):
         return None
     return ControlStackEscapeFact8616(
         function_addr=function_addr,
@@ -136,8 +143,9 @@ def classify_control_stack_escape_8616(
 def materialize_control_stack_escape_8616(
     codegen: object,
     fact: ControlStackEscapeFact8616,
-) -> bool:
+) -> cython.bint:
     """Remove only the synthetic C value projected from a discarded return address."""
+    root: object
     typed_codegen = cast(Any, codegen)
     root = getattr(getattr(typed_codegen, "cfunc", None), "statements", None)
     if not isinstance(root, structured_c.CStatements):
@@ -145,8 +153,12 @@ def materialize_control_stack_escape_8616(
     changed = False
     matched_return = False
 
-    def rewrite(statements: list[Any]) -> None:
+    def rewrite(statements: object) -> None:
         """Rewrite the exact terminal RET while preserving all prior effects."""
+        child: object
+        tags: object
+        attribute: object
+        statement: object
         nonlocal changed, matched_return
         for statement in statements:
             tags = (
@@ -157,7 +169,7 @@ def materialize_control_stack_escape_8616(
             if (
                 isinstance(statement, structured_c.CReturn)
                 and tags is not None
-                and tags.get("ins_addr") == fact.terminal_ret_addr
+                and operator.eq(tags.get("ins_addr"), fact.terminal_ret_addr)
             ):
                 matched_return = True
                 if statement.retval is not None:

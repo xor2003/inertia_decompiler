@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Tail-validation reporting helpers for CLI and batch decompilation runs.
 
 Layer: CLI/fallback/reporting.
@@ -5,6 +6,7 @@ Responsibility: report collected tail-validation evidence without changing seman
 """
 
 from __future__ import annotations
+import cython
 
 import hashlib
 import json
@@ -33,6 +35,7 @@ from inertia.validation.tail_validation import (
 from inertia.validation.tail_validation import (
     x86_16_tail_validation_snapshot_passed,
 )
+import builtins
 
 ROOT: Path = Path(__file__).resolve().parents[2]
 TAIL_VALIDATION_STDERR_PREFIX: str = "[tail-validation] "
@@ -79,11 +82,13 @@ class TailValidationResultStatus(Enum):
 _TAIL_VALIDATION_STABLE_STATUSES = frozenset({"stable", "passed"})
 
 
-def _dynamic_cli_attr(obj: object, name: str, default: object = None) -> object:
+@cython.ccall
+def _dynamic_cli_attr(obj: object, name: object, default: object = None) -> object:
     # Dynamic CLI/angr compatibility boundary: work items, projects, and results are heterogeneous.
     return getattr(obj, name, default)
 
 
+@cython.ccall
 def _as_mapping(value: object) -> Mapping[str, object]:
     if isinstance(value, Mapping):
         return cast(Mapping[str, object], value)
@@ -92,21 +97,24 @@ def _as_mapping(value: object) -> Mapping[str, object]:
 
 def _as_string_tuple(value: object) -> tuple[str, ...]:
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return tuple(item for item in value if isinstance(item, str) and item)
+        return tuple(item for item in iter(value) if isinstance(item, str) and item)
     return ()
 
 
+@cython.ccall
 def _as_int(value: object) -> int | None:
     return value if isinstance(value, int) else None
 
 
+@cython.ccall
 def _as_iterable(value: object) -> Iterable[object]:
     if isinstance(value, Iterable) and not isinstance(value, (str, bytes, bytearray)):
         return value
     return ()
 
 
-def _has_acceptance_validation_failure(results: Iterable[object]) -> bool:
+@cython.ccall
+def _has_acceptance_validation_failure(results: Iterable[object]) -> cython.bint:
     """Return whether any finished work result carries a final ``validation_failed`` status.
 
     The status is the terminal work-result verdict: when it is
@@ -114,6 +122,7 @@ def _has_acceptance_validation_failure(results: Iterable[object]) -> bool:
     tail checks) rejected the output. A clean semantic tail snapshot must not
     exempt that rejection from the reported surface.
     """
+    result: object
     for result in results:
         status = _dynamic_cli_attr(result, "status", None)
         if (
@@ -124,7 +133,8 @@ def _has_acceptance_validation_failure(results: Iterable[object]) -> bool:
     return False
 
 
-def parse_env_bool(value: str | None) -> bool | None:
+@cython.ccall
+def parse_env_bool(value: object) -> bool | None:
     """Parse common environment boolean spellings."""
     if value is None:
         return None
@@ -136,23 +146,28 @@ def parse_env_bool(value: str | None) -> bool | None:
     return None
 
 
-def tail_validation_runtime_enabled(project: object) -> bool:
+@cython.ccall
+def tail_validation_runtime_enabled(project: object) -> cython.bint:
     """Return whether tail validation is enabled for a project object."""
     return bool(_dynamic_cli_attr(project, "_inertia_tail_validation_enabled", True))
 
 
-def set_tail_validation_runtime_enabled(project: object, enabled: bool) -> None:
+@cython.ccall
+def set_tail_validation_runtime_enabled(project: object, enabled: cython.bint) -> None:
     """Set the runtime tail-validation policy on a project object."""
     typing.cast(typing.Any, project)._inertia_tail_validation_enabled = bool(enabled)
 
 
+@cython.ccall
 def inherit_tail_validation_runtime_policy(project: object, source_project: object) -> None:
     """Copy the tail-validation runtime policy between project objects."""
     set_tail_validation_runtime_enabled(project, tail_validation_runtime_enabled(source_project))
 
 
-def tail_validation_enabled_for_run(binary_path: Path | None, *, proc: str | None = None) -> bool:
+@cython.ccall
+def tail_validation_enabled_for_run(binary_path: Path | None, *, proc: object = None) -> cython.bint:
     """Enable semantic validation by default for executable and COD runs."""
+    forced: object
     forced = parse_env_bool(os.environ.get(TAIL_VALIDATION_ENABLE_ENV))
     if forced is not None:
         return forced
@@ -164,20 +179,20 @@ def tail_validation_enabled_for_run(binary_path: Path | None, *, proc: str | Non
     return bool(proc is not None or suffix in {".cod", ".exe"})
 
 
-def _compute_cfg_hash_from_result(result: object, item: object) -> str | None:
+def _compute_cfg_hash_from_result(result: object, item: object) -> object:
     """Compute a lightweight CFG hash from function block addresses."""
     function = _dynamic_cli_attr(result, "function", None) or _dynamic_cli_attr(item, "function", None)
     block_addrs = _dynamic_cli_attr(function, "block_addrs_set", None)
     if not block_addrs:
         return None
-    payload = ",".join(str(addr) for addr in sorted(_as_iterable(block_addrs), key=str))
+    payload = ",".join(str(addr) for addr in builtins.iter(sorted(tuple(_as_iterable(block_addrs)), key=str)))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
-def tail_validation_record_for_result(item: object, result: object) -> dict[str, object] | None:
+def tail_validation_record_for_result(item: object, result: object) -> object:
     """Convert one function work result into a tail-validation record."""
 
-    def _impl() -> dict[str, object]:
+    def _impl() -> object:
         snapshot = _dynamic_cli_attr(result, "tail_validation", None)
         identity = _tail_record_identity_8616(item, result)
         block_count = _dynamic_cli_attr(result, "block_count", None)
@@ -197,7 +212,9 @@ def tail_validation_record_for_result(item: object, result: object) -> dict[str,
     return _impl()
 
 
+@cython.ccall
 def _tail_record_identity_8616(item: object, result: object) -> dict[str, object]:
+    kind: object
     function = _dynamic_cli_attr(result, "function", None) or _dynamic_cli_attr(item, "function", None)
     project = _dynamic_cli_attr(function, "project", None)
     binary_name = _dynamic_cli_attr(project, "filename", None)
@@ -219,8 +236,9 @@ def _tail_record_identity_8616(item: object, result: object) -> dict[str, object
     }
 
 
+@cython.ccall
 def _attach_tail_record_counts_8616(
-    record: dict[str, object],
+    record: object,
     block_count: object,
     byte_count: object,
     cfg_hash: object,
@@ -233,7 +251,10 @@ def _attach_tail_record_counts_8616(
         record["cfg_hash"] = cfg_hash
 
 
-def _missing_snapshot_tail_record_8616(identity: dict[str, object], result: object) -> dict[str, object]:
+@cython.ccall
+def _missing_snapshot_tail_record_8616(identity: object, result: object) -> dict[str, object]:
+    exit_detail: object
+    candidate: object
     status = _dynamic_cli_attr(result, "status", None)
     payload = _dynamic_cli_attr(result, "payload", None)
     debug_output = _dynamic_cli_attr(result, "debug_output", None)
@@ -253,11 +274,15 @@ def _missing_snapshot_tail_record_8616(identity: dict[str, object], result: obje
     }
 
 
+@cython.ccall
 def collect_tail_validation_records(
     function_tasks: Sequence[object],
-    result_map: Mapping[int, object],
-) -> list[dict[str, object]]:
+    result_map: Mapping[cython.longlong, object],
+) -> object:
     """Collect tail-validation records for all selected function tasks."""
+    record: object
+    result: object
+    item: object
     records: list[dict[str, object]] = []
     for item in function_tasks:
         result = result_map.get(_as_int(_dynamic_cli_attr(item, "index")) or -1)
@@ -288,7 +313,7 @@ def collect_tail_validation_records(
 def emit_tail_validation_surface_summary(
     *,
     records: Sequence[Mapping[str, object]],
-    scanned: int,
+    scanned: cython.longlong,
     summary: Mapping[str, object],
     surface: Mapping[str, object],
     console_cache_path: Path | None,
@@ -297,6 +322,8 @@ def emit_tail_validation_surface_summary(
     """Render and cache the aggregate tail-validation surface summary."""
 
     def _impl() -> None:
+        detail_artifact_path: object
+        line: object
         emitted_any = False
         rendered = _as_mapping(render_x86_16_tail_validation_console_summary(surface, cache_path=console_cache_path))
         detail_artifact = _as_mapping(cache_x86_16_tail_validation_detail_artifact(surface, cache_path=detail_cache_path))
@@ -320,7 +347,7 @@ def emit_tail_validation_surface_summary(
         if os.environ.get(TAIL_VALIDATION_METADATA_ENV) == "1":
             payload = {
                 "scanned": int(scanned),
-                "records": [dict(record) for record in records if isinstance(record, Mapping)],
+                "records": [dict(record) for record in iter(records) if isinstance(record, Mapping)],
                 "summary": dict(summary or {}),
                 "surface": dict(surface or {}),
                 "console_cache_hit": bool(rendered.get("cache_hit")),
@@ -339,12 +366,12 @@ def emit_tail_validation_surface_summary(
     return _impl()
 
 
-def tail_validation_snapshot_for_function_run(project: object, function: object) -> dict[str, object]:
+def tail_validation_snapshot_for_function_run(project: object, function: object) -> object:
     """Return the latest tail-validation snapshot for a function run."""
     merged: dict[str, object] = {}
     fallback_snapshot = _dynamic_cli_attr(project, "_inertia_last_tail_validation_snapshot", None)
     if isinstance(fallback_snapshot, dict):
-        if all(stage in fallback_snapshot for stage in ("structuring", "postprocess")):
+        if all(stage in fallback_snapshot for stage in iter(("structuring", "postprocess"))):
             return dict(fallback_snapshot)
         merged.update(fallback_snapshot)
     snapshot = extract_x86_16_tail_validation_snapshot(_as_mapping(_dynamic_cli_attr(function, "info", None)))
@@ -353,12 +380,13 @@ def tail_validation_snapshot_for_function_run(project: object, function: object)
     return merged
 
 
+@cython.ccall
 def tail_validation_snapshot_for_fallback(
     project: object,
     function: object,
     *,
-    allow_project_fallback: bool,
-) -> dict[str, object]:
+    allow_project_fallback: cython.bint,
+) -> object:
     """Return the snapshot available to a fallback emission lane."""
     forced_snapshot = _dynamic_cli_attr(project, "_inertia_forced_tail_validation_snapshot", None)
     if isinstance(forced_snapshot, dict):
@@ -386,7 +414,8 @@ def tail_validation_snapshot_for_fallback(
     return {}
 
 
-def tail_validation_fallback_allows_project_snapshot(kind: str) -> bool:
+@cython.ccall
+def tail_validation_fallback_allows_project_snapshot(kind: object) -> cython.bint:
     """Return whether a fallback lane may consult project-level snapshots."""
     return kind in TAIL_VALIDATION_FALLBACK_PROJECT_SNAPSHOT_KINDS
 
@@ -394,11 +423,13 @@ def tail_validation_fallback_allows_project_snapshot(kind: str) -> bool:
 @cast(typing.Callable[..., typing.Any], trace_function(name="tail_validation.summary"))
 def emit_tail_validation_console_summary(
     function_tasks: Sequence[object],
-    result_map: Mapping[int, object],
+    result_map: Mapping[cython.longlong, object],
     *,
     binary_path: Path | None = None,
 ) -> None:
     """Emit the decompiler run tail-validation summary to stderr."""
+    project: object
+    item: object
     annotate_current_span(functions=len(function_tasks), binary=binary_path.name if binary_path is not None else None)
     for item in function_tasks:
         project = _dynamic_cli_attr(_dynamic_cli_attr(item, "function", None), "project", None)
@@ -450,11 +481,12 @@ def tail_validation_cache_label(
     binary_path: Path | None,
     function_tasks: Sequence[object],
     *,
-    cache_salt: str | None = None,
-) -> str | None:
+    cache_salt: object = None,
+) -> object:
     """Build a deterministic cache label for a tail-validation summary."""
 
-    def _impl() -> str | None:
+    def _impl() -> object:
+        item: object
         if binary_path is None:
             return None
         resolved = Path(binary_path).resolve()
@@ -484,26 +516,30 @@ def tail_validation_cache_label(
     return _impl()
 
 
+@cython.ccall
 def tail_validation_console_cache_path(
     binary_path: Path | None,
     function_tasks: Sequence[object],
     *,
-    cache_salt: str | None = None,
+    cache_salt: object = None,
 ) -> Path | None:
     """Return the cache path for the rendered console summary."""
+    label: object
     label = tail_validation_cache_label(binary_path, function_tasks, cache_salt=cache_salt)
     if label is None:
         return None
     return TAIL_VALIDATION_CONSOLE_CACHE_DIR / f"{label}.tail_validation_console.json"
 
 
+@cython.ccall
 def tail_validation_detail_cache_path(
     binary_path: Path | None,
     function_tasks: Sequence[object],
     *,
-    cache_salt: str | None = None,
+    cache_salt: object = None,
 ) -> Path | None:
     """Return the cache path for the detailed summary artifact."""
+    label: object
     label = tail_validation_cache_label(binary_path, function_tasks, cache_salt=cache_salt)
     if label is None:
         return None
@@ -514,11 +550,11 @@ def tail_validation_display_status(
     snapshot: Mapping[str, object] | None,
     *,
     expected_stages: Sequence[str] = ("structuring", "postprocess"),
-    fallback_kind: str | None = None,
-) -> str:
+    fallback_kind: object = None,
+) -> object:
     """Return a compact validation status string for attempt reporting."""
 
-    def _impl() -> str:
+    def _impl() -> object:
         if fallback_kind is not None:
             return TailValidationDisplayStatus.FAILED.value
         if not isinstance(snapshot, Mapping) or not snapshot:
@@ -538,7 +574,11 @@ def tail_validation_display_status(
     return _impl()
 
 
-def _collect_failed_stages_8616(snapshot: Mapping[str, object], expected_stages: Sequence[str]) -> list[str]:
+@cython.ccall
+def _collect_failed_stages_8616(snapshot: Mapping[str, object], expected_stages: Sequence[str]) -> object:
+    entry: object
+    status: object
+    stage_name: object
     failed_stages: list[str] = []
     for stage_name in expected_stages:
         entry = snapshot.get(stage_name)
@@ -561,21 +601,22 @@ def _collect_failed_stages_8616(snapshot: Mapping[str, object], expected_stages:
 def format_tail_validation_diagnostic(
     snapshot: Mapping[str, object] | None,
     *,
-    function_addr: int = 0,
-    function_name: str = "sub",
+    function_addr: cython.longlong = 0,
+    function_name: object = "sub",
     block_count: int | None = None,
     byte_count: int | None = None,
-    cfg_hash: str | None = None,
-    exit_kind: str | None = None,
-    exit_detail: str | None = None,
-) -> list[str]:
+    cfg_hash: object = None,
+    exit_kind: object = None,
+    exit_detail: object = None,
+) -> object:
     """Format a tail validation snapshot as human-readable diagnostic lines.
 
     Returns lines suitable for printing as stdout comments (/* ... */).
     When the snapshot is missing or uncollected, reports the exit kind/detail.
     """
 
-    def _impl() -> list[str]:
+    def _impl() -> object:
+        stage_key: object
         lines: list[str] = []
         header = f"/* tail validation: {function_name} ({function_addr:#x}) */"
         lines.append(header)
@@ -610,9 +651,15 @@ def format_tail_validation_diagnostic(
     return _impl()
 
 
+@cython.ccall
 def _append_stage_diagnostic_lines_8616(
-    lines: list[str], snapshot: Mapping[str, object], stage_key: str
+    lines: object, snapshot: Mapping[str, object], stage_key: object
 ) -> None:
+    entry: object
+    mode: object
+    status: object
+    summary_text: object
+    verdict: object
     entry = snapshot.get(stage_key)
     if not isinstance(entry, Mapping):
         lines.append(f"/* tail validation {stage_key}: missing */")

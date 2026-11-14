@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove wide call-predicate polarity without constructing scalar C operands.
 
 Layer: Structuring.
@@ -10,6 +11,8 @@ rewrite cleanup, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, replace
 
@@ -21,28 +24,32 @@ from inertia.lowering.call_output_stack_objects import select_wide_call_return_c
 from .condition_exit_normalization import transparent_condition_exit_8616
 from .wide_condition_ordering import prove_wide_ordering_operator_8616
 from .wide_stack_condition_chains import WideStackOperandPair8616, _chain_outcome_8616
+import dataclasses
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideCallConditionPlan8616:
     """Target-directed ordering proof; not a call-placement or storage proof."""
 
     operator: ConditionOp
-    conditions: tuple[ConditionIR, ConditionIR, ConditionIR]
+    conditions: object
     high_stack: IRValue
     low_stack: IRValue
 
 
+@cython.ccall
 def _normalize_chain_exits(
-    chain: tuple[ConditionIR, ...],
-    successors: dict[int, tuple[int, ...]],
+    chain: object,
+    successors: object,
     artifact: SSAFunctionArtifact | None,
-    retained: frozenset[int],
-) -> dict[int, ConditionIR] | None:
+    retained: object,
+) -> object:
     """Collapse only SSA-proven empty paths, preserving original condition facts."""
-    normalized: dict[int, ConditionIR] = {}
+    condition: object
+    target: object
+    normalized: dict[cython.longlong, ConditionIR] = {}
     for condition in chain:
-        targets: list[int] = []
+        targets: list[cython.longlong] = []
         for target in (condition.taken_target, condition.fallthrough_target):
             if not isinstance(target, int):
                 return None
@@ -61,14 +68,18 @@ def _normalize_chain_exits(
 
 def plan_wide_call_condition_8616(
     root: ConditionIR,
-    conditions_by_block: dict[int, ConditionIR],
-    successors: dict[int, tuple[int, ...]],
-    true_target: int,
-    false_target: int,
+    conditions_by_block: object,
+    successors: object,
+    true_target: cython.longlong,
+    false_target: cython.longlong,
     *,
     artifact: SSAFunctionArtifact | None = None,
 ) -> WideCallConditionPlan8616 | None:
     """Require one complete chain and a unique operator for all nine orders."""
+    chain: object
+    normalized: object
+    operator: object
+    condition: object
     chain = select_wide_call_return_condition_chain_8616(root, tuple(conditions_by_block.values()))
     if chain is None or true_target == false_target:
         return None
@@ -79,12 +90,12 @@ def plan_wide_call_condition_8616(
             return None
     high, _equality, low = chain
     operands = (high.lhs, low.lhs, high.rhs, low.rhs)
-    if not all(isinstance(operand, IRValue) for operand in operands):
+    if not all(isinstance(operand, IRValue) for operand in iter(operands)):
         return None
     assert isinstance(high.lhs, IRValue) and isinstance(low.lhs, IRValue)
     assert isinstance(high.rhs, IRValue) and isinstance(low.rhs, IRValue)
     pair = WideStackOperandPair8616(high.lhs, low.lhs, high.rhs, low.rhs, True, False, False)
-    retained = frozenset((*conditions_by_block, true_target, false_target))
+    retained = frozenset(tuple(conditions_by_block) + (true_target, false_target))
     normalized = _normalize_chain_exits(chain, successors, artifact, retained)
     if normalized is None:
         return None

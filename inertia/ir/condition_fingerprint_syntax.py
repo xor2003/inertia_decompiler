@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Lexical structure of owned condition fingerprints.
 
 Layer: IR.
@@ -9,9 +10,12 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import cython
+import builtins
 
 
-def split_condition_fingerprint_arguments_8616(value: str) -> list[str]:
+@cython.ccall
+def split_condition_fingerprint_arguments_8616(value: object) -> object:
     """Split at commas whose running parenthesis balance is zero.
 
     Preserve negative balance on malformed input, empty interior arguments and
@@ -21,7 +25,7 @@ def split_condition_fingerprint_arguments_8616(value: str) -> list[str]:
     toward zero: no comma in the skipped span can separate arguments.
     """
     if "(" not in value and ")" not in value:
-        parts = [part.strip() for part in value.split(",")]
+        parts = [part.strip() for part in builtins.iter(value.split(","))]
         if not value or value.endswith(","):
             parts.pop()
         return parts

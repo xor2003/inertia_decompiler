@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Normalize exact Boolean ITE encodings used as structured conditions.
 
 Layer: Structuring.
@@ -15,6 +16,8 @@ Every other ITE is retained unchanged as insufficient evidence.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import Enum
@@ -36,6 +39,7 @@ from inertia.lowering.structured_tags import copy_structured_tags_8616
 from inertia.pipeline.errors import PipelineHardError
 
 from .condition_materialization import invert_structured_condition_8616
+import dataclasses
 
 
 class BooleanConditionIteDisposition8616(Enum):
@@ -48,18 +52,18 @@ class BooleanConditionIteDisposition8616(Enum):
     MATERIALIZED_INVERTED = "materialized_inverted"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class BooleanConditionIteStats8616:
     """Closed evidence-loop counters for Boolean control-condition ITEs."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether at least one proven condition was materialized."""
         return self.materialized_count > 0
 
@@ -71,6 +75,7 @@ class _CodegenSurface8616(Protocol):
     _inertia_boolean_condition_ite_stats_8616: BooleanConditionIteStats8616
 
 
+@cython.ccall
 def _constant_integer_8616(expression: CExpression) -> int | None:
     """Return an exact Python integer from one structured constant."""
     if not isinstance(expression, CConstant) or not isinstance(expression.value, int):
@@ -81,9 +86,10 @@ def _constant_integer_8616(expression: CExpression) -> int | None:
 _LOGICAL_NOT_WRAPPER_LIMIT_8616 = 4
 
 
+@cython.ccall
 def _unwrap_logical_not_chain_8616(
     condition: CExpression,
-) -> tuple[CExpression, int]:
+) -> tuple[CExpression, cython.longlong]:
     """Unwrap a bounded chain of logical Not operators around one expression.
 
     Only the ``CUnaryOp`` ``"Not"`` operator is a logical negation; bitwise
@@ -102,8 +108,10 @@ def _unwrap_logical_not_chain_8616(
     return operand, not_count
 
 
+@cython.ccall
 def _merge_condition_origin_tags_8616(replacement: CExpression, condition: CExpression) -> None:
     """Preserve inner comparison and outer wrapper instruction-origin tags."""
+    wrapper: object
     encoded, _not_count = _unwrap_logical_not_chain_8616(condition)
     if not isinstance(encoded, CITE):
         return
@@ -122,6 +130,7 @@ def _merge_condition_origin_tags_8616(replacement: CExpression, condition: CExpr
     replacement.tags = tags
 
 
+@cython.ccall
 def _normalize_boolean_ite_8616(
     condition: CExpression,
     codegen: object,
@@ -132,6 +141,8 @@ def _normalize_boolean_ite_8616(
     each wrapper only flips truth parity, so the folded expression still
     evaluates ``cond`` exactly once and preserves the original guard truth.
     """
+    false_value: object
+    true_value: object
     encoded, not_count = _unwrap_logical_not_chain_8616(condition)
     if not isinstance(encoded, CITE):
         return condition, BooleanConditionIteDisposition8616.NOT_ITE
@@ -159,6 +170,9 @@ def _normalize_boolean_ite_8616(
 
 def normalize_boolean_condition_ites_8616(codegen: object) -> BooleanConditionIteStats8616:
     """Normalize all exact Boolean ITEs that directly control branches or loops."""
+    body: object
+    condition: object
+    node: object
     surface = cast(_CodegenSurface8616, codegen)
     try:
         root = surface.cfunc
@@ -180,14 +194,14 @@ def normalize_boolean_condition_ites_8616(codegen: object) -> BooleanConditionIt
             dispositions.append(disposition)
             node.condition = replacement
 
-    raw_count = sum(disposition is not BooleanConditionIteDisposition8616.NOT_ITE for disposition in dispositions)
+    raw_count = sum(disposition is not BooleanConditionIteDisposition8616.NOT_ITE for disposition in iter(dispositions))
     normalized_count = sum(
         disposition
         not in {
             BooleanConditionIteDisposition8616.NOT_ITE,
             BooleanConditionIteDisposition8616.REFUSED_NON_CONSTANT,
         }
-        for disposition in dispositions
+        for disposition in iter(dispositions)
     )
     materialized_count = sum(
         disposition
@@ -195,7 +209,7 @@ def normalize_boolean_condition_ites_8616(codegen: object) -> BooleanConditionIt
             BooleanConditionIteDisposition8616.MATERIALIZED_IDENTITY,
             BooleanConditionIteDisposition8616.MATERIALIZED_INVERTED,
         }
-        for disposition in dispositions
+        for disposition in iter(dispositions)
     )
     stats = BooleanConditionIteStats8616(
         raw_fact_count=raw_count,

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Resolve proven same-block data-register dependencies for return expressions.
 
 Layer: Structuring.
@@ -14,15 +15,18 @@ lowering owns their conversion to typed ``Address``/stack variables.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Sequence
 
 from angr import ailment
 from angr.ailment.expression import Expression
+import operator
 
-type RegisterNameResolver8616 = Callable[[object], str | None]
-type TemporaryResolver8616 = Callable[[object, Sequence[object], int], object]
-type ExpressionCopier8616 = Callable[[object], object]
+RegisterNameResolver8616 = typing.TypeAliasType("RegisterNameResolver8616", Callable[[object], str | None])
+TemporaryResolver8616 = typing.TypeAliasType("TemporaryResolver8616", Callable[[object, Sequence[object], int], object])
+ExpressionCopier8616 = typing.TypeAliasType("ExpressionCopier8616", Callable[[object], object])
 
 _DATA_REGISTERS_8616 = frozenset(
     {
@@ -42,7 +46,8 @@ _DATA_REGISTERS_8616 = frozenset(
 )
 
 
-def _register_view_8616(expr: object) -> tuple[int, int] | None:
+@cython.ccall
+def _register_view_8616(expr: object) -> object:
     """Return the byte interval for one concrete AIL register expression."""
     if not isinstance(expr, ailment.Expr.Register):
         return None
@@ -51,21 +56,25 @@ def _register_view_8616(expr: object) -> tuple[int, int] | None:
     return expr.reg_offset, max(expr.bits // 8, 1)
 
 
-def _register_views_overlap_8616(lhs: tuple[int, int], rhs: tuple[int, int]) -> bool:
+@cython.ccall
+def _register_views_overlap_8616(lhs: object, rhs: object) -> cython.bint:
     """Return whether two byte-addressed register views overlap."""
     lhs_start, lhs_size = lhs
     rhs_start, rhs_size = rhs
     return lhs_start < rhs_start + rhs_size and rhs_start < lhs_start + lhs_size
 
 
+@cython.ccall
 def _reaching_register_source_8616(
     expr: ailment.Expr.Register,
     statements: Sequence[object],
     *,
-    before_index: int,
+    before_index: cython.longlong,
     resolve_temporaries: TemporaryResolver8616,
-) -> tuple[object, int] | None:
+) -> object:
     """Find one exact reaching definition, refusing calls and partial writes."""
+    wanted: object
+    written: object
     wanted = _register_view_8616(expr)
     if wanted is None:
         return None
@@ -80,22 +89,23 @@ def _reaching_register_source_8616(
         written = _register_view_8616(statement.dst)
         if written is None or not _register_views_overlap_8616(wanted, written):
             continue
-        if written != wanted:
+        if operator.ne(written, wanted):
             return None
         return resolve_temporaries(statement.src, statements, index), index
     return None
 
 
+@cython.ccall
 def resolve_same_block_data_register_dependencies_8616(
     expr: object,
     statements: Sequence[object],
     *,
-    before_index: int,
+    before_index: cython.longlong,
     register_name: RegisterNameResolver8616,
     resolve_temporaries: TemporaryResolver8616,
     copy_expression: ExpressionCopier8616,
-    active_views: frozenset[tuple[int, int]] = frozenset(),
-    depth: int = 0,
+    active_views: object = frozenset(),
+    depth: cython.longlong = 0,
 ) -> object:
     """Substitute exact reaching data-register assignments in an AIL expression.
 
@@ -130,18 +140,21 @@ def resolve_same_block_data_register_dependencies_8616(
     )
 
 
+@cython.ccall
 def _resolve_register_leaf_8616(
     expr: ailment.Expr.Register,
     statements: Sequence[object],
     *,
-    before_index: int,
+    before_index: cython.longlong,
     register_name: RegisterNameResolver8616,
     resolve_temporaries: TemporaryResolver8616,
     copy_expression: ExpressionCopier8616,
-    active_views: frozenset[tuple[int, int]],
-    depth: int,
+    active_views: object,
+    depth: cython.longlong,
 ) -> object:
     """Substitute one proven reaching source for a data-register leaf."""
+    reaching: object
+    view: object
     view = _register_view_8616(expr)
     if view is None or view in active_views or register_name(expr) not in _DATA_REGISTERS_8616:
         return expr
@@ -170,12 +183,12 @@ def _resolve_composite_children_8616(
     expr: object,
     statements: Sequence[object],
     *,
-    before_index: int,
+    before_index: cython.longlong,
     register_name: RegisterNameResolver8616,
     resolve_temporaries: TemporaryResolver8616,
     copy_expression: ExpressionCopier8616,
-    active_views: frozenset[tuple[int, int]],
-    depth: int,
+    active_views: object,
+    depth: cython.longlong,
 ) -> object:
     """Copy one composite expression and resolve each child operand."""
 
@@ -196,7 +209,7 @@ def _resolve_composite_children_8616(
     if not isinstance(result, Expression):
         return expr
     if isinstance(result, ailment.Expr.BinaryOp):
-        result.operands = [resolve(operand) for operand in result.operands]
+        result.operands = [resolve(operand) for operand in iter(result.operands)]
     elif isinstance(result, ailment.Expr.UnaryOp):
         result.operand = resolve(result.operand)
     elif isinstance(result, ailment.Expr.ITE):

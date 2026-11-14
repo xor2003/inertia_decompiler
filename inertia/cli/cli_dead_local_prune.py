@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: preserve legacy CLI helper surface while delegating semantic proof to X86_16 layers.
@@ -5,6 +6,8 @@ Forbidden: owning decompiler semantics, source-backed recovery, or postprocess s
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
@@ -19,6 +22,8 @@ from inertia.postprocess.optimization.local_liveness import (
     stack_storage_liveness_key_8616,
 )
 from inertia.postprocess.optimization.local_read_keys import collect_local_read_keys_8616
+import dataclasses
+import operator
 
 _PURE_GENERATED_HELPER_CALLEES = frozenset(
     {
@@ -44,17 +49,21 @@ class _CodegenLike(Protocol):
     """Codegen surface needed by dead-local pruning."""
 
     cfunc: _CFunctionLike | None
-    _inertia_dead_local_prune_protected_direct_stack_move_count_8616: int
-    _inertia_dead_local_prune_walk_refused_complex_8616: int
+    _inertia_dead_local_prune_protected_direct_stack_move_count_8616: cython.longlong
+    _inertia_dead_local_prune_walk_refused_complex_8616: cython.longlong
 
 
 class _AliasStorageLike(Protocol):
     """Alias-storage summary used to compare local assignment reads."""
 
-    identity: tuple[object, ...] | None
+    identity: object
 
 
-def _call_name(node: structured_c.CFunctionCall) -> str | None:
+@cython.ccall
+def _call_name(node: structured_c.CFunctionCall) -> object:
+    callee: object
+    name: object
+    target_name: object
     target = node.callee_target
     if isinstance(target, str):
         return target
@@ -74,7 +83,9 @@ def _call_name(node: structured_c.CFunctionCall) -> str | None:
     return name if isinstance(name, str) else None
 
 
-def _expr_has_side_effects(node: object, *, iter_c_nodes_deep: Callable[[object], Iterable[object]]) -> bool:
+@cython.ccall
+def _expr_has_side_effects(node: object, *, iter_c_nodes_deep: Callable[[object], Iterable[object]]) -> cython.bint:
+    subnode: object
     for subnode in iter_c_nodes_deep(node):
         if not isinstance(subnode, structured_c.CFunctionCall):
             continue
@@ -84,6 +95,7 @@ def _expr_has_side_effects(node: object, *, iter_c_nodes_deep: Callable[[object]
     return False
 
 
+@cython.ccall
 def _stack_variable_offset_8616(variable: object) -> int | None:
     """Return the BP-relative offset for one stack variable."""
     if not isinstance(variable, SimStackVariable):
@@ -91,12 +103,14 @@ def _stack_variable_offset_8616(variable: object) -> int | None:
     return variable.offset if isinstance(variable.offset, int) else None
 
 
-def _is_local_variable_8616(variable: object) -> bool:
+@cython.ccall
+def _is_local_variable_8616(variable: object) -> cython.bint:
     """Return whether one codegen variable is a register/stack local."""
     return isinstance(variable, (SimRegisterVariable, SimStackVariable))
 
 
-def _statement_may_diverge_control_flow_8616(stmt: object) -> bool:
+@cython.ccall
+def _statement_may_diverge_control_flow_8616(stmt: object) -> cython.bint:
     """Return whether a statement can interrupt fall-through order."""
     control_flow_types = (
         structured_c.CBreak,
@@ -112,31 +126,32 @@ def _statement_may_diverge_control_flow_8616(stmt: object) -> bool:
     return isinstance(stmt, control_flow_types)
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _DeadLocalPruneRun:
     """State for one dead-local-assignment prune pass over a cfunc."""
 
     codegen: _CodegenLike
     root: object
-    structured_codegen_node: Callable[[object], bool]
+    structured_codegen_node: Callable[[object], cython.bint]
     iter_c_nodes_deep: Callable[[object], Iterable[object]]
     unwrap_c_casts: Callable[[object], object]
     describe_alias_storage: Callable[[object], _AliasStorageLike]
-    reads: set[tuple[object, ...]]
-    protected_stack_offsets: frozenset[int]
-    direct_stack_move_protected_keys: set[tuple[object, ...]]
-    changed: bool = False
-    seen_prune_nodes: set[int] = field(default_factory=set)
-    prune_visit_count: int = 0
-    max_prune_visits: int = 20000
+    reads: object
+    protected_stack_offsets: object
+    direct_stack_move_protected_keys: object
+    changed: cython.bint = False
+    seen_prune_nodes: object = field(default_factory=set)
+    prune_visit_count: cython.longlong = 0
+    max_prune_visits: cython.longlong = 20000
 
+    @cython.ccall
     def collect_storage_read_keys(
         self,
         node: object,
-        keys: set[tuple[object, ...]],
-        seen: set[int] | None = None,
+        keys: object,
+        seen: object = None,
         *,
-        allow_variable_read: bool = True,
+        allow_variable_read: cython.bint = True,
     ) -> None:
         """Delegate read traversal to the structured-C cleanup owner."""
         collect_local_read_keys_8616(
@@ -146,8 +161,14 @@ class _DeadLocalPruneRun:
         )
 
 
-    def call_callee_key(self, call_expr: structured_c.CFunctionCall) -> tuple[str, object] | None:
+    @cython.ccall
+    def call_callee_key(self, call_expr: structured_c.CFunctionCall) -> object:
         """Return a stable identity key for one call target."""
+        callee: object
+        callee_addr: object
+        callee_func: object
+        callee_name: object
+        callee_target: object
         callee_target = call_expr.callee_target
         if callee_target is not None:
             return ("target", callee_target)
@@ -172,6 +193,7 @@ class _DeadLocalPruneRun:
 
     def normalized_call_arg_key(self, expr: object) -> tuple[object, ...]:
         """Return a structural identity key for one call argument."""
+        storage_key: object
         expr = self.unwrap_c_casts(expr)
         storage_key = self.describe_alias_storage(expr).identity
         if storage_key is not None:
@@ -200,34 +222,43 @@ class _DeadLocalPruneRun:
             return (
                 "call",
                 self.call_callee_key(expr),
-                tuple(self.normalized_call_arg_key(arg) for arg in expr.args or ()),
+                tuple(self.normalized_call_arg_key(arg) for arg in iter(expr.args or ())),
             )
         return ("expr", type(expr).__name__)
 
-    def same_call_signature(self, lhs: object, rhs: object) -> bool:
+    def same_call_signature(self, lhs: object, rhs: object) -> cython.bint:
         """Return whether two call expressions name the same callee/args."""
+        lhs_key: object
+        rhs_key: object
         lhs_call = self.unwrap_c_casts(lhs)
         rhs_call = self.unwrap_c_casts(rhs)
         if not isinstance(lhs_call, structured_c.CFunctionCall) or not isinstance(rhs_call, structured_c.CFunctionCall):
             return False
         lhs_key = self.call_callee_key(lhs_call)
         rhs_key = self.call_callee_key(rhs_call)
-        if lhs_key is None or rhs_key is None or lhs_key != rhs_key:
+        if lhs_key is None or rhs_key is None or operator.ne(lhs_key, rhs_key):
             return False
-        lhs_args = tuple(self.normalized_call_arg_key(arg) for arg in lhs_call.args or ())
-        rhs_args = tuple(self.normalized_call_arg_key(arg) for arg in rhs_call.args or ())
+        lhs_args = tuple(self.normalized_call_arg_key(arg) for arg in iter(lhs_call.args or ()))
+        rhs_args = tuple(self.normalized_call_arg_key(arg) for arg in iter(rhs_call.args or ()))
         return lhs_args == rhs_args
 
-    def collect_stmt_reads(self, stmt: object) -> set[tuple[object, ...]]:
+    @cython.ccall
+    def collect_stmt_reads(self, stmt: object) -> object:
         """Return all read keys observed inside one statement."""
         stmt_reads: set[tuple[object, ...]] = set()
         self.collect_storage_read_keys(stmt, stmt_reads)
         return stmt_reads
 
+    @cython.ccall
     def _local_assignment_lhs_keys(
         self, stmt: structured_c.CAssignment
-    ) -> set[tuple[object, ...]]:
+    ) -> object:
         """Return every identity key owned by one local assignment lhs."""
+        lhs_unified: object
+        lhs_variable: object
+        liveness_key: object
+        physical_key: object
+        storage_key: object
         lhs_variable = stmt.lhs.variable
         lhs_unified = stmt.lhs.unified_variable
         lhs_exact_keys: set[tuple[object, ...]] = set()
@@ -248,6 +279,7 @@ class _DeadLocalPruneRun:
                 lhs_keys.add(("physical", physical_key))
         return lhs_keys
 
+    @cython.ccall
     def _bump_protected_direct_stack_move_count(self) -> None:
         """Record one protected direct-stack-move lhs diagnostic."""
         # Dynamic codegen compatibility boundary: diagnostics are attached to the codegen object.
@@ -264,13 +296,15 @@ class _DeadLocalPruneRun:
             + 1
         )
 
+    @cython.ccall
     def _prune_local_assignment(
         self,
         stmt: structured_c.CAssignment,
-        new_statements: list[object | None],
-        pending_assignment_indices: dict[tuple[object, ...], int],
-    ) -> bool:
+        new_statements: object,
+        pending_assignment_indices: object,
+    ) -> cython.bint:
         """Handle one local-variable assignment; True when fully consumed."""
+        key: object
         lhs_keys = self._local_assignment_lhs_keys(stmt)
         rhs_reads: set[tuple[object, ...]] = set()
         if self.structured_codegen_node(stmt.rhs):
@@ -289,14 +323,15 @@ class _DeadLocalPruneRun:
             stmt, lhs_keys, rhs_reads, new_statements, pending_assignment_indices
         )
 
+    @cython.ccall
     def _drop_or_keep_dead_assignment(
         self,
         stmt: structured_c.CAssignment,
-        lhs_keys: set[tuple[object, ...]],
-        rhs_reads: set[tuple[object, ...]],
-        new_statements: list[object | None],
-        pending_assignment_indices: dict[tuple[object, ...], int],
-    ) -> bool:
+        lhs_keys: object,
+        rhs_reads: object,
+        new_statements: object,
+        pending_assignment_indices: object,
+    ) -> cython.bint:
         """Drop proven local dead stores; retain unproved architectural effects."""
         self_referential_rhs = bool(lhs_keys) and not lhs_keys.isdisjoint(rhs_reads)
         # AST reads omit architectural live-out uses published in native SSA.
@@ -311,26 +346,30 @@ class _DeadLocalPruneRun:
         self._mark_pending_assignment(lhs_keys, new_statements, pending_assignment_indices)
         return False
 
+    @cython.ccall
     def _mark_pending_assignment(
         self,
-        lhs_keys: set[tuple[object, ...]],
-        new_statements: list[object | None],
-        pending_assignment_indices: dict[tuple[object, ...], int],
+        lhs_keys: object,
+        new_statements: object,
+        pending_assignment_indices: object,
     ) -> None:
         """Record one still-live assignment and drop its shadowed writers."""
+        key: object
         for key in lhs_keys:
             if key in pending_assignment_indices:
                 new_statements[pending_assignment_indices[key]] = None
                 self.changed = True
             pending_assignment_indices[key] = len(new_statements)
 
+    @cython.ccall
     def _prune_dirty_assignment(
         self,
         stmt: structured_c.CAssignment,
-        new_statements: list[object | None],
-        pending_assignment_indices: dict[tuple[object, ...], int],
-    ) -> bool:
+        new_statements: object,
+        pending_assignment_indices: object,
+    ) -> cython.bint:
         """Handle one dirty-expression assignment; True when consumed/dropped."""
+        dirty: object
         # Dynamic codegen boundary: dirty expressions are external codegen nodes.
         dirty = getattr(stmt.lhs, "dirty", None)
         # Dynamic codegen boundary: dirty metadata fields vary by angr expression.
@@ -348,7 +387,8 @@ class _DeadLocalPruneRun:
         self._mark_pending_assignment(lhs_keys, new_statements, pending_assignment_indices)
         return False
 
-    def _is_prunable_local_assignment(self, stmt: object) -> bool:
+    @cython.ccall
+    def _is_prunable_local_assignment(self, stmt: object) -> cython.bint:
         """Return whether one statement is a side-effect-free local assignment."""
         return (
             isinstance(stmt, structured_c.CAssignment)
@@ -357,7 +397,8 @@ class _DeadLocalPruneRun:
             and not _expr_has_side_effects(stmt.rhs, iter_c_nodes_deep=self.iter_c_nodes_deep)
         )
 
-    def _is_prunable_dirty_assignment(self, stmt: object) -> bool:
+    @cython.ccall
+    def _is_prunable_dirty_assignment(self, stmt: object) -> cython.bint:
         """Return whether one statement is a side-effect-free dirty assignment."""
         return (
             isinstance(stmt, structured_c.CAssignment)
@@ -365,9 +406,10 @@ class _DeadLocalPruneRun:
             and not _expr_has_side_effects(stmt.rhs, iter_c_nodes_deep=self.iter_c_nodes_deep)
         )
 
+    @cython.ccall
     def _call_shadowed_by_return(
-        self, statements: list[object], index: int, stmt: object
-    ) -> bool:
+        self, statements: object, index: cython.longlong, stmt: object
+    ) -> cython.bint:
         """Return whether a bare call repeats the following return's call."""
         # Dynamic codegen boundary: expression statements expose expr in angr structured C.
         call_expr = stmt if isinstance(stmt, structured_c.CFunctionCall) else getattr(stmt, "expr", None)
@@ -380,10 +422,14 @@ class _DeadLocalPruneRun:
             and self.same_call_signature(call_expr, next_stmt.retval)
         )
 
+    @cython.ccall
     def _prune_statements(self, node: structured_c.CStatements) -> None:
         """Rewrite one statement list, dropping proven-dead assignments."""
+        stmt: object
+        index: object
+        key: object
         new_statements: list[object | None] = []
-        pending_assignment_indices: dict[tuple[object, ...], int] = {}
+        pending_assignment_indices: dict[tuple[object, ...], cython.longlong] = {}
         statements = list(node.statements)
         for index, stmt in enumerate(statements):
             if self._call_shadowed_by_return(statements, index, stmt):
@@ -406,12 +452,15 @@ class _DeadLocalPruneRun:
                 continue
             self.prune(stmt)
             new_statements.append(stmt)
-        if new_statements != list(node.statements):
-            node.statements = [stmt for stmt in new_statements if stmt is not None]
+        if operator.ne(new_statements, list(node.statements)):
+            node.statements = [stmt for stmt in iter(new_statements) if stmt is not None]
             self.changed = True
 
+    @cython.ccall
     def _prune_scalar_children(self, node: object) -> None:
         """Recurse into single-child node attributes."""
+        value: object
+        attr: object
         for attr in (
             "lhs",
             "rhs",
@@ -435,8 +484,12 @@ class _DeadLocalPruneRun:
             if self.structured_codegen_node(value):
                 self.prune(value)
 
+    @cython.ccall
     def _prune_sequence_children(self, node: object) -> None:
         """Recurse into sequence-valued node attributes."""
+        items: object
+        attr: object
+        item: object
         for attr in ("args", "operands", "statements"):
             if not hasattr(node, attr):
                 continue
@@ -451,8 +504,11 @@ class _DeadLocalPruneRun:
                 if self.structured_codegen_node(item):
                     self.prune(item)
 
+    @cython.ccall
     def _prune_condition_pairs(self, node: object) -> None:
         """Recurse into CIfElse-like condition/body pairs."""
+        body: object
+        cond: object
         if hasattr(node, "condition_and_nodes"):
             try:
                 # Dynamic codegen boundary: CIfElse-like nodes may expose condition/body pairs.
@@ -466,6 +522,7 @@ class _DeadLocalPruneRun:
                     if self.structured_codegen_node(body):
                         self.prune(body)
 
+    @cython.ccall
     def prune(self, node: object) -> None:
         """Prune one node and its structured children."""
         if not self.structured_codegen_node(node):
@@ -492,9 +549,12 @@ class _DeadLocalPruneRun:
         self._prune_condition_pairs(node)
 
 
-def _direct_stack_move_protected_offsets(codegen: _CodegenLike) -> frozenset[int]:
+@cython.ccall
+def _direct_stack_move_protected_offsets(codegen: _CodegenLike) -> frozenset[cython.longlong]:
     """Collect stack offsets protected by direct-stack-move evidence."""
-    protected: set[int] = set()
+    offset: object
+    record: object
+    protected: set[cython.longlong] = set()
     # Dynamic codegen compatibility boundary: this counter is attached by the CLI orchestration pass.
     for record in tuple(getattr(codegen, "_inertia_direct_stack_move_evidence_8616", ()) or ()):
         if isinstance(record, Mapping):
@@ -510,15 +570,21 @@ def _direct_stack_move_protected_offsets(codegen: _CodegenLike) -> frozenset[int
     return frozenset(protected)
 
 
+@cython.ccall
 def _direct_stack_move_protected_keys(
     root: object,
-    reads: set[tuple[object, ...]],
-    protected_stack_offsets: frozenset[int],
+    reads: object,
+    protected_stack_offsets: object,
     *,
     iter_c_nodes_deep: Callable[[object], Iterable[object]],
     describe_alias_storage: Callable[[object], _AliasStorageLike],
-) -> set[tuple[object, ...]]:
+) -> object:
     """Return read-backed keys for variables at protected stack offsets."""
+    liveness_key: object
+    physical_key: object
+    storage_key: object
+    unified: object
+    node: object
     protected_keys: set[tuple[object, ...]] = set()
     if not protected_stack_offsets:
         return protected_keys
@@ -546,15 +612,17 @@ def _direct_stack_move_protected_keys(
     return protected_keys
 
 
+@cython.ccall
 def _prune_dead_local_assignments(
     codegen: _CodegenLike,
     *,
-    structured_codegen_node: Callable[[object], bool],
+    structured_codegen_node: Callable[[object], cython.bint],
     iter_c_nodes_deep: Callable[[object], Iterable[object]],
     unwrap_c_casts: Callable[[object], object],
     describe_alias_storage: Callable[[object], _AliasStorageLike],
-) -> bool:
+) -> cython.bint:
     """Prune local assignments using read keys from the cleanup owner."""
+    cfunc: object
     cfunc = codegen.cfunc
     if cfunc is None:
         return False

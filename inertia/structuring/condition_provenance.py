@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Transport proven condition-load provenance across structured C-AST rebuilds.
 
 Layer: Structuring.
@@ -11,6 +12,8 @@ or inspect rendered C here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -33,30 +36,36 @@ from inertia.pipeline.errors import PipelineHardError
 from inertia.widening.segmented_load_identity import segmented_load_identity_8616
 
 from .condition_lowering import attach_condition_segment_access_provenance_8616
+import dataclasses
+import operator
+import builtins
 
 _SOURCE_INSTRUCTION_ADDRS_TAG_8616 = "inertia_source_instruction_addrs"
 _LOG = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StructuredConditionProvenanceStats8616:
     """Evidence census for exact structured-condition provenance transport."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    updated_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    updated_count: cython.longlong = 0
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether any typed segment helper gained provenance."""
         return self.updated_count > 0
 
 
 def _condition_expressions_8616(root: object) -> Iterator[CExpression]:
     """Yield expressions owned by structured branch and loop nodes."""
+    _body: object
+    condition: object
+    node: object
     for node in _iter_c_nodes_deep_8616(root):
         if isinstance(node, (CForLoop, CWhileLoop, CDoWhileLoop)):
             if isinstance(node.condition, CExpression):
@@ -68,8 +77,11 @@ def _condition_expressions_8616(root: object) -> Iterator[CExpression]:
                     yield condition
 
 
-def _direct_condition_key_8616(expression: CExpression) -> tuple[int, int] | None:
+@cython.ccall
+def _direct_condition_key_8616(expression: CExpression) -> object:
     """Return provenance owned directly by one structured condition expression."""
+    block_addr: object
+    src_insn: object
     boundary = cast(Any, expression)  # tags are an angr C-AST boundary
     tags = boundary.tags
     if not isinstance(tags, dict):
@@ -81,8 +93,10 @@ def _direct_condition_key_8616(expression: CExpression) -> tuple[int, int] | Non
     return src_insn, block_addr
 
 
+@cython.ccall
 def _typed_segment_helpers_8616(expression: object) -> tuple[CFunctionCall, ...]:
     """Return typed segmented-load helpers nested in one condition."""
+    node: object
     helpers: list[CFunctionCall] = []
     for node in _iter_c_nodes_deep_8616(expression):
         if not isinstance(node, CFunctionCall):
@@ -92,8 +106,9 @@ def _typed_segment_helpers_8616(expression: object) -> tuple[CFunctionCall, ...]
     return tuple(helpers)
 
 
-def _helper_source_addrs_8616(helper: CFunctionCall) -> tuple[int, ...]:
+def _helper_source_addrs_8616(helper: CFunctionCall) -> tuple[cython.longlong, ...]:
     """Return exact memory-access instructions already owned by one helper."""
+    source_addrs: object
     boundary = cast(Any, helper)  # tags are an angr C-AST boundary
     tags = boundary.tags
     if not isinstance(tags, dict):
@@ -101,7 +116,7 @@ def _helper_source_addrs_8616(helper: CFunctionCall) -> tuple[int, ...]:
     source_addrs = tags.get(_SOURCE_INSTRUCTION_ADDRS_TAG_8616, ())
     if not isinstance(source_addrs, tuple):
         return ()
-    return tuple(addr for addr in source_addrs if isinstance(addr, int))
+    return tuple(addr for addr in iter(source_addrs) if isinstance(addr, int))
 
 
 def _dynamic_node_tag_keys_8616(node: object) -> tuple[str, ...]:
@@ -113,22 +128,27 @@ def _dynamic_node_tag_keys_8616(node: object) -> tuple[str, ...]:
         return ()
     if not isinstance(tags, dict):
         return ()
-    return tuple(sorted(key for key in tags if isinstance(key, str)))
+    return tuple(sorted(key for key in iter(tags) if isinstance(key, str)))
 
 
+@cython.ccall
 def structured_loop_segment_provenance_surface_8616(
     root: object,
 ) -> tuple[tuple[object, ...], ...]:
     """Describe typed segmented helpers owned by structured loop fields."""
+    expression: object
+    field_name: object
+    helper: object
+    node: object
     surface: list[tuple[object, ...]] = []
     for node in _iter_c_nodes_deep_8616(root):
         if not isinstance(node, (CForLoop, CWhileLoop, CDoWhileLoop)):
             continue
-        fields = (
+        fields = tuple((
             ("initializer", node.initializer),
             ("condition", node.condition),
             ("iterator", node.iterator),
-        ) if isinstance(node, CForLoop) else (("condition", node.condition),)
+        )) if isinstance(node, CForLoop) else tuple((("condition", node.condition),))
         for field_name, expression in fields:
             boundary = cast(Any, expression)  # tags are an angr C-AST boundary
             try:
@@ -166,7 +186,10 @@ def transport_structured_condition_segment_provenance_8616(
     instruction and block tags. CMP/JCC addresses and body ownership are not
     substitutes for the memory access attached to an operand or helper.
     """
-    facts_by_key: dict[tuple[int, int], list[ConditionIR]] = {}
+    key: object
+    condition: object
+    expression: object
+    facts_by_key: dict[tuple[cython.longlong, cython.longlong], list[ConditionIR]] = {}
     for condition in conditions:
         if isinstance(condition.src_insn, int) and isinstance(condition.block_addr, int):
             facts_by_key.setdefault((condition.src_insn, condition.block_addr), []).append(condition)
@@ -189,7 +212,7 @@ def transport_structured_condition_segment_provenance_8616(
                         segmented_load_identity_8616(node),
                         _dynamic_node_tag_keys_8616(node),
                     )
-                    for node in _iter_c_nodes_deep_8616(expression)
+                    for node in builtins.iter(_iter_c_nodes_deep_8616(expression))
                 ),
             )
         if not helpers:
@@ -205,19 +228,19 @@ def transport_structured_condition_segment_provenance_8616(
             continue
 
         condition = candidates[0]
-        sources_before = tuple(_helper_source_addrs_8616(helper) for helper in helpers)
+        sources_before = tuple(_helper_source_addrs_8616(helper) for helper in iter(helpers))
         attach_condition_segment_access_provenance_8616(
             expression,
             condition,
         )
-        sources_after = tuple(_helper_source_addrs_8616(helper) for helper in helpers)
-        proven_after = sum(bool(source_addrs) for source_addrs in sources_after)
+        sources_after = tuple(_helper_source_addrs_8616(helper) for helper in iter(helpers))
+        proven_after = sum(bool(source_addrs) for source_addrs in iter(sources_after))
         classified_count += proven_after
         materialized_count += proven_after
         failure_count += len(helpers) - proven_after
         updated_count += sum(
             before != after
-            for before, after in zip(sources_before, sources_after, strict=True)
+            for before, after in builtins.iter(zip(sources_before, sources_after, strict=True))
         )
 
     if classified_count > 0 and materialized_count == 0:
@@ -244,12 +267,13 @@ def replay_codegen_structured_condition_segment_provenance_8616(
     lowering replay so its ambiguity policy receives operand-owned instruction
     evidence rather than borrowing CMP or JCC addresses.
     """
+    cached: object
     boundary = cast(Any, codegen)  # metadata and cfunc are an angr plugin boundary
     try:
         root = boundary.cfunc.statements
         conditions = tuple(
             condition
-            for condition in boundary._inertia_typed_conditions
+            for condition in iter(boundary._inertia_typed_conditions)
             if isinstance(condition, ConditionIR)
         )
     except (AttributeError, TypeError):
@@ -257,7 +281,7 @@ def replay_codegen_structured_condition_segment_provenance_8616(
         root = None
     replay_key = (id(root), len(conditions))
     # Dynamic angr codegen metadata boundary: replay cache fields are optional.
-    if getattr(boundary, "_inertia_structured_condition_provenance_replay_key_8616", None) == replay_key:
+    if operator.eq(getattr(boundary, "_inertia_structured_condition_provenance_replay_key_8616", None), replay_key):
         # Dynamic angr codegen metadata boundary: cached stats are optional.
         cached = getattr(boundary, "_inertia_structured_condition_provenance_stats_8616", None)
         if isinstance(cached, StructuredConditionProvenanceStats8616):

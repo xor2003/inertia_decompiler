@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Single-owner response contract for declared get/set-vector effects.
 
 Layer: Frontend.
@@ -16,9 +17,13 @@ the four exact slot bytes.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
+import dataclasses
+import operator
 
 __all__ = [
     "DOS_DISPATCH_SLOT_8616",
@@ -30,10 +35,10 @@ __all__ = [
     "vector_response_8616",
 ]
 
-INT21_GET_VECTOR_8616: int = 0x35
-INT21_SET_VECTOR_8616: int = 0x25
-DOS_DISPATCH_SLOT_8616: int = 0x21
-IVT_SLOT_BYTES_8616: int = 4
+INT21_GET_VECTOR_8616: cython.longlong = 0x35
+INT21_SET_VECTOR_8616: cython.longlong = 0x25
+DOS_DISPATCH_SLOT_8616: cython.longlong = 0x21
+IVT_SLOT_BYTES_8616: cython.longlong = 4
 
 
 class VectorResponseRefusal8616(StrEnum):
@@ -49,7 +54,7 @@ class VectorResponseRefusal8616(StrEnum):
     FUNCTION_UNSUPPORTED = "vector_function_not_declared"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class VectorResponseEffect8616:
     """Computed get/set-vector effects, without callsite admission authority.
 
@@ -60,23 +65,25 @@ class VectorResponseEffect8616:
     granted effect set.
     """
 
-    function: int
-    number: int
+    function: cython.longlong
+    number: cython.longlong
     es: int | None
     bx: int | None
-    slot_after: bytes | None
+    slot_after: object
 
 
-def _word_8616(value: object) -> bool:
+@cython.ccall
+def _word_8616(value: object) -> cython.bint:
     """Return whether ``value`` is a strict 16-bit word, bool excluded."""
     return type(value) is int and 0 <= value <= 0xFFFF
 
 
+@cython.ccall
 def vector_response_8616(
     *,
-    function: int,
-    number: int,
-    slot_before: bytes,
+    function: cython.longlong,
+    number: cython.longlong,
+    slot_before: object,
     ds: int | None = None,
     dx: int | None = None,
 ) -> VectorResponseEffect8616 | VectorResponseRefusal8616:
@@ -99,7 +106,7 @@ def vector_response_8616(
     if (
         not valid_selectors
         or not isinstance(slot_before, bytes)
-        or len(slot_before) != IVT_SLOT_BYTES_8616
+        or operator.ne(len(slot_before), IVT_SLOT_BYTES_8616)
     ):
         return VectorResponseRefusal8616.FUNCTION_UNSUPPORTED
     if function == INT21_GET_VECTOR_8616:

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Preflight accepted storage contracts for function-prototype application.
 
 Layer: Types/Lowering.
@@ -12,6 +13,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -37,6 +40,9 @@ from .interprocedural_storage_simtypes import (
     storage_slot_simtype_8616,
 )
 from .stack_variable_coordinates import machine_bp_offset_for_stack_variable_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "FunctionStoragePrototypeApplicationResult8616",
@@ -60,7 +66,7 @@ class FunctionStoragePrototypeApplicationVerdict8616(StrEnum):
     UNCHANGED = "unchanged"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionStoragePrototypeApplicationResult8616:
     """Atomic prototype-application result retained on current codegen."""
 
@@ -68,10 +74,10 @@ class FunctionStoragePrototypeApplicationResult8616:
     verdict: FunctionStoragePrototypeApplicationVerdict8616
     prototype: SimTypeFunction | None = None
     type_failures: tuple[StorageSimTypeFailureKind8616, ...] = ()
-    changed: bool = False
+    changed: cython.bint = False
 
     @property
-    def blocks_legacy_reconciliation(self) -> bool:
+    def blocks_legacy_reconciliation(self) -> cython.bint:
         """Return whether fallback width-only mutation would violate atomicity."""
         return self.verdict in {
             FunctionStoragePrototypeApplicationVerdict8616.CONTRACT_REFUSED,
@@ -81,29 +87,30 @@ class FunctionStoragePrototypeApplicationResult8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionStoragePrototypeTypes8616:
     """Mutation-free argument and proven-return types for one accepted contract."""
 
-    argument_types: tuple[SimType, ...] | None
+    argument_types: object
     proven_return: SimType | None = None
     failures: tuple[StorageSimTypeFailureKind8616, ...] = ()
 
     @property
-    def accepted(self) -> bool:
+    def accepted(self) -> cython.bint:
         """Return whether every contract-owned type passed preflight."""
         return self.argument_types is not None and not self.failures
 
 
-def _prototype_arguments_8616(prototype: object) -> tuple[SimType, ...] | None:
+def _prototype_arguments_8616(prototype: object) -> object:
     """Return a fully typed argument tuple or refuse a partial prototype."""
     if not isinstance(prototype, SimTypeFunction):
         return None
     arguments = tuple(prototype.args or ())
-    return arguments if all(isinstance(item, SimType) for item in arguments) else None
+    return arguments if all(isinstance(item, SimType) for item in iter(arguments)) else None
 
 
-def _pointer_is_informative_8616(pointer_type: SimTypePointer) -> bool:
+@cython.ccall
+def _pointer_is_informative_8616(pointer_type: SimTypePointer) -> cython.bint:
     """Return whether an existing near pointer carries a non-void pointee."""
     pointee = pointer_type.pts_to
     return not (
@@ -113,29 +120,33 @@ def _pointer_is_informative_8616(pointer_type: SimTypePointer) -> bool:
 
 
 def _existing_pointer_candidate_8616(
-    candidates: tuple[SimType | None, ...],
+    candidates: object,
     arch: Arch,
-) -> tuple[SimType | None, bool]:
+) -> tuple[SimType | None, cython.bint]:
     """Join exact-width existing pointees or refuse competing object types."""
     pointers = tuple(
         bound
-        for candidate in candidates
+        for candidate in iter(candidates)
         if isinstance(candidate, SimTypePointer)
         and isinstance((bound := candidate.with_arch(arch)), SimTypePointer)
         and bound.size == 16
     )
-    informative = tuple(item for item in pointers if _pointer_is_informative_8616(item))
-    if informative and any(item != informative[0] for item in informative[1:]):
+    informative = tuple(item for item in iter(pointers) if _pointer_is_informative_8616(item))
+    if informative and any(operator.ne(item, informative[0]) for item in iter(informative[1:])):
         return None, False
     return (informative[0] if informative else (pointers[0] if pointers else None)), True
 
 
+@cython.ccall
 def _slot_matches_cvar_8616(
     slot: StorageSlotContract8616,
     cvar: structured_c.CVariable,
     codegen: object,
-) -> bool:
+) -> cython.bint:
     """Verify one C argument against contiguous machine-BP storage pieces."""
+    address: object
+    first_address: object
+    piece: object
     pieces = slot.pieces
     variable = cvar.variable
     if (
@@ -155,17 +166,18 @@ def _slot_matches_cvar_8616(
             or not piece.is_exact
             or address is None
             or address.base != ("bp",)
-            or address.offset != expected_offset
+            or operator.ne(address.offset, expected_offset)
         ):
             return False
         expected_offset += piece.width
     variable_offset = machine_bp_offset_for_stack_variable_8616(codegen, variable)
-    return isinstance(variable_offset, int) and variable_offset == first_address.offset
+    return isinstance(variable_offset, int) and operator.eq(variable_offset, first_address.offset)
 
 
+@cython.ccall
 def storage_prototype_with_types_8616(
     original: SimTypeFunction,
-    argument_types: tuple[SimType, ...],
+    argument_types: object,
     return_type: SimType,
     arch: Arch,
 ) -> SimTypeFunction:
@@ -174,42 +186,48 @@ def storage_prototype_with_types_8616(
     return cast(SimTypeFunction, SimTypeFunction(
         argument_types,
         return_type,
-        arg_names=names if len(names) == len(argument_types) else None,
+        arg_names=names if operator.eq(len(names), len(argument_types)) else None,
         variadic=original.variadic,
     ).with_arch(arch))
 
 
 def _prototype_inputs_aligned_8616(
-    cfunc_args: tuple[SimType, ...] | None,
-    function_args: tuple[SimType, ...] | None,
+    cfunc_args: object,
+    function_args: object,
     contract: FunctionStorageContract8616,
-    cvars: tuple[structured_c.CVariable, ...],
+    cvars: object,
     codegen: object,
-) -> bool:
+) -> cython.bint:
     """Return whether argument counts, logical order, and cvars all align."""
     if cfunc_args is None or function_args is None:
         return False
     expected_indices = tuple(range(len(contract.inputs)))
     return (
-        len(cfunc_args) == len(contract.inputs)
-        and len(cvars) == len(contract.inputs)
-        and tuple(slot.logical_index for slot in contract.inputs) == expected_indices
+        operator.eq(len(cfunc_args), len(contract.inputs))
+        and operator.eq(len(cvars), len(contract.inputs))
+        and operator.eq(tuple(slot.logical_index for slot in iter(contract.inputs)), expected_indices)
         and all(
             _slot_matches_cvar_8616(slot, cvar, codegen)
-            for slot, cvar in zip(contract.inputs, cvars, strict=True)
+            for slot, cvar in builtins.iter(zip(contract.inputs, cvars, strict=True))
         )
     )
 
 
+@cython.ccall
 def preflight_storage_prototype_types_8616(
     contract: FunctionStorageContract8616,
     cfunc_prototype: SimTypeFunction,
     function_prototype: SimTypeFunction,
-    cvars: tuple[structured_c.CVariable, ...],
+    cvars: object,
     arch: Arch,
     codegen: object,
 ) -> FunctionStoragePrototypeTypes8616:
     """Preflight every parameter and any proven return before mutation."""
+    cfunc_args: object
+    function_args: object
+    cvar: object
+    index: object
+    slot: object
     cfunc_args = _prototype_arguments_8616(cfunc_prototype)
     function_args = _prototype_arguments_8616(function_prototype)
     if not _prototype_inputs_aligned_8616(
@@ -264,9 +282,9 @@ def preflight_storage_prototype_types_8616(
 
 
 def _pointer_retyping_preserves_arithmetic_8616(
-    codegen: object, cvars: tuple[structured_c.CVariable, ...],
-    argument_types: tuple[SimType, ...],
-) -> bool:
+    codegen: object, cvars: object,
+    argument_types: object,
+) -> cython.bint:
     """Refuse type-only promotion that reinterprets retained numeric operations.
 
     Accepted interface evidence proves storage/type classes, not an address
@@ -274,8 +292,12 @@ def _pointer_retyping_preserves_arithmetic_8616(
     representation and segment proof before the pointer type is committed.
     Header-only third-party declaration surfaces have no body to reinterpret.
     """
-    promoted = tuple(cvar for cvar, target in zip(cvars, argument_types, strict=True)
-                     if isinstance(target, SimTypePointer) and cvar.variable_type != target)
+    body: object
+    cfunc: object
+    leaf: object
+    node: object
+    promoted = tuple(cvar for cvar, target in builtins.iter(zip(cvars, argument_types, strict=True))
+                     if isinstance(target, SimTypePointer) and operator.ne(cvar.variable_type, target))
     if not promoted:
         return True
     # Dynamic angr/codegen compatibility boundary: declaration-only surfaces.
@@ -288,7 +310,7 @@ def _pointer_retyping_preserves_arithmetic_8616(
             continue
         for leaf in _iter_c_nodes_deep_8616(node):
             if isinstance(leaf, structured_c.CVariable) and any(
-                leaf is cvar or leaf.variable is cvar.variable for cvar in promoted
+                leaf is cvar or leaf.variable is cvar.variable for cvar in iter(promoted)
             ):
                 return False
     return True

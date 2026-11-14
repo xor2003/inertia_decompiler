@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: preserve legacy CLI helper surface while delegating semantic proof to X86_16 layers.
@@ -5,6 +6,8 @@ Forbidden: owning decompiler semantics, source-backed recovery, or postprocess s
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import re
 from collections.abc import Callable, Iterable
@@ -27,23 +30,27 @@ from inertia.pipeline.structured_assignment_index import (
 from inertia.pipeline.structured_ast_query_index import (
     StructuredAstQueryIndex8616,
 )
+import operator
 
 _LINEAR_TEMP_NAME_RE_8616 = re.compile(r"(?:v\d+|vvar_\d+|ir_\d+|tmp_\d+)")
 
 
-def _dynamic_codegen_attr(obj: object, name: str, default: Any = None) -> Any:  # noqa: ANN401
+@cython.ccall
+def _dynamic_codegen_attr(obj: object, name: object, default: Any = None) -> Any:  # noqa: ANN401
     """Read a dynamic angr structured-codegen attribute at the CLI boundary."""
     # Dynamic codegen boundary: angr C-AST nodes expose version-dependent fields.
     return getattr(obj, name, default)
 
 
-def _dynamic_codegen_setattr(obj: object, name: str, value: object) -> None:
+@cython.ccall
+def _dynamic_codegen_setattr(obj: object, name: object, value: object) -> None:
     """Write a dynamic angr structured-codegen attribute at the CLI boundary."""
     # Dynamic codegen boundary: angr C-AST nodes expose version-dependent fields.
     setattr(obj, name, value)
 
 
-def _strip_typed_suffix_8616(name: object) -> str | None:
+@cython.ccall
+def _strip_typed_suffix_8616(name: object) -> object:
     if not isinstance(name, str):
         return None
     if name.endswith("}"):
@@ -53,7 +60,8 @@ def _strip_typed_suffix_8616(name: object) -> str | None:
     return name
 
 
-def _is_linear_temp_name_8616(name: object) -> bool:
+@cython.ccall
+def _is_linear_temp_name_8616(name: object) -> cython.bint:
     base = _strip_typed_suffix_8616(name)
     return isinstance(base, str) and _LINEAR_TEMP_NAME_RE_8616.fullmatch(base) is not None
 
@@ -73,7 +81,7 @@ class _SsStackByteOffsetRewrite8616:
         codegen: Any,  # noqa: ANN401
         unwrap_c_casts: Callable[[object], object],
         iter_c_nodes_deep: Callable[[object], Iterable[object]],
-        replace_c_children: Callable[[object, Callable[[object], object]], bool],
+        replace_c_children: Callable[[object, Callable[[object], object]], cython.bint],
         c_constant_value: Callable[[object], int | None],
         flatten_c_add_terms: Callable[[object], Iterable[object]],
         classify_segmented_dereference: Callable[[object, object], Any],
@@ -104,8 +112,8 @@ class _SsStackByteOffsetRewrite8616:
         self.assignment_identity_index: StructuredAssignmentIdentityIndex8616 | None = None
         self.binary_name: Any = None
         self.binary_path: Any = None
-        self.changed: bool = False
-        self.cvar_single_assignment_cache: dict[int, object | None] = {}
+        self.changed: cython.bint = False
+        self.cvar_single_assignment_cache: dict[cython.longlong, object | None] = {}
         self.dirty_expr_single_assignment_cache: dict[str, object | None] = {}
         self.func_name: Any = None
         self.new_root: Any = None
@@ -124,7 +132,7 @@ class _SsStackByteOffsetRewrite8616:
             return result
         return None
 
-    def run_8616_part0(self) -> tuple[bool, object]:
+    def run_8616_part0(self) -> tuple[cython.bint, object]:
         """Collect alias state and refuse early when no codegen function exists."""
         if _dynamic_codegen_attr(self.codegen, "cfunc", None) is None:
             return True, False
@@ -152,7 +160,7 @@ class _SsStackByteOffsetRewrite8616:
         self.assignment_identity_index = None
         return False, None
 
-    def _safe_dirty_attr_8616(self, obj: object, attr: str) -> object | None:
+    def _safe_dirty_attr_8616(self, obj: object, attr: object) -> object | None:
         try:
             return cast(object, _dynamic_codegen_attr(obj, attr, None))
         except (AttributeError, TypeError, ValueError):
@@ -174,15 +182,17 @@ class _SsStackByteOffsetRewrite8616:
             )
         return self.synthetic_sp_anchor
 
-    def _is_sp_virtual_register(self, variable: object) -> bool:
+    def _is_sp_virtual_register(self, variable: object) -> cython.bint:
         sp_offset = _dynamic_codegen_attr(_dynamic_codegen_attr(self.project, "arch", None), "registers", {}).get("sp", (None, None))[0]
-        return isinstance(sp_offset, int) and _dynamic_codegen_attr(variable, "reg", None) == sp_offset
+        return isinstance(sp_offset, int) and operator.eq(_dynamic_codegen_attr(variable, "reg", None), sp_offset)
 
-    def _is_ss_virtual_register(self, variable: object) -> bool:
+    def _is_ss_virtual_register(self, variable: object) -> cython.bint:
         ss_offset = _dynamic_codegen_attr(_dynamic_codegen_attr(self.project, "arch", None), "registers", {}).get("ss", (None, None))[0]
-        return isinstance(ss_offset, int) and _dynamic_codegen_attr(variable, "reg", None) == ss_offset
+        return isinstance(ss_offset, int) and operator.eq(_dynamic_codegen_attr(variable, "reg", None), ss_offset)
 
     def _dirty_reg_offset_8616(self, node: object) -> int | None:
+        dirty: object
+        attr: object
         dirty = _dynamic_codegen_attr(node, "dirty", None)
         if dirty is None:
             return None
@@ -192,10 +202,11 @@ class _SsStackByteOffsetRewrite8616:
                 return int(reg)
         return None
 
-    def _dirty_is_ss_virtual_register_8616(self, node: object) -> bool:
+    def _dirty_is_ss_virtual_register_8616(self, node: object) -> cython.bint:
         return self._is_ss_virtual_register(SimpleNamespace(reg=self._dirty_reg_offset_8616(node)))
 
-    def _is_linear_temp(self, cvar: object) -> bool:
+    def _is_linear_temp(self, cvar: object) -> cython.bint:
+        name: object
         if not isinstance(cvar, structured_c.CVariable):
             return False
         variable = _dynamic_codegen_attr(cvar, "variable", None)
@@ -207,6 +218,7 @@ class _SsStackByteOffsetRewrite8616:
         return _is_linear_temp_name_8616(name)
 
     def _alias_keys_for_cvar(self, cvar: object) -> tuple[object, ...]:
+        variable: object
         keys: list[object] = []
         variable = _dynamic_codegen_attr(cvar, "variable", None)
         linear_temp = self._is_linear_temp(cvar)
@@ -224,6 +236,8 @@ class _SsStackByteOffsetRewrite8616:
         return tuple(keys)
 
     def _alias_lookup_keys_for_cvar(self, cvar: object) -> tuple[object, ...]:
+        variable: object
+        candidate: object
         variable = _dynamic_codegen_attr(cvar, "variable", None)
         keys: list[object] = []
         linear_temp = self._is_linear_temp(cvar)
@@ -246,8 +260,9 @@ class _SsStackByteOffsetRewrite8616:
     def _assignment_keys_for_cvar(self, 
         cvar: structured_c.CVariable,
         *,
-        include_virtual_name: bool,
+        include_virtual_name: cython.bint,
     ) -> tuple[StructuredAssignmentIdentityKey8616, ...]:
+        variable: object
         keys: list[StructuredAssignmentIdentityKey8616] = []
         variable = _dynamic_codegen_attr(cvar, "variable", None)
         if variable is not None:
@@ -302,6 +317,7 @@ class _SsStackByteOffsetRewrite8616:
         return tuple(dict.fromkeys(keys))
 
     def _assignment_index(self) -> StructuredAssignmentIdentityIndex8616 | None:
+        root: object
         if self.assignment_identity_index is not None:
             return self.assignment_identity_index
         root = _dynamic_codegen_attr(_dynamic_codegen_attr(self.codegen, "cfunc", None), "statements", None)
@@ -319,7 +335,10 @@ class _SsStackByteOffsetRewrite8616:
         )
         return self.assignment_identity_index
 
-    def _single_assignment_expr_for_virtual_name(self, name: str) -> object | None:
+    def _single_assignment_expr_for_virtual_name(self, name: object) -> object | None:
+        cached: object
+        index: object
+        resolved: object
         normalized_name = _strip_typed_suffix_8616(name)
         if not normalized_name:
             return None
@@ -358,6 +377,7 @@ class _SsStackByteOffsetRewrite8616:
         return resolved
 
     def _single_assignment_expr_for_cvar(self, node_cvar: object) -> object | None:
+        index: object
         cache_key = id(node_cvar)
         if cache_key in self.cvar_single_assignment_cache:
             return self.cvar_single_assignment_cache[cache_key]
@@ -382,6 +402,9 @@ class _SsStackByteOffsetRewrite8616:
         return []
 
     def _statement_index_containing(self, node: object) -> int | None:
+        idx: object
+        nested: object
+        stmt: object
         if node is None:
             return None
         for idx, stmt in enumerate(self._top_level_statements()):
@@ -391,6 +414,9 @@ class _SsStackByteOffsetRewrite8616:
         return None
 
     def _nearest_preceding_assignment_expr_for_cvar(self, node_cvar: object) -> object | None:
+        stmt_idx: object
+        idx: object
+        stmt: object
         if not isinstance(node_cvar, structured_c.CVariable):
             return None
         node_var = _dynamic_codegen_attr(node_cvar, "variable", None)
@@ -419,8 +445,10 @@ class _SsStackByteOffsetRewrite8616:
     def _resolve_dirty_virtual_expr(self, 
         node: object,
         *,
-        seen_varids: set[int] | None = None,
+        seen_varids: object = None,
     ) -> object | None:
+        dirty: object
+        resolved: object
         dirty = _dynamic_codegen_attr(node, "dirty", None)
         if dirty is None:
             return None
@@ -445,7 +473,7 @@ class _SsStackByteOffsetRewrite8616:
             return self._synthetic_sp_anchor_cvar()
         return None
 
-    def _dirty_alias_key(self, node: object) -> tuple[str, int] | None:
+    def _dirty_alias_key(self, node: object) -> object:
         varid = self._safe_dirty_attr_8616(_dynamic_codegen_attr(node, "dirty", None), "varid")
         if isinstance(varid, int):
             return ("vvar", varid)
@@ -454,9 +482,12 @@ class _SsStackByteOffsetRewrite8616:
     def _resolve_stack_pointer_alias(self, 
         node: object,
         *,
-        seen_expr_ids: set[int] | None = None,
-        seen_varids: set[int] | None = None,
-    ) -> tuple[object, int] | None:
+        seen_expr_ids: object = None,
+        seen_varids: object = None,
+    ) -> object:
+        alias: object
+        dirty_key: object
+        resolved_dirty: object
         node = self.unwrap_c_casts(node)
         if node is None:
             return None
@@ -499,9 +530,14 @@ class _SsStackByteOffsetRewrite8616:
         self,
         node: object,
         *,
-        seen_expr_ids: set[int] | None = None,
-        seen_varids: set[int] | None = None,
-    ) -> tuple[object, int] | None:
+        seen_expr_ids: object = None,
+        seen_varids: object = None,
+    ) -> object:
+        alias: object
+        identity: object
+        nearest_assignment_rhs: object
+        single_assignment_rhs: object
+        key: object
         variable = _dynamic_codegen_attr(node, "variable", None)
         if isinstance(variable, SimStackVariable):
             identity = self.stack_slot_identity_for_variable(variable)
@@ -529,7 +565,10 @@ class _SsStackByteOffsetRewrite8616:
             )
         return None
 
-    def _resolve_reference_stack_pointer_alias(self, node: structured_c.CUnaryOp) -> tuple[object, int] | None:
+    def _resolve_reference_stack_pointer_alias(self, node: structured_c.CUnaryOp) -> object:
+        alias: object
+        identity: object
+        key: object
         operand = self.unwrap_c_casts(node.operand)
         if isinstance(operand, structured_c.CVariable):
             variable = _dynamic_codegen_attr(operand, "variable", None)
@@ -547,9 +586,13 @@ class _SsStackByteOffsetRewrite8616:
         self,
         node: structured_c.CBinaryOp,
         *,
-        seen_expr_ids: set[int] | None = None,
-        seen_varids: set[int] | None = None,
-    ) -> tuple[object, int] | None:
+        seen_expr_ids: object = None,
+        seen_varids: object = None,
+    ) -> object:
+        lhs: object
+        lhs_const: object
+        rhs: object
+        rhs_const: object
         lhs = self._resolve_stack_pointer_alias(
             node.lhs,
             seen_expr_ids=seen_expr_ids,
@@ -573,9 +616,10 @@ class _SsStackByteOffsetRewrite8616:
     def _expr_is_ss_segment_value_8616(self, 
         node: object,
         *,
-        seen_expr_ids: set[int] | None = None,
-        seen_varids: set[int] | None = None,
-    ) -> bool:
+        seen_expr_ids: object = None,
+        seen_varids: object = None,
+    ) -> cython.bint:
+        resolved_dirty: object
         node = self.unwrap_c_casts(node)
         if node is None:
             return False
@@ -611,9 +655,10 @@ class _SsStackByteOffsetRewrite8616:
         self,
         node: object,
         *,
-        seen_expr_ids: set[int] | None = None,
-        seen_varids: set[int] | None = None,
-    ) -> bool:
+        seen_expr_ids: object = None,
+        seen_varids: object = None,
+    ) -> cython.bint:
+        single_assignment_rhs: object
         variable = _dynamic_codegen_attr(node, "variable", None)
         if runtime_segment_name_for_variable_8616(variable) == "ss":
             return True
@@ -639,7 +684,7 @@ class _SsStackByteOffsetRewrite8616:
             )
         return False
 
-    def _expr_is_ss_segment_scale_term_8616(self, node: object, *, seen_varids: set[int] | None = None) -> bool:
+    def _expr_is_ss_segment_scale_term_8616(self, node: object, *, seen_varids: object = None) -> cython.bint:
         node = self.unwrap_c_casts(node)
         if not isinstance(node, structured_c.CBinaryOp):
             return False
@@ -659,8 +704,9 @@ class _SsStackByteOffsetRewrite8616:
     def _strip_proven_ss_segment_scale_from_addr_expr_8616(self, 
         addr_expr: object,
         *,
-        seen_varids: set[int] | None = None,
+        seen_varids: object = None,
     ) -> object | None:
+        term: object
         terms = self.flatten_c_add_terms(addr_expr)
         if not terms:
             return None
@@ -689,9 +735,11 @@ class _SsStackByteOffsetRewrite8616:
     def _expr_contains_ss_segment_scale_8616(self, 
         node: object,
         *,
-        seen_expr_ids: set[int] | None = None,
-        seen_varids: set[int] | None = None,
-    ) -> bool:
+        seen_expr_ids: object = None,
+        seen_varids: object = None,
+    ) -> cython.bint:
+        resolved_dirty: object
+        single_assignment_rhs: object
         node = self.unwrap_c_casts(node)
         if node is None:
             return False
@@ -730,9 +778,9 @@ class _SsStackByteOffsetRewrite8616:
         self,
         node: object,
         *,
-        seen_expr_ids: set[int] | None = None,
-        seen_varids: set[int] | None = None,
-    ) -> bool:
+        seen_expr_ids: object = None,
+        seen_varids: object = None,
+    ) -> cython.bint:
         op = _dynamic_codegen_attr(node, "op", None)
         lhs = _dynamic_codegen_attr(node, "lhs", None)
         rhs = _dynamic_codegen_attr(node, "rhs", None)
@@ -765,9 +813,13 @@ class _SsStackByteOffsetRewrite8616:
     def _resolve_ss_linear_stack_pointer_alias(self,
         node: object,
         *,
-        seen_expr_ids: set[int] | None = None,
-        seen_varids: set[int] | None = None,
-    ) -> tuple[object, int] | None:
+        seen_expr_ids: object = None,
+        seen_varids: object = None,
+    ) -> object:
+        addsub: object
+        direct: object
+        resolved_expr: object
+        stripped: object
         node = self.unwrap_c_casts(node)
         if node is None:
             return None
@@ -811,9 +863,13 @@ class _SsStackByteOffsetRewrite8616:
         self,
         node: structured_c.CBinaryOp,
         *,
-        seen_expr_ids: set[int] | None = None,
-        seen_varids: set[int] | None = None,
-    ) -> tuple[object, int] | None:
+        seen_expr_ids: object = None,
+        seen_varids: object = None,
+    ) -> object:
+        lhs: object
+        lhs_const: object
+        rhs: object
+        rhs_const: object
         lhs_const = self.c_constant_value(self.unwrap_c_casts(node.lhs))
         rhs_const = self.c_constant_value(self.unwrap_c_casts(node.rhs))
         if rhs_const is not None:
@@ -840,8 +896,10 @@ class _SsStackByteOffsetRewrite8616:
         self,
         node: object,
         *,
-        seen_varids: set[int] | None = None,
+        seen_varids: object = None,
     ) -> object | None:
+        resolved_dirty: object
+        resolved_expr: object
         resolved_dirty = self._resolve_dirty_virtual_expr(node, seen_varids=seen_varids)
         if resolved_dirty is not None:
             return resolved_dirty
@@ -856,8 +914,10 @@ class _SsStackByteOffsetRewrite8616:
         self,
         resolved_expr: object,
         *,
-        seen_varids: set[int] | None = None,
-    ) -> tuple[object, int] | None:
+        seen_varids: object = None,
+    ) -> object:
+        addr_expr: object
+        resolved: object
         if not self._expr_contains_ss_segment_scale_8616(resolved_expr, seen_varids=seen_varids):
             return None
         addr_expr = self.strip_segment_scale_from_addr_expr(resolved_expr, self.project)
@@ -876,7 +936,8 @@ class _SsStackByteOffsetRewrite8616:
             return resolved
         return None
 
-    def _is_uncast_ss_linear_carrier_byte_offset_8616(self, node: object) -> bool:
+    def _is_uncast_ss_linear_carrier_byte_offset_8616(self, node: object) -> cython.bint:
+        resolved_dirty: object
         if isinstance(node, structured_c.CTypeCast):
             return False
         node = self.unwrap_c_casts(node)
@@ -899,6 +960,8 @@ class _SsStackByteOffsetRewrite8616:
         return self._expr_contains_ss_segment_scale_8616(base_expr)
 
     def _collect_stack_pointer_aliases(self) -> None:
+        index: object
+        walk_node: object
         aliases: dict[object, object] = {}
         index = self._assignment_index()
         if index is None or self.structured_query_index is None:
@@ -915,9 +978,12 @@ class _SsStackByteOffsetRewrite8616:
 
     def _record_assignment_stack_pointer_alias(
         self,
-        aliases: dict[object, object],
+        aliases: object,
         walk_node: structured_c.CAssignment,
-    ) -> bool:
+    ) -> cython.bint:
+        dirty_key: object
+        resolved: object
+        key: object
         lhs = _dynamic_codegen_attr(walk_node, "lhs", None)
         if isinstance(lhs, structured_c.CVariable):
             if not self._is_linear_temp(lhs):
@@ -937,7 +1003,7 @@ class _SsStackByteOffsetRewrite8616:
         resolved_state = self.stack_pointer_alias_state(*resolved)
         needs_update = False
         for key in keys:
-            if aliases.get(key) != resolved_state:
+            if operator.ne(aliases.get(key), resolved_state):
                 aliases[key] = resolved_state
                 needs_update = True
         return needs_update
@@ -956,7 +1022,7 @@ class _SsStackByteOffsetRewrite8616:
                 return pointee_bits
         return None
 
-    def make_stack_deref(self, cvar: Any, offset: int, bits: int) -> object:  # noqa: ANN401
+    def make_stack_deref(self, cvar: Any, offset: cython.longlong, bits: cython.longlong) -> object:  # noqa: ANN401
         """Build a typed dereference for a proven stack-relative address."""
         element_type = SimTypeChar(False) if bits == 8 else SimTypeShort(False)
         ptr_type = SimTypePointer(element_type).with_arch(self.project.arch)
@@ -988,7 +1054,7 @@ class _SsStackByteOffsetRewrite8616:
             codegen=self.codegen,
         )
 
-    def make_addr_deref(self, addr_expr: Any, bits: int) -> object:  # noqa: ANN401
+    def make_addr_deref(self, addr_expr: Any, bits: cython.longlong) -> object:  # noqa: ANN401
         """Build a typed dereference for a proven 16-bit address expression."""
         element_type = SimTypeChar(False) if bits == 8 else SimTypeShort(False)
         ptr_type = SimTypePointer(element_type).with_arch(self.project.arch)
@@ -999,14 +1065,15 @@ class _SsStackByteOffsetRewrite8616:
             codegen=self.codegen,
         )
 
-    def _contains_large_unsigned_constant(self, node: object) -> bool:
+    def _contains_large_unsigned_constant(self, node: object) -> cython.bint:
+        term: object
         for term in self.flatten_c_add_terms(node):
             value = self.c_constant_value(self.unwrap_c_casts(term))
             if isinstance(value, int) and value > 0x7FFF:
                 return True
         return False
 
-    def _stack_cvar_identity(self, cvar: object) -> tuple[str, int, int | None, object] | None:
+    def _stack_cvar_identity(self, cvar: object) -> object:
         variable = _dynamic_codegen_attr(cvar, "variable", None)
         if not isinstance(variable, SimStackVariable):
             return None
@@ -1018,7 +1085,9 @@ class _SsStackByteOffsetRewrite8616:
             return None
         return base, offset, size if isinstance(size, int) else None, region
 
-    def _stack_deref_identity(self, node: object) -> tuple[tuple[str, int, int | None, object], int, int] | None:
+    def _stack_deref_identity(self, node: object) -> object:
+        base_identity: object
+        resolved: object
         if not isinstance(node, structured_c.CUnaryOp) or node.op != "Dereference":
             return None
         bits = self._effective_deref_bits(node)
@@ -1033,7 +1102,7 @@ class _SsStackByteOffsetRewrite8616:
             return None
         return base_identity, int(extra_offset), int(bits)
 
-    def _expr_contains_rewrite_alias_carrier(self, expr: object, *, seen_ids: set[int] | None = None) -> bool:
+    def _expr_contains_rewrite_alias_carrier(self, expr: object, *, seen_ids: object = None) -> cython.bint:
         expr = self.unwrap_c_casts(expr)
         if seen_ids is None:
             seen_ids = set()
@@ -1057,15 +1126,17 @@ class _SsStackByteOffsetRewrite8616:
         return False
 
     def _return_if_changed(self, original: object, replacement: object) -> object:
+        original_cvar: object
+        original_deref: object
         if replacement is original:
             return original
         original_cvar = self._stack_cvar_identity(original)
         replacement_cvar = self._stack_cvar_identity(replacement)
-        if original_cvar is not None and original_cvar == replacement_cvar:
+        if original_cvar is not None and operator.eq(original_cvar, replacement_cvar):
             return original
         original_deref = self._stack_deref_identity(original)
         replacement_deref = self._stack_deref_identity(replacement)
-        if original_deref is not None and original_deref == replacement_deref:
+        if original_deref is not None and operator.eq(original_deref, replacement_deref):
             return self._identical_deref_replacement(original, replacement)
         return replacement
 
@@ -1078,9 +1149,11 @@ class _SsStackByteOffsetRewrite8616:
     def _resolved_stack_deref_for_offset(
         self,
         node: object,
-        target_offset: int,
+        target_offset: cython.longlong,
         access_size: int | None,
     ) -> object | None:
+        resolved_cvar: object
+        resolved_size: object
         resolved_cvar = self.resolve_stack_cvar_at_offset(self.codegen, target_offset)
         if resolved_cvar is not None:
             resolved_variable = _dynamic_codegen_attr(resolved_cvar, "variable", None)
@@ -1103,7 +1176,7 @@ class _SsStackByteOffsetRewrite8616:
                 isinstance(resolved_variable, SimStackVariable)
                 and isinstance(access_size, int)
                 and resolved_offset == target_offset
-                and resolved_size == access_size
+                and operator.eq(resolved_size, access_size)
             ):
                 return self._return_if_changed(node, resolved_cvar)
         if isinstance(access_size, int) and access_size >= 4:
@@ -1112,7 +1185,8 @@ class _SsStackByteOffsetRewrite8616:
             )
         return None
 
-    def _transform_plain_alias_lane(self, node: object, resolved_plain_alias: tuple[object, int]) -> object:
+    def _transform_plain_alias_lane(self, node: object, resolved_plain_alias: object) -> object:
+        resolved: object
         base_cvar, extra_offset = resolved_plain_alias
         bits = self._effective_deref_bits(node)
         if extra_offset != 0 and self._is_uncast_ss_linear_carrier_byte_offset_8616(_dynamic_codegen_attr(node, "operand", None)):
@@ -1128,7 +1202,8 @@ class _SsStackByteOffsetRewrite8616:
                 return resolved
         return self._return_if_changed(node, self.make_stack_deref(base_cvar, extra_offset, bits))
 
-    def _transform_resolved_stack_alias_deref(self, node: object, resolved_stack_alias: tuple[object, int]) -> object:
+    def _transform_resolved_stack_alias_deref(self, node: object, resolved_stack_alias: object) -> object:
+        resolved: object
         base_cvar, extra_offset = resolved_stack_alias
         type_ = _dynamic_codegen_attr(node, "type", None)
         bits = _dynamic_codegen_attr(type_, "size", None)
@@ -1143,7 +1218,9 @@ class _SsStackByteOffsetRewrite8616:
                 return resolved
         return self._return_if_changed(node, self.make_stack_deref(base_cvar, extra_offset, bits))
 
-    def _transform_unclassified_deref(self, node: object, classified: Any) -> object:  # noqa: ANN401
+    def _transform_unclassified_deref(self, node: object, classified: object) -> object:  # noqa: ANN401
+        addr_expr: object
+        resolved_stack_alias: object
         if classified is None or classified.seg_name != "ss":
             return node
         addr_expr = self.strip_segment_scale_from_addr_expr(_dynamic_codegen_attr(classified, "addr_expr", None), self.project)
@@ -1166,6 +1243,9 @@ class _SsStackByteOffsetRewrite8616:
         return self._return_if_changed(node, self.make_addr_deref(addr_expr, bits))
 
     def _transform_classified_stack_deref(self, node: object, classified: Any) -> object:  # noqa: ANN401
+        addr_expr: object
+        resolved: object
+        resolved_stack_alias: object
         cvar = classified.cvar
         extra_offset = classified.extra_offset
         base_variable = _dynamic_codegen_attr(cvar, "variable", None)
@@ -1198,6 +1278,8 @@ class _SsStackByteOffsetRewrite8616:
 
     def transform(self, node: object) -> object:
         """Rewrite a dereference node into a proven stack dereference when possible."""
+        classified: object
+        resolved_plain_alias: object
         if not isinstance(node, structured_c.CUnaryOp) or node.op != "Dereference":
             return node
         resolved_plain_alias = self._resolve_stack_pointer_alias(_dynamic_codegen_attr(node, "operand", None))
@@ -1210,7 +1292,7 @@ class _SsStackByteOffsetRewrite8616:
             return self._transform_unclassified_deref(node, classified)
         return self._transform_classified_stack_deref(node, classified)
 
-    def run_8616_part1(self) -> tuple[bool, object]:
+    def run_8616_part1(self) -> tuple[cython.bint, object]:
         """Apply the transform over the function body and report change state."""
         self.root = self.codegen.cfunc.statements
         self.new_root = self.transform(self.root)
@@ -1230,13 +1312,14 @@ class _SsStackByteOffsetRewrite8616:
 
         return True, self.changed
 
+@cython.ccall
 def _rewrite_ss_stack_byte_offsets(
     project: Any,  # noqa: ANN401
     codegen: Any,  # noqa: ANN401
     *,
     unwrap_c_casts: Callable[[object], object],
     iter_c_nodes_deep: Callable[[object], Iterable[object]],
-    replace_c_children: Callable[[object, Callable[[object], object]], bool],
+    replace_c_children: Callable[[object, Callable[[object], object]], cython.bint],
     c_constant_value: Callable[[object], int | None],
     flatten_c_add_terms: Callable[[object], Iterable[object]],
     classify_segmented_dereference: Callable[[object, object], Any],
@@ -1247,5 +1330,5 @@ def _rewrite_ss_stack_byte_offsets(
     materialize_stack_cvar_at_offset: Callable[[object, int, int], Any],
     stack_slot_identity_for_variable: Callable[[object], Any],
     stack_pointer_alias_state: Callable[[object, int], Any],
-) -> bool:
+) -> cython.bint:
     return cast(bool, _SsStackByteOffsetRewrite8616(project, codegen, unwrap_c_casts, iter_c_nodes_deep, replace_c_children, c_constant_value, flatten_c_add_terms, classify_segmented_dereference, strip_segment_scale_from_addr_expr, resolve_stack_cvar_at_offset, promote_direct_stack_cvariable, stack_type_for_size, materialize_stack_cvar_at_offset, stack_slot_identity_for_variable, stack_pointer_alias_state).run_8616())

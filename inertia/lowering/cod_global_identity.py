@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Preserve unique COD global identities through declaration reconciliation.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -29,6 +32,9 @@ from .global_symbol_names import (
     reconcile_ds_global_local_declarations_8616,
     synchronize_ds_global_symbol_names_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "CodGlobalIdentityStats8616",
@@ -38,71 +44,69 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CodGlobalStorageSurface8616:
     """One exact DS storage surface with its canonical compiler symbol."""
 
-    offset: int
-    width: int
-    canonical_name: str
+    offset: cython.longlong
+    width: cython.longlong
+    canonical_name: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CodGlobalIdentityFact8616:
     """One exact storage identity joined to an optional COD display alias."""
 
-    offset: int
-    width: int
-    canonical_name: str
-    source_alias: str
-    source_ctype: str | None = None
+    offset: cython.longlong
+    width: cython.longlong
+    canonical_name: object
+    source_alias: object
+    source_ctype: object = None
     source_array_len: GlobalDeclarationArrayLength8616 = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CodGlobalIdentityStats8616:
     """Closed evidence counters for COD global identity preservation."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
 class _CodGlobalIdentityCodegen8616(Protocol):
     """Owned metadata fields used across Lowering and final rendering."""
 
-    _inertia_cod_global_identity_facts_8616: tuple[CodGlobalIdentityFact8616, ...]
+    _inertia_cod_global_identity_facts_8616: object
     _inertia_cod_global_identity_stats_8616: CodGlobalIdentityStats8616
-    _inertia_global_declaration_specs_8616: tuple[
-        tuple[str, str, GlobalDeclarationArrayLength8616], ...
-    ]
-    _inertia_strong_global_declaration_specs_8616: tuple[
-        tuple[str, str, GlobalDeclarationArrayLength8616], ...
-    ]
+    _inertia_global_declaration_specs_8616: object
+    _inertia_strong_global_declaration_specs_8616: object
 
 
 def _cod_alias_pairs_8616(
-    metadata: CODProcMetadata | None,
+    metadata: object,
 ) -> tuple[tuple[str, str], ...]:
     """Return explicit canonical/display pairs from owned COD metadata."""
     if metadata is None:
         return ()
     return tuple(
         (ref.name, ref.source_alias)
-        for ref in metadata.global_refs
+        for ref in iter(metadata.global_refs)
         if isinstance(ref, CODGlobalRef)
         and isinstance(ref.source_alias, str)
         and bool(ref.source_alias)
-        and ref.source_alias != ref.name
+        and operator.ne(ref.source_alias, ref.name)
     )
 
 
 def _unambiguous_aliases_8616(
     pairs: Iterable[tuple[str, str]],
-) -> tuple[dict[str, str], int]:
+) -> tuple[dict[str, str], cython.longlong]:
     """Return one-to-one aliases and the number of ambiguous pairs refused."""
+    canonical_name: object
+    source_alias: object
     canonical_to_aliases: dict[str, set[str]] = {}
     alias_to_canonicals: dict[str, set[str]] = {}
     pair_tuple = tuple(dict.fromkeys(pairs))
@@ -111,11 +115,11 @@ def _unambiguous_aliases_8616(
         alias_to_canonicals.setdefault(source_alias, set()).add(canonical_name)
     aliases = {
         canonical_name: next(iter(source_aliases))
-        for canonical_name, source_aliases in canonical_to_aliases.items()
+        for canonical_name, source_aliases in builtins.iter(canonical_to_aliases.items())
         if len(source_aliases) == 1
         and len(alias_to_canonicals[next(iter(source_aliases))]) == 1
     }
-    accepted = sum(1 for canonical_name, _source_alias in pair_tuple if canonical_name in aliases)
+    accepted = sum(1 for canonical_name, _source_alias in iter(pair_tuple) if canonical_name in aliases)
     return aliases, len(pair_tuple) - accepted
 
 
@@ -129,7 +133,7 @@ def _declaration_specs_8616(
         return ()
     return tuple(
         (ctype, name, array_len)
-        for ctype, name, array_len in raw_specs
+        for ctype, name, array_len in iter(raw_specs)
         if isinstance(ctype, str)
         and isinstance(name, str)
         and (
@@ -143,19 +147,22 @@ def _declaration_specs_8616(
 def _rebind_declaration_alias_8616(
     codegen: _CodGlobalIdentityCodegen8616,
     fact: CodGlobalIdentityFact8616,
-) -> bool:
+) -> cython.bint:
     """Merge one canonical declaration into its proven source display alias."""
+    _name: object
+    array_len: object
+    ctype: object
     try:
         strong_specs = codegen._inertia_strong_global_declaration_specs_8616
     except AttributeError:
         strong_specs = ()
-    canonical_strong = tuple(spec for spec in strong_specs if spec[1] == fact.canonical_name)
-    alias_strong = tuple(spec for spec in strong_specs if spec[1] == fact.source_alias)
+    canonical_strong = tuple(spec for spec in iter(strong_specs) if operator.eq(spec[1], fact.canonical_name))
+    alias_strong = tuple(spec for spec in iter(strong_specs) if operator.eq(spec[1], fact.source_alias))
     rebound_strong = tuple(
         (ctype, fact.source_alias, array_len)
-        for ctype, _name, array_len in canonical_strong
+        for ctype, _name, array_len in iter(canonical_strong)
     )
-    if canonical_strong and alias_strong and set(rebound_strong) != set(alias_strong):
+    if canonical_strong and alias_strong and operator.ne(set(rebound_strong), set(alias_strong)):
         raise PipelineHardError(
             "conflicting strong declarations for one COD global identity: "
             f"canonical={fact.canonical_name!r} alias={fact.source_alias!r}"
@@ -163,50 +170,50 @@ def _rebind_declaration_alias_8616(
     if canonical_strong:
         retained_strong = tuple(
             spec
-            for spec in strong_specs
+            for spec in iter(strong_specs)
             if spec[1] not in {fact.canonical_name, fact.source_alias}
         )
         codegen._inertia_strong_global_declaration_specs_8616 = tuple(
-            dict.fromkeys((*retained_strong, *rebound_strong, *alias_strong))
+            dict.fromkeys(tuple(retained_strong) + tuple(rebound_strong) + tuple(alias_strong))
         )
     before = _declaration_specs_8616(codegen)
-    current_alias_specs = tuple(spec for spec in before if spec[1] == fact.source_alias)
+    current_alias_specs = tuple(spec for spec in iter(before) if operator.eq(spec[1], fact.source_alias))
     persisted_alias_specs = (
-        ((fact.source_ctype, fact.source_alias, fact.source_array_len),)
+        tuple(((fact.source_ctype, fact.source_alias, fact.source_array_len),))
         if isinstance(fact.source_ctype, str) and fact.source_ctype
-        else ()
+        else tuple(())
     )
-    alias_specs = tuple(dict.fromkeys((*persisted_alias_specs, *current_alias_specs)))
-    canonical_specs = tuple(spec for spec in before if spec[1] == fact.canonical_name)
+    alias_specs = tuple(dict.fromkeys(tuple(persisted_alias_specs) + tuple(current_alias_specs)))
+    canonical_specs = tuple(spec for spec in iter(before) if operator.eq(spec[1], fact.canonical_name))
     if not alias_specs and not canonical_specs:
         return False
     codegen._inertia_global_declaration_specs_8616 = tuple(
         spec
-        for spec in before
+        for spec in iter(before)
         if spec[1] not in {fact.source_alias, fact.canonical_name}
     )
     # Alias declarations carry the optional source type and aggregate extent.
     # Record them first so equal-width generic canonical declarations cannot
     # replace stronger source-side signedness or array shape.
-    for ctype, _name, array_len in (*alias_specs, *canonical_specs):
+    for ctype, _name, array_len in tuple(alias_specs) + tuple(canonical_specs):
         record_global_declaration_spec_8616(
             codegen,
             ctype=ctype,
             name=fact.source_alias,
             array_len=array_len,
         )
-    return _declaration_specs_8616(codegen) != before
+    return operator.ne(_declaration_specs_8616(codegen), before)
 
 
 def _source_declaration_for_alias_8616(
     codegen: _CodGlobalIdentityCodegen8616,
-    source_alias: str,
+    source_alias: object,
 ) -> tuple[str | None, GlobalDeclarationArrayLength8616]:
     """Return the strongest currently recorded declaration for one COD alias."""
     candidates = tuple(
         spec
-        for spec in _declaration_specs_8616(codegen)
-        if spec[1] == source_alias
+        for spec in builtins.iter(_declaration_specs_8616(codegen))
+        if operator.eq(spec[1], source_alias)
     )
     if not candidates:
         return None, None
@@ -221,11 +228,14 @@ def _source_declaration_for_alias_8616(
     return ctype, array_len
 
 
+@cython.ccall
 def _merge_identity_facts_8616(
     facts: Iterable[CodGlobalIdentityFact8616],
 ) -> tuple[CodGlobalIdentityFact8616, ...]:
     """Merge repeated lifecycle observations without losing declaration shape."""
-    merged: dict[tuple[int, int, str, str], CodGlobalIdentityFact8616] = {}
+    previous: object
+    fact: object
+    merged: dict[tuple[cython.longlong, cython.longlong, str, str], CodGlobalIdentityFact8616] = {}
     for fact in facts:
         key = (
             fact.offset,
@@ -251,8 +261,9 @@ def _merge_identity_facts_8616(
             source_array_len=source_array_len,
         )
     return tuple(merged.values())
-def reconcile_recorded_cod_global_storage_identities_8616(codegen: object) -> bool:
+def reconcile_recorded_cod_global_storage_identities_8616(codegen: object) -> cython.bint:
     """Reapply persistent unambiguous display aliases after AST rebuilding."""
+    fact: object
     typed_codegen = cast(_CodGlobalIdentityCodegen8616, codegen)
     try:
         raw_facts = typed_codegen._inertia_cod_global_identity_facts_8616
@@ -261,7 +272,7 @@ def reconcile_recorded_cod_global_storage_identities_8616(codegen: object) -> bo
     facts = tuple(
         dict.fromkeys(
             fact
-            for fact in raw_facts
+            for fact in iter(raw_facts)
             if isinstance(fact, CodGlobalIdentityFact8616)
             and fact.width > 0
             and bool(fact.canonical_name)
@@ -276,7 +287,7 @@ def reconcile_recorded_cod_global_storage_identities_8616(codegen: object) -> bo
             width=fact.width,
             name=fact.source_alias,
         )
-        for fact in facts
+        for fact in iter(facts)
     )
     changed = bool(synchronize_ds_global_symbol_names_8616(codegen, name_facts))
     changed = reconcile_ds_global_local_declarations_8616(codegen, name_facts) or changed
@@ -299,12 +310,14 @@ def reconcile_recorded_cod_global_storage_identities_8616(codegen: object) -> bo
     return changed
 
 
+@cython.ccall
 def record_cod_global_storage_identities_8616(
     codegen: object,
     metadata: CODProcMetadata | None,
     surfaces: Iterable[CodGlobalStorageSurface8616],
-) -> bool:
+) -> cython.bint:
     """Join exact storage surfaces to COD aliases and persist display names."""
+    surface: object
     typed_codegen = cast(_CodGlobalIdentityCodegen8616, codegen)
     pairs = _cod_alias_pairs_8616(metadata)
     aliases, ambiguous_count = _unambiguous_aliases_8616(pairs)
@@ -333,7 +346,7 @@ def record_cod_global_storage_identities_8616(
     except AttributeError:
         previous = ()
     typed_codegen._inertia_cod_global_identity_facts_8616 = _merge_identity_facts_8616(
-        (*previous, *facts)
+        tuple(previous) + tuple(facts)
     )
     typed_codegen._inertia_cod_global_identity_stats_8616 = (
         CodGlobalIdentityStats8616(

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Track exact constants feeding stack-resident far-pointer offsets.
 
 Layer: Types/Lowering.
@@ -11,6 +12,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -30,9 +33,11 @@ from .register_constant_segmented_store import (
     OperandView8616,
     RegisterNameResolver8616,
 )
+import dataclasses
+import operator
 
-type StackSlotResolver8616 = Callable[[InstructionView8616, OperandView8616], tuple[int, int] | None]
-type _ConstantValue8616 = tuple[int, int]
+StackSlotResolver8616 = typing.TypeAliasType("StackSlotResolver8616", Callable[[InstructionView8616, OperandView8616], tuple[int, int] | None])
+_ConstantValue8616 = typing.TypeAliasType("_ConstantValue8616", tuple[int, int])
 
 __all__ = [
     "FarPointerConstantState8616",
@@ -48,44 +53,56 @@ _REGISTER_ALIAS_GROUPS_8616 = (
 )
 
 
-def _register_aliases_8616(register_name: str) -> frozenset[str]:
+@cython.ccall
+def _register_aliases_8616(register_name: object) -> object:
     """Return every architectural register view overlapping one name."""
+    aliases: object
     for aliases in _REGISTER_ALIAS_GROUPS_8616:
         if register_name in aliases:
             return aliases
     return frozenset((register_name,))
 
 
-def _normalized_constant_8616(value: int, width: int) -> int:
+@cython.ccall
+def _normalized_constant_8616(value: cython.longlong, width: cython.longlong) -> cython.longlong:
     """Apply the architectural write width to one exact integer value."""
     return value & ((1 << (width * 8)) - 1)
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class FarPointerConstantState8616:
     """Exact same-block register and BP-stack constant state."""
 
-    register_values: dict[str, _ConstantValue8616] = field(default_factory=dict)
-    stack_values: dict[int, _ConstantValue8616] = field(default_factory=dict)
+    register_values: object = field(default_factory=dict)
+    stack_values: object = field(default_factory=dict)
 
-    def forget_register(self, register_name: str) -> None:
+    @cython.ccall
+    def forget_register(self, register_name: object) -> None:
         """Invalidate all aliases overlapping one written register."""
+        alias: object
         for alias in _register_aliases_8616(register_name):
             self.register_values.pop(alias, None)
 
-    def forget_stack_range(self, offset: int, width: int) -> None:
+    @cython.ccall
+    def forget_stack_range(self, offset: cython.longlong, width: cython.longlong) -> None:
         """Invalidate every tracked stack constant overlapping one write."""
+        _value: object
+        destination: object
+        source_width: object
         write_end = offset + width
         for destination, (_value, source_width) in tuple(self.stack_values.items()):
             if destination < write_end and offset < destination + source_width:
                 self.stack_values.pop(destination, None)
 
-    def stack_constant(self, offset: int, width: int) -> int | None:
+    @cython.ccall
+    def stack_constant(self, offset: cython.longlong, width: cython.longlong) -> int | None:
         """Return one exact stack constant only at the requested width."""
+        value: object
         value = self.stack_values.get(offset)
-        return value[0] if value is not None and value[1] == width else None
+        return value[0] if value is not None and operator.eq(value[1], width) else None
 
-    def set_register(self, register_name: str, value: int, width: int) -> None:
+    @cython.ccall
+    def set_register(self, register_name: object, value: cython.longlong, width: cython.longlong) -> None:
         """Publish one exact register value after invalidating aliases."""
         self.forget_register(register_name)
         self.register_values[register_name] = (
@@ -94,6 +111,7 @@ class FarPointerConstantState8616:
         )
 
 
+@cython.ccall
 def apply_far_pointer_constant_instruction_8616(
     state: FarPointerConstantState8616,
     instruction: InstructionView8616,
@@ -102,18 +120,20 @@ def apply_far_pointer_constant_instruction_8616(
     stack_slot: StackSlotResolver8616,
 ) -> None:
     """Advance exact constant state across one decoded instruction."""
+    destination: object
+    destination_slot: object
     operands = instruction.operands
     destination_slot = stack_slot(instruction, operands[0]) if operands else None
     if destination_slot is not None:
         _apply_stack_store_8616(state, instruction, operands, destination_slot, register_name)
         return
 
-    if operands and operands[0].kind != X86_OP_REG:
+    if operands and operator.ne(operands[0].kind, X86_OP_REG):
         if operands[0].memory is not None:
             state.stack_values.clear()
         return
 
-    if not operands or operands[0].kind != X86_OP_REG:
+    if not operands or operator.ne(operands[0].kind, X86_OP_REG):
         return
     destination = register_name(instruction.raw, operands[0].register)
     width = operands[0].size
@@ -135,43 +155,50 @@ def apply_far_pointer_constant_instruction_8616(
     state.forget_register(destination)
 
 
+@cython.ccall
 def _apply_stack_store_8616(
     state: FarPointerConstantState8616,
     instruction: InstructionView8616,
     operands: Sequence[OperandView8616],
-    destination_slot: tuple[int, int],
+    destination_slot: object,
     register_name: RegisterNameResolver8616,
 ) -> None:
     """Apply one proven BP-stack write, retaining only exact MOV sources."""
+    source_name: object
+    source_value: object
     destination_offset, destination_width = destination_slot
     state.forget_stack_range(destination_offset, destination_width)
-    if instruction.instruction_id == X86_INS_MOV and len(operands) == 2:
+    if operator.eq(instruction.instruction_id, X86_INS_MOV) and len(operands) == 2:
         source = operands[1]
         source_name = (
             register_name(instruction.raw, source.register)
-            if source.kind == X86_OP_REG
+            if operator.eq(source.kind, X86_OP_REG)
             else None
         )
         source_value = state.register_values.get(source_name) if source_name is not None else None
-        if source_value is not None and source_value[1] == destination_width:
+        if source_value is not None and operator.eq(source_value[1], destination_width):
             state.stack_values[destination_offset] = source_value
 
 
+@cython.ccall
 def _mov_source_value_8616(
     state: FarPointerConstantState8616,
     instruction: InstructionView8616,
     source: OperandView8616,
-    width: int,
+    width: cython.longlong,
     register_name: RegisterNameResolver8616,
     stack_slot: StackSlotResolver8616,
 ) -> _ConstantValue8616 | None:
     """Resolve one MOV source to an exact constant only at matching width."""
-    if source.kind == X86_OP_IMM and isinstance(source.immediate, int):
+    candidate: object
+    source_name: object
+    source_slot: object
+    if operator.eq(source.kind, X86_OP_IMM) and isinstance(source.immediate, int):
         return (_normalized_constant_8616(source.immediate, width), width)
-    if source.kind == X86_OP_REG:
+    if operator.eq(source.kind, X86_OP_REG):
         source_name = register_name(instruction.raw, source.register)
         candidate = state.register_values.get(source_name) if source_name is not None else None
-        if candidate is not None and candidate[1] == width:
+        if candidate is not None and operator.eq(candidate[1], width):
             return candidate
         return None
     source_slot = stack_slot(instruction, source)
@@ -182,17 +209,19 @@ def _mov_source_value_8616(
     return None
 
 
+@cython.ccall
 def _apply_register_mov_8616(
     state: FarPointerConstantState8616,
     instruction: InstructionView8616,
     operands: Sequence[OperandView8616],
-    destination: str,
-    width: int,
+    destination: object,
+    width: cython.longlong,
     register_name: RegisterNameResolver8616,
     stack_slot: StackSlotResolver8616,
-) -> bool:
+) -> cython.bint:
     """Track one register-destination MOV; return True only for a MOV shape."""
-    if instruction.instruction_id != X86_INS_MOV or len(operands) != 2:
+    value: object
+    if operator.ne(instruction.instruction_id, X86_INS_MOV) or len(operands) != 2:
         return False
     value = _mov_source_value_8616(
         state, instruction, operands[1], width, register_name, stack_slot
@@ -203,33 +232,35 @@ def _apply_register_mov_8616(
     return True
 
 
+@cython.ccall
 def _apply_register_arithmetic_8616(
     state: FarPointerConstantState8616,
     instruction: InstructionView8616,
     operands: Sequence[OperandView8616],
-    destination: str,
-    width: int,
+    destination: object,
+    width: cython.longlong,
     register_name: RegisterNameResolver8616,
-) -> bool:
+) -> cython.bint:
     """Track proven SUB-self, ADD/SUB-immediate, and SHL/SAL-immediate updates."""
-    if instruction.instruction_id == X86_INS_SUB and len(operands) == 2 and operands[1].kind == X86_OP_REG:
+    previous: object
+    if operator.eq(instruction.instruction_id, X86_INS_SUB) and len(operands) == 2 and operator.eq(operands[1].kind, X86_OP_REG):
         source_register_name = register_name(instruction.raw, operands[1].register)
         if source_register_name == destination:
             state.set_register(destination, 0, width)
             return True
 
     if instruction.instruction_id in {X86_INS_ADD, X86_INS_SUB} and len(operands) == 2:
-        immediate = operands[1].immediate if operands[1].kind == X86_OP_IMM else None
+        immediate = operands[1].immediate if operator.eq(operands[1].kind, X86_OP_IMM) else None
         previous = state.register_values.get(destination)
-        if isinstance(immediate, int) and previous is not None and previous[1] == width:
-            delta = immediate if instruction.instruction_id == X86_INS_ADD else -immediate
+        if isinstance(immediate, int) and previous is not None and operator.eq(previous[1], width):
+            delta = immediate if operator.eq(instruction.instruction_id, X86_INS_ADD) else -immediate
             state.set_register(destination, previous[0] + delta, width)
             return True
 
     if instruction.instruction_id in {X86_INS_SHL, X86_INS_SAL} and len(operands) == 2:
-        amount = operands[1].immediate if operands[1].kind == X86_OP_IMM else None
+        amount = operands[1].immediate if operator.eq(operands[1].kind, X86_OP_IMM) else None
         previous = state.register_values.get(destination)
-        if isinstance(amount, int) and previous is not None and previous[1] == width:
+        if isinstance(amount, int) and previous is not None and operator.eq(previous[1], width):
             state.set_register(destination, previous[0] << amount, width)
             return True
 

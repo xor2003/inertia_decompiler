@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Render fallback names using the proven machine-BP argument coordinates.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Sequence
 from typing import Final, Protocol, cast
@@ -16,9 +19,9 @@ from angr.sim_variable import SimStackVariable
 
 from .stack_variable_coordinates import machine_bp_offset_for_stack_variable_8616
 
-_BP_OFFSET_MODULUS: Final[int] = 1 << 16
-_BP_OFFSET_SIGN_BIT: Final[int] = _BP_OFFSET_MODULUS >> 1
-_BP_OFFSET_UNSIGNED_MAX: Final[int] = _BP_OFFSET_MODULUS - 1
+_BP_OFFSET_MODULUS: Final[cython.longlong] = 1 << 16
+_BP_OFFSET_SIGN_BIT: Final[cython.longlong] = _BP_OFFSET_MODULUS >> 1
+_BP_OFFSET_UNSIGNED_MAX: Final[cython.longlong] = _BP_OFFSET_MODULUS - 1
 
 
 class _CodegenBoundary(Protocol):
@@ -39,8 +42,10 @@ class _ArgumentBoundary(Protocol):
     variable: object
 
 
-def machine_bp_stack_object_name_8616(offset: int, *, codegen: object | None = None) -> str:
+@cython.ccall
+def machine_bp_stack_object_name_8616(offset: cython.longlong, *, codegen: object | None = None) -> str:
     """Name a machine-BP slot without comparing it with raw entry-SP offsets."""
+    argument: object
     is_unsigned_negative_offset = _BP_OFFSET_SIGN_BIT <= offset <= _BP_OFFSET_UNSIGNED_MAX
     offset = offset - _BP_OFFSET_MODULUS if is_unsigned_negative_offset else offset
     try:

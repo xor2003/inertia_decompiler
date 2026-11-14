@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed Alias contracts for indexed-address access roles.
 
 Layer: Alias.
@@ -12,6 +13,8 @@ extent and bounds still require independent proof.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -21,6 +24,8 @@ from .indexed_address_contracts import (
     IndexedAddressAliasFact8616,
     IndexedAddressAliasRefusal8616,
 )
+import dataclasses
+import operator
 
 
 class IndexedAliasAccessRole8616(StrEnum):
@@ -38,7 +43,7 @@ class IndexedAliasAccessFailureKind8616(StrEnum):
     AMBIGUOUS_ADDRESS_FORM = "ambiguous_address_form"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAliasAccessFact8616:
     """One exact Alias access and its proven pointer/global role."""
 
@@ -46,7 +51,7 @@ class IndexedAliasAccessFact8616:
     role: IndexedAliasAccessRole8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether the role follows from the exact address form."""
         storage = self.source.storage
         if self.role is IndexedAliasAccessRole8616.POINTER_RELATIVE:
@@ -56,7 +61,7 @@ class IndexedAliasAccessFact8616:
         return bool(self.source.complete and role_matches)
 
     @property
-    def is_pointer_argument(self) -> bool:
+    def is_pointer_argument(self) -> cython.bint:
         """Return whether pointer-relative storage came from a BP argument."""
         return bool(
             self.role is IndexedAliasAccessRole8616.POINTER_RELATIVE
@@ -64,33 +69,33 @@ class IndexedAliasAccessFact8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAliasAccessRefusal8616:
     """One retained Alias input and its access-role refusal reason."""
 
     failure: IndexedAliasAccessFailureKind8616
-    detail: str
+    detail: object
     source_fact: IndexedAddressAliasFact8616 | None = None
     source_refusal: IndexedAddressAliasRefusal8616 | None = None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether this refusal identifies exactly one Alias input."""
         return (self.source_fact is None) != (self.source_refusal is None)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAliasAccessStats8616:
     """Closed accounting for Alias access-role classification."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every Alias input became one role or refusal."""
         counts = (
             self.raw_fact_count,
@@ -100,55 +105,54 @@ class IndexedAliasAccessStats8616:
             self.failure_count,
         )
         return bool(
-            all(count >= 0 for count in counts)
-            and self.raw_fact_count
-            == self.normalized_fact_count + self.failure_count
+            all(count >= 0 for count in iter(counts))
+            and operator.eq(self.raw_fact_count, self.normalized_fact_count + self.failure_count)
             and self.normalized_fact_count
             == self.classified_fact_count
             == self.materialized_count
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAliasAccessEvidence8616:
     """Function-wide pointer/global roles with every refusal retained."""
 
-    function_addr: int
-    facts: tuple[IndexedAliasAccessFact8616, ...]
-    refusals: tuple[IndexedAliasAccessRefusal8616, ...]
+    function_addr: cython.longlong
+    facts: object
+    refusals: object
     stats: IndexedAliasAccessStats8616
     source: IndexedAddressAliasEvidence8616
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether source identity and role accounting are lossless."""
-        classified_sources = tuple(fact.source for fact in self.facts)
+        classified_sources = tuple(fact.source for fact in iter(self.facts))
         refused_facts = tuple(
             refusal.source_fact
-            for refusal in self.refusals
+            for refusal in iter(self.refusals)
             if refusal.source_fact is not None
         )
         refused_upstream = tuple(
             refusal.source_refusal
-            for refusal in self.refusals
+            for refusal in iter(self.refusals)
             if refusal.source_refusal is not None
         )
         return bool(
             self.source.closed
-            and self.function_addr == self.source.function_addr
-            and self.stats.raw_fact_count == self.source.stats.raw_fact_count
-            and len(self.facts) == self.stats.materialized_count
-            and len(self.refusals) == self.stats.failure_count
+            and operator.eq(self.function_addr, self.source.function_addr)
+            and operator.eq(self.stats.raw_fact_count, self.source.stats.raw_fact_count)
+            and operator.eq(len(self.facts), self.stats.materialized_count)
+            and operator.eq(len(self.refusals), self.stats.failure_count)
             and self.stats.closed
-            and all(fact.complete for fact in self.facts)
-            and all(refusal.complete for refusal in self.refusals)
-            and len(classified_sources) + len(refused_facts) == len(self.source.facts)
+            and all(fact.complete for fact in iter(self.facts))
+            and all(refusal.complete for refusal in iter(self.refusals))
+            and operator.eq(len(classified_sources) + len(refused_facts), len(self.source.facts))
             and all(
                 classified_sources.count(source) + refused_facts.count(source) == 1
-                for source in self.source.facts
+                for source in iter(self.source.facts)
             )
-            and len(refused_upstream) == len(self.source.refusals)
-            and all(refused_upstream.count(source) == 1 for source in self.source.refusals)
+            and operator.eq(len(refused_upstream), len(self.source.refusals))
+            and all(refused_upstream.count(source) == 1 for source in iter(self.source.refusals))
         )
 
 

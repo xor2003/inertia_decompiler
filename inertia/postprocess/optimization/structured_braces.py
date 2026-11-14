@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prevent nested statement wrappers from producing unsafe braceless C.
 
 Layer: Rewrite/Postprocess cleanup.
@@ -14,6 +15,8 @@ mistaking a multi-statement body for one C statement.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Protocol, cast
@@ -21,6 +24,9 @@ from typing import Protocol, cast
 from angr.analyses.decompiler.structured_codegen.c import CIfElse, CStatements
 
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = (
     "StructuredBraceNormalizationStats8616",
@@ -41,42 +47,42 @@ class _StructuredBraceCodegen8616(Protocol):
     _inertia_structured_brace_normalization_stats_8616: StructuredBraceNormalizationStats8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StructuredBraceNormalizationStats8616:
     """Closed evidence census for structured brace normalization."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether at least one branch was made explicitly braced."""
         return self.materialized_count > 0
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every classified branch was materialized."""
         return bool(
             0 <= self.classified_fact_count <= self.normalized_fact_count <= self.raw_fact_count
-            and self.classified_fact_count
-            == self.materialized_count + self.failure_count
+            and operator.eq(self.classified_fact_count, self.materialized_count + self.failure_count)
         )
 
 
-def _transparent_statement_count_8616(node: object) -> int:
+def _transparent_statement_count_8616(node: object) -> cython.longlong:
     """Count rendered statements through transparent statement-list wrappers."""
     if not isinstance(node, CStatements):
         return int(node is not None)
     return sum(
         _transparent_statement_count_8616(statement)
-        for statement in tuple(node.statements or ())
+        for statement in builtins.iter(tuple(node.statements or ()))
     )
 
 
-def _requires_explicit_braces_8616(branch: CIfElse) -> bool:
+@cython.ccall
+def _requires_explicit_braces_8616(branch: CIfElse) -> cython.bint:
     """Return whether a branch body contains multiple rendered statements."""
     if not branch.cstyle_ifs or len(branch.condition_and_nodes) != 1:
         return False
@@ -88,19 +94,20 @@ def _requires_explicit_braces_8616(branch: CIfElse) -> bool:
     )
 
 
-def normalize_multi_statement_braces_8616(codegen: object) -> bool:
+def normalize_multi_statement_braces_8616(codegen: object) -> cython.bint:
     """Force braces around direct or transparently nested multi-statement bodies."""
+    branch: object
     boundary = cast(_StructuredBraceCodegen8616, codegen)
     try:
         root = boundary.cfunc.statements
     except AttributeError:
         return False
     branches = tuple(
-        node for node in _iter_c_nodes_deep_8616(root) if isinstance(node, CIfElse)
+        node for node in builtins.iter(_iter_c_nodes_deep_8616(root)) if isinstance(node, CIfElse)
     )
-    normalized = tuple(branch for branch in branches if branch.cstyle_ifs)
+    normalized = tuple(branch for branch in iter(branches) if branch.cstyle_ifs)
     classified = tuple(
-        branch for branch in normalized if _requires_explicit_braces_8616(branch)
+        branch for branch in iter(normalized) if _requires_explicit_braces_8616(branch)
     )
     materialized_count = 0
     for branch in classified:

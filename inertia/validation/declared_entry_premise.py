@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Validation.
 
 Responsibility: transport a checked conditional entry without replaying during reporting.
@@ -7,6 +8,8 @@ Owns canonical equivalence checking and validation diagnostics
 Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-backed proof
 """
 from __future__ import annotations
+import typing
+import cython
 
 import hashlib
 import json
@@ -20,6 +23,8 @@ from inertia.ir.scoped_function_ir_view import ScopedFunctionIRView8616
 from inertia.ir.segment_state import SegmentStateArtifact
 from inertia.ir.source_graph_binding import canonical_source_graph_8616
 from inertia.ir.ssa_function import SSAFunctionArtifact
+import dataclasses
+import operator
 
 
 class EntryPremiseStatus8616(StrEnum):
@@ -35,27 +40,32 @@ class EntryPremiseAuthority8616(StrEnum):
     NATIVE_NEAR_CALL = 'native_near_call'
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class EntryPremiseReceipt8616:
     """Immutable canonical projection of one freshly authenticated scope."""
 
     status: EntryPremiseStatus8616
-    payload_json: str
-    digest: str
+    payload_json: object
+    digest: object
 
     def to_dict(self) -> dict[str, object]:
         """Serialize detached data; this operation performs no proof replay."""
         return {'status': self.status.value, 'payload': json.loads(self.payload_json), 'sha256': self.digest}
 
 
-def _receipt(status: EntryPremiseStatus8616, payload: dict[str, object]) -> EntryPremiseReceipt8616:
+@cython.ccall
+def _receipt(status: EntryPremiseStatus8616, payload: object) -> EntryPremiseReceipt8616:
     """Freeze deterministic projection bytes for comparison and cache identity."""
     encoded = json.dumps(payload, sort_keys=True, separators=(',', ':'))
     return EntryPremiseReceipt8616(status, encoded, hashlib.sha256(encoded.encode()).hexdigest())
 
 
-def _codegen_source_bound_8616(project: object, codegen: object, state: SegmentStateArtifact) -> bool:
+@cython.ccall
+def _codegen_source_bound_8616(project: object, codegen: object, state: SegmentStateArtifact) -> cython.bint:
     """Bind native IR or its authenticated, private call-Semantics projection."""
+    current: object
+    current_ssa: object
+    projection: object
     from inertia.semantics.call_stack_effect_pipeline import CallSemanticProjection8616
 
     # Current codegen attachments are the third-party boundary; owned contracts
@@ -78,8 +88,12 @@ def _codegen_source_bound_8616(project: object, codegen: object, state: SegmentS
     )
 
 
+@cython.ccall
 def collect_entry_premise_8616(project: object, codegen: object) -> EntryPremiseReceipt8616 | None:
     """Authenticate attached scoped state once; never discover ambient declarations."""
+    scope: object
+    state: object
+    view: object
     # Codegen is the dynamic third-party AST boundary.
     state = getattr(codegen, '_inertia_segment_state_artifact', None)
     refused = _receipt(EntryPremiseStatus8616.REFUSED, {'reason': 'entry_scope_unbound'})
@@ -115,13 +129,14 @@ def collect_entry_premise_8616(project: object, codegen: object) -> EntryPremise
             'stack_segment': scope.stack_segment, 'stack_offset': scope.stack_offset,
             'minimum_selector': scope.minimum_selector, 'maximum_selector': scope.maximum_selector,
             'path_block_addrs': list(scope.path_block_addrs),
-            'assumptions': [item.value for item in scope.assumptions],
+            'assumptions': [item.value for item in iter(scope.assumptions)],
         },
         'boundary': {'start': link.boundary.addr, 'size': link.boundary.size},
     }
     return _receipt(EntryPremiseStatus8616.CONDITIONAL, payload)
 
 
+@cython.ccall
 def _collect_near_call_premise_8616(
     project: object, codegen: object, state: SegmentStateArtifact,
 ) -> EntryPremiseReceipt8616:
@@ -161,24 +176,30 @@ def _collect_near_call_premise_8616(
     })
 
 
-def valid_entry_premise_projection_8616(value: object) -> bool:
+@cython.ccall
+def valid_entry_premise_projection_8616(value: object) -> cython.bint:
     """Detect damaged diagnostic receipts without treating JSON as proof authority."""
-    if not isinstance(value, dict) or value.get('status') != EntryPremiseStatus8616.CONDITIONAL:
+    payload: object
+    if not isinstance(value, dict) or operator.ne(value.get('status'), EntryPremiseStatus8616.CONDITIONAL):
         return False
     payload = value.get('payload')
     if not isinstance(payload, dict):
         return False
-    if payload.get('authority') == EntryPremiseAuthority8616.NATIVE_NEAR_CALL:
+    if operator.eq(payload.get('authority'), EntryPremiseAuthority8616.NATIVE_NEAR_CALL):
         if not isinstance(payload.get('near_call'), dict):
             return False
     elif not isinstance(payload.get('declaration'), dict):
         return False
     encoded = json.dumps(payload, sort_keys=True, separators=(',', ':'))
-    return value.get('sha256') == hashlib.sha256(encoded.encode()).hexdigest()
+    return operator.eq(value.get('sha256'), hashlib.sha256(encoded.encode()).hexdigest())
 
 
-def entry_premise_cache_identity_8616(codegen: object) -> dict[str, object] | None:
+@cython.ccall
+def entry_premise_cache_identity_8616(codegen: object) -> object:
     """Project retained bindings cheaply; cache identity never authenticates them."""
+    scope: object
+    state: object
+    view: object
     # Third-party codegen attachment boundary, not an owned contract.
     state = getattr(codegen, '_inertia_segment_state_artifact', None)
     if not isinstance(state, SegmentStateArtifact):

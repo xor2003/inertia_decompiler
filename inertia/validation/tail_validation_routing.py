@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Tail Validation.
 
 Responsibility: route validation delta families to likely owning layers for diagnosis.
@@ -10,9 +11,12 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+import dataclasses
 
 __all__ = [
     "TailValidationFamilyRoute",
@@ -20,17 +24,17 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TailValidationFamilyRoute:
     """Diagnostic route from a tail-validation delta family to its likely owner."""
 
-    family: str
-    count: int
-    function_count: int
-    stages: tuple[str, ...]
-    likely_layer: str
-    next_root_cause_file: str
-    signal: str
+    family: object
+    count: cython.longlong
+    function_count: cython.longlong
+    stages: object
+    likely_layer: object
+    next_root_cause_file: object
+    signal: object
 
 
 _DEFAULT_ROUTE = TailValidationFamilyRoute(
@@ -88,22 +92,26 @@ _FAMILY_ROUTING_TABLE: dict[str, tuple[str, str, str]] = {
 }
 
 
-def _count(value: object) -> int:
+@cython.ccall
+def _count(value: object) -> cython.longlong:
     return value if isinstance(value, int) else 0
 
 
 def _stage_names(value: object) -> tuple[str, ...]:
     if not isinstance(value, Sequence) or isinstance(value, str):
         return ()
-    return tuple(item for item in value if isinstance(item, str))
+    return tuple(item for item in iter(value) if isinstance(item, str))
 
 
 def build_tail_validation_family_routing(
     changed_families: Sequence[Mapping[str, object]],
-) -> list[dict[str, object]]:
+) -> object:
     """Build stable owner-layer routing rows for changed validation families."""
 
     def _impl() -> list[dict[str, object]]:
+        family: object
+        route: object
+        row: object
         rows: list[TailValidationFamilyRoute] = []
         for row in changed_families:
             if not isinstance(row, Mapping):
@@ -143,7 +151,7 @@ def build_tail_validation_family_routing(
                 "next_root_cause_file": item.next_root_cause_file,
                 "signal": item.signal,
             }
-            for item in rows
+            for item in iter(rows)
         ]
 
     return _impl()

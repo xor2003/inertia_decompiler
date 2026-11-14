@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Pure bounded DOSBox final-owned-MCB resize response contract.
 
 Layer: Frontend/runtime package surface — shared service contract.
@@ -34,6 +35,8 @@ typed refusals, never DOS errors and never silent success.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -41,6 +44,8 @@ from enum import StrEnum
 from itertools import pairwise
 
 from inertia.frontend.real16_resize_response8616 import INT21_RESIZE_FUNCTION_8616
+import dataclasses
+import operator
 
 __all__ = [
     "DOSBOX_ERR_INSUFFICIENT_MEMORY",
@@ -59,69 +64,78 @@ __all__ = [
 
 # AH=4Ah is Resize Memory Block (SETBLOCK), projected once from the shared
 # declared-service owner so both profiles name the same native function.
-DOSBOX_RESIZE_FUNCTION: int = INT21_RESIZE_FUNCTION_8616
+DOSBOX_RESIZE_FUNCTION: cython.longlong = INT21_RESIZE_FUNCTION_8616
 
 # Native MCB geometry and markers from DOS_MCB: one 16-byte paragraph
 # holding marker byte 0, owner word at 1, size word at 3.
-DOSBOX_MCB_BYTES: int = 16
-DOSBOX_MCB_MIDDLE_MARKER: int = ord("M")
-DOSBOX_MCB_FINAL_MARKER: int = ord("Z")
-DOSBOX_MCB_FREE_OWNER: int = 0
+DOSBOX_MCB_BYTES: cython.longlong = 16
+DOSBOX_MCB_MIDDLE_MARKER: cython.longlong = ord("M")
+DOSBOX_MCB_FINAL_MARKER: cython.longlong = ord("Z")
+DOSBOX_MCB_FREE_OWNER: cython.longlong = 0
 
 # DOSERR_INSUFFICIENT_MEMORY is the only DOS error a validated final-block
 # resize can reach; destroyed-MCB metadata is refused as corrupt evidence.
-DOSBOX_ERR_INSUFFICIENT_MEMORY: int = 8
+DOSBOX_ERR_INSUFFICIENT_MEMORY: cython.longlong = 8
 
-_WORD_MAXIMUM: int = 0xFFFF
+_WORD_MAXIMUM: cython.longlong = 0xFFFF
 
 
-def _require_word(value: int, field: str) -> None:
+@cython.ccall
+def _require_word(value: cython.longlong, field: object) -> None:
     """Reject truncated or Boolean machine-word declarations."""
     if type(value) is not int or not 0 <= value <= _WORD_MAXIMUM:
         raise ValueError(f"{field} must be a 16-bit integer")
 
 
-def _require_chain_layout(chain: tuple[DosboxMcbEntry, ...]) -> None:
+@cython.ccall
+def _require_chain_layout(chain: object) -> None:
     """Prove strict contiguity, nonwrapping and no adjacent free pair.
 
     A chain with no adjacent free-owner blocks is a ``DOS_CompressMemory``
     no-op, which keeps both compress calls inside ``DOS_ResizeMemory``
     side-effect free on this declared state.
     """
+    following: object
+    previous: object
     for previous, following in pairwise(chain):
         expected = previous.segment + previous.size + 1
         if expected > _WORD_MAXIMUM:
             raise ValueError("resize chain must not wrap the paragraph space")
-        if following.segment != expected:
+        if operator.ne(following.segment, expected):
             raise ValueError("resize chain must be contiguous")
-        if previous.owner == DOSBOX_MCB_FREE_OWNER and following.owner == DOSBOX_MCB_FREE_OWNER:
+        if operator.eq(previous.owner, DOSBOX_MCB_FREE_OWNER) and operator.eq(following.owner, DOSBOX_MCB_FREE_OWNER):
             raise ValueError("resize chain must not declare adjacent free blocks")
 
 
-def _require_owned_final(chain: tuple[DosboxMcbEntry, ...], psp_segment: int) -> None:
+@cython.ccall
+def _require_owned_final(chain: object, psp_segment: cython.longlong) -> None:
     """Prove one final Z block owned by the declared PSP, inside range."""
+    entry: object
     for entry in chain[:-1]:
-        if entry.marker != DOSBOX_MCB_MIDDLE_MARKER:
+        if operator.ne(entry.marker, DOSBOX_MCB_MIDDLE_MARKER):
             raise ValueError("resize chain must carry a single final Z block")
     final = chain[-1]
-    if final.marker != DOSBOX_MCB_FINAL_MARKER:
+    if operator.ne(final.marker, DOSBOX_MCB_FINAL_MARKER):
         raise ValueError("resize chain must end in a final Z block")
     if final.data_segment > _WORD_MAXIMUM or final.segment + final.size > _WORD_MAXIMUM:
         raise ValueError("resize final block must not wrap the paragraph space")
-    if final.owner != psp_segment:
+    if operator.ne(final.owner, psp_segment):
         raise ValueError("resize final block must be owned by the declared PSP")
 
 
-def _require_proven_inputs(segment: int, paragraphs: int, ax: int) -> None:
+@cython.ccall
+def _require_proven_inputs(segment: cython.longlong, paragraphs: cython.longlong, ax: cython.longlong) -> None:
     """Require exact proven ES/BX words and the AH=4Ah service identity."""
+    field: object
+    value: object
     for field, value in (("ES", segment), ("BX", paragraphs), ("AX", ax)):
         _require_word(value, field)
-    if ax >> 8 != DOSBOX_RESIZE_FUNCTION:
+    if operator.ne(ax >> 8, DOSBOX_RESIZE_FUNCTION):
         raise ValueError("resize requires INT21/AH4A")
 
 
 def _current_chain_refusal(
-    policy: DosboxResizePolicy, current_chain: Sequence[bytes] | None
+    policy: DosboxResizePolicy, current_chain: object
 ) -> DosboxResizeRefusal | None:
     """Bind supplied current MCB images to the declared initial entries.
 
@@ -129,6 +143,9 @@ def _current_chain_refusal(
     covers the initial resize only, so a mutated, truncated or extended
     chain refuses instead of silently passing corrupt metadata.
     """
+    declared: object
+    image: object
+    supplied: object
     if current_chain is None:
         return DosboxResizeRefusal.CURRENT_CHAIN_ABSENT
     if len(current_chain) < len(policy.chain):
@@ -139,19 +156,20 @@ def _current_chain_refusal(
     for image in current_chain:
         if not isinstance(image, (bytes, bytearray, memoryview)):
             raise ValueError("current chain entries must be bytes")
-        if len(image) != DOSBOX_MCB_BYTES:
+        if operator.ne(len(image), DOSBOX_MCB_BYTES):
             return DosboxResizeRefusal.CURRENT_CHAIN_INCOMPLETE
         current.append(bytes(image))
     # Validate the snapshots too: a mutable source or a non-byte memoryview
     # can have a different byte extent after conversion.
-    if any(len(supplied) != DOSBOX_MCB_BYTES for supplied in current):
+    if any(operator.ne(len(supplied), DOSBOX_MCB_BYTES) for supplied in iter(current)):
         return DosboxResizeRefusal.CURRENT_CHAIN_INCOMPLETE
     for supplied, declared in zip(current, policy.chain, strict=True):
-        if supplied != declared.image:
+        if operator.ne(supplied, declared.image):
             return DosboxResizeRefusal.CURRENT_CHAIN_CHANGED
     return None
 
 
+@cython.ccall
 def _growth_failure(policy: DosboxResizePolicy) -> DosboxResizeResponse:
     """Stage native error 8: clamped BX plus the same-value header writes."""
     final = policy.final_entry
@@ -162,15 +180,16 @@ def _growth_failure(policy: DosboxResizePolicy) -> DosboxResizeResponse:
         ))
 
 
+@cython.ccall
 def _shrink_response(
-    policy: DosboxResizePolicy, segment: int, paragraphs: int, new_header_before: bytes | None
+    policy: DosboxResizePolicy, segment: cython.longlong, paragraphs: cython.longlong, new_header_before: object
 ) -> DosboxResizeResponse | DosboxResizeRefusal:
     """Stage the native split: shrunk block plus new free final header."""
     if new_header_before is None:
         return DosboxResizeRefusal.NEW_HEADER_UNPROVEN
     if not isinstance(new_header_before, (bytes, bytearray, memoryview)):
         raise ValueError("new header image must be bytes")
-    if len(new_header_before) != DOSBOX_MCB_BYTES:
+    if operator.ne(len(new_header_before), DOSBOX_MCB_BYTES):
         return DosboxResizeRefusal.NEW_HEADER_UNPROVEN
     final = policy.final_entry
     base, header = final.address, (segment + paragraphs) << 4
@@ -187,7 +206,7 @@ def _shrink_response(
     ))
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DosboxMcbEntry:
     """One declared MCB paragraph and its exact current 16-byte image.
 
@@ -197,46 +216,46 @@ class DosboxMcbEntry:
     bytes 3..5 the declared size in paragraphs.
     """
 
-    segment: int
-    image: bytes
+    segment: cython.longlong
+    image: object
 
     def __post_init__(self) -> None:
         """Require a word segment, complete image and native marker."""
         _require_word(self.segment, "MCB segment")
         if not isinstance(self.image, bytes):
             raise ValueError("MCB image must be immutable bytes")
-        if len(self.image) != DOSBOX_MCB_BYTES:
+        if operator.ne(len(self.image), DOSBOX_MCB_BYTES):
             raise ValueError("MCB image must be exactly 16 bytes")
         if self.marker not in (DOSBOX_MCB_MIDDLE_MARKER, DOSBOX_MCB_FINAL_MARKER):
             raise ValueError("MCB image must carry a native M/Z marker")
 
     @property
-    def marker(self) -> int:
+    def marker(self) -> cython.longlong:
         """MCB type byte: ``M`` middle or ``Z`` final."""
         return self.image[0]
 
     @property
-    def owner(self) -> int:
+    def owner(self) -> cython.longlong:
         """Declared owner word; 0 marks a free block."""
         return int.from_bytes(self.image[1:3], "little")
 
     @property
-    def size(self) -> int:
+    def size(self) -> cython.longlong:
         """Declared block size in paragraphs, excluding this header."""
         return int.from_bytes(self.image[3:5], "little")
 
     @property
-    def data_segment(self) -> int:
+    def data_segment(self) -> cython.longlong:
         """Paragraph of the block's first data byte."""
         return self.segment + 1
 
     @property
-    def address(self) -> int:
+    def address(self) -> cython.longlong:
         """Physical address of this MCB paragraph."""
         return self.segment << 4
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DosboxResizePolicy:
     """Explicit initial MCB chain authority for one DOSBox resize model.
 
@@ -251,11 +270,12 @@ class DosboxResizePolicy:
     the declared chain, never derived from the PSP segment.
     """
 
-    psp_segment: int
-    chain: tuple[DosboxMcbEntry, ...]
+    psp_segment: cython.longlong
+    chain: object
 
     def __post_init__(self) -> None:
         """Prove the declared chain's marker, contiguity and ownership invariants."""
+        entry: object
         _require_word(self.psp_segment, "PSP segment")
         if self.psp_segment == 0:
             raise ValueError("resize PSP segment must be nonzero")
@@ -291,32 +311,33 @@ class DosboxResizeRefusal(StrEnum):
     NEW_HEADER_UNPROVEN = "new_header_bytes_unproven"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DosboxResizeWrite:
     """One exact modeled byte span, delivered in native effect order."""
 
-    address: int
-    data: bytes
+    address: cython.longlong
+    data: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DosboxResizeResponse:
     """Complete low-register response plus every staged memory write."""
 
-    ax: int
-    bx: int
-    carry: bool
-    writes: tuple[DosboxResizeWrite, ...]
+    ax: cython.longlong
+    bx: cython.longlong
+    carry: cython.bint
+    writes: object
 
 
+@cython.ccall
 def dosbox_resize_response(
     policy: DosboxResizePolicy,
     *,
-    segment: int,
-    paragraphs: int,
-    ax: int,
+    segment: cython.longlong,
+    paragraphs: cython.longlong,
+    ax: cython.longlong,
     current_chain: Sequence[bytes] | None,
-    new_header_before: bytes | None = None,
+    new_header_before: object = None,
 ) -> DosboxResizeResponse | DosboxResizeRefusal:
     """Stage a DOSBox final-block resize or an exact refusal without mutation.
 
@@ -330,6 +351,7 @@ def dosbox_resize_response(
     CF clears; growth beyond the final size returns AX=8, BX=old size and
     CF set, still exposing the native same-value size/owner writes.
     """
+    refusal: object
     if not isinstance(policy, DosboxResizePolicy):
         raise ValueError("resize requires a declared DOSBox policy")
     _require_proven_inputs(segment, paragraphs, ax)
@@ -337,9 +359,9 @@ def dosbox_resize_response(
     if refusal is not None:
         return refusal
     final = policy.final_entry
-    if segment != final.data_segment:
+    if operator.ne(segment, final.data_segment):
         return DosboxResizeRefusal.OTHER_BLOCK
-    if paragraphs == final.size:
+    if operator.eq(paragraphs, final.size):
         # Equal size: native returns before any store.
         return DosboxResizeResponse(ax=segment, bx=paragraphs, carry=False, writes=())
     if paragraphs > final.size:

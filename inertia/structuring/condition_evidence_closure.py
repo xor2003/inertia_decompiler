@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify final structured-condition evidence closure.
 
 Layer: Structuring.
@@ -12,6 +13,8 @@ work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -23,26 +26,27 @@ from inertia.ir.condition_ir import ConditionIR
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 
 from .condition_chain_provenance import condition_chain_provenance_8616
+import dataclasses
 
-type ConditionEvidenceKey8616 = tuple[int, int]
+ConditionEvidenceKey8616 = typing.TypeAliasType("ConditionEvidenceKey8616", tuple[int, int])
 
 
 class _TaggedNode8616(Protocol):
     """Third-party structured AST tag surface used at this boundary."""
 
-    tags: dict[str, object]
+    tags: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionEvidenceClosure8616:
     """Identity-based closure result for final structured conditions."""
 
-    required_keys: frozenset[ConditionEvidenceKey8616]
-    materialized_keys: frozenset[ConditionEvidenceKey8616]
-    unresolved_branch_owners: frozenset[int]
+    required_keys: object
+    materialized_keys: object
+    unresolved_branch_owners: object
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every typed condition has a final proven owner."""
         return (
             self.required_keys <= self.materialized_keys
@@ -50,6 +54,7 @@ class ConditionEvidenceClosure8616:
         )
 
 
+@cython.ccall
 def _condition_key_8616(condition: ConditionIR) -> ConditionEvidenceKey8616 | None:
     """Return one exact JCC/block identity when both coordinates exist."""
     if not isinstance(condition.src_insn, int) or not isinstance(
@@ -60,7 +65,8 @@ def _condition_key_8616(condition: ConditionIR) -> ConditionEvidenceKey8616 | No
     return condition.src_insn, condition.block_addr
 
 
-def _tags_8616(node: object) -> dict[str, object]:
+@cython.ccall
+def _tags_8616(node: object) -> object:
     """Read third-party AST tags without assigning semantic defaults."""
     try:
         tags = cast(_TaggedNode8616, node).tags
@@ -71,11 +77,14 @@ def _tags_8616(node: object) -> dict[str, object]:
 
 def _tagged_key_8616(tags: Mapping[str, object]) -> ConditionEvidenceKey8616 | None:
     """Return one exact condition identity carried by AST tags."""
+    block_addr: object
+    instruction_addr: object
+    loop_key: object
     loop_key = tags.get("inertia_typed_loop_condition_key_8616")
     if (
         isinstance(loop_key, tuple)
         and len(loop_key) == 2
-        and all(isinstance(item, int) for item in loop_key)
+        and all(isinstance(item, int) for item in iter(loop_key))
     ):
         return cast(ConditionEvidenceKey8616, loop_key)
     if not (
@@ -92,35 +101,44 @@ def _tagged_key_8616(tags: Mapping[str, object]) -> ConditionEvidenceKey8616 | N
 
 def _binary_cfg_owner_8616(
     node: CIfElse,
-    successors: Mapping[int, tuple[int, ...]],
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
 ) -> int | None:
     """Return the exact two-successor CFG owner of one structured if node."""
-    candidates: list[int] = []
-    for tagged in (node, *(condition for condition, _body in node.condition_and_nodes)):
+    address: object
+    name: object
+    tagged: object
+    candidates: list[cython.longlong] = []
+    for tagged in (node, ) + tuple((condition for condition, _body in iter(node.condition_and_nodes))):
         tags = _tags_8616(tagged)
         for name in ("vex_block_addr", "ins_addr"):
             address = tags.get(name)
             if isinstance(address, int) and address not in candidates:
                 candidates.append(address)
-    owners = tuple(address for address in candidates if len(successors.get(address, ())) == 2)
+    owners = tuple(address for address in iter(candidates) if len(successors.get(address, ())) == 2)
     return owners[0] if len(owners) == 1 else None
 
 
 def classify_condition_evidence_closure_8616(
     root: object,
-    typed_conditions: tuple[ConditionIR, ...],
-    successors: Mapping[int, tuple[int, ...]],
+    typed_conditions: object,
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
 ) -> ConditionEvidenceClosure8616:
     """Classify typed condition coverage and unresolved real CFG branches."""
+    candidates: object
+    key: object
+    owner: object
+    provenance: object
+    instruction_addr: object
+    node: object
     required_keys = frozenset(
         key
-        for condition in typed_conditions
+        for condition in iter(typed_conditions)
         if (key := _condition_key_8616(condition)) is not None
     )
     materialized_keys: set[ConditionEvidenceKey8616] = set()
-    unresolved_owners: set[int] = set()
-    required_blocks = {block_addr for _instruction_addr, block_addr in required_keys}
-    keys_by_instruction: dict[int, set[ConditionEvidenceKey8616]] = {}
+    unresolved_owners: set[cython.longlong] = set()
+    required_blocks = {block_addr for _instruction_addr, block_addr in iter(required_keys)}
+    keys_by_instruction: dict[cython.longlong, set[ConditionEvidenceKey8616]] = {}
     for key in required_keys:
         keys_by_instruction.setdefault(key[0], set()).add(key)
     for node in _iter_c_nodes_deep_8616(root):

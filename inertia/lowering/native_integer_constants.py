@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Evaluate integer constants while their native bit-width proof is available.
 
 Layer: Types/Lowering, native codegen compatibility boundary.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import operator
 from collections.abc import Callable
@@ -27,15 +30,17 @@ from angr.sim_type import SimType, SimTypeChar, SimTypeInt, SimTypeNum
 
 from .native_integer_operations import lower_native_integer_operation_8616
 from .semantic_cast import CSemanticCast8616
+import dataclasses
 
 _INTEGER_TYPES = (SimTypeChar, SimTypeInt, SimTypeNum)
-_INTEGER_OPERATIONS: dict[str, Callable[[int, int], int]] = {
+_INTEGER_OPERATIONS: dict[str, Callable[[int, int], cython.longlong]] = {
     "Add": operator.add, "Sub": operator.sub, "Mul": operator.mul,
     "And": operator.and_, "Or": operator.or_, "Xor": operator.xor,
 }
 
 
-def _same_pure_native_register_value_8616(left: object, right: object) -> bool:
+@cython.ccall
+def _same_pure_native_register_value_8616(left: object, right: object) -> cython.bint:
     """Recognize identical register reads or immutable SSA register values."""
     if isinstance(left, Register) and isinstance(right, Register):
         return bool(left.reg_offset == right.reg_offset)
@@ -49,6 +54,7 @@ def _same_pure_native_register_value_8616(left: object, right: object) -> bool:
     return False
 
 
+@cython.ccall
 def native_integer_constant_value_8616(expression: BinaryOp) -> int | None:
     """Evaluate literals or a pure register XOR cancellation at native width.
 
@@ -56,6 +62,7 @@ def native_integer_constant_value_8616(expression: BinaryOp) -> int | None:
     identifiers denote one immutable value. Loads, calls, dirty expressions and
     composite operands have no such proof here and remain unevaluated.
     """
+    operation: object
     operation = _INTEGER_OPERATIONS.get(expression.op)
     bits = expression.bits
     non_scalar = expression.floating_point or expression.vector_count is not None or expression.vector_size is not None
@@ -77,15 +84,15 @@ def native_integer_constant_value_8616(expression: BinaryOp) -> int | None:
     return value
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class NativeIntegerConstantReport8616:
     """Census of candidate expressions and exactly evaluated integer values."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
 class _CodegenReportBoundary8616(Protocol):
@@ -94,6 +101,7 @@ class _CodegenReportBoundary8616(Protocol):
     _inertia_integer_constant_report_8616: NativeIntegerConstantReport8616
 
 
+@cython.ccall
 def _report_8616(codegen: object) -> NativeIntegerConstantReport8616:
     """Return the owned aggregate census at the native codegen boundary."""
     boundary = cast(_CodegenReportBoundary8616, codegen)
@@ -112,7 +120,7 @@ def fold_unsigned_narrowing_constant_8616(destination: SimType, expression: CTyp
     literal = expression.expr
     if not isinstance(literal, CConstant) or not isinstance(literal.value, int):
         return None
-    if not all(isinstance(type_, _INTEGER_TYPES) for type_ in (source, converted, destination)):
+    if not all(isinstance(type_, _INTEGER_TYPES) for type_ in iter((source, converted, destination))):
         return None
     converted_integer = cast(SimTypeChar | SimTypeInt | SimTypeNum, converted)
     destination_integer = cast(SimTypeChar | SimTypeInt | SimTypeNum, destination)
@@ -140,6 +148,7 @@ def apply_native_unsigned_constant_casts_8616() -> None:
         _cls: type[MakeTypecastsImplicit], destination: SimType, expression: CExpression,
     ) -> CExpression:
         """Retain machine conversions and fold only proven literal conversions."""
+        replacement: object
         # A machine conversion is not a cosmetic contextual promotion. In
         # particular, removing an unsigned-word conversion before a shift
         # reintroduces signed DOS-int promotion of an unsigned byte.
@@ -175,6 +184,8 @@ def apply_native_integer_constant_values_8616() -> None:
         self: CStructuredCodeGenerator, expression: BinaryOp, **kwargs: object,
     ) -> CExpression:
         """Preserve explicit scalar AIL types while leaving variable-backed nodes intact."""
+        replacement: object
+        value: object
         if self.project.arch.name == "86_16" and self._variable_map.variable(expression) is None:
             report = _report_8616(self)
             report.raw_fact_count += 1

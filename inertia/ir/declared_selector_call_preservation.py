@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: IR.
 Responsibility: collect conditional CALL records from a declared selector proof.
 
@@ -8,6 +9,8 @@ Owns typed Value, Address, Condition, instruction facts, and lossless normalizat
 Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 from __future__ import annotations
+import typing
+import cython
 
 from copy import deepcopy
 from dataclasses import dataclass, replace
@@ -64,21 +67,27 @@ from .segment_call_preservation import segment_call_dependency_traversal_scope_8
 from .segment_effect_closure import SegmentEffectClosureResult8616, prove_segment_effect_closure_8616
 from .segment_state import build_x86_16_segment_state_artifact
 from .source_graph_binding import SourceGraphSerializationError8616, canonical_source_graph_8616
+import dataclasses
+import operator
+import builtins
 
 
-def _charge_collection_8616(project: object, units: int) -> bool:
+@cython.ccall
+def _charge_collection_8616(project: object, units: cython.longlong) -> cython.bint:
     """Charge the existing shared ledger without increasing its limits."""
     with segment_call_dependency_traversal_scope_8616() as traversal:
         traversal.census_work_units += units
         return (traversal.census_work_units <= traversal.census_work_limit
-                and not deadline_reached_8616(traversal.census_deadline)
+                and not deadline_reached_8616(traversal.effective_census_deadline_8616)
                 and not direct_evidence_deadline_expired_8616(project))
 
 
 def collect_declared_selector_call_preservations_8616(
     project: object, scope: DeclaredSegmentInvariant,
-) -> tuple[EntryDomainCallPreservation8616, ...]:
+) -> object:
     """Account every root CALL under its exact declared selector certificate."""
+    index_facts: object
+    link: object
     link = scope.root_link
     if link is None:
         return ()
@@ -87,19 +96,20 @@ def collect_declared_selector_call_preservations_8616(
         _CallerInstructionPosition8616(
             artifact, block, instruction, artifact.blocks, block.instrs,
             block_index, instruction_index)
-        for block_index, block in enumerate(artifact.blocks)
-        for instruction_index, instruction in enumerate(block.instrs)
+        for block_index, block in builtins.iter(enumerate(artifact.blocks))
+        for instruction_index, instruction in builtins.iter(enumerate(block.instrs))
         if instruction.op == 'CALL')
-    calls = tuple((position.block, position.instruction) for position in positions)
+    calls = tuple((position.block, position.instruction) for position in iter(positions))
     if scope.project is not project or scope.status is not InvariantStatus.PROVEN_CONDITIONAL:
         return tuple(_refused_result_8616(
             artifact, boundary, block, instruction, None, None, None,
             instruction.addr, None,
             EntryDomainCallPreservationFailure8616.CALLER_BINDING_MISMATCH,
-        ) for block, instruction in calls)
+        ) for block, instruction in iter(calls))
     with segment_call_dependency_traversal_scope_8616():
         if not _charge_collection_8616(project, len(calls)):
-            return _budget_exhausted_call_records_8616(artifact, boundary, calls)
+            return cast("tuple[EntryDomainCallPreservation8616, ...]",
+                        _budget_exhausted_call_records_8616(artifact, boundary, calls))
         index = decoded_callsite_index_for_boundary_8616(
             project, boundary, direct_target_resolver=cast(
                 DirectCallTargetResolver8616, _premise_target_resolver_8616(project)),
@@ -108,65 +118,81 @@ def collect_declared_selector_call_preservations_8616(
                        if index._entries_by_normalized_target or index._entries_by_exact_far_target
                        else None)
         if index_facts is not None and not _charge_collection_8616(project, cast(int, index_facts[-1])):
-            return _budget_exhausted_call_records_8616(artifact, boundary, calls, index)
-        callees: dict[tuple[int, int, int, int], _PreparedCall8616] = {}
+            return cast("tuple[EntryDomainCallPreservation8616, ...]",
+                        _budget_exhausted_call_records_8616(artifact, boundary, calls, index))
+        callees: dict[tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong], _PreparedCall8616] = {}
         prepared = tuple(_collect_call_8616(
             project, scope, index, position.block, position.instruction,
             index_facts=index_facts, callees=callees, position=position)
-                         for position in positions)
-        candidates = tuple(item for item in prepared if isinstance(item, _PreparedCall8616))
+                         for position in iter(positions))
+        candidates = tuple(item for item in iter(prepared) if isinstance(item, _PreparedCall8616))
         if not candidates:
             return cast(tuple[EntryDomainCallPreservation8616, ...], prepared)
         assert index_facts is not None
-        budget_refused: set[int] = set()
+        budget_refused: set[cython.longlong] = set()
         admitted = _admit_prepared_calls_8616(project, candidates, budget_refused=budget_refused)
-        index_current = index_facts == _index_facts_8616(index)
+        index_current = operator.eq(index_facts, _index_facts_8616(index))
         index_current = _charge_collection_8616(project, cast(int, index_facts[-1])) and index_current
         callee_verdicts = _seal_shared_callees_8616(project, candidates, admitted)
         return tuple(_seal_call_8616(
             project, item, admitted[id(item)], index_admitted=index_current,
             budget_exhausted=id(item) in budget_refused,
             callee_admitted=(True if item.cs_only else callee_verdicts.get(id(item.record.callee), False)))
-                     if isinstance(item, _PreparedCall8616) else item for item in prepared)
+                     if isinstance(item, _PreparedCall8616) else item for item in iter(prepared))
 
 
 def _admit_prepared_calls_8616(
-    project: object, candidates: tuple[_PreparedCall8616, ...],
-    *, budget_refused: set[int],
-) -> dict[int, bool]:
-    """Batch each explicit authority without reconstructing CS-only closures."""
-    admitted: dict[int, bool] = {}
-    for cs_only in (False, True):
-        group = tuple(item for item in candidates if item.cs_only is cs_only)
+    project: object, candidates: object,
+    *, budget_refused: object,
+) -> object:
+    """Share a stronger CS seal when both groups already carry that obligation.
+
+    Retained CS judgements only select the proof route; the canonical consumer
+    still reauthenticates every target and CS dependency. Full-callee records
+    keep their own final closure seals and original identities. Without the
+    common obligation, preserve the separate target and CS authority routes.
+    """
+    cs_only: object
+    group: object
+    targets = tuple(item for item in iter(candidates) if not item.cs_only)
+    cs_calls = tuple(item for item in iter(candidates) if item.cs_only)
+    groups: tuple[tuple[cython.bint, tuple[_PreparedCall8616, ...]], ...] = ((False, targets), (True, cs_calls))
+    if targets and cs_calls and all(_selector_cs_judgement_8616(item.projection) for item in iter(targets)):
+        groups = ((True, candidates),)
+    admitted: dict[cython.longlong, cython.bint] = {}
+    for cs_only, group in groups:
         if not group:
             continue
-        projections = tuple(item.projection for item in group)
+        projections = tuple(item.projection for item in iter(group))
         obligations: list[Obligation] = []
         verdicts = (consume_declared_selector_cs_preservation_batch_8616(project, projections, obligations=obligations)
                     if cs_only else consume_declared_selector_callsite_batch_8616(project, projections, obligations=obligations))
         if any(item.kind in (ObligationKind.BUDGET_EXCEEDED, ObligationKind.DEADLINE_EXCEEDED)
-               for item in obligations):
-            budget_refused.update(id(item) for item, verdict in zip(group, verdicts, strict=True) if not verdict)
-        admitted.update((id(item), verdict) for item, verdict in zip(group, verdicts, strict=True))
+               for item in iter(obligations)):
+            budget_refused.update(id(item) for item, verdict in builtins.iter(zip(group, verdicts, strict=True)) if not verdict)
+        admitted.update((id(item), verdict) for item, verdict in builtins.iter(zip(group, verdicts, strict=True)))
     return admitted
 
 
 def _collect_call_8616(
     project: object, scope: DeclaredSegmentInvariant,
     index: DecodedDirectCallsiteIndex8616, block: IRBlock, instruction: IRInstr,
-    *, index_facts: tuple[object, ...] | None = None,
-    callees: dict[tuple[int, int, int, int], _PreparedCall8616] | None = None,
+    *, index_facts: object = None,
+    callees: object = None,
     position: _CallerInstructionPosition8616 | None = None,
 ) -> EntryDomainCallPreservation8616 | _PreparedCall8616:
     """Bind native geometry, symbolic operands and universal callee effects."""
+    entry: object
+    link: object
+    projection: object
     link = scope.root_link
     assert link is not None
     artifact, boundary = link.artifact, link.boundary
     if not _charge_collection_8616(project, 1):
         return _budget_exhausted_call_records_8616(
             artifact, boundary, ((block, instruction),), index)[0]
-    geometry = tuple(row for row in scope.geometry_rows
-                     if row.addr == instruction.addr and row.target is not None
+    geometry = tuple(row for row in iter(scope.geometry_rows)
+                     if operator.eq(row.addr, instruction.addr) and row.target is not None
                      and row.fallthrough is not None)
     if len(geometry) != 1:
         return _refused_result_8616(
@@ -174,17 +200,17 @@ def _collect_call_8616(
             instruction.addr, None, EntryDomainCallPreservationFailure8616.TARGET_MISMATCH)
     row = geometry[0]
     assert row.target is not None and row.fallthrough is not None
-    entries = tuple(entry for entry in index.for_target(row.target)
-                    if entry.callsite_addr == instruction.addr
-                    and entry.caller_start == artifact.function_addr)
+    entries = tuple(entry for entry in builtins.iter(index.for_target(row.target))
+                    if operator.eq(entry.callsite_addr, instruction.addr)
+                    and operator.eq(entry.caller_start, artifact.function_addr))
     entry = entries[0] if len(entries) == 1 else None
     projection = selector_callsite_8616(scope, block, instruction, row.target, row.fallthrough)
     if entry is None or projection is None:
         return _refused_result_8616(
             artifact, boundary, block, instruction, index, entry, None,
             instruction.addr, row.target, EntryDomainCallPreservationFailure8616.CALLSITE_UNPROVEN)
-    scoped = tuple(record for record in scope.scoped_call_preservations
-                   if record.callsite_addr == instruction.addr
+    scoped = tuple(record for record in iter(scope.scoped_call_preservations)
+                   if operator.eq(record.callsite_addr, instruction.addr)
                    and record.artifact is artifact)
     if scoped:
         return _prepare_scoped_record_8616(project, projection, scoped, position)
@@ -197,10 +223,11 @@ def _collect_call_8616(
         position=position)
 
 
+@cython.ccall
 def _prepare_scoped_record_8616(
     project: object, projection: DeclaredSelectorCallsite8616,
-    records: tuple[EntryDomainCallPreservation8616, ...],
-    position: _CallerInstructionPosition8616 | None,
+    records: object,
+    position: object,
 ) -> EntryDomainCallPreservation8616 | _PreparedCall8616:
     """Retain an exact invocation record for the selector batch's final proof.
 
@@ -229,28 +256,34 @@ def _prepare_scoped_record_8616(
                              index_facts, units, position, scoped_facts)
 
 
+@cython.ccall
 def _scoped_record_matches_8616(
     record: EntryDomainCallPreservation8616, projection: DeclaredSelectorCallsite8616,
-) -> bool:
+) -> cython.bint:
     """Bind the original scoped record to this exact caller instruction."""
+    link: object
     link = projection.scope.root_link
     if link is None or record.required_scope is None or record.selector_projection is not None:
         return False
     identities = (record.artifact is link.artifact and record.boundary is link.boundary
                   and record.block is projection.block and record.instruction is projection.instruction)
-    coordinates = (record.callsite_addr == projection.callsite_addr
-                   and record.target_addr == projection.target_addr)
+    coordinates = (operator.eq(record.callsite_addr, projection.callsite_addr)
+                   and operator.eq(record.target_addr, projection.target_addr))
     return identities and coordinates and record.callee is not None and record.failure is None
 
 
 def _callee_record_8616(
     project: object, scope: DeclaredSegmentInvariant, index: DecodedDirectCallsiteIndex8616,
     entry: DecodedDirectCallsite8616, projection: DeclaredSelectorCallsite8616,
-    *, index_facts: tuple[object, ...] | None = None,
-    callees: dict[tuple[int, int, int, int], _PreparedCall8616] | None = None,
+    *, index_facts: object = None,
+    callees: object = None,
     position: _CallerInstructionPosition8616 | None = None,
 ) -> EntryDomainCallPreservation8616 | _PreparedCall8616:
     """Retain a refused record whenever the full universal callee chain is absent."""
+    callee: object
+    link: object
+    retained: object
+    surface: object
     link = scope.root_link
     assert link is not None
     artifact, boundary = link.artifact, link.boundary
@@ -277,7 +310,7 @@ def _callee_record_8616(
             instruction.addr, projection.target_addr, EntryDomainCallPreservationFailure8616.CALLEE_UNRESOLVED)
     callee_artifact, callee_boundary, coverage = surface
     if not _charge_collection_8616(
-        project, len(callee_artifact.blocks) + sum(len(block.instrs) for block in callee_artifact.blocks),
+        project, len(callee_artifact.blocks) + sum(len(block.instrs) for block in iter(callee_artifact.blocks)),
     ):
         return _budget_exhausted_call_records_8616(artifact, boundary, ((block, instruction),), index)[0]
     if type(coverage) is not IRBoundaryCoverageResult8616:
@@ -303,39 +336,40 @@ def _callee_record_8616(
     return result
 
 
-def _fresh_universal_closure_8616(callee: SegmentEffectClosureResult8616) -> bool:
+def _fresh_universal_closure_8616(callee: SegmentEffectClosureResult8616) -> cython.bint:
     """Consume the just-returned canonical factory result only until the pure seal."""
     if type(callee) is not SegmentEffectClosureResult8616:
         return False
     counts = (callee.raw_fact_count, callee.normalized_fact_count,
               callee.classified_fact_count, callee.materialized_count, callee.failure_count)
     return (callee.failure is None and callee.state.invocation_scope is None
-            and counts == (1, 1, 1, 1, 0) and all(type(item) is int for item in counts))
+            and counts == (1, 1, 1, 1, 0) and all(type(item) is int for item in iter(counts)))
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _PreparedCall8616:
     """Nonpublishing obligations retained until the shared selector batch seals."""
 
     record: EntryDomainCallPreservation8616
     projection: DeclaredSelectorCallsite8616
     pending: DirectNearCallTargetBindingPending8616 | None
-    callee_facts: tuple[object, ...]
-    index_facts: tuple[object, ...]
-    work_units: int
+    callee_facts: object
+    index_facts: object
+    work_units: cython.longlong
     position: _CallerInstructionPosition8616
     scoped_facts: object | None = None
-    cs_only: bool = False
+    cs_only: cython.bint = False
 
 
 class _NativeInstructionMetadata8616(Protocol):
     """Read-only third-party decoded instruction metadata at the native boundary."""
 
-    address: int
-    size: int
-    bytes: bytes | bytearray
+    address: cython.longlong
+    size: cython.longlong
+    bytes: object
 
 
+@cython.ccall
 def _native_entry_facts_8616(entry: DecodedDirectCallsite8616) -> tuple[object, ...]:
     """Read the retained decoded CALL metadata without loading or lifting again."""
     position = entry.instruction_index
@@ -348,29 +382,29 @@ def _native_entry_facts_8616(entry: DecodedDirectCallsite8616) -> tuple[object, 
 
 def _index_facts_8616(index: DecodedDirectCallsiteIndex8616) -> tuple[object, ...]:
     """Detach owned index maps and relevant native CALL coordinates and bytes."""
-    def rows(mapping: dict[int, tuple[DecodedDirectCallsite8616, ...]]) -> tuple[object, ...]:
+    def rows(mapping: object) -> tuple[object, ...]:
         """Keep map membership and each exact decoded entry's owned fields."""
         return tuple((key, tuple((
             id(entry), entry.caller_start, id(entry.instructions),
             entry.instruction_index, entry.callsite_addr, entry.target_addr,
             id(entry.entry_identity), entry.is_far, _native_entry_facts_8616(entry),
-        ) for entry in entries)) for key, entries in mapping.items())
+        ) for entry in iter(entries))) for key, entries in builtins.iter(mapping.items()))
 
     near, far = rows(index._entries_by_normalized_target), rows(index._entries_by_exact_far_target)
-    units = (sum(len(entries) for entries in index._entries_by_normalized_target.values())
-             + sum(len(entries) for entries in index._entries_by_exact_far_target.values())
+    units = (sum(len(entries) for entries in builtins.iter(index._entries_by_normalized_target.values()))
+             + sum(len(entries) for entries in builtins.iter(index._entries_by_exact_far_target.values()))
              + len(index.entry_identities) + len(index.caller_censuses) + 1)
     return (deepcopy(index.stats), near, far,
-            tuple(id(item) for item in index.entry_identities),
-            tuple(id(item) for item in index.caller_censuses), units)
+            tuple(id(item) for item in iter(index.entry_identities)),
+            tuple(id(item) for item in iter(index.caller_censuses)), units)
 
 
-def _metadata_work_units_8616(value: object) -> int:
+def _metadata_work_units_8616(value: object) -> cython.longlong:
     """Count detached mutable metadata entries, including nested summary containers."""
     if isinstance(value, dict):
-        return sum(1 + _metadata_work_units_8616(item) for item in value.values())
+        return sum(1 + _metadata_work_units_8616(item) for item in builtins.iter(value.values()))
     if isinstance(value, (tuple, list)):
-        return sum(1 + _metadata_work_units_8616(item) for item in value)
+        return sum(1 + _metadata_work_units_8616(item) for item in iter(value))
     return 0
 
 
@@ -383,12 +417,12 @@ def _coverage_facts_8616(coverage: IRBoundaryCoverageResult8616) -> tuple[object
             id(coverage.scoped_view), id(boundary.project), boundary.addr, boundary.size,
             boundary.block_addrs_set, boundary.reachable_instruction_addrs,
             boundary.successor_edges, boundary.decode_lower_bound,
-            tuple(id(item) for item in boundary.blocks), deepcopy(boundary.info),
+            tuple(id(item) for item in iter(boundary.blocks)), deepcopy(boundary.info),
             id(boundary.near_return_continuations))
 
 
 def _callee_facts_8616(
-    callee: SegmentEffectClosureResult8616, visited: set[int] | None = None,
+    callee: SegmentEffectClosureResult8616, visited: object = None,
 ) -> tuple[object, ...]:
     """Detach mutable universal state and nested closures without invoking evidence."""
     if visited is None:
@@ -404,34 +438,39 @@ def _callee_facts_8616(
         proof.classified_fact_count, proof.materialized_count, proof.failure_count,
         id(proof.invocation), id(proof.invocation_scope),
         _callee_facts_8616(proof.callee, visited),
-    ) for proof in state.call_preservations)
+    ) for proof in iter(state.call_preservations))
     state_maps = (state.entry_states, state.exit_states, state.instruction_entry_states,
                   state.instruction_exit_states, state.summary)
-    units = (len(artifact.blocks) + sum(len(block.instrs) for block in artifact.blocks)
+    units = (len(artifact.blocks) + sum(len(block.instrs) for block in iter(artifact.blocks))
              + _metadata_work_units_8616(state_maps)
              + _metadata_work_units_8616(coverage.boundary.info)
-             + sum(cast(int, item[-1][-1]) + cast(int, item[2][-1]) + 1 for item in dependencies))
+             + sum(cast(int, item[-1][-1]) + cast(int, item[2][-1]) + 1 for item in iter(dependencies)))
     return (
         id(callee), _coverage_facts_8616(coverage), id(artifact), id(state),
         callee.failure, callee.callsite_addrs,
         callee.return_block_addrs, callee.raw_fact_count, callee.normalized_fact_count,
         callee.classified_fact_count, callee.materialized_count, callee.failure_count,
         id(state.source_artifact), id(state.entry_context), id(state.invocation_scope),
-        id(state.scoped_view), dependencies, tuple(id(item) for item in state.declared_call_consumptions),
+        id(state.scoped_view), dependencies, tuple(id(item) for item in iter(state.declared_call_consumptions)),
         deepcopy(state_maps),
         canonical_source_graph_8616(artifact.function_addr, artifact.blocks), artifact.refusals, units,
     )
 
 
+@cython.ccall
 def _bound_record_8616(
     project: object, scope: DeclaredSegmentInvariant, index: DecodedDirectCallsiteIndex8616,
     entry: DecodedDirectCallsite8616, projection: DeclaredSelectorCallsite8616,
-    callee: SegmentEffectClosureResult8616 | None,
-    *, index_facts: tuple[object, ...] | None = None,
-    callee_facts: tuple[object, ...] | None = None,
+    callee: object,
+    *, index_facts: object = None,
+    callee_facts: object = None,
     position: _CallerInstructionPosition8616 | None = None,
 ) -> EntryDomainCallPreservation8616 | _PreparedCall8616:
     """Prepare every callback obligation before the one shared selector admission."""
+    failure: object
+    link: object
+    pending: object
+    window: object
     link = scope.root_link
     assert link is not None
     artifact, boundary = link.artifact, link.boundary
@@ -462,7 +501,7 @@ def _bound_record_8616(
     window = _callsite_window_8616(project, entry)
     operand = instruction.args[0] if instruction.args else None
     callee_bound = (_selector_cs_judgement_8616(projection) if callee is None else (
-        callee.coverage.artifact.function_addr == projection.target_addr
+        operator.eq(callee.coverage.artifact.function_addr, projection.target_addr)
         and callee.coverage.boundary.project is project
         and "cs" in _callee_preserved_registers_8616(callee)))
     if (failure is not None or window is None or projection.target_addr not in window[2]
@@ -473,7 +512,7 @@ def _bound_record_8616(
         return _refuse_prepared_8616(result)
     pending = None
     if operand.space is MemSpace.CONST:
-        if type(operand.const) is not int or operand.const != projection.target_addr:
+        if type(operand.const) is not int or operator.ne(operand.const, projection.target_addr):
             return _refuse_prepared_8616(result)
     else:
         offered = prepare_declared_near_call_target_binding_pending_8616(
@@ -494,6 +533,7 @@ def _bound_record_8616(
                              cs_only=callee is None)
 
 
+@cython.ccall
 def _refuse_prepared_8616(result: EntryDomainCallPreservation8616) -> EntryDomainCallPreservation8616:
     """Keep failed preparation in the complete per-CALL accounting census."""
     return _refused_result_8616(
@@ -503,26 +543,31 @@ def _refuse_prepared_8616(result: EntryDomainCallPreservation8616) -> EntryDomai
     )
 
 
-def _callee_facts_match_8616(prepared: _PreparedCall8616) -> bool:
+@cython.ccall
+def _callee_facts_match_8616(prepared: _PreparedCall8616) -> cython.bint:
     """Turn malformed owned source serialization into its precise typed non-proof."""
+    callee: object
     callee = prepared.record.callee
     if callee is None:
         return False
     try:
         if prepared.scoped_facts is not None:
-            return prepared.scoped_facts == scoped_selector_record_facts_8616(prepared.record)
+            unchanged: cython.bint = operator.eq(prepared.scoped_facts, scoped_selector_record_facts_8616(prepared.record))
+            return unchanged
         if not _fresh_universal_closure_8616(callee):
             return False
-        return prepared.callee_facts == _callee_facts_8616(callee)
+        return operator.eq(prepared.callee_facts, _callee_facts_8616(callee))
     except SourceGraphSerializationError8616:
         return False
 
 
+@cython.ccall
 def _seal_shared_callees_8616(
-    project: object, prepared: tuple[_PreparedCall8616, ...], admitted: dict[int, bool],
-) -> dict[int, bool]:
+    project: object, prepared: object, admitted: object,
+) -> object:
     """Reconcile every distinct retained callee once after the last callback."""
-    results: dict[int, bool] = {}
+    item: object
+    results: dict[cython.longlong, cython.bint] = {}
     for item in prepared:
         if item.cs_only:
             continue
@@ -535,10 +580,11 @@ def _seal_shared_callees_8616(
     return results
 
 
+@cython.ccall
 def _seal_call_8616(
-    project: object, prepared: _PreparedCall8616, admitted: bool,
+    project: object, prepared: _PreparedCall8616, admitted: cython.bint,
     *, index_admitted: bool | None = None, callee_admitted: bool | None = None,
-    budget_exhausted: bool = False,
+    budget_exhausted: cython.bint = False,
 ) -> EntryDomainCallPreservation8616:
     """Materialize through pure metadata/operand seals after all callbacks finish."""
     result = prepared.record
@@ -551,7 +597,7 @@ def _seal_call_8616(
     if not admitted:
         return _refuse_prepared_8616(result)
     if index_admitted is None:
-        index_admitted = prepared.index_facts == _index_facts_8616(result.index)
+        index_admitted = operator.eq(prepared.index_facts, _index_facts_8616(result.index))
     if callee_admitted is None:
         callee_admitted = prepared.cs_only or _callee_facts_match_8616(prepared)
     if (not index_admitted or not callee_admitted
@@ -561,8 +607,10 @@ def _seal_call_8616(
     return _seal_operand_8616(prepared)
 
 
+@cython.ccall
 def _seal_operand_8616(prepared: _PreparedCall8616) -> EntryDomainCallPreservation8616:
     """Finish a bound operand without replaying a just-consumed scoped proof."""
+    pending: object
     result = prepared.record
     if prepared.scoped_facts is not None:
         if (not _scoped_record_matches_8616(result, prepared.projection)
@@ -577,6 +625,6 @@ def _seal_operand_8616(prepared: _PreparedCall8616) -> EntryDomainCallPreservati
         return replace(result, binding=binding)
     operand = result.instruction.args[0] if result.instruction.args else None
     if (not isinstance(operand, IRValue) or operand.space is not MemSpace.CONST
-            or type(operand.const) is not int or operand.const != result.target_addr):
+            or type(operand.const) is not int or operator.ne(operand.const, result.target_addr)):
         return _refuse_prepared_8616(result)
     return result

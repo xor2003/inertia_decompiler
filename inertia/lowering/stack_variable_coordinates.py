@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Keep machine-BP and angr entry-SP stack coordinates coherent.
 
 Layer: Types/Lowering.
@@ -11,6 +12,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, replace
 from enum import StrEnum
@@ -31,6 +34,8 @@ from .stack_storage_evidence import (
     alias_excludes_stack_range_8616,
     typed_frame_excludes_stack_range_8616,
 )
+import dataclasses
+import operator
 
 
 class StackCoordinateProducer8616(StrEnum):
@@ -40,26 +45,26 @@ class StackCoordinateProducer8616(StrEnum):
     CALL_OUTPUT_OBJECT = "call_output_object"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackVariableCoordinateProjection8616:
     """One machine-BP storage slot and its typed semantic value projection."""
 
     variable: SimStackVariable
     cvar: object
-    bp_offset: int
-    entry_sp_offset: int
-    size: int
+    bp_offset: cython.longlong
+    entry_sp_offset: cython.longlong
+    size: cython.longlong
     display_name: str = ""
     equivalent_variables: tuple[SimStackVariable, ...] = ()
     producer: StackCoordinateProducer8616 = StackCoordinateProducer8616.STACK_STORAGE
 
     @property
-    def value_size(self) -> int:
+    def value_size(self) -> cython.longlong:
         """Return the current typed value width inside this storage slot."""
         return _semantic_value_size_8616(self.cvar, self.size)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackVariableCoordinateRegistry8616:
     """Immutable coordinate projections owned by one codegen surface."""
 
@@ -73,35 +78,35 @@ class StackVariableCoordinateRegistry8616:
         return next(
             (
                 projection
-                for projection in self.projections
+                for projection in iter(self.projections)
                 if projection.variable is variable
-                or any(alias is variable for alias in projection.equivalent_variables)
+                or any(alias is variable for alias in iter(projection.equivalent_variables))
             ),
             None,
         )
 
     def for_bp_range(
         self,
-        bp_offset: int,
-        size: int,
+        bp_offset: cython.longlong,
+        size: cython.longlong,
     ) -> StackVariableCoordinateProjection8616 | None:
         """Return the unique projection for one exact machine-BP byte range."""
         matches = tuple(
             projection
-            for projection in self.projections
-            if projection.bp_offset == bp_offset and projection.size == size
+            for projection in iter(self.projections)
+            if operator.eq(projection.bp_offset, bp_offset) and operator.eq(projection.size, size)
         )
         return matches[0] if len(matches) == 1 else None
 
     def containing_bp_range(
         self,
-        bp_offset: int,
-        size: int,
+        bp_offset: cython.longlong,
+        size: cython.longlong,
     ) -> StackVariableCoordinateProjection8616 | None:
         """Return the unique projected owner containing one machine-BP range."""
         matches = tuple(
             projection
-            for projection in self.projections
+            for projection in iter(self.projections)
             if projection.bp_offset <= bp_offset
             and projection.bp_offset + projection.size >= bp_offset + size
         )
@@ -109,32 +114,34 @@ class StackVariableCoordinateRegistry8616:
 
     def for_bp_value_range(
         self,
-        bp_offset: int,
-        size: int,
+        bp_offset: cython.longlong,
+        size: cython.longlong,
     ) -> StackVariableCoordinateProjection8616 | None:
         """Return the unique exact storage or typed low-value projection."""
+        exact: object
+        owner: object
         exact = self.for_bp_range(bp_offset, size)
         if exact is not None:
             return exact
         owner = self.containing_bp_range(bp_offset, size)
         if (
             owner is None
-            or owner.bp_offset != bp_offset
-            or owner.value_size != size
+            or operator.ne(owner.bp_offset, bp_offset)
+            or operator.ne(owner.value_size, size)
         ):
             return None
         return owner
 
     def for_entry_sp_range(
         self,
-        entry_sp_offset: int,
-        size: int,
+        entry_sp_offset: cython.longlong,
+        size: cython.longlong,
     ) -> StackVariableCoordinateProjection8616 | None:
         """Return the unique projection surviving an AST variable clone."""
         matches = tuple(
             projection
-            for projection in self.projections
-            if projection.entry_sp_offset == entry_sp_offset and projection.size == size
+            for projection in iter(self.projections)
+            if operator.eq(projection.entry_sp_offset, entry_sp_offset) and operator.eq(projection.size, size)
         )
         return matches[0] if len(matches) == 1 else None
 
@@ -156,12 +163,12 @@ class StackVariableCoordinateRegistry8616:
             return None
         matches = tuple(
             projection
-            for projection in self.projections
-            if projection.entry_sp_offset == variable.offset
-            and projection.size == variable.size
+            for projection in iter(self.projections)
+            if operator.eq(projection.entry_sp_offset, variable.offset)
+            and operator.eq(projection.size, variable.size)
             and any(
-                candidate.ident == ident
-                for candidate in (projection.variable, *projection.equivalent_variables)
+                operator.eq(candidate.ident, ident)
+                for candidate in iter((projection.variable, ) + tuple(projection.equivalent_variables))
             )
         )
         return matches[0] if len(matches) == 1 else None
@@ -180,22 +187,22 @@ class StackVariableCoordinateRegistry8616:
             return None
         matches = tuple(
             projection
-            for projection in self.projections
-            if projection.entry_sp_offset == variable.offset
-            and projection.size == variable.size
-            and projection.display_name == variable.name
+            for projection in iter(self.projections)
+            if operator.eq(projection.entry_sp_offset, variable.offset)
+            and operator.eq(projection.size, variable.size)
+            and operator.eq(projection.display_name, variable.name)
         )
         return matches[0] if len(matches) == 1 else None
 
     def containing_entry_sp_range(
         self,
-        entry_sp_offset: int,
-        size: int,
+        entry_sp_offset: cython.longlong,
+        size: cython.longlong,
     ) -> StackVariableCoordinateProjection8616 | None:
         """Return the unique projected owner containing one entry-SP range."""
         matches = tuple(
             projection
-            for projection in self.projections
+            for projection in iter(self.projections)
             if projection.entry_sp_offset <= entry_sp_offset
             and projection.entry_sp_offset + projection.size
             >= entry_sp_offset + size
@@ -226,10 +233,11 @@ class _TypedCVariableBoundary8616(Protocol):
 class _SizedTypeBoundary8616(Protocol):
     """Third-party angr type width used at the C-variable boundary."""
 
-    size: int
+    size: cython.longlong
 
 
-def _semantic_value_size_8616(cvar: object, storage_size: int) -> int:
+@cython.ccall
+def _semantic_value_size_8616(cvar: object, storage_size: cython.longlong) -> cython.longlong:
     """Return a proven semantic value width bounded by its ABI storage slot."""
     try:
         variable_type = cast(_TypedCVariableBoundary8616, cvar).variable_type
@@ -242,6 +250,7 @@ def _semantic_value_size_8616(cvar: object, storage_size: int) -> int:
     return value_size if value_size <= storage_size else storage_size
 
 
+@cython.ccall
 def stack_variable_coordinate_registry_8616(
     codegen: object,
 ) -> StackVariableCoordinateRegistry8616:
@@ -254,6 +263,7 @@ def stack_variable_coordinate_registry_8616(
     return registry if isinstance(registry, StackVariableCoordinateRegistry8616) else StackVariableCoordinateRegistry8616()
 
 
+@cython.ccall
 def reset_stack_variable_coordinate_registry_8616(codegen: object) -> None:
     """Reset projections before replaying exact stack materialization."""
     boundary = cast(_CodegenBoundary8616, codegen)
@@ -267,10 +277,10 @@ def record_stack_variable_coordinate_projection_8616(
     *,
     variable: SimStackVariable,
     cvar: object,
-    bp_offset: int,
-    entry_sp_offset: int,
-    size: int,
-    display_name: str | None = None,
+    bp_offset: cython.longlong,
+    entry_sp_offset: cython.longlong,
+    size: cython.longlong,
+    display_name: object = None,
     producer: StackCoordinateProducer8616 = StackCoordinateProducer8616.STACK_STORAGE,
 ) -> StackVariableCoordinateProjection8616:
     """Record one exact projection, replacing prior data for that variable."""
@@ -292,13 +302,13 @@ def record_stack_variable_coordinate_projection_8616(
     registry = stack_variable_coordinate_registry_8616(codegen)
     retained = tuple(
         item
-        for item in registry.projections
+        for item in iter(registry.projections)
         if item.variable is not variable
-        and not (item.bp_offset == bp_offset and item.size == size)
+        and not (operator.eq(item.bp_offset, bp_offset) and operator.eq(item.size, size))
     )
     boundary = cast(_CodegenBoundary8616, codegen)
     boundary._inertia_stack_variable_coordinate_registry_8616 = (
-        StackVariableCoordinateRegistry8616((*retained, projection))
+        StackVariableCoordinateRegistry8616(tuple(retained) + (projection,))
     )
     return projection
 
@@ -306,17 +316,18 @@ def record_stack_variable_coordinate_projection_8616(
 def record_stack_variable_coordinate_alias_8616(
     codegen: object,
     *,
-    bp_offset: int,
-    size: int,
+    bp_offset: cython.longlong,
+    size: cython.longlong,
     variable: SimStackVariable,
 ) -> StackVariableCoordinateProjection8616 | None:
     """Attach one Lowering-reconciled angr view to a canonical projection."""
+    projection: object
     registry = stack_variable_coordinate_registry_8616(codegen)
     projection = registry.for_bp_range(bp_offset, size)
     if projection is None:
         return None
     if projection.variable is variable or any(
-        alias is variable for alias in projection.equivalent_variables
+        alias is variable for alias in iter(projection.equivalent_variables)
     ):
         return projection
     rebound = StackVariableCoordinateProjection8616(
@@ -326,13 +337,13 @@ def record_stack_variable_coordinate_alias_8616(
         entry_sp_offset=projection.entry_sp_offset,
         size=projection.size,
         display_name=projection.display_name,
-        equivalent_variables=(*projection.equivalent_variables, variable),
+        equivalent_variables=tuple(projection.equivalent_variables) + (variable,),
         producer=projection.producer,
     )
     boundary = cast(_CodegenBoundary8616, codegen)
     boundary._inertia_stack_variable_coordinate_registry_8616 = (
         StackVariableCoordinateRegistry8616(
-            tuple(rebound if item is projection else item for item in registry.projections)
+            tuple(rebound if item is projection else item for item in iter(registry.projections))
         )
     )
     return rebound
@@ -341,10 +352,10 @@ def record_stack_variable_coordinate_alias_8616(
 def bind_stack_variable_coordinate_cvar_8616(
     codegen: object,
     *,
-    bp_offset: int,
-    size: int,
+    bp_offset: cython.longlong,
+    size: cython.longlong,
     cvar: object,
-    display_name: str | None = None,
+    display_name: object = None,
     producer: StackCoordinateProducer8616 | None = None,
 ) -> StackVariableCoordinateProjection8616 | None:
     """Bind an existing projection to its canonical C interface variable.
@@ -353,6 +364,7 @@ def bind_stack_variable_coordinate_cvar_8616(
     may instead be the canonical machine-BP function argument selected from the
     same Alias identity; consumers must resolve through this registry.
     """
+    projection: object
     registry = stack_variable_coordinate_registry_8616(codegen)
     projection = registry.for_bp_range(bp_offset, size)
     if projection is None:
@@ -370,21 +382,23 @@ def bind_stack_variable_coordinate_cvar_8616(
     boundary = cast(_CodegenBoundary8616, codegen)
     boundary._inertia_stack_variable_coordinate_registry_8616 = (
         StackVariableCoordinateRegistry8616(
-            tuple(rebound if item is projection else item for item in registry.projections)
+            tuple(rebound if item is projection else item for item in iter(registry.projections))
         )
     )
     return rebound
 
 
+@cython.ccall
 def publish_selected_stack_cvar_projection_8616(
     codegen: object,
     cvar: object,
     *,
-    bp_offset: int,
-    size: int,
+    bp_offset: cython.longlong,
+    size: cython.longlong,
     entry_sp_offset: int | None = None,
 ) -> StackVariableCoordinateProjection8616 | None:
     """Publish one selected C variable with an optional proven entry-SP coordinate."""
+    projection: object
     try:
         variable = cast(_CVariableBoundary8616, cvar).variable
     except AttributeError:
@@ -394,7 +408,7 @@ def publish_selected_stack_cvar_projection_8616(
         or variable.base != "bp"
         or not isinstance(variable.offset, int)
         or not isinstance(variable.size, int)
-        or variable.size != size
+        or operator.ne(variable.size, size)
     ):
         return None
     projection = stack_variable_coordinate_registry_8616(codegen).for_bp_range(
@@ -404,7 +418,7 @@ def publish_selected_stack_cvar_projection_8616(
     if (
         projection is not None
         and isinstance(entry_sp_offset, int)
-        and projection.entry_sp_offset != entry_sp_offset
+        and operator.ne(projection.entry_sp_offset, entry_sp_offset)
     ):
         return record_stack_variable_coordinate_projection_8616(
             codegen,
@@ -444,6 +458,7 @@ def publish_selected_stack_cvar_projection_8616(
 
 def refresh_stack_variable_coordinate_cvar_8616(codegen: object, cvar: CVariable) -> None:
     """Grow accepted storage and replay names; value narrowing cannot shrink ABI slots."""
+    projection: object
     variable = cvar.variable
     if not isinstance(variable, SimStackVariable) or variable.size <= 0:
         return
@@ -457,16 +472,18 @@ def refresh_stack_variable_coordinate_cvar_8616(codegen: object, cvar: CVariable
     )
     cast(_CodegenBoundary8616, codegen)._inertia_stack_variable_coordinate_registry_8616 = (
         StackVariableCoordinateRegistry8616(tuple(
-            refreshed if item is projection else item for item in registry.projections
+            refreshed if item is projection else item for item in iter(registry.projections)
         ))
     )
 
 
+@cython.ccall
 def machine_bp_offset_for_stack_variable_8616(
     codegen: object,
     variable: SimStackVariable,
 ) -> int | None:
     """Return machine-BP offset, refusing unresolved coordinate collisions."""
+    projection: object
     registry = stack_variable_coordinate_registry_8616(codegen)
     projection = registry.for_variable(variable)
     if projection is not None:
@@ -481,12 +498,16 @@ def machine_bp_offset_for_stack_variable_8616(
     return variable.offset if isinstance(variable.offset, int) else None
 
 
+@cython.ccall
 def _entry_sp_offset_8616(
     codegen: object,
     registry: StackVariableCoordinateRegistry8616,
     variable: SimStackVariable,
-) -> tuple[bool, int | None]:
+) -> tuple[cython.bint, int | None]:
     """Resolve an entry-SP projection for one int-offset variable."""
+    named_projection: object
+    projection: object
+    raw_projection: object
     offset = cast(int, variable.offset)
     size = cast(int, variable.size)
     projection = registry.for_equivalent_entry_sp_variable(variable)
@@ -499,7 +520,7 @@ def _entry_sp_offset_8616(
         and (
             raw_projection is None
             or raw_projection is named_projection
-            or raw_projection.display_name != variable.name
+            or operator.ne(raw_projection.display_name, variable.name)
         )
     ):
         return True, named_projection.bp_offset
@@ -529,10 +550,11 @@ def _entry_sp_offset_8616(
     return False, None
 
 
+@cython.ccall
 def _fallback_offset_8616(
     codegen: object,
     variable: SimStackVariable,
-) -> tuple[bool, int | None]:
+) -> tuple[cython.bint, int | None]:
     """Resolve a machine-BP offset from alias artifacts or C-frame evidence."""
     offset = cast(int, variable.offset)
     size = cast(int, variable.size)
@@ -566,12 +588,14 @@ def _fallback_offset_8616(
     return False, None
 
 
+@cython.ccall
 def stack_cvar_for_machine_bp_range_8616(
     codegen: object,
-    bp_offset: int,
-    size: int,
+    bp_offset: cython.longlong,
+    size: cython.longlong,
 ) -> object | None:
     """Return the canonical CVariable for one exact projected BP range."""
+    projection: object
     projection = stack_variable_coordinate_registry_8616(codegen).for_bp_range(
         bp_offset,
         size,
@@ -579,12 +603,14 @@ def stack_cvar_for_machine_bp_range_8616(
     return projection.cvar if projection is not None else None
 
 
+@cython.ccall
 def stack_cvar_for_machine_bp_value_range_8616(
     codegen: object,
-    bp_offset: int,
-    size: int,
+    bp_offset: cython.longlong,
+    size: cython.longlong,
 ) -> object | None:
     """Return the C value for an exact slot or its proven low-byte view."""
+    projection: object
     projection = stack_variable_coordinate_registry_8616(codegen).for_bp_value_range(
         bp_offset,
         size,

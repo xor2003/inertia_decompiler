@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/angr compatibility.
 
 Responsibility: adapt angr return rendering for proven 16-bit x86 return facts.
@@ -12,6 +13,7 @@ An existing native dereference is a return value, not a missing-value placeholde
 """
 
 from __future__ import annotations
+import cython
 
 import contextlib
 import logging
@@ -85,6 +87,9 @@ from .ailment_variant_access import (
 )
 from .calling_convention_compat import collect_wide_stack_argument_width_evidence_8616
 from .msvc_x87_interrupts import msvc_x87_escape_opcode_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "apply_x86_16_decompiler_return_compatibility",
@@ -98,17 +103,18 @@ log: logging.Logger = logging.getLogger(__name__)
 class _ReturnCompatProjectContract8616(Protocol):
     """Inertia context carried by a third-party angr project."""
 
-    _inertia_original_linear_delta: int
+    _inertia_original_linear_delta: cython.longlong
     _inertia_original_project: object
 
 
 class _ReturnCompatFunctionContract8616(Protocol):
     """Legacy Inertia return-use override carried by an angr function."""
 
-    _inertia_return_compat_caller_uses_return_8616: bool
+    _inertia_return_compat_caller_uses_return_8616: cython.bint
 
 
-def _return_compat_original_linear_delta_8616(project: object | None) -> int | None:
+@cython.ccall
+def _return_compat_original_linear_delta_8616(project: object) -> int | None:
     """Read the owned exact-slice address delta with direct contract access."""
     if project is None:
         return None
@@ -119,7 +125,8 @@ def _return_compat_original_linear_delta_8616(project: object | None) -> int | N
     return value if isinstance(value, int) else None
 
 
-def _return_compat_original_project_8616(project: object | None) -> object | None:
+@cython.ccall
+def _return_compat_original_project_8616(project: object) -> object | None:
     """Read the owned source-project link with direct contract access."""
     if project is None:
         return None
@@ -129,6 +136,7 @@ def _return_compat_original_project_8616(project: object | None) -> object | Non
         return None
 
 
+@cython.ccall
 def _return_compat_caller_use_override_8616(function: object) -> bool | None:
     """Read the legacy owned caller-use override with direct contract access."""
     try:
@@ -138,8 +146,12 @@ def _return_compat_caller_use_override_8616(function: object) -> bool | None:
     return value if isinstance(value, bool) else None
 
 
-def _dynamic_int_counter_8616(owner: object, name: str) -> int:
+@cython.ccall
+def _dynamic_int_counter_8616(owner: object, name: object) -> cython.longlong:
     """Read a runtime compatibility counter from a third-party angr object."""
+    info: object
+    stored: object
+    value: object
     value = getattr(cast(Any, owner), name, None)
     if isinstance(value, int):
         return value
@@ -150,8 +162,10 @@ def _dynamic_int_counter_8616(owner: object, name: str) -> int:
     return stored if isinstance(stored, int) else 0
 
 
-def _increment_dynamic_int_counter_8616(owner: object, name: str) -> None:
+@cython.ccall
+def _increment_dynamic_int_counter_8616(owner: object, name: object) -> None:
     """Increment telemetry without requiring mutable attributes on slotted angr objects."""
+    info: object
     value = _dynamic_int_counter_8616(owner, name) + 1
     try:
         setattr(cast(Any, owner), name, value)
@@ -163,7 +177,8 @@ def _increment_dynamic_int_counter_8616(owner: object, name: str) -> None:
         info[name] = value
 
 
-def _object_tuple_8616(value: object) -> tuple[object, ...]:
+@cython.ccall
+def _object_tuple_8616(value: object) -> object:
     """Return a tuple for dynamic angr sequence payloads."""
     if isinstance(value, tuple):
         return value
@@ -172,7 +187,11 @@ def _object_tuple_8616(value: object) -> tuple[object, ...]:
     return ()
 
 
-def _describe_c_expr_8616(expr: object, *, depth: int = 0) -> str:
+@cython.ccall
+def _describe_c_expr_8616(expr: object, *, depth: cython.longlong = 0) -> object:
+    child: object
+    value: object
+    attr: object
     if expr is None:
         return "None"
     if depth >= 3:
@@ -195,26 +214,33 @@ def _describe_c_expr_8616(expr: object, *, depth: int = 0) -> str:
     return " ".join(parts)
 
 
-def _is_stack_base_return_register_8616(reg_arg: SimRegArg) -> bool:
+@cython.ccall
+def _is_stack_base_return_register_8616(reg_arg: SimRegArg) -> cython.bint:
     return reg_arg.reg_name.lower() in {"sp", "bp", "ebp", "esp", "rbp", "rsp"}
 
 
-def _is_void_return_type_8616(return_type: object) -> bool:
+@cython.ccall
+def _is_void_return_type_8616(return_type: object) -> cython.bint:
     """Return whether an angr SimType is explicitly the C ``void`` return type."""
     return type(return_type) is SimTypeBottom and getattr(return_type, "label", None) == "void"
 
 
-def _is_x86_16_near_pointer_return_8616(arch: object, return_type: object) -> bool:
+@cython.ccall
+def _is_x86_16_near_pointer_return_8616(arch: object, return_type: object) -> cython.bint:
     return isinstance(return_type, SimTypePointer) and getattr(arch, "name", None) == "86_16"
 
 
-def _prototype_has_return_type_8616(prototype: object) -> bool:
+@cython.ccall
+def _prototype_has_return_type_8616(prototype: object) -> cython.bint:
     """Return whether a dynamic angr prototype carries a return type."""
     return prototype is not None and getattr(prototype, "returnty", None) is not None
 
 
+@cython.ccall
 def _cfunc_typed_prototype_8616(codegen_func: object, cfunc: object) -> object | None:
     """Return a typed functy/prototype from the cfunc, publishing it back."""
+    prototype: object
+    attr_name: object
     for attr_name in ("functy", "prototype"):
         prototype = getattr(cfunc, attr_name, None)
         if _prototype_has_return_type_8616(prototype):
@@ -225,6 +251,7 @@ def _cfunc_typed_prototype_8616(codegen_func: object, cfunc: object) -> object |
     return None
 
 
+@cython.ccall
 def _dbg_prototype_resolve_8616(
     project: object, codegen_func: object, cfunc: object, func_addr: object, functions: object
 ) -> None:
@@ -246,8 +273,10 @@ def _dbg_prototype_resolve_8616(
     )
 
 
+@cython.ccall
 def _publish_kb_prototype_8616(codegen_func: object, cfunc: object, kb_func: object, prototype: object) -> None:
     """Publish a kb-proven prototype onto codegen surfaces and count it."""
+    target: object
     for target in (codegen_func, cfunc):
         if target is None:
             continue
@@ -259,8 +288,15 @@ def _publish_kb_prototype_8616(codegen_func: object, cfunc: object, kb_func: obj
         _increment_dynamic_int_counter_8616(kb_func, "_inertia_return_compat_codegen_prototype_resolved_count")
 
 
+@cython.ccall
 def _resolve_codegen_prototype_8616(codegen: object) -> tuple[object | None, object | None]:
     """Resolve the best available function/prototype pair from dynamic codegen state."""
+    cfunc: object
+    codegen_func: object
+    func_addr: object
+    functions: object
+    project: object
+    prototype: object
     if codegen is None:
         return None, None
 
@@ -295,8 +331,15 @@ def _resolve_codegen_prototype_8616(codegen: object) -> tuple[object | None, obj
     return codegen_func or kb_func, prototype
 
 
-def codegen_has_explicit_void_return_8616(project: object, codegen: object) -> bool:
+@cython.ccall
+def codegen_has_explicit_void_return_8616(project: object, codegen: object) -> cython.bint:
     """Return whether dynamic codegen/function metadata proves an explicit void return."""
+    cfunc: object
+    func_addr: object
+    function: object
+    functions: object
+    return_type: object
+    candidate: object
 
     cfunc = getattr(codegen, "cfunc", None)
     function = getattr(codegen, "_inertia_current_function_8616", None)
@@ -324,13 +367,16 @@ def codegen_has_explicit_void_return_8616(project: object, codegen: object) -> b
     return function is not None and getattr(function, "returning", None) is False
 
 
+@cython.ccall
 def describe_x86_16_decompiler_return_compatibility() -> tuple[str, ...]:
     """Describe the third-party angr return compatibility patches installed here."""
     return ("ReturnMaker._handle_Return: SimComboArg support",)
 
 
+@cython.ccall
 def _make_return_register_expr_8616(self: object, stmt: object, reg_arg: SimRegArg) -> object:
     """Capture return-time state; SSA, not producer substitution, binds its value."""
+    reg_name: object
     self_dynamic = cast(Any, self)
     stmt_dynamic = cast(Any, stmt)
     reg = self_dynamic.arch.registers[reg_arg.reg_name]
@@ -346,13 +392,16 @@ def _make_return_register_expr_8616(self: object, stmt: object, reg_arg: SimRegA
     )
 
 
+@cython.ccall
 def _resolve_same_block_tmp_source_8616(
     expr: object,
     statements: Sequence[object],
     *,
-    before_index: int,
-    depth: int = 0,
+    before_index: cython.longlong,
+    depth: cython.longlong = 0,
 ) -> object:
+    src: object
+    tmp_idx: object
     if depth > 8 or not isinstance(expr, ailment.Expr.Tmp):
         return expr
     tmp_idx = getattr(expr, "tmp_idx", None)
@@ -368,13 +417,16 @@ def _resolve_same_block_tmp_source_8616(
     return expr
 
 
+@cython.ccall
 def _resolve_same_block_tmps_in_expr_8616(
     expr: object,
     statements: Sequence[object],
     *,
-    before_index: int,
-    depth: int = 0,
+    before_index: cython.longlong,
+    depth: cython.longlong = 0,
 ) -> object:
+    child: object
+    attr: object
     if depth > 8 or expr is None:
         return expr
     if isinstance(expr, ailment.Expr.Tmp):
@@ -402,7 +454,7 @@ def _resolve_same_block_tmps_in_expr_8616(
             operands = operand_view.operands
             operand_view.operands = [
                 _resolve_same_block_tmps_in_expr_8616(child, statements, before_index=before_index, depth=depth + 1)
-                for child in operands
+                for child in iter(operands)
             ]
         except Exception:
             pass
@@ -414,14 +466,14 @@ def _resolve_same_block_register_reads_in_expr_8616(
     expr: object,
     statements: Sequence[object],
     *,
-    before_index: int,
-    reg_offset: int,
-    reg_size: int,
-    depth: int = 0,
+    before_index: cython.longlong,
+    reg_offset,
+    reg_size,
+    depth: cython.longlong = 0,
 ) -> object:
     del reg_offset, reg_size
 
-    def resolve_temporaries(candidate: object, block_statements: Sequence[object], index: int) -> object:
+    def resolve_temporaries(candidate: object, block_statements: Sequence[object], index: cython.longlong) -> object:
         source = _resolve_same_block_tmp_source_8616(candidate, block_statements, before_index=index)
         return _resolve_same_block_tmps_in_expr_8616(source, block_statements, before_index=index)
 
@@ -436,14 +488,17 @@ def _resolve_same_block_register_reads_in_expr_8616(
     )
 
 
+@cython.ccall
 def _copy_ail_expr_8616(expr: object) -> object:
+    copy: object
     copy = getattr(expr, "copy", None)
     if callable(copy):
         return copy()
     return expr
 
 
-def _ail_register_name_8616(self: object, expr: object) -> str | None:
+@cython.ccall
+def _ail_register_name_8616(self: object, expr: object) -> object:
     """Translate the offset and width of a checked native register."""
     self_dynamic = cast(Any, self)
     if not isinstance(expr, ailment.Expr.Register):
@@ -457,14 +512,21 @@ def _ail_register_name_8616(self: object, expr: object) -> str | None:
     return str(self_dynamic.arch.translate_register_name(reg_offset, size_bytes))
 
 
+@cython.ccall
 def _strip_ail_convert_8616(expr: object) -> object:
     while isinstance(expr, ailment.Expr.Convert):
         expr = getattr(expr, "operand", expr)
     return expr
 
 
+@cython.ccall
 def _bp_offset_expr_8616(self: object, expr: object) -> int | None:
     """Return the BP-relative offset represented by one canonical AIL address."""
+    lhs_const: object
+    lhs_offset: object
+    rhs_const: object
+    rhs_offset: object
+    variable: object
     expr = _strip_ail_convert_8616(expr)
     if isinstance(expr, BasePointerOffset):
         base_pointer = cast(AilBasePointerOffset8616, expr)
@@ -502,8 +564,11 @@ def _bp_offset_expr_8616(self: object, expr: object) -> int | None:
     return None
 
 
-def _is_ss_segment_scale_8616(self: object, expr: object) -> bool:
+@cython.ccall
+def _is_ss_segment_scale_8616(self: object, expr: object) -> cython.bint:
     """Recognize an explicit SS segment scale in a native binary expression."""
+    maybe_scale: object
+    maybe_seg: object
     expr = _strip_ail_convert_8616(expr)
     if not isinstance(expr, ailment.Expr.BinaryOp):
         return False
@@ -514,15 +579,17 @@ def _is_ss_segment_scale_8616(self: object, expr: object) -> bool:
         return False
     scale = 4 if op == "Shl" else 16
     for maybe_seg, maybe_scale in (operands, tuple(reversed(operands))):
-        if _ail_const_value_8616(_strip_ail_convert_8616(maybe_scale)) != scale:
+        if operator.ne(_ail_const_value_8616(_strip_ail_convert_8616(maybe_scale)), scale):
             continue
         if _ail_register_name_8616(self, _strip_ail_convert_8616(maybe_seg)) == "ss":
             return True
     return False
 
 
+@cython.ccall
 def _bp_offset_from_linear_stack_addr_8616(self: object, addr_expr: object) -> int | None:
     """Read a BP displacement only from canonical stack-address evidence."""
+    direct: object
     addr_expr = _strip_ail_convert_8616(addr_expr)
     direct = _bp_offset_expr_8616(self, addr_expr)
     if direct is not None:
@@ -543,8 +610,11 @@ def _bp_offset_from_linear_stack_addr_8616(self: object, addr_expr: object) -> i
     return None
 
 
+@cython.ccall
 def _materialize_return_stack_load_8616(self: object, expr: object) -> object:
     """Attach proven BP-relative storage to a native return load copy."""
+    region: object
+    attr: object
     self_dynamic = cast(Any, self)
     if isinstance(expr, ailment.Expr.Load):
         load = cast(AilLoad8616, expr)
@@ -577,26 +647,27 @@ def _materialize_return_stack_load_8616(self: object, expr: object) -> object:
             setattr(result, attr, _materialize_return_stack_load_8616(self, getattr(result, attr)))
     if hasattr(result, "operands"):
         with contextlib.suppress(Exception):
-            result.operands = [_materialize_return_stack_load_8616(self, operand) for operand in result.operands]
+            result.operands = [_materialize_return_stack_load_8616(self, operand) for operand in iter(result.operands)]
     return result
 
 
-def _terminal_candidate_blocked_8616(statements: tuple[object, ...], idx: int) -> bool:
+def _terminal_candidate_blocked_8616(statements: object, idx: cython.longlong) -> cython.bint:
     """Return whether a later same-block statement is a branch or call barrier."""
     return any(
         isinstance(next_stmt, (ailment.Stmt.ConditionalJump, ailment.Stmt.SideEffectStatement, ailment.Expr.Call))
         or (isinstance(next_stmt, ailment.Stmt.Assignment) and isinstance(cast(Any, next_stmt).src, ailment.Expr.Call))
-        for next_stmt in statements[idx + 1 :]
+        for next_stmt in iter(statements[idx + 1 :])
     )
 
 
+@cython.ccall
 def _resolve_terminal_src_8616(
     self: object,
     src: object,
-    statements: tuple[object, ...],
-    idx: int,
-    reg_offset: int,
-    reg_size: int,
+    statements: object,
+    idx: cython.longlong,
+    reg_offset: cython.longlong,
+    reg_size: cython.longlong,
 ) -> object:
     """Inline same-block tmp/register reads inside a terminal source expression."""
     src = _resolve_same_block_tmp_source_8616(src, statements, before_index=idx)
@@ -613,14 +684,19 @@ def _resolve_terminal_src_8616(
 
 def _terminal_register_candidates_8616(
     self: object,
-    graph_blocks: tuple[object, ...],
-    return_ins_addr: int,
-    reg_offset: int,
-    reg_size: int,
-    max_insn_distance: int,
-) -> tuple[list[tuple[int, int, object]], bool]:
+    graph_blocks: object,
+    return_ins_addr: cython.longlong,
+    reg_offset: cython.longlong,
+    reg_size: cython.longlong,
+    max_insn_distance: cython.longlong,
+) -> tuple[list[tuple[cython.longlong, cython.longlong, object]], cython.bint]:
     """Collect ``(ins_addr, block_id, src)`` candidates producing the register."""
-    candidates: list[tuple[int, int, object]] = []
+    graph_block: object
+    ins_addr: object
+    src: object
+    graph_stmt: object
+    idx: object
+    candidates: list[tuple[cython.longlong, cython.longlong, object]] = []
     tied = False
     for graph_block in graph_blocks:
         if graph_block is None:
@@ -639,7 +715,7 @@ def _terminal_register_candidates_8616(
                 continue
             src = _resolve_terminal_src_8616(self, src, statements, idx, reg_offset, reg_size)
             candidates.append((ins_addr, id(graph_block), src))
-            if sum(1 for candidate in candidates if candidate[0] == ins_addr) > 1:
+            if sum(1 for candidate in iter(candidates) if operator.eq(candidate[0], ins_addr)) > 1:
                 tied = True
     return candidates, tied
 
@@ -649,11 +725,13 @@ def _find_terminal_register_source_8616(
     stmt: object,
     *,
     block: object | None = None,
-    reg_offset: int,
-    reg_size: int,
-    max_insn_distance: int = 32,
+    reg_offset: cython.longlong,
+    reg_size: cython.longlong,
+    max_insn_distance: cython.longlong = 32,
 ) -> object | None:
     """Find a nearby producer without crossing a branch or unmodeled call effect."""
+    graph: object
+    return_ins_addr: object
     graph = getattr(self, "graph", None)
     if graph is None:
         return None
@@ -675,18 +753,21 @@ def _find_reaching_register_source_8616(
     self: object,
     block: object,
     *,
-    reg_offset: int,
-    reg_size: int,
-    max_depth: int = 8,
+    reg_offset: cython.longlong,
+    reg_size: cython.longlong,
+    max_depth: cython.longlong = 8,
 ) -> object | None:
+    graph: object
     graph = getattr(self, "graph", None)
     if graph is None or block is None:
         return None
 
     candidates = []
-    seen_blocks: set[int] = set()
+    seen_blocks: set[cython.longlong] = set()
 
-    def scan_predecessors(node: object, depth: int) -> None:
+    def scan_predecessors(node: object, depth: cython.longlong) -> None:
+        src: object
+        pred: object
         if depth > max_depth:
             return
         try:
@@ -724,6 +805,7 @@ def _find_reaching_register_source_8616(
     return _materialize_return_stack_load_8616(self, _copy_ail_expr_8616(candidates[0]))
 
 
+@cython.ccall
 def _infer_x86_16_ax_return_expr_8616(self: object, stmt: object, block: object | None) -> object | None:
     """Infer a 16-bit scalar return only from concrete AX producer evidence.
 
@@ -731,6 +813,9 @@ def _infer_x86_16_ax_return_expr_8616(self: object, stmt: object, block: object 
     no terminal/reaching AX assignment is found, the caller must keep upstream's
     original return handling.
     """
+    arch: object
+    function: object
+    ret_expr: object
     arch = getattr(self, "arch", None)
     registers = getattr(arch, "registers", {}) if arch is not None else {}
     ax_reg = registers.get("ax") if isinstance(registers, dict) else None
@@ -763,12 +848,15 @@ def _infer_x86_16_ax_return_expr_8616(self: object, stmt: object, block: object 
     return ret_expr
 
 
-def _return_compat_prototype_is_guessed_8616(function: object) -> bool:
+@cython.ccall
+def _return_compat_prototype_is_guessed_8616(function: object) -> cython.bint:
     # Dynamic angr Function compatibility boundary.
     return bool(getattr(function, "is_prototype_guessed", False))
 
 
+@cython.ccall
 def _return_compat_function_block_count_8616(self: object) -> int | None:
+    graph: object
     # Dynamic angr ReturnMaker compatibility boundary.
     graph = getattr(self, "graph", None)
     if graph is None:
@@ -779,8 +867,10 @@ def _return_compat_function_block_count_8616(self: object) -> int | None:
         return None
 
 
-def _return_compat_target_addrs_8616(function: object) -> tuple[int, ...]:
+@cython.ccall
+def _return_compat_target_addrs_8616(function: object) -> tuple[cython.longlong, ...]:
     """Return addresses that may name ``function`` across exact-region slices."""
+    target_addr: object
     # Dynamic angr Function compatibility boundary.
     target_addr = getattr(function, "addr", None)
     if not isinstance(target_addr, int):
@@ -795,16 +885,20 @@ def _return_compat_target_addrs_8616(function: object) -> tuple[int, ...]:
 
 def _return_compat_candidate_projects_8616(function: object) -> tuple[object, ...]:
     """Return projects that may contain callers for ``function``."""
+    candidate: object
     project = _return_compat_function_project_8616(function)
     projects: list[object] = []
     for candidate in (project, _return_compat_original_project_8616(project)):
-        if candidate is not None and not any(candidate is existing for existing in projects):
+        if candidate is not None and not any(candidate is existing for existing in iter(projects)):
             projects.append(candidate)
     return tuple(projects)
 
 
+@cython.ccall
 def _return_compat_function_project_8616(function: object) -> object | None:
     """Return the project attached to an angr Function-like object."""
+    project: object
+    attr_name: object
     for attr_name in ("project", "_project"):
         # Dynamic angr Function compatibility boundary.
         project = getattr(function, attr_name, None)
@@ -813,8 +907,12 @@ def _return_compat_function_project_8616(function: object) -> object | None:
     return None
 
 
+@cython.ccall
 def _return_compat_attach_project_context_8616(function: object, owner: object) -> None:
     """Attach ReturnMaker project context to a Function-like object when missing."""
+    candidate_project: object
+    current_project: object
+    attr_name: object
     if function is None:
         return
     current_project = _return_compat_function_project_8616(function)
@@ -830,21 +928,24 @@ def _return_compat_attach_project_context_8616(function: object, owner: object) 
             return
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _CallerReturnUseCensus8616:
     """Evidence counts for the caller return-use census."""
 
-    target_addrs: set[int]
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    failure_count: int = 0
-    used_callsite_count: int = 0
-    unused_callsite_count: int = 0
-    callsite_addrs: set[int] = field(default_factory=set)
+    target_addrs: object
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    used_callsite_count: cython.longlong = 0
+    unused_callsite_count: cython.longlong = 0
+    callsite_addrs: object = field(default_factory=set)
 
+    @cython.ccall
     def visit_seed(self, caller: object, seed: object) -> None:
         """Classify one callsite seed against the target census."""
+        callsite_addr: object
+        summary: object
         try:
             from inertia.semantics.callsite_summary import CallsiteReturnUseKind8616, summarize_x86_16_callsite
         except Exception:
@@ -869,8 +970,12 @@ class _CallerReturnUseCensus8616:
         else:
             self.unused_callsite_count += 1
 
+    @cython.ccall
     def visit_project(self, candidate_project: object) -> None:
         """Census every caller function in one candidate project."""
+        functions: object
+        caller: object
+        seed: object
         try:
             from inertia.lowering.analysis_helpers import collect_neighbor_call_targets
         except Exception:
@@ -893,23 +998,27 @@ class _CallerReturnUseCensus8616:
             for seed in seeds:
                 self.visit_seed(caller, seed)
 
+    @cython.ccall
     def verdict(self) -> CallerReturnUseVerdict8616:
         """Fold census counts into the caller-use verdict."""
         if self.used_callsite_count:
             return CallerReturnUseVerdict8616.USED
         if (
             self.normalized_fact_count
-            and self.classified_fact_count == self.normalized_fact_count
+            and operator.eq(self.classified_fact_count, self.normalized_fact_count)
             and not self.failure_count
         ):
             return CallerReturnUseVerdict8616.UNUSED
         return CallerReturnUseVerdict8616.UNKNOWN
 
 
+@cython.ccall
 def _record_caller_use_evidence_8616(
     function: object, verdict: CallerReturnUseVerdict8616, census: _CallerReturnUseCensus8616
 ) -> None:
     """Persist the census verdict as caller-return-use evidence."""
+    function_addr: object
+    project: object
     project = _return_compat_function_project_8616(function)
     function_addr = getattr(function, "addr", None)  # Dynamic angr Function boundary.
     if project is None or not isinstance(function_addr, int):
@@ -932,8 +1041,11 @@ def _record_caller_use_evidence_8616(
     )
 
 
+@cython.ccall
 def _return_compat_function_caller_return_use_8616(function: object) -> bool | None:
     """Return proven caller observation, retaining legacy overrides as hints."""
+    override: object
+    candidate_project: object
     observation = _return_compat_proven_result_observation_8616(function)
     if observation is CallerReturnUseVerdict8616.USED:
         return True
@@ -965,26 +1077,35 @@ def _return_compat_function_caller_return_use_8616(function: object) -> bool | N
     return None
 
 
+@cython.ccall
 def _return_compat_proven_result_observation_8616(
     function: object,
 ) -> CallerReturnUseVerdict8616 | None:
     """Resolve one non-conflicting closed caller-result observation proof."""
+    project: object
     project = _return_compat_function_project_8616(function)
     if project is None:
         return None
     observations = {
         observation
-        for target_addr in _return_compat_target_addrs_8616(function)
+        for target_addr in builtins.iter(_return_compat_target_addrs_8616(function))
         if (observation := proven_function_result_observation_8616(project, target_addr)) is not None
     }
     return next(iter(observations)) if len(observations) == 1 else None
 
 
+@cython.ccall
 def _return_compat_debug_caller_state_8616(function: object) -> dict[str, object]:
     """Return opt-in diagnostics for caller return-use visibility."""
+    functions: object
+    target_addr: object
+    caller: object
+    candidate_project: object
+    index: object
+    seed: object
 
     candidate_projects = _return_compat_candidate_projects_8616(function)
-    target_addrs = tuple(sorted(_return_compat_target_addrs_8616(function)))
+    target_addrs = tuple(sorted(tuple(_return_compat_target_addrs_8616(function))))
     project_rows: list[dict[str, object]] = []
     try:
         from inertia.lowering.analysis_helpers import collect_neighbor_call_targets
@@ -1038,26 +1159,30 @@ def _return_compat_debug_caller_state_8616(function: object) -> dict[str, object
     }
 
 
-def _return_compat_c_expr_is_unresolved_carrier_8616(expr: object, *, depth: int = 0) -> bool:
+@cython.ccall
+def _return_compat_c_expr_is_unresolved_carrier_8616(expr: object, *, depth: cython.longlong = 0) -> cython.bint:
     """Return whether a C return expression is only an unresolved carrier."""
     if depth != 0:
         return False
     return bool(return_expr_is_unresolved_carrier_8616(expr))
 
 
+@cython.ccall
 def _return_compat_c_result_needs_neutralization_8616(
     expr: object | None,
     return_type: object,
-) -> bool:
+) -> cython.bint:
     """Classify unusable C return expressions through typed lowering evidence."""
     return bool(return_value_needs_neutralization_8616(expr, return_type))
 
 
-def _return_compat_should_drop_unresolved_c_return_8616(_function: object, _retval: object) -> bool:
+@cython.ccall
+def _return_compat_should_drop_unresolved_c_return_8616(_function: object, _retval: object) -> cython.bint:
     """Refuse to drop an unresolved return solely because callers ignore it."""
     return False
 
 
+@cython.ccall
 def _return_compat_unknown_caller_terminal_expr_8616(
     self: object, stmt: object, block: object | None, ret_val: object
 ) -> object | None:
@@ -1081,9 +1206,11 @@ def _return_compat_unknown_caller_terminal_expr_8616(
 
 
 def _return_compat_unknown_caller_unconditional_predecessor_expr_8616(
-    self: object, block: object | None, ret_val: object
+    self: object, block: object, ret_val: object
 ) -> object | None:
     """Find predecessor producer evidence without crossing its side effects."""
+    graph: object
+    src: object
     if not isinstance(ret_val, SimRegArg) or ret_val.reg_name.lower() != "ax":
         return None
     self_dynamic = cast(Any, self)
@@ -1113,7 +1240,7 @@ def _return_compat_unknown_caller_unconditional_predecessor_expr_8616(
         if any(
             isinstance(stmt, (ailment.Stmt.ConditionalJump, ailment.Stmt.SideEffectStatement, ailment.Expr.Call))
             or (isinstance(stmt, ailment.Stmt.Assignment) and isinstance(cast(Any, stmt).src, ailment.Expr.Call))
-            for stmt in following
+            for stmt in iter(following)
         ):
             return None
         src = _resolve_same_block_tmp_source_8616(src, statements, before_index=idx)
@@ -1130,14 +1257,16 @@ def _return_compat_unknown_caller_unconditional_predecessor_expr_8616(
     return None
 
 
+@cython.ccall
 def _return_compat_unknown_caller_reaching_register_proven_8616(
     self: object,
-    block: object | None,
+    block: object,
     ret_val: object,
     *,
-    max_depth: int = 8,
-) -> bool:
+    max_depth: cython.longlong = 8,
+) -> cython.bint:
     """Return True when every predecessor path proves a reaching AX definition."""
+    graph: object
     if not isinstance(ret_val, SimRegArg) or ret_val.reg_name.lower() != "ax":
         return False
     self_dynamic = cast(Any, self)
@@ -1150,12 +1279,13 @@ def _return_compat_unknown_caller_reaching_register_proven_8616(
     except Exception:
         return False
 
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     return _path_has_reaching_ax_def_8616(graph, block, 0, max_depth, seen, reg[0], ret_val.size)
 
 
-def _explicit_scalar_return_source_8616(source: object) -> bool:
+def _explicit_scalar_return_source_8616(source: object) -> cython.bint:
     """Return whether a reaching AX source is explicit enough for unknown callers."""
+    unary_op_type: object
     if isinstance(source, ailment.Expr.Const):
         return True
     if isinstance(source, (ailment.Expr.Load, ailment.Expr.Register, ailment.Expr.Tmp)):
@@ -1163,7 +1293,7 @@ def _explicit_scalar_return_source_8616(source: object) -> bool:
     if isinstance(source, ailment.Expr.BinaryOp):
         # Dynamic AIL compatibility boundary: BinaryOp children are exposed as operands.
         binary = cast(AilBinaryOp8616, source)
-        return all(_explicit_scalar_return_source_8616(child) for child in _object_tuple_8616(binary.operands))
+        return all(_explicit_scalar_return_source_8616(child) for child in builtins.iter(_object_tuple_8616(binary.operands)))
     # Dynamic AIL compatibility boundary: UnaryOp is version-dependent in ailment.
     unary_op_type = getattr(ailment.Expr, "UnaryOp", None)
     if unary_op_type is not None and isinstance(source, unary_op_type):
@@ -1175,10 +1305,12 @@ def _explicit_scalar_return_source_8616(source: object) -> bool:
     return False
 
 
+@cython.ccall
 def _predecessor_reaching_ax_def_8616(
-    predecessor: object, reg_offset: int, reg_size: int
+    predecessor: object, reg_offset: cython.longlong, reg_size: cython.longlong
 ) -> bool | None:
     """Return the reaching-definition verdict for one predecessor block."""
+    src: object
     # Dynamic angr AIL block compatibility boundary.
     statements = tuple(getattr(predecessor, "statements", ()) or ())
     for idx in range(len(statements) - 1, -1, -1):
@@ -1196,16 +1328,19 @@ def _predecessor_reaching_ax_def_8616(
     return None
 
 
+@cython.ccall
 def _path_has_reaching_ax_def_8616(
     graph: object,
     node: object,
-    depth: int,
-    max_depth: int,
-    seen: set[int],
-    reg_offset: int,
-    reg_size: int,
-) -> bool:
+    depth: cython.longlong,
+    max_depth: cython.longlong,
+    seen: object,
+    reg_offset: cython.longlong,
+    reg_size: cython.longlong,
+) -> cython.bint:
     """Return whether every predecessor path proves a reaching AX definition."""
+    verdict: object
+    predecessor: object
     if depth > max_depth:
         return False
     try:
@@ -1231,6 +1366,7 @@ def _path_has_reaching_ax_def_8616(
     return True
 
 
+@cython.ccall
 def _iter_function_ail_blocks_8616(function: object, graph: object | None = None) -> tuple[object, ...]:
     if graph is None:
         graph = getattr(function, "graph", None)
@@ -1242,9 +1378,13 @@ def _iter_function_ail_blocks_8616(function: object, graph: object | None = None
         return ()
 
 
-def _return_insn_addrs_8616(function: object, graph: object | None = None) -> tuple[int, ...]:
-    addrs: list[int] = []
-    fallback_addrs: list[int] = []
+@cython.ccall
+def _return_insn_addrs_8616(function: object, graph: object | None = None) -> tuple[cython.longlong, ...]:
+    ins_addr: object
+    block: object
+    stmt: object
+    addrs: list[cython.longlong] = []
+    fallback_addrs: list[cython.longlong] = []
     for block in _iter_function_ail_blocks_8616(function, graph=graph):
         for stmt in tuple(getattr(block, "statements", ()) or ()):
             ins_addr = getattr(stmt, "tags", {}).get("ins_addr", None)
@@ -1255,23 +1395,30 @@ def _return_insn_addrs_8616(function: object, graph: object | None = None) -> tu
             if isinstance(ins_addr, int):
                 addrs.append(ins_addr)
     if addrs:
-        return tuple(sorted(set(addrs)))
+        return tuple(sorted(tuple(set(addrs))))
     if fallback_addrs:
         return (max(fallback_addrs),)
     return ()
 
 
+@cython.ccall
 def _terminal_source_at_return_8616(
     function: object,
     graph: object | None,
     ctx: object,
-    return_ins_addr: int,
-    reg_offset: int,
-    reg_size: int,
-    max_insn_distance: int,
+    return_ins_addr: cython.longlong,
+    reg_offset: cython.longlong,
+    reg_size: cython.longlong,
+    max_insn_distance: cython.longlong,
 ) -> object | None:
     """Return the unique latest producer for one return address, or None."""
-    best: tuple[int, object] | None = None
+    best: object
+    ins_addr: object
+    src: object
+    block: object
+    graph_stmt: object
+    idx: object
+    best = None
     tied = False
     for block in _iter_function_ail_blocks_8616(function, graph=graph):
         statements = tuple(getattr(block, "statements", ()) or ())
@@ -1288,7 +1435,7 @@ def _terminal_source_at_return_8616(
             if best is None or ins_addr > best[0]:
                 best = (ins_addr, src)
                 tied = False
-            elif ins_addr == best[0]:
+            elif operator.eq(ins_addr, best[0]):
                 tied = True
     if best is None or tied:
         return None
@@ -1300,10 +1447,12 @@ def _terminal_register_sources_for_function_8616(
     arch: object,
     function: object,
     graph: object | None = None,
-    reg_offset: int,
-    reg_size: int,
-    max_insn_distance: int = 32,
+    reg_offset: cython.longlong,
+    reg_size: cython.longlong,
+    max_insn_distance: cython.longlong = 32,
 ) -> tuple[object, ...]:
+    source: object
+    return_ins_addr: object
     return_addrs = _return_insn_addrs_8616(function, graph=graph)
     if not return_addrs:
         return ()
@@ -1318,7 +1467,12 @@ def _terminal_register_sources_for_function_8616(
     return tuple(sources)
 
 
-def _stack_annotation_name_for_bp_disp_8616(function: object, bp_disp: int) -> str | None:
+@cython.ccall
+def _stack_annotation_name_for_bp_disp_8616(function: object, bp_disp: cython.longlong) -> object:
+    info: object
+    name: object
+    spec: object
+    key: object
     info = getattr(function, "info", None)
     annotations = info.get("x86_16_annotations") if isinstance(info, dict) else None
     stack_vars = annotations.get("stack_vars") if isinstance(annotations, dict) else None
@@ -1335,7 +1489,9 @@ def _stack_annotation_name_for_bp_disp_8616(function: object, bp_disp: int) -> s
     return None
 
 
-def _stack_name_preference_8616(cvar: object) -> int:
+@cython.ccall
+def _stack_name_preference_8616(cvar: object) -> cython.longlong:
+    variable: object
     variable = getattr(cvar, "variable", None)
     name = getattr(variable, "name", None) or getattr(cvar, "name", None)
     if not isinstance(name, str) or not name:
@@ -1347,12 +1503,19 @@ def _stack_name_preference_8616(cvar: object) -> int:
     return 3
 
 
-def _existing_stack_cvar_for_bp_disp_8616(codegen: object, bp_disp: int) -> CVariable | None:
+@cython.ccall
+def _existing_stack_cvar_for_bp_disp_8616(codegen: object, bp_disp: cython.longlong) -> CVariable | None:
+    best_score: object
+    cfunc: object
+    offset: object
+    variables_in_use: object
+    cvar: object
+    variable: object
     cfunc = getattr(codegen, "cfunc", None)
     variables_in_use = getattr(cfunc, "variables_in_use", None)
     if not isinstance(variables_in_use, dict):
         return None
-    candidate_offsets = (bp_disp, bp_disp - 2) if bp_disp < 0 else (bp_disp,)
+    candidate_offsets = tuple((bp_disp, bp_disp - 2)) if bp_disp < 0 else tuple((bp_disp,))
     best = None
     best_score = None
     for variable, cvar in variables_in_use.items():
@@ -1368,11 +1531,20 @@ def _existing_stack_cvar_for_bp_disp_8616(codegen: object, bp_disp: int) -> CVar
     return best
 
 
-def _make_c_stack_return_value_8616(codegen: object, *, bp_disp: int, size: int) -> CVariable:
+@cython.ccall
+def _make_c_stack_return_value_8616(codegen: object, *, bp_disp: cython.longlong, size: cython.longlong) -> CVariable:
     return _make_c_stack_value_8616(codegen, bp_disp=bp_disp, size=size, variable_type=SimTypeShort(False))
 
 
-def _update_cfunc_arg_type_for_bp_disp_8616(codegen: object, *, bp_disp: int, variable_type: object) -> None:
+@cython.ccall
+def _update_cfunc_arg_type_for_bp_disp_8616(codegen: object, *, bp_disp: cython.longlong, variable_type: object) -> None:
+    arg_list: object
+    arg_types: object
+    cfunc: object
+    functy: object
+    variable_manager: object
+    cvar: object
+    idx: object
     cfunc = getattr(codegen, "cfunc", None)
     arg_list = getattr(cfunc, "arg_list", None)
     functy = getattr(cfunc, "functy", None)
@@ -1400,14 +1572,23 @@ def _update_cfunc_arg_type_for_bp_disp_8616(codegen: object, *, bp_disp: int, va
         return
 
 
+@cython.ccall
 def _make_c_stack_value_8616(
     codegen: object,
     *,
-    bp_disp: int,
-    size: int,
+    bp_disp: cython.longlong,
+    size: cython.longlong,
     variable_type: SimType,
 ) -> CVariable:
     """Return one stack value without weakening an existing typed variable."""
+    arch: object
+    cfunc: object
+    existing: object
+    function: object
+    project: object
+    region: object
+    unified: object
+    variables_in_use: object
     existing = _existing_stack_cvar_for_bp_disp_8616(codegen, bp_disp)
     if existing is not None and (
         existing.variable_type is not None or getattr(existing, "type", None) is not None
@@ -1442,7 +1623,11 @@ def _make_c_stack_value_8616(
     return cvar
 
 
-def _return_scan_project_and_addr_8616(project: object, function: object) -> tuple[object, int]:
+@cython.ccall
+def _return_scan_project_and_addr_8616(project: object, function: object) -> tuple[object, cython.longlong]:
+    original_delta: object
+    original_project: object
+    start: object
     start = getattr(function, "addr", None)
     if not isinstance(start, int):
         return project, 0
@@ -1453,7 +1638,12 @@ def _return_scan_project_and_addr_8616(project: object, function: object) -> tup
     return project, start
 
 
-def _function_bytes_for_return_scan_8616(project: object, function: object) -> tuple[object, int, bytes]:
+@cython.ccall
+def _function_bytes_for_return_scan_8616(project: object, function: object) -> tuple[object, cython.longlong, bytes]:
+    block_size: object
+    original_delta: object
+    size: object
+    block_addr: object
     scan_project, start = _return_scan_project_and_addr_8616(project, function)
     scan_project_dynamic = cast(Any, scan_project)
     if not isinstance(start, int):
@@ -1461,7 +1651,7 @@ def _function_bytes_for_return_scan_8616(project: object, function: object) -> t
     size = getattr(function, "size", None)
     if not isinstance(size, int) or size <= 0:
         end = start
-        for block_addr in sorted(getattr(function, "block_addrs_set", ()) or ()):
+        for block_addr in sorted(tuple(getattr(function, "block_addrs_set", ()) or ())):
             scan_block_addr = int(block_addr)
             original_delta = getattr(project, "_inertia_original_linear_delta", None)
             if scan_project is not project and isinstance(original_delta, int):
@@ -1482,7 +1672,8 @@ def _function_bytes_for_return_scan_8616(project: object, function: object) -> t
         return scan_project, start, b""
 
 
-def _modrm16_operand_8616(data: bytes, index: int) -> tuple[dict[str, int] | None, int]:
+@cython.ccall
+def _modrm16_operand_8616(data: object, index: cython.longlong) -> tuple[dict[str, int] | None, cython.longlong]:
     if index >= len(data):
         return None, index
     modrm = data[index]
@@ -1490,7 +1681,7 @@ def _modrm16_operand_8616(data: bytes, index: int) -> tuple[dict[str, int] | Non
     mod = modrm >> 6
     reg = (modrm >> 3) & 0x7
     rm = modrm & 0x7
-    operand: dict[str, int] = {"reg": reg, "mod": mod, "rm": rm}
+    operand: dict[str, cython.longlong] = {"reg": reg, "mod": mod, "rm": rm}
     if mod == 3:
         operand["kind"] = 2
         return operand, index
@@ -1520,7 +1711,9 @@ def _modrm16_operand_8616(data: bytes, index: int) -> tuple[dict[str, int] | Non
     return operand, index
 
 
-def _x87_scalar_type_for_size_8616(project: object, size: int) -> SimType:
+@cython.ccall
+def _x87_scalar_type_for_size_8616(project: object, size: cython.longlong) -> SimType:
+    arch: object
     scalar_type = SimTypeFloat() if size == 4 else SimTypeDouble()
     arch = getattr(project, "arch", None)
     if arch is not None and hasattr(scalar_type, "with_arch"):
@@ -1528,7 +1721,8 @@ def _x87_scalar_type_for_size_8616(project: object, size: int) -> SimType:
     return scalar_type
 
 
-def _x87_opcode_reads_memory_operand_8616(opcode: int, reg: int) -> bool:
+@cython.ccall
+def _x87_opcode_reads_memory_operand_8616(opcode: cython.longlong, reg: cython.longlong) -> cython.bint:
     if opcode in (0xD8, 0xDC):
         # D8/DC group operations read a float/double memory operand:
         # arithmetic and compare variants all consume the operand as scalar data.
@@ -1540,10 +1734,14 @@ def _x87_opcode_reads_memory_operand_8616(opcode: int, reg: int) -> bool:
     return False
 
 
-def _x87_arg_offset_census_8616(data: bytes) -> tuple[dict[int, int], set[int]] | None:
+@cython.ccall
+def _x87_arg_offset_census_8616(data: object) -> object:
     """Census BP-relative x87 memory-operand offsets; None on undecodable operand."""
-    offsets: dict[int, int] = {}
-    conflicts: set[int] = set()
+    opcode: object
+    operand: object
+    previous: object
+    offsets: dict[cython.longlong, cython.longlong] = {}
+    conflicts: set[cython.longlong] = set()
     index = 0
     while index < len(data):
         byte = data[index]
@@ -1564,7 +1762,7 @@ def _x87_arg_offset_census_8616(data: bytes) -> tuple[dict[int, int], set[int]] 
             if disp > 0:
                 size = 8 if opcode in (0xDC, 0xDD) else 4
                 previous = offsets.get(disp)
-                if previous is not None and previous != size:
+                if previous is not None and operator.ne(previous, size):
                     conflicts.add(disp)
                     offsets.pop(disp, None)
                 elif disp not in conflicts:
@@ -1573,7 +1771,8 @@ def _x87_arg_offset_census_8616(data: bytes) -> tuple[dict[int, int], set[int]] 
     return offsets, conflicts
 
 
-def x86_16_msvc_x87_scalar_stack_args(project: object, function: object) -> dict[int, object]:
+@cython.ccall
+def x86_16_msvc_x87_scalar_stack_args(project: object, function: object) -> dict[cython.longlong, object]:
     """Return BP-relative stack arguments that are proven scalar FP operands.
 
     Microsoft C's no-FPU runtime encodes x87 ESC instructions as INT 34h/35h/
@@ -1581,6 +1780,7 @@ def x86_16_msvc_x87_scalar_stack_args(project: object, function: object) -> dict
     operand read by those decoded x87 operations is scalar data, not a near
     pointer, so later prototype promotion must not reinterpret it as a pointer.
     """
+    census: object
     scan_project, _start, data = _function_bytes_for_return_scan_8616(project, function)
     if not data:
         return {}
@@ -1593,12 +1793,17 @@ def x86_16_msvc_x87_scalar_stack_args(project: object, function: object) -> dict
         return {}
     return {
         offset: _x87_scalar_type_for_size_8616(scan_project, size)
-        for offset, size in sorted(offsets.items())
+        for offset, size in builtins.iter(sorted(tuple(offsets.items())))
         if offset not in conflicts
     }
 
 
+@cython.ccall
 def _peer_map_dgroup_base_8616(project: object) -> int | None:
+    binary: object
+    linked_base: object
+    obj: object
+    line: object
     obj = getattr(getattr(project, "loader", None), "main_object", None)
     binary = getattr(obj, "binary", None)
     if not isinstance(binary, str):
@@ -1634,9 +1839,10 @@ def _read_x87_constant_8616(
     codegen: object,
     *,
     project: object | None = None,
-    offset: int,
-    size: int,
+    offset: cython.longlong,
+    size: cython.longlong,
 ) -> float | None:
+    dgroup_base: object
     if project is None:
         project = getattr(codegen, "project", None)
     if project is None:
@@ -1648,7 +1854,7 @@ def _read_x87_constant_8616(
         data = bytes(cast(Any, project).loader.memory.load(dgroup_base + offset, size))
     except Exception:
         return None
-    if len(data) != size:
+    if operator.ne(len(data), size):
         return None
     try:
         if size == 4:
@@ -1662,11 +1868,13 @@ def _read_x87_constant_8616(
 
 def _c_expr_from_x87_operand_8616(
     codegen: object,
-    operand: dict[str, int],
+    operand: object,
     *,
     project: object | None = None,
-    size: int,
+    size: cython.longlong,
 ) -> object | None:
+    kind: object
+    value: object
     kind = operand.get("kind")
     value_type = SimTypeFloat() if size == 4 else SimTypeDouble()
     if kind == 1:
@@ -1681,25 +1889,28 @@ def _c_expr_from_x87_operand_8616(
     return None
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _MsvcX87ReturnScan8616:
     """x87 stack-machine state for the msvc INT-escape return decode."""
 
     codegen: object
     scan_project: object
-    stack: list[object] = field(default_factory=list)
+    stack: object = field(default_factory=list)
     final_expr: object | None = None
     final_store_offset: int | None = None
     final_store_index: int | None = None
-    fpu_ops: int = 0
+    fpu_ops: cython.longlong = 0
 
-    def _operand_expr(self, operand: dict[str, int], size: int) -> object | None:
+    @cython.ccall
+    def _operand_expr(self, operand: object, size: cython.longlong) -> object | None:
         return _c_expr_from_x87_operand_8616(
             self.codegen, operand, project=self.scan_project, size=size
         )
 
-    def apply(self, opcode: int, reg: int, operand: dict[str, int], index: int) -> bool:
+    @cython.ccall
+    def apply(self, opcode: cython.longlong, reg: cython.longlong, operand: object, index: cython.longlong) -> cython.bint:
         """Apply one decoded x87 escape op; False aborts the decode."""
+        expr: object
         size = 8 if opcode in (0xDC, 0xDD) else 4
         if (opcode, reg) in ((0xD9, 0), (0xDD, 0)):
             expr = self._operand_expr(operand, size)
@@ -1730,7 +1941,15 @@ class _MsvcX87ReturnScan8616:
         return True
 
 
+@cython.ccall
 def _decode_msvc_x87_return_expr_8616(codegen: object) -> object | None:
+    final_expr: object
+    final_store_index: object
+    final_store_offset: object
+    function: object
+    opcode: object
+    operand: object
+    project: object
     project = getattr(codegen, "project", None)
     function = getattr(codegen, "_func", None)
     if project is None or function is None:
@@ -1774,19 +1993,26 @@ def _decode_msvc_x87_return_expr_8616(codegen: object) -> object | None:
     return final_expr
 
 
-def _debug_return_compat_refuse_8616(reason: str) -> None:
+@cython.ccall
+def _debug_return_compat_refuse_8616(reason: object) -> None:
     """Log a refused CReturn compatibility reason when debugging."""
     if os.environ.get("INERTIA_DEBUG_RETURN_COMPAT") == "1":
         print(f"[dbg-return] CReturn compat-refused={reason}", file=sys.stderr, flush=True)
 
 
-def _dbg_ax_source_census_8616(codegen: object, function: object, sources: tuple[object, ...]) -> None:
+def _dbg_ax_source_census_8616(codegen: object, function: object, sources: object) -> None:
     """Dump the terminal AX-source census when debug logging is enabled."""
+    graph: object
+    ins_addr: object
+    block: object
+    stmt: object
+    stmt_text: object
+    stmt_type: object
     if os.environ.get("INERTIA_DEBUG_RETURN_COMPAT") != "1":
         return
     graph = getattr(codegen, "ail_graph", None)
     blocks = _iter_function_ail_blocks_8616(function, graph=graph)
-    stmt_count = sum(len(tuple(getattr(block, "statements", ()) or ())) for block in blocks)
+    stmt_count = sum(len(tuple(getattr(block, "statements", ()) or ())) for block in iter(blocks))
     ins_addrs = []
     for block in blocks:
         for stmt in tuple(getattr(block, "statements", ()) or ()):
@@ -1814,12 +2040,14 @@ def _dbg_ax_source_census_8616(codegen: object, function: object, sources: tuple
     )
 
 
+@cython.ccall
 def _ax_source_stack_offsets_8616(
-    sources: tuple[object, ...], ctx: object, arch: object, reg_size: int
-) -> tuple[set[int], set[int]]:
+    sources: object, ctx: object, arch: object, reg_size: cython.longlong
+) -> tuple[set[cython.longlong], set[cython.longlong]]:
     """Census the bp-displacement/size pairs of terminal AX load sources."""
-    offsets: set[int] = set()
-    sizes: set[int] = set()
+    source: object
+    offsets: set[cython.longlong] = set()
+    sizes: set[cython.longlong] = set()
     for source in sources:
         if not isinstance(source, ailment.Expr.Load):
             continue
@@ -1834,7 +2062,13 @@ def _ax_source_stack_offsets_8616(
     return offsets, sizes
 
 
+@cython.ccall
 def _infer_x86_16_c_return_value_from_ax_8616(codegen: object) -> object | None:
+    arch: object
+    bp_disp: object
+    function: object
+    instruction_fact: object
+    project: object
     project = getattr(codegen, "project", None)
     arch = getattr(project, "arch", None)
     registers = getattr(arch, "registers", {}) if arch is not None else {}
@@ -1874,9 +2108,13 @@ def _infer_x86_16_c_return_value_from_ax_8616(codegen: object) -> object | None:
     return cast(object, retval)
 
 
-def _terminal_ax_stack_load_from_instructions_8616(function: object) -> tuple[int, int] | None:
+def _terminal_ax_stack_load_from_instructions_8616(function: object) -> object:
     """Return one stack range when every terminal block proves the same AX load."""
-    terminal_facts: list[tuple[int, int]] = []
+    capstone: object
+    terminal_fact: object
+    block: object
+    instruction: object
+    terminal_facts: list[tuple[cython.longlong, cython.longlong]] = []
     # Dynamic angr Function and capstone boundary. Typed instruction effects
     # below own the semantic classification.
     blocks: Iterable[object] = getattr(function, "blocks", ()) or ()
@@ -1885,11 +2123,11 @@ def _terminal_ax_stack_load_from_instructions_8616(function: object) -> tuple[in
         wrappers: tuple[object, ...] = tuple(getattr(capstone, "insns", ()) or ())
         if not wrappers:
             continue
-        instructions = tuple(getattr(wrapper, "insn", wrapper) for wrapper in wrappers)
+        instructions = tuple(getattr(wrapper, "insn", wrapper) for wrapper in iter(wrappers))
         terminal_mnemonic = str(getattr(instructions[-1], "mnemonic", "") or "").lower()
         if terminal_mnemonic not in {"ret", "retf", "retn"}:
             continue
-        terminal_fact: tuple[int, int] | None = None
+        terminal_fact = None
         for instruction in reversed(instructions[:-1]):
             effect = terminal_ax_return_effect_8616(instruction)
             if effect.kind is TerminalAxReturnEffectKind8616.CALL_CLOBBER:
@@ -1914,17 +2152,17 @@ def _terminal_ax_stack_load_from_instructions_8616(function: object) -> tuple[in
 
 
 def _wide_terminal_return_owner_8616(
-    self: object, stmt: object, wide_evidence: Any, locations: tuple[object, ...]
+    self: object, stmt: object, wide_evidence: object, locations: object
 ) -> Expression | None:
     """Materialize the single dword stack owner for an ax:dx terminal return."""
     if wide_evidence is None:
         return None
     if len(wide_evidence.terminal_return_offsets) != 1:
         return None
-    reg_locations = [location for location in locations if isinstance(location, SimRegArg)]
-    if len(reg_locations) != len(locations):
+    reg_locations = [location for location in iter(locations) if isinstance(location, SimRegArg)]
+    if operator.ne(len(reg_locations), len(locations)):
         return None
-    if tuple(location.reg_name for location in reg_locations) != ("ax", "dx"):
+    if tuple(location.reg_name for location in iter(reg_locations)) != ("ax", "dx"):
         return None
     terminal_owner = _make_bp_stack_load_expr_8616(
         self,
@@ -1935,10 +2173,12 @@ def _wide_terminal_return_owner_8616(
     return terminal_owner if isinstance(terminal_owner, Expression) else None
 
 
+@cython.ccall
 def _combo_location_part_8616(
     self: object, stmt: object, block: object | None, loc: object
 ) -> Expression | None:
     """Resolve one combo location to a terminal source or register expr."""
+    part: object
     if not isinstance(loc, SimRegArg) or _is_stack_base_return_register_8616(loc):
         return None
     reg_offset, reg_size = cast(Any, self).arch.registers[loc.reg_name]
@@ -1947,9 +2187,17 @@ def _combo_location_part_8616(
     return candidate if isinstance(candidate, Expression) else None
 
 
+@cython.ccall
 def _make_return_combo_expr_8616(
     self: object, stmt: object, block: object | None, ret_val: SimComboArg
 ) -> object | None:
+    candidate: object
+    function: object
+    project: object
+    terminal_owner: object
+    wide_evidence: object
+    loc: object
+    part: object
     self_dynamic = cast(Any, self)
     stmt_dynamic = cast(Any, stmt)
     function = getattr(self, "function", None)
@@ -1990,7 +2238,7 @@ def _make_return_combo_expr_8616(
         if (
             isinstance(high_stack_offset, int)
             and isinstance(low_stack_offset, int)
-            and high_stack_offset == low_stack_offset + 2
+            and operator.eq(high_stack_offset, low_stack_offset + 2)
             and low_stack_offset in wide_offsets
         ):
             candidate_owner = _make_bp_stack_load_expr_8616(self, stmt, bp_disp=low_stack_offset, size=4)
@@ -2006,11 +2254,13 @@ def _make_return_combo_expr_8616(
     return cast(object, expr)
 
 
+@cython.ccall
 def _raw_capstone_insn_8616(insn: object) -> object:
     return getattr(insn, "insn", insn)
 
 
-def _capstone_reg_name_8616(insn: object, reg_id: int) -> str:
+@cython.ccall
+def _capstone_reg_name_8616(insn: object, reg_id: cython.longlong) -> object:
     raw = cast(Any, _raw_capstone_insn_8616(insn))
     try:
         return str(raw.reg_name(reg_id)).lower()
@@ -2018,7 +2268,9 @@ def _capstone_reg_name_8616(insn: object, reg_id: int) -> str:
         return ""
 
 
-def _mem_bp_disp_operand_8616(insn: object, operand_index: int) -> int | None:
+@cython.ccall
+def _mem_bp_disp_operand_8616(insn: object, operand_index: cython.longlong) -> int | None:
+    mem: object
     raw = _raw_capstone_insn_8616(insn)
     operands = tuple(getattr(raw, "operands", ()) or ())
     if operand_index >= len(operands):
@@ -2039,7 +2291,8 @@ def _mem_bp_disp_operand_8616(insn: object, operand_index: int) -> int | None:
     return disp
 
 
-def _reg_operand_name_8616(insn: object, operand_index: int) -> str | None:
+@cython.ccall
+def _reg_operand_name_8616(insn: object, operand_index: cython.longlong) -> object:
     raw = _raw_capstone_insn_8616(insn)
     operands = tuple(getattr(raw, "operands", ()) or ())
     if operand_index >= len(operands):
@@ -2050,20 +2303,24 @@ def _reg_operand_name_8616(insn: object, operand_index: int) -> str | None:
     return _capstone_reg_name_8616(raw, int(getattr(operand, "reg", 0) or 0))
 
 
-def _insn_mnemonic_8616(insn: object) -> str:
+@cython.ccall
+def _insn_mnemonic_8616(insn: object) -> object:
     return str(getattr(_raw_capstone_insn_8616(insn), "mnemonic", "") or "").lower()
 
 
-def _match_wide_stack_arith_sequence_8616(insns: Sequence[object]) -> tuple[str, int, int] | None:
+@cython.ccall
+def _match_wide_stack_arith_sequence_8616(insns: Sequence[object]) -> object:
+    first_low: object
+    second_low: object
     for index in range(max(0, len(insns) - 3)):
-        first, second, third, fourth = insns[index : index + 4]
+        first, second, third, fourth = tuple(insns[index : index + 4])
         if _insn_mnemonic_8616(first) != "mov" or _reg_operand_name_8616(first, 0) != "ax":
             continue
         if _insn_mnemonic_8616(second) != "mov" or _reg_operand_name_8616(second, 0) != "dx":
             continue
         first_low = _mem_bp_disp_operand_8616(first, 1)
         first_high = _mem_bp_disp_operand_8616(second, 1)
-        if first_low is None or first_high != first_low + 2:
+        if first_low is None or operator.ne(first_high, first_low + 2):
             continue
         low_op = _insn_mnemonic_8616(third)
         high_op = _insn_mnemonic_8616(fourth)
@@ -2071,7 +2328,7 @@ def _match_wide_stack_arith_sequence_8616(insns: Sequence[object]) -> tuple[str,
             continue
         second_low = _mem_bp_disp_operand_8616(third, 1)
         second_high = _mem_bp_disp_operand_8616(fourth, 1)
-        if second_low is None or second_high != second_low + 2:
+        if second_low is None or operator.ne(second_high, second_low + 2):
             continue
         if low_op == "add" and high_op == "adc":
             return "Add", second_low, first_low
@@ -2080,12 +2337,17 @@ def _match_wide_stack_arith_sequence_8616(insns: Sequence[object]) -> tuple[str,
     return None
 
 
-def _terminal_wide_stack_arith_return_8616(self: object) -> tuple[str, int, int] | None:
+@cython.ccall
+def _terminal_wide_stack_arith_return_8616(self: object) -> object:
+    function: object
+    matched: object
+    project: object
+    block_addr: object
     function = getattr(self, "function", None)
     project = getattr(function, "project", None) or getattr(self, "project", None)
     if function is None or project is None:
         return None
-    for block_addr in sorted(getattr(function, "block_addrs_set", ()) or ()):
+    for block_addr in sorted(tuple(getattr(function, "block_addrs_set", ()) or ())):
         try:
             block = project.factory.block(int(block_addr), opt_level=0)
         except Exception:
@@ -2097,7 +2359,10 @@ def _terminal_wide_stack_arith_return_8616(self: object) -> tuple[str, int, int]
     return None
 
 
-def _make_bp_stack_load_expr_8616(self: object, stmt: object, *, bp_disp: int, size: int) -> object:
+@cython.ccall
+def _make_bp_stack_load_expr_8616(self: object, stmt: object, *, bp_disp: cython.longlong, size: cython.longlong) -> object:
+    function: object
+    ins_addr: object
     self_dynamic = cast(Any, self)
     function = getattr(self, "function", None)
     variable = SimStackVariable(bp_disp, size, base="bp", region=getattr(function, "addr", None))
@@ -2119,11 +2384,14 @@ def _make_bp_stack_load_expr_8616(self: object, stmt: object, *, bp_disp: int, s
     )
 
 
+@cython.ccall
 def _make_wide_stack_arith_return_expr_8616(
     self: object,
     stmt: object,
     prototype: object,
 ) -> object | None:
+    matched: object
+    returnty: object
     self_dynamic = cast(Any, self)
     returnty = getattr(prototype, "returnty", None)
     if not isinstance(returnty, SimTypeLong):
@@ -2149,8 +2417,9 @@ _ORIG_HANDLE_RETURN_8616: object | None = None
 _ORIG_HANDLE_C_RETURN_8616: object | None = None
 
 
+@cython.ccall
 def _orig_handle_return_fallback_8616(
-    self_dynamic: Any, stmt_idx: int, stmt_dynamic: Any, block_dynamic: Any, skipped_label: str
+    self_dynamic: Any, stmt_idx: cython.longlong, stmt_dynamic: Any, block_dynamic: Any, skipped_label: object
 ) -> object | None:
     """Call the original ReturnMaker handler, tolerating missing returnty."""
     try:
@@ -2162,8 +2431,10 @@ def _orig_handle_return_fallback_8616(
         raise
 
 
-def _dbg_return_stmt_window_8616(stmt_idx: int, block_dynamic: Any) -> None:
+@cython.ccall
+def _dbg_return_stmt_window_8616(stmt_idx: cython.longlong, block_dynamic: Any) -> None:
     """Dump the statement window preceding the return when debugging."""
+    prev_stmt: object
     if os.environ.get("INERTIA_DEBUG_RETURN_COMPAT") != "1":
         return
     if stmt_idx <= 0:
@@ -2193,12 +2464,13 @@ def _dbg_return_stmt_window_8616(stmt_idx: int, block_dynamic: Any) -> None:
     print(f"[dbg-return] prev_stmt_repr={prev_stmt}", file=sys.stderr, flush=True)
 
 
+@cython.ccall
 def _dbg_return_entry_8616(
     function: object,
-    function_addr: int,
-    stmt_idx: int,
+    function_addr: cython.longlong,
+    stmt_idx: cython.longlong,
     stmt: object,
-    block: object | None,
+    block: object,
     retty: object,
 ) -> None:
     """Dump the ReturnMaker entry state when debug logging is enabled."""
@@ -2228,14 +2500,17 @@ def _dbg_return_entry_8616(
     )
 
 
+@cython.ccall
 def _caller_use_ret_val_8616(prototype: object, calling_convention: object) -> object:
     """Resolve the caller-use return location for a guessed prototype."""
+    returnty: object
     returnty = getattr(prototype, "returnty", None)
     if calling_convention is None:
         return SimRegArg("ax", 2)
     return cast(Any, calling_convention).return_val(returnty)
 
 
+@cython.ccall
 def _guessed_unused_caller_ret_stmt_8616(
     self: object,
     stmt: object,
@@ -2245,6 +2520,7 @@ def _guessed_unused_caller_ret_stmt_8616(
     calling_convention: object,
 ) -> object:
     """Materialize a return for a prototype whose result is provably unused."""
+    ret_expr: object
     ret_val = _caller_use_ret_val_8616(prototype, calling_convention)
     ret_expr = _return_compat_unknown_caller_terminal_expr_8616(self, stmt, block, ret_val)
     if ret_expr is None:
@@ -2261,6 +2537,7 @@ def _guessed_unused_caller_ret_stmt_8616(
     return cast(object, cast(Any, stmt).copy())
 
 
+@cython.ccall
 def _guessed_unknown_caller_ret_stmt_8616(
     self: object,
     stmt: object,
@@ -2270,6 +2547,7 @@ def _guessed_unknown_caller_ret_stmt_8616(
     calling_convention: object,
 ) -> object | None:
     """Materialize a return for unknown caller use; None to continue the arm."""
+    ret_expr: object
     # Dynamic angr SimTypeFunction compatibility boundary.
     ret_val = _caller_use_ret_val_8616(prototype, calling_convention)
     ret_expr = _return_compat_unknown_caller_terminal_expr_8616(self, stmt, block, ret_val)
@@ -2297,7 +2575,8 @@ def _guessed_unknown_caller_ret_stmt_8616(
     return None
 
 
-def _has_prototype_return_8616(prototype: object, calling_convention: object) -> bool:
+@cython.ccall
+def _has_prototype_return_8616(prototype: object, calling_convention: object) -> cython.bint:
     """Return whether prototype + CC provide a usable return contract."""
     return (
         prototype is not None
@@ -2307,8 +2586,10 @@ def _has_prototype_return_8616(prototype: object, calling_convention: object) ->
     )
 
 
+@cython.ccall
 def _inferred_ax_ret_stmt_8616(self: object, stmt: object, block: object) -> object | None:
     """Materialize an inferred AX return statement; None to fall back."""
+    ret_expr: object
     ret_expr = _infer_x86_16_ax_return_expr_8616(self, stmt, block)
     if ret_expr is None:
         return None
@@ -2325,14 +2606,17 @@ def _inferred_ax_ret_stmt_8616(self: object, stmt: object, block: object) -> obj
     return cast(object, new_stmt)
 
 
+@cython.ccall
 def _prototype_ret_val_8616(self_dynamic: Any, prototype: object, calling_convention: object) -> object:
     """Resolve the return location, preferring ax for near-pointer returns."""
+    returnty: object
     returnty = getattr(prototype, "returnty", None)
     if _is_x86_16_near_pointer_return_8616(getattr(self_dynamic, "arch", None), returnty):
         return SimRegArg("ax", 2)
     return cast(Any, calling_convention).return_val(returnty)
 
 
+@cython.ccall
 def _dbg_ret_val_dump_8616(ret_val: object) -> None:
     """Dump the resolved return location when debug logging is enabled."""
     if os.environ.get("INERTIA_DEBUG_RETURN_COMPAT") != "1":
@@ -2351,6 +2635,7 @@ def _dbg_ret_val_dump_8616(ret_val: object) -> None:
     )
 
 
+@cython.ccall
 def _dbg_skip_sp_return_8616(self_dynamic: Any, ret_val: SimRegArg) -> None:
     """Log the sp-based return refusal when debug logging is enabled."""
     if os.environ.get("INERTIA_DEBUG_RETURN_COMPAT") != "1":
@@ -2363,8 +2648,10 @@ def _dbg_skip_sp_return_8616(self_dynamic: Any, ret_val: SimRegArg) -> None:
     )
 
 
+@cython.ccall
 def _reg_ret_expr_8616(self: object, stmt: object, block: object, ret_val: SimRegArg) -> object | None:
     """Resolve a scalar register return expression from terminal evidence."""
+    ret_expr: object
     self_dynamic = cast(Any, self)
     try:
         reg = self_dynamic.arch.registers[ret_val.reg_name]
@@ -2395,18 +2682,22 @@ def _reg_ret_expr_8616(self: object, stmt: object, block: object, ret_val: SimRe
     return ret_expr
 
 
+@cython.ccall
 def _combo_ret_expr_8616(
     self: object, stmt: object, block: object, prototype: object, ret_val: SimComboArg
 ) -> object | None:
     """Resolve a wide combo return expression from arith or per-part evidence."""
+    ret_expr: object
     ret_expr = _make_wide_stack_arith_return_expr_8616(self, stmt, prototype)
     if ret_expr is None:
         ret_expr = _make_return_combo_expr_8616(self, stmt, block, ret_val)
     return ret_expr
 
 
+@cython.ccall
 def _dbg_ret_expr_dump_8616(ret_expr: object) -> None:
     """Dump the resolved return expression when debug logging is enabled."""
+    reg_name: object
     if os.environ.get("INERTIA_DEBUG_RETURN_COMPAT") != "1" or ret_expr is None:
         return
     reg_name = getattr(ret_expr, "reg_name", None)
@@ -2423,6 +2714,7 @@ def _dbg_ret_expr_dump_8616(ret_expr: object) -> None:
     )
 
 
+@cython.ccall
 def _publish_ret_stmt_8616(self: object, stmt: object, ret_val: object, ret_expr: object) -> object:
     """Copy the return statement and attach the resolved expression."""
     new_stmt = cast(Any, stmt).copy()
@@ -2439,15 +2731,17 @@ def _publish_ret_stmt_8616(self: object, stmt: object, ret_val: object, ret_expr
     return cast(object, new_stmt)
 
 
+@cython.ccall
 def _prototype_return_arm_8616(
     self: object,
-    stmt_idx: int,
+    stmt_idx: cython.longlong,
     stmt: object,
     block: object,
     prototype: object,
     calling_convention: object,
 ) -> object:
     """Resolve and publish a prototype-backed return expression."""
+    ret_expr: object
     self_dynamic = cast(Any, self)
     stmt_dynamic = cast(Any, stmt)
     block_dynamic = cast(Any, block)
@@ -2478,9 +2772,10 @@ def _prototype_return_arm_8616(
     return _publish_ret_stmt_8616(self, stmt, ret_val, ret_expr)
 
 
+@cython.ccall
 def _empty_ret_exprs_arm_8616(
     self: object,
-    stmt_idx: int,
+    stmt_idx: cython.longlong,
     stmt: object,
     block: object,
     function_dynamic: Any,
@@ -2488,6 +2783,9 @@ def _empty_ret_exprs_arm_8616(
     calling_convention: object,
 ) -> object | None:
     """Handle a Return statement that carries no return expressions."""
+    function: object
+    handled: object
+    retty: object
     self_dynamic = cast(Any, self)
     stmt_dynamic = cast(Any, stmt)
     block_dynamic = cast(Any, block)
@@ -2526,9 +2824,15 @@ def _empty_ret_exprs_arm_8616(
     return _prototype_return_arm_8616(self, stmt_idx, stmt, block, prototype, calling_convention)
 
 
+@cython.ccall
 def _handle_Return_8616(  # pylint:disable=unused-argument
-    self: object, stmt_idx: int, stmt: ailment.Stmt.Return, block: object | None
+    self: object, stmt_idx: cython.longlong, stmt: ailment.Stmt.Return, block: object
 ) -> object | None:
+    calling_convention: object
+    function: object
+    function_addr: object
+    prototype: object
+    retty: object
     self_dynamic = cast(Any, self)
     block_dynamic = cast(Any, block)
     stmt_dynamic = cast(Any, stmt)
@@ -2552,13 +2856,14 @@ def _handle_Return_8616(  # pylint:disable=unused-argument
     )
 
 
+@cython.ccall
 def _should_infer_ax_c_retval_8616(
     codegen: object,
     current_retval: object,
-    unobserved_result: bool,
+    unobserved_result: cython.bint,
     return_type: object,
     return_type_size: object,
-) -> bool:
+) -> cython.bint:
     """Return whether a missing C retval may be inferred from AX evidence."""
     return (
         codegen is not None
@@ -2571,8 +2876,10 @@ def _should_infer_ax_c_retval_8616(
     )
 
 
+@cython.ccall
 def _maybe_infer_ax_c_retval_8616(codegen: object, obj_dynamic: Any) -> None:
     """Infer a missing C return value from terminal AX evidence."""
+    retval: object
     retval = _infer_x86_16_c_return_value_from_ax_8616(codegen)
     if retval is None:
         return
@@ -2585,8 +2892,10 @@ def _maybe_infer_ax_c_retval_8616(codegen: object, obj_dynamic: Any) -> None:
         )
 
 
+@cython.ccall
 def _maybe_decode_x87_c_retval_8616(codegen: object, codegen_func_dynamic: Any, obj_dynamic: Any) -> None:
     """Replace a constant C retval with a decoded msvc x87 return expression."""
+    x87_retval: object
     x87_retval = _decode_msvc_x87_return_expr_8616(codegen)
     if x87_retval is not None:
         obj_dynamic.retval = x87_retval
@@ -2611,7 +2920,7 @@ def _dbg_creturn_state_8616(codegen: object, obj_dynamic: Any, return_type_size:
         graph_attrs = tuple(
             sorted(
                 name
-                for name in dir(codegen)
+                for name in builtins.iter(dir(codegen))
                 if "graph" in name.lower() or name in {"_func", "function", "cfunc"}
             )
         )
@@ -2629,8 +2938,10 @@ def _dbg_creturn_state_8616(codegen: object, obj_dynamic: Any, return_type_size:
     )
 
 
+@cython.ccall
 def _finish_creturn_8616(self_dynamic: Any, obj_dynamic: Any, obj: object) -> object | None:
     """Call the original CReturn handler and uncollapse safe scalar results."""
+    result: object
     try:
         result = cast(Any, _ORIG_HANDLE_C_RETURN_8616)(self_dynamic, obj_dynamic)
         if result is not None:
@@ -2658,8 +2969,14 @@ def _finish_creturn_8616(self_dynamic: Any, obj_dynamic: Any, obj: object) -> ob
         raise
 
 
+@cython.ccall
 def _handle_CReturn_8616(self: object, obj: object) -> object | None:
     """Preserve native return expressions; infer only genuinely missing values."""
+    codegen: object
+    current_retval: object
+    observation_function: object
+    return_type: object
+    return_type_size: object
     self_dynamic = cast(Any, self)
     obj_dynamic = cast(Any, obj)
     codegen = getattr(self_dynamic, "codegen", None)
@@ -2691,6 +3008,7 @@ def _handle_CReturn_8616(self: object, obj: object) -> object | None:
     return _finish_creturn_8616(self_dynamic, obj_dynamic, obj)
 
 
+@cython.ccall
 def apply_x86_16_decompiler_return_compatibility() -> None:
     """Install 16-bit x86 return handling hooks backed by structured evidence."""
     if os.environ.get("INERTIA_DISABLE_RETURN_COMPAT") == "1":

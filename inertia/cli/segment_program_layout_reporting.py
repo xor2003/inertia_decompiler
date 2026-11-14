@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Transport and report typed whole-program segment evidence.
 
 Layer: CLI/fallback/reporting.
@@ -6,6 +7,8 @@ program join, and attach/report its result. Never infer segment semantics here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import sys
 from collections.abc import Iterable, Mapping
@@ -27,21 +30,23 @@ from inertia.semantics.segment_program_layout_contract import (
 class _ProjectBoundary8616(Protocol):
     """Dynamic angr project fields used only to carry owned core contracts."""
 
-    _inertia_segment_function_summaries_8616: Mapping[int, SegmentFunctionSummary8616]
+    _inertia_segment_function_summaries_8616: Mapping[cython.longlong, SegmentFunctionSummary8616]
     _inertia_segment_program_layout_8616: SegmentProgramLayoutContract8616
 
 
 class _FunctionBoundary8616(Protocol):
     """Minimal dynamic angr function address needed for reporting."""
 
-    addr: int
+    addr: cython.longlong
 
 
+@cython.ccall
 def segment_program_function_evidence_for_project_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> SegmentProgramFunctionEvidence8616 | None:
     """Read one typed function summary from a dynamic project boundary."""
+    summary: object
     boundary = cast(_ProjectBoundary8616, project)
     try:
         summaries = boundary._inertia_segment_function_summaries_8616
@@ -53,6 +58,7 @@ def segment_program_function_evidence_for_project_8616(
     return segment_program_function_evidence_8616(summary)
 
 
+@cython.ccall
 def segment_program_function_evidence_for_function_8616(
     project: object,
     function: object,
@@ -68,20 +74,24 @@ def segment_program_function_evidence_for_function_8616(
     return segment_program_function_evidence_for_project_8616(project, function_addr)
 
 
+@cython.ccall
 def with_segment_program_function_evidence_8616(
     result: FunctionWorkResult,
     project: object,
 ) -> FunctionWorkResult:
     """Attach current core-owned function evidence to a clean-worker result."""
+    evidence: object
     evidence = segment_program_function_evidence_for_function_8616(project, result.function)
     if evidence is None:
         return result
     return replace(result, segment_program_function_evidence=evidence)
 
 
-def _expected_function_addrs_8616(items: Iterable[FunctionWorkItem]) -> tuple[int, ...]:
+@cython.ccall
+def _expected_function_addrs_8616(items: Iterable[FunctionWorkItem]) -> tuple[cython.longlong, ...]:
     """Return exact selected recovery addresses without hiding missing results."""
-    addrs: list[int] = []
+    item: object
+    addrs: list[cython.longlong] = []
     for item in items:
         if item.recovery_addr is not None:
             addrs.append(item.recovery_addr)
@@ -96,12 +106,13 @@ def _expected_function_addrs_8616(items: Iterable[FunctionWorkItem]) -> tuple[in
     return tuple(sorted(addrs))
 
 
+@cython.ccall
 def segment_program_function_evidence_matches_item_8616(
     evidence: SegmentProgramFunctionEvidence8616,
     item: FunctionWorkItem,
-) -> bool:
+) -> cython.bint:
     """Return whether transported evidence belongs to the requested function."""
-    allowed: set[int] = set()
+    allowed: set[cython.longlong] = set()
     if item.recovery_addr is not None:
         allowed.add(item.recovery_addr)
     function = cast(_FunctionBoundary8616, item.function)
@@ -114,9 +125,10 @@ def segment_program_function_evidence_matches_item_8616(
     return evidence.function_addr in allowed
 
 
+@cython.ccall
 def _discovery_contract_8616(
-    expected_addrs: tuple[int, ...],
-    source: SourceRegionCatalogEvidence8616 | None,
+    expected_addrs: object,
+    source: object,
 ) -> SegmentProgramDiscoveryEvidence8616:
     """Translate CLI discovery counts into the X86_16 program-summary input."""
     if source is None:
@@ -142,7 +154,7 @@ def attach_segment_program_layout_8616(
     expected_addrs = _expected_function_addrs_8616(items)
     evidence = tuple(
         result.segment_program_function_evidence
-        for result in results
+        for result in iter(results)
         if result.segment_program_function_evidence is not None
     )
     contract = build_x86_16_segment_program_layout(

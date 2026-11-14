@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Detect packed DOS MZ inputs and decode the proven LZEXE 0.91 format.
 
 Layer: frontend (loader).
@@ -7,6 +8,8 @@ Forbidden: generic stub emulation, guessed relocations, or treating an unsupport
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import struct
 from dataclasses import dataclass
@@ -14,6 +17,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from .mz_image import MZHeaderView, UnpackedMZImage
+import dataclasses
 
 __all__ = (
     "MZHeaderView",
@@ -55,32 +59,34 @@ class PackedMZErrorKind(StrEnum):
 class PackedMZError(ValueError):
     """Evidence-backed refusal to decode a packed executable."""
 
-    def __init__(self, kind: PackedMZErrorKind, detail: str) -> None:
+    def __init__(self, kind: PackedMZErrorKind, detail: object) -> None:
         """Record the typed refusal and its diagnostic detail."""
         self.kind = kind
         self.detail = detail
         super().__init__(f"{kind.value}: {detail}")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PackerDetection:
     """A packer signature tied to an exact file location."""
 
     packer_type: PackerType
-    signature: str
-    offset: int
-    confidence: float
+    signature: object
+    offset: cython.longlong
+    confidence: cython.double
 
     @property
-    def label(self) -> str:
+    def label(self) -> object:
         """Return the packer family with a version suffix when known."""
         if self.packer_type is PackerType.LZEXE and self.signature in {"LZ90", "LZ91"}:
             return f"LZEXE 0.{self.signature[2:]}"
         return self.packer_type.value
 
 
-def detect_packer_in_bytes(data: bytes) -> PackerDetection | None:
+@cython.ccall
+def detect_packer_in_bytes(data: object) -> PackerDetection | None:
     """Classify exact header signatures or a bounded entry-stub signature."""
+    header: object
     header = MZHeaderView.parse(data)
     if header is None:
         return None
@@ -111,6 +117,7 @@ def detect_packer_in_bytes(data: bytes) -> PackerDetection | None:
     return None
 
 
+@cython.ccall
 def detect_packer(path: Path) -> PackerDetection | None:
     """Classify a DOS MZ executable without mutating it."""
     try:
@@ -119,19 +126,26 @@ def detect_packer(path: Path) -> PackerDetection | None:
         return None
 
 
+@cython.cclass
 class _LZEXEBitStream:
     """LSB-first bit and byte reader used by the LZEXE 0.91 stream."""
+    _buffer = cython.declare(object, visibility = "public")
+    _data = cython.declare(object, visibility = "public")
+    _position = cython.declare(object, visibility = "public")
+    _remaining = cython.declare(cython.longlong, visibility = "public")
 
-    def __init__(self, data: bytes, offset: int) -> None:
+    def __init__(self, data: object, offset: cython.longlong) -> None:
         self._data = data
         self._position = offset
         self._remaining = 0
         self._buffer = 0
         self._load_word()
 
-    def _malformed(self, detail: str) -> PackedMZError:
+    @cython.ccall
+    def _malformed(self, detail: object) -> PackedMZError:
         return PackedMZError(PackedMZErrorKind.MALFORMED_LZEXE, detail)
 
+    @cython.ccall
     def _load_word(self) -> None:
         if self._position < 0 or self._position + 2 > len(self._data):
             raise self._malformed("compressed bitstream is truncated")
@@ -139,7 +153,8 @@ class _LZEXEBitStream:
         self._buffer = self._data[self._position] | (self._data[self._position + 1] << 8)
         self._position += 2
 
-    def bit(self) -> int:
+    @cython.ccall
+    def bit(self) -> cython.longlong:
         """Read one low-order bit."""
         value = self._buffer & 1
         self._buffer >>= 1
@@ -148,7 +163,8 @@ class _LZEXEBitStream:
             self._load_word()
         return value
 
-    def byte(self) -> int:
+    @cython.ccall
+    def byte(self) -> cython.longlong:
         """Read one literal byte."""
         if self._position >= len(self._data):
             raise self._malformed("compressed byte stream is truncated")
@@ -157,13 +173,15 @@ class _LZEXEBitStream:
         return value
 
 
-def _require_slice(data: bytes, offset: int, size: int, detail: str) -> bytes:
+@cython.ccall
+def _require_slice(data: object, offset: cython.longlong, size: cython.longlong, detail: object) -> object:
     if offset < 0 or offset + size > len(data):
         raise PackedMZError(PackedMZErrorKind.MALFORMED_LZEXE, detail)
     return data[offset : offset + size]
 
 
-def _decode_lzexe_image(data: bytes, packed_stream_offset: int, unpacked_paragraphs: int) -> tuple[bytearray, int]:
+@cython.ccall
+def _decode_lzexe_image(data: object, packed_stream_offset: cython.longlong, unpacked_paragraphs: cython.longlong) -> tuple[bytearray, cython.longlong]:
     """Decode the LZEXE literal/back-reference stream into the output image."""
     output = bytearray((unpacked_paragraphs * 2) << 4)
     stream = _LZEXEBitStream(data, packed_stream_offset)
@@ -203,12 +221,13 @@ def _decode_lzexe_image(data: bytes, packed_stream_offset: int, unpacked_paragra
     return output, output_position
 
 
+@cython.ccall
 def _read_lzexe_relocations(
-    data: bytes, relocation_position: int, output_size: int
-) -> tuple[tuple[int, int], ...]:
+    data: object, relocation_position: cython.longlong, output_size: cython.longlong
+) -> tuple[tuple[cython.longlong, cython.longlong], ...]:
     """Read the LZEXE relocation span stream into segment:offset pairs."""
     relocation_linear = 0
-    relocations: list[tuple[int, int]] = []
+    relocations: list[tuple[cython.longlong, cython.longlong]] = []
     while True:
         span_data = _require_slice(data, relocation_position, 1, "relocation stream is truncated")
         span = span_data[0]
@@ -230,8 +249,9 @@ def _read_lzexe_relocations(
     return tuple(relocations)
 
 
-def unpack_lzexe_091(data: bytes) -> UnpackedMZImage:
+def unpack_lzexe_091(data: object) -> UnpackedMZImage:
     """Decode LZEXE 0.91 while retaining relocations for the normal MZ loader."""
+    header: object
     header = MZHeaderView.parse(data)
     if header is None:
         raise PackedMZError(PackedMZErrorKind.NOT_MZ, "missing MZ signature or fixed header")
@@ -250,7 +270,7 @@ def unpack_lzexe_091(data: bytes) -> UnpackedMZImage:
 
     relocations = _read_lzexe_relocations(data, lz_header_offset + 0x158, len(output))
 
-    relocation_image_size = max(((segment << 4) + offset + 2 for segment, offset in relocations), default=0)
+    relocation_image_size = max(((segment << 4) + offset + 2 for segment, offset in iter(relocations)), default=0)
     image_size = max(output_position, relocation_image_size)
     return UnpackedMZImage(
         image=bytes(output[:image_size]),

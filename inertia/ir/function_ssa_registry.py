@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Cache exact function SSA artifacts on one analysis project.
 
 Layer: IR.
@@ -12,6 +13,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, replace
 from enum import StrEnum
@@ -42,6 +45,8 @@ from .function_readiness_contracts import (
 )
 from .ssa_function import SSAFunctionArtifact, build_x86_16_function_ssa
 from .vex_import import build_x86_16_ir_function_artifact
+import dataclasses
+import operator
 
 __all__ = [
     "FunctionSSAArtifactFailure8616",
@@ -88,11 +93,11 @@ class FunctionSSAArtifactFailure8616(StrEnum):
 _SSA_ARTIFACT_PRODUCER_8616 = "x86_16_function_ssa"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionSSAArtifactResolution8616:
     """One exact function SSA artifact or a typed refusal."""
 
-    function_addr: int
+    function_addr: cython.longlong
     verdict: FunctionSSAArtifactVerdict8616
     artifact: SSAFunctionArtifact | None
     failure: FunctionSSAArtifactFailure8616 | None
@@ -102,7 +107,7 @@ class FunctionSSAArtifactResolution8616:
 class _FunctionManager8616(Protocol):
     """Third-party function-manager surface used for exact lookup."""
 
-    def function(self, *, addr: int, create: bool = False) -> object | None:
+    def function(self, *, addr: cython.longlong, create: cython.bint = False) -> object | None:
         """Return an existing function without inventing a boundary."""
         ...
 
@@ -123,13 +128,14 @@ class _ProjectSSARegistrySurface8616(Protocol):
     """angr project plus the owned typed SSA registry extension."""
 
     kb: _KnowledgeBase8616
-    _inertia_caller_function_ranges_8616: tuple[tuple[int, int], ...]
-    _inertia_function_ssa_artifacts_8616: dict[int, SSAFunctionArtifact]
-    _inertia_function_ssa_stages_8616: dict[int, FunctionSSAArtifactStage8616]
-    _inertia_function_ssa_source_bindings_8616: dict[int, FunctionSourceBinding8616]
+    _inertia_caller_function_ranges_8616: object
+    _inertia_function_ssa_artifacts_8616: object
+    _inertia_function_ssa_stages_8616: object
+    _inertia_function_ssa_source_bindings_8616: object
 
 
-def _registry_8616(project: object) -> dict[int, SSAFunctionArtifact]:
+@cython.ccall
+def _registry_8616(project: object) -> object:
     """Return the validated project-owned SSA artifact registry."""
     surface = cast(_ProjectSSARegistrySurface8616, project)
     try:
@@ -142,9 +148,10 @@ def _registry_8616(project: object) -> dict[int, SSAFunctionArtifact]:
     return registry
 
 
+@cython.ccall
 def _stage_registry_8616(
     project: object,
-) -> dict[int, FunctionSSAArtifactStage8616]:
+) -> object:
     """Return the project-owned readiness stage for every cached SSA artifact."""
     surface = cast(_ProjectSSARegistrySurface8616, project)
     try:
@@ -157,7 +164,8 @@ def _stage_registry_8616(
     return registry
 
 
-def _source_bindings_8616(project: object) -> dict[int, FunctionSourceBinding8616]:
+@cython.ccall
+def _source_bindings_8616(project: object) -> object:
     """Return the project-owned SSA source-binding ledger, creating it if absent."""
     surface = cast(_ProjectSSARegistrySurface8616, project)
     try:
@@ -170,20 +178,22 @@ def _source_bindings_8616(project: object) -> dict[int, FunctionSourceBinding861
     return bindings
 
 
+@cython.ccall
 def _binding_stale_8616(
-    binding: FunctionSourceBinding8616 | None,
-    observed: FunctionSourceRevision8616 | None,
-) -> bool:
+    binding: object,
+    observed: object,
+) -> cython.bint:
     """Return whether a recorded binding is provably older than current source."""
     return (
         binding is not None
         and observed is not None
-        and binding.revision != observed
+        and operator.ne(binding.revision, observed)
     )
 
 
+@cython.ccall
 def _refuse_8616(
-    function_addr: int,
+    function_addr: cython.longlong,
     failure: FunctionSSAArtifactFailure8616,
     stage: FunctionSSAArtifactStage8616 | None = None,
 ) -> FunctionSSAArtifactResolution8616:
@@ -197,8 +207,9 @@ def _refuse_8616(
     )
 
 
+@cython.ccall
 def _proven_8616(
-    function_addr: int,
+    function_addr: cython.longlong,
     artifact: SSAFunctionArtifact,
     stage: FunctionSSAArtifactStage8616,
 ) -> FunctionSSAArtifactResolution8616:
@@ -212,12 +223,13 @@ def _proven_8616(
     )
 
 
+@cython.ccall
 def _verify_ssa_attestation_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     artifact: SSAFunctionArtifact,
-    observed: FunctionSourceRevision8616 | None,
-) -> bool:
+    observed: object,
+) -> cython.bint:
     """Authenticate one SSA body by its own derivation record.
 
     A copied revision value or an authentic parent digest is never enough:
@@ -225,16 +237,21 @@ def _verify_ssa_attestation_8616(
     ledger, bound to the live generation, and its declared parent digest
     must be one of the exact consumed inputs recorded at derivation time.
     """
+    attested: object
+    body_digest: object
+    direct: object
+    lineage: object
+    parent: object
     if observed is None:
         return False
     attested = artifact.source_revision
-    if attested is not None and attested != observed:
+    if attested is not None and operator.ne(attested, observed):
         return False
     body_digest = function_artifact_body_digest_8616(artifact)
     if body_digest is None:
         return False
     direct = function_build_attestation_8616(project, function_addr, body_digest)
-    if direct is None or direct.revision != observed:
+    if direct is None or operator.ne(direct.revision, observed):
         return False
     parent = artifact.parent_digest
     if parent is None:
@@ -242,13 +259,14 @@ def _verify_ssa_attestation_8616(
     if parent not in direct.inputs:
         return False
     lineage = function_build_attestation_8616(project, function_addr, parent)
-    return lineage is not None and lineage.revision == observed
+    return lineage is not None and operator.eq(lineage.revision, observed)
 
 
+@cython.ccall
 def _record_source_binding_8616(
-    bindings: dict[int, FunctionSourceBinding8616],
-    function_addr: int,
-    observed: FunctionSourceRevision8616 | None,
+    bindings: object,
+    function_addr: cython.longlong,
+    observed: object,
     artifact: SSAFunctionArtifact,
 ) -> None:
     """Bind a published SSA artifact to its observed or attested generation."""
@@ -265,17 +283,19 @@ def _record_source_binding_8616(
     )
 
 
+@cython.ccall
 def function_boundary_at_address_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> object | None:
     """Return an exact CFG function or an independently framed range boundary."""
     return function_source_boundary_8616(project, function_addr)
 
 
+@cython.ccall
 def registered_function_ssa_artifact_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> FunctionSSAArtifactResolution8616:
     """Return one registered artifact and its readiness without rebuilding it.
 
@@ -283,13 +303,17 @@ def registered_function_ssa_artifact_8616(
     refuses with ``SOURCE_REVISION_CHANGED`` and never leaks the stale
     artifact to consumers.
     """
+    binding: object
+    cached: object
+    observed: object
+    stage: object
     cached = _registry_8616(project).get(function_addr)
     if cached is None:
         return _refuse_8616(
             function_addr,
             FunctionSSAArtifactFailure8616.ARTIFACT_NOT_REGISTERED,
         )
-    if not isinstance(cached, SSAFunctionArtifact) or cached.function_addr != function_addr:
+    if not isinstance(cached, SSAFunctionArtifact) or operator.ne(cached.function_addr, function_addr):
         return _refuse_8616(
             function_addr,
             FunctionSSAArtifactFailure8616.ARTIFACT_CONFLICT,
@@ -340,11 +364,12 @@ def registered_function_ssa_artifact_8616(
     return _proven_8616(function_addr, cached, stage)
 
 
+@cython.ccall
 def _publication_source_failure_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     artifact: SSAFunctionArtifact,
-    observed: FunctionSourceRevision8616 | None,
+    observed: object,
 ) -> FunctionSSAArtifactFailure8616 | None:
     """Require native source and authenticate the exact published SSA body."""
     if observed is None:
@@ -356,9 +381,10 @@ def _publication_source_failure_8616(
     return None
 
 
+@cython.ccall
 def _published_ssa_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     artifact: SSAFunctionArtifact,
     stage: FunctionSSAArtifactStage8616,
 ) -> FunctionSSAArtifactResolution8616:
@@ -367,6 +393,7 @@ def _published_ssa_8616(
     return _proven_8616(function_addr, artifact, stage)
 
 
+@cython.ccall
 def publish_function_ssa_artifact_8616(
     project: object,
     artifact: SSAFunctionArtifact,
@@ -380,6 +407,9 @@ def publish_function_ssa_artifact_8616(
     and republishing the identical stale artifact refuses with
     ``SOURCE_REVISION_CONFLICT``.
     """
+    current_stage: object
+    source_failure: object
+    stored: object
     function_addr = artifact.function_addr
     observed = observed_function_artifact_source_revision_8616(project, function_addr, artifact)
     source_failure = _publication_source_failure_8616(
@@ -392,7 +422,7 @@ def publish_function_ssa_artifact_8616(
     bindings = _source_bindings_8616(project)
     stored = artifacts.get(function_addr)
     if stored is not None and (
-        not isinstance(stored, SSAFunctionArtifact) or stored.function_addr != function_addr
+        not isinstance(stored, SSAFunctionArtifact) or operator.ne(stored.function_addr, function_addr)
     ):
         return _refuse_8616(
             function_addr,
@@ -400,7 +430,7 @@ def publish_function_ssa_artifact_8616(
             stages.get(function_addr),
         )
     if stored is not None and _binding_stale_8616(bindings.get(function_addr), observed):
-        if stored == artifact:
+        if operator.eq(stored, artifact):
             return _refuse_8616(
                 function_addr,
                 FunctionSSAArtifactFailure8616.SOURCE_REVISION_CONFLICT,
@@ -417,7 +447,7 @@ def publish_function_ssa_artifact_8616(
         return _published_ssa_8616(project, function_addr, artifact, stage)
     current_stage = stages.get(function_addr, FunctionSSAArtifactStage8616.IR)
     if current_stage is FunctionSSAArtifactStage8616.SEMANTIC:
-        if stage is FunctionSSAArtifactStage8616.IR or stored == artifact:
+        if stage is FunctionSSAArtifactStage8616.IR or operator.eq(stored, artifact):
             return _published_ssa_8616(project, function_addr, stored, current_stage)
         return _refuse_8616(
             function_addr,
@@ -425,7 +455,7 @@ def publish_function_ssa_artifact_8616(
             current_stage,
         )
     if stage is FunctionSSAArtifactStage8616.IR:
-        if stored == artifact:
+        if operator.eq(stored, artifact):
             return _published_ssa_8616(project, function_addr, stored, current_stage)
         return _refuse_8616(
             function_addr,
@@ -438,11 +468,13 @@ def publish_function_ssa_artifact_8616(
     return _published_ssa_8616(project, function_addr, artifact, stage)
 
 
+@cython.ccall
 def function_ssa_artifact_at_address_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> FunctionSSAArtifactResolution8616:
     """Build or return one exact caller SSA artifact without guessing gaps."""
+    function: object
     registered = registered_function_ssa_artifact_8616(project, function_addr)
     if registered.verdict is FunctionSSAArtifactVerdict8616.PROVEN:
         return registered
@@ -464,16 +496,19 @@ def function_ssa_artifact_at_address_8616(
     )
 
 
+@cython.ccall
 def _attest_ssa_derivation_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     function_ssa: SSAFunctionArtifact,
     ir_artifact: object,
-    revision: FunctionSourceRevision8616 | None,
+    revision: object,
 ) -> None:
     """Attest the actual derivation: this exact SSA body consumed this exact
     IR body under the same generation, so neither a copied revision nor an
     authentic-but-unrelated parent digest can confer proof later."""
+    ir_body_digest: object
+    ssa_body_digest: object
     if revision is None:
         return
     ssa_body_digest = function_artifact_body_digest_8616(function_ssa)
@@ -485,13 +520,14 @@ def _attest_ssa_derivation_8616(
             ssa_body_digest,
             revision,
             _SSA_ARTIFACT_PRODUCER_8616,
-            inputs=() if ir_body_digest is None else (ir_body_digest,),
+            inputs=tuple(()) if ir_body_digest is None else tuple((ir_body_digest,)),
         )
 
 
+@cython.ccall
 def _canonical_registered_ir_artifact_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     ir_artifact: IRFunctionArtifact,
 ) -> IRFunctionArtifact:
     """Reuse the registered IR object when the rebuild is content-identical.
@@ -502,23 +538,26 @@ def _canonical_registered_ir_artifact_8616(
     canonical registered object keeps registry identity stable while retaining
     the latest-wins store for genuine republishers.
     """
+    artifact: object
     registered_ir = registered_function_ir_artifact_8616(project, function_addr)
     artifact = registered_ir.artifact
     if (
         registered_ir.verdict is FunctionIRArtifactVerdict8616.PROVEN
         and artifact is not None
-        and artifact == ir_artifact
+        and operator.eq(artifact, ir_artifact)
     ):
         return artifact
     return ir_artifact
 
 
+@cython.ccall
 def function_ssa_artifact_for_boundary_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     function: object,
 ) -> FunctionSSAArtifactResolution8616:
     """Build or return one exact SSA artifact from a supplied boundary."""
+    revision: object
     try:
         boundary_addr = cast(_FunctionBoundary8616, function).addr
     except AttributeError:
@@ -535,9 +574,9 @@ def function_ssa_artifact_for_boundary_8616(
     if (
         registered.verdict is FunctionSSAArtifactVerdict8616.PROVEN
         and registered.artifact is not None
-        and registered.artifact.source_revision == observed_function_source_revision_8616(
+        and operator.eq(registered.artifact.source_revision, observed_function_source_revision_8616(
             project, function_addr, boundary=function,
-        )
+        ))
     ):
         return registered
     if registered.failure is FunctionSSAArtifactFailure8616.ARTIFACT_CONFLICT:

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Tail Validation.
 
 Responsibility: compare recovered behavior against observed effects and report honest deltas.
@@ -12,6 +13,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 import hashlib
@@ -204,9 +207,13 @@ from .validation_storage import (
     StorageIdentityValidationReport8616,
     validate_storage_identities_8616,
 )
+import dataclasses
+import operator
+import builtins
+T = typing.TypeVar("T")
 
-type StructuredAstValue = Any
-type TailValidationValue = Any
+StructuredAstValue = typing.TypeAliasType("StructuredAstValue", Any)
+TailValidationValue = typing.TypeAliasType("TailValidationValue", Any)
 
 _TAIL_VALIDATION_EXPRESSION_CALLBACKS_8616 = ExpressionFingerprintCallbacks8616(
     expr_fingerprint=_expr_fingerprint,
@@ -214,16 +221,19 @@ _TAIL_VALIDATION_EXPRESSION_CALLBACKS_8616 = ExpressionFingerprintCallbacks8616(
 )
 
 
+@cython.ccall
 def _boundary_tuple_8616(value: StructuredAstValue) -> tuple[StructuredAstValue, ...]:
     """Convert a dynamic angr/codegen iterable to a tuple without changing semantics."""
     return tuple(cast(Iterable[StructuredAstValue], value))
 
 
+@cython.ccall
 def _boundary_list_8616(value: StructuredAstValue) -> list[StructuredAstValue]:
     """Convert a dynamic angr/codegen iterable to a list without changing semantics."""
     return list(cast(Iterable[StructuredAstValue], value))
 
 
+@cython.ccall
 def _boundary_set_8616(value: StructuredAstValue) -> set[StructuredAstValue]:
     """Convert a dynamic angr/codegen iterable to a set without changing semantics."""
     return set(cast(Iterable[StructuredAstValue], value))
@@ -332,9 +342,11 @@ _CONTROL_FLOW_WRITE_LOCATION_MARKERS_8616 = (
 
 def _conditional_continue_removed_gate_8616(
     delta: Mapping[str, TailValidationValue],
-    touched_fields: set[str],
-) -> bool:
+    touched_fields: object,
+) -> cython.bint:
     """Return whether all touched removals are ifbreak/Cmp evidence."""
+    field_delta: object
+    field_name: object
 
     saw_removed_ifbreak = False
     for field_name in touched_fields:
@@ -347,19 +359,22 @@ def _conditional_continue_removed_gate_8616(
         if not removed:
             return False
         if field_name == "control_flow_effects":
-            if any(not isinstance(item, str) or not item.startswith("ifbreak:") for item in removed):
+            if any(not isinstance(item, str) or not item.startswith("ifbreak:") for item in iter(removed)):
                 return False
             saw_removed_ifbreak = True
         elif field_name == "conditions":
-            if any(not isinstance(item, str) or not item.startswith("Cmp") for item in removed):
+            if any(not isinstance(item, str) or not item.startswith("Cmp") for item in iter(removed)):
                 return False
     return saw_removed_ifbreak
 
 
+@cython.ccall
 def _evidenced_duplicate_guards_8616(
     facts: Sequence[LoopHeaderDuplicateGuardRemovalFact8616],
-) -> set[str] | None:
+) -> object:
     """Return normalized removed guards proven by loop-header JCC facts."""
+    inverted_guard: object
+    fact: object
 
     evidenced_guards: set[str] = set()
     for fact in facts:
@@ -387,10 +402,12 @@ def _evidenced_duplicate_guards_8616(
     return evidenced_guards
 
 
+@cython.ccall
 def _removed_ifbreak_guards_8616(
-    removed_controls: tuple[TailValidationValue, ...],
-) -> set[str] | None:
+    removed_controls: object,
+) -> object:
     """Return normalized guards from ifbreak control effects."""
+    control: object
 
     removed_guards: set[str] = set()
     for control in removed_controls:
@@ -406,11 +423,13 @@ def _removed_ifbreak_guards_8616(
     return removed_guards
 
 
+@cython.ccall
 def conditional_continue_guard_repair_delta_8616(
-    materialized_count: int,
+    materialized_count: cython.longlong,
     validation: Mapping[str, TailValidationValue],
-) -> bool:
+) -> cython.bint:
     """Accept only validation deltas introduced by proven conditional-continue guard repair."""
+    delta: object
     if materialized_count <= 0:
         return False
     delta = validation.get("delta")
@@ -422,11 +441,16 @@ def conditional_continue_guard_repair_delta_8616(
     return _conditional_continue_removed_gate_8616(delta, touched_fields)
 
 
+@cython.ccall
 def loop_header_duplicate_guard_removal_delta_8616(
     facts: Sequence[LoopHeaderDuplicateGuardRemovalFact8616],
     validation: Mapping[str, TailValidationValue],
-) -> bool:
+) -> cython.bint:
     """Accept only exact redundant break removals proven by loop-header JCC facts."""
+    control_delta: object
+    delta: object
+    evidenced_guards: object
+    removed_guards: object
     if not facts:
         return False
     delta = validation.get("delta")
@@ -456,9 +480,9 @@ def loop_header_duplicate_guard_removal_delta_8616(
 
 
 def loop_exit_return_guard_repair_delta_8616(
-    materialized_count: int,
+    materialized_count: cython.longlong,
     validation: Mapping[str, TailValidationValue],
-) -> bool:
+) -> cython.bint:
     """Accept a proven loop ``if (cond) return;`` to ``if (cond) break;`` rewrite.
 
     The Structuring pass preserves the condition and changes only the control
@@ -466,6 +490,9 @@ def loop_exit_return_guard_repair_delta_8616(
     fingerprint match prevents this validator from accepting arbitrary return
     deletion or branch changes merely because a loop-repair pass ran.
     """
+    control_delta: object
+    delta: object
+    returns_delta: object
     if materialized_count <= 0:
         return False
     delta = validation.get("delta")
@@ -483,7 +510,7 @@ def loop_exit_return_guard_repair_delta_8616(
     removed_returns = _boundary_tuple_8616(returns_delta.get("removed", ()) or ())
     # Empty CReturn nodes are represented as ``none`` by the compact fixture
     # boundary and as ``return`` by the live angr tail fingerprint.
-    if not removed_returns or any(item not in {"none", "return"} for item in removed_returns):
+    if not removed_returns or any(item not in {"none", "return"} for item in iter(removed_returns)):
         return False
 
     control_delta = delta.get("control_flow_effects")
@@ -495,30 +522,31 @@ def loop_exit_return_guard_repair_delta_8616(
         return False
     added_conditions = {
         item[len("ifbreak:") :]
-        for item in added
+        for item in iter(added)
         if isinstance(item, str) and item.startswith("ifbreak:")
     }
     removed_conditions = {
         item[len("if:") :]
-        for item in removed
+        for item in iter(removed)
         if isinstance(item, str) and item.startswith("if:")
     }
     removed_non_guards = tuple(
-        item for item in removed if not (isinstance(item, str) and item.startswith("if:"))
+        item for item in iter(removed) if not (isinstance(item, str) and item.startswith("if:"))
     )
     return (
-        len(added_conditions) == len(added)
-        and len(removed_conditions) == len(removed) - len(removed_non_guards)
+        operator.eq(len(added_conditions), len(added))
+        and operator.eq(len(removed_conditions), len(removed) - len(removed_non_guards))
         and added_conditions == removed_conditions
-        and all(item == "return" for item in removed_non_guards)
+        and all(item == "return" for item in iter(removed_non_guards))
         and len(removed_non_guards) <= 1
     )
 
 
+@cython.ccall
 def _switch_loop_exit_returns_gate_8616(
     returns_delta: TailValidationValue,
-    touched_fields: set[str],
-) -> bool:
+    touched_fields: object,
+) -> cython.bint:
     """Return whether the returns delta matches a switch-loop exit repair."""
 
     if isinstance(returns_delta, Mapping):
@@ -535,10 +563,12 @@ def _switch_loop_exit_returns_gate_8616(
 
 
 def switch_loop_exit_return_repair_delta_8616(
-    materialized_count: int,
+    materialized_count: cython.longlong,
     validation: Mapping[str, TailValidationValue],
-) -> bool:
+) -> cython.bint:
     """Accept only validation deltas introduced by proven switch-loop exit-return repair."""
+    control_delta: object
+    delta: object
     if materialized_count <= 0:
         return False
     delta = validation.get("delta")
@@ -559,15 +589,15 @@ def switch_loop_exit_return_repair_delta_8616(
     if removed_control:
         return False
     return bool(added_control) and all(
-        isinstance(token, str) and token.startswith("case:const:") for token in added_control
+        isinstance(token, str) and token.startswith("case:const:") for token in iter(added_control)
     )
 
 
 def _switch_loop_exit_return_replacement_delta_8616(
-    added_returns: tuple[TailValidationValue, ...],
-    removed_returns: tuple[TailValidationValue, ...],
-    touched_fields: set[str],
-) -> bool:
+    added_returns: object,
+    removed_returns: object,
+    touched_fields: object,
+) -> cython.bint:
     """Return whether a return delta is an allowed switch-loop void-tail replacement."""
     if not touched_fields or touched_fields - {"returns", "control_flow_effects"}:
         return False
@@ -575,11 +605,15 @@ def _switch_loop_exit_return_replacement_delta_8616(
         return False
     if not removed_returns:
         return False
-    return all(isinstance(token, str) and re.fullmatch(r"Add\(reg:ax,const:-\d+\)", token) for token in removed_returns)
+    return all(isinstance(token, str) and re.fullmatch(r"Add\(reg:ax,const:-\d+\)", token) for token in iter(removed_returns))
 
 
-def exit_goto_repair_delta_8616(validation: Mapping[str, TailValidationValue]) -> bool:
+@cython.ccall
+def exit_goto_repair_delta_8616(validation: Mapping[str, TailValidationValue]) -> cython.bint:
     """Accept only the validation delta produced by replacing one exit goto with return."""
+    control_flow_delta: object
+    delta: object
+    returns_delta: object
     delta = validation.get("delta")
     if not isinstance(delta, Mapping):
         return False
@@ -615,8 +649,10 @@ def exit_goto_repair_delta_8616(validation: Mapping[str, TailValidationValue]) -
     )
 
 
-def segmented_stack_slot_size_precision_delta_8616(validation: Mapping[str, TailValidationValue]) -> bool:
+def segmented_stack_slot_size_precision_delta_8616(validation: Mapping[str, TailValidationValue]) -> cython.bint:
     """Accept only segmented-write deltas that change proven stack-slot size spelling."""
+    delta: object
+    segmented_delta: object
     delta = validation.get("delta")
     if not isinstance(delta, Mapping):
         return False
@@ -628,21 +664,23 @@ def segmented_stack_slot_size_precision_delta_8616(validation: Mapping[str, Tail
         return False
     raw_added = _boundary_tuple_8616(segmented_delta.get("added", ()) or ())
     raw_removed = _boundary_tuple_8616(segmented_delta.get("removed", ()) or ())
-    added = tuple(item for item in raw_added if isinstance(item, str))
-    removed = tuple(item for item in raw_removed if isinstance(item, str))
+    added = tuple(item for item in iter(raw_added) if isinstance(item, str))
+    removed = tuple(item for item in iter(raw_removed) if isinstance(item, str))
     if not added or not removed:
         return False
-    if len(added) != len(raw_added) or len(removed) != len(raw_removed):
+    if operator.ne(len(added), len(raw_added)) or operator.ne(len(removed), len(raw_removed)):
         return False
-    if not all(item.startswith("deref:") and "stack_slot:SS:BP" in item for item in added + removed):
+    if not all(item.startswith("deref:") and "stack_slot:SS:BP" in item for item in iter(added + removed)):
         return False
-    normalized_added = {_normalize_segmented_stack_slot_size_token_8616(item) for item in added}
-    normalized_removed = {_normalize_segmented_stack_slot_size_token_8616(item) for item in removed}
+    normalized_added = {_normalize_segmented_stack_slot_size_token_8616(item) for item in iter(added)}
+    normalized_removed = {_normalize_segmented_stack_slot_size_token_8616(item) for item in iter(removed)}
     return normalized_added == normalized_removed
 
 
-def name_only_helper_annotation_delta_8616(validation: Mapping[str, TailValidationValue]) -> bool:
+def name_only_helper_annotation_delta_8616(validation: Mapping[str, TailValidationValue]) -> cython.bint:
     """Accept only helper-call removals that replace address helpers with equivalent names."""
+    delta: object
+    helper_delta: object
     delta = validation.get("delta")
     if not isinstance(delta, Mapping):
         return False
@@ -657,12 +695,15 @@ def name_only_helper_annotation_delta_8616(validation: Mapping[str, TailValidati
     return (
         not added
         and bool(removed)
-        and all(isinstance(token, str) and token.startswith("name:addr:") for token in removed)
+        and all(isinstance(token, str) and token.startswith("name:addr:") for token in iter(removed))
     )
 
 
-def direct_stack_move_idiv_remainder_aux_delta_8616(validation: Mapping[str, TailValidationValue]) -> bool:
+def direct_stack_move_idiv_remainder_aux_delta_8616(validation: Mapping[str, TailValidationValue]) -> cython.bint:
     """Accept only helper/register churn from signed-idiv remainder stack-move materialization."""
+    delta: object
+    helper_delta: object
+    register_delta: object
     delta = validation.get("delta")
     if not isinstance(delta, Mapping):
         return False
@@ -674,7 +715,7 @@ def direct_stack_move_idiv_remainder_aux_delta_8616(validation: Mapping[str, Tai
         helper_tokens = _boundary_tuple_8616(helper_delta.get("added", ()) or ()) + _boundary_tuple_8616(
             helper_delta.get("removed", ()) or ()
         )
-        if not helper_tokens or any(not _helper_token_is_insert_artifact_8616(token) for token in helper_tokens):
+        if not helper_tokens or any(not _helper_token_is_insert_artifact_8616(token) for token in iter(helper_tokens)):
             return False
     elif "helper_calls" in touched_fields:
         return False
@@ -683,20 +724,23 @@ def direct_stack_move_idiv_remainder_aux_delta_8616(validation: Mapping[str, Tai
         reg_tokens = _boundary_tuple_8616(register_delta.get("added", ()) or ()) + _boundary_tuple_8616(
             register_delta.get("removed", ()) or ()
         )
-        if not reg_tokens or any(token != "reg:ax" for token in reg_tokens):
+        if not reg_tokens or any(token != "reg:ax" for token in iter(reg_tokens)):
             return False
     elif "register_writes" in touched_fields:
         return False
     return True
 
 
+@cython.ccall
 def direct_stack_move_function_pointer_prune_delta_8616(
     validation: Mapping[str, TailValidationValue],
-    evidence_offsets: Collection[int],
+    evidence_offsets: Collection[cython.longlong],
     *,
-    has_prune_evidence: bool,
-) -> bool:
+    has_prune_evidence: cython.bint,
+) -> cython.bint:
     """Accept direct-stack move deltas that only prune evidenced function-pointer stores."""
+    delta: object
+    stack_delta: object
     if not has_prune_evidence:
         return False
     delta = validation.get("delta")
@@ -719,20 +763,25 @@ def direct_stack_move_function_pointer_prune_delta_8616(
     return _stack_write_delta_offsets_are_evidenced_8616(stack_delta, evidence_offset_set)
 
 
-def validation_stack_offsets_in_token_8616(token: str) -> frozenset[int]:
+@cython.ccall
+def validation_stack_offsets_in_token_8616(token: object) -> frozenset[cython.longlong]:
     """Return BP-relative stack offsets mentioned in a validation token."""
-    offsets: set[int] = set()
+    match: object
+    offsets: set[cython.longlong] = set()
     for match in _STACK_OFFSET_TOKEN_RE_8616.finditer(token):
         value = int(match.group("value"), 16)
         offsets.add(-value if match.group("sign") == "-" else value)
     return frozenset(offsets)
 
 
+@cython.ccall
 def validation_stack_write_delta_offsets_are_evidenced_8616(
     validation: Mapping[str, TailValidationValue],
-    evidence_offsets: Collection[int],
-) -> bool:
+    evidence_offsets: Collection[cython.longlong],
+) -> cython.bint:
     """Return whether a validation stack-write delta is covered by evidence offsets."""
+    delta: object
+    stack_delta: object
     delta = validation.get("delta")
     if not isinstance(delta, Mapping):
         return False
@@ -742,21 +791,27 @@ def validation_stack_write_delta_offsets_are_evidenced_8616(
     return _stack_write_delta_offsets_are_evidenced_8616(stack_delta, evidence_offsets)
 
 
+@cython.ccall
 def validation_without_delta_fields_8616(
     validation: Mapping[str, TailValidationValue],
     fields: Collection[str],
-) -> dict[str, TailValidationValue]:
+) -> object:
     """Return validation payload copy with selected delta fields removed."""
+    delta: object
     delta = validation.get("delta")
     if not isinstance(delta, Mapping):
         return dict(validation)
     stripped = dict(validation)
-    stripped["delta"] = {key: value for key, value in delta.items() if key not in set(fields)}
+    stripped["delta"] = {key: value for key, value in builtins.iter(delta.items()) if key not in set(fields)}
     return stripped
 
 
-def validation_delta_removes_stack_or_control_effects_8616(validation: Mapping[str, TailValidationValue]) -> bool:
+@cython.ccall
+def validation_delta_removes_stack_or_control_effects_8616(validation: Mapping[str, TailValidationValue]) -> cython.bint:
     """Return whether a validation delta removes stack writes or control effects."""
+    delta: object
+    field_delta: object
+    field_name: object
     delta = validation.get("delta")
     if not isinstance(delta, Mapping):
         return False
@@ -767,12 +822,14 @@ def validation_delta_removes_stack_or_control_effects_8616(validation: Mapping[s
     return False
 
 
+@cython.ccall
 def _stack_write_delta_offsets_are_evidenced_8616(
     stack_delta: Mapping[str, TailValidationValue],
-    evidence_offsets: Collection[int],
-) -> bool:
+    evidence_offsets: Collection[cython.longlong],
+) -> cython.bint:
     """Return whether stack-write delta offsets are covered by evidence."""
-    touched_offsets: set[int] = set()
+    token: object
+    touched_offsets: set[cython.longlong] = set()
     for token in _boundary_tuple_8616(stack_delta.get("added") or ()) + _boundary_tuple_8616(
         stack_delta.get("removed") or ()
     ):
@@ -782,18 +839,22 @@ def _stack_write_delta_offsets_are_evidenced_8616(
     return not touched_offsets or touched_offsets <= set(evidence_offsets)
 
 
-def _helper_token_is_insert_artifact_8616(token: TailValidationValue) -> bool:
+@cython.ccall
+def _helper_token_is_insert_artifact_8616(token: TailValidationValue) -> cython.bint:
     """Return whether a helper-call token names the compiler insert artifact."""
     if not isinstance(token, str):
         return False
     return token in {"name:_INSERT", "name:__INSERT", "_INSERT", "__INSERT"} or token.endswith("._INSERT")
 
 
-def callsite_stack_precision_control_delta_8616(control_delta: Mapping[str, TailValidationValue]) -> bool:
+@cython.ccall
+def callsite_stack_precision_control_delta_8616(control_delta: Mapping[str, TailValidationValue]) -> cython.bint:
     """Accept only callsite control-flow deltas from stack-write precision token expansion."""
+    added_token: object
+    removed_token: object
     added_control = _boundary_tuple_8616(control_delta.get("added", ()) or ())
     removed_control = _boundary_tuple_8616(control_delta.get("removed", ()) or ())
-    if len(added_control) != len(removed_control):
+    if operator.ne(len(added_control), len(removed_control)):
         return False
     for added_token, removed_token in zip(added_control, removed_control, strict=False):
         added_is_hash = isinstance(added_token, str) and added_token.startswith("control_flow_effects:sha256:")
@@ -806,39 +867,41 @@ def callsite_stack_precision_control_delta_8616(control_delta: Mapping[str, Tail
     return True
 
 
-def callsite_resolved_indirect_helper_control_delta_8616(control_delta: Mapping[str, TailValidationValue]) -> bool:
+def callsite_resolved_indirect_helper_control_delta_8616(control_delta: Mapping[str, TailValidationValue]) -> cython.bint:
     """Accept only callsite control-flow deltas that replace indirect helper names with resolved names."""
     added_control = _boundary_tuple_8616(control_delta.get("added", ()) or ())
     removed_control = _boundary_tuple_8616(control_delta.get("removed", ()) or ())
     if not added_control or not removed_control:
         return False
-    if any(isinstance(token, str) and token.startswith("control_flow_effects:sha256:") for token in added_control):
+    if any(isinstance(token, str) and token.startswith("control_flow_effects:sha256:") for token in iter(added_control)):
         return False
     removed_nonhash = tuple(
         token
-        for token in removed_control
+        for token in iter(removed_control)
         if not (isinstance(token, str) and token.startswith("control_flow_effects:sha256:"))
     )
-    if len(added_control) != len(removed_nonhash):
+    if operator.ne(len(added_control), len(removed_nonhash)):
         return False
 
-    def _normalize(token: TailValidationValue) -> str | None:
+    def _normalize(token: TailValidationValue) -> object:
         if not isinstance(token, str):
             return None
         normalized = re.sub(r"name:addr:0x[0-9a-fA-F]+", "name:<resolved>", token)
         return normalized.replace("name:<indirect>", "name:<resolved>")
 
-    added = Counter(normalized for normalized in (_normalize(token) for token in added_control) if normalized)
-    removed = Counter(normalized for normalized in (_normalize(token) for token in removed_nonhash) if normalized)
+    added = Counter(normalized for normalized in iter((_normalize(token) for token in iter(added_control))) if normalized)
+    removed = Counter(normalized for normalized in iter((_normalize(token) for token in iter(removed_nonhash))) if normalized)
     if not added or added != removed:
         return False
-    return all(isinstance(token, str) and "name:addr:0x" in token for token in added_control) and all(
-        isinstance(token, str) and "name:<indirect>" in token for token in removed_nonhash
+    return all(isinstance(token, str) and "name:addr:0x" in token for token in iter(added_control)) and all(
+        isinstance(token, str) and "name:<indirect>" in token for token in iter(removed_nonhash)
     )
 
 
-def _is_stack_only_control_flow_write_precision_token_8616(token: TailValidationValue) -> bool:
+@cython.ccall
+def _is_stack_only_control_flow_write_precision_token_8616(token: TailValidationValue) -> cython.bint:
     """Return whether a control-flow token only expands stack-based SS writes."""
+    reg_match: object
     if not isinstance(token, str):
         return False
     if not token.startswith(("while-body-writes:", "for-body-writes:", "do-while-body-writes:", "if-body-writes:")):
@@ -849,16 +912,18 @@ def _is_stack_only_control_flow_write_precision_token_8616(token: TailValidation
         if reg_match.group(1) not in {"sp", "ss"}:
             return False
     deref_count = token.count("deref:")
-    return deref_count > 0 and deref_count == token.count("deref:Add(Mul(reg:ss,const:16)")
+    return deref_count > 0 and operator.eq(deref_count, token.count("deref:Add(Mul(reg:ss,const:16)"))
 
 
 def callsite_helper_control_target_delta_8616(
-    delta: Mapping[str, TailValidationValue], target_evidence: Collection[int]
-) -> bool:
+    delta: Mapping[str, TailValidationValue], target_evidence: Collection[cython.longlong]
+) -> cython.bint:
     """Accept callsite helper/control deltas that only correct resolved target addresses."""
+    control_delta: object
+    helper_delta: object
     touched_fields = {
         field_name
-        for field_name, field_delta in delta.items()
+        for field_name, field_delta in builtins.iter(delta.items())
         if isinstance(field_delta, Mapping)
         and (
             _boundary_tuple_8616(field_delta.get("added") or ())
@@ -873,14 +938,14 @@ def callsite_helper_control_target_delta_8616(
         return False
     helper_added = _boundary_tuple_8616(helper_delta.get("added") or ())
     helper_removed = _boundary_tuple_8616(helper_delta.get("removed") or ())
-    if not helper_added or len(helper_added) != len(helper_removed):
+    if not helper_added or operator.ne(len(helper_added), len(helper_removed)):
         return False
-    added_targets = {_helper_call_addr_token_8616(token) for token in helper_added}
-    if any(not isinstance(target, int) for target in added_targets):
+    added_targets = {_helper_call_addr_token_8616(token) for token in iter(helper_added)}
+    if any(not isinstance(target, int) for target in iter(added_targets)):
         return False
-    if any(_helper_call_addr_token_8616(token) is None for token in helper_removed):
+    if any(_helper_call_addr_token_8616(token) is None for token in iter(helper_removed)):
         return False
-    added_targets_int = {target for target in added_targets if isinstance(target, int)}
+    added_targets_int = {target for target in iter(added_targets) if isinstance(target, int)}
     target_set = set(target_evidence)
     if not target_set or not added_targets_int or not added_targets_int.issubset(target_set):
         return False
@@ -894,21 +959,23 @@ def callsite_helper_control_target_delta_8616(
         return False
     normalized_added = Counter(
         normalized
-        for token in added_control
-        for normalized in (_canonicalize_control_call_targets_for_compare_8616(token),)
+        for token in iter(added_control)
+        for normalized in iter((_canonicalize_control_call_targets_for_compare_8616(token),))
         if normalized is not None
     )
     normalized_removed = Counter(
         normalized
-        for token in removed_control
-        for normalized in (_canonicalize_control_call_targets_for_compare_8616(token),)
+        for token in iter(removed_control)
+        for normalized in iter((_canonicalize_control_call_targets_for_compare_8616(token),))
         if normalized is not None
     )
     return normalized_added == normalized_removed
 
 
-def callsite_consumed_stack_store_prune_delta_8616(pruned_count: int, delta: Mapping[str, TailValidationValue]) -> bool:
+def callsite_consumed_stack_store_prune_delta_8616(pruned_count: cython.longlong, delta: Mapping[str, TailValidationValue]) -> cython.bint:
     """Accept only consumed call-argument stack-store prune validation deltas."""
+    control_delta: object
+    stack_delta: object
     if pruned_count <= 0:
         return False
     touched_fields = _validation_delta_touched_fields_from_mapping_8616(delta)
@@ -920,7 +987,7 @@ def callsite_consumed_stack_store_prune_delta_8616(pruned_count: int, delta: Map
     removed_stack = _boundary_tuple_8616(stack_delta.get("removed") or ())
     if not removed_stack or len(removed_stack) > pruned_count:
         return False
-    if not all(_is_local_stack_slot_write_token_8616(token) for token in removed_stack):
+    if not all(_is_local_stack_slot_write_token_8616(token) for token in iter(removed_stack)):
         return False
     if "control_flow_effects" not in touched_fields:
         return True
@@ -930,8 +997,10 @@ def callsite_consumed_stack_store_prune_delta_8616(pruned_count: int, delta: Map
     return _control_delta_removes_stack_body_write_8616(control_delta, set(removed_stack))
 
 
-def callsite_far_pointer_remnant_prune_delta_8616(pruned_count: int, delta: Mapping[str, TailValidationValue]) -> bool:
+def callsite_far_pointer_remnant_prune_delta_8616(pruned_count: cython.longlong, delta: Mapping[str, TailValidationValue]) -> cython.bint:
     """Accept only far-pointer high-byte remnant prune validation deltas."""
+    control_delta: object
+    stack_delta: object
     if pruned_count <= 0:
         return False
     touched_fields = _validation_delta_touched_fields_from_mapping_8616(delta)
@@ -943,7 +1012,7 @@ def callsite_far_pointer_remnant_prune_delta_8616(pruned_count: int, delta: Mapp
         removed_stack = _boundary_tuple_8616(stack_delta.get("removed") or ())
         if added_stack:
             return False
-        if removed_stack and not all(_is_stack_slot_write_token_8616(token) for token in removed_stack):
+        if removed_stack and not all(_is_stack_slot_write_token_8616(token) for token in iter(removed_stack)):
             return False
     control_delta = delta.get("control_flow_effects")
     if isinstance(control_delta, Mapping):
@@ -951,12 +1020,12 @@ def callsite_far_pointer_remnant_prune_delta_8616(pruned_count: int, delta: Mapp
         removed_control = _boundary_tuple_8616(control_delta.get("removed") or ())
         normalized_added = Counter(
             normalized
-            for normalized in (_strip_stack_slot_write_fragments_8616(token) for token in added_control)
+            for normalized in iter((_strip_stack_slot_write_fragments_8616(token) for token in iter(added_control)))
             if isinstance(normalized, str)
         )
         normalized_removed = Counter(
             normalized
-            for normalized in (_strip_stack_slot_write_fragments_8616(token) for token in removed_control)
+            for normalized in iter((_strip_stack_slot_write_fragments_8616(token) for token in iter(removed_control)))
             if isinstance(normalized, str)
         )
         if normalized_added != normalized_removed:
@@ -964,21 +1033,21 @@ def callsite_far_pointer_remnant_prune_delta_8616(pruned_count: int, delta: Mapp
     return True
 
 
-def _resolved_indirect_helper_delta_gate_8616(helper_delta: TailValidationValue) -> bool:
+def _resolved_indirect_helper_delta_gate_8616(helper_delta: TailValidationValue) -> cython.bint:
     """Return whether helper deltas replace only ``name:<indirect>`` tokens."""
 
     if not isinstance(helper_delta, Mapping):
         return False
     helper_added = _boundary_tuple_8616(helper_delta.get("added") or ())
     helper_removed = _boundary_tuple_8616(helper_delta.get("removed") or ())
-    if not helper_added or len(helper_added) != len(helper_removed):
+    if not helper_added or operator.ne(len(helper_added), len(helper_removed)):
         return False
-    if not all(isinstance(token, str) and token == "name:<indirect>" for token in helper_removed):
+    if not all(isinstance(token, str) and token == "name:<indirect>" for token in iter(helper_removed)):
         return False
-    return all(_helper_call_addr_token_8616(token) is not None for token in helper_added)
+    return all(_helper_call_addr_token_8616(token) is not None for token in iter(helper_added))
 
 
-def _resolved_indirect_stack_delta_gate_8616(stack_delta: TailValidationValue) -> bool:
+def _resolved_indirect_stack_delta_gate_8616(stack_delta: TailValidationValue) -> cython.bint:
     """Return whether stack adds are local slots and nothing was removed."""
 
     if not isinstance(stack_delta, Mapping):
@@ -987,10 +1056,10 @@ def _resolved_indirect_stack_delta_gate_8616(stack_delta: TailValidationValue) -
     removed_stack = _boundary_tuple_8616(stack_delta.get("removed") or ())
     if removed_stack:
         return False
-    return not added_stack or all(_is_local_stack_slot_write_token_8616(token) for token in added_stack)
+    return not added_stack or all(_is_local_stack_slot_write_token_8616(token) for token in iter(added_stack))
 
 
-def _resolved_indirect_segmented_delta_gate_8616(segmented_delta: TailValidationValue) -> bool:
+def _resolved_indirect_segmented_delta_gate_8616(segmented_delta: TailValidationValue) -> cython.bint:
     """Return whether segmented removals are outgoing SS:SP writes only."""
 
     if not isinstance(segmented_delta, Mapping):
@@ -1000,12 +1069,14 @@ def _resolved_indirect_segmented_delta_gate_8616(segmented_delta: TailValidation
     if added_segmented:
         return False
     return not removed_segmented or all(
-        _is_outgoing_ss_sp_segmented_write_token_8616(token) for token in removed_segmented
+        _is_outgoing_ss_sp_segmented_write_token_8616(token) for token in iter(removed_segmented)
     )
 
 
-def callsite_resolved_indirect_helper_stack_delta_8616(delta: Mapping[str, TailValidationValue]) -> bool:
+@cython.ccall
+def callsite_resolved_indirect_helper_stack_delta_8616(delta: Mapping[str, TailValidationValue]) -> cython.bint:
     """Accept deltas from replacing indirect helpers with resolved call targets."""
+    control_delta: object
     touched_fields = _validation_delta_touched_fields_from_mapping_8616(delta)
     if not touched_fields or touched_fields - {
         "helper_calls",
@@ -1030,7 +1101,7 @@ def callsite_resolved_indirect_helper_stack_delta_8616(delta: Mapping[str, TailV
 
 def _mixed_helper_delta_gate_8616(
     helper_delta: TailValidationValue,
-    target_evidence: Collection[int],
+    target_evidence: Collection[cython.longlong],
 ) -> bool | None:
     """Validate helper addr tokens and return the indirect-removed flag."""
 
@@ -1040,19 +1111,19 @@ def _mixed_helper_delta_gate_8616(
     helper_removed = _boundary_tuple_8616(helper_delta.get("removed") or ())
     if not helper_added or not helper_removed:
         return None
-    if not all(_helper_call_addr_token_8616(token) is not None for token in helper_added):
+    if not all(_helper_call_addr_token_8616(token) is not None for token in iter(helper_added)):
         return None
     if not all(
         isinstance(token, str) and (token == "name:<indirect>" or _helper_call_addr_token_8616(token) is not None)
-        for token in helper_removed
+        for token in iter(helper_removed)
     ):
         return None
-    added_targets = {_helper_call_addr_token_8616(token) for token in helper_added}
-    if any(not isinstance(target, int) for target in added_targets):
+    added_targets = {_helper_call_addr_token_8616(token) for token in iter(helper_added)}
+    if any(not isinstance(target, int) for target in iter(added_targets)):
         return None
-    added_targets_int = {target for target in added_targets if isinstance(target, int)}
+    added_targets_int = {target for target in iter(added_targets) if isinstance(target, int)}
     target_set = set(target_evidence)
-    has_indirect_removed = any(token == "name:<indirect>" for token in helper_removed)
+    has_indirect_removed = any(token == "name:<indirect>" for token in iter(helper_removed))
     if not has_indirect_removed and (
         not target_set or not added_targets_int or not added_targets_int.issubset(target_set)
     ):
@@ -1063,7 +1134,7 @@ def _mixed_helper_delta_gate_8616(
 def _mixed_stack_delta_removed_8616(
     stack_delta: TailValidationValue,
     pruned_stack_tokens: Collection[str],
-) -> tuple[TailValidationValue, ...] | None:
+) -> object:
     """Return the removed stack tokens when the stack delta is a pure prune."""
 
     if not isinstance(stack_delta, Mapping):
@@ -1071,7 +1142,7 @@ def _mixed_stack_delta_removed_8616(
     if _boundary_tuple_8616(stack_delta.get("added") or ()):
         return None
     removed_stack = _boundary_tuple_8616(stack_delta.get("removed") or ())
-    if not removed_stack or not all(_is_local_stack_slot_write_token_8616(token) for token in removed_stack):
+    if not removed_stack or not all(_is_local_stack_slot_write_token_8616(token) for token in iter(removed_stack)):
         return None
     pruned_stack_set = set(pruned_stack_tokens)
     if not pruned_stack_set or not set(removed_stack).issubset(pruned_stack_set):
@@ -1081,10 +1152,10 @@ def _mixed_stack_delta_removed_8616(
 
 def _mixed_control_delta_gate_8616(
     control_delta: TailValidationValue,
-    removed_stack: tuple[TailValidationValue, ...],
-    has_indirect_removed: bool,
-    target_set: set[int],
-) -> bool:
+    removed_stack: object,
+    has_indirect_removed: cython.bint,
+    target_set: object,
+) -> cython.bint:
     """Validate control effects as helper/stack body-only changes."""
 
     if not isinstance(control_delta, Mapping):
@@ -1106,23 +1177,26 @@ def _mixed_control_delta_gate_8616(
         "dowhile-body-writes:",
         "do-while-body-writes:",
     )
-    if not all(isinstance(token, str) and token.startswith(allowed_prefixes) for token in added_control):
+    if not all(isinstance(token, str) and token.startswith(allowed_prefixes) for token in iter(added_control)):
         return False
-    if not all(isinstance(token, str) and token.startswith(allowed_prefixes) for token in removed_control):
+    if not all(isinstance(token, str) and token.startswith(allowed_prefixes) for token in iter(removed_control)):
         return False
-    if not any("name:addr:" in token for token in added_control):
+    if not any("name:addr:" in token for token in iter(added_control)):
         return False
-    return any("name:<indirect>" in token for token in removed_control) or (
-        not has_indirect_removed and bool(target_set) and any("name:addr:" in token for token in removed_control)
+    return any("name:<indirect>" in token for token in iter(removed_control)) or (
+        not has_indirect_removed and bool(target_set) and any("name:addr:" in token for token in iter(removed_control))
     )
 
 
+@cython.ccall
 def callsite_mixed_helper_stack_control_delta_8616(
     delta: Mapping[str, TailValidationValue],
-    target_evidence: Collection[int],
+    target_evidence: Collection[cython.longlong],
     pruned_stack_tokens: Collection[str],
-) -> bool:
+) -> cython.bint:
     """Accept mixed helper/stack/control deltas backed by callsite evidence."""
+    helper_gate: object
+    removed_stack: object
     touched_fields = _validation_delta_touched_fields_from_mapping_8616(delta)
     if touched_fields != {"helper_calls", "stack_writes", "control_flow_effects"}:
         return False
@@ -1145,8 +1219,10 @@ def callsite_mixed_helper_stack_control_delta_8616(
 
 def callsite_stack_arg_slot_alias_condition_delta_8616(
     delta: Mapping[str, TailValidationValue], aliases: Mapping[tuple[str, int | None], str]
-) -> bool:
+) -> cython.bint:
     """Accept condition/control deltas that only rename stack args to slots."""
+    field_delta: object
+    field_name: object
     touched_fields = _validation_delta_touched_fields_from_mapping_8616(delta)
     if not touched_fields or touched_fields - {"conditions", "control_flow_effects"}:
         return False
@@ -1160,12 +1236,12 @@ def callsite_stack_arg_slot_alias_condition_delta_8616(
         removed = _boundary_tuple_8616(field_delta.get("removed") or ())
         normalized_added = Counter(
             token
-            for token in (_canonicalize_stack_arg_alias_token_8616(value, aliases) for value in added)
+            for token in iter((_canonicalize_stack_arg_alias_token_8616(value, aliases) for value in iter(added)))
             if isinstance(token, str)
         )
         normalized_removed = Counter(
             token
-            for token in (_canonicalize_stack_arg_alias_token_8616(value, aliases) for value in removed)
+            for token in iter((_canonicalize_stack_arg_alias_token_8616(value, aliases) for value in iter(removed)))
             if isinstance(token, str)
         )
         if normalized_added != normalized_removed:
@@ -1175,12 +1251,12 @@ def callsite_stack_arg_slot_alias_condition_delta_8616(
 
 def _canonicalize_stack_arg_alias_token_8616(
     token: TailValidationValue, aliases: Mapping[tuple[str, int | None], str]
-) -> str | None:
+) -> object:
     """Replace stack-argument names with evidenced stack-slot fingerprints."""
     if not isinstance(token, str) or not aliases:
         return token if isinstance(token, str) else None
 
-    def _replace(match: re.Match[str]) -> str:
+    def _replace(match: re.Match[str]) -> object:
         name = match.group("name")
         raw_size = match.group("size")
         size = int(raw_size) if isinstance(raw_size, str) and raw_size else None
@@ -1190,11 +1266,12 @@ def _canonicalize_stack_arg_alias_token_8616(
     return _STACK_ARG_ALIAS_TOKEN_RE_8616.sub(_replace, token)
 
 
+@cython.ccall
 def validation_delta_touched_fields_8616(delta: Mapping[str, TailValidationValue]) -> set[str]:
     """Return validation fields that contain added or removed token deltas."""
     return {
         field_name
-        for field_name, field_delta in delta.items()
+        for field_name, field_delta in builtins.iter(delta.items())
         if isinstance(field_delta, Mapping)
         and (
             _boundary_tuple_8616(field_delta.get("added") or ())
@@ -1203,7 +1280,8 @@ def validation_delta_touched_fields_8616(delta: Mapping[str, TailValidationValue
     }
 
 
-def _validation_delta_touched_fields_from_mapping_8616(delta: Mapping[str, TailValidationValue]) -> set[str]:
+@cython.ccall
+def _validation_delta_touched_fields_from_mapping_8616(delta: Mapping[str, TailValidationValue]) -> object:
     """Compatibility helper for internal validation delta-field checks."""
     return validation_delta_touched_fields_8616(delta)
 
@@ -1217,7 +1295,8 @@ _CONTROL_BODY_WRITE_PREFIXES_8616 = (
 )
 
 
-def _is_local_stack_slot_write_token_8616(token: TailValidationValue) -> bool:
+@cython.ccall
+def _is_local_stack_slot_write_token_8616(token: TailValidationValue) -> cython.bint:
     """Return whether a token describes a local SS:BP stack-slot write."""
     return (
         isinstance(token, str)
@@ -1226,12 +1305,14 @@ def _is_local_stack_slot_write_token_8616(token: TailValidationValue) -> bool:
     )
 
 
-def _is_stack_slot_write_token_8616(token: TailValidationValue) -> bool:
+@cython.ccall
+def _is_stack_slot_write_token_8616(token: TailValidationValue) -> cython.bint:
     """Return whether a token describes any SS:BP stack-slot write."""
     return isinstance(token, str) and _STACK_SLOT_WRITE_TOKEN_RE_8616.fullmatch(token) is not None
 
 
-def _is_outgoing_ss_sp_segmented_write_token_8616(token: TailValidationValue) -> bool:
+@cython.ccall
+def _is_outgoing_ss_sp_segmented_write_token_8616(token: TailValidationValue) -> cython.bint:
     """Return whether a token describes an outgoing SS:SP segmented write."""
     return (
         isinstance(token, str)
@@ -1242,7 +1323,8 @@ def _is_outgoing_ss_sp_segmented_write_token_8616(token: TailValidationValue) ->
     )
 
 
-def _strip_stack_slot_write_fragments_8616(token: TailValidationValue) -> str | None:
+@cython.ccall
+def _strip_stack_slot_write_fragments_8616(token: TailValidationValue) -> object:
     """Remove stack-slot write fragments from a control-flow token."""
     if not isinstance(token, str):
         return None
@@ -1253,15 +1335,16 @@ def _strip_stack_slot_write_fragments_8616(token: TailValidationValue) -> str | 
 
 def _control_delta_removes_stack_body_write_8616(
     control_delta: Mapping[str, TailValidationValue], removed_stack_tokens: Collection[str]
-) -> bool:
+) -> cython.bint:
     """Return whether a control-flow delta removes a body-write for a stack token."""
+    token: object
     if not removed_stack_tokens:
         return False
     removed_control = _boundary_tuple_8616(control_delta.get("removed") or ())
     for token in removed_control:
         if not isinstance(token, str) or not token.startswith(_CONTROL_BODY_WRITE_PREFIXES_8616):
             continue
-        if any(stack_token in token for stack_token in removed_stack_tokens):
+        if any(stack_token in token for stack_token in iter(removed_stack_tokens)):
             return True
     return False
 
@@ -1269,15 +1352,18 @@ def _control_delta_removes_stack_body_write_8616(
 _CALL_TARGET_TOKEN_RE_8616 = re.compile(r"\b(?:name:)?addr:0x[0-9a-fA-F]+\b")
 
 
-def _canonicalize_control_call_targets_for_compare_8616(token: TailValidationValue) -> str | None:
+@cython.ccall
+def _canonicalize_control_call_targets_for_compare_8616(token: TailValidationValue) -> object:
     """Normalize resolved control-flow call target tokens for validation comparison."""
     if not isinstance(token, str) or not token:
         return None
     return _CALL_TARGET_TOKEN_RE_8616.sub("addr:*", token)
 
 
+@cython.ccall
 def _helper_call_addr_token_8616(token: TailValidationValue) -> int | None:
     """Return the resolved helper-call address encoded in a validation token."""
+    prefix: object
     if not isinstance(token, str):
         return None
     prefix = "name:addr:" if token.startswith("name:addr:") else "addr:" if token.startswith("addr:") else None
@@ -1289,13 +1375,14 @@ def _helper_call_addr_token_8616(token: TailValidationValue) -> int | None:
     return None
 
 
-def _helper_call_fingerprint_targets_stack_probe_8616(project: TailValidationValue, fingerprint: str | None) -> bool:
+@cython.ccall
+def _helper_call_fingerprint_targets_stack_probe_8616(project: TailValidationValue, fingerprint: object) -> cython.bint:
     """Return whether a helper-call fingerprint resolves to a compiler stack probe."""
     addr = _helper_call_addr_token_8616(fingerprint)
     return _target_addr_is_stack_probe_helper_8616(project, addr)
 
 
-def _normalize_segmented_stack_slot_size_token_8616(token: str) -> str:
+def _normalize_segmented_stack_slot_size_token_8616(token: object) -> object:
     """Erase only stack-slot size suffixes when comparing segmented-write tokens."""
     return _SEGMENTED_STACK_SLOT_SIZE_TOKEN_RE_8616.sub(
         lambda match: f"stack_slot:SS:BP{match.group('offset')}:size*",
@@ -1304,10 +1391,14 @@ def _normalize_segmented_stack_slot_size_token_8616(token: str) -> str:
 
 
 def void_tail_call_guard_materialization_delta_8616(
-    materialized_count: int,
+    materialized_count: cython.longlong,
     validation: Mapping[str, TailValidationValue],
-) -> bool:
+) -> cython.bint:
     """Accept only validation deltas introduced by proven void-tail-call guard materialization."""
+    control_delta: object
+    delta: object
+    field_delta: object
+    field_name: object
     if materialized_count <= 0:
         return False
     delta = validation.get("delta")
@@ -1334,7 +1425,7 @@ def void_tail_call_guard_materialization_delta_8616(
         return False
     added = _boundary_tuple_8616(control_delta.get("added", ()) or ())
     removed = _boundary_tuple_8616(control_delta.get("removed", ()) or ())
-    return bool(added) and not removed and all(str(item).startswith("if-body-calls:") for item in added)
+    return bool(added) and not removed and all(str(item).startswith("if-body-calls:") for item in iter(added))
 
 
 _LOCAL_STACK_ABI_INT_WIDTH_TOKEN_RE_8616 = re.compile(
@@ -1343,18 +1434,18 @@ _LOCAL_STACK_ABI_INT_WIDTH_TOKEN_RE_8616 = re.compile(
 _EMBEDDED_NAME_ADDR_HELPER_CALL_TOKEN_RE_8616 = re.compile(r"(?P<prefix>^|[:,])name:(?P<addr>addr:0x[0-9a-fA-F]+)")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class X86_16TailValidationSummary:
     """Immutable observable effects collected for one tail-validation stage."""
 
-    helper_calls: tuple[str, ...]
-    register_writes: tuple[str, ...]
-    stack_writes: tuple[str, ...]
-    global_writes: tuple[str, ...]
-    segmented_writes: tuple[str, ...]
-    returns: tuple[str, ...]
-    conditions: tuple[str, ...]
-    control_flow_effects: tuple[str, ...]
+    helper_calls: object
+    register_writes: object
+    stack_writes: object
+    global_writes: object
+    segmented_writes: object
+    returns: object
+    conditions: object
+    control_flow_effects: object
     def_use_issues: tuple[str, ...] = ()
     missing_required_calls: tuple[str, ...] = ()
     control_flow_issues: tuple[str, ...] = ()
@@ -1369,14 +1460,14 @@ class X86_16TailValidationSummary:
 
     entry_premise: EntryPremiseReceipt8616 | None = None
 
-    def as_dict(self) -> dict[str, TailValidationValue]:
+    def as_dict(self) -> object:
         """Return observable fingerprints and a detached conditional receipt."""
         result = asdict(self)
         result["entry_premise"] = self.entry_premise.to_dict() if self.entry_premise else None
         return result
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class X86_16FinalSemanticValidationReport8616:
     """Final-AST semantic guards evaluated after every output mutation."""
 
@@ -1394,7 +1485,7 @@ class X86_16FinalSemanticValidationReport8616:
     software_interrupt_inputs: SoftwareInterruptValidationReport8616
 
     @property
-    def passed(self) -> bool:
+    def passed(self) -> cython.bint:
         """Return whether all absolute final semantic guards passed."""
         return bool(
             self.def_use.passed
@@ -1411,8 +1502,11 @@ class X86_16FinalSemanticValidationReport8616:
             and self.software_interrupt_inputs.passed
         )
 
-    def semantic_failures(self) -> dict[str, tuple[str, ...]]:
+    def semantic_failures(self) -> object:
         """Return typed failure families for the canonical tail snapshot."""
+        issues: object
+        key: object
+        tokens_fn: object
         failures: dict[str, tuple[str, ...]] = {}
         reports: tuple[tuple[str, TailValidationValue, TailValidationValue], ...] = (
             ("def_use", self.def_use.issues, self.def_use.issue_tokens),
@@ -1441,7 +1535,7 @@ class X86_16FinalSemanticValidationReport8616:
                 failures[key] = tokens_fn()
         return failures
 
-    def evidence_counts(self) -> dict[str, dict[str, int]]:
+    def evidence_counts(self) -> dict[str, dict[str, cython.longlong]]:
         """Return closed-loop evidence counters for each final guard."""
         return {
             "def_use": {
@@ -1531,30 +1625,31 @@ class X86_16FinalSemanticValidationReport8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class X86_16ValidationCacheDescriptor:
     """Stable identity for a validation cache namespace and payload."""
 
-    namespace: str
-    fingerprint: str
-    cache_key: str
+    namespace: object
+    fingerprint: object
+    cache_key: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _TailValidationBoundaryContext8616:
     """One-shot facts shared from boundary fingerprinting into summary collection."""
 
-    mode: str
-    root_id: int
-    boundary_fingerprint: str
+    mode: object
+    root_id: cython.longlong
+    boundary_fingerprint: object
     summary_input_generation: TailValidationSummaryInputGeneration8616
-    contextual_call_fingerprints: dict[int, str]
-    contextual_call_summaries: dict[int, TailValidationValue]
-    contextual_condition_fingerprints: dict[int, str]
+    contextual_call_fingerprints: object
+    contextual_call_summaries: object
+    contextual_condition_fingerprints: object
 
 
+@cython.ccall
 def build_x86_16_validation_cache_descriptor(
-    namespace: str, payload: TailValidationValue
+    namespace: object, payload: TailValidationValue
 ) -> X86_16ValidationCacheDescriptor:
     """Build a deterministic cache descriptor for validation payload data."""
     fingerprint = _json_fingerprint({"namespace": namespace, "payload": payload})
@@ -1565,15 +1660,17 @@ def build_x86_16_validation_cache_descriptor(
     )
 
 
-def resolve_x86_16_validation_cached_artifact[T](
+@cython.ccall
+def resolve_x86_16_validation_cached_artifact(
     *,
-    cache: MutableMapping[str, TailValidationValue] | None,
+    cache: object,
     descriptor: X86_16ValidationCacheDescriptor,
     build: Callable[[], T],
     clone_on_hit: Callable[[T], T] | None = None,
     store_value: Callable[[T], TailValidationValue] | None = None,
 ) -> dict[str, TailValidationValue]:
     """Return a cached validation artifact or build and persist a fresh value."""
+    cached: object
     if cache is not None:
         cached = cache.get(descriptor.cache_key)
         if cached is not None:
@@ -1596,8 +1693,12 @@ def resolve_x86_16_validation_cached_artifact[T](
     }
 
 
+@cython.ccall
 def _codegen_root(codegen: TailValidationValue) -> TailValidationValue | None:
     """Return the canonical lowered C AST before legacy angr root aliases."""
+    cfunc: object
+    value: object
+    attr: object
     cfunc = getattr(codegen, "cfunc", None)
     # Structuring and Lowering replace ``statements`` while angr may retain the
     # pre-lowering tree in ``body``. Validation must observe the tree that will
@@ -1609,11 +1710,13 @@ def _codegen_root(codegen: TailValidationValue) -> TailValidationValue | None:
     return cfunc
 
 
-def _sorted_unique(values: set[str]) -> tuple[str, ...]:
+@cython.ccall
+def _sorted_unique(values: object) -> tuple[str, ...]:
     return tuple(sorted(values))
 
 
-def _compact_tail_validation_observable_8616(field_name: str, value: str) -> str:
+@cython.ccall
+def _compact_tail_validation_observable_8616(field_name: object, value: object) -> object:
     """Bound validation diagnostics for huge exact fingerprints.
 
     Large raw flag expressions can be thousands of characters long. Validation
@@ -1622,6 +1725,9 @@ def _compact_tail_validation_observable_8616(field_name: str, value: str) -> str
     conservative: equal long expressions stay equal; changed long expressions
     still differ; no semantic rewrite is inferred from the digest.
     """
+    compact_selector: object
+    write_split: object
+    prefix: object
     if field_name not in _COMPACT_OBSERVABLE_FIELDS_8616 or not isinstance(value, str):
         return value
     if field_name == "control_flow_effects":
@@ -1660,13 +1766,14 @@ def _compact_tail_validation_observable_8616(field_name: str, value: str) -> str
     return compacted
 
 
-def _compact_tail_validation_observables_8616(field_name: str, values: set[str]) -> set[str]:
+@cython.ccall
+def _compact_tail_validation_observables_8616(field_name: object, values: object) -> object:
     if field_name not in _COMPACT_OBSERVABLE_FIELDS_8616:
         return values
-    return {_compact_tail_validation_observable_8616(field_name, value) for value in values}
+    return {_compact_tail_validation_observable_8616(field_name, value) for value in iter(values)}
 
 
-def _json_fingerprint(payload: TailValidationValue) -> str:
+def _json_fingerprint(payload: TailValidationValue) -> object:
     def _json_default(value: TailValidationValue) -> str:
         # Validation cache fingerprinting must never crash on rich AST objects.
         # Keep fallback deterministic and side-effect free.
@@ -1676,6 +1783,7 @@ def _json_fingerprint(payload: TailValidationValue) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+@cython.ccall
 def _clear_tail_validation_expr_fingerprint_cache_8616(project: TailValidationValue) -> None:
     """Clear fingerprint values and their retained AST identity guards."""
     with contextlib.suppress(Exception):
@@ -1683,10 +1791,11 @@ def _clear_tail_validation_expr_fingerprint_cache_8616(project: TailValidationVa
         project._inertia_tail_validation_expr_fingerprint_cache_nodes_8616 = {}
 
 
+@cython.ccall
 def canonicalize_tail_validation_summary_field_values_8616(
-    field_name: str,
-    values: set[str],
-) -> set[str]:
+    field_name: object,
+    values: object,
+) -> object:
     """Canonicalize condition/control-flow fingerprint strings for comparison.
 
     Delegates condition semantics to the IR-layer owners:
@@ -1698,31 +1807,32 @@ def canonicalize_tail_validation_summary_field_values_8616(
 
     These are validation-only; they do not mutate IR or feed results back into recovery.
     """
+    value: object
     if field_name == "helper_calls":
         return {
             _canonicalize_stack_arg_storage_fingerprint_8616(
                 _canonicalize_helper_call_fingerprint_for_compare_8616(value)
             )
-            for value in values
+            for value in iter(values)
         }
     if field_name == "segmented_writes":
         return {
             _canonicalize_stack_arg_storage_fingerprint_8616(
                 _canonicalize_segmented_write_fingerprint_for_compare_8616(value)
             )
-            for value in values
+            for value in iter(values)
         }
     if field_name == "control_flow_effects":
-        return {_canonical_control_flow_effect_for_compare_8616(str(value)) for value in values}
+        return {_canonical_control_flow_effect_for_compare_8616(str(value)) for value in iter(values)}
     if field_name == "returns":
         return {
             _canonicalize_stack_arg_storage_fingerprint_8616(
                 normalize_condition_fingerprint_algebraic_8616(value)
             )
-            for value in values
+            for value in iter(values)
         }
     if field_name != "conditions":
-        return {_canonicalize_stack_arg_storage_fingerprint_8616(value) for value in values}
+        return {_canonicalize_stack_arg_storage_fingerprint_8616(value) for value in iter(values)}
     normalized: set[str] = set()
     for value in values:
         value = _compact_tail_validation_observable_8616(field_name, value)
@@ -1733,7 +1843,7 @@ def canonicalize_tail_validation_summary_field_values_8616(
     return normalized
 
 
-def _canonicalize_stack_arg_storage_fingerprint_8616(value: str) -> str:
+def _canonicalize_stack_arg_storage_fingerprint_8616(value: object) -> object:
     def _replace_legacy_stack(match: re.Match[str]) -> str:
         return f"{match.group('prefix')}stack_slot:SS:BP{match.group('offset')}:size2"
 
@@ -1741,28 +1851,34 @@ def _canonicalize_stack_arg_storage_fingerprint_8616(value: str) -> str:
     return _LEGACY_STACK_LOCATION_TOKEN_RE_8616.sub(_replace_legacy_stack, value)
 
 
-def _canonicalize_embedded_helper_call_tokens_for_compare_8616(value: str) -> str:
+def _canonicalize_embedded_helper_call_tokens_for_compare_8616(value: object) -> object:
     def _replace(match: re.Match[str]) -> str:
         return f"{match.group('prefix')}{match.group('addr').lower()}"
 
     return _EMBEDDED_NAME_ADDR_HELPER_CALL_TOKEN_RE_8616.sub(_replace, value)
 
 
-def _fp_ds_global_offset_8616(fingerprint: str) -> int | None:
+@cython.ccall
+def _fp_ds_global_offset_8616(fingerprint: object) -> int | None:
+    match: object
     match = re.fullmatch(r"ds_global:(0x[0-9a-fA-F]+|\d+)", fingerprint)
     if match is None:
         return None
     return int(match.group(1), 0)
 
 
-def _fp_const_value_8616(fingerprint: str) -> int | None:
+@cython.ccall
+def _fp_const_value_8616(fingerprint: object) -> int | None:
+    match: object
     match = re.fullmatch(r"const:(0x[0-9a-fA-F]+|\d+)", fingerprint)
     if match is None:
         return None
     return int(match.group(1), 0)
 
 
-def _fp_scaled_ds_global_byte_offset_8616(fingerprint: str) -> int | None:
+@cython.ccall
+def _fp_scaled_ds_global_byte_offset_8616(fingerprint: object) -> int | None:
+    call: object
     call = _split_fingerprint_call_8616(fingerprint)
     if call is None:
         return None
@@ -1780,7 +1896,10 @@ def _fp_scaled_ds_global_byte_offset_8616(fingerprint: str) -> int | None:
     return None
 
 
-def _fp_flatten_or_args_8616(fingerprint: str) -> list[str]:
+@cython.ccall
+def _fp_flatten_or_args_8616(fingerprint: object) -> object:
+    call: object
+    arg: object
     call = _split_fingerprint_call_8616(fingerprint)
     if call is None:
         return [fingerprint]
@@ -1794,22 +1913,26 @@ def _fp_flatten_or_args_8616(fingerprint: str) -> list[str]:
     return flattened
 
 
-def _fp_adjacent_word_pair_base_8616(fingerprint: str) -> str | None:
+def _fp_adjacent_word_pair_base_8616(fingerprint: object) -> object:
     parts = _fp_flatten_or_args_8616(fingerprint)
     if len(parts) != 2:
         return None
     offsets = sorted(
         offset
-        for part in parts
+        for part in iter(parts)
         if isinstance((offset := _fp_ds_global_offset_8616(part)), int)
     )
-    if len(offsets) == 2 and offsets[1] == offsets[0] + 2:
+    if len(offsets) == 2 and operator.eq(offsets[1], offsets[0] + 2):
         return f"ds_global:{offsets[0]:#x}"
     return None
 
 
-def _fp_normalize_and_pair_8616(op: str, normalized_args: list[str]) -> str | None:
+@cython.ccall
+def _fp_normalize_and_pair_8616(op: object, normalized_args: object) -> object:
     """Fold And masks and adjacent-word compares into canonical ds globals."""
+    pair_base: object
+    candidate: object
+    zero: object
 
     if op == "And" and len(normalized_args) == 2:
         left_const = _fp_const_value_8616(normalized_args[0])
@@ -1831,15 +1954,15 @@ def _fp_normalize_and_pair_8616(op: str, normalized_args: list[str]) -> str | No
     return None
 
 
-def _fp_normalize_or_8616(op: str, normalized_args: list[str]) -> str | None:
+def _fp_normalize_or_8616(op: object, normalized_args: object) -> object:
     """Flatten Or chains and fold adjacent byte pairs into ds globals."""
 
     if op != "Or":
         return None
-    deduped_args = tuple(dict.fromkeys(arg for item in normalized_args for arg in _fp_flatten_or_args_8616(item)))
+    deduped_args = tuple(dict.fromkeys(arg for item in iter(normalized_args) for arg in builtins.iter(_fp_flatten_or_args_8616(item))))
     if len(deduped_args) == 1:
         return deduped_args[0]
-    if deduped_args != tuple(normalized_args):
+    if operator.ne(deduped_args, tuple(normalized_args)):
         return f"Or({','.join(deduped_args)})"
     if len(normalized_args) == 2:
         low_offset = _fp_ds_global_offset_8616(normalized_args[0])
@@ -1847,18 +1970,22 @@ def _fp_normalize_or_8616(op: str, normalized_args: list[str]) -> str | None:
         if not isinstance(low_offset, int) or not isinstance(high_offset, int):
             low_offset = _fp_ds_global_offset_8616(normalized_args[1])
             high_offset = _fp_scaled_ds_global_byte_offset_8616(normalized_args[0])
-        if isinstance(low_offset, int) and high_offset == low_offset + 1:
+        if isinstance(low_offset, int) and operator.eq(high_offset, low_offset + 1):
             return f"ds_global:{low_offset:#x}"
     return None
 
 
-def _fp_normalize_expr_8616(fingerprint: str) -> str:
+@cython.ccall
+def _fp_normalize_expr_8616(fingerprint: object) -> object:
+    call: object
+    or_result: object
+    pair_result: object
     call = _split_fingerprint_call_8616(fingerprint)
     if call is None:
         return fingerprint
     op, args_str = call
     args = _split_fingerprint_args_8616(args_str)
-    normalized_args = [_fp_normalize_expr_8616(arg) for arg in args]
+    normalized_args = [_fp_normalize_expr_8616(arg) for arg in iter(args)]
     pair_result = _fp_normalize_and_pair_8616(op, normalized_args)
     if pair_result is not None:
         return pair_result
@@ -1871,12 +1998,14 @@ def _fp_normalize_expr_8616(fingerprint: str) -> str:
             return f"ds_global:{base_offset + 2:#x}"
     return f"{op}({','.join(normalized_args)})"
 
-def _canonicalize_global_word_pair_condition_fingerprint_8616(value: str) -> str:
+@cython.ccall
+def _canonicalize_global_word_pair_condition_fingerprint_8616(value: object) -> object:
     """Fold adjacent byte views after Condition IR has canonicalized DS storage."""
 
     return _fp_normalize_expr_8616(value)
 
-def _canonicalize_condition_fingerprint_for_compare_8616(value: str) -> str:
+@cython.ccall
+def _canonicalize_condition_fingerprint_for_compare_8616(value: object) -> object:
     """Normalize one condition through the Condition IR storage owner."""
     normalized = normalize_condition_fingerprint_string_8616(value)
     normalized = normalize_condition_fingerprint_algebraic_8616(normalized)
@@ -1885,12 +2014,15 @@ def _canonicalize_condition_fingerprint_for_compare_8616(value: str) -> str:
     return _canonicalize_stack_arg_storage_fingerprint_8616(normalized)
 
 
-def _canonicalize_final_branch_condition_fingerprint_8616(value: str) -> str:
+@cython.ccall
+def _canonicalize_final_branch_condition_fingerprint_8616(value: object) -> object:
     """Normalize exact storage-view equivalences for final branch validation."""
     return _canonicalize_condition_fingerprint_for_compare_8616(value)
 
 
-def _canonicalize_helper_call_fingerprint_for_compare_8616(value: str) -> str:
+@cython.ccall
+def _canonicalize_helper_call_fingerprint_for_compare_8616(value: object) -> object:
+    match: object
     if not isinstance(value, str):
         return value
     match = re.fullmatch(r"name:(addr:0x[0-9a-fA-F]+)", value)
@@ -1899,7 +2031,8 @@ def _canonicalize_helper_call_fingerprint_for_compare_8616(value: str) -> str:
     return match.group(1).lower()
 
 
-def _const_fingerprint_value_8616(value: str) -> int | None:
+@cython.ccall
+def _const_fingerprint_value_8616(value: object) -> int | None:
     if not isinstance(value, str) or not value.startswith("const:"):
         return None
     try:
@@ -1908,8 +2041,11 @@ def _const_fingerprint_value_8616(value: str) -> int | None:
         return None
 
 
-def _flatten_additive_terms_8616(term: str, sign: int, terms: list[tuple[int, str]]) -> None:
+@cython.ccall
+def _flatten_additive_terms_8616(term: object, sign: cython.longlong, terms: object) -> None:
     """Append the signed additive terms for one expression."""
+    inner: object
+    inner_arg: object
 
     inner = _split_fingerprint_call_8616(term)
     if inner is None:
@@ -1928,8 +2064,13 @@ def _flatten_additive_terms_8616(term: str, sign: int, terms: list[tuple[int, st
     terms.append((sign, _canonicalize_additive_expr_8616(term)))
 
 
-def _canonicalize_additive_expr_8616(expr: str) -> str:
+def _canonicalize_additive_expr_8616(expr: object) -> object:
     """Canonicalize one expression under the additive compare surface."""
+    call: object
+    arg: object
+    idx: object
+    sign: object
+    term: object
 
     call = _split_fingerprint_call_8616(expr)
     if call is None:
@@ -1943,7 +2084,7 @@ def _canonicalize_additive_expr_8616(expr: str) -> str:
     if op == "Reference" and len(args) == 1 and args[0].startswith("stack_slot:"):
         return _canonicalize_additive_expr_8616(args[0])
     if op in {"Add", "Sub"}:
-        terms: list[tuple[int, str]] = []
+        terms: list[tuple[cython.longlong, str]] = []
         for idx, arg in enumerate(args):
             _flatten_additive_terms_8616(arg, -1 if op == "Sub" and idx > 0 else 1, terms)
 
@@ -1958,24 +2099,29 @@ def _canonicalize_additive_expr_8616(expr: str) -> str:
         if const_total or not parts:
             parts.append(f"const:{const_total}")
         return f"Add({','.join(parts)})"
-    return f"{op}({','.join(_canonicalize_additive_expr_8616(arg) for arg in args)})"
+    return f"{op}({','.join(_canonicalize_additive_expr_8616(arg) for arg in iter(args))})"
 
 
-def _canonicalize_additive_fingerprint_for_compare_8616(value: str) -> str:
+@cython.ccall
+def _canonicalize_additive_fingerprint_for_compare_8616(value: object) -> object:
     return _canonicalize_additive_expr_8616(value)
 
-def _canonicalize_linear_ds_deref_condition_fingerprint_8616(value: str) -> str:
+@cython.ccall
+def _canonicalize_linear_ds_deref_condition_fingerprint_8616(value: object) -> object:
     """Compatibility wrapper for the Condition IR storage owner."""
     return canonicalize_condition_storage_fingerprint_8616(value)
 
 
-def _canonicalize_segmented_write_fingerprint_for_compare_8616(value: str) -> str:
+@cython.ccall
+def _canonicalize_segmented_write_fingerprint_for_compare_8616(value: object) -> object:
     if not isinstance(value, str) or not value.startswith("deref:"):
         return value
     return "deref:" + _canonicalize_additive_fingerprint_for_compare_8616(value[len("deref:") :])
 
 
-def _canonicalize_summary_field_counter_8616(field_name: str, values: Sequence[str]) -> Counter[str]:
+@cython.ccall
+def _canonicalize_summary_field_counter_8616(field_name: object, values: Sequence[str]) -> Counter[str]:
+    value: object
     counter: Counter[str] = Counter()
     for value in values:
         if field_name == "helper_calls":
@@ -1989,7 +2135,9 @@ def _canonicalize_summary_field_counter_8616(field_name: str, values: Sequence[s
     return counter
 
 
+@cython.ccall
 def _counter_delta_items_8616(left: Counter[str], right: Counter[str]) -> tuple[str, ...]:
+    value: object
     items: list[str] = []
     for value in sorted(left):
         count = int(left[value] or 0) - int(right.get(value, 0) or 0)
@@ -2001,26 +2149,36 @@ def _counter_delta_items_8616(left: Counter[str], right: Counter[str]) -> tuple[
 def _missing_callsite_fingerprints_8616(values: Sequence[str]) -> tuple[str, ...]:
     return tuple(
         str(value)
-        for value in values
+        for value in iter(values)
         if isinstance(value, str) and value.startswith(_MISSING_CALLSITE_FINGERPRINT_PREFIX_8616)
     )
 
 
+@cython.ccall
 def _summary_is_stack_probe_helper_8616(
     summary: Mapping[str, TailValidationValue] | CallsiteSummary8616 | None,
-) -> bool:
+) -> cython.bint:
     """Return whether a callsite summary represents a compiler stack probe."""
     return bool(_summary_attr_8616(summary, "stack_probe_helper"))
 
 
-def _is_stack_probe_helper_name_8616(name: str | None) -> bool:
+@cython.ccall
+def _is_stack_probe_helper_name_8616(name: object) -> cython.bint:
     normalized = normalize_callee_name_8616(name)
     if not isinstance(normalized, str):
         return False
     return normalized.lower().lstrip("_") in {"anchkstk", "analloca_probe"}
 
 
-def _project_function_name_for_addr_8616(project: TailValidationValue, addr: int) -> str | None:
+@cython.ccall
+def _project_function_name_for_addr_8616(project: TailValidationValue, addr: cython.longlong) -> object:
+    candidate_project: object
+    code_labels: object
+    functions: object
+    label: object
+    lookup: object
+    metadata: object
+    name: object
     # Dynamic angr/codegen compatibility boundary.
     for candidate_project in (project, getattr(project, "_inertia_original_project", None)):
         if candidate_project is None:
@@ -2051,7 +2209,11 @@ def _project_function_name_for_addr_8616(project: TailValidationValue, addr: int
     return None
 
 
-def _target_addr_is_stack_probe_helper_8616(project: TailValidationValue, target_addr: int | None) -> bool:
+def _target_addr_is_stack_probe_helper_8616(project: TailValidationValue, target_addr: int | None) -> cython.bint:
+    candidate_project: object
+    linked_base: object
+    main_object: object
+    addr: object
     if not isinstance(target_addr, int):
         return False
     normalized = _normalized_call_target_addr_8616(project, target_addr)
@@ -2071,13 +2233,14 @@ def _target_addr_is_stack_probe_helper_8616(project: TailValidationValue, target
             if is_x86_16_stack_probe_helper_at_8616(candidate_project, addr):
                 return True
     return any(
-        _is_stack_probe_helper_name_8616(_project_function_name_for_addr_8616(project, addr)) for addr in candidates
+        _is_stack_probe_helper_name_8616(_project_function_name_for_addr_8616(project, addr)) for addr in iter(candidates)
     )
 
 
+@cython.ccall
 def _call_node_is_stack_probe_helper_8616(
     project: TailValidationValue, node: TailValidationValue, summary: TailValidationValue
-) -> bool:
+) -> cython.bint:
     if _summary_is_stack_probe_helper_8616(summary):
         return True
     target_addr = _call_summary_target_addr_8616(project, summary)
@@ -2092,12 +2255,13 @@ def _call_node_is_stack_probe_helper_8616(
     return False
 
 
+@cython.ccall
 def _callsite_expected_fingerprint_8616(
     function: TailValidationValue,
     project: TailValidationValue,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     summary_inventory: Mapping[int, CallsiteSummary8616] | None = None,
-) -> str | None:
+) -> object:
     summary = (
         summary_inventory.get(callsite_addr)
         if summary_inventory is not None
@@ -2113,26 +2277,30 @@ def _callsite_expected_fingerprint_8616(
     return f"callsite:{callsite_addr:#x}"
 
 
-def _function_callsite_addrs_for_validation_8616(function: TailValidationValue) -> tuple[int, ...]:
+def _function_callsite_addrs_for_validation_8616(function: TailValidationValue) -> object:
     """Return callsite addresses from dynamic angr function metadata."""
     # Dynamic boundary: angr Function may expose get_call_sites as a method.
-    callsite_addrs = _boundary_tuple_8616(sorted(getattr(function, "get_call_sites", list)() or ()))
+    callsite_addrs = _boundary_tuple_8616(sorted(tuple(getattr(function, "get_call_sites", list)() or ())))
     if callsite_addrs:
         return callsite_addrs
     return tuple(
         addr
-        for addr in _collect_direct_capstone_callsite_addrs_8616(function)
+        for addr in builtins.iter(_collect_direct_capstone_callsite_addrs_8616(function))
         if isinstance(addr, int)
     )
 
 
+@cython.ccall
 def _append_missing_contextual_callsite_fingerprints_8616(
     root: TailValidationValue,
     project: TailValidationValue,
-    helper_calls: list[str],
+    helper_calls: object,
     summary_inventory: Mapping[int, CallsiteSummary8616] | None = None,
 ) -> None:
     """Append missing contextual callsite fingerprints to helper-call tokens."""
+    fingerprint: object
+    function: object
+    callsite_addr: object
     function = _function_for_call_context_8616(root, project)
     if function is None:
         return
@@ -2160,9 +2328,13 @@ def _append_missing_contextual_callsite_fingerprints_8616(
         helper_calls.append(f"{_MISSING_CALLSITE_FINGERPRINT_PREFIX_8616}{fingerprint}")
 
 
+@cython.ccall
 def _invert_condition_fingerprint_8616(
-    node: TailValidationValue, project: TailValidationValue, contextual_condition_fingerprints: Mapping[int, str]
-) -> str | None:
+    node: TailValidationValue, project: TailValidationValue, contextual_condition_fingerprints: Mapping[cython.longlong, str]
+) -> object:
+    contextual: object
+    inverted_contextual: object
+    inverted_op: object
     contextual = contextual_condition_fingerprints.get(id(node))
     if contextual is not None:
         inverted_contextual = invert_condition_fingerprint_string_8616(contextual)
@@ -2180,7 +2352,8 @@ def _invert_condition_fingerprint_8616(
     return str(_wrap_not_fingerprint(fingerprint))
 
 
-def _is_void_loop_exit_stmt_8616(stmt: TailValidationValue) -> bool:
+@cython.ccall
+def _is_void_loop_exit_stmt_8616(stmt: TailValidationValue) -> cython.bint:
     """Return whether a statement exits the loop without a value."""
 
     if isinstance(stmt, CBreak):
@@ -2188,10 +2361,14 @@ def _is_void_loop_exit_stmt_8616(stmt: TailValidationValue) -> bool:
     return bool(isinstance(stmt, CReturn) and getattr(stmt, "retval", None) is None)
 
 
+@cython.ccall
 def _loop_break_guard_stmt_parts_8616(
     guard_stmt: TailValidationValue,
-) -> tuple[TailValidationValue, set[int]] | None:
+) -> object:
     """Classify the loop guard statement into break cond + suppressed ids."""
+    else_node: object
+    _branch_cond: object
+    branch_node: object
 
     suppressed_node_ids = {id(guard_stmt)}
     if isinstance(guard_stmt, CIfBreak):
@@ -2215,12 +2392,13 @@ def _loop_break_guard_stmt_parts_8616(
 
 
 def _loop_break_prefix_call_gate_8616(
-    statements: tuple[TailValidationValue, ...],
-    guard_index: int,
+    statements: object,
+    guard_index: cython.longlong,
     break_cond: TailValidationValue,
-    contextual_condition_fingerprints: Mapping[int, str],
-) -> bool:
+    contextual_condition_fingerprints: Mapping[cython.longlong, str],
+) -> cython.bint:
     """Return whether call-bearing prefix assignments retain call evidence."""
+    contextual_fingerprint: object
 
     if guard_index <= 0:
         return True
@@ -2230,15 +2408,21 @@ def _loop_break_prefix_call_gate_8616(
     prefix_assignments = statements[:guard_index]
     prefix_has_call = any(
         isinstance(child, CFunctionCall)
-        for stmt in prefix_assignments
-        for child in _iter_c_nodes_deep_8616(getattr(stmt, "rhs", None))
+        for stmt in iter(prefix_assignments)
+        for child in builtins.iter(_iter_c_nodes_deep_8616(getattr(stmt, "rhs", None)))
     )
     return not prefix_has_call or "call:" in contextual_fingerprint
 
 
+@cython.ccall
 def _extract_loop_break_guard_normalization_8616(
-    loop: TailValidationValue, project: TailValidationValue, contextual_condition_fingerprints: Mapping[int, str]
-) -> tuple[str, set[int]] | None:
+    loop: TailValidationValue, project: TailValidationValue, contextual_condition_fingerprints: Mapping[cython.longlong, str]
+) -> object:
+    body: object
+    break_cond: object
+    condition: object
+    guard_parts: object
+    normalized: object
     condition = getattr(loop, "condition", None)
     if _c_constant_int_value(condition) != 1:
         return None
@@ -2269,7 +2453,8 @@ def _extract_loop_break_guard_normalization_8616(
         return None
     return normalized, suppressed_node_ids
 
-def _do_while_iterator_shape_8616(iterator: TailValidationValue) -> bool:
+@cython.ccall
+def _do_while_iterator_shape_8616(iterator: TailValidationValue) -> cython.bint:
     """Return whether the statement is an Add/Sub self-update of a variable."""
 
     return (
@@ -2282,7 +2467,8 @@ def _do_while_iterator_shape_8616(iterator: TailValidationValue) -> bool:
     )
 
 
-def _read_carrier_record_gate_8616(record: TailValidationValue) -> bool:
+@cython.ccall
+def _read_carrier_record_gate_8616(record: TailValidationValue) -> cython.bint:
     """Return whether the materialization record closed with no failures."""
 
     return (
@@ -2298,7 +2484,7 @@ def _read_carrier_record_gate_8616(record: TailValidationValue) -> bool:
 def _do_while_post_body_condition_fingerprint_8616(
     loop: TailValidationValue,
     project: TailValidationValue,
-) -> str | None:
+) -> object:
     """Fingerprint a proven affine do-while guard in its post-body state."""
     if not isinstance(loop, CDoWhileLoop) or not isinstance(loop.condition, CBinaryOp):
         return None
@@ -2309,15 +2495,15 @@ def _do_while_post_body_condition_fingerprint_8616(
     if not _do_while_iterator_shape_8616(iterator):
         return None
     target = _expr_fingerprint(iterator.lhs, project)
-    if _expr_fingerprint(iterator.rhs.lhs, project) != target:
+    if operator.ne(_expr_fingerprint(iterator.rhs.lhs, project), target):
         return None
     replacement = _expr_fingerprint(iterator.rhs, project)
     occurrence_count = 0
 
-    def _fingerprint(node: TailValidationValue) -> str:
+    def _fingerprint(node: TailValidationValue) -> object:
         """Substitute the proven iterator update at its unique guard use."""
         nonlocal occurrence_count
-        if isinstance(node, CVariable) and _expr_fingerprint(node, project) == target:
+        if isinstance(node, CVariable) and operator.eq(_expr_fingerprint(node, project), target):
             occurrence_count += 1
             return replacement
         if isinstance(node, CBinaryOp):
@@ -2328,8 +2514,9 @@ def _do_while_post_body_condition_fingerprint_8616(
     return fingerprint if occurrence_count == 1 else None
 
 
+@cython.ccall
 def _normalized_if_chain_condition_8616(
-    pairs: Sequence[tuple[TailValidationValue, TailValidationValue]], idx: int, codegen: TailValidationValue
+    pairs: Sequence[tuple[TailValidationValue, TailValidationValue]], idx: cython.longlong, codegen: TailValidationValue
 ) -> TailValidationValue | None:
     if idx <= 0 or idx >= len(pairs):
         return None
@@ -2338,12 +2525,14 @@ def _normalized_if_chain_condition_8616(
     return _split_ordering_if_chain_replacement_condition_8616(prev_cond, curr_cond, codegen)
 
 
+@cython.ccall
 def _normalized_call_target_addr_8616(project: TailValidationValue, target_addr: int | None) -> int | None:
     """Return canonical call identity through the shared traits owner."""
     normalized = normalize_x86_16_call_target_addr_8616(project, target_addr)
     return normalized if isinstance(normalized, int) else None
 
 
+@cython.ccall
 def _call_summary_target_addr_8616(
     project: TailValidationValue,
     summary: Mapping[str, TailValidationValue] | CallsiteSummary8616 | None,
@@ -2352,7 +2541,10 @@ def _call_summary_target_addr_8616(
     return _normalized_call_target_addr_8616(project, _summary_attr_8616(summary, "target_addr"))
 
 
+@cython.ccall
 def _active_validation_function_8616(project: TailValidationValue) -> TailValidationValue | None:
+    candidate: object
+    codegen: object
     # Dynamic angr/codegen compatibility boundary.
     codegen = getattr(project, "_inertia_tail_validation_active_codegen", None)
     if codegen is None:
@@ -2370,7 +2562,9 @@ def _active_validation_function_8616(project: TailValidationValue) -> TailValida
     return None
 
 
-def _active_callsite_target_fingerprint_8616(project: TailValidationValue, callsite_addr: int) -> str | None:
+@cython.ccall
+def _active_callsite_target_fingerprint_8616(project: TailValidationValue, callsite_addr: cython.longlong) -> object:
+    function: object
     function = _active_validation_function_8616(project)
     if function is None:
         return None
@@ -2390,9 +2584,11 @@ def _active_callsite_target_fingerprint_8616(project: TailValidationValue, calls
     return None
 
 
+@cython.ccall
 def _call_summary_callsite_addr_8616(
     summary: Mapping[str, TailValidationValue] | CallsiteSummary8616 | None,
 ) -> int | None:
+    callsite_addr: object
     if isinstance(summary, Mapping):
         callsite_addr = summary.get("callsite_addr")
     elif isinstance(summary, CallsiteSummary8616):
@@ -2402,8 +2598,12 @@ def _call_summary_callsite_addr_8616(
     return callsite_addr if isinstance(callsite_addr, int) else None
 
 
-def _known_function_entry_addr_8616(project: TailValidationValue, addr: int) -> bool:
+@cython.ccall
+def _known_function_entry_addr_8616(project: TailValidationValue, addr: cython.longlong) -> cython.bint:
     """Return whether an address is a known function entry, not a callsite token."""
+    functions: object
+    lookup: object
+    candidate: object
     functions = getattr(getattr(project, "kb", None), "functions", None)
     lookup = getattr(functions, "function", None)
     if not callable(lookup):
@@ -2415,12 +2615,13 @@ def _known_function_entry_addr_8616(project: TailValidationValue, addr: int) -> 
     for candidate in candidates:
         with contextlib.suppress(Exception):
             function = lookup(addr=candidate, create=False)
-            if getattr(function, "addr", None) == candidate:
+            if operator.eq(getattr(function, "addr", None), candidate):
                 return True
     return False
 
 
-def _token_int_addr_8616(raw: str) -> int | None:
+@cython.ccall
+def _token_int_addr_8616(raw: object) -> int | None:
     """Parse a hex-prefixed or decimal address token."""
 
     try:
@@ -2429,19 +2630,22 @@ def _token_int_addr_8616(raw: str) -> int | None:
         return None
 
 
+@cython.ccall
 def _normalized_helper_addr_fingerprint_8616(
     project: TailValidationValue,
-    resolved_addr: int,
-    fallback: str,
-) -> str:
+    resolved_addr: cython.longlong,
+    fallback: object,
+) -> object:
     """Normalize a resolved call address, keeping the fallback on failure."""
 
     normalized = _normalized_call_target_addr_8616(project, resolved_addr)
     return f"addr:{normalized:#x}" if isinstance(normalized, int) else fallback
 
 
-def _normalize_addr_helper_token_8616(project: TailValidationValue, token: str) -> str:
+@cython.ccall
+def _normalize_addr_helper_token_8616(project: TailValidationValue, token: object) -> object:
     """Normalize an ``addr:`` helper token through entry/callsite evidence."""
+    value: object
 
     value = _token_int_addr_8616(token[5:])
     if value is None:
@@ -2454,8 +2658,10 @@ def _normalize_addr_helper_token_8616(project: TailValidationValue, token: str) 
     return _normalized_helper_addr_fingerprint_8616(project, value, token)
 
 
-def _normalize_name_addr_helper_token_8616(project: TailValidationValue, token: str) -> str:
+@cython.ccall
+def _normalize_name_addr_helper_token_8616(project: TailValidationValue, token: object) -> object:
     """Normalize a ``name:addr:`` helper token."""
+    value: object
 
     value = _token_int_addr_8616(token[10:])
     if value is None:
@@ -2464,7 +2670,8 @@ def _normalize_name_addr_helper_token_8616(project: TailValidationValue, token: 
     return f"name:addr:{normalized:#x}" if isinstance(normalized, int) else token
 
 
-def _normalize_symbol_helper_token_8616(project: TailValidationValue, token: str, prefix: str) -> str:
+@cython.ccall
+def _normalize_symbol_helper_token_8616(project: TailValidationValue, token: object, prefix: object) -> object:
     """Resolve a symbol-name helper token to a normalized addr fingerprint."""
 
     raw_name = token[len(prefix):]
@@ -2475,7 +2682,8 @@ def _normalize_symbol_helper_token_8616(project: TailValidationValue, token: str
     return token
 
 
-def _normalize_helper_call_fingerprint_8616(project: TailValidationValue, token: str | None) -> str | None:
+@cython.ccall
+def _normalize_helper_call_fingerprint_8616(project: TailValidationValue, token: object) -> object:
     if not isinstance(token, str) or not token:
         return token
     if token.startswith("addr:"):
@@ -2488,12 +2696,20 @@ def _normalize_helper_call_fingerprint_8616(project: TailValidationValue, token:
         return _normalize_symbol_helper_token_8616(project, token, "codcall:")
     return token
 
-def _is_void_return_type_8616(return_type: TailValidationValue) -> bool:
+@cython.ccall
+def _is_void_return_type_8616(return_type: TailValidationValue) -> cython.bint:
     return isinstance(return_type, SimTypeBottom) and getattr(return_type, "label", None) == "void"
 
 
-def _active_codegen_return_value_is_unobserved_8616(project: TailValidationValue) -> bool:
+@cython.ccall
+def _active_codegen_return_value_is_unobserved_8616(project: TailValidationValue) -> cython.bint:
     """Return whether the active function's result is outside the live-out surface."""
+    cfunc: object
+    cfunc_addr: object
+    codegen: object
+    functions: object
+    candidate: object
+    candidate_function: object
     codegen = getattr(project, "_inertia_tail_validation_active_codegen", None)
     if codegen is None:
         return False
@@ -2523,7 +2739,9 @@ def _active_codegen_return_value_is_unobserved_8616(project: TailValidationValue
     return False
 
 
-def _function_has_void_return_evidence_8616(function: TailValidationValue) -> bool:
+@cython.ccall
+def _function_has_void_return_evidence_8616(function: object) -> cython.bint:
+    prototype: object
     if function is None:
         return False
     if getattr(function, "returning", None) is False:
@@ -2533,13 +2751,16 @@ def _function_has_void_return_evidence_8616(function: TailValidationValue) -> bo
     return _is_void_return_type_8616(getattr(prototype, "returnty", None))
 
 
+@cython.ccall
 def _call_effect_fingerprint_8616(
     node: TailValidationValue,
     project: TailValidationValue,
     *,
-    contextual_call_summaries: Mapping[int, TailValidationValue],
-    contextual_call_fingerprints: Mapping[int, str],
-) -> str:
+    contextual_call_summaries: Mapping[cython.longlong, TailValidationValue],
+    contextual_call_fingerprints: Mapping[cython.longlong, str],
+) -> object:
+    call_fingerprint: object
+    summary: object
     summary = contextual_call_summaries.get(id(node))
     target_addr = _call_summary_target_addr_8616(project, summary)
     call_fingerprint = (
@@ -2552,11 +2773,14 @@ def _call_effect_fingerprint_8616(
     return _normalize_helper_call_fingerprint_8616(project, call_fingerprint) or "<unknown-call>"
 
 
+@cython.ccall
 def _expected_helper_call_counts_for_validation_8616(
     root: TailValidationValue,
     project: TailValidationValue,
     summary_inventory: Mapping[int, CallsiteSummary8616] | None = None,
 ) -> Counter[str]:
+    function: object
+    callsite_addr: object
     function = _function_for_call_context_8616(root, project)
     if function is None:
         return Counter()
@@ -2574,11 +2798,14 @@ def _expected_helper_call_counts_for_validation_8616(
     return counts
 
 
+@cython.ccall
 def _cap_helper_call_fingerprints_to_expected_8616(
     project: TailValidationValue,
     fingerprints: Sequence[str],
     expected_counts: Counter[str],
 ) -> tuple[str, ...]:
+    expected_count: object
+    fingerprint: object
     if not expected_counts:
         return tuple(fingerprints)
     observed: Counter[str] = Counter()
@@ -2599,7 +2826,8 @@ def _helper_call_fingerprints_satisfy_expected_8616(
     project: TailValidationValue,
     fingerprints: Sequence[str],
     expected_counts: Counter[str],
-) -> bool:
+) -> cython.bint:
+    fingerprint: object
     if not expected_counts:
         return False
     observed: Counter[str] = Counter()
@@ -2607,10 +2835,12 @@ def _helper_call_fingerprints_satisfy_expected_8616(
         normalized = _normalize_helper_call_fingerprint_8616(project, fingerprint)
         key = _canonicalize_helper_call_fingerprint_for_compare_8616(str(normalized or fingerprint))
         observed[key] += 1
-    return all(observed.get(key, 0) >= count for key, count in expected_counts.items())
+    return all(observed.get(key, 0) >= count for key, count in builtins.iter(expected_counts.items()))
 
 
 def _collapse_mixed_addr_name_addr_duplicates_8616(fingerprints: Sequence[str]) -> tuple[str, ...]:
+    previous: object
+    fingerprint: object
     by_key: dict[str, str] = {}
     order: list[str] = []
     for fingerprint in fingerprints:
@@ -2622,11 +2852,15 @@ def _collapse_mixed_addr_name_addr_duplicates_8616(fingerprints: Sequence[str]) 
             continue
         if str(previous).startswith("name:addr:") and not str(fingerprint).startswith("name:addr:"):
             by_key[key] = fingerprint
-    return tuple(by_key[key] for key in order)
+    return tuple(by_key[key] for key in iter(order))
 
 
+@cython.ccall
 def _node_callsite_addr_8616(node: TailValidationValue) -> int | None:
     """Return a callsite address from dynamic angr C AST node metadata."""
+    tags: object
+    value: object
+    key: object
     # Dynamic boundary: angr C AST nodes expose optional tag/address attributes.
     tags = getattr(node, "tags", None)
     if isinstance(tags, dict):
@@ -2639,6 +2873,7 @@ def _node_callsite_addr_8616(node: TailValidationValue) -> int | None:
     return value if isinstance(value, int) else None
 
 
+@cython.ccall
 def _call_identity_callsite_addr_8616(node: TailValidationValue, summary: TailValidationValue) -> int | None:
     summary_callsite_addr = _call_summary_callsite_addr_8616(summary)
     if isinstance(summary_callsite_addr, int):
@@ -2646,9 +2881,15 @@ def _call_identity_callsite_addr_8616(node: TailValidationValue, summary: TailVa
     return _node_callsite_addr_8616(node)
 
 
-def _candidate_target_addrs_from_call_8616(project: TailValidationValue, node: TailValidationValue) -> tuple[int, ...]:
+@cython.ccall
+def _candidate_target_addrs_from_call_8616(project: TailValidationValue, node: TailValidationValue) -> tuple[cython.longlong, ...]:
     """Return candidate target addresses from dynamic angr call node metadata."""
-    addrs: list[int] = []
+    callee_addr: object
+    callee_func: object
+    match: object
+    addr: object
+    target: object
+    addrs: list[cython.longlong] = []
     # Dynamic boundary: angr C AST call nodes expose optional callee metadata.
     callee_func = getattr(node, "callee_func", None)
     callee_addr = getattr(callee_func, "addr", None)
@@ -2670,16 +2911,17 @@ def _candidate_target_addrs_from_call_8616(project: TailValidationValue, node: T
             addrs.append(int(match.group(1), 16))
         except ValueError:
             continue
-    ordered: list[int] = []
+    ordered: list[cython.longlong] = []
     for addr in addrs:
         if addr not in ordered:
             ordered.append(addr)
     return tuple(ordered)
 
 
+@cython.ccall
 def _call_node_matches_summary_8616(
-    project: TailValidationValue, node: TailValidationValue, summary: TailValidationValue
-) -> bool:
+    project: TailValidationValue, node: object, summary: object
+) -> cython.bint:
     if node is None or summary is None:
         return False
     target_addr = _call_summary_target_addr_8616(project, summary)
@@ -2691,13 +2933,15 @@ def _call_node_matches_summary_8616(
         return False
     return target_addr in {
         _normalized_call_target_addr_8616(project, candidate_addr)
-        for candidate_addr in _candidate_target_addrs_from_call_8616(project, node)
+        for candidate_addr in builtins.iter(_candidate_target_addrs_from_call_8616(project, node))
         if isinstance(candidate_addr, int)
     }
 
 
-def _call_node_has_nonprobe_target_evidence_8616(project: TailValidationValue, node: TailValidationValue) -> bool:
+@cython.ccall
+def _call_node_has_nonprobe_target_evidence_8616(project: TailValidationValue, node: TailValidationValue) -> cython.bint:
     """Return whether a C call node already points at a concrete non-stack-probe target."""
+    candidate_addr: object
     for candidate_addr in _candidate_target_addrs_from_call_8616(project, node):
         normalized = _normalized_call_target_addr_8616(project, candidate_addr)
         addr = normalized if isinstance(normalized, int) else candidate_addr
@@ -2706,12 +2950,14 @@ def _call_node_has_nonprobe_target_evidence_8616(project: TailValidationValue, n
     return False
 
 
+@cython.ccall
 def _index_call_nodes_by_callsite_8616(
     call_nodes: Sequence[CFunctionCall],
-) -> tuple[dict[int, list[CFunctionCall]], list[CFunctionCall]]:
+) -> tuple[dict[cython.longlong, list[CFunctionCall]], list[CFunctionCall]]:
     """Partition call nodes by exact callsite address evidence."""
+    node: object
 
-    nodes_by_callsite: dict[int, list[CFunctionCall]] = {}
+    nodes_by_callsite: dict[cython.longlong, list[CFunctionCall]] = {}
     remaining_nodes: list[CFunctionCall] = []
     for node in call_nodes:
         callsite_addr = _node_callsite_addr_8616(node)
@@ -2722,15 +2968,19 @@ def _index_call_nodes_by_callsite_8616(
     return nodes_by_callsite, remaining_nodes
 
 
+@cython.ccall
 def _exact_callsite_pairs_8616(
-    nodes_by_callsite: dict[int, list[CFunctionCall]],
-    callsite_addrs: tuple[int, ...],
-) -> tuple[list[tuple[CFunctionCall, int]], set[int], list[int]]:
+    nodes_by_callsite: object,
+    callsite_addrs: object,
+) -> tuple[list[tuple[CFunctionCall, cython.longlong]], set[cython.longlong], list[cython.longlong]]:
     """Pair callsites that have direct node evidence; list the rest."""
+    matched_nodes: object
+    node: object
+    callsite_addr: object
 
-    ordered_pairs: list[tuple[CFunctionCall, int]] = []
-    used_node_ids: set[int] = set()
-    unmatched_callsites: list[int] = []
+    ordered_pairs: list[tuple[CFunctionCall, cython.longlong]] = []
+    used_node_ids: set[cython.longlong] = set()
+    unmatched_callsites: list[cython.longlong] = []
     for callsite_addr in callsite_addrs:
         matched_nodes = nodes_by_callsite.get(callsite_addr)
         if matched_nodes:
@@ -2742,15 +2992,21 @@ def _exact_callsite_pairs_8616(
     return ordered_pairs, used_node_ids, unmatched_callsites
 
 
+@cython.ccall
 def _evidence_call_pairs_8616(
     project: TailValidationValue,
     function: TailValidationValue,
-    unmatched_callsites: Sequence[int],
-    available_nodes: list[CFunctionCall],
-    summary_inventory: Mapping[int, CallsiteSummary8616] | None,
-    ordered_pairs: list[tuple[CFunctionCall, int]],
+    unmatched_callsites: Sequence[cython.longlong],
+    available_nodes: object,
+    summary_inventory: object,
+    ordered_pairs: object,
 ) -> None:
     """Pair unmatched callsites to remaining nodes by summary evidence."""
+    matched_index: object
+    node: object
+    summary: object
+    callsite_addr: object
+    idx: object
 
     for callsite_addr in unmatched_callsites:
         summary = (
@@ -2774,13 +3030,14 @@ def _ordered_contextual_call_pairs_impl_8616(
     root: TailValidationValue,
     project: TailValidationValue,
     summary_inventory: Mapping[int, CallsiteSummary8616] | None,
-) -> list[tuple[CFunctionCall, int]]:
+) -> object:
     """Build ordered call-node/callsite pairs from direct then summary evidence."""
+    function: object
 
     function = _function_for_call_context_8616(root, project)
     if function is None:
         return []
-    callsite_addrs = _boundary_tuple_8616(sorted(getattr(function, "get_call_sites", list)() or ()))
+    callsite_addrs = _boundary_tuple_8616(sorted(tuple(getattr(function, "get_call_sites", list)() or ())))
     if not callsite_addrs:
         callsite_addrs = _collect_direct_capstone_callsite_addrs_8616(function)
     call_nodes = list(_iter_observable_call_nodes_for_validation_8616(root))
@@ -2792,7 +3049,7 @@ def _ordered_contextual_call_pairs_impl_8616(
         nodes_by_callsite, callsite_addrs
     )
     remaining_nodes.extend(
-        node for node in call_nodes if id(node) not in used_node_ids and node not in remaining_nodes
+        node for node in iter(call_nodes) if id(node) not in used_node_ids and node not in remaining_nodes
     )
     _evidence_call_pairs_8616(
         project,
@@ -2805,13 +3062,15 @@ def _ordered_contextual_call_pairs_impl_8616(
     return ordered_pairs
 
 
+@cython.ccall
 def _ordered_contextual_call_pairs_8616(
     root: TailValidationValue,
     project: TailValidationValue,
     summary_inventory: Mapping[int, CallsiteSummary8616] | None = None,
-) -> list[tuple[CFunctionCall, int]]:
+) -> object:
     return _ordered_contextual_call_pairs_impl_8616(root, project, summary_inventory)
 
+@cython.ccall
 def _node_boundary_expr_fingerprint_8616(
     node: TailValidationValue,
     project: TailValidationValue,
@@ -2905,6 +3164,7 @@ def _node_boundary_stmt_fingerprint_8616(
     contextual_call_summaries: Mapping[int, TailValidationValue] | None,
 ) -> TailValidationValue:
     """Fingerprint statement-kind nodes, falling back to generic field tuples."""
+    structured_fp: object
 
     structured_fp = _structured_node_boundary_fingerprint_8616(
         node,
@@ -2930,17 +3190,19 @@ def _node_boundary_stmt_fingerprint_8616(
                     contextual_call_fingerprints,
                     contextual_call_summaries,
                 )
-                for stmt in (getattr(node, "statements", ()) or ())
+                for stmt in iter((getattr(node, "statements", ()) or ()))
             ),
         )
     return None
 
 
+@cython.ccall
 def _node_boundary_generic_fields_fingerprint_8616(
     node: TailValidationValue,
     project: TailValidationValue,
 ) -> TailValidationValue:
     """Fingerprint a node from its generic child-field tuple."""
+    attr: object
 
     fields = []
     for attr in (
@@ -2961,13 +3223,18 @@ def _node_boundary_generic_fields_fingerprint_8616(
     return (type(node).__name__, tuple(fields))
 
 
+@cython.ccall
 def _node_boundary_fingerprint_impl_8616(
-    node: TailValidationValue,
+    node: object,
     project: TailValidationValue,
     contextual_call_fingerprints: Mapping[int, str] | None,
     contextual_call_summaries: Mapping[int, TailValidationValue] | None,
 ) -> TailValidationValue:
     """Compute the node boundary fingerprint, dispatching by node kind."""
+    condition_fingerprint: object
+    contextual_condition_fingerprints: object
+    expr_fp: object
+    stmt_fp: object
 
     if node is None:
         return None
@@ -2991,12 +3258,15 @@ def _node_boundary_fingerprint_impl_8616(
     return _node_boundary_generic_fields_fingerprint_8616(node, project)
 
 
+@cython.ccall
 def _node_boundary_fingerprint(
-    node: TailValidationValue,
+    node: object,
     project: TailValidationValue,
     contextual_call_fingerprints: Mapping[int, str] | None = None,
     contextual_call_summaries: Mapping[int, TailValidationValue] | None = None,
 ) -> TailValidationValue:
+    cache: object
+    cached: object
     if node is not None:
         # Dynamic angr/codegen compatibility boundary.
         cache = getattr(project, "_inertia_tail_validation_boundary_node_cache_8616", None)
@@ -3020,6 +3290,7 @@ def _node_boundary_fingerprint(
     return result
 
 
+@cython.ccall
 def _condition_node_boundary_fingerprint_8616(
     node: TailValidationValue,
     project: TailValidationValue,
@@ -3027,6 +3298,8 @@ def _condition_node_boundary_fingerprint_8616(
     contextual_call_summaries: Mapping[int, TailValidationValue] | None,
 ) -> TailValidationValue:
     """Fingerprint a control-flow condition through the canonical expression surface."""
+    condition_fingerprint: object
+    contextual_condition_fingerprints: object
     # Dynamic angr/codegen compatibility boundary.
     contextual_condition_fingerprints = getattr(
         project,
@@ -3049,6 +3322,8 @@ def _call_node_boundary_fingerprint_8616(
     contextual_call_fingerprints: Mapping[int, str] | None,
     contextual_call_summaries: Mapping[int, TailValidationValue] | None,
 ) -> tuple[TailValidationValue, ...]:
+    call_fingerprint: object
+    summary: object
     if _is_runtime_segment_helper_call_8616(node):
         return ("expr", _expr_fingerprint(node, project))
     call_fingerprint = None
@@ -3069,7 +3344,7 @@ def _call_node_boundary_fingerprint_8616(
                 contextual_call_fingerprints,
                 contextual_call_summaries,
             )
-            for arg in (getattr(node, "args", ()) or ())
+            for arg in iter((getattr(node, "args", ()) or ()))
         ),
     )
 
@@ -3094,7 +3369,7 @@ def _structured_node_boundary_fingerprint_8616(
                             body, project, contextual_call_fingerprints, contextual_call_summaries
                         ),
                     )
-                    for cond, body in (node.condition_and_nodes or ())
+                    for cond, body in iter((node.condition_and_nodes or ()))
                 ),
                 _node_boundary_fingerprint(
                     node.else_node, project, contextual_call_fingerprints, contextual_call_summaries
@@ -3151,11 +3426,11 @@ def _structured_node_boundary_fingerprint_8616(
                         case_body, project, contextual_call_fingerprints, contextual_call_summaries
                     ),
                 )
-                for case_value, case_body in sorted(
+                for case_value, case_body in builtins.iter(sorted(
                     # Dynamic angr/codegen compatibility boundary.
-                    _switch_case_items_8616(node.cases),
+                    tuple(_switch_case_items_8616(node.cases)),
                     key=lambda item: _switch_case_fingerprint(item[0], project),
-                )
+                ))
             )
             return (
                 "switch",
@@ -3172,7 +3447,9 @@ def _structured_node_boundary_fingerprint_8616(
     return _impl()
 
 
-def _tail_validation_summary_cache_store(codegen: TailValidationValue) -> dict[str, TailValidationValue]:
+@cython.ccall
+def _tail_validation_summary_cache_store(codegen: TailValidationValue) -> object:
+    cache: object
     cache = getattr(codegen, "_inertia_tail_validation_summary_cache", None)
     if not isinstance(cache, dict):
         cache = {}
@@ -3185,28 +3462,32 @@ def _tail_validation_summary_cache_store(codegen: TailValidationValue) -> dict[s
     return cache
 
 
+@cython.ccall
 def _consume_tail_validation_boundary_context_8616(
     codegen: TailValidationValue,
     *,
-    mode: str,
-    boundary_fingerprint: str,
+    mode: object,
+    boundary_fingerprint: object,
     root: TailValidationValue,
 ) -> _TailValidationBoundaryContext8616 | None:
     """Return matching boundary facts once, then clear them from codegen."""
+    context: object
     # Dynamic angr/codegen compatibility boundary.
     context = getattr(codegen, "_inertia_tail_validation_boundary_context_8616", None)
     if not isinstance(context, _TailValidationBoundaryContext8616):
         return None
     with contextlib.suppress(Exception):
         delattr(codegen, "_inertia_tail_validation_boundary_context_8616")
-    if context.mode != mode or context.boundary_fingerprint != boundary_fingerprint or context.root_id != id(root):
+    if operator.ne(context.mode, mode) or operator.ne(context.boundary_fingerprint, boundary_fingerprint) or operator.ne(context.root_id, id(root)):
         return None
     return context
 
 
+@cython.ccall
 def _clone_tail_validation_aggregate_payload(
     value: Mapping[str, TailValidationValue],
 ) -> dict[str, TailValidationValue]:
+    surface: object
     surface = value.get("surface")
     return {
         "summary": dict(value["summary"]),
@@ -3214,19 +3495,21 @@ def _clone_tail_validation_aggregate_payload(
     }
 
 
+@cython.ccall
 def _records_with_uncollected_placeholders(
     records: Sequence[Mapping[str, TailValidationValue]],
     *,
-    scanned: int,
-) -> list[Mapping[str, TailValidationValue]]:
-    normalized = [record for record in records if isinstance(record, Mapping)]
+    scanned: cython.longlong,
+) -> object:
+    normalized = [record for record in iter(records) if isinstance(record, Mapping)]
     missing_records = max(0, int(scanned or 0) - len(normalized))
     if missing_records <= 0:
         return normalized
     return normalized + [{} for _ in range(missing_records)]
 
 
-def _tail_validation_validation_cache_store(owner: TailValidationValue) -> MutableMapping[str, TailValidationValue]:
+@cython.ccall
+def _tail_validation_validation_cache_store(owner: object) -> MutableMapping[str, TailValidationValue]:
     if owner is None:
         return {}
     if isinstance(owner, MutableMapping):
@@ -3239,7 +3522,8 @@ def _tail_validation_validation_cache_store(owner: TailValidationValue) -> Mutab
     return {}
 
 
-def _tail_validation_records_fingerprint(records: Sequence[Mapping[str, TailValidationValue]], *, scanned: int) -> str:
+@cython.ccall
+def _tail_validation_records_fingerprint(records: Sequence[Mapping[str, TailValidationValue]], *, scanned: cython.longlong) -> object:
     payload = {
         "scanned": int(scanned or 0),
         "records": [
@@ -3253,14 +3537,19 @@ def _tail_validation_records_fingerprint(records: Sequence[Mapping[str, TailVali
                 "exit_kind": record.get("exit_kind"),
                 "exit_detail": record.get("exit_detail"),
             }
-            for record in records
+            for record in iter(records)
         ],
     }
     return build_x86_16_validation_cache_descriptor("tail_validation.aggregate.records", payload).fingerprint
 
 
-def _tail_validation_changed_observable_fields(entry: Mapping[str, TailValidationValue]) -> tuple[str, ...]:
+def _tail_validation_changed_observable_fields(entry: Mapping[str, TailValidationValue]) -> object:
     def _impl() -> tuple[str, ...]:
+        delta: object
+        field_delta: object
+        value: object
+        field_name: object
+        key: object
         delta = entry.get("delta")
         changed_fields: list[str] = []
         if isinstance(delta, Mapping):
@@ -3281,12 +3570,15 @@ def _tail_validation_changed_observable_fields(entry: Mapping[str, TailValidatio
             if isinstance(value, str):
                 text_parts.append(value)
         combined = " ".join(text_parts)
-        return tuple(field_name for field_name in _TAIL_VALIDATION_OBSERVABLE_FIELDS if f"{field_name}:" in combined)
+        return tuple(field_name for field_name in iter(_TAIL_VALIDATION_OBSERVABLE_FIELDS) if f"{field_name}:" in combined)
 
     return _impl()
 
 
+@cython.ccall
 def _tail_validation_changed_families(entry: Mapping[str, TailValidationValue]) -> tuple[str, ...]:
+    family: object
+    field_name: object
     fields = set(_tail_validation_changed_observable_fields(entry))
     families: list[str] = []
     for field_name, family in (
@@ -3313,8 +3605,13 @@ def _tail_validation_changed_families(entry: Mapping[str, TailValidationValue]) 
 
 def _tail_validation_changed_family_summary(
     changed_functions: Sequence[Mapping[str, TailValidationValue]],
-) -> list[dict[str, TailValidationValue]]:
-    def _impl() -> list[dict[str, TailValidationValue]]:
+) -> object:
+    def _impl() -> object:
+        families: object
+        stage: object
+        family: object
+        item: object
+        row: object
         rows: dict[str, dict[str, TailValidationValue]] = {}
         for item in changed_functions:
             if not isinstance(item, Mapping):
@@ -3365,10 +3662,12 @@ def _tail_validation_changed_family_summary(
     return _impl()
 
 
-def _tail_validation_sort_value(value: TailValidationValue) -> str:
+@cython.ccall
+def _tail_validation_sort_value(value: TailValidationValue) -> object:
     return value if isinstance(value, str) else ""
 
 
+@cython.ccall
 def _tail_validation_function_sort_key(item: Mapping[str, TailValidationValue]) -> tuple[str, str, str, str]:
     return (
         "" if isinstance(item.get("cod_file"), str) else "~",
@@ -3378,7 +3677,8 @@ def _tail_validation_function_sort_key(item: Mapping[str, TailValidationValue]) 
     )
 
 
-def _tail_validation_stage_status(entry: TailValidationValue) -> str:
+@cython.ccall
+def _tail_validation_stage_status(entry: TailValidationValue) -> object:
     """Normalize one stage entry into its honest per-stage status string.
 
     Conditional and refused entry-premise evidence keep their explicit
@@ -3386,16 +3686,18 @@ def _tail_validation_stage_status(entry: TailValidationValue) -> str:
     ``uncollected``. A retained premise receipt cannot certify unconditional
     stability even beside a forged ``stable``/``passed`` status.
     """
+    premise: object
+    status: object
     if not isinstance(entry, Mapping):
         return "uncollected"
     status = entry.get("status")
     premise = entry.get("entry_premise")
-    if status == EntryPremiseStatus8616.REFUSED:
+    if operator.eq(status, EntryPremiseStatus8616.REFUSED):
         return EntryPremiseStatus8616.REFUSED.value
     if bool(entry.get("changed", False)):
         return "changed"
     if isinstance(status, str) and status:
-        normalized: str = status.lower()
+        normalized: object = status.lower()
         if normalized in {
             EntryPremiseStatus8616.CONDITIONAL,
             EntryPremiseStatus8616.REFUSED,
@@ -3418,7 +3720,9 @@ def _tail_validation_stage_status(entry: TailValidationValue) -> str:
     return "changed" if bool(entry.get("changed", False)) else "passed"
 
 
+@cython.ccall
 def _tail_validation_record_proc_name(record: Mapping[str, TailValidationValue]) -> TailValidationValue:
+    proc_name: object
     proc_name = record.get("proc_name")
     if proc_name:
         return proc_name
@@ -3427,16 +3731,17 @@ def _tail_validation_record_proc_name(record: Mapping[str, TailValidationValue])
 
 def _tail_validation_function_accounting(
     records: Sequence[Mapping[str, TailValidationValue]],
-) -> dict[str, TailValidationValue]:
+) -> object:
     """Aggregate per-function status; refused and conditional never pass."""
 
     def _impl() -> dict[str, TailValidationValue]:
+        record: object
         rows: list[dict[str, TailValidationValue]] = []
         status_counts: Counter[str] = Counter()
         for record in records:
             proc_name = _tail_validation_record_proc_name(record)
             stage_statuses = {
-                stage: _tail_validation_stage_status(record.get(stage)) for stage in ("structuring", "postprocess")
+                stage: _tail_validation_stage_status(record.get(stage)) for stage in iter(("structuring", "postprocess"))
             }
             if "changed" in stage_statuses.values():
                 status = "changed"
@@ -3457,7 +3762,7 @@ def _tail_validation_function_accounting(
                     "proc_name": proc_name,
                     "proc_kind": record.get("proc_kind"),
                     "status": status,
-                    "stage_statuses": dict(sorted(stage_statuses.items())),
+                    "stage_statuses": dict(sorted(tuple(stage_statuses.items()))),
                     "exit_kind": record.get("exit_kind"),
                     "exit_detail": record.get("exit_detail"),
                     "tail_validation_uncollected": bool(record.get("tail_validation_uncollected", False)),
@@ -3465,24 +3770,25 @@ def _tail_validation_function_accounting(
             )
         rows.sort(key=_tail_validation_function_sort_key)
         return {
-            "function_status_counts": dict(sorted(status_counts.items())),
+            "function_status_counts": dict(sorted(tuple(status_counts.items()))),
             "function_statuses": rows,
-            "passed_functions": [row for row in rows if row["status"] == "passed"],
-            "changed_functions": [row for row in rows if row["status"] == "changed"],
+            "passed_functions": [row for row in iter(rows) if row["status"] == "passed"],
+            "changed_functions": [row for row in iter(rows) if row["status"] == "changed"],
             "conditional_functions": [
-                row for row in rows if row["status"] == EntryPremiseStatus8616.CONDITIONAL
+                row for row in iter(rows) if operator.eq(row["status"], EntryPremiseStatus8616.CONDITIONAL)
             ],
             "refused_functions": [
-                row for row in rows if row["status"] == EntryPremiseStatus8616.REFUSED
+                row for row in iter(rows) if operator.eq(row["status"], EntryPremiseStatus8616.REFUSED)
             ],
-            "unknown_functions": [row for row in rows if row["status"] == "unknown"],
-            "uncollected_functions": [row for row in rows if row["status"] == "uncollected"],
+            "unknown_functions": [row for row in iter(rows) if row["status"] == "unknown"],
+            "uncollected_functions": [row for row in iter(rows) if row["status"] == "uncollected"],
         }
 
     return _impl()
 
 
-def _tail_validation_stage_bucket_8616(entry: TailValidationValue) -> str:
+@cython.ccall
+def _tail_validation_stage_bucket_8616(entry: TailValidationValue) -> object:
     """Classify one stage entry into its honest summary counter bucket.
 
     Conditional and refused premise evidence keep explicit buckets even when a
@@ -3504,11 +3810,15 @@ def _tail_validation_stage_bucket_8616(entry: TailValidationValue) -> str:
 
 
 def _tail_validation_stage_summary(
-    records: Sequence[Mapping[str, TailValidationValue]], stage: str
-) -> dict[str, TailValidationValue]:
+    records: Sequence[Mapping[str, TailValidationValue]], stage: object
+) -> object:
     """Summarize one stage; conditional/refused evidence never counts stable."""
 
     def _impl() -> dict[str, TailValidationValue]:
+        entry: object
+        mode: object
+        verdict: object
+        record: object
         stable_count = 0
         changed_count = 0
         conditional_count = 0
@@ -3528,10 +3838,10 @@ def _tail_validation_stage_summary(
             if bucket == "unknown":
                 unknown_count += 1
                 continue
-            if bucket == EntryPremiseStatus8616.CONDITIONAL:
+            if operator.eq(bucket, EntryPremiseStatus8616.CONDITIONAL):
                 conditional_count += 1
                 continue
-            if bucket == EntryPremiseStatus8616.REFUSED:
+            if operator.eq(bucket, EntryPremiseStatus8616.REFUSED):
                 refused_count += 1
                 continue
             changed = bucket == "changed"
@@ -3567,7 +3877,7 @@ def _tail_validation_stage_summary(
         )
         top_verdicts = [
             {"verdict": verdict, "count": count}
-            for verdict, count in sorted(verdict_counter.items(), key=lambda item: (-item[1], item[0]))
+            for verdict, count in builtins.iter(sorted(tuple(verdict_counter.items()), key=lambda item: (-item[1], item[0])))
         ]
         return {
             "stable_count": stable_count,
@@ -3577,7 +3887,7 @@ def _tail_validation_stage_summary(
             "unknown_count": unknown_count,
             "missing_count": missing_count,
             "coverage_count": stable_count + changed_count + unknown_count,
-            "mode_counts": dict(sorted(mode_counter.items())),
+            "mode_counts": dict(sorted(tuple(mode_counter.items()))),
             "top_verdicts": top_verdicts,
             "changed_functions": changed_functions,
             "changed_families": _tail_validation_changed_family_summary(changed_functions),
@@ -3586,11 +3896,11 @@ def _tail_validation_stage_summary(
     return _impl()
 
 
-def _switch_case_fingerprint(case_value: TailValidationValue, project: TailValidationValue) -> str:
+def _switch_case_fingerprint(case_value: TailValidationValue, project: TailValidationValue) -> object:
     if isinstance(case_value, int):
         return f"const:{case_value}"
     if isinstance(case_value, (tuple, list)):
-        return "[" + ",".join(_switch_case_fingerprint(item, project) for item in case_value) + "]"
+        return "[" + ",".join(_switch_case_fingerprint(item, project) for item in iter(case_value)) + "]"
     return str(_expr_fingerprint(case_value, project))
 
 
@@ -3600,17 +3910,23 @@ def _switch_case_items_8616(cases: TailValidationValue) -> tuple[tuple[TailValid
     if isinstance(cases, (list, tuple)):
         return tuple(
             (case_value, case_body)
-            for item in cases
+            for item in iter(cases)
             if isinstance(item, (list, tuple)) and len(item) == 2
-            for case_value, case_body in (item,)
+            for case_value, case_body in iter((item,))
         )
     return ()
 
 
+@cython.ccall
 def fingerprint_x86_16_tail_validation_boundary(
-    project: TailValidationValue, codegen: TailValidationValue, *, mode: str = "live_out"
-) -> str:
+    project: TailValidationValue, codegen: TailValidationValue, *, mode: object = "live_out"
+) -> object:
     """Fingerprint the structured-codegen boundary used for validation caching."""
+    func_addr: object
+    previous_active_codegen: object
+    previous_condition_fingerprints: object
+    previous_node_cache: object
+    previous_snapshot_expr_cache: object
     if mode not in _TAIL_VALIDATION_MODES:
         raise ValueError(f"Unsupported x86-16 tail validation mode: {mode}")
     # C codegen mutates AST nodes in place between validation boundaries. The
@@ -3709,12 +4025,14 @@ def fingerprint_x86_16_tail_validation_boundary(
         return descriptor.fingerprint
 
 
+@cython.ccall
 def _transport_entry_premise_8616(
-    source: Mapping[str, TailValidationValue], target: dict[str, TailValidationValue],
+    source: Mapping[str, TailValidationValue], target: object,
 ) -> None:
     """Retain conditional identity; damaged or dropped receipts cannot become stable."""
+    premise: object
     premise = source.get("entry_premise")
-    if premise is None and source.get("status") != EntryPremiseStatus8616.CONDITIONAL:
+    if premise is None and operator.ne(source.get("status"), EntryPremiseStatus8616.CONDITIONAL):
         return
     if not valid_entry_premise_projection_8616(premise):
         target["status"] = EntryPremiseStatus8616.REFUSED.value
@@ -3726,11 +4044,14 @@ def _transport_entry_premise_8616(
         target["status"] = EntryPremiseStatus8616.CONDITIONAL.value
 
 
+@cython.ccall
 def _tail_validation_stage_snapshot_entry_8616(
-    stage: str,
+    stage: object,
     entry: Mapping[str, TailValidationValue],
-) -> dict[str, TailValidationValue]:
+) -> object:
     """Build one persisted stage snapshot from its stored entry."""
+    delta: object
+    status: object
 
     status = entry.get("status")
     if not (isinstance(status, str) and status):
@@ -3763,10 +4084,13 @@ def _tail_validation_stage_snapshot_entry_8616(
 
 def extract_x86_16_tail_validation_snapshot(
     function_info: Mapping[str, TailValidationValue] | None,
-) -> dict[str, TailValidationValue]:
+) -> object:
     """Extract persisted structuring/postprocess validation stage snapshots."""
 
-    def _impl() -> dict[str, TailValidationValue]:
+    def _impl() -> object:
+        entry: object
+        validation_info: object
+        stage: object
         stages: dict[str, TailValidationValue] = {}
         if not isinstance(function_info, Mapping):
             return stages
@@ -3783,8 +4107,10 @@ def extract_x86_16_tail_validation_snapshot(
     return _impl()
 
 
-def x86_16_tail_validation_result_passed(validation: Mapping[str, TailValidationValue] | None) -> bool:
+@cython.ccall
+def x86_16_tail_validation_result_passed(validation: Mapping[str, TailValidationValue] | None) -> cython.bint:
     """Accept a stable stage only when no semantic failure evidence remains."""
+    status: object
     if not isinstance(validation, Mapping):
         return False
     if validation.get("semantic_failures") or validation.get("entry_premise") is not None:
@@ -3797,9 +4123,10 @@ def x86_16_tail_validation_result_passed(validation: Mapping[str, TailValidation
     return False
 
 
+@cython.ccall
 def x86_16_tail_validation_result_preserves_behavior(
     validation: Mapping[str, TailValidationValue] | None,
-) -> bool:
+) -> cython.bint:
     """Accept local equality under retained premises, without final acceptance.
 
     The tail collector authenticates the live scope before comparison. This
@@ -3815,7 +4142,7 @@ def x86_16_tail_validation_result_preserves_behavior(
     if x86_16_tail_validation_result_passed(validation):
         return True
     return (
-        validation.get("status") == EntryPremiseStatus8616.CONDITIONAL
+        operator.eq(validation.get("status"), EntryPremiseStatus8616.CONDITIONAL)
         and validation.get("changed") is False
         and valid_entry_premise_projection_8616(validation.get("entry_premise"))
     )
@@ -3825,13 +4152,16 @@ def x86_16_tail_validation_snapshot_passed(
     snapshot: Mapping[str, TailValidationValue] | None,
     *,
     expected_stages: Sequence[str] = ("structuring", "postprocess"),
-) -> bool:
+) -> cython.bint:
     """Accept expected stages only without retained semantic failure evidence."""
 
-    def _impl() -> bool:
+    def _impl() -> cython.bint:
+        entry: object
+        status: object
+        stage: object
         if not isinstance(snapshot, Mapping):
             return False
-        required_stages = tuple(stage for stage in expected_stages if isinstance(stage, str) and stage)
+        required_stages = tuple(stage for stage in iter(expected_stages) if isinstance(stage, str) and stage)
         if not required_stages:
             return False
         for stage in required_stages:
@@ -3852,14 +4182,18 @@ def x86_16_tail_validation_snapshot_passed(
     return _impl()
 
 
+@cython.ccall
 def persist_x86_16_tail_validation_snapshot(
     *,
     function_info: MutableMapping[str, TailValidationValue] | None,
-    codegen: TailValidationValue,
-    stage: str,
+    codegen: object,
+    stage: object,
     validation: Mapping[str, TailValidationValue],
-) -> dict[str, TailValidationValue]:
+) -> object:
     """Persist one validation stage snapshot onto function info and codegen."""
+    delta: object
+    snapshot: object
+    status: object
     status = validation.get("status")
     if not isinstance(status, str) or not status:
         status = "changed" if bool(validation.get("changed", False)) else "stable"
@@ -3890,6 +4224,7 @@ def persist_x86_16_tail_validation_snapshot(
     return snapshot_entry
 
 
+@cython.ccall
 def _surface_stage_summaries_8616(summary: Mapping[str, TailValidationValue]) -> dict[str, Mapping[str, TailValidationValue]]:
     """Return the per-stage summary mappings."""
 
@@ -3898,8 +4233,11 @@ def _surface_stage_summaries_8616(summary: Mapping[str, TailValidationValue]) ->
     return {"structuring": structuring, "postprocess": postprocess}
 
 
-def _surface_stage_rows_8616(surface: Mapping[str, TailValidationValue]) -> dict[str, Mapping[str, TailValidationValue]]:
+@cython.ccall
+def _surface_stage_rows_8616(surface: Mapping[str, TailValidationValue]) -> object:
     """Index the surface stage rows by stage name."""
+    stage_name: object
+    row: object
 
     rows: dict[str, Mapping[str, TailValidationValue]] = {}
     for row in surface.get("stage_rows", ()) or ():
@@ -3911,16 +4249,17 @@ def _surface_stage_rows_8616(surface: Mapping[str, TailValidationValue]) -> dict
     return rows
 
 
-def _surface_summary_total_8616(stage_summaries: dict[str, Mapping[str, TailValidationValue]], key: str) -> int:
+def _surface_summary_total_8616(stage_summaries: object, key: object) -> cython.longlong:
     """Sum one counter across per-stage summaries."""
 
-    return sum(int(stage.get(key, 0) or 0) for stage in stage_summaries.values())
+    return sum(int(stage.get(key, 0) or 0) for stage in builtins.iter(stage_summaries.values()))
 
 
+@cython.ccall
 def _surface_scalar_checks_8616(
     summary: Mapping[str, TailValidationValue],
-    stage_summaries: dict[str, Mapping[str, TailValidationValue]],
-) -> tuple[tuple[str, int], ...]:
+    stage_summaries: object,
+) -> tuple[tuple[str, cython.longlong], ...]:
     """Return the scalar surface-vs-summary consistency expectations."""
 
     return (
@@ -3939,12 +4278,15 @@ def _surface_scalar_checks_8616(
     )
 
 
+@cython.ccall
 def _record_surface_scalar_issues_8616(
-    issues: list[str],
+    issues: object,
     surface: Mapping[str, TailValidationValue],
-    checks: Sequence[tuple[str, int]],
+    checks: Sequence[tuple[str, cython.longlong]],
 ) -> None:
     """Append issues for scalar counters that disagree with the summary."""
+    expected: object
+    key: object
 
     for key, expected in checks:
         actual = int(surface.get(key, 0) or 0)
@@ -3952,12 +4294,17 @@ def _record_surface_scalar_issues_8616(
             issues.append(f"{key}: surface={actual} summary={expected}")
 
 
+@cython.ccall
 def _record_surface_stage_row_issues_8616(
-    issues: list[str],
-    stage_summaries: dict[str, Mapping[str, TailValidationValue]],
-    stage_rows: dict[str, Mapping[str, TailValidationValue]],
+    issues: object,
+    stage_summaries: object,
+    stage_rows: object,
 ) -> None:
     """Append issues for per-stage rows that disagree with the summary."""
+    row: object
+    key: object
+    stage_name: object
+    stage_summary: object
 
     for stage_name, stage_summary in stage_summaries.items():
         row = stage_rows.get(stage_name)
@@ -3971,11 +4318,12 @@ def _record_surface_stage_row_issues_8616(
                 issues.append(f"{stage_name}.{key}: surface={actual} summary={expected}")
 
 
+@cython.ccall
 def check_x86_16_tail_validation_surface_consistency(
     summary: Mapping[str, TailValidationValue],
     surface: Mapping[str, TailValidationValue],
     *,
-    scanned: int,
+    scanned: cython.longlong,
 ) -> tuple[str, ...]:
     """Return consistency issues between aggregate summary and UI surface."""
 
@@ -3984,9 +4332,9 @@ def check_x86_16_tail_validation_surface_consistency(
     stage_summaries = _surface_stage_summaries_8616(summary)
     stage_rows = _surface_stage_rows_8616(surface)
     _record_surface_scalar_issues_8616(issues, surface, _surface_scalar_checks_8616(summary, stage_summaries))
-    if dict(surface.get("function_status_counts", {}) or {}) != dict(summary.get("function_status_counts", {}) or {}):
+    if operator.ne(dict(surface.get("function_status_counts", {}) or {}), dict(summary.get("function_status_counts", {}) or {})):
         issues.append("function_status_counts mismatch")
-    if len(surface.get("function_statuses", ()) or ()) != scanned_count:
+    if operator.ne(len(surface.get("function_statuses", ()) or ()), scanned_count):
         issues.append(
             f"function_statuses: surface={len(surface.get('function_statuses', ()) or ())} scanned={scanned_count}"
         )
@@ -3994,11 +4342,16 @@ def check_x86_16_tail_validation_surface_consistency(
     return tuple(issues)
 
 def build_x86_16_tail_validation_surface(
-    summary: Mapping[str, TailValidationValue], *, scanned: int
-) -> dict[str, TailValidationValue]:
+    summary: Mapping[str, TailValidationValue], *, scanned: cython.longlong
+) -> object:
     """Build a human-facing aggregate tail-validation surface."""
 
-    def _impl() -> dict[str, TailValidationValue]:
+    def _impl() -> object:
+        count: object
+        stage: object
+        verdict: object
+        item: object
+        row: object
         scanned_count = max(int(scanned or 0), 0)
         severity = str(summary.get("severity", "uncollected"))
         changed_function_count = int(summary.get("changed_function_count", 0) or 0)
@@ -4026,7 +4379,7 @@ def build_x86_16_tail_validation_surface(
                 "changed_rate": row["changed_rate"],
                 "top_verdicts": row["top_verdicts"],
             }
-            for row in sorted(stage_rows, key=lambda item: (-item["changed_count"], item["stage"]))
+            for row in builtins.iter(sorted(stage_rows, key=lambda item: (-item["changed_count"], item["stage"])))
             if row["changed_count"] > 0
         ]
         top_changed_verdicts = []
@@ -4039,7 +4392,7 @@ def build_x86_16_tail_validation_surface(
                     verdict_counter[verdict] += count
         top_changed_verdicts = [
             {"verdict": verdict, "count": count}
-            for verdict, count in sorted(verdict_counter.items(), key=lambda item: (-item[1], item[0]))
+            for verdict, count in builtins.iter(sorted(tuple(verdict_counter.items()), key=lambda item: (-item[1], item[0])))
         ]
         changed_function_rows: dict[
             tuple[TailValidationValue, TailValidationValue, TailValidationValue], dict[str, TailValidationValue]
@@ -4077,7 +4430,7 @@ def build_x86_16_tail_validation_surface(
                     "stages": tuple(sorted(row["stages"])),
                     "verdicts": tuple(row["verdicts"]),
                 }
-                for row in changed_function_rows.values()
+                for row in builtins.iter(changed_function_rows.values())
             ),
             key=lambda item: (
                 -int(item.get("changed_stage_count", 0) or 0),
@@ -4089,19 +4442,19 @@ def build_x86_16_tail_validation_surface(
         )
         changed_families = _tail_validation_changed_family_summary(changed_functions)
         top_uncollected_functions = sorted(
-            (dict(item) for item in uncollected_functions if isinstance(item, Mapping)),
+            (dict(item) for item in iter(uncollected_functions) if isinstance(item, Mapping)),
             key=_tail_validation_function_sort_key,
         )
         top_unknown_functions = sorted(
-            (dict(item) for item in unknown_functions if isinstance(item, Mapping)),
+            (dict(item) for item in iter(unknown_functions) if isinstance(item, Mapping)),
             key=_tail_validation_function_sort_key,
         )
         top_conditional_functions = sorted(
-            (dict(item) for item in conditional_functions if isinstance(item, Mapping)),
+            (dict(item) for item in iter(conditional_functions) if isinstance(item, Mapping)),
             key=_tail_validation_function_sort_key,
         )
         top_refused_functions = sorted(
-            (dict(item) for item in refused_functions if isinstance(item, Mapping)),
+            (dict(item) for item in iter(refused_functions) if isinstance(item, Mapping)),
             key=_tail_validation_function_sort_key,
         )
 
@@ -4150,6 +4503,12 @@ def build_x86_16_tail_validation_surface(
 def _normalized_tail_validation_baseline_entries(
     entries: Sequence[Mapping[str, TailValidationValue]] | None,
 ) -> list[dict[str, str]]:
+    cod_file: object
+    proc_kind: object
+    proc_name: object
+    stage: object
+    verdict: object
+    item: object
     normalized: set[tuple[str, str, str, str, str]] = set()
     for item in entries or ():
         if not isinstance(item, Mapping):
@@ -4159,7 +4518,7 @@ def _normalized_tail_validation_baseline_entries(
         proc_kind = item.get("proc_kind")
         stage = item.get("stage")
         verdict = item.get("verdict")
-        if not all(isinstance(value, str) and value for value in (cod_file, proc_name, proc_kind, stage, verdict)):
+        if not all(isinstance(value, str) and value for value in iter((cod_file, proc_name, proc_kind, stage, verdict))):
             continue
         assert isinstance(cod_file, str)
         assert isinstance(proc_name, str)
@@ -4175,10 +4534,11 @@ def _normalized_tail_validation_baseline_entries(
             "stage": stage,
             "verdict": verdict,
         }
-        for cod_file, proc_name, proc_kind, stage, verdict in sorted(normalized)
+        for cod_file, proc_name, proc_kind, stage, verdict in builtins.iter(sorted(normalized))
     ]
 
 
+@cython.ccall
 def build_x86_16_tail_validation_baseline(summary: Mapping[str, TailValidationValue]) -> dict[str, TailValidationValue]:
     """Build a baseline payload from currently changed validation entries."""
     normalized_entries = _normalized_tail_validation_baseline_entries(summary.get("changed_functions"))
@@ -4189,6 +4549,7 @@ def build_x86_16_tail_validation_baseline(summary: Mapping[str, TailValidationVa
     }
 
 
+@cython.ccall
 def compare_x86_16_tail_validation_baseline(
     summary: Mapping[str, TailValidationValue],
     baseline: Mapping[str, TailValidationValue] | None,
@@ -4207,7 +4568,7 @@ def compare_x86_16_tail_validation_baseline(
             item["stage"],
             item["verdict"],
         )
-        for item in current_entries
+        for item in iter(current_entries)
     }
     baseline_set = {
         (
@@ -4217,7 +4578,7 @@ def compare_x86_16_tail_validation_baseline(
             item["stage"],
             item["verdict"],
         )
-        for item in baseline_entries
+        for item in iter(baseline_entries)
     }
     unexpected = [
         {
@@ -4227,7 +4588,7 @@ def compare_x86_16_tail_validation_baseline(
             "stage": stage,
             "verdict": verdict,
         }
-        for cod_file, proc_name, proc_kind, stage, verdict in sorted(current_set - baseline_set)
+        for cod_file, proc_name, proc_kind, stage, verdict in builtins.iter(sorted(current_set - baseline_set))
     ]
     missing = [
         {
@@ -4237,7 +4598,7 @@ def compare_x86_16_tail_validation_baseline(
             "stage": stage,
             "verdict": verdict,
         }
-        for cod_file, proc_name, proc_kind, stage, verdict in sorted(baseline_set - current_set)
+        for cod_file, proc_name, proc_kind, stage, verdict in builtins.iter(sorted(baseline_set - current_set))
     ]
     matches = [
         {
@@ -4247,7 +4608,7 @@ def compare_x86_16_tail_validation_baseline(
             "stage": stage,
             "verdict": verdict,
         }
-        for cod_file, proc_name, proc_kind, stage, verdict in sorted(current_set & baseline_set)
+        for cod_file, proc_name, proc_kind, stage, verdict in builtins.iter(sorted(current_set & baseline_set))
     ]
     if unexpected:
         status = "regressed"
@@ -4263,11 +4624,13 @@ def compare_x86_16_tail_validation_baseline(
     }
 
 
+@cython.ccall
 def annotate_x86_16_tail_validation_surface_with_baseline(
     surface: Mapping[str, TailValidationValue],
     comparison: Mapping[str, TailValidationValue] | None,
-) -> dict[str, TailValidationValue]:
+) -> object:
     """Attach baseline comparison fields to an existing validation surface."""
+    status: object
     annotated = dict(surface)
     if not isinstance(comparison, Mapping):
         return annotated
@@ -4287,7 +4650,7 @@ def annotate_x86_16_tail_validation_surface_with_baseline(
 def build_x86_16_tail_validation_aggregate(
     records: Sequence[Mapping[str, TailValidationValue]],
     *,
-    scanned: int,
+    scanned: cython.longlong,
 ) -> dict[str, TailValidationValue]:
     """Build cached aggregate tail-validation summary and surface records."""
     normalized_records = _records_with_uncollected_placeholders(records, scanned=scanned)
@@ -4387,10 +4750,12 @@ def summarize_x86_16_tail_validation_records(
     }
 
 
+@cython.ccall
 def _record_expr_locations(
     node: TailValidationValue, project: TailValidationValue, observed_locations: StackObservedLocations8616
 ) -> None:
     """Retain direct address exposure separately from ordinary value reads."""
+    arg: object
     if isinstance(node, CVariable):
         observed_locations.add(_location_fingerprint(node, project))
         return
@@ -4422,25 +4787,28 @@ def _record_expr_locations(
         return
 
 
-def _is_control_flow_node(node: TailValidationValue) -> bool:
+@cython.ccall
+def _is_control_flow_node(node: TailValidationValue) -> cython.bint:
     return isinstance(
         node, (CIfElse, CIfBreak, CWhileLoop, CDoWhileLoop, CForLoop, CSwitchCase, CGoto, CBreak, CContinue, CReturn)
     )
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _ObservedLocationCollector8616:
     """Run state for one observed-locations collection pass."""
 
     project: TailValidationValue
     contextual_conditions: Mapping[int, str] | None
-    return_value_unobserved: bool
+    return_value_unobserved: cython.bint
     observed_locations: StackObservedLocations8616 = field(
         default_factory=StackObservedLocations8616
     )
 
+    @cython.ccall
     def record_contextual_stack_locations(self, condition: TailValidationValue) -> None:
         """Record contextual stack-slot tokens from one condition fingerprint."""
+        fingerprint: object
 
         if self.contextual_conditions is None:
             return
@@ -4448,8 +4816,12 @@ class _ObservedLocationCollector8616:
         if fingerprint is not None:
             self.observed_locations.update(_STACK_SLOT_WRITE_TOKEN_RE_8616.findall(fingerprint))
 
+    @cython.ccall
     def record_control_condition_locations(self, node: TailValidationValue) -> None:
         """Record expr and contextual locations from control conditions."""
+        cond: object
+        condition: object
+        pair: object
 
         # Dynamic angr/codegen compatibility boundary.
         condition = getattr(node, "condition", None)
@@ -4468,8 +4840,10 @@ class _ObservedLocationCollector8616:
             _record_expr_locations(pair[0], self.project, self.observed_locations)
             self.record_contextual_stack_locations(pair[0])
 
+    @cython.ccall
     def process_node(self, node: TailValidationValue) -> None:
         """Record observed locations from one node by kind."""
+        arg: object
 
         if isinstance(node, (CIfElse, CIfBreak, CWhileLoop, CDoWhileLoop, CForLoop, CSwitchCase)):
             self.record_control_condition_locations(node)
@@ -4488,13 +4862,15 @@ class _ObservedLocationCollector8616:
             _record_expr_locations(retval, self.project, self.observed_locations)
 
 
+@cython.ccall
 def _collect_observed_locations(
     root: TailValidationValue,
     project: TailValidationValue,
-    mode: str,
+    mode: object,
     contextual_conditions: Mapping[int, str] | None = None,
 ) -> StackObservedLocations8616:
     """Collect observable reads and explicit address exposure in one summary."""
+    node: object
     if mode != "live_out":
         return StackObservedLocations8616()
 
@@ -4509,6 +4885,11 @@ def _collect_observed_locations(
 
 def _observable_call_children_8616(node: TailValidationValue) -> Iterator[TailValidationValue]:
     """Yield generic child nodes that may contain observable calls."""
+    child: object
+    else_node: object
+    attr: object
+    body: object
+    cond: object
 
     for attr in ("retval", "condition", "cond", "expr", "lhs", "rhs", "operand"):
         child = getattr(node, attr, None)
@@ -4529,9 +4910,10 @@ def _observable_call_children_8616(node: TailValidationValue) -> Iterator[TailVa
 
 
 def _observable_function_call_nodes_8616(
-    node: CFunctionCall, seen: set[int]
+    node: CFunctionCall, seen: object
 ) -> Iterator[TailValidationValue]:
     """Yield the call itself when observable plus calls nested in its args."""
+    arg: object
 
     if not _is_runtime_segment_helper_call_8616(node) and not _is_structured_c_intrinsic_call_8616(node):
         yield node
@@ -4540,9 +4922,12 @@ def _observable_function_call_nodes_8616(
 
 
 def _iter_observable_call_nodes_impl_8616(
-    node: TailValidationValue, seen: set[int]
+    node: object, seen: object
 ) -> Iterator[TailValidationValue]:
     """Yield observable calls under ``node``, guarding on the seen set."""
+    rhs: object
+    child: object
+    stmt: object
 
     if node is None:
         return
@@ -4567,7 +4952,7 @@ def _iter_observable_call_nodes_impl_8616(
 
 
 def _iter_observable_call_nodes_for_validation_8616(
-    node: TailValidationValue, _seen: set[int] | None = None
+    node: TailValidationValue, _seen: object = None
 ) -> TailValidationValue:
     """Yield every observable call, including calls nested in call arguments."""
 
@@ -4576,8 +4961,10 @@ def _iter_observable_call_nodes_for_validation_8616(
 
 
 
-def _summary_attr_8616(summary_entry: TailValidationValue, attr: str) -> TailValidationValue:
+@cython.ccall
+def _summary_attr_8616(summary_entry: object, attr: object) -> TailValidationValue:
     """Read an explicit field from a contextual callsite summary contract."""
+    nested: object
     if summary_entry is None:
         return None
     if isinstance(summary_entry, Mapping):
@@ -4601,7 +4988,8 @@ def _summary_attr_8616(summary_entry: TailValidationValue, attr: str) -> TailVal
     return direct_attrs.get(attr)
 
 
-def _summary_proves_function_return_call_8616(summary_entry: TailValidationValue) -> bool:
+@cython.ccall
+def _summary_proves_function_return_call_8616(summary_entry: TailValidationValue) -> cython.bint:
     return (
         _summary_attr_8616(summary_entry, "return_register") == "ax"
         and _summary_attr_8616(summary_entry, "return_used") is True
@@ -4609,7 +4997,10 @@ def _summary_proves_function_return_call_8616(summary_entry: TailValidationValue
     )
 
 
+@cython.ccall
 def _standalone_call_from_tail_statement_8616(stmt: TailValidationValue) -> CFunctionCall | None:
+    expr: object
+    nested: object
     if isinstance(stmt, CFunctionCall):
         return stmt
     # Dynamic angr/codegen compatibility boundary.
@@ -4623,17 +5014,19 @@ def _standalone_call_from_tail_statement_8616(stmt: TailValidationValue) -> CFun
     return None
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _SplitTailReturnRun8616:
     """Run state for the split tail-return fingerprint scan."""
 
     project: TailValidationValue
-    contextual_call_summaries: Mapping[int, TailValidationValue]
-    split_return_fingerprints: list[str] = field(default_factory=list)
-    unaccounted_bare_returns: int = 0
+    contextual_call_summaries: Mapping[cython.longlong, TailValidationValue]
+    split_return_fingerprints: object = field(default_factory=list)
+    unaccounted_bare_returns: cython.longlong = 0
 
-    def record_bare_return(self, statement_list: list[TailValidationValue], idx: int) -> None:
+    @cython.ccall
+    def record_bare_return(self, statement_list: object, idx: cython.longlong) -> None:
         """Account for one bare return through its preceding tail call."""
+        previous_call: object
 
         previous_call = None
         scan_idx = idx - 1
@@ -4648,8 +5041,16 @@ class _SplitTailReturnRun8616:
         else:
             self.unaccounted_bare_returns += 1
 
+    @cython.ccall
     def record_statement_list(self, statements: TailValidationValue) -> None:
         """Record bare returns and recurse into nested statement lists."""
+        child: object
+        child_statements: object
+        nested: object
+        _cond: object
+        attr: object
+        idx: object
+        stmt: object
 
         statement_list = list(statements or ())
         for idx, stmt in enumerate(statement_list):
@@ -4681,11 +5082,13 @@ class _SplitTailReturnRun8616:
                         self.record_statement_list(child_statements)
 
 
+@cython.ccall
 def _split_tail_return_call_fingerprints_8616(
     root: TailValidationValue,
     project: TailValidationValue,
-    contextual_call_summaries: Mapping[int, TailValidationValue],
-) -> tuple[str, ...] | None:
+    contextual_call_summaries: Mapping[cython.longlong, TailValidationValue],
+) -> object:
+    root_statements: object
     run = _SplitTailReturnRun8616(
         project=project,
         contextual_call_summaries=contextual_call_summaries,
@@ -4700,14 +5103,17 @@ def _split_tail_return_call_fingerprints_8616(
         return None
     return tuple(dict.fromkeys(run.split_return_fingerprints))
 
+@cython.ccall
 def _seed_call_summaries_from_existing_8616(
     project: TailValidationValue,
     call_nodes: Sequence[TailValidationValue],
     existing_summaries: TailValidationValue,
-) -> dict[int, TailValidationValue]:
+) -> object:
     """Seed the summary map from exact codegen callsite mappings."""
+    summary: object
+    node: object
 
-    summary_map: dict[int, TailValidationValue] = {}
+    summary_map: dict[cython.longlong, TailValidationValue] = {}
     if not isinstance(existing_summaries, Mapping):
         return summary_map
     for node in call_nodes:
@@ -4737,14 +5143,19 @@ def _seed_call_summaries_from_existing_8616(
     return summary_map
 
 
+@cython.ccall
 def _pair_call_summaries_from_ordered_pairs_8616(
     project: TailValidationValue,
     function: TailValidationValue,
-    summary_map: dict[int, TailValidationValue],
-    ordered_pairs: Iterable[tuple[TailValidationValue, int]],
-    summary_inventory: Mapping[int, CallsiteSummary8616] | None,
+    summary_map: object,
+    ordered_pairs: Iterable[tuple[TailValidationValue, cython.longlong]],
+    summary_inventory: object,
 ) -> None:
     """Pair unmatched call nodes to callsite summaries by ordered evidence."""
+    summary: object
+    target_addr: object
+    callsite_addr: object
+    node: object
 
     for node, callsite_addr in ordered_pairs:
         if id(node) in summary_map:
@@ -4766,14 +5177,18 @@ def _pair_call_summaries_from_ordered_pairs_8616(
                 }
 
 
+@cython.ccall
 def _direct_capstone_call_summary_fallback_8616(
     project: TailValidationValue,
     function: TailValidationValue,
     call_nodes: Sequence[TailValidationValue],
-) -> dict[int, TailValidationValue]:
+) -> object:
     """Fallback pairing of call nodes to direct Capstone targets by position."""
+    idx: object
+    node: object
+    target_addr: object
 
-    summary_map: dict[int, TailValidationValue] = {}
+    summary_map: dict[cython.longlong, TailValidationValue] = {}
     direct_targets = _collect_direct_capstone_call_targets_for_function(function)
     callsite_addrs = _function_callsite_addrs_for_validation_8616(function)
     for idx, (node, target_addr) in enumerate(zip(call_nodes, direct_targets, strict=False)):
@@ -4785,12 +5200,16 @@ def _direct_capstone_call_summary_fallback_8616(
     return summary_map
 
 
+@cython.ccall
 def _contextual_call_summary_map_impl_8616(
-    root: TailValidationValue,
+    root: object,
     project: TailValidationValue,
     summary_inventory: Mapping[int, CallsiteSummary8616] | None,
-) -> dict[int, TailValidationValue]:
+) -> object:
     """Build the observable-call summary map through the evidence chain."""
+    codegen: object
+    existing_summaries: object
+    function: object
 
     if root is None:
         return {}
@@ -4822,11 +5241,12 @@ def _contextual_call_summary_map_impl_8616(
     return _direct_capstone_call_summary_fallback_8616(project, function, call_nodes)
 
 
+@cython.ccall
 def _build_contextual_call_summary_map(
     root: TailValidationValue,
     project: TailValidationValue,
     summary_inventory: Mapping[int, CallsiteSummary8616] | None = None,
-) -> dict[int, TailValidationValue]:
+) -> object:
     """Map each observable call to the strongest available callsite summary.
 
     Exact codegen mappings are preferred, but they may be partial after an AST
@@ -4838,8 +5258,11 @@ def _build_contextual_call_summary_map(
     return _contextual_call_summary_map_impl_8616(root, project, summary_inventory)
 
 
+@cython.ccall
 def _call_from_statement_8616(stmt: TailValidationValue) -> CFunctionCall | None:
     """Return a direct call payload from equivalent structured statement wrappers."""
+    expr: object
+    nested_statements: object
     if isinstance(stmt, CFunctionCall):
         return stmt
     if isinstance(stmt, CAssignment):
@@ -4855,9 +5278,12 @@ def _call_from_statement_8616(stmt: TailValidationValue) -> CFunctionCall | None
     return None
 
 
+@cython.ccall
 def _assignment_lhs_rhs_8616(
     node: TailValidationValue,
 ) -> tuple[TailValidationValue | None, TailValidationValue | None]:
+    lhs: object
+    rhs: object
     lhs = getattr(node, "lhs", None)
     rhs = getattr(node, "rhs", None)
     if lhs is None and hasattr(node, "dst"):
@@ -4867,6 +5293,8 @@ def _assignment_lhs_rhs_8616(
 
 
 def _iter_assignment_nodes_8616(node: TailValidationValue) -> Iterator[TailValidationValue]:
+    nested_statements: object
+    nested: object
     if isinstance(node, CAssignment) or node.__class__.__name__.endswith("Assignment"):
         yield node
     nested_statements = getattr(node, "statements", None)
@@ -4875,7 +5303,8 @@ def _iter_assignment_nodes_8616(node: TailValidationValue) -> Iterator[TailValid
             yield from _iter_assignment_nodes_8616(nested)
 
 
-def _assignment_lhs_writes_memory_8616(lhs: TailValidationValue, project: TailValidationValue) -> bool:
+@cython.ccall
+def _assignment_lhs_writes_memory_8616(lhs: object, project: TailValidationValue) -> cython.bint:
     if lhs is None:
         return False
     if _dirty_expression_is_temporary_lvalue_8616(lhs):
@@ -4889,8 +5318,10 @@ def _assignment_lhs_writes_memory_8616(lhs: TailValidationValue, project: TailVa
     return location_text.startswith(("stack:", "global:", "deref:"))
 
 
-def _dirty_expression_is_temporary_lvalue_8616(lhs: TailValidationValue) -> bool:
+@cython.ccall
+def _dirty_expression_is_temporary_lvalue_8616(lhs: TailValidationValue) -> cython.bint:
     """Return whether an unresolved angr lvalue has explicit temporary storage."""
+    category: object
     if not isinstance(lhs, CDirtyExpression):
         return False
     # Dynamic angr/AIL boundary: CDirtyExpression wraps a VirtualVariable.
@@ -4898,8 +5329,11 @@ def _dirty_expression_is_temporary_lvalue_8616(lhs: TailValidationValue) -> bool
     return category is VirtualVariableCategory.TMP
 
 
-def _dirty_expression_write_width_bytes_8616(lhs: TailValidationValue) -> int:
+@cython.ccall
+def _dirty_expression_write_width_bytes_8616(lhs: TailValidationValue) -> cython.longlong:
     """Return exact byte width carried by an unresolved angr virtual value."""
+    bits: object
+    size: object
     if not isinstance(lhs, CDirtyExpression):
         return 0
     dirty = lhs.dirty
@@ -4908,7 +5342,7 @@ def _dirty_expression_write_width_bytes_8616(lhs: TailValidationValue) -> int:
     bits = getattr(dirty, "bits", None)
     if not isinstance(size, int) or not isinstance(bits, int):
         return 0
-    if size <= 0 or bits != size * 8:
+    if size <= 0 or operator.ne(bits, size * 8):
         return 0
     return size
 
@@ -4922,7 +5356,7 @@ def _assignment_write_locations_8616(
         return ()
     indexed_locations = _indexed_global_write_location_fingerprints_8616(lhs, project)
     if indexed_locations:
-        return tuple(str(location) for location in indexed_locations)
+        return tuple(str(location) for location in iter(indexed_locations))
     location = _location_fingerprint(lhs, project, resolve_copy_alias=False)
     if not location.startswith("global:"):
         return (location,)
@@ -4941,17 +5375,21 @@ def _assignment_write_locations_8616(
     return tuple(f"global:{base + byte_offset:#x}" for byte_offset in range(width))
 
 
-def _contains_call_8616(node: TailValidationValue) -> bool:
+def _contains_call_8616(node: TailValidationValue) -> cython.bint:
+    expr: object
     if isinstance(node, CFunctionCall):
         return True
     expr = getattr(node, "expr", None)
     if isinstance(expr, CFunctionCall):
         return True
-    return any(isinstance(child, CFunctionCall) for child in _iter_c_nodes_deep_8616(node))
+    return any(isinstance(child, CFunctionCall) for child in builtins.iter(_iter_c_nodes_deep_8616(node)))
 
 
-def _is_stack_carrier_temp_assignment_8616(stmt: TailValidationValue) -> bool:
-    def _impl() -> bool:
+def _is_stack_carrier_temp_assignment_8616(stmt: TailValidationValue) -> cython.bint:
+    def _impl() -> cython.bint:
+        lhs: object
+        rhs: object
+        variable: object
         candidates = list(_iter_assignment_nodes_8616(stmt))
         if not candidates:
             return False
@@ -4983,7 +5421,8 @@ def _is_stack_carrier_temp_assignment_8616(stmt: TailValidationValue) -> bool:
     return _impl()
 
 
-def _is_value_only_assignment_8616(stmt: TailValidationValue, project: TailValidationValue) -> bool:
+@cython.ccall
+def _is_value_only_assignment_8616(stmt: TailValidationValue, project: TailValidationValue) -> cython.bint:
     candidates = list(_iter_assignment_nodes_8616(stmt))
     if not candidates:
         return False
@@ -4991,8 +5430,12 @@ def _is_value_only_assignment_8616(stmt: TailValidationValue, project: TailValid
     return not _assignment_lhs_writes_memory_8616(lhs, project)
 
 
-def _expr_mentions_temp_carrier_8616(expr: TailValidationValue) -> bool:
-    def _impl() -> bool:
+def _expr_mentions_temp_carrier_8616(expr: TailValidationValue) -> cython.bint:
+    def _impl() -> cython.bint:
+        dirty: object
+        dirty_name: object
+        variable: object
+        node: object
         if expr is None:
             return False
         nodes = (expr, *_iter_c_nodes_deep_8616(expr))
@@ -5015,7 +5458,8 @@ def _expr_mentions_temp_carrier_8616(expr: TailValidationValue) -> bool:
     return _impl()
 
 
-def _looks_like_ss_segment_store_8616(lhs: TailValidationValue, project: TailValidationValue) -> bool:
+@cython.ccall
+def _looks_like_ss_segment_store_8616(lhs: TailValidationValue, project: TailValidationValue) -> cython.bint:
     while isinstance(lhs, CTypeCast):
         lhs = lhs.expr
     if not isinstance(lhs, CUnaryOp) or lhs.op != "Dereference":
@@ -5026,7 +5470,8 @@ def _looks_like_ss_segment_store_8616(lhs: TailValidationValue, project: TailVal
     return "reg:ss" in _expr_fingerprint(lhs.operand, project)
 
 
-def _is_dynamic_dirty_ss_location_8616(location: str) -> bool:
+@cython.ccall
+def _is_dynamic_dirty_ss_location_8616(location: object) -> cython.bint:
     if not isinstance(location, str) or not location.startswith("deref:"):
         return False
     if "reg:ss" in location and re.search(r"virtual:(?:vvar|tmp|ir)_\d+", location):
@@ -5050,14 +5495,19 @@ def _is_dynamic_dirty_ss_location_8616(location: str) -> bool:
     )
 
 
-def _lhs_aliases_dynamic_stack_frame_8616(lhs: TailValidationValue, project: TailValidationValue) -> bool:
+@cython.ccall
+def _lhs_aliases_dynamic_stack_frame_8616(lhs: TailValidationValue, project: TailValidationValue) -> cython.bint:
     aliased_location = _location_fingerprint(lhs, project, resolve_copy_alias=True)
     if aliased_location.startswith(("stack:", "stack_slot:", "unresolved_stack_carrier:")):
         return True
     return _is_dynamic_dirty_ss_location_8616(aliased_location)
 
 
-def _canonicalize_segmented_write_aliases_8616(segmented_writes: set[str], global_writes: set[str]) -> set[str]:
+@cython.ccall
+def _canonicalize_segmented_write_aliases_8616(segmented_writes: object, global_writes: object) -> object:
+    direct_match: object
+    linear_match: object
+    location: object
     if not segmented_writes or not global_writes:
         return segmented_writes
     filtered: set[str] = set()
@@ -5081,16 +5531,18 @@ def _canonicalize_segmented_write_aliases_8616(segmented_writes: set[str], globa
     return filtered
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _PrunableSegmentScanRun8616:
     """Run state for the prunable live-out segment-write scan."""
 
     project: TailValidationValue
-    contextual_call_summaries: Mapping[int, TailValidationValue]
-    prunable_ids: set[int] = field(default_factory=set)
+    contextual_call_summaries: Mapping[cython.longlong, TailValidationValue]
+    prunable_ids: object = field(default_factory=set)
 
-    def wanted_prunable_count(self, call: TailValidationValue) -> int:
+    def wanted_prunable_count(self, call: TailValidationValue) -> cython.longlong:
         """Return how many preceding segment stores the call could absorb."""
+        summary_entry: object
+        typed_summary: object
 
         summary_entry = self.contextual_call_summaries.get(id(call))
         summary_obj = (
@@ -5106,7 +5558,7 @@ class _PrunableSegmentScanRun8616:
         )
         explicit_arg_count = len(_boundary_tuple_8616(getattr(call, "args", ()) or ()))
         carrier_backed_args = any(
-            _expr_mentions_temp_carrier_8616(arg) for arg in (getattr(call, "args", ()) or ())
+            _expr_mentions_temp_carrier_8616(arg) for arg in iter((getattr(call, "args", ()) or ()))
         )
         missing_arg_count = (
             expected_arg_count - explicit_arg_count if isinstance(expected_arg_count, int) else 0
@@ -5121,8 +5573,10 @@ class _PrunableSegmentScanRun8616:
             wanted_prunable_count = max(wanted_prunable_count, push_arg_source_count)
         return wanted_prunable_count
 
-    def scan_call_backwards(self, stmt_list: list[TailValidationValue], idx: int) -> None:
+    @cython.ccall
+    def scan_call_backwards(self, stmt_list: object, idx: cython.longlong) -> None:
         """Collect prunable SS segment stores preceding the call at ``idx``."""
+        call: object
 
         call = _call_from_statement_8616(stmt_list[idx])
         if call is None:
@@ -5150,8 +5604,14 @@ class _PrunableSegmentScanRun8616:
                     continue
             break
 
+    @cython.ccall
     def scan_stmt_children(self, stmt: TailValidationValue) -> None:
         """Recurse into the statement's nested statement lists."""
+        child: object
+        else_node: object
+        nested_statements: object
+        _cond: object
+        attr: object
 
         nested_statements = getattr(stmt, "statements", None)
         if isinstance(nested_statements, (list, tuple)):
@@ -5167,8 +5627,11 @@ class _PrunableSegmentScanRun8616:
             for _cond, child in _boundary_tuple_8616(stmt.condition_and_nodes or ()):
                 self.scan_statements(getattr(child, "statements", ()) or ())
 
+    @cython.ccall
     def scan_statements(self, statements: Sequence[TailValidationValue]) -> None:
         """Scan one statement list for calls and nested statement lists."""
+        idx: object
+        stmt: object
 
         stmt_list = list(statements or ())
         for idx, stmt in enumerate(stmt_list):
@@ -5176,11 +5639,12 @@ class _PrunableSegmentScanRun8616:
             self.scan_stmt_children(stmt)
 
 
+@cython.ccall
 def _prunable_live_out_segment_write_ids_8616(
     root: TailValidationValue,
     project: TailValidationValue,
-    contextual_call_summaries: Mapping[int, TailValidationValue],
-) -> set[int]:
+    contextual_call_summaries: Mapping[cython.longlong, TailValidationValue],
+) -> object:
     run = _PrunableSegmentScanRun8616(
         project=project,
         contextual_call_summaries=contextual_call_summaries,
@@ -5191,16 +5655,18 @@ def _prunable_live_out_segment_write_ids_8616(
         run.scan_statements((root,))
     return run.prunable_ids
 
+@cython.ccall
 def _capstone_block_call_targets_8616(
     project: TailValidationValue,
     factory: TailValidationValue,
-    block_addr: int,
+    block_addr: cython.longlong,
     linked_base: TailValidationValue,
     image_end: TailValidationValue,
-) -> list[int]:
+) -> object:
     """Collect resolved direct call targets from one lifted block."""
+    insn: object
 
-    targets: list[int] = []
+    targets: list[cython.longlong] = []
     try:
         block = factory.block(block_addr, opt_level=0)
     except Exception:
@@ -5217,8 +5683,15 @@ def _capstone_block_call_targets_8616(
     return targets
 
 
-def _collect_direct_capstone_call_targets_impl_8616(function: TailValidationValue) -> tuple[int, ...]:
+@cython.ccall
+def _collect_direct_capstone_call_targets_impl_8616(function: TailValidationValue) -> tuple[cython.longlong, ...]:
     """Collect resolved call targets across all function blocks."""
+    factory: object
+    linked_base: object
+    main_object: object
+    max_addr: object
+    project: object
+    block_addr: object
 
     project = getattr(function, "project", None)
     if project is None or getattr(getattr(project, "arch", None), "name", None) != "86_16":
@@ -5230,21 +5703,25 @@ def _collect_direct_capstone_call_targets_impl_8616(function: TailValidationValu
     factory = getattr(project, "factory", None)
     if factory is None:
         return ()
-    targets: list[int] = []
-    for block_addr in sorted(getattr(function, "block_addrs_set", ()) or ()):
+    targets: list[cython.longlong] = []
+    for block_addr in sorted(tuple(getattr(function, "block_addrs_set", ()) or ())):
         targets.extend(
             _capstone_block_call_targets_8616(project, factory, block_addr, linked_base, image_end)
         )
     return tuple(targets)
 
 
-def _collect_direct_capstone_call_targets_for_function(function: TailValidationValue) -> tuple[int, ...]:
+@cython.ccall
+def _collect_direct_capstone_call_targets_for_function(function: TailValidationValue) -> object:
     return _collect_direct_capstone_call_targets_impl_8616(function)
 
 
 
 def _direct_capstone_call_target_8616(insn: TailValidationValue) -> int | None:
     def _impl() -> int | None:
+        capstone_insn: object
+        operands: object
+        token: object
         capstone_insn = getattr(insn, "insn", None)
         operands = getattr(capstone_insn, "operands", None)
         if operands:
@@ -5252,7 +5729,7 @@ def _direct_capstone_call_target_8616(insn: TailValidationValue) -> int | None:
             if getattr(operand, "type", None) == 2 and isinstance(getattr(operand, "imm", None), int):
                 return int(operand.imm)
         op_str = str(getattr(insn, "op_str", "") or "").strip().lower()
-        if not op_str or "[" in op_str or any(ch.isalpha() for ch in op_str if ch not in "xabcdef"):
+        if not op_str or "[" in op_str or any(ch.isalpha() for ch in iter(op_str) if ch not in "xabcdef"):
             return None
         for token in re.split(r"[\s,:]+", op_str):
             if not token:
@@ -5266,9 +5743,12 @@ def _direct_capstone_call_target_8616(insn: TailValidationValue) -> int | None:
     return _impl()
 
 
+@cython.ccall
 def _maybe_add_coarse_conditions_8616(
-    node: TailValidationValue, project: TailValidationValue, conditions: set[str], mode: str
+    node: TailValidationValue, project: TailValidationValue, conditions: object, mode: object
 ) -> None:
+    value: object
+    attr: object
     if mode != "coarse" or _is_control_flow_node(node):
         return
     for attr in ("condition", "cond"):
@@ -5277,30 +5757,33 @@ def _maybe_add_coarse_conditions_8616(
             conditions.add(_expr_fingerprint(value, project))
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _ControlFlowEffectRun8616:
     """Run state for recording one control-flow node's typed effects."""
 
     node: TailValidationValue
     project: TailValidationValue
-    mode: str
-    observed_locations: set[str]
-    contextual_call_summaries: Mapping[int, TailValidationValue]
-    contextual_call_fingerprints: Mapping[int, str]
+    mode: object
+    observed_locations: object
+    contextual_call_summaries: Mapping[cython.longlong, TailValidationValue]
+    contextual_call_fingerprints: Mapping[cython.longlong, str]
     expected_helper_call_counts: Counter[str]
-    contextual_condition_fingerprints: Mapping[int, str]
-    normalized_loop_conditions: Mapping[int, str]
-    canonical_loop_node_ids: Collection[int]
-    canonical_loop_body_suppressed_write_ids: Mapping[int, frozenset[int]]
-    prunable_segment_write_ids: set[int]
-    conditions: set[str]
-    control_flow_effects: set[str]
+    contextual_condition_fingerprints: Mapping[cython.longlong, str]
+    normalized_loop_conditions: Mapping[cython.longlong, str]
+    canonical_loop_node_ids: Collection[cython.longlong]
+    canonical_loop_body_suppressed_write_ids: Mapping[cython.longlong, frozenset[cython.longlong]]
+    prunable_segment_write_ids: object
+    conditions: object
+    control_flow_effects: object
 
+    @cython.ccall
     def _observable_body_write_locations(
         self,
         body: TailValidationValue,
-        suppressed_write_ids: Collection[int],
-    ) -> tuple[str, ...]:
+        suppressed_write_ids: Collection[cython.longlong],
+    ) -> object:
+        child: object
+        location: object
         locations: set[str] = set()
         for child in _iter_c_nodes_deep_8616(body):
             if (
@@ -5324,12 +5807,13 @@ class _ControlFlowEffectRun8616:
                     locations.add(location)
         return _sorted_unique(locations)
 
+    @cython.ccall
     def _record_loop_body_writes(
         self,
-        kind: str,
-        cond_fp: str,
+        kind: object,
+        cond_fp: object,
         body: TailValidationValue,
-        loop_id: int,
+        loop_id: cython.longlong,
     ) -> None:
         body_writes = self._observable_body_write_locations(
             body,
@@ -5340,8 +5824,13 @@ class _ControlFlowEffectRun8616:
         writes_fp = ",".join(body_writes)
         self.control_flow_effects.add(f"{kind}-body-writes:{cond_fp}:{writes_fp}")
 
-    def _observable_body_call_fingerprints(self, body: TailValidationValue) -> tuple[str, ...]:
-        entries: list[tuple[str, int | None, int]] = []
+    @cython.ccall
+    def _observable_body_call_fingerprints(self, body: TailValidationValue) -> object:
+        callsite_addr: object
+        child: object
+        fingerprint: object
+        node_id: object
+        entries: list[tuple[str, int | None, cython.longlong]] = []
         located_fingerprints: set[str] = set()
         for child in _iter_observable_call_nodes_for_validation_8616(body):
             if _is_runtime_segment_helper_call_8616(child) or _is_structured_c_intrinsic_call_8616(child):
@@ -5360,8 +5849,8 @@ class _ControlFlowEffectRun8616:
             entries.append((fingerprint, callsite_addr, id(child)))
 
         calls: list[str] = []
-        seen_callsite_keys: set[tuple[int, str]] = set()
-        seen_node_ids: set[int] = set()
+        seen_callsite_keys: set[tuple[cython.longlong, str]] = set()
+        seen_node_ids: set[cython.longlong] = set()
         for fingerprint, callsite_addr, node_id in entries:
             if isinstance(callsite_addr, int):
                 key = (callsite_addr, fingerprint)
@@ -5378,24 +5867,28 @@ class _ControlFlowEffectRun8616:
         collapsed_calls = _collapse_mixed_addr_name_addr_duplicates_8616(calls)
         return _cap_helper_call_fingerprints_to_expected_8616(self.project, collapsed_calls, self.expected_helper_call_counts)
 
-    def _record_body_calls(self, kind: str, cond_fp: str, body: TailValidationValue) -> None:
+    @cython.ccall
+    def _record_body_calls(self, kind: object, cond_fp: object, body: TailValidationValue) -> None:
         body_calls = self._observable_body_call_fingerprints(body)
         if not body_calls:
             return
         self.control_flow_effects.add(f"{kind}-body-calls:{cond_fp}:{','.join(body_calls)}")
 
-    def _condition_fp(self, cond: TailValidationValue) -> str:
+    @cython.ccall
+    def _condition_fp(self, cond: TailValidationValue) -> object:
         return self.contextual_condition_fingerprints.get(
             id(cond), _expr_fingerprint(cond, self.project)
         )
 
-    def _loop_condition_fp(self, node: TailValidationValue) -> str:
+    @cython.ccall
+    def _loop_condition_fp(self, node: TailValidationValue) -> object:
         cond = node.condition
         return self.normalized_loop_conditions.get(
             id(node), self._condition_fp(cond)
         )
 
-    def _record_loop_effect(self, node: TailValidationValue, base_kind: str) -> None:
+    @cython.ccall
+    def _record_loop_effect(self, node: TailValidationValue, base_kind: object) -> None:
         cond_fp = self._loop_condition_fp(node)
         loop_kind = "loop" if id(node) in self.canonical_loop_node_ids else base_kind
         self.control_flow_effects.add(f"{loop_kind}:{cond_fp}")
@@ -5405,7 +5898,13 @@ class _ControlFlowEffectRun8616:
         if self.mode == "live_out":
             self.conditions.add(cond_fp)
 
-    def _if_else_arm(self, node: TailValidationValue) -> bool:
+    @cython.ccall
+    def _if_else_arm(self, node: TailValidationValue) -> cython.bint:
+        cond_fp: object
+        normalized_cond: object
+        _child: object
+        cond: object
+        idx: object
         if (
             identical_assignment_arm_condition_8616(
                 node,
@@ -5431,14 +5930,16 @@ class _ControlFlowEffectRun8616:
             self._record_body_calls("if-else", "else", node.else_node)
         return True
 
-    def _if_break_arm(self, node: TailValidationValue) -> bool:
+    @cython.ccall
+    def _if_break_arm(self, node: TailValidationValue) -> cython.bint:
         cond_fp = self._condition_fp(node.condition)
         self.control_flow_effects.add(f"ifbreak:{cond_fp}")
         if self.mode == "live_out":
             self.conditions.add(cond_fp)
         return True
 
-    def _do_while_arm(self, node: TailValidationValue) -> bool:
+    @cython.ccall
+    def _do_while_arm(self, node: TailValidationValue) -> cython.bint:
         cond_fp = self._loop_condition_fp(node)
         self.control_flow_effects.add(f"dowhile:{cond_fp}")
         # Dynamic angr/codegen compatibility boundary.
@@ -5448,7 +5949,10 @@ class _ControlFlowEffectRun8616:
             self.conditions.add(cond_fp)
         return True
 
-    def _switch_arm(self, node: TailValidationValue) -> bool:
+    @cython.ccall
+    def _switch_arm(self, node: TailValidationValue) -> cython.bint:
+        case_body: object
+        case_value: object
         switch_fp = _expr_fingerprint(node.switch, self.project)
         self.control_flow_effects.add(f"switch:{switch_fp}")
         if self.mode == "live_out":
@@ -5464,7 +5968,8 @@ class _ControlFlowEffectRun8616:
             self._record_body_calls("case-default", "default", node.default)
         return True
 
-    def run(self) -> bool:
+    @cython.ccall
+    def run(self) -> cython.bint:
         """Record supported control-flow observables and report recognition."""
         node = self.node
         if isinstance(node, CIfElse):
@@ -5491,23 +5996,24 @@ class _ControlFlowEffectRun8616:
         return False
 
 
+@cython.ccall
 def _process_control_flow_node_8616(
     node: TailValidationValue,
     *,
     project: TailValidationValue,
-    mode: str,
-    observed_locations: set[str],
-    contextual_call_summaries: Mapping[int, TailValidationValue],
-    contextual_call_fingerprints: Mapping[int, str],
+    mode: object,
+    observed_locations: object,
+    contextual_call_summaries: Mapping[cython.longlong, TailValidationValue],
+    contextual_call_fingerprints: Mapping[cython.longlong, str],
     expected_helper_call_counts: Counter[str],
-    contextual_condition_fingerprints: Mapping[int, str],
-    normalized_loop_conditions: Mapping[int, str],
-    canonical_loop_node_ids: Collection[int],
-    canonical_loop_body_suppressed_write_ids: Mapping[int, frozenset[int]],
-    prunable_segment_write_ids: set[int],
-    conditions: set[str],
-    control_flow_effects: set[str],
-) -> bool:
+    contextual_condition_fingerprints: Mapping[cython.longlong, str],
+    normalized_loop_conditions: Mapping[cython.longlong, str],
+    canonical_loop_node_ids: Collection[cython.longlong],
+    canonical_loop_body_suppressed_write_ids: Mapping[cython.longlong, frozenset[cython.longlong]],
+    prunable_segment_write_ids: object,
+    conditions: object,
+    control_flow_effects: object,
+) -> cython.bint:
     run = _ControlFlowEffectRun8616(
         node=node,
         project=project,
@@ -5526,35 +6032,37 @@ def _process_control_flow_node_8616(
     )
     return run.run()
 
-@dataclass
+@cython.dataclasses.dataclass
 class _TailValidationNodeRun8616:
     """Run state for one structured node's validation-visible effects."""
 
     node: TailValidationValue
     project: TailValidationValue
-    mode: str
-    observed_locations: set[str]
-    contextual_call_summaries: Mapping[int, TailValidationValue]
-    contextual_call_fingerprints: Mapping[int, str]
+    mode: object
+    observed_locations: object
+    contextual_call_summaries: Mapping[cython.longlong, TailValidationValue]
+    contextual_call_fingerprints: Mapping[cython.longlong, str]
     expected_helper_call_counts: Counter[str]
-    contextual_condition_fingerprints: Mapping[int, str]
-    normalized_loop_conditions: Mapping[int, str]
-    canonical_loop_node_ids: Collection[int]
-    canonical_loop_body_suppressed_write_ids: Mapping[int, frozenset[int]]
-    prunable_segment_write_ids: set[int]
-    helper_calls: list[str]
-    helper_call_node_ids: set[int]
-    helper_callsite_keys: set[int]
-    helper_callsite_fingerprints: set[str]
-    register_writes: set[str]
-    stack_writes: set[str]
-    global_writes: set[str]
-    segmented_writes: set[str]
-    returns: set[str]
-    conditions: set[str]
-    control_flow_effects: set[str]
+    contextual_condition_fingerprints: Mapping[cython.longlong, str]
+    normalized_loop_conditions: Mapping[cython.longlong, str]
+    canonical_loop_node_ids: Collection[cython.longlong]
+    canonical_loop_body_suppressed_write_ids: Mapping[cython.longlong, frozenset[cython.longlong]]
+    prunable_segment_write_ids: object
+    helper_calls: object
+    helper_call_node_ids: object
+    helper_callsite_keys: object
+    helper_callsite_fingerprints: object
+    register_writes: object
+    stack_writes: object
+    global_writes: object
+    segmented_writes: object
+    returns: object
+    conditions: object
+    control_flow_effects: object
 
+    @cython.ccall
     def _record_helper_call(self, call_node: TailValidationValue) -> None:
+        summary: object
         if _is_runtime_segment_helper_call_8616(call_node) or _is_structured_c_intrinsic_call_8616(call_node):
             return
         summary = self.contextual_call_summaries.get(id(call_node))
@@ -5593,7 +6101,9 @@ class _TailValidationNodeRun8616:
                 return
         self.helper_calls.append(fingerprint)
 
+    @cython.ccall
     def _return_arm(self, node: TailValidationValue) -> None:
+        call_node: object
         # Dynamic angr/codegen compatibility boundary.
         for call_node in _iter_observable_call_nodes_for_validation_8616(node.retval):
             self._record_helper_call(call_node)
@@ -5605,7 +6115,8 @@ class _TailValidationNodeRun8616:
             self.returns.add(_expr_fingerprint(retval, self.project))
         self.control_flow_effects.add("return")
 
-    def _record_assignment_location(self, node: TailValidationValue, location: str) -> None:
+    @cython.ccall
+    def _record_assignment_location(self, node: TailValidationValue, location: object) -> None:
         if location.startswith("reg:"):
             if self.mode == "coarse" or location in self.observed_locations:
                 self.register_writes.add(location)
@@ -5629,7 +6140,10 @@ class _TailValidationNodeRun8616:
                 return
             self.segmented_writes.add(location)
 
+    @cython.ccall
     def _assignment_arm(self, node: TailValidationValue) -> None:
+        call_node: object
+        location: object
         if id(node) in self.prunable_segment_write_ids:
             return
         tags = node.tags
@@ -5647,8 +6161,10 @@ class _TailValidationNodeRun8616:
         ):
             self._record_assignment_location(node, location)
 
+    @cython.ccall
     def run(self) -> None:
         """Record this node's validation-visible call, write, return, and flow effects."""
+        call_node: object
         node = self.node
         if isinstance(node, CFunctionCall):
             for call_node in _iter_observable_call_nodes_for_validation_8616(node):
@@ -5678,31 +6194,32 @@ class _TailValidationNodeRun8616:
         )
 
 
+@cython.ccall
 def _process_tail_validation_node_8616(
     node: TailValidationValue,
     *,
     project: TailValidationValue,
-    mode: str,
-    observed_locations: set[str],
-    contextual_call_summaries: Mapping[int, TailValidationValue],
-    contextual_call_fingerprints: Mapping[int, str],
+    mode: object,
+    observed_locations: object,
+    contextual_call_summaries: Mapping[cython.longlong, TailValidationValue],
+    contextual_call_fingerprints: Mapping[cython.longlong, str],
     expected_helper_call_counts: Counter[str],
-    contextual_condition_fingerprints: Mapping[int, str],
-    normalized_loop_conditions: Mapping[int, str],
-    canonical_loop_node_ids: Collection[int],
-    canonical_loop_body_suppressed_write_ids: Mapping[int, frozenset[int]],
-    prunable_segment_write_ids: set[int],
-    helper_calls: list[str],
-    helper_call_node_ids: set[int],
-    helper_callsite_keys: set[int],
-    helper_callsite_fingerprints: set[str],
-    register_writes: set[str],
-    stack_writes: set[str],
-    global_writes: set[str],
-    segmented_writes: set[str],
-    returns: set[str],
-    conditions: set[str],
-    control_flow_effects: set[str],
+    contextual_condition_fingerprints: Mapping[cython.longlong, str],
+    normalized_loop_conditions: Mapping[cython.longlong, str],
+    canonical_loop_node_ids: Collection[cython.longlong],
+    canonical_loop_body_suppressed_write_ids: Mapping[cython.longlong, frozenset[cython.longlong]],
+    prunable_segment_write_ids: object,
+    helper_calls: object,
+    helper_call_node_ids: object,
+    helper_callsite_keys: object,
+    helper_callsite_fingerprints: object,
+    register_writes: object,
+    stack_writes: object,
+    global_writes: object,
+    segmented_writes: object,
+    returns: object,
+    conditions: object,
+    control_flow_effects: object,
 ) -> None:
     """Collect one structured node's validation-visible semantic effects."""
 
@@ -5734,11 +6251,13 @@ def _process_tail_validation_node_8616(
 
 def _build_tail_validation_stage_rows_8616(
     *,
-    scanned_count: int,
+    scanned_count: cython.longlong,
     structuring: Mapping[str, TailValidationValue],
     postprocess: Mapping[str, TailValidationValue],
-) -> tuple[list[dict[str, TailValidationValue]], int, int, int, int]:
-    def _impl() -> tuple[list[dict[str, TailValidationValue]], int, int, int, int]:
+) -> object:
+    def _impl() -> tuple[list[dict[str, TailValidationValue]], cython.longlong, cython.longlong, cython.longlong, cython.longlong]:
+        stage_name: object
+        stage_summary: object
         stage_rows: list[dict[str, TailValidationValue]] = []
         total_changed = total_missing = total_unknown = total_coverage = 0
         for stage_name, stage_summary in (("structuring", structuring), ("postprocess", postprocess)):
@@ -5774,7 +6293,8 @@ def _build_tail_validation_stage_rows_8616(
     return _impl()
 
 
-def _tail_validation_headline_8616(severity: str, scanned_count: int, changed_function_count: int) -> str:
+@cython.ccall
+def _tail_validation_headline_8616(severity: object, scanned_count: cython.longlong, changed_function_count: cython.longlong) -> str:
     if scanned_count == 0:
         return "whole-tail validation: no functions scanned"
     if severity == "clean":
@@ -5785,26 +6305,29 @@ def _tail_validation_headline_8616(severity: str, scanned_count: int, changed_fu
         return f"whole-tail validation failed across {scanned_count} functions"
     if severity == "unknown":
         return f"whole-tail validation incomplete across {scanned_count} functions"
-    if severity == EntryPremiseStatus8616.CONDITIONAL.value:
+    if operator.eq(severity, EntryPremiseStatus8616.CONDITIONAL.value):
         return f"whole-tail validation conditional across {scanned_count} functions"
-    if severity == EntryPremiseStatus8616.REFUSED.value:
+    if operator.eq(severity, EntryPremiseStatus8616.REFUSED.value):
         return f"whole-tail validation refused across {scanned_count} functions"
     return f"whole-tail validation failed across {changed_function_count} functions"
 
 
+@cython.ccall
 def _def_use_node_call_summary_8616(
     node: TailValidationValue,
-    summary_map: Mapping[int, TailValidationValue],
-    inventory: Mapping[int, CallsiteSummary8616],
+    summary_map: Mapping[cython.longlong, TailValidationValue],
+    inventory: Mapping[cython.longlong, CallsiteSummary8616],
 ) -> CallsiteSummary8616 | None:
     """Resolve a node's callsite summary, hard-failing on tag conflicts."""
+    summary: object
+    tagged_callsite_addr: object
 
     summary = summary_map.get(id(node))
     tagged_callsite_addr = structured_callsite_addr_8616(node)
     if isinstance(summary, CallsiteSummary8616):
         if (
             tagged_callsite_addr is not None
-            and tagged_callsite_addr != summary.callsite_addr
+            and operator.ne(tagged_callsite_addr, summary.callsite_addr)
         ):
             raise PipelineHardError(
                 "structured call output identity conflicts with typed summary: "
@@ -5818,16 +6341,17 @@ def _def_use_node_call_summary_8616(
 
 def _def_use_call_output_facts_8616(
     raw_facts: TailValidationValue,
-) -> dict[int, list[CallOutputStackObjectFact8616]]:
+) -> object:
     """Group proven stack-object facts by callsite address."""
+    fact: object
 
     facts = tuple(
         fact
-        for fact in _boundary_tuple_8616(raw_facts)
+        for fact in builtins.iter(_boundary_tuple_8616(raw_facts))
         if isinstance(fact, CallOutputStackObjectFact8616)
         and fact.boundary_offset > fact.base_offset
     )
-    facts_by_callsite: dict[int, list[CallOutputStackObjectFact8616]] = {}
+    facts_by_callsite: dict[cython.longlong, list[CallOutputStackObjectFact8616]] = {}
     for fact in facts:
         facts_by_callsite.setdefault(fact.callsite_addr, []).append(fact)
     return facts_by_callsite
@@ -5836,7 +6360,7 @@ def _def_use_call_output_facts_8616(
 def _def_use_call_output_definitions_8616(
     codegen: TailValidationValue,
     query_index: StructuredAstQueryIndex8616 | None = None,
-) -> dict[int, tuple[DefUseCallOutputDefinition8616, ...]]:
+) -> object:
     """Join lowering-owned output facts to exact current structured calls.
 
     Structuring may regenerate a call node after Lowering records its output
@@ -5844,6 +6368,8 @@ def _def_use_call_output_definitions_8616(
     authoritative callsite inventory; target names and AST order are not
     evidence of identity.
     """
+    summary: object
+    node: object
     try:
         raw_facts = codegen._inertia_call_output_stack_object_facts_8616
         summary_map = codegen._inertia_callsite_summaries
@@ -5856,7 +6382,7 @@ def _def_use_call_output_definitions_8616(
         return {}
     inventory = callsite_summary_inventory_8616(codegen)
     facts_by_callsite = _def_use_call_output_facts_8616(raw_facts)
-    definitions: dict[int, tuple[DefUseCallOutputDefinition8616, ...]] = {}
+    definitions: dict[cython.longlong, tuple[DefUseCallOutputDefinition8616, ...]] = {}
     nodes = query_index.nodes if query_index is not None else _iter_c_nodes_deep_8616(root)
     for node in nodes:
         if not isinstance(node, CFunctionCall):
@@ -5870,15 +6396,17 @@ def _def_use_call_output_definitions_8616(
                 base_offset=fact.base_offset,
                 width=fact.boundary_offset - fact.base_offset,
             )
-            for fact in facts_by_callsite.get(summary.callsite_addr, ())
+            for fact in builtins.iter(facts_by_callsite.get(summary.callsite_addr, ()))
         )
         if call_definitions:
             definitions[call_node_id] = call_definitions
     return definitions
 
 
+@cython.ccall
 def _def_use_entry_registers_8616(codegen: TailValidationValue) -> tuple[object, ...]:
     """Return explicit function arguments available at the C entry boundary."""
+    arg_list: object
     try:
         arg_list = codegen.cfunc.arg_list
     except AttributeError:
@@ -5894,7 +6422,7 @@ def _def_use_entry_registers_8616(codegen: TailValidationValue) -> tuple[object,
 def _def_use_indexed_stack_read_proofs_8616(
     codegen: TailValidationValue,
     root: object,
-) -> dict[int, IndexedStackReadProof8616]:
+) -> object:
     """Collect Structuring-owned bounded-index proofs for the exact final AST."""
     try:
         raw_facts = codegen._inertia_direct_stack_move_facts_8616
@@ -5902,7 +6430,7 @@ def _def_use_indexed_stack_read_proofs_8616(
         raw_facts = ()
     direct_stack_move_facts = tuple(
         fact
-        for fact in _boundary_tuple_8616(raw_facts)
+        for fact in builtins.iter(_boundary_tuple_8616(raw_facts))
         if isinstance(fact, DirectStackMoveFact8616)
     )
     report = collect_indexed_stack_read_proofs_8616(
@@ -5924,22 +6452,25 @@ def _def_use_indexed_stack_read_proofs_8616(
                     fact.source_call_ins_addr,
                     fact.source_call_return_contract,
                 )
-                for fact in direct_stack_move_facts
+                for fact in iter(direct_stack_move_facts)
             ),
             report,
         )
     return cast(dict[int, Any], report.by_read_node_id())
 
 
-def _def_use_segment_register_offsets_8616(project: TailValidationValue) -> frozenset[int]:
+@cython.ccall
+def _def_use_segment_register_offsets_8616(project: TailValidationValue) -> frozenset[cython.longlong]:
     """Return architectural segment-register offsets from the angr boundary."""
+    register: object
+    register_name: object
     try:
         registers = project.arch.registers
     except AttributeError:
         return frozenset()
     if not isinstance(registers, Mapping):
         return frozenset()
-    offsets: set[int] = set()
+    offsets: set[cython.longlong] = set()
     for register_name in ("cs", "ds", "es", "ss"):
         register = registers.get(register_name)
         if (
@@ -5951,11 +6482,15 @@ def _def_use_segment_register_offsets_8616(project: TailValidationValue) -> froz
     return frozenset(offsets)
 
 
+@cython.ccall
 def _def_use_entry_segment_register_offsets_8616(
     project: TailValidationValue,
     codegen: TailValidationValue,
-) -> frozenset[int]:
+) -> frozenset[cython.longlong]:
     """Return segment offsets proven as architectural live-ins by typed IR."""
+    entry_states: object
+    register: object
+    register_name: object
     try:
         artifact = codegen._inertia_segment_state_artifact
     except AttributeError:
@@ -5971,7 +6506,7 @@ def _def_use_entry_segment_register_offsets_8616(
     entry_states = artifact.entry_states.get(function_addr, {})
     proven_names = {
         register_name
-        for register_name, state in entry_states.items()
+        for register_name, state in builtins.iter(entry_states.items())
         if state.origin is SegmentOrigin.PROVEN
         and state.value_kind is SegmentValueKind8616.ARCHITECTURAL_LIVE_IN
     }
@@ -5981,7 +6516,7 @@ def _def_use_entry_segment_register_offsets_8616(
         return frozenset()
     if not isinstance(registers, Mapping):
         return frozenset()
-    offsets: set[int] = set()
+    offsets: set[cython.longlong] = set()
     for register_name in proven_names:
         register = registers.get(register_name)
         if isinstance(register, (list, tuple)) and register and isinstance(register[0], int):
@@ -5997,6 +6532,7 @@ def _validate_final_control_flow_8616(
     query_index: StructuredAstQueryIndex8616 | None = None,
 ) -> ControlFlowValidationReport8616:
     """Join final AST reachability checks with binary-proven exit obligations."""
+    shared_exits: object
     structured = validate_structured_control_flow_8616(
         root,
         query_index=query_index,
@@ -6056,18 +6592,14 @@ def _validate_final_control_flow_8616(
             + branch_conditions.materialized_count
             + obligations.materialized_count
         ),
-        issues=(
-            *structured.issues,
-            *branch_conditions.issues,
-            *obligations.issues,
-        ),
+        issues=tuple(structured.issues) + tuple(branch_conditions.issues) + tuple(obligations.issues),
     )
 def refresh_x86_16_final_semantic_validation_8616(
     project: TailValidationValue,
     codegen: TailValidationValue,
     *,
-    persist_failures: bool = True,
-    include_virtual_carriers: bool = False,
+    persist_failures: cython.bint = True,
+    include_virtual_carriers: cython.bint = False,
 ) -> X86_16FinalSemanticValidationReport8616:
     """Evaluate absolute semantic guards on the exact final codegen AST.
 
@@ -6078,6 +6610,7 @@ def refresh_x86_16_final_semantic_validation_8616(
     mutates the C AST. Final emission callers opt into regenerated virtual
     carriers only after all lowering and cleanup mutations have stopped.
     """
+    root: object
     root = _codegen_root(codegen)
     if root is None:
         def_use_report = DefUseValidationReport8616()
@@ -6205,7 +6738,7 @@ def refresh_x86_16_final_semantic_validation_8616(
         return report
     summary_text = (
         "absolute final semantic guard failed: "
-        + ", ".join(f"{family}={len(failures)}" for family, failures in semantic_failures.items())
+        + ", ".join(f"{family}={len(failures)}" for family, failures in builtins.iter(semantic_failures.items()))
     )
     failure_details = format_tail_semantic_failures_8616(semantic_failures)
     if failure_details:
@@ -6228,7 +6761,7 @@ def refresh_x86_16_final_semantic_validation_8616(
     return report
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _SummaryValidationReports8616:
     """Typed bundle of the nine validation reports for one root."""
 
@@ -6243,13 +6776,14 @@ class _SummaryValidationReports8616:
     storage_identity_report: TailValidationValue
 
 
+@cython.ccall
 def _finish_tail_validation_summary_8616(
     summary: X86_16TailValidationSummary,
     codegen: TailValidationValue,
-    cache: dict[str, TailValidationValue],
+    cache: object,
     *,
-    cache_hit: bool,
-    cache_key: str,
+    cache_hit: cython.bint,
+    cache_key: object,
 ) -> X86_16TailValidationSummary:
     """Emit the optional debug dump and record cache identity."""
 
@@ -6351,39 +6885,40 @@ def _summary_validation_reports_8616(
     )
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _TailSummaryBuildRun8616:
     """Run state for building one tail-validation summary."""
 
     project: TailValidationValue
     codegen: TailValidationValue
     root: TailValidationValue
-    mode: str
+    mode: object
     boundary_context: TailValidationValue
     reports: _SummaryValidationReports8616
-    helper_calls: list[str] = field(default_factory=list)
-    register_writes: set[str] = field(default_factory=set)
-    stack_writes: set[str] = field(default_factory=set)
-    global_writes: set[str] = field(default_factory=set)
-    segmented_writes: set[str] = field(default_factory=set)
-    returns: set[str] = field(default_factory=set)
-    conditions: set[str] = field(default_factory=set)
-    control_flow_effects: set[str] = field(default_factory=set)
-    helper_call_node_ids: set[int] = field(default_factory=set)
-    helper_callsite_keys: set[int] = field(default_factory=set)
-    helper_callsite_fingerprints: set[str] = field(default_factory=set)
-    contextual_call_fingerprints: Mapping[int, str] = field(default_factory=dict)
-    contextual_call_summaries: Mapping[int, TailValidationValue] = field(default_factory=dict)
-    contextual_condition_fingerprints: Mapping[int, str] = field(default_factory=dict)
+    helper_calls: object = field(default_factory=list)
+    register_writes: object = field(default_factory=set)
+    stack_writes: object = field(default_factory=set)
+    global_writes: object = field(default_factory=set)
+    segmented_writes: object = field(default_factory=set)
+    returns: object = field(default_factory=set)
+    conditions: object = field(default_factory=set)
+    control_flow_effects: object = field(default_factory=set)
+    helper_call_node_ids: object = field(default_factory=set)
+    helper_callsite_keys: object = field(default_factory=set)
+    helper_callsite_fingerprints: object = field(default_factory=set)
+    contextual_call_fingerprints: Mapping[cython.longlong, str] = field(default_factory=dict)
+    contextual_call_summaries: Mapping[cython.longlong, TailValidationValue] = field(default_factory=dict)
+    contextual_condition_fingerprints: Mapping[cython.longlong, str] = field(default_factory=dict)
     observed_locations: StackObservedLocations8616 = field(default_factory=StackObservedLocations8616)
     expected_helper_call_counts: Counter[str] = field(default_factory=Counter)
-    prunable_segment_write_ids: set[int] = field(default_factory=set)
-    split_tail_return_call_fingerprints: tuple[str, ...] | None = ()
-    normalized_loop_conditions: dict[int, str] = field(default_factory=dict)
-    suppressed_control_flow_nodes: set[int] = field(default_factory=set)
-    canonical_loop_node_ids: set[int] = field(default_factory=set)
-    canonical_loop_body_suppressed_write_ids: dict[int, frozenset[int]] = field(default_factory=dict)
+    prunable_segment_write_ids: object = field(default_factory=set)
+    split_tail_return_call_fingerprints: object = ()
+    normalized_loop_conditions: object = field(default_factory=dict)
+    suppressed_control_flow_nodes: object = field(default_factory=set)
+    canonical_loop_node_ids: object = field(default_factory=set)
+    canonical_loop_body_suppressed_write_ids: object = field(default_factory=dict)
 
+    @cython.ccall
     def collect_context(self, func_addr: object, summary_inventory: Mapping[int, CallsiteSummary8616] | None) -> None:
         """Resolve or reuse contextual fingerprints inside the trace span."""
 
@@ -6415,6 +6950,7 @@ class _TailSummaryBuildRun8616:
                     self.root, self.project
                 )
 
+    @cython.ccall
     def collect_support(self, func_addr: object, summary_inventory: Mapping[int, CallsiteSummary8616] | None) -> None:
         """Collect observed locations, expected counts, and prunable writes."""
 
@@ -6444,8 +6980,13 @@ class _TailSummaryBuildRun8616:
                 else _split_tail_return_call_fingerprints_8616(self.root, self.project, self.contextual_call_summaries)
             )
 
+    @cython.ccall
     def normalize_loops(self, func_addr: object) -> None:
         """Canonicalize loop-head conditions and suppression evidence."""
+        canonical_shape: object
+        normalized: object
+        post_body_condition: object
+        node: object
 
         with span("x86_16.tail_validation.summary.loop_normalization", function=func_addr):
             for node in _iter_c_nodes_deep_8616(self.root):
@@ -6480,8 +7021,10 @@ class _TailSummaryBuildRun8616:
                 self.normalized_loop_conditions[id(node)] = normalized[0]
                 self.suppressed_control_flow_nodes.update(normalized[1])
 
+    @cython.ccall
     def process_nodes(self, func_addr: object) -> None:
         """Walk every node and record observable effects."""
+        node: object
 
         with span("x86_16.tail_validation.summary.process_nodes", function=func_addr):
             for node in _iter_c_nodes_deep_8616(self.root):
@@ -6538,6 +7081,7 @@ class _TailSummaryBuildRun8616:
             self.returns.discard("none")
             self.returns.update(self.split_tail_return_call_fingerprints)
 
+    @cython.ccall
     def finalize(self, func_addr: object, summary_inventory: Mapping[int, CallsiteSummary8616] | None) -> X86_16TailValidationSummary:
         """Apply final contextual/fingerprint passes and emit the summary."""
 
@@ -6583,8 +7127,12 @@ class _TailSummaryBuildRun8616:
             ),
         )
 
+    @cython.ccall
     def build(self) -> X86_16TailValidationSummary:
         """Run all build phases under the codegen snapshot guard."""
+        func_addr: object
+        previous_active_codegen: object
+        previous_snapshot_expr_cache: object
 
         previous_active_codegen = getattr(self.project, "_inertia_tail_validation_active_codegen", None)
         # Dynamic angr/codegen compatibility boundary.
@@ -6622,10 +7170,17 @@ def collect_x86_16_tail_validation_summary(
     project: TailValidationValue,
     codegen: TailValidationValue,
     *,
-    mode: str = "live_out",
-    boundary_fingerprint: str | None = None,
+    mode: object = "live_out",
+    boundary_fingerprint: object = None,
 ) -> X86_16TailValidationSummary:
     """Collect observable structured-codegen effects for whole-tail validation."""
+    boundary_cache_key: object
+    boundary_cached_summary: object
+    boundary_context: object
+    boundary_entries: object
+    entries: object
+    root: object
+    summary_boundary_fingerprint: object
 
     if mode not in _TAIL_VALIDATION_MODES:
         raise ValueError(f"Unsupported x86-16 tail validation mode: {mode}")
@@ -6732,15 +7287,15 @@ def collect_x86_16_tail_validation_summary(
     )
 
 def _tail_validation_return_precision_improvement_8616(
-    field_name: str,
+    field_name: object,
     *,
-    added: tuple[str, ...],
-    removed: tuple[str, ...],
-) -> bool:
+    added: object,
+    removed: object,
+) -> cython.bint:
     if field_name != "returns" or not added or not removed:
         return False
     imprecise_prefixes = ("virtual:", "expr_cycle", "alias_cycle")
-    if any(not value.startswith(imprecise_prefixes) for value in removed):
+    if any(not value.startswith(imprecise_prefixes) for value in iter(removed)):
         return False
     concrete_prefixes = (
         "const:",
@@ -6753,11 +7308,14 @@ def _tail_validation_return_precision_improvement_8616(
         "Xor(",
         "Cmp",
     )
-    return all(value.startswith(concrete_prefixes) for value in added)
+    return all(value.startswith(concrete_prefixes) for value in iter(added))
 
 
-def _tail_validation_linear_ds_write_offset_8616(location: str) -> int | None:
+@cython.ccall
+def _tail_validation_linear_ds_write_offset_8616(location: object) -> int | None:
     """Return the DS-relative byte offset from an accepted write fingerprint."""
+    direct_match: object
+    match: object
     if not isinstance(location, str):
         return None
     direct_match = re.fullmatch(r"deref:ds:0x([0-9a-fA-F]+)", location)
@@ -6774,8 +7332,10 @@ def _tail_validation_linear_ds_write_offset_8616(location: str) -> int | None:
     return offset if offset >= 0 else None
 
 
-def _tail_validation_ds_global_write_offset_8616(location: str) -> int | None:
+@cython.ccall
+def _tail_validation_ds_global_write_offset_8616(location: object) -> int | None:
     """Return the offset from Condition IR's canonical DS-global identity."""
+    match: object
     if not isinstance(location, str):
         return None
     canonical_location = canonicalize_condition_storage_fingerprint_8616(location)
@@ -6785,18 +7345,20 @@ def _tail_validation_ds_global_write_offset_8616(location: str) -> int | None:
     return int(match.group(1), 16)
 
 
+@cython.ccall
 def _linear_ds_write_offset_maps_8616(
-    global_values: set[TailValidationValue],
-    segmented_values: set[TailValidationValue],
-) -> tuple[dict[int, TailValidationValue], dict[int, set[str]]]:
+    global_values: object,
+    segmented_values: object,
+) -> tuple[dict[cython.longlong, TailValidationValue], dict[cython.longlong, set[str]]]:
     """Index global and segmented write locations by resolved DS offset."""
+    location: object
 
     global_by_offset = {
         offset: location
-        for location in global_values
+        for location in iter(global_values)
         if isinstance((offset := _tail_validation_ds_global_write_offset_8616(location)), int)
     }
-    segmented_by_offset: dict[int, set[str]] = {}
+    segmented_by_offset: dict[cython.longlong, set[str]] = {}
     for location in segmented_values:
         offset = _tail_validation_linear_ds_write_offset_8616(location)
         if isinstance(offset, int):
@@ -6804,26 +7366,30 @@ def _linear_ds_write_offset_maps_8616(
     return global_by_offset, segmented_by_offset
 
 
+@cython.ccall
 def _ds_byte_expanded_word_bases_8616(
-    global_by_offset: dict[int, TailValidationValue],
-    segmented_by_offset: dict[int, set[str]],
-) -> set[int]:
+    global_by_offset: object,
+    segmented_by_offset: object,
+) -> set[cython.longlong]:
     """Return word bases whose low/high bytes appear in both surfaces."""
 
     return {
         offset
-        for offset in global_by_offset
+        for offset in iter(global_by_offset)
         if offset + 1 in global_by_offset and offset in segmented_by_offset and offset + 1 in segmented_by_offset
     }
 
 
 def _suppress_linear_ds_alias_writes_8616(
-    global_values: set[TailValidationValue],
-    segmented_values: set[TailValidationValue],
-    byte_expanded_word_bases: set[int],
-    global_by_offset: dict[int, TailValidationValue],
-) -> bool:
+    global_values: object,
+    segmented_values: object,
+    byte_expanded_word_bases: object,
+    global_by_offset: object,
+) -> cython.bint:
     """Remove proven byte/word aliases from both location sets."""
+    high_global: object
+    global_location: object
+    word_base: object
 
     changed = False
     for word_base in sorted(byte_expanded_word_bases):
@@ -6839,14 +7405,13 @@ def _suppress_linear_ds_alias_writes_8616(
             continue
         matching_segmented = {
             location
-            for location in segmented_values
+            for location in iter(segmented_values)
             if _tail_validation_linear_ds_write_offset_8616(location)
             in {global_base, global_base + 1}
         }
         if not any(
-            _tail_validation_linear_ds_write_offset_8616(location)
-            == global_base
-            for location in matching_segmented
+            operator.eq(_tail_validation_linear_ds_write_offset_8616(location), global_base)
+            for location in iter(matching_segmented)
         ):
             continue
         global_values.remove(global_location)
@@ -6855,12 +7420,13 @@ def _suppress_linear_ds_alias_writes_8616(
     return changed
 
 
+@cython.ccall
 def _suppress_linear_ds_aliases_8616(
-    global_delta: dict[str, TailValidationValue],
-    segmented_delta: dict[str, TailValidationValue],
-    global_key: str,
-    segmented_key: str,
-) -> bool:
+    global_delta: object,
+    segmented_delta: object,
+    global_key: object,
+    segmented_key: object,
+) -> cython.bint:
     """Suppress matching DS/global aliases for one delta direction."""
 
     global_values = _boundary_set_8616(global_delta.get(global_key, ()) or ())
@@ -6880,8 +7446,12 @@ def _suppress_linear_ds_aliases_8616(
     return changed
 
 
-def _suppress_global_linear_ds_write_precision_delta_8616(diff: dict[str, TailValidationValue]) -> None:
+@cython.ccall
+def _suppress_global_linear_ds_write_precision_delta_8616(diff: object) -> None:
     """Suppress only proven DS/global write-location precision aliases."""
+    delta: object
+    global_delta: object
+    segmented_delta: object
     delta = diff.get("delta")
     if not isinstance(delta, dict):
         return
@@ -6896,8 +7466,9 @@ def _suppress_global_linear_ds_write_precision_delta_8616(diff: dict[str, TailVa
 def compare_x86_16_tail_validation_summaries(
     before: X86_16TailValidationSummary,
     after: X86_16TailValidationSummary,
-) -> dict[str, TailValidationValue]:
+) -> object:
     """Compare two tail-validation summaries and return normalized deltas."""
+    field_name: object
     changed = False
     precision_improvements: dict[str, TailValidationValue] = {}
     before_fields = before.as_dict()
@@ -6955,7 +7526,7 @@ def compare_x86_16_tail_validation_summaries(
     _suppress_typed_stack_condition_storage_delta_8616(diff)
     changed = any(
         bool((field_delta.get("added", ()) or ()) or (field_delta.get("removed", ()) or ()))
-        for field_delta in diff["delta"].values()
+        for field_delta in builtins.iter(diff["delta"].values())
         if isinstance(field_delta, dict)
     )
     semantic_failures = collect_tail_semantic_failures_8616(
@@ -6972,7 +7543,7 @@ def compare_x86_16_tail_validation_summaries(
         semantic_failures = dict(semantic_failures)
         family = "control_flow_identity"
         semantic_failures[family] = tuple(
-            dict.fromkeys((*semantic_failures.get(family, ()), *unproven_goto_identities))
+            dict.fromkeys(tuple(semantic_failures.get(family, ())) + tuple(unproven_goto_identities))
         )
     if semantic_failures:
         diff["semantic_failures"] = semantic_failures
@@ -6983,15 +7554,18 @@ def compare_x86_16_tail_validation_summaries(
     return diff
 
 
+@cython.ccall
 def _compare_entry_premises_8616(
     before: X86_16TailValidationSummary,
     after: X86_16TailValidationSummary,
-    diff: dict[str, TailValidationValue],
+    diff: object,
 ) -> None:
     """Require identical explicit conditions and prevent unconditional promotion."""
+    after_premise: object
+    before_premise: object
     before_premise, after_premise = before.entry_premise, after.entry_premise
     if before_premise is not None or after_premise is not None:
-        if (before_premise != after_premise or after_premise is None
+        if (operator.ne(before_premise, after_premise) or after_premise is None
                 or after_premise.status is not EntryPremiseStatus8616.CONDITIONAL
                 or not valid_entry_premise_projection_8616(after_premise.to_dict())):
             diff["status"] = EntryPremiseStatus8616.REFUSED.value
@@ -7004,15 +7578,15 @@ def _compare_entry_premises_8616(
 
 
 def _typed_stack_condition_pair_8616(
-    condition_delta: dict[str, TailValidationValue],
-    control_delta: dict[str, TailValidationValue],
-) -> tuple[str, str, tuple[str, ...], tuple[str, ...], tuple[str, ...], tuple[str, ...]] | None:
+    condition_delta: object,
+    control_delta: object,
+) -> object:
     """Return the normalized stack/global condition pair when the shape holds."""
 
-    added = tuple(str(value) for value in condition_delta.get("added", ()) or ())
-    removed = tuple(str(value) for value in condition_delta.get("removed", ()) or ())
-    control_added = tuple(str(value) for value in control_delta.get("added", ()) or ())
-    control_removed = tuple(str(value) for value in control_delta.get("removed", ()) or ())
+    added = tuple(str(value) for value in iter(condition_delta.get("added", ()) or ()))
+    removed = tuple(str(value) for value in iter(condition_delta.get("removed", ()) or ()))
+    control_added = tuple(str(value) for value in iter(control_delta.get("added", ()) or ()))
+    control_removed = tuple(str(value) for value in iter(control_delta.get("removed", ()) or ()))
     if len(added) != len(removed) != len(control_added) != len(control_removed) or len(added) != 1:
         return None
     if "stack_slot:SS:BP-" not in added[0] or "ds_global:" not in removed[0]:
@@ -7021,20 +7595,26 @@ def _typed_stack_condition_pair_8616(
     removed_condition = _canonicalize_structuring_precision_condition_text_8616(removed[0])
     if added_condition == removed_condition:
         return None
-    if not any(added_condition in value for value in control_added):
+    if not any(added_condition in value for value in iter(control_added)):
         return None
-    if not any(removed_condition in value for value in control_removed):
+    if not any(removed_condition in value for value in iter(control_removed)):
         return None
     return added_condition, removed_condition, added, removed, control_added, control_removed
 
 
-def _suppress_typed_stack_condition_storage_delta_8616(diff: dict[str, TailValidationValue]) -> None:
+@cython.ccall
+def _suppress_typed_stack_condition_storage_delta_8616(diff: object) -> None:
     """Classify a typed local-store condition replacing a wider global alias.
 
     The branch validator separately proves the final predicate against ConditionIR
     and the call-return store. This comparison rule only removes the corresponding
     representation delta when every other observable field is unchanged.
     """
+    condition_delta: object
+    control_delta: object
+    delta: object
+    pair: object
+    precision: object
     delta = diff.get("delta")
     precision = diff.get("precision_improvements")
     if not isinstance(delta, dict) or not isinstance(precision, dict):
@@ -7061,7 +7641,9 @@ def _suppress_typed_stack_condition_storage_delta_8616(diff: dict[str, TailValid
 
 
 
-def _control_body_call_addr_tokens_8616(values: Sequence[str]) -> set[str]:
+@cython.ccall
+def _control_body_call_addr_tokens_8616(values: Sequence[str]) -> object:
+    value: object
     tokens: set[str] = set()
     for value in values:
         if "-body-calls:" not in str(value):
@@ -7070,7 +7652,11 @@ def _control_body_call_addr_tokens_8616(values: Sequence[str]) -> set[str]:
     return tokens
 
 
+@cython.ccall
 def _control_body_call_token_counter_8616(values: Sequence[str]) -> Counter[str]:
+    split: object
+    call: object
+    value: object
     counter: Counter[str] = Counter()
     for value in values:
         split = _split_control_flow_body_call_effect_8616(str(value))
@@ -7082,13 +7668,16 @@ def _control_body_call_token_counter_8616(values: Sequence[str]) -> Counter[str]
     return counter
 
 
-def _is_control_body_call_fingerprint_token_8616(value: str) -> bool:
+@cython.ccall
+def _is_control_body_call_fingerprint_token_8616(value: object) -> cython.bint:
     if value in {"<indirect>", "name:<indirect>", "<unknown-call>"}:
         return True
     return value.startswith(("addr:", "name:"))
 
 
-def _split_control_flow_body_call_effect_8616(value: str) -> tuple[str, tuple[str, ...]] | None:
+def _split_control_flow_body_call_effect_8616(value: object) -> object:
+    char: object
+    idx: object
     if "-body-calls:" not in value:
         return None
     depth = 0
@@ -7102,13 +7691,13 @@ def _split_control_flow_body_call_effect_8616(value: str) -> tuple[str, tuple[st
         if char != ":" or depth != 0:
             continue
         payload = value[idx + 1 :]
-        calls = tuple(part for part in payload.split(",") if part)
-        if calls and all(_is_control_body_call_fingerprint_token_8616(call) for call in calls):
+        calls = tuple(part for part in builtins.iter(payload.split(",")) if part)
+        if calls and all(_is_control_body_call_fingerprint_token_8616(call) for call in iter(calls)):
             return value[: idx + 1], calls
     return None
 
 
-def _canonicalize_structuring_precision_condition_text_8616(value: str) -> str:
+def _canonicalize_structuring_precision_condition_text_8616(value: object) -> object:
     value = _canonicalize_local_stack_abi_int_width_8616(value)
 
     def _replace_linear_ds(match: re.Match[str]) -> str:
@@ -7121,7 +7710,8 @@ def _canonicalize_structuring_precision_condition_text_8616(value: str) -> str:
     )
 
 
-def _canonicalize_structuring_precision_effect_8616(value: str) -> str | None:
+def _canonicalize_structuring_precision_effect_8616(value: object) -> object:
+    split: object
     value = _canonicalize_embedded_helper_call_tokens_for_compare_8616(
         _canonicalize_structuring_precision_condition_text_8616(value)
     )
@@ -7134,13 +7724,16 @@ def _canonicalize_structuring_precision_effect_8616(value: str) -> str | None:
     if split is None:
         return value
     prefix, locations = split
-    kept_locations = tuple(location for location in locations if location != "reg:ax")
+    kept_locations = tuple(location for location in iter(locations) if location != "reg:ax")
     if not kept_locations:
         return None
     return f"{prefix}{','.join(kept_locations)}"
 
 
+@cython.ccall
 def _canonicalize_structuring_precision_counter_8616(values: Sequence[str]) -> Counter[str]:
+    canonical: object
+    value: object
     counter: Counter[str] = Counter()
     for value in values:
         canonical = _canonicalize_structuring_precision_effect_8616(str(value))
@@ -7150,18 +7743,20 @@ def _canonicalize_structuring_precision_counter_8616(values: Sequence[str]) -> C
 
 
 def _collect_structuring_precision_suppressed_fields_8616(
-    delta: dict[str, TailValidationValue],
-    allowed_fields: set[str],
-) -> dict[str, dict[str, tuple[str, ...]]] | None:
+    delta: object,
+    allowed_fields: object,
+) -> object:
     """Collect nonempty field deltas limited to the allowed field set."""
+    field_delta: object
+    field_name: object
 
     suppressed: dict[str, dict[str, tuple[str, ...]]] = {}
     for field_name, field_delta in delta.items():
         if not isinstance(field_delta, dict):
             return None
-        added = _boundary_tuple_8616(str(value) for value in _boundary_tuple_8616(field_delta.get("added", ()) or ()))
+        added = _boundary_tuple_8616(str(value) for value in builtins.iter(_boundary_tuple_8616(field_delta.get("added", ()) or ())))
         removed = _boundary_tuple_8616(
-            str(value) for value in _boundary_tuple_8616(field_delta.get("removed", ()) or ())
+            str(value) for value in builtins.iter(_boundary_tuple_8616(field_delta.get("removed", ()) or ()))
         )
         if not added and not removed:
             continue
@@ -7172,16 +7767,16 @@ def _collect_structuring_precision_suppressed_fields_8616(
 
 
 def _callsite_int_helper_control_gate_8616(
-    helper_delta: dict[str, tuple[str, ...]],
-    control_delta: dict[str, tuple[str, ...]],
-) -> bool:
+    helper_delta: object,
+    control_delta: object,
+) -> cython.bint:
     """Return whether helper and body-call targets share an identity."""
 
     helper_added = helper_delta["added"]
     helper_removed = helper_delta["removed"]
-    if any(value not in {"<indirect>", "name:<indirect>"} and not value.startswith("addr:") for value in helper_added):
+    if any(value not in {"<indirect>", "name:<indirect>"} and not value.startswith("addr:") for value in iter(helper_added)):
         return False
-    if any(not value.startswith("addr:") for value in helper_removed):
+    if any(not value.startswith("addr:") for value in iter(helper_removed)):
         return False
     control_added = control_delta["added"]
     control_removed = control_delta["removed"]
@@ -7190,37 +7785,42 @@ def _callsite_int_helper_control_gate_8616(
     )
     if not body_targets:
         return False
-    return any(value in body_targets for value in helper_added)
+    return any(value in body_targets for value in iter(helper_added))
 
 
-def _stack_writes_int_width_gate_8616(stack_delta: dict[str, tuple[str, ...]]) -> bool:
+def _stack_writes_int_width_gate_8616(stack_delta: object) -> cython.bint:
     """Return whether stack writes only narrow DOS int locals to size2."""
 
     added_stack = stack_delta["added"]
     removed_stack = stack_delta["removed"]
-    if any(not value.startswith("stack_slot:SS:BP-") for value in added_stack + removed_stack):
+    if any(not value.startswith("stack_slot:SS:BP-") for value in iter(added_stack + removed_stack)):
         return False
-    removed_canonical = Counter(_canonicalize_local_stack_abi_int_width_8616(value) for value in removed_stack)
-    added_canonical = Counter(_canonicalize_local_stack_abi_int_width_8616(value) for value in added_stack)
-    return not any(count > added_canonical.get(key, 0) for key, count in removed_canonical.items())
+    removed_canonical = Counter(_canonicalize_local_stack_abi_int_width_8616(value) for value in iter(removed_stack))
+    added_canonical = Counter(_canonicalize_local_stack_abi_int_width_8616(value) for value in iter(added_stack))
+    return not any(count > added_canonical.get(key, 0) for key, count in builtins.iter(removed_canonical.items()))
 
 
-def _conditions_canonical_gate_8616(condition_delta: dict[str, tuple[str, ...]]) -> bool:
+def _conditions_canonical_gate_8616(condition_delta: object) -> cython.bint:
     """Return whether added/removed conditions canonicalize identically."""
 
     added_conditions = Counter(
-        _canonicalize_structuring_precision_condition_text_8616(value) for value in condition_delta["added"]
+        _canonicalize_structuring_precision_condition_text_8616(value) for value in iter(condition_delta["added"])
     )
     removed_conditions = Counter(
-        _canonicalize_structuring_precision_condition_text_8616(value) for value in condition_delta["removed"]
+        _canonicalize_structuring_precision_condition_text_8616(value) for value in iter(condition_delta["removed"])
     )
     return added_conditions == removed_conditions
 
 
 def _callsite_int_precision_field_gates_8616(
-    suppressed: dict[str, dict[str, tuple[str, ...]]],
-) -> bool:
+    suppressed: object,
+) -> cython.bint:
     """Return whether all optional per-field precision gates pass."""
+    condition_delta: object
+    control_delta: object
+    helper_delta: object
+    register_delta: object
+    stack_delta: object
 
     helper_delta = suppressed.get("helper_calls")
     control_delta = suppressed.get("control_flow_effects")
@@ -7231,7 +7831,7 @@ def _callsite_int_precision_field_gates_8616(
 
     register_delta = suppressed.get("register_writes")
     if register_delta is not None:  # noqa: SIM102
-        if register_delta["added"] or any(value != "reg:ax" for value in register_delta["removed"]):
+        if register_delta["added"] or any(value != "reg:ax" for value in iter(register_delta["removed"])):
             return False
 
     stack_delta = suppressed.get("stack_writes")
@@ -7242,12 +7842,13 @@ def _callsite_int_precision_field_gates_8616(
     if condition_delta is not None and not _conditions_canonical_gate_8616(condition_delta):
         return False
 
-    return _canonicalize_structuring_precision_counter_8616(control_delta["added"]) == (
+    return operator.eq(_canonicalize_structuring_precision_counter_8616(control_delta["added"]), (
         _canonicalize_structuring_precision_counter_8616(control_delta["removed"])
-    )
+    ))
 
 
-def _suppress_structuring_callsite_target_local_int_precision_delta_8616(diff: dict[str, TailValidationValue]) -> None:
+@cython.ccall
+def _suppress_structuring_callsite_target_local_int_precision_delta_8616(diff: object) -> None:
     """Classify structuring-only precision when the same loop helper remains.
 
     This comparison accepts a narrow before/after bundle produced when
@@ -7256,6 +7857,11 @@ def _suppress_structuring_callsite_target_local_int_precision_delta_8616(diff: d
     host size4 to x86-16 size2.  It refuses global, segmented, return, or
     unrelated helper changes, so true call loss remains a validation failure.
     """
+    delta: object
+    field_delta: object
+    precision: object
+    suppressed: object
+    field_name: object
     delta = diff.get("delta")
     precision = diff.get("precision_improvements")
     if not isinstance(delta, dict) or not isinstance(precision, dict):
@@ -7277,30 +7883,31 @@ def _suppress_structuring_callsite_target_local_int_precision_delta_8616(diff: d
 
 
 def _void_return_exit_condition_pair_8616(
-    condition_delta: dict[str, tuple[str, ...]],
-) -> tuple[str, str] | None:
+    condition_delta: object,
+) -> object:
     """Return the normalized added/inverted-removed condition pair."""
 
-    condition_added = tuple(value for value in condition_delta["added"] if value != "const:True")
-    condition_removed = tuple(value for value in condition_delta["removed"] if value != "const:True")
+    condition_added = tuple(value for value in iter(condition_delta["added"]) if value != "const:True")
+    condition_removed = tuple(value for value in iter(condition_delta["removed"]) if value != "const:True")
     if len(condition_added) != 1 or len(condition_removed) != 1:
         return None
     added_condition = normalize_condition_fingerprint_string_8616(condition_added[0])
     removed_condition = normalize_condition_fingerprint_string_8616(condition_removed[0])
     inverted_removed = invert_condition_fingerprint_string_8616(removed_condition)
-    if normalize_condition_fingerprint_string_8616(inverted_removed or "") != added_condition:
+    if operator.ne(normalize_condition_fingerprint_string_8616(inverted_removed or ""), added_condition):
         return None
     if "const:True" not in condition_delta["removed"]:
         return None
     return added_condition, removed_condition
 
 
+@cython.ccall
 def _void_return_exit_control_gate_8616(
-    control_delta: dict[str, tuple[str, ...]],
-    added_condition: str,
-    removed_condition: str,
-    helper_target: str,
-) -> bool:
+    control_delta: object,
+    added_condition: object,
+    removed_condition: object,
+    helper_target: object,
+) -> cython.bint:
     """Return whether control effects match the expected guard fold."""
 
     control_added = set(control_delta["added"])
@@ -7319,14 +7926,14 @@ def _void_return_exit_control_gate_8616(
 
 
 def _void_return_exit_helper_target_8616(
-    helper_delta: dict[str, tuple[str, ...]],
-    return_delta: dict[str, tuple[str, ...]],
-) -> str | None:
+    helper_delta: object,
+    return_delta: object,
+) -> object:
     """Return the single removed helper target when the shape gates pass."""
 
     helper_added = helper_delta["added"]
     helper_removed = helper_delta["removed"]
-    if helper_added or not helper_removed or any(not value.startswith("addr:") for value in helper_removed):
+    if helper_added or not helper_removed or any(not value.startswith("addr:") for value in iter(helper_removed)):
         return None
     helper_targets = set(helper_removed)
     if len(helper_targets) != 1:
@@ -7336,7 +7943,8 @@ def _void_return_exit_helper_target_8616(
     return next(iter(helper_targets))
 
 
-def _suppress_void_return_loop_exit_guard_structuring_delta_8616(diff: dict[str, TailValidationValue]) -> None:
+@cython.ccall
+def _suppress_void_return_loop_exit_guard_structuring_delta_8616(diff: object) -> None:
     """Classify while(true)+void-exit guard normalization.
 
     Structuring can turn ``while (true) { if (exit) return; body; }`` into a
@@ -7344,6 +7952,17 @@ def _suppress_void_return_loop_exit_guard_structuring_delta_8616(diff: dict[str,
     the same helper call in that loop body, not treat the removed synthetic void
     return as call loss.
     """
+    condition_delta: object
+    condition_pair: object
+    control_delta: object
+    delta: object
+    field_delta: object
+    helper_delta: object
+    helper_target: object
+    precision: object
+    return_delta: object
+    suppressed: object
+    field_name: object
     delta = diff.get("delta")
     precision = diff.get("precision_improvements")
     if not isinstance(delta, dict) or not isinstance(precision, dict):
@@ -7385,22 +8004,22 @@ def _suppress_void_return_loop_exit_guard_structuring_delta_8616(diff: dict[str,
             field_delta["removed"] = ()
 
 def _inverse_guard_condition_control_parts_8616(
-    condition_delta: dict[str, TailValidationValue],
-    control_delta: dict[str, TailValidationValue],
-) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...], tuple[str, ...]] | None:
+    condition_delta: object,
+    control_delta: object,
+) -> object:
     """Return condition/control tuples when they invert one guard exactly."""
 
     condition_added = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(condition_delta.get("added", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(condition_delta.get("added", ()) or ()))
     )
     condition_removed = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(condition_delta.get("removed", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(condition_delta.get("removed", ()) or ()))
     )
     control_added = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(control_delta.get("added", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(control_delta.get("added", ()) or ()))
     )
     control_removed = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(control_delta.get("removed", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(control_delta.get("removed", ()) or ()))
     )
     if len(condition_added) != 1 or len(condition_removed) != 1:
         return None
@@ -7410,33 +8029,34 @@ def _inverse_guard_condition_control_parts_8616(
     added_condition = normalize_condition_fingerprint_string_8616(condition_added[0])
     removed_condition = normalize_condition_fingerprint_string_8616(condition_removed[0])
     inverted_removed = invert_condition_fingerprint_string_8616(removed_condition)
-    if normalize_condition_fingerprint_string_8616(inverted_removed or "") != added_condition:
+    if operator.ne(normalize_condition_fingerprint_string_8616(inverted_removed or ""), added_condition):
         return None
     return condition_added, condition_removed, control_added, control_removed
 
 
 def _inverse_guard_register_suppression_8616(
     register_delta: TailValidationValue,
-    suppressed: dict[str, dict[str, tuple[str, ...]]],
-) -> bool:
+    suppressed: object,
+) -> cython.bint:
     """Validate the optional register delta (AX add only) and record it."""
 
     if not isinstance(register_delta, dict):
         return True
     register_added = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(register_delta.get("added", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(register_delta.get("added", ()) or ()))
     )
     register_removed = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(register_delta.get("removed", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(register_delta.get("removed", ()) or ()))
     )
-    if register_removed or any(value != "reg:ax" for value in register_added):
+    if register_removed or any(value != "reg:ax" for value in iter(register_added)):
         return False
     if register_added:
         suppressed["register_writes"] = {"added": register_added, "removed": register_removed}
     return True
 
 
-def _suppress_loop_continue_exit_guard_inverse_structuring_delta_8616(diff: dict[str, TailValidationValue]) -> None:
+@cython.ccall
+def _suppress_loop_continue_exit_guard_inverse_structuring_delta_8616(diff: object) -> None:
     """Classify loop continue guard vs machine exit-branch guard inversion.
 
     A structured loop commonly prints the condition for continuing the loop
@@ -7444,6 +8064,14 @@ def _suppress_loop_continue_exit_guard_inverse_structuring_delta_8616(diff: dict
     exit guard.  This is a validation-layer comparison rule only: it refuses if
     any helper, return, memory, or non-AX register effect changed.
     """
+    condition_delta: object
+    control_delta: object
+    delta: object
+    field_delta: object
+    parts: object
+    precision: object
+    register_delta: object
+    field_name: object
     delta = diff.get("delta")
     precision = diff.get("precision_improvements")
     if not isinstance(delta, dict) or not isinstance(precision, dict):
@@ -7477,17 +8105,17 @@ def _suppress_loop_continue_exit_guard_inverse_structuring_delta_8616(diff: dict
             field_delta["removed"] = ()
 
 def _inverse_guard_condition_parts_8616(
-    condition_delta: dict[str, TailValidationValue],
+    condition_delta: object,
     before: Mapping[str, TailValidationValue],
     after: Mapping[str, TailValidationValue],
-) -> tuple[tuple[str, ...], tuple[str, ...], str, str] | None:
+) -> object:
     """Validate the inverse-guard condition delta and return its parts."""
 
     condition_added = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(condition_delta.get("added", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(condition_delta.get("added", ()) or ()))
     )
     condition_removed = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(condition_delta.get("removed", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(condition_delta.get("removed", ()) or ()))
     )
     if len(condition_removed) != 1 or len(condition_added) > 1:
         return None
@@ -7499,10 +8127,10 @@ def _inverse_guard_condition_parts_8616(
         return None
 
     before_conditions = canonicalize_tail_validation_summary_field_values_8616(
-        "conditions", {str(value) for value in before.get("conditions", ()) or ()}
+        "conditions", {str(value) for value in iter(before.get("conditions", ()) or ())}
     )
     after_conditions = canonicalize_tail_validation_summary_field_values_8616(
-        "conditions", {str(value) for value in after.get("conditions", ()) or ()}
+        "conditions", {str(value) for value in iter(after.get("conditions", ()) or ())}
     )
     if removed_condition not in before_conditions or removed_condition in after_conditions:
         return None
@@ -7516,22 +8144,23 @@ def _inverse_guard_condition_parts_8616(
 
 
 def _inverse_guard_control_parts_8616(
-    control_delta: dict[str, TailValidationValue],
+    control_delta: object,
     before: Mapping[str, TailValidationValue],
     after: Mapping[str, TailValidationValue],
-    removed_condition: str,
-    inverted_condition: str,
-) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+    removed_condition: object,
+    inverted_condition: object,
+) -> object:
     """Validate the else-fold control-flow delta and return added/removed."""
+    split_else: object
 
     control_added = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(control_delta.get("added", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(control_delta.get("added", ()) or ()))
     )
     control_removed = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(control_delta.get("removed", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(control_delta.get("removed", ()) or ()))
     )
     removed_else_effects = tuple(
-        value for value in control_removed if value.startswith("if-else-body-calls:else:")
+        value for value in iter(control_removed) if value.startswith("if-else-body-calls:else:")
     )
     if len(removed_else_effects) != 1:
         return None
@@ -7545,16 +8174,16 @@ def _inverse_guard_control_parts_8616(
         "if:else",
         removed_else_effects[0],
     }
-    if set(control_removed) != expected_removed:
+    if operator.ne(set(control_removed), expected_removed):
         return None
     if set(control_added) not in ({expected_added_body}, {f"if:{inverted_condition}", expected_added_body}):
         return None
 
     before_control = canonicalize_tail_validation_summary_field_values_8616(
-        "control_flow_effects", {str(value) for value in before.get("control_flow_effects", ()) or ()}
+        "control_flow_effects", {str(value) for value in iter(before.get("control_flow_effects", ()) or ())}
     )
     after_control = canonicalize_tail_validation_summary_field_values_8616(
-        "control_flow_effects", {str(value) for value in after.get("control_flow_effects", ()) or ()}
+        "control_flow_effects", {str(value) for value in iter(after.get("control_flow_effects", ()) or ())}
     )
     if expected_added_body not in after_control:
         return None
@@ -7565,13 +8194,17 @@ def _inverse_guard_control_parts_8616(
     return control_added, control_removed
 
 
+@cython.ccall
 def _inverse_guard_delta_stability_gate_8616(
-    delta: dict[str, TailValidationValue],
-    precision: dict[str, TailValidationValue],
+    delta: object,
+    precision: object,
     before: Mapping[str, TailValidationValue],
     after: Mapping[str, TailValidationValue],
-) -> tuple[dict[str, TailValidationValue], dict[str, TailValidationValue]] | None:
+) -> object:
     """Return the condition/control delta maps when the entry gates pass."""
+    condition_delta: object
+    control_delta: object
+    helper_delta: object
 
     condition_delta = delta.get("conditions")
     control_delta = delta.get("control_flow_effects")
@@ -7580,14 +8213,15 @@ def _inverse_guard_delta_stability_gate_8616(
         return None
     if helper_delta.get("added", ()) or helper_delta.get("removed", ()):
         return None
-    if _canonicalize_summary_field_counter_8616("helper_calls", before.get("helper_calls", ()) or ()) != (
+    if operator.ne(_canonicalize_summary_field_counter_8616("helper_calls", before.get("helper_calls", ()) or ()), (
         _canonicalize_summary_field_counter_8616("helper_calls", after.get("helper_calls", ()) or ())
-    ):
+    )):
         return None
     return condition_delta, control_delta
 
 
-def _suppress_if_else_inverse_guard_structuring_delta_8616(diff: dict[str, TailValidationValue]) -> None:
+@cython.ccall
+def _suppress_if_else_inverse_guard_structuring_delta_8616(diff: object) -> None:
     """Classify an empty-then inverse guard folded into one direct if body.
 
     angr may initially represent ``if (x == 0) {} else { call(); }`` and later
@@ -7595,6 +8229,15 @@ def _suppress_if_else_inverse_guard_structuring_delta_8616(diff: dict[str, TailV
     rule accepts only that exact inverse-guard shape with identical calls and
     no other observable delta. It does not mutate or recover control flow.
     """
+    after: object
+    before: object
+    condition_parts: object
+    control_parts: object
+    delta: object
+    deltas: object
+    field_delta: object
+    precision: object
+    field_name: object
     delta = diff.get("delta")
     precision = diff.get("precision_improvements")
     before = diff.get("before")
@@ -7637,11 +8280,14 @@ def _suppress_if_else_inverse_guard_structuring_delta_8616(diff: dict[str, TailV
             field_delta["removed"] = ()
 
 
+@cython.ccall
 def _delta_other_fields_stable_8616(
     delta: Mapping[str, TailValidationValue],
-    excluded: frozenset[str],
-) -> bool:
+    excluded: object,
+) -> cython.bint:
     """Return whether every non-excluded delta field has no add/remove."""
+    field_delta: object
+    field_name: object
 
     for field_name, field_delta in delta.items():
         if field_name in excluded:
@@ -7654,15 +8300,16 @@ def _delta_other_fields_stable_8616(
 
 
 def _suppress_removed_else_membership_8616(
-    delta: dict[str, TailValidationValue],
-    control_delta: dict[str, TailValidationValue],
-    control_removed: tuple[str, ...],
+    delta: object,
+    control_delta: object,
+    control_removed: object,
     before: Mapping[str, TailValidationValue],
-    precision: dict[str, TailValidationValue],
-) -> bool:
+    precision: object,
+) -> cython.bint:
     """Accept an else-body membership loss covered by the helper multiset."""
+    value: object
 
-    if any(value != "if:else" and not value.startswith("if-else-body-calls:else:") for value in control_removed):
+    if any(value != "if:else" and not value.startswith("if-else-body-calls:else:") for value in iter(control_removed)):
         return False
     if not _delta_other_fields_stable_8616(delta, frozenset({"helper_calls", "control_flow_effects"})):
         return False
@@ -7673,9 +8320,9 @@ def _suppress_removed_else_membership_8616(
             continue
         calls = value.removeprefix("if-else-body-calls:else:").split(",")
         removed_else_calls.update(
-            _canonicalize_helper_call_fingerprint_for_compare_8616(call) for call in calls if call
+            _canonicalize_helper_call_fingerprint_for_compare_8616(call) for call in iter(calls) if call
         )
-    if any(count > helper_counter.get(call, 0) for call, count in removed_else_calls.items()):
+    if any(count > helper_counter.get(call, 0) for call, count in builtins.iter(removed_else_calls.items())):
         return False
     precision["if_else_body_membership_structuring"] = {
         "control_flow_effects": {"added": (), "removed": control_removed}
@@ -7686,22 +8333,24 @@ def _suppress_removed_else_membership_8616(
 
 
 def _suppress_added_membership_8616(
-    delta: dict[str, TailValidationValue],
-    control_delta: dict[str, TailValidationValue],
-    control_added: tuple[str, ...],
-    normalized_added_parts: list[tuple[str, tuple[str, ...]]],
+    delta: object,
+    control_delta: object,
+    control_added: object,
+    normalized_added_parts: object,
     after: Mapping[str, TailValidationValue],
-    precision: dict[str, TailValidationValue],
-) -> bool:
+    precision: object,
+) -> cython.bint:
     """Accept an added-only body-call superset covered by helper evidence."""
+    _added_prefix: object
+    added_calls: object
 
     helper_counter = _canonicalize_summary_field_counter_8616("helper_calls", after.get("helper_calls", ()) or ())
     added_call_counter: Counter[str] = Counter()
     for _added_prefix, added_calls in normalized_added_parts:
         added_call_counter.update(
-            _canonicalize_helper_call_fingerprint_for_compare_8616(call) for call in added_calls
+            _canonicalize_helper_call_fingerprint_for_compare_8616(call) for call in iter(added_calls)
         )
-    if any(count > helper_counter.get(call, 0) for call, count in added_call_counter.items()):
+    if any(count > helper_counter.get(call, 0) for call, count in builtins.iter(added_call_counter.items())):
         return False
     precision["if_body_call_membership_structuring"] = {
         "control_flow_effects": {"added": control_added, "removed": ()}
@@ -7712,12 +8361,17 @@ def _suppress_added_membership_8616(
 
 
 def _added_parts_cover_removed_parts_8616(
-    added_parts: list[tuple[str, tuple[str, ...]]],
-    removed_parts: list[tuple[str, tuple[str, ...]]],
-) -> bool:
+    added_parts: object,
+    removed_parts: object,
+) -> cython.bint:
     """Return whether added body-call parts strictly cover every removal."""
+    match_idx: object
+    added_item: object
+    idx: object
+    removed_calls: object
+    removed_prefix: object
 
-    used_added: set[int] = set()
+    used_added: set[cython.longlong] = set()
     for removed_prefix, removed_calls in removed_parts:
         removed_counter = Counter(removed_calls)
         match_idx = None
@@ -7729,7 +8383,7 @@ def _added_parts_cover_removed_parts_8616(
                 continue
             added_counter = Counter(added_calls)
             if not removed_counter or any(
-                count > added_counter.get(call, 0) for call, count in removed_counter.items()
+                count > added_counter.get(call, 0) for call, count in builtins.iter(removed_counter.items())
             ):
                 continue
             if added_counter == removed_counter:
@@ -7739,14 +8393,15 @@ def _added_parts_cover_removed_parts_8616(
         if match_idx is None:
             return False
         used_added.add(match_idx)
-    return len(used_added) == len(added_parts)
+    return operator.eq(len(used_added), len(added_parts))
 
 
+@cython.ccall
 def _helper_multiset_stable_gate_8616(
     helper_delta: TailValidationValue,
     before: Mapping[str, TailValidationValue],
     after: Mapping[str, TailValidationValue],
-) -> bool:
+) -> cython.bint:
     """Return whether helper calls are unchanged as a multiset."""
 
     if not isinstance(helper_delta, dict):
@@ -7755,47 +8410,47 @@ def _helper_multiset_stable_gate_8616(
         helper_delta.get("removed", ()) or ()
     ):
         return False
-    return _canonicalize_summary_field_counter_8616("helper_calls", before.get("helper_calls", ()) or ()) == (
+    return operator.eq(_canonicalize_summary_field_counter_8616("helper_calls", before.get("helper_calls", ()) or ()), (
         _canonicalize_summary_field_counter_8616("helper_calls", after.get("helper_calls", ()) or ())
-    )
+    ))
 
 
 def _membership_control_parts_8616(
-    control_delta: dict[str, TailValidationValue],
+    control_delta: object,
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Return the string-normalized control add/remove tuples."""
 
     control_added = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(control_delta.get("added", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(control_delta.get("added", ()) or ()))
     )
     control_removed = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(control_delta.get("removed", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(control_delta.get("removed", ()) or ()))
     )
     return control_added, control_removed
 
 
 def _suppress_added_removed_membership_8616(
-    delta: dict[str, TailValidationValue],
-    control_delta: dict[str, TailValidationValue],
-    control_added: tuple[str, ...],
-    control_removed: tuple[str, ...],
+    delta: object,
+    control_delta: object,
+    control_added: object,
+    control_removed: object,
     after: Mapping[str, TailValidationValue],
-    precision: dict[str, TailValidationValue],
+    precision: object,
 ) -> None:
     """Suppress the added-removed if-body membership supersets that survive."""
 
-    if any(not value.startswith("if-body-calls:") for value in control_added + control_removed):
+    if any(not value.startswith("if-body-calls:") for value in iter(control_added + control_removed)):
         return
 
     if not _delta_other_fields_stable_8616(delta, frozenset({"helper_calls", "control_flow_effects"})):
         return
 
-    added_parts = [_split_control_flow_body_call_effect_8616(value) for value in control_added]
-    removed_parts = [_split_control_flow_body_call_effect_8616(value) for value in control_removed]
-    if any(item is None for item in added_parts + removed_parts):
+    added_parts = [_split_control_flow_body_call_effect_8616(value) for value in iter(control_added)]
+    removed_parts = [_split_control_flow_body_call_effect_8616(value) for value in iter(control_removed)]
+    if any(item is None for item in iter(added_parts + removed_parts)):
         return
-    normalized_added_parts = [item for item in added_parts if item is not None]
-    normalized_removed_parts = [item for item in removed_parts if item is not None]
+    normalized_added_parts = [item for item in iter(added_parts) if item is not None]
+    normalized_removed_parts = [item for item in iter(removed_parts) if item is not None]
     if not control_removed:
         _suppress_added_membership_8616(
             delta, control_delta, control_added, normalized_added_parts, after, precision
@@ -7812,7 +8467,8 @@ def _suppress_added_removed_membership_8616(
     control_delta["removed"] = ()
 
 
-def _suppress_if_body_call_membership_structuring_delta_8616(diff: dict[str, TailValidationValue]) -> None:
+@cython.ccall
+def _suppress_if_body_call_membership_structuring_delta_8616(diff: object) -> None:
     """Classify an if-body call membership refinement with no call-count change.
 
     The pre-structuring surface can know a branch condition and all helper
@@ -7822,6 +8478,11 @@ def _suppress_if_body_call_membership_structuring_delta_8616(diff: dict[str, Tai
     only when the complete helper-call multiset is unchanged and the delta is
     strictly an ``if-body-calls`` superset for the same condition prefix.
     """
+    after: object
+    before: object
+    control_delta: object
+    delta: object
+    precision: object
     delta = diff.get("delta")
     precision = diff.get("precision_improvements")
     before = diff.get("before")
@@ -7853,7 +8514,7 @@ def _suppress_if_body_call_membership_structuring_delta_8616(diff: dict[str, Tai
     )
 
 
-def _suppress_helper_calls_accounted_by_control_body_calls_8616(diff: dict[str, TailValidationValue]) -> None:
+def _suppress_helper_calls_accounted_by_control_body_calls_8616(diff: object) -> None:
     """Suppress top-level helper-call accounting loss when body-call evidence remains.
 
     Some postprocess cleanup can change how validation walks helper calls:
@@ -7863,6 +8524,12 @@ def _suppress_helper_calls_accounted_by_control_body_calls_8616(diff: dict[str, 
     every removed call is still present in the after-summary body-call multiset,
     and all other observable fields are stable.
     """
+    after: object
+    delta: object
+    helper_delta: object
+    precision: object
+    field_delta: object
+    field_name: object
     delta = diff.get("delta")
     precision = diff.get("precision_improvements")
     after = diff.get("after")
@@ -7873,10 +8540,10 @@ def _suppress_helper_calls_accounted_by_control_body_calls_8616(diff: dict[str, 
     if not isinstance(helper_delta, dict):
         return
     helper_added = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(helper_delta.get("added", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(helper_delta.get("added", ()) or ()))
     )
     helper_removed = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(helper_delta.get("removed", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(helper_delta.get("removed", ()) or ()))
     )
     if helper_added or not helper_removed:
         return
@@ -7890,10 +8557,10 @@ def _suppress_helper_calls_accounted_by_control_body_calls_8616(diff: dict[str, 
             return
 
     after_control_counter = _control_body_call_token_counter_8616(after.get("control_flow_effects", ()) or ())
-    removed_counter = Counter(_canonicalize_helper_call_fingerprint_for_compare_8616(value) for value in helper_removed)
+    removed_counter = Counter(_canonicalize_helper_call_fingerprint_for_compare_8616(value) for value in iter(helper_removed))
     if not after_control_counter:
         return
-    if any(count > after_control_counter.get(call, 0) for call, count in removed_counter.items()):
+    if any(count > after_control_counter.get(call, 0) for call, count in builtins.iter(removed_counter.items())):
         return
 
     precision["helper_calls_accounted_by_control_body_calls"] = {
@@ -7903,24 +8570,29 @@ def _suppress_helper_calls_accounted_by_control_body_calls_8616(diff: dict[str, 
     helper_delta["removed"] = ()
 
 
-def _control_body_call_effect_without_calls_8616(value: str, removed_calls: set[str]) -> str | None:
+def _control_body_call_effect_without_calls_8616(value: object, removed_calls: object) -> object:
     """Return a body-call effect fingerprint with selected helper calls removed."""
+    split: object
     split = _split_control_flow_body_call_effect_8616(value)
     if split is None:
         return None
     prefix, calls = split
     kept = tuple(
-        call for call in calls if _canonicalize_helper_call_fingerprint_for_compare_8616(call) not in removed_calls
+        call for call in iter(calls) if _canonicalize_helper_call_fingerprint_for_compare_8616(call) not in removed_calls
     )
     return f"{prefix}{','.join(kept)}" if kept else None
 
 
-def _canonical_control_flow_effect_for_compare_8616(value: str) -> str:
+def _canonical_control_flow_effect_for_compare_8616(value: object) -> object:
     """Return the canonical validation-comparison form for one control-flow effect."""
+    offset: object
+    split: object
+    write_split: object
+    location: object
     split = _split_control_flow_body_call_effect_8616(value)
     if split is not None:
         prefix, calls = split
-        normalized_calls = tuple(_canonicalize_helper_call_fingerprint_for_compare_8616(call) for call in calls)
+        normalized_calls = tuple(_canonicalize_helper_call_fingerprint_for_compare_8616(call) for call in iter(calls))
         if prefix.endswith(":") and ":" in prefix[:-1]:
             kind, condition = prefix[:-1].split(":", 1)
             normalized_condition = _canonicalize_condition_fingerprint_for_compare_8616(condition)
@@ -7950,16 +8622,16 @@ def _canonical_control_flow_effect_for_compare_8616(value: str) -> str:
 
 def _helper_removed_delta_parts_8616(
     helper_delta: TailValidationValue,
-) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+) -> object:
     """Return helper add/remove tuples only for a pure removal delta."""
 
     if not isinstance(helper_delta, dict):
         return None
     helper_added = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(helper_delta.get("added", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(helper_delta.get("added", ()) or ()))
     )
     helper_removed = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(helper_delta.get("removed", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(helper_delta.get("removed", ()) or ()))
     )
     if helper_added or not helper_removed:
         return None
@@ -7968,34 +8640,37 @@ def _helper_removed_delta_parts_8616(
 
 def _removed_helpers_accounted_in_after_text_8616(
     after: Mapping[str, TailValidationValue],
-    removed_call_tokens: set[str],
-) -> bool:
+    removed_call_tokens: object,
+) -> cython.bint:
     """Return whether every removed helper still appears in after evidence."""
 
     after_condition_text = "\n".join(
         str(value)
-        for value in _boundary_tuple_8616(after.get("conditions", ()) or ())
-        + _boundary_tuple_8616(after.get("control_flow_effects", ()) or ())
+        for value in iter(_boundary_tuple_8616(after.get("conditions", ()) or ())
+        + _boundary_tuple_8616(after.get("control_flow_effects", ()) or ()))
     )
-    return all(f"call:{helper}" in after_condition_text for helper in removed_call_tokens)
+    return all(f"call:{helper}" in after_condition_text for helper in iter(removed_call_tokens))
 
 
 def _control_body_call_delta_gate_8616(
-    control_delta: dict[str, TailValidationValue],
-    removed_calls: set[str],
+    control_delta: object,
+    removed_calls: object,
     after: Mapping[str, TailValidationValue],
-) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+) -> object:
     """Return control tuples when every change stays in body-call effects."""
+    reduced: object
+    added_effect: object
+    removed_effect: object
 
     control_added = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(control_delta.get("added", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(control_delta.get("added", ()) or ()))
     )
     control_removed = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(control_delta.get("removed", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(control_delta.get("removed", ()) or ()))
     )
     after_controls = {
         _canonical_control_flow_effect_for_compare_8616(str(value))
-        for value in _boundary_tuple_8616(after.get("control_flow_effects", ()) or ())
+        for value in builtins.iter(_boundary_tuple_8616(after.get("control_flow_effects", ()) or ()))
         if "-body-calls:" in str(value)
     }
     for removed_effect in control_removed:
@@ -8010,8 +8685,15 @@ def _control_body_call_delta_gate_8616(
     return control_added, control_removed
 
 
-def _suppress_helper_calls_accounted_by_conditions_8616(diff: dict[str, TailValidationValue]) -> None:
+@cython.ccall
+def _suppress_helper_calls_accounted_by_conditions_8616(diff: object) -> None:
     """Suppress helper-call loss when the same calls remain in condition evidence."""
+    after: object
+    control_delta: object
+    control_parts: object
+    delta: object
+    helper_parts: object
+    precision: object
     delta = diff.get("delta")
     precision = diff.get("precision_improvements")
     after = diff.get("after")
@@ -8030,7 +8712,7 @@ def _suppress_helper_calls_accounted_by_conditions_8616(diff: dict[str, TailVali
         return
 
     removed_call_tokens = set(helper_removed)
-    removed_calls = {_canonicalize_helper_call_fingerprint_for_compare_8616(value) for value in removed_call_tokens}
+    removed_calls = {_canonicalize_helper_call_fingerprint_for_compare_8616(value) for value in iter(removed_call_tokens)}
     if not _removed_helpers_accounted_in_after_text_8616(after, removed_call_tokens):
         return
 
@@ -8049,39 +8731,42 @@ def _suppress_helper_calls_accounted_by_conditions_8616(diff: dict[str, TailVali
     control_delta["added"] = ()
     control_delta["removed"] = ()
 
-def _value_mentions_helper_target_8616(value: str, helper_target: str) -> bool:
+@cython.ccall
+def _value_mentions_helper_target_8616(value: object, helper_target: object) -> cython.bint:
     """Return whether a validation fingerprint references a helper target."""
     return helper_target in value or f"call:{helper_target}" in value
 
 
-def _loop_body_write_effect_has_only_register_carriers_8616(value: str) -> bool:
+def _loop_body_write_effect_has_only_register_carriers_8616(value: object) -> cython.bint:
     """Return whether a loop body-write effect contains only register carriers."""
+    locations: object
     locations = _control_flow_loop_body_write_locations_8616(value)
-    return locations is not None and all(location.startswith("reg:") for location in locations)
+    return locations is not None and all(location.startswith("reg:") for location in iter(locations))
 
 
-def _after_control_mentions_helper_as_loop_evidence_8616(after_controls: Sequence[str], helper_target: str) -> bool:
+def _after_control_mentions_helper_as_loop_evidence_8616(after_controls: Sequence[str], helper_target: object) -> cython.bint:
     """Return whether after-summary loop evidence still accounts for a helper."""
     return any(
         _value_mentions_helper_target_8616(value, helper_target)
         and ("-body-calls:" in value or value.startswith(("while:", "for:", "dowhile:", "do-while:")))
-        for value in after_controls
+        for value in iter(after_controls)
     )
 
 
 def _no_condition_change_carrier_arm_8616(
-    control_added: tuple[str, ...],
-    control_removed: tuple[str, ...],
-    helper_removed: tuple[str, ...],
-) -> bool:
+    control_added: object,
+    control_removed: object,
+    helper_removed: object,
+) -> cython.bint:
     """Accept loop carriers absorbed into existing loop-head evidence."""
+    value: object
 
     for value in control_added:
         if not (
             value.startswith(("while:", "for:", "dowhile:", "do-while:"))
             and any(
                 _value_mentions_helper_target_8616(value, helper_target)
-                for helper_target in helper_removed
+                for helper_target in iter(helper_removed)
             )
         ):
             return False
@@ -8099,43 +8784,43 @@ def _no_condition_change_carrier_arm_8616(
 
 
 def _carrier_arm_added_loop_kind_8616(
-    added_condition: str,
-    control_added: tuple[str, ...],
-    helper_removed: tuple[str, ...],
-    condition_mentions_removed_helper: bool,
-) -> str | None:
+    added_condition: object,
+    control_added: object,
+    helper_removed: object,
+    condition_mentions_removed_helper: cython.bint,
+) -> object:
     """Return the loop kind when the added controls match the carrier shape."""
 
     loop_kinds = ("while", "for", "dowhile", "do-while")
     added_loop_kinds = tuple(
-        kind for kind in loop_kinds if f"{kind}:{added_condition}" in control_added
+        kind for kind in iter(loop_kinds) if f"{kind}:{added_condition}" in control_added
     )
     if len(added_loop_kinds) != 1:
         return None
     loop_kind = added_loop_kinds[0]
     added_body_call_controls = {
         value
-        for value in control_added
+        for value in iter(control_added)
         if value.startswith(f"{loop_kind}-body-calls:{added_condition}:")
         and any(
-            _value_mentions_helper_target_8616(value, helper_target) for helper_target in helper_removed
+            _value_mentions_helper_target_8616(value, helper_target) for helper_target in iter(helper_removed)
         )
     }
     if not condition_mentions_removed_helper and not added_body_call_controls:
         return None
     allowed_added_controls = {f"{loop_kind}:{added_condition}"}
     allowed_added_controls.update(added_body_call_controls)
-    if set(control_added) != allowed_added_controls:
+    if operator.ne(set(control_added), allowed_added_controls):
         return None
     return loop_kind
 
 
 def _carrier_arm_removed_controls_gate_8616(
-    loop_kind: str,
-    removed_break_condition: str | None,
-    control_removed: tuple[str, ...],
-    helper_removed: tuple[str, ...],
-) -> bool:
+    loop_kind: object,
+    removed_break_condition: object,
+    control_removed: object,
+    helper_removed: object,
+) -> cython.bint:
     """Return whether the removed controls match the carrier fold shape."""
 
     if removed_break_condition is None:
@@ -8150,40 +8835,42 @@ def _carrier_arm_removed_controls_gate_8616(
         allowed_removed_controls = set(required_removed_controls)
     allowed_removed_controls.update(
         value
-        for value in control_removed
+        for value in iter(control_removed)
         if value.startswith(f"{loop_kind}-body-calls:const:True:")
         and any(
-            _value_mentions_helper_target_8616(value, helper_target) for helper_target in helper_removed
+            _value_mentions_helper_target_8616(value, helper_target) for helper_target in iter(helper_removed)
         )
     )
     allowed_removed_controls.update(
         value
-        for value in control_removed
+        for value in iter(control_removed)
         if _loop_body_write_effect_has_only_register_carriers_8616(value)
     )
-    return set(control_removed) == allowed_removed_controls
+    return operator.eq(set(control_removed), allowed_removed_controls)
 
 
 def _condition_change_carrier_arm_8616(
-    condition_added: tuple[str, ...],
-    condition_removed: tuple[str, ...],
-    control_added: tuple[str, ...],
-    control_removed: tuple[str, ...],
-    helper_removed: tuple[str, ...],
-) -> bool:
+    condition_added: object,
+    condition_removed: object,
+    control_added: object,
+    control_removed: object,
+    helper_removed: object,
+) -> cython.bint:
     """Accept a restructured loop condition carrying the removed helper."""
+    loop_kind: object
+    removed_break_condition: object
 
     if len(condition_added) != 1:
         return False
     added_condition = normalize_condition_fingerprint_string_8616(condition_added[0])
     condition_mentions_removed_helper = any(
         _value_mentions_helper_target_8616(added_condition, helper_target)
-        for helper_target in helper_removed
+        for helper_target in iter(helper_removed)
     )
     if not condition_mentions_removed_helper and "call:" not in added_condition:
         return False
 
-    removed_nonconstant_conditions = tuple(value for value in condition_removed if value != "const:True")
+    removed_nonconstant_conditions = tuple(value for value in iter(condition_removed) if value != "const:True")
     if len(removed_nonconstant_conditions) > 1:
         return False
     removed_break_condition = (
@@ -8193,7 +8880,7 @@ def _condition_change_carrier_arm_8616(
     )
     if removed_break_condition is not None:
         inverted_break_condition = invert_condition_fingerprint_string_8616(removed_break_condition)
-        if normalize_condition_fingerprint_string_8616(inverted_break_condition or "") != added_condition:
+        if operator.ne(normalize_condition_fingerprint_string_8616(inverted_break_condition or ""), added_condition):
             return False
 
     loop_kind = _carrier_arm_added_loop_kind_8616(
@@ -8206,7 +8893,7 @@ def _condition_change_carrier_arm_8616(
     )
 
 
-def _suppress_loop_condition_call_result_carrier_delta_8616(diff: dict[str, TailValidationValue]) -> None:
+def _suppress_loop_condition_call_result_carrier_delta_8616(diff: object) -> None:
     """Classify a call-result carrier disappearing into a structured loop condition.
 
     Structuring can turn ``while (true)`` plus a helper-backed compare carrier
@@ -8215,6 +8902,13 @@ def _suppress_loop_condition_call_result_carrier_delta_8616(diff: dict[str, Tail
     must still be referenced by after-summary loop evidence, and removed body
     writes must be register-only call-result carriers.
     """
+    after: object
+    condition_delta: object
+    control_delta: object
+    delta: object
+    helper_delta: object
+    precision: object
+    helper_target: object
     delta = diff.get("delta")
     precision = diff.get("precision_improvements")
     after = diff.get("after")
@@ -8232,29 +8926,29 @@ def _suppress_loop_condition_call_result_carrier_delta_8616(diff: dict[str, Tail
         return
 
     helper_added = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(helper_delta.get("added", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(helper_delta.get("added", ()) or ()))
     )
     helper_removed = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(helper_delta.get("removed", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(helper_delta.get("removed", ()) or ()))
     )
-    if helper_added or not helper_removed or any(not value.startswith("addr:") for value in helper_removed):
+    if helper_added or not helper_removed or any(not value.startswith("addr:") for value in iter(helper_removed)):
         return
 
     condition_added = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(condition_delta.get("added", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(condition_delta.get("added", ()) or ()))
     )
     condition_removed = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(condition_delta.get("removed", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(condition_delta.get("removed", ()) or ()))
     )
     control_added = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(control_delta.get("added", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(control_delta.get("added", ()) or ()))
     )
     control_removed = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(control_delta.get("removed", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(control_delta.get("removed", ()) or ()))
     )
 
     after_controls = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(after.get("control_flow_effects", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(after.get("control_flow_effects", ()) or ()))
     )
     for helper_target in helper_removed:
         if not _after_control_mentions_helper_as_loop_evidence_8616(after_controls, helper_target):
@@ -8286,7 +8980,13 @@ def _suppress_loop_condition_call_result_carrier_delta_8616(diff: dict[str, Tail
     control_delta["removed"] = ()
 
 
-def _suppress_flags_register_write_condition_transfer_delta_8616(diff: dict[str, TailValidationValue]) -> None:
+@cython.ccall
+def _suppress_flags_register_write_condition_transfer_delta_8616(diff: object) -> None:
+    delta: object
+    precision: object
+    register_delta: object
+    field_delta: object
+    field_name: object
     delta = diff.get("delta")
     precision = diff.get("precision_improvements")
     if not isinstance(delta, dict) or not isinstance(precision, dict):
@@ -8311,21 +9011,25 @@ def _suppress_flags_register_write_condition_transfer_delta_8616(diff: dict[str,
 
 
 def _call_feeder_control_gate_8616(
-    control_added: tuple[TailValidationValue, ...],
-    register_added: tuple[TailValidationValue, ...],
-) -> bool:
+    control_added: object,
+    register_added: object,
+) -> cython.bint:
     """Return whether control effects prove a loop-body call feeding a register."""
 
     if not control_added or any(
-        not value.startswith(("while-body-calls:", "while-body-writes:")) for value in control_added
+        not value.startswith(("while-body-calls:", "while-body-writes:")) for value in iter(control_added)
     ):
         return False
-    if not any(":call:" in value or ":name:" in value for value in control_added):
+    if not any(":call:" in value or ":name:" in value for value in iter(control_added)):
         return False
-    return any(any(str(reg) in value for reg in register_added) for value in control_added)
+    return any(any(str(reg) in value for reg in iter(register_added)) for value in iter(control_added))
 
 
-def _suppress_void_return_loop_call_feeder_delta_8616(diff: dict[str, TailValidationValue]) -> None:
+def _suppress_void_return_loop_call_feeder_delta_8616(diff: object) -> None:
+    control_delta: object
+    delta: object
+    precision: object
+    register_delta: object
     delta = diff.get("delta")
     precision = diff.get("precision_improvements")
     if not isinstance(delta, dict) or not isinstance(precision, dict):
@@ -8337,12 +9041,12 @@ def _suppress_void_return_loop_call_feeder_delta_8616(diff: dict[str, TailValida
     register_added = _boundary_tuple_8616(register_delta.get("added", ()) or ())
     register_removed = _boundary_tuple_8616(register_delta.get("removed", ()) or ())
     control_added = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(control_delta.get("added", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(control_delta.get("added", ()) or ()))
     )
     control_removed = _boundary_tuple_8616(control_delta.get("removed", ()) or ())
     if register_removed or control_removed:
         return
-    if not register_added or any(not str(value).startswith("reg:") for value in register_added):
+    if not register_added or any(not str(value).startswith("reg:") for value in iter(register_added)):
         return
     if not _call_feeder_control_gate_8616(control_added, register_added):
         return
@@ -8357,12 +9061,14 @@ def _suppress_void_return_loop_call_feeder_delta_8616(diff: dict[str, TailValida
     control_delta["added"] = ()
     control_delta["removed"] = ()
 
-def _control_flow_loop_body_write_locations_8616(value: str) -> tuple[str, ...] | None:
+def _control_flow_loop_body_write_locations_8616(value: object) -> object:
     """Parse top-level write locations from a loop-body effect fingerprint."""
+    char: object
+    idx: object
     is_compact_loop_write = value.startswith("control_flow_effects:sha256:") and ":loop-body-writes:" in value
     if not value.startswith(_LOOP_BODY_WRITE_EFFECT_PREFIXES_8616) and not is_compact_loop_write:
         return None
-    candidates: list[int] = []
+    candidates: list[cython.longlong] = []
     depth = 0
     for idx, char in enumerate(value):
         if char == "(":
@@ -8376,13 +9082,14 @@ def _control_flow_loop_body_write_locations_8616(value: str) -> tuple[str, ...] 
         if value.startswith(_CONTROL_FLOW_WRITE_LOCATION_MARKERS_8616, idx):
             candidates.append(idx)
     for idx in sorted(candidates):
-        locations = tuple(part for part in _split_fingerprint_args_8616(value[idx:]) if part)
-        if locations and all(location.startswith(_CONTROL_FLOW_WRITE_LOCATION_MARKERS_8616) for location in locations):
+        locations = tuple(part for part in builtins.iter(_split_fingerprint_args_8616(value[idx:])) if part)
+        if locations and all(location.startswith(_CONTROL_FLOW_WRITE_LOCATION_MARKERS_8616) for location in iter(locations)):
             return locations
     return None
 
 
-def _split_control_flow_loop_body_write_effect_8616(value: str) -> tuple[str, tuple[str, ...]] | None:
+@cython.ccall
+def _split_control_flow_loop_body_write_effect_8616(value: object) -> object:
     locations = _control_flow_loop_body_write_locations_8616(value)
     if not locations:
         return None
@@ -8393,18 +9100,20 @@ def _split_control_flow_loop_body_write_effect_8616(value: str) -> tuple[str, tu
     return value[:idx], locations
 
 
-def _indexed_span_evidenced_location_8616(location: str, spans: tuple[tuple[int, int], ...]) -> bool:
+def _indexed_span_evidenced_location_8616(location: object, spans: object) -> cython.bint:
     """Return whether one location lies inside an evidenced span."""
 
     offset = _tail_validation_ds_global_write_offset_8616(location)
-    return isinstance(offset, int) and any(((offset - start) & 0xFFFF) < width for start, width in spans)
+    return isinstance(offset, int) and any(((offset - start) & 0xFFFF) < width for start, width in iter(spans))
 
 
 def _indexed_global_delta_parts_8616(
     delta: Mapping[str, TailValidationValue],
-    spans: tuple[tuple[int, int], ...],
-) -> tuple[tuple[TailValidationValue, ...], tuple[TailValidationValue, ...]] | None:
+    spans: object,
+) -> object:
     """Return global add/remove tuples when every changed byte is evidenced."""
+    control_delta: object
+    global_delta: object
 
     if validation_delta_touched_fields_8616(delta) != {"global_writes", "control_flow_effects"}:
         return None
@@ -8419,16 +9128,19 @@ def _indexed_global_delta_parts_8616(
         return None
     if any(
         not isinstance(item, str) or not _indexed_span_evidenced_location_8616(item, spans)
-        for item in (*global_added, *global_removed)
+        for item in iter(tuple(global_added) + tuple(global_removed))
     ):
         return None
     return global_added, global_removed
 
 
+@cython.ccall
 def _indexed_control_location_parts_8616(
     control_delta: TailValidationValue,
-) -> tuple[Counter[str], Counter[str]] | None:
+) -> object:
     """Return added/removed location counters from one control-effect pair."""
+    after_split: object
+    before_split: object
 
     if not isinstance(control_delta, Mapping):
         return None
@@ -8440,7 +9152,7 @@ def _indexed_control_location_parts_8616(
         return None
     after_split = _split_control_flow_loop_body_write_effect_8616(control_added[0])
     before_split = _split_control_flow_loop_body_write_effect_8616(control_removed[0])
-    if after_split is None or before_split is None or after_split[0] != before_split[0]:
+    if after_split is None or before_split is None or operator.ne(after_split[0], before_split[0]):
         return None
     after_locations = Counter(after_split[1])
     before_locations = Counter(before_split[1])
@@ -8452,10 +9164,10 @@ def _indexed_control_location_parts_8616(
 
 
 def indexed_segmented_global_precision_delta_8616(
-    materialized_count: int,
+    materialized_count: cython.longlong,
     evidence: Sequence[IndexedSegmentedGlobalEvidence8616],
     validation: Mapping[str, TailValidationValue],
-) -> bool:
+) -> cython.bint:
     """Accept exact byte-location precision added by indexed-global lowering.
 
     Lowering may replace a one-byte dirty write fingerprint with the complete
@@ -8463,11 +9175,14 @@ def indexed_segmented_global_precision_delta_8616(
     refinement: the same loop/control prefix must remain, and every changed
     global byte must be covered by materialized typed evidence.
     """
+    delta: object
+    global_parts: object
+    location_parts: object
     if materialized_count <= 0 or not evidence:
         return False
-    if any(not isinstance(item, IndexedSegmentedGlobalEvidence8616) for item in evidence):
+    if any(not isinstance(item, IndexedSegmentedGlobalEvidence8616) for item in iter(evidence)):
         return False
-    spans = tuple((item.base_offset & 0xFFFF, int(item.width)) for item in evidence if 0 < int(item.width) <= 0x10000)
+    spans = tuple((item.base_offset & 0xFFFF, int(item.width)) for item in iter(evidence) if 0 < int(item.width) <= 0x10000)
     if not spans:
         return False
 
@@ -8486,15 +9201,18 @@ def indexed_segmented_global_precision_delta_8616(
     changed_locations = (*added_locations.elements(), *removed_locations.elements())
     if any(
         not location.startswith("ds_global:") or not _indexed_span_evidenced_location_8616(location, spans)
-        for location in changed_locations
+        for location in iter(changed_locations)
     ):
         return False
-    return added_locations == Counter(global_added) and removed_locations == Counter(global_removed)
+    return operator.eq(added_locations, Counter(global_added)) and operator.eq(removed_locations, Counter(global_removed))
 
 def _read_carrier_delta_parts_8616(
     delta: Mapping[str, TailValidationValue],
-) -> tuple[str, str, str, tuple[str, ...], tuple[str, ...]] | None:
+) -> object:
     """Return carrier/condition/control parts for an exact load replacement."""
+    condition_delta: object
+    control_delta: object
+    register_delta: object
 
     if validation_delta_touched_fields_8616(delta) != {
         "register_writes",
@@ -8527,21 +9245,23 @@ def _read_carrier_delta_parts_8616(
         return None
     if not all(
         isinstance(item, str)
-        for item in (*register_removed, *condition_added, *condition_removed, *control_added, *control_removed)
+        for item in iter(tuple(register_removed) + tuple(condition_added) + tuple(condition_removed) + tuple(control_added) + tuple(control_removed))
     ):
         return None
     return register_removed[0], condition_removed[0], condition_added[0], control_removed, control_added
 
 
+@cython.ccall
 def _read_carrier_site_matches_8616(
     site: TailValidationValue,
-    removed_register: str,
-    before_condition: str,
-    after_condition: str,
-    control_removed: tuple[str, ...],
-    control_added: tuple[str, ...],
-) -> bool:
+    removed_register: object,
+    before_condition: object,
+    after_condition: object,
+    control_removed: object,
+    control_added: object,
+) -> cython.bint:
     """Return whether one evidence site proves the carrier replacement."""
+    effect: object
 
     register_name = site.destination_register
     if not isinstance(register_name, str) or not register_name:
@@ -8563,7 +9283,7 @@ def _read_carrier_site_matches_8616(
         "Dereference(Add(Mul(reg:ds,const:16),"
         f"{scaled_index},const:{site.base_offset & 0xFFFF}))"
     )
-    if before_condition.replace(register_token, indexed_load, 1) != after_condition:
+    if operator.ne(before_condition.replace(register_token, indexed_load, 1), after_condition):
         return False
 
     rewritten_effects: list[str] = []
@@ -8575,14 +9295,16 @@ def _read_carrier_site_matches_8616(
         if rewritten == effect or register_token in rewritten:
             return False
         rewritten_effects.append(rewritten)
-    return Counter(rewritten_effects) == Counter(control_added)
+    return operator.eq(Counter(rewritten_effects), Counter(control_added))
 
 
 def indexed_global_read_carrier_precision_delta_8616(
     record: IndexedGlobalReadCarrierMaterializationRecord8616,
     validation: Mapping[str, TailValidationValue],
-) -> bool:
+) -> cython.bint:
     """Accept an exact machine-proven indexed load replacing its register carrier."""
+    delta: object
+    parts: object
     if not _read_carrier_record_gate_8616(record):
         return False
     delta = validation.get("delta")
@@ -8596,19 +9318,19 @@ def indexed_global_read_carrier_precision_delta_8616(
         _read_carrier_site_matches_8616(
             site, removed_register, before_condition, after_condition, control_removed, control_added
         )
-        for site in record.evidence
+        for site in iter(record.evidence)
     )
 
 def _dword_zero_test_condition_parts_8616(
     condition_delta: TailValidationValue,
-    control_added: tuple[TailValidationValue, ...],
-    control_removed: tuple[TailValidationValue, ...],
-    touched_fields: set[str],
-) -> tuple[str | None, str | None] | None:
+    control_added: object,
+    control_removed: object,
+    touched_fields: object,
+) -> object:
     """Resolve the condition add/remove pair for a dword zero-test delta."""
 
-    condition_added: str | None = None
-    condition_removed: str | None = None
+    condition_added: object = None
+    condition_removed: object = None
     if touched_fields == {"conditions", "control_flow_effects"}:
         if not isinstance(condition_delta, Mapping):
             return None
@@ -8622,10 +9344,10 @@ def _dword_zero_test_condition_parts_8616(
         condition_removed = condition_removed_items[0]
     else:
         control_added_conditions = tuple(
-            effect[3:] for effect in control_added if effect.startswith("if:")
+            effect[3:] for effect in iter(control_added) if effect.startswith("if:")
         )
         control_removed_conditions = tuple(
-            effect[3:] for effect in control_removed if effect.startswith("if:")
+            effect[3:] for effect in iter(control_removed) if effect.startswith("if:")
         )
         if len(control_added_conditions) == 1 and len(control_removed_conditions) == 1:
             condition_added = control_added_conditions[0]
@@ -8633,12 +9355,15 @@ def _dword_zero_test_condition_parts_8616(
     return condition_added, condition_removed
 
 
+@cython.ccall
 def _dword_zero_test_matched_condition_pair_8616(
     evidence: Sequence[DwordGlobalZeroTestEvidence8616],
-    condition_added: str | None,
-    condition_removed: str | None,
-) -> tuple[str, str] | None:
+    condition_added: object,
+    condition_removed: object,
+) -> object:
     """Match the condition substitution against one piece of binary evidence."""
+    compare_op: object
+    item: object
 
     for item in evidence:
         for compare_op in ("CmpEQ", "CmpNE"):
@@ -8660,8 +9385,9 @@ def _dword_zero_test_matched_condition_pair_8616(
 
 def _dword_zero_test_control_parts_8616(
     delta: Mapping[str, TailValidationValue],
-) -> tuple[set[str], TailValidationValue, tuple[TailValidationValue, ...], tuple[TailValidationValue, ...]] | None:
+) -> object:
     """Resolve and validate the control-effect tuples for a dword zero-test."""
+    control_delta: object
 
     touched_fields = validation_delta_touched_fields_8616(delta)
     if touched_fields not in ({"conditions", "control_flow_effects"}, {"control_flow_effects"}):
@@ -8671,27 +9397,31 @@ def _dword_zero_test_control_parts_8616(
         return None
     control_added = _boundary_tuple_8616(control_delta.get("added") or ())
     control_removed = _boundary_tuple_8616(control_delta.get("removed") or ())
-    if not control_added or len(control_added) != len(control_removed):
+    if not control_added or operator.ne(len(control_added), len(control_removed)):
         return None
-    if any(not isinstance(effect, str) for effect in (*control_added, *control_removed)):
+    if any(not isinstance(effect, str) for effect in iter(tuple(control_added) + tuple(control_removed))):
         return None
     return touched_fields, delta.get("conditions"), control_added, control_removed
 
 
 def dword_global_zero_test_precision_delta_8616(
-    materialized_count: int,
+    materialized_count: cython.longlong,
     evidence: Sequence[DwordGlobalZeroTestEvidence8616],
     validation: Mapping[str, TailValidationValue],
-) -> bool:
+) -> cython.bint:
     """Accept an exact split-word OR zero-test rewritten as one dword test.
 
     The binary evidence proves adjacent low/high word loads feeding one OR and
     Jcc. Validation accepts only the corresponding condition substitution when
     every control-flow effect, including body calls, remains otherwise exact.
     """
+    condition_parts: object
+    control_parts: object
+    delta: object
+    matched_condition_pair: object
     if materialized_count <= 0 or not evidence:
         return False
-    if any(not isinstance(item, DwordGlobalZeroTestEvidence8616) for item in evidence):
+    if any(not isinstance(item, DwordGlobalZeroTestEvidence8616) for item in iter(evidence)):
         return False
     delta = validation.get("delta")
     if not isinstance(delta, Mapping):
@@ -8714,24 +9444,29 @@ def dword_global_zero_test_precision_delta_8616(
         return False
 
     before_condition, after_condition = matched_condition_pair
-    if any(effect.count(before_condition) != 1 for effect in control_removed):
+    if any(effect.count(before_condition) != 1 for effect in iter(control_removed)):
         return False
     expected_added = Counter(
         effect.replace(before_condition, after_condition, 1)
-        for effect in control_removed
+        for effect in iter(control_removed)
     )
-    return Counter(control_added) == expected_added
+    return operator.eq(Counter(control_added), expected_added)
 
 
-def _is_local_stack_body_write_precision_effect_8616(value: str) -> bool:
+def _is_local_stack_body_write_precision_effect_8616(value: object) -> cython.bint:
     locations = _control_flow_loop_body_write_locations_8616(value)
     if not locations:
         return False
-    return all(location.startswith(("stack_slot:SS:BP-", "stack:-")) for location in locations)
+    return all(location.startswith(("stack_slot:SS:BP-", "stack:-")) for location in iter(locations))
 
 
-def _suppress_straight_line_local_stack_write_precision_delta_8616(diff: dict[str, TailValidationValue]) -> None:
+def _suppress_straight_line_local_stack_write_precision_delta_8616(diff: object) -> None:
     """Classify added straight-line local scratch writes with no observable use."""
+    delta: object
+    precision: object
+    stack_delta: object
+    field_delta: object
+    field_name: object
     delta = diff.get("delta")
     precision = diff.get("precision_improvements")
     if not isinstance(delta, dict) or not isinstance(precision, dict):
@@ -8739,11 +9474,11 @@ def _suppress_straight_line_local_stack_write_precision_delta_8616(diff: dict[st
     stack_delta = delta.get("stack_writes")
     if not isinstance(stack_delta, dict):
         return
-    added = _boundary_tuple_8616(str(value) for value in _boundary_tuple_8616(stack_delta.get("added", ()) or ()))
-    removed = _boundary_tuple_8616(str(value) for value in _boundary_tuple_8616(stack_delta.get("removed", ()) or ()))
+    added = _boundary_tuple_8616(str(value) for value in builtins.iter(_boundary_tuple_8616(stack_delta.get("added", ()) or ())))
+    removed = _boundary_tuple_8616(str(value) for value in builtins.iter(_boundary_tuple_8616(stack_delta.get("removed", ()) or ())))
     if not added or removed:
         return
-    if any(not value.startswith(("stack_slot:SS:BP-", "stack:-")) for value in added):
+    if any(not value.startswith(("stack_slot:SS:BP-", "stack:-")) for value in iter(added)):
         return
     for field_name, field_delta in delta.items():
         if field_name == "stack_writes":
@@ -8757,16 +9492,16 @@ def _suppress_straight_line_local_stack_write_precision_delta_8616(diff: dict[st
     stack_delta["removed"] = ()
 
 
+@cython.ccall
 def _loop_body_write_precision_inputs_8616(
-    diff: dict[str, TailValidationValue],
-) -> tuple[
-    dict[str, TailValidationValue],
-    dict[str, TailValidationValue],
-    dict[str, TailValidationValue],
-    tuple[str, ...],
-    tuple[str, ...],
-] | None:
+    diff: object,
+) -> object:
     """Resolve the delta pieces and prove no return/write overlap."""
+    control_delta: object
+    delta: object
+    precision: object
+    split_effect: object
+    effect: object
 
     delta = diff.get("delta")
     precision = diff.get("precision_improvements")
@@ -8781,13 +9516,13 @@ def _loop_body_write_precision_inputs_8616(
         return None
     return_locations = {
         str(value)
-        for summary_key in ("before", "after")
-        for summary in (diff.get(summary_key),)
+        for summary_key in iter(("before", "after"))
+        for summary in iter((diff.get(summary_key),))
         if isinstance(summary, Mapping)
-        for value in _boundary_tuple_8616(summary.get("returns", ()) or ())
+        for value in builtins.iter(_boundary_tuple_8616(summary.get("returns", ()) or ()))
     }
     loop_body_write_locations: set[str] = set()
-    for effect in (*added, *removed):
+    for effect in tuple(added) + tuple(removed):
         split_effect = _split_control_flow_loop_body_write_effect_8616(str(effect))
         if split_effect is not None:
             loop_body_write_locations.update(split_effect[1])
@@ -8797,19 +9532,24 @@ def _loop_body_write_precision_inputs_8616(
 
 
 def _mixed_stack_write_precision_8616(
-    added: tuple[object, ...],
-    removed: tuple[object, ...],
-) -> tuple[bool, set[str]]:
+    added: object,
+    removed: object,
+) -> tuple[cython.bint, set[str]]:
     """Match added/removed body-write effects onto local-BP supersets."""
+    match_idx: object
+    added_item: object
+    idx: object
+    removed_locations: object
+    removed_prefix: object
 
-    added_effects = [_split_control_flow_loop_body_write_effect_8616(str(value)) for value in added]
-    removed_effects = [_split_control_flow_loop_body_write_effect_8616(str(value)) for value in removed]
-    if any(item is None for item in added_effects + removed_effects):
+    added_effects = [_split_control_flow_loop_body_write_effect_8616(str(value)) for value in iter(added)]
+    removed_effects = [_split_control_flow_loop_body_write_effect_8616(str(value)) for value in iter(removed)]
+    if any(item is None for item in iter(added_effects + removed_effects)):
         return False, set()
-    normalized_added_effects = [item for item in added_effects if item is not None]
-    normalized_removed_effects = [item for item in removed_effects if item is not None]
+    normalized_added_effects = [item for item in iter(added_effects) if item is not None]
+    normalized_removed_effects = [item for item in iter(removed_effects) if item is not None]
     precision_added_locations: set[str] = set()
-    used_added: set[int] = set()
+    used_added: set[cython.longlong] = set()
     for removed_prefix, removed_locations in normalized_removed_effects:
         removed_set = set(removed_locations)
         match_idx = None
@@ -8823,7 +9563,7 @@ def _mixed_stack_write_precision_8616(
                 added_prefix == removed_prefix
                 and removed_set <= added_set
                 and extra_locations
-                and all(location.startswith("stack_slot:SS:BP-") for location in extra_locations)
+                and all(location.startswith("stack_slot:SS:BP-") for location in iter(extra_locations))
             ):
                 match_idx = idx
                 precision_added_locations.update(extra_locations)
@@ -8831,32 +9571,35 @@ def _mixed_stack_write_precision_8616(
         if match_idx is None:
             return False, set()
         used_added.add(match_idx)
-    if len(used_added) != len(added_effects):
+    if operator.ne(len(used_added), len(added_effects)):
         return False, set()
     return True, precision_added_locations
 
 
 def _stack_writes_delta_gate_8616(
-    delta: dict[str, TailValidationValue],
-) -> tuple[tuple[str, ...], object] | None:
+    delta: object,
+) -> object:
     """Gate the stack_writes delta; returns (added, stack_delta) or None."""
+    stack_delta: object
 
     added_stack_writes: tuple[str, ...] = ()
     stack_delta = delta.get("stack_writes")
     if isinstance(stack_delta, dict):
         added_stack_writes = _boundary_tuple_8616(
-            str(value) for value in _boundary_tuple_8616(stack_delta.get("added", ()) or ())
+            str(value) for value in builtins.iter(_boundary_tuple_8616(stack_delta.get("added", ()) or ()))
         )
         if _boundary_tuple_8616(stack_delta.get("removed", ()) or ()):
             return None
-        if any(not value.startswith("stack_slot:SS:BP-") for value in added_stack_writes):
+        if any(not value.startswith("stack_slot:SS:BP-") for value in iter(added_stack_writes)):
             return None
     elif "stack_writes" in delta:
         return None
     return added_stack_writes, stack_delta
 
 
-def _suppress_loop_body_local_stack_write_precision_delta_8616(diff: dict[str, TailValidationValue]) -> None:
+def _suppress_loop_body_local_stack_write_precision_delta_8616(diff: object) -> None:
+    inputs: object
+    stack_gate: object
     inputs = _loop_body_write_precision_inputs_8616(diff)
     if inputs is None:
         return
@@ -8867,7 +9610,7 @@ def _suppress_loop_body_local_stack_write_precision_delta_8616(diff: dict[str, T
     added_stack_writes, stack_delta = stack_gate
 
     pure_local_precision = all(
-        _is_local_stack_body_write_precision_effect_8616(str(value)) for value in added + removed
+        _is_local_stack_body_write_precision_effect_8616(str(value)) for value in iter(added + removed)
     )
     mixed_precision = False
     precision_added_locations: set[str] = set()
@@ -8891,7 +9634,7 @@ def _suppress_loop_body_local_stack_write_precision_delta_8616(diff: dict[str, T
         stack_delta["removed"] = ()
 
 
-def _canonicalize_local_stack_abi_int_width_8616(value: str) -> str:
+def _canonicalize_local_stack_abi_int_width_8616(value: object) -> object:
     def _replace(match: re.Match[str]) -> str:
         return f"stack_slot:SS:BP{match.group('offset').lower()}:size2"
 
@@ -8899,33 +9642,34 @@ def _canonicalize_local_stack_abi_int_width_8616(value: str) -> str:
 
 
 def _local_stack_abi_width_field_delta_8616(
-    field_name: str,
+    field_name: object,
     field_delta: TailValidationValue,
-    allowed_fields: set[str],
-) -> tuple[dict[str, tuple[str, ...]], bool] | None:
+    allowed_fields: object,
+) -> object:
     """Return the suppressed entry + width-token flag for one delta field."""
 
     if not isinstance(field_delta, dict):
         return None
-    added = _boundary_tuple_8616(str(value) for value in _boundary_tuple_8616(field_delta.get("added", ()) or ()))
+    added = _boundary_tuple_8616(str(value) for value in builtins.iter(_boundary_tuple_8616(field_delta.get("added", ()) or ())))
     removed = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(field_delta.get("removed", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(field_delta.get("removed", ()) or ()))
     )
     if not added and not removed:
         return {}, False
     if field_name not in allowed_fields:
         return None
-    added_canonical = Counter(_canonicalize_local_stack_abi_int_width_8616(value) for value in added)
-    removed_canonical = Counter(_canonicalize_local_stack_abi_int_width_8616(value) for value in removed)
+    added_canonical = Counter(_canonicalize_local_stack_abi_int_width_8616(value) for value in iter(added))
+    removed_canonical = Counter(_canonicalize_local_stack_abi_int_width_8616(value) for value in iter(removed))
     if added_canonical != removed_canonical:
         return None
     saw_width_token = any(
-        _LOCAL_STACK_ABI_INT_WIDTH_TOKEN_RE_8616.search(value) for value in added + removed
+        _LOCAL_STACK_ABI_INT_WIDTH_TOKEN_RE_8616.search(value) for value in iter(added + removed)
     )
     return {"added": added, "removed": removed}, saw_width_token
 
 
-def _suppress_local_stack_abi_int_width_delta_8616(diff: dict[str, TailValidationValue]) -> None:
+@cython.ccall
+def _suppress_local_stack_abi_int_width_delta_8616(diff: object) -> None:
     """Suppress source-backed host-int width noise for the same local BP slot.
 
     Source C parsed on the host can spell a DOS ``int`` stack local as size4
@@ -8934,6 +9678,11 @@ def _suppress_local_stack_abi_int_width_delta_8616(diff: dict[str, TailValidatio
     rewrite recovered code, and it refuses to fire if any helper, register,
     global, segmented, return, or non-local condition delta remains.
     """
+    delta: object
+    field_delta: object
+    field_result: object
+    precision: object
+    field_name: object
     delta = diff.get("delta")
     precision = diff.get("precision_improvements")
     if not isinstance(delta, dict) or not isinstance(precision, dict):
@@ -8961,26 +9710,32 @@ def _suppress_local_stack_abi_int_width_delta_8616(diff: dict[str, TailValidatio
             field_delta["removed"] = ()
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _SwitchHelperDeltaParts8616:
     """Typed add/remove tuples for the five switch-helper delta fields."""
 
-    helper_added: tuple[TailValidationValue, ...]
-    helper_removed: tuple[TailValidationValue, ...]
-    register_added: tuple[TailValidationValue, ...]
-    register_removed: tuple[TailValidationValue, ...]
-    return_added: tuple[TailValidationValue, ...]
-    return_removed: tuple[TailValidationValue, ...]
-    condition_added: tuple[TailValidationValue, ...]
-    condition_removed: tuple[TailValidationValue, ...]
-    control_added: tuple[TailValidationValue, ...]
-    control_removed: tuple[TailValidationValue, ...]
+    helper_added: object
+    helper_removed: object
+    register_added: object
+    register_removed: object
+    return_added: object
+    return_removed: object
+    condition_added: object
+    condition_removed: object
+    control_added: object
+    control_removed: object
 
 
+@cython.ccall
 def _switch_helper_delta_parts_8616(
-    delta: dict[str, TailValidationValue],
+    delta: object,
 ) -> _SwitchHelperDeltaParts8616 | None:
     """Extract add/remove tuples when all five delta fields are present."""
+    condition_delta: object
+    control_delta: object
+    helper_delta: object
+    register_delta: object
+    return_delta: object
 
     helper_delta = delta.get("helper_calls")
     register_delta = delta.get("register_writes")
@@ -9009,7 +9764,7 @@ def _switch_helper_delta_parts_8616(
     )
 
 
-def _switch_helper_return_shape_gate_8616(parts: _SwitchHelperDeltaParts8616) -> bool:
+def _switch_helper_return_shape_gate_8616(parts: _SwitchHelperDeltaParts8616) -> cython.bint:
     """Return whether the return-change shape matches a switch-helper fold."""
 
     if not parts.return_added and not parts.return_removed:
@@ -9018,25 +9773,30 @@ def _switch_helper_return_shape_gate_8616(parts: _SwitchHelperDeltaParts8616) ->
         return len(parts.condition_added) >= 2 and len(parts.condition_removed) >= 2
     if not (parts.return_added and parts.return_removed):
         return False
-    if parts.helper_removed and not all(str(value).startswith("addr:") for value in parts.helper_removed):
+    if parts.helper_removed and not all(str(value).startswith("addr:") for value in iter(parts.helper_removed)):
         return False
     if not parts.helper_removed and not all(
-        _switch_helper_unstructured_return_8616(str(value)) for value in parts.return_removed
+        _switch_helper_unstructured_return_8616(str(value)) for value in iter(parts.return_removed)
     ):
         return False
-    if parts.helper_removed and not any("CFakeVariable" in str(value) for value in parts.return_removed):
+    if parts.helper_removed and not any("CFakeVariable" in str(value) for value in iter(parts.return_removed)):
         return False
-    if not all(_switch_helper_structured_return_8616(str(value)) for value in parts.return_added):
+    if not all(_switch_helper_structured_return_8616(str(value)) for value in iter(parts.return_added)):
         return False
     if parts.register_added:
         return False
     return not parts.register_removed or all(
-        str(value) == "reg:ax" for value in parts.register_removed
+        str(value) == "reg:ax" for value in iter(parts.register_removed)
     )
 
 
-def _suppress_switch_helper_structuring_precision_delta_8616(diff: dict[str, TailValidationValue]) -> None:
+def _suppress_switch_helper_structuring_precision_delta_8616(diff: object) -> None:
     """Classify a multi-guard switch decision tree becoming structured cases."""
+    delta: object
+    field_delta: object
+    parts: object
+    precision: object
+    field_name: object
     delta = diff.get("delta")
     precision = diff.get("precision_improvements")
     if not isinstance(delta, dict) or not isinstance(precision, dict):
@@ -9054,7 +9814,7 @@ def _suppress_switch_helper_structuring_precision_delta_8616(diff: dict[str, Tai
         return
     if not all(
         _switch_helper_condition_fingerprint_8616(str(value))
-        for value in parts.condition_added + parts.condition_removed
+        for value in iter(parts.condition_added + parts.condition_removed)
     ):
         return
     precision["switch_helper_structuring"] = {
@@ -9070,7 +9830,8 @@ def _suppress_switch_helper_structuring_precision_delta_8616(diff: dict[str, Tai
             field_delta["added"] = ()
             field_delta["removed"] = ()
 
-def _const_return_i16_value_8616(value: str) -> int | None:
+@cython.ccall
+def _const_return_i16_value_8616(value: object) -> int | None:
     if not isinstance(value, str) or not value.startswith("const:"):
         return None
     try:
@@ -9080,38 +9841,44 @@ def _const_return_i16_value_8616(value: str) -> int | None:
 
 
 def _signed_i16_return_pair_8616(
-    return_delta: dict[str, TailValidationValue],
-    control_delta: dict[str, TailValidationValue],
-) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...], tuple[str, ...]] | None:
+    return_delta: object,
+    control_delta: object,
+) -> object:
     """Return the signed/i16 return + if:else tuples when the shape holds."""
 
     return_added = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(return_delta.get("added", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(return_delta.get("added", ()) or ()))
     )
     return_removed = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(return_delta.get("removed", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(return_delta.get("removed", ()) or ()))
     )
     control_added = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(control_delta.get("added", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(control_delta.get("added", ()) or ()))
     )
     control_removed = _boundary_tuple_8616(
-        str(value) for value in _boundary_tuple_8616(control_delta.get("removed", ()) or ())
+        str(value) for value in builtins.iter(_boundary_tuple_8616(control_delta.get("removed", ()) or ()))
     )
     if not return_added or not return_removed:
         return None
-    if Counter(filter(None, (_const_return_i16_value_8616(value) for value in return_added))) != Counter(
-        filter(None, (_const_return_i16_value_8616(value) for value in return_removed))
-    ):
+    if operator.ne(Counter(filter(None, (_const_return_i16_value_8616(value) for value in iter(return_added)))), Counter(
+        filter(None, (_const_return_i16_value_8616(value) for value in iter(return_removed)))
+    )):
         return None
-    if any(_const_return_i16_value_8616(value) is None for value in return_added + return_removed):
+    if any(_const_return_i16_value_8616(value) is None for value in iter(return_added + return_removed)):
         return None
-    if control_added or tuple(value for value in control_removed if value != "if:else"):
+    if control_added or tuple(value for value in iter(control_removed) if value != "if:else"):
         return None
     return return_added, return_removed, control_added, control_removed
 
 
-def _suppress_signed_i16_return_else_structuring_delta_8616(diff: dict[str, TailValidationValue]) -> None:
+@cython.ccall
+def _suppress_signed_i16_return_else_structuring_delta_8616(diff: object) -> None:
     """Suppress signed/unsigned 16-bit return spelling drift after structuring."""
+    control_delta: object
+    delta: object
+    pair: object
+    precision: object
+    return_delta: object
     delta = diff.get("delta")
     precision = diff.get("precision_improvements")
     if not isinstance(delta, dict) or not isinstance(precision, dict):
@@ -9136,13 +9903,15 @@ def _suppress_signed_i16_return_else_structuring_delta_8616(diff: dict[str, Tail
     control_delta["removed"] = ()
 
 
-def _switch_helper_structured_return_8616(value: str) -> bool:
+@cython.ccall
+def _switch_helper_structured_return_8616(value: object) -> cython.bint:
     if value.startswith("const:"):
         return True
     return "stack_slot:SS:BP+" in value and value.startswith(("Add(", "Shl(", "Mul("))
 
 
-def _switch_helper_unstructured_return_8616(value: str) -> bool:
+@cython.ccall
+def _switch_helper_unstructured_return_8616(value: object) -> cython.bint:
     if value.startswith("const:"):
         return True
     if "CFakeVariable" in value and "Mul(reg:ss,const:16)" in value:
@@ -9152,7 +9921,8 @@ def _switch_helper_unstructured_return_8616(value: str) -> bool:
     )
 
 
-def _switch_helper_condition_fingerprint_8616(value: str) -> bool:
+@cython.ccall
+def _switch_helper_condition_fingerprint_8616(value: object) -> cython.bint:
     if value.startswith("if:"):
         value = value[len("if:") :]
     if value == "else":
@@ -9166,8 +9936,11 @@ def _switch_helper_condition_fingerprint_8616(value: str) -> bool:
     )
 
 
-def format_x86_16_tail_validation_diff(validation: dict[str, TailValidationValue]) -> str:
+def format_x86_16_tail_validation_diff(validation: object) -> object:
     """Format a tail-validation comparison for diagnostic output."""
+    delta: object
+    field_delta: object
+    field_name: object
     if not validation.get("changed", False):
         return "no observable whole-tail changes"
 
@@ -9185,15 +9958,21 @@ def format_x86_16_tail_validation_diff(validation: dict[str, TailValidationValue
                 return value[len("name:") :]
             return value
 
-        field_parts = [f"+{_display(value)}" for value in added] + [f"-{_display(value)}" for value in removed]
+        field_parts = [f"+{_display(value)}" for value in iter(added)] + [f"-{_display(value)}" for value in iter(removed)]
         parts.append(f"{field_name}: " + ", ".join(field_parts))
     semantic_failures = normalize_tail_semantic_failures_8616(validation.get("semantic_failures"))
     parts.extend(format_tail_semantic_failures_8616(semantic_failures))
     return "; ".join(parts) if parts else "observable whole-tail delta present"
 
 
-def _format_x86_16_tail_validation_timing_suffix(validation: Mapping[str, TailValidationValue]) -> str:
-    def _impl() -> str:
+def _format_x86_16_tail_validation_timing_suffix(validation: Mapping[str, TailValidationValue]) -> object:
+    def _impl() -> object:
+        collect_after_ms: object
+        collect_before_ms: object
+        compare_ms: object
+        timing_debug: object
+        timings: object
+        total_ms: object
         timing_debug = os.environ.get("INERTIA_DEBUG_TIMING")
         if timing_debug is None or timing_debug.strip().lower() in {"", "0", "false", "no", "off"}:
             return ""
@@ -9225,8 +10004,12 @@ def _format_x86_16_tail_validation_timing_suffix(validation: Mapping[str, TailVa
     return _impl()
 
 
-def build_x86_16_tail_validation_verdict(stage: str, validation: dict[str, TailValidationValue]) -> str:
+@cython.ccall
+def build_x86_16_tail_validation_verdict(stage: object, validation: object) -> str:
     """Build a stable user-facing verdict for one tail-validation stage."""
+    mode: object
+    status: object
+    summary_text: object
     mode = validation.get("mode", "unknown")
     summary_text = validation.get("summary_text")
     if not isinstance(summary_text, str) or not summary_text:
@@ -9238,6 +10021,7 @@ def build_x86_16_tail_validation_verdict(stage: str, validation: dict[str, TailV
     return f"{stage} whole-tail validation [{mode}] {status}: {summary_text}{timing_suffix}"
 
 
+@cython.ccall
 def describe_x86_16_tail_validation_scope() -> dict[str, TailValidationValue]:
     """Describe the owned validation boundary, modes, observables, and cache policy."""
     return {
@@ -9267,17 +10051,18 @@ def describe_x86_16_tail_validation_scope() -> dict[str, TailValidationValue]:
 def build_x86_16_tail_validation_cached_result(
     *,
     owner: TailValidationValue,
-    stage: str,
-    mode: str,
-    before_fingerprint: str,
-    after_fingerprint: str,
+    stage: object,
+    mode: object,
+    before_fingerprint: object,
+    after_fingerprint: object,
     before_summary: X86_16TailValidationSummary,
     after_summary: X86_16TailValidationSummary,
     semantic_failure_scope: TailSemanticFailureScope8616 = TailSemanticFailureScope8616.ALL_AFTER,
-) -> dict[str, TailValidationValue]:
+) -> object:
     """Compare summaries through the validation cache owned by a stage object."""
 
-    def _impl() -> dict[str, TailValidationValue]:
+    def _impl() -> object:
+        comparisons: object
         cache = _tail_validation_validation_cache_store(owner)
         comparisons = cache.get("comparisons", {})
         descriptor = build_x86_16_validation_cache_descriptor(

@@ -1,4 +1,5 @@
 # AUTO-GENERATED split from cli_runtime_shared.py
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: preserve legacy CLI helper surface while delegating semantic proof to X86_16 layers.
@@ -6,6 +7,7 @@ Forbidden: owning decompiler semantics, source-backed recovery, or postprocess s
 """
 
 from __future__ import annotations
+import cython
 
 import typing
 from collections.abc import Callable, Iterable, Iterator
@@ -23,18 +25,21 @@ from inertia.lowering.analysis_helpers import InterruptCall as InterruptCall
 from inertia.lowering.analysis_helpers import collect_dos_int21_calls, interrupt_service_name
 
 from .cli_c_ast_rewrites import _c_constant_value, _same_c_expression, _unwrap_c_casts
+import dataclasses
+import operator
+import builtins
 
 structured_c: Any = structured_codegen.c
 
 print: Callable[..., None] = _timestamped_print
 
-type RegisterState = dict[str, dict[tuple[str, ...], int]]
+RegisterState = typing.TypeAliasType("RegisterState", dict[str, dict[tuple[str, ...], int]])
 
 
 class _CFunctionLike(Protocol):
     """Structured C function surface consumed from angr codegen."""
 
-    addr: int
+    addr: cython.longlong
     statements: object
 
 
@@ -47,7 +52,7 @@ class _CodegenLike(Protocol):
 class _FunctionLike(Protocol):
     """Function surface used to attach pseudo callees for DOS interrupt calls."""
 
-    def get_call_target(self, insn_addr: int) -> int | None:
+    def get_call_target(self, insn_addr: cython.longlong) -> int | None:
         """Return a resolved call target for an instruction address."""
 
 
@@ -76,9 +81,14 @@ __all__ = [
 ]
 
 
-def _iter_c_nodes(node: object, *, max_nodes: int = 10000) -> Iterator[object]:
+def _iter_c_nodes(node: object, *, max_nodes: cython.longlong = 10000) -> Iterator[object]:
+    child: object
+    current: object
+    attr: object
+    body: object
+    cond: object
     stack = [node]
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     visited = 0
     while stack:
         current = stack.pop()
@@ -117,36 +127,39 @@ def _iter_c_nodes(node: object, *, max_nodes: int = 10000) -> Iterator[object]:
                 stack.append(child)
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class InterruptWrapperCall:
     """Normalized DOS interrupt wrapper call observed in structured C."""
 
-    callee_name: str
-    canonical_name: str
-    kind: str
-    arguments: tuple[object, ...]
+    callee_name: object
+    canonical_name: object
+    kind: object
+    arguments: object
     vector_arg: object | None = None
     inregs_arg: object | None = None
     outregs_arg: object | None = None
     sregs_arg: object | None = None
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class InterruptWrapperFieldAccess:
     """Structured-C field access into DOS interrupt wrapper register structs."""
 
-    base_name: str
-    field_path: tuple[str, ...]
+    base_name: object
+    field_path: object
     expr: object
 
 
-def _normalize_interrupt_wrapper_name(name: str | None) -> str | None:
+@cython.ccall
+def _normalize_interrupt_wrapper_name(name: object) -> object:
     if not isinstance(name, str) or not name:
         return None
     return name.lstrip("_")
 
 
-def _interrupt_wrapper_call_kind(name: str | None, args: tuple[object, ...] | None = None) -> str | None:
+@cython.ccall
+def _interrupt_wrapper_call_kind(name: object, args: object = None) -> object:
+    first_value: object
     canonical = _normalize_interrupt_wrapper_name(name)
     if canonical not in {"int86", "int86x", "intdos", "intdosx"}:
         if canonical != "CallReturn" or not args:
@@ -161,7 +174,8 @@ def _interrupt_wrapper_call_kind(name: str | None, args: tuple[object, ...] | No
     return canonical
 
 
-def _interrupt_wrapper_arg_slots(kind: str, args: tuple[object, ...]) -> tuple[object | None, object | None, object | None, object | None]:
+@cython.ccall
+def _interrupt_wrapper_arg_slots(kind: object, args: object) -> tuple[object | None, object | None, object | None, object | None]:
     """Map wrapper kind + positional args to (vector, inregs, outregs, sregs) slots."""
     if kind in {"int86", "int86x"}:
         vector_arg = args[0] if len(args) >= 1 else None
@@ -180,7 +194,10 @@ def _interrupt_wrapper_call_signature(node: object) -> InterruptWrapperCall | No
     """Read a dynamic call boundary once and classify its existing wrapper name."""
     def _impl() -> InterruptWrapperCall | None:
         """Preserve function-name precedence and consume the checked target value."""
-        callee_name: str | None = None
+        callee_func: object
+        callee_name: object
+        kind: object
+        callee_name = None
         # Dynamic codegen boundary: CFunctionCall may carry either callee_func or callee_target.
         callee_func = getattr(node, "callee_func", None)
         if callee_func is not None:
@@ -210,7 +227,11 @@ def _interrupt_wrapper_call_signature(node: object) -> InterruptWrapperCall | No
     return _impl()
 
 
+@cython.ccall
 def _interrupt_wrapper_field_path(expr: object) -> InterruptWrapperFieldAccess | None:
+    current: object
+    field: object
+    field_name: object
     path: list[str] = []
     current = expr
     while isinstance(current, structured_c.CVariableField):
@@ -238,7 +259,8 @@ def _interrupt_wrapper_field_path(expr: object) -> InterruptWrapperFieldAccess |
     return InterruptWrapperFieldAccess(base_name=base_name, field_path=tuple(path), expr=expr)
 
 
-def _interrupt_wrapper_field_role(base_name: str) -> str:
+@cython.ccall
+def _interrupt_wrapper_field_role(base_name: object) -> str:
     if base_name == "inregs":
         return "input"
     if base_name == "outregs":
@@ -248,9 +270,11 @@ def _interrupt_wrapper_field_role(base_name: str) -> str:
     return "other"
 
 
+@cython.ccall
 def _interrupt_wrapper_field_access_summary(
-    accesses: list[InterruptWrapperFieldAccess],
-) -> dict[str, list[InterruptWrapperFieldAccess]]:
+    accesses: object,
+) -> object:
+    access: object
     summary: dict[str, list[InterruptWrapperFieldAccess]] = {
         "input": [],
         "output": [],
@@ -262,13 +286,18 @@ def _interrupt_wrapper_field_access_summary(
     return summary
 
 
+@cython.ccall
 def _interrupt_wrapper_call_text(sig: InterruptWrapperCall) -> str:
-    args = [str(arg) for arg in sig.arguments if arg is not None]
+    args = [str(arg) for arg in iter(sig.arguments) if arg is not None]
     return f"{sig.canonical_name}({', '.join(args)})"
 
 
-def collect_interrupt_wrapper_calls(codegen: _CodegenLike) -> list[InterruptWrapperCall]:
+@cython.ccall
+def collect_interrupt_wrapper_calls(codegen: _CodegenLike) -> object:
     """Return normalized interrupt-wrapper calls from structured C codegen."""
+    cfunc: object
+    sig: object
+    node: object
     cfunc = codegen.cfunc
     if cfunc is None:
         return []
@@ -283,8 +312,12 @@ def collect_interrupt_wrapper_calls(codegen: _CodegenLike) -> list[InterruptWrap
     return calls
 
 
-def collect_interrupt_wrapper_field_accesses(codegen: _CodegenLike) -> list[InterruptWrapperFieldAccess]:
+@cython.ccall
+def collect_interrupt_wrapper_field_accesses(codegen: _CodegenLike) -> object:
     """Return register-struct field accesses from structured C codegen."""
+    access: object
+    cfunc: object
+    node: object
     cfunc = codegen.cfunc
     if cfunc is None:
         return []
@@ -299,7 +332,13 @@ def collect_interrupt_wrapper_field_accesses(codegen: _CodegenLike) -> list[Inte
     return accesses
 
 
-def _attach_interrupt_wrapper_callees(project: angr.Project, codegen: _CodegenLike, api_style: str) -> bool:
+@cython.ccall
+def _attach_interrupt_wrapper_callees(project: angr.Project, codegen: _CodegenLike, api_style: object) -> cython.bint:
+    cache: object
+    callee_func: object
+    cfunc: object
+    sig: object
+    node: object
     cfunc = codegen.cfunc
     if cfunc is None:
         return False
@@ -335,25 +374,26 @@ def _attach_interrupt_wrapper_callees(project: angr.Project, codegen: _CodegenLi
         if callee_func is None:
             continue
         # Dynamic codegen boundary: angr callee function names are optional.
-        if getattr(callee_func, "name", None) != sig.canonical_name:
+        if operator.ne(getattr(callee_func, "name", None), sig.canonical_name):
             callee_func.name = sig.canonical_name
             changed = True
 
     return changed
 
 
+@cython.ccall
 def _interrupt_wrapper_register_state_value(
     state: RegisterState,
-    base_name: str,
-    field_path: tuple[str, ...],
+    base_name: object,
+    field_path: object,
 ) -> int | None:
     return state.get(base_name, {}).get(field_path)
 
 
 def _interrupt_wrapper_record_register_write(
     state: RegisterState,
-    base_name: str,
-    field_path: tuple[str, ...],
+    base_name: object,
+    field_path: object,
     value: int | None,
 ) -> None:
     def _impl() -> None:
@@ -376,12 +416,15 @@ _X_WORD_TO_HALVES: dict[str, tuple[str, str]] = {
 }
 
 
+@cython.ccall
 def _interrupt_wrapper_mirror_register_write(
-    regs: dict[tuple[str, ...], int],
-    field_path: tuple[str, ...],
-    value: int,
+    regs: object,
+    field_path: object,
+    value: cython.longlong,
 ) -> None:
     """Mirror one register write into derived half/word views."""
+    al: object
+    high_ah: object
     if len(field_path) == 2 and field_path[0] == "x" and field_path[1] in _X_WORD_TO_HALVES:
         hi_name, lo_name = _X_WORD_TO_HALVES[field_path[1]]
         word = value & 0xFFFF
@@ -409,17 +452,19 @@ def _interrupt_wrapper_mirror_register_write(
 def _interrupt_wrapper_helper_call_expr(
     sig: InterruptWrapperCall,
     input_state: RegisterState,
-    api_style: str,
+    api_style: object,
     codegen: _CodegenLike,
 ) -> object | None:
     def _impl() -> object | None:
+        service_call: object
+        vector: object
         vector = _c_constant_value(_unwrap_c_casts(sig.vector_arg)) if sig.vector_arg is not None else None
         if vector is None and sig.kind in {"intdos", "intdosx"}:
             vector = 0x21
         if vector is None:
             return None
 
-        service_call: InterruptCall | None = InterruptCall(insn_addr=0, vector=vector & 0xFF)
+        service_call = InterruptCall(insn_addr=0, vector=vector & 0xFF)
         if vector == 0x21:
             service_call = _interrupt_wrapper_int21_call(input_state)
             if service_call is None:
@@ -442,8 +487,12 @@ def _interrupt_wrapper_helper_call_expr(
     return _impl()
 
 
+@cython.ccall
 def _interrupt_wrapper_int21_call(input_state: RegisterState) -> InterruptCall | None:
     """Build the DOS 0x21 service call from inregs state, or None when AH is unknown."""
+    ah: object
+    al: object
+    ax: object
     inregs = "inregs"
     ah = _interrupt_wrapper_register_state_value(input_state, inregs, ("h", "ah"))
     al = _interrupt_wrapper_register_state_value(input_state, inregs, ("h", "al"))
@@ -474,8 +523,10 @@ def _interrupt_wrapper_int21_call(input_state: RegisterState) -> InterruptCall |
     )
 
 
+@cython.ccall
 def _interrupt_wrapper_int10_call(input_state: RegisterState) -> InterruptCall | None:
     """Build the BIOS 0x10 service call from inregs state, or None when AH is unknown."""
+    ah: object
     inregs = "inregs"
     ah = _interrupt_wrapper_register_state_value(input_state, inregs, ("h", "ah"))
     if ah is None:
@@ -496,14 +547,16 @@ def _interrupt_wrapper_int10_call(input_state: RegisterState) -> InterruptCall |
     )
 
 
+@cython.ccall
 def _interrupt_wrapper_helper_args(
     sig: InterruptWrapperCall,
-    vector: int,
+    vector: cython.longlong,
     input_state: RegisterState,
-    helper_name: str,
+    helper_name: object,
     codegen: _CodegenLike,
-) -> list[object]:
+) -> object:
     """Collect selector constants for the lowered helper call."""
+    selector: object
     helper_args: list[object] = []
     if sig.kind in {"int86", "int86x"} and vector in {0x10, 0x16}:
         selector = _interrupt_wrapper_register_state_value(input_state, "inregs", ("h", "ah"))
@@ -514,8 +567,11 @@ def _interrupt_wrapper_helper_args(
     return helper_args
 
 
-def _interrupt_wrapper_callee_name(call_expr: object) -> str | None:
+@cython.ccall
+def _interrupt_wrapper_callee_name(call_expr: object) -> object:
     """Resolve a call node's callee name across the dynamic callee_target/callee_func boundary."""
+    helper_func: object
+    helper_name: object
     # Dynamic codegen boundary: helper calls may carry either callee_target or callee_func.
     helper_name = getattr(call_expr, "callee_target", None)
     if not isinstance(helper_name, str):
@@ -526,7 +582,9 @@ def _interrupt_wrapper_callee_name(call_expr: object) -> str | None:
     return helper_name if isinstance(helper_name, str) else None
 
 
+@cython.ccall
 def _interrupt_wrapper_result_helper_expr(helper_expr: object, codegen: _CodegenLike) -> object | None:
+    helper_name: object
     helper_name = _interrupt_wrapper_callee_name(helper_expr)
     if helper_name is None or not helper_name:
         return None
@@ -536,6 +594,7 @@ def _interrupt_wrapper_result_helper_expr(helper_expr: object, codegen: _Codegen
     return cast(object, structured_c.CFunctionCall(helper_name, None, helper_args, codegen=codegen))
 
 
+@cython.ccall
 def _interrupt_wrapper_high_byte_extract(helper_call: object, codegen: _CodegenLike) -> object:
     """Build `(helper_call >> 8) & 0xFF` for a high-half register read."""
     return cast(object, structured_c.CBinaryOp(
@@ -551,6 +610,7 @@ def _interrupt_wrapper_high_byte_extract(helper_call: object, codegen: _CodegenL
     ))
 
 
+@cython.ccall
 def _interrupt_wrapper_low_byte_extract(helper_call: object, codegen: _CodegenLike) -> object:
     """Build `helper_call & 0xFF` for a low-half register read."""
     return cast(object, structured_c.CBinaryOp(
@@ -565,6 +625,7 @@ def _interrupt_wrapper_result_extract_expr(
     access: InterruptWrapperFieldAccess, helper_expr: object, codegen: _CodegenLike
 ) -> object | None:
     def _impl() -> object | None:
+        helper_call: object
         helper_call = _interrupt_wrapper_result_helper_expr(helper_expr, codegen)
         if helper_call is None:
             return None
@@ -606,10 +667,11 @@ def _interrupt_wrapper_result_extract_expr(
     return _impl()
 
 
+@cython.ccall
 def _interrupt_wrapper_result_replacement(
     access: InterruptWrapperFieldAccess,
-    helper_expr: object | None,
-    api_style: str,
+    helper_expr: object,
+    api_style: object,
     codegen: _CodegenLike,
 ) -> object | None:
     if helper_expr is None:
@@ -618,9 +680,12 @@ def _interrupt_wrapper_result_replacement(
 
 
 def _interrupt_wrapper_result_expr_replacement(
-    expr: object, helper_expr: object | None, api_style: str, codegen: _CodegenLike
+    expr: object, helper_expr: object | None, api_style: object, codegen: _CodegenLike
 ) -> object | None:
     def _impl() -> object | None:
+        access: object
+        helper_name: object
+        replacement: object
         if helper_expr is None:
             return None
 
@@ -647,13 +712,18 @@ def _interrupt_wrapper_result_expr_replacement(
     return _impl()
 
 
+@cython.ccall
 def _interrupt_wrapper_dos_version_replacement(
     expr: object,
-    helper_name: str,
+    helper_name: object,
     helper_expr: object,
     codegen: _CodegenLike,
 ) -> object | None:
     """Rebuild a dos_version helper call from a `(ah<<8)|al` outregs shape."""
+    high_access: object
+    low_access: object
+    high_expr: object
+    low_expr: object
     current_expr = cast(Any, _unwrap_c_casts(expr))
     if not isinstance(current_expr, structured_c.CBinaryOp) or current_expr.op not in {"Or", "Add"}:
         return None
@@ -688,7 +758,9 @@ def _interrupt_wrapper_dos_version_replacement(
     return None
 
 
-def _lower_interrupt_wrapper_result_reads(project: angr.Project, codegen: _CodegenLike, api_style: str) -> bool:
+@cython.ccall
+def _lower_interrupt_wrapper_result_reads(project: angr.Project, codegen: _CodegenLike, api_style: object) -> cython.bint:
+    cfunc: object
     cfunc = codegen.cfunc
     if cfunc is None:
         return False
@@ -696,19 +768,23 @@ def _lower_interrupt_wrapper_result_reads(project: angr.Project, codegen: _Codeg
     return _visit_wrapper_result_node(cfunc.statements, {}, None, api_style, codegen)
 
 
+@cython.ccall
 def _copy_register_state(state: RegisterState) -> RegisterState:
     """Deep-copy the per-block register-state mapping for a child scope."""
-    return cast(RegisterState, {base_name: dict(values) for base_name, values in state.items()})
+    return cast(RegisterState, {base_name: dict(values) for base_name, values in builtins.iter(state.items())})
 
 
+@cython.ccall
 def _visit_wrapper_assignment(
     stmt: object,
     local_state: RegisterState,
-    current_helper: object | None,
-    api_style: str,
+    current_helper: object,
+    api_style: object,
     codegen: _CodegenLike,
-) -> tuple[object, bool]:
+) -> tuple[object, cython.bint]:
     """Record an assignment's register write and rewrite its RHS result reads."""
+    lhs_access: object
+    replacement: object
     stmt_node = cast(Any, stmt)
     lhs_access = _interrupt_wrapper_field_path(stmt_node.lhs)
     if lhs_access is not None and lhs_access.base_name in {"inregs", "outregs", "sregs"}:
@@ -734,14 +810,17 @@ def _visit_wrapper_assignment(
     return stmt, changed
 
 
+@cython.ccall
 def _visit_wrapper_call_stmt(
     stmt: object,
     local_state: RegisterState,
     current_helper: object | None,
-    api_style: str,
+    api_style: object,
     codegen: _CodegenLike,
-) -> tuple[object, object | None, bool]:
+) -> tuple[object, object | None, cython.bint]:
     """Lower a wrapper call statement and update the active result helper."""
+    helper: object
+    sig: object
     sig = _interrupt_wrapper_call_signature(stmt)
     if sig is None:
         return stmt, current_helper, False
@@ -755,14 +834,18 @@ def _visit_wrapper_call_stmt(
     return stmt, helper, False
 
 
+@cython.ccall
 def _visit_wrapper_expr_stmt(
     stmt: object,
     local_state: RegisterState,
     current_helper: object | None,
-    api_style: str,
+    api_style: object,
     codegen: _CodegenLike,
-) -> tuple[object, object | None, bool]:
+) -> tuple[object, object | None, cython.bint]:
     """Lower a wrapper call held in an expression statement."""
+    expr: object
+    helper: object
+    sig: object
     # Dynamic codegen boundary: expression statements can omit expr in synthetic nodes.
     expr = getattr(stmt, "expr", None)
     if not isinstance(expr, structured_c.CFunctionCall):
@@ -778,14 +861,16 @@ def _visit_wrapper_expr_stmt(
     return stmt, helper, False
 
 
+@cython.ccall
 def _visit_wrapper_statements(
     node: object,
     state: RegisterState,
     active_helper: object | None,
-    api_style: str,
+    api_style: object,
     codegen: _CodegenLike,
-) -> bool:
+) -> cython.bint:
     """Walk one statement block, tracking register state and active helper."""
+    stmt: object
     node_statements = cast(Any, node)
     local_state = _copy_register_state(state)
     current_helper = active_helper
@@ -812,19 +897,22 @@ def _visit_wrapper_statements(
         changed = _visit_wrapper_result_node(stmt, local_state, current_helper, api_style, codegen) or changed
         new_statements.append(stmt)
 
-    if new_statements != list(node_statements.statements):
+    if operator.ne(new_statements, list(node_statements.statements)):
         node_statements.statements = new_statements
     return changed
 
 
+@cython.ccall
 def _visit_wrapper_result_node(
     node: object,
     state: RegisterState,
     active_helper: object | None,
-    api_style: str,
+    api_style: object,
     codegen: _CodegenLike,
-) -> bool:
+) -> cython.bint:
     """Dispatch structured-C node shapes to their wrapper-result lowering lane."""
+    _cond: object
+    body: object
     if isinstance(node, structured_c.CStatements):
         return _visit_wrapper_statements(node, state, active_helper, api_style, codegen)
     if isinstance(node, structured_c.CIfElse):
@@ -842,8 +930,11 @@ def _visit_wrapper_result_node(
     return False
 
 
-def _dos_pseudo_functions(project: angr.Project, function: _FunctionLike, dos_calls: Iterable[InterruptCall]) -> list[object]:
+@cython.ccall
+def _dos_pseudo_functions(project: angr.Project, function: _FunctionLike, dos_calls: Iterable[InterruptCall]) -> object:
     """Resolve the function objects behind each DOS int21 call target."""
+    target: object
+    call: object
     pseudo_funcs: list[object] = []
     for call in dos_calls:
         target = function.get_call_target(call.insn_addr)
@@ -853,8 +944,10 @@ def _dos_pseudo_functions(project: angr.Project, function: _FunctionLike, dos_ca
     return pseudo_funcs
 
 
-def _unbound_c_call_nodes(cfunc: object) -> list[Any]:
+@cython.ccall
+def _unbound_c_call_nodes(cfunc: object) -> object:
     """Collect structured-C call nodes that still lack a callee_func binding."""
+    node: object
     call_nodes: list[object] = []
     for node in _iter_c_nodes(cast(Any, cfunc).statements):
         if not isinstance(node, structured_c.CFunctionCall):
@@ -866,9 +959,12 @@ def _unbound_c_call_nodes(cfunc: object) -> list[Any]:
 
 
 def _attach_dos_pseudo_callees(
-    project: angr.Project, function: _FunctionLike, codegen: _CodegenLike, api_style: str
-) -> bool:
-    def _impl() -> bool:
+    project: angr.Project, function: _FunctionLike, codegen: _CodegenLike, api_style: object
+) -> cython.bint:
+    def _impl() -> cython.bint:
+        cfunc: object
+        pseudo_func: object
+        node: object
         cfunc = codegen.cfunc
         if api_style != "pseudo" or cfunc is None:
             return False

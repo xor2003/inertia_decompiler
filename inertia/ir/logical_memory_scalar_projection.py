@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Project closed logical-memory reads into typed scalar values.
 
 Layer: IR.
@@ -10,6 +11,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from .core import AddressStatus, IRAddress, IRInstr, IRValue, MemSpace
 from .logical_memory_contracts import IRLogicalMemoryArtifact8616
@@ -17,7 +20,8 @@ from .logical_memory_value_trace import trace_logical_word_load_8616
 from .scalar_definitions import ScalarDefinitionIndex8616
 
 
-def _stable_stack_word_source_8616(source: IRAddress) -> bool:
+@cython.ccall
+def _stable_stack_word_source_8616(source: IRAddress) -> cython.bint:
     """Return whether the source is one stable SS word."""
     return (
         source.space is MemSpace.SS
@@ -27,16 +31,18 @@ def _stable_stack_word_source_8616(source: IRAddress) -> bool:
     )
 
 
+@cython.ccall
 def project_logical_stack_word_value_8616(
     instruction: IRInstr,
     definitions: ScalarDefinitionIndex8616,
     logical_memory: IRLogicalMemoryArtifact8616 | None,
     *,
-    function_addr: int,
-    block_addr: int,
-    before_index: int,
+    function_addr: cython.longlong,
+    block_addr: cython.longlong,
+    before_index: cython.longlong,
 ) -> IRValue | None:
     """Return one proven stack word represented by byte-executed IR."""
+    source: object
     trace = trace_logical_word_load_8616(
         instruction,
         definitions,

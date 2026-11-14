@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Project proven incoming stack words still read by the structured body.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Protocol, cast
@@ -25,6 +28,8 @@ from inertia.ir.ssa_function import SSAFunctionArtifact
 from inertia.lowering.c_ast_utils import _replace_c_children_8616
 
 from .stack_variable_coordinates import machine_bp_offset_for_stack_variable_8616
+import dataclasses
+import operator
 
 _WORD_BYTES = 2
 _BITS_PER_BYTE = 8
@@ -39,22 +44,23 @@ class _CodegenBoundary(Protocol):
     project: Project
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LiveStackWordInputs8616:
     """Incoming evidence accounting; materialization counts projected offsets only.
 
     The consuming positive-BP planner separately accounts for C parameters.
     """
 
-    offsets: frozenset[int] = frozenset()
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    offsets: frozenset[cython.longlong] = frozenset()
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-def _read_bytes(codegen: object, node: object) -> frozenset[int]:
+@cython.ccall
+def _read_bytes(codegen: object, node: object) -> frozenset[cython.longlong]:
     """Resolve only exact typed stack-value bytes through the coordinate owner."""
     if not isinstance(node, CVariable) or not isinstance(node.variable, SimStackVariable):
         return frozenset()
@@ -74,10 +80,11 @@ def _read_bytes(codegen: object, node: object) -> frozenset[int]:
     return frozenset(range(offset, offset + width))
 
 
-def _entry_word_evidence(alias: StackMemorySSAAliasArtifact8616) -> tuple[set[int], set[int], set[int]]:
+def _entry_word_evidence(alias: StackMemorySSAAliasArtifact8616) -> tuple[set[cython.longlong], set[cython.longlong], set[cython.longlong]]:
     """Require a logical word owner as well as exact incoming raw bytes."""
-    incoming: set[int] = set()
-    written: set[int] = set()
+    fact: object
+    incoming: set[cython.longlong] = set()
+    written: set[cython.longlong] = set()
     for fact in alias.facts:
         address = fact.address
         exact = address.space is MemSpace.SS and address.base == ("bp",) and address.status is AddressStatus.STABLE
@@ -90,14 +97,14 @@ def _entry_word_evidence(alias: StackMemorySSAAliasArtifact8616) -> tuple[set[in
             incoming.update(byte_range)
     candidates = {
         access.address.offset
-        for access in alias.logical_accesses
+        for access in iter(alias.logical_accesses)
         if access.source.kind is IRMemoryAccessKind8616.READ
         and access.address.space is MemSpace.SS
         and access.address.base == ("bp",)
         and access.address.status is AddressStatus.STABLE
-        and access.address.size == _WORD_BYTES
+        and operator.eq(access.address.size, _WORD_BYTES)
         and access.address.offset >= _FIRST_ARGUMENT
-        and all(item.raw_slice.address.version == 0 for item in access.slices)
+        and all(item.raw_slice.address.version == 0 for item in iter(access.slices))
     }
     return candidates, incoming, written
 
@@ -113,7 +120,7 @@ def collect_live_stack_word_inputs_8616(codegen: object, root: object) -> LiveSt
     if not alias.complete or alias.source_ssa is not source or alias.call_effects:
         return LiveStackWordInputs8616()
     candidates, incoming, written = _entry_word_evidence(alias)
-    reads: set[int] = set()
+    reads: set[cython.longlong] = set()
 
     def collect(node: object) -> object:
         """Collect reads and conservatively exclude any structured write target."""
@@ -122,7 +129,7 @@ def collect_live_stack_word_inputs_8616(codegen: object, root: object) -> LiveSt
         reads.update(_read_bytes(codegen, node))
         return node
 
-    def is_read(parent: object, attr: str) -> bool:
+    def is_read(parent: object, attr: object) -> cython.bint:
         """Exclude assignment storage and address-taking from value demand."""
         if isinstance(parent, CAssignment) and attr == "lhs":
             return False
@@ -131,6 +138,6 @@ def collect_live_stack_word_inputs_8616(codegen: object, root: object) -> LiveSt
         return attr != "variable"
 
     _replace_c_children_8616(root, collect, should_process_child=is_read)
-    defined = {offset for offset in candidates if {offset, offset + 1} <= incoming - written}
-    live = frozenset(offset for offset in defined if {offset, offset + 1} <= reads)
+    defined = {offset for offset in iter(candidates) if {offset, offset + 1} <= incoming - written}
+    live = frozenset(offset for offset in iter(defined) if {offset, offset + 1} <= reads)
     return LiveStackWordInputs8616(live, len(candidates), len(defined), len(live), len(live), len(candidates) - len(live))

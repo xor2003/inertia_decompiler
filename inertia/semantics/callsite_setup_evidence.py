@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Collect original-image instruction evidence for consumed call setup.
 
 Layer: Recovery metadata.
@@ -13,6 +14,7 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import cython
 
 from angr import Project
 from capstone import CS_ARCH_X86, CS_MODE_16, Cs, CsError
@@ -25,12 +27,14 @@ from inertia.semantics.register_entry_overwrite import (
     RegisterEntryOverwriteVerdict8616,
     prove_consumed_stack_address_setup_8616,
 )
+import builtins
 
 
 def collect_consumed_stack_address_setup_8616(
     project: Project, request: ConsumedStackAddressSetup8616,
 ) -> RegisterEntryOverwriteProof8616:
     """Read bounded image bytes without trusting analysis-only stub bodies."""
+    registry: object
     refusal = RegisterEntryOverwriteProof8616(
         RegisterEntryOverwriteVerdict8616.UNKNOWN_REFUSE,
         RegisterEntryOverwriteReason8616.MISSING_EFFECTS, 0xFFFF, (),
@@ -56,7 +60,7 @@ def collect_consumed_stack_address_setup_8616(
             min(request.call_address + 15, image.max_addr + 1) - request.producer_address,
         ))
         caller = tuple(
-            instruction for instruction in decoder.disasm(caller_bytes, request.producer_address)
+            instruction for instruction in builtins.iter(decoder.disasm(caller_bytes, request.producer_address))
             if instruction.address <= request.call_address
         )
         callee_bytes = bytes(project.loader.memory.load(

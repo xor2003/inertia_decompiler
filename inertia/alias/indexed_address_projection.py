@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Project indexed IR addresses into symbolic Alias storage identities.
 
 Layer: Alias.
@@ -11,6 +12,8 @@ Widening and Types/Lowering consume these facts only after Alias proof.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import Counter
 from typing import Protocol, cast
@@ -36,6 +39,8 @@ from .indexed_address_copy_projection import project_indexed_address_copies_8616
 from .indexed_address_range_contracts import IndexedAliasLoopRangeEvidence8616
 from .indexed_address_range_projection import project_indexed_loop_ranges_to_alias_8616
 from .storage_fact_join import build_segmented_alias_range_8616
+import operator
+import builtins
 
 
 class _CodegenBoundary8616(Protocol):
@@ -51,6 +56,7 @@ class _CodegenBoundary8616(Protocol):
     _inertia_indexed_loop_range_alias_evidence_8616: IndexedAliasLoopRangeEvidence8616
 
 
+@cython.ccall
 def _source_key_8616(fact: IndexedAddressFact8616) -> tuple[object, ...]:
     """Return the exact machine/SSA identity of one indexed access."""
     return (
@@ -62,10 +68,12 @@ def _source_key_8616(fact: IndexedAddressFact8616) -> tuple[object, ...]:
     )
 
 
+@cython.ccall
 def _project_fact_8616(
     fact: IndexedAddressFact8616,
 ) -> IndexedAddressAliasFact8616 | IndexedAddressAliasRefusal8616:
     """Project one complete indexed fact without widening its meaning."""
+    source_range: object
     if not fact.complete:
         return IndexedAddressAliasRefusal8616(
             IndexedAddressAliasFailureKind8616.INCOMPLETE_SOURCE_FACT,
@@ -117,6 +125,7 @@ def project_indexed_address_aliases_8616(
     evidence: IndexedAddressEvidence8616,
 ) -> IndexedAddressAliasEvidence8616:
     """Project every closed indexed IR outcome into Alias or a typed refusal."""
+    source: object
     if not evidence.closed:
         raise PipelineHardError(
             "indexed-address IR evidence is incomplete before Alias projection",
@@ -124,7 +133,7 @@ def project_indexed_address_aliases_8616(
         )
     duplicate_keys = {
         key
-        for key, count in Counter(_source_key_8616(fact) for fact in evidence.facts).items()
+        for key, count in builtins.iter(Counter(_source_key_8616(fact) for fact in iter(evidence.facts)).items())
         if count > 1
     }
     facts: list[IndexedAddressAliasFact8616] = []
@@ -134,7 +143,7 @@ def project_indexed_address_aliases_8616(
             f"IR refused indexed address: {source.failure.value}",
             source_refusal=source,
         )
-        for source in evidence.refusals
+        for source in iter(evidence.refusals)
     ]
     for source in evidence.facts:
         if _source_key_8616(source) in duplicate_keys:
@@ -173,16 +182,10 @@ def project_indexed_address_aliases_8616(
     return result
 
 
+@cython.ccall
 def _required_ir_evidence_8616(
     boundary: _CodegenBoundary8616,
-) -> (
-    tuple[
-        IndexedAddressEvidence8616,
-        IndexedAddressCopyEvidence8616,
-        IndexedLoopRangeEvidence8616,
-    ]
-    | None
-):
+) -> object:
     """Read required IR evidence or return None when no IR owner ran."""
     try:
         source = boundary._inertia_indexed_address_evidence_8616
@@ -227,6 +230,7 @@ def _required_ir_evidence_8616(
     return source, copy_source, range_source
 
 
+@cython.ccall
 def _project_alias_evidence_8616(
     boundary: _CodegenBoundary8616,
     source: IndexedAddressEvidence8616,
@@ -240,7 +244,7 @@ def _project_alias_evidence_8616(
         existing = None
     if not (
         isinstance(existing, IndexedAddressAliasEvidence8616)
-        and existing.source == source
+        and operator.eq(existing.source, source)
     ):
         existing = project_indexed_address_aliases_8616(source)
         boundary._inertia_indexed_address_alias_evidence_8616 = existing
@@ -250,7 +254,7 @@ def _project_alias_evidence_8616(
         access_evidence = None
     if not (
         isinstance(access_evidence, IndexedAliasAccessEvidence8616)
-        and access_evidence.source == existing
+        and operator.eq(access_evidence.source, existing)
     ):
         access_evidence = classify_indexed_alias_accesses_8616(existing)
         boundary._inertia_indexed_address_alias_access_evidence_8616 = access_evidence
@@ -260,8 +264,8 @@ def _project_alias_evidence_8616(
         range_evidence = None
     if not (
         isinstance(range_evidence, IndexedAliasLoopRangeEvidence8616)
-        and range_evidence.source == range_source
-        and range_evidence.accesses == access_evidence
+        and operator.eq(range_evidence.source, range_source)
+        and operator.eq(range_evidence.accesses, access_evidence)
     ):
         boundary._inertia_indexed_loop_range_alias_evidence_8616 = (
             project_indexed_loop_ranges_to_alias_8616(
@@ -275,9 +279,9 @@ def _project_alias_evidence_8616(
         copy_evidence = None
     if not (
         isinstance(copy_evidence, IndexedAliasCopyEvidence8616)
-        and copy_evidence.source == copy_source
-        and copy_evidence.aliases == existing
-        and copy_evidence.accesses == access_evidence
+        and operator.eq(copy_evidence.source, copy_source)
+        and operator.eq(copy_evidence.aliases, existing)
+        and operator.eq(copy_evidence.accesses, access_evidence)
     ):
         boundary._inertia_indexed_address_alias_copy_evidence_8616 = (
             project_indexed_address_copies_8616(
@@ -288,11 +292,13 @@ def _project_alias_evidence_8616(
         )
 
 
+@cython.ccall
 def apply_x86_16_indexed_address_aliases_8616(
     project: object,
     codegen: object,
-) -> bool:
+) -> cython.bint:
     """Publish Alias projection and fail if the preceding IR owner is absent."""
+    required: object
     boundary = cast(_CodegenBoundary8616, codegen)
     required = _required_ir_evidence_8616(boundary)
     if required is None:

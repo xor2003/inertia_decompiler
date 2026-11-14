@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prune C carriers for caller stack cleanup consumed by structured calls.
 
 Layer: Types/Lowering.
@@ -17,6 +18,8 @@ Dynamic access below is restricted to those third-party surfaces.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 import logging
@@ -35,28 +38,34 @@ from capstone.x86_const import (
 )
 
 from inertia.semantics.callsite_summary import CallsiteSummary8616, callsite_summary_inventory_8616
+import dataclasses
+import operator
+import builtins
 
 log: logging.Logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallCleanupCarrierPruneStats8616:
     """Closed evidence counters for one cleanup-carrier replay."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
+@cython.ccall
 def _boundary_tuple_8616(value: object) -> tuple[Any, ...]:
     """Convert one dynamic angr collection to a stable tuple."""
     return tuple(cast(Iterable[Any], value))
 
 
-def _candidate_addresses_8616(project: object, address: int) -> frozenset[int]:
+@cython.ccall
+def _candidate_addresses_8616(project: object, address: cython.longlong) -> frozenset[cython.longlong]:
     """Return current/original address-domain candidates for one instruction."""
+    delta: object
     candidates = {address}
     delta = getattr(project, "_inertia_original_linear_delta", None)
     if isinstance(delta, int) and delta:
@@ -64,8 +73,12 @@ def _candidate_addresses_8616(project: object, address: int) -> frozenset[int]:
     return frozenset(candidates)
 
 
-def _decode_instruction_8616(project: object, address: int) -> object | None:
+@cython.ccall
+def _decode_instruction_8616(project: object, address: cython.longlong) -> object | None:
     """Decode one exact instruction through the active/original project."""
+    candidate_project: object
+    delta: object
+    factory: object
     projects = (project, getattr(project, "_inertia_original_project", None))
     delta = getattr(project, "_inertia_original_linear_delta", None)
     for candidate_project in projects:
@@ -87,25 +100,27 @@ def _decode_instruction_8616(project: object, address: int) -> object | None:
     return None
 
 
+@cython.ccall
 def _is_exact_cleanup_instruction_8616(
     project: object,
-    address: int,
-    amount: int,
-) -> bool:
+    address: cython.longlong,
+    amount: cython.longlong,
+) -> cython.bint:
     """Return whether one address is exactly ``ADD SP, amount``."""
     insn = _decode_instruction_8616(project, address)
     operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
     return bool(
-        getattr(insn, "id", None) == X86_INS_ADD
+        operator.eq(getattr(insn, "id", None), X86_INS_ADD)
         and len(operands) == 2
-        and getattr(operands[0], "type", None) == X86_OP_REG
-        and getattr(operands[0], "reg", None) == X86_REG_SP
-        and getattr(operands[1], "type", None) == X86_OP_IMM
-        and getattr(operands[1], "imm", None) == amount
+        and operator.eq(getattr(operands[0], "type", None), X86_OP_REG)
+        and operator.eq(getattr(operands[0], "reg", None), X86_REG_SP)
+        and operator.eq(getattr(operands[1], "type", None), X86_OP_IMM)
+        and operator.eq(getattr(operands[1], "imm", None), amount)
     )
 
 
-def _pure_expression_8616(node: object) -> bool:
+@cython.ccall
+def _pure_expression_8616(node: object) -> cython.bint:
     """Return whether evaluating an angr C expression has no C side effect."""
     if isinstance(
         node,
@@ -125,8 +140,10 @@ def _pure_expression_8616(node: object) -> bool:
     return False
 
 
-def _stack_cleanup_carrier_lhs_8616(node: object, project: object) -> bool:
+@cython.ccall
+def _stack_cleanup_carrier_lhs_8616(node: object, project: object) -> cython.bint:
     """Return whether an assignment destination is a stack/SP carrier."""
+    registers: object
     if isinstance(node, structured_c.CDirtyExpression):
         return True
     if not isinstance(node, structured_c.CVariable):
@@ -139,16 +156,17 @@ def _stack_cleanup_carrier_lhs_8616(node: object, project: object) -> bool:
         (isinstance(variable, SimStackVariable)
         and variable.base == "bp")
         or (isinstance(variable, SimRegisterVariable)
-        and variable.reg == sp_offset)
+        and operator.eq(variable.reg, sp_offset))
     )
 
 
-def _expression_instruction_addresses_8616(node: object) -> frozenset[int]:
+def _expression_instruction_addresses_8616(node: object) -> frozenset[cython.longlong]:
     """Collect instruction provenance from one supported structured-C tree."""
-    addresses: set[int] = set()
-    seen: set[int] = set()
+    addresses: set[cython.longlong] = set()
+    seen: set[cython.longlong] = set()
 
     def visit(current: object) -> None:
+        tags: object
         if current is None or id(current) in seen:
             return
         seen.add(id(current))
@@ -168,23 +186,24 @@ def _expression_instruction_addresses_8616(node: object) -> frozenset[int]:
     return frozenset(addresses)
 
 
-def _debug_render_8616(node: object) -> str:
+def _debug_render_8616(node: object) -> object:
     """Render one third-party node for opt-in diagnostics only."""
+    chunks: object
     chunks = getattr(node, "c_repr_chunks", None)
     if not callable(chunks):
         return repr(node)
     with contextlib.suppress(Exception):
         rendered_chunks = cast(Iterable[tuple[str, object]], chunks(asexpr=True))
-        return "".join(text for text, _item in rendered_chunks)
+        return "".join(text for text, _item in iter(rendered_chunks))
     return repr(node)
 
 
 def _provenance_is_one_call_cleanup_8616(
     project: object,
-    provenance: frozenset[int],
-    cleanup_address: int,
+    provenance: object,
+    cleanup_address: cython.longlong,
     summary: CallsiteSummary8616,
-) -> bool:
+) -> cython.bint:
     """Prove that every contributing instruction belongs to one call cleanup."""
     sequence_addresses = {
         summary.callsite_addr,
@@ -193,8 +212,8 @@ def _provenance_is_one_call_cleanup_8616(
     }
     allowed = frozenset(
         candidate
-        for address in sequence_addresses
-        for candidate in _candidate_addresses_8616(project, address)
+        for address in iter(sequence_addresses)
+        for candidate in builtins.iter(_candidate_addresses_8616(project, address))
     )
     return bool(
         provenance
@@ -206,14 +225,15 @@ def _provenance_is_one_call_cleanup_8616(
 
 def _statement_prune_verdict_8616(
     project: object,
-    normalized: dict[int, CallsiteSummary8616],
+    normalized: object,
     statement: object,
-) -> tuple[bool, bool]:
+) -> tuple[cython.bint, cython.bint]:
     """Classify one statement; return ``(matched, drop)`` for prune decision."""
+    matched_addr: object
     provenance = _expression_instruction_addresses_8616(statement)
     matching_addrs = tuple(
         address
-        for address, summary in normalized.items()
+        for address, summary in builtins.iter(normalized.items())
         if _provenance_is_one_call_cleanup_8616(
             project,
             provenance,
@@ -227,8 +247,8 @@ def _statement_prune_verdict_8616(
             "[call-cleanup-carrier] statement=%s provenance=%s "
             "matching=%s lhs=%s rhs=%s rendered=%s",
             type(statement).__name__,
-            tuple(hex(address) for address in sorted(provenance)),
-            tuple(hex(address) for address in matching_addrs),
+            tuple(hex(address) for address in builtins.iter(sorted(provenance))),
+            tuple(hex(address) for address in iter(matching_addrs)),
             type(getattr(statement, "lhs", None)).__name__,
             type(getattr(statement, "rhs", None)).__name__,
             _debug_render_8616(statement),
@@ -246,24 +266,25 @@ def _statement_prune_verdict_8616(
 def prune_consumed_call_cleanup_carriers_8616(
     project: object,
     codegen: object,
-) -> bool:
+) -> cython.bint:
     """Delete exact, pure cleanup carriers already consumed by typed calls."""
+    root: object
     consumed = frozenset(
         address
-        for address in _boundary_tuple_8616(
+        for address in builtins.iter(_boundary_tuple_8616(
             getattr(
                 codegen,
                 "_inertia_consumed_call_cleanup_carrier_ins_addrs_8616",
                 (),
             )
             or ()
-        )
+        ))
         if isinstance(address, int)
     )
     inventory = callsite_summary_inventory_8616(codegen)
     cleanup_summary_by_addr = {
         summary.stack_cleanup_instruction_addr: summary
-        for summary in inventory.values()
+        for summary in builtins.iter(inventory.values())
         if isinstance(summary.stack_cleanup_instruction_addr, int)
         and summary.stack_cleanup_instruction_addr in consumed
         and isinstance(summary.stack_cleanup, int)
@@ -271,7 +292,7 @@ def prune_consumed_call_cleanup_carriers_8616(
     }
     normalized = {
         address: summary
-        for address, summary in cleanup_summary_by_addr.items()
+        for address, summary in builtins.iter(cleanup_summary_by_addr.items())
         if _is_exact_cleanup_instruction_8616(
             project,
             address,
@@ -281,10 +302,16 @@ def prune_consumed_call_cleanup_carriers_8616(
     root = getattr(getattr(codegen, "cfunc", None), "statements", None)
     classified = 0
     materialized = 0
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
 
     def visit(node: object) -> None:
         """Prune matching assignments from mutable structured statement lists."""
+        pairs: object
+        statements: object
+        _condition: object
+        attribute: object
+        body: object
+        statement: object
         nonlocal classified, materialized
         if node is None or id(node) in seen:
             return

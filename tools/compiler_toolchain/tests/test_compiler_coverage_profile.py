@@ -295,10 +295,15 @@ def _default_profile_drift() -> str | None:
     probe_path = DEFAULT_PROFILE_REGISTRY.parents[2] / probe["path"]
     if hashlib.sha256(probe_path.read_bytes()).hexdigest() != probe["sha256"]:
         return "probe evidence sha256 mismatch"
-    runner = registry["runners"]["kvikdos"]
-    runner_path = Path(runner["path"])
-    if hashlib.sha256(runner_path.read_bytes()).hexdigest() != runner["sha256"]:
-        return "kvikdos executable sha256 mismatch"
+    for runner_id, label in (("dosbox", "DOSBox"), ("kvikdos", "kvikdos")):
+        if runner_id not in registry["runners"]:
+            continue
+        runner = registry["runners"][runner_id]
+        runner_path = Path(runner["path"])
+        if not runner_path.is_file():
+            return f"{label} executable missing"
+        if hashlib.sha256(runner_path.read_bytes()).hexdigest() != runner["sha256"]:
+            return f"{label} executable sha256 mismatch"
     return None
 
 
@@ -1467,3 +1472,185 @@ def test_frozen_tail_context_preserves_classic_msc6_root(tmp_path):
     spec = resolve_case_toolchain(MSC6_AX_PROFILE_ID, msc6_root=root)
     context = profile_owner.FrozenCompilerContext.create(spec, None)
     assert context.resolve().toolchain_root == root
+# --- DOS packed-timestamp staleness boundary (artifact-timestamp candidate) ---
+
+def _stamp(path, mtime):
+    os.utime(path, (mtime, mtime))
+
+
+@pytest.mark.parametrize(
+    "offset,expect_stale",
+    [
+        (-1.99, False),   # DOS-truncated fresh stamp: inside one packed-time quantum
+        (-2.0, True),     # provably predates launch: every possible w < wall_start
+        (-2.01, True),
+        (-4.0, True),
+        (0.0, False),
+        (1.5, False),
+    ],
+)
+def test_dosbox_artifact_diagnostics_dos_quantum_boundary(tmp_path, offset, expect_stale):
+    """Only stamps a full DOS 2s quantum before launch may be called stale."""
+    wall_start = 1_700_000_000.42
+    artifact = tmp_path / "CASE.OBJ"
+    artifact.write_bytes(b"obj")
+    _stamp(artifact, wall_start + offset)
+    problems = profile_owner._dosbox_artifact_diagnostics(
+        tmp_path, ("CASE.OBJ",), wall_start,
+    )
+    assert ("stale or empty artifact CASE.OBJ" in problems) is expect_stale
+    if expect_stale:
+        assert artifact.stat().st_size > 0
+
+
+def test_dosbox_stage_accepts_dos_truncated_fresh_artifact(tmp_path, monkeypatch):
+    """A link-stage artifact truncated >1s behind wall_start is still fresh.
+
+    Reproduces the false rejection seen on frozen MS5.1 compare16: the linker
+    rewrote CMP16.EXE at ~wall_start+0.4s and DOSBox stamped it floor2(w),
+    1.5-1.9s behind wall_start, which the old -1.0s bound misread as stale.
+    """
+    registry, _root = _borland_registry(tmp_path)
+    toolchain = resolve_case_toolchain("bc31-small", evidence_path=registry)
+    fake_now = 1_700_000_001.42
+    monkeypatch.setattr(profile_owner.time, "time", lambda: fake_now)
+    real_run = _dosbox_run(toolchain, tmp_path, "ok")
+
+    def run(command, **kwargs):
+        result = real_run(command, **kwargs)
+        # DOSBox packs the close time: floor2(wall_start + ~0.5) lands 1.42s
+        # behind wall_start, i.e. outside the old 1.0s tolerance.
+        dos_stamp = fake_now - 1.42
+        _stamp(tmp_path / "CASE.OBJ", dos_stamp)
+        return result
+
+    monkeypatch.setattr(profile_owner, "_run", run)
+    receipt = profile_owner._run_dosbox_stage(
+        toolchain, tmp_path, tag="CC",
+        command_line=toolchain.compile_dos_command(source_name="CASE.C", obj_name="CASE.OBJ"),
+        path_dos=toolchain.compiler_path_dos,
+        environment=toolchain.compiler_environment,
+        required=("CASE.OBJ",),
+    )
+    assert receipt.passed, receipt.stdout + receipt.stderr
+
+
+def test_dosbox_stage_still_rejects_artifact_predating_dos_quantum(tmp_path, monkeypatch):
+    """A nonempty artifact stamped >2s before launch remains stale evidence."""
+    registry, _root = _borland_registry(tmp_path)
+    toolchain = resolve_case_toolchain("bc31-small", evidence_path=registry)
+    fake_now = 1_700_000_001.42
+    monkeypatch.setattr(profile_owner.time, "time", lambda: fake_now)
+    stale = tmp_path / "CASE.OBJ"
+    stale.write_bytes(b"old-obj")
+    _stamp(stale, fake_now - 2.5)
+
+    launched = Mock(return_value=SimpleNamespace(returncode=0, stdout="", stderr=""))
+    monkeypatch.setattr(profile_owner, "_run", launched)
+    receipt = profile_owner._run_dosbox_stage(
+        toolchain, tmp_path, tag="CC",
+        command_line=toolchain.compile_dos_command(source_name="CASE.C", obj_name="CASE.OBJ"),
+        path_dos=toolchain.compiler_path_dos,
+        environment=toolchain.compiler_environment,
+        required=("CASE.OBJ",),
+    )
+    # Prelaunch cleanup must delete the leftover before DOSBox even starts.
+    launched.assert_called_once()
+    assert not receipt.passed
+    assert "missing artifact CASE.OBJ" in receipt.stdout + receipt.stderr
+
+
+def test_clear_stage_artifacts_refuses_surviving_artifact(tmp_path, monkeypatch):
+    """Cleanup that cannot actually remove a file must block the stage."""
+    leftover = tmp_path / "CASE.OBJ"
+    leftover.write_bytes(b"stale")
+    real_unlink = Path.unlink
+
+    def silent_noop(self, *args, **kwargs):
+        if self == leftover:
+            return None
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", silent_noop)
+    receipt = profile_owner._clear_stage_artifacts(tmp_path, ("CASE.OBJ",))
+    assert receipt is not None
+    assert receipt.outcome is profile_owner.ToolStageOutcome.INCOMPLETE
+    assert "survivors" in receipt.stderr
+
+
+# --- DOS packed-timestamp staleness boundary: runtime proof owner ---
+
+@pytest.mark.parametrize(
+    "offset,expect_stale",
+    [(-4.0, True), (-2.01, True), (-2.0, True), (-1.99, False), (0.0, False), (1.5, False)],
+)
+def test_dosbox_runtime_artifact_dos_quantum_boundary(tmp_path, offset, expect_stale):
+    """Runtime proof files share the same FAT 2s quantum as compile artifacts."""
+    wall_start = 1_700_000_000.42
+    artifact = tmp_path / "ORIG.OUT"
+    artifact.write_bytes(b"guest output")
+    _stamp(artifact, wall_start + offset)
+    _payload, error = harness._read_dosbox_run_artifact(
+        tmp_path, "ORIG.OUT", wall_start=wall_start, allow_empty=True,
+    )
+    assert (error == "stale DOSBox runtime artifact ORIG.OUT") is expect_stale
+
+
+def test_dosbox_runtime_accepts_dos_truncated_fresh_proof(tmp_path, monkeypatch):
+    """A guest proof truncated >1s behind wall_start is still fresh evidence."""
+    toolchain, executable = _dosbox_runtime_case(tmp_path)
+    fake_now = 1_700_000_001.42
+    monkeypatch.setattr(harness.time, "time", lambda: fake_now)
+
+    def run(_command, **_kwargs):
+        _write_dosbox_run_proof(tmp_path, "ORIG", 0)
+        for name in ("ORIG.OUT", "ORIGST.OUT", "ORIGEX.OUT", "ORIGDN.OUT"):
+            _stamp(tmp_path / name, fake_now - 1.42)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(harness, "_run", run)
+    ran_ok, guest_exit, guest_stdout, diagnostics = harness._run_example(
+        executable, tmp_path, kvikdos=tmp_path / "unused-kvikdos",
+        timeout=37, toolchain=toolchain, run_tag="ORIG",
+    )
+    assert ran_ok and guest_exit == 0 and guest_stdout == "guest output\r\n", diagnostics
+
+
+def test_dosbox_runtime_still_rejects_proof_predating_dos_quantum(tmp_path, monkeypatch):
+    """Proof files stamped >2s before launch remain stale evidence."""
+    toolchain, executable = _dosbox_runtime_case(tmp_path)
+    fake_now = 1_700_000_001.42
+    monkeypatch.setattr(harness.time, "time", lambda: fake_now)
+
+    def run(_command, **_kwargs):
+        _write_dosbox_run_proof(tmp_path, "ORIG", 0)
+        for name in ("ORIG.OUT", "ORIGST.OUT", "ORIGEX.OUT", "ORIGDN.OUT"):
+            _stamp(tmp_path / name, fake_now - 2.5)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(harness, "_run", run)
+    ran_ok, guest_exit, _stdout, diagnostics = harness._run_example(
+        executable, tmp_path, kvikdos=tmp_path / "unused-kvikdos",
+        timeout=37, toolchain=toolchain, run_tag="ORIG",
+    )
+    assert ran_ok is False and guest_exit is None
+    assert "stale DOSBox runtime artifact" in diagnostics
+
+
+def test_prepare_dosbox_runtime_fails_closed_on_surviving_artifact(tmp_path, monkeypatch):
+    """Runtime prep must refuse to launch when a stale proof file cannot go."""
+    toolchain, _executable = _dosbox_runtime_case(tmp_path)
+    leftover = tmp_path / "ORIG.OUT"
+    leftover.write_bytes(b"stale")
+    real_unlink = Path.unlink
+
+    def silent_noop(self, *args, **kwargs):
+        if self == leftover:
+            return None
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", silent_noop)
+    error = harness._prepare_dosbox_runtime(
+        tmp_path, toolchain, "CASE.EXE", harness._dosbox_runtime_names("ORIG"),
+    )
+    assert error is not None and "ORIG.OUT" in error

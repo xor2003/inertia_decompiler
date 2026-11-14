@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Validation.
 
 Responsibility: declare validation lanes and families that keep checks explicit and repeatable.
@@ -9,6 +10,7 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import cython
 
 from dataclasses import dataclass
 
@@ -18,24 +20,25 @@ from inertia.structuring.structuring_grouped_refusal_report import (
 from inertia.structuring.structuring_grouping_report import describe_x86_16_structuring_grouping_report_surface
 
 from .validation_helper_report import describe_x86_16_validation_helper_report_surface
+import dataclasses
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ValidationLayerSpec:
     """Describe one validation tier and the checks that normally cover it."""
 
-    name: str
-    purpose: str
-    default_checks: tuple[str, ...]
+    name: object
+    purpose: object
+    default_checks: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ValidationFamilySpec:
     """Describe one validation family and its default regression checks."""
 
-    name: str
-    purpose: str
-    default_checks: tuple[str, ...]
+    name: object
+    purpose: object
+    default_checks: object
 
 
 VALIDATION_LAYERS: tuple[ValidationLayerSpec, ...] = (
@@ -192,14 +195,15 @@ VALIDATION_FAMILIES: tuple[ValidationFamilySpec, ...] = (
 
 def describe_x86_16_validation_layers() -> tuple[tuple[str, tuple[str, ...]], ...]:
     """Return validation layer names with their default check surfaces."""
-    return tuple((layer.name, layer.default_checks) for layer in VALIDATION_LAYERS)
+    return tuple((layer.name, layer.default_checks) for layer in iter(VALIDATION_LAYERS))
 
 
 def describe_x86_16_validation_families() -> tuple[tuple[str, tuple[str, ...]], ...]:
     """Return validation family names with their default check surfaces."""
-    return tuple((family.name, family.default_checks) for family in VALIDATION_FAMILIES)
+    return tuple((family.name, family.default_checks) for family in iter(VALIDATION_FAMILIES))
 
 
+@cython.ccall
 def describe_x86_16_validation_triage() -> dict[str, object]:
     """Return the validation triage contract used by reports and tests."""
     return {

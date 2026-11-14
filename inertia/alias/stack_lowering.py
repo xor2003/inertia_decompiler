@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Legacy import bridge for stack-lowering helpers.
 
 Layer: Alias.
@@ -8,6 +9,7 @@ work here.
 """
 
 from __future__ import annotations
+import cython
 
 from inertia.lowering.stack_lowering import (
     _canonicalize_stack_cvar_expr,

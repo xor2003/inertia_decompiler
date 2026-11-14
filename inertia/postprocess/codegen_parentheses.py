@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Code generation/formatting.
 
 Responsibility: render mixed bitwise, shift and logical operands with explicit
@@ -14,28 +15,31 @@ rendered text, COD, source, or CLI/reporting evidence here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Generator
 from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CClosingObject, CExpression
+import operator
 
-type _Chunks8616 = Generator[tuple[str, object]]
-type _BinaryRenderer8616 = Callable[[CBinaryOp, str], _Chunks8616]
+_Chunks8616 = typing.TypeAliasType("_Chunks8616", Generator[tuple[str, object]])
+_BinaryRenderer8616 = typing.TypeAliasType("_BinaryRenderer8616", Callable[[CBinaryOp, str], _Chunks8616])
 _GROUPED_OPERATORS = frozenset({"And", "Or", "Xor", "Shl", "Shr", "Sar", "LogicalOr"})
 
 
 class _NamedRenderer8616(Protocol):
     """Installation identity exposed by the third-party renderer method."""
 
-    __name__: str
+    __name__: object
 
 
 def _operand_chunks_8616(parent: CBinaryOp, expression: CExpression) -> _Chunks8616:
     """Group a binary operand without mutating its expression or chunk owners."""
     group = isinstance(expression, CBinaryOp) and (
         parent.op_precedence > expression.op_precedence
-        or (parent.op in {"And", "Or", "Xor"} and expression.op != parent.op)
+        or (parent.op in {"And", "Or", "Xor"} and operator.ne(expression.op, parent.op))
         or (parent.op in {"Shl", "Shr", "Sar"} and expression.op in {"Add", "Sub"})
         or (parent.op == "LogicalOr" and expression.op == "LogicalAnd")
     )
@@ -55,7 +59,7 @@ def apply_codegen_parentheses_8616() -> None:
         return
     original = cast(_BinaryRenderer8616, CBinaryOp._c_repr_chunks)
 
-    def _binary_chunks_8616(self: CBinaryOp, op: str) -> _Chunks8616:
+    def _binary_chunks_8616(self: CBinaryOp, op: object) -> _Chunks8616:
         """Preserve native rendering except for explicit mixed-operator grouping."""
         if self.codegen.project.arch.name != "86_16" or self.op not in _GROUPED_OPERATORS:
             yield from original(self, op)

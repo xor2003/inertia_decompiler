@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Validate removal of exact callee-saved frame-spill fingerprints.
 
 Layer: Tail Validation.
@@ -12,6 +13,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import re
 from collections.abc import Mapping
@@ -22,13 +25,16 @@ from inertia.lowering.callee_saved_frame import (
     CalleeSavedFramePruneFact8616,
     CalleeSavedFramePruneRecord8616,
 )
+import operator
+import builtins
 
 _SS_SP_SEGMENTED_WRITE_RE_8616 = re.compile(
     r"deref:Add\(Mul\(reg:ss,const:16\),reg:sp(?:,const:(?P<displacement>-?[0-9]+))?\)"
 )
 
 
-def _fingerprints_8616(value: object) -> tuple[object, ...]:
+@cython.ccall
+def _fingerprints_8616(value: object) -> object:
     """Normalize one owned validation fingerprint sequence."""
     if isinstance(value, tuple):
         return value
@@ -41,7 +47,7 @@ def _changed_delta_fields_8616(delta: Mapping[str, object]) -> frozenset[str]:
     """Return validation fields that contain an added or removed fingerprint."""
     return frozenset(
         field_name
-        for field_name, field_delta in delta.items()
+        for field_name, field_delta in builtins.iter(delta.items())
         if isinstance(field_delta, Mapping)
         and (
             _fingerprints_8616(field_delta.get("added"))
@@ -50,8 +56,11 @@ def _changed_delta_fields_8616(delta: Mapping[str, object]) -> frozenset[str]:
     )
 
 
+@cython.ccall
 def _ss_sp_displacement_8616(token: object) -> int | None:
     """Decode one canonical Tail Validation ``SS:SP`` location fingerprint."""
+    displacement: object
+    match: object
     if not isinstance(token, str):
         return None
     match = _SS_SP_SEGMENTED_WRITE_RE_8616.fullmatch(token)
@@ -61,26 +70,29 @@ def _ss_sp_displacement_8616(token: object) -> int | None:
     return int(displacement) if displacement is not None else 0
 
 
-def _push_facts_proven_8616(facts: tuple[CalleeSavedFramePruneFact8616, ...]) -> bool:
+def _push_facts_proven_8616(facts: object) -> cython.bint:
     """Require one complete PUSH-fact census with typed store coordinates."""
     return bool(
         facts
         and all(
-            fact.instruction_role is CalleeSavedFrameInstructionRole8616.PUSH for fact in facts
+            fact.instruction_role is CalleeSavedFrameInstructionRole8616.PUSH for fact in iter(facts)
         )
-        and all(fact.instruction_addr == fact.push_addr for fact in facts)
-        and all(fact.stack_displacement is not None for fact in facts)
+        and all(operator.eq(fact.instruction_addr, fact.push_addr) for fact in iter(facts))
+        and all(fact.stack_displacement is not None for fact in iter(facts))
         and all(
-            fact.access_width is not None and fact.access_width > 0 for fact in facts
+            fact.access_width is not None and fact.access_width > 0 for fact in iter(facts)
         )
     )
 
 
 def callee_saved_frame_prune_delta_8616(
-    record: CalleeSavedFramePruneRecord8616 | None,
+    record: object,
     validation: Mapping[str, object],
-) -> bool:
+) -> cython.bint:
     """Accept only removed segmented writes proven by a closed frame census."""
+    actual: object
+    delta: object
+    segmented_delta: object
     if record is None or not record.closes_evidence:
         return False
     if _fingerprints_8616(validation.get("semantic_failures")):
@@ -95,22 +107,22 @@ def callee_saved_frame_prune_delta_8616(
     facts = record.frame_stack_store_evidence
     if not removed or not _push_facts_proven_8616(facts):
         return False
-    actual = tuple(_ss_sp_displacement_8616(token) for token in removed)
-    if None in actual or len(actual) != len(set(actual)) or len(actual) != len(facts):
+    actual = tuple(_ss_sp_displacement_8616(token) for token in iter(removed))
+    if None in actual or operator.ne(len(actual), len(set(actual))) or operator.ne(len(actual), len(facts)):
         return False
     exact_displacements = frozenset(
         fact.stack_displacement
-        for fact in facts
+        for fact in iter(facts)
         if fact.carrier_kind is CalleeSavedFrameCarrierKind8616.SEGMENTED_STACK_WRITE
     )
     normalized_store_count = sum(
         fact.carrier_kind is CalleeSavedFrameCarrierKind8616.STACK_SLOT_WRITE
-        for fact in facts
+        for fact in iter(facts)
     )
     actual_displacements = frozenset(actual)
     return bool(
         exact_displacements <= actual_displacements
-        and len(actual_displacements - exact_displacements) == normalized_store_count
+        and operator.eq(len(actual_displacements - exact_displacements), normalized_store_count)
     )
 
 

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Lower proven architectural segment-register live-ins to C runtime state.
 
 Layer: Types/Lowering.
@@ -15,6 +16,8 @@ identity from rendered C or relax validation for unproven carriers.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -33,6 +36,9 @@ from inertia.ir.segment_state import SegmentStateArtifact, SegmentValueKind8616
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616, _replace_c_children_8616
 from inertia.lowering.terminal_return_expressions import contains_effectful_call_8616
 from inertia.pipeline.errors import PipelineHardError
+import dataclasses
+import operator
+import builtins
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -53,16 +59,16 @@ _RUNTIME_SEGMENT_STATE_SYMBOLS_8616: dict[str, str] = {
     "es": "inertia_es",
     "ss": "inertia_ss",
 }
-_RUNTIME_SEGMENT_STATE_ADDRESSES_8616: dict[str, int] = {
+_RUNTIME_SEGMENT_STATE_ADDRESSES_8616: dict[str, cython.longlong] = {
     name: 0x1_0000 + index * 2
-    for index, name in enumerate(_RUNTIME_SEGMENT_STATE_SYMBOLS_8616)
+    for index, name in builtins.iter(enumerate(_RUNTIME_SEGMENT_STATE_SYMBOLS_8616))
 }
 
 
 class _ArchSegmentRegisters8616(Protocol):
     """Third-party architecture fields needed to classify physical registers."""
 
-    register_names: Mapping[int, str]
+    register_names: Mapping[cython.longlong, str]
 
 
 class _ProjectSegmentRegisters8616(Protocol):
@@ -74,7 +80,7 @@ class _ProjectSegmentRegisters8616(Protocol):
 class _SegmentVariableManager8616(Protocol):
     """Alias-owned input identities exposed by the native variable manager."""
 
-    def input_variables(self, exclude_specials: bool = True) -> list[SimVariable]:
+    def input_variables(self, exclude_specials: cython.bint = True) -> object:
         """Return read input versions, excluding definitions and phi variables."""
         ...
 
@@ -86,7 +92,7 @@ class _SegmentVariableManager8616(Protocol):
 class _CFunctionSegmentRegisters8616(Protocol):
     """Third-party C function fields mutated by segment-state lowering."""
 
-    addr: int
+    addr: cython.longlong
     statements: object
     unified_local_vars: MutableMapping[object, object]
     variables_in_use: MutableMapping[SimVariable, structured_c.CVariable]
@@ -116,15 +122,15 @@ class _DirtySegmentCarrier8616(Protocol):
     oident: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentRegisterStateLoweringStats8616:
     """Closed evidence counters for architectural segment-state lowering."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
 class _SegmentInputCaptureFailure8616(StrEnum):
@@ -134,18 +140,23 @@ class _SegmentInputCaptureFailure8616(StrEnum):
     ENTRY_ORDER_UNPROVEN = "entry_order_unproven"
 
 
-def runtime_segment_state_symbol_8616(segment_name: str) -> str | None:
+@cython.ccall
+def runtime_segment_state_symbol_8616(segment_name: object) -> object:
     """Return the C runtime-state symbol for one architectural segment."""
     return _RUNTIME_SEGMENT_STATE_SYMBOLS_8616.get(segment_name.strip().lower())
 
 
-def is_runtime_segment_state_symbol_8616(name: str) -> bool:
+@cython.ccall
+def is_runtime_segment_state_symbol_8616(name: object) -> cython.bint:
     """Return whether a C name belongs to the segment-state runtime contract."""
     return name in _RUNTIME_SEGMENT_STATE_SYMBOLS_8616.values()
 
 
-def runtime_segment_name_for_variable_8616(variable: object) -> str | None:
+@cython.ccall
+def runtime_segment_name_for_variable_8616(variable: object) -> object:
     """Identify lowered state by its owned category and reserved symbol, not name alone."""
+    segment_name: object
+    symbol: object
     if not isinstance(variable, SimMemoryVariable) or variable.category != "inertia_segment_state":
         return None
     variable_name = variable.name
@@ -157,14 +168,17 @@ def runtime_segment_name_for_variable_8616(variable: object) -> str | None:
     return None
 
 
+@cython.ccall
 def runtime_segment_state_cvar_8616(
-    segment_name: str,
+    segment_name: object,
     *,
     codegen: object,
     variable_type: SimType | None,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> structured_c.CVariable | None:
     """Materialize one proven architectural segment as explicit runtime state."""
+    address: object
+    symbol: object
     normalized_name = segment_name.strip().lower()
     symbol = _RUNTIME_SEGMENT_STATE_SYMBOLS_8616.get(normalized_name)
     address = _RUNTIME_SEGMENT_STATE_ADDRESSES_8616.get(normalized_name)
@@ -183,15 +197,18 @@ def runtime_segment_state_cvar_8616(
     )
 
 
+@cython.ccall
 def runtime_segment_state_variable_matches_8616(
-    variable: object, segment_name: str, function_addr: int,
-) -> bool:
+    variable: object, segment_name: object, function_addr: cython.longlong,
+) -> cython.bint:
     """Check an owned runtime carrier without allocating codegen nodes.
 
     This is the observational counterpart of runtime_segment_state_cvar_8616;
     metadata and coordinates must agree with that single construction owner.
     A spelling alone cannot identify architectural state.
     """
+    address: object
+    symbol: object
     normalized = segment_name.strip().lower()
     address = _RUNTIME_SEGMENT_STATE_ADDRESSES_8616.get(normalized)
     symbol = _RUNTIME_SEGMENT_STATE_SYMBOLS_8616.get(normalized)
@@ -205,12 +222,13 @@ def runtime_segment_state_variable_matches_8616(
     )
 
 
+@cython.ccall
 def runtime_segment_push_source_cvar_8616(
-    segment_name: str,
+    segment_name: object,
     *,
     codegen: object,
     variable_type: SimType | None,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> structured_c.CVariable | None:
     """Materialize one instruction-proven segment PUSH as explicit runtime state."""
     return runtime_segment_state_cvar_8616(
@@ -221,11 +239,13 @@ def runtime_segment_push_source_cvar_8616(
     )
 
 
+@cython.ccall
 def _physical_segment_name_8616(
     variable: object,
     project: _ProjectSegmentRegisters8616,
-) -> str | None:
+) -> object:
     """Return a supported segment name for one physical register variable."""
+    register_name: object
     if (
         not isinstance(variable, SimRegisterVariable)
         or not isinstance(variable.reg, int)
@@ -239,11 +259,14 @@ def _physical_segment_name_8616(
     return normalized if normalized in _RUNTIME_SEGMENT_STATE_SYMBOLS_8616 else None
 
 
+@cython.ccall
 def _cvar_segment_name_8616(
     cvar: structured_c.CVariable,
     project: _ProjectSegmentRegisters8616,
-) -> str | None:
+) -> object:
     """Return the physical segment identity carried by one C variable."""
+    segment_name: object
+    variable: object
     for variable in (cvar.unified_variable, cvar.variable):
         segment_name = _physical_segment_name_8616(variable, project)
         if segment_name is not None:
@@ -251,11 +274,13 @@ def _cvar_segment_name_8616(
     return None
 
 
+@cython.ccall
 def _dirty_segment_name_8616(
     expression: structured_c.CDirtyExpression,
     project: _ProjectSegmentRegisters8616,
-) -> str | None:
+) -> object:
     """Return a segment identity from a register-origin virtual variable."""
+    register_name: object
     dirty = cast(_DirtySegmentCarrier8616, expression.dirty)
     try:
         category = dirty.category
@@ -276,26 +301,29 @@ def _dirty_segment_name_8616(
 
 def _entry_live_in_segments_8616(
     artifact: SegmentStateArtifact,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> frozenset[str]:
     """Return segment identities proven as architectural function live-ins."""
+    entry_state: object
     entry_state = artifact.entry_states.get(function_addr, {})
     return frozenset(
         segment_name
-        for segment_name, state in entry_state.items()
+        for segment_name, state in builtins.iter(entry_state.items())
         if segment_name in _RUNTIME_SEGMENT_STATE_SYMBOLS_8616
         and state.origin is SegmentOrigin.PROVEN
         and state.value_kind is SegmentValueKind8616.ARCHITECTURAL_LIVE_IN
-        and state.source == segment_name
+        and operator.eq(state.source, segment_name)
     )
 
 
+@cython.ccall
 def _runtime_segment_cvar_8616(
-    segment_name: str,
+    segment_name: object,
     source: structured_c.CVariable,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> structured_c.CVariable:
     """Build the explicit global C carrier for one architectural segment."""
+    materialized: object
     materialized = runtime_segment_push_source_cvar_8616(
         segment_name,
         codegen=source.codegen,
@@ -307,12 +335,14 @@ def _runtime_segment_cvar_8616(
     return materialized
 
 
+@cython.ccall
 def _runtime_segment_dirty_cvar_8616(
-    segment_name: str,
+    segment_name: object,
     source: structured_c.CDirtyExpression,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> structured_c.CVariable:
     """Build runtime segment state from a register-origin virtual variable."""
+    materialized: object
     materialized = runtime_segment_push_source_cvar_8616(
         segment_name,
         codegen=source.codegen,
@@ -324,6 +354,7 @@ def _runtime_segment_dirty_cvar_8616(
     return materialized
 
 
+@cython.ccall
 def _dirty_carrier_debug_8616(
     dirty: _DirtySegmentCarrier8616,
 ) -> tuple[str | None, int | None, int | None]:
@@ -347,21 +378,23 @@ def _dirty_carrier_debug_8616(
     )
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _SegmentStateScan8616:
     """Replace proven segment live-ins and census every visited node."""
 
     project: _ProjectSegmentRegisters8616
-    function_addr: int
-    live_in_segments: frozenset[str] | set[str]
-    raw_node_ids: set[int] = field(default_factory=set)
-    classified_node_ids: set[int] = field(default_factory=set)
-    materialized_node_ids: set[int] = field(default_factory=set)
-    debug_unclassified_registers: set[tuple[str | None, int | None, int | None]] = field(default_factory=set)
-    debug_dirty_segment_carriers: set[tuple[str, str | None, int | None, int | None]] = field(default_factory=set)
+    function_addr: cython.longlong
+    live_in_segments: object
+    raw_node_ids: object = field(default_factory=set)
+    classified_node_ids: object = field(default_factory=set)
+    materialized_node_ids: object = field(default_factory=set)
+    debug_unclassified_registers: object = field(default_factory=set)
+    debug_dirty_segment_carriers: object = field(default_factory=set)
 
+    @cython.ccall
     def _transform_dirty(self, node: structured_c.CDirtyExpression) -> object:
         """Replace one proven register-origin dirty segment carrier."""
+        segment_name: object
         dirty = cast(_DirtySegmentCarrier8616, node.dirty)
         segment_name = _dirty_segment_name_8616(node, self.project)
         if segment_name is None:
@@ -377,8 +410,10 @@ class _SegmentStateScan8616:
         self.materialized_node_ids.add(id(node))
         return _runtime_segment_dirty_cvar_8616(segment_name, node, self.function_addr)
 
+    @cython.ccall
     def _transform_cvar(self, node: structured_c.CVariable) -> object:
         """Replace one proven architectural segment CVariable."""
+        segment_name: object
         segment_name = _cvar_segment_name_8616(node, self.project)
         if segment_name is None:
             variable = node.variable
@@ -398,6 +433,7 @@ class _SegmentStateScan8616:
         self.materialized_node_ids.add(id(node))
         return _runtime_segment_cvar_8616(segment_name, node, self.function_addr)
 
+    @cython.ccall
     def transform(self, node: object) -> object:
         """Dispatch one C node through the segment-state replacement arms."""
         if isinstance(node, structured_c.CDirtyExpression):
@@ -411,8 +447,8 @@ def _capture_segment_entry_versions_8616(
     codegen: object,
     function: _CFunctionSegmentRegisters8616,
     project: _ProjectSegmentRegisters8616,
-    live_ins: frozenset[str],
-) -> set[int]:
+    live_ins: object,
+) -> object:
     """Retain exact alias-proven entry values before architectural mutations.
 
     The native input registry excludes written and phi versions. A physical
@@ -421,11 +457,15 @@ def _capture_segment_entry_versions_8616(
     independent origin evidence: the input registry alone does not model its
     implicit architectural writes.
     """
+    segment: object
+    node: object
+    source: object
+    variable: object
     root = function.statements
     nodes = tuple(_iter_c_nodes_deep_8616(root))
     written = {
         _cvar_segment_name_8616(node.lhs, project)
-        for node in nodes
+        for node in iter(nodes)
         if isinstance(node, structured_c.CAssignment)
         and isinstance(node.lhs, structured_c.CVariable)
     }
@@ -434,7 +474,7 @@ def _capture_segment_entry_versions_8616(
         return set()
     inputs = set(function.variable_manager.input_variables())
     sources: dict[SimRegisterVariable, structured_c.CVariable] = {}
-    captured_ids: set[int] = set()
+    captured_ids: set[cython.longlong] = set()
     for node in nodes:
         if (
             isinstance(node, structured_c.CVariable)
@@ -460,10 +500,10 @@ def _capture_segment_entry_versions_8616(
             details=_SegmentInputCaptureFailure8616.ENTRY_ORDER_UNPROVEN,
         )
     variables = [*function.variables_in_use, *(
-        node.variable for node in nodes if isinstance(node, structured_c.CVariable)
+        node.variable for node in iter(nodes) if isinstance(node, structured_c.CVariable)
     )]
     next_id = 1 + max(
-        (variable.tmp_id for variable in variables if isinstance(variable, SimTemporaryVariable)),
+        (variable.tmp_id for variable in iter(variables) if isinstance(variable, SimTemporaryVariable)),
         default=-1,
     )
     replacements: dict[SimRegisterVariable, structured_c.CVariable] = {}
@@ -493,8 +533,11 @@ def _capture_segment_entry_versions_8616(
     return captured_ids
 
 
-def lower_architectural_segment_register_state_8616(codegen: object) -> bool:
+def lower_architectural_segment_register_state_8616(codegen: object) -> cython.bint:
     """Materialize IR-proven segment live-ins as explicit C runtime globals."""
+    cfunc: object
+    project: object
+    variable: object
     typed_codegen = cast(_CodegenSegmentRegisters8616, codegen)
     cfunc = typed_codegen.cfunc
     project = typed_codegen.project

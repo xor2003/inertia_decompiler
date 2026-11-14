@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Check the typed extent of a single machine-store projection.
 
 Layer: Types/Lowering.
@@ -11,14 +12,19 @@ refuse single-store materialization; they do not justify deleting any effect.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from angr.analyses.decompiler.structured_codegen.c import CExpression
+import operator
 
 _BITS_PER_BYTE = 8
 
 
-def has_exact_store_projection_width_8616(lvalue: object, width_bytes: int) -> bool:
+@cython.ccall
+def has_exact_store_projection_width_8616(lvalue: object, width_bytes: cython.longlong) -> cython.bint:
     """Require a known lvalue width equal to the consumed machine-store fact."""
+    value_type: object
     if not isinstance(lvalue, CExpression) or width_bytes <= 0:
         return False
     try:
@@ -27,4 +33,4 @@ def has_exact_store_projection_width_8616(lvalue: object, width_bytes: int) -> b
     except (AttributeError, TypeError, ValueError):
         # Native codegen types can be missing or not yet architecture-bound.
         return False
-    return isinstance(width_bits, int) and width_bits == width_bytes * _BITS_PER_BYTE
+    return isinstance(width_bits, int) and operator.eq(width_bits, width_bytes * _BITS_PER_BYTE)

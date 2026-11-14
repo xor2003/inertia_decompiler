@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Place binary-proven stack moves at their owning structured loop tail.
 
 Layer: Structuring.
@@ -12,6 +13,8 @@ aliases, types, or semantics from rendered C, source, symbols, or names.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 import logging
@@ -30,50 +33,56 @@ from .direct_stack_move_loop_sites import tagged_assignment_locations_8616
 from .direct_stack_move_ownership import (
     direct_stack_move_branch_owned_addresses_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 log: logging.Logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectStackMoveLoopTailStats8616:
     """Closed evidence counters for one loop-tail placement decision."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    refused_branch_owner_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    refused_branch_owner_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _LoopbackEdge8616:
     """One direct backward jump following a stack-move instruction."""
 
-    move_addr: int
-    jump_addr: int
-    target_addr: int
+    move_addr: cython.longlong
+    jump_addr: cython.longlong
+    target_addr: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _LoopTailSite8616:
     """One structured loop body proven to own a machine loop-tail move."""
 
-    statements: list[Any]
-    gap: int
-    depth: int
+    statements: object
+    gap: cython.longlong
+    depth: cython.longlong
 
 
+@cython.ccall
 def _boundary_tuple_8616(value: object) -> tuple[Any, ...]:
     """Convert one dynamic angr collection to a stable tuple."""
     return tuple(cast(Iterable[Any], value))
 
 
-def _candidate_addresses_8616(project: object, address: int) -> frozenset[int]:
+@cython.ccall
+def _candidate_addresses_8616(project: object, address: cython.longlong) -> frozenset[cython.longlong]:
     """Return current and original address-domain candidates.
 
     Dynamic boundary: angr project attributes may include original-address metadata.
     """
+    delta: object
     candidates = {address}
     delta = getattr(project, "_inertia_original_linear_delta", None)
     if isinstance(delta, int) and delta:
@@ -86,11 +95,17 @@ def _ordered_instructions_8616(function: object) -> tuple[object, ...]:
 
     Dynamic boundary: angr/capstone block interfaces are optional external objects.
     """
+    address: object
+    capstone: object
+    insn: object
+    local_blocks: object
+    block: object
+    wrapper: object
     blocks = _boundary_tuple_8616(getattr(function, "blocks", ()) or ())
     local_blocks = getattr(function, "_local_blocks", None)
     if isinstance(local_blocks, dict) and local_blocks:
         blocks = tuple(local_blocks.values())
-    by_addr: dict[int, object] = {}
+    by_addr: dict[cython.longlong, object] = {}
     for block in blocks:
         capstone = getattr(block, "capstone", None)
         for wrapper in _boundary_tuple_8616(getattr(capstone, "insns", ()) or ()):
@@ -98,18 +113,24 @@ def _ordered_instructions_8616(function: object) -> tuple[object, ...]:
             address = getattr(insn, "address", None)
             if isinstance(address, int):
                 by_addr[address] = insn
-    return tuple(by_addr[address] for address in sorted(by_addr))
+    return tuple(by_addr[address] for address in builtins.iter(sorted(by_addr)))
 
 
 def _loopback_after_move_8616(
     project: object,
     function: object,
-    move_addr: int,
+    move_addr: cython.longlong,
 ) -> _LoopbackEdge8616 | None:
     """Return the first nearby direct loopback after one exact move.
 
     Dynamic boundary: project, factory, and capstone fields are third-party/angr.
     """
+    capstone: object
+    decoded_move_addr: object
+    factory: object
+    jump_addr: object
+    candidate: object
+    instructions: object
     move_candidates = _candidate_addresses_8616(project, move_addr)
     instruction_sets = [_ordered_instructions_8616(function)]
     factory = getattr(project, "factory", None)
@@ -121,15 +142,15 @@ def _loopback_after_move_8616(
                 instruction_sets.append(
                     tuple(
                         getattr(wrapper, "insn", wrapper)
-                        for wrapper in _boundary_tuple_8616(
+                        for wrapper in builtins.iter(_boundary_tuple_8616(
                             getattr(capstone, "insns", ()) or ()
-                        )
+                        ))
                     )
                 )
     for instructions in instruction_sets:
         move_indexes = tuple(
             index
-            for index, insn in enumerate(instructions)
+            for index, insn in builtins.iter(enumerate(instructions))
             if getattr(insn, "address", None) in move_candidates
         )
         if len(move_indexes) != 1:
@@ -148,7 +169,7 @@ def _loopback_after_move_8616(
             not isinstance(jump_addr, int)
             or CS_GRP_JUMP not in groups
             or len(operands) != 1
-            or getattr(operands[0], "type", None) != X86_OP_IMM
+            or operator.ne(getattr(operands[0], "type", None), X86_OP_IMM)
             or not isinstance(getattr(operands[0], "imm", None), int)
         ):
             continue
@@ -158,22 +179,30 @@ def _loopback_after_move_8616(
     return None
 
 
+@cython.ccall
 def direct_stack_move_has_loop_tail_edge_8616(
     project: object,
     function: object,
-    move_addr: int,
-) -> bool:
+    move_addr: cython.longlong,
+) -> cython.bint:
     """Return whether CFG instructions prove this move owns a loopback tail."""
     return _loopback_after_move_8616(project, function, move_addr) is not None
 
 
-def _tree_tag_addresses_8616(root: object) -> frozenset[int]:
+def _tree_tag_addresses_8616(root: object) -> frozenset[cython.longlong]:
     """Collect exact instruction-origin tags from a structured subtree.
 
     Dynamic boundary: structured codegen nodes use optional attributes.
     """
-    addresses: set[int] = set()
-    seen: set[int] = set()
+    child: object
+    node: object
+    pairs: object
+    tags: object
+    attr: object
+    body: object
+    condition: object
+    addresses: set[cython.longlong] = set()
+    seen: set[cython.longlong] = set()
     stack = [root]
     while stack:
         node = stack.pop()
@@ -187,10 +216,10 @@ def _tree_tag_addresses_8616(root: object) -> frozenset[int]:
         if isinstance(tags, dict):
             addresses.update(
                 value
-                for value in (
+                for value in iter((
                     tags.get("ins_addr"),
                     tags.get("inertia_relocated_from_ins_addr"),
-                )
+                ))
                 if isinstance(value, int)
             )
         for attr in ("condition", "body", "else_node", "statements"):
@@ -204,7 +233,7 @@ def _tree_tag_addresses_8616(root: object) -> frozenset[int]:
     return frozenset(addresses)
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _LoopTailSiteScan8616:
     """Structured-loop tail-site scan state for one loopback edge.
 
@@ -214,15 +243,16 @@ class _LoopTailSiteScan8616:
 
     project: object
     edge: _LoopbackEdge8616
-    sites: list[_LoopTailSite8616] = field(default_factory=list)
-    seen: set[int] = field(default_factory=set)
+    sites: object = field(default_factory=list)
+    seen: object = field(default_factory=set)
 
+    @cython.ccall
     def _debug_site_8616(
         self,
-        class_name: str,
-        depth: int,
-        body_addresses: set[int],
-        condition_addresses: set[int],
+        class_name: object,
+        depth: cython.longlong,
+        body_addresses: object,
+        condition_addresses: object,
     ) -> None:
         """Emit one loop-site debug record when the env flag is set."""
         if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
@@ -247,9 +277,9 @@ class _LoopTailSiteScan8616:
         self,
         node: object,
         body: object,
-        statements: list[object],
-        class_name: str,
-        depth: int,
+        statements: object,
+        class_name: object,
+        depth: cython.longlong,
     ) -> None:
         """Record proven tail sites owned by one structured loop body.
 
@@ -257,31 +287,32 @@ class _LoopTailSiteScan8616:
         node. An absent condition contributes no instruction addresses; the
         existing body/target ownership checks remain required.
         """
+        move_addr: object
         body_addresses = {
             candidate
-            for address in _tree_tag_addresses_8616(body)
-            for candidate in _candidate_addresses_8616(self.project, address)
+            for address in builtins.iter(_tree_tag_addresses_8616(body))
+            for candidate in builtins.iter(_candidate_addresses_8616(self.project, address))
         }
         condition_addresses = {
             candidate
-            for address in _tree_tag_addresses_8616(getattr(node, "condition", None))
-            for candidate in _candidate_addresses_8616(self.project, address)
+            for address in builtins.iter(_tree_tag_addresses_8616(getattr(node, "condition", None)))
+            for candidate in builtins.iter(_candidate_addresses_8616(self.project, address))
         }
         self._debug_site_8616(class_name, depth, body_addresses, condition_addresses)
         for move_addr in _candidate_addresses_8616(self.project, self.edge.move_addr):
             move_candidates = _candidate_addresses_8616(self.project, self.edge.move_addr)
             ordered_body_addresses = body_addresses - move_candidates
-            before_move = tuple(address for address in ordered_body_addresses if address < move_addr)
+            before_move = tuple(address for address in iter(ordered_body_addresses) if address < move_addr)
             if not before_move or max(ordered_body_addresses, default=move_addr) >= move_addr:
                 continue
             envelope = body_addresses | condition_addresses
             target_candidates = _candidate_addresses_8616(self.project, self.edge.target_addr)
             target_in_envelope = bool(envelope) and any(
-                min(envelope) <= target <= max(envelope) for target in target_candidates
+                min(envelope) <= target <= max(envelope) for target in iter(target_candidates)
             )
             target_at_pretest = class_name in {"CWhileLoop", "CForLoop"} and any(
                 0 < min(body_addresses) - target <= 32
-                for target in target_candidates
+                for target in iter(target_candidates)
             )
             if not target_in_envelope and not target_at_pretest:
                 continue
@@ -293,13 +324,22 @@ class _LoopTailSiteScan8616:
                 )
             )
 
-    def visit(self, node: object, depth: int) -> None:
+    @cython.ccall
+    def visit(self, node: object, depth: cython.longlong) -> None:
         """Collect candidate loop bodies recursively.
 
         Dynamic boundary: heterogeneous third-party angr C-AST containers use
         optional body, statements, else_node and condition-pair slots. Inspect
         only present children; only an observed statement list can own a site.
         """
+        body: object
+        pairs: object
+        statements: object
+        statements_value: object
+        _condition: object
+        attr: object
+        guarded_body: object
+        statement: object
         if node is None or id(node) in self.seen:
             return
         self.seen.add(id(node))
@@ -320,6 +360,7 @@ class _LoopTailSiteScan8616:
                 self.visit(guarded_body, depth + 1)
 
 
+@cython.ccall
 def _loop_tail_sites_8616(
     project: object,
     root: object,
@@ -341,12 +382,15 @@ def place_direct_stack_move_loop_tail_assignment_8616(
     move_fact: DirectStackMoveFact8616,
     assignment: structured_c.CAssignment,
     *,
-    branch_owned_addresses: frozenset[int] | None = None,
-) -> bool:
+    branch_owned_addresses: object = None,
+) -> cython.bint:
     """Append one assignment to its unique CFG-proven structured loop body.
 
     Dynamic boundary: codegen exposes optional cfunc/statements fields.
     """
+    cfunc: object
+    edge: object
+    root: object
     branch_owned = (
         branch_owned_addresses
         if branch_owned_addresses is not None
@@ -374,15 +418,15 @@ def place_direct_stack_move_loop_tail_assignment_8616(
     )
     best_sites: tuple[_LoopTailSite8616, ...] = ()
     if sites:
-        best_gap = min(site.gap for site in sites)
-        deepest = max(site.depth for site in sites if site.gap == best_gap)
-        best_sites = tuple(site for site in sites if site.gap == best_gap and site.depth == deepest)
+        best_gap = min(site.gap for site in iter(sites))
+        deepest = max(site.depth for site in iter(sites) if operator.eq(site.gap, best_gap))
+        best_sites = tuple(site for site in iter(sites) if operator.eq(site.gap, best_gap) and operator.eq(site.depth, deepest))
     materialized = len(best_sites) == 1 and len(locations) <= 1
     if materialized and best_sites:
         target = best_sites[0].statements
         if locations:
             location = locations[0]
-            if location.statements is not target or location.index != len(target) - 1:
+            if location.statements is not target or operator.ne(location.index, len(target) - 1):
                 del location.statements[location.index]
                 target.append(assignment)
         else:

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Compose an invocation-proven indirect edge with ordinary selector discharge.
 
 Layer: IR.
@@ -8,6 +9,8 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
@@ -33,6 +36,9 @@ from .scoped_function_ir_view import ScopedFunctionCFGProjection8616
 from .segment_call_preservation import segment_call_dependency_traversal_scope_8616
 from .vex_import import IRImportRefusalReason8616, raw_x86_16_import_bundle_for_artifact_8616
 from .vex_terminal_jump import TerminalJumpEvidence8616
+import dataclasses
+import operator
+import builtins
 
 
 class ScopedIndirectTargetFailure8616(StrEnum):
@@ -41,7 +47,7 @@ class ScopedIndirectTargetFailure8616(StrEnum):
     UNPROVED = "scoped_indirect_target_unproved"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ScopedIndirectTargetView8616:
     """Raw native ownership plus a replay recipe; no context-free completeness."""
 
@@ -50,31 +56,48 @@ class ScopedIndirectTargetView8616:
     boundary: ExactFunctionRangeBoundary8616
     discovery: InvocationIndirectTarget8616
     invocation_scope: Real16InvocationDomain8616
-    terminal_evidence: Mapping[int, TerminalJumpEvidence8616]
+    terminal_evidence: Mapping[cython.longlong, TerminalJumpEvidence8616]
     invocation_resolver: Callable[[int], Real16InvocationDomain8616 | None] | None
-    source_digest: str
+    source_digest: object
     failure: ScopedIndirectTargetFailure8616 | None
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
-    def cfg_projection_for(self, invocation: Real16InvocationDomain8616) -> ScopedFunctionCFGProjection8616 | None:
+    def to_dict(self) -> dict[str, object]:
+        """Report only edges reauthenticated under this view's retained entry."""
+        projection: object
+        projection = self.cfg_projection_for(self.invocation_scope)
+        return {
+            "function_addr": self.source_artifact.function_addr,
+            "boundary_addr": self.boundary.addr,
+            "failure": None if self.failure is None else self.failure.value,
+            "authenticated": projection is not None,
+            "successors": {} if projection is None else {
+                str(addr): list(targets)
+                for addr, targets in builtins.iter(sorted(tuple(projection.successors.items())))
+            },
+        }
+
+    def cfg_projection_for(self, invocation: object) -> ScopedFunctionCFGProjection8616 | None:
         """Reauthenticate the indirect theorem and relative obligations each use."""
-        if self.failure is not None:
+        if invocation is None or self.failure is not None:
             return None
         with segment_call_dependency_traversal_scope_8616():
             return _projection(self, invocation)
 
 
+@cython.ccall
 def prove_scoped_indirect_target_view_8616(
     project: object, artifact: IRFunctionArtifact, boundary: ExactFunctionRangeBoundary8616,
     discovery: InvocationIndirectTarget8616, invocation_scope: Real16InvocationDomain8616,
-    terminal_evidence: Mapping[int, TerminalJumpEvidence8616], *,
+    terminal_evidence: Mapping[cython.longlong, TerminalJumpEvidence8616], *,
     invocation_resolver: Callable[[int], Real16InvocationDomain8616 | None] | None = None,
 ) -> ScopedIndirectTargetView8616:
     """Build one conditional view without mutating or publishing its raw source."""
+    projection: object
     view = ScopedIndirectTargetView8616(
         project, artifact, boundary, discovery, invocation_scope,
         MappingProxyType(dict(terminal_evidence)), invocation_resolver,
@@ -90,7 +113,8 @@ def prove_scoped_indirect_target_view_8616(
                    classified_fact_count=count, materialized_count=count, failure_count=0)
 
 
-def _bound_scope(view: ScopedIndirectTargetView8616, scope: Real16InvocationDomain8616) -> bool:
+@cython.ccall
+def _bound_scope(view: ScopedIndirectTargetView8616, scope: Real16InvocationDomain8616) -> cython.bint:
     """Bind the same exact native CALL and raw callee, then replay entry authority."""
     if type(scope) is not Real16InvocationDomain8616 or scope.project is not view.project:
         return False
@@ -109,21 +133,23 @@ def _bound_scope(view: ScopedIndirectTargetView8616, scope: Real16InvocationDoma
 
 def _effective_source(view: ScopedIndirectTargetView8616) -> IRFunctionArtifact | None:
     """Discharge only the singleton's pending terminal, retaining every other fact."""
+    replacement: object
+    block: object
     raw, receipt, boundary = view.source_artifact, view.discovery, view.boundary
-    if (raw.function_addr != receipt.function_addr or boundary.addr != raw.function_addr
-            or _source_digest_8616(raw.function_addr, raw.blocks) != view.source_digest):
+    if (operator.ne(raw.function_addr, receipt.function_addr) or operator.ne(boundary.addr, raw.function_addr)
+            or operator.ne(_source_digest_8616(raw.function_addr, raw.blocks), view.source_digest)):
         return None
     edges = boundary.conditional_edges
     if len(edges) != 1 or (edges[0].block_addr, edges[0].instruction_addr, edges[0].target_addr) != (
         receipt.block_addr, receipt.instruction_addr, receipt.target,
     ):
         return None
-    if {block.addr for block in raw.blocks} != boundary.block_addrs_set:
+    if operator.ne({block.addr for block in iter(raw.blocks)}, boundary.block_addrs_set):
         return None
     changed: list[IRBlock] = []
     matches = 0
     for block in raw.blocks:
-        if block.addr != receipt.block_addr:
+        if operator.ne(block.addr, receipt.block_addr):
             changed.append(block)
             continue
         replacement = _effective_block(block, receipt)
@@ -132,30 +158,30 @@ def _effective_source(view: ScopedIndirectTargetView8616) -> IRFunctionArtifact 
         changed.append(replacement)
         matches += 1
     if matches != 1 or not all(
-        any(item in block.refusals for block in raw.blocks if block.addr == item.block_addr)
-        for item in raw.refusals
+        any(item in block.refusals for block in iter(raw.blocks) if operator.eq(block.addr, item.block_addr))
+        for item in iter(raw.refusals)
     ):
         return None
     return replace(raw, blocks=tuple(changed), refusals=tuple(
-        item for item in raw.refusals
-        if not (item.kind == IRImportRefusalReason8616.INDIRECT_TERMINAL_PENDING and item.block_addr == receipt.block_addr)
+        item for item in iter(raw.refusals)
+        if not (operator.eq(item.kind, IRImportRefusalReason8616.INDIRECT_TERMINAL_PENDING) and operator.eq(item.block_addr, receipt.block_addr))
     ))
 
 
 def _effective_block(block: IRBlock, receipt: InvocationIndirectTarget8616) -> IRBlock | None:
     """Keep the native origin and all effects while binding the proved control value."""
-    if not block.instrs or block.successor_addrs != (receipt.target,):
+    if not block.instrs or operator.ne(block.successor_addrs, (receipt.target,)):
         return None
     terminal = block.instrs[-1]
     marker = IRImportRefusalReason8616.INDIRECT_TERMINAL_PENDING
-    if (terminal.op != "JMP" or terminal.addr != receipt.instruction_addr or terminal.origin is None
+    if (terminal.op != "JMP" or operator.ne(terminal.addr, receipt.instruction_addr) or terminal.origin is None
             or len(terminal.args) != 1 or not isinstance(terminal.args[0], IRValue)):
         return None
-    if not any(item.kind == marker for item in block.refusals):
+    if not any(operator.eq(item.kind, marker) for item in iter(block.refusals)):
         return None
     return replace(
-        block, instrs=(*block.instrs[:-1], replace(terminal, args=(IRValue(MemSpace.CONST, const=receipt.target, size=4),))),
-        refusals=tuple(item for item in block.refusals if item.kind != marker),
+        block, instrs=tuple(block.instrs[:-1]) + (replace(terminal, args=(IRValue(MemSpace.CONST, const=receipt.target, size=4),)),),
+        refusals=tuple(item for item in iter(block.refusals) if operator.ne(item.kind, marker)),
     )
 
 
@@ -163,6 +189,9 @@ def _projection(
     view: ScopedIndirectTargetView8616, scope: Real16InvocationDomain8616,
 ) -> ScopedFunctionCFGProjection8616 | None:
     """Replay the singleton before composing the existing relative-jump theorem."""
+    effective: object
+    native: object
+    seed: object
     if not _bound_scope(view, scope):
         return None
     seed = _seed_authority(view.discovery.invocation)
@@ -172,7 +201,7 @@ def _projection(
     if native is None:
         return None
     fresh = discover_invocation_indirect_target_8616(view.discovery.invocation, view.discovery.decoded_call)
-    if fresh != view.discovery:
+    if operator.ne(fresh, view.discovery):
         return None
     effective = _effective_source(view)
     if effective is None:
@@ -184,19 +213,19 @@ def _projection(
     if application.status is EntryJumpDomainApplicationStatus8616.STALE_INPUT:
         return None
     blocks = application.blocks
-    if any(block.refusals for block in blocks):
+    if any(block.refusals for block in iter(blocks)):
         return None
     if (not _bound_scope(view, scope) or _effective_source(view) is None
             or raw_x86_16_import_bundle_for_artifact_8616(view.project, view.boundary, view.source_artifact) is None):
         return None
     # Later relative-proof/native callbacks must not invalidate the earlier
     # singleton's explicit data premise while leaving callee entry unchanged.
-    if _seed_authority(view.discovery.invocation) != seed:
+    if operator.ne(_seed_authority(view.discovery.invocation), seed):
         return None
-    successors = {block.addr: block.successor_addrs for block in blocks}
-    predecessors = {address: tuple(block.addr for block in blocks if address in block.successor_addrs) for address in successors}
+    successors = {block.addr: block.successor_addrs for block in iter(blocks)}
+    predecessors = {address: tuple(block.addr for block in iter(blocks) if address in block.successor_addrs) for address in iter(successors)}
     return ScopedFunctionCFGProjection8616(
         effective.function_addr, view.source_artifact, scope, application.applied, blocks,
         MappingProxyType(successors), MappingProxyType(predecessors),
-        MappingProxyType({block.addr: block.refusals for block in blocks}),
+        MappingProxyType({block.addr: block.refusals for block in iter(blocks)}),
     )

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Lower stable object and array accesses from typed address evidence.
 
 Layer: Types/Lowering.
@@ -7,6 +8,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, MutableMapping
 from dataclasses import dataclass
@@ -14,20 +17,25 @@ from typing import Any
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_variable import SimRegisterVariable
+import dataclasses
+import operator
+import builtins
 
-type ClassifySegmentedDereference = Callable[[object, object], object | None]
-type FlattenCAddTerms = Callable[[object], list[object]]
-type UnwrapCCasts = Callable[[object], object]
-type CConstantValue = Callable[[object], int | None]
-type SegmentRegName = Callable[[object, object], str | None]
-type ProjectRewriteCache = Callable[[object], MutableMapping[str, MutableMapping[int, object]]]
+ClassifySegmentedDereference = typing.TypeAliasType("ClassifySegmentedDereference", Callable[[object, object], object | None])
+FlattenCAddTerms = typing.TypeAliasType("FlattenCAddTerms", Callable[[object], list[object]])
+UnwrapCCasts = typing.TypeAliasType("UnwrapCCasts", Callable[[object], object])
+CConstantValue = typing.TypeAliasType("CConstantValue", Callable[[object], int | None])
+SegmentRegName = typing.TypeAliasType("SegmentRegName", Callable[[object, object], str | None])
+ProjectRewriteCache = typing.TypeAliasType("ProjectRewriteCache", Callable[[object], MutableMapping[str, MutableMapping[int, object]]])
 
 
-def _dynamic_attr_8616(obj: object, name: str, default: object = None) -> Any:  # noqa: ANN401
+@cython.ccall
+def _dynamic_attr_8616(obj: object, name: object, default: object = None) -> Any:  # noqa: ANN401
     """Dynamic angr/codegen boundary: read optional third-party C-AST metadata."""
     return getattr(obj, name, default)
 
 
+@cython.ccall
 def _is_segment_scale_term_8616(
     term: object,
     project: object,
@@ -35,15 +43,18 @@ def _is_segment_scale_term_8616(
     unwrap_c_casts: UnwrapCCasts,
     c_constant_value: CConstantValue,
     segment_reg_name: SegmentRegName,
-) -> bool:
+) -> cython.bint:
     """True when a C term is ``segment * 16`` or ``segment << 4`` scaling."""
+    expected: object
+    maybe_scale: object
+    maybe_seg: object
     if not isinstance(term, structured_c.CBinaryOp):
         return False
     expected = 16 if term.op == "Mul" else 4 if term.op == "Shl" else None
     if expected is None:
         return False
     for maybe_seg, maybe_scale in ((term.lhs, term.rhs), (term.rhs, term.lhs)):
-        if c_constant_value(unwrap_c_casts(maybe_scale)) != expected:
+        if operator.ne(c_constant_value(unwrap_c_casts(maybe_scale)), expected):
             continue
         if segment_reg_name(unwrap_c_casts(maybe_seg), project) is not None:
             return True
@@ -59,10 +70,12 @@ def _match_segment_register_based_dereference(
     unwrap_c_casts: UnwrapCCasts,
     c_constant_value: CConstantValue,
     segment_reg_name: SegmentRegName,
-) -> tuple[object, object] | None:
+) -> object:
     """Match a DS/ES dereference that can be lowered to an object base."""
 
-    def _impl() -> tuple[object, object] | None:
+    def _impl() -> object:
+        base_term: object
+        classified: object
         classified = classify_segmented_dereference(node, project)
         if (
             classified is None
@@ -91,6 +104,7 @@ def _match_segment_register_based_dereference(
     return _impl()
 
 
+@cython.ccall
 def _strip_segment_scale_from_addr_expr(
     addr_expr: object,
     project: object,
@@ -101,9 +115,10 @@ def _strip_segment_scale_from_addr_expr(
     segment_reg_name: SegmentRegName,
 ) -> object | None:
     """Return an address expression with DS/ES segment scaling removed."""
+    term: object
     kept_terms = [
         term
-        for term in flatten_c_add_terms(addr_expr)
+        for term in builtins.iter(flatten_c_add_terms(addr_expr))
         if not _is_segment_scale_term_8616(
             unwrap_c_casts(term),
             project,
@@ -120,6 +135,7 @@ def _strip_segment_scale_from_addr_expr(
     return result
 
 
+@cython.ccall
 def _single_register_base_term_8616(
     addr_expr: object,
     project: object,
@@ -130,6 +146,7 @@ def _single_register_base_term_8616(
     segment_reg_name: SegmentRegName,
 ) -> object | None:
     """Return the single register base term when the address has exactly one."""
+    term: object
     base_terms: list[object] = []
     for term in flatten_c_add_terms(addr_expr):
         inner = unwrap_c_casts(term)
@@ -154,6 +171,7 @@ def _single_register_base_term_8616(
     return base_terms[0]
 
 
+@cython.ccall
 def _match_ss_stack_reference(
     node: object,
     project: object,
@@ -162,6 +180,7 @@ def _match_ss_stack_reference(
     classify_segmented_dereference: ClassifySegmentedDereference,
 ) -> object | None:
     """Return a cached stack reference tuple when a classified SS access is proven."""
+    classified: object
     cache = project_rewrite_cache(project).setdefault("ss_stack_reference", {})
     key = id(node)
     if key in cache:
@@ -186,27 +205,30 @@ def _match_ss_stack_reference(
     return None
 
 
-type BaseKey = tuple[object, ...]
-type NamingCandidate = tuple[int, int, int]
-type TraitCache = dict[str, dict[BaseKey, object]]
-type BuildAccessTraitEvidenceProfiles = Callable[[TraitCache], dict[BaseKey, Any]]
-type AccessTraitFieldName = Callable[[int, int], str]
+BaseKey = typing.TypeAliasType("BaseKey", tuple[object, ...])
+NamingCandidate = typing.TypeAliasType("NamingCandidate", tuple[int, int, int])
+TraitCache = typing.TypeAliasType("TraitCache", dict[str, dict[BaseKey, object]])
+BuildAccessTraitEvidenceProfiles = typing.TypeAliasType("BuildAccessTraitEvidenceProfiles", Callable[[TraitCache], dict[BaseKey, Any]])
+AccessTraitFieldName = typing.TypeAliasType("AccessTraitFieldName", Callable[[int, int], str])
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class AccessTraitObjectHint:
     """Stable object-shape naming hint derived from typed access traits."""
 
     base_key: BaseKey
-    kind: str
-    candidates: tuple[NamingCandidate, ...]
+    kind: object
+    candidates: object
 
-    def should_rename_stack(self) -> bool:
+    def should_rename_stack(self) -> cython.bint:
         """Return whether this hint is strong enough to rename stack objects."""
         return self.kind in {"member", "array", "stack"}
 
     def candidate_field_names(self, *, access_trait_field_name: AccessTraitFieldName) -> tuple[str, ...]:
         """Return deterministic field names for all unique candidate offsets."""
+        _count: object
+        _size: object
+        offset: object
         names: list[str] = []
         seen: set[str] = set()
         for offset, _size, _count in self.candidates:
@@ -218,10 +240,10 @@ class AccessTraitObjectHint:
         return tuple(names)
 
 
-def _stable_hint_kind(profile: object, base_key: BaseKey) -> str | None:
+def _stable_hint_kind(profile: object, base_key: BaseKey) -> object:
     """Return the single stable object-hint kind proven by an access profile."""
 
-    def _impl() -> str | None:
+    def _impl() -> object:
         structured_kinds = _structured_hint_kinds_8616(profile)
         if structured_kinds:
             return next(iter(structured_kinds)) if len(structured_kinds) == 1 else None
@@ -238,8 +260,10 @@ def _stable_hint_kind(profile: object, base_key: BaseKey) -> str | None:
     return _impl()
 
 
-def _structured_hint_kinds_8616(profile: object) -> set[str]:
+@cython.ccall
+def _structured_hint_kinds_8616(profile: object) -> object:
     """Map structured induction/stride evidence to object-hint kinds."""
+    evidence: object
     structured_kinds: set[str] = set()
     induction_evidence = _dynamic_attr_8616(profile, "induction_evidence", ())
     stride_evidence = _dynamic_attr_8616(profile, "stride_evidence", ())
@@ -254,7 +278,8 @@ def _structured_hint_kinds_8616(profile: object) -> set[str]:
     return structured_kinds
 
 
-def _simple_hint_kind_8616(profile: object, base_key: BaseKey) -> str | None:
+@cython.ccall
+def _simple_hint_kind_8616(profile: object, base_key: BaseKey) -> object:
     """Resolve the single simple hint kind, or the stack fallback."""
     simple_kinds: set[str] = set()
     if _dynamic_attr_8616(profile, "member_like", ()):
@@ -272,11 +297,15 @@ def _simple_hint_kind_8616(profile: object, base_key: BaseKey) -> str | None:
     return None
 
 
+@cython.ccall
 def _build_stable_access_object_hints(
     traits: TraitCache,
     *,
     build_access_trait_evidence_profiles: BuildAccessTraitEvidenceProfiles,
-) -> dict[BaseKey, AccessTraitObjectHint]:
+) -> object:
+    kind: object
+    base_key: object
+    profile: object
     profiles = build_access_trait_evidence_profiles(traits)
     hints: dict[BaseKey, AccessTraitObjectHint] = {}
     for base_key, profile in profiles.items():
@@ -294,10 +323,12 @@ def _build_stable_access_object_hints(
     return hints
 
 
+@cython.ccall
 def _stable_access_object_hint_for_key(
-    hints: dict[BaseKey, AccessTraitObjectHint],
-    base_key: BaseKey | None,
+    hints: object,
+    base_key: object,
 ) -> AccessTraitObjectHint | None:
+    hint: object
     if base_key is None:
         return None
     hint = hints.get(base_key)
@@ -308,12 +339,16 @@ def _stable_access_object_hint_for_key(
     return None
 
 
+@cython.ccall
 def _has_stable_access_object_hints(
     codegen: object,
     *,
     build_access_trait_evidence_profiles: BuildAccessTraitEvidenceProfiles,
-) -> bool:
+) -> cython.bint:
     """Return whether codegen has any stable access-object hints available."""
+    cfunc: object
+    project: object
+    traits: object
     cfunc = _dynamic_attr_8616(codegen, "cfunc", None)
     if cfunc is None:
         return False

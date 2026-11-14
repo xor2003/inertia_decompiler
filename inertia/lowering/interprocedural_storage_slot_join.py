@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Join exact interprocedural storage slots across a complete caller census.
 
 Layer: Types/Lowering.
@@ -12,6 +13,7 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import cython
 
 from dataclasses import replace
 
@@ -24,6 +26,7 @@ from .interprocedural_storage_contracts import (
     StorageTrialSignedness8616,
     StorageTrialValueClass8616,
 )
+import operator
 
 __all__ = ["join_storage_slot_contracts_8616", "ordered_storage_trials_8616"]
 
@@ -34,8 +37,9 @@ _SlotJoinResult8616 = tuple[
 _StoragePiecesKey8616 = tuple[tuple[object, ...], ...]
 
 
+@cython.ccall
 def _joined_signedness_8616(
-    values: set[StorageTrialSignedness8616],
+    values: object,
 ) -> StorageTrialSignedness8616 | None:
     """Join sign-insensitive observations with one informative class."""
     if not values or StorageTrialSignedness8616.UNKNOWN in values:
@@ -70,23 +74,25 @@ def ordered_storage_trials_8616(
 
 
 def _trial_groups_8616(
-    trials: tuple[StorageTrial8616, ...],
-) -> tuple[tuple[StorageTrial8616, ...], ...] | None:
+    trials: object,
+) -> object:
     """Group contiguous logical slots and reject missing or duplicate pieces."""
+    logical_index: object
+    trial: object
     if not trials:
         return ()
-    grouped: dict[int, list[StorageTrial8616]] = {}
+    grouped: dict[cython.longlong, list[StorageTrial8616]] = {}
     for trial in trials:
         grouped.setdefault(trial.logical_index, []).append(trial)
-    if tuple(sorted(grouped)) != tuple(range(len(grouped))):
+    if operator.ne(tuple(sorted(grouped)), tuple(range(len(grouped)))):
         return None
     result: list[tuple[StorageTrial8616, ...]] = []
     for logical_index in sorted(grouped):
         pieces = tuple(sorted(grouped[logical_index], key=lambda item: item.piece_index))
         if (
             not pieces
-            or any(item.piece_count != len(pieces) for item in pieces)
-            or tuple(item.piece_index for item in pieces) != tuple(range(len(pieces)))
+            or any(operator.ne(item.piece_count, len(pieces)) for item in iter(pieces))
+            or operator.ne(tuple(item.piece_index for item in iter(pieces)), tuple(range(len(pieces))))
         ):
             return None
         result.append(pieces)
@@ -95,23 +101,26 @@ def _trial_groups_8616(
 
 def _slot_from_pieces_8616(
     role: StorageTrialRole8616,
-    pieces: tuple[StorageTrial8616, ...],
+    pieces: object,
 ) -> tuple[StorageSlotContract8616 | None, StorageTrialFailureKind8616 | None]:
     """Build one slot only when all physical pieces agree on typed meaning."""
+    pointee_width_bytes: object
+    provenances: object
+    signedness: object
     if not pieces:
         return None, StorageTrialFailureKind8616.INCOMPLETE_TRIAL
     first_piece = pieces[0]
     if role is not StorageTrialRole8616.INPUT and len(pieces) > 1:
-        provenances = {item.provenance for item in pieces}
+        provenances = {item.provenance for item in iter(pieces)}
         if len(provenances) != 1 or None in provenances:
             return None, StorageTrialFailureKind8616.SPLIT_PROVENANCE_CONFLICT
-    signedness = _joined_signedness_8616({item.signedness for item in pieces})
+    signedness = _joined_signedness_8616({item.signedness for item in iter(pieces)})
     if signedness is None:
         return None, StorageTrialFailureKind8616.SIGNEDNESS_CONFLICT
-    value_classes = {item.value_class for item in pieces}
+    value_classes = {item.value_class for item in iter(pieces)}
     if len(value_classes) != 1:
         return None, StorageTrialFailureKind8616.VALUE_CLASS_CONFLICT
-    pointee_widths = {item.pointee_width_bytes for item in pieces}
+    pointee_widths = {item.pointee_width_bytes for item in iter(pieces)}
     if len(pointee_widths) != 1:
         return None, StorageTrialFailureKind8616.POINTEE_WIDTH_CONFLICT
     pointee_width_bytes = next(iter(pointee_widths))
@@ -124,7 +133,7 @@ def _slot_from_pieces_8616(
         StorageSlotContract8616(
             role=role,
             logical_index=first_piece.logical_index,
-            pieces=tuple(item.storage for item in pieces),
+            pieces=tuple(item.storage for item in iter(pieces)),
             signedness=signedness,
             value_class=first_piece.value_class,
             pointee_width_bytes=pointee_width_bytes,
@@ -138,8 +147,11 @@ def _site_slots_8616(
     role: StorageTrialRole8616,
 ) -> _SlotJoinResult8616:
     """Normalize one callsite's complete trial groups into exact slots."""
+    groups: object
+    slot: object
+    pieces: object
     trials = ordered_storage_trials_8616(callsite, role)
-    if any(trial.role is not role for trial in trials):
+    if any(trial.role is not role for trial in iter(trials)):
         return None, StorageTrialFailureKind8616.INCOMPLETE_TRIAL
     groups = _trial_groups_8616(trials)
     if groups is None:
@@ -155,18 +167,23 @@ def _site_slots_8616(
 
 def _pieces_key_8616(slot: StorageSlotContract8616) -> _StoragePiecesKey8616:
     """Return one exact physical-storage key independent of local slot order."""
-    return tuple(piece.key for piece in slot.pieces)
+    return tuple(piece.key for piece in iter(slot.pieces))
 
 
+@cython.ccall
 def _join_one_site_8616(
-    joined: list[StorageSlotContract8616],
-    current: tuple[StorageSlotContract8616, ...],
+    joined: object,
+    current: object,
 ) -> StorageTrialFailureKind8616 | None:
     """Merge one callsite's slots into the joined shape or return the conflict."""
-    if len(current) != len(joined):
+    signedness: object
+    index: object
+    left: object
+    right: object
+    if operator.ne(len(current), len(joined)):
         return StorageTrialFailureKind8616.ARGUMENT_ORDER_CONFLICT
     for index, (left, right) in enumerate(zip(joined, current, strict=True)):
-        if _pieces_key_8616(left) != _pieces_key_8616(right):
+        if operator.ne(_pieces_key_8616(left), _pieces_key_8616(right)):
             return StorageTrialFailureKind8616.STORAGE_CONFLICT
         signedness = _joined_signedness_8616(
             {left.signedness, right.signedness}
@@ -175,22 +192,26 @@ def _join_one_site_8616(
             return StorageTrialFailureKind8616.SIGNEDNESS_CONFLICT
         if left.value_class is not right.value_class:
             return StorageTrialFailureKind8616.VALUE_CLASS_CONFLICT
-        if left.pointee_width_bytes != right.pointee_width_bytes:
+        if operator.ne(left.pointee_width_bytes, right.pointee_width_bytes):
             return StorageTrialFailureKind8616.POINTEE_WIDTH_CONFLICT
         joined[index] = replace(left, signedness=signedness)
     return None
 
 
 def _uniform_slot_contracts_8616(
-    callsites: tuple[CallsiteStorageTrials8616, ...],
+    callsites: object,
     role: StorageTrialRole8616,
 ) -> _SlotJoinResult8616:
     """Require one identical input or scalar-return shape across callsites."""
+    failure: object
+    slots: object
+    callsite: object
+    current: object
     relevant = callsites
     if role is StorageTrialRole8616.RETURN:
         relevant = tuple(
             callsite
-            for callsite in callsites
+            for callsite in iter(callsites)
             if ordered_storage_trials_8616(callsite, role)
         )
     if not relevant:
@@ -209,8 +230,9 @@ def _uniform_slot_contracts_8616(
     return tuple(joined), None
 
 
+@cython.ccall
 def join_storage_slot_contracts_8616(
-    callsites: tuple[CallsiteStorageTrials8616, ...],
+    callsites: object,
     role: StorageTrialRole8616,
 ) -> _SlotJoinResult8616:
     """Join one input/return role's exact slots over a complete census."""

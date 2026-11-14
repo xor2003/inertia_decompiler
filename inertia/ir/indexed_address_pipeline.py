@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Attach indexed segmented-address evidence immediately after function SSA.
 
 Layer: IR.
@@ -10,6 +11,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Protocol, cast
 
@@ -24,6 +27,7 @@ from .indexed_address_range_candidates import (
 )
 from .indexed_address_range_contracts import IndexedLoopRangeEvidence8616
 from .ssa_function import SSAFunctionArtifact
+import operator
 
 
 class _CodegenBoundary8616(Protocol):
@@ -35,10 +39,11 @@ class _CodegenBoundary8616(Protocol):
     _inertia_indexed_loop_range_evidence_8616: IndexedLoopRangeEvidence8616
 
 
+@cython.ccall
 def apply_x86_16_indexed_address_evidence_8616(
     project: object,
     codegen: object,
-) -> bool:
+) -> cython.bint:
     """Publish closed indexed-address evidence after function SSA exists."""
     boundary = cast(_CodegenBoundary8616, codegen)
     try:
@@ -53,7 +58,7 @@ def apply_x86_16_indexed_address_evidence_8616(
         existing = None
     if not (
         isinstance(existing, IndexedAddressEvidence8616)
-        and existing.function_addr == function_ssa.function_addr
+        and operator.eq(existing.function_addr, function_ssa.function_addr)
     ):
         existing = collect_indexed_address_evidence_8616(function_ssa)
         if not existing.closed:
@@ -68,7 +73,7 @@ def apply_x86_16_indexed_address_evidence_8616(
         copy_evidence = None
     if not (
         isinstance(copy_evidence, IndexedAddressCopyEvidence8616)
-        and copy_evidence.source == existing
+        and operator.eq(copy_evidence.source, existing)
     ):
         copy_evidence = collect_indexed_address_copy_evidence_8616(
             function_ssa,

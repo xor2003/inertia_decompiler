@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Helper boundary.
 
 Responsibility: summarize typed IR, string-effect, and induction evidence into array-access candidates.
@@ -11,6 +12,7 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import cython
 
 import logging
 import typing
@@ -47,25 +49,34 @@ from inertia.lowering.c_ast_utils import (
     _same_c_expression_8616,
 )
 from inertia.lowering.type_storage_object_bridge import load_storage_object_bridge
+import dataclasses
+import operator
+import builtins
 
 logger: logging.Logger = logging.getLogger(__name__)
-MAX_TYPED_ARRAY_CANDIDATES: int = 64
+MAX_TYPED_ARRAY_CANDIDATES: cython.longlong = 64
 
 
-def _limit_sorted_mapping_8616[MappingKey, MappingValue](
-    mapping: dict[MappingKey, MappingValue], limit: int
-) -> dict[MappingKey, MappingValue]:
+@cython.ccall
+def _limit_sorted_mapping_8616(
+    mapping: object, limit: cython.longlong
+) -> object:
     """Limit an already ordered mapping without changing its key/value types."""
     if limit <= 0 or len(mapping) <= limit:
         return mapping
     return dict(list(mapping.items())[:limit])
 
 
-def _typed_ir_array_candidates(codegen: object) -> dict[tuple[str, tuple[str, ...], int], dict[str, object]]:
+def _typed_ir_array_candidates(codegen: object) -> object:
     """Collect typed IR address candidates that look like indexed array accesses."""
 
-    def _impl() -> dict[tuple[str, tuple[str, ...], int], dict[str, object]]:
+    def _impl() -> dict[tuple[str, tuple[str, ...], cython.longlong], dict[str, object]]:
         """Read optional typed IR from the dynamic third-party angr codegen boundary."""
+        artifact: object
+        function_ssa: object
+        atom: object
+        block: object
+        instr: object
         # Dynamic codegen boundary: typed IR metadata is optional on third-party angr codegen objects.
         artifact = getattr(codegen, "_inertia_vex_ir_artifact", None)
         function_ssa = getattr(codegen, "_inertia_vex_ir_function_ssa", None)
@@ -74,10 +85,10 @@ def _typed_ir_array_candidates(codegen: object) -> dict[tuple[str, tuple[str, ..
 
         phi_registers = {
             phi.target.name
-            for phi in tuple(function_ssa.phi_nodes if function_ssa is not None else ())
+            for phi in builtins.iter(tuple(function_ssa.phi_nodes if function_ssa is not None else ()))
             if phi.target.name is not None
         }
-        candidates: dict[tuple[str, tuple[str, ...], int], dict[str, object]] = {}
+        candidates: dict[tuple[str, tuple[str, ...], cython.longlong], dict[str, object]] = {}
         for block in tuple(artifact.blocks or ()):
             for instr in tuple(block.instrs or ()):
                 for atom in tuple(instr.args or ()):
@@ -94,21 +105,25 @@ def _typed_ir_array_candidates(codegen: object) -> dict[tuple[str, tuple[str, ..
                         "element_size": int(atom.size or 0),
                         "has_phi_index": True,
                     }
-        return dict(sorted(candidates.items()))
+        return dict(sorted(tuple(candidates.items())))
 
     return _impl()
 
 
-def _typed_string_array_candidates(codegen: object) -> dict[tuple[str, tuple[str, ...], int], dict[str, object]]:
+def _typed_string_array_candidates(codegen: object) -> object:
     """Collect stable string-effect addresses that look like array bases."""
 
-    def _impl() -> dict[tuple[str, tuple[str, ...], int], dict[str, object]]:
+    def _impl() -> dict[tuple[str, tuple[str, ...], cython.longlong], dict[str, object]]:
+        artifact: object
+        address: object
+        record: object
+        role: object
         # Dynamic codegen boundary: string-effect metadata is optional on third-party angr codegen objects.
         artifact = getattr(codegen, "_inertia_string_effect_artifact", None)
         if artifact is None or not hasattr(artifact, "records"):
             return {}
 
-        candidates: dict[tuple[str, tuple[str, ...], int], dict[str, object]] = {}
+        candidates: dict[tuple[str, tuple[str, ...], cython.longlong], dict[str, object]] = {}
         for record in tuple(artifact.records or ()):
             for role, address in (("source", record.source), ("destination", record.destination)):
                 if not isinstance(address, IRAddress):
@@ -128,15 +143,20 @@ def _typed_string_array_candidates(codegen: object) -> dict[tuple[str, tuple[str
                     "repeat_kind": record.repeat_kind,
                     "role": role,
                 }
-        return dict(sorted(candidates.items()))
+        return dict(sorted(tuple(candidates.items())))
 
     return _impl()
 
 
+@cython.ccall
 def _cached_access_trait_profiles_8616(
-    project: object, func_addr: int
-) -> dict[tuple[object, ...], AccessTraitEvidenceProfile] | None:
+    project: object, func_addr: cython.longlong
+) -> object:
     """Build cached access-trait profiles across the dynamic compatibility project boundary."""
+    profile_cache: object
+    profiles: object
+    traits: object
+    traits_cache: object
     # Dynamic compatibility boundary: project-side access-trait caches are optional CLI/fallback metadata.
     traits_cache = getattr(project, "_inertia_access_traits", None)
     if not isinstance(traits_cache, dict) or func_addr not in traits_cache:
@@ -162,20 +182,21 @@ def _cached_access_trait_profiles_8616(
     return cast(dict[tuple[object, ...], AccessTraitEvidenceProfile], profiles)
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class InductionVariable:
     """Represents a loop-carried induction variable with stride."""
 
-    var_name: str
-    stride: int  # Bytes per iteration
-    base_value: int  # Initial value
+    var_name: object
+    stride: cython.longlong  # Bytes per iteration
+    base_value: cython.longlong  # Initial value
     loop_bound: int | None  # Upper bound if known
-    element_width: int  # Bit width of element (8, 16, 32)
+    element_width: cython.longlong  # Bit width of element (8, 16, 32)
 
     def __repr__(self) -> str:
         return f"IndVar({self.var_name}, stride={self.stride}, width={self.element_width})"
 
 
+@cython.ccall
 def _access_trait_induction_var_8616(candidate: AccessTraitInductionVar, variable: object) -> InductionVariable:
     """Convert CLI access-trait induction evidence into the owned array-matching contract."""
     var_name = variable.name or f"reg_{variable.reg}" if isinstance(variable, SimRegisterVariable) else "reg_unknown"
@@ -188,37 +209,38 @@ def _access_trait_induction_var_8616(candidate: AccessTraitInductionVar, variabl
     )
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class ArrayAccessPattern:
     """Detected array access pattern."""
 
-    base_expr: str  # Base pointer
-    index_var: str  # Index variable
-    stride: int  # Bytes per element
-    offset: int  # Constant offset
-    element_type: str  # "int", "char", "ptr", etc.
-    element_width: int  # Bit width
+    base_expr: object  # Base pointer
+    index_var: object  # Index variable
+    stride: cython.longlong  # Bytes per element
+    offset: cython.longlong  # Constant offset
+    element_type: object  # "int", "char", "ptr", etc.
+    element_width: cython.longlong  # Bit width
 
     def __repr__(self) -> str:
         return f"Array({self.base_expr}[{self.index_var} * {self.stride} + {self.offset}]:{self.element_type})"
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class ArrayRecoveryInfo:
     """Information about recovered array structure."""
 
-    array_name: str
-    base_ptr: str
-    element_type: str
-    element_width: int
-    element_stride: int
-    access_patterns: set[str]  # Collected access patterns
-    confidence: float  # 0.0-1.0 based on pattern consistency
+    array_name: object
+    base_ptr: object
+    element_type: object
+    element_width: cython.longlong
+    element_stride: cython.longlong
+    access_patterns: object  # Collected access patterns
+    confidence: cython.double  # 0.0-1.0 based on pattern consistency
 
     def __repr__(self) -> str:
         return f"ArrayInfo({self.array_name}: {self.element_type}[{len(self.access_patterns)} accesses])"
 
 
+@cython.cclass
 class InductionVariableCollector:
     """Collect loop induction variables with stride patterns.
 
@@ -227,12 +249,15 @@ class InductionVariableCollector:
     - Used as array indices or pointer offsets
     - Loop-carried across function calls
     """
+    induction_vars = cython.declare(dict, visibility = "public")
+    stride_patterns = cython.declare(dict, visibility = "public")
 
     def __init__(self) -> None:
         self.induction_vars: dict[str, InductionVariable] = {}
-        self.stride_patterns: dict[str, int] = {}
+        self.stride_patterns: dict[str, cython.longlong] = {}
 
-    def collect(self, expressions: list[str]) -> dict[str, InductionVariable]:
+    @cython.ccall
+    def collect(self, expressions: object) -> object:
         """Collect induction variables from expression list.
 
         Args:
@@ -241,6 +266,7 @@ class InductionVariableCollector:
         Returns:
             Dictionary mapping variable name to InductionVariable
         """
+        expr: object
         # Placeholder: would analyze loop bodies and variable updates
         # For now, demonstrate structure
 
@@ -250,7 +276,8 @@ class InductionVariableCollector:
 
         return self.induction_vars
 
-    def _analyze_update_expr(self, expr: str) -> None:
+    @cython.ccall
+    def _analyze_update_expr(self, expr: object) -> None:
         """Analyze variable update expression for stride patterns."""
         # Example: "si += 2" or "di -= 4"
         if "+=" in expr:
@@ -268,6 +295,7 @@ class InductionVariableCollector:
                     pass
 
 
+@cython.cclass
 class ArrayExpressionMatcher:
     """Detect and match array access patterns.
 
@@ -277,14 +305,17 @@ class ArrayExpressionMatcher:
     - Offset access: base + index * stride + offset
     - Nested arrays: base[i][j]
     """
+    array_infos = cython.declare(object, visibility = "public")
+    detected_patterns = cython.declare(list, visibility = "public")
 
     def __init__(self) -> None:
         self.detected_patterns: list[ArrayAccessPattern] = []
         self.array_infos: dict[str, ArrayRecoveryInfo] = {}
 
+    @cython.ccall
     def match_patterns(
-        self, expressions: list[str], induction_vars: dict[str, InductionVariable]
-    ) -> list[ArrayAccessPattern]:
+        self, expressions: object, induction_vars: object
+    ) -> object:
         """Match array access patterns in expressions.
 
         Args:
@@ -294,6 +325,7 @@ class ArrayExpressionMatcher:
         Returns:
             List of detected ArrayAccessPattern
         """
+        expr: object
         patterns = []
 
         for expr in expressions:
@@ -305,15 +337,18 @@ class ArrayExpressionMatcher:
 
         return patterns
 
-    def _looks_like_array_access(self, expr: str) -> bool:
+    def _looks_like_array_access(self, expr: object) -> cython.bint:
         """Heuristic check if expression might be array access."""
         # Check for patterns like "[", "*", "+", "-"
-        return any(marker in expr for marker in ["[", "mem[", "*"])
+        return any(marker in expr for marker in iter(["[", "mem[", "*"]))
 
+    @cython.ccall
     def _extract_array_pattern(
-        self, expr: str, induction_vars: dict[str, InductionVariable]
+        self, expr: object, induction_vars: object
     ) -> ArrayAccessPattern | None:
         """Extract array pattern from expression if possible."""
+        ind_var: object
+        var_name: object
         # Placeholder: would parse expression into base, index, stride, offset
         # For now, return generic pattern
 
@@ -331,7 +366,8 @@ class ArrayExpressionMatcher:
 
         return None
 
-    def synthesize_arrays(self, patterns: list[ArrayAccessPattern]) -> dict[str, ArrayRecoveryInfo]:
+    @cython.ccall
+    def synthesize_arrays(self, patterns: object) -> object:
         """Synthesize array recovery info from matched patterns.
 
         Groups patterns by base expression to recover array structure.
@@ -342,6 +378,7 @@ class ArrayExpressionMatcher:
         Returns:
             Dictionary mapping base_expr to ArrayRecoveryInfo
         """
+        pattern: object
         arrays: dict[str, ArrayRecoveryInfo] = {}
 
         for pattern in patterns:
@@ -366,7 +403,8 @@ class ArrayExpressionMatcher:
         return arrays
 
 
-def _invert_cmp_op_8616(op: str) -> str | None:
+@cython.ccall
+def _invert_cmp_op_8616(op: object) -> object:
     return {
         "CmpGT": "CmpLE",
         "CmpGE": "CmpLT",
@@ -377,12 +415,14 @@ def _invert_cmp_op_8616(op: str) -> str | None:
     }.get(op)
 
 
-def _literal_true_8616(node: object) -> bool:
+@cython.ccall
+def _literal_true_8616(node: object) -> cython.bint:
     return isinstance(node, CConstant) and isinstance(node.value, int) and node.value != 0
 
 
 def _extract_break_guard_8616(stmt: object) -> object | None:
     def _impl() -> object | None:
+        else_node: object
         if type(stmt).__name__ not in {"CIfElse", "CIfBreak"}:
             return None
         # Dynamic angr boundary: CIfElse/CIfBreak expose variant-specific children outside a common typed base.
@@ -406,8 +446,8 @@ def _extract_break_guard_8616(stmt: object) -> object | None:
     return _impl()
 
 
-def _extract_monotonic_update_8616(stmt: object) -> tuple[CVariable, int] | None:
-    def _impl() -> tuple[CVariable, int] | None:
+def _extract_monotonic_update_8616(stmt: object) -> object:
+    def _impl() -> object:
         if not isinstance(stmt, CAssignment) or not isinstance(stmt.lhs, CVariable):
             return None
         rhs = stmt.rhs
@@ -432,11 +472,15 @@ def _extract_monotonic_update_8616(stmt: object) -> tuple[CVariable, int] | None
     return _impl()
 
 
-def _cond_uses_var_8616(node: object, target: object) -> bool:
+@cython.ccall
+def _cond_uses_var_8616(node: object, target: object) -> cython.bint:
+    child: object
+    target_key: object
+    attr: object
     if isinstance(node, CVariable):
         return bool(_same_c_expression_8616(node, target))
     target_key = _expr_index_key_8616(target)
-    if target_key is not None and _expr_index_key_8616(node) == target_key:
+    if target_key is not None and operator.eq(_expr_index_key_8616(node), target_key):
         return True
     for attr in ("lhs", "rhs", "operand", "cond", "iftrue", "iffalse", "expr", "condition", "retval"):
         # Dynamic angr boundary: recursive C-AST traversal crosses expression variants with different child names.
@@ -446,7 +490,12 @@ def _cond_uses_var_8616(node: object, target: object) -> bool:
     return False
 
 
-def _loop_index_key_8616(loop_var: object) -> tuple[object, ...] | None:
+@cython.ccall
+def _loop_index_key_8616(loop_var: object) -> object:
+    addr: object
+    base: object
+    offset: object
+    variable: object
     # Dynamic angr boundary: CVariable wraps several SimVariable subclasses behind a common .variable slot.
     variable = getattr(loop_var, "variable", None)
     if isinstance(variable, SimRegisterVariable):
@@ -466,8 +515,9 @@ def _loop_index_key_8616(loop_var: object) -> tuple[object, ...] | None:
     return None
 
 
-def _expr_index_key_8616(expr: object) -> tuple[object, ...] | None:
-    def _impl() -> tuple[object, ...] | None:
+def _expr_index_key_8616(expr: object) -> object:
+    def _impl() -> object:
+        base: object
         if isinstance(expr, CVariable):
             return _loop_index_key_8616(expr)
         if isinstance(expr, CTypeCast):
@@ -499,6 +549,7 @@ def _expr_index_key_8616(expr: object) -> tuple[object, ...] | None:
     return _impl()
 
 
+@cython.ccall
 def _unwrap_double_negation_8616(node: object) -> object | None:
     if (
         isinstance(node, CUnaryOp)
@@ -510,7 +561,10 @@ def _unwrap_double_negation_8616(node: object) -> object | None:
     return None
 
 
-def _condition_index_key_8616(node: object) -> tuple[object, ...] | None:
+@cython.ccall
+def _condition_index_key_8616(node: object) -> object:
+    lhs_key: object
+    rhs_key: object
     if isinstance(node, CBinaryOp):
         lhs_key = _expr_index_key_8616(node.lhs)
         if lhs_key is not None:
@@ -525,14 +579,21 @@ def _typed_induction_summaries_8616(codegen: object) -> tuple[InductionSummary, 
     """Return typed induction summaries attached by the structuring stage."""
     # Dynamic codegen boundary: structuring attaches optional induction summaries to angr codegen objects.
     summaries = getattr(codegen, "_inertia_induction_summaries", ()) or ()
-    return tuple(summary for summary in summaries if isinstance(summary, InductionSummary))
+    return tuple(summary for summary in iter(summaries) if isinstance(summary, InductionSummary))
 
 
-def _has_induction_evidence_for_key_8616(codegen: object, index_key: tuple[object, ...]) -> bool:
-    def _impl() -> bool:
+def _has_induction_evidence_for_key_8616(codegen: object, index_key: object) -> cython.bint:
+    def _impl() -> cython.bint:
         """Check induction evidence through the dynamic third-party angr codegen/project boundary."""
+        candidate: object
+        cfunc: object
+        direct_profile: object
+        func_addr: object
+        profiles: object
+        project: object
+        profile: object
         summaries = _typed_induction_summaries_8616(codegen)
-        if any(summary.index_key == index_key for summary in summaries):
+        if any(operator.eq(summary.index_key, index_key) for summary in iter(summaries)):
             return True
         # Dynamic codegen boundary: project/cfunc are third-party angr codegen attachments.
         project = getattr(codegen, "project", None)
@@ -548,24 +609,27 @@ def _has_induction_evidence_for_key_8616(codegen: object, index_key: tuple[objec
             return True
         for profile in profiles.values():
             candidate = infer_induction_variable(profile)
-            if candidate is not None and candidate.index_key == index_key:
+            if candidate is not None and operator.eq(candidate.index_key, index_key):
                 return True
         return False
 
     return _impl()
 
 
+@cython.ccall
 def _best_typed_induction_summary_8616(
-    summaries: tuple[InductionSummary, ...],
-    index_key: tuple[object, ...],
+    summaries: object,
+    index_key: object,
 ) -> InductionSummary | None:
     """Return the highest-scoring typed summary for one index key."""
+    best_summary_score: object
+    summary: object
     best_summary: InductionSummary | None = None
-    best_summary_score: tuple[int, int, int] | None = None
+    best_summary_score = None
     for summary in summaries:
-        if summary.index_key != index_key:
+        if operator.ne(summary.index_key, index_key):
             continue
-        summary_score: tuple[int, int, int] = (
+        summary_score: tuple[cython.longlong, cython.longlong, cython.longlong] = (
             int(summary.count),
             abs(int(summary.stride)),
             int(summary.width),
@@ -576,25 +640,32 @@ def _best_typed_induction_summary_8616(
     return best_summary
 
 
+@cython.ccall
 def _best_profile_induction_match_8616(
-    profiles: dict[tuple[object, ...], AccessTraitEvidenceProfile],
-    index_key: tuple[object, ...],
+    profiles: object,
+    index_key: object,
     variable: object,
 ) -> InductionVariable | None:
     """Return the best access-trait induction match for one index key."""
+    best_score: object
+    candidate: object
+    direct_match: object
+    direct_profile: object
+    profile: object
+    profile_key: object
     direct_profile = profiles.get(index_key)
     if direct_profile is not None:
         direct_match = infer_induction_variable(direct_profile)
-        if direct_match is not None and direct_match.index_key == index_key:
+        if direct_match is not None and operator.eq(direct_match.index_key, index_key):
             return _access_trait_induction_var_8616(direct_match, variable)
 
     best_match: InductionVariable | None = None
-    best_score: tuple[int, int, int, int] | None = None
+    best_score = None
     for profile_key, profile in profiles.items():
         candidate = infer_induction_variable(profile)
-        if candidate is None or candidate.index_key != index_key:
+        if candidate is None or operator.ne(candidate.index_key, index_key):
             continue
-        candidate_score: tuple[int, int, int, int] = (
+        candidate_score: tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong] = (
             int(candidate.count),
             abs(int(candidate.stride)),
             int(candidate.width),
@@ -606,8 +677,16 @@ def _best_profile_induction_match_8616(
     return best_match
 
 
+@cython.ccall
 def _profile_induction_match_8616(codegen: object, loop_var: object) -> InductionVariable | None:
     """Match induction evidence through the dynamic third-party angr codegen/project boundary."""
+    best_summary: object
+    cfunc: object
+    func_addr: object
+    index_key: object
+    profiles: object
+    project: object
+    variable: object
     # Dynamic angr boundary: CVariable-compatible loop nodes expose the wrapped SimVariable dynamically.
     variable = getattr(loop_var, "variable", None)
     index_key = _loop_index_key_8616(loop_var)
@@ -638,24 +717,30 @@ def _profile_induction_match_8616(codegen: object, loop_var: object) -> Inductio
     return _best_profile_induction_match_8616(profiles, index_key, variable)
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _InductionLoopRewrite8616:
     """Mutable run state for induction-loop condition rewriting."""
 
     codegen: object
-    changed: bool = False
+    changed: cython.bint = False
 
     @staticmethod
-    def _last_monotonic_update(statements: list[object]) -> tuple[CVariable, int] | None:
+    def _last_monotonic_update(statements: object) -> object:
         """Return the last monotonic update statement, or None."""
+        update: object
+        stmt: object
         for stmt in reversed(statements[1:]):
             update = _extract_monotonic_update_8616(stmt)
             if update is not None:
                 return update
         return None
 
+    @cython.ccall
     def _rewrite_while_loop(self, node: CWhileLoop) -> object:
         """Convert while(1)+guard+update into a bounded loop condition."""
+        induction_info: object
+        inverted: object
+        update: object
         if not _literal_true_8616(node.condition):
             return node
         body = node.body
@@ -680,7 +765,7 @@ class _InductionLoopRewrite8616:
         induction_info = _profile_induction_match_8616(self.codegen, loop_var)
         if induction_info is None:
             return node
-        if abs(int(_delta)) != int(induction_info.stride):
+        if operator.ne(abs(int(_delta)), int(induction_info.stride)):
             return node
 
         node.condition = CBinaryOp(
@@ -694,8 +779,11 @@ class _InductionLoopRewrite8616:
         self.changed = True
         return node
 
+    @cython.ccall
     def transform(self, node: object) -> object:
         """Rewrite one node when induction evidence supports it."""
+        index_key: object
+        simplified: object
         if isinstance(node, CForLoop):
             simplified = _unwrap_double_negation_8616(node.condition)
             if simplified is not None:
@@ -709,8 +797,10 @@ class _InductionLoopRewrite8616:
         return self._rewrite_while_loop(node)
 
 
-def _rewrite_induction_loops_8616(codegen: object) -> bool:
+@cython.ccall
+def _rewrite_induction_loops_8616(codegen: object) -> cython.bint:
     """Rewrite induction loop shape at the dynamic third-party angr codegen boundary."""
+    cfunc: object
     # Dynamic codegen boundary: this pass is called with third-party angr codegen instances.
     cfunc = getattr(codegen, "cfunc", None)
     if cfunc is None:
@@ -730,8 +820,8 @@ def _rewrite_induction_loops_8616(codegen: object) -> bool:
 
 
 def _run_array_expression_matching_8616(
-    codegen: object, rewrite_step: Callable[[object], bool]
-) -> bool:
+    codegen: object, rewrite_step: Callable[[object], cython.bint]
+) -> cython.bint:
     """Publish array-matching metadata, then run the selected rewrite step.
 
     Shared by ``apply_x86_16_array_expression_matching`` (the real
@@ -742,8 +832,11 @@ def _run_array_expression_matching_8616(
     executed no-op pass leaves.
     """
 
-    def _impl() -> bool:
+    def _impl() -> cython.bint:
         """Attach optional array metadata across the dynamic third-party angr codegen boundary."""
+        bridge: object
+        function_addr: object
+        project: object
         # Dynamic codegen boundary: angr codegen supplies cfunc/project at runtime.
         if getattr(codegen, "cfunc", None) is None:
             return False
@@ -760,7 +853,7 @@ def _run_array_expression_matching_8616(
                 if bridge is None
                 else {
                     base_key: fact
-                    for base_key, fact in bridge.array_facts.items()
+                    for base_key, fact in builtins.iter(bridge.array_facts.items())
                     if bridge.allows_object_lowering(base_key)
                 }
             )
@@ -769,7 +862,7 @@ def _run_array_expression_matching_8616(
                 if bridge is None
                 else {
                     base_key: bridge.lowering_refusal_reason(base_key)
-                    for base_key in bridge.array_facts
+                    for base_key in iter(bridge.array_facts)
                     if not bridge.allows_object_lowering(base_key)
                 }
             )
@@ -804,6 +897,7 @@ def _run_array_expression_matching_8616(
     return _impl()
 
 
-def apply_x86_16_array_expression_matching(codegen: object) -> bool:
+@cython.ccall
+def apply_x86_16_array_expression_matching(codegen: object) -> cython.bint:
     """Attach array matching evidence to an angr codegen object without rewriting semantics."""
     return _run_array_expression_matching_8616(codegen, _rewrite_induction_loops_8616)

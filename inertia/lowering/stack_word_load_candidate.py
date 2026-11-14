@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Check bounded C-AST candidates for one Alias-proven stack word load.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_variable import SimStackVariable
@@ -17,9 +20,11 @@ from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 
 from .instruction_bp_stack_access import InstructionBpStackAccess8616
 from .runtime_memory_helpers import segmented_memory_read_helper_8616
+import operator
+import builtins
 
 
-def stack_word_load_expression_has_side_effect_8616(node: object) -> bool:
+def stack_word_load_expression_has_side_effect_8616(node: object) -> cython.bint:
     """Reject expression forms that cannot be discarded by materialization."""
     return any(
         (
@@ -28,11 +33,12 @@ def stack_word_load_expression_has_side_effect_8616(node: object) -> bool:
         )
         or type(candidate).__name__
         in {"CAssignment", "CMultiStatementExpression"}
-        for candidate in _iter_c_nodes_deep_8616(node)
+        for candidate in builtins.iter(_iter_c_nodes_deep_8616(node))
     )
 
 
-def stack_word_operand_is_captured_value_8616(node: object) -> bool:
+@cython.ccall
+def stack_word_operand_is_captured_value_8616(node: object) -> cython.bint:
     """Distinguish saved scalar bytes from current stack-storage projections.
 
     Load instruction provenance identifies where a capture originated, not
@@ -42,10 +48,11 @@ def stack_word_operand_is_captured_value_8616(node: object) -> bool:
     return isinstance(node, structured_c.CVariable) and not isinstance(node.variable, SimStackVariable)
 
 
+@cython.ccall
 def stack_word_byte_pair_matches_machine_bp_view_8616(
     low: object,
     high: object,
-) -> bool:
+) -> cython.bint:
     """Require adjacent stack coordinates when both byte views are variables."""
     if not isinstance(low, structured_c.CVariable):
         return False
@@ -59,11 +66,12 @@ def stack_word_byte_pair_matches_machine_bp_view_8616(
         and low_variable.base == high_variable.base == "bp"
         and isinstance(low_variable.offset, int)
         and isinstance(high_variable.offset, int)
-        and high_variable.offset == low_variable.offset + 1
+        and operator.eq(high_variable.offset, low_variable.offset + 1)
         and high_variable.size == 1
     )
 
 
+@cython.ccall
 def direct_machine_bp_word_owner_8616(
     low: object,
     load: InstructionBpStackAccess8616,
@@ -75,7 +83,7 @@ def direct_machine_bp_word_owner_8616(
     if (
         isinstance(variable, SimStackVariable)
         and variable.base == "bp"
-        and variable.offset == load.displacement
+        and operator.eq(variable.offset, load.displacement)
         and variable.size == load.size == 2
     ):
         return low

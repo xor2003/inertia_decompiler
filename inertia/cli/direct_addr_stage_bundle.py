@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Deterministic direct-address repeated-family evidence bundles.
 
 Layer: CLI/fallback/reporting.
@@ -10,42 +11,46 @@ budgets.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import hashlib
 import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
+import dataclasses
 
 _UNAVAILABLE = "unavailable\n"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectAddrStageBundleInput:
     """Inputs captured at a repeated direct-address family stop."""
 
     binary_path: Path | None
-    function_addr: int
-    function_name: str
-    family_label: str
-    raw_asm: str | None = None
-    cod_window: str | None = None
-    raw_codegen: str | None = None
-    post_callsite: str | None = None
-    post_stack_lowering: str | None = None
-    final_stdout: str | None = None
-    final_stderr: str | None = None
+    function_addr: cython.longlong
+    function_name: object
+    family_label: object
+    raw_asm: object = None
+    cod_window: object = None
+    raw_codegen: object = None
+    post_callsite: object = None
+    post_stack_lowering: object = None
+    final_stdout: object = None
+    final_stderr: object = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectAddrStageBundleResult:
     """Result of a bundle write or reuse."""
 
     path: Path
-    reused: bool
+    reused: cython.bint
 
 
-def _safe_component(value: object, *, limit: int = 64) -> str:
+@cython.ccall
+def _safe_component(value: object, *, limit: cython.longlong = 64) -> object:
     text = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value))
     text = text.strip("._-")
     if not text:
@@ -53,16 +58,19 @@ def _safe_component(value: object, *, limit: int = 64) -> str:
     return text[:limit]
 
 
-def _stable_text(value: str | None) -> str:
+@cython.ccall
+def _stable_text(value: object) -> object:
     if not isinstance(value, str) or not value.strip():
         return _UNAVAILABLE
     return value if value.endswith("\n") else value + "\n"
 
 
-def _sha256_text(text: str) -> str:
+@cython.ccall
+def _sha256_text(text: object) -> object:
     return hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()
 
 
+@cython.ccall
 def direct_addr_stage_bundle_dir(
     request: DirectAddrStageBundleInput,
     *,
@@ -77,12 +85,15 @@ def direct_addr_stage_bundle_dir(
     return root / f"{binary_name}_{binary_key}" / f"{request.function_addr:#x}_{function_name}_{family_key}"
 
 
+@cython.ccall
 def write_direct_addr_stage_bundle(
     request: DirectAddrStageBundleInput,
     *,
     root: Path = Path(".codex_automation/stage_debug"),
 ) -> DirectAddrStageBundleResult:
     """Write or reuse the deterministic repeated-family evidence bundle."""
+    name: object
+    text: object
     bundle_dir = direct_addr_stage_bundle_dir(request, root=root)
     manifest_path = bundle_dir / "manifest.json"
     if manifest_path.exists():

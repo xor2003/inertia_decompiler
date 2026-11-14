@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Index structured-C assignments for one immutable query generation.
 
 Layer: Pipeline governance.
@@ -11,12 +12,17 @@ Do not recover semantic facts or perform IR, alias, widening, lowering/materiali
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
 from .structured_ast_query_index import StructuredAstQueryIndex8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "StructuredAssignmentIdentityIndex8616",
@@ -37,12 +43,12 @@ class StructuredAssignmentIdentityKind8616(StrEnum):
     REGISTER = "register"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StructuredAssignmentIdentityKey8616:
     """One explicit structural key for an assignment left-hand side."""
 
     kind: StructuredAssignmentIdentityKind8616
-    identity: int | str
+    identity: object
     width: int | None = None
 
     def __post_init__(self) -> None:
@@ -71,13 +77,13 @@ class StructuredAssignmentLookupVerdict8616(StrEnum):
     AMBIGUOUS = "ambiguous"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StructuredAssignmentLookupResult8616:
     """Result of one exact assignment identity lookup."""
 
     verdict: StructuredAssignmentLookupVerdict8616
     rhs: object | None
-    match_count: int
+    match_count: cython.longlong
 
     def __post_init__(self) -> None:
         """Keep verdict, payload, and accounting coherent."""
@@ -91,18 +97,18 @@ class StructuredAssignmentLookupResult8616:
             raise ValueError("assignment lookup result is internally inconsistent")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StructuredAssignmentLookupStats8616:
     """Closed accounting for one assignment projection generation."""
 
-    build_count: int
-    assignment_count: int
-    indexed_assignment_count: int
-    key_count: int
-    query_count: int
-    missing_count: int
-    unique_count: int
-    ambiguous_count: int
+    build_count: cython.longlong
+    assignment_count: cython.longlong
+    indexed_assignment_count: cython.longlong
+    key_count: cython.longlong
+    query_count: cython.longlong
+    missing_count: cython.longlong
+    unique_count: cython.longlong
+    ambiguous_count: cython.longlong
 
     def __post_init__(self) -> None:
         """Reject incomplete or negative projection accounting."""
@@ -122,19 +128,19 @@ class StructuredAssignmentLookupStats8616:
             raise ValueError("one assignment projection must have exactly one build")
         if self.indexed_assignment_count > self.assignment_count:
             raise ValueError("indexed assignment count exceeds the source census")
-        if self.query_count != self.missing_count + self.unique_count + self.ambiguous_count:
+        if operator.ne(self.query_count, self.missing_count + self.unique_count + self.ambiguous_count):
             raise ValueError("assignment projection query accounting is not closed")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _StructuredAssignmentRecord8616:
     """Immutable assignment payload retained for one query generation."""
 
-    assignment_identity: int
+    assignment_identity: cython.longlong
     rhs: object | None
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class StructuredAssignmentIdentityIndex8616:
     """Deterministic assignment projection over one structured-AST census."""
 
@@ -143,12 +149,12 @@ class StructuredAssignmentIdentityIndex8616:
         StructuredAssignmentIdentityKey8616,
         tuple[_StructuredAssignmentRecord8616, ...],
     ]
-    assignment_count: int
-    indexed_assignment_count: int
-    query_count: int = 0
-    missing_count: int = 0
-    unique_count: int = 0
-    ambiguous_count: int = 0
+    assignment_count: cython.longlong
+    indexed_assignment_count: cython.longlong
+    query_count: cython.longlong = 0
+    missing_count: cython.longlong = 0
+    unique_count: cython.longlong = 0
+    ambiguous_count: cython.longlong = 0
 
     @classmethod
     def build(
@@ -160,6 +166,8 @@ class StructuredAssignmentIdentityIndex8616:
         ],
     ) -> StructuredAssignmentIdentityIndex8616:
         """Build one projection from the query index's assignment census."""
+        assignment: object
+        key: object
         records_by_key: dict[
             StructuredAssignmentIdentityKey8616,
             list[_StructuredAssignmentRecord8616],
@@ -175,23 +183,27 @@ class StructuredAssignmentIdentityIndex8616:
                 records_by_key.setdefault(key, []).append(record)
         return cls(
             root=query_index.root,
-            _records_by_key={key: tuple(records) for key, records in records_by_key.items()},
+            _records_by_key={key: tuple(records) for key, records in builtins.iter(records_by_key.items())},
             assignment_count=len(query_index.assignments),
             indexed_assignment_count=indexed_assignment_count,
         )
 
+    @cython.ccall
     def require_root(self, root: object) -> None:
         """Reject reuse for a different structured-AST generation root."""
         if self.root is not root:
             raise ValueError("assignment projection belongs to a different AST root")
 
+    @cython.ccall
     def lookup(
         self,
         keys: Iterable[StructuredAssignmentIdentityKey8616],
     ) -> StructuredAssignmentLookupResult8616:
         """Return missing, unique, or fail-closed ambiguous for exact keys."""
+        record: object
+        key: object
         self.query_count += 1
-        matches: dict[int, _StructuredAssignmentRecord8616] = {}
+        matches: dict[cython.longlong, _StructuredAssignmentRecord8616] = {}
         for key in dict.fromkeys(keys):
             for record in self._records_by_key.get(key, ()):
                 matches.setdefault(record.assignment_identity, record)
@@ -217,6 +229,7 @@ class StructuredAssignmentIdentityIndex8616:
             len(matches),
         )
 
+    @cython.ccall
     def stats(self) -> StructuredAssignmentLookupStats8616:
         """Return immutable closed accounting for this projection."""
         return StructuredAssignmentLookupStats8616(

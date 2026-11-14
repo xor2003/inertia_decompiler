@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Collect proof-bearing input storage trials from the production pipeline.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from inertia.frontend.x86_16.frontend_function_boundary import ExactFunctionRangeBoundary8616
 from inertia.ir.core import IRAddress
@@ -66,6 +69,7 @@ from .interprocedural_storage_trial_types import (
     callee_storage_pieces_8616,
 )
 from .modular_argument_type_facts import ModularArgumentTypeFacts8616
+import operator
 
 __all__ = [
     "collect_function_input_storage_trials_8616",
@@ -83,9 +87,10 @@ _CONFLICT_FAILURES = frozenset(
 )
 
 
+@cython.ccall
 def _failure_8616(
     kind: StorageTrialCollectionFailureKind8616,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     fact: CalleeCallsiteFact8616 | None = None,
     *,
     logical_index: int | None = None,
@@ -100,13 +105,22 @@ def _failure_8616(
     )
 
 
+@cython.ccall
 def _input_trials_8616(
-    callee_addr: int, caller_addr: int, callsite_addr: int, logical_index: int,
+    callee_addr: cython.longlong, caller_addr: cython.longlong, callsite_addr: cython.longlong, logical_index: cython.longlong,
     storage: IRAddress, reaching: CallArgumentDefinitionResolution8616,
     signedness: StorageTrialSignedness8616, value_class: StorageTrialValueClass8616,
     *, caller_ssa: SSAFunctionArtifact | None = None,
-) -> tuple[StorageTrial8616, ...] | None:
+) -> object:
     """Bind one complete input's exact pieces, retaining only producer-owned roots."""
+    binding: object
+    logical: object
+    source_slice: object
+    storage_pieces: object
+    use: object
+    definition: object
+    piece: object
+    piece_index: object
     use = reaching.use
     storage_pieces = callee_storage_pieces_8616(storage, reaching.definitions)
     if use is None or storage_pieces is None:
@@ -148,14 +162,18 @@ def _input_trials_8616(
 
 
 def _callsite_trials_8616(
-    callee_addr: int,
+    callee_addr: cython.longlong,
     fact: CalleeCallsiteFact8616,
-    argument_storage: tuple[IRAddress, ...],
+    argument_storage: object,
     signedness_facts: ConditionArgumentFactsResult8616,
     pointer_evidence: CalleePointerArgumentEvidence8616 | None,
     modular_facts: ModularArgumentTypeFacts8616,
-) -> tuple[CallsiteStorageTrials8616 | None, tuple[StorageTrialCollectionFailure8616, ...], bool]:
+) -> tuple[CallsiteStorageTrials8616 | None, tuple[StorageTrialCollectionFailure8616, ...], cython.bint]:
     """Materialize every logical input at one exact caller or refuse the callsite."""
+    function_ssa: object
+    input_trials: object
+    summary: object
+    classified_input: object
     caller_addr = fact.caller_addr
     summary = fact.summary
     if not isinstance(caller_addr, int):
@@ -167,7 +185,7 @@ def _callsite_trials_8616(
         if summary.logical_arg_widths
         else summary.arg_count
     )
-    if summary is None or len(argument_storage) != logical_argument_count:
+    if summary is None or operator.ne(len(argument_storage), logical_argument_count):
         return None, (_failure_8616(StorageTrialCollectionFailureKind8616.ARGUMENT_STORAGE_UNKNOWN, callee_addr, fact),), False
     if not isinstance(summary.stack_cleanup, int) or summary.stack_cleanup < 0:
         return None, (_failure_8616(StorageTrialCollectionFailureKind8616.STACK_DELTA_UNKNOWN, callee_addr, fact),), False
@@ -275,9 +293,12 @@ def _callsite_trials_8616(
 def collect_function_input_storage_trials_8616(
     project: object,
     codegen: object,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> FunctionInputStorageTrialCollection8616:
     """Collect all input trials only when the caller and type censuses close."""
+    callsite: object
+    count_evidence: object
+    fact: object
     width_evidence = collect_callee_argument_width_evidence_8616(project, function_addr)
     count_evidence = width_evidence.count_evidence
     facts = () if count_evidence is None else count_evidence.callsite_facts
@@ -289,8 +310,8 @@ def collect_function_input_storage_trials_8616(
                 function_addr,
             )
         )
-    callsite_addrs = tuple(fact.callsite_addr for fact in facts)
-    if len(set(callsite_addrs)) != len(callsite_addrs):
+    callsite_addrs = tuple(fact.callsite_addr for fact in iter(facts))
+    if operator.ne(len(set(callsite_addrs)), len(callsite_addrs)):
         failures.append(
             _failure_8616(
                 StorageTrialCollectionFailureKind8616.CALLSITE_IDENTITY_CONFLICT,
@@ -340,7 +361,7 @@ def collect_function_input_storage_trials_8616(
         if caller_census_complete
         else (
             StorageTrialCollectionVerdict8616.CONFLICT
-            if any(failure.kind in _CONFLICT_FAILURES for failure in failures)
+            if any(failure.kind in _CONFLICT_FAILURES for failure in iter(failures))
             else StorageTrialCollectionVerdict8616.UNKNOWN_REFUSE
         )
     )

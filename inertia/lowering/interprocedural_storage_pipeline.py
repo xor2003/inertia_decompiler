@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Collect and atomically publish production interprocedural storage trials.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -41,6 +44,7 @@ from .interprocedural_storage_trial_collection import (
 )
 from .pointer_parameter_caller_targets import publish_pointer_parameter_caller_targets_8616
 from .pointer_parameter_outputs import publish_pointer_parameter_outputs_8616
+import dataclasses
 
 __all__ = [
     "FunctionStoragePublicationResult8616",
@@ -64,7 +68,7 @@ class FunctionStoragePublicationVerdict8616(StrEnum):
     UNCHANGED_REFUSED = "unchanged_refused"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionStoragePublicationResult8616:
     """Closed collection and atomic publication evidence for one function."""
 
@@ -73,10 +77,10 @@ class FunctionStoragePublicationResult8616:
     input_collection: FunctionInputStorageTrialCollection8616 | None = None
     return_collection: FunctionReturnStorageTrialCollection8616 | None = None
     resolution: ProgramStorageResolution8616 | None = None
-    changed: bool = False
+    changed: cython.bint = False
 
     @property
-    def published(self) -> bool:
+    def published(self) -> cython.bint:
         """Return whether this attempt reached the atomic transaction boundary."""
         return self.verdict in {
             FunctionStoragePublicationVerdict8616.PUBLISHED_ACCEPTED,
@@ -89,7 +93,7 @@ class FunctionStoragePublicationResult8616:
 class _CFunctionSurface8616(Protocol):
     """Owned current-function identity exposed by structured codegen."""
 
-    addr: int
+    addr: cython.longlong
 
 
 class _CodegenSurface8616(Protocol):
@@ -102,7 +106,7 @@ class _CodegenSurface8616(Protocol):
 class _FunctionManager8616(Protocol):
     """Third-party angr function lookup used at the pipeline boundary."""
 
-    def function(self, *, addr: int, create: bool = False) -> object | None:
+    def function(self, *, addr: cython.longlong, create: cython.bint = False) -> object | None:
         """Return an existing function without creating a guessed one."""
         ...
 
@@ -117,16 +121,18 @@ class _ProjectSurface8616(Protocol):
     """angr project plus explicit caller-evidence address aliases."""
 
     kb: _KnowledgeBase8616
-    _inertia_caller_evidence_target_8616: int
-    _inertia_caller_target_aliases_8616: tuple[int, ...]
+    _inertia_caller_evidence_target_8616: cython.longlong
+    _inertia_caller_target_aliases_8616: object
 
 
+@cython.ccall
 def _record_result_8616(
     project: object,
     codegen: object,
     result: FunctionStoragePublicationResult8616,
 ) -> FunctionStoragePublicationResult8616:
     """Record current evidence, refusing stale accepted contracts before reuse."""
+    previous: object
     if not result.published and result.function_addr is not None:
         previous = accepted_function_storage_contract_8616(project, result.function_addr)
         if previous is not None:
@@ -148,11 +154,13 @@ def _record_result_8616(
     return result
 
 
+@cython.ccall
 def _function_context_8616(
     project: object,
     codegen: object,
-) -> tuple[int, object] | None:
+) -> object:
     """Return the exact current function and address without creating one."""
+    function: object
     try:
         function_addr = cast(_CodegenSurface8616, codegen).cfunc.addr
         function = cast(_ProjectSurface8616, project).kb.functions.function(
@@ -168,8 +176,8 @@ def _function_context_8616(
 
 def _accepted_target_addrs_8616(
     project: object,
-    function_addr: int,
-) -> tuple[int, ...]:
+    function_addr: cython.longlong,
+) -> tuple[cython.longlong, ...]:
     """Return only explicit project target aliases for the current function."""
     surface = cast(_ProjectSurface8616, project)
     try:
@@ -185,7 +193,7 @@ def _accepted_target_addrs_8616(
     return tuple(
         dict.fromkeys(
             address
-            for address in (function_addr, evidence_target, *aliases)
+            for address in iter((function_addr, evidence_target, ) + tuple(aliases))
             if isinstance(address, int) and not isinstance(address, bool)
         )
     )
@@ -193,35 +201,40 @@ def _accepted_target_addrs_8616(
 
 def _return_evidence_8616(
     project: object,
-    function_addr: int,
-    accepted_target_addrs: tuple[int, ...],
+    function_addr: cython.longlong,
+    accepted_target_addrs: object,
 ) -> tuple[
     CallerReturnUseEvidence8616 | None,
     FunctionStoragePublicationVerdict8616 | None,
 ]:
     """Select one exact or explicitly aliased caller-return census."""
+    exact: object
     evidence_by_addr = caller_return_use_evidence_by_addr_8616(project)
     exact = evidence_by_addr.get(function_addr)
     if exact is not None:
         return exact, None
     candidates = tuple(
         evidence_by_addr[address]
-        for address in accepted_target_addrs
+        for address in iter(accepted_target_addrs)
         if address in evidence_by_addr
     )
     if not candidates:
         return None, FunctionStoragePublicationVerdict8616.RETURN_EVIDENCE_UNAVAILABLE
     reference = candidates[0]
-    if any(candidate != reference for candidate in candidates[1:]):
+    if any(candidate != reference for candidate in iter(candidates[1:])):
         return None, FunctionStoragePublicationVerdict8616.RETURN_EVIDENCE_CONFLICT
     return reference, None
 
 
+@cython.ccall
 def collect_and_publish_function_storage_contract_8616(
     project: object,
     codegen: object,
 ) -> FunctionStoragePublicationResult8616:
     """Collect one complete function contract and republish the program payload."""
+    context: object
+    evidence: object
+    function_resolution: object
     context = _function_context_8616(project, codegen)
     if context is None:
         return _record_result_8616(
@@ -316,10 +329,11 @@ def collect_and_publish_function_storage_contract_8616(
     )
 
 
+@cython.ccall
 def publish_and_reconcile_callsite_interfaces_8616(
     project: object,
     codegen: object,
-) -> bool:
+) -> cython.bint:
     """Publish storage contracts before all declaration/prototype consumers."""
     from .callsite_prototype_declarations import (
         materialize_callsite_prototype_declarations_8616,

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Refusal gates for unresolved decompiler output.
 
 Layer: CLI/fallback/reporting.
@@ -5,17 +6,21 @@ Responsibility: owns final-output refusal checks for unresolved decompiler text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import re
 from dataclasses import dataclass
+import dataclasses
+import builtins
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DecompilationQualityAssessment:
     """Final-output quality verdict and the markers that triggered it."""
 
-    reject_as_decompiled: bool
-    markers: tuple[str, ...]
+    reject_as_decompiled: cython.bint
+    markers: object
 
 
 _RAW_IR_MARKERS: tuple[tuple[str, re.Pattern[str]], ...] = (
@@ -78,7 +83,7 @@ _BP_STACK_LOCAL_DECL_RE = re.compile(
 )
 
 
-def _bp_stack_locals_read_without_assignment(rendered_text: str) -> tuple[str, ...]:
+def _bp_stack_locals_read_without_assignment(rendered_text: object) -> tuple[str, ...]:
     """Return named BP locals that are read but never assigned.
 
     This is a final quality gate, not semantic recovery. A stack local that
@@ -86,6 +91,9 @@ def _bp_stack_locals_read_without_assignment(rendered_text: str) -> tuple[str, .
     lowering; otherwise validation can appear clean while emitted C still reads
     an uninitialized recovered local.
     """
+    match: object
+    line: object
+    name: object
     locals_: list[str] = []
     code_lines = _code_only_text(rendered_text).splitlines()
     for line in code_lines:
@@ -95,7 +103,7 @@ def _bp_stack_locals_read_without_assignment(rendered_text: str) -> tuple[str, .
     if not locals_:
         return ()
 
-    body_without_decls = "\n".join(line for line in code_lines if _BP_STACK_LOCAL_DECL_RE.match(line) is None)
+    body_without_decls = "\n".join(line for line in iter(code_lines) if _BP_STACK_LOCAL_DECL_RE.match(line) is None)
     missing: list[str] = []
     for name in locals_:
         name_re = re.compile(rf"\b{re.escape(name)}\b")
@@ -113,27 +121,29 @@ def _bp_stack_locals_read_without_assignment(rendered_text: str) -> tuple[str, .
     return tuple(missing)
 
 
-def _code_only_text(rendered_text: str) -> str:
+@cython.ccall
+def _code_only_text(rendered_text: object) -> str:
     code_lines = [
         line.strip()
-        for line in rendered_text.splitlines()
+        for line in builtins.iter(rendered_text.splitlines())
         if line.strip() and line.strip() not in {"{", "}"} and not line.strip().startswith(("/*", "*", "//"))
     ]
     return "\n".join(code_lines)
 
 
-def _unresolved_virtual_temporaries(code_only_text: str) -> tuple[str, ...]:
+@cython.ccall
+def _unresolved_virtual_temporaries(code_only_text: object) -> tuple[str, ...]:
     """Return virtual-temp names referenced without an emitted C declaration."""
     referenced = set(_VIRTUAL_TEMP_RE.findall(code_only_text))
     declared = {
         match.group("name")
-        for line in code_only_text.splitlines()
+        for line in builtins.iter(code_only_text.splitlines())
         if (match := _VIRTUAL_TEMP_DECL_RE.match(line)) is not None
     }
     return tuple(sorted(referenced - declared))
 
 
-def assess_decompiled_c_text(rendered_text: str) -> DecompilationQualityAssessment:
+def assess_decompiled_c_text(rendered_text: object) -> DecompilationQualityAssessment:
     """Classify emitted C text as acceptable or unresolved IR-shaped output."""
 
     def _impl() -> DecompilationQualityAssessment:
@@ -142,7 +152,7 @@ def assess_decompiled_c_text(rendered_text: str) -> DecompilationQualityAssessme
 
         code_only_text = _code_only_text(rendered_text)
         code_lines = code_only_text.splitlines()
-        markers = tuple(label for label, pattern in _RAW_IR_MARKERS if pattern.search(code_only_text))
+        markers = tuple(label for label, pattern in iter(_RAW_IR_MARKERS) if pattern.search(code_only_text))
         if not markers:
             return DecompilationQualityAssessment(reject_as_decompiled=False, markers=())
 
@@ -150,7 +160,7 @@ def assess_decompiled_c_text(rendered_text: str) -> DecompilationQualityAssessme
             return DecompilationQualityAssessment(reject_as_decompiled=True, markers=markers)
 
         raw_ir_line_count = sum(
-            1 for line in code_lines if any(pattern.search(line) for pattern in _RAW_IR_LINE_PATTERNS)
+            1 for line in iter(code_lines) if any(pattern.search(line) for pattern in iter(_RAW_IR_LINE_PATTERNS))
         )
         readable_line_count = max(len(code_lines), 1)
         reject = raw_ir_line_count >= 4 and raw_ir_line_count * 2 >= readable_line_count
@@ -162,7 +172,8 @@ def assess_decompiled_c_text(rendered_text: str) -> DecompilationQualityAssessme
     return _impl()
 
 
-def assess_final_generated_c_text(rendered_text: str) -> DecompilationQualityAssessment:
+@cython.ccall
+def assess_final_generated_c_text(rendered_text: object) -> DecompilationQualityAssessment:
     """Refuse final generated C that still exposes unresolved recovery state.
 
     The generic quality gate intentionally allows some ugly but honest C during
@@ -178,7 +189,7 @@ def assess_final_generated_c_text(rendered_text: str) -> DecompilationQualityAss
         return DecompilationQualityAssessment(reject_as_decompiled=False, markers=())
 
     code_only_text = _code_only_text(rendered_text)
-    markers = [label for label, pattern in _FINAL_OUTPUT_LEAKAGE_MARKERS if pattern.search(code_only_text)]
+    markers = [label for label, pattern in iter(_FINAL_OUTPUT_LEAKAGE_MARKERS) if pattern.search(code_only_text)]
     if _unresolved_virtual_temporaries(code_only_text):
         markers.append("unresolved-vvar")
     if _bp_stack_locals_read_without_assignment(rendered_text):

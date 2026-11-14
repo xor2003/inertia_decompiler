@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery/reporting.
 
 Responsibility: project already-published recovery metadata into typed confidence evidence.
@@ -64,6 +65,12 @@ from inertia.lowering.storage_objects import StorageObjectRefusal
 from inertia.lowering.type_array_matching import ArrayExpressionMatcher, ArrayRecoveryInfo
 from inertia.lowering.type_storage_object_bridge import SegmentedStorageFact, StorageObjectBridgeFact
 from inertia.lowering.type_structure_merging import StructField, StructRecoveryInfo, StructType, StructureFieldMerger
+import typing
+import cython
+import dataclasses
+import operator
+import builtins
+ItemT = typing.TypeVar("ItemT")
 
 __all__ = [
     "ArrayEvidenceItem",
@@ -85,50 +92,50 @@ class EvidenceStatus(Enum):
     ERROR = "error"  # Producer recorded a failure reason
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class EvidenceRefusal:
     """Typed refusal fact reported by a producer for one object."""
 
-    identity: str
-    reason: str
+    identity: object
+    reason: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StructEvidenceItem:
     """One struct/object candidate projected from producer or legacy evidence."""
 
-    identity: str
-    source: str  # "storage_object" | "typed_ir" | "legacy"
-    evidence_count: int
-    evidence_basis: str  # What the count measures, e.g. "candidate field offset"
-    segmented_allowed: bool
-    refusal_reason: str | None = None  # Producer refusal verdict, when present
+    identity: object
+    source: object  # "storage_object" | "typed_ir" | "legacy"
+    evidence_count: cython.longlong
+    evidence_basis: object  # What the count measures, e.g. "candidate field offset"
+    segmented_allowed: cython.bint
+    refusal_reason: object = None  # Producer refusal verdict, when present
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ArrayEvidenceItem:
     """One array candidate projected from producer or legacy evidence."""
 
-    identity: str
-    source: str  # "storage_object" | "typed_ir" | "string_effect" | "legacy"
-    evidence_count: int
-    evidence_basis: str  # What the count measures, e.g. "access pattern"
+    identity: object
+    source: object  # "storage_object" | "typed_ir" | "string_effect" | "legacy"
+    evidence_count: cython.longlong
+    evidence_basis: object  # What the count measures, e.g. "access pattern"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentEvidenceItem:
     """One segment association projected from producer or legacy evidence."""
 
-    segment: str
-    bucket: str  # "stable" | "over_associated" | "unknown"
-    classification: str
-    stability: float
-    evidence_count: int
-    detail: str
+    segment: object
+    bucket: object  # "stable" | "over_associated" | "unknown"
+    classification: object
+    stability: cython.double
+    evidence_count: cython.longlong
+    detail: object
 
 
-@dataclass(frozen=True, slots=True)
-class EvidenceChannel[ItemT]:
+@dataclasses.dataclass(frozen=True, )
+class EvidenceChannel(typing.Generic[ItemT]):
     """Validated projection of one producer evidence channel.
 
     ``status`` is ABSENT when no producer ran and no validated evidence
@@ -145,11 +152,11 @@ class EvidenceChannel[ItemT]:
     status: EvidenceStatus
     items: tuple[ItemT, ...] = ()
     refusals: tuple[EvidenceRefusal, ...] = ()
-    error: str | None = None
+    error: object = None
     malformed: tuple[str, ...] = ()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConfidenceEvidence:
     """Complete projected recovery evidence for one confidence report."""
 
@@ -158,8 +165,10 @@ class ConfidenceEvidence:
     segments: EvidenceChannel[SegmentEvidenceItem]
 
 
-def _applied_flag_8616(codegen: object, name: str, malformed: list[str]) -> bool:
+@cython.ccall
+def _applied_flag_8616(codegen: object, name: object, malformed: object) -> cython.bint:
     """Read a producer ``_applied`` flag at the dynamic codegen boundary."""
+    value: object
     value = getattr(codegen, name, None)
     if value is None:
         return False
@@ -170,24 +179,28 @@ def _applied_flag_8616(codegen: object, name: str, malformed: list[str]) -> bool
     return value
 
 
-def _error_string_8616(codegen: object, name: str) -> str | None:
+@cython.ccall
+def _error_string_8616(codegen: object, name: object) -> object:
     """Read a producer ``_error`` diagnostic at the dynamic codegen boundary."""
+    value: object
     value = getattr(codegen, name, None)
     return value if isinstance(value, str) and value else None
 
 
-def _channel_status_8616(applied: bool, error: str | None, has_items: bool) -> EvidenceStatus:
+@cython.ccall
+def _channel_status_8616(applied: cython.bint, error: object, has_items: cython.bint) -> EvidenceStatus:
     """Derive the channel status from producer state and validated evidence."""
     if error is not None:
         return EvidenceStatus.ERROR
     return EvidenceStatus.PRESENT if applied or has_items else EvidenceStatus.ABSENT
 
 
+@cython.ccall
 def _mapping_or_malformed_8616(
     value: object,
-    name: str,
-    malformed: list[str],
-) -> dict[object, object]:
+    name: object,
+    malformed: object,
+) -> object:
     """Validate a producer dictionary attachment at the dynamic codegen boundary."""
     if value is None:
         return {}
@@ -197,13 +210,14 @@ def _mapping_or_malformed_8616(
     return value
 
 
+@cython.ccall
 def _producer_payload_8616(
     codegen: object,
-    name: str,
-    usable: bool,
-    status_label: str,
-    malformed: list[str],
-) -> dict[object, object]:
+    name: object,
+    usable: cython.bint,
+    status_label: object,
+    malformed: object,
+) -> object:
     """Read one producer mapping, refusing retained payloads of a failed channel.
 
     A non-empty mapping on a channel whose producer never applied or recorded
@@ -211,6 +225,7 @@ def _producer_payload_8616(
     items rather than silently fabricating confidence markers. An empty
     mapping carries no evidence and needs no diagnosis.
     """
+    value: object
     # Dynamic codegen boundary: optional producer metadata on angr codegen objects.
     value = getattr(codegen, name, None)
     mapping = _mapping_or_malformed_8616(value, name, malformed)
@@ -220,33 +235,35 @@ def _producer_payload_8616(
     return {}
 
 
-def _is_plain_int_8616(value: object) -> bool:
+@cython.ccall
+def _is_plain_int_8616(value: object) -> cython.bint:
     """Return whether a value is an int, excluding bool."""
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def _str_tuple_8616(value: object, min_len: int) -> tuple[str, ...] | None:
+def _str_tuple_8616(value: object, min_len: cython.longlong) -> object:
     """Return the value as a tuple of >= ``min_len`` strings, else None."""
     if (
         isinstance(value, (tuple, list))
         and len(value) >= min_len
-        and all(isinstance(part, str) for part in value)
+        and all(isinstance(part, str) for part in iter(value))
     ):
         return tuple(value)
     return None
 
 
-def _int_tuple_8616(value: object, min_len: int) -> tuple[int, ...] | None:
+def _int_tuple_8616(value: object, min_len: cython.longlong) -> object:
     """Return the value as a tuple of >= ``min_len`` ints (no bool), else None."""
     if (
         isinstance(value, (tuple, list))
         and len(value) >= min_len
-        and all(_is_plain_int_8616(part) for part in value)
+        and all(_is_plain_int_8616(part) for part in iter(value))
     ):
         return tuple(value)
     return None
 
 
+@cython.ccall
 def _positive_count_8616(value: object) -> int | None:
     """Return the value as a positive plain int (bool excluded), else None."""
     if isinstance(value, int) and not isinstance(value, bool) and value >= 1:
@@ -254,6 +271,7 @@ def _positive_count_8616(value: object) -> int | None:
     return None
 
 
+@cython.ccall
 def _unit_probability_8616(value: object) -> float | None:
     """Return the value as a finite [0, 1] probability (bool excluded), else None."""
     if (
@@ -269,8 +287,8 @@ def _unit_probability_8616(value: object) -> float | None:
 # Published value vocabularies, mirroring the current producers. Producer keys
 # and fields are enum ``.value``/``.name`` strings, so these sets define the
 # space each published payload may legitimately occupy.
-_MEM_SPACE_VALUES_8616: frozenset[str] = frozenset(space.value for space in MemSpace)
-_SEGMENT_ORIGIN_VALUES_8616: frozenset[str] = frozenset(origin.value for origin in SegmentOrigin)
+_MEM_SPACE_VALUES_8616: frozenset[str] = frozenset(space.value for space in iter(MemSpace))
+_SEGMENT_ORIGIN_VALUES_8616: frozenset[str] = frozenset(origin.value for origin in iter(SegmentOrigin))
 _SEGMENT_REGISTER_NAMES_8616: frozenset[str] = frozenset(SegmentRegister.__members__)
 _STRING_CANDIDATE_ROLES_8616: frozenset[str] = frozenset({"source", "destination"})
 
@@ -288,27 +306,32 @@ _SEGMENT_CLASSIFICATION_BUCKET_8616: dict[str, str] = {
 def _render_key_part_8616(part: object) -> str:
     """Render one key component, flattening nested tuples deterministically."""
     if isinstance(part, tuple):
-        return ":".join(_render_key_part_8616(item) for item in part)
+        return ":".join(_render_key_part_8616(item) for item in iter(part))
     return str(part)
 
 
-def _base_key_identity_8616(base_key: object) -> str:
+@cython.ccall
+def _base_key_identity_8616(base_key: object) -> object:
     """Render a deterministic identity for a storage-object base key."""
     rendered = _render_key_part_8616(base_key)
     return rendered if rendered else "<empty-base>"
 
 
-def _typed_candidate_identity_8616(key: object) -> str:
+@cython.ccall
+def _typed_candidate_identity_8616(key: object) -> object:
     """Render a deterministic identity for a typed IR candidate key."""
     rendered = _render_key_part_8616(key)
     return rendered if rendered else "<empty-key>"
 
 
+@cython.ccall
 def _bridge_struct_items_8616(
-    facts: dict[object, object],
-    malformed: list[str],
-) -> list[StructEvidenceItem]:
+    facts: object,
+    malformed: object,
+) -> object:
     """Project validated storage-object member facts into struct evidence items."""
+    base_key: object
+    fact: object
     items: list[StructEvidenceItem] = []
     for base_key, fact in facts.items():
         if (
@@ -333,11 +356,14 @@ def _bridge_struct_items_8616(
     return items
 
 
+@cython.ccall
 def _bridge_refusals_8616(
-    refusals: dict[object, object],
-    malformed: list[str],
-) -> list[EvidenceRefusal]:
+    refusals: object,
+    malformed: object,
+) -> object:
     """Project validated storage-object refusals into typed refusal facts."""
+    base_key: object
+    refusal: object
     items: list[EvidenceRefusal] = []
     for base_key, refusal in refusals.items():
         if not isinstance(refusal, StorageObjectRefusal):
@@ -352,9 +378,10 @@ def _bridge_refusals_8616(
     return items
 
 
+@cython.ccall
 def _typed_ir_struct_candidate_offsets_8616(
     key: object, candidate: object
-) -> tuple[int, ...] | None:
+) -> object:
     """Return a candidate's validated offsets, or None when it is off-contract.
 
     ``type_structure_merging._typed_ir_struct_candidates`` publishes
@@ -363,6 +390,8 @@ def _typed_ir_struct_candidate_offsets_8616(
     (>= 2 ints — the producer requires at least two offsets), non-empty
     ``candidate_widths`` ints, and ``has_phi_evidence`` set to True.
     """
+    key_base_tuple: object
+    offsets: object
     if not isinstance(key, tuple) or len(key) != 2 or not isinstance(candidate, dict):
         return None
     key_space, key_base = key
@@ -373,8 +402,8 @@ def _typed_ir_struct_candidate_offsets_8616(
         isinstance(key_space, str)
         and key_space in _MEM_SPACE_VALUES_8616
         and key_base_tuple is not None
-        and candidate.get("space") == key_space
-        and base == key_base_tuple
+        and operator.eq(candidate.get("space"), key_space)
+        and operator.eq(base, key_base_tuple)
         and offsets is not None
         and _int_tuple_8616(candidate.get("candidate_widths"), 1) is not None
         and candidate.get("has_phi_evidence") is True
@@ -383,11 +412,15 @@ def _typed_ir_struct_candidate_offsets_8616(
     return offsets
 
 
+@cython.ccall
 def _typed_ir_struct_items_8616(
-    candidates: dict[object, object],
-    malformed: list[str],
-) -> list[StructEvidenceItem]:
+    candidates: object,
+    malformed: object,
+) -> object:
     """Project typed IR field-offset candidates into struct evidence items."""
+    offsets: object
+    candidate: object
+    key: object
     items: list[StructEvidenceItem] = []
     for key, candidate in candidates.items():
         offsets = _typed_ir_struct_candidate_offsets_8616(key, candidate)
@@ -406,16 +439,21 @@ def _typed_ir_struct_items_8616(
     return items
 
 
-def _functions_from_fields_8616(fields: dict[int, StructField]) -> int:
+@cython.ccall
+def _functions_from_fields_8616(fields: object) -> cython.longlong:
     """Count distinct functions recorded on an owned struct type's fields."""
+    struct_field: object
     functions: set[str] = set()
     for struct_field in fields.values():
         functions.update(struct_field.functions)
     return len(functions)
 
 
-def _legacy_struct_items_8616(legacy: object, malformed: list[str]) -> list[StructEvidenceItem]:
+@cython.ccall
+def _legacy_struct_items_8616(legacy: object, malformed: object) -> object:
     """Project a validated legacy ``_struct_recovery_info`` attachment into items."""
+    name: object
+    struct_type: object
     if legacy is None:
         return []
     items: list[StructEvidenceItem] = []
@@ -450,6 +488,7 @@ def _legacy_struct_items_8616(legacy: object, malformed: list[str]) -> list[Stru
 
 def _project_struct_channel_8616(codegen: object, cfunc: object | None) -> EvidenceChannel[StructEvidenceItem]:
     """Project struct-merging producer metadata into typed struct evidence."""
+    error: object
     malformed: list[str] = []
     applied = _applied_flag_8616(codegen, "_inertia_struct_merging_applied", malformed)
     error = _error_string_8616(codegen, "_inertia_struct_merging_error")
@@ -491,11 +530,12 @@ def _project_struct_channel_8616(codegen: object, cfunc: object | None) -> Evide
     )
 
 
+@cython.ccall
 def _bridge_array_items_8616(
-    facts: dict[object, object],
-    refusals: list[EvidenceRefusal],
-    malformed: list[str],
-) -> list[ArrayEvidenceItem]:
+    facts: object,
+    refusals: object,
+    malformed: object,
+) -> object:
     """Project validated lowerable array bridge facts into array evidence items.
 
     The producer publishes ``lowerable_arrays`` already filtered by
@@ -504,6 +544,8 @@ def _bridge_array_items_8616(
     contradictory metadata: it is projected as a refusal — never as an
     ordinary item — and the inconsistent placement is named in ``malformed``.
     """
+    base_key: object
+    fact: object
     items: list[ArrayEvidenceItem] = []
     for base_key, fact in facts.items():
         if (
@@ -536,7 +578,8 @@ def _bridge_array_items_8616(
     return items
 
 
-def _typed_ir_array_candidate_valid_8616(key: object, candidate: dict[object, object]) -> bool:
+@cython.ccall
+def _typed_ir_array_candidate_valid_8616(key: object, candidate: object) -> cython.bint:
     """Validate one typed IR array candidate against the producer contract.
 
     ``type_array_matching._typed_ir_array_candidates`` publishes
@@ -544,6 +587,8 @@ def _typed_ir_array_candidate_valid_8616(key: object, candidate: dict[object, ob
     keys and dict values carrying the key-identical ``space``/``base``/
     ``element_size`` fields plus ``has_phi_index`` set to True.
     """
+    element_size: object
+    key_base_tuple: object
     if not isinstance(key, tuple) or len(key) != 3:
         return False
     key_space, key_base, key_size = key
@@ -556,15 +601,16 @@ def _typed_ir_array_candidate_valid_8616(key: object, candidate: dict[object, ob
         and key_base_tuple is not None
         and _is_plain_int_8616(key_size)
         and key_size >= 0
-        and candidate.get("space") == key_space
-        and base == key_base_tuple
+        and operator.eq(candidate.get("space"), key_space)
+        and operator.eq(base, key_base_tuple)
         and _is_plain_int_8616(element_size)
-        and element_size == key_size
+        and operator.eq(element_size, key_size)
         and candidate.get("has_phi_index") is True
     )
 
 
-def _string_array_candidate_valid_8616(key: object, candidate: dict[object, object]) -> bool:
+@cython.ccall
+def _string_array_candidate_valid_8616(key: object, candidate: object) -> cython.bint:
     """Validate one string-effect array candidate against the producer contract.
 
     ``type_array_matching._typed_string_array_candidates`` publishes the same
@@ -573,6 +619,9 @@ def _string_array_candidate_valid_8616(key: object, candidate: dict[object, obje
     ``segment_origin`` (a SegmentOrigin value), non-empty ``string_family``
     and ``repeat_kind`` strings, and ``role`` in {"source", "destination"}.
     """
+    element_size: object
+    key_base_tuple: object
+    segment_origin: object
     if not isinstance(key, tuple) or len(key) != 3:
         return False
     key_space, key_base, key_size = key
@@ -586,10 +635,10 @@ def _string_array_candidate_valid_8616(key: object, candidate: dict[object, obje
         and key_base_tuple is not None
         and _is_plain_int_8616(key_size)
         and key_size >= 0
-        and candidate.get("space") == key_space
-        and base == key_base_tuple
+        and operator.eq(candidate.get("space"), key_space)
+        and operator.eq(base, key_base_tuple)
         and _is_plain_int_8616(element_size)
-        and element_size == key_size
+        and operator.eq(element_size, key_size)
         and candidate.get("has_string_effect") is True
         and isinstance(segment_origin, str)
         and segment_origin in _SEGMENT_ORIGIN_VALUES_8616
@@ -602,13 +651,16 @@ def _string_array_candidate_valid_8616(key: object, candidate: dict[object, obje
     )
 
 
+@cython.ccall
 def _typed_candidate_array_items_8616(
-    candidates: dict[object, object],
-    source: str,
-    field: str,
-    malformed: list[str],
-) -> list[ArrayEvidenceItem]:
+    candidates: object,
+    source: object,
+    field: object,
+    malformed: object,
+) -> object:
     """Project typed IR or string-effect array candidates into evidence items."""
+    candidate: object
+    key: object
     items: list[ArrayEvidenceItem] = []
     for key, candidate in candidates.items():
         valid = isinstance(candidate, dict) and (
@@ -630,11 +682,14 @@ def _typed_candidate_array_items_8616(
     return items
 
 
+@cython.ccall
 def _refused_array_refusals_8616(
-    refused: dict[object, object],
-    malformed: list[str],
-) -> list[EvidenceRefusal]:
+    refused: object,
+    malformed: object,
+) -> object:
     """Project validated refused-array reasons into typed refusal facts."""
+    reason: object
+    base_key: object
     items: list[EvidenceRefusal] = []
     for base_key, reason in refused.items():
         if reason is not None and not isinstance(reason, str):
@@ -649,8 +704,11 @@ def _refused_array_refusals_8616(
     return items
 
 
-def _legacy_array_items_8616(legacy: object, malformed: list[str]) -> list[ArrayEvidenceItem]:
+@cython.ccall
+def _legacy_array_items_8616(legacy: object, malformed: object) -> list[ArrayEvidenceItem]:
     """Project a validated legacy ``_array_recovery_info`` attachment into items."""
+    info: object
+    name: object
     if legacy is None:
         return []
     infos: list[ArrayRecoveryInfo] = []
@@ -679,12 +737,13 @@ def _legacy_array_items_8616(legacy: object, malformed: list[str]) -> list[Array
             evidence_count=len(info.access_patterns),
             evidence_basis="access pattern",
         )
-        for info in infos
+        for info in iter(infos)
     ]
 
 
 def _project_array_channel_8616(codegen: object, cfunc: object | None) -> EvidenceChannel[ArrayEvidenceItem]:
     """Project array-matching producer metadata into typed array evidence."""
+    error: object
     malformed: list[str] = []
     applied = _applied_flag_8616(codegen, "_inertia_array_matching_applied", malformed)
     error = _error_string_8616(codegen, "_inertia_array_matching_error")
@@ -745,11 +804,18 @@ def _project_array_channel_8616(codegen: object, cfunc: object | None) -> Eviden
 _SEGMENT_SUMMARY_BUCKETS_8616: tuple[str, ...] = ("stable", "over_associated", "unknown")
 
 
+@cython.ccall
 def _summary_segment_items_8616(
     summary: object,
-    malformed: list[str],
-) -> list[SegmentEvidenceItem]:
+    malformed: object,
+) -> object:
     """Project the published segmented-memory summary into segment evidence items."""
+    entries: object
+    item: object
+    bucket: object
+    entry: object
+    key: object
+    segment_name: object
     if summary is None:
         return []
     if not isinstance(summary, dict):
@@ -774,11 +840,12 @@ def _summary_segment_items_8616(
     return items
 
 
+@cython.ccall
 def _summary_segment_item_8616(
-    bucket: str,
+    bucket: object,
     segment_name: object,
     entry: object,
-    malformed: list[str],
+    malformed: object,
 ) -> SegmentEvidenceItem | None:
     """Validate one segmented-memory summary entry into a segment evidence item.
 
@@ -789,6 +856,11 @@ def _summary_segment_item_8616(
     ``evidence_count`` a positive int (zero-count entries are never
     published), and ``known_values`` a tuple of ints.
     """
+    classification: object
+    evidence_count: object
+    known_values: object
+    space: object
+    stability: object
     label = f"_inertia_segmented_memory_summary[{bucket!r}][{segment_name!r}]"
     if not isinstance(segment_name, str) or segment_name not in _SEGMENT_REGISTER_NAMES_8616:
         malformed.append(label)
@@ -801,7 +873,7 @@ def _summary_segment_item_8616(
     evidence_count = _positive_count_8616(entry.get("evidence_count"))
     space = entry.get("space")
     known_values = _int_tuple_8616(entry.get("known_values"), 0)
-    if not isinstance(classification, str) or _SEGMENT_CLASSIFICATION_BUCKET_8616.get(classification) != bucket:
+    if not isinstance(classification, str) or operator.ne(_SEGMENT_CLASSIFICATION_BUCKET_8616.get(classification), bucket):
         malformed.append(label)
         return None
     if (
@@ -823,7 +895,8 @@ def _summary_segment_item_8616(
     )
 
 
-def _legacy_segment_bucket_8616(classification: str) -> str:
+@cython.ccall
+def _legacy_segment_bucket_8616(classification: object) -> str:
     """Map a legacy segment-association classification onto a summary bucket."""
     if classification in {"single", "const"}:
         return "stable"
@@ -832,6 +905,7 @@ def _legacy_segment_bucket_8616(classification: str) -> str:
     return "unknown"
 
 
+@cython.ccall
 def _legacy_segment_item_8616(assoc: SegmentAssociation) -> SegmentEvidenceItem:
     """Project one owned legacy segment association into a segment evidence item."""
     segment = assoc.segment_reg.name if isinstance(assoc.segment_reg, SegmentRegister) else str(assoc.segment_reg)
@@ -846,12 +920,15 @@ def _legacy_segment_item_8616(assoc: SegmentAssociation) -> SegmentEvidenceItem:
     )
 
 
+@cython.ccall
 def _validated_segment_mapping_8616(
     entries: Iterable[tuple[object, object]],
-    label: str,
-    malformed: list[str],
-) -> list[SegmentAssociation]:
+    label: object,
+    malformed: object,
+) -> object:
     """Validate legacy (key, association) pairs into owned associations."""
+    assoc: object
+    key: object
     associations: list[SegmentAssociation] = []
     for key, assoc in entries:
         if not isinstance(assoc, SegmentAssociation):
@@ -861,8 +938,11 @@ def _validated_segment_mapping_8616(
     return associations
 
 
-def _legacy_segment_associations_8616(legacy: object, malformed: list[str]) -> list[SegmentAssociation]:
+@cython.ccall
+def _legacy_segment_associations_8616(legacy: object, malformed: object) -> object:
     """Validate a legacy ``_segmented_memory_info`` payload into associations."""
+    assoc: object
+    index: object
     if isinstance(legacy, SegmentAssociation):
         return [legacy]
     if isinstance(legacy, SegmentAssociationAnalyzer):
@@ -883,18 +963,20 @@ def _legacy_segment_associations_8616(legacy: object, malformed: list[str]) -> l
     return []
 
 
-def _legacy_segment_items_8616(legacy: object, malformed: list[str]) -> list[SegmentEvidenceItem]:
+@cython.ccall
+def _legacy_segment_items_8616(legacy: object, malformed: object) -> list[SegmentEvidenceItem]:
     """Project a validated legacy ``_segmented_memory_info`` attachment into items."""
     if legacy is None:
         return []
     return [
         _legacy_segment_item_8616(assoc)
-        for assoc in _legacy_segment_associations_8616(legacy, malformed)
+        for assoc in builtins.iter(_legacy_segment_associations_8616(legacy, malformed))
     ]
 
 
 def _project_segment_channel_8616(codegen: object, cfunc: object | None) -> EvidenceChannel[SegmentEvidenceItem]:
     """Project segmented-memory producer metadata into typed segment evidence."""
+    error: object
     malformed: list[str] = []
     applied = _applied_flag_8616(codegen, "_inertia_segmented_memory_applied", malformed)
     error = _error_string_8616(codegen, "_inertia_segmented_memory_error")
@@ -920,6 +1002,7 @@ def _project_segment_channel_8616(codegen: object, cfunc: object | None) -> Evid
     )
 
 
+@cython.ccall
 def load_confidence_evidence(codegen: object, cfunc: object | None) -> ConfidenceEvidence:
     """Project all published producer metadata into typed confidence evidence.
 

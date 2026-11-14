@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Applicability probe for the combined subview/copy-propagation pass.
 
 Layer: Widening.
@@ -17,6 +18,8 @@ Do not join values from rendered text, cosmetic shape, postprocess, or CLI/repor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from .stack_subview_projection import (
     _finish_stack_subview_stats_8616,
@@ -28,7 +31,8 @@ from .widening_copyprop_8616 import (
 )
 
 
-def widening_subview_copyprop_applicable_8616(codegen: object) -> bool:
+@cython.ccall
+def widening_subview_copyprop_applicable_8616(codegen: object) -> cython.bint:
     """Return False only when both combined transforms are proven no-ops.
 
     The combined pass runs stack-subview materialization first and copy
@@ -38,6 +42,8 @@ def widening_subview_copyprop_applicable_8616(codegen: object) -> bool:
     so both probes returning proven-no-op proves the combined pass returns
     ``False`` with no AST change. Unknown input remains applicable.
     """
+    copyprop_evidence: object
+    subview_evidence: object
     subview_evidence = stack_subview_projection_probe_8616(codegen)
     if subview_evidence is None:
         return True

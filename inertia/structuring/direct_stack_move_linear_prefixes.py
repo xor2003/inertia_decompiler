@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Place direct stack moves at CFG-proven linear structured prefixes.
 
 Layer: Structuring.
@@ -21,6 +22,8 @@ work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -43,6 +46,8 @@ from .direct_stack_move_loop_evidence import (
     comparable_address_8616,
     repeated_sequence_edges_8616,
 )
+import dataclasses
+import operator
 
 
 class DirectStackMoveLinearPrefixVerdict8616(Enum):
@@ -57,27 +62,27 @@ class DirectStackMoveLinearPrefixVerdict8616(Enum):
     PROVEN_LINEAR_PREFIX = "proven_linear_prefix"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectStackMoveLinearPrefixStats8616:
     """Closed evidence counters and verdict for one placement attempt."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    candidate_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    candidate_count: cython.longlong
     verdict: DirectStackMoveLinearPrefixVerdict8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _PlacementSite8616:
     """One mutable statement boundary before a linear successor statement."""
 
-    statements: list[Any]
-    insertion_index: int
-    following_addr: int
-    depth: int
+    statements: object
+    insertion_index: cython.longlong
+    following_addr: cython.longlong
+    depth: cython.longlong
 
 
 _OWNED_SOURCE_KINDS_8616 = frozenset(
@@ -92,7 +97,10 @@ _LOOP_TYPES_8616 = (
 
 def _tree_nodes_8616(root: object) -> Iterator[object]:
     """Yield dynamic structured-C descendants once."""
-    seen: set[int] = set()
+    node: object
+    value: object
+    attribute: object
+    seen: set[cython.longlong] = set()
     stack = [root]
     while stack:
         node = stack.pop()
@@ -121,13 +129,18 @@ def _tree_nodes_8616(root: object) -> Iterator[object]:
                 stack.append(value)
 
 
+@cython.ccall
 def _following_address_8616(
     project: object,
     statement: object,
-    move_addr: int,
+    move_addr: cython.longlong,
 ) -> int | None:
     """Return the first tagged instruction after a move in one statement tree."""
-    candidates: set[int] = set()
+    address: object
+    tags: object
+    key: object
+    node: object
+    candidates: set[cython.longlong] = set()
     for node in _tree_nodes_8616(statement):
         # Dynamic boundary: tags are owned by angr structured-C nodes.
         tags = getattr(node, "tags", None)
@@ -143,10 +156,11 @@ def _following_address_8616(
     return min(candidates) if candidates else None
 
 
+@cython.ccall
 def _placement_sites_8616(
     project: object,
     root: object,
-    move_addr: int,
+    move_addr: cython.longlong,
     snapshot: DirectStackMoveLinearCfgSnapshot8616,
 ) -> tuple[_PlacementSite8616, ...]:
     """Return non-loop statement boundaries with exact linear CFG evidence."""
@@ -155,18 +169,22 @@ def _placement_sites_8616(
     return tuple(scan.candidates)
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _PlacementSiteScan8616:
     """Mutable non-loop placement-site scan over structured containers."""
 
     project: object
-    move_addr: int
+    move_addr: cython.longlong
     snapshot: DirectStackMoveLinearCfgSnapshot8616
-    candidates: list[_PlacementSite8616] = field(default_factory=list)
-    seen: set[tuple[int, bool]] = field(default_factory=set)
+    candidates: object = field(default_factory=list)
+    seen: object = field(default_factory=set)
 
-    def visit(self, node: object, depth: int, inside_loop_body: bool) -> None:
+    @cython.ccall
+    def visit(self, node: object, depth: cython.longlong, inside_loop_body: cython.bint) -> None:
         """Walk structured statement containers without crossing loop ownership."""
+        _condition: object
+        body: object
+        statement: object
         if node is None or (id(node), inside_loop_body) in self.seen:
             return
         self.seen.add((id(node), inside_loop_body))
@@ -184,8 +202,12 @@ class _PlacementSiteScan8616:
                 self.visit(body, depth + 1, inside_loop_body)
             self.visit(node.else_node, depth + 1, inside_loop_body)
 
-    def _scan_container(self, node: structured_c.CStatements, depth: int) -> None:
+    @cython.ccall
+    def _scan_container(self, node: structured_c.CStatements, depth: cython.longlong) -> None:
         """Record each proven linear successor boundary in one container."""
+        following_addr: object
+        index: object
+        statement: object
         for index, statement in enumerate(tuple(node.statements)):
             following_addr = _following_address_8616(
                 self.project,
@@ -207,25 +229,28 @@ class _PlacementSiteScan8616:
                 )
 
 
+@cython.ccall
 def _same_tagged_assignment_8616(
     statement: object,
     assignment: structured_c.CAssignment,
-    move_addr: int,
-) -> bool:
+    move_addr: cython.longlong,
+) -> cython.bint:
     """Return whether one adjacent statement is the exact requested assignment."""
     return bool(
         isinstance(statement, structured_c.CAssignment)
         and statement.lhs is assignment.lhs
         and statement.rhs is assignment.rhs
-        and statement.tags.get("ins_addr") == move_addr
+        and operator.eq(statement.tags.get("ins_addr"), move_addr)
     )
 
 
+@cython.ccall
 def _record_stats_8616(
     codegen: object,
     stats: DirectStackMoveLinearPrefixStats8616,
 ) -> None:
     """Publish the typed placement evidence on the dynamic codegen boundary."""
+    history: object
     dynamic_codegen = cast(Any, codegen)
     dynamic_codegen._inertia_direct_stack_move_linear_prefix_8616 = stats
     # Dynamic boundary: codegen extension state persists across replay rounds.
@@ -246,8 +271,11 @@ def place_direct_stack_move_linear_prefix_assignment_8616(
     function: object,
     move_fact: DirectStackMoveFact8616,
     assignment: structured_c.CAssignment,
-) -> bool:
+) -> cython.bint:
     """Place one assignment only at a unique non-repeated linear CFG prefix."""
+    root: object
+    selected: object
+    snapshot: object
     if move_fact.source_kind not in _OWNED_SOURCE_KINDS_8616:
         _record_stats_8616(
             codegen,
@@ -285,19 +313,19 @@ def place_direct_stack_move_linear_prefix_assignment_8616(
     )
     if snapshot is not None and not sites:
         verdict = DirectStackMoveLinearPrefixVerdict8616.REFUSED_NO_LINEAR_SUCCESSOR
-    selected: _PlacementSite8616 | None = None
+    selected = None
     if sites:
-        minimum_distance = min(site.following_addr - move_fact.ins_addr for site in sites)
+        minimum_distance = min(site.following_addr - move_fact.ins_addr for site in iter(sites))
         nearest = tuple(
             site
-            for site in sites
-            if site.following_addr - move_fact.ins_addr == minimum_distance
+            for site in iter(sites)
+            if operator.eq(site.following_addr - move_fact.ins_addr, minimum_distance)
         )
-        maximum_depth = max(site.depth for site in nearest)
-        deepest = tuple(site for site in nearest if site.depth == maximum_depth)
+        maximum_depth = max(site.depth for site in iter(nearest))
+        deepest = tuple(site for site in iter(nearest) if operator.eq(site.depth, maximum_depth))
         unique = {
             (id(site.statements), site.insertion_index, site.following_addr): site
-            for site in deepest
+            for site in iter(deepest)
         }
         if len(unique) == 1:
             selected = next(iter(unique.values()))

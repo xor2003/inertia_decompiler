@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Provide deterministic size bounds for validation observables.
 
 Layer: Tail Validation.
@@ -12,6 +13,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 import hashlib
@@ -23,8 +26,10 @@ _DEFAULT_FINGERPRINT_LIMIT_8616 = 512
 _FINGERPRINT_LIMIT_ENV_8616 = "INERTIA_TAIL_VALIDATION_FINGERPRINT_LIMIT"
 
 
-def _validation_fingerprint_limit_8616() -> int:
+@cython.ccall
+def _validation_fingerprint_limit_8616() -> cython.longlong:
     """Return the configured deterministic observable-size limit."""
+    raw_limit: object
     limit = _DEFAULT_FINGERPRINT_LIMIT_8616
     raw_limit = os.environ.get(_FINGERPRINT_LIMIT_ENV_8616)
     if isinstance(raw_limit, str) and raw_limit.strip():
@@ -33,10 +38,11 @@ def _validation_fingerprint_limit_8616() -> int:
     return limit
 
 
+@cython.ccall
 def compact_normalized_validation_observable_8616(
-    field_name: str,
-    value: str,
-) -> str:
+    field_name: object,
+    value: object,
+) -> object:
     """Digest one oversized normalized observable while retaining its owner."""
     if len(value) <= _validation_fingerprint_limit_8616():
         return value

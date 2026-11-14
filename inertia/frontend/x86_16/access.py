@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Helper boundary.
 
 Responsibility: execute memory access while recording segmented IR facts for alias/type consumers.
@@ -5,6 +6,8 @@ Forbidden: treating linear execution addresses as semantic storage identity.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Protocol, cast
 
@@ -24,15 +27,15 @@ ITY_I16: object = Type.int_16
 ITY_I32: object = Type.int_32
 
 # Constants for access modes
-MODE_READ: int = 0
-MODE_WRITE: int = 1
-MODE_EXEC: int = 2
+MODE_READ: cython.longlong = 0
+MODE_WRITE: cython.longlong = 1
+MODE_EXEC: cython.longlong = 2
 
 # Module-level fact cache — bridges ephemeral emulator → persistent pipeline.
 # Key = function address (int), value = list of AliasStorageFacts/AliasFailure.
 # Populated by _record_semantic_memory_access() during VEX lifting.
 # Consumed by collect_semantic_alias_facts_from_project_8616().
-_inertia_module_alias_fact_cache: dict[int, list[object]] = {}
+_inertia_module_alias_fact_cache: dict[cython.longlong, list[object]] = {}
 
 
 class _AddableValue(Protocol):
@@ -50,7 +53,7 @@ class _CastableValue(Protocol):
         """Return this value cast to the requested VEX type."""
         ...
 
-    def __lshift__(self, _other: int) -> _AddableValue:
+    def __lshift__(self, _other: cython.longlong) -> _AddableValue:
         """Return this value shifted left by a constant bit count."""
         ...
 
@@ -72,7 +75,7 @@ class _JumpEmitter(Protocol):
 class _InstructionAddressWidth8616(Protocol):
     """Decoded instruction API used for effective address-size resolution."""
 
-    def effective_address_bits(self) -> int:
+    def effective_address_bits(self) -> cython.longlong:
         """Return address width after applying decoded size overrides."""
         ...
 
@@ -80,7 +83,7 @@ class _InstructionAddressWidth8616(Protocol):
 class _InstructionSite8616(Protocol):
     """Active third-party lifter instruction site used for evidence identity."""
 
-    addr: int
+    addr: cython.longlong
 
 
 class DataAccess(Hardware):  # type: ignore[misc, unused-ignore]  # dynamic frontend base contract
@@ -88,15 +91,15 @@ class DataAccess(Hardware):  # type: ignore[misc, unused-ignore]  # dynamic fron
 
     active_instruction: object | None
 
-    def __init__(self, size: int = 0) -> None:
+    def __init__(self, size: cython.longlong = 0) -> None:
         """Initialize TLB state and owned semantic access logs."""
         super().__init__(size)
         self.tlb: list[object | None] = []  # Translation Lookaside Buffer
         self._inertia_last_resolved_operand: ResolvedMemoryOperand | None = None
-        self._inertia_resolved_operands: list[tuple[int, ResolvedMemoryOperand]] = []
-        self._inertia_semantic_access_log: list[tuple[int, object]] = []
+        self._inertia_resolved_operands: list[tuple[cython.longlong, ResolvedMemoryOperand]] = []
+        self._inertia_semantic_access_log: list[tuple[cython.longlong, object]] = []
         self._inertia_current_block_addr: int | None = None
-        self._inertia_uncollected_accesses: int = 0
+        self._inertia_uncollected_accesses: cython.longlong = 0
 
     def set_segment(self, reg: sgreg_t, sel: object) -> None:
         """Write a segment selector through the frontend register surface."""
@@ -131,14 +134,14 @@ class DataAccess(Hardware):  # type: ignore[misc, unused-ignore]  # dynamic fron
             vaddr = cast(_CastableValue, vaddr).cast_to(ITY_I32)
         return cast(_CastableValue, sg).cast_to(ITY_I32), vaddr
 
-    def _record_resolved_operand(self, operand: ResolvedMemoryOperand, mode: int) -> ResolvedMemoryOperand:
+    def _record_resolved_operand(self, operand: ResolvedMemoryOperand, mode: cython.longlong) -> ResolvedMemoryOperand:
         """Remember the last decoded operand and record semantic evidence."""
         self._inertia_last_resolved_operand = operand
         self._inertia_resolved_operands.append((mode, operand))
         DataAccess._record_semantic_memory_access(self, operand, mode)
         return operand
 
-    def _record_semantic_memory_access(self, operand: ResolvedMemoryOperand, mode: int) -> None:
+    def _record_semantic_memory_access(self, operand: ResolvedMemoryOperand, mode: cython.longlong) -> None:
         """Record typed IR address for alias/type consumption.
 
         The execution path still uses operand.exec_linear (linear) for the actual
@@ -147,6 +150,7 @@ class DataAccess(Hardware):  # type: ignore[misc, unused-ignore]  # dynamic fron
         AGENTS rule #3: exec_linear is execution-only; assert_semantic_safe()
         blocks accidental leakage of linear IR into semantic layers.
         """
+        active_instruction: object
         from inertia.ir.core import IRAddress
 
         # Hard block: no linear addresses in semantic logs
@@ -189,7 +193,7 @@ class DataAccess(Hardware):  # type: ignore[misc, unused-ignore]  # dynamic fron
                 )
 
     def _resolve_memory_operand(
-        self, seg: object, addr: object, width_bits: int, mode: int, *, address_bits: int | None = None
+        self, seg: object, addr: object, width_bits: cython.longlong, mode: cython.longlong, *, address_bits: int | None = None
     ) -> ResolvedMemoryOperand:
         """Decode an operand and record its semantic segmented address."""
         operand = self._resolved_segment_operand(seg, addr, width_bits, address_bits=address_bits)
@@ -197,9 +201,10 @@ class DataAccess(Hardware):  # type: ignore[misc, unused-ignore]  # dynamic fron
         return operand
 
     def _resolved_segment_operand(
-        self, seg: object, addr: object, width_bits: int, *, address_bits: int | None = None
+        self, seg: object, addr: object, width_bits: cython.longlong, *, address_bits: int | None = None
     ) -> ResolvedMemoryOperand:
         """Resolve an operand; explicit stack addressing overrides instruction prefixes."""
+        active_instruction: object
         if address_bits is not None:
             return resolve_memory_operand_8616(self, seg, addr, width_bits, address_bits=address_bits)
         address_bits = 16
@@ -216,13 +221,13 @@ class DataAccess(Hardware):  # type: ignore[misc, unused-ignore]  # dynamic fron
             address_bits = active_address_bits
         return resolve_memory_operand_8616(self, seg, addr, width_bits, address_bits=address_bits)
 
-    def search_tlb(self, vpn: int) -> object | None:
+    def search_tlb(self, vpn: cython.longlong) -> object | None:
         """Return a cached TLB entry when present."""
         if vpn + 1 > len(self.tlb) or self.tlb[vpn] is None:
             return None
         return self.tlb[vpn]
 
-    def cache_tlb(self, vpn: int, pte: object) -> None:
+    def cache_tlb(self, vpn: cython.longlong, pte: object) -> None:
         """Cache a TLB entry for frontend execution."""
         if vpn + 1 > len(self.tlb):
             self.tlb.extend([None] * (vpn + 1 - len(self.tlb)))
@@ -246,6 +251,8 @@ class DataAccess(Hardware):  # type: ignore[misc, unused-ignore]  # dynamic fron
 
     def read_mem32_seg(self, seg: object, addr: object, *, address_bits: int | None = None) -> object:
         """Read 32 bits from segmented memory while recording semantic evidence."""
+        address: object
+        index: object
         addresses = self._segment_byte_addresses(seg, addr, 32, MODE_READ, address_bits=address_bits)
         # PyVEX's vvifyresults decorator returns VexValue, not the wrapped RdTmp.
         result = cast(VexValue, cast(VexValue, self.read_mem8(cast(int | VexValue, addresses[0]))).cast_to(Type.int_32))
@@ -270,6 +277,8 @@ class DataAccess(Hardware):  # type: ignore[misc, unused-ignore]  # dynamic fron
         self, seg: object, addr: object, value: object, *, address_bits: int | None = None
     ) -> None:
         """Write 32 bits to segmented memory while recording semantic evidence."""
+        address: object
+        index: object
         addresses = self._segment_byte_addresses(seg, addr, 32, MODE_WRITE, address_bits=address_bits)
         value32 = self.constant(value, Type.int_32) if isinstance(value, int) else cast(VexValue, value)
         for index, address in enumerate(addresses):
@@ -292,17 +301,17 @@ class DataAccess(Hardware):  # type: ignore[misc, unused-ignore]  # dynamic fron
         operand = self._resolve_memory_operand(seg, addr, 8, MODE_WRITE)
         self.write_mem8(cast(int | VexValue, operand.exec_linear), cast(int | VexValue, value))
 
-    def get_code8(self, offset: int) -> int:
+    def get_code8(self, offset: cython.longlong) -> cython.longlong:
         """Read an 8-bit immediate from the instruction bitstream."""
         assert offset == 0
         return cast(int, self.bitstream.read("uint:8"))
 
-    def get_code16(self, offset: int) -> int:
+    def get_code16(self, offset: cython.longlong) -> cython.longlong:
         """Read a 16-bit immediate from the instruction bitstream."""
         assert offset == 0
         return cast(int, self.bitstream.read("uintle:16"))
 
-    def get_code32(self, offset: int) -> int:
+    def get_code32(self, offset: cython.longlong) -> cython.longlong:
         """Read a 32-bit immediate from the instruction bitstream."""
         assert offset == 0
         return cast(int, self.bitstream.read("uintle:32"))
@@ -349,8 +358,8 @@ class DataAccess(Hardware):  # type: ignore[misc, unused-ignore]  # dynamic fron
         self,
         seg: object,
         addr: object,
-        width_bits: int,
-        mode: int,
+        width_bits: cython.longlong,
+        mode: cython.longlong,
         *,
         address_bits: int | None = None,
     ) -> tuple[object, ...]:

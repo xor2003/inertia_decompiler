@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Small typed constant proofs shared by capture validation and fingerprints.
 
 Layer: Tail validation.
@@ -9,18 +10,24 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CConstant
 from angr.sim_type import SimTypeChar, SimTypeInt, SimTypeLong, SimTypeLongLong, SimTypeShort
 
 
+@cython.ccall
 def constant_integer_value_8616(node: object) -> int | None:
     """Prove a typed constant expression with bounded work and no mutable reads."""
     return _constant_bitwise_value(node, [64])
 
 
+@cython.ccall
 def fold_typed_constant_binary_8616(node: CBinaryOp, lhs: object, rhs: object) -> CConstant | None:
     """Fold already simplified literal operands under the shared typed proof."""
+    bounds: object
+    value: object
     if not isinstance(lhs, CConstant) or not isinstance(rhs, CConstant):
         return None
     candidate = CBinaryOp(node.op, lhs, rhs, codegen=node.codegen)
@@ -31,7 +38,8 @@ def fold_typed_constant_binary_8616(node: CBinaryOp, lhs: object, rhs: object) -
     return CConstant(value, node.type, codegen=node.codegen)
 
 
-def integer_bounds_8616(type_: object, storage_bits: int = 64) -> tuple[int, int] | None:
+@cython.ccall
+def integer_bounds_8616(type_: object, storage_bits: cython.longlong = 64) -> object:
     """Return a bounded ordinary C integer domain; unknown and oversized types refuse."""
     if not isinstance(type_, (SimTypeChar, SimTypeShort, SimTypeInt, SimTypeLong, SimTypeLongLong)):
         return None
@@ -44,7 +52,8 @@ def integer_bounds_8616(type_: object, storage_bits: int = 64) -> tuple[int, int
     return minimum, (1 << (bits - int(type_.signed))) - 1
 
 
-def _constant_bitwise_value(node: object, budget: list[int]) -> int | None:
+@cython.ccall
+def _constant_bitwise_value(node: object, budget: object) -> int | None:
     """Evaluate only typed literals and nonnegative And/Or/Xor within a 64-node budget.
 
     Nonnegative representable operands make integer promotions and signedness
@@ -52,6 +61,8 @@ def _constant_bitwise_value(node: object, budget: list[int]) -> int | None:
     undefined shifts, negative bitwise operands and all mutable/effectful values refuse.
     Every intermediate result must also fit its declared integer type.
     """
+    bounds: object
+    value: object
     budget[0] -= 1
     if budget[0] < 0 or not isinstance(node, (CConstant, CBinaryOp)):
         return None
@@ -69,8 +80,11 @@ def _constant_bitwise_value(node: object, budget: list[int]) -> int | None:
     return value if bounds[0] <= value <= bounds[1] else None
 
 
-def _nonnegative_bitwise_value(node: CBinaryOp, budget: list[int]) -> int | None:
+@cython.ccall
+def _nonnegative_bitwise_value(node: CBinaryOp, budget: object) -> int | None:
     """Keep the evaluator restricted to promotion-independent bitwise constants."""
+    left: object
+    right: object
     if node.op not in {"And", "Or", "Xor", "Shl"}:
         return None
     left = _constant_bitwise_value(node.lhs, budget)
@@ -86,7 +100,8 @@ def _nonnegative_bitwise_value(node: CBinaryOp, budget: list[int]) -> int | None
     return left ^ right
 
 
-def _defined_unsigned_shift(node: CBinaryOp, left: int, right: int) -> int | None:
+@cython.ccall
+def _defined_unsigned_shift(node: CBinaryOp, left: cython.longlong, right: cython.longlong) -> int | None:
     """Admit unsigned left shifts safe under both DOS16 and host32 promotions."""
     type_ = node.lhs.type
     if integer_bounds_8616(type_) is None or type_.signed is not False:

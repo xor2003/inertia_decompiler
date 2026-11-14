@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prune unreachable suffixes after proven total-return conditionals.
 
 Layer: Structuring.
@@ -14,6 +15,8 @@ external structured goto may still enter the apparent suffix.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -26,29 +29,32 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 
 from .multi_arm_return_chains import is_materialized_multi_arm_return_chain_8616
+import dataclasses
+import builtins
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TotalReturnSuffixPruneStats8616:
     """Closed evidence accounting for total-return suffix pruning."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TotalReturnSuffixPruneResult8616:
     """Mutation count and evidence status for one Structuring prune pass."""
 
-    removed_statement_count: int = 0
+    removed_statement_count: cython.longlong = 0
     stats: TotalReturnSuffixPruneStats8616 = TotalReturnSuffixPruneStats8616()
 
 
-def _contains_label_8616(root: object) -> bool:
+def _contains_label_8616(root: object) -> cython.bint:
     """Return whether one dynamic angr C-AST subtree contains a label."""
+    current: object
     pending = [root]
     while pending:
         current = pending.pop()
@@ -59,7 +65,7 @@ def _contains_label_8616(root: object) -> bool:
         elif isinstance(current, CIfElse):
             pending.extend(
                 body
-                for _condition, body in tuple(current.condition_and_nodes or ())
+                for _condition, body in builtins.iter(tuple(current.condition_and_nodes or ()))
                 if body is not None
             )
             if current.else_node is not None:
@@ -67,6 +73,7 @@ def _contains_label_8616(root: object) -> bool:
     return False
 
 
+@cython.ccall
 def prune_unreachable_total_return_suffixes_8616(
     root: object,
 ) -> TotalReturnSuffixPruneResult8616:
@@ -86,19 +93,23 @@ def prune_unreachable_total_return_suffixes_8616(
     )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _ReturnSuffixPruneScan8616:
     """Mutable counters for one total-return suffix prune scan."""
 
-    raw_count: int = 0
-    normalized_count: int = 0
-    classified_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    removed_count: int = 0
+    raw_count: cython.longlong = 0
+    normalized_count: cython.longlong = 0
+    classified_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    removed_count: cython.longlong = 0
 
     def prune_container(self, container: CStatements) -> None:
         """Prune unreachable suffixes inside one statement container."""
+        _condition: object
+        body: object
+        index: object
+        statement: object
         statements = list(cast(Iterable[object], container.statements or ()))
         for index, statement in enumerate(tuple(statements)):
             if isinstance(statement, CStatements):
@@ -119,7 +130,7 @@ class _ReturnSuffixPruneScan8616:
                 suffix = statements[index + 1 :]
                 if not suffix:
                     continue
-                if any(_contains_label_8616(item) for item in suffix):
+                if any(_contains_label_8616(item) for item in iter(suffix)):
                     self.failure_count += 1
                     continue
                 self.classified_count += 1

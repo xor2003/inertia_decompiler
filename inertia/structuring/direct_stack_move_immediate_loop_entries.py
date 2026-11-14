@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify immediate stack-store relocation into structured loop entries.
 
 Layer: Structuring.
@@ -15,6 +16,8 @@ dynamic reads are restricted to ``_ast_field_8616``.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from enum import Enum
 
@@ -33,6 +36,7 @@ from .direct_stack_move_loop_sites import (
     DirectStackMoveAssignmentLocation8616,
     DirectStackMoveLoopEntrySite8616,
 )
+import operator
 
 
 class ImmediateLoopEntryRelocationVerdict8616(Enum):
@@ -45,7 +49,7 @@ class ImmediateLoopEntryRelocationVerdict8616(Enum):
     REFUSED_NONADJACENT_ASSIGNMENT = "refused_nonadjacent_assignment"
 
     @property
-    def permits_relocation(self) -> bool:
+    def permits_relocation(self) -> cython.bint:
         """Return whether Structuring may preserve or relocate the assignment."""
         return self in {
             self.NOT_APPLICABLE,
@@ -54,11 +58,13 @@ class ImmediateLoopEntryRelocationVerdict8616(Enum):
         }
 
 
-def _ast_field_8616(node: object | None, name: str) -> object | None:
+@cython.ccall
+def _ast_field_8616(node: object | None, name: object) -> object | None:
     """Read one optional field from a heterogeneous third-party angr AST node."""
     return getattr(node, name, None)
 
 
+@cython.ccall
 def classify_immediate_loop_entry_relocation_8616(
     root: object,
     site: DirectStackMoveLoopEntrySite8616,
@@ -69,20 +75,23 @@ def classify_immediate_loop_entry_relocation_8616(
     """Prove the exact backedge and structured adjacency of an immediate store."""
     if move_fact.source_kind is not DirectStackMoveSourceKind8616.IMMEDIATE:
         return ImmediateLoopEntryRelocationVerdict8616.NOT_APPLICABLE
-    if edge.entry_addr != move_fact.ins_addr:
+    if operator.ne(edge.entry_addr, move_fact.ins_addr):
         return ImmediateLoopEntryRelocationVerdict8616.REFUSED_NONEXACT_BACKEDGE
     if location.statements is site.statements:
         return ImmediateLoopEntryRelocationVerdict8616.ALREADY_OWNED
     return _loop_entry_predecessor_scan_8616(root, site, location)
 
 
+@cython.ccall
 def _loop_entry_predecessor_scan_8616(
     root: object,
     site: DirectStackMoveLoopEntrySite8616,
     location: DirectStackMoveAssignmentLocation8616,
 ) -> ImmediateLoopEntryRelocationVerdict8616:
     """Walk the structured tree for the loop body owning the site."""
-    seen: set[int] = set()
+    node: object
+    verdict: object
+    seen: set[cython.longlong] = set()
     stack: list[object] = [root]
     while stack:
         node = stack.pop()
@@ -95,13 +104,20 @@ def _loop_entry_predecessor_scan_8616(
     return ImmediateLoopEntryRelocationVerdict8616.REFUSED_NONADJACENT_ASSIGNMENT
 
 
+@cython.ccall
 def _visit_scan_node_8616(
     node: object,
     site: DirectStackMoveLoopEntrySite8616,
     location: DirectStackMoveAssignmentLocation8616,
-    stack: list[object],
+    stack: object,
 ) -> ImmediateLoopEntryRelocationVerdict8616 | None:
     """Match loop-body ownership for one node or push its children."""
+    child: object
+    _condition: object
+    attr: object
+    body: object
+    index: object
+    statement: object
     statements = _ast_field_8616(node, "statements")
     if isinstance(statements, list):
         for index, statement in enumerate(tuple(statements)):
@@ -114,7 +130,7 @@ def _visit_scan_node_8616(
                 if body_statements is site.statements:
                     if (
                         location.statements is statements
-                        and location.index + 1 == index
+                        and operator.eq(location.index + 1, index)
                     ):
                         return ImmediateLoopEntryRelocationVerdict8616.PROVEN_ADJACENT_PREDECESSOR
                     return ImmediateLoopEntryRelocationVerdict8616.REFUSED_NONADJACENT_ASSIGNMENT

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize a void C contract from closed unobservable-return evidence.
 
 Layer: Types/lowering.
@@ -10,6 +11,8 @@ Function names are not evidence.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -43,9 +46,12 @@ from inertia.semantics.terminal_return_storage import (
 from .return_type_evidence import proven_function_result_observation_8616
 from .runtime_segment_access import is_runtime_segment_load_helper_8616
 from .unobserved_returns import return_value_needs_neutralization_8616
+import dataclasses
+import operator
+import builtins
 
 
-def _return_expr_is_side_effect_free_8616(expr: object) -> bool:
+def _return_expr_is_side_effect_free_8616(expr: object) -> cython.bint:
     """Return whether an expression contains only side-effect-free value nodes."""
     nodes = tuple(_iter_c_nodes_deep_8616(expr))
     pure_node_types = (
@@ -61,7 +67,7 @@ def _return_expr_is_side_effect_free_8616(expr: object) -> bool:
     return bool(nodes) and all(
         isinstance(node, pure_node_types)
         or (isinstance(node, CFunctionCall) and is_runtime_segment_load_helper_8616(node))
-        for node in nodes
+        for node in iter(nodes)
     )
 
 __all__ = [
@@ -75,66 +81,66 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalReturnStorageInput8616:
     """Carry one terminal-storage classification already collected by Semantics."""
 
     storage: TerminalReturnStorage8616 | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalReturnValueEvidence8616:
     """Closed accounting for AIL terminal returns after ReturnMaker."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    value_return_count: int
-    empty_return_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    value_return_count: cython.longlong
+    empty_return_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def proves_no_terminal_value(self) -> bool:
+    def proves_no_terminal_value(self) -> cython.bint:
         """Return whether every discovered terminal return is empty."""
         return (
             self.raw_fact_count > 0
-            and self.normalized_fact_count == self.raw_fact_count
-            and self.classified_fact_count == self.raw_fact_count
+            and operator.eq(self.normalized_fact_count, self.raw_fact_count)
+            and operator.eq(self.classified_fact_count, self.raw_fact_count)
             and self.value_return_count == 0
-            and self.empty_return_count == self.classified_fact_count
+            and operator.eq(self.empty_return_count, self.classified_fact_count)
             and self.failure_count == 0
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class UnusedVoidReturnTypeStats8616:
     """Closed evidence counts for one void-contract materialization."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class UnusedVoidReturnTypeResult8616:
     """Result of one void-contract materialization."""
 
-    changed: bool
+    changed: cython.bint
     stats: UnusedVoidReturnTypeStats8616
 
 
 class _EvidenceOwner8616(Protocol):
     """Owned typed evidence registry carried by an angr project boundary."""
 
-    _inertia_terminal_return_value_evidence_8616: dict[int, TerminalReturnValueEvidence8616]
+    _inertia_terminal_return_value_evidence_8616: object
 
 
 class _VoidContractOwner8616(Protocol):
     """Typed project state carrying closed void-return contracts."""
 
-    _inertia_proven_void_return_addresses_8616: frozenset[int]
+    _inertia_proven_void_return_addresses_8616: object
 
 
 class _ProjectSurface8616(Protocol):
@@ -148,7 +154,7 @@ class _ProjectSurface8616(Protocol):
 class _FunctionSurface8616(Protocol):
     """Third-party function fields consumed by void return lowering."""
 
-    addr: int
+    addr: cython.longlong
     info: object
     prototype: object | None
     prototype_source: PrototypeSource
@@ -157,7 +163,7 @@ class _FunctionSurface8616(Protocol):
 class _FunctionManagerSurface8616(Protocol):
     """Third-party function lookup boundary."""
 
-    def function(self, *, addr: int, create: bool) -> _FunctionSurface8616 | None:
+    def function(self, *, addr: cython.longlong, create: cython.bint) -> _FunctionSurface8616 | None:
         """Return an existing function without creating one."""
 
 
@@ -170,7 +176,7 @@ class _KnowledgeBaseSurface8616(Protocol):
 class _CFunctionSurface8616(Protocol):
     """Third-party generated C function fields updated by void lowering."""
 
-    addr: int
+    addr: cython.longlong
     functy: object
     statements: object
 
@@ -179,13 +185,14 @@ class _CodegenSurface8616(Protocol):
     """Third-party codegen fields updated by void return lowering."""
 
     cfunc: _CFunctionSurface8616
-    _inertia_codegen_decl_refresh_required_8616: bool
-    _inertia_force_codegen_regeneration_8616: bool
+    _inertia_codegen_decl_refresh_required_8616: cython.bint
+    _inertia_force_codegen_regeneration_8616: cython.bint
 
 
+@cython.ccall
 def record_terminal_return_value_evidence_8616(
     owner: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     evidence: TerminalReturnValueEvidence8616,
 ) -> None:
     """Record immutable terminal-return evidence for final type lowering."""
@@ -198,11 +205,13 @@ def record_terminal_return_value_evidence_8616(
     carrier._inertia_terminal_return_value_evidence_8616 = evidence_by_addr
 
 
+@cython.ccall
 def terminal_return_value_evidence_8616(
     owner: object,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> TerminalReturnValueEvidence8616 | None:
     """Return recorded terminal-return evidence for one exact function address."""
+    evidence: object
     carrier = cast(_EvidenceOwner8616, owner)
     try:
         evidence = carrier._inertia_terminal_return_value_evidence_8616.get(function_addr)
@@ -211,7 +220,8 @@ def terminal_return_value_evidence_8616(
     return evidence if isinstance(evidence, TerminalReturnValueEvidence8616) else None
 
 
-def proven_void_return_address_8616(owner: object, function_addr: int) -> bool:
+@cython.ccall
+def proven_void_return_address_8616(owner: object, function_addr: cython.longlong) -> cython.bint:
     """Return whether Types/lowering proved an empty result contract for an address."""
     carrier = cast(_VoidContractOwner8616, owner)
     try:
@@ -220,20 +230,23 @@ def proven_void_return_address_8616(owner: object, function_addr: int) -> bool:
         return False
 
 
-def _has_explicit_prototype_8616(function: _FunctionSurface8616) -> bool:
+@cython.ccall
+def _has_explicit_prototype_8616(function: _FunctionSurface8616) -> cython.bint:
     """Return whether source/debug annotations own the function prototype."""
+    annotations: object
     if not isinstance(function.info, Mapping):
         return False
     annotations = function.info.get(ANNOTATION_KEY)
     return isinstance(annotations, Mapping) and isinstance(annotations.get("prototype"), SimTypeFunction)
 
 
+@cython.ccall
 def _demotion_boundary_8616(
     project_surface: _ProjectSurface8616,
     function_surface: _FunctionSurface8616,
     prototype: object,
-    prototype_was_guessed: bool,
-) -> bool:
+    prototype_was_guessed: cython.bint,
+) -> cython.bint:
     """Return whether ABI/prototype evidence permits return demotion."""
     return (
         project_surface.arch.name == "86_16"
@@ -243,13 +256,14 @@ def _demotion_boundary_8616(
     )
 
 
+@cython.ccall
 def materialize_unused_caller_void_return_type_8616(
     project: object,
     function: object,
     *,
     caller_observation: CallerReturnUseVerdict8616,
-    prototype_was_guessed: bool,
-    terminal_value_proven: bool,
+    prototype_was_guessed: cython.bint,
+    terminal_value_proven: cython.bint,
 ) -> UnusedVoidReturnTypeResult8616:
     """Demote a generated scalar return when closed facts prove no result contract."""
     project_surface = cast(_ProjectSurface8616, project)
@@ -295,6 +309,10 @@ def materialize_unused_caller_void_codegen_type_8616(
     ``terminal_storage_input`` lets another Types/lowering consumer reuse the
     same Semantics classification instead of decoding the function twice.
     """
+    evidence: object
+    function: object
+    terminal_storage: object
+    node: object
     project_surface = cast(_ProjectSurface8616, project)
     codegen_surface = cast(_CodegenSurface8616, codegen)
     try:
@@ -328,22 +346,22 @@ def materialize_unused_caller_void_codegen_type_8616(
         or not isinstance(cfunc.functy, SimTypeFunction)
     ):
         return UnusedVoidReturnTypeResult8616(False, UnusedVoidReturnTypeStats8616())
-    return_nodes = tuple(node for node in _iter_c_nodes_deep_8616(cfunc.statements) if isinstance(node, CReturn))
+    return_nodes = tuple(node for node in builtins.iter(_iter_c_nodes_deep_8616(cfunc.statements)) if isinstance(node, CReturn))
     prototype = cfunc.functy
-    nonempty_returns = tuple(node for node in return_nodes if node.retval is not None)
+    nonempty_returns = tuple(node for node in iter(return_nodes) if node.retval is not None)
     function_prototype_is_void = (
         isinstance(function.prototype, SimTypeFunction) and isinstance(function.prototype.returnty, SimTypeBottom)
     ) or proven_void_return_address_8616(project, cfunc.addr)
     pure_returns = bool(nonempty_returns) and all(
-        _return_expr_is_side_effect_free_8616(node.retval) for node in nonempty_returns
+        _return_expr_is_side_effect_free_8616(node.retval) for node in iter(nonempty_returns)
     )
     synthetic_zero_returns = bool(nonempty_returns) and all(
         isinstance(node.retval, CConstant) and node.retval.value == 0
-        for node in nonempty_returns
+        for node in iter(nonempty_returns)
     )
     unresolved_returns = bool(nonempty_returns) and all(
         return_value_needs_neutralization_8616(node.retval, prototype.returnty)
-        for node in nonempty_returns
+        for node in iter(nonempty_returns)
     )
     terminal_register_empty = terminal_storage in {
         TerminalReturnStorage8616.NONE,
@@ -359,7 +377,7 @@ def materialize_unused_caller_void_codegen_type_8616(
         return UnusedVoidReturnTypeResult8616(False, UnusedVoidReturnTypeStats8616())
     unsafe_returns = tuple(
         node
-        for node in return_nodes
+        for node in iter(return_nodes)
         if node.retval is not None
         and not (isinstance(node.retval, CConstant) and node.retval.value == 0)
         and not return_value_needs_neutralization_8616(node.retval, prototype.returnty)

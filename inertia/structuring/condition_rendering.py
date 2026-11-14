@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Render ConditionIR to C-like strings.
 
 Layer: Structuring.
@@ -12,6 +13,7 @@ If signedness cannot be expressed safely in C, use explicit helper form
 """
 
 from __future__ import annotations
+import cython
 
 from typing import Protocol, runtime_checkable
 
@@ -50,13 +52,16 @@ __all__ = (
 
 @runtime_checkable
 class _ConditionOperandMapping8616(Protocol):
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> object:
         """Return a structured representation for condition rendering."""
         ...
 
 
-def render_condition_ir_8616(cond: ConditionIR) -> str | None:
+@cython.ccall
+def render_condition_ir_8616(cond: ConditionIR) -> object:
     """Render a ConditionIR to a C-like condition string."""
+    helper: object
+    rhs_str: object
     lhs_str = render_condition_operand_8616(cond.lhs)
     rhs_str = render_condition_operand_8616(cond.rhs) if cond.rhs is not None else None
 
@@ -79,11 +84,14 @@ def render_condition_ir_8616(cond: ConditionIR) -> str | None:
     return None
 
 
-def render_condition_ir_native_8616(cond: ConditionIR) -> str | None:
+@cython.ccall
+def render_condition_ir_native_8616(cond: ConditionIR) -> object:
     """Render using native C operators (when unsigned/signed semantics are safe).
 
     This is for use when type analysis has proven signedness.
     """
+    rhs_str: object
+    sym: object
     lhs_str = render_condition_operand_8616(cond.lhs)
     rhs_str = render_condition_operand_8616(cond.rhs) if cond.rhs is not None else None
 
@@ -105,6 +113,7 @@ def render_condition_ir_native_8616(cond: ConditionIR) -> str | None:
     return None
 
 
+@cython.ccall
 def render_condition_operand_8616(value: object) -> str:
     """Format an operand value to a string representation."""
     if value is None:

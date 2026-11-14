@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """MSC 5.1 local variable name hash diagnostics.
 
 Layer: CLI/fallback/reporting.
@@ -13,12 +14,16 @@ with MSC 5.1's hashing mechanism.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Protocol, cast
+import operator
+import builtins
 
 
 class _CodegenFunctionLike(Protocol):
-    variables_in_use: dict[object, object]
+    variables_in_use: object
     addr: int | None
 
 
@@ -26,12 +31,13 @@ class _CodegenLike(Protocol):
     cfunc: _CodegenFunctionLike | None
 
 
-def msc51_hash(name: str) -> int:
+def msc51_hash(name: object) -> cython.longlong:
     """Compute MSC 5.1 bucket index for a local variable name."""
-    return sum(ord(c.upper()) for c in name) % 16
+    return sum(ord(c.upper()) for c in iter(name)) % 16
 
 
-def msc51_simulate_allocation(names: list[str]) -> dict[str, int]:
+@cython.ccall
+def msc51_simulate_allocation(names: object) -> dict[str, cython.longlong]:
     """Simulate MSC 5.1 hash table insertion.
 
     Args:
@@ -40,7 +46,8 @@ def msc51_simulate_allocation(names: list[str]) -> dict[str, int]:
     Returns:
         Dict mapping each name to its bucket index (0..15).
     """
-    table: list[str | None] = [None] * 16
+    name: object
+    table: object = [None] * 16
     for name in names:
         bucket = msc51_hash(name)
         for probe in range(16):
@@ -50,10 +57,11 @@ def msc51_simulate_allocation(names: list[str]) -> dict[str, int]:
                 break
         else:
             raise ValueError(f"Hash table full, cannot insert '{name}'")
-    return {name: idx for idx, name in enumerate(table) if name is not None}
+    return {name: idx for idx, name in builtins.iter(enumerate(table)) if name is not None}
 
 
-def msc51_bp_offset_for_bucket(bucket_idx: int, slot_size: int = 2) -> int:
+@cython.ccall
+def msc51_bp_offset_for_bucket(bucket_idx: cython.longlong, slot_size: cython.longlong = 2) -> cython.longlong:
     """Convert a bucket index (0..15) to a BP offset.
 
     MSC 5.1 allocates in bucket order: bucket 0 -> bp-2, bucket 1 -> bp-4, ...
@@ -62,7 +70,7 @@ def msc51_bp_offset_for_bucket(bucket_idx: int, slot_size: int = 2) -> int:
     return (bucket_idx + 1) * slot_size
 
 
-def _collect_named_stack_locals(codegen: object) -> list[tuple[str, int, object]]:
+def _collect_named_stack_locals(codegen: object) -> object:
     """Collect named local stack variables with their BP offsets.
 
     Returns:
@@ -70,6 +78,8 @@ def _collect_named_stack_locals(codegen: object) -> list[tuple[str, int, object]
         (most negative first, i.e., bp-2 before bp-4).
         Args and synthetic locals (local_XX, arg_XX, vNN, vvar_NN) are excluded.
     """
+    cfunc: object
+    variable: object
     import re
 
     try:
@@ -89,7 +99,7 @@ def _collect_named_stack_locals(codegen: object) -> list[tuple[str, int, object]
         r"ir_\d+(?:_\d+)?|a\d+)$"
     )
 
-    named_locals: list[tuple[str, int, object]] = []
+    named_locals: list[tuple[str, cython.longlong, object]] = []
     for variable in variables_in_use:
         if not isinstance(variable, SimStackVariable):
             continue
@@ -112,8 +122,11 @@ def _collect_named_stack_locals(codegen: object) -> list[tuple[str, int, object]
     return sorted(named_locals, key=lambda x: x[1])
 
 
-def _probe_path_has_gaps_8616(bucket_assignments: dict[str, int], bucket_to_name: dict[int, str]) -> bool:
+@cython.ccall
+def _probe_path_has_gaps_8616(bucket_assignments: object, bucket_to_name: object) -> cython.bint:
     """Check 1: no empty gaps in the backward probe path for any variable."""
+    assigned_bucket: object
+    name: object
     for name, assigned_bucket in bucket_assignments.items():
         h = msc51_hash(name)
         if h == assigned_bucket:
@@ -126,11 +139,15 @@ def _probe_path_has_gaps_8616(bucket_assignments: dict[str, int], bucket_to_name
     return False
 
 
+@cython.ccall
 def _must_precede_map_8616(
-    names: list[str], bucket_assignments: dict[str, int], bucket_to_name: dict[int, str]
-) -> dict[str, set[str]]:
+    names: object, bucket_assignments: object, bucket_to_name: object
+) -> object:
     """Map each displaced variable to the blockers that must precede it."""
-    must_precede: dict[str, set[str]] = {name: set() for name in names}
+    blocker: object
+    assigned_bucket: object
+    name: object
+    must_precede: dict[str, set[str]] = {name: set() for name in iter(names)}
     for name, assigned_bucket in bucket_assignments.items():
         h = msc51_hash(name)
         if h == assigned_bucket:
@@ -138,31 +155,33 @@ def _must_precede_map_8616(
         idx = h
         while idx != assigned_bucket:
             blocker = bucket_to_name.get(idx)
-            if blocker is not None and blocker != name:
+            if blocker is not None and operator.ne(blocker, name):
                 must_precede[name].add(blocker)
             idx = (idx - 1) % 16
     return must_precede
 
 
-def _ordering_constraints_acyclic_8616(names: list[str], must_precede: dict[str, set[str]]) -> bool:
+def _ordering_constraints_acyclic_8616(names: object, must_precede: object) -> cython.bint:
     """Check 2: ordering constraints are acyclic (iterative-coloured DFS)."""
     WHITE, GRAY, BLACK = 0, 1, 2
-    color: dict[str, int] = dict.fromkeys(names, WHITE)
+    color: object = dict.fromkeys(names, WHITE)
 
-    def _dfs_visit(node: str) -> bool:
+    def _dfs_visit(node: object) -> cython.bint:
+        pred: object
         color[node] = GRAY
         for pred in must_precede.get(node, set()):
-            if color.get(pred) == GRAY:
+            if operator.eq(color.get(pred), GRAY):
                 return False
-            if color.get(pred) == WHITE and not _dfs_visit(pred):
+            if operator.eq(color.get(pred), WHITE) and not _dfs_visit(pred):
                 return False
         color[node] = BLACK
         return True
 
-    return all(not (color[name] == WHITE and not _dfs_visit(name)) for name in names)
+    return all(not (operator.eq(color[name], WHITE) and not _dfs_visit(name)) for name in iter(names))
 
 
-def _check_declaration_order_feasible(names: list[str], bucket_assignments: dict[str, int]) -> bool:
+@cython.ccall
+def _check_declaration_order_feasible(names: object, bucket_assignments: object) -> cython.bint:
     """Check whether any declaration order could produce the observed bucket assignments.
 
     For a variable to end up at bucket b:
@@ -176,19 +195,26 @@ def _check_declaration_order_feasible(names: list[str], bucket_assignments: dict
     if len(names) <= 1:
         return True
 
-    bucket_to_name = {b: n for n, b in bucket_assignments.items()}
+    bucket_to_name = {b: n for n, b in builtins.iter(bucket_assignments.items())}
     if _probe_path_has_gaps_8616(bucket_assignments, bucket_to_name):
         return False
     must_precede = _must_precede_map_8616(names, bucket_assignments, bucket_to_name)
     return _ordering_constraints_acyclic_8616(names, must_precede)
 
 
+@cython.ccall
 def diagnose_msc51_locals(codegen: object) -> list[str]:
     """Diagnose whether recovered local variable names match MSC 5.1 hash allocation.
 
     Returns one-line summary per function:
       [dbg] msc51-hash func_0xNNNN: matching compiler hash: a, b | not matching: x (at bp-2, hash says bp-14)
     """
+    cfunc: object
+    func_addr: object
+    _variable: object
+    bp_offset: object
+    idx: object
+    name: object
     named_locals = _collect_named_stack_locals(codegen)
     if not named_locals:
         return []
@@ -219,6 +245,7 @@ def diagnose_msc51_locals(codegen: object) -> list[str]:
     return [msg]
 
 
+@cython.ccall
 def emit_msc51_diagnostic(codegen: object) -> None:
     """Emit MSC 5.1 hash diagnostic messages to stderr.
 

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Transfer typed segment-register state through one IR block.
 
 Layer: IR.
@@ -9,6 +10,8 @@ postprocess, or CLI/reporting work here. Never infer stack identity here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import hashlib
 from collections.abc import Mapping
@@ -17,6 +20,11 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol, cast
 
 from .core import IRBlock, IRFunctionArtifact, IRInstr, IRValue, MemSpace, SegmentOrigin
+import dataclasses
+import operator
+DeclaredCallAdmission8616 = typing.TypeVar("DeclaredCallAdmission8616")
+Real16InvocationDomain8616 = typing.TypeVar("Real16InvocationDomain8616")
+SegmentCallPreservationResult8616 = typing.TypeVar("SegmentCallPreservationResult8616")
 
 if TYPE_CHECKING:
     from inertia.frontend.x86_16.declared_external_call_evidence import DeclaredCallAdmission8616
@@ -41,7 +49,7 @@ __all__ = [
 
 SEGMENT_REGISTERS: tuple[str, ...] = ("cs", "ds", "es", "ss", "fs", "gs")
 SEGMENT_REGISTER_SET: frozenset[str] = frozenset(SEGMENT_REGISTERS)
-type InstructionStateKey = int | tuple[int, int]
+InstructionStateKey = typing.TypeAliasType("InstructionStateKey", int | tuple[int, int])
 
 
 class SegmentValueKind8616(StrEnum):
@@ -60,13 +68,13 @@ class SegmentValueKind8616(StrEnum):
     CALL_BOUNDARY = "call_boundary"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentRegisterState:
     """Proven state for one segment register at a program point."""
 
-    register: str
+    register: object
     value_kind: SegmentValueKind8616
-    source: str | None
+    source: object
     origin: SegmentOrigin
 
     def __post_init__(self) -> None:
@@ -95,7 +103,7 @@ class SegmentRegisterState:
             return None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentRestoreSource:
     """Alias-proved relation from one segment write to an earlier segment read.
 
@@ -108,29 +116,32 @@ class SegmentRestoreSource:
     authorize a cross-function lineage proof.
     """
 
-    block_addr: int
-    restore_instruction_addr: int
-    restore_register: str
-    saved_instruction_addr: int
-    saved_register: str
+    block_addr: cython.longlong
+    restore_instruction_addr: cython.longlong
+    restore_register: object
+    saved_instruction_addr: cython.longlong
+    saved_register: object
     source_artifact: IRFunctionArtifact | None = field(
         default=None, repr=False, compare=False
     )
 
 
-def unknown_segment_state(register: str) -> SegmentRegisterState:
+@cython.ccall
+def unknown_segment_state(register: object) -> SegmentRegisterState:
     """Return the lattice unknown state for one register."""
     return SegmentRegisterState(register, SegmentValueKind8616.UNKNOWN, None, SegmentOrigin.UNKNOWN)
 
 
-def call_boundary_segment_state(register: str) -> SegmentRegisterState:
+@cython.ccall
+def call_boundary_segment_state(register: object) -> SegmentRegisterState:
     """Return the typed refusal state for one segment register at a CALL exit."""
     return SegmentRegisterState(register, SegmentValueKind8616.CALL_BOUNDARY, None, SegmentOrigin.UNKNOWN)
 
 
+@cython.ccall
 def _drop_unproved_call_boundary_identities(
-    state: dict[str, SegmentRegisterState],
-    preserved_registers: frozenset[str] = frozenset(),
+    state: object,
+    preserved_registers: object = frozenset(),
 ) -> None:
     """Drop every identity that lacks a proof of preservation across a CALL.
 
@@ -138,6 +149,7 @@ def _drop_unproved_call_boundary_identities(
     General-register proxies are always dropped. ``call_stack_effect`` proves
     BP/SP storage only, not segments; a known target is not a callee model.
     """
+    register: object
     for register in tuple(state):
         if register in SEGMENT_REGISTER_SET:
             if register not in preserved_registers:
@@ -147,31 +159,33 @@ def _drop_unproved_call_boundary_identities(
 
 
 def bound_call_preservation_at_instruction_8616(
-    artifact: IRFunctionArtifact | None,
+    artifact: object,
     block: IRBlock,
     instruction: IRInstr,
-    proofs: tuple[SegmentCallPreservationResult8616, ...],
+    proofs: object,
 ) -> SegmentCallPreservationResult8616 | None:
     """Select one identical raw-body candidate without authenticating evidence."""
     candidates = tuple(
-        proof for proof in proofs
-        if proof.caller.artifact is artifact and proof.callsite_addr == instruction.addr
+        proof for proof in iter(proofs)
+        if proof.caller.artifact is artifact and operator.eq(proof.callsite_addr, instruction.addr)
     )
     if len(candidates) != 1 or artifact is None:
         return None
-    if instruction.op != "CALL" or not any(candidate is block for candidate in artifact.blocks):
+    if instruction.op != "CALL" or not any(candidate is block for candidate in iter(artifact.blocks)):
         return None
     return candidates[0]
 
 
+@cython.ccall
 def call_preservation_at_instruction_8616(
     artifact: IRFunctionArtifact | None,
     block: IRBlock,
     instruction: IRInstr,
-    proofs: tuple[SegmentCallPreservationResult8616, ...],
+    proofs: object,
     invocation_scope: Real16InvocationDomain8616 | None = None,
 ) -> SegmentCallPreservationResult8616 | None:
     """Select one complete exact-call proof bound to this identical raw body."""
+    proof: object
     proof = bound_call_preservation_at_instruction_8616(
         artifact, block, instruction, proofs,
     )
@@ -181,7 +195,7 @@ def call_preservation_at_instruction_8616(
 class _LoaderMemorySurface8616(Protocol):
     """Third-party loader memory API used for exact mapped bytes."""
 
-    def load(self, address: int, size: int) -> bytes:
+    def load(self, address: cython.longlong, size: cython.longlong) -> object:
         """Read a mapped byte range or raise for an unmapped address."""
         ...
 
@@ -198,10 +212,11 @@ class _ProjectLoaderBoundary8616(Protocol):
     loader: _LoaderSurface8616
 
 
+@cython.ccall
 def _current_image_digest_matches_8616(
     project: object,
     admission: DeclaredCallAdmission8616,
-) -> bool:
+) -> cython.bint:
     """Re-hash the entire currently loaded image against the admission.
 
     The retained ``image_base``/``image_size`` window covers caller and
@@ -218,15 +233,16 @@ def _current_image_digest_matches_8616(
         )
     except (AttributeError, KeyError, TypeError, ValueError):
         return False
-    return bool(hashlib.sha256(loaded).hexdigest() == admission.image_sha256)
+    return bool(operator.eq(hashlib.sha256(loaded).hexdigest(), admission.image_sha256))
 
 
+@cython.ccall
 def _declared_call_target_bound_8616(
     project: object,
     block: IRBlock,
     instruction: IRInstr,
     admission: DeclaredCallAdmission8616,
-) -> bool:
+) -> cython.bint:
     """Bind the consumed CALL's exact target and distance via native proof.
 
     Near calls rerun the shared declared-stub binding owner against the
@@ -258,8 +274,8 @@ def _declared_call_target_bound_8616(
     )
     return bool(
         binding.complete
-        and binding.callsite_addr == admission.callsite_addr
-        and binding.target_addr == admission.target_addr
+        and operator.eq(binding.callsite_addr, admission.callsite_addr)
+        and operator.eq(binding.target_addr, admission.target_addr)
     )
 
 
@@ -268,7 +284,7 @@ def _declared_call_consumption_bound_8616(
     block: IRBlock,
     instruction: IRInstr,
     admission: DeclaredCallAdmission8616,
-) -> bool:
+) -> cython.bint:
     """Re-authenticate one admitted declaration against current authority.
 
     Consumption requires: the admission's retained project with image window,
@@ -278,6 +294,9 @@ def _declared_call_consumption_bound_8616(
     exact ``("ds",)`` relation, and the target/distance bound by the shared
     exact native evidence. A receipt's presence is never proof.
     """
+    project: object
+    registry: object
+    source: object
     project = admission.project
     if (
         project is None
@@ -299,8 +318,8 @@ def _declared_call_consumption_bound_8616(
     if (
         registry is None
         or not registry.closes_evidence
-        or registry.image_sha256 != admission.image_sha256
-        or not any(item is admission for item in registry.admissions)
+        or operator.ne(registry.image_sha256, admission.image_sha256)
+        or not any(item is admission for item in iter(registry.admissions))
     ):
         return False
     resolution = registered_function_ir_artifact_8616(project, admission.caller_addr)
@@ -325,10 +344,10 @@ def _declared_call_consumption_bound_8616(
 
 
 def declared_call_effect_at_instruction_8616(
-    artifact: IRFunctionArtifact | None,
+    artifact: object,
     block: IRBlock,
     instruction: IRInstr,
-    admissions: tuple[DeclaredCallAdmission8616, ...],
+    admissions: object,
 ) -> DeclaredCallAdmission8616 | None:
     """Select the unique admitted declaration bound to this exact CALL.
 
@@ -344,12 +363,12 @@ def declared_call_effect_at_instruction_8616(
 
     if artifact is None or instruction.op != "CALL" or type(instruction.addr) is not int:
         return None
-    if not any(item is instruction for item in block.instrs):
+    if not any(item is instruction for item in iter(block.instrs)):
         return None
-    if not any(candidate is block for candidate in artifact.blocks):
+    if not any(candidate is block for candidate in iter(artifact.blocks)):
         return None
     candidates = tuple(
-        admission for admission in admissions
+        admission for admission in iter(admissions)
         if type(admission) is DeclaredCallAdmission8616
         and admission.binds_callsite(artifact.function_addr, instruction.addr)
     )
@@ -361,7 +380,8 @@ def declared_call_effect_at_instruction_8616(
     return admission
 
 
-def architectural_live_in_state(register: str) -> SegmentRegisterState:
+@cython.ccall
+def architectural_live_in_state(register: object) -> SegmentRegisterState:
     """Return a proven physical identity with an unknown runtime value."""
     return SegmentRegisterState(
         register,
@@ -371,43 +391,48 @@ def architectural_live_in_state(register: str) -> SegmentRegisterState:
     )
 
 
-def join_register_states(states: tuple[SegmentRegisterState, ...], register: str) -> SegmentRegisterState:
+def join_register_states(states: object, register: object) -> SegmentRegisterState:
     """Join predecessor states as a must lattice."""
-    if not states or any(state.origin is not SegmentOrigin.PROVEN or state.source is None for state in states):
+    if not states or any(state.origin is not SegmentOrigin.PROVEN or state.source is None for state in iter(states)):
         return unknown_segment_state(register)
     first = states[0]
-    if all(state.source == first.source for state in states[1:]):
-        if all(state.value_kind == first.value_kind for state in states[1:]):
+    if all(operator.eq(state.source, first.source) for state in iter(states[1:])):
+        if all(operator.eq(state.value_kind, first.value_kind) for state in iter(states[1:])):
             return first
         return SegmentRegisterState(register, SegmentValueKind8616.MERGED_PROVEN, first.source, SegmentOrigin.PROVEN)
     return SegmentRegisterState(register, SegmentValueKind8616.MERGED, None, SegmentOrigin.UNKNOWN)
 
 
-def _visible_segment_states(state: dict[str, SegmentRegisterState]) -> dict[str, SegmentRegisterState]:
+@cython.ccall
+def _visible_segment_states(state: object) -> dict[str, SegmentRegisterState]:
     """Keep general-register aliases internal to one block transfer."""
-    return {register: state[register] for register in SEGMENT_REGISTERS if register in state}
+    return {register: state[register] for register in iter(SEGMENT_REGISTERS) if register in state}
 
 
+@cython.ccall
 def _restore_source_map(
-    block_addr: int,
-    restore_sources: tuple[SegmentRestoreSource, ...],
-) -> dict[tuple[int, str], SegmentRestoreSource]:
+    block_addr: cython.longlong,
+    restore_sources: object,
+) -> dict[tuple[cython.longlong, str], SegmentRestoreSource]:
     """Index proven restore relations for one block."""
     return {
         (source.restore_instruction_addr, source.restore_register): source
-        for source in restore_sources
-        if source.block_addr == block_addr
+        for source in iter(restore_sources)
+        if operator.eq(source.block_addr, block_addr)
     }
 
 
+@cython.ccall
 def _restored_register_state(
-    dst_name: str,
-    instruction_addr: int | None,
-    instruction_entries: dict[InstructionStateKey, dict[str, SegmentRegisterState]],
-    restore_map: dict[tuple[int, str], SegmentRestoreSource],
-    saved_instruction_entries: dict[InstructionStateKey, dict[str, SegmentRegisterState]],
+    dst_name: object,
+    instruction_addr: object,
+    instruction_entries: object,
+    restore_map: object,
+    saved_instruction_entries: object,
 ) -> SegmentRegisterState | None:
     """Resolve an Alias-proved restoration to the saved pre-instruction state."""
+    saved: object
+    source: object
     if instruction_addr is None:
         return None
     source = restore_map.get((instruction_addr, dst_name))
@@ -421,13 +446,15 @@ def _restored_register_state(
     return SegmentRegisterState(dst_name, SegmentValueKind8616.STACK_RESTORE, saved.source, SegmentOrigin.PROVEN)
 
 
+@cython.ccall
 def _written_register_state(
-    dst_name: str,
+    dst_name: object,
     src: IRValue,
-    state: dict[str, SegmentRegisterState],
-    restored: SegmentRegisterState | None,
+    state: object,
+    restored: object,
 ) -> SegmentRegisterState | None:
     """Propagate typed segment identities through proven register writes."""
+    inherited: object
     if restored is not None:
         return restored
     if src.space is MemSpace.CONST and src.const is not None:
@@ -451,16 +478,17 @@ def _written_register_state(
     return None
 
 
+@cython.ccall
 def transfer_block_with_instruction_states(
     block: IRBlock,
-    entry_state: dict[str, SegmentRegisterState],
-    restore_sources: tuple[SegmentRestoreSource, ...] = (),
-    saved_instruction_entries: dict[InstructionStateKey, dict[str, SegmentRegisterState]] | None = None,
+    entry_state: object,
+    restore_sources: object = (),
+    saved_instruction_entries: object = None,
     *,
-    call_preservations: tuple[SegmentCallPreservationResult8616, ...] = (),
+    call_preservations: object = (),
     source_artifact: IRFunctionArtifact | None = None,
     invocation_scope: Real16InvocationDomain8616 | None = None,
-    declared_call_effects: tuple[DeclaredCallAdmission8616, ...] = (),
+    declared_call_effects: object = (),
     near_call_effects: Mapping[int, frozenset[str]] | None = None,
 ) -> tuple[
     dict[str, SegmentRegisterState],
@@ -481,6 +509,11 @@ def transfer_block_with_instruction_states(
     enumerated segment registers across that one CALL boundary; it never
     substitutes for a real callee proof and grants nothing else.
     """
+    declared: object
+    proof: object
+    written_state: object
+    instr: object
+    instruction_index: object
     state = dict(entry_state)
     instruction_entries: dict[InstructionStateKey, dict[str, SegmentRegisterState]] = {}
     instruction_exits: dict[InstructionStateKey, dict[str, SegmentRegisterState]] = {}
@@ -513,7 +546,7 @@ def transfer_block_with_instruction_states(
                 preserved |= frozenset(declared.retained_registers)
             # This operation-local map is prepared by the authenticated solver.
             # Apply the conditional step only under the inductive CS identity.
-            if near_call_effects is not None and state.get("cs") == architectural_live_in_state("cs"):
+            if near_call_effects is not None and operator.eq(state.get("cs"), architectural_live_in_state("cs")):
                 preserved |= near_call_effects.get(id(instr), frozenset())
             _drop_unproved_call_boundary_identities(state, preserved)
             # CALL args describe the target, not an assigned output value.

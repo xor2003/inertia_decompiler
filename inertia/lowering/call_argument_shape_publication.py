@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Publish accepted logical call shapes into the matching physical inventory.
 
 Layer: Types/Lowering.
@@ -8,6 +9,7 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import cython
 
 from dataclasses import replace
 
@@ -18,8 +20,10 @@ from .call_argument_shape import (
     CallsiteArgumentShapeReconciliation8616,
     carry_forward_logical_call_argument_shape_8616,
 )
+import operator
 
 
+@cython.ccall
 def publish_reconciled_call_argument_shape_8616(
     inventory: CallsiteSummary8616,
     updated: CallsiteSummary8616,
@@ -37,8 +41,8 @@ def publish_reconciled_call_argument_shape_8616(
     ):
         return inventory
     shape_unchanged = (
-        inventory.logical_arg_widths == updated.logical_arg_widths
-        and inventory.logical_arg_classes == updated.logical_arg_classes
+        operator.eq(inventory.logical_arg_widths, updated.logical_arg_widths)
+        and operator.eq(inventory.logical_arg_classes, updated.logical_arg_classes)
     )
     if shape_unchanged:
         return inventory

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove bounded unsigned C projections of one authenticated word value.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import Enum
@@ -18,13 +21,16 @@ from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CConstant, 
 from angr.sim_type import SimTypeChar, SimTypeInt, SimTypeNum, SimTypeShort
 
 from .semantic_cast import CSemanticCast8616, declared_variable_type_8616
+import dataclasses
+import operator
+import builtins
 
 _WORD_BITS = 16
 _NODE_LIMIT = 32
 _DEPTH_LIMIT = 16
 _ONE = 16
 _INTEGER_TYPES = (SimTypeChar, SimTypeInt, SimTypeNum, SimTypeShort)
-type _Lanes = tuple[frozenset[int], ...]
+_Lanes = typing.TypeAliasType("_Lanes", tuple[frozenset[int], ...])
 
 
 class NativeWordExpressionStatus8616(Enum):
@@ -46,7 +52,7 @@ class NativeWordExpressionFailure8616(Enum):
     UNBOUNDED = "unbounded"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NativeWordExpressionProof8616:
     """Value-only proof; it never grants memory or source freshness authority."""
 
@@ -54,15 +60,16 @@ class NativeWordExpressionProof8616:
     failure: NativeWordExpressionFailure8616 | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _WordTerm8616:
     """Symbolic low word plus its current integer width and range proof."""
 
     lanes: _Lanes
-    width: int
-    bounded: bool = True
+    width: cython.longlong
+    bounded: cython.bint = True
 
 
+@cython.ccall
 def _unsigned_width_8616(type_: object) -> int | None:
     """Accept only explicit nonvolatile unsigned byte/word integer types."""
     if not isinstance(type_, _INTEGER_TYPES) or type(type_) not in _INTEGER_TYPES or type_.signed is not False:
@@ -76,15 +83,16 @@ def _unsigned_width_8616(type_: object) -> int | None:
     return width if width in {8, 16} else None
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _WordEvaluation8616:
     """One bounded evaluation over an exact caller-authenticated leaf."""
 
     leaf: CVariable
-    remaining: int = _NODE_LIMIT
+    remaining: cython.longlong = _NODE_LIMIT
 
-    def evaluate(self, node: object, depth: int = 0) -> _WordTerm8616 | NativeWordExpressionFailure8616:
+    def evaluate(self, node: object, depth: cython.longlong = 0) -> _WordTerm8616 | NativeWordExpressionFailure8616:
         """Evaluate pure bit operations only after their C definedness checks."""
+        width: object
         self.remaining -= 1
         if self.remaining < 0 or depth >= _DEPTH_LIMIT:
             return NativeWordExpressionFailure8616.LIMIT
@@ -92,9 +100,9 @@ class _WordEvaluation8616:
             variable = cast(CVariable, node)
             identity = variable.unified_variable or variable.variable
             expected = self.leaf.unified_variable or self.leaf.variable
-            if identity is not expected or variable.vvar_id != self.leaf.vvar_id:
+            if identity is not expected or operator.ne(variable.vvar_id, self.leaf.vvar_id):
                 return NativeWordExpressionFailure8616.LEAF
-            if _unsigned_width_8616(declared_variable_type_8616(variable)) != _WORD_BITS:
+            if operator.ne(_unsigned_width_8616(declared_variable_type_8616(variable)), _WORD_BITS):
                 return NativeWordExpressionFailure8616.TYPE
             return _WordTerm8616(tuple(frozenset({bit}) for bit in range(_WORD_BITS)), _WORD_BITS)
         if type(node) is CConstant:
@@ -110,20 +118,22 @@ class _WordEvaluation8616:
             return self.binary(cast(CBinaryOp, node), depth)
         return NativeWordExpressionFailure8616.OPERATION
 
-    def conversion(self, node: CTypeCast, depth: int) -> _WordTerm8616 | NativeWordExpressionFailure8616:
+    @cython.ccall
+    def conversion(self, node: CTypeCast, depth: cython.longlong) -> _WordTerm8616 | NativeWordExpressionFailure8616:
         """Retain only visible machine casts with coherent source metadata."""
+        width: object
         width = _unsigned_width_8616(node.dst_type)
         if type(node) is not CSemanticCast8616 or width is None:
             return NativeWordExpressionFailure8616.TYPE
         source = self.evaluate(node.expr, depth + 1)
         if isinstance(source, NativeWordExpressionFailure8616):
             return source
-        if _unsigned_width_8616(node.src_type) != source.width:
+        if operator.ne(_unsigned_width_8616(node.src_type), source.width):
             return NativeWordExpressionFailure8616.TYPE
         lanes = source.lanes[:width] + (frozenset(),) * (_WORD_BITS - width)
         return _WordTerm8616(lanes, width)
 
-    def binary(self, node: CBinaryOp, depth: int) -> _WordTerm8616 | NativeWordExpressionFailure8616:
+    def binary(self, node: CBinaryOp, depth: cython.longlong) -> _WordTerm8616 | NativeWordExpressionFailure8616:
         """Preserve unsigned shifts under DOS int16 and host int32 promotion."""
         left = self.evaluate(node.lhs, depth + 1)
         if isinstance(left, NativeWordExpressionFailure8616):
@@ -136,13 +146,14 @@ class _WordEvaluation8616:
                 return right
             if not right.bounded:
                 return NativeWordExpressionFailure8616.UNBOUNDED
-            lanes = tuple(a | b for a, b in zip(left.lanes, right.lanes, strict=True))
+            lanes = tuple(a | b for a, b in builtins.iter(zip(left.lanes, right.lanes, strict=True)))
             return _WordTerm8616(lanes, max(left.width, right.width))
         if node.op not in {"Shl", "Shr"}:
             return NativeWordExpressionFailure8616.OPERATION
         return self.shift(node, left, depth)
 
-    def shift(self, node: CBinaryOp, left: _WordTerm8616, depth: int) -> _WordTerm8616 | NativeWordExpressionFailure8616:
+    @cython.ccall
+    def shift(self, node: CBinaryOp, left: _WordTerm8616, depth: cython.longlong) -> _WordTerm8616 | NativeWordExpressionFailure8616:
         """Check literal shift bounds and both target promotion domains."""
         count = node.rhs
         self.remaining -= 1
@@ -158,7 +169,7 @@ class _WordEvaluation8616:
         # u8 promotes to signed DOS int16. Only an explicit u16 operand
         # keeps a nonliteral left shift unsigned there; host int32 also
         # remains defined since 65535 << 15 is below INT32_MAX.
-        if left.width != _WORD_BITS:
+        if operator.ne(left.width, _WORD_BITS):
             return NativeWordExpressionFailure8616.SHIFT
         lanes: _Lanes = (frozenset(),) * amount + left.lanes[:_WORD_BITS - amount]
         bounded = not amount or not any(left.lanes[_WORD_BITS - amount:])
@@ -172,7 +183,7 @@ def validate_native_word_expression_8616(expression: object, leaf: CVariable) ->
     dominance, source bytes and the current C-to-native SSA correspondence.
     No coordinate, register spelling or compiler identity supplies that proof.
     """
-    if type(leaf) is not CVariable or _unsigned_width_8616(declared_variable_type_8616(leaf)) != _WORD_BITS:
+    if type(leaf) is not CVariable or operator.ne(_unsigned_width_8616(declared_variable_type_8616(leaf)), _WORD_BITS):
         return NativeWordExpressionProof8616(NativeWordExpressionStatus8616.REFUSED, NativeWordExpressionFailure8616.TYPE)
     result = _WordEvaluation8616(leaf).evaluate(expression)
     if isinstance(result, NativeWordExpressionFailure8616):
@@ -180,5 +191,5 @@ def validate_native_word_expression_8616(expression: object, leaf: CVariable) ->
     if not result.bounded:
         return NativeWordExpressionProof8616(NativeWordExpressionStatus8616.REFUSED, NativeWordExpressionFailure8616.UNBOUNDED)
     identity = tuple(frozenset({bit}) for bit in range(_WORD_BITS))
-    status = NativeWordExpressionStatus8616.PROVEN if result.lanes == identity else NativeWordExpressionStatus8616.MISMATCH
+    status = NativeWordExpressionStatus8616.PROVEN if operator.eq(result.lanes, identity) else NativeWordExpressionStatus8616.MISMATCH
     return NativeWordExpressionProof8616(status)

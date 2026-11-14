@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Recover natural loop metadata from CFG and structured IR evidence.
 
 Layer: Structuring.
@@ -13,6 +14,9 @@ Forbidden: text matching, asm/C regex, sample-specific address hacks.
 """
 
 from __future__ import annotations
+import dataclasses
+import typing
+import cython
 
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -24,6 +28,8 @@ from .natural_loop_topology import (
     NaturalLoopTopology8616,
     classify_natural_loop_topology_8616,
 )
+import operator
+import builtins
 
 __all__ = [
     "BlockSemantics",
@@ -49,64 +55,64 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LoopBackEdge:
     """CFG edge from a latch block back to a loop header."""
 
-    header: int
-    latch: int
+    header: cython.longlong
+    latch: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NaturalLoop:
     """Natural loop membership recovered from a back edge."""
 
-    header: int
-    latch: int
-    blocks: frozenset[int]
+    header: cython.longlong
+    latch: cython.longlong
+    blocks: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class InductionUpdate:
     """Recovered induction-variable update evidence."""
 
     variable: object
     initial: object | None
-    step: int
-    update_block: int
-    confidence: float
+    step: cython.longlong
+    update_block: cython.longlong
+    confidence: cython.double
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LoopGuard:
     """Recovered loop guard evidence tied to an induction variable."""
 
     variable: object
     bound: object
-    op: str
-    signed: bool
-    guard_block: int
-    confidence: float
+    op: object
+    signed: cython.bint
+    guard_block: cython.longlong
+    confidence: cython.double
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RecoveredLoop:
     """Recovered loop with optional induction and guard evidence."""
 
     loop: NaturalLoop
     induction: InductionUpdate | None
     guard: LoopGuard | None
-    confidence: float
+    confidence: cython.double
 
 
 class CFGView(Protocol):
     """Minimal CFG interface used by loop recovery."""
 
-    def successors(self, block: int) -> Iterable[int]:
+    def successors(self, block: cython.longlong) -> Iterable[cython.longlong]:
         """Return successor block ids."""
         ...
 
-    def predecessors(self, block: int) -> Iterable[int]:
+    def predecessors(self, block: cython.longlong) -> Iterable[cython.longlong]:
         """Return predecessor block ids."""
         ...
 
@@ -114,19 +120,20 @@ class CFGView(Protocol):
 class BlockSemantics(Protocol):
     """Minimal block semantics interface used by loop recovery."""
 
-    def statements(self, block: int) -> Iterable[object]:
+    def statements(self, block: cython.longlong) -> Iterable[object]:
         """Return semantic statements for a block."""
         ...
 
-    def terminator_condition(self, block: int) -> object | None:
+    def terminator_condition(self, block: cython.longlong) -> object | None:
         """Return the block terminator condition when one exists."""
         ...
 
 
-def compute_dominators(cfg: CFGView, entry: int, blocks: Iterable[int]) -> dict[int, set[int]]:
+def compute_dominators(cfg: CFGView, entry: cython.longlong, blocks: Iterable[cython.longlong]) -> object:
     """Compute dominator sets for the selected CFG blocks."""
+    b: object
     block_set = set(blocks)
-    dom = {b: set(block_set) for b in block_set}
+    dom = {b: set(block_set) for b in iter(block_set)}
     dom[entry] = {entry}
 
     changed = True
@@ -135,31 +142,34 @@ def compute_dominators(cfg: CFGView, entry: int, blocks: Iterable[int]) -> dict[
         for b in sorted(block_set):
             if b == entry:
                 continue
-            preds = [p for p in cfg.predecessors(b) if p in block_set]
-            new_dom = {b} if not preds else set.intersection(*(dom[p] for p in preds)) | {b}
-            if new_dom != dom[b]:
+            preds = [p for p in builtins.iter(cfg.predecessors(b)) if p in block_set]
+            new_dom = {b} if not preds else set.intersection(*(dom[p] for p in iter(preds))) | {b}
+            if operator.ne(new_dom, dom[b]):
                 dom[b] = new_dom
                 changed = True
 
     return dom
 
 
-def find_back_edges(cfg: CFGView, entry: int, blocks: Iterable[int]) -> list[LoopBackEdge]:
+def find_back_edges(cfg: CFGView, entry: cython.longlong, blocks: Iterable[cython.longlong]) -> object:
     """Find CFG edges whose destination dominates their source."""
     block_list = list(blocks)
     dom = compute_dominators(cfg, entry, block_list)
     edges = [
         LoopBackEdge(header=dst, latch=src)
-        for src in block_list
-        for dst in cfg.successors(src)
+        for src in iter(block_list)
+        for dst in builtins.iter(cfg.successors(src))
         if dst in dom.get(src, set())
     ]
 
     return sorted(edges, key=lambda e: (e.header, e.latch))
 
 
+@cython.ccall
 def build_natural_loop(cfg: CFGView, edge: LoopBackEdge) -> NaturalLoop:
     """Build the natural loop induced by a back edge."""
+    b: object
+    pred: object
     members = {edge.header, edge.latch}
     worklist = [edge.latch]
 
@@ -177,16 +187,18 @@ def build_natural_loop(cfg: CFGView, edge: LoopBackEdge) -> NaturalLoop:
     )
 
 
-def recover_natural_loops(cfg: CFGView, entry: int, blocks: Iterable[int]) -> list[NaturalLoop]:
+@cython.ccall
+def recover_natural_loops(cfg: CFGView, entry: cython.longlong, blocks: Iterable[cython.longlong]) -> list[NaturalLoop]:
     """Recover natural loops from CFG topology only."""
-    return [build_natural_loop(cfg, edge) for edge in find_back_edges(cfg, entry, blocks)]
+    return [build_natural_loop(cfg, edge) for edge in builtins.iter(find_back_edges(cfg, entry, blocks))]
 
 
 # ── Induction variable detection ──
 
 
-def _same_var(a: object, b: object) -> bool:
-    return repr(a) == repr(b)
+@cython.ccall
+def _same_var(a: object, b: object) -> cython.bint:
+    return operator.eq(repr(a), repr(b))
 
 
 def match_induction_update(stmt: object) -> InductionUpdate | None:
@@ -197,6 +209,10 @@ def match_induction_update(stmt: object) -> InductionUpdate | None:
 
         Operates on dynamic angr/compatibility boundary node objects, not rendered text.
         """
+        constant: object
+        op: object
+        target: object
+        value: object
         target = getattr(stmt, "target", None) or getattr(stmt, "lhs", None)
         value = getattr(stmt, "value", None) or getattr(stmt, "rhs", None)
         if target is None or value is None:
@@ -222,8 +238,12 @@ def match_induction_update(stmt: object) -> InductionUpdate | None:
     return _impl()
 
 
+@cython.ccall
 def find_loop_induction(loop: NaturalLoop, semantics: BlockSemantics) -> InductionUpdate | None:
     """Find a unique induction update inside a recovered loop."""
+    match: object
+    block: object
+    stmt: object
     candidates: list[InductionUpdate] = []
 
     for block in sorted(loop.blocks):
@@ -246,7 +266,7 @@ def find_loop_induction(loop: NaturalLoop, semantics: BlockSemantics) -> Inducti
 # ── Loop guard detection ──
 
 
-def match_loop_guard(cond: object, induction: InductionUpdate | None, guard_block: int) -> LoopGuard | None:
+def match_loop_guard(cond: object, induction: InductionUpdate | None, guard_block: cython.longlong) -> LoopGuard | None:
     """Match a typed condition as a loop guard for an induction update."""
 
     def _impl() -> LoopGuard | None:
@@ -254,6 +274,9 @@ def match_loop_guard(cond: object, induction: InductionUpdate | None, guard_bloc
 
         Operates on dynamic angr/compatibility boundary condition objects, not text.
         """
+        left: object
+        op: object
+        right: object
         if cond is None or induction is None:
             return None
 
@@ -289,12 +312,15 @@ def match_loop_guard(cond: object, induction: InductionUpdate | None, guard_bloc
     return _impl()
 
 
+@cython.ccall
 def find_loop_guard(
     loop: NaturalLoop,
     semantics: BlockSemantics,
     induction: InductionUpdate | None,
 ) -> LoopGuard | None:
     """Find the loop guard attached to a loop header or latch."""
+    guard: object
+    block: object
     for block in (loop.header, loop.latch):
         cond = semantics.terminator_condition(block)
         guard = match_loop_guard(cond, induction, block)
@@ -310,10 +336,13 @@ def recover_loops(
     cfg: CFGView,
     semantics: BlockSemantics,
     *,
-    entry: int,
-    blocks: Iterable[int],
-) -> list[RecoveredLoop]:
+    entry: cython.longlong,
+    blocks: Iterable[cython.longlong],
+) -> object:
     """Recover natural loops with optional induction and guard evidence."""
+    guard: object
+    induction: object
+    loop: object
     recovered: list[RecoveredLoop] = []
 
     for loop in recover_natural_loops(cfg, entry, blocks):

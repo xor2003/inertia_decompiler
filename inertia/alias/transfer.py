@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Alias transfer functions for register reads and writes.
 
 Layer: Alias.
@@ -8,14 +9,17 @@ work here.
 """
 
 from __future__ import annotations
+import cython
 
 from dataclasses import dataclass
 
 from .domains import FULL16, HIGH8, LOW8, register_domain_for_name, register_pair_name, register_view_for_name
 from .state import AliasCell, AliasState
+import dataclasses
+import operator
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RegisterSliceExpr:
     """Represent a derived low/high-byte view of a full register expression."""
 
@@ -23,7 +27,7 @@ class RegisterSliceExpr:
     view: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RegisterConcatExpr:
     """Represent a synthesized full register from high and low byte cells."""
 
@@ -31,8 +35,12 @@ class RegisterConcatExpr:
     low: object
 
 
-def write_register(alias: AliasState, reg_name: str, expr: object) -> AliasCell | None:
+@cython.ccall
+def write_register(alias: AliasState, reg_name: object, expr: object) -> AliasCell | None:
     """Write a register expression into alias state and update dependent views."""
+    domain: object
+    full: object
+    view: object
     domain = register_domain_for_name(reg_name)
     view = register_view_for_name(reg_name)
     if domain is None or view is None:
@@ -41,7 +49,7 @@ def write_register(alias: AliasState, reg_name: str, expr: object) -> AliasCell 
     version = alias.bump_domain(domain)
     cell = alias.set(domain, view, expr, version=version)
 
-    if view == FULL16:
+    if operator.eq(view, FULL16):
         alias.set(domain, LOW8, RegisterSliceExpr(expr, LOW8), version=version)
         alias.set(domain, HIGH8, RegisterSliceExpr(expr, HIGH8), version=version)
         return cell
@@ -54,8 +62,14 @@ def write_register(alias: AliasState, reg_name: str, expr: object) -> AliasCell 
     return cell
 
 
-def synthesize_full_register(alias: AliasState, reg_name: str) -> RegisterConcatExpr | object | None:
+@cython.ccall
+def synthesize_full_register(alias: AliasState, reg_name: object) -> RegisterConcatExpr | object | None:
     """Build a full-register expression from byte cells when evidence exists."""
+    domain: object
+    full: object
+    high: object
+    low: object
+    pair_name: object
     pair_name = register_pair_name(reg_name)
     if pair_name is None:
         return None
@@ -72,8 +86,13 @@ def synthesize_full_register(alias: AliasState, reg_name: str) -> RegisterConcat
     return RegisterConcatExpr(high.expr, low.expr)
 
 
-def read_register(alias: AliasState, reg_name: str) -> object | None:
+@cython.ccall
+def read_register(alias: AliasState, reg_name: object) -> object | None:
     """Read a register expression, synthesizing compatible views when needed."""
+    cell: object
+    domain: object
+    full: object
+    view: object
     domain = register_domain_for_name(reg_name)
     view = register_view_for_name(reg_name)
     if domain is None or view is None:
@@ -83,7 +102,7 @@ def read_register(alias: AliasState, reg_name: str) -> object | None:
     if cell is not None and cell.expr is not None and cell.is_ready():
         return cell.expr
 
-    if view == FULL16:
+    if operator.eq(view, FULL16):
         synthesized = synthesize_full_register(alias, reg_name)
         return synthesized
 

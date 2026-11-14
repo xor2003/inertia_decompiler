@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: define command-line options and parse user-selected execution policy.
@@ -5,6 +6,8 @@ Forbidden: owning decompiler semantics, source-backed recovery, or postprocess s
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import argparse
 import os
@@ -13,6 +16,7 @@ from pathlib import Path
 from tools.dosunit.catalog.real16_declared_input import read_declared_real16_input_8616
 
 from .catalog_policy import DEFAULT_CATALOG_TIMEOUT, positive_catalog_timeout
+import operator
 
 __all__ = ["CliArguments", "_build_cli_argument_parser", "parse_cli_arguments"]
 
@@ -22,56 +26,58 @@ class CliArguments(argparse.Namespace):
 
     binary: Path
     addr: int | None
-    blob: bool
-    base_addr: int = 0x1000
-    entry_point: int = 0x1000
+    blob: cython.bint
+    base_addr: cython.longlong = 0x1000
+    entry_point: cython.longlong = 0x1000
     _requested_base_addr: int | None
     _requested_entry_point: int | None
     real16_declared_input: Path | None = None
-    show_asm: bool
-    alternate_source_c: bool
-    c_target: str
+    show_asm: cython.bint
+    alternate_source_c: cython.bint
+    c_target: object
     output_c_dir: Path | None
-    trace_c_stages: bool
-    dump_layers: bool
+    trace_c_stages: cython.bint
+    dump_layers: cython.bint
     dump_layer_dir: Path
-    dump_layer_filter: str
-    proc: str | None
-    proc_kind: str
-    declared_call_effects: tuple[Path, ...]
-    timeout: int
-    catalog_timeout: int
-    window: int
+    dump_layer_filter: object
+    proc: object
+    proc_kind: object
+    declared_call_effects: object
+    timeout: cython.longlong
+    catalog_timeout: cython.longlong
+    window: cython.longlong
     exact_region_end: int | None
-    max_memory_mb: int
-    max_functions: int
-    include_library_functions: bool
-    ignore_local_sidecar_hints: bool
-    api_style: str
-    pat_backend: str
-    function_discovery_backend: str
-    rizin_timeout: int
+    max_memory_mb: cython.longlong
+    max_functions: cython.longlong
+    include_library_functions: cython.bint
+    ignore_local_sidecar_hints: cython.bint
+    api_style: object
+    pat_backend: object
+    function_discovery_backend: object
+    rizin_timeout: cython.longlong
     signature_catalog: Path | None
-    seed_engine: str
-    brief: bool
+    seed_engine: object
+    brief: cython.bint
     otel_spans: bool | None
     otel_top_n: int | None
     otel_min_ms: float | None
     otel_full_jsonl: bool | None
     otel_stderr: bool | None
-    otel_format: str | None
+    otel_format: object
     otel_text_max_spans: int | None
     otel_export_otlp: bool | None
-    otel_service_name: str | None
+    otel_service_name: object
     otel_force_flush_ms: int | None
-    otel_endpoint: str | None
+    otel_endpoint: object
     otel_span_file: Path | None
 
 
-def _parse_int(value: str) -> int:
+@cython.ccall
+def _parse_int(value: object) -> cython.longlong:
     return int(value, 0)
 
 
+@cython.ccall
 def _build_cli_argument_parser() -> argparse.ArgumentParser:
     """Build the parser defining the public decompiler CLI surface."""
     parser = argparse.ArgumentParser(
@@ -368,8 +374,9 @@ def _build_cli_argument_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def parse_cli_arguments(argv: list[str] | None = None) -> CliArguments:
+def parse_cli_arguments(argv: object = None) -> CliArguments:
     """Parse ``argv`` into the owned typed CLI argument contract."""
+    declared: object
     parser = _build_cli_argument_parser()
     parsed = parser.parse_args(argv, namespace=CliArguments())
     if not isinstance(parsed, CliArguments):
@@ -379,11 +386,12 @@ def parse_cli_arguments(argv: list[str] | None = None) -> CliArguments:
     parsed.declared_call_effects = (
         ()
         if declared is None
-        else tuple(Path(path) for path in declared)
+        else tuple(Path(path) for path in iter(declared))
     )
     return parsed
 
 
+@cython.ccall
 def _resolve_declared_load_coordinates_8616(
     parser: argparse.ArgumentParser, args: CliArguments,
 ) -> None:
@@ -402,7 +410,7 @@ def _resolve_declared_load_coordinates_8616(
     expected_entry = declaration.boot.entry.linear()
     if args._requested_base_addr is not None and args._requested_base_addr not in (expected_base, expected_base << 4):
         parser.error("--base-addr conflicts with --real16-declared-input load segment")
-    if args._requested_entry_point is not None and args.entry_point != expected_entry:
+    if args._requested_entry_point is not None and operator.ne(args.entry_point, expected_entry):
         parser.error("--entry-point conflicts with --real16-declared-input entry")
     args.base_addr = expected_base
     args.entry_point = expected_entry

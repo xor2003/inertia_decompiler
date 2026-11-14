@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Publish binary-proven far callback argument grouping.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, replace
 from enum import StrEnum
@@ -24,6 +27,8 @@ from .call_argument_shape import (
     exact_far_callback_call_shape_evidence_8616,
 )
 from .function_pointer_parameter_evidence import FunctionPointerParameterFact8616
+import dataclasses
+import operator
 
 
 class FarCallbackCallShapeRefusalKind8616(StrEnum):
@@ -34,45 +39,51 @@ class FarCallbackCallShapeRefusalKind8616(StrEnum):
     NO_WIDENED_CALLER_OBJECT = "no_widened_caller_object"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FarCallbackCallShapeRefusal8616:
     """One unmaterialized candidate, identified by its binary callsite."""
 
-    callsite_addr: int
-    callee_addr: int
+    callsite_addr: cython.longlong
+    callee_addr: cython.longlong
     kind: FarCallbackCallShapeRefusalKind8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FarCallbackCallShapeResult8616:
     """Closed census and immutable callsite inventory after shape publication."""
 
-    inventory: dict[int, CallsiteSummary8616]
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    inventory: object
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
     refusals: tuple[FarCallbackCallShapeRefusal8616, ...] = ()
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Require every attempted candidate to publish or refuse explicitly."""
         return (
-            self.raw_fact_count == self.materialized_count + self.failure_count
+            operator.eq(self.raw_fact_count, self.materialized_count + self.failure_count)
             and self.raw_fact_count >= self.normalized_fact_count >= self.classified_fact_count
-            and self.classified_fact_count == self.materialized_count
-            and self.failure_count == len(self.refusals)
+            and operator.eq(self.classified_fact_count, self.materialized_count)
+            and operator.eq(self.failure_count, len(self.refusals))
         )
 
 
+@cython.ccall
 def publish_binary_far_callback_shapes_8616(
     project: object,
-    inventory: dict[int, CallsiteSummary8616],
+    inventory: object,
     *,
-    caller_stack_objects: tuple[CallerStackObject8616, ...],
+    caller_stack_objects: object,
 ) -> FarCallbackCallShapeResult8616:
     """Publish only far callback shapes whose caller storage is also widened."""
+    callee_evidence: object
+    caller_object: object
+    logical: object
+    caller: object
+    callsite_addr: object
     published = dict(inventory)
     raw = 0
     normalized = 0
@@ -80,10 +91,10 @@ def publish_binary_far_callback_shapes_8616(
     materialized = 0
     refusals: list[FarCallbackCallShapeRefusal8616] = []
     cache: dict[
-        int,
+        cython.longlong,
         tuple[FunctionPointerParameterFact8616, tuple[CallsiteSummary8616, ...]] | None,
     ] = {}
-    for callsite_addr, caller in sorted(inventory.items()):
+    for callsite_addr, caller in sorted(tuple(inventory.items())):
         callee_addr = caller.target_addr
         if (
             caller.kind is not CallTargetKind8616.DIRECT_FAR_CALL
@@ -129,7 +140,7 @@ def publish_binary_far_callback_shapes_8616(
             )
             continue
         classified += 1
-        if caller.logical_arg_widths and caller.logical_arg_widths != logical.widths:
+        if caller.logical_arg_widths and operator.ne(caller.logical_arg_widths, logical.widths):
             raise PipelineHardError(
                 "binary far callback shape conflicts with published callsite shape",
                 layer="types/lowering",

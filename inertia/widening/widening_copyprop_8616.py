@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Copy propagation over proven alias storage domains.
 
 Layer: Widening.
@@ -9,6 +10,8 @@ CLI/reporting evidence.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -33,6 +36,10 @@ from inertia.semantics.expression_analysis import (
     VirtualValueIdentity8616,
     describe_virtual_value_identity_8616,
 )
+import dataclasses
+import operator
+import builtins
+structured_c = typing.TypeVar("structured_c")
 
 __all__ = [
     "CopypropApplicabilityProbe8616",
@@ -54,7 +61,7 @@ class _DiagnosticCRepr8616(Protocol):
 
 def _debug_copy_replacement_8616(
     *,
-    storage_key: str,
+    storage_key: object,
     original: object,
     replacement: object,
 ) -> None:
@@ -62,7 +69,7 @@ def _debug_copy_replacement_8616(
     if os.environ.get("INERTIA_DEBUG_WIDENING_COPYPROP") != "1":
         return
 
-    def _render(node: object) -> str:
+    def _render(node: object) -> object:
         """Render one dynamic angr C expression for diagnostics."""
         try:
             return str(cast(_DiagnosticCRepr8616, node).c_repr())
@@ -83,26 +90,26 @@ class _WideningCopypropCodegen8616(Protocol):
     """Codegen counters written at the dynamic third-party angr boundary."""
 
     cfunc: object | None
-    widening_copyprop_nested_replacements_8616: int
-    widening_copyprop_address_context_refused_8616: int
-    widening_copyprop_memory_kills_8616: int
-    widening_copyprop_nontrivial_stack_definitions_refused_8616: int
-    widening_copyprop_nontrivial_assignment_uses_refused_8616: int
-    widening_copyprop_recursive_definitions_refused_8616: int
-    widening_copyprop_typed_cast_definitions_refused_8616: int
-    widening_copyprop_unknown_identity_refused_8616: int
-    widening_copyprop_width_mismatch_refused_8616: int
+    widening_copyprop_nested_replacements_8616: cython.longlong
+    widening_copyprop_address_context_refused_8616: cython.longlong
+    widening_copyprop_memory_kills_8616: cython.longlong
+    widening_copyprop_nontrivial_stack_definitions_refused_8616: cython.longlong
+    widening_copyprop_nontrivial_assignment_uses_refused_8616: cython.longlong
+    widening_copyprop_recursive_definitions_refused_8616: cython.longlong
+    widening_copyprop_typed_cast_definitions_refused_8616: cython.longlong
+    widening_copyprop_unknown_identity_refused_8616: cython.longlong
+    widening_copyprop_width_mismatch_refused_8616: cython.longlong
     _inertia_widening_call_push_definition_guard_8616: SemanticLaneState
     _inertia_widening_nontrivial_definition_guard_8616: SemanticLaneState
     _inertia_widening_copy_width_guard_8616: SemanticLaneState
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class _ReusableDefinition8616:
     """One alias-proven source and the structured contexts that may consume it."""
 
     expression: object
-    condition_only: bool
+    condition_only: cython.bint
 
 
 class _ConditionNode8616(Protocol):
@@ -129,7 +136,7 @@ class _MultiStatementExpressionNode8616(Protocol):
     expr: object
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _CopypropRun8616:
     """Mutable propagation state for one widening copy-propagation pass.
 
@@ -149,19 +156,19 @@ class _CopypropRun8616:
     """
 
     typed_codegen: _WideningCopypropCodegen8616
-    enable_nested: bool
-    call_push_instruction_addrs: frozenset[int]
+    enable_nested: cython.bint
+    call_push_instruction_addrs: object
     call_push_definition_guard: SemanticLaneState
     nontrivial_definition_guard: SemanticLaneState
     copy_width_guard: SemanticLaneState
-    mutate: bool = True
-    changed: bool = False
-    guarded_call_push_assignment_ids: set[int] = field(default_factory=set)
-    block_defs: dict[str, _ReusableDefinition8616] = field(default_factory=dict)
-    virtual_defs: dict[VirtualValueIdentity8616, object] = field(default_factory=dict)
+    mutate: cython.bint = True
+    changed: cython.bint = False
+    guarded_call_push_assignment_ids: object = field(default_factory=set)
+    block_defs: object = field(default_factory=dict)
+    virtual_defs: object = field(default_factory=dict)
 
     @staticmethod
-    def _lhs_writes_memory(lhs: object) -> bool:
+    def _lhs_writes_memory(lhs: object) -> cython.bint:
         """Classify lvalues through the dynamic third-party angr C AST boundary."""
         from angr.analyses.decompiler.structured_codegen import c as structured_c
 
@@ -176,8 +183,11 @@ class _CopypropRun8616:
         # Unknown lvalue shape: conservatively treat it as an observable memory write.
         return True
 
-    def _block_def_key(self, storage_facts: AliasStorageFacts) -> str | None:
+    @cython.ccall
+    def _block_def_key(self, storage_facts: AliasStorageFacts) -> object:
         """Create a key from alias facts crossing a dynamic compatibility boundary."""
+        domain: object
+        identity: object
         domain = storage_facts.domain
         identity = storage_facts.identity
         if domain is None or identity is None:
@@ -188,7 +198,12 @@ class _CopypropRun8616:
             return None
         return f"{domain}:{identity}"
 
-    def _replacement_for_variable(self, node: object, *, condition_use: bool = False) -> object | None:
+    @cython.ccall
+    def _replacement_for_variable(self, node: object, *, condition_use: cython.bint = False) -> object | None:
+        definition: object
+        storage_key: object
+        virtual_identity: object
+        virtual_replacement: object
         from angr.analyses.decompiler.structured_codegen import c as structured_c
 
         if not isinstance(node, structured_c.CVariable):
@@ -231,6 +246,7 @@ class _CopypropRun8616:
             return size * 8 if isinstance(size, int) and size > 0 else None
         return None
 
+    @cython.ccall
     def _recordable_copy_source(self, lhs: object, rhs: object) -> _ReusableDefinition8616 | None:
         """Return a reusable RHS only when no explicit conversion is crossed.
 
@@ -243,6 +259,8 @@ class _CopypropRun8616:
         them duplicates work while the named storage remains live. Transient
         register carriers still require propagation into structured uses.
         """
+        lhs_bits: object
+        rhs_bits: object
         from angr.analyses.decompiler.structured_codegen import c as structured_c
 
         if isinstance(rhs, structured_c.CTypeCast):
@@ -257,7 +275,7 @@ class _CopypropRun8616:
             self.copy_width_guard.normalized += 1
             self.copy_width_guard.classified += 1
             self.copy_width_guard.materialized += 1
-            if lhs_bits is None or rhs_bits is None or lhs_bits != rhs_bits:
+            if lhs_bits is None or rhs_bits is None or operator.ne(lhs_bits, rhs_bits):
                 self.typed_codegen.widening_copyprop_width_mismatch_refused_8616 += 1
                 return None
         lhs_identity = describe_alias_storage(lhs).identity
@@ -281,11 +299,13 @@ class _CopypropRun8616:
         stored = _clone_c_ast_tree_8616(rhs) if self.mutate else rhs
         return _ReusableDefinition8616(stored, condition_only=nontrivial)
 
-    def _expression_reads_storage_key(self, expr: object, storage_key: str) -> bool:
+    @cython.ccall
+    def _expression_reads_storage_key(self, expr: object, storage_key: object) -> cython.bint:
         """Return whether an expression reads the alias domain being defined."""
+        nested: object
         from angr.analyses.decompiler.structured_codegen import c as structured_c
 
-        for nested in (expr, *_iter_c_nodes_deep_8616(expr)):
+        for nested in (expr, ) + tuple(_iter_c_nodes_deep_8616(expr)):
             if not isinstance(nested, structured_c.CVariable):
                 continue
             nested_key = self._block_def_key(describe_alias_storage(nested))
@@ -293,7 +313,8 @@ class _CopypropRun8616:
                 return True
         return False
 
-    def _should_process_child_8616(self, parent: object, attr: str) -> bool:
+    @cython.ccall
+    def _should_process_child_8616(self, parent: object, attr: object) -> cython.bint:
         """Filter children through the dynamic third-party angr C AST boundary."""
         from angr.analyses.decompiler.structured_codegen import c as structured_c
 
@@ -305,8 +326,10 @@ class _CopypropRun8616:
                 return False
         return True
 
-    def _transform_nested_8616(self, node: object, *, condition_use: bool) -> object:
+    @cython.ccall
+    def _transform_nested_8616(self, node: object, *, condition_use: cython.bint) -> object:
         """Transform nested nodes through the dynamic third-party angr C AST boundary."""
+        nested_replacement: object
         from angr.analyses.decompiler.structured_codegen import c as structured_c
 
         if isinstance(node, structured_c.CMultiStatementExpression):
@@ -322,8 +345,9 @@ class _CopypropRun8616:
         # writes back only nodes that differ, so no AST mutation escapes.
         return _clone_c_ast_tree_8616(nested_replacement) if self.mutate else node
 
-    def _propagate_expr(self, expr: object, *, condition_use: bool = False) -> object:
+    def _propagate_expr(self, expr: object, *, condition_use: cython.bint = False) -> object:
         """Propagate expressions through the dynamic third-party angr C AST boundary."""
+        replacement: object
         from angr.analyses.decompiler.structured_codegen import c as structured_c
 
         if self.enable_nested and isinstance(expr, structured_c.CMultiStatementExpression):
@@ -358,8 +382,13 @@ class _CopypropRun8616:
             self.changed = True
         return expr
 
+    @cython.ccall
     def _record_virtual_copy_definition(self, lhs: object, rhs: object) -> None:
         """Record a pure whole-value virtual copy from explicit typed evidence."""
+        identity: object
+        lhs_bits: object
+        rhs_identity: object
+        source: object
         from angr.analyses.decompiler.structured_codegen import c as structured_c
 
         identity = describe_virtual_value_identity_8616(lhs)
@@ -378,13 +407,18 @@ class _CopypropRun8616:
             return
         lhs_bits = self._expression_bit_width(lhs)
         source_bits = self._expression_bit_width(source)
-        if lhs_bits is None or lhs_bits != source_bits:
+        if lhs_bits is None or operator.ne(lhs_bits, source_bits):
             self.virtual_defs.pop(identity, None)
             return
         self.virtual_defs[identity] = _clone_c_ast_tree_8616(source) if self.mutate else source
 
+    @cython.ccall
     def _propagate_virtual_comparison_operands(self, condition: object) -> None:
         """Replace direct comparison carriers from proven whole-value copies."""
+        identity: object
+        replacement: object
+        is_lhs: object
+        operand: object
         from angr.analyses.decompiler.structured_codegen import c as structured_c
 
         if not self.enable_nested:
@@ -397,9 +431,9 @@ class _CopypropRun8616:
         for is_lhs, operand in ((True, comparison.lhs), (False, comparison.rhs)):
             identity = describe_virtual_value_identity_8616(operand)
             replacement = self.virtual_defs.get(identity) if identity is not None else None
-            if replacement is None or self._expression_bit_width(operand) != self._expression_bit_width(
+            if replacement is None or operator.ne(self._expression_bit_width(operand), self._expression_bit_width(
                 replacement
-            ):
+            )):
                 continue
             if self.mutate:
                 if is_lhs:
@@ -411,7 +445,8 @@ class _CopypropRun8616:
             )
             self.changed = True
 
-    def _propagate_condition_pair_8616(self, pair: object) -> tuple[object, bool]:
+    @cython.ccall
+    def _propagate_condition_pair_8616(self, pair: object) -> tuple[object, cython.bint]:
         """Propagate one ``(condition, node)`` pair; clear defs on side effects."""
         if not isinstance(pair, tuple) or len(pair) < 2:
             return pair, False
@@ -426,6 +461,7 @@ class _CopypropRun8616:
             self.virtual_defs.clear()
         return pair, pair_changed
 
+    @cython.ccall
     def _propagate_direct_condition(self, stmt: object) -> None:
         """Consume current block definitions in a structured condition.
 
@@ -434,6 +470,11 @@ class _CopypropRun8616:
         reaching it. Nested statement bodies still receive fresh maps and
         therefore cannot inherit unproven loop-carried state.
         """
+        cond_node: object
+        condition: object
+        condition_node: object
+        pairs_node: object
+        pair: object
         condition_node = cast(_ConditionNode8616, stmt) if hasattr(stmt, "condition") else None
         cond_node = cast(_CondNode8616, stmt) if hasattr(stmt, "cond") else None
         condition = condition_node.condition if condition_node is not None else None
@@ -464,8 +505,10 @@ class _CopypropRun8616:
             self.block_defs.clear()
             self.virtual_defs.clear()
 
+    @cython.ccall
     def _walk_assignment(self, stmt: object) -> None:
         """Propagate through one ``CAssignment`` and update definition maps."""
+        lhs_key: object
         from angr.analyses.decompiler.structured_codegen import c as structured_c
 
         assignment = cast(structured_c.CAssignment, stmt)
@@ -520,15 +563,17 @@ class _CopypropRun8616:
             self.block_defs.clear()
             self.virtual_defs.clear()
 
+    @cython.ccall
     def _record_block_definition(
         self,
         stmt: object,
         lhs: object,
         rhs: object,
-        lhs_key: str,
-        guarded_call_push_definition: bool,
+        lhs_key: object,
+        guarded_call_push_definition: cython.bint,
     ) -> None:
         """Record, refuse, or drop one alias-proven block definition."""
+        recordable_source: object
         if guarded_call_push_definition:
             self.block_defs.pop(lhs_key, None)
             assignment_id = id(stmt)
@@ -550,13 +595,15 @@ class _CopypropRun8616:
         else:
             self.block_defs[lhs_key] = recordable_source
 
+    @cython.ccall
     def walk_statements(
         self,
         statements_obj: object,
-        inherited_defs: dict[str, _ReusableDefinition8616] | None = None,
-        inherited_virtual_defs: dict[VirtualValueIdentity8616, object] | None = None,
+        inherited_defs: object = None,
+        inherited_virtual_defs: object = None,
     ) -> None:
         """Walk statements through the dynamic third-party angr C AST boundary."""
+        stmt: object
         stmts = _unwrap_statements_8616(statements_obj)
         # Map storage domain key -> source_expr for last plain-variable definition.
         parent_defs = self.block_defs
@@ -570,6 +617,7 @@ class _CopypropRun8616:
             self.block_defs = parent_defs
             self.virtual_defs = parent_virtual_defs
 
+    @cython.ccall
     def _walk_statement_8616(self, stmt: object) -> None:
         """Dispatch one structured statement to its propagation arm."""
         from angr.analyses.decompiler.structured_codegen import c as structured_c
@@ -605,8 +653,14 @@ class _CopypropRun8616:
             self.block_defs.clear()
             self.virtual_defs.clear()
 
+    @cython.ccall
     def _walk_node(self, node: object) -> None:
         """Walk nested nodes through the dynamic third-party angr C AST boundary."""
+        child: object
+        attr: object
+        body: object
+        case_body: object
+        cond: object
         if node is None:
             return
         if hasattr(node, "statements"):
@@ -651,8 +705,10 @@ _WIDENING_COPYPROP_COUNTERS_8616: tuple[str, ...] = (
 )
 
 
+@cython.ccall
 def _iter_switch_case_bodies_8616(cases: object) -> tuple[object, ...]:
     """Yield switch-case bodies through the dynamic third-party angr boundary."""
+    case: object
     if cases is None:
         return ()
     if isinstance(cases, dict):
@@ -671,8 +727,8 @@ def _prepare_copyprop_run_8616(
     inventory_owner: object,
     counter_surface: _WideningCopypropCodegen8616,
     *,
-    enable_nested: bool,
-    mutate: bool = True,
+    enable_nested: cython.bint,
+    mutate: cython.bint = True,
 ) -> _CopypropRun8616:
     """Build one propagation run with its guards and counter surface.
 
@@ -682,15 +738,16 @@ def _prepare_copyprop_run_8616(
     a read-only applicability probe. Counter initialization crosses the
     dynamic third-party angr codegen boundary.
     """
+    counter_name: object
     callsite_inventory = callsite_summary_inventory_8616(inventory_owner)
     raw_call_push_instruction_addrs = tuple(
         instruction_addr
-        for summary in callsite_inventory.values()
-        for instruction_addr in summary.push_arg_instruction_addrs
+        for summary in builtins.iter(callsite_inventory.values())
+        for instruction_addr in iter(summary.push_arg_instruction_addrs)
     )
     call_push_instruction_addrs = frozenset(
         instruction_addr
-        for instruction_addr in raw_call_push_instruction_addrs
+        for instruction_addr in iter(raw_call_push_instruction_addrs)
         if isinstance(instruction_addr, int)
     )
     call_push_definition_guard = SemanticLaneState(
@@ -726,10 +783,12 @@ def _prepare_copyprop_run_8616(
     )
 
 
+@cython.ccall
 def _walk_copyprop_roots_8616(cfunc: object, run: _CopypropRun8616) -> None:
     """Walk the same roots the pass consumes, across the dynamic angr boundary."""
+    root: object
     roots = (getattr(cfunc, "statements", None), getattr(cfunc, "body", None))
-    walked_root_ids: set[int] = set()
+    walked_root_ids: set[cython.longlong] = set()
     for root in roots:
         if root is None or id(root) in walked_root_ids:
             continue
@@ -739,7 +798,8 @@ def _walk_copyprop_roots_8616(cfunc: object, run: _CopypropRun8616) -> None:
         run.walk_statements(cfunc)
 
 
-def _widening_copy_propagation_8616(codegen: object, *, enable_nested: bool = False) -> bool:
+@cython.ccall
+def _widening_copy_propagation_8616(codegen: object, *, enable_nested: cython.bint = False) -> cython.bint:
     """Propagate copies using alias storage domains.
 
     For each block, maintain a map from storage domain to the last
@@ -750,6 +810,7 @@ def _widening_copy_propagation_8616(codegen: object, *, enable_nested: bool = Fa
     The codegen and C AST nodes cross a dynamic third-party angr boundary; owned
     Inertia counters are written through a typed protocol cast.
     """
+    cfunc: object
     typed_codegen = cast(_WideningCopypropCodegen8616, codegen)
     try:
         cfunc = typed_codegen.cfunc
@@ -767,7 +828,7 @@ def _widening_copy_propagation_8616(codegen: object, *, enable_nested: bool = Fa
     return run.changed
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _CopypropProbeDiagnostics8616:
     """Disposable counter/guard surface isolating a read-only probe run.
 
@@ -778,15 +839,15 @@ class _CopypropProbeDiagnostics8616:
     """
 
     cfunc: object | None = None
-    widening_copyprop_nested_replacements_8616: int = 0
-    widening_copyprop_address_context_refused_8616: int = 0
-    widening_copyprop_memory_kills_8616: int = 0
-    widening_copyprop_nontrivial_stack_definitions_refused_8616: int = 0
-    widening_copyprop_nontrivial_assignment_uses_refused_8616: int = 0
-    widening_copyprop_recursive_definitions_refused_8616: int = 0
-    widening_copyprop_typed_cast_definitions_refused_8616: int = 0
-    widening_copyprop_unknown_identity_refused_8616: int = 0
-    widening_copyprop_width_mismatch_refused_8616: int = 0
+    widening_copyprop_nested_replacements_8616: cython.longlong = 0
+    widening_copyprop_address_context_refused_8616: cython.longlong = 0
+    widening_copyprop_memory_kills_8616: cython.longlong = 0
+    widening_copyprop_nontrivial_stack_definitions_refused_8616: cython.longlong = 0
+    widening_copyprop_nontrivial_assignment_uses_refused_8616: cython.longlong = 0
+    widening_copyprop_recursive_definitions_refused_8616: cython.longlong = 0
+    widening_copyprop_typed_cast_definitions_refused_8616: cython.longlong = 0
+    widening_copyprop_unknown_identity_refused_8616: cython.longlong = 0
+    widening_copyprop_width_mismatch_refused_8616: cython.longlong = 0
     _inertia_widening_call_push_definition_guard_8616: SemanticLaneState = field(
         default_factory=SemanticLaneState
     )
@@ -798,7 +859,8 @@ class _CopypropProbeDiagnostics8616:
     )
 
 
-    def counter_values(self) -> tuple[tuple[str, int], ...]:
+    @cython.ccall
+    def counter_values(self) -> tuple[tuple[str, cython.longlong], ...]:
         """Project owned diagnostic counters for the external codegen boundary."""
         return (
             ("widening_copyprop_nested_replacements_8616", self.widening_copyprop_nested_replacements_8616),
@@ -813,7 +875,7 @@ class _CopypropProbeDiagnostics8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CopypropApplicabilityProbe8616:
     """Read-only evidence that copy propagation is a proven no-op.
 
@@ -825,6 +887,7 @@ class CopypropApplicabilityProbe8616:
     diagnostics: _CopypropProbeDiagnostics8616 | None
 
 
+@cython.ccall
 def widening_copy_propagation_probe_8616(codegen: object) -> CopypropApplicabilityProbe8616 | None:
     """Prove whether copy propagation can change the current C AST.
 
@@ -842,6 +905,8 @@ def widening_copy_propagation_probe_8616(codegen: object) -> CopypropApplicabili
     Boundary exceptions raised by the real decision path propagate
     identically; unexpected boundary type failures are treated as unknown.
     """
+    cfunc: object
+    counter_name: object
     typed_codegen = cast(_WideningCopypropCodegen8616, codegen)
     try:
         cfunc = typed_codegen.cfunc
@@ -869,6 +934,7 @@ def widening_copy_propagation_probe_8616(codegen: object) -> CopypropApplicabili
     return CopypropApplicabilityProbe8616(diagnostics=diagnostics)
 
 
+@cython.ccall
 def publish_copyprop_probe_diagnostics_8616(
     codegen: object, diagnostics: _CopypropProbeDiagnostics8616
 ) -> None:
@@ -878,6 +944,9 @@ def publish_copyprop_probe_diagnostics_8616(
     no-op pass performs, so validation consumers observe identical evidence
     whether the pass ran or was scheduled out.
     """
+    current: object
+    counter_name: object
+    probe_delta: object
     for counter_name, probe_delta in diagnostics.counter_values():
         if not hasattr(codegen, counter_name):
             # Dynamic-name init at the angr codegen boundary (no owned container).
@@ -900,8 +969,10 @@ def publish_copyprop_probe_diagnostics_8616(
     )
 
 
-def _is_side_effecting(expr: object) -> bool:
+@cython.ccall
+def _is_side_effecting(expr: object) -> cython.bint:
     """Check if expression has side effects that prevent copy propagation."""
+    node: object
     from angr.analyses.decompiler.structured_codegen import c as structured_c
 
     for node in _iter_c_nodes_deep_8616(expr):
@@ -912,28 +983,29 @@ def _is_side_effecting(expr: object) -> bool:
     return False
 
 
-def _is_same_expr(a: object, b: object) -> bool:
+@cython.ccall
+def _is_same_expr(a: object, b: object) -> cython.bint:
     """Check if two expressions are structurally identical across the dynamic third-party angr boundary."""
     from angr.analyses.decompiler.structured_codegen import c as structured_c
 
     if type(a) is not type(b):
         return False
     if isinstance(a, structured_c.CVariable):
-        return getattr(a, "variable", None) is getattr(b, "variable", None) and getattr(a, "offset", None) == getattr(
+        return getattr(a, "variable", None) is getattr(b, "variable", None) and operator.eq(getattr(a, "offset", None), getattr(
             b, "offset", None
-        )
+        ))
     if isinstance(a, structured_c.CConstant):
-        return getattr(a, "value", None) == getattr(b, "value", None)
+        return operator.eq(getattr(a, "value", None), getattr(b, "value", None))
     if isinstance(a, structured_c.CBinaryOp):
         rhs_binary = b
         return (
-            a.op == getattr(rhs_binary, "op", None)
+            operator.eq(a.op, getattr(rhs_binary, "op", None))
             and _is_same_expr(a.lhs, getattr(rhs_binary, "lhs", None))
             and _is_same_expr(a.rhs, getattr(rhs_binary, "rhs", None))
         )
     if isinstance(a, structured_c.CUnaryOp):
         rhs_unary = b
-        return a.op == getattr(rhs_unary, "op", None) and _is_same_expr(
+        return operator.eq(a.op, getattr(rhs_unary, "op", None)) and _is_same_expr(
             a.operand, getattr(rhs_unary, "operand", None)
         )
     return a is b

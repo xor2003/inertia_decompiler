@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Match condition substitutions without changing guarded effects.
 
 Layer: Tail Validation.
@@ -12,21 +13,28 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import Counter
+import operator
 
 _GUARD_PREFIXES: tuple[str, ...] = ("if:", "ifbreak:", "while:", "dowhile:", "for:", "loop:")
 _LOOP_BODY_PREFIXES: tuple[str, ...] = ("loop-body-calls:", "loop-body-writes:")
 
 
+@cython.ccall
 def _replace_control_condition(
-    token: str, pairs: tuple[tuple[str, str], ...],
-) -> tuple[str, str | None] | None:
+    token: object, pairs: object,
+) -> object:
     """Return an exact substitution and its plain-guard owner, or refuse."""
+    after: object
+    before: object
+    prefix: object
     matches: set[tuple[str, str | None]] = set()
     for before, after in pairs:
         for prefix in _GUARD_PREFIXES:
-            if token == prefix + before:
+            if operator.eq(token, prefix + before):
                 matches.add((prefix + after, before))
         for prefix in _LOOP_BODY_PREFIXES:
             head = prefix + before + ":"
@@ -37,17 +45,20 @@ def _replace_control_condition(
 
 
 def control_condition_delta_matches_8616(
-    removed: tuple[str, ...],
-    added: tuple[str, ...],
-    pairs: tuple[tuple[str, str], ...],
-) -> bool:
+    removed: object,
+    added: object,
+    pairs: object,
+) -> cython.bint:
     """Require a bijection of guards and unchanged condition-owned effects.
 
     Each proven condition replacement needs one plain guard. Body records may
     accompany it, but cannot substitute for that guard or change their payload.
     Control kinds, multiplicities, call ordering, and writes remain exact.
     """
-    if not pairs or len(removed) != len(added):
+    guard: object
+    replacement: object
+    token: object
+    if not pairs or operator.ne(len(removed), len(added)):
         return False
     replacements: list[str] = []
     guards: list[str] = []
@@ -60,6 +71,6 @@ def control_condition_delta_matches_8616(
         if guard is not None:
             guards.append(guard)
     return (
-        Counter(guards) == Counter(before for before, _after in pairs)
-        and Counter(replacements) == Counter(added)
+        operator.eq(Counter(guards), Counter(before for before, _after in iter(pairs)))
+        and operator.eq(Counter(replacements), Counter(added))
     )

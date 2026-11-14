@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Encode closed direct-global Widening evidence for CLI persistence.
 
 Layer: Widening.
@@ -9,6 +10,8 @@ CLI/reporting evidence.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from inertia.ir.core import AddressStatus, IRAddress, MemSpace, SegmentOrigin
 
@@ -16,17 +19,20 @@ from .global_object_layout import (
     DirectGlobalObjectLayout8616,
     DirectGlobalObjectLayoutEvidence8616,
 )
+import operator
 
 _SCHEMA_8616 = 1
 
 
-def _nonnegative_int_8616(value: object, *, field: str) -> int:
+@cython.ccall
+def _nonnegative_int_8616(value: object, *, field: object) -> cython.longlong:
     """Parse one strict nonnegative transport integer."""
     if not isinstance(value, int) or isinstance(value, bool) or value < 0:
         raise ValueError(f"direct-global layout transport has invalid {field}")
     return value
 
 
+@cython.ccall
 def _layout_record_8616(layout: DirectGlobalObjectLayout8616) -> dict[str, object]:
     """Serialize one proven direct-global object extent."""
     return {
@@ -39,6 +45,7 @@ def _layout_record_8616(layout: DirectGlobalObjectLayout8616) -> dict[str, objec
     }
 
 
+@cython.ccall
 def direct_global_object_layout_evidence_record_8616(
     evidence: DirectGlobalObjectLayoutEvidence8616,
 ) -> dict[str, object]:
@@ -46,7 +53,7 @@ def direct_global_object_layout_evidence_record_8616(
     validate_direct_global_object_layout_evidence_8616(evidence)
     return {
         "schema": _SCHEMA_8616,
-        "layouts": [_layout_record_8616(layout) for layout in evidence.layouts],
+        "layouts": [_layout_record_8616(layout) for layout in iter(evidence.layouts)],
         "counts": {
             "raw": evidence.raw_fact_count,
             "normalized": evidence.normalized_fact_count,
@@ -59,6 +66,7 @@ def direct_global_object_layout_evidence_record_8616(
 
 def _layout_from_record_8616(record: object) -> DirectGlobalObjectLayout8616:
     """Restore one validated direct-global object extent."""
+    raw_proofs: object
     if not isinstance(record, dict):
         raise ValueError("direct-global layout transport entry must be an object")
     raw_proofs = record.get("proof_function_addrs")
@@ -66,9 +74,9 @@ def _layout_from_record_8616(record: object) -> DirectGlobalObjectLayout8616:
         raise ValueError("direct-global layout transport has invalid proof functions")
     proofs = tuple(
         _nonnegative_int_8616(value, field="proof function address")
-        for value in raw_proofs
+        for value in iter(raw_proofs)
     )
-    if not proofs or proofs != tuple(sorted(set(proofs))):
+    if not proofs or operator.ne(proofs, tuple(sorted(tuple(set(proofs))))):
         raise ValueError("direct-global layout proof functions are not canonical")
     layout = DirectGlobalObjectLayout8616(
         address=IRAddress(
@@ -94,6 +102,7 @@ def validate_direct_global_object_layout_evidence_8616(
     evidence: DirectGlobalObjectLayoutEvidence8616,
 ) -> None:
     """Refuse open, contradictory, or noncanonical direct-global evidence."""
+    layout: object
     counts = (
         evidence.raw_fact_count,
         evidence.normalized_fact_count,
@@ -101,7 +110,7 @@ def validate_direct_global_object_layout_evidence_8616(
         evidence.materialized_count,
         evidence.failure_count,
     )
-    if not all(count >= 0 for count in counts):
+    if not all(count >= 0 for count in iter(counts)):
         raise ValueError("direct-global layout evidence has negative accounting")
     if not (
         evidence.raw_fact_count >= evidence.normalized_fact_count
@@ -114,9 +123,9 @@ def validate_direct_global_object_layout_evidence_8616(
         raise ValueError("classified direct-global layouts were not materialized")
     layout_keys = tuple(
         (layout.address.space.value, layout.address.offset, layout.address.size)
-        for layout in evidence.layouts
+        for layout in iter(evidence.layouts)
     )
-    if layout_keys != tuple(sorted(set(layout_keys))):
+    if operator.ne(layout_keys, tuple(sorted(tuple(set(layout_keys))))):
         raise ValueError("direct-global layouts are not canonical")
     for layout in evidence.layouts:
         _layout_from_record_8616(_layout_record_8616(layout))
@@ -126,14 +135,16 @@ def direct_global_object_layout_evidence_from_record_8616(
     record: object,
 ) -> DirectGlobalObjectLayoutEvidence8616:
     """Restore one accepted direct-global Widening census."""
-    if not isinstance(record, dict) or record.get("schema") != _SCHEMA_8616:
+    counts: object
+    raw_layouts: object
+    if not isinstance(record, dict) or operator.ne(record.get("schema"), _SCHEMA_8616):
         raise ValueError("direct-global layout transport has an unsupported schema")
     raw_layouts = record.get("layouts")
     counts = record.get("counts")
     if not isinstance(raw_layouts, list) or not isinstance(counts, dict):
         raise ValueError("direct-global layout transport has invalid collections")
     evidence = DirectGlobalObjectLayoutEvidence8616(
-        layouts=tuple(_layout_from_record_8616(item) for item in raw_layouts),
+        layouts=tuple(_layout_from_record_8616(item) for item in iter(raw_layouts)),
         raw_fact_count=_nonnegative_int_8616(counts.get("raw"), field="raw count"),
         normalized_fact_count=_nonnegative_int_8616(
             counts.get("normalized"),

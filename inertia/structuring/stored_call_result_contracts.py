@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed status contracts for stored call-result occurrence ownership.
 
 Layer: Structuring.
@@ -8,9 +9,12 @@ Do not perform alias-state ownership, widening, type/materialization recovery, r
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import Enum
+import dataclasses
 
 __all__ = (
     "StoredCallResultOccurrenceResult8616",
@@ -39,35 +43,35 @@ class StoredCallResultRefusalReason8616(Enum):
     STRUCTURED_ORDER_UNKNOWN = "structured_order_unknown"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StoredCallResultRefusal8616:
     """One exact callsite whose duplicate occurrence cannot be removed."""
 
-    callsite_addr: int
+    callsite_addr: cython.longlong
     reason: StoredCallResultRefusalReason8616
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class StoredCallResultOccurrenceStats8616:
     """Closed evidence counters for stored-call occurrence ownership."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    removed_standalone_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    removed_standalone_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StoredCallResultOccurrenceResult8616:
     """Typed result published by the Structuring stored-call owner."""
 
     verdict: StoredCallResultOccurrenceVerdict8616
     stats: StoredCallResultOccurrenceStats8616
-    refusals: tuple[StoredCallResultRefusal8616, ...]
+    refusals: object
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether a proven duplicate standalone call was removed."""
         return self.stats.materialized_count > 0

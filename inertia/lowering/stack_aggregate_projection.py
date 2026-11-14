@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Types/Lowering.
 
 Responsibility: preserve a proven aggregate's canonical coordinate during replay.
@@ -7,6 +8,8 @@ Candidates must already be proven views of the same machine-BP object.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import MutableMapping
 from dataclasses import dataclass
@@ -24,39 +27,44 @@ from .stack_variable_coordinates import (
     record_stack_variable_coordinate_projection_8616,
     stack_variable_coordinate_registry_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 
 def select_stack_aggregate_projection_8616(
     codegen: object,
-    candidates: list[CVariable],
+    candidates: object,
     tracked: CVariable | None,
     *,
-    bp_offset: int,
-    entry_sp_offset: int | None,
-    size: int,
+    bp_offset: cython.longlong,
+    entry_sp_offset: object,
+    size: cython.longlong,
 ) -> CVariable:
     """Select a current proven view without erasing a canonical projection.
 
     Multiple entry-SP views share the caller-proven machine-BP identity; their
     multiplicity must not force a fallback to a raw-BP coordinate spelling.
     """
+    canonical: object
+    projection: object
     if not candidates:
         raise ValueError("aggregate selection requires a current proven candidate")
     projection = stack_variable_coordinate_registry_8616(codegen).for_bp_range(bp_offset, size)
-    canonical: CVariable | None = next(
-        (candidate for candidate in candidates if projection is not None and candidate is projection.cvar),
+    canonical = next(
+        (candidate for candidate in iter(candidates) if projection is not None and candidate is projection.cvar),
         None,
     )
     entry_views: tuple[CVariable, ...] = tuple(
-        candidate for candidate in candidates
+        candidate for candidate in iter(candidates)
         if isinstance(candidate.variable, SimStackVariable)
-        and candidate.variable.offset == entry_sp_offset
+        and operator.eq(candidate.variable.offset, entry_sp_offset)
     )
     selected: CVariable = canonical or (entry_views[0] if entry_views else tracked) or candidates[0]
     variable = selected.variable
     if not isinstance(variable, SimStackVariable) or entry_sp_offset is None:
         return selected
-    if projection is not None and projection.entry_sp_offset == entry_sp_offset:
+    if projection is not None and operator.eq(projection.entry_sp_offset, entry_sp_offset):
         record_stack_variable_coordinate_alias_8616(
             codegen, bp_offset=bp_offset, size=size, variable=variable,
         )
@@ -72,21 +80,21 @@ def select_stack_aggregate_projection_8616(
     return selected
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackAggregateViewRebindReport8616:
     """Closed evidence counters for canonical aggregate AST references."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int = 0
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong = 0
 
 
 class _AggregateFunctionBoundary8616(Protocol):
     """Third-party AST and declaration inventories sharing aggregate views."""
 
-    addr: int
+    addr: cython.longlong
     statements: object
     variables_in_use: MutableMapping[object, object]
     unified_local_vars: MutableMapping[object, object]
@@ -103,10 +111,10 @@ def restore_live_stack_aggregate_declaration_8616(
     codegen: object,
     tracked: object,
     *,
-    bp_offset: int,
-    entry_sp_offset: int | None,
-    size: int,
-) -> bool:
+    bp_offset: cython.longlong,
+    entry_sp_offset: object,
+    size: cython.longlong,
+) -> cython.bint:
     """Restore a live aggregate's declaration or lost coordinate projection.
 
     A copied private cache alone is insufficient. Require the exact tracked
@@ -116,14 +124,16 @@ def restore_live_stack_aggregate_declaration_8616(
     with the exact already-materialized array type. No name or offset-based
     variable join is performed.
     """
+    existing: object
+    live: object
     if not isinstance(tracked, CVariable) or not isinstance(tracked.variable, SimStackVariable):
         return False
     boundary = cast(_AggregateViewBoundary8616, codegen)
     variable = tracked.variable
     array_type = tracked.variable_type
-    width_matches = variable.size == size or (
+    width_matches = operator.eq(variable.size, size) or (
         isinstance(variable.size, int) and 0 < variable.size < size
-        and isinstance(array_type, SimTypeFixedSizeArray) and array_type.size == size * 8
+        and isinstance(array_type, SimTypeFixedSizeArray) and operator.eq(array_type.size, size * 8)
     )
     try:
         function = boundary.cfunc
@@ -131,18 +141,18 @@ def restore_live_stack_aggregate_declaration_8616(
     except AttributeError:
         return False
     if (
-        entry_sp_offset is None or variable.base != "bp" or variable.offset != entry_sp_offset
-        or not width_matches or variable.region != function.addr
+        entry_sp_offset is None or variable.base != "bp" or operator.ne(variable.offset, entry_sp_offset)
+        or not width_matches or operator.ne(variable.region, function.addr)
     ):
         return False
-    declared = any(value is tracked for value in function.variables_in_use.values())
+    declared = any(value is tracked for value in builtins.iter(function.variables_in_use.values()))
     existing = stack_variable_coordinate_registry_8616(codegen).for_variable(variable)
     if declared and existing is not None and (
-        existing.bp_offset == bp_offset and existing.entry_sp_offset == entry_sp_offset and existing.size == size
+        operator.eq(existing.bp_offset, bp_offset) and operator.eq(existing.entry_sp_offset, entry_sp_offset) and operator.eq(existing.size, size)
     ):
         return False
     live = tracked if declared else next((
-        node for node in _iter_c_nodes_deep_8616(root)
+        node for node in builtins.iter(_iter_c_nodes_deep_8616(root))
         if isinstance(node, CVariable) and node.variable is variable
     ), None)
     if live is None:
@@ -156,7 +166,7 @@ def restore_live_stack_aggregate_declaration_8616(
 
 def rebind_stack_aggregate_views_8616(
     codegen: object,
-    candidates: list[CVariable],
+    candidates: object,
     canonical: CVariable,
 ) -> StackAggregateViewRebindReport8616:
     """Unify caller-proven aggregate views without reinterpreting other storage.
@@ -166,6 +176,9 @@ def rebind_stack_aggregate_views_8616(
     recorded its exact variable identity as an alias of this canonical object.
     Preserve reference-site tags and retire only consumed alias declarations.
     """
+    projection: object
+    root: object
+    variable_id: object
     boundary = cast(_AggregateViewBoundary8616, codegen)
     projection = stack_variable_coordinate_registry_8616(codegen).for_variable(canonical.variable)
     proven_aliases = (
@@ -175,16 +188,16 @@ def rebind_stack_aggregate_views_8616(
     )
     aliases = {
         id(candidate.variable): candidate.variable
-        for candidate in candidates
+        for candidate in iter(candidates)
         if candidate.variable is not canonical.variable
     }
     aliases.update(
         (id(variable), variable)
-        for variable in proven_aliases
+        for variable in iter(proven_aliases)
         if variable is not canonical.variable
     )
-    replaced: set[int] = set()
-    consumed: set[int] = set()
+    replaced: set[cython.longlong] = set()
+    consumed: set[cython.longlong] = set()
 
     def transform(node: object) -> object:
         """Replace only exact variable identities proven by aggregate recovery."""

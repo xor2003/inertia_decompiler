@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Support modules for the decompiler entrypoint.
 
 Layer: CLI/fallback/reporting.
@@ -5,3 +6,4 @@ Responsibility: expose the inertia.cli package namespace without owning semantic
 """
 
 from __future__ import annotations
+import cython

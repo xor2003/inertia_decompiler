@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove multi-arm ownership of shared-epilogue scalar return ladders.
 
 Layer: Structuring.
@@ -17,6 +18,8 @@ with a typed status.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Mapping
 
@@ -35,19 +38,22 @@ from .multi_arm_condition_ownership import (
     MultiArmConditionOwnershipStatus8616,
 )
 from .scalar_return_evidence import _is_signed_word_expression_8616
+import operator
 
 _BINARY_EDGES = 2
 
 
+@cython.ccall
 def _refuse_scalar_8616(
     status: MultiArmConditionOwnershipStatus8616,
-    detail: str | None = None,
+    detail: object = None,
 ) -> MultiArmConditionOwnershipResult8616:
     """Build one typed scalar return-arm ownership refusal."""
     return MultiArmConditionOwnershipResult8616(status=status, detail=detail)
 
 
-def _same_proven_scalar_return_8616(body: CExpression, leaf: CExpression) -> bool:
+@cython.ccall
+def _same_proven_scalar_return_8616(body: CExpression, leaf: CExpression) -> cython.bint:
     """Match complete word literals or proven full-width variable projections."""
     if _operand_value_width_8616(body) != 16 or _operand_value_width_8616(leaf) != 16:
         return False
@@ -56,15 +62,16 @@ def _same_proven_scalar_return_8616(body: CExpression, leaf: CExpression) -> boo
             return False
         if not (-32768 <= body.value <= 65535 and -32768 <= leaf.value <= 65535):
             return False
-        return body.value & 0xffff == leaf.value & 0xffff
+        return operator.eq(body.value & 0xffff, leaf.value & 0xffff)
     if not _operand_storage_matches_8616(body, leaf, same_expression=_same_c_expression_8616):
         return False
     return isinstance(_strip_casts_8616(body), CVariable) and isinstance(_strip_casts_8616(leaf), CVariable)
 
 
+@cython.ccall
 def _recovered_scalar_return_leaf_8616(
-    leaf_addr: int,
-    retained_blocks: frozenset[int],
+    leaf_addr: cython.longlong,
+    retained_blocks: object,
     recover_return: Callable[[int], CExpression | None],
 ) -> CExpression | None:
     """Recover one proven signed-word return expression for a CFG leaf."""
@@ -76,10 +83,11 @@ def _recovered_scalar_return_leaf_8616(
     return value
 
 
+@cython.ccall
 def _scalar_fact_targets_8616(
     fact: ConditionIR,
-    successors: Mapping[int, tuple[int, ...]],
-) -> tuple[int, int] | MultiArmConditionOwnershipResult8616:
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
+) -> object:
     """Validate complete integer coordinates against the exact CFG edge pair."""
     block_addr = fact.block_addr
     if (
@@ -96,8 +104,8 @@ def _scalar_fact_targets_8616(
         return _refuse_scalar_8616(MultiArmConditionOwnershipStatus8616.CFG_EDGE_MISMATCH)
     edges = {taken, fallthrough}
     if (
-        len(edges) != _BINARY_EDGES
-        or set(successors.get(block_addr, ())) != edges
+        operator.ne(len(edges), _BINARY_EDGES)
+        or operator.ne(set(successors.get(block_addr, ())), edges)
     ):
         return _refuse_scalar_8616(
             MultiArmConditionOwnershipStatus8616.CFG_EDGE_MISMATCH,
@@ -106,17 +114,21 @@ def _scalar_fact_targets_8616(
     return taken, fallthrough
 
 
+@cython.ccall
 def _select_scalar_fact_polarity_8616(
-    index: int,
-    facts: tuple[ConditionIR, ...],
-    arm_values: list[CExpression],
+    index: cython.longlong,
+    facts: object,
+    arm_values: object,
     else_value: CExpression,
-    successors: Mapping[int, tuple[int, ...]],
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
     artifact: SSAFunctionArtifact | None,
-    retained_blocks: frozenset[int],
+    retained_blocks: object,
     recover_return: Callable[[int], CExpression | None],
 ) -> bool | MultiArmConditionOwnershipResult8616:
     """Prove one arm's native leaf and continuation, or return a typed refusal."""
+    fallthrough_value: object
+    leaf_value: object
+    taken_value: object
     fact = facts[index]
     last_index = len(facts) - 1
     targets = _scalar_fact_targets_8616(fact, successors)
@@ -196,11 +208,11 @@ def _select_scalar_fact_polarity_8616(
 
 
 def select_scalar_return_arm_owners_8616(
-    arm_bodies: tuple[object, ...],
-    else_body: object | None,
-    facts: tuple[ConditionIR, ...],
+    arm_bodies: object,
+    else_body: object,
+    facts: object,
     *,
-    successors: Mapping[int, tuple[int, ...]],
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
     artifact: SSAFunctionArtifact | None = None,
     recover_return: Callable[[int], CExpression | None],
 ) -> MultiArmConditionOwnershipResult8616:
@@ -213,7 +225,9 @@ def select_scalar_return_arm_owners_8616(
     leaf values that cannot prove orientation refuse. Selected polarity is
     ``True`` when the structured true-arm sits on the fact's taken edge.
     """
-    if len(facts) < _BINARY_EDGES or len(arm_bodies) != len(facts):
+    body: object
+    index: object
+    if len(facts) < _BINARY_EDGES or operator.ne(len(arm_bodies), len(facts)):
         return _refuse_scalar_8616(
             MultiArmConditionOwnershipStatus8616.TOO_FEW_ARMS
         )
@@ -221,8 +235,8 @@ def select_scalar_return_arm_owners_8616(
         return _refuse_scalar_8616(
             MultiArmConditionOwnershipStatus8616.MISSING_BODY_TARGET
         )
-    identities = {(fact.block_addr, fact.src_insn) for fact in facts}
-    if len(identities) != len(facts):
+    identities = {(fact.block_addr, fact.src_insn) for fact in iter(facts)}
+    if operator.ne(len(identities), len(facts)):
         return _refuse_scalar_8616(
             MultiArmConditionOwnershipStatus8616.DUPLICATE_FACT
         )
@@ -244,10 +258,10 @@ def select_scalar_return_arm_owners_8616(
 
     retained_blocks = frozenset(
         fact.block_addr
-        for fact in facts
+        for fact in iter(facts)
         if isinstance(fact.block_addr, int) and not isinstance(fact.block_addr, bool)
     )
-    polarities: list[bool] = []
+    polarities: list[cython.bint] = []
     for index in range(len(facts)):
         selected = _select_scalar_fact_polarity_8616(
             index, facts, arm_values, else_value, successors,

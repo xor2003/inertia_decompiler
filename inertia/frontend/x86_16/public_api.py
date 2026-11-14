@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Canonical public API surface for the 16-bit x86 platform support.
 
 Layer: Frontend/runtime package surface.
@@ -7,6 +8,7 @@ package remains a thin facade re-exporting this surface.
 """
 
 from __future__ import annotations as _future_annotations
+import cython
 
 lazy import inertia.cli.corpus_recovery_artifact as corpus_recovery_artifact
 lazy import inertia.cli.corpus_scan as corpus_scan

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery metadata.
 
 Responsibility: summarize recovered function-level callsite and typed-IR signals.
@@ -13,43 +14,50 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from types import SimpleNamespace
 
 from .callsite_summary import summarize_x86_16_callsite
+import dataclasses
+import builtins
 
 __all__ = ["FunctionSummary8616", "summarize_x86_16_function"]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionSummary8616:
     """Function-level summary of recovered 86:16 decompiler evidence."""
 
-    function_addr: int
-    direct_call_count: int
-    callsite_kinds: tuple[str, ...]
-    typed_ir_condition_kinds: tuple[str, ...]
-    typed_ir_register_clobbers: tuple[str, ...]
-    typed_ir_address_spaces: tuple[str, ...]
-    typed_ir_stable_address_spaces: tuple[str, ...]
+    function_addr: cython.longlong
+    direct_call_count: cython.longlong
+    callsite_kinds: object
+    typed_ir_condition_kinds: object
+    typed_ir_register_clobbers: object
+    typed_ir_address_spaces: object
+    typed_ir_stable_address_spaces: object
     frame_slot_count: int | None
 
 
-def summarize_x86_16_function(project: object, function: SimpleNamespace) -> FunctionSummary8616 | None:
+def summarize_x86_16_function(project: object, function: object) -> FunctionSummary8616 | None:
     """Summarize angr function metadata for 86:16 diagnostics.
 
     Dynamic attribute boundary: project/function are third-party angr objects
     whose architecture, callsite, address, and info fields are optional across
     supported angr versions.
     """
+    info: object
+    summary: object
+    callsite_addr: object
     if project is None or function is None:
         return None
     if getattr(getattr(project, "arch", None), "name", None) != "86_16":
         return None
 
     callsite_kinds: list[str] = []
-    for callsite_addr in tuple(sorted(getattr(function, "get_call_sites", list)() or ())):
+    for callsite_addr in tuple(sorted(tuple(getattr(function, "get_call_sites", list)() or ()))):
         summary = summarize_x86_16_callsite(function, callsite_addr)
         if summary is None or not isinstance(summary.kind, str):
             continue
@@ -64,15 +72,15 @@ def summarize_x86_16_function(project: object, function: SimpleNamespace) -> Fun
         vex_ir_summary.get("stable_address_space_counts", {}) if isinstance(vex_ir_summary, dict) else {}
     )
     frame_slot_count = vex_ir_summary.get("frame_slot_count") if isinstance(vex_ir_summary, dict) else None
-    typed_ir_condition_kinds = tuple(sorted(str(key) for key in condition_counts))
+    typed_ir_condition_kinds = tuple(sorted(str(key) for key in iter(condition_counts)))
     typed_ir_register_clobbers = tuple(
-        sorted(str(key) for key, count in register_clobbers.items() if isinstance(count, int) and count > 0)
+        sorted(str(key) for key, count in builtins.iter(register_clobbers.items()) if isinstance(count, int) and count > 0)
     )
     typed_ir_address_spaces = tuple(
-        sorted(str(key) for key, count in address_space_counts.items() if isinstance(count, int) and count > 0)
+        sorted(str(key) for key, count in builtins.iter(address_space_counts.items()) if isinstance(count, int) and count > 0)
     )
     typed_ir_stable_address_spaces = tuple(
-        sorted(str(key) for key, count in stable_address_space_counts.items() if isinstance(count, int) and count > 0)
+        sorted(str(key) for key, count in builtins.iter(stable_address_space_counts.items()) if isinstance(count, int) and count > 0)
     )
     return FunctionSummary8616(
         function_addr=int(function.addr),

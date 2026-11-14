@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove structured comparison-guard polarity against typed replacements.
 
 Layer: Structuring.
@@ -17,6 +18,8 @@ expression.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from enum import Enum
@@ -33,6 +36,7 @@ from angr.sim_type import SimTypeChar, SimTypeInt, SimTypeNum
 from angr.sim_variable import SimRegisterVariable
 
 from .condition_storage_identity import _memory_operand_identity_8616, _strip_casts_8616
+import operator
 
 __all__ = ("ConditionComparisonPolarity8616", "condition_comparison_polarity_8616")
 
@@ -55,7 +59,8 @@ _INVERSE_COMPARISON_OPS_8616: dict[str, str] = {
 }
 
 
-def _unwrap_explicit_not_8616(node: object) -> tuple[object, bool]:
+@cython.ccall
+def _unwrap_explicit_not_8616(node: object) -> tuple[object, cython.bint]:
     """Remove explicit ``Not`` layers, returning the core node and parity."""
     inverted = False
     while isinstance(node, CUnaryOp) and node.op == "Not":
@@ -64,6 +69,7 @@ def _unwrap_explicit_not_8616(node: object) -> tuple[object, bool]:
     return node, inverted
 
 
+@cython.ccall
 def _operand_value_width_8616(node: object) -> int | None:
     """Read the C value width independently of its backing storage extent."""
     if not isinstance(node, CExpression):
@@ -76,20 +82,23 @@ def _operand_value_width_8616(node: object) -> int | None:
     return width if isinstance(width, int) and width > 0 else None
 
 
-def _operand_casts_preserve_width_8616(node: object) -> bool:
+@cython.ccall
+def _operand_casts_preserve_width_8616(node: object) -> cython.bint:
     """Refuse width-changing casts, including truncation hidden by re-extension."""
-    seen: set[int] = set()
+    width: object
+    seen: set[cython.longlong] = set()
     while isinstance(node, CTypeCast):
         if id(node) in seen:
             return False
         seen.add(id(node))
         width = _operand_value_width_8616(node)
-        if width is None or width != _operand_value_width_8616(node.expr):
+        if width is None or operator.ne(width, _operand_value_width_8616(node.expr)):
             return False
         node = node.expr
     return True
 
 
+@cython.ccall
 def _operand_signedness_8616(node: object) -> bool | None:
     """Require an explicit integer interpretation at the C value boundary."""
     if not isinstance(node, CExpression):
@@ -101,7 +110,8 @@ def _operand_signedness_8616(node: object) -> bool | None:
     return signed if isinstance(signed, bool) else None
 
 
-def _register_storage_matches_8616(left: object, right: object, width: int) -> bool:
+@cython.ccall
+def _register_storage_matches_8616(left: object, right: object, width: cython.longlong) -> cython.bint:
     """Keep register extent and region evidence in addition to its offset."""
     left_variable = left.variable if isinstance(left, CVariable) else None
     right_variable = right.variable if isinstance(right, CVariable) else None
@@ -110,25 +120,30 @@ def _register_storage_matches_8616(left: object, right: object, width: int) -> b
     if not isinstance(left_variable, SimRegisterVariable) or not isinstance(right_variable, SimRegisterVariable):
         return False
     return bool(
-        left_variable.reg == right_variable.reg
-        and left_variable.size == right_variable.size
+        operator.eq(left_variable.reg, right_variable.reg)
+        and operator.eq(left_variable.size, right_variable.size)
         and left_variable.size * 8 >= width
-        and left_variable.region == right_variable.region
+        and operator.eq(left_variable.region, right_variable.region)
     )
 
 
+@cython.ccall
 def _operand_storage_matches_8616(
     structured: object,
     replacement: object,
     *,
-    same_expression: Callable[[object, object], bool],
-) -> bool:
+    same_expression: Callable[[object, object], cython.bint],
+) -> cython.bint:
     """Match full-width values before comparing storage or expression identity."""
+    replacement_identity: object
+    signed: object
+    structured_identity: object
+    width: object
     width = _operand_value_width_8616(structured)
-    if width is None or width != _operand_value_width_8616(replacement):
+    if width is None or operator.ne(width, _operand_value_width_8616(replacement)):
         return False
     signed = _operand_signedness_8616(structured)
-    if signed is None or signed != _operand_signedness_8616(replacement):
+    if signed is None or operator.ne(signed, _operand_signedness_8616(replacement)):
         return False
     if not (
         _operand_casts_preserve_width_8616(structured)
@@ -142,7 +157,7 @@ def _operand_storage_matches_8616(
     structured_identity = _memory_operand_identity_8616(structured)
     replacement_identity = _memory_operand_identity_8616(replacement)
     if structured_identity is not None or replacement_identity is not None:
-        return structured_identity == replacement_identity
+        return operator.eq(structured_identity, replacement_identity)
     if structured is replacement:
         return True
     # General expression matching ignores nested value types. Different
@@ -154,11 +169,12 @@ def _operand_storage_matches_8616(
     return bool(same_expression(structured, replacement))
 
 
+@cython.ccall
 def condition_comparison_polarity_8616(
     structured: object,
     replacement: object,
     *,
-    same_expression: Callable[[object, object], bool],
+    same_expression: Callable[[object, object], cython.bint],
 ) -> ConditionComparisonPolarity8616:
     """Return the proven truth relation between a structured guard and a typed comparison.
 
@@ -182,9 +198,9 @@ def condition_comparison_polarity_8616(
     )
     if not ordered_match:
         return ConditionComparisonPolarity8616.UNKNOWN
-    if core.op == replacement.op:
+    if operator.eq(core.op, replacement.op):
         polarity = ConditionComparisonPolarity8616.DIRECT
-    elif _INVERSE_COMPARISON_OPS_8616[core.op] == replacement.op:
+    elif operator.eq(_INVERSE_COMPARISON_OPS_8616[core.op], replacement.op):
         polarity = ConditionComparisonPolarity8616.INVERTED
     else:
         return ConditionComparisonPolarity8616.UNKNOWN

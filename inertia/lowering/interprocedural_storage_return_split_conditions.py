@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Compatibility surface for typed split-return decision-graph selection.
 
 Layer: Types/Lowering.
@@ -9,6 +10,7 @@ owner. Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import cython
 
 from .interprocedural_storage_return_split_condition_graph import (
     SplitReturnConditionCandidate8616,

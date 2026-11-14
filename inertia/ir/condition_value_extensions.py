@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Preserve exact signed conversion semantics in condition value provenance.
 
 Layer: IR.
@@ -9,15 +10,19 @@ operations, retaining the original storage and memory access width.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from .core import IRBinaryValue, IRValue, MemSpace
+import operator
 
-_SIGNED_WIDENINGS: frozenset[tuple[int, int]] = frozenset({(1, 2), (2, 4)})
-_BITS_PER_BYTE: int = 8
+_SIGNED_WIDENINGS: frozenset[tuple[cython.longlong, cython.longlong]] = frozenset({(1, 2), (2, 4)})
+_BITS_PER_BYTE: cython.longlong = 8
 
 
+@cython.ccall
 def sign_extend_condition_value_8616(
-    value: IRValue | IRBinaryValue, destination_size: int,
+    value: IRValue | IRBinaryValue, destination_size: cython.longlong,
 ) -> IRBinaryValue | None:
     """Return exact two-complement extension or refuse an unsupported width.
 
@@ -51,14 +56,14 @@ def signed_extension_source_8616(value: IRBinaryValue) -> IRValue | IRBinaryValu
     source = masked.lhs
     if (source.size, value.size) not in _SIGNED_WIDENINGS:
         return None
-    if biased.size != value.size or masked.size != value.size:
+    if operator.ne(biased.size, value.size) or operator.ne(masked.size, value.size):
         return None
     sign_bit = 1 << (source.size * _BITS_PER_BYTE - 1)
     mask = (1 << (source.size * _BITS_PER_BYTE)) - 1
     constants = ((masked.rhs, mask), (biased.rhs, sign_bit), (value.rhs, sign_bit))
     exact_constants = all(
         isinstance(atom, IRValue) and atom.space is MemSpace.CONST
-        and type(atom.const) is int and atom.const == expected and atom.size == value.size
-        for atom, expected in constants
+        and type(atom.const) is int and operator.eq(atom.const, expected) and operator.eq(atom.size, value.size)
+        for atom, expected in iter(constants)
     )
     return source if exact_constants else None

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: preserve legacy CLI helper surface while delegating semantic proof to X86_16 layers.
@@ -19,11 +20,13 @@ redirect the restored graph to a different manager.
 """
 
 from __future__ import annotations
+import cython
 
 import io
 import pickle
 import typing
 from typing import Any
+import builtins
 
 _PRESERVED_SNAPSHOT_TAG_8616 = "inertia-rollback-preserved"
 
@@ -54,15 +57,15 @@ class PickledCfuncSnapshot8616(bytes):
     ``boundary_type_store_kb``: the live ``types._kb`` at snapshot time.
     """
 
-    has_variable_manager: bool
+    has_variable_manager: cython.bint
     boundary_manager: object
     boundary_type_store_kb: object
 
     def __new__(
         cls,
-        payload: bytes,
+        payload: object,
         *,
-        has_variable_manager: bool,
+        has_variable_manager: cython.bint,
         boundary_manager: object,
         boundary_type_store_kb: object,
     ) -> PickledCfuncSnapshot8616:
@@ -83,15 +86,16 @@ class _TrustedCfuncPickler8616(pickle.Pickler):
     ``snapshot_trusted_cfunc_8616``.
     """
 
-    def __init__(self, buffer: io.BytesIO, preserved: tuple[object, ...]) -> None:
+    def __init__(self, buffer: io.BytesIO, preserved: object) -> None:
         """Record preserved objects by identity for ``persistent_id``."""
         super().__init__(buffer, protocol=pickle.HIGHEST_PROTOCOL)
-        self._preserved_ids: dict[int, int] = {
-            id(obj): idx for idx, obj in enumerate(preserved)
+        self._preserved_ids: dict[cython.longlong, cython.longlong] = {
+            id(obj): idx for idx, obj in builtins.iter(enumerate(preserved))
         }
 
-    def persistent_id(self, obj: object) -> tuple[str, int] | None:
+    def persistent_id(self, obj: object) -> object:
         """Externalize preserved boundary objects as index tokens."""
+        idx: object
         idx = self._preserved_ids.get(id(obj))
         if idx is None:
             return None
@@ -101,7 +105,7 @@ class _TrustedCfuncPickler8616(pickle.Pickler):
 class _TrustedCfuncUnpickler8616(pickle.Unpickler):
     """Materialize a pickled cfunc, rebinding preserved boundary objects."""
 
-    def __init__(self, buffer: io.BytesIO, preserved: tuple[object, ...]) -> None:
+    def __init__(self, buffer: io.BytesIO, preserved: object) -> None:
         """Record preserved objects resolved by ``persistent_load``."""
         super().__init__(buffer)
         self._preserved = preserved
@@ -121,10 +125,11 @@ class _TrustedCfuncUnpickler8616(pickle.Unpickler):
         return self._preserved[idx]
 
 
+@cython.ccall
 def pickled_trusted_cfunc_8616(
     cfunc: object,
     *,
-    preserve_objects: tuple[object, ...],
+    preserve_objects: object,
 ) -> PickledCfuncSnapshot8616 | None:
     """Serialize the full copied state of one cfunc to opaque bytes.
 
@@ -136,10 +141,11 @@ def pickled_trusted_cfunc_8616(
     serializing. ``None`` means the state could not be serialized; callers
     then keep the original object-level deepcopy path.
     """
+    type_store: object
     dynamic_cfunc = typing.cast(Any, cfunc)
     has_variable_manager = False
     manager: Any | None = None
-    type_store: Any | None = None
+    type_store = None
     type_store_kb: Any | None = None
     try:
         boundary_manager = typing.cast(Any, dynamic_cfunc.variable_manager)
@@ -169,10 +175,11 @@ def pickled_trusted_cfunc_8616(
     )
 
 
+@cython.ccall
 def unpickle_trusted_cfunc_8616(
     snapshot: PickledCfuncSnapshot8616,
     *,
-    preserve_objects: tuple[object, ...],
+    preserve_objects: object,
 ) -> object | None:
     """Materialize a pickled cfunc snapshot with its recorded bindings.
 

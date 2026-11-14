@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Provide coherent C89 full-register and word-register runtime storage.
 
 Layer: Types/Lowering.
@@ -12,10 +13,12 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, cast
+import dataclasses
 
 
 class GPRegisterRuntimeABI8616(StrEnum):
@@ -34,6 +37,7 @@ class _CodegenABI8616(Protocol):
     _inertia_gp_runtime_abi_8616: GPRegisterRuntimeABI8616
 
 
+@cython.ccall
 def gp_runtime_abi_8616(codegen: object) -> GPRegisterRuntimeABI8616:
     """Read an explicit ABI selection; old codegen objects retain scalar ABI."""
     try:
@@ -45,6 +49,7 @@ def gp_runtime_abi_8616(codegen: object) -> GPRegisterRuntimeABI8616:
     return selected
 
 
+@cython.ccall
 def select_gp_runtime_abi_8616(codegen: object, abi: GPRegisterRuntimeABI8616) -> None:
     """Publish the typed storage contract before lowering or rendering views."""
     if not isinstance(abi, GPRegisterRuntimeABI8616):
@@ -52,6 +57,7 @@ def select_gp_runtime_abi_8616(codegen: object, abi: GPRegisterRuntimeABI8616) -
     cast(_CodegenABI8616, codegen)._inertia_gp_runtime_abi_8616 = abi
 
 
+@cython.ccall
 def initialize_gp_runtime_abi_8616(codegen: object) -> None:
     """Initialize fresh/rebuilt codegen while preserving explicit ABI selection."""
     try:
@@ -62,12 +68,12 @@ def initialize_gp_runtime_abi_8616(codegen: object) -> None:
     select_gp_runtime_abi_8616(codegen, selected)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class GPWordRuntimeLane8616:
     """C symbols naming two views of one shared architectural register lane."""
 
-    full_register: str
-    word_register: str
+    full_register: object
+    word_register: object
 
     @property
     def storage_symbol(self) -> str:
@@ -86,10 +92,10 @@ class GPWordRuntimeLane8616:
 
 
 GP_WORD_RUNTIME_LANES_8616: tuple[GPWordRuntimeLane8616, ...] = tuple(
-    GPWordRuntimeLane8616(full, word) for full, word in (
+    GPWordRuntimeLane8616(full, word) for full, word in iter((
         ("eax", "ax"), ("ebx", "bx"), ("ecx", "cx"), ("edx", "dx"),
         ("esi", "si"), ("edi", "di"), ("esp", "sp"), ("ebp", "bp"),
-    )
+    ))
 )
 
 _TYPE_DECLARATIONS = """#include <limits.h>
@@ -123,7 +129,7 @@ typedef char inertia_gp_lane_must_be_four_bytes[(sizeof(inertia_gp_lane) == 4) ?
 
 def runtime_gp_word_symbols_8616() -> frozenset[str]:
     """Return reserved lvalue macros, which must never become synthetic globals."""
-    return frozenset(lane.word_symbol for lane in GP_WORD_RUNTIME_LANES_8616)
+    return frozenset(lane.word_symbol for lane in iter(GP_WORD_RUNTIME_LANES_8616))
 
 
 def gp_runtime_replaced_declaration_names_8616(codegen: object) -> frozenset[str]:
@@ -131,11 +137,12 @@ def gp_runtime_replaced_declaration_names_8616(codegen: object) -> frozenset[str
     if gp_runtime_abi_8616(codegen) is not GPRegisterRuntimeABI8616.COHERENT_WORD_VIEWS:
         return frozenset()
     return frozenset(
-        symbol for lane in GP_WORD_RUNTIME_LANES_8616
-        for symbol in (lane.full_symbol, lane.word_symbol)
+        symbol for lane in iter(GP_WORD_RUNTIME_LANES_8616)
+        for symbol in iter((lane.full_symbol, lane.word_symbol))
     )
 
 
+@cython.ccall
 def coherent_gp_runtime_header_8616() -> str:
     """Render declarations and lvalue views without allocating duplicate state.
 
@@ -144,6 +151,7 @@ def coherent_gp_runtime_header_8616() -> str:
     is exported. Taking a word address for use as a full-register pointer is
     not part of this ABI.
     """
+    lane: object
     declarations = ["#ifndef INERTIA_COHERENT_GP_RUNTIME_H", "#define INERTIA_COHERENT_GP_RUNTIME_H", _TYPE_DECLARATIONS]
     for lane in GP_WORD_RUNTIME_LANES_8616:
         declarations.extend((
@@ -151,16 +159,16 @@ def coherent_gp_runtime_header_8616() -> str:
             f"#define {lane.full_symbol} ({lane.storage_symbol}.full)",
             f"#define {lane.word_symbol} ({lane.storage_symbol}.word.low)",
         ))
-    return "\n".join((*declarations, "#endif", ""))
+    return "\n".join(tuple(declarations) + ("#endif", ""))
 
 
-def coherent_gp_runtime_definitions_8616() -> str:
+def coherent_gp_runtime_definitions_8616() -> object:
     """Render the single runtime translation unit after including its header."""
-    return "\n".join(f"inertia_gp_lane {lane.storage_symbol} = {{0}};" for lane in GP_WORD_RUNTIME_LANES_8616) + "\n"
+    return "\n".join(f"inertia_gp_lane {lane.storage_symbol} = {{0}};" for lane in iter(GP_WORD_RUNTIME_LANES_8616)) + "\n"
 
 
 def project_gp_runtime_declarations_8616(
-    codegen: object, specs: tuple[object, ...],
+    codegen: object, specs: object,
 ) -> tuple[tuple[object, ...], tuple[str, ...]]:
     """Replace owned scalar declarations with the selected shared-storage ABI.
 
@@ -170,9 +178,9 @@ def project_gp_runtime_declarations_8616(
     """
     if gp_runtime_abi_8616(codegen) is not GPRegisterRuntimeABI8616.COHERENT_WORD_VIEWS:
         return specs, ()
-    full_symbols = {lane.full_symbol for lane in GP_WORD_RUNTIME_LANES_8616}
+    full_symbols = {lane.full_symbol for lane in iter(GP_WORD_RUNTIME_LANES_8616)}
     retained = tuple(
-        spec for spec in specs if not (
+        spec for spec in iter(specs) if not (
             isinstance(spec, (tuple, list)) and len(spec) == 3
             and isinstance(spec[1], str) and spec[1] in full_symbols
         )

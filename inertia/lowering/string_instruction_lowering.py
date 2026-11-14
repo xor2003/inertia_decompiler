@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Helper boundary.
 
 Responsibility: lower proven string-instruction artifacts into typed intrinsic records.
@@ -10,6 +11,7 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import cython
 
 import typing
 from dataclasses import dataclass, field
@@ -20,6 +22,8 @@ from inertia.semantics.string_instruction_artifact import (
     StringInstructionCoverage8616,
     StringInstructionRecord,
 )
+import dataclasses
+import operator
 
 __all__ = [
     "StringInstructionCoverage8616",
@@ -35,7 +39,7 @@ __all__ = [
 class _FunctionManagerLike(Protocol):
     """Minimal angr function-manager surface used by this metadata hook."""
 
-    def function(self, *, addr: int, create: bool) -> object | None:
+    def function(self, *, addr: cython.longlong, create: cython.bint) -> object | None:
         """Return an angr function object when one is already present."""
 
 
@@ -51,28 +55,28 @@ class _ProjectLike(Protocol):
     kb: _KnowledgeBaseLike
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StringIntrinsicRecord:
     """Generic intrinsic classification proven from string-instruction artifacts."""
 
-    index: int
-    family: str
-    record_indexes: tuple[int, ...]
-    width: int
-    direction_mode: str
-    repeat_kind: str
+    index: cython.longlong
+    family: object
+    record_indexes: object
+    width: cython.longlong
+    direction_mode: object
+    repeat_kind: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StringIntrinsicRefusal:
     """Reason a string-instruction artifact could not be lowered generically."""
 
-    kind: str
-    detail: str
-    record_indexes: tuple[int, ...] = ()
+    kind: object
+    detail: object
+    record_indexes: tuple[cython.longlong, ...] = ()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StringIntrinsicArtifact:
     """Lowered intrinsic records, refusal evidence, and proved coverage scope."""
 
@@ -93,7 +97,7 @@ class StringIntrinsicArtifact:
                     "direction_mode": rec.direction_mode,
                     "repeat_kind": rec.repeat_kind,
                 }
-                for rec in self.records
+                for rec in iter(self.records)
             ],
             "refusals": [
                 {
@@ -101,13 +105,13 @@ class StringIntrinsicArtifact:
                     "detail": item.detail,
                     "record_indexes": list(item.record_indexes),
                 }
-                for item in self.refusals
+                for item in iter(self.refusals)
             ],
         }
 
 
-def _single_record_family(record: StringInstructionRecord) -> str | None:
-    def _impl() -> str | None:
+def _single_record_family(record: StringInstructionRecord) -> object:
+    def _impl() -> object:
         if record.family == "movs" and record.repeat_kind != "none":
             if record.direction_mode == "forward":
                 return "memcpy_class"
@@ -130,23 +134,23 @@ def _single_record_family(record: StringInstructionRecord) -> str | None:
     return _impl()
 
 
-def _mixed_movs_family(records: tuple[StringInstructionRecord, ...]) -> StringIntrinsicRecord | None:
+def _mixed_movs_family(records: object) -> StringIntrinsicRecord | None:
     def _impl() -> StringIntrinsicRecord | None:
         if not records:
             return None
-        if not all(record.family == "movs" for record in records):
+        if not all(record.family == "movs" for record in iter(records)):
             return None
-        direction_modes = {record.direction_mode for record in records}
+        direction_modes = {record.direction_mode for record in iter(records)}
         if "backward" not in direction_modes or "forward" not in direction_modes:
             return None
-        if not any(record.repeat_kind != "none" for record in records):
+        if not any(record.repeat_kind != "none" for record in iter(records)):
             return None
-        widths = tuple(sorted({record.width for record in records if record.width > 0}))
-        repeat_kind = "mixed" if len({record.repeat_kind for record in records}) > 1 else records[0].repeat_kind
+        widths = tuple(sorted({record.width for record in iter(records) if record.width > 0}))
+        repeat_kind = "mixed" if len({record.repeat_kind for record in iter(records)}) > 1 else records[0].repeat_kind
         return StringIntrinsicRecord(
             index=0,
             family="memmove_overlap_class",
-            record_indexes=tuple(record.index for record in records),
+            record_indexes=tuple(record.index for record in iter(records)),
             width=max(widths, default=0),
             direction_mode="mixed",
             repeat_kind=repeat_kind,
@@ -155,7 +159,8 @@ def _mixed_movs_family(records: tuple[StringInstructionRecord, ...]) -> StringIn
     return _impl()
 
 
-def _scan_tail_family(records: tuple[StringInstructionRecord, ...]) -> StringIntrinsicRecord | None:
+@cython.ccall
+def _scan_tail_family(records: object) -> StringIntrinsicRecord | None:
     if len(records) != 2:
         return None
     first, second = records
@@ -163,7 +168,7 @@ def _scan_tail_family(records: tuple[StringInstructionRecord, ...]) -> StringInt
         return None
     if first.repeat_kind != "repnz" or second.repeat_kind != "none":
         return None
-    if first.width != second.width or first.width <= 0:
+    if operator.ne(first.width, second.width) or first.width <= 0:
         return None
     return StringIntrinsicRecord(
         index=0,
@@ -175,8 +180,10 @@ def _scan_tail_family(records: tuple[StringInstructionRecord, ...]) -> StringInt
     )
 
 
-def _strlen_copy_pair_8616(records: tuple[StringInstructionRecord, ...]) -> StringIntrinsicArtifact | None:
+@cython.ccall
+def _strlen_copy_pair_8616(records: object) -> StringIntrinsicArtifact | None:
     """Merge a proven strlen+copy record pair into one strlen_copy intrinsic."""
+    scan_tail: object
     if len(records) != 2:
         return None
     first_family = _single_record_family(records[0])
@@ -204,10 +211,13 @@ def _strlen_copy_pair_8616(records: tuple[StringInstructionRecord, ...]) -> Stri
     return None
 
 
+@cython.ccall
 def _lowered_intrinsic_records_8616(
-    records: tuple[StringInstructionRecord, ...],
+    records: object,
 ) -> tuple[list[StringIntrinsicRecord], list[StringIntrinsicRefusal]]:
     """Lower each proven record family or refuse it explicitly."""
+    family: object
+    rec: object
     lowered_records: list[StringIntrinsicRecord] = []
     refusals: list[StringIntrinsicRefusal] = []
     for rec in records:
@@ -236,10 +246,12 @@ def _lowered_intrinsic_records_8616(
 
 def build_x86_16_string_intrinsic_artifact(artifact: StringInstructionArtifact) -> StringIntrinsicArtifact:
     """Lower proven string-instruction evidence into generic intrinsic classes."""
+    mixed_movs: object
+    pair: object
     mixed_movs = _mixed_movs_family(artifact.records)
     if artifact.refusals and mixed_movs is None:
         return StringIntrinsicArtifact(
-            refusals=tuple(StringIntrinsicRefusal(item.kind, item.detail) for item in artifact.refusals)
+            refusals=tuple(StringIntrinsicRefusal(item.kind, item.detail) for item in iter(artifact.refusals))
         )
     if not artifact.records:
         return StringIntrinsicArtifact(
@@ -254,7 +266,7 @@ def build_x86_16_string_intrinsic_artifact(artifact: StringInstructionArtifact) 
     if mixed_movs is not None:
         residual_refusals = tuple(
             StringIntrinsicRefusal(item.kind, item.detail)
-            for item in artifact.refusals
+            for item in iter(artifact.refusals)
             if item.kind != "mixed_direction_signal"
         )
         return StringIntrinsicArtifact(records=(mixed_movs,), refusals=residual_refusals)
@@ -271,6 +283,7 @@ def build_x86_16_string_intrinsic_artifact(artifact: StringInstructionArtifact) 
     )
 
 
+@cython.ccall
 def _render_header() -> str:
     return (
         "typedef struct {\n"
@@ -291,15 +304,15 @@ def _render_header() -> str:
     )
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _IntrinsicRender8616:
     """Shared per-record rendering state for intrinsic diagnostic C."""
 
-    lines: list[str]
-    declared_length: bool = False
-    declared_compare: bool = False
+    lines: object
+    declared_length: cython.bint = False
+    declared_compare: cython.bint = False
 
-    def _width_args(self, width: int) -> str:
+    def _width_args(self, width: cython.longlong) -> str:
         """Return call arguments for one width-taking intrinsic."""
         return str(width)
 
@@ -307,38 +320,46 @@ class _IntrinsicRender8616:
         """Return call arguments for the state-taking overlap intrinsic."""
         return ""
 
+    @cython.ccall
     def _declare_length(self) -> None:
         if not self.declared_length:
             self.lines.append("    unsigned short __x86_16_length;")
             self.declared_length = True
 
+    @cython.ccall
     def _declare_compare(self) -> None:
         if not self.declared_compare:
             self.lines.append("    int __x86_16_compare;")
             self.declared_compare = True
 
+    @cython.ccall
     def _emit_movs(self, rec: StringIntrinsicRecord) -> None:
         self.lines.append(f"    /* {rec.family}, width={rec.width}, direction={rec.direction_mode} */")
         self.lines.append(f"    __x86_16_movs({self._width_args(rec.width)});")
 
+    @cython.ccall
     def _emit_overlap(self) -> None:
         self.lines.append("    /* memmove_overlap_class: mixed forward/backward movs evidence */")
         self.lines.append(f"    __x86_16_movs_overlap_select({self._state_args()});")
 
+    @cython.ccall
     def _emit_stos(self, rec: StringIntrinsicRecord) -> None:
         self.lines.append(f"    /* memset_class, width={rec.width}, direction={rec.direction_mode} */")
         self.lines.append(f"    __x86_16_stos({self._width_args(rec.width)});")
 
+    @cython.ccall
     def _emit_strlen(self, rec: StringIntrinsicRecord) -> None:
         self._declare_length()
         self.lines.append("    /* strlen_class */")
         self.lines.append(f"    __x86_16_length = __x86_16_scas_zterm_len({self._width_args(rec.width)});")
 
+    @cython.ccall
     def _emit_cmps(self, rec: StringIntrinsicRecord) -> None:
         self._declare_compare()
         self.lines.append(f"    /* memcmp_class, width={rec.width} */")
         self.lines.append(f"    __x86_16_compare = __x86_16_cmps({self._width_args(rec.width)});")
 
+    @cython.ccall
     def _emit_scan_tail(self, rec: StringIntrinsicRecord) -> None:
         self._declare_length()
         self.lines.append("    /* scan_tail_class */")
@@ -384,12 +405,12 @@ _COMPACT_PROTOTYPES_8616: dict[str, str] = {
 }
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _CompactIntrinsicRender8616(_IntrinsicRender8616):
     """Compact renderer collecting unique prototypes per record family."""
 
-    prototype_lines: list[str] = field(default_factory=list)
-    declared_prototypes: set[str] = field(default_factory=set)
+    prototype_lines: object = field(default_factory=list)
+    declared_prototypes: object = field(default_factory=set)
 
     def record(self, rec: StringIntrinsicRecord) -> None:
         """Append the family's prototype once, then emit the record's render lines."""
@@ -400,27 +421,28 @@ class _CompactIntrinsicRender8616(_IntrinsicRender8616):
         super().record(rec)
 
 
-def _render_compact_intrinsic_c(name: str, artifact: StringIntrinsicArtifact) -> str | None:
+def _render_compact_intrinsic_c(name: object, artifact: StringIntrinsicArtifact) -> object:
+    rec: object
     if not artifact.records:
         return None
-    families = {rec.family for rec in artifact.records}
+    families = {rec.family for rec in iter(artifact.records)}
     if "strlen_copy_class" in families:
         return None
-    if any(family not in _COMPACT_PROTOTYPES_8616 for family in families):
+    if any(family not in _COMPACT_PROTOTYPES_8616 for family in iter(families)):
         return None
 
     render = _CompactIntrinsicRender8616(lines=[f"void {name}(void)\n{{"])
     for rec in artifact.records:
         render.record(rec)
     render.lines.append("}")
-    return "\n".join([*render.prototype_lines, "", *render.lines]) + "\n"
+    return "\n".join(list(render.prototype_lines) + ["", ] + list(render.lines)) + "\n"
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _FullIntrinsicRender8616(_IntrinsicRender8616):
     """State-struct renderer including the merged strlen-copy arm."""
 
-    def _width_args(self, width: int) -> str:
+    def _width_args(self, width: cython.longlong) -> str:
         return f"&__x86_16_state, {width}"
 
     def _state_args(self) -> str:
@@ -434,8 +456,11 @@ class _FullIntrinsicRender8616(_IntrinsicRender8616):
         self.lines.append("    __x86_16_movs(&__x86_16_state, 1);")
 
 
-def render_x86_16_string_intrinsic_c(name: str, artifact: StringIntrinsicArtifact) -> str | None:
+@cython.ccall
+def render_x86_16_string_intrinsic_c(name: object, artifact: StringIntrinsicArtifact) -> object:
     """Render diagnostic C for proven string intrinsic classes."""
+    compact: object
+    rec: object
     if not artifact.records:
         return None
     compact = _render_compact_intrinsic_c(name, artifact)
@@ -451,8 +476,14 @@ def render_x86_16_string_intrinsic_c(name: str, artifact: StringIntrinsicArtifac
     return "\n".join(render.lines) + "\n"
 
 
-def apply_x86_16_string_instruction_lowering(project: _ProjectLike, codegen: object) -> bool:
+@cython.ccall
+def apply_x86_16_string_instruction_lowering(project: _ProjectLike, codegen: object) -> cython.bint:
     """Attach lowered string-intrinsic metadata at the angr/codegen dynamic boundary."""
+    cfunc: object
+    func_addr: object
+    function: object
+    info: object
+    string_artifact: object
     cfunc = getattr(codegen, "cfunc", None)
     if cfunc is None:
         return False

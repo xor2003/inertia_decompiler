@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Recover binary-proven near-pointer arguments and stack-slot versions.
 
 Layer: Types/Lowering.
@@ -11,6 +12,8 @@ of a near pointer. LEA computes an address and never proves a dereference.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
@@ -47,6 +50,8 @@ from .real_mode_linear import (
     _capstone_insns_for_direct_global_update_8616,
     _direct_global_update_blocks_8616,
 )
+import dataclasses
+import operator
 
 _FALLBACK_MEMORY_WRITE_INSNS_8616 = frozenset(
     {
@@ -67,30 +72,30 @@ _FALLBACK_MEMORY_WRITE_INSNS_8616 = frozenset(
 class _MemoryOperandBoundary8616(Protocol):
     """Typed view of Capstone x86 memory operand fields."""
 
-    base: int
-    index: int
-    disp: int
+    base: cython.longlong
+    index: cython.longlong
+    disp: cython.longlong
 
 
 class _OperandBoundary8616(Protocol):
     """Typed view of one Capstone x86 operand."""
 
-    type: int
-    size: int
-    reg: int
-    imm: int
-    access: int
+    type: cython.longlong
+    size: cython.longlong
+    reg: cython.longlong
+    imm: cython.longlong
+    access: cython.longlong
     mem: _MemoryOperandBoundary8616
 
 
 class _InstructionBoundary8616(Protocol):
     """Typed view of one decoded Capstone instruction."""
 
-    address: int
-    id: int
+    address: cython.longlong
+    id: cython.longlong
     operands: Sequence[_OperandBoundary8616]
 
-    def reg_name(self, register: int) -> str | None:
+    def reg_name(self, register: cython.longlong) -> object:
         """Return Capstone's architectural name for an explicit register ID."""
         ...
 
@@ -110,7 +115,7 @@ class _CapstoneBlockBoundary8616(Protocol):
 class _BlockBoundary8616(Protocol):
     """Typed view of an angr function block used by fact collection."""
 
-    addr: int
+    addr: cython.longlong
     capstone: _CapstoneBlockBoundary8616
 
 
@@ -120,7 +125,7 @@ class _FunctionBoundary8616(Protocol):
     blocks: Sequence[_BlockBoundary8616]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NearPointerArgumentFact8616:
     """Prove pointer use separately from the exact value in its current carrier.
 
@@ -128,40 +133,42 @@ class NearPointerArgumentFact8616:
     argument. An adjusted carrier still proves pointer use, not value equality.
     """
 
-    stack_offset: int
-    carrier_load_ins_addr: int
-    dereference_ins_addr: int
-    access_width_bytes: int
-    source_version_delta: int = 0
-    source_update_ins_addrs: tuple[int, ...] = ()
-    carrier_register_name: str | None = None
-    carrier_value_is_exact: bool = False
+    stack_offset: cython.longlong
+    carrier_load_ins_addr: cython.longlong
+    dereference_ins_addr: cython.longlong
+    access_width_bytes: cython.longlong
+    source_version_delta: cython.longlong = 0
+    source_update_ins_addrs: tuple[cython.longlong, ...] = ()
+    carrier_register_name: object = None
+    carrier_value_is_exact: cython.bint = False
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _NearPointerCarrier8616:
     """Current binary value-version state for one pointer carrier register."""
 
-    stack_offset: int
-    carrier_load_ins_addr: int
-    source_version_delta: int = 0
-    source_update_ins_addrs: tuple[int, ...] = ()
-    value_is_exact: bool = True
+    stack_offset: cython.longlong
+    carrier_load_ins_addr: cython.longlong
+    source_version_delta: cython.longlong = 0
+    source_update_ins_addrs: tuple[cython.longlong, ...] = ()
+    value_is_exact: cython.bint = True
 
 
-def _direct_bp_stack_operand_8616(operand: _OperandBoundary8616) -> tuple[int, int] | None:
+@cython.ccall
+def _direct_bp_stack_operand_8616(operand: _OperandBoundary8616) -> object:
     """Return a positive BP slot and width for one exact memory operand."""
     if (
-        operand.type != X86_OP_MEM
-        or int(operand.mem.base) != X86_REG_BP
-        or int(operand.mem.index) != X86_REG_INVALID
+        operator.ne(operand.type, X86_OP_MEM)
+        or operator.ne(int(operand.mem.base), X86_REG_BP)
+        or operator.ne(int(operand.mem.index), X86_REG_INVALID)
         or int(operand.mem.disp) < 4
     ):
         return None
     return int(operand.mem.disp), int(operand.size)
 
 
-def _operand_is_written_8616(insn: _InstructionBoundary8616, operand: _OperandBoundary8616) -> bool:
+@cython.ccall
+def _operand_is_written_8616(insn: _InstructionBoundary8616, operand: _OperandBoundary8616) -> cython.bint:
     """Read Capstone write metadata, with a conservative fixture fallback."""
     try:
         return bool(int(operand.access) & CS_AC_WRITE)
@@ -169,57 +176,63 @@ def _operand_is_written_8616(insn: _InstructionBoundary8616, operand: _OperandBo
         return insn.id in _FALLBACK_MEMORY_WRITE_INSNS_8616
 
 
+@cython.ccall
 def _direct_stack_write_delta_8616(
     insn: _InstructionBoundary8616,
-    operands: tuple[_OperandBoundary8616, ...],
-) -> tuple[int, int | None] | None:
+    operands: object,
+) -> object:
     """Classify one direct BP argument write and its exact additive delta."""
+    slot: object
     if not operands:
         return None
     slot = _direct_bp_stack_operand_8616(operands[0])
     if slot is None or slot[1] != 2 or not _operand_is_written_8616(insn, operands[0]):
         return None
     offset, _width = slot
-    if insn.id == X86_INS_INC:
+    if operator.eq(insn.id, X86_INS_INC):
         return offset, 1
-    if insn.id == X86_INS_DEC:
+    if operator.eq(insn.id, X86_INS_DEC):
         return offset, -1
-    if insn.id in {X86_INS_ADD, X86_INS_SUB} and len(operands) == 2 and operands[1].type == X86_OP_IMM:
+    if insn.id in {X86_INS_ADD, X86_INS_SUB} and len(operands) == 2 and operator.eq(operands[1].type, X86_OP_IMM):
         immediate = int(operands[1].imm)
         if -0x8000 <= immediate <= 0xFFFF:
             immediate &= 0xFFFF
             if immediate & 0x8000:
                 immediate -= 0x10000
-            return offset, immediate if insn.id == X86_INS_ADD else -immediate
+            return offset, immediate if operator.eq(insn.id, X86_INS_ADD) else -immediate
     return offset, None
 
 
 def _unique_memory_carrier_8616(
     operand: _OperandBoundary8616,
-    carriers: dict[int, _NearPointerCarrier8616],
-) -> tuple[int, _NearPointerCarrier8616] | None:
+    carriers: object,
+) -> object:
     """Find a sole argument address carrier outside a BP-based stack object."""
     address_registers = (int(operand.mem.base), int(operand.mem.index))
     if X86_REG_BP in address_registers:
         return None
-    carrier_registers = tuple(register for register in address_registers if register in carriers)
+    carrier_registers = tuple(register for register in iter(address_registers) if register in carriers)
     if len(carrier_registers) != 1:
         return None
     register = carrier_registers[0]
     return register, carriers[register]
 
 
+@cython.ccall
 def _record_pointer_facts_8616(
     insn: _InstructionBoundary8616,
-    insn_addr: int,
-    operands: tuple[_OperandBoundary8616, ...],
-    carriers: dict[int, _NearPointerCarrier8616],
-    facts: list[NearPointerArgumentFact8616],
-    seen: set[tuple[int, int, int]],
+    insn_addr: cython.longlong,
+    operands: object,
+    carriers: object,
+    facts: object,
+    seen: object,
 ) -> None:
     """Record pointer dereferences proven through one live carrier."""
+    carrier_match: object
+    register_name: object
+    operand: object
     for operand in operands:
-        if operand.type != X86_OP_MEM or insn.id == X86_INS_LEA:
+        if operator.ne(operand.type, X86_OP_MEM) or operator.eq(insn.id, X86_INS_LEA):
             continue
         carrier_match = _unique_memory_carrier_8616(operand, carriers)
         if carrier_match is None or int(operand.size) <= 0:
@@ -247,18 +260,24 @@ def _record_pointer_facts_8616(
         )
 
 
+@cython.ccall
 def _update_carriers_8616(
     insn: _InstructionBoundary8616,
-    insn_addr: int,
-    operands: tuple[_OperandBoundary8616, ...],
-    carriers: dict[int, _NearPointerCarrier8616],
+    insn_addr: cython.longlong,
+    operands: object,
+    carriers: object,
 ) -> None:
     """Apply one instruction's carrier version, transfer, or invalidation."""
+    delta: object
+    source_stack_slot: object
+    stack_write: object
+    carrier: object
+    register: object
     stack_write = _direct_stack_write_delta_8616(insn, operands)
     if stack_write is not None:
         stack_offset, delta = stack_write
         for register, carrier in tuple(carriers.items()):
-            if carrier.stack_offset != stack_offset:
+            if operator.ne(carrier.stack_offset, stack_offset):
                 continue
             if delta is None:
                 carriers.pop(register, None)
@@ -266,15 +285,15 @@ def _update_carriers_8616(
             carriers[register] = replace(
                 carrier,
                 source_version_delta=carrier.source_version_delta + delta,
-                source_update_ins_addrs=(*carrier.source_update_ins_addrs, insn_addr),
+                source_update_ins_addrs=tuple(carrier.source_update_ins_addrs) + (insn_addr,),
             )
-    if not operands or operands[0].type != X86_OP_REG:
+    if not operands or operator.ne(operands[0].type, X86_OP_REG):
         return
     destination_register = int(operands[0].reg)
-    if insn.id == X86_INS_ADD and destination_register in carriers:
+    if operator.eq(insn.id, X86_INS_ADD) and destination_register in carriers:
         carriers[destination_register] = replace(carriers[destination_register], value_is_exact=False)
         return
-    if insn.id != X86_INS_MOV or len(operands) != 2:
+    if operator.ne(insn.id, X86_INS_MOV) or len(operands) != 2:
         carriers.pop(destination_register, None)
         return
     source = operands[1]
@@ -282,17 +301,19 @@ def _update_carriers_8616(
     if source_stack_slot is not None and source_stack_slot[0] >= 4 and source_stack_slot[1] == 2:
         carriers[destination_register] = _NearPointerCarrier8616(source_stack_slot[0], insn_addr)
         return
-    if source.type == X86_OP_REG and int(source.reg) in carriers:
+    if operator.eq(source.type, X86_OP_REG) and int(source.reg) in carriers:
         carriers[destination_register] = carriers[int(source.reg)]
         return
     carriers.pop(destination_register, None)
 
 
 def _collect_near_pointer_argument_facts_uncached_8616(
-    project: object | None,
+    project: object,
     function: object,
 ) -> tuple[NearPointerArgumentFact8616, ...]:
     """Collect BP-argument facts from one decoded binary function surface."""
+    block: object
+    wrapped: object
     if function is None:
         return ()
     if project is not None:
@@ -303,9 +324,9 @@ def _collect_near_pointer_argument_facts_uncached_8616(
         except (AttributeError, TypeError):
             return ()
     facts: list[NearPointerArgumentFact8616] = []
-    seen: set[tuple[int, int, int]] = set()
+    seen: set[tuple[cython.longlong, cython.longlong, cython.longlong]] = set()
     for block in sorted(blocks, key=lambda candidate: int(candidate.addr)):
-        carriers: dict[int, _NearPointerCarrier8616] = {}
+        carriers: dict[cython.longlong, _NearPointerCarrier8616] = {}
         wrapped_insns = (
             _capstone_insns_for_direct_global_update_8616(project, block)
             if project is not None
@@ -326,11 +347,12 @@ def _collect_near_pointer_argument_facts_uncached_8616(
     return tuple(sorted(facts, key=lambda fact: (fact.dereference_ins_addr, fact.stack_offset)))
 
 
+@cython.ccall
 def collect_near_pointer_argument_facts_8616(
     function: object,
     *,
     project: object | None = None,
-) -> tuple[NearPointerArgumentFact8616, ...]:
+) -> object:
     """Collect or reuse BP-argument facts for one decoded binary surface."""
     return cast(
         tuple[NearPointerArgumentFact8616, ...],

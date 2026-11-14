@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize atomic multi-arm wide return chains from typed CFG evidence.
 
 Layer: Structuring.
@@ -13,6 +14,8 @@ leaf, or observable body effect refuses the complete candidate without mutation.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -33,14 +36,17 @@ from angr.analyses.decompiler.structured_codegen.c import (
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
 
 from inertia.ir.condition_ir import ConditionIR
+import dataclasses
+import operator
+import builtins
 
 log: logging.Logger = logging.getLogger(__name__)
 
-type MultiArmConditionMaterializer8616 = Callable[
+MultiArmConditionMaterializer8616 = typing.TypeAliasType("MultiArmConditionMaterializer8616", Callable[
     [ConditionIR, int, int], CExpression | None
-]
-type MultiArmReturnRecoverer8616 = Callable[[int], CExpression | None]
-type MultiArmBodyTargetResolver8616 = Callable[[object], int | None]
+])
+MultiArmReturnRecoverer8616 = typing.TypeAliasType("MultiArmReturnRecoverer8616", Callable[[int], CExpression | None])
+MultiArmBodyTargetResolver8616 = typing.TypeAliasType("MultiArmBodyTargetResolver8616", Callable[[object], int | None])
 
 
 class MultiArmReturnChainStatus8616(Enum):
@@ -50,29 +56,29 @@ class MultiArmReturnChainStatus8616(Enum):
     REFUSED = "refused"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class MultiArmReturnCandidate8616:
     """One ordered structured arm and its exact CFG ownership evidence."""
 
     fact: ConditionIR
     structured_condition: CExpression
     body: object
-    true_target: int
-    false_target: int
+    true_target: cython.longlong
+    false_target: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class MultiArmReturnChainStats8616:
     """Closed evidence accounting for one atomic multi-arm recovery."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class MultiArmReturnChainResult8616:
     """Atomic replacement nodes and evidence status for one return chain."""
 
@@ -83,7 +89,8 @@ class MultiArmReturnChainResult8616:
     stats: MultiArmReturnChainStats8616 = MultiArmReturnChainStats8616()
 
 
-def _refused_result_8616(raw_count: int) -> MultiArmReturnChainResult8616:
+@cython.ccall
+def _refused_result_8616(raw_count: cython.longlong) -> MultiArmReturnChainResult8616:
     """Build one typed atomic refusal with closed evidence accounting."""
     return MultiArmReturnChainResult8616(
         MultiArmReturnChainStatus8616.REFUSED,
@@ -94,16 +101,18 @@ def _refused_result_8616(raw_count: int) -> MultiArmReturnChainResult8616:
     )
 
 
-def _debug_return_setup_8616(event: str, **fields: object) -> None:
+def _debug_return_setup_8616(event: object, **fields: object) -> None:
     """Log one structured return-setup decision when diagnostics are enabled."""
     if os.environ.get("INERTIA_DEBUG_CONDITION_MATERIALIZATION") != "1":
         return
-    details = " ".join(f"{key}={value!r}" for key, value in sorted(fields.items()))
+    details = " ".join(f"{key}={value!r}" for key, value in builtins.iter(sorted(tuple(fields.items()))))
     log.warning("[multi-arm-return-chain] event=%s %s", event, details)
 
 
-def is_wide_register_return_setup_body_8616(body: object) -> bool:
+def is_wide_register_return_setup_body_8616(body: object) -> cython.bint:
     """Prove that a body contains only adjacent stack words copied to registers."""
+    assignment: object
+    statement: object
     if not isinstance(body, CStatements):
         _debug_return_setup_8616("body-type-refused", body_type=type(body).__name__)
         return False
@@ -112,7 +121,7 @@ def is_wide_register_return_setup_body_8616(body: object) -> bool:
         _debug_return_setup_8616(
             "statement-count-refused",
             statement_count=len(statements),
-            statement_types=tuple(type(statement).__name__ for statement in statements),
+            statement_types=tuple(type(statement).__name__ for statement in iter(statements)),
         )
         return False
     assignments: list[CAssignment] = []
@@ -123,7 +132,7 @@ def is_wide_register_return_setup_body_8616(body: object) -> bool:
             )
             return False
         assignments.append(statement)
-    register_offsets: set[int] = set()
+    register_offsets: set[cython.longlong] = set()
     stack_slices: list[SimStackVariable] = []
     for assignment in assignments:
         if not isinstance(assignment.lhs, CVariable) or not isinstance(
@@ -160,9 +169,9 @@ def is_wide_register_return_setup_body_8616(body: object) -> bool:
         stack_slices.append(rhs)
     ordered = sorted(stack_slices, key=lambda variable: variable.offset)
     stack_pair_is_safe = (
-        ordered[0].base == ordered[1].base
-        and max(variable.offset + variable.size for variable in ordered)
-        - min(variable.offset for variable in ordered)
+        operator.eq(ordered[0].base, ordered[1].base)
+        and max(variable.offset + variable.size for variable in iter(ordered))
+        - min(variable.offset for variable in iter(ordered))
         == 4
     )
     safe = len(register_offsets) == 2 and stack_pair_is_safe
@@ -172,13 +181,14 @@ def is_wide_register_return_setup_body_8616(body: object) -> bool:
             register_offsets=tuple(sorted(register_offsets)),
             stack_slices=tuple(
                 (variable.base, variable.offset, variable.size)
-                for variable in ordered
+                for variable in iter(ordered)
             ),
         )
     return safe
 
 
-def _is_materialized_return_body_8616(body: object) -> bool:
+@cython.ccall
+def _is_materialized_return_body_8616(body: object) -> cython.bint:
     """Return whether one structured body contains exactly one return."""
     if not isinstance(body, CStatements):
         return False
@@ -187,9 +197,9 @@ def _is_materialized_return_body_8616(body: object) -> bool:
 
 
 def is_materialized_multi_arm_return_chain_8616(
-    structured_arms: tuple[tuple[CExpression, object], ...],
+    structured_arms: object,
     else_body: object,
-) -> bool:
+) -> cython.bint:
     """Return whether every arm is an already-proved return-chain replacement."""
     return (
         len(structured_arms) >= 2
@@ -199,31 +209,32 @@ def is_materialized_multi_arm_return_chain_8616(
             )
             is True
             and _is_materialized_return_body_8616(body)
-            for condition, body in structured_arms
+            for condition, body in iter(structured_arms)
         )
         and _is_materialized_return_body_8616(else_body)
     )
 
 
-def multi_arm_wide_return_obligation_count_8616(root: object) -> int:
+def multi_arm_wide_return_obligation_count_8616(root: object) -> cython.longlong:
     """Count arms in a structured wide-return chain that must not be discarded."""
+    current: object
     pending = [root]
     while pending:
         current = pending.pop()
         if isinstance(current, CIfElse):
             arms = tuple(current.condition_and_nodes or ())
-            bodies = tuple(body for _condition, body in arms)
+            bodies = tuple(body for _condition, body in iter(arms))
             if (
                 len(arms) >= 2
                 and current.else_node is not None
                 and all(
                     is_wide_register_return_setup_body_8616(body)
                     or _is_materialized_return_body_8616(body)
-                    for body in (*bodies, current.else_node)
+                    for body in iter(tuple(bodies) + (current.else_node,))
                 )
             ):
                 return len(arms)
-            pending.extend(body for _condition, body in arms if body is not None)
+            pending.extend(body for _condition, body in iter(arms) if body is not None)
             if current.else_node is not None:
                 pending.append(current.else_node)
         elif isinstance(current, CStatements):
@@ -231,11 +242,12 @@ def multi_arm_wide_return_obligation_count_8616(root: object) -> int:
     return 0
 
 
+@cython.ccall
 def _return_body_8616(
     codegen: object,
     original_body: object,
     expression: CExpression,
-    target_addr: int,
+    target_addr: cython.longlong,
 ) -> CStatements:
     """Build one return body while preserving the original CFG tags."""
     body_tags = dict(original_body.tags) if isinstance(original_body, CStatements) else {}
@@ -247,13 +259,17 @@ def _return_body_8616(
 
 def recover_multi_arm_wide_return_chain_8616(
     codegen: object,
-    candidates: tuple[MultiArmReturnCandidate8616, ...],
+    candidates: object,
     else_body: object,
-    else_target: int,
+    else_target: cython.longlong,
     materialize_condition: MultiArmConditionMaterializer8616,
     recover_return: MultiArmReturnRecoverer8616,
 ) -> MultiArmReturnChainResult8616:
     """Build an all-or-nothing multi-arm return replacement from typed evidence."""
+    condition: object
+    else_return: object
+    returned: object
+    candidate: object
     raw_count = len(candidates)
     refused = _refused_result_8616(raw_count)
     if raw_count < 2 or not isinstance(else_target, int):
@@ -262,7 +278,7 @@ def recover_multi_arm_wide_return_chain_8616(
         return refused
     if any(
         not is_wide_register_return_setup_body_8616(candidate.body)
-        for candidate in candidates
+        for candidate in iter(candidates)
     ):
         return refused
 
@@ -300,15 +316,15 @@ def recover_multi_arm_wide_return_chain_8616(
                 codegen, candidate.body, returned, candidate.true_target
             ),
         )
-        for candidate, condition, returned in zip(
+        for candidate, condition, returned in builtins.iter(zip(
             candidates, conditions, returns, strict=True
-        )
+        ))
     )
     return MultiArmReturnChainResult8616(
         MultiArmReturnChainStatus8616.MATERIALIZED,
         condition_and_nodes=replacement_arms,
         else_node=_return_body_8616(codegen, else_body, else_return, else_target),
-        return_expressions=(*returns, else_return),
+        return_expressions=tuple(returns) + (else_return,),
         stats=MultiArmReturnChainStats8616(
             raw_fact_count=raw_count,
             normalized_fact_count=raw_count,
@@ -320,27 +336,28 @@ def recover_multi_arm_wide_return_chain_8616(
 
 def recover_structured_multi_arm_wide_return_chain_8616(
     codegen: object,
-    structured_arms: tuple[tuple[CExpression, object], ...],
-    facts: tuple[ConditionIR, ...],
+    structured_arms: object,
+    facts: object,
     else_body: object,
     resolve_body_target: MultiArmBodyTargetResolver8616,
     materialize_condition: MultiArmConditionMaterializer8616,
     recover_return: MultiArmReturnRecoverer8616,
 ) -> MultiArmReturnChainResult8616:
     """Resolve ordered CFG targets and recover one complete structured return chain."""
+    else_target: object
     raw_count = len(structured_arms)
-    if raw_count < 2 or len(facts) != raw_count:
+    if raw_count < 2 or operator.ne(len(facts), raw_count):
         return _refused_result_8616(raw_count)
-    true_targets = tuple(resolve_body_target(body) for _condition, body in structured_arms)
+    true_targets = tuple(resolve_body_target(body) for _condition, body in iter(structured_arms))
     else_target = resolve_body_target(else_body)
-    if else_target is None or any(target is None for target in true_targets):
+    if else_target is None or any(target is None for target in iter(true_targets)):
         return _refused_result_8616(raw_count)
     proven_true_targets = cast(tuple[int, ...], true_targets)
     false_targets = tuple(
         facts[index + 1].block_addr if index + 1 < raw_count else else_target
         for index in range(raw_count)
     )
-    if any(not isinstance(target, int) for target in false_targets):
+    if any(not isinstance(target, int) for target in iter(false_targets)):
         return _refused_result_8616(raw_count)
     candidates = tuple(
         MultiArmReturnCandidate8616(
@@ -350,13 +367,13 @@ def recover_structured_multi_arm_wide_return_chain_8616(
             true_target,
             cast(int, false_target),
         )
-        for (condition, body), fact, true_target, false_target in zip(
+        for (condition, body), fact, true_target, false_target in builtins.iter(zip(
             structured_arms,
             facts,
             proven_true_targets,
             false_targets,
             strict=True,
-        )
+        ))
     )
     return recover_multi_arm_wide_return_chain_8616(
         codegen,

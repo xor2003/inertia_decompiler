@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Replay CALL execution-frame pruning after call materialization.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ does not recover arguments, call targets, stack identity, or control flow.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from typing import Protocol, cast
@@ -35,11 +38,15 @@ class _CodegenFrameStats8616(Protocol):
     _inertia_call_execution_frame_carrier_stats_8616: CallExecutionFrameCarrierStats8616
 
 
+@cython.ccall
 def prune_materialized_call_execution_frames_8616(
     codegen: object,
     calls: Iterable[tuple[CFunctionCall, CallsiteSummary8616]],
-) -> bool:
+) -> cython.bint:
     """Prune exact SP execution carriers for all summarized calls."""
+    frame_kind: object
+    call: object
+    summary: object
     current = CallExecutionFrameCarrierStats8616()
     for call, summary in calls:
         frame_kind = callsite_machine_frame_kind_8616(summary)

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Lightweight entrypoint reuse for validated direct-address results.
 
 Layer: CLI/fallback/reporting.
@@ -7,6 +8,8 @@ without changing normal CLI execution.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import os
 import sys
@@ -29,13 +32,15 @@ from inertia.cli.generated_c_artifacts import write_generated_function_c
 
 
 def _prepare_fast_path_args_8616(
-    argv: list[str] | None,
+    argv: object,
 ) -> tuple[CliArguments, Path | None]:
     """Parse the lightweight subset with the same startup policy as the full CLI."""
+    mapped_backend: object
+    signature_catalog: object
     args = parse_cli_arguments(argv)
     raw_argv = list(argv) if argv is not None else list(sys.argv[1:])
     seed_engine_was_explicit = any(
-        token == "--seed-engine" or token.startswith("--seed-engine=") for token in raw_argv
+        token == "--seed-engine" or token.startswith("--seed-engine=") for token in iter(raw_argv)
     )
     if seed_engine_was_explicit and args.seed_engine:
         mapped_backend = {"auto": "auto", "angr": "angr", "rizin": "rizin"}.get(
@@ -51,11 +56,13 @@ def _prepare_fast_path_args_8616(
     return args, signature_catalog
 
 
+@cython.ccall
 def _emit_fast_cache_artifact_8616(
     args: CliArguments,
     artifact: DirectRequestCacheArtifact8616,
-) -> int:
+) -> cython.longlong:
     """Emit one already-validated artifact through the direct CLI streams."""
+    diagnostic_line: object
     _timestamped_print(f"/* loading: {args.binary} */", flush=True)
     if artifact.runtime_header:
         sys.stdout.write(artifact.runtime_header)
@@ -94,8 +101,10 @@ def _emit_fast_cache_artifact_8616(
     return 0
 
 
-def try_direct_request_fast_path_8616(argv: list[str] | None = None) -> int | None:
+@cython.ccall
+def try_direct_request_fast_path_8616(argv: object = None) -> int | None:
     """Return a cache-hit exit status, or None to run the full decompiler."""
+    inputs: object
     args, signature_catalog = _prepare_fast_path_args_8616(argv)
     # No live project exists here to reauthenticate declared-call authority.
     if args.declared_call_effects:

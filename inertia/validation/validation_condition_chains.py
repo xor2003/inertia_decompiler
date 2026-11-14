@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Validate final composite conditions against Structuring provenance.
 
 Layer: Validation.
@@ -14,6 +15,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -27,6 +30,8 @@ from inertia.structuring.condition_chain_provenance import (
     ConditionChainProvenance8616,
     condition_chain_provenance_8616,
 )
+import dataclasses
+import operator
 
 
 class ConditionChainValidationStatus8616(StrEnum):
@@ -41,16 +46,16 @@ class ConditionChainValidationStatus8616(StrEnum):
     PRECISION_MISMATCH = "precision_mismatch"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionChainValidationResult8616:
     """Closed evidence for one composite-condition validation decision."""
 
     status: ConditionChainValidationStatus8616
     provenance: ConditionChainProvenance8616 | None = None
-    leaf_jcc_addrs: tuple[int, ...] = ()
+    leaf_jcc_addrs: tuple[cython.longlong, ...] = ()
 
     @property
-    def proven(self) -> bool:
+    def proven(self) -> cython.bint:
         """Return whether all provenance, leaf, fact, and precision checks pass."""
         return self.status is ConditionChainValidationStatus8616.PROVEN
 
@@ -61,8 +66,10 @@ class _TaggedConditionNode8616(Protocol):
     tags: object
 
 
+@cython.ccall
 def _condition_jcc_addr_8616(condition: object) -> int | None:
     """Read one exact Structuring-owned JCC identity from a condition leaf."""
+    jcc_addr: object
     surface = cast(_TaggedConditionNode8616, condition)
     try:
         tags = surface.tags
@@ -74,8 +81,12 @@ def _condition_jcc_addr_8616(condition: object) -> int | None:
     return jcc_addr if isinstance(jcc_addr, int) else None
 
 
-def _logical_leaf_jcc_addrs_8616(condition: object) -> tuple[int, ...] | None:
+@cython.ccall
+def _logical_leaf_jcc_addrs_8616(condition: object) -> object:
     """Return exact JCC identities for every terminal logical predicate."""
+    jcc_addr: object
+    lhs: object
+    rhs: object
     if isinstance(condition, CBinaryOp) and condition.op in {
         "LogicalAnd",
         "LogicalOr",
@@ -92,18 +103,20 @@ def _logical_leaf_jcc_addrs_8616(condition: object) -> tuple[int, ...] | None:
 def validate_complete_condition_chain_8616(
     condition: object,
     *,
-    root_jcc_addr: int,
-    facts_by_jcc: Mapping[int, Mapping[tuple[object, ...], ConditionIR]],
-    actual_fingerprint: str,
-    precision_candidates: frozenset[str],
+    root_jcc_addr: cython.longlong,
+    facts_by_jcc: Mapping[cython.longlong, Mapping[tuple[object, ...], ConditionIR]],
+    actual_fingerprint: object,
+    precision_candidates: object,
 ) -> ConditionChainValidationResult8616:
     """Validate exact leaf preservation for a precision-backed composite."""
+    leaf_jcc_addrs: object
+    provenance: object
     provenance = condition_chain_provenance_8616(condition)
     if provenance is None:
         return ConditionChainValidationResult8616(
             ConditionChainValidationStatus8616.NO_PROVENANCE
         )
-    if not provenance.jcc_addrs or provenance.jcc_addrs[0] != root_jcc_addr:
+    if not provenance.jcc_addrs or operator.ne(provenance.jcc_addrs[0], root_jcc_addr):
         return ConditionChainValidationResult8616(
             ConditionChainValidationStatus8616.ROOT_MISMATCH,
             provenance,
@@ -116,15 +129,15 @@ def validate_complete_condition_chain_8616(
             leaf_jcc_addrs or (),
         )
     if (
-        len(set(leaf_jcc_addrs)) != len(leaf_jcc_addrs)
-        or set(leaf_jcc_addrs) != set(provenance.jcc_addrs)
+        operator.ne(len(set(leaf_jcc_addrs)), len(leaf_jcc_addrs))
+        or operator.ne(set(leaf_jcc_addrs), set(provenance.jcc_addrs))
     ):
         return ConditionChainValidationResult8616(
             ConditionChainValidationStatus8616.LEAF_IDENTITY_MISMATCH,
             provenance,
             leaf_jcc_addrs,
         )
-    if any(len(facts_by_jcc.get(jcc_addr, {})) != 1 for jcc_addr in provenance.jcc_addrs):
+    if any(len(facts_by_jcc.get(jcc_addr, {})) != 1 for jcc_addr in iter(provenance.jcc_addrs)):
         return ConditionChainValidationResult8616(
             ConditionChainValidationStatus8616.TYPED_FACT_MISMATCH,
             provenance,

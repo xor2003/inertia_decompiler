@@ -47,6 +47,12 @@ Run `python -m tools.compiler_toolchain.import_ultra_quickc_fixtures --help`.
 Its private tests live beside the importer. Compiler execution and fixture
 selection are unchanged by the move.
 
+Before a DOSBox stage starts, the harness removes its owned outputs and verifies
+that they are gone. It then checks completion markers and output freshness,
+accounting for [FAT write timestamps having two-second precision](https://learn.microsoft.com/en-us/windows/win32/sysinfo/file-times).
+Missing, empty or provably stale required artifacts still refuse. Empty guest
+stdout is permitted only where the runtime-output contract allows it.
+
 Inputs: explicit JSON manifests, source fixtures, profile registries and external
 compiler/runtime binaries. Outputs: isolated case artifacts, logs, provenance and
 structured reports. Shared compiler/decompiler source manifests remain at `examples/compiler_coverage/`

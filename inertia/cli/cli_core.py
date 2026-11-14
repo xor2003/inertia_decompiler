@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: orchestrate commands, fallback lanes, diagnostics, and output policy.
@@ -6,6 +7,7 @@ Dynamic attributes in this CLI boundary are limited to third-party angr/codegen 
 """
 
 from __future__ import annotations
+import cython
 
 import contextlib
 import copy as copy
@@ -29,6 +31,9 @@ from collections.abc import Sequence as Sequence
 from collections.abc import Sized as Sized
 from concurrent.futures import FIRST_COMPLETED as FIRST_COMPLETED
 from concurrent.futures import wait as wait
+import dataclasses
+import operator
+import builtins
 
 # Static named reexports keep the legacy CLI facade's names explicit for type checkers; runtime bindings and __all__ are unchanged.
 if _cli_compat_typing.TYPE_CHECKING:
@@ -921,11 +926,11 @@ from .indexed_alias_program_context import (
 )
 
 print: Callable[..., object] = _timestamped_print
-type _AngrFunction = Any
-type _StructuredCNode8616 = Any
-type _SyntheticGlobals8616 = Any
-type _FunctionCfgPair8616 = tuple[object, _AngrFunction]
-type _DirectDecompileJobResult8616 = tuple[
+_AngrFunction = typing.TypeAliasType("_AngrFunction", Any)
+_StructuredCNode8616 = typing.TypeAliasType("_StructuredCNode8616", Any)
+_SyntheticGlobals8616 = typing.TypeAliasType("_SyntheticGlobals8616", Any)
+_FunctionCfgPair8616 = typing.TypeAliasType("_FunctionCfgPair8616", tuple[object, _AngrFunction])
+_DirectDecompileJobResult8616 = typing.TypeAliasType("_DirectDecompileJobResult8616", tuple[
     str,
     str,
     str | None,
@@ -937,7 +942,7 @@ type _DirectDecompileJobResult8616 = tuple[
     FailureFamilyState,
     str,
     tuple[ScalarInterface8616 | None, str],
-]
+])
 __all__ = [
     "_argument_was_explicit",
     "_bounded_non_optimized_timeout",
@@ -961,6 +966,7 @@ __all__ = [
 _ARCHITECTURE_GUARD_STATUS_8616: bool | None = None
 
 
+@cython.ccall
 def _ensure_runtime_architecture_guard_8616() -> None:
     """Re-run architecture boundary checks in execution path."""
     global _ARCHITECTURE_GUARD_STATUS_8616
@@ -987,13 +993,14 @@ class DirectClinicPolicy8616(Enum):
     FAST_PEEPHOLE = "fast_peephole"
 
 
+@cython.ccall
 def _direct_clinic_policy_8616(
     *,
-    arch_name: str,
-    direct_addr_mode: bool,
-    block_count: int,
-    byte_count: int,
-    call_site_count: int,
+    arch_name: object,
+    direct_addr_mode: cython.bint,
+    block_count: cython.longlong,
+    byte_count: cython.longlong,
+    call_site_count: cython.longlong,
 ) -> DirectClinicPolicy8616:
     """Select bounded Clinic work without disabling semantic variable recovery."""
     if arch_name != "86_16" or not direct_addr_mode:
@@ -1005,8 +1012,10 @@ def _direct_clinic_policy_8616(
     return DirectClinicPolicy8616.STANDARD
 
 
-def _safe_function_callsite_count_8616(func: object) -> int:
-    counts: list[int] = []
+@cython.ccall
+def _safe_function_callsite_count_8616(func: object) -> cython.longlong:
+    get_call_sites: object
+    counts: list[cython.longlong] = []
     get_call_sites = getattr(func, "get_call_sites", None)
     if callable(get_call_sites):
         try:
@@ -1021,13 +1030,14 @@ def _safe_function_callsite_count_8616(func: object) -> int:
     return max(counts, default=0)
 
 
+@cython.ccall
 def _clinic_policy_needs_callsite_count_8616(
     *,
-    arch_name: str,
-    direct_addr_mode: bool,
-    block_count: int,
-    byte_count: int,
-) -> bool:
+    arch_name: object,
+    direct_addr_mode: cython.bint,
+    block_count: cython.longlong,
+    byte_count: cython.longlong,
+) -> cython.bint:
     if arch_name != "86_16" or not direct_addr_mode:
         return False
     if block_count >= 32 or byte_count >= 280:
@@ -1041,6 +1051,11 @@ def _temporary_clinic_policy_8616(
     policy: DirectClinicPolicy8616,
 ) -> Iterator[None]:
     """Apply reversible Clinic cost bounds while preserving semantic stages."""
+    prev_disable_complex_expr_scan: object
+    prev_disable_narrowing: object
+    prev_fast_block_peephole: object
+    prev_peephole_cap: object
+    prev_skip_simplify: object
     if policy is DirectClinicPolicy8616.STANDARD:
         yield
         return
@@ -1067,11 +1082,13 @@ def _temporary_clinic_policy_8616(
             typing.cast(typing.Any, project_obj)._inertia_clinic_peephole_cap = prev_peephole_cap
 
 
-def _env_truthy_8616(name: str) -> bool:
+@cython.ccall
+def _env_truthy_8616(name: object) -> cython.bint:
     return os.environ.get(name, "").strip().lower() in _TRUTHY_ENV_VALUES_8616
 
 
-def _analysis_timeout_lane_allows_fork() -> bool:
+@cython.ccall
+def _analysis_timeout_lane_allows_fork() -> cython.bint:
     """Return true when timeout wrapper state supports fork isolation."""
     return (
         os.name == "posix"
@@ -1080,7 +1097,8 @@ def _analysis_timeout_lane_allows_fork() -> bool:
     )
 
 
-def _analysis_timeout_use_fork_8616() -> bool:
+@cython.ccall
+def _analysis_timeout_use_fork_8616() -> cython.bint:
     """Return whether timeout-heavy lanes should use fork isolation."""
     return (
         _analysis_timeout_lane_allows_fork()
@@ -1089,18 +1107,20 @@ def _analysis_timeout_use_fork_8616() -> bool:
     )
 
 
-def _direct_addr_use_fork_lane_8616(*, tail_validation_enabled: bool) -> bool:
+@cython.ccall
+def _direct_addr_use_fork_lane_8616(*, tail_validation_enabled) -> cython.bint:
     del tail_validation_enabled
     if _env_truthy_8616(_DIRECT_ADDR_FORCE_THREAD_LANE_ENV_8616):
         return False
     return _analysis_timeout_use_fork_8616()
 
 
-def _argument_was_explicit(name: str) -> bool:
+def _argument_was_explicit(name: object) -> cython.bint:
     flag = name.strip()
-    return any(token == flag or token.startswith(f"{flag}=") for token in sys.argv[1:])
+    return any(token == flag or token.startswith(f"{flag}=") for token in iter(sys.argv[1:]))
 
 
+@cython.ccall
 def _configure_cli_telemetry_8616(args: CliArguments) -> None:
     configure_telemetry_from_env(
         enabled=args.otel_spans,
@@ -1118,15 +1138,21 @@ def _configure_cli_telemetry_8616(args: CliArguments) -> None:
     )
 
 
-def _parse_int(value: str) -> int:
+@cython.ccall
+def _parse_int(value: object) -> cython.longlong:
     return int(value, 0)
 
 
-def _collect_rizin_library_offsets_8616(evidence: object | None) -> set[int]:
+@cython.ccall
+def _collect_rizin_library_offsets_8616(evidence: object) -> object:
     """Collect library-like entry addresses reported by rizin evidence."""
+    functions: object
+    symbols: object
+    function_fact: object
+    symbol_fact: object
     if evidence is None:
         return set()
-    out: set[int] = set()
+    out: set[cython.longlong] = set()
     functions = getattr(evidence, "functions", ())
     symbols = getattr(evidence, "symbols", ())
     for function_fact in functions if isinstance(functions, Sequence) else ():
@@ -1138,8 +1164,10 @@ def _collect_rizin_library_offsets_8616(evidence: object | None) -> set[int]:
     return out
 
 
-def _has_local_sidecar_evidence_8616(binary_path: Path) -> bool:
+@cython.ccall
+def _has_local_sidecar_evidence_8616(binary_path: Path) -> cython.bint:
     """Check whether local sidecar hint files exist next to the binary."""
+    candidate: object
     if os.environ.get("INERTIA_IGNORE_LOCAL_SIDECAR_HINTS_8616", "").strip().lower() in {
         "1",
         "true",
@@ -1163,14 +1191,15 @@ def _has_local_sidecar_evidence_8616(binary_path: Path) -> bool:
         ".pdb",
     }
     for candidate in parent.glob(f"{stem}.*"):
-        if candidate.resolve() == binary_path.resolve():
+        if operator.eq(candidate.resolve(), binary_path.resolve()):
             continue
         if candidate.suffix.lower() in sidecar_exts:
             return True
     return False
 
 
-def _auto_rizin_enabled_for_binary_8616(project: angr.Project, binary_path: Path) -> bool:
+@cython.ccall
+def _auto_rizin_enabled_for_binary_8616(project: angr.Project, binary_path: Path) -> cython.bint:
     """Resolve the auto-backend rizin preference for the current binary."""
     # For non-86_16 keep auto as hybrid-friendly behavior.
     if str(getattr(project.arch, "name", "") or "") != "86_16":
@@ -1184,7 +1213,8 @@ def _auto_rizin_enabled_for_binary_8616(project: angr.Project, binary_path: Path
     return not _has_local_sidecar_evidence_8616(binary_path)
 
 
-def _wants_rizin_8616(project: angr.Project, args: CliArguments, binary_path: Path, backend: str) -> bool:
+@cython.ccall
+def _wants_rizin_8616(project: angr.Project, args: CliArguments, binary_path: Path, backend: object) -> cython.bint:
     """Check whether rizin discovery should run for this backend/binary pair."""
     if args.binary.suffix.lower() != ".exe":
         return False
@@ -1193,7 +1223,8 @@ def _wants_rizin_8616(project: angr.Project, args: CliArguments, binary_path: Pa
     return backend == "auto" and _auto_rizin_enabled_for_binary_8616(project, binary_path)
 
 
-def _rizin_offsets_status_8616(rz_evidence: RizinEvidence | None, rz: RizinDiscoveryResult | None) -> tuple[list[int], float, str]:
+@cython.ccall
+def _rizin_offsets_status_8616(rz_evidence: object, rz: object) -> tuple[list[cython.longlong], cython.double, str]:
     """Resolve ranked rizin offsets, elapsed time, and status from evidence lanes."""
     if rz_evidence is not None and rz_evidence.status is RizinEvidenceStatus.OK and rz_evidence.functions:
         return list(rz_evidence.function_offsets), rz_evidence.elapsed_ms, rz_evidence.status.value
@@ -1202,20 +1233,22 @@ def _rizin_offsets_status_8616(rz_evidence: RizinEvidence | None, rz: RizinDisco
     return [], 0.0, "error"
 
 
+@cython.ccall
 def _merged_or_rizin_offsets_8616(
     project: angr.Project,
-    rizin_offsets: list[int],
-    rizin_library_offsets: set[int],
-    include_library_functions: bool,
-    status_value: str,
-    elapsed_ms: float,
-    backend: str,
-) -> list[int]:
+    rizin_offsets: object,
+    rizin_library_offsets: object,
+    include_library_functions: cython.bint,
+    status_value: object,
+    elapsed_ms: cython.double,
+    backend: object,
+) -> object:
     """Return rizin offsets directly or merged with angr-ranked seeds."""
+    addr: object
     if not include_library_functions and rizin_library_offsets:
         original_count = len(rizin_offsets)
-        rizin_offsets = [offset for offset in rizin_offsets if offset not in rizin_library_offsets]
-        if len(rizin_offsets) != original_count:
+        rizin_offsets = [offset for offset in iter(rizin_offsets) if offset not in rizin_library_offsets]
+        if operator.ne(len(rizin_offsets), original_count):
             print(
                 f"/* rizin discovery: dropped {original_count - len(rizin_offsets)} library-like entries by default */"
             )
@@ -1229,8 +1262,8 @@ def _merged_or_rizin_offsets_8616(
         project,
         include_library_functions=include_library_functions,
     )
-    merged: list[int] = []
-    seen: set[int] = set()
+    merged: list[cython.longlong] = []
+    seen: set[cython.longlong] = set()
     for addr in angr_offsets:
         if addr not in seen:
             merged.append(addr)
@@ -1243,7 +1276,8 @@ def _merged_or_rizin_offsets_8616(
     return merged
 
 
-def _print_rizin_fallback_diagnostics_8616(rz_evidence: RizinEvidence | None, rz: RizinDiscoveryResult | None) -> None:
+@cython.ccall
+def _print_rizin_fallback_diagnostics_8616(rz_evidence: object, rz: object) -> None:
     """Print rizin lane diagnostics before the angr-ranked fallback."""
     if rz_evidence is not None:
         detail = rz_evidence.detail or rz_evidence.status.value
@@ -1258,12 +1292,14 @@ def _print_rizin_fallback_diagnostics_8616(rz_evidence: RizinEvidence | None, rz
         )
 
 
+@cython.ccall
 def _discover_ranked_binary_offsets(
     project: angr.Project,
     *,
     args: CliArguments,
-) -> list[int]:
+) -> object:
     """Return ranked offsets from the selected binary discovery backend."""
+    rz_evidence: object
     binary_path = args.binary
     include_library_functions = args.include_library_functions
     typing.cast(typing.Any, project)._inertia_include_library_functions = include_library_functions
@@ -1299,7 +1335,8 @@ def _discover_ranked_binary_offsets(
     )
 
 
-def _function_recovery_detail(stage: str | None) -> str | None:
+@cython.ccall
+def _function_recovery_detail(stage: object) -> object:
     if stage == "recovery":
         return "during x86-16 function recovery"
     if isinstance(stage, str) and stage.startswith("recovery:"):
@@ -1314,12 +1351,14 @@ def _function_recovery_detail(stage: str | None) -> str | None:
     return None
 
 
-def _sanitize_direct_timeout_stage_token(token: str) -> str:
+@cython.ccall
+def _sanitize_direct_timeout_stage_token(token: object) -> object:
     """Normalize timeout stage fragments into parser-friendly tokens."""
     return re.sub(r"\s+", "_", token.strip()) or "timeout"
 
 
-def _direct_timeout_failure_stage_from_payload(payload: object | None, *, default: str = "decompilation") -> str:
+@cython.ccall
+def _direct_timeout_failure_stage_from_payload(payload: object | None, *, default: object = "decompilation") -> object:
     message = str(payload or "").lower()
     if not message:
         return default
@@ -1345,7 +1384,8 @@ def _direct_timeout_failure_stage_from_payload(payload: object | None, *, defaul
     return default
 
 
-def _bounded_non_optimized_timeout(timeout: int) -> int:
+@cython.ccall
+def _bounded_non_optimized_timeout(timeout: cython.longlong) -> cython.longlong:
     # The non-optimized slice path is our recovery fallback after bounded
     # function discovery times out. Very small caps cause deterministic
     # failures for medium procedures that need project/slice setup plus
@@ -1356,8 +1396,10 @@ def _bounded_non_optimized_timeout(timeout: int) -> int:
 _DEFAULT_FUNCTION_TIMEOUT_CAP = 240
 
 
+@cython.ccall
 def _parse_env_timeout_cap(default_timeout_cap: int | None = None) -> int | None:
     """Return the environment override or one caller-selected default cap."""
+    cap: object
     default_cap = (
         _DEFAULT_FUNCTION_TIMEOUT_CAP
         if default_timeout_cap is None
@@ -1375,20 +1417,22 @@ def _parse_env_timeout_cap(default_timeout_cap: int | None = None) -> int | None
     return max(1, cap_value)
 
 
+@cython.ccall
 def _enforce_function_timeout_cap(
-    timeout: int,
+    timeout: cython.longlong,
     *,
-    context: str,
+    context: object,
     explicit_timeout_floor: int | None = None,
     default_timeout_cap: int | None = None,
-) -> int:
+) -> cython.longlong:
+    cap: object
     cap = _parse_env_timeout_cap(default_timeout_cap)
     if cap is not None and explicit_timeout_floor is not None and "INERTIA_MAX_FUNCTION_TIMEOUT" not in os.environ:
         cap = max(cap, max(1, int(explicit_timeout_floor)))
     if cap is None:
         return max(1, int(timeout))
     bounded = max(1, min(int(timeout), cap))
-    if bounded != max(1, int(timeout)):
+    if operator.ne(bounded, max(1, int(timeout))):
         logging.getLogger(__name__).debug(
             "%s timeout capped: requested=%s cap=%s applied=%s",
             context,
@@ -1399,12 +1443,13 @@ def _enforce_function_timeout_cap(
     return bounded
 
 
+@cython.ccall
 def _direct_addr_wall_clock_budget(
-    timeout: int,
+    timeout: cython.longlong,
     *,
     effective_timeout: int | None = None,
-    explicit_timeout: bool = False,
-) -> int:
+    explicit_timeout: cython.bint = False,
+) -> cython.longlong:
     # One-function direct-address recovery may chain bounded recovery,
     # non-optimized fallback, and final attribution. Keep that lane inside a
     # deterministic wall-clock budget so callers see an explicit timeout class
@@ -1432,7 +1477,8 @@ def _direct_addr_wall_clock_budget(
     )
 
 
-def _direct_addr_validation_retry_count_8616(*, timeout_was_explicit: bool, args_timeout: int) -> int:
+@cython.ccall
+def _direct_addr_validation_retry_count_8616(*, timeout_was_explicit, args_timeout) -> cython.longlong:
     # A retry must construct a fresh project/function/codegen graph. The direct
     # worker currently closes over one mutable angr graph, so retrying after a
     # validation failure can reuse a partially rewritten AST and lose calls.
@@ -1442,19 +1488,21 @@ def _direct_addr_validation_retry_count_8616(*, timeout_was_explicit: bool, args
     return 0
 
 
-def _direct_addr_robust_retry_enabled_8616(*, timeout_was_explicit: bool) -> bool:
+@cython.ccall
+def _direct_addr_robust_retry_enabled_8616(*, timeout_was_explicit: cython.bint) -> cython.bint:
     # Robust retry is useful for default interactive recovery, but it must not
     # silently double a caller-provided direct-address timeout budget.
     return not timeout_was_explicit
 
 
+@cython.ccall
 def _direct_addr_should_skip_heavy_validation_fallbacks_8616(
     *,
-    timeout_was_explicit: bool,
+    timeout_was_explicit: cython.bint,
     args_timeout: object,
     direct_status: object,
     partial_payload: object,
-) -> bool:
+) -> cython.bint:
     """Return True when explicit-timeout validation failure should emit the direct partial."""
     return (
         timeout_was_explicit
@@ -1465,12 +1513,13 @@ def _direct_addr_should_skip_heavy_validation_fallbacks_8616(
     )
 
 
+@cython.ccall
 def _direct_addr_project_local_fallback_addr_8616(
     *,
     function: object,
-    direct_display_addr: int,
-    using_rebased_direct_slice: bool,
-) -> int:
+    direct_display_addr: cython.longlong,
+    using_rebased_direct_slice: cython.bint,
+) -> cython.longlong:
     """Return the address valid for reads in the current fallback project.
 
     ``direct_display_addr`` is the original binary address and must remain the
@@ -1478,29 +1527,32 @@ def _direct_addr_project_local_fallback_addr_8616(
     safe local base, so fallback lanes that read bytes from that project must
     use the function's project-local address instead.
     """
+    local_addr: object
     if not using_rebased_direct_slice:
         return direct_display_addr
     local_addr = getattr(function, "addr", None)
     return local_addr if isinstance(local_addr, int) else direct_display_addr
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectAddrCanonicalization8616:
     """Sidecar-proven canonical entry for a requested direct address."""
 
-    requested_addr: int
-    canonical_addr: int
-    region: tuple[int, int]
-    name: str | None
+    requested_addr: cython.longlong
+    canonical_addr: cython.longlong
+    region: object
+    name: object
 
 
+@cython.ccall
 def _canonicalize_direct_addr_from_sidecar_padding_8616(
     project: angr.Project,
-    lst_metadata: LSTMetadata | None,
-    requested_addr: int | None,
+    lst_metadata: object,
+    requested_addr: object,
     *,
-    function_label: str | None = None,
+    function_label: object = None,
 ) -> DirectAddrCanonicalization8616 | None:
+    region: object
     if lst_metadata is None or requested_addr is None or getattr(getattr(project, "arch", None), "name", "") != "86_16":
         return None
     region = _lst_code_region(lst_metadata, requested_addr)
@@ -1535,12 +1587,14 @@ def _canonicalize_direct_addr_from_sidecar_padding_8616(
     )
 
 
+@cython.ccall
 def _canonicalize_sidecar_work_offset_8616(
     project: angr.Project,
     lst_metadata: LSTMetadata | None,
-    offset: int,
-    name: str | None,
-) -> tuple[int, str | None]:
+    offset: cython.longlong,
+    name: object,
+) -> tuple[cython.longlong, str | None]:
+    canonical: object
     canonical = _canonicalize_direct_addr_from_sidecar_padding_8616(
         project,
         lst_metadata,
@@ -1554,19 +1608,20 @@ def _canonicalize_sidecar_work_offset_8616(
 
 def _prepare_ranked_binary_preview_items(
     project: angr.Project,
-    ranked_binary_offsets: Sequence[int],
+    ranked_binary_offsets: Sequence[cython.longlong],
     *,
-    max_count: int,
-    timeout: int,
-    window: int,
-    low_memory: bool,
-) -> list[FunctionWorkItem]:
-    def _impl() -> list[FunctionWorkItem]:
+    max_count: cython.longlong,
+    timeout: cython.longlong,
+    window: cython.longlong,
+    low_memory: cython.bint,
+) -> object:
+    def _impl() -> object:
+        addr: object
         if max_count <= 0 or not ranked_binary_offsets:
             return []
 
         preview_items: list[FunctionWorkItem] = []
-        selected_addrs: set[int] = set()
+        selected_addrs: set[cython.longlong] = set()
         quick_timeout = min(timeout, 2)
         probe_budget = min(len(ranked_binary_offsets), max(max_count * 6, 12))
 
@@ -1633,10 +1688,17 @@ def _prepare_ranked_binary_preview_items(
     return _impl()
 
 
+@cython.ccall
 def _preserve_source_label_for_recovered_function_8616(
     source_function: _AngrFunction,
     recovered_function: _AngrFunction,
-) -> bool:
+) -> cython.bint:
+    recovered_info: object
+    recovered_name: object
+    source_info: object
+    source_name: object
+    key: object
+    value: object
     source_addr = function_original_addr(source_function)
     recovered_addr = function_original_addr(recovered_function)
     if not isinstance(source_addr, int) or not isinstance(recovered_addr, int) or source_addr != recovered_addr:
@@ -1663,8 +1725,10 @@ def _preserve_source_label_for_recovered_function_8616(
     return True
 
 
-def _function_work_item_recovery_addr_8616(item: FunctionWorkItem) -> int:
+@cython.ccall
+def _function_work_item_recovery_addr_8616(item: FunctionWorkItem) -> cython.longlong:
     """Return the stable binary address requested for a function work item."""
+    recovery_addr: object
     recovery_addr = item.recovery_addr
     if recovery_addr is None:
         recovery_addr = function_original_addr(item.function)
@@ -1675,22 +1739,24 @@ def _function_work_item_recovery_addr_8616(item: FunctionWorkItem) -> int:
 
 def _supplement_function_cfg_pairs_with_ranked_preview(
     project: angr.Project,
-    function_cfg_pairs: list[tuple[object, object]],
-    ranked_binary_offsets: Sequence[int],
+    function_cfg_pairs: object,
+    ranked_binary_offsets: Sequence[cython.longlong],
     *,
-    target_count: int,
-    timeout: int,
-    window: int,
-    low_memory: bool,
-) -> list[tuple[object, object]]:
-    def _impl() -> list[tuple[object, object]]:
+    target_count: cython.longlong,
+    timeout: cython.longlong,
+    window: cython.longlong,
+    low_memory: cython.bint,
+) -> object:
+    def _impl() -> object:
+        addr: object
+        item: object
         if target_count <= 0 or len(function_cfg_pairs) >= target_count or not ranked_binary_offsets:
             return function_cfg_pairs
 
         supplemented = list(function_cfg_pairs)
         seen_addrs = {
             getattr(function, "addr", None)
-            for _cfg, function in supplemented
+            for _cfg, function in iter(supplemented)
             if isinstance(getattr(function, "addr", None), int)
         }
         preview_items = _prepare_ranked_binary_preview_items(
@@ -1714,20 +1780,24 @@ def _supplement_function_cfg_pairs_with_ranked_preview(
     return _impl()
 
 
+@cython.ccall
 def _supplement_function_cfg_pairs_with_seeded_recovery(
     project: angr.Project,
-    function_cfg_pairs: list[tuple[object, object]],
+    function_cfg_pairs: object,
     *,
-    timeout: int,
-    target_count: int,
-) -> list[tuple[object, object]]:
+    timeout: cython.longlong,
+    target_count: cython.longlong,
+) -> object:
+    addr: object
+    function: object
+    function_cfg: object
     if target_count <= 0 or len(function_cfg_pairs) >= target_count:
         return function_cfg_pairs
 
     supplemented = list(function_cfg_pairs)
     seen_addrs = {
         getattr(function, "addr", None)
-        for _cfg, function in supplemented
+        for _cfg, function in iter(supplemented)
         if isinstance(getattr(function, "addr", None), int)
     }
     seeded_pairs = _recover_seeded_exe_functions(
@@ -1750,18 +1820,21 @@ def _function_work_cache_lookup(
     item: FunctionWorkItem,
     *,
     binary_path: Path | None,
-    timeout: int,
-    api_style: str,
-    enable_structured_simplify: bool,
-    enable_postprocess: bool,
+    timeout: cython.longlong,
+    api_style: object,
+    enable_structured_simplify: cython.bint,
+    enable_postprocess: cython.bint,
     cod_metadata: CODProcMetadata | None = None,
-    synthetic_globals: dict[int, tuple[str, int]] | None = None,
+    synthetic_globals: object = None,
     lst_metadata: LSTMetadata | None = None,
-) -> tuple[FunctionWorkResult | None, str, dict[str, object] | None, bool, list[str]]:
+) -> object:
     """Load a function result only when semantic and diagnostic provenance match."""
 
-    def _impl() -> tuple[FunctionWorkResult | None, str, dict[str, object] | None, bool, list[str]]:
+    def _impl() -> object:
         """Perform the lock-compatible cache lookup."""
+        cache_key: object
+        cached_result: object
+        function_project: object
         function = item.function
         function_addr = function.addr
         function_name = function.name
@@ -1812,26 +1885,31 @@ def _function_work_cache_lookup(
     return _impl()
 
 
+@cython.ccall
 def _cache_bypass_8616(
-    reason: str,
-    cache_key: dict[str, object] | None,
-    tail_validation_enabled: bool,
-    expected_validation_stages: list[str],
-) -> tuple[FunctionWorkResult | None, str, dict[str, object] | None, bool, list[str]]:
+    reason: object,
+    cache_key: object,
+    tail_validation_enabled: cython.bint,
+    expected_validation_stages: object,
+) -> tuple[FunctionWorkResult | None, str, dict[str, object] | None, cython.bint, list[str]]:
     """Build a cache-bypass result tuple carrying the bypass diagnostic."""
     return None, reason, cache_key, tail_validation_enabled, expected_validation_stages
 
 
+@cython.ccall
 def _ok_cached_function_result_tuple_8616(
     item: FunctionWorkItem,
-    cached_result: dict[str, object],
-    function_addr: int,
-    function_name: str,
-    cache_key: dict[str, object] | None,
-    tail_validation_enabled: bool,
-    expected_validation_stages: list[str],
-) -> tuple[FunctionWorkResult | None, str, dict[str, object] | None, bool, list[str]]:
+    cached_result: object,
+    function_addr: cython.longlong,
+    function_name: object,
+    cache_key: object,
+    tail_validation_enabled: cython.bint,
+    expected_validation_stages: object,
+) -> object:
     """Accept or bypass one cached successful function result."""
+    bypass_reason: object
+    cached_diagnostic_output: object
+    cached_tail_validation: object
     typed_switch_artifacts = os.environ.get("INERTIA_ENABLE_TYPED_SWITCH_AST_ARTIFACTS") == "1"
     cached_diagnostic_output = cached_result.get("diagnostic_output")
     if typed_switch_artifacts and (
@@ -1879,20 +1957,23 @@ def _ok_cached_function_result_tuple_8616(
     )
 
 
-def _cached_payload_acceptance_bypass_reason_8616(cached_result: dict[str, object]) -> str | None:
+@cython.ccall
+def _cached_payload_acceptance_bypass_reason_8616(cached_result: object) -> object:
     """Return the acceptance-provenance bypass reason, or None when the payload is reusable."""
+    cached_gcc_hash: object
+    cached_validated_hash: object
     cached_payload = str(cached_result.get("payload", ""))
     cached_validated_hash = cached_result.get("validated_c_hash")
     cached_gcc_hash = cached_result.get("gcc_checked_c_hash")
     if not isinstance(cached_validated_hash, str) or not isinstance(cached_gcc_hash, str):
         return "missing_acceptance_provenance"
     if (
-        cached_validated_hash != cached_gcc_hash
-        or cached_validated_hash != _sha256_text_8616(cached_payload)
+        operator.ne(cached_validated_hash, cached_gcc_hash)
+        or operator.ne(cached_validated_hash, _sha256_text_8616(cached_payload))
     ):
         return "stale_output_mismatch"
     normalized_cached_payload = _normalize_accepted_payload_8616(cached_payload)
-    if normalized_cached_payload.rstrip() != cached_payload.rstrip():
+    if operator.ne(normalized_cached_payload.rstrip(), cached_payload.rstrip()):
         return "stale_normalization"
     cached_quality = assess_final_generated_c_text(cached_payload)
     if cached_quality.reject_as_decompiled:
@@ -1905,31 +1986,38 @@ def _cached_payload_acceptance_bypass_reason_8616(cached_result: dict[str, objec
 
 def _cached_tail_snapshot_8616(
     cached_tail_validation: object,
-    expected_validation_stages: list[str],
-) -> dict[str, object] | None:
+    expected_validation_stages: object,
+) -> object:
     """Build the cached tail-validation snapshot preserving stage ordering."""
     if not isinstance(cached_tail_validation, dict):
         return None
     cached_stage_names = [
-        stage for stage in expected_validation_stages if stage in cached_tail_validation
+        stage for stage in iter(expected_validation_stages) if stage in cached_tail_validation
     ]
     cached_stage_names.extend(
-        stage for stage in cached_tail_validation if stage not in expected_validation_stages
+        stage for stage in iter(cached_tail_validation) if stage not in expected_validation_stages
     )
-    return {stage: copy.deepcopy(cached_tail_validation[stage]) for stage in cached_stage_names}
+    return {stage: copy.deepcopy(cached_tail_validation[stage]) for stage in iter(cached_stage_names)}
 
 
+@cython.ccall
 def _cached_function_work_result_8616(
     item: FunctionWorkItem,
-    cached_result: dict[str, object],
-    function_addr: int,
-    function_name: str,
-    tail_validation_enabled: bool,
-    expected_validation_stages: list[str],
-    typed_switch_artifacts: bool,
-    diagnostic_output: str,
+    cached_result: object,
+    function_addr: cython.longlong,
+    function_name: object,
+    tail_validation_enabled: cython.bint,
+    expected_validation_stages: object,
+    typed_switch_artifacts: cython.bint,
+    diagnostic_output: object,
 ) -> FunctionWorkResult:
     """Rebuild a FunctionWorkResult from accepted cached provenance."""
+    cached_block_count: object
+    cached_byte_count: object
+    cached_elapsed: object
+    cached_gcc_hash: object
+    cached_tail_validation: object
+    cached_validated_hash: object
     cached_payload = str(cached_result.get("payload", ""))
     cached_validated_hash = cached_result.get("validated_c_hash")
     cached_gcc_hash = cached_result.get("gcc_checked_c_hash")
@@ -1974,11 +2062,12 @@ def _cached_function_work_result_8616(
     )
 
 
+@cython.ccall
 def _isolated_project_recovery_target_8616(
     function: _AngrFunction,
     isolated_project: angr.Project,
-    fallback_max_addr: int,
-) -> tuple[int, int]:
+    fallback_max_addr: cython.longlong,
+) -> tuple[cython.longlong, cython.longlong]:
     """Resolve the candidate address and absolute exclusive image end.
 
     ``Backend.max_addr`` is an absolute, already-rebased *inclusive* address for
@@ -1986,6 +2075,8 @@ def _isolated_project_recovery_target_8616(
     exclusive image end is ``max_addr + 1``. The linked base must not be added
     again.
     """
+    isolated_main_object: object
+    isolated_max_addr: object
     candidate_addr = function_original_addr(function)
     isolated_main_object = getattr(getattr(isolated_project, "loader", None), "main_object", None)
     isolated_max_addr = getattr(isolated_main_object, "max_addr", fallback_max_addr)
@@ -1999,21 +2090,23 @@ def _isolated_project_recovery_target_8616(
 def _run_function_work_item_uncached(
     item: FunctionWorkItem,
     *,
-    timeout: int,
-    api_style: str,
+    timeout: cython.longlong,
+    api_style: object,
     binary_path: Path | None,
     cod_metadata: CODProcMetadata | None,
-    synthetic_globals: dict[int, tuple[str, int]] | None,
+    synthetic_globals: object,
     lst_metadata: LSTMetadata | None,
-    enable_structured_simplify: bool,
-    enable_postprocess: bool = True,
-    force_isolated_project: bool = False,
-    process_isolated_worker: bool = False,
-    allow_isolated_retry: bool = True,
+    enable_structured_simplify: cython.bint,
+    enable_postprocess: cython.bint = True,
+    force_isolated_project: cython.bint = False,
+    process_isolated_worker: cython.bint = False,
+    allow_isolated_retry: cython.bint = True,
 ) -> FunctionWorkResult:
     """Decompile one function under the requested analysis-isolation policy."""
 
     def _impl() -> FunctionWorkResult:
+        cached_work_result: object
+        helper_result: object
         block_estimate, _byte_estimate = _function_complexity(item.function)
         annotate_current_span(
             blocks=block_estimate,
@@ -2134,22 +2227,22 @@ def _run_function_work_item_uncached(
         return _impl()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _WorkRunCtx8616:
     """Shared context for one uncached work-item decompile run."""
 
     item: FunctionWorkItem
-    api_style: str
+    api_style: object
     binary_path: Path | None
     lst_metadata: LSTMetadata | None
     cod_metadata: CODProcMetadata | None
-    synthetic_globals: dict[int, tuple[str, int]] | None
-    effective_timeout: int
-    enable_structured_simplify: bool
-    enable_postprocess: bool
-    allow_isolated_retry: bool
-    force_isolated_project: bool
-    process_isolated_worker: bool
+    synthetic_globals: object
+    effective_timeout: cython.longlong
+    enable_structured_simplify: cython.bint
+    enable_postprocess: cython.bint
+    allow_isolated_retry: cython.bint
+    force_isolated_project: cython.bint
+    process_isolated_worker: cython.bint
     failure_family_state: FailureFamilyState
 
 
@@ -2158,6 +2251,7 @@ _DecompileRunTuple8616 = tuple[
 ]
 
 
+@cython.ccall
 def _maybe_return_known_helper_result_8616(
     ctx: _WorkRunCtx8616,
     decompile_project: angr.Project,
@@ -2165,6 +2259,9 @@ def _maybe_return_known_helper_result_8616(
     decompile_function: _AngrFunction,
 ) -> FunctionWorkResult | None:
     """Return a known-runtime-helper result when the helper lane renders C."""
+    helper_c: object
+    helper_name: object
+    known_helper_preview: object
     helper_name = getattr(decompile_function, "name", None)
     known_helper_preview = (
         _try_emit_known_runtime_helper_c(name=helper_name) if isinstance(helper_name, str) else None
@@ -2206,12 +2303,13 @@ def _maybe_return_known_helper_result_8616(
     )
 
 
+@cython.ccall
 def _recovered_evidence_acceptance_8616(
     decompile_project: angr.Project,
     decompile_function: _AngrFunction,
-    tail_validation_enabled: bool,
+    tail_validation_enabled: cython.bint,
     expected_validation_stages: Sequence[str],
-) -> tuple[str, str, None, dict[str, object], str | None, str | None] | None:
+) -> object:
     """Re-accept a recovered binary-evidence candidate through the canonical gate."""
     recovered_payload, recovered_snapshot = _recover_binary_evidence_c_8616(
         decompile_project, decompile_function
@@ -2242,24 +2340,26 @@ def _recovered_evidence_acceptance_8616(
     return None
 
 
+@cython.ccall
 def _finalize_acceptance_lanes_8616(
     *,
-    status: str,
-    partial_payload: str | None,
-    tail_validation_snapshot: dict[str, object] | None,
+    status: object,
+    partial_payload: object,
+    tail_validation_snapshot: object,
     acceptance: CAcceptanceResult8616,
     decompile_project: angr.Project,
     decompile_function: _AngrFunction,
-    tail_validation_enabled: bool,
+    tail_validation_enabled: cython.bint,
     expected_validation_stages: Sequence[str],
 ) -> tuple[str, str, str | None, dict[str, object] | None, str | None, str | None]:
     """Apply blocker, recovered-evidence, and partial acceptance lanes."""
+    recovered: object
     acceptance_payload = acceptance.validated_payload
-    acceptance_validated_hash: str | None = acceptance.validated_payload_hash
-    acceptance_gcc_hash: str | None = acceptance.gcc_checked_payload_hash
+    acceptance_validated_hash: object = acceptance.validated_payload_hash
+    acceptance_gcc_hash: object = acceptance.gcc_checked_payload_hash
     payload = acceptance.gcc_checked_payload
     if acceptance.blocker is not None:
-        if status == WorkItemStatus.VALIDATION_FAILED.value:
+        if operator.eq(status, WorkItemStatus.VALIDATION_FAILED.value):
             preserved_candidate = None
         else:
             preserved_candidate = (
@@ -2305,22 +2405,23 @@ def _finalize_acceptance_lanes_8616(
     return status, payload, partial_payload, tail_validation_snapshot, acceptance_validated_hash, acceptance_gcc_hash
 
 
+@cython.ccall
 def _finalize_work_result_8616(
     ctx: _WorkRunCtx8616,
     *,
-    status: str,
-    payload: str,
-    partial_payload: str | None,
-    debug_output: str,
-    tail_validation_snapshot: dict[str, object] | None,
-    elapsed: float,
+    status: object,
+    payload: object,
+    partial_payload: object,
+    debug_output: object,
+    tail_validation_snapshot: object,
+    elapsed: cython.double,
     block_count: int | None,
     byte_count: int | None,
     decompile_project: angr.Project,
     decompile_function: _AngrFunction,
     decompile_cfg: object,
-    cache_key: dict[str, object] | None,
-    tail_validation_enabled: bool,
+    cache_key: object,
+    tail_validation_enabled: cython.bint,
     expected_validation_stages: Sequence[str],
     terminal_failure: TerminalDecompileFailure8616 | None = None,
 ) -> FunctionWorkResult:
@@ -2394,12 +2495,13 @@ def _finalize_work_result_8616(
     )
 
 
+@cython.ccall
 def _helper_model_tail_snapshot_8616(
-    status: str,
-    payload: str,
+    status: object,
+    payload: object,
     function_obj: _AngrFunction,
-    tail_snapshot_local: dict[str, object] | None,
-) -> dict[str, object] | None:
+    tail_snapshot_local: object,
+) -> object:
     """Substitute the helper-model snapshot when payload matches the model."""
     if not _payload_needs_helper_retry_8616(status, payload, function_obj, tail_snapshot_local):
         return tail_snapshot_local
@@ -2426,6 +2528,7 @@ def _helper_model_tail_snapshot_8616(
     }
 
 
+@cython.ccall
 def _run_local_work_8616(
     ctx: _WorkRunCtx8616,
     project_obj: angr.Project,
@@ -2433,6 +2536,7 @@ def _run_local_work_8616(
     function_obj: _AngrFunction,
 ) -> _DecompileRunTuple8616:
     """Run one decompile attempt with captured output and tail snapshot."""
+    local_arch_name: object
     with _capture_thread_output() as (stdout_buf, stderr_buf):
         _apply_function_annotations_for_active_and_original_8616(
             project_obj,
@@ -2485,7 +2589,7 @@ def _run_local_work_8616(
     if err_output:
         debug_output_local += err_output
     raw_tail_snapshot = _tail_validation_snapshot_for_function_run(project_obj, function_obj)
-    tail_snapshot_local: dict[str, object] | None = raw_tail_snapshot if isinstance(raw_tail_snapshot, dict) else None
+    tail_snapshot_local: object = raw_tail_snapshot if isinstance(raw_tail_snapshot, dict) else None
     tail_snapshot_local = _helper_model_tail_snapshot_8616(status, payload, function_obj, tail_snapshot_local)
     if os.environ.get("INERTIA_DEBUG_TAIL_SNAPSHOT"):
         logging.getLogger(__name__).warning(
@@ -2507,14 +2611,18 @@ def _run_local_work_8616(
     )
 
 
+@cython.ccall
 def _isolated_project_lane_8616(
     ctx: _WorkRunCtx8616,
     item_function: _AngrFunction,
     decompile_project: angr.Project,
-    block_estimate: int,
-    byte_estimate: int,
-) -> tuple[angr.Project, object, _AngrFunction] | FunctionWorkResult | None:
+    block_estimate: cython.longlong,
+    byte_estimate: cython.longlong,
+) -> object:
     """Rebuild the decompile triple on a fresh isolated project when possible."""
+    linked_base: object
+    main_object: object
+    max_addr: object
     main_object = getattr(getattr(item_function, "project", None), "loader", None)
     main_object = getattr(main_object, "main_object", None)
     linked_base = getattr(main_object, "linked_base", None)
@@ -2571,12 +2679,13 @@ def _decompile_for_work_item_8616(
     decompile_project: angr.Project,
     decompile_cfg: object,
     decompile_function: _AngrFunction,
-    block_estimate: int,
-    byte_estimate: int,
-    tail_validation_enabled: bool,
+    block_estimate: cython.longlong,
+    byte_estimate: cython.longlong,
+    tail_validation_enabled: cython.bint,
     expected_validation_stages: Sequence[str],
-) -> FunctionWorkResult | tuple[_DecompileRunTuple8616, angr.Project, object, _AngrFunction]:
+) -> object:
     """Run the fork or local decompile lane for one work item."""
+    isolated_lane: object
     fork_isolated_eligible = (
         ctx.force_isolated_project
         and not ctx.process_isolated_worker
@@ -2653,19 +2762,27 @@ def _decompile_for_work_item_8616(
     return run_tuple, decompile_project, decompile_cfg, decompile_function
 
 
+@cython.ccall
 def _with_scalar_interface_8616(result: FunctionWorkResult, project: object) -> FunctionWorkResult:
-    """Export a scalar interface only alongside the exact accepted payload."""
+    """Transport accepted scalar receipts; only live functions publish new ones.
+
+    Cache and clean-worker identity records carry no prototype authority.
+    A transported result without a retained interface keeps that optional
+    evidence absent; an existing receipt must still pass source and
+    producer-generation authentication.
+    """
     digest = hashlib.sha256(result.payload.encode()).hexdigest()
-    if (result.status != WorkItemStatus.OK.value
-        or result.validated_payload_hash != digest or result.gcc_checked_payload_hash != digest):
+    if (operator.ne(result.status, WorkItemStatus.OK.value)
+        or operator.ne(result.validated_payload_hash, digest) or operator.ne(result.gcc_checked_payload_hash, digest)):
         return replace(result, scalar_interface=None, scalar_interface_generation=None)
     if result.scalar_interface is not None:
         _import_scalar_interface_8616(result, project)
         return result
-    if result.function is None:
+    if (result.from_cache
+        or result.execution_origin is FunctionWorkExecutionOrigin8616.CLEAN_PROCESS
+        or result.function is None):
         return replace(result, scalar_interface=None, scalar_interface_generation=None)
-    if result.function is not None:
-        project = result.function.project
+    project = result.function.project
     return replace(
         result,
         scalar_interface=scalar_interface_for_result_8616(project, function_original_addr(result.function), result.payload, function=result.function),
@@ -2673,19 +2790,22 @@ def _with_scalar_interface_8616(result: FunctionWorkResult, project: object) -> 
     )
 
 
+@cython.ccall
 def _import_scalar_interface_8616(result: FunctionWorkResult, project: object) -> None:
     """Import only a current producer's interface for its accepted result bytes."""
+    interface: object
     interface = result.scalar_interface
     if interface is None:
         return
     digest = hashlib.sha256(result.payload.encode()).hexdigest()
-    if (result.status != WorkItemStatus.OK.value or result.validated_payload_hash != digest
-        or result.gcc_checked_payload_hash != digest or interface.payload_sha256 != digest
-        or result.scalar_interface_generation != _cache_source_digest(DECOMPILATION_CACHE_SOURCE_FILES)):
+    if (operator.ne(result.status, WorkItemStatus.OK.value) or operator.ne(result.validated_payload_hash, digest)
+        or operator.ne(result.gcc_checked_payload_hash, digest) or operator.ne(interface.payload_sha256, digest)
+        or operator.ne(result.scalar_interface_generation, _cache_source_digest(DECOMPILATION_CACHE_SOURCE_FILES))):
         raise ValueError("unaccepted or stale scalar interface result")
     attach_scalar_interface_8616(project, interface)
 
 
+@cython.ccall
 def _function_work_result_for_fork_ipc(result: FunctionWorkResult) -> FunctionWorkResult:
     """Retain scalar evidence before stripping non-pickleable angr surfaces."""
     if result.function is not None:
@@ -2697,26 +2817,31 @@ _SERIAL_CLEAN_WORKER_RESULT_ENV_8616 = "INERTIA_SERIAL_CLEAN_WORKER_RESULT"
 _SERIAL_CLEAN_WORKER_RESULT_SCHEMA_8616 = 5
 
 
+@cython.ccall
 def _report_declared_call_consumptions_8616(result: FunctionWorkResult) -> None:
     """Report consumed assumptions without changing the typed validation verdict."""
+    evidence: object
+    line: object
     evidence = result.segment_program_function_evidence
     if evidence is not None:
         for line in declared_call_diagnostic_lines_8616(evidence.declared_call_consumptions):
             print(line, file=sys.stderr, flush=True)
 
 
+@cython.ccall
 def _declared_call_dependency_retained_8616(
     project: object,
     function: object,
-    evidence: SegmentProgramFunctionEvidence8616 | None,
-    *, declarations_requested: bool = False,
-) -> bool:
+    evidence: object,
+    *, declarations_requested: cython.bint = False,
+) -> cython.bint:
     """Replay exact current admissions before accepting transported receipts."""
+    function_addr: object
     # Dynamic angr Function boundary; the result evidence is an owned contract.
     function_addr = getattr(function, "addr", None)
     if type(function_addr) is not int:
         return False
-    if evidence is not None and evidence.function_addr != function_addr:
+    if evidence is not None and operator.ne(evidence.function_addr, function_addr):
         return False
     receipts = () if evidence is None else evidence.declared_call_consumptions
     return declared_call_receipts_current_8616(
@@ -2724,11 +2849,13 @@ def _declared_call_dependency_retained_8616(
     )
 
 
-def _direct_addr_work_requires_parent_lock_8616(lock_key: dict[str, object] | None) -> bool:
+@cython.ccall
+def _direct_addr_work_requires_parent_lock_8616(lock_key: object) -> cython.bint:
     """Return whether this process owns direct-address producer serialization."""
     return lock_key is not None and not bool(os.environ.get(_SERIAL_CLEAN_WORKER_RESULT_ENV_8616))
 
 
+@cython.ccall
 def _write_serial_clean_worker_result_8616(
     result: FunctionWorkResult,
     *,
@@ -2736,6 +2863,7 @@ def _write_serial_clean_worker_result_8616(
     result_path: Path | None = None,
 ) -> None:
     """Write existing worker evidence to an explicit or parent-requested path."""
+    result_path_text: object
     if result_path is None:
         result_path_text = os.environ.get(_SERIAL_CLEAN_WORKER_RESULT_ENV_8616)
         if not result_path_text:
@@ -2776,19 +2904,22 @@ def _write_serial_clean_worker_result_8616(
     os.replace(temporary_path, result_path)
 
 
+@cython.ccall
 def _worker_scalar_interface_8616(
-    record: dict[str, object], item: FunctionWorkItem, payload: str, status: str,
+    record: object, item: FunctionWorkItem, payload: object, status: object,
 ) -> ScalarInterface8616 | None:
     """Admit matching accepted worker type evidence before parent publication."""
+    interface: object
+    raw_interface: object
     raw_interface = record.get("scalar_interface")
     interface = None if raw_interface is None else scalar_interface_from_record_8616(raw_interface)
     if interface is not None:
         digest = hashlib.sha256(payload.encode()).hexdigest()
-        if (status != WorkItemStatus.OK.value or interface.target != function_original_addr(item.function)
-            or interface.payload_sha256 != digest or record.get("validated_payload_hash") != digest
-            or record.get("gcc_checked_payload_hash") != digest):
+        if (operator.ne(status, WorkItemStatus.OK.value) or operator.ne(interface.target, function_original_addr(item.function))
+            or operator.ne(interface.payload_sha256, digest) or operator.ne(record.get("validated_payload_hash"), digest)
+            or operator.ne(record.get("gcc_checked_payload_hash"), digest)):
             raise ValueError("unaccepted or mismatched scalar interface result")
-        if record.get("scalar_interface_generation") != _cache_source_digest(DECOMPILATION_CACHE_SOURCE_FILES):
+        if operator.ne(record.get("scalar_interface_generation"), _cache_source_digest(DECOMPILATION_CACHE_SOURCE_FILES)):
             raise ValueError("stale scalar interface producer generation")
         attach_scalar_interface_8616(item.function.project, interface)
     return interface
@@ -2798,14 +2929,22 @@ def _read_serial_clean_worker_result_8616(
     result_path: Path,
     *,
     item: FunctionWorkItem,
-    debug_output: str,
+    debug_output: object,
 ) -> FunctionWorkResult:
     """Read and validate one direct-address clean-process result."""
+    fallback_family_labels: object
+    partial_payload: object
+    payload: object
+    raw_segment_evidence: object
+    same_family_retry_stops: object
+    segment_evidence: object
+    status: object
+    tail_validation: object
     try:
         record = json.loads(result_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as ex:
         raise ValueError(f"invalid serial clean-worker result: {ex}") from ex
-    if not isinstance(record, dict) or record.get("schema") != _SERIAL_CLEAN_WORKER_RESULT_SCHEMA_8616:
+    if not isinstance(record, dict) or operator.ne(record.get("schema"), _SERIAL_CLEAN_WORKER_RESULT_SCHEMA_8616):
         raise ValueError("serial clean-worker result has an unsupported schema")
     status = record.get("status")
     payload = record.get("payload")
@@ -2821,7 +2960,7 @@ def _read_serial_clean_worker_result_8616(
         raise ValueError("serial clean-worker result has invalid tail-validation state")
     fallback_family_labels = record.get("fallback_family_labels")
     if not isinstance(fallback_family_labels, list) or not all(
-        isinstance(label, str) for label in fallback_family_labels
+        isinstance(label, str) for label in iter(fallback_family_labels)
     ):
         raise ValueError("serial clean-worker result has invalid fallback-family labels")
     same_family_retry_stops = record.get("same_family_retry_stops")
@@ -2871,11 +3010,12 @@ def _read_serial_clean_worker_result_8616(
     )
 
 
+@cython.ccall
 def _complete_serial_clean_worker_result_8616(
     result: FunctionWorkResult,
     *,
     project: object | None = None,
-) -> bool:
+) -> cython.bint:
     """Serialize a clean-worker result and tell the direct CLI to stop retrying."""
     if not os.environ.get(_SERIAL_CLEAN_WORKER_RESULT_ENV_8616):
         return False
@@ -2883,14 +3023,15 @@ def _complete_serial_clean_worker_result_8616(
     return True
 
 
+@cython.ccall
 def _serial_clean_worker_command_8616(
     args: CliArguments,
     *,
-    recovery_addr: int,
-    timeout: int,
+    recovery_addr: cython.longlong,
+    timeout: cython.longlong,
     window: int | None = None,
     exact_region_end: int | None = None,
-) -> list[str]:
+) -> object:
     """Build the bounded direct-address command used by a serial clean worker."""
     command = [
         sys.executable,
@@ -2939,12 +3080,14 @@ def _serial_clean_worker_command_8616(
     return command
 
 
-def _serial_clean_worker_outer_timeout_8616(timeout: int) -> int:
+@cython.ccall
+def _serial_clean_worker_outer_timeout_8616(timeout: cython.longlong) -> cython.longlong:
     """Allow bounded interpreter, protocol, and final-check overhead."""
     return max(10, max(1, timeout) + 45)
 
 
-def _serial_clean_worker_debug_output_8616(stderr: str | bytes | None) -> str:
+@cython.ccall
+def _serial_clean_worker_debug_output_8616(stderr: object) -> str:
     """Remove only the child transport marker from parent-visible diagnostics."""
     if isinstance(stderr, bytes):
         stderr = stderr.decode("utf-8", errors="replace")
@@ -2952,7 +3095,7 @@ def _serial_clean_worker_debug_output_8616(stderr: str | bytes | None) -> str:
         return ""
     retained_lines = [
         line
-        for line in stderr.splitlines(keepends=True)
+        for line in builtins.iter(stderr.splitlines(keepends=True))
         if not line.strip().endswith("/* == c == */")
     ]
     return "".join(retained_lines)
@@ -2963,8 +3106,8 @@ def _run_serial_clean_process_work_item_8616(
     context: _BatchCliContext8616,
     item: FunctionWorkItem,
     *,
-    timeout: int,
-    caller_return_evidence_by_addr: dict[int, CallerReturnUseEvidence8616] | None = None,
+    timeout: cython.longlong,
+    caller_return_evidence_by_addr: object = None,
     cache_only: typing.Literal[False] = False,
 ) -> FunctionWorkResult: ...
 
@@ -2974,8 +3117,8 @@ def _run_serial_clean_process_work_item_8616(
     context: _BatchCliContext8616,
     item: FunctionWorkItem,
     *,
-    timeout: int,
-    caller_return_evidence_by_addr: dict[int, CallerReturnUseEvidence8616] | None = None,
+    timeout: cython.longlong,
+    caller_return_evidence_by_addr: object = None,
     cache_only: typing.Literal[True],
 ) -> FunctionWorkResult | None: ...
 
@@ -2984,11 +3127,12 @@ def _run_serial_clean_process_work_item_8616(
     context: _BatchCliContext8616,
     item: FunctionWorkItem,
     *,
-    timeout: int,
-    caller_return_evidence_by_addr: dict[int, CallerReturnUseEvidence8616] | None = None,
-    cache_only: bool = False,
+    timeout: cython.longlong,
+    caller_return_evidence_by_addr: object = None,
+    cache_only: cython.bint = False,
 ) -> FunctionWorkResult | None:
     """Load or produce one clean-worker result without inherited module state."""
+    canonical: object
     recovery_addr = _function_work_item_recovery_addr_8616(item)
     requested_addr = recovery_addr
     canonical = _canonicalize_direct_addr_from_sidecar_padding_8616(
@@ -3111,12 +3255,13 @@ def _run_serial_clean_process_work_item_8616(
             )
 
 
+@cython.ccall
 def _serial_clean_worker_failure_8616(
-    diagnostics: str,
+    diagnostics: object,
     *,
-    recovery_addr: int,
-    returncode: int,
-    result_present: bool,
+    recovery_addr: cython.longlong,
+    returncode: cython.longlong,
+    result_present: cython.bint,
 ) -> tuple[WorkItemStatus, str, str]:
     """Preserve child terminal reasons and reject malformed failure transport.
 
@@ -3141,10 +3286,12 @@ def _serial_clean_worker_failure_8616(
     )
 
 
+@cython.ccall
 def _serial_clean_worker_window_8616(
-    context: _BatchCliContext8616, recovery_addr: int
-) -> tuple[int, int | None]:
+    context: _BatchCliContext8616, recovery_addr: cython.longlong
+) -> tuple[cython.longlong, int | None]:
     """Resolve the clean-worker window from an exact LST region when present."""
+    exact_region: object
     worker_window = context.args.window
     exact_region_end = None
     if context.lst_metadata is not None:
@@ -3158,11 +3305,12 @@ def _serial_clean_worker_window_8616(
     return worker_window, exact_region_end
 
 
+@cython.ccall
 def _serial_clean_cache_hit_result_8616(
     cache_lookup: SerialWorkerCacheLookup8616,
     result_path: Path,
     item: FunctionWorkItem,
-    recovery_addr: int,
+    recovery_addr: cython.longlong,
 ) -> FunctionWorkResult:
     """Materialize a clean-worker cache hit into a FunctionWorkResult."""
     result_path.write_text(json.dumps(cache_lookup.record, sort_keys=True), encoding="utf-8")
@@ -3178,9 +3326,10 @@ def _serial_clean_cache_hit_result_8616(
     )
 
 
+@cython.ccall
 def _payload_needs_helper_retry_8616(
-    status: str, payload: object, function_obj: object, tail_snapshot: object
-) -> bool:
+    status: object, payload: object, function_obj: object, tail_snapshot: object
+) -> cython.bint:
     """Check whether a successful payload lacks required validation stages."""
     if status != "ok" or not isinstance(payload, str):
         return False
@@ -3189,7 +3338,8 @@ def _payload_needs_helper_retry_8616(
     return _tail_snapshot_missing_stages_8616(tail_snapshot)
 
 
-def _tail_snapshot_missing_stages_8616(tail_snapshot: object) -> bool:
+@cython.ccall
+def _tail_snapshot_missing_stages_8616(tail_snapshot: object) -> cython.bint:
     """Check whether a tail snapshot misses the structuring or postprocess stage."""
     return (
         not isinstance(tail_snapshot, dict)
@@ -3205,10 +3355,10 @@ def _run_canonicalized_direct_clean_worker_8616(
     lst_metadata: LSTMetadata,
     canonical: DirectAddrCanonicalization8616,
     *,
-    function_label: str | None,
-    caller_return_evidence_by_addr: dict[int, CallerReturnUseEvidence8616] | None = None,
+    function_label: object,
+    caller_return_evidence_by_addr: object = None,
     cache_only: typing.Literal[False] = False,
-) -> int: ...
+) -> cython.longlong: ...
 
 
 @typing.overload
@@ -3218,8 +3368,8 @@ def _run_canonicalized_direct_clean_worker_8616(
     lst_metadata: LSTMetadata,
     canonical: DirectAddrCanonicalization8616,
     *,
-    function_label: str | None,
-    caller_return_evidence_by_addr: dict[int, CallerReturnUseEvidence8616] | None = None,
+    function_label: object,
+    caller_return_evidence_by_addr: object = None,
     cache_only: typing.Literal[True],
 ) -> int | None: ...
 
@@ -3230,11 +3380,12 @@ def _run_canonicalized_direct_clean_worker_8616(
     lst_metadata: LSTMetadata,
     canonical: DirectAddrCanonicalization8616,
     *,
-    function_label: str | None,
-    caller_return_evidence_by_addr: dict[int, CallerReturnUseEvidence8616] | None = None,
-    cache_only: bool = False,
+    function_label: object,
+    caller_return_evidence_by_addr: object = None,
+    cache_only: cython.bint = False,
 ) -> int | None:
     """Decompile a sidecar-canonicalized entry in the pure-binary worker."""
+    result: object
     function = SimpleNamespace(
         addr=canonical.canonical_addr,
         name=function_label or canonical.name or f"sub_{canonical.canonical_addr:x}",
@@ -3268,7 +3419,7 @@ def _run_canonicalized_direct_clean_worker_8616(
         return None
     if result.debug_output:
         print(result.debug_output, file=sys.stderr, end="" if result.debug_output.endswith("\n") else "\n")
-    if result.status == WorkItemStatus.OK.value:
+    if operator.eq(result.status, WorkItemStatus.OK.value):
         print(f"/* function: {canonical.canonical_addr:#x} {function.name} */")
         if not _tail_validation_passes_lenient(
             result.tail_validation,
@@ -3289,20 +3440,24 @@ def _run_canonicalized_direct_clean_worker_8616(
     if result.partial_payload:
         print(result.partial_payload)
     print(f"/* canonical clean worker {result.status}: {result.payload} */", file=sys.stderr)
-    if result.status == WorkItemStatus.TIMEOUT.value:
+    if operator.eq(result.status, WorkItemStatus.TIMEOUT.value):
         emit_terminal_status(CliTerminalStatus.TIMEOUT)
         return 3
-    if result.status == WorkItemStatus.VALIDATION_FAILED.value:
+    if operator.eq(result.status, WorkItemStatus.VALIDATION_FAILED.value):
         return 4
     return 6
 
 
+@cython.ccall
 def _tail_validation_passes_lenient(
-    snapshot: dict[str, object] | None,
+    snapshot: object,
     *,
-    expected_stages: list[str],
-) -> bool:
+    expected_stages: object,
+) -> cython.bint:
     """Return True only when every expected stage is present and stable."""
+    entry: object
+    status: object
+    stage_name: object
     if not isinstance(snapshot, dict):
         return False
     for stage_name in expected_stages:
@@ -3319,23 +3474,25 @@ def _tail_validation_passes_lenient(
     return True
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class CAcceptanceResult8616:
     """Validated generated-C acceptance decision and checked payload identity."""
 
     status: WorkItemStatus
-    blocker: str | None
-    validated_payload: str
-    validated_payload_hash: str
-    gcc_checked_payload: str
-    gcc_checked_payload_hash: str
+    blocker: object
+    validated_payload: object
+    validated_payload_hash: object
+    gcc_checked_payload: object
+    gcc_checked_payload_hash: object
 
 
-def _sha256_text_8616(text: str) -> str:
+@cython.ccall
+def _sha256_text_8616(text: object) -> object:
     return hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()
 
 
-def _normalize_gcc_checked_payload_8616(checked_payload: str, emitted_payload: str) -> str:
+@cython.ccall
+def _normalize_gcc_checked_payload_8616(checked_payload: object, emitted_payload: object) -> object:
     checked_raw = str(checked_payload or "")
     emitted_raw = str(emitted_payload or "")
     checked = checked_raw.strip()
@@ -3349,10 +3506,11 @@ def _normalize_gcc_checked_payload_8616(checked_payload: str, emitted_payload: s
     return checked_raw
 
 
+@cython.ccall
 def _acceptance_result_8616(
-    status: WorkItemStatus | str,
-    blocker: str | None,
-    payload: str,
+    status: object,
+    blocker: object,
+    payload: object,
 ) -> CAcceptanceResult8616:
     """Build a typed acceptance result with payload identity evidence."""
     try:
@@ -3372,7 +3530,8 @@ def _acceptance_result_8616(
     )
 
 
-def _normalize_accepted_payload_8616(payload: str) -> str:
+@cython.ccall
+def _normalize_accepted_payload_8616(payload: object) -> str:
     accepted_payload = _normalize_function_signature_arg_names(payload)
     accepted_payload = normalize_unresolved_c_text(accepted_payload)
     accepted_payload = _normalize_anonymous_call_targets(accepted_payload)
@@ -3407,9 +3566,14 @@ def _normalize_accepted_payload_8616(payload: str) -> str:
     return str(_hoist_c89_local_declarations_text(accepted_payload))
 
 
+@cython.ccall
 def _tail_validation_stage_detail_8616(
-    tail_validation_snapshot: dict[str, object] | None, expected_validation_stages: list[str] | tuple[str, ...]
-) -> str:
+    tail_validation_snapshot: object, expected_validation_stages: object
+) -> object:
+    changed: object
+    entry: object
+    status: object
+    stage_name: object
     stage_details: list[str] = []
     snapshot_dict = tail_validation_snapshot if isinstance(tail_validation_snapshot, dict) else {}
     for stage_name in expected_validation_stages:
@@ -3432,9 +3596,11 @@ _RECOMPILE_RESULT_CACHE_8616: dict[tuple[str, str, str | None], RecompileCheckRe
 _RECOMPILE_RESULT_CACHE_LOCK_8616 = threading.Lock()
 
 
-def _collect_recompilation_payloads_8616(accepted_payload: str) -> tuple[list[tuple[str, str]], str | None]:
+def _collect_recompilation_payloads_8616(accepted_payload: object) -> object:
     """Require every target while keeping unavailable-tool evidence retryable."""
     def _impl() -> tuple[list[tuple[str, str]], str | None]:
+        recompilation: object
+        recomp_target: object
         recompilation_targets = ("portable-flat", "msc-dos")
         checked_payloads: list[tuple[str, str]] = []
         payload_hash = hashlib.sha256(accepted_payload.encode("utf-8", errors="ignore")).hexdigest()
@@ -3460,11 +3626,11 @@ def _collect_recompilation_payloads_8616(accepted_payload: str) -> tuple[list[tu
                 continue
             combined = "\n".join(
                 part
-                for part in (recompilation.stdout or "", recompilation.stderr or "")
+                for part in iter((recompilation.stdout or "", recompilation.stderr or ""))
                 if isinstance(part, str) and part
             ).strip()
-            lines = [line.strip() for line in combined.splitlines() if line.strip()]
-            error_lines = [line for line in lines if ("error" in line.lower() or "fatal" in line.lower())]
+            lines = [line.strip() for line in builtins.iter(combined.splitlines()) if line.strip()]
+            error_lines = [line for line in iter(lines) if ("error" in line.lower() or "fatal" in line.lower())]
             if error_lines:
                 detail = error_lines[0]
                 if len(error_lines) > 1:
@@ -3488,22 +3654,25 @@ def _collect_recompilation_payloads_8616(accepted_payload: str) -> tuple[list[tu
     return _impl()
 
 
+@cython.ccall
 def _run_function_work_item(
     item: FunctionWorkItem,
     *,
-    timeout: int,
-    api_style: str,
+    timeout: cython.longlong,
+    api_style: object,
     binary_path: Path | None,
     cod_metadata: CODProcMetadata | None,
     synthetic_globals: _SyntheticGlobals8616 | None,
     lst_metadata: LSTMetadata | None,
-    enable_structured_simplify: bool,
-    enable_postprocess: bool = True,
-    force_isolated_project: bool = False,
-    process_isolated_worker: bool = False,
-    allow_isolated_retry: bool = True,
+    enable_structured_simplify: cython.bint,
+    enable_postprocess: cython.bint = True,
+    force_isolated_project: cython.bint = False,
+    process_isolated_worker: cython.bint = False,
+    allow_isolated_retry: cython.bint = True,
 ) -> FunctionWorkResult:
     """Run one function work item with per-key producer serialization."""
+    cache_key: object
+    cached_result: object
     cache_key = function_decompilation_cache_key_8616(
         item,
         binary_path=binary_path,
@@ -3565,13 +3734,13 @@ def _run_function_work_item(
 )
 def _validated_generated_c_acceptance_8616(
     *,
-    status: str,
-    payload: str,
-    tail_validation_snapshot: dict[str, object] | None,
-    tail_validation_enabled: bool,
-    expected_validation_stages: list[str] | tuple[str, ...],
-    c_target: str = "portable-flat",
-    emit_failure_diagnostics: bool = True,
+    status: object,
+    payload: object,
+    tail_validation_snapshot: object,
+    tail_validation_enabled: cython.bint,
+    expected_validation_stages: object,
+    c_target: object = "portable-flat",
+    emit_failure_diagnostics: cython.bint = True,
 ) -> CAcceptanceResult8616:
     """Apply final CLI acceptance gates to generated C without changing semantics."""
     if isinstance(tail_validation_snapshot, dict):
@@ -3588,31 +3757,33 @@ def _validated_generated_c_acceptance_8616(
 
 
 def _acceptance_tail_snapshot_admitted_8616(
-    status: str, snapshot: dict[str, object] | None, stages: list[str] | tuple[str, ...],
-    enabled: bool, conditional: bool,
-) -> bool:
+    status: object, snapshot: object, stages: object,
+    enabled: cython.bint, conditional: cython.bint,
+) -> cython.bint:
     """Keep explicit conditional authority distinct from disabled validation."""
     if conditional:
         return True
-    if status == WorkItemStatus.CONDITIONAL.value:
+    if operator.eq(status, WorkItemStatus.CONDITIONAL.value):
         return False
     if isinstance(snapshot, dict) and any(
         isinstance(entry, Mapping) and entry.get("entry_premise") is not None
-        for entry in snapshot.values()
+        for entry in builtins.iter(snapshot.values())
     ):
         return False
     return not enabled or _tail_validation_passes_lenient(snapshot, expected_stages=list(stages))
 
 
+@cython.ccall
 def _acceptance_run_8616(
-    status: str,
-    payload: str,
-    tail_validation_snapshot: dict[str, object] | None,
-    tail_validation_enabled: bool,
-    expected_validation_stages: list[str] | tuple[str, ...],
-    emit_failure_diagnostics: bool,
+    status: object,
+    payload: object,
+    tail_validation_snapshot: object,
+    tail_validation_enabled: cython.bint,
+    expected_validation_stages: object,
+    emit_failure_diagnostics: cython.bint,
 ) -> CAcceptanceResult8616:
     """Run final validation, quality, and recompilation checks."""
+    recompile_fail_detail: object
     baseline_payload = payload if isinstance(payload, str) else ""
     if status not in (WorkItemStatus.OK.value, WorkItemStatus.CONDITIONAL.value):
         return _acceptance_result_8616(status, None, baseline_payload)
@@ -3701,10 +3872,11 @@ def _acceptance_run_8616(
     )
 
 
+@cython.ccall
 def _recompile_gate_fail_detail_8616(
-    checked_payloads: list[tuple[str, str]] | tuple[tuple[str, str], ...],
-    recomp_failure: str | None,
-) -> str | None:
+    checked_payloads: object,
+    recomp_failure: object,
+) -> object:
     """Return the first recompilation-gate fail detail, or None when accepted."""
     if recomp_failure is not None:
         return recomp_failure
@@ -3713,14 +3885,16 @@ def _recompile_gate_fail_detail_8616(
     return _toolchain_identity_fail_detail_8616(checked_payloads, checked_payloads[0][0])
 
 
-def _exe_addr_none_batch_gate_8616(args: CliArguments) -> bool:
+@cython.ccall
+def _exe_addr_none_batch_gate_8616(args: CliArguments) -> cython.bint:
     """Check the shared EXE batch-mode address gate."""
     return args.addr is None and args.binary.suffix.lower() == ".exe"
 
 
+@cython.ccall
 def _exe_unlabeled_batch_gate_8616(
     args: CliArguments, lst_metadata: object, visible_code_labels: object
-) -> bool:
+) -> cython.bint:
     """Check the batch-mode gate requiring EXE input, LST, and no visible labels."""
     return (
         _exe_addr_none_batch_gate_8616(args)
@@ -3729,43 +3903,48 @@ def _exe_unlabeled_batch_gate_8616(
     )
 
 
+@cython.ccall
 def _seeded_supplement_needed_8616(
     args: CliArguments,
     function_cfg_pairs: Sized | None,
     ranked_binary_offsets: Sized | None,
-) -> bool:
+) -> cython.bint:
     """Check whether seeded/ranked supplements are needed to reach the cap."""
     if args.max_functions <= 0 or not ranked_binary_offsets or not function_cfg_pairs:
         return False
     return len(function_cfg_pairs) < args.max_functions
 
 
-def _catalog_address_cache_storable_8616(project: angr.Project) -> bool:
+@cython.ccall
+def _catalog_address_cache_storable_8616(project: angr.Project) -> cython.bint:
     """Check whether catalog address evidence is absent or provably complete."""
+    source_region_evidence: object
     source_region_evidence = _source_region_catalog_evidence_8616(project)
     return source_region_evidence is None or source_region_evidence.complete
 
 
+@cython.ccall
 def _library_ranked_task_gate_8616(
     args: CliArguments,
     lst_metadata: object,
     visible_code_labels: object,
     include_library_functions: object,
     ranked_binary_offsets: object,
-) -> bool:
+) -> cython.bint:
     """Check the ranked-library task replacement gate for batch EXE mode."""
     if not _exe_unlabeled_batch_gate_8616(args, lst_metadata, visible_code_labels):
         return False
     return bool(include_library_functions and ranked_binary_offsets)
 
 
+@cython.ccall
 def _retry_gate_allows_candidate_8616(
     result: FunctionWorkResult,
     args: CliArguments,
     project: angr.Project,
     lst_metadata: object,
     cod_metadata: object,
-) -> bool:
+) -> cython.bint:
     """Allow new sidecar evidence only when the work item permits a retry."""
     if result.skip_heavy_fallbacks or result.status == "ok" or args.addr is not None:
         return False
@@ -3776,20 +3955,24 @@ def _retry_gate_allows_candidate_8616(
     )
 
 
-def _cacheable_direct_result_8616(result: FunctionWorkResult, integrity: AcceptedPayloadIntegrity8616) -> bool:
+@cython.ccall
+def _cacheable_direct_result_8616(result: FunctionWorkResult, integrity: AcceptedPayloadIntegrity8616) -> cython.bint:
     """Check whether a direct result carries complete cacheable provenance."""
-    if result.status != WorkItemStatus.OK.value or not isinstance(result.tail_validation, dict):
+    if operator.ne(result.status, WorkItemStatus.OK.value) or not isinstance(result.tail_validation, dict):
         return False
     if not isinstance(result.validated_payload_hash, str) or not isinstance(result.gcc_checked_payload_hash, str):
         return False
     return result.failure_family_snapshot is not None and integrity.passed
 
 
+@cython.ccall
 def _toolchain_identity_fail_detail_8616(
-    checked_payloads: list[tuple[str, str]] | tuple[tuple[str, str], ...],
-    reference_target: str,
-) -> str | None:
+    checked_payloads: object,
+    reference_target: object,
+) -> object:
     """Return a fail detail when toolchains disagree on the checked C identity."""
+    target_checked_payload: object
+    target_name: object
     reference_hash = _sha256_text_8616(checked_payloads[0][1])
     for target_name, target_checked_payload in checked_payloads[1:]:
         target_hash = _sha256_text_8616(target_checked_payload)
@@ -3798,7 +3981,8 @@ def _toolchain_identity_fail_detail_8616(
     return None
 
 
-def _dump_validation_failed_payload_8616(accepted_payload: str, baseline_payload: str) -> None:
+@cython.ccall
+def _dump_validation_failed_payload_8616(accepted_payload: object, baseline_payload: object) -> None:
     """Persist a validation-failed payload artifact for debugging."""
     dump_payload = accepted_payload if accepted_payload.strip() else baseline_payload
     if not dump_payload.strip():
@@ -3818,12 +4002,13 @@ def _dump_validation_failed_payload_8616(accepted_payload: str, baseline_payload
         return
 
 
+@cython.ccall
 def _validation_fail_8616(
-    detail: str,
-    tail_validation_snapshot: dict[str, object] | None,
-    emit_failure_diagnostics: bool,
-    accepted_payload: str,
-    baseline_payload: str,
+    detail: object,
+    tail_validation_snapshot: object,
+    emit_failure_diagnostics: cython.bint,
+    accepted_payload: object,
+    baseline_payload: object,
 ) -> CAcceptanceResult8616:
     """Record a validation failure and emit its diagnostics when enabled."""
     _mark_tail_validation_failed_with_blocker_8616(
@@ -3839,17 +4024,18 @@ def _validation_fail_8616(
     return _acceptance_result_8616(WorkItemStatus.VALIDATION_FAILED, detail, accepted_payload)
 
 
+@cython.ccall
 def _accept_generated_c_for_emission_8616(
     *,
-    payload: str,
-    tail_validation_snapshot: dict[str, object] | None,
+    payload: object,
+    tail_validation_snapshot: object,
     project: angr.Project,
-    emit_failure_diagnostics: bool = True,
+    emit_failure_diagnostics: cython.bint = True,
 ) -> CAcceptanceResult8616:
     """Apply the canonical final contract to one generated-C emission candidate."""
     tail_validation_enabled = _tail_validation_runtime_enabled(project)
-    expected_stages: tuple[str, ...] = (
-        ("structuring", "postprocess") if tail_validation_enabled else ()
+    expected_stages: object = (
+        tuple(("structuring", "postprocess")) if tail_validation_enabled else tuple(())
     )
     return _validated_generated_c_acceptance_8616(
         status=WorkItemStatus.OK.value,
@@ -3862,6 +4048,7 @@ def _accept_generated_c_for_emission_8616(
     )
 
 
+@cython.ccall
 def _accept_function_work_result_for_emission_8616(
     result: FunctionWorkResult,
     *,
@@ -3900,7 +4087,8 @@ def _accept_function_work_result_for_emission_8616(
     )
 
 
-def _dump_validation_failed_payload_if_requested_8616(payload: str, *, prefix: str = "payload") -> None:
+@cython.ccall
+def _dump_validation_failed_payload_if_requested_8616(payload: object, *, prefix: object = "payload") -> None:
     if not _env_truthy_8616("INERTIA_DUMP_VALIDATION_FAILED_PAYLOAD"):
         return
     if not isinstance(payload, str) or not payload.strip():
@@ -3917,12 +4105,14 @@ def _dump_validation_failed_payload_if_requested_8616(payload: str, *, prefix: s
         return
 
 
+@cython.ccall
 def _mark_tail_validation_failed_with_blocker_8616(
-    snapshot: dict[str, object] | None,
-    detail: str,
+    snapshot: object,
+    detail: object,
     *,
-    stage: str = "postprocess",
+    stage: object = "postprocess",
 ) -> None:
+    entry: object
     if not isinstance(snapshot, dict):
         return
     entry = snapshot.get(stage)
@@ -3936,6 +4126,7 @@ def _mark_tail_validation_failed_with_blocker_8616(
     entry["verdict"] = f"{stage} whole-tail validation [live_out] changed: {detail}"
 
 
+@cython.ccall
 def _emit_failed_timeout_acceptance_hints_8616() -> None:
     # No static hints here: stale canned blockers are worse than an honest
     # timeout/validation detail. Real acceptance failures are emitted by
@@ -3943,19 +4134,20 @@ def _emit_failed_timeout_acceptance_hints_8616() -> None:
     return
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _PartialResultReport8616:
     """Describe CLI labels for an honest partial decompilation result."""
 
     status: WorkItemStatus
-    heading: str
-    direct_c_header: str
-    sweep_c_header: str
-    fallback_detail: str
-    show_timeout_delay: bool
+    heading: object
+    direct_c_header: object
+    sweep_c_header: object
+    fallback_detail: object
+    show_timeout_delay: cython.bint
 
 
-def _partial_result_report_8616(raw_status: str) -> _PartialResultReport8616:
+@cython.ccall
+def _partial_result_report_8616(raw_status: object) -> _PartialResultReport8616:
     """Map a typed work-item status to non-semantic partial-output labels."""
     try:
         status = WorkItemStatus(raw_status)
@@ -4000,7 +4192,9 @@ _C_ASSIGN_RE_8616 = re.compile(
 )
 
 
-def _strip_comment_blocks_8616(text: str) -> str:
+@cython.ccall
+def _strip_comment_blocks_8616(text: object) -> str:
+    line: object
     out = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
     lines = []
     for line in out.splitlines():
@@ -4010,17 +4204,21 @@ def _strip_comment_blocks_8616(text: str) -> str:
     return "\n".join(lines)
 
 
-def _non_probe_call_count_for_fallback_rank_8616(text: str) -> int:
+def _non_probe_call_count_for_fallback_rank_8616(text: object) -> cython.longlong:
     """Count already-emitted non-probe calls for CLI fallback candidate ranking."""
     body = _extract_function_body_text_8616(_strip_comment_blocks_8616(text))
     return sum(
         1
-        for name in _CALL_TOKEN_RE.findall(body)
+        for name in builtins.iter(_CALL_TOKEN_RE.findall(body))
         if name not in _NON_EXECUTABLE_CALL_NAMES_8616 and not is_x86_16_stack_probe_name_8616(name)
     )
 
 
-def _pointer_param_names_8616(text: str) -> set[str]:
+@cython.ccall
+def _pointer_param_names_8616(text: object) -> object:
+    headers: object
+    ident_match: object
+    raw_param: object
     headers = re.findall(
         r"\b[A-Za-z_][A-Za-z0-9_\s\*]*\s+[A-Za-z_][A-Za-z0-9_]*\s*\(([^;{}]*)\)\s*\{",
         text,
@@ -4040,7 +4238,11 @@ def _pointer_param_names_8616(text: str) -> set[str]:
     return names
 
 
-def _count_unresolved_ds_linear_macro_hits_8616(payload: str) -> int:
+@cython.ccall
+def _count_unresolved_ds_linear_macro_hits_8616(payload: object) -> cython.longlong:
+    lhs: object
+    match: object
+    rhs: object
     stripped_payload = _strip_comment_blocks_8616(payload)
     pointer_like = _pointer_param_names_8616(payload)
     # Track simple aliases of pointer parameters (e.g., bx = rhs; SEG_U8(ds, bx)).
@@ -4053,7 +4255,7 @@ def _count_unresolved_ds_linear_macro_hits_8616(payload: str) -> int:
         offset = match.group(1).strip()
         base = offset
         if "+" in offset:
-            left, right = [piece.strip() for piece in offset.split("+", 1)]
+            left, right = [piece.strip() for piece in builtins.iter(offset.split("+", 1))]
             if left.isdigit():
                 base = right
             elif right.isdigit():
@@ -4072,7 +4274,9 @@ def _count_unresolved_ds_linear_macro_hits_8616(payload: str) -> int:
     return unresolved
 
 
-def _extract_function_body_text_8616(emitted_c: str) -> str:
+@cython.ccall
+def _extract_function_body_text_8616(emitted_c: object) -> object:
+    m: object
     clean = _strip_comment_blocks_8616(emitted_c)
     m = re.search(r"\{", clean)
     if m is None:
@@ -4080,7 +4284,8 @@ def _extract_function_body_text_8616(emitted_c: str) -> str:
     return clean[m.start() :]
 
 
-def _ordered_call_names_from_text_8616(text: str) -> list[str]:
+@cython.ccall
+def _ordered_call_names_from_text_8616(text: object) -> object:
     if not isinstance(text, str) or not text:
         return []
     text = _strip_comment_blocks_8616(text)
@@ -4089,34 +4294,37 @@ def _ordered_call_names_from_text_8616(text: str) -> list[str]:
     return names
 
 
-def _call_text_skip_string_8616(text: str, index: int, quote: str) -> int:
+@cython.ccall
+def _call_text_skip_string_8616(text: object, index: cython.longlong, quote: object) -> cython.longlong:
     """Advance past a quoted string literal in C text."""
     index += 1
     while index < len(text):
         if text[index] == "\\":
             index += 2
             continue
-        if text[index] == quote:
+        if operator.eq(text[index], quote):
             return index + 1
         index += 1
     return index
 
 
-def _call_text_skip_ws_8616(text: str, index: int) -> int:
+@cython.ccall
+def _call_text_skip_ws_8616(text: object, index: cython.longlong) -> cython.longlong:
     """Advance past whitespace in C text."""
     while index < len(text) and text[index].isspace():
         index += 1
     return index
 
 
+@cython.ccall
 def _call_text_parse_until_8616(
-    text: str, keywords: set[str], index: int, stop_char: str | None = None
-) -> tuple[list[str], int]:
+    text: object, keywords: object, index: cython.longlong, stop_char: object = None
+) -> tuple[list[str], cython.longlong]:
     """Collect call-like names until a matching delimiter is reached."""
     names: list[str] = []
     while index < len(text):
         ch = text[index]
-        if stop_char is not None and ch == stop_char:
+        if stop_char is not None and operator.eq(ch, stop_char):
             return names, index + 1
         if ch in {'"', "'"}:
             index = _call_text_skip_string_8616(text, index, ch)
@@ -4144,7 +4352,9 @@ def _call_text_parse_until_8616(
     return names, index
 
 
-def _extract_emitted_function_name_8616(emitted_c: str) -> str | None:
+@cython.ccall
+def _extract_emitted_function_name_8616(emitted_c: object) -> object:
+    m: object
     if not isinstance(emitted_c, str) or not emitted_c:
         return None
     header = emitted_c.split("{", 1)[0]
@@ -4157,7 +4367,9 @@ def _extract_emitted_function_name_8616(emitted_c: str) -> str | None:
     return name
 
 
-def _unreachable_calls_after_return_violation_8616(emitted_c: str) -> bool:
+@cython.ccall
+def _unreachable_calls_after_return_violation_8616(emitted_c: object) -> cython.bint:
+    line: object
     body = _extract_function_body_text_8616(_strip_comment_blocks_8616(emitted_c))
     if not isinstance(body, str) or not body.strip():
         return False
@@ -4177,8 +4389,11 @@ def _unreachable_calls_after_return_violation_8616(emitted_c: str) -> bool:
     return False
 
 
-def _line_has_call_token_8616(token_re: re.Pattern[str], line: str) -> bool:
+@cython.ccall
+def _line_has_call_token_8616(token_re: re.Pattern[str], line: object) -> cython.bint:
     """Check whether a line contains a non-keyword call token."""
+    name: object
+    match: object
     for match in token_re.finditer(line):
         name = match.group(1)
         if name is None or name in {"if", "for", "while", "switch", "return", "sizeof"}:
@@ -4187,6 +4402,7 @@ def _line_has_call_token_8616(token_re: re.Pattern[str], line: str) -> bool:
     return False
 
 
+@cython.ccall
 def _print_stop_on_first_failure_8616(function: object, result: FunctionWorkResult) -> None:
     display_addr = function_original_addr(function)
     print(
@@ -4197,11 +4413,18 @@ def _print_stop_on_first_failure_8616(function: object, result: FunctionWorkResu
 
 def _emit_function_timing_summary(
     function_tasks: Sequence[FunctionWorkItem],
-    result_map: Mapping[int, FunctionWorkResult],
+    result_map: Mapping[cython.longlong, FunctionWorkResult],
     *,
-    limit: int = 5,
+    limit: cython.longlong = 5,
 ) -> None:
-    rows: list[tuple[float, int, int, str, str]] = []
+    result: object
+    _index: object
+    addr: object
+    elapsed: object
+    item: object
+    name: object
+    status: object
+    rows: list[tuple[cython.double, cython.longlong, cython.longlong, str, str]] = []
     for item in function_tasks:
         result = result_map.get(item.index)
         if result is None:
@@ -4231,7 +4454,10 @@ def _emit_function_timing_summary(
         print(f"/* summary:   {addr:#x} {name}: {elapsed:.2f}s status={status} */")
 
 
-def _helper_name(project: angr.Project, addr: int) -> str | None:
+@cython.ccall
+def _helper_name(project: angr.Project, addr: cython.longlong) -> object:
+    name: object
+    proc: object
     proc = project.hooked_by(addr)
     if proc is None:
         return None
@@ -4245,6 +4471,7 @@ def _helper_name(project: angr.Project, addr: int) -> str | None:
 
 
 def _iter_c_nodes(node: _StructuredCNode8616) -> Iterator[_StructuredCNode8616]:
+    stmt: object
     yield node
     if isinstance(node, structured_c.CStatements):
         for stmt in node.statements:
@@ -4255,6 +4482,9 @@ def _iter_c_nodes(node: _StructuredCNode8616) -> Iterator[_StructuredCNode8616]:
 
 def _iter_c_child_nodes_8616(node: _StructuredCNode8616) -> Iterator[_StructuredCNode8616]:
     """Walk the generic structured-codegen child slots of one C node."""
+    value: object
+    arg: object
+    attr: object
     for attr in ("lhs", "rhs", "expr", "condition", "true_node", "false_node", "stmt", "callee_target"):
         if hasattr(node, attr):
             try:
@@ -4274,17 +4504,19 @@ def _iter_c_child_nodes_8616(node: _StructuredCNode8616) -> Iterator[_Structured
                     yield from _iter_c_nodes(arg)
 
 
-def _is_structured_codegen_node_8616(value: object) -> bool:
+@cython.ccall
+def _is_structured_codegen_node_8616(value: object) -> cython.bint:
     """Check whether a child value lives in the structured-codegen module."""
     return value is not None and type(value).__module__.startswith(
         "angr.analyses.decompiler.structured_codegen"
     )
 
 
+@cython.ccall
 def _fork_unavailable_reason() -> str:
     live_threads = [
         thread.name
-        for thread in threading.enumerate()
+        for thread in builtins.iter(threading.enumerate())
         if thread is not threading.current_thread() and thread.is_alive()
     ]
     if live_threads:
@@ -4292,7 +4524,8 @@ def _fork_unavailable_reason() -> str:
     return f"threading.active_count()={threading.active_count()}"
 
 
-def _binary_evidence_recovery_snapshot_8616(reason: str) -> dict[str, object]:
+@cython.ccall
+def _binary_evidence_recovery_snapshot_8616(reason: object) -> dict[str, object]:
     detail = f"validated binary instruction evidence recovery: {reason}"
     return {
         "structuring": {
@@ -4310,6 +4543,7 @@ def _binary_evidence_recovery_snapshot_8616(reason: str) -> dict[str, object]:
     }
 
 
+@cython.ccall
 def _recover_binary_evidence_c_8616(
     project: angr.Project,
     function: _AngrFunction,
@@ -4323,13 +4557,14 @@ def _recover_binary_evidence_c_8616(
     return None, None
 
 
+@cython.ccall
 def _remember_fallback_tail_validation(
     project: angr.Project,
-    fallback_tail_validation_by_index: dict[int, dict[str, object]],
+    fallback_tail_validation_by_index: object,
     item: FunctionWorkItem,
     *,
     function: _AngrFunction | None = None,
-    allow_project_fallback: bool = True,
+    allow_project_fallback: cython.bint = True,
 ) -> dict[str, object]:
     target_function = function if function is not None else item.function
     snapshot = _tail_validation_snapshot_for_fallback(
@@ -4341,6 +4576,7 @@ def _remember_fallback_tail_validation(
     return dict(snapshot)
 
 
+@cython.ccall
 def _tail_validation_snapshot_from_result_8616(raw_tail_validation: object) -> dict[str, object]:
     if isinstance(raw_tail_validation, Mapping) and (
         "structuring" in raw_tail_validation or "postprocess" in raw_tail_validation
@@ -4351,10 +4587,11 @@ def _tail_validation_snapshot_from_result_8616(raw_tail_validation: object) -> d
     return dict(_extract_x86_16_tail_validation_snapshot(cast(Mapping[str, Any], raw_tail_validation)))
 
 
+@cython.ccall
 def _emit_sidecar_slice_tail_validation_snapshot_8616(
     function_cfg: object,
     function: object,
-    snapshot: dict[str, object] | None,
+    snapshot: object,
     *,
     binary_path: Path | None,
 ) -> None:
@@ -4367,6 +4604,7 @@ def _emit_sidecar_slice_tail_validation_snapshot_8616(
     )
 
 
+@cython.ccall
 def _retry_function_tail_validation_snapshot_8616(project: angr.Project, function: object) -> dict[str, object]:
     """Return the snapshot produced by a successful retry function.
 
@@ -4375,6 +4613,7 @@ def _retry_function_tail_validation_snapshot_8616(project: angr.Project, functio
     that produced the accepted payload before consulting that older project
     cache.
     """
+    project_snapshot: object
     function_snapshot = _extract_x86_16_tail_validation_snapshot(getattr(function, "info", None))
     if function_snapshot:
         return dict(function_snapshot)
@@ -4384,13 +4623,18 @@ def _retry_function_tail_validation_snapshot_8616(project: angr.Project, functio
     return dict(_tail_validation_snapshot_for_function_run(project, function))
 
 
+@cython.ccall
 def _fresh_sidecar_retry_work_item_8616(
     *,
     item: FunctionWorkItem,
     project: angr.Project,
     args: CliArguments,
-    lst_metadata: LSTMetadata | None,
+    lst_metadata: object,
 ) -> FunctionWorkItem | None:
+    linked_base: object
+    loader: object
+    main_object: object
+    source_name: object
     if lst_metadata is None:
         return None
     if args.addr is not None:
@@ -4460,19 +4704,21 @@ def _fresh_sidecar_retry_work_item_8616(
     )
 
 
-def _work_item_status_8616(status: str) -> WorkItemStatus:
+@cython.ccall
+def _work_item_status_8616(status: object) -> WorkItemStatus:
     try:
         return WorkItemStatus(status)
     except (TypeError, ValueError):
         return WorkItemStatus.UNKNOWN
 
 
+@cython.ccall
 def _retry_timeout_for_failed_result_8616(
     result: FunctionWorkResult,
     args: CliArguments,
     *,
-    timeout_was_explicit: bool,
-) -> int:
+    timeout_was_explicit: cython.bint,
+) -> cython.longlong:
     """Preserve measured clean-worker cost when budgeting a fallback retry."""
     timeout = retry_timeout_after_failed_attempt(
         args.timeout,
@@ -4488,12 +4734,12 @@ def _retry_timeout_for_failed_result_8616(
     )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _TimeoutDelayPrinter8616:
     """One-shot timeout delay line printer bound to a work result."""
 
     result: FunctionWorkResult
-    printed: bool = False
+    printed: cython.bint = False
 
     def __call__(self) -> None:
         """Print the timeout delay line once for timeout results."""
@@ -4505,16 +4751,17 @@ class _TimeoutDelayPrinter8616:
             self.printed = True
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _OkEmitOutcome8616:
     """Outcome of the ok-status emission lane."""
 
-    early_counters: tuple[int, int] | None
+    early_counters: object
     result: FunctionWorkResult
-    attempt_status_printed: bool
-    emitted_problem: bool
+    attempt_status_printed: cython.bint
+    emitted_problem: cython.bint
 
 
+@cython.ccall
 def _retry_work_item_8616(item: FunctionWorkItem, result: FunctionWorkResult) -> FunctionWorkItem:
     """Prefer the result's recovered function/CFG for retry lanes when present."""
     if result.function is not None and result.function_cfg is not None:
@@ -4527,6 +4774,7 @@ def _retry_work_item_8616(item: FunctionWorkItem, result: FunctionWorkResult) ->
     return item
 
 
+@cython.ccall
 def _emit_retry_gate_candidate_8616(
     result: FunctionWorkResult,
     args: CliArguments,
@@ -4536,10 +4784,10 @@ def _emit_retry_gate_candidate_8616(
     retry_item: FunctionWorkItem,
     function: _AngrFunction,
     synthetic_globals: _SyntheticGlobals8616,
-    timeout_was_explicit: bool,
-    fallback_tail_validation_by_index: dict[int, dict[str, object]],
-    result_state_by_index: dict[int, FunctionWorkResult] | None,
-) -> bool:
+    timeout_was_explicit: cython.bint,
+    fallback_tail_validation_by_index: object,
+    result_state_by_index: object,
+) -> cython.bint:
     """Run the pre-emission retry lane when its gate allows a candidate."""
     if not _retry_gate_allows_candidate_8616(result, args, project, lst_metadata, cod_metadata):
         return False
@@ -4561,13 +4809,14 @@ def _emit_retry_gate_candidate_8616(
     )
 
 
+@cython.ccall
 def _validation_failed_retry_gate_8616(
     args: CliArguments,
     project: angr.Project,
     result: FunctionWorkResult,
-    lst_metadata: LSTMetadata | None,
-    cod_metadata: CODProcMetadata | None,
-) -> bool:
+    lst_metadata: object,
+    cod_metadata: object,
+) -> cython.bint:
     """Allow evidence-mutating sweep retries unless the work item forbids them."""
     return (
         not result.skip_heavy_fallbacks
@@ -4580,6 +4829,7 @@ def _validation_failed_retry_gate_8616(
     )
 
 
+@cython.ccall
 def _emit_ok_result_8616(
     *,
     result: FunctionWorkResult,
@@ -4590,12 +4840,13 @@ def _emit_ok_result_8616(
     lst_metadata: LSTMetadata | None,
     cod_metadata: CODProcMetadata | None,
     synthetic_globals: _SyntheticGlobals8616,
-    result_tail_validation: dict[str, object],
-    timeout_was_explicit: bool,
-    fallback_tail_validation_by_index: dict[int, dict[str, object]],
-    result_state_by_index: dict[int, FunctionWorkResult] | None,
+    result_tail_validation: object,
+    timeout_was_explicit: cython.bint,
+    fallback_tail_validation_by_index: object,
+    result_state_by_index: object,
 ) -> _OkEmitOutcome8616:
     """Emit an ok-status result or route its failed validation to retry."""
+    _diag_line: object
     payload_text = result.payload if isinstance(result.payload, str) else ""
     normalized_payload_text = _normalize_accepted_payload_8616(payload_text)
     if normalized_payload_text != payload_text:
@@ -4679,6 +4930,7 @@ def _emit_ok_result_8616(
     )
 
 
+@cython.ccall
 def _emit_partial_payload_block_8616(
     result: FunctionWorkResult,
     function: _AngrFunction,
@@ -4705,7 +4957,8 @@ def _emit_partial_payload_block_8616(
     )
 
 
-def _emit_conditional_result_8616(result: FunctionWorkResult, *, args: CliArguments) -> int:
+@cython.ccall
+def _emit_conditional_result_8616(result: FunctionWorkResult, *, args: CliArguments) -> cython.longlong:
     """Export conditional C separately, without fallback, success caching or pass."""
     snapshot = _tail_validation_snapshot_from_result_8616(result.tail_validation)
     integrity = verify_function_work_result_payload_integrity_8616(result)
@@ -4725,8 +4978,9 @@ def _emit_conditional_result_8616(result: FunctionWorkResult, *, args: CliArgume
     return 5
 
 
+@cython.ccall
 def _retain_emission_result_8616(
-    results: dict[int, FunctionWorkResult] | None, index: int, result: FunctionWorkResult,
+    results: object, index: cython.longlong, result: FunctionWorkResult,
     *, expected: FunctionWorkResult | None = None,
 ) -> None:
     """Retain checked work status so aggregation cannot lose conditional evidence."""
@@ -4734,16 +4988,18 @@ def _retain_emission_result_8616(
         results[index] = result
 
 
+@cython.ccall
 def _emission_result_state_8616(
-    results: dict[int, FunctionWorkResult] | None,
-) -> dict[int, FunctionWorkResult]:
+    results: object,
+) -> object:
     """Keep caller aggregation or create operation-local final-result ownership."""
     return {} if results is None else results
 
 
+@cython.ccall
 def _write_final_function_result_8616(
     item: FunctionWorkItem, result: FunctionWorkResult, *,
-    project: object, output_dir: Path | None,
+    project: object, output_dir: object,
 ) -> None:
     """Persist owned final status, without promoting legacy stdout-only fallbacks."""
     if output_dir is not None:
@@ -4762,23 +5018,23 @@ def _emit_function_result(
     lst_metadata: LSTMetadata | None,
     cod_metadata: CODProcMetadata | None,
     synthetic_globals: _SyntheticGlobals8616,
-    precise_sidecar_regions: bool,
-    allow_heavy_fallbacks: bool,
-    interactive_stdout: bool,
-    use_serial_fork_per_function: bool,
-    fallback_tail_validation_by_index: dict[int, dict[str, object]],
-    result_state_by_index: dict[int, FunctionWorkResult] | None = None,
-    timeout_was_explicit: bool = False,
-) -> tuple[int, int]:
+    precise_sidecar_regions: cython.bint,
+    allow_heavy_fallbacks: cython.bint,
+    interactive_stdout: cython.bint,
+    use_serial_fork_per_function: cython.bint,
+    fallback_tail_validation_by_index: object,
+    result_state_by_index: object = None,
+    timeout_was_explicit: cython.bint = False,
+) -> object:
     """Emit one result and retain its final owned evidence beside generated C."""
     result_state_by_index = _emission_result_state_8616(result_state_by_index)
 
-    def _impl() -> tuple[int, int]:
+    def _impl() -> object:
         nonlocal result
         result = _accept_function_work_result_for_emission_8616(result, project=project)
         _retain_emission_result_8616(result_state_by_index, item.index, result)
         result_tail_validation = _tail_validation_snapshot_from_result_8616(result.tail_validation)
-        if result.status == WorkItemStatus.CONDITIONAL.value:
+        if operator.eq(result.status, WorkItemStatus.CONDITIONAL.value):
             conditional_exit = _emit_conditional_result_8616(result, args=args)
             return 0, int(conditional_exit != 5)
         decompiled_local = 0
@@ -4887,15 +5143,16 @@ def _try_emit_retry_recovered_candidate_8616(
     cod_metadata: CODProcMetadata | None,
     synthetic_globals: _SyntheticGlobals8616,
     retry_timeout: int | None = None,
-    fallback_tail_validation_by_index: dict[int, dict[str, object]] | None = None,
-    result_state_by_index: dict[int, FunctionWorkResult] | None = None,
-) -> bool:
+    fallback_tail_validation_by_index: object = None,
+    result_state_by_index: object = None,
+) -> cython.bint:
     """Try one fresh-project retry and retain only validated, compilable C."""
     try:
         if retry_timeout is None:
             retry_timeout = max(1, int(args.timeout)) if isinstance(args.timeout, int) else 120
 
         def _run_retry_candidate() -> FunctionWorkResult:
+            retry_item: object
             retry_item = _fresh_sidecar_retry_work_item_8616(
                 item=item,
                 project=project,
@@ -4961,6 +5218,7 @@ def _try_emit_retry_recovered_candidate_8616(
         return False
 
 
+@cython.ccall
 def _retry_clean_process_fallback_8616(
     retry_result: FunctionWorkResult,
     item: FunctionWorkItem,
@@ -4968,8 +5226,8 @@ def _retry_clean_process_fallback_8616(
     project: angr.Project,
     args: CliArguments,
     lst_metadata: LSTMetadata | None,
-    retry_timeout: int,
-) -> tuple[FunctionWorkResult, dict[str, object], bool]:
+    retry_timeout: cython.longlong,
+) -> tuple[FunctionWorkResult, dict[str, object], cython.bint]:
     """Re-run a rejected retry through the clean-process worker lane."""
     retry_tv = _tail_validation_snapshot_from_result_8616(retry_result.tail_validation)
     retry_has_payload = isinstance(retry_result.payload, str) and bool(retry_result.payload.strip())
@@ -4999,14 +5257,15 @@ def _retry_clean_process_fallback_8616(
     return retry_result, retry_tv, retry_has_payload
 
 
+@cython.ccall
 def _record_retry_success_8616(
     retry_result: FunctionWorkResult,
-    retry_tv: dict[str, object],
+    retry_tv: object,
     item: FunctionWorkItem,
     function: _AngrFunction,
     args: CliArguments,
-    fallback_tail_validation_by_index: dict[int, dict[str, object]] | None,
-    result_state_by_index: dict[int, FunctionWorkResult] | None,
+    fallback_tail_validation_by_index: object,
+    result_state_by_index: object,
 ) -> None:
     """Record and emit one validated retry-recovered candidate."""
     retry_payload = retry_result.payload
@@ -5048,18 +5307,25 @@ def _emit_function_result_fallback_lanes_8616(
     args: CliArguments,
     lst_metadata: LSTMetadata | None,
     cod_metadata: CODProcMetadata | None,
-    precise_sidecar_regions: bool,
-    allow_heavy_fallbacks: bool,
-    interactive_stdout: bool,
-    use_serial_fork_per_function: bool,
-    fallback_tail_validation_by_index: dict[int, dict[str, object]],
-    decompiled_local: int,
-    failed_local: int,
-    attempt_status_printed: bool,
-    emitted_problem: bool,
+    precise_sidecar_regions: cython.bint,
+    allow_heavy_fallbacks: cython.bint,
+    interactive_stdout: cython.bint,
+    use_serial_fork_per_function: cython.bint,
+    fallback_tail_validation_by_index: object,
+    decompiled_local: cython.longlong,
+    failed_local: cython.longlong,
+    attempt_status_printed: cython.bint,
+    emitted_problem: cython.bint,
     emit_timeout_delay_line: Callable[[], None],
-) -> tuple[int, int]:
-    def _impl() -> tuple[int, int]:
+) -> object:
+    def _impl() -> object:
+        closed_sidecar_verdict: object
+        function_project: object
+        known_counters: object
+        nonopt_counters: object
+        slice_counters: object
+        slice_result: object
+        trivial_counters: object
         nonlocal decompiled_local, failed_local, attempt_status_printed, emitted_problem
         function: _AngrFunction = item.function
         skip_heavy_fallbacks_for_result = result.skip_heavy_fallbacks
@@ -5133,7 +5399,7 @@ def _emit_function_result_fallback_lanes_8616(
         if trivial_counters is not None:
             return trivial_counters
 
-        nonopt_result: NonOptimizedSliceOutcome | str | None = None
+        nonopt_result: object = None
         if _nonopt_slice_gate_8616(result, precise_sidecar_regions, args, known_nonopt_c, slice_result):
             nonopt_result = _run_nonopt_slice_lane_8616(
                 function_project=function_project,
@@ -5188,8 +5454,11 @@ def _emit_function_result_fallback_lanes_8616(
     return _impl()
 
 
+@cython.ccall
 def _copy_function_project_tv_attrs_8616(function_project: object, project: angr.Project) -> None:
     """Copy tail-validation snapshots from a rebased function project."""
+    attr_value: object
+    attr_name: object
     if function_project is project:
         return
     for attr_name in (
@@ -5201,6 +5470,7 @@ def _copy_function_project_tv_attrs_8616(function_project: object, project: angr
             setattr(project, attr_name, dict(attr_value))
 
 
+@cython.ccall
 def _sidecar_slice_fallback_8616(
     *,
     item: FunctionWorkItem,
@@ -5209,15 +5479,17 @@ def _sidecar_slice_fallback_8616(
     project: angr.Project,
     args: CliArguments,
     lst_metadata: LSTMetadata | None,
-    precise_sidecar_regions: bool,
-    allow_heavy_fallbacks: bool,
-    skip_heavy_fallbacks_for_result: bool,
-    fallback_tail_validation_by_index: dict[int, dict[str, object]],
-    decompiled_local: int,
-    failed_local: int,
+    precise_sidecar_regions: cython.bint,
+    allow_heavy_fallbacks: cython.bint,
+    skip_heavy_fallbacks_for_result: cython.bint,
+    fallback_tail_validation_by_index: object,
+    decompiled_local: cython.longlong,
+    failed_local: cython.longlong,
 ) -> tuple[SliceRecoveryAttemptOutcome | None, tuple[int, int] | None]:
     """Try the sidecar-slice fallback lane and its acceptance gate."""
-    slice_result: SliceRecoveryAttemptOutcome | None = None
+    slice_result: object
+    _diag_line: object
+    slice_result = None
     if allow_heavy_fallbacks and precise_sidecar_regions and not skip_heavy_fallbacks_for_result:
         slice_result = _try_decompile_sidecar_slice(
             project,
@@ -5266,6 +5538,7 @@ def _sidecar_slice_fallback_8616(
     return slice_result, None
 
 
+@cython.ccall
 def _known_nonopt_fallback_8616(
     *,
     item: FunctionWorkItem,
@@ -5276,13 +5549,15 @@ def _known_nonopt_fallback_8616(
     args: CliArguments,
     project: angr.Project,
     cod_metadata: CODProcMetadata | None,
-    fallback_tail_validation_by_index: dict[int, dict[str, object]],
-    emitted_problem: bool,
+    fallback_tail_validation_by_index: object,
+    emitted_problem: cython.bint,
     emit_timeout_delay_line: Callable[[], None],
-    decompiled_local: int,
-    failed_local: int,
+    decompiled_local: cython.longlong,
+    failed_local: cython.longlong,
 ) -> tuple[str | None, tuple[int, int] | None]:
     """Try known-function recovery only when the work item permits heavy retries."""
+    known_nonopt_c: object
+    _diag_line: object
     if result.skip_heavy_fallbacks or result.partial_payload is not None:
         return None, None
     known_nonopt_result = _try_decompile_non_optimized_known_function(
@@ -5342,6 +5617,7 @@ def _known_nonopt_fallback_8616(
     return None, (decompiled_local + 1, failed_local)
 
 
+@cython.ccall
 def _trivial_sidecar_fallback_8616(
     *,
     item: FunctionWorkItem,
@@ -5350,11 +5626,12 @@ def _trivial_sidecar_fallback_8616(
     project: angr.Project,
     args: CliArguments,
     lst_metadata: LSTMetadata | None,
-    fallback_tail_validation_by_index: dict[int, dict[str, object]],
-    decompiled_local: int,
-    failed_local: int,
-) -> tuple[int, int] | None:
+    fallback_tail_validation_by_index: object,
+    decompiled_local: cython.longlong,
+    failed_local: cython.longlong,
+) -> object:
     """Try the trivial sidecar fallback lane and its acceptance gate."""
+    trivial_c: object
     trivial_c = _try_emit_trivial_sidecar_c(project, lst_metadata, function.addr, function.name)
     if trivial_c is None:
         return None
@@ -5386,13 +5663,14 @@ def _trivial_sidecar_fallback_8616(
     return None
 
 
+@cython.ccall
 def _nonopt_slice_gate_8616(
     result: FunctionWorkResult,
-    precise_sidecar_regions: bool,
+    precise_sidecar_regions: cython.bint,
     args: CliArguments,
-    known_nonopt_c: str | None,
-    slice_result: SliceRecoveryAttemptOutcome | None,
-) -> bool:
+    known_nonopt_c: object,
+    slice_result: object,
+) -> cython.bint:
     """Gate the non-optimized slice lane on remaining fallback eligibility."""
     return (
         result.partial_payload is None
@@ -5404,17 +5682,18 @@ def _nonopt_slice_gate_8616(
     )
 
 
+@cython.ccall
 def _run_nonopt_slice_lane_8616(
     *,
     function_project: object,
-    using_rebased_function_slice: bool,
+    using_rebased_function_slice: cython.bint,
     project: angr.Project,
     function: _AngrFunction,
     args: CliArguments,
     function_lst_metadata: LSTMetadata | None,
     cod_metadata: CODProcMetadata | None,
-    use_serial_fork_per_function: bool,
-) -> NonOptimizedSliceOutcome | str | None:
+    use_serial_fork_per_function: cython.bint,
+) -> object:
     """Run the non-optimized slice fallback attempt."""
     nonopt_result = _try_decompile_non_optimized_slice(
         function_project if using_rebased_function_slice else project,
@@ -5431,21 +5710,24 @@ def _run_nonopt_slice_lane_8616(
     return nonopt_result
 
 
+@cython.ccall
 def _emit_nonopt_acceptance_8616(
     *,
-    nonopt_result: NonOptimizedSliceOutcome | str | None,
+    nonopt_result: object,
     item: FunctionWorkItem,
     result: FunctionWorkResult,
     function: _AngrFunction,
     project: angr.Project,
     args: CliArguments,
-    fallback_tail_validation_by_index: dict[int, dict[str, object]],
-    emitted_problem: bool,
+    fallback_tail_validation_by_index: object,
+    emitted_problem: cython.bint,
     emit_timeout_delay_line: Callable[[], None],
-    decompiled_local: int,
-    failed_local: int,
-) -> tuple[int, int] | None:
+    decompiled_local: cython.longlong,
+    failed_local: cython.longlong,
+) -> object:
     """Accept and emit a rendered non-optimized slice candidate."""
+    nonopt_c: object
+    _diag_line: object
     nonopt_c = _non_optimized_slice_rendered(nonopt_result)
     if nonopt_c is None:
         return None
@@ -5496,19 +5778,22 @@ def _emit_function_result_light_fallback_8616(
     args: CliArguments,
     lst_metadata: LSTMetadata | None,
     cod_metadata: CODProcMetadata | None,
-    allow_heavy_fallbacks: bool,
-    skip_heavy_fallbacks_for_result: bool,
-    interactive_stdout: bool,
-    fallback_tail_validation_by_index: dict[int, dict[str, object]],
-    decompiled_local: int,
-    failed_local: int,
-    attempt_status_printed: bool,
-    emitted_problem: bool,
+    allow_heavy_fallbacks: cython.bint,
+    skip_heavy_fallbacks_for_result: cython.bint,
+    interactive_stdout: cython.bint,
+    fallback_tail_validation_by_index: object,
+    decompiled_local: cython.longlong,
+    failed_local: cython.longlong,
+    attempt_status_printed: cython.bint,
+    emitted_problem: cython.bint,
     emit_timeout_delay_line: Callable[[], None],
-) -> tuple[int, int]:
+) -> object:
     """Emit diagnostics and the light string/assembly fallback lanes."""
 
-    def _impl() -> tuple[int, int]:
+    def _impl() -> tuple[cython.longlong, cython.longlong]:
+        accepted_string: object
+        sidecar_region: object
+        string_c: object
         nonlocal decompiled_local, failed_local, attempt_status_printed, emitted_problem
         function: _AngrFunction = item.function
         sidecar_region = _lst_code_region(lst_metadata, function.addr) if lst_metadata is not None else None
@@ -5566,6 +5851,7 @@ def _emit_function_result_light_fallback_8616(
     return _impl()
 
 
+@cython.ccall
 def _emit_light_nonopt_unavailable_8616(
     project: angr.Project,
     function: _AngrFunction,
@@ -5573,11 +5859,12 @@ def _emit_light_nonopt_unavailable_8616(
     args: CliArguments,
     lst_metadata: LSTMetadata | None,
     cod_metadata: CODProcMetadata | None,
-    allow_heavy_fallbacks: bool,
-    skip_heavy_fallbacks_for_result: bool,
-    interactive_stdout: bool,
+    allow_heavy_fallbacks: cython.bint,
+    skip_heavy_fallbacks_for_result: cython.bint,
+    interactive_stdout: cython.bint,
 ) -> None:
     """Probe the light non-optimized lane and print why it is unavailable."""
+    nonopt_skip_reason: object
     nonopt_failure_detail = None
     if (not allow_heavy_fallbacks) and (not skip_heavy_fallbacks_for_result):
         try:
@@ -5610,12 +5897,13 @@ def _emit_light_nonopt_unavailable_8616(
         print(f"/* non-optimized fallback unavailable: {nonopt_skip_reason} */")
 
 
+@cython.ccall
 def _emit_light_asm_fallback_tail_8616(
     function: _AngrFunction,
     result: FunctionWorkResult,
     project: angr.Project,
-    asm_fallback: str,
-    emitted_problem: bool,
+    asm_fallback: object,
+    emitted_problem: cython.bint,
     emit_timeout_delay_line: Callable[[], None],
 ) -> None:
     """Emit the light-lane asm fallback tail."""
@@ -5653,24 +5941,28 @@ def _emit_light_asm_fallback_tail_8616(
     _print_asm_fallback_text(asm_fallback)
 
 
+@cython.ccall
 def _emit_string_or_asm_fallback_8616(
     *,
     item: FunctionWorkItem,
     result: FunctionWorkResult,
     project: angr.Project,
     args: CliArguments,
-    lst_metadata: LSTMetadata | None,
-    fallback_tail_validation_by_index: dict[int, dict[str, object]],
-    skip_heavy_fallbacks_for_result: bool,
-    allow_heavy_fallbacks: bool,
-    interactive_stdout: bool,
-    emitted_problem: bool,
-    attempt_status_printed: bool,
-    decompiled_local: int,
-    failed_local: int,
-    nonopt_result: NonOptimizedSliceOutcome | str | None,
+    lst_metadata: object,
+    fallback_tail_validation_by_index: object,
+    skip_heavy_fallbacks_for_result: cython.bint,
+    allow_heavy_fallbacks: cython.bint,
+    interactive_stdout: cython.bint,
+    emitted_problem: cython.bint,
+    attempt_status_printed: cython.bint,
+    decompiled_local: cython.longlong,
+    failed_local: cython.longlong,
+    nonopt_result: object,
     emit_timeout_delay_line: Callable[[], None],
-) -> tuple[int, int]:
+) -> tuple[cython.longlong, cython.longlong]:
+    accepted_string: object
+    sidecar_region: object
+    string_c: object
     function: _AngrFunction = item.function
     sidecar_region = _lst_code_region(lst_metadata, function.addr) if lst_metadata is not None else None
     string_c = _string_intrinsic_candidate_8616(project, function, sidecar_region)
@@ -5707,9 +5999,10 @@ def _emit_string_or_asm_fallback_8616(
     return decompiled_local, failed_local
 
 
+@cython.ccall
 def _string_intrinsic_candidate_8616(
-    project: angr.Project, function: _AngrFunction, sidecar_region: tuple[int, int] | None
-) -> str | None:
+    project: angr.Project, function: _AngrFunction, sidecar_region: object
+) -> object:
     """Emit a string-intrinsic C candidate for a function's code window."""
     if sidecar_region is not None:
         return _try_emit_string_intrinsic_c(
@@ -5719,12 +6012,13 @@ def _string_intrinsic_candidate_8616(
     return _try_emit_string_intrinsic_c(project, start=start, end=end, name=function.name)
 
 
+@cython.ccall
 def _accept_string_fallback_8616(
     project: angr.Project,
     item: FunctionWorkItem,
-    string_c: str,
-    fallback_tail_validation_by_index: dict[int, dict[str, object]],
-) -> tuple[CAcceptanceResult8616, dict[str, object]] | None:
+    string_c: object,
+    fallback_tail_validation_by_index: object,
+) -> object:
     """Accept a string-intrinsic fallback only through the canonical gate."""
     fallback_snapshot = _remember_fallback_tail_validation(
         project,
@@ -5742,20 +6036,22 @@ def _accept_string_fallback_8616(
     return None
 
 
+@cython.ccall
 def _emit_string_fallback_block_8616(
     function: _AngrFunction,
     result: FunctionWorkResult,
     args: CliArguments,
     fallback_acceptance: CAcceptanceResult8616,
-    fallback_snapshot: dict[str, object],
-    allow_heavy_fallbacks: bool,
-    skip_heavy_fallbacks_for_result: bool,
-    interactive_stdout: bool,
-    nonopt_result: NonOptimizedSliceOutcome | str | None,
-    emitted_problem: bool,
+    fallback_snapshot: object,
+    allow_heavy_fallbacks: cython.bint,
+    skip_heavy_fallbacks_for_result: cython.bint,
+    interactive_stdout: cython.bint,
+    nonopt_result: object,
+    emitted_problem: cython.bint,
     emit_timeout_delay_line: Callable[[], None],
 ) -> None:
     """Print the accepted string-intrinsic fallback output block."""
+    nonopt_skip_reason: object
     _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
     if not emitted_problem:
         print(f"/* problem: {result.status} */")
@@ -5782,16 +6078,18 @@ def _emit_string_fallback_block_8616(
     )
 
 
+@cython.ccall
 def _emit_asm_fallback_block_8616(
     function: _AngrFunction,
     result: FunctionWorkResult,
     project: angr.Project,
-    asm_fallback: str,
-    attempt_status_printed: bool,
-    emitted_problem: bool,
+    asm_fallback: object,
+    attempt_status_printed: cython.bint,
+    emitted_problem: cython.bint,
     emit_timeout_delay_line: Callable[[], None],
 ) -> None:
     """Print diagnostics and the asm fallback block for a failed function."""
+    _diag_line: object
     for _diag_line in _format_tail_validation_diagnostic(
         result.tail_validation,
         function_addr=function.addr,
@@ -5828,8 +6126,10 @@ def _emit_asm_fallback_block_8616(
     _print_asm_fallback_text(asm_fallback)
 
 
-def _prepare_main_cli_args_8616(argv: list[str] | None) -> tuple[CliArguments, bool, Path | None]:
+def _prepare_main_cli_args_8616(argv: object) -> tuple[CliArguments, cython.bint, Path | None]:
     """Parse CLI arguments and apply startup-only process settings."""
+    effective_signature_catalog: object
+    mapped: object
     args = parse_cli_arguments(argv)
     _configure_cli_telemetry_8616(args)
     annotate_current_span(
@@ -5840,8 +6140,8 @@ def _prepare_main_cli_args_8616(argv: list[str] | None) -> tuple[CliArguments, b
         backend=args.function_discovery_backend,
     )
     raw_argv = list(argv) if argv is not None else list(sys.argv[1:])
-    seed_engine_was_explicit = any(token == "--seed-engine" or token.startswith("--seed-engine=") for token in raw_argv)
-    timeout_was_explicit = any(token == "--timeout" or token.startswith("--timeout=") for token in raw_argv)
+    seed_engine_was_explicit = any(token == "--seed-engine" or token.startswith("--seed-engine=") for token in iter(raw_argv))
+    timeout_was_explicit = any(token == "--timeout" or token.startswith("--timeout=") for token in iter(raw_argv))
     if seed_engine_was_explicit and args.seed_engine:
         seed_engine = str(args.seed_engine).strip().lower()
         backend_map = {"auto": "auto", "angr": "angr", "rizin": "rizin"}
@@ -5858,14 +6158,16 @@ def _prepare_main_cli_args_8616(argv: list[str] | None) -> tuple[CliArguments, b
     _lower_process_priority()
     _apply_memory_limit(args.max_memory_mb)
 
-    effective_signature_catalog: Path | None = args.signature_catalog
+    effective_signature_catalog = args.signature_catalog
     if effective_signature_catalog is None:
         effective_signature_catalog = default_signature_catalog_path()
     return args, timeout_was_explicit, effective_signature_catalog
 
 
+@cython.ccall
 def _resolve_cod_path_8616(binary_path: Path) -> Path | None:
     """Return the sidecar listing path associated with a CLI binary path."""
+    suffix: object
     if binary_path.suffix.lower() in {".cod", ".lst", ".map", ".dbg", ".pdb"}:
         return binary_path
     for suffix in (".COD", ".cod"):
@@ -5875,12 +6177,17 @@ def _resolve_cod_path_8616(binary_path: Path) -> Path | None:
     return None
 
 
+@cython.ccall
 def _linked_proc_addr_from_metadata_8616(
-    metadata: LSTMetadata | None,
-    proc_name: str | None,
-    proc_kind: str | None,
+    metadata: object,
+    proc_name: object,
+    proc_kind: object,
 ) -> int | None:
     """Resolve a named procedure to a linked-binary address from sidecar metadata."""
+    cod_proc_kinds: object
+    known_kind: object
+    addr: object
+    label: object
     if metadata is None or not isinstance(proc_name, str) or not proc_name:
         return None
     wanted_name = proc_name.lstrip("_")
@@ -5888,16 +6195,16 @@ def _linked_proc_addr_from_metadata_8616(
     cod_proc_kinds = getattr(metadata, "cod_proc_kinds", None)
     if not isinstance(cod_proc_kinds, Mapping):
         cod_proc_kinds = {}
-    candidates: list[tuple[int, int, int, int]] = []
-    for addr, label in sorted(_visible_code_labels(metadata).items()):
+    candidates: list[tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong]] = []
+    for addr, label in sorted(tuple(_visible_code_labels(metadata).items())):
         if not isinstance(addr, int) or not isinstance(label, str):
             continue
-        if label.lstrip("_") != wanted_name:
+        if operator.ne(label.lstrip("_"), wanted_name):
             continue
         known_kind = cod_proc_kinds.get(addr)
         kind_score = 1
         if wanted_kind and isinstance(known_kind, str):
-            kind_score = 2 if known_kind.upper() == wanted_kind else 0
+            kind_score = 2 if operator.eq(known_kind.upper(), wanted_kind) else 0
         region_score = 1 if _lst_code_region(metadata, addr) is not None else 0
         candidates.append((kind_score, region_score, -addr, addr))
     if not candidates:
@@ -5906,24 +6213,27 @@ def _linked_proc_addr_from_metadata_8616(
     return candidates[0][3]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _MainProjectSetup8616:
     """Prepared project and sidecar state for the main CLI decompilation flow."""
 
     project: angr.Project
-    function_label: str | None
+    function_label: object
     cod_metadata: CODProcMetadata | None
     synthetic_globals: _SyntheticGlobals8616
     lst_metadata: LSTMetadata | None
-    prefer_fast_recovery: bool
-    proc_resolved_to_linked_binary: bool
+    prefer_fast_recovery: cython.bint
+    proc_resolved_to_linked_binary: cython.bint
 
 
+@cython.ccall
 def _prepare_main_project_8616(
     args: CliArguments,
     effective_signature_catalog: Path | None,
 ) -> _MainProjectSetup8616:
     """Build the angr project and optional sidecar metadata for a CLI run."""
+    linked_proc_addr: object
+    lst_metadata: object
     function_label = None
     cod_metadata = None
     synthetic_globals = None
@@ -5934,7 +6244,7 @@ def _prepare_main_project_8616(
     if args.proc is not None:
         binary_path = Path(args.binary)
         cod_path = _resolve_cod_path_8616(binary_path)
-        linked_proc_addr: int | None = None
+        linked_proc_addr = None
         sidecar_only_input = binary_path.suffix.lower() in {".cod", ".lst", ".map", ".dbg", ".pdb"}
         if not sidecar_only_input:
             (
@@ -6018,10 +6328,11 @@ def _prepare_main_project_8616(
     )
 
 
+@cython.ccall
 def _proc_linked_binary_lane_8616(
     args: CliArguments,
     binary_path: Path,
-    cod_path: Path | None,
+    cod_path: object,
     effective_signature_catalog: Path | None,
 ) -> tuple[
     angr.Project,
@@ -6029,9 +6340,12 @@ def _proc_linked_binary_lane_8616(
     CODProcMetadata | None,
     str | None,
     int | None,
-    bool,
+    cython.bint,
 ]:
     """Build the binary-backed project lane for ``--proc`` mode."""
+    linked_proc_addr: object
+    linked_region: object
+    lst_metadata: object
     cod_metadata = None
     function_label = None
     proc_resolved_to_linked_binary = False
@@ -6102,10 +6416,13 @@ def _proc_linked_binary_lane_8616(
 def _proc_cod_image_lane_8616(
     args: CliArguments,
     binary_path: Path,
-    cod_path: Path | None,
+    cod_path: object,
     lst_metadata: LSTMetadata | None,
 ) -> tuple[angr.Project, CODProcMetadata | None, _SyntheticGlobals8616, str | None]:
     """Build the COD-image project lane when the linked binary lookup failed."""
+    selected_entries: object
+    target_name: object
+    target_offset: object
     if cod_path is None:
         raise ValueError(f"--proc mode requires sibling COD listing: not found for {binary_path}")
     # This lane is only entered from the proc-mode branch where args.proc is set.
@@ -6135,7 +6452,7 @@ def _proc_cod_image_lane_8616(
     )
     record_synthetic_call_stubs_8616(
         project,
-        frozenset(args.base_addr + offset for offset in cod_image.call_target_offsets),
+        frozenset(args.base_addr + offset for offset in iter(cod_image.call_target_offsets)),
     )
     admit_declared_external_call_files_8616(
         project,
@@ -6166,33 +6483,36 @@ def _proc_cod_image_lane_8616(
     return project, cod_metadata, synthetic_globals, function_label
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _DirectAddrCliContext8616:
     """Inputs for the direct-address CLI decompilation branch."""
 
     args: CliArguments
     project: angr.Project
-    function_label: str | None
+    function_label: object
     cod_metadata: CODProcMetadata | None
     synthetic_globals: _SyntheticGlobals8616
     lst_metadata: LSTMetadata | None
-    prefer_fast_recovery: bool
-    proc_resolved_to_linked_binary: bool
-    low_memory_path: bool
-    interactive_stdout: bool
-    precise_sidecar_regions: bool
-    timeout_was_explicit: bool
+    prefer_fast_recovery: cython.bint
+    proc_resolved_to_linked_binary: cython.bint
+    low_memory_path: cython.bint
+    interactive_stdout: cython.bint
+    precise_sidecar_regions: cython.bint
+    timeout_was_explicit: cython.bint
     request_cache_inputs: DirectRequestCacheInputs8616
 
 
+@cython.ccall
 def _direct_request_cache_artifact_for_result_8616(
     context: _DirectAddrCliContext8616,
     result: FunctionWorkResult,
     *,
-    function_addr: int,
-    function_name: str,
+    function_addr: cython.longlong,
+    function_name: object,
 ) -> DirectRequestCacheArtifact8616 | None:
     """Project an accepted direct result into the persistent cache contract."""
+    evidence: object
+    failure_family_snapshot: object
     integrity = verify_function_work_result_payload_integrity_8616(result)
     if not _cacheable_direct_result_8616(result, integrity):
         return None
@@ -6259,15 +6579,17 @@ def _direct_request_cache_artifact_for_result_8616(
     )
 
 
+@cython.ccall
 def _store_direct_request_result_8616(
     context: _DirectAddrCliContext8616,
     lookup: DirectRequestCacheLookup8616,
     result: FunctionWorkResult,
     *,
-    function_addr: int,
-    function_name: str,
+    function_addr: cython.longlong,
+    function_name: object,
 ) -> None:
     """Store one direct result when its typed acceptance proof is complete."""
+    artifact: object
     artifact = _direct_request_cache_artifact_for_result_8616(
         context,
         result,
@@ -6278,15 +6600,16 @@ def _store_direct_request_result_8616(
         store_direct_request_cache_8616(lookup, artifact)
 
 
+@cython.ccall
 def _emit_direct_cache_hit_8616(
     context: _DirectAddrCliContext8616,
     result: FunctionWorkResult,
     *,
     function: _AngrFunction,
     function_cfg: object | None,
-    emit_function_header: bool,
+    emit_function_header: cython.bint,
     project_for_worker_result: object | None,
-) -> int:
+) -> cython.longlong:
     """Emit one already-validated direct result through the normal CLI contract."""
     args = context.args
     integrity = verify_function_work_result_payload_integrity_8616(result)
@@ -6331,7 +6654,7 @@ def _emit_direct_cache_hit_8616(
     return 0
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _DirectAddrCliRun8616:
     """Mutable run state for direct-address CLI orchestration."""
 
@@ -6386,7 +6709,7 @@ class _DirectAddrCliRun8616:
     # Bound once in part3 after serial hydration plus selected-target and
     # neighbor fast-probe facts have been recorded on the project registry;
     # a mapping copy isolates the payload from later registry mutations.
-    clean_worker_caller_return_evidence_by_addr: dict[int, CallerReturnUseEvidence8616] = field(
+    clean_worker_caller_return_evidence_by_addr: object = field(
         default_factory=dict
     )
     clinic_core_timeout: Any = None
@@ -6420,7 +6743,7 @@ class _DirectAddrCliRun8616:
     direct_item: Any = None
     direct_job_result: Any = None
     direct_scalar_interface: ScalarInterface8616 | None = None
-    direct_scalar_generation: str | None = None
+    direct_scalar_generation: object = None
     direct_nonoptimized_verdict: Any = None
     direct_payload: Any = None
     direct_project: Any = None
@@ -6563,8 +6886,10 @@ class _DirectAddrCliRun8616:
     using_rebased_direct_slice: Any = None
     v: Any = None
 
-    def run_8616(self) -> int:
+    @cython.ccall
+    def run_8616(self) -> cython.longlong:
         """Run the direct-address CLI phases and return the process exit code."""
+        _rc: object
         _rc = self.run_8616_part0_8616()
         if _rc is not None:
             return _rc
@@ -6585,7 +6910,8 @@ class _DirectAddrCliRun8616:
             return _rc
         return 0
 
-    def _emit_budget_exhausted_sidecar_asm_fallback_or_timeout(self, detail: str) -> None:
+    @cython.ccall
+    def _emit_budget_exhausted_sidecar_asm_fallback_or_timeout(self, detail: object) -> None:
         """Hoisted nested function (callable via `self`)."""
         if self.precise_sidecar_regions and self.budget_fallback_addr is not None and self.lst_metadata is not None:
             self.sidecar_region = _lst_code_region(self.lst_metadata, self.budget_fallback_addr)
@@ -6618,10 +6944,12 @@ class _DirectAddrCliRun8616:
                 sys.stderr.flush()
                 os._exit(4)
         _emit_timeout_and_exit(self.args.timeout, detail)
-    def _remaining_direct_addr_budget(self) -> int:
+    @cython.ccall
+    def _remaining_direct_addr_budget(self) -> cython.longlong:
         """Hoisted nested function (callable via `self`)."""
         return max(0, int(self.direct_addr_deadline - time.monotonic()))
-    def _enforce_direct_addr_budget_timeout(self, *, recovery_detail: str | None=None) -> None:
+    @cython.ccall
+    def _enforce_direct_addr_budget_timeout(self, *, recovery_detail: object=None) -> None:
         """Hoisted nested function (callable via `self`)."""
         if self._remaining_direct_addr_budget() > 0:
             return
@@ -6629,6 +6957,7 @@ class _DirectAddrCliRun8616:
         if self.detail is None:
             self.detail = "after exhausting direct-address recovery budget"
         self._emit_budget_exhausted_sidecar_asm_fallback_or_timeout(self.detail)
+    @cython.ccall
     def _direct_failure_snapshot(self, result: FunctionWorkResult) -> FailureFamilySnapshot:
         """Hoisted nested function (callable via `self`)."""
         """Build the complete direct-address diagnostic snapshot for one result."""
@@ -6644,7 +6973,8 @@ class _DirectAddrCliRun8616:
             ),
             artifact_path=f"{self.func.addr:#x}:{self.func.name}",
         )
-    def _direct_analysis_timeout_for_shape(self, base_timeout: int, block_count: int, byte_count: int) -> int:
+    @cython.ccall
+    def _direct_analysis_timeout_for_shape(self, base_timeout: cython.longlong, block_count: cython.longlong, byte_count: cython.longlong) -> cython.longlong:
         """Hoisted nested function (callable via `self`)."""
         self.boosted = _effective_decompile_timeout_8616(
             self.direct_project,
@@ -6666,15 +6996,15 @@ class _DirectAddrCliRun8616:
             context="direct shape timeout",
             explicit_timeout_floor=self.args.timeout if self.timeout_was_explicit else None,
         )
-    def _preserve_best_failure_candidate(self, result: FunctionWorkResult) -> str | None:
+    def _preserve_best_failure_candidate(self, result: FunctionWorkResult) -> object:
         """Hoisted nested function (callable via `self`)."""
         self.candidates = [
-            text for text in (result.payload, result.partial_payload) if isinstance(text, str) and text.strip()
+            text for text in iter((result.payload, result.partial_payload)) if isinstance(text, str) and text.strip()
         ]
         if not self.candidates:
             return None
 
-        def _rank(text: str) -> tuple[int, int]:
+        def _rank(text: object) -> tuple[cython.longlong, cython.longlong]:
             self.quality = assess_decompiled_c_text(text)
             self.quality_violations = len(self.quality.markers) if self.quality.reject_as_decompiled else 0
             return (
@@ -6683,7 +7013,8 @@ class _DirectAddrCliRun8616:
             )
 
         return cast(str | None, max(self.candidates, key=_rank))
-    def _preserve_acceptance_candidate_or_best_failure(self, acceptance: CAcceptanceResult8616, result: FunctionWorkResult) -> str | None:
+    @cython.ccall
+    def _preserve_acceptance_candidate_or_best_failure(self, acceptance: CAcceptanceResult8616, result: FunctionWorkResult) -> object:
         """Hoisted nested function (callable via `self`)."""
         if acceptance.status == "ok" and acceptance.blocker is None:
             self.checked_payload = acceptance.gcc_checked_payload
@@ -6692,6 +7023,7 @@ class _DirectAddrCliRun8616:
             if acceptance.validated_payload.strip():
                 return cast(str | None, acceptance.validated_payload)
         return self._preserve_best_failure_candidate(result)
+    @cython.ccall
     def _recover_target_function(self) -> _FunctionCfgPair8616:
         """Hoisted nested function (callable via `self`)."""
         self.exact_region_end = getattr(self.args, "exact_region_end", None)
@@ -6714,6 +7046,7 @@ class _DirectAddrCliRun8616:
                 exact_region=self.exact_region,
             ),
         )
+    @cython.ccall
     def direct_decompile_job(self) -> _DirectDecompileJobResult8616:
         """Hoisted nested function (callable via `self`)."""
         """Run one direct function through the selected bounded Clinic policy."""
@@ -6780,7 +7113,7 @@ class _DirectAddrCliRun8616:
         if isinstance(self.func_info, dict):
             self.func_info_tv = self.func_info.get("x86_16_tail_validation")
         self.merged_statuses = (
-            {k: v.get("status") if isinstance(v, dict) else type(v).__name__ for k, v in self.snapshot.items()}
+            {k: v.get("status") if isinstance(v, dict) else type(v).__name__ for k, v in builtins.iter(self.snapshot.items())}
             if isinstance(self.snapshot, dict)
             else "N/A"
         )
@@ -6805,7 +7138,7 @@ class _DirectAddrCliRun8616:
                 _cache_source_digest(DECOMPILATION_CACHE_SOURCE_FILES),
             ),
         )
-    def _candidate_text_for_rank(self, result: FunctionWorkResult) -> str:
+    def _candidate_text_for_rank(self, result: FunctionWorkResult) -> object:
         """Hoisted nested function (callable via `self`)."""
         self.payload_text = result.payload if isinstance(result.payload, str) and result.payload.strip() else ""
         self.partial_text = (
@@ -6820,7 +7153,7 @@ class _DirectAddrCliRun8616:
         if not self.payload_text and not self.partial_text:
             return ""
 
-        def _text_rank(text: str) -> tuple[int, int, int]:
+        def _text_rank(text: object) -> tuple[cython.longlong, cython.longlong, cython.longlong]:
             self.quality = assess_decompiled_c_text(text)
             self.quality_violations = len(self.quality.markers) if self.quality.reject_as_decompiled else 0
             self.present_calls = _non_probe_call_count_for_fallback_rank_8616(text)
@@ -6831,7 +7164,8 @@ class _DirectAddrCliRun8616:
             )
 
         return cast(str, self.payload_text if _text_rank(self.payload_text) >= _text_rank(self.partial_text) else self.partial_text)
-    def _candidate_rank(self, result: FunctionWorkResult) -> tuple[int, int, int]:
+    @cython.ccall
+    def _candidate_rank(self, result: FunctionWorkResult) -> tuple[cython.longlong, cython.longlong, cython.longlong]:
         """Hoisted nested function (callable via `self`)."""
         self.text = self._candidate_text_for_rank(result)
         self.quality = assess_decompiled_c_text(self.text)
@@ -6842,18 +7176,22 @@ class _DirectAddrCliRun8616:
             self.present_calls,
             len(self.text),
         )
-    def _consume_heavy_fallback_budget(self) -> bool:
+    @cython.ccall
+    def _consume_heavy_fallback_budget(self) -> cython.bint:
         """Hoisted nested function (callable via `self`)."""
         if self.heavy_fallback_budget <= 0:
             return False
         self.heavy_fallback_budget -= 1
         return True
-    def _current_direct_partial_payload(self) -> str | None:
+    @cython.ccall
+    def _current_direct_partial_payload(self) -> object:
         """Hoisted nested function (callable via `self`)."""
         self.candidate = self.direct_result.partial_payload
         return self.candidate if isinstance(self.candidate, str) and self.candidate.strip() else None
-    def _accept_direct_fallback_payload(self, payload_text: str, *, tail_validation_snapshot: dict[str, object] | None=None) -> str | None:
+    @cython.ccall
+    def _accept_direct_fallback_payload(self, payload_text: object, *, tail_validation_snapshot: object=None) -> object:
         """Hoisted nested function (callable via `self`)."""
+        _attr_name_lp8616: object
         self.payload_for_acceptance = payload_text
         self.snapshot = dict(tail_validation_snapshot) if isinstance(tail_validation_snapshot, dict) else None
         for _attr_name_lp8616 in (
@@ -6893,6 +7231,7 @@ class _DirectAddrCliRun8616:
             flush=True,
         )
         return None
+    @cython.ccall
     def _phase_direct_header_8616(self) -> int | None:
         """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
         if (
@@ -6927,9 +7266,9 @@ class _DirectAddrCliRun8616:
                 else:
                     self.expected_runtime_header = render_c_runtime_header_8616(self.args.c_target)
                 if declared_consumption_ok and (
-                    self.artifact.arch_name == self.project.arch.name
-                    and self.artifact.entry_point == self.project.entry
-                    and self.artifact.runtime_header == self.expected_runtime_header
+                    operator.eq(self.artifact.arch_name, self.project.arch.name)
+                    and operator.eq(self.artifact.entry_point, self.project.entry)
+                    and operator.eq(self.artifact.runtime_header, self.expected_runtime_header)
                 ):
                     self.cached_function = SimpleNamespace(
                         addr=self.artifact.function_addr,
@@ -6968,13 +7307,16 @@ class _DirectAddrCliRun8616:
                 print("[dbg] direct request cache refused: runtime_identity", file=sys.stderr, flush=True)
         return None
 
+    @cython.ccall
     def _phase_direct_cfg_recovery_8616(self) -> int | None:
         """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
+        _rc: object
         _rc = self._phase_direct_cfg_recovery_8616_part0_8616()
         if _rc is not None:
             return _rc
         return None
 
+    @cython.ccall
     def _phase_direct_probe_setup_8616(self) -> int | None:
         """Run the optional precise-sidecar refinement; return an exit code to abort.
 
@@ -6994,7 +7336,7 @@ class _DirectAddrCliRun8616:
                 if (
                     self.sidecar_region is not None
                     and isinstance(self.sidecar_region[0], int)
-                    and int(self.sidecar_region[0]) == int(self.direct_addr)
+                    and operator.eq(int(self.sidecar_region[0]), int(self.direct_addr))
                     and (self.block_count <= 3 or self.byte_count <= 24)
                 ):
                     self.sidecar_addr = self.sidecar_region[0]
@@ -7015,6 +7357,7 @@ class _DirectAddrCliRun8616:
                 pass
         return None
 
+    @cython.ccall
     def _phase_direct_catalog_8616(self) -> int | None:
         """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
         if self.direct_addr is not None and self.project.arch.name == "86_16":
@@ -7040,8 +7383,10 @@ class _DirectAddrCliRun8616:
                     self.cfg, self.func = self.ranked_cfg, self.ranked_func
         return None
 
+    @cython.ccall
     def _phase_direct_fast_probe_8616(self) -> int | None:
         """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
+        _call_target_lp8616: object
         if self.project.arch.name == "86_16":
             attach_direct_target_argument_evidence_context_8616(
                 self.project,
@@ -7069,6 +7414,7 @@ class _DirectAddrCliRun8616:
                         binary_path=self.args.binary,
                     )
         return None
+    @cython.ccall
     def _phase_direct_helper_model_8616(self) -> int | None:
         """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
         if isinstance(self.known_helper_model, str):
@@ -7118,6 +7464,7 @@ class _DirectAddrCliRun8616:
             return 0
         return None
 
+    @cython.ccall
     def _phase_direct_cache_failure_8616(self) -> int | None:
         """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
         if self.direct_cache_result is not None and self.direct_cache_result.failure_family_snapshot is not None:
@@ -7145,11 +7492,12 @@ class _DirectAddrCliRun8616:
             )
         return None
 
+    @cython.ccall
     def _phase_direct_known_cache_8616(self) -> int | None:
         """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
         if (
             self.canonical_direct_addr is not None
-            and self.canonical_direct_addr.requested_addr != self.canonical_direct_addr.canonical_addr
+            and operator.ne(self.canonical_direct_addr.requested_addr, self.canonical_direct_addr.canonical_addr)
             and not self.args.ignore_local_sidecar_hints
         ):
             assert self.lst_metadata is not None
@@ -7166,16 +7514,19 @@ class _DirectAddrCliRun8616:
                 return cast(int | None, self.cached_clean_status)
         return None
 
+    @cython.ccall
     def _phase_direct_probe_recovery_8616(self) -> int | None:
         """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
+        _rc: object
         _rc = self._phase_direct_probe_recovery_8616_part0_8616()
         if _rc is not None:
             return _rc
         return None
 
+    @cython.ccall
     def _phase_direct_status_sync_8616(self) -> int | None:
         """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
-        if self.direct_status != self.direct_result.status or self.direct_blocker is not None:
+        if operator.ne(self.direct_status, self.direct_result.status) or self.direct_blocker is not None:
             self.preserved_candidate = self._preserve_acceptance_candidate_or_best_failure(self.direct_acceptance, self.direct_result)
             self.direct_payload = self.direct_acceptance.gcc_checked_payload
         else:
@@ -7187,6 +7538,7 @@ class _DirectAddrCliRun8616:
             self.preserved_candidate = self.direct_result.partial_payload
         return None
 
+    @cython.ccall
     def _phase_direct_empty_lanes_8616(self) -> int | None:
         """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
         if (
@@ -7214,11 +7566,12 @@ class _DirectAddrCliRun8616:
                 )
         return None
 
+    @cython.ccall
     def _phase_direct_light_lanes_8616(self) -> int | None:
         """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
         if (
             self.canonical_direct_addr is not None
-            and self.canonical_direct_addr.requested_addr != self.canonical_direct_addr.canonical_addr
+            and operator.ne(self.canonical_direct_addr.requested_addr, self.canonical_direct_addr.canonical_addr)
             and not self.args.ignore_local_sidecar_hints
             and _work_item_status_8616(self.direct_result.status) is WorkItemStatus.VALIDATION_FAILED
         ):
@@ -7233,6 +7586,7 @@ class _DirectAddrCliRun8616:
             )
         return None
 
+    @cython.ccall
     def _phase_direct_heavy_lanes_8616(self) -> int | None:
         """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
         if self.direct_result.status != "ok":
@@ -7281,6 +7635,7 @@ class _DirectAddrCliRun8616:
                     )
         return None
 
+    @cython.ccall
     def _phase_direct_failure_emit_8616(self) -> int | None:
         """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
         if (
@@ -7342,6 +7697,7 @@ class _DirectAddrCliRun8616:
                     )
         return None
 
+    @cython.ccall
     def _phase_direct_serial_gate_8616(self) -> int | None:
         """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
         if self.direct_result.status == "timeout":
@@ -7358,13 +7714,16 @@ class _DirectAddrCliRun8616:
             return 3
         return None
 
+    @cython.ccall
     def _phase_direct_emit_batch_8616(self) -> int | None:
         """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
+        _rc: object
         _rc = self._phase_direct_emit_batch_8616_part0_8616()
         if _rc is not None:
             return _rc
         return None
 
+    @cython.ccall
     def _phase_direct_integrity_8616(self) -> int | None:
         """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
         if self.integrity.verdict in {
@@ -7378,6 +7737,7 @@ class _DirectAddrCliRun8616:
             self.integrity = verify_function_work_result_payload_integrity_8616(self.direct_result)
         return None
 
+    @cython.ccall
     def _phase_direct_cache_store_8616(self) -> int | None:
         """Run an extracted `_run_direct_addr_cli_8616` phase; return an exit code to abort."""
         if self.direct_cache_key is not None and self.direct_result.status == "ok":
@@ -7405,8 +7765,10 @@ class _DirectAddrCliRun8616:
         return None
 
 
+    @cython.ccall
     def run_8616_part0_8616(self) -> int | None:
         """Run an extracted sub-phase; return an exit code to abort."""
+        _rc: object
         """Run the direct-address CLI branch after project and sidecar setup."""
         self.args = self.context.args
         self.direct_addr = self.args.addr
@@ -7437,6 +7799,7 @@ class _DirectAddrCliRun8616:
         self.interactive_stdout = self.context.interactive_stdout
         self.precise_sidecar_regions = self.context.precise_sidecar_regions
         return None
+    @cython.ccall
     def run_8616_part1_8616(self) -> int | None:
         """Run an extracted sub-phase; return an exit code to abort."""
         self.timeout_was_explicit = self.context.timeout_was_explicit
@@ -7465,7 +7828,7 @@ class _DirectAddrCliRun8616:
             explicit_timeout=bool(self.timeout_was_explicit),
         )
         self.budget_fallback_addr: int | None = None
-        self.budget_fallback_name: str | None = None
+        self.budget_fallback_name: object = None
         self.canonical_direct_addr = _canonicalize_direct_addr_from_sidecar_padding_8616(
             self.project,
             self.lst_metadata,
@@ -7473,8 +7836,10 @@ class _DirectAddrCliRun8616:
             function_label=self.function_label,
         )
         return None
+    @cython.ccall
     def run_8616_part2_8616(self) -> int | None:
         """Run an extracted sub-phase; return an exit code to abort."""
+        _rc: object
         if self.canonical_direct_addr is not None:
             print(
                 "/* direct address canonicalized from "
@@ -7509,8 +7874,10 @@ class _DirectAddrCliRun8616:
             if self.code_name is not None:
                 self.func.name = self.code_name
         return None
+    @cython.ccall
     def run_8616_part3_8616(self) -> int | None:
         """Run an extracted sub-phase; return an exit code to abort."""
+        _rc: object
         self.direct_project = getattr(self.func, "project", self.project)
         _rc = self._phase_direct_fast_probe_8616()
         if _rc is not None:
@@ -7543,6 +7910,7 @@ class _DirectAddrCliRun8616:
         if _rc is not None:
             return _rc
         return None
+    @cython.ccall
     def _snapshot_clean_worker_caller_return_evidence_8616(self) -> None:
         """Bind the final caller-return evidence snapshot for clean-worker lanes.
 
@@ -7557,8 +7925,10 @@ class _DirectAddrCliRun8616:
             caller_return_use_evidence_by_addr_8616(self.project)
         )
 
+    @cython.ccall
     def run_8616_part4_8616(self) -> int | None:
         """Run an extracted sub-phase; return an exit code to abort."""
+        _rc: object
         self.direct_cache_item = FunctionWorkItem(index=1, function_cfg=self.cfg, function=self.func)
         self.direct_cache_result, self.direct_cache_debug, self.direct_cache_key, self._, self._ = _function_work_cache_lookup(
             self.direct_cache_item,
@@ -7578,12 +7948,12 @@ class _DirectAddrCliRun8616:
         if _rc is not None:
             return _rc
         print("/* decompiling... */", flush=True)
-        self.direct_tail_validation_snapshot: dict[str, object] | None = None
+        self.direct_tail_validation_snapshot: object = None
         self.direct_segment_program_evidence: SegmentProgramFunctionEvidence8616 | None = None
         self.direct_failure_family_state = FailureFamilyState()
         self.direct_sidecar_verdict = "not_attempted"
         self.direct_nonoptimized_verdict = "not_attempted"
-        self.direct_timeout_stage: str | None = None
+        self.direct_timeout_stage: object = None
         self.direct_terminal_failure: TerminalDecompileFailure8616 | None = None
         self.direct_debug_output = ""
         self._block_count, self._byte_count = _function_complexity(self.func)
@@ -7592,8 +7962,10 @@ class _DirectAddrCliRun8616:
         if _rc is not None:
             return _rc
         return None
+    @cython.ccall
     def run_8616_part5_8616(self) -> int | None:
         """Run an extracted sub-phase; return an exit code to abort."""
+        _rc: object
         _rc = self.run_8616_part5_8616_b0()
         if _rc is not None:
             return _rc
@@ -7604,8 +7976,10 @@ class _DirectAddrCliRun8616:
         if _rc is not None:
             return _rc
         return None
+    @cython.ccall
     def _phase_direct_cfg_recovery_8616_part0_8616(self) -> int | None:
         """Run an extracted sub-phase; return an exit code to abort."""
+        _rc: object
         try:
 
 
@@ -7628,8 +8002,10 @@ class _DirectAddrCliRun8616:
             if _rc is not None:
                 return _rc
         return None
+    @cython.ccall
     def _phase_direct_probe_recovery_8616_part0_8616(self) -> int | None:
         """Run an extracted sub-phase; return an exit code to abort."""
+        _rc: object
         try:
 
 
@@ -7658,8 +8034,10 @@ class _DirectAddrCliRun8616:
                 else None
             )
         return None
+    @cython.ccall
     def _phase_direct_emit_batch_8616_part0_8616(self) -> int | None:
         """Run an extracted sub-phase; return an exit code to abort."""
+        _rc: object
         if self.direct_result.status != "ok":
 
 
@@ -7675,8 +8053,10 @@ class _DirectAddrCliRun8616:
         return None
 
 
+    @cython.ccall
     def run_8616_part5_8616_b0(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
+        _rc: object
         self.direct_item = FunctionWorkItem(index=1, function_cfg=self.cfg, function=self.func)
         self.direct_result = FunctionWorkResult(
             index=1,
@@ -7698,7 +8078,7 @@ class _DirectAddrCliRun8616:
             byte_count=self._byte_count,
             segment_program_function_evidence=self.direct_segment_program_evidence,
         )
-        if self.direct_result.status == WorkItemStatus.OK.value and not _declared_call_dependency_retained_8616(
+        if operator.eq(self.direct_result.status, WorkItemStatus.OK.value) and not _declared_call_dependency_retained_8616(
             self.direct_project,
             self.func,
             self.direct_result.segment_program_function_evidence,
@@ -7742,9 +8122,11 @@ class _DirectAddrCliRun8616:
         if self.direct_status == "validation_failed" and isinstance(self.direct_result.tail_validation, dict):
             typing.cast(typing.Any, self.direct_project)._inertia_forced_tail_validation_snapshot = dict(self.direct_result.tail_validation)
         return None
+    @cython.ccall
     def run_8616_part5_8616_b1(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
-        if self.direct_result.status == WorkItemStatus.CONDITIONAL.value:
+        _rc: object
+        if operator.eq(self.direct_result.status, WorkItemStatus.CONDITIONAL.value):
             if _complete_serial_clean_worker_result_8616(self.direct_result, project=self.direct_project):
                 return 0
             return _emit_conditional_result_8616(self.direct_result, args=self.args)
@@ -7755,8 +8137,10 @@ class _DirectAddrCliRun8616:
         if _rc is not None:
             return _rc
         return None
+    @cython.ccall
     def run_8616_part5_8616_b2(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
+        _rc: object
         _rc = self._phase_direct_serial_gate_8616()
         if _rc is not None:
             return _rc
@@ -7798,11 +8182,13 @@ class _DirectAddrCliRun8616:
             return _rc
         _write_serial_clean_worker_result_8616(self.direct_result, project=self.direct_project)
         return 0
+    @cython.ccall
     def _phase_direct_cfg_recovery_8616_part0_8616_e00(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
         self._enforce_direct_addr_budget_timeout()
         self.sidecar_region = _lst_code_region(self.lst_metadata, self.direct_addr) if self.lst_metadata is not None else None
         return None
+    @cython.ccall
     def _phase_direct_cfg_recovery_8616_part0_8616_e01(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
         if self.precise_sidecar_regions and self.sidecar_region is not None:
@@ -7839,7 +8225,7 @@ class _DirectAddrCliRun8616:
                 )
                 return 0
             self._enforce_direct_addr_budget_timeout()
-            self.nonopt_result: NonOptimizedSliceOutcome | str | None = _try_decompile_non_optimized_slice(
+            self.nonopt_result: object = _try_decompile_non_optimized_slice(
                 self.project,
                 self.sidecar_region[0],
                 self.code_name,
@@ -7919,6 +8305,7 @@ class _DirectAddrCliRun8616:
             print(_format_asm_range(self.project, self.sidecar_region[0], self.sidecar_region[1]))
             return 4
         return None
+    @cython.ccall
     def _phase_direct_cfg_recovery_8616_part0_8616_e02(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
         self.nonopt_result = None
@@ -7965,8 +8352,10 @@ class _DirectAddrCliRun8616:
             name=self.fallback_function.name,
         )
         return None
+    @cython.ccall
     def _phase_direct_cfg_recovery_8616_part0_8616_e03(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
+        __diag_line_lp8616: object
         if self.string_c is not None:
             print("/* Function recovery timed out; emitted generic string-intrinsic fallback. */")
             print(f"/* binary: {self.args.binary} */")
@@ -8020,11 +8409,13 @@ class _DirectAddrCliRun8616:
                 print(__diag_line_lp8616)
         _emit_timeout_and_exit(self.args.timeout, self.recovery_detail)
         return None
+    @cython.ccall
     def _phase_direct_cfg_recovery_8616_part0_8616_e10(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
         self._enforce_direct_addr_budget_timeout()
         self.sidecar_region = _lst_code_region(self.lst_metadata, self.direct_addr) if self.lst_metadata is not None else None
         return None
+    @cython.ccall
     def _phase_direct_cfg_recovery_8616_part0_8616_e11(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
         if self.precise_sidecar_regions and self.sidecar_region is not None:
@@ -8141,6 +8532,7 @@ class _DirectAddrCliRun8616:
             print(_format_asm_range(self.project, self.sidecar_region[0], self.sidecar_region[1]))
             return 4
         return None
+    @cython.ccall
     def _phase_direct_cfg_recovery_8616_part0_8616_e12(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
         self.nonopt_result = None
@@ -8188,8 +8580,10 @@ class _DirectAddrCliRun8616:
             name=self.fallback_function.name,
         )
         return None
+    @cython.ccall
     def _phase_direct_cfg_recovery_8616_part0_8616_e13(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
+        __diag_line_lp8616: object
         if self.string_c is not None:
             print("/* Function recovery timed out; emitted generic string-intrinsic fallback. */")
             print(f"/* binary: {self.args.binary} */")
@@ -8243,6 +8637,7 @@ class _DirectAddrCliRun8616:
                 print(__diag_line_lp8616)
         _emit_timeout_and_exit(self.args.timeout, self.recovery_detail)
         return None
+    @cython.ccall
     def _phase_direct_probe_recovery_8616_part0_8616_b0(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
         self._direct_blocks, self._direct_bytes = _function_complexity(self.func)
@@ -8293,8 +8688,10 @@ class _DirectAddrCliRun8616:
             tail_validation_enabled=_tail_validation_runtime_enabled(self.direct_project),
         )
         return None
+    @cython.ccall
     def _phase_direct_probe_recovery_8616_part0_8616_b1(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
+        _extra_lp8616: object
         with span(
             "direct.decompile_job",
             addr=hex(getattr(self.func, "addr", 0)),
@@ -8326,7 +8723,7 @@ class _DirectAddrCliRun8616:
                 elif isinstance(_extra_lp8616, SegmentProgramFunctionEvidence8616):
                     self.direct_segment_program_evidence = _extra_lp8616
                 elif isinstance(_extra_lp8616, tuple) and len(_extra_lp8616) == 2 and isinstance(_extra_lp8616[0], ScalarInterface8616):
-                    if _extra_lp8616[1] != _cache_source_digest(DECOMPILATION_CACHE_SOURCE_FILES):
+                    if operator.ne(_extra_lp8616[1], _cache_source_digest(DECOMPILATION_CACHE_SOURCE_FILES)):
                         raise ValueError("stale direct-worker scalar interface generation")
                     self.direct_scalar_interface = _extra_lp8616[0]
                     self.direct_scalar_generation = _extra_lp8616[1]
@@ -8338,8 +8735,10 @@ class _DirectAddrCliRun8616:
                 elif isinstance(_extra_lp8616, str):
                     self.direct_debug_output = _extra_lp8616
         return None
+    @cython.ccall
     def _phase_direct_emit_batch_8616_part0_8616_b0(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
+        _rc: object
         if self.direct_result.status == "validation_failed":
             _rc = self._phase_direct_emit_batch_8616_part0_8616_b0_zb0()
             if _rc is not None:
@@ -8348,6 +8747,7 @@ class _DirectAddrCliRun8616:
             if _rc is not None:
                 return _rc
         return None
+    @cython.ccall
     def _phase_direct_emit_batch_8616_part0_8616_b1(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
         self._enforce_direct_addr_budget_timeout(recovery_detail="after exhausting direct-address decompilation budget")
@@ -8360,7 +8760,7 @@ class _DirectAddrCliRun8616:
         )
         self.slice_result = None
         self.sidecar_closed_nonopt = False
-        self.known_nonopt_result: NonOptimizedSliceOutcome | str | None = None
+        self.known_nonopt_result: object = None
         self.reserve_budget_for_rebased_sidecar = (
             self.using_rebased_direct_slice and self.precise_sidecar_regions and self.direct_result.status == "validation_failed"
         )
@@ -8390,6 +8790,7 @@ class _DirectAddrCliRun8616:
             self.direct_failure_family_state.repeat_detected and not self.direct_failure_family_state.new_proof_seen
         )
         return None
+    @cython.ccall
     def _phase_direct_emit_batch_8616_part0_8616_b2(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
         if self.direct_result.status == "empty":
@@ -8434,8 +8835,10 @@ class _DirectAddrCliRun8616:
             # recoverable clinic/core failure class for helper routines.
             self.exact_retry_blocked = False
         return None
+    @cython.ccall
     def _phase_direct_emit_batch_8616_part0_8616_b3(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
+        _rc: object
         sidecar_retry_permitted = (
             not self.fast_direct_probe
             and self.direct_result.status != "ok"
@@ -8460,6 +8863,7 @@ class _DirectAddrCliRun8616:
             if _rc is not None:
                 return _rc
         return None
+    @cython.ccall
     def _phase_direct_emit_batch_8616_part0_8616_b4(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
         self.allow_known_nonopt = (not self.exact_retry_blocked) or (self.direct_result.status in {"timeout", "validation_failed"})
@@ -8500,6 +8904,7 @@ class _DirectAddrCliRun8616:
                     )
         self.known_nonopt_c = _non_optimized_slice_rendered(self.known_nonopt_result)
         return None
+    @cython.ccall
     def _phase_direct_emit_batch_8616_part0_8616_b5(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
         if self.known_nonopt_c is not None:
@@ -8553,6 +8958,7 @@ class _DirectAddrCliRun8616:
                 )
         self.generic_nonopt_c = _non_optimized_slice_rendered(self.generic_nonopt_result)
         return None
+    @cython.ccall
     def _phase_direct_emit_batch_8616_part0_8616_b6(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
         if self.generic_nonopt_c is not None:
@@ -8591,6 +8997,7 @@ class _DirectAddrCliRun8616:
             # family repeats so richer bounded slices can be considered.
             self.exact_retry_blocked = False
         return None
+    @cython.ccall
     def _phase_direct_emit_batch_8616_part0_8616_b7(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
         if not self.fast_direct_probe and self.precise_sidecar_regions:  # noqa: SIM102
@@ -8650,6 +9057,7 @@ class _DirectAddrCliRun8616:
                     return 0
         self.trivial_c = _try_emit_trivial_sidecar_c(self.project, self.lst_metadata, self.direct_display_addr, self.func.name)
         return None
+    @cython.ccall
     def _phase_direct_emit_batch_8616_part0_8616_b8(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
         if self.trivial_c is not None:
@@ -8686,6 +9094,7 @@ class _DirectAddrCliRun8616:
             )
         self.nonopt_c = _non_optimized_slice_rendered(self.nonopt_result)
         return None
+    @cython.ccall
     def _phase_direct_emit_batch_8616_part0_8616_b9(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
         if self.nonopt_c is not None:
@@ -8717,8 +9126,10 @@ class _DirectAddrCliRun8616:
                 return 0
         self.current_partial_payload = self._current_direct_partial_payload()
         return None
+    @cython.ccall
     def _phase_direct_emit_batch_8616_part0_8616_b10(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
+        _rc: object
         _rc = self._phase_direct_emit_batch_8616_part0_8616_b10_s0()
         if _rc is not None:
             return _rc
@@ -8726,8 +9137,10 @@ class _DirectAddrCliRun8616:
         if _rc is not None:
             return _rc
         return None
+    @cython.ccall
     def _phase_direct_emit_batch_8616_part0_8616_b11(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
+        __diag_line_lp8616: object
         if self.string_c is not None:
             _emit_tail_validation_for_function_run_or_uncollected(
                 self.direct_project,
@@ -8789,6 +9202,7 @@ class _DirectAddrCliRun8616:
         print("\n/* == lift break probe == */")
         print(_probe_lift_break(self.project, self.func.addr))
         return None
+    @cython.ccall
     def _phase_direct_emit_batch_8616_part0_8616_b12(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
         print("\n/* == asm fallback == */")
@@ -8796,6 +9210,7 @@ class _DirectAddrCliRun8616:
         return 6 if self.status == "error" else 4
 
 
+    @cython.ccall
     def _phase_direct_cfg_recovery_8616_part0_8616_zb0(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
         self.direct_recovery_timeout = (
@@ -8804,6 +9219,7 @@ class _DirectAddrCliRun8616:
             else _default_recovery_timeout(self.args.timeout, explicit_timeout=self.timeout_was_explicit)
         )
         return None
+    @cython.ccall
     def _phase_direct_cfg_recovery_8616_part0_8616_zb1(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
         self.direct_recovery_timeout = max(1, min(self.direct_recovery_timeout, self._remaining_direct_addr_budget() or 1))
@@ -8814,8 +9230,10 @@ class _DirectAddrCliRun8616:
             prefer_process_alarm=True,
         )
         return None
+    @cython.ccall
     def _phase_direct_cfg_recovery_8616_part0_8616_ze00(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
+        _rc: object
         _rc = self._phase_direct_cfg_recovery_8616_part0_8616_e00()
         if _rc is not None:
             return _rc
@@ -8823,8 +9241,10 @@ class _DirectAddrCliRun8616:
         if _rc is not None:
             return _rc
         return None
+    @cython.ccall
     def _phase_direct_cfg_recovery_8616_part0_8616_ze01(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
+        _rc: object
         _rc = self._phase_direct_cfg_recovery_8616_part0_8616_e02()
         if _rc is not None:
             return _rc
@@ -8832,8 +9252,10 @@ class _DirectAddrCliRun8616:
         if _rc is not None:
             return _rc
         return None
+    @cython.ccall
     def _phase_direct_cfg_recovery_8616_part0_8616_ze10(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
+        _rc: object
         _rc = self._phase_direct_cfg_recovery_8616_part0_8616_e10()
         if _rc is not None:
             return _rc
@@ -8841,8 +9263,10 @@ class _DirectAddrCliRun8616:
         if _rc is not None:
             return _rc
         return None
+    @cython.ccall
     def _phase_direct_cfg_recovery_8616_part0_8616_ze11(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
+        _rc: object
         _rc = self._phase_direct_cfg_recovery_8616_part0_8616_e12()
         if _rc is not None:
             return _rc
@@ -8850,6 +9274,7 @@ class _DirectAddrCliRun8616:
         if _rc is not None:
             return _rc
         return None
+    @cython.ccall
     def _phase_direct_cfg_recovery_8616_part0_8616_ze20(self, ex: BaseException) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
         self.recovery_detail = _function_recovery_detail(getattr(self.project, "_inertia_decompiler_stage", None))
@@ -8864,6 +9289,7 @@ class _DirectAddrCliRun8616:
         print("\n/* == lift break probe == */")
         print(_probe_lift_break(self.project, self.direct_addr))
         return None
+    @cython.ccall
     def _phase_direct_cfg_recovery_8616_part0_8616_ze21(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
         print("\n/* == first block asm == */")
@@ -8872,8 +9298,10 @@ class _DirectAddrCliRun8616:
         self.start, self.end = _infer_linear_disassembly_window(self.project, self.direct_addr)
         print(_format_asm_range(self.project, self.start, self.end))
         return 5
+    @cython.ccall
     def _phase_direct_emit_batch_8616_part0_8616_zb0(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
+        _rc: object
         _rc = self._phase_direct_emit_batch_8616_part0_8616_b0()
         if _rc is not None:
             return _rc
@@ -8894,8 +9322,10 @@ class _DirectAddrCliRun8616:
         if _rc is not None:
             return _rc
         return None
+    @cython.ccall
     def _phase_direct_emit_batch_8616_part0_8616_zb1(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
+        _rc: object
         _rc = self._phase_direct_emit_batch_8616_part0_8616_b6()
         if _rc is not None:
             return _rc
@@ -8918,8 +9348,10 @@ class _DirectAddrCliRun8616:
         if _rc is not None:
             return _rc
         return None
+    @cython.ccall
     def run_8616_part5_8616_b1_s0(self) -> int | None:
         """Run an extracted sub-phase; return an exit code to abort."""
+        _rc: object
         if self.direct_result.status in {"empty", "validation_failed"}:
             self.evidence_payload, self.evidence_snapshot = _recover_binary_evidence_c_8616(self.direct_project, self.func)
             if isinstance(self.evidence_payload, str) and self.evidence_payload.strip() and isinstance(self.evidence_snapshot, dict):
@@ -8958,8 +9390,10 @@ class _DirectAddrCliRun8616:
         self.direct_timeout_payload = self.direct_result.payload
         self._direct_blocks_for_timeout_guard, self._direct_bytes_for_timeout_guard = _function_complexity(self.func)
         return None
+    @cython.ccall
     def run_8616_part5_8616_b1_s1(self) -> int | None:
         """Run an extracted sub-phase; return an exit code to abort."""
+        _rc: object
         self.clinic_core_timeout = isinstance(self.direct_timeout_payload, str) and (
             "core:clinic:" in self.direct_timeout_payload
             or "timed out after" in self.direct_timeout_payload.lower()
@@ -8984,13 +9418,16 @@ class _DirectAddrCliRun8616:
             _print_stop_on_first_failure_8616(self.func, self.direct_result)
             return 6
         return None
+    @cython.ccall
     def _phase_direct_emit_batch_8616_part0_8616_b0_zb0(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
         self.best_direct_candidate = self.direct_result
         self.best_direct_rank = self._candidate_rank(self.direct_result)
         return None
+    @cython.ccall
     def _phase_direct_emit_batch_8616_part0_8616_b0_zb1(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
+        _lv8616: object
         self.retry_count = _direct_addr_validation_retry_count_8616(
             timeout_was_explicit=self.timeout_was_explicit,
             args_timeout=self.args.timeout,
@@ -9030,7 +9467,7 @@ class _DirectAddrCliRun8616:
                 )
                 self.retry_checked_status = self.retry_acceptance.status
                 self.retry_blocker = self.retry_acceptance.blocker
-                if self.retry_checked_status != self.retry_result.status or self.retry_blocker is not None:
+                if operator.ne(self.retry_checked_status, self.retry_result.status) or self.retry_blocker is not None:
                     self.retry_preserved_candidate = self._preserve_acceptance_candidate_or_best_failure(
                         self.retry_acceptance,
                         self.retry_result,
@@ -9066,6 +9503,7 @@ class _DirectAddrCliRun8616:
             if self.best_direct_rank > self.current_rank:
                 self.direct_result = self.best_direct_candidate
         return None
+    @cython.ccall
     def _phase_direct_emit_batch_8616_part0_8616_b3_zb0(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
         self.sidecar_region = _lst_code_region(self.lst_metadata, self.direct_display_addr)
@@ -9170,6 +9608,7 @@ class _DirectAddrCliRun8616:
             except (_AnalysisTimeout, Exception):
                 self.direct_sidecar_verdict = "error"
         return None
+    @cython.ccall
     def _phase_direct_emit_batch_8616_part0_8616_b3_zb1(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
         self._early_slice = _try_decompile_sidecar_slice(
@@ -9205,6 +9644,7 @@ class _DirectAddrCliRun8616:
                 )
                 return 0
         return None
+    @cython.ccall
     def _phase_direct_emit_batch_8616_part0_8616_b10_s0(self) -> int | None:
         """Run an extracted sub-phase; return an exit code to abort."""
         if self.current_partial_payload is not None:
@@ -9248,6 +9688,7 @@ class _DirectAddrCliRun8616:
         if self.lst_metadata is not None and not self.using_rebased_direct_slice:
             self.sidecar_region = _lst_code_region(self.lst_metadata, self.direct_display_addr)
         return None
+    @cython.ccall
     def _phase_direct_emit_batch_8616_part0_8616_b10_s1(self) -> int | None:
         """Run an extracted sub-phase; return an exit code to abort."""
         self.linear_window = (
@@ -9269,8 +9710,10 @@ class _DirectAddrCliRun8616:
         return None
 
 
+    @cython.ccall
     def _phase_direct_cfg_recovery_8616_part0_8616_zh0(self) -> int | None:
         """Run an extracted handler sub-phase; return an exit code to abort."""
+        _rc: object
         _rc = self._phase_direct_cfg_recovery_8616_part0_8616_ze00()
         if _rc is not None:
             return _rc
@@ -9278,8 +9721,10 @@ class _DirectAddrCliRun8616:
         if _rc is not None:
             return _rc
         return None
+    @cython.ccall
     def _phase_direct_cfg_recovery_8616_part0_8616_zh1(self) -> int | None:
         """Run an extracted handler sub-phase; return an exit code to abort."""
+        _rc: object
         _rc = self._phase_direct_cfg_recovery_8616_part0_8616_ze10()
         if _rc is not None:
             return _rc
@@ -9287,8 +9732,10 @@ class _DirectAddrCliRun8616:
         if _rc is not None:
             return _rc
         return None
+    @cython.ccall
     def _phase_direct_cfg_recovery_8616_part0_8616_zh2(self, ex: BaseException) -> int | None:
         """Run an extracted handler sub-phase; return an exit code to abort."""
+        _rc: object
         _rc = self._phase_direct_cfg_recovery_8616_part0_8616_ze20(ex)
         if _rc is not None:
             return _rc
@@ -9297,7 +9744,8 @@ class _DirectAddrCliRun8616:
             return _rc
         return None
 
-    def _direct_nonopt_probe_eligible_8616(self) -> bool:
+    @cython.ccall
+    def _direct_nonopt_probe_eligible_8616(self) -> cython.bint:
         """Return whether a non-optimized-slice probe is eligible before consuming fallback budget."""
         return (
             self.partial_payload is None
@@ -9306,41 +9754,43 @@ class _DirectAddrCliRun8616:
             and not self.sidecar_closed_nonopt
             and not (self.direct_failure_family_state.repeat_detected and not self.direct_failure_family_state.new_proof_seen)
         )
-def _run_direct_addr_cli_8616(context: _DirectAddrCliContext8616) -> int:
+@cython.ccall
+def _run_direct_addr_cli_8616(context: _DirectAddrCliContext8616) -> cython.longlong:
 
 
     """Run the direct-address CLI branch after project and sidecar setup."""
     return _DirectAddrCliRun8616(context=context).run_8616()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _BatchCliContext8616:
     """Owned inputs and runtime policy shared by batch execution lanes."""
 
     args: CliArguments
     project: angr.Project
-    function_tasks: list[FunctionWorkItem]
-    result_map: dict[int, FunctionWorkResult]
-    fallback_tail_validation_by_index: dict[int, dict[str, object]]
+    function_tasks: object
+    result_map: object
+    fallback_tail_validation_by_index: object
     lst_metadata: LSTMetadata | None
     cod_metadata: CODProcMetadata | None
     synthetic_globals: _SyntheticGlobals8616
-    visible_code_labels: dict[int, str]
-    include_library_functions: bool
-    low_memory_path: bool
-    interactive_stdout: bool
-    precise_sidecar_regions: bool
-    timeout_was_explicit: bool
-    use_serial_fork_per_function: bool
-    allow_heavy_fallbacks: bool
-    force_isolated_function_projects: bool
+    visible_code_labels: object
+    include_library_functions: cython.bint
+    low_memory_path: cython.bint
+    interactive_stdout: cython.bint
+    precise_sidecar_regions: cython.bint
+    timeout_was_explicit: cython.bint
+    use_serial_fork_per_function: cython.bint
+    allow_heavy_fallbacks: cython.bint
+    force_isolated_function_projects: cython.bint
     sweep_deadline: float | None
-    shown_total: int
-    skipped_signature_labels: int
-    declared_caller_targets: tuple[tuple[int, tuple[int, ...]], ...] = ()
+    shown_total: cython.longlong
+    skipped_signature_labels: cython.longlong
+    declared_caller_targets: tuple[tuple[cython.longlong, tuple[cython.longlong, ...]], ...] = ()
 
-    def force_isolated_project_for(self, work_item: FunctionWorkItem) -> bool:
+    def force_isolated_project_for(self, work_item: FunctionWorkItem) -> cython.bint:
         """Return whether a work item needs a fresh project for stable recovery."""
+        function_project: object
         if not self.force_isolated_function_projects:
             return False
         work_function = cast(_AngrFunction, work_item.function)
@@ -9354,6 +9804,7 @@ class _BatchCliContext8616:
 
     def configure_recovered_project_for(self, work_item: FunctionWorkItem) -> None:
         """Apply the owned CLI runtime policy to a recovered function project."""
+        function_project: object
         work_function = cast(_AngrFunction, work_item.function)
         try:
             function_project = work_function.project
@@ -9369,7 +9820,7 @@ class _BatchCliContext8616:
         _transfer_caller_return_use_evidence_8616(self.project, function_project)
         _inherit_tail_validation_runtime_policy(function_project, self.project)
 
-    def sweep_budget_exhausted(self) -> bool:
+    def sweep_budget_exhausted(self) -> cython.bint:
         """Return whether the optional whole-binary sweep deadline has elapsed."""
         return self.sweep_deadline is not None and time.monotonic() >= self.sweep_deadline
 
@@ -9380,12 +9831,14 @@ class _BatchCliContext8616:
         return max(0, int(self.sweep_deadline - time.monotonic()))
 
 
+@cython.ccall
 def _batch_function_decompile_timeout_8616(
     context: _BatchCliContext8616,
     function: _AngrFunction,
     adaptive_timeout_model: _AdaptivePerByteTimeoutModel,
-) -> int:
+) -> cython.longlong:
     """Return one complexity-aware timeout shared by serial and parallel lanes."""
+    remaining_sweep_budget: object
     args = context.args
     block_count, byte_count = _function_complexity(function)
     decompile_timeout = adaptive_timeout_model.timeout_for_byte_count(byte_count)
@@ -9421,13 +9874,14 @@ def _batch_function_decompile_timeout_8616(
     )
 
 
+@cython.ccall
 def _x86_16_complexity_timeout_8616(
-    decompile_timeout: int,
+    decompile_timeout: cython.longlong,
     args: CliArguments,
-    timeout_was_explicit: bool,
-    block_count: int,
-    byte_count: int,
-) -> int:
+    timeout_was_explicit: cython.bint,
+    block_count: cython.longlong,
+    byte_count: cython.longlong,
+) -> cython.longlong:
     """Raise a decompile timeout by measured 16-bit function complexity."""
     if block_count >= 72 or byte_count >= 520:
         decompile_timeout = max(decompile_timeout, args.timeout + 120, 240)
@@ -9445,12 +9899,13 @@ def _x86_16_complexity_timeout_8616(
     return decompile_timeout
 
 
+@cython.ccall
 def _finalization_timeout_floor_8616(
-    architecture: str,
+    architecture: object,
     args: CliArguments,
-    timeout_was_explicit: bool,
-    bounded_timeout: int,
-) -> int:
+    timeout_was_explicit: cython.bint,
+    bounded_timeout: cython.longlong,
+) -> cython.longlong:
     """Enforce the large-function finalization floor for batch 16-bit sweeps."""
     if (
         architecture != "86_16"
@@ -9466,19 +9921,21 @@ def _finalization_timeout_floor_8616(
     )
 
 
+@cython.ccall
 def _transfer_caller_return_use_evidence_8616(
     source_project: object,
     destination_project: object,
-) -> int:
+) -> cython.longlong:
     """Copy typed project evidence across a fresh-project worker boundary."""
     return int(transfer_project_evidence_8616(source_project, destination_project).caller_return_use_count)
 
 
+@cython.ccall
 def _fresh_primary_function_work_item_8616(
     context: _BatchCliContext8616,
     item: FunctionWorkItem,
     *,
-    timeout: int,
+    timeout: cython.longlong,
 ) -> FunctionWorkItem:
     """Recover one primary work item from a fresh binary project."""
     args = context.args
@@ -9541,28 +9998,30 @@ def _fresh_primary_function_work_item_8616(
     return fresh_item
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _SerialFunctionOutcome8616:
     """Counters and control signal produced by one serial function attempt."""
 
-    decompiled: int
-    failed: int
-    stop_requested: bool = False
+    decompiled: cython.longlong
+    failed: cython.longlong
+    stop_requested: cython.bint = False
 
 
+@cython.ccall
 def _run_serial_function_8616(
     context: _BatchCliContext8616,
     item: FunctionWorkItem,
     *,
-    recover_timeout: int,
+    recover_timeout: cython.longlong,
     adaptive_timeout_model: _AdaptivePerByteTimeoutModel,
-    allow_isolated_retry_in_function_tasks: bool,
-    emitted_indexes: set[int],
+    allow_isolated_retry_in_function_tasks: cython.bint,
+    emitted_indexes: object,
 ) -> _SerialFunctionOutcome8616:
     """Recover, decompile, retry, and emit one serial function work item."""
+    result: object
     item_function = cast(_AngrFunction, item.function)
     recovery_addr = _function_work_item_recovery_addr_8616(item)
-    result: FunctionWorkResult | None = context.result_map.get(item.index)
+    result = context.result_map.get(item.index)
     if result is None:
         return _serial_missing_result_lane_8616(
             context,
@@ -9577,17 +10036,19 @@ def _run_serial_function_8616(
     return _SerialFunctionOutcome8616(decompiled=0, failed=0)
 
 
-def _serial_local_recover_timeout_8616(recover_timeout: int, remaining_sweep_budget: float | None) -> int:
+@cython.ccall
+def _serial_local_recover_timeout_8616(recover_timeout: cython.longlong, remaining_sweep_budget: object) -> cython.longlong:
     """Clamp the recovery timeout to the remaining sweep budget."""
     if remaining_sweep_budget is not None:
         return max(1, min(recover_timeout, int(remaining_sweep_budget)))
     return recover_timeout
 
 
+@cython.ccall
 def _serial_recover_call_8616(
     recover_call: Callable[[], object],
-    local_recover_timeout: int,
-    thread_name_prefix: str,
+    local_recover_timeout: cython.longlong,
+    thread_name_prefix: object,
 ) -> _FunctionCfgPair8616:
     """Run one recovery call through fork when enabled, else daemon thread."""
     if _analysis_timeout_use_fork_8616():
@@ -9620,17 +10081,19 @@ def _serial_recover_call_8616(
     )
 
 
+@cython.ccall
 def _serial_stub_rerank_and_item_8616(
     context: _BatchCliContext8616,
     item: FunctionWorkItem,
     item_function: _AngrFunction,
     function_cfg: object,
-    function: _AngrFunction | None,
-    recovery_addr: int,
-    recovery_mode: str,
-    recover_timeout: int,
+    function: object,
+    recovery_addr: cython.longlong,
+    recovery_mode: object,
+    recover_timeout: cython.longlong,
 ) -> FunctionWorkItem:
     """Re-rank lst stub recoveries and rebuild the active work item."""
+    lst_metadata: object
     args = context.args
     project = context.project
     lst_metadata = context.lst_metadata
@@ -9678,15 +10141,20 @@ def _serial_recover_function_8616(
     context: _BatchCliContext8616,
     item: FunctionWorkItem,
     item_function: _AngrFunction,
-    recovery_addr: int,
-    recover_timeout: int,
+    recovery_addr: cython.longlong,
+    recover_timeout: cython.longlong,
 ) -> tuple[FunctionWorkResult | None, str, FunctionWorkItem]:
     """Recover the function CFG for a work item that lacks one."""
+    cached_recovery_result: object
+    cached_work_result: object
+    lst_metadata: object
+    remaining_sweep_budget: object
+    result: object
     args = context.args
     project = context.project
     lst_metadata = context.lst_metadata
     recovery_mode = "lst" if lst_metadata is not None and context.visible_code_labels else "ranked"
-    result: FunctionWorkResult | None = None
+    result = None
     cached_work_result, _cache_bypass_debug, _cache_key, _tail_enabled, _expected_stages = (
         _function_work_cache_lookup(
             item,
@@ -9803,13 +10271,14 @@ def _serial_recover_function_8616(
     return result, recovery_mode, active_item
 
 
+@cython.ccall
 def _serial_no_cfg_error_outcome_8616(
     context: _BatchCliContext8616,
     item: FunctionWorkItem,
     item_function: _AngrFunction,
-    recovery_addr: int,
-    recovery_mode: str,
-    emitted_indexes: set[int],
+    recovery_addr: cython.longlong,
+    recovery_mode: object,
+    emitted_indexes: object,
 ) -> _SerialFunctionOutcome8616:
     """Emit the no-CFG recovery error and its outcome."""
     decompiled = 0
@@ -9835,11 +10304,12 @@ def _serial_no_cfg_error_outcome_8616(
     return _SerialFunctionOutcome8616(decompiled=decompiled, failed=failed)
 
 
+@cython.ccall
 def _serial_emit_result_8616(
     context: _BatchCliContext8616,
     item: FunctionWorkItem,
     result: FunctionWorkResult,
-) -> tuple[int, int]:
+) -> object:
     """Emit one serial function result through the shared emission lane."""
     return _emit_function_result(
         item,
@@ -9863,8 +10333,8 @@ def _serial_decompile_active_item_8616(
     context: _BatchCliContext8616,
     item: FunctionWorkItem,
     active_item: FunctionWorkItem,
-    decompile_timeout: float,
-    allow_isolated_retry_in_function_tasks: bool,
+    decompile_timeout: cython.double,
+    allow_isolated_retry_in_function_tasks: cython.bint,
 ) -> FunctionWorkResult:
     """Run the serial decompile for a recovered work item."""
     args = context.args
@@ -9929,10 +10399,10 @@ def _serial_post_result_8616(
     context: _BatchCliContext8616,
     item: FunctionWorkItem,
     active_item: FunctionWorkItem,
-    result: FunctionWorkResult | None,
-    decompile_timeout: float,
+    result: object,
+    decompile_timeout: cython.double,
     adaptive_timeout_model: _AdaptivePerByteTimeoutModel,
-    allow_isolated_retry_in_function_tasks: bool,
+    allow_isolated_retry_in_function_tasks: cython.bint,
 ) -> FunctionWorkResult | None:
     """Normalize, observe, and bridge-retry a serial work result."""
     args = context.args
@@ -9988,25 +10458,27 @@ def _serial_post_result_8616(
     return result
 
 
+@cython.ccall
 def _serial_missing_result_lane_8616(
     context: _BatchCliContext8616,
     item: FunctionWorkItem,
     item_function: _AngrFunction,
-    recovery_addr: int,
+    recovery_addr: cython.longlong,
     *,
-    recover_timeout: int,
+    recover_timeout: cython.longlong,
     adaptive_timeout_model: _AdaptivePerByteTimeoutModel,
-    allow_isolated_retry_in_function_tasks: bool,
-    emitted_indexes: set[int],
+    allow_isolated_retry_in_function_tasks: cython.bint,
+    emitted_indexes: object,
 ) -> _SerialFunctionOutcome8616:
     """Recover, decompile, retry, and emit a work item without a cached result."""
+    result: object
     args = context.args
     decompiled = 0
     failed = 0
-    result: FunctionWorkResult | None = None
+    result = None
     active_item = item
     recovery_mode = "existing"
-    decompile_timeout: float = max(1, args.timeout)
+    decompile_timeout: cython.double = max(1, args.timeout)
     if item.function_cfg is None:
         result, recovery_mode, active_item = _serial_recover_function_8616(
             context,
@@ -10059,11 +10531,14 @@ def _serial_missing_result_lane_8616(
 def _finish_batch_cli_8616(
     context: _BatchCliContext8616,
     *,
-    decompiled: int,
-    failed: int,
-    emitted_indexes: set[int],
-) -> int:
+    decompiled: cython.longlong,
+    failed: cython.longlong,
+    emitted_indexes: object,
+) -> cython.longlong:
     """Emit pending results and the common terminal summary for a batch run."""
+    existing: object
+    index: object
+    snapshot: object
     args = context.args
     project = context.project
     function_tasks = context.function_tasks
@@ -10072,7 +10547,7 @@ def _finish_batch_cli_8616(
     lst_metadata = context.lst_metadata
     shown_total = context.shown_total
     skipped_signature_labels = context.skipped_signature_labels
-    attempted = sum(1 for item in function_tasks if result_map.get(item.index) is not None)
+    attempted = sum(1 for item in iter(function_tasks) if result_map.get(item.index) is not None)
     attempted_target = "selected" if args.max_functions <= 0 and args.addr is None else "displayed"
     print(f"/* info: decompilation attempted for {attempted}/{shown_total} {attempted_target} function(s) */")
     d, f = _emit_pending_batch_results_8616(context, emitted_indexes)
@@ -10084,9 +10559,9 @@ def _finish_batch_cli_8616(
             result_map[index] = replace(existing, tail_validation=snapshot)
     accepted_payloads = tuple(
         result.payload
-        for item in function_tasks
+        for item in iter(function_tasks)
         if (result := result_map.get(item.index)) is not None
-        and result.status == WorkItemStatus.OK.value
+        and operator.eq(result.status, WorkItemStatus.OK.value)
         and isinstance(result.payload, str)
         and result.payload.strip()
     )
@@ -10114,14 +10589,14 @@ def _finish_batch_cli_8616(
     _emit_tail_validation_console_summary(function_tasks, result_map, binary_path=args.binary)
     summary_target = "selected functions" if args.max_functions <= 0 and args.addr is None else "shown functions"
     print(f"\n/* summary: decompiled {decompiled}/{total_shown} {summary_target} */")
-    timed_out = sum(1 for result in result_map.values() if result.status == "timeout")
+    timed_out = sum(1 for result in builtins.iter(result_map.values()) if result.status == "timeout")
     if timed_out:
         print(f"/* summary: {timed_out} discovered function(s) timed out during decompilation */")
     if failed:
         print(f"/* summary: {failed} functions fell back to asm/details */")
-    same_family_retry_stops = sum(result.same_family_retry_stops for result in result_map.values())
+    same_family_retry_stops = sum(result.same_family_retry_stops for result in builtins.iter(result_map.values()))
     fallback_family_labels = sorted(
-        {label for result in result_map.values() for label in result.fallback_family_labels if label},
+        {label for result in builtins.iter(result_map.values()) for label in iter(result.fallback_family_labels) if label},
         key=lambda item: (item.casefold(), item),
     )
     (
@@ -10154,17 +10629,20 @@ def _finish_batch_cli_8616(
     )
     if (not failed and not batch_c_output.failed and attempted == total_shown
             and all(result.status in (WorkItemStatus.OK.value, WorkItemStatus.CONDITIONAL.value)
-                    for result in result_map.values())
-            and any(result.status == WorkItemStatus.CONDITIONAL.value for result in result_map.values())):
+                    for result in builtins.iter(result_map.values()))
+            and any(operator.eq(result.status, WorkItemStatus.CONDITIONAL.value) for result in builtins.iter(result_map.values()))):
         emit_terminal_status(CliTerminalStatus.CONDITIONAL)
         return 5
     return 2 if batch_c_output.failed else exit_code
 
 
+@cython.ccall
 def _emit_pending_batch_results_8616(
-    context: _BatchCliContext8616, emitted_indexes: set[int]
-) -> tuple[int, int]:
+    context: _BatchCliContext8616, emitted_indexes: object
+) -> tuple[cython.longlong, cython.longlong]:
     """Emit every un-emitted function result, returning (decompiled, failed) deltas."""
+    result: object
+    item: object
     decompiled = 0
     failed = 0
     for item in context.function_tasks:
@@ -10194,8 +10672,12 @@ def _emit_pending_batch_results_8616(
     return decompiled, failed
 
 
-def _dead_setup_counters_8616(results: Iterable[FunctionWorkResult]) -> tuple[int, int, int, int]:
+@cython.ccall
+def _dead_setup_counters_8616(results: Iterable[FunctionWorkResult]) -> tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong]:
     """Aggregate dead-setup evidence counters across function results."""
+    ds: object
+    info: object
+    result: object
     candidates = 0
     pruned = 0
     refused = 0
@@ -10215,13 +10697,14 @@ def _dead_setup_counters_8616(results: Iterable[FunctionWorkResult]) -> tuple[in
     return candidates, pruned, refused, escaped
 
 
+@cython.ccall
 def _batch_exit_code_8616(
     *,
-    attempted: int,
-    decompiled: int,
-    failed: int,
-    total_shown: int,
-) -> int:
+    attempted: cython.longlong,
+    decompiled: cython.longlong,
+    failed: cython.longlong,
+    total_shown: cython.longlong,
+) -> cython.longlong:
     """Return success only for a complete batch whose every result was accepted."""
     complete = (
         total_shown > 0
@@ -10232,8 +10715,11 @@ def _batch_exit_code_8616(
     return 0 if complete else 2
 
 
-def _run_serial_batch_cli_8616(context: _BatchCliContext8616) -> int:
+def _run_serial_batch_cli_8616(context: _BatchCliContext8616) -> cython.longlong:
     """Run the serial function queue and emit its complete file summary."""
+    lst_metadata: object
+    item: object
+    pending_item: object
     args = context.args
     project = context.project
     function_tasks = context.function_tasks
@@ -10246,7 +10732,7 @@ def _run_serial_batch_cli_8616(context: _BatchCliContext8616) -> int:
     _sweep_budget_exhausted = context.sweep_budget_exhausted
     decompiled = 0
     failed = 0
-    emitted_indexes: set[int] = set()
+    emitted_indexes: set[cython.longlong] = set()
     recover_timeout = _default_recovery_timeout(args.timeout, explicit_timeout=timeout_was_explicit)
     adaptive_timeout_model = _AdaptivePerByteTimeoutModel(
         args.timeout,
@@ -10270,7 +10756,7 @@ def _run_serial_batch_cli_8616(context: _BatchCliContext8616) -> int:
         function_tasks, caller_targets=dict(context.declared_caller_targets),
     ):
         if _sweep_budget_exhausted():
-            remaining = sum(1 for pending_item in function_tasks if pending_item.index not in result_map)
+            remaining = sum(1 for pending_item in iter(function_tasks) if pending_item.index not in result_map)
             print(
                 f"[dbg] sweep budget exhausted; marking {remaining} remaining function(s) as timeout",
                 file=sys.stderr,
@@ -10311,7 +10797,7 @@ def _run_serial_batch_cli_8616(context: _BatchCliContext8616) -> int:
     )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _MainCliRun8616:
     """Mutable run state for main CLI orchestration."""
 
@@ -10448,8 +10934,11 @@ class _MainCliRun8616:
     worker_policy: Any = None
     workers: Any = None
 
-    def run_8616(self) -> int:
+    @cython.ccall
+    def run_8616(self) -> cython.longlong:
         """Run the main CLI phases and return the process exit code."""
+        _rc: object
+        phase: object
         phases: tuple[Callable[[], int | None], ...] = (
             self._phase_setup_8616,
             self._phase_seed_rank_dispatch_8616,
@@ -10472,6 +10961,7 @@ class _MainCliRun8616:
         )
 
 
+    @cython.ccall
     def _phase_setup_8616(self) -> int | None:
         """Run an extracted `_run_main_cli_8616` phase; return an exit code to abort."""
         self.args, self.timeout_was_explicit, self.effective_signature_catalog = _prepare_main_cli_args_8616(self.argv)
@@ -10545,8 +11035,8 @@ class _MainCliRun8616:
         typing.cast(typing.Any, self.project)._inertia_uncapped_seeded_recovery = False
         self.cfg: object | None = None
         self.function_cfg_pairs: list[_FunctionCfgPair8616] = []
-        self.ranked_binary_offsets: list[int] = []
-        self.labeled_offsets: list[tuple[int, str]] = []
+        self.ranked_binary_offsets: list[cython.longlong] = []
+        self.labeled_offsets: list[tuple[cython.longlong, str]] = []
         self.ranked_labeled_total = 0
         self.total_functions = 0
         self.shown_total = 0
@@ -10581,8 +11071,11 @@ class _MainCliRun8616:
             print("/* Low-memory mode: using a smaller, safer function-discovery pass. */")
         self.packed_exe = None if self.args.proc is not None else getattr(self.project, "_inertia_packed_exe", None)
         return None
+    @cython.ccall
     def _phase_seed_inputs_8616(self) -> int | None:
         """Run an extracted `_run_main_cli_8616` phase; return an exit code to abort."""
+        _addr_lp8616: object
+        _func_lp8616: object
         if self.skipped_signature_labels > 0:
             print(f"/* skipping {self.skipped_signature_labels} signature-matched function(s) by default. */")
         if self.library_label_skipped_count > 0:
@@ -10606,6 +11099,7 @@ class _MainCliRun8616:
                         if isinstance(self.rz_name, str) and self.rz_name:
                             _func_lp8616.name = self.rz_name
         return None
+    @cython.ccall
     def _phase_configure_display_dispatch_8616(self) -> int | None:
         """Keep explicit declared-closure selection separate from hybrid catalogs."""
         if self.declared_discovery is not None:
@@ -10678,7 +11172,7 @@ class _MainCliRun8616:
             attach_project_argument_evidence_ranges_8616(self.project, self.project)
             publish_discovered_indexed_alias_program_8616(
                 self.project,
-                tuple(function for _cfg, function in self.uncapped_function_cfg_pairs),
+                tuple(function for _cfg, function in iter(self.uncapped_function_cfg_pairs)),
             )
         if (
             self.args.addr is None
@@ -10706,11 +11200,13 @@ class _MainCliRun8616:
         ):
             _store_catalog_address_cache(self.project, self.args.binary, self.uncapped_function_cfg_pairs)
         self.function_tasks: list[FunctionWorkItem] = []
-        self.result_map: dict[int, FunctionWorkResult] = {}
-        self.fallback_tail_validation_by_index: dict[int, dict[str, object]] = {}
+        self.result_map: dict[cython.longlong, FunctionWorkResult] = {}
+        self.fallback_tail_validation_by_index: dict[cython.longlong, dict[str, object]] = {}
         return None
+    @cython.ccall
     def _phase_configure_execution_8616(self) -> int | None:
         """Run an extracted `_run_main_cli_8616` phase; return an exit code to abort."""
+        _rc: object
         _rc = self._exec_parallel_banner_8616()
         if _rc is not None:
             return _rc
@@ -10722,10 +11218,12 @@ class _MainCliRun8616:
             return _rc
         return None
 
-    def _sweep_budget_exhausted(self) -> bool:
+    @cython.ccall
+    def _sweep_budget_exhausted(self) -> cython.bint:
         """Hoisted nested function (callable via `self`)."""
         return self.sweep_deadline is not None and time.monotonic() >= self.sweep_deadline
 
+    @cython.ccall
     def _phase_seed_rank_8616(self) -> int | None:
         """Phase extracted from `_run_main_cli_8616`."""
         try:
@@ -10750,8 +11248,10 @@ class _MainCliRun8616:
             return 5
         return None
 
+    @cython.ccall
     def _phase_seed_rank_8616_else_8616(self) -> int | None:
         """Else-branch of the extracted phase."""
+        _rc: object
         _rc = self._phase_seed_rank_8616_else_8616_part0_8616()
         if _rc is not None:
             return _rc
@@ -10770,21 +11270,28 @@ class _MainCliRun8616:
         return None
 
 
+    @cython.ccall
     def _phase_build_pairs_8616(self) -> int | None:
         """Phase extracted from `_run_main_cli_8616`."""
         self.total_functions = self.ranked_labeled_total or len(self.labeled_offsets)
         self.shown_total = len(self.labeled_offsets)
         return None
 
+    @cython.ccall
     def _phase_build_pairs_8616_else_8616(self) -> int | None:
         """Else-branch of the extracted phase."""
+        _rc: object
         _rc = self._phase_build_pairs_8616_else_8616_part0_8616()
         if _rc is not None:
             return _rc
         return None
 
+    @cython.ccall
     def _phase_build_tasks_8616(self) -> int | None:
         """Phase extracted from `_run_main_cli_8616`."""
+        _index_lp8616: object
+        _name_lp8616: object
+        _offset_lp8616: object
         for _index_lp8616, (_offset_lp8616, _name_lp8616) in enumerate(self.labeled_offsets, start=1):
             self.index = _index_lp8616
             self.offset = _offset_lp8616
@@ -10805,8 +11312,10 @@ class _MainCliRun8616:
                 )
             )
         return None
+    @cython.ccall
     def _phase_build_tasks_8616_else_8616(self) -> int | None:
         """Else-branch of the extracted phase."""
+        _rc: object
         _rc = self._phase_build_tasks_8616_else_8616_part0_8616()
         if _rc is not None:
             return _rc
@@ -10814,6 +11323,7 @@ class _MainCliRun8616:
 
     def _phase_serial_fork_batch_8616(self) -> int | None:
         """Phase extracted from `_run_main_cli_8616`."""
+        _future_lp8616: object
         self.parallel_timeout_model = build_parallel_clean_worker_timeout_model(
             self.args.timeout,
             explicit_timeout=self.timeout_was_explicit,
@@ -10824,7 +11334,7 @@ class _MainCliRun8616:
                 cast(_AngrFunction, item.function),
                 self.parallel_timeout_model,
             )
-            for item in self.function_tasks
+            for item in iter(self.function_tasks)
         }
         self.executor = DaemonThreadPoolExecutor(max_workers=self.workers, thread_name_prefix="func-clean")
         try:
@@ -10835,10 +11345,10 @@ class _MainCliRun8616:
                     item,
                     timeout=self.timeout_by_index[item.index],
                 ): item
-                for item in prioritize_clean_function_work_8616(
+                for item in builtins.iter(prioritize_clean_function_work_8616(
                     self.function_tasks,
                     function_complexity=_function_complexity,
-                )
+                ))
             }
             self.pending = set(self.item_by_future)
             while self.pending:
@@ -10896,8 +11406,10 @@ class _MainCliRun8616:
             self.executor.shutdown(wait=True, cancel_futures=False)
         return None
 
+    @cython.ccall
     def _phase_serial_fork_batch_8616_else_8616(self) -> int | None:
         """Else-branch of the extracted phase."""
+        _rc: object
         _rc = self._phase_serial_fork_batch_8616_else_8616_part0_8616()
         if _rc is not None:
             return _rc
@@ -10915,7 +11427,7 @@ class _MainCliRun8616:
         self.workers = self.requested_workers
         if self.lst_metadata is not None and self.visible_code_labels:
             self.workers = 1
-        if any(item.function_cfg is None for item in self.function_tasks):
+        if any(item.function_cfg is None for item in iter(self.function_tasks)):
             self.workers = 1
         if _exe_unlabeled_batch_gate_8616(self.args, self.lst_metadata, self.visible_code_labels):
             self.workers = 1
@@ -10931,6 +11443,7 @@ class _MainCliRun8616:
         ):
             self.workers = 1
         return None
+    @cython.ccall
     def _exec_policy_fields_8616(self) -> int | None:
         """Run an extracted execution-config phase; return an exit code to abort."""
         if (
@@ -10992,6 +11505,7 @@ class _MainCliRun8616:
             addr_requested=self.args.addr is not None,
         )
         return None
+    @cython.ccall
     def _exec_batch_context_8616(self) -> int | None:
         """Run an extracted execution-config phase; return an exit code to abort."""
         self.sweep_deadline: float | None = None
@@ -11041,7 +11555,7 @@ class _MainCliRun8616:
             return _run_serial_batch_cli_8616(self.batch_context)
         self.decompiled = 0
         self.failed = 0
-        self.emitted_indexes: set[int] = set()
+        self.emitted_indexes: set[cython.longlong] = set()
         self.allow_isolated_retry_for_parallel_tasks = self.interactive_stdout or self.args.max_functions <= 0 or self.args.addr is not None
         return None
     def _seed_else_ranked_offsets_8616(self) -> int | None:
@@ -11089,7 +11603,7 @@ class _MainCliRun8616:
                         self.seeded_catalog_addrs = self.seeded_recovery_result[1]
                     else:
                         self.function_cfg_pairs = self.seeded_recovery_result
-                        self.seeded_catalog_addrs = [function.addr for _, function in self.function_cfg_pairs]
+                        self.seeded_catalog_addrs = [function.addr for _, function in iter(self.function_cfg_pairs)]
             except Exception as ex:
                 self.catalog_error = ex
                 self.function_cfg_pairs = self.function_cfg_pairs if self.function_cfg_pairs else []
@@ -11100,6 +11614,7 @@ class _MainCliRun8616:
                 self.total_functions = len(self.seeded_catalog_addrs)
                 self.shown_total = len(self.function_cfg_pairs)
         return None
+    @cython.ccall
     def _seed_else_sweep_tail_8616(self) -> int | None:
         """Run an extracted seed-tail lane; return an exit code to abort."""
         if self.cfg is None and not self.function_cfg_pairs and not self.prefer_ranked_hidden_sidecar_full_queue:
@@ -11193,7 +11708,7 @@ class _MainCliRun8616:
             if self.function_cfg_pairs:
                 try:
                     self.display_cache_key = _catalog_address_cache_key_8616(self.project, self.args.binary)
-                    self.cached_catalog_int_addrs = [addr for addr in self.cached_catalog_addrs if isinstance(addr, int)]
+                    self.cached_catalog_int_addrs = [addr for addr in iter(self.cached_catalog_addrs) if isinstance(addr, int)]
                     self.supplemented_cached_result = cast(
                         tuple[list[_FunctionCfgPair8616], list[int]],
                         _run_with_timeout_in_daemon_thread(
@@ -11242,7 +11757,7 @@ class _MainCliRun8616:
                 if self.source_region_evidence is not None and not self.source_region_evidence.complete:
                     print(
                         "/* Function catalog recovery failed: startup-bounded source catalog was incomplete; "
-                        f"failed addresses={','.join(hex(addr) for addr in self.source_region_evidence.failed_addrs) or 'none'} */"
+                        f"failed addresses={','.join(hex(addr) for addr in iter(self.source_region_evidence.failed_addrs)) or 'none'} */"
                     )
                     return 5
                 self.total_functions = max(
@@ -11290,8 +11805,10 @@ class _MainCliRun8616:
             except Exception as ex:
                 self.catalog_error = ex
         return None
+    @cython.ccall
     def _phase_build_pairs_8616_else_8616_part0_8616(self) -> int | None:
         """Run an extracted sub-phase; return an exit code to abort."""
+        _rc: object
         if not self.function_cfg_pairs and self.cfg is not None:
             _rc = self._phase_build_pairs_8616_else_8616_part0_8616_b0()
             if _rc is not None:
@@ -11309,8 +11826,10 @@ class _MainCliRun8616:
             if self.args.max_functions > 0:
                 self.shown_total = min(self.shown_total, self.args.max_functions)
         return None
+    @cython.ccall
     def _phase_build_tasks_8616_else_8616_part0_8616(self) -> int | None:
         """Run an extracted sub-phase; return an exit code to abort."""
+        _rc: object
         if (
             self.args.addr is None and self.args.binary.suffix.lower() == ".exe" and not self.function_cfg_pairs and self.ranked_binary_offsets
         ):
@@ -11328,7 +11847,7 @@ class _MainCliRun8616:
                         function=_make_placeholder_function(self.project, addr, f"sub_{addr:x}"),
                         recovery_addr=addr,
                     )
-                    for index, addr in enumerate(self.preview_addrs, start=1)
+                    for index, addr in builtins.iter(enumerate(self.preview_addrs, start=1))
                 ]
                 self.shown_total = len(self.function_tasks)
             else:
@@ -11345,7 +11864,7 @@ class _MainCliRun8616:
                             function=_make_placeholder_function(self.project, addr, f"sub_{addr:x}"),
                             recovery_addr=addr,
                         )
-                        for index, addr in enumerate(self.preview_addrs, start=1)
+                        for index, addr in builtins.iter(enumerate(self.preview_addrs, start=1))
                     ]
                 else:
                     self.function_tasks = _prepare_ranked_binary_preview_items(
@@ -11364,8 +11883,10 @@ class _MainCliRun8616:
             if _rc is not None:
                 return _rc
         return None
+    @cython.ccall
     def _phase_serial_fork_batch_8616_else_8616_part0_8616(self) -> int | None:
         """Run an extracted sub-phase; return an exit code to abort."""
+        _rc: object
         _rc = self._phase_serial_fork_batch_8616_else_8616_part0_8616_b0()
         if _rc is not None:
             return _rc
@@ -11398,8 +11919,11 @@ class _MainCliRun8616:
             except Exception as ex:
                 self.catalog_error = ex
         return None
+    @cython.ccall
     def _phase_build_pairs_8616_else_8616_part0_8616_b0(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
+        _function_cfg_lp8616: object
+        _function_lp8616: object
         self.limit = self.args.max_functions if self.args.max_functions > 0 else None
         self.defer_limit_until_after_seed_ranking = self.args.addr is None and self.args.binary.suffix.lower() == ".exe"
         self.functions, self.total_functions = cast(
@@ -11407,7 +11931,7 @@ class _MainCliRun8616:
             _interesting_functions(self.cfg, limit=None if self.defer_limit_until_after_seed_ranking else self.limit),
         )
         self.shown_total = len(self.functions)
-        self.function_cfg_pairs = [(self.cfg, function) for function in self.functions]
+        self.function_cfg_pairs = [(self.cfg, function) for function in iter(self.functions)]
         if self.args.addr is None and self.args.binary.suffix.lower() == ".exe":
             self._seeded_pairs_and_addrs = _recover_seeded_exe_functions(
                 self.project,
@@ -11423,11 +11947,11 @@ class _MainCliRun8616:
             if self.seeded_pairs:
                 if isinstance(self.seeded_addrs, (list, tuple)):
                     self.discovered_addrs = set(self.seeded_addrs)
-                    self.existing_addrs = {function.addr for function in self.functions}
-                    self.recovered_seed_addrs = {function.addr for _, function in self.seeded_pairs}
+                    self.existing_addrs = {function.addr for function in iter(self.functions)}
+                    self.recovered_seed_addrs = {function.addr for _, function in iter(self.seeded_pairs)}
                     if self.discovered_addrs - (self.existing_addrs | self.recovered_seed_addrs):
                         typing.cast(typing.Any, self.project)._inertia_uncapped_seeded_recovery = True
-                self.seen_existing = {function.addr for function in self.functions}
+                self.seen_existing = {function.addr for function in iter(self.functions)}
                 self.seeded_pairs = _rank_function_cfg_pairs_for_display(self.project, self.seeded_pairs)
                 for _function_cfg_lp8616, _function_lp8616 in self.seeded_pairs:
                     self.function_cfg = _function_cfg_lp8616
@@ -11446,6 +11970,7 @@ class _MainCliRun8616:
                 self.function_cfg_pairs = self.function_cfg_pairs[:self.limit]
                 self.shown_total = len(self.function_cfg_pairs)
         return None
+    @cython.ccall
     def _phase_build_pairs_8616_else_8616_part0_8616_b1(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
         if (
@@ -11456,7 +11981,7 @@ class _MainCliRun8616:
         ):
             self.supplemental_pairs = _supplement_functions_from_prologue_scan(
                 self.project,
-                {function.addr for function in self.functions},
+                {function.addr for function in iter(self.functions)},
             )
             if self.supplemental_pairs:
                 self.function_cfg_pairs.extend(self.supplemental_pairs)
@@ -11465,8 +11990,13 @@ class _MainCliRun8616:
                 self.total_functions = max(self.total_functions, self.shown_total)
                 typing.cast(typing.Any, self.project)._inertia_supplemental_scan_used = True
         return None
+    @cython.ccall
     def _phase_build_tasks_8616_else_8616_part0_8616_o0(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
+        _addr_lp8616: object
+        _function_cfg_lp8616: object
+        _function_lp8616: object
+        _index_lp8616: object
         for _index_lp8616, (_function_cfg_lp8616, _function_lp8616) in enumerate(self.function_cfg_pairs, start=1):
             self.index = _index_lp8616
             self.function_cfg = _function_cfg_lp8616
@@ -11484,7 +12014,7 @@ class _MainCliRun8616:
         ) and self.args.max_functions <= 0:
             self.existing_by_addr = {
                 getattr(item.function, "addr", None): item
-                for item in self.function_tasks
+                for item in iter(self.function_tasks)
                 if isinstance(getattr(item.function, "addr", None), int)
             }
             self.function_tasks = []
@@ -11512,14 +12042,17 @@ class _MainCliRun8616:
                 )
             self.shown_total = len(self.function_tasks)
         return None
+    @cython.ccall
     def _phase_build_tasks_8616_else_8616_part0_8616_o1(self) -> int | None:
         """Build the limited ranked queue without mutating or losing prior tasks."""
+        _addr_lp8616: object
+        _index_lp8616: object
         if _library_ranked_task_gate_8616(
             self.args, self.lst_metadata, self.visible_code_labels, self.include_library_functions, self.ranked_binary_offsets
         ) and self.args.max_functions > 0:
             self.existing_by_addr = {
                 getattr(item.function, "addr", None): item
-                for item in self.function_tasks
+                for item in iter(self.function_tasks)
                 if isinstance(getattr(item.function, "addr", None), int)
             }
             self.replacement_tasks: list[FunctionWorkItem] = []
@@ -11548,12 +12081,15 @@ class _MainCliRun8616:
             self.function_tasks = self.replacement_tasks
             self.shown_total = len(self.function_tasks)
         return None
+    @cython.ccall
     def _phase_serial_fork_batch_8616_else_8616_part0_8616_b0(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
         self.executor = DaemonThreadPoolExecutor(max_workers=self.workers, thread_name_prefix="func")
         return None
+    @cython.ccall
     def _phase_serial_fork_batch_8616_else_8616_part0_8616_b1(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
+        _rc: object
         try:
             _rc = self._phase_serial_fork_batch_8616_else_8616_part0_8616_b1_zb0()
             if _rc is not None:
@@ -11566,6 +12102,7 @@ class _MainCliRun8616:
         return None
 
 
+    @cython.ccall
     def _phase_serial_fork_batch_8616_else_8616_part0_8616_b1_zb0(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
         self.future_map = {
@@ -11582,14 +12119,17 @@ class _MainCliRun8616:
                 force_isolated_project=self.force_isolated_function_projects,
                 allow_isolated_retry=self.allow_isolated_retry_for_parallel_tasks,
             ): item
-            for item in self.function_tasks
+            for item in iter(self.function_tasks)
             if item.function_cfg is not None
         }
         self.pending = set(self.future_map)
         return None
+    @cython.ccall
     def _phase_serial_fork_batch_8616_else_8616_part0_8616_b1_zb1(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
-        self.deadlines = {future: time.monotonic() + max(1, self.args.timeout) for future in self.future_map}
+        _rc: object
+        exit_code: object
+        self.deadlines = {future: time.monotonic() + max(1, self.args.timeout) for future in iter(self.future_map)}
         self.has_expired_futures = False
         while self.pending:
             exhausted, exit_code = self._phase_serial_fork_batch_8616_else_8616_part0_8616_b1_zb1_w0()
@@ -11602,14 +12142,18 @@ class _MainCliRun8616:
             if _rc is not None:
                 return _rc
             self.now = time.monotonic()
-            self.expired = [future for future in self.pending if self.now >= self.deadlines[future]]
+            self.expired = [future for future in iter(self.pending) if self.now >= self.deadlines[future]]
             _rc = self._phase_serial_fork_batch_8616_else_8616_part0_8616_b1_zb1_w2()
             if _rc is not None:
                 return _rc
         return None
 
+    @cython.ccall
     def _phase_serial_fork_batch_8616_else_8616_part0_8616_b1_zb1_w2(self) -> int | None:
         """Expire pending futures past their deadlines; return an exit code to abort."""
+        _rc: object
+        current_result: object
+        _future_lp8616: object
         for _future_lp8616 in self.expired:
             item = self.future_map[_future_lp8616]
             if not _future_lp8616.done():
@@ -11671,6 +12215,8 @@ class _MainCliRun8616:
         Retain worker failures as visible error results, and use the same
         emission/accounting boundary as late completion.
         """
+        exit_code: object
+        future: object
         for future in sorted(self.done, key=lambda candidate: self.future_map[candidate].index):
             item: FunctionWorkItem = self.future_map[future]
             try:
@@ -11695,7 +12241,8 @@ class _MainCliRun8616:
                 return exit_code
         return None
 
-    def _phase_serial_fork_batch_8616_else_8616_part0_8616_b1_zb1_w0(self) -> tuple[bool, int | None]:
+    @cython.ccall
+    def _phase_serial_fork_batch_8616_else_8616_part0_8616_b1_zb1_w0(self) -> tuple[cython.bint, int | None]:
         """Stop an exhausted sweep after collecting ready pending work.
 
         A sweep can expire before the first wait, so the previous ``done``
@@ -11704,12 +12251,13 @@ class _MainCliRun8616:
         """
         if not self._sweep_budget_exhausted():
             return False, None
-        self.done = {future for future in self.pending if future.done()}
+        self.done = {future for future in iter(self.pending) if future.done()}
         exit_code = self._phase_serial_fork_batch_8616_else_8616_part0_8616_b1_zb1_w1()
         self.has_expired_futures = bool(self.pending)
         self.pending.clear()
         return True, exit_code
 
+    @cython.ccall
     def _phase_seed_rank_8616_else_8616_part4_8616_b1(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
         if self.cfg is None and not self.function_cfg_pairs and not self.prefer_ranked_hidden_sidecar_full_queue:
@@ -11806,7 +12354,7 @@ class _MainCliRun8616:
                         self.seeded_catalog_addrs = self.seeded_recovery_result[1]
                     else:
                         self.function_cfg_pairs = self.seeded_recovery_result
-                        self.seeded_catalog_addrs = [function.addr for _, function in self.function_cfg_pairs]
+                        self.seeded_catalog_addrs = [function.addr for _, function in iter(self.function_cfg_pairs)]
             except Exception as ex:
                 self.catalog_error = ex
                 self.function_cfg_pairs = self.function_cfg_pairs if self.function_cfg_pairs else []
@@ -11818,6 +12366,7 @@ class _MainCliRun8616:
                 self.shown_total = len(self.function_cfg_pairs)
         return None
 
+    @cython.ccall
     def _phase_seed_rank_8616_else_8616_part0_8616_b0(self) -> int | None:
         """Run an extracted zone sub-phase; return an exit code to abort."""
         self.catalog_error: BaseException | None = None
@@ -11826,7 +12375,7 @@ class _MainCliRun8616:
             self.ranked_binary_offsets = _discover_ranked_binary_offsets(self.project, args=self.args)
             self.linked_base = getattr(getattr(self.project.loader, "main_object", None), "linked_base", None)
             if isinstance(self.linked_base, int):
-                self.ranked_binary_offsets = [addr for addr in self.ranked_binary_offsets if addr != self.linked_base]
+                self.ranked_binary_offsets = [addr for addr in iter(self.ranked_binary_offsets) if operator.ne(addr, self.linked_base)]
             self.direct_inventory_total = len(self.ranked_binary_offsets) if self.ranked_binary_offsets else None
             if self.direct_inventory_total is not None:
                 print(
@@ -11839,8 +12388,10 @@ class _MainCliRun8616:
         )
         return None
 
+    @cython.ccall
     def _phase_seed_rank_8616_else_8616_part4_8616(self) -> int | None:
         """Run an extracted sub-phase; return an exit code to abort."""
+        _rc: object
         _rc = self._phase_seed_rank_8616_else_8616_part4_8616_b0()
         if _rc is not None:
             return _rc
@@ -11849,8 +12400,10 @@ class _MainCliRun8616:
             return _rc
         return None
 
+    @cython.ccall
     def _phase_seed_rank_8616_else_8616_part0_8616(self) -> int | None:
         """Run an extracted sub-phase; return an exit code to abort."""
+        _rc: object
         _rc = self._phase_seed_rank_8616_else_8616_part0_8616_b0()
         if _rc is not None:
             return _rc
@@ -11859,6 +12412,7 @@ class _MainCliRun8616:
             return _rc
         return None
 
+    @cython.ccall
     def _expire_late_done_emit_8616(self, item: FunctionWorkItem, current_result: FunctionWorkResult) -> int | None:
         """Emit one late-completed future result and count it; return an exit code to abort."""
         d, f = _emit_function_result(
@@ -11887,10 +12441,12 @@ class _MainCliRun8616:
             return 2
         return None
 
-    def _catalog_ready_8616(self) -> bool:
+    @cython.ccall
+    def _catalog_ready_8616(self) -> cython.bint:
         """Return whether sidecar-visible code labels enable the catalog lane."""
         return self.lst_metadata is not None and bool(self.visible_code_labels)
 
+    @cython.ccall
     def _phase_seed_rank_dispatch_8616(self) -> int | None:
         """Dispatch the seed-ranking phase between catalog and non-catalog lanes."""
         self.declared_discovery = discover_declared_function_closure_8616(self.project)
@@ -11907,6 +12463,7 @@ class _MainCliRun8616:
         return (self._phase_seed_rank_8616() if self._catalog_ready_8616()
                 else self._phase_seed_rank_8616_else_8616())
 
+    @cython.ccall
     def _phase_build_pairs_dispatch_8616(self) -> int | None:
         """Dispatch the pair-building phase between catalog and non-catalog lanes."""
         if self.declared_discovery is not None:
@@ -11914,6 +12471,7 @@ class _MainCliRun8616:
         return (self._phase_build_pairs_8616() if self._catalog_ready_8616()
                 else self._phase_build_pairs_8616_else_8616())
 
+    @cython.ccall
     def _phase_build_tasks_dispatch_8616(self) -> int | None:
         """Dispatch the task-building phase between catalog and non-catalog lanes."""
         if self.declared_discovery is not None:
@@ -11924,25 +12482,27 @@ class _MainCliRun8616:
                 index=index, function_cfg=None,
                 function=_make_placeholder_function(self.project, head, f"sub_{head:x}"),
                 recovery_addr=head,
-            ) for index, head in enumerate(heads, start=1)]
+            ) for index, head in builtins.iter(enumerate(heads, start=1))]
             self.shown_total = len(self.function_tasks)
             return None
         return (self._phase_build_tasks_8616() if self._catalog_ready_8616()
                 else self._phase_build_tasks_8616_else_8616())
 
+    @cython.ccall
     def _phase_serial_fork_batch_dispatch_8616(self) -> int | None:
         """Dispatch the batch phase between clean-process and in-process lanes."""
         return (self._phase_serial_fork_batch_8616() if self.use_serial_fork_per_function
                 else self._phase_serial_fork_batch_8616_else_8616())
-def _run_main_cli_8616(argv: list[str] | None) -> int:
+@cython.ccall
+def _run_main_cli_8616(argv: object) -> cython.longlong:
     """Run CLI orchestration after the mandatory architecture guard succeeds."""
     return _MainCliRun8616(argv=argv).run_8616()
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: object = None) -> cython.longlong:
     """Run the decompiler CLI and return a process exit code."""
 
-    def _impl() -> int:
+    def _impl() -> cython.longlong:
         try:
             _ensure_runtime_architecture_guard_8616()
         except DecompilerArchitectureGuardError as ex:

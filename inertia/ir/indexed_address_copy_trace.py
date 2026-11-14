@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Trace normalized indexed STORE byte lanes to exact LOAD definitions.
 
 Layer: IR.
@@ -10,6 +11,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -35,30 +38,32 @@ from .scalar_definitions import (
     scalar_definition_key_8616,
 )
 from .ssa import SSABlock
+import dataclasses
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAddressCopyPathRefusal8616:
     """One typed refusal produced while tracing a STORE byte lane."""
 
     failure: IndexedAddressCopyFailureKind8616
-    detail: str
+    detail: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _ValueTrace8616:
     """Internal exact scalar source trace or one typed refusal."""
 
     entry: ScalarDefinition8616 | None
     load: ScalarDefinition8616 | None
-    steps: tuple[IndexedAddressCopyStep8616, ...]
+    steps: object
     refusal: IndexedAddressCopyPathRefusal8616 | None
     logical_source: LogicalMemoryValueTrace8616 | None
 
 
+@cython.ccall
 def _failed_trace_8616(
     failure: IndexedAddressCopyFailureKind8616,
-    detail: str,
+    detail: object,
 ) -> _ValueTrace8616:
     """Return one failed trace without partial semantic evidence."""
     return _ValueTrace8616(
@@ -70,6 +75,7 @@ def _failed_trace_8616(
     )
 
 
+@cython.ccall
 def _logical_copy_failure_8616(
     failure: IndexedAddressFailureKind8616 | None,
 ) -> IndexedAddressCopyFailureKind8616:
@@ -83,12 +89,13 @@ def _logical_copy_failure_8616(
     return IndexedAddressCopyFailureKind8616.LOGICAL_MEMORY_EVIDENCE_UNPROVEN
 
 
+@cython.ccall
 def _unique_definition_8616(
     value: IRValue,
     definitions: ScalarDefinitionIndex8616,
     *,
-    block_addr: int,
-    before_index: int,
+    block_addr: cython.longlong,
+    before_index: cython.longlong,
 ) -> ScalarDefinition8616 | _ValueTrace8616:
     """Resolve one exact reaching definition inside the owning SSA block."""
     candidates = reaching_scalar_definitions_8616(
@@ -110,12 +117,15 @@ def _unique_definition_8616(
     return candidates[0]
 
 
+@cython.ccall
 def _step_kind_8616(
     definition: ScalarDefinition8616,
     source_expression: IRValue,
     source_definition: ScalarDefinition8616,
 ) -> tuple[IndexedAddressCopyStepKind8616 | None, int | None]:
     """Classify one operation only when it preserves a known byte lane."""
+    destination: object
+    source: object
     instruction = definition.instruction
     destination = instruction.dst
     source = source_definition.instruction.dst
@@ -144,6 +154,7 @@ def _step_kind_8616(
     return None, None
 
 
+@cython.ccall
 def _load_source_trace_8616(definition: ScalarDefinition8616) -> _ValueTrace8616:
     """Return the terminal trace for one exact LOAD definition."""
     instruction = definition.instruction
@@ -155,6 +166,7 @@ def _load_source_trace_8616(definition: ScalarDefinition8616) -> _ValueTrace8616
     return _ValueTrace8616(definition, definition, (), None, None)
 
 
+@cython.ccall
 def _copy_source_expression_8616(instruction: IRInstr) -> IRValue | None:
     """Return the copied source value for exact MOV/Shr16 copy operations."""
     source_expression: IRValue | None = None
@@ -168,13 +180,14 @@ def _copy_source_expression_8616(instruction: IRInstr) -> IRValue | None:
     return source_expression
 
 
+@cython.ccall
 def _or16_logical_source_trace_8616(
     definition: ScalarDefinition8616,
     definitions: ScalarDefinitionIndex8616,
     logical_memory: IRLogicalMemoryArtifact8616 | None,
     *,
-    function_addr: int,
-    block_addr: int,
+    function_addr: cython.longlong,
+    block_addr: cython.longlong,
 ) -> _ValueTrace8616:
     """Trace one ``Iop_Or16`` definition through closed logical word evidence."""
     instruction = definition.instruction
@@ -203,17 +216,23 @@ def _or16_logical_source_trace_8616(
     )
 
 
+@cython.ccall
 def _trace_value_to_load_8616(
     value: IRValue,
     definitions: ScalarDefinitionIndex8616,
     logical_memory: IRLogicalMemoryArtifact8616 | None,
     *,
-    function_addr: int,
-    block_addr: int,
-    before_index: int,
-    seen: frozenset[tuple[str, str | None, int, int, int | None]] = frozenset(),
+    function_addr: cython.longlong,
+    block_addr: cython.longlong,
+    before_index: cython.longlong,
+    seen: object = frozenset(),
 ) -> _ValueTrace8616:
     """Trace one value backward through exact copy-lane definitions."""
+    destination: object
+    kind: object
+    source_destination: object
+    source_expression: object
+    source_operand: object
     key = scalar_definition_key_8616(value)
     if key in seen:
         return _failed_trace_8616(
@@ -300,15 +319,16 @@ def _trace_value_to_load_8616(
     return _ValueTrace8616(
         definition,
         source_trace.load,
-        (step, *source_trace.steps),
+        (step, ) + tuple(source_trace.steps),
         None,
         source_trace.logical_source,
     )
 
 
+@cython.ccall
 def _member_instruction_8616(
     block: SSABlock,
-    instr_index: int,
+    instr_index: cython.longlong,
 ) -> IRInstr | None:
     """Return one exact indexed STORE member without dynamic lookup."""
     if not 0 <= instr_index < len(block.instrs):
@@ -319,16 +339,18 @@ def _member_instruction_8616(
     return instruction
 
 
+@cython.ccall
 def trace_indexed_store_member_8616(
     block: SSABlock,
-    instr_index: int,
+    instr_index: cython.longlong,
     lane: IndexedAddressCopyLane8616,
     definitions: ScalarDefinitionIndex8616,
     logical_memory: IRLogicalMemoryArtifact8616 | None,
     *,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> IndexedAddressCopyValuePath8616 | IndexedAddressCopyPathRefusal8616:
     """Trace one normalized STORE member to its exact LOAD endpoint."""
+    instruction: object
     instruction = _member_instruction_8616(block, instr_index)
     value = None if instruction is None else instruction.args[1]
     if not isinstance(value, IRValue):

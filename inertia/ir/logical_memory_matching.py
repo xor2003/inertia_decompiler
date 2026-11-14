@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Match captured logical memory operands to exact execution IR sites.
 
 Layer: IR.
@@ -10,6 +11,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -20,34 +23,39 @@ from .logical_memory_contracts import (
     IRMemoryAccessKind8616,
     IRMemoryExecutionSlice8616,
 )
+import dataclasses
+import operator
+import builtins
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RawLogicalMemorySite8616:
     """One LOAD or STORE retained at an exact imported instruction index."""
 
-    instr_index: int
+    instr_index: cython.longlong
     kind: IRMemoryAccessKind8616
     address: IRAddress | None
-    instr_size: int
+    instr_size: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LogicalMemoryExecutionCandidate8616:
     """One atomic wide operation or ordered byte run for a capture."""
 
-    start_position: int
-    end_position: int
+    start_position: cython.longlong
+    end_position: cython.longlong
     address: IRAddress
-    slices: tuple[IRMemoryExecutionSlice8616, ...]
+    slices: object
 
 
-def _is_direct_address(address: IRAddress) -> bool:
+@cython.ccall
+def _is_direct_address(address: IRAddress) -> cython.bint:
     """Return whether an offset is direct rather than register-relative."""
-    return not address.base or address.base == (address.space.value,)
+    return not address.base or operator.eq(address.base, (address.space.value,))
 
 
-def _offset_with_delta(address: IRAddress, address_bits: int, delta: int) -> int:
+@cython.ccall
+def _offset_with_delta(address: IRAddress, address_bits: cython.longlong, delta: cython.longlong) -> cython.longlong:
     """Advance one offset using architectural wrap only for direct addresses."""
     offset = int(address.offset) + delta
     if _is_direct_address(address):
@@ -55,11 +63,12 @@ def _offset_with_delta(address: IRAddress, address_bits: int, delta: int) -> int
     return offset
 
 
+@cython.ccall
 def _sized_address(
     address: IRAddress,
-    address_bits: int,
-    delta: int,
-    size: int,
+    address_bits: cython.longlong,
+    delta: cython.longlong,
+    size: cython.longlong,
 ) -> IRAddress:
     """Copy an exact raw address with normalized offset and requested width."""
     return IRAddress(
@@ -75,19 +84,23 @@ def _sized_address(
     )
 
 
-def _same_segment_base(left: IRAddress, right: IRAddress) -> bool:
+@cython.ccall
+def _same_segment_base(left: IRAddress, right: IRAddress) -> cython.bint:
     """Compare typed segment/base identity without rendered-expression matching."""
-    return left.space is right.space and left.base == right.base
+    return left.space is right.space and operator.eq(left.base, right.base)
 
 
+@cython.ccall
 def raw_logical_memory_sites_8616(
     block: IRBlock,
-    insn_addr: int,
+    insn_addr: cython.longlong,
 ) -> tuple[RawLogicalMemorySite8616, ...]:
     """Collect only exact LOAD/STORE operations owned by one instruction."""
+    instr_index: object
+    instruction: object
     sites: list[RawLogicalMemorySite8616] = []
     for instr_index, instruction in enumerate(block.instrs):
-        if instruction.addr != insn_addr or instruction.op not in {"LOAD", "STORE"}:
+        if operator.ne(instruction.addr, insn_addr) or instruction.op not in {"LOAD", "STORE"}:
             continue
         kind = (
             IRMemoryAccessKind8616.READ
@@ -109,9 +122,14 @@ def raw_logical_memory_sites_8616(
 def _wide_candidate(
     capture: IRLogicalMemoryCaptureRecord8616,
     site: RawLogicalMemorySite8616,
-    position: int,
+    position: cython.longlong,
 ) -> LogicalMemoryExecutionCandidate8616 | None:
     """Expand one exact wide raw operation into deterministic byte slices."""
+    address: object
+    address_bits: object
+    block_addr: object
+    capture_address: object
+    insn_addr: object
     address = site.address
     capture_address = capture.address
     address_bits = capture.address_bits
@@ -126,7 +144,7 @@ def _wide_candidate(
         site.kind is not capture.kind
         or address is None
         or address.space is not capture_address.space
-        or address.size != width
+        or operator.ne(address.size, width)
         or site.instr_size not in {0, width}
     ):
         return None
@@ -150,10 +168,14 @@ def _wide_candidate(
 
 def _byte_candidate(
     capture: IRLogicalMemoryCaptureRecord8616,
-    sites: tuple[RawLogicalMemorySite8616, ...],
-    start_position: int,
+    sites: object,
+    start_position: cython.longlong,
 ) -> LogicalMemoryExecutionCandidate8616 | None:
     """Combine exactly one capture-width ordered run of byte raw operations."""
+    address_bits: object
+    block_addr: object
+    capture_address: object
+    insn_addr: object
     capture_address = capture.address
     address_bits = capture.address_bits
     block_addr = capture.block_addr
@@ -164,29 +186,28 @@ def _byte_candidate(
     assert insn_addr is not None
     width = capture_address.size
     selected = sites[start_position : start_position + width]
-    if len(selected) != width:
+    if operator.ne(len(selected), width):
         return None
     if any(
         site.kind is not capture.kind
         or site.address is None
         or site.address.size != 1
         or site.instr_size not in {0, 1}
-        for site in selected
+        for site in iter(selected)
     ):
         return None
-    addresses = tuple(site.address for site in selected)
-    if not all(isinstance(address, IRAddress) for address in addresses):
+    addresses = tuple(site.address for site in iter(selected))
+    if not all(isinstance(address, IRAddress) for address in iter(addresses)):
         return None
-    typed_addresses = tuple(address for address in addresses if isinstance(address, IRAddress))
+    typed_addresses = tuple(address for address in iter(addresses) if isinstance(address, IRAddress))
     first = typed_addresses[0]
     if first.space is not capture_address.space:
         return None
-    if any(not _same_segment_base(first, address) for address in typed_addresses):
+    if any(not _same_segment_base(first, address) for address in iter(typed_addresses)):
         return None
     if any(
-        _offset_with_delta(first, address_bits, byte_offset)
-        != _offset_with_delta(address, address_bits, 0)
-        for byte_offset, address in enumerate(typed_addresses)
+        operator.ne(_offset_with_delta(first, address_bits, byte_offset), _offset_with_delta(address, address_bits, 0))
+        for byte_offset, address in builtins.iter(enumerate(typed_addresses))
     ):
         return None
     slices = tuple(
@@ -197,9 +218,9 @@ def _byte_candidate(
             source_byte_offset=byte_offset,
             address=_sized_address(address, address_bits, 0, 1),
         )
-        for byte_offset, (site, address) in enumerate(
+        for byte_offset, (site, address) in builtins.iter(enumerate(
             zip(selected, typed_addresses, strict=True)
-        )
+        ))
     )
     return LogicalMemoryExecutionCandidate8616(
         start_position,
@@ -209,11 +230,16 @@ def _byte_candidate(
     )
 
 
+@cython.ccall
 def logical_memory_execution_candidates_8616(
     capture: IRLogicalMemoryCaptureRecord8616,
-    sites: tuple[RawLogicalMemorySite8616, ...],
+    sites: object,
 ) -> tuple[LogicalMemoryExecutionCandidate8616, ...]:
     """Enumerate all exact wide or byte-run owners for one valid capture."""
+    byte_run: object
+    wide: object
+    position: object
+    site: object
     assert capture.address is not None
     candidates: list[LogicalMemoryExecutionCandidate8616] = []
     for position, site in enumerate(sites):
@@ -229,7 +255,7 @@ def logical_memory_execution_candidates_8616(
 
 def logical_memory_candidate_failure_8616(
     capture: IRLogicalMemoryCaptureRecord8616,
-    sites: tuple[RawLogicalMemorySite8616, ...],
+    sites: object,
 ) -> tuple[IRLogicalMemoryFailureKind8616, str]:
     """Classify why no complete exact execution candidate exists."""
     if not sites:
@@ -237,13 +263,13 @@ def logical_memory_candidate_failure_8616(
             IRLogicalMemoryFailureKind8616.MISSING_EXECUTION_SLICES,
             "capture instruction has no raw LOAD or STORE operations",
         )
-    matching_kind = tuple(site for site in sites if site.kind is capture.kind)
+    matching_kind = tuple(site for site in iter(sites) if site.kind is capture.kind)
     if not matching_kind:
         return (
             IRLogicalMemoryFailureKind8616.ACCESS_KIND_CONFLICT,
             "raw operation kind does not match the typed capture kind",
         )
-    addressed = tuple(site for site in matching_kind if site.address is not None)
+    addressed = tuple(site for site in iter(matching_kind) if site.address is not None)
     if not addressed:
         return (
             IRLogicalMemoryFailureKind8616.INVALID_ADDRESS,
@@ -252,7 +278,7 @@ def logical_memory_candidate_failure_8616(
     assert capture.address is not None
     matching_segment = tuple(
         site
-        for site in addressed
+        for site in iter(addressed)
         if site.address is not None and site.address.space is capture.address.space
     )
     if not matching_segment:
@@ -262,7 +288,7 @@ def logical_memory_candidate_failure_8616(
         )
     families = {
         (site.address.space, site.address.base)
-        for site in matching_segment
+        for site in iter(matching_segment)
         if site.address is not None
     }
     if capture.address.size > 1 and len(families) > 1:

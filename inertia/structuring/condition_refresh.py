@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Close typed condition refreshes before returning to Structuring scheduling.
 
 Layer: Structuring.
@@ -14,6 +15,8 @@ Dynamic boundary: project and codegen are third-party angr plugin objects.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import Enum
@@ -29,6 +32,7 @@ from .condition_materialization import (
     materialize_structuring_conditions_8616,
     structuring_condition_surface_token_8616,
 )
+import dataclasses
 
 __all__ = [
     "ConditionRefreshClosure8616",
@@ -45,17 +49,17 @@ class ConditionRefreshClosure8616(Enum):
     REQUIRES_BROAD_REPLAY = "requires_broad_replay"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StructuringConditionRefreshResult8616:
     """Typed scheduling result for one condition refresh request."""
 
     closure: ConditionRefreshClosure8616
-    condition_changed: bool = False
-    segment_global_changed: bool = False
-    transferred_count: int = 0
+    condition_changed: cython.bint = False
+    segment_global_changed: cython.bint = False
+    transferred_count: cython.longlong = 0
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether the request changed state or remained unclosed."""
         return (
             self.condition_changed
@@ -64,7 +68,7 @@ class StructuringConditionRefreshResult8616:
         )
 
     @property
-    def requires_broad_lowering_replay(self) -> bool:
+    def requires_broad_lowering_replay(self) -> cython.bint:
         """Return whether conservative full Lowering replay is required."""
         return self.closure is ConditionRefreshClosure8616.REQUIRES_BROAD_REPLAY
 
@@ -82,7 +86,7 @@ class StructuringConditionRefreshResult8616:
 class _ConditionRefreshFunction8616(Protocol):
     """Third-party C-function fields consumed by condition refresh."""
 
-    addr: int
+    addr: cython.longlong
     statements: object
 
 
@@ -90,11 +94,11 @@ class _ConditionRefreshCodegen8616(Protocol):
     """Third-party codegen metadata consumed and published by condition refresh."""
 
     cfunc: _ConditionRefreshFunction8616
-    _inertia_typed_conditions_transferred: bool
-    _inertia_structuring_conditions_materialized_after_transfer_8616: bool
+    _inertia_typed_conditions_transferred: cython.bint
+    _inertia_structuring_conditions_materialized_after_transfer_8616: cython.bint
     _inertia_structuring_conditions_materialized_root_8616: object
     _inertia_structuring_conditions_materialized_surface_8616: object
-    _inertia_codegen_decl_refresh_required_8616: bool
+    _inertia_codegen_decl_refresh_required_8616: cython.bint
 
 
 class _SyntheticGlobalsBoundary8616(Protocol):
@@ -103,8 +107,10 @@ class _SyntheticGlobalsBoundary8616(Protocol):
     _inertia_synthetic_globals: object
 
 
-def _synthetic_globals_8616(project: object, codegen: object) -> dict[object, object] | None:
+@cython.ccall
+def _synthetic_globals_8616(project: object, codegen: object) -> object:
     """Return dynamic synthetic-global metadata from its supported boundaries."""
+    owner: object
     for owner in (codegen, project):
         try:
             value = cast(_SyntheticGlobalsBoundary8616, owner)._inertia_synthetic_globals
@@ -115,6 +121,7 @@ def _synthetic_globals_8616(project: object, codegen: object) -> dict[object, ob
     return None
 
 
+@cython.ccall
 def refresh_structuring_condition_semantics_8616(
     project: object,
     codegen: object,

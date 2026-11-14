@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Resolve proven linear virtual carriers for terminal register returns.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -31,6 +34,8 @@ from .physical_registers import physical_register_offset_8616, physical_register
 from .runtime_memory_helpers import memory_pointer_helper_8616, segmented_memory_read_helper_8616
 from .stack_storage_evidence import alias_proves_stack_range_8616
 from .stack_variable_coordinates import stack_variable_coordinate_registry_8616
+import operator
+import builtins
 
 __all__ = [
     "contains_effectful_call_8616",
@@ -47,23 +52,25 @@ _COPY_RETURN_NODE_LIMIT = 128
 _COPY_RETURN_DEPTH_LIMIT = 16
 
 
-def _call_is_effectful_8616(call: structured_c.CFunctionCall) -> bool:
+@cython.ccall
+def _call_is_effectful_8616(call: structured_c.CFunctionCall) -> cython.bint:
     """Refuse unclassified calls while accepting generated memory reads."""
     return memory_pointer_helper_8616(call) is None and segmented_memory_read_helper_8616(call) is None
 
 
-def contains_effectful_call_8616(node: object) -> bool:
+def contains_effectful_call_8616(node: object) -> cython.bint:
     """Return whether one structured subtree contains an effectful call."""
     nodes = (node, *_iter_c_nodes_deep_8616(node))
     return any(
         isinstance(candidate, structured_c.CFunctionCall) and _call_is_effectful_8616(candidate)
-        for candidate in nodes
+        for candidate in iter(nodes)
     )
 
 
+@cython.ccall
 def _first_unsafe_scalar_node_8616(
     expression: object,
-    seen: frozenset[int] = frozenset(),
+    seen: object = frozenset(),
 ) -> object | None:
     """Return the first unsupported node on the current recursion path."""
     marker = id(expression)
@@ -88,6 +95,7 @@ def _first_unsafe_scalar_node_8616(
     return expression
 
 
+@cython.ccall
 def _unsafe_variable_8616(expression: structured_c.CVariable) -> object | None:
     """Reject unresolved temporary or physical-register carriers."""
     if isinstance(expression.variable, SimTemporaryVariable) or physical_register_view_8616(expression) is not None:
@@ -95,11 +103,14 @@ def _unsafe_variable_8616(expression: structured_c.CVariable) -> object | None:
     return None
 
 
+@cython.ccall
 def _unsafe_call_node_8616(
     expression: structured_c.CFunctionCall,
-    child_path: frozenset[int],
+    child_path: object,
 ) -> object | None:
     """Reject effectful calls; recurse into pure call arguments."""
+    unsafe_argument: object
+    argument: object
     if _call_is_effectful_8616(expression):
         return cast(object, expression)
     for argument in tuple(expression.args or ()):
@@ -109,17 +120,20 @@ def _unsafe_call_node_8616(
     return None
 
 
-def _safe_scalar_expression_8616(expression: object) -> bool:
+@cython.ccall
+def _safe_scalar_expression_8616(expression: object) -> cython.bint:
     """Accept a resolved, side-effect-free scalar expression."""
     return _first_unsafe_scalar_node_8616(expression) is None
 
 
-def uncollapse_safe_scalar_expression_8616(expression: object) -> bool:
+@cython.ccall
+def uncollapse_safe_scalar_expression_8616(expression: object) -> cython.bint:
     """Expose an already-proven scalar tree hidden by angr's depth cutoff."""
+    node: object
     if not _safe_scalar_expression_8616(expression):
         return False
     changed = False
-    for node in (expression, *_iter_c_nodes_deep_8616(expression)):
+    for node in (expression, ) + tuple(_iter_c_nodes_deep_8616(expression)):
         if isinstance(node, structured_c.CExpression) and node.collapsed:
             node.collapsed = False
             changed = True
@@ -128,6 +142,9 @@ def uncollapse_safe_scalar_expression_8616(expression: object) -> bool:
 
 def _diagnostic_expression_shape_8616(expression: object) -> object:
     """Describe typed AST structure for opt-in lowering diagnostics."""
+    helper: object
+    identity: object
+    register_view: object
     identity = describe_virtual_value_identity_8616(expression)
     if isinstance(expression, structured_c.CConstant):
         return (type(expression).__name__, expression.value)
@@ -165,22 +182,24 @@ def _diagnostic_expression_shape_8616(expression: object) -> object:
         return (
             type(expression).__name__,
             None if helper is None else helper.helper_name,
-            tuple(_diagnostic_expression_shape_8616(argument) for argument in tuple(expression.args or ())),
+            tuple(_diagnostic_expression_shape_8616(argument) for argument in builtins.iter(tuple(expression.args or ()))),
         )
     return type(expression).__name__
 
 
 def _resolve_virtual_expression_8616(
     expression: object,
-    definitions: dict[VirtualValueIdentity8616, object],
+    definitions: object,
 ) -> object:
     """Clone once and substitute exact, already-resolved prior definitions."""
+    identity: object
     identity = describe_virtual_value_identity_8616(expression)
     source = definitions[identity] if identity is not None and identity in definitions else expression
     clone = _clone_c_ast_tree_8616(source)
 
     def transform(child: object) -> object:
         """Substitute one generated child from the resolved definition map."""
+        child_identity: object
         child_identity = describe_virtual_value_identity_8616(child)
         if child_identity is None or child_identity not in definitions:
             return child
@@ -190,7 +209,8 @@ def _resolve_virtual_expression_8616(
     return clone
 
 
-def _assignment_writes_observable_storage_8616(lhs: object) -> bool:
+@cython.ccall
+def _assignment_writes_observable_storage_8616(lhs: object) -> cython.bint:
     """Conservatively classify writes that invalidate prior memory reads."""
     if describe_virtual_value_identity_8616(lhs) is not None:
         return False
@@ -200,10 +220,13 @@ def _assignment_writes_observable_storage_8616(lhs: object) -> bool:
     return True
 
 
+@cython.ccall
 def _linear_virtual_definitions_8616(
-    statements: tuple[object, ...],
-) -> dict[VirtualValueIdentity8616, object]:
+    statements: object,
+) -> object:
     """Collect reusable generated definitions without crossing barriers."""
+    identity: object
+    statement: object
     definitions: dict[VirtualValueIdentity8616, object] = {}
     for statement in statements:
         if not isinstance(statement, structured_c.CAssignment):
@@ -232,30 +255,32 @@ def _linear_virtual_definitions_8616(
     return definitions
 
 
-def _contains_unresolved_virtual_value_8616(expression: object) -> bool:
+def _contains_unresolved_virtual_value_8616(expression: object) -> cython.bint:
     """Return whether a resolved expression still exposes a generated carrier."""
     nodes = (expression, *_iter_c_nodes_deep_8616(expression))
     return any(
         isinstance(node, structured_c.CDirtyExpression)
         or (isinstance(node, structured_c.CVariable) and isinstance(node.variable, SimTemporaryVariable))
-        for node in nodes
+        for node in iter(nodes)
     )
 
 
+@cython.ccall
 def _uncollapse_materialized_expression_8616(expression: object) -> object:
     """Clear inherited display collapse state on a newly materialized expression."""
-    for node in (expression, *_iter_c_nodes_deep_8616(expression)):
+    node: object
+    for node in (expression, ) + tuple(_iter_c_nodes_deep_8616(expression)):
         if isinstance(node, structured_c.CExpression):
             node.collapsed = False
     return expression
 
 
-def return_expression_has_wide_word_composition_8616(expression: object | None) -> bool:
+def return_expression_has_wide_word_composition_8616(expression: object | None) -> cython.bint:
     """Return whether a C expression structurally preserves a 32-bit word pair."""
     if not isinstance(expression, structured_c.CBinaryOp) or expression.op != "Or":
         return False
 
-    def _is_high_word(node: object) -> bool:
+    def _is_high_word(node: object) -> cython.bint:
         if not isinstance(node, structured_c.CBinaryOp) or node.op != "Shl":
             return False
         shift = node.rhs
@@ -264,18 +289,18 @@ def return_expression_has_wide_word_composition_8616(expression: object | None) 
     return _is_high_word(expression.lhs) or _is_high_word(expression.rhs)
 
 
-def return_expression_contains_dereference_8616(expression: object | None) -> bool:
+def return_expression_contains_dereference_8616(expression: object | None) -> cython.bint:
     """Return whether one generated expression reads through a pointer."""
     return any(
         isinstance(node, structured_c.CUnaryOp) and node.op == "Dereference"
-        for node in _iter_c_nodes_deep_8616(expression)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(expression))
     )
 
 
 def return_expression_requires_materialization_8616(
-    statements_before_return: tuple[object, ...],
-    expression: object | None,
-) -> bool:
+    statements_before_return,
+    expression: object,
+) -> cython.bint:
     """Return whether a generated return expression must be made renderable."""
     if expression is None:
         return True
@@ -285,20 +310,22 @@ def return_expression_requires_materialization_8616(
     nodes = (expression, *_iter_c_nodes_deep_8616(expression))
     return any(
         isinstance(node, structured_c.CExpression) and node.collapsed
-        for node in nodes
+        for node in iter(nodes)
     ) or _contains_unresolved_virtual_value_8616(expression)
 
 
 def resolve_linear_virtual_return_expression_8616(
-    statements_before_definition: tuple[object, ...],
+    statements_before_definition: object,
     expression: object,
 ) -> object | None:
     """Resolve one candidate terminal value or refuse incomplete evidence."""
+    identity: object
+    unsafe_node: object
     definitions = _linear_virtual_definitions_8616(statements_before_definition)
     resolved = _resolve_virtual_expression_8616(expression, definitions)
     unresolved = tuple(
         node
-        for node in (resolved, *_iter_c_nodes_deep_8616(resolved))
+        for node in iter((resolved, ) + tuple(_iter_c_nodes_deep_8616(resolved)))
         if isinstance(node, structured_c.CDirtyExpression)
         or (isinstance(node, structured_c.CVariable) and isinstance(node.variable, SimTemporaryVariable))
     )
@@ -308,7 +335,7 @@ def resolve_linear_virtual_return_expression_8616(
             "terminal virtual return resolution: definitions=%s unresolved=%s unsafe=%s nodes=%s",
             tuple(
                 (identity.kind.value, identity.value, type(rhs).__name__)
-                for identity, rhs in definitions.items()
+                for identity, rhs in builtins.iter(definitions.items())
             ),
             tuple(
                 (
@@ -316,10 +343,10 @@ def resolve_linear_virtual_return_expression_8616(
                     identity.kind.value if (identity := describe_virtual_value_identity_8616(node)) is not None else None,
                     identity.value if identity is not None else None,
                 )
-                for node in unresolved
+                for node in iter(unresolved)
             ),
             type(unsafe_node).__name__ if unsafe_node is not None else None,
-            tuple(type(node).__name__ for node in (resolved, *_iter_c_nodes_deep_8616(resolved))),
+            tuple(type(node).__name__ for node in iter((resolved, ) + tuple(_iter_c_nodes_deep_8616(resolved)))),
         )
     if unresolved or unsafe_node is not None:
         return None
@@ -329,7 +356,7 @@ def resolve_linear_virtual_return_expression_8616(
 class _CopyReturnFunction8616(Protocol):
     """Current function identity and statement root at the codegen boundary."""
 
-    addr: int
+    addr: cython.longlong
     statements: object
 
 
@@ -341,10 +368,12 @@ class _CopyReturnCodegen8616(Protocol):
     _inertia_vex_ir_function_ssa: SSAFunctionArtifact
 
 
-def _grouped_linear_statements_8616(root: object) -> tuple[object, ...] | None:
+def _grouped_linear_statements_8616(root: object) -> object:
     """Flatten statement grouping without entering any control-flow body."""
-    pending: list[tuple[object, int]] = [(root, 0)]
-    seen: set[int] = set()
+    depth: object
+    node: object
+    pending: list[tuple[object, cython.longlong]] = [(root, 0)]
+    seen: set[cython.longlong] = set()
     linear: list[object] = []
     while pending:
         node, depth = pending.pop()
@@ -356,15 +385,16 @@ def _grouped_linear_statements_8616(root: object) -> tuple[object, ...] | None:
             seen.add(id(node))
             if len(node.statements) + len(pending) + len(linear) > _COPY_RETURN_NODE_LIMIT:
                 return None
-            pending.extend((child, depth + 1) for child in reversed(node.statements))
+            pending.extend((child, depth + 1) for child in builtins.iter(reversed(node.statements)))
         else:
             linear.append(node)
     return tuple(linear)
 
 
-def _exact_copy_carrier_8616(left: structured_c.CVariable, right: structured_c.CVariable) -> bool:
+@cython.ccall
+def _exact_copy_carrier_8616(left: structured_c.CVariable, right: structured_c.CVariable) -> cython.bint:
     """Require one explicit SSA id and the same current variable owner."""
-    if type(left.vvar_id) is not int or left.vvar_id != right.vvar_id:
+    if type(left.vvar_id) is not int or operator.ne(left.vvar_id, right.vvar_id):
         return False
     return (
         left.variable is right.variable
@@ -376,12 +406,14 @@ def _current_copy_definition_8616(
     root: object, true_body: object, false_body: object, expression: structured_c.CVariable,
 ) -> structured_c.CAssignment | None:
     """Select a unique definition from the exact branch's straight-line prefix."""
+    definitions: object
+    linear: object
     linear = _grouped_linear_statements_8616(root)
     if linear is None:
         return None
-    controls = tuple(index for index, node in enumerate(linear)
+    controls = tuple(index for index, node in builtins.iter(enumerate(linear))
                      if isinstance(node, structured_c.CIfElse) and node.else_node is false_body
-                     and any(body is true_body for _condition, body in node.condition_and_nodes))
+                     and any(body is true_body for _condition, body in iter(node.condition_and_nodes)))
     if len(controls) != 1:
         return None
     definitions = _bounded_copy_definitions_8616(root, expression.vvar_id)
@@ -393,29 +425,32 @@ def _current_copy_definition_8616(
     if not _exact_copy_carrier_8616(definition.lhs, expression):
         return None
     prefix = linear[:controls[0]]
-    if any(not isinstance(statement, structured_c.CAssignment) for statement in prefix):
+    if any(not isinstance(statement, structured_c.CAssignment) for statement in iter(prefix)):
         return None
-    positions = tuple(index for index, statement in enumerate(prefix) if statement is definition)
+    positions = tuple(index for index, statement in builtins.iter(enumerate(prefix)) if statement is definition)
     if len(positions) != 1 or not isinstance(definition.rhs, structured_c.CVariable):
         return None
-    if not all(_safe_intervening_copy_assignment_8616(statement, expression) for statement in prefix[positions[0] + 1:]):
+    if not all(_safe_intervening_copy_assignment_8616(statement, expression) for statement in iter(prefix[positions[0] + 1:])):
         return None
     return definition
 
 
-def _bounded_copy_definitions_8616(root: object, varid: int) -> tuple[structured_c.CAssignment, ...] | None:
+@cython.ccall
+def _bounded_copy_definitions_8616(root: object, varid: cython.longlong) -> object:
     """Inventory definitions only, refusing oversized current trees."""
+    index: object
+    node: object
     definitions: list[structured_c.CAssignment] = []
     for index, node in enumerate(_iter_c_nodes_deep_8616(root)):
         if index >= _COPY_RETURN_NODE_LIMIT:
             return None
         if (isinstance(node, structured_c.CAssignment)
-                and isinstance(node.lhs, structured_c.CVariable) and node.lhs.vvar_id == varid):
+                and isinstance(node.lhs, structured_c.CVariable) and operator.eq(node.lhs.vvar_id, varid)):
             definitions.append(node)
     return tuple(definitions)
 
 
-def _safe_intervening_copy_assignment_8616(statement: object, carrier: structured_c.CVariable) -> bool:
+def _safe_intervening_copy_assignment_8616(statement: object, carrier: structured_c.CVariable) -> cython.bint:
     """Reject observable writes and calls between a copy and its return branch."""
     if not isinstance(statement, structured_c.CAssignment):
         return False
@@ -426,15 +461,17 @@ def _safe_intervening_copy_assignment_8616(statement: object, carrier: structure
         return False
     protected = (carrier.variable, carrier.unified_variable)
     destinations = (lhs.variable, lhs.unified_variable)
-    if any(owner is not None and owner is destination for owner in protected for destination in destinations):
+    if any(owner is not None and owner is destination for owner in iter(protected) for destination in iter(destinations)):
         return False
     return not isinstance(lhs.variable, (SimStackVariable, SimMemoryVariable)) and not isinstance(
         lhs.unified_variable, (SimStackVariable, SimMemoryVariable)
     )
 
 
-def _alias_owned_stack_copy_leaf_8616(codegen: object, leaf: structured_c.CVariable) -> bool:
+@cython.ccall
+def _alias_owned_stack_copy_leaf_8616(codegen: object, leaf: structured_c.CVariable) -> cython.bint:
     """Require the exact current stack variable's Alias coordinate projection."""
+    projection: object
     if not isinstance(leaf.variable, SimStackVariable):
         return False
     projection = stack_variable_coordinate_registry_8616(codegen).for_variable(leaf.variable)
@@ -448,20 +485,21 @@ def _alias_owned_stack_copy_leaf_8616(codegen: object, leaf: structured_c.CVaria
 
 def _coherent_word_copy_types_8616(
     expression: structured_c.CVariable, definition: structured_c.CAssignment, leaf: structured_c.CVariable,
-) -> bool:
+) -> cython.bint:
     """Admit only same-signed explicit sixteen-bit scalar integer values."""
     types = (expression.type, definition.lhs.type, leaf.type)
-    if any(type(type_) not in (SimTypeShort, SimTypeInt, SimTypeNum) for type_ in types):
+    if any(type(type_) not in (SimTypeShort, SimTypeInt, SimTypeNum) for type_ in iter(types)):
         return False
     try:
         if any(type_.size != 16 or type(type_.signed) is not bool
-               or type_.signed is not leaf.type.signed or type_.qualifier is not None for type_ in types):
+               or type_.signed is not leaf.type.signed or type_.qualifier is not None for type_ in iter(types)):
             return False
     except ValueError:
         return False
     return True
 
 
+@cython.ccall
 def resolve_current_stack_copy_return_8616(
     codegen: object, true_body: object, false_body: object, expression: structured_c.CExpression,
 ) -> structured_c.CVariable | None:
@@ -470,6 +508,7 @@ def resolve_current_stack_copy_return_8616(
     Consume only live definitions: bypass controls, ambiguous identities,
     intervening calls/storage writes and incoherent scalar types refuse.
     """
+    definition: object
     if not isinstance(expression, structured_c.CVariable) or type(expression.vvar_id) is not int:
         return None
     boundary = cast(_CopyReturnCodegen8616, codegen)
@@ -483,7 +522,7 @@ def resolve_current_stack_copy_return_8616(
         return None
     if not isinstance(alias, StackMemorySSAAliasArtifact8616) or not alias.complete:
         return None
-    if alias.source_ssa is not source or alias.function_addr != function_addr:
+    if alias.source_ssa is not source or operator.ne(alias.function_addr, function_addr):
         return None
     definition = _current_copy_definition_8616(root, true_body, false_body, expression)
     if definition is None or not isinstance(definition.rhs, structured_c.CVariable):

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Function-entry fetch-domain proof for retained terminal jumps.
 
 Layer: IR / control-domain evidence.
@@ -45,6 +46,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import hashlib
 from collections.abc import Callable, Mapping
@@ -97,6 +100,10 @@ from .vex_terminal_jump import (
     TerminalJumpEvidence8616,
     TerminalJumpRefusalReason8616,
 )
+import dataclasses
+import operator
+import builtins
+Real16InvocationDomain8616 = typing.TypeVar("Real16InvocationDomain8616")
 
 if TYPE_CHECKING:
     from .real16_invocation_domain import Real16InvocationDomain8616
@@ -159,21 +166,21 @@ class EntryJumpDomainRefusal8616(StrEnum):
     APPLICATION_INPUT_STALE = "entry_jump_domain_application_input_stale"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class EntryJumpDomainBudget8616:
     """Deterministic term budget; no wall-clock deadline, same input same cost."""
 
-    max_terms: int = 65536
-    max_iterations: int = 17
+    max_terms: cython.longlong = 65536
+    max_iterations: cython.longlong = 17
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class EntryJumpDomainLedgerEntry8616:
     """One recorded fact consumed by the entry-domain proof."""
 
     stage: EntryJumpDomainStage8616
-    fact: str
-    detail: str
+    fact: object
+    detail: object
 
     def to_dict(self) -> dict[str, object]:
         """Serialize one ledger entry for diagnostics and workers."""
@@ -184,11 +191,11 @@ class EntryJumpDomainLedgerEntry8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PendingTerminalJump8616:
     """A retained terminal jump whose only open obligation is the window gate."""
 
-    block_addr: int
+    block_addr: cython.longlong
     decoded: DecodedRelativeEdge
 
     def to_dict(self) -> dict[str, object]:
@@ -201,7 +208,7 @@ class PendingTerminalJump8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _ScopedCallDependency8616:
     """One conditional callsite proof consumed under an authenticated entry.
 
@@ -215,7 +222,7 @@ class _ScopedCallDependency8616:
     that consumed it instead of silently persisting.
     """
 
-    callsite_addr: int
+    callsite_addr: cython.longlong
     record: EntryDomainCallPreservation8616 = field(compare=False)
     scope: Real16InvocationDomain8616 = field(compare=False)
 
@@ -228,7 +235,7 @@ class _ScopedCallDependency8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class AdmittedTerminalJump8616:
     """A discharged terminal jump with its proven loader-linear target.
 
@@ -242,13 +249,13 @@ class AdmittedTerminalJump8616:
     dependency under its recorded scope before any edge materializes.
     """
 
-    block_addr: int
-    head: int
-    target: int
+    block_addr: cython.longlong
+    head: cython.longlong
+    target: cython.longlong
     invocation: Real16InvocationDomain8616 | None = field(default=None, compare=False)
     invocation_scope: Real16InvocationDomain8616 | None = field(default=None, compare=False)
     near_call_scope: NearCallJumpScope8616 | None = field(default=None, compare=False)
-    call_dependencies: tuple[_ScopedCallDependency8616, ...] = field(
+    call_dependencies: object = field(
         default=(), compare=False
     )
 
@@ -267,14 +274,15 @@ class AdmittedTerminalJump8616:
             "near_call_scope": None if self.near_call_scope is None else self.near_call_scope.to_dict(),
             "call_dependencies": [
                 dependency.to_dict()
-                for dependency in self.call_dependencies
+                for dependency in iter(self.call_dependencies)
             ],
         }
 
 
+@cython.ccall
 def _canonical_source_8616(
-    function_addr: int, blocks: tuple[IRBlock, ...],
-) -> str:
+    function_addr: cython.longlong, blocks: object,
+) -> object:
     """Serialize the exact artifact surface a domain proof consumes.
 
     The canonical form is the interned node-table encoding owned by
@@ -289,19 +297,21 @@ def _canonical_source_8616(
     deep-copied DAGs encode identically. Block order is significant:
     reordering the census changes the canonical form.
     """
-    return canonical_source_graph_8616(function_addr, blocks)
+    canonical: object = canonical_source_graph_8616(function_addr, blocks)
+    return canonical
 
 
+@cython.ccall
 def _source_digest_8616(
-    function_addr: int, blocks: tuple[IRBlock, ...],
-) -> str:
+    function_addr: cython.longlong, blocks: object,
+) -> object:
     """Digest the canonical source surface for typed binding comparison."""
     return hashlib.sha256(
         _canonical_source_8616(function_addr, blocks).encode("utf-8")
     ).hexdigest()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class EntryJumpDomainSourceBinding8616:
     """Exact proved-input identity for one batch domain proof.
 
@@ -314,10 +324,10 @@ class EntryJumpDomainSourceBinding8616:
     successor edge — is stale evidence and must not materialize.
     """
 
-    function_addr: int
-    block_count: int
-    digest: str
-    pending: tuple[PendingTerminalJump8616, ...]
+    function_addr: cython.longlong
+    block_count: cython.longlong
+    digest: object
+    pending: object
 
     def to_dict(self) -> dict[str, object]:
         """Serialize the binding for diagnostics; it is not fresh proof."""
@@ -325,22 +335,22 @@ class EntryJumpDomainSourceBinding8616:
             "function_addr": self.function_addr,
             "block_count": self.block_count,
             "digest": self.digest,
-            "pending": [candidate.to_dict() for candidate in self.pending],
+            "pending": [candidate.to_dict() for candidate in iter(self.pending)],
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class EntryJumpDomainStats8616:
     """Closed five-stage accounting for the batch domain proof."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Every classified candidate either materialized or was refused."""
         counts = (
             self.raw_fact_count,
@@ -349,15 +359,14 @@ class EntryJumpDomainStats8616:
             self.materialized_count,
             self.failure_count,
         )
-        if not all(type(count) is int and count >= 0 for count in counts):
+        if not all(type(count) is int and count >= 0 for count in iter(counts)):
             return False
         return bool(
-            self.classified_fact_count
-            == self.materialized_count + self.failure_count
+            operator.eq(self.classified_fact_count, self.materialized_count + self.failure_count)
             and self.normalized_fact_count <= self.raw_fact_count
         )
 
-    def to_dict(self) -> dict[str, int]:
+    def to_dict(self) -> dict[str, cython.longlong]:
         """Serialize the evidence ledger for diagnostics and workers."""
         return {
             "raw_fact_count": self.raw_fact_count,
@@ -368,7 +377,7 @@ class EntryJumpDomainStats8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class EntryJumpDomainProof8616:
     """Batch entry-domain proof product for one function's pending jumps.
 
@@ -383,22 +392,23 @@ class EntryJumpDomainProof8616:
     onto the region and which kept their default refusal.
     """
 
-    function_addr: int
+    function_addr: cython.longlong
     source_binding: EntryJumpDomainSourceBinding8616
-    admitted: tuple[AdmittedTerminalJump8616, ...]
-    refusals: tuple[IRRefusal, ...]
-    ledger: tuple[EntryJumpDomainLedgerEntry8616, ...]
+    admitted: object
+    refusals: object
+    ledger: object
     stats: EntryJumpDomainStats8616
-    terms_consumed: int
-    iterations: int
+    terms_consumed: cython.longlong
+    iterations: cython.longlong
     call_preservations: tuple[EntryDomainCallPreservation8616, ...] = ()
     invocation_scope: Real16InvocationDomain8616 | None = field(default=None, compare=False)
     near_call_scope: NearCallJumpScope8616 | None = field(default=None, compare=False)
 
-    def admitted_target_for(self, head: int) -> int | None:
+    def admitted_target_for(self, head: cython.longlong) -> int | None:
         """Return the proven target for one discharged jump head."""
+        jump: object
         for jump in self.admitted:
-            if jump.head == head:
+            if operator.eq(jump.head, head):
                 return jump.target
         return None
 
@@ -409,14 +419,14 @@ class EntryJumpDomainProof8616:
             "near_call_scope": None if self.near_call_scope is None else self.near_call_scope.to_dict(),
             "function_addr": self.function_addr,
             "source_binding": self.source_binding.to_dict(),
-            "admitted": [jump.to_dict() for jump in self.admitted],
-            "refusals": [refusal.to_dict() for refusal in self.refusals],
-            "ledger": [entry.to_dict() for entry in self.ledger],
+            "admitted": [jump.to_dict() for jump in iter(self.admitted)],
+            "refusals": [refusal.to_dict() for refusal in iter(self.refusals)],
+            "ledger": [entry.to_dict() for entry in iter(self.ledger)],
             "stats": self.stats.to_dict(),
             "terms_consumed": self.terms_consumed,
             "iterations": self.iterations,
             "call_preservations": [
-                preservation.to_dict() for preservation in self.call_preservations
+                preservation.to_dict() for preservation in iter(self.call_preservations)
             ],
         }
 
@@ -438,7 +448,7 @@ class ScopedCallTargetStatus8616(StrEnum):
     STALE_SOURCE = "stale_source"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class AdmittedScopedCallTarget8616:
     """Exact outgoing target under a discharged callsite selector obligation.
 
@@ -450,8 +460,8 @@ class AdmittedScopedCallTarget8616:
     block: IRBlock = field(compare=False)
     instruction: IRInstr = field(compare=False)
     scope: NearCallJumpScope8616 | Real16InvocationDomain8616 = field(compare=False)
-    target: int
-    next_addr: int
+    target: cython.longlong
+    next_addr: cython.longlong
 
     def to_dict(self) -> dict[str, object]:
         """Expose the exact conditional callsite without erasing its premise."""
@@ -460,7 +470,7 @@ class AdmittedScopedCallTarget8616:
                 "conditional_only": True}
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class EntryJumpDomainApplication8616:
     """Typed result of applying one proof to a supplied block surface.
 
@@ -477,9 +487,9 @@ class EntryJumpDomainApplication8616:
     """
 
     status: EntryJumpDomainApplicationStatus8616
-    blocks: tuple[IRBlock, ...]
-    applied: tuple[AdmittedTerminalJump8616, ...]
-    refusals: tuple[IRRefusal, ...]
+    blocks: object
+    applied: object
+    refusals: object
     invocation_scope: Real16InvocationDomain8616 | None = field(default=None, compare=False)
     near_call_scope: NearCallJumpScope8616 | None = field(default=None, compare=False)
 
@@ -495,25 +505,28 @@ class EntryJumpDomainApplication8616:
             "invocation_scope": None if self.invocation_scope is None else self.invocation_scope.to_dict(),
             "near_call_scope": None if self.near_call_scope is None else self.near_call_scope.to_dict(),
             "status": self.status.value,
-            "call_targets": [call.to_dict() for call in self.call_targets],
+            "call_targets": [call.to_dict() for call in iter(self.call_targets)],
             "call_target_status": self.call_target_status.value,
             "call_target_stats": self.call_target_stats.to_dict(),
-            "applied": [jump.to_dict() for jump in self.applied],
-            "refusals": [refusal.to_dict() for refusal in self.refusals],
+            "applied": [jump.to_dict() for jump in iter(self.applied)],
+            "refusals": [refusal.to_dict() for refusal in iter(self.refusals)],
         }
 
 
+@cython.ccall
 def collect_pending_terminal_jumps_8616(
-    evidence_by_block: Mapping[int, TerminalJumpEvidence8616],
-) -> dict[int, PendingTerminalJump8616]:
+    evidence_by_block: Mapping[cython.longlong, TerminalJumpEvidence8616],
+) -> object:
     """Project retained evidence into domain-proof candidates.
 
     Only a retained, decoded, unconditional jump whose sole open obligation
     is ``SELECTOR_WINDOW_UNPROVED`` is a candidate; every other failure
     keeps its default refusal and never reaches this proof.
     """
-    pending: dict[int, PendingTerminalJump8616] = {}
-    for block_addr, evidence in sorted(evidence_by_block.items()):
+    block_addr: object
+    evidence: object
+    pending: dict[cython.longlong, PendingTerminalJump8616] = {}
+    for block_addr, evidence in sorted(tuple(evidence_by_block.items())):
         if (
             evidence.retain
             and evidence.decoded is not None
@@ -526,24 +539,27 @@ def collect_pending_terminal_jumps_8616(
     return pending
 
 
+@cython.ccall
 def _instruction_state_key_8616(
-    block_addr: int, index: int, instr: IRInstr,
+    block_addr: cython.longlong, index: cython.longlong, instr: IRInstr,
 ) -> InstructionStateKey:
     """Reproduce the solver's exact per-instruction state key."""
     return instr.addr if isinstance(instr.addr, int) else (block_addr, index)
 
 
-def _writes_cs_8616(instr: IRInstr) -> bool:
+@cython.ccall
+def _writes_cs_8616(instr: IRInstr) -> cython.bint:
     """Detect an explicit typed CS write in one IR instruction."""
     return (
         instr.op != "CALL"
         and isinstance(instr.dst, IRValue)
         and instr.dst.space is MemSpace.REG
-        and instr.dst.name == _CS_REGISTER_8616
+        and operator.eq(instr.dst.name, _CS_REGISTER_8616)
     )
 
 
-def _word_jump_form_8616(decoded: DecodedRelativeEdge) -> bool:
+@cython.ccall
+def _word_jump_form_8616(decoded: DecodedRelativeEdge) -> cython.bint:
     """Accept only unconditional word-width jumps, derived from owned facts.
 
     The self-validating decode already fixes form, operand width, and
@@ -581,23 +597,25 @@ class _NativeReliftProject8616(Protocol):
     factory: _NativeReliftFactory8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _NativeRelift8616:
     """Bounded native re-lift result: lifted block surface or typed failure."""
 
     lifted: object | None
-    failure: tuple[EntryJumpDomainRefusal8616, str] | None
+    failure: object
 
 
 _MAX_NATIVE_RELIFT_BYTES_8616 = 4096
 
 
-def _external_int_8616(value: object) -> int:
+@cython.ccall
+def _external_int_8616(value: object) -> cython.longlong:
     """Coerce external pyvex/angr integer-like values without owning them."""
     return int(cast(Any, value))
 
 
-def _native_source_available_8616(project: object | None) -> bool:
+@cython.ccall
+def _native_source_available_8616(project: object) -> cython.bint:
     """The source authority must be an x86-16 loader-linear angr project."""
     if project is None:
         return False
@@ -614,8 +632,9 @@ def _native_source_available_8616(project: object | None) -> bool:
     )
 
 
+@cython.ccall
 def _block_next_origin_8616(
-    terminal: IRInstr, block_addr: int,
+    terminal: IRInstr, block_addr: cython.longlong,
 ) -> IRInstructionOrigin8616 | None:
     """Return the terminal's recorded block-``next`` provenance, or refuse it.
 
@@ -627,7 +646,7 @@ def _block_next_origin_8616(
     origin = terminal.origin
     if not (
         isinstance(origin, IRInstructionOrigin8616)
-        and origin.block_addr == block_addr
+        and operator.eq(origin.block_addr, block_addr)
         and origin.is_block_next
         and type(origin.block_next_tmp) is int
         and type(origin.statement_index) is int
@@ -636,11 +655,12 @@ def _block_next_origin_8616(
     return origin
 
 
+@cython.ccall
 def _transfer_operand_bound_8616(
     terminal: IRInstr,
     origin: IRInstructionOrigin8616,
     decoded: DecodedRelativeEdge,
-) -> bool:
+) -> cython.bint:
     """Bind the terminal operand to the imported ``next`` expression.
 
     The operand must be exactly the imported ``next`` expression — a
@@ -656,16 +676,16 @@ def _transfer_operand_bound_8616(
     if operand.space is MemSpace.TMP:
         return bool(
             type(operand.source_tmp) is int
-            and operand.source_tmp == origin.block_next_tmp
+            and operator.eq(operand.source_tmp, origin.block_next_tmp)
         )
     return bool(
         operand.space is MemSpace.CONST
         and type(operand.const) is int
-        and operand.const == decoded.next_head + decoded.displacement
+        and operator.eq(operand.const, decoded.next_head + decoded.displacement)
     )
 
 
-def _segment_solve_terms_8616(blocks: tuple[IRBlock, ...]) -> int:
+def _segment_solve_terms_8616(blocks: object) -> cython.longlong:
     """Deterministic term charge for one segment-solver run.
 
     The solver's internal counter is not observable here, so each run is
@@ -673,10 +693,11 @@ def _segment_solve_terms_8616(blocks: tuple[IRBlock, ...]) -> int:
     consumes. Same input always costs the same terms; a budget too small
     to afford the run refuses instead of silently skipping revalidation.
     """
-    return sum(1 + len(block.instrs) for block in blocks)
+    return sum(1 + len(block.instrs) for block in iter(blocks))
 
 
-def _joint_fetch_window_8616(heads: tuple[int, ...]) -> tuple[int, int] | None:
+@cython.ccall
+def _joint_fetch_window_8616(heads: object) -> object:
     """Intersect the selector fetch windows of the given loader-linear heads.
 
     A selector ``s`` can fetch loader-linear ``h`` only when
@@ -684,6 +705,7 @@ def _joint_fetch_window_8616(heads: tuple[int, ...]) -> tuple[int, int] | None:
     intersection over every proof-relevant head; an empty intersection means
     no single selector fetches both the root and the transfer.
     """
+    head: object
     minimum = 0
     maximum = _SELECTOR_MAX_8616
     for head in heads:
@@ -696,8 +718,9 @@ def _joint_fetch_window_8616(heads: tuple[int, ...]) -> tuple[int, int] | None:
     return minimum, maximum
 
 
+@cython.ccall
 def _window_invariant_target_8616(
-    decoded: DecodedRelativeEdge, root: int,
+    decoded: DecodedRelativeEdge, root: cython.longlong,
 ) -> int | None:
     """Prove the decoded linear target under the joint fetch window.
 
@@ -708,24 +731,28 @@ def _window_invariant_target_8616(
     common reachable band. This is the closed-form content of the verified
     parent-jump entry theorem, evaluated without trusting any receipt.
     """
+    window: object
     window = _joint_fetch_window_8616((root, decoded.head))
     if window is None:
         return None
-    target = decoded.next_head + decoded.displacement
+    target: cython.longlong = decoded.next_head + decoded.displacement
     minimum, maximum = window
     if (maximum << 4) <= target <= (minimum << 4) + _SELECTOR_MAX_8616:
         return target
     return None
 
 
+@cython.cclass
 class _Ledger8616:
     """Mutable accumulation surface closed into the frozen proof product."""
+    entries = cython.declare(list, visibility = "public")
 
     def __init__(self) -> None:
         self.entries: list[EntryJumpDomainLedgerEntry8616] = []
 
+    @cython.ccall
     def record(
-        self, stage: EntryJumpDomainStage8616, fact: str, detail: str,
+        self, stage: EntryJumpDomainStage8616, fact: object, detail: object,
     ) -> None:
         """Append one typed fact to the five-stage ledger."""
         self.entries.append(
@@ -733,14 +760,18 @@ class _Ledger8616:
         )
 
 
+@cython.cclass
 class _Budget8616:
     """Deterministic decreasing term counter."""
+    consumed = cython.declare(object, visibility = "public")
+    remaining = cython.declare(object, visibility = "public")
 
     def __init__(self, budget: EntryJumpDomainBudget8616) -> None:
         self.remaining = budget.max_terms
         self.consumed = 0
 
-    def consume(self, terms: int) -> bool:
+    @cython.ccall
+    def consume(self, terms: cython.longlong) -> cython.bint:
         """Consume terms; False means the deterministic budget ran out."""
         if self.remaining < terms:
             return False
@@ -750,8 +781,8 @@ class _Budget8616:
 
 
 def _patched_blocks_8616(
-    blocks: tuple[IRBlock, ...], admitted: Mapping[int, int],
-) -> tuple[IRBlock, ...]:
+    blocks: object, admitted: Mapping[cython.longlong, cython.longlong],
+) -> object:
     """Project admitted jump edges into block successor sets for re-solving."""
     if not admitted:
         return blocks
@@ -761,14 +792,14 @@ def _patched_blocks_8616(
             instrs=block.instrs,
             refusals=block.refusals,
             successor_addrs=tuple(sorted(
-                {*block.successor_addrs, admitted[block.addr]}
+                set(block.successor_addrs) | {admitted[block.addr]}
             )) if block.addr in admitted else block.successor_addrs,
         )
-        for block in blocks
+        for block in iter(blocks)
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _ReachableRegion8616:
     """Typed reachability over the census: members plus exterior edges.
 
@@ -778,12 +809,13 @@ class _ReachableRegion8616:
     PATH_INCOMPLETE refusal instead of being silently ignored.
     """
 
-    reachable: frozenset[int]
-    exterior: tuple[tuple[int, int], ...]
+    reachable: object
+    exterior: object
 
 
+@cython.ccall
 def _reachable_blocks_8616(
-    blocks_by_addr: Mapping[int, IRBlock], entry: int,
+    blocks_by_addr: Mapping[cython.longlong, IRBlock], entry: cython.longlong,
 ) -> _ReachableRegion8616 | None:
     """Walk typed in-function successor edges from the entry block.
 
@@ -793,8 +825,11 @@ def _reachable_blocks_8616(
     exterior edges — the theorem quantifies over a closed region, so an
     edge leaving the enumeration is proof debt, not a legitimate exit.
     """
-    reachable: set[int] = set()
-    exterior: set[tuple[int, int]] = set()
+    addr: object
+    block: object
+    succ: object
+    reachable: set[cython.longlong] = set()
+    exterior: set[tuple[cython.longlong, cython.longlong]] = set()
     work = [entry]
     while work:
         addr = work.pop()
@@ -815,15 +850,16 @@ def _reachable_blocks_8616(
     )
 
 
+@cython.ccall
 def _block_refusal_8616(
-    block: IRBlock, addr: int,
-) -> tuple[EntryJumpDomainRefusal8616, str] | None:
+    block: IRBlock, addr: cython.longlong,
+) -> object:
     """Refuse when a reachable block carries any non-pending refusal."""
+    refusal: object
     for refusal in block.refusals:
         if (
-            refusal.kind
-            != TerminalJumpRefusalReason8616.SELECTOR_WINDOW_UNPROVED.value
-            or refusal.block_addr != addr
+            operator.ne(refusal.kind, TerminalJumpRefusalReason8616.SELECTOR_WINDOW_UNPROVED.value)
+            or operator.ne(refusal.block_addr, addr)
         ):
             return (
                 EntryJumpDomainRefusal8616.PATH_REFUSAL_PRESENT,
@@ -832,9 +868,10 @@ def _block_refusal_8616(
     return None
 
 
+@cython.ccall
 def _effect_gate_8616(
     instr: IRInstr,
-) -> tuple[EntryJumpDomainRefusal8616, str] | None:
+) -> object:
     """Consume the authoritative scalar-effect owner's UNKNOWN closure."""
     if (
         scalar_instruction_effect_8616(instr).kind
@@ -848,13 +885,14 @@ def _effect_gate_8616(
     return None
 
 
+@cython.ccall
 def _instruction_gate_8616(
     block: IRBlock,
-    addr: int,
-    is_terminal: bool,
+    addr: cython.longlong,
+    is_terminal: cython.bint,
     instr: IRInstr,
-    transfer_blocks: frozenset[int],
-) -> tuple[EntryJumpDomainRefusal8616, str] | None:
+    transfer_blocks: object,
+) -> object:
     """Gate one reachable instruction for the entry-domain theorem.
 
     A call lacks a bound CS-preservation record and an explicit typed
@@ -890,6 +928,7 @@ def _instruction_gate_8616(
     return _effect_gate_8616(instr)
 
 
+@cython.cclass
 class _ProofRun8616:
     """Mutable proof session accumulating ledger, refusals, and admissions.
 
@@ -897,22 +936,45 @@ class _ProofRun8616:
     the fixpoint state; each stage method either records typed evidence or
     extends the refusal set, never mutating the consumed artifact.
     """
+    _defer_near_call_final_seal = cython.declare(object, visibility = "public")
+    admitted = cython.declare(dict, visibility = "public")
+    admitted_invocations = cython.declare(dict, visibility = "public")
+    artifact = cython.declare(object, visibility = "public")
+    binding = cython.declare(object, visibility = "public")
+    block_targets = cython.declare(dict, visibility = "public")
+    bound_callsites = cython.declare(set, visibility = "public")
+    budget = cython.declare(object, visibility = "public")
+    call_dependencies = cython.declare(dict, visibility = "public")
+    call_preservations = cython.declare(object, visibility = "public")
+    exhausted = cython.declare(cython.bint, visibility = "public")
+    invocation_resolver = cython.declare(object, visibility = "public")
+    invocation_scope = cython.declare(object, visibility = "public")
+    iterations = cython.declare(cython.longlong, visibility = "public")
+    ledger = cython.declare(object, visibility = "public")
+    near_call_scope = cython.declare(object, visibility = "public")
+    normalized = cython.declare(object, visibility = "public")
+    offered_invocation_scope = cython.declare(object, visibility = "public")
+    pending = cython.declare(dict, visibility = "public")
+    project = cython.declare(object, visibility = "public")
+    raw_count = cython.declare(object, visibility = "public")
+    refusals = cython.declare(list, visibility = "public")
+    terms = cython.declare(object, visibility = "public")
 
     def __init__(
         self,
         artifact: IRFunctionArtifact,
-        pending: Mapping[int, PendingTerminalJump8616],
-        raw_count: int,
-        normalized: int,
+        pending: Mapping[cython.longlong, PendingTerminalJump8616],
+        raw_count: cython.longlong,
+        normalized: cython.longlong,
         project: object | None,
         binding: EntryJumpDomainSourceBinding8616,
         budget: EntryJumpDomainBudget8616,
-        call_preservations: tuple[EntryDomainCallPreservation8616, ...] = (),
+        call_preservations: object = (),
         invocation_resolver: Callable[
             [int], Real16InvocationDomain8616 | None
         ] | None = None,
         near_call_scope: NearCallJumpScope8616 | None = None,
-        defer_near_call_final_seal: bool = False,
+        defer_near_call_final_seal: cython.bint = False,
         offered_invocation_scope: Real16InvocationDomain8616 | None = None,
     ) -> None:
         self.near_call_scope = near_call_scope
@@ -921,6 +983,7 @@ class _ProofRun8616:
         self.pending = dict(pending)
         self.call_preservations = call_preservations
         self.invocation_resolver = invocation_resolver
+        self.offered_invocation_scope = offered_invocation_scope
         self.project = project
         self.binding = binding
         self.raw_count = raw_count
@@ -929,20 +992,21 @@ class _ProofRun8616:
         self.terms = _Budget8616(budget)
         self.ledger = _Ledger8616()
         self.refusals: list[IRRefusal] = []
-        self.admitted: dict[int, int] = {}
-        self.block_targets: dict[int, int] = {}
-        self.admitted_invocations: dict[int, Real16InvocationDomain8616] = {}
-        self.call_dependencies: dict[int, _ScopedCallDependency8616] = {}
+        self.admitted: dict[cython.longlong, cython.longlong] = {}
+        self.block_targets: dict[cython.longlong, cython.longlong] = {}
+        self.admitted_invocations: dict[cython.longlong, Real16InvocationDomain8616] = {}
+        self.call_dependencies: dict[cython.longlong, _ScopedCallDependency8616] = {}
         self.invocation_scope: Real16InvocationDomain8616 | None = offered_invocation_scope
         self.iterations = 0
         self.exhausted = False
-        self.bound_callsites: set[int] = set()
+        self.bound_callsites: set[cython.longlong] = set()
 
+    @cython.ccall
     def refuse(
         self,
-        candidate: PendingTerminalJump8616 | None,
+        candidate: object,
         reason: EntryJumpDomainRefusal8616,
-        detail: str,
+        detail: object,
         block_addr: int | None,
     ) -> None:
         """Record one typed refusal and its ledger fact."""
@@ -954,24 +1018,28 @@ class _ProofRun8616:
                 f"{reason.value}: {detail}",
             )
 
+    @cython.ccall
     def refuse_all(
         self,
-        candidates: Mapping[int, PendingTerminalJump8616],
+        candidates: Mapping[cython.longlong, PendingTerminalJump8616],
         reason: EntryJumpDomainRefusal8616,
-        detail: str,
+        detail: object,
     ) -> None:
         """Refuse every still-open candidate with the same typed reason."""
+        candidate: object
         for candidate in candidates.values():
             self.refuse(candidate, reason, detail, candidate.block_addr)
 
-    def stage_entry(self) -> bool:
+    @cython.ccall
+    def stage_entry(self) -> cython.bint:
         """Stage ENTRY: the root must be a decoded, aligned entry block."""
-        blocks_by_addr = {block.addr: block for block in self.artifact.blocks}
+        entry_block: object
+        blocks_by_addr = {block.addr: block for block in iter(self.artifact.blocks)}
         entry_block = blocks_by_addr.get(self.artifact.function_addr)
         if (
             entry_block is None
             or not entry_block.instrs
-            or entry_block.instrs[0].addr != self.artifact.function_addr
+            or operator.ne(entry_block.instrs[0].addr, self.artifact.function_addr)
         ):
             self.ledger.record(
                 EntryJumpDomainStage8616.ENTRY,
@@ -991,8 +1059,12 @@ class _ProofRun8616:
         )
         return True
 
-    def stage_census(self) -> bool:
+    @cython.ccall
+    def stage_census(self) -> cython.bint:
         """Stage CENSUS: every block needs a complete typed instruction stream."""
+        block: object
+        index: object
+        instr: object
         census_failure = False
         for block in self.artifact.blocks:
             if not self.terms.consume(1 + len(block.instrs)):
@@ -1028,12 +1100,13 @@ class _ProofRun8616:
         )
         return True
 
+    @cython.ccall
     def path_interference(
         self,
-        blocks_by_addr: Mapping[int, IRBlock],
-        region: _ReachableRegion8616 | None,
-        transfer_blocks: frozenset[int],
-    ) -> tuple[EntryJumpDomainRefusal8616, str] | None:
+        blocks_by_addr: Mapping[cython.longlong, IRBlock],
+        region: object,
+        transfer_blocks: object,
+    ) -> object:
         """Stage PATH: classify reachable control and scan for interference.
 
         The reachable region must be closed: an exterior successor edge is
@@ -1043,6 +1116,8 @@ class _ProofRun8616:
         interference, and an effect the owner cannot close is unclassified
         proof debt, never assumed benign.
         """
+        failure: object
+        addr: object
         if region is None:
             return (
                 EntryJumpDomainRefusal8616.PATH_INCOMPLETE,
@@ -1072,13 +1147,17 @@ class _ProofRun8616:
                 return failure
         return None
 
+    @cython.ccall
     def _instruction_effects_8616(
         self,
         block: IRBlock,
-        addr: int,
-        transfer_blocks: frozenset[int],
-    ) -> tuple[EntryJumpDomainRefusal8616, str] | None:
+        addr: cython.longlong,
+        transfer_blocks: object,
+    ) -> object:
         """Scan one reachable block's instructions for interference."""
+        failure: object
+        index: object
+        instr: object
         for index, instr in enumerate(block.instrs):
             if not self.terms.consume(1):
                 return (
@@ -1086,15 +1165,16 @@ class _ProofRun8616:
                     "instruction scan budget exhausted",
                 )
             failure = _instruction_gate_8616(
-                block, addr, index == len(block.instrs) - 1, instr,
+                block, addr, operator.eq(index, len(block.instrs) - 1), instr,
                 transfer_blocks,
             )
             if failure is not None:
                 return failure
         return None
 
+    @cython.ccall
     def entry_cs_state(
-        self, patched_blocks: tuple[IRBlock, ...],
+        self, patched_blocks: object,
     ) -> tuple[SegmentStateSolution8616 | None, SegmentRegisterState | None]:
         """Stage SEGMENT: rerun the solver on this exact artifact.
 
@@ -1102,6 +1182,7 @@ class _ProofRun8616:
         remaining budget cannot afford is not performed and flags the run
         as exhausted instead of producing unbudgeted evidence.
         """
+        entry_cs: object
         if not self.terms.consume(_segment_solve_terms_8616(patched_blocks)):
             self.exhausted = True
             return None, None
@@ -1116,44 +1197,51 @@ class _ProofRun8616:
         ).get(_CS_REGISTER_8616)
         return solution, entry_cs
 
+    @cython.ccall
     def cs_invariant(
         self,
         solution: SegmentStateSolution8616,
-        blocks_by_addr: Mapping[int, IRBlock],
-        reachable: frozenset[int],
+        blocks_by_addr: Mapping[cython.longlong, IRBlock],
+        reachable: object,
         entry_cs: SegmentRegisterState,
-    ) -> bool:
+    ) -> cython.bint:
         """Require the entry CS identity at every reachable instruction."""
+        state: object
+        addr: object
+        index: object
+        instr: object
         for addr in sorted(reachable):
             scan_block = blocks_by_addr[addr]
             for index, instr in enumerate(scan_block.instrs):
                 state = solution.instruction_entry_states.get(
                     _instruction_state_key_8616(addr, index, instr), {},
                 ).get(_CS_REGISTER_8616)
-                if state is None or state != entry_cs:
+                if state is None or operator.ne(state, entry_cs):
                     return False
         return True
 
+    @cython.ccall
     def _consuming_scope_8616(
-        self, callsite_addr: int, required: Real16InvocationDomain8616,
+        self, callsite_addr: cython.longlong, required: Real16InvocationDomain8616,
     ) -> Real16InvocationDomain8616 | None:
         """Resolve the authenticated consuming entry for one conditional record.
 
-        A conditional record names the invocation-local premise its
-        Semantics binding consumed; this run may only read it under a
-        scope that reauthenticates against that exact entry. The resolver
-        is asked for the premise bound to the same callsite inside this
-        identical artifact, and ``same_real16_entry_scope_8616`` — not
-        selector or address coincidence — decides whether the resolved
-        and required entries transport through a coterminous proven edge.
-        A missing resolver, a missing premise, or a foreign entry returns
-        ``None`` so the record stays conditional and the call keeps its
-        default refusal.
+        An explicitly offered root is independent consuming evidence, not a
+        request to reconstruct the same entry at each callsite. Authenticate
+        it against the record's required entry before consuming any effects.
+        Without an offered root, retain the callsite resolver route. Missing
+        or foreign evidence keeps the call's default refusal.
         """
-        resolver = self.invocation_resolver
-        if resolver is None or self.project is None:
+        resolver: object
+        scope: object
+        if self.project is None:
             return None
-        scope = resolver(callsite_addr)
+        scope = self.offered_invocation_scope
+        if scope is None:
+            resolver = self.invocation_resolver
+            if resolver is None:
+                return None
+            scope = resolver(callsite_addr)
         from .real16_invocation_domain import (
             Real16InvocationDomain8616,
             same_real16_entry_scope_8616,
@@ -1165,14 +1253,16 @@ class _ProofRun8616:
             return None
         if self.invocation_scope is None:
             self.invocation_scope = scope
-        elif not same_real16_entry_scope_8616(scope, self.invocation_scope):
+        elif scope is not self.invocation_scope and not same_real16_entry_scope_8616(
+            scope, self.invocation_scope,
+        ):
             return None
         return self.invocation_scope
 
     def _call_substitutes_8616(
         self, original_block: IRBlock, instr: IRInstr,
-        selector_admissions: tuple[EntryDomainCallPreservation8616, ...] | None = None,
-    ) -> tuple[IRInstr, ...]:
+        selector_admissions: object = None,
+    ) -> object:
         """Model one bound CS-preserving CALL as its proved segment writes.
 
         Only a complete per-callsite preservation proof bound to the
@@ -1190,18 +1280,20 @@ class _ProofRun8616:
         unobserved ``ax`` keeps the typed instruction stream nonempty and
         mirrors the call boundary's general-register drop.
         """
+        required: object
+        scope: object
         if self.near_call_scope is not None:
             return self._conditional_call_substitutes_8616(original_block, instr)
         candidates = tuple(
             proof
-            for proof in self.call_preservations
+            for proof in iter(self.call_preservations)
             if proof.block is original_block and proof.instruction is instr
         )
         if len(candidates) != 1 or not self.terms.consume(1):
             return (instr,)
         proof = candidates[0]
         required = proof.required_scope
-        scope: Real16InvocationDomain8616 | None = None
+        scope = None
         if proof.selector_projection is not None:
             scope = self.invocation_scope
         elif required is not None:
@@ -1211,7 +1303,7 @@ class _ProofRun8616:
             if scope is None:
                 return (instr,)
         if proof.selector_projection is not None and selector_admissions is not None:
-            preserved = (frozenset({"cs"}) if any(proof is item for item in selector_admissions)
+            preserved = (frozenset({"cs"}) if any(proof is item for item in iter(selector_admissions))
                          else frozenset())
         else:
             preserved = _call_preserved_registers_8616(proof, scope)
@@ -1238,12 +1330,13 @@ class _ProofRun8616:
 
     def _conditional_call_substitutes_8616(
         self, original_block: IRBlock, instr: IRInstr,
-    ) -> tuple[IRInstr, ...]:
+    ) -> object:
         """Project an authenticated conditional step under this run's entry."""
+        callee: object
         if self.near_call_scope is None:
             return (instr,)
         matches = tuple(
-            step for step in self.near_call_scope.preservations
+            step for step in iter(self.near_call_scope.preservations)
             if step.theorem is not None
             and step.theorem.block is original_block
             and step.theorem.instruction is instr
@@ -1259,8 +1352,8 @@ class _ProofRun8616:
         return self._segment_surrogates_8616(instr, preserved)
 
     def _segment_surrogates_8616(
-        self, instr: IRInstr, preserved: frozenset[str],
-    ) -> tuple[IRInstr, ...]:
+        self, instr: IRInstr, preserved: object,
+    ) -> object:
         """Project only authenticated segment preservation into the solver view."""
         surrogates = tuple(
             IRInstr(
@@ -1270,7 +1363,7 @@ class _ProofRun8616:
                 size=2,
                 addr=instr.addr,
             )
-            for register in SEGMENT_REGISTERS
+            for register in iter(SEGMENT_REGISTERS)
             if register not in preserved
         )
         if not surrogates:
@@ -1286,8 +1379,8 @@ class _ProofRun8616:
         return surrogates
 
     def _call_preservation_view_8616(
-        self, blocks: tuple[IRBlock, ...], *, propose_selectors: bool = False,
-    ) -> tuple[IRBlock, ...]:
+        self, blocks: object, *, propose_selectors: cython.bint = False,
+    ) -> object:
         """Build solver proposals or consume selector CALLs in one final batch.
 
         The admitted originals exist only during this synchronous view build;
@@ -1296,16 +1389,19 @@ class _ProofRun8616:
         call dependency or call-bound ledger entry. Reverify must authenticate
         every selector record and solve the final graph before publication.
         """
+        block: object
+        instr: object
+        original: object
         if not self.call_preservations and self.near_call_scope is None:
             return blocks
-        selectors = tuple(record for record in self.call_preservations
+        selectors = tuple(record for record in iter(self.call_preservations)
                           if record.selector_projection is not None)
         view: list[IRBlock] = []
         for original, block in zip(self.artifact.blocks, blocks, strict=True):
             instrs: list[IRInstr] = []
             for instr in block.instrs:
                 if instr.op != "CALL" or any(
-                    record.block is original and record.instruction is instr for record in selectors
+                    record.block is original and record.instruction is instr for record in iter(selectors)
                 ):
                     instrs.append(instr)
                 else:
@@ -1318,10 +1414,10 @@ class _ProofRun8616:
             instrs = []
             for instr in block.instrs:
                 if instr.op == "CALL" and any(
-                    record.block is original and record.instruction is instr for record in selectors
+                    record.block is original and record.instruction is instr for record in iter(selectors)
                 ):
                     if propose_selectors:
-                        matches = tuple(record for record in selectors
+                        matches = tuple(record for record in iter(selectors)
                                         if record.block is original and record.instruction is instr)
                         if (len(matches) == 1 and self.terms.consume(1)
                                 and _selector_call_root_bound_8616(matches[0], self.invocation_scope)):
@@ -1335,6 +1431,7 @@ class _ProofRun8616:
             result.append(replace(block, instrs=tuple(instrs)))
         return tuple(result)
 
+    @cython.ccall
     def _native_relift_8616(
         self, block: IRBlock, decoded: DecodedRelativeEdge,
     ) -> _NativeRelift8616:
@@ -1400,7 +1497,7 @@ class _ProofRun8616:
                     "re-lifted block lacks byte or VEX surfaces",
                 ),
             )
-        if lifted_addr != block.addr or lifted_size != native_len:
+        if operator.ne(lifted_addr, block.addr) or lifted_size != native_len:
             return _NativeRelift8616(
                 None,
                 (
@@ -1411,12 +1508,13 @@ class _ProofRun8616:
             )
         return _NativeRelift8616(lifted, None)
 
+    @cython.ccall
     def _native_transfer_binding_8616(
         self,
         block: IRBlock,
         origin: IRInstructionOrigin8616,
         decoded: DecodedRelativeEdge,
-    ) -> tuple[EntryJumpDomainRefusal8616, str] | None:
+    ) -> object:
         """Bind the decoded carrier to the re-lifted native block tail.
 
         The decoded edge is only a claim: this stage re-lifts the exact
@@ -1442,8 +1540,8 @@ class _ProofRun8616:
         offset = decoded.head - block.addr
         if (
             offset < 0
-            or offset + decoded.encoded_size != len(native_bytes)
-            or native_bytes[offset:] != decoded.encoding
+            or operator.ne(offset + decoded.encoded_size, len(native_bytes))
+            or operator.ne(native_bytes[offset:], decoded.encoding)
         ):
             return (
                 EntryJumpDomainRefusal8616.TRANSFER_FACT_MISMATCH,
@@ -1459,7 +1557,7 @@ class _ProofRun8616:
                 EntryJumpDomainRefusal8616.TRANSFER_FACT_MISMATCH,
                 "re-lifted block is not a boring near-transfer terminal",
             )
-        if len(native_vex.statements) != origin.statement_index:
+        if operator.ne(len(native_vex.statements), origin.statement_index):
             return (
                 EntryJumpDomainRefusal8616.TRANSFER_FACT_MISMATCH,
                 f"re-lifted statement count {len(native_vex.statements)} "
@@ -1469,7 +1567,7 @@ class _ProofRun8616:
         native_next = native_vex.next
         if (
             not isinstance(native_next, pyvex.expr.RdTmp)
-            or native_next.tmp != origin.block_next_tmp
+            or operator.ne(native_next.tmp, origin.block_next_tmp)
         ):
             return (
                 EntryJumpDomainRefusal8616.TRANSFER_FACT_MISMATCH,
@@ -1478,20 +1576,25 @@ class _ProofRun8616:
             )
         return None
 
+    @cython.ccall
     def evaluate(
         self,
         candidate: PendingTerminalJump8616,
         block: IRBlock,
         solution: SegmentStateSolution8616,
         entry_cs: SegmentRegisterState,
-        reachable: frozenset[int],
-        blocks_by_addr: Mapping[int, IRBlock],
-    ) -> bool:
+        reachable: object,
+        blocks_by_addr: Mapping[cython.longlong, IRBlock],
+    ) -> cython.bint:
         """Settle one reachable candidate: admit, refuse, or defer.
 
         Returns True when the candidate is settled this iteration; an
         unreachable transfer block defers for a later fixpoint round.
         """
+        native_failure: object
+        origin: object
+        premise_target: object
+        target: object
         decoded = candidate.decoded
         block_addr = candidate.block_addr
         if block_addr not in reachable:
@@ -1500,7 +1603,7 @@ class _ProofRun8616:
         origin = _block_next_origin_8616(terminal, block_addr)
         if (
             terminal.op != "JMP"
-            or terminal.addr != decoded.head
+            or operator.ne(terminal.addr, decoded.head)
             or not _word_jump_form_8616(decoded)
             or origin is None
             or not _transfer_operand_bound_8616(terminal, origin, decoded)
@@ -1577,8 +1680,8 @@ class _ProofRun8616:
         return True
 
     def _premise_window_target_8616(
-        self, block_addr: int, decoded: DecodedRelativeEdge,
-    ) -> tuple[int, Real16InvocationDomain8616] | None:
+        self, block_addr: cython.longlong, decoded: DecodedRelativeEdge,
+    ) -> object:
         """Discharge one transfer through a bound invocation premise.
 
         Consulted only when the joint fetch-window bound cannot keep the
@@ -1588,6 +1691,9 @@ class _ProofRun8616:
         block and jump head, and the retained premise is kept on the
         admission for application-time replay.
         """
+        block: object
+        premise: object
+        resolver: object
         resolver = self.invocation_resolver
         if resolver is None or self.project is None:
             return None
@@ -1597,8 +1703,8 @@ class _ProofRun8616:
         block = next(
             (
                 candidate
-                for candidate in self.artifact.blocks
-                if candidate.addr == block_addr
+                for candidate in iter(self.artifact.blocks)
+                if operator.eq(candidate.addr, block_addr)
             ),
             None,
         )
@@ -1626,8 +1732,14 @@ class _ProofRun8616:
             self.invocation_scope = premise
         return target, premise
 
+    @cython.ccall
     def fixpoint(self) -> None:
         """Iterate stages 3-5 until no candidate remains or progress stops."""
+        entry_cs: object
+        failure: object
+        region: object
+        solution: object
+        block_addr: object
         open_candidates = dict(self.pending)
         while open_candidates and self.iterations < self.budget.max_iterations:
             self.iterations += 1
@@ -1635,7 +1747,7 @@ class _ProofRun8616:
                 self.artifact.blocks, self.block_targets,
             )
             current_blocks = self._call_preservation_view_8616(current_blocks, propose_selectors=True)
-            current_by_addr = {block.addr: block for block in current_blocks}
+            current_by_addr = {block.addr: block for block in iter(current_blocks)}
             region = _reachable_blocks_8616(
                 current_by_addr, self.artifact.function_addr,
             )
@@ -1730,13 +1842,19 @@ class _ProofRun8616:
         publishing the result. Standalone proof and application retain
         their own authentication.
         """
+        block_addr: object
+        entry_cs: object
+        failure: object
+        region: object
+        solution: object
+        head: object
         if not self.admitted:
             return
         final_blocks = _patched_blocks_8616(
             self.artifact.blocks, self.block_targets,
         )
         final_blocks = self._call_preservation_view_8616(final_blocks)
-        final_by_addr = {block.addr: block for block in final_blocks}
+        final_by_addr = {block.addr: block for block in iter(final_blocks)}
         region = _reachable_blocks_8616(
             final_by_addr, self.artifact.function_addr,
         )
@@ -1775,14 +1893,15 @@ class _ProofRun8616:
         )
         for head in sorted(self.admitted):
             block_addr = next(
-                addr for addr, cand in self.pending.items()
-                if cand.decoded.head == head
+                addr for addr, cand in builtins.iter(self.pending.items())
+                if operator.eq(cand.decoded.head, head)
             )
             self.refuse(self.pending[block_addr], reason, detail, block_addr)
         self.admitted.clear()
         self.block_targets.clear()
 
-    def _near_call_final_seal_refused_8616(self) -> bool:
+    @cython.ccall
+    def _near_call_final_seal_refused_8616(self) -> cython.bint:
         """Final scope authentication the staged seal defers or re-runs.
 
         A staged synchronous run returns ``False`` here — its private
@@ -1799,9 +1918,9 @@ class _ProofRun8616:
                 project=self.project,
                 artifact=self.artifact,
             )
-            or self.binding.digest != _source_digest_8616(
+            or operator.ne(self.binding.digest, _source_digest_8616(
                 self.artifact.function_addr, self.artifact.blocks,
-            )
+            ))
         )
 
     def product(self) -> EntryJumpDomainProof8616:
@@ -1815,7 +1934,7 @@ class _ProofRun8616:
         """
         dependencies = tuple(
             self.call_dependencies[callsite]
-            for callsite in sorted(self.call_dependencies)
+            for callsite in builtins.iter(sorted(self.call_dependencies))
         )
         return EntryJumpDomainProof8616(
             function_addr=self.artifact.function_addr,
@@ -1823,8 +1942,8 @@ class _ProofRun8616:
             admitted=tuple(
                 AdmittedTerminalJump8616(
                     block_addr=next(
-                        addr for addr, cand in self.pending.items()
-                        if cand.decoded.head == head
+                        addr for addr, cand in builtins.iter(self.pending.items())
+                        if operator.eq(cand.decoded.head, head)
                     ),
                     head=head,
                     target=target,
@@ -1833,7 +1952,7 @@ class _ProofRun8616:
                     invocation_scope=self.invocation_scope,
                     near_call_scope=self.near_call_scope,
                 )
-                for head, target in sorted(self.admitted.items())
+                for head, target in builtins.iter(sorted(tuple(self.admitted.items())))
             ),
             refusals=tuple(self.refusals),
             ledger=tuple(self.ledger.entries),
@@ -1852,13 +1971,14 @@ class _ProofRun8616:
         )
 
 
+@cython.ccall
 def prove_entry_jump_domains_8616(
     artifact: IRFunctionArtifact,
-    evidence_by_block: Mapping[int, TerminalJumpEvidence8616],
+    evidence_by_block: Mapping[cython.longlong, TerminalJumpEvidence8616],
     *,
     project: object | None = None,
     budget: EntryJumpDomainBudget8616 | None = None,
-    call_preservations: tuple[EntryDomainCallPreservation8616, ...] = (),
+    call_preservations: object = (),
     invocation_resolver: Callable[
         [int], Real16InvocationDomain8616 | None
     ] | None = None,
@@ -1867,9 +1987,11 @@ def prove_entry_jump_domains_8616(
 ) -> EntryJumpDomainProof8616:
     """Prove pending terminal jumps against the function-entry fetch domain.
 
-    ``offered_invocation_scope`` is an explicit declared-root authority for
-    selector CALL records. It never makes selector evidence universal and
-    authorizes only CS preservation; full invocation effects remain separate.
+    ``offered_invocation_scope`` retains the explicit consuming root for
+    conditional CALL records, including original scoped callee records. Selector
+    evidence authorizes only CS preservation; full callee effects still require
+    their own complete dependency checks against that root. Neither becomes
+    universal evidence through an offered scope.
     Unoffered callers retain their existing resolver-based proof route.
 
     The standalone public prove keeps its own complete final
@@ -1934,16 +2056,16 @@ def prove_entry_jump_domains_8616(
 
 def _prove_entry_jump_domains_8616(
     artifact: IRFunctionArtifact,
-    evidence_by_block: Mapping[int, TerminalJumpEvidence8616],
+    evidence_by_block: Mapping[cython.longlong, TerminalJumpEvidence8616],
     *,
     project: object | None = None,
     budget: EntryJumpDomainBudget8616 | None = None,
-    call_preservations: tuple[EntryDomainCallPreservation8616, ...] = (),
+    call_preservations: object = (),
     invocation_resolver: Callable[
         [int], Real16InvocationDomain8616 | None
     ] | None = None,
     near_call_scope: NearCallJumpScope8616 | None = None,
-    defer_near_call_final_seal: bool = False,
+    defer_near_call_final_seal: cython.bint = False,
     offered_invocation_scope: Real16InvocationDomain8616 | None = None,
 ) -> EntryJumpDomainProof8616:
     """Run the shared proof core for the public and staged routes.
@@ -1961,7 +2083,7 @@ def _prove_entry_jump_domains_8616(
         function_addr=artifact.function_addr,
         block_count=len(artifact.blocks),
         digest=_source_digest_8616(artifact.function_addr, artifact.blocks),
-        pending=tuple(pending[addr] for addr in sorted(pending)),
+        pending=tuple(pending[addr] for addr in builtins.iter(sorted(pending))),
     )
     run = _ProofRun8616(
         artifact,
@@ -2005,12 +2127,13 @@ def _prove_entry_jump_domains_8616(
     return run.product()
 
 
+@cython.ccall
 def _application_admission_failure_8616(
     proof: EntryJumpDomainProof8616,
-    root: int,
-    artifact_blocks: tuple[IRBlock, ...],
+    root: cython.longlong,
+    artifact_blocks: object,
     invocation_scope: Real16InvocationDomain8616 | None = None,
-) -> str | None:
+) -> object:
     """Check every published edge against its unique decoded pending transfer.
 
     Source membership alone cannot bind a target: a changed admission may
@@ -2022,14 +2145,18 @@ def _application_admission_failure_8616(
     consuming artifact's identical block object and the recorded jump head
     and target.
     """
-    pending: dict[tuple[int, int], PendingTerminalJump8616] = {}
+    candidate: object
+    dependency_failure: object
+    jump: object
+    recorded: object
+    pending: dict[tuple[cython.longlong, cython.longlong], PendingTerminalJump8616] = {}
     for recorded in proof.source_binding.pending:
         key = (recorded.block_addr, recorded.decoded.head)
         if key in pending:
             return "recorded pending candidate is ambiguous"
         pending[key] = recorded
-    blocks_by_addr = {block.addr: block for block in artifact_blocks}
-    seen_blocks: set[int] = set()
+    blocks_by_addr = {block.addr: block for block in iter(artifact_blocks)}
+    seen_blocks: set[cython.longlong] = set()
     for jump in proof.admitted:
         candidate = pending.get((jump.block_addr, jump.head))
         if candidate is None:
@@ -2051,7 +2178,7 @@ def _application_admission_failure_8616(
             or type(jump.target) is not int
         ):
             return "admitted target does not match its decoded entry-window transfer"
-        if target != jump.target and not _premise_redischarges_8616(
+        if operator.ne(target, jump.target) and not _premise_redischarges_8616(
             jump, blocks_by_addr.get(jump.block_addr),
         ):
             return (
@@ -2065,7 +2192,7 @@ def _application_dependency_facts_8616(proof: EntryJumpDomainProof8616) -> objec
     """Pin original edge/dependency fields across the final shared CALL callback."""
     from .declared_selector_scoped_callee import _scope_facts
 
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     return (
         id(proof.invocation_scope), _scope_facts(proof.invocation_scope, seen),
         tuple((id(jump), jump.block_addr, jump.head, jump.target,
@@ -2073,40 +2200,46 @@ def _application_dependency_facts_8616(proof: EntryJumpDomainProof8616) -> objec
                id(jump.invocation_scope), _scope_facts(jump.invocation_scope, seen),
                id(jump.near_call_scope),
                tuple((id(item), item.callsite_addr, id(item.record), id(item.scope),
-                      _scope_facts(item.scope, seen)) for item in jump.call_dependencies))
-              for jump in proof.admitted),
+                      _scope_facts(item.scope, seen)) for item in iter(jump.call_dependencies)))
+              for jump in iter(proof.admitted)),
     )
 
 
+@cython.ccall
 def _application_final_calls_failure_8616(
-    proof: EntryJumpDomainProof8616, artifact_blocks: tuple[IRBlock, ...],
-) -> str | None:
+    proof: EntryJumpDomainProof8616, artifact_blocks: object,
+) -> object:
     """Run one fresh shared record consume after all edge/scope callbacks."""
+    failure: object
+    jump: object
     if proof.admitted and proof.near_call_scope is None:
         before = _application_dependency_facts_8616(proof)
         expected = _source_call_dependencies_8616(proof, artifact_blocks, proof.invocation_scope)
-        if _application_dependency_facts_8616(proof) != before:
+        if operator.ne(_application_dependency_facts_8616(proof), before):
             return "retained edge or invocation dependencies changed during CALL consumption"
         for jump in proof.admitted:
             failure = _call_dependency_records_failure_8616(jump, expected)
             if failure is not None:
                 return failure
-    if (not proof.stats.closed or len(proof.admitted) != proof.stats.materialized_count
-            or len(proof.refusals) != proof.stats.failure_count):
+    if (not proof.stats.closed or operator.ne(len(proof.admitted), proof.stats.materialized_count)
+            or operator.ne(len(proof.refusals), proof.stats.failure_count)):
         return "proof accounting does not close over its admissions and refusals"
     return None
 
 
 def _selector_call_root_bound_8616(
     record: EntryDomainCallPreservation8616,
-    scope: Real16InvocationDomain8616 | None,
-) -> bool:
+    scope: object,
+) -> cython.bint:
     """Bind selector authority to the exact offered declared root and CALL."""
+    projection: object
+    selector: object
+    source: object
     from .real16_invocation_domain import DeclaredFunctionEntryLink8616, Real16InvocationDomain8616
 
     selector = record.selector_scope
     projection = record.selector_projection
-    if type(scope) is not Real16InvocationDomain8616 or selector is None or projection is None:
+    if scope is None or type(scope) is not Real16InvocationDomain8616 or selector is None or projection is None:
         return False
     root = selector.root_link
     source = selector.source
@@ -2119,19 +2252,21 @@ def _selector_call_root_bound_8616(
         and root.admission is selector.admission
         and record.artifact is root.artifact and record.boundary is root.boundary
         and root.boundary.project is scope.project and record.required_scope is None
-        and projection.incoming_cs == scope.entry_segment
-        and any(offered is record for offered in scope.entry_call_preservations)
+        and operator.eq(projection.incoming_cs, scope.entry_segment)
+        and any(offered is record for offered in iter(scope.entry_call_preservations))
         and projection.block is record.block and projection.instruction is record.instruction
-        and any(block is record.block for block in root.artifact.blocks)
-        and any(row is record.instruction for row in record.block.instrs)
+        and any(block is record.block for block in iter(root.artifact.blocks))
+        and any(row is record.instruction for row in iter(record.block.instrs))
     )
 
 
+@cython.ccall
 def _selector_call_preserves_cs_8616(
     record: EntryDomainCallPreservation8616,
     scope: Real16InvocationDomain8616 | None,
-) -> bool:
+) -> cython.bint:
     """Consume only CS preservation, with exact root binding after callbacks."""
+    selector: object
     from .real16_invocation_domain import same_real16_entry_scope_8616
 
     if not _selector_call_root_bound_8616(record, scope):
@@ -2147,10 +2282,11 @@ def _selector_call_preserves_cs_8616(
 
 
 def _selector_call_batch_8616(
-    records: tuple[EntryDomainCallPreservation8616, ...],
+    records: object,
     scope: Real16InvocationDomain8616 | None,
 ) -> tuple[EntryDomainCallPreservation8616, ...]:
     """Consume exact selector records once and expose originals only synchronously."""
+    selector: object
     from .entry_domain_call_preservation import consume_entry_selector_call_preservation_batch_8616
     from .real16_invocation_domain import same_real16_entry_scope_8616
 
@@ -2159,57 +2295,60 @@ def _selector_call_batch_8616(
     selector = records[0].selector_scope
     if selector is None or not all(
         record.selector_scope is selector and _selector_call_root_bound_8616(record, scope)
-        for record in records
+        for record in iter(records)
     ) or not same_real16_entry_scope_8616(scope, scope):
         return ()
     from .declared_selector_scoped_callee import _scope_facts
 
     before = _scope_facts(scope, set())
     verdicts = consume_entry_selector_call_preservation_batch_8616(records, selector)
-    if (len(verdicts) != len(records) or not same_real16_entry_scope_8616(scope, scope)
-            or _scope_facts(scope, set()) != before
-            or not all(_selector_call_root_bound_8616(record, scope) for record in records)):
+    if (operator.ne(len(verdicts), len(records)) or not same_real16_entry_scope_8616(scope, scope)
+            or operator.ne(_scope_facts(scope, set()), before)
+            or not all(_selector_call_root_bound_8616(record, scope) for record in iter(records))):
         return ()
-    return tuple(record for record, admitted in zip(records, verdicts, strict=True) if admitted)
+    return tuple(record for record, admitted in builtins.iter(zip(records, verdicts, strict=True)) if admitted)
 
 
+@cython.ccall
 def _call_preserved_registers_8616(
     record: EntryDomainCallPreservation8616,
     scope: Real16InvocationDomain8616 | None,
-) -> frozenset[str]:
+) -> object:
     """Keep selector-only CS evidence distinct from full segment effects."""
     if record.selector_projection is not None:
         return frozenset({"cs"}) if _selector_call_preserves_cs_8616(record, scope) else frozenset()
-    if not record.complete_for(scope):
-        return frozenset()
+    # The owned projection freshly authenticates this scope and returns no
+    # effects on refusal. A preceding complete_for call would replay it twice.
     return frozenset(record.preserved_registers_for(scope))
 
 
 def _source_call_dependencies_8616(
     proof: EntryJumpDomainProof8616,
-    blocks: tuple[IRBlock, ...],
+    blocks: object,
     scope: Real16InvocationDomain8616 | None,
-) -> tuple[EntryDomainCallPreservation8616, ...] | None:
+) -> object:
     """Reconstruct the complete CALL census from the exact applying source.
 
     All source calls must close before application. This intentionally refuses
     an unproved off-path call too: retained dependencies cannot authenticate a
     reduced caller surface or omit a source row by deleting its record.
     """
+    block: object
+    instruction: object
     expected: list[EntryDomainCallPreservation8616] = []
-    consumed: set[int] = set()
+    consumed: set[cython.longlong] = set()
     for block in blocks:
         for instruction in block.instrs:
             if instruction.op != "CALL":
                 continue
             records = tuple(
-                record for record in proof.call_preservations
+                record for record in iter(proof.call_preservations)
                 if record.block is block and record.instruction is instruction
             )
             if len(records) != 1:
                 return None
             record = records[0]
-            if record.callsite_addr != instruction.addr or id(record) in consumed:
+            if operator.ne(record.callsite_addr, instruction.addr) or id(record) in consumed:
                 return None
             consumed.add(id(record))
             if (record.selector_projection is None
@@ -2217,17 +2356,18 @@ def _source_call_dependencies_8616(
                 return None
             if record.required_scope is not None or record.selector_projection is not None:
                 expected.append(record)
-    if len(consumed) != len(proof.call_preservations):
+    if operator.ne(len(consumed), len(proof.call_preservations)):
         return None
-    selectors = tuple(record for record in expected if record.selector_projection is not None)
-    if len(_selector_call_batch_8616(selectors, scope)) != len(selectors):
+    selectors = tuple(record for record in iter(expected) if record.selector_projection is not None)
+    if operator.ne(len(_selector_call_batch_8616(selectors, scope)), len(selectors)):
         return None
     return tuple(sorted(expected, key=lambda record: record.callsite_addr))
 
 
+@cython.ccall
 def _near_scope_admission_failure_8616(
     jump: AdmittedTerminalJump8616, proof: EntryJumpDomainProof8616,
-) -> str | None:
+) -> object:
     """Reject foreign near-call projections or mixed invocation premises."""
     if proof.near_call_scope is None or jump.near_call_scope is not proof.near_call_scope:
         return "admission retained a foreign near-call scope"
@@ -2238,13 +2378,16 @@ def _near_scope_admission_failure_8616(
     return None
 
 
+@cython.ccall
 def _call_dependency_failure_8616(
     jump: AdmittedTerminalJump8616,
     proof: EntryJumpDomainProof8616,
-    blocks: tuple[IRBlock, ...],
+    blocks: object,
     invocation_scope: Real16InvocationDomain8616 | None,
-) -> str | None:
+) -> object:
     """Replay the source census and require one common explicitly consumed scope."""
+    scope: object
+    dependency: object
     from .real16_invocation_domain import same_real16_entry_scope_8616
 
     if proof.near_call_scope is not None or jump.near_call_scope is not None:
@@ -2267,24 +2410,28 @@ def _call_dependency_failure_8616(
     return None
 
 
+@cython.ccall
 def _call_dependency_records_failure_8616(
     jump: AdmittedTerminalJump8616,
-    expected: tuple[EntryDomainCallPreservation8616, ...] | None,
-) -> str | None:
+    expected: object,
+) -> object:
     """Match final source admissions to original dependency objects without callbacks."""
-    if expected is None or len(expected) != len(jump.call_dependencies):
+    dependency: object
+    record: object
+    if expected is None or operator.ne(len(expected), len(jump.call_dependencies)):
         return "retained dependencies do not close over the source CALL census"
     for record, dependency in zip(expected, jump.call_dependencies, strict=True):
         if type(dependency) is not _ScopedCallDependency8616:
             return "retained call dependency is not a typed scope projection"
-        if dependency.record is not record or dependency.callsite_addr != record.callsite_addr:
+        if dependency.record is not record or operator.ne(dependency.callsite_addr, record.callsite_addr):
             return "retained dependency is duplicated, foreign, or out of census order"
     return None
 
 
+@cython.ccall
 def _premise_redischarges_8616(
-    jump: AdmittedTerminalJump8616, block: IRBlock | None,
-) -> bool:
+    jump: AdmittedTerminalJump8616, block: object,
+) -> cython.bint:
     """Replay a retained invocation premise against its admission record.
 
     The premise retained on the admission must still be complete — its own
@@ -2294,6 +2441,7 @@ def _premise_redischarges_8616(
     identical block object. A window-discharged admission retains no
     premise, so any target drift there stays refused.
     """
+    premise: object
     premise = jump.invocation
     if premise is None or block is None:
         return False
@@ -2317,9 +2465,9 @@ def _premise_redischarges_8616(
 
 def _admit_application_calls_8616(
     artifact: IRFunctionArtifact, proof: EntryJumpDomainProof8616,
-    blocks: tuple[IRBlock, ...], scope: NearCallJumpScope8616,
+    blocks: object, scope: NearCallJumpScope8616,
     seal: _ApplicationSealTiming8616,
-) -> tuple[AdmittedScopedCallTarget8616, ...] | ScopedCallTargetStatus8616:
+) -> object:
     """Discharge each exact callsite interval on the final application graph.
 
     The authenticated conditional callee effects are induction steps; the
@@ -2328,7 +2476,12 @@ def _admit_application_calls_8616(
     native evidence after solving. FINAL defers this identical check to the
     application core seal after all callbacks, before any result publishes.
     """
-    pending = {row.block_addr: row for row in proof.source_binding.pending}
+    entry_cs: object
+    region: object
+    solution: object
+    theorem: object
+    step: object
+    pending = {row.block_addr: row for row in iter(proof.source_binding.pending)}
     run = _ProofRun8616(
         artifact, pending, raw_count=len(pending), normalized=len(pending),
         project=scope.project, binding=proof.source_binding,
@@ -2337,10 +2490,10 @@ def _admit_application_calls_8616(
     if not run.stage_entry() or not run.stage_census():
         return ScopedCallTargetStatus8616.UNPROVED
     solver_blocks = run._call_preservation_view_8616(blocks)
-    by_addr = {block.addr: block for block in solver_blocks}
+    by_addr = {block.addr: block for block in iter(solver_blocks)}
     region = _reachable_blocks_8616(by_addr, artifact.function_addr)
     if region is None or run.path_interference(
-        by_addr, region, frozenset(jump.block_addr for jump in proof.admitted),
+        by_addr, region, frozenset(jump.block_addr for jump in iter(proof.admitted)),
     ) is not None:
         return ScopedCallTargetStatus8616.UNPROVED
     solution, entry_cs = run.entry_cs_state(solver_blocks)
@@ -2354,68 +2507,106 @@ def _admit_application_calls_8616(
             return ScopedCallTargetStatus8616.UNPROVED
         if (theorem.block.addr not in region.reachable
                 or type(theorem.target_addr) is not int or type(theorem.next_addr) is not int
-                or theorem.selector_low != scope.context.selector_low
-                or theorem.selector_high != scope.context.selector_high):
+                or operator.ne(theorem.selector_low, scope.context.selector_low)
+                or operator.ne(theorem.selector_high, scope.context.selector_high)):
             return ScopedCallTargetStatus8616.UNPROVED
         admitted.append(AdmittedScopedCallTarget8616(
             theorem.block, theorem.instruction, scope, theorem.target_addr, theorem.next_addr,
         ))
     if seal is _ApplicationSealTiming8616.EAGER and (
             not authenticate_near_call_jump_scope_8616(scope, project=scope.project, artifact=artifact)
-            or proof.source_binding.digest != _source_digest_8616(artifact.function_addr, artifact.blocks)):
+            or operator.ne(proof.source_binding.digest, _source_digest_8616(artifact.function_addr, artifact.blocks))):
         return ScopedCallTargetStatus8616.STALE_SOURCE
     return tuple(admitted)
+
+
+@cython.ccall
+def _declared_call_continuations_8616(
+    records: object,
+) -> object:
+    """Prepare native continuations before fresh dependency admission and sealing.
+
+    A retained conditional callee record has no selector projection. Its decoded
+    CALL census provides the continuation candidate; only the subsequent full
+    dependency checks authorize the target and its consuming entry scope.
+    """
+    coordinates: object
+    projection: object
+    record: object
+    from inertia.frontend.x86_16.frontend_direct_callsite_index import DecodedDirectCallsite8616
+
+    continuations: list[cython.longlong] = []
+    for record in records:
+        projection = record.selector_projection
+        if projection is not None:
+            next_addr = projection.next_addr
+        else:
+            entry = record.entry
+            if type(entry) is not DecodedDirectCallsite8616:
+                return None
+            coordinates = entry.bound_near_coordinates(record.boundary)
+            if coordinates is None:
+                return None
+            next_addr = coordinates[0]
+        if type(next_addr) is not int:
+            return None
+        continuations.append(next_addr)
+    return tuple(continuations)
 
 
 def _admit_declared_application_calls_8616(
     artifact: IRFunctionArtifact, proof: EntryJumpDomainProof8616,
     scope: Real16InvocationDomain8616,
-) -> tuple[AdmittedScopedCallTarget8616, ...] | ScopedCallTargetStatus8616:
-    """Project exact native targets after fresh declared-selector batch admission.
+) -> object:
+    """Project native targets after fresh admission of every CALL dependency.
 
-    The original records bind the raw CALL operands, decoded native E8 bytes
-    and the declared root's selector induction. This is target authority only:
-    no callee return, register or stack effect is inferred. Returned targets
-    are synchronous application results; every later consumer replays the batch.
+    Selector projections use their canonical batch; original scoped callee
+    records retain their full dependency and entry-scope checks. Continuations
+    come from bound native CALL bytes. This is target authority only: no callee
+    return, register or stack effect is inferred. Every later consumer replays
+    the retained dependencies before using these synchronous application results.
     """
+    continuations: object
+    next_addr: object
+    record: object
     records = proof.call_preservations
     if proof.invocation_scope is not scope or proof.near_call_scope is not None:
         return ScopedCallTargetStatus8616.UNPROVED
-    calls = tuple((block, instruction) for block in artifact.blocks
-                  for instruction in block.instrs if instruction.op == "CALL")
-    if len(records) != len(calls) or any(
+    calls = tuple((block, instruction) for block in iter(artifact.blocks)
+                  for instruction in iter(block.instrs) if instruction.op == "CALL")
+    if operator.ne(len(records), len(calls)) or any(
         sum(record.block is block and record.instruction is instruction
-            and record.artifact is artifact for record in records) != 1
-        for block, instruction in calls
+            and record.artifact is artifact for record in iter(records)) != 1
+        for block, instruction in iter(calls)
     ):
         return ScopedCallTargetStatus8616.UNPROVED
     dependencies = _application_dependency_facts_8616(proof)
-    if len(_selector_call_batch_8616(records, scope)) != len(records):
+    continuations = _declared_call_continuations_8616(records)
+    if continuations is None or _source_call_dependencies_8616(proof, artifact.blocks, scope) is None:
         return ScopedCallTargetStatus8616.UNPROVED
-    if (_application_dependency_facts_8616(proof) != dependencies
+    if (operator.ne(_application_dependency_facts_8616(proof), dependencies)
             or proof.invocation_scope is not scope or proof.call_preservations is not records
-            or proof.source_binding.digest != _source_digest_8616(artifact.function_addr, artifact.blocks)):
+            or operator.ne(proof.source_binding.digest, _source_digest_8616(artifact.function_addr, artifact.blocks))):
         return ScopedCallTargetStatus8616.STALE_SOURCE
     admitted: list[AdmittedScopedCallTarget8616] = []
-    for record in records:
-        projection = record.selector_projection
-        if projection is None or type(record.target_addr) is not int:
+    for record, next_addr in zip(records, continuations, strict=True):
+        if type(record.target_addr) is not int:
             return ScopedCallTargetStatus8616.UNPROVED
-        # The batch freshly reconstructed and compared the exact symbolic
-        # DirectNearCallTargetBinding, or authenticated an existing constant.
-        # Reading its coordinates now is pure and cannot introduce a new CALL.
+        # Dependency admission authenticated each exact symbolic binding or
+        # constant operand. The final seal also binds the prepared continuation.
         admitted.append(AdmittedScopedCallTarget8616(
-            record.block, record.instruction, scope, record.target_addr, projection.next_addr))
+            record.block, record.instruction, scope, record.target_addr, next_addr))
     return tuple(admitted)
 
 
+@cython.ccall
 def _requested_application_calls_8616(
     artifact: IRFunctionArtifact, proof: EntryJumpDomainProof8616,
-    blocks: tuple[IRBlock, ...], scope: NearCallJumpScope8616 | None,
+    blocks: object, scope: object,
     mode: EntryProjectionMode8616,
     seal: _ApplicationSealTiming8616,
-    invocation_scope: Real16InvocationDomain8616 | None,
-) -> tuple[AdmittedScopedCallTarget8616, ...] | ScopedCallTargetStatus8616:
+    invocation_scope: object,
+) -> object:
     """Run outgoing-call admission only for an explicit semantic consumer."""
     if type(mode) is not EntryProjectionMode8616:
         raise TypeError("projection mode must be an EntryProjectionMode8616")
@@ -2445,7 +2636,7 @@ class _ApplicationSealTiming8616(Enum):
     FINAL = "final"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _SealedEntryJumpDomain8616:
     """A proof admitted inside one sealed synchronous prove/apply stage.
 
@@ -2460,6 +2651,7 @@ class _SealedEntryJumpDomain8616:
     application: EntryJumpDomainApplication8616
 
 
+@cython.ccall
 def apply_entry_jump_domain_8616(
     artifact: IRFunctionArtifact, proof: EntryJumpDomainProof8616,
     *, invocation_scope: Real16InvocationDomain8616 | None = None,
@@ -2504,23 +2696,25 @@ def apply_entry_jump_domain_8616(
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _ApplicationInputPins8616:
     """Original admission identities and scalar binding, retained across callbacks."""
 
     binding: EntryJumpDomainSourceBinding8616
-    digest: str
-    root: int
-    admitted: tuple[AdmittedTerminalJump8616, ...]
+    digest: object
+    root: cython.longlong
+    admitted: object
     scope: NearCallJumpScope8616 | None
 
 
+@cython.ccall
 def _final_application_seal_refused_8616(
     artifact: IRFunctionArtifact,
     proof: EntryJumpDomainProof8616,
     pins: _ApplicationInputPins8616,
-) -> bool:
+) -> cython.bint:
     """Reauthenticate after callbacks, then reconcile the original admission pins."""
+    scope: object
     scope = pins.scope
     if scope is not None and not authenticate_near_call_jump_scope_8616(
         scope, project=scope.project, artifact=artifact,
@@ -2532,17 +2726,18 @@ def _final_application_seal_refused_8616(
         and proof.admitted is pins.admitted
     )
     roots_match = (
-        artifact.function_addr == pins.root
-        and proof.function_addr == pins.root
-        and pins.binding.function_addr == pins.root
+        operator.eq(artifact.function_addr, pins.root)
+        and operator.eq(proof.function_addr, pins.root)
+        and operator.eq(pins.binding.function_addr, pins.root)
     )
     return (
         not identities_match or not roots_match
-        or pins.binding.digest != pins.digest
-        or pins.digest != _source_digest_8616(artifact.function_addr, artifact.blocks)
+        or operator.ne(pins.binding.digest, pins.digest)
+        or operator.ne(pins.digest, _source_digest_8616(artifact.function_addr, artifact.blocks))
     )
 
 
+@cython.ccall
 def _stale_sealed_application_8616(
     artifact: IRFunctionArtifact,
     unproved_call_stats: EntryJumpDomainStats8616,
@@ -2565,14 +2760,15 @@ def _stale_sealed_application_8616(
     )
 
 
+@cython.ccall
 def _application_stale_detail_8616(
     artifact: IRFunctionArtifact,
     proof: EntryJumpDomainProof8616,
     binding: EntryJumpDomainSourceBinding8616,
-    invocation_scope: Real16InvocationDomain8616 | None,
-    near_call_scope: NearCallJumpScope8616 | None,
+    invocation_scope: object,
+    near_call_scope: object,
     seal: _ApplicationSealTiming8616,
-) -> str | None:
+) -> object:
     """First refused input check, in order, else the admission callback.
 
     Scope identity, root consistency, and block census run at entry under
@@ -2594,21 +2790,20 @@ def _application_stale_detail_8616(
         )
     ):
         return "conditional near-call proof requires its identical authenticated scope"
-    if binding.function_addr != proof.function_addr:
+    if operator.ne(binding.function_addr, proof.function_addr):
         return (
             f"proof root 0x{proof.function_addr:x} is inconsistent with "
             f"its recorded binding root 0x{binding.function_addr:x}"
         )
-    if artifact.function_addr != binding.function_addr:
+    if operator.ne(artifact.function_addr, binding.function_addr):
         return (
             f"consuming artifact root 0x{artifact.function_addr:x} does "
             f"not match the proved function root "
             f"0x{binding.function_addr:x}"
         )
-    if binding.block_count != len(artifact.blocks) or (
+    if operator.ne(binding.block_count, len(artifact.blocks)) or (
         seal is _ApplicationSealTiming8616.EAGER
-        and binding.digest
-        != _source_digest_8616(artifact.function_addr, artifact.blocks)
+        and operator.ne(binding.digest, _source_digest_8616(artifact.function_addr, artifact.blocks))
     ):
         return (
             "supplied blocks do not recompute the proof's recorded "
@@ -2638,7 +2833,10 @@ def _apply_entry_jump_domain_core_8616(
     admission solver — a source surface moved inside those callbacks is
     caught by the seal instead of publishing a stale application.
     """
-    raw_calls = sum(instruction.op == "CALL" for block in artifact.blocks for instruction in block.instrs)
+    jump: object
+    stale_detail: object
+    block: object
+    raw_calls = sum(instruction.op == "CALL" for block in iter(artifact.blocks) for instruction in iter(block.instrs))
     unproved_call_stats = EntryJumpDomainStats8616(raw_calls, 0, 0, 0, raw_calls)
     binding = proof.source_binding
     pins = _ApplicationInputPins8616(
@@ -2678,7 +2876,7 @@ def _apply_entry_jump_domain_core_8616(
             applied=(),
             refusals=(),
         )
-    admitted_by_block = {jump.block_addr: jump for jump in proof.admitted}
+    admitted_by_block = {jump.block_addr: jump for jump in iter(proof.admitted)}
     patched: list[IRBlock] = []
     for block in artifact.blocks:
         jump = admitted_by_block.get(block.addr)
@@ -2690,26 +2888,25 @@ def _apply_entry_jump_domain_core_8616(
                 instr,
                 args=(IRValue(MemSpace.CONST, const=jump.target, size=4),),
             )
-            if instr.op == "JMP" and instr.addr == jump.head
+            if instr.op == "JMP" and operator.eq(instr.addr, jump.head)
             # CALL proof bindings require a distinct effective instruction.
             # Other unchanged instructions can retain their shared identity.
             else replace(instr) if instr.op == "CALL" else instr
-            for instr in block.instrs
+            for instr in iter(block.instrs)
         )
         patched.append(IRBlock(
             addr=block.addr,
             instrs=instrs,
             refusals=tuple(
-                refusal for refusal in block.refusals
+                refusal for refusal in iter(block.refusals)
                 if not (
-                    refusal.kind
-                    == TerminalJumpRefusalReason8616
-                    .SELECTOR_WINDOW_UNPROVED.value
-                    and refusal.block_addr == block.addr
+                    operator.eq(refusal.kind, TerminalJumpRefusalReason8616
+                    .SELECTOR_WINDOW_UNPROVED.value)
+                    and operator.eq(refusal.block_addr, block.addr)
                 )
             ),
             successor_addrs=tuple(sorted(
-                {*block.successor_addrs, jump.target}
+                set(block.successor_addrs) | {jump.target}
             )),
         ))
     calls = _requested_application_calls_8616(
@@ -2750,14 +2947,15 @@ def _apply_entry_jump_domain_core_8616(
     )
 
 
+@cython.ccall
 def _staged_near_call_entry_domain_8616(
     artifact: IRFunctionArtifact,
-    evidence_by_block: Mapping[int, TerminalJumpEvidence8616],
+    evidence_by_block: Mapping[cython.longlong, TerminalJumpEvidence8616],
     *,
     project: object | None,
     near_call_scope: NearCallJumpScope8616,
     budget: EntryJumpDomainBudget8616 | None = None,
-    call_preservations: tuple[EntryDomainCallPreservation8616, ...] = (),
+    call_preservations: object = (),
     invocation_resolver: Callable[
         [int], Real16InvocationDomain8616 | None
     ] | None = None,

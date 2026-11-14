@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Schedule direct-stack lowering from exact typed replay requests.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Dynamic boundary: codegen, function, and project are third-party angr objects.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -39,6 +42,9 @@ from .direct_stack_replay_contracts import (
     DirectStackReplayState8616,
     DirectStackReplayStats8616,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "DirectStackCallsiteProjection8616",
@@ -65,7 +71,7 @@ class _CodegenReplayBoundary8616(Protocol):
 
     cfunc: object
     project: object
-    _inertia_direct_stack_move_facts_8616: tuple[object, ...]
+    _inertia_direct_stack_move_facts_8616: object
     _inertia_direct_stack_mov_lane_8616: SemanticLaneState
     _inertia_direct_stack_replay_state_8616: DirectStackReplayState8616
 
@@ -76,7 +82,7 @@ class _CFunctionReplayBoundary8616(Protocol):
     statements: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _StructuredRootCodegen8616:
     """Adapt one structured statement root to the generation boundary."""
 
@@ -86,12 +92,13 @@ class _StructuredRootCodegen8616:
 class _FunctionReplayBoundary8616(Protocol):
     """Third-party function facts consumed by direct-stack replay."""
 
-    addr: int
-    _inertia_direct_stack_move_instruction_facts_8616: tuple[object, ...]
+    addr: cython.longlong
+    _inertia_direct_stack_move_instruction_facts_8616: object
 
 
+@cython.ccall
 def direct_stack_callsite_projection_8616(
-    inventory_addr: int,
+    inventory_addr: cython.longlong,
     summary: CallsiteSummary8616,
 ) -> DirectStackCallsiteProjection8616:
     """Project one summary to every fact read by direct-stack replay."""
@@ -111,7 +118,7 @@ def direct_stack_callsite_projection_8616(
 def _direct_stack_replay_generation_8616(
     codegen: object,
     function: object | None,
-    consumer_generation: DirectStackConsumerGeneration8616 | None,
+    consumer_generation: object,
 ) -> DirectStackReplayGeneration8616:
     """Return value-based replay inputs under one structured-surface owner."""
     callsites = callsite_summary_inventory_8616(codegen)
@@ -145,7 +152,7 @@ def _direct_stack_replay_generation_8616(
         ),
         callsites=tuple(
             direct_stack_callsite_projection_8616(addr, summary)
-            for addr, summary in sorted(callsites.items())
+            for addr, summary in builtins.iter(sorted(tuple(callsites.items())))
         ),
         attached_facts=attached_facts,
         function_facts=function_facts,
@@ -154,6 +161,7 @@ def _direct_stack_replay_generation_8616(
     )
 
 
+@cython.ccall
 def direct_stack_replay_generation_8616(
     codegen: object,
     function: object | None,
@@ -162,6 +170,7 @@ def direct_stack_replay_generation_8616(
     return _direct_stack_replay_generation_8616(codegen, function, None)
 
 
+@cython.ccall
 def direct_stack_replay_scheduling_generation_8616(
     codegen: object,
     function: object | None,
@@ -174,6 +183,7 @@ def direct_stack_replay_scheduling_generation_8616(
     )
 
 
+@cython.ccall
 def _replay_state_8616(codegen: object) -> DirectStackReplayState8616:
     """Read the owned scheduler state from a third-party codegen boundary."""
     try:
@@ -183,6 +193,7 @@ def _replay_state_8616(codegen: object) -> DirectStackReplayState8616:
     return state if isinstance(state, DirectStackReplayState8616) else DirectStackReplayState8616()
 
 
+@cython.ccall
 def _publish_replay_state_8616(
     codegen: object,
     state: DirectStackReplayState8616,
@@ -193,7 +204,8 @@ def _publish_replay_state_8616(
     cast(_CodegenReplayBoundary8616, codegen)._inertia_direct_stack_replay_state_8616 = state
 
 
-def _direct_stack_replay_failed_8616(codegen: object) -> bool:
+@cython.ccall
+def _direct_stack_replay_failed_8616(codegen: object) -> cython.bint:
     """Return whether the current typed materialization lane failed closure."""
     try:
         lane = cast(_CodegenReplayBoundary8616, codegen)._inertia_direct_stack_mov_lane_8616
@@ -212,6 +224,7 @@ def _direct_stack_replay_failed_8616(codegen: object) -> bool:
     )
 
 
+@cython.ccall
 def _request_8616(
     codegen: object,
     function: object,
@@ -224,12 +237,14 @@ def _request_8616(
     )
 
 
+@cython.ccall
 def _resolve_replay_function_8616(
     codegen: object,
-    project: object | None,
-    function: object | None,
+    project: object,
+    function: object,
 ) -> object | None:
     """Resolve the active third-party angr function for one replay request."""
+    func_addr: object
     if function is not None:
         return function
     try:
@@ -247,19 +262,21 @@ def _resolve_replay_function_8616(
         return None
 
 
+@cython.ccall
 def execute_direct_stack_replay_8616(
     codegen: object,
     project: object | None,
-    function: object | None,
+    function: object,
     options: DirectStackReplayOptions8616,
     operation: Callable[[object | None], bool | DirectStackMaterializationResult8616],
-) -> bool:
+) -> cython.bint:
     """Execute or skip one complete direct-stack materialization transaction.
 
     A reported mutation invalidates stability immediately, so it does not pay
     for a second whole-AST generation. A reportedly stable pass still compares
     pre/post requests; only that confirmed stable post-state can be skipped.
     """
+    request_after: object
     function = _resolve_replay_function_8616(codegen, project, function)
     if function is None:
         unavailable_result = operation(None)
@@ -270,7 +287,7 @@ def execute_direct_stack_replay_8616(
         )
     request_before = _request_8616(codegen, function, options)
     state = _replay_state_8616(codegen)
-    if state.stable_request == request_before:
+    if operator.eq(state.stable_request, request_before):
         _publish_replay_state_8616(
             codegen,
             replace(
@@ -315,7 +332,7 @@ def execute_direct_stack_replay_8616(
     exact_witness_changed = bool(
         request_after is not None
         and request_before.generation.ast is not None
-        and request_after.generation.ast != request_before.generation.ast
+        and operator.ne(request_after.generation.ast, request_before.generation.ast)
     )
     effective_changed = reported_changed or exact_witness_changed
     replay_failed = _direct_stack_replay_failed_8616(codegen)

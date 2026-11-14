@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Exact-byte near-relative control evidence.
 
 Layer: frontend control semantics.
@@ -7,6 +8,8 @@ coordinate owner. Neither CS nor a concrete CFG target is guessed.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -22,6 +25,8 @@ from .control_coordinates import (
     linear_continuation,
     relative_offset,
 )
+import dataclasses
+import operator
 
 
 class RelativeEdgeForm(StrEnum):
@@ -50,7 +55,7 @@ class RelativeEdgeRefusalReason(StrEnum):
 
 # Non-displacement byte count (prefix plus opcode) and displacement width
 # for each supported form. Encoded size is prefix bytes + displacement bytes.
-_FORM_LAYOUT: dict[RelativeEdgeForm, tuple[int, int]] = {
+_FORM_LAYOUT: dict[RelativeEdgeForm, tuple[cython.longlong, cython.longlong]] = {
     RelativeEdgeForm.JMP_REL8: (1, 8),
     RelativeEdgeForm.JCC_REL8: (1, 8),
     RelativeEdgeForm.LOOP_REL8: (1, 8),
@@ -78,12 +83,13 @@ _CALL_FORMS: frozenset[RelativeEdgeForm] = frozenset({
 
 # Prefix bytes the contract does not accept at all. 0x66 is handled
 # separately because it is supported only before E8/E9 and 0F 80..8F.
-_UNSUPPORTED_PREFIX_BYTES: frozenset[int] = frozenset({
+_UNSUPPORTED_PREFIX_BYTES: frozenset[cython.longlong] = frozenset({
     0xF0, 0xF2, 0xF3, 0x26, 0x2E, 0x36, 0x3E, 0x64, 0x65, 0x67,
 })
 
 
-def _unprefixed_form(opcode: int) -> RelativeEdgeForm | None:
+@cython.ccall
+def _unprefixed_form(opcode: cython.longlong) -> RelativeEdgeForm | None:
     """Return the unprefixed relative form of one opcode byte, if any."""
     if opcode == 0xEB:
         return RelativeEdgeForm.JMP_REL8
@@ -100,7 +106,8 @@ def _unprefixed_form(opcode: int) -> RelativeEdgeForm | None:
     return None
 
 
-def _classify_jcc16(encoding: bytes) -> RelativeEdgeForm | RelativeEdgeRefusalReason:
+@cython.ccall
+def _classify_jcc16(encoding: object) -> RelativeEdgeForm | RelativeEdgeRefusalReason:
     """Classify a 0F-leading encoding as Jcc rel16 or a refusal."""
     if len(encoding) < 2:
         return RelativeEdgeRefusalReason.LENGTH_MISMATCH
@@ -111,7 +118,8 @@ def _classify_jcc16(encoding: bytes) -> RelativeEdgeForm | RelativeEdgeRefusalRe
     return RelativeEdgeForm.JCC_REL16
 
 
-def _classify_dword(encoding: bytes) -> RelativeEdgeForm | RelativeEdgeRefusalReason:
+@cython.ccall
+def _classify_dword(encoding: object) -> RelativeEdgeForm | RelativeEdgeRefusalReason:
     """Classify a 66-leading encoding as rel32 or a refusal."""
     if len(encoding) < 2:
         return RelativeEdgeRefusalReason.LENGTH_MISMATCH
@@ -133,8 +141,10 @@ def _classify_dword(encoding: bytes) -> RelativeEdgeForm | RelativeEdgeRefusalRe
     return RelativeEdgeForm.CALL_REL32 if opcode == 0xE8 else RelativeEdgeForm.JMP_REL32
 
 
-def _classify_encoding(encoding: bytes) -> RelativeEdgeForm | RelativeEdgeRefusalReason:
+@cython.ccall
+def _classify_encoding(encoding: object) -> RelativeEdgeForm | RelativeEdgeRefusalReason:
     """Map complete instruction bytes to a supported form or refusal."""
+    form: object
     if not encoding:
         return RelativeEdgeRefusalReason.EMPTY_ENCODING
     lead = encoding[0]
@@ -148,12 +158,12 @@ def _classify_encoding(encoding: bytes) -> RelativeEdgeForm | RelativeEdgeRefusa
     if form is None:
         return RelativeEdgeRefusalReason.UNSUPPORTED_FORM
     prefix_len, displacement_bits = _FORM_LAYOUT[form]
-    if len(encoding) != prefix_len + displacement_bits // 8:
+    if operator.ne(len(encoding), prefix_len + displacement_bits // 8):
         return RelativeEdgeRefusalReason.LENGTH_MISMATCH
     return form
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RelativeEdgeRefusal:
     """Typed non-result retaining the exact bytes that failed to decode.
 
@@ -163,12 +173,12 @@ class RelativeEdgeRefusal:
     """
 
     reason: RelativeEdgeRefusalReason
-    head: int
-    encoding: bytes
-    source: str | None = None
+    head: cython.longlong
+    encoding: object
+    source: object = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RelativeEdgeTargets:
     """One CS-domain evaluation of a decoded edge's architectural effects.
 
@@ -183,7 +193,7 @@ class RelativeEdgeTargets:
     fallthrough_control: CoordinateValue
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DecodedRelativeEdge:
     """Immutable exact-byte near-relative control edge.
 
@@ -199,12 +209,12 @@ class DecodedRelativeEdge:
     exist only as the projections below, evaluated under an explicit CS.
     """
 
-    head: int
-    encoding: bytes
+    head: cython.longlong
+    encoding: object
     form: RelativeEdgeForm
     width: ControlWidth
-    displacement: int
-    source: str | None = None
+    displacement: cython.longlong
+    source: object = None
 
     def __post_init__(self) -> None:
         """Re-derive every stored invariant from the retained bytes."""
@@ -221,36 +231,36 @@ class DecodedRelativeEdge:
         if self.width is not expected_width:
             raise ValueError("operand width inconsistent with form")
         displacement = int.from_bytes(self.encoding[prefix_len:], "little", signed=True)
-        if displacement != self.displacement:
+        if operator.ne(displacement, self.displacement):
             raise ValueError("displacement inconsistent with encoding")
 
     @property
-    def encoded_size(self) -> int:
+    def encoded_size(self) -> cython.longlong:
         """Return the complete instruction length in bytes."""
         return len(self.encoding)
 
     @property
-    def next_head(self) -> int:
+    def next_head(self) -> cython.longlong:
         """Return the head coordinate of the next instruction, same domain."""
         return self.head + len(self.encoding)
 
     @property
-    def displacement_bits(self) -> int:
+    def displacement_bits(self) -> cython.longlong:
         """Return the encoded displacement width in bits."""
         return _FORM_LAYOUT[self.form][1]
 
     @property
-    def is_conditional(self) -> bool:
+    def is_conditional(self) -> cython.bint:
         """Return whether the form has an architecturally live untaken edge."""
         return self.form in _CONDITIONAL_FORMS
 
     @property
-    def is_call(self) -> bool:
+    def is_call(self) -> cython.bint:
         """Return whether the form is a near call."""
         return self.form in _CALL_FORMS
 
     @property
-    def encoding_digest(self) -> str:
+    def encoding_digest(self) -> object:
         """Return a stable digest of the exact bytes for receipts."""
         return sha256(self.encoding).hexdigest()
 
@@ -313,8 +323,9 @@ class DecodedRelativeEdge:
         )
 
 
+@cython.ccall
 def decode_relative_edge(
-    head: int, encoding: bytes, *, source: str | None = None,
+    head: cython.longlong, encoding: object, *, source: object = None,
 ) -> DecodedRelativeEdge | RelativeEdgeRefusal:
     """Decode complete instruction bytes into a typed edge or a refusal.
 
@@ -343,7 +354,7 @@ def decode_relative_edge(
     )
 
 
-type RelativeEdgeDecode = DecodedRelativeEdge | RelativeEdgeRefusal
+RelativeEdgeDecode = typing.TypeAliasType("RelativeEdgeDecode", DecodedRelativeEdge | RelativeEdgeRefusal)
 
 
 class RelativeDestinationVerdict(StrEnum):
@@ -354,21 +365,23 @@ class RelativeDestinationVerdict(StrEnum):
     SELECTOR_DEPENDENT = "selector_dependent"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RelativeDestination:
     """Constant-time selector-interval evidence, without a native IR binding claim."""
 
     verdict: RelativeDestinationVerdict
     target: int | None
-    selector_min: int
-    selector_max: int
+    selector_min: cython.longlong
+    selector_max: cython.longlong
 
 
+@cython.ccall
 def _concrete_projection_only(value: object, width: object) -> NoReturn:
     """Reject accidental symbolic input at the concrete interval boundary."""
     raise TypeError(f"expected concrete coordinate, received {value!r}:{width!r}")
 
 
+@cython.ccall
 def invariant_relative_destination(edge: DecodedRelativeEdge) -> RelativeDestination:
     """Project a decoded edge under every CS capable of fetching its head.
 

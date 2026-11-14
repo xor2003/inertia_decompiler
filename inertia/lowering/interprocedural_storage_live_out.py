@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Collect function-wide direct segmented-memory live-out trials.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import replace
 
@@ -43,18 +46,20 @@ from .pointer_parameter_caller_target_contracts import (
     PointerParameterCallerTarget8616,
     PointerParameterCallerTargetEvidence8616,
 )
+import operator
+import builtins
 
 
 def attach_callsite_memory_live_out_evidence_8616(
     callsite: CallsiteStorageTrials8616,
-    evidence: tuple[CallsiteMemoryLiveOutEvidence8616, ...],
+    evidence: object,
 ) -> CallsiteStorageTrials8616:
     """Attach the unique exact live-out projection to one callsite contract."""
-    matches = tuple(item for item in evidence if item.callsite_addr == callsite.callsite_addr)
+    matches = tuple(item for item in iter(evidence) if operator.eq(item.callsite_addr, callsite.callsite_addr))
     if len(matches) != 1:
         raise RuntimeError("complete memory live-out collection lost exact callsite evidence")
     match = matches[0]
-    if match.caller_addr != callsite.caller_addr or match.callee_addr != callsite.callee_addr:
+    if operator.ne(match.caller_addr, callsite.caller_addr) or operator.ne(match.callee_addr, callsite.callee_addr):
         raise RuntimeError("memory live-out callsite identity changed during projection")
     return replace(
         callsite,
@@ -65,21 +70,23 @@ def attach_callsite_memory_live_out_evidence_8616(
 
 
 def _pointer_effects_by_callsite_8616(
-    callee_addr: int,
-    callsites: tuple[CallsiteStorageTrials8616, ...],
-    evidence: PointerParameterCallerTargetEvidence8616 | None,
+    callee_addr: cython.longlong,
+    callsites: object,
+    evidence: object,
 ) -> tuple[
     dict[int, tuple[PointerParameterCallerTarget8616, ...]] | None,
     MemoryLiveOutFailure8616 | None,
 ]:
     """Validate and partition exact dynamic effects by known callsite."""
-    expected = {item.callsite_addr: item for item in callsites}
-    if len(expected) != len(callsites):
+    callsite: object
+    effect: object
+    expected = {item.callsite_addr: item for item in iter(callsites)}
+    if operator.ne(len(expected), len(callsites)):
         return None, MemoryLiveOutFailure8616(
             MemoryLiveOutFailureKind8616.POINTER_TARGET_CONFLICT,
             callee_addr,
         )
-    empty: dict[int, tuple[PointerParameterCallerTarget8616, ...]] = dict.fromkeys(expected, ())
+    empty: object = dict.fromkeys(expected, ())
     if evidence is None:
         return empty, None
     if not evidence.complete:
@@ -88,21 +95,21 @@ def _pointer_effects_by_callsite_8616(
             callee_addr,
             pointer_failure=evidence.failure,
         )
-    if evidence.callee_addr != callee_addr:
+    if operator.ne(evidence.callee_addr, callee_addr):
         return None, MemoryLiveOutFailure8616(
             MemoryLiveOutFailureKind8616.POINTER_TARGET_CONFLICT,
             callee_addr,
         )
-    grouped: dict[int, list[PointerParameterCallerTarget8616]] = {
-        callsite_addr: [] for callsite_addr in expected
+    grouped: dict[cython.longlong, list[PointerParameterCallerTarget8616]] = {
+        callsite_addr: [] for callsite_addr in iter(expected)
     }
     for effect in evidence.facts:
         callsite = expected.get(effect.callsite_addr)
         if (
             callsite is None
             or not effect.complete
-            or effect.callee_addr != callee_addr
-            or effect.caller_addr != callsite.caller_addr
+            or operator.ne(effect.callee_addr, callee_addr)
+            or operator.ne(effect.caller_addr, callsite.caller_addr)
         ):
             return None, MemoryLiveOutFailure8616(
                 MemoryLiveOutFailureKind8616.POINTER_TARGET_CONFLICT,
@@ -110,7 +117,7 @@ def _pointer_effects_by_callsite_8616(
                 effect.caller_addr,
                 effect.callsite_addr,
             )
-        if any(item.logical_index == effect.logical_index for item in grouped[effect.callsite_addr]):
+        if any(operator.eq(item.logical_index, effect.logical_index) for item in iter(grouped[effect.callsite_addr])):
             return None, MemoryLiveOutFailure8616(
                 MemoryLiveOutFailureKind8616.POINTER_TARGET_CONFLICT,
                 callee_addr,
@@ -118,22 +125,22 @@ def _pointer_effects_by_callsite_8616(
                 effect.callsite_addr,
             )
         grouped[effect.callsite_addr].append(effect)
-    if evidence.facts and any(not grouped[callsite_addr] for callsite_addr in expected):
+    if evidence.facts and any(not grouped[callsite_addr] for callsite_addr in iter(expected)):
         return None, MemoryLiveOutFailure8616(
             MemoryLiveOutFailureKind8616.POINTER_TARGET_CONFLICT,
             callee_addr,
         )
     return {
         callsite_addr: tuple(sorted(items, key=lambda item: item.logical_index))
-        for callsite_addr, items in grouped.items()
+        for callsite_addr, items in builtins.iter(grouped.items())
     }, None
 
 
 def _pointer_only_collection_8616(
-    callee_addr: int,
-    callsites: tuple[CallsiteStorageTrials8616, ...],
-    pointer_by_callsite: dict[int, tuple[PointerParameterCallerTarget8616, ...]],
-    pointer_count: int,
+    callee_addr: cython.longlong,
+    callsites: object,
+    pointer_by_callsite: object,
+    pointer_count: cython.longlong,
 ) -> FunctionMemoryLiveOutCollection8616:
     """Retain closed pointer effects when the callee has no direct-memory output."""
     sites = tuple(
@@ -141,7 +148,7 @@ def _pointer_only_collection_8616(
             site.caller_addr, callee_addr, site.callsite_addr,
             pointer_effects=pointer_by_callsite[site.callsite_addr],
         )
-        for site in callsites
+        for site in iter(callsites)
     )
     return FunctionMemoryLiveOutCollection8616(
         MemoryLiveOutCollectionVerdict8616.PROVEN,
@@ -150,12 +157,14 @@ def _pointer_only_collection_8616(
     )
 
 
+@cython.ccall
 def _caller_conditions_8616(
     project: object,
-    caller_addr: int,
-    cache: dict[tuple[int, int], tuple[ConditionIR, ...]],
-) -> tuple[ConditionIR, ...]:
+    caller_addr: cython.longlong,
+    cache: object,
+) -> object:
     """Keep equal-address conditions isolated by their authoritative project owner."""
+    conditions: object
     key = (id(project), caller_addr)
     conditions = cache.get(key)
     if conditions is None:
@@ -167,13 +176,17 @@ def _caller_conditions_8616(
 
 def collect_function_memory_live_out_trials_8616(
     project: object,
-    callee_addr: int,
-    callsites: tuple[CallsiteStorageTrials8616, ...],
-    accepted_target_addrs: tuple[int, ...],
+    callee_addr: cython.longlong,
+    callsites: object,
+    accepted_target_addrs: object,
     *,
     pointer_targets: PointerParameterCallerTargetEvidence8616 | None = None,
 ) -> FunctionMemoryLiveOutCollection8616:
     """Collect exact direct and dynamic memory effects for one callee."""
+    artifact: object
+    pointer_by_callsite: object
+    pointer_failure: object
+    site: object
     pointer_by_callsite, pointer_failure = _pointer_effects_by_callsite_8616(
         callee_addr,
         callsites,
@@ -228,8 +241,8 @@ def collect_function_memory_live_out_trials_8616(
             callee_addr, callsites, pointer_by_callsite, pointer_count
         )
 
-    targets = tuple(dict.fromkeys((callee_addr, *accepted_target_addrs)))
-    conditions_by_caller: dict[tuple[int, int], tuple[ConditionIR, ...]] = {}
+    targets = tuple(dict.fromkeys((callee_addr, ) + tuple(accepted_target_addrs)))
+    conditions_by_caller: dict[tuple[cython.longlong, cython.longlong], tuple[ConditionIR, ...]] = {}
     collected_sites: list[CallsiteMemoryLiveOutEvidence8616] = []
     raw = normalized = materialized = pointer_count
     for site in sorted(callsites, key=lambda item: (item.callsite_addr, item.caller_addr)):

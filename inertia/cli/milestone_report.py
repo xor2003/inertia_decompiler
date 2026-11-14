@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery/reporting.
 
 Responsibility: assemble milestone reports from existing layer descriptions and summaries.
@@ -11,6 +12,8 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import json
 from collections.abc import Mapping, Sequence
@@ -53,25 +56,34 @@ from .readability_goals import (
 )
 from .readability_set import describe_x86_16_golden_readability_set, summarize_x86_16_golden_readability_set
 from .recovery_manifest import describe_x86_16_object_recovery_focus, describe_x86_16_recovery_layers
+import dataclasses
+import operator
+import builtins
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class MilestoneReportSection:
     """Named report section emitted by the X86_16 milestone report builder."""
 
-    name: str
+    name: object
     summary: Mapping[str, object]
 
 
-def _tail_validation_cache_key(surface: Mapping[str, object]) -> str:
+@cython.ccall
+def _tail_validation_cache_key(surface: Mapping[str, object]) -> object:
     return build_x86_16_validation_cache_descriptor("tail_validation.console_summary", surface).cache_key
 
 
-def _content_addressed_cache_path(path: Path, cache_key: str) -> Path:
+@cython.ccall
+def _content_addressed_cache_path(path: Path, cache_key: object) -> Path:
     return path.with_name(f"{path.stem}.{cache_key[:12]}{path.suffix}")
 
 
-def _label_for_proc_item_8616(item: Mapping[str, object]) -> str | None:
+@cython.ccall
+def _label_for_proc_item_8616(item: Mapping[str, object]) -> object:
+    cod_file: object
+    proc_kind: object
+    proc_name: object
     proc_name = item.get("proc_name")
     if not isinstance(proc_name, str) or not proc_name:
         return None
@@ -85,7 +97,11 @@ def _label_for_proc_item_8616(item: Mapping[str, object]) -> str | None:
     return label
 
 
-def _append_uncollected_lines_8616(lines: list[str], top_uncollected_functions: list[Mapping[str, object]]) -> None:
+@cython.ccall
+def _append_uncollected_lines_8616(lines: object, top_uncollected_functions: object) -> None:
+    exit_kind: object
+    label: object
+    item: object
     for item in top_uncollected_functions[:3]:
         label = _label_for_proc_item_8616(item)
         if label is None:
@@ -96,18 +112,25 @@ def _append_uncollected_lines_8616(lines: list[str], top_uncollected_functions: 
         )
 
 
-def _append_unknown_lines_8616(lines: list[str], top_unknown_functions: list[Mapping[str, object]]) -> None:
+@cython.ccall
+def _append_unknown_lines_8616(lines: object, top_unknown_functions: object) -> None:
+    label: object
+    item: object
     for item in top_unknown_functions[:3]:
         label = _label_for_proc_item_8616(item)
         if label is not None:
             lines.append(f"unknown {label}")
 
 
+@cython.ccall
 def _append_hotspot_and_family_lines_8616(
-    lines: list[str],
-    stage_hotspots: list[Mapping[str, object]],
-    changed_families: list[Mapping[str, object]],
+    lines: object,
+    stage_hotspots: object,
+    changed_families: object,
 ) -> None:
+    family: object
+    family_row: object
+    hotspot: object
     for hotspot in stage_hotspots[:2]:
         lines.append(
             f"stage={hotspot.get('stage', 'unknown')} changed={hotspot.get('changed_count', 0)} rate={hotspot.get('changed_rate', 0.0)}"
@@ -121,11 +144,15 @@ def _append_hotspot_and_family_lines_8616(
             )
 
 
+@cython.ccall
 def _append_verdict_and_function_lines_8616(
-    lines: list[str],
-    top_changed_verdicts: list[Mapping[str, object]],
-    top_changed_functions: list[Mapping[str, object]],
+    lines: object,
+    top_changed_verdicts: object,
+    top_changed_functions: object,
 ) -> None:
+    label: object
+    verdict: object
+    item: object
     for item in top_changed_verdicts[:3]:
         verdict = item.get("verdict")
         if isinstance(verdict, str) and verdict:
@@ -139,8 +166,9 @@ def _append_verdict_and_function_lines_8616(
         lines.append(f"function[{stages}] {label}: {verdicts[0]}" if verdicts else f"function[{stages}] {label}")
 
 
-def _render_tail_validation_lines(surface: Mapping[str, object]) -> list[str]:
-    def _impl() -> list[str]:
+def _render_tail_validation_lines(surface: Mapping[str, object]) -> object:
+    def _impl() -> object:
+        baseline_status: object
         surface_payload = cast(Mapping[str, Any], surface)
         headline = str(surface.get("headline", "whole-tail validation summary unavailable"))
         severity = str(surface.get("severity", "uncollected"))
@@ -189,6 +217,7 @@ def _render_tail_validation_lines(surface: Mapping[str, object]) -> list[str]:
     return _impl()
 
 
+@cython.ccall
 def _milestone_descriptors_8616() -> dict[str, object]:
     return {
         "validation_layers": describe_x86_16_validation_layers(),
@@ -213,7 +242,7 @@ def _milestone_descriptors_8616() -> dict[str, object]:
     }
 
 
-def _milestone_scan_inputs_8616(scan_summary: Mapping[str, object]) -> dict[str, object]:
+def _milestone_scan_inputs_8616(scan_summary: Mapping[str, object]) -> object:
     def _impl() -> dict[str, object]:
         summary_payload = cast(Mapping[str, Any], scan_summary)
         return {
@@ -247,18 +276,19 @@ def _milestone_scan_inputs_8616(scan_summary: Mapping[str, object]) -> dict[str,
     return _impl()
 
 
+@cython.ccall
 def render_x86_16_tail_validation_console_summary(
     surface: Mapping[str, object],
     *,
-    cache_path: str | Path | None = None,
-) -> dict[str, object]:
+    cache_path: object = None,
+) -> object:
     """Render a deterministic tail-validation console summary with optional cache reuse."""
     cache_key = _tail_validation_cache_key(surface)
     if cache_path is not None:
         path = Path(cache_path)
         try:
             cached = json.loads(path.read_text())
-            if cached.get("cache_key") == cache_key:
+            if operator.eq(cached.get("cache_key"), cache_key):
                 return {
                     "cache_key": cache_key,
                     "cache_hit": True,
@@ -283,12 +313,14 @@ def render_x86_16_tail_validation_console_summary(
     return rendered
 
 
+@cython.ccall
 def cache_x86_16_tail_validation_detail_artifact(
     surface: Mapping[str, object],
     *,
-    cache_path: str | Path | None,
+    cache_path: object,
 ) -> dict[str, object]:
     """Write or reuse a content-addressed tail-validation detail artifact."""
+    cached_artifact: object
     artifact = dict(surface)
     cache_key = _tail_validation_cache_key(artifact)
     if cache_path is None:
@@ -303,7 +335,7 @@ def cache_x86_16_tail_validation_detail_artifact(
     immutable_path = _content_addressed_cache_path(path, cache_key)
     try:
         cached = json.loads(path.read_text())
-        if cached.get("cache_key") == cache_key:
+        if operator.eq(cached.get("cache_key"), cache_key):
             cached_artifact = cached.get("artifact", {})
             return {
                 "cache_key": cache_key,
@@ -335,7 +367,8 @@ def cache_x86_16_tail_validation_detail_artifact(
     }
 
 
-def _success_rate(summary: Mapping[str, object]) -> float:
+@cython.ccall
+def _success_rate(summary: Mapping[str, object]) -> cython.double:
     summary_payload = cast(Mapping[str, Any], summary)
     scanned = int(summary_payload.get("scanned", 0) or 0)
     ok = int(summary_payload.get("ok", 0) or 0)
@@ -344,7 +377,9 @@ def _success_rate(summary: Mapping[str, object]) -> float:
     return round(ok / scanned, 6)
 
 
-def _readability_tier(result: Mapping[str, object], golden_cases: set[tuple[str, str]]) -> str:
+@cython.ccall
+def _readability_tier(result: Mapping[str, object], golden_cases: object) -> str:
+    fallback_kind: object
     result_payload = cast(Mapping[str, Any], result)
     if not bool(result.get("ok", False)):
         return "R0"
@@ -362,16 +397,18 @@ def _readability_tier(result: Mapping[str, object], golden_cases: set[tuple[str,
 def _build_corpus_completion_surface(
     scan_summary: Mapping[str, object],
     *,
-    readability_tiers: Mapping[str, int],
-    timeout_stage_counts: Mapping[str, int],
-    top_fallback_files: list[dict[str, object]],
-    top_fallback_functions: list[dict[str, object]],
-    top_ugly_clusters: list[dict[str, object]],
-    readability_clusters: list[dict[str, object]],
+    readability_tiers: Mapping[str, cython.longlong],
+    timeout_stage_counts: Mapping[str, cython.longlong],
+    top_fallback_files: object,
+    top_fallback_functions: object,
+    top_ugly_clusters: object,
+    readability_clusters: object,
     family_ownership: Mapping[str, object],
     readability_focus: Mapping[str, object],
-) -> dict[str, object]:
+) -> object:
     def _impl() -> dict[str, object]:
+        next_goal: object
+        next_goal_payload: object
         summary_payload = cast(Mapping[str, Any], scan_summary)
         focus_payload = cast(Mapping[str, Any], readability_focus)
         scanned = int(summary_payload.get("scanned", 0) or 0)
@@ -458,7 +495,7 @@ def _build_corpus_completion_surface(
                         "rank": item["rank"],
                         "is_next_focus": item["is_next_focus"],
                     }
-                    for item in goal_queue
+                    for item in iter(goal_queue)
                 ],
                 "next_goal": None
                 if next_goal_payload is None
@@ -487,14 +524,16 @@ def _build_corpus_completion_surface(
 def build_x86_16_milestone_report(
     scan_summary: Mapping[str, object],
     *,
-    corpus_name: str = "x86-16",
-    corpus_slice: str | None = None,
+    corpus_name: object = "x86-16",
+    corpus_slice: object = None,
     blocked_mnemonics: Sequence[str] | None = None,
-) -> dict[str, object]:
+) -> object:
     """Build the X86_16 milestone report from already-collected recovery summaries."""
 
-    def _impl() -> dict[str, object]:
-        def _goal_item_payload(item: Mapping[str, object], *, include_rank: bool) -> dict[str, object]:
+    def _impl() -> object:
+        raw_next_focus_goal: object
+        result: object
+        def _goal_item_payload(item: Mapping[str, object], *, include_rank: cython.bint) -> object:
             payload = {
                 "step": item["step"],
                 "title": item["title"],
@@ -511,12 +550,12 @@ def build_x86_16_milestone_report(
                 payload["is_next_focus"] = item["is_next_focus"]
             return payload
 
-        def _next_goal_payload(next_goal: Mapping[str, object] | None) -> dict[str, object] | None:
+        def _next_goal_payload(next_goal: object) -> object:
             if next_goal is None:
                 return None
             return _goal_item_payload(next_goal, include_rank=True)
 
-        def _corpus_rates_payload() -> dict[str, float]:
+        def _corpus_rates_payload() -> dict[str, cython.double]:
             scanned = max(int(summary_payload.get("scanned", 0) or 0), 1)
             return {
                 "success_rate": _success_rate(scan_summary),
@@ -584,7 +623,7 @@ def build_x86_16_milestone_report(
         family_ownership = cast(Mapping[str, object], scan_inputs["family_ownership"])
         interrupt_api = cast(Mapping[str, Any], scan_inputs["interrupt_api"])
         scan_results = cast(Sequence[Mapping[str, object]], scan_inputs["scan_results"])
-        golden_cases = {(case.source, case.proc_name) for case in readability_set}
+        golden_cases = {(case.source, case.proc_name) for case in iter(readability_set)}
         readability_tier_counts = {"R0": 0, "R1": 0, "R2": 0, "R3": 0}
         for result in scan_results:
             readability_tier_counts[_readability_tier(result, golden_cases)] += 1
@@ -614,37 +653,37 @@ def build_x86_16_milestone_report(
             "corpus": corpus_name,
             "corpus_slice": corpus_slice or summary_payload.get("slice", "active"),
             "scan_summary": dict(scan_summary),
-            "validation_layers": [{"name": name, "default_checks": list(checks)} for name, checks in validation_layers],
+            "validation_layers": [{"name": name, "default_checks": list(checks)} for name, checks in iter(validation_layers)],
             "validation_families": [
-                {"name": name, "default_checks": list(checks)} for name, checks in validation_families
+                {"name": name, "default_checks": list(checks)} for name, checks in iter(validation_families)
             ],
             "validation_triage": validation_triage,
             "alias_api": [
-                {"name": name, "purpose": purpose, "helpers": list(helpers)} for name, purpose, helpers in alias_api
+                {"name": name, "purpose": purpose, "helpers": list(helpers)} for name, purpose, helpers in iter(alias_api)
             ],
             "decode_width_matrix": [
                 {"name": name, "operand_bits": operand_bits, "address_bits": address_bits}
-                for name, operand_bits, address_bits in decode_width_matrix
+                for name, operand_bits, address_bits in iter(decode_width_matrix)
             ],
             "mixed_width_extension_surface": mixed_width_extension_surface,
             "mixed_width_instruction_surface": mixed_width_instruction_surface,
             "widening_pipeline": [
                 {"name": name, "purpose": purpose, "helpers": list(helpers)}
-                for name, purpose, helpers in widening_pipeline
+                for name, purpose, helpers in iter(widening_pipeline)
             ],
             "recovery_layers": [
                 {"name": name, "purpose": purpose, "helpers": list(helpers)}
-                for name, purpose, helpers in recovery_layers
+                for name, purpose, helpers in iter(recovery_layers)
             ],
             "recovery_confidence_axes": [
-                {"status": status, "meaning": meaning} for status, meaning in recovery_confidence_axes
+                {"status": status, "meaning": meaning} for status, meaning in iter(recovery_confidence_axes)
             ],
             "object_recovery_focus": [
                 {"name": name, "purpose": purpose, "helpers": list(helpers)}
-                for name, purpose, helpers in object_recovery_focus
+                for name, purpose, helpers in iter(object_recovery_focus)
             ],
             "projection_cleanup_rules": [
-                {"name": name, "purpose": purpose} for name, purpose in projection_cleanup_rules
+                {"name": name, "purpose": purpose} for name, purpose in iter(projection_cleanup_rules)
             ],
             "readability_goals": [
                 {
@@ -655,13 +694,13 @@ def build_x86_16_milestone_report(
                     "owner_surfaces": list(owner_surfaces),
                     "completion_signal": completion_signal,
                 }
-                for step, title, deterministic_goal, target_clusters, owner_surfaces, completion_signal in readability_goals
+                for step, title, deterministic_goal, target_clusters, owner_surfaces, completion_signal in iter(readability_goals)
             ],
             "readability_set_summary": [
                 {"source": source, "proc_name": proc_name, "anchor_count": anchor_count}
-                for source, proc_name, anchor_count in summarize_x86_16_golden_readability_set()
+                for source, proc_name, anchor_count in builtins.iter(summarize_x86_16_golden_readability_set())
             ],
-            "readability_set": [asdict(case) for case in readability_set],
+            "readability_set": [asdict(case) for case in iter(readability_set)],
             "correctness_goals": [
                 {
                     "code": code,
@@ -671,7 +710,7 @@ def build_x86_16_milestone_report(
                     "owner_surfaces": list(owner_surfaces),
                     "completion_signal": completion_signal,
                 }
-                for code, title, priority, status, owner_surfaces, completion_signal in correctness_goals
+                for code, title, priority, status, owner_surfaces, completion_signal in iter(correctness_goals)
             ],
             "correctness_goal_summary": correctness_goal_summary,
             "blocked_mnemonics": list(blocked_mnemonics or ()),
@@ -708,11 +747,11 @@ def build_x86_16_milestone_report(
             "instruction_metadata_surface": instruction_metadata_surface,
             "readability_tiers": readability_tier_counts,
             "readability_goal_summary": [
-                _goal_item_payload(item, include_rank=False) for item in readability_goal_summary
+                _goal_item_payload(item, include_rank=False) for item in iter(readability_goal_summary)
             ],
             "readability_goal_queue": [
                 _goal_item_payload(item, include_rank=True)
-                for item in cast(Sequence[Mapping[str, object]], readability_focus["goal_queue"])
+                for item in builtins.iter(cast(Sequence[Mapping[str, object]], readability_focus["goal_queue"]))
             ],
             "readability_focus": {
                 "next_goal": _next_goal_payload(next_focus_goal),
@@ -745,12 +784,13 @@ def build_x86_16_milestone_report(
     return _impl()
 
 
+@cython.ccall
 def write_x86_16_milestone_report(
-    output_path: str | Path,
+    output_path: object,
     scan_summary: Mapping[str, object],
     *,
-    corpus_name: str = "x86-16",
-    corpus_slice: str | None = None,
+    corpus_name: object = "x86-16",
+    corpus_slice: object = None,
     blocked_mnemonics: Sequence[str] | None = None,
 ) -> Path:
     """Write the X86_16 milestone report JSON and return the output path."""

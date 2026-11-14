@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify exact leaf sources for modular scalar tracing.
 
 Layer: IR.
@@ -9,26 +10,31 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from .core import AddressStatus, IRAddress, IRInstr, IRValue, MemSpace, SegmentOrigin
 from .scalar_affine_contracts import ScalarAffineEntryRegister8616, ScalarAffineTerm8616
+import operator
 
 
-def _proven_bp_load_address_8616(address: IRAddress, width: int) -> bool:
+@cython.ccall
+def _proven_bp_load_address_8616(address: IRAddress, width: cython.longlong) -> cython.bint:
     """Return whether the address is one proven stable BP-relative word."""
     return (
         address.space is MemSpace.SS
         and address.base == ("bp",)
-        and address.size == width
+        and operator.eq(address.size, width)
         and address.status is AddressStatus.STABLE
         and address.segment_origin is SegmentOrigin.PROVEN
     )
 
 
-def stack_affine_source_8616(instruction: IRInstr, width: int) -> IRAddress | None:
+@cython.ccall
+def stack_affine_source_8616(instruction: IRInstr, width: cython.longlong) -> IRAddress | None:
     """Return one exact direct BP-relative scalar LOAD source."""
     address = instruction.args[0] if instruction.args else None
-    if instruction.op != "LOAD" or instruction.size != width:
+    if instruction.op != "LOAD" or operator.ne(instruction.size, width):
         return None
     if not isinstance(address, IRAddress):
         return None
@@ -37,8 +43,9 @@ def stack_affine_source_8616(instruction: IRInstr, width: int) -> IRAddress | No
     return address
 
 
+@cython.ccall
 def entry_register_affine_term_8616(
-    value: IRValue, *, function_addr: int, block_addr: int,
+    value: IRValue, *, function_addr: cython.longlong, block_addr: cython.longlong,
 ) -> ScalarAffineTerm8616 | None:
     """Prove an entry SP/BP root, never a block-local live-in at a later block."""
     if block_addr != function_addr or value.name not in {"sp", "bp"}:

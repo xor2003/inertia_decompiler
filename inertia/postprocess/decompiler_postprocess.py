@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Rewrite/Postprocess cleanup.
 
 Responsibility: normalize already-proven decompiler output and attach inert metadata.
@@ -17,6 +18,8 @@ rendered text, COD, source, or CLI/reporting evidence here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 import logging
@@ -99,21 +102,34 @@ from inertia.postprocess.decompiler_postprocess_utils import (
     _replace_c_children_8616,
     _structured_codegen_node_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 
+@cython.ccall
 def _source_annotation_lines_8616(func: object) -> tuple[str, ...]:
     return ()
 
 
-def _merge_source_annotations_if_missing_8616(_target_func: object, _source_func: object) -> bool:
+@cython.ccall
+def _merge_source_annotations_if_missing_8616(_target_func: object, _source_func: object) -> cython.bint:
     return False
 
 
-def _attach_project_cod_source_annotations_if_missing_8616(project: object, func_addr: int, func: object) -> bool:
+@cython.ccall
+def _attach_project_cod_source_annotations_if_missing_8616(project: object, func_addr: cython.longlong, func: object) -> cython.bint:
     return False
 
 
-def _metadata_function_for_codegen_addr_8616(project: Any, func_addr: int) -> Any | None:
+@cython.ccall
+def _metadata_function_for_codegen_addr_8616(project: Any, func_addr: cython.longlong) -> Any | None:
+    delta: object
+    func: object
+    info: object
+    original_func: object
+    original_project: object
+    rebased_func: object
     func = None
     with contextlib.suppress(Exception):
         func = project.kb.functions.function(addr=func_addr, create=False)
@@ -155,7 +171,8 @@ def _metadata_function_for_codegen_addr_8616(project: Any, func_addr: int) -> An
     return func
 
 
-def _strip_typed_suffix_8616(name: object) -> str | None:
+@cython.ccall
+def _strip_typed_suffix_8616(name: object) -> object:
     if not isinstance(name, str):
         return None
     if name.endswith("}"):
@@ -165,8 +182,10 @@ def _strip_typed_suffix_8616(name: object) -> str | None:
     return name
 
 
-def _function_complexity_8616(project: Any, function: Any) -> tuple[int, int]:
-    block_addrs = sorted(getattr(function, "block_addrs_set", ()) or ())
+@cython.ccall
+def _function_complexity_8616(project: Any, function: Any) -> tuple[cython.longlong, cython.longlong]:
+    block_addr: object
+    block_addrs = sorted(tuple(getattr(function, "block_addrs_set", ()) or ()))
     byte_count = 0
     for block_addr in block_addrs:
         try:
@@ -177,12 +196,16 @@ def _function_complexity_8616(project: Any, function: Any) -> tuple[int, int]:
     return len(block_addrs), byte_count
 
 
-def _is_tiny_function_8616(project: Any, function: Any) -> bool:
+@cython.ccall
+def _is_tiny_function_8616(project: Any, function: Any) -> cython.bint:
     block_count, byte_count = _function_complexity_8616(project, function)
     return block_count <= 4 and byte_count <= 32
 
 
+@cython.ccall
 def _unwrap_synthetic_wide_return_8616(retval: object) -> object | None:
+    maybe_low: object
+    maybe_wide: object
     if not isinstance(retval, CBinaryOp):
         return None
 
@@ -204,9 +227,11 @@ def _unwrap_synthetic_wide_return_8616(retval: object) -> object | None:
     return None
 
 
+@cython.ccall
 def _normalize_arg_names_8616(
-    arg_names: tuple[str | None, ...] | list[str | None] | None, count: int
-) -> list[str]:
+    arg_names: object, count: cython.longlong
+) -> object:
+    suffix_match: object
     normalized: list[str] = []
     used: set[str] = set()
     source = list(arg_names or ())
@@ -229,7 +254,10 @@ def _normalize_arg_names_8616(
     return normalized
 
 
-def _known_helper_arg_names_8616(name: str | None) -> list[str] | None:
+@cython.ccall
+def _known_helper_arg_names_8616(name: object) -> object:
+    decl: object
+    proto: object
     if not isinstance(name, str) or not name:
         return None
 
@@ -250,11 +278,14 @@ def _known_helper_arg_names_8616(name: str | None) -> list[str] | None:
     if proto is None:
         return None
 
-    arg_names = [arg_name for arg_name in getattr(proto, "arg_names", ()) or () if isinstance(arg_name, str)]
+    arg_names = [arg_name for arg_name in iter(getattr(proto, "arg_names", ()) or ()) if isinstance(arg_name, str)]
     return arg_names or None
 
 
+@cython.ccall
 def _set_codegen_prototype_8616(codegen: Any, prototype: object) -> None:
+    owner: object
+    attr: object
     functy_ok = False
     proto_ok = False
     try:
@@ -294,7 +325,8 @@ def _set_codegen_prototype_8616(codegen: Any, prototype: object) -> None:
         )
 
 
-def _prototypes_equivalent_8616(left: object, right: object) -> bool:
+@cython.ccall
+def _prototypes_equivalent_8616(left: object, right: object) -> cython.bint:
     """Return true when two prototype objects describe the same function interface."""
 
     if left is right:
@@ -302,11 +334,12 @@ def _prototypes_equivalent_8616(left: object, right: object) -> bool:
     if left is None or right is None:
         return False
     with contextlib.suppress(Exception):
-        return bool(left == right)
+        return bool(operator.eq(left, right))
     return False
 
 
-def _types_equivalent_8616(left: object, right: object) -> bool:
+@cython.ccall
+def _types_equivalent_8616(left: object, right: object) -> cython.bint:
     """Return true when two angr type objects describe the same C type."""
 
     if left is right:
@@ -314,23 +347,30 @@ def _types_equivalent_8616(left: object, right: object) -> bool:
     if left is None or right is None:
         return False
     with contextlib.suppress(Exception):
-        return bool(left == right)
+        return bool(operator.eq(left, right))
     return False
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _RetaddrPruneRun8616:
     """Run state for pruning architectural return-address stack arguments."""
 
     project: SimpleNamespace
     codegen: SimpleNamespace
-    debug: bool = field(init=False)
+    debug: cython.bint = field(init=False)
 
     def __post_init__(self) -> None:
         self.debug = os.environ.get("INERTIA_DEBUG_RETADDR_PRUNE") == "1"
 
-    def run_8616(self) -> bool:
+    @cython.ccall
+    def run_8616(self) -> cython.bint:
         """Run the return-address stack-argument prune pass."""
+        annotations: object
+        func: object
+        func_addr: object
+        prototype: object
+        variable: object
+        arg: object
         if getattr(self.codegen, "cfunc", None) is None:
             return False
         if getattr(self.codegen, "_inertia_return_selector_materialized_8616", False):
@@ -398,7 +438,8 @@ class _RetaddrPruneRun8616:
         _set_codegen_prototype_8616(self.codegen, new_proto)
         return True
 
-    def _debug_stack_variable(self, container: str, variable: object) -> None:
+    @cython.ccall
+    def _debug_stack_variable(self, container: object, variable: object) -> None:
         if not self.debug or not isinstance(variable, SimStackVariable):
             return
         identity = _stack_slot_identity_for_variable(variable)
@@ -412,6 +453,7 @@ class _RetaddrPruneRun8616:
             identity,
         )
 
+    @cython.ccall
     def _return_address_stack_offset(self, variable: object) -> int | None:
         if not isinstance(variable, SimStackVariable):
             return None
@@ -421,7 +463,8 @@ class _RetaddrPruneRun8616:
         slot_offset = identity.offset
         return slot_offset if isinstance(slot_offset, int) else None
 
-    def _should_drop_arg(self, variable: object, stack_specs: Mapping[object, object]) -> bool:
+    @cython.ccall
+    def _should_drop_arg(self, variable: object, stack_specs: Mapping[object, object]) -> cython.bint:
         slot_offset = self._return_address_stack_offset(variable)
         if slot_offset != 0:  # noqa: SIM103
             return False
@@ -430,7 +473,12 @@ class _RetaddrPruneRun8616:
         # must not override the architectural return-address exclusion.
         return True
 
-    def _prune_return_address_variable_maps(self) -> bool:
+    @cython.ccall
+    def _prune_return_address_variable_maps(self) -> cython.bint:
+        cfunc: object
+        unified: object
+        variables_in_use: object
+        variable: object
         changed_maps = False
         cfunc = getattr(self.codegen, "cfunc", None)
         if cfunc is None:
@@ -451,7 +499,10 @@ class _RetaddrPruneRun8616:
                     changed_maps = True
         return changed_maps
 
+    @cython.ccall
     def _assignment_lhs_rhs(self, node: object) -> tuple[object | None, object | None]:
+        lhs: object
+        rhs: object
         lhs = getattr(node, "lhs", None)
         rhs = getattr(node, "rhs", None)
         if lhs is None and hasattr(node, "dst"):
@@ -459,7 +510,9 @@ class _RetaddrPruneRun8616:
             rhs = getattr(node, "src", None)
         return lhs, rhs
 
+    @cython.ccall
     def _top_level_assignment(self, stmt: object) -> Any | None:
+        nested: object
         if isinstance(stmt, CAssignment) or stmt.__class__.__name__.endswith("Assignment"):
             return stmt
         nested = getattr(stmt, "statements", None)
@@ -469,22 +522,30 @@ class _RetaddrPruneRun8616:
                 return child
         return None
 
-    def _return_address_lvalue(self, lhs: object) -> bool:
+    @cython.ccall
+    def _return_address_lvalue(self, lhs: object) -> cython.bint:
+        variable: object
         node = lhs
         while isinstance(node, CTypeCast):
             node = node.expr
         variable = getattr(node, "variable", None)
         return self._return_address_stack_offset(variable) == 0
 
-    def _rhs_has_side_effect(self, rhs: object) -> bool:
-        for node in (rhs, *_iter_c_nodes_deep_8616(rhs)):
+    @cython.ccall
+    def _rhs_has_side_effect(self, rhs: object) -> cython.bint:
+        node: object
+        for node in (rhs, ) + tuple(_iter_c_nodes_deep_8616(rhs)):
             if isinstance(node, CFunctionCall):
                 return True
             if isinstance(node, CUnaryOp) and getattr(node, "op", None) == "Dereference":
                 return True
         return False
 
-    def _is_return_address_assignment_artifact(self, stmt: object) -> bool:
+    @cython.ccall
+    def _is_return_address_assignment_artifact(self, stmt: object) -> cython.bint:
+        assignment: object
+        lhs: object
+        rhs: object
         assignment = self._top_level_assignment(stmt)
         if assignment is None:
             return False
@@ -493,8 +554,10 @@ class _RetaddrPruneRun8616:
             return False
         return not self._rhs_has_side_effect(rhs)
 
-    def _prune_return_address_statement_list(self, statements_owner: Any, statements: object) -> bool:
+    @cython.ccall
+    def _prune_return_address_statement_list(self, statements_owner: Any, statements: object) -> cython.bint:
         """Drop proven return-address artifacts from one statement list."""
+        stmt: object
         if not isinstance(statements, (list, tuple)):
             return False
         changed_body = False
@@ -509,7 +572,12 @@ class _RetaddrPruneRun8616:
             statements_owner.statements = items if isinstance(statements, list) else tuple(items)
         return changed_body
 
-    def _prune_return_address_body_assignments(self, owner: Any) -> bool:
+    @cython.ccall
+    def _prune_return_address_body_assignments(self, owner: Any) -> cython.bint:
+        child: object
+        statements: object
+        attr: object
+        pair: object
         statements = getattr(owner, "statements", None)
         statements_owner = owner
         if isinstance(owner, CStatements):
@@ -528,9 +596,13 @@ class _RetaddrPruneRun8616:
                 changed_body = self._prune_return_address_body_assignments(pair[1]) or changed_body
         return changed_body
 
+    @cython.ccall
     def _arg_name_from_stack_spec(self, 
         variable: object, stack_specs: Any
-    ) -> str | None:
+    ) -> object:
+        arg_name: object
+        spec: object
+        spec_name: object
         arg_name = getattr(variable, "name", None)
         if not isinstance(variable, SimStackVariable):
             return arg_name
@@ -546,25 +618,32 @@ class _RetaddrPruneRun8616:
                 return spec_name
         return arg_name
 
-    def _sync_arg_name(self, arg: Any, variable: Any, arg_name: str | None) -> None:
+    @cython.ccall
+    def _sync_arg_name(self, arg: Any, variable: object, arg_name: object) -> None:
+        unified: object
         if arg_name is None:
             return
         with contextlib.suppress(Exception):
             arg.name = arg_name
-        if variable is not None and getattr(variable, "name", None) != arg_name:
+        if variable is not None and operator.ne(getattr(variable, "name", None), arg_name):
             variable.name = arg_name
         unified = getattr(arg, "unified_variable", None)
-        if unified is not None and getattr(unified, "name", None) != arg_name:
+        if unified is not None and operator.ne(getattr(unified, "name", None), arg_name):
             unified.name = arg_name
 
+    @cython.ccall
     def _build_proto_args_and_names(self, 
-        kept_args: list[Any],
-        proto_args: list[Any],
+        kept_args: object,
+        proto_args: object,
         stack_specs: object,
         *,
-        prefer_proto_types: bool = False,
+        prefer_proto_types: cython.bint = False,
     ) -> tuple[list[Any], list[str | None]]:
         """Build a pruned prototype while preserving explicit argument types."""
+        arg_type: object
+        variable: object
+        arg: object
+        index: object
         arg_types: list[Any] = []
         arg_names: list[str | None] = []
         for index, arg in enumerate(kept_args):
@@ -582,13 +661,19 @@ class _RetaddrPruneRun8616:
 
 
 
-def _prune_return_address_stack_arguments_8616(project: SimpleNamespace, codegen: SimpleNamespace) -> bool:
+@cython.ccall
+def _prune_return_address_stack_arguments_8616(project: SimpleNamespace, codegen: SimpleNamespace) -> cython.bint:
     """Prune architectural return-address stack slots from arguments."""
     return _RetaddrPruneRun8616(project=project, codegen=codegen).run_8616()
 
 
-def _normalize_function_prototype_arg_names_8616(project: Any, codegen: Any) -> bool:
+@cython.ccall
+def _normalize_function_prototype_arg_names_8616(project: Any, codegen: Any) -> cython.bint:
     """Normalize generated argument names without losing stack coordinates."""
+    arg_names: object
+    func: object
+    func_addr: object
+    prototype: object
     if getattr(codegen, "cfunc", None) is None:
         return False
 
@@ -609,7 +694,7 @@ def _normalize_function_prototype_arg_names_8616(project: Any, codegen: Any) -> 
         return False
 
     normalized = _normalize_arg_names_8616(arg_names, len(getattr(prototype, "args", ()) or ()))
-    if list(arg_names) == normalized:
+    if operator.eq(list(arg_names), normalized):
         return False
 
     new_proto = prototype.__class__(
@@ -624,7 +709,9 @@ def _normalize_function_prototype_arg_names_8616(project: Any, codegen: Any) -> 
     return True
 
 
-def _collect_goto_label_names_8616(root: object) -> set[str]:
+@cython.ccall
+def _collect_goto_label_names_8616(root: object) -> object:
+    node: object
     names: set[str] = set()
     for node in _iter_c_nodes_deep_8616(root):
         if isinstance(node, CLabel):
@@ -634,7 +721,10 @@ def _collect_goto_label_names_8616(root: object) -> set[str]:
     return names
 
 
-def _collect_mapped_goto_label_names_8616(cfunc: object) -> set[str]:
+@cython.ccall
+def _collect_mapped_goto_label_names_8616(cfunc: object) -> object:
+    mapping: object
+    value: object
     mapping = getattr(cfunc, "map_addr_to_label", None)
     if not isinstance(mapping, dict):
         return set()
@@ -647,23 +737,27 @@ def _collect_mapped_goto_label_names_8616(cfunc: object) -> set[str]:
     return names
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _RepairExitGotosRun8616:
     """Run state for _repair_unresolved_function_exit_gotos_8616."""
 
     codegen: Any
     project: Any
-    block_addrs: tuple[int, ...] = field(init=False)
-    defined_all_labels: set[str] = field(init=False)
+    block_addrs: object = field(init=False)
+    defined_all_labels: object = field(init=False)
     map_addr_to_label: Any = field(init=False)
     max_block_addr: int | None = field(init=False)
     min_block_addr: int | None = field(init=False)
 
-    def run_8616(self) -> bool:
+    def run_8616(self) -> cython.bint:
         """Repair unresolved CGoto that are definitely function-exit candidates.
 
 This is a conservative pass: only jump targets proven to be out-of-procedure
 become ``return``. Any ambiguous in-procedure target remains unchanged."""
+        cfunc: object
+        root: object
+        stats: object
+        goto: object
         cfunc = getattr(self.codegen, "cfunc", None)
         if cfunc is None:
             return False
@@ -680,12 +774,14 @@ become ``return``. Any ambiguous in-procedure target remains unchanged."""
             self.codegen._inertia_unresolved_goto_exit_stats_8616 = stats
         self._init_block_evidence_8616(cfunc, root)
         changed = False
-        for goto in tuple(node for node in _iter_c_nodes_deep_8616(root) if isinstance(node, CGoto)):
+        for goto in tuple(node for node in builtins.iter(_iter_c_nodes_deep_8616(root)) if isinstance(node, CGoto)):
             changed = self._repair_goto_8616(goto, root, stats) or changed
         return changed
 
+    @cython.ccall
     def _init_block_evidence_8616(self, cfunc: object, root: object) -> None:
         """Seed block address range and label maps for exit-target classification."""
+        func_addr: object
         func_addr = getattr(cfunc, "addr", None)
         function = None
         if func_addr is not None and self.project is not None:
@@ -693,7 +789,7 @@ become ``return``. Any ambiguous in-procedure target remains unchanged."""
                 function = self.project.kb.functions.function(addr=func_addr, create=False)
             except Exception:
                 function = None
-        self.block_addrs = tuple(sorted(getattr(function, "block_addrs_set", ()) or ()))
+        self.block_addrs = tuple(sorted(tuple(getattr(function, "block_addrs_set", ()) or ())))
         self.min_block_addr = self.block_addrs[0] if self.block_addrs else None
         self.max_block_addr = self.block_addrs[-1] if self.block_addrs else None
         defined_labels = _collect_goto_label_names_8616(root)
@@ -701,8 +797,10 @@ become ``return``. Any ambiguous in-procedure target remains unchanged."""
         self.defined_all_labels = defined_labels | mapped_labels
         self.map_addr_to_label = getattr(cfunc, "map_addr_to_label", None)
 
-    def _repair_goto_8616(self, goto: object, root: object, stats: dict[str, int]) -> bool:
+    def _repair_goto_8616(self, goto: object, root: object, stats: object) -> cython.bint:
         """Rewrite one proven exit-target goto to return; count refusals."""
+        target: object
+        target_idx: object
         target = getattr(goto, "target", None)
         target_idx = getattr(goto, "target_idx", None)
         if not isinstance(target, int):
@@ -723,7 +821,9 @@ become ``return``. Any ambiguous in-procedure target remains unchanged."""
         stats["unresolved_goto_exit_refused"] = int(stats["unresolved_goto_exit_refused"]) + 1
         return False
 
-    def _is_known_target(self, target: int, target_idx: int | None) -> bool:
+    @cython.ccall
+    def _is_known_target(self, target: cython.longlong, target_idx: object) -> cython.bint:
+        mapped_label: object
         if not self.block_addrs:
             return False
         if target in self.block_addrs:
@@ -738,7 +838,8 @@ become ``return``. Any ambiguous in-procedure target remains unchanged."""
             return mapped_name in self.defined_all_labels
         return False
 
-    def _is_function_exit_target(self, target: int) -> bool:
+    @cython.ccall
+    def _is_function_exit_target(self, target: cython.longlong) -> cython.bint:
         if not self.block_addrs:
             return False
         if target in self.block_addrs:
@@ -748,11 +849,13 @@ become ``return``. Any ambiguous in-procedure target remains unchanged."""
         return bool(target < self.min_block_addr or target > self.max_block_addr)
 
 
-def _repair_unresolved_function_exit_gotos_8616(project: Any, codegen: Any) -> bool:
+@cython.ccall
+def _repair_unresolved_function_exit_gotos_8616(project: Any, codegen: Any) -> cython.bint:
     return _RepairExitGotosRun8616(project=project, codegen=codegen).run_8616()
 
 
-def _make_unique_identifier_8616(base: str, used: set[str]) -> str:
+@cython.ccall
+def _make_unique_identifier_8616(base: object, used: object) -> object:
     candidate = base
     suffix = 2
     while candidate in used:
@@ -762,17 +865,22 @@ def _make_unique_identifier_8616(base: str, used: set[str]) -> str:
     return candidate
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _DedupeVarNamesRun8616:
     """Run state for _dedupe_codegen_variable_names_8616."""
 
     codegen: Any
-    changed: bool = field(init=False)
-    used_names: set[str] = field(default_factory=set)
-    seen_variables: set[int] = field(default_factory=set)
+    changed: cython.bint = field(init=False)
+    used_names: object = field(default_factory=set)
+    seen_variables: object = field(default_factory=set)
 
-    def run_8616(self) -> bool:
+    @cython.ccall
+    def run_8616(self) -> cython.bint:
         """Run the deterministic codegen variable-name dedupe pass."""
+        unified_locals: object
+        variables_in_use: object
+        cvar: object
+        variable: object
         if os.environ.get("INERTIA_ENABLE_NAME_DEDUP", "").strip().lower() not in {"1", "true", "yes", "on"}:
             return False
         if getattr(self.codegen, "cfunc", None) is None:
@@ -787,10 +895,13 @@ class _DedupeVarNamesRun8616:
             self._rename_dedupe_item_8616(variable, cvar)
         return self.changed
 
+    @cython.ccall
     def _ordered_dedupe_items_8616(
         self, variables_in_use: object, unified_locals: object
-    ) -> list[Any]:
+    ) -> object:
         """Merge variable maps into one deterministic ordered item list."""
+        cvars: object
+        variable: object
         ordered_items = list(variables_in_use.items()) if isinstance(variables_in_use, dict) else []
         if isinstance(unified_locals, dict):
             for variable, cvars in unified_locals.items():
@@ -799,8 +910,10 @@ class _DedupeVarNamesRun8616:
         ordered_items.sort(key=self.sort_key)
         return ordered_items
 
+    @cython.ccall
     def _rename_dedupe_item_8616(self, variable: Any, cvar: Any) -> None:
         """Apply a unique non-generic name to one variable/cvar pair."""
+        name: object
         if id(variable) in self.seen_variables:
             return
         self.seen_variables.add(id(variable))
@@ -813,15 +926,18 @@ class _DedupeVarNamesRun8616:
             self.used_names.add(name)
         self.apply_name(variable, cvar, name)
 
-    def is_generic_name(self, name: object) -> bool:
+    @cython.ccall
+    def is_generic_name(self, name: object) -> cython.bint:
         """Check whether a candidate name is a generated placeholder."""
         normalized = _strip_typed_suffix_8616(name)
         if not isinstance(normalized, str):
             return False
         return re.fullmatch(r"(?:v\d+|vvar_\d+|ir_\d+)", normalized) is not None
 
-    def preferred_name(self, variable: object, cvar: object) -> str | None:
+    @cython.ccall
+    def preferred_name(self, variable: object, cvar: object) -> object:
         """Pick the preferred human-readable name for one variable."""
+        candidate: object
         candidates = [
             getattr(variable, "name", None),
             getattr(cvar, "name", None),
@@ -835,8 +951,11 @@ class _DedupeVarNamesRun8616:
                 return candidate
         return None
 
-    def sort_key(self, item: tuple[object, object]) -> tuple[object, ...]:
+    @cython.ccall
+    def sort_key(self, item: object) -> tuple[object, ...]:
         """Return the deterministic sort key for one dedupe item."""
+        cvar_name: object
+        variable_name: object
         variable, cvar = item
         variable_name = getattr(variable, "name", None)
         cvar_name = getattr(cvar, "name", None)
@@ -870,12 +989,14 @@ class _DedupeVarNamesRun8616:
             )
         return (3, variable_name_key, cvar_name_key)
 
-    def apply_name(self, variable: Any, cvar: Any, new_name: str) -> None:
+    @cython.ccall
+    def apply_name(self, variable: Any, cvar: Any, new_name: object) -> None:
         """Apply the chosen name to the variable and cvar."""
-        if getattr(variable, "name", None) != new_name:
+        unified: object
+        if operator.ne(getattr(variable, "name", None), new_name):
             variable.name = new_name
             self.changed = True
-        if getattr(cvar, "name", None) != new_name:
+        if operator.ne(getattr(cvar, "name", None), new_name):
             try:
                 cvar.name = new_name
             except Exception:
@@ -883,17 +1004,21 @@ class _DedupeVarNamesRun8616:
             else:
                 self.changed = True
         unified = getattr(cvar, "unified_variable", None)
-        if unified is not None and getattr(unified, "name", None) != new_name:
+        if unified is not None and operator.ne(getattr(unified, "name", None), new_name):
             unified.name = new_name
             self.changed = True
 
 
-def _dedupe_codegen_variable_names_8616(codegen: Any) -> bool:
+@cython.ccall
+def _dedupe_codegen_variable_names_8616(codegen: Any) -> cython.bint:
     return _DedupeVarNamesRun8616(codegen=codegen).run_8616()
 
 
-def _binary_return_value_shape_8616(retval: CBinaryOp) -> str | None:
+@cython.ccall
+def _binary_return_value_shape_8616(retval: CBinaryOp) -> object:
     """Classify a binary-op return value as scalar or far-pointer shaped."""
+    maybe_low: object
+    maybe_wide: object
     if retval.op in {"Or", "Concat"}:
         for maybe_wide, maybe_low in ((retval.lhs, retval.rhs), (retval.rhs, retval.lhs)):
             if _c_constant_value_8616(maybe_low) == 0:
@@ -906,7 +1031,8 @@ def _binary_return_value_shape_8616(retval: CBinaryOp) -> str | None:
     return "scalar"
 
 
-def _return_value_shape_8616(retval: object) -> str | None:
+@cython.ccall
+def _return_value_shape_8616(retval: object) -> object:
     if retval is None:
         return None
     if isinstance(retval, CFunctionCall) and getattr(retval, "callee_target", None) == "MK_FP":
@@ -924,7 +1050,13 @@ def _return_value_shape_8616(retval: object) -> str | None:
     return "scalar"
 
 
-def _stack_arg_has_pointer_evidence_8616(codegen: object, variable: object) -> bool:
+@cython.ccall
+def _stack_arg_has_pointer_evidence_8616(codegen: object, variable: object) -> cython.bint:
+    identity: object
+    statements: object
+    node: object
+    operand_node: object
+    stmt: object
     if not isinstance(variable, SimStackVariable):
         return False
     identity = _stack_slot_identity_for_variable(variable)
@@ -942,16 +1074,19 @@ def _stack_arg_has_pointer_evidence_8616(codegen: object, variable: object) -> b
                 operand_var = operand_node.variable
                 if not isinstance(operand_var, SimStackVariable):
                     continue
-                if _stack_slot_identity_for_variable(operand_var) == identity:
+                if operator.eq(_stack_slot_identity_for_variable(operand_var), identity):
                     return True
     return False
 
 
-def _codegen_arg_bp_offsets_8616(codegen: SimpleNamespace) -> set[int]:
+@cython.ccall
+def _codegen_arg_bp_offsets_8616(codegen: SimpleNamespace) -> object:
     """Collect machine-BP offsets for every argument cvar in arg_list."""
+    cfunc: object
+    cvar: object
     # Dynamic angr/codegen compatibility boundary.
     cfunc = getattr(codegen, "cfunc", None)
-    offsets: set[int] = set()
+    offsets: set[cython.longlong] = set()
     # Dynamic angr/codegen compatibility boundary.
     for cvar in tuple(getattr(cfunc, "arg_list", ()) or ()):
         offset = _machine_bp_offset_for_cvariable_8616(codegen, cvar)
@@ -960,12 +1095,17 @@ def _codegen_arg_bp_offsets_8616(codegen: SimpleNamespace) -> set[int]:
     return offsets
 
 
-def _codegen_stack_variable_bp_offsets_8616(codegen: SimpleNamespace) -> set[int]:
+@cython.ccall
+def _codegen_stack_variable_bp_offsets_8616(codegen: SimpleNamespace) -> object:
     """Collect machine-BP offsets for stack variables in variables_in_use."""
+    cfunc: object
+    identity: object
+    variables_in_use: object
+    variable: object
     # Dynamic angr/codegen compatibility boundary.
     cfunc = getattr(codegen, "cfunc", None)
     variables_in_use = getattr(cfunc, "variables_in_use", None)
-    offsets: set[int] = set()
+    offsets: set[cython.longlong] = set()
     if isinstance(variables_in_use, dict):
         for variable in variables_in_use:
             if not isinstance(variable, SimStackVariable):
@@ -978,14 +1118,14 @@ def _codegen_stack_variable_bp_offsets_8616(codegen: SimpleNamespace) -> set[int
 
 def _positive_stack_specs_are_normalized_for_codegen_8616(
     stack_specs: Mapping[object, object], codegen: SimpleNamespace
-) -> bool:
-    positive_offsets = sorted(offset for offset in stack_specs if isinstance(offset, int) and offset > 0)
+) -> cython.bint:
+    positive_offsets = sorted(offset for offset in iter(stack_specs) if isinstance(offset, int) and offset > 0)
     if not positive_offsets or positive_offsets[0] != 2:
         return False
     arg_offsets = _codegen_arg_bp_offsets_8616(codegen)
     known_offsets = set(arg_offsets)
     if arg_offsets:
-        shifted_offsets = {offset + 2 for offset in positive_offsets}
+        shifted_offsets = {offset + 2 for offset in iter(positive_offsets)}
         if shifted_offsets <= arg_offsets:
             return True
         if set(positive_offsets) <= arg_offsets:
@@ -993,7 +1133,7 @@ def _positive_stack_specs_are_normalized_for_codegen_8616(
     known_offsets |= _codegen_stack_variable_bp_offsets_8616(codegen)
     if known_offsets:
         direct_offsets = set(positive_offsets)
-        shifted_offsets = {offset + 2 for offset in positive_offsets}
+        shifted_offsets = {offset + 2 for offset in iter(positive_offsets)}
         if direct_offsets <= known_offsets:
             return False
         if shifted_offsets <= known_offsets:
@@ -1004,8 +1144,13 @@ def _positive_stack_specs_are_normalized_for_codegen_8616(
     return True
 
 
-def _promote_stack_prototype_from_bp_loads_8616(project: SimpleNamespace, codegen: SimpleNamespace) -> bool:
+@cython.ccall
+def _promote_stack_prototype_from_bp_loads_8616(project: SimpleNamespace, codegen: SimpleNamespace) -> cython.bint:
     """Bridge legacy BP evidence only when typed Lowering owns no interface."""
+    func: object
+    func_addr: object
+    live_prototype: object
+    prototype: object
     if getattr(codegen, "cfunc", None) is None:
         return False
 
@@ -1035,7 +1180,7 @@ def _promote_stack_prototype_from_bp_loads_8616(project: SimpleNamespace, codege
     if not list(getattr(prototype, "args", ()) or ()):
         return positive_bp_changed
     source_pointer_flags, annotated_args = _promotion_arg_inputs_8616(project, func, func_addr)
-    arg_names = [name for name in getattr(prototype, "arg_names", ()) or () if isinstance(name, str)]
+    arg_names = [name for name in iter(getattr(prototype, "arg_names", ()) or ()) if isinstance(name, str)]
     return _attempt_stack_arg_promotion_8616(
         project=project,
         codegen=codegen,
@@ -1048,8 +1193,10 @@ def _promote_stack_prototype_from_bp_loads_8616(project: SimpleNamespace, codege
     )
 
 
+@cython.ccall
 def _promotion_candidate_prototype_8616(func: object) -> object:
     """Prefer the annotated prototype over the live function prototype."""
+    info: object
     info = getattr(func, "info", None)
     annotations = info.get(ANNOTATION_KEY) if isinstance(info, Mapping) else None
     annotated_prototype = annotations.get("prototype") if isinstance(annotations, Mapping) else None
@@ -1060,9 +1207,10 @@ def _promotion_candidate_prototype_8616(func: object) -> object:
     )
 
 
+@cython.ccall
 def _promotion_arg_inputs_8616(
     project: SimpleNamespace, func: object, func_addr: int | None
-) -> tuple[tuple[bool, ...], list[tuple[int, str | None]]]:
+) -> tuple[tuple[cython.bint, ...], list[tuple[cython.longlong, str | None]]]:
     """Collect source pointer flags and annotated args for promotion."""
     _annotations, source_pointer_flags, _stack_specs, annotated_args = _collect_stack_promotion_inputs_8616(func)
     if not source_pointer_flags:
@@ -1079,17 +1227,18 @@ def _promotion_arg_inputs_8616(
     return source_pointer_flags, annotated_args
 
 
+@cython.ccall
 def _attempt_stack_arg_promotion_8616(
     *,
     project: SimpleNamespace,
     codegen: SimpleNamespace,
     func: object,
     prototype: object,
-    arg_names: list[str],
-    source_pointer_flags: tuple[bool, ...],
-    annotated_args: list[tuple[int, str | None]],
-    positive_bp_changed: bool,
-) -> bool:
+    arg_names: object,
+    source_pointer_flags: object,
+    annotated_args: object,
+    positive_bp_changed: cython.bint,
+) -> cython.bint:
     """Try each argument-promotion strategy in authority order."""
     current_proto = getattr(getattr(codegen, "cfunc", None), "functy", None) or prototype
     existing_args = list(getattr(codegen.cfunc, "arg_list", ()) or ())
@@ -1135,7 +1284,8 @@ def _attempt_stack_arg_promotion_8616(
     )
 
 
-def _promote_positive_bp_stack_slots_to_args_8616(project: SimpleNamespace, codegen: SimpleNamespace) -> bool:
+@cython.ccall
+def _promote_positive_bp_stack_slots_to_args_8616(project: SimpleNamespace, codegen: SimpleNamespace) -> cython.bint:
     """Promote proven positive BP stack slots into function arguments.
 
     The high-byte projection lane is a compatibility consumer for already
@@ -1145,6 +1295,10 @@ def _promote_positive_bp_stack_slots_to_args_8616(project: SimpleNamespace, code
     metadata, not a classified body fact, and must be pruned without tripping
     the closed-loop materialization contract.
     """
+    cfunc: object
+    func: object
+    func_addr: object
+    variables_in_use: object
 
     cfunc = getattr(codegen, "cfunc", None)
     if cfunc is None:
@@ -1193,10 +1347,12 @@ def _promote_positive_bp_stack_slots_to_args_8616(project: SimpleNamespace, code
     )
 
 
+@cython.ccall
 def _add_bp_arg_candidate_8616(
-    candidates: dict[int, tuple[SimStackVariable, CVariable]], variable: object, cvar: object
+    candidates: object, variable: object, cvar: object
 ) -> None:
     """Record one positive-BP slot candidate when it is a real stack variable."""
+    offset: object
     if not isinstance(variable, SimStackVariable) or not isinstance(cvar, CVariable):
         return
     offset = getattr(variable, "offset", None)
@@ -1205,10 +1361,15 @@ def _add_bp_arg_candidate_8616(
     candidates.setdefault(offset, (variable, cvar))
 
 
-def _collect_bp_arg_candidates_8616(cfunc: object) -> dict[int, tuple[SimStackVariable, CVariable]]:
+@cython.ccall
+def _collect_bp_arg_candidates_8616(cfunc: object) -> object:
     """Collect positive BP stack slots from variables, body uses, and args."""
+    variables_in_use: object
+    cvar: object
+    node: object
+    variable: object
     variables_in_use = getattr(cfunc, "variables_in_use", None)
-    candidates: dict[int, tuple[SimStackVariable, CVariable]] = {}
+    candidates: dict[cython.longlong, tuple[SimStackVariable, CVariable]] = {}
     for variable, cvar in (variables_in_use or {}).items():
         _add_bp_arg_candidate_8616(candidates, variable, cvar)
     for node in _iter_c_nodes_deep_8616(getattr(cfunc, "statements", None)):
@@ -1220,14 +1381,17 @@ def _collect_bp_arg_candidates_8616(cfunc: object) -> dict[int, tuple[SimStackVa
     return candidates
 
 
-def _stack_spec_arg_names_8616(stack_specs: object) -> dict[int, str]:
+def _stack_spec_arg_names_8616(stack_specs: object) -> object:
     """Map source argument names from COD stack-layout specs to BP offsets."""
-    names_by_offset: dict[int, str] = {}
+    spec_name: object
+    offset: object
+    spec: object
+    names_by_offset: dict[cython.longlong, str] = {}
     if not isinstance(stack_specs, dict):
         return names_by_offset
-    positive_offsets = sorted(offset for offset in stack_specs if isinstance(offset, int) and offset > 0)
+    positive_offsets = sorted(offset for offset in iter(stack_specs) if isinstance(offset, int) and offset > 0)
     positive_specs_are_normalized = bool(positive_offsets) and positive_offsets[0] == 2
-    for offset, spec in sorted(stack_specs.items(), key=lambda item: item[0]):
+    for offset, spec in sorted(tuple(stack_specs.items()), key=lambda item: item[0]):
         if not isinstance(offset, int) or offset <= 0:
             continue
         name = spec if isinstance(spec, str) else None
@@ -1240,12 +1404,16 @@ def _stack_spec_arg_names_8616(stack_specs: object) -> dict[int, str]:
     return names_by_offset
 
 
+@cython.ccall
 def _collect_source_arg_metadata_8616(
     annotations: object, cfunc: object, func: object
-) -> tuple[dict[int, str], dict[int, SimType]]:
+) -> tuple[dict[cython.longlong, str], dict[cython.longlong, SimType]]:
     """Collect source argument names and types from COD specs and the prototype."""
+    current_proto: object
+    arg_name: object
+    arg_type: object
     source_arg_names_by_offset = _stack_spec_arg_names_8616(stack_layout_annotation_specs_8616(annotations))
-    source_arg_types_by_offset: dict[int, SimType] = {}
+    source_arg_types_by_offset: dict[cython.longlong, SimType] = {}
     # Dynamic angr/codegen compatibility boundary.
     annotated_prototype = annotations.get("prototype") if isinstance(annotations, dict) else None
     current_proto = (
@@ -1273,12 +1441,17 @@ def _collect_source_arg_metadata_8616(
     return source_arg_names_by_offset, source_arg_types_by_offset
 
 
+@cython.ccall
 def _classify_contained_high_byte_args_8616(
-    candidates: dict[int, tuple[Any, Any]], body_stack_offsets: set[int], body_stack_read_offsets: Set[int]
-) -> tuple[dict[int, int], dict[int, int]]:
+    candidates: object, body_stack_offsets: object, body_stack_read_offsets: Set[cython.longlong]
+) -> tuple[dict[cython.longlong, cython.longlong], dict[cython.longlong, cython.longlong]]:
     """Split one-byte odd slots into body-read (projectable) and stale (dead) maps."""
-    stale_contained_high_byte_args: dict[int, int] = {}
-    contained_high_byte_args: dict[int, int] = {}
+    base: object
+    _cvar: object
+    offset: object
+    variable: object
+    stale_contained_high_byte_args: dict[cython.longlong, cython.longlong] = {}
+    contained_high_byte_args: dict[cython.longlong, cython.longlong] = {}
     for offset, (variable, _cvar) in candidates.items():
         size = int(getattr(variable, "size", 0) or 0)
         if size != 1 or offset <= 4 or offset % 2 == 0:
@@ -1296,19 +1469,20 @@ def _classify_contained_high_byte_args_8616(
     return contained_high_byte_args, stale_contained_high_byte_args
 
 
+@cython.ccall
 def _project_contained_high_byte_args_8616(
-    codegen: SimpleNamespace, cfunc: Any, candidates: dict[int, tuple[Any, Any]]
-) -> tuple[bool, dict[int, int], dict[int, int]]:
+    codegen: SimpleNamespace, cfunc: Any, candidates: object
+) -> tuple[cython.bint, dict[cython.longlong, cython.longlong], dict[cython.longlong, cython.longlong]]:
     """Project body uses of contained high-byte slots onto their word bases."""
     body_stack_offsets = {
         offset
         # Dynamic angr/codegen compatibility boundary.
-        for node in _iter_c_nodes_deep_8616(getattr(cfunc, "statements", None))
+        for node in builtins.iter(_iter_c_nodes_deep_8616(getattr(cfunc, "statements", None)))
         if isinstance(node, CVariable)
         # Dynamic angr/codegen compatibility boundary.
-        for variable in (getattr(node, "variable", None),)
+        for variable in iter((getattr(node, "variable", None),))
         # Dynamic angr/codegen compatibility boundary.
-        for offset in (getattr(variable, "offset", None),)
+        for offset in iter((getattr(variable, "offset", None),))
         if isinstance(variable, SimStackVariable) and isinstance(offset, int)
     }
     body_stack_read_offsets = _stack_variable_read_offsets_8616(cfunc.statements)
@@ -1321,7 +1495,7 @@ def _project_contained_high_byte_args_8616(
         classified_fact_count=len(contained_high_byte_args),
     )
     changed = False
-    projected_high_byte_offsets: set[int] = set()
+    projected_high_byte_offsets: set[cython.longlong] = set()
     if contained_high_byte_args:
         changed = _apply_high_byte_projection_8616(
             codegen=codegen,
@@ -1333,21 +1507,24 @@ def _project_contained_high_byte_args_8616(
         )
         contained_high_byte_args = {
             offset: base_offset
-            for offset, base_offset in contained_high_byte_args.items()
+            for offset, base_offset in builtins.iter(contained_high_byte_args.items())
             if offset in projected_high_byte_offsets
         }
     return changed, contained_high_byte_args, stale_contained_high_byte_args
 
 
+@cython.ccall
 def _high_byte_projection_8616(
     node: object,
     *,
     codegen: SimpleNamespace,
-    contained_high_byte_args: dict[int, int],
-    base_cvars: dict[int, object],
-    projected_high_byte_offsets: set[int],
+    contained_high_byte_args: object,
+    base_cvars: object,
+    projected_high_byte_offsets: object,
 ) -> object:
     """Project a contained high-byte stack slot as Shr of the word base."""
+    base_cvar: object
+    base_offset: object
     if not isinstance(node, CVariable):
         return node
     # Dynamic angr/codegen compatibility boundary.
@@ -1373,7 +1550,8 @@ def _high_byte_projection_8616(
     )
 
 
-def _should_rewrite_high_byte_child_8616(parent: object, attr: str) -> bool:
+@cython.ccall
+def _should_rewrite_high_byte_child_8616(parent: object, attr: object) -> cython.bint:
     """Skip variable attrs and assignment lhs during high-byte rewrite."""
     if attr == "variable":
         return False
@@ -1384,16 +1562,16 @@ def _apply_high_byte_projection_8616(
     *,
     codegen: SimpleNamespace,
     cfunc: Any,
-    candidates: dict[int, tuple[Any, Any]],
-    contained_high_byte_args: dict[int, int],
+    candidates: object,
+    contained_high_byte_args: object,
     high_byte_stats: StackArgHighByteProjectionStats8616,
-    projected_high_byte_offsets: set[int],
-) -> bool:
+    projected_high_byte_offsets: object,
+) -> cython.bint:
     """Rewrite body uses of contained high-byte slots as Shr of the word base."""
     codegen._inertia_stack_arg_high_byte_projection_candidates_8616 = int(
         getattr(codegen, "_inertia_stack_arg_high_byte_projection_candidates_8616", 0) or 0
     ) + len(contained_high_byte_args)
-    base_cvars = {base_offset: candidates[base_offset][1] for base_offset in set(contained_high_byte_args.values())}
+    base_cvars = {base_offset: candidates[base_offset][1] for base_offset in builtins.iter(set(contained_high_byte_args.values()))}
 
     def _high_byte_projection(node: object) -> object:
         return _high_byte_projection_8616(
@@ -1422,18 +1600,23 @@ def _apply_high_byte_projection_8616(
     return changed
 
 
-def _classify_contained_high_word_args_8616(cfunc: Any, candidates: dict[int, tuple[Any, Any]]) -> dict[int, int]:
+@cython.ccall
+def _classify_contained_high_word_args_8616(cfunc: Any, candidates: object) -> object:
     """Classify even high-word slots contained in a >=4-byte base and dead in the body."""
+    base: object
+    _cvar: object
+    offset: object
+    variable: object
     body_stack_variable_ids = {
         id(variable)
         # Dynamic angr/codegen compatibility boundary.
-        for node in _iter_c_nodes_deep_8616(getattr(cfunc, "statements", None))
+        for node in builtins.iter(_iter_c_nodes_deep_8616(getattr(cfunc, "statements", None)))
         if isinstance(node, CVariable)
         # Dynamic angr/codegen compatibility boundary.
-        for variable in (getattr(node, "variable", None),)
+        for variable in iter((getattr(node, "variable", None),))
         if isinstance(variable, SimStackVariable)
     }
-    contained_high_word_args: dict[int, int] = {}
+    contained_high_word_args: dict[cython.longlong, cython.longlong] = {}
     for offset, (variable, _cvar) in candidates.items():
         if offset <= 4 or offset % 2 != 0 or id(variable) in body_stack_variable_ids:
             continue
@@ -1451,20 +1634,29 @@ def _classify_contained_high_word_args_8616(cfunc: Any, candidates: dict[int, tu
     return contained_high_word_args
 
 
+@cython.ccall
 def _build_desired_bp_args_8616(
     *,
-    candidates: dict[int, tuple[Any, Any]],
-    contained_offsets: set[int],
-    high_word_bases: set[int],
-    source_arg_names_by_offset: dict[int, str],
-    source_arg_types_by_offset: dict[int, SimType],
-) -> tuple[list[Any], list[Any], list[Any], bool]:
+    candidates: object,
+    contained_offsets: object,
+    high_word_bases: object,
+    source_arg_names_by_offset: object,
+    source_arg_types_by_offset: object,
+) -> tuple[list[Any], list[Any], list[Any], cython.bint]:
     """Rebuild the desired arg list with source names and widened types."""
+    arg_type: object
+    name: object
+    source_name: object
+    source_type: object
+    cvar: object
+    index: object
+    offset: object
+    variable: object
     desired_args = []
     arg_types = []
     arg_names = []
     changed = False
-    for index, (offset, (variable, cvar)) in enumerate(sorted(candidates.items())):
+    for index, (offset, (variable, cvar)) in enumerate(sorted(tuple(candidates.items()))):
         if offset in contained_offsets:
             continue
         width = max(2, int(getattr(variable, "size", 0) or 2))
@@ -1472,7 +1664,7 @@ def _build_desired_bp_args_8616(
             width = max(width, 4)
         name = getattr(variable, "name", None)
         source_name = source_arg_names_by_offset.get(offset)
-        if isinstance(source_name, str) and source_name and name != source_name:
+        if isinstance(source_name, str) and source_name and operator.ne(name, source_name):
             name = source_name
             variable.name = name
             with contextlib.suppress(Exception):
@@ -1488,7 +1680,7 @@ def _build_desired_bp_args_8616(
             changed = True
         arg_type = getattr(cvar, "variable_type", None)
         source_type = source_arg_types_by_offset.get(offset)
-        if source_type is not None and arg_type != source_type:
+        if source_type is not None and operator.ne(arg_type, source_type):
             arg_type = source_type
             cvar.variable_type = source_type
             changed = True
@@ -1511,17 +1703,19 @@ def _commit_bp_arg_layout_8616(
     project: SimpleNamespace,
     codegen: SimpleNamespace,
     cfunc: Any,
-    variables_in_use: dict[Any, Any],
-    desired_args: list[Any],
-    arg_types: list[Any],
-    arg_names: list[Any],
-    contained_offsets: set[int],
-    changed: bool,
-) -> bool:
+    variables_in_use: object,
+    desired_args: object,
+    arg_types: object,
+    arg_names: object,
+    contained_offsets: object,
+    changed: cython.bint,
+) -> cython.bint:
     """Commit arg list, retune the prototype, and prune contained slots."""
+    current_proto: object
+    return_type: object
     existing_args = list(getattr(cfunc, "arg_list", ()) or ())
-    if len(existing_args) != len(desired_args) or any(
-        existing is not desired for existing, desired in zip(existing_args, desired_args, strict=False)
+    if operator.ne(len(existing_args), len(desired_args)) or any(
+        existing is not desired for existing, desired in builtins.iter(zip(existing_args, desired_args, strict=False))
     ):
         cfunc.arg_list = desired_args
         changed = True
@@ -1543,8 +1737,11 @@ def _commit_bp_arg_layout_8616(
     return changed
 
 
-def _prune_contained_stack_offsets_8616(cfunc: Any, variables_in_use: dict[Any, Any], contained_offsets: set[int]) -> bool:
+@cython.ccall
+def _prune_contained_stack_offsets_8616(cfunc: Any, variables_in_use: object, contained_offsets: object) -> cython.bint:
     """Remove stale contained stack slots from variable maps."""
+    unified: object
+    variable: object
     if not contained_offsets:
         return False
     changed = False
@@ -1561,7 +1758,9 @@ def _prune_contained_stack_offsets_8616(cfunc: Any, variables_in_use: dict[Any, 
     return changed
 
 
-def _type_size_bytes_8616(type_: object, *, default: int = 2) -> int:
+@cython.ccall
+def _type_size_bytes_8616(type_: object, *, default: cython.longlong = 2) -> cython.longlong:
+    bits: object
     try:
         bits = getattr(type_, "size", None)
     except ValueError:
@@ -1571,24 +1770,29 @@ def _type_size_bytes_8616(type_: object, *, default: int = 2) -> int:
     return default
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _SyncProtoLayoutRun8616:
     """Run state for _sync_arg_list_from_prototype_stack_layout_8616."""
 
-    annotated_args: list[tuple[int, str | None]] | tuple[tuple[int, str | None], ...]
-    arg_names: list[str]
+    annotated_args: object
+    arg_names: object
     codegen: SimpleNamespace
     func: object
     project: SimpleNamespace
     prototype: object
-    source_pointer_flags: tuple[bool, ...]
+    source_pointer_flags: object
 
-    def run_8616(self) -> bool:
+    @cython.ccall
+    def run_8616(self) -> cython.bint:
         """Sync codegen arg list and prototype from the stack layout."""
+        cfunc: object
+        func_addr: object
+        unified: object
+        variables_in_use: object
         proto_args: list[Any] = list(getattr(self.prototype, "args", ()) or ())
         if not proto_args:
             return False
-        if len(self.source_pointer_flags) != len(proto_args):
+        if operator.ne(len(self.source_pointer_flags), len(proto_args)):
             return False
         prototype_is_explicit = not bool(getattr(self.func, "is_prototype_guessed", True))
         original_proto_args = list(proto_args)
@@ -1639,11 +1843,15 @@ class _SyncProtoLayoutRun8616:
         ) or changed
         return changed
 
+    @cython.ccall
     def _collect_stack_cvars_8616(
-        self, cfunc: Any, variables_in_use: dict[Any, Any]
-    ) -> dict[int, CVariable]:
+        self, cfunc: Any, variables_in_use: object
+    ) -> object:
         """Collect stack cvars by BP offset from variable maps and AST nodes."""
-        stack_cvars_by_offset: dict[int, CVariable] = {}
+        cvar: object
+        node: object
+        variable: object
+        stack_cvars_by_offset: dict[cython.longlong, CVariable] = {}
         for variable, cvar in variables_in_use.items():
             if isinstance(variable, SimStackVariable) and isinstance(cvar, CVariable):
                 offset_value = variable.offset
@@ -1663,42 +1871,46 @@ class _SyncProtoLayoutRun8616:
         return stack_cvars_by_offset
 
     def _annotation_offsets_and_widths_8616(
-        self, proto_args: list[Any], stack_cvars_by_offset: dict[int, CVariable]
-    ) -> tuple[tuple[int, ...], dict[int, int]]:
+        self, proto_args: object, stack_cvars_by_offset: object
+    ) -> tuple[tuple[cython.longlong, ...], dict[cython.longlong, cython.longlong]]:
         """Derive ordered annotation offsets and inferred argument widths."""
-        annotated_offsets: tuple[int, ...] = ()
-        if len(self.annotated_args) == len(proto_args):
+        annotated_offsets: tuple[cython.longlong, ...] = ()
+        if operator.eq(len(self.annotated_args), len(proto_args)):
             candidate_offsets = tuple(
-                offset for offset, _name in self.annotated_args if isinstance(offset, int) and offset > 0
+                offset for offset, _name in iter(self.annotated_args) if isinstance(offset, int) and offset > 0
             )
-            if len(candidate_offsets) == len(proto_args) and tuple(sorted(candidate_offsets)) == candidate_offsets:
+            if operator.eq(len(candidate_offsets), len(proto_args)) and operator.eq(tuple(sorted(candidate_offsets)), candidate_offsets):
                 annotated_offsets = candidate_offsets
         inferred_arg_widths = _annotation_arg_widths_from_stack_layout_8616(
             arg_offsets=list(annotated_offsets),
             known_positive_stack_offsets={
-                offset for offset in stack_cvars_by_offset if isinstance(offset, int) and offset > 0
+                offset for offset in iter(stack_cvars_by_offset) if isinstance(offset, int) and offset > 0
             },
         )
         return annotated_offsets, inferred_arg_widths
 
+    @cython.ccall
     def _materialize_proto_arg_cvars_8616(
         self,
         *,
-        proto_args: list[Any],
-        annotated_offsets: tuple[int, ...],
-        x87_scalar_arg_types: dict[int, Any],
-        inferred_arg_widths: dict[int, int],
-        prototype_is_explicit: bool,
-        variables_in_use: dict[Any, Any],
+        proto_args: object,
+        annotated_offsets: object,
+        x87_scalar_arg_types: object,
+        inferred_arg_widths: object,
+        prototype_is_explicit: cython.bint,
+        variables_in_use: object,
         unified: object,
-        stack_cvars_by_offset: dict[int, CVariable],
+        stack_cvars_by_offset: object,
         func_addr: object,
-        offset: int,
-    ) -> tuple[bool, list[Any], set[int]]:
+        offset: cython.longlong,
+    ) -> tuple[cython.bint, list[Any], set[cython.longlong]]:
         """Materialize one argument cvar per prototype arg at its stack offset."""
+        cvar: object
+        arg_type: object
+        index: object
         changed = False
         desired_args = []
-        expected_offsets: set[int] = set()
+        expected_offsets: set[cython.longlong] = set()
         for index, arg_type in enumerate(proto_args):
             if annotated_offsets:
                 offset = annotated_offsets[index]
@@ -1717,21 +1929,21 @@ class _SyncProtoLayoutRun8616:
             name = self.arg_names[index] if index < len(self.arg_names) and isinstance(self.arg_names[index], str) else f"a{index}"
             cvar = stack_cvars_by_offset.get(offset)
             variable = getattr(cvar, "variable", None) if cvar is not None else None
-            if not isinstance(variable, SimStackVariable) or getattr(variable, "size", None) != width:
+            if not isinstance(variable, SimStackVariable) or operator.ne(getattr(variable, "size", None), width):
                 variable = SimStackVariable(offset, width, base="bp", name=name, region=func_addr)
                 cvar = CVariable(variable, variable_type=arg_type, codegen=self.codegen)
                 variables_in_use[variable] = cvar
                 if isinstance(unified, dict):
                     unified[variable] = {(cvar, arg_type)}
                 changed = True
-            if getattr(variable, "name", None) != name:
+            if operator.ne(getattr(variable, "name", None), name):
                 variable.name = name
                 changed = True
-            if getattr(cvar, "name", None) != name:
+            if operator.ne(getattr(cvar, "name", None), name):
                 with contextlib.suppress(Exception):
                     cast(Any, cvar).name = name
                 changed = True
-            if getattr(cvar, "variable_type", None) != arg_type:
+            if operator.ne(getattr(cvar, "variable_type", None), arg_type):
                 cast(Any, cvar).variable_type = arg_type
                 changed = True
             if variable not in variables_in_use:
@@ -1742,24 +1954,26 @@ class _SyncProtoLayoutRun8616:
                 offset += width
         return changed, desired_args, expected_offsets
 
+    @cython.ccall
     def _resolve_proto_arg_type_8616(
         self,
         *,
-        index: int,
-        offset: int,
+        index: cython.longlong,
+        offset: cython.longlong,
         arg_type: object,
-        proto_args: list[Any],
-        annotated_offsets: tuple[int, ...],
-        x87_scalar_arg_types: dict[int, Any],
-        inferred_arg_widths: dict[int, int],
-        prototype_is_explicit: bool,
-    ) -> tuple[Any, int, bool]:
+        proto_args: object,
+        annotated_offsets: object,
+        x87_scalar_arg_types: object,
+        inferred_arg_widths: object,
+        prototype_is_explicit: cython.bint,
+    ) -> tuple[Any, cython.longlong, cython.bint]:
         """Resolve one prototype arg's effective type and byte width."""
+        scalar_type: object
         changed = False
         scalar_type = x87_scalar_arg_types.get(offset)
         if scalar_type is not None:
             arg_type = scalar_type
-            if proto_args[index] != scalar_type:
+            if operator.ne(proto_args[index], scalar_type):
                 proto_args[index] = scalar_type
                 changed = True
         elif (
@@ -1768,7 +1982,7 @@ class _SyncProtoLayoutRun8616:
             and isinstance(arg_type, SimTypePointer)
         ):
             arg_type = SimTypeShort(False).with_arch(self.project.arch)
-            if proto_args[index] != arg_type:
+            if operator.ne(proto_args[index], arg_type):
                 proto_args[index] = arg_type
                 changed = True
         width = max(2, _type_size_bytes_8616(arg_type))
@@ -1787,28 +2001,31 @@ class _SyncProtoLayoutRun8616:
         )
         return arg_type, width, changed or wide_changed
 
+    @cython.ccall
     def _widen_proto_arg_type_8616(
         self,
         *,
-        index: int,
+        index: cython.longlong,
         arg_type: object,
-        width: int,
-        proto_args: list[Any],
-        prototype_is_explicit: bool,
-    ) -> tuple[Any, bool]:
+        width: cython.longlong,
+        proto_args: object,
+        prototype_is_explicit: cython.bint,
+    ) -> tuple[Any, cython.bint]:
         """Widen a non-pointer arg to a long type when evidence says it is wide."""
         if prototype_is_explicit or width <= 2 or isinstance(arg_type, SimTypePointer):
             return arg_type, False
         wide_type = SimTypeLong(False).with_arch(self.project.arch)
         if _type_size_bytes_8616(arg_type) <= width or isinstance(arg_type, SimTypeLong):
             arg_type = wide_type
-            if proto_args[index] != wide_type:
+            if operator.ne(proto_args[index], wide_type):
                 proto_args[index] = wide_type
                 return arg_type, True
         return arg_type, False
 
-    def _prune_below_first_arg_8616(self, variables_in_use: dict[Any, Any], unified: object, first_arg_offset: int) -> bool:
+    @cython.ccall
+    def _prune_below_first_arg_8616(self, variables_in_use: object, unified: object, first_arg_offset: cython.longlong) -> cython.bint:
         """Drop positive stack slots below the first argument offset."""
+        variable: object
         changed = False
         for variable in tuple(variables_in_use.keys()):
             if not isinstance(variable, SimStackVariable):
@@ -1831,15 +2048,15 @@ class _SyncProtoLayoutRun8616:
         self,
         *,
         cfunc: Any,
-        desired_args: list[Any],
-        proto_args: list[Any],
-        original_proto_args: list[Any],
-    ) -> bool:
+        desired_args: object,
+        proto_args: object,
+        original_proto_args: object,
+    ) -> cython.bint:
         """Commit the rebuilt arg list and retype the prototype when args changed."""
         changed = False
         existing_args = list(getattr(cfunc, "arg_list", ()) or ())
-        if len(existing_args) != len(desired_args) or any(
-            existing is not desired for existing, desired in zip(existing_args, desired_args, strict=False)
+        if operator.ne(len(existing_args), len(desired_args)) or any(
+            existing is not desired for existing, desired in builtins.iter(zip(existing_args, desired_args, strict=False))
         ):
             cfunc.arg_list = desired_args
             changed = True
@@ -1848,7 +2065,7 @@ class _SyncProtoLayoutRun8616:
             prototype_dynamic = cast(Any, self.prototype)
             return_type = prototype_dynamic.returnty
             # Dynamic angr/codegen compatibility boundary.
-            if any(isinstance(arg_type, SimTypeLong) and not getattr(arg_type, "signed", True) for arg_type in proto_args):  # noqa: SIM102
+            if any(isinstance(arg_type, SimTypeLong) and not getattr(arg_type, "signed", True) for arg_type in iter(proto_args)):  # noqa: SIM102
                 if isinstance(return_type, SimTypeLong):
                     return_type = SimTypeLong(False).with_arch(self.project.arch)
             active_prototype = prototype_dynamic.__class__(
@@ -1865,21 +2082,25 @@ class _SyncProtoLayoutRun8616:
         return changed
 
 
-def _sync_arg_list_from_prototype_stack_layout_8616(project: SimpleNamespace, codegen: SimpleNamespace, func: object, prototype: object, arg_names: list[str], source_pointer_flags: tuple[bool, ...], annotated_args: list[tuple[int, str | None]] | tuple[tuple[int, str | None], ...]) -> bool:
+@cython.ccall
+def _sync_arg_list_from_prototype_stack_layout_8616(project: SimpleNamespace, codegen: SimpleNamespace, func: object, prototype: object, arg_names: object, source_pointer_flags: object, annotated_args: object) -> cython.bint:
     """Sync codegen argument variables from a structured stack prototype layout."""
     return _SyncProtoLayoutRun8616(project=project, codegen=codegen, func=func, prototype=prototype, arg_names=arg_names, source_pointer_flags=source_pointer_flags, annotated_args=annotated_args).run_8616()
 
 
+@cython.ccall
 def _collect_stack_promotion_inputs_8616(
     func: object,
-) -> tuple[dict[object, object], tuple[bool, ...], object, list[tuple[int, str | None]]]:
+) -> tuple[dict[object, object], tuple[cython.bint, ...], object, list[tuple[cython.longlong, str | None]]]:
+    info: object
+    maybe_annotations: object
     annotations = {}
     info = getattr(func, "info", None)
     if isinstance(info, MutableMapping):
         maybe_annotations = info.get(ANNOTATION_KEY)
         if isinstance(maybe_annotations, dict):
             annotations = maybe_annotations
-    prototype_pointer_flags: tuple[bool, ...] = ()
+    prototype_pointer_flags: tuple[cython.bint, ...] = ()
     # Dynamic angr/codegen compatibility boundary.
     if getattr(func, "is_prototype_guessed", True) is False:
         prototype_pointer_flags = _prototype_pointer_flags_8616(getattr(func, "prototype", None))
@@ -1895,14 +2116,17 @@ def _collect_stack_promotion_inputs_8616(
     return annotations, prototype_pointer_flags, stack_specs, _annotated_args_from_stack_specs_8616(stack_specs)
 
 
-def _annotated_args_from_stack_specs_8616(stack_specs: object) -> list[tuple[int, str | None]]:
+def _annotated_args_from_stack_specs_8616(stack_specs: object) -> object:
     """Build (codegen_offset, name) pairs from positive stack specs."""
-    annotated_args: list[tuple[int, str | None]] = []
+    spec_name: object
+    offset: object
+    spec: object
+    annotated_args: list[tuple[cython.longlong, str | None]] = []
     if not isinstance(stack_specs, dict):
         return annotated_args
-    positive_offsets = sorted(offset for offset in stack_specs if isinstance(offset, int) and offset > 0)
+    positive_offsets = sorted(offset for offset in iter(stack_specs) if isinstance(offset, int) and offset > 0)
     positive_specs_are_normalized = bool(positive_offsets) and positive_offsets[0] == 2
-    for offset, spec in sorted(stack_specs.items(), key=lambda item: item[0]):
+    for offset, spec in sorted(tuple(stack_specs.items()), key=lambda item: item[0]):
         if not isinstance(offset, int) or offset <= 0:
             continue
         name = None
@@ -1917,18 +2141,21 @@ def _annotated_args_from_stack_specs_8616(stack_specs: object) -> list[tuple[int
     return annotated_args
 
 
-def _prototype_pointer_flags_8616(prototype: object) -> tuple[bool, ...]:
+def _prototype_pointer_flags_8616(prototype: object) -> tuple[cython.bint, ...]:
     if prototype is None:
         return ()
     args = cast(tuple[object, ...], tuple(getattr(prototype, "args", ()) or ()))
     if not args:
         return ()
-    return tuple(isinstance(arg, SimTypePointer) for arg in args)
+    return tuple(isinstance(arg, SimTypePointer) for arg in iter(args))
 
 
+@cython.ccall
 def _prototype_pointer_flags_for_codegen_function_8616(
     project: SimpleNamespace, func_addr: int | None
-) -> tuple[bool, ...]:
+) -> object:
+    delta: object
+    candidate: object
     if not isinstance(func_addr, int):
         return ()
     for candidate in (func_addr,):
@@ -1950,8 +2177,10 @@ def _prototype_pointer_flags_for_codegen_function_8616(
     return ()
 
 
+@cython.ccall
 def _pointer_type_for_codegen_8616(codegen: Any) -> SimTypePointer:
     """Bind a pointer view to the codegen architecture, retaining its type class."""
+    arch: object
     pointer_type = SimTypePointer(SimTypeShort(False))
     arch = getattr(getattr(codegen, "project", None), "arch", None)
     if arch is not None:
@@ -1966,48 +2195,48 @@ class PointerArgIndirectFactKind8616(Enum):
     STORE_WORD = "store_word"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PointerArgIndirectFact8616:
     """Evidence that a register loaded from a stack argument is dereferenced."""
 
     kind: PointerArgIndirectFactKind8616
-    insn_addr: int
-    stack_offset: int
-    base_reg: str
+    insn_addr: cython.longlong
+    stack_offset: cython.longlong
+    base_reg: object
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class PointerArgIndirectMaterializationStats8616:
     """Evidence counters for pointer-argument indirect load materialization."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    refused_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    refused_count: cython.longlong = 0
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class StackArgHighByteProjectionStats8616:
     """Evidence counters for replacing high-byte stack args with base-word projections."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
 def _record_semantic_lane_8616(
     codegen: SimpleNamespace,
     *,
-    name: str,
-    raw: int,
-    normalized: int,
-    classified: int,
-    materialized: int,
-    failures: int,
+    name: object,
+    raw: cython.longlong,
+    normalized: cython.longlong,
+    classified: cython.longlong,
+    materialized: cython.longlong,
+    failures: cython.longlong,
 ) -> SemanticLaneState:
     lane = SemanticLaneState(
         name=name,
@@ -2020,11 +2249,12 @@ def _record_semantic_lane_8616(
     # Dynamic angr/codegen compatibility boundary.
     lanes = tuple(getattr(codegen, "_inertia_semantic_lanes_8616", ()) or ())
     # Dynamic angr/codegen compatibility boundary.
-    filtered = tuple(existing for existing in lanes if getattr(existing, "name", None) != lane.name)
+    filtered = tuple(existing for existing in iter(lanes) if operator.ne(getattr(existing, "name", None), lane.name))
     codegen._inertia_semantic_lanes_8616 = (*filtered, lane)
     return lane
 
 
+@cython.ccall
 def _record_pointer_arg_indirect_lane_8616(
     codegen: SimpleNamespace, stats: PointerArgIndirectMaterializationStats8616
 ) -> None:
@@ -2040,6 +2270,7 @@ def _record_pointer_arg_indirect_lane_8616(
     codegen._inertia_pointer_arg_indirect_lane_8616 = lane
 
 
+@cython.ccall
 def _record_stack_arg_high_byte_projection_lane_8616(
     codegen: SimpleNamespace, stats: StackArgHighByteProjectionStats8616
 ) -> None:
@@ -2055,7 +2286,10 @@ def _record_stack_arg_high_byte_projection_lane_8616(
     codegen._inertia_stack_arg_high_byte_projection_lane_8616 = lane
 
 
-def _operand_reg_name_from_capstone_8616(insn: Any, operand: Any) -> str | None:
+@cython.ccall
+def _operand_reg_name_from_capstone_8616(insn: Any, operand: Any) -> object:
+    reg: object
+    reg_name: object
     reg = getattr(operand, "reg", None)
     if not isinstance(reg, int):
         return None
@@ -2069,8 +2303,10 @@ def _operand_reg_name_from_capstone_8616(insn: Any, operand: Any) -> str | None:
     return None
 
 
-def _operand_mem_base_name_from_capstone_8616(insn: Any, operand: Any) -> str | None:
-    if getattr(operand, "type", None) != X86_OP_MEM:
+@cython.ccall
+def _operand_mem_base_name_from_capstone_8616(insn: Any, operand: Any) -> object:
+    mem: object
+    if operator.ne(getattr(operand, "type", None), X86_OP_MEM):
         return None
     mem = getattr(operand, "mem", None)
     base_reg = getattr(mem, "base", None) if mem is not None else None
@@ -2079,8 +2315,12 @@ def _operand_mem_base_name_from_capstone_8616(insn: Any, operand: Any) -> str | 
     return _operand_reg_name_from_capstone_8616(insn, SimpleNamespace(reg=base_reg))
 
 
+@cython.ccall
 def _bp_memory_displacement_from_capstone_8616(insn: Any, operand: Any) -> int | None:
-    if getattr(operand, "type", None) != X86_OP_MEM:
+    disp: object
+    index_reg: object
+    mem: object
+    if operator.ne(getattr(operand, "type", None), X86_OP_MEM):
         return None
     mem = getattr(operand, "mem", None)
     if mem is None:
@@ -2095,13 +2335,17 @@ def _bp_memory_displacement_from_capstone_8616(insn: Any, operand: Any) -> int |
     return disp if isinstance(disp, int) else None
 
 
-def _is_simple_reg_indirect_operand_8616(insn: Any, operand: Any, reg_name: str) -> bool:
-    if getattr(operand, "type", None) != X86_OP_MEM:
+@cython.ccall
+def _is_simple_reg_indirect_operand_8616(insn: Any, operand: Any, reg_name: object) -> cython.bint:
+    disp: object
+    index_reg: object
+    mem: object
+    if operator.ne(getattr(operand, "type", None), X86_OP_MEM):
         return False
     mem = getattr(operand, "mem", None)
     if mem is None:
         return False
-    if _operand_mem_base_name_from_capstone_8616(insn, operand) != reg_name:
+    if operator.ne(_operand_mem_base_name_from_capstone_8616(insn, operand), reg_name):
         return False
     index_reg = getattr(mem, "index", None)
     disp = getattr(mem, "disp", None)
@@ -2109,16 +2353,19 @@ def _is_simple_reg_indirect_operand_8616(insn: Any, operand: Any, reg_name: str)
 
 
 def _collect_pointer_arg_indirect_facts_8616(
-    project: Any, function: Any, pointer_arg_offsets: set[int]
+    project: object, function: object, pointer_arg_offsets: object
 ) -> tuple[PointerArgIndirectFact8616, ...]:
+    insn: object
+    block_addr: object
+    wrapped_insn: object
     if project is None or function is None or not pointer_arg_offsets:
         return ()
 
     facts: list[PointerArgIndirectFact8616] = []
-    seen: set[tuple[PointerArgIndirectFactKind8616, int, int]] = set()
-    reg_points_to_arg_offset: dict[str, int] = {}
+    seen: set[tuple[PointerArgIndirectFactKind8616, cython.longlong, cython.longlong]] = set()
+    reg_points_to_arg_offset: dict[str, cython.longlong] = {}
 
-    for block_addr in sorted(getattr(function, "block_addrs_set", ()) or ()):
+    for block_addr in sorted(tuple(getattr(function, "block_addrs_set", ()) or ())):
         try:
             block = project.factory.block(block_addr, opt_level=0)
             insns = tuple(getattr(getattr(block, "capstone", None), "insns", ()) or ())
@@ -2138,22 +2385,25 @@ def _collect_pointer_arg_indirect_facts_8616(
     return tuple(sorted(facts, key=lambda fact: fact.insn_addr))
 
 
+@cython.ccall
 def _collect_pointer_arg_fact_from_insn_8616(
     *,
     insn: object,
-    insn_addr: int,
-    pointer_arg_offsets: set[int],
-    reg_points_to_arg_offset: dict[str, int],
-    seen: set[tuple[PointerArgIndirectFactKind8616, int, int]],
-    facts: list[PointerArgIndirectFact8616],
+    insn_addr: cython.longlong,
+    pointer_arg_offsets: object,
+    reg_points_to_arg_offset: object,
+    seen: object,
+    facts: object,
 ) -> None:
     """Fold one capstone instruction into register-provenance load/store facts."""
+    dst_reg: object
+    src_reg: object
     mnemonic = str(getattr(insn, "mnemonic", "") or "").lower()
     operands: tuple[Any, ...] = tuple(getattr(insn, "operands", ()) or ())
     if mnemonic != "mov" or len(operands) != 2:
         dst_reg = (
             _operand_reg_name_from_capstone_8616(insn, operands[0])
-            if operands and getattr(operands[0], "type", None) == X86_OP_REG
+            if operands and operator.eq(getattr(operands[0], "type", None), X86_OP_REG)
             else None
         )
         if dst_reg is not None:
@@ -2162,10 +2412,10 @@ def _collect_pointer_arg_fact_from_insn_8616(
 
     dst, src = operands
     dst_reg = (
-        _operand_reg_name_from_capstone_8616(insn, dst) if getattr(dst, "type", None) == X86_OP_REG else None
+        _operand_reg_name_from_capstone_8616(insn, dst) if operator.eq(getattr(dst, "type", None), X86_OP_REG) else None
     )
     src_reg = (
-        _operand_reg_name_from_capstone_8616(insn, src) if getattr(src, "type", None) == X86_OP_REG else None
+        _operand_reg_name_from_capstone_8616(insn, src) if operator.eq(getattr(src, "type", None), X86_OP_REG) else None
     )
 
     if dst_reg is not None:
@@ -2199,17 +2449,20 @@ def _collect_pointer_arg_fact_from_insn_8616(
     )
 
 
+@cython.ccall
 def _record_reg_indirect_fact_8616(
     *,
     insn: object,
     operand: object,
-    insn_addr: int,
+    insn_addr: cython.longlong,
     kind: PointerArgIndirectFactKind8616,
-    reg_points_to_arg_offset: dict[str, int],
-    seen: set[tuple[PointerArgIndirectFactKind8616, int, int]],
-    facts: list[PointerArgIndirectFact8616],
+    reg_points_to_arg_offset: object,
+    seen: object,
+    facts: object,
 ) -> None:
     """Record one load/store fact when the operand reads through a known base."""
+    base_reg: object
+    stack_offset: object
     for base_reg, stack_offset in tuple(reg_points_to_arg_offset.items()):
         if _is_simple_reg_indirect_operand_8616(insn, operand, base_reg):
             key = (kind, insn_addr, stack_offset)
@@ -2226,7 +2479,9 @@ def _record_reg_indirect_fact_8616(
             break
 
 
+@cython.ccall
 def _make_zero_indexed_pointer_arg_8616(codegen: Any, cvar: CVariable) -> CIndexedVariable:
+    arch: object
     index_type = SimTypeShort(False)
     arch = getattr(getattr(codegen, "project", None), "arch", None)
     if arch is not None and hasattr(index_type, "with_arch"):
@@ -2234,7 +2489,9 @@ def _make_zero_indexed_pointer_arg_8616(codegen: Any, cvar: CVariable) -> CIndex
     return CIndexedVariable(cvar, CConstant(0, index_type, codegen=codegen), codegen=codegen)
 
 
-def _function_call_name_8616(expr: object) -> str | None:
+@cython.ccall
+def _function_call_name_8616(expr: object) -> object:
+    callee: object
     if not isinstance(expr, CFunctionCall):
         return None
     target = expr.callee_target
@@ -2247,6 +2504,7 @@ def _function_call_name_8616(expr: object) -> str | None:
     return name.lstrip("_") if isinstance(name, str) and name else None
 
 
+@cython.ccall
 def _offset_expr_stack_arg_offset_8616(expr: object) -> int | None:
     while isinstance(expr, CTypeCast):
         expr = expr.expr
@@ -2263,11 +2521,13 @@ def _offset_expr_stack_arg_offset_8616(expr: object) -> int | None:
     return None
 
 
+@cython.ccall
 def _materialized_pointer_arg_helper_load_8616(
     rhs: object,
-    pointer_args_by_offset: dict[int, CVariable],
+    pointer_args_by_offset: object,
     codegen: SimpleNamespace,
-) -> tuple[int, CIndexedVariable] | None:
+) -> object:
+    pointer_arg: object
     if not isinstance(rhs, CFunctionCall):
         return None
     if _function_call_name_8616(rhs) not in {"SEG_U16", "MEM_U16"}:
@@ -2288,9 +2548,10 @@ def _materialized_pointer_arg_helper_load_8616(
     return offset, _make_zero_indexed_pointer_arg_8616(codegen, pointer_arg)
 
 
+@cython.ccall
 def _existing_pointer_arg_indexed_load_offset_8616(
     rhs: object,
-    pointer_args_by_offset: dict[int, CVariable],
+    pointer_args_by_offset: object,
 ) -> int | None:
     if not isinstance(rhs, CIndexedVariable):
         return None
@@ -2303,7 +2564,8 @@ def _existing_pointer_arg_indexed_load_offset_8616(
     return offset
 
 
-def _assignment_lhs_accepts_pointer_load_value_8616(lhs: object) -> bool:
+@cython.ccall
+def _assignment_lhs_accepts_pointer_load_value_8616(lhs: object) -> cython.bint:
     while isinstance(lhs, CTypeCast):
         lhs = lhs.expr
     if isinstance(lhs, CIndexedVariable):
@@ -2315,7 +2577,15 @@ def _assignment_lhs_accepts_pointer_load_value_8616(lhs: object) -> bool:
     return False
 
 
+@cython.ccall
 def _statement_children_for_pointer_arg_materialization_8616(stmt: object) -> tuple[object, ...]:
+    body: object
+    cases: object
+    child: object
+    cond_pairs: object
+    _case: object
+    _cond: object
+    attr: object
     children: list[object] = []
     for attr in ("initializer", "iterator", "body", "else_node", "statements"):
         child = getattr(stmt, attr, None)
@@ -2335,8 +2605,11 @@ def _statement_children_for_pointer_arg_materialization_8616(stmt: object) -> tu
 
 
 def _iter_assignments_in_statement_order_8616(
-    root: object, seen: set[int] | None = None
+    root: object, seen: object = None
 ) -> Iterator[CAssignment]:
+    child: object
+    item: object
+    stmt: object
     if seen is None:
         seen = set()
     if root is None:
@@ -2360,7 +2633,10 @@ def _iter_assignments_in_statement_order_8616(
         yield from _iter_assignments_in_statement_order_8616(child, seen)
 
 
+@cython.ccall
 def _stack_offset_for_cvariable_8616(cvar: object) -> int | None:
+    offset: object
+    variable: object
     if not isinstance(cvar, CVariable):
         return None
     for variable in (cvar.variable, cvar.unified_variable):
@@ -2370,11 +2646,13 @@ def _stack_offset_for_cvariable_8616(cvar: object) -> int | None:
     return None
 
 
+@cython.ccall
 def _machine_bp_offset_for_cvariable_8616(
     codegen: object,
     cvar: object,
 ) -> int | None:
     """Return one structured variable's canonical machine-BP offset."""
+    variable: object
     if not isinstance(cvar, CVariable):
         return None
     for variable in (cvar.variable, cvar.unified_variable):
@@ -2386,12 +2664,14 @@ def _machine_bp_offset_for_cvariable_8616(
     return None
 
 
+@cython.ccall
 def _machine_bp_stack_binding_identity_8616(
     codegen: object,
     variable: SimStackVariable,
     cvar: object,
 ) -> _StackSlotIdentity | None:
     """Prefer a declaration map's canonical C-variable identity over its key."""
+    identity: object
     if isinstance(cvar, CVariable) and isinstance(
         cvar.variable,
         SimStackVariable,
@@ -2402,8 +2682,14 @@ def _machine_bp_stack_binding_identity_8616(
     return machine_bp_stack_identity_8616(codegen, variable)
 
 
-def _pointer_arg_offsets_for_codegen_8616(codegen: SimpleNamespace) -> dict[int, CVariable]:
-    offsets: dict[int, CVariable] = {}
+@cython.ccall
+def _pointer_arg_offsets_for_codegen_8616(codegen: SimpleNamespace) -> object:
+    cfunc: object
+    current_name: object
+    variable: object
+    cvar: object
+    index: object
+    offsets: dict[cython.longlong, CVariable] = {}
     cfunc = codegen.cfunc
     if cfunc is None:
         return offsets
@@ -2414,11 +2700,11 @@ def _pointer_arg_offsets_for_codegen_8616(codegen: SimpleNamespace) -> dict[int,
     current_names = [
         # Dynamic angr/codegen compatibility boundary.
         getattr(getattr(cvar, "variable", None), "name", None)
-        for cvar in tuple(cfunc.arg_list or ())
+        for cvar in builtins.iter(tuple(cfunc.arg_list or ()))
         if isinstance(cvar, CVariable)
     ]
     duplicate_names = {
-        name for name in current_names if isinstance(name, str) and current_names.count(name) > 1
+        name for name in iter(current_names) if isinstance(name, str) and current_names.count(name) > 1
     }
     for index, cvar in enumerate(tuple(cfunc.arg_list or ())):
         if not isinstance(cvar, CVariable):
@@ -2438,10 +2724,10 @@ def _pointer_arg_offsets_for_codegen_8616(codegen: SimpleNamespace) -> dict[int,
         ):
             variable = cvar.variable
             # Dynamic angr/codegen compatibility boundary.
-            if variable is not None and getattr(variable, "name", None) != proto_name:
+            if variable is not None and operator.ne(getattr(variable, "name", None), proto_name):
                 variable.name = proto_name
             # Dynamic angr/codegen compatibility boundary.
-            if cvar.name != proto_name:
+            if operator.ne(cvar.name, proto_name):
                 with contextlib.suppress(Exception):
                     cvar.name = proto_name
         offset = _stack_offset_for_cvariable_8616(cvar)
@@ -2450,7 +2736,8 @@ def _pointer_arg_offsets_for_codegen_8616(codegen: SimpleNamespace) -> dict[int,
     return offsets
 
 
-def _current_arg_name_is_renamable_8616(current_name: object, duplicate_names: set[str]) -> bool:
+@cython.ccall
+def _current_arg_name_is_renamable_8616(current_name: object, duplicate_names: object) -> cython.bint:
     """Check a codegen arg name is a duplicate or a generated placeholder."""
     return bool(
         current_name in duplicate_names
@@ -2462,9 +2749,12 @@ def _current_arg_name_is_renamable_8616(current_name: object, duplicate_names: s
 def _candidate_functions_for_pointer_arg_fact_scan_8616(
     project: Any, codegen: Any, func: Any
 ) -> Iterator[tuple[Any, Any]]:
-    yielded: set[tuple[int, int]] = set()
+    cfunc_addr: object
+    delta: object
+    original_project: object
+    yielded: set[tuple[cython.longlong, cython.longlong]] = set()
 
-    def add(candidate_project: Any, candidate_func: Any) -> Iterator[tuple[Any, Any]]:
+    def add(candidate_project: object, candidate_func: object) -> Iterator[tuple[Any, Any]]:
         if candidate_project is None or candidate_func is None:
             return
         key = (id(candidate_project), id(candidate_func))
@@ -2491,7 +2781,7 @@ def _candidate_functions_for_pointer_arg_fact_scan_8616(
 
 def _materialize_pointer_arg_indirect_loads_8616(
     project: SimpleNamespace, codegen: SimpleNamespace, func: object
-) -> bool:
+) -> cython.bint:
     pointer_args_by_offset = _pointer_arg_offsets_for_codegen_8616(codegen)
     debug_pointer_indirect = os.environ.get("INERTIA_DEBUG_POINTER_ARG_INDIRECT") == "1"
     stats = PointerArgIndirectMaterializationStats8616()
@@ -2507,7 +2797,7 @@ def _materialize_pointer_arg_indirect_loads_8616(
         project, codegen, func, pointer_args_by_offset, debug_pointer_indirect
     )
 
-    load_facts = tuple(fact for fact in facts if fact.kind is PointerArgIndirectFactKind8616.LOAD_WORD)
+    load_facts = tuple(fact for fact in iter(facts) if fact.kind is PointerArgIndirectFactKind8616.LOAD_WORD)
     stats.raw_fact_count = len(facts)
     stats.normalized_fact_count = len(load_facts)
     stats.classified_fact_count = len(load_facts)
@@ -2543,14 +2833,17 @@ def _materialize_pointer_arg_indirect_loads_8616(
     return changed
 
 
+@cython.ccall
 def _scan_pointer_arg_indirect_facts_8616(
     project: SimpleNamespace,
     codegen: SimpleNamespace,
     func: object,
-    pointer_args_by_offset: dict[int, CVariable],
-    debug: bool,
-) -> tuple[PointerArgIndirectFact8616, ...]:
+    pointer_args_by_offset: object,
+    debug: cython.bint,
+) -> object:
     """Scan candidate functions until pointer-arg indirect facts appear."""
+    scan_func: object
+    scan_project: object
     facts: tuple[PointerArgIndirectFact8616, ...] = ()
     for scan_project, scan_func in _candidate_functions_for_pointer_arg_fact_scan_8616(project, codegen, func):
         facts = _collect_pointer_arg_indirect_facts_8616(scan_project, scan_func, set(pointer_args_by_offset))
@@ -2558,7 +2851,7 @@ def _scan_pointer_arg_indirect_facts_8616(
             print(
                 "[dbg-pointer-indirect] "
                 f"scan_project={id(scan_project)} func={getattr(scan_func, 'addr', None)!r} "
-                f"blocks={sorted(getattr(scan_func, 'block_addrs_set', ()) or ())} facts={facts!r}",
+                f"blocks={sorted(tuple(getattr(scan_func, 'block_addrs_set', ()) or ()))} facts={facts!r}",
                 file=sys.stderr,
                 flush=True,
             )
@@ -2567,8 +2860,9 @@ def _scan_pointer_arg_indirect_facts_8616(
     return facts
 
 
+@cython.ccall
 def _print_pointer_indirect_map_debug_8616(
-    pointer_args_by_offset: dict[int, CVariable], load_facts: tuple[PointerArgIndirectFact8616, ...]
+    pointer_args_by_offset: object, load_facts: object
 ) -> None:
     """Emit the pointer-arg map and load facts debug line."""
     pointer_debug = {
@@ -2581,7 +2875,7 @@ def _print_pointer_indirect_map_debug_8616(
             getattr(getattr(cvar, "variable", None), "offset", None),
             id(cvar),
         )
-        for offset, cvar in sorted(pointer_args_by_offset.items())
+        for offset, cvar in builtins.iter(sorted(tuple(pointer_args_by_offset.items())))
     }
     print(
         "[dbg-pointer-indirect] "
@@ -2592,20 +2886,22 @@ def _print_pointer_indirect_map_debug_8616(
     )
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _PointerArgIndirectMaterializePass8616:
     """Ordered per-statement materialization of pointer-arg indirect loads."""
 
     codegen: SimpleNamespace
-    pointer_args_by_offset: dict[int, CVariable]
-    load_facts: tuple[PointerArgIndirectFact8616, ...]
-    debug: bool
-    fact_index: int = field(default=0, init=False)
-    refused: int = field(default=0, init=False)
-    materialized: int = field(default=0, init=False)
+    pointer_args_by_offset: object
+    load_facts: object
+    debug: cython.bint
+    fact_index: cython.longlong = field(default=0, init=False)
+    refused: cython.longlong = field(default=0, init=False)
+    materialized: cython.longlong = field(default=0, init=False)
 
-    def run_8616(self) -> bool:
+    @cython.ccall
+    def run_8616(self) -> cython.bint:
         """Apply ordered load materialization over cfunc assignments."""
+        stmt: object
         changed = False
         for stmt in _iter_assignments_in_statement_order_8616(self.codegen.cfunc.statements):
             changed = self._process_statement_8616(stmt) or changed
@@ -2613,8 +2909,10 @@ class _PointerArgIndirectMaterializePass8616:
             self.refused += len(self.load_facts) - self.fact_index
         return changed
 
-    def _process_statement_8616(self, stmt: Any) -> bool:
+    @cython.ccall
+    def _process_statement_8616(self, stmt: Any) -> cython.bint:
         """Materialize one assignment when its fact order matches."""
+        helper_load: object
         rhs = stmt.rhs
         self._print_assignment_debug(rhs, stmt)
         helper_load = _materialized_pointer_arg_helper_load_8616(rhs, self.pointer_args_by_offset, self.codegen)
@@ -2625,8 +2923,11 @@ class _PointerArgIndirectMaterializePass8616:
             return self._apply_existing_indexed_arm(existing_indexed_offset)
         return self._apply_cvariable_arm(stmt, rhs)
 
+    @cython.ccall
     def _print_assignment_debug(self, rhs: object, stmt: object) -> None:
         """Emit the per-assignment debug line when debugging is on."""
+        rhs_unified: object
+        rhs_var: object
         if not self.debug:
             return
         rhs_var = getattr(rhs, "variable", None)
@@ -2642,11 +2943,13 @@ class _PointerArgIndirectMaterializePass8616:
             flush=True,
         )
 
-    def _next_fact_matches(self, offset: int) -> bool:
+    @cython.ccall
+    def _next_fact_matches(self, offset: cython.longlong) -> cython.bint:
         """Check the next expected load fact matches this stack offset."""
-        return self.fact_index < len(self.load_facts) and self.load_facts[self.fact_index].stack_offset == offset
+        return self.fact_index < len(self.load_facts) and operator.eq(self.load_facts[self.fact_index].stack_offset, offset)
 
-    def _apply_helper_load_arm(self, stmt: Any, helper_load: tuple[int, object]) -> bool:
+    @cython.ccall
+    def _apply_helper_load_arm(self, stmt: Any, helper_load: object) -> cython.bint:
         """Rewrite a helper-load rhs when the next fact matches its offset."""
         offset, indexed_pointer_arg = helper_load
         if not self._next_fact_matches(offset):
@@ -2672,7 +2975,8 @@ class _PointerArgIndirectMaterializePass8616:
         self.materialized += 1
         return True
 
-    def _apply_existing_indexed_arm(self, existing_indexed_offset: int) -> bool:
+    @cython.ccall
+    def _apply_existing_indexed_arm(self, existing_indexed_offset: cython.longlong) -> cython.bint:
         """Accept an already-indexed pointer load in fact order."""
         if not self._next_fact_matches(existing_indexed_offset):
             self.refused += 1
@@ -2696,7 +3000,8 @@ class _PointerArgIndirectMaterializePass8616:
         self.materialized += 1
         return False
 
-    def _apply_cvariable_arm(self, stmt: Any, rhs: object) -> bool:
+    @cython.ccall
+    def _apply_cvariable_arm(self, stmt: Any, rhs: object) -> cython.bint:
         """Materialize a pointer-arg cvariable rhs into a zero-indexed load."""
         if not isinstance(rhs, CVariable):
             return False
@@ -2739,11 +3044,13 @@ class _PointerArgIndirectMaterializePass8616:
         return True
 
 
+@cython.ccall
 def _x87_scalar_stack_arg_types_8616(
     project: Any, func: Any, *, codegen: Any | None = None
-) -> dict[int, object]:
+) -> object:
+    candidate: object
     candidates = [getattr(codegen, "_func", None) if codegen is not None else None, func]
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     for candidate in candidates:
         if candidate is None or id(candidate) in seen:
             continue
@@ -2767,7 +3074,7 @@ def _x87_scalar_stack_arg_types_8616(
                     file=sys.stderr,
                     flush=True,
                 )
-            result_dict: dict[int, object] = {int(key): value for key, value in result.items()}
+            result_dict: dict[cython.longlong, object] = {int(key): value for key, value in builtins.iter(result.items())}
             return result_dict
         if os.environ.get("INERTIA_DEBUG_X87_PROTO") == "1":
             print(
@@ -2781,8 +3088,11 @@ def _x87_scalar_stack_arg_types_8616(
     return {}
 
 
-def _apply_stack_arg_cvar_type_8616(codegen: object, cvar: object, variable_type: object) -> bool:
+@cython.ccall
+def _apply_stack_arg_cvar_type_8616(codegen: object, cvar: object, variable_type: object) -> cython.bint:
     """Apply a stack-argument C variable type when it structurally changes."""
+    variable: object
+    variable_manager: object
 
     changed = False
     # Dynamic angr/codegen compatibility boundary.
@@ -2798,23 +3108,26 @@ def _apply_stack_arg_cvar_type_8616(codegen: object, cvar: object, variable_type
     return changed
 
 
+@cython.ccall
 def _promote_one_annotated_arg_8616(
     *,
-    index: int,
-    annotated_args: list[tuple[int, str | None]],
-    existing_args: list[Any],
-    stack_cvars_by_offset: dict[int, object],
-    inferred_arg_widths: dict[int, int],
-    x87_scalar_arg_types: Mapping[int, object],
-    new_args: list[Any],
+    index: cython.longlong,
+    annotated_args: object,
+    existing_args: object,
+    stack_cvars_by_offset: object,
+    inferred_arg_widths: object,
+    x87_scalar_arg_types: Mapping[cython.longlong, object],
+    new_args: object,
     pointer_type: object,
-    source_pointer_flags: tuple[bool, ...],
-    promote_near_pointers: bool,
+    source_pointer_flags: object,
+    promote_near_pointers: cython.bint,
     project: SimpleNamespace,
     codegen: SimpleNamespace,
-    resolved_args: list[object],
-) -> tuple[bool, bool]:
+    resolved_args: object,
+) -> tuple[cython.bint, cython.bint]:
     """Apply scalar/pointer materialization to one annotated arg."""
+    resolved_arg: object
+    scalar_type: object
     pointer_promoted = False
     scalar_materialized = False
     annotated_offset = annotated_args[index][0] if index < len(annotated_args) else None
@@ -2832,7 +3145,7 @@ def _promote_one_annotated_arg_8616(
     if scalar_type is not None:
         if resolved_arg is not None:
             scalar_materialized |= _apply_stack_arg_cvar_type_8616(codegen, resolved_arg, scalar_type)
-        if new_args[index] != scalar_type:
+        if operator.ne(new_args[index], scalar_type):
             new_args[index] = scalar_type
             scalar_materialized = True
         return pointer_promoted, scalar_materialized
@@ -2853,7 +3166,7 @@ def _promote_one_annotated_arg_8616(
     ):
         scalar_type = SimTypeShort(False).with_arch(project.arch)
         scalar_materialized |= _apply_stack_arg_cvar_type_8616(codegen, resolved_arg, scalar_type)
-        if new_args[index] != scalar_type:
+        if operator.ne(new_args[index], scalar_type):
             new_args[index] = scalar_type
             scalar_materialized = True
         return pointer_promoted, scalar_materialized
@@ -2869,16 +3182,18 @@ def _promote_one_annotated_arg_8616(
     return pointer_promoted, scalar_materialized
 
 
+@cython.ccall
 def _materialize_wide_arg_8616(
     *,
     codegen: SimpleNamespace,
     project: SimpleNamespace,
     resolved_arg: object,
-    new_args: list[Any],
-    index: int,
-    inferred_width: int,
-) -> bool:
+    new_args: object,
+    index: cython.longlong,
+    inferred_width: cython.longlong,
+) -> cython.bint:
     """Widen an annotated arg to a long when inferred width exceeds a word."""
+    variable: object
     if inferred_width <= 2 or isinstance(new_args[index], SimTypePointer):
         return False
     scalar_materialized = False
@@ -2889,25 +3204,26 @@ def _materialize_wide_arg_8616(
             # Dynamic angr/codegen compatibility boundary.
             variable = getattr(resolved_arg, "variable", None)
             # Dynamic angr/codegen compatibility boundary.
-            if isinstance(variable, SimStackVariable) and getattr(variable, "size", None) != inferred_width:
+            if isinstance(variable, SimStackVariable) and operator.ne(getattr(variable, "size", None), inferred_width):
                 variable.size = inferred_width
                 scalar_materialized = True
-        if new_args[index] != wide_type:
+        if operator.ne(new_args[index], wide_type):
             new_args[index] = wide_type
             scalar_materialized = True
     return scalar_materialized
 
 
+@cython.ccall
 def _promote_annotated_arg_pointer_8616(
     *,
     codegen: SimpleNamespace,
     resolved_arg: object,
-    new_args: list[Any],
-    index: int,
-    source_pointer_flags: tuple[bool, ...],
-    promote_near_pointers: bool,
+    new_args: object,
+    index: cython.longlong,
+    source_pointer_flags: object,
+    promote_near_pointers: cython.bint,
     pointer_type: object,
-) -> bool:
+) -> cython.bint:
     """Promote one annotated arg to a near pointer when evidence allows."""
     if resolved_arg is None or not promote_near_pointers:
         return False
@@ -2916,10 +3232,10 @@ def _promote_annotated_arg_pointer_8616(
     if not _stack_arg_has_pointer_evidence_8616(codegen, getattr(resolved_arg, "variable", None)):
         return False
     pointer_promoted = False
-    if getattr(resolved_arg, "variable_type", None) != pointer_type:
+    if operator.ne(getattr(resolved_arg, "variable_type", None), pointer_type):
         cast(Any, resolved_arg).variable_type = pointer_type
         pointer_promoted = True
-    if new_args[index] != pointer_type:
+    if operator.ne(new_args[index], pointer_type):
         new_args[index] = pointer_type
         pointer_promoted = True
     return pointer_promoted
@@ -2931,13 +3247,15 @@ def _promote_from_annotated_args_8616(
     codegen: SimpleNamespace,
     func: object,
     prototype: object,
-    arg_names: list[str],
-    existing_args: list[Any],
-    annotated_args: list[tuple[int, str | None]],
-    source_pointer_flags: tuple[bool, ...],
-    promote_near_pointers: bool,
-) -> bool:
+    arg_names: object,
+    existing_args: object,
+    annotated_args: object,
+    source_pointer_flags: object,
+    promote_near_pointers: cython.bint,
+) -> cython.bint:
     """Sync annotated positive BP arguments into the active codegen prototype."""
+    cvar: object
+    variable: object
 
     if not annotated_args:
         return False
@@ -2955,15 +3273,15 @@ def _promote_from_annotated_args_8616(
         existing_name = arg_names[index] if index < len(arg_names) else None
         desired_names.append(annotated_name or existing_name)
     normalized_names = _normalize_arg_names_8616(desired_names, target_arg_count)
-    stack_cvars_by_offset: dict[int, object] = {}
+    stack_cvars_by_offset: dict[cython.longlong, object] = {}
     for variable, cvar in getattr(codegen.cfunc, "variables_in_use", {}).items():
         if isinstance(variable, SimStackVariable):
             stack_cvars_by_offset.setdefault(variable.offset, cvar)
-    annotated_offsets = [offset for offset, _name in annotated_args if isinstance(offset, int)]
+    annotated_offsets = [offset for offset, _name in iter(annotated_args) if isinstance(offset, int)]
     inferred_arg_widths = _annotation_arg_widths_from_stack_layout_8616(
         arg_offsets=annotated_offsets,
         known_positive_stack_offsets={
-            offset for offset in stack_cvars_by_offset if isinstance(offset, int) and offset > 0
+            offset for offset in iter(stack_cvars_by_offset) if isinstance(offset, int) and offset > 0
         },
     )
     pointer_promoted = False
@@ -2993,7 +3311,7 @@ def _promote_from_annotated_args_8616(
         scalar_materialized
         or pointer_promoted
         or target_arg_count > len(getattr(prototype, "args", ()) or ())
-        or list(arg_names) != normalized_names
+        or operator.ne(list(arg_names), normalized_names)
     ):
         return False
     _commit_annotated_arg_prototype_8616(
@@ -3017,14 +3335,15 @@ def _commit_annotated_arg_prototype_8616(
     codegen: SimpleNamespace,
     func: object,
     prototype: object,
-    new_args: list[Any],
-    normalized_names: list[str],
-    resolved_args: list[object],
-    target_arg_count: int,
-    annotated_offsets: list[int],
-    inferred_arg_widths: dict[int, int],
+    new_args: object,
+    normalized_names: object,
+    resolved_args: object,
+    target_arg_count: cython.longlong,
+    annotated_offsets: object,
+    inferred_arg_widths: object,
 ) -> None:
     """Install the promoted prototype, arg list, and prune dead slots."""
+    arg_list: object
     prototype_dynamic = cast(Any, prototype)
     new_proto = prototype_dynamic.__class__(
         new_args,
@@ -3038,27 +3357,31 @@ def _commit_annotated_arg_prototype_8616(
     arg_list = getattr(codegen.cfunc, "arg_list", None)
     if isinstance(arg_list, list) and len(arg_list) > target_arg_count:
         codegen.cfunc.arg_list = arg_list[:target_arg_count]
-    elif not arg_list and any(resolved_arg is not None for resolved_arg in resolved_args):
-        codegen.cfunc.arg_list = [resolved_arg for resolved_arg in resolved_args if resolved_arg is not None]
+    elif not arg_list and any(resolved_arg is not None for resolved_arg in iter(resolved_args)):
+        codegen.cfunc.arg_list = [resolved_arg for resolved_arg in iter(resolved_args) if resolved_arg is not None]
     _prune_unused_stack_slots_covered_by_annotation_args_8616(
         codegen=codegen,
         arg_offsets=set(annotated_offsets),
         arg_widths=inferred_arg_widths,
     )
 
+@cython.ccall
 def _promote_one_fallback_arg_8616(
     *,
-    index: int,
+    index: cython.longlong,
     resolved_arg: Any,
-    x87_scalar_arg_types: Mapping[int, object],
-    new_args: list[Any],
+    x87_scalar_arg_types: Mapping[cython.longlong, object],
+    new_args: object,
     pointer_type: object,
-    source_pointer_flags: tuple[bool, ...],
-    promote_near_pointers: bool,
+    source_pointer_flags: object,
+    promote_near_pointers: cython.bint,
     project: Any,
     codegen: Any,
-) -> tuple[bool, bool]:
+) -> tuple[cython.bint, cython.bint]:
     """Apply scalar/pointer materialization to one fallback arg."""
+    scalar_type: object
+    var_offset: object
+    variable: object
     pointer_promoted = False
     scalar_materialized = False
     variable = getattr(resolved_arg, "variable", None)
@@ -3066,7 +3389,7 @@ def _promote_one_fallback_arg_8616(
     scalar_type = x87_scalar_arg_types.get(var_offset) if isinstance(var_offset, int) else None
     if scalar_type is not None:
         scalar_materialized |= _apply_stack_arg_cvar_type_8616(codegen, resolved_arg, scalar_type)
-        if index < len(new_args) and new_args[index] != scalar_type:
+        if index < len(new_args) and operator.ne(new_args[index], scalar_type):
             new_args[index] = scalar_type
             scalar_materialized = True
         return pointer_promoted, scalar_materialized
@@ -3078,7 +3401,7 @@ def _promote_one_fallback_arg_8616(
     ):
         scalar_type = SimTypeShort(False).with_arch(project.arch)
         scalar_materialized |= _apply_stack_arg_cvar_type_8616(codegen, resolved_arg, scalar_type)
-        if new_args[index] != scalar_type:
+        if operator.ne(new_args[index], scalar_type):
             new_args[index] = scalar_type
             scalar_materialized = True
         return pointer_promoted, scalar_materialized
@@ -3088,26 +3411,28 @@ def _promote_one_fallback_arg_8616(
         return pointer_promoted, scalar_materialized
     if not _stack_arg_has_pointer_evidence_8616(codegen, getattr(resolved_arg, "variable", None)):
         return pointer_promoted, scalar_materialized
-    if getattr(resolved_arg, "variable_type", None) != pointer_type:
+    if operator.ne(getattr(resolved_arg, "variable_type", None), pointer_type):
         cast(Any, resolved_arg).variable_type = pointer_type
         pointer_promoted = True
-    if index < len(new_args) and new_args[index] != pointer_type:
+    if index < len(new_args) and operator.ne(new_args[index], pointer_type):
         new_args[index] = pointer_type
         pointer_promoted = True
     return pointer_promoted, scalar_materialized
 
 
+@cython.ccall
 def _commit_fallback_arg_prototype_8616(
     *,
     project: Any,
     codegen: Any,
     func: Any,
     current_proto: Any,
-    fallback_args: list[Any],
-    new_args: list[Any],
-    target_arg_count: int,
+    fallback_args: object,
+    new_args: object,
+    target_arg_count: cython.longlong,
 ) -> None:
     """Build normalized names and install the fallback prototype."""
+    arch: object
     desired_names: list[str | None] = []
     for index in range(target_arg_count):
         if index < len(fallback_args):
@@ -3141,12 +3466,14 @@ def _promote_from_fallback_args_8616(
     codegen: Any,
     func: Any,
     current_proto: Any,
-    existing_args: list[Any],
-    source_pointer_flags: tuple[bool, ...],
-    promote_near_pointers: bool,
-) -> bool:
+    existing_args: object,
+    source_pointer_flags: object,
+    promote_near_pointers: cython.bint,
+) -> cython.bint:
+    index: object
+    resolved_arg: object
     fallback_args: list[Any] = [
-        arg for arg in existing_args if isinstance(getattr(arg, "variable", None), SimStackVariable)
+        arg for arg in iter(existing_args) if isinstance(getattr(arg, "variable", None), SimStackVariable)
     ]
     if not fallback_args:
         return False
@@ -3190,7 +3517,9 @@ def _promote_from_fallback_args_8616(
     return True
 
 
-def _legacy_arg_names_only_8616(arg_names: list[str]) -> bool:
+@cython.ccall
+def _legacy_arg_names_only_8616(arg_names: object) -> cython.bint:
+    name: object
     for name in arg_names:
         if name is None:
             continue
@@ -3199,8 +3528,11 @@ def _legacy_arg_names_only_8616(arg_names: list[str]) -> bool:
     return True
 
 
-def _has_wide_return_pattern_8616(codegen: Any) -> bool:
-    def _impl() -> bool:
+def _has_wide_return_pattern_8616(codegen: Any) -> cython.bint:
+    def _impl() -> cython.bint:
+        maybe_other: object
+        maybe_shl: object
+        stmt: object
         for stmt in getattr(codegen.cfunc.statements, "statements", ()) or ():
             if not isinstance(stmt, CReturn):
                 continue
@@ -3219,7 +3551,9 @@ def _has_wide_return_pattern_8616(codegen: Any) -> bool:
     return _impl()
 
 
-def _c_variable_name_8616(expr: object) -> str | None:
+@cython.ccall
+def _c_variable_name_8616(expr: object) -> object:
+    candidate: object
     if not isinstance(expr, CVariable):
         return None
     for candidate in (
@@ -3244,13 +3578,19 @@ def _c_variable_name_8616(expr: object) -> str | None:
     return None
 
 
-def _is_unresolved_synthetic_carrier_name_8616(name: str | None) -> bool:
+@cython.ccall
+def _is_unresolved_synthetic_carrier_name_8616(name: object) -> cython.bint:
     """Return true for generated temporary names that are not semantic variables."""
     return isinstance(name, str) and re.fullmatch(r"(?:vvar|v|ir|tmp)_?\d+", name) is not None
 
 
-def _return_carrier_name_8616(expr: object) -> str | None:
+@cython.ccall
+def _return_carrier_name_8616(expr: object) -> object:
     """Return the generated carrier name for C variables and dirty expressions."""
+    dirty: object
+    expr_idx: object
+    variable_name: object
+    candidate: object
     variable_name = _c_variable_name_8616(expr)
     if variable_name is not None:
         return variable_name
@@ -3284,7 +3624,8 @@ def _return_carrier_name_8616(expr: object) -> str | None:
     return None
 
 
-def _return_value_is_unresolved_synthetic_carrier_8616(retval: object) -> bool:
+@cython.ccall
+def _return_value_is_unresolved_synthetic_carrier_8616(retval: object) -> cython.bint:
     """Return true when a return value is only an unresolved generated carrier."""
     carrier_name = _return_carrier_name_8616(retval)
     if _is_unresolved_synthetic_carrier_name_8616(carrier_name):
@@ -3309,7 +3650,8 @@ def _return_value_is_unresolved_synthetic_carrier_8616(retval: object) -> bool:
     return False
 
 
-def _return_value_is_unresolved_synthetic_carrier_component_8616(expr: object) -> bool:
+@cython.ccall
+def _return_value_is_unresolved_synthetic_carrier_component_8616(expr: object) -> cython.bint:
     """Return true for constants or generated carriers inside a synthetic return expression."""
     if isinstance(expr, CConstant):
         return True
@@ -3332,12 +3674,14 @@ def _return_value_is_unresolved_synthetic_carrier_component_8616(expr: object) -
     return _return_value_is_unresolved_synthetic_carrier_8616(expr)
 
 
-def _is_generated_stack_local_carrier_name_8616(name: str | None) -> bool:
+@cython.ccall
+def _is_generated_stack_local_carrier_name_8616(name: object) -> cython.bint:
     """Return true for generated stack-local carrier names without semantic ownership."""
     return isinstance(name, str) and re.fullmatch(r"local_?\d+(?:_\d+)?", name) is not None
 
 
-def _is_generated_stack_local_carrier_variable_8616(expr: object) -> bool:
+@cython.ccall
+def _is_generated_stack_local_carrier_variable_8616(expr: object) -> cython.bint:
     """Return true for unnamed generated stack-slot carriers."""
     if not isinstance(expr, CVariable):
         return False
@@ -3345,18 +3689,28 @@ def _is_generated_stack_local_carrier_variable_8616(expr: object) -> bool:
     return isinstance(expr.variable, SimStackVariable)
 
 
-def _node_references_c_variable_name_8616(node: object, name: str) -> bool:
+@cython.ccall
+def _node_references_c_variable_name_8616(node: object, name: object) -> cython.bint:
     """Return true when a C AST node still reads the named generated variable."""
+    child: object
     for child in _iter_c_nodes_deep_8616(node):
         if child is node:
             continue
-        if isinstance(child, CVariable) and _c_variable_name_8616(child) == name:
+        if isinstance(child, CVariable) and operator.eq(_c_variable_name_8616(child), name):
             return True
     return False
 
 
-def _drop_codegen_variable_name_if_unreferenced_8616(codegen: SimpleNamespace, name: str) -> bool:
+@cython.ccall
+def _drop_codegen_variable_name_if_unreferenced_8616(codegen: SimpleNamespace, name: object) -> cython.bint:
     """Remove a generated declaration entry once the final C AST no longer uses it."""
+    cfunc: object
+    mapping: object
+    root: object
+    variable_name: object
+    attr_name: object
+    cvar: object
+    variable: object
     # Dynamic angr/codegen compatibility boundary.
     root = getattr(getattr(codegen, "cfunc", None), "statements", None)
     if root is not None and _node_references_c_variable_name_8616(root, name):
@@ -3382,9 +3736,10 @@ def _drop_codegen_variable_name_if_unreferenced_8616(codegen: SimpleNamespace, n
     return changed
 
 
+@cython.ccall
 def _collapse_return_pair_stmt_list_8616(
-    statements: list[object], ax_return_expr: object
-) -> list[object] | None:
+    statements: object, ax_return_expr: object
+) -> object:
     """Collapse vvar*/ax return pairs; return the new list or None."""
     rewritten: list[object] = []
     index = 0
@@ -3407,7 +3762,7 @@ def _collapse_return_pair_stmt_list_8616(
                 index += 2
                 local_changed = True
                 continue
-        if isinstance(current, CReturn) and index == len(statements) - 1 and ax_return_expr is not None:
+        if isinstance(current, CReturn) and operator.eq(index, len(statements) - 1) and ax_return_expr is not None:
             # Dynamic angr/codegen compatibility boundary.
             current_name = _return_carrier_name_8616(current.retval)
             if isinstance(current_name, str) and current_name.startswith("vvar_"):
@@ -3421,8 +3776,12 @@ def _collapse_return_pair_stmt_list_8616(
     return rewritten if local_changed else None
 
 
-def _collapse_adjacent_unresolved_return_carrier_8616(project: SimpleNamespace, codegen: SimpleNamespace) -> bool:
+def _collapse_adjacent_unresolved_return_carrier_8616(project, codegen: SimpleNamespace) -> cython.bint:
     """Replace adjacent ``return vvar_*; return ax;`` with the concrete AX return."""
+    ax_return_expr: object
+    rewritten: object
+    root: object
+    container: object
     del project
     # Dynamic angr/codegen compatibility boundary.
     if getattr(codegen, "cfunc", None) is None:
@@ -3432,13 +3791,13 @@ def _collapse_adjacent_unresolved_return_carrier_8616(project: SimpleNamespace, 
     ax_return_expr = next(
         (
             node
-            for node in _iter_c_nodes_deep_8616(root)
+            for node in builtins.iter(_iter_c_nodes_deep_8616(root))
             if _return_carrier_name_8616(node) in {"ax", "reg:ax"}
         ),
         None,
     )
     changed = False
-    for container in tuple(node for node in (root, *_iter_c_nodes_deep_8616(root)) if isinstance(node, CStatements)):
+    for container in tuple(node for node in iter((root, ) + tuple(_iter_c_nodes_deep_8616(root))) if isinstance(node, CStatements)):
         # Dynamic angr/codegen compatibility boundary.
         statements = list(getattr(container, "statements", ()) or ())
         if not statements:
@@ -3454,8 +3813,8 @@ def _collapse_adjacent_unresolved_return_carrier_8616(project: SimpleNamespace, 
 
 
 def _promote_from_legacy_arg_names_8616(
-    *, project: SimpleNamespace, codegen: SimpleNamespace, func: object, prototype: object, arg_names: list[str]
-) -> bool:
+    *, project: SimpleNamespace, codegen: SimpleNamespace, func: object, prototype: object, arg_names: object
+) -> cython.bint:
     if not _legacy_arg_names_only_8616(arg_names):
         return False
     if not getattr(codegen, "cfunc", None):
@@ -3465,7 +3824,7 @@ def _promote_from_legacy_arg_names_8616(
         return False
     existing_args: list[Any] = list(getattr(prototype, "args", ()) or ())
     if offsets:
-        target_arg_count = max(len(existing_args), max(((offset - 2) // 2) for offset in offsets))
+        target_arg_count = max(len(existing_args), max(((offset - 2) // 2) for offset in iter(offsets)))
         if target_arg_count > len(existing_args):
             new_args: list[Any] = list(existing_args)
             new_args.extend(
@@ -3502,11 +3861,17 @@ def _promote_from_legacy_arg_names_8616(
     return True
 
 
+@cython.ccall
 def _legacy_return_bp_arg_offsets_8616(
     project: SimpleNamespace, codegen: SimpleNamespace
-) -> tuple[set[int], set[_StackSlotIdentity]]:
+) -> tuple[set[cython.longlong], set[_StackSlotIdentity]]:
     """Collect proven positive BP-load offsets used by return expressions."""
-    stack_slots_by_offset: dict[int, _StackSlotIdentity] = {}
+    identity: object
+    retval: object
+    node: object
+    stmt: object
+    variable: object
+    stack_slots_by_offset: dict[cython.longlong, _StackSlotIdentity] = {}
     for variable in getattr(codegen.cfunc, "variables_in_use", {}):
         if not isinstance(variable, SimStackVariable):
             continue
@@ -3515,7 +3880,7 @@ def _legacy_return_bp_arg_offsets_8616(
             offset_value = variable.offset
             if isinstance(offset_value, int):
                 stack_slots_by_offset[offset_value] = identity
-    offsets: set[int] = set()
+    offsets: set[cython.longlong] = set()
     slot_identities: set[_StackSlotIdentity] = set()
     for stmt in getattr(codegen.cfunc.statements, "statements", ()) or ():
         if not isinstance(stmt, CReturn):
@@ -3528,14 +3893,17 @@ def _legacy_return_bp_arg_offsets_8616(
     return offsets, slot_identities
 
 
+@cython.ccall
 def _collect_bp_arg_offset_8616(
     node: object,
     project: SimpleNamespace,
-    stack_slots_by_offset: dict[int, _StackSlotIdentity],
-    offsets: set[int],
-    slot_identities: set[_StackSlotIdentity],
+    stack_slots_by_offset: object,
+    offsets: object,
+    slot_identities: object,
 ) -> None:
     """Record one proven positive BP-load offset into the output sets."""
+    offset: object
+    slot_identity: object
     offset = _match_bp_stack_load_8616(node, project)
     if offset is None or offset <= 2:
         return
@@ -3546,7 +3914,11 @@ def _collect_bp_arg_offset_8616(
     slot_identities.add(slot_identity)
 
 
-def _classify_return_shape_8616(project: SimpleNamespace, codegen: SimpleNamespace) -> bool:
+def _classify_return_shape_8616(project: SimpleNamespace, codegen: SimpleNamespace) -> cython.bint:
+    gate: object
+    info: object
+    new_returnty: object
+    source_shape: object
     # Return-shape reclassification mutates function prototypes and can affect
     # observable memory/ABI behavior. Keep it opt-in until fully proven stable.
     gate = _classify_return_gate_8616(project, codegen)
@@ -3557,7 +3929,7 @@ def _classify_return_shape_8616(project: SimpleNamespace, codegen: SimpleNamespa
     ignored_unreachable_returns = _switch_loop_exit_unreachable_tail_returns_8616(codegen)
     return_nodes = [
         node
-        for node in _iter_c_nodes_deep_8616(codegen.cfunc.statements)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(codegen.cfunc.statements))
         if isinstance(node, CReturn) and id(node) not in ignored_unreachable_returns
     ]
     if not return_nodes:
@@ -3575,7 +3947,7 @@ def _classify_return_shape_8616(project: SimpleNamespace, codegen: SimpleNamespa
     tiny_function = _is_tiny_function_8616(project, func)
     changed, value_returns, return_shapes = _return_node_shape_pass_8616(return_nodes, tiny_function)
 
-    has_value_return = any(getattr(ret, "retval", None) is not None for ret in return_nodes)
+    has_value_return = any(getattr(ret, "retval", None) is not None for ret in iter(return_nodes))
     if (
         not has_value_return
         and not return_nodes
@@ -3606,10 +3978,15 @@ def _classify_return_shape_8616(project: SimpleNamespace, codegen: SimpleNamespa
     return _commit_return_shape_8616(project, codegen, func, prototype, new_returnty)
 
 
+@cython.ccall
 def _classify_return_gate_8616(
     project: SimpleNamespace, codegen: SimpleNamespace
-) -> tuple[object, object, bool, bool, bool] | None:
+) -> object:
     """Resolve func/prototype and gate the return-shape classification."""
+    existing_returnty: object
+    func: object
+    function_addr: object
+    prototype: object
     func, prototype = _resolve_codegen_function_and_prototype_8616(project, codegen)
     if func is None or prototype is None:
         return None
@@ -3655,10 +4032,15 @@ def _classify_return_gate_8616(
     return func, prototype, source_decl_is_void, proven_value_return, has_switch_loop_exit_void_evidence
 
 
+@cython.ccall
 def _return_node_shape_pass_8616(
-    return_nodes: list[Any], tiny_function: bool
-) -> tuple[bool, int, set[str]]:
+    return_nodes: object, tiny_function: cython.bint
+) -> tuple[cython.bint, cython.longlong, set[str]]:
     """Walk return nodes, unwrap tiny synthetic returns, collect shapes."""
+    replacement: object
+    retval: object
+    shape: object
+    ret: object
     changed = False
     value_returns = 0
     return_shapes: set[str] = set()
@@ -3680,13 +4062,14 @@ def _return_node_shape_pass_8616(
     return changed, value_returns, return_shapes
 
 
+@cython.ccall
 def _commit_return_shape_8616(
     project: SimpleNamespace,
     codegen: SimpleNamespace,
     func: object,
     prototype: object,
     new_returnty: object,
-) -> bool:
+) -> cython.bint:
     """Install the reclassified return type on func and codegen prototypes."""
     prototype_dynamic = cast(Any, prototype)
     new_proto = prototype_dynamic.__class__(
@@ -3714,9 +4097,15 @@ def _commit_return_shape_8616(
     return True
 
 
+@cython.ccall
 def _resolve_codegen_function_and_prototype_8616(
     project: SimpleNamespace, codegen: SimpleNamespace
-) -> tuple[object | None, object | None]:
+) -> object:
+    candidate: object
+    delta: object
+    func: object
+    func_addr: object
+    prototype: object
     if getattr(codegen, "cfunc", None) is None:
         return None, None
     for candidate in (
@@ -3750,7 +4139,14 @@ def _resolve_codegen_function_and_prototype_8616(
     return func, prototype
 
 
-def _switch_loop_exit_unreachable_tail_returns_8616(codegen: SimpleNamespace) -> set[int]:
+@cython.ccall
+def _switch_loop_exit_unreachable_tail_returns_8616(codegen: SimpleNamespace) -> object:
+    root: object
+    container: object
+    index: object
+    node: object
+    statement: object
+    tail_stmt: object
     # Dynamic angr/codegen compatibility boundary.
     if not bool(getattr(codegen, "_inertia_switch_loop_exit_return_materialized_8616", False)):
         return set()
@@ -3758,8 +4154,8 @@ def _switch_loop_exit_unreachable_tail_returns_8616(codegen: SimpleNamespace) ->
     root = getattr(getattr(codegen, "cfunc", None), "statements", None)
     if not isinstance(root, CStatements):
         return set()
-    ignored: set[int] = set()
-    for container in (root, *_iter_c_nodes_deep_8616(root)):
+    ignored: set[cython.longlong] = set()
+    for container in (root, ) + tuple(_iter_c_nodes_deep_8616(root)):
         if not isinstance(container, CStatements):
             continue
         # Dynamic angr/codegen compatibility boundary.
@@ -3774,8 +4170,10 @@ def _switch_loop_exit_unreachable_tail_returns_8616(codegen: SimpleNamespace) ->
     return ignored
 
 
-def _statement_is_switch_loop_exit_8616(statement: object) -> bool:
+@cython.ccall
+def _statement_is_switch_loop_exit_8616(statement: object) -> cython.bint:
     """Match a constant-true while loop containing a switch dispatch."""
+    loop: object
     loop = _single_wrapped_while_loop_8616(statement)
     # Dynamic angr/codegen compatibility boundary.
     if loop is None or not _constant_true_8616(getattr(loop, "condition", None)):
@@ -3784,6 +4182,7 @@ def _statement_is_switch_loop_exit_8616(statement: object) -> bool:
     return _first_switch_8616(getattr(loop, "body", None)) is not None
 
 
+@cython.ccall
 def _single_wrapped_while_loop_8616(node: object) -> CWhileLoop | None:
     if isinstance(node, CWhileLoop):
         return node
@@ -3802,11 +4201,14 @@ def _single_wrapped_while_loop_8616(node: object) -> CWhileLoop | None:
     return None
 
 
-def _constant_true_8616(node: object) -> bool:
+@cython.ccall
+def _constant_true_8616(node: object) -> cython.bint:
     return isinstance(node, CConstant) and isinstance(node.value, int) and node.value != 0
 
 
+@cython.ccall
 def _first_switch_8616(node: object) -> CSwitchCase | None:
+    child: object
     if isinstance(node, CSwitchCase):
         return node
     for child in _iter_c_nodes_deep_8616(node):
@@ -3815,17 +4217,24 @@ def _first_switch_8616(node: object) -> CSwitchCase | None:
     return None
 
 
-def _is_void_return_type_8616(return_type: object) -> bool:
+@cython.ccall
+def _is_void_return_type_8616(return_type: object) -> cython.bint:
     return isinstance(return_type, SimTypeBottom) and getattr(return_type, "label", None) == "void"
 
 
-def _function_has_void_return_prototype_8616(func: object, project: object | None = None) -> bool:
+@cython.ccall
+def _function_has_void_return_prototype_8616(func: object, project: object | None = None) -> cython.bint:
+    prototype: object
     prototype = getattr(func, "prototype", None)
     # Dynamic angr/codegen compatibility boundary.
     return _is_void_return_type_8616(getattr(prototype, "returnty", None))
 
 
-def _codegen_has_void_return_evidence_8616(_project: object, codegen: SimpleNamespace, func: object | None) -> bool:
+@cython.ccall
+def _codegen_has_void_return_evidence_8616(_project: object, codegen: SimpleNamespace, func: object) -> cython.bint:
+    candidate_func: object
+    cfunc: object
+    candidate: object
     cfunc = getattr(codegen, "cfunc", None)
     for candidate in (
         getattr(cfunc, "prototype", None),
@@ -3847,9 +4256,9 @@ def _codegen_has_void_return_evidence_8616(_project: object, codegen: SimpleName
 
 def _choose_return_type_for_shape_8616(
     *,
-    shape: str,
-    return_shapes: set[str],
-    source_shape: str | None,
+    shape: object,
+    return_shapes: object,
+    source_shape: object,
     existing_returnty: object,
 ) -> SimType | None:
     """Choose a changed return type, or refuse an idempotent/no-proof update."""
@@ -3866,8 +4275,10 @@ def _choose_return_type_for_shape_8616(
     return _impl()
 
 
+@cython.ccall
 def _resolve_void_prune_func_8616(project: object, codegen: SimpleNamespace, func_addr: object) -> object | None:
     """Resolve the owning function for the void-return prune pass."""
+    func: object
     func = getattr(codegen, "_inertia_current_function_8616", None)
     if func is None:
         with contextlib.suppress(Exception):
@@ -3875,8 +4286,12 @@ def _resolve_void_prune_func_8616(project: object, codegen: SimpleNamespace, fun
     return func
 
 
-def _prune_void_function_return_values_8616(project: object, codegen: SimpleNamespace) -> bool:
+def _prune_void_function_return_values_8616(project: object, codegen: SimpleNamespace) -> cython.bint:
     """Normalize proven-void returns, retaining all internal call-result bindings."""
+    func_addr: object
+    root: object
+    container: object
+    stmt: object
     if getattr(codegen, "cfunc", None) is None:
         return False
 
@@ -3890,7 +4305,7 @@ def _prune_void_function_return_values_8616(project: object, codegen: SimpleName
 
     changed = False
     root = getattr(codegen.cfunc, "statements", None)
-    for container in tuple(node for node in (root, *_iter_c_nodes_deep_8616(root)) if isinstance(node, CStatements)):
+    for container in tuple(node for node in iter((root, ) + tuple(_iter_c_nodes_deep_8616(root))) if isinstance(node, CStatements)):
         if not isinstance(container, CStatements):
             continue
         statements = list(container.statements or ())
@@ -3909,8 +4324,10 @@ def _prune_void_function_return_values_8616(project: object, codegen: SimpleName
     return changed
 
 
-def _rewrite_void_return_stmt_8616(stmt: object, rewritten: list[object]) -> bool:
+@cython.ccall
+def _rewrite_void_return_stmt_8616(stmt: object, rewritten: object) -> cython.bint:
     """Append the void-normalized form of one return statement."""
+    retval: object
     if not isinstance(stmt, CReturn):
         rewritten.append(stmt)
         return False
@@ -3926,12 +4343,15 @@ def _rewrite_void_return_stmt_8616(stmt: object, rewritten: list[object]) -> boo
     return True
 
 
+@cython.ccall
 def _prevalidated_positive_stack_annotations_complete_8616(
     codegen: object,
     structured_prototype: Any,
     annotations: object,
-) -> bool:
+) -> cython.bint:
     """Return true when lowering already consumed all positive stack annotations."""
+    cfunc: object
+    global_specs: object
 
     # Dynamic angr/codegen compatibility boundary.
     if not getattr(codegen, "_inertia_annotated_stack_prototype_materialized_8616", 0):
@@ -3944,8 +4364,8 @@ def _prevalidated_positive_stack_annotations_complete_8616(
     stack_specs = cast(Mapping[object, object], stack_layout_annotation_specs_8616(annotations))
     if not isinstance(stack_specs, Mapping) or not stack_specs:
         return False
-    positive_offsets = [offset for offset in stack_specs if isinstance(offset, int) and offset > 0]
-    if len(positive_offsets) != len(stack_specs):
+    positive_offsets = [offset for offset in iter(stack_specs) if isinstance(offset, int) and offset > 0]
+    if operator.ne(len(positive_offsets), len(stack_specs)):
         return False
     # Dynamic angr/codegen compatibility boundary.
     cfunc = getattr(codegen, "cfunc", None)
@@ -3956,23 +4376,25 @@ def _prevalidated_positive_stack_annotations_complete_8616(
     return len(tuple(getattr(cfunc, "arg_list", ()) or ())) >= len(positive_offsets)
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _ApplyAnnotationsRun8616:
     """Run state for _apply_annotations_8616."""
 
     codegen: SimpleNamespace
     project: SimpleNamespace
-    annotation_stack_bindings: tuple[Any, ...] = field(init=False)
-    arg_slot_identities: set[Any] = field(init=False)
+    annotation_stack_bindings: object = field(init=False)
+    arg_slot_identities: object = field(init=False)
     func_addr: object = field(init=False)
     global_specs: Mapping[Any, Any] = field(init=False)
-    materialized_stack_cvars: dict[int, Any] = field(init=False)
+    materialized_stack_cvars: object = field(init=False)
     positive_specs_are_normalized: object = field(init=False)
     stack_specs: Mapping[object, object] = field(init=False)
-    stack_vars_by_offset: dict[int, Any] = field(init=False)
+    stack_vars_by_offset: object = field(init=False)
 
-    def run_8616(self) -> bool:
+    def run_8616(self) -> cython.bint:
         """Run the annotation bridge across the dynamic angr codegen surface."""
+        func: object
+        structured_prototype: object
         if getattr(self.codegen, "cfunc", None) is None:
             return False
         self.func_addr = getattr(self.codegen.cfunc, "addr", None)
@@ -4007,20 +4429,21 @@ class _ApplyAnnotationsRun8616:
                 f"apply_annotations func={getattr(func, 'addr', None)!r} "
                 f"cfunc={getattr(self.codegen.cfunc, 'addr', None)!r} "
                 f"project_id={id(self.project)} "
-                f"cod_map_keys={sorted(getattr(self.project, '_inertia_cod_metadata_by_func_addr_8616', {}) or {})} "
-                f"stack_offsets={sorted(k for k in self.stack_specs if isinstance(k, int))}",
+                f"cod_map_keys={sorted(tuple(getattr(self.project, '_inertia_cod_metadata_by_func_addr_8616', {}) or {}))} "
+                f"stack_offsets={sorted(k for k in iter(self.stack_specs) if isinstance(k, int))}",
                 file=sys.stderr,
                 flush=True,
             )
         helper_arg_name_by_offset = self._collect_stack_candidate_cvars_8616(func)
         return self._run_annotation_passes_8616(func, helper_arg_name_by_offset, promote_near_pointers, changed)
 
+    @cython.ccall
     def _run_annotation_passes_8616(
-        self, func: object, helper_arg_name_by_offset: dict[int, str], promote_near_pointers: bool, changed: bool
-    ) -> bool:
+        self, func: object, helper_arg_name_by_offset: object, promote_near_pointers: cython.bint, changed: cython.bint
+    ) -> cython.bint:
         """Run rename, rewrite, arg-list sync, and post-sync rewrite passes."""
         used_stack_names: set[str] = set()
-        name_owner_offsets: dict[str, int] = {}
+        name_owner_offsets: dict[str, cython.longlong] = {}
         rename_changed = _rename_stack_variables_from_specs_8616(
             codegen=self.codegen,
             stack_specs=self.stack_specs,
@@ -4063,8 +4486,10 @@ class _ApplyAnnotationsRun8616:
                 changed = True
         return changed
 
+    @cython.ccall
     def _resolve_structured_prototype_8616(self, func: object, annotations: object) -> object:
         """Pick authoritative > annotated > live prototype for this function."""
+        authoritative_prototype: object
         annotated_prototype = annotations.get("prototype") if isinstance(annotations, Mapping) else None
         argument_count = len(tuple(getattr(self.codegen.cfunc, "arg_list", ()) or ()))
         authoritative_prototype = authoritative_function_prototype_8616(
@@ -4080,8 +4505,12 @@ class _ApplyAnnotationsRun8616:
             else getattr(func, "prototype", None)
         )
 
-    def _apply_structured_prototype_8616(self, structured_prototype: Any) -> bool:
+    @cython.ccall
+    def _apply_structured_prototype_8616(self, structured_prototype: Any) -> cython.bint:
         """Install the structured prototype and retune argument cvar types."""
+        current_codegen_proto: object
+        cvar: object
+        index: object
         changed = False
         # Dynamic angr/codegen compatibility boundary.
         current_codegen_proto = getattr(self.codegen.cfunc, "functy", None)
@@ -4106,8 +4535,13 @@ class _ApplyAnnotationsRun8616:
             )
         return changed
 
-    def _collect_stack_candidate_cvars_8616(self, func: object) -> dict[int, str]:
+    def _collect_stack_candidate_cvars_8616(self, func: object) -> object:
         """Seed stack identity, candidate-cvar maps, and annotation bindings."""
+        arg_variable: object
+        identity: object
+        arg: object
+        candidates: object
+        offset: object
         self.arg_slot_identities = set()
         for arg in getattr(self.codegen.cfunc, "arg_list", ()) or ():
             arg_variable = getattr(arg, "variable", None)
@@ -4116,10 +4550,10 @@ class _ApplyAnnotationsRun8616:
                 if identity is not None:
                     self.arg_slot_identities.add(identity)
         helper_arg_names = list(getattr(getattr(func, "prototype", None), "arg_names", ()) or ())
-        helper_arg_offsets = sorted(offset for offset in self.stack_specs if isinstance(offset, int) and offset > 0)
-        helper_arg_name_by_offset: dict[int, str] = {
+        helper_arg_offsets = sorted(offset for offset in iter(self.stack_specs) if isinstance(offset, int) and offset > 0)
+        helper_arg_name_by_offset: dict[cython.longlong, str] = {
             offset: helper_arg_names[index]
-            for index, offset in enumerate(helper_arg_offsets)
+            for index, offset in builtins.iter(enumerate(helper_arg_offsets))
             if index < len(helper_arg_names) and isinstance(helper_arg_names[index], str) and helper_arg_names[index]
         }
         self.stack_vars_by_offset = {}
@@ -4128,12 +4562,12 @@ class _ApplyAnnotationsRun8616:
             _best_score, best_cvar = max(candidates, key=lambda item: item[0])
             self.stack_vars_by_offset[offset] = best_cvar
         self.materialized_stack_cvars = {}
-        positive_stack_spec_offsets = sorted(offset for offset in self.stack_specs if isinstance(offset, int) and offset > 0)
+        positive_stack_spec_offsets = sorted(offset for offset in iter(self.stack_specs) if isinstance(offset, int) and offset > 0)
         self.positive_specs_are_normalized = _positive_stack_specs_are_normalized_for_codegen_8616(
             self.stack_specs, self.codegen
         ) and (
             not self.stack_vars_by_offset
-            or any((offset + 2) in self.stack_vars_by_offset for offset in positive_stack_spec_offsets)
+            or any((offset + 2) in self.stack_vars_by_offset for offset in iter(positive_stack_spec_offsets))
         )
         self.annotation_stack_bindings = tuple(
             StackVariableBinding(
@@ -4141,7 +4575,7 @@ class _ApplyAnnotationsRun8616:
                 size=variable.size,
                 var_name=variable.name,
             )
-            for variable, cvar in self.codegen.cfunc.variables_in_use.items()
+            for variable, cvar in builtins.iter(self.codegen.cfunc.variables_in_use.items())
             if isinstance(variable, SimStackVariable)
             and (
                 identity := _machine_bp_stack_binding_identity_8616(
@@ -4156,9 +4590,14 @@ class _ApplyAnnotationsRun8616:
         )
         return helper_arg_name_by_offset
 
-    def _exact_stack_candidates_8616(self) -> dict[int, list[tuple[tuple[int, int, int, int, int], CVariable]]]:
+    @cython.ccall
+    def _exact_stack_candidates_8616(self) -> object:
         """Collect exact-identity stack cvar candidates scored per offset."""
-        exact_stack_candidates: dict[int, list[tuple[tuple[int, int, int, int, int], CVariable]]] = {}
+        identity: object
+        variable: object
+        arg: object
+        cvar: object
+        exact_stack_candidates: dict[cython.longlong, list[tuple[tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong, cython.longlong], CVariable]]] = {}
         for arg in getattr(self.codegen.cfunc, "arg_list", ()) or ():
             variable = getattr(arg, "variable", None)
             if not isinstance(arg, CVariable) or not isinstance(variable, SimStackVariable):
@@ -4180,8 +4619,12 @@ class _ApplyAnnotationsRun8616:
                 exact_stack_candidates.setdefault(identity.offset, []).append((score, cvar))
         return exact_stack_candidates
 
-    def global_spec_for(self, addr: int) -> tuple[str | None, object | None]:
+    @cython.ccall
+    def global_spec_for(self, addr: cython.longlong) -> tuple[str | None, object | None]:
         """Resolve a global address to its COD name and type."""
+        name: object
+        spec: object
+        vartype: object
         spec = self.global_specs.get(addr)
         if isinstance(spec, str):
             return spec, None
@@ -4192,7 +4635,8 @@ class _ApplyAnnotationsRun8616:
                 return name, vartype
         return None, None
 
-    def _stack_name_is_generic(self, name: object) -> bool:
+    @cython.ccall
+    def _stack_name_is_generic(self, name: object) -> cython.bint:
         normalized = _strip_typed_suffix_8616(name)
         if not isinstance(normalized, str):
             return False
@@ -4202,8 +4646,14 @@ class _ApplyAnnotationsRun8616:
         )
 
     def _stack_candidate_score(self, 
-        variable: SimStackVariable, cvar: Any, *, exact: bool
-    ) -> tuple[int, int, int, int, int]:
+        variable: SimStackVariable, cvar: Any, *, exact: cython.bint
+    ) -> tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong, cython.longlong]:
+        cvar_name: object
+        identity: object
+        preferred_name: object
+        size: object
+        unified_name: object
+        variable_name: object
         identity = _machine_bp_stack_binding_identity_8616(
             self.codegen,
             variable,
@@ -4217,7 +4667,7 @@ class _ApplyAnnotationsRun8616:
         preferred_name = next(
             (
                 name
-                for name in (variable_name, cvar_name, unified_name)
+                for name in iter((variable_name, cvar_name, unified_name))
                 if isinstance(name, str) and name and not self._stack_name_is_generic(name)
             ),
             None,
@@ -4229,15 +4679,16 @@ class _ApplyAnnotationsRun8616:
         exact_rank = 1 if exact else 0
         return (exact_rank, is_arg_slot, has_preferred_name, size_rank, -identity.offset)
 
-    def _stack_spec_for_offset(self, offset: int, size: int) -> StackAnnotationSpec8616 | None:
+    @cython.ccall
+    def _stack_spec_for_offset(self, offset: cython.longlong, size: cython.longlong) -> StackAnnotationSpec8616 | None:
         binding = StackVariableBinding(offset, size)
         if self.positive_specs_are_normalized and offset > 0:
             return select_normalized_stack_argument_annotation_spec_8616(
                 binding,
                 stack_specs=self.stack_specs,
             )
-        candidate_offsets: tuple[int, ...]
-        candidate_offsets = (offset, offset + 2, offset - 2) if offset < 0 else (offset,)
+        candidate_offsets: object
+        candidate_offsets = tuple((offset, offset + 2, offset - 2)) if offset < 0 else tuple((offset,))
         return select_stack_annotation_spec_8616(
             binding,
             stack_specs=self.stack_specs,
@@ -4245,7 +4696,13 @@ class _ApplyAnnotationsRun8616:
             known_bindings=self.annotation_stack_bindings,
         )
 
-    def _materialize_stack_cvar(self, offset: int, type_: object) -> object | None:
+    @cython.ccall
+    def _materialize_stack_cvar(self, offset: cython.longlong, type_: object) -> object | None:
+        existing: object
+        spec: object
+        unified_locals: object
+        variables_in_use: object
+        vartype: object
         existing = self.materialized_stack_cvars.get(offset)
         if existing is not None:
             return cast(object | None, existing)
@@ -4276,8 +4733,11 @@ class _ApplyAnnotationsRun8616:
         self.stack_vars_by_offset[offset] = cvar
         return cast(object | None, cvar)
 
-    def resolve_stack_cvar(self, offset: int) -> object | None:
+    @cython.ccall
+    def resolve_stack_cvar(self, offset: cython.longlong) -> object | None:
         """Resolve one stack offset to its preferred cvar."""
+        best: object
+        direct: object
         # A normalized positive stack map starts after the architectural
         # near return word.  BP+2 is therefore never a source variable;
         # do not let an angr declaration-only return carrier win an exact
@@ -4301,10 +4761,15 @@ class _ApplyAnnotationsRun8616:
             return best
         return self._materialize_stack_cvar(offset, None)
 
-    def _covering_stack_cvar_8616(self, offset: int) -> object | None:
+    @cython.ccall
+    def _covering_stack_cvar_8616(self, offset: cython.longlong) -> object | None:
         """Pick the smallest declared stack slot covering a negative offset."""
+        best_size: object
+        identity: object
+        cvar: object
+        variable: object
         best = None
-        best_size: int | None = None
+        best_size = None
         for variable, cvar in getattr(self.codegen.cfunc, "variables_in_use", {}).items():
             if not isinstance(variable, SimStackVariable):
                 continue
@@ -4326,7 +4791,8 @@ class _ApplyAnnotationsRun8616:
         return best
 
 
-def _apply_annotations_8616(project: SimpleNamespace, codegen: SimpleNamespace) -> bool:
+@cython.ccall
+def _apply_annotations_8616(project: SimpleNamespace, codegen: SimpleNamespace) -> cython.bint:
     """Apply annotation names while preserving authoritative typed interfaces."""
     return _ApplyAnnotationsRun8616(project=project, codegen=codegen).run_8616()
 
@@ -4335,11 +4801,14 @@ def _rename_stack_variables_from_specs_8616(
     *,
     codegen: SimpleNamespace,
     stack_specs: Mapping[object, object],
-    helper_arg_name_by_offset: dict[int, str],
-    used_stack_names: set[str],
-    name_owner_offsets: dict[str, int],
-) -> bool:
+    helper_arg_name_by_offset: object,
+    used_stack_names: object,
+    name_owner_offsets: object,
+) -> cython.bint:
     """Apply inert stack names through the typed lowering storage contract."""
+    cvar: object
+    identity: object
+    variable: object
     positive_specs_are_normalized = _positive_stack_specs_are_normalized_for_codegen_8616(stack_specs, codegen)
     cfunc = codegen.cfunc
     variables_in_use = cfunc.variables_in_use
@@ -4349,7 +4818,7 @@ def _rename_stack_variables_from_specs_8616(
             size=variable.size,
             var_name=variable.name,
         )
-        for variable, cvar in variables_in_use.items()
+        for variable, cvar in builtins.iter(variables_in_use.items())
         if isinstance(variable, SimStackVariable)
         and (
             identity := _machine_bp_stack_binding_identity_8616(
@@ -4366,7 +4835,7 @@ def _rename_stack_variables_from_specs_8616(
     changed = False
     stack_candidates: list[tuple[_StackSlotIdentity, SimStackVariable, CVariable]] = [
         (identity, variable, cvar)
-        for variable, cvar in variables_in_use.items()
+        for variable, cvar in builtins.iter(variables_in_use.items())
         if isinstance(variable, SimStackVariable)
         and (
             identity := _machine_bp_stack_binding_identity_8616(
@@ -4406,6 +4875,7 @@ def _rename_stack_variables_from_specs_8616(
     return changed
 
 
+@cython.ccall
 def _rename_one_stack_item_8616(
     *,
     identity: Any,
@@ -4413,13 +4883,17 @@ def _rename_one_stack_item_8616(
     cvar: CVariable,
     codegen: SimpleNamespace,
     stack_specs: Mapping[object, object],
-    stack_bindings: tuple[StackVariableBinding, ...],
-    positive_specs_are_normalized: bool,
-    helper_arg_name_by_offset: dict[int, str],
-    used_stack_names: set[str],
-    name_owner_offsets: dict[str, int],
-) -> bool:
+    stack_bindings: object,
+    positive_specs_are_normalized: cython.bint,
+    helper_arg_name_by_offset: object,
+    used_stack_names: object,
+    name_owner_offsets: object,
+) -> cython.bint:
     """Rename one stack variable from its resolved annotation spec name."""
+    kept: object
+    name: object
+    target: object
+    vartype: object
     changed = False
     offset = identity.offset
     name, vartype = _spec_name_for_8616(
@@ -4456,10 +4930,10 @@ def _rename_one_stack_item_8616(
     if name is not None:
         name_owner_offsets[name] = offset
         target = cvar.unified_variable or cvar.variable
-        if target is not None and target.name != name:
+        if target is not None and operator.ne(target.name, name):
             target.name = name
             changed = True
-        if variable.name != name:
+        if operator.ne(variable.name, name):
             variable.name = name
             changed = True
     if vartype is not None and _apply_stack_arg_cvar_type_8616(codegen, cvar, vartype):
@@ -4467,6 +4941,7 @@ def _rename_one_stack_item_8616(
     return changed
 
 
+@cython.ccall
 def _keep_existing_stack_name_8616(
     *,
     name: object,
@@ -4474,22 +4949,24 @@ def _keep_existing_stack_name_8616(
     cvar: CVariable,
     codegen: SimpleNamespace,
     vartype: object,
-    offset: int,
-    used_stack_names: set[str],
-    name_owner_offsets: dict[str, int],
+    offset: cython.longlong,
+    used_stack_names: object,
+    name_owner_offsets: object,
 ) -> bool | None:
     """Keep an already-owned stack name when the spec resolves to it."""
+    owner_offset: object
+    unified: object
     current_name = variable.name
     if not (isinstance(current_name, str) and current_name and current_name == name):
         return None
     owner_offset = name_owner_offsets.get(current_name)
-    if current_name in used_stack_names and owner_offset != offset:
+    if current_name in used_stack_names and operator.ne(owner_offset, offset):
         return None
     changed = False
     used_stack_names.add(current_name)
     name_owner_offsets[current_name] = offset
     unified = cvar.unified_variable
-    if unified is not None and unified.name != current_name:
+    if unified is not None and operator.ne(unified.name, current_name):
         unified.name = current_name
         changed = True
     if vartype is not None and _apply_stack_arg_cvar_type_8616(codegen, cvar, vartype):
@@ -4497,24 +4974,27 @@ def _keep_existing_stack_name_8616(
     return changed
 
 
+@cython.ccall
 def _dedupe_stack_item_name_8616(
     *,
     name: object,
-    offset: int,
-    used_stack_names: set[str],
-    name_owner_offsets: dict[str, int],
-) -> str | None:
+    offset: cython.longlong,
+    used_stack_names: object,
+    name_owner_offsets: object,
+) -> object:
     """Allocate a unique name for a stack item, honoring prior owners."""
+    owner_offset: object
     if isinstance(name, str) and name in used_stack_names:
         owner_offset = name_owner_offsets.get(name)
-        if owner_offset == offset:
+        if operator.eq(owner_offset, offset):
             return name
         return _unique_stack_name_8616(name, used_stack_names)
     return _unique_stack_name_8616(name if isinstance(name, str) else None, used_stack_names)
 
 
 
-def _unique_stack_name_8616(base_name: str | None, used_stack_names: set[str]) -> str | None:
+@cython.ccall
+def _unique_stack_name_8616(base_name: object, used_stack_names: object) -> object:
     """Allocate a suffix-unique stack name within used_stack_names."""
     if not isinstance(base_name, str) or not base_name:
         return None
@@ -4527,17 +5007,21 @@ def _unique_stack_name_8616(base_name: str | None, used_stack_names: set[str]) -
     return candidate
 
 
+@cython.ccall
 def _spec_name_for_8616(
     variable: SimStackVariable,
     cvar: CVariable,
     *,
     codegen: SimpleNamespace,
     stack_specs: Mapping[object, object],
-    stack_bindings: tuple[StackVariableBinding, ...],
-    positive_specs_are_normalized: bool,
-    helper_arg_name_by_offset: dict[int, str],
+    stack_bindings: object,
+    positive_specs_are_normalized: cython.bint,
+    helper_arg_name_by_offset: object,
 ) -> tuple[str | None, object | None]:
     """Resolve the annotation spec name and type for one stack binding."""
+    helper_name: object
+    identity: object
+    selected: object
     identity = _machine_bp_stack_binding_identity_8616(
         codegen,
         variable,
@@ -4546,9 +5030,9 @@ def _spec_name_for_8616(
     if identity is None:
         return None, None
     offset = identity.offset
-    candidate_offsets: tuple[int, ...]
+    candidate_offsets: object
     if offset > 0:
-        candidate_offsets = (offset - 2, offset) if positive_specs_are_normalized else (offset,)
+        candidate_offsets = tuple((offset - 2, offset)) if positive_specs_are_normalized else tuple((offset,))
         helper_name = helper_arg_name_by_offset.get(offset)
         if helper_name is not None:
             return helper_name, None
@@ -4582,22 +5066,26 @@ def _spec_name_for_8616(
     return selected.name, selected.type_spec
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _SyncArgsFromAnnotationsRun8616:
     """Run state for _sync_arg_list_from_annotations_8616."""
 
     codegen: SimpleNamespace
     func: object
-    promote_near_pointers: bool
+    promote_near_pointers: cython.bint
     resolve_stack_cvar: Callable[[int], object]
     stack_specs: Mapping[object, object]
-    raw_offset_by_codegen_offset: dict[int, int] = field(init=False)
+    raw_offset_by_codegen_offset: object = field(init=False)
 
-    def run_8616(self) -> bool:
+    def run_8616(self) -> cython.bint:
         """Run the compatibility sync against dynamic C-AST arguments."""
-        raw_arg_offsets = sorted(offset for offset in self.stack_specs if isinstance(offset, int) and offset > 0)
+        arch: object
+        authoritative_prototype: object
+        current_proto: object
+        project: object
+        raw_arg_offsets = sorted(offset for offset in iter(self.stack_specs) if isinstance(offset, int) and offset > 0)
         specs_are_normalized = _positive_stack_specs_are_normalized_for_codegen_8616(self.stack_specs, self.codegen)
-        arg_offsets = [offset + 2 if specs_are_normalized else offset for offset in raw_arg_offsets]
+        arg_offsets = [offset + 2 if specs_are_normalized else offset for offset in iter(raw_arg_offsets)]
         arg_offsets_set = set(arg_offsets)
         self.raw_offset_by_codegen_offset = dict(zip(arg_offsets, raw_arg_offsets, strict=False))
         if not arg_offsets:
@@ -4605,11 +5093,11 @@ class _SyncArgsFromAnnotationsRun8616:
         known_positive_stack_offsets = {
             identity.offset
             # Dynamic angr/self.codegen compatibility boundary.
-            for variable, cvar in getattr(
+            for variable, cvar in builtins.iter(getattr(
                 self.codegen.cfunc,
                 "variables_in_use",
                 {},
-            ).items()
+            ).items())
             if isinstance(variable, SimStackVariable)
             if (
                 identity := _machine_bp_stack_binding_identity_8616(
@@ -4723,10 +5211,12 @@ class _SyncArgsFromAnnotationsRun8616:
             self.codegen._inertia_codegen_decl_refresh_required_8616 = True
         return True
 
+    @cython.ccall
     def _resolve_args_from_offsets_8616(
-        self, arg_offsets: list[int]
-    ) -> tuple[list[CVariable], list[str | None], bool]:
+        self, arg_offsets: object
+    ) -> tuple[list[CVariable], list[str | None], cython.bint]:
         """Resolve stack cvars and apply spec names for each arg offset."""
+        offset: object
         resolved_args = []
         resolved_names: list[str | None] = []
         name_changed = False
@@ -4745,12 +5235,13 @@ class _SyncArgsFromAnnotationsRun8616:
         authoritative_prototype: Any,
         current_proto: object,
         project: object,
-        resolved_args: list[CVariable],
-        resolved_names: list[str | None],
-        existing_args: list[object],
-        target_arg_count: int,
-    ) -> bool:
+        resolved_args: object,
+        resolved_names: object,
+        existing_args: object,
+        target_arg_count: cython.longlong,
+    ) -> cython.bint:
         """Install the authoritative prototype and arg list on the codegen."""
+        arch: object
         authoritative_names = tuple(authoritative_prototype.arg_names or ())
         desired_names = [
             resolved_names[index]
@@ -4761,14 +5252,14 @@ class _SyncArgsFromAnnotationsRun8616:
             for index in range(target_arg_count)
         ]
         normalized_names = _normalize_arg_names_8616(desired_names, target_arg_count)
-        interface_changed = len(existing_args) != target_arg_count or any(
+        interface_changed = operator.ne(len(existing_args), target_arg_count) or any(
             existing is not resolved
-            for existing, resolved in zip(existing_args, resolved_args, strict=False)
+            for existing, resolved in builtins.iter(zip(existing_args, resolved_args, strict=False))
         )
         if interface_changed:
             self.codegen.cfunc.arg_list = resolved_args
         current_names = tuple(getattr(current_proto, "arg_names", ()) or ())
-        if current_names != tuple(normalized_names):
+        if operator.ne(current_names, tuple(normalized_names)):
             named_prototype = SimTypeFunction(
                 list(authoritative_prototype.args or ()),
                 authoritative_prototype.returnty,
@@ -4783,12 +5274,13 @@ class _SyncArgsFromAnnotationsRun8616:
             interface_changed = True
         return interface_changed
 
+    @cython.ccall
     def _aligned_source_pointer_flags_8616(
         self,
         project: object,
-        arg_offsets: list[int],
-        inferred_arg_widths: dict[int, int],
-    ) -> tuple[bool, ...]:
+        arg_offsets: object,
+        inferred_arg_widths: object,
+    ) -> object:
         """Collect and align source pointer flags to inferred arg widths."""
         _, source_pointer_flags, _, _ = _collect_stack_promotion_inputs_8616(self.func)
         if not source_pointer_flags and project is not None:
@@ -4807,19 +5299,22 @@ class _SyncArgsFromAnnotationsRun8616:
             )
         return source_pointer_flags
 
+    @cython.ccall
     def _promote_resolved_arg_types_8616(
         self,
         *,
-        resolved_args: list[CVariable],
-        arg_offsets: list[int],
-        inferred_arg_widths: dict[int, int],
-        source_pointer_flags: tuple[bool, ...],
-        x87_scalar_arg_types: Mapping[int, object],
-        new_args: list[Any],
+        resolved_args: object,
+        arg_offsets: object,
+        inferred_arg_widths: object,
+        source_pointer_flags: object,
+        x87_scalar_arg_types: Mapping[cython.longlong, object],
+        new_args: object,
         pointer_type: object,
         project: object,
-    ) -> tuple[bool, bool]:
+    ) -> tuple[cython.bint, cython.bint]:
         """Apply scalar/pointer type materialization to resolved args."""
+        index: object
+        resolved_arg: object
         pointer_promoted = False
         scalar_materialized = False
         for index, resolved_arg in enumerate(resolved_args):
@@ -4838,20 +5333,25 @@ class _SyncArgsFromAnnotationsRun8616:
             scalar_materialized |= arg_scalar_materialized
         return pointer_promoted, scalar_materialized
 
+    @cython.ccall
     def _promote_one_resolved_arg_8616(
         self,
         *,
-        index: int,
+        index: cython.longlong,
         resolved_arg: CVariable,
-        arg_offsets: list[int],
-        inferred_arg_widths: dict[int, int],
-        source_pointer_flags: tuple[bool, ...],
-        x87_scalar_arg_types: Mapping[int, object],
-        new_args: list[Any],
+        arg_offsets: object,
+        inferred_arg_widths: object,
+        source_pointer_flags: object,
+        x87_scalar_arg_types: Mapping[cython.longlong, object],
+        new_args: object,
         pointer_type: object,
         project: object,
-    ) -> tuple[bool, bool]:
+    ) -> tuple[cython.bint, cython.bint]:
         """Apply scalar/pointer type materialization to one resolved arg."""
+        arch: object
+        scalar_type: object
+        variable: object
+        variable_identity: object
         pointer_promoted = False
         scalar_materialized = False
         variable = getattr(resolved_arg, "variable", None)
@@ -4888,7 +5388,7 @@ class _SyncArgsFromAnnotationsRun8616:
                     self.codegen, resolved_arg, wide_type, new_args, index
                 )
             # Dynamic angr/codegen compatibility boundary.
-            if isinstance(variable, SimStackVariable) and getattr(variable, "size", None) != inferred_width:
+            if isinstance(variable, SimStackVariable) and operator.ne(getattr(variable, "size", None), inferred_width):
                 variable.size = inferred_width
                 scalar_materialized = True
         if not self.promote_near_pointers:
@@ -4898,21 +5398,22 @@ class _SyncArgsFromAnnotationsRun8616:
         )
         if not aligned_pointer_evidence and not _stack_arg_has_pointer_evidence_8616(self.codegen, variable):
             return pointer_promoted, scalar_materialized
-        if getattr(resolved_arg, "variable_type", None) != pointer_type:
+        if operator.ne(getattr(resolved_arg, "variable_type", None), pointer_type):
             cast(Any, resolved_arg).variable_type = pointer_type
             pointer_promoted = True
-        if index < len(new_args) and new_args[index] != pointer_type:
+        if index < len(new_args) and operator.ne(new_args[index], pointer_type):
             new_args[index] = pointer_type
             pointer_promoted = True
         return pointer_promoted, scalar_materialized
 
+    @cython.ccall
     def _desired_arg_names_8616(
         self,
-        resolved_args: list[CVariable],
-        resolved_names: list[str | None],
+        resolved_args: object,
+        resolved_names: object,
         current_proto: Any,
-        target_arg_count: int,
-    ) -> list[str | None]:
+        target_arg_count: cython.longlong,
+    ) -> object:
         """Build desired arg names from specs, cvars, or the live prototype."""
         desired_names = []
         for index in range(target_arg_count):
@@ -4929,7 +5430,10 @@ class _SyncArgsFromAnnotationsRun8616:
                 desired_names.append(None)
         return desired_names
 
-    def _name_from_stack_spec(self, offset: int) -> str | None:
+    @cython.ccall
+    def _name_from_stack_spec(self, offset: cython.longlong) -> object:
+        name: object
+        spec: object
         spec = self.stack_specs.get(self.raw_offset_by_codegen_offset.get(offset, offset))
         if isinstance(spec, str):
             return spec
@@ -4938,15 +5442,18 @@ class _SyncArgsFromAnnotationsRun8616:
             return name if isinstance(name, str) and name else None
         return None
 
-    def _apply_arg_name(self, cvar: Any, name: str | None) -> bool:
+    @cython.ccall
+    def _apply_arg_name(self, cvar: Any, name: object) -> cython.bint:
+        unified: object
+        variable: object
         if not isinstance(name, str) or not name:
             return False
         local_changed = False
         variable = getattr(cvar, "variable", None)
-        if variable is not None and getattr(variable, "name", None) != name:
+        if variable is not None and operator.ne(getattr(variable, "name", None), name):
             variable.name = name
             local_changed = True
-        if getattr(cvar, "name", None) != name:
+        if operator.ne(getattr(cvar, "name", None), name):
             try:
                 cvar.name = name
             except Exception:
@@ -4954,7 +5461,7 @@ class _SyncArgsFromAnnotationsRun8616:
             else:
                 local_changed = True
         unified = getattr(cvar, "unified_variable", None)
-        if unified is not None and getattr(unified, "name", None) != name:
+        if unified is not None and operator.ne(getattr(unified, "name", None), name):
             unified.name = name
             local_changed = True
         return local_changed
@@ -4962,39 +5469,43 @@ class _SyncArgsFromAnnotationsRun8616:
 
 def _sync_interface_unchanged_8616(
     *,
-    existing_args: list[object],
-    resolved_args: list[CVariable],
+    existing_args: object,
+    resolved_args: object,
     current_proto: object,
-    normalized_names: list[str],
-    target_arg_count: int,
-    pointer_promoted: bool,
-    scalar_materialized: bool,
-    name_changed: bool,
-) -> bool:
+    normalized_names: object,
+    target_arg_count: cython.longlong,
+    pointer_promoted: cython.bint,
+    scalar_materialized: cython.bint,
+    name_changed: cython.bint,
+) -> cython.bint:
     """Report whether the sync pass would leave the interface untouched."""
     return (
-        len(existing_args) == target_arg_count
-        and len(getattr(current_proto, "args", ()) or ()) == target_arg_count
-        and list(getattr(current_proto, "arg_names", ()) or ()) == normalized_names
-        and all(existing is resolved for existing, resolved in zip(existing_args, resolved_args, strict=False))
+        operator.eq(len(existing_args), target_arg_count)
+        and operator.eq(len(getattr(current_proto, "args", ()) or ()), target_arg_count)
+        and operator.eq(list(getattr(current_proto, "arg_names", ()) or ()), normalized_names)
+        and all(existing is resolved for existing, resolved in builtins.iter(zip(existing_args, resolved_args, strict=False)))
         and not pointer_promoted
         and not scalar_materialized
         and not name_changed
     )
 
 
-def _sync_arg_list_from_annotations_8616(codegen: SimpleNamespace, func: object, stack_specs: Mapping[object, object], resolve_stack_cvar: Callable[[int], object], promote_near_pointers: bool) -> bool:
+@cython.ccall
+def _sync_arg_list_from_annotations_8616(codegen: SimpleNamespace, func: object, stack_specs: Mapping[object, object], resolve_stack_cvar: Callable[[int], object], promote_near_pointers: cython.bint) -> cython.bint:
     """Synchronize annotated argument names without weakening owned types."""
     return _SyncArgsFromAnnotationsRun8616(codegen=codegen, func=func, stack_specs=stack_specs, resolve_stack_cvar=resolve_stack_cvar, promote_near_pointers=promote_near_pointers).run_8616()
 
 
+@cython.ccall
 def _annotation_arg_widths_from_stack_layout_8616(
     *,
-    arg_offsets: list[int],
-    known_positive_stack_offsets: set[int],
-) -> dict[int, int]:
+    arg_offsets: object,
+    known_positive_stack_offsets: object,
+) -> object:
     """Infer annotation argument byte widths from neighboring stack slots."""
-    widths: dict[int, int] = {}
+    index: object
+    offset: object
+    widths: dict[cython.longlong, cython.longlong] = {}
     for index, offset in enumerate(arg_offsets):
         width = 2
         if index + 1 < len(arg_offsets):
@@ -5010,17 +5521,18 @@ def _annotation_arg_widths_from_stack_layout_8616(
 def _prune_unused_stack_slots_covered_by_annotation_args_8616(
     *,
     codegen: object,
-    arg_offsets: set[int],
-    arg_widths: Mapping[int, int],
-) -> bool:
+    arg_offsets: object,
+    arg_widths: Mapping[cython.longlong, cython.longlong],
+) -> cython.bint:
     """Remove declaration-only high-word stack slots covered by wider arguments."""
+    cfunc: object
     # Dynamic angr/codegen compatibility boundary.
     cfunc = getattr(codegen, "cfunc", None)
     if cfunc is None:
         return False
     covered_offsets = {
         covered
-        for base_offset, width in arg_widths.items()
+        for base_offset, width in builtins.iter(arg_widths.items())
         if width > 2
         for covered in range(base_offset + 2, base_offset + width, 2)
         if covered not in arg_offsets
@@ -5030,10 +5542,10 @@ def _prune_unused_stack_slots_covered_by_annotation_args_8616(
     body_variable_ids = {
         id(variable)
         # Dynamic angr/codegen compatibility boundary.
-        for node in _iter_c_nodes_deep_8616(getattr(cfunc, "statements", None))
+        for node in builtins.iter(_iter_c_nodes_deep_8616(getattr(cfunc, "statements", None)))
         if isinstance(node, CVariable)
         # Dynamic angr/codegen compatibility boundary.
-        for variable in (getattr(node, "variable", None),)
+        for variable in iter((getattr(node, "variable", None),))
         if isinstance(variable, SimStackVariable)
     }
     # Dynamic angr/codegen compatibility boundary.
@@ -5053,15 +5565,17 @@ def _prune_unused_stack_slots_covered_by_annotation_args_8616(
     return changed
 
 
+@cython.ccall
 def _pointer_flag_scalar_type_8616(
     *,
-    index: int,
-    source_pointer_flags: tuple[bool, ...],
-    new_args: list[Any],
+    index: cython.longlong,
+    source_pointer_flags: object,
+    new_args: object,
     resolved_arg: CVariable,
     project: object,
 ) -> object | None:
     """Return a scalar short type when the pointer flag for this arg is False."""
+    arch: object
     if not (
         index < len(source_pointer_flags)
         and source_pointer_flags[index] is False
@@ -5075,28 +5589,33 @@ def _pointer_flag_scalar_type_8616(
     return cast(object, SimTypeShort(False).with_arch(arch)) if arch is not None else SimTypeShort(False)
 
 
+@cython.ccall
 def _apply_new_arg_scalar_type_8616(
     codegen: SimpleNamespace,
     resolved_arg: CVariable,
     scalar_type: object,
-    new_args: list[Any],
-    index: int,
-) -> bool:
+    new_args: object,
+    index: cython.longlong,
+) -> cython.bint:
     """Apply a scalar type to the cvar and the staged arg list."""
     changed = _apply_stack_arg_cvar_type_8616(codegen, resolved_arg, scalar_type)
-    if index < len(new_args) and new_args[index] != scalar_type:
+    if index < len(new_args) and operator.ne(new_args[index], scalar_type):
         new_args[index] = scalar_type
         changed = True
     return changed
 
 
+@cython.ccall
 def _prune_covered_stack_var_map_8616(
     var_map: object,
-    body_variable_ids: set[int],
-    covered_offsets: set[int],
+    body_variable_ids: object,
+    covered_offsets: object,
     identity_for: Callable[[object, object], Any],
-) -> bool:
+) -> cython.bint:
     """Delete covered high-word stack slots from one codegen var map."""
+    identity: object
+    cvar: object
+    variable: object
     if not isinstance(var_map, dict):
         return False
     changed = False
@@ -5110,7 +5629,7 @@ def _prune_covered_stack_var_map_8616(
     return changed
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _ApplyRewritesRun8616:
     """Run state for _apply_annotation_rewrites_8616."""
 
@@ -5121,12 +5640,13 @@ class _ApplyRewritesRun8616:
     project: Any
     resolve_stack_cvar: Callable[[int], object | None]
     """Resolve one stack offset to its preferred cvar."""
-    stack_candidate_score: Callable[..., tuple[int, int, int, int, int]]
-    stack_vars_by_offset: dict[int, CVariable]
-    changed: bool = field(init=False)
-    preferred_stack_cvars_by_identity: dict[object, CVariable] = field(init=False)
+    stack_candidate_score: Callable[..., tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong, cython.longlong]]
+    stack_vars_by_offset: object
+    changed: cython.bint = field(init=False)
+    preferred_stack_cvars_by_identity: object = field(init=False)
 
-    def run_8616(self) -> bool:
+    @cython.ccall
+    def run_8616(self) -> cython.bint:
         """Run the annotation rewrites across stack, global, and alias transforms."""
         self.changed = False
         self.preferred_stack_cvars_by_identity = self._seed_preferred_stack_cvars_8616()
@@ -5139,8 +5659,12 @@ class _ApplyRewritesRun8616:
             self.changed = True
         return self.changed
 
-    def _seed_preferred_stack_cvars_8616(self) -> dict[object, CVariable]:
+    @cython.ccall
+    def _seed_preferred_stack_cvars_8616(self) -> object:
         """Seed preferred cvar per stack identity from args and variables_in_use."""
+        identity: object
+        cvar: object
+        variable: object
         preferred: dict[object, CVariable] = {}
         for cvar in getattr(self.codegen.cfunc, "arg_list", ()) or ():
             if not isinstance(cvar, CVariable):
@@ -5155,10 +5679,14 @@ class _ApplyRewritesRun8616:
             self._prefer_stack_cvar_8616(preferred, variable, cvar)
         return preferred
 
+    @cython.ccall
     def _prefer_stack_cvar_8616(
-        self, preferred: dict[object, CVariable], variable: object, cvar: CVariable
+        self, preferred: object, variable: object, cvar: CVariable
     ) -> None:
         """Record a variables_in_use cvar when it beats the current identity best."""
+        current_best: object
+        current_best_var: object
+        identity: object
         if not isinstance(variable, SimStackVariable):
             return
         identity = _machine_bp_stack_binding_identity_8616(
@@ -5181,8 +5709,13 @@ class _ApplyRewritesRun8616:
         if new_score > current_score:
             preferred[identity] = cvar
 
+    @cython.ccall
     def _rename_global_variables_8616(self) -> None:
         """Rename global variables to their COD spec names and types."""
+        target: object
+        vartype: object
+        cvar: object
+        variable: object
         for variable, cvar in getattr(self.codegen.cfunc, "variables_in_use", {}).items():
             if not isinstance(variable, SimMemoryVariable):
                 continue
@@ -5196,18 +5729,21 @@ class _ApplyRewritesRun8616:
             if current and not current.startswith(("g_", "field_")) and current != name:
                 continue
             target = getattr(cvar, "unified_variable", None) or getattr(cvar, "variable", None)
-            if target is not None and getattr(target, "name", None) != name:
+            if target is not None and operator.ne(getattr(target, "name", None), name):
                 target.name = name
                 self.changed = True
-            if variable.name != name:
+            if operator.ne(variable.name, name):
                 variable.name = name
                 self.changed = True
-            if vartype is not None and getattr(cvar, "variable_type", None) != vartype:
+            if vartype is not None and operator.ne(getattr(cvar, "variable_type", None), vartype):
                 cast(Any, cvar).variable_type = vartype
                 self.changed = True
 
+    @cython.ccall
     def transform_stack_aliases(self, node: object) -> object:
         """Rewrite stack-alias expressions to the preferred cvar."""
+        identity: object
+        preferred: object
         if not isinstance(node, CVariable):
             return node
         variable = node.variable
@@ -5221,8 +5757,10 @@ class _ApplyRewritesRun8616:
             return node
         return preferred
 
+    @cython.ccall
     def transform_globals(self, node: object) -> object:
         """Rewrite global memory variables to their COD names."""
+        vartype: object
         if not isinstance(node, CVariable):
             return node
         variable = node.variable
@@ -5237,7 +5775,7 @@ class _ApplyRewritesRun8616:
         current = variable.name
         if current and not current.startswith(("g_", "field_")) and current != name:
             return node
-        if variable.name != name:
+        if operator.ne(variable.name, name):
             variable.name = name
             self.changed = True
         return CVariable(
@@ -5246,8 +5784,13 @@ class _ApplyRewritesRun8616:
             codegen=self.codegen,
         )
 
+    @cython.ccall
     def transform(self, node: object) -> object:
         """Rewrite BP stack-load pairs and remaining stack aliases."""
+        direct_offset: object
+        merged: object
+        stack_cvar: object
+        type_: object
         if not _structured_codegen_node_8616(node):
             return node
         direct_offset = _match_bp_stack_load_8616(node, self.project)
@@ -5262,8 +5805,16 @@ class _ApplyRewritesRun8616:
                 return merged
         return node
 
+    @cython.ccall
     def _transform_bp_load_pair_8616(self, node: CBinaryOp) -> object | None:
         """Resolve an Or/Add of two adjacent BP loads to the low slot's cvar."""
+        high_cvar: object
+        high_var: object
+        low_cvar: object
+        low_offset: object
+        low_var: object
+        high_expr: object
+        low_expr: object
         for low_expr, high_expr in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
             low_offset = _match_bp_stack_load_8616(low_expr, self.project)
             if low_offset is None:
@@ -5271,7 +5822,7 @@ class _ApplyRewritesRun8616:
             high_offset = _match_bp_stack_load_8616(high_expr, self.project)
             if not isinstance(high_offset, int):
                 continue
-            if high_offset != low_offset + 1:
+            if operator.ne(high_offset, low_offset + 1):
                 continue
             low_cvar = self.stack_vars_by_offset.get(low_offset)
             high_cvar = self.stack_vars_by_offset.get(high_offset)
@@ -5286,13 +5837,17 @@ class _ApplyRewritesRun8616:
         return None
 
 
-def _apply_annotation_rewrites_8616(project: Any, codegen: Any, stack_vars_by_offset: dict[int, CVariable], global_spec_for: Callable[[int], tuple[str | None, object | None]], resolve_stack_cvar: Callable[[int], object | None], materialize_stack_cvar: Callable[[int, object | None], object | None], stack_candidate_score: Callable[..., tuple[int, int, int, int, int]]) -> bool:
+@cython.ccall
+def _apply_annotation_rewrites_8616(project: Any, codegen: Any, stack_vars_by_offset: object, global_spec_for: Callable[[int], tuple[str | None, object | None]], resolve_stack_cvar: Callable[[int], object | None], materialize_stack_cvar: Callable[[int, object | None], object | None], stack_candidate_score: Callable[..., tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong, cython.longlong]]) -> cython.bint:
     return _ApplyRewritesRun8616(project=project, codegen=codegen, stack_vars_by_offset=stack_vars_by_offset, global_spec_for=global_spec_for, resolve_stack_cvar=resolve_stack_cvar, materialize_stack_cvar=materialize_stack_cvar, stack_candidate_score=stack_candidate_score).run_8616()
 
 
+@cython.ccall
 def _apply_helper_signature_annotation_8616(
-    project: Any, codegen: Any, func_addr: int, func: Any
-) -> tuple[bool, object | None]:
+    project: Any, codegen: Any, func_addr: cython.longlong, func: object
+) -> tuple[cython.bint, object | None]:
+    func_name: object
+    helper_decl: object
     changed = False
     func_name = getattr(func, "name", None)
     if isinstance(func_name, str) and func_name.startswith("_") and not func_name.startswith("__"):
@@ -5302,12 +5857,12 @@ def _apply_helper_signature_annotation_8616(
             and stripped_name
             and preferred_known_helper_signature_decl(func_name) is not None
             and preferred_known_helper_signature_decl(stripped_name) is not None
-            and getattr(func, "name", None) != stripped_name
+            and operator.ne(getattr(func, "name", None), stripped_name)
         ):
             func.name = stripped_name
             if (
                 getattr(codegen, "cfunc", None) is not None
-                and getattr(codegen.cfunc, "name", None) != stripped_name
+                and operator.ne(getattr(codegen.cfunc, "name", None), stripped_name)
             ):
                 codegen.cfunc.name = stripped_name
             changed = True
@@ -5333,8 +5888,13 @@ def _apply_helper_signature_annotation_8616(
     return True, func
 
 
+@cython.ccall
 def _sync_helper_prototype_arg_names_8616(codegen: Any, func: Any) -> None:
     """Sync codegen arg names from a freshly annotated helper prototype."""
+    unified: object
+    variable: object
+    cvar: object
+    index: object
     prototype_arg_names = tuple(getattr(func.prototype, "arg_names", ()) or ())
     for index, cvar in enumerate(getattr(codegen.cfunc, "arg_list", ()) or ()):
         if index >= len(prototype_arg_names):
@@ -5344,24 +5904,29 @@ def _sync_helper_prototype_arg_names_8616(codegen: Any, func: Any) -> None:
             continue
         variable = getattr(cvar, "variable", None)
         unified = getattr(cvar, "unified_variable", None)
-        if variable is not None and getattr(variable, "name", None) != arg_name:
+        if variable is not None and operator.ne(getattr(variable, "name", None), arg_name):
             variable.name = arg_name
-        if unified is not None and getattr(unified, "name", None) != arg_name:
+        if unified is not None and operator.ne(getattr(unified, "name", None), arg_name):
             unified.name = arg_name
-        if getattr(cvar, "name", None) != arg_name:
+        if operator.ne(getattr(cvar, "name", None), arg_name):
             cvar.name = arg_name
 
 
-def _prune_unused_unnamed_memory_declarations_8616(codegen: Any) -> bool:
+@cython.ccall
+def _prune_unused_unnamed_memory_declarations_8616(codegen: Any) -> cython.bint:
     if getattr(codegen, "cfunc", None) is None:
         return False
     used_variables = _collect_used_variable_ids_8616(codegen.cfunc.statements)
     return _del_unused_global_memory_vars_8616(codegen.cfunc.variables_in_use, used_variables)
 
 
-def _collect_used_variable_ids_8616(statements: object) -> set[int]:
+@cython.ccall
+def _collect_used_variable_ids_8616(statements: object) -> object:
     """Collect ids of every variable/unified-variable referenced by the body."""
-    used_variables: set[int] = set()
+    unified: object
+    variable: object
+    node: object
+    used_variables: set[cython.longlong] = set()
     for node in _iter_c_nodes_deep_8616(statements):
         if not isinstance(node, CVariable):
             continue
@@ -5374,8 +5939,11 @@ def _collect_used_variable_ids_8616(statements: object) -> set[int]:
     return used_variables
 
 
-def _del_unused_global_memory_vars_8616(variables_in_use: object, used_variables: set[int]) -> bool:
+@cython.ccall
+def _del_unused_global_memory_vars_8616(variables_in_use: object, used_variables: object) -> cython.bint:
     """Delete g_-named memory variables never referenced by the body."""
+    unified: object
+    variable: object
     if not isinstance(variables_in_use, dict):
         return False
     changed = False
@@ -5396,33 +5964,38 @@ def _del_unused_global_memory_vars_8616(variables_in_use: object, used_variables
     return changed
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _PruneFlagAssignRun8616:
     """Run state for _prune_unused_flag_assignments_8616."""
 
     codegen: Any
     project: Any
-    changed: bool = field(init=False)
+    changed: cython.bint = field(init=False)
     flags_offset: object = field(init=False)
-    used_registers: set[int] = field(init=False)
-    used_variables: set[int] = field(init=False)
+    used_registers: object = field(init=False)
+    used_variables: object = field(init=False)
 
-    def run_8616(self) -> bool:
+    @cython.ccall
+    def run_8616(self) -> cython.bint:
         """Run the unused-flag-assignment prune pass."""
         if getattr(self.codegen, "cfunc", None) is None:
             return False
         self.flags_offset = self.project.arch.registers.get("flags", (None, None))[0]
         if self.flags_offset is None:
             return False
-        self.used_registers: set[int] = set()
-        self.used_variables: set[int] = set()
+        self.used_registers: set[cython.longlong] = set()
+        self.used_variables: set[cython.longlong] = set()
         self.collect_reads(self.codegen.cfunc.statements)
         self.changed = False
         self.visit(self.codegen.cfunc.statements)
         return self.changed
 
-    def collect_reads(self, node: object, *, assignment_lhs: bool = False) -> None:
+    @cython.ccall
+    def collect_reads(self, node: object, *, assignment_lhs: cython.bint = False) -> None:
         """Collect variable and register reads under one structured node."""
+        child: object
+        lhs: object
+        attr: object
         if not _structured_codegen_node_8616(node):
             return
         if isinstance(node, CVariable):
@@ -5453,8 +6026,11 @@ class _PruneFlagAssignRun8616:
             self._collect_seq_reads_8616(getattr(node, attr, None))
         self._collect_pair_reads_8616(getattr(node, "condition_and_nodes", None))
 
+    @cython.ccall
     def _collect_seq_reads_8616(self, seq: Any) -> None:
         """Collect reads from a child sequence, including nested tuples."""
+        item: object
+        subitem: object
         if not seq:
             return
         for item in seq:
@@ -5465,8 +6041,11 @@ class _PruneFlagAssignRun8616:
                     if _structured_codegen_node_8616(subitem):
                         self.collect_reads(subitem)
 
+    @cython.ccall
     def _collect_pair_reads_8616(self, pairs: Any) -> None:
         """Collect reads from condition/body pairs."""
+        body: object
+        cond: object
         if not pairs:
             return
         for cond, body in pairs:
@@ -5475,8 +6054,11 @@ class _PruneFlagAssignRun8616:
             if _structured_codegen_node_8616(body):
                 self.collect_reads(body)
 
+    @cython.ccall
     def _record_cvar_reads_8616(self, node: CVariable) -> None:
         """Record the variable and register reads carried by one CVariable."""
+        unified: object
+        variable: object
         variable = node.variable
         if variable is not None:
             self.used_variables.add(id(variable))
@@ -5488,8 +6070,16 @@ class _PruneFlagAssignRun8616:
             if isinstance(unified, SimRegisterVariable) and getattr(unified, "reg", None) is not None:
                 self.used_registers.add(unified.reg)
 
+    @cython.ccall
     def visit(self, node: object) -> None:
         """Prune unused flag assignments under one structured node."""
+        child: object
+        pairs: object
+        variable: object
+        _cond: object
+        attr: object
+        body: object
+        stmt: object
         if isinstance(node, CStatements):
             new_statements = []
             for stmt in node.statements:
@@ -5498,7 +6088,7 @@ class _PruneFlagAssignRun8616:
                     variable = getattr(stmt.lhs, "variable", None)
                     if (
                         isinstance(variable, SimRegisterVariable)
-                        and getattr(variable, "reg", None) == self.flags_offset
+                        and operator.eq(getattr(variable, "reg", None), self.flags_offset)
                         and id(variable) not in self.used_variables
                         and getattr(variable, "reg", None) not in self.used_registers
                     ):
@@ -5519,17 +6109,21 @@ class _PruneFlagAssignRun8616:
                     self.visit(body)
 
 
-def _prune_unused_flag_assignments_8616(project: Any, codegen: Any) -> bool:
+@cython.ccall
+def _prune_unused_flag_assignments_8616(project: Any, codegen: Any) -> cython.bint:
     return _PruneFlagAssignRun8616(project=project, codegen=codegen).run_8616()
 
 
-def _c_expr_uses_register_8616(node: object, reg_offset: int) -> bool:
+@cython.ccall
+def _c_expr_uses_register_8616(node: object, reg_offset: cython.longlong) -> cython.bint:
     """Return whether any structured node under ``node`` reads ``reg_offset``."""
+    child: object
+    attr: object
     if not _structured_codegen_node_8616(node):
         return False
     if isinstance(node, CVariable):
         variable = node.variable
-        return isinstance(variable, SimRegisterVariable) and getattr(variable, "reg", None) == reg_offset
+        return isinstance(variable, SimRegisterVariable) and operator.eq(getattr(variable, "reg", None), reg_offset)
 
     for attr in (
         "lhs",
@@ -5555,8 +6149,11 @@ def _c_expr_uses_register_8616(node: object, reg_offset: int) -> bool:
     return _pairs_use_register_8616(getattr(node, "condition_and_nodes", None), reg_offset)
 
 
-def _seq_uses_register_8616(seq: Any, reg_offset: int) -> bool:
+@cython.ccall
+def _seq_uses_register_8616(seq: Any, reg_offset: cython.longlong) -> cython.bint:
     """Scan a child sequence, including nested tuples, for a register use."""
+    item: object
+    subitem: object
     if not seq:
         return False
     for item in seq:
@@ -5569,8 +6166,11 @@ def _seq_uses_register_8616(seq: Any, reg_offset: int) -> bool:
     return False
 
 
-def _pairs_use_register_8616(pairs: Any, reg_offset: int) -> bool:
+@cython.ccall
+def _pairs_use_register_8616(pairs: Any, reg_offset: cython.longlong) -> cython.bint:
     """Scan condition/body pairs for a register use."""
+    body: object
+    cond: object
     if not pairs:
         return False
     for cond, body in pairs:
@@ -5581,8 +6181,11 @@ def _pairs_use_register_8616(pairs: Any, reg_offset: int) -> bool:
     return False
 
 
-def _stmt_reads_reg_before_write_8616(stmt: object, reg_offset: int) -> tuple[bool, bool]:
+@cython.ccall
+def _stmt_reads_reg_before_write_8616(stmt: object, reg_offset: cython.longlong) -> object:
     """Return (reads-before-write, writes) for one structured statement."""
+    body: object
+    cond: object
     if not _structured_codegen_node_8616(stmt):
         return False, False
 
@@ -5591,7 +6194,7 @@ def _stmt_reads_reg_before_write_8616(stmt: object, reg_offset: int) -> tuple[bo
         writes = (
             isinstance(lhs, CVariable)
             and isinstance(getattr(lhs, "variable", None), SimRegisterVariable)
-            and getattr(lhs.variable, "reg", None) == reg_offset
+            and operator.eq(getattr(lhs.variable, "reg", None), reg_offset)
         )
         reads = _c_expr_uses_register_8616(stmt.rhs, reg_offset)
         return reads, writes
@@ -5614,8 +6217,10 @@ def _stmt_reads_reg_before_write_8616(stmt: object, reg_offset: int) -> tuple[bo
     return _c_expr_uses_register_8616(stmt, reg_offset), False
 
 
-def _stmt_list_reads_reg_8616(statements: Iterable[object], reg_offset: int) -> tuple[bool, bool]:
+@cython.ccall
+def _stmt_list_reads_reg_8616(statements: Iterable[object], reg_offset: cython.longlong) -> tuple[cython.bint, cython.bint]:
     """Scan an ordered statement list for a read-before-write of the register."""
+    substmt: object
     for substmt in statements:
         reads, writes = _stmt_reads_reg_before_write_8616(substmt, reg_offset)
         if reads:
@@ -5625,8 +6230,12 @@ def _stmt_list_reads_reg_8616(statements: Iterable[object], reg_offset: int) -> 
     return False, False
 
 
-def _ifelse_reads_reg_8616(stmt: object, reg_offset: int) -> tuple[bool, bool]:
+@cython.ccall
+def _ifelse_reads_reg_8616(stmt: object, reg_offset: cython.longlong) -> tuple[cython.bint, cython.bint]:
     """Scan condition/body pairs then the else node for a read-before-write."""
+    else_node: object
+    body: object
+    cond: object
     cond_nodes = getattr(stmt, "condition_and_nodes", None) or ()
     for cond, body in cond_nodes:
         if _c_expr_uses_register_8616(cond, reg_offset):
@@ -5642,7 +6251,9 @@ def _ifelse_reads_reg_8616(stmt: object, reg_offset: int) -> tuple[bool, bool]:
     return False, False
 
 
-def _prune_overwritten_flag_assignments_8616(project: Any, codegen: Any) -> bool:
+@cython.ccall
+def _prune_overwritten_flag_assignments_8616(project: Any, codegen: Any) -> cython.bint:
+    flags_offset: object
     if getattr(codegen, "cfunc", None) is None:
         return False
 
@@ -5653,22 +6264,32 @@ def _prune_overwritten_flag_assignments_8616(project: Any, codegen: Any) -> bool
     return _visit_overwritten_flag_node_8616(codegen.cfunc.statements, codegen, flags_offset)
 
 
+@cython.ccall
 def _is_dead_flag_assignment_8616(
-    stmt: object, statements: list[object], idx: int, codegen: Any, flags_offset: int
-) -> bool:
+    stmt: object, statements: object, idx: cython.longlong, codegen: Any, flags_offset: cython.longlong
+) -> cython.bint:
     """Check a flag write has no subsequent read in the statement remainder."""
+    variable: object
     if not (isinstance(stmt, CAssignment) and isinstance(stmt.lhs, CVariable)):
         return False
     variable = getattr(stmt.lhs, "variable", None)
-    if not (isinstance(variable, SimRegisterVariable) and getattr(variable, "reg", None) == flags_offset):
+    if not (isinstance(variable, SimRegisterVariable) and operator.eq(getattr(variable, "reg", None), flags_offset)):
         return False
     remainder = CStatements(statements[idx + 1 :], codegen=codegen)
     reads, _writes = _stmt_reads_reg_before_write_8616(remainder, flags_offset)
     return not reads
 
 
-def _visit_overwritten_flag_node_8616(node: object, codegen: Any, flags_offset: int) -> bool:
+@cython.ccall
+def _visit_overwritten_flag_node_8616(node: object, codegen: Any, flags_offset: cython.longlong) -> cython.bint:
     """Prune overwritten flag assignments under one node; return changed."""
+    child: object
+    pairs: object
+    _cond: object
+    attr: object
+    body: object
+    idx: object
+    stmt: object
     if isinstance(node, CStatements):
         new_statements = []
         statements = list(node.statements)

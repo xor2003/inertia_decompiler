@@ -99,6 +99,7 @@ def _feasible(
     apply_call: ApplyCall | None = None,
     repeat_consult_noop: Callable[[IRBlock], bool] | None = None,
     call_replay_unobserved: Callable[[IRInstr], bool] | None = None,
+    captured_terminal_call_unobserved: Callable[[IRInstr], bool] | None = None,
     call_cut: object | None = None,
     work: int = 10000,
 ) -> edge.Real16EdgeFeasibility8616:
@@ -110,6 +111,8 @@ def _feasible(
         kwargs["repeat_consult_noop"] = repeat_consult_noop
     if call_replay_unobserved is not None:
         kwargs["call_replay_unobserved"] = call_replay_unobserved
+    if captured_terminal_call_unobserved is not None:
+        kwargs["captured_terminal_call_unobserved"] = captured_terminal_call_unobserved
     if call_cut is not None:
         kwargs["call_cut"] = call_cut
     return edge.invocation_feasible_scope_8616(
@@ -210,6 +213,85 @@ def test_call_cut_block_keeps_obligatory_replay() -> None:
     assert base_calls.count(17) >= 2
 
 
+@pytest.mark.parametrize("confined", [False, True])
+def test_captured_terminal_call_can_omit_only_confined_discarded_effect(confined: bool) -> None:
+    """Keep fresh cut capture while an explicit verdict governs its unused CALL exit."""
+    artifact = _artifact()
+    block = artifact.blocks[1]
+    cut = edge.Real16CallCutRequest8616(artifact, block, len(block.instrs) - 1, block.instrs[-1])
+    baseline_calls: list[int] = []
+    selected_calls: list[int] = []
+    baseline = _feasible(artifact=artifact, apply_call=_recording_call(baseline_calls), call_cut=cut)
+    selected = _feasible(
+        artifact=artifact, apply_call=_recording_call(selected_calls), call_cut=cut,
+        captured_terminal_call_unobserved=lambda _instruction: confined,
+    )
+    _same_result(baseline, selected)
+    assert baseline.call_cut is not None
+    assert selected.call_cut == baseline.call_cut
+    if confined:
+        assert 0 < selected_calls.count(cut.instruction.addr) < baseline_calls.count(cut.instruction.addr)
+    else:
+        assert selected_calls == baseline_calls
+    assert [addr for addr in selected_calls if addr != cut.instruction.addr] == [
+        addr for addr in baseline_calls if addr != cut.instruction.addr
+    ]
+
+
+@pytest.mark.parametrize("foreign", [False, True])
+def test_invalid_cut_cannot_omit_a_call_effect(foreign: bool) -> None:
+    """Nonterminal or foreign requests cannot earn the post-capture permission."""
+    artifact = _artifact()
+    block = artifact.blocks[1 if foreign else 2]
+    index = len(block.instrs) - 1 if foreign else 0
+    request = edge.Real16CallCutRequest8616(
+        _artifact() if foreign else artifact, block, index, block.instrs[index],
+    )
+    baseline_calls: list[int] = []
+    selected_calls: list[int] = []
+    verdict_calls: list[int] = []
+
+    def verdict(instruction: IRInstr) -> bool:
+        verdict_calls.append(instruction.addr)
+        return True
+
+    baseline = _feasible(artifact=artifact, apply_call=_recording_call(baseline_calls), call_cut=request)
+    selected = _feasible(
+        artifact=artifact, apply_call=_recording_call(selected_calls), call_cut=request,
+        captured_terminal_call_unobserved=verdict,
+    )
+    _same_result(baseline, selected)
+    assert baseline.call_cut is selected.call_cut is None
+    assert baseline_calls == selected_calls
+    assert not verdict_calls
+
+
+@pytest.mark.parametrize("tainted", [False, True])
+def test_failed_fresh_capture_cannot_reuse_an_earlier_cut_for_omission(tainted: bool) -> None:
+    """A prior snapshot never substitutes for exhausted or tainted fresh capture."""
+    artifact = _artifact()
+    block = artifact.blocks[1]
+    instruction = block.instrs[-1]
+    request = edge.Real16CallCutRequest8616(artifact, block, len(block.instrs) - 1, instruction)
+    memory = PathMemory8616()
+    earlier = edge._capture_call_cut_8616(request, {}, memory, [10000])
+    assert earlier is not None
+    states = [earlier]
+    verdict_calls: list[int] = []
+
+    def verdict(row: IRInstr) -> bool:
+        verdict_calls.append(row.addr)
+        return True
+
+    if tainted:
+        memory.taint()
+    assert not edge._observe_snapshot_cut_8616(
+        block, instruction, request, {}, memory, [10000 if tainted else 0], states, verdict,
+    )
+    assert states == [earlier]
+    assert not verdict_calls
+
+
 def test_no_hook_call_only_blocks_still_omit() -> None:
     """Without apply_call the CALL row has no consult at all: still confined."""
     baseline = _feasible()
@@ -283,11 +365,16 @@ def test_call_noop_rebound_producer_declines_per_call(
     checked = [
         (owner, "_feasibility_call_handler_8616"),
         (owner, "_feasibility_call_rows_8616"),
+        (owner, "_callee_selected_native_blocks_8616"),
         (owner, "interrupt_call_vector_8616"),
         (edge, "interrupt_call_vector_8616"),
         (edge, "_ordinary_call_target_8616"),
         (edge, "_kb_snapshot_observed_8616"),
         (edge, "_kb_block_exit_8616"),
+        (edge, "_observe_snapshot_cut_8616"),
+        (edge, "_captured_terminal_call_unobserved_8616"),
+        (edge, "_observe_call_cut_8616"),
+        (edge, "_capture_call_cut_8616"),
         (edge, "_kb_transfer_effect_8616"),
     ]
     for module, name in checked:

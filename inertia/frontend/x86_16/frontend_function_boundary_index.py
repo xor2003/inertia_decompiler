@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Reuse exact function boundaries across consumers of one binary image.
 
 Layer: Frontend.
@@ -7,6 +8,8 @@ facts only; it does not infer signatures, aliases, types, or structured flow.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from typing import Protocol, cast
@@ -15,6 +18,8 @@ from .frontend_function_boundary import (
     ExactFunctionRangeBoundary8616,
     exact_function_range_boundary_8616,
 )
+import dataclasses
+import operator
 
 __all__ = [
     "ExactFunctionRangeInventory8616",
@@ -23,12 +28,12 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ExactFunctionRangeInventory8616:
     """Closed Frontend boundaries for one exact immutable range inventory."""
 
-    ranges: tuple[tuple[int, int], ...]
-    boundaries: tuple[ExactFunctionRangeBoundary8616, ...] = field(
+    ranges: object
+    boundaries: object = field(
         compare=False,
     )
 
@@ -36,16 +41,13 @@ class ExactFunctionRangeInventory8616:
 class _ProjectSurface8616(Protocol):
     """Dynamic angr project plus the owned Frontend inventory cache."""
 
-    _inertia_exact_function_range_inventories_8616: dict[
-        tuple[tuple[int, int], ...],
-        ExactFunctionRangeInventory8616,
-    ]
+    _inertia_exact_function_range_inventories_8616: object
 
 
 class _MemorySurface8616(Protocol):
     """Third-party loader memory used to prove one padding alias."""
 
-    def load(self, addr: int, size: int) -> bytes | bytearray | memoryview:
+    def load(self, addr: cython.longlong, size: cython.longlong) -> object:
         """Load exact binary bytes from one mapped range."""
         ...
 
@@ -53,8 +55,8 @@ class _MemorySurface8616(Protocol):
 class _MainObjectSurface8616(Protocol):
     """Inclusive loaded-image bounds supplied by the third-party loader."""
 
-    min_addr: int
-    max_addr: int
+    min_addr: cython.longlong
+    max_addr: cython.longlong
 
 
 class _LoaderSurface8616(Protocol):
@@ -70,7 +72,8 @@ class _BoundaryProjectSurface8616(Protocol):
     loader: _LoaderSurface8616
 
 
-def _range_is_inside_mapped_image_8616(project: object, start: int, end: int) -> bool:
+@cython.ccall
+def _range_is_inside_mapped_image_8616(project: object, start: cython.longlong, end: cython.longlong) -> cython.bint:
     """Return whether a range is contained by authoritative loader bounds.
 
     Synthetic tests and compatibility projects may not expose a main object; in
@@ -89,9 +92,10 @@ def _range_is_inside_mapped_image_8616(project: object, start: int, end: int) ->
     return min_addr <= start < end <= max_addr + 1
 
 
+@cython.ccall
 def _inventory_cache_8616(
     project: object,
-) -> dict[tuple[tuple[int, int], ...], ExactFunctionRangeInventory8616]:
+) -> object:
     """Return the owned cache at the dynamic third-party project boundary."""
     surface = cast(_ProjectSurface8616, project)
     try:
@@ -106,9 +110,10 @@ def _inventory_cache_8616(
 
 def exact_function_range_inventory_8616(
     project: object,
-    ranges: tuple[tuple[int, int], ...],
+    ranges: object,
 ) -> ExactFunctionRangeInventory8616:
     """Build each exact boundary once for one immutable binary range inventory."""
+    cached: object
     cache = _inventory_cache_8616(project)
     cached = cache.get(ranges)
     if cached is not None:
@@ -116,7 +121,7 @@ def exact_function_range_inventory_8616(
 
     boundaries = tuple(
         boundary
-        for start, end in ranges
+        for start, end in iter(ranges)
         if _range_is_inside_mapped_image_8616(project, start, end)
         if (boundary := exact_function_range_boundary_8616(project, start, end))
         is not None
@@ -132,10 +137,10 @@ def exact_function_range_inventory_8616(
 def _boundary_has_callable_entry_8616(
     project: object,
     boundary: ExactFunctionRangeBoundary8616,
-    target_addr: int,
-) -> bool:
+    target_addr: cython.longlong,
+) -> cython.bint:
     """Prove that a range start reaches one framed entry through padding only."""
-    if target_addr == boundary.addr:
+    if operator.eq(target_addr, boundary.addr):
         return True
     prefix_size = target_addr - boundary.addr
     if not 0 < prefix_size <= 0x80:
@@ -147,22 +152,22 @@ def _boundary_has_callable_entry_8616(
     except (AttributeError, KeyError, TypeError, ValueError):
         return False
     return (
-        len(prefix) == prefix_size
-        and all(byte in {0x00, 0x90, 0xCC} for byte in prefix)
+        operator.eq(len(prefix), prefix_size)
+        and all(byte in {0x00, 0x90, 0xCC} for byte in iter(prefix))
         and prologue in {b"\x55\x8b\xec", b"\x55\x89\xe5"}
     )
 
 
 def exact_function_entry_boundary_8616(
     project: object,
-    target_addr: int,
-    ranges: tuple[tuple[int, int], ...],
+    target_addr: cython.longlong,
+    ranges: object,
 ) -> ExactFunctionRangeBoundary8616 | None:
     """Resolve one exact range boundary for a direct callable entry or alias."""
     inventory = exact_function_range_inventory_8616(project, ranges)
     matches = tuple(
         boundary
-        for boundary in inventory.boundaries
+        for boundary in iter(inventory.boundaries)
         if _boundary_has_callable_entry_8616(project, boundary, target_addr)
     )
     return matches[0] if len(matches) == 1 else None

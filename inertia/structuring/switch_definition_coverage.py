@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Check SSA definition survival before replacing a switch decision ladder.
 
 Layer: Structuring.
@@ -12,28 +13,33 @@ Do not infer replacement values or repair statements in Rewrite or the CLI.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from angr import ailment
+import dataclasses
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _VariableInventory8616:
     """Exact SSA IDs defined and read by a bounded pre-codegen surface."""
 
-    definitions: set[int] = field(default_factory=set)
-    reads: set[int] = field(default_factory=set)
+    definitions: object = field(default_factory=set)
+    reads: object = field(default_factory=set)
 
+    @cython.ccall
     def observe_read(
-        self, expr_idx: int, expr: ailment.Expr.Expression, stmt_idx: int,
+        self, expr_idx: cython.longlong, expr: ailment.Expr.Expression, stmt_idx: cython.longlong,
         stmt: ailment.Stmt.Statement | None, block: ailment.Block | None,
     ) -> None:
         """Record an atom through angr's standard AIL expression visitor."""
         if isinstance(expr, ailment.Expr.VirtualVariable):
             self.reads.add(expr.varid)
 
+    @cython.ccall
     def statement(self, statement: ailment.Stmt.Statement, walker: ailment.AILBlockViewer) -> None:
         """Separate assignment destinations from uses of their source values."""
         if isinstance(statement, ailment.Stmt.Assignment) and isinstance(
@@ -45,8 +51,9 @@ class _VariableInventory8616:
             walker.walk_statement(statement)
 
 
+@cython.ccall
 def _inventory_8616(
-    roots: tuple[object, ...],
+    roots: object,
     children: Callable[[object], tuple[object, ...]],
     *,
     excluded: object | None = None,
@@ -56,11 +63,17 @@ def _inventory_8616(
     Dynamic boundary: attributes below belong to third-party angr structurer nodes.
     The caller supplies its authoritative child traversal, including cases.
     """
+    arms: object
+    expression: object
+    node: object
+    _body: object
+    name: object
+    statement: object
     result = _VariableInventory8616()
     walker = ailment.AILBlockViewer()
     walker.expr_handlers[ailment.Expr.VirtualVariable] = result.observe_read
     pending = list(roots)
-    visited: set[int] = set()
+    visited: set[cython.longlong] = set()
     while pending:
         node = pending.pop()
         if node is excluded or id(node) in visited:
@@ -84,13 +97,14 @@ def _inventory_8616(
     return result
 
 
+@cython.ccall
 def missing_switch_definition_ids_8616(
     sequence: object,
     replaced: object,
-    retained: tuple[object, ...],
+    retained: object,
     *,
     children: Callable[[object], tuple[object, ...]],
-) -> tuple[int, ...]:
+) -> tuple[cython.longlong, ...]:
     """Return discarded SSA definitions still referenced after replacement.
 
     Include the surrounding function, not just cases: loop tails and shared
@@ -98,6 +112,6 @@ def missing_switch_definition_ids_8616(
     replaced subtree are not invented or reclassified by this check.
     """
     source = _inventory_8616((replaced,), children)
-    surviving = _inventory_8616((sequence, *retained), children, excluded=replaced)
+    surviving = _inventory_8616((sequence, ) + tuple(retained), children, excluded=replaced)
     removed = source.definitions - surviving.definitions
     return tuple(sorted(removed & surviving.reads))

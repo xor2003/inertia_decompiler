@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Resolve stored call-return operands for structured early exits.
 
 Layer: Structuring.
@@ -10,6 +11,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import cast
 
@@ -30,18 +33,21 @@ from inertia.lowering.stack_variable_coordinates import (
 )
 
 from .condition_lowering import lower_ir_value_to_c_expr_8616
+import operator
 
 
-def _canonical_stack_offset_8616(offset: int) -> int:
+@cython.ccall
+def _canonical_stack_offset_8616(offset: cython.longlong) -> cython.longlong:
     """Normalize one 16-bit BP displacement to its signed identity."""
     normalized = offset & 0xFFFF
     return normalized - 0x10000 if normalized >= 0x8000 else normalized
 
 
+@cython.ccall
 def _matches_stored_return_cvar_8616(
     operand: object,
     evidence: StoredCallReturnConditionEvidence8616,
-) -> bool:
+) -> cython.bint:
     """Match one active C stack object to the exact Lowering-owned store."""
     if not isinstance(operand, CVariable) or not isinstance(operand.variable, SimStackVariable):
         return False
@@ -50,9 +56,8 @@ def _matches_stored_return_cvar_8616(
     return (
         variable.base == "bp"
         and isinstance(variable.offset, int)
-        and _canonical_stack_offset_8616(variable.offset)
-        == _canonical_stack_offset_8616(store.dst_offset)
-        and int(variable.size) == store.width
+        and operator.eq(_canonical_stack_offset_8616(variable.offset), _canonical_stack_offset_8616(store.dst_offset))
+        and operator.eq(int(variable.size), store.width)
     )
 
 
@@ -64,17 +69,17 @@ def stored_return_operand_8616(
 ) -> CVariable | None:
     """Return the exact active stack object from the inverted typed guard."""
     expected_op = "CmpNE" if evidence.kind is StoredCallReturnConditionKind8616.ZERO else "CmpEQ"
-    if not isinstance(condition, CBinaryOp) or condition.op != expected_op:
+    if not isinstance(condition, CBinaryOp) or operator.ne(condition.op, expected_op):
         return None
     operands = (condition.lhs, condition.rhs)
     constants = tuple(
-        operand for operand in operands if isinstance(operand, CConstant) and operand.value == 0
+        operand for operand in iter(operands) if isinstance(operand, CConstant) and operand.value == 0
     )
     if len(constants) != 1:
         return None
     direct = tuple(
         operand
-        for operand in operands
+        for operand in iter(operands)
         if _matches_stored_return_cvar_8616(operand, evidence)
     )
     if len(direct) == 1:
@@ -88,10 +93,10 @@ def stored_return_operand_8616(
         return projected
     lowered = tuple(
         lower_ir_value_to_c_expr_8616(value, project, codegen)
-        for value in (evidence.condition.lhs, evidence.condition.rhs)
+        for value in iter((evidence.condition.lhs, evidence.condition.rhs))
         if isinstance(value, IRValue)
     )
     matches = tuple(
-        value for value in lowered if _matches_stored_return_cvar_8616(value, evidence)
+        value for value in iter(lowered) if _matches_stored_return_cvar_8616(value, evidence)
     )
     return cast(CVariable, matches[0]) if len(matches) == 1 else None

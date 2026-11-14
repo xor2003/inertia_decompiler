@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Recover exact storage facts for direct multi-register call results.
 
 Layer: Semantics.
@@ -10,6 +11,8 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -26,6 +29,8 @@ from capstone.x86_const import (
     X86_REG_DS,
     X86_REG_DX,
 )
+import dataclasses
+import operator
 
 
 class DirectCallResultMemoryView8616(Protocol):
@@ -95,32 +100,34 @@ class DirectCallResultInstructionView8616(Protocol):
         ...
 
     @property
-    def operands(self) -> tuple[DirectCallResultOperandView8616, ...]:
+    def operands(self) -> object:
         """Return immutable decoded operand snapshots."""
         ...
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectCallResultStorageFact8616:
     """Proof that one direct call result occupies a four-byte DS object."""
 
-    offset: int
-    width: int
-    source_call_target: int
-    source_call_ins_addr: int
-    low_store_ins_addr: int
-    high_store_ins_addr: int
+    offset: cython.longlong
+    width: cython.longlong
+    source_call_target: cython.longlong
+    source_call_ins_addr: cython.longlong
+    low_store_ins_addr: cython.longlong
+    high_store_ins_addr: cython.longlong
 
 
+@cython.ccall
 def _direct_call_target_8616(instruction: DirectCallResultInstructionView8616) -> int | None:
     """Return an exact immediate target for one direct call instruction."""
     if instruction.instruction_id not in {X86_INS_CALL, X86_INS_LCALL} or not instruction.operands:
         return None
     target = instruction.operands[0]
-    return target.immediate if target.kind == X86_OP_IMM and isinstance(target.immediate, int) else None
+    return target.immediate if operator.eq(target.kind, X86_OP_IMM) and isinstance(target.immediate, int) else None
 
 
-def _flat_memory_8616(memory: DirectCallResultMemoryView8616 | None) -> bool:
+@cython.ccall
+def _flat_memory_8616(memory: object) -> cython.bint:
     """Return whether the memory operand is a flat DS/absolute address."""
     return (
         memory is not None
@@ -131,28 +138,31 @@ def _flat_memory_8616(memory: DirectCallResultMemoryView8616 | None) -> bool:
     )
 
 
+@cython.ccall
 def _direct_ds_word_store_8616(
     instruction: DirectCallResultInstructionView8616,
-    source_register: int,
+    source_register: cython.longlong,
 ) -> int | None:
     """Return the exact DS offset stored from one required word register."""
-    if instruction.instruction_id != X86_INS_MOV or len(instruction.operands) < 2:
+    memory: object
+    if operator.ne(instruction.instruction_id, X86_INS_MOV) or len(instruction.operands) < 2:
         return None
-    destination, source = instruction.operands[:2]
+    destination, source = tuple(instruction.operands[:2])
     memory = destination.memory
-    if destination.kind != X86_OP_MEM or destination.size != 2 or not _flat_memory_8616(memory):
+    if operator.ne(destination.kind, X86_OP_MEM) or destination.size != 2 or not _flat_memory_8616(memory):
         return None
-    if source.kind != X86_OP_REG or source.register != source_register or source.size != 2:
+    if operator.ne(source.kind, X86_OP_REG) or operator.ne(source.register, source_register) or source.size != 2:
         return None
     assert memory is not None and isinstance(memory.displacement, int)
     return memory.displacement & 0xFFFF
 
 
+@cython.ccall
 def _ordered_int_addresses_8616(
     call: DirectCallResultInstructionView8616,
     low_store: DirectCallResultInstructionView8616,
     high_store: DirectCallResultInstructionView8616,
-) -> bool:
+) -> cython.bint:
     """Return whether the three sites carry strictly ordered int addresses."""
     return (
         isinstance(call.address, int)
@@ -162,10 +172,17 @@ def _ordered_int_addresses_8616(
     )
 
 
+@cython.ccall
 def recover_direct_call_result_storage_facts_8616(
     instructions: Iterable[DirectCallResultInstructionView8616],
 ) -> tuple[DirectCallResultStorageFact8616, ...]:
     """Classify adjacent CALL, DS:[base]=AX, DS:[base+2]=DX sequences."""
+    high_offset: object
+    low_offset: object
+    target: object
+    call: object
+    high_store: object
+    low_store: object
     ordered = tuple(instructions)
     facts: list[DirectCallResultStorageFact8616] = []
     for call, low_store, high_store in zip(ordered, ordered[1:], ordered[2:], strict=False):
@@ -176,7 +193,7 @@ def recover_direct_call_result_storage_facts_8616(
             target is None
             or low_offset is None
             or high_offset is None
-            or ((low_offset + 2) & 0xFFFF) != high_offset
+            or operator.ne(((low_offset + 2) & 0xFFFF), high_offset)
             or not _ordered_int_addresses_8616(call, low_store, high_store)
         ):
             continue

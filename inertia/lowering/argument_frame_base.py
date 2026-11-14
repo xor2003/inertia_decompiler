@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Derive the proven first stack-argument machine-BP offset for one function.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Any, Protocol, cast
 
@@ -20,6 +23,7 @@ from inertia.alias.segment_stack_restore import (
 from inertia.ir.vex_control_flow import terminal_ret_instruction_addrs_8616
 from inertia.semantics.terminal_return_contract import TerminalReturnFrameKind8616
 from inertia.semantics.terminal_stack_cleanup import terminal_stack_cleanup_at_address_8616
+import operator
 
 __all__ = [
     "FAR_FIRST_ARGUMENT_BP_OFFSET_8616",
@@ -30,8 +34,8 @@ __all__ = [
     "proven_first_argument_machine_bp_offset_at_8616",
 ]
 
-NEAR_FIRST_ARGUMENT_BP_OFFSET_8616: int = 4
-FAR_FIRST_ARGUMENT_BP_OFFSET_8616: int = 6
+NEAR_FIRST_ARGUMENT_BP_OFFSET_8616: cython.longlong = 4
+FAR_FIRST_ARGUMENT_BP_OFFSET_8616: cython.longlong = 6
 _FAR_RETURN_REGISTER_8616 = "cs"
 
 
@@ -42,7 +46,7 @@ class _ArgumentFrameCodegen8616(Protocol):
     _inertia_segment_stack_restore_artifact: object
 
 
-def proven_far_return_frame_8616(codegen: object) -> bool:
+def proven_far_return_frame_8616(codegen: object) -> cython.bint:
     """Return whether the terminal frame is a proven far return.
 
     A ``cs`` stack restore at a block-terminal RET with no in-function save is
@@ -62,15 +66,16 @@ def proven_far_return_frame_8616(codegen: object) -> bool:
     if not terminal_rets:
         return False
     return any(
-        fact.restore_register == _FAR_RETURN_REGISTER_8616
+        operator.eq(fact.restore_register, _FAR_RETURN_REGISTER_8616)
         and fact.saved_instruction_addr is None
         and fact.verdict is SegmentStackRestoreVerdict8616.UNKNOWN_REFUSE
         and fact.restore_instruction_addr in terminal_rets
-        for fact in artifact.facts
+        for fact in iter(artifact.facts)
     )
 
 
-def proven_far_return_frame_at_8616(project: object, function_addr: int) -> bool:
+@cython.ccall
+def proven_far_return_frame_at_8616(project: object, function_addr: cython.longlong) -> cython.bint:
     """Return whether the function at ``function_addr`` ends in a far return.
 
     This is the codegen-free variant used when reasoning about a callee whose
@@ -84,7 +89,8 @@ def proven_far_return_frame_at_8616(project: object, function_addr: int) -> bool
     )
 
 
-def proven_first_argument_machine_bp_offset_8616(codegen: object) -> int:
+@cython.ccall
+def proven_first_argument_machine_bp_offset_8616(codegen: object) -> cython.longlong:
     """Return the machine-BP offset of the first stack argument.
 
     A far frame reserves ``BP+4..+5`` for the caller CS word, so arguments begin
@@ -96,16 +102,18 @@ def proven_first_argument_machine_bp_offset_8616(codegen: object) -> int:
     return NEAR_FIRST_ARGUMENT_BP_OFFSET_8616
 
 
+@cython.ccall
 def proven_first_argument_machine_bp_offset_at_8616(
     project: object,
-    function_addr: int,
-) -> int:
+    function_addr: cython.longlong,
+) -> cython.longlong:
     """Return the machine-BP first-argument base for the function at an address."""
     if proven_far_return_frame_at_8616(project, function_addr):
         return FAR_FIRST_ARGUMENT_BP_OFFSET_8616
     return NEAR_FIRST_ARGUMENT_BP_OFFSET_8616
 
 
+@cython.ccall
 def msc_calling_convention_for_function_8616(project: object, function: object) -> object:
     """Return the proven Microsoft C calling convention for one function.
 
@@ -114,6 +122,7 @@ def msc_calling_convention_for_function_8616(project: object, function: object) 
     at ``BP+6``; every other function keeps the near ``SimCC8616MSCsmall``
     convention rather than guessing a far frame.
     """
+    addr: object
     from inertia.frontend.x86_16.simos_86_16 import SimCC8616MSClarge, SimCC8616MSCsmall
 
     arch = cast(Any, project).arch

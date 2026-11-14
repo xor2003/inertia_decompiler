@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Substitute `(ss << 4) ± BP ± offset` patterns with named stack variables in C output.
 
 Layer: Types/Lowering.
@@ -9,6 +10,7 @@ AGENTS rule: rewrite must NOT do semantic recovery.
 """
 
 from __future__ import annotations
+import cython
 
 import re
 import typing
@@ -18,12 +20,14 @@ from typing import Any
 from .stack_variable_binding import StackVariableBinding
 
 
-def _dynamic_codegen_attr_8616(obj: object, name: str, default: object = None) -> Any:  # noqa: ANN401
+@cython.ccall
+def _dynamic_codegen_attr_8616(obj: object, name: object, default: object = None) -> Any:  # noqa: ANN401
     """Dynamic codegen boundary: read optional stack-binding metadata."""
     return getattr(obj, name, default)
 
 
-def _signed16(value: int) -> int:
+@cython.ccall
+def _signed16(value: cython.longlong) -> cython.longlong:
     """Convert unsigned 16-bit int to signed."""
     if value >= 0x8000:
         return value - 0x10000
@@ -31,14 +35,15 @@ def _signed16(value: int) -> int:
 
 
 def substitute_ss_bp_dereferences_with_variables(
-    c_text: str,
+    c_text: object,
     bindings: Sequence[StackVariableBinding],
-) -> str:
+) -> object:
     """Replace all `(ss << 4) + BP ± offset` patterns with named variables."""
+    binding: object
     if not bindings:
         return c_text
 
-    offset_map: dict[int, str] = {}
+    offset_map: dict[cython.longlong, str] = {}
     for binding in bindings:
         offset_map[binding.bp_offset] = binding.var_name
 
@@ -53,7 +58,7 @@ def substitute_ss_bp_dereferences_with_variables(
         r"(0x[0-9a-fA-F]+|\d+)"
     )
 
-    def replacer(m: re.Match[str]) -> str:
+    def replacer(m: re.Match[str]) -> object:
         sign_str = m.group(1).strip()
         offset_str = m.group(2).strip()
         offset_value = int(offset_str, 16 if offset_str.startswith("0x") else 10)
@@ -79,10 +84,11 @@ def substitute_ss_bp_dereferences_with_variables(
     return result
 
 
+@cython.ccall
 def apply_stack_variable_bindings_to_c_text(
-    c_text: str,
+    c_text: object,
     codegen: object,
-) -> str:
+) -> object:
     """Apply fact-based stack variable bindings to C text."""
     bindings = _dynamic_codegen_attr_8616(codegen, "_inertia_stack_variable_bindings", None)
     if not bindings:

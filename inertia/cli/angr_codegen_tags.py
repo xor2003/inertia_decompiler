@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Normalize third-party structured-codegen tag containers.
 
 Layer: CLI/fallback/reporting.
@@ -7,6 +8,7 @@ all tag entries and does not infer semantic evidence.
 """
 
 from __future__ import annotations
+import cython
 
 from collections.abc import Iterable
 from typing import Protocol, cast
@@ -38,9 +40,9 @@ def normalize_codegen_node_tags_8616(node: object) -> object:
         items = tuple(cast(_TagItems8616, raw_tags).items())
     except (AttributeError, TypeError, ValueError):
         return node
-    if not all(isinstance(key, str) for key, _value in items):
+    if not all(isinstance(key, str) for key, _value in iter(items)):
         return node
-    tagged.tags = {cast(str, key): value for key, value in items}
+    tagged.tags = {cast(str, key): value for key, value in iter(items)}
     return node
 
 

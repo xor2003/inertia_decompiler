@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Install the IR-owned remainder identity at angr's optimization boundary.
 
 Layer: Frontend/IR adapter.
@@ -6,6 +7,7 @@ Other architectures retain their existing optimizer. No rendered-C recovery.
 """
 
 from __future__ import annotations
+import cython
 
 from angr.ailment.block import Block
 from angr.ailment.expression import BinaryOp, Expression

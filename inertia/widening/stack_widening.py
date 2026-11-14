@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Stack and storage widening proofs built from alias facts.
 
 Layer: Widening.
@@ -9,6 +10,8 @@ CLI/reporting evidence.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -30,9 +33,11 @@ from inertia.semantics.alias_query import (
 )
 
 from .register_widening import RegisterWideningCandidate, can_join_adjacent_register_slices
+import dataclasses
+import operator
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class WideningCandidate:
     """Alias-described storage slice that may participate in a widening join."""
 
@@ -40,7 +45,7 @@ class WideningCandidate:
     view: _StorageView
     expr: object
 
-    def is_joinable_with(self, other: WideningCandidate) -> bool:
+    def is_joinable_with(self, other: WideningCandidate) -> cython.bint:
         """Return whether this candidate's domain and view can join another."""
         return bool(self.domain.can_join(other.domain) and self.view.can_join(other.view))
 
@@ -53,52 +58,52 @@ class WideningCandidate:
         return cls(domain, domain.view, expr)
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class WideningProof:
     """Result of proving whether two adjacent storage slices may be widened."""
 
-    ok: bool
-    reason: str
+    ok: cython.bint
+    reason: object
     left: AliasStorageFacts
     right: AliasStorageFacts
     merged_domain: _StorageDomainSignature | None = None
-    register_pair: str | None = None
+    register_pair: object = None
     left_version: int | None = None
     right_version: int | None = None
 
-    def is_safe(self) -> bool:
+    def is_safe(self) -> cython.bint:
         """Return whether this proof allows widening."""
         return self.ok
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class StorageSubviewProof:
     """Proof that one stack expression is a proper contained storage view."""
 
-    ok: bool
-    reason: str
+    ok: cython.bint
+    reason: object
     container: AliasStorageFacts
     subview: AliasStorageFacts
     relative_bit_offset: int | None = None
 
-    def is_safe(self) -> bool:
+    def is_safe(self) -> cython.bint:
         """Return whether this proof allows contained-view materialization."""
         return self.ok
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class StorageJoinAnalysis:
     """Convenience view over a widening proof for layer-boundary consumers."""
 
     proof: WideningProof
 
     @property
-    def ok(self) -> bool:
+    def ok(self) -> cython.bint:
         """Whether the underlying proof allows widening."""
         return self.proof.ok
 
     @property
-    def reason(self) -> str:
+    def reason(self) -> object:
         """Short deterministic reason for the proof result."""
         return self.proof.reason
 
@@ -117,29 +122,31 @@ class StorageJoinAnalysis:
         """Merged storage domain when proof succeeded."""
         return self.proof.merged_domain
 
-    def same_domain(self) -> bool:
+    def same_domain(self) -> cython.bint:
         """Return whether both slices describe the same storage domain."""
         return bool(self.left.same_domain(self.right))
 
-    def compatible_view(self) -> bool:
+    def compatible_view(self) -> cython.bint:
         """Return whether both slices have join-compatible storage views."""
         return bool(self.left.compatible_view(self.right))
 
-    def needs_synthesis(self) -> bool:
+    def needs_synthesis(self) -> cython.bint:
         """Return whether either side lacks concrete storage evidence."""
         return bool(self.left.needs_synthesis() or self.right.needs_synthesis())
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class WideningPipelineSpec:
     """Documented widening pipeline step and its owning helper functions."""
 
-    name: str
-    purpose: str
-    helpers: tuple[str, ...]
+    name: object
+    purpose: object
+    helpers: object
 
 
-def _register_version_for_expr(expr: object, state: AliasState | None) -> int | None:
+@cython.ccall
+def _register_version_for_expr(expr: object, state: object) -> int | None:
+    pair_name: object
     if state is None:
         return None
     facts = describe_alias_storage(expr)
@@ -155,8 +162,9 @@ def _register_version_for_expr(expr: object, state: AliasState | None) -> int | 
     return version if isinstance(version, int) else None
 
 
+@cython.ccall
 def _adjacent_refusal_8616(
-    reason: str,
+    reason: object,
     low_facts: AliasStorageFacts,
     high_facts: AliasStorageFacts,
     low_version: int | None,
@@ -173,10 +181,11 @@ def _adjacent_refusal_8616(
     )
 
 
+@cython.ccall
 def _shared_register_value_8616(
     low_facts: AliasStorageFacts,
     high_facts: AliasStorageFacts,
-) -> str | None:
+) -> object:
     """Return the register name both slice identities agree on."""
     if low_facts.identity is None or high_facts.identity is None:
         return None
@@ -191,11 +200,15 @@ def _shared_register_value_8616(
     return None
 
 
+@cython.ccall
 def _register_pair_identity_8616(
     low_facts: AliasStorageFacts,
     high_facts: AliasStorageFacts,
-) -> str | None:
+) -> object:
     """Return the shared register when both slices order as a named pair."""
+    high_view: object
+    low_value: object
+    low_view: object
     low_value = _shared_register_value_8616(low_facts, high_facts)
     if low_value is None:
         return None
@@ -210,12 +223,13 @@ def _register_pair_identity_8616(
     return None
 
 
+@cython.ccall
 def _register_version_verdict_8616(
-    register_pair: str | None,
+    register_pair: object,
     low_facts: AliasStorageFacts,
     high_facts: AliasStorageFacts,
-    low_version: int | None,
-    high_version: int | None,
+    low_version: object,
+    high_version: object,
 ) -> WideningProof | None:
     """Check pair/version evidence when an alias state is supplied."""
     if register_pair is None:
@@ -226,20 +240,22 @@ def _register_version_verdict_8616(
         return _adjacent_refusal_8616(
             "missing_version_evidence", low_facts, high_facts, low_version, high_version,
         )
-    if low_version != high_version:
+    if operator.ne(low_version, high_version):
         return _adjacent_refusal_8616(
             "version_mismatch", low_facts, high_facts, low_version, high_version,
         )
     return None
 
 
+@cython.ccall
 def _prove_adjacent_slices_8616(
     low_expr: object,
     high_expr: object,
-    alias_state: AliasState | None,
+    alias_state: object,
     version_resolver: Callable[[object, AliasState | None], int | None],
 ) -> WideningProof:
     """Run the adjacent-slice proof ladder over alias storage facts."""
+    verdict: object
     low_facts = describe_alias_storage(low_expr)
     high_facts = describe_alias_storage(high_expr)
     register_pair = _register_pair_identity_8616(low_facts, high_facts)
@@ -283,6 +299,7 @@ def _prove_adjacent_slices_8616(
     )
 
 
+@cython.ccall
 def prove_adjacent_storage_slices(
     low_expr: object,
     high_expr: object,
@@ -299,6 +316,7 @@ def prove_adjacent_storage_slices(
     )
 
 
+@cython.ccall
 def prove_contained_stack_subview(
     container_expr: object,
     subview_expr: object,
@@ -306,6 +324,8 @@ def prove_contained_stack_subview(
     expected_bit_offset: int | None = None,
 ) -> StorageSubviewProof:
     """Prove that a narrower stack expression is contained by a wider one."""
+    container_view: object
+    subview_view: object
     container = describe_alias_storage(container_expr)
     subview = describe_alias_storage(subview_expr)
     if container.needs_synthesis() or subview.needs_synthesis():
@@ -325,7 +345,7 @@ def prove_contained_stack_subview(
     if not contains_alias_storage(container_expr, subview_expr):
         return StorageSubviewProof(False, "storage_mismatch", container, subview)
     relative_bit_offset = subview_view.bit_offset - container_view.bit_offset
-    if expected_bit_offset is not None and relative_bit_offset != expected_bit_offset:
+    if expected_bit_offset is not None and operator.ne(relative_bit_offset, expected_bit_offset):
         return StorageSubviewProof(
             False,
             "bit_offset_mismatch",
@@ -342,6 +362,7 @@ def prove_contained_stack_subview(
     )
 
 
+@cython.ccall
 def analyze_adjacent_storage_slices(
     low_expr: object, high_expr: object, *, alias_state: AliasState | None = None
 ) -> StorageJoinAnalysis:
@@ -349,8 +370,10 @@ def analyze_adjacent_storage_slices(
     return StorageJoinAnalysis(prove_adjacent_storage_slices(low_expr, high_expr, alias_state=alias_state))
 
 
-def collect_widening_candidates(exprs: Iterable[object]) -> list[WideningCandidate]:
+@cython.ccall
+def collect_widening_candidates(exprs: Iterable[object]) -> object:
     """Collect expressions that have concrete widening candidate evidence."""
+    expr: object
     candidates: list[WideningCandidate] = []
     for expr in exprs:
         try:
@@ -360,8 +383,10 @@ def collect_widening_candidates(exprs: Iterable[object]) -> list[WideningCandida
     return candidates
 
 
+@cython.ccall
 def describe_widening_candidates(exprs: Iterable[object]) -> tuple[dict[str, object], ...]:
     """Return deterministic descriptions of joinable widening candidates."""
+    candidate: object
     descriptions: list[dict[str, object]] = []
     for candidate in collect_widening_candidates(exprs):
         descriptions.append(
@@ -397,15 +422,17 @@ WIDENING_PIPELINE: tuple[WideningPipelineSpec, ...] = (
 
 def describe_x86_16_widening_pipeline() -> tuple[tuple[str, str, tuple[str, ...]], ...]:
     """Describe the widening pipeline order for architecture checks and tests."""
-    return tuple((spec.name, spec.purpose, spec.helpers) for spec in WIDENING_PIPELINE)
+    return tuple((spec.name, spec.purpose, spec.helpers) for spec in iter(WIDENING_PIPELINE))
 
 
 def can_join_adjacent_storage_slices(
     low_expr: object, high_expr: object, *, alias_state: AliasState | None = None
-) -> bool:
+) -> cython.bint:
     """Return whether adjacent storage slices are proven safe to join."""
 
-    def _impl() -> bool:
+    def _impl() -> cython.bint:
+        high_candidate: object
+        low_candidate: object
         proof = prove_adjacent_storage_slices(low_expr, high_expr, alias_state=alias_state)
         if not proof.ok:
             return False
@@ -434,6 +461,7 @@ def can_join_adjacent_storage_slices(
     return _impl()
 
 
+@cython.ccall
 def merge_storage_slice_domains(
     low_expr: object, high_expr: object, *, alias_state: AliasState | None = None
 ) -> _StorageDomainSignature:

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove bounded dynamic reads from initialized stack-array prefixes.
 
 Layer: Structuring.
@@ -12,6 +13,8 @@ type recovery, AST mutation, and validation verdict policy.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -58,6 +61,9 @@ from inertia.semantics.callsite_summary import (
     structured_call_kind_8616,
 )
 from inertia.widening.segmented_load_identity import segmented_load_identity_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "IndexedStackReadProof8616",
@@ -79,7 +85,7 @@ class _ScalarStorageKind8616(Enum):
 class _AddressedCallee8616(Protocol):
     """Third-party callee surface carrying an exact binary address."""
 
-    addr: int
+    addr: cython.longlong
 
 
 class _AssignmentExpression8616(Protocol):
@@ -88,26 +94,26 @@ class _AssignmentExpression8616(Protocol):
     rhs: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _ScalarStorage8616:
     """Stable scalar identity used by structured range proofs."""
 
     kind: _ScalarStorageKind8616
-    offset: int
-    width: int
+    offset: cython.longlong
+    width: cython.longlong
     region: int | None = None
     ident: str = ""
     space: MemSpace | None = None
 
 
-@dataclass(frozen=True, order=True, slots=True)
+@dataclasses.dataclass(frozen=True, order=True, )
 class _StackArrayStorage8616:
     """One bounded BP-relative stack array."""
 
-    offset: int
-    width: int
-    element_width: int
-    element_count: int
+    offset: cython.longlong
+    width: cython.longlong
+    element_width: cython.longlong
+    element_count: cython.longlong
 
 
 class IndexedStackReadProofKind8616(Enum):
@@ -116,51 +122,52 @@ class IndexedStackReadProofKind8616(Enum):
     INITIALIZED_PREFIX_BOUNDED_INDEX = "initialized_prefix_bounded_index"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedStackReadProof8616:
     """Proof that one exact dynamic stack-array read selects initialized data."""
 
-    read_node_id: int
-    array_offset: int
-    array_width: int
-    element_width: int
-    index_storage_offset: int
+    read_node_id: cython.longlong
+    array_offset: cython.longlong
+    array_width: cython.longlong
+    element_width: cython.longlong
+    index_storage_offset: cython.longlong
     kind: IndexedStackReadProofKind8616
 
-    def matches(self, node: object, *, array_offset: int, array_width: int) -> bool:
+    def matches(self, node: object, *, array_offset: cython.longlong, array_width: cython.longlong) -> cython.bint:
         """Return whether this proof belongs to the supplied exact read."""
         return (
-            id(node) == self.read_node_id
-            and self.array_offset == array_offset
-            and self.array_width == array_width
+            operator.eq(id(node), self.read_node_id)
+            and operator.eq(self.array_offset, array_offset)
+            and operator.eq(self.array_width, array_width)
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedStackReadProofReport8616:
     """Closed evidence loop for bounded dynamic stack-array reads."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    proofs: tuple[IndexedStackReadProof8616, ...]
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    proofs: object
 
-    def by_read_node_id(self) -> dict[int, IndexedStackReadProof8616]:
+    def by_read_node_id(self) -> dict[cython.longlong, IndexedStackReadProof8616]:
         """Return exact proofs indexed by in-memory structured read identity."""
-        return {proof.read_node_id: proof for proof in self.proofs}
+        return {proof.read_node_id: proof for proof in iter(self.proofs)}
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _MutableProofReport8616:
     """Mutable counters while one structured tree is analyzed."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    proofs: list[IndexedStackReadProof8616] = field(default_factory=list)
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    proofs: object = field(default_factory=list)
 
+    @cython.ccall
     def freeze(self) -> IndexedStackReadProofReport8616:
         """Return an immutable proof report."""
         materialized = len(self.proofs)
@@ -174,15 +181,16 @@ class _MutableProofReport8616:
         )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _RangeProofState8616:
     """Path-local prefix, predecessor, and upper-bound facts."""
 
-    prefixes: dict[_StackArrayStorage8616, _ScalarStorage8616]
-    predecessors: dict[_ScalarStorage8616, _ScalarStorage8616]
-    ranges: dict[_ScalarStorage8616, _ScalarStorage8616]
-    constants: dict[_ScalarStorage8616, int]
+    prefixes: object
+    predecessors: object
+    ranges: object
+    constants: object
 
+    @cython.ccall
     def copy(self) -> _RangeProofState8616:
         """Return an independent path state."""
         return _RangeProofState8616(
@@ -193,7 +201,7 @@ class _RangeProofState8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _AscendingLoop8616:
     """Canonical zero-based unit-stride loop bound."""
 
@@ -201,15 +209,16 @@ class _AscendingLoop8616:
     bound: _ScalarStorage8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _RemainderCallEvidence8616:
     """Matched signed-remainder call contract and optional output bound."""
 
     range_bound: _ScalarStorage8616 | None
-    call_node_id: int
+    call_node_id: cython.longlong
     call_contract: RuntimeCallReturnContract8616
 
 
+@cython.ccall
 def _strip_casts_8616(node: object) -> object:
     """Remove structured type casts without changing expression meaning."""
     while isinstance(node, CTypeCast):
@@ -217,6 +226,7 @@ def _strip_casts_8616(node: object) -> object:
     return node
 
 
+@cython.ccall
 def _type_width_bytes_8616(type_: object) -> int | None:
     """Return a byte width from an angr type when it is fully bound."""
     if not isinstance(type_, SimType):
@@ -232,6 +242,8 @@ def _type_width_bytes_8616(type_: object) -> int | None:
 
 def _scalar_storage_8616(node: object) -> _ScalarStorage8616 | None:
     """Return stable storage identity for one scalar C variable."""
+    segmented_identity: object
+    variable: object
     node = _strip_casts_8616(node)
     segmented_identity = segmented_load_identity_8616(node)
     if segmented_identity is not None:
@@ -254,7 +266,7 @@ def _scalar_storage_8616(node: object) -> _ScalarStorage8616 | None:
     variable = next(
         (
             candidate
-            for candidate in variables
+            for candidate in iter(variables)
             if isinstance(candidate, (SimStackVariable, SimMemoryVariable, SimRegisterVariable))
         ),
         None,
@@ -268,11 +280,13 @@ def _scalar_storage_8616(node: object) -> _ScalarStorage8616 | None:
     return None
 
 
+@cython.ccall
 def _stack_variable_storage_8616(
     node: CVariable,
     variable: SimStackVariable,
 ) -> _ScalarStorage8616 | None:
     """Return stack storage identity for one proven stack variable."""
+    width: object
     width = _type_width_bytes_8616(node.type)
     if width is None:
         width = variable.size if isinstance(variable.size, int) else None
@@ -287,6 +301,7 @@ def _stack_variable_storage_8616(
     )
 
 
+@cython.ccall
 def _memory_variable_storage_8616(
     variable: SimMemoryVariable,
 ) -> _ScalarStorage8616 | None:
@@ -302,6 +317,7 @@ def _memory_variable_storage_8616(
     )
 
 
+@cython.ccall
 def _register_variable_storage_8616(
     variable: SimRegisterVariable,
 ) -> _ScalarStorage8616 | None:
@@ -320,8 +336,9 @@ def _register_variable_storage_8616(
     )
 
 
+@cython.ccall
 def _machine_bp_stack_offset_8616(
-    codegen: object | None,
+    codegen: object,
     node: object,
 ) -> int | None:
     """Project one stack expression to the lowering fact coordinate space."""
@@ -339,6 +356,7 @@ def _machine_bp_stack_offset_8616(
     return machine_offset if isinstance(machine_offset, int) else None
 
 
+@cython.ccall
 def _scalar_memory_address_8616(
     storage: _ScalarStorage8616,
 ) -> IRAddress | None:
@@ -358,8 +376,10 @@ def _scalar_memory_address_8616(
     )
 
 
+@cython.ccall
 def _structured_call_target_addr_8616(call: CFunctionCall) -> int | None:
     """Return a structured call's exact third-party callee address."""
+    callee: object
     callee = call.callee_func
     if callee is None:
         return None
@@ -370,7 +390,8 @@ def _structured_call_target_addr_8616(call: CFunctionCall) -> int | None:
     return addr if isinstance(addr, int) else None
 
 
-def _array_variable_shape_8616(variable: object, length: object) -> bool:
+@cython.ccall
+def _array_variable_shape_8616(variable: object, length: object) -> cython.bint:
     """Check the backing stack variable and declared length are proven ints."""
     return (
         isinstance(variable, SimStackVariable)
@@ -382,11 +403,13 @@ def _array_variable_shape_8616(variable: object, length: object) -> bool:
     )
 
 
+@cython.ccall
 def _stack_array_storage_8616(
-    codegen: object | None,
+    codegen: object,
     node: object,
 ) -> _StackArrayStorage8616 | None:
     """Return bounded stack-array identity for one C expression."""
+    element_width: object
     node = _strip_casts_8616(node)
     if not isinstance(node, CVariable) or not isinstance(
         node.type,
@@ -424,8 +447,10 @@ def _stack_array_storage_8616(
     )
 
 
-def _assignment_to_scalar_8616(node: object) -> tuple[_ScalarStorage8616, object] | None:
+@cython.ccall
+def _assignment_to_scalar_8616(node: object) -> object:
     """Return scalar assignment destination and RHS."""
+    lhs: object
     if not isinstance(node, CAssignment):
         return None
     lhs = _scalar_storage_8616(node.lhs)
@@ -434,6 +459,7 @@ def _assignment_to_scalar_8616(node: object) -> tuple[_ScalarStorage8616, object
     return lhs, node.rhs
 
 
+@cython.ccall
 def _constant_value_8616(node: object) -> int | None:
     """Return one structured integer constant."""
     node = _strip_casts_8616(node)
@@ -442,41 +468,49 @@ def _constant_value_8616(node: object) -> int | None:
     return None
 
 
+@cython.ccall
 def _binary_storage_constant_8616(
     node: object,
-    op: str,
-    constant: int,
+    op: object,
+    constant: cython.longlong,
 ) -> _ScalarStorage8616 | None:
     """Match ``storage op constant`` and return the storage identity."""
     node = _strip_casts_8616(node)
-    if not isinstance(node, CBinaryOp) or node.op != op:
+    if not isinstance(node, CBinaryOp) or operator.ne(node.op, op):
         return None
-    if _constant_value_8616(node.rhs) != constant:
+    if operator.ne(_constant_value_8616(node.rhs), constant):
         return None
     return _scalar_storage_8616(node.lhs)
 
 
+@cython.ccall
 def _ascending_loop_8616(loop: CForLoop) -> _AscendingLoop8616 | None:
     """Match a zero-based, unit-stride, strict-upper-bound for-loop."""
+    descriptor: object
+    initializer: object
+    iterator: object
     initializer = _assignment_to_scalar_8616(loop.initializer)
     if initializer is None or _constant_value_8616(initializer[1]) != 0:
         return None
     induction = initializer[0]
     descriptor = _ascending_condition_8616(loop.condition)
-    if descriptor is None or descriptor.induction != induction:
+    if descriptor is None or operator.ne(descriptor.induction, induction):
         return None
     iterator = _assignment_to_scalar_8616(loop.iterator)
     if (
         iterator is None
-        or iterator[0] != induction
-        or _binary_storage_constant_8616(iterator[1], "Add", 1) != induction
+        or operator.ne(iterator[0], induction)
+        or operator.ne(_binary_storage_constant_8616(iterator[1], "Add", 1), induction)
     ):
         return None
     return descriptor
 
 
+@cython.ccall
 def _ascending_condition_8616(condition: object) -> _AscendingLoop8616 | None:
     """Return the induction and bound from an exact ``index < bound`` predicate."""
+    bound: object
+    induction: object
     condition = _strip_casts_8616(condition)
     if not isinstance(condition, CBinaryOp):
         return None
@@ -492,13 +526,14 @@ def _ascending_condition_8616(condition: object) -> _AscendingLoop8616 | None:
         induction is None
         or
         bound is None
-        or bound == induction
+        or operator.eq(bound, induction)
     ):
         return None
     return _AscendingLoop8616(induction=induction, bound=bound)
 
 
-def _break_only_8616(node: object) -> bool:
+@cython.ccall
+def _break_only_8616(node: object) -> cython.bint:
     """Return whether one structured branch contains exactly one break."""
     if isinstance(node, CBreak):
         return True
@@ -507,6 +542,7 @@ def _break_only_8616(node: object) -> bool:
     return _break_only_8616(node.statements[0])
 
 
+@cython.ccall
 def _negated_break_condition_8616(condition: CUnaryOp) -> _AscendingLoop8616 | None:
     """Unwrap one negated break condition into its ascending descriptor."""
     operand = _strip_casts_8616(condition.operand)
@@ -521,8 +557,11 @@ def _negated_break_condition_8616(condition: CUnaryOp) -> _AscendingLoop8616 | N
     return _ascending_condition_8616(operand)
 
 
+@cython.ccall
 def _ordered_break_condition_8616(condition: CBinaryOp) -> _AscendingLoop8616 | None:
     """Return the ordered induction/bound descriptor for one comparison."""
+    bound: object
+    induction: object
     if condition.op == "CmpGE":
         induction = _scalar_storage_8616(condition.lhs)
         bound = _scalar_storage_8616(condition.rhs)
@@ -531,11 +570,12 @@ def _ordered_break_condition_8616(condition: CBinaryOp) -> _AscendingLoop8616 | 
         bound = _scalar_storage_8616(condition.lhs)
     else:
         return None
-    if induction is None or bound is None or induction == bound:
+    if induction is None or bound is None or operator.eq(induction, bound):
         return None
     return _AscendingLoop8616(induction=induction, bound=bound)
 
 
+@cython.ccall
 def _break_guard_descriptor_8616(node: object) -> _AscendingLoop8616 | None:
     """Return the continued-loop predicate encoded by one exact break guard."""
     if isinstance(node, CIfBreak):
@@ -556,7 +596,8 @@ def _break_guard_descriptor_8616(node: object) -> _AscendingLoop8616 | None:
     return _ordered_break_condition_8616(condition)
 
 
-def _unconditional_while_8616(loop: CWhileLoop) -> bool:
+@cython.ccall
+def _unconditional_while_8616(loop: CWhileLoop) -> cython.bint:
     """Return whether one structured while loop has an unconditional header."""
     if loop.condition is None:
         return True
@@ -564,7 +605,7 @@ def _unconditional_while_8616(loop: CWhileLoop) -> bool:
     return isinstance(condition, CConstant) and condition.value in {True}
 
 
-def _canonical_while_debug_8616(enabled: bool, reason: str, **values: object) -> None:
+def _canonical_while_debug_8616(enabled: cython.bint, reason: object, **values: object) -> None:
     """Emit opt-in canonical-while refusal details."""
     if enabled:
         logging.getLogger(__name__).warning(
@@ -574,7 +615,7 @@ def _canonical_while_debug_8616(enabled: bool, reason: str, **values: object) ->
         )
 
 
-def _expression_shape_8616(node: object, depth: int = 0) -> object:
+def _expression_shape_8616(node: object, depth: cython.longlong = 0) -> object:
     """Return a bounded typed expression shape for opt-in diagnostics."""
     if depth >= 5:
         return type(node).__name__
@@ -604,37 +645,39 @@ def _expression_shape_8616(node: object, depth: int = 0) -> object:
             "call",
             node.callee_func,
             node.callee_target,
-            tuple(_expression_shape_8616(argument, depth + 1) for argument in node.args),
+            tuple(_expression_shape_8616(argument, depth + 1) for argument in iter(node.args)),
         )
     return type(node).__name__
 
 
 def _conditional_while_descriptor_8616(
     loop: CWhileLoop,
-    statements: tuple[object, ...],
+    statements: object,
     state: _RangeProofState8616,
-    debug: bool,
-) -> tuple[_AscendingLoop8616, int] | None:
+    debug: cython.bint,
+) -> object:
     """Match a conditional while header to its tail induction update."""
+    descriptor: object
+    induction_write: object
     descriptor = _ascending_condition_8616(loop.condition)
     if descriptor is None or state.constants.get(descriptor.induction) != 0:
         _canonical_while_debug_8616(debug, "conditional", condition=_expression_shape_8616(loop.condition), descriptor=descriptor)
         return None
     scalar_assignments = tuple(
         (assignment, target_rhs)
-        for assignment in _direct_scalar_assignments_8616(loop.body)
-        for target_rhs in (_assignment_to_scalar_8616(assignment),)
+        for assignment in builtins.iter(_direct_scalar_assignments_8616(loop.body))
+        for target_rhs in iter((_assignment_to_scalar_8616(assignment),))
         if target_rhs is not None
     )
     induction_writes = tuple(
         assignment
-        for assignment, target_rhs in scalar_assignments
-        if target_rhs[0] == descriptor.induction
+        for assignment, target_rhs in iter(scalar_assignments)
+        if operator.eq(target_rhs[0], descriptor.induction)
     )
     bound_writes = tuple(
         assignment
-        for assignment, target_rhs in scalar_assignments
-        if target_rhs[0] == descriptor.bound
+        for assignment, target_rhs in iter(scalar_assignments)
+        if operator.eq(target_rhs[0], descriptor.bound)
     )
     induction_write = (
         cast(_AssignmentExpression8616, induction_writes[0])
@@ -646,12 +689,11 @@ def _conditional_while_descriptor_8616(
         or bool(bound_writes)
         or not statements
         or induction_write is not statements[-1]
-        or _binary_storage_constant_8616(
+        or operator.ne(_binary_storage_constant_8616(
             induction_write.rhs,
             "Add",
             1,
-        )
-        != descriptor.induction
+        ), descriptor.induction)
     ):
         _canonical_while_debug_8616(
             debug,
@@ -666,17 +708,17 @@ def _conditional_while_descriptor_8616(
 
 
 def _guard_candidate_8616(
-    statements: tuple[object, ...],
-    guard_index: int,
+    statements: object,
+    guard_index: cython.longlong,
     descriptor: _AscendingLoop8616,
-    debug: bool,
-) -> tuple[_AscendingLoop8616, int] | None:
+    debug: cython.bint,
+) -> object:
     """Prove one guard candidate has ordered induction writes only."""
     writes_before_guard = tuple(
         assignment
-        for prior in statements[:guard_index]
-        for assignment in _direct_scalar_assignments_8616(prior)
-        for target_rhs in (_assignment_to_scalar_8616(assignment),)
+        for prior in iter(statements[:guard_index])
+        for assignment in builtins.iter(_direct_scalar_assignments_8616(prior))
+        for target_rhs in iter((_assignment_to_scalar_8616(assignment),))
         if target_rhs is not None
         and target_rhs[0] in {descriptor.induction, descriptor.bound}
     )
@@ -690,19 +732,18 @@ def _guard_candidate_8616(
         return None
     induction_writes = tuple(
         assignment
-        for following in statements[guard_index + 1 :]
-        for assignment in _direct_scalar_assignments_8616(following)
-        for target_rhs in (_assignment_to_scalar_8616(assignment),)
-        if target_rhs is not None and target_rhs[0] == descriptor.induction
+        for following in iter(statements[guard_index + 1 :])
+        for assignment in builtins.iter(_direct_scalar_assignments_8616(following))
+        for target_rhs in iter((_assignment_to_scalar_8616(assignment),))
+        if target_rhs is not None and operator.eq(target_rhs[0], descriptor.induction)
     )
     if (
         len(induction_writes) != 1
-        or _binary_storage_constant_8616(
+        or operator.ne(_binary_storage_constant_8616(
             induction_writes[0].rhs,
             "Add",
             1,
-        )
-        != descriptor.induction
+        ), descriptor.induction)
     ):
         _canonical_while_debug_8616(
             debug,
@@ -714,7 +755,7 @@ def _guard_candidate_8616(
                     type(assignment.rhs).__name__,
                     assignment.rhs.op if isinstance(assignment.rhs, CBinaryOp) else None,
                 )
-                for assignment in induction_writes
+                for assignment in iter(induction_writes)
             ),
         )
         return None
@@ -724,18 +765,22 @@ def _guard_candidate_8616(
 def _canonical_while_8616(
     loop: CWhileLoop,
     state: _RangeProofState8616,
-) -> tuple[_AscendingLoop8616, int] | None:
+) -> object:
     """Match an exact zero-based unit-stride while-loop representation."""
+    candidate: object
+    descriptor: object
+    guard_index: object
+    statement: object
     debug = os.environ.get("INERTIA_DEBUG_INDEXED_STACK_RANGES") == "1"
 
-    def _debug(reason: str, **values: object) -> None:
+    def _debug(reason: object, **values: object) -> None:
         """Emit opt-in canonical-while refusal details."""
         _canonical_while_debug_8616(debug, reason, **values)
 
     statements = _transparent_body_statements_8616(loop.body)
     if not _unconditional_while_8616(loop):
         return _conditional_while_descriptor_8616(loop, statements, state, debug)
-    candidates: list[tuple[_AscendingLoop8616, int]] = []
+    candidates: list[tuple[_AscendingLoop8616, cython.longlong]] = []
     for guard_index, statement in enumerate(statements):
         descriptor = _break_guard_descriptor_8616(statement)
         if isinstance(statement, CIfElse):
@@ -751,7 +796,7 @@ def _canonical_while_8616(
                         type(branch).__name__,
                         _break_only_8616(branch),
                     )
-                    for condition, branch in statement.condition_and_nodes
+                    for condition, branch in iter(statement.condition_and_nodes)
                 ),
                 has_else=statement.else_node is not None,
             )
@@ -768,18 +813,19 @@ def _canonical_while_8616(
         )
         if candidate is not None:
             candidates.append(candidate)
-    candidate_descriptors = {descriptor for descriptor, _index in candidates}
+    candidate_descriptors = {descriptor for descriptor, _index in iter(candidates)}
     if len(candidate_descriptors) != 1:
         _debug(
             "candidate-count",
             count=len(candidates),
-            statement_types=tuple(type(statement).__name__ for statement in statements),
+            statement_types=tuple(type(statement).__name__ for statement in iter(statements)),
             constants=state.constants,
         )
         return None
     return candidates[0]
 
 
+@cython.ccall
 def _transparent_body_statements_8616(body: object) -> tuple[object, ...]:
     """Flatten only sequencing containers from one structured loop body.
 
@@ -787,6 +833,7 @@ def _transparent_body_statements_8616(body: object) -> tuple[object, ...]:
     callers cannot mistake conditionally executed assignments for direct
     straight-line effects.
     """
+    statement: object
     if not isinstance(body, CStatements):
         return ()
     flattened: list[object] = []
@@ -804,12 +851,15 @@ def _prefix_array_8616(
     descriptor: _AscendingLoop8616,
 ) -> _StackArrayStorage8616 | None:
     """Return an array assigned at every iteration before any control split."""
+    array: object
+    scalar_assignment: object
+    statement: object
     for statement in _transparent_body_statements_8616(loop.body):
         if not isinstance(statement, CAssignment):
             return None
         if any(
             isinstance(candidate, CFunctionCall)
-            for candidate in _iter_c_nodes_deep_8616(statement.rhs)
+            for candidate in builtins.iter(_iter_c_nodes_deep_8616(statement.rhs))
         ):
             return None
         scalar_assignment = _assignment_to_scalar_8616(statement)
@@ -822,7 +872,7 @@ def _prefix_array_8616(
         if not isinstance(lhs, CIndexedVariable):
             continue
         array = _stack_array_storage_8616(codegen, lhs.variable)
-        if array is not None and _scalar_storage_8616(lhs.index) == descriptor.induction:
+        if array is not None and operator.eq(_scalar_storage_8616(lhs.index), descriptor.induction):
             return array
     return None
 
@@ -831,21 +881,24 @@ def _while_prefix_array_8616(
     codegen: object | None,
     loop: CWhileLoop,
     descriptor: _AscendingLoop8616,
-    guard_index: int,
+    guard_index: cython.longlong,
 ) -> _StackArrayStorage8616 | None:
     """Return an array written on every guarded continuing while iteration."""
+    array: object
+    scalar_assignment: object
+    statement: object
     statements = _transparent_body_statements_8616(loop.body)
     for statement in statements[guard_index + 1 :]:
         if (
             isinstance(statement, (CIfElse, CIfBreak))
-            and _break_guard_descriptor_8616(statement) == descriptor
+            and operator.eq(_break_guard_descriptor_8616(statement), descriptor)
         ):
             continue
         if not isinstance(statement, CAssignment):
             return None
         if any(
             isinstance(candidate, CFunctionCall)
-            for candidate in _iter_c_nodes_deep_8616(statement.rhs)
+            for candidate in builtins.iter(_iter_c_nodes_deep_8616(statement.rhs))
         ):
             return None
         scalar_assignment = _assignment_to_scalar_8616(statement)
@@ -858,7 +911,7 @@ def _while_prefix_array_8616(
         if not isinstance(lhs, CIndexedVariable):
             continue
         array = _stack_array_storage_8616(codegen, lhs.variable)
-        if array is not None and _scalar_storage_8616(lhs.index) == descriptor.induction:
+        if array is not None and operator.eq(_scalar_storage_8616(lhs.index), descriptor.induction):
             return array
     return None
 
@@ -867,7 +920,7 @@ def _direct_scalar_assignments_8616(node: object) -> tuple[CAssignment, ...]:
     """Return all scalar assignments in one structured subtree."""
     return tuple(
         candidate
-        for candidate in _iter_c_nodes_deep_8616(node)
+        for candidate in builtins.iter(_iter_c_nodes_deep_8616(node))
         if isinstance(candidate, CAssignment)
         and _assignment_to_scalar_8616(candidate) is not None
     )
@@ -879,9 +932,12 @@ def _direct_decrement_carriers_8616(
     descriptor: _AscendingLoop8616,
 ) -> frozenset[_ScalarStorage8616]:
     """Return predecessor carriers decremented once on each continuing iteration."""
+    assignment: object
+    bound: object
+    candidate: object
     straight_line_assignment_ids = {
         id(statement)
-        for statement in _transparent_body_statements_8616(body)
+        for statement in builtins.iter(_transparent_body_statements_8616(body))
         if isinstance(statement, CAssignment)
     }
     if not straight_line_assignment_ids:
@@ -889,13 +945,13 @@ def _direct_decrement_carriers_8616(
     all_assignments = _direct_scalar_assignments_8616(body)
     carriers: set[_ScalarStorage8616] = set()
     for candidate, bound in state.predecessors.items():
-        if bound != descriptor.bound:
+        if operator.ne(bound, descriptor.bound):
             continue
         writes = tuple(
             statement
-            for statement in all_assignments
-            for assignment in (_assignment_to_scalar_8616(statement),)
-            if assignment is not None and assignment[0] == candidate
+            for statement in iter(all_assignments)
+            for assignment in iter((_assignment_to_scalar_8616(statement),))
+            if assignment is not None and operator.eq(assignment[0], candidate)
         )
         if (
             len(writes) != 1
@@ -906,18 +962,16 @@ def _direct_decrement_carriers_8616(
         decremented = (
             assignment is not None
             and (
-                _binary_storage_constant_8616(
+                operator.eq(_binary_storage_constant_8616(
                     assignment[1],
                     "Sub",
                     1,
-                )
-                == candidate
-                or _binary_storage_constant_8616(
+                ), candidate)
+                or operator.eq(_binary_storage_constant_8616(
                     assignment[1],
                     "Add",
                     -1,
-                )
-                == candidate
+                ), candidate)
             )
         )
         if decremented:
@@ -926,55 +980,56 @@ def _direct_decrement_carriers_8616(
 
 
 def _common_prefixes_8616(
-    states: tuple[_RangeProofState8616, ...],
+    states: object,
 ) -> dict[_StackArrayStorage8616, _ScalarStorage8616]:
     """Return prefix facts shared by every supplied path state."""
     first = states[0].prefixes
     return {
         key: value
-        for key, value in first.items()
-        if all(state.prefixes.get(key) == value for state in states[1:])
+        for key, value in builtins.iter(first.items())
+        if all(operator.eq(state.prefixes.get(key), value) for state in iter(states[1:]))
     }
 
 
 def _common_predecessors_8616(
-    states: tuple[_RangeProofState8616, ...],
+    states: object,
 ) -> dict[_ScalarStorage8616, _ScalarStorage8616]:
     """Return predecessor facts shared by every supplied path state."""
     first = states[0].predecessors
     return {
         key: value
-        for key, value in first.items()
-        if all(state.predecessors.get(key) == value for state in states[1:])
+        for key, value in builtins.iter(first.items())
+        if all(operator.eq(state.predecessors.get(key), value) for state in iter(states[1:]))
     }
 
 
 def _common_ranges_8616(
-    states: tuple[_RangeProofState8616, ...],
+    states: object,
 ) -> dict[_ScalarStorage8616, _ScalarStorage8616]:
     """Return range facts shared by every supplied path state."""
     first = states[0].ranges
     return {
         key: value
-        for key, value in first.items()
-        if all(state.ranges.get(key) == value for state in states[1:])
+        for key, value in builtins.iter(first.items())
+        if all(operator.eq(state.ranges.get(key), value) for state in iter(states[1:]))
     }
 
 
 def _common_constants_8616(
-    states: tuple[_RangeProofState8616, ...],
-) -> dict[_ScalarStorage8616, int]:
+    states: object,
+) -> dict[_ScalarStorage8616, cython.longlong]:
     """Return exact scalar constants shared by every supplied path state."""
     first = states[0].constants
     return {
         key: value
-        for key, value in first.items()
-        if all(state.constants.get(key) == value for state in states[1:])
+        for key, value in builtins.iter(first.items())
+        if all(operator.eq(state.constants.get(key), value) for state in iter(states[1:]))
     }
 
 
+@cython.ccall
 def _intersect_states_8616(
-    states: tuple[_RangeProofState8616, ...],
+    states: object,
     fallback: _RangeProofState8616,
 ) -> _RangeProofState8616:
     """Retain exact facts available on every structured path."""
@@ -988,17 +1043,24 @@ def _intersect_states_8616(
     )
 
 
+@cython.ccall
 def _contract_inventories_8616(
-    facts: tuple[DirectStackMoveFact8616, ...],
+    facts: object,
 ) -> tuple[
-    dict[int, RuntimeCallReturnContract8616],
-    dict[int, RuntimeCallReturnContract8616],
+    dict[cython.longlong, RuntimeCallReturnContract8616],
+    dict[cython.longlong, RuntimeCallReturnContract8616],
 ]:
     """Index unambiguous call-return contracts by callsite and callee."""
-    callsite_contracts: dict[int, RuntimeCallReturnContract8616] = {}
-    target_contracts: dict[int, RuntimeCallReturnContract8616] = {}
-    ambiguous_callsites: set[int] = set()
-    ambiguous_targets: set[int] = set()
+    contract: object
+    existing: object
+    ambiguous: object
+    fact: object
+    inventory: object
+    key: object
+    callsite_contracts: dict[cython.longlong, RuntimeCallReturnContract8616] = {}
+    target_contracts: dict[cython.longlong, RuntimeCallReturnContract8616] = {}
+    ambiguous_callsites: set[cython.longlong] = set()
+    ambiguous_targets: set[cython.longlong] = set()
     for fact in facts:
         contract = fact.source_call_return_contract
         if contract is None:
@@ -1018,7 +1080,7 @@ def _contract_inventories_8616(
             if not isinstance(key, int) or key in ambiguous:
                 continue
             existing = inventory.get(key)
-            if existing is not None and existing != contract:
+            if existing is not None and operator.ne(existing, contract):
                 inventory.pop(key, None)
                 ambiguous.add(key)
             else:
@@ -1026,18 +1088,18 @@ def _contract_inventories_8616(
     return callsite_contracts, target_contracts
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _IndexedReadProofScan8616:
     """Prove dynamic indexed stack reads across one structured CFG."""
 
     codegen: object | None
-    facts: tuple[DirectStackMoveFact8616, ...]
-    callsite_contracts: dict[int, RuntimeCallReturnContract8616]
-    target_contracts: dict[int, RuntimeCallReturnContract8616]
+    facts: object
+    callsite_contracts: object
+    target_contracts: object
     report: _MutableProofReport8616 = field(default_factory=_MutableProofReport8616)
-    debug: bool = False
+    debug: cython.bint = False
 
-    def _debug(self, event: str, **values: object) -> None:
+    def _debug(self, event: object, **values: object) -> None:
         """Emit opt-in typed proof diagnostics."""
         if self.debug:
             logging.getLogger(__name__).warning(
@@ -1046,6 +1108,7 @@ class _IndexedReadProofScan8616:
                 values,
             )
 
+    @cython.ccall
     def _invalidate_scalar(
         self,
         state: _RangeProofState8616,
@@ -1054,17 +1117,17 @@ class _IndexedReadProofScan8616:
         """Drop facts that depend on a newly written scalar."""
         state.prefixes = {
             array: bound
-            for array, bound in state.prefixes.items()
+            for array, bound in builtins.iter(state.prefixes.items())
             if bound != scalar
         }
         state.predecessors = {
             candidate: bound
-            for candidate, bound in state.predecessors.items()
+            for candidate, bound in builtins.iter(state.predecessors.items())
             if candidate != scalar and bound != scalar
         }
         state.ranges = {
             candidate: bound
-            for candidate, bound in state.ranges.items()
+            for candidate, bound in builtins.iter(state.ranges.items())
             if candidate != scalar and bound != scalar
         }
         state.constants.pop(scalar, None)
@@ -1076,10 +1139,14 @@ class _IndexedReadProofScan8616:
         call_contracts: Mapping[int, RuntimeCallReturnContract8616] | None = None,
     ) -> None:
         """Drop bound proofs unless one call contract preserves their address."""
+        address: object
+        contract: object
+        bound: object
+        call: object
         contracts = call_contracts or {}
         calls = tuple(
             node
-            for node in _iter_c_nodes_deep_8616(expr)
+            for node in builtins.iter(_iter_c_nodes_deep_8616(expr))
             if isinstance(node, CFunctionCall)
         )
         for call in calls:
@@ -1112,11 +1179,11 @@ class _IndexedReadProofScan8616:
             )
             global_bounds = {
                 bound
-                for bound in (
+                for bound in iter((
                     tuple(state.prefixes.values())
                     + tuple(state.predecessors.values())
                     + tuple(state.ranges.values())
-                )
+                ))
                 if bound.kind in {
                     _ScalarStorageKind8616.MEMORY,
                     _ScalarStorageKind8616.REGISTER,
@@ -1132,8 +1199,14 @@ class _IndexedReadProofScan8616:
                     continue
                 self._invalidate_scalar(state, bound)
 
+    @cython.ccall
     def _prove_reads(self, expr: object, state: _RangeProofState8616) -> None:
         """Record proofs for dynamic indexed stack-array reads in one value."""
+        array: object
+        index: object
+        prefix_bound: object
+        range_bound: object
+        node: object
         if expr is None:
             return
         for node in _iter_c_nodes_deep_8616(expr):
@@ -1161,7 +1234,7 @@ class _IndexedReadProofScan8616:
             if prefix_bound is None or range_bound is None:
                 continue
             self.report.classified_fact_count += 1
-            if prefix_bound != range_bound:
+            if operator.ne(prefix_bound, range_bound):
                 continue
             self.report.proofs.append(
                 IndexedStackReadProof8616(
@@ -1183,11 +1256,11 @@ class _IndexedReadProofScan8616:
         """Select the uniquely matching signed-remainder lowering fact."""
         return tuple(
             fact
-            for fact in self.facts
+            for fact in iter(self.facts)
             if fact.source_kind
             is DirectStackMoveSourceKind8616.SIGNED_IDIV_REMAINDER
-            and fact.dst_offset == lhs_bp_offset
-            and fact.width == lhs.width
+            and operator.eq(fact.dst_offset, lhs_bp_offset)
+            and operator.eq(fact.width, lhs.width)
             and fact.source_immediate == 1
             and fact.source_call_return_contract is not None
             and fact.source_call_return_contract.value_range.is_nonnegative
@@ -1201,6 +1274,7 @@ class _IndexedReadProofScan8616:
             )
         )
 
+    @cython.ccall
     def _remainder_divisor_bound_8616(
         self,
         rhs: CBinaryOp,
@@ -1210,6 +1284,7 @@ class _IndexedReadProofScan8616:
         statement_ins_addr: object,
     ) -> _ScalarStorage8616 | None:
         """Prove the modulo divisor binds to the fact's source offset."""
+        divisor: object
         divisor = _binary_storage_constant_8616(rhs.rhs, "Add", 1)
         divisor_expression = _strip_casts_8616(rhs.rhs)
         divisor_bp_offset = (
@@ -1220,7 +1295,7 @@ class _IndexedReadProofScan8616:
         if (
             divisor is None
             or divisor.kind is not _ScalarStorageKind8616.STACK
-            or divisor_bp_offset != fact.source_offset
+            or operator.ne(divisor_bp_offset, fact.source_offset)
             or not isinstance(fact.source_call_ins_addr, int)
         ):
             self._debug(
@@ -1233,6 +1308,7 @@ class _IndexedReadProofScan8616:
             return None
         return divisor
 
+    @cython.ccall
     def _remainder_range_fact(
         self,
         assignment: CAssignment,
@@ -1240,6 +1316,8 @@ class _IndexedReadProofScan8616:
         state: _RangeProofState8616,
     ) -> _RemainderCallEvidence8616 | None:
         """Bind one structured modulo assignment to lowering and range evidence."""
+        contract: object
+        divisor: object
         rhs = _strip_casts_8616(assignment.rhs)
         if not isinstance(rhs, CBinaryOp) or rhs.op != "Mod":
             return None
@@ -1297,8 +1375,8 @@ class _IndexedReadProofScan8616:
             expected_callee_addr=fact.source_call_target,
         )
         if (
-            callsite_addr != fact.source_call_ins_addr
-            and callee_addr != fact.source_call_target
+            operator.ne(callsite_addr, fact.source_call_ins_addr)
+            and operator.ne(callee_addr, fact.source_call_target)
         ):
             return None
         contract = fact.source_call_return_contract
@@ -1310,15 +1388,23 @@ class _IndexedReadProofScan8616:
             call_contract=contract,
         )
 
+    @cython.ccall
     def _walk_assignment(
         self,
         node: CAssignment,
         state: _RangeProofState8616,
     ) -> _RangeProofState8616:
         """Fold one scalar assignment's proof effects into the state."""
+        assigned_constant: object
+        assignment: object
+        copied_range: object
+        copied_storage: object
+        derived: object
+        derived_range: object
+        predecessor: object
         self._prove_reads(node.rhs, state)
         assignment = _assignment_to_scalar_8616(node)
-        call_contracts: dict[int, RuntimeCallReturnContract8616] = {}
+        call_contracts: dict[cython.longlong, RuntimeCallReturnContract8616] = {}
         derived_range = None
         if assignment is not None:
             derived = self._remainder_range_fact(node, assignment[0], state)
@@ -1380,9 +1466,10 @@ class _IndexedReadProofScan8616:
                 if isinstance(statement, CAssignment)
                 else None,
             )
-            for statement in node.body.statements
+            for statement in iter(node.body.statements)
         )
 
+    @cython.ccall
     def _loop_outgoing_8616(
         self,
         node: object,
@@ -1390,26 +1477,31 @@ class _IndexedReadProofScan8616:
         entering: _RangeProofState8616,
     ) -> _RangeProofState8616:
         """Intersect loop-entry and post-iteration states, then drop writes."""
+        scalar: object
         outgoing = _intersect_states_8616(
             (entering, iterated),
             entering,
         )
         written_scalars = {
             assignment[0]
-            for candidate in _direct_scalar_assignments_8616(node)
-            for assignment in (_assignment_to_scalar_8616(candidate),)
+            for candidate in builtins.iter(_direct_scalar_assignments_8616(node))
+            for assignment in iter((_assignment_to_scalar_8616(candidate),))
             if assignment is not None
         }
         for scalar in written_scalars:
             self._invalidate_scalar(outgoing, scalar)
         return outgoing
 
+    @cython.ccall
     def _walk_for(
         self,
         node: CForLoop,
         state: _RangeProofState8616,
     ) -> _RangeProofState8616:
         """Prove prefix bounds and countdown carriers across one for-loop."""
+        descriptor: object
+        prefix_array: object
+        carrier: object
         initialized = self._walk(node.initializer, state)
         descriptor = _ascending_loop_8616(node)
         self._debug(
@@ -1444,12 +1536,16 @@ class _IndexedReadProofScan8616:
             outgoing.prefixes[prefix_array] = descriptor.bound
         return outgoing
 
+    @cython.ccall
     def _walk_while(
         self,
         node: CWhileLoop,
         state: _RangeProofState8616,
     ) -> _RangeProofState8616:
         """Prove countdown carriers across one canonical while-loop."""
+        prefix_array: object
+        while_descriptor: object
+        carrier: object
         while_descriptor = _canonical_while_8616(node, state)
         self._debug(
             "while-loop",
@@ -1497,7 +1593,7 @@ class _IndexedReadProofScan8616:
         """Intersect the branch states of one if/else node."""
         branches = tuple(
             self._walk(branch, state)
-            for _condition, branch in node.condition_and_nodes
+            for _condition, branch in iter(node.condition_and_nodes)
         )
         if node.else_node is None:
             branches += (state.copy(),)
@@ -1514,7 +1610,7 @@ class _IndexedReadProofScan8616:
         self._prove_reads(node.switch, state)
         branches = tuple(
             self._walk(body, state)
-            for body in node.cases.values()
+            for body in builtins.iter(node.cases.values())
         ) if isinstance(node.cases, dict) else ()
         if node.default is None:
             branches += (state.copy(),)
@@ -1522,12 +1618,14 @@ class _IndexedReadProofScan8616:
             branches += (self._walk(node.default, state),)
         return _intersect_states_8616(branches, state)
 
+    @cython.ccall
     def _walk(
         self,
         node: object,
         incoming: _RangeProofState8616,
     ) -> _RangeProofState8616:
         """Walk structured control flow without mutating the AST."""
+        statement: object
         state = incoming.copy()
         if node is None:
             return state
@@ -1557,7 +1655,7 @@ class _IndexedReadProofScan8616:
 def collect_indexed_stack_read_proofs_8616(
     root: object,
     *,
-    direct_stack_move_facts: tuple[DirectStackMoveFact8616, ...] = (),
+    direct_stack_move_facts: object = (),
     codegen: object | None = None,
 ) -> IndexedStackReadProofReport8616:
     """Prove exact dynamic reads selected from initialized stack-array prefixes.
@@ -1569,7 +1667,7 @@ def collect_indexed_stack_read_proofs_8616(
     """
     facts = tuple(
         fact
-        for fact in direct_stack_move_facts
+        for fact in iter(direct_stack_move_facts)
         if isinstance(fact, DirectStackMoveFact8616)
     )
     callsite_contracts, target_contracts = _contract_inventories_8616(facts)

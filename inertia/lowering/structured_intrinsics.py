@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Lower typed structured-codegen intrinsics before C validation.
 
 Layer: Types/Lowering.
@@ -13,6 +14,8 @@ Incomplete or effectful forms are retained; rewrite and CLI must not hide them.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -27,6 +30,8 @@ from inertia.lowering.c_ast_utils import (
     _replace_c_children_8616,
 )
 from inertia.semantics.callsite_summary import StructuredCallKind8616, structured_call_kind_8616
+import dataclasses
+import operator
 
 __all__ = [
     "StructuredIntrinsicLoweringStats8616",
@@ -39,7 +44,7 @@ __all__ = [
 class _CFunctionStructuredIntrinsics8616(Protocol):
     """Third-party C function root consumed by intrinsic lowering."""
 
-    addr: int
+    addr: cython.longlong
     statements: object
 
 
@@ -50,18 +55,19 @@ class _CodegenStructuredIntrinsics8616(Protocol):
     _inertia_structured_intrinsic_lowering_stats_8616: StructuredIntrinsicLoweringStats8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StructuredIntrinsicLoweringStats8616:
     """Closed evidence counters for unused structured intrinsic removal."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-def is_structured_insert_intrinsic_8616(node: object) -> bool:
+@cython.ccall
+def is_structured_insert_intrinsic_8616(node: object) -> cython.bint:
     """Return whether a structured call is angr's typed Insert intrinsic."""
     return (
         isinstance(node, structured_c.CFunctionCall)
@@ -69,8 +75,10 @@ def is_structured_insert_intrinsic_8616(node: object) -> bool:
     )
 
 
-def _expression_is_side_effect_free_8616(node: object) -> bool:
+@cython.ccall
+def _expression_is_side_effect_free_8616(node: object) -> cython.bint:
     """Return whether evaluating one structured expression has no side effect."""
+    candidate: object
     nodes = (node, *_iter_c_nodes_deep_8616(node))
     for candidate in nodes:
         if isinstance(
@@ -87,6 +95,7 @@ def _expression_is_side_effect_free_8616(node: object) -> bool:
     return True
 
 
+@cython.ccall
 def _expression_width_bits_8616(expression: object) -> int | None:
     """Return the positive typed width of one structured expression."""
     expression_type = expression.type if isinstance(expression, structured_c.CExpression) else None
@@ -99,8 +108,10 @@ def _expression_width_bits_8616(expression: object) -> int | None:
     return width if isinstance(width, int) and width > 0 else None
 
 
+@cython.ccall
 def _insert_value_width_bits_8616(value: object) -> int | None:
     """Return the inserted field width, including typed segment helpers."""
+    helper_width: object
     if isinstance(value, structured_c.CFunctionCall) and isinstance(value.callee_target, str):
         helper_width = {
             "SEG_U8": 8,
@@ -114,8 +125,9 @@ def _insert_value_width_bits_8616(value: object) -> int | None:
 
 def _decoded_insert_operands_8616(
     call: structured_c.CFunctionCall,
-) -> tuple[object, int, object, int, int] | None:
+) -> object:
     """Validate Insert operands; return (base, shift, value, base_width, value_width)."""
+    value_width: object
     raw_args: object = call.args
     if not isinstance(raw_args, (list, tuple)):
         return None
@@ -130,7 +142,7 @@ def _decoded_insert_operands_8616(
     value_width = _insert_value_width_bits_8616(value)
     if value_width is None:
         return None
-    candidate_widths = tuple(width for width in (base_width, result_width) if width is not None)
+    candidate_widths = tuple(width for width in iter((base_width, result_width)) if width is not None)
     if not candidate_widths:
         return None
     base_width = max(candidate_widths)
@@ -142,10 +154,12 @@ def _decoded_insert_operands_8616(
     return base, shift, value, base_width, value_width
 
 
+@cython.ccall
 def lower_structured_insert_call_8616(
     call: object,
 ) -> structured_c.CExpression | None:
     """Lower one x86 little-endian Insert intrinsic to exact bit operations."""
+    decoded: object
     if not is_structured_insert_intrinsic_8616(call):
         return None
     assert isinstance(call, structured_c.CFunctionCall)
@@ -185,8 +199,9 @@ def lower_structured_insert_call_8616(
     return structured_c.CBinaryOp("Or", preserved, inserted, codegen=call.codegen)
 
 
-def lower_structured_insert_intrinsics_8616(codegen: object) -> bool:
+def lower_structured_insert_intrinsics_8616(codegen: object) -> cython.bint:
     """Lower every complete typed Insert pseudo-call in one C function."""
+    cfunc: object
     typed_codegen = cast(_CodegenStructuredIntrinsics8616, codegen)
     cfunc = typed_codegen.cfunc
     if cfunc is None or cfunc.statements is None:
@@ -196,11 +211,12 @@ def lower_structured_insert_intrinsics_8616(codegen: object) -> bool:
         return False
     root = cfunc.statements
 
-    raw_node_ids: set[int] = set()
-    classified_node_ids: set[int] = set()
-    materialized_node_ids: set[int] = set()
+    raw_node_ids: set[cython.longlong] = set()
+    classified_node_ids: set[cython.longlong] = set()
+    materialized_node_ids: set[cython.longlong] = set()
 
     def transform(node: object) -> object:
+        replacement: object
         if not is_structured_insert_intrinsic_8616(node):
             return node
         raw_node_ids.add(id(node))
@@ -231,10 +247,11 @@ def lower_structured_insert_intrinsics_8616(codegen: object) -> bool:
     return changed
 
 
+@cython.ccall
 def _cvariable_is_unread_elsewhere_8616(
     lhs: structured_c.CVariable,
-    identity_occurrence_counts: Mapping[int, int],
-) -> bool:
+    identity_occurrence_counts: Mapping[cython.longlong, cython.longlong],
+) -> cython.bint:
     """Return whether one exact variable identity has no other AST occurrence."""
     identity = lhs.unified_variable or lhs.variable
     return identity_occurrence_counts.get(id(identity), 0) <= 1
@@ -242,7 +259,7 @@ def _cvariable_is_unread_elsewhere_8616(
 
 def _unused_insert_statement_8616(
     statement: object,
-    identity_occurrence_counts: Mapping[int, int],
+    identity_occurrence_counts: Mapping[cython.longlong, cython.longlong],
 ) -> structured_c.CFunctionCall | None:
     """Return a pure standalone Insert intrinsic, otherwise refuse it."""
     if isinstance(statement, structured_c.CExpressionStatement):
@@ -261,14 +278,16 @@ def _unused_insert_statement_8616(
     raw_args: object = expression.args
     if not isinstance(raw_args, (list, tuple)):
         return None
-    if not all(_expression_is_side_effect_free_8616(argument) for argument in raw_args):
+    if not all(_expression_is_side_effect_free_8616(argument) for argument in iter(raw_args)):
         return None
     return expression
 
 
-def _insert_identity_occurrence_counts_8616(root: object) -> dict[int, int]:
+@cython.ccall
+def _insert_identity_occurrence_counts_8616(root: object) -> object:
     """Count uses of each unified variable identity under the root."""
-    counts: dict[int, int] = {}
+    node: object
+    counts: dict[cython.longlong, cython.longlong] = {}
     for node in _iter_c_node_occurrences_8616(root):
         if isinstance(node, structured_c.CVariable):
             identity = node.unified_variable or node.variable
@@ -277,11 +296,13 @@ def _insert_identity_occurrence_counts_8616(root: object) -> dict[int, int]:
     return counts
 
 
-def _insert_statement_lists_8616(root: object) -> list[structured_c.CStatements]:
+@cython.ccall
+def _insert_statement_lists_8616(root: object) -> object:
     """Collect each distinct statement-list node reachable under the root."""
+    node: object
     statement_lists: list[structured_c.CStatements] = []
-    seen_statement_list_ids: set[int] = set()
-    for node in (root, *_iter_c_nodes_deep_8616(root)):
+    seen_statement_list_ids: set[cython.longlong] = set()
+    for node in (root, ) + tuple(_iter_c_nodes_deep_8616(root)):
         if not isinstance(node, structured_c.CStatements) or id(node) in seen_statement_list_ids:
             continue
         seen_statement_list_ids.add(id(node))
@@ -289,11 +310,14 @@ def _insert_statement_lists_8616(root: object) -> list[structured_c.CStatements]
     return statement_lists
 
 
+@cython.ccall
 def _prune_statement_list_8616(
     statements_node: structured_c.CStatements,
-    identity_occurrence_counts: dict[int, int],
-) -> tuple[int, int, bool]:
+    identity_occurrence_counts: object,
+) -> tuple[cython.longlong, cython.longlong, cython.bint]:
     """Drop unused Insert statements; return (raw, dropped, changed)."""
+    intrinsic: object
+    statement: object
     raw_count = 0
     dropped_count = 0
     old_statements = list(statements_node.statements or ())
@@ -312,14 +336,18 @@ def _prune_statement_list_8616(
             new_statements.append(statement)
             continue
         dropped_count += 1
-    if len(new_statements) != len(old_statements):
+    if operator.ne(len(new_statements), len(old_statements)):
         statements_node.statements = new_statements
         return raw_count, dropped_count, True
     return raw_count, dropped_count, False
 
 
-def prune_unused_structured_insert_intrinsics_8616(codegen: object) -> bool:
+@cython.ccall
+def prune_unused_structured_insert_intrinsics_8616(codegen: object) -> cython.bint:
     """Remove pure standalone Insert pseudo-calls whose values are unused."""
+    cfunc: object
+    root: object
+    statements_node: object
     typed_codegen = cast(_CodegenStructuredIntrinsics8616, codegen)
     cfunc = typed_codegen.cfunc
     root = cfunc.statements if cfunc is not None else None

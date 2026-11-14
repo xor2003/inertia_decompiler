@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Rewrite/Postprocess cleanup.
 
 Responsibility: prune setup/carrier assignments only when typed evidence proves they are dead.
@@ -6,6 +7,7 @@ Do not recover new semantics, storage identity, types, call signatures, control 
 """
 
 from __future__ import annotations
+import cython
 
 import enum
 import os
@@ -31,6 +33,9 @@ from inertia.postprocess.callsite_stack_metadata import (
     _prune_dead_stack_carrier_assignments_8616 as _prune_dead_stack_carrier_assignments_core_8616,
 )
 from inertia.postprocess.decompiler_postprocess_utils import _iter_c_nodes_deep_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "DeadSetupDecision8616",
@@ -42,10 +47,10 @@ __all__ = [
 _STAGING_NAME_RE = re.compile(r"^(?:vvar_\d+|s_[0-9a-fA-F]+(?:_[0-9a-fA-F]+)*|tmp_\d+|ir_\d+|arg_[0-9a-fA-F]+)$")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _Candidate:
-    stmt_index: int
-    key: tuple[str, int | str]
+    stmt_index: cython.longlong
+    key: object
     lhs: CVariable
     rhs: object
 
@@ -53,17 +58,18 @@ class _Candidate:
 class _StatementBlockLike8616(Protocol):
     """Structural view of a dynamic angr/codegen statement block."""
 
-    statements: list[object]
+    statements: object
 
 
 class _DeadSetupCounters8616(Protocol):
     """Owned integer counters established before the production sweep."""
 
-    dead_setup_candidates: int
-    dead_setup_refused: int
-    dead_setup_pruned: int
+    dead_setup_candidates: cython.longlong
+    dead_setup_refused: cython.longlong
+    dead_setup_pruned: cython.longlong
 
 
+@cython.ccall
 def _is_statement_block_like_8616(node: object) -> TypeGuard[_StatementBlockLike8616]:
     """Return whether a dynamic angr/codegen boundary node has mutable statements."""
     return isinstance(getattr(node, "statements", None), list)
@@ -89,6 +95,7 @@ class DeadSetupMode8616(enum.Enum):
     PRODUCTION = "production"
 
 
+@cython.ccall
 def _env_dead_setup_mode_8616() -> DeadSetupMode8616 | None:
     """Resolve pruning mode from environment flags, or None when unset."""
     env_mode = os.environ.get("INERTIA_DEAD_SETUP_PRUNE_MODE", "").strip().lower()
@@ -104,8 +111,10 @@ def _env_dead_setup_mode_8616() -> DeadSetupMode8616 | None:
     return None
 
 
+@cython.ccall
 def _attr_dead_setup_mode_8616(codegen: object) -> DeadSetupMode8616 | None:
     """Resolve pruning mode from dynamic codegen compatibility boundary flags."""
+    attr: object
     attr = getattr(codegen, "_inertia_dead_setup_prune_mode", None)
     if isinstance(attr, DeadSetupMode8616):
         return attr
@@ -120,8 +129,12 @@ def _attr_dead_setup_mode_8616(codegen: object) -> DeadSetupMode8616 | None:
     return None
 
 
+@cython.ccall
 def _resolve_dead_setup_mode_8616(codegen: object) -> DeadSetupMode8616:
     """Resolve pruning mode from environment and dynamic codegen compatibility boundary flags."""
+    attr_resolved: object
+    env_resolved: object
+    safe_attr: object
     env_resolved = _env_dead_setup_mode_8616()
     if env_resolved is not None:
         return env_resolved
@@ -138,8 +151,10 @@ def _resolve_dead_setup_mode_8616(codegen: object) -> DeadSetupMode8616:
     return DeadSetupMode8616.DIAGNOSTIC
 
 
+@cython.ccall
 def _setup_counter_defaults(codegen: object) -> None:
     """Initialize dynamic codegen compatibility boundary diagnostic counters."""
+    name: object
     for name in (
         "dead_setup_candidates",
         "dead_setup_pruned",
@@ -161,8 +176,12 @@ def _setup_counter_defaults(codegen: object) -> None:
             setattr(codegen, name, 0)
 
 
-def _var_name(node: CVariable) -> str:
+@cython.ccall
+def _var_name(node: CVariable) -> object:
     """Return a variable name from dynamic angr/codegen boundary CVariable metadata."""
+    name: object
+    node_name: object
+    var: object
     var = getattr(node, "variable", None)
     name = getattr(var, "name", None)
     if isinstance(name, str) and name:
@@ -173,8 +192,11 @@ def _var_name(node: CVariable) -> str:
     return ""
 
 
+@cython.ccall
 def _var_key(node: CVariable) -> tuple[str, int | str]:
     """Return a stable key from dynamic angr/codegen boundary CVariable metadata."""
+    ident: object
+    var: object
     var = getattr(node, "variable", None)
     if var is not None:
         ident = getattr(var, "ident", None)
@@ -184,8 +206,11 @@ def _var_key(node: CVariable) -> tuple[str, int | str]:
     return ("nodeid", id(node))
 
 
-def _is_observable_storage(lhs: CVariable) -> bool:
+@cython.ccall
+def _is_observable_storage(lhs: CVariable) -> cython.bint:
     """Return whether dynamic angr/codegen boundary metadata names observable storage."""
+    region: object
+    var: object
     var = getattr(lhs, "variable", None)
     region = getattr(var, "region", None)
     # Local stack/register carriers are removable when def-use proves dead.
@@ -193,6 +218,7 @@ def _is_observable_storage(lhs: CVariable) -> bool:
     return bool(isinstance(region, str) and region.lower() in {"global", "argument", "arg"})
 
 
+@cython.ccall
 def _is_candidate_lhs(lhs: object) -> TypeGuard[CVariable]:
     if not isinstance(lhs, CVariable):
         return False
@@ -200,20 +226,24 @@ def _is_candidate_lhs(lhs: object) -> TypeGuard[CVariable]:
     return bool(name and _STAGING_NAME_RE.match(name))
 
 
-def _is_address_of_op_8616(node: object) -> bool:
+@cython.ccall
+def _is_address_of_op_8616(node: object) -> cython.bint:
     """Return whether a dynamic angr/codegen node takes an address."""
     return isinstance(node, CUnaryOp) and node.op in {"Reference", "AddressOf"}
 
 
-def _binop_has_const_operand_8616(node: CBinaryOp) -> bool:
+@cython.ccall
+def _binop_has_const_operand_8616(node: CBinaryOp) -> cython.bint:
     """Return whether an Add/Sub node has a constant operand."""
     if node.op not in {"Add", "Sub"}:
         return False
     return isinstance(node.lhs, CConstant) or isinstance(node.rhs, CConstant)
 
 
-def _is_setup_rhs(rhs: object) -> bool:
+@cython.ccall
+def _is_setup_rhs(rhs: object) -> cython.bint:
     """Classify setup expressions across a dynamic angr/codegen C AST boundary."""
+    node: object
     if rhs is None:
         return False
     if _is_address_of_op_8616(rhs):
@@ -232,21 +262,24 @@ def _is_setup_rhs(rhs: object) -> bool:
     return False
 
 
-def _rhs_has_side_effects(rhs: object) -> bool:
+def _rhs_has_side_effects(rhs: object) -> cython.bint:
     if rhs is None:
         return False
-    return any(isinstance(node, CFunctionCall) for node in _iter_c_nodes_deep_8616(rhs))
+    return any(isinstance(node, CFunctionCall) for node in builtins.iter(_iter_c_nodes_deep_8616(rhs)))
 
 
-def _count_variable_reads_8616(node: object, reads: dict[tuple[str, int | str], int]) -> None:
+@cython.ccall
+def _count_variable_reads_8616(node: object, reads: object) -> None:
     """Accumulate CVariable reads under one dynamic angr/codegen subtree."""
+    sub: object
     for sub in _iter_c_nodes_deep_8616(node):
         if isinstance(sub, CVariable):
             key = _var_key(sub)
             reads[key] = reads.get(key, 0) + 1
 
 
-def _count_assignment_reads_8616(stmt: CAssignment, reads: dict[tuple[str, int | str], int]) -> None:
+@cython.ccall
+def _count_assignment_reads_8616(stmt: CAssignment, reads: object) -> None:
     """Accumulate reads for one assignment across the dynamic angr/codegen boundary."""
     lhs = stmt.lhs
     rhs = stmt.rhs
@@ -259,9 +292,12 @@ def _count_assignment_reads_8616(stmt: CAssignment, reads: dict[tuple[str, int |
         _count_variable_reads_8616(lhs, reads)
 
 
-def _collect_read_counts(root: object) -> dict[tuple[str, int | str], int]:
+@cython.ccall
+def _collect_read_counts(root: object) -> object:
     """Count CVariable reads across dynamic angr/codegen boundary statement blocks."""
-    reads: dict[tuple[str, int | str], int] = {}
+    block: object
+    stmt: object
+    reads: dict[tuple[str, int | str], cython.longlong] = {}
     # Traverse by statement blocks to avoid double-counting that occurs when
     # walking the full tree and then re-walking each nested node.
     for block in _iter_statement_blocks(root):
@@ -287,8 +323,16 @@ _BLOCK_CHILD_ATTRS_8616 = (
 )
 
 
-def _push_block_children_8616(node: object, stack: list[object]) -> None:
+@cython.ccall
+def _push_block_children_8616(node: object, stack: object) -> None:
     """Push nested dynamic angr/codegen C AST boundary children onto the worklist."""
+    cases: object
+    child: object
+    condition_and_nodes: object
+    default: object
+    attr: object
+    body: object
+    cond: object
     for attr in _BLOCK_CHILD_ATTRS_8616:
         child = getattr(node, attr, None)
         if child is not None:
@@ -309,7 +353,9 @@ def _push_block_children_8616(node: object, stack: list[object]) -> None:
 
 def _iter_statement_blocks(root: object) -> Iterator[object]:
     """Yield nested statement blocks from a dynamic angr/codegen C AST boundary."""
-    seen: set[int] = set()
+    node: object
+    stmt: object
+    seen: set[cython.longlong] = set()
     stack: list[object] = [root]
     while stack:
         node = stack.pop()
@@ -326,8 +372,11 @@ def _iter_statement_blocks(root: object) -> Iterator[object]:
         _push_block_children_8616(node, stack)
 
 
-def _gather_candidates(statements: object) -> list[_Candidate]:
+@cython.ccall
+def _gather_candidates(statements: object) -> object:
     """Collect setup candidates from a dynamic angr/codegen boundary statement block."""
+    idx: object
+    stmt: object
     stmts: list[object] = list(getattr(statements, "statements", ()) or ())
     out: list[_Candidate] = []
     for idx, stmt in enumerate(stmts):
@@ -343,7 +392,9 @@ def _gather_candidates(statements: object) -> list[_Candidate]:
     return out
 
 
-def _rhs_mentions_flag_like_state(rhs: object) -> bool:
+@cython.ccall
+def _rhs_mentions_flag_like_state(rhs: object) -> cython.bint:
+    node: object
     for node in _iter_c_nodes_deep_8616(rhs):
         if not isinstance(node, CVariable):
             continue
@@ -353,8 +404,10 @@ def _rhs_mentions_flag_like_state(rhs: object) -> bool:
     return False
 
 
-def _rhs_looks_like_stack_carrier(rhs: object) -> bool:
+@cython.ccall
+def _rhs_looks_like_stack_carrier(rhs: object) -> cython.bint:
     """Return whether a dynamic angr/codegen boundary RHS looks like a stack carrier."""
+    node: object
     for node in _iter_c_nodes_deep_8616(rhs):
         if not isinstance(node, CVariable):
             continue
@@ -366,9 +419,9 @@ def _rhs_looks_like_stack_carrier(rhs: object) -> bool:
 
 def _classify_candidate_8616(
     cand: _Candidate,
-    reads: dict[tuple[str, int | str], int],
+    reads: object,
     *,
-    call_indices: set[int] | None = None,
+    call_indices: object = None,
 ) -> DeadSetupDecision8616:
     if _is_observable_storage(cand.lhs):
         return DeadSetupDecision8616.LIVE_CALL_ARG_SETUP
@@ -376,7 +429,7 @@ def _classify_candidate_8616(
         # Conservative production rule: setup/carrier statements in call-bearing
         # regions can encode outgoing argument staging. Refuse pruning unless
         # we have stronger evidence than local shape/liveness.
-        if any(cand.stmt_index <= idx for idx in call_indices):
+        if any(cand.stmt_index <= idx for idx in iter(call_indices)):
             return DeadSetupDecision8616.LIVE_CALL_ARG_SETUP
     if _rhs_has_side_effects(cand.rhs):
         return DeadSetupDecision8616.UNKNOWN_REFUSE
@@ -389,42 +442,46 @@ def _classify_candidate_8616(
     return DeadSetupDecision8616.DEFINITELY_DEAD
 
 
-def _bump_counter_8616(codegen: object, name: str, inc: int = 1) -> None:
+@cython.ccall
+def _bump_counter_8616(codegen: object, name: object, inc: cython.longlong = 1) -> None:
     """Increment a dynamic codegen compatibility boundary diagnostic counter."""
     setattr(codegen, name, int(getattr(codegen, name, 0)) + int(inc))
 
 
+@cython.ccall
 def _record_decision_counter_8616(codegen: object, decision: DeadSetupDecision8616) -> None:
     """Record a pruning decision into dynamic codegen compatibility boundary counters."""
-    if decision == DeadSetupDecision8616.LIVE_CALL_ARG_SETUP:
+    if operator.eq(decision, DeadSetupDecision8616.LIVE_CALL_ARG_SETUP):
         typing.cast(typing.Any, codegen).dead_setup_live_call_arg = int(getattr(codegen, "dead_setup_live_call_arg", 0)) + 1
-    elif decision == DeadSetupDecision8616.LIVE_STACK_CARRIER:
+    elif operator.eq(decision, DeadSetupDecision8616.LIVE_STACK_CARRIER):
         typing.cast(typing.Any, codegen).dead_setup_live_stack_carrier = int(getattr(codegen, "dead_setup_live_stack_carrier", 0)) + 1
-    elif decision == DeadSetupDecision8616.LIVE_WIDENING_CARRIER:
+    elif operator.eq(decision, DeadSetupDecision8616.LIVE_WIDENING_CARRIER):
         typing.cast(typing.Any, codegen).dead_setup_live_widening_carrier = int(getattr(codegen, "dead_setup_live_widening_carrier", 0)) + 1
-    elif decision == DeadSetupDecision8616.LIVE_CONDITION_SOURCE:
+    elif operator.eq(decision, DeadSetupDecision8616.LIVE_CONDITION_SOURCE):
         typing.cast(typing.Any, codegen).dead_setup_live_condition_source = int(getattr(codegen, "dead_setup_live_condition_source", 0)) + 1
-    elif decision == DeadSetupDecision8616.UNKNOWN_REFUSE:
+    elif operator.eq(decision, DeadSetupDecision8616.UNKNOWN_REFUSE):
         typing.cast(typing.Any, codegen).dead_setup_unknown_refuse = int(getattr(codegen, "dead_setup_unknown_refuse", 0)) + 1
 
 
-def _block_call_indices_8616(stmts: list[object]) -> set[int]:
+def _block_call_indices_8616(stmts: object) -> set[cython.longlong]:
     """Return statement indices containing calls in one dynamic angr/codegen block."""
     return {
         idx
-        for idx, stmt in enumerate(stmts)
-        if any(isinstance(node, CFunctionCall) for node in _iter_c_nodes_deep_8616(stmt))
+        for idx, stmt in builtins.iter(enumerate(stmts))
+        if any(isinstance(node, CFunctionCall) for node in builtins.iter(_iter_c_nodes_deep_8616(stmt)))
     }
 
 
+@cython.ccall
 def _classify_block_candidates_8616(
     codegen: object,
-    candidates: list[_Candidate],
-    reads: dict[tuple[str, int | str], int],
-    call_indices: set[int] | None,
-) -> tuple[set[int], int]:
+    candidates: object,
+    reads: object,
+    call_indices: object,
+) -> tuple[set[cython.longlong], cython.longlong]:
     """Classify one block's candidates; return removable indices and refused count."""
-    to_remove: set[int] = set()
+    cand: object
+    to_remove: set[cython.longlong] = set()
     refused = 0
     for cand in candidates:
         try:
@@ -433,7 +490,7 @@ def _classify_block_candidates_8616(
             _bump_counter_8616(codegen, "dead_setup_failure_count")
             decision = DeadSetupDecision8616.UNKNOWN_REFUSE
         _bump_counter_8616(codegen, "dead_setup_classified_fact_count")
-        if decision == DeadSetupDecision8616.DEFINITELY_DEAD:
+        if operator.eq(decision, DeadSetupDecision8616.DEFINITELY_DEAD):
             to_remove.add(cand.stmt_index)
             continue
         refused += 1
@@ -441,8 +498,10 @@ def _classify_block_candidates_8616(
     return to_remove, refused
 
 
+@cython.ccall
 def _diagnostic_sweep_8616(codegen: object, statements: object) -> None:
     """Run the diagnostics-only census across dynamic angr/codegen statement blocks."""
+    block: object
     reads = _collect_read_counts(statements)
     total_candidates = 0
     total_refused = 0
@@ -461,16 +520,18 @@ def _diagnostic_sweep_8616(codegen: object, statements: object) -> None:
         _bump_counter_8616(codegen, "dead_setup_refused", total_refused)
 
 
+@cython.ccall
 def _prune_block_candidates_8616(
     codegen: object,
     block: object,
-    stmts: list[object],
-    reads: dict[tuple[str, int | str], int],
-) -> tuple[int, int, int, bool]:
+    stmts: object,
+    reads: object,
+) -> tuple[cython.longlong, cython.longlong, cython.longlong, cython.bint]:
     """Classify and delete proven-dead candidates in one block.
 
     Returns (candidate_count, refused, pruned, block_changed).
     """
+    idx: object
     candidates = _gather_candidates(block)
     if not candidates:
         return 0, 0, 0, False
@@ -492,8 +553,10 @@ def _prune_block_candidates_8616(
     return len(candidates), refused, 0, False
 
 
-def _production_sweep_8616(codegen: _DeadSetupCounters8616, statements: object) -> bool:
+@cython.ccall
+def _production_sweep_8616(codegen: _DeadSetupCounters8616, statements: object) -> cython.bint:
     """Run production prune passes until a fixpoint across dynamic angr/codegen blocks."""
+    block: object
     changed = False
     while True:
         reads = _collect_read_counts(statements)
@@ -526,8 +589,11 @@ def _production_sweep_8616(codegen: _DeadSetupCounters8616, statements: object) 
     return changed
 
 
-def _prune_dead_setup_carriers_8616(codegen: object) -> bool:
+@cython.ccall
+def _prune_dead_setup_carriers_8616(codegen: object) -> cython.bint:
     """Prune dead setup carriers across a dynamic angr/codegen C AST boundary."""
+    cfunc: object
+    statements: object
     cfunc = getattr(codegen, "cfunc", None)
     if cfunc is None:
         return False
@@ -537,7 +603,7 @@ def _prune_dead_setup_carriers_8616(codegen: object) -> bool:
 
     _setup_counter_defaults(codegen)
     mode = _resolve_dead_setup_mode_8616(codegen)
-    if mode == DeadSetupMode8616.DISABLED:
+    if operator.eq(mode, DeadSetupMode8616.DISABLED):
         typing.cast(typing.Any, codegen).dead_setup_prune_disabled = int(getattr(codegen, "dead_setup_prune_disabled", 0)) + 1
         return False
 
@@ -550,7 +616,7 @@ def _prune_dead_setup_carriers_8616(codegen: object) -> bool:
         typing.cast(typing.Any, codegen).dead_setup_live_call_arg = int(getattr(codegen, "dead_setup_live_call_arg", 0)) + 1
         return False
 
-    if mode == DeadSetupMode8616.DIAGNOSTIC:
+    if operator.eq(mode, DeadSetupMode8616.DIAGNOSTIC):
         _diagnostic_sweep_8616(codegen, statements)
         return False
 
@@ -563,10 +629,11 @@ def _prune_dead_setup_carriers_8616(codegen: object) -> bool:
     return _production_sweep_8616(typing.cast(_DeadSetupCounters8616, codegen), statements)
 
 
+@cython.ccall
 def _block_escaped_names_8616(
     block: object,
-    reads: dict[tuple[str, int | str], int],
-    escaped: set[str],
+    reads: object,
+    escaped: object,
 ) -> None:
     """Record names of still-present proven-dead candidates in one block.
 
@@ -574,23 +641,28 @@ def _block_escaped_names_8616(
     sequence. Absence contributes no diagnostic candidates; present statements
     still require the existing DEFINITELY_DEAD evidence before being counted.
     """
+    cand: object
     stmts = list(getattr(block, "statements", ()) or ())
     if not stmts:
         return
     call_indices = _block_call_indices_8616(stmts)
     for cand in _gather_candidates(block):
         decision = _classify_candidate_8616(cand, reads, call_indices=call_indices)
-        if decision != DeadSetupDecision8616.DEFINITELY_DEAD:
+        if operator.ne(decision, DeadSetupDecision8616.DEFINITELY_DEAD):
             continue
         name = _var_name(cand.lhs)
         if name:
             escaped.add(name)
 
 
-def _count_dead_setup_escaped_8616(codegen: object) -> int:
+@cython.ccall
+def _count_dead_setup_escaped_8616(codegen: object) -> cython.longlong:
     """Count escaped setup carriers across a dynamic angr/codegen C AST boundary."""
+    cfunc: object
+    statements: object
+    block: object
     mode = _resolve_dead_setup_mode_8616(codegen)
-    if mode != DeadSetupMode8616.PRODUCTION:
+    if operator.ne(mode, DeadSetupMode8616.PRODUCTION):
         return 0
     if hasattr(codegen, "_inertia_callsite_materialization_stats") and not _callsite_materialization_complete_8616(
         codegen

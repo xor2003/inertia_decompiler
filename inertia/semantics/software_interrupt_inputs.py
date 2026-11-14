@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Recover typed register inputs consumed by software interrupts.
 
 Layer: Semantics.
@@ -10,6 +11,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -31,8 +34,11 @@ from inertia.ir.scalar_definitions import (
     ScalarDefinitionIndex8616,
     build_scalar_definition_index_8616,
 )
+import dataclasses
+import operator
+import builtins
 
-type IRScalarValue8616 = IRValue | IRBinaryValue
+IRScalarValue8616 = typing.TypeAliasType("IRScalarValue8616", IRValue | IRBinaryValue)
 
 __all__ = [
     "IRScalarValue8616",
@@ -52,47 +58,47 @@ class SoftwareInterruptRefusalKind8616(StrEnum):
     REQUIRED_REGISTER_UNRESOLVED = "required-register-unresolved"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SoftwareInterruptAbiSpec8616:
     """One selector-specific software-interrupt input contract."""
 
-    vector: int
-    selector_register: str
-    selector_value: int
-    argument_registers: tuple[str, ...]
-    result_register: str | None
+    vector: cython.longlong
+    selector_register: object
+    selector_value: cython.longlong
+    argument_registers: object
+    result_register: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SoftwareInterruptInputFact8616:
     """Exact register values consumed and produced at one interrupt callsite."""
 
-    callsite_addr: int
-    target_addr: int
-    vector: int
-    selector_value: int
-    argument_registers: tuple[str, ...]
-    argument_values: tuple[IRScalarValue8616, ...]
-    result_register: str | None
+    callsite_addr: cython.longlong
+    target_addr: cython.longlong
+    vector: cython.longlong
+    selector_value: cython.longlong
+    argument_registers: object
+    argument_values: object
+    result_register: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SoftwareInterruptInputStats8616:
     """Closed evidence-loop counters for interrupt input recovery."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SoftwareInterruptInputArtifact8616:
     """Typed interrupt input facts and explicit recovery refusals."""
 
     facts: tuple[SoftwareInterruptInputFact8616, ...] = ()
-    refusals: tuple[tuple[int, SoftwareInterruptRefusalKind8616, str], ...] = ()
+    refusals: tuple[tuple[cython.longlong, SoftwareInterruptRefusalKind8616, str], ...] = ()
     stats: SoftwareInterruptInputStats8616 = SoftwareInterruptInputStats8616()
 
 
@@ -120,7 +126,7 @@ _BINARY_OPS_8616: dict[str, str] = {
     "Iop_Shl16": "Shl",
 }
 
-_REGISTER_SIZES_8616: dict[str, int] = {
+_REGISTER_SIZES_8616: dict[str, cython.longlong] = {
     "al": 1,
     "ah": 1,
     "bl": 1,
@@ -152,7 +158,8 @@ _REGISTER_SIZES_8616: dict[str, int] = {
 }
 
 
-def _tmp_id_8616(value: IRValue | None) -> int | None:
+@cython.ccall
+def _tmp_id_8616(value: object) -> int | None:
     """Return an exact VEX temporary id from an IR destination."""
     if value is None or value.space is not MemSpace.TMP or value.name is None:
         return None
@@ -161,12 +168,15 @@ def _tmp_id_8616(value: IRValue | None) -> int | None:
     return int(value.name[1:])
 
 
+@cython.ccall
 def _resolve_value_8616(
     value: object,
-    temp_values: dict[int, IRScalarValue8616],
-    register_values: dict[str, IRScalarValue8616 | None],
+    temp_values: object,
+    register_values: object,
 ) -> IRScalarValue8616 | None:
     """Resolve one typed IR value through exact same-block definitions."""
+    lhs: object
+    rhs: object
     if isinstance(value, IRBinaryValue):
         lhs = _resolve_value_8616(value.lhs, temp_values, register_values)
         rhs = _resolve_value_8616(value.rhs, temp_values, register_values)
@@ -187,6 +197,7 @@ def _resolve_value_8616(
     return None
 
 
+@cython.ccall
 def _stack_load_value_8616(instr: IRInstr) -> IRValue | None:
     """Return a typed stack value for one exact stable SS load."""
     if instr.op != "LOAD" or len(instr.args) != 1:
@@ -211,16 +222,22 @@ def _stack_load_value_8616(instr: IRInstr) -> IRValue | None:
 
 def _record_definition_8616(
     instr: IRInstr,
-    temp_values: dict[int, IRScalarValue8616],
-    register_values: dict[str, IRScalarValue8616 | None],
+    temp_values: object,
+    register_values: object,
     definitions: ScalarDefinitionIndex8616,
-    logical_memory: IRLogicalMemoryArtifact8616 | None,
+    logical_memory: object,
     *,
-    function_addr: int,
-    block_addr: int,
-    instr_index: int,
+    function_addr: cython.longlong,
+    block_addr: cython.longlong,
+    instr_index: cython.longlong,
 ) -> None:
     """Apply one supported typed-IR definition to same-block value state."""
+    lhs: object
+    logical_word: object
+    resolved: object
+    rhs: object
+    stack_value: object
+    temp_id: object
     temp_id = _tmp_id_8616(instr.dst)
     stack_value = _stack_load_value_8616(instr)
     if temp_id is not None and stack_value is not None:
@@ -247,7 +264,7 @@ def _record_definition_8616(
                 isinstance(value, IRValue)
                 and value.space is MemSpace.SS
                 and value.size < instr.size
-                for value in (lhs, rhs)
+                for value in iter((lhs, rhs))
             )
         )
         if lhs is not None and rhs is not None and not byte_stack_recombination:
@@ -277,8 +294,10 @@ def _record_definition_8616(
             register_values[register_name] = resolved
 
 
-def _interrupt_call_target_8616(instr: IRInstr) -> tuple[int, int, int] | None:
+@cython.ccall
+def _interrupt_call_target_8616(instr: IRInstr) -> object:
     """Return callsite, target, and vector for one typed-IR interrupt call."""
+    vector: object
     if instr.op != "CALL" or len(instr.args) != 1 or instr.addr is None:
         return None
     target = instr.args[0]
@@ -288,25 +307,30 @@ def _interrupt_call_target_8616(instr: IRInstr) -> tuple[int, int, int] | None:
     return None if vector is None else (instr.addr, target.const, vector)
 
 
+@cython.ccall
 def _matching_spec_8616(
-    vector: int,
-    register_values: dict[str, IRScalarValue8616 | None],
+    vector: cython.longlong,
+    register_values: object,
 ) -> SoftwareInterruptAbiSpec8616 | None:
     """Select an interrupt ABI only from an exact constant selector."""
+    selector: object
+    spec: object
     for spec in _INTERRUPT_ABI_SPECS_8616:
-        if spec.vector != vector:
+        if operator.ne(spec.vector, vector):
             continue
         selector = register_values.get(spec.selector_register)
-        if isinstance(selector, IRValue) and selector.space is MemSpace.CONST and selector.const == spec.selector_value:
+        if isinstance(selector, IRValue) and selector.space is MemSpace.CONST and operator.eq(selector.const, spec.selector_value):
             return spec
     return None
 
 
+@cython.ccall
 def _required_register_value_8616(
-    register_name: str,
-    register_values: dict[str, IRScalarValue8616 | None],
+    register_name: object,
+    register_values: object,
 ) -> IRScalarValue8616 | None:
     """Resolve a required ABI register, preserving an untouched entry value."""
+    size: object
     if register_name in register_values:
         return register_values[register_name]
     size = _REGISTER_SIZES_8616.get(register_name)
@@ -320,13 +344,17 @@ def _facts_from_block_8616(
     definitions: ScalarDefinitionIndex8616,
     logical_memory: IRLogicalMemoryArtifact8616 | None,
     *,
-    function_addr: int,
-) -> tuple[list[SoftwareInterruptInputFact8616], list[tuple[int, SoftwareInterruptRefusalKind8616, str]], int, int, int]:
+    function_addr: cython.longlong,
+) -> tuple[list[SoftwareInterruptInputFact8616], list[tuple[cython.longlong, SoftwareInterruptRefusalKind8616, str]], cython.longlong, cython.longlong, cython.longlong]:
     """Recover interrupt facts and counters from one typed IR block."""
-    temp_values: dict[int, IRScalarValue8616] = {}
+    call_target: object
+    spec: object
+    instr: object
+    instr_index: object
+    temp_values: dict[cython.longlong, IRScalarValue8616] = {}
     register_values: dict[str, IRScalarValue8616 | None] = {}
     facts: list[SoftwareInterruptInputFact8616] = []
-    refusals: list[tuple[int, SoftwareInterruptRefusalKind8616, str]] = []
+    refusals: list[tuple[cython.longlong, SoftwareInterruptRefusalKind8616, str]] = []
     raw_count = 0
     normalized_count = 0
     classified_count = 0
@@ -353,11 +381,11 @@ def _facts_from_block_8616(
         classified_count += 1
         values = tuple(
             _required_register_value_8616(name, register_values)
-            for name in spec.argument_registers
+            for name in iter(spec.argument_registers)
         )
-        if any(value is None for value in values):
+        if any(value is None for value in iter(values)):
             missing = ",".join(
-                name for name, value in zip(spec.argument_registers, values, strict=True) if value is None
+                name for name, value in builtins.iter(zip(spec.argument_registers, values, strict=True)) if value is None
             )
             refusals.append(
                 (
@@ -374,20 +402,22 @@ def _facts_from_block_8616(
                 vector=vector,
                 selector_value=spec.selector_value,
                 argument_registers=spec.argument_registers,
-                argument_values=tuple(value for value in values if value is not None),
+                argument_values=tuple(value for value in iter(values) if value is not None),
                 result_register=spec.result_register,
             )
         )
     return facts, refusals, raw_count, normalized_count, classified_count
 
 
+@cython.ccall
 def build_software_interrupt_input_artifact_8616(
     artifact: IRFunctionArtifact,
 ) -> SoftwareInterruptInputArtifact8616:
     """Build typed software-interrupt inputs from exact same-block IR facts."""
+    block: object
     definitions = build_scalar_definition_index_8616(artifact)
     facts: list[SoftwareInterruptInputFact8616] = []
-    refusals: list[tuple[int, SoftwareInterruptRefusalKind8616, str]] = []
+    refusals: list[tuple[cython.longlong, SoftwareInterruptRefusalKind8616, str]] = []
     raw_count = normalized_count = classified_count = 0
     for block in artifact.blocks:
         block_facts, block_refusals, raw, normalized, classified = _facts_from_block_8616(
@@ -414,6 +444,7 @@ def build_software_interrupt_input_artifact_8616(
     )
 
 
+@cython.ccall
 def software_interrupt_value_fingerprint_8616(value: IRScalarValue8616) -> str:
     """Return a deterministic identity for one proven interrupt argument."""
     if isinstance(value, IRBinaryValue):

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Advance segmented execution offsets without flattening away width.
 
 Layer: Frontend.
@@ -8,6 +9,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Protocol, cast
 
@@ -20,10 +23,11 @@ class _AddableSegmentOffset8616(Protocol):
         ...
 
 
+@cython.ccall
 def advance_segment_offset_8616(
     offset: object,
-    delta: int,
-    address_bits: int,
+    delta: cython.longlong,
+    address_bits: cython.longlong,
     delta_value: object,
 ) -> object:
     """Advance one offset inside its address width before linearization."""

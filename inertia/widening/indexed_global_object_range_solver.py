@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Solve bounded global extents from complete grouped Widening inputs.
 
 Layer: Widening.
@@ -8,6 +9,7 @@ Do not join values from rendered text, cosmetic shape, postprocess, or CLI/repor
 """
 
 from __future__ import annotations
+import cython
 
 from inertia.alias.indexed_address_access_contracts import IndexedAliasAccessFact8616
 from inertia.alias.indexed_address_copy_contracts import IndexedAliasCopyFact8616
@@ -25,6 +27,7 @@ from .indexed_global_object_ranges import (
     BoundedGlobalObjectRangeFailureKind8616,
     indexed_global_access_key_8616,
 )
+import operator
 
 __all__ = [
     "build_provisional_indexed_global_ranges_8616",
@@ -34,10 +37,13 @@ __all__ = [
 ]
 
 
+@cython.ccall
 def indexed_loop_range_proof_sites_8616(
-    facts: tuple[IndexedAliasLoopRangeFact8616, ...],
+    facts: object,
 ) -> tuple[IndexedLoopProofSite8616, ...]:
     """Return deterministic unique proof sites without losing semantic roles."""
+    fact: object
+    site: object
     sites: list[IndexedLoopProofSite8616] = []
     for fact in facts:
         for site in fact.source.proof_sites:
@@ -46,19 +52,18 @@ def indexed_loop_range_proof_sites_8616(
     return tuple(sites)
 
 
+@cython.ccall
 def build_provisional_indexed_global_ranges_8616(
-    accesses: dict[IndexedGlobalObjectKey8616, list[IndexedAliasAccessFact8616]],
-    range_facts: dict[
-        IndexedGlobalObjectKey8616,
-        list[IndexedAliasLoopRangeFact8616],
-    ],
-    layouts: dict[IndexedGlobalObjectKey8616, GlobalObjectLayout8616],
-    failures: dict[
-        IndexedGlobalObjectKey8616,
-        BoundedGlobalObjectRangeFailureKind8616,
-    ],
-) -> dict[IndexedGlobalObjectKey8616, BoundedGlobalObjectRange8616]:
+    accesses: object,
+    range_facts: object,
+    layouts: object,
+    failures: object,
+) -> object:
     """Build exact provisional extents before overlap and copy validation."""
+    layout: object
+    lower: object
+    upper: object
+    key: object
     provisional: dict[IndexedGlobalObjectKey8616, BoundedGlobalObjectRange8616] = {}
     for key in sorted(accesses, key=indexed_global_object_sort_key_8616):
         if key in failures:
@@ -70,15 +75,15 @@ def build_provisional_indexed_global_ranges_8616(
         access_tuple = tuple(accesses[key])
         fact_tuple = tuple(range_facts.get(key, ()))
         access_keys = tuple(
-            sorted({indexed_global_access_key_8616(item) for item in access_tuple})
+            sorted({indexed_global_access_key_8616(item) for item in iter(access_tuple)})
         )
         covered_keys = {
-            indexed_global_access_key_8616(item.access) for item in fact_tuple
+            indexed_global_access_key_8616(item.access) for item in iter(fact_tuple)
         }
-        if set(access_keys) != covered_keys:
+        if operator.ne(set(access_keys), covered_keys):
             failures[key] = BoundedGlobalObjectRangeFailureKind8616.UNCOVERED_ACCESS
             continue
-        bounds = {(item.source.init, item.source.upper_bound) for item in fact_tuple}
+        bounds = {(item.source.init, item.source.upper_bound) for item in iter(fact_tuple)}
         if len(bounds) != 1:
             failures[key] = BoundedGlobalObjectRangeFailureKind8616.CONFLICTING_BOUNDS
             continue
@@ -105,14 +110,17 @@ def build_provisional_indexed_global_ranges_8616(
     return provisional
 
 
+@cython.ccall
 def refuse_indexed_global_range_overlaps_8616(
-    provisional: dict[IndexedGlobalObjectKey8616, BoundedGlobalObjectRange8616],
-    failures: dict[
-        IndexedGlobalObjectKey8616,
-        BoundedGlobalObjectRangeFailureKind8616,
-    ],
+    provisional: object,
+    failures: object,
 ) -> None:
     """Refuse both exact segmented objects when their extents overlap."""
+    index: object
+    left: object
+    left_key: object
+    right: object
+    right_key: object
     items = tuple(provisional.items())
     for index, (left_key, left) in enumerate(items):
         for right_key, right in items[index + 1 :]:
@@ -125,16 +133,20 @@ def refuse_indexed_global_range_overlaps_8616(
                 failures[right_key] = BoundedGlobalObjectRangeFailureKind8616.OVERLAP
 
 
+@cython.ccall
 def refuse_incompatible_indexed_global_copies_8616(
-    copies: tuple[IndexedAliasCopyFact8616, ...],
+    copies: object,
     layouts: GlobalObjectLayoutEvidence8616,
-    provisional: dict[IndexedGlobalObjectKey8616, BoundedGlobalObjectRange8616],
-    failures: dict[
-        IndexedGlobalObjectKey8616,
-        BoundedGlobalObjectRangeFailureKind8616,
-    ],
+    provisional: object,
+    failures: object,
 ) -> None:
     """Require whole-element copy endpoints to retain identical bounds."""
+    destination_key: object
+    destination_range: object
+    key: object
+    source_key: object
+    source_range: object
+    copy: object
     for copy in copies:
         source_keys = indexed_global_access_object_keys_8616(
             copy.source_access,
@@ -155,10 +167,10 @@ def refuse_incompatible_indexed_global_copies_8616(
             and destination_range is not None
             and source_key not in failures
             and destination_key not in failures
-            and copy.source.storage.width == source_range.element_width
-            and copy.destination.storage.width == destination_range.element_width
-            and source_range.lower_inclusive == destination_range.lower_inclusive
-            and source_range.upper_exclusive == destination_range.upper_exclusive
+            and operator.eq(copy.source.storage.width, source_range.element_width)
+            and operator.eq(copy.destination.storage.width, destination_range.element_width)
+            and operator.eq(source_range.lower_inclusive, destination_range.lower_inclusive)
+            and operator.eq(source_range.upper_exclusive, destination_range.upper_exclusive)
             and indexed_global_access_key_8616(copy.source_access)
             in source_range.covered_access_keys
             and indexed_global_access_key_8616(copy.destination_access)

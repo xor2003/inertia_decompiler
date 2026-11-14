@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/runtime.
 
 Responsibility: model emulator memory reads and writes for the 16-bit runtime surface.
@@ -5,6 +6,8 @@ Forbidden: decompiler storage recovery, alias ownership, or segment-flattening s
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Protocol, cast
 
@@ -15,7 +18,7 @@ from pyvex.lifting.util.vex_helper import IRSBCustomizer, Type
 
 from .vex_value_contract import require_vex_value_8616
 
-DEFAULT_MEMORY_SIZE: int = 1024  # 1 KB
+DEFAULT_MEMORY_SIZE: cython.longlong = 1024  # 1 KB
 
 __all__ = ("DEFAULT_MEMORY_SIZE", "Memory")
 
@@ -37,7 +40,7 @@ class _LifterInstruction(Protocol):
 
     _irsb_c: _MemoryCustomizer
 
-    def constant(self, value: int, _type: object = Type.int_8) -> VexValue:
+    def constant(self, value: cython.longlong, _type: object = Type.int_8) -> VexValue:
         """Create a typed VEX constant."""
         ...
 
@@ -46,23 +49,28 @@ class _LifterInstruction(Protocol):
         ...
 
 
-def _dirty_input_value(value: object) -> bool:
+@cython.ccall
+def _dirty_input_value(value: object) -> cython.bint:
     """Return whether a VEX value wraps an input dirty helper."""
     return isinstance(value, VexValue) and "IN_" in repr(value.rdt)
 
 
 class Memory:
     """Provide byte storage and VEX memory operations for frontend execution."""
+    a20gate: object
+    bitstream: object
+    mem_size: object
+    memory: object
 
     lifter_instruction: _LifterInstruction
 
-    def __init__(self, size: int = DEFAULT_MEMORY_SIZE) -> None:
+    def __init__(self, size: cython.longlong = DEFAULT_MEMORY_SIZE) -> None:
         """Initialize concrete backing storage used by runtime surfaces."""
-        self.mem_size: int = size
+        self.mem_size: cython.longlong = size
         self.memory: bytearray = bytearray(size)
-        self.a20gate: bool = False
+        self.a20gate: cython.bint = False
 
-    def dump_mem(self, addr: int, size: int) -> None:
+    def dump_mem(self, addr: cython.longlong, size: cython.longlong) -> None:
         """Print a hex dump of the concrete memory backing store."""
         addr &= ~(0x10 - 1)
 
@@ -75,13 +83,13 @@ class Memory:
                 )
             print()
 
-    def read_data(self, addr: int, size: int) -> bytearray | None:
+    def read_data(self, addr: cython.longlong, size: cython.longlong) -> object:
         """Read concrete bytes when the requested range is inside memory."""
         if not self.in_range(addr, size):
             return None
         return self.memory[addr : addr + size]
 
-    def write_data(self, addr: int, data: bytearray) -> bool:
+    def write_data(self, addr: cython.longlong, data: object) -> cython.bint:
         """Write concrete bytes when the requested range is inside memory."""
         if not self.in_range(addr, len(data)):
             return False
@@ -179,15 +187,15 @@ class Memory:
             stored_value = self.lifter_instruction.constant(0xFF & ((1 << 8) - 1), Type.int_8)
         self.lifter_instruction._irsb_c.store(address.rdt, stored_value.rdt)
 
-    def is_ena_a20gate(self) -> bool:
+    def is_ena_a20gate(self) -> cython.bint:
         """Return whether the A20 gate is enabled in the frontend model."""
         return self.a20gate
 
-    def set_a20gate(self, ena: bool) -> None:
+    def set_a20gate(self, ena: cython.bint) -> None:
         """Set the A20 gate state in the frontend model."""
         self.a20gate = ena
 
-    def in_range(self, addr: int, length: int) -> bool:
+    def in_range(self, addr: cython.longlong, length: cython.longlong) -> cython.bint:
         """Return whether a concrete byte range fits in the backing store."""
         return addr + length - 1 < self.mem_size
 

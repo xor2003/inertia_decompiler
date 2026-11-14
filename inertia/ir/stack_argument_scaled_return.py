@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove one exact modular scaled return from two stable stack inputs.
 
 Layer: IR.
@@ -11,6 +12,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import Enum
@@ -37,6 +40,9 @@ from .stack_argument_modular_use_contracts import (
     ModularArgumentUseVerdict8616,
     ModularReturnRegister8616,
 )
+import dataclasses
+import operator
+import builtins
 
 
 class ScaledReturnVerdict8616(Enum):
@@ -74,18 +80,18 @@ class FarScaledReturnFailure8616(Enum):
     SEGMENT_LEAF_MISMATCH = "segment_leaf_mismatch"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ScaledReturnStats8616:
     """Account for one requested IR fact through all five evidence stages."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ScaledReturnResult8616:
     """One proven modular offset value plus its exact affine expression.
 
@@ -103,8 +109,9 @@ class ScaledReturnResult8616:
     offset_expression: ScalarAffineExpression8616 | None = None
     upstream_failure: ModularArgumentUseFailure8616 | ScalarAffineFailure8616 | None = None
 
-    def _closed_offset_expression(self) -> bool:
+    def _closed_offset_expression(self) -> cython.bint:
         """Return whether the retained expression still matches this proof."""
+        expression: object
         expression = self.offset_expression
         if expression is None or not expression.complete:
             return False
@@ -118,19 +125,20 @@ class ScaledReturnResult8616:
         fixed_word_expression = expression.width == 2 and expression.constant == 0
         exact_terms = (
             len(terms) == 2
-            and all(isinstance(term.source, IRAddress) for term in terms)
-            and terms[0].source != terms[1].source
-            and sorted(term.coefficient for term in terms) == [1, 2]
+            and all(isinstance(term.source, IRAddress) for term in iter(terms))
+            and operator.ne(terms[0].source, terms[1].source)
+            and sorted(term.coefficient for term in iter(terms)) == [1, 2]
         )
         return bool(
             exact_ax_root
             and fixed_word_expression
-            and expression.definition_path == self.definition_path
+            and operator.eq(expression.definition_path, self.definition_path)
             and exact_terms
         )
 
-    def matches_storage_inputs(self, base: IRAddress, index: IRAddress) -> bool:
+    def matches_storage_inputs(self, base: IRAddress, index: IRAddress) -> cython.bint:
         """Bind the retained coefficient roles to these exact stable stack words."""
+        expression: object
         expression = self.offset_expression
         return bool(
             self.complete
@@ -139,22 +147,22 @@ class ScaledReturnResult8616:
         )
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Require one closed fact with both source and return identities."""
         return bool(
             self.verdict is ScaledReturnVerdict8616.PROVEN
             and self.failure is None
             and self.base_access_key is not None
             and self.index_access_key is not None
-            and self.base_access_key != self.index_access_key
+            and operator.ne(self.base_access_key, self.index_access_key)
             and self.return_instruction_addr is not None
             and self.definition_path
             and self._closed_offset_expression()
-            and self.stats == ScaledReturnStats8616(1, 1, 1, 1, 0)
+            and operator.eq(self.stats, ScaledReturnStats8616(1, 1, 1, 1, 0))
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FarScaledReturnResult8616:
     """Exact AX offset and DX segment paths, or one nonpublishing refusal."""
 
@@ -170,7 +178,7 @@ class FarScaledReturnResult8616:
     ) = None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Require both return words and one exact shared terminal return."""
         return bool(
             self.verdict is ScaledReturnVerdict8616.PROVEN
@@ -178,16 +186,17 @@ class FarScaledReturnResult8616:
             and self.offset is not None
             and self.offset.complete
             and self.segment_access_key is not None
-            and self.return_instruction_addr == self.offset.return_instruction_addr
+            and operator.eq(self.return_instruction_addr, self.offset.return_instruction_addr)
             and self.segment_definition_path
-            and self.stats == ScaledReturnStats8616(1, 1, 1, 1, 0)
+            and operator.eq(self.stats, ScaledReturnStats8616(1, 1, 1, 1, 0))
         )
 
 
+@cython.ccall
 def _refuse_8616(
     failure: ScaledReturnFailure8616,
     *,
-    normalized: bool = False,
+    normalized: cython.bint = False,
     upstream: ModularArgumentUseFailure8616 | ScalarAffineFailure8616 | None = None,
 ) -> ScaledReturnResult8616:
     """Keep one failed fact without partial type or expression publication."""
@@ -199,10 +208,11 @@ def _refuse_8616(
     )
 
 
+@cython.ccall
 def _refuse_far_8616(
     failure: FarScaledReturnFailure8616,
     *,
-    normalized: bool = False,
+    normalized: cython.bint = False,
     upstream: ScaledReturnFailure8616 | ModularArgumentUseFailure8616 | ScalarAffineFailure8616 | None = None,
 ) -> FarScaledReturnResult8616:
     """Retain a failed far-return obligation without partial publication."""
@@ -220,10 +230,11 @@ def _approved_access_8616(
     storage: IRAddress,
 ) -> IRLogicalMemoryAccess8616 | None:
     """Bind an upstream proof key to one complete exact word-read operand."""
+    logical: object
     logical = artifact.logical_memory
     if logical is None or not logical.closed or logical.refusals:
         return None
-    matches = tuple(access for access in logical.accesses if access.key == key)
+    matches = tuple(access for access in iter(logical.accesses) if operator.eq(access.key, key))
     if len(matches) != 1:
         return None
     access = matches[0]
@@ -231,18 +242,19 @@ def _approved_access_8616(
         not access.complete
         or access.kind is not IRMemoryAccessKind8616.READ
         or not _same_stack_storage_8616(access.address, storage)
-        or key.function_addr != artifact.function_addr
+        or operator.ne(key.function_addr, artifact.function_addr)
     ):
         return None
     return access
 
 
-def _same_stack_storage_8616(left: IRAddress, right: IRAddress) -> bool:
+@cython.ccall
+def _same_stack_storage_8616(left: IRAddress, right: IRAddress) -> cython.bint:
     """Compare proven stable BP storage, ignoring versioned address carriers."""
     return bool(
         left.space is right.space is MemSpace.SS
         and left.base == right.base == ("bp",)
-        and left.offset == right.offset
+        and operator.eq(left.offset, right.offset)
         and left.size == right.size == 2
         and left.status is right.status
         and left.segment_origin is right.segment_origin
@@ -251,19 +263,20 @@ def _same_stack_storage_8616(left: IRAddress, right: IRAddress) -> bool:
 
 def _last_return_word_root_8616(
     artifact: SSAFunctionArtifact,
-    block_addr: int,
+    block_addr: cython.longlong,
     return_register: ModularReturnRegister8616,
-) -> tuple[IRValue, int] | None:
+) -> object:
     """Find the final full-word register definition in the proven source block."""
-    block = next((item for item in artifact.blocks if item.addr == block_addr), None)
+    block: object
+    block = next((item for item in iter(artifact.blocks) if operator.eq(item.addr, block_addr)), None)
     if block is None:
         return None
     writes = tuple(
         (instruction.dst, index)
-        for index, instruction in enumerate(block.instrs)
+        for index, instruction in builtins.iter(enumerate(block.instrs))
         if instruction.dst is not None
         and instruction.dst.space is MemSpace.REG
-        and instruction.dst.name == return_register.value
+        and operator.eq(instruction.dst.name, return_register.value)
     )
     if not writes or writes[-1][0].size != 2:
         return None
@@ -271,10 +284,10 @@ def _last_return_word_root_8616(
 
 
 def _scaled_terms_match_8616(
-    terms: tuple[ScalarAffineTerm8616, ...],
+    terms: object,
     base: IRAddress,
     index: IRAddress,
-) -> bool:
+) -> cython.bint:
     """Require exactly two distinct source words and no hidden term."""
     return bool(
         len(terms) == 2
@@ -282,41 +295,47 @@ def _scaled_terms_match_8616(
             isinstance(term.source, IRAddress)
             and _same_stack_storage_8616(term.source, base)
             and term.coefficient == 1
-            for term in terms
+            for term in iter(terms)
         ) == 1
         and sum(
             isinstance(term.source, IRAddress)
             and _same_stack_storage_8616(term.source, index)
             and term.coefficient == 2
-            for term in terms
+            for term in iter(terms)
         ) == 1
     )
 
 
+@cython.ccall
 def _leaf_sites_match_8616(
-    path: tuple[IndexedAddressDefinitionSite8616, ...],
-    accesses: tuple[IRLogicalMemoryAccess8616, ...],
-) -> bool:
+    path: object,
+    accesses: object,
+) -> cython.bint:
     """Bind every affine LOAD leaf to approved exact logical byte reads."""
     expected = {
         (slice_.block_addr, slice_.instr_index, slice_.insn_addr)
-        for access in accesses for slice_ in access.execution_slices
+        for access in iter(accesses) for slice_ in iter(access.execution_slices)
     }
     actual = {
         (site.block_addr, site.instr_index, site.instr_addr)
-        for site in path if site.op == "LOAD"
+        for site in iter(path) if site.op == "LOAD"
     }
     expected_count = len(accesses) * 2
-    return bool(expected_count > 0 and len(expected) == expected_count and len(actual) == expected_count and actual == expected)
+    return bool(expected_count > 0 and operator.eq(len(expected), expected_count) and operator.eq(len(actual), expected_count) and actual == expected)
 
 
+@cython.ccall
 def _approved_input_pair_8616(
     boundary: ExactFunctionRangeBoundary8616,
     artifact: SSAFunctionArtifact,
     base_storage: IRAddress,
     index_storage: IRAddress,
-) -> tuple[IRLogicalMemoryAccess8616, IRLogicalMemoryAccess8616, int] | ScaledReturnResult8616:
+) -> object:
     """Close both modular uses, their exact memory reads, and one return site."""
+    base_access: object
+    base_key: object
+    index_access: object
+    index_key: object
     if _same_stack_storage_8616(base_storage, index_storage):
         return _refuse_8616(ScaledReturnFailure8616.INPUT_IDENTITY_CONFLICT)
     base_use = prove_stack_argument_modular_return_use_8616(boundary, artifact, base_storage)
@@ -338,9 +357,9 @@ def _approved_input_pair_8616(
         return _refuse_8616(ScaledReturnFailure8616.RETURN_SITE_CONFLICT, normalized=True)
     same_return = (
         base_use.return_instruction_addr is not None
-        and base_use.return_instruction_addr == index_use.return_instruction_addr
+        and operator.eq(base_use.return_instruction_addr, index_use.return_instruction_addr)
     )
-    distinct_same_block_inputs = base_key != index_key and base_key.block_addr == index_key.block_addr
+    distinct_same_block_inputs = operator.ne(base_key, index_key) and operator.eq(base_key.block_addr, index_key.block_addr)
     if not same_return or not distinct_same_block_inputs:
         return _refuse_8616(ScaledReturnFailure8616.RETURN_SITE_CONFLICT, normalized=True)
     base_access = _approved_access_8616(artifact, base_key, base_storage)
@@ -351,6 +370,7 @@ def _approved_input_pair_8616(
     return base_access, index_access, base_use.return_instruction_addr
 
 
+@cython.ccall
 def prove_stack_argument_scaled_return_8616(
     boundary: ExactFunctionRangeBoundary8616,
     artifact: SSAFunctionArtifact,
@@ -358,6 +378,8 @@ def prove_stack_argument_scaled_return_8616(
     index_storage: IRAddress,
 ) -> ScaledReturnResult8616:
     """Prove AX equals base plus twice index modulo 16 bits, not pointer C."""
+    expression: object
+    root: object
     pair = _approved_input_pair_8616(boundary, artifact, base_storage, index_storage)
     if isinstance(pair, ScaledReturnResult8616):
         return pair
@@ -381,7 +403,7 @@ def prove_stack_argument_scaled_return_8616(
             upstream=trace.failure,
         )
     if (
-        expression.root != value or expression.width != 2 or expression.constant != 0
+        operator.ne(expression.root, value) or expression.width != 2 or expression.constant != 0
         or not _scaled_terms_match_8616(expression.terms, base_storage, index_storage)
     ):
         return _refuse_8616(ScaledReturnFailure8616.AFFINE_SHAPE_MISMATCH, normalized=True)
@@ -399,13 +421,16 @@ def prove_stack_argument_scaled_return_8616(
     )
 
 
+@cython.ccall
 def _prove_far_segment_identity_8616(
     artifact: SSAFunctionArtifact,
     key: IRLogicalMemoryAccessKey8616,
     access: IRLogicalMemoryAccess8616,
     storage: IRAddress,
-) -> tuple[IndexedAddressDefinitionSite8616, ...] | FarScaledReturnResult8616:
+) -> object:
     """Bind the final DX word to exactly one unchanged input segment read."""
+    expression: object
+    root: object
     root = _last_return_word_root_8616(
         artifact, key.block_addr, ModularReturnRegister8616.DX,
     )
@@ -427,7 +452,7 @@ def _prove_far_segment_identity_8616(
             upstream=trace.failure,
         )
     if (
-        expression.root != value
+        operator.ne(expression.root, value)
         or expression.width != 2
         or expression.constant != 0
         or len(expression.terms) != 1
@@ -448,10 +473,11 @@ def _prove_far_segment_identity_8616(
         return _refuse_far_8616(
             FarScaledReturnFailure8616.SEGMENT_LEAF_MISMATCH, normalized=True,
         )
-    segment_path: tuple[IndexedAddressDefinitionSite8616, ...] = expression.definition_path
+    segment_path: object = expression.definition_path
     return segment_path
 
 
+@cython.ccall
 def prove_stack_argument_far_scaled_return_8616(
     boundary: ExactFunctionRangeBoundary8616,
     artifact: SSAFunctionArtifact,
@@ -464,6 +490,8 @@ def prove_stack_argument_far_scaled_return_8616(
     The result is IR evidence only. It does not authorize a C pointer type or
     return expression until a later layer binds the guest segment and offset.
     """
+    access: object
+    segment_key: object
     if (
         not _same_stack_storage_8616(
             segment_storage,
@@ -500,9 +528,9 @@ def prove_stack_argument_far_scaled_return_8616(
     segment_key = segment_use.input_access_key
     if (
         segment_key is None
-        or segment_use.return_instruction_addr != offset.return_instruction_addr
-        or segment_key == offset.base_access_key
-        or segment_key == offset.index_access_key
+        or operator.ne(segment_use.return_instruction_addr, offset.return_instruction_addr)
+        or operator.eq(segment_key, offset.base_access_key)
+        or operator.eq(segment_key, offset.index_access_key)
     ):
         return _refuse_far_8616(
             FarScaledReturnFailure8616.RETURN_SITE_CONFLICT, normalized=True,

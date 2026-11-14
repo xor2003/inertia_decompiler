@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Project proven callee argument cleanup into native scalar stack state.
 
 Layer: Frontend/IR adapter.
@@ -8,6 +9,8 @@ The narrow SP write preserves upper ESP through native subregister SSA.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import Counter
 from dataclasses import dataclass
@@ -20,35 +23,38 @@ from angr.ailment.manager import Manager
 
 from inertia.semantics.call_return_segment import callee_return_evidence_8616
 from inertia.semantics.terminal_return_contract import TerminalReturnFrameKind8616
+import dataclasses
+import operator
+import builtins
 
-_WORD_OPERAND_BITS: int = 16
+_WORD_OPERAND_BITS: cython.longlong = 16
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CalleeCleanupFact8616:
     """Exact call target and agreed binary cleanup consumed by one SP write."""
 
-    callsite_addr: int
-    target_addr: int
-    cleanup_bytes: int
-    operand_bits: int
+    callsite_addr: cython.longlong
+    target_addr: cython.longlong
+    cleanup_bytes: cython.longlong
+    operand_bits: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CalleeCleanupReport8616:
     """Call census; unselected calls retain their original representation."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    facts: tuple[CalleeCleanupFact8616, ...]
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    facts: object
 
 
 def materialize_callee_cleanup_8616(
     project: object, graph: nx.DiGraph[Block], manager: Manager,
-    accepted_calls: tuple[int, ...], *, sp_offset: int,
+    accepted_calls: object, *, sp_offset: cython.longlong,
 ) -> CalleeCleanupReport8616:
     """Apply each proven narrow near-return cleanup once, after its call.
 
@@ -58,12 +64,15 @@ def materialize_callee_cleanup_8616(
     address, never a fabricated VEX producer identity. Counts describe newly
     inserted effects; zero-cleanup and already-applied calls are unselected.
     """
+    address: object
+    block: object
+    statement: object
     calls = [
         (block, statement)
-        for block in graph for statement in block.statements
+        for block in iter(graph) for statement in iter(block.statements)
         if isinstance(statement, Stmt.SideEffectStatement) and isinstance(statement.expr, Expr.Call)
     ]
-    occurrences = Counter(statement.tags.get("ins_addr") for _block, statement in calls)
+    occurrences = Counter(statement.tags.get("ins_addr") for _block, statement in iter(calls))
     facts: list[CalleeCleanupFact8616] = []
     if isinstance(project, Project) and project.arch.name == "86_16":
         for block, statement in calls:
@@ -72,14 +81,14 @@ def materialize_callee_cleanup_8616(
                 continue
             if block.statements[-1] is not statement:
                 continue
-            if not any(node.addr == block.addr + block.original_size for node in graph.successors(block)):
+            if not any(operator.eq(node.addr, block.addr + block.original_size) for node in builtins.iter(graph.successors(block))):
                 continue
             target = statement.expr.target
             if not isinstance(target, Expr.Const) or not isinstance(target.value, int):
                 continue
             evidence = callee_return_evidence_8616(project, target.value)
             amount = evidence.consistent_cleanup
-            if not amount or evidence.consistent_return_operand_bits != _WORD_OPERAND_BITS:
+            if not amount or operator.ne(evidence.consistent_return_operand_bits, _WORD_OPERAND_BITS):
                 continue
             if evidence.consistent_return_frame_kind is not TerminalReturnFrameKind8616.NEAR:
                 continue

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: preserve legacy CLI helper surface while delegating semantic proof to X86_16 layers.
@@ -5,6 +6,7 @@ Forbidden: owning decompiler semantics, source-backed recovery, or postprocess s
 """
 
 from __future__ import annotations
+import cython
 
 import typing
 from collections.abc import Callable
@@ -17,6 +19,8 @@ from inertia.lowering.storage_objects import (
     StorageObjectArtifact,
     build_storage_object_artifact,
 )
+import dataclasses
+import builtins
 
 __all__ = [
     "AccessRewriteArtifact",
@@ -25,12 +29,12 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class AccessRewriteArtifact:
     """Stable object-hint rewrite data derived from typed access evidence."""
 
     object_hints: StableHints
-    refusal_reasons: dict[BaseKey, str]
+    refusal_reasons: object
 
 
 def _stable_object_hints_from_artifact(storage_object_artifact: StorageObjectArtifact) -> StableHints:
@@ -38,20 +42,25 @@ def _stable_object_hints_from_artifact(storage_object_artifact: StorageObjectArt
         base_key: AccessTraitObjectHint(
             base_key=record.base_key,
             kind=record.object_kind,
-            candidates=tuple((offset, 1, 1) for offset in record.candidate_offsets),
+            candidates=tuple((offset, 1, 1) for offset in iter(record.candidate_offsets)),
         )
-        for base_key, record in storage_object_artifact.records.items()
+        for base_key, record in builtins.iter(storage_object_artifact.records.items())
     }
 
 
+@cython.ccall
 def load_access_rewrite_artifact(
     project: object,
-    function_addr: int | None,
+    function_addr: object,
     *,
     build_access_trait_evidence_profiles: Callable[[dict[str, dict[BaseKey, object]]], EvidenceProfiles],
     build_stable_access_object_hints: Callable[[dict[str, dict[BaseKey, object]]], StableHints],
 ) -> AccessRewriteArtifact | None:
     """Load or build the access rewrite artifact cached on an angr project."""
+    cache: object
+    cached: object
+    traits: object
+    traits_cache: object
     if function_addr is None:
         return None
     # dynamic angr boundary: Inertia attaches optional analysis caches to Project.
@@ -73,7 +82,7 @@ def load_access_rewrite_artifact(
         build_stable_access_object_hints=build_stable_access_object_hints,
     )
     object_hints = _stable_object_hints_from_artifact(storage_object_artifact)
-    refusal_reasons = {base_key: refusal.reason for base_key, refusal in storage_object_artifact.refusals.items()}
+    refusal_reasons = {base_key: refusal.reason for base_key, refusal in builtins.iter(storage_object_artifact.refusals.items())}
     if not object_hints and not refusal_reasons:
         return None
     artifact = AccessRewriteArtifact(
@@ -88,14 +97,16 @@ def load_access_rewrite_artifact(
     return artifact
 
 
+@cython.ccall
 def has_access_rewrite_artifact(
     project: object,
     function_addr: int | None,
     *,
     build_access_trait_evidence_profiles: Callable[[dict[str, dict[BaseKey, object]]], EvidenceProfiles],
     build_stable_access_object_hints: Callable[[dict[str, dict[BaseKey, object]]], StableHints],
-) -> bool:
+) -> cython.bint:
     """Return whether a function has stable access rewrite object hints."""
+    artifact: object
     artifact = load_access_rewrite_artifact(
         project,
         function_addr,

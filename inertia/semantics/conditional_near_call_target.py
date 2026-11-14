@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Conditional direct near-CALL target theorem under an authenticated entry interval.
 
 Layer: Semantics.
@@ -42,6 +43,8 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -84,6 +87,8 @@ from .direct_near_call_target_binding import (
     prove_direct_near_call_target_binding_at_coordinates_8616,
 )
 from .direct_ret_call_effect import direct_near_call_target_is_bound_8616
+import dataclasses
+import operator
 
 __all__ = [
     "ConditionalCallsiteSelectorObligation8616",
@@ -133,18 +138,18 @@ class ConditionalNearCallTargetFailure8616(StrEnum):
     TARGET_OUTSIDE_INTERVAL = "conditional_near_call_target_outside_interval"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionalNearCallTargetStats8616:
     """Closed five-stage accounting for one conditional theorem evaluation."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether the candidate resolved to one theorem or refusal."""
         counts = (
             self.raw_fact_count,
@@ -153,15 +158,14 @@ class ConditionalNearCallTargetStats8616:
             self.materialized_count,
             self.failure_count,
         )
-        if not all(type(count) is int and count >= 0 for count in counts):
+        if not all(type(count) is int and count >= 0 for count in iter(counts)):
             return False
         return bool(
             self.raw_fact_count == self.normalized_fact_count == 1
-            and self.normalized_fact_count
-            == self.materialized_count + self.failure_count
+            and operator.eq(self.normalized_fact_count, self.materialized_count + self.failure_count)
         )
 
-    def to_dict(self) -> dict[str, int]:
+    def to_dict(self) -> dict[str, cython.longlong]:
         """Serialize the evidence ledger for diagnostics."""
         return {
             "raw_fact_count": self.raw_fact_count,
@@ -172,7 +176,7 @@ class ConditionalNearCallTargetStats8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionalCallsiteSelectorObligation8616:
     """Explicit unproved CS-preservation condition for one outgoing CALL.
 
@@ -185,11 +189,11 @@ class ConditionalCallsiteSelectorObligation8616:
     """
 
     context: NativeNearCallEntry8616 = field(compare=False, repr=False)
-    callsite_addr: int = 0
-    selector_low: int = 0
-    selector_high: int = 0
+    callsite_addr: cython.longlong = 0
+    selector_low: cython.longlong = 0
+    selector_high: cython.longlong = 0
 
-    def admits_selector(self, selector: int) -> bool:
+    def admits_selector(self, selector: cython.longlong) -> cython.bint:
         """Return whether ``selector`` lies in the retained interval."""
         return bool(
             type(selector) is int
@@ -207,7 +211,7 @@ class ConditionalCallsiteSelectorObligation8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionalNearCallTargetTheorem8616:
     """Conditional target theorem (or typed refusal) for one outgoing CALL.
 
@@ -269,13 +273,14 @@ class ConditionalNearCallTargetTheorem8616:
         }
 
 
+@cython.ccall
 def _refuse_8616(
     callsite_addr: int | None,
     target_addr: int | None,
     failure: ConditionalNearCallTargetFailure8616,
     *,
-    normalized: bool = False,
-    classified: bool = False,
+    normalized: cython.bint = False,
+    classified: cython.bint = False,
     preflight_failure: DirectNearCallTargetBindingFailure8616 | None = None,
     shape: DirectNearCallTargetShape8616 | None = None,
 ) -> ConditionalNearCallTargetTheorem8616:
@@ -293,11 +298,12 @@ def _refuse_8616(
     )
 
 
+@cython.ccall
 def _rebind_raw_root_8616(
     project: object,
     context: NativeNearCallEntry8616,
     artifact: IRFunctionArtifact,
-) -> bool:
+) -> cython.bint:
     """Re-bind the identical raw root artifact against a fresh native import.
 
     The IR-side bundle owner is imported lazily: IR callers may reach this
@@ -305,6 +311,7 @@ def _rebind_raw_root_8616(
     top-level dependency could close an import cycle. The returned bundle
     must be anchored on the identical supplied artifact object.
     """
+    bundle: object
     from inertia.ir.vex_import import raw_x86_16_import_bundle_for_artifact_8616
 
     bundle = raw_x86_16_import_bundle_for_artifact_8616(
@@ -341,21 +348,21 @@ def _surface_identity_failure_8616(
     if type(artifact) is not IRFunctionArtifact:
         return ConditionalNearCallTargetFailure8616.FOREIGN_ROOT
     bound_artifact = artifact
-    if (bound_artifact.function_addr != bound_context.target_addr
-            or bound_context.boundary.addr != bound_artifact.function_addr):
+    if (operator.ne(bound_artifact.function_addr, bound_context.target_addr)
+            or operator.ne(bound_context.boundary.addr, bound_artifact.function_addr)):
         return ConditionalNearCallTargetFailure8616.FOREIGN_ROOT
     if type(block) is not IRBlock or not any(
-        candidate is block for candidate in bound_artifact.blocks
+        candidate is block for candidate in iter(bound_artifact.blocks)
     ):
         return ConditionalNearCallTargetFailure8616.FOREIGN_BLOCK
     if type(instruction) is not IRInstr or not any(
-        item is instruction for item in block.instrs
+        item is instruction for item in iter(block.instrs)
     ):
         return ConditionalNearCallTargetFailure8616.FOREIGN_INSTRUCTION
     return None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _DetachedSourceFacts8616:
     """Immutable pre-callback projection of the theorem's owned facts.
 
@@ -371,9 +378,9 @@ class _DetachedSourceFacts8616:
     """
 
     graph: ImmutableSourceGraphFacts8616
-    context_scalars: tuple[int, int, int, int, int, int]
-    call_encoding: bytes
-    coordinate_facts: tuple[int, int, int]
+    context_scalars: object
+    call_encoding: object
+    coordinate_facts: object
     shape: DirectNearCallTargetShape8616 | None
     context_project: object = field(compare=False)
     context_boundary: object = field(compare=False)
@@ -384,16 +391,17 @@ class _DetachedSourceFacts8616:
     origin: object = field(compare=False)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _DetachedNativeFacts8616:
     """Live instruction evidence with native authorities pinned across callbacks."""
 
-    incoming: bytes
+    incoming: object
     witness: FunctionBoundaryWitness8616
-    root_key: tuple[object, ...] | None
-    authorities: tuple[object, ...] = field(compare=False, repr=False)
+    root_key: object
+    authorities: object = field(compare=False, repr=False)
 
 
+@cython.ccall
 def _capture_native_facts_8616(
     project: object, context: NativeNearCallEntry8616,
 ) -> _DetachedNativeFacts8616 | None:
@@ -406,6 +414,9 @@ def _capture_native_facts_8616(
     Witness capture uses the existing boundary restoration owner and may
     decode reachability; it is not merely a byte read.
     """
+    incoming: object
+    native: object
+    witness: object
     from inertia.ir.raw_boot_native_surface_cache import _native_surface_key_8616
     from inertia.ir.vex_import import build_x86_16_ir_function_artifact
 
@@ -440,14 +451,14 @@ def _capture_source_facts_8616(
         return None
     if not all(
         type(value) is int
-        for value in (
+        for value in iter((
             context.callsite_addr,
             context.next_addr,
             context.target_addr,
             context.callee_addr,
             context.selector_low,
             context.selector_high,
-        )
+        ))
     ):
         return None
     try:
@@ -483,10 +494,11 @@ def _capture_source_facts_8616(
     )
 
 
+@cython.ccall
 def _graph_facts_equal_8616(
     artifact: IRFunctionArtifact,
     snapshot: ImmutableSourceGraphFacts8616,
-) -> bool:
+) -> cython.bint:
     """Recapture the detached source graph and reconcile it callback-free.
 
     The ``compare=False`` refusal arrays are orthogonal census evidence,
@@ -500,15 +512,16 @@ def _graph_facts_equal_8616(
         return False
     return bool(
         fresh == snapshot
-        and fresh.function_refusals == snapshot.function_refusals
-        and fresh.block_refusals == snapshot.block_refusals
+        and operator.eq(fresh.function_refusals, snapshot.function_refusals)
+        and operator.eq(fresh.block_refusals, snapshot.block_refusals)
     )
 
 
+@cython.ccall
 def _context_projection_equal_8616(
     context: NativeNearCallEntry8616,
     snapshot: _DetachedSourceFacts8616,
-) -> bool:
+) -> cython.bint:
     """Reconcile context identities, scalars and encoding callback-free."""
     if not all((
         context.project is snapshot.context_project,
@@ -519,15 +532,15 @@ def _context_projection_equal_8616(
     )):
         return False
     return bool(
-        context.call_encoding == snapshot.call_encoding
-        and (
+        operator.eq(context.call_encoding, snapshot.call_encoding)
+        and operator.eq((
             context.callsite_addr,
             context.next_addr,
             context.target_addr,
             context.callee_addr,
             context.selector_low,
             context.selector_high,
-        ) == snapshot.context_scalars
+        ), snapshot.context_scalars)
     )
 
 
@@ -539,7 +552,7 @@ def _stale_source_projection_8616(
     instruction: IRInstr,
     coordinates: DirectNearCallCoordinates8616,
     snapshot: _DetachedSourceFacts8616,
-) -> bool:
+) -> cython.bint:
     """Return whether owned facts drifted, without graph recapture.
 
     Pure owned reads with no native callback: root/context coordinate
@@ -554,17 +567,17 @@ def _stale_source_projection_8616(
         return True
     if not all((
         boundary.project is project,
-        boundary.addr == artifact.function_addr,
-        artifact.function_addr == context.target_addr,
-        any(candidate is block for candidate in artifact.blocks),
+        operator.eq(boundary.addr, artifact.function_addr),
+        operator.eq(artifact.function_addr, context.target_addr),
+        any(candidate is block for candidate in iter(artifact.blocks)),
     )):
         return True
     if not all((
         instruction.op == "CALL",
-        instruction.addr == coordinates.callsite_addr,
+        operator.eq(instruction.addr, coordinates.callsite_addr),
         len(instruction.args) == 1,
         instruction.origin is snapshot.origin,
-        any(item is instruction for item in block.instrs),
+        any(item is instruction for item in iter(block.instrs)),
     )):
         return True
     if instruction.args[0] is not snapshot.operand:
@@ -576,18 +589,19 @@ def _stale_source_projection_8616(
         return True
     bound_shape = shape
     return not all((
-        bound_shape.next_linear_addr == coordinates.next_addr,
+        operator.eq(bound_shape.next_linear_addr, coordinates.next_addr),
         _retained_coordinate_facts_8616(
             coordinates.callsite_addr, coordinates.target_addr, bound_shape
         ),
-        (
+        operator.eq((
             coordinates.callsite_addr,
             coordinates.next_addr,
             coordinates.target_addr,
-        ) == snapshot.coordinate_facts,
+        ), snapshot.coordinate_facts),
     ))
 
 
+@cython.ccall
 def _stale_source_facts_8616(
     project: object,
     artifact: IRFunctionArtifact,
@@ -596,7 +610,7 @@ def _stale_source_facts_8616(
     instruction: IRInstr,
     coordinates: DirectNearCallCoordinates8616,
     snapshot: _DetachedSourceFacts8616,
-) -> bool:
+) -> cython.bint:
     """Return whether any owned fact drifted from the detached snapshot.
 
     The cheap reconciliation plus one full recaptured source graph —
@@ -613,6 +627,7 @@ def _stale_source_facts_8616(
     return not _graph_facts_equal_8616(artifact, snapshot.graph)
 
 
+@cython.ccall
 def _final_seal_source_changed_8616(
     project: object,
     artifact: IRFunctionArtifact,
@@ -622,19 +637,20 @@ def _final_seal_source_changed_8616(
     coordinates: DirectNearCallCoordinates8616,
     snapshot: _DetachedSourceFacts8616,
     native_snapshot: _DetachedNativeFacts8616,
-) -> bool:
+) -> cython.bint:
     """Read native evidence before the final callback-free owned reconciliation."""
     if _stale_source_projection_8616(
         project, artifact, context, block, instruction, coordinates, snapshot,
     ):
         return True
-    if _capture_native_facts_8616(project, context) != native_snapshot:
+    if operator.ne(_capture_native_facts_8616(project, context), native_snapshot):
         return True
     return _stale_source_facts_8616(
         project, artifact, context, block, instruction, coordinates, snapshot,
     )
 
 
+@cython.ccall
 def _conditional_seal_8616(
     project: object,
     artifact: IRFunctionArtifact,
@@ -691,9 +707,10 @@ def _conditional_seal_8616(
     return None
 
 
+@cython.ccall
 def _interval_failure_8616(
     context: NativeNearCallEntry8616,
-    target_addr: int,
+    target_addr: cython.longlong,
 ) -> ConditionalNearCallTargetFailure8616 | None:
     """Check the conditional theorem's own arithmetic on retained bounds.
 
@@ -724,6 +741,7 @@ def _interval_failure_8616(
     return None
 
 
+@cython.ccall
 def _byte_and_seal_gates_8616(
     project: object,
     artifact: IRFunctionArtifact,
@@ -741,6 +759,8 @@ def _byte_and_seal_gates_8616(
     The ordinary route refuses the selector window before binding target
     bytes, so the owning helper must check the mapped E8 encoding here.
     """
+    native_snapshot: object
+    snapshot: object
     snapshot = _capture_source_facts_8616(
         artifact, context, instruction, coordinates, shape
     )
@@ -763,6 +783,7 @@ def _byte_and_seal_gates_8616(
     )
 
 
+@cython.ccall
 def _post_auth_gates_8616(
     project: object,
     artifact: IRFunctionArtifact,
@@ -785,6 +806,7 @@ def _post_auth_gates_8616(
     re-authenticates the raw root and context and reconciles the detached
     source snapshot that ends the gate chain.
     """
+    failure: object
     expired = ConditionalNearCallTargetFailure8616.REQUEST_EXPIRED
     binding = prove_direct_near_call_target_binding_at_coordinates_8616(
         project, block=block, instruction=instruction, coordinates=coordinates
@@ -818,6 +840,7 @@ def _post_auth_gates_8616(
     return None, None, binding.shape
 
 
+@cython.ccall
 def _conditional_evidence_8616(
     project: object,
     artifact: IRFunctionArtifact,
@@ -825,11 +848,7 @@ def _conditional_evidence_8616(
     block: IRBlock,
     instruction: IRInstr,
     coordinates: DirectNearCallCoordinates8616,
-) -> tuple[
-    ConditionalNearCallTargetFailure8616 | None,
-    DirectNearCallTargetBindingFailure8616 | None,
-    DirectNearCallTargetShape8616 | None,
-]:
+) -> object:
     """Run the raw-root rebind and context authentication, then the gates.
 
     Returns ``(failure, preflight_failure, shape)``: a non-``None`` failure
@@ -861,6 +880,7 @@ def _conditional_evidence_8616(
     )
 
 
+@cython.ccall
 def prove_conditional_near_call_target_8616(
     project: object,
     *,
@@ -891,6 +911,8 @@ def prove_conditional_near_call_target_8616(
     callback. CS preservation from the callee entry to this callsite is
     retained as the explicit ``obligation`` and remains unproved.
     """
+    failure: object
+    shape: object
     callsite = (
         coordinates.callsite_addr
         if type(coordinates) is DirectNearCallCoordinates8616
@@ -938,6 +960,7 @@ def prove_conditional_near_call_target_8616(
     )
 
 
+@cython.ccall
 def _conditional_theorem_8616(
     context: NativeNearCallEntry8616,
     artifact: IRFunctionArtifact,
@@ -983,12 +1006,12 @@ class _ScopedTargetStage8616(StrEnum):
     STAGED = "staged"
     REFUSED = "refused"
 
-    def __bool__(self) -> bool:
+    def __bool__(self) -> cython.bint:
         """Prevent staged evidence from acting as an admitted proof."""
         raise TypeError("staged target requires the final whole-census seal")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _ScopedFreshTheorem8616:
     """Staged fresh-theorem result; never admission authority.
 
@@ -1003,13 +1026,14 @@ class _ScopedFreshTheorem8616:
         default=None, compare=False, repr=False,
     )
 
-    def __bool__(self) -> bool:
+    def __bool__(self) -> cython.bint:
         """Reject staged evidence used as an admitted proof."""
         raise TypeError(
             "staged fresh theorem requires the final whole-census seal"
         )
 
 
+@cython.ccall
 def _staged_target_binding_8616(
     project: object,
     context: NativeNearCallEntry8616,
@@ -1049,6 +1073,7 @@ def _staged_target_binding_8616(
     return None if direct_evidence_deadline_expired_8616(project) else binding
 
 
+@cython.ccall
 def _staged_fresh_theorem_8616(
     project: object,
     *,
@@ -1067,6 +1092,7 @@ def _staged_fresh_theorem_8616(
     ``_conditional_theorem_8616`` builder and only after every staged gate
     passes; refused input can never mint a theorem.
     """
+    binding: object
     refused = _ScopedFreshTheorem8616(_ScopedTargetStage8616.REFUSED)
     if _surface_identity_failure_8616(
         project, artifact, context, block, instruction, coordinates,
@@ -1093,6 +1119,7 @@ def _staged_fresh_theorem_8616(
     )
 
 
+@cython.ccall
 def _staged_scoped_theorem_8616(
     project: object,
     theorem: object,
@@ -1114,6 +1141,8 @@ def _staged_scoped_theorem_8616(
     derivation still re-compares every retained fact against the rooted
     IR.
     """
+    binding: object
+    facts: object
     facts = _retained_theorem_facts_8616(
         project, theorem, artifact, context, block, instruction
     )
@@ -1131,13 +1160,14 @@ def _staged_scoped_theorem_8616(
     return _ScopedTargetStage8616.STAGED if binding is not None else _ScopedTargetStage8616.REFUSED
 
 
+@cython.ccall
 def _derive_final_scoped_theorem_8616(
     project: object,
     theorem: object,
     *,
     artifact: object,
     context: object,
-) -> bool:
+) -> cython.bint:
     """Re-derive one retained theorem callback-free from the final IR.
 
     The scope's final whole-census pass: reconcile the retained record,
@@ -1150,6 +1180,8 @@ def _derive_final_scoped_theorem_8616(
     mutation a transient callback could hide is observed against the
     final rooted state.
     """
+    bound: object
+    facts: object
     bound = theorem if type(theorem) is ConditionalNearCallTargetTheorem8616 else None
     if bound is None:
         return False
@@ -1192,8 +1224,9 @@ def _derive_final_scoped_theorem_8616(
 def _theorem_coordinate_facts_8616(
     theorem: ConditionalNearCallTargetTheorem8616,
     context: NativeNearCallEntry8616,
-) -> tuple[int, int, int] | None:
+) -> object:
     """Reconcile the theorem's retained scalars against its own obligation."""
+    obligation: object
     obligation = theorem.obligation
     callsite = theorem.callsite_addr
     next_addr = theorem.next_addr
@@ -1202,16 +1235,16 @@ def _theorem_coordinate_facts_8616(
     high = theorem.selector_high
     if obligation is None or not all(
         type(value) is int
-        for value in (callsite, next_addr, target, low, high)
+        for value in iter((callsite, next_addr, target, low, high))
     ):
         return None
     if not all((
         obligation.context is context,
-        obligation.callsite_addr == callsite,
-        obligation.selector_low == low,
-        obligation.selector_high == high,
-        low == context.selector_low,
-        high == context.selector_high,
+        operator.eq(obligation.callsite_addr, callsite),
+        operator.eq(obligation.selector_low, low),
+        operator.eq(obligation.selector_high, high),
+        operator.eq(low, context.selector_low),
+        operator.eq(high, context.selector_high),
     )):
         return None
     if not (
@@ -1225,10 +1258,11 @@ def _theorem_coordinate_facts_8616(
     return callsite, next_addr, target
 
 
+@cython.ccall
 def _conditional_facts_equal_8616(
     theorem: ConditionalNearCallTargetTheorem8616,
     fresh: ConditionalNearCallTargetTheorem8616,
-) -> bool:
+) -> cython.bint:
     """Reconcile a re-evaluated theorem against the retained record."""
     if not all((
         type(fresh) is ConditionalNearCallTargetTheorem8616,
@@ -1256,13 +1290,14 @@ def _conditional_facts_equal_8616(
             theorem.selector_low,
             theorem.selector_high,
         ),
-        fresh.obligation == theorem.obligation,
-        fresh.shape == theorem.shape,
-        fresh.stats == theorem.stats,
+        operator.eq(fresh.obligation, theorem.obligation),
+        operator.eq(fresh.shape, theorem.shape),
+        operator.eq(fresh.stats, theorem.stats),
         fresh.stats.closed,
     ))
 
 
+@cython.ccall
 def _retained_theorem_facts_8616(
     project: object,
     theorem: object,
@@ -1270,7 +1305,7 @@ def _retained_theorem_facts_8616(
     context: object,
     block: object,
     instruction: object,
-) -> tuple[int, int, int] | None:
+) -> object:
     """Reconcile a retained theorem record against the supplied surfaces.
 
     Shared structural gate for both consumption paths: the record must be
@@ -1281,6 +1316,7 @@ def _retained_theorem_facts_8616(
     coordinate facts, or ``None`` for any omitted, copied, or foreign
     surface.
     """
+    retained: object
     if (
         type(theorem) is not ConditionalNearCallTargetTheorem8616
         or not all((
@@ -1309,6 +1345,7 @@ def _retained_theorem_facts_8616(
     return _theorem_coordinate_facts_8616(theorem, retained)
 
 
+@cython.ccall
 def consume_conditional_near_call_target_8616(
     project: object,
     theorem: object,
@@ -1317,7 +1354,7 @@ def consume_conditional_near_call_target_8616(
     context: object,
     block: object,
     instruction: object,
-) -> bool:
+) -> cython.bint:
     """Re-prove a retained conditional theorem against live evidence.
 
     The identical explicit ``context`` and the exact retained
@@ -1330,6 +1367,7 @@ def consume_conditional_near_call_target_8616(
     returns ``False``; the context alone can never license a modified or
     forged artifact.
     """
+    facts: object
     facts = _retained_theorem_facts_8616(
         project, theorem, artifact, context, block, instruction
     )
@@ -1347,6 +1385,7 @@ def consume_conditional_near_call_target_8616(
     return _conditional_facts_equal_8616(cast(ConditionalNearCallTargetTheorem8616, theorem), fresh)
 
 
+@cython.ccall
 def reauthenticate_conditional_near_call_target_8616(
     project: object,
     theorem: object,
@@ -1355,7 +1394,7 @@ def reauthenticate_conditional_near_call_target_8616(
     context: object,
     block: object,
     instruction: object,
-) -> bool:
+) -> cython.bint:
     """Re-run only the canonical native surfaces of a retained theorem.
 
     One bounded pass for consumers that already bracket this call with
@@ -1371,6 +1410,7 @@ def reauthenticate_conditional_near_call_target_8616(
     call, so no redundant full-IR serialization or second proof model is
     introduced, and no cache or registry is consulted.
     """
+    facts: object
     facts = _retained_theorem_facts_8616(
         project, theorem, artifact, context, block, instruction
     )

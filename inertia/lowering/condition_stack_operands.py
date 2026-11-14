@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Types/Lowering.
 
 Responsibility: lower typed ConditionIR stack operands onto proven stack storage.
@@ -10,6 +11,8 @@ when an exact BP-relative object already exists.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from typing import Protocol, cast
@@ -28,6 +31,8 @@ from .stack_variable_coordinates import (
     stack_cvar_for_machine_bp_range_8616,
     stack_variable_coordinate_registry_8616,
 )
+import operator
+import builtins
 
 
 class _ProjectLike(Protocol):
@@ -52,6 +57,7 @@ class _CodegenLike(Protocol):
     cfunc: _CFunctionLike | None
 
 
+@cython.ccall
 def _cfunc_for_codegen(codegen: object) -> _CFunctionLike | None:
     """Read the optional C function at the explicit third-party codegen boundary."""
     try:
@@ -60,6 +66,7 @@ def _cfunc_for_codegen(codegen: object) -> _CFunctionLike | None:
         return None
 
 
+@cython.ccall
 def _variables_in_use(cfunc: object) -> object:
     """Read the optional angr declaration map without inventing a fallback contract."""
     try:
@@ -68,6 +75,7 @@ def _variables_in_use(cfunc: object) -> object:
         return None
 
 
+@cython.ccall
 def _unified_local_vars(cfunc: object) -> object:
     """Read the optional angr unified-local map at the dynamic boundary."""
     try:
@@ -76,6 +84,7 @@ def _unified_local_vars(cfunc: object) -> object:
         return None
 
 
+@cython.ccall
 def _cfunc_addr(cfunc: object) -> int | None:
     """Read the optional function region used for newly materialized storage."""
     try:
@@ -84,7 +93,8 @@ def _cfunc_addr(cfunc: object) -> int | None:
         return None
 
 
-def _condition_integer_type(codegen: object, size: int, *, signed: bool) -> SimType:
+@cython.ccall
+def _condition_integer_type(codegen: object, size: cython.longlong, *, signed: cython.bint) -> SimType:
     """Return an architecture-bound integer type for one condition operand."""
     if size == 1:
         type_ = SimTypeChar(signed)
@@ -95,16 +105,17 @@ def _condition_integer_type(codegen: object, size: int, *, signed: bool) -> SimT
     return type_.with_arch(cast(_CodegenLike, codegen).project.arch)
 
 
+@cython.ccall
 def _matches_stack_storage(
     codegen: object,
     variable: object,
     *,
-    base: str,
-    offset: int,
-    size: int,
-) -> bool:
+    base: object,
+    offset: cython.longlong,
+    size: cython.longlong,
+) -> cython.bint:
     """Match an exact machine stack identity across projected C coordinates."""
-    if not isinstance(variable, SimStackVariable) or variable.base != base or variable.size != size:
+    if not isinstance(variable, SimStackVariable) or operator.ne(variable.base, base) or operator.ne(variable.size, size):
         return False
     storage_offset = (
         machine_bp_offset_for_stack_variable_8616(codegen, variable)
@@ -114,15 +125,19 @@ def _matches_stack_storage(
     return storage_offset == offset
 
 
+@cython.ccall
 def _existing_stack_cvar(
     codegen: object,
     cfunc: _CFunctionLike,
     *,
-    base: str,
-    offset: int,
-    size: int,
+    base: object,
+    offset: cython.longlong,
+    size: cython.longlong,
 ) -> structured_c.CVariable | None:
     """Resolve an exact stack declaration by its canonical C variable value."""
+    cvar: object
+    entries: object
+    entry: object
     variables_in_use = _variables_in_use(cfunc)
     if isinstance(variables_in_use, dict):
         for cvar in variables_in_use.values():
@@ -158,31 +173,32 @@ def _existing_wide_stack_cvar(
     codegen: object,
     cfunc: _CFunctionLike,
     *,
-    base: str,
-    offset: int,
-    size: int,
+    base: object,
+    offset: cython.longlong,
+    size: cython.longlong,
 ) -> structured_c.CVariable | None:
     """Resolve a proven wide owner containing one word slice."""
+    cvar: object
     if size != 2:
         return None
     candidates: list[structured_c.CVariable] = []
     variables_in_use = _variables_in_use(cfunc)
     if isinstance(variables_in_use, dict):
         candidates.extend(
-            cvar for cvar in variables_in_use.values() if isinstance(cvar, structured_c.CVariable)
+            cvar for cvar in builtins.iter(variables_in_use.values()) if isinstance(cvar, structured_c.CVariable)
         )
     try:
         arg_list = cfunc.arg_list
     except AttributeError:
         arg_list = None
     if isinstance(arg_list, (list, tuple)):
-        candidates.extend(cvar for cvar in arg_list if isinstance(cvar, structured_c.CVariable))
+        candidates.extend(cvar for cvar in iter(arg_list) if isinstance(cvar, structured_c.CVariable))
 
     for cvar in candidates:
         variable = cvar.variable
         if not isinstance(variable, SimStackVariable):
             continue
-        if variable.base != base or variable.size != 4:
+        if operator.ne(variable.base, base) or variable.size != 4:
             continue
         variable_offset = (
             machine_bp_offset_for_stack_variable_8616(codegen, variable)
@@ -195,13 +211,14 @@ def _existing_wide_stack_cvar(
     return None
 
 
+@cython.ccall
 def _wide_stack_word_projection(
     codegen: object,
     declaration: structured_c.CVariable,
     *,
-    offset: int,
-    signed: bool,
-    prefer_word_view: bool = False,
+    offset: cython.longlong,
+    signed: cython.bint,
+    prefer_word_view: cython.bint = False,
 ) -> structured_c.CExpression | None:
     """Project a proven low/high word without declaring an overlapping object."""
     from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CConstant
@@ -268,14 +285,15 @@ def _wide_stack_word_projection(
     return projected
 
 
+@cython.ccall
 def project_contained_stack_integer_view_8616(
     codegen: object,
     declaration: structured_c.CVariable,
     *,
-    owner_bp_offset: int,
-    offset: int,
-    size: int,
-    signed: bool,
+    owner_bp_offset: cython.longlong,
+    offset: cython.longlong,
+    size: cython.longlong,
+    signed: cython.bint,
     tags: Mapping[str, object] | None,
 ) -> structured_c.CExpression | None:
     """Project one proven integer subrange without declaring new storage."""
@@ -337,6 +355,7 @@ def project_contained_stack_integer_view_8616(
     return view
 
 
+@cython.ccall
 def _register_cvar_8616(
     cfunc: _CFunctionLike,
     variable: SimStackVariable,
@@ -351,20 +370,22 @@ def _register_cvar_8616(
         unified_local_vars[variable] = {(declaration, declaration.variable_type)}
 
 
+@cython.ccall
 def _wider_storage_view_8616(
     codegen: object,
-    cfunc: _CFunctionLike | None,
+    cfunc: object,
     *,
-    base: str,
-    offset: int,
-    size: int,
-    name: str,
-    signed: bool,
+    base: object,
+    offset: cython.longlong,
+    size: cython.longlong,
+    name: object,
+    signed: cython.bint,
     tags: Mapping[str, object] | None,
-    prefer_signed_local_storage: bool,
+    prefer_signed_local_storage: cython.bint,
     storage_size: int | None,
 ) -> structured_c.CExpression | None:
     """Project the narrower view from a proven wider stack storage owner."""
+    storage_declaration: object
     if cfunc is None or not isinstance(storage_size, int) or storage_size <= size:
         return None
     storage_declaration = _existing_stack_cvar(
@@ -398,14 +419,17 @@ def _wider_storage_view_8616(
     )
 
 
+@cython.ccall
 def _bp_declaration_or_contained_view_8616(
     codegen: object,
-    offset: int,
-    size: int,
-    signed: bool,
+    offset: cython.longlong,
+    size: cython.longlong,
+    signed: cython.bint,
     tags: Mapping[str, object] | None,
 ) -> tuple[structured_c.CVariable | None, structured_c.CExpression | None]:
     """Return a BP declaration or a contained view inside a wider owner."""
+    contained_view: object
+    owner: object
     projected = stack_cvar_for_machine_bp_range_8616(codegen, offset, size)
     if isinstance(projected, structured_c.CVariable):
         return projected, None
@@ -432,17 +456,19 @@ def _bp_declaration_or_contained_view_8616(
     return None, None
 
 
+@cython.ccall
 def _existing_wide_projection_8616(
     codegen: object,
     cfunc: _CFunctionLike,
     *,
-    base: str,
-    offset: int,
-    size: int,
-    signed: bool,
-    prefer_signed_local_storage: bool,
+    base: object,
+    offset: cython.longlong,
+    size: cython.longlong,
+    signed: cython.bint,
+    prefer_signed_local_storage: cython.bint,
 ) -> structured_c.CExpression | None:
     """Project a word view from an existing wider stack declaration."""
+    wide_declaration: object
     wide_declaration = _existing_wide_stack_cvar(
         codegen,
         cfunc,
@@ -461,15 +487,16 @@ def _existing_wide_projection_8616(
     )
 
 
+@cython.ccall
 def _register_stack_declaration_8616(
     codegen: object,
-    cfunc: _CFunctionLike | None,
+    cfunc: object,
     *,
-    base: str,
-    offset: int,
-    size: int,
-    name: str,
-    signed: bool,
+    base: object,
+    offset: cython.longlong,
+    size: cython.longlong,
+    name: object,
+    signed: cython.bint,
     tags: Mapping[str, object] | None,
 ) -> structured_c.CVariable:
     """Create and register one fresh stack declaration for the view."""
@@ -491,14 +518,16 @@ def _register_stack_declaration_8616(
     return declaration
 
 
+@cython.ccall
 def _signed_stack_view_8616(
     codegen: object,
     declaration: structured_c.CVariable,
-    size: int,
-    signed: bool,
+    size: cython.longlong,
+    signed: cython.bint,
     tags: Mapping[str, object] | None,
 ) -> structured_c.CExpression:
     """Return the declaration view, semantically cast when signedness differs."""
+    current_signed: object
     current_type = declaration.variable_type
     target_type = _condition_integer_type(codegen, size, signed=signed)
     view = structured_c.CVariable(
@@ -509,7 +538,7 @@ def _signed_stack_view_8616(
         tags=dict(tags or declaration.tags),
     )
     current_signed = current_type.signed if isinstance(current_type, (SimTypeChar, SimTypeShort, SimTypeLong)) else None
-    if current_signed is None or bool(current_signed) == signed:
+    if current_signed is None or operator.eq(bool(current_signed), signed):
         return view
     return CSemanticCast8616(
         current_type,
@@ -520,17 +549,18 @@ def _signed_stack_view_8616(
     )
 
 
+@cython.ccall
 def materialize_typed_condition_stack_operand_8616(
     codegen: object,
     *,
-    base: str,
-    offset: int,
-    size: int,
-    name: str,
-    signed: bool,
+    base: object,
+    offset: cython.longlong,
+    size: cython.longlong,
+    name: object,
+    signed: cython.bint,
     tags: Mapping[str, object] | None = None,
     preferred: structured_c.CVariable | None = None,
-    prefer_signed_local_storage: bool = False,
+    prefer_signed_local_storage: cython.bint = False,
     storage_size: int | None = None,
 ) -> structured_c.CExpression | None:
     """Return a typed expression view over one exact BP-relative stack object.
@@ -540,6 +570,10 @@ def materialize_typed_condition_stack_operand_8616(
     storage owner; the returned expression is only a word projection.  This
     prevents condition width from silently narrowing a live stack object.
     """
+    cfunc: object
+    contained_view: object
+    declaration: object
+    projected: object
     if size <= 0:
         return None
     cfunc = _cfunc_for_codegen(codegen)

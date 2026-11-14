@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: preserve legacy CLI helper surface while delegating semantic proof to X86_16 layers.
@@ -5,6 +6,8 @@ Forbidden: owning decompiler semantics, source-backed recovery, or postprocess s
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -19,15 +22,17 @@ from inertia.lowering.storage_objects import (
     build_storage_object_artifact,
     storage_object_record_for_key,
 )
+import dataclasses
+import operator
 
-type StableHints = dict[BaseKey, AccessTraitObjectHint]
-type ReplaceCChildren = Callable[[object, Callable[[object], object]], bool]
+StableHints = typing.TypeAliasType("StableHints", dict[BaseKey, AccessTraitObjectHint])
+ReplaceCChildren = typing.TypeAliasType("ReplaceCChildren", Callable[[object, Callable[[object], object]], bool])
 
 
 class _CFunctionLike(Protocol):
     """C function shape needed by this legacy CLI cleanup helper."""
 
-    addr: int
+    addr: cython.longlong
     statements: object
 
 
@@ -37,7 +42,7 @@ class _CodegenLike(Protocol):
     cfunc: _CFunctionLike | None
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _CodGlobalLoadFold8616:
     """Mutable fold state for coalescing scaled word-global loads."""
 
@@ -50,10 +55,16 @@ class _CodGlobalLoadFold8616:
     synthetic_word_global_variable: Callable[
         [_CodegenLike, object, int, dict[int, structured_c.CVariable]], structured_c.CVariable | None
     ]
-    created: dict[int, structured_c.CVariable] = field(default_factory=dict)
+    created: object = field(default_factory=dict)
 
+    @cython.ccall
     def transform(self, node: object) -> object:
         """Replace one adjacent low+high byte global-load pair with a word global."""
+        cvar: object
+        low_addr: object
+        record: object
+        high_expr: object
+        low_expr: object
         if not isinstance(node, structured_c.CBinaryOp) or node.op not in {"Or", "Add"}:
             return node
 
@@ -74,7 +85,7 @@ class _CodGlobalLoadFold8616:
                 continue
 
             high_addr = self.match_scaled_high_byte(high_expr, self.project)
-            if high_addr != low_addr + 1:
+            if operator.ne(high_addr, low_addr + 1):
                 continue
 
             return cvar
@@ -82,6 +93,7 @@ class _CodGlobalLoadFold8616:
         return node
 
 
+@cython.ccall
 def _storage_object_artifact_for(
     project: object,
     codegen: _CodegenLike,
@@ -92,6 +104,8 @@ def _storage_object_artifact_for(
     build_stable_access_object_hints: Callable[[dict[str, dict[BaseKey, object]]], StableHints],
 ) -> StorageObjectArtifact | None:
     """Return the storage-object artifact for this function's access traits."""
+    traits: object
+    traits_cache: object
     # dynamic angr boundary: access traits are attached to Project by earlier passes.
     traits_cache = getattr(project, "_inertia_access_traits", None)
     if not isinstance(traits_cache, dict) or cfunc.addr not in traits_cache:
@@ -111,6 +125,7 @@ def _storage_object_artifact_for(
     )
 
 
+@cython.ccall
 def _coalesce_cod_word_global_loads(
     project: object,
     codegen: _CodegenLike,
@@ -125,7 +140,8 @@ def _coalesce_cod_word_global_loads(
         [_CodegenLike, object, int, dict[int, structured_c.CVariable]], structured_c.CVariable | None
     ],
     replace_c_children: ReplaceCChildren,
-) -> bool:
+) -> cython.bint:
+    cfunc: object
     cfunc = codegen.cfunc
     if not synthetic_globals or cfunc is None:
         return False

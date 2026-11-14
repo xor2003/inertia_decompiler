@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery/reporting.
 
 Responsibility: declare recovery layers and focus areas for documentation and diagnostics.
@@ -11,17 +12,19 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import cython
 
 from dataclasses import dataclass
+import dataclasses
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RecoveryLayerSpec:
     """Declarative description of one evidence-owned recovery layer."""
 
-    name: str
-    purpose: str
-    helpers: tuple[str, ...]
+    name: object
+    purpose: object
+    helpers: object
 
 
 RECOVERY_LAYERS: tuple[RecoveryLayerSpec, ...] = (
@@ -154,7 +157,7 @@ RECOVERY_LAYERS: tuple[RecoveryLayerSpec, ...] = (
 
 def describe_x86_16_recovery_layers() -> tuple[tuple[str, str, tuple[str, ...]], ...]:
     """Return the ordered recovery-layer manifest for reports and tests."""
-    return tuple((layer.name, layer.purpose, layer.helpers) for layer in RECOVERY_LAYERS)
+    return tuple((layer.name, layer.purpose, layer.helpers) for layer in iter(RECOVERY_LAYERS))
 
 
 OBJECT_RECOVERY_FOCUS_ORDER: tuple[str, ...] = (
@@ -168,10 +171,10 @@ OBJECT_RECOVERY_FOCUS_ORDER: tuple[str, ...] = (
 
 def describe_x86_16_object_recovery_focus() -> tuple[tuple[str, str, tuple[str, ...]], ...]:
     """Return object-recovery layers in their focused audit order."""
-    by_name = {layer.name: layer for layer in RECOVERY_LAYERS}
+    by_name = {layer.name: layer for layer in iter(RECOVERY_LAYERS)}
     return tuple(
         (layer.name, layer.purpose, layer.helpers)
-        for name in OBJECT_RECOVERY_FOCUS_ORDER
+        for name in iter(OBJECT_RECOVERY_FOCUS_ORDER)
         if (layer := by_name.get(name)) is not None
     )
 

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Publish storage identity for closed logical stack-memory operands.
 
 Layer: Alias.
@@ -10,6 +11,8 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -24,6 +27,8 @@ from inertia.ir.ssa_memory_ranges import StackCoordinateAgreement8616
 
 from .alias_model_impl import AliasStorageFacts, alias_facts_for_ir_address_8616
 from .stack_memory_ssa_contracts import StackMemoryAliasStats8616
+import dataclasses
+import operator
 
 
 class LogicalStackStorageIdentityFailure8616(StrEnum):
@@ -39,7 +44,7 @@ class LogicalStackStorageIdentityFailure8616(StrEnum):
     COORDINATE_CONFLICT = "coordinate_conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LogicalStackStorageIdentity8616:
     """One logical operand bound to exact Alias-owned stack storage."""
 
@@ -59,12 +64,12 @@ class LogicalStackStorageIdentity8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LogicalStackStorageIdentityRefusal8616:
     """One retained non-identity outcome from the logical-memory census."""
 
     failure: LogicalStackStorageIdentityFailure8616
-    detail: str
+    detail: object
     source: IRLogicalMemoryAccess8616 | None = None
     source_refusal: IRLogicalMemoryRefusal8616 | None = None
 
@@ -80,31 +85,32 @@ class LogicalStackStorageIdentityRefusal8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LogicalStackStorageIdentityProjection8616:
     """Closed Alias identity outcomes for one logical-memory artifact."""
 
-    identities: tuple[LogicalStackStorageIdentity8616, ...]
-    refusals: tuple[LogicalStackStorageIdentityRefusal8616, ...]
+    identities: object
+    refusals: object
     stats: StackMemoryAliasStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every input has one identity or typed refusal."""
         return bool(
             self.stats.complete
-            and len(self.identities) == self.stats.materialized_count
-            and len(self.refusals) == self.stats.failure_count
+            and operator.eq(len(self.identities), self.stats.materialized_count)
+            and operator.eq(len(self.refusals), self.stats.failure_count)
         )
 
 
+@cython.ccall
 def _project_access_8616(
-    function_addr: int,
+    function_addr: cython.longlong,
     source: IRLogicalMemoryAccess8616,
     coordinate_agreement: StackCoordinateAgreement8616,
 ) -> LogicalStackStorageIdentity8616 | LogicalStackStorageIdentityRefusal8616:
     """Project one exact logical operand without claiming memory value state."""
-    if source.key.function_addr != function_addr:
+    if operator.ne(source.key.function_addr, function_addr):
         return LogicalStackStorageIdentityRefusal8616(
             LogicalStackStorageIdentityFailure8616.FUNCTION_IDENTITY_MISMATCH,
             "logical operand belongs to another function",
@@ -150,8 +156,8 @@ def _project_access_8616(
 
 
 def project_logical_stack_storage_identities_8616(
-    function_addr: int,
-    source: IRLogicalMemoryArtifact8616 | None,
+    function_addr: cython.longlong,
+    source: object,
     *,
     coordinate_agreement: StackCoordinateAgreement8616 = StackCoordinateAgreement8616.NO_CONFLICT_OBSERVED,
 ) -> LogicalStackStorageIdentityProjection8616:
@@ -160,10 +166,10 @@ def project_logical_stack_storage_identities_8616(
         return LogicalStackStorageIdentityProjection8616(
             (), (), StackMemoryAliasStats8616()
         )
-    if source.function_addr != function_addr or not source.closed:
+    if operator.ne(source.function_addr, function_addr) or not source.closed:
         failure = (
             LogicalStackStorageIdentityFailure8616.FUNCTION_IDENTITY_MISMATCH
-            if source.function_addr != function_addr
+            if operator.ne(source.function_addr, function_addr)
             else LogicalStackStorageIdentityFailure8616.UPSTREAM_INCOMPLETE
         )
         count = max(1, source.stats.raw_fact_count)
@@ -182,13 +188,13 @@ def project_logical_stack_storage_identities_8616(
                 failure_count=count,
             ),
         )
-    outcomes = tuple(_project_access_8616(function_addr, item, coordinate_agreement) for item in source.accesses)
+    outcomes = tuple(_project_access_8616(function_addr, item, coordinate_agreement) for item in iter(source.accesses))
     identities = tuple(
-        item for item in outcomes if isinstance(item, LogicalStackStorageIdentity8616)
+        item for item in iter(outcomes) if isinstance(item, LogicalStackStorageIdentity8616)
     )
     refusals = tuple(
         item
-        for item in outcomes
+        for item in iter(outcomes)
         if isinstance(item, LogicalStackStorageIdentityRefusal8616)
     ) + tuple(
         LogicalStackStorageIdentityRefusal8616(
@@ -196,7 +202,7 @@ def project_logical_stack_storage_identities_8616(
             item.detail,
             source_refusal=item,
         )
-        for item in source.refusals
+        for item in iter(source.refusals)
     )
     materialized_count = len(identities)
     stats = StackMemoryAliasStats8616(

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Legacy callsite cleanup and materialization bridge.
 
 Layer: Rewrite/Postprocess cleanup.
@@ -53,6 +54,8 @@ rendered text, COD, source, or CLI/reporting evidence here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 import logging
@@ -218,6 +221,9 @@ from inertia.semantics.stack_probe_fact_trace import (
     record_stack_arg_materialization_8616,
 )
 from inertia.structuring.simple_loop_recovery import _function_instruction_summaries_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "_attach_callsite_summaries_8616",
@@ -239,10 +245,10 @@ __all__ = [
     "replay_callsite_stack_arguments_after_regeneration_8616",
 ]
 
-type AngrProjectValue = Any
-type AngrFunctionValue = Any
-type StructuredCodegenValue = Any
-type StructuredAstValue = Any
+AngrProjectValue = typing.TypeAliasType("AngrProjectValue", Any)
+AngrFunctionValue = typing.TypeAliasType("AngrFunctionValue", Any)
+StructuredCodegenValue = typing.TypeAliasType("StructuredCodegenValue", Any)
+StructuredAstValue = typing.TypeAliasType("StructuredAstValue", Any)
 
 _SUB_TARGET_RE = re.compile(r"^(?:sub_|0x)(?P<addr>[0-9a-fA-F]+)$")
 _NAMESPACED_TARGET_RE = re.compile(r"^::0x(?P<addr>[0-9a-fA-F]+)::")
@@ -257,11 +263,11 @@ class SegmentPushSourceLowerer8616(Protocol):
 
     def __call__(
         self,
-        segment_name: str,
+        segment_name: object,
         *,
         codegen: object,
         variable_type: SimType | None,
-        function_addr: int,
+        function_addr: cython.longlong,
     ) -> structured_c.CVariable | None:
         """Return the explicit runtime-state C carrier for a proven segment source."""
 
@@ -269,14 +275,14 @@ class SegmentPushSourceLowerer8616(Protocol):
 class SegmentAddressProvenanceAttacher8616(Protocol):
     """Types/Lowering service preserving exact callsite PUSH provenance."""
 
-    def __call__(self, args: tuple[object, ...], instruction_addrs: tuple[int, ...]) -> None:
+    def __call__(self, args: object, instruction_addrs: object) -> None:
         """Attach exact source sites without recovering new call semantics."""
 
 
 class FixedStackProbeFrameLowerer8616(Protocol):
     """Types/Lowering service for consuming proven fixed stack probes."""
 
-    def __call__(self, codegen: object) -> bool:
+    def __call__(self, codegen: object) -> cython.bint:
         """Return whether a proven fixed probe was lowered into C locals."""
         ...
 
@@ -284,7 +290,7 @@ class FixedStackProbeFrameLowerer8616(Protocol):
 class FunctionResultObservationProvider8616(Protocol):
     """Types/Lowering service for one closed caller-result observation."""
 
-    def __call__(self, project: object, function_addr: int) -> CallerReturnUseVerdict8616 | None:
+    def __call__(self, project: object, function_addr: cython.longlong) -> CallerReturnUseVerdict8616 | None:
         """Return whether binary callers provably use or ignore the result."""
         ...
 
@@ -296,7 +302,7 @@ class CallTargetIdentityConsumer8616(Protocol):
         self,
         project: object,
         codegen: object,
-    ) -> bool:
+    ) -> cython.bint:
         """Apply only call-target identities already proven by typed evidence."""
         ...
 
@@ -304,15 +310,15 @@ class CallTargetIdentityConsumer8616(Protocol):
 class CallArgumentRematerializationClassifier8616(Protocol):
     """Types/Lowering service for rejecting unresolved call arguments."""
 
-    def __call__(self, argument: object) -> bool:
+    def __call__(self, argument: object) -> cython.bint:
         """Return whether closed Lowering evidence requires rematerialization."""
         ...
 
 
-type CallArgumentSetupLivenessClassifier8616 = Callable[
+CallArgumentSetupLivenessClassifier8616 = typing.TypeAliasType("CallArgumentSetupLivenessClassifier8616", Callable[
     [tuple[StructuredAstValue, ...] | None, frozenset[tuple[StructuredAstValue, ...]]],
     bool,
-]
+])
 
 
 class CallsiteArgumentReplayConsumer8616(Protocol):
@@ -323,8 +329,8 @@ class CallsiteArgumentReplayConsumer8616(Protocol):
         project: object,
         codegen: object,
         *,
-        preserve_setup: bool = False,
-    ) -> bool:
+        preserve_setup: cython.bint = False,
+    ) -> cython.bint:
         """Replay already-proven callsite facts onto the current C AST."""
         ...
 
@@ -332,7 +338,7 @@ class CallsiteArgumentReplayConsumer8616(Protocol):
 class CallReturnFrameArgumentLowerer8616(Protocol):
     """Types/Lowering service consuming exact CALL-frame argument projections."""
 
-    def __call__(self, project: object, codegen: object) -> bool:
+    def __call__(self, project: object, codegen: object) -> cython.bint:
         """Consume only Semantics-proven machine return-frame arguments."""
         ...
 
@@ -343,9 +349,9 @@ class CalleePointerArgumentClassifier8616(Protocol):
     def __call__(
         self,
         project: object,
-        callee_name: str,
-        argument_index: int,
-    ) -> bool:
+        callee_name: object,
+        argument_index: cython.longlong,
+    ) -> cython.bint:
         """Return whether callee machine evidence proves a pointer argument."""
         ...
 
@@ -360,14 +366,14 @@ class _CallsiteMaterializationControlCarrier8616(Protocol):
     """Typed Inertia call-materialization state carried by an angr codegen object."""
 
     _inertia_callsite_materialization_stats: CallsiteMaterializationStats
-    _inertia_callsite_disable_consumed_arg_store_prune_8616: bool
-    _inertia_callsite_consumed_arg_store_prune_refused_by_context_8616: int
-    _inertia_callsite_disable_stack_probe_setup_prune_8616: bool
-    _inertia_callsite_stack_probe_setup_prune_refused_by_context_8616: int
-    _inertia_callsite_arg_regen_replay_active_8616: bool
-    _inertia_postprocess_changed: bool
-    _inertia_callsite_regen_replay_conservative_no_prune_8616: int
-    _inertia_callsite_return_exprs_8616: dict[int, StructuredAstValue]
+    _inertia_callsite_disable_consumed_arg_store_prune_8616: cython.bint
+    _inertia_callsite_consumed_arg_store_prune_refused_by_context_8616: cython.longlong
+    _inertia_callsite_disable_stack_probe_setup_prune_8616: cython.bint
+    _inertia_callsite_stack_probe_setup_prune_refused_by_context_8616: cython.longlong
+    _inertia_callsite_arg_regen_replay_active_8616: cython.bint
+    _inertia_postprocess_changed: cython.bint
+    _inertia_callsite_regen_replay_conservative_no_prune_8616: cython.longlong
+    _inertia_callsite_return_exprs_8616: object
     _inertia_call_target_identity_consumer_8616: CallTargetIdentityConsumer8616
     _inertia_call_argument_rematerialization_classifier_8616: CallArgumentRematerializationClassifier8616
     _inertia_call_argument_setup_liveness_classifier_8616: CallArgumentSetupLivenessClassifier8616
@@ -379,6 +385,7 @@ class _CallsiteMaterializationControlCarrier8616(Protocol):
     _inertia_function_result_observation_provider_8616: FunctionResultObservationProvider8616
 
 
+@cython.ccall
 def _bind_callee_pointer_argument_classifier_8616(
     project: object,
     classifier: CalleePointerArgumentClassifier8616,
@@ -388,11 +395,12 @@ def _bind_callee_pointer_argument_classifier_8616(
     carrier._inertia_callee_pointer_argument_classifier_8616 = classifier
 
 
+@cython.ccall
 def _bound_callee_pointer_argument_is_proven_8616(
     project: object,
-    callee_name: str,
-    argument_index: int,
-) -> bool:
+    callee_name: object,
+    argument_index: cython.longlong,
+) -> cython.bint:
     """Consume the bound lowering classifier without owning pointer recovery."""
     try:
         classifier = cast(
@@ -404,6 +412,7 @@ def _bound_callee_pointer_argument_is_proven_8616(
     return classifier(project, callee_name, argument_index)
 
 
+@cython.ccall
 def _bind_call_target_identity_consumer_8616(
     codegen: StructuredCodegenValue,
     consumer: CallTargetIdentityConsumer8616,
@@ -413,6 +422,7 @@ def _bind_call_target_identity_consumer_8616(
     carrier._inertia_call_target_identity_consumer_8616 = consumer
 
 
+@cython.ccall
 def _bind_call_argument_rematerialization_classifier_8616(
     codegen: StructuredCodegenValue,
     classifier: CallArgumentRematerializationClassifier8616,
@@ -422,6 +432,7 @@ def _bind_call_argument_rematerialization_classifier_8616(
     carrier._inertia_call_argument_rematerialization_classifier_8616 = classifier
 
 
+@cython.ccall
 def _bind_call_argument_setup_liveness_classifier_8616(
     codegen: StructuredCodegenValue,
     classifier: CallArgumentSetupLivenessClassifier8616,
@@ -431,6 +442,7 @@ def _bind_call_argument_setup_liveness_classifier_8616(
     carrier._inertia_call_argument_setup_liveness_classifier_8616 = classifier
 
 
+@cython.ccall
 def _bind_callsite_argument_replay_consumer_8616(
     codegen: StructuredCodegenValue,
     consumer: CallsiteArgumentReplayConsumer8616,
@@ -440,12 +452,13 @@ def _bind_callsite_argument_replay_consumer_8616(
     carrier._inertia_callsite_argument_replay_consumer_8616 = consumer
 
 
+@cython.ccall
 def _replay_bound_callsite_argument_consumer_8616(
     project: object,
     codegen: StructuredCodegenValue,
     *,
-    preserve_setup: bool = False,
-) -> bool:
+    preserve_setup: cython.bint = False,
+) -> cython.bint:
     """Invoke the required Structuring owner after a core AST regeneration."""
     try:
         consumer = cast(
@@ -462,10 +475,11 @@ def _replay_bound_callsite_argument_consumer_8616(
     return bool(consumer(project, codegen))
 
 
+@cython.ccall
 def _bound_call_argument_requires_rematerialization_8616(
     codegen: StructuredCodegenValue,
     argument: object,
-) -> bool:
+) -> cython.bint:
     """Consume the bound Lowering verdict without classifying arguments here."""
     try:
         classifier = cast(
@@ -477,10 +491,11 @@ def _bound_call_argument_requires_rematerialization_8616(
     return classifier(argument)
 
 
+@cython.ccall
 def _replay_call_target_identity_consumer_8616(
     project: AngrProjectValue,
     codegen: StructuredCodegenValue,
-) -> bool:
+) -> cython.bint:
     """Replay the bound Types/Lowering target consumer after call AST rebuilding."""
     carrier = cast(_CallsiteMaterializationControlCarrier8616, codegen)
     try:
@@ -493,6 +508,7 @@ def _replay_call_target_identity_consumer_8616(
     return bool(consumer(project, codegen))
 
 
+@cython.ccall
 def _bind_segment_push_source_lowerer_8616(
     codegen: StructuredCodegenValue,
     lowerer: SegmentPushSourceLowerer8616,
@@ -502,6 +518,7 @@ def _bind_segment_push_source_lowerer_8616(
     carrier._inertia_segment_push_source_lowerer_8616 = lowerer
 
 
+@cython.ccall
 def _bind_segment_address_provenance_attacher_8616(
     codegen: StructuredCodegenValue,
     attacher: SegmentAddressProvenanceAttacher8616,
@@ -511,6 +528,7 @@ def _bind_segment_address_provenance_attacher_8616(
     carrier._inertia_segment_address_provenance_attacher_8616 = attacher
 
 
+@cython.ccall
 def _bind_fixed_stack_probe_frame_lowerer_8616(
     codegen: StructuredCodegenValue,
     lowerer: FixedStackProbeFrameLowerer8616,
@@ -520,6 +538,7 @@ def _bind_fixed_stack_probe_frame_lowerer_8616(
     carrier._inertia_fixed_stack_probe_frame_lowerer_8616 = lowerer
 
 
+@cython.ccall
 def _bind_call_return_frame_argument_lowerer_8616(
     codegen: StructuredCodegenValue,
     lowerer: CallReturnFrameArgumentLowerer8616,
@@ -529,10 +548,11 @@ def _bind_call_return_frame_argument_lowerer_8616(
     carrier._inertia_call_return_frame_argument_lowerer_8616 = lowerer
 
 
+@cython.ccall
 def _replay_call_return_frame_argument_lowerer_8616(
     project: object,
     codegen: StructuredCodegenValue,
-) -> bool:
+) -> cython.bint:
     """Replay the bound CALL-frame consumer after summaries and tags converge."""
     try:
         lowerer = cast(
@@ -546,6 +566,7 @@ def _replay_call_return_frame_argument_lowerer_8616(
     return bool(lowerer(project, codegen))
 
 
+@cython.ccall
 def _bind_function_result_observation_provider_8616(
     codegen: StructuredCodegenValue,
     provider: FunctionResultObservationProvider8616,
@@ -555,10 +576,11 @@ def _bind_function_result_observation_provider_8616(
     carrier._inertia_function_result_observation_provider_8616 = provider
 
 
+@cython.ccall
 def _bound_function_result_observation_8616(
     project: object,
     codegen: StructuredCodegenValue,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> CallerReturnUseVerdict8616 | None:
     """Consume caller-result evidence without recovering it in postprocess."""
     try:
@@ -571,7 +593,8 @@ def _bound_function_result_observation_8616(
     return provider(project, function_addr)
 
 
-def _replay_fixed_stack_probe_frame_lowerer_8616(codegen: StructuredCodegenValue) -> bool:
+@cython.ccall
+def _replay_fixed_stack_probe_frame_lowerer_8616(codegen: StructuredCodegenValue) -> cython.bint:
     """Replay the bound Lowering consumer without owning its semantic proof."""
     try:
         lowerer = cast(
@@ -583,10 +606,13 @@ def _replay_fixed_stack_probe_frame_lowerer_8616(codegen: StructuredCodegenValue
     return lowerer(codegen)
 
 
+@cython.ccall
 def _ensure_callsite_materialization_controls_8616(
     codegen: StructuredCodegenValue,
 ) -> _CallsiteMaterializationControlCarrier8616:
     """Initialize and return the owned call-materialization control contract."""
+    attr: object
+    default: object
     carrier = cast(_CallsiteMaterializationControlCarrier8616, codegen)
     for attr, default in (
         ("_inertia_callsite_disable_consumed_arg_store_prune_8616", False),
@@ -611,10 +637,13 @@ def _ensure_callsite_materialization_controls_8616(
     return carrier
 
 
+@cython.ccall
 def _callsite_summary_inventory_8616(
     codegen: StructuredCodegenValue,
-) -> dict[int, CallsiteSummary8616]:
+) -> object:
     """Return the authoritative callsite inventory after validating its owned contract."""
+    callsite_addr: object
+    summary: object
     try:
         inventory = codegen._inertia_callsite_summary_inventory_8616
     except AttributeError:
@@ -624,14 +653,15 @@ def _callsite_summary_inventory_8616(
     for callsite_addr, summary in inventory.items():
         if not isinstance(callsite_addr, int) or not isinstance(summary, CallsiteSummary8616):
             raise TypeError("callsite summary inventory contains an invalid owned contract")
-        if summary.callsite_addr != callsite_addr:
+        if operator.ne(summary.callsite_addr, callsite_addr):
             raise TypeError(
                 "callsite summary inventory key does not match the summary callsite address"
             )
     return inventory
 
 
-def _tail_call_summary_from_seed_8616(seed: CallTargetSeed | None) -> CallsiteSummary8616 | None:
+@cython.ccall
+def _tail_call_summary_from_seed_8616(seed: object) -> CallsiteSummary8616 | None:
     """Project one frontend-proven external tail transfer into callsite evidence."""
     if seed is None or seed.kind not in {
         CallTargetKind8616.DIRECT_NEAR_TAIL_JUMP,
@@ -670,16 +700,21 @@ class CallsiteMaterializationDecision8616(Enum):
     NOT_APPLICABLE = "not_applicable"
 
 
-def _source_call_floor_enabled_8616() -> bool:
+@cython.ccall
+def _source_call_floor_enabled_8616() -> cython.bint:
     return False
 
 
-def _single_function_context_measuring_enabled_8616() -> bool:
+@cython.ccall
+def _single_function_context_measuring_enabled_8616() -> cython.bint:
     return os.environ.get("INERTIA_MEASURE_SINGLE_FUNCTION_CONTEXT", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+@cython.ccall
 def _structured_root_8616(cfunc: StructuredAstValue) -> StructuredAstValue:
     """Return the current codegen root before falling back to legacy body state."""
+    body: object
+    statements: object
     # Dynamic angr boundary: ``statements`` is the canonical root updated by
     # lowering, while ``body`` may still reference the pre-lowering tree.
     statements = getattr(cfunc, "statements", None)
@@ -691,26 +726,33 @@ def _structured_root_8616(cfunc: StructuredAstValue) -> StructuredAstValue:
 
 def _has_live_summarized_call_8616(
     root: StructuredAstValue,
-    summary_map: Mapping[int, CallsiteSummary8616],
-) -> bool:
+    summary_map: Mapping[cython.longlong, CallsiteSummary8616],
+) -> cython.bint:
     """Return whether the current AST still contains a summary-bound call."""
     return any(
         isinstance(node, CFunctionCall) and id(node) in summary_map
-        for node in (root, *_iter_c_nodes_deep_8616(root))
+        for node in iter((root, ) + tuple(_iter_c_nodes_deep_8616(root)))
     )
 
 
+@cython.ccall
 def _boundary_tuple_8616(value: StructuredAstValue) -> tuple[StructuredAstValue, ...]:
     """Normalize an optional dynamic angr collection to a typed tuple."""
     return tuple(value or ())
 
 
-def _materialize_stdlib_call_chains_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> bool:
+@cython.ccall
+def _materialize_stdlib_call_chains_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> cython.bint:
 
     return __materialize_stdlib_call_chains_8616___impl(codegen=codegen)
 
 
-def __materialize_stdlib_call_chains_8616___impl(*, codegen: StructuredAstValue) -> bool:
+@cython.ccall
+def __materialize_stdlib_call_chains_8616___impl(*, codegen: StructuredAstValue) -> cython.bint:
+    cfunc: object
+    srand_call: object
+    statements: object
+    time_call: object
     cfunc = getattr(codegen, "cfunc", None)
     root = _structured_root_8616(cfunc)
     statements = getattr(root, "statements", None)
@@ -748,7 +790,9 @@ def __materialize_stdlib_call_chains_8616___impl(*, codegen: StructuredAstValue)
 
 
 
-def __materialize_stdlib_call_chains_8616___call_name(stmt: StructuredAstValue) -> str | None:
+@cython.ccall
+def __materialize_stdlib_call_chains_8616___call_name(stmt: StructuredAstValue) -> object:
+    expr: object
     expr = getattr(stmt, "expr", None)
     if not isinstance(expr, CFunctionCall):
         return None
@@ -757,7 +801,9 @@ def __materialize_stdlib_call_chains_8616___call_name(stmt: StructuredAstValue) 
 
 
 
-def __materialize_stdlib_call_chains_8616___is_zero_constant(expr: StructuredAstValue) -> bool:
+@cython.ccall
+def __materialize_stdlib_call_chains_8616___is_zero_constant(expr: StructuredAstValue) -> cython.bint:
+    value: object
     value = getattr(expr, "value", None)
     if isinstance(value, int):
         return value == 0
@@ -765,7 +811,9 @@ def __materialize_stdlib_call_chains_8616___is_zero_constant(expr: StructuredAst
 
 
 
-def __materialize_stdlib_call_chains_8616___is_zero_arg_call(stmt: StructuredAstValue, target_name: str) -> bool:
+@cython.ccall
+def __materialize_stdlib_call_chains_8616___is_zero_arg_call(stmt: StructuredAstValue, target_name: object) -> cython.bint:
+    expr: object
     expr = getattr(stmt, "expr", None)
     if not isinstance(expr, CFunctionCall):
         return False
@@ -777,6 +825,7 @@ def __materialize_stdlib_call_chains_8616___is_zero_arg_call(stmt: StructuredAst
 
 
 
+@cython.ccall
 def _sync_cfunc_root_statements_8616(
     cfunc: StructuredAstValue, root: StructuredAstValue, root_statements: StructuredAstValue
 ) -> None:
@@ -784,7 +833,11 @@ def _sync_cfunc_root_statements_8616(
     return __sync_cfunc_root_statements_8616___impl(cfunc=cfunc, root=root, root_statements=root_statements)
 
 
+@cython.ccall
 def __sync_cfunc_root_statements_8616___impl(*, cfunc: StructuredAstValue, root: StructuredAstValue, root_statements: StructuredAstValue) -> None:
+    body_statements: object
+    cfunc_body: object
+    cfunc_statements: object
     cfunc_statements = getattr(cfunc, "statements", None)
     cfunc_body = getattr(cfunc, "body", None)
     body_statements = getattr(cfunc_body, "statements", None)
@@ -810,29 +863,32 @@ def __sync_cfunc_root_statements_8616___impl(*, cfunc: StructuredAstValue, root:
 
 
 
+@cython.ccall
 def _missing_calls_from_sequences_8616(
-    source_call_names: list[str],
-    expected_names: list[str],
-    present_names: list[str],
-) -> tuple[list[str], list[str]]:
+    source_call_names: object,
+    expected_names: object,
+    present_names: object,
+) -> object:
 
     return __missing_calls_from_sequences_8616___impl(expected_names=expected_names, present_names=present_names, source_call_names=source_call_names)
 
 
-def __missing_calls_from_sequences_8616___impl(*, expected_names: list[str], present_names: list[str], source_call_names: list[str]) -> tuple[list[str], list[str]]:
+def __missing_calls_from_sequences_8616___impl(*, expected_names: object, present_names: object, source_call_names: object) -> tuple[list[str], list[str]]:
+    count: object
+    name: object
     expected_sequence = [
         (normalize_callee_name_8616(name) or name)
-        for name in expected_names
+        for name in iter(expected_names)
         if isinstance(name, str) and name and name != "aNchkstk"
     ]
     source_sequence = [
         (normalize_callee_name_8616(name) or name)
-        for name in source_call_names
+        for name in iter(source_call_names)
         if isinstance(name, str) and name and name != "aNchkstk"
     ]
     actual_sequence = [
         (normalize_callee_name_8616(name) or name)
-        for name in present_names
+        for name in iter(present_names)
         if isinstance(name, str) and name and name != "aNchkstk"
     ]
     ordered_requirement = list(expected_sequence or source_sequence)
@@ -851,13 +907,15 @@ def __missing_calls_from_sequences_8616___impl(*, expected_names: list[str], pre
 
 
 
+@cython.ccall
 def _adopt_source_name_for_target_8616(
     project: StructuredAstValue,
-    target_addr: int,
-    normalized: str | None,
-    source_sequence: list[str],
-) -> str | None:
+    target_addr: cython.longlong,
+    normalized: object,
+    source_sequence: object,
+) -> object:
     """Adopt the first source name matching the call target when the name is unknown."""
+    source_name: object
     for source_name in source_sequence:
         if _source_name_matches_target_8616(project, target_addr, source_name):
             if not isinstance(normalized, str) or _call_name_is_unknown_8616(normalized):
@@ -866,13 +924,14 @@ def _adopt_source_name_for_target_8616(
     return normalized
 
 
+@cython.ccall
 def _adopt_arg_count_matched_source_name_8616(
     node: StructuredAstValue,
     summary: CallsiteSummary8616,
-    source_sequence: list[str],
-    source_idx: int,
-    normalized: str | None,
-) -> tuple[str | None, int]:
+    source_sequence: object,
+    source_idx: cython.longlong,
+    normalized: object,
+) -> tuple[str | None, cython.longlong]:
     """Adopt the pending source name when its known arity matches."""
     expected_arg_count = _expected_arg_count_for_known_callee_8616(source_sequence[source_idx])
     summary_arg_count = int(summary.arg_count or 0)
@@ -886,13 +945,14 @@ def _adopt_arg_count_matched_source_name_8616(
     return normalized, source_idx
 
 
+@cython.ccall
 def _resolve_present_call_name_8616(
     project: StructuredAstValue,
     node: StructuredAstValue,
-    summary: CallsiteSummary8616 | None,
-    source_sequence: list[str],
-    source_idx: int,
-) -> tuple[str | None, int]:
+    summary: object,
+    source_sequence: object,
+    source_idx: cython.longlong,
+) -> tuple[str | None, cython.longlong]:
     """Resolve one call node's present name and advance the source scan."""
     normalized = normalize_callee_name_8616(_call_node_name_8616(node) or "") or _call_node_name_8616(node)
     target_addr = summary.target_addr if summary is not None else None
@@ -907,7 +967,7 @@ def _resolve_present_call_name_8616(
     if (
         isinstance(normalized, str)
         and source_idx < len(source_sequence)
-        and normalized == source_sequence[source_idx]
+        and operator.eq(normalized, source_sequence[source_idx])
     ):
         source_idx += 1
     elif (
@@ -922,17 +982,22 @@ def _resolve_present_call_name_8616(
     return normalized, source_idx
 
 
+@cython.ccall
 def _structured_present_call_names_8616(
     project: StructuredAstValue,
     codegen: StructuredAstValue,
     root: StructuredAstValue,
-    source_call_names: list[str],
-) -> list[str]:
+    source_call_names: object,
+) -> object:
 
     return __structured_present_call_names_8616___impl(codegen=codegen, project=project, root=root, source_call_names=source_call_names)
 
 
-def __structured_present_call_names_8616___impl(*, codegen: StructuredAstValue, project: StructuredAstValue, root: StructuredAstValue, source_call_names: list[str]) -> list[str]:
+@cython.ccall
+def __structured_present_call_names_8616___impl(*, codegen: StructuredAstValue, project: StructuredAstValue, root: StructuredAstValue, source_call_names: object) -> object:
+    summary: object
+    summary_map: object
+    node: object
     summary_map = getattr(codegen, "_inertia_callsite_summaries", None)
     if isinstance(summary_map, dict):
         _refresh_callsite_summary_node_ids_8616(codegen, summary_map)
@@ -941,7 +1006,7 @@ def __structured_present_call_names_8616___impl(*, codegen: StructuredAstValue, 
 
     source_sequence = [
         normalize_callee_name_8616(name) or name
-        for name in source_call_names
+        for name in iter(source_call_names)
         if isinstance(name, str) and name and name != "aNchkstk"
     ]
     source_idx = 0
@@ -959,7 +1024,10 @@ def __structured_present_call_names_8616___impl(*, codegen: StructuredAstValue, 
 
 
 
-def _ordered_missing_from_source_8616(source_sequence: list[str], missing: list[str]) -> list[str]:
+@cython.ccall
+def _ordered_missing_from_source_8616(source_sequence: object, missing: object) -> object:
+    count: object
+    name: object
     missing_counts = Counter(missing)
     if not source_sequence:
         return list(missing)
@@ -974,14 +1042,20 @@ def _ordered_missing_from_source_8616(source_sequence: list[str], missing: list[
     return ordered_missing
 
 
+@cython.ccall
 def _debug_loop_relocate_precheck_8616(
     *,
-    debug_enabled: bool,
-    context_tag: str,
-    func_addr: int,
-    ordered_missing: list[str],
+    debug_enabled: cython.bint,
+    context_tag: object,
+    func_addr: cython.longlong,
+    ordered_missing: object,
     current_statements: StructuredAstValue,
 ) -> None:
+    body: object
+    body_statements: object
+    expr: object
+    bstmt: object
+    stmt: object
     if not debug_enabled:
         return
     stmt_kinds = []
@@ -1015,14 +1089,22 @@ def _debug_loop_relocate_precheck_8616(
     )
 
 
+@cython.ccall
 def _match_expected_call_stmt_indexes_8616(
-    mutable_statements: StructuredAstValue, ordered_missing: list[str]
-) -> tuple[int | None, list[str], list[int]]:
+    mutable_statements: StructuredAstValue, ordered_missing: object
+) -> object:
 
     return __match_expected_call_stmt_indexes_8616___impl(mutable_statements=mutable_statements, ordered_missing=ordered_missing)
 
 
-def __match_expected_call_stmt_indexes_8616___impl(*, mutable_statements: StructuredAstValue, ordered_missing: list[str]) -> tuple[int | None, list[str], list[int]]:
+@cython.ccall
+def __match_expected_call_stmt_indexes_8616___impl(*, mutable_statements: StructuredAstValue, ordered_missing: object) -> tuple[int | None, list[str], list[cython.longlong]]:
+    expr: object
+    first_return_idx: object
+    call_name: object
+    idx: object
+    rel_i: object
+    stmt: object
     first_return_idx = None
     for idx, stmt in enumerate(mutable_statements):
         if isinstance(stmt, structured_c.CReturn):
@@ -1033,7 +1115,7 @@ def __match_expected_call_stmt_indexes_8616___impl(*, mutable_statements: Struct
         if first_return_idx is not None
         else list(enumerate(mutable_statements))
     )
-    call_stmt_indexes: list[int] = []
+    call_stmt_indexes: list[cython.longlong] = []
     call_stmt_names: list[str] = []
     for idx, stmt in scan_slice:
         expr = getattr(stmt, "expr", None)
@@ -1044,35 +1126,39 @@ def __match_expected_call_stmt_indexes_8616___impl(*, mutable_statements: Struct
             continue
         call_stmt_indexes.append(idx)
         call_stmt_names.append(normalized)
-    expected = [name for name in ordered_missing if isinstance(name, str) and name]
-    matched_call_stmt_indexes: list[int] = []
+    expected = [name for name in iter(ordered_missing) if isinstance(name, str) and name]
+    matched_call_stmt_indexes: list[cython.longlong] = []
     if expected:
         exp_i = 0
         for rel_i, call_name in enumerate(call_stmt_names):
             if exp_i >= len(expected):
                 break
-            if call_name == expected[exp_i]:
+            if operator.eq(call_name, expected[exp_i]):
                 matched_call_stmt_indexes.append(call_stmt_indexes[rel_i])
                 exp_i += 1
     return first_return_idx, call_stmt_names, matched_call_stmt_indexes
 
 
 
+@cython.ccall
 def _relocate_recovered_calls_into_loops_8616(
     *,
-    debug_enabled: bool,
-    context_tag: str,
-    func_addr: int,
-    ordered_missing: list[str],
+    debug_enabled: cython.bint,
+    context_tag: object,
+    func_addr: cython.longlong,
+    ordered_missing: object,
     root: StructuredAstValue,
     root_statements: StructuredAstValue,
     cfunc: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
 
     return __relocate_recovered_calls_into_loops_8616___impl(cfunc=cfunc, context_tag=context_tag, debug_enabled=debug_enabled, func_addr=func_addr, ordered_missing=ordered_missing, root=root, root_statements=root_statements)
 
 
-def __relocate_recovered_calls_into_loops_8616___impl(*, cfunc: StructuredAstValue, context_tag: str, debug_enabled: bool, func_addr: int, ordered_missing: list[str], root: StructuredAstValue, root_statements: StructuredAstValue) -> bool:
+@cython.ccall
+def __relocate_recovered_calls_into_loops_8616___impl(*, cfunc: StructuredAstValue, context_tag: object, debug_enabled: cython.bint, func_addr: cython.longlong, ordered_missing: object, root: StructuredAstValue, root_statements: StructuredAstValue) -> cython.bint:
+    current_statements: object
+    first_return_idx: object
     current_statements = getattr(root, "statements", None)
     if not isinstance(current_statements, (list, tuple)):
         current_statements = root_statements
@@ -1090,7 +1176,7 @@ def __relocate_recovered_calls_into_loops_8616___impl(*, cfunc: StructuredAstVal
     first_return_idx, call_stmt_names, matched_call_stmt_indexes = _match_expected_call_stmt_indexes_8616(
         mutable_statements, ordered_missing
     )
-    expected = [name for name in ordered_missing if isinstance(name, str) and name]
+    expected = [name for name in iter(ordered_missing) if isinstance(name, str) and name]
     if debug_enabled:
         log.warning(
             "[call-recover] context=%s loop-relocate candidates addr=%#x first_return_idx=%r calls=%r expected=%r matched=%r",
@@ -1101,7 +1187,7 @@ def __relocate_recovered_calls_into_loops_8616___impl(*, cfunc: StructuredAstVal
             expected,
             matched_call_stmt_indexes,
         )
-    if not expected or len(matched_call_stmt_indexes) != len(expected):
+    if not expected or operator.ne(len(matched_call_stmt_indexes), len(expected)):
         return False
     target_bodies = list(empty_loop_bodies)
     move_count = min(len(expected), len(matched_call_stmt_indexes))
@@ -1113,7 +1199,7 @@ def __relocate_recovered_calls_into_loops_8616___impl(*, cfunc: StructuredAstVal
         body_statements.append(mutable_statements[stmt_idx])
         body.statements = body_statements
     remove_indexes = set(matched_call_stmt_indexes[:move_count])
-    mutable_statements = [stmt for idx, stmt in enumerate(mutable_statements) if idx not in remove_indexes]
+    mutable_statements = [stmt for idx, stmt in builtins.iter(enumerate(mutable_statements)) if idx not in remove_indexes]
     if (
         first_return_idx is not None
         and first_return_idx < len(mutable_statements)
@@ -1134,20 +1220,22 @@ def __relocate_recovered_calls_into_loops_8616___impl(*, cfunc: StructuredAstVal
 
 
 
+@cython.ccall
 def _count_non_probe_callsites_8616(
     project: StructuredAstValue,
     codegen: StructuredAstValue,
     function: StructuredAstValue,
     get_call_sites: StructuredAstValue,
-    target_by_callsite: dict[int, int],
-) -> bool:
+    target_by_callsite: object,
+) -> cython.bint:
     """Count decoded callsites that do not resolve to stack-probe helpers."""
+    callee_name: object
+    get_call_target: object
+    target: object
+    callsite_addr: object
     callsite_addrs = tuple(
         sorted(
-            {
-                *cast(Iterable[int], get_call_sites() or ()),
-                *target_by_callsite,
-            }
+            set(cast(Iterable[int], get_call_sites() or ())) | set(target_by_callsite)
         )
     )
     codegen._inertia_call_recovery_callsite_count_8616 = len(callsite_addrs)
@@ -1174,8 +1262,12 @@ def _count_non_probe_callsites_8616(
 
 def _function_has_direct_call_instruction_evidence_8616(
     project: StructuredAstValue, codegen: StructuredAstValue
-) -> bool:
+) -> cython.bint:
     """Return whether the current function has a decoded call-like target."""
+    cfunc: object
+    func_addr: object
+    function: object
+    get_call_sites: object
     cfunc = getattr(codegen, "cfunc", None)
     func_addr = getattr(cfunc, "addr", None)
     if not isinstance(func_addr, int):
@@ -1184,7 +1276,7 @@ def _function_has_direct_call_instruction_evidence_8616(
     if function is None:
         return True
     target_by_callsite = {
-        seed.callsite_addr: seed.target_addr for seed in collect_neighbor_call_targets(function)
+        seed.callsite_addr: seed.target_addr for seed in builtins.iter(collect_neighbor_call_targets(function))
     }
     get_call_sites = getattr(function, "get_call_sites", None)
     if callable(get_call_sites):
@@ -1193,10 +1285,11 @@ def _function_has_direct_call_instruction_evidence_8616(
     summaries = _function_instruction_summaries_8616(project, function)
     if not summaries:
         return True
-    return any(str(summary.mnemonic).lower() in {"call", "lcall"} for summary in summaries)
+    return any(str(summary.mnemonic).lower() in {"call", "lcall"} for summary in iter(summaries))
 
 
-def _current_callsite_function_8616(project: StructuredAstValue, func_addr: int) -> StructuredAstValue | None:
+@cython.ccall
+def _current_callsite_function_8616(project: StructuredAstValue, func_addr: cython.longlong) -> StructuredAstValue | None:
     """Return the prepared function object that owns current callsite evidence.
 
     Single-function recovery may expand a function with grouped CFG fragments
@@ -1205,8 +1298,10 @@ def _current_callsite_function_8616(project: StructuredAstValue, func_addr: int)
     prefer the prepared object published by the CLI and fall back to the KB only
     when no matching prepared object exists.
     """
+    functions: object
+    prepared: object
     prepared = getattr(project, "_inertia_current_decompile_function_8616", None)
-    if prepared is not None and getattr(prepared, "addr", None) == func_addr:
+    if prepared is not None and operator.eq(getattr(prepared, "addr", None), func_addr):
         return prepared
     with contextlib.suppress(Exception):
         functions = getattr(getattr(project, "kb", None), "functions", None)
@@ -1215,8 +1310,11 @@ def _current_callsite_function_8616(project: StructuredAstValue, func_addr: int)
     return None
 
 
-def _present_call_names_from_nodes_8616(root: StructuredAstValue) -> list[str]:
+@cython.ccall
+def _present_call_names_from_nodes_8616(root: StructuredAstValue) -> object:
     """Collect normalized call names directly from structured call nodes."""
+    node: object
+    raw: object
     present_names: list[str] = []
     for node in _iter_c_nodes_deep_8616(root):
         if not isinstance(node, CFunctionCall):
@@ -1233,13 +1331,14 @@ def _present_call_names_from_nodes_8616(root: StructuredAstValue) -> list[str]:
     return present_names
 
 
+@cython.ccall
 def _missing_calls_for_recovery_8616(
     project: StructuredAstValue,
     codegen: StructuredAstValue,
     root: StructuredAstValue,
-    source_call_names: list[str],
-    expected_names: list[str],
-) -> tuple[list[str], list[str]]:
+    source_call_names: object,
+    expected_names: object,
+) -> object:
     """Compute source-ordered calls missing from the structured output."""
     present_names = _structured_present_call_names_8616(project, codegen, root, source_call_names)
     if not present_names:
@@ -1249,11 +1348,13 @@ def _missing_calls_for_recovery_8616(
     )
 
 
-def _recover_missing_direct_calls_from_evidence_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> bool:
+@cython.ccall
+def _recover_missing_direct_calls_from_evidence_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> cython.bint:
 
     return __recover_missing_direct_calls_from_evidence_8616___impl(codegen=codegen, project=project)
 
 
+@cython.ccall
 def _recovered_calls_debug_log_8616(
     codegen: StructuredAstValue,
     cfunc: StructuredAstValue,
@@ -1261,6 +1362,7 @@ def _recovered_calls_debug_log_8616(
     ordered_missing: StructuredAstValue,
     root: StructuredAstValue,
 ) -> None:
+    node: object
     cfunc_calls = []
     cfunc_root_now = _structured_root_8616(cfunc)
     for node in _iter_c_nodes_deep_8616(cfunc_root_now):
@@ -1280,11 +1382,12 @@ def _recovered_calls_debug_log_8616(
     )
 
 
+@cython.ccall
 def _resolve_missing_call_set_8616(
     project: StructuredAstValue,
     codegen: StructuredAstValue,
     root: StructuredAstValue,
-    inventory_missing: StructuredAstValue,
+    inventory_missing: object,
     source_call_names: StructuredAstValue,
     expected_names: StructuredAstValue,
     expected_summary_by_name: StructuredAstValue,
@@ -1298,12 +1401,13 @@ def _resolve_missing_call_set_8616(
     return (source_sequence, missing, expected_summary_by_name)
 
 
+@cython.ccall
 def _recover_call_evidence_gate_8616(
     project: StructuredAstValue,
     codegen: StructuredAstValue,
-    context_tag: str,
-    debug_enabled: bool,
-) -> bool:
+    context_tag: object,
+    debug_enabled: cython.bint,
+) -> cython.bint:
     """Whether direct-call instruction evidence exists; records the skip otherwise."""
     if _function_has_direct_call_instruction_evidence_8616(project, codegen):
         return True
@@ -1315,12 +1419,13 @@ def _recover_call_evidence_gate_8616(
     return False
 
 
+@cython.ccall
 def _recover_debug_skip_8616(
-    context_tag: str,
-    func_addr: int,
+    context_tag: object,
+    func_addr: cython.longlong,
     codegen: StructuredAstValue,
-    reason: str,
-    debug_enabled: bool,
+    reason: object,
+    debug_enabled: cython.bint,
 ) -> None:
     """Emit the standard call-recovery skip log when enabled."""
     if debug_enabled:
@@ -1333,7 +1438,10 @@ def _recover_debug_skip_8616(
         )
 
 
-def __recover_missing_direct_calls_from_evidence_8616___impl(*, codegen: StructuredAstValue, project: StructuredAstValue) -> bool:
+@cython.ccall
+def __recover_missing_direct_calls_from_evidence_8616___impl(*, codegen: StructuredAstValue, project: StructuredAstValue) -> cython.bint:
+    context_tag: object
+    prepared: object
     debug_enabled = bool(os.environ.get("INERTIA_DEBUG_CALL_RECOVERY"))
     context_tag = getattr(codegen, "_inertia_call_recover_context", "postprocess")
     if not _recover_call_evidence_gate_8616(project, codegen, context_tag, debug_enabled):
@@ -1412,13 +1520,16 @@ def _missing_calls_from_owned_inventory_8616(
     project: StructuredAstValue,
     codegen: StructuredAstValue,
     root: StructuredAstValue,
-) -> tuple[list[str], dict[str, list[CallsiteSummary8616]]] | None:
+) -> object:
     """Return missing calls by exact owned callsite identity when available."""
+    callee_name: object
+    callsite_addr: object
+    summary: object
     inventory = _callsite_summary_inventory_8616(codegen)
     if not inventory:
         return None
     call_nodes = tuple(
-        node for node in _iter_c_nodes_deep_8616(root) if isinstance(node, CFunctionCall)
+        node for node in builtins.iter(_iter_c_nodes_deep_8616(root)) if isinstance(node, CFunctionCall)
     )
     try:
         attached_summaries = codegen._inertia_callsite_summaries
@@ -1433,7 +1544,7 @@ def _missing_calls_from_owned_inventory_8616(
         )
     names: list[str] = []
     summaries_by_name: dict[str, list[CallsiteSummary8616]] = {}
-    for callsite_addr, summary in sorted(inventory.items()):
+    for callsite_addr, summary in sorted(tuple(inventory.items())):
         if callsite_addr in represented or summary.stack_probe_helper:
             continue
         target_addr = summary.target_addr
@@ -1453,18 +1564,24 @@ def _missing_calls_from_owned_inventory_8616(
     return names, summaries_by_name
 
 
+@cython.ccall
 def _prepare_call_recovery_context_8616(
     project: StructuredAstValue,
     codegen: StructuredAstValue,
     *,
-    debug_enabled: bool,
-    context_tag: str,
-) -> tuple[StructuredAstValue, StructuredAstValue, StructuredAstValue, int, StructuredAstValue] | None:
+    debug_enabled: cython.bint,
+    context_tag: object,
+) -> object:
 
     return __prepare_call_recovery_context_8616___impl(codegen=codegen, context_tag=context_tag, debug_enabled=debug_enabled, project=project)
 
 
-def __prepare_call_recovery_context_8616___impl(*, codegen: StructuredAstValue, context_tag: str, debug_enabled: bool, project: StructuredAstValue) -> tuple[StructuredAstValue, StructuredAstValue, StructuredAstValue, int, StructuredAstValue] | None:
+@cython.ccall
+def __prepare_call_recovery_context_8616___impl(*, codegen: StructuredAstValue, context_tag: object, debug_enabled: cython.bint, project: StructuredAstValue) -> object:
+    cfunc: object
+    func_addr: object
+    function: object
+    root_statements: object
     cfunc = getattr(codegen, "cfunc", None)
     if cfunc is None:
         if debug_enabled:
@@ -1501,8 +1618,10 @@ def __prepare_call_recovery_context_8616___impl(*, codegen: StructuredAstValue, 
 
 
 
-def _expected_callee_name_8616(project: StructuredAstValue, target: int) -> str | None:
+@cython.ccall
+def _expected_callee_name_8616(project: StructuredAstValue, target: cython.longlong) -> object:
     """Resolve a non-helper callee name for the call target."""
+    callee_name: object
     callee = _lookup_callee_function_8616(project, target, allow_containing=False)
     callee_name = getattr(callee, "name", None)
     if not isinstance(callee_name, str) or not callee_name:
@@ -1515,9 +1634,9 @@ def _expected_callee_name_8616(project: StructuredAstValue, target: int) -> str 
 def _expected_callsite_names_8616(
     project: StructuredAstValue,
     function: StructuredAstValue,
-    callsite_addrs: tuple[int, ...],
-    target_by_callsite: dict[int, int],
-    tail_callsite_addrs: set[int],
+    callsite_addrs: object,
+    target_by_callsite: object,
+    tail_callsite_addrs: object,
 ) -> tuple[
     list[str],
     list[str],
@@ -1525,6 +1644,10 @@ def _expected_callsite_names_8616(
     list[CallsiteSummary8616],
 ]:
     """Enumerate expected call names and summaries from decoded callsites."""
+    callee_name: object
+    summary: object
+    target: object
+    callsite_addr: object
     expected_names: list[str] = []
     tail_names: list[str] = []
     expected_summary_by_name: dict[str, list[CallsiteSummary8616]] = {}
@@ -1550,57 +1673,60 @@ def _expected_callsite_names_8616(
     return expected_names, tail_names, expected_summary_by_name, callsite_summaries
 
 
+@cython.ccall
 def _source_floor_expected_names_8616(
     project: StructuredAstValue,
     cfunc: StructuredAstValue,
-    func_addr: int,
-    tail_names: list[str],
-    callsite_summaries: list[CallsiteSummary8616],
+    func_addr: cython.longlong,
+    tail_names: object,
+    callsite_summaries: object,
 ) -> tuple[list[str], list[str] | None, dict[str, list[CallsiteSummary8616]] | None]:
     """Rebuild expected names from COD source order when the floor is enabled."""
+    source_name: object
+    summary: object
     source_call_names = list(_cod_source_call_names_8616(project, func_addr))
     if not source_call_names:
         source_call_names = list(_cod_source_call_names_for_symbol_8616(project, getattr(cfunc, "name", None)))
     if not source_call_names:
         return source_call_names, None, None
     expected_names = [
-        source_name for source_name in source_call_names if isinstance(source_name, str) and source_name
+        source_name for source_name in iter(source_call_names) if isinstance(source_name, str) and source_name
     ]
     expected_names.extend(tail_names)
-    summaries_by_name: dict[str, list[CallsiteSummary8616]] | None = None
-    if len(callsite_summaries) == len(expected_names):
+    summaries_by_name: object = None
+    if operator.eq(len(callsite_summaries), len(expected_names)):
         summaries_by_name = {}
         for source_name, summary in zip(expected_names, callsite_summaries, strict=False):
             summaries_by_name.setdefault(source_name, []).append(summary)
     return source_call_names, expected_names, summaries_by_name
 
 
+@cython.ccall
 def _recover_expected_calls_8616(
     project: StructuredAstValue,
     cfunc: StructuredAstValue,
     function: StructuredAstValue,
-    func_addr: int,
-) -> tuple[
-    list[str],
-    dict[str, list[CallsiteSummary8616]],
-    list[str],
-]:
+    func_addr: cython.longlong,
+) -> object:
 
     return __recover_expected_calls_8616___impl(cfunc=cfunc, func_addr=func_addr, function=function, project=project)
 
 
-def __recover_expected_calls_8616___impl(*, cfunc: StructuredAstValue, func_addr: int, function: StructuredAstValue, project: StructuredAstValue) -> tuple[
+@cython.ccall
+def __recover_expected_calls_8616___impl(*, cfunc: StructuredAstValue, func_addr: cython.longlong, function: StructuredAstValue, project: StructuredAstValue) -> tuple[
     list[str],
     dict[str, list[CallsiteSummary8616]],
     list[str],
 ]:
+    floor_names: object
+    floor_summaries: object
     expected_names: list[str] = []
     expected_summary_by_name: dict[str, list[CallsiteSummary8616]] = {}
     target_seeds = collect_neighbor_call_targets(function)
-    target_by_callsite = {seed.callsite_addr: seed.target_addr for seed in target_seeds}
+    target_by_callsite = {seed.callsite_addr: seed.target_addr for seed in iter(target_seeds)}
     tail_callsite_addrs = {
         seed.callsite_addr
-        for seed in target_seeds
+        for seed in iter(target_seeds)
         if seed.kind
         in {
             CallTargetKind8616.DIRECT_NEAR_TAIL_JUMP,
@@ -1611,10 +1737,7 @@ def __recover_expected_calls_8616___impl(*, cfunc: StructuredAstValue, func_addr
     tail_names: list[str] = []
     callsite_addrs = _boundary_tuple_8616(
         sorted(
-            {
-                *getattr(function, "get_call_sites", list)(),
-                *target_by_callsite,
-            }
+            set(getattr(function, "get_call_sites", list)()) | set(target_by_callsite)
         )
     )
     callsite_summaries: list[CallsiteSummary8616] = []
@@ -1645,35 +1768,43 @@ def __recover_expected_calls_8616___impl(*, cfunc: StructuredAstValue, func_addr
 
 
 
-def _summary_looks_loop_carried_arg_8616(summary: CallsiteSummary8616 | None) -> bool:
+@cython.ccall
+def _summary_looks_loop_carried_arg_8616(summary: object) -> cython.bint:
     """Return whether binary push evidence reads a BP-relative value."""
+    source: object
     if summary is None:
         return False
     for source in summary.push_arg_sources:
         if not isinstance(source, tuple) or len(source) < 2:
             continue
-        base, displacement = source[:2]
+        base, displacement = tuple(source[:2])
         if base == "bp" and isinstance(displacement, int):
             return True
     return False
 
 
+@cython.ccall
 def _insert_missing_calls_8616(
     *,
     project: StructuredAstValue,
     codegen: StructuredAstValue,
-    mutable_statements: list[StructuredAstValue],
-    ordered_missing: list[str],
-    source_sequence: list[str],
-    expected_summary_by_name: dict[str, list[CallsiteSummary8616]],
-    summary_map: dict[int, CallsiteSummary8616],
+    mutable_statements: object,
+    ordered_missing: object,
+    source_sequence: object,
+    expected_summary_by_name: object,
+    summary_map: object,
     first_empty_loop_body: StructuredAstValue,
-) -> tuple[bool, list[StructuredAstValue]]:
+) -> object:
 
     return __insert_missing_calls_8616___impl(codegen=codegen, expected_summary_by_name=expected_summary_by_name, first_empty_loop_body=first_empty_loop_body, mutable_statements=mutable_statements, ordered_missing=ordered_missing, project=project, source_sequence=source_sequence, summary_map=summary_map)
 
 
-def __insert_missing_calls_8616___impl(*, codegen: StructuredAstValue, expected_summary_by_name: dict[str, list[CallsiteSummary8616]], first_empty_loop_body: StructuredAstValue, mutable_statements: list[StructuredAstValue], ordered_missing: list[str], project: StructuredAstValue, source_sequence: list[str], summary_map: dict[int, CallsiteSummary8616]) -> tuple[bool, list[StructuredAstValue]]:
+@cython.ccall
+def __insert_missing_calls_8616___impl(*, codegen: StructuredAstValue, expected_summary_by_name: object, first_empty_loop_body: object, mutable_statements: object, ordered_missing: object, project: StructuredAstValue, source_sequence: object, summary_map: object) -> tuple[cython.bint, list[StructuredAstValue]]:
+    summary_candidates: object
+    idx: object
+    name: object
+    stmt: object
     insert_at = len(mutable_statements)
     for idx, stmt in enumerate(mutable_statements):
         if isinstance(stmt, structured_c.CReturn):
@@ -1692,7 +1823,7 @@ def __insert_missing_calls_8616___impl(*, codegen: StructuredAstValue, expected_
         preferred_summary = summary_candidates[0] if summary_candidates else None
         loop_carried_missing = _summary_looks_loop_carried_arg_8616(preferred_summary)
         if (
-            (idx == 0 and source_sequence and source_sequence[0] == name) or loop_carried_missing
+            (idx == 0 and source_sequence and operator.eq(source_sequence[0], name)) or loop_carried_missing
         ) and first_empty_loop_body is not None:
             loop_body_statements = list(
                 cast(Iterable[StructuredAstValue], getattr(first_empty_loop_body, "statements", ()) or ())
@@ -1711,7 +1842,11 @@ def __insert_missing_calls_8616___impl(*, codegen: StructuredAstValue, expected_
 
 
 
+@cython.ccall
 def _first_empty_loop_body_8616(statements: StructuredAstValue) -> StructuredAstValue | None:
+    body: object
+    body_statements: object
+    stmt: object
     for stmt in statements:
         body = getattr(stmt, "body", None)
         body_statements = getattr(body, "statements", None)
@@ -1725,9 +1860,10 @@ def _first_empty_loop_body_8616(statements: StructuredAstValue) -> StructuredAst
     return None
 
 
+@cython.ccall
 def _setup_cleanup_changed_8616(
     consumed_dirty_setup: StructuredAstValue, source_alias_artifacts: StructuredAstValue, scalar_high_byte_remnants: StructuredAstValue, farptr_high_byte_remnants: StructuredAstValue, pre_clobber_removed: StructuredAstValue, direct_push_source_stores_pruned: StructuredAstValue, materialized_stmt: StructuredAstValue, stmt: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Predicate extracted from a callsite gate."""
     return (
         consumed_dirty_setup
@@ -1740,9 +1876,10 @@ def _setup_cleanup_changed_8616(
     )
 
 
+@cython.ccall
 def _arity_contract_extends_count_8616(
     arity_contract: StructuredAstValue, expected_arg_count: StructuredAstValue, push_arg_sources: StructuredAstValue, stack_cleanup: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Predicate extracted from a callsite gate."""
     return (
         arity_contract.mode is CallArityMode8616.EXACT
@@ -1756,9 +1893,10 @@ def _arity_contract_extends_count_8616(
     )
 
 
+@cython.ccall
 def _known_arg_count_override_ok_8616(
-    expected_arg_count: StructuredAstValue, known_arg_count: StructuredAstValue, summary_arg_count: StructuredAstValue, has_strong_direct_push_sources: StructuredAstValue, stack_probe_seen: StructuredAstValue,
-) -> bool:
+    expected_arg_count: StructuredAstValue, known_arg_count: StructuredAstValue, summary_arg_count: object, has_strong_direct_push_sources: StructuredAstValue, stack_probe_seen: StructuredAstValue,
+) -> cython.bint:
     """Predicate extracted from a callsite gate."""
     return (
         isinstance(expected_arg_count, int)
@@ -1771,9 +1909,10 @@ def _known_arg_count_override_ok_8616(
     )
 
 
+@cython.ccall
 def _single_bp_push_source_8616(
-    call: StructuredAstValue, is_stack_probe_helper: StructuredAstValue, expected_arg_count: StructuredAstValue, push_arg_sources: StructuredAstValue,
-) -> bool:
+    call: object, is_stack_probe_helper: StructuredAstValue, expected_arg_count: StructuredAstValue, push_arg_sources: StructuredAstValue,
+) -> cython.bint:
     """Predicate extracted from a callsite gate."""
     return (
         call is not None
@@ -1789,9 +1928,10 @@ def _single_bp_push_source_8616(
     )
 
 
+@cython.ccall
 def _strict_shape_remat_ok_8616(
-    rematerialize_call_args: StructuredAstValue, call: StructuredAstValue, expected_arg_count: StructuredAstValue, has_exact_direct_push_sources: StructuredAstValue, has_safe_non_stack_fallback: StructuredAstValue, probe_seen_without_ss_address: StructuredAstValue,
-) -> bool:
+    rematerialize_call_args: StructuredAstValue, call: object, expected_arg_count: StructuredAstValue, has_exact_direct_push_sources: StructuredAstValue, has_safe_non_stack_fallback: StructuredAstValue, probe_seen_without_ss_address: StructuredAstValue,
+) -> cython.bint:
     """Predicate extracted from a callsite gate."""
     return (
         call is not None
@@ -1802,9 +1942,10 @@ def _strict_shape_remat_ok_8616(
     )
 
 
+@cython.ccall
 def _protected_arg_is_source_immediate_8616(
     push_sources: StructuredAstValue, push_source: StructuredAstValue, current_arg: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Predicate extracted from a callsite gate."""
     return (
         isinstance(push_sources, tuple)
@@ -1813,27 +1954,28 @@ def _protected_arg_is_source_immediate_8616(
     and push_source[0] == "imm"
     and isinstance(push_source[1], int)
     and isinstance(current_arg, structured_c.CConstant)
-    and getattr(current_arg, "value", None) == int(push_source[1])
+    and operator.eq(getattr(current_arg, "value", None), int(push_source[1]))
     )
 
 
 def _push_source_count_matches_8616(
     strict_arg_shape_applied: StructuredAstValue, expected_arg_count: StructuredAstValue, push_arg_sources: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Predicate extracted from a callsite gate."""
     return (
         not strict_arg_shape_applied
     and isinstance(expected_arg_count, int)
     and expected_arg_count > 0
     and isinstance(push_arg_sources, tuple)
-    and len(push_arg_sources) == expected_arg_count
-    and any(source is not None for source in push_arg_sources)
+    and operator.eq(len(push_arg_sources), expected_arg_count)
+    and any(source is not None for source in iter(push_arg_sources))
     )
 
 
+@cython.ccall
 def _probe_fact_gate_ok_8616(
-    strict_arg_shape_applied: StructuredAstValue, typed_stack_probe_materialization: StructuredAstValue, stack_probe_address_seen: StructuredAstValue, expected_arg_count: StructuredAstValue, stack_probe_seen: StructuredAstValue, typed_stack_probe_fact: StructuredAstValue,
-) -> bool:
+    strict_arg_shape_applied: StructuredAstValue, typed_stack_probe_materialization: StructuredAstValue, stack_probe_address_seen: StructuredAstValue, expected_arg_count: StructuredAstValue, stack_probe_seen: StructuredAstValue, typed_stack_probe_fact: object,
+) -> cython.bint:
     """Predicate extracted from a callsite gate."""
     return (
         not strict_arg_shape_applied
@@ -1844,9 +1986,10 @@ def _probe_fact_gate_ok_8616(
     )
 
 
+@cython.ccall
 def _single_probe_fact_arg_gate_8616(
-    stack_probe_seen: StructuredAstValue, strict_arg_shape_applied: StructuredAstValue, expected_arg_count: StructuredAstValue, typed_stack_probe_fact: StructuredAstValue, is_stack_probe_helper: StructuredAstValue, new_statements: StructuredAstValue,
-) -> bool:
+    stack_probe_seen: StructuredAstValue, strict_arg_shape_applied: StructuredAstValue, expected_arg_count: StructuredAstValue, typed_stack_probe_fact: object, is_stack_probe_helper: StructuredAstValue, new_statements: StructuredAstValue,
+) -> cython.bint:
     """Predicate extracted from a callsite gate."""
     return (
         not strict_arg_shape_applied
@@ -1858,9 +2001,10 @@ def _single_probe_fact_arg_gate_8616(
     )
 
 
+@cython.ccall
 def _named_probe_fact_gate_8616(
-    strict_arg_shape_applied: StructuredAstValue, expected_arg_count: StructuredAstValue, stack_probe_address_seen: StructuredAstValue, semantic_call_name: StructuredAstValue, call_name: StructuredAstValue, stack_probe_seen: StructuredAstValue, typed_stack_probe_fact: StructuredAstValue,
-) -> bool:
+    strict_arg_shape_applied: StructuredAstValue, expected_arg_count: StructuredAstValue, stack_probe_address_seen: StructuredAstValue, semantic_call_name: object, call_name: object, stack_probe_seen: StructuredAstValue, typed_stack_probe_fact: object,
+) -> cython.bint:
     """Predicate extracted from a callsite gate."""
     return (
         not strict_arg_shape_applied
@@ -1871,9 +2015,10 @@ def _named_probe_fact_gate_8616(
     )
 
 
+@cython.ccall
 def _remat_no_count_gate_8616(
-    rematerialize_call_args: StructuredAstValue, call: StructuredAstValue, is_stack_probe_helper: StructuredAstValue, arg_count: StructuredAstValue, new_statements: StructuredAstValue,
-) -> bool:
+    rematerialize_call_args: StructuredAstValue, call: object, is_stack_probe_helper: StructuredAstValue, arg_count: StructuredAstValue, new_statements: StructuredAstValue,
+) -> cython.bint:
     """Predicate extracted from a callsite gate."""
     return (
         call is not None
@@ -1884,36 +2029,39 @@ def _remat_no_count_gate_8616(
     )
 
 
-def _push_source_is_sign_ext_word_pair_8616(low_source: StructuredAstValue, high_source: StructuredAstValue) -> bool:
+@cython.ccall
+def _push_source_is_sign_ext_word_pair_8616(low_source: StructuredAstValue, high_source: StructuredAstValue) -> cython.bint:
     """Whether (low, high) is an EXPR sign-extension word pair."""
     return (
         isinstance(low_source, tuple)
         and isinstance(high_source, tuple)
         and len(high_source) == 3
-        and high_source[0] == CallsitePushSourceKind8616.EXPR.value
+        and operator.eq(high_source[0], CallsitePushSourceKind8616.EXPR.value)
         and isinstance(high_source[1], tuple)
-        and high_source[1] == low_source
+        and operator.eq(high_source[1], low_source)
         and isinstance(high_source[2], tuple)
         and len(high_source[2]) == 1
-        and high_source[2][0] == (CallsitePushExprOp8616.SIGN_EXT_HI.value, 16)
+        and operator.eq(high_source[2][0], (CallsitePushExprOp8616.SIGN_EXT_HI.value, 16))
     )
 
 
-def _push_source_is_immediate_word_pair_8616(low_source: StructuredAstValue, high_source: StructuredAstValue) -> bool:
+@cython.ccall
+def _push_source_is_immediate_word_pair_8616(low_source: StructuredAstValue, high_source: StructuredAstValue) -> cython.bint:
     """Whether (low, high) is a pair of IMMEDIATE push sources."""
     return (
         isinstance(low_source, tuple)
         and isinstance(high_source, tuple)
         and len(low_source) >= 2
         and len(high_source) >= 2
-        and low_source[0] == CallsitePushSourceKind8616.IMMEDIATE.value
-        and high_source[0] == CallsitePushSourceKind8616.IMMEDIATE.value
+        and operator.eq(low_source[0], CallsitePushSourceKind8616.IMMEDIATE.value)
+        and operator.eq(high_source[0], CallsitePushSourceKind8616.IMMEDIATE.value)
         and isinstance(low_source[1], int)
         and isinstance(high_source[1], int)
     )
 
 
-def _push_source_is_global_word_pair_8616(low_source: StructuredAstValue, high_source: StructuredAstValue) -> bool:
+@cython.ccall
+def _push_source_is_global_word_pair_8616(low_source: StructuredAstValue, high_source: StructuredAstValue) -> cython.bint:
     """Whether (low, high) is a pair of adjacent 2-byte ``global`` push sources."""
     return (
         isinstance(low_source, tuple)
@@ -1926,18 +2074,20 @@ def _push_source_is_global_word_pair_8616(low_source: StructuredAstValue, high_s
         and isinstance(high_source[1], int)
         and int(low_source[2]) == 2
         and int(high_source[2]) == 2
-        and int(high_source[1]) == int(low_source[1]) + 2
+        and operator.eq(int(high_source[1]), int(low_source[1]) + 2)
     )
 
 
 
-def _stmt_is_placeholder_8616(stmt: StructuredAstValue) -> bool:
+def _stmt_is_placeholder_8616(stmt: object) -> cython.bint:
     """Return whether a loop-body statement is a safe placeholder anchor."""
+    expr: object
+    nested: object
     if stmt is None:
         return True
     nested = getattr(stmt, "statements", None)
     if isinstance(nested, (list, tuple)):
-        return all(_stmt_is_placeholder_8616(child) for child in nested)
+        return all(_stmt_is_placeholder_8616(child) for child in iter(nested))
     expr = getattr(stmt, "expr", None)
     if expr is None:
         return True
@@ -1957,6 +2107,8 @@ def _stmt_is_placeholder_8616(stmt: StructuredAstValue) -> bool:
 
 def _empty_loop_body_for_stmt_8616(stmt: StructuredAstValue) -> StructuredAstValue | None:
     """Return the statement body when it is a loop-shaped empty placeholder."""
+    body: object
+    body_statements: object
     body = getattr(stmt, "body", None)
     body_statements = getattr(body, "statements", None)
     if not isinstance(body_statements, (list, tuple)):
@@ -1965,12 +2117,15 @@ def _empty_loop_body_for_stmt_8616(stmt: StructuredAstValue) -> StructuredAstVal
         return None
     if len(body_statements) == 0:
         return body
-    if all(_stmt_is_placeholder_8616(body_stmt) for body_stmt in body_statements):
+    if all(_stmt_is_placeholder_8616(body_stmt) for body_stmt in iter(body_statements)):
         return body
     return None
 
 
-def _empty_loop_bodies_8616(statements: StructuredAstValue) -> list[StructuredAstValue]:
+@cython.ccall
+def _empty_loop_bodies_8616(statements: StructuredAstValue) -> object:
+    body: object
+    stmt: object
     bodies = []
     for stmt in statements:
         body = _empty_loop_body_for_stmt_8616(stmt)
@@ -1979,50 +2134,50 @@ def _empty_loop_bodies_8616(statements: StructuredAstValue) -> list[StructuredAs
     return bodies
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class CallsiteMaterializationStats:
     """Evidence counters for late callsite materialization decisions."""
 
-    callsite_materialization_attempt_count: int = 0
-    callsite_materialization_cache_hit_count: int = 0
-    callsite_materialization_cache_refused_count: int = 0
-    no_live_summarized_call_refusal_count: int = 0
-    callsite_count: int = 0
-    call_target_fact_count: int = 0
-    call_target_materialized_count: int = 0
-    call_arg_fact_count: int = 0
-    call_arg_materialized_count: int = 0
-    bp_slot_arg_value_normalized_count: int = 0
-    pointer_arg_materialized_count: int = 0
-    push_order_reversed_count: int = 0
-    physical_arg_width_override_count: int = 0
-    direct_push_override_recent_store_count: int = 0
-    consumed_outgoing_stack_placeholder_count: int = 0
-    live_setup_definition_preserved_count: int = 0
-    stale_target_rejected_count: int = 0
-    known_prototype_arg_mismatch_count: int = 0
-    has_push_arg_evidence_count: int = 0
-    no_push_arg_evidence_count: int = 0
-    source_proven_stack_probe_count: int = 0
-    byte_merge_raw_fact_count: int = 0
-    byte_merge_classified_fact_count: int = 0
-    byte_merge_materialized_count: int = 0
-    byte_merge_refused_count: int = 0
-    failure_count: int = 0
-    known_prototype_arg_mismatches: list[dict[str, StructuredAstValue]] = field(default_factory=list)
+    callsite_materialization_attempt_count: cython.longlong = 0
+    callsite_materialization_cache_hit_count: cython.longlong = 0
+    callsite_materialization_cache_refused_count: cython.longlong = 0
+    no_live_summarized_call_refusal_count: cython.longlong = 0
+    callsite_count: cython.longlong = 0
+    call_target_fact_count: cython.longlong = 0
+    call_target_materialized_count: cython.longlong = 0
+    call_arg_fact_count: cython.longlong = 0
+    call_arg_materialized_count: cython.longlong = 0
+    bp_slot_arg_value_normalized_count: cython.longlong = 0
+    pointer_arg_materialized_count: cython.longlong = 0
+    push_order_reversed_count: cython.longlong = 0
+    physical_arg_width_override_count: cython.longlong = 0
+    direct_push_override_recent_store_count: cython.longlong = 0
+    consumed_outgoing_stack_placeholder_count: cython.longlong = 0
+    live_setup_definition_preserved_count: cython.longlong = 0
+    stale_target_rejected_count: cython.longlong = 0
+    known_prototype_arg_mismatch_count: cython.longlong = 0
+    has_push_arg_evidence_count: cython.longlong = 0
+    no_push_arg_evidence_count: cython.longlong = 0
+    source_proven_stack_probe_count: cython.longlong = 0
+    byte_merge_raw_fact_count: cython.longlong = 0
+    byte_merge_classified_fact_count: cython.longlong = 0
+    byte_merge_materialized_count: cython.longlong = 0
+    byte_merge_refused_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    known_prototype_arg_mismatches: object = field(default_factory=list)
 
     @property
-    def raw_fact_count(self: CallsiteMaterializationStats) -> int:
+    def raw_fact_count(self: CallsiteMaterializationStats) -> cython.longlong:
         """Return all raw callsite facts observed by this compatibility pass."""
         return int(self.callsite_count or 0) + int(self.byte_merge_raw_fact_count or 0)
 
     @property
-    def normalized_fact_count(self: CallsiteMaterializationStats) -> int:
+    def normalized_fact_count(self: CallsiteMaterializationStats) -> cython.longlong:
         """Return raw facts that were normalized into pass-owned evidence."""
         return int(self.callsite_count or 0) + int(self.byte_merge_classified_fact_count or 0)
 
     @property
-    def classified_fact_count(self: CallsiteMaterializationStats) -> int:
+    def classified_fact_count(self: CallsiteMaterializationStats) -> cython.longlong:
         """Return normalized facts that were classified as usable evidence."""
         return (
             int(self.call_target_fact_count or 0)
@@ -2031,7 +2186,7 @@ class CallsiteMaterializationStats:
         )
 
     @property
-    def materialized_count(self: CallsiteMaterializationStats) -> int:
+    def materialized_count(self: CallsiteMaterializationStats) -> cython.longlong:
         """Return classified facts that were consumed into generated C."""
         return (
             int(self.call_target_materialized_count or 0)
@@ -2039,7 +2194,8 @@ class CallsiteMaterializationStats:
             + int(self.byte_merge_materialized_count or 0)
         )
 
-    def evidence_counters(self: CallsiteMaterializationStats) -> dict[str, int]:
+    @cython.ccall
+    def evidence_counters(self: CallsiteMaterializationStats) -> dict[str, cython.longlong]:
         """Return the architecture-mandated evidence loop counters."""
         return {
             "raw_fact_count": self.raw_fact_count,
@@ -2049,9 +2205,10 @@ class CallsiteMaterializationStats:
             "failure_count": int(self.failure_count or 0),
         }
 
-    def report_counters(self: CallsiteMaterializationStats) -> dict[str, StructuredAstValue]:
+    @cython.ccall
+    def report_counters(self: CallsiteMaterializationStats) -> object:
         """Return evidence counters plus detailed callsite report fields."""
-        payload: dict[str, StructuredAstValue] = self.evidence_counters()
+        payload: object = self.evidence_counters()
         payload.update(
             {
                 "callsite_count": int(self.callsite_count or 0),
@@ -2068,7 +2225,8 @@ class CallsiteMaterializationStats:
         )
         return payload
 
-    def fact_trace_counters(self: CallsiteMaterializationStats) -> dict[str, int]:
+    @cython.ccall
+    def fact_trace_counters(self: CallsiteMaterializationStats) -> dict[str, cython.longlong]:
         """Return every counter mirrored into the stack-probe fact trace."""
         return {
             "callsite_materialization_attempt_count": self.callsite_materialization_attempt_count,
@@ -2124,7 +2282,7 @@ class CallArgMaterializationGap8616(Enum):
     SUMMARY_ARG_PROOF_UNCONSUMED = "summary_arg_proof_unconsumed"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallArityContract8616:
     """Carry the recovered call argument count and its proof strength."""
 
@@ -2132,24 +2290,30 @@ class CallArityContract8616:
     mode: CallArityMode8616 = CallArityMode8616.UNKNOWN
 
 
-def _normalize_signature_value_8616(value: StructuredAstValue) -> StructuredAstValue:
+def _normalize_signature_value_8616(value: object) -> StructuredAstValue:
     """Return a mutation-sensitive cache token for one boundary value."""
     if value is None or isinstance(value, (str, int, bool, float)):
         return value
     if isinstance(value, (tuple, list, frozenset, set)):
-        normalized = tuple(_normalize_signature_value_8616(item) for item in value)
+        normalized = tuple(_normalize_signature_value_8616(item) for item in iter(value))
         return normalized if not isinstance(value, (set, frozenset)) else tuple(sorted(normalized, key=repr))
     if isinstance(value, dict):
         return tuple(
             (_normalize_signature_value_8616(key), _normalize_signature_value_8616(val))
-            for key, val in sorted(value.items(), key=lambda pair: repr(pair[0]))
+            for key, val in builtins.iter(sorted(tuple(value.items()), key=lambda pair: repr(pair[0])))
         )
     return type(value).__name__, id(value)
 
 
 def _callsite_materialization_signature_8616(
     codegen: StructuredAstValue,
-) -> tuple[StructuredAstValue, ...] | None:
+) -> object:
+    cfunc: object
+    func_addr: object
+    root: object
+    summary: object
+    summary_map: object
+    node: object
     cfunc = getattr(codegen, "cfunc", None)
     root = _structured_root_8616(cfunc)
     if root is None:
@@ -2167,8 +2331,8 @@ def _callsite_materialization_signature_8616(
         summary = summary_map.get(id(node))
         if summary is None:
             continue
-        argument_tokens = tuple(_call_arg_semantic_key_8616(argument) for argument in node.args or ())
-        if any(token is None for token in argument_tokens):
+        argument_tokens = tuple(_call_arg_semantic_key_8616(argument) for argument in iter(node.args or ()))
+        if any(token is None for token in iter(argument_tokens)):
             return None
         signatures.append(
             (
@@ -2187,12 +2351,13 @@ def _callsite_materialization_signature_8616(
     return ("func", func_addr, "calls", tuple(signatures))
 
 
+@cython.ccall
 def _set_callsite_materialization_decision_8616(
     codegen: StructuredAstValue,
     decision: CallsiteMaterializationDecision8616,
     *,
-    changed: bool,
-    signature: tuple[StructuredAstValue, ...] | None = None,
+    changed: cython.bint,
+    signature: object = None,
 ) -> None:
     stats = _ensure_callsite_materialization_stats_8616(codegen)
     if decision is CallsiteMaterializationDecision8616.CACHE_HIT:
@@ -2223,7 +2388,8 @@ def _set_callsite_materialization_decision_8616(
     codegen._inertia_callsite_materialization_last_decision_8616 = decision
 
 
-_KNOWN_HELPER_ARG_KIND_CACHE_8616: dict[str, dict[int, CallArgSemanticKind8616]] = {}
+_KNOWN_HELPER_ARG_KIND_CACHE_8616: dict[str, dict[cython.longlong, CallArgSemanticKind8616]] = {}
+@cython.ccall
 def _ensure_callsite_materialization_stats_8616(codegen: StructuredAstValue) -> CallsiteMaterializationStats:
     """Initialize and return the owned callsite materialization statistics."""
     carrier = cast(_CallsiteMaterializationControlCarrier8616, codegen)
@@ -2237,6 +2403,7 @@ def _ensure_callsite_materialization_stats_8616(codegen: StructuredAstValue) -> 
     return stats
 
 
+@cython.ccall
 def _sync_callsite_materialization_stats_8616(codegen: StructuredAstValue) -> CallsiteMaterializationStats:
     """Mirror typed callsite counters into the shared evidence trace."""
     stats = _ensure_callsite_materialization_stats_8616(codegen)
@@ -2245,10 +2412,14 @@ def _sync_callsite_materialization_stats_8616(codegen: StructuredAstValue) -> Ca
     return stats
 
 
+@cython.ccall
 def _record_stack_probe_helper_target_fingerprints_8616(
     codegen: StructuredAstValue, *, summary: StructuredAstValue = None, call: StructuredAstValue = None
 ) -> None:
-    target_addrs: set[int] = set()
+    callee_addr: object
+    candidate: object
+    target: object
+    target_addrs: set[cython.longlong] = set()
     target_addr = summary.target_addr if summary is not None else None
     if isinstance(target_addr, int):
         target_addrs.add(target_addr)
@@ -2271,7 +2442,8 @@ def _record_stack_probe_helper_target_fingerprints_8616(
     codegen._inertia_stack_probe_helper_target_fingerprints_8616 = tuple(sorted(fingerprints))
 
 
-def _is_stack_probe_call_name_8616(name: str | None) -> bool:
+@cython.ccall
+def _is_stack_probe_call_name_8616(name: object) -> cython.bint:
     if not isinstance(name, str):
         return False
     normalized = normalize_callee_name_8616(name)
@@ -2287,8 +2459,11 @@ def _is_stack_probe_call_name_8616(name: str | None) -> bool:
     }
 
 
+@cython.ccall
 def _lookup_iter_functions_8616(candidate_project: StructuredAstValue) -> StructuredAstValue:
     """Return the candidate project's function inventory as a tuple."""
+    functions: object
+    values: object
     functions = getattr(getattr(candidate_project, "kb", None), "functions", None)
     if functions is None:
         return ()
@@ -2301,28 +2476,33 @@ def _lookup_iter_functions_8616(candidate_project: StructuredAstValue) -> Struct
     return ()
 
 
-def _lookup_unique_near_target_8616(candidate_project: StructuredAstValue, candidate_addr: int) -> StructuredAstValue:
+@cython.ccall
+def _lookup_unique_near_target_8616(candidate_project: StructuredAstValue, candidate_addr: cython.longlong) -> StructuredAstValue:
     """Return the unique function whose low 16-bit address matches the target."""
+    func_addr: object
+    function: object
     if not (isinstance(candidate_addr, int) and 0 <= candidate_addr <= 0xFFFF):
         return None
     matches = []
     for function in _lookup_iter_functions_8616(candidate_project):
         func_addr = getattr(function, "addr", None)
-        if isinstance(func_addr, int) and (func_addr & 0xFFFF) == candidate_addr:
+        if isinstance(func_addr, int) and operator.eq((func_addr & 0xFFFF), candidate_addr):
             matches.append(function)
     if len(matches) == 1:
         return matches[0]
     return None
 
 
+@cython.ccall
 def _contains_function_addr_8616(
-    containing: StructuredAstValue,
-    candidate_addr: int,
+    containing: object,
+    candidate_addr: cython.longlong,
     ceiling_addr: StructuredAstValue,
     *,
-    allow_range: bool,
-) -> bool:
+    allow_range: cython.bint,
+) -> cython.bint:
     """Return whether the candidate address belongs to the containing function."""
+    start_addr: object
     if containing is None:
         return False
     start_addr = getattr(containing, "addr", None)
@@ -2333,7 +2513,7 @@ def _contains_function_addr_8616(
     block_addrs = _boundary_tuple_8616(getattr(containing, "block_addrs_set", ()) or ())
     if candidate_addr in block_addrs:
         return True
-    if start_addr == candidate_addr:
+    if operator.eq(start_addr, candidate_addr):
         return True
     if allow_range and callable(ceiling_addr):
         try:
@@ -2353,11 +2533,16 @@ def _contains_function_addr_8616(
 
 def _lookup_exact_or_containing_8616(
     candidate_project: StructuredAstValue,
-    candidate_addr: int,
+    candidate_addr: cython.longlong,
     *,
-    allow_containing: bool,
+    allow_containing: cython.bint,
 ) -> StructuredAstValue:
     """Return an exact or range-containing function for the candidate address."""
+    ceiling_addr: object
+    containing: object
+    floor_func: object
+    functions: object
+    lookup: object
     functions = getattr(getattr(candidate_project, "kb", None), "functions", None)
     lookup = getattr(functions, "function", lambda **_: None)
     function = lookup(addr=candidate_addr, create=False)
@@ -2378,9 +2563,13 @@ def _lookup_exact_or_containing_8616(
     return containing
 
 
+@cython.ccall
 def _lookup_callee_function_8616(
-    project: StructuredAstValue, target_addr: int, *, allow_containing: bool = True
+    project: StructuredAstValue, target_addr: cython.longlong, *, allow_containing: cython.bint = True
 ) -> StructuredAstValue:
+    function: object
+    candidate_addr: object
+    candidate_project: object
     ordered_addrs = _candidate_linear_target_addrs_8616(project, target_addr)
 
     for candidate_project in (project, getattr(project, "_inertia_original_project", None)):
@@ -2396,12 +2585,15 @@ def _lookup_callee_function_8616(
     return None
 
 
+@cython.ccall
 def _first_rebased_sidecar_label_8616(
-    lookup_addrs: Set[int],
-    target_addr: int,
+    lookup_addrs: Set[cython.longlong],
+    target_addr: cython.longlong,
     resolve: Callable[[int], str | None],
-) -> str | None:
+) -> object:
     """Return the first non-None label resolved from the non-target lookup addresses."""
+    rebased: object
+    lookup_addr: object
     for lookup_addr in sorted(lookup_addrs - {target_addr}):
         rebased = resolve(lookup_addr)
         if rebased is not None:
@@ -2410,13 +2602,18 @@ def _first_rebased_sidecar_label_8616(
 
 
 def _sidecar_label_in_lookup_addrs_8616(
-    target_addr: int,
-    lookup_addrs: set[int],
+    target_addr: cython.longlong,
+    lookup_addrs: object,
     *,
-    label_maps: tuple[StructuredAstValue, ...],
-    metadata_items: tuple[StructuredAstValue, ...],
-) -> str | None:
+    label_maps: object,
+    metadata_items: object,
+) -> object:
     """Resolve a unique sidecar label across the candidate lookup addresses."""
+    exact_rebased: object
+    exact_target: object
+    range_rebased: object
+    range_target: object
+    target_offset: object
     exact_target = __sidecar_label_for_target_8616___exact_label(target_addr, label_maps=label_maps)
     if exact_target is not None:
         return exact_target
@@ -2426,7 +2623,7 @@ def _sidecar_label_in_lookup_addrs_8616(
     )
     if exact_rebased is not None:
         return exact_rebased
-    if any(__sidecar_label_for_target_8616___has_exact_label(lookup_addr, label_maps=label_maps) for lookup_addr in lookup_addrs):
+    if any(__sidecar_label_for_target_8616___has_exact_label(lookup_addr, label_maps=label_maps) for lookup_addr in iter(lookup_addrs)):
         return None
     range_target = __sidecar_label_for_target_8616___containing_range_label(target_addr, metadata_items=metadata_items)
     if range_target is not None:
@@ -2446,14 +2643,22 @@ def _sidecar_label_in_lookup_addrs_8616(
     )
 
 
+@cython.ccall
 def _project_main_object_min_addr_8616(project: StructuredAstValue) -> int | None:
+    loader: object
+    main_object: object
+    min_addr: object
     loader = getattr(project, "loader", None)
     main_object = getattr(loader, "main_object", None)
     min_addr = getattr(main_object, "min_addr", None)
     return int(min_addr) if isinstance(min_addr, int) else None
 
 
-def _candidate_linear_target_addrs_8616(project: StructuredAstValue, target_addr: int) -> tuple[int, ...]:
+@cython.ccall
+def _candidate_linear_target_addrs_8616(project: StructuredAstValue, target_addr: cython.longlong) -> tuple[cython.longlong, ...]:
+    original_delta: object
+    addr: object
+    candidate_project: object
     candidate_addrs = [target_addr]
     original_delta = getattr(project, "_inertia_original_linear_delta", None)
     if isinstance(original_delta, int):
@@ -2466,19 +2671,22 @@ def _candidate_linear_target_addrs_8616(project: StructuredAstValue, target_addr
             image_base = _project_main_object_min_addr_8616(candidate_project)
             if isinstance(image_base, int):
                 candidate_addrs.append(image_base + target_addr)
-    ordered: list[int] = []
+    ordered: list[cython.longlong] = []
     for addr in candidate_addrs:
         if isinstance(addr, int) and addr not in ordered:
             ordered.append(addr)
     return tuple(ordered)
 
 
-def _sidecar_label_for_target_8616(project: StructuredAstValue, target_addr: int) -> str | None:
+@cython.ccall
+def _sidecar_label_for_target_8616(project: StructuredAstValue, target_addr: cython.longlong) -> object:
 
     return __sidecar_label_for_target_8616___impl(project=project, target_addr=target_addr)
 
 
-def __sidecar_label_for_target_8616___impl(*, project: StructuredAstValue, target_addr: int) -> str | None:
+@cython.ccall
+def __sidecar_label_for_target_8616___impl(*, project: object, target_addr: cython.longlong) -> object:
+    original_delta: object
     if project is None or not isinstance(target_addr, int):
         return None
 
@@ -2501,7 +2709,11 @@ def __sidecar_label_for_target_8616___impl(*, project: StructuredAstValue, targe
 
 
 
+@cython.ccall
 def __sidecar_label_for_target_8616___metadata_items(*, project: StructuredAstValue) -> tuple[StructuredAstValue, ...]:
+    candidate_project: object
+    metadata: object
+    original_project: object
     original_project = getattr(project, "_inertia_original_project", None)
     items = []
     for candidate_project in (project, original_project):
@@ -2515,6 +2727,9 @@ def __sidecar_label_for_target_8616___metadata_items(*, project: StructuredAstVa
 
 
 def __sidecar_label_for_target_8616___label_maps(*, project: StructuredAstValue) -> StructuredAstValue:
+    candidate_project: object
+    labels: object
+    original_project: object
     original_project = getattr(project, "_inertia_original_project", None)
     for candidate_project in (project, original_project):
         if candidate_project is None:
@@ -2528,7 +2743,9 @@ def __sidecar_label_for_target_8616___label_maps(*, project: StructuredAstValue)
 
 
 
-def __sidecar_label_for_target_8616___exact_label(addr: int, *, label_maps: tuple[StructuredAstValue, ...]) -> str | None:
+def __sidecar_label_for_target_8616___exact_label(addr: cython.longlong, *, label_maps: object) -> object:
+    normalized: object
+    labels: object
     for labels in label_maps:
         label = getattr(labels, "get", lambda _addr: None)(addr)
         normalized = __sidecar_label_for_target_8616___normalized_label(label)
@@ -2538,7 +2755,8 @@ def __sidecar_label_for_target_8616___exact_label(addr: int, *, label_maps: tupl
 
 
 
-def __sidecar_label_for_target_8616___normalized_label(label: StructuredAstValue) -> str | None:
+@cython.ccall
+def __sidecar_label_for_target_8616___normalized_label(label: StructuredAstValue) -> object:
     if not isinstance(label, str) or not label:
         return None
     normalized = normalize_callee_name_8616(label.lstrip("_"))
@@ -2548,8 +2766,9 @@ def __sidecar_label_for_target_8616___normalized_label(label: StructuredAstValue
 
 
 
-def __sidecar_label_for_target_8616___has_exact_label(addr: int, *, label_maps: tuple[StructuredAstValue, ...]) -> bool:
+def __sidecar_label_for_target_8616___has_exact_label(addr: cython.longlong, *, label_maps: object) -> cython.bint:
     """Return whether sidecar evidence names this exact address."""
+    labels: object
     for labels in label_maps:
         label = getattr(labels, "get", lambda _addr: None)(addr)
         if isinstance(label, str) and label:
@@ -2558,7 +2777,14 @@ def __sidecar_label_for_target_8616___has_exact_label(addr: int, *, label_maps: 
 
 
 
-def __sidecar_label_for_target_8616___containing_range_label(addr: int, *, metadata_items: tuple[StructuredAstValue, ...]) -> str | None:
+@cython.ccall
+def __sidecar_label_for_target_8616___containing_range_label(addr: cython.longlong, *, metadata_items: object) -> object:
+    code_labels: object
+    code_ranges: object
+    normalized: object
+    code_span: object
+    metadata: object
+    start_addr: object
     matches: set[str] = set()
     for metadata in metadata_items:
         code_ranges = getattr(metadata, "code_ranges", None)
@@ -2578,7 +2804,13 @@ def __sidecar_label_for_target_8616___containing_range_label(addr: int, *, metad
 
 
 
-def __sidecar_label_for_target_8616___unique_offset_label(offset: int, *, label_maps: tuple[StructuredAstValue, ...]) -> str | None:
+@cython.ccall
+def __sidecar_label_for_target_8616___unique_offset_label(offset: cython.longlong, *, label_maps: object) -> object:
+    items: object
+    normalized: object
+    label_addr: object
+    label_name: object
+    labels: object
     matches: set[str] = set()
     for labels in label_maps:
         items = getattr(labels, "items", None)
@@ -2589,7 +2821,7 @@ def __sidecar_label_for_target_8616___unique_offset_label(offset: int, *, label_
         except Exception:
             continue
         for label_addr, label_name in iterable:
-            if not isinstance(label_addr, int) or (label_addr & 0xFFFF) != offset:
+            if not isinstance(label_addr, int) or operator.ne((label_addr & 0xFFFF), offset):
                 continue
             normalized = __sidecar_label_for_target_8616___normalized_label(label_name)
             if normalized is not None:
@@ -2598,7 +2830,8 @@ def __sidecar_label_for_target_8616___unique_offset_label(offset: int, *, label_
 
 
 
-def _function_matches_target_addr_8616(function: StructuredAstValue, target_addr: int | None) -> bool:
+def _function_matches_target_addr_8616(function: object, target_addr: int | None) -> cython.bint:
+    start_addr: object
     if function is None or not isinstance(target_addr, int):
         return False
     start_addr = getattr(function, "addr", None)
@@ -2607,10 +2840,14 @@ def _function_matches_target_addr_8616(function: StructuredAstValue, target_addr
     if _target_addr_matches_near_or_linear_8616(start_addr, target_addr):
         return True
     block_addrs = _boundary_tuple_8616(getattr(function, "block_addrs_set", ()) or ())
-    return any(_target_addr_matches_near_or_linear_8616(block_addr, target_addr) for block_addr in block_addrs)
+    return any(_target_addr_matches_near_or_linear_8616(block_addr, target_addr) for block_addr in iter(block_addrs))
 
 
-def _function_name_matches_target_addr_8616(function: StructuredAstValue, target_addr: int | None) -> bool:
+@cython.ccall
+def _function_name_matches_target_addr_8616(function: object, target_addr: int | None) -> cython.bint:
+    match: object
+    candidate: object
+    raw_name: object
     if function is None or not isinstance(target_addr, int):
         return False
     for raw_name in (getattr(function, "name", None),):
@@ -2629,7 +2866,8 @@ def _function_name_matches_target_addr_8616(function: StructuredAstValue, target
     return False
 
 
-def _target_addr_matches_near_or_linear_8616(candidate_addr: int, target_addr: int) -> bool:
+@cython.ccall
+def _target_addr_matches_near_or_linear_8616(candidate_addr: cython.longlong, target_addr: cython.longlong) -> cython.bint:
     if candidate_addr == target_addr:
         return True
     if not (isinstance(candidate_addr, int) and isinstance(target_addr, int)):
@@ -2638,11 +2876,14 @@ def _target_addr_matches_near_or_linear_8616(candidate_addr: int, target_addr: i
     # rebased linear addresses, so match the low 16-bit offset when the summary
     # target is a near IP rather than a linear address.
     if 0 <= target_addr <= 0xFFFF:
-        return (candidate_addr & 0xFFFF) == target_addr
+        return operator.eq((candidate_addr & 0xFFFF), target_addr)
     return False
 
 
-def _project_label_at_addr_8616(project: StructuredAstValue, addr: int) -> str | None:
+@cython.ccall
+def _project_label_at_addr_8616(project: StructuredAstValue, addr: cython.longlong) -> object:
+    label: object
+    labels: object
     for labels in (
         getattr(getattr(project, "_inertia_lst_metadata", None), "code_labels", None),
         getattr(getattr(project, "kb", None), "labels", None),
@@ -2657,7 +2898,10 @@ def _project_label_at_addr_8616(project: StructuredAstValue, addr: int) -> str |
     return None
 
 
-def _project_bytes_at_8616(project: StructuredAstValue, addr: int, size: int) -> bytes:
+@cython.ccall
+def _project_bytes_at_8616(project: StructuredAstValue, addr: cython.longlong, size: cython.longlong) -> bytes:
+    load: object
+    memory: object
     memory = getattr(getattr(project, "loader", None), "memory", None)
     load = getattr(memory, "load", None)
     if not callable(load):
@@ -2667,11 +2911,15 @@ def _project_bytes_at_8616(project: StructuredAstValue, addr: int, size: int) ->
     return b""
 
 
-def _looks_like_x86_16_function_prologue_8616(data: bytes) -> bool:
+@cython.ccall
+def _looks_like_x86_16_function_prologue_8616(data: object) -> cython.bint:
     return data.startswith((b"\x55\x8b\xec", b"\x55\x89\xe5"))
 
 
-def _target_addr_has_labeled_function_prologue_8616(project: StructuredAstValue, target_addr: int) -> bool:
+@cython.ccall
+def _target_addr_has_labeled_function_prologue_8616(project: StructuredAstValue, target_addr: cython.longlong) -> cython.bint:
+    candidate_project: object
+    candidate_addr: object
     candidate_addrs = _candidate_linear_target_addrs_8616(project, target_addr)
     for candidate_project in (project, getattr(project, "_inertia_original_project", None)):
         if candidate_project is None:
@@ -2684,7 +2932,14 @@ def _target_addr_has_labeled_function_prologue_8616(project: StructuredAstValue,
     return False
 
 
-def _target_addr_is_recovered_function_entry_8616(project: StructuredAstValue, target_addr: int) -> bool:
+@cython.ccall
+def _target_addr_is_recovered_function_entry_8616(project: object, target_addr: cython.longlong) -> cython.bint:
+    function: object
+    functions: object
+    lookup: object
+    start_addr: object
+    candidate_addr: object
+    candidate_project: object
     if project is None or not isinstance(target_addr, int):
         return False
     if _lookup_callee_function_8616(project, target_addr, allow_containing=False) is not None:
@@ -2701,14 +2956,20 @@ def _target_addr_is_recovered_function_entry_8616(project: StructuredAstValue, t
             if function is None:
                 continue
             start_addr = getattr(function, "addr", None)
-            if isinstance(start_addr, int) and start_addr == candidate_addr:
+            if isinstance(start_addr, int) and operator.eq(start_addr, candidate_addr):
                 return True
     return bool(_target_addr_has_labeled_function_prologue_8616(project, target_addr))
 
 
+@cython.ccall
 def _annotated_function_pointer_stack_offsets_8616(
     project: StructuredAstValue, cfunc: StructuredAstValue
-) -> frozenset[int]:
+) -> frozenset[cython.longlong]:
+    func_addr: object
+    function: object
+    type_: object
+    raw_offset: object
+    spec: object
     func_addr = getattr(cfunc, "addr", None)
     if not isinstance(func_addr, int):
         return frozenset()
@@ -2718,7 +2979,7 @@ def _annotated_function_pointer_stack_offsets_8616(
     stack_vars = annotations.get("stack_vars") if isinstance(annotations, dict) else None
     if not isinstance(stack_vars, dict):
         return frozenset()
-    offsets: set[int] = set()
+    offsets: set[cython.longlong] = set()
     for raw_offset, spec in stack_vars.items():
         if not isinstance(raw_offset, int) or not isinstance(spec, dict):
             continue
@@ -2729,17 +2990,19 @@ def _annotated_function_pointer_stack_offsets_8616(
 
 
 def _candidate_projects_and_addrs_for_insn_8616(
-    project: StructuredAstValue, ins_addr: int | None
-) -> tuple[tuple[StructuredAstValue, int], ...]:
+    project: object, ins_addr: int | None
+) -> tuple[tuple[StructuredAstValue, cython.longlong], ...]:
+    original_delta: object
+    original_project: object
     if project is None or not isinstance(ins_addr, int):
         return ()
     original_project = getattr(project, "_inertia_original_project", None)
     original_delta = getattr(project, "_inertia_original_linear_delta", None)
-    projects = tuple(candidate for candidate in (project, original_project) if candidate is not None)
+    projects = tuple(candidate for candidate in iter((project, original_project)) if candidate is not None)
     addrs = {ins_addr}
     if isinstance(original_delta, int):
         addrs.add(ins_addr + original_delta)
-    return tuple((candidate_project, addr) for candidate_project in projects for addr in sorted(addrs))
+    return tuple((candidate_project, addr) for candidate_project in iter(projects) for addr in builtins.iter(sorted(addrs)))
 
 
 _PUSH_SOURCE_OPS_8616 = frozenset({
@@ -2758,7 +3021,8 @@ _PUSH_COMMUTATIVE_OPS_8616 = {
 }
 
 
-def _mov_reg_imm_at_8616(candidate_project: StructuredAstValue, addr: int, expected: int) -> int | None:
+@cython.ccall
+def _mov_reg_imm_at_8616(candidate_project: StructuredAstValue, addr: cython.longlong, expected: cython.longlong) -> int | None:
     """Return the destination register of ``mov reg, imm`` at the address."""
     try:
         raw = bytes(candidate_project.loader.memory.load(addr, 3))
@@ -2775,9 +3039,13 @@ def _mov_reg_imm_at_8616(candidate_project: StructuredAstValue, addr: int, expec
     return opcode - 0xB8
 
 
+@cython.ccall
 def _mov_reg_imm_setup_matches_push_source_8616(
     project: StructuredAstValue, ins_addr: int | None, source: StructuredAstValue
-) -> bool:
+) -> cython.bint:
+    reg: object
+    candidate_ins_addr: object
+    candidate_project: object
     if not (isinstance(source, tuple) and len(source) >= 2 and source[0] == "imm" and isinstance(source[1], int)):
         return False
     expected = int(source[1]) & 0xFFFF
@@ -2798,13 +3066,15 @@ def _mov_reg_imm_setup_matches_push_source_8616(
         opcode = push[0]
         if not 0x50 <= opcode <= 0x57:
             continue
-        if opcode - 0x50 == reg:
+        if operator.eq(opcode - 0x50, reg):
             return True
     return False
 
 
-def _setup_shift_byte_variants_8616(variants: StructuredAstValue, op_name: str, op_value: int, reg: int, shift_modrm: dict[str, int]) -> list[bytearray]:
+@cython.ccall
+def _setup_shift_byte_variants_8616(variants: StructuredAstValue, op_name: object, op_value: cython.longlong, reg: cython.longlong, shift_modrm: object) -> object:
     """Build byte-pattern variants for one push-op family."""
+    raw: object
     next_variants: list[bytearray] = []
     modrm = shift_modrm[op_name]
     for raw in variants:
@@ -2815,8 +3085,10 @@ def _setup_shift_byte_variants_8616(variants: StructuredAstValue, op_name: str, 
     return next_variants
 
 
-def _setup_neg_byte_variants_8616(variants: StructuredAstValue, op_name: str, op_value: int, reg: int) -> list[bytearray]:
+@cython.ccall
+def _setup_neg_byte_variants_8616(variants: StructuredAstValue, op_name: object, op_value: cython.longlong, reg: cython.longlong) -> object:
     """Build byte-pattern variants for one push-op family."""
+    raw: object
     next_variants: list[bytearray] = []
     for raw in variants:
         if op_value == 0:
@@ -2824,8 +3096,10 @@ def _setup_neg_byte_variants_8616(variants: StructuredAstValue, op_name: str, op
     return next_variants
 
 
-def _setup_add_byte_variants_8616(variants: StructuredAstValue, op_name: str, op_value: int, reg: int) -> list[bytearray]:
+@cython.ccall
+def _setup_add_byte_variants_8616(variants: StructuredAstValue, op_name: object, op_value: cython.longlong, reg: cython.longlong) -> object:
     """Build byte-pattern variants for one push-op family."""
+    raw: object
     next_variants: list[bytearray] = []
     for raw in variants:
         if reg == 0:
@@ -2841,8 +3115,10 @@ def _setup_add_byte_variants_8616(variants: StructuredAstValue, op_name: str, op
     return next_variants
 
 
-def _setup_sub_byte_variants_8616(variants: StructuredAstValue, op_name: str, op_value: int, reg: int) -> list[bytearray]:
+@cython.ccall
+def _setup_sub_byte_variants_8616(variants: StructuredAstValue, op_name: object, op_value: cython.longlong, reg: cython.longlong) -> object:
     """Build byte-pattern variants for one push-op family."""
+    raw: object
     next_variants: list[bytearray] = []
     for raw in variants:
         if reg == 0:
@@ -2859,9 +3135,10 @@ def _setup_sub_byte_variants_8616(variants: StructuredAstValue, op_name: str, op
 
 
 
+@cython.ccall
 def _setup_op_byte_variants_8616(
-    variants: Iterable[bytearray], op_name: str, op_value: int, reg: int
-) -> list[bytearray] | None:
+    variants: Iterable[bytearray], op_name: object, op_value: cython.longlong, reg: cython.longlong
+) -> object:
     """Expand byte-pattern variants for one expression operation."""
     op_value &= 0xFFFF
     shift_modrm = {
@@ -2871,19 +3148,22 @@ def _setup_op_byte_variants_8616(
     }
     if op_name in shift_modrm:
         return _setup_shift_byte_variants_8616(variants, op_name, op_value, reg, shift_modrm)
-    if op_name == CallsitePushExprOp8616.NEG.value:
+    if operator.eq(op_name, CallsitePushExprOp8616.NEG.value):
         return _setup_neg_byte_variants_8616(variants, op_name, op_value, reg)
-    if op_name == CallsitePushExprOp8616.ADD.value:
+    if operator.eq(op_name, CallsitePushExprOp8616.ADD.value):
         return _setup_add_byte_variants_8616(variants, op_name, op_value, reg)
-    if op_name == CallsitePushExprOp8616.SUB.value:
+    if operator.eq(op_name, CallsitePushExprOp8616.SUB.value):
         return _setup_sub_byte_variants_8616(variants, op_name, op_value, reg)
     return None
 
 
 def _setup_byte_variants_for_reg_8616(
-    reg: int, bp_offset: int, ops: tuple[tuple[str, int], ...]
+    reg: cython.longlong, bp_offset: cython.longlong, ops: object
 ) -> tuple[bytes, ...]:
     """Return candidate setup-instruction byte patterns for the register."""
+    op_name: object
+    op_value: object
+    raw: object
     variants = [bytearray((0x8B, 0x40 | (reg << 3) | 0x06, bp_offset & 0xFF))]
     for op_name, op_value in ops:
         next_variants = _setup_op_byte_variants_8616(variants, op_name, op_value, reg)
@@ -2892,15 +3172,17 @@ def _setup_byte_variants_for_reg_8616(
         variants = next_variants
     for raw in variants:
         raw.append(0x50 | reg)
-    return tuple(bytes(raw) for raw in variants)
+    return tuple(bytes(raw) for raw in iter(variants))
 
 
+@cython.ccall
 def _reg_setup_bytes_match_8616(
     candidate_project: StructuredAstValue,
-    candidate_ins_addr: int,
-    bp_offset: int,
-    ops: tuple[StructuredAstValue, ...],
-) -> bool:
+    candidate_ins_addr: cython.longlong,
+    bp_offset: cython.longlong,
+    ops: object,
+) -> cython.bint:
+    expected: object
     for reg in range(8):
         for expected in _setup_byte_variants_for_reg_8616(reg, bp_offset, ops):
             start = candidate_ins_addr - len(expected) + 1
@@ -2915,7 +3197,9 @@ def _reg_setup_bytes_match_8616(
 
 def _reg_expr_setup_matches_push_source_8616(
     project: StructuredAstValue, ins_addr: int | None, source: StructuredAstValue
-) -> bool:
+) -> cython.bint:
+    candidate_ins_addr: object
+    candidate_project: object
     if not (
         isinstance(source, tuple)
         and len(source) == 3
@@ -2929,12 +3213,12 @@ def _reg_expr_setup_matches_push_source_8616(
         return False
     bp_offset = int(source[1][1])
     ops = tuple(source[2])
-    if not all(isinstance(op_name, str) and isinstance(op_value, int) for op_name, op_value in ops):
+    if not all(isinstance(op_name, str) and isinstance(op_value, int) for op_name, op_value in iter(ops)):
         return False
     if not -0x80 <= bp_offset <= 0x7F:
         return False
 
-    if len(ops) == 1 and ops[0][0] == CallsitePushExprOp8616.MUL.value:
+    if len(ops) == 1 and operator.eq(ops[0][0], CallsitePushExprOp8616.MUL.value):
         factor = int(ops[0][1]) & 0xFFFF
         expected = bytes((0xB8, factor & 0xFF, (factor >> 8) & 0xFF, 0xF7, 0x6E, bp_offset & 0xFF, 0x50))
         for candidate_project, candidate_ins_addr in _candidate_projects_and_addrs_for_insn_8616(project, ins_addr):
@@ -2953,16 +3237,20 @@ def _reg_expr_setup_matches_push_source_8616(
     return False
 
 
+@cython.ccall
 def _direct_bp_push_instruction_matches_source_8616(
     project: StructuredAstValue,
     ins_addr: int | None,
     source: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Prove that an instruction is ``push word ptr [bp+offset]`` for a source."""
+    candidate_ins_addr: object
+    candidate_project: object
+    expected: object
     if not (
         isinstance(source, tuple)
         and len(source) >= 2
-        and source[0] == CallsitePushSourceKind8616.BP_VALUE.value
+        and operator.eq(source[0], CallsitePushSourceKind8616.BP_VALUE.value)
         and isinstance(source[1], int)
     ):
         return False
@@ -2984,28 +3272,30 @@ def _direct_bp_push_instruction_matches_source_8616(
     return False
 
 
-def _collect_bp_offsets_nested_8616(current: tuple[StructuredAstValue, ...], offsets: set[int]) -> None:
+@cython.ccall
+def _collect_bp_offsets_nested_8616(current: object, offsets: object) -> None:
     """Accumulate BP offsets from the indexed/global/segmented push-source kinds."""
     source_kind = current[0]
-    if source_kind == CallsitePushSourceKind8616.BP_INDEX_ADDRESS.value:
+    if operator.eq(source_kind, CallsitePushSourceKind8616.BP_INDEX_ADDRESS.value):
         if isinstance(current[1], int):
             offsets.add(int(current[1]))
         if len(current) >= 5 and isinstance(current[4], tuple):
             _collect_bp_offsets_8616(current[4], offsets)
         return
-    if source_kind == CallsitePushSourceKind8616.GLOBAL_INDEX_VALUE.value and len(current) >= 4:
+    if operator.eq(source_kind, CallsitePushSourceKind8616.GLOBAL_INDEX_VALUE.value) and len(current) >= 4:
         if isinstance(current[3], tuple):
             _collect_bp_offsets_8616(current[3], offsets)
         return
     if (
-        source_kind == CallsitePushSourceKind8616.SEGMENTED_INDIRECT_VALUE.value
+        operator.eq(source_kind, CallsitePushSourceKind8616.SEGMENTED_INDIRECT_VALUE.value)
         and len(current) == 4
         and isinstance(current[3], tuple)
     ):
         _collect_bp_offsets_8616(current[3], offsets)
 
 
-def _collect_bp_offsets_8616(current: StructuredAstValue, offsets: set[int]) -> None:
+@cython.ccall
+def _collect_bp_offsets_8616(current: StructuredAstValue, offsets: object) -> None:
     """Accumulate BP offsets read by a structured push-source expression."""
     if not isinstance(current, tuple) or len(current) < 2:
         return
@@ -3014,23 +3304,26 @@ def _collect_bp_offsets_8616(current: StructuredAstValue, offsets: set[int]) -> 
         if isinstance(current[1], int):
             offsets.add(int(current[1]))
         return
-    if source_kind == CallsitePushSourceKind8616.EXPR.value and isinstance(current[1], tuple):
+    if operator.eq(source_kind, CallsitePushSourceKind8616.EXPR.value) and isinstance(current[1], tuple):
         _collect_bp_offsets_8616(current[1], offsets)
         return
     _collect_bp_offsets_nested_8616(current, offsets)
 
 
-def _bp_offsets_from_push_source_8616(source: StructuredAstValue) -> frozenset[int]:
+@cython.ccall
+def _bp_offsets_from_push_source_8616(source: StructuredAstValue) -> frozenset[cython.longlong]:
     """Return BP stack offsets read by a structured callsite push source."""
-    offsets: set[int] = set()
+    offsets: set[cython.longlong] = set()
     _collect_bp_offsets_8616(source, offsets)
     return frozenset(offsets)
 
 
+@cython.ccall
 def _expr_push_sources_for_bp_offset_8616(
-    push_sources: tuple[StructuredAstValue, ...], offset: int
+    push_sources: object, offset: cython.longlong
 ) -> tuple[tuple[StructuredAstValue, ...], ...]:
     """Select expression push sources proven to read a BP stack offset."""
+    source: object
     if not isinstance(push_sources, tuple):
         return ()
     matches: list[tuple[StructuredAstValue, ...]] = []
@@ -3038,7 +3331,7 @@ def _expr_push_sources_for_bp_offset_8616(
         if not (
             isinstance(source, tuple)
             and len(source) == 3
-            and source[0] == CallsitePushSourceKind8616.EXPR.value
+            and operator.eq(source[0], CallsitePushSourceKind8616.EXPR.value)
             and isinstance(source[1], tuple)
         ):
             continue
@@ -3048,45 +3341,50 @@ def _expr_push_sources_for_bp_offset_8616(
 
 
 def _expr_push_sources_8616(
-    push_sources: tuple[StructuredAstValue, ...],
+    push_sources: object,
 ) -> tuple[tuple[StructuredAstValue, ...], ...]:
     if not isinstance(push_sources, tuple):
         return ()
     return tuple(
         source
-        for source in push_sources
+        for source in iter(push_sources)
         if isinstance(source, tuple)
         and len(source) == 3
-        and source[0] == CallsitePushSourceKind8616.EXPR.value
+        and operator.eq(source[0], CallsitePushSourceKind8616.EXPR.value)
         and isinstance(source[1], tuple)
     )
 
 
+@cython.ccall
 def _signature_arg_parts_and_variadic_8616(
-    decl: str,
-) -> tuple[tuple[str, ...], bool] | None:
+    decl: object,
+) -> object:
 
     return __signature_arg_parts_and_variadic_8616___impl(decl=decl)
 
 
-def __signature_arg_parts_and_variadic_8616___impl(*, decl: str) -> tuple[tuple[str, ...], bool] | None:
+def __signature_arg_parts_and_variadic_8616___impl(*, decl: object) -> object:
+    m: object
     m = re.search(r"\((?P<args>[^)]*)\)", decl)
     arg_text = m.group("args").strip() if m is not None else ""
     if not arg_text or arg_text == "void":
         return ((), False)
-    parts = tuple(part.strip() for part in arg_text.split(",") if part.strip())
+    parts = tuple(part.strip() for part in builtins.iter(arg_text.split(",")) if part.strip())
     if parts and parts[-1] == "...":
         return (parts[:-1], True)
     return (parts, False)
 
 
 
-def _known_callee_arity_contract_8616(name: str) -> CallArityContract8616:
+@cython.ccall
+def _known_callee_arity_contract_8616(name: object) -> CallArityContract8616:
 
     return __known_callee_arity_contract_8616___impl(name=name)
 
 
-def __known_callee_arity_contract_8616___impl(*, name: str) -> CallArityContract8616:
+@cython.ccall
+def __known_callee_arity_contract_8616___impl(*, name: object) -> CallArityContract8616:
+    parsed: object
     normalized = normalize_callee_name_8616(name)
     if not isinstance(normalized, str):
         return CallArityContract8616(None)
@@ -3128,23 +3426,26 @@ def __known_callee_arity_contract_8616___impl(*, name: str) -> CallArityContract
 
 
 
-def _expected_arg_count_for_known_callee_8616(name: str) -> int | None:
+@cython.ccall
+def _expected_arg_count_for_known_callee_8616(name: object) -> int | None:
     return _known_callee_arity_contract_8616(name).count
 
 
-def _call_arity_contract_allows_count_8616(contract: CallArityContract8616, actual_count: int) -> bool:
+@cython.ccall
+def _call_arity_contract_allows_count_8616(contract: CallArityContract8616, actual_count: cython.longlong) -> cython.bint:
     if not isinstance(contract.count, int):
         return True
     if contract.mode is CallArityMode8616.EXACT:
-        return actual_count == contract.count
+        return operator.eq(actual_count, contract.count)
     if contract.mode is CallArityMode8616.MINIMUM:
         return actual_count >= contract.count
     return True
 
 
+@cython.ccall
 def _semantic_call_name_from_summary_8616(
-    project: StructuredAstValue, summary: StructuredAstValue, fallback_name: str | None
-) -> str | None:
+    project: StructuredAstValue, summary: object, fallback_name: object
+) -> object:
     if summary is not None:
         target_addr = summary.target_addr
         if isinstance(target_addr, int):
@@ -3155,6 +3456,7 @@ def _semantic_call_name_from_summary_8616(
     return normalized if isinstance(normalized, str) and normalized else fallback_name
 
 
+@cython.ccall
 def _expected_arg_count_for_call_8616(
     summary_arg_count: int | None,
     *,
@@ -3177,6 +3479,7 @@ def _expected_arg_count_for_call_8616(
     return None
 
 
+@cython.ccall
 def _push_source_width_for_arg_accounting_8616(source: StructuredAstValue) -> int | None:
     if not isinstance(source, tuple) or len(source) < 2:
         return None
@@ -3204,7 +3507,9 @@ def _push_source_width_for_arg_accounting_8616(source: StructuredAstValue) -> in
     return None
 
 
-def _push_sources_total_width_for_arg_accounting_8616(sources: tuple[StructuredAstValue, ...]) -> int | None:
+@cython.ccall
+def _push_sources_total_width_for_arg_accounting_8616(sources: object) -> int | None:
+    source: object
     if not isinstance(sources, tuple) or not sources:
         return None
     total = 0
@@ -3217,17 +3522,17 @@ def _push_sources_total_width_for_arg_accounting_8616(sources: tuple[StructuredA
 
 
 def _prototype_widths_account_for_push_sources_top_8616(
-    widths: tuple[int, ...] | None, sources: tuple[StructuredAstValue, ...]
-) -> bool:
+    widths: object, sources: object
+) -> cython.bint:
     if not widths or not isinstance(sources, tuple) or not sources:
         return False
     source_total = _push_sources_total_width_for_arg_accounting_8616(sources)
-    return isinstance(source_total, int) and source_total == sum(max(2, int(width)) for width in widths)
+    return isinstance(source_total, int) and operator.eq(source_total, sum(max(2, int(width)) for width in iter(widths)))
 
 
 def _logical_arg_widths_for_summary_8616(
-    summary: CallsiteSummary8616 | None,
-) -> tuple[int, ...] | None:
+    summary: object,
+) -> object:
     """Return validated logical widths carried by an owned callsite summary."""
     if summary is None or not summary.logical_arg_widths:
         return None
@@ -3235,14 +3540,17 @@ def _logical_arg_widths_for_summary_8616(
     logical_widths = summary.logical_arg_widths
     if not _prototype_widths_account_for_push_sources_top_8616(logical_widths, push_sources):
         return None
-    return tuple(width for width in logical_widths if isinstance(width, int)) if all(
-        isinstance(width, int) for width in logical_widths
+    return tuple(width for width in iter(logical_widths) if isinstance(width, int)) if all(
+        isinstance(width, int) for width in iter(logical_widths)
     ) else None
 
 
+@cython.ccall
 def _logical_expected_arg_count_for_summary_8616(
     project: StructuredAstValue, node: StructuredAstValue, summary: CallsiteSummary8616
-) -> int:
+) -> cython.longlong:
+    known_widths: object
+    logical_widths: object
     push_sources = _boundary_tuple_8616(summary.push_arg_sources)
     logical_widths = _logical_arg_widths_for_summary_8616(summary)
     if logical_widths is not None:
@@ -3262,16 +3570,17 @@ def _logical_expected_arg_count_for_summary_8616(
         known_widths is not None
         and _prototype_widths_account_for_push_sources_top_8616(known_widths, push_sources)
         and isinstance(known_contract.count, int)
-        and known_contract.count == len(known_widths)
+        and operator.eq(known_contract.count, len(known_widths))
     ):
         return known_contract.count
     return physical_count
 
 
 def _known_default_args_for_missing_8616(
-    name: str, codegen: StructuredAstValue
-) -> tuple[StructuredAstValue, ...] | None:
+    name: object, codegen: StructuredAstValue
+) -> object:
     """Compiler/runtime helper ABI defaults used when a known helper omits pushes."""
+    values: object
     normalized = normalize_callee_name_8616(name)
     if not isinstance(normalized, str):
         return None
@@ -3283,10 +3592,13 @@ def _known_default_args_for_missing_8616(
     values = defaults.get(normalized)
     if values is None:
         return None
-    return tuple(structured_c.CConstant(value, SimTypeShort(False), codegen=codegen) for value in values)
+    return tuple(structured_c.CConstant(value, SimTypeShort(False), codegen=codegen) for value in iter(values))
 
 
-def _prototype_call_arg_semantic_kind_8616(prototype: StructuredAstValue, arg_index: int) -> CallArgSemanticKind8616:
+@cython.ccall
+def _prototype_call_arg_semantic_kind_8616(prototype: StructuredAstValue, arg_index: cython.longlong) -> CallArgSemanticKind8616:
+    arg_type: object
+    args: object
     args = getattr(prototype, "args", None)
     if not isinstance(args, (list, tuple)) or not (0 <= arg_index < len(args)):
         return CallArgSemanticKind8616.UNKNOWN
@@ -3298,14 +3610,15 @@ def _prototype_call_arg_semantic_kind_8616(prototype: StructuredAstValue, arg_in
     return CallArgSemanticKind8616.UNKNOWN
 
 
+@cython.ccall
 def _callee_expects_pointer_arg_8616(
-    name: str,
-    arg_index: int,
+    name: object,
+    arg_index: cython.longlong,
     *,
     project: StructuredAstValue = None,
     prototype: StructuredAstValue = None,
     cod_path_hint: StructuredAstValue = None,
-) -> bool:
+) -> cython.bint:
     normalized = normalize_callee_name_8616(name)
     if not isinstance(normalized, str):
         return False
@@ -3321,9 +3634,10 @@ def _callee_expects_pointer_arg_8616(
     )
 
 
+@cython.ccall
 def _call_arg_semantic_kind_8616(
-    callee: str | None,
-    arg_index: int,
+    callee: object,
+    arg_index: cython.longlong,
     *,
     project: StructuredAstValue = None,
     prototype: StructuredAstValue = None,
@@ -3333,7 +3647,13 @@ def _call_arg_semantic_kind_8616(
     return __call_arg_semantic_kind_8616___impl(arg_index=arg_index, callee=callee, project=project, prototype=prototype)
 
 
-def __call_arg_semantic_kind_8616___impl(*, arg_index: int, callee: str | None, project: StructuredAstValue, prototype: StructuredAstValue) -> CallArgSemanticKind8616:
+@cython.ccall
+def __call_arg_semantic_kind_8616___impl(*, arg_index: cython.longlong, callee: object, project: StructuredAstValue, prototype: StructuredAstValue) -> CallArgSemanticKind8616:
+    cached: object
+    helper_kind: object
+    m: object
+    idx: object
+    part: object
     normalized = normalize_callee_name_8616(callee)
     if not isinstance(normalized, str):
         return CallArgSemanticKind8616.UNKNOWN
@@ -3345,7 +3665,7 @@ def __call_arg_semantic_kind_8616___impl(*, arg_index: int, callee: str | None, 
             m = re.search(r"\((?P<args>[^)]*)\)", decl)
             arg_text = m.group("args").strip() if m is not None else ""
             if arg_text and arg_text != "void":
-                parts = [part.strip() for part in arg_text.split(",") if part.strip()]
+                parts = [part.strip() for part in builtins.iter(arg_text.split(",")) if part.strip()]
                 for idx, part in enumerate(parts):
                     kind = (
                         CallArgSemanticKind8616.POINTER
@@ -3367,30 +3687,35 @@ def __call_arg_semantic_kind_8616___impl(*, arg_index: int, callee: str | None, 
 
 
 
-def _callee_name_should_yield_to_sidecar_8616(callee_func: StructuredAstValue, sidecar_label: str | None) -> bool:
+@cython.ccall
+def _callee_name_should_yield_to_sidecar_8616(callee_func: object, sidecar_label: object) -> cython.bint:
+    callee_name: object
     if callee_func is None or not isinstance(sidecar_label, str):
         return False
     callee_name = normalize_callee_name_8616(getattr(callee_func, "name", None))
     if callee_name is None or callee_name.startswith("sub_"):
         return True
-    if callee_name == sidecar_label:
+    if operator.eq(callee_name, sidecar_label):
         return False
     block_addrs = _boundary_tuple_8616(getattr(callee_func, "block_addrs_set", ()) or ())
     return len(block_addrs) == 0
 
 
-def _cod_metadata_for_function_8616(project: SimpleNamespace, func_addr: int) -> StructuredAstValue | None:
+@cython.ccall
+def _cod_metadata_for_function_8616(project: SimpleNamespace, func_addr: cython.longlong) -> StructuredAstValue | None:
 
     return __cod_metadata_for_function_8616___impl(func_addr=func_addr, project=project)
 
 
+@cython.ccall
 def _cod_project_variants_8616(
     project: SimpleNamespace,
-    func_addr: int,
-    original_project: StructuredAstValue,
+    func_addr: cython.longlong,
+    original_project: object,
     original_delta: StructuredAstValue,
-) -> list[tuple[StructuredAstValue, tuple[int, ...]]]:
+) -> object:
     """Return candidate (project, address) variants for COD metadata lookup."""
+    candidate: object
     project_addr_candidates = []
     if isinstance(original_delta, int):
         project_addr_candidates.append(func_addr + original_delta)
@@ -3399,19 +3724,19 @@ def _cod_project_variants_8616(
             project_addr_candidates.append(rebased)
     project_addr_candidates.append(func_addr)
 
-    normalized_project_addr_candidates: list[int] = []
+    normalized_project_addr_candidates: list[cython.longlong] = []
     for candidate in project_addr_candidates:
         if candidate not in normalized_project_addr_candidates:
             normalized_project_addr_candidates.append(candidate)
 
-    project_variants: list[tuple[StructuredAstValue, tuple[int, ...]]] = [
+    project_variants: list[tuple[StructuredAstValue, tuple[cython.longlong, ...]]] = [
         (project, tuple(normalized_project_addr_candidates))
     ]
     if original_project is not None:
         original_addr_candidates = [func_addr]
         if isinstance(original_delta, int):
             original_addr_candidates = [func_addr + original_delta]
-        normalized_original_addr_candidates: list[int] = []
+        normalized_original_addr_candidates: list[cython.longlong] = []
         for candidate in original_addr_candidates:
             if candidate >= 0 and candidate not in normalized_original_addr_candidates:
                 normalized_original_addr_candidates.append(candidate)
@@ -3422,14 +3747,17 @@ def _cod_project_variants_8616(
 def _cod_metadata_for_addr_8616(
     project: SimpleNamespace,
     candidate_project: StructuredAstValue,
-    candidate_addr: int,
+    candidate_addr: cython.longlong,
     lst_metadata: StructuredAstValue,
     cod_path: StructuredAstValue,
-    binary_path: StructuredAstValue,
-    cache: dict[StructuredAstValue, StructuredAstValue],
-    fallback_addr: int,
+    binary_path: object,
+    cache: object,
+    fallback_addr: cython.longlong,
 ) -> StructuredAstValue | None:
     """Resolve COD proc metadata for one candidate address."""
+    function: object
+    function_name: object
+    candidate_name: object
     function = getattr(getattr(candidate_project, "kb", None), "functions", None)
     function = getattr(function, "function", lambda **_: None)(addr=candidate_addr, create=False)
     function_name = getattr(function, "name", None)
@@ -3469,7 +3797,18 @@ def _cod_metadata_for_addr_8616(
     return None
 
 
-def __cod_metadata_for_function_8616___impl(*, func_addr: int, project: SimpleNamespace) -> StructuredAstValue | None:
+@cython.ccall
+def __cod_metadata_for_function_8616___impl(*, func_addr: cython.longlong, project: SimpleNamespace) -> StructuredAstValue | None:
+    binary_path: object
+    cache: object
+    cod_path: object
+    lst_metadata: object
+    metadata: object
+    original_delta: object
+    original_project: object
+    candidate_addr: object
+    candidate_addrs: object
+    candidate_project: object
     original_project = getattr(project, "_inertia_original_project", None)
     original_delta = getattr(project, "_inertia_original_linear_delta", None)
     project_variants = _cod_project_variants_8616(project, func_addr, original_project, original_delta)
@@ -3509,8 +3848,14 @@ def __cod_metadata_for_function_8616___impl(*, func_addr: int, project: SimpleNa
 
 
 
-def _candidate_target_addrs_from_call_8616(node: StructuredAstValue) -> tuple[int, ...]:
-    addrs: list[int] = []
+@cython.ccall
+def _candidate_target_addrs_from_call_8616(node: StructuredAstValue) -> tuple[cython.longlong, ...]:
+    callee_addr: object
+    callee_func: object
+    match: object
+    addr: object
+    target: object
+    addrs: list[cython.longlong] = []
     callee_func = getattr(node, "callee_func", None)
     callee_addr = getattr(callee_func, "addr", None)
     if isinstance(callee_addr, int):
@@ -3535,14 +3880,19 @@ def _candidate_target_addrs_from_call_8616(node: StructuredAstValue) -> tuple[in
         except ValueError:
             continue
 
-    ordered: list[int] = []
+    ordered: list[cython.longlong] = []
     for addr in addrs:
         if addr not in ordered:
             ordered.append(addr)
     return tuple(ordered)
 
 
-def _rename_call_node_from_sidecar_8616(project: StructuredAstValue, node: StructuredAstValue) -> bool:
+@cython.ccall
+def _rename_call_node_from_sidecar_8616(project: object, node: StructuredAstValue) -> cython.bint:
+    callee_func: object
+    current_name: object
+    current_target: object
+    target_addr: object
     if project is None:
         return False
     renamed = False
@@ -3566,7 +3916,8 @@ def _rename_call_node_from_sidecar_8616(project: StructuredAstValue, node: Struc
     return renamed
 
 
-def _preserve_detached_callee_render_metadata_8616(node: StructuredAstValue) -> bool:
+@cython.ccall
+def _preserve_detached_callee_render_metadata_8616(node: StructuredAstValue) -> cython.bint:
     """Delegate renderer context repair without discarding the call's ABI or target.
 
     Native C nodes and their codegen are a third-party boundary. The frontend
@@ -3578,7 +3929,10 @@ def _preserve_detached_callee_render_metadata_8616(node: StructuredAstValue) -> 
     return repair_cfunctioncall_render_target_8616(node.codegen.project, node)
 
 
-def _call_node_name_8616(node: StructuredAstValue) -> str | None:
+@cython.ccall
+def _call_node_name_8616(node: StructuredAstValue) -> object:
+    callee_func: object
+    raw: object
     callee_func = getattr(node, "callee_func", None)
     for raw in (
         getattr(callee_func, "name", None),
@@ -3590,7 +3944,9 @@ def _call_node_name_8616(node: StructuredAstValue) -> str | None:
     return None
 
 
-def _is_runtime_segment_helper_call_8616(node: StructuredAstValue) -> bool:
+@cython.ccall
+def _is_runtime_segment_helper_call_8616(node: StructuredAstValue) -> cython.bint:
+    tags: object
     tags = getattr(node, "tags", None)
     marker_name = tags.get("inertia_x86_16_runtime_segment_helper") if isinstance(tags, dict) else None
     if isinstance(marker_name, str) and marker_name.upper() in _RUNTIME_SEGMENT_HELPERS_8616:
@@ -3603,9 +3959,10 @@ def _segmented_stack_arg_store_lvalue_args_8616(
     expr: StructuredAstValue,
     project: StructuredAstValue,
     *,
-    allow_raw_dereference: bool = True,
-) -> tuple[StructuredAstValue, StructuredAstValue] | None:
+    allow_raw_dereference: cython.bint = True,
+) -> object:
     """Return segment helper arguments for SEG_U* stack-argument store lvalues."""
+    segment_name: object
     node = expr
     while isinstance(node, CTypeCast):
         node = node.expr
@@ -3620,13 +3977,18 @@ def _segmented_stack_arg_store_lvalue_args_8616(
     segment_name, offset_terms = _match_real_mode_segmented_store_shape_8616(node, project)
     if segment_name is None:
         return None
-    return segment_name, tuple(term for _sign, term in offset_terms)
+    return segment_name, tuple(term for _sign, term in iter(offset_terms))
 
 
+@cython.ccall
 def prune_consumed_segmented_stack_byte_arg_stores_8616(
     project: StructuredAstValue, codegen: StructuredAstValue
-) -> bool:
+) -> cython.bint:
     """Prune SS SEG_U* stores only after a materialized next-call arg consumes them."""
+    cfunc: object
+    root: object
+    root_statements: object
+    summary_map: object
     debug_enabled = bool(os.environ.get("INERTIA_DEBUG_STACK_PROBE_ARTIFACTS_VERBOSE"))
 
 
@@ -3651,7 +4013,7 @@ def prune_consumed_segmented_stack_byte_arg_stores_8616(
 
     changed = False
 
-    seen_container_ids: set[int] = set()
+    seen_container_ids: set[cython.longlong] = set()
 
     if isinstance(root, list):
         changed = _prune_consumed_segmented_stack_byte_arg_stores_8616___prune_statement_list_8616(
@@ -3672,16 +4034,19 @@ def prune_consumed_segmented_stack_byte_arg_stores_8616(
     return changed
 
 
+@cython.ccall
 def _prune_consumed_segmented_stack_byte_arg_stores_8616___prune_statement_list_8616(
-    statements: list[StructuredAstValue],
+    statements: object,
     *,
-    seen_container_ids: set[int],
+    seen_container_ids: object,
     codegen: StructuredAstValue,
-    debug_enabled: bool,
+    debug_enabled: cython.bint,
     project: StructuredAstValue,
     summary_map: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Prune consumed stores in one statement list; return whether anything changed."""
+    idx: object
+    stmt: object
     container_id = id(statements)
     if container_id in seen_container_ids:
         return False
@@ -3701,27 +4066,30 @@ def _prune_consumed_segmented_stack_byte_arg_stores_8616___prune_statement_list_
             project=project, summary_map=summary_map,
         ) or changed
         pruned.append(stmt)
-    if len(pruned) != len(statements):
+    if operator.ne(len(pruned), len(statements)):
         statements[:] = pruned
     return changed
 
 
+@cython.ccall
 def _prune_consumed_segmented_stack_byte_arg_stores_8616___list_statements_8616(node: StructuredAstValue) -> StructuredAstValue:
     """Return the nested statement list of a container node, if it holds one."""
     return getattr(node, "statements", None)
 
 
+@cython.ccall
 def _prune_consumed_segmented_stack_byte_arg_stores_8616___prune_maybe_8616(
-    container: StructuredAstValue,
+    container: object,
     node: StructuredAstValue,
     *,
-    seen_container_ids: set[int],
+    seen_container_ids: object,
     codegen: StructuredAstValue,
-    debug_enabled: bool,
+    debug_enabled: cython.bint,
     project: StructuredAstValue,
     summary_map: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Prune one potential statement-list container; True if it changed."""
+    nested: object
     if container is None:
         return False
     nested = getattr(container, "statements", None)
@@ -3740,6 +4108,8 @@ def _prune_consumed_segmented_stack_byte_arg_stores_8616___prune_maybe_8616(
 
 def _prune_consumed_segmented_stack_byte_arg_stores_8616___iter_case_bodies_8616(node: StructuredAstValue) -> Iterator[StructuredAstValue]:
     """Yield each switch case body plus the default body."""
+    _case_value: object
+    case_body: object
     for _case_value, case_body in _boundary_tuple_8616(
         cast(
             Iterable[tuple[StructuredAstValue, StructuredAstValue]],
@@ -3752,6 +4122,8 @@ def _prune_consumed_segmented_stack_byte_arg_stores_8616___iter_case_bodies_8616
 
 def _prune_consumed_segmented_stack_byte_arg_stores_8616___iter_condition_bodies_8616(node: StructuredAstValue) -> Iterator[StructuredAstValue]:
     """Yield each if/elif body plus the else body."""
+    _condition: object
+    child: object
     for _condition, child in _boundary_tuple_8616(
         cast(
             Iterable[tuple[StructuredAstValue, StructuredAstValue]],
@@ -3762,17 +4134,19 @@ def _prune_consumed_segmented_stack_byte_arg_stores_8616___iter_condition_bodies
     yield getattr(node, "else_node", None)
 
 
+@cython.ccall
 def _prune_consumed_segmented_stack_byte_arg_stores_8616___prune_many_8616(
     containers: Iterable[StructuredAstValue],
     node: StructuredAstValue,
     *,
-    seen_container_ids: set[int],
+    seen_container_ids: object,
     codegen: StructuredAstValue,
-    debug_enabled: bool,
+    debug_enabled: cython.bint,
     project: StructuredAstValue,
     summary_map: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Prune a sequence of statement-list containers."""
+    container: object
     changed = False
     for container in containers:
         changed = _prune_consumed_segmented_stack_byte_arg_stores_8616___prune_maybe_8616(
@@ -3782,16 +4156,17 @@ def _prune_consumed_segmented_stack_byte_arg_stores_8616___prune_many_8616(
     return changed
 
 
+@cython.ccall
 def _prune_consumed_segmented_stack_byte_arg_stores_8616___prune_dict_value_8616(
-    dict_value: StructuredAstValue,
+    dict_value: object,
     node: StructuredAstValue,
     *,
-    seen_container_ids: set[int],
+    seen_container_ids: object,
     codegen: StructuredAstValue,
-    debug_enabled: bool,
+    debug_enabled: cython.bint,
     project: StructuredAstValue,
     summary_map: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Prune a value found inside a dict field."""
     if isinstance(dict_value, list):
         return _prune_consumed_segmented_stack_byte_arg_stores_8616___prune_statement_list_8616(
@@ -3806,16 +4181,21 @@ def _prune_consumed_segmented_stack_byte_arg_stores_8616___prune_dict_value_8616
     return False
 
 
+@cython.ccall
 def _prune_consumed_segmented_stack_byte_arg_stores_8616___prune_fields_8616(
     node: StructuredAstValue,
     *,
-    seen_container_ids: set[int],
+    seen_container_ids: object,
     codegen: StructuredAstValue,
-    debug_enabled: bool,
+    debug_enabled: cython.bint,
     project: StructuredAstValue,
     summary_map: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Walk every instance field and prune statement lists found inside."""
+    raw_dict: object
+    tuple_value: object
+    value: object
+    dict_value: object
     changed = False
     raw_dict = getattr(node, "__dict__", None)
     values = tuple(raw_dict.values()) if isinstance(raw_dict, dict) else ()
@@ -3846,15 +4226,16 @@ def _prune_consumed_segmented_stack_byte_arg_stores_8616___prune_fields_8616(
     return changed
 
 
+@cython.ccall
 def _prune_consumed_segmented_stack_byte_arg_stores_8616___prune_nested_statement_lists_8616(
-    node: StructuredAstValue,
+    node: object,
     *,
-    seen_container_ids: set[int],
+    seen_container_ids: object,
     codegen: StructuredAstValue,
-    debug_enabled: bool,
+    debug_enabled: cython.bint,
     project: StructuredAstValue,
     summary_map: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Walk container nodes and prune consumed stores in every nested statement list."""
     if node is None:
         return False
@@ -3893,14 +4274,16 @@ def _prune_consumed_segmented_stack_byte_arg_stores_8616___prune_nested_statemen
 def _prune_consumed_segmented_stack_byte_arg_stores_8616___consumed_store_stack_offset_8616(
     lhs: StructuredAstValue,
     *,
-    idx: int,
-    debug_enabled: bool,
+    idx: cython.longlong,
+    debug_enabled: cython.bint,
     project: StructuredAstValue,
 ) -> StructuredAstValue | None:
     """Return the stack-offset lvalue arg when the store targets SS:off(stack)."""
+    lhs_args: object
+    seg_name: object
     lhs_args = _segmented_stack_arg_store_lvalue_args_8616(lhs, project)
     if lhs_args is None:
-        if debug_enabled and any(helper in str(lhs) for helper in ("SEG_U8", "SEG_U16", "SEG_U32")):
+        if debug_enabled and any(helper in str(lhs) for helper in iter(("SEG_U8", "SEG_U16", "SEG_U32"))):
             _prune_consumed_segmented_stack_byte_arg_stores_8616___debug("seg-u-lvalue-miss", idx=idx, lhs=str(lhs), debug_enabled=debug_enabled)
         return None
     seg_arg, offset_arg = lhs_args
@@ -3922,15 +4305,17 @@ def _prune_consumed_segmented_stack_byte_arg_stores_8616___consumed_store_stack_
 
 
 def _prune_consumed_segmented_stack_byte_arg_stores_8616___consumed_store_next_call_matches_8616(
-    statements: list[StructuredAstValue],
-    idx: int,
+    statements: object,
+    idx: cython.longlong,
     rhs: StructuredAstValue,
     *,
     codegen: StructuredAstValue,
     summary_map: StructuredAstValue,
-    debug_enabled: bool,
-) -> bool:
+    debug_enabled: cython.bint,
+) -> cython.bint:
     """Check whether the following real call consumes the stored rhs."""
+    next_call: object
+    summary: object
     next_call = _prune_consumed_segmented_stack_byte_arg_stores_8616___next_real_call_8616(statements, idx)
     if next_call is None:
         _prune_consumed_segmented_stack_byte_arg_stores_8616___debug("next-not-real-call", idx=idx, next=str(statements[idx + 1]), debug_enabled=debug_enabled)
@@ -3959,20 +4344,24 @@ def _prune_consumed_segmented_stack_byte_arg_stores_8616___consumed_store_next_c
     push_sources = summary.push_arg_sources
     if isinstance(push_sources, tuple) and push_sources:
         return True
-    matched_rhs = any(_same_c_expression_8616(arg, rhs) for arg in call_args)
+    matched_rhs = any(_same_c_expression_8616(arg, rhs) for arg in iter(call_args))
     if not matched_rhs:
         _prune_consumed_segmented_stack_byte_arg_stores_8616___debug(
             "args-do-not-match-rhs",
             idx=idx,
             call=str(next_call),
             rhs=str(rhs),
-            args=tuple(str(arg) for arg in call_args),
+            args=tuple(str(arg) for arg in iter(call_args)),
         debug_enabled=debug_enabled)
     return matched_rhs
 
 
-def _prune_consumed_segmented_stack_byte_arg_stores_8616___statement_is_consumed_store_8616(statements: list[StructuredAstValue], idx: int, *, codegen: StructuredAstValue, debug_enabled: bool, project: StructuredAstValue, summary_map: StructuredAstValue) -> bool:
+@cython.ccall
+def _prune_consumed_segmented_stack_byte_arg_stores_8616___statement_is_consumed_store_8616(statements: object, idx: cython.longlong, *, codegen: StructuredAstValue, debug_enabled: cython.bint, project: StructuredAstValue, summary_map: StructuredAstValue) -> cython.bint:
     """Decide whether statements[idx] is a stack byte-arg store consumed by the next call."""
+    assignment: object
+    lhs: object
+    rhs: object
     if idx + 1 >= len(statements):
         return False
     assignment = _prune_consumed_segmented_stack_byte_arg_stores_8616___top_level_assignment_node_8616(statements[idx])
@@ -3994,14 +4383,18 @@ def _prune_consumed_segmented_stack_byte_arg_stores_8616___statement_is_consumed
 
 
 
-def _prune_consumed_segmented_stack_byte_arg_stores_8616___debug(reason: str, debug_enabled: bool, **fields: StructuredAstValue) -> None:
+def _prune_consumed_segmented_stack_byte_arg_stores_8616___debug(reason: object, debug_enabled: cython.bint, **fields: StructuredAstValue) -> None:
     if debug_enabled:
         log.warning("[consumed-seg-stack-byte-prune] %s %r", reason, fields)
 
 
 
+@cython.ccall
 def _prune_consumed_segmented_stack_byte_arg_stores_8616___call_from_statement_8616(stmt: StructuredAstValue) -> StructuredAstValue | None:
     """Extract a direct call expression from a supported statement shell."""
+    nested: object
+    value: object
+    attr: object
     if isinstance(stmt, CFunctionCall):
         return stmt
     for attr in ("expr", "rhs", "src", "retval"):
@@ -4015,7 +4408,10 @@ def _prune_consumed_segmented_stack_byte_arg_stores_8616___call_from_statement_8
 
 
 
+@cython.ccall
 def _prune_consumed_segmented_stack_byte_arg_stores_8616___assignment_lhs_rhs_8616(node: StructuredAstValue) -> StructuredAstValue:
+    lhs: object
+    rhs: object
     lhs = getattr(node, "lhs", None)
     rhs = getattr(node, "rhs", None)
     if lhs is None and hasattr(node, "dst"):
@@ -4025,7 +4421,8 @@ def _prune_consumed_segmented_stack_byte_arg_stores_8616___assignment_lhs_rhs_86
 
 
 
-def _prune_consumed_segmented_stack_byte_arg_stores_8616___is_assignment_node_8616(node: StructuredAstValue) -> bool:
+@cython.ccall
+def _prune_consumed_segmented_stack_byte_arg_stores_8616___is_assignment_node_8616(node: StructuredAstValue) -> cython.bint:
     class_name = node.__class__.__name__
     return (
         class_name == "CAssignment"
@@ -4035,7 +4432,9 @@ def _prune_consumed_segmented_stack_byte_arg_stores_8616___is_assignment_node_86
 
 
 
+@cython.ccall
 def _prune_consumed_segmented_stack_byte_arg_stores_8616___top_level_assignment_node_8616(stmt: StructuredAstValue) -> StructuredAstValue:
+    expr: object
     if _prune_consumed_segmented_stack_byte_arg_stores_8616___is_assignment_node_8616(stmt):
         return stmt
     expr = getattr(stmt, "expr", None)
@@ -4045,8 +4444,10 @@ def _prune_consumed_segmented_stack_byte_arg_stores_8616___top_level_assignment_
 
 
 
-def _prune_consumed_segmented_stack_byte_arg_stores_8616___expr_contains_dirty_expression_8616(expr: StructuredAstValue) -> bool:
-    for raw_node in (expr, *_iter_c_nodes_deep_8616(expr)):
+@cython.ccall
+def _prune_consumed_segmented_stack_byte_arg_stores_8616___expr_contains_dirty_expression_8616(expr: StructuredAstValue) -> cython.bint:
+    raw_node: object
+    for raw_node in (expr, ) + tuple(_iter_c_nodes_deep_8616(expr)):
         node = raw_node
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -4056,10 +4457,14 @@ def _prune_consumed_segmented_stack_byte_arg_stores_8616___expr_contains_dirty_e
 
 
 
-def _prune_consumed_segmented_stack_byte_arg_stores_8616___node_contains_placeholder_stack_8616(node: StructuredAstValue, *, max_nodes: int = 1024) -> bool:
+def _prune_consumed_segmented_stack_byte_arg_stores_8616___node_contains_placeholder_stack_8616(node: StructuredAstValue, *, max_nodes: cython.longlong = 1024) -> cython.bint:
+    name: object
+    variable: object
+    candidate: object
+    idx: object
     if isinstance(node, (tuple, list)):
-        return any(_prune_consumed_segmented_stack_byte_arg_stores_8616___node_contains_placeholder_stack_8616(item, max_nodes=max_nodes) for item in node)
-    for idx, candidate in enumerate((node, *_iter_c_nodes_deep_8616(node))):
+        return any(_prune_consumed_segmented_stack_byte_arg_stores_8616___node_contains_placeholder_stack_8616(item, max_nodes=max_nodes) for item in iter(node))
+    for idx, candidate in enumerate((node, ) + tuple(_iter_c_nodes_deep_8616(node))):
         if idx > max_nodes:
             return False
         name = getattr(candidate, "name", None)
@@ -4072,8 +4477,10 @@ def _prune_consumed_segmented_stack_byte_arg_stores_8616___node_contains_placeho
 
 
 
-def _prune_consumed_segmented_stack_byte_arg_stores_8616___rhs_is_side_effect_free_8616(expr: StructuredAstValue) -> bool:
-    for raw_node in (expr, *_iter_c_nodes_deep_8616(expr)):
+@cython.ccall
+def _prune_consumed_segmented_stack_byte_arg_stores_8616___rhs_is_side_effect_free_8616(expr: StructuredAstValue) -> cython.bint:
+    raw_node: object
+    for raw_node in (expr, ) + tuple(_iter_c_nodes_deep_8616(expr)):
         node = raw_node
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -4085,8 +4492,12 @@ def _prune_consumed_segmented_stack_byte_arg_stores_8616___rhs_is_side_effect_fr
 
 
 
-def _prune_consumed_segmented_stack_byte_arg_stores_8616___is_safe_intervening_stack_carrier_8616(stmt: StructuredAstValue) -> bool:
+@cython.ccall
+def _prune_consumed_segmented_stack_byte_arg_stores_8616___is_safe_intervening_stack_carrier_8616(stmt: StructuredAstValue) -> cython.bint:
     """Recognize a pure dirty SSA carrier between a consumed store and its call."""
+    assignment: object
+    lhs: object
+    rhs: object
     assignment = _prune_consumed_segmented_stack_byte_arg_stores_8616___top_level_assignment_node_8616(stmt)
     if assignment is None:
         return False
@@ -4097,13 +4508,17 @@ def _prune_consumed_segmented_stack_byte_arg_stores_8616___is_safe_intervening_s
 
 
 
+@cython.ccall
 def _prune_consumed_segmented_stack_byte_arg_stores_8616___next_real_call_8616(
-    statements: list[StructuredAstValue],
-    store_idx: int,
+    statements: object,
+    store_idx: cython.longlong,
     *,
-    max_carriers: int = 8,
+    max_carriers: cython.longlong = 8,
 ) -> StructuredAstValue:
     """Find the next call across only bounded, proven-pure dirty SP carriers."""
+    call: object
+    candidate: object
+    carrier_count: object
     for carrier_count, candidate in enumerate(statements[store_idx + 1 :]):
         call = _prune_consumed_segmented_stack_byte_arg_stores_8616___call_from_statement_8616(candidate)
         if call is not None:
@@ -4116,11 +4531,13 @@ def _prune_consumed_segmented_stack_byte_arg_stores_8616___next_real_call_8616(
 
 
 
-def _call_name_is_unknown_8616(name: str | None) -> bool:
+@cython.ccall
+def _call_name_is_unknown_8616(name: object) -> cython.bint:
     return name is None or name.startswith("sub_") or name == "CallReturn"
 
 
-def _callee_names_match_8616(left: str | None, right: str | None) -> bool:
+@cython.ccall
+def _callee_names_match_8616(left: object, right: object) -> cython.bint:
     left_norm = normalize_callee_name_8616(left)
     right_norm = normalize_callee_name_8616(right)
     if not isinstance(left_norm, str) or not isinstance(right_norm, str):
@@ -4129,15 +4546,22 @@ def _callee_names_match_8616(left: str | None, right: str | None) -> bool:
         return True
     # MSC/OMF public C symbols commonly carry one leading underscore while the
     # generated C call expression does not. Treat that decoration as equivalent.
-    return left_norm.lstrip("_") == right_norm.lstrip("_")
+    return operator.eq(left_norm.lstrip("_"), right_norm.lstrip("_"))
 
 
+@cython.ccall
 def _resolve_dirty_virtual_expr_8616(node: StructuredAstValue) -> StructuredAstValue:
 
     return __resolve_dirty_virtual_expr_8616___impl(node=node)
 
 
+@cython.ccall
 def __resolve_dirty_virtual_expr_8616___impl(*, node: StructuredAstValue) -> StructuredAstValue:
+    codegen: object
+    dirty: object
+    root: object
+    varid: object
+    stmt: object
     dirty = getattr(node, "dirty", None)
     if dirty is None:
         return None
@@ -4166,8 +4590,12 @@ def __resolve_dirty_virtual_expr_8616___impl(*, node: StructuredAstValue) -> Str
 
 
 
-def _stack_probe_candidate_addrs_8616(project: StructuredAstValue, target_addr: int) -> list[int]:
+@cython.ccall
+def _stack_probe_candidate_addrs_8616(project: StructuredAstValue, target_addr: cython.longlong) -> object:
     """Build linear-address candidates under which stack-probe evidence may be registered."""
+    linked_base: object
+    main_object: object
+    original_delta: object
     candidate_addrs = [int(target_addr)]
     main_object = getattr(getattr(project, "loader", None), "main_object", None)
     linked_base = getattr(main_object, "linked_base", None)
@@ -4184,8 +4612,11 @@ def _stack_probe_candidate_addrs_8616(project: StructuredAstValue, target_addr: 
     return candidate_addrs
 
 
-def _summary_targets_stack_probe_helper_8616(project: StructuredAstValue, summary: CallsiteSummary8616 | None) -> bool:
+@cython.ccall
+def _summary_targets_stack_probe_helper_8616(project: StructuredAstValue, summary: CallsiteSummary8616 | None) -> cython.bint:
     """Return whether binary helper evidence identifies this summary target as a stack probe."""
+    candidate_project: object
+    candidate_addr: object
     if not isinstance(summary, CallsiteSummary8616):
         return False
     if bool(summary.stack_probe_helper):
@@ -4203,16 +4634,19 @@ def _summary_targets_stack_probe_helper_8616(project: StructuredAstValue, summar
     return False
 
 
-def _call_node_has_nonprobe_target_evidence_8616(project: StructuredAstValue, node: StructuredAstValue) -> bool:
+@cython.ccall
+def _call_node_has_nonprobe_target_evidence_8616(project: StructuredAstValue, node: StructuredAstValue) -> cython.bint:
     """Return whether a call node already points at a concrete non-stack-probe target."""
+    candidate_addr: object
     for candidate_addr in _candidate_target_addrs_from_call_8616(node):
         if not is_x86_16_stack_probe_helper_at_8616(project, candidate_addr):
             return True
     return False
 
 
+@cython.ccall
 def _stack_probe_call_match_verdict_8616(
-    project: StructuredAstValue, node: StructuredAstValue, call_name: StructuredAstValue, summary_targets_stack_probe: bool
+    project: StructuredAstValue, node: StructuredAstValue, call_name: StructuredAstValue, summary_targets_stack_probe: cython.bint
 ) -> bool | None:
     """Decide a stack-probe summary match; None means the probe gate does not apply."""
     if not summary_targets_stack_probe:
@@ -4226,8 +4660,16 @@ def _stack_probe_call_match_verdict_8616(
     return None
 
 
-def _call_name_matches_summary_target_8616(project: StructuredAstValue, target_addr: int, call_name: str) -> bool:
+@cython.ccall
+def _call_name_matches_summary_target_8616(project: StructuredAstValue, target_addr: cython.longlong, call_name: object) -> cython.bint:
     """Match a call name against functions near the summary target address."""
+    decorated: object
+    functions: object
+    lookup: object
+    named_addr: object
+    named_function: object
+    candidate_addr: object
+    lookup_name: object
     functions = getattr(getattr(project, "kb", None), "functions", None)
     lookup = getattr(functions, "function", None)
     for candidate_addr in _candidate_linear_target_addrs_8616(project, target_addr):
@@ -4255,14 +4697,19 @@ def _call_name_matches_summary_target_8616(project: StructuredAstValue, target_a
     return isinstance(named_addr, int) and _target_addr_matches_near_or_linear_8616(named_addr, target_addr)
 
 
+@cython.ccall
 def _call_node_matches_summary_8616(
     project: StructuredAstValue, node: StructuredAstValue, summary: CallsiteSummary8616 | None
-) -> bool:
+) -> cython.bint:
 
     return __call_node_matches_summary_8616___impl(node=node, project=project, summary=summary)
 
 
-def __call_node_matches_summary_8616___impl(*, node: StructuredAstValue, project: StructuredAstValue, summary: CallsiteSummary8616 | None) -> bool:
+@cython.ccall
+def __call_node_matches_summary_8616___impl(*, node: object, project: StructuredAstValue, summary: CallsiteSummary8616 | None) -> cython.bint:
+    probe_verdict: object
+    candidate_addr: object
+    candidate_name: object
     if node is None or not isinstance(summary, CallsiteSummary8616):
         return False
     call_name = _call_node_name_8616(node)
@@ -4288,9 +4735,10 @@ def __call_node_matches_summary_8616___impl(*, node: StructuredAstValue, project
 
 
 
+@cython.ccall
 def _call_node_can_take_summary_8616(
-    project: StructuredAstValue, node: StructuredAstValue, summary: CallsiteSummary8616 | None
-) -> bool:
+    project: StructuredAstValue, node: StructuredAstValue, summary: object
+) -> cython.bint:
     """Return whether a structured call node can safely consume a callsite summary."""
     if summary is None:
         return True
@@ -4313,8 +4761,12 @@ def _call_node_can_take_summary_8616(
     return _call_node_matches_summary_8616(project, node, summary)
 
 
-def _node_callsite_matches_summary_8616(node: StructuredAstValue, summary: CallsiteSummary8616) -> bool:
+@cython.ccall
+def _node_callsite_matches_summary_8616(node: StructuredAstValue, summary: CallsiteSummary8616) -> cython.bint:
     """Return true when node-local address metadata ties a summary to the callsite."""
+    tags: object
+    value: object
+    key: object
     summary_callsite = summary.callsite_addr
     if not isinstance(summary_callsite, int):
         return False
@@ -4322,19 +4774,20 @@ def _node_callsite_matches_summary_8616(node: StructuredAstValue, summary: Calls
     if isinstance(tags, dict):
         for key in ("ins_addr", "insn_addr", "stmt_addr", "addr"):
             value = tags.get(key)
-            if isinstance(value, int) and value == summary_callsite:
+            if isinstance(value, int) and operator.eq(value, summary_callsite):
                 return True
     value = getattr(node, "addr", None)
-    return isinstance(value, int) and value == summary_callsite
+    return isinstance(value, int) and operator.eq(value, summary_callsite)
 
 
+@cython.ccall
 def _scan_call_names_for_target_8616(
-    source_call_names: tuple[str, ...],
-    source_call_idx: int,
+    source_call_names: object,
+    source_call_idx: cython.longlong,
     project: StructuredAstValue,
-    target_addr: int,
-    summary_has_stack_probe_shape: bool,
-) -> tuple[str | None, int]:
+    target_addr: cython.longlong,
+    summary_has_stack_probe_shape: cython.bint,
+) -> tuple[str | None, cython.longlong]:
     """Scan source call names for a probe match or a name matching the target address."""
     scan_idx = source_call_idx
     while scan_idx < len(source_call_names):
@@ -4350,10 +4803,12 @@ def _scan_call_names_for_target_8616(
     return None, source_call_idx
 
 
+@cython.ccall
 def _scan_call_names_for_arg_count_8616(
-    source_call_names: tuple[str, ...], source_call_idx: int, summary_arg_count: int
-) -> tuple[str | None, int]:
+    source_call_names: object, source_call_idx: cython.longlong, summary_arg_count: cython.longlong
+) -> tuple[str | None, cython.longlong]:
     """Scan source call names for one whose known callee arity matches the summary."""
+    expected_arg_count: object
     scan_idx = source_call_idx
     while scan_idx < len(source_call_names):
         candidate = source_call_names[scan_idx]
@@ -4361,15 +4816,16 @@ def _scan_call_names_for_arg_count_8616(
             scan_idx += 1
             continue
         expected_arg_count = _expected_arg_count_for_known_callee_8616(candidate)
-        if expected_arg_count is None or expected_arg_count == summary_arg_count:
+        if expected_arg_count is None or operator.eq(expected_arg_count, summary_arg_count):
             return candidate, scan_idx + 1
         scan_idx += 1
     return None, source_call_idx
 
 
+@cython.ccall
 def _scan_call_names_for_probe_8616(
-    source_call_names: tuple[str, ...], source_call_idx: int
-) -> tuple[str | None, int]:
+    source_call_names: object, source_call_idx: cython.longlong
+) -> tuple[str | None, cython.longlong]:
     """Scan source call names for the next stack-probe helper name."""
     scan_idx = source_call_idx
     while scan_idx < len(source_call_names):
@@ -4380,12 +4836,14 @@ def _scan_call_names_for_probe_8616(
     return None, source_call_idx
 
 
+@cython.ccall
 def _next_source_call_name_for_summary_8616(
-    source_call_names: tuple[str, ...],
-    source_call_idx: int,
-    summary: CallsiteSummary8616 | None,
+    source_call_names: object,
+    source_call_idx: cython.longlong,
+    summary: object,
     project: StructuredAstValue = None,
-) -> tuple[str | None, int]:
+) -> object:
+    found_name: object
     summary_is_stack_probe = bool(summary.stack_probe_helper) if summary is not None else False
     summary_has_stack_probe_shape = (
         summary is not None and int(summary.arg_count or 0) == 0 and summary.stack_cleanup is None
@@ -4414,9 +4872,14 @@ def _next_source_call_name_for_summary_8616(
     return None, source_call_idx
 
 
+@cython.ccall
 def _source_name_matches_target_8616(
-    project: StructuredAstValue, target_addr: int | None, expected_source_name: str | None
-) -> bool:
+    project: StructuredAstValue, target_addr: int | None, expected_source_name: object
+) -> cython.bint:
+    function_addr: object
+    functions: object
+    lookup: object
+    candidate_name: object
     if not isinstance(expected_source_name, str) or not expected_source_name:
         return False
     normalized_expected = normalize_callee_name_8616(expected_source_name)
@@ -4444,22 +4907,25 @@ def _source_name_matches_target_8616(
     )
 
 
-def _align_cod_call_names_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> bool:
+@cython.ccall
+def _align_cod_call_names_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> cython.bint:
     return False
 
 
-def _normalize_call_target_names_8616(codegen: StructuredAstValue) -> bool:
+@cython.ccall
+def _normalize_call_target_names_8616(codegen: StructuredAstValue) -> cython.bint:
 
     return __normalize_call_target_names_8616___impl(codegen=codegen)
 
 
+@cython.ccall
 def _expected_source_name_for_call_node_8616(
-    summary: CallsiteSummary8616 | None,
+    summary: object,
     node: StructuredAstValue,
-    source_call_names: tuple[str, ...],
-    source_call_idx: int,
+    source_call_names: object,
+    source_call_idx: cython.longlong,
     project: StructuredAstValue,
-) -> tuple[str | None, int]:
+) -> object:
     """Choose the source-level callee name expected for this call node."""
     is_stack_probe_helper = bool(summary.stack_probe_helper) if summary is not None else False
     if (
@@ -4478,7 +4944,14 @@ def _expected_source_name_for_call_node_8616(
     return None, source_call_idx
 
 
-def __normalize_call_target_names_8616___impl(*, codegen: StructuredAstValue) -> bool:
+@cython.ccall
+def __normalize_call_target_names_8616___impl(*, codegen: StructuredAstValue) -> cython.bint:
+    cfunc: object
+    func_addr: object
+    project: object
+    summary: object
+    summary_map: object
+    node: object
     cfunc = getattr(codegen, "cfunc", None)
     if cfunc is None:
         return False
@@ -4504,7 +4977,7 @@ def __normalize_call_target_names_8616___impl(*, codegen: StructuredAstValue) ->
     source_call_idx = 0
     call_nodes = [
         node
-        for node in _iter_c_nodes_deep_8616(root)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(root))
         if isinstance(node, CFunctionCall) and not _is_runtime_segment_helper_call_8616(node)
     ]
     for node in call_nodes:
@@ -4541,17 +5014,19 @@ def __normalize_call_target_names_8616___impl(*, codegen: StructuredAstValue) ->
 
 
 
+@cython.ccall
 def _repair_callsite_args_before_final_stats_8616(
     project: StructuredAstValue,
     codegen: StructuredAstValue,
     root: StructuredAstValue,
-    summary_map: dict[int, StructuredAstValue],
-) -> bool:
+    summary_map: object,
+) -> cython.bint:
 
     return __repair_callsite_args_before_final_stats_8616___impl(codegen=codegen, project=project, root=root, summary_map=summary_map)
 
 
-def __repair_callsite_args_before_final_stats_8616___impl(*, codegen: StructuredAstValue, project: StructuredAstValue, root: StructuredAstValue, summary_map: dict[int, StructuredAstValue]) -> bool:
+@cython.ccall
+def __repair_callsite_args_before_final_stats_8616___impl(*, codegen: StructuredAstValue, project: StructuredAstValue, root: StructuredAstValue, summary_map: object) -> cython.bint:
     debug_materialization = bool(os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"))
     if getattr(codegen, "_inertia_callsite_arg_pre_final_stats_active_8616", False):
         return False
@@ -4582,14 +5057,18 @@ def __repair_callsite_args_before_final_stats_8616___impl(*, codegen: Structured
 
 
 
+@cython.ccall
 def _has_callsite_arg_materialization_gap_8616(
-    root: StructuredAstValue, summary_map: dict[int, StructuredAstValue], project: StructuredAstValue = None
-) -> bool:
+    root: StructuredAstValue, summary_map: object, project: StructuredAstValue = None
+) -> cython.bint:
 
     return __has_callsite_arg_materialization_gap_8616___impl(project=project, root=root, summary_map=summary_map)
 
 
-def __has_callsite_arg_materialization_gap_8616___impl(*, project: StructuredAstValue, root: StructuredAstValue, summary_map: dict[int, StructuredAstValue]) -> bool:
+@cython.ccall
+def __has_callsite_arg_materialization_gap_8616___impl(*, project: StructuredAstValue, root: StructuredAstValue, summary_map: object) -> cython.bint:
+    summary: object
+    node: object
     for node in _iter_c_nodes_deep_8616(root):
         if not isinstance(node, CFunctionCall) or _is_runtime_segment_helper_call_8616(node):
             continue
@@ -4609,13 +5088,14 @@ def __has_callsite_arg_materialization_gap_8616___impl(*, project: StructuredAst
 
 
 
+@cython.ccall
 def _fixup_stack_probe_call_target_8616(
     *,
     node: StructuredAstValue,
-    expected_source_name: str | None,
-    summary_arg_count: int,
+    expected_source_name: object,
+    summary_arg_count: cython.longlong,
     summary_stack_cleanup: int | None,
-) -> bool:
+) -> cython.bint:
     """Clear callee_func and pin the stack-probe name when source proves a probe call."""
     if not _source_proves_stack_probe_call_8616(
         node=node,
@@ -4629,15 +5109,16 @@ def _fixup_stack_probe_call_target_8616(
         node.callee_func = None
         changed = True
     normalized_probe_name = normalize_callee_name_8616(expected_source_name) or "aNchkstk"
-    if getattr(node, "callee_target", None) != normalized_probe_name:
+    if operator.ne(getattr(node, "callee_target", None), normalized_probe_name):
         node.callee_target = normalized_probe_name
         changed = True
     return changed
 
 
+@cython.ccall
 def _rename_call_node_to_sidecar_label_8616(
-    project: StructuredAstValue, node: StructuredAstValue, target_addr: int
-) -> bool:
+    project: StructuredAstValue, node: StructuredAstValue, target_addr: cython.longlong
+) -> cython.bint:
     """Rename the call node to the sidecar label when it disagrees."""
     sidecar_label = _sidecar_label_for_target_8616(project, target_addr)
     current_name = _call_node_name_8616(node)
@@ -4653,55 +5134,62 @@ def _rename_call_node_to_sidecar_label_8616(
     if getattr(node, "callee_func", None) is not None:
         node.callee_func = None
         changed = True
-    if getattr(node, "callee_target", None) != sidecar_label:
+    if operator.ne(getattr(node, "callee_target", None), sidecar_label):
         node.callee_target = sidecar_label
         changed = True
     return changed
 
 
-def _bind_expected_callee_name_8616(node: StructuredAstValue, expected_source_name: str) -> bool:
+@cython.ccall
+def _bind_expected_callee_name_8616(node: StructuredAstValue, expected_source_name: object) -> cython.bint:
     """Bind the expected source name onto the call node target and callee_func."""
+    callee_func: object
     changed = False
-    if getattr(node, "callee_target", None) != expected_source_name:
+    if operator.ne(getattr(node, "callee_target", None), expected_source_name):
         node.callee_target = expected_source_name
         changed = True
     callee_func = getattr(node, "callee_func", None)
-    if callee_func is not None and getattr(callee_func, "name", None) != expected_source_name:
+    if callee_func is not None and operator.ne(getattr(callee_func, "name", None), expected_source_name):
         callee_func.name = expected_source_name
         changed = True
     return changed
 
 
+@cython.ccall
 def _normalize_single_call_target_node_8616(
     *,
     project: StructuredAstValue,
     node: StructuredAstValue,
-    expected_source_name: str | None,
+    expected_source_name: object,
     target_addr: int | None,
-    summary_arg_count: int,
+    summary_arg_count: cython.longlong,
     summary_stack_cleanup: int | None,
     stats: CallsiteMaterializationStats,
-    allow_call_target_rewrites: bool,
-) -> bool:
+    allow_call_target_rewrites: cython.bint,
+) -> cython.bint:
 
     return __normalize_single_call_target_node_8616___impl(allow_call_target_rewrites=allow_call_target_rewrites, expected_source_name=expected_source_name, node=node, project=project, stats=stats, summary_arg_count=summary_arg_count, summary_stack_cleanup=summary_stack_cleanup, target_addr=target_addr)
 
 
-def __normalize_single_call_target_node_8616___impl(*, allow_call_target_rewrites: bool, expected_source_name: str | None, node: StructuredAstValue, project: StructuredAstValue, stats: CallsiteMaterializationStats, summary_arg_count: int, summary_stack_cleanup: int | None, target_addr: int | None) -> bool:
+@cython.ccall
+def __normalize_single_call_target_node_8616___impl(*, allow_call_target_rewrites: cython.bint, expected_source_name: object, node: object, project: StructuredAstValue, stats: CallsiteMaterializationStats, summary_arg_count: cython.longlong, summary_stack_cleanup: int | None, target_addr: int | None) -> cython.bint:
+    callee_func: object
+    callee_name: object
+    callee_target: object
     if node is None:
         return False
     changed = False
     changed |= _preserve_detached_callee_render_metadata_8616(node)
     callee_target = getattr(node, "callee_target", None)
     normalized_target = normalize_callee_name_8616(callee_target)
-    if isinstance(normalized_target, str) and normalized_target != callee_target:
+    if isinstance(normalized_target, str) and operator.ne(normalized_target, callee_target):
         node.callee_target = normalized_target
         changed = True
 
     callee_func = getattr(node, "callee_func", None)
     callee_name = getattr(callee_func, "name", None)
     normalized_name = normalize_callee_name_8616(callee_name)
-    if callee_func is not None and isinstance(normalized_name, str) and normalized_name != callee_name:
+    if callee_func is not None and isinstance(normalized_name, str) and operator.ne(normalized_name, callee_name):
         callee_func.name = normalized_name
         changed = True
 
@@ -4750,13 +5238,14 @@ def __normalize_single_call_target_node_8616___impl(*, allow_call_target_rewrite
 
 
 
+@cython.ccall
 def _source_proves_stack_probe_call_8616(
     *,
     node: StructuredAstValue,
-    expected_source_name: str | None,
-    summary_arg_count: int,
+    expected_source_name: object,
+    summary_arg_count: cython.longlong,
     summary_stack_cleanup: int | None,
-) -> bool:
+) -> cython.bint:
     call_name = _call_node_name_8616(node)
     if not (_is_stack_probe_call_name_8616(expected_source_name) or _is_stack_probe_call_name_8616(call_name)):
         return False
@@ -4768,8 +5257,9 @@ def _source_proves_stack_probe_call_8616(
     return summary_arg_count == 0 and summary_stack_cleanup in {None, 0}
 
 
+@cython.ccall
 def _source_proven_stack_probe_summary_8616(
-    summary: CallsiteSummary8616, *, node: StructuredAstValue, expected_source_name: str | None
+    summary: CallsiteSummary8616, *, node: StructuredAstValue, expected_source_name: object
 ) -> CallsiteSummary8616:
     """Upgrade a typed summary only when source and binary facts prove a stack probe."""
     summary_arg_count = int(summary.arg_count or 0)
@@ -4799,7 +5289,8 @@ def _source_proven_stack_probe_summary_8616(
     )
 
 
-def _summary_proves_stack_probe_call_8616(summary: CallsiteSummary8616, *, node: StructuredAstValue) -> bool:
+@cython.ccall
+def _summary_proves_stack_probe_call_8616(summary: CallsiteSummary8616, *, node: StructuredAstValue) -> cython.bint:
     """Return whether typed summary facts prove an unnamed stack-probe call."""
     if not bool(summary.stack_probe_helper):
         return False
@@ -4808,14 +5299,18 @@ def _summary_proves_stack_probe_call_8616(summary: CallsiteSummary8616, *, node:
     return int(summary.arg_count or 0) == 0 and summary.stack_cleanup is None
 
 
+@cython.ccall
 def _bind_stale_probe_or_unknown_target_8616(
-    *, project: StructuredAstValue, node: StructuredAstValue, target_addr: int, stats: StructuredAstValue
-) -> bool:
+    *, project: StructuredAstValue, node: StructuredAstValue, target_addr: cython.longlong, stats: StructuredAstValue
+) -> cython.bint:
 
     return __bind_stale_probe_or_unknown_target_8616___impl(node=node, project=project, stats=stats, target_addr=target_addr)
 
 
-def __bind_stale_probe_or_unknown_target_8616___impl(*, node: StructuredAstValue, project: StructuredAstValue, stats: StructuredAstValue, target_addr: int) -> bool:
+@cython.ccall
+def __bind_stale_probe_or_unknown_target_8616___impl(*, node: StructuredAstValue, project: StructuredAstValue, stats: StructuredAstValue, target_addr: cython.longlong) -> cython.bint:
+    callee_func: object
+    candidate: object
     call_name = _call_node_name_8616(node)
     if not (_is_stack_probe_call_name_8616(call_name) or _call_name_is_unknown_8616(call_name)):
         return False
@@ -4843,7 +5338,7 @@ def __bind_stale_probe_or_unknown_target_8616___impl(*, node: StructuredAstValue
     elif candidate is None and getattr(node, "callee_func", None) is not None:
         node.callee_func = None
         changed = True
-    if isinstance(target_name, str) and getattr(node, "callee_target", None) != target_name:
+    if isinstance(target_name, str) and operator.ne(getattr(node, "callee_target", None), target_name):
         node.callee_target = target_name
         changed = True
     if changed:
@@ -4852,19 +5347,22 @@ def __bind_stale_probe_or_unknown_target_8616___impl(*, node: StructuredAstValue
 
 
 
+@cython.ccall
 def _prefer_expected_source_name_8616(
     *,
     project: StructuredAstValue,
     node: StructuredAstValue,
-    expected_source_name: str,
+    expected_source_name: object,
     target_addr: int | None,
-    summary_arg_count: int,
-) -> bool:
+    summary_arg_count: cython.longlong,
+) -> cython.bint:
 
     return __prefer_expected_source_name_8616___impl(expected_source_name=expected_source_name, node=node, project=project, summary_arg_count=summary_arg_count, target_addr=target_addr)
 
 
-def __prefer_expected_source_name_8616___impl(*, expected_source_name: str, node: StructuredAstValue, project: StructuredAstValue, summary_arg_count: int, target_addr: int | None) -> bool:
+@cython.ccall
+def __prefer_expected_source_name_8616___impl(*, expected_source_name: object, node: StructuredAstValue, project: StructuredAstValue, summary_arg_count: cython.longlong, target_addr: int | None) -> cython.bint:
+    current_expected_arity: object
     expected_arity_contract = _known_callee_arity_contract_8616(expected_source_name)
     current_call_name = _call_node_name_8616(node)
     current_arity = len(_boundary_tuple_8616(getattr(node, "args", ()) or ()))
@@ -4885,8 +5383,8 @@ def __prefer_expected_source_name_8616___impl(*, expected_source_name: str, node
         and source_name_proved
         and (
             current_expected_arity is None
-            or current_expected_arity != expected_arity_contract.count
-            or current_expected_arity == callsite_arity
+            or operator.ne(current_expected_arity, expected_arity_contract.count)
+            or operator.eq(current_expected_arity, callsite_arity)
         )
     ):
         return False
@@ -4894,21 +5392,22 @@ def __prefer_expected_source_name_8616___impl(*, expected_source_name: str, node
     if getattr(node, "callee_func", None) is not None:
         node.callee_func = None
         changed = True
-    if getattr(node, "callee_target", None) != expected_source_name:
+    if operator.ne(getattr(node, "callee_target", None), expected_source_name):
         node.callee_target = expected_source_name
         changed = True
     return changed
 
 
 
+@cython.ccall
 def _reject_stale_callee_target_8616(
     node: StructuredAstValue,
     matched_function: StructuredAstValue,
     current_addr: StructuredAstValue,
-    expected_source_name: str | None,
-    target_addr: int,
+    expected_source_name: object,
+    target_addr: cython.longlong,
     stats: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Reject a callee_func whose address disagrees with the decoded target."""
     if (
         _function_matches_target_addr_8616(matched_function, target_addr)
@@ -4918,18 +5417,19 @@ def _reject_stale_callee_target_8616(
         return False
     stats.stale_target_rejected_count += 1
     node.callee_func = None
-    if getattr(node, "callee_target", None) != expected_source_name:
+    if operator.ne(getattr(node, "callee_target", None), expected_source_name):
         node.callee_target = expected_source_name
     return True
 
 
+@cython.ccall
 def _rename_callee_to_expected_source_name_8616(
     project: StructuredAstValue,
     node: StructuredAstValue,
-    callee_func: StructuredAstValue,
-    target_addr: int,
-    expected_source_name: str | None,
-) -> bool:
+    callee_func: object,
+    target_addr: cython.longlong,
+    expected_source_name: object,
+) -> cython.bint:
     """Rename callee_func/callee_target to the expected source name when proven."""
     if not (
         isinstance(expected_source_name, str)
@@ -4942,20 +5442,22 @@ def _rename_callee_to_expected_source_name_8616(
     if current_name != expected_source_name:
         callee_func.name = expected_source_name
         changed = True
-    if getattr(node, "callee_target", None) != expected_source_name:
+    if operator.ne(getattr(node, "callee_target", None), expected_source_name):
         node.callee_target = expected_source_name
         changed = True
     return changed
 
 
+@cython.ccall
 def _bind_canonical_addr_target_8616(
     project: StructuredAstValue,
     node: StructuredAstValue,
     candidate: StructuredAstValue,
-    target_addr: int,
-    expected_source_name: str | None,
-) -> bool:
+    target_addr: cython.longlong,
+    expected_source_name: object,
+) -> cython.bint:
     """Render the stable sub_<addr> target when no source or sidecar name is proven."""
+    retained: object
     sidecar_label = _sidecar_label_for_target_8616(project, target_addr)
     if not (
         _function_matches_target_addr_8616(candidate, target_addr)
@@ -4979,25 +5481,30 @@ def _bind_canonical_addr_target_8616(
     if getattr(node, "callee_func", None) is not None:
         node.callee_func = None
         changed = True
-    if getattr(node, "callee_target", None) != canonical_target:
+    if operator.ne(getattr(node, "callee_target", None), canonical_target):
         node.callee_target = canonical_target
         changed = True
     return changed
 
 
+@cython.ccall
 def _bind_node_target_addr_8616(
     *,
     project: StructuredAstValue,
     node: StructuredAstValue,
-    expected_source_name: str | None,
-    target_addr: int,
+    expected_source_name: object,
+    target_addr: cython.longlong,
     stats: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
 
     return __bind_node_target_addr_8616___impl(expected_source_name=expected_source_name, node=node, project=project, stats=stats, target_addr=target_addr)
 
 
-def __bind_node_target_addr_8616___impl(*, expected_source_name: str | None, node: StructuredAstValue, project: StructuredAstValue, stats: StructuredAstValue, target_addr: int) -> bool:
+@cython.ccall
+def __bind_node_target_addr_8616___impl(*, expected_source_name: object, node: StructuredAstValue, project: StructuredAstValue, stats: StructuredAstValue, target_addr: cython.longlong) -> cython.bint:
+    callee_func: object
+    candidate: object
+    current_addr: object
     changed = False
     candidate = _lookup_callee_function_8616(project, target_addr, allow_containing=False)
     if candidate is not None and getattr(node, "callee_func", None) is not candidate:
@@ -5029,14 +5536,17 @@ def __bind_node_target_addr_8616___impl(*, expected_source_name: str | None, nod
 
 
 
+@cython.ccall
 def _accumulate_callsite_stats_from_call_nodes_8616(
     root: StructuredAstValue,
-    summary_map: dict[int, StructuredAstValue],
-    source_call_names: tuple[str, ...],
+    summary_map: object,
+    source_call_names: object,
     project: StructuredAstValue,
     stats: CallsiteMaterializationStats,
 ) -> None:
     """Walk structured call nodes and accumulate materialization counters."""
+    summary: object
+    node: object
     source_call_idx = 0
     for node in _iter_c_nodes_deep_8616(root):
         if not isinstance(node, CFunctionCall):
@@ -5059,8 +5569,9 @@ def _accumulate_callsite_stats_from_call_nodes_8616(
         )
 
 
+@cython.ccall
 def _raise_on_prototype_arg_mismatch_8616(
-    stats: CallsiteMaterializationStats, cfunc: StructuredAstValue, hard_gate_active: bool
+    stats: CallsiteMaterializationStats, cfunc: StructuredAstValue, hard_gate_active: cython.bint
 ) -> None:
     """Hard-fail (or defer) when known-prototype arg mismatches were observed."""
     if not stats.known_prototype_arg_mismatch_count:
@@ -5082,8 +5593,9 @@ def _raise_on_prototype_arg_mismatch_8616(
     )
 
 
+@cython.ccall
 def _raise_on_unmaterialized_callsite_facts_8616(
-    stats: CallsiteMaterializationStats, cfunc: StructuredAstValue, hard_gate_active: bool
+    stats: CallsiteMaterializationStats, cfunc: StructuredAstValue, hard_gate_active: cython.bint
 ) -> None:
     """Hard-fail when facts were classified but none materialized."""
     evidence_counters = stats.evidence_counters()
@@ -5102,12 +5614,18 @@ def _raise_on_unmaterialized_callsite_facts_8616(
     )
 
 
+@cython.ccall
 def _finalize_callsite_materialization_stats_8616(codegen: StructuredAstValue) -> CallsiteMaterializationStats:
 
     return __finalize_callsite_materialization_stats_8616___impl(codegen=codegen)
 
 
+@cython.ccall
 def __finalize_callsite_materialization_stats_8616___impl(*, codegen: StructuredAstValue) -> CallsiteMaterializationStats:
+    cfunc: object
+    func_addr: object
+    project: object
+    summary_map: object
     previous = _ensure_callsite_materialization_stats_8616(codegen)
     stats = CallsiteMaterializationStats(
         bp_slot_arg_value_normalized_count=int(getattr(previous, "bp_slot_arg_value_normalized_count", 0) or 0),
@@ -5172,19 +5690,21 @@ def __finalize_callsite_materialization_stats_8616___impl(*, codegen: Structured
 
 
 
+@cython.ccall
 def _accumulate_callsite_materialization_stats_8616(
     *,
     stats: CallsiteMaterializationStats,
     node: StructuredAstValue,
     summary: CallsiteSummary8616,
-    expected_source_name: str | None,
+    expected_source_name: object,
     project: StructuredAstValue = None,
 ) -> None:
 
     return __accumulate_callsite_materialization_stats_8616___impl(expected_source_name=expected_source_name, node=node, project=project, stats=stats, summary=summary)
 
 
-def __accumulate_callsite_materialization_stats_8616___impl(*, expected_source_name: str | None, node: StructuredAstValue, project: StructuredAstValue, stats: CallsiteMaterializationStats, summary: CallsiteSummary8616) -> None:
+def __accumulate_callsite_materialization_stats_8616___impl(*, expected_source_name: object, node: StructuredAstValue, project: StructuredAstValue, stats: CallsiteMaterializationStats, summary: CallsiteSummary8616) -> None:
+    candidate_addr: object
     stats.callsite_count += 1
     target_addr = summary.target_addr
     if isinstance(target_addr, int):
@@ -5198,21 +5718,21 @@ def __accumulate_callsite_materialization_stats_8616___impl(*, expected_source_n
                     persisted_target_addr,
                     expected_addr,
                 )
-                for expected_addr in target_candidates
+                for expected_addr in iter(target_candidates)
             )
         ) or any(
             _function_matches_target_addr_8616(
                 getattr(node, "callee_func", None),
                 candidate,
             )
-            for candidate in target_candidates
+            for candidate in iter(target_candidates)
         ):
             stats.call_target_materialized_count += 1
         else:
             for candidate_addr in _candidate_target_addrs_from_call_8616(node):
                 if any(
                     _target_addr_matches_near_or_linear_8616(candidate_addr, expected_addr)
-                    for expected_addr in target_candidates
+                    for expected_addr in iter(target_candidates)
                 ):
                     stats.call_target_materialized_count += 1
                     break
@@ -5248,25 +5768,32 @@ def __accumulate_callsite_materialization_stats_8616___impl(*, expected_source_n
 
 
 
-def _cod_source_call_names_8616(project: StructuredAstValue, func_addr: int) -> tuple[str, ...]:
+@cython.ccall
+def _cod_source_call_names_8616(project: StructuredAstValue, func_addr: cython.longlong) -> tuple[str, ...]:
     return ()
 
 
-def _cod_source_call_names_for_symbol_8616(project: StructuredAstValue, symbol_name: str | None) -> tuple[str, ...]:
+@cython.ccall
+def _cod_source_call_names_for_symbol_8616(project: StructuredAstValue, symbol_name: object) -> tuple[str, ...]:
     return ()
 
 
-def _summary_type_8616(project: StructuredAstValue, width: int) -> StructuredAstValue:
+@cython.ccall
+def _summary_type_8616(project: StructuredAstValue, width: cython.longlong) -> StructuredAstValue:
+    arch: object
     arch = getattr(project, "arch", None)
     ty = SimTypeLong(False) if width >= 4 else SimTypeShort(False)
     return ty.with_arch(arch) if arch is not None and hasattr(ty, "with_arch") else ty
 
 
+@cython.ccall
 def _word_type_8616(project: StructuredAstValue) -> StructuredAstValue:
     return _summary_type_8616(project, 2)
 
 
-def _type_with_project_arch_8616(project: StructuredAstValue, type_: StructuredAstValue) -> StructuredAstValue:
+@cython.ccall
+def _type_with_project_arch_8616(project: StructuredAstValue, type_: object) -> StructuredAstValue:
+    arch: object
     if type_ is None:
         return None
     try:
@@ -5284,7 +5811,10 @@ def _type_with_project_arch_8616(project: StructuredAstValue, type_: StructuredA
     return type_
 
 
-def _ensure_c_expr_type_has_arch_8616(project: StructuredAstValue, expr: StructuredAstValue) -> StructuredAstValue:
+@cython.ccall
+def _ensure_c_expr_type_has_arch_8616(project: StructuredAstValue, expr: object) -> StructuredAstValue:
+    const_type: object
+    fixed_type: object
     if expr is None:
         return None
     if isinstance(expr, structured_c.CVariable):
@@ -5302,7 +5832,10 @@ def _ensure_c_expr_type_has_arch_8616(project: StructuredAstValue, expr: Structu
     return expr
 
 
-def _safe_type_size_bits_8616(type_: StructuredAstValue, project: StructuredAstValue = None) -> int | None:
+@cython.ccall
+def _safe_type_size_bits_8616(type_: object, project: StructuredAstValue = None) -> int | None:
+    arch: object
+    bits: object
     if type_ is None:
         return None
     try:
@@ -5321,11 +5854,14 @@ def _safe_type_size_bits_8616(type_: StructuredAstValue, project: StructuredAstV
     return None
 
 
-def _prototype_arg_widths_8616(project: StructuredAstValue, prototype: StructuredAstValue) -> tuple[int, ...] | None:
+@cython.ccall
+def _prototype_arg_widths_8616(project: StructuredAstValue, prototype: StructuredAstValue) -> object:
+    args: object
+    arg_type: object
     args = getattr(prototype, "args", None)
     if not isinstance(args, (list, tuple)):
         return None
-    widths: list[int] = []
+    widths: list[cython.longlong] = []
     for arg_type in args:
         bits = _safe_type_size_bits_8616(arg_type, project)
         if not isinstance(bits, int) or bits <= 0:
@@ -5335,15 +5871,16 @@ def _prototype_arg_widths_8616(project: StructuredAstValue, prototype: Structure
 
 
 def _known_helper_prototype_arg_widths_8616(
-    project: StructuredAstValue, symbol_name: str | None
-) -> tuple[int, ...] | None:
+    project: StructuredAstValue, symbol_name: object
+) -> object:
+    override_widths: object
     normalized = normalize_callee_name_8616(symbol_name)
     if not isinstance(normalized, str) or not normalized:
         return None
     override_widths = known_helper_abi_widths_8616(normalized)
     if override_widths is not None:
-        return tuple(width for width in override_widths if isinstance(width, int)) if all(
-            isinstance(width, int) for width in override_widths
+        return tuple(width for width in iter(override_widths) if isinstance(width, int)) if all(
+            isinstance(width, int) for width in iter(override_widths)
         ) else None
     decl = preferred_known_helper_signature_decl(normalized)
     if not isinstance(decl, str) or not decl:
@@ -5359,8 +5896,10 @@ def _known_helper_prototype_arg_widths_8616(
     return None
 
 
+@cython.ccall
 def _near_function_pointer_type_8616(project: StructuredAstValue, arg_count: int | None) -> SimTypePointer:
     """Retain the pointer type class when binding the legacy callable view."""
+    arch: object
     argc = arg_count if isinstance(arg_count, int) and arg_count >= 0 else 1
     prototype = SimTypeFunction(
         [_word_type_8616(project) for _ in range(argc)],
@@ -5374,7 +5913,9 @@ def _near_function_pointer_type_8616(project: StructuredAstValue, arg_count: int
     return cast(SimTypePointer, ptr_type.with_arch(arch)) if arch is not None else ptr_type
 
 
+@cython.ccall
 def _summary_return_type_8616(project: StructuredAstValue, summary: StructuredAstValue) -> StructuredAstValue:
+    arch: object
     return_shape = summary.return_shape
     if return_shape == "dx_ax" and summary.return_used is True:
         return _summary_type_8616(project, 4)
@@ -5385,7 +5926,9 @@ def _summary_return_type_8616(project: StructuredAstValue, summary: StructuredAs
     return ty.with_arch(arch) if arch is not None and hasattr(ty, "with_arch") else ty
 
 
-def _prototype_needs_summary_8616(prototype: StructuredAstValue) -> bool:
+@cython.ccall
+def _prototype_needs_summary_8616(prototype: object) -> cython.bint:
+    return_type: object
     if prototype is None:
         return True
     args = _boundary_tuple_8616(getattr(prototype, "args", ()) or ())
@@ -5397,8 +5940,9 @@ def _prototype_needs_summary_8616(prototype: StructuredAstValue) -> bool:
 
 def _resolved_summary_arg_widths_8616(
     summary: CallsiteSummary8616, callee_func: StructuredAstValue
-) -> tuple[StructuredAstValue, ...] | None:
+) -> object:
     """Resolve the summary arg width tuple, padding/truncating to the arg count."""
+    logical_arg_widths: object
     logical_arg_widths = _logical_arg_widths_for_summary_8616(summary)
     arg_count = len(logical_arg_widths) if logical_arg_widths is not None else summary.arg_count
     if not isinstance(arg_count, int):
@@ -5418,14 +5962,16 @@ def _resolved_summary_arg_widths_8616(
     return arg_widths
 
 
+@cython.ccall
 def _install_summary_prototype_8616(
     project: StructuredAstValue,
     callee_func: StructuredAstValue,
     summary: CallsiteSummary8616,
-    arg_widths: tuple[StructuredAstValue, ...],
+    arg_widths: object,
 ) -> None:
     """Build and install a guessed SimTypeFunction prototype on the callee."""
-    arg_types = [_summary_type_8616(project, width) for width in arg_widths]
+    arch: object
+    arg_types = [_summary_type_8616(project, width) for width in iter(arg_widths)]
     arg_names = _normalize_arg_names_8616(None, len(arg_types))
     prototype = SimTypeFunction(
         arg_types,
@@ -5444,18 +5990,21 @@ def _install_summary_prototype_8616(
     callee_func.prototype_source = PrototypeSource.GUESSED
 
 
+@cython.ccall
 def _apply_summary_prototype_8616(
     project: StructuredAstValue,
     callee_func: StructuredAstValue,
     summary: CallsiteSummary8616,
-) -> bool:
+) -> cython.bint:
     """Apply typed callsite evidence to a dynamic angr callee function."""
 
 
     return __apply_summary_prototype_8616___impl(callee_func=callee_func, project=project, summary=summary)
 
 
-def __apply_summary_prototype_8616___impl(*, callee_func: StructuredAstValue, project: StructuredAstValue, summary: CallsiteSummary8616) -> bool:
+@cython.ccall
+def __apply_summary_prototype_8616___impl(*, callee_func: object, project: StructuredAstValue, summary: CallsiteSummary8616) -> cython.bint:
+    arg_widths: object
     if callee_func is None:
         return False
     try:
@@ -5472,23 +6021,28 @@ def __apply_summary_prototype_8616___impl(*, callee_func: StructuredAstValue, pr
 
 
 
+@cython.ccall
 def _collect_callsite_summary_inventory_8616(
     project: StructuredAstValue,
     codegen: StructuredAstValue,
     function: StructuredAstValue,
-    callsite_addrs: tuple[int, ...],
-    names_changed: bool,
-) -> dict[int, CallsiteSummary8616]:
+    callsite_addrs: object,
+    names_changed: cython.bint,
+) -> object:
     """Collect the authoritative per-callsite summary inventory."""
+    previous_summary: object
+    summary: object
+    target_inventory: object
+    callsite_addr: object
     retained_summaries = retained_program_callsite_summary_inventory_8616(
         project,
         function,
         callsite_addrs,
     )
-    target_inventory: CallsiteTargetInventory8616 | None = None
-    target_seeds = {seed.callsite_addr: seed for seed in collect_neighbor_call_targets(function)}
+    target_inventory = None
+    target_seeds = {seed.callsite_addr: seed for seed in builtins.iter(collect_neighbor_call_targets(function))}
     previous_summary_inventory = _callsite_summary_inventory_8616(codegen)
-    summary_inventory: dict[int, CallsiteSummary8616] = {}
+    summary_inventory: dict[cython.longlong, CallsiteSummary8616] = {}
     for callsite_addr in callsite_addrs:
         summary = retained_summaries.get(callsite_addr)
         if summary is None and not names_changed:
@@ -5517,13 +6071,15 @@ def _collect_callsite_summary_inventory_8616(
 def _log_callsite_summary_debug_8616(
     project: StructuredAstValue,
     function: StructuredAstValue,
-    callsite_addrs: tuple[int, ...],
-    source_call_names: tuple[str, ...],
-    func_addr: int,
-    measure_single_function_context: bool,
-    kb_lookup_count: int,
-) -> int:
+    callsite_addrs: object,
+    source_call_names: object,
+    func_addr: cython.longlong,
+    measure_single_function_context: cython.bint,
+    kb_lookup_count: cython.longlong,
+) -> cython.longlong:
     """Emit the callsite debug dump; returns the updated KB lookup count."""
+    callee: object
+    cs_addr: object
     try:
         callsite_dbg = []
         for cs_addr in callsite_addrs:
@@ -5549,21 +6105,25 @@ def _log_callsite_summary_debug_8616(
     return kb_lookup_count
 
 
+@cython.ccall
 def _apply_summaries_to_ordered_callsite_pairs_8616(
     *,
     project: StructuredAstValue,
     codegen: StructuredAstValue,
-    ordered_pairs: list[tuple[CFunctionCall, int]],
-    summary_inventory: dict[int, CallsiteSummary8616],
-    summary_map: dict[int, StructuredAstValue],
-    source_call_names: tuple[str, ...],
-    source_call_idx: int,
-    debug_callsites: bool,
-    func_addr: int,
-    allow_call_target_rewrites: bool,
+    ordered_pairs: object,
+    summary_inventory: object,
+    summary_map: object,
+    source_call_names: object,
+    source_call_idx: cython.longlong,
+    debug_callsites: cython.bint,
+    func_addr: cython.longlong,
+    allow_call_target_rewrites: cython.bint,
     stats: CallsiteMaterializationStats,
-) -> bool:
+) -> cython.bint:
     """Apply each summary to its paired structured call node."""
+    summary: object
+    callsite_addr: object
+    node: object
     changed = False
     for node, callsite_addr in ordered_pairs:
         summary = summary_inventory.get(callsite_addr)
@@ -5607,12 +6167,17 @@ def _apply_summaries_to_ordered_callsite_pairs_8616(
     return changed
 
 
-def _attach_callsite_summaries_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> bool:
+@cython.ccall
+def _attach_callsite_summaries_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> cython.bint:
 
     return __attach_callsite_summaries_8616___impl(codegen=codegen, project=project)
 
 
-def __attach_callsite_summaries_8616___impl(*, codegen: StructuredAstValue, project: StructuredAstValue) -> bool:
+@cython.ccall
+def __attach_callsite_summaries_8616___impl(*, codegen: StructuredAstValue, project: StructuredAstValue) -> cython.bint:
+    cfunc: object
+    func_addr: object
+    function: object
     cfunc = getattr(codegen, "cfunc", None)
     if cfunc is None:
         return False
@@ -5631,7 +6196,7 @@ def __attach_callsite_summaries_8616___impl(*, codegen: StructuredAstValue, proj
     root = _structured_root_8616(cfunc)
     call_nodes = [
         node
-        for node in _iter_c_nodes_deep_8616(root)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(root))
         if isinstance(node, CFunctionCall) and not _is_runtime_segment_helper_call_8616(node)
     ]
     callsite_addrs = _all_function_callsite_addrs_8616(project, function)
@@ -5698,7 +6263,12 @@ def __attach_callsite_summaries_8616___impl(*, codegen: StructuredAstValue, proj
 
 
 
+@cython.ccall
 def __attach_callsite_summaries_8616___node_callsite_addr(node: StructuredAstValue) -> int | None:
+    exact_callsite_addr: object
+    tags: object
+    value: object
+    key: object
     if isinstance(node, CFunctionCall):
         exact_callsite_addr = structured_callsite_addr_8616(node)
         if exact_callsite_addr is not None:
@@ -5714,32 +6284,36 @@ def __attach_callsite_summaries_8616___node_callsite_addr(node: StructuredAstVal
 
 
 
-def _all_function_callsite_addrs_8616(project: StructuredAstValue, function: StructuredAstValue) -> tuple[int, ...]:
+def _all_function_callsite_addrs_8616(project: StructuredAstValue, function: StructuredAstValue) -> tuple[cython.longlong, ...]:
     """Return exact decoded calls plus CFG-proven external tail-call sites."""
     recorded = {
-        int(addr) for addr in (getattr(function, "get_call_sites", list)() or ()) if isinstance(addr, int)
+        int(addr) for addr in iter((getattr(function, "get_call_sites", list)() or ())) if isinstance(addr, int)
     }
     if getattr(getattr(project, "arch", None), "name", None) != "86_16":
         return tuple(sorted(recorded))
     callsites = {
         *recorded,
         *decoded_function_callsite_addresses_8616(function),
-        *(target.callsite_addr for target in collect_neighbor_call_targets(function)),
+        *(target.callsite_addr for target in builtins.iter(collect_neighbor_call_targets(function))),
     }
     return tuple(sorted(callsites))
 
 
+@cython.ccall
 def _match_unmatched_callsite_node_index_8616(
     *,
     project: StructuredAstValue,
-    callsite_addr: int,
-    summary: CallsiteSummary8616 | None,
-    available_nodes: list[CFunctionCall],
-    active_summary_inventory: Mapping[int, CallsiteSummary8616],
-    call_return_store_offsets: dict[int, int],
+    callsite_addr: cython.longlong,
+    summary: object,
+    available_nodes: object,
+    active_summary_inventory: Mapping[cython.longlong, CallsiteSummary8616],
+    call_return_store_offsets: object,
     function: StructuredAstValue,
 ) -> int | None:
     """Resolve one unmatched callsite to an index into available_nodes."""
+    matched_index: object
+    idx: object
+    node: object
     matched_index = None
     if summary is not None:
         for idx, node in enumerate(available_nodes):
@@ -5759,16 +6333,19 @@ def _match_unmatched_callsite_node_index_8616(
     return matched_index
 
 
+@cython.ccall
 def _match_node_index_by_return_store_8616(
     project: StructuredAstValue,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     summary: CallsiteSummary8616,
-    available_nodes: list[CFunctionCall],
-    active_summary_inventory: Mapping[int, CallsiteSummary8616],
-    call_return_store_offsets: dict[int, int],
+    available_nodes: object,
+    active_summary_inventory: Mapping[cython.longlong, CallsiteSummary8616],
+    call_return_store_offsets: object,
     function: StructuredAstValue,
 ) -> int | None:
     """Match a node via the stack offset that stores the call return value."""
+    idx: object
+    node: object
     destination = summary.return_store_destination
     if not (
         isinstance(destination, tuple)
@@ -5782,7 +6359,7 @@ def _match_node_index_by_return_store_8616(
         function=function, project=project,
     )
     for idx, node in enumerate(available_nodes):
-        if call_return_store_offsets.get(id(node)) != destination[1]:
+        if operator.ne(call_return_store_offsets.get(id(node)), destination[1]):
             continue
         if isinstance(target_name, str) and not _callee_names_match_8616(
             _call_node_name_8616(node), target_name
@@ -5792,15 +6369,21 @@ def _match_node_index_by_return_store_8616(
     return None
 
 
+@cython.ccall
 def _match_node_index_by_name_and_imm_8616(
     project: StructuredAstValue,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     summary: CallsiteSummary8616 | None,
-    available_nodes: list[CFunctionCall],
-    active_summary_inventory: Mapping[int, CallsiteSummary8616],
+    available_nodes: object,
+    active_summary_inventory: Mapping[cython.longlong, CallsiteSummary8616],
     function: StructuredAstValue,
 ) -> int | None:
     """Match a node by callee name, refined by immediate argument equality."""
+    existing_imm_arg: object
+    matched_index: object
+    summary_imm_arg: object
+    idx: object
+    node: object
     target_name = __ordered_callsite_pairs_8616___target_name_for_callsite(
         callsite_addr, active_summary_inventory=active_summary_inventory,
         function=function, project=project,
@@ -5811,7 +6394,7 @@ def _match_node_index_by_name_and_imm_8616(
     if summary_imm_arg is not None:
         for idx, node in enumerate(available_nodes):
             existing_imm_arg = __ordered_callsite_pairs_8616___single_existing_imm_arg(node)
-            if existing_imm_arg != summary_imm_arg:
+            if operator.ne(existing_imm_arg, summary_imm_arg):
                 continue
             if _callee_names_match_8616(_call_node_name_8616(node), target_name):
                 return idx
@@ -5825,7 +6408,7 @@ def _match_node_index_by_name_and_imm_8616(
         if (
             summary_imm_arg is not None
             and existing_imm_arg is not None
-            and existing_imm_arg != summary_imm_arg
+            and operator.ne(existing_imm_arg, summary_imm_arg)
         ):
             continue
         if _callee_names_match_8616(_call_node_name_8616(node), target_name):
@@ -5833,17 +6416,21 @@ def _match_node_index_by_name_and_imm_8616(
     return None
 
 
+@cython.ccall
 def _match_node_index_by_imm_tuple_8616(
     summary: CallsiteSummary8616 | None,
-    available_nodes: list[CFunctionCall],
-    target_name: str,
+    available_nodes: object,
+    target_name: object,
 ) -> int | None:
     """Match a node whose full immediate argument tuple equals the summary's."""
+    summary_immediate_args: object
+    idx: object
+    node: object
     summary_immediate_args = __ordered_callsite_pairs_8616___summary_immediate_args(summary)
     if summary_immediate_args is None:
         return None
     for idx, node in enumerate(available_nodes):
-        if __ordered_callsite_pairs_8616___immediate_args(node) != summary_immediate_args:
+        if operator.ne(__ordered_callsite_pairs_8616___immediate_args(node), summary_immediate_args):
             continue
         if _callee_names_match_8616(_call_node_name_8616(node), target_name):
             return idx
@@ -5853,23 +6440,27 @@ def _match_node_index_by_imm_tuple_8616(
 def _match_remaining_callsites_to_nodes_8616(
     *,
     project: StructuredAstValue,
-    unmatched_callsites: list[int],
-    remaining_nodes: list[CFunctionCall],
-    active_summary_inventory: Mapping[int, CallsiteSummary8616],
-    call_return_store_offsets: dict[int, int],
-    ordered_pairs: list[tuple[CFunctionCall, int]],
-    used_node_ids: set[int],
+    unmatched_callsites: object,
+    remaining_nodes: object,
+    active_summary_inventory: Mapping[cython.longlong, CallsiteSummary8616],
+    call_return_store_offsets: object,
+    ordered_pairs: object,
+    used_node_ids: object,
     function: StructuredAstValue,
-) -> tuple[list[int], list[CFunctionCall]]:
+) -> tuple[list[cython.longlong], list[CFunctionCall]]:
     """Match leftover callsites against leftover nodes; returns (still_unmatched, available)."""
-    still_unmatched_callsites: list[int] = []
+    matched_index: object
+    node: object
+    summary: object
+    callsite_addr: object
+    still_unmatched_callsites: list[cython.longlong] = []
     if remaining_nodes and unmatched_callsites:
         available_nodes = list(remaining_nodes)
         if os.environ.get("INERTIA_DEBUG_CALLSITE_SUMMARY"):
             log.warning(
                 "[callsite-summary] ordered unmatched callsites=%r remaining_names=%r",
-                tuple(hex(addr) for addr in unmatched_callsites[:8]),
-                tuple(_call_node_name_8616(node) for node in available_nodes[:16]),
+                tuple(hex(addr) for addr in iter(unmatched_callsites[:8])),
+                tuple(_call_node_name_8616(node) for node in iter(available_nodes[:16])),
             )
         for callsite_addr in unmatched_callsites:
             summary = active_summary_inventory.get(callsite_addr)
@@ -5892,11 +6483,14 @@ def _match_remaining_callsites_to_nodes_8616(
     return still_unmatched_callsites, remaining_nodes
 
 
+@cython.ccall
 def _local_callsite_summary_inventory_8616(
-    function: StructuredAstValue, callsite_addrs: tuple[int, ...]
-) -> dict[int, CallsiteSummary8616]:
+    function: StructuredAstValue, callsite_addrs: object
+) -> object:
     """Summarize each callsite locally when no shared inventory was provided."""
-    local_inventory: dict[int, CallsiteSummary8616] = {}
+    summary: object
+    callsite_addr: object
+    local_inventory: dict[cython.longlong, CallsiteSummary8616] = {}
     for callsite_addr in callsite_addrs:
         summary = summarize_x86_16_callsite(function, callsite_addr)
         if summary is not None:
@@ -5904,11 +6498,15 @@ def _local_callsite_summary_inventory_8616(
     return local_inventory
 
 
+@cython.ccall
 def _call_return_store_stack_offsets_8616(
-    root: StructuredAstValue, call_node_ids: set[int]
-) -> dict[int, int]:
+    root: StructuredAstValue, call_node_ids: object
+) -> object:
     """Map call node ids to the stack offset receiving their return value."""
-    call_return_store_offsets: dict[int, int] = {}
+    assignment: object
+    child: object
+    node_id: object
+    call_return_store_offsets: dict[cython.longlong, cython.longlong] = {}
     for assignment in _iter_c_nodes_deep_8616(root):
         if not isinstance(assignment, structured_c.CAssignment):
             continue
@@ -5916,7 +6514,7 @@ def _call_return_store_stack_offsets_8616(
         if not isinstance(lhs_offset, int):
             continue
         rhs = assignment.rhs
-        matched_ids: set[int] = set()
+        matched_ids: set[cython.longlong] = set()
         if id(rhs) in call_node_ids:
             matched_ids.add(id(rhs))
         for child in _iter_c_nodes_deep_8616(rhs):
@@ -5928,12 +6526,14 @@ def _call_return_store_stack_offsets_8616(
     return call_return_store_offsets
 
 
+@cython.ccall
 def _partition_call_nodes_by_callsite_8616(
-    call_nodes: list[CFunctionCall],
+    call_nodes: object,
     node_callsite_addr_resolver: Callable[[StructuredAstValue], int | None],
-) -> tuple[dict[int, list[CFunctionCall]], list[CFunctionCall]]:
+) -> tuple[dict[cython.longlong, list[CFunctionCall]], list[CFunctionCall]]:
     """Group call nodes by resolved callsite address; the rest stay unmatched."""
-    nodes_by_callsite: dict[int, list[CFunctionCall]] = {}
+    node: object
+    nodes_by_callsite: dict[cython.longlong, list[CFunctionCall]] = {}
     remaining_nodes: list[CFunctionCall] = []
     for node in call_nodes:
         node_callsite_addr = node_callsite_addr_resolver(node)
@@ -5944,16 +6544,23 @@ def _partition_call_nodes_by_callsite_8616(
     return nodes_by_callsite, remaining_nodes
 
 
+@cython.ccall
 def _match_call_nodes_by_callsite_addr_8616(
     project: StructuredAstValue,
-    callsite_addrs: tuple[int, ...],
-    nodes_by_callsite: dict[int, list[CFunctionCall]],
-    active_summary_inventory: Mapping[int, CallsiteSummary8616],
-    ordered_pairs: list[tuple[CFunctionCall, int]],
-    used_node_ids: set[int],
-) -> list[int]:
+    callsite_addrs: object,
+    nodes_by_callsite: object,
+    active_summary_inventory: Mapping[cython.longlong, CallsiteSummary8616],
+    ordered_pairs: object,
+    used_node_ids: object,
+) -> object:
     """Pair callsites whose structured nodes carry a resolvable callsite address."""
-    unmatched_callsites: list[int] = []
+    chosen_index: object
+    matched_nodes: object
+    node: object
+    summary: object
+    callsite_addr: object
+    regenerated_node: object
+    unmatched_callsites: list[cython.longlong] = []
     for callsite_addr in callsite_addrs:
         matched_nodes = nodes_by_callsite.get(callsite_addr)
         if not matched_nodes:
@@ -5976,12 +6583,15 @@ def _match_call_nodes_by_callsite_addr_8616(
     return unmatched_callsites
 
 
+@cython.ccall
 def _choose_summary_compatible_node_8616(
     project: StructuredAstValue,
-    matched_nodes: list[CFunctionCall],
-    summary: CallsiteSummary8616 | None,
+    matched_nodes: object,
+    summary: object,
 ) -> int | None:
     """Pick the index of the matched node compatible with the summary."""
+    idx: object
+    node: object
     if len(matched_nodes) == 1:
         return 0 if _call_node_can_take_summary_8616(project, matched_nodes[0], summary) else None
     if summary is not None:
@@ -5991,23 +6601,27 @@ def _choose_summary_compatible_node_8616(
     return None
 
 
+@cython.ccall
 def _ordered_callsite_pairs_8616(
     *,
     project: StructuredAstValue,
     function: StructuredAstValue,
     root: StructuredAstValue,
-    call_nodes: list[CFunctionCall],
-    callsite_addrs: tuple[int, ...],
+    call_nodes: object,
+    callsite_addrs: object,
     node_callsite_addr_resolver: Callable[[StructuredAstValue], int | None],
     summary_inventory: Mapping[int, CallsiteSummary8616] | None = None,
-) -> list[tuple[CFunctionCall, int]]:
+) -> object:
     """Pair structured calls with the authoritative recovery inventory."""
 
 
     return __ordered_callsite_pairs_8616___impl(call_nodes=call_nodes, callsite_addrs=callsite_addrs, function=function, node_callsite_addr_resolver=node_callsite_addr_resolver, project=project, root=root, summary_inventory=summary_inventory)
 
 
-def __ordered_callsite_pairs_8616___impl(*, call_nodes: list[CFunctionCall], callsite_addrs: tuple[int, ...], function: StructuredAstValue, node_callsite_addr_resolver: Callable[[StructuredAstValue], int | None], project: StructuredAstValue, root: StructuredAstValue, summary_inventory: Mapping[int, CallsiteSummary8616] | None) -> list[tuple[CFunctionCall, int]]:
+def __ordered_callsite_pairs_8616___impl(*, call_nodes: object, callsite_addrs: object, function: StructuredAstValue, node_callsite_addr_resolver: Callable[[StructuredAstValue], int | None], project: StructuredAstValue, root: StructuredAstValue, summary_inventory: Mapping[int, CallsiteSummary8616] | None) -> object:
+    active_summary_inventory: object
+    callsite_addr: object
+    node: object
     active_summary_inventory = summary_inventory
     if active_summary_inventory is None:
         active_summary_inventory = _local_callsite_summary_inventory_8616(function, callsite_addrs)
@@ -6074,7 +6688,7 @@ def __ordered_callsite_pairs_8616___impl(*, call_nodes: list[CFunctionCall], cal
 
 
 
-    call_node_ids = {id(node) for node in call_nodes}
+    call_node_ids = {id(node) for node in iter(call_nodes)}
     call_return_store_offsets = _call_return_store_stack_offsets_8616(root, call_node_ids)
 
 
@@ -6097,17 +6711,17 @@ def __ordered_callsite_pairs_8616___impl(*, call_nodes: list[CFunctionCall], cal
         call_nodes, node_callsite_addr_resolver
     )
 
-    ordered_pairs: list[tuple[CFunctionCall, int]] = []
-    used_node_ids: set[int] = set()
+    ordered_pairs: list[tuple[CFunctionCall, cython.longlong]] = []
+    used_node_ids: set[cython.longlong] = set()
     unmatched_callsites = _match_call_nodes_by_callsite_addr_8616(
         project, callsite_addrs, nodes_by_callsite, active_summary_inventory,
         ordered_pairs, used_node_ids,
     )
 
     remaining_nodes.extend(
-        node for node in call_nodes if id(node) not in used_node_ids and node not in remaining_nodes
+        node for node in iter(call_nodes) if id(node) not in used_node_ids and node not in remaining_nodes
     )
-    still_unmatched_callsites: list[int] = []
+    still_unmatched_callsites: list[cython.longlong] = []
     still_unmatched_callsites, remaining_nodes = _match_remaining_callsites_to_nodes_8616(
         project=project,
         unmatched_callsites=unmatched_callsites,
@@ -6118,8 +6732,8 @@ def __ordered_callsite_pairs_8616___impl(*, call_nodes: list[CFunctionCall], cal
         used_node_ids=used_node_ids,
         function=function,
     )
-    if len(remaining_nodes) == len(still_unmatched_callsites) and all(
-        _call_node_name_8616(node) is None for node in remaining_nodes
+    if operator.eq(len(remaining_nodes), len(still_unmatched_callsites)) and all(
+        _call_node_name_8616(node) is None for node in iter(remaining_nodes)
     ):
         for node, callsite_addr in zip(remaining_nodes, still_unmatched_callsites, strict=False):
             ordered_pairs.append((node, callsite_addr))
@@ -6127,6 +6741,7 @@ def __ordered_callsite_pairs_8616___impl(*, call_nodes: list[CFunctionCall], cal
 
 
 
+@cython.ccall
 def __ordered_callsite_pairs_8616___single_existing_imm_arg(node: StructuredAstValue) -> int | None:
     args = _boundary_tuple_8616(getattr(node, "args", ()) or ())
     if len(args) != 1:
@@ -6135,7 +6750,9 @@ def __ordered_callsite_pairs_8616___single_existing_imm_arg(node: StructuredAstV
 
 
 
+@cython.ccall
 def __ordered_callsite_pairs_8616___constant_int_value(node: StructuredAstValue) -> int | None:
+    value: object
     while isinstance(node, CTypeCast):
         node = node.expr
     value = getattr(node, "value", None)
@@ -6145,7 +6762,9 @@ def __ordered_callsite_pairs_8616___constant_int_value(node: StructuredAstValue)
 
 
 
+@cython.ccall
 def __ordered_callsite_pairs_8616___assignment_lhs_stack_offset(node: StructuredAstValue) -> int | None:
+    lhs: object
     lhs = getattr(node, "lhs", None)
     while isinstance(lhs, CTypeCast):
         lhs = lhs.expr
@@ -6158,6 +6777,7 @@ def __ordered_callsite_pairs_8616___assignment_lhs_stack_offset(node: Structured
 
 
 
+@cython.ccall
 def __ordered_callsite_pairs_8616___single_summary_imm_arg(summary: StructuredAstValue) -> int | None:
     sources = summary.push_arg_sources
     if not isinstance(sources, tuple) or len(sources) != 1:
@@ -6171,20 +6791,22 @@ def __ordered_callsite_pairs_8616___single_summary_imm_arg(summary: StructuredAs
 
 
 
-def __ordered_callsite_pairs_8616___immediate_args(node: StructuredAstValue) -> tuple[int, ...] | None:
+def __ordered_callsite_pairs_8616___immediate_args(node: StructuredAstValue) -> object:
     args = _boundary_tuple_8616(getattr(node, "args", ()) or ())
-    values = tuple(__ordered_callsite_pairs_8616___constant_int_value(arg) for arg in args)
-    return tuple(value for value in values if isinstance(value, int)) if all(
-        isinstance(value, int) for value in values
+    values = tuple(__ordered_callsite_pairs_8616___constant_int_value(arg) for arg in iter(args))
+    return tuple(value for value in iter(values) if isinstance(value, int)) if all(
+        isinstance(value, int) for value in iter(values)
     ) else None
 
 
 
-def __ordered_callsite_pairs_8616___summary_immediate_args(summary: StructuredAstValue) -> tuple[int, ...] | None:
+@cython.ccall
+def __ordered_callsite_pairs_8616___summary_immediate_args(summary: StructuredAstValue) -> object:
+    source: object
     sources = summary.push_arg_sources
     if not isinstance(sources, tuple):
         return None
-    values: list[int] = []
+    values: list[cython.longlong] = []
     for source in sources:
         if not isinstance(source, tuple) or len(source) < 2 or source[0] != "imm":
             return None
@@ -6196,7 +6818,8 @@ def __ordered_callsite_pairs_8616___summary_immediate_args(summary: StructuredAs
 
 
 
-def __ordered_callsite_pairs_8616___target_name_for_callsite(callsite_addr: int, *, active_summary_inventory: Mapping[int, CallsiteSummary8616], function: StructuredAstValue, project: StructuredAstValue) -> str | None:
+def __ordered_callsite_pairs_8616___target_name_for_callsite(callsite_addr: cython.longlong, *, active_summary_inventory: Mapping[cython.longlong, CallsiteSummary8616], function: StructuredAstValue, project: StructuredAstValue) -> object:
+    summary: object
     try:
         target_addr = getattr(function, "get_call_target", lambda _addr: None)(callsite_addr)
     except Exception:
@@ -6214,13 +6837,14 @@ def __ordered_callsite_pairs_8616___target_name_for_callsite(callsite_addr: int,
 
 
 
+@cython.ccall
 def _upgrade_to_source_proven_probe_summary_8616(
     codegen: StructuredAstValue,
     node: StructuredAstValue,
     active_summary: CallsiteSummary8616,
-    expected_source_name: str | None,
+    expected_source_name: object,
     stats: CallsiteMaterializationStats,
-) -> tuple[CallsiteSummary8616, bool]:
+) -> tuple[CallsiteSummary8616, cython.bint]:
     """Swap in the source-proven stack-probe summary and pin the probe name."""
     upgraded_summary = _source_proven_stack_probe_summary_8616(
         active_summary,
@@ -6236,20 +6860,25 @@ def _upgrade_to_source_proven_probe_summary_8616(
     if getattr(node, "callee_func", None) is not None:
         node.callee_func = None
         changed = True
-    if getattr(node, "callee_target", None) != normalized_probe_name:
+    if operator.ne(getattr(node, "callee_target", None), normalized_probe_name):
         node.callee_target = normalized_probe_name
         changed = True
     return upgraded_summary, changed
 
 
+@cython.ccall
 def _resolve_summary_target_candidate_8616(
     project: StructuredAstValue,
     node: StructuredAstValue,
-    callee_func: StructuredAstValue,
-    target_addr: int,
-    allow_call_target_rewrites: bool,
-) -> tuple[StructuredAstValue, bool, StructuredAstValue, bool]:
+    callee_func: object,
+    target_addr: cython.longlong,
+    allow_call_target_rewrites: cython.bint,
+) -> tuple[StructuredAstValue, cython.bint, StructuredAstValue, cython.bint]:
     """Resolve the target-addr function candidate and rebind callee_func when allowed."""
+    candidate: object
+    candidate_addr: object
+    containing_candidate: object
+    current_addr: object
     candidate = _lookup_callee_function_8616(project, target_addr, allow_containing=False)
     candidate_proves_target = False
     if candidate is not None and (
@@ -6269,7 +6898,7 @@ def _resolve_summary_target_candidate_8616(
         addr_mismatch = callee_func is None or (
             isinstance(current_addr, int)
             and isinstance(candidate_addr, int)
-            and current_addr != candidate_addr
+            and operator.ne(current_addr, candidate_addr)
         )
         if candidate_proves_target and allow_call_target_rewrites and addr_mismatch:
             node.callee_func = candidate
@@ -6278,13 +6907,14 @@ def _resolve_summary_target_candidate_8616(
     return candidate, candidate_proves_target, callee_func, changed
 
 
+@cython.ccall
 def _apply_sidecar_label_to_call_8616(
     project: StructuredAstValue,
-    node: StructuredAstValue,
+    node: object,
     candidate: StructuredAstValue,
-    callee_func: StructuredAstValue,
-    sidecar_label: str | None,
-) -> tuple[StructuredAstValue, str | None, bool]:
+    callee_func: object,
+    sidecar_label: object,
+) -> tuple[StructuredAstValue, str | None, cython.bint]:
     """Bind the sidecar label onto the call node and callee when it outranks."""
     changed = False
     if callee_func is None and node is not None and isinstance(sidecar_label, str):
@@ -6293,7 +6923,7 @@ def _apply_sidecar_label_to_call_8616(
     if (
         callee_func is None
         and isinstance(sidecar_label, str)
-        and getattr(node, "callee_target", None) != sidecar_label
+        and operator.ne(getattr(node, "callee_target", None), sidecar_label)
     ):
         cast(Any, node).callee_target = sidecar_label
         changed = True
@@ -6315,17 +6945,19 @@ def _apply_sidecar_label_to_call_8616(
     return callee_func, callee_name, changed
 
 
+@cython.ccall
 def _reject_unproven_matched_function_8616(
     project: StructuredAstValue,
     node: StructuredAstValue,
-    candidate: StructuredAstValue,
-    candidate_proves_target: bool,
+    candidate: object,
+    candidate_proves_target: cython.bint,
     callee_func: StructuredAstValue,
-    target_addr: int,
-    expected_source_name: str | None,
+    target_addr: cython.longlong,
+    expected_source_name: object,
     stats: CallsiteMaterializationStats,
-) -> tuple[StructuredAstValue, str | None, bool]:
+) -> tuple[StructuredAstValue, str | None, cython.bint]:
     """Drop callee_func/callee_name when the match does not prove the target."""
+    current_addr: object
     current_addr = getattr(callee_func, "addr", None)
     matched_function = candidate if candidate is not None else callee_func
     if (
@@ -6342,21 +6974,22 @@ def _reject_unproven_matched_function_8616(
         isinstance(expected_source_name, str)
         and expected_source_name
         and _source_name_matches_target_8616(project, target_addr, expected_source_name)
-        and getattr(node, "callee_target", None) != expected_source_name
+        and operator.ne(getattr(node, "callee_target", None), expected_source_name)
     ):
         cast(Any, node).callee_target = expected_source_name
     return callee_func, callee_name, True
 
 
+@cython.ccall
 def _bind_expected_name_to_proven_callee_8616(
     project: StructuredAstValue,
-    callee_func: StructuredAstValue,
-    callee_name: str | None,
-    sidecar_label: str | None,
-    target_addr: int,
-    expected_source_name: str | None,
-    candidate_proves_target: bool,
-) -> tuple[StructuredAstValue, str | None, bool]:
+    callee_func: object,
+    callee_name: object,
+    sidecar_label: object,
+    target_addr: cython.longlong,
+    expected_source_name: object,
+    candidate_proves_target: cython.bint,
+) -> tuple[StructuredAstValue, str | None, cython.bint]:
     """Rename the callee to the expected source name when the target is proven."""
     changed = False
     expected_name_bindable = (
@@ -6382,13 +7015,14 @@ def _bind_expected_name_to_proven_callee_8616(
     return callee_func, callee_name, changed
 
 
+@cython.ccall
 def _expected_name_fills_bare_target_8616(
     node: StructuredAstValue,
-    callee_name: str | None,
-    expected_source_name: str | None,
-    sidecar_label: str | None,
-    target_addr: int,
-) -> bool:
+    callee_name: object,
+    expected_source_name: object,
+    sidecar_label: object,
+    target_addr: cython.longlong,
+) -> cython.bint:
     """Gate for filling an unlabeled callee_target from the expected source name."""
     if (
         callee_name is not None
@@ -6398,28 +7032,29 @@ def _expected_name_fills_bare_target_8616(
         return False
     if sidecar_label is not None or isinstance(target_addr, int):
         return False
-    return getattr(node, "callee_target", None) != expected_source_name
+    return operator.ne(getattr(node, "callee_target", None), expected_source_name)
 
 
+@cython.ccall
 def _sync_call_node_callee_target_8616(
     project: StructuredAstValue,
     node: StructuredAstValue,
     callee_func: StructuredAstValue,
-    callee_name: str | None,
-    sidecar_label: str | None,
-    target_addr: int,
-    expected_source_name: str | None,
-) -> bool:
+    callee_name: object,
+    sidecar_label: object,
+    target_addr: cython.longlong,
+    expected_source_name: object,
+) -> cython.bint:
     """Re-sync node.callee_target from the resolved callee name or sidecar."""
     callee_name = normalize_callee_name_8616(getattr(callee_func, "name", None))
-    if callee_name is not None and getattr(node, "callee_target", None) != callee_name:
+    if callee_name is not None and operator.ne(getattr(node, "callee_target", None), callee_name):
         cast(Any, node).callee_target = callee_name
         return True
     if (
         callee_name is None
         and isinstance(expected_source_name, str)
         and _source_name_matches_target_8616(project, target_addr, expected_source_name)
-        and getattr(node, "callee_target", None) != expected_source_name
+        and operator.ne(getattr(node, "callee_target", None), expected_source_name)
     ) or _expected_name_fills_bare_target_8616(
         node, callee_name, expected_source_name, sidecar_label, target_addr
     ):
@@ -6428,14 +7063,15 @@ def _sync_call_node_callee_target_8616(
     return bool(_rename_call_node_from_sidecar_8616(project, node))
 
 
+@cython.ccall
 def _sync_prototype_widths_to_summary_8616(
     codegen: StructuredAstValue,
     project: StructuredAstValue,
     node: StructuredAstValue,
     active_summary: CallsiteSummary8616,
-    callee_func: StructuredAstValue,
-    summary_map: dict[int, CallsiteSummary8616],
-) -> tuple[CallsiteSummary8616, bool]:
+    callee_func: object,
+    summary_map: object,
+) -> tuple[CallsiteSummary8616, cython.bint]:
     """Fold prototype arg widths back into the summary when they explain pushes."""
     if not (isinstance(active_summary, CallsiteSummary8616) and callee_func is not None):
         return active_summary, False
@@ -6447,7 +7083,7 @@ def _sync_prototype_widths_to_summary_8616(
     push_sources = _boundary_tuple_8616(active_summary.push_arg_sources)
     if not (
         logical_widths
-        and logical_widths != active_summary.logical_arg_widths
+        and operator.ne(logical_widths, active_summary.logical_arg_widths)
         and _prototype_widths_account_for_push_sources_top_8616(logical_widths, push_sources)
     ):
         return active_summary, False
@@ -6457,11 +7093,12 @@ def _sync_prototype_widths_to_summary_8616(
     return active_summary, True
 
 
+@cython.ccall
 def _return_store_destination_applicable_8616(
-    call: StructuredAstValue,
-    summary: CallsiteSummary8616 | None,
+    call: object,
+    summary: object,
     destination: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Gate for applying a summary return-store destination to a call."""
     return (
         call is not None
@@ -6473,24 +7110,27 @@ def _return_store_destination_applicable_8616(
     )
 
 
+@cython.ccall
 def _apply_callsite_summary_to_node_8616(
     *,
     project: StructuredAstValue,
     codegen: StructuredAstValue,
     node: StructuredAstValue,
     summary: CallsiteSummary8616,
-    summary_map: dict[int, CallsiteSummary8616],
-    expected_source_name: str | None,
-    allow_call_target_rewrites: bool,
+    summary_map: object,
+    expected_source_name: object,
+    allow_call_target_rewrites: cython.bint,
     stats: CallsiteMaterializationStats,
-) -> bool:
+) -> cython.bint:
     """Attach one typed callsite summary to its C call node."""
 
 
     return __apply_callsite_summary_to_node_8616___impl(allow_call_target_rewrites=allow_call_target_rewrites, codegen=codegen, expected_source_name=expected_source_name, node=node, project=project, stats=stats, summary=summary, summary_map=summary_map)
 
 
-def __apply_callsite_summary_to_node_8616___impl(*, allow_call_target_rewrites: bool, codegen: StructuredAstValue, expected_source_name: str | None, node: StructuredAstValue, project: StructuredAstValue, stats: CallsiteMaterializationStats, summary: CallsiteSummary8616, summary_map: dict[int, CallsiteSummary8616]) -> bool:
+@cython.ccall
+def __apply_callsite_summary_to_node_8616___impl(*, allow_call_target_rewrites: cython.bint, codegen: StructuredAstValue, expected_source_name: object, node: object, project: StructuredAstValue, stats: CallsiteMaterializationStats, summary: CallsiteSummary8616, summary_map: object) -> cython.bint:
+    callee_func: object
     if node is None:
         return False
     changed = False
@@ -6499,7 +7139,7 @@ def __apply_callsite_summary_to_node_8616___impl(*, allow_call_target_rewrites: 
         codegen, node, summary, expected_source_name, stats
     )
     changed |= probe_changed
-    if summary_map.get(id(node)) != active_summary:
+    if operator.ne(summary_map.get(id(node)), active_summary):
         summary_map[id(node)] = active_summary
         changed = True
         record_callsite_summary_fact_8616(codegen, active_summary, node_id=id(node), attached=True)
@@ -6541,13 +7181,15 @@ def __apply_callsite_summary_to_node_8616___impl(*, allow_call_target_rewrites: 
 
 
 
+@cython.ccall
 def _census_call_nodes_by_callsite_8616(
-    call_nodes: list[CFunctionCall],
-) -> tuple[dict[int, list[CFunctionCall]], dict[int, CFunctionCall], dict[int, int]]:
+    call_nodes: object,
+) -> tuple[dict[cython.longlong, list[CFunctionCall]], dict[cython.longlong, CFunctionCall], dict[cython.longlong, cython.longlong]]:
     """Index call nodes by id and resolved callsite address."""
-    nodes_by_callsite: dict[int, list[CFunctionCall]] = {}
-    current_nodes_by_id: dict[int, CFunctionCall] = {}
-    node_callsite_by_id: dict[int, int] = {}
+    node: object
+    nodes_by_callsite: dict[cython.longlong, list[CFunctionCall]] = {}
+    current_nodes_by_id: dict[cython.longlong, CFunctionCall] = {}
+    node_callsite_by_id: dict[cython.longlong, cython.longlong] = {}
     for node in call_nodes:
         node_id = id(node)
         current_nodes_by_id[node_id] = node
@@ -6558,45 +7200,48 @@ def _census_call_nodes_by_callsite_8616(
     return nodes_by_callsite, current_nodes_by_id, node_callsite_by_id
 
 
+@cython.ccall
 def _node_for_callsite_summary_8616(
     project: StructuredAstValue,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     summary: StructuredAstValue,
-    nodes_by_callsite: dict[int, list[CFunctionCall]],
+    nodes_by_callsite: object,
 ) -> CFunctionCall | None:
     """Pick the unique structured node that can take this callsite summary."""
+    candidates: object
     candidates = nodes_by_callsite.get(callsite_addr, [])
     if not candidates:
         return None
-    viable = [node for node in candidates if _call_node_can_take_summary_8616(project, node, summary)]
+    viable = [node for node in iter(candidates) if _call_node_can_take_summary_8616(project, node, summary)]
     if not viable:
         return None
     if len(viable) == 1:
         return viable[0]
-    target_matches = [node for node in viable if _call_node_matches_summary_8616(project, node, summary)]
+    target_matches = [node for node in iter(viable) if _call_node_matches_summary_8616(project, node, summary)]
     if len(target_matches) == 1:
         return target_matches[0]
-    named_viable = [node for node in viable if not _call_name_is_unknown_8616(_call_node_name_8616(node))]
+    named_viable = [node for node in iter(viable) if not _call_name_is_unknown_8616(_call_node_name_8616(node))]
     if len(named_viable) == 1:
         return named_viable[0]
     return None
 
 
+@cython.ccall
 def _refresh_one_summary_binding_8616(
     project: StructuredAstValue,
-    node_id: int,
+    node_id: cython.longlong,
     node: CFunctionCall,
     summary: CallsiteSummary8616,
-    node_callsite: int | None,
-    refreshed: dict[int, CallsiteSummary8616],
-    stale_items: list[tuple[int, CallsiteSummary8616]],
-) -> bool:
+    node_callsite: object,
+    refreshed: object,
+    stale_items: object,
+) -> cython.bint:
     """Rebind one summary to its node or mark it stale; True when anything changed."""
     summary_callsite = summary.callsite_addr
     if (
         isinstance(summary_callsite, int)
         and isinstance(node_callsite, int)
-        and summary_callsite != node_callsite
+        and operator.ne(summary_callsite, node_callsite)
     ):
         stale_items.append((node_id, summary))
         return True
@@ -6615,19 +7260,23 @@ def _refresh_one_summary_binding_8616(
     previous_target_addr = structured_callsite_target_addr_8616(node)
     bind_structured_callsite_identity_8616(node, summary)
     refreshed[node_id] = summary
-    return previous_target_addr != summary.target_addr
+    return operator.ne(previous_target_addr, summary.target_addr)
 
 
+@cython.ccall
 def _refresh_summary_map_bindings_8616(
     project: StructuredAstValue,
-    summary_map: dict[int, CallsiteSummary8616],
-    current_nodes_by_id: dict[int, CFunctionCall],
-    node_callsite_by_id: dict[int, int],
-) -> tuple[dict[int, CallsiteSummary8616], list[tuple[int, CallsiteSummary8616]], bool]:
+    summary_map: object,
+    current_nodes_by_id: object,
+    node_callsite_by_id: object,
+) -> tuple[dict[cython.longlong, CallsiteSummary8616], list[tuple[cython.longlong, CallsiteSummary8616]], cython.bint]:
     """Rebind each mapped summary to its current node; collect stale items."""
+    node: object
+    node_id: object
+    summary: object
     changed = False
-    refreshed: dict[int, CallsiteSummary8616] = {}
-    stale_items: list[tuple[int, CallsiteSummary8616]] = []
+    refreshed: dict[cython.longlong, CallsiteSummary8616] = {}
+    stale_items: list[tuple[cython.longlong, CallsiteSummary8616]] = []
     for node_id, summary in tuple(summary_map.items()):
         node = current_nodes_by_id.get(node_id)
         if node is None:
@@ -6640,14 +7289,18 @@ def _refresh_summary_map_bindings_8616(
     return refreshed, stale_items, changed
 
 
+@cython.ccall
 def _resolve_stale_summary_items_8616(
     project: StructuredAstValue,
-    stale_items: list[tuple[int, CallsiteSummary8616]],
-    refreshed: dict[int, CallsiteSummary8616],
-    nodes_by_callsite: dict[int, list[CFunctionCall]],
-) -> tuple[list[tuple[int, CallsiteSummary8616]], bool]:
+    stale_items: object,
+    refreshed: object,
+    nodes_by_callsite: object,
+) -> tuple[list[tuple[cython.longlong, CallsiteSummary8616]], cython.bint]:
     """Rebind stale summaries to the node matching their callsite when possible."""
-    unresolved_stale_items: list[tuple[int, CallsiteSummary8616]] = []
+    node: object
+    node_id: object
+    summary: object
+    unresolved_stale_items: list[tuple[cython.longlong, CallsiteSummary8616]] = []
     changed = False
     for node_id, summary in stale_items:
         callsite_addr = summary.callsite_addr
@@ -6672,22 +7325,26 @@ def _resolve_stale_summary_items_8616(
     return unresolved_stale_items, changed
 
 
+@cython.ccall
 def _adopt_inventory_summaries_8616(
     project: StructuredAstValue,
     codegen: StructuredAstValue,
-    refreshed: dict[int, CallsiteSummary8616],
-    nodes_by_callsite: dict[int, list[CFunctionCall]],
-    unresolved_stale_items: list[tuple[int, CallsiteSummary8616]],
-) -> bool:
+    refreshed: object,
+    nodes_by_callsite: object,
+    unresolved_stale_items: object,
+) -> cython.bint:
     """Bind inventory summaries not yet represented by any refreshed node."""
+    node: object
+    callsite_addr: object
+    summary: object
     changed = False
     summary_inventory = _callsite_summary_inventory_8616(codegen)
     represented_callsites = {
         summary.callsite_addr
-        for summary in refreshed.values()
+        for summary in builtins.iter(refreshed.values())
         if isinstance(summary.callsite_addr, int)
     }
-    for callsite_addr, summary in sorted(summary_inventory.items()):
+    for callsite_addr, summary in sorted(tuple(summary_inventory.items())):
         if callsite_addr in represented_callsites:
             continue
         node = _node_for_callsite_summary_8616(project, callsite_addr, summary, nodes_by_callsite)
@@ -6703,19 +7360,24 @@ def _adopt_inventory_summaries_8616(
 
 def _rebind_stale_summaries_by_evidence_8616(
     project: StructuredAstValue,
-    unresolved_stale_items: list[tuple[int, CallsiteSummary8616]],
-    call_nodes: list[CFunctionCall],
-    refreshed: dict[int, CallsiteSummary8616],
-) -> dict[int, CallsiteSummary8616]:
+    unresolved_stale_items: object,
+    call_nodes: object,
+    refreshed: object,
+) -> object:
     """Fallback remap lane: rebind only where evidence still matches the summary."""
+    matched_idx: object
+    node: object
+    idx: object
+    old_node_id: object
+    summary: object
     # Fallback remap lane: when callsite tags are unavailable after AST
     # rewrites, rebind summaries only when the current call node still matches
     # the summary target/name evidence. Unknown means refuse; do not zip stale
     # summaries by order because that can manufacture wrong call semantics.
-    if not all(isinstance(summary.callsite_addr, int) for _, summary in unresolved_stale_items):
+    if not all(isinstance(summary.callsite_addr, int) for _, summary in iter(unresolved_stale_items)):
         unresolved_stale_items = []
     available_nodes = [
-        node for node in call_nodes if id(node) not in refreshed and __refresh_callsite_summary_node_ids_8616___node_callsite_addr(node) is None
+        node for node in iter(call_nodes) if id(node) not in refreshed and __refresh_callsite_summary_node_ids_8616___node_callsite_addr(node) is None
     ]
     rebound = dict(refreshed)
     for old_node_id, summary in sorted(
@@ -6737,9 +7399,12 @@ def _rebind_stale_summaries_by_evidence_8616(
 
 
 def _refresh_callsite_summary_node_ids_8616(
-    codegen: StructuredAstValue, summary_map: dict[int, CallsiteSummary8616]
-) -> bool:
-    def _impl() -> bool:
+    codegen: StructuredAstValue, summary_map: object
+) -> cython.bint:
+    def _impl() -> cython.bint:
+        cfunc: object
+        project: object
+        root: object
         cfunc = getattr(codegen, "cfunc", None)
         root = _structured_root_8616(cfunc)
         if root is None:
@@ -6748,7 +7413,7 @@ def _refresh_callsite_summary_node_ids_8616(
 
         call_nodes = [
             node
-            for node in _iter_c_nodes_deep_8616(root)
+            for node in builtins.iter(_iter_c_nodes_deep_8616(root))
             if isinstance(node, CFunctionCall) and not _is_runtime_segment_helper_call_8616(node)
         ]
         nodes_by_callsite, current_nodes_by_id, node_callsite_by_id = (
@@ -6781,7 +7446,8 @@ def _refresh_callsite_summary_node_ids_8616(
     return _impl()
 
 
-def __refresh_callsite_summary_node_ids_8616___summary_is_typed_stack_probe_fact_8616(summary: StructuredAstValue) -> bool:
+@cython.ccall
+def __refresh_callsite_summary_node_ids_8616___summary_is_typed_stack_probe_fact_8616(summary: StructuredAstValue) -> cython.bint:
     helper_return_space = summary.helper_return_space
     helper_return_space = helper_return_space.lower() if isinstance(helper_return_space, str) else None
     helper_return_width = summary.helper_return_width
@@ -6799,7 +7465,11 @@ def __refresh_callsite_summary_node_ids_8616___summary_is_typed_stack_probe_fact
 
 
 
+@cython.ccall
 def __refresh_callsite_summary_node_ids_8616___node_callsite_addr(node: StructuredAstValue) -> int | None:
+    tags: object
+    value: object
+    key: object
     exact_callsite = structured_callsite_addr_8616(node)
     if isinstance(exact_callsite, int):
         return exact_callsite
@@ -6818,10 +7488,12 @@ def __refresh_callsite_summary_node_ids_8616___node_callsite_addr(node: Structur
 
 
 
+@cython.ccall
 def _prototype_candidate_summary_8616(
-    node: StructuredAstValue, summary_map: dict[int, CallsiteSummary8616]
+    node: StructuredAstValue, summary_map: object
 ) -> tuple[CallsiteSummary8616 | None, str]:
     """Return the summary/call-name pair eligible for prototype materialization."""
+    summary_obj: object
     if not isinstance(node, CFunctionCall):
         return None, ""
     summary_obj = summary_map.get(id(node))
@@ -6839,14 +7511,17 @@ def _prototype_candidate_summary_8616(
     return summary_obj, call_name or ""
 
 
+@cython.ccall
 def _emit_summary_prototype_for_node_8616(
     project: StructuredAstValue,
     node: StructuredAstValue,
-    summary_map: dict[int, CallsiteSummary8616],
-    seen_decls: set[str],
-    prototype_decls: list[str],
-) -> bool:
+    summary_map: object,
+    seen_decls: object,
+    prototype_decls: object,
+) -> cython.bint:
     """Apply the summary prototype to the callee and record its decl."""
+    decl: object
+    summary: object
     summary, call_name = _prototype_candidate_summary_8616(node, summary_map)
     if summary is None:
         return False
@@ -6860,12 +7535,17 @@ def _emit_summary_prototype_for_node_8616(
     return bool(changed)
 
 
-def _materialize_callsite_prototypes_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> bool:
+@cython.ccall
+def _materialize_callsite_prototypes_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> cython.bint:
 
     return __materialize_callsite_prototypes_8616___impl(codegen=codegen, project=project)
 
 
-def __materialize_callsite_prototypes_8616___impl(*, codegen: StructuredAstValue, project: StructuredAstValue) -> bool:
+@cython.ccall
+def __materialize_callsite_prototypes_8616___impl(*, codegen: StructuredAstValue, project: StructuredAstValue) -> cython.bint:
+    cfunc: object
+    summary_map: object
+    node: object
     cfunc = getattr(codegen, "cfunc", None)
     if cfunc is None:
         return False
@@ -6928,7 +7608,8 @@ def __materialize_callsite_prototypes_8616___impl(*, codegen: StructuredAstValue
 
 
 
-def __materialize_callsite_prototypes_8616___prototype_decl_from_summary(name: str, summary: CallsiteSummary8616) -> str | None:
+def __materialize_callsite_prototypes_8616___prototype_decl_from_summary(name: object, summary: CallsiteSummary8616) -> object:
+    logical_arg_widths: object
     if not isinstance(name, str) or re.fullmatch(r"[A-Za-z_]\w*", name) is None:
         return None
     logical_arg_widths = _logical_arg_widths_for_summary_8616(summary)
@@ -6936,12 +7617,12 @@ def __materialize_callsite_prototypes_8616___prototype_decl_from_summary(name: s
     if not isinstance(arg_count, int) or arg_count < 0:
         return None
     arg_widths = logical_arg_widths or _boundary_tuple_8616(summary.arg_widths)
-    if len(arg_widths) != arg_count:
+    if operator.ne(len(arg_widths), arg_count):
         arg_widths = tuple(2 for _ in range(arg_count))
     args = (
         "void"
         if arg_count == 0
-        else ", ".join(f"{__materialize_callsite_prototypes_8616___ctype_for_width(width)} a{idx}" for idx, width in enumerate(arg_widths))
+        else ", ".join(f"{__materialize_callsite_prototypes_8616___ctype_for_width(width)} a{idx}" for idx, width in builtins.iter(enumerate(arg_widths)))
     )
     return_type = (
         __materialize_callsite_prototypes_8616___ctype_for_width(4)
@@ -6956,6 +7637,7 @@ def __materialize_callsite_prototypes_8616___prototype_decl_from_summary(name: s
 
 
 
+@cython.ccall
 def __materialize_callsite_prototypes_8616___ctype_for_width(width: StructuredAstValue) -> str:
     if isinstance(width, int) and width >= 4:
         return "unsigned long"
@@ -6965,17 +7647,21 @@ def __materialize_callsite_prototypes_8616___ctype_for_width(width: StructuredAs
 
 
 
+@cython.ccall
 def _stack_probe_summary_flags_8616(
-    summary_map: dict[int, CallsiteSummary8616],
-    typed_stack_probe_facts: dict[int, TypedStackProbeReturnFact8616],
-) -> tuple[bool, bool]:
+    summary_map: object,
+    typed_stack_probe_facts: object,
+) -> object:
     """Classify typed stack-probe summaries for conservative argument lowering."""
 
 
     return __stack_probe_summary_flags_8616___impl(summary_map=summary_map, typed_stack_probe_facts=typed_stack_probe_facts)
 
 
-def __stack_probe_summary_flags_8616___impl(*, summary_map: dict[int, CallsiteSummary8616], typed_stack_probe_facts: dict[int, TypedStackProbeReturnFact8616]) -> tuple[bool, bool]:
+@cython.ccall
+def __stack_probe_summary_flags_8616___impl(*, summary_map: object, typed_stack_probe_facts: object) -> tuple[cython.bint, cython.bint]:
+    summary: object
+    summary_node_id: object
     has_recoverable_stack_probe = False
     for summary in tuple(summary_map.values()):
         if not summary.stack_probe_helper:
@@ -7006,9 +7692,10 @@ def __stack_probe_summary_flags_8616___impl(*, summary_map: dict[int, CallsiteSu
 
 
 
+@cython.ccall
 def _call_arg_materialization_mode_flags_8616(
-    has_recoverable_stack_probe: bool,
-) -> tuple[bool, bool]:
+    has_recoverable_stack_probe: cython.bint,
+) -> tuple[cython.bint, cython.bint]:
     conservative_materialization = (
         os.environ.get("INERTIA_CONSERVATIVE_CALLSITE_ARG_MATERIALIZE", "0").strip().lower()
         not in {
@@ -7030,60 +7717,62 @@ def _call_arg_materialization_mode_flags_8616(
     return conservative_materialization, prune_consumed_arg_stores
 
 
+@cython.ccall
 def _default_args_override_expected_count_8616(
     expected_count: StructuredAstValue,
     known_count: int | None,
-    default_args: tuple[StructuredAstValue, ...] | None,
-    push_sources: tuple[StructuredAstValue, ...],
-) -> bool:
+    default_args: object,
+    push_sources: object,
+) -> cython.bint:
     """Decide whether known-default args should override an absent expected count."""
     return (
         (not isinstance(expected_count, int) or expected_count <= 0)
         and isinstance(known_count, int)
         and known_count > 0
         and default_args is not None
-        and len(default_args) == known_count
+        and operator.eq(len(default_args), known_count)
         and not push_sources
     )
 
 
 def _direct_args_from_push_sources_8616(
-    push_sources: tuple[StructuredAstValue, ...],
-    expected_count: int,
-    call_name: str,
+    push_sources: object,
+    expected_count: cython.longlong,
+    call_name: object,
     direct_expr_from_push_source_fn: Callable[..., StructuredAstValue | None],
-) -> tuple[tuple[StructuredAstValue, ...], tuple[StructuredAstValue, ...]] | None:
+) -> object:
     """Materialize direct args from push sources matching the expected count."""
-    if not (isinstance(push_sources, tuple) and len(push_sources) == expected_count):
+    if not (isinstance(push_sources, tuple) and operator.eq(len(push_sources), expected_count)):
         return None
     ordered_sources = list(reversed(push_sources)) if len(push_sources) > 1 else list(push_sources)
     direct_args = [
         direct_expr_from_push_source_fn(source, call_name=call_name, arg_index=idx)
-        for idx, source in enumerate(ordered_sources)
+        for idx, source in builtins.iter(enumerate(ordered_sources))
     ]
-    if not all(arg is not None for arg in direct_args):
+    if not all(arg is not None for arg in iter(direct_args)):
         return None
     return tuple(direct_args), tuple(ordered_sources)
 
 
 def _instruction_bound_push_sources_8616(
-    sources: tuple[StructuredAstValue, ...], instructions: tuple[StructuredAstValue, ...],
-) -> bool:
+    sources: object, instructions: object,
+) -> cython.bint:
     """Consume existing complete source-to-instruction bindings for replacement."""
-    return bool(sources) and all(source is not None for source in sources) and (
-        len(instructions) == len(sources)
-        and all(isinstance(addr, int) and not isinstance(addr, bool) for addr in instructions)
+    return bool(sources) and all(source is not None for source in iter(sources)) and (
+        operator.eq(len(instructions), len(sources))
+        and all(isinstance(addr, int) and not isinstance(addr, bool) for addr in iter(instructions))
     )
 
 
+@cython.ccall
 def _commit_seeded_call_args_8616(
     node: StructuredAstValue,
-    seeded_args: tuple[StructuredAstValue, ...],
-    call_name: str,
-    summary: CallsiteSummary8616 | None,
+    seeded_args: object,
+    call_name: object,
+    summary: object,
     set_materialized_call_args_fn: Callable[..., CallArgumentMutationResult8616],
     refresh_summary_arg_shape_fn: Callable[[StructuredAstValue, StructuredAstValue | None], None],
-) -> bool:
+) -> cython.bint:
     """Install seeded args without overruling stronger values absent exact PUSH facts."""
     exact_push_sources = (
         summary is not None
@@ -7103,23 +7792,30 @@ def _commit_seeded_call_args_8616(
     return bool(transaction.changed)
 
 
+@cython.ccall
 def _conservative_seed_for_call_node_8616(
     node: StructuredAstValue,
     *,
-    all_arg_exprs_are_non_segment_registers_fn: Callable[[StructuredAstValue], bool],
-    call_args_need_rematerialization_fn: Callable[..., bool],
+    all_arg_exprs_are_non_segment_registers_fn: Callable[[StructuredAstValue], cython.bint],
+    call_args_need_rematerialization_fn: Callable[..., cython.bint],
     call_name_fn: Callable[[StructuredAstValue], str | None],
     codegen: StructuredAstValue,
     direct_expr_from_push_source_fn: Callable[..., StructuredAstValue | None],
     expected_arg_count_fn: Callable[[str], int | None],
-    has_unverified_non_ss_stack_probe: bool,
+    has_unverified_non_ss_stack_probe: cython.bint,
     known_default_args_fn: Callable[[str, StructuredAstValue], tuple[StructuredAstValue, ...] | None],
     normalize_materialized_call_args_fn: Callable[..., list[StructuredAstValue] | None],
     refresh_summary_arg_shape_fn: Callable[[StructuredAstValue, StructuredAstValue | None], None],
     set_materialized_call_args_fn: Callable[..., CallArgumentMutationResult8616],
-    summary_map: dict[int, StructuredAstValue],
-) -> bool:
+    summary_map: object,
+) -> cython.bint:
     """Seed conservatively proven call args onto one call node."""
+    default_args: object
+    direct_seed: object
+    normalized_args: object
+    seeded_args: object
+    summary: object
+    summary_obj: object
     if not isinstance(node, CFunctionCall) or _is_runtime_segment_helper_call_8616(node):
         return False
     call_name = call_name_fn(node) or ""
@@ -7147,7 +7843,7 @@ def _conservative_seed_for_call_node_8616(
     if not (isinstance(expected_count, int) and expected_count > 0):
         return False
     current_args = _boundary_tuple_8616(getattr(node, "args", ()) or ())
-    arity_mismatch = isinstance(known_count, int) and len(current_args) != known_count
+    arity_mismatch = isinstance(known_count, int) and operator.ne(len(current_args), known_count)
     if (
         current_args
         and not arity_mismatch
@@ -7171,7 +7867,7 @@ def _conservative_seed_for_call_node_8616(
             seeded_args = tuple(normalized_args)
     if seeded_args is None and (
         default_args is not None
-        and len(default_args) == expected_count
+        and operator.eq(len(default_args), expected_count)
         and not has_unverified_non_ss_stack_probe
     ):
         seeded_args = tuple(default_args)
@@ -7183,6 +7879,7 @@ def _conservative_seed_for_call_node_8616(
     )
 
 
+@cython.ccall
 def _seed_empty_known_helper_for_node_8616(
     node: StructuredAstValue,
     *,
@@ -7190,13 +7887,18 @@ def _seed_empty_known_helper_for_node_8616(
     codegen: StructuredAstValue,
     direct_expr_from_push_source_fn: Callable[..., StructuredAstValue | None],
     expected_arg_count_fn: Callable[[str], int | None],
-    has_unverified_non_ss_stack_probe: bool,
+    has_unverified_non_ss_stack_probe: cython.bint,
     known_default_args_fn: Callable[[str, StructuredAstValue], tuple[StructuredAstValue, ...] | None],
     refresh_summary_arg_shape_fn: Callable[[StructuredAstValue, StructuredAstValue | None], None],
     set_materialized_call_args_fn: Callable[..., CallArgumentMutationResult8616],
-    summary_map: dict[int, StructuredAstValue],
-) -> bool:
+    summary_map: object,
+) -> cython.bint:
     """Seed args onto one empty known-helper call node."""
+    default_args: object
+    direct_seed: object
+    seeded_args: object
+    summary: object
+    summary_obj: object
     if not isinstance(node, CFunctionCall) or _is_runtime_segment_helper_call_8616(node):
         return False
     call_name = call_name_fn(node) or ""
@@ -7233,7 +7935,7 @@ def _seed_empty_known_helper_for_node_8616(
         seeded_args = direct_seed[0]
     if seeded_args is None and (
         default_args is not None
-        and len(default_args) == expected_count
+        and operator.eq(len(default_args), expected_count)
         and not has_unverified_non_ss_stack_probe
     ):
         seeded_args = tuple(default_args)
@@ -7245,27 +7947,30 @@ def _seed_empty_known_helper_for_node_8616(
     )
 
 
+@cython.ccall
 def _conservative_call_arg_seed_8616(
     *,
     root: StructuredAstValue,
-    summary_map: dict[int, StructuredAstValue],
+    summary_map: object,
     codegen: StructuredAstValue,
-    has_unverified_non_ss_stack_probe: bool,
+    has_unverified_non_ss_stack_probe: cython.bint,
     call_name_fn: Callable[[StructuredAstValue], str | None],
     expected_arg_count_fn: Callable[[str], int | None],
     known_default_args_fn: Callable[[str, StructuredAstValue], tuple[StructuredAstValue, ...] | None],
     direct_expr_from_push_source_fn: Callable[..., StructuredAstValue | None],
     normalize_materialized_call_args_fn: Callable[..., list[StructuredAstValue] | None],
-    all_arg_exprs_are_non_segment_registers_fn: Callable[[StructuredAstValue], bool],
+    all_arg_exprs_are_non_segment_registers_fn: Callable[[StructuredAstValue], cython.bint],
     set_materialized_call_args_fn: Callable[..., CallArgumentMutationResult8616],
     refresh_summary_arg_shape_fn: Callable[[StructuredAstValue, StructuredAstValue | None], None],
-    call_args_need_rematerialization_fn: Callable[..., bool],
-) -> bool:
+    call_args_need_rematerialization_fn: Callable[..., cython.bint],
+) -> cython.bint:
 
     return __conservative_call_arg_seed_8616___impl(all_arg_exprs_are_non_segment_registers_fn=all_arg_exprs_are_non_segment_registers_fn, call_args_need_rematerialization_fn=call_args_need_rematerialization_fn, call_name_fn=call_name_fn, codegen=codegen, direct_expr_from_push_source_fn=direct_expr_from_push_source_fn, expected_arg_count_fn=expected_arg_count_fn, has_unverified_non_ss_stack_probe=has_unverified_non_ss_stack_probe, known_default_args_fn=known_default_args_fn, normalize_materialized_call_args_fn=normalize_materialized_call_args_fn, refresh_summary_arg_shape_fn=refresh_summary_arg_shape_fn, root=root, set_materialized_call_args_fn=set_materialized_call_args_fn, summary_map=summary_map)
 
 
-def __conservative_call_arg_seed_8616___impl(*, all_arg_exprs_are_non_segment_registers_fn: Callable[[StructuredAstValue], bool], call_args_need_rematerialization_fn: Callable[..., bool], call_name_fn: Callable[[StructuredAstValue], str | None], codegen: StructuredAstValue, direct_expr_from_push_source_fn: Callable[..., StructuredAstValue | None], expected_arg_count_fn: Callable[[str], int | None], has_unverified_non_ss_stack_probe: bool, known_default_args_fn: Callable[[str, StructuredAstValue], tuple[StructuredAstValue, ...] | None], normalize_materialized_call_args_fn: Callable[..., list[StructuredAstValue] | None], refresh_summary_arg_shape_fn: Callable[[StructuredAstValue, StructuredAstValue | None], None], root: StructuredAstValue, set_materialized_call_args_fn: Callable[..., CallArgumentMutationResult8616], summary_map: dict[int, StructuredAstValue]) -> bool:
+@cython.ccall
+def __conservative_call_arg_seed_8616___impl(*, all_arg_exprs_are_non_segment_registers_fn: Callable[[StructuredAstValue], cython.bint], call_args_need_rematerialization_fn: Callable[..., cython.bint], call_name_fn: Callable[[StructuredAstValue], str | None], codegen: StructuredAstValue, direct_expr_from_push_source_fn: Callable[..., StructuredAstValue | None], expected_arg_count_fn: Callable[[str], int | None], has_unverified_non_ss_stack_probe: cython.bint, known_default_args_fn: Callable[[str, StructuredAstValue], tuple[StructuredAstValue, ...] | None], normalize_materialized_call_args_fn: Callable[..., list[StructuredAstValue] | None], refresh_summary_arg_shape_fn: Callable[[StructuredAstValue, StructuredAstValue | None], None], root: StructuredAstValue, set_materialized_call_args_fn: Callable[..., CallArgumentMutationResult8616], summary_map: object) -> cython.bint:
+    node: object
     changed = False
     for node in _iter_c_nodes_deep_8616(root):
         changed = _conservative_seed_for_call_node_8616(
@@ -7287,24 +7992,27 @@ def __conservative_call_arg_seed_8616___impl(*, all_arg_exprs_are_non_segment_re
 
 
 
+@cython.ccall
 def _seed_empty_known_helper_calls_8616(
     *,
     root: StructuredAstValue,
-    summary_map: dict[int, StructuredAstValue],
+    summary_map: object,
     codegen: StructuredAstValue,
-    has_unverified_non_ss_stack_probe: bool,
+    has_unverified_non_ss_stack_probe: cython.bint,
     call_name_fn: Callable[[StructuredAstValue], str | None],
     expected_arg_count_fn: Callable[[str], int | None],
     known_default_args_fn: Callable[[str, StructuredAstValue], tuple[StructuredAstValue, ...] | None],
     direct_expr_from_push_source_fn: Callable[..., StructuredAstValue | None],
     set_materialized_call_args_fn: Callable[..., CallArgumentMutationResult8616],
     refresh_summary_arg_shape_fn: Callable[[StructuredAstValue, StructuredAstValue | None], None],
-) -> bool:
+) -> cython.bint:
 
     return __seed_empty_known_helper_calls_8616___impl(call_name_fn=call_name_fn, codegen=codegen, direct_expr_from_push_source_fn=direct_expr_from_push_source_fn, expected_arg_count_fn=expected_arg_count_fn, has_unverified_non_ss_stack_probe=has_unverified_non_ss_stack_probe, known_default_args_fn=known_default_args_fn, refresh_summary_arg_shape_fn=refresh_summary_arg_shape_fn, root=root, set_materialized_call_args_fn=set_materialized_call_args_fn, summary_map=summary_map)
 
 
-def __seed_empty_known_helper_calls_8616___impl(*, call_name_fn: Callable[[StructuredAstValue], str | None], codegen: StructuredAstValue, direct_expr_from_push_source_fn: Callable[..., StructuredAstValue | None], expected_arg_count_fn: Callable[[str], int | None], has_unverified_non_ss_stack_probe: bool, known_default_args_fn: Callable[[str, StructuredAstValue], tuple[StructuredAstValue, ...] | None], refresh_summary_arg_shape_fn: Callable[[StructuredAstValue, StructuredAstValue | None], None], root: StructuredAstValue, set_materialized_call_args_fn: Callable[..., CallArgumentMutationResult8616], summary_map: dict[int, StructuredAstValue]) -> bool:
+@cython.ccall
+def __seed_empty_known_helper_calls_8616___impl(*, call_name_fn: Callable[[StructuredAstValue], str | None], codegen: StructuredAstValue, direct_expr_from_push_source_fn: Callable[..., StructuredAstValue | None], expected_arg_count_fn: Callable[[str], int | None], has_unverified_non_ss_stack_probe: cython.bint, known_default_args_fn: Callable[[str, StructuredAstValue], tuple[StructuredAstValue, ...] | None], refresh_summary_arg_shape_fn: Callable[[StructuredAstValue, StructuredAstValue | None], None], root: StructuredAstValue, set_materialized_call_args_fn: Callable[..., CallArgumentMutationResult8616], summary_map: object) -> cython.bint:
+    node: object
     changed = False
     for node in _iter_c_nodes_deep_8616(root):
         changed = _seed_empty_known_helper_for_node_8616(
@@ -7323,20 +8031,24 @@ def __seed_empty_known_helper_calls_8616___impl(*, call_name_fn: Callable[[Struc
 
 
 
+@cython.ccall
 def _clear_zero_arg_known_helper_args_8616(
     *,
     root: StructuredAstValue,
-    summary_map: dict[int, StructuredAstValue],
+    summary_map: object,
     call_name_fn: StructuredAstValue,
     expected_arg_count_fn: StructuredAstValue,
     set_materialized_call_args_fn: StructuredAstValue,
     refresh_summary_arg_shape_fn: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
 
     return __clear_zero_arg_known_helper_args_8616___impl(call_name_fn=call_name_fn, expected_arg_count_fn=expected_arg_count_fn, root=root, set_materialized_call_args_fn=set_materialized_call_args_fn, summary_map=summary_map)
 
 
-def __clear_zero_arg_known_helper_args_8616___impl(*, call_name_fn: StructuredAstValue, expected_arg_count_fn: StructuredAstValue, root: StructuredAstValue, set_materialized_call_args_fn: StructuredAstValue, summary_map: dict[int, StructuredAstValue]) -> bool:
+@cython.ccall
+def __clear_zero_arg_known_helper_args_8616___impl(*, call_name_fn: StructuredAstValue, expected_arg_count_fn: StructuredAstValue, root: StructuredAstValue, set_materialized_call_args_fn: StructuredAstValue, summary_map: object) -> cython.bint:
+    summary: object
+    node: object
     changed = False
     for node in _iter_c_nodes_deep_8616(root):
         if not isinstance(node, CFunctionCall) or _is_runtime_segment_helper_call_8616(node):
@@ -7359,12 +8071,16 @@ def __clear_zero_arg_known_helper_args_8616___impl(*, call_name_fn: StructuredAs
 
 
 
+@cython.ccall
 def _record_unmaterialized_callsite_arg_gaps_8616(
     *,
     root: StructuredAstValue,
-    summary_map: dict[int, StructuredAstValue],
+    summary_map: object,
     codegen: StructuredAstValue,
 ) -> None:
+    project: object
+    summary: object
+    node: object
     gaps: list[dict[str, StructuredAstValue]] = []
     project = getattr(codegen, "project", None)
     for node in _iter_c_nodes_deep_8616(root):
@@ -7400,7 +8116,8 @@ def _record_unmaterialized_callsite_arg_gaps_8616(
         )
 
 
-def _rhs_matches_call_return_addr_8616(rhs: StructuredAstValue, call_return_addr: int | None) -> bool:
+@cython.ccall
+def _rhs_matches_call_return_addr_8616(rhs: StructuredAstValue, call_return_addr: int | None) -> cython.bint:
     """Check whether an rhs stores the masked call return address."""
     if not isinstance(call_return_addr, int):
         return False
@@ -7412,24 +8129,27 @@ def _rhs_matches_call_return_addr_8616(rhs: StructuredAstValue, call_return_addr
     value = node.value
     if not isinstance(value, int):
         return False
-    return (value & 0xFFFF) == (int(call_return_addr) & 0xFFFF)
+    return operator.eq((value & 0xFFFF), (int(call_return_addr) & 0xFFFF))
 
 
+@cython.ccall
 def _linear_add_offset_key_8616(
     lhs_key: StructuredAstValue, rhs_key: StructuredAstValue
 ) -> StructuredAstValue | None:
+    lhs_var: object
+    rhs_var: object
     lhs_const, lhs_scale, lhs_var = lhs_key
     rhs_const, rhs_scale, rhs_var = rhs_key
     if lhs_var is None:
         return ((lhs_const + rhs_const) & 0xFFFF, rhs_scale, rhs_var)
     if rhs_var is None:
         return ((lhs_const + rhs_const) & 0xFFFF, lhs_scale, lhs_var)
-    if lhs_var == rhs_var:
+    if operator.eq(lhs_var, rhs_var):
         return ((lhs_const + rhs_const) & 0xFFFF, lhs_scale + rhs_scale, lhs_var)
     return None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _CallEvidenceFlags8616:
     """Derived evidence flags for one call statement."""
     probe_seen_without_ss_address: StructuredAstValue
@@ -7442,7 +8162,7 @@ class _CallEvidenceFlags8616:
     rematerialize_call_args: StructuredAstValue
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _CallStmtFacts8616:
     """Per-statement resolved call locals for the rewrite loop."""
     summary: StructuredAstValue
@@ -7462,7 +8182,7 @@ class _CallStmtFacts8616:
     push_arg_sources: StructuredAstValue
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _CallArityEvidence8616:
     """Resolved argument-count/width evidence for one call statement."""
     typed_stack_probe_materialization: StructuredAstValue
@@ -7473,15 +8193,45 @@ class _CallArityEvidence8616:
     rematerialize_call_args: StructuredAstValue
 
 
+@cython.cclass
 class _CallsiteStackArgsMaterializer8616:
     """Materialize callsite stack arguments over the structured C body."""
+    caller_stack_objects = cython.declare(tuple, visibility = "public")
+    cfunc = cython.declare(object, visibility = "public")
+    changed = cython.declare(object, visibility = "public")
+    cod_path_hint = cython.declare(object, visibility = "public")
+    codegen = cython.declare(object, visibility = "public")
+    consumed_stale_return_alias_statement_ids = cython.declare(set, visibility = "public")
+    direct_global_arg_refs_by_offset = cython.declare(dict, visibility = "public")
+    expr_dirty_carrier_cache = cython.declare(dict, visibility = "public")
+    fnptr_store_evidence_cache_8616 = cython.declare(object, visibility = "public")
+    fnptr_typed_stack_offsets_cache_8616 = cython.declare(object, visibility = "public")
+    func_addr = cython.declare(object, visibility = "public")
+    function_scope_typed_stack_probe_fact = cython.declare(object, visibility = "public")
+    has_unverified_non_ss_stack_probe = cython.declare(object, visibility = "public")
+    logical_shape_evidence_by_callsite = cython.declare(dict, visibility = "public")
+    materialized_callsite_metadata_ids = cython.declare(dict, visibility = "public")
+    project = cython.declare(object, visibility = "public")
+    prune_consumed_arg_stores = cython.declare(object, visibility = "public")
+    return_call_exprs_by_callsite = cython.declare(dict, visibility = "public")
+    rewritten_block_ids = cython.declare(set, visibility = "public")
+    rhs_safe_pre_call_setup_cache = cython.declare(dict, visibility = "public")
+    statement_contains_call_cache = cython.declare(dict, visibility = "public")
+    stats = cython.declare(object, visibility = "public")
+    summary_by_callsite_addr = cython.declare(dict, visibility = "public")
+    summary_map = cython.declare(object, visibility = "public")
+    synthetic_stack_cvars = cython.declare(dict, visibility = "public")
+    typed_stack_probe_facts = cython.declare(object, visibility = "public")
 
     def __init__(self, project: StructuredAstValue, codegen: StructuredAstValue) -> None:
         self.project = project
         self.codegen = codegen
 
-    def run(self) -> bool:
+    @cython.ccall
+    def run(self) -> cython.bint:
         """Drive callsite stack-argument materialization; return whether the body changed."""
+        early: object
+        previous_signature: object
         self.cfunc = getattr(self.codegen, "cfunc", None)
         if self.cfunc is None:
             _set_callsite_materialization_decision_8616(
@@ -7527,12 +8277,13 @@ class _CallsiteStackArgsMaterializer8616:
             )
         return self._run_publish(root, selector_materialized_before)
 
+    @cython.ccall
     def _run_early_refusal_gates(
         self,
-        fixed_probe_changed: bool,
-        signature: StructuredAstValue,
+        fixed_probe_changed: cython.bint,
+        signature: object,
         previous_signature: StructuredAstValue,
-        previous_complete: bool,
+        previous_complete: cython.bint,
     ) -> bool | None:
         """Handle pointer-memory and cache-hit early-refusal gates; None means continue."""
         if getattr(self.codegen, "_inertia_pointer_memory_materialized_8616", None):
@@ -7554,7 +8305,7 @@ class _CallsiteStackArgsMaterializer8616:
                     getattr(self.cfunc, "addr", 0) or 0,
                 )
             return fixed_probe_changed
-        if previous_complete and signature is not None and previous_signature == signature:
+        if previous_complete and signature is not None and operator.eq(previous_signature, signature):
             _set_callsite_materialization_decision_8616(
                 self.codegen,
                 CallsiteMaterializationDecision8616.CACHE_HIT,
@@ -7564,8 +8315,12 @@ class _CallsiteStackArgsMaterializer8616:
             return fixed_probe_changed
         return None
 
+    @cython.ccall
     def _run_collect_evidence(self) -> None:
         """Collect COD/function evidence for the current function."""
+        cod_metadata: object
+        function: object
+        synthetic_globals: object
         self.func_addr = getattr(self.cfunc, "addr", None)
         with span(
             "x86_16.call_args.collect_evidence",
@@ -7586,24 +8341,26 @@ class _CallsiteStackArgsMaterializer8616:
                 _collect_synthetic_direct_global_symbol_refs_8616(synthetic_globals, instruction_summaries),
             )
             self.direct_global_arg_refs_by_offset = {
-                (ref.offset & 0xFFFF, int(ref.width or 0)): ref for ref in direct_global_arg_refs if int(ref.width or 0) > 0
+                (ref.offset & 0xFFFF, int(ref.width or 0)): ref for ref in iter(direct_global_arg_refs) if int(ref.width or 0) > 0
             }
 
-    def _run_summary_prep(self, fixed_probe_changed: bool, signature: StructuredAstValue) -> bool | None:
+    @cython.ccall
+    def _run_summary_prep(self, fixed_probe_changed: cython.bint, signature: StructuredAstValue) -> bool | None:
         """Build summary maps and refuse when no live summarized call remains."""
+        summary_map_raw: object
         summary_map_raw = getattr(self.codegen, "_inertia_callsite_summaries", None)
-        self.summary_map: dict[int, CallsiteSummary8616] = (
+        self.summary_map: object = (
             {
                 key: value
-                for key, value in summary_map_raw.items()
+                for key, value in builtins.iter(summary_map_raw.items())
                 if isinstance(key, int) and isinstance(value, CallsiteSummary8616)
             }
             if isinstance(summary_map_raw, dict)
             else {}
         )
-        self.summary_by_callsite_addr: dict[int, CallsiteSummary8616] = {
+        self.summary_by_callsite_addr: dict[cython.longlong, CallsiteSummary8616] = {
             int(callsite_addr): _summary
-            for _summary in tuple(self.summary_map.values())
+            for _summary in builtins.iter(tuple(self.summary_map.values()))
             if isinstance((callsite_addr := _summary.callsite_addr), int)
         }
         _refresh_callsite_summary_node_ids_8616(self.codegen, self.summary_map)
@@ -7617,24 +8374,25 @@ class _CallsiteStackArgsMaterializer8616:
             return fixed_probe_changed
         return None
 
-    def _run_evidence_and_controls(self) -> tuple[bool, bool, bool]:
+    def _run_evidence_and_controls(self) -> tuple[cython.bint, cython.bint, cython.bint]:
         """Census push-arg evidence, stack-probe flags, and materialization controls."""
+        _summary: object
         self.caller_stack_objects = tuple(
             CallerStackObject8616(variable.offset, variable.size)
-            for cvar in _boundary_tuple_8616(getattr(self.cfunc, "arg_list", ()) or ())
+            for cvar in builtins.iter(_boundary_tuple_8616(getattr(self.cfunc, "arg_list", ()) or ()))
             if isinstance(cvar, structured_c.CVariable)
-            for variable in (cvar.variable,)
+            for variable in iter((cvar.variable,))
             if isinstance(variable, SimStackVariable)
             and isinstance(variable.offset, int)
             and isinstance(variable.size, int)
             and variable.offset >= 4
             and variable.size > 0
         )
-        self.logical_shape_evidence_by_callsite: dict[int, LogicalArgumentShapeEvidence8616] = {}
+        self.logical_shape_evidence_by_callsite: dict[cython.longlong, LogicalArgumentShapeEvidence8616] = {}
         has_push_arg_evidence = False
         for _summary in self.summary_map.values():
             push_sources = _summary.push_arg_sources
-            if isinstance(push_sources, tuple) and any(source is not None for source in push_sources):
+            if isinstance(push_sources, tuple) and any(source is not None for source in iter(push_sources)):
                 has_push_arg_evidence = True
                 break
         self.stats = _ensure_callsite_materialization_stats_8616(self.codegen)
@@ -7656,7 +8414,7 @@ class _CallsiteStackArgsMaterializer8616:
         self.function_scope_typed_stack_probe_fact = None
         if not self.has_unverified_non_ss_stack_probe:
             function_scope_stack_probe_facts = _boundary_tuple_8616(
-                fact for fact in self.typed_stack_probe_facts.values() if fact.segment_space == "ss"
+                fact for fact in builtins.iter(self.typed_stack_probe_facts.values()) if fact.segment_space == "ss"
             )
             if len(function_scope_stack_probe_facts) == 1:
                 self.function_scope_typed_stack_probe_fact = function_scope_stack_probe_facts[0]
@@ -7682,29 +8440,31 @@ class _CallsiteStackArgsMaterializer8616:
             materialization_controls._inertia_callsite_regen_replay_conservative_no_prune_8616 += 1
         if conservative_materialization and has_push_arg_evidence and not regen_replay_preserve_materialized_stack:
             conservative_materialization = False
-        self.materialized_callsite_metadata_ids: dict[int, tuple[int, ...]] = {}
-        self.synthetic_stack_cvars: dict[int, structured_c.CVariable] = {}
-        self.return_call_exprs_by_callsite: dict[int, StructuredAstValue] = dict(
+        self.materialized_callsite_metadata_ids: dict[cython.longlong, tuple[cython.longlong, ...]] = {}
+        self.synthetic_stack_cvars: dict[cython.longlong, structured_c.CVariable] = {}
+        self.return_call_exprs_by_callsite: dict[cython.longlong, StructuredAstValue] = dict(
             materialization_controls._inertia_callsite_return_exprs_8616
         )
-        self.rewritten_block_ids: set[int] = set()
-        self.consumed_stale_return_alias_statement_ids: set[int] = set()
-        self.fnptr_typed_stack_offsets_cache_8616: frozenset[int] | None = None
-        self.fnptr_store_evidence_cache_8616: dict[int, list[tuple[int, StructuredAstValue]]] | None = None
-        self.statement_contains_call_cache: dict[int, bool] = {}
-        self.expr_dirty_carrier_cache: dict[int, bool] = {}
-        self.rhs_safe_pre_call_setup_cache: dict[int, bool] = {}
+        self.rewritten_block_ids: set[cython.longlong] = set()
+        self.consumed_stale_return_alias_statement_ids: set[cython.longlong] = set()
+        self.fnptr_typed_stack_offsets_cache_8616: object = None
+        self.fnptr_store_evidence_cache_8616: object = None
+        self.statement_contains_call_cache: dict[cython.longlong, cython.bint] = {}
+        self.expr_dirty_carrier_cache: dict[cython.longlong, cython.bint] = {}
+        self.rhs_safe_pre_call_setup_cache: dict[cython.longlong, cython.bint] = {}
         return has_push_arg_evidence, conservative_materialization, disable_stack_probe_setup_prune
 
     def _run_rewrite_root(
         self,
         root: StructuredAstValue,
         *,
-        disable_stack_probe_setup_prune: bool,
-        conservative_materialization: bool,
-        has_push_arg_evidence: bool,
+        disable_stack_probe_setup_prune: cython.bint,
+        conservative_materialization: cython.bint,
+        has_push_arg_evidence: cython.bint,
     ) -> None:
         """Rewrite the structured root blocks and run the post-rewrite prune passes."""
+        root_statements: object
+        summarized_call: object
         if not conservative_materialization:
             with span(
                 "x86_16.call_args.rewrite_blocks",
@@ -7786,7 +8546,7 @@ class _CallsiteStackArgsMaterializer8616:
             self.changed = True
         summarized_calls = tuple(
             node
-            for node in (root, *_iter_c_nodes_deep_8616(root))
+            for node in iter((root, ) + tuple(_iter_c_nodes_deep_8616(root)))
             if isinstance(node, CFunctionCall)
             and id(node) in self.summary_map
         )
@@ -7815,11 +8575,11 @@ class _CallsiteStackArgsMaterializer8616:
         return_frame_summaries = (
             tuple(summary_inventory.values())
             if summary_inventory
-            else tuple(self.summary_map[id(call)] for call in summarized_calls)
+            else tuple(self.summary_map[id(call)] for call in iter(summarized_calls))
         )
         return_addr_by_callsite = {
             summary.callsite_addr: summary.return_addr
-            for summary in return_frame_summaries
+            for summary in iter(return_frame_summaries)
             if summary.return_addr is not None
         }
         if prune_call_return_frame_stack_assignments_8616(
@@ -7829,7 +8589,8 @@ class _CallsiteStackArgsMaterializer8616:
         ):
             self.changed = True
 
-    def _run_publish(self, root: StructuredAstValue, selector_materialized_before: int) -> bool:
+    @cython.ccall
+    def _run_publish(self, root: StructuredAstValue, selector_materialized_before: cython.longlong) -> cython.bint:
         """Sync the structured root and publish materialization decision metadata."""
         if self.changed:
             with span("x86_16.call_args.sync_root"):
@@ -7857,6 +8618,7 @@ class _CallsiteStackArgsMaterializer8616:
         )
         return self.changed
 
+    @cython.ccall
     def _seg_helper_arg_width_8616(self, node: StructuredAstValue) -> int | None:
         """Return the byte width implied by a SEG_U8/U16/U32 helper call."""
         if not isinstance(node, CFunctionCall):
@@ -7866,8 +8628,11 @@ class _CallsiteStackArgsMaterializer8616:
             return None
         return {"SEG_U8": 1, "SEG_U16": 2, "SEG_U32": 4}.get(helper_name.upper())
 
+    @cython.ccall
     def _arg_width_from_type_bits_8616(self, type_: StructuredAstValue) -> int | None:
         """Derive a byte width from a type's bit size under the project arch."""
+        arch: object
+        byte_width: object
         bits = _safe_type_size_bits_8616(type_, getattr(self.codegen, "project", None))
         arch = getattr(getattr(self.codegen, "project", None), "arch", None)
         byte_width = getattr(arch, "byte_width", None)
@@ -7875,7 +8640,13 @@ class _CallsiteStackArgsMaterializer8616:
             return max(bits // byte_width, 1)
         return None
 
-    def _arg_width_from_expr(self, expr: StructuredAstValue) -> int:
+    @cython.ccall
+    def _arg_width_from_expr(self, expr: StructuredAstValue) -> cython.longlong:
+        cast_width: object
+        seg_helper_width: object
+        size: object
+        variable: object
+        width: object
         node = expr
         if isinstance(node, CTypeCast):
             cast_type = getattr(node, "type", None) or getattr(node, "dst_type", None)
@@ -7896,13 +8667,19 @@ class _CallsiteStackArgsMaterializer8616:
             return size
         return 2
 
-    def _canonical_segment_register_name_8616(self, name: StructuredAstValue) -> str | None:
+    @cython.ccall
+    def _canonical_segment_register_name_8616(self, name: StructuredAstValue) -> object:
         if not isinstance(name, str):
             return None
         base = name.strip().lower().split("#", 1)[0]
         return base if base in {"cs", "ds", "es", "ss"} else None
 
-    def _segment_register_name_from_expr_8616(self, expr: StructuredAstValue) -> str | None:
+    @cython.ccall
+    def _segment_register_name_from_expr_8616(self, expr: StructuredAstValue) -> object:
+        canonical_name: object
+        canonical_reg_name: object
+        reg_name: object
+        variable: object
         node = expr
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -7919,7 +8696,8 @@ class _CallsiteStackArgsMaterializer8616:
                 return canonical_reg_name
         return None
 
-    def _is_segment_register_value_expr(self, expr: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_segment_register_value_expr(self, expr: StructuredAstValue) -> cython.bint:
         node = expr
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -7927,7 +8705,7 @@ class _CallsiteStackArgsMaterializer8616:
             return self._is_segment_register_value_expr(node.lhs)
         return self._segment_register_name_from_expr_8616(node) is not None
 
-    def _is_call_arg_count_evidence_tuple(self, source: StructuredAstValue) -> bool:
+    def _is_call_arg_count_evidence_tuple(self, source: StructuredAstValue) -> cython.bint:
         if not isinstance(source, tuple) or len(source) < 2:
             return False
         if source[0] not in {
@@ -7982,7 +8760,7 @@ class _CallsiteStackArgsMaterializer8616:
                 and isinstance(source[1], tuple)
                 and self._is_call_arg_count_evidence_tuple(source[1])
                 and isinstance(source[2], tuple)
-                and all(self._expr_op_is_valid(op) for op in source[2])
+                and all(self._expr_op_is_valid(op) for op in iter(source[2]))
             )
         if source[0] == "global_index":
             return (
@@ -8010,7 +8788,7 @@ class _CallsiteStackArgsMaterializer8616:
                         CallsitePushExprOp8616.MUL.value,
                     }
                     and isinstance(op[1], int)
-                    for op in source[4]
+                    for op in iter(source[4])
                 )
             )
         if source[0] == "seg_indirect":
@@ -8028,22 +8806,23 @@ class _CallsiteStackArgsMaterializer8616:
     def _fallback_call_arg_count_8616(self,
         *,
         expected_arg_count: int | None,
-        push_arg_sources: tuple[StructuredAstValue, ...],
+        push_arg_sources: object,
     ) -> int | None:
         if isinstance(expected_arg_count, int):
             return expected_arg_count
         if (
             isinstance(push_arg_sources, tuple)
             and push_arg_sources
-            and all(self._is_call_arg_count_evidence_tuple(source) for source in push_arg_sources)
+            and all(self._is_call_arg_count_evidence_tuple(source) for source in iter(push_arg_sources))
         ):
             return len(push_arg_sources)
         return 1
 
-    def _all_arg_exprs_are_non_segment_registers(self, args: StructuredAstValue) -> bool:
-        return bool(args) and all(not self._is_segment_register_value_expr(arg) for arg in args)
+    def _all_arg_exprs_are_non_segment_registers(self, args: StructuredAstValue) -> cython.bint:
+        return bool(args) and all(not self._is_segment_register_value_expr(arg) for arg in iter(args))
 
-    def _is_plain_register_value_expr(self, expr: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_plain_register_value_expr(self, expr: StructuredAstValue) -> cython.bint:
         node = expr
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -8054,7 +8833,9 @@ class _CallsiteStackArgsMaterializer8616:
             return False
         return not self._is_segment_register_value_expr(node)
 
+    @cython.ccall
     def _plain_register_expr_key(self, expr: StructuredAstValue) -> StructuredAstValue:
+        variable: object
         if not self._is_plain_register_value_expr(expr):
             return None
         node = expr
@@ -8068,8 +8849,10 @@ class _CallsiteStackArgsMaterializer8616:
             getattr(variable, "size", None),
         )
 
+    @cython.ccall
     def _outgoing_stack_value_expr_key(self, expr: StructuredAstValue) -> StructuredAstValue:
         """Return the machine-BP identity of an outgoing call-stack carrier."""
+        offset: object
         if not self._is_outgoing_stack_value_carrier_expr(expr):
             return None
         node = expr
@@ -8087,10 +8870,16 @@ class _CallsiteStackArgsMaterializer8616:
             variable.name or cvar.name,
         )
 
+    @cython.ccall
     def _value_expr_key(self, expr: StructuredAstValue) -> StructuredAstValue:
         return self._plain_register_expr_key(expr) or self._outgoing_stack_value_expr_key(expr)
 
-    def _same_value_carrier_identity_expr(self, expr_a: StructuredAstValue, expr_b: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _same_value_carrier_identity_expr(self, expr_a: StructuredAstValue, expr_b: StructuredAstValue) -> cython.bint:
+        key_a: object
+        key_b: object
+        var_a: object
+        var_b: object
         node_a = expr_a
         while isinstance(node_a, CTypeCast):
             node_a = node_a.expr
@@ -8101,7 +8890,7 @@ class _CallsiteStackArgsMaterializer8616:
             return False
         key_a = self._value_expr_key(node_a)
         key_b = self._value_expr_key(node_b)
-        if key_a is None or key_b is None or key_a != key_b:
+        if key_a is None or key_b is None or operator.ne(key_a, key_b):
             return False
         var_a = getattr(node_a, "variable", None)
         var_b = getattr(node_b, "variable", None)
@@ -8109,19 +8898,26 @@ class _CallsiteStackArgsMaterializer8616:
         name_b = getattr(var_b, "name", None) or getattr(node_b, "name", None)
         return name_a == name_b
 
-    def _is_outgoing_stack_value_carrier_expr(self, expr: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_outgoing_stack_value_carrier_expr(self, expr: StructuredAstValue) -> cython.bint:
         """Use Lowering's machine-BP projection to identify outgoing carriers."""
         node = expr
         while isinstance(node, CTypeCast):
             node = node.expr
         return outgoing_call_stack_carrier_offset_8616(self.codegen, node) is not None
 
-    def _is_c_ast_node(self, value: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_c_ast_node(self, value: StructuredAstValue) -> cython.bint:
         return type(value).__module__.startswith("angr.analyses.decompiler.structured_codegen")
 
+    @cython.ccall
     def _clone_c_ast_tree(self,
-        node: StructuredAstValue, memo: dict[int, StructuredAstValue] | None = None
+        node: StructuredAstValue, memo: object = None
     ) -> StructuredAstValue:
+        existing: object
+        items: object
+        value: object
+        attr: object
         if not self._is_c_ast_node(node):
             return node
         if memo is None:
@@ -8155,12 +8951,16 @@ class _CallsiteStackArgsMaterializer8616:
             items = getattr(cloned, attr, None)
             if not isinstance(items, (list, tuple)):
                 continue
-            rebuilt = [self._clone_c_ast_tree(item, memo) if self._is_c_ast_node(item) else item for item in items]
+            rebuilt = [self._clone_c_ast_tree(item, memo) if self._is_c_ast_node(item) else item for item in iter(items)]
             setattr(cloned, attr, tuple(rebuilt) if isinstance(items, tuple) else rebuilt)
         return cloned
 
-    def _c_ast_count_walk_8616(self, current: StructuredAstValue, seen: set[int], limit: int) -> int:
+    @cython.ccall
+    def _c_ast_count_walk_8616(self, current: StructuredAstValue, seen: object, limit: cython.longlong) -> cython.longlong:
         """Count descendant AST nodes bounded by limit."""
+        items: object
+        attr: object
+        item: object
         if not self._is_c_ast_node(current):
             return 0
         marker = id(current)
@@ -8194,16 +8994,19 @@ class _CallsiteStackArgsMaterializer8616:
                     break
         return total
 
-    def _c_ast_node_count_limited(self, node: StructuredAstValue, *, limit: int = 128) -> int:
-        seen: set[int] = set()
+    @cython.ccall
+    def _c_ast_node_count_limited(self, node: StructuredAstValue, *, limit: cython.longlong = 128) -> cython.longlong:
+        seen: set[cython.longlong] = set()
         return self._c_ast_count_walk_8616(node, seen, limit)
 
+    @cython.ccall
     def _c_ast_contains_identity_8616(self,
-        node: StructuredAstValue, target: StructuredAstValue, *, max_nodes: int = 2048
-    ) -> bool:
+        node: StructuredAstValue, target: StructuredAstValue, *, max_nodes: cython.longlong = 2048
+    ) -> cython.bint:
+        current: object
         target_id = id(target)
         stack = [node]
-        seen: set[int] = set()
+        seen: set[cython.longlong] = set()
         visited = 0
         while stack:
             current = stack.pop()
@@ -8227,6 +9030,9 @@ class _CallsiteStackArgsMaterializer8616:
 
     def _c_ast_child_nodes_8616(self, current: StructuredAstValue) -> Iterator[StructuredAstValue]:
         """Yield the direct structured-C child nodes of a node."""
+        child: object
+        items: object
+        attr: object
         for attr in (
             "lhs",
             "rhs",
@@ -8247,17 +9053,18 @@ class _CallsiteStackArgsMaterializer8616:
         for attr in ("args", "operands", "statements"):
             items = getattr(current, attr, None)
             if isinstance(items, (list, tuple)):
-                yield from (item for item in items if item is not None)
+                yield from (item for item in iter(items) if item is not None)
 
     def _c_ast_has_cycle_or_too_complex_8616(self,
-        node: StructuredAstValue, *, max_nodes: int = 4096, max_depth: int = 256
-    ) -> bool:
-        active: set[int] = set()
-        complete: set[int] = set()
+        node: StructuredAstValue, *, max_nodes: cython.longlong = 4096, max_depth: cython.longlong = 256
+    ) -> cython.bint:
+        active: set[cython.longlong] = set()
+        complete: set[cython.longlong] = set()
         visited = 0
 
 
-        def _walk(current: StructuredAstValue, depth: int) -> bool:
+        def _walk(current: StructuredAstValue, depth: cython.longlong) -> cython.bint:
+            child: object
             nonlocal visited
             while isinstance(current, CTypeCast):
                 current = current.expr
@@ -8284,9 +9091,15 @@ class _CallsiteStackArgsMaterializer8616:
 
         return _walk(node, 0)
 
+    @cython.ccall
     def _resolve_recent_value_assignment(self,
-        expr: StructuredAstValue, statements_prefix: list[StructuredAstValue]
+        expr: StructuredAstValue, statements_prefix: object
     ) -> StructuredAstValue:
+        expr_value_key: object
+        lhs: object
+        lhs_value_key: object
+        rhs: object
+        assignment: object
         if not (self._is_plain_register_value_expr(expr) or self._is_outgoing_stack_value_carrier_expr(expr)):
             return expr, len(statements_prefix)
         expr_value_key = self._value_expr_key(expr)
@@ -8298,7 +9111,7 @@ class _CallsiteStackArgsMaterializer8616:
                     continue
                 lhs_value_key = self._value_expr_key(lhs)
                 if not _same_c_expression_8616(lhs, expr) and not (
-                    expr_value_key is not None and lhs_value_key is not None and lhs_value_key == expr_value_key
+                    expr_value_key is not None and lhs_value_key is not None and operator.eq(lhs_value_key, expr_value_key)
                 ):
                     continue
                 if self._assignment_lhs_writes_memory(lhs) or self._is_segment_register_value_expr(rhs):
@@ -8308,9 +9121,11 @@ class _CallsiteStackArgsMaterializer8616:
                 return rhs, stmt_idx
         return None, None
 
-    def _expr_contains_plain_register_uses(self, expr: StructuredAstValue, *, max_nodes: int = 1024) -> bool:
+    @cython.ccall
+    def _expr_contains_plain_register_uses(self, expr: StructuredAstValue, *, max_nodes: cython.longlong = 1024) -> cython.bint:
+        node: object
         stack = [expr]
-        seen: set[int] = set()
+        seen: set[cython.longlong] = set()
         visited = 0
         while stack:
             node = stack.pop()
@@ -8332,6 +9147,9 @@ class _CallsiteStackArgsMaterializer8616:
 
     def _expr_plain_use_children_8616(self, node: StructuredAstValue) -> Iterator[StructuredAstValue]:
         """Yield child nodes in the plain-register-use traversal order."""
+        child: object
+        items: object
+        attr: object
         for attr in ("lhs", "rhs", "operand", "expr", "condition", "iftrue", "iffalse", "variable", "index"):
             child = getattr(node, attr, None)
             if child is not None:
@@ -8339,9 +9157,13 @@ class _CallsiteStackArgsMaterializer8616:
         for attr in ("args", "operands"):
             items = getattr(node, attr, None)
             if isinstance(items, (list, tuple)):
-                yield from (item for item in items if item is not None)
+                yield from (item for item in iter(items) if item is not None)
 
-    def _register_carrier_transform_8616(self, node: StructuredAstValue, statements_prefix: list[StructuredAstValue], seen_keys: set[StructuredAstValue], failed: list[bool]) -> StructuredAstValue:
+    @cython.ccall
+    def _register_carrier_transform_8616(self, node: StructuredAstValue, statements_prefix: object, seen_keys: object, failed: object) -> StructuredAstValue:
+        key: object
+        resolved: object
+        scoped_key: object
         if failed[0] or not (self._is_plain_register_value_expr(node) or self._is_outgoing_stack_value_carrier_expr(node)):
             return node
         key = self._value_expr_key(node)
@@ -8373,8 +9195,8 @@ class _CallsiteStackArgsMaterializer8616:
 
     def _resolve_register_carriers_in_expr(self,
         expr: StructuredAstValue,
-        statements_prefix: list[StructuredAstValue],
-        seen_keys: set[StructuredAstValue] | None = None,
+        statements_prefix: object,
+        seen_keys: object = None,
     ) -> StructuredAstValue:
         if self._c_ast_node_count_limited(expr, limit=512) > 512:
             self.codegen._inertia_call_arg_register_resolution_refused_complex_8616 = (
@@ -8402,14 +9224,19 @@ class _CallsiteStackArgsMaterializer8616:
             return None
         return rewritten
 
-    def _stack_slot_fallback_name(self, offset: int) -> str:
+    @cython.ccall
+    def _stack_slot_fallback_name(self, offset: cython.longlong) -> str:
         if offset >= 0:
             slot_index = max(offset // 2, 1)
             return f"arg_{slot_index}"
         slot_index = max(((-offset) + 1) // 2, 1)
         return f"local_{slot_index}"
 
-    def _known_positive_bp_arg_offset_8616(self, offset: int) -> bool:
+    @cython.ccall
+    def _known_positive_bp_arg_offset_8616(self, offset: cython.longlong) -> cython.bint:
+        arg_variable: object
+        cfunc_obj: object
+        arg: object
         if not isinstance(offset, int) or offset <= 0:
             return False
         cfunc_obj = getattr(self.codegen, "cfunc", None)
@@ -8424,7 +9251,8 @@ class _CallsiteStackArgsMaterializer8616:
                 return True
         return False
 
-    def _materialize_fallback_stack_name_8616(self, offset: int, preferred_name: str | None = None) -> str:
+    @cython.ccall
+    def _materialize_fallback_stack_name_8616(self, offset: cython.longlong, preferred_name: object = None) -> object:
         fallback_name = (
             preferred_name if isinstance(preferred_name, str) and preferred_name else self._stack_slot_fallback_name(offset)
         )
@@ -8433,7 +9261,8 @@ class _CallsiteStackArgsMaterializer8616:
             return f"local_{slot_index}"
         return fallback_name
 
-    def _stack_name_preference(self, name: str | None) -> int:
+    @cython.ccall
+    def _stack_name_preference(self, name: object) -> cython.longlong:
         if not isinstance(name, str) or not name:
             return 0
         if name.startswith(("vvar_", "tmp_", "ir_", "s_", "stack_bp_", "stack_sp_")):
@@ -8445,7 +9274,9 @@ class _CallsiteStackArgsMaterializer8616:
     def _iter_stack_cvar_candidates(self) -> StructuredAstValue:
         yield from iter_stack_cvariable_candidates_8616(self.codegen, self.synthetic_stack_cvars)
 
-    def _existing_containing_stack_cvar_8616(self, offset: int, *, size_hint: int = 1) -> StructuredAstValue:
+    @cython.ccall
+    def _existing_containing_stack_cvar_8616(self, offset: cython.longlong, *, size_hint: cython.longlong = 1) -> StructuredAstValue:
+        cvar: object
         cvar = containing_stack_cvariable_8616(
             self.codegen,
             self.synthetic_stack_cvars,
@@ -8454,10 +9285,12 @@ class _CallsiteStackArgsMaterializer8616:
         )
         return self._clone_c_ast_tree(cvar) if cvar is not None else None
 
+    @cython.ccall
     def _stack_cvar_match_score_8616(
-        self, cvar: StructuredAstValue, offset: int, size_hint: int
-    ) -> tuple[int, int, int, int, int, int] | None:
+        self, cvar: StructuredAstValue, offset: cython.longlong, size_hint: cython.longlong
+    ) -> object:
         """Score a stack cvar candidate for containing/matching the offset."""
+        variable: object
         variable = getattr(cvar, "variable", None)
         if not isinstance(variable, SimStackVariable):
             return None
@@ -8485,12 +9318,16 @@ class _CallsiteStackArgsMaterializer8616:
             -abs(base_offset - offset),
         )
 
+    @cython.ccall
     def _best_matching_stack_cvar_8616(
-        self, offset: int, size_hint: int
+        self, offset: cython.longlong, size_hint: cython.longlong
     ) -> StructuredAstValue | None:
         """Pick the best-scoring stack cvar candidate for the offset."""
+        best_score: object
+        candidate_score: object
+        cvar: object
         best = None
-        best_score: tuple[int, int, int, int, int, int] | None = None
+        best_score = None
         for cvar in self._iter_stack_cvar_candidates():
             candidate_score = self._stack_cvar_match_score_8616(cvar, offset, size_hint)
             if candidate_score is not None and (best_score is None or candidate_score > best_score):
@@ -8498,15 +9335,18 @@ class _CallsiteStackArgsMaterializer8616:
                 best_score = candidate_score
         return best
 
+    @cython.ccall
     def _register_synthetic_stack_cvar_8616(
         self,
-        name: str,
+        name: object,
         variable_type: StructuredAstValue,
         *,
-        offset: int,
-        size_hint: int,
+        offset: cython.longlong,
+        size_hint: cython.longlong,
     ) -> StructuredAstValue | None:
         """Materialize and register a synthetic stack cvar for the offset."""
+        unified_locals: object
+        variables_in_use: object
         cvar = materialize_call_argument_stack_cvariable_8616(
             self.codegen,
             self.synthetic_stack_cvars,
@@ -8518,7 +9358,7 @@ class _CallsiteStackArgsMaterializer8616:
             return None
         variable = cvar.variable
         bound_variable_type = variable_type or _word_type_8616(self.project)
-        if variable.name != name:
+        if operator.ne(variable.name, name):
             variable.name = name
         if cvar.variable_type is None:
             cvar.variable_type = bound_variable_type
@@ -8531,9 +9371,13 @@ class _CallsiteStackArgsMaterializer8616:
             unified_locals[variable] = {(cvar, getattr(cvar, "variable_type", None))}
         return cvar
 
+    @cython.ccall
     def _stack_cvar_for_offset(self,
-        offset: int, *, size_hint: int = 2, allow_best_match: bool = True
+        offset: cython.longlong, *, size_hint: cython.longlong = 2, allow_best_match: cython.bint = True
     ) -> StructuredAstValue | None:
+        best: object
+        existing_synthetic: object
+        proven_object: object
         existing_synthetic = self.synthetic_stack_cvars.get(offset)
         if existing_synthetic is not None:
             return self._clone_c_ast_tree(existing_synthetic)
@@ -8573,14 +9417,16 @@ class _CallsiteStackArgsMaterializer8616:
             )
         )
 
-    def _sanitize_exact_negative_bp_call_arg_cvar_8616(self, expr: StructuredAstValue, offset: int) -> StructuredAstValue:
+    @cython.ccall
+    def _sanitize_exact_negative_bp_call_arg_cvar_8616(self, expr: StructuredAstValue, offset: cython.longlong) -> StructuredAstValue:
         """Clear a stale display identity only for the already-proven BP slot."""
+        unified: object
         if offset >= 0 or not isinstance(expr, structured_c.CVariable):
             return expr
         variable = expr.variable
         if not isinstance(variable, SimStackVariable):
             return expr
-        if variable.base != "bp" or call_argument_stack_variable_offset_8616(self.codegen, expr) != offset:
+        if variable.base != "bp" or operator.ne(call_argument_stack_variable_offset_8616(self.codegen, expr), offset):
             return expr
         unified = expr.unified_variable
         if unified is None:
@@ -8592,54 +9438,68 @@ class _CallsiteStackArgsMaterializer8616:
         expr.unified_variable = None
         return expr
 
+    @cython.ccall
     def _set_variables_in_use_type_8616(
-        self, variables: dict[StructuredAstValue, StructuredAstValue], offset: int, variable_type: StructuredAstValue
-    ) -> bool:
+        self, variables: object, offset: cython.longlong, variable_type: StructuredAstValue
+    ) -> cython.bint:
         """Update cvar variable_type for stack variables at the offset."""
+        cvar: object
+        variable: object
         changed_type = False
         for variable, cvar in variables.items():
             if not isinstance(variable, SimStackVariable):
                 continue
-            if variable.offset != offset:
+            if operator.ne(variable.offset, offset):
                 continue
-            if getattr(cvar, "variable_type", None) != variable_type:
+            if operator.ne(getattr(cvar, "variable_type", None), variable_type):
                 cvar.variable_type = variable_type
                 changed_type = True
         return changed_type
 
+    @cython.ccall
     def _set_unified_local_slot_type_8616(
-        self, unified: dict[StructuredAstValue, StructuredAstValue], offset: int, variable_type: StructuredAstValue
-    ) -> bool:
+        self, unified: object, offset: cython.longlong, variable_type: StructuredAstValue
+    ) -> cython.bint:
         """Update unified local entries for stack variables at the offset."""
+        _old_type: object
+        cvar: object
+        entries: object
+        variable: object
         changed_type = False
         for variable, entries in list(unified.items()):
-            if not isinstance(variable, SimStackVariable) or getattr(variable, "offset", None) != offset:
+            if not isinstance(variable, SimStackVariable) or operator.ne(getattr(variable, "offset", None), offset):
                 continue
             new_entries = set()
             for cvar, _old_type in entries:
-                if getattr(cvar, "variable_type", None) != variable_type:
+                if operator.ne(getattr(cvar, "variable_type", None), variable_type):
                     cvar.variable_type = variable_type
                     changed_type = True
                 new_entries.add((cvar, variable_type))
             unified[variable] = new_entries
         return changed_type
 
-    def _set_ast_stack_slot_type_8616(self, cfunc_obj: StructuredAstValue, offset: int, variable_type: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _set_ast_stack_slot_type_8616(self, cfunc_obj: StructuredAstValue, offset: cython.longlong, variable_type: StructuredAstValue) -> cython.bint:
         """Update in-AST CVariable node types for the stack slot."""
+        node: object
         changed_type = False
         for node in _iter_c_nodes_deep_8616(cfunc_obj):
             if not isinstance(node, structured_c.CVariable):
                 continue
             variable = node.variable
-            if not isinstance(variable, SimStackVariable) or getattr(variable, "offset", None) != offset:
+            if not isinstance(variable, SimStackVariable) or operator.ne(getattr(variable, "offset", None), offset):
                 continue
-            if node.variable_type != variable_type:
+            if operator.ne(node.variable_type, variable_type):
                 node.variable_type = variable_type
                 changed_type = True
         return changed_type
 
-    def _set_stack_slot_type_8616(self, offset: int, variable_type: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _set_stack_slot_type_8616(self, offset: cython.longlong, variable_type: StructuredAstValue) -> cython.bint:
         """Set the slot type across variable maps and AST nodes."""
+        cfunc_obj: object
+        unified: object
+        variables: object
         changed_type = False
         cfunc_obj = getattr(self.codegen, "cfunc", None)
         variables = getattr(cfunc_obj, "variables_in_use", None)
@@ -8651,7 +9511,10 @@ class _CallsiteStackArgsMaterializer8616:
         changed_type = self._set_ast_stack_slot_type_8616(cfunc_obj, offset, variable_type) or changed_type
         return bool(changed_type)
 
-    def _stack_slot_offset_for_name_8616(self, name: str | None) -> int | None:
+    @cython.ccall
+    def _stack_slot_offset_for_name_8616(self, name: object) -> int | None:
+        variable: object
+        cvar: object
         if not isinstance(name, str) or not name:
             return None
         for cvar in self._iter_stack_cvar_candidates():
@@ -8664,9 +9527,12 @@ class _CallsiteStackArgsMaterializer8616:
                 return offset if isinstance(offset, int) else None
         return None
 
+    @cython.ccall
     def _indirect_call_target_stack_offset_8616(self,
-        call: StructuredAstValue, summary: StructuredAstValue = None
+        call: object, summary: StructuredAstValue = None
     ) -> int | None:
+        callee_target: object
+        offset: object
         if call is None:
             return None
         target_source = summary.target_source if summary is not None else None
@@ -8683,9 +9549,11 @@ class _CallsiteStackArgsMaterializer8616:
             offset = self._plain_stack_slot_address_offset(callee_target)
         return offset
 
+    @cython.ccall
     def _apply_indirect_callsite_type_8616(self,
-        call: StructuredAstValue, summary: StructuredAstValue, _expected_arg_count: int | None
-    ) -> bool:
+        call: object, summary: object, _expected_arg_count: int | None
+    ) -> cython.bint:
+        target_cvar: object
         target_addr = summary.target_addr if summary is not None else None
         if call is None or isinstance(target_addr, int):
             return False
@@ -8705,7 +9573,8 @@ class _CallsiteStackArgsMaterializer8616:
                 changed_type = True
         return bool(changed_type)
 
-    def _set_assignment_lhs_8616(self, assignment: StructuredAstValue, new_lhs: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _set_assignment_lhs_8616(self, assignment: object, new_lhs: object) -> cython.bint:
         if assignment is None or new_lhs is None:
             return False
         if hasattr(assignment, "lhs"):
@@ -8720,8 +9589,12 @@ class _CallsiteStackArgsMaterializer8616:
             return True
         return False
 
-    def _same_call_result_value_8616(self, lhs: StructuredAstValue, rhs: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _same_call_result_value_8616(self, lhs: StructuredAstValue, rhs: StructuredAstValue) -> cython.bint:
         """Compare call-result values by SSA identity before storage identity."""
+        lhs_identity: object
+        rhs_identity: object
+        attribute: object
         while isinstance(lhs, CTypeCast):
             lhs = lhs.expr
         while isinstance(rhs, CTypeCast):
@@ -8736,16 +9609,16 @@ class _CallsiteStackArgsMaterializer8616:
                 rhs_identity = getattr(rhs_dirty, attribute, None)
                 if isinstance(lhs_identity, int) or isinstance(rhs_identity, int):
                     return (
-                        isinstance(lhs_identity, int) and isinstance(rhs_identity, int) and lhs_identity == rhs_identity
+                        isinstance(lhs_identity, int) and isinstance(rhs_identity, int) and operator.eq(lhs_identity, rhs_identity)
                     )
         return bool(_same_c_expression_8616(lhs, rhs))
 
     def _expression_reads_exact_call_result_8616(self,
-        expression: StructuredAstValue,
+        expression: object,
         call_result: StructuredAstValue,
         *,
-        seen: set[int] | None = None,
-    ) -> bool:
+        seen: object = None,
+    ) -> cython.bint:
         """Return whether a structured C expression reads the exact call result."""
         if expression is None:
             return False
@@ -8759,9 +9632,10 @@ class _CallsiteStackArgsMaterializer8616:
         seen.add(marker)
         return any(
             self._expression_reads_exact_call_result_8616(child, call_result, seen=seen)
-            for child in self._call_result_read_children_8616(expression)
+            for child in builtins.iter(self._call_result_read_children_8616(expression))
         )
 
+    @cython.ccall
     def _call_result_read_children_8616(self, expression: StructuredAstValue) -> tuple[StructuredAstValue, ...]:
         """Return the child expressions this node may read through."""
         if isinstance(expression, CTypeCast):
@@ -8778,13 +9652,16 @@ class _CallsiteStackArgsMaterializer8616:
             return tuple(expression.args or ())
         return ()
 
+    @cython.ccall
     def _is_exact_destination_view_8616(
         self,
         candidate_lhs: StructuredAstValue,
         destination_lhs: StructuredAstValue,
-        expected_stack_destination: tuple[int, int] | None,
-    ) -> bool:
+        expected_stack_destination: object,
+    ) -> cython.bint:
         """Check whether candidate_lhs is the same proven destination."""
+        destination_region: object
+        destination_variable: object
         if _same_c_expression_8616(candidate_lhs, destination_lhs):
             return True
         if expected_stack_destination is None:
@@ -8798,20 +9675,24 @@ class _CallsiteStackArgsMaterializer8616:
         if not isinstance(variable, SimStackVariable):
             return False
         expected_offset, expected_width = expected_stack_destination
-        if variable.base != "bp" or variable.offset != expected_offset or variable.size != expected_width:
+        if variable.base != "bp" or operator.ne(variable.offset, expected_offset) or operator.ne(variable.size, expected_width):
             return False
         destination_variable = getattr(destination_lhs, "variable", None)
         destination_region = getattr(destination_variable, "region", None)
-        return destination_region is None or variable.region is None or variable.region == destination_region
+        return destination_region is None or variable.region is None or operator.eq(variable.region, destination_region)
 
+    @cython.ccall
     def _classify_stale_alias_candidate_8616(
         self,
         candidate: StructuredAstValue,
         old_lhs: StructuredAstValue,
         destination_lhs: StructuredAstValue,
-        expected_stack_destination: tuple[int, int] | None,
+        expected_stack_destination: object,
     ) -> tuple[StructuredAstValue, ...]:
         """Classify one following statement as refuse/match/skip for alias consumption."""
+        candidate_assignment: object
+        candidate_lhs: object
+        candidate_rhs: object
         if self._statement_contains_call(candidate):
             return ("refuse", "following-call")
         candidate_assignment = self._top_level_assignment_node_8616(candidate)
@@ -8832,16 +9713,19 @@ class _CallsiteStackArgsMaterializer8616:
             return ("refuse", "competing-read")
         return ("skip",)
 
+    @cython.ccall
     def _consume_exact_stale_return_alias_8616(self,
         call_node: StructuredAstValue,
         old_lhs: StructuredAstValue,
         destination_lhs: StructuredAstValue,
-        following_stmts: tuple[StructuredAstValue, ...],
+        following_stmts: object,
         *,
-        expected_stack_destination: tuple[int, int] | None = None,
+        expected_stack_destination: object = None,
     ) -> StructuredAstValue | None:
         """Consume and return the exact destination view of a proven call result."""
-        matched_alias: tuple[int, StructuredAstValue] | None = None
+        matched_alias: object
+        candidate: object
+        matched_alias = None
 
         for candidate in following_stmts:
             verdict = self._classify_stale_alias_candidate_8616(
@@ -8870,10 +9754,13 @@ class _CallsiteStackArgsMaterializer8616:
             log.warning("[call-return-destination-consume] target=%s", _call_node_name_8616(call_node))
         return candidate_lhs
 
+    @cython.ccall
     def _call_result_destination_cvar_8616(
-        self, destination: tuple[StructuredAstValue, int], width_hint: int
+        self, destination: object, width_hint: cython.longlong
     ) -> StructuredAstValue | None:
         """Resolve the destination lvalue cvar for the proven store."""
+        dest_cvar: object
+        direct_ref: object
         if destination[0] == "bp":
             dest_cvar = self._stack_cvar_for_offset(destination[1], size_hint=width_hint, allow_best_match=False)
             if dest_cvar is None:
@@ -8891,10 +9778,15 @@ class _CallsiteStackArgsMaterializer8616:
     def _apply_call_return_store_destination_8616(self,
         stmt: StructuredAstValue,
         call: StructuredAstValue,
-        summary: CallsiteSummary8616 | None,
-        following_stmts: tuple[StructuredAstValue, ...] = (),
-    ) -> bool:
+        summary: object,
+        following_stmts: object = (),
+    ) -> cython.bint:
         """Apply a proven call-result destination and consume its exact stale alias."""
+        dest_cvar: object
+        destination: object
+        old_lhs: object
+        stale_destination: object
+        assignment: object
         destination = summary.return_store_destination if summary is not None else None
         if summary is None or destination is None or not _return_store_destination_applicable_8616(call, summary, destination):
             return False
@@ -8907,7 +9799,7 @@ class _CallsiteStackArgsMaterializer8616:
         updated = False
         for assignment in self._iter_assignment_nodes(stmt):
             if self._call_from_statement(assignment) is not call and not any(
-                node is call for node in _iter_c_nodes_deep_8616(assignment)
+                node is call for node in builtins.iter(_iter_c_nodes_deep_8616(assignment))
             ):
                 continue
             old_lhs, _old_rhs = self._assignment_lhs_rhs(assignment)
@@ -8931,8 +9823,16 @@ class _CallsiteStackArgsMaterializer8616:
             return updated
         return False
 
-    def _promote_current_function_return_type_from_summary_8616(self, summary: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _promote_current_function_return_type_from_summary_8616(self, summary: StructuredAstValue) -> cython.bint:
         """Consume return-use evidence while preserving stronger prototype provenance."""
+        arch: object
+        cfunc_obj: object
+        func: object
+        func_addr: object
+        functions: object
+        lookup: object
+        prototype: object
         if summary.return_register != "ax" or summary.return_used is not True:
             return False
         cfunc_obj = getattr(self.codegen, "cfunc", None)
@@ -8962,14 +9862,14 @@ class _CallsiteStackArgsMaterializer8616:
             new_prototype = new_prototype.with_arch(arch)
         changed_return = False
         if cfunc_obj is not None:
-            if getattr(cfunc_obj, "functy", None) != new_prototype:
+            if operator.ne(getattr(cfunc_obj, "functy", None), new_prototype):
                 cfunc_obj.functy = new_prototype
                 changed_return = True
-            if getattr(cfunc_obj, "prototype", None) != new_prototype:
+            if operator.ne(getattr(cfunc_obj, "prototype", None), new_prototype):
                 with contextlib.suppress(Exception):
                     cfunc_obj.prototype = new_prototype
                     changed_return = True
-        if func is not None and getattr(func, "prototype", None) != new_prototype:
+        if func is not None and operator.ne(getattr(func, "prototype", None), new_prototype):
             func.prototype = new_prototype
             func.prototype_source = max(func.prototype_source, PrototypeSource.CALLSITE_DECOMPILER)
             changed_return = True
@@ -8979,7 +9879,9 @@ class _CallsiteStackArgsMaterializer8616:
             )
         return changed_return
 
-    def _register_name_from_c_variable_8616(self, expr: StructuredAstValue) -> str | None:
+    @cython.ccall
+    def _register_name_from_c_variable_8616(self, expr: StructuredAstValue) -> object:
+        reg_name: object
         node = expr
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -8996,21 +9898,21 @@ class _CallsiteStackArgsMaterializer8616:
                 return reg_name.strip().lower().split("#", 1)[0]
         return None
 
-    def _node_reads_register_name_8616(self, node: StructuredAstValue, register_name: str) -> bool:
+    def _node_reads_register_name_8616(self, node: object, register_name: object) -> cython.bint:
         if node is None:
             return False
-        if self._register_name_from_c_variable_8616(node) == register_name:
+        if operator.eq(self._register_name_from_c_variable_8616(node), register_name):
             return True
         return any(
-            self._register_name_from_c_variable_8616(child) == register_name for child in _iter_c_nodes_deep_8616(node)
+            operator.eq(self._register_name_from_c_variable_8616(child), register_name) for child in builtins.iter(_iter_c_nodes_deep_8616(node))
         )
 
     def _ret_selector_debug_refuse_8616(self,
-        call: StructuredAstValue,
+        call: object,
         stmt: StructuredAstValue,
-        following_statements: tuple[StructuredAstValue, ...],
-        summary: StructuredAstValue,
-        reason: str,
+        following_statements: object,
+        summary: object,
+        reason: object,
     ) -> StructuredAstValue:
         """Log a selector-materialization refusal and keep ``stmt``."""
         if os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"):
@@ -9019,7 +9921,7 @@ class _CallsiteStackArgsMaterializer8616:
                 _call_node_name_8616(call) if call is not None else None,
                 reason,
                 type(stmt).__name__,
-                tuple(type(candidate).__name__ for candidate in following_statements),
+                tuple(type(candidate).__name__ for candidate in iter(following_statements)),
                 summary.return_register if summary is not None else None,
                 summary.return_used if summary is not None else None,
             )
@@ -9027,11 +9929,13 @@ class _CallsiteStackArgsMaterializer8616:
 
     def _call_return_selector_assignment_statement_8616(self,
         stmt: StructuredAstValue,
-        call: StructuredAstValue,
-        summary: CallsiteSummary8616 | None,
+        call: object,
+        summary: object,
         following_statements: StructuredAstValue,
     ) -> StructuredAstValue:
         """Materialize an AX selector only from a present typed callsite summary."""
+        ax_expr: object
+        existing_variable: object
         following_statements = tuple(following_statements or ())
 
 
@@ -9048,7 +9952,7 @@ class _CallsiteStackArgsMaterializer8616:
         if not (is_standalone_call or is_assignment_call):
             return self._ret_selector_debug_refuse_8616(call, stmt, following_statements, summary, "call-not-standalone-or-assignment")
         has_following_ax_read = any(
-            self._node_reads_register_name_8616(candidate, "ax") for candidate in following_statements
+            self._node_reads_register_name_8616(candidate, "ax") for candidate in iter(following_statements)
         )
         if not has_following_ax_read and summary.return_use_kind != "condition":
             return self._ret_selector_debug_refuse_8616(call, stmt, following_statements, summary, "no-ax-selector-evidence")
@@ -9060,8 +9964,8 @@ class _CallsiteStackArgsMaterializer8616:
         if (
             isinstance(existing_variable, SimRegisterVariable)
             and isinstance(ax_expr.variable, SimRegisterVariable)
-            and existing_variable.reg == ax_expr.variable.reg
-            and existing_variable.size == ax_expr.variable.size
+            and operator.eq(existing_variable.reg, ax_expr.variable.reg)
+            and operator.eq(existing_variable.size, ax_expr.variable.size)
         ):
             return stmt
         if os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"):
@@ -9069,7 +9973,7 @@ class _CallsiteStackArgsMaterializer8616:
                 "[call-return-selector] materialize target=%r stmt=%s following=%r",
                 _call_node_name_8616(call),
                 type(stmt).__name__,
-                tuple(type(candidate).__name__ for candidate in following_statements),
+                tuple(type(candidate).__name__ for candidate in iter(following_statements)),
             )
         _preserve_detached_callee_render_metadata_8616(call)
         self.codegen._inertia_call_return_switch_selector_materialized_8616 = (
@@ -9080,7 +9984,10 @@ class _CallsiteStackArgsMaterializer8616:
             return stmt
         return structured_c.CAssignment(ax_expr, call, codegen=self.codegen)
 
-    def _near_function_symbol_expr_8616(self, target_addr: int, arg_count: int | None = None) -> StructuredAstValue | None:
+    @cython.ccall
+    def _near_function_symbol_expr_8616(self, target_addr: cython.longlong, arg_count: int | None = None) -> StructuredAstValue | None:
+        synthetic: object
+        synthetic_globals: object
         name = None
         synthetic_globals = getattr(self.codegen, "_inertia_synthetic_globals", None)
         if not isinstance(synthetic_globals, dict):
@@ -9103,7 +10010,10 @@ class _CallsiteStackArgsMaterializer8616:
             codegen=self.codegen,
         )
 
-    def _operand_reg_name_from_capstone_8616(self, insn: StructuredAstValue, operand: StructuredAstValue) -> str | None:
+    @cython.ccall
+    def _operand_reg_name_from_capstone_8616(self, insn: StructuredAstValue, operand: StructuredAstValue) -> object:
+        reg: object
+        reg_name: object
         reg = getattr(operand, "reg", None)
         if not isinstance(reg, int):
             return None
@@ -9116,7 +10026,12 @@ class _CallsiteStackArgsMaterializer8616:
                 return name.lower()
         return None
 
-    def _mov_bp_imm_store_8616(self, insn: StructuredAstValue) -> tuple[int, int] | None:
+    @cython.ccall
+    def _mov_bp_imm_store_8616(self, insn: StructuredAstValue) -> object:
+        base_operand: object
+        disp: object
+        imm: object
+        mem: object
         if str(getattr(insn, "mnemonic", "") or "").lower() != "mov":
             return None
         operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
@@ -9137,7 +10052,11 @@ class _CallsiteStackArgsMaterializer8616:
             return None
         return disp, imm & 0xFFFF
 
+    @cython.ccall
     def _mov_bp_store_offset_8616(self, insn: StructuredAstValue) -> int | None:
+        base_operand: object
+        disp: object
+        mem: object
         if str(getattr(insn, "mnemonic", "") or "").lower() != "mov":
             return None
         operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
@@ -9155,7 +10074,11 @@ class _CallsiteStackArgsMaterializer8616:
         disp = getattr(mem, "disp", None)
         return disp if isinstance(disp, int) else None
 
+    @cython.ccall
     def _function_for_current_cfunc_8616(self) -> StructuredAstValue:
+        func_addr: object
+        functions: object
+        lookup: object
         func_addr = getattr(self.cfunc, "addr", None)
         if not isinstance(func_addr, int):
             return None
@@ -9167,32 +10090,39 @@ class _CallsiteStackArgsMaterializer8616:
             return lookup(addr=func_addr, create=False)
         return None
 
-    def _function_pointer_stack_store_slot_has_type_evidence_8616(self, offset: int) -> bool:
+    @cython.ccall
+    def _function_pointer_stack_store_slot_has_type_evidence_8616(self, offset: cython.longlong) -> cython.bint:
         if self.fnptr_typed_stack_offsets_cache_8616 is None:
             self.fnptr_typed_stack_offsets_cache_8616 = _annotated_function_pointer_stack_offsets_8616(self.project, self.cfunc)
         return isinstance(offset, int) and offset in self.fnptr_typed_stack_offsets_cache_8616
 
+    @cython.ccall
     def _scan_fnptr_evidence_block_8616(self,
-        block_addr: int,
-        evidence: dict[int, list[tuple[int, StructuredAstValue]]],
-        seen_stores: set[tuple[int, int, int]],
-        debug_fnptr: bool,
+        block_addr: cython.longlong,
+        evidence: object,
+        seen_stores: object,
+        debug_fnptr: cython.bint,
     ) -> None:
         """Scan one lifted block for typed function-pointer stack stores."""
+        insn: object
         with contextlib.suppress(Exception):
             block = self.project.factory.block(block_addr, opt_level=0)
             insns = _boundary_tuple_8616(getattr(getattr(block, "capstone", None), "insns", ()) or ())
             for insn in insns:
                 self._scan_fnptr_evidence_insn_8616(insn, block_addr, evidence, seen_stores, debug_fnptr)
 
+    @cython.ccall
     def _scan_fnptr_evidence_insn_8616(self,
         insn: StructuredAstValue,
-        block_addr: int,
-        evidence: dict[int, list[tuple[int, StructuredAstValue]]],
-        seen_stores: set[tuple[int, int, int]],
-        debug_fnptr: bool,
+        block_addr: cython.longlong,
+        evidence: object,
+        seen_stores: object,
+        debug_fnptr: cython.bint,
     ) -> None:
         """Record one bp+imm function-pointer store when slot and target evidence hold."""
+        capstone_insn: object
+        store: object
+        symbol: object
         capstone_insn = getattr(insn, "insn", insn)
         store = self._mov_bp_imm_store_8616(capstone_insn)
         if store is None:
@@ -9253,39 +10183,48 @@ class _CallsiteStackArgsMaterializer8616:
             return
         evidence.setdefault(offset, []).append((insn_addr, symbol))
 
-    def _function_pointer_stack_store_evidence_8616(self) -> dict[int, list[tuple[int, StructuredAstValue]]]:
+    def _function_pointer_stack_store_evidence_8616(self) -> object:
+        block_addr: object
+        items: object
+        offset: object
         function = self._function_for_current_cfunc_8616()
-        block_addrs = _boundary_tuple_8616(sorted(getattr(function, "block_addrs_set", ()) or ()))
+        block_addrs = _boundary_tuple_8616(sorted(tuple(getattr(function, "block_addrs_set", ()) or ())))
         debug_fnptr = bool(os.environ.get("INERTIA_DEBUG_FUNCTION_POINTER_STORES"))
         if debug_fnptr:
             log.warning(
                 "[fnptr-scan] func=%#x blocks=%r",
                 getattr(self.cfunc, "addr", 0) or 0,
-                tuple(hex(addr) for addr in block_addrs),
+                tuple(hex(addr) for addr in iter(block_addrs)),
             )
-        evidence: dict[int, list[tuple[int, StructuredAstValue]]] = {}
-        seen_stores: set[tuple[int, int, int]] = set()
+        evidence: dict[cython.longlong, list[tuple[cython.longlong, StructuredAstValue]]] = {}
+        seen_stores: set[tuple[cython.longlong, cython.longlong, cython.longlong]] = set()
         for block_addr in block_addrs:
             self._scan_fnptr_evidence_block_8616(block_addr, evidence, seen_stores, debug_fnptr)
-        ordered: dict[int, list[tuple[int, StructuredAstValue]]] = {}
+        ordered: dict[cython.longlong, list[tuple[cython.longlong, StructuredAstValue]]] = {}
         for offset, items in evidence.items():
             ordered[offset] = [
                 (int(getattr(getattr(symbol, "variable", None), "addr", imm) or imm), self._clone_c_ast_tree(symbol))
-                for _addr, symbol in sorted(items, key=lambda item: item[0])
-                for imm in [int(getattr(getattr(symbol, "variable", None), "addr", 0) or 0)]
+                for _addr, symbol in builtins.iter(sorted(items, key=lambda item: item[0]))
+                for imm in iter([int(getattr(getattr(symbol, "variable", None), "addr", 0) or 0)])
             ]
         return ordered
 
-    def _cached_function_pointer_stack_store_evidence_8616(self) -> dict[int, list[tuple[int, StructuredAstValue]]]:
+    @cython.ccall
+    def _cached_function_pointer_stack_store_evidence_8616(self) -> object:
         if self.fnptr_store_evidence_cache_8616 is None:
             self.fnptr_store_evidence_cache_8616 = self._function_pointer_stack_store_evidence_8616()
         return self.fnptr_store_evidence_cache_8616
 
-    def _bp_stack_store_counts_8616(self) -> Counter[int]:
+    @cython.ccall
+    def _bp_stack_store_counts_8616(self) -> Counter[cython.longlong]:
+        capstone_insn: object
+        offset: object
+        block_addr: object
+        insn: object
         function = self._function_for_current_cfunc_8616()
-        block_addrs = _boundary_tuple_8616(sorted(getattr(function, "block_addrs_set", ()) or ()))
-        counts: Counter[int] = Counter()
-        seen_insns: set[int] = set()
+        block_addrs = _boundary_tuple_8616(sorted(tuple(getattr(function, "block_addrs_set", ()) or ())))
+        counts: Counter[cython.longlong] = Counter()
+        seen_insns: set[cython.longlong] = set()
         for block_addr in block_addrs:
             with contextlib.suppress(Exception):
                 block = self.project.factory.block(block_addr, opt_level=0)
@@ -9302,6 +10241,7 @@ class _CallsiteStackArgsMaterializer8616:
                     counts[offset] += 1
         return counts
 
+    @cython.ccall
     def _stack_offset_from_cvar_8616(self, expr: StructuredAstValue) -> int | None:
         """Return the authoritative machine-BP coordinate for a stack C variable."""
         node = expr
@@ -9310,14 +10250,17 @@ class _CallsiteStackArgsMaterializer8616:
         offset = call_argument_stack_variable_offset_8616(self.codegen, node)
         return offset if isinstance(offset, int) else None
 
-    def _is_immediate_like_expr_8616(self, expr: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_immediate_like_expr_8616(self, expr: StructuredAstValue) -> cython.bint:
         node = expr
         while isinstance(node, CTypeCast):
             node = node.expr
         return isinstance(node, structured_c.CConstant)
 
 
-    def _symbol_name_8616(self, expr: StructuredAstValue) -> str | None:
+    @cython.ccall
+    def _symbol_name_8616(self, expr: StructuredAstValue) -> object:
+        variable: object
         node = expr
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -9325,20 +10268,26 @@ class _CallsiteStackArgsMaterializer8616:
         name = getattr(variable, "name", None) or getattr(node, "name", None)
         return name if isinstance(name, str) and name else None
 
+    @cython.ccall
     def _assignment_to_stack_offset_8616(self,
         stmt: StructuredAstValue,
-        offset: int,
+        offset: cython.longlong,
     ) -> tuple[StructuredAstValue | None, StructuredAstValue | None]:
+        assignment: object
         for assignment in self._iter_assignment_nodes(stmt):
             lhs, rhs = self._assignment_lhs_rhs(assignment)
-            if self._stack_offset_from_cvar_8616(lhs) == offset:
+            if operator.eq(self._stack_offset_from_cvar_8616(lhs), offset):
                 return assignment, rhs
         return None, None
 
+    @cython.ccall
     def _debug_fnptr_ifelse_8616(
-        self, stmt: StructuredAstValue, evidence: dict[int, list[tuple[int, StructuredAstValue]]]
+        self, stmt: StructuredAstValue, evidence: object
     ) -> None:
         """Log branch assignment evidence for a function-pointer ifelse."""
+        child: object
+        else_node: object
+        _cond: object
         branch_debug = []
         for _cond, child in _boundary_tuple_8616(stmt.condition_and_nodes or ()):
             branch_debug.append(
@@ -9359,36 +10308,43 @@ class _CallsiteStackArgsMaterializer8616:
             tuple(sorted(evidence)),
         )
 
+    @cython.ccall
     def _branch_assignments_for_offset_8616(
-        self, stmt: StructuredAstValue, else_node: StructuredAstValue, offset: int
-    ) -> list[tuple[StructuredAstValue, StructuredAstValue | None]]:
+        self, stmt: StructuredAstValue, else_node: object, offset: cython.longlong
+    ) -> object:
         """Collect branch assignments whose LHS is the stack offset."""
+        _cond: object
+        assignment: object
+        child: object
         branch_assignments: list[tuple[StructuredAstValue, StructuredAstValue | None]] = []
         for _cond, child in _boundary_tuple_8616(stmt.condition_and_nodes or ()):
             for assignment in self._iter_assignment_nodes(child):
                 lhs, rhs = self._assignment_lhs_rhs(assignment)
-                if self._stack_offset_from_cvar_8616(lhs) == offset:
+                if operator.eq(self._stack_offset_from_cvar_8616(lhs), offset):
                     branch_assignments.append((assignment, rhs))
         if else_node is not None:
             for assignment in self._iter_assignment_nodes(else_node):
                 lhs, rhs = self._assignment_lhs_rhs(assignment)
-                if self._stack_offset_from_cvar_8616(lhs) == offset:
+                if operator.eq(self._stack_offset_from_cvar_8616(lhs), offset):
                     branch_assignments.append((assignment, rhs))
         return branch_assignments
 
+    @cython.ccall
     def _materialize_branch_unknown_fnptr_symbols_8616(
         self,
         stmt: StructuredAstValue,
         else_node: StructuredAstValue,
-        evidence: dict[int, list[tuple[int, StructuredAstValue]]],
-    ) -> bool:
+        evidence: object,
+    ) -> cython.bint:
         """Assign the single remaining known symbol to the single unknown branch."""
+        offset: object
+        symbols: object
         changed = False
         for offset, symbols in evidence.items():
             symbol_by_name = {
                 name: symbol
-                for _addr, symbol in symbols
-                for name in [self._symbol_name_8616(symbol)]
+                for _addr, symbol in iter(symbols)
+                for name in iter([self._symbol_name_8616(symbol)])
                 if name is not None
             }
             if len(symbol_by_name) < 2:
@@ -9396,16 +10352,16 @@ class _CallsiteStackArgsMaterializer8616:
             branch_assignments = self._branch_assignments_for_offset_8616(stmt, else_node, offset)
             known_names = {
                 name
-                for _assignment, rhs in branch_assignments
-                for name in [self._symbol_name_8616(rhs)]
+                for _assignment, rhs in iter(branch_assignments)
+                for name in iter([self._symbol_name_8616(rhs)])
                 if name in symbol_by_name
             }
             unknown_assignments = [
                 assignment
-                for assignment, rhs in branch_assignments
+                for assignment, rhs in iter(branch_assignments)
                 if self._symbol_name_8616(rhs) not in symbol_by_name
             ]
-            remaining = [symbol for name, symbol in symbol_by_name.items() if name not in known_names]
+            remaining = [symbol for name, symbol in builtins.iter(symbol_by_name.items()) if name not in known_names]
             if len(unknown_assignments) == 1 and len(remaining) == 1:
                 assignment = unknown_assignments[0]
                 symbol = self._clone_c_ast_tree(remaining[0])
@@ -9420,13 +10376,20 @@ class _CallsiteStackArgsMaterializer8616:
                 changed = True
         return changed
 
+    @cython.ccall
     def _materialize_else_fnptr_symbols_8616(
         self,
         stmt: StructuredAstValue,
-        else_node: StructuredAstValue,
-        evidence: dict[int, list[tuple[int, StructuredAstValue]]],
-    ) -> bool:
+        else_node: object,
+        evidence: object,
+    ) -> cython.bint:
         """Materialize the missing branch symbol into an empty else block."""
+        assignment: object
+        name: object
+        symbol: object
+        _cond: object
+        child: object
+        offset: object
         changed = False
         for offset in evidence:
             has_empty_else = else_node is None or not _boundary_tuple_8616(
@@ -9438,7 +10401,7 @@ class _CallsiteStackArgsMaterializer8616:
             for _cond, child in _boundary_tuple_8616(stmt.condition_and_nodes or ()):
                 for assignment in self._iter_assignment_nodes(child):
                     lhs, rhs = self._assignment_lhs_rhs(assignment)
-                    if self._stack_offset_from_cvar_8616(lhs) == offset:
+                    if operator.eq(self._stack_offset_from_cvar_8616(lhs), offset):
                         name = self._symbol_name_8616(rhs)
                         if name is not None:
                             branch_names.add(name)
@@ -9452,7 +10415,8 @@ class _CallsiteStackArgsMaterializer8616:
             changed = True
         return changed
 
-    def _replace_stack_code_pointer_assignments_8616(self, root: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _replace_stack_code_pointer_assignments_8616(self, root: StructuredAstValue) -> cython.bint:
         evidence = self._cached_function_pointer_stack_store_evidence_8616()
         if not evidence:
             return False
@@ -9482,15 +10446,18 @@ class _CallsiteStackArgsMaterializer8616:
         )
         return changed_local
 
+    @cython.ccall
     def _walk_fnptr_ifelse_8616(
         self,
         stmt: StructuredAstValue,
         *,
         evidence: StructuredAstValue,
         bp_stack_store_counts: StructuredAstValue,
-        debug_fnptr: bool,
-    ) -> bool:
+        debug_fnptr: cython.bint,
+    ) -> cython.bint:
         """Apply function-pointer repairs inside a CIfElse statement."""
+        _cond: object
+        child: object
         changed_local = False
         if debug_fnptr:
             self._debug_fnptr_ifelse_8616(stmt, evidence)
@@ -9514,15 +10481,19 @@ class _CallsiteStackArgsMaterializer8616:
             changed_local = True
         return changed_local
 
+    @cython.ccall
     def _walk_fnptr_children_8616(
         self,
         stmt: StructuredAstValue,
         *,
         evidence: StructuredAstValue,
         bp_stack_store_counts: StructuredAstValue,
-        debug_fnptr: bool,
-    ) -> bool:
+        debug_fnptr: cython.bint,
+    ) -> cython.bint:
         """Walk statement child containers for function-pointer repairs."""
+        child: object
+        children: object
+        attr: object
         any_changed = False
         for attr in ("statements",):
             children = getattr(stmt, attr, None)
@@ -9542,14 +10513,15 @@ class _CallsiteStackArgsMaterializer8616:
                 any_changed = True
         return any_changed
 
+    @cython.ccall
     def _walk_fnptr_statements_8616(
         self,
-        stmt: StructuredAstValue,
+        stmt: object,
         *,
-        evidence: dict[int, list[tuple[int, StructuredAstValue]]],
+        evidence: object,
         bp_stack_store_counts: StructuredAstValue,
-        debug_fnptr: bool,
-    ) -> bool:
+        debug_fnptr: cython.bint,
+    ) -> cython.bint:
         """Walk statements and apply function-pointer store repairs; return whether anything changed."""
         changed_local = False
         if stmt is None:
@@ -9568,10 +10540,12 @@ class _CallsiteStackArgsMaterializer8616:
             changed_local = True
         return changed_local
 
+    @cython.ccall
     def _final_return_call_pair_8616(
-        self, statements: list[StructuredAstValue]
-    ) -> tuple[int, int] | None:
+        self, statements: object
+    ) -> object:
         """Locate the trailing ``call; return`` statement pair."""
+        ret_idx: object
         ret_idx = None
         for idx in range(len(statements) - 1, -1, -1):
             candidate = self.single_nested_statement(statements[idx])
@@ -9590,21 +10564,26 @@ class _CallsiteStackArgsMaterializer8616:
             return None
         return ret_idx, call_idx
 
+    @cython.ccall
     def _materialize_final_call_direct_args_8616(
         self,
         call: StructuredAstValue,
         summary: CallsiteSummary8616,
-        statements: list[StructuredAstValue],
+        statements: object,
     ) -> None:
         """Materialize direct push-source args for the trailing call when proven."""
+        arg: object
+        normalized_args: object
+        idx: object
+        source: object
         push_arg_sources = summary.push_arg_sources
         summary_arg_count = summary.arg_count
         if not (
             isinstance(summary_arg_count, int)
             and summary_arg_count > 0
             and isinstance(push_arg_sources, tuple)
-            and len(push_arg_sources) == summary_arg_count
-            and len(_boundary_tuple_8616(getattr(call, "args", ()) or ())) != summary_arg_count
+            and operator.eq(len(push_arg_sources), summary_arg_count)
+            and operator.ne(len(_boundary_tuple_8616(getattr(call, "args", ()) or ())), summary_arg_count)
         ):
             return
         ordered_push_sources = (
@@ -9624,7 +10603,7 @@ class _CallsiteStackArgsMaterializer8616:
             direct_args.append(arg)
             if isinstance(source, tuple) and len(source) >= 2 and source[0] == "bp" and isinstance(source[1], int):
                 direct_bindings[int(source[1])] = self._clone_c_ast_tree(arg)
-        if len(direct_args) == summary_arg_count:
+        if operator.eq(len(direct_args), summary_arg_count):
             normalized_args = self._normalize_materialized_call_args(
                 direct_args,
                 [-1] * len(direct_args),
@@ -9643,10 +10622,11 @@ class _CallsiteStackArgsMaterializer8616:
                     record_stack_arg_materialization_8616(self.codegen, len(normalized_args))
                     self._refresh_summary_arg_shape(call, summary)
 
+    @cython.ccall
     def _debug_final_return_call_8616(
         self,
         call: StructuredAstValue,
-        summary: CallsiteSummary8616 | None,
+        summary: object,
         ret_stmt: StructuredAstValue,
     ) -> None:
         """Log trailing call/return diagnostics when debugging is enabled."""
@@ -9659,17 +10639,19 @@ class _CallsiteStackArgsMaterializer8616:
                 getattr(ret_stmt.retval, "value", None),
             )
 
+    @cython.ccall
     def _apply_final_return_call_8616(
         self,
-        statements: list[StructuredAstValue],
-        call_idx: int,
+        statements: object,
+        call_idx: cython.longlong,
         ret_stmt: StructuredAstValue,
         call: StructuredAstValue,
         summary: CallsiteSummary8616,
-        nested_call_statements: StructuredAstValue,
-        nested_call_idx: int | None,
-    ) -> bool:
+        nested_call_statements: object,
+        nested_call_idx: object,
+    ) -> cython.bint:
         """Replace the return value with the call and drop the call statement."""
+        retval: object
         retval = ret_stmt.retval
         if retval is not None and not isinstance(retval, structured_c.CConstant):
             return False
@@ -9683,7 +10665,12 @@ class _CallsiteStackArgsMaterializer8616:
             del statements[call_idx]
         return True
 
-    def _materialize_final_return_call_8616(self, statements: list[StructuredAstValue]) -> bool:
+    @cython.ccall
+    def _materialize_final_return_call_8616(self, statements: object) -> cython.bint:
+        call: object
+        function_addr: object
+        pair: object
+        summary: object
         if os.environ.get("INERTIA_DEBUG_FUNCTION_POINTER_STORES"):
             log.warning(
                 "[return-call-list] %r",
@@ -9694,7 +10681,7 @@ class _CallsiteStackArgsMaterializer8616:
                         getattr(getattr(stmt, "expr", None), "__class__", type(None)).__name__,
                         getattr(getattr(stmt, "retval", None), "__class__", type(None)).__name__,
                     )
-                    for idx, stmt in enumerate(statements[-8:])
+                    for idx, stmt in builtins.iter(enumerate(statements[-8:]))
                 ],
             )
         if len(statements) < 2:
@@ -9736,7 +10723,9 @@ class _CallsiteStackArgsMaterializer8616:
             statements, call_idx, ret_stmt, call, summary, nested_call_statements, nested_call_idx
         )
 
-    def _register_expr_from_name_8616(self, reg_name: str) -> StructuredAstValue:
+    @cython.ccall
+    def _register_expr_from_name_8616(self, reg_name: object) -> StructuredAstValue:
+        register: object
         register = getattr(getattr(self.project, "arch", None), "registers", {}).get(reg_name.lower())
         if not isinstance(register, tuple) or not register:
             return None
@@ -9746,17 +10735,20 @@ class _CallsiteStackArgsMaterializer8616:
             codegen=self.codegen,
         )
 
-    def _segment_register_expr(self, seg_name: str) -> StructuredAstValue:
+    @cython.ccall
+    def _segment_register_expr(self, seg_name: object) -> StructuredAstValue:
         return self._register_expr_from_name_8616(seg_name)
 
+    @cython.ccall
     def _lower_proven_segment_push_source_8616(self,
-        segment_name: str,
-        push_sources: tuple[StructuredAstValue, ...],
+        segment_name: object,
+        push_sources: object,
     ) -> StructuredAstValue:
         """Delegate an exact segment PUSH source to the bound Types/Lowering service."""
+        cfunc: object
         proven_segments = {
             source[1].lower()
-            for source in push_sources
+            for source in iter(push_sources)
             if (
                 isinstance(source, tuple)
                 and len(source) == 2
@@ -9785,7 +10777,10 @@ class _CallsiteStackArgsMaterializer8616:
             function_addr=function_addr,
         )
 
+    @cython.ccall
     def _plain_stack_slot_address_offset(self, node: StructuredAstValue) -> int | None:
+        sign: object
+        term: object
         term_root = node
         while isinstance(term_root, CTypeCast):
             term_root = term_root.expr
@@ -9793,7 +10788,7 @@ class _CallsiteStackArgsMaterializer8616:
 
 
         const_total = 0
-        stack_offsets: list[int] = []
+        stack_offsets: list[cython.longlong] = []
         for term, sign in self.flatten(term_root):
             value = getattr(term, "value", None) if isinstance(term, structured_c.CConstant) else None
             if isinstance(value, int):
@@ -9814,6 +10809,7 @@ class _CallsiteStackArgsMaterializer8616:
             return None
         return stack_offsets[0] + const_total
 
+    @cython.ccall
     def _plain_bp_stack_load_offset(self, node: StructuredAstValue) -> int | None:
         node = self._clone_c_ast_tree(node)
         while isinstance(node, CTypeCast):
@@ -9822,11 +10818,13 @@ class _CallsiteStackArgsMaterializer8616:
             return None
         return self._plain_stack_slot_address_offset(node.operand)
 
+    @cython.ccall
     def _fold_stack_plus_const_term_8616(self,
         term: StructuredAstValue,
-        stack_terms: list[StructuredAstValue],
+        stack_terms: object,
     ) -> int | None:
         """Fold one add/sub term: returns its const contribution, 0 for stack terms, None to refuse."""
+        term_base: object
         unwrapped = self._unary_unwrap(term)
         if isinstance(unwrapped, structured_c.CVariable):
             variable = unwrapped.variable
@@ -9846,15 +10844,19 @@ class _CallsiteStackArgsMaterializer8616:
             return 0
         return None
 
+    @cython.ccall
     def _normalize_stack_plus_const_base_8616(
         self,
         node: StructuredAstValue,
         *,
-        pointer_arg: bool,
-        normalize_stack_slot_value_arithmetic: bool,
-        node_has_stack_value_carrier: bool,
+        pointer_arg: cython.bint,
+        normalize_stack_slot_value_arithmetic: cython.bint,
+        node_has_stack_value_carrier: cython.bint,
     ) -> StructuredAstValue | None:
         """Collapse a ``stack_var + const`` expression back to its stack base."""
+        const_delta: object
+        sign: object
+        term: object
         if not normalize_stack_slot_value_arithmetic or pointer_arg or not node_has_stack_value_carrier:
             return None
         if isinstance(node, CTypeCast):
@@ -9876,11 +10878,13 @@ class _CallsiteStackArgsMaterializer8616:
             return None
         return stack_terms[0]
 
+    @cython.ccall
     def _resolve_bp_slot_replacement_8616(self,
-        displacement: int,
+        displacement: cython.longlong,
         stack_bindings: StructuredAstValue,
     ) -> StructuredAstValue | None:
         """Resolve the replacement expr for a BP slot displacement."""
+        replacement: object
         replacement = None
         if isinstance(stack_bindings, dict):
             replacement = stack_bindings.get(displacement)
@@ -9893,17 +10897,21 @@ class _CallsiteStackArgsMaterializer8616:
             replacement = self._stack_cvar_for_offset(displacement, allow_best_match=False)
         return replacement
 
+    @cython.ccall
     def _transform_bp_slot_node_8616(
         self,
         node: StructuredAstValue,
         *,
         stack_bindings: StructuredAstValue,
-        pointer_arg: bool,
-        normalize_stack_slot_value_arithmetic: bool,
-        debug_materialization: bool,
-        replacement_cache: dict[int, StructuredAstValue],
-    ) -> tuple[StructuredAstValue, bool]:
+        pointer_arg: cython.bint,
+        normalize_stack_slot_value_arithmetic: cython.bint,
+        debug_materialization: cython.bint,
+        replacement_cache: object,
+    ) -> tuple[StructuredAstValue, cython.bint]:
         """Normalize one BP stack-slot load; return ``(node, replaced)``."""
+        cached: object
+        displacement: object
+        replacement: object
         displacement = _match_bp_stack_load_8616(node, self.project)
         if displacement is None:
             displacement = self._plain_bp_stack_load_offset(node)
@@ -9943,11 +10951,12 @@ class _CallsiteStackArgsMaterializer8616:
         expr: StructuredAstValue,
         *,
         stack_bindings: StructuredAstValue = None,
-        pointer_arg: bool = False,
-        normalize_stack_slot_value_arithmetic: bool = True,
-    ) -> tuple[StructuredAstValue, int]:
+        pointer_arg: cython.bint = False,
+        normalize_stack_slot_value_arithmetic: cython.bint = True,
+    ) -> tuple[StructuredAstValue, cython.longlong]:
+        collapsed: object
         replacements = 0
-        replacement_cache: dict[int, StructuredAstValue] = {}
+        replacement_cache: dict[cython.longlong, StructuredAstValue] = {}
         debug_materialization = bool(os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"))
         node_has_stack_value_carrier = self._node_contains_stable_named_stack_value_8616(
             expr
@@ -9991,9 +11000,11 @@ class _CallsiteStackArgsMaterializer8616:
                 break
         return rewritten, replacements
 
+    @cython.ccall
     def _materialize_pointer_arg_8616(self,
-        expr: StructuredAstValue, *, target_name: str, arg_index: int, force_pointer: bool = False
-    ) -> tuple[StructuredAstValue | None, bool]:
+        expr: StructuredAstValue, *, target_name: object, arg_index: cython.longlong, force_pointer: cython.bint = False
+    ) -> object:
+        ds_expr: object
         if call_argument_has_materialized_object_address_8616(expr):
             return expr, False
         if not force_pointer and not _callee_expects_pointer_arg_8616(
@@ -10035,9 +11046,10 @@ class _CallsiteStackArgsMaterializer8616:
             expr, ds_expr, codegen=self.codegen, c_target=target,
         )
 
+    @cython.ccall
     def _global_index_source_shape_8616(self,
         source_kind: StructuredAstValue, source_value: StructuredAstValue, source: StructuredAstValue
-    ) -> bool:
+    ) -> cython.bint:
         return (
             source_kind == "global_index"
             and isinstance(source_value, int)
@@ -10047,9 +11059,10 @@ class _CallsiteStackArgsMaterializer8616:
             and isinstance(source[4], tuple)
         )
 
+    @cython.ccall
     def _seg_indirect_source_shape_8616(self,
         source_kind: StructuredAstValue, source_value: StructuredAstValue, source: StructuredAstValue
-    ) -> bool:
+    ) -> cython.bint:
         return (
             source_kind == "seg_indirect"
             and isinstance(source_value, str)
@@ -10059,18 +11072,20 @@ class _CallsiteStackArgsMaterializer8616:
             and isinstance(source[3], tuple)
         )
 
+    @cython.ccall
     def _direct_expr_ret_reg_8616(self, source: StructuredAstValue) -> StructuredAstValue | None:
         reg_name = source[2]
         if not isinstance(reg_name, str) or reg_name.lower() not in {"ax", "dx"}:
             return None
         return self._register_expr_from_name_8616(reg_name.lower())
 
+    @cython.ccall
     def _direct_expr_imm_8616(self,
         source_value: StructuredAstValue,
         *,
-        call_name: str | None,
-        arg_index: int,
-        materialize_pointer: bool,
+        call_name: object,
+        arg_index: cython.longlong,
+        materialize_pointer: cython.bint,
     ) -> StructuredAstValue | None:
         expr = structured_c.CConstant(source_value, _word_type_8616(self.project), codegen=self.codegen)
         if not materialize_pointer:
@@ -10082,14 +11097,15 @@ class _CallsiteStackArgsMaterializer8616:
         )
         return pointer_expr
 
+    @cython.ccall
     def _direct_expr_extended_kinds_8616(self,
-        source: tuple[StructuredAstValue, ...],
+        source: object,
         source_kind: StructuredAstValue,
         source_value: StructuredAstValue,
         *,
-        call_name: str | None,
-        arg_index: int,
-        materialize_pointer: bool,
+        call_name: object,
+        arg_index: cython.longlong,
+        materialize_pointer: cython.bint,
     ) -> StructuredAstValue | None:
         """Build an expression for the composite push-source kinds, or None."""
         if self._global_index_source_shape_8616(source_kind, source_value, source):
@@ -10112,13 +11128,14 @@ class _CallsiteStackArgsMaterializer8616:
             return self._direct_expr_expr_ops_8616(source, call_name=call_name, arg_index=arg_index, materialize_pointer=materialize_pointer)
         return None
 
+    @cython.ccall
     def _direct_expr_from_push_source_8616(self,
         source: StructuredAstValue,
         *,
-        call_name: str | None,
-        arg_index: int,
-        materialize_pointer: bool = True,
-        force_pointer_arg: bool = False,
+        call_name: object,
+        arg_index: cython.longlong,
+        materialize_pointer: cython.bint = True,
+        force_pointer_arg: cython.bint = False,
     ) -> StructuredAstValue | None:
         """Build a C expression from structured push-source evidence."""
         if not isinstance(source, tuple) or len(source) < 2:
@@ -10133,7 +11150,7 @@ class _CallsiteStackArgsMaterializer8616:
         if source_kind == "seg" and isinstance(source_value, str):
             seg_expr = self._segment_register_expr(source_value.lower())
             return seg_expr
-        if source_kind == CallsitePushSourceKind8616.REGISTER_VALUE.value and isinstance(source_value, str):
+        if operator.eq(source_kind, CallsitePushSourceKind8616.REGISTER_VALUE.value) and isinstance(source_value, str):
             return self._register_expr_from_name_8616(source_value.lower())
         if source_kind == "global" and isinstance(source_value, int):
             return self._direct_expr_global_value_8616(source)
@@ -10146,15 +11163,19 @@ class _CallsiteStackArgsMaterializer8616:
             materialize_pointer=materialize_pointer,
         )
 
+    @cython.ccall
     def _direct_expr_bp_value_8616(self,
         source: StructuredAstValue,
         *,
-        call_name: str | None,
-        arg_index: int,
-        materialize_pointer: bool,
-        force_pointer_arg: bool,
+        call_name: object,
+        arg_index: cython.longlong,
+        materialize_pointer: cython.bint,
+        force_pointer_arg: cython.bint,
     ) -> StructuredAstValue | None:
         """Materialize a bp value push source."""
+        base_expr: object
+        expr: object
+        source_width: object
         source_value = source[1]
         source_width = source[2] if len(source) >= 3 and isinstance(source[2], int) else None
         if source_value > 0 and source_value % 2:
@@ -10184,10 +11205,12 @@ class _CallsiteStackArgsMaterializer8616:
             force_pointer=force_pointer_arg,
         )
         return pointer_expr
+    @cython.ccall
     def _direct_expr_bp_addr_8616(self,
         source: StructuredAstValue,
     ) -> StructuredAstValue | None:
         """Materialize a bp addr push source."""
+        expr: object
         source_value = source[1]
         expr = self._stack_cvar_for_offset(
             source_value,
@@ -10199,11 +11222,15 @@ class _CallsiteStackArgsMaterializer8616:
         expr = self._sanitize_exact_negative_bp_call_arg_cvar_8616(expr, source_value)
         expr = _ensure_c_expr_type_has_arch_8616(self.project, expr)
         return CUnaryOp("Reference", expr, codegen=self.codegen)
+    @cython.ccall
     def _direct_expr_bp_index_addr_8616(self,
         source: StructuredAstValue,
-        *, call_name: str | None, arg_index: int
+        *, call_name: object, arg_index: cython.longlong
     ) -> StructuredAstValue | None:
         """Materialize a bp index addr push source."""
+        expr: object
+        index_expr: object
+        index_source: object
         source_value = source[1]
         index_reg = source[2]
         scale = source[3]
@@ -10243,10 +11270,15 @@ class _CallsiteStackArgsMaterializer8616:
             index_expr,
             codegen=self.codegen,
         )
+    @cython.ccall
     def _direct_expr_global_value_8616(self,
         source: StructuredAstValue,
     ) -> StructuredAstValue | None:
         """Materialize a global value push source."""
+        direct_expr: object
+        direct_ref: object
+        ds_expr: object
+        helper: object
         source_value = source[1]
         width = source[2] if len(source) >= 3 else 2
         if isinstance(width, int):
@@ -10269,9 +11301,12 @@ class _CallsiteStackArgsMaterializer8616:
         )
     def _direct_expr_global_index_8616(self,
         source: StructuredAstValue,
-        *, call_name: str | None, arg_index: int
+        *, call_name: object, arg_index: cython.longlong
     ) -> StructuredAstValue | None:
         """Materialize a global index push source."""
+        ds_expr: object
+        helper: object
+        index_expr: object
         source_value = source[1]
         ds_expr = self._segment_register_expr("ds")
         if ds_expr is None:
@@ -10317,11 +11352,15 @@ class _CallsiteStackArgsMaterializer8616:
             [ds_expr, offset_expr],
             codegen=self.codegen,
         )
+    @cython.ccall
     def _direct_expr_seg_indirect_8616(self,
         source: StructuredAstValue,
-        *, call_name: str | None, arg_index: int
+        *, call_name: object, arg_index: cython.longlong
     ) -> StructuredAstValue | None:
         """Materialize a seg indirect push source."""
+        address_expr: object
+        helper: object
+        segment_expr: object
         source_value = source[1]
         segment_expr = self._segment_register_expr(source_value)
         if segment_expr is None:
@@ -10347,9 +11386,10 @@ class _CallsiteStackArgsMaterializer8616:
         )
     def _direct_expr_expr_ops_8616(self,
         source: StructuredAstValue,
-        *, call_name: str | None, arg_index: int, materialize_pointer: bool
+        *, call_name: object, arg_index: cython.longlong, materialize_pointer: cython.bint
     ) -> StructuredAstValue | None:
         """Materialize a expr ops push source."""
+        expr: object
         source_value = source[1]
         expr = self._direct_expr_from_push_source_8616(
             source_value,
@@ -10384,6 +11424,7 @@ class _CallsiteStackArgsMaterializer8616:
         )
         return pointer_expr
 
+    @cython.ccall
     def _push_source_width_8616(self, source: StructuredAstValue) -> int | None:
         if not isinstance(source, tuple) or len(source) < 2:
             return None
@@ -10410,7 +11451,9 @@ class _CallsiteStackArgsMaterializer8616:
             return 2
         return None
 
-    def _push_sources_total_width_8616(self, sources: tuple[StructuredAstValue, ...]) -> int | None:
+    @cython.ccall
+    def _push_sources_total_width_8616(self, sources: object) -> int | None:
+        source: object
         if not isinstance(sources, tuple) or not sources:
             return None
         total = 0
@@ -10422,19 +11465,20 @@ class _CallsiteStackArgsMaterializer8616:
         return total
 
     def _prototype_widths_account_for_push_sources_8616(self,
-        widths: tuple[int, ...] | None, sources: tuple[StructuredAstValue, ...]
-    ) -> bool:
+        widths: object, sources: object
+    ) -> cython.bint:
         if not widths or not isinstance(sources, tuple) or not sources:
             return False
         source_total = self._push_sources_total_width_8616(sources)
-        return isinstance(source_total, int) and source_total == sum(max(2, int(width)) for width in widths)
+        return isinstance(source_total, int) and operator.eq(source_total, sum(max(2, int(width)) for width in iter(widths)))
 
+    @cython.ccall
     def _logical_arg_count_from_width_evidence_8616(self,
         *,
         known_arg_count: int | None,
         prototype_arg_count: int | None,
-        expected_arg_widths: tuple[int, ...] | None,
-        push_arg_sources: tuple[StructuredAstValue, ...],
+        expected_arg_widths: object,
+        push_arg_sources: object,
         arity_contract: CallArityContract8616,
     ) -> int | None:
         if not self._prototype_widths_account_for_push_sources_8616(expected_arg_widths, push_arg_sources):
@@ -10442,7 +11486,7 @@ class _CallsiteStackArgsMaterializer8616:
         if arity_contract.mode is not CallArityMode8616.EXACT and not (
             isinstance(prototype_arg_count, int)
             and prototype_arg_count > 0
-            and prototype_arg_count == len(expected_arg_widths or ())
+            and operator.eq(prototype_arg_count, len(expected_arg_widths or ()))
         ):
             return None
         width_count = len(expected_arg_widths or ())
@@ -10466,7 +11510,8 @@ class _CallsiteStackArgsMaterializer8616:
 
     def _global_word_source_info_8616(self,
         source: StructuredAstValue,
-    ) -> tuple[int, tuple[tuple[str, StructuredAstValue], ...]] | None:
+    ) -> object:
+        base: object
         if not isinstance(source, tuple) or len(source) < 2:
             return None
         source_kind = source[0]
@@ -10496,13 +11541,17 @@ class _CallsiteStackArgsMaterializer8616:
                         }
                     )
                 )
-                for op in source[2]
+                for op in iter(source[2])
             ):
                 return None
-            return base[0], tuple((op[0], op[1]) for op in source[2])
+            return base[0], tuple((op[0], op[1]) for op in iter(source[2]))
         return None
 
-    def _global_u32_expr_8616(self, low_addr: int) -> StructuredAstValue:
+    @cython.ccall
+    def _global_u32_expr_8616(self, low_addr: cython.longlong) -> StructuredAstValue:
+        direct_expr: object
+        direct_ref: object
+        ds_expr: object
         direct_ref = self.direct_global_arg_refs_by_offset.get((int(low_addr) & 0xFFFF, 4))
         if direct_ref is not None:
             direct_expr = _make_direct_global_symbol_expr_8616(self.codegen, direct_ref, 4)
@@ -10518,6 +11567,7 @@ class _CallsiteStackArgsMaterializer8616:
             codegen=self.codegen,
         )
 
+    @cython.ccall
     def _combine_word_pair_op_exprs_8616(
         self,
         low_op: StructuredAstValue,
@@ -10527,27 +11577,36 @@ class _CallsiteStackArgsMaterializer8616:
         base: StructuredAstValue,
     ) -> StructuredAstValue | None:
         """Combine the low/high op pair into a 32-bit expression over base."""
+        high_rhs: object
+        low_rhs: object
+        rhs: object
         low_rhs = self._global_word_source_info_8616(low_value)
         high_rhs = self._global_word_source_info_8616(high_value)
         if low_rhs is None or high_rhs is None:
             return None
         low_rhs_addr, low_rhs_ops = low_rhs
         high_rhs_addr, high_rhs_ops = high_rhs
-        if low_rhs_ops or high_rhs_ops or high_rhs_addr != low_rhs_addr + 2:
+        if low_rhs_ops or high_rhs_ops or operator.ne(high_rhs_addr, low_rhs_addr + 2):
             return None
         rhs = self._global_u32_expr_8616(low_rhs_addr)
         if rhs is None:
             return None
         return CBinaryOp(
-            "Sub" if low_op == CallsitePushExprOp8616.SUB_SOURCE.value else "Add",
+            "Sub" if operator.eq(low_op, CallsitePushExprOp8616.SUB_SOURCE.value) else "Add",
             base,
             rhs,
             codegen=self.codegen,
         )
 
+    @cython.ccall
     def _combine_word_pair_push_sources_8616(self,
         low_source: StructuredAstValue, high_source: StructuredAstValue
     ) -> StructuredAstValue | None:
+        base_expr: object
+        caller_stack_object: object
+        low_expr: object
+        sign_ext_high_source: object
+        sign_ext_low_source: object
 
         if (
             _push_source_is_sign_ext_word_pair_8616(low_source, high_source)
@@ -10575,7 +11634,7 @@ class _CallsiteStackArgsMaterializer8616:
 
         sign_ext_high_source = self._sign_ext_source_8616(high_source)
         sign_ext_low_source = self._sign_ext_source_8616(low_source)
-        if sign_ext_high_source is not None and isinstance(low_source, tuple) and low_source == sign_ext_high_source[1]:
+        if sign_ext_high_source is not None and isinstance(low_source, tuple) and operator.eq(low_source, sign_ext_high_source[1]):
             base_expr = self._direct_expr_from_push_source_8616(
                 low_source,
                 call_name=None,
@@ -10584,7 +11643,7 @@ class _CallsiteStackArgsMaterializer8616:
             )
             if base_expr is not None:
                 return CTypeCast(None, _summary_type_8616(self.project, 4), base_expr, codegen=self.codegen)
-        if sign_ext_low_source is not None and isinstance(high_source, tuple) and high_source == sign_ext_low_source[1]:
+        if sign_ext_low_source is not None and isinstance(high_source, tuple) and operator.eq(high_source, sign_ext_low_source[1]):
             base_expr = self._direct_expr_from_push_source_8616(
                 high_source,
                 call_name=None,
@@ -10603,16 +11662,20 @@ class _CallsiteStackArgsMaterializer8616:
         return self._combine_global_word_pair_8616(low_source, high_source)
 
 
+    @cython.ccall
     def _combine_global_word_pair_8616(self,
         low_source: StructuredAstValue, high_source: StructuredAstValue
     ) -> StructuredAstValue | None:
+        base: object
+        high_info: object
+        low_info: object
         low_info = self._global_word_source_info_8616(low_source)
         high_info = self._global_word_source_info_8616(high_source)
         if low_info is None or high_info is None:
             return None
         low_addr, low_ops = low_info
         high_addr, high_ops = high_info
-        if high_addr != low_addr + 2:
+        if operator.ne(high_addr, low_addr + 2):
             return None
         base = self._global_u32_expr_8616(low_addr)
         if base is None:
@@ -10624,19 +11687,19 @@ class _CallsiteStackArgsMaterializer8616:
         low_op, low_value = low_ops[0]
         high_op, high_value = high_ops[0]
         if (
-            low_op == CallsitePushExprOp8616.SUB_SOURCE.value and high_op == CallsitePushExprOp8616.SBB_SOURCE.value
-        ) or (low_op == CallsitePushExprOp8616.ADD_SOURCE.value and high_op == CallsitePushExprOp8616.ADC_SOURCE.value):
+            operator.eq(low_op, CallsitePushExprOp8616.SUB_SOURCE.value) and operator.eq(high_op, CallsitePushExprOp8616.SBB_SOURCE.value)
+        ) or (operator.eq(low_op, CallsitePushExprOp8616.ADD_SOURCE.value) and operator.eq(high_op, CallsitePushExprOp8616.ADC_SOURCE.value)):
             return self._combine_word_pair_op_exprs_8616(low_op, low_value, high_op, high_value, base)
         if high_value != 0:
             return None
-        if low_op == CallsitePushExprOp8616.SUB.value and high_op == CallsitePushExprOp8616.SBB.value:
+        if operator.eq(low_op, CallsitePushExprOp8616.SUB.value) and operator.eq(high_op, CallsitePushExprOp8616.SBB.value):
             return CBinaryOp(
                 "Sub",
                 base,
                 structured_c.CConstant(low_value, _summary_type_8616(self.project, 4), codegen=self.codegen),
                 codegen=self.codegen,
             )
-        if low_op == CallsitePushExprOp8616.ADD.value and high_op == CallsitePushExprOp8616.ADC.value:
+        if operator.eq(low_op, CallsitePushExprOp8616.ADD.value) and operator.eq(high_op, CallsitePushExprOp8616.ADC.value):
             return CBinaryOp(
                 "Add",
                 base,
@@ -10645,12 +11708,15 @@ class _CallsiteStackArgsMaterializer8616:
             )
         return None
 
+    @cython.ccall
     def _combine_word_pair_scalar_arg_8616(self,
         low_expr: StructuredAstValue,
         high_expr: StructuredAstValue,
         low_source: StructuredAstValue = None,
         high_source: StructuredAstValue = None,
     ) -> StructuredAstValue:
+        combined_from_sources: object
+        ds_expr: object
         combined_from_sources = self._combine_word_pair_push_sources_8616(low_source, high_source)
         if combined_from_sources is not None:
             return combined_from_sources
@@ -10677,12 +11743,17 @@ class _CallsiteStackArgsMaterializer8616:
         )
         return CBinaryOp("Or", low_long, shifted_high, codegen=self.codegen)
 
+    @cython.ccall
     def _logical_args_from_push_sources_by_expected_widths_8616(self,
-        ordered_sources: list[StructuredAstValue],
+        ordered_sources: object,
         *,
-        expected_arg_widths: tuple[int, ...] | None,
-        call_name: str | None,
-    ) -> list[StructuredAstValue] | None:
+        expected_arg_widths: object,
+        call_name: object,
+    ) -> object:
+        combined: object
+        expr: object
+        arg_idx: object
+        width: object
         if not expected_arg_widths or not ordered_sources:
             return None
         logical_args: list[StructuredAstValue] = []
@@ -10711,16 +11782,18 @@ class _CallsiteStackArgsMaterializer8616:
                 return None
             logical_args.append(combined)
             source_idx += 2
-        if source_idx != len(ordered_sources):
+        if operator.ne(source_idx, len(ordered_sources)):
             return None
         return logical_args
 
+    @cython.ccall
     def _group_scalar_args_by_expected_widths_8616(self,
-        values: list[StructuredAstValue],
+        values: object,
         *,
-        expected_arg_widths: tuple[int, ...] | None,
-        push_sources: tuple[StructuredAstValue, ...] = (),
-    ) -> list[StructuredAstValue] | None:
+        expected_arg_widths: object,
+        push_sources: object = (),
+    ) -> object:
+        width: object
         if not expected_arg_widths or len(values) <= len(expected_arg_widths):
             return None
         grouped: list[StructuredAstValue] = []
@@ -10740,13 +11813,17 @@ class _CallsiteStackArgsMaterializer8616:
             high_source = push_sources[value_idx + 1] if value_idx + 1 < len(push_sources) else None
             grouped.append(self._combine_word_pair_scalar_arg_8616(low_expr, high_expr, low_source, high_source))
             value_idx += 2
-        if value_idx != len(values):
+        if operator.ne(value_idx, len(values)):
             return None
         return grouped
 
-    def _node_contains_stable_named_stack_value_8616(self, node: StructuredAstValue, *, max_nodes: int = 1024) -> bool:
+    def _node_contains_stable_named_stack_value_8616(self, node: StructuredAstValue, *, max_nodes: cython.longlong = 1024) -> cython.bint:
+        child: object
+        current: object
+        items: object
+        attr: object
         stack = [node]
-        seen: set[int] = set()
+        seen: set[cython.longlong] = set()
         visited = 0
         while stack:
             current = stack.pop()
@@ -10768,10 +11845,11 @@ class _CallsiteStackArgsMaterializer8616:
             for attr in ("args", "operands"):
                 items = getattr(current, attr, None)
                 if isinstance(items, (list, tuple)):
-                    stack.extend(item for item in items if item is not None)
+                    stack.extend(item for item in iter(items) if item is not None)
         return False
 
-    def _placeholder_stack_node_hit_8616(self, current: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _placeholder_stack_node_hit_8616(self, current: StructuredAstValue) -> cython.bint:
         if isinstance(current, structured_c.CFakeVariable) and getattr(current, "name", None) == "stack_base":
             return True
         if isinstance(current, structured_c.CVariable):
@@ -10787,8 +11865,11 @@ class _CallsiteStackArgsMaterializer8616:
                 return True
         return self._is_virtual_dirty_expr_8616(current)
 
-    def _placeholder_stack_expand_8616(self, current: StructuredAstValue, stack: list[StructuredAstValue]) -> None:
+    def _placeholder_stack_expand_8616(self, current: StructuredAstValue, stack: object) -> None:
         """Push the child nodes of ``current`` onto the placeholder scan stack."""
+        child: object
+        items: object
+        attr: object
         for attr in ("lhs", "rhs", "operand", "expr", "condition", "iftrue", "iffalse", "variable", "index"):
             child = getattr(current, attr, None)
             if child is not None:
@@ -10796,13 +11877,14 @@ class _CallsiteStackArgsMaterializer8616:
         for attr in ("args", "operands"):
             items = getattr(current, attr, None)
             if isinstance(items, (list, tuple)):
-                stack.extend(item for item in items if item is not None)
+                stack.extend(item for item in iter(items) if item is not None)
 
-    def _node_contains_placeholder_stack_8616(self, node: StructuredAstValue, *, max_nodes: int = 1024) -> bool:
+    def _node_contains_placeholder_stack_8616(self, node: StructuredAstValue, *, max_nodes: cython.longlong = 1024) -> cython.bint:
+        current: object
         if isinstance(node, (tuple, list)):
-            return any(self._node_contains_placeholder_stack_8616(item, max_nodes=max_nodes) for item in node)
+            return any(self._node_contains_placeholder_stack_8616(item, max_nodes=max_nodes) for item in iter(node))
         stack = [node]
-        seen: set[int] = set()
+        seen: set[cython.longlong] = set()
         visited = 0
         while stack:
             current = stack.pop()
@@ -10820,7 +11902,10 @@ class _CallsiteStackArgsMaterializer8616:
             self._placeholder_stack_expand_8616(current, stack)
         return False
 
-    def _debug_expr_variable_8616(self, node: StructuredAstValue) -> str:
+    @cython.ccall
+    def _debug_expr_variable_8616(self, node: StructuredAstValue) -> object:
+        offset: object
+        reg: object
         variable = node.variable
         name = getattr(variable, "name", None) or node.name or "var"
         offset = getattr(variable, "offset", None)
@@ -10831,7 +11916,9 @@ class _CallsiteStackArgsMaterializer8616:
             return f"{name}#{reg}"
         return name
 
-    def _debug_expr_8616(self, node: StructuredAstValue, seen: set[int] | None = None, depth: int = 0) -> StructuredAstValue:
+    @cython.ccall
+    def _debug_expr_8616(self, node: StructuredAstValue, seen: object = None, depth: cython.longlong = 0) -> StructuredAstValue:
+        composite: object
         if seen is None:
             seen = set()
         if depth > 64:
@@ -10852,7 +11939,7 @@ class _CallsiteStackArgsMaterializer8616:
             return composite
         return node.__class__.__name__
 
-    def _debug_expr_composite_8616(self, node: StructuredAstValue, seen: set[int], depth: int) -> StructuredAstValue:
+    def _debug_expr_composite_8616(self, node: StructuredAstValue, seen: object, depth: cython.longlong) -> StructuredAstValue:
         """Render composite C AST nodes for debug output, or None when unmatched."""
         if isinstance(node, structured_c.CIndexedVariable):
             return (
@@ -10865,10 +11952,11 @@ class _CallsiteStackArgsMaterializer8616:
             return f"{node.op}({self._debug_expr_8616(node.lhs, seen, depth + 1)},{self._debug_expr_8616(node.rhs, seen, depth + 1)})"
         if isinstance(node, CFunctionCall):
             name = node.callee_target or getattr(node.callee_func, "name", None) or "call"
-            return f"{name}({','.join(self._debug_expr_8616(arg, seen, depth + 1) for arg in (node.args or ()))})"
+            return f"{name}({','.join(self._debug_expr_8616(arg, seen, depth + 1) for arg in iter((node.args or ())))})"
         return None
 
-    def _call_arg_is_pointer_shaped_8616(self, node: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _call_arg_is_pointer_shaped_8616(self, node: StructuredAstValue) -> cython.bint:
         """Return whether an existing call argument is already pointer-shaped."""
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -10876,7 +11964,12 @@ class _CallsiteStackArgsMaterializer8616:
             return node.callee_target in {"SEG_PTR", "MK_FP"}
         return isinstance(node, CUnaryOp) and getattr(node, "op", None) in {"Reference", "AddressOf"}
 
+    @cython.ccall
     def _linear_mul_offset_key_8616(self, node: StructuredAstValue) -> StructuredAstValue | None:
+        lhs_key: object
+        lhs_mul_const: object
+        rhs_key: object
+        rhs_mul_const: object
         lhs_mul_const = self._constant_int_value_8616(node.lhs)
         rhs_mul_const = self._constant_int_value_8616(node.rhs)
         if lhs_mul_const is not None:
@@ -10893,8 +11986,13 @@ class _CallsiteStackArgsMaterializer8616:
             return ((lhs_base * rhs_mul_const) & 0xFFFF, lhs_scale * rhs_mul_const, lhs_var)
         return None
 
+    @cython.ccall
     def _linear_offset_key_binop_8616(self, node: StructuredAstValue) -> StructuredAstValue | None:
         """Affine-offset key for a binary-op node."""
+        lhs_key: object
+        rhs_key: object
+        rhs_var: object
+        shift: object
         op = node.op
         lhs_key = self._linear_offset_key_8616(node.lhs)
         rhs_key = self._linear_offset_key_8616(node.rhs)
@@ -10905,7 +12003,7 @@ class _CallsiteStackArgsMaterializer8616:
             rhs_const, rhs_scale, rhs_var = rhs_key
             if rhs_var is None:
                 return ((lhs_const - rhs_const) & 0xFFFF, lhs_scale, lhs_var)
-            if lhs_var == rhs_var:
+            if operator.eq(lhs_var, rhs_var):
                 return ((lhs_const - rhs_const) & 0xFFFF, lhs_scale - rhs_scale, lhs_var)
             return None
         if op == "Shl":
@@ -10921,10 +12019,12 @@ class _CallsiteStackArgsMaterializer8616:
         return None
 
 
+    @cython.ccall
     def _linear_offset_key_8616(self,
         node: StructuredAstValue,
-    ) -> tuple[int, int, StructuredAstValue | None] | None:
+    ) -> object:
         """Return a simple affine offset key `(constant, scale, variable_key)`."""
+        offset: object
         while isinstance(node, CTypeCast):
             node = node.expr
         if isinstance(node, structured_c.CConstant):
@@ -10942,9 +12042,11 @@ class _CallsiteStackArgsMaterializer8616:
             return self._linear_offset_key_binop_8616(node)
         return None
 
+    @cython.ccall
     def _pointer_ref_offset_key_8616(self,
         node: StructuredAstValue,
-    ) -> tuple[int, int, StructuredAstValue | None] | None:
+    ) -> object:
+        index_key: object
         operand = node.operand
         while isinstance(operand, CTypeCast):
             operand = operand.expr
@@ -10973,9 +12075,10 @@ class _CallsiteStackArgsMaterializer8616:
                 return self._linear_offset_key_8616(operand)
         return self._linear_offset_key_8616(node)
 
+    @cython.ccall
     def _pointer_offset_key_8616(self,
         node: StructuredAstValue,
-    ) -> tuple[int, int, StructuredAstValue | None] | None:
+    ) -> object:
         """Return the linear offset addressed by a pointer-shaped call argument."""
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -10989,18 +12092,20 @@ class _CallsiteStackArgsMaterializer8616:
         return self._linear_offset_key_8616(node)
 
     def _pointer_offset_keys_match_8616(self,
-        actual_args: tuple[StructuredAstValue, ...],
-        expected_args: tuple[StructuredAstValue, ...],
-    ) -> bool:
+        actual_args: object,
+        expected_args: object,
+    ) -> cython.bint:
         """Return whether actual pointer arguments address the expected offsets."""
-        if len(actual_args) != len(expected_args) or not actual_args:
+        if operator.ne(len(actual_args), len(expected_args)) or not actual_args:
             return False
-        actual_keys = tuple(self._pointer_offset_key_8616(arg) for arg in actual_args)
-        expected_keys = tuple(self._pointer_offset_key_8616(arg) for arg in expected_args)
-        return all(key is not None for key in actual_keys) and actual_keys == expected_keys
+        actual_keys = tuple(self._pointer_offset_key_8616(arg) for arg in iter(actual_args))
+        expected_keys = tuple(self._pointer_offset_key_8616(arg) for arg in iter(expected_args))
+        return all(key is not None for key in iter(actual_keys)) and actual_keys == expected_keys
 
+    @cython.ccall
     def _stack_address_base_offset_8616(self, node: StructuredAstValue) -> int | None:
         """Return one pointer expression's proven machine-BP base coordinate."""
+        lhs_offset: object
         while isinstance(node, CTypeCast):
             node = node.expr
         if isinstance(node, structured_c.CVariable):
@@ -11018,22 +12123,27 @@ class _CallsiteStackArgsMaterializer8616:
                 return self._stack_address_base_offset_8616(node.rhs)
         return None
 
+    @cython.ccall
     def _exact_stack_address_source_mismatch_8616(self,
-        actual_args: tuple[StructuredAstValue, ...],
-        ordered_sources: tuple[StructuredAstValue, ...] | list[StructuredAstValue],
-    ) -> bool:
+        actual_args: object,
+        ordered_sources: object,
+    ) -> cython.bint:
         """Return whether typed stack-address evidence rejects an existing argument."""
+        actual_arg: object
+        source: object
         for actual_arg, source in zip(actual_args, ordered_sources, strict=False):
             if not call_argument_source_requires_exact_address_identity_8616(source):
                 continue
             if not isinstance(source, tuple) or len(source) < 2 or not isinstance(source[1], int):
                 continue
-            if self._stack_address_base_offset_8616(actual_arg) != int(source[1]):
+            if operator.ne(self._stack_address_base_offset_8616(actual_arg), int(source[1])):
                 return True
         return False
 
-    def _arg_contains_runtime_segment_access_8616(self, node: StructuredAstValue) -> bool:
-        for raw in (node, *_iter_c_nodes_deep_8616(node)):
+    @cython.ccall
+    def _arg_contains_runtime_segment_access_8616(self, node: StructuredAstValue) -> cython.bint:
+        raw: object
+        for raw in (node, ) + tuple(_iter_c_nodes_deep_8616(node)):
             current = raw
             while isinstance(current, CTypeCast):
                 current = current.expr
@@ -11044,7 +12154,8 @@ class _CallsiteStackArgsMaterializer8616:
                 return True
         return False
 
-    def _pointer_arg_quality_8616(self, raw: StructuredAstValue) -> int:
+    @cython.ccall
+    def _pointer_arg_quality_8616(self, raw: StructuredAstValue) -> cython.longlong:
         """Quality score for a pointer-kind argument node."""
         if self._node_contains_placeholder_stack_8616(raw) or self._expr_contains_plain_register_uses(raw):
             return 0
@@ -11053,7 +12164,8 @@ class _CallsiteStackArgsMaterializer8616:
         if isinstance(raw, CUnaryOp) and raw.op == "Reference":
             return 7
         return 2
-    def _value_arg_quality_8616(self, raw: StructuredAstValue) -> int:
+    @cython.ccall
+    def _value_arg_quality_8616(self, raw: StructuredAstValue) -> cython.longlong:
         """Quality score for a value-kind argument node."""
         if self._node_contains_placeholder_stack_8616(raw):
             return 0
@@ -11064,7 +12176,8 @@ class _CallsiteStackArgsMaterializer8616:
         if isinstance(raw, CFunctionCall) and getattr(raw, "callee_target", None) in {"SEG_PTR", "MK_FP"}:
             return 0
         return 3
-    def _arg_semantic_quality_8616(self, arg_name: str | None, arg_index: int, node: StructuredAstValue) -> int:
+    @cython.ccall
+    def _arg_semantic_quality_8616(self, arg_name: object, arg_index: cython.longlong, node: StructuredAstValue) -> cython.longlong:
         kind = _call_arg_semantic_kind_8616(
             arg_name or "",
             arg_index,
@@ -11091,16 +12204,23 @@ class _CallsiteStackArgsMaterializer8616:
         return 2
 
     def _normalize_materialized_call_args(self,
-        rhs_values: list[StructuredAstValue],
-        source_indices: list[int],
-        statements: list[StructuredAstValue],
+        rhs_values: object,
+        source_indices: object,
+        statements: object,
         *,
-        call_name: str | None = None,
-        stack_bindings: dict[int, StructuredAstValue] | None = None,
-        preserve_register_arg_indices: set[int] | None = None,
-        expected_arg_widths: tuple[int, ...] | None = None,
-        push_sources: tuple[StructuredAstValue, ...] = (),
-    ) -> list[StructuredAstValue] | None:
+        call_name: object = None,
+        stack_bindings: object = None,
+        preserve_register_arg_indices: object = None,
+        expected_arg_widths: object = None,
+        push_sources: object = (),
+    ) -> object:
+        grouped_pointer_args: object
+        grouped_scalar_args: object
+        arg_idx: object
+        expr: object
+        idx: object
+        rhs: object
+        source_idx: object
         if not rhs_values:
             return None
         debug_materialization = bool(os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"))
@@ -11309,8 +12429,8 @@ class _CallsiteStackArgsMaterializer8616:
                     "[call-far-pointer] function=%#x target=%s args=%s grouped=%s",
                     getattr(getattr(self.codegen, "cfunc", None), "addr", 0) or 0,
                     call_name,
-                    tuple(self._debug_expr_8616(arg) for arg in rhs_values),
-                    tuple(self._debug_expr_8616(arg) for arg in grouped_pointer_args),
+                    tuple(self._debug_expr_8616(arg) for arg in iter(rhs_values)),
+                    tuple(self._debug_expr_8616(arg) for arg in iter(grouped_pointer_args)),
                 )
             return grouped_pointer_args
 
@@ -11335,9 +12455,9 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-        if len(source_indices) != len(rhs_values):
+        if operator.ne(len(source_indices), len(rhs_values)):
             source_indices = [-1] * len(rhs_values)
-        resolved_stack_index_arg_indices: set[int] = set()
+        resolved_stack_index_arg_indices: set[cython.longlong] = set()
         for arg_idx, (rhs, source_idx) in enumerate(zip(rhs_values, source_indices, strict=False)):
             ok = self._normalize_rhs_register_arg_8616(
                 rhs,
@@ -11371,9 +12491,10 @@ class _CallsiteStackArgsMaterializer8616:
                 return None
         return normalized
 
+    @cython.ccall
     def _rewritten_pointer_arg_ok_8616(self,
         pointer_arg: StructuredAstValue, push_source_matches_stack_index: StructuredAstValue, idx: StructuredAstValue, resolved_stack_index_arg_indices: StructuredAstValue, rewritten: StructuredAstValue,
-    ) -> bool:
+    ) -> cython.bint:
         """Predicate extracted from a callsite gate."""
         return (
             (
@@ -11385,8 +12506,8 @@ class _CallsiteStackArgsMaterializer8616:
         )
 
     def _stale_return_pair_candidate_8616(self,
-        lhs: StructuredAstValue, rhs: StructuredAstValue, low_expr: StructuredAstValue, high_expr: StructuredAstValue, seen_destinations: StructuredAstValue,
-    ) -> bool:
+        lhs: object, rhs: object, low_expr: object, high_expr: object, seen_destinations: StructuredAstValue,
+    ) -> cython.bint:
         """Predicate extracted from a callsite gate."""
         return (
             lhs is not None
@@ -11394,7 +12515,7 @@ class _CallsiteStackArgsMaterializer8616:
     and not isinstance(rhs, CFunctionCall)
     and low_expr is not None
     and high_expr is not None
-    and any(self._same_return_destination_8616(lhs, seen_lhs) for seen_lhs in seen_destinations)
+    and any(self._same_return_destination_8616(lhs, seen_lhs) for seen_lhs in iter(seen_destinations))
     and (
         self._combined_low_high_target(rhs, low_expr, high_expr)
         or self._combined_unknown_low_high_target(rhs, high_expr)
@@ -11403,15 +12524,15 @@ class _CallsiteStackArgsMaterializer8616:
 
     def _strict_push_source_shape_ok_8616(self,
         push_arg_sources: StructuredAstValue, has_physical_far_pointer_push_sources: StructuredAstValue, has_exact_arithmetic_push_sources: StructuredAstValue, has_instruction_proven_direct_push_sources: StructuredAstValue, expected_arg_count: StructuredAstValue, expected_arg_widths: StructuredAstValue, has_recent_stack_arg_store_evidence: StructuredAstValue,
-    ) -> bool:
+    ) -> cython.bint:
         """Predicate extracted from a callsite gate."""
         return (
             isinstance(push_arg_sources, tuple)
     and (
-        len(push_arg_sources) == expected_arg_count
+        operator.eq(len(push_arg_sources), expected_arg_count)
         or self._prototype_widths_account_for_push_sources_8616(expected_arg_widths, push_arg_sources)
     )
-    and any(source is not None for source in push_arg_sources)
+    and any(source is not None for source in iter(push_arg_sources))
     and (
         not has_recent_stack_arg_store_evidence
         or has_physical_far_pointer_push_sources
@@ -11420,9 +12541,10 @@ class _CallsiteStackArgsMaterializer8616:
     )
         )
 
+    @cython.ccall
     def _normalized_args_probe_gate_8616(self,
-        normalized_args: StructuredAstValue, stack_probe_address_seen: StructuredAstValue, stack_probe_seen: StructuredAstValue, typed_stack_probe_fact: StructuredAstValue, typed_stack_probe_materialization: StructuredAstValue,
-    ) -> bool:
+        normalized_args: object, stack_probe_address_seen: StructuredAstValue, stack_probe_seen: StructuredAstValue, typed_stack_probe_fact: object, typed_stack_probe_materialization: StructuredAstValue,
+    ) -> cython.bint:
         """Predicate extracted from a callsite gate."""
         return (
             normalized_args is not None
@@ -11436,37 +12558,42 @@ class _CallsiteStackArgsMaterializer8616:
     )
         )
 
+    @cython.ccall
     def _pointer_arg_from_default_shape_8616(self,
-        call_name: str | None,
-        idx: int,
-        normalized: list[StructuredAstValue],
-    ) -> bool:
+        call_name: object,
+        idx: cython.longlong,
+        normalized: object,
+    ) -> cython.bint:
         """Whether the known default arg at ``idx`` is pointer-shaped."""
+        default_args: object
         default_args = _known_default_args_for_missing_8616(call_name or "", self.codegen)
         default_arg = (
             default_args[idx]
-            if default_args is not None and len(default_args) == len(normalized) and len(default_args) > idx
+            if default_args is not None and operator.eq(len(default_args), len(normalized)) and len(default_args) > idx
             else None
         )
         return isinstance(default_arg, CFunctionCall) and getattr(
             default_arg, "callee_target", None
         ) in {"SEG_PTR", "MK_FP"}
 
+    @cython.ccall
     def _postprocess_normalized_arg_8616(
         self,
-        normalized: list[StructuredAstValue],
-        idx: int,
+        normalized: object,
+        idx: cython.longlong,
         expr: StructuredAstValue,
-        source_indices: list[int],
-        statements: list[StructuredAstValue],
-        push_sources: tuple[StructuredAstValue, ...],
-        stack_bindings: dict[int, StructuredAstValue] | None,
-        resolved_stack_index_arg_indices: set[int],
+        source_indices: object,
+        statements: object,
+        push_sources: object,
+        stack_bindings: object,
+        resolved_stack_index_arg_indices: object,
         *,
-        call_name: str | None,
-        debug_materialization: bool,
-    ) -> bool:
+        call_name: object,
+        debug_materialization: cython.bint,
+    ) -> cython.bint:
         """Post-process one normalized arg: bp-slot values, carriers, pointer materialization."""
+        pointer_expr: object
+        resolved_rewritten: object
         source_idx = source_indices[idx] if idx < len(source_indices) else -1
         prefix = statements[: source_idx + 1] if isinstance(source_idx, int) and source_idx >= 0 else statements
         push_source = push_sources[idx] if isinstance(push_sources, tuple) and idx < len(push_sources) else None
@@ -11510,7 +12637,7 @@ class _CallsiteStackArgsMaterializer8616:
         push_source_matches_stack_index = (
             isinstance(push_source_offset, int)
             and isinstance(push_source, tuple)
-            and self._resolved_stack_index_arg_base_from_evidence_8616(rewritten, push_source) == push_source_offset
+            and operator.eq(self._resolved_stack_index_arg_base_from_evidence_8616(rewritten, push_source), push_source_offset)
         )
         if self._rewritten_pointer_arg_ok_8616(pointer_arg, push_source_matches_stack_index, idx, resolved_stack_index_arg_indices, rewritten):
             pointer_expr, pointer_materialized = rewritten, False
@@ -11529,17 +12656,19 @@ class _CallsiteStackArgsMaterializer8616:
         normalized[idx] = pointer_expr
         return True
 
+    @cython.ccall
     def _default_arg_expects_pointer_8616(self,
-        call_name: str | None,
-        normalized: list[StructuredAstValue],
-        rhs_values: list[StructuredAstValue],
-    ) -> bool:
+        call_name: object,
+        normalized: object,
+        rhs_values: object,
+    ) -> cython.bint:
+        default_args: object
         default_args = _known_default_args_for_missing_8616(call_name or "", self.codegen)
         default_arg = (
             default_args[len(normalized)]
             if (
                 default_args is not None
-                and len(default_args) == len(rhs_values)
+                and operator.eq(len(default_args), len(rhs_values))
                 and len(default_args) > len(normalized)
             )
             else None
@@ -11548,25 +12677,29 @@ class _CallsiteStackArgsMaterializer8616:
             default_arg, "callee_target", None
         ) in {"SEG_PTR", "MK_FP"}
 
+    @cython.ccall
     def _source_expr_overrides_rhs_8616(self,
         rhs: StructuredAstValue,
         push_source: StructuredAstValue,
         source_expr: StructuredAstValue,
-    ) -> bool:
+    ) -> cython.bint:
+        rhs_offset: object
+        source_offset: object
         rhs_offset = self._stack_offset_from_cvar_8616(rhs)
         source_offset = self._stable_call_source_expr_stack_offset(push_source)
         if self._node_contains_stable_named_stack_value_8616(rhs):
-            if source_offset is not None and rhs_offset is not None and rhs_offset != source_offset:
+            if source_offset is not None and rhs_offset is not None and operator.ne(rhs_offset, source_offset):
                 return True
             return not _same_c_expression_8616(rhs, source_expr)
         if self._expr_contains_plain_register_uses(rhs):
             return False
-        return source_offset is not None and rhs_offset is not None and rhs_offset != source_offset
+        return source_offset is not None and rhs_offset is not None and operator.ne(rhs_offset, source_offset)
 
+    @cython.ccall
     def _byte_merge_stack_index_ok_8616(self,
         expr: StructuredAstValue,
-        byte_merge_resolved: bool,
-    ) -> bool:
+        byte_merge_resolved: cython.bint,
+    ) -> cython.bint:
         byte_merge_stack_index_ok = (
             byte_merge_resolved
             and not self._is_segment_register_value_expr(expr)
@@ -11581,14 +12714,17 @@ class _CallsiteStackArgsMaterializer8616:
         )
         return bool(byte_merge_stack_index_ok or byte_helper_stack_index_ok)
 
+    @cython.ccall
     def _segment_register_rhs_arm_8616(self,
         rhs: StructuredAstValue,
         push_sources: StructuredAstValue,
-        normalized: list[StructuredAstValue],
-        call_name: str | None,
-        debug_materialization: bool,
+        normalized: object,
+        call_name: object,
+        debug_materialization: cython.bint,
     ) -> bool | None:
         """Append a lowered segment-register arg; True applied, False refused, None not applicable."""
+        lowered_segment: object
+        segment_name: object
         if not self._is_segment_register_value_expr(rhs):
             return None
         segment_name = self._segment_register_name_from_expr_8616(rhs)
@@ -11603,16 +12739,18 @@ class _CallsiteStackArgsMaterializer8616:
         normalized.append(lowered_segment)
         return True
 
+    @cython.ccall
     def _pointer_stack_index_rhs_arm_8616(self,
         rhs: StructuredAstValue,
         prefix: StructuredAstValue,
-        normalized: list[StructuredAstValue],
-        resolved_stack_index_arg_indices: set[int],
+        normalized: object,
+        resolved_stack_index_arg_indices: object,
         *,
-        call_name: str | None,
-        debug_materialization: bool,
-    ) -> bool:
+        call_name: object,
+        debug_materialization: cython.bint,
+    ) -> cython.bint:
         """Resolve a pointer stack-index arg; appends and returns True."""
+        resolved_stack_index: object
         resolved_stack_index = self._resolve_stack_address_index_arg_expr_8616(rhs, prefix, call_name=call_name, debug_materialization=debug_materialization)
         if resolved_stack_index is not None:
             resolved_stack_index_arg_indices.add(len(normalized))
@@ -11621,23 +12759,27 @@ class _CallsiteStackArgsMaterializer8616:
         normalized.append(self._clone_c_ast_tree(rhs))
         return True
 
+    @cython.ccall
     def _normalize_rhs_register_arg_8616(
         self,
         rhs: StructuredAstValue,
-        arg_idx: int,
-        source_idx: int,
-        normalized: list[StructuredAstValue],
-        resolved_stack_index_arg_indices: set[int],
-        statements: list[StructuredAstValue],
-        stack_bindings: dict[int, StructuredAstValue] | None,
-        preserved_register_indices: set[int],
-        push_sources: tuple[StructuredAstValue, ...],
-        rhs_values: list[StructuredAstValue],
+        arg_idx: cython.longlong,
+        source_idx: cython.longlong,
+        normalized: object,
+        resolved_stack_index_arg_indices: object,
+        statements: object,
+        stack_bindings: object,
+        preserved_register_indices: object,
+        push_sources: object,
+        rhs_values: object,
         *,
-        call_name: str | None,
-        debug_materialization: bool,
-    ) -> bool:
+        call_name: object,
+        debug_materialization: cython.bint,
+    ) -> cython.bint:
         """Normalize one register-carrier rhs into the output arg list."""
+        resolved: object
+        segment_verdict: object
+        source_expr: object
         byte_merge_resolved = False
         prefix = statements[: source_idx + 1] if isinstance(source_idx, int) and source_idx >= 0 else statements
         pointer_arg = _callee_expects_pointer_arg_8616(
@@ -11709,15 +12851,23 @@ class _CallsiteStackArgsMaterializer8616:
         normalized.append(expr)
         return True
 
+    @cython.ccall
     def _resolve_shr_word_8616(
         self,
         rhs: StructuredAstValue,
-        prefix: list[StructuredAstValue],
+        prefix: object,
         *,
-        call_name: str | None,
-        debug_materialization: bool,
+        call_name: object,
+        debug_materialization: cython.bint,
     ) -> StructuredAstValue | None:
         """Resolve `Shr(word, 8)` carriers to their underlying word value."""
+        lhs: object
+        lhs_resolved: object
+        rhs_stmt: object
+        shift_const: object
+        assignment: object
+        stmt: object
+        stmt_idx: object
         # Byte-split push carriers often materialize as `Shr(word_expr, 8)`.
         # For call-arg recovery we want the underlying 16-bit word value;
         # if that can be resolved, use it instead of failing the whole arg list.
@@ -11750,16 +12900,18 @@ class _CallsiteStackArgsMaterializer8616:
                     )
         return None
 
+    @cython.ccall
     def _resolve_dirty_rhs_fallback_8616(
         self,
         rhs: StructuredAstValue,
-        prefix: list[StructuredAstValue],
+        prefix: object,
         *,
-        call_name: str | None,
-        debug_materialization: bool,
-        source_idx: int,
+        call_name: object,
+        debug_materialization: cython.bint,
+        source_idx: cython.longlong,
     ) -> StructuredAstValue | None:
         """Fall back to a recent dirty rhs value when carrier resolution fails."""
+        dirty_rhs: object
         dirty_rhs = self._recent_dirty_value_rhs(rhs, prefix)
         if dirty_rhs is not None:
             if debug_materialization:
@@ -11774,16 +12926,19 @@ class _CallsiteStackArgsMaterializer8616:
             return dirty_rhs
         return None
 
+    @cython.ccall
     def _resolve_register_rhs_chain_8616(
         self,
         rhs: StructuredAstValue,
-        prefix: list[StructuredAstValue],
+        prefix: object,
         *,
-        call_name: str | None,
-        debug_materialization: bool,
-        source_idx: int,
-    ) -> tuple[StructuredAstValue | None, bool]:
+        call_name: object,
+        debug_materialization: cython.bint,
+        source_idx: cython.longlong,
+    ) -> tuple[StructuredAstValue | None, cython.bint]:
         """Resolve a register-carrier rhs via assignment, dirty-rhs, Shr, or byte-merge chains."""
+        byte_resolved: object
+        resolved: object
         resolved = self._resolve_register_carriers_in_expr(rhs, prefix)
         if debug_materialization:
             log.warning(
@@ -11811,17 +12966,20 @@ class _CallsiteStackArgsMaterializer8616:
                 return byte_resolved, True
         return resolved, False
 
+    @cython.ccall
     def _normalize_call_helper_offset_8616(
         self,
         expr: StructuredAstValue,
-        prefix: list[StructuredAstValue],
+        prefix: object,
         *,
-        stack_bindings: dict[int, StructuredAstValue] | None,
-        call_name: str | None,
-        debug_materialization: bool,
-        source_idx: int,
+        stack_bindings: object,
+        call_name: object,
+        debug_materialization: cython.bint,
+        source_idx: cython.longlong,
     ) -> StructuredAstValue:
         """Resolve register carriers inside a SEG_PTR/MK_FP helper offset argument."""
+        dirty_offset: object
+        resolved_offset: object
         if not (isinstance(expr, CFunctionCall) and getattr(expr, "callee_target", None) in {"SEG_PTR", "MK_FP"}):
             return expr
         helper_args = list(expr.args or ())
@@ -11856,7 +13014,7 @@ class _CallsiteStackArgsMaterializer8616:
         return expr
 
     def _debug_normalize_refuse_8616(
-        self,reason: str, expr: StructuredAstValue = None, *, call_name: str | None, debug_materialization: bool
+        self,reason: object, expr: StructuredAstValue = None, *, call_name: object, debug_materialization: cython.bint
     ) -> None:
         if debug_materialization:
             log.warning(
@@ -11868,9 +13026,9 @@ class _CallsiteStackArgsMaterializer8616:
             )
         return None
     def _byte_merge_refuse_8616(self,
-        reason_fmt: str,
-        call_name: str | None,
-        debug_materialization: bool,
+        reason_fmt: object,
+        call_name: object,
+        debug_materialization: cython.bint,
         *fmt_args: StructuredAstValue,
     ) -> None:
         self.stats.byte_merge_refused_count += 1
@@ -11882,11 +13040,14 @@ class _CallsiteStackArgsMaterializer8616:
                 *fmt_args,
             )
 
+    @cython.ccall
     def _resolve_byte_merge_low_source_8616(
         self,
-        expr: StructuredAstValue, prefix: list[StructuredAstValue],
-    *, call_name: str | None, debug_materialization: bool
+        expr: StructuredAstValue, prefix: object,
+    *, call_name: object, debug_materialization: cython.bint
     ) -> StructuredAstValue:
+        low_source: object
+        resolved_low: object
         low_source = self._byte_merge_low_source(expr)
         if low_source is None:
             return None
@@ -11917,10 +13078,13 @@ class _CallsiteStackArgsMaterializer8616:
     def _resolve_value_carrier_or_byte_source_8616(
         self,
         expr: StructuredAstValue,
-        prefix: list[StructuredAstValue],
-        seen: set[tuple[StructuredAstValue, int]] | None = None,
-    *, call_name: str | None, debug_materialization: bool
+        prefix: object,
+        seen: object = None,
+    *, call_name: object, debug_materialization: cython.bint
     ) -> StructuredAstValue:
+        assigned_rhs: object
+        byte_resolved: object
+        resolved: object
         if seen is None:
             seen = set()
         key = (self._value_expr_key(expr), len(prefix))
@@ -11941,11 +13105,13 @@ class _CallsiteStackArgsMaterializer8616:
         if byte_resolved is not None and not self._expr_contains_non_segment_register_uses(byte_resolved):
             return byte_resolved
         return self._resolve_value_carrier_or_byte_source_8616(assigned_rhs, next_prefix, next_seen, call_name=call_name, debug_materialization=debug_materialization)
+    @cython.ccall
     def _resolve_stack_address_index_arg_expr_8616(
         self,
-        expr: StructuredAstValue, prefix: list[StructuredAstValue],
-    *, call_name: str | None, debug_materialization: bool
+        expr: StructuredAstValue, prefix: object,
+    *, call_name: object, debug_materialization: cython.bint
     ) -> StructuredAstValue:
+        resolved_index: object
         node = self._strip_arg_casts(expr)
         if not isinstance(node, CBinaryOp) or getattr(node, "op", None) not in {"Add", "Sub"}:
             return None
@@ -11975,9 +13141,16 @@ class _CallsiteStackArgsMaterializer8616:
         if stack_on_lhs:
             return CBinaryOp(getattr(node, "op", "Add"), cloned_stack, cloned_index, codegen=self.codegen)
         return CBinaryOp("Add", cloned_index, cloned_stack, codegen=self.codegen)
+    @cython.ccall
     def _group_single_far_pointer_arg_8616(
-        self,values: list[StructuredAstValue], *, call_name: str | None
-    ) -> list[StructuredAstValue] | None:
+        self,values: object, *, call_name: object
+    ) -> object:
+        name: object
+        segment_expr: object
+        segment_idx: object
+        segment_name: object
+        idx: object
+        value: object
         logical_arg_count = _expected_arg_count_for_known_callee_8616(call_name or "")
         if logical_arg_count != 1 or len(values) != 2:
             return None
@@ -12022,12 +13195,13 @@ class _CallsiteStackArgsMaterializer8616:
                 codegen=self.codegen,
             )
         ]
+    @cython.ccall
     def _stack_call_source_expr_8616(
-        self,source: StructuredAstValue, arg_index: int, *, call_name: str | None
+        self,source: StructuredAstValue, arg_index: cython.longlong, *, call_name: object
     ) -> StructuredAstValue | None:
         if not isinstance(source, tuple) or not source:
             return None
-        if source[0] == CallsitePushSourceKind8616.RETURN_REGISTER.value:
+        if operator.eq(source[0], CallsitePushSourceKind8616.RETURN_REGISTER.value):
             return None
         return self._direct_expr_from_push_source_8616(
             source,
@@ -12039,11 +13213,13 @@ class _CallsiteStackArgsMaterializer8616:
         self,
         call: StructuredAstValue,
         args: StructuredAstValue,
-        push_arg_sources: tuple[StructuredAstValue, ...],
-        statements: list[StructuredAstValue],
-        call_name: str | None,
+        push_arg_sources: object,
+        statements: object,
+        call_name: object,
     ) -> bool | None:
         """Normalize args when push sources carry return-register evidence; None = not applicable."""
+        direct_args: object
+        normalized_direct_args: object
         ordered_sources = list(reversed(push_arg_sources)) if len(push_arg_sources) > 1 else list(push_arg_sources)
         direct_args, consumed_return_call_indices = (
             self._direct_args_from_ordered_push_sources_consuming_return_calls_8616(
@@ -12057,12 +13233,12 @@ class _CallsiteStackArgsMaterializer8616:
             ordered_sources,
         ):
             return self._delete_consumed_return_call_refs_8616(consumed_return_call_indices)
-        if direct_args is not None and all(arg is not None for arg in direct_args):
+        if direct_args is not None and all(arg is not None for arg in iter(direct_args)):
             has_unresolved_arg = any(
                 self._node_contains_placeholder_stack_8616(arg) or self._expr_contains_plain_register_uses(arg)
-                for arg in args
+                for arg in iter(args)
             )
-            if has_unresolved_arg or len(direct_args) != len(args):
+            if has_unresolved_arg or operator.ne(len(direct_args), len(args)):
                 normalized_direct_args = self._normalize_materialized_call_args(
                     list(direct_args),
                     [-1] * len(direct_args),
@@ -12072,7 +13248,7 @@ class _CallsiteStackArgsMaterializer8616:
                 if (
                     normalized_direct_args is not None
                     and self._all_arg_exprs_are_non_segment_registers(normalized_direct_args)
-                    and tuple(normalized_direct_args) != args
+                    and operator.ne(tuple(normalized_direct_args), args)
                 ):
                     transaction = self._set_materialized_call_args(
                         call,
@@ -12085,8 +13261,10 @@ class _CallsiteStackArgsMaterializer8616:
                         return transaction.changed or deleted
                     return bool(transaction.changed)
         return None
-    def _existing_args_have_unresolved_8616(self, args: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _existing_args_have_unresolved_8616(self, args: StructuredAstValue) -> cython.bint:
         """Whether any existing arg still has placeholder/register evidence."""
+        arg: object
         for arg in args:
             node = arg
             while isinstance(node, CTypeCast):
@@ -12102,11 +13280,13 @@ class _CallsiteStackArgsMaterializer8616:
 
     def _normalize_existing_call_args_8616(self,
         call: StructuredAstValue,
-        statements: list[StructuredAstValue],
+        statements: object,
         *,
-        call_name: str | None,
-        push_arg_sources: tuple[StructuredAstValue, ...] = (),
-    ) -> bool:
+        call_name: object,
+        push_arg_sources: object = (),
+    ) -> cython.bint:
+        normalized_args: object
+        ret_reg_result: object
         args = _boundary_tuple_8616(getattr(call, "args", ()) or ())
         if not args:
             return False
@@ -12116,8 +13296,8 @@ class _CallsiteStackArgsMaterializer8616:
             and any(
                 isinstance(source, tuple)
                 and len(source) >= 3
-                and source[0] == CallsitePushSourceKind8616.RETURN_REGISTER.value
-                for source in push_arg_sources
+                and operator.eq(source[0], CallsitePushSourceKind8616.RETURN_REGISTER.value)
+                for source in iter(push_arg_sources)
             )
         ):
             ret_reg_result = self._normalize_ret_reg_source_args_8616(
@@ -12125,14 +13305,14 @@ class _CallsiteStackArgsMaterializer8616:
             )
             if ret_reg_result is not None:
                 return ret_reg_result
-        preserve_return_register_indices: set[int] = set()
+        preserve_return_register_indices: set[cython.longlong] = set()
         ordered_push_sources_for_args: tuple[StructuredAstValue, ...] = ()
-        if isinstance(push_arg_sources, tuple) and len(push_arg_sources) == len(args):
+        if isinstance(push_arg_sources, tuple) and operator.eq(len(push_arg_sources), len(args)):
             ordered_sources = list(reversed(push_arg_sources)) if len(push_arg_sources) > 1 else list(push_arg_sources)
             ordered_push_sources_for_args = tuple(ordered_sources)
             preserve_return_register_indices = {
                 idx
-                for idx, source in enumerate(ordered_sources)
+                for idx, source in builtins.iter(enumerate(ordered_sources))
                 if isinstance(source, tuple)
                 and len(source) >= 3
                 and source[0] == "ret_reg"
@@ -12153,11 +13333,11 @@ class _CallsiteStackArgsMaterializer8616:
 
         force_replace_args = any(
             self._push_source_is_expr_arithmetic_8616(source)
-            for source in (tuple(push_arg_sources) if isinstance(push_arg_sources, tuple) else ())
+            for source in iter((tuple(push_arg_sources) if isinstance(push_arg_sources, tuple) else ()))
         )
-        if len(tuple(normalized_args)) != len(args) and not self._existing_args_have_unresolved_8616(args):
+        if operator.ne(len(tuple(normalized_args)), len(args)) and not self._existing_args_have_unresolved_8616(args):
             return False
-        if tuple(normalized_args) == args:
+        if operator.eq(tuple(normalized_args), args):
             return False
         return bool(
             self._set_materialized_call_args(
@@ -12168,6 +13348,7 @@ class _CallsiteStackArgsMaterializer8616:
             ).changed
         )
 
+    @cython.ccall
     def _normalize_near_function_pointer_call_arg_8616(self, arg: StructuredAstValue) -> StructuredAstValue:
         node = arg
         while isinstance(node, CTypeCast):
@@ -12188,7 +13369,12 @@ class _CallsiteStackArgsMaterializer8616:
         )
         return self._clone_c_ast_tree(offset_expr), True
 
+    @cython.ccall
     def _call_node_tagged_callsite_addr_8616(self, call: StructuredAstValue) -> int | None:
+        exact_callsite_addr: object
+        tags: object
+        value: object
+        key: object
         if isinstance(call, CFunctionCall):
             exact_callsite_addr = structured_callsite_addr_8616(call)
             if exact_callsite_addr is not None:
@@ -12202,12 +13388,13 @@ class _CallsiteStackArgsMaterializer8616:
         value = getattr(call, "addr", None)
         return value if isinstance(value, int) else None
 
+    @cython.ccall
     def _known_name_callsite_mismatch_8616(self,
         call: StructuredAstValue,
         summary: StructuredAstValue,
         current_name: StructuredAstValue,
-        semantic_name: str,
-    ) -> bool:
+        semantic_name: object,
+    ) -> cython.bint:
         """Refuse target rewrite when a known name disagrees with the summary callsite."""
         if not (isinstance(current_name, str) and current_name and not _call_name_is_unknown_8616(current_name)):
             return False
@@ -12226,14 +13413,16 @@ class _CallsiteStackArgsMaterializer8616:
             )
         return True
 
+    @cython.ccall
     def _install_summary_target_8616(self,
         call: StructuredAstValue,
-        summary: StructuredAstValue,
-        semantic_name: str,
+        summary: object,
+        semantic_name: object,
         current_name: StructuredAstValue,
-        target_addr: int,
+        target_addr: cython.longlong,
     ) -> None:
         """Install the proven summary target name and callee on ``call``."""
+        candidate: object
         candidate = _lookup_callee_function_8616(self.project, target_addr, allow_containing=False)
         if candidate is not None and _callee_names_match_8616(getattr(candidate, "name", None), semantic_name):
             call.callee_func = candidate
@@ -12254,9 +13443,10 @@ class _CallsiteStackArgsMaterializer8616:
                 summary.callsite_addr if summary is not None else None,
             )
 
+    @cython.ccall
     def _apply_summary_call_target_8616(self,
-        call: StructuredAstValue, summary: StructuredAstValue, fallback_name: str | None
-    ) -> tuple[bool, bool]:
+        call: object, summary: object, fallback_name: object
+    ) -> tuple[cython.bint, cython.bint]:
         if call is None or summary is None or bool(summary.stack_probe_helper):
             return False, False
         changed = _preserve_detached_callee_render_metadata_8616(call)
@@ -12277,26 +13467,29 @@ class _CallsiteStackArgsMaterializer8616:
     def _call_args_match_materialized_args_8616(self,
         call: StructuredAstValue,
         args: StructuredAstValue,
-    ) -> bool:
+    ) -> cython.bint:
         """Return whether a call already carries the evidence-derived arguments."""
         current_args = _boundary_tuple_8616(getattr(call, "args", ()) or ())
         materialized_args = _boundary_tuple_8616(args or ())
-        return len(current_args) == len(materialized_args) and all(
+        return operator.eq(len(current_args), len(materialized_args)) and all(
             _same_c_expression_8616(before, after)
             or (
                 _call_arg_semantic_key_8616(before) is not None
-                and _call_arg_semantic_key_8616(before) == _call_arg_semantic_key_8616(after)
+                and operator.eq(_call_arg_semantic_key_8616(before), _call_arg_semantic_key_8616(after))
             )
-            for before, after in zip(current_args, materialized_args, strict=False)
+            for before, after in builtins.iter(zip(current_args, materialized_args, strict=False))
         )
 
+    @cython.ccall
     def _merge_proven_partial_direct_args_8616(self,
         call: StructuredAstValue,
-        direct_args: list[StructuredAstValue],
-    ) -> tuple[StructuredAstValue, ...] | None:
+        direct_args: object,
+    ) -> object:
         """Replace only unresolved arguments backed by an exact direct source."""
+        direct_arg: object
+        current_arg: object
         current_args = _boundary_tuple_8616(getattr(call, "args", ()) or ())
-        if len(current_args) != len(direct_args):
+        if operator.ne(len(current_args), len(direct_args)):
             return None
         merged: list[StructuredAstValue] = []
         replacement_count = 0
@@ -12311,15 +13504,16 @@ class _CallsiteStackArgsMaterializer8616:
                 merged.append(current_arg)
         return tuple(merged) if replacement_count > 0 else None
 
+    @cython.ccall
     def _argument_matches_register_push_source_8616(self,
         argument: StructuredAstValue,
         source: StructuredAstValue,
-    ) -> bool:
+    ) -> cython.bint:
         """Return whether an argument is the exact register named by PUSH evidence."""
         if (
             not isinstance(source, tuple)
             or len(source) != 2
-            or source[0] != CallsitePushSourceKind8616.REGISTER_VALUE.value
+            or operator.ne(source[0], CallsitePushSourceKind8616.REGISTER_VALUE.value)
             or not isinstance(source[1], str)
         ):
             return False
@@ -12330,13 +13524,14 @@ class _CallsiteStackArgsMaterializer8616:
             isinstance(node, structured_c.CVariable)
             and isinstance(node.variable, SimRegisterVariable)
             and isinstance(node.variable.name, str)
-            and node.variable.name.lower() == source[1].lower()
+            and operator.eq(node.variable.name.lower(), source[1].lower())
         )
 
     def _regroup_args_from_summary_widths_8616(
-        self, args_after: StructuredAstValue, summary: StructuredAstValue, callee_name: str | None
+        self, args_after: StructuredAstValue, summary: object, callee_name: object
     ) -> StructuredAstValue:
         """Regroup scalar args to match summary-declared logical widths."""
+        grouped_args: object
         if summary is None or len(args_after) <= 1:
             return args_after
         push_sources = _boundary_tuple_8616(summary.push_arg_sources or ())
@@ -12356,18 +13551,19 @@ class _CallsiteStackArgsMaterializer8616:
                 "[call-summary-width-regroup] function=%#x target=%s args_before=%s args_after=%s",
                 getattr(getattr(self.codegen, "cfunc", None), "addr", 0) or 0,
                 callee_name,
-                tuple(self._debug_expr_8616(arg) for arg in args_after),
-                tuple(self._debug_expr_8616(arg) for arg in grouped_args),
+                tuple(self._debug_expr_8616(arg) for arg in iter(args_after)),
+                tuple(self._debug_expr_8616(arg) for arg in iter(grouped_args)),
             )
         return tuple(grouped_args)
 
+    @cython.ccall
     def _apply_zero_arity_ownership_8616(
         self,
         call: StructuredAstValue,
         summary: StructuredAstValue,
         args_before: StructuredAstValue,
         args_after: StructuredAstValue,
-        target_changed: bool,
+        target_changed: cython.bint,
     ) -> CallArgumentMutationResult8616 | None:
         """Apply the zero-argument ownership contract when it enforces arity."""
         if not isinstance(summary, CallsiteSummary8616):
@@ -12422,16 +13618,16 @@ class _CallsiteStackArgsMaterializer8616:
 
     def _materialization_quality_refused_8616(
         self,
-        call_name: str | None,
+        call_name: object,
         args_before: StructuredAstValue,
         args_after: StructuredAstValue,
-        exact_register_args: bool,
-        exact_stack_address_mismatch: bool,
-        exact_literal_args: bool = False,
-    ) -> bool:
+        exact_register_args: cython.bint,
+        exact_stack_address_mismatch: cython.bint,
+        exact_literal_args: cython.bint = False,
+    ) -> cython.bint:
         """Refuse replacement when materialized args score worse without exact evidence."""
-        before_score = sum(self._arg_semantic_quality_8616(call_name, idx, arg) for idx, arg in enumerate(args_before))
-        after_score = sum(self._arg_semantic_quality_8616(call_name, idx, arg) for idx, arg in enumerate(args_after))
+        before_score = sum(self._arg_semantic_quality_8616(call_name, idx, arg) for idx, arg in builtins.iter(enumerate(args_before)))
+        after_score = sum(self._arg_semantic_quality_8616(call_name, idx, arg) for idx, arg in builtins.iter(enumerate(args_after)))
         if (
             after_score < before_score
             and not exact_register_args
@@ -12445,20 +13641,21 @@ class _CallsiteStackArgsMaterializer8616:
                     call_name,
                     before_score,
                     after_score,
-                    tuple(self._debug_expr_8616(arg) for arg in args_before),
-                    tuple(self._debug_expr_8616(arg) for arg in args_after),
+                    tuple(self._debug_expr_8616(arg) for arg in iter(args_before)),
+                    tuple(self._debug_expr_8616(arg) for arg in iter(args_after)),
                 )
             return True
         return False
+    @cython.ccall
     def _refresh_summary_arg_widths_8616(self,
         call: StructuredAstValue,
         summary: StructuredAstValue,
-        effective_call_name: str | None,
+        effective_call_name: object,
     ) -> StructuredAstValue:
         logical_widths = self._summary_logical_arg_widths(summary, effective_call_name)
         if (
             logical_widths
-            and logical_widths != summary.logical_arg_widths
+            and operator.ne(logical_widths, summary.logical_arg_widths)
             and _prototype_widths_account_for_push_sources_top_8616(
                 logical_widths,
                 _boundary_tuple_8616(summary.push_arg_sources or ()),
@@ -12469,10 +13666,12 @@ class _CallsiteStackArgsMaterializer8616:
             record_callsite_summary_fact_8616(self.codegen, summary, node_id=id(call), attached=True)
         return summary
 
+    @cython.ccall
     def _attach_arg_provenance_8616(self,
-        args_after: tuple[StructuredAstValue, ...],
+        args_after: object,
         summary: StructuredAstValue,
     ) -> None:
+        provenance_attacher: object
         carrier = cast(_CallsiteMaterializationControlCarrier8616, self.codegen)
         try:
             provenance_attacher = carrier._inertia_segment_address_provenance_attacher_8616
@@ -12482,8 +13681,13 @@ class _CallsiteStackArgsMaterializer8616:
             provenance_attacher(args_after, tuple(summary.push_arg_instruction_addrs))
 
     def _set_materialized_call_args(self,
-        call: StructuredAstValue, args: StructuredAstValue, *, call_name: str | None, force_replace: bool = False
+        call: StructuredAstValue, args: StructuredAstValue, *, call_name: object, force_replace: cython.bint = False
     ) -> CallArgumentMutationResult8616:
+        safety_result: object
+        summary: object
+        summaryless_result: object
+        zero_result: object
+        arg: object
 
 
         summary = self.summary_map.get(id(call))
@@ -12535,9 +13739,9 @@ class _CallsiteStackArgsMaterializer8616:
             if len(summary_push_sources) > 1
             else summary_push_sources
         )
-        exact_register_args = bool(args_after) and len(args_after) == len(ordered_summary_sources) and all(
+        exact_register_args = bool(args_after) and operator.eq(len(args_after), len(ordered_summary_sources)) and all(
             self._argument_matches_register_push_source_8616(argument, source)
-            for argument, source in zip(args_after, ordered_summary_sources, strict=True)
+            for argument, source in builtins.iter(zip(args_after, ordered_summary_sources, strict=True))
         )
         exact_stack_address_mismatch = self._exact_stack_address_source_mismatch_8616(
             args_before,
@@ -12545,20 +13749,20 @@ class _CallsiteStackArgsMaterializer8616:
         )
         literal_source_indices = {
             idx
-            for idx, source in enumerate(ordered_summary_sources)
+            for idx, source in builtins.iter(enumerate(ordered_summary_sources))
             if isinstance(source, tuple)
             and len(source) == 2
-            and source[0] == CallsitePushSourceKind8616.IMMEDIATE.value
+            and operator.eq(source[0], CallsitePushSourceKind8616.IMMEDIATE.value)
             and isinstance(source[1], int)
             and not isinstance(source[1], bool)
         }
         exact_literal_args = (
             bool(literal_source_indices)
             and bool(args_after)
-            and len(args_after) == len(ordered_summary_sources)
+            and operator.eq(len(args_after), len(ordered_summary_sources))
             and all(
                 self._expr_matches_push_source_value_8616(args_after[idx], ordered_summary_sources[idx])
-                for idx in literal_source_indices
+                for idx in iter(literal_source_indices)
             )
         )
         if args_before and (not force_replace) and self._materialization_quality_refused_8616(
@@ -12592,34 +13796,34 @@ class _CallsiteStackArgsMaterializer8616:
     def _summaryless_conflict_gate_8616(
         self,
         call: StructuredAstValue,
-        summary: StructuredAstValue,
+        summary: object,
         args_before: StructuredAstValue,
         args_after: StructuredAstValue,
         *,
-        call_name: str | None,
-        target_changed: bool,
-        force_replace: bool,
+        call_name: object,
+        target_changed: cython.bint,
+        force_replace: cython.bint,
     ) -> CallArgumentMutationResult8616 | None:
         """Refuse summaryless replacement when resolved args would conflict."""
-        if summary is None and force_replace and args_before and len(args_before) == len(args_after):
+        if summary is None and force_replace and args_before and operator.eq(len(args_before), len(args_after)):
             existing_args_are_resolved = not any(
                 self._node_contains_placeholder_stack_8616(arg) or self._expr_contains_plain_register_uses(arg)
-                for arg in args_before
+                for arg in iter(args_before)
             )
-            before_keys = tuple(_call_arg_semantic_key_8616(arg) for arg in args_before)
-            after_keys = tuple(_call_arg_semantic_key_8616(arg) for arg in args_after)
-            before_pointer_keys = tuple(self._pointer_offset_key_8616(arg) for arg in args_before)
-            after_pointer_keys = tuple(self._pointer_offset_key_8616(arg) for arg in args_after)
+            before_keys = tuple(_call_arg_semantic_key_8616(arg) for arg in iter(args_before))
+            after_keys = tuple(_call_arg_semantic_key_8616(arg) for arg in iter(args_after))
+            before_pointer_keys = tuple(self._pointer_offset_key_8616(arg) for arg in iter(args_before))
+            after_pointer_keys = tuple(self._pointer_offset_key_8616(arg) for arg in iter(args_after))
             semantic_replacement_has_conflict = (
                 existing_args_are_resolved
-                and all(key is not None for key in before_keys)
-                and all(key is not None for key in after_keys)
+                and all(key is not None for key in iter(before_keys))
+                and all(key is not None for key in iter(after_keys))
                 and before_keys != after_keys
             )
             pointer_replacement_has_conflict = (
                 existing_args_are_resolved
-                and all(key is not None for key in before_pointer_keys)
-                and all(key is not None for key in after_pointer_keys)
+                and all(key is not None for key in iter(before_pointer_keys))
+                and all(key is not None for key in iter(after_pointer_keys))
                 and before_pointer_keys != after_pointer_keys
             )
             if semantic_replacement_has_conflict or pointer_replacement_has_conflict:
@@ -12631,8 +13835,8 @@ class _CallsiteStackArgsMaterializer8616:
                         "[call-materialized-refuse] function=%#x target=%s reason=summaryless-conflicting-replacement args_before=%s args_after=%s",
                         getattr(getattr(self.codegen, "cfunc", None), "addr", 0) or 0,
                         call_name,
-                        tuple(self._debug_expr_8616(arg) for arg in args_before),
-                        tuple(self._debug_expr_8616(arg) for arg in args_after),
+                        tuple(self._debug_expr_8616(arg) for arg in iter(args_before)),
+                        tuple(self._debug_expr_8616(arg) for arg in iter(args_after)),
                     )
                 return refused_call_argument_mutation_8616(target_changed=target_changed)
         return None
@@ -12643,15 +13847,15 @@ class _CallsiteStackArgsMaterializer8616:
         args_before: StructuredAstValue,
         args_after: StructuredAstValue,
         *,
-        target_changed: bool,
+        target_changed: cython.bint,
     ) -> CallArgumentMutationResult8616 | None:
         """Refuse cyclic, self-referencing, or call-dropping materializations."""
-        if any(self._c_ast_has_cycle_or_too_complex_8616(arg) for arg in args_after):
+        if any(self._c_ast_has_cycle_or_too_complex_8616(arg) for arg in iter(args_after)):
             self.codegen._inertia_call_arg_cyclic_or_complex_refused_8616 = (
                 int(getattr(self.codegen, "_inertia_call_arg_cyclic_or_complex_refused_8616", 0) or 0) + 1
             )
             return refused_call_argument_mutation_8616(target_changed=target_changed)
-        if any(self._c_ast_contains_identity_8616(arg, call) for arg in args_after):
+        if any(self._c_ast_contains_identity_8616(arg, call) for arg in iter(args_after)):
             self.codegen._inertia_call_arg_self_reference_refused_8616 = (
                 int(getattr(self.codegen, "_inertia_call_arg_self_reference_refused_8616", 0) or 0) + 1
             )
@@ -12661,19 +13865,23 @@ class _CallsiteStackArgsMaterializer8616:
             return refused_call_argument_mutation_8616(target_changed=target_changed)
         return None
 
+    @cython.ccall
     def _remember_materialized_args_8616(
         self,
         call: StructuredAstValue,
         args_after: StructuredAstValue,
         ordered_summary_sources: StructuredAstValue,
         *,
-        force_replace: bool,
-        call_name: str | None,
-        args_before_len: int,
+        force_replace: cython.bint,
+        call_name: object,
+        args_before_len: cython.longlong,
         protected: StructuredAstValue,
     ) -> None:
         """Remember accepted args into the protected-arg store with quality scores."""
-        if force_replace or len(args_after) != args_before_len:
+        return_arg_sources: object
+        arg: object
+        idx: object
+        if force_replace or operator.ne(len(args_after), args_before_len):
             protected.discard_call(call)
         for idx, arg in enumerate(args_after):
             score = self._arg_semantic_quality_8616(call_name, idx, arg)
@@ -12696,11 +13904,11 @@ class _CallsiteStackArgsMaterializer8616:
         call: StructuredAstValue,
         args_before: StructuredAstValue,
         args_after: StructuredAstValue,
-        summary: StructuredAstValue,
+        summary: object,
         *,
-        args_equal: bool,
-        target_changed: bool,
-        call_name: str | None,
+        args_equal: cython.bint,
+        target_changed: cython.bint,
+        call_name: object,
     ) -> CallArgumentMutationResult8616:
         """Commit accepted args onto the call node and record the mutation."""
         if args_equal:
@@ -12724,8 +13932,8 @@ class _CallsiteStackArgsMaterializer8616:
             "callarg-normalized function=%#x target=%s args_before=%s args_after=%s",
             getattr(getattr(self.codegen, "cfunc", None), "addr", 0) or 0,
             call_name,
-            tuple(self._debug_expr_8616(arg) for arg in args_before),
-            tuple(self._debug_expr_8616(arg) for arg in args_after),
+            tuple(self._debug_expr_8616(arg) for arg in iter(args_before)),
+            tuple(self._debug_expr_8616(arg) for arg in iter(args_after)),
         )
         if os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"):
             log.warning(
@@ -12734,15 +13942,19 @@ class _CallsiteStackArgsMaterializer8616:
                 id(call),
                 call_name,
                 summary.callsite_addr if summary is not None else None,
-                tuple(self._debug_expr_8616(arg) for arg in args_before),
-                tuple(self._debug_expr_8616(arg) for arg in args_after),
+                tuple(self._debug_expr_8616(arg) for arg in iter(args_before)),
+                tuple(self._debug_expr_8616(arg) for arg in iter(args_after)),
             )
         return accepted_call_argument_mutation_8616(
             arguments_changed=True,
             target_changed=target_changed,
         )
 
+    @cython.ccall
     def _prototype_arg_count(self, call: StructuredAstValue) -> int | None:
+        args: object
+        callee_func: object
+        prototype: object
         callee_func = getattr(call, "callee_func", None)
         prototype = getattr(callee_func, "prototype", None)
         args = getattr(prototype, "args", None)
@@ -12750,13 +13962,16 @@ class _CallsiteStackArgsMaterializer8616:
             return len(args)
         return None
 
+    @cython.ccall
     def _prototype_arg_widths_for_call_8616(self,
         call: StructuredAstValue,
-    ) -> tuple[int, ...] | None:
+    ) -> object:
+        callee_func: object
         callee_func = getattr(call, "callee_func", None)
         return _prototype_arg_widths_8616(self.project, getattr(callee_func, "prototype", None))
 
-    def _is_stable_named_stack_value_expr_8616(self, expr: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_stable_named_stack_value_expr_8616(self, expr: StructuredAstValue) -> cython.bint:
         node = expr
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -12771,10 +13986,14 @@ class _CallsiteStackArgsMaterializer8616:
             return False
         return not name.startswith(("arg_", "s_", "stack_", "vvar_", "tmp_", "ir_"))
 
+    @cython.ccall
     def _remat_exact_width_mismatch_8616(
-        self, call: StructuredAstValue, args: StructuredAstValue, ordered_push_sources: list[StructuredAstValue]
-    ) -> bool:
+        self, call: StructuredAstValue, args: StructuredAstValue, ordered_push_sources: object
+    ) -> cython.bint:
         """Return whether an exact stack-source arg has a storage-width mismatch."""
+        source_evidence: object
+        actual_arg: object
+        push_source: object
         for actual_arg, push_source in zip(args, ordered_push_sources, strict=False):
             source_evidence = call_argument_stack_value_source_8616(push_source)
             if source_evidence is None:
@@ -12793,10 +14012,9 @@ class _CallsiteStackArgsMaterializer8616:
                 else None
             )
             if (
-                call_argument_stack_variable_offset_8616(self.codegen, actual_node)
-                == source_evidence.offset
+                operator.eq(call_argument_stack_variable_offset_8616(self.codegen, actual_node), source_evidence.offset)
                 and isinstance(actual_storage_width, int)
-                and actual_storage_width != source_evidence.width
+                and operator.ne(actual_storage_width, source_evidence.width)
             ):
                 if os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"):
                     log.warning(
@@ -12815,14 +14033,14 @@ class _CallsiteStackArgsMaterializer8616:
         self,
         call: StructuredAstValue,
         args: StructuredAstValue,
-        ordered_push_sources: list[StructuredAstValue],
-        semantic_call_name: str | None,
+        ordered_push_sources: object,
+        semantic_call_name: object,
     ) -> bool | None:
         """Verdict for arithmetic push-source args; ``None`` means undecided."""
         if not (
-            len(ordered_push_sources) == len(args)
+            operator.eq(len(ordered_push_sources), len(args))
             and any(
-                self._push_source_is_arithmetic_expr_8616(source) for source in ordered_push_sources
+                self._push_source_is_arithmetic_expr_8616(source) for source in iter(ordered_push_sources)
             )
         ):
             return None
@@ -12833,9 +14051,9 @@ class _CallsiteStackArgsMaterializer8616:
                 arg_index=idx,
                 force_pointer_arg=idx < len(args) and self._call_arg_is_pointer_shaped_8616(args[idx]),
             )
-            for idx, source in enumerate(ordered_push_sources)
+            for idx, source in builtins.iter(enumerate(ordered_push_sources))
         ]
-        if not all(arg is not None for arg in direct_source_args):
+        if not all(arg is not None for arg in iter(direct_source_args)):
             return None
         if self._pointer_offset_keys_match_8616(args, tuple(direct_source_args)):
             if os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"):
@@ -12843,14 +14061,14 @@ class _CallsiteStackArgsMaterializer8616:
                     "[call-remat] function=%#x target=%s reason=keep-pointer-push-offset-alignment args=%s",
                     getattr(getattr(self.codegen, "cfunc", None), "addr", 0) or 0,
                     getattr(call, "callee_target", None),
-                    tuple(self._debug_expr_8616(arg) for arg in args),
+                    tuple(self._debug_expr_8616(arg) for arg in iter(args)),
                 )
             return False
-        current_keys = tuple(_call_arg_semantic_key_8616(arg) for arg in args)
-        direct_keys = tuple(_call_arg_semantic_key_8616(arg) for arg in direct_source_args)
+        current_keys = tuple(_call_arg_semantic_key_8616(arg) for arg in iter(args))
+        direct_keys = tuple(_call_arg_semantic_key_8616(arg) for arg in iter(direct_source_args))
         if (
-            all(key is not None for key in current_keys)
-            and all(key is not None for key in direct_keys)
+            all(key is not None for key in iter(current_keys))
+            and all(key is not None for key in iter(direct_keys))
             and current_keys != direct_keys
         ):
                 if os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"):
@@ -12866,20 +14084,22 @@ class _CallsiteStackArgsMaterializer8616:
 
     def _remat_bp_offset_mismatch_8616(
         self, call: StructuredAstValue, args: StructuredAstValue, push_arg_sources: StructuredAstValue
-    ) -> bool:
+    ) -> cython.bint:
         """Return whether bp push-source offsets disagree with the actual args."""
+        projected_offset: object
+        arg: object
         if not (
             isinstance(push_arg_sources, tuple)
-            and len(push_arg_sources) == len(args)
+            and operator.eq(len(push_arg_sources), len(args))
             and all(
                 isinstance(source, tuple) and len(source) >= 2 and source[0] == "bp" and isinstance(source[1], int)
-                for source in push_arg_sources
+                for source in iter(push_arg_sources)
             )
         ):
             return False
         expected_offsets = [
             int(source[1])
-            for source in (reversed(push_arg_sources) if len(push_arg_sources) > 1 else push_arg_sources)
+            for source in iter((reversed(push_arg_sources) if len(push_arg_sources) > 1 else push_arg_sources))
         ]
         actual_offsets: list[int | None] = []
         for arg in args:
@@ -12895,8 +14115,8 @@ class _CallsiteStackArgsMaterializer8616:
                 if projected_offset is not None
                 else self._plain_stack_slot_address_offset(node)
             )
-        if all(isinstance(offset, int) for offset in actual_offsets):
-            normalized_actual = [cast(int, offset) for offset in actual_offsets]
+        if all(isinstance(offset, int) for offset in iter(actual_offsets)):
+            normalized_actual = [cast(int, offset) for offset in iter(actual_offsets)]
             if normalized_actual != expected_offsets:
                 if os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"):
                     log.warning(
@@ -12909,17 +14129,19 @@ class _CallsiteStackArgsMaterializer8616:
                 return True
         return False
 
+    @cython.ccall
     def _remat_derived_push_args_body_8616(
         self,
         call: StructuredAstValue,
         args: StructuredAstValue,
         push_arg_sources: StructuredAstValue,
-        semantic_call_name: str | None,
-        semantic_name: str,
+        semantic_call_name: object,
+        semantic_name: object,
         arity_contract: StructuredAstValue,
         expected_arg_widths: StructuredAstValue,
-    ) -> tuple[StructuredAstValue, bool, bool, bool, StructuredAstValue, list[StructuredAstValue]]:
+    ) -> tuple[StructuredAstValue, cython.bint, cython.bint, cython.bint, StructuredAstValue, list[StructuredAstValue]]:
         """Compute rematerialization verdicts from aligned push sources."""
+        remat_verdict: object
         expr_verified = False
         push_align = False
         remat_expr = False
@@ -12940,7 +14162,7 @@ class _CallsiteStackArgsMaterializer8616:
                 arg_index=idx,
                 force_pointer_arg=idx < len(args) and self._call_arg_is_pointer_shaped_8616(args[idx]),
             )
-            for idx, source in enumerate(ordered_sources)
+            for idx, source in builtins.iter(enumerate(ordered_sources))
         ]
         remat_verdict, expr_verified, push_align, remat_expr, expected_args = (
             self._remat_expected_args_verdict_8616(
@@ -12954,20 +14176,22 @@ class _CallsiteStackArgsMaterializer8616:
 
     def _remat_expected_args_verdict_8616(self,
         expected_args: StructuredAstValue,
-        ordered_sources: list[StructuredAstValue],
+        ordered_sources: object,
         args: StructuredAstValue,
-        semantic_call_name: str | None,
-        semantic_name: str,
+        semantic_call_name: object,
+        semantic_name: object,
         call: StructuredAstValue,
         logical_widths_for_existing_args: StructuredAstValue,
-        expr_verified: bool,
-        push_align: bool,
-        remat_expr: bool,
-    ) -> tuple[bool | None, bool, bool, bool, StructuredAstValue]:
-        if all(expected is not None for expected in expected_args):
+        expr_verified: cython.bint,
+        push_align: cython.bint,
+        remat_expr: cython.bint,
+    ) -> object:
+        mismatch_verdict: object
+        normalized_expected_args: object
+        if all(expected is not None for expected in iter(expected_args)):
             preserve_return_register_indices = {
                 idx
-                for idx, source in enumerate(ordered_sources)
+                for idx, source in builtins.iter(enumerate(ordered_sources))
                 if isinstance(source, tuple)
                 and len(source) >= 3
                 and source[0] == "ret_reg"
@@ -13003,12 +14227,12 @@ class _CallsiteStackArgsMaterializer8616:
                         "[call-remat] function=%#x target=%s reason=keep-derived-pointer-push-offset-alignment args=%s",
                         getattr(getattr(self.codegen, "cfunc", None), "addr", 0) or 0,
                         getattr(call, "callee_target", None),
-                        tuple(self._debug_expr_8616(arg) for arg in args),
+                        tuple(self._debug_expr_8616(arg) for arg in iter(args)),
                     )
                 return False, expr_verified, push_align, remat_expr, expected_args
-            expected_keys = tuple(_call_arg_semantic_key_8616(expected) for expected in expected_args)
-            actual_keys = tuple(_call_arg_semantic_key_8616(arg) for arg in args)
-            if all(key is not None for key in expected_keys) and all(key is not None for key in actual_keys):
+            expected_keys = tuple(_call_arg_semantic_key_8616(expected) for expected in iter(expected_args))
+            actual_keys = tuple(_call_arg_semantic_key_8616(arg) for arg in iter(args))
+            if all(key is not None for key in iter(expected_keys)) and all(key is not None for key in iter(actual_keys)):
                 mismatch_verdict = self._remat_key_mismatch_verdict_8616(
                     args, expected_args, ordered_sources, exact_stack_address_mismatch,
                     semantic_name, call, expr_verified, push_align, remat_expr, actual_keys, expected_keys,
@@ -13017,35 +14241,38 @@ class _CallsiteStackArgsMaterializer8616:
                     return mismatch_verdict
                 expr_verified = True
                 push_align = any(
-                    self._push_source_is_arithmetic_expr_8616(source) for source in ordered_sources
+                    self._push_source_is_arithmetic_expr_8616(source) for source in iter(ordered_sources)
                 )
         return None, expr_verified, push_align, remat_expr, expected_args
 
     def _remat_key_mismatch_verdict_8616(self,
         args: StructuredAstValue,
         expected_args: StructuredAstValue,
-        ordered_sources: list[StructuredAstValue],
-        exact_stack_address_mismatch: bool,
-        semantic_name: str,
+        ordered_sources: object,
+        exact_stack_address_mismatch: cython.bint,
+        semantic_name: object,
         call: StructuredAstValue,
-        expr_verified: bool,
-        push_align: bool,
-        remat_expr: bool,
-        actual_keys: tuple[StructuredAstValue, ...],
-        expected_keys: tuple[StructuredAstValue, ...],
-    ) -> tuple[bool | None, bool, bool, bool, StructuredAstValue] | None:
+        expr_verified: cython.bint,
+        push_align: cython.bint,
+        remat_expr: cython.bint,
+        actual_keys: object,
+        expected_keys: object,
+    ) -> object:
+        actual_arg: object
+        expected_arg: object
+        source: object
         if actual_keys != expected_keys:
             actual_score = sum(
-                self._arg_semantic_quality_8616(semantic_name, idx, arg) for idx, arg in enumerate(args)
+                self._arg_semantic_quality_8616(semantic_name, idx, arg) for idx, arg in builtins.iter(enumerate(args))
             )
             expected_score = sum(
-                self._arg_semantic_quality_8616(semantic_name, idx, arg) for idx, arg in enumerate(expected_args)
+                self._arg_semantic_quality_8616(semantic_name, idx, arg) for idx, arg in builtins.iter(enumerate(expected_args))
             )
             if (
                 actual_score > expected_score
                 and not exact_stack_address_mismatch
-                and not any(self._node_contains_placeholder_stack_8616(arg) for arg in args)
-                and not any(self._expr_contains_plain_register_uses(arg) for arg in args)
+                and not any(self._node_contains_placeholder_stack_8616(arg) for arg in iter(args))
+                and not any(self._expr_contains_plain_register_uses(arg) for arg in iter(args))
             ):
                 return False, expr_verified, push_align, remat_expr, expected_args
             resolved_stack_index_args_match = True
@@ -13060,7 +14287,7 @@ class _CallsiteStackArgsMaterializer8616:
                     and len(source) >= 4
                     and source[0] == "bp_index_addr"
                     and isinstance(source[1], int)
-                    and self._guard_stack_address_offset_arg_base_8616(actual_arg) == int(source[1])
+                    and operator.eq(self._guard_stack_address_offset_arg_base_8616(actual_arg), int(source[1]))
                     and not self._expr_contains_plain_register_uses(actual_arg)
                     and not self._node_contains_placeholder_stack_8616(actual_arg)
                 ):
@@ -13084,10 +14311,10 @@ class _CallsiteStackArgsMaterializer8616:
         call: StructuredAstValue,
         args: StructuredAstValue,
         push_arg_sources: StructuredAstValue,
-        semantic_call_name: str | None,
+        semantic_call_name: object,
         arity_contract: StructuredAstValue,
-        expected_arg_widths: tuple[int, ...] | None,
-    ) -> tuple[bool | None, bool, bool, bool, StructuredAstValue, list[StructuredAstValue]]:
+        expected_arg_widths: object,
+    ) -> object:
         """Compare push-source-derived expected args against the current call args."""
         semantic_name = semantic_call_name or getattr(call, "callee_target", None) or ""
         expr_verified = False
@@ -13098,10 +14325,10 @@ class _CallsiteStackArgsMaterializer8616:
         if (
             isinstance(push_arg_sources, tuple)
             and (
-                len(push_arg_sources) == len(args)
+                operator.eq(len(push_arg_sources), len(args))
                 or self._prototype_widths_account_for_push_sources_8616(expected_arg_widths, push_arg_sources)
             )
-            and any(source is not None for source in push_arg_sources)
+            and any(source is not None for source in iter(push_arg_sources))
         ):
             return self._remat_derived_push_args_body_8616(
                 call, args, push_arg_sources, semantic_call_name,
@@ -13109,7 +14336,7 @@ class _CallsiteStackArgsMaterializer8616:
             )
         return None, expr_verified, push_align, remat_expr, expected_args, ordered_sources
 
-    def _remat_debug_8616(self, call: StructuredAstValue, fmt_tail: str, *args: StructuredAstValue) -> None:
+    def _remat_debug_8616(self, call: StructuredAstValue, fmt_tail: object, *args: StructuredAstValue) -> None:
         """Emit the standard call-rematerialization debug line when enabled."""
         if os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"):
             log.warning(
@@ -13119,7 +14346,8 @@ class _CallsiteStackArgsMaterializer8616:
                 *args,
             )
 
-    def _remat_stack_variable_verdict_8616(self, node: StructuredAstValue, call: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _remat_stack_variable_verdict_8616(self, node: StructuredAstValue, call: StructuredAstValue) -> cython.bint:
         """Return whether a stack-variable arg node still needs rematerialization."""
         variable = node.variable
         name = getattr(variable, "name", None) or node.name
@@ -13135,40 +14363,42 @@ class _CallsiteStackArgsMaterializer8616:
                 return True
         return False
 
+    @cython.ccall
     def _remat_arith_source_verdict_8616(self,
         arg: StructuredAstValue,
-        arg_index: int,
+        arg_index: cython.longlong,
         call: StructuredAstValue,
         expected_args: StructuredAstValue,
         *,
-        expr_source_alignment_verified: bool,
-        rematerialize_for_expr_sources: bool,
-    ) -> bool:
+        expr_source_alignment_verified: cython.bint,
+        rematerialize_for_expr_sources: cython.bint,
+    ) -> cython.bint:
         """Verdict for an arithmetic-expression push source arg."""
         if (
             expr_source_alignment_verified
             and not rematerialize_for_expr_sources
-            and _call_arg_semantic_key_8616(arg) == _call_arg_semantic_key_8616(expected_args[arg_index])
+            and operator.eq(_call_arg_semantic_key_8616(arg), _call_arg_semantic_key_8616(expected_args[arg_index]))
         ):
             return False
         self._remat_debug_8616(call, 'reason=push-expr-ops arg=%d', arg_index)
         return True
 
+    @cython.ccall
     def _remat_arg_verdict_8616(
         self,
         arg: StructuredAstValue,
-        arg_index: int,
+        arg_index: cython.longlong,
         ordered_push_sources: StructuredAstValue,
         call: StructuredAstValue,
         *,
-        semantic_call_name: str | None,
-        semantic_name: str | None,
-        expr_source_alignment_verified: bool,
-        rematerialize_for_expr_sources: bool,
+        semantic_call_name: object,
+        semantic_name: object,
+        expr_source_alignment_verified: cython.bint,
+        rematerialize_for_expr_sources: cython.bint,
         expected_args: StructuredAstValue,
-        arity_satisfied: bool,
+        arity_satisfied: cython.bint,
         callee_prototype: StructuredAstValue,
-    ) -> bool:
+    ) -> cython.bint:
         """Return whether this arg needs rematerialization."""
         node = arg
         while isinstance(node, CTypeCast):
@@ -13210,20 +14440,23 @@ class _CallsiteStackArgsMaterializer8616:
             return self._remat_stack_variable_verdict_8616(node, call)
         return False
 
+    @cython.ccall
     def _remat_per_arg_scan_8616(
         self,
         call: StructuredAstValue,
         args: StructuredAstValue,
         ordered_push_sources: StructuredAstValue,
-        semantic_name: str | None,
-        semantic_call_name: str | None,
+        semantic_name: object,
+        semantic_call_name: object,
         arity_satisfied: StructuredAstValue,
         callee_prototype: StructuredAstValue,
-        expr_source_alignment_verified: bool,
-        rematerialize_for_expr_sources: bool,
+        expr_source_alignment_verified: cython.bint,
+        rematerialize_for_expr_sources: cython.bint,
         expected_args: StructuredAstValue,
-    ) -> bool:
+    ) -> cython.bint:
         """Per-argument rematerialization verdicts for placeholder/stack args."""
+        arg: object
+        arg_index: object
         for arg_index, arg in enumerate(args):
             if self._remat_arg_verdict_8616(
                 arg,
@@ -13243,7 +14476,7 @@ class _CallsiteStackArgsMaterializer8616:
 
     def _remat_debug_reason_8616(self,
         call: StructuredAstValue,
-        reason: str,
+        reason: object,
         *,
         args: StructuredAstValue = (),
     ) -> None:
@@ -13254,7 +14487,7 @@ class _CallsiteStackArgsMaterializer8616:
                 getattr(getattr(self.codegen, "cfunc", None), "addr", 0) or 0,
                 getattr(call, "callee_target", None),
                 reason,
-                tuple(self._debug_expr_8616(arg) for arg in args),
+                tuple(self._debug_expr_8616(arg) for arg in iter(args)),
             )
 
     def _remat_debug_keep_existing_8616(self, call: StructuredAstValue, args: StructuredAstValue) -> None:
@@ -13268,17 +14501,22 @@ class _CallsiteStackArgsMaterializer8616:
                     getattr(getattr(arg, "variable", None), "name", None)
                     or getattr(arg, "name", None)
                     or arg.__class__.__name__
-                    for arg in args
+                    for arg in iter(args)
                 ),
             )
 
+    @cython.ccall
     def _call_args_need_rematerialization_8616(self,
         call: StructuredAstValue,
         push_arg_sources: StructuredAstValue = (),
         *,
-        semantic_call_name: str | None = None,
-        expected_arg_widths: tuple[int, ...] | None = None,
-    ) -> bool:
+        semantic_call_name: object = None,
+        expected_arg_widths: object = None,
+    ) -> cython.bint:
+        arith_verdict: object
+        callee_func: object
+        callee_prototype: object
+        derived_verdict: object
         rematerialize_for_expr_sources = False
         expr_source_alignment_verified = False
         push_source_arg_alignment_verified = False
@@ -13346,11 +14584,13 @@ class _CallsiteStackArgsMaterializer8616:
         self._remat_debug_keep_existing_8616(call, args)
         return False
 
+    @cython.ccall
     def _prototype_logical_evidence_8616(self,
         call: StructuredAstValue,
         current_summary: StructuredAstValue,
-        arg_widths_live: tuple[int, ...],
+        arg_widths_live: object,
     ) -> StructuredAstValue:
+        callee: object
         callee = call.callee_func
         try:
             prototype = callee.prototype if callee is not None else None
@@ -13369,10 +14609,12 @@ class _CallsiteStackArgsMaterializer8616:
             prototype_widths,
         )
 
+    @cython.ccall
     def _publish_inventory_summary_8616(self,
         updated: StructuredAstValue,
         reconciliation: StructuredAstValue,
     ) -> None:
+        inventory_summary: object
         summary_inventory = _callsite_summary_inventory_8616(self.codegen)
         inventory_summary = summary_inventory.get(updated.callsite_addr)
         if inventory_summary is None:
@@ -13391,27 +14633,32 @@ class _CallsiteStackArgsMaterializer8616:
 
     def _refresh_summary_arg_shape(self,
         call: CFunctionCall,
-        summary: CallsiteSummary8616 | None,
+        summary: object,
     ) -> None:
         """Publish a Lowering-reconciled call shape to typed callsite metadata."""
+        current_summary: object
+        helper_widths: object
+        known_widths: object
+        logical_evidence: object
+        return_pair_evidence: object
         if summary is None:
             return
         args = _boundary_tuple_8616(call.args or ())
-        arg_widths_live = tuple(self._arg_width_from_expr(arg) for arg in args)
-        if any(not isinstance(width, int) or width <= 0 for width in arg_widths_live):
+        arg_widths_live = tuple(self._arg_width_from_expr(arg) for arg in iter(args))
+        if any(not isinstance(width, int) or width <= 0 for width in iter(arg_widths_live)):
             return
         current_summary = self.summary_map.get(id(call), summary)
         logical_evidence = self.logical_shape_evidence_by_callsite.get(current_summary.callsite_addr)
-        if logical_evidence is not None and logical_evidence.widths != arg_widths_live:
+        if logical_evidence is not None and operator.ne(logical_evidence.widths, arg_widths_live):
             logical_evidence = None
         return_pair_evidence = exact_call_return_pair_shape_evidence_8616(current_summary)
         if (
             return_pair_evidence is not None
-            and len(return_pair_evidence.widths) == len(args)
+            and operator.eq(len(return_pair_evidence.widths), len(args))
             and all(
                 isinstance(args[index], CFunctionCall)
-                or any(isinstance(node, CFunctionCall) for node in _iter_c_nodes_deep_8616(args[index]))
-                for index in return_pair_evidence.return_argument_indices
+                or any(isinstance(node, CFunctionCall) for node in builtins.iter(_iter_c_nodes_deep_8616(args[index])))
+                for index in iter(return_pair_evidence.return_argument_indices)
             )
         ):
             logical_evidence = return_pair_evidence
@@ -13443,9 +14690,8 @@ class _CallsiteStackArgsMaterializer8616:
         helper_widths = known_helper_abi_widths_8616(semantic_name)
         if (
             helper_widths is not None
-            and sum(helper_widths)
-            == sum(width for width in current_summary.arg_widths if isinstance(width, int) and width > 0)
-            and updated.logical_arg_widths != helper_widths
+            and operator.eq(sum(helper_widths), sum(width for width in iter(current_summary.arg_widths) if isinstance(width, int) and width > 0))
+            and operator.ne(updated.logical_arg_widths, helper_widths)
         ):
             updated = replace(updated, logical_arg_widths=helper_widths)
         # ``logical_arg_widths`` is non-comparing metadata on the frozen
@@ -13457,12 +14703,13 @@ class _CallsiteStackArgsMaterializer8616:
             self.changed = True
         self._publish_inventory_summary_8616(updated, reconciliation)
 
+    @cython.ccall
     def _record_prunable_segment_metadata_ids(self,
-        call: StructuredAstValue, statements: list[StructuredAstValue], consumed_indices: list[int]
+        call: object, statements: object, consumed_indices: object
     ) -> None:
         if call is None or not consumed_indices:
             return
-        tail_ids: list[int] = []
+        tail_ids: list[cython.longlong] = []
         scan = max(consumed_indices) + 1
         while scan < len(statements):
             stmt = statements[scan]
@@ -13477,13 +14724,17 @@ class _CallsiteStackArgsMaterializer8616:
         if tail_ids:
             self.materialized_callsite_metadata_ids[id(call)] = tuple(tail_ids)
 
+    @cython.ccall
     def _consumed_index_step_8616(self,
         statement: StructuredAstValue,
-        is_candidate: bool,
+        is_candidate: cython.bint,
         setup_is_proven_dead: StructuredAstValue,
-        live_identity_keys: set[StructuredAstValue],
-    ) -> bool:
+        live_identity_keys: object,
+    ) -> cython.bint:
         """Update live-key state for one statement; return True when removable."""
+        assignment: object
+        lhs_key: object
+        rhs: object
         assignment = self._top_level_assignment_node_8616(statement)
         lhs = rhs = None
         lhs_key = None
@@ -13511,17 +14762,20 @@ class _CallsiteStackArgsMaterializer8616:
         live_identity_keys.update(self._statement_variable_identity_keys_8616(statement))
         return False
 
+    @cython.ccall
     def _delete_consumed_indices_8616(self,
-        statements: list[StructuredAstValue],
-        indices: list[int],
+        statements: object,
+        indices: object,
         *,
-        live_consumers: tuple[StructuredAstValue, ...] = (),
+        live_consumers: object = (),
     ) -> None:
         """Delete consumed setup only after proving its value has no retained read."""
+        consumer: object
+        idx: object
         if not isinstance(statements, list) or not indices:
             return
         clean_indices = sorted(
-            {int(idx) for idx in indices if isinstance(idx, int) and 0 <= int(idx) < len(statements)},
+            {int(idx) for idx in iter(indices) if isinstance(idx, int) and 0 <= int(idx) < len(statements)},
             reverse=True,
         )
         if not clean_indices:
@@ -13538,7 +14792,7 @@ class _CallsiteStackArgsMaterializer8616:
         live_identity_keys: set[tuple[StructuredAstValue, ...]] = set()
         for consumer in live_consumers:
             live_identity_keys.update(self._statement_variable_identity_keys_8616(consumer))
-        removable_indices: list[int] = []
+        removable_indices: list[cython.longlong] = []
         for statement_idx in range(len(statements) - 1, -1, -1):
             if self._consumed_index_step_8616(
                 statements[statement_idx],
@@ -13551,8 +14805,12 @@ class _CallsiteStackArgsMaterializer8616:
         for idx in sorted(removable_indices, reverse=True):
             del statements[idx]
 
+    @cython.ccall
     def _call_from_statement(self, stmt: StructuredAstValue) -> StructuredAstValue | None:
         """Extract a direct call expression from a supported statement shell."""
+        nested_statements: object
+        value: object
+        attr: object
         if isinstance(stmt, CFunctionCall):
             return stmt
         for attr in ("expr", "rhs", "src", "retval"):
@@ -13564,8 +14822,12 @@ class _CallsiteStackArgsMaterializer8616:
             return self._call_from_statement(nested_statements[0])
         return None
 
-    def _statement_contains_call(self, stmt: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _statement_contains_call(self, stmt: StructuredAstValue) -> cython.bint:
         """Return whether a statement subtree contains any call node."""
+        cached: object
+        expr: object
+        node: object
         marker = id(stmt)
         cached = self.statement_contains_call_cache.get(marker)
         if cached is not None:
@@ -13585,7 +14847,8 @@ class _CallsiteStackArgsMaterializer8616:
         self.statement_contains_call_cache[marker] = result
         return result
 
-    def _fold_dx_ax_return_pair_assignments_8616(self, statements: list[StructuredAstValue]) -> bool:
+    @cython.ccall
+    def _fold_dx_ax_return_pair_assignments_8616(self, statements: object) -> cython.bint:
 
 
 
@@ -13606,23 +14869,26 @@ class _CallsiteStackArgsMaterializer8616:
         changed = self._fold_later_stale_return_pair_by_preorder_8616(statements, []) or changed
         return changed
 
-    def _is_standalone_call_statement_8616(self, stmt: StructuredAstValue, call: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_standalone_call_statement_8616(self, stmt: StructuredAstValue, call: object) -> cython.bint:
         if call is None:
             return False
         if stmt is call:
             return True
         return getattr(stmt, "expr", None) is call
 
-    def _is_consumable_return_call_statement_8616(self, stmt: StructuredAstValue, call: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_consumable_return_call_statement_8616(self, stmt: StructuredAstValue, call: StructuredAstValue) -> cython.bint:
         if self._is_standalone_call_statement_8616(stmt, call):
             return True
         return isinstance(stmt, structured_c.CAssignment) and getattr(stmt, "rhs", None) is call
 
-    def _ret_reg_source_info_8616(self, source: StructuredAstValue) -> tuple[int, str] | None:
+    @cython.ccall
+    def _ret_reg_source_info_8616(self, source: StructuredAstValue) -> object:
         if not (
             isinstance(source, tuple)
             and len(source) >= 3
-            and source[0] == CallsitePushSourceKind8616.RETURN_REGISTER.value
+            and operator.eq(source[0], CallsitePushSourceKind8616.RETURN_REGISTER.value)
             and isinstance(source[1], int)
             and isinstance(source[2], str)
         ):
@@ -13632,40 +14898,47 @@ class _CallsiteStackArgsMaterializer8616:
             return None
         return int(source[1]), reg_name
 
+    @cython.ccall
     def _call_args_embed_return_source_callsites_8616(self,
         call: StructuredAstValue,
-        ordered_sources: list[StructuredAstValue],
-    ) -> bool:
+        ordered_sources: object,
+    ) -> cython.bint:
         """Prove that return-register producer calls already occur in call arguments."""
         expected_callsites = {
             info[0]
-            for source in ordered_sources
+            for source in iter(ordered_sources)
             if (info := self._ret_reg_source_info_8616(source)) is not None
         }
         embedded_callsites = {
             callsite_addr
-            for arg in _boundary_tuple_8616(getattr(call, "args", ()) or ())
-            for node in (arg, *_iter_c_nodes_deep_8616(arg))
+            for arg in builtins.iter(_boundary_tuple_8616(getattr(call, "args", ()) or ()))
+            for node in iter((arg, ) + tuple(_iter_c_nodes_deep_8616(arg)))
             if isinstance(node, CFunctionCall)
             if isinstance((callsite_addr := structured_callsite_addr_8616(node)), int)
         }
         return bool(expected_callsites) and expected_callsites <= embedded_callsites
 
+    @cython.ccall
     def _summary_for_call_node_8616(self,
-        call: StructuredAstValue, callsite_addr: int
+        call: StructuredAstValue, callsite_addr: cython.longlong
     ) -> CallsiteSummary8616 | None:
         """Resolve a cloned call through its stable machine callsite identity."""
+        summary: object
         summary = self.summary_map.get(id(call))
         if summary is not None:
             return summary
         tagged_callsite = structured_callsite_addr_8616(call)
         return self.summary_by_callsite_addr.get(callsite_addr) if tagged_callsite == callsite_addr else None
 
+    @cython.ccall
     def _walk_return_call_matches_8616(self,
-        node: StructuredAstValue,
-        callsite_addr: int,
-        matches: list[StructuredAstValue],
+        node: object,
+        callsite_addr: cython.longlong,
+        matches: object,
     ) -> None:
+        child: object
+        container: object
+        attr: object
         if node is None:
             return
         container = getattr(node, "statements", None)
@@ -13677,30 +14950,38 @@ class _CallsiteStackArgsMaterializer8616:
                 self._walk_return_call_matches_8616(child, callsite_addr, matches)
         self._walk_return_call_condition_nodes_8616(getattr(node, "condition_and_nodes", None), callsite_addr, matches)
 
+    @cython.ccall
     def _scan_return_call_container_8616(self,
-        container: list[StructuredAstValue],
-        callsite_addr: int,
-        matches: list[StructuredAstValue],
+        container: object,
+        callsite_addr: cython.longlong,
+        matches: object,
     ) -> None:
         """Append matching return-call carriers in ``container`` and recurse."""
+        call: object
+        summary: object
+        idx: object
+        stmt: object
         for idx, stmt in enumerate(list(container)):
             call = self._call_from_statement(stmt)
             summary = self._summary_for_call_node_8616(call, callsite_addr) if call is not None else None
             if (
                 call is not None
                 and summary is not None
-                and summary.callsite_addr == callsite_addr
+                and operator.eq(summary.callsite_addr, callsite_addr)
                 and self._is_consumable_return_call_statement_8616(stmt, call)
             ):
                 matches.append((container, idx, call, summary))
             self._walk_return_call_matches_8616(stmt, callsite_addr, matches)
 
+    @cython.ccall
     def _walk_return_call_condition_nodes_8616(self,
         condition_nodes: StructuredAstValue,
-        callsite_addr: int,
-        matches: list[StructuredAstValue],
+        callsite_addr: cython.longlong,
+        matches: object,
     ) -> None:
         """Recurse into ``condition_and_nodes`` items."""
+        child: object
+        item: object
         if not isinstance(condition_nodes, (list, tuple)):
             return
         for item in condition_nodes:
@@ -13710,38 +14991,47 @@ class _CallsiteStackArgsMaterializer8616:
             else:
                 self._walk_return_call_matches_8616(item, callsite_addr, matches)
 
-    def _find_unique_standalone_return_call_ref_8616(self, callsite_addr: int) -> StructuredAstValue:
+    @cython.ccall
+    def _find_unique_standalone_return_call_ref_8616(self, callsite_addr: cython.longlong) -> StructuredAstValue:
         root = _structured_root_8616(getattr(self.codegen, "cfunc", None))
-        matches: list[tuple[list[StructuredAstValue], int, StructuredAstValue, StructuredAstValue]] = []
+        matches: list[tuple[list[StructuredAstValue], cython.longlong, StructuredAstValue, StructuredAstValue]] = []
 
         self._walk_return_call_matches_8616(root, callsite_addr, matches)
         return matches[0] if len(matches) == 1 else None
 
+    @cython.ccall
     def _nearest_standalone_return_call_8616(self,
-        statements: list[StructuredAstValue], callsite_addr: int
+        statements: object, callsite_addr: cython.longlong
     ) -> StructuredAstValue:
+        call: object
+        summary: object
         for idx in range(len(statements) - 1, -1, -1):
             stmt = statements[idx]
             call = self._call_from_statement(stmt)
             if call is None:
                 continue
             summary = self.summary_map.get(id(call))
-            if summary is None and structured_callsite_addr_8616(call) == callsite_addr:
+            if summary is None and operator.eq(structured_callsite_addr_8616(call), callsite_addr):
                 summary = self.summary_by_callsite_addr.get(callsite_addr)
             if (
                 summary is not None
-                and summary.callsite_addr == callsite_addr
+                and operator.eq(summary.callsite_addr, callsite_addr)
                 and self._is_consumable_return_call_statement_8616(stmt, call)
             ):
                 return statements, idx, call, summary
             return None
         return self._find_unique_standalone_return_call_ref_8616(callsite_addr)
 
-    def _delete_consumed_return_call_refs_8616(self, refs: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _delete_consumed_return_call_refs_8616(self, refs: StructuredAstValue) -> cython.bint:
         """Delete exact standalone return-call carriers consumed as call arguments."""
+        container: object
+        idx: object
+        indices: object
+        ref: object
         if not refs:
             return False
-        grouped: dict[int, tuple[list[StructuredAstValue], set[int]]] = {}
+        grouped: dict[cython.longlong, tuple[list[StructuredAstValue], set[cython.longlong]]] = {}
         for ref in refs:
             if not isinstance(ref, tuple) or len(ref) != 2:
                 continue
@@ -13761,7 +15051,8 @@ class _CallsiteStackArgsMaterializer8616:
                 deleted = True
         return deleted
 
-    def _record_materialized_return_call_expr_8616(self, call: StructuredAstValue, summary: StructuredAstValue) -> None:
+    @cython.ccall
+    def _record_materialized_return_call_expr_8616(self, call: object, summary: object) -> None:
         if call is None or summary is None:
             return
         callsite_addr = summary.callsite_addr
@@ -13779,7 +15070,10 @@ class _CallsiteStackArgsMaterializer8616:
         self.return_call_exprs_by_callsite[callsite_addr] = cloned_call
         self.codegen._inertia_callsite_return_exprs_8616 = dict(self.return_call_exprs_by_callsite)
 
-    def _stored_return_call_expr_for_callsite_8616(self, callsite_addr: int) -> StructuredAstValue | None:
+    @cython.ccall
+    def _stored_return_call_expr_for_callsite_8616(self, callsite_addr: cython.longlong) -> StructuredAstValue | None:
+        persistent_return_calls: object
+        stored_return_call: object
         stored_return_call = self.return_call_exprs_by_callsite.get(callsite_addr)
         if stored_return_call is not None:
             return stored_return_call
@@ -13791,16 +15085,22 @@ class _CallsiteStackArgsMaterializer8616:
                 return stored_return_call
         return None
 
-    def _summary_for_callsite_addr_8616(self, callsite_addr: int) -> StructuredAstValue | None:
+    @cython.ccall
+    def _summary_for_callsite_addr_8616(self, callsite_addr: cython.longlong) -> StructuredAstValue | None:
+        summary: object
         summary = self.summary_by_callsite_addr.get(callsite_addr)
         if summary is not None:
             return summary
         for summary in tuple(self.summary_map.values()):
-            if summary.callsite_addr == callsite_addr:
+            if operator.eq(summary.callsite_addr, callsite_addr):
                 return summary
         return None
 
-    def _callee_name_for_summary_8616(self, summary: StructuredAstValue) -> str | None:
+    @cython.ccall
+    def _callee_name_for_summary_8616(self, summary: StructuredAstValue) -> object:
+        synthetic: object
+        synthetic_globals: object
+        raw: object
         target_addr = summary.target_addr
         candidates: list[str | None] = []
         if isinstance(target_addr, int):
@@ -13820,7 +15120,10 @@ class _CallsiteStackArgsMaterializer8616:
                 return normalized
         return None
 
-    def _synthesized_return_call_expr_from_summary_8616(self, callsite_addr: int) -> StructuredAstValue | None:
+    def _synthesized_return_call_expr_from_summary_8616(self, callsite_addr: cython.longlong) -> StructuredAstValue | None:
+        args: object
+        expected_widths: object
+        summary: object
         summary = self._summary_for_callsite_addr_8616(callsite_addr)
         if summary is None:
             return None
@@ -13860,9 +15163,9 @@ class _CallsiteStackArgsMaterializer8616:
         if args is None:
             args = [
                 self._direct_expr_from_push_source_8616(source, call_name=callee_name, arg_index=idx)
-                for idx, source in enumerate(ordered_sources)
+                for idx, source in builtins.iter(enumerate(ordered_sources))
             ]
-        if not args or any(arg is None for arg in args):
+        if not args or any(arg is None for arg in iter(args)):
             return None
         target_addr = summary.target_addr
         callee_func = (
@@ -13873,7 +15176,7 @@ class _CallsiteStackArgsMaterializer8616:
         ret_call_expr = CFunctionCall(
             callee_name,
             callee_func,
-            [self._clone_c_ast_tree(arg) for arg in args],
+            [self._clone_c_ast_tree(arg) for arg in iter(args)],
             codegen=self.codegen,
         )
         bind_structured_callsite_identity_8616(ret_call_expr, summary)
@@ -13887,11 +15190,13 @@ class _CallsiteStackArgsMaterializer8616:
                 getattr(getattr(self.codegen, "cfunc", None), "addr", 0) or 0,
                 callee_name,
                 callsite_addr,
-                tuple(self._debug_expr_8616(arg) for arg in args),
+                tuple(self._debug_expr_8616(arg) for arg in iter(args)),
             )
         return ret_call_expr
 
-    def _regroup_return_call_args_from_summary_8616(self, call: StructuredAstValue, summary: StructuredAstValue) -> None:
+    def _regroup_return_call_args_from_summary_8616(self, call: object, summary: object) -> None:
+        expected_widths: object
+        grouped_args: object
         if call is None or summary is None:
             return
         args = _boundary_tuple_8616(getattr(call, "args", ()) or ())
@@ -13935,21 +15240,24 @@ class _CallsiteStackArgsMaterializer8616:
                     "[call-ret-reg-producer-regroup] function=%#x return_call=%s args_before=%r args_after=%r",
                     getattr(getattr(self.codegen, "cfunc", None), "addr", 0) or 0,
                     callee_name,
-                    tuple(self._debug_expr_8616(arg) for arg in args),
-                    tuple(self._debug_expr_8616(arg) for arg in grouped_args),
+                    tuple(self._debug_expr_8616(arg) for arg in iter(args)),
+                    tuple(self._debug_expr_8616(arg) for arg in iter(grouped_args)),
                 )
 
+    @cython.ccall
     def _ret_arg_without_nearby_call_8616(
         self,
-        statements: list[StructuredAstValue],
+        statements: object,
         ordered_sources: StructuredAstValue,
-        source_idx: int,
+        source_idx: cython.longlong,
         first_callsite: StructuredAstValue,
-        first_reg: str,
+        first_reg: object,
         result_read: StructuredAstValue,
-        call_name: str | None,
+        call_name: object,
     ) -> StructuredAstValue | None:
         """Handle the return-source arm when no standalone return call exists."""
+        second_info: object
+        stored_return_call: object
         if result_read.verdict is RuntimeCallResultVerdict8616.UNKNOWN_REFUSE:
             return None
         stored_return_call = self._stored_return_call_expr_for_callsite_8616(first_callsite)
@@ -13959,7 +15267,7 @@ class _CallsiteStackArgsMaterializer8616:
             second_info = self._ret_reg_source_info_8616(ordered_sources[source_idx + 1])
             if (
                 second_info is not None
-                and second_info[0] == first_callsite
+                and operator.eq(second_info[0], first_callsite)
                 and {first_reg, second_info[1]} == {"ax", "dx"}
             ):
                 ret_call_expr = self._clone_c_ast_tree(stored_return_call)
@@ -14004,13 +15312,17 @@ class _CallsiteStackArgsMaterializer8616:
             self._ret_consume_debug_refuse_8616(statements, call_name, first_callsite, first_reg)
         return None
 
+    @cython.ccall
     def _ret_consume_debug_refuse_8616(self,
-        statements: list[StructuredAstValue],
-        call_name: str | None,
-        first_callsite: int,
-        first_reg: str,
+        statements: object,
+        call_name: object,
+        first_callsite: cython.longlong,
+        first_reg: object,
     ) -> None:
         """Log a missing-return-call refusal with the prefix call census."""
+        call: object
+        summary: object
+        stmt: object
         prefix_calls = []
         for stmt in statements[-8:]:
             call = self._call_from_statement(stmt)
@@ -14032,14 +15344,18 @@ class _CallsiteStackArgsMaterializer8616:
             first_reg,
             tuple(prefix_calls),
         )
+    @cython.ccall
     def _return_call_arg_from_ret_sources_8616(self,
-        ordered_sources: list[StructuredAstValue],
-        source_idx: int,
-        statements: list[StructuredAstValue],
+        ordered_sources: object,
+        source_idx: cython.longlong,
+        statements: object,
         *,
-        call_name: str | None,
-    ) -> tuple[StructuredAstValue, int, StructuredAstValue | None] | None:
+        call_name: object,
+    ) -> object:
         """Consume only the register sources proven to belong to one return value."""
+        first_info: object
+        nearest: object
+        second_info: object
 
         first_info = (
             self._ret_reg_source_info_8616(ordered_sources[source_idx]) if 0 <= source_idx < len(ordered_sources) else None
@@ -14067,7 +15383,7 @@ class _CallsiteStackArgsMaterializer8616:
             second_info = self._ret_reg_source_info_8616(ordered_sources[source_idx + 1])
             if (
                 second_info is not None
-                and second_info[0] == first_callsite
+                and operator.eq(second_info[0], first_callsite)
                 and {first_reg, second_info[1]} == {"ax", "dx"}
             ):
                 ret_call_expr = self._return_call_expr_with_materialized_args_8616(first_callsite=first_callsite, return_call=return_call, return_summary=return_summary)
@@ -14115,17 +15431,21 @@ class _CallsiteStackArgsMaterializer8616:
             return ret_call_expr, 1, (call_container, call_stmt_idx)
         return None
 
+    @cython.ccall
     def _direct_args_from_ordered_push_sources_consuming_return_calls_8616(self,
-        ordered_sources: list[StructuredAstValue],
+        ordered_sources: object,
         *,
-        call_name: str | None,
-        statements: list[StructuredAstValue],
+        call_name: object,
+        statements: object,
     ) -> tuple[
         list[StructuredAstValue] | None,
-        tuple[tuple[list[StructuredAstValue], int], ...],
+        tuple[tuple[list[StructuredAstValue], cython.longlong], ...],
     ]:
+        call_stmt_ref: object
+        expr: object
+        ret_arg: object
         direct_args: list[StructuredAstValue] = []
-        consumed_return_call_indices: list[tuple[list[StructuredAstValue], int]] = []
+        consumed_return_call_indices: list[tuple[list[StructuredAstValue], cython.longlong]] = []
         return_args_materialized_count = 0
         source_idx = 0
         while source_idx < len(ordered_sources):
@@ -14159,7 +15479,7 @@ class _CallsiteStackArgsMaterializer8616:
             )
         return direct_args, tuple(consumed_return_call_indices)
 
-    def _probe_assignment_is_stable_store_8616(self, assignment: StructuredAstValue) -> bool:
+    def _probe_assignment_is_stable_store_8616(self, assignment: StructuredAstValue) -> cython.bint:
         lhs, _rhs = self._assignment_lhs_rhs(assignment)
         dereference = lhs
         while isinstance(dereference, CTypeCast):
@@ -14175,19 +15495,24 @@ class _CallsiteStackArgsMaterializer8616:
             and node.op == "Reference"
             and isinstance(node.operand, structured_c.CVariable)
             and isinstance(node.operand.variable, SimStackVariable)
-            for node in (operand, *_iter_c_nodes_deep_8616(operand))
+            for node in iter((operand, ) + tuple(_iter_c_nodes_deep_8616(operand)))
         )
         return bool(segment_name == "ss" and has_named_stack_reference)
 
+    @cython.ccall
     def _stack_probe_helper_statement_is_consumable_8616(self,
         stmt: StructuredAstValue,
         call: CFunctionCall,
-        summary: CallsiteSummary8616 | None,
-        statements: list[StructuredAstValue],
-        probe_index: int,
-        typed_fact: TypedStackProbeReturnFact8616 | None,
-    ) -> bool:
+        summary: object,
+        statements: object,
+        probe_index: cython.longlong,
+        typed_fact: object,
+    ) -> cython.bint:
         """Return whether an evidence-backed compiler stack probe is fully represented by C locals."""
+        candidate_call: object
+        candidate_summary: object
+        assignment: object
+        candidate: object
         if not self._is_standalone_call_statement_8616(stmt, call):
             return False
         if _boundary_tuple_8616(call.args or ()):
@@ -14217,11 +15542,16 @@ class _CallsiteStackArgsMaterializer8616:
             or stable_store_count >= following_arg_count
         )
 
+    @cython.ccall
     def _has_nonvirtual_dirty_probe_consumer_8616(self,
-        statements: list[StructuredAstValue],
-        probe_index: int,
-    ) -> bool:
+        statements: object,
+        probe_index: cython.longlong,
+    ) -> cython.bint:
         """Refuse probe pruning while an unclassified dirty consumer remains."""
+        candidate_call: object
+        candidate_summary: object
+        candidate: object
+        node: object
         for candidate in statements[probe_index + 1 :]:
             candidate_call = self._call_from_statement(candidate)
             candidate_summary = self.summary_map.get(id(candidate_call)) if candidate_call is not None else None
@@ -14229,15 +15559,18 @@ class _CallsiteStackArgsMaterializer8616:
                 candidate_summary is not None and candidate_summary.stack_probe_helper
             ):
                 break
-            for node in (candidate, *_iter_c_nodes_deep_8616(candidate)):
+            for node in (candidate, ) + tuple(_iter_c_nodes_deep_8616(candidate)):
                 if node.__class__.__name__ == "CDirtyExpression" and not self._is_virtual_dirty_expr_8616(node):
                     return True
         return False
 
+    @cython.ccall
     def _assignment_lhs_rhs(self,
         node: StructuredAstValue,
     ) -> tuple[StructuredAstValue | None, StructuredAstValue | None]:
         """Return assignment lhs/rhs across angr C and AIL assignment shapes."""
+        lhs: object
+        rhs: object
         lhs = getattr(node, "lhs", None)
         rhs = getattr(node, "rhs", None)
         if lhs is None and hasattr(node, "dst"):
@@ -14245,32 +15578,40 @@ class _CallsiteStackArgsMaterializer8616:
             rhs = getattr(node, "src", None)
         return lhs, rhs
 
-    def _is_assignment_node(self, node: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_assignment_node(self, node: StructuredAstValue) -> cython.bint:
         """Return whether a node has assignment semantics."""
         class_name = node.__class__.__name__
         if class_name == "CAssignment" or class_name.endswith("Assignment"):
             return True
         return hasattr(node, "dst") and hasattr(node, "src")
 
-    def _iter_assignment_nodes(self, stmt: StructuredAstValue) -> list[StructuredAstValue]:
+    @cython.ccall
+    def _iter_assignment_nodes(self, stmt: StructuredAstValue) -> object:
         """Return assignment nodes contained in a statement tree."""
+        node: object
         candidates: list[StructuredAstValue] = []
-        seen_ids: set[int] = set()
-        for node in (stmt, *_iter_c_nodes_deep_8616(stmt)):
+        seen_ids: set[cython.longlong] = set()
+        for node in (stmt, ) + tuple(_iter_c_nodes_deep_8616(stmt)):
             if self._is_assignment_node(node) and id(node) not in seen_ids:
                 candidates.append(node)
                 seen_ids.add(id(node))
         return candidates
 
     def _statement_sequence_identity_changed_8616(self,
-        original: list[StructuredAstValue], rewritten: list[StructuredAstValue]
-    ) -> bool:
+        original: object, rewritten: object
+    ) -> cython.bint:
         """Return true when block statement membership changed without deep AST equality."""
-        if len(original) != len(rewritten):
+        if operator.ne(len(original), len(rewritten)):
             return True
-        return any(before is not after for before, after in zip(original, rewritten, strict=False))
+        return any(before is not after for before, after in builtins.iter(zip(original, rewritten, strict=False)))
 
-    def _contains_ss_evidence_for_callstack_8616(self, term: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _contains_ss_evidence_for_callstack_8616(self, term: object) -> cython.bint:
+        register_name: object
+        segment_selector: object
+        variable: object
+        raw_node: object
         if term is None:
             return False
         nodes = (term, *_iter_c_nodes_deep_8616(term))
@@ -14290,7 +15631,9 @@ class _CallsiteStackArgsMaterializer8616:
                 return True
         return False
 
-    def _contains_ss_dereference_for_callstack_8616(self, term: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _contains_ss_dereference_for_callstack_8616(self, term: object) -> cython.bint:
+        raw_node: object
         if term is None:
             return False
         nodes = (term, *_iter_c_nodes_deep_8616(term))
@@ -14306,7 +15649,9 @@ class _CallsiteStackArgsMaterializer8616:
                 return True
         return False
 
-    def _contains_unresolved_dirty_expr_8616(self, term: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _contains_unresolved_dirty_expr_8616(self, term: StructuredAstValue) -> cython.bint:
+        raw_node: object
         nodes = (term, *_iter_c_nodes_deep_8616(term))
         for raw_node in nodes:
             if raw_node.__class__.__name__ != "CDirtyExpression":
@@ -14316,10 +15661,11 @@ class _CallsiteStackArgsMaterializer8616:
             return True
         return False
 
-    def _contains_dirty_expr_8616(self, term: StructuredAstValue) -> bool:
+    def _contains_dirty_expr_8616(self, term: StructuredAstValue) -> cython.bint:
         nodes = (term, *_iter_c_nodes_deep_8616(term))
-        return any(raw_node.__class__.__name__ == "CDirtyExpression" for raw_node in nodes)
+        return any(raw_node.__class__.__name__ == "CDirtyExpression" for raw_node in iter(nodes))
 
+    @cython.ccall
     def _deref_stack_store_rhs_verdict_8616(self, lhs: StructuredAstValue, rhs: StructuredAstValue) -> StructuredAstValue | None:
         """Final verdict for dereference-shaped stack-store lhs."""
         deref = lhs
@@ -14335,6 +15681,7 @@ class _CallsiteStackArgsMaterializer8616:
             return rhs
         return None
 
+    @cython.ccall
     def _stack_store_rhs_verdict_8616(self, lhs: StructuredAstValue, rhs: StructuredAstValue) -> StructuredAstValue | None:
         """Return rhs when the assignment lhs is a proven stack store target."""
         if classify_push_store_width_8616(lhs) is not PushStoreWidthVerdict8616.COMPLETE_WIDTH:
@@ -14352,7 +15699,15 @@ class _CallsiteStackArgsMaterializer8616:
         if seg_name == "ss":
             return rhs
         return self._deref_stack_store_rhs_verdict_8616(lhs, rhs)
+    @cython.ccall
     def _stack_store_rhs_from_statement(self, stmt: StructuredAstValue) -> StructuredAstValue | None:
+        lhs: object
+        nested_children: object
+        nested_statements: object
+        rhs: object
+        verdict: object
+        assignment: object
+        nested: object
         nested_statements = getattr(stmt, "statements", None)
         if isinstance(nested_statements, (list, tuple)):
             for nested in reversed(tuple(nested_statements)):
@@ -14378,16 +15733,16 @@ class _CallsiteStackArgsMaterializer8616:
         return None
 
     def _store_matches_typed_stack_probe_fact(self,
-        lhs: StructuredAstValue, fact: TypedStackProbeReturnFact8616 | None
-    ) -> bool:
+        lhs: object, fact: object
+    ) -> cython.bint:
         if lhs is None or fact is None:
             return False
 
 
         seg_name, _offset_terms = _match_real_mode_segmented_store_shape_8616(lhs, self.project)
-        if any(self._contains_unsafe_dirty_term(term) for _sign, term in _offset_terms):
+        if any(self._contains_unsafe_dirty_term(term) for _sign, term in iter(_offset_terms)):
             return False
-        if seg_name == fact.segment_space:
+        if operator.eq(seg_name, fact.segment_space):
             return True
 
         deref = lhs
@@ -14398,9 +15753,11 @@ class _CallsiteStackArgsMaterializer8616:
         stack_offset = _stack_offset_from_expr_8616(getattr(deref, "operand", None), self.project, self.codegen)
         return isinstance(stack_offset, int)
 
+    @cython.ccall
     def _typed_stack_store_rhs_from_statement(self,
-        stmt: StructuredAstValue, fact: TypedStackProbeReturnFact8616 | None
+        stmt: StructuredAstValue, fact: object
     ) -> StructuredAstValue:
+        assignment: object
         if fact is None:
             return None
         for assignment in reversed(self._iter_assignment_nodes(stmt)):
@@ -14413,7 +15770,12 @@ class _CallsiteStackArgsMaterializer8616:
                 return rhs
         return None
 
-    def _stack_store_rhss_from_statement(self, stmt: StructuredAstValue, *, max_collect: int = 4) -> list[StructuredAstValue]:
+    @cython.ccall
+    def _stack_store_rhss_from_statement(self, stmt: StructuredAstValue, *, max_collect: cython.longlong = 4) -> object:
+        nested_children: object
+        nested_statements: object
+        rhs: object
+        nested: object
         nested_statements = getattr(stmt, "statements", None)
         if isinstance(nested_statements, (list, tuple)):
             rhss: list[StructuredAstValue] = []
@@ -14434,12 +15796,17 @@ class _CallsiteStackArgsMaterializer8616:
         rhs = self._stack_store_rhs_from_statement(stmt)
         return [rhs] if rhs is not None else []
 
+    @cython.ccall
     def _typed_stack_store_rhss_from_statement(self,
         stmt: StructuredAstValue,
         fact: TypedStackProbeReturnFact8616 | None,
         *,
-        max_collect: int = 4,
-    ) -> list[StructuredAstValue]:
+        max_collect: cython.longlong = 4,
+    ) -> object:
+        nested_children: object
+        nested_statements: object
+        rhs: object
+        nested: object
         nested_statements = getattr(stmt, "statements", None)
         if isinstance(nested_statements, (list, tuple)):
             rhss: list[StructuredAstValue] = []
@@ -14460,11 +15827,14 @@ class _CallsiteStackArgsMaterializer8616:
         rhs = self._typed_stack_store_rhs_from_statement(stmt, fact)
         return [rhs] if rhs is not None else []
 
+    @cython.ccall
     def _typed_stack_store_rhs_from_nested_8616(self,
         nested_statements: StructuredAstValue,
         fact: TypedStackProbeReturnFact8616,
-        max_collect: int,
+        max_collect: cython.longlong,
     ) -> tuple[list[StructuredAstValue], list[set[tuple[str, str | int]]]]:
+        nested_children: object
+        nested: object
         rhss: list[StructuredAstValue] = []
         sources: list[set[tuple[str, str | int]]] = []
         for nested in reversed(tuple(nested_statements)):
@@ -14491,15 +15861,16 @@ class _CallsiteStackArgsMaterializer8616:
             sources = sources[:max_collect]
         return rhss, sources
 
+    @cython.ccall
     def _typed_stack_store_rhs_sources_from_statement(self,
         stmt: StructuredAstValue,
-        fact: TypedStackProbeReturnFact8616 | None,
+        fact: object,
         *,
-        max_collect: int = 4,
-    ) -> tuple[
-        list[StructuredAstValue],
-        list[set[tuple[str, str | int]]],
-    ]:
+        max_collect: cython.longlong = 4,
+    ) -> object:
+        nested_statements: object
+        rhs: object
+        assignment: object
         if fact is None:
             return [], []
         nested_statements = getattr(stmt, "statements", None)
@@ -14522,13 +15893,16 @@ class _CallsiteStackArgsMaterializer8616:
                 break
         return ([rhs], [carrier_sources]) if rhs is not None else ([], [])
 
+    @cython.ccall
     def _collect_typed_stack_carrier_defs(self,
-        statements: list[StructuredAstValue],
-        start_index: int,
+        statements: object,
+        start_index: cython.longlong,
         *,
-        wanted_indices: list[int],
-        wanted_keys: set[tuple[str, str | int]],
-    ) -> list[int]:
+        wanted_indices: object,
+        wanted_keys: object,
+    ) -> object:
+        lhs: object
+        assignment: object
         if not wanted_indices or not wanted_keys:
             return wanted_indices
         consumed = list(wanted_indices)
@@ -14552,7 +15926,9 @@ class _CallsiteStackArgsMaterializer8616:
             idx -= 1
         return sorted(consumed)
 
-    def _is_stack_carrier_temp_assignment(self, stmt: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_stack_carrier_temp_assignment(self, stmt: StructuredAstValue) -> cython.bint:
+        lhs: object
         candidates = self._iter_assignment_nodes(stmt)
         if not candidates:
             return False
@@ -14571,14 +15947,18 @@ class _CallsiteStackArgsMaterializer8616:
             return rhs_node.op in {"Add", "Sub", "Mul", "Shl", "Shr", "And", "Or", "Xor"}
         return False
 
-    def _is_non_memory_assignment(self, stmt: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_non_memory_assignment(self, stmt: StructuredAstValue) -> cython.bint:
         candidates = self._iter_assignment_nodes(stmt)
         if not candidates:
             return False
         lhs, _rhs = self._assignment_lhs_rhs(candidates[-1])
         return isinstance(lhs, structured_c.CVariable)
 
+    @cython.ccall
     def _value_carrier_assignment_rhs_from_statement(self, stmt: StructuredAstValue) -> StructuredAstValue:
+        lhs: object
+        rhs: object
         candidates = self._iter_assignment_nodes(stmt)
         if not candidates:
             return None
@@ -14596,7 +15976,8 @@ class _CallsiteStackArgsMaterializer8616:
             return None
         return rhs
 
-    def _outgoing_placeholder_lhs_ok_8616(self, lhs: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _outgoing_placeholder_lhs_ok_8616(self, lhs: StructuredAstValue) -> cython.bint:
         lhs_node = lhs
         while isinstance(lhs_node, CTypeCast):
             lhs_node = lhs_node.expr
@@ -14623,8 +16004,12 @@ class _CallsiteStackArgsMaterializer8616:
         # by immediate callsite backtracking and stack-slot offset constraints.
         return bool(name.startswith(("s_", "stack_bp_", "stack_sp_", "local_", "arg_")))
 
+    @cython.ccall
     def _outgoing_arg_placeholder_rhs_from_statement(self, stmt: StructuredAstValue) -> StructuredAstValue:
         """Refuse partial stores before considering legacy outgoing carriers."""
+        lhs: object
+        resolved: object
+        rhs: object
         candidates = self._iter_assignment_nodes(stmt)
         if not candidates:
             return None
@@ -14644,9 +16029,16 @@ class _CallsiteStackArgsMaterializer8616:
             return None
         return rhs
 
+    @cython.ccall
     def _is_outgoing_segment_return_store_statement(self,
-        stmt: StructuredAstValue, *, stack_probe_seen: bool = False
-    ) -> bool:
+        stmt: StructuredAstValue, *, stack_probe_seen: cython.bint = False
+    ) -> cython.bint:
+        assignment: object
+        lhs: object
+        rhs: object
+        segment_selector: object
+        variable: object
+        raw_node: object
         if not stack_probe_seen:
             return False
         assignment = self._top_level_assignment_node_8616(stmt)
@@ -14659,7 +16051,7 @@ class _CallsiteStackArgsMaterializer8616:
         if segment_name != "ss":
             return False
         rhs_segments = set()
-        for raw_node in (rhs, *_iter_c_nodes_deep_8616(rhs)):
+        for raw_node in (rhs, ) + tuple(_iter_c_nodes_deep_8616(rhs)):
             node = raw_node
             while isinstance(node, CTypeCast):
                 node = node.expr
@@ -14675,13 +16067,19 @@ class _CallsiteStackArgsMaterializer8616:
                 rhs_segments.add(linear_segment_name)
         return rhs_segments == {"ss"}
 
-    def _offset_terms_include_stack_base_placeholder(self, offset_terms: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _offset_terms_include_stack_base_placeholder(self, offset_terms: StructuredAstValue) -> cython.bint:
+        _sign: object
+        term: object
         for _sign, term in _boundary_tuple_8616(offset_terms or ()):
             if self._node_contains_placeholder_stack_8616(term):
                 return True
         return False
 
-    def _is_stack_probe_frame_artifact_store_statement(self, stmt: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_stack_probe_frame_artifact_store_statement(self, stmt: StructuredAstValue) -> cython.bint:
+        assignment: object
+        lhs: object
         if self._statement_contains_call(stmt):
             return False
         assignment = self._top_level_assignment_node_8616(stmt)
@@ -14695,7 +16093,9 @@ class _CallsiteStackArgsMaterializer8616:
             return False
         return self._offset_terms_include_stack_base_placeholder(offset_terms)
 
+    @cython.ccall
     def _top_level_assignment_node_8616(self, stmt: StructuredAstValue) -> StructuredAstValue:
+        nested_statements: object
         if self._is_assignment_node(stmt):
             return stmt
         nested_statements = getattr(stmt, "statements", None)
@@ -14705,7 +16105,9 @@ class _CallsiteStackArgsMaterializer8616:
                 return nested
         return None
 
+    @cython.ccall
     def _c_variable_identity_key_8616(self, node: StructuredAstValue) -> StructuredAstValue:
+        variable: object
         current = node
         while isinstance(current, CTypeCast):
             current = current.expr
@@ -14729,12 +16131,14 @@ class _CallsiteStackArgsMaterializer8616:
             return ("name", name)
         return None
 
+    @cython.ccall
     def _statement_variable_identity_keys_8616(self,
         stmt: StructuredAstValue,
-    ) -> set[tuple[StructuredAstValue, ...]]:
+    ) -> object:
         """Return variable identity keys referenced anywhere in a statement."""
+        raw_node: object
         keys: set[tuple[StructuredAstValue, ...]] = set()
-        for raw_node in (stmt, *_iter_c_nodes_deep_8616(stmt)):
+        for raw_node in (stmt, ) + tuple(_iter_c_nodes_deep_8616(stmt)):
             node = raw_node
             while isinstance(node, CTypeCast):
                 node = node.expr
@@ -14743,21 +16147,25 @@ class _CallsiteStackArgsMaterializer8616:
                 keys.add(key)
         return keys
 
+    @cython.ccall
     def _statement_references_variable_identity_8616(self,
-        stmt: StructuredAstValue, key: tuple[StructuredAstValue, ...] | None
-    ) -> bool:
+        stmt: StructuredAstValue, key: object
+    ) -> cython.bint:
         """Return whether a statement references a specific variable identity."""
         if key is None:
             return True
         return key in self._statement_variable_identity_keys_8616(stmt)
 
     def _variable_identity_referenced_later_8616(self,
-        key: tuple[StructuredAstValue, ...] | None, later_statements: tuple[StructuredAstValue, ...]
-    ) -> bool:
+        key: object, later_statements: object
+    ) -> cython.bint:
         """Return whether later statements reference a variable identity."""
-        return any(self._statement_references_variable_identity_8616(stmt, key) for stmt in later_statements)
+        return any(self._statement_references_variable_identity_8616(stmt, key) for stmt in iter(later_statements))
 
-    def _debug_node_shape_8616(self, node: StructuredAstValue) -> str:
+    @cython.ccall
+    def _debug_node_shape_8616(self, node: object) -> str:
+        value: object
+        attr: object
         if node is None:
             return "None"
         parts = [type(node).__name__]
@@ -14776,18 +16184,23 @@ class _CallsiteStackArgsMaterializer8616:
                 parts.append(f"{attr}={type(value).__name__}")
         return " ".join(parts)
 
-    def _probe_artifact_refuse_8616(self, fmt: str, *args: StructuredAstValue) -> bool:
+    def _probe_artifact_refuse_8616(self, fmt: object, *args: StructuredAstValue) -> cython.bint:
         if os.environ.get("INERTIA_DEBUG_STACK_PROBE_ARTIFACTS"):
             log.warning("[stack-probe-artifacts] refuse-assignment reason=" + fmt, *args)
         return False
 
+    @cython.ccall
     def _is_stack_probe_frame_artifact_assignment_statement(self,
         stmt: StructuredAstValue,
         *,
-        later_statements: tuple[StructuredAstValue, ...] = (),
-        later_identity_keys: frozenset[tuple[StructuredAstValue, ...]] | None = None,
-    ) -> bool:
+        later_statements: object = (),
+        later_identity_keys: object = None,
+    ) -> cython.bint:
         """Recognize legacy scalar artifacts, never infer dead stack storage."""
+        assignment: object
+        lhs: object
+        lhs_key: object
+        rhs: object
         if self._statement_contains_call(stmt):
             return False
         assignment = self._top_level_assignment_node_8616(stmt)
@@ -14842,13 +16255,14 @@ class _CallsiteStackArgsMaterializer8616:
             )
         return self._probe_artifact_lhs_accepted_8616(variable, name, lhs_node, lhs, stmt)
 
+    @cython.ccall
     def _probe_artifact_lhs_accepted_8616(self,
         variable: StructuredAstValue,
         name: StructuredAstValue,
         lhs_node: StructuredAstValue,
         lhs: StructuredAstValue,
         stmt: StructuredAstValue,
-    ) -> bool:
+    ) -> cython.bint:
         if isinstance(variable, SimStackVariable):
             # A nested sequence's suffix omits outer reads and alias uses.
             # Only the storage owner can prove this memory definition dead.
@@ -14868,9 +16282,13 @@ class _CallsiteStackArgsMaterializer8616:
             )
         return accepted
 
+    @cython.ccall
     def _is_outgoing_stack_arg_segment_placeholder_store_statement(self,
-        stmt: StructuredAstValue, *, stack_probe_seen: bool
-    ) -> bool:
+        stmt: StructuredAstValue, *, stack_probe_seen: cython.bint
+    ) -> cython.bint:
+        assignment: object
+        lhs: object
+        rhs: object
         if not stack_probe_seen or self._statement_contains_call(stmt):
             return False
         assignment = self._top_level_assignment_node_8616(stmt)
@@ -14906,9 +16324,14 @@ class _CallsiteStackArgsMaterializer8616:
             return False
         return not self._statement_contains_call(rhs)
 
+    @cython.ccall
     def _is_outgoing_stack_slot_placeholder_store_statement(self,
-        stmt: StructuredAstValue, *, stack_probe_seen: bool
-    ) -> bool:
+        stmt: StructuredAstValue, *, stack_probe_seen: cython.bint
+    ) -> cython.bint:
+        assignment: object
+        lhs: object
+        offset: object
+        rhs: object
         if not stack_probe_seen or self._statement_contains_call(stmt):
             return False
         assignment = self._top_level_assignment_node_8616(stmt)
@@ -14926,7 +16349,9 @@ class _CallsiteStackArgsMaterializer8616:
         offset = getattr(variable, "offset", None)
         return isinstance(variable, SimStackVariable) and isinstance(offset, int) and offset < 0
 
-    def _next_statement_is_materialized_direct_push_call_8616(self, statements: list[StructuredAstValue], idx: int) -> bool:
+    def _next_statement_is_materialized_direct_push_call_8616(self, statements: object, idx: cython.longlong) -> cython.bint:
+        call: object
+        summary: object
         if idx + 1 >= len(statements):
             return False
         next_stmt = statements[idx + 1]
@@ -14941,11 +16366,12 @@ class _CallsiteStackArgsMaterializer8616:
             return False
         if not all(
             isinstance(source, tuple) and len(source) >= 2 and source[0] == "bp" and isinstance(source[1], int)
-            for source in push_sources
+            for source in iter(push_sources)
         ):
             return False
         return bool(_boundary_tuple_8616(getattr(call, "args", ()) or ()))
 
+    @cython.ccall
     def _stack_variable_offset_8616(self, expr: StructuredAstValue) -> int | None:
         node = expr
         while isinstance(node, CTypeCast):
@@ -14958,15 +16384,19 @@ class _CallsiteStackArgsMaterializer8616:
         offset = variable.offset
         return offset if isinstance(offset, int) else None
 
+    @cython.ccall
     def _assignment_ins_addr_8616(self, stmt: StructuredAstValue) -> int | None:
+        ins_addr: object
+        tags: object
         tags = getattr(stmt, "tags", None)
         if not isinstance(tags, dict):
             return None
         ins_addr = tags.get("ins_addr")
         return ins_addr if isinstance(ins_addr, int) else None
 
+    @cython.ccall
     def _push_source_op_step_8616(
-        self, current: StructuredAstValue, op_name: str, op_value: StructuredAstValue
+        self, current: StructuredAstValue, op_name: object, op_value: StructuredAstValue
     ) -> StructuredAstValue | None:
         """Resolve one nested-source push op against the binary node."""
         if not isinstance(op_value, tuple):
@@ -15000,10 +16430,13 @@ class _CallsiteStackArgsMaterializer8616:
             return lhs
         return None
 
+    @cython.ccall
     def _push_op_sign_ext_hi_step_8616(
-        self, current: StructuredAstValue, op_value: int
+        self, current: StructuredAstValue, op_value: cython.longlong
     ) -> StructuredAstValue | None:
         """Consume a sign-extend-high pattern ``0 - ((x >> (w-1)) & 1)``."""
+        and_lhs: object
+        and_rhs: object
         width_bits = max(int(op_value), 1)
         if current.op != "Sub" or self._constant_int_value_8616(current.lhs) != 0:
             return None
@@ -15020,11 +16453,12 @@ class _CallsiteStackArgsMaterializer8616:
             and_lhs = and_lhs.expr
         if not isinstance(and_lhs, CBinaryOp) or getattr(and_lhs, "op", None) != "Shr":
             return None
-        if self._constant_int_value_8616(getattr(and_lhs, "rhs", None)) != width_bits - 1:
+        if operator.ne(self._constant_int_value_8616(getattr(and_lhs, "rhs", None)), width_bits - 1):
             return None
         return getattr(and_lhs, "lhs", None)
 
-    def _push_op_commutative_8616(self, c_op: str, commutative_c_op: str, lhs: StructuredAstValue, rhs: StructuredAstValue, lhs_value: StructuredAstValue, rhs_value: StructuredAstValue, wanted: int) -> StructuredAstValue | None:
+    @cython.ccall
+    def _push_op_commutative_8616(self, c_op: object, commutative_c_op: object, lhs: StructuredAstValue, rhs: StructuredAstValue, lhs_value: StructuredAstValue, rhs_value: StructuredAstValue, wanted: cython.longlong) -> StructuredAstValue | None:
         """Verdict for one named push-op step."""
         if c_op != commutative_c_op:
             return None
@@ -15033,39 +16467,47 @@ class _CallsiteStackArgsMaterializer8616:
         if lhs_value == wanted:
             return rhs
         return None
-    def _push_op_sub_8616(self, c_op: str, lhs: StructuredAstValue, rhs: StructuredAstValue, lhs_value: StructuredAstValue, rhs_value: StructuredAstValue, wanted: int) -> StructuredAstValue | None:
+    @cython.ccall
+    def _push_op_sub_8616(self, c_op: object, lhs: StructuredAstValue, rhs: StructuredAstValue, lhs_value: StructuredAstValue, rhs_value: StructuredAstValue, wanted: cython.longlong) -> StructuredAstValue | None:
         """Verdict for one named push-op step."""
         if c_op != "Sub" or rhs_value != wanted:
             return None
         return lhs
-    def _push_op_shl_8616(self, c_op: str, lhs: StructuredAstValue, rhs: StructuredAstValue, lhs_value: StructuredAstValue, rhs_value: StructuredAstValue, wanted: int) -> StructuredAstValue | None:
+    @cython.ccall
+    def _push_op_shl_8616(self, c_op: object, lhs: StructuredAstValue, rhs: StructuredAstValue, lhs_value: StructuredAstValue, rhs_value: StructuredAstValue, wanted: cython.longlong) -> StructuredAstValue | None:
         """Verdict for one named push-op step."""
-        if (c_op == "Shl" and rhs_value == wanted) or (c_op == "Mul" and rhs_value == ((1 << wanted) & 0xFFFF)):
+        if (c_op == "Shl" and rhs_value == wanted) or (c_op == "Mul" and operator.eq(rhs_value, ((1 << wanted) & 0xFFFF))):
             return lhs
-        if c_op == "Mul" and lhs_value == ((1 << wanted) & 0xFFFF):
+        if c_op == "Mul" and operator.eq(lhs_value, ((1 << wanted) & 0xFFFF)):
             return rhs
         return None
-    def _push_op_shr_8616(self, c_op: str, lhs: StructuredAstValue, rhs: StructuredAstValue, lhs_value: StructuredAstValue, rhs_value: StructuredAstValue, wanted: int) -> StructuredAstValue | None:
+    @cython.ccall
+    def _push_op_shr_8616(self, c_op: object, lhs: StructuredAstValue, rhs: StructuredAstValue, lhs_value: StructuredAstValue, rhs_value: StructuredAstValue, wanted: cython.longlong) -> StructuredAstValue | None:
         """Verdict for one named push-op step."""
         if c_op != "Shr" or rhs_value != wanted:
             return None
         return lhs
-    def _push_op_sar_8616(self, c_op: str, lhs: StructuredAstValue, rhs: StructuredAstValue, lhs_value: StructuredAstValue, rhs_value: StructuredAstValue, wanted: int) -> StructuredAstValue | None:
+    @cython.ccall
+    def _push_op_sar_8616(self, c_op: object, lhs: StructuredAstValue, rhs: StructuredAstValue, lhs_value: StructuredAstValue, rhs_value: StructuredAstValue, wanted: cython.longlong) -> StructuredAstValue | None:
         """Verdict for one named push-op step."""
         if c_op != "Shr" or rhs_value != wanted or not isinstance(lhs, CTypeCast):
             return None
         if not isinstance(lhs.dst_type, SimTypeShort) or lhs.dst_type.signed is not True:
             return None
         return lhs.expr
-    def _push_op_neg_8616(self, c_op: str, lhs: StructuredAstValue, rhs: StructuredAstValue, lhs_value: StructuredAstValue, rhs_value: StructuredAstValue, wanted: int) -> StructuredAstValue | None:
+    @cython.ccall
+    def _push_op_neg_8616(self, c_op: object, lhs: StructuredAstValue, rhs: StructuredAstValue, lhs_value: StructuredAstValue, rhs_value: StructuredAstValue, wanted: cython.longlong) -> StructuredAstValue | None:
         """Verdict for one named push-op step."""
         if c_op != "Sub" or lhs_value != 0:
             return None
         return rhs
+    @cython.ccall
     def _push_op_scalar_step_8616(
-        self, current: StructuredAstValue, op_name: str, op_value: int
+        self, current: StructuredAstValue, op_name: object, op_value: cython.longlong
     ) -> StructuredAstValue | None:
         """Consume one constant-int push op against the binary node."""
+        commutative_c_op: object
+        handler: object
         c_op = current.op
         lhs = current.lhs
         rhs = current.rhs
@@ -15086,6 +16528,7 @@ class _CallsiteStackArgsMaterializer8616:
             return None
         return handler(c_op, lhs, rhs, lhs_value, rhs_value, wanted)
 
+    @cython.ccall
     def _scalar_push_source_verdict_8616(
         self, node: StructuredAstValue, source: StructuredAstValue
     ) -> bool | None:
@@ -15094,12 +16537,17 @@ class _CallsiteStackArgsMaterializer8616:
             return False
         source_kind, source_value = source[0], source[1]
         if source_kind == "bp" and isinstance(source_value, int):
-            return self._stack_variable_offset_8616(node) == int(source_value)
+            return operator.eq(self._stack_variable_offset_8616(node), int(source_value))
         if source_kind == "imm" and isinstance(source_value, int):
-            return self._constant_int_value_8616(node) == (int(source_value) & 0xFFFF)
+            return operator.eq(self._constant_int_value_8616(node), (int(source_value) & 0xFFFF))
         return None
 
-    def _expr_matches_push_source_value_8616(self, expr: StructuredAstValue, source: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _expr_matches_push_source_value_8616(self, expr: StructuredAstValue, source: StructuredAstValue) -> cython.bint:
+        current: object
+        scalar: object
+        op_name: object
+        op_value: object
         node = expr
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -15118,8 +16566,9 @@ class _CallsiteStackArgsMaterializer8616:
             if current is None:
                 return False
         return self._expr_matches_push_source_value_8616(current, source_value)
+    @cython.ccall
     def _push_source_expr_op_step_8616(self,
-        current: StructuredAstValue,
+        current: object,
         op_name: StructuredAstValue,
         op_value: StructuredAstValue,
     ) -> StructuredAstValue | None:
@@ -15136,7 +16585,7 @@ class _CallsiteStackArgsMaterializer8616:
             return current
         if not isinstance(op_value, int):
             return None
-        if op_name == CallsitePushExprOp8616.SIGN_EXT_HI.value:
+        if operator.eq(op_name, CallsitePushExprOp8616.SIGN_EXT_HI.value):
             current = self._push_op_sign_ext_hi_step_8616(current, op_value)
         else:
             current = self._push_op_scalar_step_8616(current, op_name, op_value)
@@ -15148,22 +16597,22 @@ class _CallsiteStackArgsMaterializer8616:
         self,
         rhs: StructuredAstValue,
         push_sources: StructuredAstValue,
-        setup_ins_addr: int,
-        idx: int,
+        setup_ins_addr: cython.longlong,
+        idx: cython.longlong,
         lhs: StructuredAstValue,
-    ) -> bool:
+    ) -> cython.bint:
         """Return whether the setup RHS matches an imm/expr push source."""
         rhs_value = self._constant_int_value_8616(rhs)
         imm_source_matches = (
             tuple(
                 source
-                for source in push_sources
+                for source in iter(push_sources)
                 if isinstance(source, tuple)
                 and len(source) >= 2
                 and source[0] == "imm"
                 and isinstance(source[1], int)
                 and isinstance(rhs_value, int)
-                and (int(source[1]) & 0xFFFF) == (rhs_value & 0xFFFF)
+                and operator.eq((int(source[1]) & 0xFFFF), (rhs_value & 0xFFFF))
                 and _mov_reg_imm_setup_matches_push_source_8616(self.project, setup_ins_addr, source)
             )
             if isinstance(rhs_value, int)
@@ -15185,7 +16634,7 @@ class _CallsiteStackArgsMaterializer8616:
 
         expr_source_matches = tuple(
             source
-            for source in push_sources
+            for source in iter(push_sources)
             if self._expr_matches_push_source_value_8616(rhs, source)
             and _reg_expr_setup_matches_push_source_8616(self.project, setup_ins_addr, source)
         )
@@ -15198,7 +16647,7 @@ class _CallsiteStackArgsMaterializer8616:
                     self._expr_matches_push_source_value_8616(rhs, source),
                     _reg_expr_setup_matches_push_source_8616(self.project, setup_ins_addr, source),
                 )
-                for source in push_sources
+                for source in iter(push_sources)
                 if isinstance(source, tuple) and source and source[0] == "expr"
             )
             if expr_diagnostics:
@@ -15216,16 +16665,16 @@ class _CallsiteStackArgsMaterializer8616:
         next_call: StructuredAstValue,
         lhs: StructuredAstValue,
         rhs: StructuredAstValue,
-        lhs_offset: int | None,
-        lhs_key: StructuredAstValue,
+        lhs_offset: object,
+        lhs_key: object,
         push_sources: StructuredAstValue,
-        setup_ins_addr: int,
-    ) -> bool:
+        setup_ins_addr: cython.longlong,
+    ) -> cython.bint:
         """Return whether the setup LHS is a proven call-arg source reference."""
         if lhs_offset is not None and lhs_key is not None and self._call_args_reference_identity(next_call, lhs_key):
             lhs_source_setup_matches = tuple(
                 source
-                for source in push_sources
+                for source in iter(push_sources)
                 if lhs_offset in _bp_offsets_from_push_source_8616(source)
                 and _reg_expr_setup_matches_push_source_8616(self.project, setup_ins_addr, source)
             )
@@ -15236,11 +16685,11 @@ class _CallsiteStackArgsMaterializer8616:
         call_args = _boundary_tuple_8616(getattr(next_call, "args", ()) or ())
         imm_setup_matches = tuple(
             source
-            for source in push_sources
+            for source in iter(push_sources)
             if isinstance(source, tuple)
             and len(source) >= 2
             and source[0] == "imm"
-            and any(self._expr_matches_push_source_value_8616(arg, source) for arg in call_args)
+            and any(self._expr_matches_push_source_value_8616(arg, source) for arg in iter(call_args))
             and _mov_reg_imm_setup_matches_push_source_8616(self.project, setup_ins_addr, source)
         )
         if imm_setup_matches:
@@ -15255,10 +16704,14 @@ class _CallsiteStackArgsMaterializer8616:
         self,
         lhs: StructuredAstValue,
         rhs: StructuredAstValue,
-        statements: list[StructuredAstValue],
-        idx: int,
-    ) -> bool:
+        statements: object,
+        idx: cython.longlong,
+    ) -> cython.bint:
         """Return whether the assignment is a consumed segmented stack byte store."""
+        lhs_args: object
+        next_call: object
+        seg_name: object
+        summary: object
         lhs_args = _segmented_stack_arg_store_lvalue_args_8616(lhs, self.project, allow_raw_dereference=False)
         if lhs_args is None:
             return False
@@ -15290,20 +16743,25 @@ class _CallsiteStackArgsMaterializer8616:
             return False
         call_args = _boundary_tuple_8616(getattr(next_call, "args", ()) or ())
         return bool(call_args) and (
-            any(_same_c_expression_8616(arg, rhs) for arg in call_args)
-            or any(isinstance(source, tuple) and source for source in push_sources)
+            any(_same_c_expression_8616(arg, rhs) for arg in iter(call_args))
+            or any(isinstance(source, tuple) and source for source in iter(push_sources))
         )
 
+    @cython.ccall
     def _pre_call_setup_window_artifact_8616(
         self,
         assignment: StructuredAstValue,
         lhs: StructuredAstValue,
         rhs: StructuredAstValue,
-        statements: list[StructuredAstValue],
-        idx: int,
-    ) -> bool:
+        statements: object,
+        idx: cython.longlong,
+    ) -> cython.bint:
         """Return whether the setup window before a call is prunable."""
-        candidates: list[tuple[StructuredAstValue, StructuredAstValue, int]] = []
+        scan_result: object
+        _candidate_lhs: object
+        _candidate_rhs: object
+        candidate_ins_addr: object
+        candidates: list[tuple[StructuredAstValue, StructuredAstValue, cython.longlong]] = []
         current_ins_addr = self._assignment_ins_addr_8616(assignment)
         if not isinstance(current_ins_addr, int):
             return False
@@ -15345,12 +16803,18 @@ class _CallsiteStackArgsMaterializer8616:
                 return False
         return True
 
+    @cython.ccall
     def _setup_window_scan_8616(self,
-        statements: list[StructuredAstValue],
-        scan_idx: int,
-        stop_idx: int,
-        candidates: list[StructuredAstValue],
-    ) -> tuple[StructuredAstValue, StructuredAstValue] | None:
+        statements: object,
+        scan_idx: cython.longlong,
+        stop_idx: cython.longlong,
+        candidates: object,
+    ) -> object:
+        call_node: object
+        call_summary: object
+        candidate_assignment: object
+        candidate_lhs: object
+        candidate_rhs: object
         call_node = None
         call_summary = None
         while scan_idx < stop_idx:
@@ -15378,12 +16842,12 @@ class _CallsiteStackArgsMaterializer8616:
         next_call: StructuredAstValue,
         lhs: StructuredAstValue,
         rhs: StructuredAstValue,
-        lhs_offset: StructuredAstValue,
-        lhs_key: StructuredAstValue,
+        lhs_offset: object,
+        lhs_key: object,
         push_sources: StructuredAstValue,
-        setup_ins_addr: int,
-        setup_gap: int,
-    ) -> bool | str:
+        setup_ins_addr: cython.longlong,
+        setup_gap: cython.longlong,
+    ) -> object:
         """True when the setup lhs is a proven consumed call arg; else a refusal reason."""
         if self._setup_lhs_reference_matches_8616(
             next_call, lhs, rhs, lhs_offset, lhs_key, push_sources, setup_ins_addr
@@ -15400,7 +16864,7 @@ class _CallsiteStackArgsMaterializer8616:
             return (f"stack-slot-ins-gap:{setup_gap}")
         source_offsets = {
             int(source[1])
-            for source in push_sources
+            for source in iter(push_sources)
             if isinstance(source, tuple) and len(source) >= 2 and source[0] == "bp" and isinstance(source[1], int)
         }
         if lhs_offset not in source_offsets:
@@ -15408,23 +16872,26 @@ class _CallsiteStackArgsMaterializer8616:
         if lhs_key is None:
             return ("missing-lhs-key")
         args = _boundary_tuple_8616(getattr(next_call, "args", ()) or ())
-        if not any(self._c_variable_identity_key_8616(arg) == lhs_key for arg in args):
+        if not any(operator.eq(self._c_variable_identity_key_8616(arg), lhs_key) for arg in iter(args)):
             return ("lhs-not-call-arg")
         return True
-    def _setup_prune_refuse_8616(self, idx: int, reason: object) -> bool:
+    @cython.ccall
+    def _setup_prune_refuse_8616(self, idx: cython.longlong, reason: object) -> cython.bint:
         if os.environ.get("INERTIA_DEBUG_STACK_PROBE_ARTIFACTS_VERBOSE"):
             log.warning("[call-arg-setup-prune] refuse idx=%d reason=%s", idx, reason)
         return False
 
+    @cython.ccall
     def _setup_next_call_gate_8616(self,
-        next_call: StructuredAstValue,
+        next_call: object,
         assignment: StructuredAstValue,
         lhs: StructuredAstValue,
         rhs: StructuredAstValue,
-        statements: list[StructuredAstValue],
-        idx: int,
+        statements: object,
+        idx: cython.longlong,
     ) -> tuple[bool | None, StructuredAstValue]:
         """(True,) consume; (False, reason) refuse; (None, (gap, ins, sources)) continue."""
+        summary: object
         if next_call is None:
             if self._pre_call_setup_window_artifact_8616(assignment, lhs, rhs, statements, idx):
                 return (True, None)
@@ -15447,10 +16914,14 @@ class _CallsiteStackArgsMaterializer8616:
             return (False, "missing-push-sources")
         return (None, (setup_ins_addr, setup_gap, push_sources))
 
+    @cython.ccall
     def _is_consumed_materialized_call_arg_setup_assignment_8616(self,
-        statements: list[StructuredAstValue],
-        idx: int,
-    ) -> bool:
+        statements: object,
+        idx: cython.longlong,
+    ) -> cython.bint:
+        assignment: object
+        lhs: object
+        rhs: object
         if idx + 1 >= len(statements):
             return self._setup_prune_refuse_8616(idx, "no-next-statement")
         assignment = self._top_level_assignment_node_8616(statements[idx])
@@ -15500,7 +16971,8 @@ class _CallsiteStackArgsMaterializer8616:
             return True
         return self._setup_prune_refuse_8616(idx, verdict)
 
-    def _seg_u8_lvalue_args_8616(self, lhs: StructuredAstValue) -> tuple[StructuredAstValue, ...] | None:
+    @cython.ccall
+    def _seg_u8_lvalue_args_8616(self, lhs: StructuredAstValue) -> object:
         node = lhs
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -15512,9 +16984,12 @@ class _CallsiteStackArgsMaterializer8616:
         args = _boundary_tuple_8616(node.args or ())
         return args if len(args) == 2 else None
 
+    @cython.ccall
     def _dirty_expr_identity_key_8616(self,
         expr: StructuredAstValue,
-    ) -> tuple[str, int | str] | None:
+    ) -> object:
+        dirty: object
+        varid: object
         node = expr
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -15529,24 +17004,29 @@ class _CallsiteStackArgsMaterializer8616:
             return ("name", name)
         return None
 
-    def _same_probe_carrier_expr_8616(self, left: StructuredAstValue, right: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _same_probe_carrier_expr_8616(self, left: StructuredAstValue, right: StructuredAstValue) -> cython.bint:
+        left_key: object
         if _same_c_expression_8616(left, right):
             return True
         left_key = self._dirty_expr_identity_key_8616(left)
-        if left_key is not None and left_key == self._dirty_expr_identity_key_8616(right):
+        if left_key is not None and operator.eq(left_key, self._dirty_expr_identity_key_8616(right)):
             return True
         left_carriers = _generic_stack_carrier_keys_8616(left)
-        return bool(left_carriers and left_carriers == _generic_stack_carrier_keys_8616(right))
+        return bool(left_carriers and operator.eq(left_carriers, _generic_stack_carrier_keys_8616(right)))
 
-    def _expr_contains_dirty_expression_8616(self, expr: StructuredAstValue) -> bool:
-        for node in (expr, *_iter_c_nodes_deep_8616(expr)):
+    @cython.ccall
+    def _expr_contains_dirty_expression_8616(self, expr: StructuredAstValue) -> cython.bint:
+        node: object
+        for node in (expr, ) + tuple(_iter_c_nodes_deep_8616(expr)):
             while isinstance(node, CTypeCast):
                 node = node.expr
             if node.__class__.__name__ == "CDirtyExpression":
                 return True
         return False
 
-    def _expr_is_add_one_of_8616(self, expr: StructuredAstValue, base: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _expr_is_add_one_of_8616(self, expr: StructuredAstValue, base: StructuredAstValue) -> cython.bint:
         node = expr
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -15565,7 +17045,8 @@ class _CallsiteStackArgsMaterializer8616:
             return self._constant_int_value_8616(rhs) == 0xFFFF and self._same_probe_carrier_expr_8616(lhs, base)
         return False
 
-    def _expr_is_add_one_shape_8616(self, expr: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _expr_is_add_one_shape_8616(self, expr: StructuredAstValue) -> cython.bint:
         node = expr
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -15579,7 +17060,8 @@ class _CallsiteStackArgsMaterializer8616:
             return self._constant_int_value_8616(rhs) == 0xFFFF
         return False
 
-    def _expr_is_shr8_of_8616(self, expr: StructuredAstValue, base: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _expr_is_shr8_of_8616(self, expr: StructuredAstValue, base: StructuredAstValue) -> cython.bint:
         node = expr
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -15590,7 +17072,8 @@ class _CallsiteStackArgsMaterializer8616:
             and self._same_probe_carrier_expr_8616(getattr(node, "lhs", None), base)
         )
 
-    def _expr_is_shr8_shape_8616(self, expr: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _expr_is_shr8_shape_8616(self, expr: StructuredAstValue) -> cython.bint:
         node = expr
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -15600,8 +17083,11 @@ class _CallsiteStackArgsMaterializer8616:
             and self._constant_int_value_8616(getattr(node, "rhs", None)) == 8
         )
 
-    def _expr_is_side_effect_free_byte_value_8616(self, expr: StructuredAstValue) -> bool:
-        for raw_node in (expr, *_iter_c_nodes_deep_8616(expr)):
+    @cython.ccall
+    def _expr_is_side_effect_free_byte_value_8616(self, expr: StructuredAstValue) -> cython.bint:
+        variable: object
+        raw_node: object
+        for raw_node in (expr, ) + tuple(_iter_c_nodes_deep_8616(expr)):
             node = raw_node
             while isinstance(node, CTypeCast):
                 node = node.expr
@@ -15614,10 +17100,15 @@ class _CallsiteStackArgsMaterializer8616:
                 return False
         return True
 
+    @cython.ccall
     def _stack_probe_seg_u8_probe_store_parts_8616(self,
         stmt: StructuredAstValue,
-        typed_probe_fact: TypedStackProbeReturnFact8616 | None,
-    ) -> tuple[StructuredAstValue, StructuredAstValue, StructuredAstValue] | None:
+        typed_probe_fact: object,
+    ) -> object:
+        args: object
+        assignment: object
+        lhs: object
+        rhs: object
         if typed_probe_fact is None:
             return None
         if typed_probe_fact.segment_space != "ss" or typed_probe_fact.width != 2:
@@ -15649,14 +17140,21 @@ class _CallsiteStackArgsMaterializer8616:
             return None
         return seg_arg, offset_arg, rhs
 
-    def _stmt_tag_int_8616(self, stmt: StructuredAstValue, key: str) -> int | None:
+    @cython.ccall
+    def _stmt_tag_int_8616(self, stmt: StructuredAstValue, key: object) -> int | None:
+        tags: object
+        value: object
         tags = getattr(stmt, "tags", None)
         if not isinstance(tags, dict):
             return None
         value = tags.get(key)
         return value if isinstance(value, int) else None
 
-    def _same_instruction_byte_pair_tags_8616(self, low_stmt: StructuredAstValue, high_stmt: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _same_instruction_byte_pair_tags_8616(self, low_stmt: StructuredAstValue, high_stmt: StructuredAstValue) -> cython.bint:
+        low_block: object
+        low_idx: object
+        low_ins: object
         low_ins = self._stmt_tag_int_8616(low_stmt, "ins_addr")
         high_ins = self._stmt_tag_int_8616(high_stmt, "ins_addr")
         low_block = self._stmt_tag_int_8616(low_stmt, "vex_block_addr")
@@ -15665,18 +17163,21 @@ class _CallsiteStackArgsMaterializer8616:
         high_idx = self._stmt_tag_int_8616(high_stmt, "vex_stmt_idx")
         return (
             low_ins is not None
-            and low_ins == high_ins
+            and operator.eq(low_ins, high_ins)
             and low_block is not None
-            and low_block == high_block
+            and operator.eq(low_block, high_block)
             and low_idx is not None
-            and high_idx == low_idx + 1
+            and operator.eq(high_idx, low_idx + 1)
         )
 
+    @cython.ccall
     def _is_typed_stack_probe_seg_u8_byte_pair_8616(self,
         low_stmt: StructuredAstValue,
         high_stmt: StructuredAstValue,
         typed_probe_fact: TypedStackProbeReturnFact8616 | None,
-    ) -> bool:
+    ) -> cython.bint:
+        high_parts: object
+        low_parts: object
         low_parts = self._stack_probe_seg_u8_probe_store_parts_8616(low_stmt, typed_probe_fact)
         high_parts = self._stack_probe_seg_u8_probe_store_parts_8616(high_stmt, typed_probe_fact)
         if low_parts is None or high_parts is None:
@@ -15697,7 +17198,11 @@ class _CallsiteStackArgsMaterializer8616:
             and self._expr_contains_dirty_expression_8616(low_rhs)
         )
 
-    def _later_non_probe_call_has_materialized_args_8616(self, statements: list[StructuredAstValue], idx: int) -> bool:
+    @cython.ccall
+    def _later_non_probe_call_has_materialized_args_8616(self, statements: object, idx: cython.longlong) -> cython.bint:
+        call: object
+        summary: object
+        candidate: object
         for candidate in statements[idx + 1 :]:
             call = self._call_from_statement(candidate)
             if call is None:
@@ -15708,7 +17213,8 @@ class _CallsiteStackArgsMaterializer8616:
             return bool(_boundary_tuple_8616(getattr(call, "args", ()) or ()))
         return False
 
-    def _record_probe_artifacts_pruned_8616(self, removed_artifacts: int, before: int, after: int) -> None:
+    @cython.ccall
+    def _record_probe_artifacts_pruned_8616(self, removed_artifacts: cython.longlong, before: cython.longlong, after: cython.longlong) -> None:
         """Publish the pruned stack-probe artifact count and debug line."""
         ensure_stack_probe_fact_stats_8616(self.codegen)["stack_probe_frame_artifacts_pruned"] = (
             int(ensure_stack_probe_fact_stats_8616(self.codegen).get("stack_probe_frame_artifacts_pruned", 0) or 0)
@@ -15722,13 +17228,15 @@ class _CallsiteStackArgsMaterializer8616:
                 after,
             )
 
+    @cython.ccall
     def _probe_frame_debug_stmt_8616(self,
         stmt: StructuredAstValue,
-        idx: int,
-        helper_or_helper_zone_active: bool,
-        stack_probe_seen: bool,
+        idx: cython.longlong,
+        helper_or_helper_zone_active: cython.bint,
+        stack_probe_seen: cython.bint,
     ) -> None:
         """Emit the verbose per-statement stack-probe artifact debug line."""
+        assignment: object
         assignment = self._top_level_assignment_node_8616(stmt)
         lhs = rhs = None
         if assignment is not None:
@@ -15744,13 +17252,16 @@ class _CallsiteStackArgsMaterializer8616:
             getattr(assignment, "tags", None) if assignment is not None else getattr(stmt, "tags", None),
         )
 
+    @cython.ccall
     def _prune_stack_probe_frame_artifacts(self,
-        statements: list[StructuredAstValue],
+        statements: object,
         *,
-        stack_probe_seen: bool,
+        stack_probe_seen: cython.bint,
         typed_probe_fact: TypedStackProbeReturnFact8616 | None,
-        allow_setup_assignment_prune: bool,
-    ) -> tuple[list[StructuredAstValue], bool]:
+        allow_setup_assignment_prune: cython.bint,
+    ) -> tuple[list[StructuredAstValue], cython.bint]:
+        idx: object
+        stmt: object
         if not stack_probe_seen and not self.prune_consumed_arg_stores:
             return statements, False
         helper_or_helper_zone_active = bool(stack_probe_seen)
@@ -15798,12 +17309,15 @@ class _CallsiteStackArgsMaterializer8616:
 
     def _probe_next_call_debug_8616(
         self,
-        statements: list[StructuredAstValue],
-        idx: int,
-        tag: str,
+        statements: object,
+        idx: cython.longlong,
+        tag: object,
         stmt: StructuredAstValue = None,
     ) -> None:
         """Emit the stack-probe placeholder refuse debug line when enabled."""
+        next_call: object
+        next_stmt: object
+        next_summary: object
         if os.environ.get("INERTIA_DEBUG_STACK_PROBE_ARTIFACTS"):
             next_stmt = statements[idx + 1] if idx + 1 < len(statements) else None
             next_call = self._call_from_statement(next_stmt) if next_stmt is not None else None
@@ -15817,17 +17331,18 @@ class _CallsiteStackArgsMaterializer8616:
                 self._debug_expr_8616(next_call),
                 type(next_summary).__name__ if next_summary is not None else None,
                 getattr(next_summary, "push_arg_sources", None) if next_summary is not None else None,
-                _boundary_tuple_8616(self._debug_expr_8616(arg) for arg in (getattr(next_call, "args", ()) or ()))
+                _boundary_tuple_8616(self._debug_expr_8616(arg) for arg in iter((getattr(next_call, "args", ()) or ())))
                 if next_call is not None
                 else (),
             )
 
+    @cython.ccall
     def _probe_placeholder_store_action_8616(self,
         stmt: StructuredAstValue,
-        idx: int,
-        statements: list[StructuredAstValue],
-        stack_probe_seen: bool,
-    ) -> str | None:
+        idx: cython.longlong,
+        statements: object,
+        stack_probe_seen: cython.bint,
+    ) -> object:
         if self._is_outgoing_stack_arg_segment_placeholder_store_statement(
             stmt,
             stack_probe_seen=stack_probe_seen,
@@ -15843,12 +17358,14 @@ class _CallsiteStackArgsMaterializer8616:
             self._probe_next_call_debug_8616(statements, idx, 'refuse-slot-placeholder-consume', stmt)
         return None
 
+    @cython.ccall
     def _probe_drop_artifact_8616(self, stmt: StructuredAstValue) -> str:
         """Record and report the drop-artifact probe-frame verdict."""
         self.stats.consumed_outgoing_stack_placeholder_count += 1
         self._record_pruned_stack_write_token_8616(stmt)
         return "drop_artifact"
 
+    @cython.ccall
     def _probe_drop_setup_8616(self, stmt: StructuredAstValue) -> str:
         """Record and report the drop-setup probe-frame verdict."""
         self.stats.consumed_outgoing_stack_placeholder_count += 1
@@ -15858,27 +17375,32 @@ class _CallsiteStackArgsMaterializer8616:
         )
         return "drop_setup"
 
-    def _probe_zone_active_update_8616(self, stmt: StructuredAstValue, helper_or_helper_zone_active: bool) -> bool:
+    @cython.ccall
+    def _probe_zone_active_update_8616(self, stmt: StructuredAstValue, helper_or_helper_zone_active: cython.bint) -> cython.bint:
         """Update the helper-zone flag when ``stmt`` carries a callsite summary."""
+        call: object
+        summary: object
         call = self._call_from_statement(stmt)
         summary = self.summary_map.get(id(call)) if call is not None else None
         if call is None or summary is None:
             return helper_or_helper_zone_active
         return bool(summary.stack_probe_helper)
 
+    @cython.ccall
     def _prune_probe_frame_step_8616(
         self,
         stmt: StructuredAstValue,
-        idx: int,
-        statements: list[StructuredAstValue],
+        idx: cython.longlong,
+        statements: object,
         *,
-        helper_or_helper_zone_active: bool,
-        stack_probe_seen: bool,
-        typed_probe_fact: TypedStackProbeReturnFact8616 | None,
+        helper_or_helper_zone_active: cython.bint,
+        stack_probe_seen: cython.bint,
+        typed_probe_fact: object,
         later_identity_keys_by_index: Sequence[frozenset[tuple[StructuredAstValue, ...]]],
-        allow_setup_assignment_prune: bool,
-    ) -> tuple[str, bool]:
+        allow_setup_assignment_prune: cython.bint,
+    ) -> tuple[str, cython.bint]:
         """Classify one statement's artifact verdict; returns (action, helper_zone_active)."""
+        placeholder_action: object
         helper_or_helper_zone_active = self._probe_zone_active_update_8616(stmt, helper_or_helper_zone_active)
         if (
             helper_or_helper_zone_active
@@ -15918,7 +17440,11 @@ class _CallsiteStackArgsMaterializer8616:
             return self._probe_drop_setup_8616(stmt), helper_or_helper_zone_active
         return "keep", helper_or_helper_zone_active
 
-    def _is_virtual_dirty_expr_8616(self, term: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_virtual_dirty_expr_8616(self, term: StructuredAstValue) -> cython.bint:
+        dirty: object
+        name: object
+        varid: object
         dirty = getattr(term, "dirty", None)
         if isinstance(dirty, str):
             return dirty.startswith(("vvar_", "tmp_", "ir_"))
@@ -15930,7 +17456,10 @@ class _CallsiteStackArgsMaterializer8616:
         name = getattr(dirty, "name", None)
         return isinstance(name, str) and (name.startswith(("vvar_", "tmp_", "ir_")))
 
-    def _assignment_lhs_writes_memory(self, lhs: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _assignment_lhs_writes_memory(self, lhs: object) -> cython.bint:
+        variable: object
+        raw_node: object
         if lhs is None:
             return False
         nodes = (lhs, *_iter_c_nodes_deep_8616(lhs))
@@ -15949,27 +17478,30 @@ class _CallsiteStackArgsMaterializer8616:
                 return True
         return False
 
-    def _is_value_only_assignment(self, stmt: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_value_only_assignment(self, stmt: StructuredAstValue) -> cython.bint:
         candidates = self._iter_assignment_nodes(stmt)
         if not candidates:
             return False
         lhs, _rhs = self._assignment_lhs_rhs(candidates[-1])
         return not self._assignment_lhs_writes_memory(lhs)
 
-    def _is_segment_register_metadata_store(self, stmt: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_segment_register_metadata_store(self, stmt: StructuredAstValue) -> cython.bint:
         candidates = self._iter_assignment_nodes(stmt)
         if not candidates:
             return False
         lhs, rhs = self._assignment_lhs_rhs(candidates[-1])
         return self._assignment_lhs_writes_memory(lhs) and self._is_segment_register_value_expr(rhs)
 
+    @cython.ccall
     def _expand_typed_carrier_defs_8616(
         self,
-        statements: list[StructuredAstValue],
-        stmt_index: int,
-        wanted_indices: list[int],
-        wanted_keys: set[tuple[str, str | int]],
-    ) -> list[int]:
+        statements: object,
+        stmt_index: cython.longlong,
+        wanted_indices: object,
+        wanted_keys: object,
+    ) -> object:
         """Expand typed carrier defs covering the wanted statement indices."""
         if not wanted_indices or not wanted_keys:
             return wanted_indices
@@ -15982,18 +17514,20 @@ class _CallsiteStackArgsMaterializer8616:
             wanted_keys=wanted_keys,
         )
 
+    @cython.ccall
     def _filter_call_return_frame_rhss_8616(
         self,
-        rhss: list[StructuredAstValue],
-        source_index: int,
+        rhss: object,
+        source_index: cython.longlong,
         *,
         call_return_addr: int | None,
-    ) -> tuple[list[StructuredAstValue], list[int]]:
+    ) -> tuple[list[StructuredAstValue], list[cython.longlong]]:
         """Drop rhs stores that merely re-store the call return address."""
+        rhs: object
         if not rhss:
             return [], []
         kept: list[StructuredAstValue] = []
-        skipped_indices: list[int] = []
+        skipped_indices: list[cython.longlong] = []
         for rhs in rhss:
             if _rhs_matches_call_return_addr_8616(rhs, call_return_addr):
                 skipped_indices.append(source_index)
@@ -16001,20 +17535,22 @@ class _CallsiteStackArgsMaterializer8616:
             kept.append(rhs)
         return kept, skipped_indices
 
+    @cython.ccall
     def _trailing_typed_probe_collect_8616(
         self,
         node: StructuredAstValue,
-        seq_idx: int,
-        statements: list[StructuredAstValue],
-        parent_stmt_index: int,
+        seq_idx: cython.longlong,
+        statements: object,
+        parent_stmt_index: cython.longlong,
         typed_probe_fact: StructuredAstValue,
-        max_collect: int,
-        rhss: list[StructuredAstValue],
-        consumed_nested_indices: list[int],
-        skipped_carriers: int,
-        skipped_value_assignments: int,
-    ) -> tuple[int, int, str]:
+        max_collect: cython.longlong,
+        rhss: object,
+        consumed_nested_indices: object,
+        skipped_carriers: cython.longlong,
+        skipped_value_assignments: cython.longlong,
+    ) -> tuple[cython.longlong, cython.longlong, str]:
         """Collect typed-probe store rhss from one nested node; returns skips and action."""
+        entry: object
         nested_rhss, nested_sources = self._typed_stack_store_rhs_sources_from_statement(
             node,
             typed_probe_fact,
@@ -16044,18 +17580,19 @@ class _CallsiteStackArgsMaterializer8616:
             return skipped_carriers, skipped_value_assignments, "stop"
         return skipped_carriers, skipped_value_assignments, "advance"
 
+    @cython.ccall
     def _trailing_non_probe_collect_8616(
         self,
         node: StructuredAstValue,
-        seq_idx: int,
+        seq_idx: cython.longlong,
         call_return_addr: StructuredAstValue,
-        max_collect: int,
-        rhss: list[StructuredAstValue],
-        consumed_nested_indices: list[int],
-        skipped_carriers: int,
-        skipped_value_assignments: int,
-        value_skip_limit: int,
-    ) -> tuple[int, int, str]:
+        max_collect: cython.longlong,
+        rhss: object,
+        consumed_nested_indices: object,
+        skipped_carriers: cython.longlong,
+        skipped_value_assignments: cython.longlong,
+        value_skip_limit: cython.longlong,
+    ) -> tuple[cython.longlong, cython.longlong, str]:
         """Collect non-probe trailing store rhss from one node; returns skips and action."""
         nested_rhss = self._stack_store_rhss_from_statement(node, max_collect=max_collect)
         if nested_rhss:
@@ -16085,12 +17622,14 @@ class _CallsiteStackArgsMaterializer8616:
             return skipped_carriers, skipped_value_assignments, "advance"
         return skipped_carriers, skipped_value_assignments, "stop"
 
+    @cython.ccall
     def _apply_consumed_nested_deletions_8616(self,
         stmt: StructuredAstValue,
-        sequence: list[StructuredAstValue],
+        sequence: object,
         nested_statements: StructuredAstValue,
-        consumed_nested_indices: list[int],
+        consumed_nested_indices: object,
     ) -> None:
+        del_idx: object
         for del_idx in reversed(self._dedupe_indices(consumed_nested_indices)):
             if 0 <= del_idx < len(sequence):
                 del sequence[del_idx]
@@ -16099,18 +17638,23 @@ class _CallsiteStackArgsMaterializer8616:
         else:
             stmt.statements = tuple(sequence)
 
+    @cython.ccall
     def _trailing_stack_store_rhss_after_last_call_8616(
         self,
         stmt: StructuredAstValue,
         *,
-        max_collect: int,
-        parent_stmt_index: int,
-        statements: list[StructuredAstValue],
+        max_collect: cython.longlong,
+        parent_stmt_index: cython.longlong,
+        statements: object,
         wanted_count: int | None,
-        typed_probe_fact: TypedStackProbeReturnFact8616 | None,
+        typed_probe_fact: object,
         call_return_addr: int | None,
-    ) -> tuple[list[StructuredAstValue], list[int]]:
+    ) -> tuple[list[StructuredAstValue], list[cython.longlong]]:
         """Collect stack-store rhss nested after the last call in a container statement."""
+        last_call_idx: object
+        nested_statements: object
+        node: object
+        seq_idx: object
         nested_statements = getattr(stmt, "statements", None)
         if not isinstance(nested_statements, (list, tuple)):
             return [], []
@@ -16123,7 +17667,7 @@ class _CallsiteStackArgsMaterializer8616:
             return [], []
 
         rhss: list[StructuredAstValue] = []
-        consumed_nested_indices: list[int] = []
+        consumed_nested_indices: list[cython.longlong] = []
         skipped_carriers = 0
         skipped_value_assignments = 0
         value_skip_limit = 160 if isinstance(wanted_count, int) and wanted_count > 0 else 8
@@ -16149,9 +17693,10 @@ class _CallsiteStackArgsMaterializer8616:
 
         return rhss[:max_collect], []
 
+    @cython.ccall
     def _skip_after_empty_typed_collect_8616(
-        self, stmt: StructuredAstValue, skipped_carriers: int, skipped_value_assignments: int
-    ) -> tuple[int, int, str]:
+        self, stmt: StructuredAstValue, skipped_carriers: cython.longlong, skipped_value_assignments: cython.longlong
+    ) -> tuple[cython.longlong, cython.longlong, str]:
         """Classify a statement that produced no typed probe stores."""
         if not self._is_skip_after_typed_collect(stmt):
             return skipped_carriers, skipped_value_assignments, "stop"
@@ -16165,19 +17710,20 @@ class _CallsiteStackArgsMaterializer8616:
 
     def _consume_backtracked_store_rhss_8616(
         self,
-        rhss: list[StructuredAstValue],
-        idx: int,
-        rhs_sources: list[set[tuple[str, str | int]]],
-        statements: list[StructuredAstValue],
-        rhs_values: list[StructuredAstValue],
-        consumed_indices: list[int],
-        consumed_return_frame_indices: list[int],
-        skipped_carriers: int,
+        rhss: object,
+        idx: cython.longlong,
+        rhs_sources: object,
+        statements: object,
+        rhs_values: object,
+        consumed_indices: object,
+        consumed_return_frame_indices: object,
+        skipped_carriers: cython.longlong,
         *,
-        typed_probe_fact: TypedStackProbeReturnFact8616 | None,
+        typed_probe_fact: object,
         call_return_addr: int | None,
-    ) -> tuple[str, list[StructuredAstValue], int]:
+    ) -> tuple[str, list[StructuredAstValue], cython.longlong]:
         """Consume collected store rhss; returns (action, rhss, skipped_carriers)."""
+        entry: object
         rhss, return_frame_indices = self._filter_call_return_frame_rhss_8616(
             rhss, idx, call_return_addr=call_return_addr
         )
@@ -16185,7 +17731,7 @@ class _CallsiteStackArgsMaterializer8616:
             consumed_return_frame_indices.extend(return_frame_indices)
             if not rhss:
                 return "advance", rhss, skipped_carriers
-        if all(self._is_segment_register_value_expr(rhs) for rhs in rhss):
+        if all(self._is_segment_register_value_expr(rhs) for rhs in iter(rhss)):
             skipped_carriers += 1
             if skipped_carriers > 4:
                 return "stop", rhss, skipped_carriers
@@ -16207,10 +17753,12 @@ class _CallsiteStackArgsMaterializer8616:
         consumed_indices.extend(expanded_indices)
         return "advance", rhss, skipped_carriers
 
+    @cython.ccall
     def _classify_non_store_backtrack_8616(
         self, stmt: StructuredAstValue
     ) -> tuple[str, StructuredAstValue | None]:
         """Classify a backtracked node that produced no stack-store rhss."""
+        placeholder_rhs: object
         placeholder_rhs = self._outgoing_arg_placeholder_rhs_from_statement(stmt)
         if placeholder_rhs is not None:
             return "placeholder", placeholder_rhs
@@ -16222,18 +17770,19 @@ class _CallsiteStackArgsMaterializer8616:
             return "value", None
         return "stop", None
 
+    @cython.ccall
     def _backtrack_non_store_action_8616(
         self,
         stmt: StructuredAstValue,
-        idx: int,
+        idx: cython.longlong,
         call_return_addr: StructuredAstValue,
-        rhs_values: list[StructuredAstValue],
-        consumed_indices: list[int],
-        consumed_return_frame_indices: list[int],
-        skipped_carriers: int,
-        skipped_value_assignments: int,
-        value_skip_limit: int,
-    ) -> tuple[str, int, int]:
+        rhs_values: object,
+        consumed_indices: object,
+        consumed_return_frame_indices: object,
+        skipped_carriers: cython.longlong,
+        skipped_value_assignments: cython.longlong,
+        value_skip_limit: cython.longlong,
+    ) -> tuple[str, cython.longlong, cython.longlong]:
         """Classify a non-store backtrack node; return (action, skips)."""
         kind, placeholder_rhs = self._classify_non_store_backtrack_8616(stmt)
         if kind == "placeholder":
@@ -16255,13 +17804,14 @@ class _CallsiteStackArgsMaterializer8616:
                 return "stop", skipped_carriers, skipped_value_assignments
             return "advance", skipped_carriers, skipped_value_assignments
         return "stop", skipped_carriers, skipped_value_assignments
+    @cython.ccall
     def _collect_call_trailing_rhss_8616(self,
         stmt: StructuredAstValue,
-        idx: int,
-        statements: list[StructuredAstValue],
-        rhs_values: list[StructuredAstValue],
-        consumed_indices: list[int],
-        limit: int,
+        idx: cython.longlong,
+        statements: object,
+        rhs_values: object,
+        consumed_indices: object,
+        limit: cython.longlong,
         wanted_count: StructuredAstValue,
         typed_probe_fact: StructuredAstValue,
         call_return_addr: StructuredAstValue,
@@ -16283,19 +17833,20 @@ class _CallsiteStackArgsMaterializer8616:
         rhs_values.extend(trailing_args)
         consumed_indices.extend(trailing_indices)
 
+    @cython.ccall
     def _collect_backtracked_stack_args(self,
-        statements: list[StructuredAstValue],
+        statements: object,
         *,
         wanted_count: int | None = None,
-        max_count: int = 4,
+        max_count: cython.longlong = 4,
         typed_probe_fact: TypedStackProbeReturnFact8616 | None = None,
-        allow_partial: bool = False,
+        allow_partial: cython.bint = False,
         call_return_addr: int | None = None,
     ) -> tuple[list[StructuredAstValue], list[StructuredAstValue]]:
 
         rhs_values: list[StructuredAstValue] = []
-        consumed_indices: list[int] = []
-        consumed_return_frame_indices: list[int] = []
+        consumed_indices: list[cython.longlong] = []
+        consumed_return_frame_indices: list[cython.longlong] = []
         skipped_carriers = 0
         skipped_value_assignments = 0
         value_skip_limit = 160 if isinstance(wanted_count, int) and wanted_count > 0 else 8
@@ -16318,29 +17869,30 @@ class _CallsiteStackArgsMaterializer8616:
             if stop:
                 break
             idx -= 1
-        if wanted_count is not None and len(rhs_values) != wanted_count:
+        if wanted_count is not None and operator.ne(len(rhs_values), wanted_count):
             if allow_partial and rhs_values:
                 return rhs_values, consumed_indices + consumed_return_frame_indices
             return [], []
         if len(rhs_values) > 1:
             self.stats.push_order_reversed_count += 1
         return rhs_values, consumed_indices + consumed_return_frame_indices
+    @cython.ccall
     def _collect_backtrack_step_8616(self,
         stmt: StructuredAstValue,
-        idx: int,
-        statements: list[StructuredAstValue],
-        rhs_values: list[StructuredAstValue],
-        consumed_indices: list[int],
-        consumed_return_frame_indices: list[int],
-        skipped_carriers: int,
-        skipped_value_assignments: int,
-        value_skip_limit: int,
-        max_count: int,
-        limit: int,
+        idx: cython.longlong,
+        statements: object,
+        rhs_values: object,
+        consumed_indices: object,
+        consumed_return_frame_indices: object,
+        skipped_carriers: cython.longlong,
+        skipped_value_assignments: cython.longlong,
+        value_skip_limit: cython.longlong,
+        max_count: cython.longlong,
+        limit: cython.longlong,
         wanted_count: StructuredAstValue,
-        typed_probe_fact: StructuredAstValue,
+        typed_probe_fact: object,
         call_return_addr: StructuredAstValue,
-    ) -> tuple[bool, int, int]:
+    ) -> tuple[cython.bint, cython.longlong, cython.longlong]:
         rhss: list[StructuredAstValue] = []
         rhs_sources: list[set[tuple[str, str | int]]] = []
         if typed_probe_fact is not None:
@@ -16388,15 +17940,18 @@ class _CallsiteStackArgsMaterializer8616:
         return (False, skipped_carriers, skipped_value_assignments)
 
 
+    @cython.ccall
     def _collect_backtracked_value_carrier_args(self,
-        statements: list[StructuredAstValue],
+        statements: object,
         *,
-        wanted_count: int,
+        wanted_count: cython.longlong,
     ) -> tuple[list[StructuredAstValue], list[StructuredAstValue]]:
+        placeholder_rhs: object
+        rhs: object
         if not isinstance(wanted_count, int) or wanted_count <= 0:
             return [], []
         rhs_values: list[StructuredAstValue] = []
-        consumed_indices: list[int] = []
+        consumed_indices: list[cython.longlong] = []
         idx = len(statements) - 1
         while idx >= 0 and len(rhs_values) < wanted_count:
             stmt = statements[idx]
@@ -16419,20 +17974,23 @@ class _CallsiteStackArgsMaterializer8616:
                 idx -= 1
                 continue
             break
-        if len(rhs_values) != wanted_count:
+        if operator.ne(len(rhs_values), wanted_count):
             return [], []
         return rhs_values, consumed_indices
 
-    def _node_is_or_contains_call_8616(self, node: StructuredAstValue, call: StructuredAstValue) -> bool:
+    def _node_is_or_contains_call_8616(self, node: StructuredAstValue, call: StructuredAstValue) -> cython.bint:
         """Whether node is or contains the given call expression."""
+        expr: object
         if node is call:
             return True
         expr = getattr(node, "expr", None)
         if expr is call:
             return True
-        return any(sub is call for sub in _iter_c_nodes_deep_8616(node))
+        return any(sub is call for sub in builtins.iter(_iter_c_nodes_deep_8616(node)))
+    @cython.ccall
     def _inline_arg_backtrack_step_8616(self, node: StructuredAstValue) -> tuple[StructuredAstValue | None, str]:
         """One backward inline-arg scan step: (rhs, consume|skip|stop)."""
+        rhs: object
         rhs = self._stack_store_rhs_from_statement(node)
         if rhs is None:
             rhs = self._outgoing_arg_placeholder_rhs_from_statement(node)
@@ -16443,21 +18001,25 @@ class _CallsiteStackArgsMaterializer8616:
                 return None, "skip"
             return None, "stop"
         return rhs, "consume"
-    def _inline_call_index_8616(self, sequence: list[StructuredAstValue], call: StructuredAstValue) -> int | None:
+    @cython.ccall
+    def _inline_call_index_8616(self, sequence: object, call: StructuredAstValue) -> int | None:
         """Index of the statement that is or contains ``call``, or None."""
+        idx: object
+        node: object
         for idx, node in enumerate(sequence):
             if self._node_is_or_contains_call_8616(node, call):
                 return idx
         return None
 
+    @cython.ccall
     def _backtrack_inline_arg_values_8616(self,
-        sequence: list[StructuredAstValue],
-        call_idx: int,
-        arg_count: int,
-    ) -> tuple[list[StructuredAstValue], list[int]]:
+        sequence: object,
+        call_idx: cython.longlong,
+        arg_count: cython.longlong,
+    ) -> tuple[list[StructuredAstValue], list[cython.longlong]]:
         """Walk backward from ``call_idx`` collecting consumed stack-store arg rhss."""
         rhs_values: list[StructuredAstValue] = []
-        consumed_indices: list[int] = []
+        consumed_indices: list[cython.longlong] = []
         scan = call_idx - 1
         skipped_carriers = 0
         while scan >= 0 and len(rhs_values) < arg_count:
@@ -16475,9 +18037,12 @@ class _CallsiteStackArgsMaterializer8616:
             scan -= 1
         return rhs_values, consumed_indices
 
+    @cython.ccall
     def _extract_inline_stack_store_args(self,
-        stmt: StructuredAstValue, call: StructuredAstValue, arg_count: int
-    ) -> tuple[StructuredAstValue, ...] | None:
+        stmt: StructuredAstValue, call: StructuredAstValue, arg_count: cython.longlong
+    ) -> object:
+        call_idx: object
+        nested_statements: object
         if not isinstance(arg_count, int) or arg_count <= 0:
             return None
         nested_statements = getattr(stmt, "statements", None)
@@ -16493,7 +18058,7 @@ class _CallsiteStackArgsMaterializer8616:
             return None
 
         rhs_values, consumed_indices = self._backtrack_inline_arg_values_8616(sequence, call_idx, arg_count)
-        if len(rhs_values) != arg_count:
+        if operator.ne(len(rhs_values), arg_count):
             return None
 
         self._delete_consumed_indices_8616(
@@ -16506,7 +18071,10 @@ class _CallsiteStackArgsMaterializer8616:
             self.stats.push_order_reversed_count += 1
         return tuple(rhs_values)
 
-    def _restore_protected_call_args_8616(self, block: StructuredAstValue) -> bool:
+    def _restore_protected_call_args_8616(self, block: StructuredAstValue) -> cython.bint:
+        protected: object
+        summary: object
+        node: object
         protected = getattr(self.codegen, "_inertia_protected_call_args_8616", None)
         if not isinstance(protected, ProtectedCallArgumentStore8616):
             return False
@@ -16531,9 +18099,9 @@ class _CallsiteStackArgsMaterializer8616:
                         call_name=semantic_call_name,
                         arg_index=idx,
                     )
-                    for idx, source in enumerate(ordered_sources)
+                    for idx, source in builtins.iter(enumerate(ordered_sources))
                 )
-                if direct_args and all(argument is not None for argument in direct_args):
+                if direct_args and all(argument is not None for argument in iter(direct_args)):
                     transaction = self._set_materialized_call_args(
                         node,
                         direct_args,
@@ -16550,13 +18118,17 @@ class _CallsiteStackArgsMaterializer8616:
                 restored = True
         return restored
 
+    @cython.ccall
     def _restore_protected_current_args_8616(self,
         node: StructuredAstValue,
-        summary: StructuredAstValue,
-        semantic_call_name: str,
-        current_args: list[StructuredAstValue],
+        summary: object,
+        semantic_call_name: object,
+        current_args: object,
         protected: StructuredAstValue,
-    ) -> bool:
+    ) -> cython.bint:
+        protected_entry: object
+        current_arg: object
+        idx: object
         updated = False
         for idx, current_arg in enumerate(tuple(current_args)):
             protected_entry = protected.get(node, idx)
@@ -16593,13 +18165,16 @@ class _CallsiteStackArgsMaterializer8616:
                 updated = True
         return updated
 
+    @cython.ccall
     def _protected_expected_arg_matches_8616(self,
         current_arg: StructuredAstValue,
         push_sources: StructuredAstValue,
-        source_idx: int,
-        idx: int,
-        semantic_call_name: str,
-    ) -> bool:
+        source_idx: cython.longlong,
+        idx: cython.longlong,
+        semantic_call_name: object,
+    ) -> cython.bint:
+        expected_arg: object
+        grouped_args: object
         expected_arg = None
         expected_widths = _known_helper_prototype_arg_widths_8616(self.project, semantic_call_name)
         arity_contract = _known_callee_arity_contract_8616(semantic_call_name)
@@ -16623,19 +18198,20 @@ class _CallsiteStackArgsMaterializer8616:
             )
         # Exact push-source evidence is stronger than the
         # readability score used for protected arg restore.
-        return expected_arg is not None and _call_arg_semantic_key_8616(
+        return expected_arg is not None and operator.eq(_call_arg_semantic_key_8616(
             current_arg
-        ) == _call_arg_semantic_key_8616(expected_arg)
+        ), _call_arg_semantic_key_8616(expected_arg))
 
     def _rewrite_block(self,
         block: StructuredAstValue,
         *,
-        inherited_stack_probe_seen: bool = False,
-        inherited_stack_probe_address_seen: bool = False,
+        inherited_stack_probe_seen: cython.bint = False,
+        inherited_stack_probe_address_seen: cython.bint = False,
         inherited_typed_stack_probe_fact: TypedStackProbeReturnFact8616 | None = None,
-        allow_setup_assignment_prune: bool,
-        depth: int = 0,
-    ) -> tuple[bool, bool, TypedStackProbeReturnFact8616 | None]:
+        allow_setup_assignment_prune: cython.bint,
+        depth: cython.longlong = 0,
+    ) -> object:
+        statements: object
         block_id = id(block)
         if block_id in self.rewritten_block_ids:
             self.codegen._inertia_callsite_duplicate_block_rewrite_refused_8616 = (
@@ -16669,26 +18245,28 @@ class _CallsiteStackArgsMaterializer8616:
                 depth=depth,
             )
 
+    @cython.ccall
     def _strict_apply_direct_args_8616(self,
         *,
         call: StructuredAstValue,
-        call_name: str | None,
+        call_name: object,
         consumed_return_call_indices: StructuredAstValue,
         direct_args: StructuredAstValue,
         direct_bindings: StructuredAstValue,
         logical_arg_widths_for_sources: StructuredAstValue,
-        new_statements: list[StructuredAstValue],
+        new_statements: object,
         ordered_push_sources: StructuredAstValue,
-        partial_direct_args: StructuredAstValue,
-        semantic_call_name: str | None,
+        partial_direct_args: object,
+        semantic_call_name: object,
         summary: StructuredAstValue,
-    ) -> bool:
+    ) -> cython.bint:
         """Install strict direct args when all or partially proven."""
+        normalized_args: object
         if partial_direct_args is not None:
             direct_args = list(partial_direct_args)
         preserve_return_register_indices = {
             idx
-            for idx, source in enumerate(ordered_push_sources)
+            for idx, source in builtins.iter(enumerate(ordered_push_sources))
             if isinstance(source, tuple)
             and len(source) >= 3
             and source[0] == "ret_reg"
@@ -16735,13 +18313,14 @@ class _CallsiteStackArgsMaterializer8616:
         return False
 
 
+    @cython.ccall
     def _strict_direct_args_from_unproven_sources_8616(self,
         *,
-        call_name: str | None,
+        call_name: object,
         logical_arg_widths_for_sources: StructuredAstValue,
-        new_statements: list[StructuredAstValue],
-        ordered_push_sources: list[StructuredAstValue],
-        semantic_call_name: str | None,
+        new_statements: object,
+        ordered_push_sources: object,
+        semantic_call_name: object,
     ) -> tuple[StructuredAstValue, StructuredAstValue]:
         """Collect direct args when push sources are not all proven."""
         consumed_direct_args, consumed_return_call_indices = (
@@ -16763,7 +18342,7 @@ class _CallsiteStackArgsMaterializer8616:
                     call_name=semantic_call_name or call_name,
                     arg_index=idx,
                 )
-                for idx, source in enumerate(ordered_push_sources)
+                for idx, source in builtins.iter(enumerate(ordered_push_sources))
             ]
         )
         return direct_args, consumed_return_call_indices
@@ -16771,16 +18350,20 @@ class _CallsiteStackArgsMaterializer8616:
     def _strict_remat_arm_0_8616(self,
         *,
         call: StructuredAstValue,
-        call_name: str | None,
-        has_instruction_proven_direct_push_sources: bool,
-        has_recent_stack_arg_store_evidence: bool,
+        call_name: object,
+        has_instruction_proven_direct_push_sources: cython.bint,
+        has_recent_stack_arg_store_evidence: cython.bint,
         logical_arg_widths_for_sources: StructuredAstValue,
         new_statements: StructuredAstValue,
         push_arg_sources: StructuredAstValue,
-        semantic_call_name: str | None,
+        semantic_call_name: object,
         summary: StructuredAstValue,
-    ) -> bool:
+    ) -> cython.bint:
         """Strict-rematerialization attempt arm 0."""
+        cvar: object
+        partial_direct_args: object
+        arg_index: object
+        source: object
         applied = False
         if has_recent_stack_arg_store_evidence and has_instruction_proven_direct_push_sources:
             self.stats.direct_push_override_recent_store_count += 1
@@ -16794,7 +18377,7 @@ class _CallsiteStackArgsMaterializer8616:
             and len(source) >= 2
             and source[0] == "bp"
             and isinstance(source[1], int)
-            for source in ordered_push_sources
+            for source in iter(ordered_push_sources)
         )
         if strict_push_sources:
             for arg_index, source in enumerate(ordered_push_sources):
@@ -16825,7 +18408,7 @@ class _CallsiteStackArgsMaterializer8616:
             call,
             direct_args,
         )
-        if all(arg is not None for arg in direct_args) or partial_direct_args is not None:
+        if all(arg is not None for arg in iter(direct_args)) or partial_direct_args is not None:
             applied = self._strict_apply_direct_args_8616(
                 call=call,
                 call_name=call_name,
@@ -16841,21 +18424,23 @@ class _CallsiteStackArgsMaterializer8616:
             ) or applied
         return applied
 
+    @cython.ccall
     def _strict_remat_arm_1_8616(self,
         *,
         call: StructuredAstValue,
-        call_name: str | None,
+        call_name: object,
         expected_arg_count: StructuredAstValue,
         fallback_arg_count: StructuredAstValue,
-        i: int,
+        i: cython.longlong,
         new_statements: StructuredAstValue,
-        semantic_call_name: str | None,
+        semantic_call_name: object,
         statements: StructuredAstValue,
-        summary: StructuredAstValue,
+        summary: object,
         summary_return_addr: StructuredAstValue,
         typed_stack_probe_fact: StructuredAstValue,
-    ) -> bool:
+    ) -> cython.bint:
         """Strict-rematerialization attempt arm 1."""
+        normalized_args: object
         applied = False
         expanded_rhs, consumed_indices = self._collect_backtracked_stack_args(
             new_statements,
@@ -16891,7 +18476,7 @@ class _CallsiteStackArgsMaterializer8616:
                     self._delete_consumed_indices_8616(
                         new_statements,
                         consumed_indices,
-                        live_consumers=(call, *statements[i + 1 :]),
+                        live_consumers=(call, ) + tuple(statements[i + 1 :]),
                     )
                 self._refresh_summary_arg_shape(call, summary)
                 applied = True
@@ -16899,20 +18484,22 @@ class _CallsiteStackArgsMaterializer8616:
                 self.changed = True
         return applied
 
+    @cython.ccall
     def _strict_remat_arm_2_8616(self,
         *,
         call: StructuredAstValue,
-        call_name: str | None,
+        call_name: object,
         expected_arg_count: StructuredAstValue,
-        i: int,
+        i: cython.longlong,
         new_statements: StructuredAstValue,
-        semantic_call_name: str | None,
+        semantic_call_name: object,
         statements: StructuredAstValue,
-        summary: StructuredAstValue,
+        summary: object,
         summary_return_addr: StructuredAstValue,
-        typed_stack_probe_fact: StructuredAstValue,
-    ) -> bool:
+        typed_stack_probe_fact: object,
+    ) -> cython.bint:
         """Strict-rematerialization attempt arm 2."""
+        normalized_args: object
         applied = False
         typed_rhs, consumed_indices = self._collect_backtracked_stack_args(
             new_statements,
@@ -16943,7 +18530,7 @@ class _CallsiteStackArgsMaterializer8616:
                     self._delete_consumed_indices_8616(
                         new_statements,
                         consumed_indices,
-                        live_consumers=(call, *statements[i + 1 :]),
+                        live_consumers=(call, ) + tuple(statements[i + 1 :]),
                     )
                 self._refresh_summary_arg_shape(call, summary)
                 applied = True
@@ -16954,14 +18541,15 @@ class _CallsiteStackArgsMaterializer8616:
     def _strict_remat_arm_3_8616(self,
         *,
         call: StructuredAstValue,
-        call_name: str | None,
+        call_name: object,
         logical_arg_widths_for_sources: StructuredAstValue,
         new_statements: StructuredAstValue,
         push_arg_sources: StructuredAstValue,
-        semantic_call_name: str | None,
+        semantic_call_name: object,
         summary: StructuredAstValue,
-    ) -> bool:
+    ) -> cython.bint:
         """Strict-rematerialization attempt arm 3."""
+        normalized_args: object
         applied = False
         ordered_sources = (
             list(reversed(push_arg_sources)) if len(push_arg_sources) > 1 else list(push_arg_sources)
@@ -16972,9 +18560,9 @@ class _CallsiteStackArgsMaterializer8616:
                 call_name=semantic_call_name or call_name,
                 arg_index=arg_index,
             )
-            for arg_index, source in enumerate(ordered_sources)
+            for arg_index, source in builtins.iter(enumerate(ordered_sources))
         ]
-        if all(arg is not None for arg in direct_args):
+        if all(arg is not None for arg in iter(direct_args)):
             normalized_args = self._normalize_materialized_call_args(
                 direct_args,
                 [-1] * len(direct_args),
@@ -17001,19 +18589,20 @@ class _CallsiteStackArgsMaterializer8616:
     def _strict_remat_arm_4_8616(self,
         *,
         call: StructuredAstValue,
-        call_name: str | None,
+        call_name: object,
         expected_arg_count: StructuredAstValue,
         expected_arg_widths: StructuredAstValue,
-        i: int,
+        i: cython.longlong,
         logical_arg_widths_for_sources: StructuredAstValue,
         new_statements: StructuredAstValue,
         push_arg_sources: StructuredAstValue,
-        semantic_call_name: str | None,
+        semantic_call_name: object,
         statements: StructuredAstValue,
-        summary: StructuredAstValue,
+        summary: object,
         summary_return_addr: StructuredAstValue,
-    ) -> bool:
+    ) -> cython.bint:
         """Strict-rematerialization attempt arm 4."""
+        normalized_args: object
         applied = False
         backtrack_wanted_count = expected_arg_count
         backtrack_push_sources = ()
@@ -17035,7 +18624,7 @@ class _CallsiteStackArgsMaterializer8616:
                 getattr(getattr(self.codegen, "cfunc", None), "addr", 0) or 0,
                 call_name,
                 expected_arg_count,
-                tuple(self._debug_expr_8616(rhs) for rhs in backtracked_rhs),
+                tuple(self._debug_expr_8616(rhs) for rhs in iter(backtracked_rhs)),
                 tuple(consumed_indices),
                 len(new_statements),
             )
@@ -17061,7 +18650,7 @@ class _CallsiteStackArgsMaterializer8616:
                     self._delete_consumed_indices_8616(
                         new_statements,
                         consumed_indices,
-                        live_consumers=(call, *statements[i + 1 :]),
+                        live_consumers=(call, ) + tuple(statements[i + 1 :]),
                     )
                 self._refresh_summary_arg_shape(call, summary)
                 applied = True
@@ -17069,18 +18658,21 @@ class _CallsiteStackArgsMaterializer8616:
                 self.changed = True
         return applied
 
+    @cython.ccall
     def _strict_remat_arm_5_8616(self,
         *,
         call: StructuredAstValue,
-        call_name: str | None,
+        call_name: object,
         expected_arg_count: StructuredAstValue,
-        i: int,
+        i: cython.longlong,
         new_statements: StructuredAstValue,
-        semantic_call_name: str | None,
+        semantic_call_name: object,
         stmt: StructuredAstValue,
         summary: StructuredAstValue,
-    ) -> bool:
+    ) -> cython.bint:
         """Strict-rematerialization attempt arm 5."""
+        inline_rhs: object
+        normalized_args: object
         applied = False
         inline_rhs = self._extract_inline_stack_store_args(stmt, call, expected_arg_count)
         normalized_args = (
@@ -17108,18 +18700,20 @@ class _CallsiteStackArgsMaterializer8616:
                 self.changed = True
         return applied
 
+    @cython.ccall
     def _strict_remat_arm_6_8616(self,
         *,
         call: StructuredAstValue,
-        call_name: str | None,
+        call_name: object,
         expected_arg_count: StructuredAstValue,
-        i: int,
+        i: cython.longlong,
         new_statements: StructuredAstValue,
-        semantic_call_name: str | None,
+        semantic_call_name: object,
         statements: StructuredAstValue,
-        summary: StructuredAstValue,
-    ) -> bool:
+        summary: object,
+    ) -> cython.bint:
         """Strict-rematerialization attempt arm 6."""
+        normalized_args: object
         applied = False
         carrier_rhs, consumed_indices = self._collect_backtracked_value_carrier_args(
             new_statements,
@@ -17144,7 +18738,7 @@ class _CallsiteStackArgsMaterializer8616:
                     self._delete_consumed_indices_8616(
                         new_statements,
                         consumed_indices,
-                        live_consumers=(call, *statements[i + 1 :]),
+                        live_consumers=(call, ) + tuple(statements[i + 1 :]),
                     )
                 self._refresh_summary_arg_shape(call, summary)
                 applied = True
@@ -17152,19 +18746,21 @@ class _CallsiteStackArgsMaterializer8616:
                 self.changed = True
         return applied
 
+    @cython.ccall
     def _strict_remat_arm_7_8616(self,
         *,
         call: StructuredAstValue,
-        call_name: str | None,
-        i: int,
+        call_name: object,
+        i: cython.longlong,
         new_statements: StructuredAstValue,
-        semantic_call_name: str | None,
+        semantic_call_name: object,
         statements: StructuredAstValue,
-        summary: StructuredAstValue,
+        summary: object,
         summary_return_addr: StructuredAstValue,
-        typed_stack_probe_fact: StructuredAstValue,
-    ) -> bool:
+        typed_stack_probe_fact: object,
+    ) -> cython.bint:
         """Strict-rematerialization attempt arm 7."""
+        normalized_args: object
         applied = False
         candidate_rhs, consumed_indices = self._collect_backtracked_stack_args(
             new_statements,
@@ -17195,7 +18791,7 @@ class _CallsiteStackArgsMaterializer8616:
                     self._delete_consumed_indices_8616(
                         new_statements,
                         consumed_indices,
-                        live_consumers=(call, *statements[i + 1 :]),
+                        live_consumers=(call, ) + tuple(statements[i + 1 :]),
                     )
                 self._refresh_summary_arg_shape(call, summary)
                 applied = True
@@ -17203,15 +18799,17 @@ class _CallsiteStackArgsMaterializer8616:
                 self.changed = True
         return applied
 
+    @cython.ccall
     def _strict_remat_arm_8_8616(self,
         *,
         call: StructuredAstValue,
-        call_name: str | None,
+        call_name: object,
         expected_arg_count: StructuredAstValue,
-        semantic_call_name: str | None,
+        semantic_call_name: object,
         summary: StructuredAstValue,
-    ) -> bool:
+    ) -> cython.bint:
         """Strict-rematerialization attempt arm 8."""
+        default_args: object
         applied = False
         resolved_call_name = semantic_call_name or call_name
         default_args = (
@@ -17219,7 +18817,7 @@ class _CallsiteStackArgsMaterializer8616:
             if isinstance(resolved_call_name, str)
             else None
         )
-        if default_args is not None and len(default_args) == expected_arg_count:
+        if default_args is not None and operator.eq(len(default_args), expected_arg_count):
             transaction = self._set_materialized_call_args(
                 call,
                 list(default_args),
@@ -17235,31 +18833,32 @@ class _CallsiteStackArgsMaterializer8616:
                 self.changed = True
         return applied
 
+    @cython.ccall
     def _strict_shape_remat_stmt_8616(self,
         *,
         call: StructuredAstValue,
-        call_name: str | None,
+        call_name: object,
         expected_arg_count: StructuredAstValue,
         expected_arg_widths: StructuredAstValue,
         fallback_arg_count: StructuredAstValue,
-        has_exact_arithmetic_push_sources: bool,
-        has_instruction_proven_direct_push_sources: bool,
-        has_physical_far_pointer_push_sources: bool,
-        has_recent_stack_arg_store_evidence: bool,
-        i: int,
-        is_stack_probe_helper: bool,
+        has_exact_arithmetic_push_sources: cython.bint,
+        has_instruction_proven_direct_push_sources: cython.bint,
+        has_physical_far_pointer_push_sources: cython.bint,
+        has_recent_stack_arg_store_evidence: cython.bint,
+        i: cython.longlong,
+        is_stack_probe_helper: cython.bint,
         logical_arg_widths_for_sources: StructuredAstValue,
-        new_statements: list[StructuredAstValue],
+        new_statements: object,
         push_arg_sources: StructuredAstValue,
-        semantic_call_name: str | None,
-        stack_probe_address_seen: bool,
-        stack_probe_seen: bool,
-        statements: list[StructuredAstValue],
+        semantic_call_name: object,
+        stack_probe_address_seen: cython.bint,
+        stack_probe_seen: cython.bint,
+        statements: object,
         stmt: StructuredAstValue,
         summary: StructuredAstValue,
         summary_return_addr: StructuredAstValue,
-        typed_stack_probe_fact: StructuredAstValue,
-        typed_stack_probe_materialization: bool,
+        typed_stack_probe_fact: object,
+        typed_stack_probe_materialization: cython.bint,
     ) -> int | None:
         """Apply strict push-source rematerialization for one call statement."""
         strict_arg_shape_applied = False
@@ -17408,19 +19007,20 @@ class _CallsiteStackArgsMaterializer8616:
 
     def _remat_fallback_args_8616(self,
         *,
-        call_name: str | None,
+        call_name: object,
         expected_arg_count: StructuredAstValue,
-        has_recent_stack_arg_store_evidence: bool,
+        has_recent_stack_arg_store_evidence: cython.bint,
         push_arg_sources: StructuredAstValue,
-        semantic_call_name: str | None,
-    ) -> tuple[StructuredAstValue, ...] | None:
+        semantic_call_name: object,
+    ) -> object:
         """Resolve exact-shape direct push sources or known default args."""
+        fallback_args: object
         if not (isinstance(expected_arg_count, int) and expected_arg_count > 0):
             return None
         fallback_args = None
         if (
             isinstance(push_arg_sources, tuple)
-            and len(push_arg_sources) == expected_arg_count
+            and operator.eq(len(push_arg_sources), expected_arg_count)
             and not has_recent_stack_arg_store_evidence
         ):
             ordered_push_sources = (
@@ -17432,9 +19032,9 @@ class _CallsiteStackArgsMaterializer8616:
                     call_name=semantic_call_name or call_name,
                     arg_index=idx,
                 )
-                for idx, source in enumerate(ordered_push_sources)
+                for idx, source in builtins.iter(enumerate(ordered_push_sources))
             ]
-            if all(arg is not None for arg in direct_args):
+            if all(arg is not None for arg in iter(direct_args)):
                 fallback_args = tuple(direct_args)
         if fallback_args is None:
             fallback_args = _known_default_args_for_missing_8616(
@@ -17442,19 +19042,20 @@ class _CallsiteStackArgsMaterializer8616:
             )
         return fallback_args
 
+    @cython.ccall
     def _remat_apply_fallback_args_8616(self,
         *,
         call: StructuredAstValue,
-        call_name: str | None,
+        call_name: object,
         expected_arg_count: StructuredAstValue,
-        fallback_args: StructuredAstValue,
-        i: int,
-        is_stack_probe_helper: bool,
-        new_statements: list[StructuredAstValue],
+        fallback_args: object,
+        i: cython.longlong,
+        is_stack_probe_helper: cython.bint,
+        new_statements: object,
         push_arg_sources: StructuredAstValue,
-        semantic_call_name: str | None,
-        stack_probe_seen: bool,
-        statements: list[StructuredAstValue],
+        semantic_call_name: object,
+        stack_probe_seen: cython.bint,
+        statements: object,
         stmt: StructuredAstValue,
         summary: StructuredAstValue,
         typed_stack_probe_fact: StructuredAstValue,
@@ -17463,7 +19064,7 @@ class _CallsiteStackArgsMaterializer8616:
         if not (
             fallback_args is not None
             and isinstance(expected_arg_count, int)
-            and len(fallback_args) == expected_arg_count
+            and operator.eq(len(fallback_args), expected_arg_count)
         ):
             return None
         transaction = self._set_materialized_call_args(
@@ -17487,25 +19088,26 @@ class _CallsiteStackArgsMaterializer8616:
         self._append_call_statement_with_relocated_writes_8616(call=call, i=i, is_stack_probe_helper=is_stack_probe_helper, new_statements=new_statements, push_arg_sources=push_arg_sources, stack_probe_seen=stack_probe_seen, statements=statements, stmt=stmt, summary=summary, typed_stack_probe_fact=typed_stack_probe_fact)
         return i + 1
 
+    @cython.ccall
     def _remat_apply_backtracked_args_8616(self,
         *,
         call: StructuredAstValue,
-        call_name: str | None,
-        consumed_indices: list[int],
-        i: int,
-        is_stack_probe_helper: bool,
-        new_statements: list[StructuredAstValue],
+        call_name: object,
+        consumed_indices: object,
+        i: cython.longlong,
+        is_stack_probe_helper: cython.bint,
+        new_statements: object,
         normalized_args: StructuredAstValue,
         push_arg_sources: StructuredAstValue,
-        semantic_call_name: str | None,
-        stack_probe_address_seen: bool,
-        stack_probe_seen: bool,
-        statements: list[StructuredAstValue],
+        semantic_call_name: object,
+        stack_probe_address_seen: cython.bint,
+        stack_probe_seen: cython.bint,
+        statements: object,
         stmt: StructuredAstValue,
-        summary: StructuredAstValue,
-        typed_stack_probe_fact: StructuredAstValue,
-        typed_stack_probe_materialization: bool,
-        want_arg_count: int,
+        summary: object,
+        typed_stack_probe_fact: object,
+        typed_stack_probe_materialization: cython.bint,
+        want_arg_count: cython.longlong,
     ) -> int | None:
         """Install backtracked stack args, or retry with inline store args."""
         if (
@@ -17526,7 +19128,7 @@ class _CallsiteStackArgsMaterializer8616:
                     self._delete_consumed_indices_8616(
                         new_statements,
                         consumed_indices,
-                        live_consumers=(call, *statements[i + 1 :]),
+                        live_consumers=(call, ) + tuple(statements[i + 1 :]),
                     )
                 self._refresh_summary_arg_shape(call, summary)
             if transaction.changed:
@@ -17562,29 +19164,30 @@ class _CallsiteStackArgsMaterializer8616:
                 self.changed = True
         return None
 
+    @cython.ccall
     def _remat_no_count_stmt_8616(self,
         *,
         arg_count: StructuredAstValue,
         call: StructuredAstValue,
-        call_name: str | None,
+        call_name: object,
         expected_arg_count: StructuredAstValue,
         fallback_arg_count: StructuredAstValue,
-        has_recent_stack_arg_store_evidence: bool,
-        i: int,
-        is_stack_probe_helper: bool,
+        has_recent_stack_arg_store_evidence: cython.bint,
+        i: cython.longlong,
+        is_stack_probe_helper: cython.bint,
         known_arg_count: StructuredAstValue,
-        new_statements: list[StructuredAstValue],
+        new_statements: object,
         prototype_arg_count: StructuredAstValue,
         push_arg_sources: StructuredAstValue,
-        semantic_call_name: str | None,
-        stack_probe_address_seen: bool,
-        stack_probe_seen: bool,
-        statements: list[StructuredAstValue],
+        semantic_call_name: object,
+        stack_probe_address_seen: cython.bint,
+        stack_probe_seen: cython.bint,
+        statements: object,
         stmt: StructuredAstValue,
         summary: StructuredAstValue,
         summary_return_addr: StructuredAstValue,
         typed_stack_probe_fact: StructuredAstValue,
-        typed_stack_probe_materialization: bool,
+        typed_stack_probe_materialization: cython.bint,
     ) -> int | None:
         """Fallback rematerialization when no arg-count contract applies.
 
@@ -17592,6 +19195,7 @@ class _CallsiteStackArgsMaterializer8616:
         consumed (appended to ``new_statements``); ``None`` lets the caller run
         its normal post-call tail.
         """
+        consumed_i: object
         fallback_args = self._remat_fallback_args_8616(
             call_name=call_name,
             expected_arg_count=expected_arg_count,
@@ -17659,18 +19263,19 @@ class _CallsiteStackArgsMaterializer8616:
             want_arg_count=want_arg_count,
         )
 
+    @cython.ccall
     def _rewrite_probe_helper_stmt_8616(self,
         *,
         stmt: StructuredAstValue,
-        call: StructuredAstValue,
-        summary: StructuredAstValue,
-        statements: list[StructuredAstValue],
-        i: int,
-        is_stack_probe_helper: bool,
-        stack_probe_seen: bool,
-        stack_probe_address_seen: bool,
-        typed_stack_probe_fact: StructuredAstValue,
-    ) -> tuple[bool, bool, StructuredAstValue, bool]:
+        call: object,
+        summary: object,
+        statements: object,
+        i: cython.longlong,
+        is_stack_probe_helper: cython.bint,
+        stack_probe_seen: cython.bint,
+        stack_probe_address_seen: cython.bint,
+        typed_stack_probe_fact: object,
+    ) -> tuple[cython.bint, cython.bint, StructuredAstValue, cython.bint]:
         """Process one stack-probe helper statement.
 
         Returns ``(stack_probe_seen, stack_probe_address_seen, typed_fact,
@@ -17718,7 +19323,7 @@ class _CallsiteStackArgsMaterializer8616:
     def _resolve_call_arity_evidence_8616(self,
         *,
         arg_count: StructuredAstValue,
-        call: StructuredAstValue,
+        call: object,
         call_name: StructuredAstValue,
         effective_prototype_arg_widths: StructuredAstValue,
         is_stack_probe_helper: StructuredAstValue,
@@ -17728,12 +19333,14 @@ class _CallsiteStackArgsMaterializer8616:
         semantic_call_name: StructuredAstValue,
         stack_cleanup: StructuredAstValue,
         stack_probe_seen: StructuredAstValue,
-        summary: StructuredAstValue,
+        summary: object,
         summary_arg_count: StructuredAstValue,
-        summary_logical_arg_widths: StructuredAstValue,
-        typed_stack_probe_fact: StructuredAstValue,
+        summary_logical_arg_widths: object,
+        typed_stack_probe_fact: object,
     ) -> _CallArityEvidence8616:
         """Resolve expected arg count/widths and rematerialization verdict."""
+        caller_stack_shape_evidence: object
+        expected_arg_widths: object
         typed_stack_probe_materialization = (
             typed_stack_probe_fact is not None and stack_probe_seen and not is_stack_probe_helper
         )
@@ -17771,7 +19378,7 @@ class _CallsiteStackArgsMaterializer8616:
                 and source_width % arity_contract.count == 0
                 and (
                     expected_arg_widths is None
-                    or source_width != sum(max(2, int(width)) for width in expected_arg_widths)
+                    or operator.ne(source_width, sum(max(2, int(width)) for width in iter(expected_arg_widths)))
                 )
             ):
                 expected_arg_widths = (source_width // arity_contract.count,) * arity_contract.count
@@ -17795,7 +19402,7 @@ class _CallsiteStackArgsMaterializer8616:
         accounted_target_prototype = (
             expected_arg_widths is not None
             and isinstance(prototype_arg_count, int)
-            and prototype_arg_count == len(expected_arg_widths)
+            and operator.eq(prototype_arg_count, len(expected_arg_widths))
             and self._prototype_widths_account_for_push_sources_8616(expected_arg_widths, push_arg_sources)
         )
         logical_arg_widths_for_sources = (
@@ -17832,10 +19439,10 @@ class _CallsiteStackArgsMaterializer8616:
             isinstance(expected_arg_count, int)
             and expected_arg_count > 0
             and isinstance(push_arg_sources, tuple)
-            and len(push_arg_sources) == expected_arg_count
+            and operator.eq(len(push_arg_sources), expected_arg_count)
             and all(
                 isinstance(source, tuple) and len(source) >= 2 and source[0] == "bp" and isinstance(source[1], int)
-                for source in push_arg_sources
+                for source in iter(push_arg_sources)
             )
         )
         if (
@@ -17865,6 +19472,7 @@ class _CallsiteStackArgsMaterializer8616:
             rematerialize_call_args=rematerialize_call_args,
         )
 
+    @cython.ccall
     def _single_bp_direct_arg_stmt_8616(self,
         *,
         call: StructuredAstValue,
@@ -17885,6 +19493,7 @@ class _CallsiteStackArgsMaterializer8616:
 
         Returns the advanced statement index when consumed, else ``None``.
         """
+        direct_stack_arg: object
         direct_stack_arg = self._direct_expr_from_push_source_8616(
             push_arg_sources[0],
             call_name=semantic_call_name or call_name,
@@ -17926,7 +19535,7 @@ class _CallsiteStackArgsMaterializer8616:
     def _rematerialize_call_stmt_8616(self,
         *,
         arg_count: StructuredAstValue,
-        call: StructuredAstValue,
+        call: object,
         call_name: StructuredAstValue,
         effective_prototype_arg_widths: StructuredAstValue,
         i: StructuredAstValue,
@@ -17943,16 +19552,18 @@ class _CallsiteStackArgsMaterializer8616:
         stack_probe_seen: StructuredAstValue,
         statements: StructuredAstValue,
         stmt: StructuredAstValue,
-        summary: StructuredAstValue,
+        summary: object,
         summary_arg_count: StructuredAstValue,
         summary_logical_arg_widths: StructuredAstValue,
         summary_return_addr: StructuredAstValue,
         typed_stack_probe_fact: StructuredAstValue,
-    ) -> int:
+    ) -> cython.longlong:
         """Run evidence resolution and rematerialization for one call stmt.
 
         Returns the advanced statement index.
         """
+        remat_i: object
+        single_i: object
         ev = self._resolve_call_arity_evidence_8616(
             arg_count=arg_count,
             call=call,
@@ -18001,7 +19612,7 @@ class _CallsiteStackArgsMaterializer8616:
                 rematerialize_call_args,
                 push_arg_sources,
                 _boundary_tuple_8616(
-                    self._debug_expr_8616(arg) for arg in _boundary_tuple_8616(getattr(call, "args", ()) or ())
+                    self._debug_expr_8616(arg) for arg in builtins.iter(_boundary_tuple_8616(getattr(call, "args", ()) or ()))
                 ),
             )
         # When a stack-probe helper was seen but its segment space is not SS
@@ -18129,7 +19740,7 @@ class _CallsiteStackArgsMaterializer8616:
 
     def _collect_call_evidence_flags_8616(self,
         *,
-        call: StructuredAstValue,
+        call: object,
         call_name: StructuredAstValue,
         expected_arg_count: StructuredAstValue,
         expected_arg_widths: StructuredAstValue,
@@ -18141,8 +19752,8 @@ class _CallsiteStackArgsMaterializer8616:
         semantic_call_name: StructuredAstValue,
         stack_probe_address_seen: StructuredAstValue,
         stack_probe_seen: StructuredAstValue,
-        summary: StructuredAstValue,
-        typed_stack_probe_fact: StructuredAstValue,
+        summary: object,
+        typed_stack_probe_fact: object,
         typed_stack_probe_materialization: StructuredAstValue,
     ) -> _CallEvidenceFlags8616:
         """Collect derived push-source/store evidence flags for one call."""
@@ -18153,7 +19764,7 @@ class _CallsiteStackArgsMaterializer8616:
             call is not None
             and isinstance(expected_arg_count, int)
             and expected_arg_count >= 0
-            and len(_boundary_tuple_8616(getattr(call, "args", ()) or ())) != expected_arg_count
+            and operator.ne(len(_boundary_tuple_8616(getattr(call, "args", ()) or ())), expected_arg_count)
         ):
             rematerialize_call_args = True
         if typed_stack_probe_materialization:
@@ -18163,13 +19774,13 @@ class _CallsiteStackArgsMaterializer8616:
             and expected_arg_count > 0
             and isinstance(push_arg_sources, tuple)
             and (
-                len(push_arg_sources) == expected_arg_count
+                operator.eq(len(push_arg_sources), expected_arg_count)
                 or self._prototype_widths_account_for_push_sources_8616(expected_arg_widths, push_arg_sources)
             )
-            and any(source is not None for source in push_arg_sources)
+            and any(source is not None for source in iter(push_arg_sources))
         )
         has_complete_exact_direct_push_sources = has_exact_direct_push_sources and all(
-            source is not None for source in push_arg_sources
+            source is not None for source in iter(push_arg_sources)
         )
         push_arg_instruction_addrs = (
             _boundary_tuple_8616(summary.push_arg_instruction_addrs) if summary is not None else ()
@@ -18201,7 +19812,7 @@ class _CallsiteStackArgsMaterializer8616:
                 expected_arg_count,
                 rematerialize_call_args,
                 _boundary_tuple_8616(
-                    self._debug_expr_8616(arg) for arg in _boundary_tuple_8616(getattr(call, "args", ()) or ())
+                    self._debug_expr_8616(arg) for arg in builtins.iter(_boundary_tuple_8616(getattr(call, "args", ()) or ()))
                 ),
             )
 
@@ -18228,7 +19839,7 @@ class _CallsiteStackArgsMaterializer8616:
                 )
                 if (
                     isinstance(push_arg_sources, tuple)
-                    and any(self._has_arithmetic_push_source(source) for source in push_arg_sources)
+                    and any(self._has_arithmetic_push_source(source) for source in iter(push_arg_sources))
                 )
                 else rematerialize_call_args
             )
@@ -18247,14 +19858,14 @@ class _CallsiteStackArgsMaterializer8616:
             and any(
                 isinstance(source, tuple)
                 and len(source) >= 1
-                and source[0] == CallsitePushSourceKind8616.SEGMENT.value
-                for source in push_arg_sources
+                and operator.eq(source[0], CallsitePushSourceKind8616.SEGMENT.value)
+                for source in iter(push_arg_sources)
             )
         )
         has_exact_arithmetic_push_sources = (
             has_exact_direct_push_sources
             and isinstance(push_arg_sources, tuple)
-            and any(self._has_simple_bp_arithmetic_push_source(source) for source in push_arg_sources)
+            and any(self._has_simple_bp_arithmetic_push_source(source) for source in iter(push_arg_sources))
         )
         return _CallEvidenceFlags8616(
             probe_seen_without_ss_address=probe_seen_without_ss_address,
@@ -18267,8 +19878,15 @@ class _CallsiteStackArgsMaterializer8616:
             rematerialize_call_args=rematerialize_call_args,
         )
 
-    def _resolve_call_stmt_facts_8616(self, call: StructuredAstValue) -> _CallStmtFacts8616:
+    @cython.ccall
+    def _resolve_call_stmt_facts_8616(self, call: object) -> _CallStmtFacts8616:
         """Resolve summary, names, prototype widths, and probe-helper verdict."""
+        effective_prototype_arg_widths: object
+        known_arg_count: object
+        known_prototype_arg_widths: object
+        physical_logical_widths: object
+        summary: object
+        summary_logical_arg_widths: object
         summary = self.summary_map.get(id(call)) if call is not None else None
         arg_count = summary.arg_count if summary is not None else None
         summary_arg_count = arg_count if isinstance(arg_count, int) else None
@@ -18290,7 +19908,7 @@ class _CallsiteStackArgsMaterializer8616:
                 known_prototype_arg_widths,
                 _boundary_tuple_8616(summary.push_arg_sources or ()),
             )
-            and summary.logical_arg_widths != known_prototype_arg_widths
+            and operator.ne(summary.logical_arg_widths, known_prototype_arg_widths)
         ):
             summary = replace(summary, logical_arg_widths=known_prototype_arg_widths)
             self.summary_map[id(call)] = summary
@@ -18351,15 +19969,18 @@ class _CallsiteStackArgsMaterializer8616:
             push_arg_sources=push_arg_sources,
         )
 
+    @cython.ccall
     def _rewrite_child_blocks_8616(self,
         block: StructuredAstValue,
-        stack_probe_seen: bool,
-        stack_probe_address_seen: bool,
+        stack_probe_seen: cython.bint,
+        stack_probe_address_seen: cython.bint,
         typed_stack_probe_fact: StructuredAstValue,
-        allow_setup_assignment_prune: bool,
-        depth: int,
-    ) -> tuple[bool, bool, StructuredAstValue]:
+        allow_setup_assignment_prune: cython.bint,
+        depth: cython.longlong,
+    ) -> tuple[cython.bint, cython.bint, StructuredAstValue]:
         """Recurse into nested blocks, propagating stack-probe facts."""
+        nested_statements: object
+        stmt: object
         for stmt in getattr(block, "statements", ()) or ():
             nested_statements = getattr(stmt, "statements", None)
             if isinstance(nested_statements, (list, tuple)):
@@ -18392,15 +20013,17 @@ class _CallsiteStackArgsMaterializer8616:
             )
         return stack_probe_seen, stack_probe_address_seen, typed_stack_probe_fact
 
+    @cython.ccall
     def _rewrite_child_merge_8616(self,
         child: StructuredAstValue,
-        allow_setup_assignment_prune: bool,
-        depth: int,
-        stack_probe_seen: bool,
-        stack_probe_address_seen: bool,
+        allow_setup_assignment_prune: cython.bint,
+        depth: cython.longlong,
+        stack_probe_seen: cython.bint,
+        stack_probe_address_seen: cython.bint,
         typed_stack_probe_fact: StructuredAstValue,
-    ) -> tuple[bool, bool, StructuredAstValue]:
+    ) -> tuple[cython.bint, cython.bint, StructuredAstValue]:
         """Rewrite one child block and merge its probe facts."""
+        child_fact: object
         (child_seen, child_addr_seen, child_fact) = self._rewrite_block(
             child,
             inherited_stack_probe_seen=stack_probe_seen,
@@ -18415,14 +20038,18 @@ class _CallsiteStackArgsMaterializer8616:
             typed_stack_probe_fact = child_fact
         return stack_probe_seen, stack_probe_address_seen, typed_stack_probe_fact
 
+    @cython.ccall
     def _rewrite_switch_children_8616(self,
         stmt: StructuredAstValue,
-        stack_probe_seen: bool,
-        stack_probe_address_seen: bool,
+        stack_probe_seen: cython.bint,
+        stack_probe_address_seen: cython.bint,
         typed_stack_probe_fact: StructuredAstValue,
-        depth: int,
-    ) -> tuple[bool, bool, StructuredAstValue]:
+        depth: cython.longlong,
+    ) -> tuple[cython.bint, cython.bint, StructuredAstValue]:
         """Rewrite CSwitchCase case/default bodies, merging probe facts."""
+        default_body: object
+        _case_value: object
+        case_body: object
         for _case_value, case_body in getattr(stmt, "cases", ()) or ():
             if isinstance(getattr(case_body, "statements", None), (list, tuple)):
                 (stack_probe_seen, stack_probe_address_seen, typed_stack_probe_fact) = (
@@ -18439,14 +20066,18 @@ class _CallsiteStackArgsMaterializer8616:
             )
         return stack_probe_seen, stack_probe_address_seen, typed_stack_probe_fact
 
+    @cython.ccall
     def _rewrite_deep_children_8616(self,
         stmt: StructuredAstValue,
-        stack_probe_seen: bool,
-        stack_probe_address_seen: bool,
+        stack_probe_seen: cython.bint,
+        stack_probe_address_seen: cython.bint,
         typed_stack_probe_fact: StructuredAstValue,
-        depth: int,
+        depth: cython.longlong,
     ) -> None:
         """Rewrite nested body/else/branch children without merging facts."""
+        else_node: object
+        nested: object
+        pair: object
         nested = getattr(stmt, "body", None)
         if isinstance(getattr(nested, "statements", None), (list, tuple)):
             self._rewrite_block(
@@ -18482,17 +20113,19 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _rewrite_stmt_pre_gate_8616(self,
         stmt: StructuredAstValue,
-        stack_probe_seen: bool,
-        new_statements: list[StructuredAstValue],
-    ) -> tuple[StructuredAstValue, bool]:
+        stack_probe_seen: cython.bint,
+        new_statements: object,
+    ) -> tuple[StructuredAstValue, cython.bint]:
         """Early per-statement dispatch.
 
         Returns ``(call, True)`` when the statement is a call that should
         continue through materialization; ``(call, False)`` when it was
         already consumed or appended verbatim.
         """
+        call: object
         if id(stmt) in self.consumed_stale_return_alias_statement_ids:
             self.changed = True
             return None, False
@@ -18520,19 +20153,20 @@ class _CallsiteStackArgsMaterializer8616:
 
     def _rewrite_block_body(self,
         block: StructuredAstValue,
-        statements: list[StructuredAstValue],
+        statements: object,
         *,
-        inherited_stack_probe_seen: bool,
-        inherited_stack_probe_address_seen: bool,
+        inherited_stack_probe_seen: cython.bint,
+        inherited_stack_probe_address_seen: cython.bint,
         inherited_typed_stack_probe_fact: TypedStackProbeReturnFact8616 | None,
-        allow_setup_assignment_prune: bool,
-        depth: int,
-    ) -> tuple[bool, bool, TypedStackProbeReturnFact8616 | None]:
+        allow_setup_assignment_prune: cython.bint,
+        depth: cython.longlong,
+    ) -> tuple[cython.bint, cython.bint, TypedStackProbeReturnFact8616 | None]:
+        typed_stack_probe_fact: object
         new_statements: list[StructuredAstValue] = []
         i = 0
         typed_stack_probe_fact = inherited_typed_stack_probe_fact or self.function_scope_typed_stack_probe_fact
         stack_probe_seen = inherited_stack_probe_seen or any(
-            summary.stack_probe_helper for summary in self.summary_map.values()
+            summary.stack_probe_helper for summary in builtins.iter(self.summary_map.values())
         )
         stack_probe_address_seen = inherited_stack_probe_address_seen or (
             typed_stack_probe_fact is not None and typed_stack_probe_fact.segment_space == "ss"
@@ -19580,7 +21214,8 @@ class _CallsiteStackArgsMaterializer8616:
         )
         return stack_probe_seen, stack_probe_address_seen, typed_stack_probe_fact
 
-    def _debug_dirty_refuse_8616(self, call: StructuredAstValue, reason: str) -> int:
+    @cython.ccall
+    def _debug_dirty_refuse_8616(self, call: StructuredAstValue, reason: object) -> cython.longlong:
         """Log and return the refusal count for dirty-setup consumption."""
         if os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"):
             log.warning(
@@ -19590,11 +21225,12 @@ class _CallsiteStackArgsMaterializer8616:
                 reason,
             )
         return 0
+    @cython.ccall
     def _debug_dirty_stop_8616(
         self,
         call: StructuredAstValue,
         callsite_addr: StructuredAstValue,
-        reason: str,
+        reason: object,
         candidate: StructuredAstValue,
         lhs: StructuredAstValue = None,
         rhs: StructuredAstValue = None,
@@ -19614,12 +21250,16 @@ class _CallsiteStackArgsMaterializer8616:
                 self._debug_expr_8616(lhs),
                 self._debug_expr_8616(rhs),
             )
+    @cython.ccall
     def _dirty_setup_candidate_reason_8616(
         self,
         candidate: StructuredAstValue,
-        callsite_addr: int,
-    ) -> tuple[str, StructuredAstValue, StructuredAstValue, StructuredAstValue, StructuredAstValue] | None:
+        callsite_addr: cython.longlong,
+    ) -> object:
         """Return (reason, candidate, lhs, rhs, ins_addr) when the candidate cannot be consumed."""
+        assignment: object
+        lhs: object
+        rhs: object
         assignment = self._top_level_assignment_node_8616(candidate)
         if assignment is None:
             return ("not-pure-assignment", candidate, None, None, None)
@@ -19643,9 +21283,11 @@ class _CallsiteStackArgsMaterializer8616:
         if not self._rhs_is_safe_to_relocate_after_call_8616(rhs):
             return ("impure-rhs", candidate, lhs, rhs, ins_addr)
         return None
+    @cython.ccall
     def _pop_consumed_callsite_dirty_setup_assignments_8616(self,
-        call: StructuredAstValue, summary: StructuredAstValue, push_sources: tuple[StructuredAstValue, ...]
-   , *, new_statements: StructuredAstValue) -> int:
+        call: object, summary: object, push_sources: object
+   , *, new_statements: StructuredAstValue) -> cython.longlong:
+        refusal: object
 
 
 
@@ -19713,22 +21355,27 @@ class _CallsiteStackArgsMaterializer8616:
             )
         return consumed
 
-    def _push_sources_include_far_pointer_parts_8616(self, push_sources: tuple[StructuredAstValue, ...]) -> bool:
+    def _push_sources_include_far_pointer_parts_8616(self, push_sources: object) -> cython.bint:
 
         if not isinstance(push_sources, tuple) or len(push_sources) < 2:
             return False
         has_segment = any(
             isinstance(source, tuple)
             and len(source) >= 2
-            and source[0] == CallsitePushSourceKind8616.SEGMENT.value
-            for source in push_sources
+            and operator.eq(source[0], CallsitePushSourceKind8616.SEGMENT.value)
+            for source in iter(push_sources)
         )
-        return has_segment and any(self._is_far_pointer_offset_source_8616(source) for source in push_sources)
+        return has_segment and any(self._is_far_pointer_offset_source_8616(source) for source in iter(push_sources))
 
     def _is_scalar_global_high_byte_store_remnant_8616(self,
-        stmt: StructuredAstValue, push_sources: tuple[StructuredAstValue, ...], call_node: StructuredAstValue
-    ) -> bool:
-        def _debug_scalar_refuse(reason: str, *, source_offset: int | None = None) -> bool:
+        stmt: StructuredAstValue, push_sources: object, call_node: StructuredAstValue
+    ) -> cython.bint:
+        assignment: object
+        lhs: object
+        rhs: object
+        source_offset: object
+        def _debug_scalar_refuse(reason: object, *, source_offset: int | None = None) -> cython.bint:
+            assignment: object
             if os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"):
                 assignment = self._top_level_assignment_node_8616(stmt)
                 lhs, rhs = self._assignment_lhs_rhs(assignment) if assignment is not None else (None, None)
@@ -19739,10 +21386,10 @@ class _CallsiteStackArgsMaterializer8616:
                     _call_node_name_8616(call_node),
                     reason,
                     source_offset,
-                    tuple(sorted(self._global_word_push_source_offsets_8616(push_sources))),
+                    tuple(sorted(tuple(self._global_word_push_source_offsets_8616(push_sources)))),
                     _boundary_tuple_8616(
                         self._debug_expr_8616(arg)
-                        for arg in _boundary_tuple_8616(getattr(call_node, "args", ()) or ())
+                        for arg in builtins.iter(_boundary_tuple_8616(getattr(call_node, "args", ()) or ()))
                     ),
                     self._debug_node_shape_8616(stmt),
                     self._debug_expr_8616(lhs),
@@ -19778,14 +21425,15 @@ class _CallsiteStackArgsMaterializer8616:
             )
         return True
 
+    @cython.ccall
     def _scalar_global_remnant_step_8616(self,
         candidate: StructuredAstValue,
-        scan: int,
-        push_sources: tuple[StructuredAstValue, ...],
+        scan: cython.longlong,
+        push_sources: object,
         call: StructuredAstValue,
-        high_byte_store_count: int,
-        removable_indices: list[int],
-        pending_carrier_indices: list[int],
+        high_byte_store_count: cython.longlong,
+        removable_indices: object,
+        pending_carrier_indices: object,
     ) -> int | None:
         """Record ``scan`` for removal and return the high-byte count delta, or ``None`` to stop."""
         if self._is_scalar_global_high_byte_store_remnant_8616(candidate, push_sources, call):
@@ -19809,8 +21457,10 @@ class _CallsiteStackArgsMaterializer8616:
         return None
 
     def _pop_pre_call_scalar_global_high_byte_remnants_8616(self,
-        call: StructuredAstValue, summary: StructuredAstValue, push_sources: tuple[StructuredAstValue, ...]
-   , *, new_statements: StructuredAstValue) -> int:
+        call: object, summary: object, push_sources: object
+   , *, new_statements: StructuredAstValue) -> cython.longlong:
+        step: object
+        idx: object
         if call is None or summary is None or bool(summary.stack_probe_helper):
             return 0
         if not _boundary_tuple_8616(getattr(call, "args", ()) or ()):
@@ -19821,8 +21471,8 @@ class _CallsiteStackArgsMaterializer8616:
             return 0
 
         scan = len(new_statements) - 1
-        removable_indices: list[int] = []
-        pending_carrier_indices: list[int] = []
+        removable_indices: list[cython.longlong] = []
+        pending_carrier_indices: list[cython.longlong] = []
         high_byte_store_count = 0
         while scan >= 0 and len(removable_indices) + len(pending_carrier_indices) < 6:
             step = self._scalar_global_remnant_step_8616(
@@ -19840,8 +21490,8 @@ class _CallsiteStackArgsMaterializer8616:
                     "push_offsets=%r suffix=%r",
                     getattr(getattr(self.codegen, "cfunc", None), "addr", 0) or 0,
                     _call_node_name_8616(call),
-                    tuple(sorted(self._global_word_push_source_offsets_8616(push_sources))),
-                    tuple(self._debug_node_shape_8616(stmt) for stmt in new_statements[-4:]),
+                    tuple(sorted(tuple(self._global_word_push_source_offsets_8616(push_sources)))),
+                    tuple(self._debug_node_shape_8616(stmt) for stmt in iter(new_statements[-4:])),
                 )
             return 0
         for idx in sorted(removable_indices, reverse=True):
@@ -19856,12 +21506,14 @@ class _CallsiteStackArgsMaterializer8616:
         ) + len(removable_indices)
         return len(removable_indices)
 
+    @cython.ccall
     def _farptr_store_debug_refuse_8616(self,
         call: StructuredAstValue,
         stmt: StructuredAstValue,
-        reason: str,
-    ) -> str | None:
+        reason: object,
+    ) -> object:
         """Log a far-pointer byte-store remnant refusal."""
+        assignment: object
         if os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"):
             assignment = self._top_level_assignment_node_8616(stmt)
             lhs, rhs = self._assignment_lhs_rhs(assignment) if assignment is not None else (None, None)
@@ -19876,9 +21528,14 @@ class _CallsiteStackArgsMaterializer8616:
             )
         return None
 
+    @cython.ccall
     def _far_pointer_byte_store_remnant_kind_8616(self,
-        stmt: StructuredAstValue, push_sources: tuple[StructuredAstValue, ...]
-   , *, call: StructuredAstValue) -> str | None:
+        stmt: StructuredAstValue, push_sources: object
+   , *, call: StructuredAstValue) -> object:
+        assignment: object
+        lhs: object
+        rhs: object
+        shift_value: object
         if not self._push_sources_include_far_pointer_parts_8616(push_sources):
             return self._farptr_store_debug_refuse_8616(call, stmt, "missing-far-pointer-sources-or-call")
         assignment = self._top_level_assignment_node_8616(stmt)
@@ -19910,18 +21567,24 @@ class _CallsiteStackArgsMaterializer8616:
             return self._farptr_store_debug_refuse_8616(call, stmt, "unsafe-source")
         return byte_kind
 
+    @cython.ccall
     def _is_far_pointer_high_byte_store_remnant_8616(self,
-        stmt: StructuredAstValue, push_sources: tuple[StructuredAstValue, ...]
-   , *, call: StructuredAstValue) -> bool:
+        stmt: StructuredAstValue, push_sources: object
+   , *, call: StructuredAstValue) -> cython.bint:
         return self._far_pointer_byte_store_remnant_kind_8616(stmt, push_sources, call=call) == "high"
 
+    @cython.ccall
     def _is_far_pointer_low_byte_store_remnant_8616(self,
-        stmt: StructuredAstValue, push_sources: tuple[StructuredAstValue, ...]
-   , *, call: StructuredAstValue) -> bool:
+        stmt: StructuredAstValue, push_sources: object
+   , *, call: StructuredAstValue) -> cython.bint:
         return self._far_pointer_byte_store_remnant_kind_8616(stmt, push_sources, call=call) == "low"
 
-    def _is_far_pointer_passthrough_suffix_assignment_8616(self, stmt: StructuredAstValue, *, call: StructuredAstValue) -> bool:
-        def _debug_passthrough_refuse(reason: str) -> bool:
+    def _is_far_pointer_passthrough_suffix_assignment_8616(self, stmt: StructuredAstValue, *, call: StructuredAstValue) -> cython.bint:
+        assignment: object
+        lhs: object
+        rhs: object
+        def _debug_passthrough_refuse(reason: object) -> cython.bint:
+            assignment: object
             if os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"):
                 assignment = self._top_level_assignment_node_8616(stmt)
                 lhs, rhs = self._assignment_lhs_rhs(assignment) if assignment is not None else (None, None)
@@ -19954,9 +21617,10 @@ class _CallsiteStackArgsMaterializer8616:
         return True
 
     def _pop_pre_call_far_pointer_high_byte_remnants_8616(self,
-        call: StructuredAstValue, summary: StructuredAstValue, push_sources: tuple[StructuredAstValue, ...]
-   , *, new_statements: StructuredAstValue) -> int:
-        def _debug_farptr_refuse(reason: str) -> int:
+        call: object, summary: object, push_sources: object
+   , *, new_statements: StructuredAstValue) -> cython.longlong:
+        idx: object
+        def _debug_farptr_refuse(reason: object) -> cython.longlong:
             if os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"):
                 log.warning(
                     "[call-farptr-high-byte-remnant] refuse function=%#x target=%s reason=%s",
@@ -19997,12 +21661,13 @@ class _CallsiteStackArgsMaterializer8616:
             )
         return len(removable_indices)
 
+    @cython.ccall
     def _non_exact_push_candidate_ok_8616(self,
         lhs: StructuredAstValue,
-        lhs_offset: int,
-        source_offsets: set[int],
+        lhs_offset: cython.longlong,
+        source_offsets: object,
         call: StructuredAstValue,
-    ) -> bool:
+    ) -> cython.bint:
         """Gate a non-exact-push candidate: lhs must be a push-source call arg."""
         if lhs_offset not in source_offsets:
             return False
@@ -20016,9 +21681,12 @@ class _CallsiteStackArgsMaterializer8616:
         push_sources: StructuredAstValue,
         source_offsets: StructuredAstValue,
         expr_sources: StructuredAstValue,
-        push_instruction_addrs: frozenset[int],
-    ) -> bool:
+        push_instruction_addrs: object,
+    ) -> cython.bint:
         """Whether a trailing statement is a consumable pre-call push-alias artifact."""
+        assignment: object
+        lhs: object
+        rhs: object
         if self._statement_contains_call(candidate):
             return False
         assignment = self._top_level_assignment_node_8616(candidate)
@@ -20037,17 +21705,17 @@ class _CallsiteStackArgsMaterializer8616:
             return False
         exact_push_instruction = ins_addr in push_instruction_addrs and any(
             _direct_bp_push_instruction_matches_source_8616(self.project, ins_addr, source)
-            for source in push_sources
+            for source in iter(push_sources)
         )
         matching_sources = _expr_push_sources_for_bp_offset_8616(push_sources, lhs_offset)
-        matching_sources = tuple(dict.fromkeys((*matching_sources, *expr_sources)))
+        matching_sources = tuple(dict.fromkeys(tuple(matching_sources) + tuple(expr_sources)))
         if not exact_push_instruction and not self._non_exact_push_candidate_ok_8616(
             lhs, lhs_offset, source_offsets, call
         ):
             return False
         expression_setup_instruction = any(
             _reg_expr_setup_matches_push_source_8616(self.project, ins_addr, source)
-            for source in matching_sources
+            for source in iter(matching_sources)
         )
         if not exact_push_instruction and not expression_setup_instruction:
             return False
@@ -20057,12 +21725,13 @@ class _CallsiteStackArgsMaterializer8616:
             or (exact_push_instruction and self._rhs_is_exact_push_register_alias_artifact_8616(rhs))
         )
 
+    @cython.ccall
     def _scan_farptr_high_byte_remnants_8616(self,
-        new_statements: list[StructuredAstValue],
+        new_statements: object,
         push_sources: StructuredAstValue,
         call: StructuredAstValue,
-    ) -> tuple[list[int], int, int]:
-        removable_indices: list[int] = []
+    ) -> tuple[list[cython.longlong], cython.longlong, cython.longlong]:
+        removable_indices: list[cython.longlong] = []
         high_byte_store_count = 0
         passthrough_count = 0
         scan = len(new_statements) - 1
@@ -20090,11 +21759,12 @@ class _CallsiteStackArgsMaterializer8616:
             break
         return (removable_indices, high_byte_store_count, passthrough_count)
 
+    @cython.ccall
     def _alias_artifact_debug_8616(self,
         call: StructuredAstValue,
         decision: CallsiteAliasArtifactDecision8616,
-        reason: str,
-    ) -> int:
+        reason: object,
+    ) -> cython.longlong:
         """Log an alias-artifact decision and count refusals; returns zero artifacts."""
         if os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"):
             log.warning(
@@ -20111,12 +21781,12 @@ class _CallsiteStackArgsMaterializer8616:
         return 0
 
     def _pop_pre_call_source_alias_artifacts_8616(self,
-        call: StructuredAstValue,
-        summary: StructuredAstValue,
-        push_sources: tuple[StructuredAstValue, ...],
+        call: object,
+        summary: object,
+        push_sources: object,
         *,
-        new_statements: list[StructuredAstValue],
-    ) -> int:
+        new_statements: object,
+    ) -> cython.longlong:
         """Pop proven pre-call push-alias artifact statements; returns count removed."""
         if call is None or summary is None or bool(summary.stack_probe_helper):
             return self._alias_artifact_debug_8616(call, CallsiteAliasArtifactDecision8616.KEEP_NO_BINARY_PUSH_EXPR_EVIDENCE, "missing-call-summary-or-stack-probe")
@@ -20125,11 +21795,11 @@ class _CallsiteStackArgsMaterializer8616:
         if not _boundary_tuple_8616(getattr(call, "args", ()) or ()):
             return self._alias_artifact_debug_8616(call, CallsiteAliasArtifactDecision8616.KEEP_NO_BINARY_PUSH_EXPR_EVIDENCE, "missing-materialized-args")
 
-        source_offsets = set().union(*(_bp_offsets_from_push_source_8616(source) for source in push_sources))
+        source_offsets = set().union(*(_bp_offsets_from_push_source_8616(source) for source in iter(push_sources)))
         expr_sources = _expr_push_sources_8616(push_sources)
         push_instruction_addrs = frozenset(
             address
-            for address in _boundary_tuple_8616(summary.push_arg_instruction_addrs or ())
+            for address in builtins.iter(_boundary_tuple_8616(summary.push_arg_instruction_addrs or ()))
             if isinstance(address, int)
         )
         if not push_instruction_addrs and (not source_offsets or not expr_sources):
@@ -20166,7 +21836,8 @@ class _CallsiteStackArgsMaterializer8616:
             )
         return consumed
 
-    def _debug_clobber_refuse_8616(self, call: StructuredAstValue, reason: str) -> bool:
+    @cython.ccall
+    def _debug_clobber_refuse_8616(self, call: StructuredAstValue, reason: object) -> cython.bint:
         """Log a clobber-gate refusal for ``call`` and return the keep verdict."""
         if os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"):
             log.warning(
@@ -20177,23 +21848,27 @@ class _CallsiteStackArgsMaterializer8616:
             )
         return False
 
+    @cython.ccall
     def _clobber_rhs_keys_match_8616(self,
-        pre_rhs_key: StructuredAstValue,
-        post_rhs_key: StructuredAstValue,
+        pre_rhs_key: object,
+        post_rhs_key: object,
         pre_rhs: StructuredAstValue,
         post_rhs: StructuredAstValue,
-    ) -> bool:
+    ) -> cython.bint:
         if pre_rhs_key is not None and post_rhs_key is not None:
-            return cast(bool, pre_rhs_key == post_rhs_key)
+            return cast(bool, operator.eq(pre_rhs_key, post_rhs_key))
         return _same_c_expression_8616(pre_rhs, post_rhs)
 
+    @cython.ccall
     def _clobber_copy_key_verdict_8616(self,
         pre_stmt: StructuredAstValue,
         post_stmt: StructuredAstValue,
-        source_offsets: set[int],
+        source_offsets: object,
         call: StructuredAstValue,
     ) -> tuple[str | None, StructuredAstValue]:
         """Compare the pre-call and post-call copy keys for a clobber candidate."""
+        post_key: object
+        pre_key: object
         pre_key = self._assignment_semantic_copy_key_8616(pre_stmt)
         post_key = self._assignment_semantic_copy_key_8616(post_stmt)
         if pre_key is None or post_key is None:
@@ -20212,18 +21887,18 @@ class _CallsiteStackArgsMaterializer8616:
         return (None, lhs_offset)
 
     def _clobber_candidate_gate_8616(self,
-        call: StructuredAstValue,
-        summary: StructuredAstValue,
-        push_sources: tuple[StructuredAstValue, ...],
-        new_statements: list[StructuredAstValue],
-        statements: list[StructuredAstValue],
-        i: int,
-    ) -> tuple[str | None, StructuredAstValue]:
+        call: object,
+        summary: object,
+        push_sources: object,
+        new_statements: object,
+        statements: object,
+        i: cython.longlong,
+    ) -> object:
         if call is None or summary is None or bool(summary.stack_probe_helper):
             return ("missing-call-summary-or-stack-probe", None)
         if not isinstance(push_sources, tuple) or not push_sources:
             return ("missing-push-sources", None)
-        source_offsets = set().union(*(_bp_offsets_from_push_source_8616(source) for source in push_sources))
+        source_offsets = set().union(*(_bp_offsets_from_push_source_8616(source) for source in iter(push_sources)))
         if not source_offsets:
             return ("missing-bp-source-offsets", None)
         if not new_statements:
@@ -20235,14 +21910,16 @@ class _CallsiteStackArgsMaterializer8616:
             new_statements[-1], statements[i + 1], source_offsets, call
         )
 
+    @cython.ccall
     def _pop_duplicate_pre_call_stack_source_clobber_8616(self,
-        call: StructuredAstValue, summary: StructuredAstValue, push_sources: tuple[StructuredAstValue, ...],
+        call: StructuredAstValue, summary: StructuredAstValue, push_sources: object,
         *,
-        i: int,
-        new_statements: list[StructuredAstValue],
-        statements: list[StructuredAstValue],
-    ) -> bool:
+        i: cython.longlong,
+        new_statements: object,
+        statements: object,
+    ) -> cython.bint:
         """Pop a duplicate pre-call stack-source clobber when the gate accepts it."""
+        gate_reason: object
 
         gate_reason, lhs_offset = self._clobber_candidate_gate_8616(
             call, summary, push_sources, new_statements, statements, i
@@ -20263,25 +21940,26 @@ class _CallsiteStackArgsMaterializer8616:
             )
         return True
 
+    @cython.ccall
     def _resync_consumed_push_stores_8616(
         self,
-        new_statements: list[StructuredAstValue],
-        non_segment_push_count: int,
-        physical_push_count: int,
+        new_statements: object,
+        non_segment_push_count: cython.longlong,
+        physical_push_count: cython.longlong,
         *,
         typed_probe_fact: TypedStackProbeReturnFact8616 | None,
-    ) -> tuple[list[StructuredAstValue], list[int]]:
+    ) -> tuple[list[StructuredAstValue], list[cython.longlong]]:
         """Recollect consumed stores when segment pushes skew the count."""
         consumed_rhs, consumed_indices = self._collect_backtracked_stack_args(
             new_statements,
             wanted_count=non_segment_push_count,
             typed_probe_fact=typed_probe_fact,
         )
-        if len(consumed_rhs) != non_segment_push_count:
+        if operator.ne(len(consumed_rhs), non_segment_push_count):
             consumed_rhs, consumed_indices = self._collect_backtracked_runtime_stack_store_args_8616(
                 wanted_count=non_segment_push_count
            , new_statements=new_statements)
-        if len(consumed_rhs) != non_segment_push_count:
+        if operator.ne(len(consumed_rhs), non_segment_push_count):
             consumed_rhs, consumed_indices = self._scan_consumable_push_store_tail_8616(
                 new_statements,
                 non_segment_push_count,
@@ -20291,16 +21969,19 @@ class _CallsiteStackArgsMaterializer8616:
             )
         return consumed_rhs, consumed_indices
 
+    @cython.ccall
     def _scan_consumable_push_store_tail_8616(
         self,
-        new_statements: list[StructuredAstValue],
-        non_segment_push_count: int,
-        physical_push_count: int,
-        consumed_rhs: list[StructuredAstValue],
-        consumed_indices: list[int],
-    ) -> tuple[list[StructuredAstValue], list[int]]:
+        new_statements: object,
+        non_segment_push_count: cython.longlong,
+        physical_push_count: cython.longlong,
+        consumed_rhs: object,
+        consumed_indices: object,
+    ) -> tuple[list[StructuredAstValue], list[cython.longlong]]:
         """Back-scan consumable non-segment store indices as a last resort."""
-        cleanup_indices: list[int] = []
+        assignment: object
+        rhs: object
+        cleanup_indices: list[cython.longlong] = []
         non_segment_seen = 0
         scan_idx = len(new_statements) - 1
         while scan_idx >= 0 and len(cleanup_indices) < physical_push_count:
@@ -20332,26 +22013,26 @@ class _CallsiteStackArgsMaterializer8616:
                 continue
             break
         if non_segment_seen == non_segment_push_count and cleanup_indices:
-            return [object()] * non_segment_push_count, sorted(set(cleanup_indices))
+            return [object()] * non_segment_push_count, sorted(tuple(set(cleanup_indices)))
         return consumed_rhs, consumed_indices
 
     def _resync_partial_push_stores_8616(
         self,
-        new_statements: list[StructuredAstValue],
-        push_sources: tuple[StructuredAstValue, ...],
-        physical_push_count: int,
+        new_statements: object,
+        push_sources: object,
+        physical_push_count: cython.longlong,
         typed_probe_fact: StructuredAstValue,
-        consumed_rhs: list[StructuredAstValue],
-        consumed_indices: list[int],
-    ) -> tuple[list[StructuredAstValue], list[int]]:
+        consumed_rhs: object,
+        consumed_indices: object,
+    ) -> tuple[list[StructuredAstValue], list[cython.longlong]]:
         """Resync consumed stores when a segment source is folded into the count."""
         non_segment_push_count = sum(
             1
-            for source in push_sources
+            for source in iter(push_sources)
             if not (
                 isinstance(source, tuple)
                 and len(source) >= 1
-                and source[0] == CallsitePushSourceKind8616.SEGMENT.value
+                and operator.eq(source[0], CallsitePushSourceKind8616.SEGMENT.value)
             )
         )
         if 0 < non_segment_push_count < physical_push_count:
@@ -20361,7 +22042,7 @@ class _CallsiteStackArgsMaterializer8616:
                 physical_push_count,
                 typed_probe_fact=typed_probe_fact,
             )
-            if len(consumed_rhs) != non_segment_push_count:
+            if operator.ne(len(consumed_rhs), non_segment_push_count):
                 consumed_rhs, consumed_indices = self._scan_consumable_push_store_tail_8616(
                     new_statements,
                     non_segment_push_count,
@@ -20382,16 +22063,22 @@ class _CallsiteStackArgsMaterializer8616:
                 break
             consumed_indices = sorted(cleanup_index_set)
         return consumed_rhs, consumed_indices
+    @cython.ccall
     def _direct_push_store_evidence_map_8616(
         self,
         call: StructuredAstValue,
-        consumed_rhs: list[StructuredAstValue],
-        consumed_indices: list[int],
-        physical_push_count: int,
-        push_sources: tuple[StructuredAstValue, ...],
-        new_statements: list[StructuredAstValue],
-    ) -> dict[int, StructuredAstValue] | None:
+        consumed_rhs: object,
+        consumed_indices: object,
+        physical_push_count: cython.longlong,
+        push_sources: object,
+        new_statements: object,
+    ) -> object:
         """Verify every consumed store matches a recorded PUSH; return source map or None."""
+        call_summary: object
+        candidate: object
+        instruction: object
+        source: object
+        consumed_index: object
         if (
             len(consumed_rhs) > physical_push_count
             or len(consumed_indices) < physical_push_count
@@ -20403,7 +22090,7 @@ class _CallsiteStackArgsMaterializer8616:
         # carry its recorded value; unknown/conflicting stores survive.
         call_summary = self.summary_map.get(id(call))
         push_addresses = call_summary.push_arg_instruction_addrs if call_summary is not None else ()
-        if len(push_addresses) != physical_push_count or len(set(push_addresses)) != physical_push_count:
+        if operator.ne(len(push_addresses), physical_push_count) or operator.ne(len(set(push_addresses)), physical_push_count):
             return None
         sources_by_instruction = dict(zip(push_addresses, push_sources, strict=True))
         for consumed_index in consumed_indices:
@@ -20419,12 +22106,14 @@ class _CallsiteStackArgsMaterializer8616:
             return sources_by_instruction
         return None
 
+    @cython.ccall
     def _prune_consumed_direct_push_source_stores_8616(self,
-        call: StructuredAstValue,
-        push_sources: tuple[StructuredAstValue, ...],
+        call: object,
+        push_sources: object,
         typed_probe_fact: TypedStackProbeReturnFact8616 | None,
-    *, i: StructuredAstValue,new_statements: StructuredAstValue,statements: StructuredAstValue) -> int:
+    *, i: StructuredAstValue,new_statements: StructuredAstValue,statements: StructuredAstValue) -> cython.longlong:
         """Consume only stores matching recorded PUSH identities and values."""
+        sources_by_instruction: object
         if not self.prune_consumed_arg_stores:
             return 0
         if call is None or not _boundary_tuple_8616(getattr(call, "args", ()) or ()):
@@ -20437,11 +22126,11 @@ class _CallsiteStackArgsMaterializer8616:
             wanted_count=physical_push_count,
             typed_probe_fact=typed_probe_fact,
         )
-        if len(consumed_rhs) != physical_push_count:
+        if operator.ne(len(consumed_rhs), physical_push_count):
             consumed_rhs, consumed_indices = self._collect_backtracked_runtime_stack_store_args_8616(
                 wanted_count=physical_push_count
            , new_statements=new_statements)
-        if len(consumed_rhs) != physical_push_count and isinstance(push_sources, tuple):
+        if operator.ne(len(consumed_rhs), physical_push_count) and isinstance(push_sources, tuple):
             consumed_rhs, consumed_indices = self._resync_partial_push_stores_8616(
                 new_statements, push_sources, physical_push_count,
                 typed_probe_fact, consumed_rhs, consumed_indices,
@@ -20463,21 +22152,23 @@ class _CallsiteStackArgsMaterializer8616:
         self._delete_consumed_indices_8616(
             new_statements,
             cleanup_indices,
-            live_consumers=(call, *statements[i + 1 :]),
+            live_consumers=(call, ) + tuple(statements[i + 1 :]),
         )
         self.codegen._inertia_callsite_direct_push_source_stores_pruned_8616 = int(
             getattr(self.codegen, "_inertia_callsite_direct_push_source_stores_pruned_8616", 0) or 0
         ) + len(cleanup_indices)
         return len(cleanup_indices)
 
+    @cython.ccall
     def _dedup_summaryless_call_stmt_8616(self,
         materialized_stmt: StructuredAstValue,
-        call: StructuredAstValue,
-        summary: StructuredAstValue,
-        new_statements: list[StructuredAstValue],
-        is_stack_probe_helper: bool,
-    ) -> bool:
+        call: object,
+        summary: object,
+        new_statements: object,
+        is_stack_probe_helper: cython.bint,
+    ) -> cython.bint:
         """Drop one of two identical standalone calls, keeping the summarized one."""
+        existing_call: object
         if call is None or is_stack_probe_helper:
             return False
         materialized_call = self._call_from_statement(materialized_stmt)
@@ -20510,7 +22201,8 @@ class _CallsiteStackArgsMaterializer8616:
                 return True
         return False
 
-    def _append_call_statement_with_relocated_writes_8616(self, *, call: StructuredAstValue,i: StructuredAstValue,is_stack_probe_helper: StructuredAstValue,new_statements: StructuredAstValue,push_arg_sources: StructuredAstValue,stack_probe_seen: StructuredAstValue,statements: StructuredAstValue,stmt: StructuredAstValue,summary: StructuredAstValue,typed_stack_probe_fact: StructuredAstValue) -> None:
+    @cython.ccall
+    def _append_call_statement_with_relocated_writes_8616(self, *, call: object,i: StructuredAstValue,is_stack_probe_helper: StructuredAstValue,new_statements: StructuredAstValue,push_arg_sources: StructuredAstValue,stack_probe_seen: StructuredAstValue,statements: StructuredAstValue,stmt: StructuredAstValue,summary: StructuredAstValue,typed_stack_probe_fact: StructuredAstValue) -> None:
         consumed_dirty_setup = (
             self._pop_consumed_callsite_dirty_setup_assignments_8616(call, summary, push_arg_sources, new_statements=new_statements)
             if call is not None and not is_stack_probe_helper
@@ -20597,13 +22289,18 @@ class _CallsiteStackArgsMaterializer8616:
             new_statements.extend(relocated_after_call)
             self.changed = True
 
+    @cython.ccall
     def _post_call_relocate_gate_8616(
         self,
         candidate: StructuredAstValue,
-        callsite_addr: int,
+        callsite_addr: cython.longlong,
         source_offsets: StructuredAstValue,
     ) -> tuple[str | None, str]:
         """Return (refusal_reason, debug_shape) for one trailing post-call statement."""
+        assignment: object
+        lhs: object
+        lhs_offset: object
+        rhs: object
         last_debug_shape = ""
         last_debug_shape = (
             f"shape={self._debug_node_shape_8616(candidate)} tags={getattr(candidate, 'tags', None)!r}"
@@ -20635,7 +22332,8 @@ class _CallsiteStackArgsMaterializer8616:
         if not self._rhs_is_safe_to_relocate_after_call_8616(rhs):
             return "suffix-impure-rhs", last_debug_shape
         return None, last_debug_shape
-    def _post_write_relocate_refuse_8616(self, call: StructuredAstValue, reason: str) -> list[StructuredAstValue]:
+    @cython.ccall
+    def _post_write_relocate_refuse_8616(self, call: StructuredAstValue, reason: object) -> list[StructuredAstValue]:
         """Log a post-call write-relocation refusal and return the empty relocation."""
         if os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"):
             log.warning(
@@ -20647,19 +22345,20 @@ class _CallsiteStackArgsMaterializer8616:
         return []
 
     def _pop_post_call_stack_source_writes_8616(self,
-        call: StructuredAstValue, summary: StructuredAstValue, push_sources: tuple[StructuredAstValue, ...]
-   , *, new_statements: StructuredAstValue) -> list[StructuredAstValue]:
+        call: object, summary: object, push_sources: object
+   , *, new_statements: StructuredAstValue) -> object:
+        last_refusal: object
         if call is None or summary is None or bool(summary.stack_probe_helper):
             return self._post_write_relocate_refuse_8616(call, "missing-call-summary-or-stack-probe")
         callsite_addr = summary.callsite_addr
         if not isinstance(callsite_addr, int):
             return self._post_write_relocate_refuse_8616(call, "missing-callsite")
-        source_offsets = set().union(*(_bp_offsets_from_push_source_8616(source) for source in push_sources))
+        source_offsets = set().union(*(_bp_offsets_from_push_source_8616(source) for source in iter(push_sources)))
         if not source_offsets:
             return self._post_write_relocate_refuse_8616(call, "missing-bp-source-offsets")
 
         relocated_reversed: list[StructuredAstValue] = []
-        last_refusal: str | None = "no-suffix"
+        last_refusal = "no-suffix"
         last_debug_shape = ""
         while new_statements:
             candidate = new_statements[-1]
@@ -20694,7 +22393,11 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _is_far_pointer_carrier_remnant_8616(self, stmt: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_far_pointer_carrier_remnant_8616(self, stmt: StructuredAstValue) -> cython.bint:
+        assignment: object
+        lhs: object
+        rhs: object
 
         if self._statement_contains_call(stmt):
             return False
@@ -20710,7 +22413,9 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _global_byte_expr_offset_8616(self, expr: StructuredAstValue) -> int | None:
+        addr: object
         node = expr
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -20723,8 +22428,10 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def make_assignment(self, offset: int, symbol: StructuredAstValue) -> StructuredAstValue:
+    @cython.ccall
+    def make_assignment(self, offset: cython.longlong, symbol: StructuredAstValue) -> StructuredAstValue:
         """Build a stack-slot assignment storing ``symbol`` at ``offset``; None without a cvar."""
+        lhs: object
         lhs = self._stack_cvar_for_offset(offset, allow_best_match=False)
         if lhs is None:
             lhs = self._stack_cvar_for_offset(offset, allow_best_match=True)
@@ -20735,7 +22442,8 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _is_stack_address_index_arg_expr_8616(self, expr: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_stack_address_index_arg_expr_8616(self, expr: StructuredAstValue) -> cython.bint:
         node = self._strip_arg_casts(expr)
         if not isinstance(node, CBinaryOp) or getattr(node, "op", None) not in {"Add", "Sub"}:
             return False
@@ -20749,7 +22457,10 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _is_proven_byte_value_source(self, node: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_proven_byte_value_source(self, node: StructuredAstValue) -> cython.bint:
+        access: object
+        width: object
         node = self._strip_arg_casts(node)
         if isinstance(node, CFunctionCall) and getattr(node, "callee_target", None) == "SEG_U8":
             return True
@@ -20770,9 +22481,12 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _resolved_stack_index_arg_base_from_evidence_8616(self,
         expr: StructuredAstValue, source: StructuredAstValue
     ) -> int | None:
+        lhs_offset: object
+        rhs_offset: object
         if not (
             isinstance(source, tuple)
             and len(source) >= 5
@@ -20803,16 +22517,20 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _same_return_destination_8616(self, lhs: StructuredAstValue, rhs: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _same_return_destination_8616(self, lhs: StructuredAstValue, rhs: StructuredAstValue) -> cython.bint:
+        lhs_key: object
         if _same_c_expression_8616(lhs, rhs):
             return True
         lhs_key = _call_arg_semantic_key_8616(lhs)
         rhs_key = _call_arg_semantic_key_8616(rhs)
-        return lhs_key is not None and lhs_key == rhs_key
+        return lhs_key is not None and operator.eq(lhs_key, rhs_key)
 
 
 
+    @cython.ccall
     def _single_statement_shell(self, node: StructuredAstValue) -> StructuredAstValue:
+        nested: object
         nested = getattr(node, "statements", None)
         if isinstance(nested, (list, tuple)) and len(nested) == 1:
             return nested[0]
@@ -20820,12 +22538,15 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _recent_dirty_assignment_match_8616(self,
         assignment: StructuredAstValue,
-        expr_op: StructuredAstValue,
+        expr_op: object,
         expr_consts: StructuredAstValue,
-        stmt_idx: int,
-    ) -> tuple[tuple[int, int, int], StructuredAstValue] | None:
+        stmt_idx: cython.longlong,
+    ) -> object:
+        lhs: object
+        rhs_stmt: object
         lhs, rhs_stmt = self._assignment_lhs_rhs(assignment)
         if lhs is None or rhs_stmt is None or self._assignment_lhs_writes_memory(lhs):
             return None
@@ -20837,7 +22558,7 @@ class _CallsiteStackArgsMaterializer8616:
         while isinstance(rhs_node, CTypeCast):
             rhs_node = rhs_node.expr
         rhs_op = getattr(rhs_node, "op", None) if isinstance(rhs_node, CBinaryOp) else None
-        if expr_op is not None and rhs_op != expr_op:
+        if expr_op is not None and operator.ne(rhs_op, expr_op):
             return None
         rhs_consts = self._expr_int_constants(rhs_node)
         if expr_consts and rhs_consts and expr_consts.isdisjoint(rhs_consts):
@@ -20849,14 +22570,16 @@ class _CallsiteStackArgsMaterializer8616:
         )
         return (score, rhs_stmt)
 
-    def _recent_dirty_value_rhs(self, expr: StructuredAstValue, prefix: list[StructuredAstValue]) -> StructuredAstValue:
+    def _recent_dirty_value_rhs(self, expr: StructuredAstValue, prefix: object) -> StructuredAstValue:
+        match: object
+        assignment: object
         expr_node = expr
         while isinstance(expr_node, CTypeCast):
             expr_node = expr_node.expr
         expr_op = getattr(expr_node, "op", None) if isinstance(expr_node, CBinaryOp) else None
         expr_consts = self._expr_int_constants(expr_node)
-        matches: list[tuple[tuple[int, int, int], StructuredAstValue]] = []
-        seen_assignments: set[int] = set()
+        matches: list[tuple[tuple[cython.longlong, cython.longlong, cython.longlong], StructuredAstValue]] = []
+        seen_assignments: set[cython.longlong] = set()
         for stmt_idx in range(len(prefix) - 1, -1, -1):
             stmt = prefix[stmt_idx]
             for assignment in reversed(self._iter_assignment_nodes(stmt)):
@@ -20870,29 +22593,31 @@ class _CallsiteStackArgsMaterializer8616:
         if not matches:
             return None
         matches.sort(key=lambda item: item[0], reverse=True)
-        if len(matches) > 1 and matches[0][0] == matches[1][0]:
+        if len(matches) > 1 and operator.eq(matches[0][0], matches[1][0]):
             return None
         return matches[0][1]
 
 
 
-    def _sign_ext_source_8616(self, source: StructuredAstValue) -> tuple[StructuredAstValue, ...] | None:
+    @cython.ccall
+    def _sign_ext_source_8616(self, source: StructuredAstValue) -> object:
         if not (
             isinstance(source, tuple)
             and len(source) == 3
-            and source[0] == CallsitePushSourceKind8616.EXPR.value
+            and operator.eq(source[0], CallsitePushSourceKind8616.EXPR.value)
             and isinstance(source[1], tuple)
             and isinstance(source[2], tuple)
             and len(source[2]) == 1
         ):
             return None
         op = source[2][0]
-        if not (isinstance(op, tuple) and op[0] == CallsitePushExprOp8616.SIGN_EXT_HI.value):
+        if not (isinstance(op, tuple) and operator.eq(op[0], CallsitePushExprOp8616.SIGN_EXT_HI.value)):
             return None
         return source
 
 
 
+    @cython.ccall
     def _guard_stack_address_arg_offset_8616(self, expr: StructuredAstValue) -> int | None:
         node = expr
         while isinstance(node, CTypeCast):
@@ -20907,10 +22632,13 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _rhs_is_safe_to_relocate_after_call_8616(self, rhs: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _rhs_is_safe_to_relocate_after_call_8616(self, rhs: StructuredAstValue) -> cython.bint:
+        variable: object
+        node: object
         if self._statement_contains_call(rhs):
             return False
-        for node in (rhs, *_iter_c_nodes_deep_8616(rhs)):
+        for node in (rhs, ) + tuple(_iter_c_nodes_deep_8616(rhs)):
             if isinstance(node, CFunctionCall):
                 return False
             if isinstance(node, CUnaryOp) and getattr(node, "op", None) == "Dereference":
@@ -20922,7 +22650,10 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _global_word_expr_offset_8616(self, expr: StructuredAstValue) -> int | None:
+        offset: object
+        pair_offset: object
         node = expr
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -20947,7 +22678,8 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _calls_match_8616(self, lhs_call: StructuredAstValue, rhs_call: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _calls_match_8616(self, lhs_call: StructuredAstValue, rhs_call: StructuredAstValue) -> cython.bint:
         lhs_name = _call_node_name_8616(lhs_call)
         rhs_name = _call_node_name_8616(rhs_call)
         return _callee_names_match_8616(lhs_name, rhs_name) and self._call_args_match_8616(
@@ -20957,7 +22689,10 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _expr_contains_dirty_carrier_for_setup_8616(self, expr: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _expr_contains_dirty_carrier_for_setup_8616(self, expr: StructuredAstValue) -> cython.bint:
+        cached: object
+        node: object
         expr_id = id(expr)
         cached = self.expr_dirty_carrier_cache.get(expr_id)
         if cached is not None:
@@ -20965,7 +22700,7 @@ class _CallsiteStackArgsMaterializer8616:
         if _generic_stack_carrier_keys_8616(expr):
             self.expr_dirty_carrier_cache[expr_id] = True
             return True
-        for node in (expr, *_iter_c_nodes_deep_8616(expr)):
+        for node in (expr, ) + tuple(_iter_c_nodes_deep_8616(expr)):
             if node.__class__.__name__ == "CDirtyExpression":
                 self.expr_dirty_carrier_cache[expr_id] = True
                 return True
@@ -20974,7 +22709,11 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _call_args_include_recorded_return_call_8616(self, call_node: StructuredAstValue, ret_callsite: int) -> bool:
+    @cython.ccall
+    def _call_args_include_recorded_return_call_8616(self, call_node: StructuredAstValue, ret_callsite: cython.longlong) -> cython.bint:
+        stored_return_call: object
+        arg: object
+        node: object
         stored_return_call = self._stored_return_call_expr_for_callsite_8616(ret_callsite)
         if stored_return_call is None:
             return False
@@ -20982,14 +22721,15 @@ class _CallsiteStackArgsMaterializer8616:
         if not stored_name:
             return False
         for arg in _boundary_tuple_8616(getattr(call_node, "args", ()) or ()):
-            for node in (arg, *_iter_c_nodes_deep_8616(arg)):
-                if isinstance(node, CFunctionCall) and _call_node_name_8616(node) == stored_name:
+            for node in (arg, ) + tuple(_iter_c_nodes_deep_8616(arg)):
+                if isinstance(node, CFunctionCall) and operator.eq(_call_node_name_8616(node), stored_name):
                     return True
         return False
 
 
 
-    def _is_runtime_segment_store_lvalue_8616(self, expr: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_runtime_segment_store_lvalue_8616(self, expr: StructuredAstValue) -> cython.bint:
         node = expr
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -21000,33 +22740,42 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _global_word_low_byte_source_offset_8616(self, expr: StructuredAstValue) -> int | None:
         return self._global_word_expr_offset_8616(expr)
 
 
 
-    def _call_args_match_8616(self, lhs_call: StructuredAstValue, rhs_call: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _call_args_match_8616(self, lhs_call: StructuredAstValue, rhs_call: StructuredAstValue) -> cython.bint:
+        lhs_key: object
+        lhs_pointer_key: object
+        lhs_arg: object
+        rhs_arg: object
         lhs_args = _boundary_tuple_8616(getattr(lhs_call, "args", ()) or ())
         rhs_args = _boundary_tuple_8616(getattr(rhs_call, "args", ()) or ())
-        if len(lhs_args) != len(rhs_args):
+        if operator.ne(len(lhs_args), len(rhs_args)):
             return False
         for lhs_arg, rhs_arg in zip(lhs_args, rhs_args, strict=True):
             if _same_c_expression_8616(lhs_arg, rhs_arg):
                 continue
             lhs_key = _call_arg_semantic_key_8616(lhs_arg)
             rhs_key = _call_arg_semantic_key_8616(rhs_arg)
-            if lhs_key is not None and lhs_key == rhs_key:
+            if lhs_key is not None and operator.eq(lhs_key, rhs_key):
                 continue
             lhs_pointer_key = self._pointer_offset_key_8616(lhs_arg)
             rhs_pointer_key = self._pointer_offset_key_8616(rhs_arg)
-            if lhs_pointer_key is not None and lhs_pointer_key == rhs_pointer_key:
+            if lhs_pointer_key is not None and operator.eq(lhs_pointer_key, rhs_pointer_key):
                 continue
             return False
         return True
 
 
 
+    @cython.ccall
     def _byte_merge_low_source(self, expr: StructuredAstValue) -> StructuredAstValue:
+        maybe_high: object
+        maybe_low: object
         node = self._strip_arg_casts(expr)
         if not isinstance(node, CBinaryOp) or node.op != "Or":
             return None
@@ -21038,7 +22787,9 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _fold_list(self, container: list[StructuredAstValue]) -> bool:
+    @cython.ccall
+    def _fold_list(self, container: object) -> cython.bint:
+        nested: object
         changed_local = False
         idx = 0
         while idx < len(container):
@@ -21050,17 +22801,18 @@ class _CallsiteStackArgsMaterializer8616:
                 changed_local = True
             idx += 1
         return self._fold_adjacent_stale_return_pair_after_destination_call_8616(container) or changed_local
+    @cython.ccall
     def _fold_list_kept_dest_apply_8616(self,
-        container: list[StructuredAstValue],
-        idx: int,
-        combine_idx: int,
+        container: object,
+        idx: cython.longlong,
+        combine_idx: cython.longlong,
         combine_rhs: StructuredAstValue,
         call: StructuredAstValue,
         summary: StructuredAstValue,
         low_expr: StructuredAstValue,
         high_expr: StructuredAstValue,
         target_lhs: StructuredAstValue,
-    ) -> bool:
+    ) -> cython.bint:
         """Fold a stale DX:AX pair when the combine target matches the call destination."""
         if not (
             self._combined_low_high_target(combine_rhs, low_expr, high_expr)
@@ -21081,17 +22833,18 @@ class _CallsiteStackArgsMaterializer8616:
             )
         return True
 
+    @cython.ccall
     def _fold_list_rewrite_apply_8616(self,
-        container: list[StructuredAstValue],
-        idx: int,
-        combine_idx: int,
+        container: object,
+        idx: cython.longlong,
+        combine_idx: cython.longlong,
         combine_rhs: StructuredAstValue,
         call: StructuredAstValue,
         summary: StructuredAstValue,
         lhs: StructuredAstValue,
         high_expr: StructuredAstValue,
         target_lhs: StructuredAstValue,
-    ) -> bool:
+    ) -> cython.bint:
         """Rewrite the call store to the combined DX:AX destination and drop the stale pair."""
         if not self._combined_low_high_target(combine_rhs, lhs, high_expr):
             return False
@@ -21111,11 +22864,20 @@ class _CallsiteStackArgsMaterializer8616:
             )
         return True
 
+    @cython.ccall
     def _fold_list_step_8616(self,
-        container: list[StructuredAstValue],
+        container: object,
         stmt: StructuredAstValue,
-        idx: int,
-    ) -> bool:
+        idx: cython.longlong,
+    ) -> cython.bint:
+        call: object
+        combine_rhs: object
+        high_expr: object
+        high_lhs: object
+        lhs: object
+        low_expr: object
+        summary: object
+        target_lhs: object
         lhs, rhs = self._assignment_lhs_rhs_local(stmt)
         call = rhs if isinstance(rhs, CFunctionCall) else None
         summary = self.summary_map.get(id(call)) if call is not None else None
@@ -21156,7 +22918,9 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _protected_call_arg_state(self) -> ProtectedCallArgumentStore8616:
+        protected: object
         protected = getattr(self.codegen, "_inertia_protected_call_args_8616", None)
         if not isinstance(protected, ProtectedCallArgumentStore8616):
             protected = ProtectedCallArgumentStore8616()
@@ -21165,7 +22929,8 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _next_nonempty_index(self, container: list[StructuredAstValue], start: int) -> int:
+    @cython.ccall
+    def _next_nonempty_index(self, container: object, start: cython.longlong) -> cython.longlong:
         idx = int(start)
         while idx < len(container) and self._is_empty_statement_shell(container[idx]):
             idx += 1
@@ -21173,6 +22938,7 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _strip_casts(self, node: StructuredAstValue) -> StructuredAstValue:
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -21180,8 +22946,13 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def materialize_assignment(self, stmt: StructuredAstValue, *, evidence: dict[int, list[tuple[int, StructuredAstValue]]]) -> bool:
+    @cython.ccall
+    def materialize_assignment(self, stmt: StructuredAstValue, *, evidence: object) -> cython.bint:
         """Rewrite evidence-proven immediate stores in ``stmt`` to their symbols."""
+        assignment: object
+        lhs: object
+        symbol: object
+        offset: object
         local_changed = False
         for offset in tuple(evidence):
             assignment, rhs = self._assignment_to_stack_offset_8616(stmt, offset)
@@ -21203,11 +22974,15 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _repair_branch_immediate_function_pointer_stores_8616(self, stmt: structured_c.CIfElse, *, evidence: dict[int, list[tuple[int, StructuredAstValue]]]) -> bool:
+    @cython.ccall
+    def _repair_branch_immediate_function_pointer_stores_8616(self, stmt: structured_c.CIfElse, *, evidence: object) -> cython.bint:
+        else_node: object
+        offset: object
+        symbols: object
         local_changed = False
         branch_nodes = [
             child
-            for _cond, child in _boundary_tuple_8616(getattr(stmt, "condition_and_nodes", ()) or ())
+            for _cond, child in builtins.iter(_boundary_tuple_8616(getattr(stmt, "condition_and_nodes", ()) or ()))
             if child is not None
         ]
         else_node = getattr(stmt, "else_node", None)
@@ -21217,8 +22992,8 @@ class _CallsiteStackArgsMaterializer8616:
             return False
         branch_assignments = [
             assignment
-            for node in branch_nodes
-            for assignment in self._iter_assignment_nodes(node)
+            for node in iter(branch_nodes)
+            for assignment in builtins.iter(self._iter_assignment_nodes(node))
             if self._assignment_lhs_rhs(assignment)[0] is not None and self._assignment_lhs_rhs(assignment)[1] is not None
         ]
         if len(branch_assignments) < 2:
@@ -21229,16 +23004,21 @@ class _CallsiteStackArgsMaterializer8616:
         return local_changed
 
 
+    @cython.ccall
     def _repair_branch_offset_group_8616(self,
         offset: StructuredAstValue,
         symbols: StructuredAstValue,
-        branch_assignments: list[StructuredAstValue],
-    ) -> bool:
+        branch_assignments: object,
+    ) -> cython.bint:
+        imm: object
+        symbol: object
+        _lhs: object
+        assignment: object
         repaired = False
-        symbol_by_imm = {int(imm) & 0xFFFF: symbol for imm, symbol in symbols}
+        symbol_by_imm = {int(imm) & 0xFFFF: symbol for imm, symbol in iter(symbols)}
         if len(symbol_by_imm) < 2:
             return False
-        matched: list[tuple[StructuredAstValue, int, StructuredAstValue]] = []
+        matched: list[tuple[StructuredAstValue, cython.longlong, StructuredAstValue]] = []
         for assignment in branch_assignments:
             lhs, rhs = self._assignment_lhs_rhs(assignment)
             imm = self._constant_int_value_8616(rhs)
@@ -21246,11 +23026,11 @@ class _CallsiteStackArgsMaterializer8616:
                 continue
             lhs_offset = self._stack_offset_from_cvar_8616(lhs)
             if lhs_offset == offset and self._symbol_name_8616(rhs) in {
-                self._symbol_name_8616(symbol) for symbol in symbol_by_imm.values()
+                self._symbol_name_8616(symbol) for symbol in builtins.iter(symbol_by_imm.values())
             }:
                 continue
             matched.append((assignment, imm & 0xFFFF, lhs))
-        if len({imm for _assignment, imm, _lhs in matched}) != len(matched):
+        if operator.ne(len({imm for _assignment, imm, _lhs in iter(matched)}), len(matched)):
             return False
         if not matched:
             return False
@@ -21268,7 +23048,9 @@ class _CallsiteStackArgsMaterializer8616:
                 )
         return repaired
 
-    def _replace_branch_node_with_assignment_8616(self, node: StructuredAstValue, assignment: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _replace_branch_node_with_assignment_8616(self, node: object, assignment: StructuredAstValue) -> cython.bint:
+        statements: object
         if node is None:
             return False
         statements = getattr(node, "statements", None)
@@ -21279,8 +23061,10 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def resolve_stack_offset(self, expr: StructuredAstValue) -> int | None:
         """Resolve an lvalue expression to its BP-relative stack offset, or None."""
+        index_value: object
         while isinstance(expr, CTypeCast):
             expr = expr.expr
         if isinstance(expr, structured_c.CVariable):
@@ -21303,7 +23087,8 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _seg_u8_store_args_8616(self, lhs: StructuredAstValue) -> tuple[StructuredAstValue, ...] | None:
+    @cython.ccall
+    def _seg_u8_store_args_8616(self, lhs: StructuredAstValue) -> object:
         node = lhs
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -21317,18 +23102,22 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _call_args_reference_global_word_8616(self, call_node: StructuredAstValue, offset: int) -> bool:
+    @cython.ccall
+    def _call_args_reference_global_word_8616(self, call_node: object, offset: cython.longlong) -> cython.bint:
+        arg: object
+        node: object
         if call_node is None:
             return False
         for arg in _boundary_tuple_8616(getattr(call_node, "args", ()) or ()):
-            for node in (arg, *_iter_c_nodes_deep_8616(arg)):
-                if self._global_word_expr_offset_8616(node) == (offset & 0xFFFF):
+            for node in (arg, ) + tuple(_iter_c_nodes_deep_8616(arg)):
+                if operator.eq(self._global_word_expr_offset_8616(node), (offset & 0xFFFF)):
                     return True
         return False
 
 
 
-    def _push_source_has_arithmetic_expr_8616(self, source: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _push_source_has_arithmetic_expr_8616(self, source: StructuredAstValue) -> cython.bint:
         if not isinstance(source, tuple) or len(source) < 3:
             return False
         if source[0] != "expr":
@@ -21338,7 +23127,12 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _materialize_empty_branch_function_pointer_stores_8616(self, stmt: structured_c.CIfElse, *, evidence: dict[int, list[tuple[int, StructuredAstValue]]]) -> bool:
+    def _materialize_empty_branch_function_pointer_stores_8616(self, stmt: structured_c.CIfElse, *, evidence: object) -> cython.bint:
+        else_node: object
+        false_assignment: object
+        true_assignment: object
+        offset: object
+        symbols: object
         condition_nodes = _boundary_tuple_8616(getattr(stmt, "condition_and_nodes", ()) or ())
         if len(condition_nodes) != 1:
             return False
@@ -21347,7 +23141,7 @@ class _CallsiteStackArgsMaterializer8616:
         if not (self._branch_node_is_empty_8616(true_node) and self._branch_node_is_empty_8616(else_node)):
             return False
         for offset, symbols in evidence.items():
-            ordered_symbols = tuple(symbol for _imm, symbol in symbols)
+            ordered_symbols = tuple(symbol for _imm, symbol in iter(symbols))
             if len(ordered_symbols) != 2:
                 continue
             true_assignment = self.make_assignment(offset, ordered_symbols[0])
@@ -21366,9 +23160,11 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _mark_return_register_arg_8616(self,
-        expr: StructuredAstValue, callsite: int, regs: tuple[str, ...]
+        expr: StructuredAstValue, callsite: cython.longlong, regs: object
     ) -> StructuredAstValue:
+        return_arg_sources: object
         if isinstance(expr, CFunctionCall):
             return_arg_sources = getattr(self.codegen, "_inertia_return_register_arg_sources_8616", None)
             if not isinstance(return_arg_sources, dict):
@@ -21379,7 +23175,8 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _push_source_is_expr_arithmetic_8616(self, source: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _push_source_is_expr_arithmetic_8616(self, source: StructuredAstValue) -> cython.bint:
         return bool(
             isinstance(source, tuple)
             and len(source) >= 3
@@ -21390,7 +23187,10 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _record_pruned_stack_write_token_8616(self, stmt: StructuredAstValue) -> None:
+        existing: object
+        token: object
         token = self._stack_slot_write_token_for_stmt_8616(stmt)
         if token is None:
             return
@@ -21401,13 +23201,16 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _dedupe_indices(self, indices: list[int]) -> list[int]:
-        return sorted(set(indices))
+    @cython.ccall
+    def _dedupe_indices(self, indices: object) -> object:
+        return sorted(tuple(set(indices)))
 
 
 
-    def _local_expr_contains_dirty_expression_8616(self, expr: StructuredAstValue) -> bool:
-        for raw_node in (expr, *_iter_c_nodes_deep_8616(expr)):
+    @cython.ccall
+    def _local_expr_contains_dirty_expression_8616(self, expr: StructuredAstValue) -> cython.bint:
+        raw_node: object
+        for raw_node in (expr, ) + tuple(_iter_c_nodes_deep_8616(expr)):
             node = raw_node
             while isinstance(node, CTypeCast):
                 node = node.expr
@@ -21417,13 +23220,15 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _call_args_reference_identity_8616(self,
-        call_node: StructuredAstValue, identity_key: StructuredAstValue
-    ) -> bool:
+        call_node: object, identity_key: object
+    ) -> cython.bint:
+        arg: object
         if call_node is None or identity_key is None:
             return False
         for arg in _boundary_tuple_8616(getattr(call_node, "args", ()) or ()):
-            if self._c_variable_identity_key_8616(arg) == identity_key:
+            if operator.eq(self._c_variable_identity_key_8616(arg), identity_key):
                 return True
             if self._statement_references_variable_identity_8616(arg, identity_key):
                 return True
@@ -21431,6 +23236,7 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _global_scaled_byte_expr_offset_8616(self, expr: StructuredAstValue) -> int | None:
         node = expr
         while isinstance(node, CTypeCast):
@@ -21448,7 +23254,9 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _lhs_is_far_pointer_outgoing_byte_store_8616(self, lhs: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _lhs_is_far_pointer_outgoing_byte_store_8616(self, lhs: StructuredAstValue) -> cython.bint:
+        args: object
         args = self._seg_u8_store_args_8616(lhs)
         if args is None:
             return False
@@ -21463,9 +23271,11 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _carrier_rhs_keys_to_chase_for_consumed_store_8616(self,
         rhs: StructuredAstValue,
     ) -> set[tuple[str, str | int]]:
+        node: object
         node = rhs
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -21478,7 +23288,7 @@ class _CallsiteStackArgsMaterializer8616:
         if isinstance(node, CUnaryOp) and getattr(node, "op", None) in {"Reference", "Dereference"}:
             return {
                 (str(key[0]), key[1])
-                for key in _generic_stack_carrier_keys_8616(node)
+                for key in builtins.iter(_generic_stack_carrier_keys_8616(node))
                 if isinstance(key, tuple)
                 and len(key) == 2
                 and isinstance(key[0], str)
@@ -21487,7 +23297,7 @@ class _CallsiteStackArgsMaterializer8616:
         if isinstance(node, CBinaryOp):
             return {
                 (str(key[0]), key[1])
-                for key in _generic_stack_carrier_keys_8616(node)
+                for key in builtins.iter(_generic_stack_carrier_keys_8616(node))
                 if isinstance(key, tuple)
                 and len(key) == 2
                 and isinstance(key[0], str)
@@ -21496,7 +23306,7 @@ class _CallsiteStackArgsMaterializer8616:
         if node.__class__.__name__ == "CDirtyExpression":
             return {
                 (str(key[0]), key[1])
-                for key in _generic_stack_carrier_keys_8616(node)
+                for key in builtins.iter(_generic_stack_carrier_keys_8616(node))
                 if isinstance(key, tuple)
                 and len(key) == 2
                 and isinstance(key[0], str)
@@ -21506,7 +23316,8 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _is_far_pointer_offset_source_8616(self, source: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_far_pointer_offset_source_8616(self, source: StructuredAstValue) -> cython.bint:
         if not isinstance(source, tuple) or len(source) < 2:
             return False
         source_kind = source[0]
@@ -21515,14 +23326,14 @@ class _CallsiteStackArgsMaterializer8616:
             CallsitePushSourceKind8616.BP_INDEX_ADDRESS.value,
         }:
             return True
-        if source_kind == CallsitePushSourceKind8616.GLOBAL_VALUE.value:
+        if operator.eq(source_kind, CallsitePushSourceKind8616.GLOBAL_VALUE.value):
             return len(source) >= 3 and isinstance(source[2], int) and int(source[2]) == 2
-        if source_kind == CallsitePushSourceKind8616.GLOBAL_INDEX_VALUE.value:
+        if operator.eq(source_kind, CallsitePushSourceKind8616.GLOBAL_INDEX_VALUE.value):
             return len(source) >= 3 and isinstance(source[2], int) and int(source[2]) == 2
-        if source_kind == CallsitePushSourceKind8616.SEGMENTED_INDIRECT_VALUE.value:
+        if operator.eq(source_kind, CallsitePushSourceKind8616.SEGMENTED_INDIRECT_VALUE.value):
             return len(source) == 4 and isinstance(source[2], int) and int(source[2]) == 2
         if (
-            source_kind == CallsitePushSourceKind8616.EXPR.value
+            operator.eq(source_kind, CallsitePushSourceKind8616.EXPR.value)
             and len(source) >= 2
             and isinstance(source[1], tuple)
         ):
@@ -21531,13 +23342,15 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _recent_stack_evidence_step_8616(self,
         candidate: StructuredAstValue,
-        typed_probe_fact: TypedStackProbeReturnFact8616 | None,
-        skipped_carriers: int,
-        skipped_values: int,
-    ) -> tuple[str, int, int]:
+        typed_probe_fact: object,
+        skipped_carriers: cython.longlong,
+        skipped_values: cython.longlong,
+    ) -> tuple[str, cython.longlong, cython.longlong]:
         """Classify one trailing statement; returns (hit|carrier|value|stop, carriers, values)."""
+        rhs: object
         if self._statement_contains_call(candidate):
             return "stop", skipped_carriers, skipped_values
         if typed_probe_fact is not None:
@@ -21564,11 +23377,12 @@ class _CallsiteStackArgsMaterializer8616:
             )
         return "stop", skipped_carriers, skipped_values
 
+    @cython.ccall
     def _has_recent_stack_arg_store_evidence(self,
-        statement_list: list[StructuredAstValue],
-        wanted_count: int,
+        statement_list: object,
+        wanted_count: cython.longlong,
         typed_probe_fact: TypedStackProbeReturnFact8616 | None,
-    ) -> bool:
+    ) -> cython.bint:
         if not isinstance(wanted_count, int) or wanted_count <= 0:
             return False
         needed = wanted_count
@@ -21588,6 +23402,7 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _stable_call_source_expr_stack_offset(self, source: StructuredAstValue) -> int | None:
         if not isinstance(source, tuple) or len(source) < 2:
             return None
@@ -21604,8 +23419,11 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def final_standalone_call_ref(self, stmt: StructuredAstValue) -> StructuredAstValue:
         """Return ``(call, container, index)`` for the statement's last standalone call."""
+        call: object
+        nested: object
         call = self.standalone_call_from_statement(stmt)
         if call is not None:
             return call, None, None
@@ -21619,25 +23437,28 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _prune_stale_fnptr_overwrite_at_8616(self,
-        new_statements: list[StructuredAstValue],
-        idx: int,
+        new_statements: object,
+        idx: cython.longlong,
         stmt: StructuredAstValue,
         next_stmt: StructuredAstValue,
-        evidence: dict[int, list[tuple[int, StructuredAstValue]]],
-        bp_stack_store_counts: dict[int, int],
-    ) -> bool:
+        evidence: object,
+        bp_stack_store_counts: object,
+    ) -> cython.bint:
         """Remove ``next_stmt`` when it stale-overwrites a proven fnptr branch slot."""
+        offset: object
+        symbols: object
         for offset, symbols in evidence.items():
             symbol_names = {
-                name for _imm, symbol in symbols for name in [self._symbol_name_8616(symbol)] if name is not None
+                name for _imm, symbol in iter(symbols) for name in iter([self._symbol_name_8616(symbol)]) if name is not None
             }
             if len(symbol_names) < 2:
                 continue
             branch_names = self._ifelse_branch_symbol_names_for_offset_8616(stmt, offset)
             if branch_names != symbol_names:
                 continue
-            if int(bp_stack_store_counts.get(offset, 0)) != len(symbols):
+            if operator.ne(int(bp_stack_store_counts.get(offset, 0)), len(symbols)):
                 continue
             if not self._assignment_is_stale_post_branch_fnptr_overwrite_8616(next_stmt, offset, symbol_names):
                 continue
@@ -21648,7 +23469,9 @@ class _CallsiteStackArgsMaterializer8616:
             return True
         return False
 
-    def _prune_stale_post_branch_fnptr_overwrites_8616(self, block: StructuredAstValue, *, bp_stack_store_counts: dict[int, int], evidence: dict[int, list[tuple[int, StructuredAstValue]]]) -> bool:
+    @cython.ccall
+    def _prune_stale_post_branch_fnptr_overwrites_8616(self, block: StructuredAstValue, *, bp_stack_store_counts: object, evidence: object) -> cython.bint:
+        statements: object
         statements = getattr(block, "statements", None)
         if not isinstance(statements, (list, tuple)) or len(statements) < 2:
             return False
@@ -21674,13 +23497,18 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _is_empty_statement_shell(self, node: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_empty_statement_shell(self, node: StructuredAstValue) -> cython.bint:
+        nested: object
         nested = getattr(node, "statements", None)
         return isinstance(nested, (list, tuple)) and len(nested) == 0
 
 
 
     def _children(self, current: StructuredAstValue) -> StructuredAstValue:
+        child: object
+        items: object
+        attr: object
         for attr in (
             "lhs",
             "rhs",
@@ -21704,13 +23532,17 @@ class _CallsiteStackArgsMaterializer8616:
                 continue
             items = getattr(current, attr, None)
             if isinstance(items, (list, tuple)):
-                yield from (item for item in items if item is not None)
+                yield from (item for item in iter(items) if item is not None)
 
 
 
+    @cython.ccall
     def _assignment_lhs_rhs_local(self,
-        node: StructuredAstValue,
+        node: object,
     ) -> tuple[StructuredAstValue | None, StructuredAstValue | None]:
+        expr: object
+        lhs: object
+        rhs: object
         node = self._single_statement_shell(node)
         if node is None:
             return None, None
@@ -21730,7 +23562,9 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _return_call_expr_with_materialized_args_8616(self, *, first_callsite: int, return_call: StructuredAstValue, return_summary: StructuredAstValue) -> StructuredAstValue:
+    @cython.ccall
+    def _return_call_expr_with_materialized_args_8616(self, *, first_callsite: cython.longlong, return_call: StructuredAstValue, return_summary: StructuredAstValue) -> StructuredAstValue:
+        synthesized: object
         if _boundary_tuple_8616(getattr(return_call, "args", ()) or ()):
             ret_expr = self._clone_c_ast_tree(return_call)
             self._regroup_return_call_args_from_summary_8616(ret_expr, return_summary)
@@ -21745,24 +23579,26 @@ class _CallsiteStackArgsMaterializer8616:
 
 
     def _push_sources_have_return_register_setup_window_evidence_8616(self,
-        call_node: StructuredAstValue, window_push_sources: tuple[StructuredAstValue, ...]
-    ) -> bool:
+        call_node: StructuredAstValue, window_push_sources: object
+    ) -> cython.bint:
         ret_reg_infos = tuple(
-            info for source in window_push_sources if (info := self._ret_reg_source_info_8616(source)) is not None
+            info for source in iter(window_push_sources) if (info := self._ret_reg_source_info_8616(source)) is not None
         )
         if not ret_reg_infos:
             return False
-        ret_callsites = {callsite for callsite, _reg in ret_reg_infos}
+        ret_callsites = {callsite for callsite, _reg in iter(ret_reg_infos)}
         return bool(ret_callsites) and all(
-            self._call_args_include_recorded_return_call_8616(call_node, ret_callsite) for ret_callsite in ret_callsites
+            self._call_args_include_recorded_return_call_8616(call_node, ret_callsite) for ret_callsite in iter(ret_callsites)
         )
 
 
 
+    @cython.ccall
     def _later_identity_keys_by_index_8616(self,
-        statement_list: list[StructuredAstValue],
+        statement_list: object,
     ) -> tuple[frozenset[tuple[StructuredAstValue, ...]], ...]:
         """Build suffix identity sets so live-later checks stay linear."""
+        statement: object
         suffix_keys: set[tuple[StructuredAstValue, ...]] = set()
         reversed_suffixes: list[frozenset[tuple[StructuredAstValue, ...]]] = []
         for statement in reversed(statement_list):
@@ -21772,6 +23608,7 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _constant_int_value(self, node: StructuredAstValue) -> int | None:
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -21782,7 +23619,8 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _rhs_is_exact_push_register_alias_artifact_8616(self, rhs: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _rhs_is_exact_push_register_alias_artifact_8616(self, rhs: StructuredAstValue) -> cython.bint:
         """Accept a pure register carrier only at an exact physical push."""
         if not isinstance(rhs, structured_c.CVariable):
             return False
@@ -21790,10 +23628,12 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _rhs_is_safe_push_alias_artifact_8616(self, rhs: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _rhs_is_safe_push_alias_artifact_8616(self, rhs: StructuredAstValue) -> cython.bint:
+        node: object
         if self._statement_contains_call(rhs):
             return False
-        for node in (rhs, *_iter_c_nodes_deep_8616(rhs)):
+        for node in (rhs, ) + tuple(_iter_c_nodes_deep_8616(rhs)):
             if isinstance(node, CFunctionCall):
                 return False
             if isinstance(node, CUnaryOp) and getattr(node, "op", None) == "Dereference":
@@ -21804,7 +23644,10 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _global_word_byte_pair_offset_8616(self, expr: StructuredAstValue) -> int | None:
+        high_offset: object
+        low_offset: object
         node = expr
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -21815,7 +23658,7 @@ class _CallsiteStackArgsMaterializer8616:
         if low_offset is None or high_offset is None:
             low_offset = self._global_byte_expr_offset_8616(getattr(node, "rhs", None))
             high_offset = self._global_scaled_byte_expr_offset_8616(getattr(node, "lhs", None))
-        if low_offset is None or high_offset is None or high_offset != low_offset + 1:
+        if low_offset is None or high_offset is None or operator.ne(high_offset, low_offset + 1):
             return None
         return low_offset & 0xFFFF
 
@@ -21824,11 +23667,13 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _call_args_reference_identity(self, call_node: StructuredAstValue, identity_key: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _call_args_reference_identity(self, call_node: object, identity_key: object) -> cython.bint:
+        arg: object
         if call_node is None or identity_key is None:
             return False
         for arg in _boundary_tuple_8616(getattr(call_node, "args", ()) or ()):
-            if self._c_variable_identity_key_8616(arg) == identity_key:
+            if operator.eq(self._c_variable_identity_key_8616(arg), identity_key):
                 return True
             if self._statement_references_variable_identity_8616(arg, identity_key):
                 return True
@@ -21836,7 +23681,8 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _is_skip_after_typed_collect(self, stmt: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_skip_after_typed_collect(self, stmt: StructuredAstValue) -> cython.bint:
         return (
             self._is_stack_carrier_temp_assignment(stmt)
             or self._is_non_memory_assignment(stmt)
@@ -21849,7 +23695,8 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _expr_op_is_valid(self, op: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _expr_op_is_valid(self, op: StructuredAstValue) -> cython.bint:
         if not isinstance(op, tuple) or len(op) != 2:
             return False
         op_name, op_value = op
@@ -21861,7 +23708,9 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _is_stack_address_arg_expr_8616(self, expr: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_stack_address_arg_expr_8616(self, expr: StructuredAstValue) -> cython.bint:
+        variable: object
         node = self._strip_arg_casts(expr)
         if not isinstance(node, CUnaryOp) or getattr(node, "op", None) not in {"Reference", "AddressOf"}:
             return False
@@ -21871,7 +23720,9 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _summary_logical_arg_widths(self, summary: StructuredAstValue, callee_name: str | None) -> tuple[int, ...] | None:
+    @cython.ccall
+    def _summary_logical_arg_widths(self, summary: object, callee_name: object) -> object:
+        expected_widths: object
         if summary is None or not isinstance(callee_name, str) or not callee_name:
             return None
         push_sources = _boundary_tuple_8616(summary.push_arg_sources or ())
@@ -21906,7 +23757,8 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _arg_is_stable_materialized_for_contract_8616(self, arg_index: int, node: StructuredAstValue, *, arity_satisfied: bool, callee_prototype: object, semantic_name: str | None) -> bool:
+    @cython.ccall
+    def _arg_is_stable_materialized_for_contract_8616(self, arg_index: cython.longlong, node: StructuredAstValue, *, arity_satisfied: cython.bint, callee_prototype: object, semantic_name: object) -> cython.bint:
         if not arity_satisfied:
             return False
         if self._node_contains_placeholder_stack_8616(node) or self._expr_contains_plain_register_uses(node):
@@ -21924,9 +23776,11 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _materialize_symbol_store_assignment_8616(self,
-        assignment: StructuredAstValue, offset: int, symbol: StructuredAstValue
-    ) -> bool:
+        assignment: StructuredAstValue, offset: cython.longlong, symbol: StructuredAstValue
+    ) -> cython.bint:
+        lhs: object
         lhs = self._stack_cvar_for_offset(offset, allow_best_match=False)
         if lhs is None:
             lhs = self._stack_cvar_for_offset(offset, allow_best_match=True)
@@ -21959,13 +23813,16 @@ class _CallsiteStackArgsMaterializer8616:
         ],
         ...,
     ]:
-        return tuple(self._debug_assignment_tuple_8616(assignment) for assignment in self._iter_assignment_nodes(stmt))
+        return tuple(self._debug_assignment_tuple_8616(assignment) for assignment in builtins.iter(self._iter_assignment_nodes(stmt)))
 
 
 
+    @cython.ccall
     def _combined_low_high_target(self,
         node: StructuredAstValue, low_expr: StructuredAstValue, high_expr: StructuredAstValue
-    ) -> bool:
+    ) -> cython.bint:
+        lhs_shift_source: object
+        rhs_shift_source: object
         node = self._strip_casts(node)
         if not isinstance(node, CBinaryOp) or getattr(node, "op", None) != "Or":
             return False
@@ -21987,7 +23844,11 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _expr_contains_non_segment_register_uses(self, node: StructuredAstValue) -> bool:
+    def _expr_contains_non_segment_register_uses(self, node: StructuredAstValue) -> cython.bint:
+        child: object
+        current: object
+        items: object
+        attr: object
         stack = [node]
         while stack:
             current = stack.pop()
@@ -22003,22 +23864,27 @@ class _CallsiteStackArgsMaterializer8616:
             for attr in ("args", "operands"):
                 items = getattr(current, attr, None)
                 if isinstance(items, (list, tuple)):
-                    stack.extend(item for item in items if item is not None)
+                    stack.extend(item for item in iter(items) if item is not None)
         return False
 
 
 
     def symbol_for_immediate(self,
-        offset: int, imm: int | None, *, exclude_names: set[str] | None = None, evidence: dict[int, list[tuple[int, StructuredAstValue]]]
+        offset: cython.longlong, imm: int | None, *, exclude_names: object = None, evidence: object
     ) -> StructuredAstValue:
         """Return a cloned evidence symbol for ``offset`` matching ``imm``, or None."""
+        name: object
+        symbols: object
+        _candidate_imm: object
+        candidate_imm: object
+        symbol: object
         symbols = evidence.get(offset)
         if not symbols:
             return None
         excluded = exclude_names or set()
         if isinstance(imm, int):
             for candidate_imm, symbol in symbols:
-                if (candidate_imm & 0xFFFF) == (imm & 0xFFFF):
+                if operator.eq((candidate_imm & 0xFFFF), (imm & 0xFFFF)):
                     return self._clone_c_ast_tree(symbol)
         for _candidate_imm, symbol in symbols:
             name = self._symbol_name_8616(symbol)
@@ -22029,7 +23895,9 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _rhs_is_dirty_stack_pointer_arithmetic_8616(self, rhs: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _rhs_is_dirty_stack_pointer_arithmetic_8616(self, rhs: StructuredAstValue) -> cython.bint:
+        node: object
         node = rhs
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -22047,10 +23915,12 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _rhs_is_dirty_far_pointer_value_artifact_8616(self, rhs: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _rhs_is_dirty_far_pointer_value_artifact_8616(self, rhs: StructuredAstValue) -> cython.bint:
+        node: object
         if not self._expr_contains_dirty_carrier_8616(rhs):
             return False
-        for node in (rhs, *_iter_c_nodes_deep_8616(rhs)):
+        for node in (rhs, ) + tuple(_iter_c_nodes_deep_8616(rhs)):
             if isinstance(node, CFunctionCall):
                 return False
             if isinstance(node, CUnaryOp) and getattr(node, "op", None) == "Dereference":
@@ -22059,11 +23929,13 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _consumed_carrier_scan_step_8616(self,
         candidate: StructuredAstValue,
-        pending_keys: set[tuple[str, str | int]],
+        pending_keys: object,
     ) -> str:
         """Classify one candidate while chasing consumed-store carriers (take|skip|stop)."""
+        assignment: object
         if self._statement_contains_call(candidate):
             return "stop"
         assignment = self._top_level_assignment_node_8616(candidate)
@@ -22084,9 +23956,12 @@ class _CallsiteStackArgsMaterializer8616:
         pending_keys.update(self._carrier_rhs_keys_to_chase_for_consumed_store_8616(rhs))
         return "take"
 
+    @cython.ccall
     def _consumed_stack_store_carrier_indices_8616(self,
-        consumed_indices: list[int], *, new_statements: list[StructuredAstValue],
-    ) -> list[int]:
+        consumed_indices: object, *, new_statements: object,
+    ) -> object:
+        assignment: object
+        consumed_idx: object
         if not consumed_indices:
             return []
         pending_keys: set[tuple[str, str | int]] = set()
@@ -22101,7 +23976,7 @@ class _CallsiteStackArgsMaterializer8616:
             pending_keys.update(_generic_stack_carrier_keys_8616(rhs))
         if not pending_keys:
             return []
-        carrier_indices: list[int] = []
+        carrier_indices: list[cython.longlong] = []
         scan_idx = min(consumed_indices) - 1
         while scan_idx >= 0 and pending_keys:
             action = self._consumed_carrier_scan_step_8616(new_statements[scan_idx], pending_keys)
@@ -22114,13 +23989,15 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _collect_backtracked_runtime_stack_store_args_8616(self,
-        *, wanted_count: int, new_statements: list[StructuredAstValue]
-    ) -> tuple[list[StructuredAstValue], list[int]]:
+        *, wanted_count: cython.longlong, new_statements: object
+    ) -> tuple[list[StructuredAstValue], list[cython.longlong]]:
+        rhs: object
         if wanted_count <= 0:
             return [], []
         rhs_values: list[StructuredAstValue] = []
-        consumed_indices: list[int] = []
+        consumed_indices: list[cython.longlong] = []
         skipped_carriers = 0
         skipped_values = 0
         idx = len(new_statements) - 1
@@ -22145,12 +24022,13 @@ class _CallsiteStackArgsMaterializer8616:
                 idx -= 1
                 continue
             break
-        if len(rhs_values) != wanted_count:
+        if operator.ne(len(rhs_values), wanted_count):
             return [], []
         return rhs_values, consumed_indices
 
 
 
+    @cython.ccall
     def _unary_unwrap(self, value_node: StructuredAstValue) -> StructuredAstValue:
         while isinstance(value_node, CTypeCast):
             value_node = value_node.expr
@@ -22158,7 +24036,8 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _has_arithmetic_push_source(self, source: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _has_arithmetic_push_source(self, source: StructuredAstValue) -> cython.bint:
         return (
             isinstance(source, tuple)
             and len(source) >= 3
@@ -22169,7 +24048,11 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _is_scalar_global_high_byte_carrier_remnant_8616(self, stmt: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_scalar_global_high_byte_carrier_remnant_8616(self, stmt: StructuredAstValue) -> cython.bint:
+        assignment: object
+        lhs: object
+        rhs: object
         if self._statement_contains_call(stmt):
             return False
         assignment = self._top_level_assignment_node_8616(stmt)
@@ -22184,13 +24067,15 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _setup_window_assignment_shape_is_prunable_8616(self,
-        candidate_lhs: StructuredAstValue,
-        candidate_rhs: StructuredAstValue,
+        candidate_lhs: object,
+        candidate_rhs: object,
         call_node: StructuredAstValue,
         *,
-        allow_unreferenced_stack_dirty: bool,
-    ) -> bool:
+        allow_unreferenced_stack_dirty: cython.bint,
+    ) -> cython.bint:
+        lhs_key: object
         if candidate_lhs is None or candidate_rhs is None:
             return False
         if candidate_lhs.__class__.__name__ == "CDirtyExpression":
@@ -22207,7 +24092,8 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def flatten(self, term: StructuredAstValue, sign: int = 1) -> StructuredAstValue:
+    @cython.ccall
+    def flatten(self, term: StructuredAstValue, sign: cython.longlong = 1) -> StructuredAstValue:
         """Flatten an Add/Sub expression tree into ``(term, sign)`` leaf pairs."""
         while isinstance(term, CTypeCast):
             term = term.expr
@@ -22219,20 +24105,25 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _is_register_expr_by_offset(self, node: StructuredAstValue, reg_name: str) -> bool:
+    @cython.ccall
+    def _is_register_expr_by_offset(self, node: StructuredAstValue, reg_name: object) -> cython.bint:
+        arch_reg_name: object
+        variable: object
         node = self._strip_casts(node)
         variable = getattr(node, "variable", None)
         if not isinstance(variable, SimRegisterVariable):
             return False
         reg = variable.reg
         arch_reg_name = getattr(getattr(self.project, "arch", None), "register_names", {}).get(reg)
-        return isinstance(arch_reg_name, str) and arch_reg_name.lower() == reg_name.lower()
+        return isinstance(arch_reg_name, str) and operator.eq(arch_reg_name.lower(), reg_name.lower())
 
 
 
-    def _expr_int_constants(self, node: StructuredAstValue) -> set[int]:
-        values: set[int] = set()
-        for current in (node, *_iter_c_nodes_deep_8616(node)):
+    @cython.ccall
+    def _expr_int_constants(self, node: StructuredAstValue) -> object:
+        current: object
+        values: set[cython.longlong] = set()
+        for current in (node, ) + tuple(_iter_c_nodes_deep_8616(node)):
             if isinstance(current, structured_c.CConstant):
                 value = current.value
                 if isinstance(value, int):
@@ -22241,7 +24132,8 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _is_index_register_expr_8616(self, expr: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_index_register_expr_8616(self, expr: StructuredAstValue) -> cython.bint:
         node = self._strip_arg_casts(expr)
         if self._is_plain_register_value_expr(node):
             return True
@@ -22253,7 +24145,10 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _combined_unknown_low_high_target(self, node: StructuredAstValue, high_expr: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _combined_unknown_low_high_target(self, node: StructuredAstValue, high_expr: StructuredAstValue) -> cython.bint:
+        lhs_shift_source: object
+        rhs_shift_source: object
         node = self._strip_casts(node)
         if not isinstance(node, CBinaryOp) or getattr(node, "op", None) != "Or":
             return False
@@ -22273,7 +24168,10 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _stack_address_arg_offset_8616(self, expr: StructuredAstValue) -> int | None:
+        offset: object
+        variable: object
         node = self._strip_arg_casts(expr)
         if not isinstance(node, CUnaryOp) or getattr(node, "op", None) not in {"Reference", "AddressOf"}:
             return None
@@ -22284,11 +24182,13 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _rhs_is_byte_proven_dirty_push_alias_artifact_8616(self, rhs: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _rhs_is_byte_proven_dirty_push_alias_artifact_8616(self, rhs: StructuredAstValue) -> cython.bint:
+        node: object
         if self._statement_contains_call(rhs):
             return False
         has_dirty = False
-        for node in (rhs, *_iter_c_nodes_deep_8616(rhs)):
+        for node in (rhs, ) + tuple(_iter_c_nodes_deep_8616(rhs)):
             if isinstance(node, CFunctionCall):
                 return False
             if isinstance(node, CUnaryOp) and getattr(node, "op", None) == "Dereference":
@@ -22299,7 +24199,7 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _has_simple_bp_arithmetic_push_source(self, source: StructuredAstValue) -> bool:
+    def _has_simple_bp_arithmetic_push_source(self, source: StructuredAstValue) -> cython.bint:
         """Return true only for exact stack-slot arithmetic push facts."""
         if not (
             isinstance(source, tuple)
@@ -22318,13 +24218,16 @@ class _CallsiteStackArgsMaterializer8616:
             and len(op) == 2
             and op[0] in {CallsitePushExprOp8616.ADD.value, CallsitePushExprOp8616.SUB.value}
             and isinstance(op[1], int)
-            for op in source[2]
+            for op in iter(source[2])
         )
 
 
 
+    @cython.ccall
     def standalone_call_from_statement(self, stmt: StructuredAstValue) -> StructuredAstValue:
         """Unwrap a statement to its standalone CFunctionCall node, or None."""
+        expr: object
+        nested: object
         if isinstance(stmt, CFunctionCall):
             return stmt
         expr = getattr(stmt, "expr", None)
@@ -22337,7 +24240,12 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _global_word_high_byte_source_offset_8616(self, expr: StructuredAstValue) -> int | None:
+        addr: object
+        lhs: object
+        offset: object
+        shift_value: object
         node = expr
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -22359,7 +24267,8 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _is_far_pointer_byte_store_source_8616(self, source: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_far_pointer_byte_store_source_8616(self, source: StructuredAstValue) -> cython.bint:
         if self._is_segment_register_value_expr(source):
             return True
         if self._rhs_is_safe_push_alias_artifact_8616(source):
@@ -22368,12 +24277,18 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _ifelse_branch_symbol_names_for_offset_8616(self, stmt: structured_c.CIfElse, offset: int) -> set[str]:
+    @cython.ccall
+    def _ifelse_branch_symbol_names_for_offset_8616(self, stmt: structured_c.CIfElse, offset: cython.longlong) -> object:
+        else_node: object
+        name: object
+        _cond: object
+        assignment: object
+        child: object
         names: set[str] = set()
         for _cond, child in _boundary_tuple_8616(getattr(stmt, "condition_and_nodes", ()) or ()):
             for assignment in self._iter_assignment_nodes(child):
                 lhs, rhs = self._assignment_lhs_rhs(assignment)
-                if self._stack_offset_from_cvar_8616(lhs) == offset:
+                if operator.eq(self._stack_offset_from_cvar_8616(lhs), offset):
                     name = self._symbol_name_8616(rhs)
                     if name is not None:
                         names.add(name)
@@ -22381,7 +24296,7 @@ class _CallsiteStackArgsMaterializer8616:
         if else_node is not None:
             for assignment in self._iter_assignment_nodes(else_node):
                 lhs, rhs = self._assignment_lhs_rhs(assignment)
-                if self._stack_offset_from_cvar_8616(lhs) == offset:
+                if operator.eq(self._stack_offset_from_cvar_8616(lhs), offset):
                     name = self._symbol_name_8616(rhs)
                     if name is not None:
                         names.add(name)
@@ -22389,6 +24304,7 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _debug_assignment_tuple_8616(self,
         assignment: StructuredAstValue,
     ) -> tuple[
@@ -22401,22 +24317,23 @@ class _CallsiteStackArgsMaterializer8616:
 
 
     def _assignment_is_stale_post_branch_fnptr_overwrite_8616(self,
-        stmt: StructuredAstValue, offset: int, symbol_names: set[str]
-    ) -> bool:
+        stmt: StructuredAstValue, offset: cython.longlong, symbol_names: object
+    ) -> cython.bint:
         assignments = tuple(self._iter_assignment_nodes(stmt))
         if len(assignments) != 1:
             return False
         assignment = assignments[0]
         lhs, rhs = self._assignment_lhs_rhs(assignment)
-        if self._stack_offset_from_cvar_8616(lhs) != offset:
+        if operator.ne(self._stack_offset_from_cvar_8616(lhs), offset):
             return False
         rhs_symbol = self._symbol_name_8616(rhs)
         if rhs_symbol in symbol_names:
             return False
-        return all(not isinstance(node, CFunctionCall) for node in _iter_c_nodes_deep_8616(stmt))
+        return all(not isinstance(node, CFunctionCall) for node in builtins.iter(_iter_c_nodes_deep_8616(stmt)))
 
 
 
+    @cython.ccall
     def _shift16_source(self, node: StructuredAstValue) -> StructuredAstValue | None:
         node = self._strip_casts(node)
         if not isinstance(node, CBinaryOp) or getattr(node, "op", None) not in {"Shl", "LShift"}:
@@ -22427,9 +24344,12 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _fold_later_stale_return_pair_by_preorder_8616(self,
-        container: list[StructuredAstValue], seen_destinations: list[StructuredAstValue]
-    ) -> bool:
+        container: object, seen_destinations: object
+    ) -> cython.bint:
+        lhs: object
+        nested: object
 
         changed_local = False
         idx = 0
@@ -22466,6 +24386,7 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _constant_value(self, node: StructuredAstValue) -> int | None:
         node = self._strip_casts(node)
         if isinstance(node, structured_c.CConstant):
@@ -22475,7 +24396,10 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _rhs_is_safe_pre_call_setup_artifact_8616(self, expr: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _rhs_is_safe_pre_call_setup_artifact_8616(self, expr: StructuredAstValue) -> cython.bint:
+        cached: object
+        node: object
         expr_id = id(expr)
         cached = self.rhs_safe_pre_call_setup_cache.get(expr_id)
         if cached is not None:
@@ -22483,7 +24407,7 @@ class _CallsiteStackArgsMaterializer8616:
         if self._statement_contains_call(expr):
             self.rhs_safe_pre_call_setup_cache[expr_id] = False
             return False
-        for node in (expr, *_iter_c_nodes_deep_8616(expr)):
+        for node in (expr, ) + tuple(_iter_c_nodes_deep_8616(expr)):
             if isinstance(node, CFunctionCall):
                 self.rhs_safe_pre_call_setup_cache[expr_id] = False
                 return False
@@ -22495,9 +24419,10 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _push_source_has_binary_evidence_in_call_window_8616(self,
-        source: StructuredAstValue, callsite_addr: int
-    ) -> bool:
+        source: StructuredAstValue, callsite_addr: cython.longlong
+    ) -> cython.bint:
         for evidence_ins_addr in range(callsite_addr - 1, callsite_addr - 17, -1):
             if (
                 isinstance(source, tuple)
@@ -22517,10 +24442,13 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _global_word_push_source_offsets_8616(self,
-        push_sources: tuple[StructuredAstValue, ...],
-    ) -> set[int]:
-        offsets: set[int] = set()
+        push_sources: object,
+    ) -> object:
+        info: object
+        source: object
+        offsets: set[cython.longlong] = set()
         if not isinstance(push_sources, tuple):
             return offsets
         for source in push_sources:
@@ -22534,7 +24462,12 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _stack_slot_write_token_for_stmt_8616(self, stmt: StructuredAstValue) -> str | None:
+    @cython.ccall
+    def _stack_slot_write_token_for_stmt_8616(self, stmt: StructuredAstValue) -> object:
+        assignment: object
+        lhs: object
+        size: object
+        variable: object
         assignment = self._top_level_assignment_node_8616(stmt)
         if assignment is None:
             return None
@@ -22553,8 +24486,10 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _expr_contains_dirty_carrier_8616(self, expr: StructuredAstValue) -> bool:
-        for node in (expr, *_iter_c_nodes_deep_8616(expr)):
+    @cython.ccall
+    def _expr_contains_dirty_carrier_8616(self, expr: StructuredAstValue) -> cython.bint:
+        node: object
+        for node in (expr, ) + tuple(_iter_c_nodes_deep_8616(expr)):
             if node.__class__.__name__ == "CDirtyExpression":
                 return True
         return False
@@ -22562,19 +24497,21 @@ class _CallsiteStackArgsMaterializer8616:
 
 
     def _fold_stale_return_pair_8616(self,
-        container: list[StructuredAstValue],
-        idx: int,
+        container: object,
+        idx: cython.longlong,
         lhs: StructuredAstValue,
         rhs: StructuredAstValue,
-        seen_call_destinations: list[StructuredAstValue],
-    ) -> bool:
+        seen_call_destinations: object,
+    ) -> cython.bint:
         """Fold a stale post-call DX:AX pair re-assignment at ``idx``; return True when removed."""
+        high_expr: object
+        low_expr: object
         low_expr = self._register_expr_from_name_8616("ax")
         high_expr = self._register_expr_from_name_8616("dx")
         if not (
             low_expr is not None
             and high_expr is not None
-            and any(self._same_return_destination_8616(lhs, seen_lhs) for seen_lhs in seen_call_destinations)
+            and any(self._same_return_destination_8616(lhs, seen_lhs) for seen_lhs in iter(seen_call_destinations))
             and (
                 self._combined_low_high_target(rhs, low_expr, high_expr)
                 or self._combined_unknown_low_high_target(rhs, high_expr)
@@ -22593,13 +24530,16 @@ class _CallsiteStackArgsMaterializer8616:
             )
         return True
 
+    @cython.ccall
     def _fold_adjacent_return_pair_8616(self,
-        container: list[StructuredAstValue],
-        idx: int,
+        container: object,
+        idx: cython.longlong,
         lhs: StructuredAstValue,
-        seen_call_destinations: list[StructuredAstValue],
-    ) -> bool:
+        seen_call_destinations: object,
+    ) -> cython.bint:
         """Fold an adjacent stale DX:AX pair after the call store at ``idx``; return True when folded."""
+        high_expr: object
+        low_expr: object
         low_expr = self._register_expr_from_name_8616("ax")
         high_expr = self._register_expr_from_name_8616("dx")
         combine_idx = self._next_nonempty_index(container, idx + 1)
@@ -22641,7 +24581,9 @@ class _CallsiteStackArgsMaterializer8616:
             )
         return True
 
-    def _fold_adjacent_stale_return_pair_after_destination_call_8616(self, container: list[StructuredAstValue]) -> bool:
+    @cython.ccall
+    def _fold_adjacent_stale_return_pair_after_destination_call_8616(self, container: object) -> cython.bint:
+        lhs: object
         changed_local = False
         seen_call_destinations: list[StructuredAstValue] = []
         idx = 0
@@ -22665,9 +24607,12 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _debug_expr_name_offset_value_8616(self,
         expr: StructuredAstValue,
     ) -> tuple[str, str | None, int | None, int | None]:
+        node: object
+        variable: object
         node = expr
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -22684,11 +24629,13 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _branch_node_is_empty_8616(self, node: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _branch_node_is_empty_8616(self, node: object) -> cython.bint:
         return node is not None and not _boundary_tuple_8616(getattr(node, "statements", ()) or ())
 
 
 
+    @cython.ccall
     def _strip_arg_casts(self, node: StructuredAstValue) -> StructuredAstValue:
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -22696,7 +24643,8 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _push_source_is_arithmetic_expr_8616(self, source: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _push_source_is_arithmetic_expr_8616(self, source: StructuredAstValue) -> cython.bint:
         return (
             isinstance(source, tuple)
             and len(source) == 3
@@ -22708,7 +24656,10 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _guard_stack_address_offset_arg_base_8616(self, expr: StructuredAstValue) -> int | None:
+        lhs_offset: object
+        rhs_offset: object
         node = expr
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -22731,7 +24682,9 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _contains_unsafe_dirty_term(self, term: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _contains_unsafe_dirty_term(self, term: StructuredAstValue) -> cython.bint:
+        raw_node: object
         nodes = (term, *_iter_c_nodes_deep_8616(term))
         for raw_node in nodes:
             if raw_node.__class__.__name__ == "CDirtyExpression":
@@ -22742,7 +24695,8 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _flatten_add_sub(self, value_node: StructuredAstValue, sign: int = 1) -> list[tuple[StructuredAstValue, int]]:
+    @cython.ccall
+    def _flatten_add_sub(self, value_node: StructuredAstValue, sign: cython.longlong = 1) -> object:
         value_node = self._unary_unwrap(value_node)
         if isinstance(value_node, CBinaryOp) and value_node.op == "Add":
             return self._flatten_add_sub(value_node.lhs, sign) + self._flatten_add_sub(value_node.rhs, sign)
@@ -22752,8 +24706,10 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def single_nested_statement(self, stmt: StructuredAstValue) -> StructuredAstValue:
         """Return the lone nested statement when present, else the statement itself."""
+        nested: object
         nested = getattr(stmt, "statements", None)
         if isinstance(nested, (list, tuple)) and len(nested) == 1:
             return nested[0]
@@ -22761,7 +24717,12 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _assignment_semantic_copy_key_8616(self, candidate: StructuredAstValue) -> StructuredAstValue:
+        assignment: object
+        lhs: object
+        lhs_key: object
+        rhs: object
         assignment = self._top_level_assignment_node_8616(candidate)
         if assignment is None or self._statement_contains_call(assignment):
             return None
@@ -22780,9 +24741,14 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _is_scalar_global_low_byte_store_remnant_8616(self,
-        stmt: StructuredAstValue, push_sources: tuple[StructuredAstValue, ...], call_node: StructuredAstValue
-    ) -> bool:
+        stmt: StructuredAstValue, push_sources: object, call_node: StructuredAstValue
+    ) -> cython.bint:
+        assignment: object
+        lhs: object
+        rhs: object
+        source_offset: object
         assignment = self._top_level_assignment_node_8616(stmt)
         if assignment is None:
             return False
@@ -22813,7 +24779,8 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _is_stale_high_byte_mask(self, node: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_stale_high_byte_mask(self, node: StructuredAstValue) -> cython.bint:
         node = self._strip_arg_casts(node)
         if not isinstance(node, CBinaryOp) or node.op != "And":
             return False
@@ -22821,7 +24788,9 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
+    @cython.ccall
     def _constant_int_value_8616(self, expr: StructuredAstValue) -> int | None:
+        node: object
         node = expr
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -22831,11 +24800,11 @@ class _CallsiteStackArgsMaterializer8616:
 
 
     def _push_sources_have_binary_setup_window_evidence_8616(self,
-        window_callsite_addr: int, window_push_sources: tuple[StructuredAstValue, ...]
-    ) -> bool:
+        window_callsite_addr: cython.longlong, window_push_sources: object
+    ) -> cython.bint:
         bp_expr_sources = tuple(
             source
-            for source in window_push_sources
+            for source in iter(window_push_sources)
             if isinstance(source, tuple)
             and len(source) >= 1
             and source[0] == "expr"
@@ -22845,22 +24814,24 @@ class _CallsiteStackArgsMaterializer8616:
             return False
         evidence_sources = tuple(
             source
-            for source in window_push_sources
+            for source in iter(window_push_sources)
             if (
                 isinstance(source, tuple) and len(source) >= 1 and (source[0] == "imm" or source in bp_expr_sources)
             )
         )
         return bool(evidence_sources) and all(
             self._push_source_has_binary_evidence_in_call_window_8616(source, window_callsite_addr)
-            for source in evidence_sources
+            for source in iter(evidence_sources)
         )
 
 
 
-    def _rhs_is_safe_far_pointer_carrier_artifact_8616(self, rhs: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _rhs_is_safe_far_pointer_carrier_artifact_8616(self, rhs: StructuredAstValue) -> cython.bint:
+        node: object
         if self._statement_contains_call(rhs):
             return False
-        for node in (rhs, *_iter_c_nodes_deep_8616(rhs)):
+        for node in (rhs, ) + tuple(_iter_c_nodes_deep_8616(rhs)):
             if isinstance(node, CFunctionCall):
                 return False
             if isinstance(node, CUnaryOp) and getattr(node, "op", None) == "Dereference":
@@ -22869,7 +24840,9 @@ class _CallsiteStackArgsMaterializer8616:
 
 
 
-    def _call_has_dx_ax_destination_proof_8616(self, call: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _call_has_dx_ax_destination_proof_8616(self, call: object) -> cython.bint:
+        summary: object
         summary = self.summary_map.get(id(call)) if call is not None else None
         if summary is None or summary.return_used is not True or summary.return_register not in {None, "ax"}:
             return False
@@ -22879,13 +24852,15 @@ class _CallsiteStackArgsMaterializer8616:
         )
 
 
-def _materialize_callsite_stack_arguments_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> bool:
+@cython.ccall
+def _materialize_callsite_stack_arguments_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> cython.bint:
     return _CallsiteStackArgsMaterializer8616(project, codegen).run()
 
 
+@cython.ccall
 def replay_callsite_stack_arguments_after_regeneration_8616(
     project: StructuredAstValue, codegen: StructuredAstValue
-) -> bool:
+) -> cython.bint:
     """Replay source/summary-backed call argument materialization after text regeneration.
 
     angr's ``regenerate_text()`` may rebuild the structured C tree from older
@@ -22894,6 +24869,8 @@ def replay_callsite_stack_arguments_after_regeneration_8616(
     emitted tree aligned with the validated semantic tree without using rendered
     C text as input.
     """
+    arch_name: object
+    summary_map: object
     if getattr(codegen, "_inertia_callsite_arg_regen_replay_active_8616", False):
         return False
     project = project or getattr(codegen, "project", None)
@@ -22928,8 +24905,10 @@ def replay_callsite_stack_arguments_after_regeneration_8616(
     return changed
 
 
-def _rhs_is_dirty_stack_pointer_arithmetic_8616(rhs: StructuredAstValue) -> bool:
+@cython.ccall
+def _rhs_is_dirty_stack_pointer_arithmetic_8616(rhs: StructuredAstValue) -> cython.bint:
     """Return whether the RHS is dirty-expression stack-pointer arithmetic."""
+    node: object
     node = rhs
     while isinstance(node, CTypeCast):
         node = node.expr
@@ -22946,9 +24925,11 @@ def _rhs_is_dirty_stack_pointer_arithmetic_8616(rhs: StructuredAstValue) -> bool
     return False
 
 
-def _rhs_is_safe_value_artifact_8616(rhs: StructuredAstValue) -> bool:
+@cython.ccall
+def _rhs_is_safe_value_artifact_8616(rhs: StructuredAstValue) -> cython.bint:
     """Return whether the RHS contains only value-safe artifacts."""
-    for child in (rhs, *_iter_c_nodes_deep_8616(rhs)):
+    child: object
+    for child in (rhs, ) + tuple(_iter_c_nodes_deep_8616(rhs)):
         if isinstance(child, CFunctionCall):
             return False
         if isinstance(child, CUnaryOp) and getattr(child, "op", None) == "Dereference":
@@ -22956,9 +24937,12 @@ def _rhs_is_safe_value_artifact_8616(rhs: StructuredAstValue) -> bool:
     return True
 
 
-def _safe_carrier_lhs_children_ok_8616(lhs: StructuredAstValue) -> bool:
+@cython.ccall
+def _safe_carrier_lhs_children_ok_8616(lhs: StructuredAstValue) -> cython.bint:
     """Whether the carrier lhs subtree is free of calls, dereferences, and memory vars."""
-    for lhs_child in (lhs, *_iter_c_nodes_deep_8616(lhs)):
+    variable: object
+    lhs_child: object
+    for lhs_child in (lhs, ) + tuple(_iter_c_nodes_deep_8616(lhs)):
         if isinstance(lhs_child, CFunctionCall):
             return False
         if isinstance(lhs_child, CUnaryOp) and getattr(lhs_child, "op", None) == "Dereference":
@@ -22969,8 +24953,13 @@ def _safe_carrier_lhs_children_ok_8616(lhs: StructuredAstValue) -> bool:
     return True
 
 
-def _is_safe_carrier_stmt_8616(stmt: StructuredAstValue) -> bool:
+@cython.ccall
+def _is_safe_carrier_stmt_8616(stmt: StructuredAstValue) -> cython.bint:
     """Return whether the statement is a removable scalar carrier assignment."""
+    assignment: object
+    lhs: object
+    rhs: object
+    variable: object
     if _hb_statement_contains_call(stmt):
         return False
     assignment = _hb_top_level_assignment(stmt)
@@ -22993,7 +24982,9 @@ def _is_safe_carrier_stmt_8616(stmt: StructuredAstValue) -> bool:
     return _rhs_is_safe_value_artifact_8616(rhs) or _rhs_is_dirty_stack_pointer_arithmetic_8616(rhs)
 
 
-def _hb_call_name(call: StructuredAstValue) -> str | None:
+@cython.ccall
+def _hb_call_name(call: StructuredAstValue) -> object:
+    name: object
     name = getattr(call, "callee_target", None)
     if isinstance(name, str) and name:
         return name
@@ -23001,7 +24992,11 @@ def _hb_call_name(call: StructuredAstValue) -> str | None:
     return name if isinstance(name, str) and name else None
 
 
+@cython.ccall
 def _hb_call_from_statement(stmt: StructuredAstValue) -> StructuredAstValue:
+    nested: object
+    value: object
+    attr: object
     if isinstance(stmt, CFunctionCall):
         return stmt
     for attr in ("expr", "rhs", "src"):
@@ -23014,13 +25009,14 @@ def _hb_call_from_statement(stmt: StructuredAstValue) -> StructuredAstValue:
     return None
 
 
-def _hb_statement_contains_call(stmt: StructuredAstValue) -> bool:
+def _hb_statement_contains_call(stmt: StructuredAstValue) -> cython.bint:
     if isinstance(stmt, CFunctionCall):
         return True
-    return any(isinstance(node, CFunctionCall) for node in _iter_c_nodes_deep_8616(stmt))
+    return any(isinstance(node, CFunctionCall) for node in builtins.iter(_iter_c_nodes_deep_8616(stmt)))
 
 
-def _hb_is_assignment(node: StructuredAstValue) -> bool:
+@cython.ccall
+def _hb_is_assignment(node: object) -> cython.bint:
     if node is None:
         return False
     class_name = node.__class__.__name__
@@ -23031,7 +25027,10 @@ def _hb_is_assignment(node: StructuredAstValue) -> bool:
     )
 
 
+@cython.ccall
 def _hb_assignment_lhs_rhs(node: StructuredAstValue) -> StructuredAstValue:
+    lhs: object
+    rhs: object
     lhs = getattr(node, "lhs", None)
     rhs = getattr(node, "rhs", None)
     if lhs is None and hasattr(node, "dst"):
@@ -23040,7 +25039,9 @@ def _hb_assignment_lhs_rhs(node: StructuredAstValue) -> StructuredAstValue:
     return lhs, rhs
 
 
+@cython.ccall
 def _hb_top_level_assignment(stmt: StructuredAstValue) -> StructuredAstValue:
+    nested: object
     if _hb_is_assignment(stmt):
         return stmt
     nested = getattr(stmt, "statements", None)
@@ -23049,11 +25050,14 @@ def _hb_top_level_assignment(stmt: StructuredAstValue) -> StructuredAstValue:
     return None
 
 
-def _hb_function_call_name_is(node: StructuredAstValue, wanted: str) -> bool:
-    return isinstance(node, CFunctionCall) and (_hb_call_name(node) or "").upper() == wanted
+@cython.ccall
+def _hb_function_call_name_is(node: StructuredAstValue, wanted: object) -> cython.bint:
+    return isinstance(node, CFunctionCall) and operator.eq((_hb_call_name(node) or "").upper(), wanted)
 
 
+@cython.ccall
 def _hb_constant_int(expr: StructuredAstValue) -> int | None:
+    node: object
     node = expr
     while isinstance(node, CTypeCast):
         node = node.expr
@@ -23061,7 +25065,12 @@ def _hb_constant_int(expr: StructuredAstValue) -> int | None:
     return int(value) if isinstance(value, int) else None
 
 
+@cython.ccall
 def _hb_global_word_expr_offset(expr: StructuredAstValue) -> int | None:
+    addr: object
+    offset: object
+    pair_offset: object
+    width: object
     node = expr
     while isinstance(node, CTypeCast):
         node = node.expr
@@ -23083,7 +25092,9 @@ def _hb_global_word_expr_offset(expr: StructuredAstValue) -> int | None:
     return None
 
 
+@cython.ccall
 def _hb_global_byte_expr_offset(expr: StructuredAstValue) -> int | None:
+    addr: object
     node = expr
     while isinstance(node, CTypeCast):
         node = node.expr
@@ -23095,6 +25106,7 @@ def _hb_global_byte_expr_offset(expr: StructuredAstValue) -> int | None:
     return None
 
 
+@cython.ccall
 def _hb_global_scaled_byte_expr_offset(expr: StructuredAstValue) -> int | None:
     node = expr
     while isinstance(node, CTypeCast):
@@ -23111,7 +25123,10 @@ def _hb_global_scaled_byte_expr_offset(expr: StructuredAstValue) -> int | None:
     return None
 
 
+@cython.ccall
 def _hb_global_word_byte_pair_offset(expr: StructuredAstValue) -> int | None:
+    high_offset: object
+    low_offset: object
     node = expr
     while isinstance(node, CTypeCast):
         node = node.expr
@@ -23122,12 +25137,16 @@ def _hb_global_word_byte_pair_offset(expr: StructuredAstValue) -> int | None:
     if low_offset is None or high_offset is None:
         low_offset = _hb_global_byte_expr_offset(getattr(node, "rhs", None))
         high_offset = _hb_global_scaled_byte_expr_offset(getattr(node, "lhs", None))
-    if low_offset is None or high_offset is None or high_offset != low_offset + 1:
+    if low_offset is None or high_offset is None or operator.ne(high_offset, low_offset + 1):
         return None
     return low_offset & 0xFFFF
 
 
+@cython.ccall
 def _hb_global_high_byte_source_offset(expr: StructuredAstValue) -> int | None:
+    addr: object
+    lhs: object
+    offset: object
     node = expr
     while isinstance(node, CTypeCast):
         node = node.expr
@@ -23149,21 +25168,26 @@ def _hb_global_high_byte_source_offset(expr: StructuredAstValue) -> int | None:
     return None
 
 
-def _hb_call_args_reference_global_word(call: StructuredAstValue, offset: int) -> bool:
+@cython.ccall
+def _hb_call_args_reference_global_word(call: StructuredAstValue, offset: cython.longlong) -> cython.bint:
+    arg: object
+    node: object
     for arg in _boundary_tuple_8616(getattr(call, "args", ()) or ()):
-        for node in (arg, *_iter_c_nodes_deep_8616(arg)):
-            if _hb_global_word_expr_offset(node) == (offset & 0xFFFF):
+        for node in (arg, ) + tuple(_iter_c_nodes_deep_8616(arg)):
+            if operator.eq(_hb_global_word_expr_offset(node), (offset & 0xFFFF)):
                 return True
     return False
 
 
-def _hb_summary_direct_global_word_offsets(summary: StructuredAstValue) -> set[int]:
-    offsets: set[int] = set()
+@cython.ccall
+def _hb_summary_direct_global_word_offsets(summary: StructuredAstValue) -> object:
+    source: object
+    offsets: set[cython.longlong] = set()
     for source in _boundary_tuple_8616(summary.push_arg_sources or ()):
         if (
             isinstance(source, tuple)
             and len(source) >= 3
-            and source[0] == CallsitePushSourceKind8616.GLOBAL_VALUE.value
+            and operator.eq(source[0], CallsitePushSourceKind8616.GLOBAL_VALUE.value)
             and isinstance(source[1], int)
             and int(source[2] or 0) == 2
         ):
@@ -23171,18 +25195,23 @@ def _hb_summary_direct_global_word_offsets(summary: StructuredAstValue) -> set[i
     return offsets
 
 
-def _hb_lhs_is_segmented_byte_store(lhs: StructuredAstValue) -> bool:
+def _hb_lhs_is_segmented_byte_store(lhs: StructuredAstValue) -> cython.bint:
     if isinstance(lhs, CFunctionCall) and _hb_function_call_name_is(lhs, "SEG_U8"):
         return True
     return any(
         isinstance(node, CFunctionCall) and _hb_function_call_name_is(node, "SEG_U8")
-        for node in _iter_c_nodes_deep_8616(lhs)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(lhs))
     )
 
 
+@cython.ccall
 def _hb_scalar_high_byte_store_source(
-    stmt: StructuredAstValue, call: StructuredAstValue, push_offsets: set[int]
+    stmt: StructuredAstValue, call: StructuredAstValue, push_offsets: object
 ) -> int | None:
+    assignment: object
+    lhs: object
+    rhs: object
+    source_offset: object
     assignment = _hb_top_level_assignment(stmt)
     if assignment is None:
         return None
@@ -23196,10 +25225,13 @@ def _hb_scalar_high_byte_store_source(
 
 
 def _hb_debug_stmt_shape(stmt: StructuredAstValue) -> str:
+    assignment: object
+    lhs: object
+    rhs: object
     assignment = _hb_top_level_assignment(stmt)
     lhs, rhs = _hb_assignment_lhs_rhs(assignment) if assignment is not None else (None, None)
     lhs_calls = tuple(
-        _hb_call_name(node) for node in (lhs, *_iter_c_nodes_deep_8616(lhs)) if isinstance(node, CFunctionCall)
+        _hb_call_name(node) for node in iter((lhs, ) + tuple(_iter_c_nodes_deep_8616(lhs))) if isinstance(node, CFunctionCall)
     )
     rhs_source = _hb_global_high_byte_source_offset(rhs)
     return (
@@ -23209,20 +25241,25 @@ def _hb_debug_stmt_shape(stmt: StructuredAstValue) -> str:
     )
 
 
-def _hb_is_safe_carrier(stmt: StructuredAstValue) -> bool:
+@cython.ccall
+def _hb_is_safe_carrier(stmt: StructuredAstValue) -> cython.bint:
     return _is_safe_carrier_stmt_8616(stmt)
 
 
-def _hb_is_sequence_wrapper(stmt: StructuredAstValue) -> bool:
+@cython.ccall
+def _hb_is_sequence_wrapper(stmt: StructuredAstValue) -> cython.bint:
     return stmt.__class__.__name__ == "CStatements" and isinstance(getattr(stmt, "statements", None), (list, tuple))
 
 
 def _hb_sequence_leaf_entries(
     owner: StructuredAstValue,
-) -> list[tuple[StructuredAstValue, int, StructuredAstValue]]:
-    entries: list[tuple[StructuredAstValue, int, StructuredAstValue]] = []
+) -> object:
+    entries: list[tuple[StructuredAstValue, cython.longlong, StructuredAstValue]] = []
 
     def collect(parent: StructuredAstValue) -> None:
+        children: object
+        child: object
+        index: object
         children = getattr(parent, "statements", None)
         if not isinstance(children, (list, tuple)):
             return
@@ -23236,9 +25273,14 @@ def _hb_sequence_leaf_entries(
     return entries
 
 
+@cython.ccall
 def _hb_delete_indexed_statements(
-    removals: dict[int, tuple[StructuredAstValue, set[int]]],
-) -> int:
+    removals: object,
+) -> cython.longlong:
+    statements: object
+    index: object
+    indexes: object
+    parent: object
     removed_count = 0
     for parent, indexes in removals.values():
         statements = getattr(parent, "statements", None)
@@ -23253,15 +25295,17 @@ def _hb_delete_indexed_statements(
     return removed_count
 
 
+@cython.ccall
 def _hb_removable_flat_scan(
     flat: StructuredAstValue,
-    index: int,
+    index: cython.longlong,
     call: StructuredAstValue,
     push_offsets: StructuredAstValue,
-) -> list[int]:
+) -> object:
+    store_source: object
     scan = index - 1
-    pending_carriers: list[int] = []
-    removable_flat_indexes: list[int] = []
+    pending_carriers: list[cython.longlong] = []
+    removable_flat_indexes: list[cython.longlong] = []
     while scan >= 0 and index - scan <= 8:
         candidate = flat[scan][2]
         store_source = _hb_scalar_high_byte_store_source(candidate, call, push_offsets)
@@ -23283,11 +25327,18 @@ def _hb_removable_flat_scan(
     return removable_flat_indexes
 
 
-def _hb_prune_flat_sequence_remnants(owner: StructuredAstValue, *, codegen: StructuredAstValue, summary_map: StructuredAstValue) -> bool:
+def _hb_prune_flat_sequence_remnants(owner: StructuredAstValue, *, codegen: StructuredAstValue, summary_map: StructuredAstValue) -> cython.bint:
+    call: object
+    summary: object
+    _child_index: object
+    _parent: object
+    index: object
+    removable_index: object
+    stmt: object
     flat = _hb_sequence_leaf_entries(owner)
     if len(flat) < 2:
         return False
-    removals: dict[int, tuple[StructuredAstValue, set[int]]] = {}
+    removals: dict[cython.longlong, tuple[StructuredAstValue, set[cython.longlong]]] = {}
 
     for index, (_parent, _child_index, stmt) in enumerate(flat):
         call = _hb_call_from_statement(stmt)
@@ -23300,7 +25351,7 @@ def _hb_prune_flat_sequence_remnants(owner: StructuredAstValue, *, codegen: Stru
                 summary is not None,
                 tuple(sorted(push_offsets)),
                 index,
-                tuple(_hb_debug_stmt_shape(entry[2]) for entry in flat[max(0, index - 6) : index]),
+                tuple(_hb_debug_stmt_shape(entry[2]) for entry in iter(flat[max(0, index - 6) : index])),
             )
         if call is None or not push_offsets:
             continue
@@ -23322,13 +25373,15 @@ def _hb_prune_flat_sequence_remnants(owner: StructuredAstValue, *, codegen: Stru
     return True
 
 
+@cython.ccall
 def _hb_removable_scalar_remnants(
-    items: list[StructuredAstValue], i: int, push_offsets: StructuredAstValue, call: StructuredAstValue
-) -> list[int]:
+    items: object, i: cython.longlong, push_offsets: StructuredAstValue, call: StructuredAstValue
+) -> object:
     """Scan backward from a call for removable scalar high-byte remnants."""
+    store_source: object
     scan = i - 1
-    pending_carriers: list[int] = []
-    removable: list[int] = []
+    pending_carriers: list[cython.longlong] = []
+    removable: list[cython.longlong] = []
     while scan >= 0 and i - scan <= 6:
         candidate = items[scan]
         store_source = _hb_scalar_high_byte_store_source(candidate, call, push_offsets)
@@ -23350,14 +25403,16 @@ def _hb_removable_scalar_remnants(
     return removable
 
 
+@cython.ccall
 def _hb_delete_scalar_remnants_8616(
-    items: list[StructuredAstValue],
-    i: int,
-    removable: list[int],
+    items: object,
+    i: cython.longlong,
+    removable: object,
     codegen: StructuredAstValue,
-) -> int:
+) -> cython.longlong:
     """Delete the proven scalar remnant indexes from ``items``; return adjusted ``i``."""
-    removed = sorted(set(removable), reverse=True)
+    idx: object
+    removed = sorted(tuple(set(removable)), reverse=True)
     for idx in removed:
         del items[idx]
         if idx < i:
@@ -23368,7 +25423,11 @@ def _hb_delete_scalar_remnants_8616(
     return i
 
 
-def _hb_prune_statement_owner(owner: StructuredAstValue, *, codegen: StructuredAstValue, seen: StructuredAstValue, summary_map: StructuredAstValue) -> bool:
+def _hb_prune_statement_owner(owner: StructuredAstValue, *, codegen: StructuredAstValue, seen: StructuredAstValue, summary_map: StructuredAstValue) -> cython.bint:
+    call: object
+    statements: object
+    summary: object
+    stmt: object
     marker = id(owner)
     if marker in seen:
         return False
@@ -23394,7 +25453,7 @@ def _hb_prune_statement_owner(owner: StructuredAstValue, *, codegen: StructuredA
                 summary is not None,
                 tuple(sorted(push_offsets)),
                 i,
-                tuple(_hb_debug_stmt_shape(stmt) for stmt in items[max(0, i - 4) : i]),
+                tuple(_hb_debug_stmt_shape(stmt) for stmt in iter(items[max(0, i - 4) : i])),
             )
         if call is None or not push_offsets:
             i += 1
@@ -23411,14 +25470,18 @@ def _hb_prune_statement_owner(owner: StructuredAstValue, *, codegen: StructuredA
     return local_changed
 
 
+@cython.ccall
 def _hb_walk_statement(
     stmt: StructuredAstValue,
     *,
     codegen: StructuredAstValue,
     seen: StructuredAstValue,
     summary_map: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Visit conditional children with the same proven cleanup context."""
+    child: object
+    attr: object
+    pair: object
     local_changed = _hb_prune_statement_owner(stmt, codegen=codegen, seen=seen, summary_map=summary_map)
     for attr in ("body", "else_node"):
         child = getattr(stmt, attr, None)
@@ -23433,10 +25496,14 @@ def _hb_walk_statement(
 
 
 
+@cython.ccall
 def _prune_scalar_global_high_byte_call_arg_remnants_8616(
     project: StructuredAstValue, codegen: StructuredAstValue
-) -> bool:
+) -> cython.bint:
     """Prune final lowered scalar high-byte stores already consumed by a call."""
+    cfunc: object
+    root: object
+    summary_map: object
     _ = project
     cfunc = getattr(codegen, "cfunc", None)
     root = getattr(cfunc, "body", None) or getattr(cfunc, "statements", None)
@@ -23741,7 +25808,7 @@ def _prune_scalar_global_high_byte_call_arg_remnants_8616(
 
 
 
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
 
 
 

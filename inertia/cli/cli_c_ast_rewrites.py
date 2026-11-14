@@ -1,4 +1,5 @@
 # AUTO-GENERATED split from cli_runtime_shared.py
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: coordinate legacy AST cleanup helpers around already-recovered facts.
@@ -10,6 +11,8 @@ angr/codegen compatibility objects and optional diagnostic metadata.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 import copy
@@ -41,6 +44,10 @@ from inertia.alias.alias_model_impl import (
 from inertia.alias.domains import DomainKey as DomainKey
 from inertia.alias.domains import register_pair_name as register_pair_name
 from inertia.alias.state import AliasState as AliasState
+import dataclasses
+import operator
+import builtins
+_cli_access_profiles = typing.TypeVar("_cli_access_profiles")
 
 # Static named reexports keep the legacy CLI facade's names explicit for type checkers; runtime bindings and __all__ are unchanged.
 if _cli_compat_typing.TYPE_CHECKING:
@@ -262,13 +269,14 @@ from inertia.widening.widening_model import analyze_adjacent_storage_slices
 # angr's structured-C node classes and attributes vary across supported
 # versions. Keep that third-party dynamism explicit and confined to this AST
 # compatibility module; owned CLI state and evidence contracts remain concrete.
-type StructuredAstValue = Any
-type StructuredCodegenValue = Any
-type AngrProjectValue = Any
+StructuredAstValue = typing.TypeAliasType("StructuredAstValue", Any)
+StructuredCodegenValue = typing.TypeAliasType("StructuredCodegenValue", Any)
+AngrProjectValue = typing.TypeAliasType("AngrProjectValue", Any)
 
-type _AccessTraitEvidenceProfile = _cli_access_profiles.AccessTraitEvidenceProfile
+_AccessTraitEvidenceProfile = typing.TypeAliasType("_AccessTraitEvidenceProfile", _cli_access_profiles.AccessTraitEvidenceProfile)
 
 
+@cython.ccall
 def _compat_callback(callback: Callable[..., object]) -> StructuredAstValue:
     """Adapt a callable across version-varying split-helper protocols."""
     return callback
@@ -403,7 +411,10 @@ __all__ = [
 ]
 
 
-def _helper_name(project: AngrProjectValue, addr: int) -> str | None:
+@cython.ccall
+def _helper_name(project: AngrProjectValue, addr: cython.longlong) -> object:
+    name: object
+    proc: object
     proc = project.hooked_by(addr)
     if proc is None:
         return None
@@ -416,34 +427,39 @@ def _helper_name(project: AngrProjectValue, addr: int) -> str | None:
     return cast(str, proc.__class__.__name__)
 
 
+@cython.ccall
 def _attach_cod_callee_names(
     project: AngrProjectValue, codegen: StructuredCodegenValue, cod_metadata: CODProcMetadata | None
-) -> bool:
+) -> cython.bint:
     return False
 
 
-def _build_cod_positive_bp_alias_map(bp_disps: list[int], cod_metadata: CODProcMetadata | None) -> dict[int, str]:
-    def _impl() -> dict[int, str]:
+def _build_cod_positive_bp_alias_map(bp_disps: object, cod_metadata: CODProcMetadata | None) -> object:
+    def _impl() -> object:
+        direct: object
+        _: object
+        disp: object
+        name: object
         if cod_metadata is None:
             return {}
         cast_aliases = cod_metadata.stack_aliases
 
-        meta_positive = sorted((disp, name) for disp, name in cast_aliases.items() if isinstance(disp, int) and isinstance(name, str) and disp > 0)
+        meta_positive = sorted((disp, name) for disp, name in builtins.iter(cast_aliases.items()) if isinstance(disp, int) and isinstance(name, str) and disp > 0)
         if not meta_positive:
             return {}
 
-        var_positive = sorted(disp for disp in bp_disps if disp > 0)
+        var_positive = sorted(disp for disp in iter(bp_disps) if disp > 0)
         if not var_positive:
             return {}
 
-        alias_map: dict[int, str] = {}
+        alias_map: dict[cython.longlong, str] = {}
         for disp in var_positive:
             direct = cast_aliases.get(disp)
             if direct is not None:
                 alias_map[disp] = direct
 
-        unmatched_var_positive = [disp for disp in var_positive if disp not in alias_map]
-        unused_meta_positive = [item for item in meta_positive if item[1] not in alias_map.values()]
+        unmatched_var_positive = [disp for disp in iter(var_positive) if disp not in alias_map]
+        unused_meta_positive = [item for item in iter(meta_positive) if item[1] not in alias_map.values()]
         if len(unmatched_var_positive) <= len(unused_meta_positive):
             for disp, (_, name) in zip(unmatched_var_positive, unused_meta_positive, strict=False):
                 alias_map[disp] = name
@@ -453,15 +469,18 @@ def _build_cod_positive_bp_alias_map(bp_disps: list[int], cod_metadata: CODProcM
     return _impl()
 
 
+@cython.ccall
 def _cod_stack_alias_for_disp(
-    disp: int,
-    cod_metadata: CODProcMetadata | None,
+    disp: cython.longlong,
+    cod_metadata: object,
     *,
-    argument_aliases: dict[int, str] | None = None,
-    positive_aliases: dict[int, str] | None = None,
-    normalized_aliases: dict[int, str] | None = None,
-) -> str | None:
+    argument_aliases: object = None,
+    positive_aliases: object = None,
+    normalized_aliases: object = None,
+) -> object:
     """Resolve a bp-relative disp to a COD alias by source priority."""
+    alias: object
+    source: object
 
     if cod_metadata is None:
         return None
@@ -482,21 +501,31 @@ def _cod_stack_alias_for_disp(
     return None
 
 
-def _build_cod_normalized_bp_alias_map(cod_metadata: CODProcMetadata | None) -> dict[int, str]:
+@cython.ccall
+def _build_cod_normalized_bp_alias_map(cod_metadata: object) -> object:
+    alias: object
+    bp_disp: object
     if cod_metadata is None:
         return {}
     aliases = cod_metadata.stack_aliases
-    normalized: dict[int, str] = {}
+    normalized: dict[cython.longlong, str] = {}
     for bp_disp, alias in aliases.items():
         if isinstance(bp_disp, int) and isinstance(alias, str) and alias:
             normalized.setdefault(_normalize_bp_disp(bp_disp), alias)
     return normalized
 
 
-def _collect_cod_name_ownership(codegen: StructuredCodegenValue) -> tuple[set[str], dict[str, int]]:
-    def _impl() -> tuple[set[str], dict[str, int]]:
+def _collect_cod_name_ownership(codegen: StructuredCodegenValue) -> object:
+    def _impl() -> tuple[set[str], dict[str, cython.longlong]]:
+        current_name: object
+        offset: object
+        unified: object
+        unified_name: object
+        variables_in_use: object
+        cvar: object
+        variable: object
         used_names: set[str] = set()
-        name_owner_offsets: dict[str, int] = {}
+        name_owner_offsets: dict[str, cython.longlong] = {}
         variables_in_use = getattr(codegen.cfunc, "variables_in_use", {})
         for variable, cvar in variables_in_use.items():
             if _stack_slot_identity_for_variable(variable) is None:
@@ -519,12 +548,13 @@ def _collect_cod_name_ownership(codegen: StructuredCodegenValue) -> tuple[set[st
     return _impl()
 
 
-def _ordered_stack_identity_variables(codegen: StructuredCodegenValue) -> list[tuple[object, object]]:
+def _ordered_stack_identity_variables(codegen: StructuredCodegenValue) -> object:
+    variables_in_use: object
     variables_in_use = getattr(codegen.cfunc, "variables_in_use", {})
     return sorted(
         [
             (variable, cvar)
-            for variable, cvar in variables_in_use.items()
+            for variable, cvar in builtins.iter(variables_in_use.items())
             if _stack_slot_identity_for_variable(variable) is not None
         ],
         key=lambda item: (
@@ -536,7 +566,12 @@ def _ordered_stack_identity_variables(codegen: StructuredCodegenValue) -> list[t
     )
 
 
-def _ordered_stack_identity_nodes(codegen: StructuredCodegenValue) -> list[tuple[object, object]]:
+def _ordered_stack_identity_nodes(codegen: StructuredCodegenValue) -> object:
+    cfunc: object
+    variables_in_use: object
+    cvar: object
+    node: object
+    variable: object
     cfunc = getattr(codegen, "cfunc", None)
     if cfunc is None:
         return []
@@ -576,7 +611,7 @@ def _ordered_stack_identity_nodes(codegen: StructuredCodegenValue) -> list[tuple
             variables_in_use[variable] = node
 
     return sorted(
-        nodes.values(),
+        tuple(nodes.values()),
         key=lambda item: (
             0 if isinstance(getattr(item[0], "offset", None), int) and getattr(item[0], "offset", 0) > 0 else 1,
             getattr(item[0], "offset", 0) if isinstance(getattr(item[0], "offset", 0), int) else 0,
@@ -588,8 +623,11 @@ def _ordered_stack_identity_nodes(codegen: StructuredCodegenValue) -> list[tuple
 
 def _apply_generic_unified_name_for_param_slot(
     variable: StructuredAstValue, cvar: StructuredAstValue, cod_metadata: CODProcMetadata | None
-) -> bool:
-    def _impl() -> bool:
+) -> cython.bint:
+    def _impl() -> cython.bint:
+        disp: object
+        unified: object
+        unified_name: object
         disp = getattr(variable, "offset", None)
         if not (isinstance(disp, int) and disp in {0, 2}):
             return False
@@ -599,13 +637,13 @@ def _apply_generic_unified_name_for_param_slot(
         unified = getattr(cvar, "unified_variable", None)
         unified_name = getattr(unified, "name", None)
         if isinstance(unified_name, str) and re.fullmatch(r"(?:v\d+|vvar_\d+)", unified_name):
-            if getattr(variable, "name", None) != unified_name:
+            if operator.ne(getattr(variable, "name", None), unified_name):
                 variable.name = unified_name
                 changed = True
-            if unified is not None and getattr(unified, "name", None) != unified_name:
+            if unified is not None and operator.ne(getattr(unified, "name", None), unified_name):
                 unified.name = unified_name
                 changed = True
-            if getattr(cvar, "name", None) != unified_name:
+            if operator.ne(getattr(cvar, "name", None), unified_name):
                 try:
                     cvar.name = unified_name
                 except Exception:
@@ -617,18 +655,20 @@ def _apply_generic_unified_name_for_param_slot(
     return _impl()
 
 
+@cython.ccall
 def _resolve_alias_collision_name(
-    alias: str,
+    alias: object,
     disp: int | None,
-    used_names: set[str],
-    name_owner_offsets: dict[str, int],
-) -> str:
+    used_names: object,
+    name_owner_offsets: object,
+) -> object:
+    owner_offset: object
     if alias not in used_names:
         used_names.add(alias)
         name_owner_offsets[alias] = disp if isinstance(disp, int) else 0
         return alias
     owner_offset = name_owner_offsets.get(alias)
-    if owner_offset == disp:
+    if operator.eq(owner_offset, disp):
         used_names.add(alias)
         name_owner_offsets[alias] = disp if isinstance(disp, int) else 0
         return alias
@@ -641,13 +681,16 @@ def _resolve_alias_collision_name(
     return alias
 
 
-def _attach_cod_variable_names(codegen: StructuredCodegenValue, cod_metadata: CODProcMetadata | None) -> bool:
+@cython.ccall
+def _attach_cod_variable_names(codegen: StructuredCodegenValue, cod_metadata: CODProcMetadata | None) -> cython.bint:
     return False
 
 
+@cython.ccall
 def _synthetic_global_entry(
-    synthetic_globals: dict[int, tuple[str, int]] | None, addr: int | None
-) -> tuple[str, int] | None:
+    synthetic_globals: object, addr: int | None
+) -> object:
+    entry: object
     if not synthetic_globals or not isinstance(addr, int):
         return None
     entry = synthetic_globals.get(addr)
@@ -658,7 +701,8 @@ def _synthetic_global_entry(
     return entry, 1
 
 
-def _sanitize_cod_identifier(name: str) -> str:
+@cython.ccall
+def _sanitize_cod_identifier(name: object) -> object:
     name = name.lstrip("_")
     if name.startswith("$") and "_" in name:
         name = name.rsplit("_", 1)[-1]
@@ -670,8 +714,11 @@ def _sanitize_cod_identifier(name: str) -> str:
     return name
 
 
-def _seed_alias_state_from_registers_8616(alias_state: AliasState, cfunc: structured_c.CFunction) -> bool:
+@cython.ccall
+def _seed_alias_state_from_registers_8616(alias_state: AliasState, cfunc: structured_c.CFunction) -> cython.bint:
     """Seed register-domain aliases from cfunc variables; return seeded."""
+    pair_name: object
+    variable: object
 
     seeded = False
     for variable in getattr(cfunc, "variables_in_use", {}):
@@ -695,6 +742,8 @@ def _seed_alias_state_from_registers_8616(alias_state: AliasState, cfunc: struct
 
 def _get_or_seed_inertia_alias_state(codegen: StructuredCodegenValue) -> StructuredAstValue:
     def _impl() -> StructuredAstValue:
+        alias_state: object
+        cfunc: object
         alias_state = getattr(codegen, "_inertia_alias_state", None)
         if alias_state is None:
             alias_state = getattr(getattr(codegen, "cfunc", None), "_inertia_alias_state", None)
@@ -718,7 +767,8 @@ def _get_or_seed_inertia_alias_state(codegen: StructuredCodegenValue) -> Structu
     return _impl()
 
 
-def _make_unique_identifier(base: str, used: set[str]) -> str:
+@cython.ccall
+def _make_unique_identifier(base: object, used: object) -> object:
     candidate = base
     suffix = 2
     while candidate in used:
@@ -728,7 +778,8 @@ def _make_unique_identifier(base: str, used: set[str]) -> str:
     return candidate
 
 
-def _structured_codegen_node(value: StructuredAstValue) -> bool:
+@cython.ccall
+def _structured_codegen_node(value: StructuredAstValue) -> cython.bint:
     """Consume the shared AST boundary, including owned semantic node subclasses."""
     return bool(_structured_codegen_node_8616(value))
 
@@ -737,24 +788,23 @@ _CLI_AST_NON_CHILD_ATTRS_8616: frozenset[str] = frozenset({"codegen"})
 _CLI_AST_LEAF_TYPES_8616: frozenset[type] = frozenset({str, bytes, int, float, complex, bool, type(None)})
 
 
-def _structured_slot_names_8616(value: StructuredAstValue) -> tuple[str, ...]:
+def _structured_slot_names_8616(value: StructuredAstValue) -> object:
     """Reuse class layouts and read every instance's current public fields."""
+    dynamic_attrs: object
     # type(value) is always a hashable class object; the lru_cache wrapper only
     # accepts Hashable args and cannot prove hashability through Any.
     value_type = cast(Hashable, type(value))
-    base_attrs: tuple[str, ...] = _structured_slot_names_for_type_8616(value_type, _CLI_AST_NON_CHILD_ATTRS_8616)
+    base_attrs: object = _structured_slot_names_for_type_8616(value_type, _CLI_AST_NON_CHILD_ATTRS_8616)
     # __dict__ is the dynamic third-party codegen boundary, not owned state.
     dynamic_attrs = getattr(value, "__dict__", None)
     if not dynamic_attrs:
         return base_attrs
-    return tuple(dict.fromkeys((
-        *base_attrs,
-        *(attr for attr in dynamic_attrs
-          if isinstance(attr, str) and not attr.startswith("_") and attr != "codegen"),
-    )))
+    return tuple(dict.fromkeys(tuple(base_attrs) + tuple((attr for attr in iter(dynamic_attrs)
+          if isinstance(attr, str) and not attr.startswith("_") and attr != "codegen"))))
 
 
-def _push_iterable_children_8616(current: StructuredAstValue, stack: list[StructuredAstValue]) -> None:
+@cython.ccall
+def _push_iterable_children_8616(current: StructuredAstValue, stack: object) -> None:
     """Push container/iterable children into the DFS stack."""
 
     if isinstance(current, (str, bytes)):
@@ -772,8 +822,10 @@ def _push_iterable_children_8616(current: StructuredAstValue, stack: list[Struct
             stack.extend(tuple(current))
 
 
-def _iter_c_node_children_8616(value: StructuredAstValue, seen_values: set[int] | None = None) -> tuple[StructuredAstValue, ...]:
+@cython.ccall
+def _iter_c_node_children_8616(value: StructuredAstValue, seen_values: object = None) -> tuple[StructuredAstValue, ...]:
     """Collect children in the existing container order, breaking value cycles."""
+    current: object
     if seen_values is None:
         seen_values = set()
     collected: list[StructuredAstValue] = []
@@ -791,13 +843,15 @@ def _iter_c_node_children_8616(value: StructuredAstValue, seen_values: set[int] 
     return tuple(collected)
 
 
+@cython.ccall
 def _c_constant_value(node: StructuredAstValue) -> int | None:
     if isinstance(node, structured_c.CConstant) and isinstance(node.value, int):
         return node.value
     return None
 
 
-def _normalize_16bit_signed_offset(offset: object) -> int:
+@cython.ccall
+def _normalize_16bit_signed_offset(offset: object) -> cython.longlong:
     if not isinstance(offset, int):
         raise TypeError("segmented address offset must be an integer")
     wrapped = offset & 0xFFFF
@@ -806,15 +860,19 @@ def _normalize_16bit_signed_offset(offset: object) -> int:
     return wrapped
 
 
-def _storage_size_from_type_bits(bits: object, project: AngrProjectValue) -> int:
+@cython.ccall
+def _storage_size_from_type_bits(bits: object, project: AngrProjectValue) -> cython.longlong:
     """Return a concrete byte size from an optional angr type width."""
+    byte_width: object
     byte_width = getattr(project.arch, "byte_width", 8)
     if not isinstance(bits, int) or bits <= 0 or not isinstance(byte_width, int) or byte_width <= 0:
         return 1
     return max(bits // byte_width, 1)
 
 
-def _project_rewrite_cache(project: AngrProjectValue) -> MutableMapping[str, MutableMapping[int, object]]:
+@cython.ccall
+def _project_rewrite_cache(project: AngrProjectValue) -> MutableMapping[str, MutableMapping[cython.longlong, object]]:
+    cache: object
     cache = getattr(project, "_inertia_rewrite_cache", None)
     if cache is None:
         cache = {}
@@ -822,15 +880,16 @@ def _project_rewrite_cache(project: AngrProjectValue) -> MutableMapping[str, Mut
     return cast(MutableMapping[str, MutableMapping[int, object]], cache)
 
 
+@cython.cclass
 class _CODSourceRewriteSpec:
     """Describe one legacy COD-backed source rewrite specification."""
-
-    name: str
-    header_regex: str
-    rewritten: str
+    name = cython.declare(str, visibility = "public")
+    header_regex = cython.declare(str, visibility = "public")
+    rewritten = cython.declare(str, visibility = "public")
     required_lines: tuple[str, ...] = ()
 
-    def apply(self, c_text: str, metadata: CODProcMetadata | None) -> str:
+    @cython.ccall
+    def apply(self, c_text: object, metadata: CODProcMetadata | None) -> str:
         """Apply this rewrite through the quarantined legacy source boundary."""
         return str(
             _rewrite_cod_proc_from_source(
@@ -843,10 +902,12 @@ class _CODSourceRewriteSpec:
         )
 
 
-def _segment_reg_name(node: StructuredAstValue, project: AngrProjectValue) -> str | None:
+@cython.ccall
+def _segment_reg_name(node: StructuredAstValue, project: AngrProjectValue) -> object:
     return _cli_segmented._segment_reg_name(node, project, project_rewrite_cache=_project_rewrite_cache)
 
 
+@cython.ccall
 def _classify_segmented_addr_expr(node: StructuredAstValue, project: AngrProjectValue) -> _SegmentedAccess | None:
     return _cli_segmented._classify_segmented_addr_expr(
         node,
@@ -861,6 +922,7 @@ def _classify_segmented_addr_expr(node: StructuredAstValue, project: AngrProject
     )
 
 
+@cython.ccall
 def _classify_segmented_dereference(node: StructuredAstValue, project: AngrProjectValue) -> _SegmentedAccess | None:
     return _cli_segmented._classify_segmented_dereference(
         node,
@@ -870,7 +932,8 @@ def _classify_segmented_dereference(node: StructuredAstValue, project: AngrProje
     )
 
 
-def _match_real_mode_linear_expr(node: StructuredAstValue, project: AngrProjectValue) -> tuple[str | None, int | None]:
+@cython.ccall
+def _match_real_mode_linear_expr(node: StructuredAstValue, project: AngrProjectValue) -> object:
     return _cli_segmented._match_real_mode_linear_expr(
         node,
         project,
@@ -879,7 +942,8 @@ def _match_real_mode_linear_expr(node: StructuredAstValue, project: AngrProjectV
     )
 
 
-def _match_segmented_dereference(node: StructuredAstValue, project: AngrProjectValue) -> tuple[str | None, int | None]:
+@cython.ccall
+def _match_segmented_dereference(node: StructuredAstValue, project: AngrProjectValue) -> object:
     return _cli_segmented._match_segmented_dereference(
         node,
         project,
@@ -888,6 +952,7 @@ def _match_segmented_dereference(node: StructuredAstValue, project: AngrProjectV
     )
 
 
+@cython.ccall
 def _match_segment_register_based_dereference(
     node: StructuredAstValue, project: AngrProjectValue
 ) -> StructuredAstValue:
@@ -902,6 +967,7 @@ def _match_segment_register_based_dereference(
     )
 
 
+@cython.ccall
 def _strip_segment_scale_from_addr_expr(addr_expr: StructuredAstValue, project: AngrProjectValue) -> StructuredAstValue:
     return _cli_segmented_lowering._strip_segment_scale_from_addr_expr(
         addr_expr,
@@ -913,6 +979,7 @@ def _strip_segment_scale_from_addr_expr(addr_expr: StructuredAstValue, project: 
     )
 
 
+@cython.ccall
 def _match_ss_stack_reference(node: StructuredAstValue, project: AngrProjectValue) -> StructuredAstValue:
     return _cli_segmented_lowering._match_ss_stack_reference(
         node,
@@ -922,7 +989,8 @@ def _match_ss_stack_reference(node: StructuredAstValue, project: AngrProjectValu
     )
 
 
-def _flatten_c_add_terms(node: StructuredAstValue, seen: set[int] | None = None) -> StructuredAstValue:
+@cython.ccall
+def _flatten_c_add_terms(node: StructuredAstValue, seen: object = None) -> StructuredAstValue:
     if seen is None:
         seen = set()
     key = id(node)
@@ -938,6 +1006,11 @@ def _flatten_c_add_terms(node: StructuredAstValue, seen: set[int] | None = None)
 
 def _resolve_dirty_virtual_expr_8616(node: StructuredAstValue) -> StructuredAstValue:
     def _impl() -> StructuredAstValue:
+        codegen: object
+        dirty: object
+        root: object
+        varid: object
+        stmt: object
         dirty = getattr(node, "dirty", None)
         if dirty is None:
             return None
@@ -968,6 +1041,7 @@ def _resolve_dirty_virtual_expr_8616(node: StructuredAstValue) -> StructuredAstV
     return _impl()
 
 
+@cython.ccall
 def _stack_cvar_base_8616(variable: object, node: StructuredAstValue) -> StructuredAstValue:
     """Return (node, 0) when the variable is a stack slot."""
 
@@ -976,8 +1050,13 @@ def _stack_cvar_base_8616(variable: object, node: StructuredAstValue) -> Structu
     return None
 
 
-def _stack_cvar_binary_8616(node: StructuredAstValue, seen: set[int]) -> StructuredAstValue:
+@cython.ccall
+def _stack_cvar_binary_8616(node: StructuredAstValue, seen: object) -> StructuredAstValue:
     """Match ``base +/- const`` over a stack cvar."""
+    lhs: object
+    lhs_const: object
+    rhs: object
+    rhs_const: object
 
     lhs = _match_stack_cvar_and_offset(node.lhs, seen)
     rhs = _match_stack_cvar_and_offset(node.rhs, seen)
@@ -993,8 +1072,11 @@ def _stack_cvar_binary_8616(node: StructuredAstValue, seen: set[int]) -> Structu
     return None
 
 
-def _stack_cvar_indexed_8616(node: StructuredAstValue, seen: set[int]) -> StructuredAstValue:
+@cython.ccall
+def _stack_cvar_indexed_8616(node: StructuredAstValue, seen: object) -> StructuredAstValue:
     """Match an indexed stack cvar plus constant offset."""
+    base: object
+    index: object
 
     base = _match_stack_cvar_and_offset(node.variable, seen)
     index = _c_constant_value(_unwrap_c_casts(node.index))
@@ -1004,8 +1086,9 @@ def _stack_cvar_indexed_8616(node: StructuredAstValue, seen: set[int]) -> Struct
     return base_cvar, _normalize_16bit_signed_offset(offset + index)
 
 
-def _match_stack_cvar_and_offset(node: StructuredAstValue, _seen: set[int] | None = None) -> StructuredAstValue:
+def _match_stack_cvar_and_offset(node: StructuredAstValue, _seen: object = None) -> StructuredAstValue:
     def _impl() -> StructuredAstValue:
+        resolved_dirty: object
         nonlocal _seen, node
         if _seen is None:
             _seen = set()
@@ -1039,7 +1122,9 @@ def _match_stack_cvar_and_offset(node: StructuredAstValue, _seen: set[int] | Non
     return _impl()
 
 
+@cython.ccall
 def _match_ss_local_plus_const(node: StructuredAstValue, project: AngrProjectValue) -> StructuredAstValue:
+    classified: object
     cache = _project_rewrite_cache(project).setdefault("ss_local_plus_const", {})
     key = id(node)
     if key in cache:
@@ -1077,13 +1162,16 @@ _CHILD_SCALAR_ATTRS = (
 _CHILD_LIST_ATTRS = ("args", "operands", "statements")
 
 
+@cython.ccall
 def _replace_scalar_child_attrs(
     current: StructuredAstValue,
     transform: StructuredAstValue,
-    node_stack: list[object],
+    node_stack: object,
     *,
     should_process_child: Callable[[StructuredAstValue, str], bool] | None = None,
-) -> bool:
+) -> cython.bint:
+    value: object
+    attr: object
     changed = False
     for attr in _CHILD_SCALAR_ATTRS:
         if not hasattr(current, attr):
@@ -1111,13 +1199,16 @@ def _replace_scalar_child_attrs(
     return changed
 
 
+@cython.ccall
 def _replace_one_list_attr_8616(
     current: StructuredAstValue,
-    attr: str,
+    attr: object,
     transform: StructuredAstValue,
-    node_stack: list[object],
-) -> bool:
+    node_stack: object,
+) -> cython.bint:
     """Transform items of one list attr; return whether it changed."""
+    items: object
+    item: object
 
     try:
         items = getattr(current, attr)
@@ -1151,11 +1242,12 @@ def _replace_one_list_attr_8616(
 def _replace_list_child_attrs(
     current: StructuredAstValue,
     transform: StructuredAstValue,
-    node_stack: list[object],
+    node_stack: object,
     *,
     should_process_child: Callable[[StructuredAstValue, str], bool] | None = None,
-) -> bool:
-    def _impl() -> bool:
+) -> cython.bint:
+    def _impl() -> cython.bint:
+        attr: object
         changed = False
         for attr in _CHILD_LIST_ATTRS:
             if not hasattr(current, attr):
@@ -1169,10 +1261,13 @@ def _replace_list_child_attrs(
     return _impl()
 
 
+@cython.ccall
 def _transform_condition_pairs_8616(
-    pairs: Iterable[tuple[object, object]], transform: StructuredAstValue, node_stack: list[object]
-) -> tuple[list[object], bool]:
+    pairs: Iterable[tuple[object, object]], transform: StructuredAstValue, node_stack: object
+) -> tuple[list[object], cython.bint]:
     """Transform each (cond, body) pair; return (new_pairs, changed)."""
+    body: object
+    cond: object
 
     new_pairs: list[object] = []
     pair_changed = False
@@ -1192,11 +1287,11 @@ def _transform_condition_pairs_8616(
 def _replace_condition_pairs(
     current: StructuredAstValue,
     transform: StructuredAstValue,
-    node_stack: list[object],
+    node_stack: object,
     *,
     should_process_child: Callable[[StructuredAstValue, str], bool] | None = None,
-) -> bool:
-    def _impl() -> bool:
+) -> cython.bint:
+    def _impl() -> cython.bint:
         if callable(should_process_child) and not should_process_child(current, "condition_and_nodes"):
             return False
         if not hasattr(current, "condition_and_nodes"):
@@ -1221,13 +1316,15 @@ def _replace_condition_pairs(
     return _impl()
 
 
+@cython.ccall
 def _replace_c_children(
     node: StructuredAstValue,
     transform: StructuredAstValue,
-    seen: set[int] | None = None,
+    seen: object = None,
     *,
     should_process_child: Callable[[StructuredAstValue, str], bool] | None = None,
-) -> bool:
+) -> cython.bint:
+    current: object
     if seen is None:
         seen = set()
     if not _structured_codegen_node(node):
@@ -1266,7 +1363,8 @@ def _replace_c_children(
     return changed
 
 
-def _emit_c_node_children_8616(value: StructuredAstValue, node_stack: list[StructuredAstValue]) -> None:
+@cython.ccall
+def _emit_c_node_children_8616(value: StructuredAstValue, node_stack: object) -> None:
     """Emit node descendants of one field's container value onto the walk stack.
 
     Same traversal as ``_iter_c_node_children_8616`` (reverse-DFS pop order with
@@ -1277,8 +1375,9 @@ def _emit_c_node_children_8616(value: StructuredAstValue, node_stack: list[Struc
     any other iterable still materializes through ``tuple()`` under the same
     exception suppression as ``_push_iterable_children_8616``.
     """
+    current: object
 
-    seen_values: set[int] = set()
+    seen_values: set[cython.longlong] = set()
     stack: list[StructuredAstValue] = [value]
     while stack:
         current = stack.pop()
@@ -1299,8 +1398,11 @@ def _emit_c_node_children_8616(value: StructuredAstValue, node_stack: list[Struc
         _push_iterable_children_8616(current, stack)
 
 
-def _iter_c_nodes_deep(node: StructuredAstValue, seen: set[int] | None = None) -> Iterator[StructuredAstValue]:
+def _iter_c_nodes_deep(node: StructuredAstValue, seen: object = None) -> Iterator[StructuredAstValue]:
     """Walk current AST children without allocating containers for leaf fields."""
+    current: object
+    value: object
+    attr: object
     if seen is None:
         seen = set()
     if not _structured_codegen_node(node):
@@ -1330,26 +1432,32 @@ def _iter_c_nodes_deep(node: StructuredAstValue, seen: set[int] | None = None) -
 
 
 def _same_c_function_call_8616(
-    lhs: StructuredAstValue, rhs: StructuredAstValue, seen_pairs: set[tuple[int, int]]
-) -> bool:
+    lhs: StructuredAstValue, rhs: StructuredAstValue, seen_pairs: object
+) -> cython.bint:
     """Compare callee identity and args of two function calls."""
 
-    if lhs.callee_target != getattr(rhs, "callee_target", None):
+    if operator.ne(lhs.callee_target, getattr(rhs, "callee_target", None)):
         return False
-    if lhs.callee_func != getattr(rhs, "callee_func", None):
+    if operator.ne(lhs.callee_func, getattr(rhs, "callee_func", None)):
         return False
     lhs_args = list(lhs.args or ())
     rhs_args = list(getattr(rhs, "args", ()) or ())
-    if len(lhs_args) != len(rhs_args):
+    if operator.ne(len(lhs_args), len(rhs_args)):
         return False
     return all(
         _same_c_expression(larg, rarg, seen_pairs)
-        for larg, rarg in zip(lhs_args, rhs_args, strict=False)
+        for larg, rarg in builtins.iter(zip(lhs_args, rhs_args, strict=False))
     )
 
 
-def _same_c_dirty_expr_8616(lhs: StructuredAstValue, rhs: StructuredAstValue) -> bool:
+@cython.ccall
+def _same_c_dirty_expr_8616(lhs: StructuredAstValue, rhs: StructuredAstValue) -> cython.bint:
     """Compare dirty-expression payloads by their identifying fields."""
+    lhs_dirty: object
+    lhs_value: object
+    rhs_dirty: object
+    rhs_value: object
+    attr: object
 
     lhs_dirty = getattr(lhs, "dirty", None)
     rhs_dirty = getattr(rhs, "dirty", None)
@@ -1357,33 +1465,36 @@ def _same_c_dirty_expr_8616(lhs: StructuredAstValue, rhs: StructuredAstValue) ->
         lhs_value = getattr(lhs_dirty, attr, None)
         rhs_value = getattr(rhs_dirty, attr, None)
         if lhs_value is not None or rhs_value is not None:
-            return lhs_value == rhs_value
-    return getattr(lhs, "idx", None) == getattr(rhs, "idx", None)
+            return operator.eq(lhs_value, rhs_value)
+    return operator.eq(getattr(lhs, "idx", None), getattr(rhs, "idx", None))
 
 
-def _same_c_variable_8616(lhs: StructuredAstValue, rhs: StructuredAstValue) -> bool:
+@cython.ccall
+def _same_c_variable_8616(lhs: StructuredAstValue, rhs: StructuredAstValue) -> cython.bint:
     """Compare variables by register/stack/memory identity."""
+    rvar: object
 
     lvar = lhs.variable
     rvar = getattr(rhs, "variable", None)
     if type(lvar) is not type(rvar):
         return False
     if isinstance(lvar, SimRegisterVariable):
-        return bool(lvar.reg == getattr(rvar, "reg", None))
+        return bool(operator.eq(lvar.reg, getattr(rvar, "reg", None)))
     if isinstance(lvar, SimStackVariable):
         return bool(
-            lvar.base == getattr(rvar, "base", None)
-            and lvar.offset == getattr(rvar, "offset", None)
-            and lvar.size == getattr(rvar, "size", None)
+            operator.eq(lvar.base, getattr(rvar, "base", None))
+            and operator.eq(lvar.offset, getattr(rvar, "offset", None))
+            and operator.eq(lvar.size, getattr(rvar, "size", None))
         )
     if isinstance(lvar, SimMemoryVariable):
-        return bool(lvar.addr == getattr(rvar, "addr", None) and lvar.size == getattr(rvar, "size", None))
-    return lvar == rvar
+        return bool(operator.eq(lvar.addr, getattr(rvar, "addr", None)) and operator.eq(lvar.size, getattr(rvar, "size", None)))
+    return operator.eq(lvar, rvar)
 
 
+@cython.ccall
 def _same_c_expression(
-    lhs: StructuredAstValue, rhs: StructuredAstValue, seen_pairs: set[tuple[int, int]] | None = None
-) -> bool:
+    lhs: StructuredAstValue, rhs: StructuredAstValue, seen_pairs: object = None
+) -> cython.bint:
     """Compare two C expressions structurally with cycle protection."""
 
     if type(lhs) is not type(rhs):
@@ -1397,23 +1508,24 @@ def _same_c_expression(
     return _same_c_expr_payload_8616(lhs, rhs, seen_pairs)
 
 
+@cython.ccall
 def _same_c_expr_payload_8616(
-    lhs: StructuredAstValue, rhs: StructuredAstValue, seen_pairs: set[tuple[int, int]]
-) -> bool:
+    lhs: StructuredAstValue, rhs: StructuredAstValue, seen_pairs: object
+) -> cython.bint:
     """Compare same-typed expression payloads by node kind."""
 
     if isinstance(lhs, structured_c.CConstant):
-        return bool(lhs.value == rhs.value)
+        return bool(operator.eq(lhs.value, rhs.value))
 
     if isinstance(lhs, structured_c.CTypeCast):
         return _same_c_expression(lhs.expr, rhs.expr, seen_pairs)
 
     if isinstance(lhs, structured_c.CUnaryOp):
-        return lhs.op == rhs.op and _same_c_expression(lhs.operand, rhs.operand, seen_pairs)
+        return operator.eq(lhs.op, rhs.op) and _same_c_expression(lhs.operand, rhs.operand, seen_pairs)
 
     if isinstance(lhs, structured_c.CBinaryOp):
         return (
-            lhs.op == rhs.op
+            operator.eq(lhs.op, rhs.op)
             and _same_c_expression(lhs.lhs, rhs.lhs, seen_pairs)
             and _same_c_expression(lhs.rhs, rhs.rhs, seen_pairs)
         )
@@ -1429,7 +1541,10 @@ def _same_c_expr_payload_8616(
 
     return lhs is rhs
 
-def _same_c_storage(lhs: StructuredAstValue, rhs: StructuredAstValue) -> bool:
+@cython.ccall
+def _same_c_storage(lhs: StructuredAstValue, rhs: StructuredAstValue) -> cython.bint:
+    lvar: object
+    rvar: object
     if not isinstance(lhs, structured_c.CVariable) or not isinstance(rhs, structured_c.CVariable):
         return False
 
@@ -1439,24 +1554,30 @@ def _same_c_storage(lhs: StructuredAstValue, rhs: StructuredAstValue) -> bool:
         return False
 
     if isinstance(lvar, SimRegisterVariable):
-        return bool(lvar.reg == getattr(rvar, "reg", None))
+        return bool(operator.eq(lvar.reg, getattr(rvar, "reg", None)))
     if isinstance(lvar, SimStackVariable):
         return bool(
-            lvar.base == getattr(rvar, "base", None)
-            and lvar.offset == getattr(rvar, "offset", None)
+            operator.eq(lvar.base, getattr(rvar, "base", None))
+            and operator.eq(lvar.offset, getattr(rvar, "offset", None))
         )
     if isinstance(lvar, SimMemoryVariable):
-        return bool(lvar.addr == getattr(rvar, "addr", None))
-    return lvar == rvar
+        return bool(operator.eq(lvar.addr, getattr(rvar, "addr", None)))
+    return operator.eq(lvar, rvar)
 
 
-def _same_stack_slot_identity_var(lhs_var: StructuredAstValue, rhs_var: StructuredAstValue) -> bool:
+@cython.ccall
+def _same_stack_slot_identity_var(lhs_var: StructuredAstValue, rhs_var: StructuredAstValue) -> cython.bint:
+    lhs_identity: object
+    rhs_identity: object
     lhs_identity = _stack_slot_identity_for_variable(lhs_var)
     rhs_identity = _stack_slot_identity_for_variable(rhs_var)
-    return bool(lhs_identity is not None and rhs_identity is not None and lhs_identity == rhs_identity)
+    return bool(lhs_identity is not None and rhs_identity is not None and operator.eq(lhs_identity, rhs_identity))
 
 
-def _stack_slot_identity_can_join_var(lhs_var: StructuredAstValue, rhs_var: StructuredAstValue) -> bool:
+@cython.ccall
+def _stack_slot_identity_can_join_var(lhs_var: StructuredAstValue, rhs_var: StructuredAstValue) -> cython.bint:
+    lhs_identity: object
+    rhs_identity: object
     lhs_identity = _stack_slot_identity_for_variable(lhs_var)
     rhs_identity = _stack_slot_identity_for_variable(rhs_var)
     if lhs_identity is None or rhs_identity is None:
@@ -1464,7 +1585,10 @@ def _stack_slot_identity_can_join_var(lhs_var: StructuredAstValue, rhs_var: Stru
     return bool(lhs_identity.can_join(rhs_identity))
 
 
-def _same_stack_slot_identity(lhs: StructuredAstValue, rhs: StructuredAstValue) -> bool:
+@cython.ccall
+def _same_stack_slot_identity(lhs: StructuredAstValue, rhs: StructuredAstValue) -> cython.bint:
+    lvar: object
+    rvar: object
     if not isinstance(lhs, structured_c.CVariable) or not isinstance(rhs, structured_c.CVariable):
         return False
     lvar = getattr(lhs, "variable", None)
@@ -1472,7 +1596,10 @@ def _same_stack_slot_identity(lhs: StructuredAstValue, rhs: StructuredAstValue) 
     return _same_stack_slot_identity_var(lvar, rvar)
 
 
-def _stack_slot_identity_can_join(lhs: StructuredAstValue, rhs: StructuredAstValue) -> bool:
+@cython.ccall
+def _stack_slot_identity_can_join(lhs: StructuredAstValue, rhs: StructuredAstValue) -> cython.bint:
+    lvar: object
+    rvar: object
     if not isinstance(lhs, structured_c.CVariable) or not isinstance(rhs, structured_c.CVariable):
         return False
     lvar = getattr(lhs, "variable", None)
@@ -1480,11 +1607,12 @@ def _stack_slot_identity_can_join(lhs: StructuredAstValue, rhs: StructuredAstVal
     return _stack_slot_identity_can_join_var(lvar, rvar)
 
 
+@cython.ccall
 def _derived_stack_high_byte_follows_cvar(
     address_base: StructuredAstValue,
-    address_byte_offset: int,
+    address_byte_offset: cython.longlong,
     low_byte: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Adapt structured CVariables to the Alias-owned derived-byte proof."""
     if not isinstance(address_base, structured_c.CVariable) or not isinstance(low_byte, structured_c.CVariable):
         return False
@@ -1497,15 +1625,18 @@ def _derived_stack_high_byte_follows_cvar(
     )
 
 
-def _is_c_constant_int(node: StructuredAstValue, value: int) -> bool:
-    return isinstance(node, structured_c.CConstant) and isinstance(node.value, int) and node.value == value
+@cython.ccall
+def _is_c_constant_int(node: StructuredAstValue, value: cython.longlong) -> cython.bint:
+    return isinstance(node, structured_c.CConstant) and isinstance(node.value, int) and operator.eq(node.value, value)
 
 
-def _cite_is_negation(node: StructuredAstValue) -> bool:
+@cython.ccall
+def _cite_is_negation(node: StructuredAstValue) -> cython.bint:
     return type(node).__name__ == "CITE" and _is_c_constant_int(node.iftrue, 0) and _is_c_constant_int(node.iffalse, 1)
 
 
-def _invert_comparison_op(op: str) -> str | None:
+@cython.ccall
+def _invert_comparison_op(op: object) -> object:
     return {
         "==": "!=",
         "!=": "==",
@@ -1516,7 +1647,9 @@ def _invert_comparison_op(op: str) -> str | None:
     }.get(op)
 
 
+@cython.ccall
 def _make_inverted_comparison(node: StructuredAstValue, codegen: StructuredCodegenValue) -> StructuredAstValue:
+    inverted: object
     if not isinstance(node, structured_c.CBinaryOp):
         return None
     inverted = _invert_comparison_op(node.op)
@@ -1532,7 +1665,10 @@ def _make_inverted_comparison(node: StructuredAstValue, codegen: StructuredCodeg
     )
 
 
+@cython.ccall
 def _invert_interval_guard_if_safe(node: StructuredAstValue, codegen: StructuredCodegenValue) -> StructuredAstValue:
+    inverted_lhs: object
+    inverted_rhs: object
     if not isinstance(node, structured_c.CBinaryOp) or node.op != "LogicalAnd":
         return None
 
@@ -1561,6 +1697,7 @@ def _invert_interval_guard_if_safe(node: StructuredAstValue, codegen: Structured
     )
 
 
+@cython.ccall
 def _extract_same_zero_compare_expr(node: StructuredAstValue) -> StructuredAstValue:
     if not isinstance(node, structured_c.CBinaryOp) or node.op != "CmpEQ":
         return None
@@ -1572,8 +1709,14 @@ def _extract_same_zero_compare_expr(node: StructuredAstValue) -> StructuredAstVa
     return None
 
 
+@cython.ccall
 def _extract_mul_zero_flag_source_8616(node: StructuredAstValue) -> StructuredAstValue:
     """Match ``x*64`` forms carrying same-zero compare sources."""
+    lhs_expr: object
+    rhs_expr: object
+    source_expr: object
+    maybe_logic: object
+    maybe_scale: object
 
     pairs = ((node.lhs, node.rhs), (node.rhs, node.lhs))
     for maybe_logic, maybe_scale in pairs:
@@ -1591,8 +1734,12 @@ def _extract_mul_zero_flag_source_8616(node: StructuredAstValue) -> StructuredAs
     return None
 
 
-def _extract_child_zero_flag_source_8616(node: StructuredAstValue, attrs: tuple[str, ...]) -> StructuredAstValue:
+@cython.ccall
+def _extract_child_zero_flag_source_8616(node: StructuredAstValue, attrs: object) -> StructuredAstValue:
     """Recurse into the first structured child attr carrying a flag source."""
+    child: object
+    extracted: object
+    attr: object
 
     for attr in attrs:
         child = getattr(node, attr, None)
@@ -1605,6 +1752,7 @@ def _extract_child_zero_flag_source_8616(node: StructuredAstValue, attrs: tuple[
 
 def _extract_zero_flag_source_expr(node: StructuredAstValue) -> StructuredAstValue:
     def _impl() -> StructuredAstValue:
+        extracted: object
         if isinstance(node, structured_c.CBinaryOp):
             if node.op == "Mul":
                 extracted = _extract_mul_zero_flag_source_8616(node)
@@ -1623,7 +1771,9 @@ def _extract_zero_flag_source_expr(node: StructuredAstValue) -> StructuredAstVal
     return _impl()
 
 
+@cython.ccall
 def _simplify_zero_flag_comparison(node: object, codegen: StructuredCodegenValue) -> object:
+    source_expr: object
     if not isinstance(node, structured_c.CBinaryOp) or node.op not in {"CmpEQ", "CmpNE"}:
         return node
 
@@ -1647,6 +1797,7 @@ def _simplify_zero_flag_comparison(node: object, codegen: StructuredCodegenValue
     return structured_c.CUnaryOp("Not", source_expr, codegen=codegen)
 
 
+@cython.ccall
 def _restore_not_shift_zero_flag_source(source_expr: object, codegen: StructuredCodegenValue) -> object:
     source_expr = _unwrap_c_casts(source_expr)
     if not isinstance(source_expr, structured_c.CBinaryOp) or source_expr.op not in {"Shr", "Sar"}:
@@ -1671,6 +1822,9 @@ def _restore_not_shift_zero_flag_source(source_expr: object, codegen: Structured
 
 def _match_high_byte_projection_base(expr: StructuredAstValue) -> StructuredAstValue:
     def _impl() -> StructuredAstValue:
+        const_value: object
+        maybe_const: object
+        maybe_other: object
         nonlocal expr
         expr = _unwrap_c_casts(expr)
         if not isinstance(expr, structured_c.CBinaryOp) or expr.op != "Shr":
@@ -1695,8 +1849,11 @@ def _match_high_byte_projection_base(expr: StructuredAstValue) -> StructuredAstV
     return _impl()
 
 
+@cython.ccall
 def _adjacent_pair_scaled_high_8616(high_expr: StructuredAstValue) -> StructuredAstValue:
     """Unwrap ``x*8``/``x*0x100``/``x<<8`` scale on the high expr."""
+    maybe_inner: object
+    maybe_scale: object
 
     if isinstance(high_expr, structured_c.CBinaryOp) and high_expr.op in {"Mul", "Shl"}:
         for maybe_inner, maybe_scale in ((high_expr.lhs, high_expr.rhs), (high_expr.rhs, high_expr.lhs)):
@@ -1707,8 +1864,11 @@ def _adjacent_pair_scaled_high_8616(high_expr: StructuredAstValue) -> Structured
     return high_expr
 
 
-def _adjacent_pair_reg_vars_8616(low_expr: StructuredAstValue, high_expr: StructuredAstValue) -> bool:
+@cython.ccall
+def _adjacent_pair_reg_vars_8616(low_expr: StructuredAstValue, high_expr: StructuredAstValue) -> cython.bint:
     """Return whether both exprs are size-1 register variables."""
+    high_var: object
+    low_var: object
 
     if not isinstance(low_expr, structured_c.CVariable) or not isinstance(high_expr, structured_c.CVariable):
         return False
@@ -1719,8 +1879,10 @@ def _adjacent_pair_reg_vars_8616(low_expr: StructuredAstValue, high_expr: Struct
     return getattr(low_var, "size", None) == 1 and getattr(high_var, "size", None) == 1
 
 
-def _adjacent_pair_proof_ok_8616(analysis: object) -> bool:
+@cython.ccall
+def _adjacent_pair_proof_ok_8616(analysis: object) -> cython.bint:
     """Validate the adjacent-slices analysis proof fields."""
+    proof: object
 
     proof = getattr(analysis, "proof", None)
     if proof is None:
@@ -1729,13 +1891,14 @@ def _adjacent_pair_proof_ok_8616(analysis: object) -> bool:
         return False
     if getattr(proof, "left_version", None) is None or getattr(proof, "right_version", None) is None:
         return False
-    return getattr(proof, "left_version", None) == getattr(proof, "right_version", None)
+    return operator.eq(getattr(proof, "left_version", None), getattr(proof, "right_version", None))
 
 
 def _match_adjacent_register_pair_var_expr(
     low_expr: StructuredAstValue, high_expr: StructuredAstValue, codegen: StructuredCodegenValue
 ) -> StructuredAstValue:
     def _impl() -> StructuredAstValue:
+        alias_state: object
         nonlocal high_expr
         high_expr = _adjacent_pair_scaled_high_8616(high_expr)
         if not _adjacent_pair_reg_vars_8616(low_expr, high_expr):
@@ -1754,6 +1917,7 @@ def _match_adjacent_register_pair_var_expr(
     return _impl()
 
 
+@cython.ccall
 def _match_high_byte_projection_expr(expr: StructuredAstValue) -> StructuredAstValue:
     expr = _unwrap_c_casts(expr)
     if not isinstance(expr, structured_c.CBinaryOp) or expr.op != "Shr":
@@ -1770,8 +1934,12 @@ def _match_high_byte_projection_expr(expr: StructuredAstValue) -> StructuredAstV
     return None
 
 
+@cython.ccall
 def _high_byte_const_and_arm_8616(node: StructuredAstValue) -> StructuredAstValue:
     """Unwrap ``x & 0xFF`` and recurse for the high-byte constant."""
+    inner_val: object
+    maybe_inner: object
+    maybe_mask: object
 
     for maybe_inner, maybe_mask in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
         if _c_constant_value(_unwrap_c_casts(maybe_mask)) == 0xFF:
@@ -1781,8 +1949,12 @@ def _high_byte_const_and_arm_8616(node: StructuredAstValue) -> StructuredAstValu
     return None
 
 
+@cython.ccall
 def _high_byte_const_shr_arm_8616(node: StructuredAstValue) -> StructuredAstValue:
     """Match ``(const | (y & 0xFF)) >> 8`` to its projected byte constant."""
+    const_value: object
+    maybe_const: object
+    maybe_other: object
 
     shift = _c_constant_value(_unwrap_c_casts(node.rhs))
     inner = _unwrap_c_casts(node.lhs)
@@ -1803,6 +1975,7 @@ def _high_byte_const_shr_arm_8616(node: StructuredAstValue) -> StructuredAstValu
 
 def _match_high_byte_projection_constant(node: StructuredAstValue) -> StructuredAstValue:
     def _impl() -> StructuredAstValue:
+        inner_val: object
         nonlocal node
         node = _unwrap_c_casts(node)
         if isinstance(node, structured_c.CBinaryOp) and node.op == "And":
@@ -1816,8 +1989,11 @@ def _match_high_byte_projection_constant(node: StructuredAstValue) -> Structured
     return _impl()
 
 
+@cython.ccall
 def _boolean_not_operand_arm_8616(node: StructuredAstValue, codegen: StructuredCodegenValue) -> StructuredAstValue:
     """Simplify ``Not operand`` shapes; None means no rewrite."""
+    lhs_const: object
+    rhs_const: object
 
     operand = _unwrap_c_casts(node.operand)
     if isinstance(operand, structured_c.CUnaryOp) and operand.op == "Not":
@@ -1868,6 +2044,9 @@ def _boolean_not_operand_arm_8616(node: StructuredAstValue, codegen: StructuredC
 
 def _simplify_boolean_expr(node: StructuredAstValue, codegen: StructuredCodegenValue) -> StructuredAstValue:
     def _impl() -> StructuredAstValue:
+        interval_guard: object
+        inverted: object
+        rewritten: object
         if isinstance(node, structured_c.CUnaryOp) and node.op == "Not":
             rewritten = _boolean_not_operand_arm_8616(node, codegen)
             if rewritten is not None:
@@ -1924,6 +2103,7 @@ def _simplify_zero_mul_or_expr(node: StructuredAstValue, codegen: StructuredCode
     return node
 
 
+@cython.ccall
 def _algebraic_pointer_shr_arm_8616(node: StructuredAstValue, codegen: StructuredCodegenValue) -> StructuredAstValue:
     """Cast ``&x >> 8`` pointer shifts to an explicit integer projection."""
 
@@ -1945,8 +2125,11 @@ def _algebraic_pointer_shr_arm_8616(node: StructuredAstValue, codegen: Structure
     )
 
 
+@cython.ccall
 def _algebraic_identity_transform_8616(node: StructuredAstValue, codegen: StructuredCodegenValue) -> StructuredAstValue:
     """Rewrite basic Xor/Sub/Add/Or/Shr identity arms on one node."""
+    high_byte_constant: object
+    rewritten: object
 
     if not isinstance(node, structured_c.CBinaryOp):
         return node
@@ -1993,7 +2176,7 @@ def _algebraic_identity_transform_8616(node: StructuredAstValue, codegen: Struct
     return node
 
 
-def _simplify_basic_algebraic_identities(codegen: StructuredCodegenValue) -> bool:
+def _simplify_basic_algebraic_identities(codegen: StructuredCodegenValue) -> cython.bint:
     if getattr(codegen, "cfunc", None) is None:
         return False
 
@@ -2016,10 +2199,12 @@ def _simplify_basic_algebraic_identities(codegen: StructuredCodegenValue) -> boo
     return changed
 
 
-def _collect_protected_deref_expr_ids(root: StructuredAstValue) -> set[int]:
-    protected_ids: set[int] = set()
+def _collect_protected_deref_expr_ids(root: StructuredAstValue) -> object:
+    walk_node: object
+    protected_ids: set[cython.longlong] = set()
 
     def _protect_addr_expr_nodes(expr: StructuredAstValue) -> None:
+        protected_node: object
         if not _structured_codegen_node(expr):
             return
         for protected_node in _iter_c_nodes_deep(expr):
@@ -2048,7 +2233,8 @@ def _collect_protected_deref_expr_ids(root: StructuredAstValue) -> set[int]:
     return protected_ids
 
 
-def _is_linear_register_temp_var(cvar: StructuredAstValue) -> bool:
+@cython.ccall
+def _is_linear_register_temp_var(cvar: StructuredAstValue) -> cython.bint:
     return (
         isinstance(cvar, structured_c.CVariable)
         and isinstance(getattr(cvar, "name", None), str)
@@ -2062,7 +2248,7 @@ def _is_linear_register_temp_var(cvar: StructuredAstValue) -> bool:
 
 _SIMPLIFY_NO_MATCH_8616: object = object()
 
-_CONST_FOLD_OPS_8616: Mapping[str, Callable[[int, int], int]] = {
+_CONST_FOLD_OPS_8616: Mapping[str, Callable[[int, int], cython.longlong]] = {
     "Add": lambda lhs, rhs: lhs + rhs,
     "Sub": lambda lhs, rhs: lhs - rhs,
     "Mul": lambda lhs, rhs: lhs * rhs,
@@ -2074,7 +2260,7 @@ _CONST_FOLD_OPS_8616: Mapping[str, Callable[[int, int], int]] = {
 }
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _BinarySimplifyCtx8616:
     """Resolved operand context shared by the binary transform arms."""
 
@@ -2082,12 +2268,12 @@ class _BinarySimplifyCtx8616:
     lhs: StructuredAstValue
     rhs: StructuredAstValue
     resolved: StructuredAstValue
-    resolved_contains_dereference: bool
-    storage_backed_source: bool
+    resolved_contains_dereference: cython.bint
+    storage_backed_source: cython.bint
 
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _StructuredSimplifyRun8616:
     """Run state for the legacy structured-C simplification passes.
 
@@ -2098,22 +2284,23 @@ class _StructuredSimplifyRun8616:
 
     codegen: StructuredCodegenValue
     cfunc: Any = None
-    protected_dereference_addr_expr_ids: set[int] = field(default_factory=set)
-    variable_use_counts: dict[int, int] = field(default_factory=dict)
-    high_byte_aliases: dict[int, int] = field(default_factory=dict)
-    shift_extract_aliases: dict[int, tuple[object, int]] = field(default_factory=dict)
-    mask_shift_aliases: dict[int, tuple[object, int, int]] = field(default_factory=dict)
-    copy_aliases: dict[int, _CopyAliasState] = field(default_factory=dict)
-    linear_aliases: dict[int, object] = field(default_factory=dict)
-    dereference_backed_linear_temps: set[int] = field(default_factory=set)
-    memory_backed_linear_temps: set[int] = field(default_factory=set)
-    far_pointer_aliases: dict[int, object] = field(default_factory=dict)
-    adjacent_byte_pair_cache: dict[tuple[int, int], object] = field(default_factory=dict)
-    word_plus_minus_one_cache: dict[int, object] = field(default_factory=dict)
+    protected_dereference_addr_expr_ids: object = field(default_factory=set)
+    variable_use_counts: object = field(default_factory=dict)
+    high_byte_aliases: object = field(default_factory=dict)
+    shift_extract_aliases: object = field(default_factory=dict)
+    mask_shift_aliases: object = field(default_factory=dict)
+    copy_aliases: object = field(default_factory=dict)
+    linear_aliases: object = field(default_factory=dict)
+    dereference_backed_linear_temps: object = field(default_factory=set)
+    memory_backed_linear_temps: object = field(default_factory=set)
+    far_pointer_aliases: object = field(default_factory=dict)
+    adjacent_byte_pair_cache: object = field(default_factory=dict)
+    word_plus_minus_one_cache: object = field(default_factory=dict)
 
     @classmethod
     def build_8616(cls, codegen: StructuredCodegenValue) -> _StructuredSimplifyRun8616 | None:
         """Return a run only when the codegen exposes structured statements."""
+        cfunc: object
         cfunc = getattr(codegen, "cfunc", None)
         if cfunc is None or getattr(cfunc, "statements", None) is None:
             return None
@@ -2121,6 +2308,8 @@ class _StructuredSimplifyRun8616:
 
     def __post_init__(self) -> None:
         """Seed protected-expression ids, use counts, and linear aliases."""
+        variable: object
+        walk_node: object
         self.protected_dereference_addr_expr_ids = _collect_protected_deref_expr_ids(getattr(self.cfunc, "statements", None))
         for walk_node in _iter_c_nodes_deep(self.cfunc.statements):
             if not isinstance(walk_node, structured_c.CVariable):
@@ -2130,8 +2319,12 @@ class _StructuredSimplifyRun8616:
                 self.variable_use_counts[id(variable)] = self.variable_use_counts.get(id(variable), 0) + 1
         self._seed_linear_aliases_8616()
 
+    @cython.ccall
     def _seed_linear_aliases_8616(self) -> None:
         """Resolve linear word-delta temporaries to a fixed point before passes."""
+        lhs_var: object
+        linear_rhs: object
+        walk_node: object
         for _ in range(3):
             changed = False
             for walk_node in _iter_c_nodes_deep(self.codegen.cfunc.statements):
@@ -2152,13 +2345,14 @@ class _StructuredSimplifyRun8616:
                 if lhs_var is None:
                     continue
                 key = id(lhs_var)
-                if self.linear_aliases.get(key) != linear_rhs:
+                if operator.ne(self.linear_aliases.get(key), linear_rhs):
                     self.linear_aliases[key] = linear_rhs
                     changed = True
             if not changed:
                 break
 
-    def run_8616(self) -> bool:
+    @cython.ccall
+    def run_8616(self) -> cython.bint:
         """Run the fixed-point transform and dead-init pruning passes."""
         root = self.codegen.cfunc.statements
         changed = False
@@ -2185,8 +2379,13 @@ class _StructuredSimplifyRun8616:
                 break
         return changed
 
+    @cython.ccall
     def _collect_high_byte_temp_constants(self, node: StructuredAstValue) -> StructuredAstValue:
-        aliases: dict[int, int] = {}
+        const_value: object
+        _maybe_other: object
+        maybe_const: object
+        walk_node: object
+        aliases: dict[cython.longlong, cython.longlong] = {}
         for walk_node in _iter_c_nodes_deep(node):
             if not isinstance(walk_node, structured_c.CAssignment) or not isinstance(
                 walk_node.lhs, structured_c.CVariable
@@ -2205,8 +2404,12 @@ class _StructuredSimplifyRun8616:
                 break
         return aliases
 
+    @cython.ccall
     def _collect_shift_extract_aliases(self, node: StructuredAstValue) -> StructuredAstValue:
-        aliases: dict[int, tuple[object, int]] = {}
+        inner: object
+        shift: object
+        walk_node: object
+        aliases: dict[cython.longlong, tuple[object, cython.longlong]] = {}
         for walk_node in _iter_c_nodes_deep(node):
             if not isinstance(walk_node, structured_c.CAssignment) or not isinstance(
                 walk_node.lhs, structured_c.CVariable
@@ -2235,10 +2438,13 @@ class _StructuredSimplifyRun8616:
             aliases[id(getattr(walk_node.lhs, "variable", None))] = (inner, shift)
         return aliases
 
+    @cython.ccall
     def _mask_shift_alias_for_assignment_8616(
-        self, walk_node: StructuredAstValue, aliases: dict[int, tuple[object, int, int]]
-    ) -> tuple[int, tuple[object, int, int]] | None:
+        self, walk_node: StructuredAstValue, aliases: object
+    ) -> object:
         """Match one assignment against the mask/shift alias forms."""
+        alias: object
+        lhs_var: object
         if not isinstance(walk_node, structured_c.CAssignment) or not isinstance(
             walk_node.lhs, structured_c.CVariable
         ):
@@ -2254,10 +2460,14 @@ class _StructuredSimplifyRun8616:
             return None
         return id(lhs_var), alias
 
+    @cython.ccall
     def _mask_shift_alias_for_rhs_8616(
-        self, rhs: StructuredAstValue, aliases: dict[int, tuple[object, int, int]]
-    ) -> tuple[object, int, int] | None:
+        self, rhs: StructuredAstValue, aliases: object
+    ) -> object:
         """Match an assignment rhs against the mask or shift alias forms."""
+        lhs_const: object
+        parent: object
+        rhs_const: object
         if isinstance(rhs, structured_c.CBinaryOp) and rhs.op == "And":
             lhs_const = _c_constant_value(_unwrap_c_casts(rhs.lhs))
             rhs_const = _c_constant_value(_unwrap_c_casts(rhs.rhs))
@@ -2278,8 +2488,11 @@ class _StructuredSimplifyRun8616:
         base_expr, mask, base_shift = parent
         return base_expr, mask, base_shift + shift
 
+    @cython.ccall
     def _collect_mask_shift_aliases(self, node: StructuredAstValue) -> StructuredAstValue:
-        aliases: dict[int, tuple[object, int, int]] = {}
+        match: object
+        walk_node: object
+        aliases: dict[cython.longlong, tuple[object, cython.longlong, cython.longlong]] = {}
         for _ in range(4):
             changed = False
             for walk_node in _iter_c_nodes_deep(node):
@@ -2287,17 +2500,21 @@ class _StructuredSimplifyRun8616:
                 if match is None:
                     continue
                 key, alias = match
-                if aliases.get(key) != alias:
+                if operator.ne(aliases.get(key), alias):
                     aliases[key] = alias
                     changed = True
             if not changed:
                 break
         return aliases
 
+    @cython.ccall
     def _copy_alias_state_for_assignment_8616(
-        self, walk_node: StructuredAstValue, aliases: dict[int, _CopyAliasState]
-    ) -> tuple[int, _CopyAliasState] | None:
+        self, walk_node: StructuredAstValue, aliases: object
+    ) -> object:
         """Match one assignment against the copy-alias form."""
+        lhs_var: object
+        parent_state: object
+        rhs_var: object
         if not isinstance(walk_node, structured_c.CAssignment) or not isinstance(
             walk_node.lhs, structured_c.CVariable
         ):
@@ -2322,8 +2539,12 @@ class _StructuredSimplifyRun8616:
         )
         return id(lhs_var), rhs_state
 
+    @cython.ccall
     def _collect_copy_aliases(self, node: StructuredAstValue) -> StructuredAstValue:
-        aliases: dict[int, _CopyAliasState] = {}
+        current: object
+        match: object
+        walk_node: object
+        aliases: dict[cython.longlong, _CopyAliasState] = {}
         for _ in range(3):
             changed = False
             for walk_node in _iter_c_nodes_deep(node):
@@ -2337,14 +2558,18 @@ class _StructuredSimplifyRun8616:
                     changed = True
                     continue
                 merged = current.merge(rhs_state)
-                if merged != current:
+                if operator.ne(merged, current):
                     aliases[key] = merged
                     changed = True
             if not changed:
                 break
         return aliases
 
-    def _extract_linear_delta(self, expr: object) -> tuple[object | None, int]:
+    @cython.ccall
+    def _extract_linear_delta(self, expr: object) -> object:
+        duplicate_word_base: object
+        left_base: object
+        right_base: object
         expr = _unwrap_c_casts(expr)
         if isinstance(expr, structured_c.CConstant) and isinstance(expr.value, int):
             return None, int(expr.value)
@@ -2363,14 +2588,15 @@ class _StructuredSimplifyRun8616:
                 return duplicate_word_base, 0
         return self._combine_linear_delta_8616(expr, left_base, left_delta, right_base, right_delta)
 
+    @cython.ccall
     def _combine_linear_delta_8616(
         self,
         expr: structured_c.CBinaryOp,
-        left_base: StructuredAstValue,
-        left_delta: int,
-        right_base: StructuredAstValue,
-        right_delta: int,
-    ) -> tuple[object | None, int]:
+        left_base: object,
+        left_delta: cython.longlong,
+        right_base: object,
+        right_delta: cython.longlong,
+    ) -> tuple[object | None, cython.longlong]:
         """Combine the operand deltas for the Add/Sub linear form."""
         if left_base is not None:
             if expr.op == "Add":
@@ -2384,7 +2610,11 @@ class _StructuredSimplifyRun8616:
             return None, left_delta + right_delta
         return None, left_delta - right_delta
 
+    @cython.ccall
     def _fold_simple_add_constants(self, node: StructuredAstValue) -> StructuredAstValue:
+        const_type: object
+        const_value: object
+        term: object
         node = _unwrap_c_casts(node)
         if not isinstance(node, structured_c.CBinaryOp) or node.op != "Add":
             return node
@@ -2424,10 +2654,11 @@ class _StructuredSimplifyRun8616:
             codegen=getattr(node, "codegen", None),
         )
 
+    @cython.ccall
     def _collect_add_terms(self, expr: StructuredAstValue) -> StructuredAstValue:
         terms = []
         stack = [_unwrap_c_casts(expr)]
-        seen: set[int] = set()
+        seen: set[cython.longlong] = set()
         while stack:
             current = _unwrap_c_casts(stack.pop())
             key = id(current)
@@ -2442,6 +2673,7 @@ class _StructuredSimplifyRun8616:
                 terms.append(current)
         return terms
 
+    @cython.ccall
     def _build_linear_expr(self, 
         base_expr: StructuredAstValue, delta: StructuredAstValue, codegen: StructuredCodegenValue
     ) -> StructuredAstValue:
@@ -2456,6 +2688,7 @@ class _StructuredSimplifyRun8616:
             codegen=self.codegen,
         )
 
+    @cython.ccall
     def _normalize_protected_add_constant_tail(self, node: StructuredAstValue) -> StructuredAstValue:
         if not isinstance(node, structured_c.CBinaryOp) or node.op != "Add":
             return node
@@ -2477,12 +2710,17 @@ class _StructuredSimplifyRun8616:
                 )
         return node
 
+    @cython.ccall
     def _alias_storage_key(self, expr: StructuredAstValue) -> StructuredAstValue:
         facts = describe_alias_storage(expr)
         return facts.identity
 
-    def _chase_copy_alias_8616(self, current: StructuredAstValue, seen: set[int]) -> StructuredAstValue:
+    @cython.ccall
+    def _chase_copy_alias_8616(self, current: StructuredAstValue, seen: object) -> StructuredAstValue:
         """Follow inlinable copy aliases, cloning each inlined expression."""
+        alias: object
+        storage_key: object
+        variable: object
         while isinstance(current, structured_c.CVariable):
             variable = getattr(current, "variable", None)
             if variable is None:
@@ -2503,7 +2741,8 @@ class _StructuredSimplifyRun8616:
             current = _unwrap_c_casts(_clone_structured_c_value(alias.expr))
         return current
 
-    def _resolve_copy_alias_expr(self, node: StructuredAstValue, seen: set[int] | None = None) -> StructuredAstValue:
+    @cython.ccall
+    def _resolve_copy_alias_expr(self, node: StructuredAstValue, seen: object = None) -> StructuredAstValue:
         current = _unwrap_c_casts(node)
         if seen is None:
             seen = set()
@@ -2532,6 +2771,7 @@ class _StructuredSimplifyRun8616:
                 return structured_c.CBinaryOp(current.op, lhs, rhs, codegen=current.codegen)
         return current
 
+    @cython.ccall
     def _expr_is_safe_inline_candidate(self, expr: StructuredAstValue) -> StructuredAstValue:
         expr = _unwrap_c_casts(expr)
         if isinstance(expr, (structured_c.CConstant, structured_c.CVariable)):
@@ -2546,6 +2786,7 @@ class _StructuredSimplifyRun8616:
             return self._expr_is_safe_inline_candidate(expr.lhs) and self._expr_is_safe_inline_candidate(expr.rhs)
         return False
 
+    @cython.ccall
     def _expr_is_copy_alias_candidate(self, expr: StructuredAstValue) -> StructuredAstValue:
         expr = _unwrap_c_casts(expr)
         if isinstance(expr, (structured_c.CConstant, structured_c.CVariable)):
@@ -2554,14 +2795,20 @@ class _StructuredSimplifyRun8616:
             return self._expr_is_copy_alias_candidate(expr.expr)
         return False
 
-    def _expr_contains_dereference(self, expr: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _expr_contains_dereference(self, expr: StructuredAstValue) -> cython.bint:
+        walk_node: object
         for walk_node in _iter_c_nodes_deep(expr):
             if isinstance(walk_node, structured_c.CUnaryOp) and walk_node.op == "Dereference":
                 return True
         return False
 
+    @cython.ccall
     def _collect_dereference_backed_linear_temps(self, node: StructuredAstValue) -> StructuredAstValue:
-        aliases: set[int] = set()
+        key: object
+        rhs_var: object
+        walk_node: object
+        aliases: set[cython.longlong] = set()
         for _ in range(4):
             changed = False
             for walk_node in _iter_c_nodes_deep(node):
@@ -2583,8 +2830,10 @@ class _StructuredSimplifyRun8616:
                 break
         return aliases
 
+    @cython.ccall
     def _linear_temp_assignment_key_8616(self, walk_node: StructuredAstValue) -> int | None:
         """Return the lhs variable key for a linear register temp assignment."""
+        lhs_var: object
         if not isinstance(walk_node, structured_c.CAssignment) or not isinstance(
             walk_node.lhs, structured_c.CVariable
         ):
@@ -2596,8 +2845,12 @@ class _StructuredSimplifyRun8616:
             return None
         return id(lhs_var)
 
+    @cython.ccall
     def _collect_memory_backed_linear_temps(self, node: StructuredAstValue) -> StructuredAstValue:
-        aliases: set[int] = set()
+        lhs_var: object
+        rhs_var: object
+        walk_node: object
+        aliases: set[cython.longlong] = set()
         for _ in range(4):
             changed = False
             for walk_node in _iter_c_nodes_deep(node):
@@ -2626,7 +2879,10 @@ class _StructuredSimplifyRun8616:
                 break
         return aliases
 
-    def _expr_uses_dereference_backed_temp(self, expr: StructuredAstValue, backed_ids: set[int]) -> bool:
+    @cython.ccall
+    def _expr_uses_dereference_backed_temp(self, expr: StructuredAstValue, backed_ids: object) -> cython.bint:
+        variable: object
+        walk_node: object
         if not backed_ids:
             return False
         for walk_node in _iter_c_nodes_deep(expr):
@@ -2637,7 +2893,10 @@ class _StructuredSimplifyRun8616:
                 return True
         return False
 
-    def _expr_uses_memory_backed_temp(self, expr: StructuredAstValue, backed_ids: set[int]) -> bool:
+    @cython.ccall
+    def _expr_uses_memory_backed_temp(self, expr: StructuredAstValue, backed_ids: object) -> cython.bint:
+        variable: object
+        walk_node: object
         if not backed_ids:
             return False
         for walk_node in _iter_c_nodes_deep(expr):
@@ -2648,7 +2907,10 @@ class _StructuredSimplifyRun8616:
                 return True
         return False
 
-    def _stack_name_root(self, name: str | None) -> str | None:
+    @cython.ccall
+    def _stack_name_root(self, name: object) -> object:
+        match: object
+        suffix: object
         if not isinstance(name, str) or not name:
             return None
         match = re.fullmatch(r"(?P<root>.*?)(?:_(?P<suffix>\d+))?", name)
@@ -2660,10 +2922,14 @@ class _StructuredSimplifyRun8616:
             return root
         return root if root else name
 
+    @cython.ccall
     def _far_pointer_alias_groups_8616(
         self, node: StructuredAstValue
-    ) -> dict[str, dict[str, list[tuple[structured_c.CVariable, object]]]]:
+    ) -> object:
         """Group stack assignments into zero inits and candidate sources per root."""
+        lhs_var: object
+        root: object
+        walk_node: object
         groups: dict[str, dict[str, list[tuple[structured_c.CVariable, object]]]] = {}
         for walk_node in _iter_c_nodes_deep(node):
             if not isinstance(walk_node, structured_c.CAssignment) or not isinstance(
@@ -2689,23 +2955,33 @@ class _StructuredSimplifyRun8616:
         return groups
 
     def _far_pointer_source_expr_8616(
-        self, root: str, sources: list[tuple[structured_c.CVariable, object]]
+        self, root: object, sources: object
     ) -> StructuredAstValue:
         """Pick the best-scoring source expression that does not self-reference."""
+        variable: object
+        cvar: object
+        rhs: object
         for cvar, rhs in sorted(sources, key=lambda item: self._source_score(item[0], item[1])):
             variable = getattr(cvar, "variable", None)
             if not isinstance(variable, SimStackVariable):
                 continue
-            if self._stack_name_root(variable.name) != root:
+            if operator.ne(self._stack_name_root(variable.name), root):
                 continue
             if self._expr_mentions_stack_root(rhs, root):
                 continue
             return rhs
         return None
 
+    @cython.ccall
     def _collect_far_pointer_stack_aliases(self, node: StructuredAstValue) -> StructuredAstValue:
+        source_expr: object
+        variable: object
+        _rhs: object
+        cvar: object
+        parts: object
+        root: object
         groups = self._far_pointer_alias_groups_8616(node)
-        aliases: dict[int, object] = {}
+        aliases: dict[cython.longlong, object] = {}
         for root, parts in groups.items():
             if not parts["zero"] or not parts["source"]:
                 continue
@@ -2719,7 +2995,9 @@ class _StructuredSimplifyRun8616:
                 aliases[id(variable)] = source_expr
         return aliases
 
-    def _expr_contains_generated_temp(self, expr: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _expr_contains_generated_temp(self, expr: StructuredAstValue) -> cython.bint:
+        walk: object
         for walk in _iter_c_nodes_deep(expr):
             if not isinstance(walk, structured_c.CVariable):
                 continue
@@ -2728,18 +3006,22 @@ class _StructuredSimplifyRun8616:
                 return True
         return False
 
-    def _expr_mentions_stack_root(self, expr: StructuredAstValue, root: str) -> bool:
+    @cython.ccall
+    def _expr_mentions_stack_root(self, expr: StructuredAstValue, root: object) -> cython.bint:
+        walk: object
         for walk in _iter_c_nodes_deep(expr):
             if not isinstance(walk, structured_c.CVariable):
                 continue
             variable = walk.variable
             if not isinstance(variable, SimStackVariable):
                 continue
-            if self._stack_name_root(variable.name) == root:
+            if operator.eq(self._stack_name_root(variable.name), root):
                 return True
         return False
 
-    def _source_score(self, _cvar: StructuredAstValue, expr: StructuredAstValue) -> tuple[int, int, int]:
+    @cython.ccall
+    def _source_score(self, _cvar: StructuredAstValue, expr: StructuredAstValue) -> tuple[cython.longlong, cython.longlong, cython.longlong]:
+        variable: object
         expr = _unwrap_c_casts(expr)
         variable = getattr(expr, "variable", None)
         name = getattr(variable, "name", None) or getattr(expr, "name", None)
@@ -2754,9 +3036,12 @@ class _StructuredSimplifyRun8616:
             return (4, int(expr.value) if isinstance(expr.value, int) else 0, 0)
         return (4, 0, 0)
 
+    @cython.ccall
     def _match_adjacent_byte_pair_var_expr(self, 
         low_expr: StructuredAstValue, high_expr: StructuredAstValue
     ) -> StructuredAstValue:
+        maybe_inner: object
+        maybe_scale: object
         key = (id(low_expr), id(high_expr))
         if key in self.adjacent_byte_pair_cache:
             cached = self.adjacent_byte_pair_cache[key]
@@ -2784,7 +3069,12 @@ class _StructuredSimplifyRun8616:
         self.adjacent_byte_pair_cache[key] = _SIMPLIFY_NO_MATCH_8616
         return None
 
+    @cython.ccall
     def _match_word_plus_minus_one_expr(self, node: StructuredAstValue) -> StructuredAstValue:
+        base_expr: object
+        result: object
+        delta_expr: object
+        masked_expr: object
         key = id(node)
         if key in self.word_plus_minus_one_cache:
             cached = self.word_plus_minus_one_cache[key]
@@ -2812,11 +3102,12 @@ class _StructuredSimplifyRun8616:
         self.word_plus_minus_one_cache[key] = _SIMPLIFY_NO_MATCH_8616
         return None
 
+    @cython.ccall
     def _word_plus_delta_result_8616(
         self,
         node: structured_c.CBinaryOp,
         base_expr: StructuredAstValue,
-        duplicate_word_base: StructuredAstValue,
+        duplicate_word_base: object,
         delta_expr: StructuredAstValue,
     ) -> StructuredAstValue:
         """Match the delta operand of the masked-word plus/minus-one form."""
@@ -2866,6 +3157,7 @@ class _StructuredSimplifyRun8616:
             )
         return None
 
+    @cython.ccall
     def _strip_byte_cast(self, expr: StructuredAstValue) -> StructuredAstValue:
         expr = _unwrap_c_casts(expr)
         if isinstance(expr, structured_c.CTypeCast):
@@ -2874,7 +3166,10 @@ class _StructuredSimplifyRun8616:
                 return _unwrap_c_casts(expr.expr)
         return expr
 
+    @cython.ccall
     def _match_masked_high_word(self, expr: StructuredAstValue) -> StructuredAstValue:
+        maybe_mask: object
+        maybe_word: object
         expr = _unwrap_c_casts(expr)
         if not isinstance(expr, structured_c.CBinaryOp) or expr.op != "And":
             return None
@@ -2884,7 +3179,12 @@ class _StructuredSimplifyRun8616:
             return _unwrap_c_casts(maybe_word)
         return None
 
+    @cython.ccall
     def _match_duplicate_word_base(self, expr: StructuredAstValue) -> StructuredAstValue:
+        maybe_high: object
+        maybe_inner: object
+        maybe_low: object
+        maybe_scale: object
         expr = _unwrap_c_casts(expr)
         if not isinstance(expr, structured_c.CBinaryOp) or expr.op != "Or":
             return None
@@ -2901,6 +3201,7 @@ class _StructuredSimplifyRun8616:
                     return low_expr
         return None
 
+    @cython.ccall
     def _analyze_current_widening_expr(self, node: StructuredAstValue) -> StructuredAstValue:
         """Analyze current operands, including temporary resolved expressions."""
         # Resolved nodes can be discarded between calls and their IDs reused.
@@ -2911,7 +3212,9 @@ class _StructuredSimplifyRun8616:
             _match_high_byte_projection_base,
         )
 
+    @cython.ccall
     def _match_linear_word_delta_expr(self, node: StructuredAstValue) -> StructuredAstValue:
+        analysis: object
         analysis = self._analyze_current_widening_expr(node)
         if analysis is None or analysis.kind != "linear":
             return None
@@ -2928,7 +3231,9 @@ class _StructuredSimplifyRun8616:
             codegen=self.codegen,
         )
 
+    @cython.ccall
     def _match_high_byte_preserving_word_expr(self, node: StructuredAstValue) -> StructuredAstValue:
+        analysis: object
         analysis = self._analyze_current_widening_expr(node)
         if analysis is None or analysis.kind != "high_byte_preserving":
             return None
@@ -2939,7 +3244,9 @@ class _StructuredSimplifyRun8616:
             codegen=self.codegen,
         )
 
-    def _memory_backed_widening_base(self, node: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _memory_backed_widening_base(self, node: StructuredAstValue) -> cython.bint:
+        analysis: object
         if self._expr_uses_dereference_backed_temp(node, self.dereference_backed_linear_temps):
             return True
         analysis = self._analyze_current_widening_expr(node)
@@ -2952,10 +3259,13 @@ class _StructuredSimplifyRun8616:
             return True
         return isinstance(base_expr, structured_c.CUnaryOp) and base_expr.op == "Dereference"
 
+    @cython.ccall
     def _make_mk_fp(self, segment_expr: StructuredAstValue, offset_expr: StructuredAstValue) -> StructuredAstValue:
         return structured_c.CFunctionCall("MK_FP", None, [segment_expr, offset_expr], codegen=self.codegen)
 
-    def _is_dead_stack_address_init(self, stmt: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_dead_stack_address_init(self, stmt: StructuredAstValue) -> cython.bint:
+        lhs_var: object
         if not isinstance(stmt, structured_c.CAssignment) or not isinstance(stmt.lhs, structured_c.CVariable):
             return False
         lhs_var = getattr(stmt.lhs, "variable", None)
@@ -2972,7 +3282,10 @@ class _StructuredSimplifyRun8616:
         ref_var = operand.variable
         return isinstance(ref_var, SimStackVariable) and _stack_slot_identity_for_variable(ref_var) is not None
 
-    def _is_redundant_self_copy(self, stmt: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_redundant_self_copy(self, stmt: StructuredAstValue) -> cython.bint:
+        lhs_var: object
+        rhs_var: object
         if not isinstance(stmt, structured_c.CAssignment):
             return False
         lhs = _unwrap_c_casts(stmt.lhs)
@@ -2985,7 +3298,17 @@ class _StructuredSimplifyRun8616:
             return False
         return _is_linear_register_temp_var(lhs)
 
+    @cython.ccall
     def _rewrite_and_over_or(self, node: StructuredAstValue) -> StructuredAstValue:
+        const_value: object
+        inner_const: object
+        inner_mask: object
+        and_expr: object
+        const_expr: object
+        inner_base: object
+        inner_const_expr: object
+        inner_mask_expr: object
+        or_expr: object
         if not isinstance(node, structured_c.CBinaryOp) or node.op != "And":
             return None
         for or_expr, const_expr in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
@@ -3014,8 +3337,10 @@ class _StructuredSimplifyRun8616:
                     return structured_c.CBinaryOp("Or", left, right, codegen=self.codegen)
         return None
 
+    @cython.ccall
     def transform(self, node: StructuredAstValue) -> StructuredAstValue:
         """Run the simplification arms for one node; identity when none match."""
+        result: object
         result = self._transform_typecast_8616(node)
         if result is not None:
             return result
@@ -3029,6 +3354,7 @@ class _StructuredSimplifyRun8616:
         return node
 
 
+    @cython.ccall
     def _binary_ctx_8616(self, node: structured_c.CBinaryOp) -> _BinarySimplifyCtx8616 | None:
         """Resolve copy aliases in the operands and snapshot the arm context."""
         memory_backed_source = self._expr_uses_memory_backed_temp(node, self.memory_backed_linear_temps)
@@ -3056,8 +3382,12 @@ class _StructuredSimplifyRun8616:
             ),
         )
 
+    @cython.ccall
     def _run_binary_arms_8616(self, ctx: _BinarySimplifyCtx8616) -> StructuredAstValue:
         """Run the binary rewrite arms in their original order."""
+        result: object
+        rewritten_and: object
+        arm: object
         for arm in (
             self._arm_widened_byte_pair_8616,
             self._arm_far_pointer_mkfp_8616,
@@ -3087,7 +3417,10 @@ class _StructuredSimplifyRun8616:
             return simplified_or
         return self._arm_shr_8616(ctx)
 
+    @cython.ccall
     def _transform_binary_8616(self, node: StructuredAstValue) -> StructuredAstValue:
+        ctx: object
+        result: object
         if id(node) in self.protected_dereference_addr_expr_ids:
             return self._normalize_protected_add_constant_tail(node)
         ctx = self._binary_ctx_8616(node)
@@ -3101,7 +3434,9 @@ class _StructuredSimplifyRun8616:
         return None
 
 
+    @cython.ccall
     def _arm_widened_byte_pair_8616(self, ctx: _BinarySimplifyCtx8616) -> StructuredAstValue:
+        widened: object
         if ctx.node.op in {"Add", "Or"} and not ctx.storage_backed_source:
             widened = self._match_adjacent_byte_pair_var_expr(ctx.lhs, ctx.rhs)
             if widened is None:
@@ -3116,7 +3451,9 @@ class _StructuredSimplifyRun8616:
         return None
 
 
+    @cython.ccall
     def _arm_far_pointer_mkfp_8616(self, ctx: _BinarySimplifyCtx8616) -> StructuredAstValue:
+        alias_expr: object
         if ctx.node.op == "Add":
             if isinstance(ctx.lhs, structured_c.CVariable) and isinstance(
                 getattr(ctx.lhs, "variable", None), SimStackVariable
@@ -3133,7 +3470,11 @@ class _StructuredSimplifyRun8616:
         return None
 
 
+    @cython.ccall
     def _arm_word_delta_8616(self, ctx: _BinarySimplifyCtx8616) -> StructuredAstValue:
+        delta: object
+        high_update: object
+        linear: object
         if (
             ctx.node.op in {"Add", "Or"}
             and not ctx.resolved_contains_dereference
@@ -3152,7 +3493,9 @@ class _StructuredSimplifyRun8616:
         return None
 
 
+    @cython.ccall
     def _arm_addsub_linear_8616(self, ctx: _BinarySimplifyCtx8616) -> StructuredAstValue:
+        linear: object
         if ctx.node.op in {"Add", "Sub"}:  # noqa: SIM102
             if not ctx.resolved_contains_dereference and not ctx.storage_backed_source:  # noqa: SIM102
                 if not self._memory_backed_widening_base(ctx.resolved):
@@ -3162,7 +3505,10 @@ class _StructuredSimplifyRun8616:
         return None
 
 
+    @cython.ccall
     def _arm_const_fold_8616(self, ctx: _BinarySimplifyCtx8616) -> StructuredAstValue:
+        op_fn: object
+        result: object
         if isinstance(ctx.lhs, structured_c.CConstant) and isinstance(ctx.rhs, structured_c.CConstant):  # noqa: SIM102
             if isinstance(ctx.lhs.value, int) and isinstance(ctx.rhs.value, int):
                 op_fn = _CONST_FOLD_OPS_8616.get(ctx.node.op)
@@ -3178,10 +3524,14 @@ class _StructuredSimplifyRun8616:
         return None
 
 
+    @cython.ccall
     def _fold_bitwise_term_values_8616(
-        self, ctx: _BinarySimplifyCtx8616, terms: list[StructuredAstValue]
+        self, ctx: _BinarySimplifyCtx8616, terms: object
     ) -> tuple[int | None, object, list[StructuredAstValue]]:
         """Fold constant operands of a flattened And/Or term list."""
+        const_value: object
+        value: object
+        term: object
         const_value = None
         const_type = None
         non_constants = []
@@ -3199,11 +3549,14 @@ class _StructuredSimplifyRun8616:
                 const_value |= value
         return const_value, const_type, non_constants
 
+    @cython.ccall
     def _arm_bitwise_terms_8616(self, ctx: _BinarySimplifyCtx8616) -> StructuredAstValue:
+        const_value: object
+        term: object
         if ctx.node.op in {"And", "Or"}:
             terms = flatten_bitwise_terms_8616(ctx.node, ctx.node.op, _unwrap_c_casts)
             const_value, const_type, non_constants = self._fold_bitwise_term_values_8616(ctx, terms)
-            if len(terms) > 2 or len(non_constants) != len(terms):
+            if len(terms) > 2 or operator.ne(len(non_constants), len(terms)):
                 rebuilt_terms = list(non_constants)
                 if const_value is not None:  # noqa: SIM102
                     if not ((ctx.node.op == "And" and const_value == -1) or (ctx.node.op == "Or" and const_value == 0)):
@@ -3231,6 +3584,7 @@ class _StructuredSimplifyRun8616:
         return None
 
 
+    @cython.ccall
     def _arm_zero_identity_8616(self, ctx: _BinarySimplifyCtx8616) -> StructuredAstValue:
         if ctx.node.op in {"Add", "Or", "Xor"}:
             if _c_constant_value(ctx.lhs) == 0:
@@ -3242,7 +3596,9 @@ class _StructuredSimplifyRun8616:
         return None
 
 
+    @cython.ccall
     def _arm_addsub_fold_8616(self, ctx: _BinarySimplifyCtx8616) -> StructuredAstValue:
+        base_expr: object
         if ctx.node.op == "Add":
             folded = self._fold_simple_add_constants(ctx.node)
             if folded is not ctx.node:
@@ -3256,7 +3612,9 @@ class _StructuredSimplifyRun8616:
         return None
 
 
+    @cython.ccall
     def _arm_same_expr_8616(self, ctx: _BinarySimplifyCtx8616) -> StructuredAstValue:
+        type_: object
         if ctx.node.op in {"And", "Or"} and _same_c_expression(ctx.lhs, ctx.rhs):
             return ctx.lhs
         if ctx.node.op == "Xor" and _same_c_expression(ctx.lhs, ctx.rhs):
@@ -3270,8 +3628,12 @@ class _StructuredSimplifyRun8616:
         return None
 
 
+    @cython.ccall
     def _mul_scaled_high_byte_8616(self, ctx: _BinarySimplifyCtx8616) -> StructuredAstValue:
         """Match a high-byte projection scaled by a constant operand."""
+        shifted: object
+        maybe_inner: object
+        maybe_other: object
         for maybe_inner, maybe_other in ((ctx.lhs, ctx.rhs), (ctx.rhs, ctx.lhs)):
             if _c_constant_value(maybe_other) is None:
                 continue
@@ -3291,7 +3653,10 @@ class _StructuredSimplifyRun8616:
             )
         return None
 
+    @cython.ccall
     def _arm_mul_8616(self, ctx: _BinarySimplifyCtx8616) -> StructuredAstValue:
+        scaled: object
+        type_: object
         if ctx.node.op == "Mul":
             scaled = self._mul_scaled_high_byte_8616(ctx)
             if scaled is not None:
@@ -3311,10 +3676,12 @@ class _StructuredSimplifyRun8616:
         return None
 
 
+    @cython.ccall
     def _masked_high_byte_identity_8616(
         self, maybe_inner: StructuredAstValue, maybe_mask: StructuredAstValue
     ) -> StructuredAstValue:
         """Return the operand itself when it is already a masked high byte."""
+        variable: object
         if _c_constant_value(maybe_mask) != 0xFF:
             return None
         if isinstance(maybe_inner, structured_c.CVariable):
@@ -3338,9 +3705,14 @@ class _StructuredSimplifyRun8616:
             return maybe_inner
         return None
 
+    @cython.ccall
     def _arm_and_mask_pair_8616(
         self, ctx: _BinarySimplifyCtx8616, maybe_inner: StructuredAstValue, maybe_mask: StructuredAstValue
     ) -> StructuredAstValue:
+        alias: object
+        const_high: object
+        masked_var: object
+        projection: object
         masked_var = self._masked_high_byte_identity_8616(maybe_inner, maybe_mask)
         if masked_var is not None:
             return masked_var
@@ -3366,8 +3738,10 @@ class _StructuredSimplifyRun8616:
                     return self._shifted_masked_result_8616(base_expr, total_shift)
         return self._shr_alias_result_8616(maybe_inner)
 
-    def _shifted_masked_result_8616(self, base_expr: StructuredAstValue, total_shift: int) -> StructuredAstValue:
+    @cython.ccall
+    def _shifted_masked_result_8616(self, base_expr: StructuredAstValue, total_shift: cython.longlong) -> StructuredAstValue:
         """Build the Shr (optionally 0xFF-masked) result for a shift alias."""
+        base_type: object
         simplified = structured_c.CBinaryOp(
             "Shr",
             base_expr,
@@ -3384,8 +3758,10 @@ class _StructuredSimplifyRun8616:
             codegen=self.codegen,
         )
 
+    @cython.ccall
     def _shr_alias_result_8616(self, maybe_inner: StructuredAstValue) -> StructuredAstValue:
         """Compose a nested Shr alias into a single masked shift."""
+        shift_alias: object
         inner = _unwrap_c_casts(maybe_inner)
         if not isinstance(inner, structured_c.CBinaryOp) or inner.op != "Shr":
             return None
@@ -3400,7 +3776,12 @@ class _StructuredSimplifyRun8616:
         return self._shifted_masked_result_8616(base_expr, base_shift + shift)
 
 
+    @cython.ccall
     def _arm_and_8616(self, ctx: _BinarySimplifyCtx8616) -> StructuredAstValue:
+        result: object
+        type_: object
+        maybe_inner: object
+        maybe_mask: object
         if ctx.node.op == "And":
             if _c_constant_value(ctx.lhs) == 0 or _c_constant_value(ctx.rhs) == 0:
                 type_ = (
@@ -3417,7 +3798,9 @@ class _StructuredSimplifyRun8616:
         return None
 
 
+    @cython.ccall
     def _arm_shr_8616(self, ctx: _BinarySimplifyCtx8616) -> StructuredAstValue:
+        high_alias: object
         if ctx.node.op == "Shr":
             if isinstance(ctx.lhs, structured_c.CBinaryOp) and ctx.lhs.op == "Shr":
                 inner_shift = _c_constant_value(_unwrap_c_casts(ctx.lhs.rhs))
@@ -3442,7 +3825,9 @@ class _StructuredSimplifyRun8616:
         return None
 
 
+    @cython.ccall
     def _transform_typecast_8616(self, node: StructuredAstValue) -> StructuredAstValue:
+        target_type: object
         if isinstance(node, structured_c.CTypeCast):
             target_type = node.type
             rendered = str(target_type) if target_type is not None else ""
@@ -3453,7 +3838,10 @@ class _StructuredSimplifyRun8616:
         return None
 
 
+    @cython.ccall
     def _transform_tail_8616(self, node: StructuredAstValue) -> StructuredAstValue:
+        constant_type: object
+        type_: object
         simplified = _simplify_boolean_expr(node, self.codegen)
         if simplified is not node:
             return simplified
@@ -3479,8 +3867,10 @@ class _StructuredSimplifyRun8616:
 
 
 
-    def _prune_dead_inits_in_statements_8616(self, node: structured_c.CStatements) -> bool:
+    @cython.ccall
+    def _prune_dead_inits_in_statements_8616(self, node: structured_c.CStatements) -> cython.bint:
         """Drop proven dead stack-address inits from one statement list."""
+        stmt: object
         changed = False
         new_statements = []
         for stmt in node.statements:
@@ -3493,12 +3883,15 @@ class _StructuredSimplifyRun8616:
             if self.prune_dead_stack_address_inits(stmt):
                 changed = True
             new_statements.append(stmt)
-        if changed or new_statements != node.statements:
+        if changed or operator.ne(new_statements, node.statements):
             node.statements = new_statements
         return changed
 
-    def prune_dead_stack_address_inits(self, node: StructuredAstValue) -> bool:
+    @cython.ccall
+    def prune_dead_stack_address_inits(self, node: StructuredAstValue) -> cython.bint:
         """Drop dead stack-address initializers under a statement container."""
+        _cond: object
+        body: object
         changed = False
         if isinstance(node, structured_c.CStatements):
             return self._prune_dead_inits_in_statements_8616(node)
@@ -3511,14 +3904,17 @@ class _StructuredSimplifyRun8616:
         return changed
 
 
-def _simplify_structured_c_expressions(codegen: StructuredCodegenValue) -> bool:
+@cython.ccall
+def _simplify_structured_c_expressions(codegen: StructuredCodegenValue) -> cython.bint:
     """Apply legacy cleanup without reusing analyses of discarded expressions."""
+    run: object
     run = _StructuredSimplifyRun8616.build_8616(codegen)
     if run is None:
         return False
     return run.run_8616()
 
 
+@cython.ccall
 def _unwrap_c_casts(node: StructuredAstValue) -> StructuredAstValue:
     """Skip cosmetic casts without discarding required machine conversions."""
     while isinstance(node, structured_c.CTypeCast):
@@ -3530,6 +3926,8 @@ def _unwrap_c_casts(node: StructuredAstValue) -> StructuredAstValue:
 
 def _match_shift_right_8_expr(node: StructuredAstValue) -> StructuredAstValue:
     def _impl() -> StructuredAstValue:
+        _maybe_masked: object
+        maybe_const: object
         nonlocal node
         node = _unwrap_c_casts(node)
         if not isinstance(node, structured_c.CBinaryOp) or node.op != "Shr":
@@ -3548,7 +3946,7 @@ def _match_shift_right_8_expr(node: StructuredAstValue) -> StructuredAstValue:
                         const_value = _c_constant_value(_unwrap_c_casts(maybe_const))
                         if not isinstance(const_value, int):
                             continue
-                        if const_value & 0xFF00 == const_value and const_value & 0xFF == 0:
+                        if operator.eq(const_value & 0xFF00, const_value) and const_value & 0xFF == 0:
                             return structured_c.CConstant(
                                 (const_value >> 8) & 0xFF, SimTypeChar(), codegen=getattr(node, "codegen", None)
                             )
@@ -3560,10 +3958,15 @@ def _match_shift_right_8_expr(node: StructuredAstValue) -> StructuredAstValue:
     return _impl()
 
 
+@cython.ccall
 def _dup_word_increment_base_8616(
     expr: StructuredAstValue, resolve_copy_alias_expr: StructuredAstValue
 ) -> StructuredAstValue:
     """Match ``low | inner*0x100`` where low and inner are the same value."""
+    maybe_high: object
+    maybe_inner: object
+    maybe_low: object
+    maybe_scale: object
 
     expr = _unwrap_c_casts(expr)
     if not isinstance(expr, structured_c.CBinaryOp) or expr.op != "Or":
@@ -3581,9 +3984,13 @@ def _dup_word_increment_base_8616(
     return None
 
 
+@cython.ccall
 def _match_duplicate_word_increment_shift_expr(
     node: StructuredAstValue, resolve_copy_alias_expr: StructuredAstValue, codegen: StructuredCodegenValue
 ) -> StructuredAstValue:
+    base_expr: object
+    maybe_const: object
+    maybe_word: object
     node = _unwrap_c_casts(node)
     if not isinstance(node, structured_c.CBinaryOp) or node.op != "Shr":
         return None
@@ -3610,9 +4017,14 @@ def _match_duplicate_word_increment_shift_expr(
     return None
 
 
+@cython.ccall
 def _match_duplicate_word_base_expr(
     node: StructuredAstValue, resolve_copy_alias_expr: StructuredAstValue
 ) -> StructuredAstValue:
+    maybe_high: object
+    maybe_inner: object
+    maybe_low: object
+    maybe_scale: object
     node = _unwrap_c_casts(node)
     if not isinstance(node, structured_c.CBinaryOp) or node.op != "Or":
         return None
@@ -3634,15 +4046,18 @@ def _match_duplicate_word_base_expr(
 _COD_GLOBAL_ARM_CONTINUE_8616: StructuredAstValue = object()
 
 
+@cython.ccall
 def _cod_named_global_cvar_8616(
-    created: dict[tuple[int, int], structured_c.CVariable],
-    linear: int,
-    symbol: tuple[str, int],
+    created: object,
+    linear: cython.longlong,
+    symbol: object,
     node_type: object,
     project: AngrProjectValue,
     codegen: StructuredCodegenValue,
 ) -> StructuredAstValue:
     """Build or reuse a named synthetic-global CVariable for a linear addr."""
+    bits: object
+    existing: object
 
     if node_type is None:
         return None
@@ -3663,14 +4078,17 @@ def _cod_named_global_cvar_8616(
     return cvar
 
 
+@cython.ccall
 def _cod_global_var_arm_8616(
     node: StructuredAstValue,
-    created: dict[tuple[int, int], structured_c.CVariable],
-    synthetic_globals: dict[int, tuple[str, int]],
+    created: object,
+    synthetic_globals: object,
     project: AngrProjectValue,
     codegen: StructuredCodegenValue,
 ) -> StructuredAstValue:
     """Name a direct SimMemoryVariable global; continue-sentinel if unmatched."""
+    cvar: object
+    symbol: object
 
     variable = node.variable
     if not isinstance(variable, SimMemoryVariable):
@@ -3685,14 +4103,18 @@ def _cod_global_var_arm_8616(
     return cvar if cvar is not None else node
 
 
+@cython.ccall
 def _cod_global_deref_arm_8616(
     node: StructuredAstValue,
-    created: dict[tuple[int, int], structured_c.CVariable],
-    synthetic_globals: dict[int, tuple[str, int]],
+    created: object,
+    synthetic_globals: object,
     project: AngrProjectValue,
     codegen: StructuredCodegenValue,
 ) -> StructuredAstValue:
     """Name a const-address Dereference global; continue-sentinel if unmatched."""
+    addr_expr: object
+    cvar: object
+    symbol: object
 
     addr_expr = _extract_dereference_addr_expr(node)
     addr_value = _c_constant_value(_unwrap_c_casts(addr_expr)) if addr_expr is not None else None
@@ -3705,14 +4127,17 @@ def _cod_global_deref_arm_8616(
     return cvar if cvar is not None else node
 
 
+@cython.ccall
 def _cod_global_seg_deref_arm_8616(
     node: StructuredAstValue,
-    created: dict[tuple[int, int], structured_c.CVariable],
-    synthetic_globals: dict[int, tuple[str, int]],
+    created: object,
+    synthetic_globals: object,
     project: AngrProjectValue,
     codegen: StructuredCodegenValue,
 ) -> StructuredAstValue:
     """Name a segmented-dereference DS global; node when unmatched."""
+    cvar: object
+    symbol: object
 
     seg_name, linear = _match_segmented_dereference(node, project)
     if not isinstance(linear, int):
@@ -3725,12 +4150,12 @@ def _cod_global_seg_deref_arm_8616(
 
 
 def _attach_cod_global_names(
-    project: AngrProjectValue, codegen: StructuredCodegenValue, synthetic_globals: dict[int, tuple[str, int]] | None
-) -> bool:
+    project: AngrProjectValue, codegen: StructuredCodegenValue, synthetic_globals: object
+) -> cython.bint:
     if not synthetic_globals or getattr(codegen, "cfunc", None) is None:
         return False
 
-    created: dict[tuple[int, int], structured_c.CVariable] = {}
+    created: dict[tuple[cython.longlong, cython.longlong], structured_c.CVariable] = {}
 
     def transform(node: StructuredAstValue) -> StructuredAstValue:
         """Rename a global variable or dereference node from COD synthetic symbols."""
@@ -3760,10 +4185,15 @@ def _attach_cod_global_names(
     return changed
 
 
+@cython.ccall
 def _rename_in_use_global_symbols_8616(
-    variables_in_use: Mapping[SimVariable, structured_c.CVariable], synthetic_globals: dict[int, tuple[str, int]]
-) -> bool:
+    variables_in_use: Mapping[SimVariable, structured_c.CVariable], synthetic_globals: object
+) -> cython.bint:
     """Rename in-use SimMemoryVariable globals to their synthetic names."""
+    symbol: object
+    unified: object
+    cvar: object
+    variable: object
 
     changed = False
     for variable, cvar in variables_in_use.items():
@@ -3774,23 +4204,29 @@ def _rename_in_use_global_symbols_8616(
             continue
         raw_name, _width = symbol
         name = _sanitize_cod_identifier(raw_name)
-        if variable.name != name:
+        if operator.ne(variable.name, name):
             variable.name = name
             changed = True
-        if getattr(cvar, "name", None) != name:
+        if operator.ne(getattr(cvar, "name", None), name):
             cvar.name = name
             changed = True
         unified = getattr(cvar, "unified_variable", None)
-        if unified is not None and getattr(unified, "name", None) != name:
+        if unified is not None and operator.ne(getattr(unified, "name", None), name):
             unified.name = name
             changed = True
     return changed
 
 
+@cython.ccall
 def _rename_unified_global_locals_8616(
-    unified_locals: MutableMapping[SimVariable, set[tuple[structured_c.CVariable, object]]], synthetic_globals: dict[int, tuple[str, int]]
-) -> bool:
+    unified_locals: MutableMapping[SimVariable, set[tuple[structured_c.CVariable, object]]], synthetic_globals: object
+) -> cython.bint:
     """Rename unified-local SimMemoryVariable globals to synthetic names."""
+    symbol: object
+    cvar_and_vartypes: object
+    cvariable: object
+    variable: object
+    vartype: object
 
     changed = False
     for variable, cvar_and_vartypes in list(unified_locals.items()):
@@ -3803,7 +4239,7 @@ def _rename_unified_global_locals_8616(
         name = _sanitize_cod_identifier(raw_name)
         new_entries = set()
         for cvariable, vartype in cvar_and_vartypes:
-            if getattr(cvariable, "name", None) != name:
+            if operator.ne(getattr(cvariable, "name", None), name):
                 cvariable.name = name
                 changed = True
             new_entries.add((cvariable, vartype))
@@ -3814,9 +4250,10 @@ def _rename_unified_global_locals_8616(
 
 
 def _attach_cod_global_declaration_names(
-    codegen: StructuredCodegenValue, synthetic_globals: dict[int, tuple[str, int]] | None
-) -> bool:
-    def _impl() -> bool:
+    codegen: StructuredCodegenValue, synthetic_globals: object
+) -> cython.bint:
+    def _impl() -> cython.bint:
+        unified_locals: object
         if not synthetic_globals or getattr(codegen, "cfunc", None) is None:
             return False
 
@@ -3835,13 +4272,15 @@ def _attach_cod_global_declaration_names(
     return _impl()
 
 
+@cython.ccall
 def _desired_global_type_spec_8616(
     variable: StructuredAstValue,
-    synthetic_globals: dict[int, tuple[str, int]],
+    synthetic_globals: object,
     short_type: StructuredAstValue,
     char_type: StructuredAstValue,
 ) -> tuple[object | None, int | None, str | None]:
     """Map a global variable to (type, size, name) from synthetic metadata."""
+    symbol: object
 
     symbol = _synthetic_global_entry(synthetic_globals, getattr(variable, "addr", None))
     if symbol is None:
@@ -3854,36 +4293,44 @@ def _desired_global_type_spec_8616(
     return None, None, None
 
 
+@cython.ccall
 def _apply_global_type_and_size_8616(
     variable: StructuredAstValue,
     cvar: StructuredAstValue,
     new_type: StructuredAstValue,
-    new_size: StructuredAstValue,
-) -> bool:
+    new_size: object,
+) -> cython.bint:
     """Apply a desired type/size to a variable and its cvar/unified pair."""
+    unified: object
 
     local_changed = False
-    if new_size is not None and getattr(variable, "size", None) != new_size:
+    if new_size is not None and operator.ne(getattr(variable, "size", None), new_size):
         variable.size = new_size
         local_changed = True
-    if getattr(cvar, "variable_type", None) != new_type:
+    if operator.ne(getattr(cvar, "variable_type", None), new_type):
         cvar.variable_type = new_type
         local_changed = True
     unified = getattr(cvar, "unified_variable", None)
-    if unified is not None and new_size is not None and getattr(unified, "size", None) != new_size:
+    if unified is not None and new_size is not None and operator.ne(getattr(unified, "size", None), new_size):
         with contextlib.suppress(Exception):
             unified.size = new_size
             local_changed = True
     return local_changed
 
 
+@cython.ccall
 def _retune_in_use_global_types_8616(
     variables_in_use: Mapping[SimVariable, structured_c.CVariable],
-    synthetic_globals: dict[int, tuple[str, int]],
+    synthetic_globals: object,
     short_type: StructuredAstValue,
     char_type: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Retune types/sizes (and names) of in-use global variables."""
+    new_type: object
+    target_name: object
+    unified: object
+    cvar: object
+    variable: object
 
     changed = False
     for variable, cvar in variables_in_use.items():
@@ -3897,25 +4344,30 @@ def _retune_in_use_global_types_8616(
         changed = _apply_global_type_and_size_8616(variable, cvar, new_type, new_size) or changed
         unified = getattr(cvar, "unified_variable", None)
         if target_name is not None:
-            if variable.name != target_name:
+            if operator.ne(variable.name, target_name):
                 variable.name = target_name
                 changed = True
-            if getattr(cvar, "name", None) != target_name:
+            if operator.ne(getattr(cvar, "name", None), target_name):
                 cvar.name = target_name
                 changed = True
-            if unified is not None and getattr(unified, "name", None) != target_name:
+            if unified is not None and operator.ne(getattr(unified, "name", None), target_name):
                 unified.name = target_name
                 changed = True
     return changed
 
 
+@cython.ccall
 def _retune_cextern_global_types_8616(
     cexterns: Iterable[structured_c.CVariable],
-    synthetic_globals: dict[int, tuple[str, int]],
+    synthetic_globals: object,
     short_type: StructuredAstValue,
     char_type: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Retune types/sizes on cextern global variables."""
+    new_size: object
+    new_type: object
+    variable: object
+    cextern: object
 
     changed = False
     for cextern in cexterns:
@@ -3927,22 +4379,27 @@ def _retune_cextern_global_types_8616(
         )
         if new_type is None:
             continue
-        if new_size is not None and variable.size != new_size:
+        if new_size is not None and operator.ne(variable.size, new_size):
             variable.size = new_size
             changed = True
-        if getattr(cextern, "variable_type", None) != new_type:
+        if operator.ne(getattr(cextern, "variable_type", None), new_type):
             cextern.variable_type = new_type
             changed = True
     return changed
 
 
+@cython.ccall
 def _retune_unified_global_types_8616(
     unified_locals: MutableMapping[SimVariable, set[tuple[structured_c.CVariable, object]]],
-    synthetic_globals: dict[int, tuple[str, int]],
+    synthetic_globals: object,
     short_type: StructuredAstValue,
     char_type: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Retune types/sizes on unified-local global variables."""
+    new_size: object
+    new_type: object
+    cvar_and_vartypes: object
+    variable: object
 
     changed = False
     for variable, cvar_and_vartypes in list(unified_locals.items()):
@@ -3953,10 +4410,10 @@ def _retune_unified_global_types_8616(
         )
         if new_type is None:
             continue
-        if new_size is not None and variable.size != new_size:
+        if new_size is not None and operator.ne(variable.size, new_size):
             variable.size = new_size
             changed = True
-        new_entries = {(cvariable, new_type) for cvariable, _vartype in cvar_and_vartypes}
+        new_entries = {(cvariable, new_type) for cvariable, _vartype in iter(cvar_and_vartypes)}
         if new_entries != cvar_and_vartypes:
             unified_locals[variable] = new_entries
             changed = True
@@ -3964,11 +4421,12 @@ def _retune_unified_global_types_8616(
 
 
 def _attach_cod_global_declaration_types(
-    codegen: StructuredCodegenValue, synthetic_globals: dict[int, tuple[str, int]] | None
-) -> bool:
+    codegen: StructuredCodegenValue, synthetic_globals: object
+) -> cython.bint:
     """Apply scalar storage widths; aggregate typing is owned by Lowering."""
 
-    def _impl() -> bool:
+    def _impl() -> cython.bint:
+        unified_locals: object
         if not synthetic_globals or getattr(codegen, "cfunc", None) is None:
             return False
 
@@ -3995,17 +4453,21 @@ def _attach_cod_global_declaration_types(
     return _impl()
 
 
-def _access_trait_field_name(offset: int, size: int) -> str:
+@cython.ccall
+def _access_trait_field_name(offset: cython.longlong, size: cython.longlong) -> str:
     return f"field_{offset:x}"
 
 
-def _stack_object_name(offset: int) -> str:
+@cython.ccall
+def _stack_object_name(offset: cython.longlong) -> str:
     if offset >= 0:
         return f"arg_{offset:x}"
     return f"local_{-offset:x}"
 
 
-def _access_trait_variable_key(variable: StructuredAstValue) -> tuple[object, ...] | None:
+@cython.ccall
+def _access_trait_variable_key(variable: StructuredAstValue) -> object:
+    identity: object
     if isinstance(variable, SimRegisterVariable):
         return ("reg", variable.reg)
     if isinstance(variable, SimStackVariable):
@@ -4018,53 +4480,57 @@ def _access_trait_variable_key(variable: StructuredAstValue) -> tuple[object, ..
     return None
 
 
+@cython.ccall
 def _access_trait_profile_for_key(
     evidence_profiles: Mapping[tuple[object, ...], _AccessTraitEvidenceProfile],
-    base_key: tuple[object, ...],
+    base_key: object,
 ) -> _AccessTraitEvidenceProfile | None:
     return _cli_access_profiles.access_trait_profile_for_key(evidence_profiles, base_key)
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class _WideningMatch:
-    kind: str
+    kind: object
     base_expr: object
-    delta: int = 0
+    delta: cython.longlong = 0
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class _AccessTraitRewriteDecision:
-    base_key: tuple[object, ...]
+    base_key: object
     profile: _AccessTraitEvidenceProfile
 
     def _inner(self) -> _cli_access_profiles.AccessTraitRewriteDecision:
         return _cli_access_profiles.AccessTraitRewriteDecision(self.base_key, self.profile)
 
-    def should_rename_stack(self) -> bool:
+    def should_rename_stack(self) -> cython.bint:
         """Return whether stable evidence permits stack-object renaming."""
         return bool(self._inner().should_rename_stack())
 
-    def preferred_kind(self) -> str | None:
+    def preferred_kind(self) -> object:
         """Return the preferred recovered object kind, when evidence is stable."""
         result = self._inner().preferred_kind()
         return result if isinstance(result, str) else None
 
-    def candidate_field_names(self) -> tuple[str, ...]:
+    def candidate_field_names(self) -> object:
         """Return deterministic field-name candidates from access evidence."""
         result = self._inner().candidate_field_names(_access_trait_field_name)
         return tuple(result) if isinstance(result, tuple) else ()
 
 
+@cython.ccall
 def _build_access_trait_evidence_profiles(
-    traits: dict[str, dict[tuple[object, ...], object]],
-) -> dict[tuple[object, ...], _AccessTraitEvidenceProfile]:
+    traits: object,
+) -> object:
     return _cli_access_profiles.build_access_trait_evidence_profiles(traits)
 
 
+@cython.ccall
 def _linear_delta_or_base_8616(
     base: StructuredAstValue, resolve_copy_alias_expr: StructuredAstValue
-) -> tuple[StructuredAstValue, bool]:
+) -> tuple[StructuredAstValue, cython.bint]:
     """Resolve an Or-shaped duplicate-word base; ok=False ⇒ abort the fold."""
+    duplicate_word_base: object
 
     if isinstance(base, structured_c.CBinaryOp) and base.op == "Or":
         duplicate_word_base = _match_duplicate_word_base_expr(base, resolve_copy_alias_expr)
@@ -4074,13 +4540,15 @@ def _linear_delta_or_base_8616(
     return base, True
 
 
+@cython.ccall
 def _extract_linear_widening_delta_8616(
     expr: StructuredAstValue,
     resolve_copy_alias_expr: StructuredAstValue,
-    seen: set[int] | None = None,
-    depth: int = 0,
+    seen: object = None,
+    depth: cython.longlong = 0,
 ) -> StructuredAstValue:
     """Extract ``base +/- const`` structure into (base, delta)."""
+    duplicate_word_base: object
 
     if depth > 64:
         return expr, 0
@@ -4115,12 +4583,13 @@ def _extract_linear_widening_delta_8616(
     return _fold_linear_delta_parts_8616(expr, left_base, left_delta, right_base, right_delta)
 
 
+@cython.ccall
 def _fold_linear_delta_parts_8616(
     expr: StructuredAstValue,
-    left_base: StructuredAstValue,
-    left_delta: int,
-    right_base: StructuredAstValue,
-    right_delta: int,
+    left_base: object,
+    left_delta: cython.longlong,
+    right_base: object,
+    right_delta: cython.longlong,
 ) -> StructuredAstValue:
     """Fold (base, delta) pairs across an Add/Sub node."""
 
@@ -4141,12 +4610,17 @@ def _fold_linear_delta_parts_8616(
     return None, left_delta - right_delta
 
 
+@cython.ccall
 def _high_byte_preserving_scale_arm_8616(
     high_expr: StructuredAstValue,
     base_expr: StructuredAstValue,
     match_high_byte_projection_base: StructuredAstValue,
 ) -> StructuredAstValue:
     """Match the ``(base +/- 1) * 0x100`` scale side of the widening."""
+    maybe_const: object
+    maybe_delta: object
+    maybe_inner: object
+    maybe_scale: object
 
     for maybe_delta, maybe_scale in ((high_expr.lhs, high_expr.rhs), (high_expr.rhs, high_expr.lhs)):
         if _c_constant_value(_unwrap_c_casts(maybe_scale)) != 0x100:
@@ -4166,10 +4640,17 @@ def _high_byte_preserving_scale_arm_8616(
     return None
 
 
+@cython.ccall
 def _match_high_byte_preserving_widening_8616(
     node: StructuredAstValue, match_high_byte_projection_base: StructuredAstValue
 ) -> StructuredAstValue:
     """Match ``(base & 255) | ((base +/- 1) * 0x100)`` widening shapes."""
+    base_expr: object
+    matched: object
+    high_expr: object
+    low_expr: object
+    maybe_mask: object
+    maybe_word: object
 
     for low_expr, high_expr in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
         low_expr = _unwrap_c_casts(low_expr)
@@ -4196,12 +4677,14 @@ def _match_high_byte_preserving_widening_8616(
     return None
 
 
+@cython.ccall
 def _analyze_widening_expr(
     node: StructuredAstValue,
     resolve_copy_alias_expr: StructuredAstValue,
     match_high_byte_projection_base: StructuredAstValue,
 ) -> StructuredAstValue:
     """Classify an expression as a linear or high-byte-preserving widening."""
+    base_expr: object
 
     node = resolve_copy_alias_expr(_unwrap_c_casts(node))
 
@@ -4215,14 +4698,15 @@ def _analyze_widening_expr(
 
     return _match_high_byte_preserving_widening_8616(node, match_high_byte_projection_base)
 
+@cython.ccall
 def _access_trait_member_candidates(
-    traits: dict[str, dict[tuple[object, ...], int]],
-) -> dict[tuple[object, ...], list[tuple[int, int, int]]]:
+    traits: object,
+) -> object:
     compatible_traits = cast(dict[str, dict[tuple[object, ...], object]], traits)
     return _cli_access_profiles.access_trait_member_candidates(compatible_traits)
 
 
-def _should_attach_access_trait_names(codegen: StructuredCodegenValue) -> bool:
+def _should_attach_access_trait_names(codegen: StructuredCodegenValue) -> cython.bint:
     return _cli_access_trait_rewrite._should_attach_access_trait_names(
     codegen,
     has_access_rewrite_artifact=lambda current_codegen: _cli_access_rewrite_artifact.has_access_rewrite_artifact(
@@ -4237,7 +4721,7 @@ def _should_attach_access_trait_names(codegen: StructuredCodegenValue) -> bool:
 )
 
 
-def _attach_access_trait_field_names(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
+def _attach_access_trait_field_names(project: AngrProjectValue, codegen: StructuredCodegenValue) -> cython.bint:
     return _cli_access_trait_rewrite._attach_access_trait_field_names(
     project,
     codegen,
@@ -4263,7 +4747,7 @@ def _attach_access_trait_field_names(project: AngrProjectValue, codegen: Structu
 )
 
 
-def _attach_pointer_member_names(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
+def _attach_pointer_member_names(project: AngrProjectValue, codegen: StructuredCodegenValue) -> cython.bint:
     return _cli_access_trait_rewrite._attach_pointer_member_names(
     project,
     codegen,
@@ -4288,7 +4772,8 @@ def _attach_pointer_member_names(project: AngrProjectValue, codegen: StructuredC
 )
 
 
-def _lst_is_linear_temp_8616(cvar: StructuredAstValue) -> bool:
+@cython.ccall
+def _lst_is_linear_temp_8616(cvar: StructuredAstValue) -> cython.bint:
     """Return whether the cvar is a linear ``vN`` temp."""
 
     return (
@@ -4298,7 +4783,8 @@ def _lst_is_linear_temp_8616(cvar: StructuredAstValue) -> bool:
     )
 
 
-def _lst_temp_alias_value_8616(rhs: StructuredAstValue, aliases: dict[int, int]) -> int | None:
+@cython.ccall
+def _lst_temp_alias_value_8616(rhs: StructuredAstValue, aliases: object) -> int | None:
     """Resolve an assignment rhs to a constant through aliases."""
 
     if isinstance(rhs, structured_c.CConstant) and isinstance(rhs.value, int):
@@ -4308,10 +4794,14 @@ def _lst_temp_alias_value_8616(rhs: StructuredAstValue, aliases: dict[int, int])
     return None
 
 
-def _lst_collect_temp_aliases_8616(statements: StructuredAstValue) -> dict[int, int]:
+@cython.ccall
+def _lst_collect_temp_aliases_8616(statements: StructuredAstValue) -> object:
     """Collect constant aliases for linear temps over a fixed point."""
+    lhs_var: object
+    value: object
+    walk_node: object
 
-    aliases: dict[int, int] = {}
+    aliases: dict[cython.longlong, cython.longlong] = {}
     for _ in range(3):
         changed = False
         for walk_node in _iter_c_nodes_deep(statements):
@@ -4329,7 +4819,7 @@ def _lst_collect_temp_aliases_8616(statements: StructuredAstValue) -> dict[int, 
             if lhs_var is None:
                 continue
             key = id(lhs_var)
-            if aliases.get(key) != value:
+            if operator.ne(aliases.get(key), value):
                 aliases[key] = value
                 changed = True
         if not changed:
@@ -4337,10 +4827,15 @@ def _lst_collect_temp_aliases_8616(statements: StructuredAstValue) -> dict[int, 
     return aliases
 
 
+@cython.ccall
 def _lst_resolved_constant_value_8616(
-    node: StructuredAstValue, temp_const_aliases: dict[int, int], seen_nodes: set[int] | None = None
+    node: StructuredAstValue, temp_const_aliases: object, seen_nodes: object = None
 ) -> int | None:
     """Resolve a node to a constant through temp aliases and Add/Sub folds."""
+    constant: object
+    lhs: object
+    rhs: object
+    variable: object
 
     node = _unwrap_c_casts(node)
     if seen_nodes is None:
@@ -4364,14 +4859,16 @@ def _lst_resolved_constant_value_8616(
     return None
 
 
+@cython.ccall
 def _lst_make_data_var_8616(
-    created: dict[tuple[int, int], structured_c.CVariable],
-    offset: int,
-    size: int,
-    label: str,
+    created: object,
+    offset: cython.longlong,
+    size: cython.longlong,
+    label: object,
     codegen: StructuredCodegenValue,
 ) -> StructuredAstValue:
     """Build or reuse a named data CVariable for an offset."""
+    existing: object
 
     key = (offset, size)
     existing = created.get(key)
@@ -4386,12 +4883,18 @@ def _lst_make_data_var_8616(
     return cvar
 
 
+@cython.ccall
 def _lst_deref_segment_terms_8616(
     operand: StructuredAstValue,
-    temp_const_aliases: dict[int, int],
+    temp_const_aliases: object,
     project: AngrProjectValue,
-) -> tuple[str | None, int, list[object]]:
+) -> tuple[str | None, cython.longlong, list[object]]:
     """Fold seg*16 + const terms into (seg_name, linear, other_terms)."""
+    const_value: object
+    name: object
+    maybe_scale: object
+    maybe_seg: object
+    term: object
 
     seg_name = None
     linear = 0
@@ -4420,15 +4923,19 @@ def _lst_deref_segment_terms_8616(
     return seg_name, linear, other_terms
 
 
+@cython.ccall
 def _lst_deref_arm_8616(
     node: StructuredAstValue,
-    created: dict[tuple[int, int], structured_c.CVariable],
-    temp_const_aliases: dict[int, int],
+    created: object,
+    temp_const_aliases: object,
     lst_metadata: LSTMetadata,
     project: AngrProjectValue,
     codegen: StructuredCodegenValue,
 ) -> StructuredAstValue:
     """Name a ``ds:linear`` dereference to its LST data label."""
+    bits: object
+    label: object
+    type_: object
 
     operand = node.operand
     if isinstance(operand, structured_c.CTypeCast):
@@ -4447,14 +4954,17 @@ def _lst_deref_arm_8616(
     return node
 
 
+@cython.ccall
 def _lst_var_arm_8616(
     node: StructuredAstValue,
-    created: dict[tuple[int, int], structured_c.CVariable],
+    created: object,
     lst_metadata: LSTMetadata,
     project: AngrProjectValue,
     codegen: StructuredCodegenValue,
 ) -> StructuredAstValue:
     """Name a SimMemoryVariable to its LST data label."""
+    bits: object
+    label: object
 
     variable = node.variable
     if isinstance(variable, SimMemoryVariable):
@@ -4469,14 +4979,14 @@ def _lst_var_arm_8616(
 
 
 def _attach_lst_data_names(
-    project: AngrProjectValue, codegen: StructuredCodegenValue, lst_metadata: LSTMetadata | None
-) -> bool:
+    project: AngrProjectValue, codegen: StructuredCodegenValue, lst_metadata: object
+) -> cython.bint:
     """Attach LST data labels to memory variables and ds dereferences."""
 
     if lst_metadata is None or getattr(codegen, "cfunc", None) is None:
         return False
 
-    created: dict[tuple[int, int], structured_c.CVariable] = {}
+    created: dict[tuple[cython.longlong, cython.longlong], structured_c.CVariable] = {}
     temp_const_aliases = _lst_collect_temp_aliases_8616(codegen.cfunc.statements)
 
     def transform(node: StructuredAstValue) -> StructuredAstValue:
@@ -4500,7 +5010,8 @@ def _attach_lst_data_names(
         changed = True
     return changed
 
-def _is_stable_byte_register_8616(expr: StructuredAstValue) -> bool:
+@cython.ccall
+def _is_stable_byte_register_8616(expr: StructuredAstValue) -> cython.bint:
     """Check the alias-storage domain is a proven 8-bit register."""
 
     facts = describe_alias_storage(expr)
@@ -4515,12 +5026,13 @@ def _is_stable_byte_register_8616(expr: StructuredAstValue) -> bool:
     )
 
 
-def _set_c_variable_type_8616(node: StructuredAstValue, type_: StructuredAstValue) -> bool:
+@cython.ccall
+def _set_c_variable_type_8616(node: StructuredAstValue, type_: StructuredAstValue) -> cython.bint:
     """Set ``node.variable_type`` when it differs; False on failure."""
 
     if not hasattr(node, "variable_type"):
         return False
-    if getattr(node, "variable_type", None) == type_:
+    if operator.eq(getattr(node, "variable_type", None), type_):
         return False
     try:
         node.variable_type = type_
@@ -4529,10 +5041,15 @@ def _set_c_variable_type_8616(node: StructuredAstValue, type_: StructuredAstValu
     return True
 
 
+@cython.ccall
 def _normalize_in_use_byte_register_types_8616(
     variables_in_use: Mapping[SimVariable, structured_c.CVariable], target_type: StructuredAstValue
-) -> bool:
+) -> cython.bint:
     """Retype in-use stable byte-register variables."""
+    current_type: object
+    unified: object
+    cvar: object
+    variable: object
 
     changed = False
     for variable, cvar in variables_in_use.items():
@@ -4543,7 +5060,7 @@ def _normalize_in_use_byte_register_types_8616(
         if not _is_stable_byte_register_8616(cvar):
             continue
         current_type = getattr(cvar, "variable_type", None)
-        if current_type != target_type and _set_c_variable_type_8616(cvar, target_type):
+        if operator.ne(current_type, target_type) and _set_c_variable_type_8616(cvar, target_type):
             changed = True
         unified = getattr(cvar, "unified_variable", None)
         if unified is not None and _set_c_variable_type_8616(unified, target_type):
@@ -4551,10 +5068,13 @@ def _normalize_in_use_byte_register_types_8616(
     return changed
 
 
+@cython.ccall
 def _normalize_unified_byte_register_types_8616(
     unified_locals: MutableMapping[SimVariable, set[tuple[structured_c.CVariable, object]]], target_type: StructuredAstValue
-) -> bool:
+) -> cython.bint:
     """Retype stable byte-register entries in the unified-local map."""
+    cvar_and_vartypes: object
+    variable: object
 
     changed = False
     for variable, cvar_and_vartypes in list(unified_locals.items()):
@@ -4567,7 +5087,7 @@ def _normalize_unified_byte_register_types_8616(
                 cvariable,
                 target_type if _is_stable_byte_register_8616(cvariable) else vartype,
             )
-            for cvariable, vartype in cvar_and_vartypes
+            for cvariable, vartype in iter(cvar_and_vartypes)
         }
         if new_entries != cvar_and_vartypes:
             unified_locals[variable] = new_entries
@@ -4575,10 +5095,13 @@ def _normalize_unified_byte_register_types_8616(
     return changed
 
 
+@cython.ccall
 def _normalize_byte_register_node_types_8616(
     statements: StructuredAstValue, target_type: StructuredAstValue
-) -> bool:
+) -> cython.bint:
     """Retype stable byte-register CVariable nodes in the body."""
+    unified: object
+    node: object
 
     changed = False
     for node in _iter_c_nodes_deep(statements):
@@ -4591,7 +5114,7 @@ def _normalize_byte_register_node_types_8616(
             continue
         if not _is_stable_byte_register_8616(node):
             continue
-        if node.variable_type != target_type:
+        if operator.ne(node.variable_type, target_type):
             changed = _set_c_variable_type_8616(node, target_type) or changed
         unified = node.unified_variable
         if unified is not None and hasattr(unified, "variable_type") and _set_c_variable_type_8616(
@@ -4601,8 +5124,10 @@ def _normalize_byte_register_node_types_8616(
     return changed
 
 
-def _normalize_scalar_byte_register_types(codegen: StructuredCodegenValue) -> bool:
+@cython.ccall
+def _normalize_scalar_byte_register_types(codegen: StructuredCodegenValue) -> cython.bint:
     """Normalize proven stable 8-bit register variables to char type."""
+    unified_locals: object
 
     if getattr(codegen, "cfunc", None) is None:
         return False
@@ -4626,9 +5151,10 @@ def _normalize_scalar_byte_register_types(codegen: StructuredCodegenValue) -> bo
 _SEGMENT_REG_DESIRED_NAMES_8616 = {"cs", "ds", "es", "ss", "fs", "gs"}
 
 
+@cython.ccall
 def _segment_register_var_name_8616(
-    variable: StructuredAstValue, project: AngrProjectValue | None
-) -> str | None:
+    variable: StructuredAstValue, project: object
+) -> object:
     """Resolve a segment-register name from the arch map or variable name."""
 
     if not isinstance(variable, SimRegisterVariable):
@@ -4644,30 +5170,41 @@ def _segment_register_var_name_8616(
     return None
 
 
+@cython.ccall
 def _attach_segment_names_in_use_8616(
     variables_in_use: Mapping[SimVariable, structured_c.CVariable], project: AngrProjectValue | None
-) -> bool:
+) -> cython.bint:
     """Attach segment names to in-use register variables."""
+    name: object
+    unified: object
+    cvar: object
+    variable: object
 
     changed = False
     for variable, cvar in variables_in_use.items():
         name = _segment_register_var_name_8616(variable, project)
         if name is None:
             continue
-        if getattr(variable, "name", None) != name:
+        if operator.ne(getattr(variable, "name", None), name):
             variable.name = name
             changed = True
         unified = getattr(cvar, "unified_variable", None)
-        if unified is not None and getattr(unified, "name", None) != name:
+        if unified is not None and operator.ne(getattr(unified, "name", None), name):
             unified.name = name
             changed = True
     return changed
 
 
+@cython.ccall
 def _attach_segment_names_unified_8616(
     unified_locals: MutableMapping[SimVariable, set[tuple[structured_c.CVariable, object]]], project: AngrProjectValue | None
-) -> bool:
+) -> cython.bint:
     """Attach segment names to unified-local register variables."""
+    name: object
+    cvar_and_vartypes: object
+    cvariable: object
+    variable: object
+    vartype: object
 
     changed = False
     for variable, cvar_and_vartypes in list(unified_locals.items()):
@@ -4683,8 +5220,10 @@ def _attach_segment_names_unified_8616(
     return changed
 
 
-def _attach_segment_register_names(codegen: StructuredCodegenValue, project: AngrProjectValue = None) -> bool:
+@cython.ccall
+def _attach_segment_register_names(codegen: StructuredCodegenValue, project: AngrProjectValue = None) -> cython.bint:
     """Attach canonical segment-register names to matching variables."""
+    unified_locals: object
 
     if getattr(codegen, "cfunc", None) is None:
         return False
@@ -4699,18 +5238,23 @@ def _attach_segment_register_names(codegen: StructuredCodegenValue, project: Ang
 
     return changed
 
-def _is_generic_var_name_8616(name: object) -> bool:
+@cython.ccall
+def _is_generic_var_name_8616(name: object) -> cython.bint:
     """Return whether the name is a generated temp identifier."""
 
     return isinstance(name, str) and re.fullmatch(r"(?:v\d+|vvar_\d+|ir_\d+)", name) is not None
 
 
+@cython.ccall
 def _arch_register_var_name_8616(
     variable: StructuredAstValue,
-    register_names: Mapping[int, object],
-    registers: Mapping[object, tuple[int, int]],
-) -> str | None:
+    register_names: Mapping[cython.longlong, object],
+    registers: Mapping[object, tuple[cython.longlong, cython.longlong]],
+) -> object:
     """Resolve a register variable to its arch register name."""
+    name: object
+    offset: object
+    reg_size: object
 
     if not isinstance(variable, SimRegisterVariable):
         return None
@@ -4726,14 +5270,16 @@ def _arch_register_var_name_8616(
     return name
 
 
-def _rename_register_variable_8616(variable: StructuredAstValue, cvar: StructuredAstValue, name: str) -> bool:
+@cython.ccall
+def _rename_register_variable_8616(variable: StructuredAstValue, cvar: StructuredAstValue, name: object) -> cython.bint:
     """Rename a register variable/cvar/unified triple; return changed."""
+    unified: object
 
     changed = False
-    if getattr(variable, "name", None) != name:
+    if operator.ne(getattr(variable, "name", None), name):
         variable.name = name
         changed = True
-    if getattr(cvar, "name", None) != name:
+    if operator.ne(getattr(cvar, "name", None), name):
         try:
             cvar.name = name
         except Exception:
@@ -4741,7 +5287,7 @@ def _rename_register_variable_8616(variable: StructuredAstValue, cvar: Structure
         else:
             changed = True
     unified = getattr(cvar, "unified_variable", None)
-    if unified is not None and getattr(unified, "name", None) != name:
+    if unified is not None and operator.ne(getattr(unified, "name", None), name):
         unified.name = name
         changed = True
     return changed
@@ -4749,10 +5295,13 @@ def _rename_register_variable_8616(variable: StructuredAstValue, cvar: Structure
 
 def _attach_register_names_in_use_8616(
     variables_in_use: Mapping[SimVariable, structured_c.CVariable],
-    register_names: Mapping[int, object],
-    registers: Mapping[object, tuple[int, int]],
-) -> bool:
+    register_names: Mapping[cython.longlong, object],
+    registers: Mapping[object, tuple[cython.longlong, cython.longlong]],
+) -> cython.bint:
     """Rename in-use register variables that still carry temp names."""
+    name: object
+    cvar: object
+    variable: object
 
     changed = False
     for variable, cvar in variables_in_use.items():
@@ -4761,11 +5310,11 @@ def _attach_register_names_in_use_8616(
             continue
         if not any(
             _is_generic_var_name_8616(candidate)
-            for candidate in (
+            for candidate in iter((
                 getattr(variable, "name", None),
                 getattr(cvar, "name", None),
                 getattr(getattr(cvar, "unified_variable", None), "name", None),
-            )
+            ))
         ):
             continue
         if _rename_register_variable_8616(variable, cvar, name):
@@ -4775,10 +5324,15 @@ def _attach_register_names_in_use_8616(
 
 def _attach_register_names_unified_8616(
     unified_locals: MutableMapping[SimVariable, set[tuple[structured_c.CVariable, object]]],
-    register_names: Mapping[int, object],
-    registers: Mapping[object, tuple[int, int]],
-) -> bool:
+    register_names: Mapping[cython.longlong, object],
+    registers: Mapping[object, tuple[cython.longlong, cython.longlong]],
+) -> cython.bint:
     """Rename unified-local register variables carrying temp names."""
+    name: object
+    _vartype: object
+    cvar: object
+    cvar_and_vartypes: object
+    variable: object
 
     changed = False
     for variable, cvar_and_vartypes in list(unified_locals.items()):
@@ -4787,10 +5341,8 @@ def _attach_register_names_unified_8616(
             continue
         if not any(
             _is_generic_var_name_8616(candidate)
-            for candidate in (
-                getattr(variable, "name", None),
-                *(getattr(cvar, "name", None) for cvar, _vartype in cvar_and_vartypes),
-            )
+            for candidate in iter((getattr(variable, "name", None),
+                ) + tuple((getattr(cvar, "name", None) for cvar, _vartype in iter(cvar_and_vartypes))))
         ):
             continue
         for cvar, _vartype in cvar_and_vartypes:
@@ -4799,8 +5351,12 @@ def _attach_register_names_unified_8616(
     return changed
 
 
-def _attach_register_names(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
+@cython.ccall
+def _attach_register_names(project: AngrProjectValue, codegen: StructuredCodegenValue) -> cython.bint:
     """Attach arch register names to register variables with temp names."""
+    register_names: object
+    registers: object
+    unified_locals: object
 
     if getattr(codegen, "cfunc", None) is None:
         return False
@@ -4824,7 +5380,8 @@ def _attach_register_names(project: AngrProjectValue, codegen: StructuredCodegen
 
     return changed
 
-def _elide_redundant_segment_pointer_dereferences(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
+@cython.ccall
+def _elide_redundant_segment_pointer_dereferences(project: AngrProjectValue, codegen: StructuredCodegenValue) -> cython.bint:
     return _cli_segmented_elision._elide_redundant_segment_pointer_dereferences(
         project,
         codegen,
@@ -4841,7 +5398,8 @@ def _elide_redundant_segment_pointer_dereferences(project: AngrProjectValue, cod
     )
 
 
-def _collect_access_traits(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
+@cython.ccall
+def _collect_access_traits(project: AngrProjectValue, codegen: StructuredCodegenValue) -> cython.bint:
     return _cli_access_traits._collect_access_traits(
         project,
         codegen,
@@ -4855,28 +5413,32 @@ def _collect_access_traits(project: AngrProjectValue, codegen: StructuredCodegen
     )
 
 
-def _prune_unused_unnamed_memory_declarations(codegen: StructuredCodegenValue) -> bool:
+@cython.ccall
+def _prune_unused_unnamed_memory_declarations(codegen: StructuredCodegenValue) -> cython.bint:
     return _cli_memory_prune._prune_unused_unnamed_memory_declarations(
         codegen,
         iter_c_nodes_deep=_iter_c_nodes_deep,
     )
 
 
-def _prune_unused_linear_register_declarations(codegen: StructuredCodegenValue) -> bool:
+@cython.ccall
+def _prune_unused_linear_register_declarations(codegen: StructuredCodegenValue) -> cython.bint:
     return _cli_local_prune._prune_unused_linear_register_declarations(
         codegen,
         iter_c_nodes_deep=_iter_c_nodes_deep,
     )
 
 
-def _prune_unused_local_declarations(codegen: StructuredCodegenValue) -> bool:
+@cython.ccall
+def _prune_unused_local_declarations(codegen: StructuredCodegenValue) -> cython.bint:
     """Consume canonical declaration cleanup after the producer's early pass."""
     from inertia.postprocess.optimization.local_declarations import prune_unreferenced_scalar_declarations_8616
 
     return prune_unreferenced_scalar_declarations_8616(codegen)
 
 
-def _prune_dead_local_assignments(codegen: StructuredCodegenValue) -> bool:
+@cython.ccall
+def _prune_dead_local_assignments(codegen: StructuredCodegenValue) -> cython.bint:
     return _cli_dead_local_prune._prune_dead_local_assignments(
         codegen,
         structured_codegen_node=_structured_codegen_node,
@@ -4886,7 +5448,8 @@ def _prune_dead_local_assignments(codegen: StructuredCodegenValue) -> bool:
     )
 
 
-def _materialize_missing_stack_local_declarations(codegen: StructuredCodegenValue) -> bool:
+@cython.ccall
+def _materialize_missing_stack_local_declarations(codegen: StructuredCodegenValue) -> cython.bint:
     return _cli_local_rewrites._materialize_missing_stack_local_declarations(
         codegen,
         stack_slot_identity_for_variable=_compat_callback(_stack_slot_identity_for_variable),
@@ -4896,14 +5459,16 @@ def _materialize_missing_stack_local_declarations(codegen: StructuredCodegenValu
     )
 
 
-def _dedupe_codegen_variable_names_8616(codegen: StructuredCodegenValue) -> bool:
+@cython.ccall
+def _dedupe_codegen_variable_names_8616(codegen: StructuredCodegenValue) -> cython.bint:
     return _cli_local_rewrites._dedupe_codegen_variable_names_8616(
         codegen,
         make_unique_identifier=_make_unique_identifier,
     )
 
 
-def _materialize_missing_register_local_declarations(codegen: StructuredCodegenValue) -> bool:
+@cython.ccall
+def _materialize_missing_register_local_declarations(codegen: StructuredCodegenValue) -> cython.bint:
     return _cli_local_rewrites._materialize_missing_register_local_declarations(
         codegen,
         stack_slot_identity_for_variable=_compat_callback(_stack_slot_identity_for_variable),
@@ -4913,14 +5478,15 @@ def _materialize_missing_register_local_declarations(codegen: StructuredCodegenV
     )
 
 
-def _prune_void_function_return_values(codegen: StructuredCodegenValue) -> bool:
+@cython.ccall
+def _prune_void_function_return_values(codegen: StructuredCodegenValue) -> cython.bint:
     return _cli_local_rewrites._prune_void_function_return_values(
         codegen,
         iter_c_nodes_deep=_iter_c_nodes_deep,
     )
 
 
-def _coalesce_far_pointer_stack_expressions(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
+def _coalesce_far_pointer_stack_expressions(project: AngrProjectValue, codegen: StructuredCodegenValue) -> cython.bint:
     return _cli_far_pointer_stack._coalesce_far_pointer_stack_expressions(
         project,
         codegen,
@@ -4939,7 +5505,8 @@ def _coalesce_far_pointer_stack_expressions(project: AngrProjectValue, codegen: 
     )
 
 
-def _simplify_nested_mk_fp_calls(codegen: StructuredCodegenValue) -> bool:
+@cython.ccall
+def _simplify_nested_mk_fp_calls(codegen: StructuredCodegenValue) -> cython.bint:
     return _cli_mkfp_simplify._simplify_nested_mk_fp_calls(
         codegen,
         unwrap_c_casts=_unwrap_c_casts,
@@ -4948,7 +5515,8 @@ def _simplify_nested_mk_fp_calls(codegen: StructuredCodegenValue) -> bool:
     )
 
 
-def _attach_ss_stack_variables(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
+@cython.ccall
+def _attach_ss_stack_variables(project: AngrProjectValue, codegen: StructuredCodegenValue) -> cython.bint:
     return _cli_stack_locals._attach_ss_stack_variables(
         project,
         codegen,
@@ -4959,7 +5527,8 @@ def _attach_ss_stack_variables(project: AngrProjectValue, codegen: StructuredCod
     )
 
 
-def _rewrite_ss_stack_byte_offsets(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
+@cython.ccall
+def _rewrite_ss_stack_byte_offsets(project: AngrProjectValue, codegen: StructuredCodegenValue) -> cython.bint:
     return _cli_stack_byte_offsets._rewrite_ss_stack_byte_offsets(
         project,
         codegen,
@@ -4979,18 +5548,21 @@ def _rewrite_ss_stack_byte_offsets(project: AngrProjectValue, codegen: Structure
     )
 
 
+@cython.ccall
 def _promote_direct_stack_cvariable(
-    codegen: StructuredCodegenValue, cvar: StructuredAstValue, size: int, type_: StructuredAstValue
-) -> bool:
+    codegen: StructuredCodegenValue, cvar: StructuredAstValue, size: cython.longlong, type_: StructuredAstValue
+) -> cython.bint:
     return _cli_stack_locals._promote_direct_stack_cvariable(codegen, cvar, size, type_)
 
 
-def _stack_type_for_size(size: int) -> StructuredAstValue:
+@cython.ccall
+def _stack_type_for_size(size: cython.longlong) -> StructuredAstValue:
     return _cli_stack_locals._stack_type_for_size(size)
 
 
+@cython.ccall
 def _resolve_stack_cvar_at_offset(
-    codegen: StructuredCodegenValue, offset: int, *, preferred_size: int | None = None
+    codegen: StructuredCodegenValue, offset: cython.longlong, *, preferred_size: int | None = None
 ) -> StructuredAstValue:
     return _cli_stack_cvars._resolve_stack_cvar_at_offset(
         codegen,
@@ -5000,8 +5572,9 @@ def _resolve_stack_cvar_at_offset(
     )
 
 
+@cython.ccall
 def _materialize_stack_cvar_at_offset(
-    codegen: StructuredCodegenValue, offset: int, size: int = 2
+    codegen: StructuredCodegenValue, offset: cython.longlong, size: cython.longlong = 2
 ) -> StructuredAstValue:
     return _cli_stack_cvars._materialize_stack_cvar_at_offset(
         codegen,
@@ -5013,11 +5586,12 @@ def _materialize_stack_cvar_at_offset(
     )
 
 
+@cython.ccall
 def _canonicalize_stack_cvar_expr(
     expr: StructuredAstValue,
     codegen: StructuredCodegenValue,
-    active_expr_ids: set[int] | None = None,
-    analysis_context: dict[str, object] | None = None,
+    active_expr_ids: object = None,
+    analysis_context: object = None,
 ) -> StructuredAstValue:
     return _cli_stack_cvars._canonicalize_stack_cvar_expr(
         expr,
@@ -5030,7 +5604,8 @@ def _canonicalize_stack_cvar_expr(
     )
 
 
-def _canonicalize_stack_cvars(codegen: StructuredCodegenValue) -> bool:
+@cython.ccall
+def _canonicalize_stack_cvars(codegen: StructuredCodegenValue) -> cython.bint:
     return _cli_stack_cvars._canonicalize_stack_cvars(
     codegen,
     replace_c_children=_replace_c_children,
@@ -5038,6 +5613,7 @@ def _canonicalize_stack_cvars(codegen: StructuredCodegenValue) -> bool:
     )
 
 
+@cython.ccall
 def _resolve_stack_cvar_from_addr_expr(
     project: AngrProjectValue, codegen: StructuredCodegenValue, addr_expr: StructuredAstValue
 ) -> StructuredAstValue:
@@ -5053,7 +5629,8 @@ def _resolve_stack_cvar_from_addr_expr(
     )
 
 
-def _coalesce_direct_ss_local_word_statements(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
+@cython.ccall
+def _coalesce_direct_ss_local_word_statements(project: AngrProjectValue, codegen: StructuredCodegenValue) -> cython.bint:
     return _cli_stack_coalesce._coalesce_direct_ss_local_word_statements(
     project,
     codegen,
@@ -5072,7 +5649,8 @@ def _coalesce_direct_ss_local_word_statements(project: AngrProjectValue, codegen
     )
 
 
-def _seed_adjacent_byte_pair_aliases(project: AngrProjectValue, codegen: StructuredCodegenValue) -> dict[int, object]:
+@cython.ccall
+def _seed_adjacent_byte_pair_aliases(project: AngrProjectValue, codegen: StructuredCodegenValue) -> object:
     return _cli_linear_aliases._seed_adjacent_byte_pair_aliases(
     project,
     codegen,
@@ -5085,7 +5663,8 @@ def _seed_adjacent_byte_pair_aliases(project: AngrProjectValue, codegen: Structu
     )
 
 
-def _coalesce_linear_recurrence_statements(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
+@cython.ccall
+def _coalesce_linear_recurrence_statements(project: AngrProjectValue, codegen: StructuredCodegenValue) -> cython.bint:
     return _cli_linear_recurrence._coalesce_linear_recurrence_statements(
         project,
         codegen,
@@ -5106,7 +5685,8 @@ def _coalesce_linear_recurrence_statements(project: AngrProjectValue, codegen: S
     )
 
 
-def _coalesce_segmented_word_store_statements(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
+@cython.ccall
+def _coalesce_segmented_word_store_statements(project: AngrProjectValue, codegen: StructuredCodegenValue) -> cython.bint:
     return _cli_segmented_store_coalesce._coalesce_segmented_word_store_statements(
     project,
     codegen,
@@ -5128,7 +5708,7 @@ def _coalesce_segmented_word_store_statements(project: AngrProjectValue, codegen
     )
 
 
-def _run_typed_widening_pass(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
+def _run_typed_widening_pass(project: AngrProjectValue, codegen: StructuredCodegenValue) -> cython.bint:
     return _cli_segmented_store_coalesce.run_typed_widening_pass_8616(
     project,
     codegen,
@@ -5146,14 +5726,17 @@ def _run_typed_widening_pass(project: AngrProjectValue, codegen: StructuredCodeg
     )
 
 
+@cython.ccall
 def _global_memory_addr(node: StructuredAstValue) -> int | None:
     return _cli_word_loads._global_memory_addr(node)
 
 
+@cython.ccall
 def _global_load_addr(node: StructuredAstValue, project: AngrProjectValue) -> int | None:
     return _cli_word_loads._global_load_addr(node, project)
 
 
+@cython.ccall
 def _match_scaled_high_byte(node: StructuredAstValue, project: AngrProjectValue) -> int | None:
     return _cli_word_loads._match_scaled_high_byte(
     node,
@@ -5163,10 +5746,12 @@ def _match_scaled_high_byte(node: StructuredAstValue, project: AngrProjectValue)
     )
 
 
+@cython.ccall
 def _extract_dereference_addr_expr(node: StructuredAstValue) -> StructuredAstValue:
     return _cli_word_loads._extract_dereference_addr_expr(node)
 
 
+@cython.ccall
 def _match_byte_load_addr_expr(node: StructuredAstValue) -> StructuredAstValue:
     return _cli_word_loads._match_byte_load_addr_expr(
         node,
@@ -5174,10 +5759,12 @@ def _match_byte_load_addr_expr(node: StructuredAstValue) -> StructuredAstValue:
     )
 
 
+@cython.ccall
 def _match_byte_store_addr_expr(node: StructuredAstValue) -> StructuredAstValue:
     return _cli_word_loads._match_byte_store_addr_expr(node)
 
 
+@cython.ccall
 def _match_shifted_high_byte_addr_expr(node: StructuredAstValue) -> StructuredAstValue:
     return _cli_word_loads._match_shifted_high_byte_addr_expr(
         node,
@@ -5187,6 +5774,7 @@ def _match_shifted_high_byte_addr_expr(node: StructuredAstValue) -> StructuredAs
     )
 
 
+@cython.ccall
 def _match_word_pair_low_addr_expr(node: StructuredAstValue, project: AngrProjectValue) -> StructuredAstValue:
     return _cli_word_loads._match_word_pair_low_addr_expr(
         node,
@@ -5198,6 +5786,7 @@ def _match_word_pair_low_addr_expr(node: StructuredAstValue, project: AngrProjec
     )
 
 
+@cython.ccall
 def _split_expr_const_offset(node: StructuredAstValue) -> StructuredAstValue:
     return _cli_segmented_compare._split_expr_const_offset(
         node,
@@ -5207,7 +5796,8 @@ def _split_expr_const_offset(node: StructuredAstValue) -> StructuredAstValue:
     )
 
 
-def _same_expression_list(lhs_terms: StructuredAstValue, rhs_terms: StructuredAstValue) -> bool:
+@cython.ccall
+def _same_expression_list(lhs_terms: StructuredAstValue, rhs_terms: StructuredAstValue) -> cython.bint:
     return _cli_segmented_compare._same_expression_list(
     lhs_terms,
     rhs_terms,
@@ -5215,9 +5805,10 @@ def _same_expression_list(lhs_terms: StructuredAstValue, rhs_terms: StructuredAs
     )
 
 
+@cython.ccall
 def _addr_exprs_are_same(
     low_addr_expr: StructuredAstValue, high_addr_expr: StructuredAstValue, project: AngrProjectValue
-) -> bool:
+) -> cython.bint:
     return _cli_segmented_compare._addr_exprs_are_same(
     low_addr_expr,
     high_addr_expr,
@@ -5229,9 +5820,10 @@ def _addr_exprs_are_same(
     )
 
 
+@cython.ccall
 def _addr_exprs_are_byte_pair(
     low_addr_expr: StructuredAstValue, high_addr_expr: StructuredAstValue, project: AngrProjectValue = None
-) -> bool:
+) -> cython.bint:
     return _cli_segmented_compare._addr_exprs_are_byte_pair(
     low_addr_expr,
     high_addr_expr,
@@ -5243,16 +5835,19 @@ def _addr_exprs_are_byte_pair(
     )
 
 
+@cython.ccall
 def _make_word_dereference_from_addr_expr(
     codegen: StructuredCodegenValue, project: AngrProjectValue, addr_expr: StructuredAstValue
 ) -> StructuredAstValue:
     return _cli_word_loads._make_word_dereference_from_addr_expr(codegen, project, addr_expr)
 
 
+@cython.ccall
 def _match_word_dereference_addr_expr(node: StructuredAstValue) -> StructuredAstValue:
     return _cli_word_loads._match_word_dereference_addr_expr(node)
 
 
+@cython.ccall
 def _word_from_constant_byte_pair(
     low_unwrapped: StructuredAstValue, high_unwrapped: StructuredAstValue, codegen: StructuredCodegenValue
 ) -> StructuredAstValue:
@@ -5277,6 +5872,8 @@ def _word_from_adjacent_memory_bytes(
     low_unwrapped: StructuredAstValue, high_unwrapped: StructuredAstValue, codegen: StructuredCodegenValue
 ) -> StructuredAstValue:
     def _impl() -> StructuredAstValue:
+        low_mem_addr: object
+        low_var: object
         low_mem_addr = _global_memory_addr(low_unwrapped)
         high_mem_addr = _global_memory_addr(high_unwrapped)
         if not (
@@ -5285,7 +5882,7 @@ def _word_from_adjacent_memory_bytes(
             and isinstance(getattr(low_unwrapped, "variable", None), SimMemoryVariable)
             and isinstance(getattr(high_unwrapped, "variable", None), SimMemoryVariable)
             and low_mem_addr is not None
-            and high_mem_addr == low_mem_addr + 1
+            and operator.eq(high_mem_addr, low_mem_addr + 1)
         ):
             return None
         if not analyze_adjacent_storage_slices(low_unwrapped, high_unwrapped).ok:
@@ -5313,6 +5910,9 @@ def _word_from_shifted_high_expr(
     codegen: StructuredCodegenValue,
     project: AngrProjectValue,
 ) -> StructuredAstValue:
+    low_addr_expr: object
+    shifted_source: object
+    word_addr_expr: object
     def _safe_type_size(node: StructuredAstValue) -> int | None:
         try:
             return getattr(getattr(node, "type", None), "size", None)
@@ -5339,12 +5939,16 @@ def _word_from_shifted_high_expr(
     return None
 
 
+@cython.ccall
 def _word_from_pair_low_addr(
     low_unwrapped: StructuredAstValue,
     high_rhs: StructuredAstValue,
     codegen: StructuredCodegenValue,
     project: AngrProjectValue,
 ) -> StructuredAstValue:
+    low_pair_addr: object
+    shifted_source: object
+    word_addr_expr: object
     low_pair_addr = _match_word_pair_low_addr_expr(low_unwrapped, project)
     if low_pair_addr is None:
         return None
@@ -5360,12 +5964,15 @@ def _word_from_pair_low_addr(
     )
 
 
+@cython.ccall
 def _word_from_byte_pair_addr_match(
     low_unwrapped: StructuredAstValue,
     high_rhs: StructuredAstValue,
     codegen: StructuredCodegenValue,
     project: AngrProjectValue,
 ) -> StructuredAstValue:
+    high_addr_expr: object
+    low_addr_expr: object
     low_addr_expr = _match_byte_load_addr_expr(low_unwrapped)
     high_addr_expr = _match_shifted_high_byte_addr_expr(high_rhs)
     if low_addr_expr is None or high_addr_expr is None:
@@ -5381,6 +5988,8 @@ def _word_from_byte_pair_addr_match(
 def _word_from_widening_shift_match(
     low_rhs: StructuredAstValue, high_rhs: StructuredAstValue, codegen: StructuredCodegenValue
 ) -> StructuredAstValue:
+    analysis: object
+    shifted_source: object
     shifted_source = _match_shift_right_8_expr(high_rhs)
     if shifted_source is None:
         return None
@@ -5395,12 +6004,14 @@ def _word_from_widening_shift_match(
     return None
 
 
+@cython.ccall
 def _match_word_rhs_from_byte_pair(
     low_rhs: StructuredAstValue,
     high_rhs: StructuredAstValue,
     codegen: StructuredCodegenValue,
     project: AngrProjectValue,
 ) -> StructuredAstValue:
+    result: object
     low_unwrapped = _unwrap_c_casts(low_rhs)
     high_unwrapped = _unwrap_c_casts(high_rhs)
     result = _word_from_constant_byte_pair(low_unwrapped, high_unwrapped, codegen)
@@ -5424,6 +6035,7 @@ def _match_word_rhs_from_byte_pair(
     return None
 
 
+@cython.ccall
 def _high_byte_store_addr(node: StructuredAstValue, project: AngrProjectValue) -> int | None:
     return _cli_word_loads._high_byte_store_addr(
     node,
@@ -5432,11 +6044,12 @@ def _high_byte_store_addr(node: StructuredAstValue, project: AngrProjectValue) -
     )
 
 
+@cython.ccall
 def _synthetic_word_global_variable(
     codegen: StructuredCodegenValue,
-    synthetic_globals: dict[int, tuple[str, int]] | None,
-    addr: int,
-    created: dict[int, structured_c.CVariable] | None = None,
+    synthetic_globals: object,
+    addr: cython.longlong,
+    created: object = None,
 ) -> StructuredAstValue:
     return _cli_word_global_helpers._synthetic_word_global_variable(
         codegen,
@@ -5449,8 +6062,8 @@ def _synthetic_word_global_variable(
 
 
 def _coalesce_cod_word_global_loads(
-    project: AngrProjectValue, codegen: StructuredCodegenValue, synthetic_globals: dict[int, tuple[str, int]] | None
-) -> bool:
+    project: AngrProjectValue, codegen: StructuredCodegenValue, synthetic_globals: object
+) -> cython.bint:
     return _cli_cod_globals._coalesce_cod_word_global_loads(
     project,
     codegen,
@@ -5468,7 +6081,8 @@ def _coalesce_cod_word_global_loads(
     )
 
 
-def _coalesce_segmented_word_load_expressions(project: AngrProjectValue, codegen: StructuredCodegenValue) -> bool:
+@cython.ccall
+def _coalesce_segmented_word_load_expressions(project: AngrProjectValue, codegen: StructuredCodegenValue) -> cython.bint:
     return _cli_segmented_load_coalesce._coalesce_segmented_word_load_expressions(
     project,
     codegen,
@@ -5486,9 +6100,10 @@ def _coalesce_segmented_word_load_expressions(project: AngrProjectValue, codegen
     )
 
 
+@cython.ccall
 def _coalesce_cod_word_global_statements(
-    project: AngrProjectValue, codegen: StructuredCodegenValue, synthetic_globals: dict[int, tuple[str, int]] | None
-) -> bool:
+    project: AngrProjectValue, codegen: StructuredCodegenValue, synthetic_globals: object
+) -> cython.bint:
     return _cli_cod_global_statements._coalesce_cod_word_global_statements(
     project,
     codegen,
@@ -5499,9 +6114,10 @@ def _coalesce_cod_word_global_statements(
     )
 
 
+@cython.ccall
 def _int21_call_replacements(
-    project: AngrProjectValue, function: StructuredAstValue, api_style: str, binary_path: Path | None
-) -> list[str]:
+    project: AngrProjectValue, function: StructuredAstValue, api_style: object, binary_path: Path | None
+) -> object:
     return _cli_helper_modeling._int21_call_replacements(
     project,
     function,
@@ -5512,9 +6128,10 @@ def _int21_call_replacements(
     )
 
 
+@cython.ccall
 def _interrupt_call_replacement_map(
-    project: AngrProjectValue, function: StructuredAstValue, api_style: str, binary_path: Path | None
-) -> dict[str, tuple[str, ...]]:
+    project: AngrProjectValue, function: StructuredAstValue, api_style: object, binary_path: Path | None
+) -> object:
     return _cli_helper_modeling._interrupt_call_replacement_map(
     project,
     function,
@@ -5528,7 +6145,8 @@ def _interrupt_call_replacement_map(
     )
 
 
-def _dos_helper_declarations(function: StructuredAstValue, api_style: str, binary_path: Path | None) -> list[str]:
+@cython.ccall
+def _dos_helper_declarations(function: StructuredAstValue, api_style: object, binary_path: Path | None) -> object:
     return _cli_helper_modeling._dos_helper_declarations(
     function,
     api_style,
@@ -5538,7 +6156,8 @@ def _dos_helper_declarations(function: StructuredAstValue, api_style: str, binar
     )
 
 
-def _interrupt_helper_declarations(function: StructuredAstValue, api_style: str, binary_path: Path | None) -> list[str]:
+@cython.ccall
+def _interrupt_helper_declarations(function: StructuredAstValue, api_style: object, binary_path: Path | None) -> object:
     return _cli_helper_modeling._interrupt_helper_declarations(
     function,
     api_style,
@@ -5548,34 +6167,39 @@ def _interrupt_helper_declarations(function: StructuredAstValue, api_style: str,
     )
 
 
-def _known_helper_declarations(cod_metadata: CODProcMetadata | None) -> list[str]:
+@cython.ccall
+def _known_helper_declarations(cod_metadata: CODProcMetadata | None) -> object:
     return _cli_helper_modeling._known_helper_declarations(
     cod_metadata,
     preferred_known_helper_signature_decl=preferred_known_helper_signature_decl,
     )
 
 
-def _is_staging_local_name(name: str | None) -> bool:
+@cython.ccall
+def _is_staging_local_name(name: object) -> cython.bint:
     return isinstance(name, str) and re.fullmatch(r"s_[0-9a-fA-F]+", name) is not None
 
 
-def _clone_c_value_container_8616(value: StructuredAstValue, memo: dict[int, object]) -> StructuredAstValue:
+def _clone_c_value_container_8616(value: StructuredAstValue, memo: object) -> StructuredAstValue:
     """Deep-clone list/tuple/dict containers elementwise."""
 
     if isinstance(value, list):
-        return [_clone_structured_c_value(item, memo) for item in value]
+        return [_clone_structured_c_value(item, memo) for item in iter(value)]
     if isinstance(value, tuple):
-        return tuple(_clone_structured_c_value(item, memo) for item in value)
+        return tuple(_clone_structured_c_value(item, memo) for item in iter(value))
     if isinstance(value, dict):
         return {
             _clone_structured_c_value(key, memo): _clone_structured_c_value(item, memo)
-            for key, item in value.items()
+            for key, item in builtins.iter(value.items())
         }
     return value
 
 
+@cython.ccall
 def _clone_c_value_slot_names_8616(value: StructuredAstValue) -> list[str]:
     """Ordered unique __slots__ names across the class hierarchy."""
+    slots: object
+    cls: object
 
     slot_names: list[str] = []
     for cls in type(value).__mro__:
@@ -5586,8 +6210,11 @@ def _clone_c_value_slot_names_8616(value: StructuredAstValue) -> list[str]:
     return list(dict.fromkeys(slot_names))
 
 
-def _clone_c_value_slots_8616(value: StructuredAstValue, clone: object, memo: dict[int, object]) -> None:
+@cython.ccall
+def _clone_c_value_slots_8616(value: StructuredAstValue, clone: object, memo: object) -> None:
     """Deep-clone slot attributes onto the shallow copy."""
+    child: object
+    attr: object
 
     for attr in _clone_c_value_slot_names_8616(value):
         if attr == "codegen" or not hasattr(value, attr):
@@ -5604,7 +6231,7 @@ def _clone_c_value_slots_8616(value: StructuredAstValue, clone: object, memo: di
                 continue
 
 
-def _clone_structured_c_value(value: StructuredAstValue, memo: dict[int, object] | None = None) -> StructuredAstValue:
+def _clone_structured_c_value(value: StructuredAstValue, memo: object = None) -> StructuredAstValue:
     def _impl() -> StructuredAstValue:
         nonlocal memo
         if memo is None:
@@ -5625,11 +6252,13 @@ def _clone_structured_c_value(value: StructuredAstValue, memo: dict[int, object]
     return _impl()
 
 
-def _collect_staging_wrapper_summary(statements: list[object]) -> tuple[int, dict[int, object], set[int], bool]:
-    def _impl() -> tuple[int, dict[int, object], set[int], bool]:
+def _collect_staging_wrapper_summary(statements: object) -> object:
+    def _impl() -> tuple[cython.longlong, dict[cython.longlong, object], set[cython.longlong], cython.bint]:
+        variable: object
+        stmt: object
         call_count = 0
-        staging_replacements: dict[int, object] = {}
-        staging_variable_ids: set[int] = set()
+        staging_replacements: dict[cython.longlong, object] = {}
+        staging_variable_ids: set[cython.longlong] = set()
         non_staging_logic = False
         for stmt in statements:
             if (isinstance(stmt, structured_c.CExpressionStatement) and isinstance(
@@ -5657,12 +6286,15 @@ def _collect_staging_wrapper_summary(statements: list[object]) -> tuple[int, dic
 
 
 def _rewrite_staging_statements(
-    statements: list[object], staging_replacements: dict[int, object], staging_variable_ids: set[int]
-) -> tuple[list[object], bool]:
+    statements: object, staging_replacements: object, staging_variable_ids: object
+) -> tuple[list[object], cython.bint]:
+    variable: object
+    stmt: object
     changed = False
 
     def transform(node: StructuredAstValue) -> StructuredAstValue:
         """Substitute a staging-local variable use with its staged replacement."""
+        replacement: object
         if isinstance(node, structured_c.CVariable):
             variable = node.variable
             replacement = staging_replacements.get(id(variable))
@@ -5683,9 +6315,13 @@ def _rewrite_staging_statements(
     return new_statements, changed
 
 
+@cython.ccall
 def _remove_unused_staging_vars_from_maps(
-    codegen: StructuredCodegenValue, staging_variable_ids: set[int], used_variables: set[int]
-) -> bool:
+    codegen: StructuredCodegenValue, staging_variable_ids: object, used_variables: object
+) -> cython.bint:
+    unified_locals: object
+    variables_in_use: object
+    variable: object
     changed = False
     variables_in_use = getattr(codegen.cfunc, "variables_in_use", None)
     if isinstance(variables_in_use, dict):
@@ -5702,10 +6338,14 @@ def _remove_unused_staging_vars_from_maps(
     return changed
 
 
-def _staging_used_variable_ids_8616(root: StructuredAstValue) -> set[int]:
+@cython.ccall
+def _staging_used_variable_ids_8616(root: StructuredAstValue) -> object:
     """Collect ids of all variables (and unified vars) referenced in the body."""
+    unified: object
+    variable: object
+    node: object
 
-    used_variables: set[int] = set()
+    used_variables: set[cython.longlong] = set()
     for node in _iter_c_nodes_deep(root):
         if not isinstance(node, structured_c.CVariable):
             continue
@@ -5718,8 +6358,9 @@ def _staging_used_variable_ids_8616(root: StructuredAstValue) -> set[int]:
     return used_variables
 
 
-def _prune_tiny_wrapper_staging_locals(codegen: StructuredCodegenValue) -> bool:
-    def _impl() -> bool:
+def _prune_tiny_wrapper_staging_locals(codegen: StructuredCodegenValue) -> cython.bint:
+    def _impl() -> cython.bint:
+        root: object
         if getattr(codegen, "cfunc", None) is None:
             return False
         root = getattr(codegen.cfunc, "statements", None)
@@ -5729,7 +6370,7 @@ def _prune_tiny_wrapper_staging_locals(codegen: StructuredCodegenValue) -> bool:
         statements = list(root.statements)
         if not statements:
             return False
-        if any(isinstance(stmt, (structured_c.CIfElse, structured_c.CWhileLoop)) for stmt in statements):
+        if any(isinstance(stmt, (structured_c.CIfElse, structured_c.CWhileLoop)) for stmt in iter(statements)):
             return False
 
         call_count, staging_replacements, staging_variable_ids, non_staging_logic = _collect_staging_wrapper_summary(
@@ -5741,7 +6382,7 @@ def _prune_tiny_wrapper_staging_locals(codegen: StructuredCodegenValue) -> bool:
 
         new_statements, changed = _rewrite_staging_statements(statements, staging_replacements, staging_variable_ids)
 
-        if len(new_statements) != len(statements):
+        if operator.ne(len(new_statements), len(statements)):
             root.statements = new_statements
 
         used_variables = _staging_used_variable_ids_8616(root)

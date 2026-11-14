@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize binary-derived positive-BP storage as function arguments.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -66,12 +69,15 @@ from .stack_variable_coordinates import (
     publish_selected_stack_cvar_projection_8616,
 )
 from .stack_variable_display_names import generated_stack_variable_name_8616
+import dataclasses
+import operator
+import builtins
 
 
 class _PositiveBpCFunction8616(Protocol):
     """angr C-function fields consumed at the dynamic Lowering boundary."""
 
-    addr: int
+    addr: cython.longlong
     arg_list: Sequence[object] | None
     functy: object
     prototype: object
@@ -84,10 +90,10 @@ class _PositiveBpCodegen8616(Protocol):
     """angr codegen fields consumed and updated by this Lowering pass."""
 
     cfunc: _PositiveBpCFunction8616 | None
-    _inertia_authoritative_zero_arg_prototype_8616: bool
-    _inertia_codegen_decl_refresh_required_8616: bool
+    _inertia_authoritative_zero_arg_prototype_8616: cython.bint
+    _inertia_codegen_decl_refresh_required_8616: cython.bint
     _inertia_positive_bp_argument_stats_8616: PositiveBpArgumentStats8616
-    _inertia_return_selector_materialized_8616: bool
+    _inertia_return_selector_materialized_8616: cython.bint
 
 
 class _FunctionSurface8616(Protocol):
@@ -95,26 +101,28 @@ class _FunctionSurface8616(Protocol):
 
     prototype: object
     prototype_source: PrototypeSource
-    is_prototype_guessed: bool
+    is_prototype_guessed: cython.bint
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PositiveBpArgumentStats8616:
     """Closed evidence counts for one positive-BP interface materialization."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-def _candidate_width_8616(candidate: structured_c.CVariable) -> int:
+@cython.ccall
+def _candidate_width_8616(candidate: structured_c.CVariable) -> cython.longlong:
     """Return the ABI storage width proven by one stack variable."""
     size = candidate.variable.size
     return max(2, size if isinstance(size, int) and size > 0 else 2)
 
 
+@cython.ccall
 def _optional_arg_list_8616(cfunc: object) -> tuple[object, ...]:
     """Read angr's optional argument surface at the dynamic boundary."""
     try:
@@ -123,18 +131,19 @@ def _optional_arg_list_8616(cfunc: object) -> tuple[object, ...]:
         return ()
 
 
+@cython.ccall
 def _canonical_argument_name_8616(
     candidate: structured_c.CVariable,
-    bp_offset: int,
+    bp_offset: cython.longlong,
     *,
     entry_sp_offset: int | None,
-) -> str:
+) -> object:
     """Keep names only when their storage coordinate remains authoritative."""
     variable = cast(SimStackVariable, candidate.variable)
     name = variable.name or candidate.name
     projected_entry_sp_view = (
         isinstance(entry_sp_offset, int)
-        and variable.offset == entry_sp_offset
+        and operator.eq(variable.offset, entry_sp_offset)
         and entry_sp_offset != bp_offset
     )
     if (
@@ -146,8 +155,10 @@ def _canonical_argument_name_8616(
     return f"arg_{bp_offset:x}"
 
 
+@cython.ccall
 def _function_for_codegen_8616(project: object, codegen: object) -> _FunctionSurface8616 | None:
     """Consume the authenticated recovery owner, including private analysis KBs."""
+    resolved: object
     # Defer the native IR boundary until argument recovery needs its context.
     from inertia.ir.vex_import import codegen_function_8616
 
@@ -159,8 +170,10 @@ def _existing_interface_matches_8616(
     codegen: object,
     cfunc: _PositiveBpCFunction8616,
     desired: Sequence[structured_c.CVariable],
-) -> bool:
+) -> cython.bint:
     """Return whether angr already owns the exact contiguous BP interface."""
+    current: object
+    wanted: object
     prototype = cfunc.functy if isinstance(cfunc.functy, SimTypeFunction) else cfunc.prototype
     if not isinstance(prototype, SimTypeFunction):
         return False
@@ -177,15 +190,15 @@ def _existing_interface_matches_8616(
             )
         except AttributeError:
             return False
-        return bool(layout) and len(layout) == len(desired) and all(
+        return bool(layout) and operator.eq(len(layout), len(desired)) and all(
             isinstance(wanted.variable, SimStackVariable)
-            and machine_bp_offset_for_stack_variable_8616(codegen, wanted.variable) == slot.offset
+            and operator.eq(machine_bp_offset_for_stack_variable_8616(codegen, wanted.variable), slot.offset)
             and isinstance(wanted.variable.size, int)
             and wanted.variable.size > 0
-            and max(2, wanted.variable.size) == slot.storage_width
-            for slot, wanted in zip(layout, desired, strict=False)
+            and operator.eq(max(2, wanted.variable.size), slot.storage_width)
+            for slot, wanted in builtins.iter(zip(layout, desired, strict=False))
         )
-    if len(existing) != len(desired) or len(tuple(prototype.args or ())) != len(desired):
+    if operator.ne(len(existing), len(desired)) or operator.ne(len(tuple(prototype.args or ())), len(desired)):
         return False
     cursor = first_argument_bp_offset
     for current, wanted in zip(existing, desired, strict=False):
@@ -199,8 +212,8 @@ def _existing_interface_matches_8616(
         ):
             return False
         if (
-            machine_bp_offset_for_stack_variable_8616(codegen, current_variable) != cursor
-            or machine_bp_offset_for_stack_variable_8616(codegen, wanted_variable) != cursor
+            operator.ne(machine_bp_offset_for_stack_variable_8616(codegen, current_variable), cursor)
+            or operator.ne(machine_bp_offset_for_stack_variable_8616(codegen, wanted_variable), cursor)
             or not isinstance(current_variable.size, int)
             or current_variable.size <= 0
         ):
@@ -209,6 +222,7 @@ def _existing_interface_matches_8616(
     return True
 
 
+@cython.ccall
 def _portable_word_argument_type_8616(project: object, argument_type: SimType) -> SimType:
     """Keep signedness while spelling a 16-bit integer portably as short."""
     if not isinstance(argument_type, SimTypeInt) or isinstance(argument_type, SimTypeShort):
@@ -226,6 +240,7 @@ def _portable_word_argument_type_8616(project: object, argument_type: SimType) -
         return normalized
 
 
+@cython.ccall
 def _argument_type_for_proven_stack_width_8616(
     project: object,
     argument_type: SimType,
@@ -254,6 +269,7 @@ def _argument_type_for_proven_stack_width_8616(
     return _portable_word_argument_type_8616(project, argument_type)
 
 
+@cython.ccall
 def _merge_existing_and_body_argument_type_8616(
     existing_type: SimType,
     entry: PositiveBpArgumentPlanEntry8616,
@@ -268,13 +284,16 @@ def _merge_existing_and_body_argument_type_8616(
     return existing_type
 
 
-def materialize_positive_bp_arguments_8616(project: object, codegen: object) -> bool:
+def materialize_positive_bp_arguments_8616(project: object, codegen: object) -> cython.bint:
     """Build one contiguous argument interface from proven BP stack storage.
 
     Arguments begin at the proven near/far frame base. Contained byte/word
     views are folded into their wider owner; a gap ends recovery. Closed
     pointer facts constrain individual slots, not the full argument census.
     """
+    authoritative_layout_end: object
+    authoritative_prototype: object
+    run: object
     run = _prepare_positive_bp_run_8616(project, codegen)
     if run is None:
         return False
@@ -288,7 +307,7 @@ def materialize_positive_bp_arguments_8616(project: object, codegen: object) -> 
 
     _collect_positive_bp_candidates_8616(run)
     run.raw_count = (
-        sum(len(bucket) for bucket in run.candidates.values())
+        sum(len(bucket) for bucket in builtins.iter(run.candidates.values()))
         + len(run.word_access_offsets)
         + len(run.wide_argument_offsets)
     )
@@ -306,7 +325,7 @@ def materialize_positive_bp_arguments_8616(project: object, codegen: object) -> 
 
     eligible_word_access_offsets = tuple(
         offset
-        for offset in run.word_access_offsets
+        for offset in iter(run.word_access_offsets)
         if authoritative_layout_end is None or offset < authoritative_layout_end
     )
     body_plan_entries = list(
@@ -419,11 +438,11 @@ def materialize_positive_bp_arguments_8616(project: object, codegen: object) -> 
                     else None
                 ),
             )
-            for entry, argument_type in zip(
+            for entry, argument_type in builtins.iter(zip(
                 argument_plan.entries,
                 source_types,
                 strict=True,
-            )
+            ))
         ]
     )
     _publish_selected_projections_8616(
@@ -448,10 +467,10 @@ def materialize_positive_bp_arguments_8616(project: object, codegen: object) -> 
 
     run.changed = (
         run.changed
-        or len(existing_args) != len(interface.desired)
+        or operator.ne(len(existing_args), len(interface.desired))
         or any(
             current is not wanted
-            for current, wanted in zip(existing_args, interface.desired, strict=False)
+            for current, wanted in builtins.iter(zip(existing_args, interface.desired, strict=False))
         )
     )
     if run.changed:
@@ -476,7 +495,7 @@ def materialize_positive_bp_arguments_8616(project: object, codegen: object) -> 
 
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _PositiveBpRun8616:
     """Captured run state for one positive-BP interface materialization."""
 
@@ -484,28 +503,28 @@ class _PositiveBpRun8616:
     codegen: _PositiveBpCodegen8616
     cfunc: _PositiveBpCFunction8616
     function: _FunctionSurface8616 | None
-    first_argument_bp_offset: int
-    word_access_offsets: frozenset[int]
-    word_access_ranges: frozenset[tuple[int, int]]
-    wide_argument_offsets: frozenset[int]
+    first_argument_bp_offset: cython.longlong
+    word_access_offsets: object
+    word_access_ranges: object
+    wide_argument_offsets: object
     variables_in_use: object
     unified_local_vars: object
     existing_arg_list: tuple[object, ...] = ()
-    candidates: dict[int, list[structured_c.CVariable]] = field(default_factory=dict)
-    body_variable_ids: set[int] = field(default_factory=set)
-    raw_count: int = 0
-    normalized_count: int = 0
-    changed: bool = False
+    candidates: object = field(default_factory=dict)
+    body_variable_ids: object = field(default_factory=set)
+    raw_count: cython.longlong = 0
+    normalized_count: cython.longlong = 0
+    changed: cython.bint = False
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _DesiredInterface8616:
     """Desired argument surface built from one completed plan."""
 
-    desired: list[structured_c.CVariable] = field(default_factory=list)
-    desired_names: list[str] = field(default_factory=list)
-    desired_entry_sp_offsets: list[int | None] = field(default_factory=list)
-    desired_variables: set[SimStackVariable] = field(default_factory=set)
+    desired: object = field(default_factory=list)
+    desired_names: object = field(default_factory=list)
+    desired_entry_sp_offsets: object = field(default_factory=list)
+    desired_variables: object = field(default_factory=set)
 
 
 def _prepare_positive_bp_run_8616(
@@ -513,6 +532,8 @@ def _prepare_positive_bp_run_8616(
     codegen: object,
 ) -> _PositiveBpRun8616 | None:
     """Capture codegen inputs for the pass or refuse early."""
+    cfunc: object
+    function: object
     typed_codegen = cast(_PositiveBpCodegen8616, codegen)
     try:
         cfunc = typed_codegen.cfunc
@@ -565,13 +586,14 @@ def _prepare_positive_bp_run_8616(
         function=function,
         first_argument_bp_offset=first_argument_bp_offset,
         word_access_offsets=word_access_offsets,
-        word_access_ranges=frozenset((offset, 2) for offset in word_access_offsets),
+        word_access_ranges=frozenset((offset, 2) for offset in iter(word_access_offsets)),
         wide_argument_offsets=wide_argument_offsets,
         variables_in_use=variables_in_use,
         unified_local_vars=unified_local_vars,
     )
 
 
+@cython.ccall
 def _positive_bp_candidate_offset_8616(
     run: _PositiveBpRun8616,
     candidate: structured_c.CVariable,
@@ -596,7 +618,7 @@ def _collect_positive_bp_candidate_8616(
     run: _PositiveBpRun8616,
     candidate: object,
     *,
-    body: bool,
+    body: cython.bint,
 ) -> None:
     """Collect one positive-BP candidate without duplicating object identity."""
     if not isinstance(candidate, structured_c.CVariable):
@@ -610,14 +632,17 @@ def _collect_positive_bp_candidate_8616(
     ):
         return
     bucket = run.candidates.setdefault(bp_offset, [])
-    if all(existing is not candidate for existing in bucket):
+    if all(existing is not candidate for existing in iter(bucket)):
         bucket.append(candidate)
     if body:
         run.body_variable_ids.add(id(variable))
 
 
+@cython.ccall
 def _collect_positive_bp_candidates_8616(run: _PositiveBpRun8616) -> None:
     """Collect candidates from the body and both angr argument surfaces."""
+    cvar: object
+    node: object
     for node in _iter_c_nodes_deep_8616(run.cfunc.statements):
         _collect_positive_bp_candidate_8616(run, node, body=True)
     if isinstance(run.variables_in_use, dict):
@@ -627,10 +652,12 @@ def _collect_positive_bp_candidates_8616(run: _PositiveBpRun8616) -> None:
         _collect_positive_bp_candidate_8616(run, cvar, body=False)
 
 
+@cython.ccall
 def _function_layout_8616(
     run: _PositiveBpRun8616,
-) -> tuple[dict[int, StackPrototypeArgument8616], int | None]:
+) -> tuple[dict[cython.longlong, StackPrototypeArgument8616], int | None]:
     """Resolve the authoritative prototype argument layout keyed by BP offset."""
+    argument: object
     try:
         project_arch = cast(Any, run.project).arch
         function_layout = (
@@ -646,7 +673,7 @@ def _function_layout_8616(
         )
     except AttributeError:
         function_layout = ()
-    layout_by_offset = {argument.offset: argument for argument in function_layout}
+    layout_by_offset = {argument.offset: argument for argument in iter(function_layout)}
     for argument in materialized_function_pointer_slots_8616(
         run.codegen, cast(Any, run.project).arch
     ):
@@ -661,10 +688,11 @@ def _function_layout_8616(
     return layout_by_offset, authoritative_layout_end
 
 
+@cython.ccall
 def _canonical_body_candidate_8616(
-    body_bucket: list[structured_c.CVariable],
-    body_owner_starts: tuple[structured_c.CVariable, ...],
-    existing_for_offset: tuple[object, ...],
+    body_bucket: object,
+    body_owner_starts: object,
+    existing_for_offset: object,
     entry_sp_offset: int | None,
 ) -> structured_c.CVariable:
     """Pick the canonical candidate for one proven BP slot."""
@@ -681,10 +709,11 @@ def _canonical_body_candidate_8616(
     return max(body_bucket, key=_candidate_width_8616)
 
 
+@cython.ccall
 def _preserved_byte_value_width_8616(
     candidate: structured_c.CVariable,
     argument_type: SimType,
-    slot_width: int,
+    slot_width: cython.longlong,
 ) -> int | None:
     """Keep a body-owned typed byte distinct from its ABI word padding."""
     if slot_width != 2 or not isinstance(argument_type, SimTypeChar):
@@ -699,11 +728,13 @@ def _preserved_byte_value_width_8616(
 
 def _body_plan_entries_8616(
     run: _PositiveBpRun8616,
-    layout_by_offset: dict[int, StackPrototypeArgument8616],
-    authoritative_layout_end: int | None,
-    read_offsets: frozenset[int],
-) -> list[PositiveBpArgumentPlanEntry8616]:
+    layout_by_offset: object,
+    authoritative_layout_end: object,
+    read_offsets: object,
+) -> object:
     """Walk contiguous proven BP slots and build one plan entry each."""
+    layout_argument: object
+    offset: object
     body_plan_entries: list[PositiveBpArgumentPlanEntry8616] = []
     cursor = run.first_argument_bp_offset
     for offset in sorted(run.candidates):
@@ -715,20 +746,20 @@ def _body_plan_entries_8616(
             break
         bucket = run.candidates[offset]
         body_bucket = [
-            item for item in bucket if id(item.variable) in run.body_variable_ids
+            item for item in iter(bucket) if id(item.variable) in run.body_variable_ids
         ]
         if not body_bucket:
             break
         if not any(
             cast(SimStackVariable, item.variable).offset in read_offsets
-            for item in body_bucket
+            for item in iter(body_bucket)
         ):
             break
         layout_argument = layout_by_offset.get(offset)
         width = (
             layout_argument.storage_width
             if layout_argument is not None
-            else max(_candidate_width_8616(item) for item in body_bucket)
+            else max(_candidate_width_8616(item) for item in iter(body_bucket))
         )
         entry_sp_offset = entry_sp_offset_for_machine_bp_range_8616(
             run.codegen,
@@ -737,17 +768,17 @@ def _body_plan_entries_8616(
         )
         existing_for_offset = tuple(
             item
-            for item in run.existing_arg_list
+            for item in iter(run.existing_arg_list)
             if isinstance(item, structured_c.CVariable)
             and isinstance(item.variable, SimStackVariable)
-            and _positive_bp_candidate_offset_8616(run, item) == offset
+            and operator.eq(_positive_bp_candidate_offset_8616(run, item), offset)
             and _candidate_width_8616(item) >= width
         )
         body_owner_starts = tuple(
             item
-            for item in body_bucket
+            for item in iter(body_bucket)
             if not isinstance(entry_sp_offset, int)
-            or cast(SimStackVariable, item.variable).offset == entry_sp_offset
+            or operator.eq(cast(SimStackVariable, item.variable).offset, entry_sp_offset)
         )
         canonical = _canonical_body_candidate_8616(
             body_bucket,
@@ -783,7 +814,8 @@ def _body_plan_entries_8616(
     return body_plan_entries
 
 
-def _refuse_stats_8616(run: _PositiveBpRun8616, *, failure_count: int = 0) -> None:
+@cython.ccall
+def _refuse_stats_8616(run: _PositiveBpRun8616, *, failure_count: cython.longlong = 0) -> None:
     """Publish refusal stats preserving raw/normalized evidence counts."""
     run.codegen._inertia_positive_bp_argument_stats_8616 = (
         PositiveBpArgumentStats8616(
@@ -794,7 +826,8 @@ def _refuse_stats_8616(run: _PositiveBpRun8616, *, failure_count: int = 0) -> No
     )
 
 
-def _positive_bp_no_plan_result_8616(run: _PositiveBpRun8616) -> bool:
+@cython.ccall
+def _positive_bp_no_plan_result_8616(run: _PositiveBpRun8616) -> cython.bint:
     """Reconcile the interface when no body plan entries survived."""
     interface_result = reconcile_callee_argument_interface_8616(
         run.project,
@@ -809,27 +842,27 @@ def _reusable_existing_candidate_8616(
     run: _PositiveBpRun8616,
     entry: PositiveBpArgumentPlanEntry8616,
     entry_sp_offset: int | None,
-    existing_args: tuple[object, ...],
+    existing_args: object,
 ) -> structured_c.CVariable | None:
     """Reuse a uniquely matching existing argument when one exists."""
     reusable = tuple(
         existing
-        for existing in existing_args
+        for existing in iter(existing_args)
         if isinstance(existing, structured_c.CVariable)
         and isinstance(existing.variable, SimStackVariable)
-        and machine_bp_offset_for_stack_variable_8616(
+        and operator.eq(machine_bp_offset_for_stack_variable_8616(
             run.codegen, existing.variable
-        )
-        == entry.bp_offset
-        and _candidate_width_8616(existing) == entry.width
+        ), entry.bp_offset)
+        and operator.eq(_candidate_width_8616(existing), entry.width)
         and (
             not isinstance(entry_sp_offset, int)
-            or existing.variable.offset == entry_sp_offset
+            or operator.eq(existing.variable.offset, entry_sp_offset)
         )
     )
     return cast(structured_c.CVariable, reusable[0]) if len(reusable) == 1 else None
 
 
+@cython.ccall
 def _fresh_argument_candidate_8616(
     run: _PositiveBpRun8616,
     entry: PositiveBpArgumentPlanEntry8616,
@@ -849,24 +882,27 @@ def _fresh_argument_candidate_8616(
     )
 
 
+@cython.ccall
 def _desired_candidates_8616(
     run: _PositiveBpRun8616,
     argument_plan: PositiveBpArgumentPlan8616,
-    body_plan_entries: list[PositiveBpArgumentPlanEntry8616],
-    existing_args: tuple[object, ...],
+    body_plan_entries: object,
+    existing_args: object,
 ) -> _DesiredInterface8616:
     """Materialize the desired argument list from the completed plan."""
+    candidate: object
+    entry: object
     interface = _DesiredInterface8616()
     body_coordinate_deltas = {
         entry_sp_offset - entry.bp_offset
-        for entry in body_plan_entries
-        for entry_sp_offset in (
+        for entry in iter(body_plan_entries)
+        for entry_sp_offset in iter((
             entry_sp_offset_for_machine_bp_range_8616(
                 run.codegen,
                 entry.bp_offset,
                 entry.width,
             ),
-        )
+        ))
         if isinstance(entry_sp_offset, int)
     }
     body_coordinate_delta = (
@@ -893,9 +929,9 @@ def _desired_candidates_8616(
             candidate = _fresh_argument_candidate_8616(run, entry, entry_sp_offset)
         variable = cast(SimStackVariable, candidate.variable)
         run.changed |= (
-            variable.size != entry.materialized_width
-            or variable.name != entry.name
-            or candidate.variable_type != entry.argument_type
+            operator.ne(variable.size, entry.materialized_width)
+            or operator.ne(variable.name, entry.name)
+            or operator.ne(candidate.variable_type, entry.argument_type)
         )
         variable.size = entry.materialized_width
         variable.name = entry.name
@@ -907,11 +943,14 @@ def _desired_candidates_8616(
     return interface
 
 
+@cython.ccall
 def _apply_authoritative_argument_names_8616(
     interface: _DesiredInterface8616,
     authoritative_prototype: SimTypeFunction,
 ) -> None:
     """Overlay authoritative prototype names onto the desired surface."""
+    candidate: object
+    index: object
     authoritative_names = tuple(authoritative_prototype.arg_names or ())
     for index, candidate in enumerate(interface.desired):
         if index >= len(authoritative_names):
@@ -922,12 +961,13 @@ def _apply_authoritative_argument_names_8616(
             interface.desired_names[index] = authoritative_name
 
 
+@cython.ccall
 def _positive_bp_source_types_8616(
-    authoritative_prototype: SimTypeFunction | None,
-    preserve_existing_types: bool,
+    authoritative_prototype: object,
+    preserve_existing_types: cython.bint,
     current_prototype: object,
     argument_plan: PositiveBpArgumentPlan8616,
-    desired: list[structured_c.CVariable],
+    desired: object,
 ) -> list[SimType]:
     """Pick the source argument types for the rebuilt prototype."""
     if authoritative_prototype is not None:
@@ -936,18 +976,23 @@ def _positive_bp_source_types_8616(
         current_types = list(current_prototype.args or ())
         return [
             _merge_existing_and_body_argument_type_8616(current_types[index], entry)
-            for index, entry in enumerate(argument_plan.entries)
+            for index, entry in builtins.iter(enumerate(argument_plan.entries))
         ]
-    return [cast(SimType, candidate.variable_type) for candidate in desired]
+    return [cast(SimType, candidate.variable_type) for candidate in iter(desired)]
 
 
+@cython.ccall
 def _publish_selected_projections_8616(
     run: _PositiveBpRun8616,
     interface: _DesiredInterface8616,
-    argument_types: list[SimType],
+    argument_types: object,
     argument_plan: PositiveBpArgumentPlan8616,
 ) -> None:
     """Publish the selected machine-BP projection on each argument."""
+    argument_type: object
+    candidate: object
+    entry: object
+    entry_sp_offset: object
     for candidate, argument_type, entry, entry_sp_offset in zip(
         interface.desired,
         argument_types,
@@ -966,26 +1011,27 @@ def _publish_selected_projections_8616(
         )
 
 
+@cython.ccall
 def _publish_new_prototype_8616(
     run: _PositiveBpRun8616,
     new_prototype: SimTypeFunction,
-) -> bool:
+) -> cython.bint:
     """Install the prototype on the cfunc surfaces and the function."""
+    function: object
     changed = False
     cfunc = run.cfunc
     if (
-        cfunc.functy != new_prototype
+        operator.ne(cfunc.functy, new_prototype)
         or not isinstance(cfunc.functy, SimTypeFunction)
-        or tuple(cfunc.functy.arg_names or ()) != tuple(new_prototype.arg_names or ())
+        or operator.ne(tuple(cfunc.functy.arg_names or ()), tuple(new_prototype.arg_names or ()))
     ):
         cfunc.functy = new_prototype
         changed = True
     try:
         if (
-            cfunc.prototype != new_prototype
+            operator.ne(cfunc.prototype, new_prototype)
             or not isinstance(cfunc.prototype, SimTypeFunction)
-            or tuple(cfunc.prototype.arg_names or ())
-            != tuple(new_prototype.arg_names or ())
+            or operator.ne(tuple(cfunc.prototype.arg_names or ()), tuple(new_prototype.arg_names or ()))
         ):
             cfunc.prototype = new_prototype
             changed = True
@@ -1005,11 +1051,13 @@ def _publish_new_prototype_8616(
     return changed
 
 
+@cython.ccall
 def _prune_stale_stack_arguments_8616(
     run: _PositiveBpRun8616,
-    desired_variables: set[SimStackVariable],
-) -> bool:
+    desired_variables: object,
+) -> cython.bint:
     """Drop stale stack locals displaced by the materialized arguments."""
+    variable: object
     changed = False
     if isinstance(run.variables_in_use, dict):
         for variable in tuple(run.variables_in_use):

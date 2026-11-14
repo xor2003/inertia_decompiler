@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Raw-stage route of the shared SSA CALL-target binder.
 
 Layer: Types/Lowering (staged candidate under
@@ -12,6 +13,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from inertia.ir.core import IRInstr, IRValue
 from inertia.ir.ssa_function import SSAFunctionArtifact
@@ -28,15 +31,17 @@ from .call_target_ssa_contracts import (
     _BoundProducer8616,
     _refuse_8616,
 )
+import operator
+import builtins
 
 
 def _raw_route_producer_8616(
     project: object,
     artifact: SSAFunctionArtifact,
-    caller_addr: int,
-    callsite_addr: int,
-    ssa_block_addr: int,
-    ssa_instr_index: int,
+    caller_addr: cython.longlong,
+    callsite_addr: cython.longlong,
+    ssa_block_addr: cython.longlong,
+    ssa_instr_index: cython.longlong,
     ssa_instr: IRInstr,
 ) -> _BoundProducer8616 | CallTargetBindResult8616:
     """Bind a raw-stage SSA CALL to the registered raw producer.
@@ -46,6 +51,7 @@ def _raw_route_producer_8616(
     block. Requires the SSA artifact to carry no Semantics enrichment: the
     raw producer and the SSA candidate share instruction positions.
     """
+    provenance: object
     raw_artifact = _registered_raw_artifact_8616(
         project,
         caller_addr,
@@ -56,7 +62,7 @@ def _raw_route_producer_8616(
     if isinstance(raw_artifact, CallTargetBindResult8616):
         return raw_artifact
     raw_blocks = tuple(
-        block for block in raw_artifact.blocks if block.addr == ssa_block_addr
+        block for block in iter(raw_artifact.blocks) if operator.eq(block.addr, ssa_block_addr)
     )
     if len(raw_blocks) != 1 or not 0 <= ssa_instr_index < len(
         raw_blocks[0].instrs
@@ -69,7 +75,7 @@ def _raw_route_producer_8616(
         )
     raw_block = raw_blocks[0]
     raw_instr = raw_block.instrs[ssa_instr_index]
-    if raw_instr.op != "CALL" or raw_instr.addr != callsite_addr:
+    if raw_instr.op != "CALL" or operator.ne(raw_instr.addr, callsite_addr):
         return _refuse_8616(
             callsite_addr,
             CallTargetBindVerdict8616.CONFLICT,
@@ -78,9 +84,9 @@ def _raw_route_producer_8616(
         )
     raw_candidates = tuple(
         instruction
-        for block in raw_artifact.blocks
-        for instruction in block.instrs
-        if instruction.op == "CALL" and instruction.addr == callsite_addr
+        for block in iter(raw_artifact.blocks)
+        for instruction in iter(block.instrs)
+        if instruction.op == "CALL" and operator.eq(instruction.addr, callsite_addr)
     )
     if len(raw_candidates) != 1 or raw_candidates[0] is not raw_instr:
         return _refuse_8616(
@@ -115,28 +121,28 @@ def _raw_provenance_failure_8616(
 ) -> CallTargetBindStage8616 | None:
     """Return the first broken SSA-to-raw provenance obligation, or none."""
     if (
-        ssa_instr.op != raw_instr.op
-        or ssa_instr.addr != raw_instr.addr
-        or ssa_instr.size != raw_instr.size
-        or ssa_instr.call_stack_effect != raw_instr.call_stack_effect
+        operator.ne(ssa_instr.op, raw_instr.op)
+        or operator.ne(ssa_instr.addr, raw_instr.addr)
+        or operator.ne(ssa_instr.size, raw_instr.size)
+        or operator.ne(ssa_instr.call_stack_effect, raw_instr.call_stack_effect)
     ):
         return CallTargetBindStage8616.SSA_RAW_OPERAND_MISMATCH
     if ssa_instr.origin is None or raw_instr.origin is None:
         return CallTargetBindStage8616.SSA_ORIGIN_MISSING
-    if ssa_instr.origin != raw_instr.origin:
+    if operator.ne(ssa_instr.origin, raw_instr.origin):
         return CallTargetBindStage8616.SSA_RAW_ORIGIN_MISMATCH
     dst_bound = (ssa_instr.dst is None and raw_instr.dst is None) or (
         ssa_instr.dst is not None
         and raw_instr.dst is not None
         and ssa_value_modulo_version_8616(ssa_instr.dst, raw_instr.dst)
     )
-    if not dst_bound or len(ssa_instr.args) != len(raw_instr.args):
+    if not dst_bound or operator.ne(len(ssa_instr.args), len(raw_instr.args)):
         return CallTargetBindStage8616.SSA_RAW_OPERAND_MISMATCH
     operands_bound = all(
         isinstance(ssa_arg, IRValue)
         and isinstance(raw_arg, IRValue)
         and ssa_value_modulo_version_8616(ssa_arg, raw_arg)
-        for ssa_arg, raw_arg in zip(ssa_instr.args, raw_instr.args, strict=True)
+        for ssa_arg, raw_arg in builtins.iter(zip(ssa_instr.args, raw_instr.args, strict=True))
     )
     if not operands_bound:
         return CallTargetBindStage8616.SSA_RAW_OPERAND_MISMATCH

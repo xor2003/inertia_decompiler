@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Coordinate the named canonical pattern replay over an unknown-entry prefix.
 
 Layer: IR.
@@ -12,6 +13,8 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, replace
 from enum import StrEnum
@@ -28,6 +31,8 @@ from .canonical_patterns import (
 from .core import IRBlock, IRInstr
 from .dead_temporary_normalization import _collect_block_facts, dead_temporary_normalization_producers_8616
 from .real16_path_memory8616 import PathMemory8616
+import dataclasses
+import operator
 
 
 class SelectNormalizationStatus8616(StrEnum):
@@ -37,18 +42,18 @@ class SelectNormalizationStatus8616(StrEnum):
     UNKNOWN_REFUSE = "unknown_refuse"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SelectNormalizationStats8616:
     """SELECT ledger: raw candidates, admitted shapes, replacements and refusals."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SelectNormalizationResult8616:
     """Original or equivalently rewritten block with its complete evidence ledger.
 
@@ -62,25 +67,31 @@ class SelectNormalizationResult8616:
     pattern_steps: tuple[CanonicalPatternStep8616, ...] = ()
 
 
-def _candidate_8616(row: IRInstr) -> bool:
+@cython.ccall
+def _candidate_8616(row: IRInstr) -> cython.bint:
     """Recognize only operation names registered by the scalar owner."""
     return scalar.frozen_dispatch_lookup(scalar._SELECT_BITS_8616, row.op) is not None
 
 
-def _reject_service_8616(row: IRInstr, registers: dict[str, int], memory: PathMemory8616) -> bool:
+@cython.ccall
+def _reject_service_8616(row: IRInstr, registers: object, memory: PathMemory8616) -> cython.bint:
     """Never provide environmental facts to the shared transfer machinery."""
     return False
 
 
+@cython.ccall
 def _rewrite_prefix_8616(
     block: IRBlock,
-    specs: tuple[CanonicalPatternSpec8616, ...],
+    specs: object,
     config: CanonicalPatternConfig8616,
-) -> tuple[IRBlock, int, int, tuple[CanonicalPatternStep8616, ...]]:
+) -> tuple[IRBlock, cython.longlong, cython.longlong, tuple[CanonicalPatternStep8616, ...]]:
     """Replay an unknown-entry prefix, stopping at its first control transfer."""
-    tmps: dict[int, tuple[int, int]] = {}
-    registers: dict[str, tuple[int, int]] = {}
-    instruction_entry: dict[str, tuple[int, int]] = {}
+    index: object
+    row: object
+    spec: object
+    tmps: dict[cython.longlong, tuple[cython.longlong, cython.longlong]] = {}
+    registers: dict[str, tuple[cython.longlong, cython.longlong]] = {}
+    instruction_entry: dict[str, tuple[cython.longlong, cython.longlong]] = {}
     dirty: set[str] = set()
     current_address: int | None = None
     memory = kb.path_memory_tainted_8616()
@@ -91,7 +102,7 @@ def _rewrite_prefix_8616(
         if row.op in {"CJMP", "JMP", "RET"}:
             rows.extend(block.instrs[index:])
             break
-        if row.addr != current_address:
+        if operator.ne(row.addr, current_address):
             current_address = row.addr
             instruction_entry = dict(registers)
             dirty.clear()
@@ -129,7 +140,7 @@ def normalize_selects_8616(
     count as refused candidates. External-root liveness remains the caller's
     responsibility when performing subsequent dead-temporary deletion.
     """
-    raw = sum(_candidate_8616(row) for row in block.instrs)
+    raw = sum(_candidate_8616(row) for row in iter(block.instrs))
     if not raw:
         return SelectNormalizationResult8616(
             block, SelectNormalizationStatus8616.COMPLETE,
@@ -137,13 +148,13 @@ def normalize_selects_8616(
         )
     policy = config if config is not None else canonical_patterns.canonical_pattern_config_8616()
     specs = canonical_patterns.CANONICAL_PATTERN_SPECS_8616
-    active = tuple(spec for spec in specs if spec.name not in policy.disabled)
+    active = tuple(spec for spec in iter(specs) if spec.name not in policy.disabled)
     if not active:
         empty_state = canonical_patterns.CanonicalPatternState8616({}, {})
         steps = tuple(
             canonical_patterns.run_canonical_pattern_8616(spec, row, empty_state, policy)
-            for row in block.instrs if _candidate_8616(row)
-            for spec in specs if spec.candidate(row)
+            for row in iter(block.instrs) if _candidate_8616(row)
+            for spec in iter(specs) if spec.candidate(row)
         )
         return SelectNormalizationResult8616(
             block, SelectNormalizationStatus8616.COMPLETE,
@@ -164,6 +175,7 @@ def normalize_selects_8616(
     )
 
 
+@cython.ccall
 def select_normalization_producers_8616() -> tuple[object, ...]:
     """Bind the shared numeric authority registry after module initialization.
 

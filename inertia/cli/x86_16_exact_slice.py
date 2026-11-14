@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Plan bounded x86-16 exact-slice recovery for CLI fallback lanes.
 
 Layer: CLI/fallback/reporting.
@@ -5,11 +6,15 @@ Responsibility: plan bounded exact-slice fallback addresses without recovering s
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import weakref
 from dataclasses import dataclass
+import dataclasses
+import operator
 
-SAFE_X86_16_SLICE_BASE: int = 0x1000
+SAFE_X86_16_SLICE_BASE: cython.longlong = 0x1000
 
 
 @dataclass(frozen=True)
@@ -18,56 +23,57 @@ class _OriginalAddrRecord:
 
     function_ref: weakref.ReferenceType[object] | None
     strong_function: object | None
-    original_addr: int
+    original_addr: cython.longlong
 
-    def owns(self, function: object) -> bool:
+    def owns(self, function: object) -> cython.bint:
         """Return whether this record belongs to ``function`` rather than a reused id."""
         if self.function_ref is not None:
             return self.function_ref() is function
         return self.strong_function is function
 
 
-_ORIGINAL_ADDR_BY_FUNCTION_ID: dict[int, _OriginalAddrRecord] = {}
+_ORIGINAL_ADDR_BY_FUNCTION_ID: dict[cython.longlong, _OriginalAddrRecord] = {}
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class X86ExactSlicePlan:
     """Address plan for recovering one x86-16 function in a bounded slice."""
 
-    original_start: int
-    original_end: int
-    slice_base: int
+    original_start: cython.longlong
+    original_end: cython.longlong
+    slice_base: cython.longlong
     original_entry: int | None = None
 
     @property
-    def original_semantic_entry(self) -> int:
+    def original_semantic_entry(self) -> cython.longlong:
         """Return the proven function entry within the bounded original region."""
         return self.original_start if self.original_entry is None else self.original_entry
 
     @property
-    def needs_rebased_slice(self) -> bool:
+    def needs_rebased_slice(self) -> cython.bint:
         """Return true when the bounded slice must run at a synthetic base."""
-        return self.slice_base != self.original_start
+        return operator.ne(self.slice_base, self.original_start)
 
     @property
-    def slice_start(self) -> int:
+    def slice_start(self) -> cython.longlong:
         """Start address used inside the bounded recovery project."""
         return self.slice_base
 
     @property
-    def slice_end(self) -> int:
+    def slice_end(self) -> cython.longlong:
         """End address used inside the bounded recovery project."""
         return self.slice_base + max(0, self.original_end - self.original_start)
 
     @property
-    def slice_semantic_entry(self) -> int:
+    def slice_semantic_entry(self) -> cython.longlong:
         """Return the function entry rebased into the bounded recovery project."""
         return self.slice_base + self.original_semantic_entry - self.original_start
 
 
+@cython.ccall
 def plan_x86_16_exact_slice(
-    original_start: int,
-    original_end: int,
+    original_start: cython.longlong,
+    original_end: cython.longlong,
     *,
     original_entry: int | None = None,
 ) -> X86ExactSlicePlan:
@@ -83,10 +89,11 @@ def plan_x86_16_exact_slice(
     )
 
 
+@cython.ccall
 def non_optimized_slice_codegen_policy(
-    arch_name: str | None,
-    slice_plan: X86ExactSlicePlan | None,
-) -> tuple[bool, bool]:
+    arch_name: object,
+    slice_plan: object,
+) -> tuple[cython.bint, cython.bint]:
     """Pick the bounded non-optimized codegen policy for one-function exact slices.
 
     Exact rebased x86-16 slices already carry original-address linkage and now
@@ -100,8 +107,13 @@ def non_optimized_slice_codegen_policy(
     return False, False
 
 
-def function_original_addr(function: object) -> int:
+@cython.ccall
+def function_original_addr(function: object) -> cython.longlong:
     """Return a function's original address, accounting for rebased exact slices."""
+    addr: object
+    info: object
+    info_original_addr: object
+    original_record: object
     original_record = _ORIGINAL_ADDR_BY_FUNCTION_ID.get(id(function))
     if original_record is not None:
         if original_record.owns(function):
@@ -118,8 +130,10 @@ def function_original_addr(function: object) -> int:
     return addr if isinstance(addr, int) else 0
 
 
-def mark_function_original_addr(function: object, original_addr: int) -> None:
+@cython.ccall
+def mark_function_original_addr(function: object, original_addr: cython.longlong) -> None:
     """Attach an original address to a recovered or rebased function object."""
+    info: object
     try:
         function_ref = weakref.ref(function)
         strong_function: object | None = None

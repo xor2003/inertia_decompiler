@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove architectural CALL positions relative to the caller's entry SP.
 
 Layer: Alias.
@@ -10,6 +11,8 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import asdict, dataclass, replace
 from enum import StrEnum
@@ -20,6 +23,8 @@ from inertia.ir.core import IRBlock, IRFunctionArtifact, IRInstr, IRValue, MemSp
 from .segment_stack_restore import _predecessor_map as _predecessor_map
 from .segment_stack_restore import _solve_stack_states, _transfer_block
 from .stack_restore_state import StackRestoreState8616, join_stack_restore_states_8616
+import dataclasses
+import operator
 
 
 class CallStackPositionRefusal8616(StrEnum):
@@ -32,7 +37,7 @@ class CallStackPositionRefusal8616(StrEnum):
     FRAME_MISMATCH = "frame_mismatch"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallStackPosition8616:
     """Exact word-SP offsets at one machine CALL, excluding later cleanup.
 
@@ -42,19 +47,19 @@ class CallStackPosition8616:
     consumes the authenticated body/RET transfer, never caller ADD SP cleanup.
     """
 
-    function_addr: int
-    block_addr: int
-    instruction_index: int
-    callsite_addr: int
-    target_addr: int
-    return_addr: int
-    return_frame_bytes: int
-    caller_before_offset: int
-    callee_entry_offset: int
-    caller_after_offset: int
+    function_addr: cython.longlong
+    block_addr: cython.longlong
+    instruction_index: cython.longlong
+    callsite_addr: cython.longlong
+    target_addr: cython.longlong
+    return_addr: cython.longlong
+    return_frame_bytes: cython.longlong
+    caller_before_offset: cython.longlong
+    callee_entry_offset: cython.longlong
+    caller_after_offset: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallStackPositionResult8616:
     """Closed one-CALL evidence outcome, including refusals without defaults."""
 
@@ -62,27 +67,27 @@ class CallStackPositionResult8616:
     refusal: CallStackPositionRefusal8616 | None
 
     @property
-    def raw_fact_count(self) -> int:
+    def raw_fact_count(self) -> cython.longlong:
         """Account for the one requested CALL position proof."""
         return 1
 
     @property
-    def normalized_fact_count(self) -> int:
+    def normalized_fact_count(self) -> cython.longlong:
         """Retain one exact source occurrence, including invalid requests."""
         return 1
 
     @property
-    def classified_fact_count(self) -> int:
+    def classified_fact_count(self) -> cython.longlong:
         """Count complete source proofs only."""
         return int(self.proof is not None)
 
     @property
-    def materialized_count(self) -> int:
+    def materialized_count(self) -> cython.longlong:
         """Count published Alias proofs, without claiming C materialization."""
         return self.classified_fact_count
 
     @property
-    def failure_count(self) -> int:
+    def failure_count(self) -> cython.longlong:
         """Count explicitly refused source candidates."""
         return int(self.refusal is not None)
 
@@ -99,7 +104,7 @@ class CallStackPositionResult8616:
         }
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _CallObserver:
     """Observe canonical physical preparation without simulating a second SP."""
 
@@ -107,14 +112,18 @@ class _CallObserver:
     caller_before: int | None = None
     callee_entry: int | None = None
 
+    @cython.ccall
     def observe(self, instruction: IRInstr, before: int | None, entry: int | None) -> None:
         """Retain only the requested source occurrence, before CALL transfer."""
         if instruction is self.target:
             self.caller_before, self.callee_entry = before, entry
 
 
+@cython.ccall
 def _call_coordinates(call: IRInstr) -> IRCallStackCoordinates8616 | None:
     """Authenticate frame width and net transfer against current source/body."""
+    coordinates: object
+    effect: object
     effect = call.call_stack_effect
     coordinates = effect.stack_coordinates if effect is not None else None
     if coordinates is None or effect is None:
@@ -122,27 +131,29 @@ def _call_coordinates(call: IRInstr) -> IRCallStackCoordinates8616 | None:
     if (coordinates.source is None or coordinates.return_addr is None
             or coordinates.return_frame_bytes is None):
         return None
-    if (not coordinates.source.matches_call(call) or coordinates.callsite_addr != call.addr
+    if (not coordinates.source.matches_call(call) or operator.ne(coordinates.callsite_addr, call.addr)
             or type(coordinates.target_addr) is not int):
         return None
     target = call.args[0] if call.args else None
     if (isinstance(target, IRValue) and target.space is MemSpace.CONST
-            and target.const != coordinates.target_addr):
+            and operator.ne(target.const, coordinates.target_addr)):
         return None
     if (not coordinates.has_proven_sp_delta or coordinates.net_sp_delta is None
-            or effect.net_stack_delta != coordinates.net_sp_delta):
+            or operator.ne(effect.net_stack_delta, coordinates.net_sp_delta)):
         return None
     return coordinates
 
 
 def _observed_call_positions_8616(
-    artifact: IRFunctionArtifact, block: IRBlock, instruction_index: int, call: IRInstr,
-) -> tuple[int, int] | None:
+    artifact: IRFunctionArtifact, block: IRBlock, instruction_index: cython.longlong, call: IRInstr,
+) -> object:
     """Solve the caller's stack state through one exact CALL instruction."""
+    before: object
+    entry: object
     states = _solve_stack_states(artifact)
     predecessors = _predecessor_map(artifact)
-    incoming = tuple(states[pred] for pred in predecessors[block.addr])
-    if block.addr == artifact.function_addr:
+    incoming = tuple(states[pred] for pred in iter(predecessors[block.addr]))
+    if operator.eq(block.addr, artifact.function_addr):
         incoming = (StackRestoreState8616(0), *incoming)
     if not incoming:
         return None
@@ -158,7 +169,7 @@ def _observed_call_positions_8616(
 
 
 def _stack_probe_helper_position_8616(
-    artifact: IRFunctionArtifact, block: IRBlock, instruction_index: int, call: IRInstr,
+    artifact: IRFunctionArtifact, block: IRBlock, instruction_index: cython.longlong, call: IRInstr,
 ) -> CallStackPosition8616 | None:
     """Prove one CALL position against a byte-matched stack-probe helper.
 
@@ -170,6 +181,14 @@ def _stack_probe_helper_position_8616(
     generic refusal. Semantics imports stay function-local: the helper census
     is needed only on the refused path.
     """
+    candidate: object
+    coordinates: object
+    effect: object
+    evidence: object
+    expected_frame: object
+    positions: object
+    project: object
+    source: object
     from inertia.semantics.call_stack_allocation import (
         collect_call_stack_allocation_candidates_8616,
     )
@@ -182,7 +201,7 @@ def _stack_probe_helper_position_8616(
     coordinates = effect.stack_coordinates if effect is not None else None
     source = coordinates.source if coordinates is not None else None
     project = source.project if source is not None else None
-    if coordinates is None or project is None or coordinates.callsite_addr != call.addr:
+    if coordinates is None or project is None or operator.ne(coordinates.callsite_addr, call.addr):
         return None
     if (type(coordinates.return_addr) is not int
             or type(coordinates.return_frame_bytes) is not int
@@ -195,7 +214,7 @@ def _stack_probe_helper_position_8616(
         if evidence is not None
         else None
     )
-    if expected_frame is None or expected_frame != coordinates.return_frame_bytes:
+    if expected_frame is None or operator.ne(expected_frame, coordinates.return_frame_bytes):
         return None
     # The lifted CALL target is a TMP expression; bind the coordinate's
     # already-authenticated target into a CONST view so the semantics census
@@ -204,7 +223,7 @@ def _stack_probe_helper_position_8616(
         call, args=(IRValue(MemSpace.CONST, const=coordinates.target_addr, size=4),))
     bound_artifact = replace(artifact, blocks=(replace(
         block, instrs=tuple(bound_call if entry is call else entry
-                            for entry in block.instrs)),))
+                            for entry in iter(block.instrs))),))
     candidate = collect_call_stack_allocation_candidates_8616(
         project, bound_artifact).get(call.addr)
     allocation = candidate.allocation_size if candidate is not None else None
@@ -214,7 +233,7 @@ def _stack_probe_helper_position_8616(
     if positions is None:
         return None
     before, entry = positions
-    if (entry - before) & 0xffff != (-coordinates.return_frame_bytes) & 0xffff:
+    if operator.ne((entry - before) & 0xffff, (-coordinates.return_frame_bytes) & 0xffff):
         return None
     return CallStackPosition8616(
         artifact.function_addr, block.addr, instruction_index, call.addr,
@@ -224,7 +243,7 @@ def _stack_probe_helper_position_8616(
 
 
 def prove_call_stack_position_8616(
-    artifact: IRFunctionArtifact, block_addr: int, instruction_index: int,
+    artifact: IRFunctionArtifact, block_addr: cython.longlong, instruction_index: cython.longlong,
 ) -> CallStackPositionResult8616:
     """Reproduce one CALL position from current CFG, preparation, and callee.
 
@@ -234,11 +253,15 @@ def prove_call_stack_position_8616(
     Byte-matched stack-probe helpers carry their returning effect in the
     caller's proven allocation request instead of a body transfer.
     """
-    blocks = {block.addr: block for block in artifact.blocks}
-    if (artifact.refusals or len(blocks) != len(artifact.blocks)
+    block: object
+    coordinates: object
+    helper_position: object
+    positions: object
+    blocks = {block.addr: block for block in iter(artifact.blocks)}
+    if (artifact.refusals or operator.ne(len(blocks), len(artifact.blocks))
             or artifact.function_addr not in blocks
-            or any(block.refusals for block in artifact.blocks)
-            or any(successor not in blocks for block in artifact.blocks for successor in block.successor_addrs)):
+            or any(block.refusals for block in iter(artifact.blocks))
+            or any(successor not in blocks for block in iter(artifact.blocks) for successor in iter(block.successor_addrs))):
         return CallStackPositionResult8616(None, CallStackPositionRefusal8616.INVALID_SOURCE)
     block = blocks.get(block_addr)
     if block is None or not 0 <= instruction_index < len(block.instrs):
@@ -259,7 +282,7 @@ def prove_call_stack_position_8616(
     if positions is None:
         return CallStackPositionResult8616(None, CallStackPositionRefusal8616.UNKNOWN_POSITION)
     before, entry = positions
-    if (entry - before) & 0xffff != (-coordinates.return_frame_bytes) & 0xffff:
+    if operator.ne((entry - before) & 0xffff, (-coordinates.return_frame_bytes) & 0xffff):
         return CallStackPositionResult8616(None, CallStackPositionRefusal8616.FRAME_MISMATCH)
     proof = CallStackPosition8616(
         artifact.function_addr, block_addr, instruction_index, call.addr, coordinates.target_addr,
@@ -269,6 +292,7 @@ def prove_call_stack_position_8616(
     return CallStackPositionResult8616(proof, None)
 
 
-def call_stack_position_is_current_8616(artifact: IRFunctionArtifact, proof: CallStackPosition8616) -> bool:
+@cython.ccall
+def call_stack_position_is_current_8616(artifact: IRFunctionArtifact, proof: CallStackPosition8616) -> cython.bint:
     """Require fresh source/callee reproduction before consuming a saved proof."""
-    return prove_call_stack_position_8616(artifact, proof.block_addr, proof.instruction_index).proof == proof
+    return operator.eq(prove_call_stack_position_8616(artifact, proof.block_addr, proof.instruction_index).proof, proof)

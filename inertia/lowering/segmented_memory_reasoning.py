@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Types/Lowering.
 
 Responsibility: reason about segment-register evidence before conservative segmented-memory lowering.
@@ -17,6 +18,7 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import cython
 
 import logging
 import os
@@ -37,6 +39,8 @@ from .real_mode_linear import (
 from .segmented_memory_lowering import apply_runtime_segment_lowering_8616
 from .stack_c_ast_matching import _match_bp_stack_dereference_8616
 from .stack_lowering_from_facts import _canonical_stack_offset_8616, _stack_object_name
+import dataclasses
+import operator
 
 if TYPE_CHECKING:
     pass
@@ -44,12 +48,14 @@ if TYPE_CHECKING:
 logger: logging.Logger = logging.getLogger(__name__)
 
 
+@cython.ccall
 def _publish_segmented_memory_evidence_8616(
     codegen: object,
-    summary: dict[str, dict[str, dict[str, object]]],
-    lowering: dict[str, dict[str, object]],
+    summary: object,
+    lowering: object,
 ) -> None:
     """Publish segment evidence across the dynamic third-party angr codegen/project boundary."""
+    project: object
     # Dynamic codegen boundary: segmented-memory evidence is optional metadata on angr codegen.
     typing.cast(typing.Any, codegen)._inertia_segmented_memory_summary = summary
     # Dynamic codegen boundary: lowering policy is optional metadata on angr codegen.
@@ -64,6 +70,10 @@ def _publish_segmented_memory_evidence_8616(
 
 def _typed_ir_address_spaces_8616(codegen: object) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Read typed IR address-space summaries from the dynamic angr codegen boundary."""
+    address_counts: object
+    artifact: object
+    stable_counts: object
+    summary: object
     artifact = getattr(codegen, "_inertia_vex_ir_artifact", None)
     summary = getattr(artifact, "summary", None)
     if not isinstance(summary, dict):
@@ -74,7 +84,7 @@ def _typed_ir_address_spaces_8616(codegen: object) -> tuple[tuple[str, ...], tup
         address_counts = {}
     if not isinstance(stable_counts, dict):
         stable_counts = {}
-    return tuple(sorted(str(key) for key in address_counts)), tuple(sorted(str(key) for key in stable_counts))
+    return tuple(sorted(str(key) for key in iter(address_counts))), tuple(sorted(str(key) for key in iter(stable_counts)))
 
 
 class _SegmentedMemoryCodegenSurface8616(Protocol):
@@ -90,6 +100,7 @@ class _SegmentedMemoryProjectSurface8616(Protocol):
     _inertia_decompiler_stage: object
 
 
+@cython.ccall
 def _segment_assignments_or_empty_8616(codegen: object) -> object:
     """Return attached segment-assignment evidence or ``()`` when the codegen attachment is absent."""
     try:
@@ -99,6 +110,7 @@ def _segment_assignments_or_empty_8616(codegen: object) -> object:
     return assignments or ()
 
 
+@cython.ccall
 def _project_c_target_value_8616(project: object) -> object:
     """Return the attached generated-C target policy or the ``portable-flat`` fallback when absent."""
     try:
@@ -107,6 +119,7 @@ def _project_c_target_value_8616(project: object) -> object:
         return "portable-flat"
 
 
+@cython.ccall
 def _project_decompiler_stage_value_8616(project: object) -> object:
     """Return the attached decompiler-stage marker or ``""`` when the project attachment is absent."""
     try:
@@ -126,15 +139,15 @@ class SegmentRegister(Enum):
     GS = "gs"  # GS register (80386+)
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class SegmentAssignment:
     """A segment register assignment at a location."""
 
     segment_reg: SegmentRegister
     value: int | None  # Literal value if known (e.g., 0x1000)
-    source: str  # "literal", "register", "parameter", "return_value"
-    location: str  # Where (function name, line number, etc.)
-    confidence: float  # 0.0-1.0
+    source: object  # "literal", "register", "parameter", "return_value"
+    location: object  # Where (function name, line number, etc.)
+    confidence: cython.double  # 0.0-1.0
 
     def __repr__(self) -> str:
         """Render the segment assignment and its recorded confidence."""
@@ -142,18 +155,19 @@ class SegmentAssignment:
         return f"{self.segment_reg.name}={val_str} ({self.confidence:.1%})"
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class SegmentAssociation:
     """Association of a segment with a specific memory space or purpose."""
 
     segment_reg: SegmentRegister
-    associated_space: str  # "code", "data", "stack", "unknown", etc.
+    associated_space: object  # "code", "data", "stack", "unknown", etc.
     classification: str = "unknown"
-    evidence_count: int = 0
-    assignments: set[SegmentAssignment] = field(default_factory=set)
-    stability: float = 0.5  # 0.0-1.0: how stable across functions
-    known_values: set[int] = field(default_factory=set)
+    evidence_count: cython.longlong = 0
+    assignments: object = field(default_factory=set)
+    stability: cython.double = 0.5  # 0.0-1.0: how stable across functions
+    known_values: object = field(default_factory=set)
 
+    @cython.ccall
     def add_evidence(self, assignment: SegmentAssignment) -> None:
         """Add evidence for this association."""
         self.assignments.add(assignment)
@@ -172,15 +186,15 @@ class SegmentAssociation:
         )
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class SegmentedPointer:
     """A segmented pointer expression (segment:offset)."""
 
     segment_reg: SegmentRegister
-    offset_expr: str  # Expression for offset part
+    offset_expr: object  # Expression for offset part
     known_base: int | None  # Known segment value if constant
-    element_type: str  # What this points to
-    confidence: float  # 0.0-1.0 based on evidence
+    element_type: object  # What this points to
+    confidence: cython.double  # 0.0-1.0 based on evidence
 
     def __repr__(self) -> str:
         """Render the far-pointer expression using its known or symbolic segment."""
@@ -188,38 +202,39 @@ class SegmentedPointer:
         return f"MK_FP({seg_str}, {self.offset_expr})"
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class FarPointerRecovery:
     """Recovered far pointer structure."""
 
-    name: str
-    pointer_id: int
+    name: object
+    pointer_id: cython.longlong
     segment_part: SegmentedPointer
-    access_count: int = 0
-    functions: set[str] = field(default_factory=set)
+    access_count: cython.longlong = 0
+    functions: object = field(default_factory=set)
 
     def __repr__(self) -> str:
         """Render the recovered far pointer and its function-use count."""
         return f"FarPtr({self.name}: {self.segment_part}, {len(self.functions)} functions)"
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class SegmentLoweringDecision:
     """Conservative lowering policy for one segment register."""
 
     segment_reg: SegmentRegister
-    classification: str
-    associated_space: str
-    confidence: float
-    allow_linear_lowering: bool
-    allow_object_lowering: bool
-    reason: str
+    classification: object
+    associated_space: object
+    confidence: cython.double
+    allow_linear_lowering: cython.bint
+    allow_object_lowering: cython.bint
+    reason: object
 
-    def requires_explicit_segmented_form(self) -> bool:
+    def requires_explicit_segmented_form(self) -> cython.bint:
         """Return whether lowering must keep an explicit segmented-memory form."""
         return not self.allow_linear_lowering
 
 
+@cython.cclass
 class SegmentedAddressClassifier:
     """Classifies segmented memory accesses.
 
@@ -230,27 +245,31 @@ class SegmentedAddressClassifier:
     """
 
     @staticmethod
-    def _segment_set(segment_accesses: list[SegmentAssignment]) -> set[SegmentRegister]:
-        return {s.segment_reg for s in segment_accesses}
+    def _segment_set(segment_accesses: object) -> set[SegmentRegister]:
+        return {s.segment_reg for s in iter(segment_accesses)}
 
     @staticmethod
-    def _value_set(segment_accesses: list[SegmentAssignment]) -> set[int]:
-        return {s.value for s in segment_accesses if s.value is not None}
+    def _value_set(segment_accesses: object) -> set[cython.longlong]:
+        return {s.value for s in iter(segment_accesses) if s.value is not None}
 
-    def _is_over_associated(self, segment_accesses: list[SegmentAssignment]) -> bool:
+    @cython.ccall
+    def _is_over_associated(self, segment_accesses: object) -> cython.bint:
         segments = self._segment_set(segment_accesses)
         values = self._value_set(segment_accesses)
         return len(segments) > 1 or len(values) > 1
 
-    def _is_const(self, segment_accesses: list[SegmentAssignment]) -> bool:
+    @cython.ccall
+    def _is_const(self, segment_accesses: object) -> cython.bint:
         values = self._value_set(segment_accesses)
         return len(values) == 1
 
-    def _is_single(self, segment_accesses: list[SegmentAssignment]) -> bool:
+    @cython.ccall
+    def _is_single(self, segment_accesses: object) -> cython.bint:
         segments = self._segment_set(segment_accesses)
         return len(segments) == 1
 
-    def classify(self, segment_accesses: list[SegmentAssignment]) -> str:
+    @cython.ccall
+    def classify(self, segment_accesses: object) -> str:
         """Classify segmented address pattern.
 
         Args:
@@ -271,6 +290,7 @@ class SegmentedAddressClassifier:
         return "unknown"
 
 
+@cython.cclass
 class SegmentAssociationAnalyzer:
     """Analyzes and builds segment associations across functions.
 
@@ -281,22 +301,31 @@ class SegmentAssociationAnalyzer:
     4. Detect far pointer patterns
     5. Score confidence based on consistency
     """
+    associations = cython.declare(dict, visibility = "public")
+    classifier = cython.declare(object, visibility = "public")
+    far_pointers = cython.declare(dict, visibility = "public")
+    next_pointer_id = cython.declare(cython.longlong, visibility = "public")
 
     def __init__(self) -> None:
         """Initialize empty segment association state."""
         self.associations: dict[SegmentRegister, SegmentAssociation] = {
-            seg: SegmentAssociation(segment_reg=seg, associated_space="unknown") for seg in SegmentRegister
+            seg: SegmentAssociation(segment_reg=seg, associated_space="unknown") for seg in iter(SegmentRegister)
         }
         self.far_pointers: dict[str, FarPointerRecovery] = {}
         self.next_pointer_id = 0
         self.classifier = SegmentedAddressClassifier()
 
-    def analyze(self, assignments: list[SegmentAssignment]) -> None:
+    @cython.ccall
+    def analyze(self, assignments: object) -> None:
         """Analyze segment assignments and build associations.
 
         Args:
             assignments: List of SegmentAssignment throughout binary
         """
+        access: object
+        accesses: object
+        assignment: object
+        segment_reg: object
         # Group by segment register
         by_segment: dict[SegmentRegister, list[SegmentAssignment]] = {}
         for assignment in assignments:
@@ -309,9 +338,9 @@ class SegmentAssociationAnalyzer:
             classification = self.classifier.classify(accesses)
 
             # Infer associated space based on pattern
-            if segment_reg == SegmentRegister.CS:
+            if operator.eq(segment_reg, SegmentRegister.CS):
                 associated_space = "code"
-            elif segment_reg == SegmentRegister.SS:
+            elif operator.eq(segment_reg, SegmentRegister.SS):
                 associated_space = "stack"
             elif segment_reg in (SegmentRegister.DS, SegmentRegister.ES):
                 associated_space = "data"
@@ -327,7 +356,8 @@ class SegmentAssociationAnalyzer:
 
             assoc.stability = self._classification_stability(classification, assoc.evidence_count)
 
-    def detect_far_pointers(self, pointer_expressions: list[SegmentedPointer]) -> dict[str, FarPointerRecovery]:
+    @cython.ccall
+    def detect_far_pointers(self, pointer_expressions: object) -> object:
         """Detect and recover far pointer patterns.
 
         Args:
@@ -336,6 +366,7 @@ class SegmentAssociationAnalyzer:
         Returns:
             Dictionary mapping pointer name to FarPointerRecovery
         """
+        ptr: object
         for ptr in pointer_expressions:
             name = f"far_ptr_{self.next_pointer_id}"
             self.next_pointer_id += 1
@@ -348,15 +379,20 @@ class SegmentAssociationAnalyzer:
 
         return self.far_pointers
 
-    def get_association_confidence(self, segment_reg: SegmentRegister) -> float:
+    @cython.ccall
+    def get_association_confidence(self, segment_reg: SegmentRegister) -> cython.double:
         """Get confidence in a segment's association."""
+        assoc: object
         assoc = self.associations.get(segment_reg)
         if assoc is None:
             return 0.0
         return assoc.stability
 
+    @cython.ccall
     def summarize(self) -> dict[str, dict[str, dict[str, object]]]:
         """Summarize segment associations into stable, over-associated, and unknown buckets."""
+        assoc: object
+        segment_reg: object
         stable: dict[str, dict[str, object]] = {}
         over_associated: dict[str, dict[str, object]] = {}
         unknown: dict[str, dict[str, object]] = {}
@@ -384,6 +420,7 @@ class SegmentAssociationAnalyzer:
             "unknown": unknown,
         }
 
+    @cython.ccall
     def lowering_decision(self, segment_reg: SegmentRegister) -> SegmentLoweringDecision:
         """Return the conservative lowering policy for one segment register."""
         assoc = self.associations[segment_reg]
@@ -445,8 +482,11 @@ class SegmentAssociationAnalyzer:
             reason="unknown association",
         )
 
-    def lowering_summary(self) -> dict[str, dict[str, object]]:
+    @cython.ccall
+    def lowering_summary(self) -> object:
         """Summarize conservative lowering decisions for observed segment registers."""
+        assoc: object
+        segment_reg: object
         summary: dict[str, dict[str, object]] = {}
         for segment_reg, assoc in self.associations.items():
             if assoc.evidence_count == 0:
@@ -463,7 +503,7 @@ class SegmentAssociationAnalyzer:
         return summary
 
     @staticmethod
-    def _classification_stability(classification: str, evidence_count: int) -> float:
+    def _classification_stability(classification: object, evidence_count: cython.longlong) -> cython.double:
         base = min(1.0, 0.5 + (evidence_count * 0.05))
         if classification == "const":
             return min(1.0, base + 0.2)
@@ -474,10 +514,10 @@ class SegmentAssociationAnalyzer:
         return max(0.1, min(0.35, base - 0.2))
 
 
-def _can_lower_ss_address_to_stack_slot_8616(codegen: object, analyzer: SegmentAssociationAnalyzer | None) -> bool:
+def _can_lower_ss_address_to_stack_slot_8616(codegen: object, analyzer: SegmentAssociationAnalyzer | None) -> cython.bint:
     """Decide SS stack-slot lowering from dynamic third-party angr codegen metadata."""
 
-    def _impl() -> bool:
+    def _impl() -> cython.bint:
         """Read optional segment assignments at the dynamic angr codegen boundary."""
         assignments = list(
             cast(tuple[SegmentAssignment, ...], _segment_assignments_or_empty_8616(codegen))
@@ -505,8 +545,13 @@ def _can_lower_ss_address_to_stack_slot_8616(codegen: object, analyzer: SegmentA
     return _impl()
 
 
-def _existing_stack_cvar_for_offset_8616(codegen: object, offset: int) -> object | None:
+@cython.ccall
+def _existing_stack_cvar_for_offset_8616(codegen: object, offset: cython.longlong) -> object | None:
     """Find an existing stack C variable through the dynamic third-party angr codegen boundary."""
+    region: object
+    variables_in_use: object
+    cvar: object
+    variable: object
     variables_in_use = getattr(getattr(codegen, "cfunc", None), "variables_in_use", None)
     if not isinstance(variables_in_use, dict):
         return None
@@ -515,10 +560,10 @@ def _existing_stack_cvar_for_offset_8616(codegen: object, offset: int) -> object
     for variable, cvar in variables_in_use.items():
         if not isinstance(variable, SimStackVariable):
             continue
-        if _canonical_stack_offset_8616(variable.offset) != _canonical_stack_offset_8616(offset):
+        if operator.ne(_canonical_stack_offset_8616(variable.offset), _canonical_stack_offset_8616(offset)):
             continue
         variable_region = variable.region
-        if isinstance(region, int) and isinstance(variable_region, int) and variable_region != region:
+        if isinstance(region, int) and isinstance(variable_region, int) and operator.ne(variable_region, region):
             continue
         return cast(object, cvar)
     return None
@@ -529,6 +574,16 @@ def _recover_stack_slot_from_segmented_operand_8616(node: object, codegen: objec
 
     def _impl() -> object | None:
         """Inspect optional C-AST/codegen attributes at the dynamic angr boundary."""
+        displacement: object
+        existing: object
+        existing_size: object
+        existing_var: object
+        facts: object
+        project: object
+        region: object
+        unified_locals: object
+        variables_in_use: object
+        width_bits: object
         codegen_dynamic = cast(Any, codegen)
         project = getattr(getattr(codegen, "project", None), "arch", None)
         if project is None:
@@ -572,14 +627,16 @@ def _recover_stack_slot_from_segmented_operand_8616(node: object, codegen: objec
     return _impl()
 
 
-def _apply_ss_stack_slot_recovery_8616(codegen: object, analyzer: SegmentAssociationAnalyzer) -> bool:
+def _apply_ss_stack_slot_recovery_8616(codegen: object, analyzer: SegmentAssociationAnalyzer) -> cython.bint:
     """Rewrite SS-segment dereferences to stack slots when the analyzer allows it."""
+    root: object
     if not _can_lower_ss_address_to_stack_slot_8616(codegen, analyzer):
         return False
 
     changed = False
 
     def transform(node: object) -> object:
+        replacement: object
         nonlocal changed
         if not isinstance(node, structured_c.CUnaryOp) or node.op != "Dereference":
             return node
@@ -627,7 +684,7 @@ def _collect_segmented_memory_analysis_8616(codegen: object) -> SegmentAssociati
         typing.cast(typing.Any, codegen)._inertia_segmented_memory_stats = {
             "segment_assignments": len(assignments),
             "associations_built": sum(
-                len(summary[bucket]) for bucket in ("stable", "over_associated", "unknown")
+                len(summary[bucket]) for bucket in iter(("stable", "over_associated", "unknown"))
             ),
             "far_pointers_detected": 0,
         }
@@ -645,8 +702,10 @@ def _collect_segmented_memory_analysis_8616(codegen: object) -> SegmentAssociati
     return analyzer
 
 
-def _apply_segmented_memory_reasoning_8616(codegen: object) -> bool:
+@cython.ccall
+def _apply_segmented_memory_reasoning_8616(codegen: object) -> cython.bint:
     """Run segment association analysis and stage-appropriate AST transformations."""
+    project: object
     analyzer = _collect_segmented_memory_analysis_8616(codegen)
     changed = False
     # Dynamic codegen boundary: angr codegen exposes ``project`` only when fully initialized.
@@ -674,7 +733,8 @@ def _apply_segmented_memory_reasoning_8616(codegen: object) -> bool:
     return changed
 
 
-def apply_x86_16_segmented_memory_reasoning(codegen: object) -> bool:
+@cython.ccall
+def apply_x86_16_segmented_memory_reasoning(codegen: object) -> cython.bint:
     """Apply segmented memory association reasoning to an angr codegen object.
 
     This is the entry point for Phase 3 decompiler framework integration.
@@ -692,7 +752,8 @@ def apply_x86_16_segmented_memory_reasoning(codegen: object) -> bool:
     return _run_segmented_memory_pass_8616(codegen, analysis_only=False)
 
 
-def analyze_x86_16_segmented_memory(codegen: object) -> bool:
+@cython.ccall
+def analyze_x86_16_segmented_memory(codegen: object) -> cython.bint:
     """Publish association metadata only; never transform the structured C AST.
 
     Structuring uses this explicit analysis-only entry regardless of the ambient
@@ -702,7 +763,8 @@ def analyze_x86_16_segmented_memory(codegen: object) -> bool:
     return _run_segmented_memory_pass_8616(codegen, analysis_only=True)
 
 
-def _run_segmented_memory_pass_8616(codegen: object, *, analysis_only: bool) -> bool:
+@cython.ccall
+def _run_segmented_memory_pass_8616(codegen: object, *, analysis_only: cython.bint) -> cython.bint:
     """Preserve the full pass entry and diagnostic contract for either execution mode."""
     # Dynamic codegen boundary: angr codegen exposes ``cfunc`` only after structuring produces a C function.
     if getattr(codegen, "cfunc", None) is None:
@@ -723,7 +785,8 @@ def _run_segmented_memory_pass_8616(codegen: object, *, analysis_only: bool) -> 
         return False
 
 
-def _lower_stable_ss_stack_accesses_8616(codegen: object) -> bool:
+@cython.ccall
+def _lower_stable_ss_stack_accesses_8616(codegen: object) -> cython.bint:
     """Analysis-only postprocess pass: collect segment evidence, skip transformation.
 
     The actual SS stack lowering runs later in cli_decompilation.py rewrite passes
@@ -732,7 +795,7 @@ def _lower_stable_ss_stack_accesses_8616(codegen: object) -> bool:
     return _apply_segmented_memory_analysis_only_8616(codegen)
 
 
-def _apply_segmented_memory_analysis_only_8616(codegen: object) -> bool:
+def _apply_segmented_memory_analysis_only_8616(codegen: object) -> cython.bint:
     """Run segment association analysis at the dynamic codegen boundary without transforming codegen."""
     if getattr(codegen, "cfunc", None) is None:
         return False
@@ -752,7 +815,7 @@ def _apply_segmented_memory_analysis_only_8616(codegen: object) -> bool:
             typing.cast(typing.Any, codegen)._inertia_segmented_memory_stats = {
                 "segment_assignments": len(assignments),
                 "associations_built": sum(
-                    len(summary.get(bucket, ())) for bucket in ("stable", "over_associated", "unknown")
+                    len(summary.get(bucket, ())) for bucket in iter(("stable", "over_associated", "unknown"))
                 ),
                 "far_pointers_detected": 0,
             }
@@ -767,6 +830,7 @@ def _apply_segmented_memory_analysis_only_8616(codegen: object) -> bool:
         return False
 
 
+@cython.ccall
 def _empty_segment_summary_8616() -> dict[str, dict[str, dict[str, object]]]:
     """Return the empty segmented-memory evidence summary shape."""
     return {"stable": {}, "over_associated": {}, "unknown": {}}

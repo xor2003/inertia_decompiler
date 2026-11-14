@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery metadata.
 
 Responsibility: record optional condition traces for diagnostics of recovered conditions.
@@ -11,6 +12,7 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import cython
 
 import logging
 import os
@@ -24,12 +26,16 @@ from inertia.ir.condition_ir import ConditionIR
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 from inertia.structuring.condition_rendering import render_condition_ir_8616, render_condition_ir_native_8616
 from inertia.validation.tail_validation_fingerprint import _expr_fingerprint
+import operator
 
 log: logging.Logger = logging.getLogger(__name__)
 
 
+@cython.ccall
 def _current_original_func_addr_8616(project: object, codegen: object) -> int | None:
     """Resolve the current function address through the dynamic third-party angr metadata boundary."""
+    cfunc: object
+    delta: object
     cfunc = getattr(codegen, "cfunc", None)
     func_addr = getattr(cfunc, "addr", None) if cfunc is not None else None
     if not isinstance(func_addr, int):
@@ -40,8 +46,10 @@ def _current_original_func_addr_8616(project: object, codegen: object) -> int | 
     return func_addr
 
 
-def _condition_trace_enabled_8616(project: object, codegen: object) -> bool:
+@cython.ccall
+def _condition_trace_enabled_8616(project: object, codegen: object) -> cython.bint:
     """Return whether optional condition tracing is enabled for this dynamic codegen boundary."""
+    target_text: object
     if not os.environ.get("INERTIA_DEBUG_CONDITION_TRACE"):
         return False
     target_text = os.environ.get("INERTIA_DEBUG_CONDITION_TRACE_ADDR")
@@ -50,8 +58,10 @@ def _condition_trace_enabled_8616(project: object, codegen: object) -> bool:
     return not isinstance(target_addr, int) or current_addr == target_addr
 
 
-def _condition_trace_store_8616(codegen: object) -> dict[tuple[int, int], dict[str, object]]:
+@cython.ccall
+def _condition_trace_store_8616(codegen: object) -> object:
     """Return the mutable condition trace store attached at the dynamic codegen boundary."""
+    store: object
     store = getattr(codegen, "_inertia_condition_trace", None)
     if not isinstance(store, dict):
         store = {}
@@ -60,12 +70,15 @@ def _condition_trace_store_8616(codegen: object) -> dict[tuple[int, int], dict[s
     return store
 
 
-def _condition_trace_key_8616(ins_addr: int, block_addr: int) -> tuple[int, int]:
+@cython.ccall
+def _condition_trace_key_8616(ins_addr: cython.longlong, block_addr: cython.longlong) -> tuple[cython.longlong, cython.longlong]:
     return (int(ins_addr), int(block_addr))
 
 
-def _condition_id_for_key_8616(codegen: object, key: tuple[int, int]) -> int:
+@cython.ccall
+def _condition_id_for_key_8616(codegen: object, key: object) -> cython.longlong:
     """Return a stable diagnostic condition id for a trace key."""
+    condition_id: object
     store = _condition_trace_store_8616(codegen)
     if key not in store:
         store[key] = {
@@ -77,7 +90,8 @@ def _condition_id_for_key_8616(codegen: object, key: tuple[int, int]) -> int:
     return int(condition_id) if isinstance(condition_id, int) else 0
 
 
-def _render_c_expr_8616(expr: object) -> str | None:
+@cython.ccall
+def _render_c_expr_8616(expr: object) -> object:
     """Render a C expression for diagnostics without changing recovered semantics."""
     if expr is None:
         return None
@@ -87,8 +101,12 @@ def _render_c_expr_8616(expr: object) -> str | None:
         return str(expr)
 
 
-def _node_condition_key_8616(node: object) -> tuple[int, int] | None:
+@cython.ccall
+def _node_condition_key_8616(node: object) -> object:
     """Read condition origin tags from the dynamic third-party angr C-AST boundary."""
+    block_addr: object
+    ins_addr: object
+    tags: object
     tags = getattr(node, "tags", None)
     if not isinstance(tags, dict):
         return None
@@ -99,16 +117,20 @@ def _node_condition_key_8616(node: object) -> tuple[int, int] | None:
     return _condition_trace_key_8616(ins_addr, block_addr)
 
 
+@cython.ccall
 def _condition_rows_for_node_8616(
     node: object,
-) -> list[tuple[tuple[int, int], object, str]]:
+) -> object:
     """Return the tagged condition rows contributed by one C-AST node.
 
     Dynamic boundary: third-party angr C-AST variants carry either condition
     pairs or an optional condition field. Only conditions with observed source
     tags contribute rows; absent fields produce no condition evidence.
     """
-    rows: list[tuple[tuple[int, int], object, str]] = []
+    cond: object
+    key: object
+    _body: object
+    rows: list[tuple[tuple[cython.longlong, cython.longlong], object, str]] = []
     if isinstance(node, CIfElse):
         condition_pairs = cast(
             tuple[tuple[object, object], ...],
@@ -133,8 +155,14 @@ def _condition_rows_for_node_8616(
     return rows
 
 
-def _iter_condition_nodes_8616(codegen: object) -> Iterable[tuple[tuple[int, int], object, str]]:
+@cython.ccall
+def _iter_condition_nodes_8616(codegen: object) -> Iterable[tuple[tuple[cython.longlong, cython.longlong], object, str]]:
     """Iterate condition-bearing nodes through the dynamic third-party angr C-AST boundary."""
+    cfunc: object
+    root: object
+    value: object
+    attr: object
+    node: object
     cfunc = getattr(codegen, "cfunc", None)
     root = None
     for attr in ("body", "statements", "stmt"):
@@ -146,14 +174,16 @@ def _iter_condition_nodes_8616(codegen: object) -> Iterable[tuple[tuple[int, int
         root = cfunc
     if root is None:
         return ()
-    rows: list[tuple[tuple[int, int], object, str]] = []
+    rows: list[tuple[tuple[cython.longlong, cython.longlong], object, str]] = []
     for node in _iter_c_nodes_deep_8616(root):
         rows.extend(_condition_rows_for_node_8616(node))
     return tuple(rows)
 
 
-def record_classified_conditions_trace_8616(project: object, codegen: object, conditions: list[ConditionIR]) -> None:
+@cython.ccall
+def record_classified_conditions_trace_8616(project: object, codegen: object, conditions: object) -> None:
     """Record classified condition IR in the optional diagnostic trace store."""
+    cond: object
     if not _condition_trace_enabled_8616(project, codegen):
         return
     store = _condition_trace_store_8616(codegen)
@@ -173,7 +203,8 @@ def record_classified_conditions_trace_8616(project: object, codegen: object, co
         entry["condition_op"] = cond.op
 
 
-def record_materialized_condition_trace_8616(project: object, codegen: object, key: tuple[int, int], expr: object) -> None:
+@cython.ccall
+def record_materialized_condition_trace_8616(project: object, codegen: object, key: object, expr: object) -> None:
     """Record the C-AST expression materialized for a classified condition."""
     if not _condition_trace_enabled_8616(project, codegen):
         return
@@ -184,8 +215,12 @@ def record_materialized_condition_trace_8616(project: object, codegen: object, k
     entry["materialized_hash"] = _expr_fingerprint(expr, project)
 
 
-def record_ast_condition_trace_8616(project: object, codegen: object, *, stage: str) -> None:
+@cython.ccall
+def record_ast_condition_trace_8616(project: object, codegen: object, *, stage: object) -> None:
     """Record condition expressions currently present in the structured C-AST."""
+    cond: object
+    key: object
+    owner: object
     if not _condition_trace_enabled_8616(project, codegen):
         return
     store = _condition_trace_store_8616(codegen)
@@ -197,10 +232,12 @@ def record_ast_condition_trace_8616(project: object, codegen: object, *, stage: 
         entry[f"{stage}_owner"] = owner
 
 
+@cython.ccall
 def record_tail_validation_condition_trace_8616(
-    project: object, codegen: object, validation: dict[str, object] | None
+    project: object, codegen: object, validation: object
 ) -> None:
     """Record the tail-validation verdict seen by the optional condition trace."""
+    entry: object
     if not _condition_trace_enabled_8616(project, codegen):
         return
     if not isinstance(validation, dict):
@@ -211,8 +248,12 @@ def record_tail_validation_condition_trace_8616(
         entry["validator_seen"] = summary
 
 
-def materialized_condition_drift_detected_8616(project: object, codegen: object) -> bool:
+@cython.ccall
+def materialized_condition_drift_detected_8616(project: object, codegen: object) -> cython.bint:
     """Report whether materialized condition expressions drifted before emitted C."""
+    emitted: object
+    materialized: object
+    entry: object
     if not _condition_trace_enabled_8616(project, codegen):
         return False
     store = _condition_trace_store_8616(codegen)
@@ -220,7 +261,7 @@ def materialized_condition_drift_detected_8616(project: object, codegen: object)
     for entry in store.values():
         materialized = entry.get("materialized_hash")
         emitted = entry.get("emitted_c_hash")
-        if isinstance(materialized, str) and isinstance(emitted, str) and materialized != emitted:
+        if isinstance(materialized, str) and isinstance(emitted, str) and operator.ne(materialized, emitted):
             drifted.append(
                 {
                     "condition_id": entry.get("condition_id"),
@@ -237,8 +278,10 @@ def materialized_condition_drift_detected_8616(project: object, codegen: object)
     return bool(drifted)
 
 
-def dump_condition_trace_8616(project: object, codegen: object, *, label: str) -> None:
+@cython.ccall
+def dump_condition_trace_8616(project: object, codegen: object, *, label: object) -> None:
     """Emit the optional condition trace to logs for diagnostics."""
+    key: object
     if not _condition_trace_enabled_8616(project, codegen):
         return
     store = _condition_trace_store_8616(codegen)

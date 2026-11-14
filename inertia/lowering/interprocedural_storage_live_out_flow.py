@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove and materialize one direct segmented-memory live-out use.
 
 Layer: Types/Lowering.
@@ -11,6 +12,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import replace
 
@@ -56,18 +59,22 @@ from .interprocedural_storage_return_defs import (
     CallOutputDefinitionVerdict8616,
     resolve_storage_call_output_definitions_8616,
 )
+import operator
 
 
+@cython.ccall
 def collect_callsite_memory_live_out_8616(
     aliases: TerminalMemoryAliasEvidence8616,
     artifact: SSAFunctionArtifact,
     site: CallsiteStorageTrials8616,
-    targets: tuple[int, ...],
-    conditions: tuple[ConditionIR, ...],
+    targets: object,
+    conditions: object,
     *,
     project: object | None = None,
 ) -> FunctionMemoryLiveOutCollection8616:
     """Collect all direct memory views for one exact caller, atomically refusing conflicts."""
+    alias_output: object
+    output_view: object
     facts: list[MemoryLiveOutUseFact8616] = []
     trials: list[StorageTrial8616] = []
     raw = normalized = materialized = 0
@@ -120,28 +127,32 @@ def collect_callsite_memory_live_out_8616(
     )
 
 
-def _value_matches_8616(value: object, storage: StorageIdentity8616, use: StorageUseEvidence8616) -> bool:
+@cython.ccall
+def _value_matches_8616(value: object, storage: StorageIdentity8616, use: StorageUseEvidence8616) -> cython.bint:
     """Match one canonical condition operand to one exact direct LOAD."""
+    address: object
     address = storage.address
     return bool(
         isinstance(value, IRValue)
         and address is not None
         and value.space is address.space
-        and value.offset == address.offset
-        and value.size == storage.width
-        and value.memory_access_insn == use.instr_addr
+        and operator.eq(value.offset, address.offset)
+        and operator.eq(value.size, storage.width)
+        and operator.eq(value.memory_access_insn, use.instr_addr)
     )
 
 
 def _condition_for_use_8616(
-    conditions: tuple[ConditionIR, ...], storage: StorageIdentity8616, use: StorageUseEvidence8616,
+    conditions: object, storage: StorageIdentity8616, use: StorageUseEvidence8616,
 ) -> tuple[ConditionIR | None, StorageTrialSignedness8616 | None, MemoryLiveOutFailureKind8616 | None]:
     """Select one canonical direct-memory condition and its exact sign class."""
+    signedness: object
+    condition: object
     matching: list[ConditionIR] = []
     for condition in conditions:
-        operands = (condition.lhs,) if condition.is_zero_test else (condition.lhs, condition.rhs)
-        if condition.width_bits == storage.width * 8 and sum(
-            _value_matches_8616(operand, storage, use) for operand in operands
+        operands = tuple((condition.lhs,)) if condition.is_zero_test else tuple((condition.lhs, condition.rhs))
+        if operator.eq(condition.width_bits, storage.width * 8) and sum(
+            _value_matches_8616(operand, storage, use) for operand in iter(operands)
         ) == 1 and condition not in matching:
             matching.append(condition)
     if not matching:
@@ -163,35 +174,42 @@ def _condition_for_use_8616(
     return condition, signedness, None
 
 
-type _ConditionCandidate8616 = tuple[
+_ConditionCandidate8616 = typing.TypeAliasType("_ConditionCandidate8616", tuple[
     StorageUseEvidence8616,
     ConditionIR | None,
     StorageTrialSignedness8616 | None,
     MemoryLiveOutFailureKind8616 | None,
-]
-type _ProvenCondition8616 = tuple[StorageUseEvidence8616, ConditionIR, StorageTrialSignedness8616]
+])
+_ProvenCondition8616 = typing.TypeAliasType("_ProvenCondition8616", tuple[StorageUseEvidence8616, ConditionIR, StorageTrialSignedness8616])
 
 
+@cython.ccall
 def _select_clean_condition_8616(
-    candidates: tuple[_ConditionCandidate8616, ...],
+    candidates: object,
 ) -> _ProvenCondition8616 | MemoryLiveOutFailureKind8616:
     """Require all reachable uses to have compatible explicit condition types."""
+    condition: object
+    failure: object
+    signedness: object
+    use: object
     typed: list[_ProvenCondition8616] = []
     for use, condition, signedness, failure in candidates:
         if failure is not None or condition is None or signedness is None:
             return failure or MemoryLiveOutFailureKind8616.CONDITION_UNSUPPORTED
         typed.append((use, condition, signedness))
-    if len({item[2] for item in typed}) != 1:
+    if len({item[2] for item in iter(typed)}) != 1:
         return MemoryLiveOutFailureKind8616.SIGNEDNESS_CONFLICT
     return typed[0]
 
 
+@cython.ccall
 def _condition_candidates_8616(
-    uses: tuple[StorageUseEvidence8616, ...],
-    conditions: tuple[ConditionIR, ...],
+    uses: object,
+    conditions: object,
     storage: StorageIdentity8616,
 ) -> tuple[_ConditionCandidate8616, ...]:
     """Activate only exact memory uses attributed to typed conditions."""
+    use: object
     candidates: list[_ConditionCandidate8616] = []
     for use in uses:
         condition, signedness, failure = _condition_for_use_8616(conditions, storage, use)
@@ -203,15 +221,18 @@ def _condition_candidates_8616(
 def materialize_memory_live_out_candidate_8616(
     artifact: SSAFunctionArtifact,
     output_view: TerminalMemoryOutputViewFact8616,
-    caller_addr: int,
-    callee_addr: int,
-    callsite_addr: int,
-    accepted_target_addrs: tuple[int, ...],
-    conditions: tuple[ConditionIR, ...],
+    caller_addr: cython.longlong,
+    callee_addr: cython.longlong,
+    callsite_addr: cython.longlong,
+    accepted_target_addrs: object,
+    conditions: object,
     *,
     project: object | None = None,
 ) -> MemoryLiveOutCandidateResult8616:
     """Materialize one activated direct-memory output candidate or refuse."""
+    evidence: object
+    path_failure: object
+    provenance: object
     alias_output = output_view.alias_output
     output = alias_output.terminal_output
     if not output_view.complete:
@@ -226,7 +247,7 @@ def materialize_memory_live_out_candidate_8616(
             access.instr_addr,
             callsite_addr,
         )
-        for access in output_view.accesses
+        for access in iter(output_view.accesses)
     )
     condition_candidates = _condition_candidates_8616(uses, conditions, storage)
     if not condition_candidates:
@@ -269,16 +290,16 @@ def materialize_memory_live_out_candidate_8616(
                 candidate[0],
             ),
         )
-        for candidate in condition_candidates
+        for candidate in iter(condition_candidates)
     )
     path_failure = memory_live_out_path_failure_8616(
-        tuple(path for _candidate, path in paths)
+        tuple(path for _candidate, path in iter(paths))
     )
     if path_failure is not None:
         return MemoryLiveOutCandidateResult8616(True, failure=path_failure)
     clean_candidates = tuple(
         candidate
-        for candidate, path in paths
+        for candidate, path in iter(paths)
         if path.verdict is MemoryLiveOutPathVerdict8616.CLEAN
     )
     if not clean_candidates:

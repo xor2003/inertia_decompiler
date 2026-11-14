@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Preserve architectural segment outputs in native SSA reaching definitions.
 
 Layer: IR/native SSA adapter.
@@ -35,6 +36,8 @@ no ABI contract for the unknown destination.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -59,38 +62,47 @@ from angr.knowledge_plugins.key_definitions.constants import ObservationPoint, O
 
 from .native_stack_anchor import native_stack_anchor_8616
 from .segment_state_transfer import SEGMENT_REGISTERS
+import dataclasses
+import operator
+import builtins
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NativeSegmentLiveOutReport8616:
     """Native boundary-use census split by retained output kind."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    stack_output_count: int = 0
-    unknown_exit_output_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    stack_output_count: cython.longlong = 0
+    unknown_exit_output_count: cython.longlong = 0
 
 
+@cython.cclass
 class _StackLoadAnchorViewer8616:
     """Find proven negative entry-SP origins inside native memory-load addresses."""
+    _viewer = cython.declare(object, visibility = "public")
+    has_stack_load = cython.declare(cython.bint, visibility = "public")
+    load_depth = cython.declare(cython.longlong, visibility = "public")
 
     def __init__(self) -> None:
         """Start one source-expression inspection with no load context."""
         self._viewer: AILBlockViewer = AILBlockViewer()
         self._viewer.expr_handlers[Load] = self._handle_Load
         self._viewer.expr_handlers[UnaryOp] = self._handle_UnaryOp
-        self.load_depth: int = 0
-        self.has_stack_load: bool = False
+        self.load_depth: cython.longlong = 0
+        self.has_stack_load: cython.bint = False
 
+    @cython.ccall
     def walk_expression(self, expression: Expression) -> None:
         """Visit one expression using the native walker's complete child schema."""
         self._viewer.walk_expression(expression)
 
+    @cython.ccall
     def _handle_Load(
-        self, expr_idx: int, expr: Load, stmt_idx: int,
+        self, expr_idx: cython.longlong, expr: Load, stmt_idx: cython.longlong,
         stmt: Statement | None, block: Block | None,
     ) -> None:
         """Restrict provenance inspection to actual native load addresses."""
@@ -100,29 +112,35 @@ class _StackLoadAnchorViewer8616:
         finally:
             self.load_depth -= 1
 
+    @cython.ccall
     def _handle_UnaryOp(
-        self, expr_idx: int, expr: UnaryOp, stmt_idx: int,
+        self, expr_idx: cython.longlong, expr: UnaryOp, stmt_idx: cython.longlong,
         stmt: Statement | None, block: Block | None,
     ) -> None:
         """Consume the frontend's coordinate tag, never apparent local offsets."""
+        anchor: object
         anchor = native_stack_anchor_8616(expr.tags)
         if self.load_depth and anchor is not None and anchor.entry_sp_offset < 0:
             self.has_stack_load = True
         self._viewer._handle_UnaryOp(expr_idx, expr, stmt_idx, stmt, block)
 
 
-def _stack_output_ids_8616(analysis: SReachingDefinitions) -> frozenset[int]:
+@cython.ccall
+def _stack_output_ids_8616(analysis: SReachingDefinitions) -> frozenset[cython.longlong]:
     """Find remaining stack-backed GP definitions without inventing save pairs."""
+    graph: object
+    block: object
+    statement: object
     graph = analysis.func_graph
     if graph is None:
         return frozenset()
     arch = analysis.project.arch
     frame_offsets = {arch.sp_offset, arch.bp_offset, arch.ip_offset}
     offsets = {
-        reg.vex_offset for reg in arch.register_list
+        reg.vex_offset for reg in iter(arch.register_list)
         if reg.general_purpose and reg.vex_offset not in frame_offsets
     }
-    candidates: set[int] = set()
+    candidates: set[cython.longlong] = set()
     for block in graph:
         for statement in block.statements:
             if not isinstance(statement, Assignment):
@@ -130,7 +148,7 @@ def _stack_output_ids_8616(analysis: SReachingDefinitions) -> frozenset[int]:
             destination = statement.dst
             if not isinstance(destination, VirtualVariable):
                 continue
-            if destination.category != VirtualVariableCategory.REGISTER or destination.oident not in offsets:
+            if operator.ne(destination.category, VirtualVariableCategory.REGISTER) or destination.oident not in offsets:
                 continue
             viewer = _StackLoadAnchorViewer8616()
             viewer.walk_expression(statement.src)
@@ -145,15 +163,15 @@ class _NativeSegmentBoundary8616(Protocol):
     _inertia_segment_live_out_report_8616: NativeSegmentLiveOutReport8616
 
 
-def _unmodeled_exit_8616(graph: nx.DiGraph, block: Block) -> bool:
+def _unmodeled_exit_8616(graph: nx.DiGraph, block: Block) -> cython.bint:
     """Whether a terminator transition lacks a matching graph successor."""
     successors = tuple(graph.successors(block))
-    if not successors or any(not successor.statements for successor in successors):
+    if not successors or any(not successor.statements for successor in iter(successors)):
         # A missing terminal or an empty successor supplies no dead-output
         # evidence. Observe the last represented instruction before the gap.
         return True
     terminal = block.statements[-1]
-    targets: tuple[tuple[Expression | None, int | None], ...]
+    targets: object
     if isinstance(terminal, Jump):
         targets = ((terminal.target, terminal.target_idx),)
     elif isinstance(terminal, ConditionalJump):
@@ -165,21 +183,23 @@ def _unmodeled_exit_8616(graph: nx.DiGraph, block: Block) -> bool:
         # No modeled control exit: with no successor there is no callee or
         # caller evidence proving the reaching definitions dead.
         return False
-    successor_keys = {(successor.addr, successor.idx) for successor in successors}
+    successor_keys = {(successor.addr, successor.idx) for successor in iter(successors)}
     return any(
         not isinstance(target, Const) or (target.value_int, target_idx) not in successor_keys
-        for target, target_idx in targets
+        for target, target_idx in iter(targets)
     )
 
 
+@cython.ccall
 def _return_output_ids_8616(
     analysis: SReachingDefinitions,
-    registers: dict[int, dict[int, int]],
-    stack_outputs: frozenset[int],
-) -> tuple[set[int], int]:
+    registers: object,
+    stack_outputs: object,
+) -> tuple[set[cython.longlong], cython.longlong]:
     """Select existing segment and unresolved stack-backed Return outputs."""
+    name: object
     outputs = {
-        varid for views in registers.values() for varid in views.values()
+        varid for views in builtins.iter(registers.values()) for varid in builtins.iter(views.values())
         if varid in stack_outputs
     }
     stack_count = len(outputs)
@@ -190,8 +210,10 @@ def _return_output_ids_8616(
     return outputs, stack_count
 
 
-def _boundary_observation_points_8616(graph: nx.DiGraph) -> list[ObservationPoint]:
+@cython.ccall
+def _boundary_observation_points_8616(graph: nx.DiGraph) -> object:
     """Observe Returns and exits without exhaustive modeled successors."""
+    block: object
     points: list[ObservationPoint] = []
     for block in graph:
         if not block.statements:
@@ -201,12 +223,18 @@ def _boundary_observation_points_8616(graph: nx.DiGraph) -> list[ObservationPoin
     return points
 
 
+@cython.ccall
 def preserve_native_segment_live_outs_8616(analysis: SReachingDefinitions) -> NativeSegmentLiveOutReport8616:
     """Retain reaching segments, stack outputs and unmodeled-exit registers."""
+    graph: object
+    _: object
+    key: object
+    registers: object
+    variable_id: object
     graph = analysis.func_graph
     if analysis.project.arch.name != "86_16" or analysis.func is None or graph is None:
         return NativeSegmentLiveOutReport8616()
-    blocks = {(block.addr, block.idx): block for block in graph}
+    blocks = {(block.addr, block.idx): block for block in iter(graph)}
     points = _boundary_observation_points_8616(graph)
     if not points:
         return NativeSegmentLiveOutReport8616()
@@ -227,7 +255,7 @@ def preserve_native_segment_live_outs_8616(analysis: SReachingDefinitions) -> Na
             outputs, reaching_stack_count = _return_output_ids_8616(analysis, registers, stack_outputs)
             stack_count += reaching_stack_count
         else:
-            outputs = {varid for views in registers.values() for varid in views.values()}
+            outputs = {varid for views in builtins.iter(registers.values()) for varid in builtins.iter(views.values())}
             unknown_count += len(outputs)
         for variable_id in outputs:
             if (None, location) not in analysis.model.all_vvar_uses[variable_id]:

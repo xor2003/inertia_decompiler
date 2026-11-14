@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Authenticated selector geometry for every native instruction fetch.
 
 Layer: frontend x86_16.
@@ -6,11 +7,14 @@ CS window and conservative A20 limits. Source/native byte identity is an
 independent required binding supplied by the caller, never inferred here.
 """
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
 
 from .control_transfer_geometry import _fetch_fits
+import dataclasses
 
 
 class FetchVerdict8616(StrEnum):
@@ -19,22 +23,23 @@ class FetchVerdict8616(StrEnum):
     REFUSED = "refused"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class InstructionFetchCheck8616:
     """One instruction's extent checked under its incoming numeric CS."""
-    addr: int
-    size: int
+    addr: cython.longlong
+    size: cython.longlong
     cs: int | None
     verdict: FetchVerdict8616
-    detail: str
+    detail: object
 
 
+@cython.ccall
 def check_instruction_fetch_8616(
-    addr: int, encoded: bytes | None, known_cs: int | None,
+    addr: cython.longlong, encoded: object, known_cs: int | None,
 ) -> InstructionFetchCheck8616:
     """Refuse missing bytes, unknown CS, crossing its window or A20 ambiguity."""
+    detail: object
     size = 0 if encoded is None else len(encoded)
-    detail: str | None
     if type(known_cs) is not int or not 0 <= known_cs <= 0xFFFF:
         detail = "cs_unbound"
     else:

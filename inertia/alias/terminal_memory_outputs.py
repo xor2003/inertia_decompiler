@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify exact terminal-memory outputs into segmented Alias owners.
 
 Layer: Alias.
@@ -11,6 +12,8 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -23,6 +26,8 @@ from inertia.semantics.terminal_memory_output_contracts import (
 
 from .alias_model_impl import AliasStorageFacts, alias_facts_for_ir_address_8616
 from .storage_fact_join import SegmentedAliasRange8616, build_segmented_alias_range_8616
+import dataclasses
+import operator
 
 
 class TerminalMemoryAliasDisposition8616(StrEnum):
@@ -42,18 +47,18 @@ class TerminalMemoryAliasFailure8616(StrEnum):
     CROSSING_OVERLAP = "crossing_overlap"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalMemoryAliasStats8616:
     """Closed evidence accounting for terminal-memory Alias classification."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every Semantics fact has one retained Alias outcome."""
         return (
             self.raw_fact_count
@@ -64,7 +69,7 @@ class TerminalMemoryAliasStats8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalMemoryAliasFact8616:
     """One exact Semantics output, its Alias range, and maximal owner."""
 
@@ -79,59 +84,60 @@ class TerminalMemoryAliasFact8616:
         return self.terminal_output.key
 
     @property
-    def is_owner(self) -> bool:
+    def is_owner(self) -> cython.bint:
         """Return whether this fact is the canonical maximal range."""
         return self.disposition is TerminalMemoryAliasDisposition8616.OWNER
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether output, storage, and ownership remain coherent."""
         address = self.terminal_output.address
         storage_matches = bool(
             self.terminal_output.complete
-            and self.storage_range.addresses == (address,)
+            and operator.eq(self.storage_range.addresses, (address,))
             and self.storage_range.space is address.space
-            and self.storage_range.offset == address.offset
-            and self.storage_range.size == address.size
+            and operator.eq(self.storage_range.offset, address.offset)
+            and operator.eq(self.storage_range.size, address.size)
         )
         owner_matches = self.owner_range.contains(self.storage_range)
         disposition_matches = (
-            self.storage_range == self.owner_range
+            operator.eq(self.storage_range, self.owner_range)
             if self.is_owner
-            else self.storage_range != self.owner_range
+            else operator.ne(self.storage_range, self.owner_range)
         )
         return storage_matches and owner_matches and disposition_matches
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalMemoryAliasEvidence8616:
     """Complete Alias ownership facts or one atomic typed refusal."""
 
-    function_addr: int
-    facts: tuple[TerminalMemoryAliasFact8616, ...]
+    function_addr: cython.longlong
+    facts: object
     failure: TerminalMemoryAliasFailure8616 | None
     stats: TerminalMemoryAliasStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every input has one coherent retained owner."""
         return (
             self.failure is None
             and self.stats.complete
-            and all(fact.complete for fact in self.facts)
+            and all(fact.complete for fact in iter(self.facts))
         )
 
     @property
     def canonical_facts(self) -> tuple[TerminalMemoryAliasFact8616, ...]:
         """Return deterministic unique maximal output facts for Lowering."""
-        return tuple(fact for fact in self.facts if fact.is_owner)
+        return tuple(fact for fact in iter(self.facts) if fact.is_owner)
 
 
+@cython.ccall
 def _refused_8616(
-    function_addr: int,
+    function_addr: cython.longlong,
     failure: TerminalMemoryAliasFailure8616,
-    raw_count: int,
-    normalized_count: int = 0,
+    raw_count: cython.longlong,
+    normalized_count: cython.longlong = 0,
 ) -> TerminalMemoryAliasEvidence8616:
     """Build one atomic Alias refusal without publishing partial facts."""
     return TerminalMemoryAliasEvidence8616(
@@ -146,10 +152,12 @@ def _refused_8616(
     )
 
 
+@cython.ccall
 def _storage_range_8616(
     output: TerminalMemoryOutputFact8616,
 ) -> tuple[SegmentedAliasRange8616 | None, TerminalMemoryAliasFailure8616 | None]:
     """Build one exact segmented Alias range from a Semantics output."""
+    storage_range: object
     storage = alias_facts_for_ir_address_8616(output.address)
     if not isinstance(storage, AliasStorageFacts):
         return None, TerminalMemoryAliasFailure8616.STORAGE_FACT_UNAVAILABLE
@@ -163,6 +171,12 @@ def classify_terminal_memory_output_aliases_8616(
     evidence: TerminalMemoryOutputEvidence8616,
 ) -> TerminalMemoryAliasEvidence8616:
     """Classify nested exact outputs while refusing crossing Alias views."""
+    failure: object
+    storage_range: object
+    index: object
+    left: object
+    output: object
+    right: object
     raw_count = max(evidence.stats.raw_fact_count, len(evidence.facts))
     if not evidence.complete:
         return _refused_8616(
@@ -177,7 +191,7 @@ def classify_terminal_memory_output_aliases_8616(
             key=lambda fact: (fact.key[0].value, fact.key[1], fact.key[2]),
         )
     )
-    if len({output.key for output in ordered_outputs}) != len(ordered_outputs):
+    if operator.ne(len({output.key for output in iter(ordered_outputs)}), len(ordered_outputs)):
         return _refused_8616(
             evidence.function_addr,
             TerminalMemoryAliasFailure8616.DUPLICATE_STORAGE,
@@ -207,11 +221,11 @@ def classify_terminal_memory_output_aliases_8616(
 
     facts: list[TerminalMemoryAliasFact8616] = []
     for output, storage_range in zip(ordered_outputs, ranges, strict=True):
-        containers = tuple(candidate for candidate in ranges if candidate.contains(storage_range))
+        containers = tuple(candidate for candidate in iter(ranges) if candidate.contains(storage_range))
         owner = max(containers, key=lambda candidate: candidate.size)
         disposition = (
             TerminalMemoryAliasDisposition8616.OWNER
-            if owner == storage_range
+            if operator.eq(owner, storage_range)
             else TerminalMemoryAliasDisposition8616.SUBVIEW
         )
         facts.append(TerminalMemoryAliasFact8616(output, storage_range, owner, disposition))

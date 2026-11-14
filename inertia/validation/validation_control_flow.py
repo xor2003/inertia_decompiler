@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Validate structured control-flow reachability without repairing output.
 
 Layer: Tail validation.
@@ -13,6 +14,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import itertools
 import logging
@@ -54,6 +57,9 @@ from .validation_goto_target_identity import (
     GotoTargetIdentityReason8616,
     goto_target_identity_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -93,13 +99,13 @@ class GotoTargetIdentityIssueKind8616(StrEnum):
     UNPROVEN_TARGET_IDENTITY = "unproven-target-identity"
 
 
-@dataclass(frozen=True, order=True, slots=True)
+@dataclasses.dataclass(frozen=True, order=True, )
 class ControlFlowIssue8616:
     """One unreachable or unproven adjacent guarded body."""
 
     kind: ControlFlowIssueKind8616
-    sequence_index: int
-    statement_index: int
+    sequence_index: cython.longlong
+    statement_index: cython.longlong
 
     def token(self) -> str:
         """Return a deterministic AST-location fingerprint."""
@@ -109,16 +115,16 @@ class ControlFlowIssue8616:
         )
 
 
-@dataclass(frozen=True, order=True, slots=True)
+@dataclasses.dataclass(frozen=True, order=True, )
 class LoopBranchGuardIssue8616:
     """One final loop-branch guard contradiction for exact JCC evidence."""
 
     kind: LoopBranchGuardIssueKind8616
-    jcc_addr: int
-    block_addr: int
-    body_target: int
-    false_target: int
-    match_count: int = 0
+    jcc_addr: cython.longlong
+    block_addr: cython.longlong
+    body_target: cython.longlong
+    false_target: cython.longlong
+    match_count: cython.longlong = 0
 
     def token(self) -> str:
         """Return a deterministic binary-evidence fingerprint."""
@@ -129,7 +135,7 @@ class LoopBranchGuardIssue8616:
         )
 
 
-@dataclass(frozen=True, order=True, slots=True)
+@dataclasses.dataclass(frozen=True, order=True, )
 class GotoTargetIdentityIssue8616:
     """One CGoto whose target identity could not be proven structurally.
 
@@ -140,53 +146,53 @@ class GotoTargetIdentityIssue8616:
     """
 
     kind: GotoTargetIdentityIssueKind8616
-    node_index: int
-    reasons: tuple[GotoTargetIdentityReason8616, ...]
+    node_index: cython.longlong
+    reasons: object
 
     def token(self) -> str:
         """Return a deterministic AST-location and reason fingerprint."""
-        reason_text = ",".join(reason.value for reason in self.reasons)
+        reason_text = ",".join(reason.value for reason in iter(self.reasons))
         return (
             f"goto-target:{self.kind.value}:node={self.node_index}:"
             f"reasons={reason_text}"
         )
 
 
-type ControlFlowValidationIssue8616 = (
+ControlFlowValidationIssue8616 = typing.TypeAliasType("ControlFlowValidationIssue8616", (
     BranchConditionIssue8616
     | ControlFlowIssue8616
     | GotoTargetIdentityIssue8616
     | LoopBranchGuardIssue8616
     | ControlFlowObligationIssue8616
-)
+))
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ControlFlowValidationReport8616:
     """Closed evidence-loop counters and structured reachability failures."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
     issues: tuple[ControlFlowValidationIssue8616, ...] = ()
 
     @property
-    def failure_count(self) -> int:
+    def failure_count(self) -> cython.longlong:
         """Return the number of unreachable or unproven guard bodies."""
         return len(self.issues)
 
     @property
-    def passed(self) -> bool:
+    def passed(self) -> cython.bint:
         """Return whether every classified adjacent guard remains reachable."""
         return (
             self.failure_count == 0
-            and self.classified_fact_count == self.materialized_count
+            and operator.eq(self.classified_fact_count, self.materialized_count)
         )
 
     def issue_tokens(self) -> tuple[str, ...]:
         """Return stable issue fingerprints for tail-validation summaries."""
-        return tuple(issue.token() for issue in self.issues)
+        return tuple(issue.token() for issue in iter(self.issues))
 
     def unproven_goto_target_tokens(self) -> tuple[str, ...]:
         """Return tokens for CGoto targets whose identity stayed unproven.
@@ -197,7 +203,7 @@ class ControlFlowValidationReport8616:
         """
         return tuple(
             issue.token()
-            for issue in self.issues
+            for issue in iter(self.issues)
             if isinstance(issue, GotoTargetIdentityIssue8616)
         )
 
@@ -213,23 +219,23 @@ class ControlFlowValidationReport8616:
         }
 
 
-def _body_has_executable_statement_8616(body: object) -> bool:
+def _body_has_executable_statement_8616(body: object) -> cython.bint:
     """Return whether a guarded body contains at least one C statement."""
     if body is None:
         return False
     if isinstance(body, CStatements):
         return any(
             _body_has_executable_statement_8616(statement)
-            for statement in body.statements
+            for statement in iter(body.statements)
         )
     return True
 
 
-def _condition_is_repeatable_8616(condition: object) -> bool:
+def _condition_is_repeatable_8616(condition: object) -> cython.bint:
     """Refuse equivalence reasoning when evaluating a condition can mutate state."""
     return not any(
         isinstance(node, (CAssignment, CFunctionCall))
-        for node in _iter_c_nodes_deep_8616(condition)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(condition))
     )
 
 
@@ -239,6 +245,7 @@ class _TaggedAstNode8616(Protocol):
     tags: Mapping[str, object] | None
 
 
+@cython.ccall
 def _ast_tags_8616(node: object) -> Mapping[str, object]:
     """Read optional tags at the third-party angr C AST boundary."""
     typed_node = cast(_TaggedAstNode8616, node)
@@ -249,12 +256,15 @@ def _ast_tags_8616(node: object) -> Mapping[str, object]:
     return tags if isinstance(tags, Mapping) else {}
 
 
+@cython.ccall
 def _node_ins_addr_8616(node: object) -> int | None:
     """Return one C AST node's exact instruction anchor when available."""
+    ins_addr: object
     ins_addr = _ast_tags_8616(node).get("ins_addr")
     return ins_addr if isinstance(ins_addr, int) else None
 
 
+@cython.ccall
 def _break_guard_condition_8616(node: object) -> object | None:
     """Return the condition for supported final C break-guard shapes."""
     if isinstance(node, CIfBreak):
@@ -278,14 +288,14 @@ def _break_guard_condition_8616(node: object) -> object | None:
 def _loop_guards_for_fact_8616(
     ast_index: ControlFlowAstIndex8616,
     fact: LoopBranchGuardFact8616,
-) -> tuple[CForLoop | CWhileLoop | CDoWhileLoop, ...]:
+) -> object:
     """Select tagged loop headers by exact target evidence when available."""
-    tagged: tuple[CForLoop | CWhileLoop | CDoWhileLoop, ...] = (
+    tagged: object = (
         ast_index.loop_guards(fact.jcc_addr)
     )
     target_matched = tuple(
         loop
-        for loop in tagged
+        for loop in iter(tagged)
         if ast_index.subtree_contains_instruction(loop.body, fact.body_target)
         and not ast_index.subtree_contains_instruction(
             loop.body,
@@ -298,13 +308,15 @@ def _loop_guards_for_fact_8616(
         return tagged
     return tuple(
         loop
-        for loop in tagged
+        for loop in iter(tagged)
         if _loop_matches_branch_region_8616(ast_index, loop, fact)
     )
 
 
-def _loop_branch_fact_is_valid_8616(fact: LoopBranchGuardFact8616) -> bool:
+@cython.ccall
+def _loop_branch_fact_is_valid_8616(fact: LoopBranchGuardFact8616) -> cython.bint:
     """Return whether one Structuring fact has exact representable identities."""
+    inverted: object
     if not (
         fact.jcc_addr >= 0
         and fact.block_addr >= 0
@@ -312,7 +324,7 @@ def _loop_branch_fact_is_valid_8616(fact: LoopBranchGuardFact8616) -> bool:
         and fact.body_target >= 0
         and fact.fallthrough_target > fact.jcc_addr
         and fact.false_target >= 0
-        and fact.body_target != fact.false_target
+        and operator.ne(fact.body_target, fact.false_target)
         and bool(fact.decoded_condition_fingerprint)
         and bool(fact.guard_condition_fingerprint)
     ):
@@ -326,11 +338,12 @@ def _loop_branch_fact_is_valid_8616(fact: LoopBranchGuardFact8616) -> bool:
     inverted = invert_condition_fingerprint_string_8616(decoded)
     return (
         inverted is not None
-        and _normalize_condition_fingerprint_8616(inverted) == guard
+        and operator.eq(_normalize_condition_fingerprint_8616(inverted), guard)
     )
 
 
-def _normalize_condition_fingerprint_8616(value: str) -> str:
+@cython.ccall
+def _normalize_condition_fingerprint_8616(value: object) -> str:
     """Return the IR-canonical condition fingerprint used for exact joins."""
     return str(
         normalize_condition_fingerprint_algebraic_8616(
@@ -341,12 +354,13 @@ def _normalize_condition_fingerprint_8616(value: str) -> str:
     )
 
 
+@cython.ccall
 def _condition_fingerprint_matches_8616(
     condition: object,
-    expected_fingerprint: str,
+    expected_fingerprint: object,
     condition_fingerprint: Callable[[object], str],
-    condition_fingerprint_normalizer: Callable[[str], str] | None,
-) -> bool:
+    condition_fingerprint_normalizer: object,
+) -> cython.bint:
     """Match one AST condition, including C scalar truth-value shorthand."""
     actual = _normalize_condition_fingerprint_8616(
         condition_fingerprint(condition)
@@ -375,7 +389,7 @@ def _loop_matches_branch_region_8616(
     ast_index: ControlFlowAstIndex8616,
     loop: CForLoop | CWhileLoop | CDoWhileLoop,
     fact: LoopBranchGuardFact8616,
-) -> bool:
+) -> cython.bint:
     """Join one loop to the proven JCC region without guessing lost tags."""
     if ast_index.subtree_contains_instruction(loop.body, fact.false_target):
         return False
@@ -388,15 +402,18 @@ def _loop_matches_branch_region_8616(
     return any(
         anchor is not None
         and fact.block_addr <= anchor <= fact.jcc_addr
-        for anchor in header_anchors
+        for anchor in iter(header_anchors)
     )
 
 
+@cython.ccall
 def _semantic_fingerprint_pair_8616(
     fact: LoopBranchGuardFact8616,
-    condition_ir_fingerprint: Callable[[ConditionIR], str | None] | None,
-) -> tuple[str, str] | None:
+    condition_ir_fingerprint: object,
+) -> object:
     """Prefer inverted typed-IR fingerprints when the fact carries condition IR."""
+    inverted: object
+    materialized: object
     decoded_fingerprint = fact.decoded_condition_fingerprint
     guard_fingerprint = fact.guard_condition_fingerprint
     if fact.condition_ir is not None and condition_ir_fingerprint is not None:
@@ -411,16 +428,17 @@ def _semantic_fingerprint_pair_8616(
     return decoded_fingerprint, guard_fingerprint
 
 
+@cython.ccall
 def _semantic_guard_matches_8616(
     candidate: object,
-    expected: str,
+    expected: object,
     fact: LoopBranchGuardFact8616,
     condition_fingerprint: Callable[[object], str],
     condition_fingerprint_normalizer: Callable[[str], str] | None,
-    condition_storage_matcher: Callable[[ConditionIR, object, bool], bool] | None,
+    condition_storage_matcher: object,
     *,
-    inverted: bool,
-) -> bool:
+    inverted: cython.bint,
+) -> cython.bint:
     """Use typed storage views only when ordinary identity is insufficient."""
     if _condition_fingerprint_matches_8616(
         candidate, expected, condition_fingerprint, condition_fingerprint_normalizer,
@@ -442,14 +460,18 @@ def _semantic_loop_branch_guards_8616(
     condition_storage_matcher: Callable[[ConditionIR, object, bool], bool] | None = None,
 ) -> tuple[object, ...]:
     """Join an untagged folded guard by exact condition and CFG evidence."""
+    guard_condition: object
+    pair: object
+    loop: object
+    node: object
     pair = _semantic_fingerprint_pair_8616(fact, condition_ir_fingerprint)
     if pair is None:
         return ()
     decoded_fingerprint, guard_fingerprint = pair
     guards: list[object] = []
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
 
-    def matches(candidate: object, expected: str, *, inverted: bool) -> bool:
+    def matches(candidate: object, expected: object, *, inverted: cython.bint) -> cython.bint:
         """Dispatch to fingerprint or typed-storage equivalence."""
         return _semantic_guard_matches_8616(
             candidate,
@@ -482,8 +504,13 @@ def _semantic_loop_branch_guards_8616(
 
 def _adjacent_guard_sequence_issues_8616(
     ast_index: ControlFlowAstIndex8616,
-) -> tuple[int, int, int, int, list[ControlFlowValidationIssue8616]]:
+) -> tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong, list[ControlFlowValidationIssue8616]]:
     """Count and report adjacent ``if/break`` + ``if`` duplicate-guard pairs."""
+    first: object
+    second: object
+    sequence: object
+    sequence_index: object
+    statement_index: object
     raw_fact_count = 0
     normalized_fact_count = 0
     classified_fact_count = 0
@@ -491,7 +518,7 @@ def _adjacent_guard_sequence_issues_8616(
     issues: list[ControlFlowValidationIssue8616] = []
     sequences = (
         node
-        for node in ast_index.nodes
+        for node in iter(ast_index.nodes)
         if isinstance(node, CStatements)
     )
     for sequence_index, sequence in enumerate(sequences):
@@ -542,9 +569,10 @@ def _adjacent_guard_sequence_issues_8616(
     )
 
 
+@cython.ccall
 def _goto_target_identity_evidence_8616(
     ast_index: ControlFlowAstIndex8616,
-) -> tuple[int, int, int, int, list[ControlFlowValidationIssue8616]]:
+) -> tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong, list[ControlFlowValidationIssue8616]]:
     """Classify every CGoto target identity, refusing unproven ones.
 
     Each CGoto is one raw fact; the typed identity owner either materializes
@@ -553,6 +581,8 @@ def _goto_target_identity_evidence_8616(
     ``materialized_count`` so ``passed`` can never certify an unknown
     computed-goto target as equal to anything, including itself.
     """
+    node: object
+    node_index: object
     raw_fact_count = 0
     normalized_fact_count = 0
     classified_fact_count = 0
@@ -584,11 +614,12 @@ def _goto_target_identity_evidence_8616(
     )
 
 
+@cython.ccall
 def _loop_branch_issue_8616(
     fact: LoopBranchGuardFact8616,
     kind: LoopBranchGuardIssueKind8616,
     *,
-    match_count: int = 0,
+    match_count: cython.longlong = 0,
 ) -> LoopBranchGuardIssue8616:
     """Build one deterministic final loop-branch issue."""
     return LoopBranchGuardIssue8616(
@@ -601,14 +632,15 @@ def _loop_branch_issue_8616(
     )
 
 
+@cython.ccall
 def _untagged_loop_branch_verdict_8616(
     ast_index: ControlFlowAstIndex8616,
     fact: LoopBranchGuardFact8616,
-    condition_fingerprint: Callable[[object], str] | None,
+    condition_fingerprint: object,
     condition_ir_fingerprint: Callable[[ConditionIR], str | None] | None,
     condition_fingerprint_normalizer: Callable[[str], str] | None,
     condition_storage_matcher: Callable[[ConditionIR, object, bool], bool] | None,
-) -> tuple[int, LoopBranchGuardIssue8616 | None]:
+) -> tuple[cython.longlong, LoopBranchGuardIssue8616 | None]:
     """Accept one untagged guard only on a unique exact-condition match."""
     semantic_guards = (
         _semantic_loop_branch_guards_8616(
@@ -639,18 +671,18 @@ def _untagged_loop_branch_verdict_8616(
 def _tagged_loop_branch_verdict_8616(
     ast_index: ControlFlowAstIndex8616,
     fact: LoopBranchGuardFact8616,
-    tagged_conditions: tuple[object, ...],
-    break_guards: tuple[object, ...],
-    loop_guards: tuple[object, ...],
-    loop_bodies: tuple[object, ...],
-) -> tuple[int, LoopBranchGuardIssue8616 | None]:
+    tagged_conditions: object,
+    break_guards: object,
+    loop_guards: object,
+    loop_bodies: object,
+) -> tuple[cython.longlong, LoopBranchGuardIssue8616 | None]:
     """Require exactly one tagged in-loop guard for a tagged loop-branch fact."""
     associated_guards = tuple(
         guard
-        for guard in break_guards
+        for guard in iter(break_guards)
         if any(
             ast_index.subtree_contains_node(body, guard)
-            for body in loop_bodies
+            for body in iter(loop_bodies)
         )
     )
     materialized_guards = (*associated_guards, *loop_guards)
@@ -667,7 +699,7 @@ def _tagged_loop_branch_verdict_8616(
             match_count=len(tagged_conditions),
         )
     if (
-        len(break_guards) != len(associated_guards)
+        operator.ne(len(break_guards), len(associated_guards))
         or len(materialized_guards) != 1
     ):
         return 0, _loop_branch_issue_8616(
@@ -678,14 +710,17 @@ def _tagged_loop_branch_verdict_8616(
     return 1, None
 
 
+@cython.ccall
 def _conflicted_fact_keys_8616(
-    facts_by_key: dict[int, list[LoopBranchGuardFact8616]],
-) -> tuple[set[int], int, list[LoopBranchGuardIssue8616]]:
+    facts_by_key: object,
+) -> tuple[set[cython.longlong], cython.longlong, list[LoopBranchGuardIssue8616]]:
     """Mark jcc keys with conflicting facts and count them as classified."""
-    conflicted_keys: set[int] = set()
+    facts: object
+    key: object
+    conflicted_keys: set[cython.longlong] = set()
     classified_count = 0
     issues: list[LoopBranchGuardIssue8616] = []
-    for key, facts in sorted(facts_by_key.items()):
+    for key, facts in sorted(tuple(facts_by_key.items())):
         if len(facts) <= 1:
             continue
         conflicted_keys.add(key)
@@ -702,16 +737,16 @@ def _conflicted_fact_keys_8616(
 
 def _debug_log_control_flow_8616(
     ast_index: ControlFlowAstIndex8616,
-    normalized_loop_branch_facts: tuple[LoopBranchGuardFact8616, ...],
-    issues: list[ControlFlowValidationIssue8616],
-    condition_fingerprint: Callable[[object], str] | None,
+    normalized_loop_branch_facts: object,
+    issues: object,
+    condition_fingerprint: object,
     condition_ir_fingerprint: Callable[[ConditionIR], str | None] | None,
     condition_fingerprint_normalizer: Callable[[str], str] | None,
     condition_storage_matcher: Callable[[ConditionIR, object, bool], bool] | None,
-    raw_fact_count: int,
-    normalized_fact_count: int,
-    classified_fact_count: int,
-    materialized_count: int,
+    raw_fact_count: cython.longlong,
+    normalized_fact_count: cython.longlong,
+    classified_fact_count: cython.longlong,
+    materialized_count: cython.longlong,
 ) -> None:
     """Emit the optional loop-branch validation diagnostic trace."""
     if not os.environ.get("INERTIA_DEBUG_VALIDATION_CONTROL_FLOW"):
@@ -728,7 +763,7 @@ def _debug_log_control_flow_8616(
                 ast_index.break_guards(fact.jcc_addr),
                 ast_index.loop_guards(fact.jcc_addr),
             )
-            for fact in normalized_loop_branch_facts
+            for fact in iter(normalized_loop_branch_facts)
         ),
         tuple(
             (
@@ -745,7 +780,7 @@ def _debug_log_control_flow_8616(
                 and _loop_branch_fact_is_valid_8616(fact)
                 else (),
             )
-            for fact in normalized_loop_branch_facts
+            for fact in iter(normalized_loop_branch_facts)
         ),
         tuple(
             (
@@ -767,12 +802,12 @@ def _debug_log_control_flow_8616(
                             fact.false_target,
                         ),
                     )
-                    for fact in normalized_loop_branch_facts
+                    for fact in iter(normalized_loop_branch_facts)
                 ),
             )
-            for loop in ast_index.loops
+            for loop in iter(ast_index.loops)
         ),
-        tuple(issue.token() for issue in issues),
+        tuple(issue.token() for issue in iter(issues)),
         raw_fact_count,
         normalized_fact_count,
         classified_fact_count,
@@ -784,7 +819,7 @@ def validate_structured_control_flow_8616(
     root: object,
     *,
     query_index: StructuredAstQueryIndex8616 | None = None,
-    loop_branch_facts: tuple[LoopBranchGuardFact8616, ...] = (),
+    loop_branch_facts: object = (),
     condition_fingerprint: Callable[[object], str] | None = None,
     condition_ir_fingerprint: Callable[[ConditionIR], str | None] | None = None,
     condition_fingerprint_normalizer: Callable[[str], str] | None = None,
@@ -808,6 +843,8 @@ def validate_structured_control_flow_8616(
     the materialized count so it can never certify equality — including
     equality with itself across before/after snapshots.
     """
+    issue: object
+    fact: object
     ast_index = ControlFlowAstIndex8616.build(root, root_index=query_index)
     (
         raw_fact_count,
@@ -830,10 +867,10 @@ def validate_structured_control_flow_8616(
     materialized_count += goto_materialized_count
     issues.extend(goto_issues)
 
-    normalized_loop_branch_facts = tuple(sorted(set(loop_branch_facts)))
+    normalized_loop_branch_facts = tuple(sorted(tuple(set(loop_branch_facts))))
     raw_fact_count += len(loop_branch_facts)
     normalized_fact_count += len(normalized_loop_branch_facts)
-    facts_by_key: dict[int, list[LoopBranchGuardFact8616]] = {}
+    facts_by_key: dict[cython.longlong, list[LoopBranchGuardFact8616]] = {}
     for fact in normalized_loop_branch_facts:
         facts_by_key.setdefault(fact.jcc_addr, []).append(fact)
     conflicted_keys, conflicted_classified, conflicted_issues = (
@@ -842,7 +879,7 @@ def validate_structured_control_flow_8616(
     classified_fact_count += conflicted_classified
     issues.extend(conflicted_issues)
 
-    loop_bodies = tuple(loop.body for loop in ast_index.loops)
+    loop_bodies = tuple(loop.body for loop in iter(ast_index.loops))
     for fact in normalized_loop_branch_facts:
         key = fact.jcc_addr
         if key in conflicted_keys:

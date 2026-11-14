@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """ALU operand and comparison semantics for typed IR conditions.
 
 Layer: Semantics.
@@ -8,6 +9,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from typing import Any
@@ -18,6 +21,7 @@ from inertia.frontend.x86_16.addressing_helpers import type_for_bits
 from inertia.ir.condition_ir import build_condition_ir_8616, harmonize_condition_args_8616
 from inertia.ir.core import IRCondition, IRValue, MemSpace
 from inertia.ir.regs import REG16_OFFSET_MAP, register_name_from_offset
+import operator
 
 __all__ = (
     "binary_operation",
@@ -46,7 +50,8 @@ _DynamicOperator8616 = Callable[..., _SymbolicValue8616]
 _FlagUpdater8616 = Callable[..., object]
 
 
-def _dynamic_vex_attr_8616(obj: object | None, name: str, default: object | None = None) -> object | None:
+@cython.ccall
+def _dynamic_vex_attr_8616(obj: object, name: object, default: object | None = None) -> object | None:
     """Dynamic VEX/emulator boundary: read optional pyvex or callback attributes."""
     if obj is None:
         return default
@@ -57,19 +62,23 @@ def _dynamic_vex_attr_8616(obj: object | None, name: str, default: object | None
         return default
 
 
-def _dynamic_flag_callback_name_8616(update_flags: object) -> str:
+@cython.ccall
+def _dynamic_flag_callback_name_8616(update_flags: object) -> object:
     """Dynamic flag-callback boundary: return the external callback name."""
     name = _dynamic_vex_attr_8616(update_flags, "__name__", "")
     return name if isinstance(name, str) else ""
 
 
+@cython.ccall
 def _type_name_for_operand(value: object) -> str:
+    ty_name: object
     ty = _dynamic_vex_attr_8616(value, "ty")
     ty_name = _dynamic_vex_attr_8616(ty, "name")
     return str(ty_name if ty_name is not None else ty or type(value).__name__)
 
 
-def _size_bytes_from_operand(value: object) -> int:
+@cython.ccall
+def _size_bytes_from_operand(value: object) -> cython.longlong:
     width = _dynamic_vex_attr_8616(value, "width")
     if isinstance(width, int) and width > 0:
         return max(1, (width + 7) // 8)
@@ -87,7 +96,8 @@ def _size_bytes_from_operand(value: object) -> int:
     return 0
 
 
-def _int_condition_value_8616(value: int, hinted_size: int) -> IRValue:
+@cython.ccall
+def _int_condition_value_8616(value: cython.longlong, hinted_size: cython.longlong) -> IRValue:
     """Return the sized CONST lane for a Python int operand."""
     size = hinted_size or 1
     if hinted_size <= 0:
@@ -98,7 +108,8 @@ def _int_condition_value_8616(value: int, hinted_size: int) -> IRValue:
     return IRValue(MemSpace.CONST, const=value, size=size, expr=("int",))
 
 
-def _mapped_reg_offset_value_8616(value: object, reg_offset: int, hinted_size: int) -> IRValue:
+@cython.ccall
+def _mapped_reg_offset_value_8616(value: object, reg_offset: cython.longlong, hinted_size: cython.longlong) -> IRValue:
     """Return the REG lane for a VEX offset inside REG16_OFFSET_MAP."""
     return IRValue(
         MemSpace.REG,
@@ -109,7 +120,8 @@ def _mapped_reg_offset_value_8616(value: object, reg_offset: int, hinted_size: i
     )
 
 
-def _reg_name_value_8616(value: object, reg_name: str, hinted_size: int) -> IRValue:
+@cython.ccall
+def _reg_name_value_8616(value: object, reg_name: object, hinted_size: cython.longlong) -> IRValue:
     """Return the REG lane for a dynamic register-name operand."""
     reg_offset = _dynamic_vex_attr_8616(value, "offset")
     return IRValue(
@@ -121,7 +133,8 @@ def _reg_name_value_8616(value: object, reg_name: str, hinted_size: int) -> IRVa
     )
 
 
-def _condition_value_from_operand(value: object, *, size_hint: int = 0) -> IRValue:
+@cython.ccall
+def _condition_value_from_operand(value: object, *, size_hint: cython.longlong = 0) -> IRValue:
     """Lower one operand boundary value into a typed IRValue."""
     hinted_size = int(size_hint or 0)
     if isinstance(value, bool):
@@ -164,7 +177,8 @@ def _condition_value_from_operand(value: object, *, size_hint: int = 0) -> IRVal
     )
 
 
-def _same_condition_operand_8616(lhs: object, rhs: object) -> bool:
+@cython.ccall
+def _same_condition_operand_8616(lhs: object, rhs: object) -> cython.bint:
     if lhs is rhs:
         return True
     try:
@@ -173,6 +187,7 @@ def _same_condition_operand_8616(lhs: object, rhs: object) -> bool:
         return False
 
 
+@cython.ccall
 def build_compare_condition_8616(lhs: object, rhs: object, update_flags: object) -> IRCondition | None:
     """Build typed comparison IR from a two-operand flag update callback."""
     name = _dynamic_flag_callback_name_8616(update_flags)
@@ -196,7 +211,7 @@ def build_compare_condition_8616(lhs: object, rhs: object, update_flags: object)
                 rhs_value,
                 expr=(name, "same_operand"),
             )
-        if rhs_value.space == MemSpace.CONST and rhs_value.const == 0:
+        if operator.eq(rhs_value.space, MemSpace.CONST) and rhs_value.const == 0:
             return build_condition_ir_8616(
                 "nonzero",
                 lhs_value,
@@ -224,6 +239,7 @@ def build_compare_condition_8616(lhs: object, rhs: object, update_flags: object)
     return None
 
 
+@cython.ccall
 def build_carry_compare_condition_8616(
     lhs: object,
     rhs: object,
@@ -248,12 +264,14 @@ def build_carry_compare_condition_8616(
     )
 
 
+@cython.ccall
 def _record_last_condition_from_update_flags(
     emu: object | None,
     lhs: object,
     rhs: object,
     update_flags: object,
 ) -> None:
+    condition: object
     owner = _dynamic_vex_attr_8616(update_flags, "__self__")
     set_last_condition = _dynamic_vex_attr_8616(owner, "set_last_condition")
     if not callable(set_last_condition):
@@ -263,6 +281,7 @@ def _record_last_condition_from_update_flags(
         set_last_condition(condition)
 
 
+@cython.ccall
 def _record_last_condition_from_carry_update_flags(
     emu: object | None,
     lhs: object,
@@ -270,6 +289,7 @@ def _record_last_condition_from_carry_update_flags(
     carry: object,
     update_flags: object,
 ) -> None:
+    condition: object
     owner = _dynamic_vex_attr_8616(update_flags, "__self__")
     set_last_condition = _dynamic_vex_attr_8616(owner, "set_last_condition")
     if not callable(set_last_condition):
@@ -279,6 +299,7 @@ def _record_last_condition_from_carry_update_flags(
         set_last_condition(condition)
 
 
+@cython.ccall
 def binary_operation(
     emu: object,
     get_lhs: _ValueGetter8616,
@@ -295,6 +316,7 @@ def binary_operation(
     set_result(result)
 
 
+@cython.ccall
 def binary_operation_with_carry(
     emu: _SymbolicValue8616,
     get_lhs: _ValueGetter8616,
@@ -302,7 +324,7 @@ def binary_operation_with_carry(
     set_result: _ValueSetter8616,
     update_flags: _FlagUpdater8616,
     operator: _DynamicOperator8616,
-    width_bits: int,
+    width_bits: cython.longlong,
 ) -> None:
     """Emit flags from pre-write operands, then apply a carry-aware result."""
     lhs, rhs = get_lhs(), get_rhs()
@@ -317,6 +339,7 @@ def binary_operation_with_carry(
     set_result(result)
 
 
+@cython.ccall
 def compare_operation(
     get_lhs: _ValueGetter8616,
     get_rhs: _ValueGetter8616,
@@ -329,10 +352,11 @@ def compare_operation(
     _record_last_condition_from_update_flags(None, lhs, rhs, update_flags)
 
 
+@cython.ccall
 def unary_operation(
     get_value: _ValueGetter8616,
     set_result: _ValueSetter8616,
-    update_flags: _FlagUpdater8616 | None,
+    update_flags: object,
     operator: _DynamicOperator8616,
 ) -> None:
     """Emit flags from the pre-write operand, then apply a unary result."""
@@ -343,11 +367,12 @@ def unary_operation(
     set_result(operator(value))
 
 
+@cython.ccall
 def masked_shift_count(
     emu: _SymbolicValue8616,
     count: _SymbolicValue8616,
-    width_bits: int,
-    mask: int = 0x1F,
+    width_bits: cython.longlong,
+    mask: cython.longlong = 0x1F,
 ) -> _SymbolicValue8616:
     """Mask an x86 shift count to the architecturally active bits."""
     value_type = type_for_bits(width_bits)
@@ -363,34 +388,37 @@ def masked_shift_count(
     return count_v & emu.constant(mask, value_type)
 
 
+@cython.ccall
 def rotate_count(
     emu: _SymbolicValue8616,
     count: _SymbolicValue8616,
-    modulo: int,
-    width_bits: int,
-    mask: int = 0x1F,
+    modulo: cython.longlong,
+    width_bits: cython.longlong,
+    mask: cython.longlong = 0x1F,
 ) -> _SymbolicValue8616:
     """Normalize a rotate count for the target operand width."""
     return masked_shift_count(emu, count, width_bits, mask) % emu.constant(modulo, type_for_bits(width_bits))
 
 
+@cython.ccall
 def rotate_through_carry_count(
     emu: _SymbolicValue8616,
     count: _SymbolicValue8616,
-    width_bits: int,
-    mask: int = 0x1F,
+    width_bits: cython.longlong,
+    mask: cython.longlong = 0x1F,
 ) -> _SymbolicValue8616:
     """Normalize a rotate-through-carry count for the target width."""
     return masked_shift_count(emu, count, width_bits, mask) % emu.constant(width_bits + 1, type_for_bits(width_bits))
 
 
+@cython.ccall
 def shift_left_operation(
     emu: _SymbolicValue8616,
     get_value: _ValueGetter8616,
     set_result: _ValueSetter8616,
     update_flags: _FlagUpdater8616,
     count: _SymbolicValue8616,
-    width_bits: int,
+    width_bits: cython.longlong,
 ) -> None:
     """Update flags from the pre-write value, then apply a logical left shift."""
     value = get_value()
@@ -399,13 +427,14 @@ def shift_left_operation(
     set_result(value << shift)
 
 
+@cython.ccall
 def shift_right_operation(
     emu: _SymbolicValue8616,
     get_value: _ValueGetter8616,
     set_result: _ValueSetter8616,
     update_flags: _FlagUpdater8616,
     count: _SymbolicValue8616,
-    width_bits: int,
+    width_bits: cython.longlong,
 ) -> None:
     """Update flags from the pre-write value, then apply a logical right shift."""
     value = get_value()
@@ -414,13 +443,14 @@ def shift_right_operation(
     set_result(value >> shift)
 
 
+@cython.ccall
 def shift_right_arithmetic_operation(
     emu: _SymbolicValue8616,
     get_value: _ValueGetter8616,
     set_result: _ValueSetter8616,
     update_flags: _FlagUpdater8616,
     count: _SymbolicValue8616,
-    width_bits: int,
+    width_bits: cython.longlong,
 ) -> None:
     """Update flags from the pre-write value, then apply an arithmetic shift."""
     value = get_value()
@@ -429,13 +459,14 @@ def shift_right_arithmetic_operation(
     set_result(value.sar(shift))
 
 
+@cython.ccall
 def rotate_left_operation(
     emu: _SymbolicValue8616,
     get_value: _ValueGetter8616,
     set_result: _ValueSetter8616,
     update_flags: _FlagUpdater8616,
     count: _SymbolicValue8616,
-    width_bits: int,
+    width_bits: cython.longlong,
 ) -> None:
     """Update flags from the pre-write value, then apply a rotate-left result."""
     value = get_value()
@@ -446,13 +477,14 @@ def rotate_left_operation(
     set_result(((value << shift) | (value >> (width - shift))) & mask)
 
 
+@cython.ccall
 def rotate_right_operation(
     emu: _SymbolicValue8616,
     get_value: _ValueGetter8616,
     set_result: _ValueSetter8616,
     update_flags: _FlagUpdater8616,
     count: _SymbolicValue8616,
-    width_bits: int,
+    width_bits: cython.longlong,
 ) -> None:
     """Update flags from the pre-write value, then apply a rotate-right result."""
     value = get_value()
@@ -463,11 +495,12 @@ def rotate_right_operation(
     set_result(((value >> shift) | (value << (width - shift))) & mask)
 
 
+@cython.ccall
 def rotate_through_carry_left_state(
     emu: _SymbolicValue8616,
     value: _SymbolicValue8616,
     count: _SymbolicValue8616,
-    width_bits: int,
+    width_bits: cython.longlong,
     ite_value: _DynamicOperator8616,
 ) -> tuple[_SymbolicValue8616, _SymbolicValue8616 | None, _SymbolicValue8616 | None]:
     """Return result, carry, and overflow for rotate-through-carry left."""
@@ -493,18 +526,19 @@ def rotate_through_carry_left_state(
         shifted_out = result[width_bits - 1].cast_to(Type.int_1)
         result = ((result << one) | carry.cast_to(type_for_bits(width_bits))) & mask
         carry = shifted_out
-        cond = shift == emu.constant(step, type_for_bits(width_bits))
+        cond = operator.eq(shift, emu.constant(step, type_for_bits(width_bits)))
         selected_result = ite_value(cond, result, selected_result)
         selected_carry = ite_value(cond, carry.cast_to(type_for_bits(width_bits)), selected_carry)
     overflow = selected_result[width_bits - 1].cast_to(Type.int_1) ^ selected_carry.cast_to(Type.int_1)
     return selected_result, selected_carry.cast_to(Type.int_1), overflow
 
 
+@cython.ccall
 def rotate_through_carry_right_state(
     emu: _SymbolicValue8616,
     value: _SymbolicValue8616,
     count: _SymbolicValue8616,
-    width_bits: int,
+    width_bits: cython.longlong,
     ite_value: _DynamicOperator8616,
 ) -> tuple[_SymbolicValue8616, _SymbolicValue8616 | None, _SymbolicValue8616 | None]:
     """Return result, carry, and overflow for rotate-through-carry right."""
@@ -530,7 +564,7 @@ def rotate_through_carry_right_state(
         shifted_out = result[0].cast_to(Type.int_1)
         result = (result >> one) | (carry.cast_to(type_for_bits(width_bits)) << (width_bits - 1))
         carry = shifted_out
-        cond = shift == emu.constant(step, type_for_bits(width_bits))
+        cond = operator.eq(shift, emu.constant(step, type_for_bits(width_bits)))
         selected_result = ite_value(cond, result & mask, selected_result)
         selected_carry = ite_value(cond, carry.cast_to(type_for_bits(width_bits)), selected_carry)
     overflow = selected_result[width_bits - 1].cast_to(Type.int_1) ^ selected_result[width_bits - 2].cast_to(Type.int_1)

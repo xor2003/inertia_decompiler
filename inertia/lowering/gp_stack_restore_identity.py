@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Check the byte ownership consumed by GP stack-restore materialization.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import cast
 
@@ -26,10 +29,14 @@ from .segment_register_state import runtime_segment_name_for_variable_8616
 from .stack_variable_coordinates import stack_variable_coordinate_registry_8616
 from .stack_word_recomposition import recognize_stack_word_recomposition_8616
 from .terminal_return_expressions import _safe_scalar_expression_8616
+import operator
+import builtins
 
 
+@cython.ccall
 def _entry_sp_byte_offset_8616(codegen: object, node: object) -> int | None:
     """Read native entry-SP storage or its explicit Lowering projection."""
+    projection: object
     if not isinstance(node, structured_c.CVariable):
         return None
     variable = node.variable
@@ -49,12 +56,18 @@ def _entry_sp_byte_offset_8616(codegen: object, node: object) -> int | None:
     return projection.entry_sp_offset if projection is not None else variable.offset
 
 
+@cython.ccall
 def matches_gp_restore_stack_bytes_8616(
     codegen: object,
     node: object,
     fact: SegmentStackRestoreFact8616,
-) -> bool:
+) -> cython.bint:
     """Require both byte operands to match the Alias-proven restore range."""
+    anchor: object
+    high: object
+    low: object
+    projection: object
+    recomposition: object
     recomposition = recognize_stack_word_recomposition_8616(node)
     if recomposition is None:
         return fact.constant_value is not None and _word_local_from_byte_views_8616(codegen, node, fact) is not None
@@ -68,9 +81,10 @@ def matches_gp_restore_stack_bytes_8616(
         anchor = None if projection is None else _entry_sp_byte_offset_8616(codegen, projection.local)
         if projection is not None and anchor is not None:
             high = anchor + projection.displacement
-    return low is not None and high is not None and (low, high) == fact.stack_offsets
+    return low is not None and high is not None and operator.eq((low, high), fact.stack_offsets)
 
 
+@cython.ccall
 def _unsigned_byte_view_8616(node: object) -> object | None:
     """Require an actual unsigned-byte truncation, not an arbitrary cast."""
     if isinstance(node, structured_c.CTypeCast) and isinstance(node.dst_type, SimTypeChar) and node.dst_type.signed is False:
@@ -78,18 +92,23 @@ def _unsigned_byte_view_8616(node: object) -> object | None:
     return None
 
 
-def _shifted_view_8616(node: object, operation: str) -> object | None:
+@cython.ccall
+def _shifted_view_8616(node: object, operation: object) -> object | None:
     """Require exactly one byte of shift in the requested direction."""
-    if (isinstance(node, structured_c.CBinaryOp) and node.op == operation
+    if (isinstance(node, structured_c.CBinaryOp) and operator.eq(node.op, operation)
             and isinstance(node.rhs, structured_c.CConstant) and node.rhs.value == 8):
         return cast(object, node.lhs)
     return None
 
 
+@cython.ccall
 def _word_local_from_byte_views_8616(
     codegen: object, node: object, fact: SegmentStackRestoreFact8616,
 ) -> structured_c.CVariable | None:
     """Find the local behind exact byte views; this alone does not prove its value."""
+    offset: object
+    high: object
+    low: object
     if not isinstance(node, structured_c.CBinaryOp) or node.op != "Or":
         return None
     for low, high in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
@@ -97,10 +116,10 @@ def _word_local_from_byte_views_8616(
         upper = _shifted_view_8616(_unsigned_byte_view_8616(_shifted_view_8616(high, "Shl")), "Shr")
         if not isinstance(local, structured_c.CVariable) or not isinstance(upper, structured_c.CVariable):
             continue
-        if local.variable != upper.variable or local.variable.size not in {2, 4}:
+        if operator.ne(local.variable, upper.variable) or local.variable.size not in {2, 4}:
             continue
         offset = _entry_sp_byte_offset_8616(codegen, local)
-        if offset is not None and fact.stack_offsets == (offset, offset + 1):
+        if offset is not None and operator.eq(fact.stack_offsets, (offset, offset + 1)):
             return local
     return None
 
@@ -111,81 +130,94 @@ _WORD_MASK_8616 = 0xFFFF
 _UPPER_WORD_MASK_8616 = 0xFFFF0000
 
 
-def _masked_value_8616(node: object, mask: int) -> object | None:
+@cython.ccall
+def _masked_value_8616(node: object, mask: cython.longlong) -> object | None:
     """Read the operand of an exact mask without discarding other operations."""
     if not isinstance(node, structured_c.CBinaryOp) or node.op != "And":
         return None
-    if isinstance(node.rhs, structured_c.CConstant) and node.rhs.value == mask:
+    if isinstance(node.rhs, structured_c.CConstant) and operator.eq(node.rhs.value, mask):
         return cast(object, node.lhs)
     return None
 
 
+@cython.ccall
 def _runtime_restore_word_8616(
     statement: structured_c.CAssignment,
-    register: str,
+    register: object,
 ) -> object | None:
     """Read an exact native word write or a preserving runtime-parent write."""
+    target: object
     destination = statement.lhs
     if isinstance(destination, structured_c.CVariable) and isinstance(destination.variable, SimRegisterVariable):
-        native_word = destination.variable.size == _WORD_BYTES_8616 and isinstance(destination.variable_type, SimTypeShort)
-        if native_word and physical_register_name_8616(destination) == register:
+        native_word = operator.eq(destination.variable.size, _WORD_BYTES_8616) and isinstance(destination.variable_type, SimTypeShort)
+        if native_word and operator.eq(physical_register_name_8616(destination), register):
             return cast(object, statement.rhs)
         return None
     target = runtime_gp_expression_view_8616(statement.lhs)
     expected = runtime_gp_live_in_name_8616(register)
-    if target is None or target.register_name != expected:
+    if target is None or operator.ne(target.register_name, expected):
         return None
     rhs = statement.rhs
     if not isinstance(rhs, structured_c.CBinaryOp) or rhs.op != "Or":
         return None
     preserved = _masked_value_8616(rhs.lhs, _UPPER_WORD_MASK_8616)
     source = runtime_gp_expression_view_8616(preserved)
-    if source != target:
+    if operator.ne(source, target):
         return None
     return _masked_value_8616(rhs.rhs, _WORD_MASK_8616)
 
 
-def _is_saved_register_byte_8616(node: object, register: str, byte: int) -> bool:
+@cython.ccall
+def _is_saved_register_byte_8616(node: object, register: object, byte: cython.longlong) -> cython.bint:
     """Match the exact runtime low word or its unsigned high-byte projection."""
+    view: object
     if byte:
         if not isinstance(node, structured_c.CBinaryOp) or node.op != "Shr":
             return False
-        if not isinstance(node.rhs, structured_c.CConstant) or node.rhs.value != _BYTE_BITS_8616:
+        if not isinstance(node.rhs, structured_c.CConstant) or operator.ne(node.rhs.value, _BYTE_BITS_8616):
             return False
         node = node.lhs
     view = runtime_gp_expression_view_8616(node)
-    return view is not None and view.register_name == register and view.width == _WORD_BYTES_8616
+    return view is not None and operator.eq(view.register_name, register) and operator.eq(view.width, _WORD_BYTES_8616)
 
 
-def _same_stack_variable_8616(node: object, operand: structured_c.CVariable) -> bool:
+@cython.ccall
+def _same_stack_variable_8616(node: object, operand: structured_c.CVariable) -> cython.bint:
     """Compare existing C storage identities, not their names or equal offsets."""
-    return isinstance(node, structured_c.CVariable) and node.variable == operand.variable
+    return isinstance(node, structured_c.CVariable) and operator.eq(node.variable, operand.variable)
 
 
 def _unique_byte_save_8616(
-    containers: tuple[structured_c.CStatements, ...],
+    containers: object,
     operand: structured_c.CVariable,
 ) -> structured_c.CAssignment | None:
     """Refuse multiple writers or an escaped address of this byte object."""
-    writers: dict[int, structured_c.CAssignment] = {}
+    container: object
+    node: object
+    writers: dict[cython.longlong, structured_c.CAssignment] = {}
     for container in containers:
         for node in _iter_c_nodes_deep_8616(container):
             if (isinstance(node, structured_c.CUnaryOp) and node.op == "Reference"
                     and any(_same_stack_variable_8616(child, operand)
-                            for child in _iter_c_nodes_deep_8616(node))):
+                            for child in builtins.iter(_iter_c_nodes_deep_8616(node)))):
                 return None
             if isinstance(node, structured_c.CAssignment) and _same_stack_variable_8616(node.lhs, operand):
                 writers[id(node)] = node
     return next(iter(writers.values())) if len(writers) == 1 else None
 
 
+@cython.ccall
 def _existing_byte_saves_8616(
     codegen: object,
-    containers: tuple[structured_c.CStatements, ...],
+    containers: object,
     word: object,
     fact: SegmentStackRestoreFact8616,
 ) -> tuple[structured_c.CAssignment, ...]:
     """Verify each byte's C storage, unique writer and saved-register value."""
+    pair: object
+    save: object
+    byte: object
+    operand: object
     if not matches_gp_restore_stack_bytes_8616(codegen, word, fact):
         return ()
     pair = recognize_stack_word_recomposition_8616(word)
@@ -207,8 +239,10 @@ def _existing_byte_saves_8616(
     return tuple(saves)
 
 
-def _unconditional_sequence_8616(container: structured_c.CStatements) -> list[object]:
+@cython.ccall
+def _unconditional_sequence_8616(container: structured_c.CStatements) -> object:
     """Flatten only transparent statement lists, never control-flow bodies."""
+    statement: object
     result: list[object] = []
     for statement in container.statements:
         if isinstance(statement, structured_c.CStatements):
@@ -218,13 +252,15 @@ def _unconditional_sequence_8616(container: structured_c.CStatements) -> list[ob
     return result
 
 
-def _assignment_prefix_before_origin_8616(statements: list[object], instruction: int | None) -> set[int]:
+@cython.ccall
+def _assignment_prefix_before_origin_8616(statements: object, instruction: int | None) -> object:
     """Identify direct preceding assignments, never crossing control-flow boundaries.
 
     Consumers must independently prove complete replacement stores and dominance.
     This only establishes order; it neither deletes nor classifies earlier effects.
     """
-    prefix: set[int] = set()
+    statement: object
+    prefix: set[cython.longlong] = set()
     for statement in statements:
         if not isinstance(statement, structured_c.CAssignment) or id(statement) in prefix:
             return set()
@@ -234,7 +270,8 @@ def _assignment_prefix_before_origin_8616(statements: list[object], instruction:
     return set()
 
 
-def _independent_segment_assignment_8616(statement: structured_c.CAssignment) -> bool:
+@cython.ccall
+def _independent_segment_assignment_8616(statement: structured_c.CAssignment) -> cython.bint:
     """Separate a pure owned segment publication from a GP destination census.
 
     The segment value remains subject to segment and whole-tail validation.
@@ -246,8 +283,11 @@ def _independent_segment_assignment_8616(statement: structured_c.CAssignment) ->
     return bool(_safe_scalar_expression_8616(statement.rhs))
 
 
-def _stack_write_offsets_8616(codegen: object, target: object) -> tuple[int, ...] | None:
+@cython.ccall
+def _stack_write_offsets_8616(codegen: object, target: object) -> object:
     """Resolve only exact word locals and unsigned indexed bytes of those locals."""
+    offset: object
+    offsets: object
     if isinstance(target, structured_c.CVariable):
         offset = _entry_sp_byte_offset_8616(codegen, target)
         if offset is not None and target.variable.size == 2 and isinstance(target.variable_type, SimTypeShort):
@@ -269,21 +309,22 @@ def _stack_write_offsets_8616(codegen: object, target: object) -> tuple[int, ...
 
 
 def _disjoint_stack_write_8616(
-    statement: structured_c.CAssignment, stores: tuple[structured_c.CAssignment, ...],
-) -> bool:
+    statement: structured_c.CAssignment, stores: object,
+) -> cython.bint:
     """Require every written stack byte to avoid every protected saved byte."""
+    target: object
     target = _stack_write_offsets_8616(statement.codegen, statement.lhs)
     if target is None or not stores:
         return False
-    saved_ranges = tuple(_stack_write_offsets_8616(store.codegen, store.lhs) for store in stores)
-    return all(saved is not None and set(target).isdisjoint(saved) for saved in saved_ranges)
+    saved_ranges = tuple(_stack_write_offsets_8616(store.codegen, store.lhs) for store in iter(stores))
+    return all(saved is not None and set(target).isdisjoint(saved) for saved in iter(saved_ranges))
 
 
 def has_materialized_gp_stack_bytes_8616(
     codegen: object,
-    containers: tuple[structured_c.CStatements, ...],
+    containers: object,
     fact: SegmentStackRestoreFact8616,
-) -> bool:
+) -> cython.bint:
     """Accept an unchanged exact byte representation before inventing a snapshot.
 
     This is deliberately limited to adjacent byte definitions dominating the
@@ -291,11 +332,14 @@ def has_materialized_gp_stack_bytes_8616(
     check additionally proves its existing structured-C value/storage binding.
     Other shapes retain the normal materialization and validation path.
     """
-    if any(isinstance(node, structured_c.CGoto) for container in containers
-           for node in _iter_c_nodes_deep_8616(container)):
+    container: object
+    restore_index: object
+    statement: object
+    if any(isinstance(node, structured_c.CGoto) for container in iter(containers)
+           for node in builtins.iter(_iter_c_nodes_deep_8616(container))):
         return False
-    candidates: set[int] = set()
-    verified: set[int] = set()
+    candidates: set[cython.longlong] = set()
+    verified: set[cython.longlong] = set()
     for container in containers:
         statements = _unconditional_sequence_8616(container)
         for restore_index, statement in enumerate(statements):
@@ -306,10 +350,10 @@ def has_materialized_gp_stack_bytes_8616(
             candidates.add(id(statement))
             word = _runtime_restore_word_8616(statement, fact.restore_register)
             saves = _existing_byte_saves_8616(codegen, containers, word, fact)
-            if len(saves) != _WORD_BYTES_8616:
+            if operator.ne(len(saves), _WORD_BYTES_8616):
                 continue
-            indices = [index for index, candidate in enumerate(statements)
-                       if any(candidate is save for save in saves)]
-            if len(indices) == _WORD_BYTES_8616 and indices[1] == indices[0] + 1 and indices[1] < restore_index:
+            indices = [index for index, candidate in builtins.iter(enumerate(statements))
+                       if any(candidate is save for save in iter(saves))]
+            if operator.eq(len(indices), _WORD_BYTES_8616) and operator.eq(indices[1], indices[0] + 1) and indices[1] < restore_index:
                 verified.add(id(statement))
     return bool(candidates) and verified == candidates

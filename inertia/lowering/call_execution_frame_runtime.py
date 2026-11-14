@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify runtime-GP projections of CALL stack execution carriers.
 
 Layer: Types/Lowering.
@@ -13,6 +14,8 @@ with the consumed CALL carrier.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from angr.analyses.decompiler.structured_codegen.c import (
     CAssignment,
@@ -24,28 +27,33 @@ from angr.analyses.decompiler.structured_codegen.c import (
 from angr.sim_variable import SimStackVariable
 
 from .gp_register_state import runtime_gp_expression_view_8616
+import operator
 
 __all__ = ["is_runtime_sp_call_decrement_8616"]
 
 
-def _masked_operand_8616(expression: object, mask: int) -> object | None:
+@cython.ccall
+def _masked_operand_8616(expression: object, mask: cython.longlong) -> object | None:
     """Return the value under one exact generated runtime-lane mask."""
     if not (
         isinstance(expression, CBinaryOp)
         and expression.op == "And"
         and isinstance(expression.rhs, CConstant)
-        and expression.rhs.value == mask
+        and operator.eq(expression.rhs.value, mask)
     ):
         return None
     operand: object = expression.lhs
     return operand
 
 
+@cython.ccall
 def is_runtime_sp_call_decrement_8616(
     assignment: CAssignment,
-    return_frame_width: int,
-) -> bool:
+    return_frame_width: cython.longlong,
+) -> cython.bint:
     """Recognize this owner's 16-bit ESP write for one CALL decrement."""
+    lhs_view: object
+    preserved_view: object
     lhs_view = runtime_gp_expression_view_8616(assignment.lhs)
     rhs = assignment.rhs
     if not (
@@ -67,12 +75,14 @@ def is_runtime_sp_call_decrement_8616(
         and inserted.op == "Sub"
         and _passive_stack_base_8616(inserted.lhs)
         and isinstance(inserted.rhs, CConstant)
-        and inserted.rhs.value == return_frame_width
+        and operator.eq(inserted.rhs.value, return_frame_width)
     )
 
 
-def _passive_stack_base_8616(expression: object) -> bool:
+@cython.ccall
+def _passive_stack_base_8616(expression: object) -> cython.bint:
     """Require a bounded stack base with no nested evaluation effects."""
+    view: object
     view = runtime_gp_expression_view_8616(expression)
     if view is not None:
         return view.parent_name == "esp" and view.bit_shift == 0 and view.width in {2, 4}

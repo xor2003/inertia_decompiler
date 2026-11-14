@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Stack frame recovery for BP/SP-based stack access semantics.
 
 Layer: Semantics.
@@ -25,36 +26,42 @@ Rule:
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from dataclasses import dataclass
 
 from inertia.ir.core import AddressStatus, IRAddress, MemSpace, SegmentOrigin
 from inertia.pipeline.errors import PipelineHardError
+import dataclasses
+import operator
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class StackFrameInfo8616:
     """Recovered stack-frame shape before alias consumes stack addresses."""
 
     function_addr: int | None
-    uses_bp_frame: bool = False
-    uses_sp_frame: bool = False
-    bp_established: bool = False
-    sp_delta_known: bool = False
-    frame_base: str | None = None
+    uses_bp_frame: cython.bint = False
+    uses_sp_frame: cython.bint = False
+    bp_established: cython.bint = False
+    sp_delta_known: cython.bint = False
+    frame_base: object = None
     frame_kind: str = "none"
     evidence: tuple[str, ...] = ()
 
 
-def _dynamic_angr_attr_8616(obj: object | None, name: str, default: object | None = None) -> object | None:
+@cython.ccall
+def _dynamic_angr_attr_8616(obj: object, name: object, default: object | None = None) -> object | None:
     """Dynamic angr/VEX/Capstone boundary: read optional external object attributes."""
     if obj is None:
         return default
     return getattr(obj, name, default)
 
 
-def _tuple_dynamic_attr_8616(obj: object | None, name: str) -> tuple[object, ...]:
+@cython.ccall
+def _tuple_dynamic_attr_8616(obj: object | None, name: object) -> tuple[object, ...]:
     """Return a tuple from an optional dynamic angr/VEX/Capstone sequence attribute."""
     value = _dynamic_angr_attr_8616(obj, name)
     if isinstance(value, (list, tuple)):
@@ -62,6 +69,7 @@ def _tuple_dynamic_attr_8616(obj: object | None, name: str) -> tuple[object, ...
     return ()
 
 
+@cython.ccall
 def _semantic_access_addr_8616(access: object) -> IRAddress | None:
     """Extract an owned IRAddress from a semantic access object or tuple."""
     if isinstance(access, tuple) and len(access) >= 2 and isinstance(access[1], IRAddress):
@@ -70,7 +78,8 @@ def _semantic_access_addr_8616(access: object) -> IRAddress | None:
     return addr if isinstance(addr, IRAddress) else None
 
 
-def _semantic_access_mode_8616(access: object) -> int:
+@cython.ccall
+def _semantic_access_mode_8616(access: object) -> cython.longlong:
     """Extract the access mode from a semantic access object or tuple."""
     if isinstance(access, tuple) and len(access) >= 1 and isinstance(access[0], int):
         return access[0]
@@ -78,32 +87,37 @@ def _semantic_access_mode_8616(access: object) -> int:
     return mode if isinstance(mode, int) else 0
 
 
-def _is_ss(addr: object) -> bool:
-    return isinstance(addr, IRAddress) and addr.space == MemSpace.SS
+@cython.ccall
+def _is_ss(addr: object) -> cython.bint:
+    return isinstance(addr, IRAddress) and operator.eq(addr.space, MemSpace.SS)
 
 
-def _is_bp_stable(addr: object) -> bool:
+@cython.ccall
+def _is_bp_stable(addr: object) -> cython.bint:
     return (
         isinstance(addr, IRAddress)
-        and addr.space == MemSpace.SS
+        and operator.eq(addr.space, MemSpace.SS)
         and addr.base == ("bp",)
         and isinstance(addr.offset, int)
-        and addr.status == AddressStatus.STABLE
+        and operator.eq(addr.status, AddressStatus.STABLE)
     )
 
 
-def _is_sp_stable(addr: object) -> bool:
+@cython.ccall
+def _is_sp_stable(addr: object) -> cython.bint:
     """SP+known_delta must be proven upstream — not guessed here."""
     return (
         isinstance(addr, IRAddress)
-        and addr.space == MemSpace.SS
+        and operator.eq(addr.space, MemSpace.SS)
         and addr.base == ("sp",)
         and isinstance(addr.offset, int)
-        and addr.status == AddressStatus.STABLE
+        and operator.eq(addr.status, AddressStatus.STABLE)
     )
 
 
-def _count_ss_accesses(semantic_accesses: Iterable[object]) -> int:
+@cython.ccall
+def _count_ss_accesses(semantic_accesses: Iterable[object]) -> cython.longlong:
+    acc: object
     n = 0
     for acc in semantic_accesses:
         addr = _semantic_access_addr_8616(acc)
@@ -112,21 +126,25 @@ def _count_ss_accesses(semantic_accesses: Iterable[object]) -> int:
     return n
 
 
-def _count_sp_provisional(semantic_accesses: Iterable[object]) -> int:
+@cython.ccall
+def _count_sp_provisional(semantic_accesses: Iterable[object]) -> cython.longlong:
+    acc: object
     n = 0
     for acc in semantic_accesses:
         addr = _semantic_access_addr_8616(acc)
         if (
             isinstance(addr, IRAddress)
-            and addr.space == MemSpace.SS
-            and addr.status == AddressStatus.PROVISIONAL
+            and operator.eq(addr.space, MemSpace.SS)
+            and operator.eq(addr.status, AddressStatus.PROVISIONAL)
             and addr.base != ("bp",)
         ):
             n += 1
     return n
 
 
-def _count_sp_stable(semantic_accesses: Iterable[object]) -> int:
+@cython.ccall
+def _count_sp_stable(semantic_accesses: Iterable[object]) -> cython.longlong:
+    acc: object
     n = 0
     for acc in semantic_accesses:
         addr = _semantic_access_addr_8616(acc)
@@ -135,7 +153,9 @@ def _count_sp_stable(semantic_accesses: Iterable[object]) -> int:
     return n
 
 
-def _count_bp_stable(semantic_accesses: Iterable[object]) -> int:
+@cython.ccall
+def _count_bp_stable(semantic_accesses: Iterable[object]) -> cython.longlong:
+    acc: object
     n = 0
     for acc in semantic_accesses:
         addr = _semantic_access_addr_8616(acc)
@@ -144,15 +164,19 @@ def _count_bp_stable(semantic_accesses: Iterable[object]) -> int:
     return n
 
 
-def _has_any_bp_base(semantic_accesses: Iterable[object]) -> bool:
+@cython.ccall
+def _has_any_bp_base(semantic_accesses: Iterable[object]) -> cython.bint:
+    acc: object
     for acc in semantic_accesses:
         addr = _semantic_access_addr_8616(acc)
-        if isinstance(addr, IRAddress) and addr.space == MemSpace.SS and addr.base == ("bp",):
+        if isinstance(addr, IRAddress) and operator.eq(addr.space, MemSpace.SS) and addr.base == ("bp",):
             return True
     return False
 
 
-def _has_any_sp_stable(semantic_accesses: Iterable[object]) -> bool:
+@cython.ccall
+def _has_any_sp_stable(semantic_accesses: Iterable[object]) -> cython.bint:
+    acc: object
     for acc in semantic_accesses:
         addr = _semantic_access_addr_8616(acc)
         if _is_sp_stable(addr):
@@ -160,13 +184,17 @@ def _has_any_sp_stable(semantic_accesses: Iterable[object]) -> bool:
     return False
 
 
-def _looks_like_frame_evidence(obj: object) -> bool:
-    def _impl() -> bool:
+def _looks_like_frame_evidence(obj: object) -> cython.bint:
+    def _impl() -> cython.bint:
         """Check for BP frame evidence using structured IR artifacts, NOT text parsing.
 
         Accepts CapstoneInsn objects (already-parsed structured disassembly)
         or VEX IRSB objects.  Rejects plain strings / COD text.
         """
+        capstone: object
+        insns: object
+        mnemonic: object
+        statements: object
         import sys
 
         sys.stderr.flush()
@@ -197,8 +225,10 @@ def _looks_like_frame_evidence(obj: object) -> bool:
     return _impl()
 
 
-def _capstone_insn_is_frame_evidence(obj: object, mnem_str: str) -> bool:
+@cython.ccall
+def _capstone_insn_is_frame_evidence(obj: object, mnem_str: object) -> cython.bint:
     """Match a single capstone instruction against push-bp / mov-bp-sp."""
+    op: object
     operands = _tuple_dynamic_attr_8616(obj, "operands")
 
     # push bp — register-based detection using capstone reg IDs
@@ -218,16 +248,22 @@ def _capstone_insn_is_frame_evidence(obj: object, mnem_str: str) -> bool:
     return False
 
 
-def _capstone_block_has_frame_evidence(insns: Iterable[object]) -> bool:
+@cython.ccall
+def _capstone_block_has_frame_evidence(insns: Iterable[object]) -> cython.bint:
     """True when any capstone instruction in the block shows frame setup."""
+    insn: object
     for insn in insns:
         if _looks_like_frame_evidence(insn):
             return True
     return False
 
 
-def _irsb_register_offsets_8616(irsb: object) -> tuple[object, object] | None:
+@cython.ccall
+def _irsb_register_offsets_8616(irsb: object) -> object:
     """Resolve (sp_offset, bp_offset) for a VEX IRSB, or None when unavailable."""
+    arch: object
+    bp_off: object
+    sp_off: object
     try:
         arch = _dynamic_angr_attr_8616(irsb, "arch")
         if arch is None:
@@ -241,13 +277,16 @@ def _irsb_register_offsets_8616(irsb: object) -> tuple[object, object] | None:
     return sp_off, bp_off
 
 
-def _vex_irsb_has_bp_frame(irsb: object) -> bool:
-    def _impl() -> bool:
+def _vex_irsb_has_bp_frame(irsb: object) -> cython.bint:
+    def _impl() -> cython.bint:
         """Inspect VEX IRSB statements for BP frame setup patterns.
 
         push bp  → Ist_Store(base=SS*16+SP-2, data=GET(BP))  after  Ist_Put(SP)=SUB(GET(SP), 2)
         mov bp,sp → Ist_Put(BP) = GET(SP)
         """
+        data: object
+        offsets: object
+        stmt: object
         offsets = _irsb_register_offsets_8616(irsb)
         if offsets is None:
             return False
@@ -275,15 +314,19 @@ def _vex_irsb_has_bp_frame(irsb: object) -> bool:
     return _impl()
 
 
-def _is_reg_get(vex_expr: object, reg_offset: object) -> bool:
+@cython.ccall
+def _is_reg_get(vex_expr: object, reg_offset: object) -> cython.bint:
     """True when vex_expr is a pure GET(reg_offset)."""
     if _dynamic_angr_attr_8616(vex_expr, "tag", "") != "Iex_Get":
         return False
-    return _dynamic_angr_attr_8616(vex_expr, "offset") == reg_offset
+    return operator.eq(_dynamic_angr_attr_8616(vex_expr, "offset"), reg_offset)
 
 
-def _is_sub_constant(vex_expr: object, constant: int) -> bool:
+@cython.ccall
+def _is_sub_constant(vex_expr: object, constant: cython.longlong) -> cython.bint:
     """True when vex_expr is Binop(Sub, Iex_Get(...), Iex_Const(constant))."""
+    const_val: object
+    rhs: object
     if _dynamic_angr_attr_8616(vex_expr, "tag", "") != "Iex_Binop":
         return False
     if str(_dynamic_angr_attr_8616(vex_expr, "op", "")) not in ("Iop_Sub32", "Iop_Sub16"):
@@ -298,14 +341,18 @@ def _is_sub_constant(vex_expr: object, constant: int) -> bool:
     if _dynamic_angr_attr_8616(const_expr, "tag", "") != "Iex_Const":
         return False
     const_val = _dynamic_angr_attr_8616(const_expr, "con")
-    return const_val is not None and _dynamic_angr_attr_8616(const_val, "value") == constant
+    return const_val is not None and operator.eq(_dynamic_angr_attr_8616(const_val, "value"), constant)
 
 
-def _gather_ir_artifacts_from_function_blocks(project: object | None, function_addr: int) -> list[object]:
+@cython.ccall
+def _gather_ir_artifacts_from_function_blocks(project: object | None, function_addr: cython.longlong) -> object:
     """Collect angr Block objects for IR-based frame detection.
 
     Returns empty list if project/kb/function is unavailable.
     """
+    func: object
+    kb: object
+    blk: object
     kb = _dynamic_angr_attr_8616(project, "kb")
     if kb is None:
         return []
@@ -320,7 +367,7 @@ def _gather_ir_artifacts_from_function_blocks(project: object | None, function_a
     return artifacts
 
 
-def _detect_sp_proven_delta_from_blocks(project: object | None, function_addr: int) -> int | None:
+def _detect_sp_proven_delta_from_blocks(project: object | None, function_addr: cython.longlong) -> int | None:
     def _impl() -> int | None:
         """Detect proven SP delta from IR/VEX block analysis.
 
@@ -329,6 +376,9 @@ def _detect_sp_proven_delta_from_blocks(project: object | None, function_addr: i
 
         Uses VEX IRSB statement analysis, NOT text parsing.
         """
+        found: object
+        offsets: object
+        irsb: object
         irsbs = _function_irsbs_8616(project, function_addr)
         if not irsbs:
             return None
@@ -350,8 +400,13 @@ def _detect_sp_proven_delta_from_blocks(project: object | None, function_addr: i
     return _impl()
 
 
-def _function_irsbs_8616(project: object | None, function_addr: int) -> list[object]:
+@cython.ccall
+def _function_irsbs_8616(project: object | None, function_addr: cython.longlong) -> object:
     """Gather all VEX IRSBs for a function, or empty when unavailable."""
+    func: object
+    irsb: object
+    kb: object
+    blk: object
     kb = _dynamic_angr_attr_8616(project, "kb")
     if kb is None:
         return []
@@ -369,10 +424,15 @@ def _function_irsbs_8616(project: object | None, function_addr: int) -> list[obj
     return irsbs
 
 
+@cython.ccall
 def _irsb_frame_sp_delta_8616(
-    irsb: object, sp_off: object, bp_off: object, seen_bp_established: bool
-) -> tuple[bool, int | None]:
+    irsb: object, sp_off: object, bp_off: object, seen_bp_established: cython.bint
+) -> tuple[cython.bint, int | None]:
     """Scan one IRSB for BP-establishment and the first ``sub sp, N`` delta."""
+    data: object
+    delta: object
+    put_off: object
+    stmt: object
     sp_delta = None
     for stmt in _tuple_dynamic_attr_8616(irsb, "statements"):
         tag = _dynamic_angr_attr_8616(stmt, "tag", "")
@@ -385,12 +445,12 @@ def _irsb_frame_sp_delta_8616(
             continue
 
         # Detect mov bp, sp → BP frame established
-        if put_off == bp_off and _is_reg_get(data, sp_off):
+        if operator.eq(put_off, bp_off) and _is_reg_get(data, sp_off):
             seen_bp_established = True
             continue
 
         # Detect sub sp, N → compute frame size only AFTER BP established
-        if seen_bp_established and put_off == sp_off:
+        if seen_bp_established and operator.eq(put_off, sp_off):
             delta = _extract_sub_constant(data)
             if delta is not None and delta < 0:
                 sp_delta = delta
@@ -398,11 +458,14 @@ def _irsb_frame_sp_delta_8616(
     return seen_bp_established, sp_delta
 
 
+@cython.ccall
 def _extract_sub_constant(vex_expr: object) -> int | None:
     """Extract the constant operand from SUB(GET(reg), Const(N)), returning N.
 
     Returns None if expression doesn't match SUB(binop) pattern.
     """
+    args: object
+    const_val: object
     if _dynamic_angr_attr_8616(vex_expr, "tag", "") != "Iex_Binop":
         return None
     op_name = str(_dynamic_angr_attr_8616(vex_expr, "op", ""))
@@ -431,13 +494,15 @@ def _extract_sub_constant(vex_expr: object) -> int | None:
     return None
 
 
+@cython.ccall
 def detect_stack_frame_8616(
     *,
     function_addr: int | None = None,
     ir_artifacts: Iterable[object] = (),
-    semantic_accesses: Iterable[tuple[int, IRAddress]] = (),
+    semantic_accesses: Iterable[tuple[cython.longlong, IRAddress]] = (),
 ) -> StackFrameInfo8616:
     """Classify the function stack-frame model from structured IR evidence."""
+    artifact: object
     evidence: list[str] = []
 
     if _has_any_bp_base(semantic_accesses):
@@ -493,9 +558,10 @@ def detect_stack_frame_8616(
     )
 
 
+@cython.ccall
 def compute_bp_offset(addr: IRAddress, frame: StackFrameInfo8616) -> int | None:
     """Return the stable BP-relative offset for an SS address when proven."""
-    if not isinstance(addr, IRAddress) or addr.space != MemSpace.SS:
+    if not isinstance(addr, IRAddress) or operator.ne(addr.space, MemSpace.SS):
         return None
 
     if not isinstance(addr.offset, int):
@@ -508,18 +574,20 @@ def compute_bp_offset(addr: IRAddress, frame: StackFrameInfo8616) -> int | None:
         return addr.offset
 
     if frame.uses_bp_frame and frame.bp_established:  # noqa: SIM102
-        if addr.base in {("ss",), ("sp",), ()} and addr.status == AddressStatus.STABLE:
+        if addr.base in {("ss",), ("sp",), ()} and operator.eq(addr.status, AddressStatus.STABLE):
             return addr.offset
 
     return None
 
 
+@cython.ccall
 def normalize_stack_address_8616(addr: IRAddress, frame: StackFrameInfo8616) -> IRAddress:
     """Normalize proven SS stack addresses to stable BP-relative form."""
+    bp_offset: object
     if not isinstance(addr, IRAddress):
         return addr
 
-    if addr.space != MemSpace.SS:
+    if operator.ne(addr.space, MemSpace.SS):
         return addr
 
     if _is_bp_stable(addr):
@@ -544,12 +612,14 @@ def normalize_stack_address_8616(addr: IRAddress, frame: StackFrameInfo8616) -> 
     return addr
 
 
+@cython.ccall
 def normalize_semantic_accesses_8616(
     semantic_accesses: Iterable[object],
     frame: StackFrameInfo8616,
-) -> list[tuple[int, IRAddress]]:
+) -> object:
     """Normalize semantic access addresses before alias fact production."""
-    normalized: list[tuple[int, IRAddress]] = []
+    acc: object
+    normalized: list[tuple[cython.longlong, IRAddress]] = []
     for acc in semantic_accesses:
         mode = _semantic_access_mode_8616(acc)
         addr = _semantic_access_addr_8616(acc)
@@ -559,16 +629,18 @@ def normalize_semantic_accesses_8616(
     return normalized
 
 
+@cython.ccall
 def assert_no_unresolved_stable_ss_before_alias_8616(
     semantic_accesses: Iterable[object],
 ) -> None:
     """Fail when stable SS addresses reach alias without BP/SP identity."""
+    acc: object
     for acc in semantic_accesses:
         addr = _semantic_access_addr_8616(acc)
-        if not isinstance(addr, IRAddress) or addr.space != MemSpace.SS:
+        if not isinstance(addr, IRAddress) or operator.ne(addr.space, MemSpace.SS):
             continue
 
-        if addr.status != AddressStatus.STABLE:
+        if operator.ne(addr.status, AddressStatus.STABLE):
             continue
 
         if addr.base in {("bp",), ("sp",)}:

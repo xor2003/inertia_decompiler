@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize stack variables from alias-proven stack facts.
 
 Layer: Types/Lowering.
@@ -7,6 +8,7 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import cython
 
 import contextlib
 import logging
@@ -43,6 +45,8 @@ from .stack_variable_display_names import (
     apply_stack_variable_projection_name_8616,
     generated_stack_variable_name_8616,
 )
+import operator
+import builtins
 
 __all__ = [
     "attach_cod_stack_alias_annotations_8616",
@@ -55,16 +59,18 @@ log: logging.Logger = logging.getLogger(__name__)
 
 
 class _StackSlotIdentityLike(Protocol):
-    base: str
-    offset: int
+    base: object
+    offset: cython.longlong
     width: int | None
 
 
-def _dynamic_boundary_attr_8616(obj: object, name: str, default: object = None) -> object:
+@cython.ccall
+def _dynamic_boundary_attr_8616(obj: object, name: object, default: object = None) -> object:
     """Dynamic angr/codegen boundary: read optional project, C AST, or metadata attributes."""
     return getattr(obj, name, default)
 
 
+@cython.ccall
 def _stack_slot_identity_from_fact_8616(fact: AliasStorageFacts) -> _StackSlotIdentityLike | None:
     """Return the owned stack-slot identity carried by an alias fact."""
     identity = fact.identity
@@ -75,7 +81,7 @@ def _stack_slot_identity_from_fact_8616(fact: AliasStorageFacts) -> _StackSlotId
 
 def _typed_bp_frame_slots_8616(
     codegen: object,
-    required_ranges: frozenset[tuple[int, int]] | None = None,
+    required_ranges: object = None,
 ) -> tuple[StackFrameSlot, ...]:
     """Return typed SS:BP slots in the materializer's explicit evidence scope."""
     artifact = _dynamic_boundary_attr_8616(codegen, "_inertia_vex_ir_frame")
@@ -83,13 +89,14 @@ def _typed_bp_frame_slots_8616(
         return ()
     return tuple(
         slot
-        for slot in artifact.slots
+        for slot in iter(artifact.slots)
         if slot.base == "bp" and slot.role in {"local", "arg"} and slot.size > 0
         and (required_ranges is None or (slot.offset, slot.size) in required_ranges)
     )
 
 
-def _binding_covers_frame_slot_8616(binding: StackVariableBinding, slot: StackFrameSlot) -> bool:
+@cython.ccall
+def _binding_covers_frame_slot_8616(binding: StackVariableBinding, slot: StackFrameSlot) -> cython.bint:
     """Return whether one alias-proven binding covers the typed frame-slot byte range."""
     binding_offset = _canonical_stack_offset_8616(binding.bp_offset)
     slot_offset = _canonical_stack_offset_8616(slot.offset)
@@ -106,14 +113,14 @@ def _unbound_typed_frame_slots_8616(
 ) -> tuple[StackFrameSlot, ...]:
     """Return typed BP frame slots not covered by any alias-proven binding."""
     binding_tuple = tuple(bindings)
-    return tuple(slot for slot in slots if not any(_binding_covers_frame_slot_8616(binding, slot) for binding in binding_tuple))
+    return tuple(slot for slot in iter(slots) if not any(_binding_covers_frame_slot_8616(binding, slot) for binding in iter(binding_tuple)))
 
 
-def _normalized_cod_stack_names_8616(stack_aliases: dict[object, object]) -> dict[int, dict[str, object]]:
+def _normalized_cod_stack_names_8616(stack_aliases: object) -> dict[cython.longlong, dict[str, object]]:
     """Normalize optional label coordinates without manufacturing layout facts."""
     valid_aliases = (
         (bp_disp, alias)
-        for bp_disp, alias in stack_aliases.items()
+        for bp_disp, alias in builtins.iter(stack_aliases.items())
         if isinstance(bp_disp, int) and isinstance(alias, str) and alias
     )
     return {
@@ -121,11 +128,11 @@ def _normalized_cod_stack_names_8616(stack_aliases: dict[object, object]) -> dic
             "name": alias,
             "purpose": StackAnnotationPurpose8616.NAME_ONLY,
         }
-        for bp_disp, alias in sorted(valid_aliases)
+        for bp_disp, alias in builtins.iter(sorted(valid_aliases))
     }
 
 
-def attach_cod_stack_alias_annotations_8616(project: object, func_addr: int, cod_metadata: object) -> bool:
+def attach_cod_stack_alias_annotations_8616(project: object, func_addr: cython.longlong, cod_metadata: object) -> cython.bint:
     """Attach COD BP stack aliases as lowering-owned stack-name evidence.
 
     COD aliases are optional naming evidence, not a source-body oracle.  This
@@ -133,6 +140,8 @@ def attach_cod_stack_alias_annotations_8616(project: object, func_addr: int, cod
     purpose excludes them from stack/prototype layout recovery: a label is
     never evidence for an argument's existence, position, or width.
     """
+    func: object
+    functions: object
     stack_aliases = _dynamic_boundary_attr_8616(cod_metadata, "stack_aliases")
     if not isinstance(stack_aliases, dict) or not stack_aliases:
         return False
@@ -172,8 +181,8 @@ def attach_cod_stack_alias_annotations_8616(project: object, func_addr: int, cod
         return False
     changed = any(
         not isinstance(stack_vars.get(offset), dict)
-        or any(stack_vars[offset].get(key) != value for key, value in spec.items())
-        for offset, spec in normalized_specs.items()
+        or any(operator.ne(stack_vars[offset].get(key), value) for key, value in builtins.iter(spec.items()))
+        for offset, spec in builtins.iter(normalized_specs.items())
     )
     annotate_function(
         project,
@@ -183,6 +192,7 @@ def attach_cod_stack_alias_annotations_8616(project: object, func_addr: int, cod
     return changed
 
 
+@cython.ccall
 def canonical_stack_offset_8616(offset: object) -> object:
     """Normalize integer 16-bit stack offsets while preserving unknown values."""
     if not isinstance(offset, int):
@@ -193,7 +203,7 @@ def canonical_stack_offset_8616(offset: object) -> object:
 
 
 @overload
-def _canonical_stack_offset_8616(offset: int) -> int: ...
+def _canonical_stack_offset_8616(offset: cython.longlong) -> cython.longlong: ...
 
 
 @overload
@@ -206,11 +216,11 @@ def _canonical_stack_offset_8616(offset: object) -> object:
 
 
 def build_stack_variable_bindings_from_alias_facts_8616(
-    alias_facts: list[object],
-) -> list[StackVariableBinding]:
+    alias_facts: object,
+) -> object:
     """Build stack variable bindings from typed alias storage facts."""
 
-    def _impl() -> list[StackVariableBinding]:
+    def _impl() -> object:
         """Build StackVariableBinding list from alias storage facts.
 
         Only stack-space facts with proven BP base are accepted.
@@ -218,8 +228,11 @@ def build_stack_variable_bindings_from_alias_facts_8616(
 
         Returns empty list if no stack facts exist.
         """
-        address_sizes: dict[int, int] = {}
-        preferred_names: dict[int, str] = {}
+        current_size: object
+        slot: object
+        fact: object
+        address_sizes: dict[cython.longlong, cython.longlong] = {}
+        preferred_names: dict[cython.longlong, str] = {}
 
         for fact in alias_facts:
             if not isinstance(fact, AliasStorageFacts):
@@ -253,7 +266,7 @@ def build_stack_variable_bindings_from_alias_facts_8616(
         return cast(
             list[Any],
             build_stack_variable_bindings_8616(
-                sorted(address_sizes.items()),
+                sorted(tuple(address_sizes.items())),
                 preferred_names=preferred_names,
             ),
         )
@@ -261,12 +274,15 @@ def build_stack_variable_bindings_from_alias_facts_8616(
     return _impl()
 
 
-def _stack_object_name(offset: int, codegen: object | None = None) -> str:
+@cython.ccall
+def _stack_object_name(offset: cython.longlong, codegen: object | None = None) -> str:
+    cfunc: object
+    arg: object
     offset = _canonical_stack_offset_8616(offset)
     if not isinstance(offset, int):
         return "arg_0"
 
-    arg_offsets: set[int] = set()
+    arg_offsets: set[cython.longlong] = set()
     cfunc = _dynamic_boundary_attr_8616(codegen, "cfunc") if codegen is not None else None
     if cfunc is not None:
         arg_list = _dynamic_boundary_attr_8616(cfunc, "arg_list", ())
@@ -287,9 +303,10 @@ def _stack_object_name(offset: int, codegen: object | None = None) -> str:
     return f"local_{-offset:x}"
 
 
-def _stack_type_for_size(size: int, *, codegen: object | None = None) -> SimType:
+@cython.ccall
+def _stack_type_for_size(size: cython.longlong, *, codegen: object | None = None) -> SimType:
     """Return one exact-width unsigned scalar type or refuse unsupported widths."""
-    scalar_types: dict[int, SimType] = {
+    scalar_types: dict[cython.longlong, SimType] = {
         1: SimTypeChar(signed=False),
         2: SimTypeShort(signed=False),
         4: SimTypeLong(signed=False),
@@ -307,15 +324,17 @@ def _stack_type_for_size(size: int, *, codegen: object | None = None) -> SimType
     return t
 
 
+@cython.ccall
 def _promote_direct_stack_cvariable(
     codegen: object,
     cvar: object,
-    size: int,
+    size: cython.longlong,
     target_type: SimType,
     *,
-    preserve_existing_type: bool = False,
+    preserve_existing_type: cython.bint = False,
 ) -> None:
     """Update the type and size on an existing stack CVariable."""
+    variable: object
     if cvar is not None:
         current_type = _dynamic_boundary_attr_8616(cvar, "variable_type")
         if not preserve_existing_type and not isinstance(current_type, SimTypePointer):  # noqa: SIM102
@@ -332,7 +351,8 @@ def _promote_direct_stack_cvariable(
                 variable.size = size
 
 
-def _apply_stack_binding_name_8616(cvar: object, preferred_name: str | None) -> str | None:
+def _apply_stack_binding_name_8616(cvar: object, preferred_name: object) -> object:
+    unified: object
     if not isinstance(preferred_name, str) or not preferred_name:
         return None
     variable = _dynamic_boundary_attr_8616(cvar, "variable")
@@ -341,25 +361,29 @@ def _apply_stack_binding_name_8616(cvar: object, preferred_name: str | None) -> 
         _dynamic_boundary_attr_8616(cvar, "name"),
         _dynamic_boundary_attr_8616(_dynamic_boundary_attr_8616(cvar, "unified_variable"), "name"),
     )
-    if any(isinstance(name, str) and name and not generated_stack_variable_name_8616(name) for name in current_names):
+    if any(isinstance(name, str) and name and not generated_stack_variable_name_8616(name) for name in iter(current_names)):
         return None
     changed_name = None
-    if isinstance(variable, SimStackVariable) and _dynamic_boundary_attr_8616(variable, "name") != preferred_name:
+    if isinstance(variable, SimStackVariable) and operator.ne(_dynamic_boundary_attr_8616(variable, "name"), preferred_name):
         variable.name = preferred_name
         changed_name = preferred_name
-    if _dynamic_boundary_attr_8616(cvar, "name") != preferred_name:
+    if operator.ne(_dynamic_boundary_attr_8616(cvar, "name"), preferred_name):
         with contextlib.suppress(Exception):
             typing.cast(typing.Any, cvar).name = preferred_name
             changed_name = preferred_name
     unified = _dynamic_boundary_attr_8616(cvar, "unified_variable")
-    if unified is not None and _dynamic_boundary_attr_8616(unified, "name") != preferred_name:
+    if unified is not None and operator.ne(_dynamic_boundary_attr_8616(unified, "name"), preferred_name):
         typing.cast(typing.Any, unified).name = preferred_name
         changed_name = preferred_name
     return changed_name
 
 
-def _arg_cvar_at_stack_offset_8616(codegen: object, offset: int) -> object | None:
+@cython.ccall
+def _arg_cvar_at_stack_offset_8616(codegen: object, offset: cython.longlong) -> object | None:
     """Return an existing argument at one canonical entry-SP offset."""
+    cfunc: object
+    projection: object
+    arg: object
     cfunc = _dynamic_boundary_attr_8616(codegen, "cfunc")
     if cfunc is None:
         return None
@@ -374,11 +398,12 @@ def _arg_cvar_at_stack_offset_8616(codegen: object, offset: int) -> object | Non
         # Native argument objects can retain BP-relative offsets after their
         # exact entry-SP projection is published. Never reinterpret that view.
         entry_offset = projection.entry_sp_offset if projection is not None else arg.variable.offset
-        if _canonical_stack_offset_8616(entry_offset) == offset:
+        if operator.eq(_canonical_stack_offset_8616(entry_offset), offset):
             return cast(object, arg)
     return None
 
 
+@cython.ccall
 def _register_stack_cvar_surface_8616(codegen: object, cvar: object, target_type: object) -> None:
     """Register a stack CVariable in codegen metadata without replacing stronger args."""
     variable = _dynamic_boundary_attr_8616(cvar, "variable")
@@ -393,15 +418,16 @@ def _register_stack_cvar_surface_8616(codegen: object, cvar: object, target_type
         unified_locals[variable] = {(cvar, _dynamic_boundary_attr_8616(cvar, "variable_type") or target_type)}
 
 
+@cython.ccall
 def _record_stack_cvar_8616(
     codegen: object,
     cvar: object,
     *,
-    binding_name: str | None,
-    offset: int,
-    bp_offset: int,
-    size: int,
-    publish_machine_bp: bool,
+    binding_name: object,
+    offset: cython.longlong,
+    bp_offset: cython.longlong,
+    size: cython.longlong,
+    publish_machine_bp: cython.bint,
 ) -> object:
     """Record projection name and machine-BP coordinates for one CVariable."""
     if isinstance(binding_name, str) and binding_name:
@@ -430,21 +456,25 @@ def _materialize_existing_views_8616(
     codegen: object,
     variables_in_use: object,
     *,
-    offset: int,
-    bp_offset: int,
-    size: int,
+    offset: cython.longlong,
+    bp_offset: cython.longlong,
+    size: cython.longlong,
     target_type: object,
-    binding_name: str | None,
-    publish_machine_bp: bool,
+    binding_name: object,
+    publish_machine_bp: cython.bint,
 ) -> object | None:
     """Promote and record matching regenerated views at this storage start."""
+    _candidate_cvar: object
+    _variable: object
+    candidate_cvar: object
+    variable: object
     if not isinstance(variables_in_use, dict):
         return None
     matches = [
         (var, cvar)
-        for var, cvar in variables_in_use.items()
+        for var, cvar in builtins.iter(variables_in_use.items())
         if isinstance(var, SimStackVariable)
-        and _canonical_stack_offset_8616(var.offset) == offset
+        and operator.eq(_canonical_stack_offset_8616(var.offset), offset)
         and (not isinstance(var.size, int) or var.size <= size)
     ]
     if not matches:
@@ -452,7 +482,7 @@ def _materialize_existing_views_8616(
     canonical_var, canonical_cvar = min(
         matches,
         key=lambda item: (
-            item[0].size != size,
+            operator.ne(item[0].size, size),
             not isinstance(item[0].size, int) or item[0].size < size,
             str(item[0].name or ""),
         ),
@@ -480,15 +510,16 @@ def _materialize_existing_views_8616(
     return recorded
 
 
+@cython.ccall
 def _materialize_new_stack_cvar_8616(
     codegen: object,
     cfunc: object,
     variables_in_use: object,
     *,
-    offset: int,
-    size: int,
+    offset: cython.longlong,
+    size: cython.longlong,
     target_type: object,
-    binding_name: str | None,
+    binding_name: object,
 ) -> tuple[object, object]:
     """Create and register a fresh SimStackVariable + CVariable pair."""
     variable = SimStackVariable(
@@ -519,16 +550,19 @@ def _materialize_new_stack_cvar_8616(
     return variable, cvar
 
 
+@cython.ccall
 def _materialize_stack_cvar_8616(
     codegen: object,
     offset: object,
-    size: int,
+    size: cython.longlong,
     *,
-    machine_bp_offset: int | None,
-    preferred_name: str | None,
-    publish_machine_bp: bool,
+    machine_bp_offset: object,
+    preferred_name: object,
+    publish_machine_bp: cython.bint,
 ) -> object | None:
     """Materialize one stack CVariable at an entry-SP offset."""
+    cfunc: object
+    existing: object
     cfunc = _dynamic_boundary_attr_8616(codegen, "cfunc")
     if cfunc is None:
         return None
@@ -585,14 +619,15 @@ def _materialize_stack_cvar_8616(
     )
 
 
+@cython.ccall
 def materialize_stack_cvar_at_offset_from_facts_8616(
     codegen: object,
-    offset: int,
-    size: int = 2,
+    offset: cython.longlong,
+    size: cython.longlong = 2,
     *,
     machine_bp_offset: int | None = None,
-    preferred_name: str | None = None,
-    publish_machine_bp: bool = True,
+    preferred_name: object = None,
+    publish_machine_bp: cython.bint = True,
 ) -> object | None:
     """Register a stack CVariable from an exact entry-SP projection.
 
@@ -612,12 +647,13 @@ def materialize_stack_cvar_at_offset_from_facts_8616(
     )
 
 
-def _stable_stack_fact_count_8616(alias_facts: list[object]) -> int:
+@cython.ccall
+def _stable_stack_fact_count_8616(alias_facts: object) -> cython.longlong:
     """Count alias facts carrying a stable stack identity."""
     return len(
         [
             fact
-            for fact in alias_facts
+            for fact in iter(alias_facts)
             if isinstance(fact, AliasStorageFacts)
             and isinstance(fact.identity, tuple)
             and len(fact.identity) >= 2
@@ -626,12 +662,13 @@ def _stable_stack_fact_count_8616(alias_facts: list[object]) -> int:
     )
 
 
-def _stable_bp_fact_count_8616(alias_facts: list[object]) -> int:
+@cython.ccall
+def _stable_bp_fact_count_8616(alias_facts: object) -> cython.longlong:
     """Count alias facts carrying a stable BP stack-slot identity."""
     return len(
         [
             fact
-            for fact in alias_facts
+            for fact in iter(alias_facts)
             if isinstance(fact, AliasStorageFacts)
             and (slot := _stack_slot_identity_from_fact_8616(fact)) is not None
             and slot.base == "bp"
@@ -639,13 +676,14 @@ def _stable_bp_fact_count_8616(alias_facts: list[object]) -> int:
     )
 
 
+@cython.ccall
 def _stack_lowering_debug_stats_8616(
-    stable_stack_fact_count: int,
-    stable_bp_fact_count: int,
+    stable_stack_fact_count: cython.longlong,
+    stable_bp_fact_count: cython.longlong,
     bindings: Collection[StackVariableBinding],
     typed_frame_slots: Collection[StackFrameSlot],
     unbound_typed_frame_slots: Collection[StackFrameSlot],
-) -> dict[str, int]:
+) -> dict[str, cython.longlong]:
     """Build the stack-lowering debug counter block."""
     return {
         "stable_stack_fact_count": stable_stack_fact_count,
@@ -663,17 +701,19 @@ def _stack_lowering_debug_stats_8616(
     }
 
 
+@cython.ccall
 def _materialization_offset_for_binding_8616(
     codegen: object,
     binding: object,
-    offset: int,
-    size: int,
-    entry_sp_offsets_by_bp_range: Mapping[tuple[int, int], int] | None,
-) -> int:
+    offset: cython.longlong,
+    size: cython.longlong,
+    entry_sp_offsets_by_bp_range: object,
+) -> cython.longlong:
     """Resolve the entry-SP materialization offset for one binding."""
+    existing_projection: object
+    materialization_offset: object
     if not isinstance(offset, int):
         raise TypeError(f"invalid stack binding offset {binding.bp_offset!r}")
-    materialization_offset: int | None
     if entry_sp_offsets_by_bp_range is None:
         existing_projection = stack_variable_coordinate_registry_8616(
             codegen
@@ -694,15 +734,17 @@ def _materialization_offset_for_binding_8616(
     return materialization_offset
 
 
+@cython.ccall
 def _materialize_stack_bindings_8616(
     codegen: object,
     bindings: Iterable[StackVariableBinding],
     entry_sp_offsets_by_bp_range: Mapping[tuple[int, int], int] | None,
-) -> tuple[int, list[StackSlotFailure], list[tuple[int, str]]]:
+) -> tuple[cython.longlong, list[StackSlotFailure], list[tuple[cython.longlong, str]]]:
     """Materialize each alias-proven binding; failures are typed, not fatal."""
+    binding: object
     materialized_count = 0
     failures_list: list[StackSlotFailure] = []
-    materialized: list[tuple[int, str]] = []
+    materialized: list[tuple[cython.longlong, str]] = []
 
     for binding in bindings:
         offset = _canonical_stack_offset_8616(binding.bp_offset)
@@ -749,9 +791,9 @@ def _materialize_stack_bindings_8616(
 
 def lower_stack_accesses_from_alias_facts_8616(
     codegen: object,
-    alias_facts: list[object],
+    alias_facts: object,
     *,
-    required_bp_ranges: frozenset[tuple[int, int]] | None = None,
+    required_bp_ranges: object = None,
     entry_sp_offsets_by_bp_range: Mapping[tuple[int, int], int] | None = None,
 ) -> StackLoweringResult:
     """Lower alias-proven BP facts into proven angr entry-SP CVariable surfaces."""
@@ -769,6 +811,8 @@ def lower_stack_accesses_from_alias_facts_8616(
         in codegen.cfunc.variables_in_use. Creating StackVariableBinding metadata is
         NOT materialization.
         """
+        lane: object
+        binding: object
         bindings = build_stack_variable_bindings_from_alias_facts_8616(alias_facts)
         typed_frame_slots = _typed_bp_frame_slots_8616(codegen, required_bp_ranges)
         unbound_typed_frame_slots = _unbound_typed_frame_slots_8616(bindings, typed_frame_slots)
@@ -787,7 +831,7 @@ def lower_stack_accesses_from_alias_facts_8616(
             raise PipelineHardError(
                 "typed BP frame slots not covered by alias-proven stack bindings",
                 layer="stack_lowering",
-                details={"unbound_slots": [slot.to_dict() for slot in unbound_typed_frame_slots]},
+                details={"unbound_slots": [slot.to_dict() for slot in iter(unbound_typed_frame_slots)]},
             )
         if os.environ.get("INERTIA_DEBUG_STACK_FACTS"):
             log.warning(

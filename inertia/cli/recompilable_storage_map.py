@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recompilable output.
 
 Responsibility: materialize proven segmented storage rows for generated-C recompilation.
@@ -11,9 +12,12 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+import dataclasses
 
 __all__ = [
     "RecompilableStorageMapArtifact",
@@ -34,62 +38,64 @@ _SEGMENT_ORDER = {
 }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RecompilableStorageMapCandidate:
     """Candidate segmented storage identity for recompilable C output."""
 
-    segment_reg: str
+    segment_reg: object
     segment_value: int | None
-    offset: int
-    width: int
-    identity_kind: str
-    association_classification: str
-    allow_linear_lowering: bool
-    stable_object_kind: str | None = None
-    stable_object_name: str | None = None
+    offset: cython.longlong
+    width: cython.longlong
+    identity_kind: object
+    association_classification: object
+    allow_linear_lowering: cython.bint
+    stable_object_kind: object = None
+    stable_object_name: object = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RecompilableStorageMapRow:
     """Accepted segmented storage row with proven linear-lowering support."""
 
-    segment_reg: str
+    segment_reg: object
     segment_value: int | None
-    offset: int
-    width: int
-    identity_kind: str
-    stable_object_kind: str | None
-    stable_object_name: str | None
+    offset: cython.longlong
+    width: cython.longlong
+    identity_kind: object
+    stable_object_kind: object
+    stable_object_name: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RecompilableStorageMapRefusal:
     """Rejected segmented storage candidate with an explicit refusal reason."""
 
-    segment_reg: str
-    offset: int
-    width: int
-    identity_kind: str
-    classification: str
-    reason: str
+    segment_reg: object
+    offset: cython.longlong
+    width: cython.longlong
+    identity_kind: object
+    classification: object
+    reason: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RecompilableStorageMapArtifact:
     """Complete accepted/refused segmented storage map for recompilation reports."""
 
-    rows: tuple[RecompilableStorageMapRow, ...]
-    refusals: tuple[RecompilableStorageMapRefusal, ...]
+    rows: object
+    refusals: object
 
 
-def _segment_sort_key(segment_reg: str) -> tuple[int, str]:
+@cython.ccall
+def _segment_sort_key(segment_reg: object) -> tuple[cython.longlong, str]:
     normalized = segment_reg.upper()
     return (_SEGMENT_ORDER.get(normalized, 99), normalized)
 
 
+@cython.ccall
 def _candidate_sort_key(
     candidate: RecompilableStorageMapCandidate,
-) -> tuple[tuple[int, str], int, int, str, str, str]:
+) -> tuple[tuple[cython.longlong, str], cython.longlong, cython.longlong, str, str, str]:
     return (
         _segment_sort_key(candidate.segment_reg),
         candidate.offset,
@@ -100,6 +106,7 @@ def _candidate_sort_key(
     )
 
 
+@cython.ccall
 def _refusal_reason(candidate: RecompilableStorageMapCandidate) -> str:
     if candidate.association_classification == "over_associated":
         return "multiple incompatible segment bases"
@@ -110,10 +117,12 @@ def _refusal_reason(candidate: RecompilableStorageMapCandidate) -> str:
     return "segment lowering not proven"
 
 
+@cython.ccall
 def build_recompilable_storage_map(
     candidates: Iterable[RecompilableStorageMapCandidate],
 ) -> RecompilableStorageMapArtifact:
     """Build a deterministic storage map from proven segmented candidates."""
+    candidate: object
     rows: list[RecompilableStorageMapRow] = []
     refusals: list[RecompilableStorageMapRefusal] = []
 

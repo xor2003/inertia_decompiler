@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bounded C-AST placement for proven numeric carry/borrow values.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -44,17 +47,21 @@ from .carry_borrow_bit_scope import (
     statement_containers_8616,
     variable_key_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class CarryBitCarrierClosure8616:
     """Exact low-instruction definitions reaching one carry mask."""
 
-    assignments: tuple[CAssignment, ...]
-    nodes: tuple[object, ...]
-    definition_nodes: tuple[tuple[object, ...], ...]
+    assignments: object
+    nodes: object
+    definition_nodes: object
 
 
+@cython.ccall
 def _constant_int_8616(node: object) -> int | None:
     """Return an integer constant through syntax-only casts."""
     while isinstance(node, CTypeCast):
@@ -62,8 +69,11 @@ def _constant_int_8616(node: object) -> int | None:
     return int(node.value) if isinstance(node, CConstant) and isinstance(node.value, int) else None
 
 
+@cython.ccall
 def _direct_masked_variable_8616(node: object) -> CVariable | None:
     """Return the variable in an exact ``value & 1`` expression."""
+    mask: object
+    value: object
     while isinstance(node, CTypeCast):
         node = node.expr
     if not isinstance(node, CBinaryOp) or node.op != "And":
@@ -82,8 +92,12 @@ def _direct_masked_variable_8616(node: object) -> CVariable | None:
     return None
 
 
-def _masked_carry_variable_8616(node: object) -> tuple[CVariable, int] | None:
+@cython.ccall
+def _masked_carry_variable_8616(node: object) -> object:
     """Return the carry variable and canonical mask depth for one C node."""
+    direct: object
+    mask: object
+    value: object
     direct = _direct_masked_variable_8616(node)
     if direct is not None:
         return direct, 1
@@ -101,8 +115,13 @@ def carry_bit_occurrences_8616(
     ownership: CFGOwnershipArtifact,
 ) -> tuple[CarryBitOccurrence8616, ...]:
     """Collect maximal carry masks owned by the proven high instruction."""
+    masked: object
+    container: object
+    node: object
+    statement: object
+    statement_index: object
     high_site = CFGInstructionSite8616(fact.high_block_addr, fact.high_ins_addr)
-    candidates_by_node: dict[int, CarryBitOccurrence8616] = {}
+    candidates_by_node: dict[cython.longlong, CarryBitOccurrence8616] = {}
     for container in statement_containers_8616(root):
         for statement_index, statement in enumerate(container.statements):
             for node in _iter_c_node_occurrences_8616(statement):
@@ -121,10 +140,11 @@ def carry_bit_occurrences_8616(
     candidates = tuple(candidates_by_node.values())
     if not candidates:
         return ()
-    maximal_depth = max(item.mask_depth for item in candidates)
-    return tuple(item for item in candidates if item.mask_depth == maximal_depth)
+    maximal_depth = max(item.mask_depth for item in iter(candidates))
+    return tuple(item for item in iter(candidates) if operator.eq(item.mask_depth, maximal_depth))
 
 
+@cython.ccall
 def _inlined_addition_carry_8616(
     node: object,
     low_site: CFGInstructionSite8616,
@@ -152,17 +172,24 @@ def _inlined_addition_carry_8616(
     return node
 
 
+@cython.ccall
 def inlined_carry_bit_occurrences_8616(
     root: object,
     fact: CarryBorrowBitLoweringFact8616,
     ownership: CFGOwnershipArtifact,
 ) -> tuple[InlinedCarryBitOccurrence8616, ...]:
     """Collect low carry projections inlined into exact high-site expressions."""
+    projection: object
+    container: object
+    high_node: object
+    node: object
+    statement: object
+    statement_index: object
     if fact.kind is not CarryBorrowKind8616.ADD_WITH_CARRY:
         return ()
     low_site = CFGInstructionSite8616(fact.low_block_addr, fact.low_ins_addr)
     high_site = CFGInstructionSite8616(fact.high_block_addr, fact.high_ins_addr)
-    candidates_by_node: dict[int, InlinedCarryBitOccurrence8616] = {}
+    candidates_by_node: dict[cython.longlong, InlinedCarryBitOccurrence8616] = {}
     for container in statement_containers_8616(root):
         for statement_index, statement in enumerate(container.statements):
             for high_node in _iter_c_node_occurrences_8616(statement):
@@ -176,7 +203,7 @@ def inlined_carry_bit_occurrences_8616(
                     or not node_matches_instruction_site_8616(high_node, high_site, ownership)
                 ):
                     continue
-                low_projections: dict[int, CBinaryOp] = {}
+                low_projections: dict[cython.longlong, CBinaryOp] = {}
                 for node in _iter_c_nodes_deep_8616(high_node.lhs):
                     projection = _inlined_addition_carry_8616(node, low_site, ownership)
                     if projection is not None:
@@ -195,12 +222,16 @@ def inlined_carry_bit_occurrences_8616(
     return tuple(candidates_by_node.values())
 
 
+@cython.ccall
 def carry_bit_carrier_closure_8616(
     occurrence: CarryBitOccurrence8616,
     fact: CarryBorrowBitLoweringFact8616,
     ownership: CFGOwnershipArtifact,
 ) -> CarryBitCarrierClosure8616 | CarryBorrowBitLoweringFailure8616:
     """Resolve the exact low-instruction assignment slice reaching carry."""
+    definitions: object
+    seed: object
+    assignment: object
     seed = variable_key_8616(occurrence.flag_variable)
     if seed is None:
         return CarryBorrowBitLoweringFailure8616.CARRY_VARIABLE_IDENTITY_MISSING
@@ -220,13 +251,15 @@ def carry_bit_carrier_closure_8616(
     return CarryBitCarrierClosure8616(selection.definitions, tuple(nodes), tuple(definition_nodes))
 
 
-def _side_effect_free_8616(node: object) -> bool:
+def _side_effect_free_8616(node: object) -> cython.bint:
     """Return whether deleting one carrier RHS cannot delete an effect."""
-    return not any(isinstance(item, (CFunctionCall, CDirtyExpression)) for item in _iter_c_nodes_deep_8616(node))
+    return not any(isinstance(item, (CFunctionCall, CDirtyExpression)) for item in builtins.iter(_iter_c_nodes_deep_8616(node)))
 
 
-def _owned_projection_pure_8616(node: object) -> bool:
+@cython.ccall
+def _owned_projection_pure_8616(node: object) -> cython.bint:
     """Return whether one owned expression can be discarded after equivalent-arm proof."""
+    item: object
     for item in _iter_c_nodes_deep_8616(node):
         if isinstance(item, CDirtyExpression):
             return False
@@ -235,12 +268,14 @@ def _owned_projection_pure_8616(node: object) -> bool:
     return True
 
 
+@cython.ccall
 def _equivalent_low_arm_assignment_8616(
     statement: object,
     fact: CarryBorrowBitLoweringFact8616,
     ownership: CFGOwnershipArtifact,
 ) -> CAssignment | None:
     """Return one low result assignment duplicated across two pure conditional arms."""
+    arms: object
     if not isinstance(statement, CIfElse) or not isinstance(statement.else_node, CStatements):
         return None
     pairs = statement.condition_and_nodes
@@ -264,7 +299,7 @@ def _equivalent_low_arm_assignment_8616(
     first, second = arms
     if not (
         isinstance(first.rhs, CBinaryOp)
-        and first.rhs.op == operation
+        and operator.eq(first.rhs.op, operation)
         and node_matches_instruction_site_8616(first.rhs, low_site, ownership)
         and _same_c_expression_8616(first.rhs, second.rhs)
     ):
@@ -272,28 +307,34 @@ def _equivalent_low_arm_assignment_8616(
     return first
 
 
+@cython.ccall
 def _same_variable_assignments_8616(
     first: object,
     second: object,
-) -> tuple[CAssignment, CAssignment] | None:
+) -> object:
     """Return both assignments when they bind the same C-SSA variable."""
     if not (
         isinstance(first, CAssignment)
         and isinstance(second, CAssignment)
         and isinstance(first.lhs, CVariable)
         and isinstance(second.lhs, CVariable)
-        and variable_key_8616(first.lhs) == variable_key_8616(second.lhs)
+        and operator.eq(variable_key_8616(first.lhs), variable_key_8616(second.lhs))
     ):
         return None
     return first, second
 
 
+@cython.ccall
 def _collapse_equivalent_low_arms_8616(
     root: object,
     fact: CarryBorrowBitLoweringFact8616,
     ownership: CFGOwnershipArtifact,
-) -> bool:
+) -> cython.bint:
     """Collapse pure identical structured copies of the exact low result."""
+    assignment: object
+    container: object
+    statement: object
+    statement_index: object
     changed = False
     for container in statement_containers_8616(root):
         for statement_index, statement in enumerate(tuple(container.statements)):
@@ -310,40 +351,46 @@ def _static_definition_8616(
     variable: CVariable,
 ) -> CAssignment | None:
     """Return one equivalent static-value definition for a C-SSA variable."""
+    key: object
     key = variable_key_8616(variable)
     if key is None:
         return None
     definitions = tuple(
         node
-        for node in _iter_c_node_occurrences_8616(root)
+        for node in builtins.iter(_iter_c_node_occurrences_8616(root))
         if isinstance(node, CAssignment)
         and isinstance(node.lhs, CVariable)
-        and variable_key_8616(node.lhs) == key
+        and operator.eq(variable_key_8616(node.lhs), key)
         and isinstance(node.rhs, CVariable)
         and node.rhs.vvar_id is None
     )
     if not definitions or any(
-        not _same_c_expression_8616(definition.rhs, definitions[0].rhs) for definition in definitions[1:]
+        not _same_c_expression_8616(definition.rhs, definitions[0].rhs) for definition in iter(definitions[1:])
     ):
         return None
     return definitions[0]
 
 
+@cython.ccall
 def _project_low_static_operands_8616(
     root: object,
     fact: CarryBorrowBitLoweringFact8616,
     ownership: CFGOwnershipArtifact,
-) -> bool:
+) -> cython.bint:
     """Project exact low arithmetic through unique static C-SSA definitions."""
+    definition: object
+    attribute: object
+    container: object
+    node: object
     low_site = CFGInstructionSite8616(fact.low_block_addr, fact.low_ins_addr)
     operation = "Sub" if fact.kind is CarryBorrowKind8616.SUB_WITH_BORROW else "Add"
-    projected_definitions: dict[int, CAssignment] = {}
+    projected_definitions: dict[cython.longlong, CAssignment] = {}
     changed = False
     for node in _iter_c_node_occurrences_8616(root):
         if (
             not isinstance(node, CAssignment)
             or not isinstance(node.rhs, CBinaryOp)
-            or node.rhs.op != operation
+            or operator.ne(node.rhs.op, operation)
             or not node_matches_instruction_site_8616(node.rhs, low_site, ownership)
         ):
             continue
@@ -367,7 +414,7 @@ def _project_low_static_operands_8616(
     for container in statement_containers_8616(root):
         container.statements = [
             statement
-            for statement in container.statements
+            for statement in iter(container.statements)
             if not (
                 id(statement) in projected_definitions
                 and isinstance(statement, CAssignment)
@@ -379,17 +426,19 @@ def _project_low_static_operands_8616(
     return True
 
 
+@cython.ccall
 def finalize_low_arithmetic_copies_8616(
     root: object,
     fact: CarryBorrowBitLoweringFact8616,
     ownership: CFGOwnershipArtifact,
-) -> bool:
+) -> cython.bint:
     """Canonicalize exact low arithmetic after its carry use is materialized."""
     collapsed = _collapse_equivalent_low_arms_8616(root, fact, ownership)
     projected = _project_low_static_operands_8616(root, fact, ownership)
     return collapsed or projected
 
 
+@cython.ccall
 def prune_dead_carry_bit_carriers_8616(
     occurrence: CarryBitOccurrence8616,
     closure: CarryBitCarrierClosure8616,
@@ -397,7 +446,10 @@ def prune_dead_carry_bit_carriers_8616(
     ownership: CFGOwnershipArtifact,
 ) -> None:
     """Retire only dead, pure assignments in the proven low carrier slice."""
-    owned = {id(assignment) for assignment in closure.assignments}
+    key: object
+    container: object
+    statement: object
+    owned = {id(assignment) for assignment in iter(closure.assignments)}
     low_site = CFGInstructionSite8616(fact.low_block_addr, fact.low_ins_addr)
     while True:
         reads = read_counts_8616(occurrence.root)

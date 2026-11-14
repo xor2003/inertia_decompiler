@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Scope-bound callee stack effect for one authenticated call chain.
 
 Layer: Semantics.
@@ -19,6 +20,8 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -42,6 +45,8 @@ from inertia.ir.real16_invocation_domain import (
 
 from .callsite_summary import CallsiteMachineFrameKind8616
 from .direct_ret_call_effect import direct_call_target_is_bound_8616
+import dataclasses
+import operator
 
 __all__ = [
     "ScopedCalleeStackCallFailure8616",
@@ -63,7 +68,7 @@ class ScopedCalleeStackCallFailure8616(StrEnum):
     BODY_REFUSED = "body_refused"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ScopedCalleeStackCallResult8616:
     """Physical call identity, dual scope bindings, and the scoped body proof.
 
@@ -90,13 +95,13 @@ class ScopedCalleeStackCallResult8616:
     )
     failure: ScopedCalleeStackCallFailure8616 | None = None
     detail: str = ""
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 1
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 1
 
-    def _retained_call_is_accepted(self) -> bool:
+    def _retained_call_is_accepted(self) -> cython.bint:
         """Require published call evidence rather than a retained refusal."""
         counts = (
             self.raw_fact_count, self.normalized_fact_count,
@@ -105,11 +110,12 @@ class ScopedCalleeStackCallResult8616:
         )
         return bool(
             self.failure is None and counts == (1, 1, 1, 1, 0)
-            and all(type(count) is int for count in counts)
+            and all(type(count) is int for count in iter(counts))
         )
 
-    def _call_identity_is_current(self) -> bool:
+    def _call_identity_is_current(self) -> cython.bint:
         """Recheck the physical CALL binding against the live source surface."""
+        coverage: object
         if not self._retained_call_is_accepted() or self.body is None:
             return False
         if self.target_addr is None or is_synthetic_call_stub_8616(
@@ -121,7 +127,7 @@ class ScopedCalleeStackCallResult8616:
             return False
         return bool(
             coverage.boundary.project is self.project
-            and coverage.artifact.function_addr == self.target_addr
+            and operator.eq(coverage.artifact.function_addr, self.target_addr)
             and direct_call_target_is_bound_8616(
                 self.project, self.callsite_addr, self.return_addr,
                 self.target_addr, self.frame_kind,
@@ -129,7 +135,7 @@ class ScopedCalleeStackCallResult8616:
         )
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Scoped evidence is never context-free; see ``complete_for``."""
         return self.complete_for(None, None)
 
@@ -137,7 +143,7 @@ class ScopedCalleeStackCallResult8616:
         self,
         offered_caller_scope: object,
         offered_callee_scope: object,
-    ) -> bool:
+    ) -> cython.bint:
         """Authorize only under both retained scope provenances, fresh.
 
         The offered callee scope must share the retained body scope's
@@ -161,7 +167,7 @@ class ScopedCalleeStackCallResult8616:
         self,
         offered_caller_scope: object,
         offered_callee_scope: object,
-    ) -> bool:
+    ) -> cython.bint:
         """Require both offered scopes to share retained provenance and link.
 
         The offered callee scope must share the retained body scope and carry
@@ -183,7 +189,7 @@ class ScopedCalleeStackCallResult8616:
         row = link.callsite
         if type(row) is not DecodedDirectCallsite8616:
             return False
-        if row.callsite_addr != self.callsite_addr or row.target_addr != self.target_addr:
+        if operator.ne(row.callsite_addr, self.callsite_addr) or operator.ne(row.target_addr, self.target_addr):
             return False
         return same_real16_entry_scope_8616(link.parent, offered_caller_scope)
 
@@ -206,6 +212,7 @@ class ScopedCalleeStackCallResult8616:
         return self.body.return_sp_delta_for(offered_callee_scope)
 
 
+@cython.ccall
 def _failure_result_8616(
     project: object,
     callsite_addr: int | None,
@@ -213,7 +220,7 @@ def _failure_result_8616(
     target_addr: int | None,
     frame_kind: CallsiteMachineFrameKind8616 | None,
     failure: ScopedCalleeStackCallFailure8616,
-    detail: str = "",
+    detail: object = "",
     *,
     caller_scope: Real16InvocationDomain8616 | None = None,
     callee_scope: Real16InvocationDomain8616 | None = None,
@@ -226,6 +233,7 @@ def _failure_result_8616(
     )
 
 
+@cython.ccall
 def prove_scoped_direct_callee_stack_effect_8616(
     project: object,
     callsite_addr: int | None,
@@ -271,8 +279,8 @@ def prove_scoped_direct_callee_stack_effect_8616(
     row = link.callsite
     chain_bound = (
         type(row) is DecodedDirectCallsite8616
-        and row.callsite_addr == callsite_addr
-        and row.target_addr == target_addr
+        and operator.eq(row.callsite_addr, callsite_addr)
+        and operator.eq(row.target_addr, target_addr)
         and not row.is_far
         and link.complete
         and callee_scope.complete
@@ -316,7 +324,7 @@ def prove_scoped_direct_callee_stack_effect_8616(
         )
     if not (
         coverage.boundary.project is project
-        and coverage.artifact.function_addr == target_addr
+        and operator.eq(coverage.artifact.function_addr, target_addr)
     ):
         return _failure_result_8616(
             project, callsite_addr, return_addr, target_addr, frame_kind,

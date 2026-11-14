@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Remove a proven near-return control slot from the C argument interface.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -21,6 +24,7 @@ from angr.sim_variable import SimStackVariable
 from inertia.alias.alias_model_impl import _stack_slot_identity_for_variable
 
 from .authoritative_function_prototypes import authoritative_function_prototype_8616
+import dataclasses
 
 
 class NearReturnAddressArgumentVerdict8616(StrEnum):
@@ -32,31 +36,31 @@ class NearReturnAddressArgumentVerdict8616(StrEnum):
     CENSUS_UNAVAILABLE_REFUSE = "census_unavailable_refuse"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NearReturnAddressArgumentStats8616:
     """Closed evidence counts for near-return argument exclusion."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NearReturnAddressArgumentResult8616:
     """Outcome published by the near-return argument owner."""
 
     verdict: NearReturnAddressArgumentVerdict8616
     stats: NearReturnAddressArgumentStats8616
-    changed: bool = False
+    changed: cython.bint = False
 
 
 class _StackIdentity8616(Protocol):
     """Alias identity fields needed to recognize the near-return word."""
 
-    base: str
-    offset: int
+    base: object
+    offset: cython.longlong
     width: int | None
 
     def end_offset(self) -> int | None:
@@ -74,14 +78,16 @@ class _Codegen8616(Protocol):
     """Third-party codegen fields carrying the typed result."""
 
     cfunc: _CFunction8616 | None
-    _inertia_codegen_decl_refresh_required_8616: bool
+    _inertia_codegen_decl_refresh_required_8616: cython.bint
     _inertia_near_return_address_argument_result_8616: (
         NearReturnAddressArgumentResult8616
     )
 
 
-def _near_return_word_8616(candidate: object) -> bool:
+@cython.ccall
+def _near_return_word_8616(candidate: object) -> cython.bint:
     """Return whether one C argument is exactly the BP+2 near-return word."""
+    identity: object
     if not isinstance(candidate, structured_c.CVariable):
         return False
     variable = candidate.variable
@@ -105,6 +111,8 @@ def prune_near_return_address_argument_8616(
     function: object | None,
 ) -> NearReturnAddressArgumentResult8616:
     """Exclude one proven BP+2 control slot when the typed census closes."""
+    authoritative: object
+    cfunc: object
     typed_codegen = cast(_Codegen8616, codegen)
     try:
         cfunc = typed_codegen.cfunc
@@ -114,10 +122,10 @@ def prune_near_return_address_argument_8616(
         arguments = list(cfunc.arg_list or ()) if cfunc is not None else []
     except AttributeError:
         arguments = []
-    candidates = tuple(arg for arg in arguments if _near_return_word_8616(arg))
+    candidates = tuple(arg for arg in iter(arguments) if _near_return_word_8616(arg))
     raw_count = sum(
         1
-        for arg in arguments
+        for arg in iter(arguments)
         if isinstance(arg, structured_c.CVariable)
         and isinstance(arg.variable, SimStackVariable)
         and arg.variable.base == "bp"
@@ -155,7 +163,7 @@ def prune_near_return_address_argument_8616(
         else:
             control_slot = candidates[0]
             assert cfunc is not None
-            cfunc.arg_list = [arg for arg in arguments if arg is not control_slot]
+            cfunc.arg_list = [arg for arg in iter(arguments) if arg is not control_slot]
             result = NearReturnAddressArgumentResult8616(
                 NearReturnAddressArgumentVerdict8616.MATERIALIZED,
                 NearReturnAddressArgumentStats8616(

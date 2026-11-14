@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Legacy JCC cleanup bridge; do not add new semantic recovery here.
 
 Layer: Rewrite/Postprocess cleanup.
@@ -46,6 +47,8 @@ rendered text, COD, source, or CLI/reporting evidence here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 import logging
@@ -100,6 +103,9 @@ from inertia.postprocess.decompiler_postprocess_utils import (
 from inertia.postprocess.flags_cleanup import _c_expr_uses_register_8616
 from inertia.structuring.condition_call_effects import classify_condition_call_effects_8616
 from inertia.validation.tail_validation_fingerprint import _expr_fingerprint
+import dataclasses
+import operator
+import builtins
 
 __all__ = ["_rewrite_decoded_jcc_conditions_8616"]
 
@@ -118,11 +124,11 @@ _COND_TO_CMP_OP_8616: dict[str, str] = {
 
 _JCC_COMPARE_OPS_8616: dict[str, str] = {
     mnemonic: _COND_TO_CMP_OP_8616[cond_op]
-    for mnemonic, cond_op in JCC_TO_COND_8616.items()
+    for mnemonic, cond_op in builtins.iter(JCC_TO_COND_8616.items())
     if cond_op in _COND_TO_CMP_OP_8616
 }
 
-_JCC_COMPARE_MASK_TESTS_8616: dict[str, tuple[int, bool]] = {
+_JCC_COMPARE_MASK_TESTS_8616: dict[str, tuple[cython.longlong, cython.bint]] = {
     "jo": (0x800, True),
     "jno": (0x800, False),
     "js": (0x80, True),
@@ -133,7 +139,7 @@ _JCC_COMPARE_MASK_TESTS_8616: dict[str, tuple[int, bool]] = {
     "jpo": (0x4, False),
 }
 
-_JCC_BLOCK_ENTRY_CARRY_TESTS_8616: dict[str, tuple[int, bool]] = {
+_JCC_BLOCK_ENTRY_CARRY_TESTS_8616: dict[str, tuple[cython.longlong, cython.bint]] = {
     "jb": (0x1, True),
     "jc": (0x1, True),
     "jnae": (0x1, True),
@@ -154,14 +160,14 @@ _INVERT_CMP_OP_8616: dict[str, str] = {
 _log = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _DecodedCmpGuard8616:
     lhs: object
     rhs: object
-    op: str
+    op: object
     expr: object | None = None
-    consumed_branch_keys: tuple[tuple[int, int], ...] = ()
-    status_output_proven: bool = False
+    consumed_branch_keys: tuple[tuple[cython.longlong, cython.longlong], ...] = ()
+    status_output_proven: cython.bint = False
 
 
 class _JccPolarityEvidence8616(Enum):
@@ -178,18 +184,24 @@ class _JccDuplicateGuardDecision8616(Enum):
     PRUNE_PREVIOUS_RAW_DUPLICATE = "prune_previous_raw_duplicate"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _DecodedGateResult8616:
     """Outcome of a decoded-guard polarity gate: refuse, replace, or continue."""
 
-    refused: bool = False
+    refused: cython.bint = False
     replacement: object | None = None
 
 
-def _condition_tags_8616(node: object) -> tuple[int, int] | None:
-    seen: set[int] = set()
+def _condition_tags_8616(node: object) -> object:
+    seen: set[cython.longlong] = set()
 
-    def _walk(current: object) -> tuple[int, int] | None:
+    def _walk(current: object) -> object:
+        block_addr: object
+        child: object
+        found: object
+        ins_addr: object
+        tags: object
+        attr: object
         if current is None:
             return None
         marker = id(current)
@@ -212,10 +224,13 @@ def _condition_tags_8616(node: object) -> tuple[int, int] | None:
     return _walk(node)
 
 
-def _condition_materialized_by_jcc_8616(node: object) -> bool:
-    seen: set[int] = set()
+def _condition_materialized_by_jcc_8616(node: object) -> cython.bint:
+    seen: set[cython.longlong] = set()
 
-    def _walk(current: object) -> bool:
+    def _walk(current: object) -> cython.bint:
+        child: object
+        tags: object
+        attr: object
         if current is None:
             return False
         marker = id(current)
@@ -237,10 +252,15 @@ def _condition_materialized_by_jcc_8616(node: object) -> bool:
     return _walk(node)
 
 
-def _jcc_materialized_polarity_evidence_8616(node: object) -> str | None:
-    seen: set[int] = set()
+def _jcc_materialized_polarity_evidence_8616(node: object) -> object:
+    seen: set[cython.longlong] = set()
 
-    def _walk(current: object) -> str | None:
+    def _walk(current: object) -> object:
+        child: object
+        evidence: object
+        found: object
+        tags: object
+        attr: object
         if current is None:
             return None
         marker = id(current)
@@ -262,7 +282,10 @@ def _jcc_materialized_polarity_evidence_8616(node: object) -> str | None:
     return _walk(node)
 
 
-def _reg_offset_8616(project: Any, name: str) -> int | None:
+@cython.ccall
+def _reg_offset_8616(project: Any, name: object) -> int | None:
+    reg: object
+    registers: object
     registers = getattr(getattr(project, "arch", None), "registers", None)
     if not isinstance(registers, dict):
         return None
@@ -270,7 +293,12 @@ def _reg_offset_8616(project: Any, name: str) -> int | None:
     return None if reg is None else int(reg[0])
 
 
-def _assignment_lhs_register_info_8616(project: Any, lhs: object) -> tuple[int, int] | None:
+@cython.ccall
+def _assignment_lhs_register_info_8616(project: Any, lhs: object) -> object:
+    bits: object
+    dirty: object
+    reg_offset: object
+    size: object
     variable = getattr(lhs, "variable", None) if isinstance(lhs, CVariable) else None
     if isinstance(variable, SimRegisterVariable):
         return int(variable.reg), int(variable.size or 0)
@@ -290,8 +318,11 @@ def _assignment_lhs_register_info_8616(project: Any, lhs: object) -> tuple[int, 
     return int(reg_offset), int(size_bytes)
 
 
-def _const_8616(value: int, codegen: object) -> CConstant:
+@cython.ccall
+def _const_8616(value: cython.longlong, codegen: object) -> CConstant:
     """Build an unsigned word constant bound to the active project arch when available."""
+    arch: object
+    project: object
     const_type = SimTypeShort(False)
     project = getattr(codegen, "project", None)
     arch = getattr(project, "arch", None)
@@ -301,8 +332,11 @@ def _const_8616(value: int, codegen: object) -> CConstant:
     return CConstant(int(value), const_type, codegen=codegen)
 
 
-def _signed_const_8616(value: int, codegen: object) -> CConstant:
+@cython.ccall
+def _signed_const_8616(value: cython.longlong, codegen: object) -> CConstant:
     """Build a signed word constant bound to the active project arch when available."""
+    arch: object
+    project: object
     const_type = SimTypeShort(True)
     project = getattr(codegen, "project", None)
     arch = getattr(project, "arch", None)
@@ -312,7 +346,9 @@ def _signed_const_8616(value: int, codegen: object) -> CConstant:
     return CConstant(int(value), const_type, codegen=codegen)
 
 
-def _type_with_project_arch_8616(project: Any, sim_type: Any) -> Any | None:
+@cython.ccall
+def _type_with_project_arch_8616(project: Any, sim_type: object) -> Any | None:
+    arch: object
     if sim_type is None:
         return None
     try:
@@ -330,8 +366,10 @@ def _type_with_project_arch_8616(project: Any, sim_type: Any) -> Any | None:
     return sim_type
 
 
-def _fix_expr_type_8616(node: Any, project: Any, seen: set[int]) -> Any | None:
+@cython.ccall
+def _fix_expr_type_8616(node: object, project: Any, seen: object) -> Any | None:
     """Rebase one expression node's type fields on the project arch."""
+    fixed_operand: object
     if node is None:
         return None
     marker = id(node)
@@ -360,8 +398,10 @@ def _fix_expr_type_8616(node: Any, project: Any, seen: set[int]) -> Any | None:
     return node
 
 
-def _fix_cast_type_8616(node: Any, project: Any, seen: set[int]) -> None:
+@cython.ccall
+def _fix_cast_type_8616(node: Any, project: Any, seen: object) -> None:
     """Rebase the inner expression and cast endpoints of one cast."""
+    fixed_expr: object
     with contextlib.suppress(Exception):
         fixed_expr = _fix_expr_type_8616(node.expr, project, seen)
         if fixed_expr is not None:
@@ -370,8 +410,10 @@ def _fix_cast_type_8616(node: Any, project: Any, seen: set[int]) -> None:
     _fix_type_attr_8616(node, "dst_type", project)
 
 
-def _fix_ite_type_8616(node: Any, project: Any, seen: set[int]) -> None:
+@cython.ccall
+def _fix_ite_type_8616(node: Any, project: Any, seen: object) -> None:
     """Rebase every sub-expression of one ternary node."""
+    fixed_condition: object
     with contextlib.suppress(Exception):
         node.cond = _fix_expr_type_8616(node.cond, project, seen)
     with contextlib.suppress(Exception):
@@ -384,8 +426,11 @@ def _fix_ite_type_8616(node: Any, project: Any, seen: set[int]) -> None:
         node.iffalse = _fix_expr_type_8616(node.iffalse, project, seen)
 
 
-def _fix_type_attr_8616(node: Any, attr: str, project: Any) -> None:
+@cython.ccall
+def _fix_type_attr_8616(node: Any, attr: object, project: Any) -> None:
     """Rebase one type attribute when a project-arch version exists."""
+    current: object
+    fixed: object
     current = getattr(node, attr, None)
     fixed = _type_with_project_arch_8616(project, current)
     if fixed is not None and fixed is not current:
@@ -393,15 +438,16 @@ def _fix_type_attr_8616(node: Any, attr: str, project: Any) -> None:
             setattr(node, attr, fixed)
 
 
-def _ensure_c_expr_type_has_arch_8616(project: Any, expr: Any) -> Any | None:
+@cython.ccall
+def _ensure_c_expr_type_has_arch_8616(project: Any, expr: object) -> Any | None:
     if expr is None:
         return None
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     return _fix_expr_type_8616(expr, project, seen)
 
 
 def _build_arch_safe_binary_op_8616(
-    project: Any, codegen: Any, op: str, lhs: Any, rhs: Any, **kwargs: Any
+    project: Any, codegen: Any, op: object, lhs: Any, rhs: Any, **kwargs: Any
 ) -> CBinaryOp:
     fixed_lhs = _ensure_c_expr_type_has_arch_8616(project, lhs)
     fixed_rhs = _ensure_c_expr_type_has_arch_8616(project, rhs)
@@ -409,7 +455,7 @@ def _build_arch_safe_binary_op_8616(
 
 
 def _try_build_arch_safe_binary_op_8616(
-    project: Any, codegen: Any, op: str, lhs: Any, rhs: Any, **kwargs: Any
+    project: Any, codegen: Any, op: object, lhs: Any, rhs: Any, **kwargs: Any
 ) -> CBinaryOp | None:
     try:
         return _build_arch_safe_binary_op_8616(project, codegen, op, lhs, rhs, **kwargs)
@@ -421,12 +467,19 @@ def _try_build_arch_safe_binary_op_8616(
         raise
 
 
-def _register_exprs_by_ins_addr_8616(codegen: Any, project: Any) -> dict[tuple[int, str, int], object]:
-    def _impl() -> dict[tuple[int, str, int], object]:
+def _register_exprs_by_ins_addr_8616(codegen: Any, project: Any) -> object:
+    def _impl() -> object:
+        cache: object
+        lhs_reg_info: object
+        tags: object
+        node: object
+        reg_name: object
+        reg_offset: object
+        reg_size: object
         cache = getattr(codegen, "_inertia_jcc_register_exprs_by_ins_addr_8616", None)
         if isinstance(cache, dict):
             return cache
-        reg_exprs: dict[tuple[int, str, int], object] = {}
+        reg_exprs: dict[tuple[cython.longlong, str, cython.longlong], object] = {}
         for node in _iter_c_nodes_deep_8616(getattr(codegen, "cfunc", None)):
             if not isinstance(node, CAssignment):
                 continue
@@ -439,13 +492,13 @@ def _register_exprs_by_ins_addr_8616(codegen: Any, project: Any) -> dict[tuple[i
                 continue
             lhs_reg_offset, var_size = lhs_reg_info
             for reg_name, (reg_offset, reg_size) in project.arch.registers.items():
-                if int(reg_offset) != int(lhs_reg_offset):
+                if operator.ne(int(reg_offset), int(lhs_reg_offset)):
                     continue
-                if var_size and int(reg_size) != var_size:
+                if var_size and operator.ne(int(reg_size), var_size):
                     continue
                 rhs = node.rhs
                 expr = (
-                    node.lhs if any(isinstance(child, CFunctionCall) for child in _iter_c_nodes_deep_8616(rhs)) else rhs
+                    node.lhs if any(isinstance(child, CFunctionCall) for child in builtins.iter(_iter_c_nodes_deep_8616(rhs))) else rhs
                 )
                 reg_exprs[(ins_addr, reg_name.lower(), int(reg_size))] = expr
         with contextlib.suppress(Exception):
@@ -455,27 +508,39 @@ def _register_exprs_by_ins_addr_8616(codegen: Any, project: Any) -> dict[tuple[i
     return _impl()
 
 
+@cython.ccall
 def _lookup_register_expr_8616(
-    reg_exprs: dict[tuple[int, str, int], object], ins_addr: int, reg_name: str, size: int
+    reg_exprs: object, ins_addr: cython.longlong, reg_name: object, size: cython.longlong
 ) -> object | None:
+    expr: object
+    _candidate_size: object
+    candidate_addr: object
+    candidate_expr: object
+    candidate_name: object
     expr = reg_exprs.get((int(ins_addr), reg_name.lower(), int(size)))
     if expr is not None:
         return expr
     for (candidate_addr, candidate_name, _candidate_size), candidate_expr in reg_exprs.items():
-        if int(candidate_addr) == int(ins_addr) and candidate_name == reg_name.lower():
+        if operator.eq(int(candidate_addr), int(ins_addr)) and operator.eq(candidate_name, reg_name.lower()):
             return candidate_expr
     return None
 
 
+@cython.ccall
 def _lookup_register_expr_before_8616(
-    reg_exprs: dict[tuple[int, str, int], object], ins_addr: int, reg_name: str, size: int
+    reg_exprs: object, ins_addr: cython.longlong, reg_name: object, size: cython.longlong
 ) -> object | None:
+    best_addr: object
+    candidate_addr: object
+    candidate_expr: object
+    candidate_name: object
+    candidate_size: object
     best_addr = None
     best_expr = None
     for (candidate_addr, candidate_name, candidate_size), candidate_expr in reg_exprs.items():
-        if candidate_name != reg_name.lower():
+        if operator.ne(candidate_name, reg_name.lower()):
             continue
-        if int(size) and int(candidate_size) != int(size):
+        if int(size) and operator.ne(int(candidate_size), int(size)):
             continue
         if int(candidate_addr) >= int(ins_addr):
             continue
@@ -486,10 +551,11 @@ def _lookup_register_expr_before_8616(
 
 
 def _lookup_prior_register_stack_load_8616(
-    project: Any, codegen: Any, ins_addr: int, reg_name: str, size: int
+    project: Any, codegen: Any, ins_addr: cython.longlong, reg_name: object, size: cython.longlong
 ) -> object | None:
+    insn: object
     for insn in sorted(
-        _function_insns_for_codegen_8616(project, codegen),
+        tuple(_function_insns_for_codegen_8616(project, codegen)),
         key=lambda item: int(getattr(item, "address", -1)),
         reverse=True,
     ):
@@ -504,9 +570,9 @@ def _lookup_prior_register_stack_load_8616(
             continue
         if int(getattr(operands[0], "type", -1)) != 1 or int(getattr(operands[1], "type", -1)) != 3:
             continue
-        if str(insn.reg_name(operands[0].reg)).lower() != reg_name.lower():
+        if operator.ne(str(insn.reg_name(operands[0].reg)).lower(), reg_name.lower()):
             continue
-        if int(getattr(operands[0], "size", 0) or size) != int(size):
+        if operator.ne(int(getattr(operands[0], "size", 0) or size), int(size)):
             continue
         mem = operands[1].mem
         if not mem.base or str(insn.reg_name(mem.base)).lower() != "bp":
@@ -518,7 +584,9 @@ def _lookup_prior_register_stack_load_8616(
     return None
 
 
+@cython.ccall
 def _wide_stack_pair_expr_8616(codegen: Any, hi_expr: object, lo_expr: object) -> object | None:
+    lo_offset: object
     lo_offset = proven_wide_stack_pair_low_offset_8616(hi_expr, lo_expr)
     if lo_offset is None:
         return None
@@ -530,7 +598,10 @@ def _wide_stack_pair_expr_8616(codegen: Any, hi_expr: object, lo_expr: object) -
     )
 
 
-def _expr_is_register_8616(project: Any, expr: object, reg_name: str) -> bool:
+@cython.ccall
+def _expr_is_register_8616(project: Any, expr: object, reg_name: object) -> cython.bint:
+    expected: object
+    node: object
     node = expr
     while isinstance(node, CTypeCast):
         node = getattr(node, "expr", None)
@@ -540,12 +611,14 @@ def _expr_is_register_8616(project: Any, expr: object, reg_name: str) -> bool:
     if not isinstance(variable, SimRegisterVariable):
         return False
     expected = _reg_offset_8616(project, reg_name)
-    return expected is not None and int(variable.reg) == int(expected)
+    return expected is not None and operator.eq(int(variable.reg), int(expected))
 
 
+@cython.ccall
 def _wide_call_return_pair_expr_8616(
-    project: Any, codegen: Any, hi_expr: object, lo_expr: object, ins_addr: int
+    project: Any, codegen: Any, hi_expr: object, lo_expr: object, ins_addr: cython.longlong
 ) -> object | None:
+    call_expr: object
     if not (_expr_is_register_8616(project, hi_expr, "dx") and _expr_is_register_8616(project, lo_expr, "ax")):
         return None
     debug_jcc = bool(os.environ.get("INERTIA_DEBUG_JCC_REWRITE"))
@@ -575,6 +648,7 @@ def _wide_call_return_pair_expr_8616(
     return cast(object | None, call_expr)
 
 
+@cython.ccall
 def _wide_call_return_pair_operands_8616(
     project: Any,
     codegen: Any,
@@ -582,8 +656,10 @@ def _wide_call_return_pair_operands_8616(
     lo_operand: Any,
     hi_reg_name_fn: Any,
     lo_reg_name_fn: Any,
-    ins_addr: int,
+    ins_addr: cython.longlong,
 ) -> object | None:
+    ax_offset: object
+    dx_offset: object
     if int(getattr(hi_operand, "type", -1)) != 1 or int(getattr(lo_operand, "type", -1)) != 1:
         return None
     if str(hi_reg_name_fn(hi_operand.reg)).lower() != "dx":
@@ -603,21 +679,26 @@ def _wide_call_return_pair_operands_8616(
     )
 
 
-def _stack_slot_placeholder_name_8616(disp: int, size: int) -> str:
+@cython.ccall
+def _stack_slot_placeholder_name_8616(disp: cython.longlong, size: cython.longlong) -> str:
     sign = "m" if int(disp) < 0 else "p"
     return f"stack_bp_{sign}{abs(int(disp)):x}_b{int(size)}"
 
 
-def _is_unstable_stack_arg_name_8616(name: object) -> bool:
+@cython.ccall
+def _is_unstable_stack_arg_name_8616(name: object) -> cython.bint:
     return isinstance(name, str) and (
         name.startswith(("arg_", "local_", "stack_bp_", "s_"))
     )
 
 
+@cython.ccall
 def _stack_slot_expr_8616(
-    codegen: Any, disp: int, size: int = 2, *, project: Any | None = None
+    codegen: Any, disp: cython.longlong, size: cython.longlong = 2, *, project: Any | None = None
 ) -> Any:
     """Read one proven machine-BP stack object without changing its identity."""
+    cfunc: object
+    region: object
     cfunc = getattr(codegen, "cfunc", None)
     if cfunc is None:
         return None
@@ -652,7 +733,8 @@ def _stack_slot_expr_8616(
     )
 
 
-def _bp_operand_stack_expr_8616(codegen: Any, disp: int, size: int = 2) -> Any:
+@cython.ccall
+def _bp_operand_stack_expr_8616(codegen: Any, disp: cython.longlong, size: cython.longlong = 2) -> Any:
     """Read a BP operand through the Types/Lowering coordinate owner."""
     return _stack_slot_expr_8616(codegen, disp, size)
 
@@ -671,7 +753,9 @@ def _low_byte_expr_from_assignment_8616(expr: Any) -> Any:
     return _impl()
 
 
-def _stack_slot_key_8616(insn: Any) -> tuple[int, int] | None:
+@cython.ccall
+def _stack_slot_key_8616(insn: Any) -> object:
+    mem: object
     if len(insn.operands) < 2:
         return None
     mem = (
@@ -689,9 +773,11 @@ def _stack_slot_key_8616(insn: Any) -> tuple[int, int] | None:
     return int(mem.disp), int(getattr(insn.operands[0], "size", 0) or getattr(insn.operands[1], "size", 0) or 2)
 
 
+@cython.ccall
 def _memory_load_expr_8616(
-    project: Any, codegen: Any, ds_var: Any, base_expr: Any, disp: int, size: int
+    project: Any, codegen: Any, ds_var: object, base_expr: object, disp: cython.longlong, size: cython.longlong
 ) -> Any | None:
+    lowered: object
     if ds_var is None:
         return None
     offset_expr = (
@@ -738,6 +824,7 @@ _JCC_LOW_OP_8616: dict[str, str] = {
 }
 
 
+@cython.ccall
 def _branch_target_imm_8616(insn: Any) -> int | None:
     operands = tuple(getattr(insn, "operands", ()) or ())
     if not operands:
@@ -748,7 +835,10 @@ def _branch_target_imm_8616(insn: Any) -> int | None:
     return int(getattr(op0, "imm", 0))
 
 
-def _function_insns_for_codegen_8616(project: Any, codegen: Any) -> tuple[Any, ...]:
+def _function_insns_for_codegen_8616(project: Any, codegen: Any) -> object:
+    cache: object
+    cache_entry: object
+    func_addr: object
     func_addr = getattr(getattr(codegen, "cfunc", None), "addr", None)
     if not isinstance(func_addr, int):
         return ()
@@ -757,7 +847,7 @@ def _function_insns_for_codegen_8616(project: Any, codegen: Any) -> tuple[Any, .
     if (
         isinstance(cache, tuple)
         and cache_entry in {None, func_addr}
-        and all(int(getattr(insn, "address", -1)) >= func_addr for insn in cache)
+        and all(int(getattr(insn, "address", -1)) >= func_addr for insn in iter(cache))
     ):
         return cache
     inventory = collect_function_instruction_inventory_8616(
@@ -773,20 +863,30 @@ def _function_insns_for_codegen_8616(project: Any, codegen: Any) -> tuple[Any, .
 
 
 def _merge_unique_insns_by_addr_8616(*groups: tuple[Any, ...]) -> tuple[Any, ...]:
-    by_addr: dict[int, Any] = {}
+    group: object
+    insn: object
+    by_addr: dict[cython.longlong, Any] = {}
     for group in groups:
         for insn in tuple(group or ()):
             addr = int(getattr(insn, "address", 0) or 0)
             if addr:
                 by_addr.setdefault(addr, insn)
-    return tuple(sorted(by_addr.values(), key=lambda item: int(getattr(item, "address", 0) or 0)))
+    return tuple(sorted(tuple(by_addr.values()), key=lambda item: int(getattr(item, "address", 0) or 0)))
 
 
-def _linear_start_candidates_8616(project: Any, codegen: Any, stop_addr: int) -> list[int]:
+@cython.ccall
+def _linear_start_candidates_8616(project: Any, codegen: Any, stop_addr: cython.longlong) -> object:
     """Collect candidate linear-scan start addresses before the stop address."""
+    cache: object
+    cfunc: object
+    func_addr: object
+    loader: object
+    loader_min_addr: object
+    main_min_addr: object
+    main_object: object
     cfunc = getattr(codegen, "cfunc", None)
     func_addr = getattr(cfunc, "addr", None)
-    start_candidates: list[int] = []
+    start_candidates: list[cython.longlong] = []
     if isinstance(func_addr, int) and 0 <= func_addr < stop_addr:
         start_candidates.append(int(func_addr))
     loader = getattr(project, "loader", None)
@@ -802,17 +902,18 @@ def _linear_start_candidates_8616(project: Any, codegen: Any, stop_addr: int) ->
         cached_addrs = sorted(
             {
                 int(getattr(insn, "address", -1))
-                for insn in cache
+                for insn in iter(cache)
                 if 0 <= int(getattr(insn, "address", -1)) < stop_addr
             }
         )
         if cached_addrs:
             start_candidates.append(cached_addrs[0])
-    return sorted({addr for addr in start_candidates if 0 <= addr < stop_addr})
+    return sorted({addr for addr in iter(start_candidates) if 0 <= addr < stop_addr})
 
 
+@cython.ccall
 def _linear_decode_insns_8616(
-    project: Any, start_addr: int, stop_addr: int, max_bytes: int
+    project: Any, start_addr: cython.longlong, stop_addr: cython.longlong, max_bytes: cython.longlong
 ) -> tuple[Any, ...]:
     """Linear-decode instructions until a terminator or the bound is hit."""
     end_addr = min(stop_addr, start_addr + int(max_bytes))
@@ -847,9 +948,12 @@ def _linear_decode_insns_8616(
     return tuple(insns)
 
 
+@cython.ccall
 def _linear_insns_before_addr_8616(
-    project: Any, codegen: Any, ins_addr: int, *, max_bytes: int = 0x800
-) -> tuple[Any, ...]:
+    project: Any, codegen: Any, ins_addr: cython.longlong, *, max_bytes: cython.longlong = 0x800
+) -> object:
+    cfunc: object
+    func_addr: object
     stop_addr = int(ins_addr)
     start_candidates = _linear_start_candidates_8616(project, codegen, stop_addr)
     if not start_candidates:
@@ -862,6 +966,7 @@ def _linear_insns_before_addr_8616(
     return _linear_decode_insns_8616(project, start_addr, stop_addr, max_bytes)
 
 
+@cython.ccall
 def _direct_call_target_8616(insn: Any) -> int | None:
     mnemonic = str(getattr(insn, "mnemonic", "")).lower()
     if mnemonic not in {"call", "lcall"}:
@@ -875,7 +980,9 @@ def _direct_call_target_8616(insn: Any) -> int | None:
     return int(getattr(op0, "imm", 0))
 
 
-def _callee_name_for_target_8616(project: Any, target_addr: int) -> tuple[str, object | None]:
+@cython.ccall
+def _callee_name_for_target_8616(project: Any, target_addr: cython.longlong) -> tuple[str, object | None]:
+    name: object
     callee_func = None
     with contextlib.suppress(Exception):
         callee_func = project.kb.functions.function(addr=int(target_addr), create=False)
@@ -887,7 +994,10 @@ def _callee_name_for_target_8616(project: Any, target_addr: int) -> tuple[str, o
     return name, callee_func
 
 
-def _callee_prototype_arg_count_8616(callee_func: Any, callee_name: str | None = None) -> int | None:
+@cython.ccall
+def _callee_prototype_arg_count_8616(callee_func: Any, callee_name: object = None) -> int | None:
+    args: object
+    prototype: object
     prototype = getattr(callee_func, "prototype", None)
     args = getattr(prototype, "args", None)
     if isinstance(args, (list, tuple)):
@@ -897,17 +1007,20 @@ def _callee_prototype_arg_count_8616(callee_func: Any, callee_name: str | None =
     return None
 
 
-def _const_from_push_imm_8616(value: int, codegen: Any) -> CConstant:
+@cython.ccall
+def _const_from_push_imm_8616(value: cython.longlong, codegen: Any) -> CConstant:
     return CConstant(int(value) & 0xFFFF, SimTypeShort(False), codegen=codegen)
 
 
+@cython.ccall
 def _push_setup_insn_arg_8616(
     insn: Any,
     codegen: Any,
-    reg_values: dict[str, object],
+    reg_values: object,
     arg_count: int | None,
-) -> tuple[bool, object | None, bool]:
+) -> tuple[cython.bint, object | None, cython.bint]:
     """Classify one setup instruction; returns (ok, pushed_value, is_arg)."""
+    expr: object
     mnemonic = str(getattr(insn, "mnemonic", "")).lower()
     operands = tuple(getattr(insn, "operands", ()) or ())
     if mnemonic == "mov" and len(operands) == 2 and int(getattr(operands[0], "type", -1)) == 1:
@@ -935,8 +1048,9 @@ def _push_setup_insn_arg_8616(
 
 
 def _call_args_from_push_setup_8616(
-    project: Any, codegen: Any, insns: tuple[Any, ...], call_index: int, arg_count: int | None = None
-) -> tuple[object, ...] | None:
+    project: Any, codegen: Any, insns: object, call_index: cython.longlong, arg_count: int | None = None
+) -> object:
+    insn: object
     if arg_count == 0:
         return ()
     start = call_index
@@ -961,15 +1075,20 @@ def _call_args_from_push_setup_8616(
         if arg_count < 0 or len(pushed) < arg_count:
             return None
         pushed = [] if arg_count == 0 else pushed[-arg_count:]
-        if any(item is None for item in pushed):
+        if any(item is None for item in iter(pushed)):
             return None
     return tuple(reversed(pushed))
 
 
+@cython.ccall
 def _log_call_return_miss_8616(
-    project: Any, codegen: Any, ins_addr: int, insns: tuple[Any, ...], linear_insns: tuple[Any, ...]
+    project: Any, codegen: Any, ins_addr: cython.longlong, insns: object, linear_insns: object
 ) -> None:
     """Emit the once-per-address no-call diagnostics for jcc rewriting."""
+    cfunc: object
+    loader: object
+    seen: object
+    insn: object
     seen = getattr(codegen, "_inertia_jcc_call_return_debug_logged_8616", None)
     if not isinstance(seen, set):
         seen = set()
@@ -999,15 +1118,18 @@ def _log_call_return_miss_8616(
     )
 
 
-def _call_return_expr_before_insn_8616(project: Any, codegen: Any, ins_addr: int) -> CFunctionCall | None:
+def _call_return_expr_before_insn_8616(project: Any, codegen: Any, ins_addr: cython.longlong) -> CFunctionCall | None:
+    call: object
+    inventory: object
+    start_idx: object
     debug_jcc = bool(os.environ.get("INERTIA_DEBUG_JCC_REWRITE"))
     insns = _function_insns_for_codegen_8616(project, codegen)
-    index_by_addr = {int(getattr(insn, "address", -1)): idx for idx, insn in enumerate(insns)}
+    index_by_addr = {int(getattr(insn, "address", -1)): idx for idx, insn in builtins.iter(enumerate(insns))}
     inventory = getattr(codegen, "_inertia_jcc_function_inventory_8616", None)
     inventory_covers_query = bool(
         isinstance(inventory, FunctionInstructionInventory8616)
         and inventory.complete
-        and inventory.function_entry == getattr(getattr(codegen, "cfunc", None), "addr", None)
+        and operator.eq(inventory.function_entry, getattr(getattr(codegen, "cfunc", None), "addr", None))
         and int(ins_addr) in index_by_addr
     )
     linear_insns = (
@@ -1023,11 +1145,11 @@ def _call_return_expr_before_insn_8616(project: Any, codegen: Any, ins_addr: int
         return None
     if linear_insns:
         index_by_addr = {
-            int(getattr(insn, "address", -1)): idx for idx, insn in enumerate(insns)
+            int(getattr(insn, "address", -1)): idx for idx, insn in builtins.iter(enumerate(insns))
         }
     start_idx = index_by_addr.get(int(ins_addr))
     if start_idx is None and linear_insns:
-        start_idx = len(tuple(insn for insn in insns if int(getattr(insn, "address", -1)) < int(ins_addr)))
+        start_idx = len(tuple(insn for insn in iter(insns) if int(getattr(insn, "address", -1)) < int(ins_addr)))
     if start_idx is None:
         return None
     call = _scan_call_return_before_insn_8616(
@@ -1038,10 +1160,14 @@ def _call_return_expr_before_insn_8616(project: Any, codegen: Any, ins_addr: int
     return call
 
 
+@cython.ccall
 def _scan_call_return_before_insn_8616(
-    project: Any, codegen: Any, insns: tuple[Any, ...], start_idx: int
+    project: Any, codegen: Any, insns: object, start_idx: cython.longlong
 ) -> CFunctionCall | None:
     """Scan backward for the nearest direct call and rebuild its arguments."""
+    args: object
+    effective_arg_count: object
+    target: object
     lower_bound = max(0, start_idx - 8)
     arg_count = None
     for idx in range(start_idx - 1, lower_bound - 1, -1):
@@ -1076,6 +1202,7 @@ def _scan_call_return_before_insn_8616(
     return None
 
 
+@cython.ccall
 def _resolve_wide_cmp_operand_8616(
     project: Any,
     codegen: Any,
@@ -1085,9 +1212,10 @@ def _resolve_wide_cmp_operand_8616(
     operand_b: Any,
     reg_name_a: Any,
     reg_name_b: Any,
-    cmp_addr: int,
+    cmp_addr: cython.longlong,
 ) -> Any:
     """Resolve one high/low operand pair to a proven wide value."""
+    wide: object
     wide = _wide_stack_pair_expr_8616(codegen, hi, lo)
     if wide is None:
         wide = _wide_call_return_pair_expr_8616(project, codegen, hi, lo, cmp_addr)
@@ -1106,12 +1234,13 @@ def _resolve_wide_cmp_operand_8616(
 
 def _cmp_jcc_reg_state_8616(
     project: Any, codegen: Any, cmp_insn: Any, reg_exprs: Any, ds_var: Any
-) -> dict[str, object]:
+) -> object:
     """Replay register-carrier state updates up to the compare instruction."""
+    state_insn: object
     reg_state: dict[str, object] = {}
-    stack_slots: dict[tuple[int, int], object] = {}
+    stack_slots: dict[tuple[cython.longlong, cython.longlong], object] = {}
     for state_insn in sorted(
-        _function_insns_for_codegen_8616(project, codegen),
+        tuple(_function_insns_for_codegen_8616(project, codegen)),
         key=lambda item: int(getattr(item, "address", -1)),
     ):
         state_addr = int(getattr(state_insn, "address", -1))
@@ -1121,20 +1250,26 @@ def _cmp_jcc_reg_state_8616(
     return reg_state
 
 
+@cython.ccall
 def _cmp_jcc_low_shape_8616(
     codegen: Any,
-    jcc1: str,
-    jcc2: str,
-    low_op: str,
-    lhs_wide: Any,
-    rhs_wide: Any,
+    jcc1: object,
+    jcc2: object,
+    low_op: object,
+    lhs_wide: object,
+    rhs_wide: object,
     lhs_hi: Any,
     rhs_hi: Any,
     lhs_lo: Any,
     rhs_lo: Any,
-    consumed_low_branch_keys: tuple[tuple[int, int], ...],
+    consumed_low_branch_keys: object,
 ) -> _DecodedCmpGuard8616 | None:
     """Select the decoded guard for the known 32-bit cmp/jcc shapes."""
+    jcc1_set: object
+    jcc2_set: object
+    op_scalar: object
+    op_wide: object
+    scalar_expr: object
     hi_lt = CBinaryOp("CmpLT", lhs_hi, rhs_hi, codegen=codegen)
     hi_gt = CBinaryOp("CmpGT", lhs_hi, rhs_hi, codegen=codegen)
     hi_eq = CBinaryOp("CmpEQ", lhs_hi, rhs_hi, codegen=codegen)
@@ -1210,13 +1345,14 @@ def _cmp_jcc_low_shape_8616(
         return _DecodedCmpGuard8616(lhs=None, rhs=None, op=op_scalar, expr=scalar_expr)
     return None
 
+@cython.ccall
 def _resolve_cmp_operands_8616(
     project: Any,
     codegen: Any,
     cmp_insn: Any,
-    reg_state: dict[str, object],
+    reg_state: object,
     ds_var: Any,
-    reg_exprs: dict[tuple[int, str, int], object],
+    reg_exprs: object,
 ) -> tuple[Any, Any]:
     """Resolve both operands of one compare through proven register state."""
     lhs = _resolve_cmp_operand_expr_8616(
@@ -1247,14 +1383,18 @@ def _decode_je_mid_wide_pair_8616(
     codegen: Any,
     cmp_insn: Any,
     mid_insns: Any,
-    reg_state: dict[str, object],
+    reg_state: object,
     ds_var: Any,
-    reg_exprs: dict[tuple[int, str, int], object],
+    reg_exprs: object,
 ) -> _DecodedCmpGuard8616 | None:
     """Decode a je/jz mid-block compare pair as one wide equality guard."""
-    cmp2_insn = next((ins for ins in mid_insns if str(getattr(ins, "mnemonic", "")).lower() == "cmp"), None)
+    cmp2_insn: object
+    jcc2_insn: object
+    lhs_wide: object
+    rhs_wide: object
+    cmp2_insn = next((ins for ins in iter(mid_insns) if str(getattr(ins, "mnemonic", "")).lower() == "cmp"), None)
     jcc2_insn = next(
-        (ins for ins in mid_insns if str(getattr(ins, "mnemonic", "")).lower() in {"je", "jz", "jne", "jnz"}),
+        (ins for ins in iter(mid_insns) if str(getattr(ins, "mnemonic", "")).lower() in {"je", "jz", "jne", "jnz"}),
         None,
     )
     if cmp2_insn is None or jcc2_insn is None:
@@ -1285,18 +1425,25 @@ def _decode_je_mid_wide_pair_8616(
     )
 
 
+@cython.ccall
 def _decode_low_cmp_jcc_8616(
     project: Any,
     codegen: Any,
     cmp_insn: Any,
-    jcc1: str,
+    jcc1: object,
     jcc2_insn: Any,
-    mid_addr: int,
-    reg_state: dict[str, object],
+    mid_addr: cython.longlong,
+    reg_state: object,
     ds_var: Any,
-    reg_exprs: dict[tuple[int, str, int], object],
+    reg_exprs: object,
 ) -> _DecodedCmpGuard8616 | None:
     """Decode the trailing low-compare block of a 32-bit cmp/jcc chain."""
+    cmp2_addr: object
+    lhs_hi: object
+    lhs_lo: object
+    low_op: object
+    rhs_hi: object
+    rhs_lo: object
     jcc2 = str(getattr(jcc2_insn, "mnemonic", "")).lower()
     cmp2_addr = _branch_target_imm_8616(jcc2_insn)
     if cmp2_addr is None:
@@ -1363,6 +1510,9 @@ def _decode_cmp_jcc_32bit_chain_8616(
     project: Any, codegen: Any, cmp_insn: Any, jcc_insn: Any, reg_exprs: Any, ds_var: Any
 ) -> _DecodedCmpGuard8616 | None:
     def _impl() -> _DecodedCmpGuard8616 | None:
+        decoded_pair: object
+        jcc2_insn: object
+        mid_addr: object
         jcc1 = str(getattr(jcc_insn, "mnemonic", "")).lower()
         mid_addr = _branch_target_imm_8616(jcc_insn)
         if mid_addr is None:
@@ -1386,7 +1536,7 @@ def _decode_cmp_jcc_32bit_chain_8616(
         jcc2_insn = next(
             (
                 ins
-                for ins in mid_insns
+                for ins in iter(mid_insns)
                 if str(getattr(ins, "mnemonic", "")).lower().startswith("j")
                 and str(getattr(ins, "mnemonic", "")).lower() not in {"jmp", "ljmp"}
             ),
@@ -1409,16 +1559,18 @@ def _decode_cmp_jcc_32bit_chain_8616(
     return _impl()
 
 
+@cython.ccall
 def _cmp_reg_operand_expr_8616(
     project: Any,
     codegen: Any,
     operand: Any,
-    reg_state: dict[str, object],
-    reg_exprs: dict[tuple[int, str, int], object],
+    reg_state: object,
+    reg_exprs: object,
     reg_name_fn: Any,
-    ins_addr: int,
+    ins_addr: cython.longlong,
 ) -> object | None:
     """Resolve a register operand from state, expression tables, or loads."""
+    expr: object
     reg_name = reg_name_fn(operand.reg).lower()
     expr = reg_state.get(reg_name)
     if expr is not None:
@@ -1440,15 +1592,17 @@ def _cmp_reg_operand_expr_8616(
     return None
 
 
+@cython.ccall
 def _cmp_mem_operand_expr_8616(
     project: Any,
     codegen: Any,
     operand: Any,
-    reg_state: dict[str, object],
+    reg_state: object,
     ds_var: Any,
     reg_name_fn: Any,
 ) -> object | None:
     """Resolve a memory operand through its proven base or a flat load."""
+    base_expr: object
     mem = operand.mem
     size = int(getattr(operand, "size", 0) or 2)
     if mem.base:
@@ -1485,11 +1639,11 @@ def _resolve_cmp_operand_expr_8616(
     project: Any,
     codegen: Any,
     operand: Any,
-    reg_state: dict[str, object],
+    reg_state: object,
     ds_var: Any,
     reg_name_fn: Any,
-    reg_exprs: dict[tuple[int, str, int], object],
-    ins_addr: int,
+    reg_exprs: object,
+    ins_addr: cython.longlong,
 ) -> object | None:
     """Consume proven comparison values; refuse registers without a definition."""
     def _impl() -> object | None:
@@ -1510,15 +1664,16 @@ def _resolve_cmp_operand_expr_8616(
 
 
 def _decode_block_and_jcc_index_8616(
-    project: Any, block_addr: int, jcc_addr: int, debug_jcc: bool
+    project: Any, block_addr: cython.longlong, jcc_addr: cython.longlong, debug_jcc: cython.bint
 ) -> tuple[tuple[Any, ...] | None, int | None]:
+    jcc_index: object
     try:
         insns = decoded_block_instructions_8616(project, block_addr, opt_level=0)
     except Exception:
         if debug_jcc:
             _log.warning("[jcc-rewrite] block decode failed block=%#x jcc=%#x", block_addr, jcc_addr)
         return None, None
-    jcc_index = next((idx for idx, insn in enumerate(insns) if int(insn.address) == int(jcc_addr)), None)
+    jcc_index = next((idx for idx, insn in builtins.iter(enumerate(insns)) if operator.eq(int(insn.address), int(jcc_addr))), None)
     if jcc_index is None:
         if debug_jcc:
             _log.warning(
@@ -1528,7 +1683,8 @@ def _decode_block_and_jcc_index_8616(
     return insns, jcc_index
 
 
-def _nearest_flag_producer_before_jcc_8616(insns: tuple[Any, ...], jcc_index: int) -> Any | None:
+@cython.ccall
+def _nearest_flag_producer_before_jcc_8616(insns: object, jcc_index: cython.longlong) -> Any | None:
     for idx in range(int(jcc_index) - 1, -1, -1):
         insn = insns[idx]
         mnemonic = str(getattr(insn, "mnemonic", "")).lower()
@@ -1539,9 +1695,11 @@ def _nearest_flag_producer_before_jcc_8616(insns: tuple[Any, ...], jcc_index: in
     return None
 
 
+@cython.ccall
 def _decode_mask_test_guard_8616(
-    project: Any, codegen: Any, jcc_mnemonic: str, block_addr: int, jcc_addr: int, debug_jcc: bool
+    project: Any, codegen: Any, jcc_mnemonic: object, block_addr: cython.longlong, jcc_addr: cython.longlong, debug_jcc: cython.bint
 ) -> _DecodedCmpGuard8616 | None:
+    flags_offset: object
     if jcc_mnemonic not in _JCC_COMPARE_MASK_TESTS_8616:
         return None
     flags_offset = _reg_offset_8616(project, "flags")
@@ -1570,9 +1728,13 @@ def _decode_mask_test_guard_8616(
 def _decode_block_entry_carry_guard_8616(
     project: Any,
     codegen: Any,
-    jcc_mnemonic: str,
+    jcc_mnemonic: object,
 ) -> _DecodedCmpGuard8616 | None:
     """Decode a carry JCC whose flag producer belongs to a predecessor block."""
+    flags_offset: object
+    root: object
+    status_stats: object
+    test: object
     test = _JCC_BLOCK_ENTRY_CARRY_TESTS_8616.get(jcc_mnemonic)
     flags_offset = _reg_offset_8616(project, "flags")
     status_stats = getattr(
@@ -1589,13 +1751,13 @@ def _decode_block_entry_carry_guard_8616(
     root = getattr(getattr(codegen, "cfunc", None), "statements", None)
     status_carriers = tuple(
         node.lhs
-        for node in _iter_c_nodes_deep_8616(root)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(root))
         if isinstance(node, CAssignment)
         and isinstance(node.lhs, CVariable)
         and isinstance(getattr(node, "tags", None), dict)
         and node.tags.get("inertia_software_interrupt_status_output_8616") is True
         and isinstance(node.lhs.variable, SimRegisterVariable)
-        and node.lhs.variable.reg == flags_offset
+        and operator.eq(node.lhs.variable.reg, flags_offset)
     )
     if len(status_carriers) != 1:
         return None
@@ -1613,7 +1775,7 @@ def _decode_block_entry_carry_guard_8616(
     )
 
 
-_INC_DEC_JCC_BASELINE_8616: dict[tuple[str, str], tuple[str, int, bool]] = {
+_INC_DEC_JCC_BASELINE_8616: dict[tuple[str, str], tuple[str, cython.longlong, cython.bint]] = {
     ("inc", "je"): ("CmpEQ", -1, True),
     ("inc", "jz"): ("CmpEQ", -1, True),
     ("inc", "jne"): ("CmpNE", -1, True),
@@ -1641,7 +1803,8 @@ _INC_DEC_JCC_BASELINE_8616: dict[tuple[str, str], tuple[str, int, bool]] = {
 }
 
 
-def _decode_linear_insns_range_8616(project: Any, start_addr: int, stop_addr: int) -> tuple[Any, ...]:
+@cython.ccall
+def _decode_linear_insns_range_8616(project: Any, start_addr: cython.longlong, stop_addr: cython.longlong) -> tuple[Any, ...]:
     insns: list[object] = []
     addr = int(start_addr)
     while addr < int(stop_addr):
@@ -1663,9 +1826,13 @@ def _decode_linear_insns_range_8616(project: Any, start_addr: int, stop_addr: in
     return tuple(insns)
 
 
+@cython.ccall
 def _switch_dispatch_seed_expr_8616(
-    project: Any, codegen: Any, ins_addr: int, reg_name: str, reg_size: int
+    project: Any, codegen: Any, ins_addr: cython.longlong, reg_name: object, reg_size: cython.longlong
 ) -> tuple[object | None, int | None]:
+    target: object
+    idx: object
+    insn: object
     insns = tuple(_function_insns_for_codegen_8616(project, codegen) or ())
     for idx, insn in enumerate(insns[:-1]):
         if int(getattr(insn, "address", -1)) >= int(ins_addr):
@@ -1682,9 +1849,9 @@ def _switch_dispatch_seed_expr_8616(
             or int(getattr(operands[1], "type", -1)) != 3
         ):
             continue
-        if str(insn.reg_name(operands[0].reg)).lower() != reg_name.lower():
+        if operator.ne(str(insn.reg_name(operands[0].reg)).lower(), reg_name.lower()):
             continue
-        if int(getattr(operands[0], "size", 0) or reg_size) != int(reg_size):
+        if operator.ne(int(getattr(operands[0], "size", 0) or reg_size), int(reg_size)):
             continue
         target = _branch_target_imm_8616(next_insn)
         if target is None or int(target) > int(ins_addr):
@@ -1697,17 +1864,21 @@ def _switch_dispatch_seed_expr_8616(
     return None, None
 
 
+@cython.ccall
 def _stateful_register_expr_before_insn_8616(
     project: Any,
     codegen: Any,
-    ins_addr: int,
-    reg_name: str,
-    reg_size: int,
-    reg_exprs: dict[tuple[int, str, int], object],
+    ins_addr: cython.longlong,
+    reg_name: object,
+    reg_size: cython.longlong,
+    reg_exprs: object,
     ds_var: Any,
 ) -> object | None:
+    replay_start: object
+    seed_expr: object
+    insn: object
     reg_state: dict[str, object] = {}
-    stack_slots: dict[tuple[int, int], object] = {}
+    stack_slots: dict[tuple[cython.longlong, cython.longlong], object] = {}
     seed_expr, replay_start = _switch_dispatch_seed_expr_8616(project, codegen, ins_addr, reg_name, reg_size)
     if seed_expr is not None and replay_start is not None:
         reg_state[reg_name.lower()] = seed_expr
@@ -1726,11 +1897,14 @@ def _decode_inc_dec_jcc_guard_8616(
     project: Any,
     codegen: Any,
     arith_insn: Any,
-    jcc_mnemonic: str,
-    reg_exprs: dict[tuple[int, str, int], object],
+    jcc_mnemonic: object,
+    reg_exprs: object,
     ds_var: Any = None,
 ) -> _DecodedCmpGuard8616 | None:
     def _impl() -> _DecodedCmpGuard8616 | None:
+        decision: object
+        lhs: object
+        reg_offset: object
         mnemonic = str(getattr(arith_insn, "mnemonic", "")).lower()
         if mnemonic not in {"inc", "dec"}:
             return None
@@ -1769,7 +1943,8 @@ def _decode_inc_dec_jcc_guard_8616(
     return _impl()
 
 
-def _typed_condition_is_reg_const_jcc_bridge_8616(cond: ConditionIR) -> bool:
+@cython.ccall
+def _typed_condition_is_reg_const_jcc_bridge_8616(cond: ConditionIR) -> cython.bint:
     lhs = cond.lhs
     rhs = cond.rhs
     return (
@@ -1780,7 +1955,8 @@ def _typed_condition_is_reg_const_jcc_bridge_8616(cond: ConditionIR) -> bool:
     )
 
 
-def _typed_condition_bridge_expr_is_plain_variable_compare_8616(expr: object) -> bool:
+@cython.ccall
+def _typed_condition_bridge_expr_is_plain_variable_compare_8616(expr: object) -> cython.bint:
     return (
         isinstance(expr, CBinaryOp)
         and isinstance(getattr(expr, "lhs", None), CVariable)
@@ -1788,11 +1964,12 @@ def _typed_condition_bridge_expr_is_plain_variable_compare_8616(expr: object) ->
     )
 
 
+@cython.ccall
 def _translated_typed_condition_guard_8616(
     project: object,
     codegen: object,
-    block_addr: int,
-    jcc_addr: int,
+    block_addr: cython.longlong,
+    jcc_addr: cython.longlong,
 ) -> _DecodedCmpGuard8616 | None:
     # Early ConditionIR facts are available here, but applying them in this
     # rewrite pass can still perturb whole-tail control-flow fingerprints for
@@ -1801,10 +1978,12 @@ def _translated_typed_condition_guard_8616(
     return None
 
 
+@cython.ccall
 def _guard_reg_exprs_and_ds_8616(
     project: Any, codegen: Any
-) -> tuple[dict[tuple[int, str, int], object], Any]:
+) -> tuple[dict[tuple[cython.longlong, str, cython.longlong], object], Any]:
     """Collect register expressions and the ds variable for guard decoding."""
+    ds_offset: object
     reg_exprs = _register_exprs_by_ins_addr_8616(codegen, project)
     ds_offset = _reg_offset_8616(project, "ds")
     ds_var = (
@@ -1813,18 +1992,23 @@ def _guard_reg_exprs_and_ds_8616(
     return reg_exprs, ds_var
 
 
+@cython.ccall
 def _log_decoded_guard_8616(
     project: Any,
-    block_addr: int,
-    jcc_addr: int,
-    jcc_mnemonic: str,
-    op: str,
+    block_addr: cython.longlong,
+    jcc_addr: cython.longlong,
+    jcc_mnemonic: object,
+    op: object,
     lhs: Any,
     rhs: Any,
-    reg_state: dict[str, object],
-    stack_slots: dict[tuple[int, int], object],
+    reg_state: object,
+    stack_slots: object,
 ) -> None:
     """Emit the decoded-guard diagnostics with expression fingerprints."""
+    key: object
+    slot_key: object
+    slot_value: object
+    value: object
     reg_state_fp = {}
     stack_slots_fp = {}
     for key, value in reg_state.items():
@@ -1852,22 +2036,27 @@ def _log_decoded_guard_8616(
     )
 
 
+@cython.ccall
 def _decode_cmp_operands_guard_8616(
     project: Any,
     codegen: Any,
-    block_addr: int,
-    jcc_addr: int,
-    jcc_mnemonic: str,
-    insns: tuple[Any, ...],
-    jcc_index: int,
+    block_addr: cython.longlong,
+    jcc_addr: cython.longlong,
+    jcc_mnemonic: object,
+    insns: object,
+    jcc_index: cython.longlong,
     cmp_insn: Any,
-    reg_exprs: dict[tuple[int, str, int], object],
+    reg_exprs: object,
     ds_var: Any,
-    debug_jcc: bool,
+    debug_jcc: cython.bint,
 ) -> _DecodedCmpGuard8616 | None:
     """Replay compare operands through register state into the decoded guard."""
+    lhs: object
+    op: object
+    rhs: object
+    insn: object
     reg_state: dict[str, object] = {}
-    stack_slots: dict[tuple[int, int], object] = {}
+    stack_slots: dict[tuple[cython.longlong, cython.longlong], object] = {}
     for insn in insns[:jcc_index]:
         _apply_cmp_state_update_8616(project, codegen, insn, reg_state, stack_slots, reg_exprs, ds_var)
 
@@ -1913,17 +2102,21 @@ def _decode_cmp_operands_guard_8616(
     return _DecodedCmpGuard8616(lhs=lhs, rhs=rhs, op=op)
 
 
+@cython.ccall
 def _translate_guard_shape_gate_8616(
     project: Any,
     codegen: Any,
-    block_addr: int,
-    jcc_addr: int,
-    jcc_mnemonic: str,
-    insns: tuple[Any, ...],
-    jcc_index: int,
-    debug_jcc: bool,
-) -> tuple[Any, bool]:
+    block_addr: cython.longlong,
+    jcc_addr: cython.longlong,
+    jcc_mnemonic: object,
+    insns: object,
+    jcc_index: cython.longlong,
+    debug_jcc: cython.bint,
+) -> tuple[Any, cython.bint]:
     """Run shape decoders; return (cmp_insn, refused) for the cmp fallback."""
+    cmp_insn: object
+    entry_carry_decoded: object
+    mask_decoded: object
     mask_decoded = _decode_mask_test_guard_8616(project, codegen, jcc_mnemonic, block_addr, jcc_addr, debug_jcc)
     if mask_decoded is not None:
         return mask_decoded, True
@@ -1950,10 +2143,12 @@ def _translate_guard_shape_gate_8616(
     return cmp_insn, False
 
 
+@cython.ccall
 def _translate_guard_early_8616(
-    project: Any, codegen: Any, block_addr: int, jcc_addr: int, debug_jcc: bool
+    project: Any, codegen: Any, block_addr: cython.longlong, jcc_addr: cython.longlong, debug_jcc: cython.bint
 ) -> _DecodedCmpGuard8616 | None:
     """Try typed-condition, mask-test, and entry-carry guard decoders."""
+    typed_decoded: object
     typed_decoded = _translated_typed_condition_guard_8616(project, codegen, block_addr, jcc_addr)
     if typed_decoded is not None:
         if debug_jcc:
@@ -1962,19 +2157,22 @@ def _translate_guard_early_8616(
     return None
 
 
+@cython.ccall
 def _translate_guard_mid_8616(
     project: Any,
     codegen: Any,
-    block_addr: int,
-    jcc_addr: int,
-    jcc_mnemonic: str,
-    jcc_index: int,
+    block_addr: cython.longlong,
+    jcc_addr: cython.longlong,
+    jcc_mnemonic: object,
+    jcc_index: cython.longlong,
     cmp_insn: Any,
-    reg_exprs: dict[tuple[int, str, int], object],
-    ds_var: Any,
-    debug_jcc: bool,
+    reg_exprs: object,
+    ds_var: object,
+    debug_jcc: cython.bint,
 ) -> _DecodedCmpGuard8616 | None:
     """Try arithmetic and test guard decoders before the cmp fallback."""
+    arith_decoded: object
+    test_decoded: object
     arith_decoded = _decode_inc_dec_jcc_guard_8616(project, codegen, cmp_insn, jcc_mnemonic, reg_exprs, ds_var)
     if arith_decoded is not None:
         if debug_jcc:
@@ -2005,9 +2203,15 @@ def _translate_guard_mid_8616(
 
 
 def _translate_cmp_jcc_guard_8616(
-    project: Any, codegen: Any, block_addr: int, jcc_addr: int
+    project: Any, codegen: Any, block_addr: cython.longlong, jcc_addr: cython.longlong
 ) -> _DecodedCmpGuard8616 | None:
     def _impl() -> _DecodedCmpGuard8616 | None:
+        chain_decoded: object
+        ds_var: object
+        early: object
+        insns: object
+        jcc_index: object
+        mid: object
         debug_jcc = bool(os.environ.get("INERTIA_DEBUG_JCC_REWRITE"))
         early = _translate_guard_early_8616(project, codegen, block_addr, jcc_addr, debug_jcc)
         if early is not None:
@@ -2066,11 +2270,13 @@ def _decode_test_jcc_guard_8616(
     project: Any,
     codegen: Any,
     test_insn: Any,
-    jcc_mnemonic: str,
-    reg_exprs: dict[tuple[int, str, int], object],
+    jcc_mnemonic: object,
+    reg_exprs: object,
     ds_var: Any,
 ) -> _DecodedCmpGuard8616 | None:
     def _impl() -> _DecodedCmpGuard8616 | None:
+        lhs: object
+        rhs: object
         mnemonic = str(getattr(test_insn, "mnemonic", "")).lower()
         if mnemonic not in {"test", "or", "and"}:
             return None
@@ -2116,17 +2322,21 @@ def _decode_test_jcc_guard_8616(
     return _impl()
 
 
+@cython.ccall
 def _cmp_state_mov_load_8616(
     project: Any,
     codegen: Any,
     insn_dynamic: Any,
-    operands: tuple[Any, ...],
-    reg_state: dict[str, object],
-    stack_slots: dict[tuple[int, int], object],
-    reg_exprs: dict[tuple[int, str, int], object],
+    operands: object,
+    reg_state: object,
+    stack_slots: object,
+    reg_exprs: object,
     ds_var: Any,
 ) -> None:
     """Track `mov reg, mem` through proven base or stack-slot evidence."""
+    base_expr: object
+    expr: object
+    key: object
     dst_reg = insn_dynamic.reg_name(operands[0].reg).lower()
     mem = operands[1].mem
     key = (int(mem.disp), int(operands[0].size)) if insn_dynamic.reg_name(mem.base) == "bp" else None
@@ -2166,14 +2376,16 @@ def _cmp_state_mov_load_8616(
             stack_slots.setdefault(key, expr)
 
 
+@cython.ccall
 def _cmp_state_mov_store_8616(
     codegen: Any,
     insn_dynamic: Any,
-    operands: tuple[Any, ...],
-    reg_state: dict[str, object],
-    stack_slots: dict[tuple[int, int], object],
+    operands: object,
+    reg_state: object,
+    stack_slots: object,
 ) -> None:
     """Track `mov [bp+disp], reg` into the known stack-slot table."""
+    slot_expr: object
     mem = operands[0].mem
     if insn_dynamic.reg_name(mem.base) != "bp":
         return
@@ -2186,8 +2398,10 @@ def _cmp_state_mov_store_8616(
         stack_slots[(int(mem.disp), size)] = reg_state[src_reg]
 
 
-def _cmp_state_cbw_8616(codegen: Any, reg_state: dict[str, object]) -> None:
+@cython.ccall
+def _cmp_state_cbw_8616(codegen: Any, reg_state: object) -> None:
     """Mirror `cbw`/`cwde` widening when the source byte value is known."""
+    al_expr: object
     al_expr = reg_state.get("al")
     if al_expr is None:
         reg_state.pop("ax", None)
@@ -2201,14 +2415,17 @@ def _cmp_state_cbw_8616(codegen: Any, reg_state: dict[str, object]) -> None:
     )
 
 
+@cython.ccall
 def _cmp_state_shift_8616(
     project: Any,
     codegen: Any,
     insn_dynamic: Any,
-    operands: tuple[Any, ...],
-    reg_state: dict[str, object],
+    operands: object,
+    reg_state: object,
 ) -> None:
     """Apply a constant shift to the tracked register value, or drop it."""
+    reg_expr: object
+    shifted: object
     reg_name = insn_dynamic.reg_name(operands[0].reg).lower()
     reg_expr = reg_state.get(reg_name)
     if reg_expr is None:
@@ -2223,15 +2440,18 @@ def _cmp_state_shift_8616(
     reg_state[reg_name] = shifted
 
 
+@cython.ccall
 def _cmp_state_incdec_8616(
     project: Any,
     codegen: Any,
     insn_dynamic: Any,
-    mnemonic: str,
-    operands: tuple[Any, ...],
-    reg_state: dict[str, object],
+    mnemonic: object,
+    operands: object,
+    reg_state: object,
 ) -> None:
     """Apply an inc/dec to the tracked register value, or drop it."""
+    reg_expr: object
+    updated: object
     reg_name = insn_dynamic.reg_name(operands[0].reg).lower()
     reg_expr = reg_state.get(reg_name)
     if reg_expr is None:
@@ -2245,17 +2465,21 @@ def _cmp_state_incdec_8616(
     reg_state[reg_name] = updated
 
 
+@cython.ccall
 def _cmp_state_addsub_8616(
     project: Any,
     codegen: Any,
     insn_dynamic: Any,
-    mnemonic: str,
-    operands: tuple[Any, ...],
-    reg_state: dict[str, object],
-    reg_exprs: dict[tuple[int, str, int], object],
+    mnemonic: object,
+    operands: object,
+    reg_state: object,
+    reg_exprs: object,
     ds_var: Any,
 ) -> None:
     """Apply an add/sub to the tracked register value, or drop it."""
+    reg_expr: object
+    rhs: object
+    updated: object
     reg_name = insn_dynamic.reg_name(operands[0].reg).lower()
     reg_expr = reg_state.get(reg_name)
     if reg_expr is None:
@@ -2286,9 +2510,9 @@ def _apply_cmp_state_update_8616(
     project: object,
     codegen: object,
     insn: object,
-    reg_state: dict[str, object],
-    stack_slots: dict[tuple[int, int], object],
-    reg_exprs: dict[tuple[int, str, int], object],
+    reg_state: object,
+    stack_slots: object,
+    reg_exprs: object,
     ds_var: object,
 ) -> None:
     def _impl() -> None:
@@ -2326,15 +2550,17 @@ def _apply_cmp_state_update_8616(
     return _impl()
 
 
+@cython.ccall
 def _bind_typed_condition_register_operand_8616(
     project: Any,
     codegen: Any,
     operand: object,
     expr: object,
-    reg_exprs: dict[tuple[int, str, int], object],
+    reg_exprs: object,
     ds_var: Any,
-    producer_insn: int,
+    producer_insn: cython.longlong,
 ) -> object:
+    bound: object
     if not isinstance(operand, IRValue) or operand.space.name != "REG" or not isinstance(operand.name, str):
         return expr
     if not _expr_is_register_8616(project, expr, operand.name):
@@ -2351,9 +2577,11 @@ def _bind_typed_condition_register_operand_8616(
     return bound if bound is not None else expr
 
 
+@cython.ccall
 def _bind_typed_condition_expr_operands_8616(
     project: object, codegen: object, cond: ConditionIR, expr: object
 ) -> object:
+    ds_offset: object
     if not isinstance(expr, CBinaryOp):
         return expr
     producer_insn = cond.producer_insn
@@ -2376,13 +2604,16 @@ def _bind_typed_condition_expr_operands_8616(
 
 def _walk_c_expr_children_8616(
     node: object,
-    seen: set[int],
-    walk: Callable[[object], bool],
-    attrs: tuple[str, ...],
+    seen: object,
+    walk: Callable[[object], cython.bint],
+    attrs: object,
     *,
-    walk_args: bool = False,
-) -> bool:
+    walk_args: cython.bint = False,
+) -> cython.bint:
     """Recurse through the composite children of one expression node."""
+    args: object
+    child: object
+    attr: object
     if isinstance(node, CBinaryOp):
         return walk(node.lhs) or walk(node.rhs)
     if isinstance(node, CUnaryOp):
@@ -2396,12 +2627,15 @@ def _walk_c_expr_children_8616(
     if walk_args:
         args = getattr(node, "args", None)
         if isinstance(args, (list, tuple)):
-            return any(walk(arg) for arg in args)
+            return any(walk(arg) for arg in iter(args))
     return False
 
 
-def _collect_arg_list_stack_offsets_8616(cfunc: object, arg_offsets: set[int]) -> None:
+@cython.ccall
+def _collect_arg_list_stack_offsets_8616(cfunc: object, arg_offsets: object) -> None:
     """Collect stack offsets already represented by the declared arg list."""
+    variable: object
+    arg: object
     arg_list = tuple(getattr(cfunc, "arg_list", ()) or ())
     for arg in arg_list:
         variable = getattr(arg, "variable", None)
@@ -2409,8 +2643,14 @@ def _collect_arg_list_stack_offsets_8616(cfunc: object, arg_offsets: set[int]) -
             arg_offsets.add(int(variable.offset or 0))
 
 
-def _collect_named_stack_offsets_8616(cfunc: object, arg_offsets: set[int]) -> None:
+@cython.ccall
+def _collect_named_stack_offsets_8616(cfunc: object, arg_offsets: object) -> None:
     """Collect positive stack offsets carrying real names in variables_in_use."""
+    cvar_name: object
+    variables_in_use: object
+    cvar: object
+    name: object
+    variable: object
     variables_in_use = getattr(cfunc, "variables_in_use", None)
     if not isinstance(variables_in_use, dict):
         return
@@ -2432,8 +2672,13 @@ def _collect_named_stack_offsets_8616(cfunc: object, arg_offsets: set[int]) -> N
             break
 
 
-def _collect_unified_stack_offsets_8616(cfunc: object, arg_offsets: set[int]) -> None:
+@cython.ccall
+def _collect_unified_stack_offsets_8616(cfunc: object, arg_offsets: object) -> None:
     """Collect named positive stack offsets from unified local vars."""
+    unified_locals: object
+    variable: object
+    cvars: object
+    item: object
     unified_locals = getattr(cfunc, "unified_local_vars", None)
     if not isinstance(unified_locals, dict):
         return
@@ -2457,17 +2702,24 @@ def _collect_unified_stack_offsets_8616(cfunc: object, arg_offsets: set[int]) ->
             arg_offsets.add(offset)
 
 
-def _m_arg_stack_offsets_8616(cfunc: object) -> set[int]:
+@cython.ccall
+def _m_arg_stack_offsets_8616(cfunc: object) -> object:
     """Compute the stack offsets occupied by function arguments."""
-    arg_offsets: set[int] = set()
+    arg_offsets: set[cython.longlong] = set()
     _collect_arg_list_stack_offsets_8616(cfunc, arg_offsets)
     _collect_named_stack_offsets_8616(cfunc, arg_offsets)
     _collect_unified_stack_offsets_8616(cfunc, arg_offsets)
     return arg_offsets
 
 
-def _root_children_8616(current: object, pending: list[object]) -> bool:
+@cython.ccall
+def _root_children_8616(current: object, pending: object) -> cython.bint:
     """Push structured children of one root node; return False if none apply."""
+    child: object
+    stmts: object
+    _cond: object
+    attr: object
+    body: object
     stmts = getattr(current, "statements", None)
     if stmts is not None:
         pending.extend(reversed(tuple(stmts or ())))
@@ -2484,15 +2736,18 @@ def _root_children_8616(current: object, pending: list[object]) -> bool:
     return False
 
 
+@cython.ccall
 def _root_tags_match_ins_addr_8616(
-    current: object, target_addr: int, max_forward_bytes: int
-) -> bool:
+    current: object, target_addr: cython.longlong, max_forward_bytes: cython.longlong
+) -> cython.bint:
     """Check whether one node's ins_addr tag matches the target."""
+    ins_addr: object
+    tags: object
     tags = getattr(current, "tags", None)
     if not isinstance(tags, dict):
         return False
     ins_addr = tags.get("ins_addr")
-    if ins_addr == target_addr:
+    if operator.eq(ins_addr, target_addr):
         return True
     return bool(
         isinstance(ins_addr, int)
@@ -2501,14 +2756,16 @@ def _root_tags_match_ins_addr_8616(
     )
 
 
+@cython.ccall
 def _m_root_contains_ins_addr_8616(
-    root: object, target_addr: int, *, max_forward_bytes: int = 0
-) -> bool:
+    root: object, target_addr: cython.longlong, *, max_forward_bytes: cython.longlong = 0
+) -> cython.bint:
     """Scan a structured root for a statement tagged with the target ins_addr."""
+    current: object
     if root is None:
         return False
     pending = [root]
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     while pending:
         current = pending.pop()
         if current is None:
@@ -2526,15 +2783,15 @@ def _m_root_contains_ins_addr_8616(
     return False
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _CallReturnGuardScan8616:
     """Collect call-return lhs sources keyed by following guard-condition tags."""
 
     fingerprint: Callable[[object], tuple[str, str]]
-    sources: dict[tuple[int, int], object] = field(default_factory=dict)
-    conflicts: set[tuple[int, int]] = field(default_factory=set)
-    seen_roots: set[int] = field(default_factory=set)
-    debug_stats: dict[str, int] = field(
+    sources: object = field(default_factory=dict)
+    conflicts: object = field(default_factory=set)
+    seen_roots: object = field(default_factory=set)
+    debug_stats: object = field(
         default_factory=lambda: {
             "blocks": 0,
             "stmts": 0,
@@ -2543,9 +2800,11 @@ class _CallReturnGuardScan8616:
             "conditions_after_assign": 0,
         }
     )
-    debug_stmt_types: dict[str, int] = field(default_factory=dict)
+    debug_stmt_types: object = field(default_factory=dict)
 
+    @cython.ccall
     def _record(self, cond: object, source: object) -> None:
+        previous: object
         key = _condition_tags_8616(cond)
         if not isinstance(key, tuple) or key in self.conflicts:
             return
@@ -2553,11 +2812,17 @@ class _CallReturnGuardScan8616:
         if previous is None:
             self.sources[key] = source
             return
-        if self.fingerprint(previous) != self.fingerprint(source):
+        if operator.ne(self.fingerprint(previous), self.fingerprint(source)):
             self.conflicts.add(key)
             self.sources.pop(key, None)
 
+    @cython.ccall
     def _walk_block(self, root: object) -> None:
+        last_call_lhs: object
+        lhs: object
+        child: object
+        cond: object
+        stmt: object
         root_id = id(root)
         if root_id in self.seen_roots:
             return
@@ -2598,8 +2863,11 @@ _CALL_EXPR_NAMES_8616 = frozenset(
 )
 
 
-def _m_assignment_rhs_has_real_call_8616(stmt: object) -> bool:
+@cython.ccall
+def _m_assignment_rhs_has_real_call_8616(stmt: object) -> cython.bint:
     """Detect an assignment whose rhs performs a real call."""
+    rhs: object
+    child: object
     if not isinstance(stmt, CAssignment):
         return False
     rhs = stmt.rhs
@@ -2617,6 +2885,9 @@ def _m_assignment_rhs_has_real_call_8616(stmt: object) -> bool:
 
 def _m_condition_exprs_from_stmt_8616(stmt: object) -> Iterator[object]:
     """Yield condition expressions attached to one statement node."""
+    cond: object
+    cond_pairs: object
+    _body: object
     cond_pairs = getattr(stmt, "condition_and_nodes", None)
     if isinstance(cond_pairs, (list, tuple)):
         for cond, _body in tuple(cond_pairs):
@@ -2629,6 +2900,13 @@ def _m_condition_exprs_from_stmt_8616(stmt: object) -> Iterator[object]:
 
 def _m_child_statement_roots_8616(stmt: object) -> Iterator[object]:
     """Yield child statement roots reachable from one statement node."""
+    body: object
+    cases: object
+    child: object
+    cond_pairs: object
+    default: object
+    _cond: object
+    attr: object
     for attr in ("body", "else_node", "iftrue", "iffalse", "initializer", "iterator"):
         child = getattr(stmt, attr, None)
         if child is not None:
@@ -2646,8 +2924,11 @@ def _m_child_statement_roots_8616(stmt: object) -> Iterator[object]:
         yield default
 
 
-def _m_expr_is_return_register_8616(expr: object, project: object) -> bool:
+@cython.ccall
+def _m_expr_is_return_register_8616(expr: object, project: object) -> cython.bint:
     """Detect whether the expression reads the AX return register."""
+    ax_offset: object
+    node: object
     node = expr
     while isinstance(node, CTypeCast):
         node = getattr(node, "expr", None)
@@ -2659,19 +2940,19 @@ def _m_expr_is_return_register_8616(expr: object, project: object) -> bool:
     ax_offset = _reg_offset_8616(project, "ax")
     if ax_offset is None:
         return False
-    return int(variable.reg) == int(ax_offset)
+    return operator.eq(int(variable.reg), int(ax_offset))
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _CallReturnRebind8616:
     """Rebind adjacent guard conditions that still read the call return register."""
 
     project: object
-    changed: bool = False
-    count: int = 0
-    seen_roots: set[int] = field(default_factory=set)
+    changed: cython.bint = False
+    count: cython.longlong = 0
+    seen_roots: object = field(default_factory=set)
 
-    def _replace_return_register_reads(self, cond: Any, source: Any) -> Any:
+    def _replace_return_register_reads(self, cond: object, source: object) -> Any:
         if cond is None or source is None:
             return cond
         if _m_expr_is_return_register_8616(cond, self.project):
@@ -2692,7 +2973,11 @@ class _CallReturnRebind8616:
             self.changed = True
         return cond
 
-    def _replace_stmt_conditions(self, stmt: Any, source: Any) -> bool:
+    @cython.ccall
+    def _replace_stmt_conditions(self, stmt: Any, source: Any) -> cython.bint:
+        cond: object
+        cond_pairs: object
+        body: object
         before_count = self.count
         cond_pairs = getattr(stmt, "condition_and_nodes", None)
         if isinstance(cond_pairs, (list, tuple)):
@@ -2709,9 +2994,13 @@ class _CallReturnRebind8616:
             new_cond = self._replace_return_register_reads(cond, source)
             if new_cond is not cond:
                 stmt.condition = new_cond
-        return self.count != before_count
+        return operator.ne(self.count, before_count)
 
+    @cython.ccall
     def _walk_block(self, root: object) -> None:
+        last_call_lhs: object
+        child: object
+        stmt: object
         root_id = id(root)
         if root_id in self.seen_roots:
             return
@@ -2728,8 +3017,11 @@ class _CallReturnRebind8616:
                 self._walk_block(child)
 
 
+@cython.ccall
 def _flatten_c_statements_8616(raw_stmts: Iterable[object] | None) -> tuple[object, ...]:
     """Flatten nested CStatements wrappers from a statement sequence."""
+    nested: object
+    stmt: object
     flattened: list[object] = []
     for stmt in tuple(raw_stmts or ()):
         if type(stmt).__name__ == "CStatements":
@@ -2741,8 +3033,10 @@ def _flatten_c_statements_8616(raw_stmts: Iterable[object] | None) -> tuple[obje
     return tuple(flattened)
 
 
-def _m_statements_from_root_8616(root: object) -> tuple[object, ...]:
+@cython.ccall
+def _m_statements_from_root_8616(root: object) -> object:
     """Collect the flattened statement list for one structured root."""
+    stmts: object
     if root is None:
         return ()
     stmts = getattr(root, "statements", None)
@@ -2757,8 +3051,8 @@ def _m_statements_from_root_8616(root: object) -> tuple[object, ...]:
 
 
 def _walk_nonsegment_reg_carrier_8616(
-    node: object, seen: set[int], segment_offsets: set[int]
-) -> bool:
+    node: object, seen: object, segment_offsets: object
+) -> cython.bint:
     """Walk one expression for a non-segment register carrier."""
     if node is None:
         return False
@@ -2779,18 +3073,19 @@ def _walk_nonsegment_reg_carrier_8616(
     )
 
 
-def _m_expr_uses_nonsegment_register_carrier_8616(expr: Any, arch: Any) -> bool:
+@cython.ccall
+def _m_expr_uses_nonsegment_register_carrier_8616(expr: Any, arch: Any) -> cython.bint:
     """Detect whether the expression reads a non-segment register carrier."""
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     segment_offsets = {
         offset
-        for name, (offset, _size) in getattr(arch, "registers", {}).items()
+        for name, (offset, _size) in builtins.iter(getattr(arch, "registers", {}).items())
         if name.lower() in {"cs", "ds", "es", "ss"}
     }
     return _walk_nonsegment_reg_carrier_8616(expr, seen, segment_offsets)
 
 
-def _walk_stack_slot_expr_8616(node: object, seen: set[int], arg_stack_offsets: set[int]) -> bool:
+def _walk_stack_slot_expr_8616(node: object, seen: object, arg_stack_offsets: object) -> cython.bint:
     """Walk one expression for a non-arg positive stack slot."""
     if node is None:
         return False
@@ -2812,7 +3107,7 @@ def _walk_stack_slot_expr_8616(node: object, seen: set[int], arg_stack_offsets: 
     )
 
 
-def _walk_unstable_stack_arg_placeholder_8616(node: object, seen: set[int]) -> bool:
+def _walk_unstable_stack_arg_placeholder_8616(node: object, seen: object) -> cython.bint:
     """Walk one expression for an unstable positive stack-arg placeholder."""
     if node is None:
         return False
@@ -2830,7 +3125,7 @@ def _walk_unstable_stack_arg_placeholder_8616(node: object, seen: set[int]) -> b
                     variable.name,
                     getattr(node.unified_variable, "name", None),
                 )
-                if any(_is_unstable_stack_arg_name_8616(name) for name in names):
+                if any(_is_unstable_stack_arg_name_8616(name) for name in iter(names)):
                     return True
     return _walk_c_expr_children_8616(
         node,
@@ -2840,7 +3135,7 @@ def _walk_unstable_stack_arg_placeholder_8616(node: object, seen: set[int]) -> b
     )
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _JccRewriteRun8616:
     """Drive the decoded-JCC condition rewrite across one structured function.
 
@@ -2853,19 +3148,20 @@ class _JccRewriteRun8616:
     codegen_dynamic: Any
     cfunc: Any
     project_dynamic: Any
-    flags_offset: int
-    changed: bool = False
-    materialized_count: int = 0
-    key_signature_plan: dict[tuple[int, int], tuple[Any, ...]] = field(default_factory=dict)
-    key_decoded_plan: dict[tuple[int, int], _DecodedCmpGuard8616] = field(default_factory=dict)
-    key_conflicts: set[tuple[int, int]] = field(default_factory=set)
-    unknown_polarity_refused_keys: set[tuple[int, int]] = field(default_factory=set)
-    raw_state_refused_keys: set[tuple[int, int]] = field(default_factory=set)
-    consumed_wide_compare_low_branch_keys: set[tuple[int, int]] = field(default_factory=set)
-    call_return_guard_sources: dict[tuple[int, int], object] = field(default_factory=dict)
-    _arg_stack_offsets: set[int] = field(default_factory=set)
+    flags_offset: cython.longlong
+    changed: cython.bint = False
+    materialized_count: cython.longlong = 0
+    key_signature_plan: object = field(default_factory=dict)
+    key_decoded_plan: object = field(default_factory=dict)
+    key_conflicts: object = field(default_factory=set)
+    unknown_polarity_refused_keys: object = field(default_factory=set)
+    raw_state_refused_keys: object = field(default_factory=set)
+    consumed_wide_compare_low_branch_keys: object = field(default_factory=set)
+    call_return_guard_sources: object = field(default_factory=dict)
+    _arg_stack_offsets: object = field(default_factory=set)
 
-    def run(self) -> bool:
+    @cython.ccall
+    def run(self) -> cython.bint:
         """Execute the decoded-JCC rewrite and report whether anything changed."""
         if not self._run_setup_8616():
             return False
@@ -2875,8 +3171,10 @@ class _JccRewriteRun8616:
         self._run_prune_and_publish_8616()
         return self.changed
 
-    def _run_setup_8616(self) -> bool:
+    @cython.ccall
+    def _run_setup_8616(self) -> cython.bint:
         """Initialize run state; refuse when the codegen context is incomplete."""
+        flags_offset: object
         self.codegen_dynamic = cast(Any, self.codegen)
         self.cfunc = getattr(self.codegen_dynamic, "cfunc", None)
         if self.cfunc is None:
@@ -2895,15 +3193,18 @@ class _JccRewriteRun8616:
         self.raw_state_refused_keys = set()
         self.consumed_wide_compare_low_branch_keys = {
             key
-            for key in tuple(getattr(self.codegen, "_inertia_jcc_consumed_32bit_low_guard_keys_8616", ()) or ())
+            for key in builtins.iter(tuple(getattr(self.codegen, "_inertia_jcc_consumed_32bit_low_guard_keys_8616", ()) or ()))
             if isinstance(key, tuple) and len(key) == 2 and isinstance(key[0], int) and isinstance(key[1], int)
         }
         self._arg_stack_offsets = self._arg_stack_offsets_8616()
         self.call_return_guard_sources = self._call_return_guard_sources_by_key_8616()
         return True
 
+    @cython.ccall
     def _run_collect_signatures_8616(self) -> None:
         """Collect decoded signatures for every tagged guard condition."""
+        key: object
+        cond: object
         for cond in self._iter_guard_conditions_8616():
             key = _condition_tags_8616(cond)
             if key is None:
@@ -2912,6 +3213,7 @@ class _JccRewriteRun8616:
                 continue
             self._collect_decoded_signature_8616(cond)
 
+    @cython.ccall
     def _run_rebind_and_sibling_polarity_8616(self) -> None:
         """Apply call-return rebinds and following-sibling polarity repair."""
         if bool(os.environ.get("INERTIA_ENABLE_JCC_CALL_RETURN_REBIND")):  # noqa: SIM102
@@ -2920,8 +3222,12 @@ class _JccRewriteRun8616:
         if self._rewrite_following_sibling_guard_polarity_8616(self.cfunc.statements):
             self.changed = True
 
+    @cython.ccall
     def _run_rewrite_node_conditions_8616(self) -> None:
         """Rewrite tagged conditions across every structured node."""
+        cond: object
+        cond_pairs: object
+        node: object
         for node in _iter_c_nodes_deep_8616(self.cfunc.statements):
             cond_pairs = getattr(node, "condition_and_nodes", None)
             if isinstance(cond_pairs, (list, tuple)):
@@ -2941,8 +3247,14 @@ class _JccRewriteRun8616:
                         cast(Any, node).condition = new_cond
                         self.changed = True
 
-    def _rewrite_condition_pairs_8616(self, node: object, cond_pairs: list[tuple[object, object]] | tuple[tuple[object, object], ...]) -> None:
+    @cython.ccall
+    def _rewrite_condition_pairs_8616(self, node: object, cond_pairs: object) -> None:
         """Rewrite one node's condition_and_nodes pair list."""
+        first_cond: object
+        primary: object
+        primary_key: object
+        body: object
+        cond: object
         pair_changed = False
         new_pairs = []
         first_old_cond = cond_pairs[0][0] if cond_pairs else None
@@ -2970,7 +3282,7 @@ class _JccRewriteRun8616:
         if (
             self._is_literal_condition_8616(primary)
             or primary is first_old_cond
-            or (primary_key is not None and primary_key == first_old_key)
+            or (primary_key is not None and operator.eq(primary_key, first_old_key))
         ) and new_pairs:
             first_cond = new_pairs[0][0]
             if first_cond is not None:
@@ -2979,9 +3291,10 @@ class _JccRewriteRun8616:
 
     def _run_prune_and_publish_8616(self) -> None:
         """Prune consumed guards and publish materialization state."""
+        lane: object
         if bool(os.environ.get("INERTIA_DEBUG_JCC_REWRITE")):
             if_node_count = sum(
-                1 for node in _iter_c_nodes_deep_8616(self.cfunc.statements) if isinstance(node, CIfElse)
+                1 for node in builtins.iter(_iter_c_nodes_deep_8616(self.cfunc.statements)) if isinstance(node, CIfElse)
             )
             _log.warning(
                 "[jcc-rewrite] consumed-low prune start consumed=%r if_nodes=%d root_type=%s",
@@ -3004,7 +3317,9 @@ class _JccRewriteRun8616:
                 self.materialized_count,
             )
 
+    @cython.ccall
     def _record_consumed_decoded_guard_keys_8616(self, decoded: _DecodedCmpGuard8616) -> None:
+        key: object
         if bool(os.environ.get("INERTIA_DEBUG_JCC_REWRITE")) and decoded.consumed_branch_keys:
             _log.warning("[jcc-rewrite] record consumed branch keys=%r", decoded.consumed_branch_keys)
         for key in decoded.consumed_branch_keys:
@@ -3018,7 +3333,8 @@ class _JccRewriteRun8616:
                 sorted(self.consumed_wide_compare_low_branch_keys)
             )
 
-    def _is_literal_condition_8616(self, expr: object) -> bool:
+    @cython.ccall
+    def _is_literal_condition_8616(self, expr: object) -> cython.bint:
         node = expr
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -3026,10 +3342,12 @@ class _JccRewriteRun8616:
             return isinstance(node.value, int)
         return False
 
-    def _is_tagged_condition_carrier_8616(self, expr: object) -> bool:
-        seen: set[int] = set()
+    def _is_tagged_condition_carrier_8616(self, expr: object) -> cython.bint:
+        seen: set[cython.longlong] = set()
 
-        def _walk(node: object) -> bool:
+        def _walk(node: object) -> cython.bint:
+            cond: object
+            expr: object
             if node is None:
                 return False
             marker = id(node)
@@ -3052,13 +3370,15 @@ class _JccRewriteRun8616:
 
         return _walk(expr)
 
-    def _expr_uses_nonsegment_register_carrier_8616(self, expr: Any) -> bool:
+    @cython.ccall
+    def _expr_uses_nonsegment_register_carrier_8616(self, expr: Any) -> cython.bint:
         return _m_expr_uses_nonsegment_register_carrier_8616(expr, self.project_dynamic.arch)
 
-    def _has_materialized_nonflag_cmp_8616(self, expr: object) -> bool:
-        seen: set[int] = set()
+    def _has_materialized_nonflag_cmp_8616(self, expr: object) -> cython.bint:
+        seen: set[cython.longlong] = set()
 
-        def _walk(node: object) -> bool:
+        def _walk(node: object) -> cython.bint:
+            cond: object
             if node is None:
                 return False
             marker = id(node)
@@ -3080,15 +3400,19 @@ class _JccRewriteRun8616:
 
         return _walk(expr)
 
-    def _arg_stack_offsets_8616(self, ) -> set[int]:
+    @cython.ccall
+    def _arg_stack_offsets_8616(self, ) -> object:
         return _m_arg_stack_offsets_8616(self.cfunc)
 
-    def _expr_uses_nonarg_bp_positive_stack_slot_8616(self, expr: object) -> bool:
+    @cython.ccall
+    def _expr_uses_nonarg_bp_positive_stack_slot_8616(self, expr: object) -> cython.bint:
         return _walk_stack_slot_expr_8616(expr, set(), self._arg_stack_offsets)
 
-    def _expr_uses_unstable_positive_stack_arg_placeholder_8616(self, expr: object) -> bool:
+    @cython.ccall
+    def _expr_uses_unstable_positive_stack_arg_placeholder_8616(self, expr: object) -> cython.bint:
         return _walk_unstable_stack_arg_placeholder_8616(expr, set())
 
+    @cython.ccall
     def _safe_fingerprint_8616(self, expr: object) -> tuple[str, str]:
         try:
             value = _expr_fingerprint(expr, self.project)
@@ -3096,12 +3420,14 @@ class _JccRewriteRun8616:
             value = repr(expr)
         return (str(type(expr).__name__), repr(value))
 
-    def _validation_fingerprint_8616(self, expr: object) -> str:
+    @cython.ccall
+    def _validation_fingerprint_8616(self, expr: object) -> object:
         try:
             return str(_expr_fingerprint(expr, self.project))
         except Exception:  # pragma: no cover - platform-specific fingerprints
             return repr(expr)
 
+    @cython.ccall
     def _record_jcc_validation_evidence_8616(self, before_expr: Any, after_expr: Any) -> None:
         before_fp = self._validation_fingerprint_8616(before_expr)
         after_fp = self._validation_fingerprint_8616(after_expr)
@@ -3118,6 +3444,7 @@ class _JccRewriteRun8616:
         )
         self.codegen_dynamic._inertia_jcc_condition_validation_evidence_8616 = tuple(evidence)
 
+    @cython.ccall
     def _record_jcc_decoded_condition_fingerprint_8616(self, expr: Any) -> None:
         fingerprint = self._validation_fingerprint_8616(expr)
         if not fingerprint:
@@ -3128,10 +3455,12 @@ class _JccRewriteRun8616:
                 int(getattr(self.codegen, "_inertia_jcc_decoded_condition_fingerprint_evidence_count_8616", 0) or 0) + 1
             )
         self.codegen_dynamic._inertia_jcc_decoded_condition_fingerprints_8616 = tuple(
-            dict.fromkeys((*existing, fingerprint))
+            dict.fromkeys(tuple(existing) + (fingerprint,))
         )
 
+    @cython.ccall
     def _record_decoded_guard_fingerprint_8616(self, decoded: _DecodedCmpGuard8616) -> None:
+        expr: object
         expr = decoded.expr
         if expr is None:
             expr = _try_build_arch_safe_binary_op_8616(
@@ -3148,7 +3477,9 @@ class _JccRewriteRun8616:
                 return
         self._record_jcc_decoded_condition_fingerprint_8616(expr)
 
+    @cython.ccall
     def _const_bool_value_8616(self, expr: object) -> int | None:
+        node: object
         node = expr
         while isinstance(node, CTypeCast):
             node = getattr(node, "expr", None)
@@ -3156,7 +3487,8 @@ class _JccRewriteRun8616:
             return int(node.value)
         return None
 
-    def _condition_inverts_decoded_guard_8616(self, expr: object) -> bool:
+    @cython.ccall
+    def _condition_inverts_decoded_guard_8616(self, expr: object) -> cython.bint:
         if isinstance(expr, CUnaryOp) and getattr(expr, "op", None) == "Not":
             return not self._condition_inverts_decoded_guard_8616(expr.operand)
         if isinstance(expr, CITE):
@@ -3175,15 +3507,19 @@ class _JccRewriteRun8616:
                 return False
         return False
 
-    def _condition_is_direct_inverting_cite_8616(self, expr: object) -> bool:
+    @cython.ccall
+    def _condition_is_direct_inverting_cite_8616(self, expr: object) -> cython.bint:
         if not isinstance(expr, CITE):
             return False
         iftrue = self._const_bool_value_8616(expr.iftrue)
         iffalse = self._const_bool_value_8616(expr.iffalse)
         return (iftrue, iffalse) == (0, 1)
 
-    def _decoded_guard_contains_real_call_8616(self, decoded: _DecodedCmpGuard8616) -> bool:
-        roots = (decoded.expr,) if decoded.expr is not None else (decoded.lhs, decoded.rhs)
+    @cython.ccall
+    def _decoded_guard_contains_real_call_8616(self, decoded: _DecodedCmpGuard8616) -> cython.bint:
+        child: object
+        root: object
+        roots = tuple((decoded.expr,)) if decoded.expr is not None else tuple((decoded.lhs, decoded.rhs))
         for root in roots:
             for child in _iter_c_nodes_deep_8616(root):
                 if not isinstance(child, CFunctionCall):
@@ -3203,18 +3539,21 @@ class _JccRewriteRun8616:
                 return True
         return False
 
-    def _decoded_guard_uses_raw_state_register_8616(self, decoded: _DecodedCmpGuard8616) -> bool:
+    @cython.ccall
+    def _decoded_guard_uses_raw_state_register_8616(self, decoded: _DecodedCmpGuard8616) -> cython.bint:
+        child: object
+        root: object
         raw_register_names = {"flags", "eflags", "sp"}
         raw_register_offsets = {
             offset
-            for offset in (
+            for offset in iter((
                 _reg_offset_8616(self.project, "flags"),
                 _reg_offset_8616(self.project, "eflags"),
                 _reg_offset_8616(self.project, "sp"),
-            )
+            ))
             if isinstance(offset, int)
         }
-        roots = (decoded.expr,) if decoded.expr is not None else (decoded.lhs, decoded.rhs)
+        roots = tuple((decoded.expr,)) if decoded.expr is not None else tuple((decoded.lhs, decoded.rhs))
         for root in roots:
             for child in _iter_c_nodes_deep_8616(root):
                 if not isinstance(child, CVariable):
@@ -3222,11 +3561,11 @@ class _JccRewriteRun8616:
                 variable = child.variable
                 names = {
                     str(name).lower()
-                    for name in (
+                    for name in iter((
                         child.name,
                         getattr(variable, "name", None),
                         getattr(child.unified_variable, "name", None),
-                    )
+                    ))
                     if isinstance(name, str) and name
                 }
                 if names & raw_register_names:
@@ -3237,9 +3576,11 @@ class _JccRewriteRun8616:
                         return True
         return False
 
+    @cython.ccall
     def _invert_decoded_guard_8616(self,
         decoded: _DecodedCmpGuard8616, tags: object
     ) -> _DecodedCmpGuard8616:
+        inverted_op: object
         if decoded.expr is not None:
             return _DecodedCmpGuard8616(
                 lhs=None,
@@ -3270,7 +3611,10 @@ class _JccRewriteRun8616:
             consumed_branch_keys=decoded.consumed_branch_keys,
         )
 
-    def _jcc_target_for_key_8616(self, key: tuple[int, int] | None) -> int | None:
+    @cython.ccall
+    def _jcc_target_for_key_8616(self, key: object) -> int | None:
+        insns: object
+        jcc_index: object
         if not isinstance(key, tuple) or len(key) != 2:
             return None
         ins_addr, block_addr = key
@@ -3284,20 +3628,24 @@ class _JccRewriteRun8616:
             return None
         return _branch_target_imm_8616(insns[jcc_index])
 
+    @cython.ccall
     def _root_contains_ins_addr_8616(self,
-        root: object, target_addr: int, *, max_forward_bytes: int = 0
-    ) -> bool:
+        root: object, target_addr: cython.longlong, *, max_forward_bytes: cython.longlong = 0
+    ) -> cython.bint:
         return _m_root_contains_ins_addr_8616(root, target_addr, max_forward_bytes=max_forward_bytes)
 
+    @cython.ccall
     def _jcc_polarity_evidence_8616(self,
-        key: tuple[int, int] | None, body: object
+        key: object, body: object
     ) -> _JccPolarityEvidence8616:
         target = self._jcc_target_for_key_8616(key)
         if isinstance(target, int) and self._root_contains_ins_addr_8616(body, target, max_forward_bytes=0):
             return _JccPolarityEvidence8616.JCC_TARGET_BODY
         return _JccPolarityEvidence8616.UNKNOWN
 
-    def _body_is_break_only_8616(self, body: object) -> bool:
+    @cython.ccall
+    def _body_is_break_only_8616(self, body: object) -> cython.bint:
+        statements: object
         if body is None:
             return False
         if isinstance(body, (CBreak, CReturn)):
@@ -3310,19 +3658,24 @@ class _JccRewriteRun8616:
         items = tuple(statements or ())
         return len(items) == 1 and isinstance(items[0], (CBreak, CReturn))
 
+    @cython.ccall
     def _condition_exprs_from_stmt_8616(self, stmt: object) -> Iterator[object]:
         return _m_condition_exprs_from_stmt_8616(stmt)
 
+    @cython.ccall
     def _child_statement_roots_8616(self, stmt: object) -> Iterator[object]:
         return _m_child_statement_roots_8616(stmt)
 
-    def _statements_from_root_8616(self, root: object) -> tuple[object, ...]:
+    @cython.ccall
+    def _statements_from_root_8616(self, root: object) -> object:
         return _m_statements_from_root_8616(root)
 
-    def _assignment_rhs_has_real_call_8616(self, stmt: object) -> bool:
+    @cython.ccall
+    def _assignment_rhs_has_real_call_8616(self, stmt: object) -> cython.bint:
         return _m_assignment_rhs_has_real_call_8616(stmt)
 
-    def _call_return_guard_sources_by_key_8616(self, ) -> dict[tuple[int, int], object]:
+    @cython.ccall
+    def _call_return_guard_sources_by_key_8616(self, ) -> object:
         debug_jcc = bool(os.environ.get("INERTIA_DEBUG_JCC_REWRITE"))
         scan = _CallReturnGuardScan8616(fingerprint=self._safe_fingerprint_8616)
         scan._walk_block(self.cfunc)
@@ -3335,10 +3688,12 @@ class _JccRewriteRun8616:
             )
         return scan.sources
 
-    def _expr_is_return_register_8616(self, expr: object) -> bool:
+    @cython.ccall
+    def _expr_is_return_register_8616(self, expr: object) -> cython.bint:
         return _m_expr_is_return_register_8616(expr, self.project)
 
-    def _rebind_adjacent_call_return_register_conditions_8616(self, ) -> bool:
+    @cython.ccall
+    def _rebind_adjacent_call_return_register_conditions_8616(self, ) -> cython.bint:
         rebind = _CallReturnRebind8616(project=self.project)
         rebind._walk_block(self.cfunc)
         if rebind.count:
@@ -3352,15 +3707,19 @@ class _JccRewriteRun8616:
                 )
         return rebind.changed
 
-    def _expr_is_stale_literal_8616(self, expr: object) -> bool:
+    @cython.ccall
+    def _expr_is_stale_literal_8616(self, expr: object) -> cython.bint:
+        node: object
         node = expr
         while isinstance(node, CTypeCast):
             node = getattr(node, "expr", None)
         return isinstance(node, CConstant) and isinstance(getattr(node, "value", None), int)
 
+    @cython.ccall
     def _rebind_decoded_call_return_guard_8616(self,
-        key: tuple[int, int] | None, decoded: _DecodedCmpGuard8616
+        key: object, decoded: _DecodedCmpGuard8616
     ) -> _DecodedCmpGuard8616:
+        source: object
         source = self.call_return_guard_sources.get(key) if key is not None else None
         if source is None or decoded.expr is not None:
             return decoded
@@ -3389,12 +3748,16 @@ class _JccRewriteRun8616:
             consumed_branch_keys=decoded.consumed_branch_keys,
         )
 
+    @cython.ccall
     def _decoded_signature_8616(self, decoded: _DecodedCmpGuard8616) -> tuple[object, ...]:
         if decoded.expr is not None:
             return ("expr", decoded.op, *self._safe_fingerprint_8616(decoded.expr))
         return ("cmp", decoded.op, *self._safe_fingerprint_8616(decoded.lhs), *self._safe_fingerprint_8616(decoded.rhs))
 
+    @cython.ccall
     def _collect_decoded_signature_8616(self, cond: object) -> None:
+        decoded: object
+        previous: object
         key = _condition_tags_8616(cond)
         if not isinstance(key, tuple):
             return
@@ -3413,7 +3776,7 @@ class _JccRewriteRun8616:
             if bool(os.environ.get("INERTIA_DEBUG_JCC_REWRITE")):
                 _log.warning("[jcc-rewrite] key plan set key=%r signature=%r", key, signature)
             return
-        if previous != signature and key not in self.key_conflicts:
+        if operator.ne(previous, signature) and key not in self.key_conflicts:
             self.key_conflicts.add(key)
             self.key_signature_plan.pop(key, None)
             self.key_decoded_plan.pop(key, None)
@@ -3427,7 +3790,12 @@ class _JccRewriteRun8616:
                 )
 
     def _iter_guard_conditions_8616(self, ) -> Iterator[Any]:
-        seen_conditions: set[int] = set()
+        cond: object
+        cond_pairs: object
+        _body: object
+        node: object
+        stmt: object
+        seen_conditions: set[cython.longlong] = set()
         for stmt in self._statements_from_root_8616(self.cfunc):
             for node in _iter_c_nodes_deep_8616(stmt):
                 cond_pairs = getattr(node, "condition_and_nodes", None)
@@ -3449,13 +3817,14 @@ class _JccRewriteRun8616:
                 seen_conditions.add(marker)
                 yield cond
 
+    @cython.ccall
     def _decoded_explicit_cmp_gate_8616(self,
         cond: object,
         decoded: _DecodedCmpGuard8616,
-        debug_jcc: bool,
-        ins_addr: int,
-        block_addr: int,
-    ) -> bool:
+        debug_jcc: cython.bint,
+        ins_addr: cython.longlong,
+        block_addr: cython.longlong,
+    ) -> cython.bint:
         """Keep stable explicit compares; allow unstable stack-arg ones through."""
         if not (
             self._has_materialized_nonflag_cmp_8616(cond) and not _c_expr_uses_register_8616(cond, self.flags_offset)
@@ -3485,13 +3854,14 @@ class _JccRewriteRun8616:
             _log.warning("[jcc-rewrite] decode skip explicit-cmp key=%r", (ins_addr, block_addr))
         return True
 
+    @cython.ccall
     def _decoded_post_translate_gate_8616(self,
         cond: object,
         decoded: _DecodedCmpGuard8616,
-        has_raw_register_carrier: bool,
-        debug_jcc: bool,
-        ins_addr: int,
-        block_addr: int,
+        has_raw_register_carrier: cython.bint,
+        debug_jcc: cython.bint,
+        ins_addr: cython.longlong,
+        block_addr: cython.longlong,
     ) -> _DecodedCmpGuard8616 | None:
         same_expr = _same_c_expression_8616(decoded.lhs, decoded.rhs)
         lhs_fp = self._safe_fingerprint_8616(decoded.lhs)
@@ -3536,9 +3906,11 @@ class _JccRewriteRun8616:
 
         return decoded
 
+    @cython.ccall
     def _decode_condition_from_tags_8616(self,
-        cond: object, block_addr: int, ins_addr: int
+        cond: object, block_addr: cython.longlong, ins_addr: cython.longlong
     ) -> _DecodedCmpGuard8616 | None:
+        decoded: object
         # Primary lane: flags-backed conditions.
         # Recovery lane: conditions that already collapsed to a literal constant
         # but still carry insn/block tags for a decodable cmp+jcc origin.
@@ -3575,17 +3947,21 @@ class _JccRewriteRun8616:
             cond, decoded, has_raw_register_carrier, debug_jcc, ins_addr, block_addr
         )
 
+    @cython.ccall
     def _build_rewrite_8616(self,
         cond: object,
         decoded: _DecodedCmpGuard8616,
-        key: tuple[int, int] | None,
+        key: object,
         *,
         polarity_evidence: _JccPolarityEvidence8616 = _JccPolarityEvidence8616.UNKNOWN,
     ) -> object | None:
         """Publish a decoded guard with its original branch provenance."""
+        expression_tags: object
+        raw_tags: object
+        replacement: object
         decoded = self._rebind_decoded_call_return_guard_8616(key, decoded)
         raw_tags = getattr(cond, "tags", None)
-        tags: dict[str, object] = dict(raw_tags) if isinstance(raw_tags, dict) else {}
+        tags: object = dict(raw_tags) if isinstance(raw_tags, dict) else {}
         if isinstance(key, tuple) and len(key) == 2:
             ins_addr, block_addr = key
             if isinstance(ins_addr, int) and isinstance(block_addr, int):
@@ -3631,34 +4007,41 @@ class _JccRewriteRun8616:
             self._record_consumed_decoded_guard_keys_8616(decoded)
         return replacement
 
+    @cython.ccall
     def _decoded_final_replacement_8616(self,
         cond: object,
         decoded: _DecodedCmpGuard8616,
-        key: tuple[int, int] | None,
+        key: object,
         polarity_evidence: _JccPolarityEvidence8616,
-        debug_jcc: bool,
+        debug_jcc: cython.bint,
     ) -> object | None:
         """Build the replacement and drop it when it reproduces a materialized condition."""
+        replacement: object
         self._record_decoded_guard_fingerprint_8616(decoded)
         replacement = self._build_rewrite_8616(cond, decoded, key, polarity_evidence=polarity_evidence)
         if replacement is None:
             return None
         self._record_jcc_decoded_condition_fingerprint_8616(replacement)
-        if _condition_materialized_by_jcc_8616(cond) and self._validation_fingerprint_8616(
+        if _condition_materialized_by_jcc_8616(cond) and operator.eq(self._validation_fingerprint_8616(
             cond
-        ) == self._validation_fingerprint_8616(replacement):
+        ), self._validation_fingerprint_8616(replacement)):
             if debug_jcc:
                 _log.warning("[jcc-rewrite] decode skip already-materialized key=%r", key)
             return None
         return replacement
 
+    @cython.ccall
     def _resolve_decoded_candidate_8616(self,
         cond: object,
         body: object | None,
-        polarity_evidence: _JccPolarityEvidence8616 | None,
-        debug_jcc: bool,
-    ) -> tuple[tuple[int, int], _JccPolarityEvidence8616, _DecodedCmpGuard8616] | None:
+        polarity_evidence: object,
+        debug_jcc: cython.bint,
+    ) -> object:
         """Resolve the narrowed key, polarity evidence, decoded guard, and signature plan."""
+        decoded: object
+        key: object
+        narrowed_key: object
+        planned_signature: object
         key = _condition_tags_8616(cond)
         ins_addr = None if key is None else key[0]
         block_addr = None if key is None else key[1]
@@ -3685,8 +4068,8 @@ class _JccRewriteRun8616:
         return narrowed_key, polarity_evidence, decoded
 
     def _decoded_pre_key_gates_8616(self,
-        cond: object, key: tuple[int, int] | None, ins_addr: object, block_addr: object, debug_jcc: bool
-    ) -> bool:
+        cond: object, key: object, ins_addr: object, block_addr: object, debug_jcc: cython.bint
+    ) -> cython.bint:
         """Refuse conditions that cannot host a decoded cmp+jcc guard."""
         from inertia.structuring.condition_ownership import requires_composite_condition_ownership_8616
 
@@ -3712,22 +4095,23 @@ class _JccRewriteRun8616:
             and not _c_expr_uses_register_8616(cond, self.flags_offset)
             and any(
                 isinstance(child, CBinaryOp) and getattr(child, "op", None) == "And"
-                for child in _iter_c_nodes_deep_8616(cond)
+                for child in builtins.iter(_iter_c_nodes_deep_8616(cond))
             )
         )
 
+    @cython.ccall
     def _decoded_signature_gate_8616(self,
         decoded: _DecodedCmpGuard8616,
-        key: tuple[int, int] | None,
-        narrowed_key: tuple[int, int],
-        planned_signature: tuple[object, ...] | None,
-        debug_jcc: bool,
-    ) -> bool:
+        key: object,
+        narrowed_key: object,
+        planned_signature: object,
+        debug_jcc: cython.bint,
+    ) -> cython.bint:
         """Refuse or record conflict when the decoded signature mismatches the plan."""
         if planned_signature is None:
             return True
         signature = self._decoded_signature_8616(decoded)
-        if signature != planned_signature:
+        if operator.ne(signature, planned_signature):
             self.key_conflicts.add(narrowed_key)
             self.key_signature_plan.pop(narrowed_key, None)
             if debug_jcc:
@@ -3740,12 +4124,13 @@ class _JccRewriteRun8616:
             return True
         return False
 
+    @cython.ccall
     def _decoded_raw_state_gate_8616(self,
         decoded: _DecodedCmpGuard8616,
-        key: tuple[int, int] | None,
-        narrowed_key: tuple[int, int],
-        debug_jcc: bool,
-    ) -> bool:
+        key: object,
+        narrowed_key: object,
+        debug_jcc: cython.bint,
+    ) -> cython.bint:
         """Refuse decoded guards that still consume unproven raw state."""
         if not (
             self._decoded_guard_uses_raw_state_register_8616(decoded)
@@ -3764,16 +4149,17 @@ class _JccRewriteRun8616:
             _log.warning("[jcc-rewrite] decode skip raw-state guard key=%r", key)
         return True
 
+    @cython.ccall
     def _decoded_materialized_keep_gate_8616(self,
         cond: object,
-        key: tuple[int, int] | None,
+        key: object,
         polarity_evidence: _JccPolarityEvidence8616,
-        debug_jcc: bool,
-    ) -> bool:
+        debug_jcc: cython.bint,
+    ) -> cython.bint:
         """Keep already-materialized conditions when polarity evidence stays weak."""
         materialized_polarity_evidence = _jcc_materialized_polarity_evidence_8616(cond)
         if (
-            materialized_polarity_evidence == _JccPolarityEvidence8616.JCC_TARGET_FOLLOWING_SIBLING.value
+            operator.eq(materialized_polarity_evidence, _JccPolarityEvidence8616.JCC_TARGET_FOLLOWING_SIBLING.value)
             and polarity_evidence is not _JccPolarityEvidence8616.JCC_TARGET_FOLLOWING_SIBLING
         ):
             if debug_jcc:
@@ -3794,16 +4180,18 @@ class _JccRewriteRun8616:
             return True
         return False
 
+    @cython.ccall
     def _decoded_unknown_polarity_inversion_gate_8616(self,
         cond: object,
-        body: object | None,
+        body: object,
         decoded: _DecodedCmpGuard8616,
-        key: tuple[int, int] | None,
-        narrowed_key: tuple[int, int],
+        key: object,
+        narrowed_key: object,
         polarity_evidence: _JccPolarityEvidence8616,
-        debug_jcc: bool,
+        debug_jcc: cython.bint,
     ) -> _DecodedGateResult8616 | None:
         """Resolve unknown-polarity inversions via a direct CITE or refuse."""
+        replacement: object
         if not (
             polarity_evidence is _JccPolarityEvidence8616.UNKNOWN
             and self._condition_inverts_decoded_guard_8616(cond)
@@ -3831,12 +4219,15 @@ class _JccRewriteRun8616:
             _log.warning("[jcc-rewrite] decode skip unknown-polarity-inversion key=%r", key)
         return _DecodedGateResult8616(refused=True)
 
+    @cython.ccall
     def _decoded_condition_replacement(self,
         cond: object,
         *,
         body: object | None = None,
         polarity_evidence: _JccPolarityEvidence8616 | None = None,
     ) -> object | None:
+        inversion: object
+        resolved: object
         key = _condition_tags_8616(cond)
         debug_jcc = bool(os.environ.get("INERTIA_DEBUG_JCC_REWRITE"))
         resolved = self._resolve_decoded_candidate_8616(cond, body, polarity_evidence, debug_jcc)
@@ -3861,12 +4252,14 @@ class _JccRewriteRun8616:
             return inversion.replacement
         return self._decoded_final_replacement_8616(cond, decoded, key, polarity_evidence, debug_jcc)
 
+    @cython.ccall
     def _rewrite_condition(self,
         node: object,
         *,
         body: object | None = None,
         polarity_evidence: _JccPolarityEvidence8616 | None = None,
     ) -> object | None:
+        replacement: object
         replacement = self._decoded_condition_replacement(node, body=body, polarity_evidence=polarity_evidence)
         if replacement is None:
             return None
@@ -3881,6 +4274,7 @@ class _JccRewriteRun8616:
         body: object | None = None,
         polarity_evidence: _JccPolarityEvidence8616 | None = None,
     ) -> object:
+        replacement: object
         from inertia.structuring.loop_condition_identity import is_owned_loop_continuation_8616
 
         if is_owned_loop_continuation_8616(node):
@@ -3895,6 +4289,7 @@ class _JccRewriteRun8616:
             return node
 
         def _replace_nested_condition(child: object) -> object:
+            nested_replacement: object
             nested_replacement = self._rewrite_condition(child)
             return child if nested_replacement is None else nested_replacement
 
@@ -3907,10 +4302,11 @@ class _JccRewriteRun8616:
             self.changed = True
         return node
 
+    @cython.ccall
     def _following_sibling_jcc_polarity_evidence_8616(self,
         cond: object,
         body: object,
-        following_siblings: tuple[object, ...],
+        following_siblings: object,
     ) -> _JccPolarityEvidence8616 | None:
         key = _condition_tags_8616(cond)
         target = self._jcc_target_for_key_8616(key)
@@ -3922,8 +4318,16 @@ class _JccRewriteRun8616:
             return _JccPolarityEvidence8616.JCC_TARGET_FOLLOWING_SIBLING
         return None
 
-    def _rewrite_sibling_ifelse_pairs_8616(self, stmt: CIfElse, following_siblings: tuple[object, ...]) -> bool:
+    @cython.ccall
+    def _rewrite_sibling_ifelse_pairs_8616(self, stmt: CIfElse, following_siblings: object) -> cython.bint:
         """Rewrite one CIfElse condition pair list via following-sibling polarity evidence."""
+        else_node: object
+        first_cond: object
+        polarity_evidence: object
+        primary: object
+        primary_key: object
+        body: object
+        cond: object
         cond_pairs = stmt.condition_and_nodes
         else_node = stmt.else_node
         if not (isinstance(cond_pairs, (list, tuple)) and else_node is None):
@@ -3955,16 +4359,20 @@ class _JccRewriteRun8616:
         first_old_key = _condition_tags_8616(first_old_cond)
         if (
             primary is first_old_cond
-            or (primary_key is not None and primary_key == first_old_key)
+            or (primary_key is not None and operator.eq(primary_key, first_old_key))
         ) and new_pairs:
             first_cond = new_pairs[0][0]
             if first_cond is not None:
                 cast(Any, stmt).condition = first_cond
         return True
 
+    @cython.ccall
     def _rewrite_following_sibling_guard_polarity_8616(self,
-        root: object, seen: set[int] | None = None
-    ) -> bool:
+        root: object, seen: object = None
+    ) -> cython.bint:
+        child: object
+        index: object
+        stmt: object
         local_changed = False
         if root is None:
             return False
@@ -3989,7 +4397,8 @@ class _JccRewriteRun8616:
             local_changed = self._rewrite_following_sibling_guard_polarity_8616(child, seen) or local_changed
         return local_changed
 
-    def _empty_return_body_8616(self, body: object) -> bool:
+    @cython.ccall
+    def _empty_return_body_8616(self, body: object) -> cython.bint:
         if isinstance(body, CReturn):
             return body.retval is None
         if isinstance(body, CStatements):
@@ -3997,15 +4406,19 @@ class _JccRewriteRun8616:
             return len(statements) == 1 and self._empty_return_body_8616(statements[0])
         return False
 
-    def _empty_statement_root_8616(self, root: object) -> bool:
+    @cython.ccall
+    def _empty_statement_root_8616(self, root: object) -> cython.bint:
         if root is None:
             return True
         if isinstance(root, CStatements):
             return not tuple(root.statements or ())
         return False
 
-    def _prune_consumed_low_ifelse_pairs_8616(self, node: Any) -> bool:
+    @cython.ccall
+    def _prune_consumed_low_ifelse_pairs_8616(self, node: Any) -> cython.bint:
         """Drop consumed low-branch guard pairs whose bodies return nothing."""
+        body: object
+        cond: object
         local_changed = False
         cond_pairs = node.condition_and_nodes
         if isinstance(cond_pairs, (list, tuple)):
@@ -4026,7 +4439,8 @@ class _JccRewriteRun8616:
                 node.condition_and_nodes = list(new_pairs)
         return local_changed
 
-    def _consumed_low_single_pair_pruned_8616(self, node: Any, cond_pairs: object) -> bool:
+    @cython.ccall
+    def _consumed_low_single_pair_pruned_8616(self, node: Any, cond_pairs: object) -> cython.bint:
         """Prune a lone consumed low-branch guard pair when the node is now empty."""
         if not (isinstance(cond_pairs, (list, tuple)) and len(cond_pairs) == 1):
             return False
@@ -4050,8 +4464,11 @@ class _JccRewriteRun8616:
             return True
         return False
 
-    def _prune_low_guard_child_roots_8616(self, node: Any) -> bool:
+    @cython.ccall
+    def _prune_low_guard_child_roots_8616(self, node: Any) -> cython.bint:
         """Recurse into non-branch child roots of one node."""
+        child: object
+        attr: object
         local_changed = False
         for attr in ("body", "else_node", "iftrue", "iffalse"):
             child = getattr(node, attr, None)
@@ -4063,7 +4480,12 @@ class _JccRewriteRun8616:
                 local_changed = True
         return local_changed
 
-    def _prune_consumed_low_guard_node_8616(self, node: Any) -> tuple[Any | None, bool]:
+    @cython.ccall
+    def _prune_consumed_low_guard_node_8616(self, node: Any) -> tuple[Any | None, cython.bint]:
+        cond_pairs: object
+        else_node: object
+        replacement: object
+        stmt: object
         if isinstance(node, CStatements):
             local_changed = False
             rebuilt: list[object] = []
@@ -4096,7 +4518,9 @@ class _JccRewriteRun8616:
             return None, True
         return node, local_changed
 
-    def _cmp_root_op_8616(self, cond: object) -> str | None:
+    @cython.ccall
+    def _cmp_root_op_8616(self, cond: object) -> object:
+        node: object
         node = cond
         while isinstance(node, CTypeCast):
             node = getattr(node, "expr", None)
@@ -4108,7 +4532,8 @@ class _JccRewriteRun8616:
                 return op
         return None
 
-    def _is_stable_materialized_guard_8616(self, cond: object) -> bool:
+    @cython.ccall
+    def _is_stable_materialized_guard_8616(self, cond: object) -> cython.bint:
         if cond is None:
             return False
         if classify_condition_call_effects_8616(cond).has_semantic_call:
@@ -4117,28 +4542,34 @@ class _JccRewriteRun8616:
             return False
         return _condition_materialized_by_jcc_8616(cond) or self._has_materialized_nonflag_cmp_8616(cond)
 
-    def _is_raw_register_guard_8616(self, cond: object) -> bool:
+    @cython.ccall
+    def _is_raw_register_guard_8616(self, cond: object) -> cython.bint:
         if cond is None:
             return False
         if classify_condition_call_effects_8616(cond).has_semantic_call:
             return False
         return self._expr_uses_nonsegment_register_carrier_8616(cond)
 
+    @cython.ccall
     def _classify_duplicate_jcc_ifbreak_guard_8616(self,
         previous_stmt: object,
         current_stmt: object,
     ) -> _JccDuplicateGuardDecision8616:
+        current_cond: object
+        previous_cond: object
+        previous_key: object
+        previous_op: object
         if not isinstance(previous_stmt, CIfBreak) or not isinstance(current_stmt, CIfBreak):
             return _JccDuplicateGuardDecision8616.KEEP_UNKNOWN
         previous_cond = getattr(previous_stmt, "condition", None)
         current_cond = getattr(current_stmt, "condition", None)
         previous_key = _condition_tags_8616(previous_cond)
         current_key = _condition_tags_8616(current_cond)
-        if previous_key is None or previous_key != current_key:
+        if previous_key is None or operator.ne(previous_key, current_key):
             return _JccDuplicateGuardDecision8616.KEEP_UNKNOWN
         previous_op = self._cmp_root_op_8616(previous_cond)
         current_op = self._cmp_root_op_8616(current_cond)
-        if previous_op is None or previous_op != current_op:
+        if previous_op is None or operator.ne(previous_op, current_op):
             return _JccDuplicateGuardDecision8616.KEEP_UNKNOWN
 
         previous_materialized = self._is_stable_materialized_guard_8616(previous_cond)
@@ -4151,7 +4582,8 @@ class _JccRewriteRun8616:
             return _JccDuplicateGuardDecision8616.PRUNE_PREVIOUS_RAW_DUPLICATE
         return _JccDuplicateGuardDecision8616.KEEP_UNKNOWN
 
-    def _duplicate_guard_decision_applied_8616(self, rebuilt: list[object], stmt: object) -> bool:
+    @cython.ccall
+    def _duplicate_guard_decision_applied_8616(self, rebuilt: object, stmt: object) -> cython.bint:
         """Apply the previous/current duplicate-guard decision; True when pruned."""
         decision = self._classify_duplicate_jcc_ifbreak_guard_8616(rebuilt[-1], stmt)
         if decision is _JccDuplicateGuardDecision8616.PRUNE_CURRENT_RAW_DUPLICATE:
@@ -4170,8 +4602,10 @@ class _JccRewriteRun8616:
         )
         return False
 
-    def _prune_duplicate_guards_statements_8616(self, root: Any, seen: set[int]) -> bool:
+    @cython.ccall
+    def _prune_duplicate_guards_statements_8616(self, root: Any, seen: object) -> cython.bint:
         """Dedupe adjacent raw/materialized if-break guards in a statements block."""
+        stmt: object
         local_changed = False
         rebuilt: list[object] = []
         for stmt in tuple(root.statements or ()):
@@ -4189,7 +4623,10 @@ class _JccRewriteRun8616:
             root.statements = rebuilt
         return local_changed
 
-    def _prune_duplicate_raw_jcc_ifbreaks_8616(self, root: Any, seen: set[int] | None = None) -> bool:
+    @cython.ccall
+    def _prune_duplicate_raw_jcc_ifbreaks_8616(self, root: object, seen: object = None) -> cython.bint:
+        child: object
+        attr: object
         if root is None:
             return False
         if seen is None:
@@ -4209,8 +4646,12 @@ class _JccRewriteRun8616:
                 local_changed = True
         return self._prune_duplicate_guard_pairs_8616(root, seen) or local_changed
 
-    def _prune_duplicate_guard_pairs_8616(self, root: Any, seen: set[int]) -> bool:
+    @cython.ccall
+    def _prune_duplicate_guard_pairs_8616(self, root: Any, seen: object) -> cython.bint:
         """Recurse into condition pair bodies and rebuild changed pair lists."""
+        cond_pairs: object
+        body: object
+        cond: object
         cond_pairs = getattr(root, "condition_and_nodes", None)
         if not isinstance(cond_pairs, (list, tuple)):
             return False
@@ -4227,8 +4668,11 @@ class _JccRewriteRun8616:
 
 
 
-def _rewrite_decoded_jcc_conditions_8616(project: object, codegen: object) -> bool:
+@cython.ccall
+def _rewrite_decoded_jcc_conditions_8616(project: object, codegen: object) -> cython.bint:
     """Rewrite tagged JCC conditions into decoded compare guards when proven."""
+    cfunc: object
+    flags_offset: object
     codegen_dynamic = cast(Any, codegen)
     cfunc = getattr(codegen_dynamic, "cfunc", None)
     if cfunc is None:

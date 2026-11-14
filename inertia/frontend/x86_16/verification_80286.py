@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery/reporting.
 
 Responsibility: run 80286 instruction verification cases and report mismatches.
@@ -5,6 +6,9 @@ Forbidden: using verification fixtures as decompiler semantic shortcuts or corpu
 """
 
 from __future__ import annotations
+import dataclasses
+import typing
+import cython
 
 import builtins
 import gzip
@@ -22,6 +26,7 @@ from capstone.x86_const import X86_OP_MEM, X86_OP_REG
 
 from .arch_86_16 import Arch86_16
 from .control_coordinates import ControlAddressDomain
+import operator
 
 _AngrState = Any
 
@@ -48,12 +53,12 @@ REPO_ROOT: Path = Path(__file__).resolve().parents[3]
 DEFAULT_SUITE_DIR: Path = REPO_ROOT / "borrow" / "80286" / "v1_real_mode"
 DEFAULT_REVOCATION_LIST: Path = REPO_ROOT / "borrow" / "80286" / "revocation_list.txt"
 DEFAULT_MOO_PARSER: Path = REPO_ROOT / "borrow" / "80286" / "tools" / "moo2json.py"
-MAX_INSN_BYTES: int = 15
+MAX_INSN_BYTES: cython.longlong = 15
 REG_ORDER: tuple[str, ...] = ("ax", "bx", "cx", "dx", "cs", "ss", "ds", "es", "sp", "bp", "si", "di", "ip", "flags")
-STRING_OPCODES: set[int] = {0x6C, 0x6D, 0x6E, 0x6F, 0xA4, 0xA5, 0xA6, 0xA7, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF}
-PREFIX_BYTES: set[int] = {0x26, 0x2E, 0x36, 0x3E, 0x64, 0x65, 0x66, 0x67, 0xF0, 0xF2, 0xF3}
-REAL_MODE_FLAGS_MASK: int = 0x0FD7
-FLAGS_MASKS: dict[str, int] = {
+STRING_OPCODES: set[cython.longlong] = {0x6C, 0x6D, 0x6E, 0x6F, 0xA4, 0xA5, 0xA6, 0xA7, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF}
+PREFIX_BYTES: set[cython.longlong] = {0x26, 0x2E, 0x36, 0x3E, 0x64, 0x65, 0x66, 0x67, 0xF0, 0xF2, 0xF3}
+REAL_MODE_FLAGS_MASK: cython.longlong = 0x0FD7
+FLAGS_MASKS: dict[str, cython.longlong] = {
     "CF": REAL_MODE_FLAGS_MASK & ~0x0002,
     "D4": 0x04C4,
     "D5": 0x04C4,
@@ -73,57 +78,64 @@ FLAGS_MASKS: dict[str, int] = {
 }
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class CaseMismatch:
     """Single observed mismatch between a MOO case expectation and angr execution."""
 
-    kind: str
-    name: str
-    expected: int
-    actual: int
+    kind: object
+    name: object
+    expected: cython.longlong
+    actual: cython.longlong
     address: int | None = None
 
 
-@dataclass
+@dataclasses.dataclass
 class CaseResult:
     """Verification result for one 80286 MOO case."""
 
-    opcode: str
-    idx: int
-    name: str
-    hash: str | None
-    passed: bool
-    skipped: bool = False
-    error: str | None = None
-    mismatches: list[CaseMismatch] = field(default_factory=list)
+    opcode: object
+    idx: cython.longlong
+    name: object
+    hash: object
+    passed: cython.bint
+    skipped: cython.bint = False
+    error: object = None
+    mismatches: object = field(default_factory=list)
 
 
-def _dynamic_verifier_getattr_8616(obj: object, name: str, default: object = None) -> Any:  # noqa: ANN401
+@cython.ccall
+def _dynamic_verifier_getattr_8616(obj: object, name: object, default: object = None) -> Any:  # noqa: ANN401
     """Read an attribute across the dynamic angr register/history verifier boundary."""
     return builtins.getattr(obj, name, default)
 
 
-def _dynamic_verifier_setattr_8616(obj: object, name: str, value: object) -> None:
+@cython.ccall
+def _dynamic_verifier_setattr_8616(obj: object, name: object, value: object) -> None:
     """Write an attribute across the dynamic angr register verifier boundary."""
     builtins.setattr(obj, name, value)
 
 
-def _state_reg_expr_8616(state: _AngrState, reg: str) -> Any:  # noqa: ANN401
+@cython.ccall
+def _state_reg_expr_8616(state: _AngrState, reg: object) -> Any:  # noqa: ANN401
     """Return an angr register expression by dynamic register name."""
     return _dynamic_verifier_getattr_8616(state.regs, reg)
 
 
-def _state_reg_set_8616(state: _AngrState, reg: str, value: object) -> None:
+@cython.ccall
+def _state_reg_set_8616(state: _AngrState, reg: object, value: object) -> None:
     """Assign an angr register by dynamic register name."""
     _dynamic_verifier_setattr_8616(state.regs, reg, value)
 
 
-def _solver_eval_int_8616(state: _AngrState, expr: object) -> int:
+@cython.ccall
+def _solver_eval_int_8616(state: _AngrState, expr: object) -> cython.longlong:
     """Evaluate a concrete angr expression as an integer for verifier comparisons."""
     return int(state.solver.eval(cast(Any, expr)))
 
 
+@cython.ccall
 def _load_moo_parser() -> Any:  # noqa: ANN401
+    spec: object
     spec = importlib.util.spec_from_file_location("moo2json_local", DEFAULT_MOO_PARSER)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Unable to load MOO parser from {DEFAULT_MOO_PARSER}")
@@ -132,8 +144,10 @@ def _load_moo_parser() -> Any:  # noqa: ANN401
     return module
 
 
-def load_revocation_hashes(path: Path = DEFAULT_REVOCATION_LIST) -> set[str]:
+@cython.ccall
+def load_revocation_hashes(path: Path = DEFAULT_REVOCATION_LIST) -> object:
     """Load lower-cased revoked MOO case hashes from a text file."""
+    line: object
     if not path.exists():
         return set()
     hashes: set[str] = set()
@@ -145,25 +159,29 @@ def load_revocation_hashes(path: Path = DEFAULT_REVOCATION_LIST) -> set[str]:
     return hashes
 
 
-def load_moo_cases(path: Path) -> tuple[str, list[dict[str, Any]]]:
+@cython.ccall
+def load_moo_cases(path: Path) -> object:
     """Parse one MOO or gzipped MOO file into CPU name and case dictionaries."""
     parser = _load_moo_parser()
     with gzip.open(path, "rb") if path.suffix == ".gz" else path.open("rb") as f:
         return cast(tuple[str, list[dict[str, Any]]], parser.parse_moo_bytes(f.read()))
 
 
-def case_linear_ip(case: dict[str, Any]) -> int:
+@cython.ccall
+def case_linear_ip(case: object) -> cython.longlong:
     """Return the real-mode linear address for a case's initial CS:IP."""
     regs = case["initial"]["regs"]
     return int(((regs["cs"] & 0xFFFF) << 4) + (regs["ip"] & 0xFFFF))
 
 
-def real_mode_linear(cs: int, ip: int) -> int:
+@cython.ccall
+def real_mode_linear(cs: cython.longlong, ip: cython.longlong) -> cython.longlong:
     """Return the 20-bit real-mode linear address for CS:IP."""
     return (((cs & 0xFFFF) << 4) + (ip & 0xFFFF)) & 0xFFFFFF
 
 
-def opcode_name_for_path(path: Path) -> str:
+@cython.ccall
+def opcode_name_for_path(path: Path) -> object:
     """Return the opcode stem represented by a MOO fixture path."""
     name = path.name
     if name.endswith(".MOO.gz"):
@@ -173,6 +191,7 @@ def opcode_name_for_path(path: Path) -> str:
     return path.stem
 
 
+@cython.ccall
 def _make_project() -> angr.Project:
     """Create a verifier project covering the complete real-mode IP range."""
     return angr.load_shellcode(
@@ -185,7 +204,8 @@ def _make_project() -> angr.Project:
     )
 
 
-def _instruction_bytes(case: dict[str, Any]) -> bytes:
+@cython.ccall
+def _instruction_bytes(case: object) -> object:
     data = bytes(case["bytes"])
     arch = Arch86_16()
     insns = list(arch.capstone.disasm(data[:MAX_INSN_BYTES], case_linear_ip(case), 1))
@@ -209,11 +229,12 @@ def _instruction_bytes(case: dict[str, Any]) -> bytes:
     return bytes(insns[0].bytes)
 
 
-def _should_retry_with_relocated_ip(case: dict[str, Any], state: _AngrState) -> bool:
+@cython.ccall
+def _should_retry_with_relocated_ip(case: object, state: _AngrState) -> cython.bint:
     regs = case["initial"]["regs"]
     if (regs["ip"] & 0xFFFF) >= 0x2000:
         return False
-    if state.addr != (regs["ip"] & 0xFFFF):
+    if operator.ne(state.addr, (regs["ip"] & 0xFFFF)):
         return False
     if _dynamic_verifier_getattr_8616(state.history, "bbl_addrs", None) and list(state.history.bbl_addrs):
         return False
@@ -265,7 +286,8 @@ def _should_retry_with_relocated_ip(case: dict[str, Any], state: _AngrState) -> 
     }
 
 
-def _first_insn(case: dict[str, Any], insn_bytes: bytes) -> Any:  # noqa: ANN401
+@cython.ccall
+def _first_insn(case: object, insn_bytes: object) -> Any:  # noqa: ANN401
     arch = Arch86_16()
     arch.capstone.detail = True
     insns = list(arch.capstone.disasm(insn_bytes, case_linear_ip(case), 1))
@@ -274,7 +296,12 @@ def _first_insn(case: dict[str, Any], insn_bytes: bytes) -> Any:  # noqa: ANN401
     return insns[0]
 
 
-def _initial_state(project: angr.Project, case: dict[str, Any]) -> Any:  # noqa: ANN401
+@cython.ccall
+def _initial_state(project: angr.Project, case: object) -> Any:  # noqa: ANN401
+    addr: object
+    byte: object
+    reg: object
+    value: object
     regs = case["initial"]["regs"]
     state = project.factory.blank_state(
         addr=regs["ip"] & 0xFFFF,
@@ -287,11 +314,13 @@ def _initial_state(project: angr.Project, case: dict[str, Any]) -> Any:  # noqa:
     return state
 
 
-def _mem_operand_offset_ffff(case: dict[str, Any], insn_bytes: bytes) -> bool:
+@cython.ccall
+def _mem_operand_offset_ffff(case: object, insn_bytes: object) -> cython.bint:
+    op: object
     regs = case["initial"]["regs"]
     insn = _first_insn(case, insn_bytes)
     for op in insn.operands:
-        if op.type != X86_OP_MEM:
+        if operator.ne(op.type, X86_OP_MEM):
             continue
         offset = op.mem.disp
         if op.mem.base:
@@ -303,15 +332,18 @@ def _mem_operand_offset_ffff(case: dict[str, Any], insn_bytes: bytes) -> bool:
     return False
 
 
-def _concrete_byte(state: _AngrState, addr: int) -> int:
+@cython.ccall
+def _concrete_byte(state: _AngrState, addr: cython.longlong) -> cython.longlong:
     return _solver_eval_int_8616(state, state.memory.load(addr, 1))
 
 
-def _concrete_word(state: _AngrState, addr: int) -> int:
+@cython.ccall
+def _concrete_word(state: _AngrState, addr: cython.longlong) -> cython.longlong:
     return _concrete_byte(state, addr) | (_concrete_byte(state, addr + 1) << 8)
 
 
-def _step_with_bytes(project: angr.Project, state: _AngrState, insn_bytes: bytes) -> Any:  # noqa: ANN401
+@cython.ccall
+def _step_with_bytes(project: angr.Project, state: _AngrState, insn_bytes: object) -> Any:  # noqa: ANN401
     """Execute one instruction, mirroring IPs reserved by angr's extern object."""
     original_addr = int(state.addr)
     mirrored = original_addr >= 0xFE00
@@ -334,8 +366,9 @@ def _step_with_bytes(project: angr.Project, state: _AngrState, insn_bytes: bytes
     return stepped
 
 
+@cython.ccall
 def _step_with_lock_retry(
-    project: angr.Project, state: _AngrState, insn_bytes: bytes, *, advance_ip_for_stripped_lock: bool = True
+    project: angr.Project, state: _AngrState, insn_bytes: object, *, advance_ip_for_stripped_lock: cython.bint = True
 ) -> Any:  # noqa: ANN401
     prefix_end = 0
     while prefix_end < len(insn_bytes) and insn_bytes[prefix_end] in PREFIX_BYTES:
@@ -346,12 +379,13 @@ def _step_with_lock_retry(
     stripped = insn_bytes[:lock_index] + insn_bytes[lock_index + 1 :]
     original_addr = state.addr
     stepped = _step_with_bytes(project, state, stripped)
-    if advance_ip_for_stripped_lock or stepped.addr != original_addr:
+    if advance_ip_for_stripped_lock or operator.ne(stepped.addr, original_addr):
         stepped.regs.ip = (_solver_eval_int_8616(stepped, stepped.regs.ip) + 1) & 0xFFFF
     return stepped
 
 
-def _push16_concrete(state: _AngrState, value: int) -> None:
+@cython.ccall
+def _push16_concrete(state: _AngrState, value: cython.longlong) -> None:
     sp = (_solver_eval_int_8616(state, state.regs.sp) - 2) & 0xFFFF
     state.regs.sp = sp
     ss = _solver_eval_int_8616(state, state.regs.ss) & 0xFFFF
@@ -359,7 +393,8 @@ def _push16_concrete(state: _AngrState, value: int) -> None:
     state.memory.store(real_mode_linear(ss, (sp + 1) & 0xFFFF), bytes([(value >> 8) & 0xFF]))
 
 
-def _pop16_concrete(state: _AngrState) -> int:
+@cython.ccall
+def _pop16_concrete(state: _AngrState) -> cython.longlong:
     sp = _solver_eval_int_8616(state, state.regs.sp) & 0xFFFF
     ss = _solver_eval_int_8616(state, state.regs.ss) & 0xFFFF
     value = _concrete_byte(state, real_mode_linear(ss, sp))
@@ -368,7 +403,8 @@ def _pop16_concrete(state: _AngrState) -> int:
     return value
 
 
-def _simulate_documented_exception(state: _AngrState, case: dict[str, Any]) -> None:
+@cython.ccall
+def _simulate_documented_exception(state: _AngrState, case: object) -> None:
     exc = case["exception"]
     current_flags = _solver_eval_int_8616(state, state.regs.flags) & 0xFFFF
     current_cs = _solver_eval_int_8616(state, state.regs.cs) & 0xFFFF
@@ -385,11 +421,16 @@ def _simulate_documented_exception(state: _AngrState, case: dict[str, Any]) -> N
     state.regs.ip = new_ip
 
 
-def _mem_operand_linear(case: dict[str, Any], insn_bytes: bytes) -> int | None:
+@cython.ccall
+def _mem_operand_linear(case: object, insn_bytes: object) -> int | None:
+    base_reg_name: object
+    index_reg_name: object
+    segment_name: object
+    op: object
     regs = case["initial"]["regs"]
     insn = _first_insn(case, insn_bytes)
     for op in insn.operands:
-        if op.type != X86_OP_MEM:
+        if operator.ne(op.type, X86_OP_MEM):
             continue
         offset = op.mem.disp
         base_reg_name = insn.reg_name(op.mem.base) if op.mem.base else None
@@ -414,8 +455,9 @@ def _mem_operand_linear(case: dict[str, Any], insn_bytes: bytes) -> int | None:
     return None
 
 
-def _simulate_manual_control_flow(case: dict[str, Any], state: _AngrState, insn_bytes: bytes) -> bool:
-    def _impl() -> bool:
+def _simulate_manual_control_flow(case: object, state: _AngrState, insn_bytes: object) -> cython.bint:
+    def _impl() -> cython.bint:
+        handler: object
         idx = 0
         while idx < len(insn_bytes) and insn_bytes[idx] in PREFIX_BYTES:
             idx += 1
@@ -436,16 +478,18 @@ _ManualFlowHandler8616 = Callable[
 ]
 
 
+@cython.ccall
 def _manual_flow_hlt_8616(
-    state: _AngrState, case: dict[str, Any], insn_bytes: bytes, idx: int, initial: dict[str, Any]
-) -> bool:
+    state: _AngrState, case: object, insn_bytes: object, idx: cython.longlong, initial: object
+) -> cython.bint:
     state.regs.ip = (initial["ip"] + len(insn_bytes)) & 0xFFFF
     return True
 
 
+@cython.ccall
 def _manual_flow_loop_8616(
-    state: _AngrState, case: dict[str, Any], insn_bytes: bytes, idx: int, initial: dict[str, Any]
-) -> bool:
+    state: _AngrState, case: object, insn_bytes: object, idx: cython.longlong, initial: object
+) -> cython.bint:
     opcode = insn_bytes[idx]
     disp = insn_bytes[idx + 1]
     if disp >= 0x80:
@@ -468,9 +512,10 @@ def _manual_flow_loop_8616(
     return True
 
 
+@cython.ccall
 def _manual_flow_jmp_short_8616(
-    state: _AngrState, case: dict[str, Any], insn_bytes: bytes, idx: int, initial: dict[str, Any]
-) -> bool:
+    state: _AngrState, case: object, insn_bytes: object, idx: cython.longlong, initial: object
+) -> cython.bint:
     disp = insn_bytes[idx + 1]
     if disp >= 0x80:
         disp -= 0x100
@@ -478,17 +523,19 @@ def _manual_flow_jmp_short_8616(
     return True
 
 
+@cython.ccall
 def _manual_flow_jmp_far_8616(
-    state: _AngrState, case: dict[str, Any], insn_bytes: bytes, idx: int, initial: dict[str, Any]
-) -> bool:
+    state: _AngrState, case: object, insn_bytes: object, idx: cython.longlong, initial: object
+) -> cython.bint:
     state.regs.ip = insn_bytes[idx + 1] | (insn_bytes[idx + 2] << 8)
     state.regs.cs = insn_bytes[idx + 3] | (insn_bytes[idx + 4] << 8)
     return True
 
 
+@cython.ccall
 def _manual_flow_call_far_8616(
-    state: _AngrState, case: dict[str, Any], insn_bytes: bytes, idx: int, initial: dict[str, Any]
-) -> bool:
+    state: _AngrState, case: object, insn_bytes: object, idx: cython.longlong, initial: object
+) -> cython.bint:
     _push16_concrete(state, initial["cs"] & 0xFFFF)
     _push16_concrete(state, (initial["ip"] + len(insn_bytes)) & 0xFFFF)
     state.regs.ip = insn_bytes[idx + 1] | (insn_bytes[idx + 2] << 8)
@@ -496,9 +543,10 @@ def _manual_flow_call_far_8616(
     return True
 
 
+@cython.ccall
 def _manual_flow_call_near_8616(
-    state: _AngrState, case: dict[str, Any], insn_bytes: bytes, idx: int, initial: dict[str, Any]
-) -> bool:
+    state: _AngrState, case: object, insn_bytes: object, idx: cython.longlong, initial: object
+) -> cython.bint:
     if (initial["ip"] & 0xFFFF) < 0xFE00:
         return False
     displacement = insn_bytes[idx + 1] | (insn_bytes[idx + 2] << 8)
@@ -510,9 +558,10 @@ def _manual_flow_call_near_8616(
     return True
 
 
+@cython.ccall
 def _manual_flow_interrupt_8616(
-    state: _AngrState, initial: dict[str, Any], insn_len: int, vector: int
-) -> bool:
+    state: _AngrState, initial: object, insn_len: cython.longlong, vector: cython.longlong
+) -> cython.bint:
     _push16_concrete(state, initial["flags"] & 0xFFFF)
     state.regs.flags = initial["flags"] & 0xFCFF
     _push16_concrete(state, initial["cs"] & 0xFFFF)
@@ -522,38 +571,43 @@ def _manual_flow_interrupt_8616(
     return True
 
 
+@cython.ccall
 def _manual_flow_int_8616(
-    state: _AngrState, case: dict[str, Any], insn_bytes: bytes, idx: int, initial: dict[str, Any]
-) -> bool:
+    state: _AngrState, case: object, insn_bytes: object, idx: cython.longlong, initial: object
+) -> cython.bint:
     return _manual_flow_interrupt_8616(state, initial, len(insn_bytes), insn_bytes[idx + 1])
 
 
+@cython.ccall
 def _manual_flow_int3_8616(
-    state: _AngrState, case: dict[str, Any], insn_bytes: bytes, idx: int, initial: dict[str, Any]
-) -> bool:
+    state: _AngrState, case: object, insn_bytes: object, idx: cython.longlong, initial: object
+) -> cython.bint:
     return _manual_flow_interrupt_8616(state, initial, len(insn_bytes), 3)
 
 
+@cython.ccall
 def _manual_flow_retf_8616(
-    state: _AngrState, case: dict[str, Any], insn_bytes: bytes, idx: int, initial: dict[str, Any]
-) -> bool:
+    state: _AngrState, case: object, insn_bytes: object, idx: cython.longlong, initial: object
+) -> cython.bint:
     state.regs.ip = _pop16_concrete(state)
     state.regs.cs = _pop16_concrete(state)
     return True
 
 
+@cython.ccall
 def _manual_flow_ret_8616(
-    state: _AngrState, case: dict[str, Any], insn_bytes: bytes, idx: int, initial: dict[str, Any]
-) -> bool:
+    state: _AngrState, case: object, insn_bytes: object, idx: cython.longlong, initial: object
+) -> cython.bint:
     if (initial["ip"] & 0xFFFF) < 0xFE00:
         return False
     state.regs.ip = _pop16_concrete(state)
     return True
 
 
+@cython.ccall
 def _manual_flow_ret_imm_8616(
-    state: _AngrState, case: dict[str, Any], insn_bytes: bytes, idx: int, initial: dict[str, Any]
-) -> bool:
+    state: _AngrState, case: object, insn_bytes: object, idx: cython.longlong, initial: object
+) -> cython.bint:
     if (initial["ip"] & 0xFFFF) < 0xFE00:
         return False
     state.regs.ip = _pop16_concrete(state)
@@ -563,9 +617,10 @@ def _manual_flow_ret_imm_8616(
     return True
 
 
+@cython.ccall
 def _manual_flow_retf_imm_8616(
-    state: _AngrState, case: dict[str, Any], insn_bytes: bytes, idx: int, initial: dict[str, Any]
-) -> bool:
+    state: _AngrState, case: object, insn_bytes: object, idx: cython.longlong, initial: object
+) -> cython.bint:
     state.regs.ip = _pop16_concrete(state)
     state.regs.cs = _pop16_concrete(state)
     state.regs.sp = (
@@ -574,26 +629,31 @@ def _manual_flow_retf_imm_8616(
     return True
 
 
+@cython.ccall
 def _manual_flow_iret_8616(
-    state: _AngrState, case: dict[str, Any], insn_bytes: bytes, idx: int, initial: dict[str, Any]
-) -> bool:
+    state: _AngrState, case: object, insn_bytes: object, idx: cython.longlong, initial: object
+) -> cython.bint:
     state.regs.ip = _pop16_concrete(state)
     state.regs.cs = _pop16_concrete(state)
     state.regs.flags = (_pop16_concrete(state) & REAL_MODE_FLAGS_MASK) | 0x0002
     return True
 
 
+@cython.ccall
 def _manual_flow_ff_8616(
-    state: _AngrState, case: dict[str, Any], insn_bytes: bytes, idx: int, initial: dict[str, Any]
-) -> bool:
+    state: _AngrState, case: object, insn_bytes: object, idx: cython.longlong, initial: object
+) -> cython.bint:
+    near_target: object
+    ptr_addr: object
+    register_name: object
     if len(insn_bytes) < 2:
         return False
     modrm_reg = (insn_bytes[idx + 1] >> 3) & 0x7
     insn = _first_insn(case, insn_bytes)
     operand = insn.operands[0]
     ptr_addr = _mem_operand_linear(case, insn_bytes)
-    near_target: int | None = None
-    if operand.type == X86_OP_REG:
+    near_target = None
+    if operator.eq(operand.type, X86_OP_REG):
         register_name = insn.reg_name(operand.reg)
         if register_name is not None:
             near_target = initial.get(register_name.lower(), 0) & 0xFFFF
@@ -613,9 +673,10 @@ def _manual_flow_ff_8616(
     return False
 
 
+@cython.ccall
 def _manual_flow_ff_call_far_8616(
-    state: _AngrState, ptr_addr: int | None, initial: dict[str, Any], insn_len: int
-) -> bool:
+    state: _AngrState, ptr_addr: object, initial: object, insn_len: cython.longlong
+) -> cython.bint:
     if ptr_addr is None:
         return False
     _push16_concrete(state, initial["cs"] & 0xFFFF)
@@ -625,7 +686,8 @@ def _manual_flow_ff_call_far_8616(
     return True
 
 
-def _manual_flow_ff_jmp_far_8616(state: _AngrState, ptr_addr: int | None) -> bool:
+@cython.ccall
+def _manual_flow_ff_jmp_far_8616(state: _AngrState, ptr_addr: object) -> cython.bint:
     if ptr_addr is None:
         return False
     state.regs.ip = _concrete_word(state, ptr_addr)
@@ -633,7 +695,7 @@ def _manual_flow_ff_jmp_far_8616(state: _AngrState, ptr_addr: int | None) -> boo
     return True
 
 
-_MANUAL_FLOW_HANDLERS_8616: dict[int, _ManualFlowHandler8616] = {
+_MANUAL_FLOW_HANDLERS_8616: dict[cython.longlong, _ManualFlowHandler8616] = {
     0xF4: _manual_flow_hlt_8616,
     0xE0: _manual_flow_loop_8616,
     0xE1: _manual_flow_loop_8616,
@@ -654,7 +716,8 @@ _MANUAL_FLOW_HANDLERS_8616: dict[int, _ManualFlowHandler8616] = {
 }
 
 
-def _repeated_string_iteration_limit(state: _AngrState, insn_bytes: bytes) -> int | None:
+@cython.ccall
+def _repeated_string_iteration_limit(state: _AngrState, insn_bytes: object) -> int | None:
     idx = 0
     saw_repeat = False
     while idx < len(insn_bytes) and insn_bytes[idx] in PREFIX_BYTES:
@@ -666,9 +729,11 @@ def _repeated_string_iteration_limit(state: _AngrState, insn_bytes: bytes) -> in
     return _solver_eval_int_8616(state, state.regs.cx)
 
 
-def _repeat_prefix_and_opcode(insn_bytes: bytes) -> tuple[int, int] | None:
+@cython.ccall
+def _repeat_prefix_and_opcode(insn_bytes: object) -> object:
+    repeat_prefix: object
     idx = 0
-    repeat_prefix: int | None = None
+    repeat_prefix = None
     while idx < len(insn_bytes) and insn_bytes[idx] in PREFIX_BYTES:
         if insn_bytes[idx] in {0xF2, 0xF3}:
             repeat_prefix = insn_bytes[idx]
@@ -678,7 +743,8 @@ def _repeat_prefix_and_opcode(insn_bytes: bytes) -> tuple[int, int] | None:
     return repeat_prefix, insn_bytes[idx]
 
 
-def _prefixed_opcode(insn_bytes: bytes) -> int | None:
+@cython.ccall
+def _prefixed_opcode(insn_bytes: object) -> int | None:
     idx = 0
     while idx < len(insn_bytes) and insn_bytes[idx] in PREFIX_BYTES:
         idx += 1
@@ -687,7 +753,9 @@ def _prefixed_opcode(insn_bytes: bytes) -> int | None:
     return insn_bytes[idx]
 
 
-def _repeat_should_continue(state: _AngrState, insn_bytes: bytes) -> bool:
+@cython.ccall
+def _repeat_should_continue(state: _AngrState, insn_bytes: object) -> cython.bint:
+    repeat_meta: object
     repeat_meta = _repeat_prefix_and_opcode(insn_bytes)
     if repeat_meta is None:
         return False
@@ -703,15 +771,18 @@ def _repeat_should_continue(state: _AngrState, insn_bytes: bytes) -> bool:
     return zf == 0
 
 
-def _faulting_word_string_delta(state: _AngrState) -> int:
+@cython.ccall
+def _faulting_word_string_delta(state: _AngrState) -> cython.longlong:
     flags = _solver_eval_int_8616(state, state.regs.flags) & 0xFFFF
     return -2 if ((flags >> 10) & 1) else 2
 
 
 def _simulate_faulting_word_string_case(
-    project: angr.Project, state: _AngrState, case: dict[str, Any], insn_bytes: bytes
+    project: angr.Project, state: _AngrState, case: object, insn_bytes: object
 ) -> Any | None:  # noqa: ANN401
     def _impl() -> Any | None:  # noqa: ANN401
+        exc: object
+        repeat_limit: object
         nonlocal state
         exc = case.get("exception")
         if exc is None or exc.get("number") != 13:
@@ -743,13 +814,15 @@ def _simulate_faulting_word_string_case(
                 insn_bytes,
                 advance_ip_for_stripped_lock=repeat_limit is None,
             )
-            if repeat_limit is None or state.addr != start_addr:
+            if repeat_limit is None or operator.ne(state.addr, start_addr):
                 return None
 
     return _impl()
 
 
-def _case_flags_mask(opcode: str, case: dict[str, Any]) -> int | None:
+@cython.ccall
+def _case_flags_mask(opcode: object, case: object) -> int | None:
+    mask: object
     mask = FLAGS_MASKS.get(opcode)
     shift_group = opcode.split(".", maxsplit=1)
     if len(shift_group) == 2 and shift_group[0] in {"C0", "C1", "D2", "D3"}:
@@ -774,19 +847,24 @@ def _case_flags_mask(opcode: str, case: dict[str, Any]) -> int | None:
     return mask
 
 
-def _current_fetch_byte(state: _AngrState) -> int:
+@cython.ccall
+def _current_fetch_byte(state: _AngrState) -> cython.longlong:
     cs = _solver_eval_int_8616(state, state.regs.cs)
     ip = _solver_eval_int_8616(state, state.regs.ip)
     return _concrete_byte(state, real_mode_linear(cs, ip))
 
 
-def _expected_reg(case: dict[str, Any], reg: str) -> int:
+@cython.ccall
+def _expected_reg(case: object, reg: object) -> cython.longlong:
+    final_regs: object
+    initial_regs: object
     initial_regs = case["initial"].get("regs", {})
     final_regs = case["final"].get("regs", {})
     return int(final_regs.get(reg, initial_regs[reg]))
 
 
-def _maybe_execute_terminating_halt(project: angr.Project, state: _AngrState, case: dict[str, Any]) -> tuple[_AngrState, bool]:
+@cython.ccall
+def _maybe_execute_terminating_halt(project: angr.Project, state: _AngrState, case: object) -> tuple[_AngrState, cython.bint]:
     if case["bytes"][:1] == [0xF4]:
         return state, False
     expected_cs = _expected_reg(case, "cs")
@@ -806,8 +884,8 @@ def _maybe_execute_terminating_halt(project: angr.Project, state: _AngrState, ca
     return state, False
 
 
-def _compare_case(state: _AngrState, case: dict[str, Any], *, opcode: str, halted: bool) -> list[CaseMismatch]:
-    def _impl() -> list[CaseMismatch]:
+def _compare_case(state: _AngrState, case: object, *, opcode: object, halted: cython.bint) -> object:
+    def _impl() -> object:
         mismatches: list[CaseMismatch] = []
         _compare_case_regs_8616(state, case, opcode, halted, mismatches)
         _compare_case_ram_8616(state, case, mismatches)
@@ -816,9 +894,15 @@ def _compare_case(state: _AngrState, case: dict[str, Any], *, opcode: str, halte
     return _impl()
 
 
+@cython.ccall
 def _compare_case_regs_8616(
-    state: _AngrState, case: dict[str, Any], opcode: str, halted: bool, mismatches: list[CaseMismatch]
+    state: _AngrState, case: object, opcode: object, halted: cython.bint, mismatches: object
 ) -> None:
+    expected: object
+    final_regs: object
+    initial_regs: object
+    mask: object
+    reg: object
     initial_regs = case["initial"].get("regs", {})
     final_regs = case["final"].get("regs", {})
     executed_hlt = halted or case["bytes"][:1] == [0xF4]
@@ -836,13 +920,17 @@ def _compare_case_regs_8616(
             if mask is not None:
                 expected &= mask
                 actual &= mask
-        if actual != expected:
+        if operator.ne(actual, expected):
             mismatches.append(CaseMismatch("reg", reg, expected, actual))
 
 
+@cython.ccall
 def _compare_case_ram_8616(
-    state: _AngrState, case: dict[str, Any], mismatches: list[CaseMismatch]
+    state: _AngrState, case: object, mismatches: object
 ) -> None:
+    expected: object
+    flag_address: object
+    addr: object
     initial_ram = dict(case["initial"].get("ram", []))
     final_ram = dict(case["final"].get("ram", []))
     flag_address = case.get("exception", {}).get("flag_address")
@@ -853,21 +941,25 @@ def _compare_case_ram_8616(
         if expected is None:
             continue
         actual = _concrete_byte(state, addr)
-        if actual != expected:
+        if operator.ne(actual, expected):
             mismatches.append(CaseMismatch("mem", f"{addr:#x}", expected, actual, address=addr))
 
 
 def verify_case(
-    case: dict[str, Any],
+    case: object,
     *,
-    opcode: str,
+    opcode: object,
     project: angr.Project | None = None,
-    execute_halt: bool = True,
-    allow_ip_relocation_retry: bool = True,
+    execute_halt: cython.bint = True,
+    allow_ip_relocation_retry: cython.bint = True,
 ) -> CaseResult:
     """Verify a single parsed 80286 MOO case against the angr 16-bit execution model."""
 
     def _impl() -> CaseResult:
+        exc: object
+        insn_bytes: object
+        repeat_limit: object
+        retry: object
         local_project = _make_project() if project is None else project
         result = CaseResult(opcode=opcode, idx=case["idx"], name=case["name"], hash=case.get("hash"), passed=False)
 
@@ -914,13 +1006,14 @@ def verify_case(
     return _impl()
 
 
+@cython.ccall
 def _case_instruction_bytes_8616(
-    case: dict[str, Any],
+    case: object,
     state: _AngrState,
-    exc: dict[str, Any] | None,
+    exc: object,
     result: CaseResult,
-    opcode: str,
-) -> bytes | None:
+    opcode: object,
+) -> object:
     """Return instruction bytes, or None after recording a documented #UD exception case."""
     try:
         return _instruction_bytes(case)
@@ -933,12 +1026,14 @@ def _case_instruction_bytes_8616(
         return None
 
 
+@cython.ccall
 def _simulate_exception_case_8616(
     local_project: angr.Project,
     state: _AngrState,
-    case: dict[str, Any],
-    insn_bytes: bytes,
+    case: object,
+    insn_bytes: object,
 ) -> _AngrState:
+    faulted_string: object
     faulted_string = _simulate_faulting_word_string_case(local_project, state, case, insn_bytes)
     if faulted_string is not None:
         return faulted_string
@@ -946,12 +1041,13 @@ def _simulate_exception_case_8616(
     return state
 
 
+@cython.ccall
 def _relocated_ip_retry_result_8616(
-    case: dict[str, Any],
+    case: object,
     state: _AngrState,
-    opcode: str,
-    execute_halt: bool,
-    allow_ip_relocation_retry: bool,
+    opcode: object,
+    execute_halt: cython.bint,
+    allow_ip_relocation_retry: cython.bint,
 ) -> CaseResult | None:
     if not (allow_ip_relocation_retry and _should_retry_with_relocated_ip(case, state)):
         return None
@@ -969,23 +1065,24 @@ def _relocated_ip_retry_result_8616(
     )
 
 
+@cython.ccall
 def _complete_repeated_iterations_8616(
     local_project: angr.Project,
     state: _AngrState,
-    insn_bytes: bytes,
-    start_addr: int,
-    repeat_limit: int,
+    insn_bytes: object,
+    start_addr: cython.longlong,
+    repeat_limit: cython.longlong,
 ) -> _AngrState:
     iterations = 1
     max_iterations = max(1, repeat_limit)
     while (
-        state.addr == start_addr
+        operator.eq(state.addr, start_addr)
         and iterations < max_iterations
         and _repeat_should_continue(state, insn_bytes)
     ):
         state = _step_with_lock_retry(local_project, state, insn_bytes, advance_ip_for_stripped_lock=False)
         iterations += 1
-    if state.addr == start_addr and (
+    if operator.eq(state.addr, start_addr) and (
         iterations >= max_iterations or not _repeat_should_continue(state, insn_bytes)
     ):
         state.regs.ip = (_solver_eval_int_8616(state, state.regs.ip) + len(insn_bytes)) & 0xFFFF
@@ -996,15 +1093,17 @@ def verify_moo_file(
     path: Path,
     *,
     limit: int | None = None,
-    execute_halt: bool = True,
-    revoked_hashes: set[str] | None = None,
+    execute_halt: cython.bint = True,
+    revoked_hashes: object = None,
     progress_every: int | None = None,
-    case_start: int = 0,
+    case_start: cython.longlong = 0,
     case_stop: int | None = None,
-) -> dict[str, Any]:
+) -> object:
     """Verify selected cases from one MOO file and return a JSON-friendly summary."""
 
     def _impl() -> dict[str, Any]:
+        case: object
+        index: object
         cpu_name, cases = load_moo_cases(path)
         opcode = opcode_name_for_path(path)
         active_revoked_hashes = revoked_hashes or set()
@@ -1035,9 +1134,9 @@ def verify_moo_file(
             if progress_every and (index % progress_every == 0 or index == total_cases):
                 print(f"[{opcode}] case {index}/{total_cases}", flush=True)
 
-        passed = sum(1 for r in results if r.passed)
-        skipped = sum(1 for r in results if r.skipped)
-        failed = sum(1 for r in results if not r.passed and not r.skipped)
+        passed = sum(1 for r in iter(results) if r.passed)
+        skipped = sum(1 for r in iter(results) if r.skipped)
+        failed = sum(1 for r in iter(results) if not r.passed and not r.skipped)
         return {
             "opcode": opcode,
             "path": str(path),
@@ -1047,36 +1146,39 @@ def verify_moo_file(
             "failed": failed,
             "skipped": skipped,
             "sample_name": results[0].name if results else "",
-            "results": [asdict(r) for r in results],
+            "results": [asdict(r) for r in iter(results)],
         }
 
     return _impl()
 
 
-def discover_moo_files(root: Path, opcodes: list[str] | None = None) -> list[Path]:
+@cython.ccall
+def discover_moo_files(root: Path, opcodes: object = None) -> object:
     """Discover MOO fixtures under a suite root, optionally filtered by opcode stem."""
+    selected: object
     if root.is_file():
         return [root]
-    selected = {op.lower() for op in opcodes} if opcodes else None
-    files = sorted(root.glob("*.MOO*"))
+    selected = {op.lower() for op in iter(opcodes)} if opcodes else None
+    files = sorted(tuple(root.glob("*.MOO*")))
     if selected is None:
         return files
-    return [path for path in files if opcode_name_for_path(path).lower() in selected]
+    return [path for path in iter(files) if opcode_name_for_path(path).lower() in selected]
 
 
-def summarize_results(file_summaries: list[dict[str, Any]]) -> dict[str, Any]:
+def summarize_results(file_summaries: object) -> dict[str, Any]:
     """Aggregate per-file verifier summaries into a suite-level summary."""
     return {
         "suite": "80286_real_mode",
         "files": file_summaries,
         "total_files": len(file_summaries),
-        "total_cases": sum(item["total"] for item in file_summaries),
-        "passed_cases": sum(item["passed"] for item in file_summaries),
-        "failed_cases": sum(item["failed"] for item in file_summaries),
-        "skipped_cases": sum(item["skipped"] for item in file_summaries),
+        "total_cases": sum(item["total"] for item in iter(file_summaries)),
+        "passed_cases": sum(item["passed"] for item in iter(file_summaries)),
+        "failed_cases": sum(item["failed"] for item in iter(file_summaries)),
+        "skipped_cases": sum(item["skipped"] for item in iter(file_summaries)),
     }
 
 
-def summary_to_json(summary: dict[str, Any]) -> str:
+@cython.ccall
+def summary_to_json(summary: object) -> object:
     """Render a verifier summary as stable pretty-printed JSON."""
     return json.dumps(summary, indent=2, sort_keys=False)

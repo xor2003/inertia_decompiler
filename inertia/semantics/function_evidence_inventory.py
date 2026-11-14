@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Retain immutable decoded-function evidence within one analysis request.
 
 Layer: traits/summaries/confidence.
@@ -13,11 +14,16 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import Protocol, cast
+import dataclasses
+import operator
+EvidenceT8616 = typing.TypeVar("EvidenceT8616")
 
 
 class FunctionEvidenceKind8616(Enum):
@@ -37,7 +43,7 @@ class FunctionEvidenceKind8616(Enum):
     TERMINAL_AX_RETURNS = "terminal_ax_returns"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionBinaryIdentity8616:
     """Stable binary identity, with object identity only as a last resort."""
 
@@ -45,49 +51,49 @@ class FunctionBinaryIdentity8616:
     object_identity: int | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionBinarySurface8616:
     """Request-local binary identity and decoded extent for one function."""
 
     identity: FunctionBinaryIdentity8616
-    size: int
-    blocks: tuple[tuple[int, int], ...]
-    callsites: tuple[tuple[int, int | None, int | None], ...]
-    content_identity: bytes | None
+    size: cython.longlong
+    blocks: object
+    callsites: object
+    content_identity: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionEvidenceInventory8616:
     """One immutable binary evidence projection for a function surface."""
 
     surface: FunctionBinarySurface8616
-    evidence: tuple[object, ...]
+    evidence: object
     fallback_owner: object | None
 
 
 class _BlockBoundary8616(Protocol):
     """Dynamic angr block fields needed for cache invalidation."""
 
-    addr: int
-    size: int
+    addr: cython.longlong
+    size: cython.longlong
 
 
 class _FunctionBoundary8616(Protocol):
     """Dynamic angr function fields used by the evidence inventory."""
 
-    addr: int
-    size: int
+    addr: cython.longlong
+    size: cython.longlong
     blocks: Sequence[_BlockBoundary8616]
 
-    def get_call_sites(self) -> Iterable[int]:
+    def get_call_sites(self) -> Iterable[cython.longlong]:
         """Return machine callsite addresses known by the recovered CFG."""
         ...
 
-    def get_call_target(self, callsite_addr: int) -> int | None:
+    def get_call_target(self, callsite_addr: cython.longlong) -> int | None:
         """Return the recovered target for one machine callsite."""
         ...
 
-    def get_call_return(self, callsite_addr: int) -> int | None:
+    def get_call_return(self, callsite_addr: cython.longlong) -> int | None:
         """Return the recovered continuation for one machine callsite."""
         ...
 
@@ -95,21 +101,20 @@ class _FunctionBoundary8616(Protocol):
 class _ProjectInventoryBoundary8616(Protocol):
     """Dynamic project field retaining request-owned evidence inventories."""
 
-    _inertia_function_evidence_inventories_8616: dict[
-        tuple[FunctionEvidenceKind8616, FunctionBinaryIdentity8616],
-        FunctionEvidenceInventory8616,
-    ]
+    _inertia_function_evidence_inventories_8616: object
 
 
+@cython.ccall
 def _callsite_surface_8616(
     boundary: _FunctionBoundary8616,
-) -> tuple[tuple[int, int | None, int | None], ...]:
+) -> tuple[tuple[cython.longlong, int | None, int | None], ...]:
     """Snapshot each proven callsite with its target and continuation."""
+    raw_callsite_addr: object
     try:
         callsite_addrs = tuple(boundary.get_call_sites())
     except (AttributeError, TypeError):
         callsite_addrs = ()
-    callsites: list[tuple[int, int | None, int | None]] = []
+    callsites: list[tuple[cython.longlong, int | None, int | None]] = []
     for raw_callsite_addr in callsite_addrs:
         try:
             callsite_addr = int(raw_callsite_addr)
@@ -127,13 +132,16 @@ def _callsite_surface_8616(
     return tuple(sorted(callsites))
 
 
+@cython.ccall
 def _function_binary_surface_8616(
     function: object,
     *,
-    content_identity: bytes | None,
-    include_callsites: bool,
+    content_identity: object,
+    include_callsites: cython.bint,
 ) -> FunctionBinarySurface8616:
     """Snapshot stable binary coordinates and the decoded block surface."""
+    address: object
+    block: object
     boundary = cast(_FunctionBoundary8616, function)
     try:
         address = int(boundary.addr)
@@ -151,7 +159,7 @@ def _function_binary_surface_8616(
         blocks = tuple(boundary.blocks)
     except (AttributeError, TypeError):
         blocks = ()
-    extents: list[tuple[int, int]] = []
+    extents: list[tuple[cython.longlong, cython.longlong]] = []
     for block in blocks:
         try:
             block_addr = int(block.addr)
@@ -172,15 +180,17 @@ def _function_binary_surface_8616(
     )
 
 
-def collect_function_binary_evidence_8616[EvidenceT8616](
-    project: object | None,
+@cython.ccall
+def collect_function_binary_evidence_8616(
+    project: object,
     function: object,
     *,
     kind: FunctionEvidenceKind8616,
     builder: Callable[[object | None, object], Iterable[EvidenceT8616]],
-    content_identity: bytes | None = None,
-) -> tuple[EvidenceT8616, ...]:
+    content_identity: object = None,
+) -> object:
     """Return cached immutable evidence or collect it for the current surface."""
+    cached: object
     if project is None:
         return tuple(builder(project, function))
     include_callsites = kind is FunctionEvidenceKind8616.NEIGHBOR_CALL_TARGETS
@@ -201,7 +211,7 @@ def collect_function_binary_evidence_8616[EvidenceT8616](
         cached is not None
         and (surface.identity.address is not None or cached.fallback_owner is function)
     )
-    if cached is not None and cached.surface == surface and fallback_owner_matches:
+    if cached is not None and operator.eq(cached.surface, surface) and fallback_owner_matches:
         return cast(tuple[EvidenceT8616, ...], cached.evidence)
     evidence = tuple(builder(project, function))
     collected_surface = _function_binary_surface_8616(

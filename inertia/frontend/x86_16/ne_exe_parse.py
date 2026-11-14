@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """NE (New Executable) format parser for Windows/OS2 16-bit binaries.
 
 Layer: Frontend/runtime.
@@ -19,24 +20,32 @@ Extracts:
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import struct
 from dataclasses import dataclass, field
 from enum import IntEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
+import dataclasses
+angr = typing.TypeVar("angr")
 
 if TYPE_CHECKING:
     import angr
 
 
-def _dynamic_loader_ne_segment_selectors_8616(main_obj: object) -> dict[int, int] | None:
+@cython.ccall
+def _dynamic_loader_ne_segment_selectors_8616(main_obj: object) -> object:
     """Read optional CLE DOSNE segment selectors at the dynamic angr loader boundary."""
+    selectors: object
+    segment: object
+    selector: object
     # Dynamic angr loader boundary: DOSNE backend adds this optional metadata.
     selectors = getattr(main_obj, "ne_segment_selectors", None)
     if not isinstance(selectors, dict):
         return None
-    typed_selectors: dict[int, int] = {}
+    typed_selectors: dict[cython.longlong, cython.longlong] = {}
     for segment, selector in selectors.items():
         if isinstance(segment, int) and isinstance(selector, int):
             typed_selectors[segment] = selector
@@ -54,17 +63,17 @@ class NETargetOS(IntEnum):
     BOSS = 5
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class NESegment:
     """NE segment table entry."""
 
-    offset: int  # Offset in file (or flags for moveable)
-    length: int  # Segment length
-    flags: int  # Segment flags
-    min_alloc: int  # Minimum allocation
+    offset: cython.longlong  # Offset in file (or flags for moveable)
+    length: cython.longlong  # Segment length
+    flags: cython.longlong  # Segment flags
+    min_alloc: cython.longlong  # Minimum allocation
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class NEEntryPoint:
     """NE entry point from entry table and names table.
 
@@ -76,26 +85,27 @@ class NEEntryPoint:
         flags: Entry flags (exported, shared, etc.)
     """
 
-    ordinal: int
-    name: str
-    segment: int
-    offset: int
-    flags: int = 0
+    ordinal: cython.longlong
+    name: object
+    segment: cython.longlong
+    offset: cython.longlong
+    flags: cython.longlong = 0
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class NEExeInfo:
     """Parsed NE executable header."""
 
-    target_os: int  # Target OS (0x36)
-    entry_points: dict[int, str] = field(default_factory=dict)  # ordinal -> name
-    entry_offsets: dict[str, tuple[int, int]] = field(default_factory=dict)  # name -> (seg, off)
-    segments: list[NESegment] = field(default_factory=list)
-    code_labels: dict[int, str] = field(default_factory=dict)  # linear addr -> name
-    data_labels: dict[int, str] = field(default_factory=dict)
+    target_os: cython.longlong  # Target OS (0x36)
+    entry_points: object = field(default_factory=dict)  # ordinal -> name
+    entry_offsets: object = field(default_factory=dict)  # name -> (seg, off)
+    segments: object = field(default_factory=list)
+    code_labels: object = field(default_factory=dict)  # linear addr -> name
+    data_labels: object = field(default_factory=dict)
 
 
-def find_ne_header(data: bytes) -> int | None:
+@cython.ccall
+def find_ne_header(data: object) -> int | None:
     """Find NE header offset from MZ (DOS) header.
 
     MZ header at offset 0x3C contains offset to new executable header.
@@ -120,12 +130,14 @@ def find_ne_header(data: bytes) -> int | None:
     return None
 
 
-def parse_ne_header(data: bytes, ne_offset: int) -> tuple[dict[str, int | str], int]:
+@cython.ccall
+def parse_ne_header(data: object, ne_offset: cython.longlong) -> tuple[dict[str, int | str], cython.longlong]:
     """Parse NE header structure.
 
     Returns:
         (header_dict, resident_names_offset): Header fields and offset to resident names table
     """
+    resident_names_off: object
     try:
         header: dict[str, int | str] = {}
         # Read fixed portion of NE header (0x40 bytes minimum for older versions)
@@ -175,13 +187,14 @@ def parse_ne_header(data: bytes, ne_offset: int) -> tuple[dict[str, int | str], 
         return {}, 0
 
 
-def parse_ne_resident_names(data: bytes, offset: int, max_len: int) -> dict[int, str]:
+@cython.ccall
+def parse_ne_resident_names(data: object, offset: cython.longlong, max_len: cython.longlong) -> object:
     """Parse resident names table.
 
     Format: zero-terminated list of (length, name, ordinal) tuples
     Returns: {ordinal: name_string}
     """
-    names: dict[int, str] = {}
+    names: dict[cython.longlong, str] = {}
     pos = offset
     end = offset + max_len
 
@@ -213,7 +226,8 @@ def parse_ne_resident_names(data: bytes, offset: int, max_len: int) -> dict[int,
     return names
 
 
-def parse_ne_segment_table(data: bytes, ne_offset: int, seg_table_off: int, seg_count: int) -> list[NESegment]:
+@cython.ccall
+def parse_ne_segment_table(data: object, ne_offset: cython.longlong, seg_table_off: cython.longlong, seg_count: cython.longlong) -> object:
     """Parse NE segment table.
 
     Each entry is 8 bytes (offset, length, flags, min_alloc)
@@ -238,16 +252,16 @@ def parse_ne_segment_table(data: bytes, ne_offset: int, seg_table_off: int, seg_
 
 
 def parse_ne_entry_table(
-    data: bytes,
-    ne_offset: int,
-    entry_off: int,
-    entry_len: int,
-    ordinal_names: dict[int, str],
-    segments: list[NESegment],
-) -> dict[int, tuple[int, int]]:
+    data: object,
+    ne_offset: cython.longlong,
+    entry_off: cython.longlong,
+    entry_len: cython.longlong,
+    ordinal_names: object,
+    segments: object,
+) -> object:
     """Parse named NE entry-table ordinals to their segment and offset."""
 
-    def _impl() -> dict[int, tuple[int, int]]:
+    def _impl() -> object:
         """Parse NE entry table to map ordinals to (segment, offset).
 
         NE entry table format (from Open Watcom exeos2.h):
@@ -272,7 +286,7 @@ def parse_ne_entry_table(
 
         Returns: {ordinal: (segment_index, offset_in_segment)}
         """
-        offsets: dict[int, tuple[int, int]] = {}
+        offsets: dict[cython.longlong, tuple[cython.longlong, cython.longlong]] = {}
         pos = ne_offset + entry_off
         end = pos + entry_len
         ordinal = 1
@@ -298,15 +312,16 @@ def parse_ne_entry_table(
     return _impl()
 
 
+@cython.ccall
 def _consume_ne_entry_bundle(
-    data: bytes,
-    pos: int,
-    bundle_type: int,
-    bundle_count: int,
-    ordinal: int,
-    ordinal_names: dict[int, str],
-    offsets: dict[int, tuple[int, int]],
-) -> tuple[int, int]:
+    data: object,
+    pos: cython.longlong,
+    bundle_type: cython.longlong,
+    bundle_count: cython.longlong,
+    ordinal: cython.longlong,
+    ordinal_names: object,
+    offsets: object,
+) -> tuple[cython.longlong, cython.longlong]:
     """Consume one entry-table bundle and advance the (position, ordinal)."""
     if bundle_type == 0x00:
         # Type 0x00: null bundle (skip count entries)
@@ -346,7 +361,7 @@ def _consume_ne_entry_bundle(
 
 def parse_ne_exe(
     binary_path: Path,
-    load_base_linear: int = 0,
+    load_base_linear: cython.longlong = 0,
     project: angr.Project | None = None,
 ) -> NEExeInfo:
     """Parse NE executable and extract debug information.
@@ -361,6 +376,12 @@ def parse_ne_exe(
     Returns:
         NEExeInfo with extracted code/data labels using correct linear addresses
     """
+    linear_addr: object
+    name: object
+    ne_offset: object
+    offset: object
+    ordinal: object
+    segment_num: object
     info = NEExeInfo(target_os=0)
 
     try:
@@ -379,7 +400,8 @@ def parse_ne_exe(
     if not header:
         return info
 
-    def header_int(name: str) -> int:
+    def header_int(name: object) -> cython.longlong:
+        value: object
         value = header.get(name, 0)
         return value if isinstance(value, int) else 0
 
@@ -406,7 +428,7 @@ def parse_ne_exe(
 
     # Calculate linear addresses from segment:offset
     # Use loader's segment mappings if available (CLE DOSNE loader)
-    ne_segment_selectors: dict[int, int] | None = None
+    ne_segment_selectors: object = None
     if project is not None:
         try:
             main_obj = project.loader.main_object
@@ -433,12 +455,13 @@ def parse_ne_exe(
     return info
 
 
+@cython.ccall
 def _calculate_ne_linear_addr(
-    segment_num: int,
-    offset: int,
-    load_base_linear: int = 0,
-    ne_segment_selectors: dict[int, int] | None = None,
-    segments: list[NESegment] | None = None,
+    segment_num: cython.longlong,
+    offset: cython.longlong,
+    load_base_linear: cython.longlong = 0,
+    ne_segment_selectors: object = None,
+    segments: object = None,
 ) -> int | None:
     """Calculate linear address from NE segment:offset using loader info if available.
 

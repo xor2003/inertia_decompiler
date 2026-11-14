@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove and materialize adjacent segmented scalar loads as wider values.
 
 Layer: Widening.
@@ -9,6 +10,8 @@ CLI/reporting evidence.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import builtins
 import logging
@@ -43,6 +46,8 @@ from .segmented_load_identity import (
     segmented_load_identity_8616,
     segmented_load_tags_8616,
 )
+import dataclasses
+import operator
 
 __all__ = [
     "SegmentedLoadWideningReport8616",
@@ -56,7 +61,7 @@ log: logging.Logger = logging.getLogger(__name__)
 class _CFunctionBoundary8616(Protocol):
     """Owned fields consumed from the dynamic angr C-function boundary."""
 
-    addr: int
+    addr: cython.longlong
 
 
 class _CodegenBoundary8616(Protocol):
@@ -67,39 +72,42 @@ class _CodegenBoundary8616(Protocol):
     _inertia_segmented_load_widening_report_8616: SegmentedLoadWideningReport8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentedLoadWideningReport8616:
     """Closed evidence loop for adjacent segmented-load widening."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-def _dynamic_cfunc_attr_8616(cfunc: object, name: str) -> object | None:
+@cython.ccall
+def _dynamic_cfunc_attr_8616(cfunc: object, name: object) -> object | None:
     """Read version-dependent attributes at the dynamic angr C-function boundary."""
     return builtins.getattr(cfunc, name, None)
 
 
-def _dynamic_cfunc_setattr_8616(cfunc: object, name: str, value: object) -> None:
+@cython.ccall
+def _dynamic_cfunc_setattr_8616(cfunc: object, name: object, value: object) -> None:
     """Write version-dependent attributes at the dynamic angr C-function boundary."""
     builtins.setattr(cfunc, name, value)
 
 
+@cython.ccall
 def join_adjacent_segmented_load_identities_8616(
-    low: SegmentedLoadIdentity8616 | None,
-    high: SegmentedLoadIdentity8616 | None,
+    low: object,
+    high: object,
 ) -> SegmentedLoadIdentity8616 | None:
     """Return the exact two-byte identity for two proven adjacent byte loads."""
     if low is None or high is None:
         return None
     if low.width != 1 or high.width != 1:
         return None
-    if low.space is not high.space or low.region != high.region:
+    if low.space is not high.space or operator.ne(low.region, high.region):
         return None
-    if low.offset == 0xFFFF or high.offset != low.offset + 1:
+    if low.offset == 0xFFFF or operator.ne(high.offset, low.offset + 1):
         return None
     return SegmentedLoadIdentity8616(
         space=low.space,
@@ -109,6 +117,7 @@ def join_adjacent_segmented_load_identities_8616(
     )
 
 
+@cython.ccall
 def _strip_casts_8616(node: object) -> object:
     """Return an expression without syntax-only casts."""
     while isinstance(node, CTypeCast):
@@ -116,8 +125,11 @@ def _strip_casts_8616(node: object) -> object:
     return node
 
 
+@cython.ccall
 def _pure_constant_value_8616(node: object) -> int | None:
     """Evaluate integer-only offset and shift expressions."""
+    lhs: object
+    rhs: object
     node = _strip_casts_8616(node)
     if isinstance(node, CConstant) and isinstance(node.value, int) and not isinstance(node.value, bool):
         return node.value
@@ -138,11 +150,13 @@ def _pure_constant_value_8616(node: object) -> int | None:
     return None
 
 
+@cython.ccall
 def _flatten_offset_terms_8616(
     node: object,
-    sign: int = 1,
-) -> tuple[int, tuple[tuple[int, object], ...]]:
+    sign: cython.longlong = 1,
+) -> tuple[cython.longlong, tuple[tuple[cython.longlong, object], ...]]:
     """Split an offset into a constant and signed symbolic terms."""
+    constant: object
     node = _strip_casts_8616(node)
     constant = _pure_constant_value_8616(node)
     if constant is not None:
@@ -156,16 +170,19 @@ def _flatten_offset_terms_8616(
 
 
 def _same_signed_terms_8616(
-    lhs: tuple[tuple[int, object], ...],
-    rhs: tuple[tuple[int, object], ...],
-) -> bool:
+    lhs: object,
+    rhs: object,
+) -> cython.bint:
     """Return whether two symbolic offset term multisets are equal."""
+    match_index: object
+    lhs_node: object
+    lhs_sign: object
     unmatched = list(rhs)
     for lhs_sign, lhs_node in lhs:
         match_index = next(
             (
                 index
-                for index, (rhs_sign, rhs_node) in enumerate(unmatched)
+                for index, (rhs_sign, rhs_node) in builtins.iter(enumerate(unmatched))
                 if lhs_sign == rhs_sign and _same_c_expression_8616(lhs_node, rhs_node)
             ),
             None,
@@ -176,15 +193,18 @@ def _same_signed_terms_8616(
     return not unmatched
 
 
-def _adjacent_offsets_8616(low: object, high: object) -> bool:
+@cython.ccall
+def _adjacent_offsets_8616(low: object, high: object) -> cython.bint:
     """Prove that two structured offsets differ by exactly one byte."""
     low_constant, low_terms = _flatten_offset_terms_8616(low)
     high_constant, high_terms = _flatten_offset_terms_8616(high)
-    return high_constant == low_constant + 1 and _same_signed_terms_8616(low_terms, high_terms)
+    return operator.eq(high_constant, low_constant + 1) and _same_signed_terms_8616(low_terms, high_terms)
 
 
-def _segmented_byte_load_8616(node: object) -> tuple[CFunctionCall, object, object] | None:
+@cython.ccall
+def _segmented_byte_load_8616(node: object) -> object:
     """Return a lowering-owned segmented byte load and its arguments."""
+    address: object
     node = _strip_casts_8616(node)
     if not isinstance(node, CFunctionCall) or not isinstance(node.tags, dict):
         return None
@@ -199,9 +219,10 @@ def _segmented_byte_load_8616(node: object) -> tuple[CFunctionCall, object, obje
     return node, node.args[0], node.args[1]
 
 
+@cython.ccall
 def _overwide_segmented_byte_lane_8616(
     node: object,
-) -> tuple[CFunctionCall, object, object] | None:
+) -> object:
     """Return a word helper used as one lane of an angr byte decomposition."""
     node = _strip_casts_8616(node)
     if not isinstance(node, CFunctionCall) or not isinstance(node.tags, dict):
@@ -213,8 +234,12 @@ def _overwide_segmented_byte_lane_8616(
     return node, node.args[0], node.args[1]
 
 
-def _shifted_high_byte_8616(node: object) -> tuple[CFunctionCall, object, object] | None:
+@cython.ccall
+def _shifted_high_byte_8616(node: object) -> object:
     """Return a segmented byte load widened into the high byte position."""
+    expected: object
+    possible_load: object
+    possible_scale: object
     node = _strip_casts_8616(node)
     if not isinstance(node, CBinaryOp):
         return None
@@ -222,15 +247,19 @@ def _shifted_high_byte_8616(node: object) -> tuple[CFunctionCall, object, object
     if expected is None:
         return None
     for possible_load, possible_scale in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
-        if _pure_constant_value_8616(possible_scale) == expected:
+        if operator.eq(_pure_constant_value_8616(possible_scale), expected):
             return _segmented_byte_load_8616(possible_load)
     return None
 
 
+@cython.ccall
 def _shifted_overwide_segmented_byte_lane_8616(
     node: object,
-) -> tuple[CFunctionCall, object, object] | None:
+) -> object:
     """Return an over-wide segmented lane shifted into byte position one."""
+    expected: object
+    possible_load: object
+    possible_scale: object
     node = _strip_casts_8616(node)
     if not isinstance(node, CBinaryOp):
         return None
@@ -238,35 +267,40 @@ def _shifted_overwide_segmented_byte_lane_8616(
     if expected is None:
         return None
     for possible_load, possible_scale in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
-        if _pure_constant_value_8616(possible_scale) == expected:
+        if operator.eq(_pure_constant_value_8616(possible_scale), expected):
             return _overwide_segmented_byte_lane_8616(possible_load)
     return None
 
 
-def _instruction_addrs_8616(node: object) -> frozenset[int]:
+def _instruction_addrs_8616(node: object) -> frozenset[cython.longlong]:
     """Return exact instruction addresses attached at the structured-C boundary."""
+    direct: object
+    source_addrs: object
     tags = node.tags if isinstance(node, (CAssignment, CFunctionCall)) else None
     if not isinstance(tags, dict):
         return frozenset()
-    values: set[int] = set()
+    values: set[cython.longlong] = set()
     direct = tags.get("ins_addr")
     if isinstance(direct, int):
         values.add(direct)
     source_addrs = tags.get("inertia_source_instruction_addrs")
     if isinstance(source_addrs, (list, tuple, set, frozenset)):
-        values.update(value for value in source_addrs if isinstance(value, int))
+        values.update(value for value in iter(source_addrs) if isinstance(value, int))
     return frozenset(values)
 
 
-def _ssa_segmented_word_mov_addrs_8616(codegen: _CodegenBoundary8616) -> frozenset[int]:
+@cython.ccall
+def _ssa_segmented_word_mov_addrs_8616(codegen: _CodegenBoundary8616) -> frozenset[cython.longlong]:
     """Return SSA-proven ``MOV reg16, segmented-address`` instruction sites."""
+    block: object
+    instruction: object
     cfunc_addr = codegen.cfunc.addr
     if not isinstance(cfunc_addr, int):
         return frozenset()
     resolution = registered_function_ssa_artifact_8616(codegen.project, cfunc_addr)
     if resolution.verdict is not FunctionSSAArtifactVerdict8616.PROVEN or resolution.artifact is None:
         return frozenset()
-    proven: set[int] = set()
+    proven: set[cython.longlong] = set()
     for block in resolution.artifact.blocks:
         for instruction in block.instrs:
             destination = instruction.dst
@@ -277,7 +311,8 @@ def _ssa_segmented_word_mov_addrs_8616(codegen: _CodegenBoundary8616) -> frozens
     return frozenset(proven)
 
 
-def _is_segmented_word_mov_8616(instruction: IRInstr, destination: IRValue | None) -> bool:
+@cython.ccall
+def _is_segmented_word_mov_8616(instruction: IRInstr, destination: IRValue | None) -> cython.bint:
     """Return whether an instruction is a proven segmented word MOV."""
     if instruction.op.upper() != "MOV" or instruction.size != 2:
         return False
@@ -293,18 +328,19 @@ def _is_segmented_word_mov_8616(instruction: IRInstr, destination: IRValue | Non
 _GP_WORD_REGISTER_NAMES_8616 = frozenset({"ax", "bp", "bx", "cx", "di", "dx", "si", "sp"})
 
 
+@cython.ccall
 def _decoded_segmented_word_mov_addr_8616(wrapper: object) -> int | None:
     """Return one ``MOV reg16, mem16`` site across the dynamic third-party Capstone boundary."""
     raw = builtins.getattr(wrapper, "insn", wrapper)
-    if builtins.getattr(raw, "id", None) != X86_INS_MOV:
+    if operator.ne(builtins.getattr(raw, "id", None), X86_INS_MOV):
         return None
     raw_operands = builtins.getattr(raw, "operands", ())
     if not isinstance(raw_operands, (list, tuple)) or len(raw_operands) != 2:
         return None
     destination, source = raw_operands
     if (
-        builtins.getattr(destination, "type", None) != X86_OP_REG
-        or builtins.getattr(source, "type", None) != X86_OP_MEM
+        operator.ne(builtins.getattr(destination, "type", None), X86_OP_REG)
+        or operator.ne(builtins.getattr(source, "type", None), X86_OP_MEM)
         or builtins.getattr(destination, "size", None) != 2
         or builtins.getattr(source, "size", None) != 2
     ):
@@ -323,7 +359,7 @@ def _decoded_segmented_word_mov_addr_8616(wrapper: object) -> int | None:
     return address if isinstance(address, int) else None
 
 
-def _decoded_segmented_word_mov_addrs_8616(codegen: _CodegenBoundary8616) -> frozenset[int]:
+def _decoded_segmented_word_mov_addrs_8616(codegen: _CodegenBoundary8616) -> frozenset[cython.longlong]:
     """Return complete frontend-decoded ``MOV reg16, mem16`` evidence sites."""
     function_entry = codegen.cfunc.addr
     inventory = collect_function_instruction_inventory_8616(
@@ -334,15 +370,17 @@ def _decoded_segmented_word_mov_addrs_8616(codegen: _CodegenBoundary8616) -> fro
         return frozenset()
     return frozenset(
         address
-        for instruction in inventory.instructions
+        for instruction in iter(inventory.instructions)
         if (address := _decoded_segmented_word_mov_addr_8616(instruction)) is not None
     )
 
 
+@cython.ccall
 def _temporary_byte_load_assignment_8616(
     statement: object,
-) -> tuple[CAssignment, CFunctionCall, object, object] | None:
+) -> object:
     """Return one byte-load assignment to a non-observable VEX temporary."""
+    load: object
     if not isinstance(statement, CAssignment) or not isinstance(statement.lhs, CVariable):
         return None
     if (
@@ -357,6 +395,7 @@ def _temporary_byte_load_assignment_8616(
     return statement, call, segment, offset
 
 
+@cython.ccall
 def _word_register_assignment_8616(statement: object) -> CAssignment | None:
     """Return one exact 16-bit architectural-register assignment."""
     if not isinstance(statement, CAssignment):
@@ -372,7 +411,8 @@ def _word_register_assignment_8616(statement: object) -> CAssignment | None:
     return None
 
 
-def _pure_register_assignment_8616(statement: object) -> bool:
+@cython.ccall
+def _pure_register_assignment_8616(statement: object) -> cython.bint:
     """Return whether a delayed recomposition may move before this register effect."""
     if not isinstance(statement, CAssignment):
         return False
@@ -384,27 +424,29 @@ def _pure_register_assignment_8616(statement: object) -> bool:
     return False
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _ByteLoadWidenStats8616:
     """Evidence counters for statement-level byte-pair widening."""
 
-    changed: bool = False
-    raw: int = 0
-    normalized: int = 0
-    classified: int = 0
-    materialized: int = 0
+    changed: cython.bint = False
+    raw: cython.longlong = 0
+    normalized: cython.longlong = 0
+    classified: cython.longlong = 0
+    materialized: cython.longlong = 0
 
 
+@cython.ccall
 def _authorized_word_destination_8616(
-    statements: list[object],
-    index: int,
+    statements: object,
+    index: cython.longlong,
     first_assignment: object,
     first_call: object,
     second_assignment: object,
     second_call: object,
-    proven_mov_addrs: frozenset[int],
-) -> tuple[int | None, CAssignment | None, frozenset[int]]:
+    proven_mov_addrs: object,
+) -> tuple[int | None, CAssignment | None, frozenset[cython.longlong]]:
     """Return the authorized destination assignment index/statement/addrs."""
+    candidate: object
     load_addrs = (
         _instruction_addrs_8616(first_assignment)
         | _instruction_addrs_8616(first_call)
@@ -425,16 +467,22 @@ def _authorized_word_destination_8616(
     return None, None, frozenset()
 
 
+@cython.ccall
 def _try_merge_byte_pair_8616(
-    statements: list[object],
-    index: int,
-    rebuilt: list[object],
+    statements: object,
+    index: cython.longlong,
+    rebuilt: object,
     *,
-    proven_mov_addrs: frozenset[int],
+    proven_mov_addrs: object,
     codegen: _CodegenBoundary8616,
     stats: _ByteLoadWidenStats8616,
 ) -> int | None:
     """Merge one authorized split-byte pair into a word load, or refuse."""
+    destination: object
+    destination_index: object
+    first: object
+    identity: object
+    second: object
     first = _temporary_byte_load_assignment_8616(statements[index])
     second = _temporary_byte_load_assignment_8616(statements[index + 1])
     if first is None or second is None:
@@ -489,16 +537,18 @@ def _widen_statement_byte_loads_8616(
     root: object,
     *,
     codegen: _CodegenBoundary8616,
-    proven_mov_addrs: frozenset[int],
-) -> tuple[bool, int, int, int, int]:
+    proven_mov_addrs: object,
+) -> tuple[cython.bint, cython.longlong, cython.longlong, cython.longlong, cython.longlong]:
     """Collapse typed-evidence-authorized split bytes into one word-register load."""
+    merged_index: object
+    group: object
     stats = _ByteLoadWidenStats8616()
     statement_groups = (
         node
-        for node in (root, *_iter_c_nodes_deep_8616(root))
+        for node in iter((root, ) + tuple(_iter_c_nodes_deep_8616(root)))
         if isinstance(node, CStatements)
     )
-    seen_groups: set[int] = set()
+    seen_groups: set[cython.longlong] = set()
     for group in statement_groups:
         if id(group) in seen_groups:
             continue
@@ -524,16 +574,22 @@ def _widen_statement_byte_loads_8616(
     return stats.changed, stats.raw, stats.normalized, stats.classified, stats.materialized
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _SegmentedLoadWidener8616:
     """Apply typed-evidence widening to one structured C tree."""
 
     codegen: _CodegenBoundary8616
-    proven_mov_addrs: frozenset[int]
+    proven_mov_addrs: object
     stats: _ByteLoadWidenStats8616 = field(default_factory=_ByteLoadWidenStats8616)
 
+    @cython.ccall
     def _typed_pair(self, node: CBinaryOp) -> object | None:
         """Return a typed-identity SEG_U16 call for one pair, or None."""
+        high: object
+        identity: object
+        low: object
+        possible_high: object
+        possible_low: object
         for possible_low, possible_high in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
             low = _segmented_byte_load_8616(possible_low)
             high = _shifted_high_byte_8616(possible_high)
@@ -565,8 +621,13 @@ class _SegmentedLoadWidener8616:
             ))
         return None
 
+    @cython.ccall
     def _authorized_pair(self, node: CBinaryOp) -> object | None:
         """Return an instruction-authorized SEG_U16 call for one pair, or None."""
+        high: object
+        low: object
+        possible_high: object
+        possible_low: object
         for possible_low, possible_high in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
             low = _overwide_segmented_byte_lane_8616(possible_low)
             high = _shifted_overwide_segmented_byte_lane_8616(possible_high)
@@ -601,8 +662,11 @@ class _SegmentedLoadWidener8616:
             ))
         return None
 
+    @cython.ccall
     def transform(self, node: object) -> object:
         """Materialize one adjacent byte pair when all widening facts agree."""
+        authorized: object
+        typed: object
         if not isinstance(node, CBinaryOp) or node.op not in {"Or", "Add"}:
             return node
         typed = self._typed_pair(node)
@@ -614,10 +678,13 @@ class _SegmentedLoadWidener8616:
         return node
 
 
-def _cfunc_rewrite_roots_8616(cfunc: object) -> list[tuple[list[str], object]]:
+@cython.ccall
+def _cfunc_rewrite_roots_8616(cfunc: object) -> object:
     """Return the distinct (attributes, root) rewrite anchors on one cfunc."""
+    root: object
+    attribute: object
     roots: list[tuple[list[str], object]] = []
-    seen_roots: dict[int, list[str]] = {}
+    seen_roots: dict[cython.longlong, list[str]] = {}
     for attribute in ("body", "statements", "stmt"):
         root = _dynamic_cfunc_attr_8616(cfunc, attribute)
         if root is None:
@@ -631,8 +698,12 @@ def _cfunc_rewrite_roots_8616(cfunc: object) -> list[tuple[list[str], object]]:
     return roots
 
 
-def apply_segmented_load_widening_8616(codegen: object) -> bool:
+@cython.ccall
+def apply_segmented_load_widening_8616(codegen: object) -> cython.bint:
     """Widen proven adjacent segmented byte loads in one structured C tree."""
+    attribute: object
+    attributes: object
+    root: object
     typed_codegen = cast(_CodegenBoundary8616, codegen)
     cfunc = typed_codegen.cfunc
     proven_mov_addrs = _ssa_segmented_word_mov_addrs_8616(

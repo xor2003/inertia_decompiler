@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Match stable induction operands without changing their conversions.
 
 Layer: Structuring.
@@ -10,6 +11,8 @@ Do not perform alias-state ownership, widening, type/materialization recovery, r
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from angr.analyses.decompiler.structured_codegen.c import (
     CBinaryOp,
@@ -22,6 +25,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
 from inertia.lowering.c_ast_utils import _same_c_expression_8616
 
 
+@cython.ccall
 def _stable_operand(expression: CExpression) -> CVariable | CConstant | None:
     """Inspect a pure conversion chain; refuse calls, loads and arithmetic."""
     while isinstance(expression, CTypeCast):
@@ -29,8 +33,11 @@ def _stable_operand(expression: CExpression) -> CVariable | CConstant | None:
     return expression if isinstance(expression, (CVariable, CConstant)) else None
 
 
-def ordered_comparison_uses_induction_8616(condition: CExpression, induction: CVariable) -> bool:
+@cython.ccall
+def ordered_comparison_uses_induction_8616(condition: CExpression, induction: CVariable) -> cython.bint:
     """Require exactly one stable operand to refer to the induction storage."""
+    lhs: object
+    rhs: object
     if not isinstance(condition, CBinaryOp) or condition.op not in {"CmpLT", "CmpLE", "CmpGT", "CmpGE"}:
         return False
     lhs = _stable_operand(condition.lhs)

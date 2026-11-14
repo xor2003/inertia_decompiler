@@ -247,6 +247,55 @@ def test_absorbing_pre_cut_refusal():
     assert absorbing(artifact).failure is PrefixCutFailure8616.INCOMPLETE_CFG
 
 
+def test_absorbing_long_prefix_fits_single_census_work_budget():
+    """A cut need not pay twice for inspecting the same pre-cut instruction rows."""
+    artifact = graph()
+    block = replace(artifact.blocks[1], instrs=(
+        *(IRInstr("NOP", None, (), addr=20 + index) for index in range(50)),
+        IRInstr("CALL", None, (), addr=70),
+    ))
+    artifact = replace(artifact, blocks=(artifact.blocks[0], block, artifact.blocks[2]))
+    later = row(artifact, 1, 50)
+    baseline = absorbing(artifact, later=later)
+    assert baseline.complete
+    bounded = absorbing(artifact, later=later, budget=PrefixCutBudget8616(115, float("inf")))
+    assert bounded.complete
+    assert bounded.witness.region == baseline.witness.region == frozenset((1, 2))
+    assert bounded.witness.artifact is artifact
+
+
+def test_absorbing_mirrored_suffix_refusal_preserves_raw_authority():
+    artifact = graph()
+    refusal = IRRefusal("unknown", "future control unresolved", block_addr=3)
+    artifact = replace(
+        artifact,
+        blocks=(*artifact.blocks[:2], replace(artifact.blocks[2], refusals=(refusal,))),
+        refusals=(refusal,),
+    )
+    result = absorbing(artifact, later=row(artifact, 1))
+    assert result.complete
+    assert result.witness.region == frozenset((1, 2))
+    assert result.witness.artifact is artifact
+    assert artifact.refusals == artifact.blocks[2].refusals == (refusal,)
+    assert admit(artifact, later=row(artifact, 1)).failure is PrefixCutFailure8616.INCOMPLETE_CFG
+
+
+@pytest.mark.parametrize("location,mirror,bypass", [
+    (None, True, False), (1, True, False), (3, False, False), (3, True, True),
+])
+def test_absorbing_global_refusal_requires_excluded_matching_block(location, mirror, bypass):
+    artifact = graph(((2, 3), (3,), ())) if bypass else graph()
+    refusal = IRRefusal("unknown", "unproved control", block_addr=location)
+    artifact = replace(
+        artifact,
+        blocks=(*artifact.blocks[:2], replace(
+            artifact.blocks[2], refusals=(refusal,) if mirror else (),
+        )),
+        refusals=(refusal,),
+    )
+    assert absorbing(artifact, later=row(artifact, 1)).failure is PrefixCutFailure8616.INCOMPLETE_CFG
+
+
 @pytest.mark.parametrize("edges,prior,failure", [
     (((2, 3), (3,), ()), 1, PrefixCutFailure8616.BYPASS),
     (((2,), (1, 3), ()), 0, PrefixCutFailure8616.CYCLE),

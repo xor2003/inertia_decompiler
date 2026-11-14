@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize typed software-interrupt inputs in structured C calls.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -40,6 +43,9 @@ from inertia.semantics.software_interrupt_inputs import (
 )
 
 from .gp_register_state import runtime_gp_expression_view_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "SoftwareInterruptMaterializationStats8616",
@@ -50,32 +56,32 @@ __all__ = [
 ]
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class SoftwareInterruptMaterializationStats8616:
     """Closed evidence counters for interrupt call argument lowering."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class SoftwareInterruptTargetMaterializationStats8616:
     """Closed evidence counters for exact interrupt service targets."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
 class _CFunctionSurface8616(Protocol):
     """Third-party C function fields consumed by interrupt lowering."""
 
-    addr: int
+    addr: cython.longlong
     statements: object
     arg_list: object
 
@@ -83,7 +89,7 @@ class _CFunctionSurface8616(Protocol):
 class _ArchSurface8616(Protocol):
     """Architecture fields needed to lower exact register inputs."""
 
-    registers: dict[str, tuple[int, int]]
+    registers: object
 
 
 class _ProjectSurface8616(Protocol):
@@ -96,14 +102,14 @@ class _ProjectSurface8616(Protocol):
 class _FunctionCallTargetSurface8616(Protocol):
     """Third-party function callsite mapping consumed by Lowering."""
 
-    def get_call_target(self, callsite_addr: int) -> int | None:
+    def get_call_target(self, callsite_addr: cython.longlong) -> int | None:
         """Return the target assigned to one exact machine callsite."""
 
 
 class _FunctionManagerSurface8616(Protocol):
     """Third-party function manager lookup consumed by Lowering."""
 
-    def function(self, *, addr: int) -> _FunctionCallTargetSurface8616 | None:
+    def function(self, *, addr: cython.longlong) -> _FunctionCallTargetSurface8616 | None:
         """Return the function at one exact address."""
 
 
@@ -136,8 +142,11 @@ class _CVariableSurface8616(Protocol):
     variable: object
 
 
+@cython.ccall
 def _callsite_addr_8616(call: structured_c.CFunctionCall) -> int | None:
     """Return the exact instruction address tagged on a structured call."""
+    owned_tags: object
+    value: object
     try:
         tags = cast(_TaggedCallSurface8616, call).tags
     except AttributeError:
@@ -149,6 +158,7 @@ def _callsite_addr_8616(call: structured_c.CFunctionCall) -> int | None:
     return value if isinstance(value, int) else None
 
 
+@cython.ccall
 def _raw_interrupt_vector_8616(call: structured_c.CFunctionCall) -> int | None:
     """Decode the raw lifted interrupt vector from one structured call."""
     target = cast(_TaggedCallSurface8616, call).callee_target
@@ -157,18 +167,21 @@ def _raw_interrupt_vector_8616(call: structured_c.CFunctionCall) -> int | None:
     return interrupt_vector_from_core_addr_8616(target) if isinstance(target, int) else None
 
 
-def _service_target_matches_vector_8616(target_addr: int, vector: int) -> bool:
+@cython.ccall
+def _service_target_matches_vector_8616(target_addr: cython.longlong, vector: cython.longlong) -> cython.bint:
     """Validate a service target against its raw interrupt vector."""
     if vector == 0x21:
         selector = target_addr - int(DOS_SERVICE_BASE_ADDR)
         return bool(0 <= selector <= 0xFF)
-    return bool(target_addr == int(INTERRUPT_SERVICE_BASE_ADDR) + vector)
+    return bool(operator.eq(target_addr, int(INTERRUPT_SERVICE_BASE_ADDR) + vector))
 
 
+@cython.ccall
 def _interrupt_context_8616(
     surface: _CodegenSurface8616,
-) -> tuple[object, int, _FunctionCallTargetSurface8616] | None:
+) -> object:
     """Resolve the root and owning function's callsite target surface."""
+    function: object
     try:
         root = surface.cfunc.statements
         function_addr = surface.cfunc.addr
@@ -181,13 +194,14 @@ def _interrupt_context_8616(
     return root, function_addr, function
 
 
+@cython.ccall
 def _proven_service_target_8616(
     surface: _CodegenSurface8616,
     function: _FunctionCallTargetSurface8616,
     *,
-    function_addr: int,
-    callsite_addr: int,
-    vector: int,
+    function_addr: cython.longlong,
+    callsite_addr: cython.longlong,
+    vector: cython.longlong,
 ) -> int | None:
     """Resolve an exact service target from callsite or project evidence."""
     try:
@@ -212,15 +226,20 @@ def _proven_service_target_8616(
     return target_addr
 
 
+@cython.ccall
 def _materialize_service_target_8616(
     surface: _CodegenSurface8616,
     node: object,
     *,
     function: _FunctionCallTargetSurface8616,
-    function_addr: int,
+    function_addr: cython.longlong,
     stats: SoftwareInterruptTargetMaterializationStats8616,
-) -> bool:
+) -> cython.bint:
     """Rewrite one interrupt call to its proven service target."""
+    callsite_addr: object
+    service_fact: object
+    target_addr: object
+    vector: object
     if not isinstance(node, structured_c.CFunctionCall):
         return False
     vector = _raw_interrupt_vector_8616(node)
@@ -249,17 +268,20 @@ def _materialize_service_target_8616(
     )
     cast(_TaggedCallSurface8616, node).callee_target = (
         service_fact.helper_name
-        if service_fact is not None and service_fact.target_addr == target_addr
+        if service_fact is not None and operator.eq(service_fact.target_addr, target_addr)
         else target_addr
     )
     stats.materialized_count += 1
     return True
 
 
+@cython.ccall
 def materialize_software_interrupt_service_targets_8616(
     codegen: object,
-) -> bool:
+) -> cython.bint:
     """Project exact frontend callsite service identities into structured C."""
+    context: object
+    node: object
     surface = cast(_CodegenSurface8616, codegen)
     stats = SoftwareInterruptTargetMaterializationStats8616()
     context = _interrupt_context_8616(surface)
@@ -278,7 +300,7 @@ def materialize_software_interrupt_service_targets_8616(
         ):
             changed = True
     get_codegen_side_metadata(codegen)["software_interrupt_target_materialization_8616"] = stats
-    if stats.classified_fact_count != stats.materialized_count:
+    if operator.ne(stats.classified_fact_count, stats.materialized_count):
         stats.failure_count = stats.classified_fact_count - stats.materialized_count
         raise PipelineHardError(
             "classified software interrupt service targets were not materialized",
@@ -287,6 +309,7 @@ def materialize_software_interrupt_service_targets_8616(
     return changed
 
 
+@cython.ccall
 def _stack_variable_8616(node: object) -> SimStackVariable | None:
     """Return exact stack storage from one C variable expression."""
     if not isinstance(node, structured_c.CVariable):
@@ -298,13 +321,15 @@ def _stack_variable_8616(node: object) -> SimStackVariable | None:
     return variable if isinstance(variable, SimStackVariable) else None
 
 
+@cython.ccall
 def _candidate_stack_cvars_8616(
     codegen: _CodegenSurface8616,
     root: object,
 ) -> tuple[structured_c.CVariable, ...]:
     """Collect deterministic C variable candidates from arguments and body."""
+    node: object
     candidates: list[structured_c.CVariable] = []
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     arg_list = codegen.cfunc.arg_list
     sources: list[object] = []
     if isinstance(arg_list, Sequence) and not isinstance(arg_list, (str, bytes)):
@@ -318,19 +343,22 @@ def _candidate_stack_cvars_8616(
     return tuple(candidates)
 
 
+@cython.ccall
 def _stack_cvar_for_value_8616(
     value: IRValue,
-    candidates: tuple[structured_c.CVariable, ...],
+    candidates: object,
     codegen: object,
 ) -> structured_c.CVariable | None:
     """Resolve or rematerialize an exact Semantics-proven SS stack value."""
+    variable: object
+    candidate: object
     if value.space is not MemSpace.SS or value.name not in {"bp", "sp"}:
         return None
     for candidate in candidates:
         variable = _stack_variable_8616(candidate)
         if variable is None:
             continue
-        if variable.offset == value.offset and variable.size == value.size:
+        if operator.eq(variable.offset, value.offset) and operator.eq(variable.size, value.size):
             return cast(structured_c.CVariable, _clone_c_ast_tree_8616(candidate))
     surface = cast(_CodegenSurface8616, codegen)
     try:
@@ -353,12 +381,17 @@ def _stack_cvar_for_value_8616(
     )
 
 
+@cython.ccall
 def _lower_value_8616(
     value: IRScalarValue8616,
     codegen: object,
-    candidates: tuple[structured_c.CVariable, ...],
+    candidates: object,
 ) -> structured_c.CExpression | None:
     """Lower one typed interrupt argument without rediscovering semantics."""
+    lhs: object
+    register: object
+    rhs: object
+    value_type: object
     if isinstance(value, IRBinaryValue):
         lhs = _lower_value_8616(value.lhs, codegen, candidates)
         rhs = _lower_value_8616(value.rhs, codegen, candidates)
@@ -384,8 +417,13 @@ def _lower_value_8616(
     return _stack_cvar_for_value_8616(value, candidates, codegen)
 
 
-def _actual_value_fingerprint_8616(node: object) -> str | None:
+@cython.ccall
+def _actual_value_fingerprint_8616(node: object) -> object:
     """Fingerprint the final C subset emitted from interrupt input facts."""
+    gp_view: object
+    lhs: object
+    rhs: object
+    variable: object
     gp_view = runtime_gp_expression_view_8616(node)
     if gp_view is not None:
         return f"reg:{gp_view.register_name}:size{gp_view.width}"
@@ -418,49 +456,50 @@ def _actual_value_fingerprint_8616(node: object) -> str | None:
 def _call_has_expected_arguments_8616(
     call: structured_c.CFunctionCall,
     fact: SoftwareInterruptInputFact8616,
-) -> bool:
+) -> cython.bint:
     """Return whether final call arguments match all proven input values."""
     args = cast(_TaggedCallSurface8616, call).args
     if not isinstance(args, Sequence) or isinstance(args, (str, bytes)):
         return False
-    actual = tuple(_actual_value_fingerprint_8616(arg) for arg in args)
+    actual = tuple(_actual_value_fingerprint_8616(arg) for arg in iter(args))
     expected = tuple(
         software_interrupt_value_fingerprint_8616(value)
-        for value in fact.argument_values
+        for value in iter(fact.argument_values)
     )
     return actual == expected
 
 
+@cython.ccall
 def _call_targets_fact_8616(
     call: structured_c.CFunctionCall,
     fact: SoftwareInterruptInputFact8616,
-) -> bool:
+) -> cython.bint:
     """Return whether a call retains the exact typed interrupt core target."""
     target = cast(_TaggedCallSurface8616, call).callee_target
     if isinstance(target, int):
-        return bool(target == fact.target_addr)
+        return bool(operator.eq(target, fact.target_addr))
     return (
         isinstance(target, structured_c.CConstant)
         and isinstance(target.value, int)
-        and target.value == fact.target_addr
+        and operator.eq(target.value, fact.target_addr)
     )
 
 
 def select_software_interrupt_call_8616(
-    calls: tuple[structured_c.CFunctionCall, ...],
+    calls: object,
     fact: SoftwareInterruptInputFact8616,
 ) -> structured_c.CFunctionCall | None:
     """Select one service call without confusing same-address status helpers."""
     callsite_calls = tuple(
-        call for call in calls if _callsite_addr_8616(call) == fact.callsite_addr
+        call for call in iter(calls) if operator.eq(_callsite_addr_8616(call), fact.callsite_addr)
     )
     materialized = tuple(
-        call for call in callsite_calls if _call_has_expected_arguments_8616(call, fact)
+        call for call in iter(callsite_calls) if _call_has_expected_arguments_8616(call, fact)
     )
     if len(materialized) == 1:
         return materialized[0]
     targeted = tuple(
-        call for call in callsite_calls if _call_targets_fact_8616(call, fact)
+        call for call in iter(callsite_calls) if _call_targets_fact_8616(call, fact)
     )
     if len(targeted) == 1:
         return targeted[0]
@@ -471,12 +510,13 @@ def _materialize_fact_8616(
     codegen: _CodegenSurface8616,
     root: object,
     fact: SoftwareInterruptInputFact8616,
-    candidates: tuple[structured_c.CVariable, ...],
-) -> tuple[bool, bool]:
+    candidates: object,
+) -> tuple[cython.bint, cython.bint]:
     """Materialize one exact fact and report success plus AST change."""
+    call: object
     calls = tuple(
         node
-        for node in _iter_c_nodes_deep_8616(root)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(root))
         if isinstance(node, structured_c.CFunctionCall)
     )
     call = select_software_interrupt_call_8616(calls, fact)
@@ -486,18 +526,20 @@ def _materialize_fact_8616(
         return True, False
     arguments = tuple(
         _lower_value_8616(value, codegen, candidates)
-        for value in fact.argument_values
+        for value in iter(fact.argument_values)
     )
-    if any(argument is None for argument in arguments):
+    if any(argument is None for argument in iter(arguments)):
         return False, False
     cast(_TaggedCallSurface8616, call).args = [
-        cast(structured_c.CExpression, argument) for argument in arguments
+        cast(structured_c.CExpression, argument) for argument in iter(arguments)
     ]
     return _call_has_expected_arguments_8616(call, fact), True
 
 
-def materialize_software_interrupt_calls_8616(codegen: object) -> bool:
+@cython.ccall
+def materialize_software_interrupt_calls_8616(codegen: object) -> cython.bint:
     """Attach Semantics facts and materialize every classified interrupt call."""
+    fact: object
     surface = cast(_CodegenSurface8616, codegen)
     try:
         ir_artifact = surface._inertia_vex_ir_artifact
@@ -523,7 +565,7 @@ def materialize_software_interrupt_calls_8616(codegen: object) -> bool:
             stats.failure_count += 1
         changed = fact_changed or changed
     get_codegen_side_metadata(codegen)["software_interrupt_materialization_8616"] = stats
-    if stats.failure_count > 0 or stats.classified_fact_count != stats.materialized_count:
+    if stats.failure_count > 0 or operator.ne(stats.classified_fact_count, stats.materialized_count):
         raise PipelineHardError(
             "classified software interrupt inputs were not materialized",
             layer="lowering",

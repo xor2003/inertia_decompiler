@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed condition-call effect evidence shared across decompiler stages.
 
 Layer: Traits/summaries/confidence.
@@ -17,6 +18,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import Enum
@@ -24,6 +27,7 @@ from enum import Enum
 from angr.analyses.decompiler.structured_codegen.c import CFunctionCall
 
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
+import dataclasses
 
 __all__ = [
     "ConditionCallEffectEvidence8616",
@@ -53,25 +57,27 @@ class ConditionCallEffectKind8616(Enum):
     SEMANTIC_CALL = "semantic_call"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionCallEffectEvidence8616:
     """Closed evidence for call effects found in one condition expression."""
 
     kind: ConditionCallEffectKind8616
-    raw_call_count: int
-    transparent_call_count: int
-    semantic_call_count: int
+    raw_call_count: cython.longlong
+    transparent_call_count: cython.longlong
+    semantic_call_count: cython.longlong
 
     @property
-    def has_semantic_call(self) -> bool:
+    def has_semantic_call(self) -> cython.bint:
         """Return whether at least one call lacks transparent-helper proof."""
         return self.kind is ConditionCallEffectKind8616.SEMANTIC_CALL
 
 
+@cython.ccall
 def classify_condition_call_effects_8616(
     condition: object,
 ) -> ConditionCallEffectEvidence8616:
     """Classify every call nested in a structured condition without guessing."""
+    node: object
     raw_call_count = 0
     transparent_call_count = 0
     semantic_call_count = 0

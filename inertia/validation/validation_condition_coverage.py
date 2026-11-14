@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Check current condition ownership against published Structuring obligations.
 
 Layer: Tail Validation.
@@ -12,6 +13,7 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import cython
 
 from typing import Protocol, cast
 
@@ -29,10 +31,11 @@ class _ConditionClosureBoundary8616(Protocol):
     _inertia_structuring_condition_evidence_closure_8616: ConditionEvidenceClosure8616
 
 
+@cython.ccall
 def missing_required_condition_keys_8616(
     codegen: object,
     root: object,
-    typed_conditions: tuple[ConditionIR, ...],
+    typed_conditions: object,
 ) -> tuple[ConditionEvidenceKey8616, ...]:
     """Recheck published obligations against current single/composite owners.
 

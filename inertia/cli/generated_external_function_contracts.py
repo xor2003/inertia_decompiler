@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: join ABI-compatible external function declarations while
@@ -7,16 +8,20 @@ belong in X86_16 Types/Lowering.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import copy
 from collections.abc import Sequence
 
 from pycparser import c_ast
+import operator
 
 _TypeContract = tuple[object, ...]
 
 
-def _identifier_tokens(node: c_ast.Node) -> tuple[str, ...] | None:
+@cython.ccall
+def _identifier_tokens(node: c_ast.Node) -> object:
     """Return identifier-type tokens beneath one declarator node."""
     current = node
     while isinstance(current, (c_ast.Decl, c_ast.Typename, c_ast.TypeDecl)):
@@ -26,8 +31,10 @@ def _identifier_tokens(node: c_ast.Node) -> tuple[str, ...] | None:
     return tuple(current.names)
 
 
-def _type_contract(node: c_ast.Node, *, parameter: bool = False) -> _TypeContract | None:
+@cython.ccall
+def _type_contract(node: c_ast.Node, *, parameter: cython.bint = False) -> _TypeContract | None:
     """Return a structural type contract with parameter arrays decayed to pointers."""
+    nested: object
     if isinstance(node, (c_ast.Decl, c_ast.Typename)):
         return _type_contract(node.type, parameter=parameter)
     if isinstance(node, c_ast.TypeDecl):
@@ -48,6 +55,7 @@ def _type_contract(node: c_ast.Node, *, parameter: bool = False) -> _TypeContrac
     return _named_type_contract(node)
 
 
+@cython.ccall
 def _named_type_contract(node: c_ast.Node) -> _TypeContract | None:
     """Return the contract tag for named struct/union/enum types."""
     if isinstance(node, c_ast.Struct):
@@ -59,8 +67,11 @@ def _named_type_contract(node: c_ast.Node) -> _TypeContract | None:
     return None
 
 
-def _parameter_contracts(function_type: c_ast.FuncDecl) -> tuple[_TypeContract, ...] | None:
+@cython.ccall
+def _parameter_contracts(function_type: c_ast.FuncDecl) -> object:
     """Return normalized prototype parameters, or None for K&R declarations."""
+    contract: object
+    parameter: object
     if function_type.args is None:
         return None
     parameters = tuple(function_type.args.params or ())
@@ -78,8 +89,10 @@ def _parameter_contracts(function_type: c_ast.FuncDecl) -> tuple[_TypeContract, 
     return tuple(contracts)
 
 
-def _integer_return_contract(node: c_ast.Node) -> tuple[int, bool] | None:
+@cython.ccall
+def _integer_return_contract(node: c_ast.Node) -> object:
     """Return target x86-16 integer width and unsignedness for one return type."""
+    tokens: object
     tokens = _identifier_tokens(node)
     if tokens is None:
         return None
@@ -119,50 +132,54 @@ def _integer_return_contract(node: c_ast.Node) -> tuple[int, bool] | None:
 
 def _return_declaration(declarations: Sequence[c_ast.Decl]) -> c_ast.Decl | None:
     """Select the strongest compatible return contract without claiming void."""
-    exact_returns = tuple(_type_contract(declaration.type.type) for declaration in declarations)
+    exact_returns = tuple(_type_contract(declaration.type.type) for declaration in iter(declarations))
     if len(set(exact_returns)) == 1:
         return declarations[0]
 
     return_capable = tuple(
         declaration
-        for declaration in declarations
+        for declaration in iter(declarations)
         if _identifier_tokens(declaration.type.type) != ("void",)
     )
     if not return_capable:
         return declarations[0]
     integer_returns = tuple(
         (declaration, _integer_return_contract(declaration.type.type))
-        for declaration in return_capable
+        for declaration in iter(return_capable)
     )
-    if any(contract is None for _declaration, contract in integer_returns):
+    if any(contract is None for _declaration, contract in iter(integer_returns)):
         return None
-    widest_bits = max(contract[0] for _declaration, contract in integer_returns if contract is not None)
+    widest_bits = max(contract[0] for _declaration, contract in iter(integer_returns) if contract is not None)
     widest = tuple(
         (declaration, contract)
-        for declaration, contract in integer_returns
-        if contract is not None and contract[0] == widest_bits
+        for declaration, contract in iter(integer_returns)
+        if contract is not None and operator.eq(contract[0], widest_bits)
     )
-    if len({contract[1] for _declaration, contract in widest}) != 1:
+    if len({contract[1] for _declaration, contract in iter(widest)}) != 1:
         return None
     return widest[0][0]
 
 
 def canonical_external_function_decl(nodes: Sequence[c_ast.Node]) -> c_ast.Decl | None:
     """Join compatible external declarations without consulting generated bodies."""
+    parameter_contracts: object
+    return_declaration: object
+    _contracts: object
+    declaration: object
     declarations = tuple(
         node
-        for node in nodes
+        for node in iter(nodes)
         if isinstance(node, c_ast.Decl) and isinstance(node.type, c_ast.FuncDecl)
     )
-    if len(declarations) != len(nodes):
+    if operator.ne(len(declarations), len(nodes)):
         return None
     typed = tuple(
         (declaration, _parameter_contracts(declaration.type))
-        for declaration in declarations
+        for declaration in iter(declarations)
         if declaration.type.args is not None
     )
     if typed:
-        parameter_contracts = {contracts for _declaration, contracts in typed}
+        parameter_contracts = {contracts for _declaration, contracts in iter(typed)}
         if None in parameter_contracts or len(parameter_contracts) != 1:
             return None
 
@@ -172,7 +189,7 @@ def canonical_external_function_decl(nodes: Sequence[c_ast.Node]) -> c_ast.Decl 
     if not typed:
         return return_declaration
     for declaration, _contracts in typed:
-        if _type_contract(declaration.type.type) == _type_contract(return_declaration.type.type):
+        if operator.eq(_type_contract(declaration.type.type), _type_contract(return_declaration.type.type)):
             return declaration
     canonical = copy.deepcopy(typed[0][0])
     canonical.type.type = copy.deepcopy(return_declaration.type.type)

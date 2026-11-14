@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Retain typed segmented-global storage identities for final validation.
 
 Layer: Types/Lowering.
@@ -9,12 +10,15 @@ Do not validate final output or mutate postprocess output.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, cast
 
 from inertia.ir.core import MemSpace
+import dataclasses
 
 __all__ = [
     "GlobalStorageIdentityFact8616",
@@ -30,15 +34,15 @@ class StorageIdentityEvidenceKind8616(StrEnum):
     DIRECT_GLOBAL_UPDATE = "direct-global-update"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class GlobalStorageIdentityFact8616:
     """One segmented global object identity retained after materialization."""
 
     space: MemSpace
-    offset: int
-    width: int
-    name: str
-    evidence_addr: int
+    offset: cython.longlong
+    width: cython.longlong
+    name: object
+    evidence_addr: cython.longlong
     kind: StorageIdentityEvidenceKind8616
 
     def __post_init__(self) -> None:
@@ -60,14 +64,13 @@ class GlobalStorageIdentityFact8616:
 class _StorageIdentityFactCarrier8616(Protocol):
     """Third-party codegen field used to retain owned storage facts."""
 
-    _inertia_global_storage_identity_facts_8616: tuple[
-        GlobalStorageIdentityFact8616, ...
-    ]
+    _inertia_global_storage_identity_facts_8616: object
 
 
+@cython.ccall
 def _fact_sort_key_8616(
     fact: GlobalStorageIdentityFact8616,
-) -> tuple[str, int, int, str, int, str]:
+) -> tuple[str, cython.longlong, cython.longlong, str, cython.longlong, str]:
     """Return deterministic storage-fact ordering independent of pass order."""
     return (
         fact.space.value,
@@ -81,7 +84,7 @@ def _fact_sort_key_8616(
 
 def global_storage_identity_facts_8616(
     codegen: object,
-) -> tuple[GlobalStorageIdentityFact8616, ...]:
+) -> object:
     """Read validated storage facts from the dynamic third-party codegen boundary."""
     carrier = cast(_StorageIdentityFactCarrier8616, codegen)
     try:
@@ -89,7 +92,7 @@ def global_storage_identity_facts_8616(
     except AttributeError:
         return ()
     if not isinstance(facts, tuple) or not all(
-        isinstance(fact, GlobalStorageIdentityFact8616) for fact in facts
+        isinstance(fact, GlobalStorageIdentityFact8616) for fact in iter(facts)
     ):
         raise TypeError(
             "_inertia_global_storage_identity_facts_8616 must be a tuple "
@@ -98,10 +101,11 @@ def global_storage_identity_facts_8616(
     return facts
 
 
+@cython.ccall
 def record_global_storage_identity_fact_8616(
     codegen: object,
     fact: GlobalStorageIdentityFact8616,
-) -> bool:
+) -> cython.bint:
     """Record one typed global identity and return whether the fact was new."""
     if not isinstance(fact, GlobalStorageIdentityFact8616):
         raise TypeError("fact must be GlobalStorageIdentityFact8616")
@@ -110,6 +114,6 @@ def record_global_storage_identity_fact_8616(
         return False
     carrier = cast(_StorageIdentityFactCarrier8616, codegen)
     carrier._inertia_global_storage_identity_facts_8616 = tuple(
-        sorted((*existing, fact), key=_fact_sort_key_8616)
+        sorted(tuple(existing) + (fact,), key=_fact_sort_key_8616)
     )
     return True

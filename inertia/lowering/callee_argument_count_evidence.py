@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Aggregate binary caller evidence for one callee's logical argument count.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -26,6 +29,8 @@ from .callee_callsite_census import (
     CalleeCallsiteFact8616,
     collect_callee_callsite_census_8616,
 )
+import dataclasses
+import operator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,30 +43,30 @@ class CalleeArgumentCountVerdict8616(StrEnum):
     CONFLICT = "conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CalleeArgumentCountEvidence8616:
     """Closed evidence census for one callee's incoming logical arity."""
 
-    target_addr: int
+    target_addr: cython.longlong
     verdict: CalleeArgumentCountVerdict8616
     argument_count: int | None = None
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    callsite_addrs: tuple[int, ...] = ()
-    callsite_summaries: tuple[CallsiteSummary8616, ...] = field(
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    callsite_addrs: tuple[cython.longlong, ...] = ()
+    callsite_summaries: object = field(
         default=(),
         compare=False,
     )
-    callsite_facts: tuple[CalleeCallsiteFact8616, ...] = field(
+    callsite_facts: object = field(
         default=(),
         compare=False,
     )
 
     @property
-    def closes_census(self) -> bool:
+    def closes_census(self) -> cython.bint:
         """Return whether every discovered caller proves the same arity."""
         return (
             self.verdict is CalleeArgumentCountVerdict8616.CONSISTENT
@@ -79,13 +84,13 @@ class CalleeArgumentCountEvidence8616:
 class _ProjectSurface8616(Protocol):
     """Owned arity evidence extension on the dynamic angr project."""
 
-    _inertia_callee_argument_count_evidence_8616: dict[int, CalleeArgumentCountEvidence8616]
+    _inertia_callee_argument_count_evidence_8616: object
 
 
 class _FunctionManager8616(Protocol):
     """Third-party angr function lookup used at the evidence boundary."""
 
-    def function(self, *, addr: int, create: bool) -> object | None:
+    def function(self, *, addr: cython.longlong, create: cython.bint) -> object | None:
         """Return an existing function at one exact address."""
         ...
 
@@ -102,12 +107,14 @@ class _EvidenceProject8616(Protocol):
     kb: _KnowledgeBase8616
 
 
+@cython.ccall
 def _logical_argument_count_8616(summary: CallsiteSummary8616) -> int | None:
     """Project one summary to logical arity without splitting wide values."""
+    widths: object
     if summary.logical_arg_widths:
         return len(summary.logical_arg_widths)
     argument_count = summary.arg_count
-    if isinstance(argument_count, int) and argument_count in {0, 1} and len(summary.arg_widths) == argument_count:
+    if isinstance(argument_count, int) and argument_count in {0, 1} and operator.eq(len(summary.arg_widths), argument_count):
         return argument_count
     if not isinstance(summary.arg_count, int) or summary.arg_count < 0:
         return None
@@ -118,19 +125,24 @@ def _logical_argument_count_8616(summary: CallsiteSummary8616) -> int | None:
     return len(widths) if widths is not None else None
 
 
+@cython.ccall
 def _project_summary_through_callee_widening_8616(
     fact: CalleeCallsiteFact8616,
-    wide_offsets_by_target: dict[tuple[int, int], tuple[int, ...] | None],
+    wide_offsets_by_target: object,
 ) -> CalleeCallsiteFact8616:
     """Attach logical widths when the callee proves a closed wide stack object."""
+    function: object
+    logical_widths: object
+    summary: object
+    wide_offsets: object
     summary = fact.summary
     if summary is None or summary.logical_arg_widths:
         return fact
     physical_widths = summary.arg_widths
     if (
         not physical_widths
-        or summary.arg_count != len(physical_widths)
-        or summary.stack_cleanup != sum(physical_widths)
+        or operator.ne(summary.arg_count, len(physical_widths))
+        or operator.ne(summary.stack_cleanup, sum(physical_widths))
     ):
         return fact
     evidence_key = (id(fact.evidence_project), fact.evidence_target_addr)
@@ -173,7 +185,8 @@ def _project_summary_through_callee_widening_8616(
     )
 
 
-def _evidence_cache_8616(project: object) -> dict[int, CalleeArgumentCountEvidence8616]:
+@cython.ccall
+def _evidence_cache_8616(project: object) -> object:
     """Return the owned per-project arity evidence cache."""
     surface = cast(_ProjectSurface8616, project)
     try:
@@ -188,24 +201,29 @@ def _evidence_cache_8616(project: object) -> dict[int, CalleeArgumentCountEviden
 
 def collect_callee_argument_count_evidence_8616(
     project: object,
-    target_addr: int,
+    target_addr: cython.longlong,
 ) -> CalleeArgumentCountEvidence8616:
     """Collect and join logical argument counts from direct binary callers."""
+    argument_count: object
+    cached: object
+    count: object
+    summary: object
+    fact: object
     cache = _evidence_cache_8616(project)
     cached = cache.get(target_addr)
     if cached is not None:
         return cached
 
     census = collect_callee_callsite_census_8616(project, target_addr)
-    wide_offsets_by_target: dict[tuple[int, int], tuple[int, ...] | None] = {}
+    wide_offsets_by_target: dict[tuple[cython.longlong, cython.longlong], tuple[int, ...] | None] = {}
     facts = tuple(
         _project_summary_through_callee_widening_8616(
             fact,
             wide_offsets_by_target,
         )
-        for fact in census.facts
+        for fact in iter(census.facts)
     )
-    counts: dict[tuple[int, int], int] = {}
+    counts: dict[tuple[cython.longlong, cython.longlong], cython.longlong] = {}
     summaries: list[CallsiteSummary8616] = []
     for fact in facts:
         summary = fact.summary
@@ -236,7 +254,7 @@ def collect_callee_argument_count_evidence_8616(
         classified_fact_count=len(counts),
         materialized_count=len(counts),
         failure_count=unclassified_count + int(verdict is CalleeArgumentCountVerdict8616.CONFLICT),
-        callsite_addrs=tuple(fact.callsite_addr for fact in facts),
+        callsite_addrs=tuple(fact.callsite_addr for fact in iter(facts)),
         callsite_summaries=tuple(summaries),
         callsite_facts=facts,
     )

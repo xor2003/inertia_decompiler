@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Replay only Lowering consumers invalidated by return-value replacement.
 
 Layer: Types/lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -17,6 +20,7 @@ from .register_local_declarations import (
     RegisterLocalDeclarationResult8616,
     materialize_typed_register_locals_8616,
 )
+import dataclasses
 
 __all__ = [
     "ReturnLivenessReplayResult8616",
@@ -24,19 +28,20 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ReturnLivenessReplayResult8616:
     """Typed result of one bounded return-liveness replay."""
 
-    carrier_prune_changed: bool
+    carrier_prune_changed: cython.bint
     register_locals: RegisterLocalDeclarationResult8616
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether liveness cleanup or declaration publication changed."""
         return self.carrier_prune_changed or self.register_locals.changed
 
 
+@cython.ccall
 def replay_return_liveness_lowering_8616(
     codegen: object,
 ) -> ReturnLivenessReplayResult8616:

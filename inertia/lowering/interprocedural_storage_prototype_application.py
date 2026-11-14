@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Apply an accepted storage contract to one function prototype transaction.
 
 Layer: Types/Lowering.
@@ -11,6 +12,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 from dataclasses import dataclass
@@ -31,6 +34,8 @@ from .interprocedural_storage_prototype_types import (
     storage_prototype_with_types_8616,
 )
 from .interprocedural_storage_transaction import function_storage_resolution_8616
+import dataclasses
+import operator
 
 __all__ = [
     "FunctionStoragePrototypeApplicationResult8616",
@@ -42,8 +47,8 @@ __all__ = [
 class _CFunctionSurface8616(Protocol):
     """Owned structured-callee fields consumed and updated together."""
 
-    addr: int
-    arg_list: list[structured_c.CVariable]
+    addr: cython.longlong
+    arg_list: object
     functy: object
 
 
@@ -51,7 +56,7 @@ class _CodegenSurface8616(Protocol):
     """Owned codegen projection and declaration-refresh state."""
 
     cfunc: _CFunctionSurface8616
-    _inertia_codegen_decl_refresh_required_8616: bool
+    _inertia_codegen_decl_refresh_required_8616: cython.bint
     _inertia_storage_prototype_application_8616: FunctionStoragePrototypeApplicationResult8616
 
 
@@ -59,13 +64,13 @@ class _FunctionSurface8616(Protocol):
     """Third-party angr function prototype fields synchronized by this pass."""
 
     prototype: object
-    is_prototype_guessed: bool
+    is_prototype_guessed: cython.bint
 
 
 class _FunctionManager8616(Protocol):
     """Third-party exact-function lookup boundary."""
 
-    def function(self, *, addr: int, create: bool = False) -> object | None:
+    def function(self, *, addr: cython.longlong, create: cython.bint = False) -> object | None:
         """Return an existing function without creating one."""
         ...
 
@@ -83,6 +88,7 @@ class _ProjectSurface8616(Protocol):
     kb: _KnowledgeBase8616
 
 
+@cython.ccall
 def _record_result_8616(
     codegen: object,
     result: FunctionStoragePrototypeApplicationResult8616,
@@ -96,17 +102,17 @@ def _record_result_8616(
     return result
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _PrototypeApplyContext8616:
     """Proven surfaces needed for the atomic callee prototype update."""
 
-    function_addr: int
+    function_addr: cython.longlong
     project_surface: _ProjectSurface8616
     function_surface: _FunctionSurface8616
     cfunc: _CFunctionSurface8616
     cfunc_prototype: SimTypeFunction
     function_prototype: SimTypeFunction
-    cvars: tuple[structured_c.CVariable, ...]
+    cvars: object
     contract: FunctionStorageContract8616
 
 
@@ -115,6 +121,8 @@ def _proven_apply_context_8616(
     codegen: object,
 ) -> _PrototypeApplyContext8616 | FunctionStoragePrototypeApplicationResult8616:
     """Collect every proven surface for the atomic prototype update."""
+    function: object
+    resolution: object
     try:
         cfunc = cast(_CodegenSurface8616, codegen).cfunc
         function_addr = cfunc.addr
@@ -175,7 +183,7 @@ def _proven_apply_context_8616(
     if not isinstance(function_prototype, SimTypeFunction):
         function_prototype = cfunc_prototype
     cvars = tuple(cfunc.arg_list or ())
-    if not all(isinstance(item, structured_c.CVariable) for item in cvars):
+    if not all(isinstance(item, structured_c.CVariable) for item in iter(cvars)):
         return _record_result_8616(
             codegen,
             FunctionStoragePrototypeApplicationResult8616(
@@ -195,14 +203,18 @@ def _proven_apply_context_8616(
     )
 
 
+@cython.ccall
 def _mutate_prototype_surfaces_8616(
     project: object,
     ctx: _PrototypeApplyContext8616,
-    argument_types: tuple[SimType, ...],
+    argument_types: object,
     cfunc_return: SimType,
     function_return: SimType,
-) -> tuple[SimTypeFunction, bool]:
+) -> tuple[SimTypeFunction, cython.bint]:
     """Update cvar types, stack sizes, prototypes, and the replay snapshot."""
+    argument_type: object
+    cvar: object
+    slot: object
     new_cfunc_prototype = storage_prototype_with_types_8616(
         ctx.cfunc_prototype,
         argument_types,
@@ -222,17 +234,17 @@ def _mutate_prototype_surfaces_8616(
         argument_types,
         strict=True,
     ):
-        if cvar.variable_type != argument_type:
+        if operator.ne(cvar.variable_type, argument_type):
             cvar.variable_type = argument_type
             changed = True
         variable = cast(SimStackVariable, cvar.variable)
-        if variable.size != slot.width:
+        if operator.ne(variable.size, slot.width):
             variable.size = slot.width
             changed = True
-    if ctx.cfunc.functy != new_cfunc_prototype:
+    if operator.ne(ctx.cfunc.functy, new_cfunc_prototype):
         ctx.cfunc.functy = new_cfunc_prototype
         changed = True
-    if ctx.function_surface.prototype != new_function_prototype:
+    if operator.ne(ctx.function_surface.prototype, new_function_prototype):
         ctx.function_surface.prototype = new_function_prototype
         changed = True
     if ctx.function_surface.is_prototype_guessed:
@@ -247,6 +259,7 @@ def _mutate_prototype_surfaces_8616(
     return new_cfunc_prototype, changed
 
 
+@cython.ccall
 def apply_accepted_function_storage_prototype_8616(
     project: object,
     codegen: object,

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed caller-target contracts for pointer-parameter memory outputs.
 
 Layer: Types/Lowering.
@@ -11,6 +12,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -31,6 +34,8 @@ from .pointer_parameter_output_contracts import (
     PointerParameterOutputContract8616,
     PointerParameterOutputEvidence8616,
 )
+import dataclasses
+import operator
 
 
 class PointerParameterCallerTargetFailure8616(StrEnum):
@@ -48,65 +53,64 @@ class PointerParameterCallerTargetFailure8616(StrEnum):
     PUBLICATION_CONFLICT = "publication_conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PointerParameterCallerTarget8616:
     """One exact segmented caller memory target for a callee output view."""
 
-    callee_addr: int
-    caller_addr: int
-    callsite_addr: int
-    logical_index: int
+    callee_addr: cython.longlong
+    caller_addr: cython.longlong
+    callsite_addr: cython.longlong
+    logical_index: cython.longlong
     segment: MemSpace
     near_offset: ScalarAffineExpression8616
-    relative_offset: int
-    width: int
-    definitions: tuple[StorageReachingDefinition8616, ...]
+    relative_offset: cython.longlong
+    width: cython.longlong
+    definitions: object
     use: StorageUseEvidence8616
     source: PointerParameterOutputContract8616
 
     @property
-    def target_base_offset(self) -> int:
+    def target_base_offset(self) -> cython.longlong:
         """Return the constant target component under near-offset wrapping."""
         mask = (1 << (self.near_offset.width * 8)) - 1
         return int((self.near_offset.constant + self.relative_offset) & mask)
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether caller and callee evidence agree exactly."""
         view = self.source.output_view
         return bool(
             self.callee_addr >= 0
             and self.caller_addr >= 0
             and self.callsite_addr >= 0
-            and self.logical_index == self.source.logical_index
+            and operator.eq(self.logical_index, self.source.logical_index)
             and self.source.complete
             and self.segment in {MemSpace.DS, MemSpace.ES}
             and self.segment is view.segment
             and self.near_offset.complete
-            and self.near_offset.width == self.source.argument_storage.size
-            and self.relative_offset == view.relative_offset
+            and operator.eq(self.near_offset.width, self.source.argument_storage.size)
+            and operator.eq(self.relative_offset, view.relative_offset)
             and self.width == view.width > 0
             and self.definitions
-            and all(item.is_complete for item in self.definitions)
-            and sum(item.value.size for item in self.definitions)
-            == self.near_offset.width
+            and all(item.is_complete for item in iter(self.definitions))
+            and operator.eq(sum(item.value.size for item in iter(self.definitions)), self.near_offset.width)
             and self.use.is_complete
-            and self.use.callsite_addr == self.callsite_addr
+            and operator.eq(self.use.callsite_addr, self.callsite_addr)
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PointerParameterCallerTargetStats8616:
     """Closed accounting for all expected caller/output projections."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every expected projection became one target."""
         return bool(
             self.raw_fact_count
@@ -117,12 +121,12 @@ class PointerParameterCallerTargetStats8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PointerParameterCallerTargetEvidence8616:
     """Complete caller targets or one atomic location-bearing refusal."""
 
-    callee_addr: int
-    facts: tuple[PointerParameterCallerTarget8616, ...]
+    callee_addr: cython.longlong
+    facts: object
     failure: PointerParameterCallerTargetFailure8616 | None
     stats: PointerParameterCallerTargetStats8616
     outputs: PointerParameterOutputEvidence8616
@@ -134,7 +138,7 @@ class PointerParameterCallerTargetEvidence8616:
     ssa_failure: FunctionSSAArtifactFailure8616 | None = None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether the complete census and all targets close."""
         if self.outputs.complete and not self.outputs.facts:
             return bool(
@@ -150,14 +154,13 @@ class PointerParameterCallerTargetEvidence8616:
             and self.census.complete
             and self.stats.complete
             and self.stats.raw_fact_count == expected == len(self.facts)
-            and all(fact.complete for fact in self.facts)
-            and len(
+            and all(fact.complete for fact in iter(self.facts))
+            and operator.eq(len(
                 {
                     (fact.caller_addr, fact.callsite_addr, fact.logical_index)
-                    for fact in self.facts
+                    for fact in iter(self.facts)
                 }
-            )
-            == expected
+            ), expected)
         )
 
 

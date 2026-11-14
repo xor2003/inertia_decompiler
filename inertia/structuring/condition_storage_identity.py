@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Compare structured conditions through typed memory storage identities.
 
 Layer: Structuring.
@@ -9,6 +10,8 @@ Do not perform alias-state ownership, widening, type/materialization recovery, r
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -22,17 +25,20 @@ from angr.sim_variable import SimMemoryVariable, SimStackVariable
 
 from inertia.ir.core import MemSpace
 from inertia.widening.segmented_load_identity import segmented_load_identity_8616
+import dataclasses
+import operator
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _MemoryOperandIdentity8616:
     """Exact segmented storage selected by one condition operand."""
 
     space: MemSpace
-    offset: int
-    width: int
+    offset: cython.longlong
+    width: cython.longlong
 
 
+@cython.ccall
 def _strip_casts_8616(node: object) -> object:
     """Remove representation-only casts from one structured operand."""
     while isinstance(node, CTypeCast):
@@ -40,10 +46,12 @@ def _strip_casts_8616(node: object) -> object:
     return node
 
 
+@cython.ccall
 def _memory_operand_identity_8616(
     node: object,
 ) -> _MemoryOperandIdentity8616 | None:
     """Return exact segmented storage without inferring an unknown segment."""
+    identity: object
     node = _strip_casts_8616(node)
     identity = segmented_load_identity_8616(node)
     if identity is not None:
@@ -77,20 +85,25 @@ def _memory_operand_identity_8616(
     )
 
 
+@cython.ccall
 def same_condition_storage_identity_8616(
     left: object,
     right: object,
     *,
-    same_expression: Callable[[object, object], bool],
-) -> bool:
+    same_expression: Callable[[object, object], cython.bint],
+) -> cython.bint:
     """Match comparisons whose corresponding operands select exact storage."""
+    left_identity: object
+    right_identity: object
+    left_operand: object
+    right_operand: object
     left = _strip_casts_8616(left)
     right = _strip_casts_8616(right)
     comparison_ops = {"CmpEQ", "CmpNE", "CmpLT", "CmpLE", "CmpGT", "CmpGE"}
     if (
         not isinstance(left, CBinaryOp)
         or not isinstance(right, CBinaryOp)
-        or left.op != right.op
+        or operator.ne(left.op, right.op)
         or left.op not in comparison_ops
     ):
         return False
@@ -101,7 +114,7 @@ def same_condition_storage_identity_8616(
         left_identity = _memory_operand_identity_8616(left_operand)
         right_identity = _memory_operand_identity_8616(right_operand)
         if left_identity is not None or right_identity is not None:
-            if left_identity != right_identity:
+            if operator.ne(left_identity, right_identity):
                 return False
         elif not same_expression(left_operand, right_operand):
             return False

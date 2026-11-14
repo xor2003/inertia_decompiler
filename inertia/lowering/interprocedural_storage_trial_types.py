@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify input trial types and slice exact callee storage pieces.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, replace
 
@@ -45,6 +48,8 @@ from .interprocedural_storage_reaching_contracts import (
     PhysicalCallArgumentPiece8616,
 )
 from .modular_argument_type_facts import ModularArgumentTypeFacts8616
+import dataclasses
+import operator
 
 __all__ = [
     "InputArgumentTypeClassification8616",
@@ -54,7 +59,7 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class InputArgumentTypeClassification8616:
     """Signedness and value class proven for one logical input."""
 
@@ -70,8 +75,8 @@ def _signedness_for_storage_8616(
     """Return one exact condition-proven signedness for a callee stack slice."""
     matching = tuple(
         fact
-        for fact in facts.facts
-        if fact.offset == storage.offset and fact.size == storage.size
+        for fact in iter(facts.facts)
+        if operator.eq(fact.offset, storage.offset) and operator.eq(fact.size, storage.size)
     )
     if len(matching) != 1:
         return None
@@ -82,21 +87,23 @@ def _signedness_for_storage_8616(
     }[matching[0].signedness]
 
 
+@cython.ccall
 def _logical_summary_class_8616(
     summary: CallsiteSummary8616,
-    logical_index: int,
-    argument_count: int,
-) -> tuple[CallsiteArgumentClass8616 | None, bool]:
+    logical_index: cython.longlong,
+    argument_count: cython.longlong,
+) -> tuple[CallsiteArgumentClass8616 | None, cython.bint]:
     """Return an independently populated logical class or malformed-shape flag."""
     classes = summary.logical_arg_classes
     if not classes:
         return None, False
-    if len(classes) != argument_count:
+    if operator.ne(len(classes), argument_count):
         return None, True
     return classes[logical_index], False
 
 
-def _source_is_bp_address_8616(argument: PhysicalCallArgument8616) -> bool:
+@cython.ccall
+def _source_is_bp_address_8616(argument: PhysicalCallArgument8616) -> cython.bint:
     """Return whether structured call evidence proves an address-of source."""
     if len(argument.pieces) != 1 or not argument.pieces[0].source:
         return False
@@ -108,10 +115,10 @@ def _source_is_bp_address_8616(argument: PhysicalCallArgument8616) -> bool:
 
 
 def _pointer_evidence_for_storage_8616(
-    evidence: CalleePointerArgumentEvidence8616 | None,
+    evidence: object,
     storage: IRAddress,
-    logical_index: int,
-) -> tuple[bool, bool]:
+    logical_index: cython.longlong,
+) -> tuple[cython.bint, cython.bint]:
     """Return exact-pointer and ambiguous-pointer flags for one stack slot."""
     if evidence is None:
         return False, False
@@ -121,15 +128,16 @@ def _pointer_evidence_for_storage_8616(
         evidence.ambiguous_displaced_stack_offsets
         + evidence.ambiguous_indexed_stack_offsets
     )
-    ambiguous = any(start <= offset < end for offset in ambiguous_offsets)
+    ambiguous = any(start <= offset < end for offset in iter(ambiguous_offsets))
     proven = logical_index in evidence.pointer_argument_indices or start in evidence.pointer_stack_offsets
     return proven, ambiguous
 
 
+@cython.ccall
 def _modular_sign_insensitive_proof_8616(
-    modular_facts: ModularArgumentTypeFacts8616 | None,
+    modular_facts: object,
     storage: IRAddress,
-) -> bool:
+) -> cython.bint:
     """Adopt one callee-bound modular word proof only for this exact slot.
 
     A bare PROVEN verdict is not identity: the retained result must be
@@ -138,20 +146,22 @@ def _modular_sign_insensitive_proof_8616(
     if modular_facts is None:
         return False
     proof = modular_facts.proof_for_8616(storage)
-    return bool(proof.complete and proof.storage == storage)
+    return bool(proof.complete and operator.eq(proof.storage, storage))
 
 
+@cython.ccall
 def classify_input_argument_8616(
     summary: CallsiteSummary8616,
     physical: PhysicalCallArgument8616,
     storage: IRAddress,
-    logical_index: int,
-    argument_count: int,
+    logical_index: cython.longlong,
+    argument_count: cython.longlong,
     signedness_facts: ConditionArgumentFactsResult8616,
     pointer_evidence: CalleePointerArgumentEvidence8616 | None,
     modular_facts: ModularArgumentTypeFacts8616 | None = None,
 ) -> InputArgumentTypeClassification8616:
     """Join independent type-class evidence and refuse unknown interpretations."""
+    signedness: object
     summary_class, malformed_classes = _logical_summary_class_8616(
         summary,
         logical_index,
@@ -211,8 +221,10 @@ def classify_input_argument_8616(
     )
 
 
-def _definition_width_8616(definition: StorageReachingDefinition8616) -> int:
+@cython.ccall
+def _definition_width_8616(definition: StorageReachingDefinition8616) -> cython.longlong:
     """Return one exact SSA source-piece width."""
+    source_storage: object
     source_storage = definition.source_storage
     if source_storage is not None:
         source_width = source_storage.width
@@ -222,10 +234,10 @@ def _definition_width_8616(definition: StorageReachingDefinition8616) -> int:
 
 
 def logical_source_definitions_failure_8616(
-    logical_memory: IRLogicalMemoryArtifact8616 | None,
-    function_addr: int,
+    logical_memory: object,
+    function_addr: cython.longlong,
     physical: PhysicalCallArgumentPiece8616,
-    definitions: tuple[StorageReachingDefinition8616, ...],
+    definitions: object,
 ) -> CallArgumentDefinitionFailure8616 | None:
     """Verify memory-source definitions against one authoritative logical read."""
     source = physical.source
@@ -242,30 +254,30 @@ def logical_source_definitions_failure_8616(
         return None
     if (
         logical_memory is None
-        or logical_memory.function_addr != function_addr
+        or operator.ne(logical_memory.function_addr, function_addr)
         or not logical_memory.closed
     ):
         return CallArgumentDefinitionFailure8616.SOURCE_DEFINITION_NOT_FOUND
     matches = tuple(
         access
-        for access in logical_memory.accesses
+        for access in iter(logical_memory.accesses)
         if access.kind is IRMemoryAccessKind8616.READ
-        and access.key.insn_addr == physical.push_addr
-        and access.address.size == physical.width
+        and operator.eq(access.key.insn_addr, physical.push_addr)
+        and operator.eq(access.address.size, physical.width)
         and (
             (
                 is_bp_value
                 and len(source) in {2, 3}
                 and access.address.space is MemSpace.SS
                 and access.address.base == ("bp",)
-                and access.address.offset == source[1]
+                and operator.eq(access.address.offset, source[1])
             )
             or (
                 is_global_value
                 and len(source) == 3
                 and access.address.space in {MemSpace.DS, MemSpace.ES}
                 and not access.address.base
-                and access.address.offset == source[1]
+                and operator.eq(access.address.offset, source[1])
             )
         )
     )
@@ -275,9 +287,9 @@ def logical_source_definitions_failure_8616(
         return CallArgumentDefinitionFailure8616.SOURCE_DEFINITION_CONFLICT
     slices = matches[0].execution_slices
     definition_sites = tuple(
-        (definition.block_addr, definition.instr_index) for definition in definitions
+        (definition.block_addr, definition.instr_index) for definition in iter(definitions)
     )
-    slice_sites = tuple((item.block_addr, item.instr_index) for item in slices)
+    slice_sites = tuple((item.block_addr, item.instr_index) for item in iter(slices))
     if definition_sites != slice_sites:
         return CallArgumentDefinitionFailure8616.SOURCE_DEFINITION_CONFLICT
     return None
@@ -285,11 +297,12 @@ def logical_source_definitions_failure_8616(
 
 def callee_storage_pieces_8616(
     storage: IRAddress,
-    definitions: tuple[StorageReachingDefinition8616, ...],
-) -> tuple[StorageIdentity8616, ...] | None:
+    definitions: object,
+) -> object:
     """Slice one callee stack slot to match exact reaching-definition pieces."""
-    widths = tuple(_definition_width_8616(definition) for definition in definitions)
-    if not widths or any(width <= 0 for width in widths) or sum(widths) != storage.size:
+    width: object
+    widths = tuple(_definition_width_8616(definition) for definition in iter(definitions))
+    if not widths or any(width <= 0 for width in iter(widths)) or operator.ne(sum(widths), storage.size):
         return None
     offset = storage.offset
     pieces: list[StorageIdentity8616] = []

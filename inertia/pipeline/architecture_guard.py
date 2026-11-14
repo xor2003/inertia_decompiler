@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Architecture enforcement: block legacy paths in normal runs, gate final C emission.
 
 Layer: Pipeline governance.
@@ -17,6 +18,10 @@ This module is the single chokepoint that enforces these rules.
 """
 
 from __future__ import annotations
+import typing
+import cython
+import dataclasses
+import builtins
 
 __all__ = [
     "FORBIDDEN_NORMAL_PATHS",
@@ -46,14 +51,16 @@ class _ArchitectureGuardProjectBoundary(Protocol):
     _inertia_debug_allow_legacy_paths: object
 
 
-def _legacy_allowed(project: object) -> bool:
+@cython.ccall
+def _legacy_allowed(project: object) -> cython.bint:
     try:
         return bool(cast(_ArchitectureGuardProjectBoundary, project)._inertia_debug_allow_legacy_paths)
     except AttributeError:
         return False
 
 
-def assert_no_legacy_path_8616(name: str, *, project: object = None) -> None:
+@cython.ccall
+def assert_no_legacy_path_8616(name: object, *, project: object = None) -> None:
     """Raise when a forbidden legacy semantic path is used in a normal run."""
     if _legacy_allowed(project):
         return
@@ -82,26 +89,28 @@ _UNARY_NOT_SHIFT_PRECEDENCE_RE = re.compile(
 )
 
 
-def _strip_c_comments_8616(c_text: str) -> str:
+def _strip_c_comments_8616(c_text: object) -> str:
     c_text = re.sub(r"/\*.*?\*/", "", c_text, flags=re.DOTALL)
-    return "\n".join(line for line in c_text.splitlines() if not line.lstrip().startswith("///"))
+    return "\n".join(line for line in builtins.iter(c_text.splitlines()) if not line.lstrip().startswith("///"))
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _ReturnDepthScan8616:
     """Brace-depth state for the post-return call emission scan."""
 
-    returned_depths: set[int] = field(default_factory=set)
-    pending_single_stmt_control_depths: set[int] = field(default_factory=set)
-    depth: int = 0
+    returned_depths: object = field(default_factory=set)
+    pending_single_stmt_control_depths: object = field(default_factory=set)
+    depth: cython.longlong = 0
 
+    @cython.ccall
     def process_line(
         self,
-        raw_line: str,
+        raw_line: object,
         call_re: re.Pattern[str],
-        ignored_calls: frozenset[str],
-    ) -> bool:
+        ignored_calls: object,
+    ) -> cython.bint:
         """Return whether one line emits a call after a same-depth return."""
+        match: object
         stripped = raw_line.strip()
         if not stripped:
             return False
@@ -118,11 +127,12 @@ class _ReturnDepthScan8616:
         self._advance_depth(raw_line)
         return False
 
+    @cython.ccall
     def _update_control_state(
         self,
-        stripped: str,
-        line_depth: int,
-        controlled_by_single_stmt: bool,
+        stripped: object,
+        line_depth: cython.longlong,
+        controlled_by_single_stmt: cython.bint,
     ) -> None:
         """Track return markers and single-statement control parents."""
         if line_depth > 0 and not controlled_by_single_stmt and re.match(r"^return\b[^;]*;", stripped):
@@ -138,29 +148,32 @@ class _ReturnDepthScan8616:
         ):
             self.pending_single_stmt_control_depths.add(line_depth)
 
-    def _advance_depth(self, raw_line: str) -> None:
+    @cython.ccall
+    def _advance_depth(self, raw_line: object) -> None:
         """Apply the line's brace delta and prune stale tracked depths."""
         self.depth += raw_line.count("{") - raw_line.count("}")
         if self.depth < 0:
             self.depth = 0
         if self.returned_depths:
             self.returned_depths = {
-                returned_depth for returned_depth in self.returned_depths if returned_depth <= self.depth
+                returned_depth for returned_depth in iter(self.returned_depths) if returned_depth <= self.depth
             }
         if self.pending_single_stmt_control_depths:
             self.pending_single_stmt_control_depths = {
                 pending_depth
-                for pending_depth in self.pending_single_stmt_control_depths
+                for pending_depth in iter(self.pending_single_stmt_control_depths)
                 if pending_depth <= self.depth
             }
 
 
-def final_c_has_unreachable_call_after_return_8616(c_text: str) -> bool:
+@cython.ccall
+def final_c_has_unreachable_call_after_return_8616(c_text: object) -> cython.bint:
     """Detect same-block call statements emitted after a terminal return.
 
     This is a final emission invariant, not a recovery pass.  It prevents stale
     rendered text from bypassing the structured AST that validation inspected.
     """
+    raw_line: object
     if not isinstance(c_text, str) or not c_text.strip():
         return False
 
@@ -176,8 +189,10 @@ def final_c_has_unreachable_call_after_return_8616(c_text: str) -> bool:
     return False
 
 
-def assert_final_c_quality_8616(c_text: str, *, function_addr: int | None = None) -> None:
+@cython.ccall
+def assert_final_c_quality_8616(c_text: object, *, function_addr: int | None = None) -> None:
     """Raise when final emitted C violates non-negotiable architecture invariants."""
+    token: object
     if os.environ.get("INERTIA_DEBUG_ALLOW_FORBIDDEN_FINAL_C"):
         return
     stripped_text = _strip_c_comments_8616(c_text)

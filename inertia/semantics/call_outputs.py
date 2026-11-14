@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize exact used call returns as typed register definitions.
 
 Layer: Semantics.
@@ -11,6 +12,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import Counter
 from collections.abc import Mapping
@@ -29,20 +32,23 @@ from .call_output_contracts import (
     CallOutputVerdict8616,
 )
 from .call_register_role_contracts import CallRegisterRolesArtifact8616
+import dataclasses
+import operator
+import builtins
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallOutputArtifact8616:
     """Semantics-enriched IR plus one output outcome for every CALL."""
 
     function: IRFunctionArtifact
-    facts: tuple[CallOutputFact8616, ...]
+    facts: object
     stats: CallOutputStats8616
     register_roles: CallRegisterRolesArtifact8616 | None = None
     source_function: IRFunctionArtifact | None = None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every CALL output decision is positively proven.
 
         Attached register-role evidence must authenticate the exact output
@@ -69,11 +75,11 @@ class CallOutputArtifact8616:
                     "target_addr": fact.target_addr,
                     "return_block_addr": fact.return_block_addr,
                     "shape": None if fact.shape is None else fact.shape.value,
-                    "outputs": [output.to_dict() for output in fact.outputs],
+                    "outputs": [output.to_dict() for output in iter(fact.outputs)],
                     "verdict": fact.verdict.value,
                     "failure": None if fact.failure is None else fact.failure.value,
                 }
-                for fact in self.facts
+                for fact in iter(self.facts)
             ],
             "register_roles": (
                 None
@@ -84,37 +90,39 @@ class CallOutputArtifact8616:
         }
 
 
+@cython.ccall
 def _roles_bind_outputs_8616(
     roles: CallRegisterRolesArtifact8616,
     outputs: CallOutputArtifact8616,
-) -> bool:
+) -> cython.bint:
     """Return whether role evidence authenticates this exact output snapshot."""
-    if roles.function_addr != outputs.function.function_addr:
+    if operator.ne(roles.function_addr, outputs.function.function_addr):
         return False
     if not roles.authenticates_output_facts(outputs.facts):
         return False
-    if roles.output_function is not None and roles.output_function != outputs.function:
+    if roles.output_function is not None and operator.ne(roles.output_function, outputs.function):
         return False
     return not (
         roles.source_function is not None
         and outputs.source_function is not None
-        and roles.source_function != outputs.source_function
+        and operator.ne(roles.source_function, outputs.source_function)
     )
 
 
+@cython.ccall
 def _shape_8616(summary: CallsiteSummary8616) -> CallOutputShape8616 | None:
     """Normalize the authoritative summary shape without widening by name."""
-    if summary.return_shape == CallOutputShape8616.AX.value:
+    if operator.eq(summary.return_shape, CallOutputShape8616.AX.value):
         return CallOutputShape8616.AX
-    if summary.return_shape == CallOutputShape8616.DX_AX.value:
+    if operator.eq(summary.return_shape, CallOutputShape8616.DX_AX.value):
         return CallOutputShape8616.DX_AX
     return None
 
 
 def _output_values_8616(
     shape: CallOutputShape8616,
-    callsite_addr: int,
-    target_addr: int,
+    callsite_addr: cython.longlong,
+    target_addr: cython.longlong,
 ) -> tuple[IRValue, ...]:
     """Return exact register slices defined by one used call result."""
     layout = CALL_OUTPUT_SHAPE_REGISTERS_8616[shape]
@@ -130,15 +138,16 @@ def _output_values_8616(
                 shape=shape,
             ),
         )
-        for name, width in layout
+        for name, width in iter(layout)
     )
 
 
+@cython.ccall
 def _refusal_8616(
-    block_addr: int,
-    instr_index: int,
+    block_addr: cython.longlong,
+    instr_index: cython.longlong,
     callsite_addr: int | None,
-    summary: CallsiteSummary8616 | None,
+    summary: object,
     failure: CallOutputFailure8616,
 ) -> CallOutputFact8616:
     """Retain one conservative call-output refusal."""
@@ -155,14 +164,16 @@ def _refusal_8616(
     )
 
 
+@cython.ccall
 def _call_summary_gate_8616(
     block: IRBlock,
-    instr_index: int,
+    instr_index: cython.longlong,
     instruction: IRInstr,
-    summaries: Mapping[int, CallsiteSummary8616],
-    address_counts: Counter[int],
+    summaries: Mapping[cython.longlong, CallsiteSummary8616],
+    address_counts: Counter[cython.longlong],
 ) -> CallsiteSummary8616 | CallOutputFact8616:
     """Return the proven callsite summary or its early refusal fact."""
+    summary: object
     summary = summaries.get(instruction.addr) if instruction.addr is not None else None
     if instruction.addr is None:
         return _refusal_8616(
@@ -215,15 +226,17 @@ def _call_summary_gate_8616(
     return summary
 
 
+@cython.ccall
 def _call_shape_gate_8616(
     block: IRBlock,
-    instr_index: int,
+    instr_index: cython.longlong,
     instruction: IRInstr,
     summary: CallsiteSummary8616,
-    blocks: Mapping[int, IRBlock],
-    predecessors: Mapping[int, set[int]],
+    blocks: Mapping[cython.longlong, IRBlock],
+    predecessors: Mapping[cython.longlong, set[cython.longlong]],
 ) -> CallOutputShape8616 | CallOutputFact8616:
     """Return the proven output shape, a no-output fact, or a refusal fact."""
+    shape: object
     if summary.return_used is False:
         return CallOutputFact8616(
             block.addr,
@@ -245,7 +258,7 @@ def _call_shape_gate_8616(
             summary,
             CallOutputFailure8616.RETURN_SHAPE_UNKNOWN,
         )
-    if instr_index != len(block.instrs) - 1:
+    if operator.ne(instr_index, len(block.instrs) - 1):
         return _refusal_8616(
             block.addr,
             instr_index,
@@ -261,7 +274,7 @@ def _call_shape_gate_8616(
             summary,
             CallOutputFailure8616.RETURN_BLOCK_MISSING,
         )
-    if block.successor_addrs != (summary.return_addr,):
+    if operator.ne(block.successor_addrs, (summary.return_addr,)):
         return _refusal_8616(
             block.addr,
             instr_index,
@@ -269,7 +282,7 @@ def _call_shape_gate_8616(
             summary,
             CallOutputFailure8616.RETURN_EDGE_MISMATCH,
         )
-    if predecessors[summary.return_addr] != {block.addr}:
+    if operator.ne(predecessors[summary.return_addr], {block.addr}):
         return _refusal_8616(
             block.addr,
             instr_index,
@@ -282,25 +295,29 @@ def _call_shape_gate_8616(
 
 def materialize_call_outputs_8616(
     artifact: IRFunctionArtifact,
-    summaries: Mapping[int, CallsiteSummary8616],
+    summaries: Mapping[cython.longlong, CallsiteSummary8616],
 ) -> CallOutputArtifact8616:
     """Insert exact used call outputs at their uniquely dominated return blocks."""
-    blocks = {block.addr: block for block in artifact.blocks}
-    predecessors: dict[int, set[int]] = {address: set() for address in blocks}
+    block: object
+    instr_index: object
+    instruction: object
+    successor: object
+    blocks = {block.addr: block for block in iter(artifact.blocks)}
+    predecessors: dict[cython.longlong, set[cython.longlong]] = {address: set() for address in iter(blocks)}
     for block in artifact.blocks:
         for successor in block.successor_addrs:
             if successor in predecessors:
                 predecessors[successor].add(block.addr)
     calls = tuple(
         (block, index, instruction)
-        for block in artifact.blocks
-        for index, instruction in enumerate(block.instrs)
+        for block in iter(artifact.blocks)
+        for index, instruction in builtins.iter(enumerate(block.instrs))
         if instruction.op == "CALL"
     )
     address_counts = Counter(
-        instruction.addr for _block, _index, instruction in calls if instruction.addr is not None
+        instruction.addr for _block, _index, instruction in iter(calls) if instruction.addr is not None
     )
-    injections: dict[int, tuple[IRInstr, ...]] = {}
+    injections: dict[cython.longlong, tuple[IRInstr, ...]] = {}
     facts: list[CallOutputFact8616] = []
     for block, instr_index, instruction in calls:
         gated_summary = _call_summary_gate_8616(
@@ -338,7 +355,7 @@ def materialize_call_outputs_8616(
                 size=output.size,
                 addr=instruction.addr,
             )
-            for output in outputs
+            for output in iter(outputs)
         )
         facts.append(
             CallOutputFact8616(
@@ -356,18 +373,18 @@ def materialize_call_outputs_8616(
     rewritten_blocks = tuple(
         IRBlock(
             block.addr,
-            (*injections.get(block.addr, ()), *block.instrs),
+            tuple(injections.get(block.addr, ())) + tuple(block.instrs),
             block.refusals,
             block.successor_addrs,
         )
-        for block in artifact.blocks
+        for block in iter(artifact.blocks)
     )
     logical_memory = rebase_logical_memory_prefix_insertions_8616(
         artifact.logical_memory,
-        prefix_lengths={address: len(items) for address, items in injections.items()},
+        prefix_lengths={address: len(items) for address, items in builtins.iter(injections.items())},
         rewritten_blocks=rewritten_blocks,
     )
-    failure_count = sum(fact.failure is not None for fact in facts)
+    failure_count = sum(fact.failure is not None for fact in iter(facts))
     stats = CallOutputStats8616(
         raw_fact_count=len(calls),
         normalized_fact_count=len(facts),

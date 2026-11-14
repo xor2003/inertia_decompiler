@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Recover bounded global extents from the complete Alias program census.
 
 Layer: Widening.
@@ -8,6 +9,8 @@ Do not join values from rendered text, cosmetic shape, postprocess, or CLI/repor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -41,6 +44,9 @@ from .indexed_global_object_ranges import (
     BoundedGlobalObjectRangeStats8616,
     indexed_global_access_key_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "ProjectBoundedGlobalObjectRangeEvidence8616",
@@ -65,19 +71,19 @@ class ProjectBoundedGlobalObjectRangeSourceStatus8616(StrEnum):
     FUNCTION_REFUSALS = "function_refusals"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ProjectBoundedGlobalObjectRangeSource8616:
     """Reduced Alias census required to validate final bounded ranges."""
 
     kind: ProjectBoundedGlobalObjectRangeSourceKind8616
     status: ProjectBoundedGlobalObjectRangeSourceStatus8616
-    selected_function_count: int
-    materialized_function_count: int
-    refused_function_count: int
-    closed_function_range_count: int
+    selected_function_count: cython.longlong
+    materialized_function_count: cython.longlong
+    refused_function_count: cython.longlong
+    closed_function_range_count: cython.longlong
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every selected function and range artifact is counted."""
         counts = (
             self.selected_function_count,
@@ -91,35 +97,34 @@ class ProjectBoundedGlobalObjectRangeSource8616:
             else ProjectBoundedGlobalObjectRangeSourceStatus8616.COMPLETE
         )
         return bool(
-            all(count >= 0 for count in counts)
-            and self.selected_function_count
-            == self.materialized_function_count + self.refused_function_count
-            and self.closed_function_range_count == self.materialized_function_count
+            all(count >= 0 for count in iter(counts))
+            and operator.eq(self.selected_function_count, self.materialized_function_count + self.refused_function_count)
+            and operator.eq(self.closed_function_range_count, self.materialized_function_count)
             and self.status is expected_status
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ProjectBoundedGlobalObjectRangeEvidence8616:
     """Whole-program accepted ranges and atomic object refusals."""
 
-    ranges: tuple[BoundedGlobalObjectRange8616, ...]
-    refusals: tuple[BoundedGlobalObjectRangeRefusal8616, ...]
+    ranges: object
+    refusals: object
     stats: BoundedGlobalObjectRangeStats8616
     source: ProjectBoundedGlobalObjectRangeSource8616
     layouts: GlobalObjectLayoutEvidence8616
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether the complete program census has one object outcome."""
         return bool(
             self.source.closed
             and self.layouts.closed
             and self.stats.closed
-            and len(self.ranges) == self.stats.materialized_count
-            and len(self.refusals) == self.stats.failure_count
-            and all(item.complete for item in self.ranges)
-            and all(item.complete for item in self.refusals)
+            and operator.eq(len(self.ranges), self.stats.materialized_count)
+            and operator.eq(len(self.refusals), self.stats.failure_count)
+            and all(item.complete for item in iter(self.ranges))
+            and all(item.complete for item in iter(self.refusals))
             and (
                 self.source.status
                 is ProjectBoundedGlobalObjectRangeSourceStatus8616.COMPLETE
@@ -142,7 +147,7 @@ def _program_source_8616(
         program.stats.raw_fact_count,
         program.stats.materialized_count,
         program.stats.failure_count,
-        sum(function.ranges.closed for function in program.functions),
+        sum(function.ranges.closed for function in iter(program.functions)),
     )
     if not source.closed:
         raise ValueError("project bounded-range source census did not close")
@@ -152,20 +157,18 @@ def _program_source_8616(
 def _classify_access_8616(
     access: IndexedAliasAccessFact8616,
     layouts: GlobalObjectLayoutEvidence8616,
-    accesses: dict[IndexedGlobalObjectKey8616, list[IndexedAliasAccessFact8616]],
-    failures: dict[
-        IndexedGlobalObjectKey8616,
-        BoundedGlobalObjectRangeFailureKind8616,
-    ],
+    accesses: object,
+    failures: object,
 ) -> None:
     """Group one global-indexed access by layout keys or record its failure."""
+    key: object
     if access.role is not IndexedAliasAccessRole8616.GLOBAL_INDEXED:
         return
     matches = matching_indexed_global_layouts_8616(access, layouts)
     keys = (
         tuple(
             (layout.address.space, layout.address.offset)
-            for layout in matches
+            for layout in iter(matches)
         )
         if matches
         else (
@@ -190,6 +193,7 @@ def _classify_access_8616(
             failures[key] = failure
 
 
+@cython.ccall
 def _collect_program_inputs_8616(
     program: IndexedAliasProgramEvidence8616,
     layouts: GlobalObjectLayoutEvidence8616,
@@ -200,11 +204,15 @@ def _collect_program_inputs_8616(
     dict[IndexedGlobalObjectKey8616, BoundedGlobalObjectRangeFailureKind8616],
 ]:
     """Group all function inputs by exact project-wide segmented layout."""
+    access: object
+    fact: object
+    function: object
+    key: object
     accesses: dict[IndexedGlobalObjectKey8616, list[IndexedAliasAccessFact8616]] = {}
     ranges: dict[IndexedGlobalObjectKey8616, list[IndexedAliasLoopRangeFact8616]] = {}
     layout_by_key = {
         (layout.address.space, layout.address.offset): layout
-        for layout in layouts.layouts
+        for layout in iter(layouts.layouts)
     }
     failures: dict[
         IndexedGlobalObjectKey8616,
@@ -231,8 +239,8 @@ def _program_copies_8616(
     """Return every accepted Alias copy from the complete function census."""
     return tuple(
         copy
-        for function in program.functions
-        for copy in function.copies.facts
+        for function in iter(program.functions)
+        for copy in iter(function.copies.facts)
     )
 
 
@@ -262,7 +270,7 @@ def recover_program_bounded_global_object_ranges_8616(
     )
     ranges = tuple(
         provisional[key]
-        for key in sorted(provisional, key=indexed_global_object_sort_key_8616)
+        for key in builtins.iter(sorted(provisional, key=indexed_global_object_sort_key_8616))
         if key not in failures
     )
     refusals = tuple(
@@ -275,7 +283,7 @@ def recover_program_bounded_global_object_ranges_8616(
                 sorted(
                     {
                         indexed_global_access_key_8616(item)
-                        for item in accesses[key]
+                        for item in iter(accesses[key])
                     }
                 )
             ),
@@ -283,10 +291,10 @@ def recover_program_bounded_global_object_ranges_8616(
                 tuple(range_facts.get(key, ()))
             ),
         )
-        for key, failure in sorted(
-            failures.items(),
+        for key, failure in builtins.iter(sorted(
+            tuple(failures.items()),
             key=lambda item: indexed_global_object_sort_key_8616(item[0]),
-        )
+        ))
     )
     raw_count = len(accesses)
     result = ProjectBoundedGlobalObjectRangeEvidence8616(

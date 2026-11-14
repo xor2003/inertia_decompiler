@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed deferred return pass-through trial contracts.
 
 Layer: Types/Lowering.
@@ -9,9 +10,13 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
+import dataclasses
+import operator
 
 __all__ = [
     "ReturnPassThroughTrial8616",
@@ -35,21 +40,21 @@ class ReturnPassThroughTrialFailure8616(StrEnum):
     CALL_TARGET_CONFLICT = "call_target_conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ReturnPassThroughTrial8616:
     """One storage- and type-deferred call-result-to-function-return relation."""
 
-    callee_addr: int
-    caller_addr: int
-    callsite_addr: int
-    target_addr: int
-    return_instruction_addr: int
-    path_block_addrs: tuple[int, ...]
-    call_block_addr: int
-    call_instr_index: int
+    callee_addr: cython.longlong
+    caller_addr: cython.longlong
+    callsite_addr: cython.longlong
+    target_addr: cython.longlong
+    return_instruction_addr: cython.longlong
+    path_block_addrs: object
+    call_block_addr: cython.longlong
+    call_instr_index: cython.longlong
 
     @property
-    def is_complete(self) -> bool:
+    def is_complete(self) -> cython.bint:
         """Return whether every pre-SCC identity is exact and deterministic."""
         return (
             self.callee_addr >= 0
@@ -58,16 +63,16 @@ class ReturnPassThroughTrial8616:
             and self.target_addr >= 0
             and self.return_instruction_addr >= 0
             and bool(self.path_block_addrs)
-            and len(set(self.path_block_addrs)) == len(self.path_block_addrs)
-            and self.call_block_addr == self.path_block_addrs[0]
+            and operator.eq(len(set(self.path_block_addrs)), len(self.path_block_addrs))
+            and operator.eq(self.call_block_addr, self.path_block_addrs[0])
             and self.call_instr_index >= 0
         )
 
-    def belongs_to(self, callee_addr: int, caller_addr: int, callsite_addr: int) -> bool:
+    def belongs_to(self, callee_addr: cython.longlong, caller_addr: cython.longlong, callsite_addr: cython.longlong) -> cython.bint:
         """Return whether this trial belongs to one exact containing callsite."""
         return (
             self.is_complete
-            and self.callee_addr == callee_addr
-            and self.caller_addr == caller_addr
-            and self.callsite_addr == callsite_addr
+            and operator.eq(self.callee_addr, callee_addr)
+            and operator.eq(self.caller_addr, caller_addr)
+            and operator.eq(self.callsite_addr, callsite_addr)
         )

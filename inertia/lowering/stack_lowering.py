@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Coordinate stack/global lowering passes before rewrite.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -44,31 +47,34 @@ log: logging.Logger = logging.getLogger(__name__)
 class _StackLoweringCodegen8616(Protocol):
     """Codegen-side fields owned by stack-lowering coordination."""
 
-    _inertia_typed_stack_probe_return_facts: dict[int, TypedStackProbeReturnFact8616]
-    _inertia_ss_lowering_refusal_log: list[object]
-    _inertia_stack_lowering_debug: dict[str, object]
-    _inertia_ss_lowering_refusal_summary: list[object]
-    _inertia_global_deref_after_address_materialized_count: int
+    _inertia_typed_stack_probe_return_facts: object
+    _inertia_ss_lowering_refusal_log: object
+    _inertia_stack_lowering_debug: object
+    _inertia_ss_lowering_refusal_summary: object
+    _inertia_global_deref_after_address_materialized_count: cython.longlong
     cfunc: object
 
 
-def _dynamic_codegen_attr_8616(obj: object | None, name: str, default: object | None = None) -> object | None:
+@cython.ccall
+def _dynamic_codegen_attr_8616(obj: object, name: object, default: object | None = None) -> object | None:
     """Dynamic codegen boundary: read optional decompiler/codegen state fields."""
     if obj is None:
         return default
     return getattr(obj, name, default)
 
 
-def _record_lowering_change_8616(codegen: _StackLoweringCodegen8616 | None) -> None:
+@cython.ccall
+def _record_lowering_change_8616(codegen: object) -> None:
     """Record that stack lowering changed the current codegen tree."""
     if codegen is not None:
         record_stable_ss_lowering_replacement_8616(codegen)
 
 
+@cython.ccall
 def _initialize_stack_lowering_debug_state_8616(
-    codegen: _StackLoweringCodegen8616 | None,
-    typed_stack_probe_return_facts: dict[int, TypedStackProbeReturnFact8616] | None,
-) -> int:
+    codegen: object,
+    typed_stack_probe_return_facts: object,
+) -> cython.longlong:
     """Initialize stack-lowering counters and return the typed fact count."""
     if codegen is None:
         return 0
@@ -91,6 +97,7 @@ def _initialize_stack_lowering_debug_state_8616(
     return len(typed_facts) if isinstance(typed_facts, dict) else 0
 
 
+@cython.ccall
 def _record_stack_lowering_refusal_8616(codegen: _StackLoweringCodegen8616 | None) -> None:
     """Record that a proven stack fact could not be lowered this round."""
     debug_stats = _dynamic_codegen_attr_8616(codegen, "_inertia_stack_lowering_debug")
@@ -101,10 +108,11 @@ def _record_stack_lowering_refusal_8616(codegen: _StackLoweringCodegen8616 | Non
     record_stable_ss_lowering_refusal_8616(codegen)
 
 
+@cython.ccall
 def _lower_global_segment_accesses_8616(
     codegen: _StackLoweringCodegen8616,
     project: object | None,
-) -> bool:
+) -> cython.bint:
     """Lower stable DS/ES globals and recount post-address dereferences."""
     round_changed = False
     if lower_stable_ds_es_linear_global_dereferences_8616(codegen, project=project):
@@ -127,17 +135,18 @@ def _lower_global_segment_accesses_8616(
     return round_changed
 
 
+@cython.ccall
 def _round_impl_8616(
     *,
-    rewrite_ss_stack_byte_offsets: Callable[[], bool],
-    canonicalize_stack_cvars: Callable[[], bool],
-    lower_stable_ss_stack_accesses: Callable[[], bool] | None,
-    codegen: _StackLoweringCodegen8616 | None,
+    rewrite_ss_stack_byte_offsets: Callable[[], cython.bint],
+    canonicalize_stack_cvars: Callable[[], cython.bint],
+    lower_stable_ss_stack_accesses: object,
+    codegen: object,
     project: object | None,
-    typed_fact_count: int,
-    lower_global_segment_accesses: bool,
-    lower_runtime_segment_accesses: bool,
-) -> bool:
+    typed_fact_count: cython.longlong,
+    lower_global_segment_accesses: cython.bint,
+    lower_runtime_segment_accesses: cython.bint,
+) -> cython.bint:
     """Run the ordered lowering steps for one round."""
     round_changed = False
     if codegen is not None and lower_stable_ss_linear_stack_dereferences_8616(codegen, project=project):
@@ -177,17 +186,18 @@ def _round_impl_8616(
     return round_changed
 
 
+@cython.ccall
 def _run_single_stack_lowering_round_8616(
     *,
-    rewrite_ss_stack_byte_offsets: Callable[[], bool],
-    canonicalize_stack_cvars: Callable[[], bool],
+    rewrite_ss_stack_byte_offsets: Callable[[], cython.bint],
+    canonicalize_stack_cvars: Callable[[], cython.bint],
     lower_stable_ss_stack_accesses: Callable[[], bool] | None,
     codegen: _StackLoweringCodegen8616 | None,
     project: object | None,
-    typed_fact_count: int,
-    lower_global_segment_accesses: bool,
-    lower_runtime_segment_accesses: bool,
-) -> bool:
+    typed_fact_count: cython.longlong,
+    lower_global_segment_accesses: cython.bint,
+    lower_runtime_segment_accesses: cython.bint,
+) -> cython.bint:
     """Run one ordered stack/global lowering round."""
     return _round_impl_8616(
         rewrite_ss_stack_byte_offsets=rewrite_ss_stack_byte_offsets,
@@ -236,18 +246,19 @@ def _emit_stack_lowering_debug_summary_8616(codegen: _StackLoweringCodegen8616 |
     return _impl()
 
 
+@cython.ccall
 def run_stack_lowering_pass_8616(
     *,
-    rewrite_ss_stack_byte_offsets: Callable[[], bool],
-    canonicalize_stack_cvars: Callable[[], bool],
+    rewrite_ss_stack_byte_offsets: Callable[[], cython.bint],
+    canonicalize_stack_cvars: Callable[[], cython.bint],
     lower_stable_ss_stack_accesses: Callable[[], bool] | None = None,
     codegen: _StackLoweringCodegen8616 | None = None,
     project: object | None = None,
-    typed_stack_probe_return_facts: dict[int, TypedStackProbeReturnFact8616] | None = None,
-    max_rounds: int = 2,
-    lower_global_segment_accesses: bool = True,
-    lower_runtime_segment_accesses: bool = True,
-) -> bool:
+    typed_stack_probe_return_facts: object = None,
+    max_rounds: cython.longlong = 2,
+    lower_global_segment_accesses: cython.bint = True,
+    lower_runtime_segment_accesses: cython.bint = True,
+) -> cython.bint:
     """Run the ordered stack lowering pass until a fixed point or round limit."""
     typed_fact_count = _initialize_stack_lowering_debug_state_8616(codegen, typed_stack_probe_return_facts)
     changed = False

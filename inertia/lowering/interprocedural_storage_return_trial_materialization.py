@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize one typed callsite return into exact storage trials.
 
 Layer: Types/Lowering.
@@ -11,6 +12,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from inertia.alias.domains import register_domain_for_name, register_view_for_name
 from inertia.frontend.x86_16.frontend_function_boundary import ExactFunctionRangeBoundary8616
@@ -74,6 +77,8 @@ from .interprocedural_storage_return_types import (
     classify_return_storage_type_8616,
 )
 from .return_witness_source import distinct_return_witness_sources_8616
+import operator
+import builtins
 
 __all__ = [
     "materialize_callsite_return_trials_8616",
@@ -81,9 +86,10 @@ __all__ = [
 ]
 
 
+@cython.ccall
 def _failure_8616(
     kind: ReturnStorageTrialCollectionFailureKind8616,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     fact: CallerReturnUseFact8616,
     *,
     ssa_failure: FunctionSSAArtifactFailure8616 | None = None,
@@ -120,7 +126,7 @@ def return_output_storages_8616(
             width=width,
             register=register,
         )
-        for register, width in pieces
+        for register, width in iter(pieces)
     )
 
 
@@ -128,26 +134,28 @@ def _witness_use_8616(
     artifact: SSAFunctionArtifact,
     fact: CallerReturnUseFact8616,
     classification: ReturnStorageTypeResult8616,
-    output_storages: tuple[StorageIdentity8616, ...],
-) -> tuple[tuple[StorageUseEvidence8616, ...] | None, bool]:
+    output_storages: object,
+) -> object:
     """Resolve exact SSA uses aligned with every physical output piece."""
+    pointer_use: object
+    split_use: object
     split_use = classification.split_condition_use
     if split_use is not None:
         uses_by_storage = {
-            piece.storage.key: piece.use for piece in split_use.pieces
+            piece.storage.key: piece.use for piece in iter(split_use.pieces)
         }
-        if len(uses_by_storage) != len(split_use.pieces):
+        if operator.ne(len(uses_by_storage), len(split_use.pieces)):
             return None, True
         uses = tuple(
             uses_by_storage[storage.key]
-            for storage in output_storages
+            for storage in iter(output_storages)
             if storage.key in uses_by_storage
         )
-        return (uses, False) if len(uses) == len(output_storages) else (None, False)
+        return (uses, False) if operator.eq(len(uses), len(output_storages)) else (None, False)
 
     pointer_use = classification.pointer_use
     if pointer_use is not None:
-        result: tuple[tuple[StorageUseEvidence8616, ...] | None, bool] = pointer_return_witness_use_8616(
+        result: object = pointer_return_witness_use_8616(
             artifact,
             fact,
             pointer_use,
@@ -155,7 +163,7 @@ def _witness_use_8616(
         )
         return result
 
-    def _reads_output(value: object) -> bool:
+    def _reads_output(value: object) -> cython.bint:
         """Match one IR operand to an exact Alias-owned output view."""
         if not isinstance(value, IRValue) or value.space is not MemSpace.REG:
             return False
@@ -163,49 +171,44 @@ def _witness_use_8616(
             return False
         return any(
             (
-                value.size == storage.width
-                and register_domain_for_name(value.name)
-                == register_domain_for_name(storage.register)
-                and register_view_for_name(value.name)
-                == register_view_for_name(storage.register)
+                operator.eq(value.size, storage.width)
+                and operator.eq(register_domain_for_name(value.name), register_domain_for_name(storage.register))
+                and operator.eq(register_view_for_name(value.name), register_view_for_name(storage.register))
             )
             or (
                 fact.byte_extension is not None
                 and fact.observed_value_view is AxValueView8616.AX
                 and storage.width == 1
-                and register_view_for_name(storage.register)
-                == register_view_for_name("al")
+                and operator.eq(register_view_for_name(storage.register), register_view_for_name("al"))
                 and value.size == 2
-                and register_domain_for_name(value.name)
-                == register_domain_for_name(storage.register)
-                and register_view_for_name(value.name)
-                == register_view_for_name("ax")
+                and operator.eq(register_domain_for_name(value.name), register_domain_for_name(storage.register))
+                and operator.eq(register_view_for_name(value.name), register_view_for_name("ax"))
             )
-            for storage in output_storages
+            for storage in iter(output_storages)
         )
 
     candidates = tuple(
         (block.addr, instr_index, instruction.addr)
-        for block in artifact.blocks
-        for instr_index, instruction in enumerate(block.instrs)
-        if isinstance(instruction.addr, int) and instruction.addr == fact.witness_instruction_addr
-        and any(_reads_output(argument) for argument in instruction.args)
+        for block in iter(artifact.blocks)
+        for instr_index, instruction in builtins.iter(enumerate(block.instrs))
+        if isinstance(instruction.addr, int) and operator.eq(instruction.addr, fact.witness_instruction_addr)
+        and any(_reads_output(argument) for argument in iter(instruction.args))
     )
     if len(candidates) != 1:
         # A CMP expands into arithmetic and architectural flag operations.
         # These are one physical condition witness, not distinct caller uses.
         # Keep all other use kinds strict and refuse multiple blocks or values.
-        sites = {(block_addr, instr_addr) for block_addr, _, instr_addr in candidates}
+        sites = {(block_addr, instr_addr) for block_addr, _, instr_addr in iter(candidates)}
         values = tuple(
             argument
-            for block in artifact.blocks
-            for instruction in block.instrs
-            if instruction.addr == fact.witness_instruction_addr
-            for argument in instruction.args
+            for block in iter(artifact.blocks)
+            for instruction in iter(block.instrs)
+            if operator.eq(instruction.addr, fact.witness_instruction_addr)
+            for argument in iter(instruction.args)
             if isinstance(argument, IRValue) and _reads_output(argument)
         )
         same_known_value = bool(values) and values[0].version is not None and all(
-            value == values[0] for value in values
+            operator.eq(value, values[0]) for value in iter(values)
         )
         if (
             fact.kind is not CallsiteReturnUseKind8616.CONDITION
@@ -228,16 +231,18 @@ def _witness_use_8616(
     )
 
 
+@cython.ccall
 def _classify_return_8616(
     project: object,
     artifact: SSAFunctionArtifact,
     fact: CallerReturnUseFact8616,
     definitions: CallOutputDefinitionResult8616,
-    output_storages: tuple[StorageIdentity8616, ...],
-    conditions_by_caller: dict[int, tuple[ConditionIR, ...]],
+    output_storages: object,
+    conditions_by_caller: object,
     caller_function: object | None,
 ) -> ReturnStorageTypeResult8616 | None:
     """Dispatch one exact use kind to its owning typed classifier."""
+    conditions: object
     if fact.kind is CallsiteReturnUseKind8616.CONDITION:
         conditions = conditions_by_caller.get(fact.caller_addr)
         if conditions is None:
@@ -284,14 +289,22 @@ def _classify_return_8616(
 
 def materialize_callsite_return_trials_8616(
     project: object,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     fact: CallerReturnUseFact8616,
-    output_storages: tuple[StorageIdentity8616, ...],
-    accepted_target_addrs: tuple[int, ...],
-    conditions_by_caller: dict[int, tuple[ConditionIR, ...]],
+    output_storages: object,
+    accepted_target_addrs: object,
+    conditions_by_caller: object,
     caller_context: CallerSSAContext8616 | None = None,
 ) -> tuple[tuple[StorageTrial8616, ...] | None, ReturnStorageTrialCollectionFailure8616 | None]:
     """Materialize one callsite's exact return pieces or one typed refusal."""
+    artifact: object
+    caller_project: object
+    classification: object
+    pointer_use: object
+    provenance: object
+    signedness: object
+    uses: object
+    value_class: object
     caller_project = project if caller_context is None else caller_context.evidence_project
     caller_function = None if caller_context is None else caller_context.caller_function
     if caller_project is None:
@@ -392,7 +405,7 @@ def materialize_callsite_return_trials_8616(
     if provenance is None or signedness is None or value_class is None:
         raise RuntimeError("complete return classification lost typed evidence")
     pointee_width_bytes: int | None = None
-    pointer_use: ReturnPointerUseEvidence8616 | None = None
+    pointer_use = None
     if value_class is StorageTrialValueClass8616.POINTER:
         pointer_use = classification.pointer_use
         if pointer_use is None or not pointer_use.complete:
@@ -419,13 +432,13 @@ def materialize_callsite_return_trials_8616(
             pointee_width_bytes=pointee_width_bytes,
             pointer_use=pointer_use,
         )
-        for piece_index, (storage, definition, use) in enumerate(
+        for piece_index, (storage, definition, use) in builtins.iter(enumerate(
             zip(
                 output_storages,
                 definitions.definitions,
                 uses,
                 strict=True,
             )
-        )
+        ))
     )
     return trials, None

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Locate exact generated C function definitions for export tooling.
 
 Layer: CLI/fallback/reporting.
@@ -6,16 +7,19 @@ changing decompiler semantics.
 """
 
 from __future__ import annotations
+import cython
 
 import re
 from pathlib import Path
 
 
+@cython.ccall
 def generated_function_definition_span(
-    source: str,
-    function_name: str,
-) -> tuple[int, int]:
+    source: object,
+    function_name: object,
+) -> tuple[cython.longlong, cython.longlong]:
     """Return the exact span of one balanced generated C definition."""
+    signature: object
     signature = re.search(
         rf"(?m)^[ \t]*[A-Za-z_][^\n;]*\b{re.escape(function_name)}"
         r"\s*\([^;\n]*\)\s*\{",
@@ -36,11 +40,12 @@ def generated_function_definition_span(
     raise ValueError(f"unterminated generated definition for {function_name}")
 
 
+@cython.ccall
 def relabel_generated_function_definition(
-    source: str,
-    old_name: str,
-    new_name: str,
-) -> str:
+    source: object,
+    old_name: object,
+    new_name: object,
+) -> object:
     """Relabel one exact generated definition without changing its body or calls."""
     if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", new_name) is None:
         raise ValueError(f"invalid generated function label {new_name!r}")
@@ -69,14 +74,16 @@ def relabel_generated_function_definition(
     return source[: match.start()] + new_name + source[match.end() :]
 
 
+@cython.ccall
 def load_generated_function_artifacts(
     directory: Path,
-    addresses: tuple[int, ...],
-) -> dict[int, str]:
+    addresses: object,
+) -> object:
     """Load one exact generated C artifact for every requested address."""
-    sources: dict[int, str] = {}
+    address: object
+    sources: dict[cython.longlong, str] = {}
     for address in addresses:
-        matches = tuple(sorted(directory.glob(f"{address:08x}-*.c")))
+        matches = tuple(sorted(tuple(directory.glob(f"{address:08x}-*.c"))))
         if len(matches) != 1:
             raise ValueError(
                 f"expected one generated artifact for {address:#x}, found {len(matches)}"

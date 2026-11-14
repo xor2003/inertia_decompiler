@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Validate Alias-owned memory outputs at the publication transaction.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -25,6 +28,9 @@ from .pointer_parameter_memory_output_contracts import (
     PointerParameterMemoryOutputObject8616,
     PointerParameterMemoryOutputView8616,
 )
+import dataclasses
+import operator
+import builtins
 
 
 class MemoryOutputTransactionVerdict8616(StrEnum):
@@ -49,18 +55,18 @@ class MemoryOutputTransactionFailure8616(StrEnum):
     ORPHAN_TRIAL = "orphan_trial"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class MemoryOutputTransactionStats8616:
     """Closed evidence accounting for one publication validation."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every retained fact passed transaction validation."""
         return (
             self.raw_fact_count
@@ -71,7 +77,7 @@ class MemoryOutputTransactionStats8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class MemoryOutputTransactionEvidence8616:
     """Complete publication proof or one typed atomic refusal."""
 
@@ -80,7 +86,7 @@ class MemoryOutputTransactionEvidence8616:
     stats: MemoryOutputTransactionStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether the complete memory-output transaction is coherent."""
         return bool(
             self.verdict is MemoryOutputTransactionVerdict8616.PROVEN
@@ -89,26 +95,27 @@ class MemoryOutputTransactionEvidence8616:
         )
 
 
-def _raw_fact_count_8616(contract: FunctionStorageContract8616) -> int:
+def _raw_fact_count_8616(contract: FunctionStorageContract8616) -> cython.longlong:
     """Count every callsite, object, view, effect, and trial being validated."""
     return (
         len(contract.callsites)
         + len(contract.memory_outputs)
         + len(contract.pointer_memory_outputs)
-        + sum(len(item.views) for item in contract.memory_outputs)
-        + sum(len(item.views) for item in contract.pointer_memory_outputs)
+        + sum(len(item.views) for item in iter(contract.memory_outputs))
+        + sum(len(item.views) for item in iter(contract.pointer_memory_outputs))
         + sum(
             len(callsite.memory_effects)
             + len(callsite.pointer_effects)
             + len(callsite.live_outs)
-            for callsite in contract.callsites
+            for callsite in iter(contract.callsites)
         )
     )
 
 
+@cython.ccall
 def _refused_8616(
     failure: MemoryOutputTransactionFailure8616,
-    raw_count: int,
+    raw_count: cython.longlong,
 ) -> MemoryOutputTransactionEvidence8616:
     """Build one typed refusal without accepting any transaction fact."""
     return MemoryOutputTransactionEvidence8616(
@@ -122,24 +129,25 @@ def _refused_8616(
     )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _TransactionScan8616:
     """Mutable consumed-identity state for one transaction validation."""
 
-    callsites: dict[tuple[int, int], CallsiteStorageBinding8616]
-    function_addr: int
-    raw_count: int
-    consumed_effects: set[tuple[int, int, int]] = field(default_factory=set)
-    consumed_pointer_effects: set[tuple[int, int, int]] = field(default_factory=set)
-    consumed_trials: set[tuple[int, int, int]] = field(default_factory=set)
-    view_keys: set[tuple[object, ...]] = field(default_factory=set)
-    pointer_source_keys: set[tuple[object, ...]] = field(default_factory=set)
+    callsites: object
+    function_addr: cython.longlong
+    raw_count: cython.longlong
+    consumed_effects: object = field(default_factory=set)
+    consumed_pointer_effects: object = field(default_factory=set)
+    consumed_trials: object = field(default_factory=set)
+    view_keys: object = field(default_factory=set)
+    pointer_source_keys: object = field(default_factory=set)
 
     def check_object_view(
         self,
         view: MemoryOutputViewBinding8616,
     ) -> MemoryOutputTransactionEvidence8616 | None:
         """Consume one memory-object view or return a typed refusal."""
+        callsite: object
         callsite_key = (view.caller_addr, view.callsite_addr)
         callsite = self.callsites.get(callsite_key)
         if callsite is None:
@@ -156,8 +164,8 @@ class _TransactionScan8616:
         self.view_keys.add(view_key)
         effect_indices = tuple(
             index
-            for index, effect in enumerate(callsite.memory_effects)
-            if effect == view.effect
+            for index, effect in builtins.iter(enumerate(callsite.memory_effects))
+            if operator.eq(effect, view.effect)
         )
         if not effect_indices:
             return _refused_8616(
@@ -169,19 +177,19 @@ class _TransactionScan8616:
                 MemoryOutputTransactionFailure8616.EFFECT_CONFLICT,
                 self.raw_count,
             )
-        self.consumed_effects.add((*callsite_key, effect_indices[0]))
+        self.consumed_effects.add(tuple(callsite_key) + (effect_indices[0],))
         if view.trial is not None:
             trial_indices = tuple(
                 index
-                for index, trial in enumerate(callsite.live_outs)
-                if trial == view.trial
+                for index, trial in builtins.iter(enumerate(callsite.live_outs))
+                if operator.eq(trial, view.trial)
             )
             if len(trial_indices) != 1:
                 return _refused_8616(
                     MemoryOutputTransactionFailure8616.TRIAL_MISMATCH,
                     self.raw_count,
                 )
-            self.consumed_trials.add((*callsite_key, trial_indices[0]))
+            self.consumed_trials.add(tuple(callsite_key) + (trial_indices[0],))
         if not view.complete:
             return _refused_8616(
                 MemoryOutputTransactionFailure8616.OBJECT_INCOMPLETE,
@@ -189,11 +197,14 @@ class _TransactionScan8616:
             )
         return None
 
+    @cython.ccall
     def check_pointer_object(
         self,
         pointer_object: PointerParameterMemoryOutputObject8616,
     ) -> MemoryOutputTransactionEvidence8616 | None:
         """Consume one pointer-output object and its views or refuse."""
+        refusal: object
+        pointer_view: object
         source = pointer_object.source
         source_view = source.output_view
         source_key = (
@@ -226,9 +237,10 @@ class _TransactionScan8616:
         pointer_view: PointerParameterMemoryOutputView8616,
     ) -> MemoryOutputTransactionEvidence8616 | None:
         """Consume one pointer-output view or return a typed refusal."""
+        callsite: object
         callsite_key = (pointer_view.caller_addr, pointer_view.callsite_addr)
         callsite = self.callsites.get(callsite_key)
-        if callsite is None or pointer_view.callee_addr != self.function_addr:
+        if callsite is None or operator.ne(pointer_view.callee_addr, self.function_addr):
             return _refused_8616(
                 (
                     MemoryOutputTransactionFailure8616.CALLSITE_MISSING
@@ -246,8 +258,8 @@ class _TransactionScan8616:
         self.view_keys.add(view_key)
         effect_indices = tuple(
             index
-            for index, effect in enumerate(callsite.pointer_effects)
-            if effect == pointer_view.effect
+            for index, effect in builtins.iter(enumerate(callsite.pointer_effects))
+            if operator.eq(effect, pointer_view.effect)
         )
         if not effect_indices:
             return _refused_8616(
@@ -259,7 +271,7 @@ class _TransactionScan8616:
                 MemoryOutputTransactionFailure8616.EFFECT_CONFLICT,
                 self.raw_count,
             )
-        self.consumed_pointer_effects.add((*callsite_key, effect_indices[0]))
+        self.consumed_pointer_effects.add(tuple(callsite_key) + (effect_indices[0],))
         if not pointer_view.complete:
             return _refused_8616(
                 MemoryOutputTransactionFailure8616.OBJECT_INCOMPLETE,
@@ -269,6 +281,8 @@ class _TransactionScan8616:
 
     def check_orphans(self) -> MemoryOutputTransactionEvidence8616 | None:
         """Require every callsite effect and trial to be consumed."""
+        callsite: object
+        callsite_key: object
         for callsite_key, callsite in self.callsites.items():
             if any(
                 (*callsite_key, index) not in self.consumed_effects
@@ -301,19 +315,24 @@ def validate_memory_output_transaction_8616(
     contract: FunctionStorageContract8616,
 ) -> MemoryOutputTransactionEvidence8616:
     """Prove that object views and callsite facts form one exact transaction."""
+    orphan_refusal: object
+    refusal: object
+    memory_object: object
+    pointer_object: object
+    view: object
     raw_count = _raw_fact_count_8616(contract)
     callsites = {
         (callsite.caller_addr, callsite.callsite_addr): callsite
-        for callsite in contract.callsites
+        for callsite in iter(contract.callsites)
     }
-    if len(callsites) != len(contract.callsites):
+    if operator.ne(len(callsites), len(contract.callsites)):
         return _refused_8616(
             MemoryOutputTransactionFailure8616.CALLSITE_CONFLICT,
             raw_count,
         )
 
-    owner_keys = tuple(item.storage.key for item in contract.memory_outputs)
-    if len(set(owner_keys)) != len(owner_keys):
+    owner_keys = tuple(item.storage.key for item in iter(contract.memory_outputs))
+    if operator.ne(len(set(owner_keys)), len(owner_keys)):
         return _refused_8616(
             MemoryOutputTransactionFailure8616.DUPLICATE_OWNER,
             raw_count,

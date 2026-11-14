@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Represent fixed-width real-mode far pointers in typed interfaces.
 
 Layer: Types/Lowering.
@@ -15,6 +16,8 @@ pointers.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from angr.sim_type import SimType, SimTypeFunction, SimTypePointer
 from archinfo import Arch
@@ -24,7 +27,7 @@ class SimTypeFarPointer16_8616(SimTypePointer):  # type: ignore[misc]
     """Angr pointer type with the fixed 32-bit width of a real-mode far pointer."""
 
     @property
-    def size(self) -> int:
+    def size(self) -> cython.longlong:
         """Return the far-pointer width in bits."""
         return 32
 
@@ -32,7 +35,7 @@ class SimTypeFarPointer16_8616(SimTypePointer):  # type: ignore[misc]
         self,
         arch: Arch,
         *,
-        memo: dict[str, SimType],
+        memo: object,
     ) -> SimTypeFarPointer16_8616:
         """Bind this far pointer through angr's recursive type memo contract."""
         out = SimTypeFarPointer16_8616(
@@ -70,6 +73,7 @@ class SimTypeFarPointer16_8616(SimTypePointer):  # type: ignore[misc]
         return out
 
 
+@cython.ccall
 def far_pointer_type_8616(
     pointee: SimType,
     arch: Arch,
@@ -81,9 +85,10 @@ def far_pointer_type_8616(
     return pointer
 
 
+@cython.ccall
 def with_far_pointer_parameter_8616(
     prototype: object,
-    parameter_index: int,
+    parameter_index: cython.longlong,
     pointer_type: SimTypeFarPointer16_8616,
     arch: Arch,
 ) -> SimTypeFunction | None:

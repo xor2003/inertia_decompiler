@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/runtime.
 
 Responsibility: implement operand-size-32 opcode behavior reachable from the 16-bit frontend.
@@ -8,6 +9,8 @@ adapter from ``instr_base``; decoded instruction state remains concrete and type
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 
@@ -72,16 +75,19 @@ from .exec import OpcodeExecHandler
 from .instr_base import InstrBase, VexExpr, _vex_expr
 from .instruction import CHK_IMM8, CHK_IMM16, CHK_IMM32, CHK_MODRM, CHK_MOFFS, CHK_PTR16, InstrData, InstrFlags
 from .vex_value_contract import require_vex_value_8616 as _require_vex_value
+import operator
 
 
 class Instr32(InstrBase):
     """Implement operand-size-32 instruction effects for the x86 frontend."""
 
-    _opcode_template_instrfuncs: list[OpcodeExecHandler | None] | None = None
-    _opcode_template_chk: list[int | InstrFlags] | None = None
+    _opcode_template_instrfuncs: object = None
+    _opcode_template_chk: object = None
 
     def __init__(self, emu: Emulator, instr: InstrData) -> None:
         """Initialize 32-bit opcode handlers for one decoded instruction."""
+        template_chk: object
+        template_funcs: object
         super().__init__(emu, instr, mode32=True)  # X86Instruction
         cls = type(self)
         template_funcs = cls._opcode_template_instrfuncs
@@ -530,6 +536,7 @@ class Instr32(InstrBase):
 
     def bound_r32_m32(self) -> None:
         """Check a signed register against a pair of signed 32-bit memory bounds."""
+        lifter_instruction: object
         if self.instr.modrm.mod == 3:
             raise Exception(EXP_UD)
         reg = _vex_expr(self.get_r32()).signed
@@ -550,15 +557,16 @@ class Instr32(InstrBase):
         if self.instr.address_bits == 32:
             counter = _require_vex_value(self.emu.get_gpreg(reg32_t.ECX)) - self.emu.constant(1, Type.int_32)
             self.emu.set_gpreg(reg32_t.ECX, counter)
-            nonzero = counter != self.emu.constant(0, Type.int_32)
+            nonzero = operator.ne(counter, self.emu.constant(0, Type.int_32))
         else:
             counter = _require_vex_value(self.emu.get_gpreg(reg16_t.CX)) - self.emu.constant(1, Type.int_16)
             self.emu.set_gpreg(reg16_t.CX, counter)
-            nonzero = counter != self.emu.constant(0, Type.int_16)
+            nonzero = operator.ne(counter, self.emu.constant(0, Type.int_16))
         return _require_vex_value(nonzero).cast_to(Type.int_1)
 
     def loop(self) -> None:
         """Execute LOOP using CX or ECX according to the effective address size."""
+        lifter_instruction: object
         lifter_instruction = self.emu.lifter_instruction
         if lifter_instruction is None:
             raise RuntimeError("LOOP condition publication requires an active lifter instruction")
@@ -590,9 +598,9 @@ class Instr32(InstrBase):
     def jcxz_rel8(self) -> None:
         """Execute JCXZ or JECXZ according to the effective address size."""
         if self.instr.address_bits == 32:
-            condition = self.emu.get_gpreg(reg32_t.ECX) == self.emu.constant(0, Type.int_32)
+            condition = operator.eq(self.emu.get_gpreg(reg32_t.ECX), self.emu.constant(0, Type.int_32))
         else:
-            condition = self.emu.get_gpreg(reg16_t.CX) == self.emu.constant(0, Type.int_16)
+            condition = operator.eq(self.emu.get_gpreg(reg16_t.CX), self.emu.constant(0, Type.int_16))
         branch_rel8(
             self._active_stack_emulator(),
             _require_vex_value(condition).cast_to(Type.int_1),
@@ -721,6 +729,7 @@ class Instr32(InstrBase):
 
     def movsd_m32_m32(self) -> None:
         """Move one dword between string operands and honor REP and address size."""
+        repeat_cond: object
         emu = self._active_string_emulator()
         repeat_cond = repeat_prefix_cond(emu, self.instr)
         si_reg, di_reg = self._string_index_regs()
@@ -734,6 +743,7 @@ class Instr32(InstrBase):
 
     def stosd_m32_eax(self) -> None:
         """Store EAX through the address-size-selected destination index."""
+        repeat_cond: object
         emu = self._active_string_emulator()
         repeat_cond = repeat_prefix_cond(emu, self.instr)
         _, di_reg = self._string_index_regs()
@@ -745,6 +755,7 @@ class Instr32(InstrBase):
 
     def lodsd_eax_m32(self) -> None:
         """Load EAX through the address-size-selected source index."""
+        repeat_cond: object
         emu = self._active_string_emulator()
         repeat_cond = repeat_prefix_cond(emu, self.instr)
         si_reg, _ = self._string_index_regs()
@@ -756,6 +767,7 @@ class Instr32(InstrBase):
 
     def scasd_eax_m32(self) -> None:
         """Compare EAX with ES:[DI/EDI] and honor repeat termination."""
+        repeat_cond: object
         emu = self._active_string_emulator()
         repeat_cond = repeat_prefix_cond(emu, self.instr)
         _, di_reg = self._string_index_regs()
@@ -768,6 +780,7 @@ class Instr32(InstrBase):
 
     def insd_m32_dx(self) -> None:
         """Input one dword from DX into ES:[DI/EDI]."""
+        repeat_cond: object
         emu = self._active_string_emulator()
         repeat_cond = repeat_prefix_cond(emu, self.instr)
         _, di_reg = self._string_index_regs()
@@ -780,6 +793,7 @@ class Instr32(InstrBase):
 
     def outsd_dx_m32(self) -> None:
         """Output one dword from DS:[SI/ESI] to DX."""
+        repeat_cond: object
         emu = self._active_string_emulator()
         repeat_cond = repeat_prefix_cond(emu, self.instr)
         si_reg, _ = self._string_index_regs()
@@ -792,6 +806,7 @@ class Instr32(InstrBase):
 
     def cmps_m8_m8(self) -> None:
         """Execute decoded ``CMPS_M8_M8`` semantics through frontend emulator effects."""
+        repeat_cond: object
         emu = self._active_string_emulator()
         repeat_cond = repeat_prefix_cond(emu, self.instr)
 
@@ -808,6 +823,7 @@ class Instr32(InstrBase):
 
     def cmps_m32_m32(self) -> None:
         """Execute decoded ``CMPS_M32_M32`` semantics through frontend emulator effects."""
+        repeat_cond: object
         emu = self._active_string_emulator()
         repeat_cond = repeat_prefix_cond(emu, self.instr)
 
@@ -843,7 +859,7 @@ class Instr32(InstrBase):
         """Return through a 16:32 far frame and release an immediate byte count."""
         return_far32(self._active_stack_emulator(), stack_adjust=self.instr.imm16)
 
-    def retf(self, _instr: dict[str, object] | None = None) -> None:
+    def retf(self, _instr: object = None) -> None:
         """Return through a 16:32 far frame."""
         return_far32(self._active_stack_emulator())
 
@@ -983,7 +999,7 @@ class Instr32(InstrBase):
         """Execute decoded ``JL_REL32`` semantics through frontend emulator effects."""
         branch_rel32(
             self._active_stack_emulator(),
-            self._branch_cond_8616("jl", self.emu.is_sign() != self.emu.is_overflow()),
+            self._branch_cond_8616("jl", operator.ne(self.emu.is_sign(), self.emu.is_overflow())),
             self.instr.imm32,
             self.instr.size,
         )
@@ -992,7 +1008,7 @@ class Instr32(InstrBase):
         """Execute decoded ``JNL_REL32`` semantics through frontend emulator effects."""
         branch_rel32(
             self._active_stack_emulator(),
-            self._branch_cond_8616("jge", self.emu.is_sign() == self.emu.is_overflow()),
+            self._branch_cond_8616("jge", operator.eq(self.emu.is_sign(), self.emu.is_overflow())),
             self.instr.imm32,
             self.instr.size,
         )
@@ -1001,7 +1017,7 @@ class Instr32(InstrBase):
         """Execute decoded ``JLE_REL32`` semantics through frontend emulator effects."""
         branch_rel32(
             self._active_stack_emulator(),
-            self._branch_cond_8616("jle", self.emu.is_zero() | (self.emu.is_sign() != self.emu.is_overflow())),
+            self._branch_cond_8616("jle", self.emu.is_zero() | operator.ne(self.emu.is_sign(), self.emu.is_overflow())),
             self.instr.imm32,
             self.instr.size,
         )
@@ -1010,7 +1026,7 @@ class Instr32(InstrBase):
         """Execute decoded ``JNLE_REL32`` semantics through frontend emulator effects."""
         branch_rel32(
             self._active_stack_emulator(),
-            self._branch_cond_8616("jg", ~self.emu.is_zero() & (self.emu.is_sign() == self.emu.is_overflow())),
+            self._branch_cond_8616("jg", ~self.emu.is_zero() & operator.eq(self.emu.is_sign(), self.emu.is_overflow())),
             self.instr.imm32,
             self.instr.size,
         )
@@ -1055,18 +1071,18 @@ class Instr32(InstrBase):
         """Load a 16:32 pointer and its selector into DS."""
         self._load_pointer_segment32(sgreg_t.DS)
 
-    def _double_shift32(self, *, left: bool, count: VexExpr | int) -> None:
+    def _double_shift32(self, *, left: cython.bint, count: VexExpr | int) -> None:
         """Execute a 32-bit SHLD/SHRD operation with a masked 80386 count."""
         dst = _vex_expr(self.get_rm32())
         src = _vex_expr(self.get_r32())
         masked = _vex_expr(masked_shift_count(self.emu, count, 32)).cast_to(Type.int_8)
         inverse = self.emu.constant(32, Type.int_8) - masked
         shifted = (dst << masked) | (src >> inverse) if left else (dst >> masked) | (src << inverse)
-        result = self._ite_value(masked == self.emu.constant(0, Type.int_8), dst, shifted.cast_to(Type.int_32))
+        result = self._ite_value(operator.eq(masked, self.emu.constant(0, Type.int_8)), dst, shifted.cast_to(Type.int_32))
         self.set_rm32(result)
         self.emu.update_eflags_double_shift(dst, result, masked, left=left)
 
-    def _bit_operation32(self, operation: str, *, immediate: bool = False) -> None:
+    def _bit_operation32(self, operation: object, *, immediate: cython.bint = False) -> None:
         """Apply one 32-bit BT-family operation, including memory bit strings."""
         index = _vex_expr(
             self.emu.constant(self.instr.imm8 & 0xFF, Type.int_32)
@@ -1162,16 +1178,17 @@ class Instr32(InstrBase):
         """Double-precision right shift using CL."""
         self._double_shift32(left=False, count=self.emu.get_gpreg(reg8_t.CL))
 
-    def _bit_scan32(self, *, reverse: bool) -> None:
+    def _bit_scan32(self, *, reverse: cython.bint) -> None:
         """Scan a 32-bit source and update the destination and zero flag."""
+        index: object
         src = _vex_expr(self.get_rm32())
         old = _vex_expr(self.get_r32())
         result = old
         indices = range(32) if reverse else range(31, -1, -1)
         for index in indices:
             bit = src & self.emu.constant(1 << index, Type.int_32)
-            result = self._ite_value(bit != self.emu.constant(0, Type.int_32), self.emu.constant(index, Type.int_32), result)
-        is_zero = src == self.emu.constant(0, Type.int_32)
+            result = self._ite_value(operator.ne(bit, self.emu.constant(0, Type.int_32)), self.emu.constant(index, Type.int_32), result)
+        is_zero = operator.eq(src, self.emu.constant(0, Type.int_32))
         self.set_r32(self._ite_value(is_zero, old, result))
         flags = self.emu.get_gpreg(reg16_t.FLAGS)
         self.emu.set_gpreg(reg16_t.FLAGS, self.emu.set_zero(flags, is_zero))
@@ -1512,22 +1529,23 @@ class Instr32(InstrBase):
         self.set_rm32(rm32 << count)
         self.emu.update_eflags_shl(rm32, self.instr.imm8)
 
-    def _rotate32(self, *, left: bool, count: VexExpr | int) -> None:
+    def _rotate32(self, *, left: cython.bint, count: VexExpr | int) -> None:
         """Rotate a 32-bit r/m operand and update defined ROL/ROR flags."""
         value = _vex_expr(self.get_rm32())
         count_value = self.emu.constant(count, Type.int_8) if isinstance(count, int) else count
         masked = (_vex_expr(count_value).cast_to(Type.int_8) & self.emu.constant(0x1F, Type.int_8))
         inverse = self.emu.constant(32, Type.int_8) - masked
         rotated = (value << masked) | (value >> inverse) if left else (value >> masked) | (value << inverse)
-        result = self._ite_value(masked == self.emu.constant(0, Type.int_8), value, rotated.cast_to(Type.int_32))
+        result = self._ite_value(operator.eq(masked, self.emu.constant(0, Type.int_8)), value, rotated.cast_to(Type.int_32))
         self.set_rm32(result)
         if left:
             self.emu.update_eflags_rol(value, masked)
         else:
             self.emu.update_eflags_ror(value, masked)
 
-    def _rotate_carry32(self, *, left: bool, count: VexExpr | int) -> None:
+    def _rotate_carry32(self, *, left: cython.bint, count: VexExpr | int) -> None:
         """Rotate a 32-bit r/m operand through CF on the architectural 33-bit ring."""
+        carry: object
         value = _vex_expr(self.get_rm32())
         count_value = self.emu.constant(count, Type.int_8) if isinstance(count, int) else count
         masked = _vex_expr(count_value).cast_to(Type.int_8) & self.emu.constant(0x1F, Type.int_8)
@@ -1541,7 +1559,7 @@ class Instr32(InstrBase):
         flags = self.emu.set_carry(flags, carry.cast_to(Type.int_1))
         flags = self.emu.set_overflow(
             flags,
-            self._ite_value(masked == self.emu.constant(1, Type.int_8), overflow, self.emu.get_flag(11)),
+            self._ite_value(operator.eq(masked, self.emu.constant(1, Type.int_8)), overflow, self.emu.get_flag(11)),
         )
         self.emu.set_gpreg(reg16_t.FLAGS, flags)
 
@@ -1708,7 +1726,7 @@ class Instr32(InstrBase):
         val = (_vex_expr(self.emu.get_gpreg(reg32_t.EDX)).cast_to(Type.int_64) << 32) | _vex_expr(
             self.emu.get_gpreg(reg32_t.EAX)
         ).cast_to(Type.int_64)
-        self._divide_error_if(rm32 == self.emu.constant(0, Type.int_64))
+        self._divide_error_if(operator.eq(rm32, self.emu.constant(0, Type.int_64)))
         quotient = val // rm32
         self._divide_error_if(quotient > self.emu.constant(0xFFFFFFFF, Type.int_64))
         self.emu.set_gpreg(reg32_t.EAX, quotient.cast_to(Type.int_32))
@@ -1721,7 +1739,7 @@ class Instr32(InstrBase):
             (_vex_expr(self.emu.get_gpreg(reg32_t.EDX)).cast_to(Type.int_64, signed=True) << 32)
             | _vex_expr(self.emu.get_gpreg(reg32_t.EAX)).cast_to(Type.int_64)
         ).signed
-        self._divide_error_if(rm32_s == self.emu.constant(0, Type.int_64))
+        self._divide_error_if(operator.eq(rm32_s, self.emu.constant(0, Type.int_64)))
         quotient = val_s // rm32_s
         remainder = val_s - quotient * rm32_s
         signed_quotient = quotient.signed
@@ -1788,8 +1806,10 @@ class Instr32(InstrBase):
         rm32 = self.get_rm32()
         push_immediate32(self._active_stack_emulator(), rm32)
 
-    def _branch_cond_8616(self, kind: str, fallback: VexExpr) -> VexExpr:
+    def _branch_cond_8616(self, kind: object, fallback: VexExpr) -> VexExpr:
         """Prefer a transferred typed branch condition over the flag fallback."""
+        direct: object
+        lifter_instruction: object
         lifter_instruction = self.emu.lifter_instruction
         if lifter_instruction is None:
             raise RuntimeError("condition transfer requires an active lifter instruction")

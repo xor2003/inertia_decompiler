@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Publish immutable direct Capstone instruction and block views.
 
 Layer: Frontend.
@@ -6,6 +7,9 @@ surface consumed by frontend CFG and discovery owners.
 """
 
 from __future__ import annotations
+import dataclasses
+import typing
+import cython
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -16,21 +20,21 @@ class _DetailedInstructionBoundary8616(Protocol):
     """Capstone detail fields consumed by downstream semantic recovery."""
 
     operands: Sequence[object]
-    bytes: bytes | bytearray
+    bytes: object
 
-    def reg_name(self, register_id: int) -> str:
+    def reg_name(self, register_id: cython.longlong) -> object:
         """Return Capstone's canonical name for one register id."""
         ...
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectCapstoneInstruction8616:
     """angr-compatible immutable view of one raw Capstone instruction."""
 
-    address: int
-    size: int
-    mnemonic: str
-    op_str: str
+    address: cython.longlong
+    size: cython.longlong
+    mnemonic: object
+    op_str: object
     insn: object
 
     @property
@@ -43,22 +47,22 @@ class DirectCapstoneInstruction8616:
         """Expose immutable operand evidence from the raw decoder boundary."""
         return cast(_DetailedInstructionBoundary8616, self.insn).operands
 
-    def reg_name(self, register_id: int) -> str:
+    def reg_name(self, register_id: cython.longlong) -> object:
         """Resolve a register id through the raw decoder boundary."""
         return cast(_DetailedInstructionBoundary8616, self.insn).reg_name(register_id)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectCapstoneBlock8616:
     """One contiguous block decoded directly from loaded bytes."""
 
-    addr: int
-    size: int
-    code: bytes
-    instructions: tuple[object, ...]
+    addr: cython.longlong
+    size: cython.longlong
+    code: object
+    instructions: object
 
     @property
-    def bytes(self) -> bytes:
+    def bytes(self) -> object:
         """Expose the exact owned bytes through angr's block field name."""
         return self.code
 
@@ -68,7 +72,7 @@ class DirectCapstoneBlock8616:
         return self
 
     @property
-    def insns(self) -> tuple[object, ...]:
+    def insns(self) -> object:
         """Expose instructions through angr's ``block.capstone.insns`` shape."""
         return self.instructions
 

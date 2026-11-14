@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Run emitted-C recompilation checks as validation/reporting evidence.
 
 Layer: CLI/fallback/reporting.
@@ -5,6 +6,8 @@ Responsibility: compile emitted C as validation evidence without repairing gener
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import fcntl
 import hashlib
@@ -33,10 +36,10 @@ from tools.compiler_toolchain.compiler_profile import (
 )
 
 
-def _sanitize_nested_block_comments(text: str) -> str:
+def _sanitize_nested_block_comments(text: object) -> object:
     """Replace /* inside /* */ block comments to prevent -Werror=comment failures."""
 
-    def _fix_inner(match: re.Match[str]) -> str:
+    def _fix_inner(match: re.Match[str]) -> object:
         content = match.group(1)
         content = content.replace("/*", "/ *")
         return "/*" + content + "*/"
@@ -44,7 +47,10 @@ def _sanitize_nested_block_comments(text: str) -> str:
     return re.sub(r"/\*(.*?)\*/", _fix_inner, text, flags=re.DOTALL)
 
 
-def _c89_line_comment_start_8616(line: str) -> int | None:
+@cython.ccall
+def _c89_line_comment_start_8616(line: object) -> int | None:
+    char: object
+    index: object
     in_string = False
     in_char = False
     escaped = False
@@ -68,7 +74,10 @@ def _c89_line_comment_start_8616(line: str) -> int | None:
     return None
 
 
-def _sanitize_c99_line_comments_for_msc_8616(text: str) -> str:
+@cython.ccall
+def _sanitize_c99_line_comments_for_msc_8616(text: object) -> str:
+    comment_start: object
+    line: object
     lines: list[str] = []
     for line in str(text or "").splitlines(keepends=True):
         newline = ""
@@ -89,7 +98,10 @@ def _sanitize_c99_line_comments_for_msc_8616(text: str) -> str:
     return "".join(lines)
 
 
-def _dedupe_msc_runtime_typedefs_8616(text: str) -> str:
+@cython.ccall
+def _dedupe_msc_runtime_typedefs_8616(text: object) -> str:
+    match: object
+    line: object
     typedef_re = re.compile(
         r"^\s*typedef\s+.+?\s+"
         r"(?P<name>int8_t|int16_t|int32_t|uint8_t|uint16_t|uint32_t|clock_t|time_t)"
@@ -109,13 +121,15 @@ def _dedupe_msc_runtime_typedefs_8616(text: str) -> str:
     return "".join(kept)
 
 
-def _strip_msc_dos_header_aggregate_typedefs_8616(text: str) -> str:
+def _strip_msc_dos_header_aggregate_typedefs_8616(text: object) -> object:
     """Remove emitted DOS aggregate definitions already supplied by DOS.H.
 
     This is target compile hygiene only. The checked emitted payload retains
     its self-contained definitions, while the MS C compiler input uses the
     canonical target-header definitions and preserves source line numbers.
     """
+    kind: object
+    name: object
     cleaned = str(text or "")
     for kind, name in (("union", "REGS"), ("struct", "SREGS")):
         pattern = re.compile(
@@ -155,7 +169,8 @@ def _msc51_compiler_lock_8616() -> Iterator[None]:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
-def _timeout_stream_text(value: str | bytes | None) -> str:
+@cython.ccall
+def _timeout_stream_text(value: object) -> object:
     """Normalize subprocess timeout stream payloads to text."""
     if value is None:
         return ""
@@ -164,7 +179,8 @@ def _timeout_stream_text(value: str | bytes | None) -> str:
     return value
 
 
-def _compile_input_payload_8616(c_text: str, *, target: str) -> str:
+@cython.ccall
+def _compile_input_payload_8616(c_text: object, *, target: object) -> object:
     header_payload = _with_runtime_header_8616(c_text, target=target)
     if target == "msc-dos":
         header_payload = _strip_msc_dos_header_aggregate_typedefs_8616(header_payload)
@@ -174,12 +190,14 @@ def _compile_input_payload_8616(c_text: str, *, target: str) -> str:
     return sanitized
 
 
-def _checked_payload_identity_8616(c_text: str) -> tuple[str, str]:
+@cython.ccall
+def _checked_payload_identity_8616(c_text: object) -> tuple[str, str]:
     checked_payload = str(c_text or "")
     return checked_payload, _sha256_text_8616(checked_payload)
 
 
-def _recompile_timeout_sec() -> int:
+@cython.ccall
+def _recompile_timeout_sec() -> cython.longlong:
     raw = os.environ.get("INERTIA_RECOMPILE_TIMEOUT_SEC", "").strip()
     try:
         value = int(raw) if raw else _DEFAULT_RECOMPILE_TIMEOUT_SEC
@@ -188,7 +206,8 @@ def _recompile_timeout_sec() -> int:
     return max(1, value)
 
 
-def _msc51_transient_emulator_failure_8616(stdout_text: str, stderr_text: str, exit_code: int) -> bool:
+@cython.ccall
+def _msc51_transient_emulator_failure_8616(stdout_text: object, stderr_text: object, exit_code: cython.longlong) -> cython.bint:
     if int(exit_code) == 0:
         return False
     combined_text = f"{stderr_text}\n{stdout_text}".lower()
@@ -202,7 +221,8 @@ def _msc51_transient_emulator_failure_8616(stdout_text: str, stderr_text: str, e
     )
 
 
-def _sanitize_empty_control_bodies_for_compile_8616(text: str) -> str:
+@cython.ccall
+def _sanitize_empty_control_bodies_for_compile_8616(text: object) -> object:
     normalized = str(text or "")
     # Compile-hygiene only: preserve condition expression while making malformed
     # empty control bodies syntactically explicit.
@@ -214,7 +234,8 @@ def _sanitize_empty_control_bodies_for_compile_8616(text: str) -> str:
     return normalized
 
 
-def _with_runtime_header_8616(c_text: str, *, target: str) -> str:
+@cython.ccall
+def _with_runtime_header_8616(c_text: object, *, target: object) -> object:
     text = _sanitize_empty_control_bodies_for_compile_8616(c_text)
     if target == "portable-flat":
         if "extern uint8_t inertia_memory[];" in text and "#define SEG_U8(seg, off)" in text:
@@ -227,6 +248,7 @@ def _with_runtime_header_8616(c_text: str, *, target: str) -> str:
     return f"{render_c_runtime_header_8616(target)}\n{text.lstrip()}"
 
 
+@cython.ccall
 def _resolve_kvikdos_path() -> Path | None:
     raw = os.environ.get("INERTIA_KVIKDOS_PATH", "").strip()
     candidate = Path(raw) if raw else _DEFAULT_KVIKDOS_PATH
@@ -235,6 +257,7 @@ def _resolve_kvikdos_path() -> Path | None:
     return candidate
 
 
+@cython.ccall
 def _resolve_msc51_root() -> Path | None:
     raw = os.environ.get("INERTIA_MSC51_ROOT", "").strip()
     candidate = Path(raw) if raw else _DEFAULT_MSC51_ROOT
@@ -245,7 +268,8 @@ def _resolve_msc51_root() -> Path | None:
     return candidate
 
 
-def _resolve_msc51_dir_8616(source_root: Path, lower: str, upper: str) -> Path:
+@cython.ccall
+def _resolve_msc51_dir_8616(source_root: Path, lower: object, upper: object) -> Path:
     """Resolve a case-variant tool directory under the MSC51 source root."""
     candidate = source_root / lower
     if not candidate.exists():
@@ -253,8 +277,10 @@ def _resolve_msc51_dir_8616(source_root: Path, lower: str, upper: str) -> Path:
     return candidate
 
 
+@cython.ccall
 def _mirror_bin_entries_8616(bin_src: Path, bin_dst: Path) -> None:
     """Copy tool binaries under both original and lowercase names for kvikdos."""
+    entry: object
     for entry in bin_src.iterdir():
         if not entry.is_file():
             continue
@@ -266,8 +292,10 @@ def _mirror_bin_entries_8616(bin_src: Path, bin_dst: Path) -> None:
             shutil.copy2(entry, lowered)
 
 
+@cython.ccall
 def _cached_msc51_mirror_8616(source_root: Path) -> Path | None:
     """Return the cached mirror root when it still has the expected layout."""
+    cached: object
     cached = _MSC51_MIRROR_CACHE.get(source_root)
     if (
         cached is not None
@@ -280,7 +308,9 @@ def _cached_msc51_mirror_8616(source_root: Path) -> Path | None:
     return None
 
 
+@cython.ccall
 def _prepare_msc51_mirror_tree(source_root: Path) -> Path:
+    cached: object
     cached = _cached_msc51_mirror_8616(source_root)
     if cached is not None:
         return cached
@@ -303,8 +333,9 @@ def _prepare_msc51_mirror_tree(source_root: Path) -> Path:
     return mirror_root
 
 
+@cython.ccall
 def _probe_kvikdos_execution_8616(
-    kvikdos: Path, c_text: str, *, target: str
+    kvikdos: Path, c_text: object, *, target: object
 ) -> RecompileCheckResult | None:
     """Refuse compilation when the emulator cannot execute in this environment.
 
@@ -343,10 +374,13 @@ def _probe_kvikdos_execution_8616(
     )
 
 
-def _check_c_recompiles_msc51_8616(c_text: str, *, target: str) -> RecompileCheckResult:
+def _check_c_recompiles_msc51_8616(c_text: object, *, target: object) -> RecompileCheckResult:
     """Require an executable DOS toolchain before checking the emitted C."""
     def _impl() -> RecompileCheckResult:
         """Keep compiler intermediate files on the case's writable DOS drive."""
+        kvikdos: object
+        msc_root: object
+        unavailable: object
         kvikdos = _resolve_kvikdos_path()
         if kvikdos is None:
             compile_payload = _compile_input_payload_8616(c_text, target=target)
@@ -458,8 +492,8 @@ def _check_c_recompiles_msc51_8616(c_text: str, *, target: str) -> RecompileChec
         else:
             source_path = str(src_path)
         if not passed and len(attempts) > 1:
-            stdout_text = "\n".join(attempt.stdout or "" for attempt in attempts)
-            stderr_text = "\n".join(attempt.stderr or "" for attempt in attempts)
+            stdout_text = "\n".join(attempt.stdout or "" for attempt in iter(attempts))
+            stderr_text = "\n".join(attempt.stderr or "" for attempt in iter(attempts))
         return RecompileCheckResult(
             outcome=RecompileCheckOutcome.PASSED if passed else RecompileCheckOutcome.FAILED,
             target=target,
@@ -476,7 +510,8 @@ def _check_c_recompiles_msc51_8616(c_text: str, *, target: str) -> RecompileChec
     return _impl()
 
 
-def _check_selected_profile_8616(c_text: str, *, target: str, context: str) -> RecompileCheckResult:
+@cython.ccall
+def _check_selected_profile_8616(c_text: object, *, target: object, context: object) -> RecompileCheckResult:
     """Use frozen original compiler evidence without running a default KVM preflight."""
     checked_payload, checked_hash = _checked_payload_identity_8616(c_text)
     try:
@@ -506,8 +541,10 @@ def _check_selected_profile_8616(c_text: str, *, target: str, context: str) -> R
     return result
 
 
+@cython.ccall
 def tail_compiler_cache_identity_8616() -> RecompileCacheIdentity:
     """Validate selected evidence before consulting the recompilation result cache."""
+    context: object
     context = os.environ.get(TAIL_COMPILER_CONTEXT_ENV)
     if context is None:
         return RecompileCacheIdentity(None, RecompileCheckOutcome.PASSED)
@@ -518,10 +555,12 @@ def tail_compiler_cache_identity_8616() -> RecompileCacheIdentity:
     return RecompileCacheIdentity(context, RecompileCheckOutcome.PASSED)
 
 
-def check_c_recompiles_8616(c_text: str, *, target: str = "portable-flat") -> RecompileCheckResult:
+def check_c_recompiles_8616(c_text: object, *, target: object = "portable-flat") -> RecompileCheckResult:
     """Compile without linking; syntax-only GCC omits return-flow diagnostics."""
 
     def _impl() -> RecompileCheckResult:
+        compiler: object
+        context: object
         if target == "msc-dos":
             context = os.environ.get(TAIL_COMPILER_CONTEXT_ENV)
             if context is not None:
@@ -606,5 +645,6 @@ def check_c_recompiles_8616(c_text: str, *, target: str = "portable-flat") -> Re
     return _impl()
 
 
-def _sha256_text_8616(text: str) -> str:
+@cython.ccall
+def _sha256_text_8616(text: object) -> object:
     return hashlib.sha256(str(text or "").encode("utf-8", errors="ignore")).hexdigest()

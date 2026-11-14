@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed Alias contracts for symbolic indexed segmented-memory accesses.
 
 Layer: Alias.
@@ -10,6 +11,8 @@ Widening and Types/Lowering consume these facts only after Alias proof.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -22,6 +25,8 @@ from inertia.ir.indexed_address_contracts import (
 )
 
 from .storage_fact_join import SegmentedAliasRange8616
+import dataclasses
+import operator
 
 
 class IndexedAddressAliasFailureKind8616(StrEnum):
@@ -35,19 +40,19 @@ class IndexedAddressAliasFailureKind8616(StrEnum):
     DUPLICATE_ACCESS = "duplicate_access"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAliasStorage8616:
     """One symbolic DS/ES access family and its exact index storage proof."""
 
     space: MemSpace
-    base_offset: int
-    width: int
+    base_offset: cython.longlong
+    width: cython.longlong
     index_value: IRValue
     index_source_range: SegmentedAliasRange8616
-    index_shift: int
+    index_shift: cython.longlong
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether symbolic target and stack source remain coherent."""
         source_addresses = self.index_source_range.addresses
         return bool(
@@ -59,7 +64,7 @@ class IndexedAliasStorage8616:
             and self.index_value.version is not None
             and self.index_source_range.space is MemSpace.SS
             and len(source_addresses) == 1
-            and source_addresses[0].size == self.index_value.size
+            and operator.eq(source_addresses[0].size, self.index_value.size)
             and 0 <= self.index_shift <= 4
         )
 
@@ -79,7 +84,7 @@ class IndexedAliasStorage8616:
         return (*self.family_key, self.width)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAddressAliasFact8616:
     """One indexed IR fact projected into symbolic Alias storage."""
 
@@ -87,7 +92,7 @@ class IndexedAddressAliasFact8616:
     storage: IndexedAliasStorage8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether the IR source and Alias projection agree exactly."""
         source_address = self.source.address
         source_range = self.storage.index_source_range
@@ -95,72 +100,72 @@ class IndexedAddressAliasFact8616:
             self.source.complete
             and self.storage.complete
             and self.storage.space is source_address.space
-            and self.storage.base_offset == source_address.offset
-            and self.storage.width == source_address.size
-            and self.storage.index_value == self.source.index_value
-            and source_range.addresses == (self.source.index_source,)
-            and self.storage.index_shift == self.source.index_shift
+            and operator.eq(self.storage.base_offset, source_address.offset)
+            and operator.eq(self.storage.width, source_address.size)
+            and operator.eq(self.storage.index_value, self.source.index_value)
+            and operator.eq(source_range.addresses, (self.source.index_source,))
+            and operator.eq(self.storage.index_shift, self.source.index_shift)
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAddressAliasRefusal8616:
     """One retained indexed candidate and its Alias refusal reason."""
 
     failure: IndexedAddressAliasFailureKind8616
-    detail: str
+    detail: object
     source_fact: IndexedAddressFact8616 | None = None
     source_refusal: IndexedAddressRefusal8616 | None = None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether this refusal identifies exactly one IR candidate."""
         return (self.source_fact is None) != (self.source_refusal is None)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAddressAliasStats8616:
     """Closed accounting for the IR-to-Alias indexed-address projection."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every IR candidate became one fact or refusal."""
         return bool(
-            self.raw_fact_count == self.materialized_count + self.failure_count
+            operator.eq(self.raw_fact_count, self.materialized_count + self.failure_count)
             and self.normalized_fact_count
             == self.classified_fact_count
             == self.materialized_count
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAddressAliasEvidence8616:
     """Function-wide indexed Alias facts with all refusals retained."""
 
-    function_addr: int
-    facts: tuple[IndexedAddressAliasFact8616, ...]
-    refusals: tuple[IndexedAddressAliasRefusal8616, ...]
+    function_addr: cython.longlong
+    facts: object
+    refusals: object
     stats: IndexedAddressAliasStats8616
     source: IndexedAddressEvidence8616
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether source and Alias accounting close without loss."""
         return bool(
             self.source.closed
-            and self.function_addr == self.source.function_addr
-            and self.stats.raw_fact_count == self.source.stats.normalized_fact_count
-            and len(self.facts) == self.stats.materialized_count
-            and len(self.refusals) == self.stats.failure_count
+            and operator.eq(self.function_addr, self.source.function_addr)
+            and operator.eq(self.stats.raw_fact_count, self.source.stats.normalized_fact_count)
+            and operator.eq(len(self.facts), self.stats.materialized_count)
+            and operator.eq(len(self.refusals), self.stats.failure_count)
             and self.stats.closed
-            and all(fact.complete for fact in self.facts)
-            and all(refusal.complete for refusal in self.refusals)
+            and all(fact.complete for fact in iter(self.facts))
+            and all(refusal.complete for refusal in iter(self.refusals))
         )
 
 

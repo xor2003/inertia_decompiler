@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Build indexed loop-range candidates from authoritative function SSA.
 
 Layer: IR.
@@ -9,6 +10,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import replace
 
@@ -48,6 +51,7 @@ from .ssa_cfg import (
     SSANaturalLoop8616,
 )
 from .ssa_function import SSAFunctionArtifact
+import operator
 
 __all__ = [
     "build_indexed_loop_range_candidates_8616",
@@ -55,10 +59,11 @@ __all__ = [
 ]
 
 
+@cython.ccall
 def _generation_refusal_8616(
     source: IndexedAddressFact8616,
     failure: IndexedLoopRangeFailureKind8616,
-    detail: str,
+    detail: object,
 ) -> IndexedLoopRangeCandidate8616:
     """Retain one indexed source with a typed candidate-generation refusal."""
     return IndexedLoopRangeCandidate8616(
@@ -71,6 +76,7 @@ def _generation_refusal_8616(
     )
 
 
+@cython.ccall
 def _induction_lifetime_failure_8616(
     source: IndexedAddressFact8616,
     loop: SSANaturalLoop8616, dominators: SSADominators8616,
@@ -91,17 +97,20 @@ def _induction_lifetime_failure_8616(
     return None
 
 
-def _constant_bound_8616(bound: object) -> tuple[bool, int | None]:
+@cython.ccall
+def _constant_bound_8616(bound: object) -> tuple[cython.bint, int | None]:
     """Retain only a condition operand's explicit IR constant value."""
     if isinstance(bound, IRValue) and bound.space is MemSpace.CONST and bound.const is not None:
         return True, bound.const
     return False, None
 
 
+@cython.ccall
 def _header_conditions_8616(
-    artifact: SSAFunctionArtifact, header: int,
-) -> tuple[ConditionIR, ...]:
+    artifact: SSAFunctionArtifact, header: cython.longlong,
+) -> object:
     """Read header guards only from the closed condition evidence owner."""
+    evidence: object
     evidence = artifact.condition_evidence
     if evidence is None or not evidence.complete:
         return ()
@@ -113,11 +122,12 @@ def _select_step_write_8616(
     writes: LogicalWordWriteValueArtifact8616, loop: SSANaturalLoop8616,
 ) -> LogicalWordWriteValueFact8616 | IndexedLoopRangeCandidate8616:
     """Select one exact increment without dropping independently proven guards."""
+    identity: object
     identity = canonical_induction_source_identity_8616(source.index_source)
     steps = tuple(
-        write for write in writes.facts
+        write for write in iter(writes.facts)
         if write.kind is LogicalWordWriteValueKind8616.OLD_LOGICAL_WORD_PLUS_ONE
-        and write.access.key.block_addr == loop.latch
+        and operator.eq(write.access.key.block_addr, loop.latch)
         and identity is not None and logical_write_matches_induction_8616(write, identity)
     )
     if len(steps) != 1:
@@ -129,12 +139,15 @@ def _select_step_write_8616(
     return steps[0]
 
 
+@cython.ccall
 def _close_induction_candidate_8616(
     artifact: SSAFunctionArtifact, candidate: IndexedLoopRangeCandidate8616,
     loop: SSANaturalLoop8616, dominators: SSADominators8616,
     init_write: LogicalWordWriteValueFact8616, step_write: LogicalWordWriteValueFact8616,
 ) -> IndexedLoopRangeCandidate8616:
     """Retain guard/CFG evidence even when the complete mutation proof refuses."""
+    failure: object
+    identity: object
     # Dynamic candidates cannot materialize: the bound owner refuses first.
     # Preserve that prerequisite diagnostic; never invent a constant to reach
     # the mutation proof. Caller-bound ranges need their own retained context.
@@ -165,10 +178,15 @@ def _candidate_for_source_8616(
     artifact: SSAFunctionArtifact,
     source: IndexedAddressFact8616,
     writes: LogicalWordWriteValueArtifact8616,
-    loops: tuple[SSANaturalLoop8616, ...],
+    loops: object,
     dominators: SSADominators8616,
 ) -> IndexedLoopRangeCandidate8616:
     """Join all exact witnesses for one indexed access or retain one refusal."""
+    block: object
+    guard_site: object
+    identity: object
+    normalized: object
+    polarity: object
     identity = canonical_induction_source_identity_8616(source.index_source)
     if identity is None:
         return _generation_refusal_8616(
@@ -176,7 +194,7 @@ def _candidate_for_source_8616(
             IndexedLoopRangeFailureKind8616.INDUCTION_IDENTITY_UNPROVEN,
             "indexed source has no canonical BP-relative identity",
         )
-    matching_loops = tuple(loop for loop in loops if source.block_addr in loop.blocks)
+    matching_loops = tuple(loop for loop in iter(loops) if source.block_addr in loop.blocks)
     if not matching_loops:
         return _generation_refusal_8616(
             source,
@@ -190,10 +208,10 @@ def _candidate_for_source_8616(
             "indexed access is owned by multiple proven natural loops",
         )
     loop = matching_loops[0]
-    entry_sources = {edge_source for edge_source, _target in loop.entry_edges}
+    entry_sources = {edge_source for edge_source, _target in iter(loop.entry_edges)}
     init_writes = tuple(
         write
-        for write in writes.facts
+        for write in iter(writes.facts)
         if write.proves_constant_zero
         and write.access.key.block_addr in entry_sources
         and logical_write_matches_induction_8616(write, identity)
@@ -236,7 +254,7 @@ def _candidate_for_source_8616(
         )
     relation, bound = normalized
     polarity = indexed_guard_polarity_8616(condition, loop)
-    block = next((item for item in artifact.blocks if item.addr == loop.header), None)
+    block = next((item for item in iter(artifact.blocks) if operator.eq(item.addr, loop.header)), None)
     if polarity is None or block is None:
         return _generation_refusal_8616(
             source,
@@ -294,17 +312,18 @@ def build_indexed_loop_range_candidates_8616(
     writes: LogicalWordWriteValueArtifact8616,
 ) -> tuple[IndexedLoopRangeCandidate8616, ...]:
     """Build one deterministic candidate for every accepted indexed fact."""
-    if not indexed.closed or indexed.function_addr != artifact.function_addr:
+    if not indexed.closed or operator.ne(indexed.function_addr, artifact.function_addr):
         raise ValueError("indexed-address evidence is open or belongs to another function")
-    if not writes.closed or writes.function_addr != artifact.function_addr:
+    if not writes.closed or operator.ne(writes.function_addr, artifact.function_addr):
         raise ValueError("logical write-value evidence is open or belongs to another function")
     loops, dominators = collect_ssa_natural_loops_8616(artifact)
     return tuple(
         _candidate_for_source_8616(artifact, source, writes, loops, dominators)
-        for source in indexed.facts
+        for source in iter(indexed.facts)
     )
 
 
+@cython.ccall
 def collect_indexed_loop_ranges_from_ssa_8616(
     artifact: SSAFunctionArtifact,
     indexed: IndexedAddressEvidence8616,

@@ -1,4 +1,5 @@
 # AUTO-GENERATED split from cli_runtime_shared.py
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: discover and select function work items for orchestrated decompilation.
@@ -6,6 +7,7 @@ Forbidden: owning decompiler semantics, source-backed recovery, or postprocess s
 """
 
 from __future__ import annotations
+import cython
 
 import builtins as builtins
 import contextlib
@@ -87,6 +89,8 @@ from inertia.cli.project_loading import (
 from inertia.cli.runtime_support import (
     AnalysisTimeout as _AnalysisTimeout,
 )
+import dataclasses
+import operator
 
 # Static named reexports keep the legacy CLI facade's names explicit for type checkers; runtime bindings and __all__ are unchanged.
 if _cli_compat_typing.TYPE_CHECKING:
@@ -195,24 +199,25 @@ from inertia.semantics.callsite_summary import (
 
 # Pseudo-callee DOS helper addresses (when materialized) live in a synthetic
 # high-address range, well above real 16-bit image code.
-DOS_SERVICE_BASE_ADDR: int = 0xF000_0000
+DOS_SERVICE_BASE_ADDR: cython.longlong = 0xF000_0000
 
-type _AngrCfg = Any
-type _AngrFunction = Any
-type _AngrBlock = Any
-type _AngrObject = Any
+_AngrCfg = typing.TypeAliasType("_AngrCfg", Any)
+_AngrFunction = typing.TypeAliasType("_AngrFunction", Any)
+_AngrBlock = typing.TypeAliasType("_AngrBlock", Any)
+_AngrObject = typing.TypeAliasType("_AngrObject", Any)
 _FunctionCfgPair = tuple[_AngrCfg, _AngrFunction]
 _SeededRecoveryResult = list[_FunctionCfgPair] | tuple[list[_FunctionCfgPair], list[int]]
 _CandidateRecoveryCacheValue = tuple[Literal["ok"], _FunctionCfgPair] | tuple[Literal["keyerror"], str]
 
 
-def _cache_key_object(value: object) -> dict[str, object] | None:
+def _cache_key_object(value: object) -> object:
     """Narrow a cache helper result at the JSON/object boundary."""
     if not isinstance(value, dict):
         return None
-    return {str(key): item for key, item in value.items()}
+    return {str(key): item for key, item in (_forit for _forit in value.items())}
 
 
+@cython.ccall
 def _function_cfg_pair_object(value: object) -> _FunctionCfgPair:
     """Narrow a dynamically returned ``(CFG, function)`` pair."""
     if isinstance(value, tuple) and len(value) == 2:
@@ -222,49 +227,50 @@ _DISPLAY_CATALOG_CACHE_POLICY_SCHEMA_8616 = 3
 _BINARY_EXACT_REGION_INFO_KEY_8616 = "x86_16_binary_exact_region"
 
 
-def _dynamic_attr(obj: object, name: str, default: object = None) -> _AngrObject:
+@cython.ccall
+def _dynamic_attr(obj: object, name: object, default: object = None) -> _AngrObject:
     """Read dynamic angr/third-party attributes at the CLI recovery boundary."""
     return builtins.getattr(obj, name, default)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DisplayCatalogCachePolicy8616:
     """Runtime inputs that may change sidecar-free function discovery results."""
 
-    ignore_local_sidecar_hints: bool
-    include_library_functions: bool
-    function_discovery_backend: str
-    pat_backend: str
-    max_functions: int
-    timeout: int
-    window: int
-    rizin_timeout: int
-    low_memory: bool
-    auto_rizin_policy: str
-    signature_catalog_path: str | None
+    ignore_local_sidecar_hints: cython.bint
+    include_library_functions: cython.bint
+    function_discovery_backend: object
+    pat_backend: object
+    max_functions: cython.longlong
+    timeout: cython.longlong
+    window: cython.longlong
+    rizin_timeout: cython.longlong
+    low_memory: cython.bint
+    auto_rizin_policy: object
+    signature_catalog_path: object
     signature_catalog_size: int | None
     signature_catalog_mtime_ns: int | None
-    catalog_timeout: int = DEFAULT_CATALOG_TIMEOUT
+    catalog_timeout: cython.longlong = DEFAULT_CATALOG_TIMEOUT
 
     @classmethod
     def from_runtime(
         cls,
         *,
-        ignore_local_sidecar_hints: bool,
-        include_library_functions: bool,
-        function_discovery_backend: str,
-        pat_backend: str,
-        max_functions: int,
-        timeout: int,
-        window: int,
-        rizin_timeout: int,
-        low_memory: bool,
-        auto_rizin_policy: str,
-        signature_catalog: Path | None,
-        catalog_timeout: int = DEFAULT_CATALOG_TIMEOUT,
+        ignore_local_sidecar_hints: cython.bint,
+        include_library_functions: cython.bint,
+        function_discovery_backend: object,
+        pat_backend: object,
+        max_functions: cython.longlong,
+        timeout: cython.longlong,
+        window: cython.longlong,
+        rizin_timeout: cython.longlong,
+        low_memory: cython.bint,
+        auto_rizin_policy: object,
+        signature_catalog: object,
+        catalog_timeout: cython.longlong = DEFAULT_CATALOG_TIMEOUT,
     ) -> Self:
         """Build a stable cache policy from the effective CLI discovery inputs."""
-        catalog_path: str | None = None
+        catalog_path: object = None
         catalog_size: int | None = None
         catalog_mtime_ns: int | None = None
         if signature_catalog is not None:
@@ -315,6 +321,7 @@ class DisplayCatalogCachePolicy8616:
         }
 
 
+@cython.ccall
 def _configure_display_catalog_cache_policy_8616(
     project: angr.Project,
     policy: DisplayCatalogCachePolicy8616,
@@ -323,6 +330,7 @@ def _configure_display_catalog_cache_policy_8616(
     cast(Any, project)._inertia_display_catalog_cache_policy = policy
 
 
+@cython.ccall
 def _display_catalog_cache_policy_8616(project: angr.Project) -> DisplayCatalogCachePolicy8616:
     """Return configured policy or a conservative legacy-compatible default."""
     policy = _dynamic_attr(project, "_inertia_display_catalog_cache_policy", None)
@@ -343,6 +351,7 @@ def _display_catalog_cache_policy_8616(project: angr.Project) -> DisplayCatalogC
     )
 
 
+@cython.ccall
 def _source_region_catalog_evidence_8616(
     project: angr.Project,
 ) -> SourceRegionCatalogEvidence8616 | None:
@@ -351,9 +360,10 @@ def _source_region_catalog_evidence_8616(
     return evidence if isinstance(evidence, SourceRegionCatalogEvidence8616) else None
 
 
+@cython.ccall
 def _record_caller_return_use_evidence_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     evidence: CallerReturnUseEvidence8616,
 ) -> None:
     """Store typed caller-use evidence on the exact-slice project contract."""
@@ -363,23 +373,23 @@ def _record_caller_return_use_evidence_8616(
 def _caller_target_aliases_for_lst_function_8616(
     lst_metadata: LSTMetadata,
     *,
-    recovered_addr: int,
-    name: str,
-) -> tuple[int, ...]:
+    recovered_addr: cython.longlong,
+    name: object,
+) -> tuple[cython.longlong, ...]:
     """Return proven sidecar label aliases for one adjusted function entry."""
     normalized_name = name.lstrip("_")
     label_aliases = tuple(
         label_addr
-        for label_addr, label_name in _visible_code_labels(lst_metadata).items()
-        if label_name.lstrip("_") == normalized_name
+        for label_addr, label_name in (_forit for _forit in _visible_code_labels(lst_metadata).items())
+        if operator.eq(label_name.lstrip("_"), normalized_name)
     )
-    return tuple(dict.fromkeys((recovered_addr, *label_aliases)))
+    return tuple(dict.fromkeys((recovered_addr, ) + tuple(label_aliases)))
 
 
 def _collect_caller_return_use_for_entry_aliases_8616(
     project: object,
-    target_addrs: tuple[int, ...],
-    function_ranges: tuple[tuple[int, int], ...],
+    target_addrs: object,
+    function_ranges: object,
 ) -> CallerReturnUseEvidence8616 | None:
     """Collect caller-use evidence across proven label and prologue aliases.
 
@@ -398,7 +408,7 @@ def _collect_caller_return_use_for_entry_aliases_8616(
     if os.environ.get("INERTIA_DEBUG_RETURN_TYPE_EVIDENCE") == "1":
         logging.getLogger(__name__).warning(
             "entry-alias return-use evidence: targets=%r facts=%r",
-            tuple(hex(target_addr) for target_addr in unique_targets),
+            tuple(hex(target_addr) for target_addr in iter(unique_targets)),
             (
                 evidence.verdict.value,
                 evidence.callsite_addrs,
@@ -411,12 +421,13 @@ def _collect_caller_return_use_for_entry_aliases_8616(
     return evidence if evidence.verdict is not CallerReturnUseVerdict8616.UNKNOWN else None
 
 
+@cython.ccall
 def _binary_padding_entry_aliases_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     *,
     max_padding: int | None = None,
-) -> tuple[int, ...]:
+) -> tuple[cython.longlong, ...]:
     """Return callable addresses in the contiguous NOP run before a prologue.
 
     MS C may expose a public entry at the beginning of alignment padding while
@@ -424,6 +435,8 @@ def _binary_padding_entry_aliases_8616(
     address in the contiguous NOP suffix reaches that prologue without side
     effects, so each is a valid alias for caller-use evidence.
     """
+    memory: object
+    byte: object
     padding_limit = (
         _X86_16_EXACT_REGION_PADDING_SCAN_LIMIT
         if max_padding is None
@@ -454,13 +467,17 @@ def _binary_padding_entry_aliases_8616(
     return tuple(range(padding_start, function_addr + 1))
 
 
+@cython.ccall
 def _entry_linear_caller_range_8616(
     project: object,
     *,
-    target_addrs: tuple[int, ...] = (),
-    max_scan: int = 0x200,
-) -> tuple[int, int] | None:
+    target_addrs: object = (),
+    max_scan: cython.longlong = 0x200,
+) -> object:
     """Return an entry range ending after a direct call into the source region."""
+    disassembler: object
+    memory: object
+    instruction: object
     entry = _dynamic_attr(project, "entry", None)
     loader = _dynamic_attr(project, "loader", None)
     memory = _dynamic_attr(loader, "memory", None)
@@ -479,7 +496,7 @@ def _entry_linear_caller_range_8616(
         instructions = tuple(disassembler.disasm(code, entry))
     except Exception:
         return None
-    normalized_targets = {target_addr & 0xFFFF for target_addr in target_addrs}
+    normalized_targets = {target_addr & 0xFFFF for target_addr in iter(target_addrs)}
     saw_target_call = not normalized_targets
     for instruction in instructions:
         address = _dynamic_attr(instruction, "address", None)
@@ -502,7 +519,8 @@ def _entry_linear_caller_range_8616(
     return None
 
 
-def _is_return_mnemonic_8616(mnemonic: object) -> bool:
+@cython.ccall
+def _is_return_mnemonic_8616(mnemonic: object) -> cython.bint:
     """Check whether a dynamic mnemonic value is a return instruction."""
     return isinstance(mnemonic, str) and mnemonic.lower() in {"ret", "retf", "iret"}
 
@@ -510,29 +528,31 @@ def _is_return_mnemonic_8616(mnemonic: object) -> bool:
 def _collect_direct_callee_return_use_evidence_8616(
     project: object,
     function: object,
-    function_ranges: tuple[tuple[int, int], ...],
-) -> dict[int, CallerReturnUseEvidence8616]:
+    function_ranges: object,
+) -> object:
     """Collect whole-program return-use evidence for direct outgoing callees."""
+    evidence: object
+    target_addr: object
     existing = caller_return_use_evidence_by_addr_8616(project)
     direct_targets = tuple(
         dict.fromkeys(
             target.target_addr
-            for target in collect_neighbor_call_targets(function)
+            for target in (_forit for _forit in collect_neighbor_call_targets(function))
             if target.return_addr is not None
         )
     )
-    collected: dict[int, CallerReturnUseEvidence8616] = {}
+    collected: dict[cython.longlong, CallerReturnUseEvidence8616] = {}
     for target_addr in direct_targets:
         if target_addr in existing:
             continue
         boundary_aliases = tuple(
             start
-            for start, end in function_ranges
+            for start, end in iter(function_ranges)
             if start <= target_addr < end
         )
         evidence = _collect_caller_return_use_for_entry_aliases_8616(
             project,
-            tuple(dict.fromkeys((target_addr, *boundary_aliases))),
+            tuple(dict.fromkeys((target_addr, ) + tuple(boundary_aliases))),
             function_ranges,
         )
         if evidence is not None:
@@ -630,19 +650,23 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _RankedBinaryPreviewItem:
     function_cfg: _AngrCfg | None
     function: _AngrFunction | None
 
 
-def _metadata_code_windows(project: angr.Project, linked_base: int, image_end: int) -> list[tuple[int, int]]:
+@cython.ccall
+def _metadata_code_windows(project: angr.Project, linked_base: cython.longlong, image_end: cython.longlong) -> object:
     """Collect labelled LST code ranges clamped to the image window."""
-    windows: list[tuple[int, int]] = []
+    metadata: object
+    end: object
+    start: object
+    windows: list[tuple[cython.longlong, cython.longlong]] = []
     metadata = _dynamic_attr(project, "_inertia_lst_metadata", None)
     if metadata is None:
         return windows
-    for start, end in sorted(_dynamic_attr(metadata, "code_ranges", {}).values()):
+    for start, end in sorted(tuple(_dynamic_attr(metadata, "code_ranges", {}).values())):
         if start >= end:
             continue
         if _lst_code_label(metadata, start, project.entry) is None:
@@ -651,9 +675,11 @@ def _metadata_code_windows(project: angr.Project, linked_base: int, image_end: i
     return windows
 
 
-def _mz_segment_windows(main_object: object, linked_base: int, image_end: int) -> list[tuple[int, int]]:
+@cython.ccall
+def _mz_segment_windows(main_object: object, linked_base: cython.longlong, image_end: cython.longlong) -> object:
     """Collect MZ segment spans clamped to the image window."""
-    windows: list[tuple[int, int]] = []
+    span: object
+    windows: list[tuple[cython.longlong, cython.longlong]] = []
     for span in _dynamic_attr(main_object, "mz_segment_spans", ()):
         start = max(linked_base, _dynamic_attr(span, "start_linear", linked_base))
         end = min(image_end, _dynamic_attr(span, "end_linear", image_end))
@@ -662,9 +688,12 @@ def _mz_segment_windows(main_object: object, linked_base: int, image_end: int) -
     return windows
 
 
-def _merge_scan_windows(windows: list[tuple[int, int]]) -> list[tuple[int, int]]:
+@cython.ccall
+def _merge_scan_windows(windows: object) -> object:
     """Merge sorted overlapping scan windows."""
-    merged: list[tuple[int, int]] = []
+    end: object
+    start: object
+    merged: list[tuple[cython.longlong, cython.longlong]] = []
     for start, end in sorted(windows):
         if not merged or start > merged[-1][1]:
             merged.append((start, end))
@@ -673,7 +702,8 @@ def _merge_scan_windows(windows: list[tuple[int, int]]) -> list[tuple[int, int]]
     return merged
 
 
-def _x86_16_image_end_exclusive_8616(max_addr: int) -> int:
+@cython.ccall
+def _x86_16_image_end_exclusive_8616(max_addr: cython.longlong) -> cython.longlong:
     """Project an absolute inclusive ``max_addr`` to the exclusive image end.
 
     ``Backend.max_addr`` is the highest *virtual* (already-rebased) address, and
@@ -685,7 +715,8 @@ def _x86_16_image_end_exclusive_8616(max_addr: int) -> int:
     return max_addr + 1
 
 
-def _x86_16_image_relative_extent_8616(linked_base: int, max_addr: int) -> int:
+@cython.ccall
+def _x86_16_image_relative_extent_8616(linked_base: cython.longlong, max_addr: cython.longlong) -> cython.longlong:
     """Return the object-relative byte extent of the loaded image.
 
     The main object's Clemory is keyed relative to ``linked_base``, so the
@@ -696,7 +727,9 @@ def _x86_16_image_relative_extent_8616(linked_base: int, max_addr: int) -> int:
     return max_addr - linked_base + 1
 
 
-def _seed_scan_windows(project: angr.Project) -> list[tuple[int, int]]:
+@cython.ccall
+def _seed_scan_windows(project: angr.Project) -> object:
+    main_object: object
     main_object = _dynamic_attr(project.loader, "main_object", None)
     if main_object is None:
         return []
@@ -715,18 +748,18 @@ def _seed_scan_windows(project: angr.Project) -> list[tuple[int, int]]:
 
 def _entry_window_seed_targets(
     project: angr.Project,
-    code: bytes,
+    code: object,
     *,
-    linked_base: int,
-    entry_window: int = 0x200,
-) -> set[int]:
-    def _impl() -> set[int]:
+    linked_base: cython.longlong,
+    entry_window: cython.longlong = 0x200,
+) -> object:
+    def _impl() -> object:
         start = max(linked_base, project.entry)
         end = min(linked_base + len(code), project.entry + max(1, entry_window))
         if start >= end:
             return set()
 
-        entry_targets: set[int] = set()
+        entry_targets: set[cython.longlong] = set()
         start_offset = start - linked_base
         end_offset = end - linked_base
         for offset in range(start_offset, end_offset):
@@ -750,13 +783,16 @@ def _entry_window_seed_targets(
     return _impl()
 
 
+@cython.ccall
 def _linear_function_seed_targets(
     project: angr.Project,
-    start_addr: int,
+    start_addr: cython.longlong,
     *,
-    max_scan: int = 0x200,
-    include_jumps: bool = True,
-) -> set[int]:
+    max_scan: cython.longlong = 0x200,
+    include_jumps: cython.bint = True,
+) -> object:
+    insn: object
+    target: object
     try:
         code = bytes(project.loader.memory.load(start_addr, max_scan))
     except Exception:
@@ -764,7 +800,7 @@ def _linear_function_seed_targets(
     if not code:
         return set()
 
-    targets: set[int] = set()
+    targets: set[cython.longlong] = set()
     offset = 0
     while offset < len(code):
         window = code[offset : offset + 16]
@@ -782,8 +818,9 @@ def _linear_function_seed_targets(
     return targets
 
 
+@cython.ccall
 def _linear_seed_target_8616(
-    project: angr.Project, code: bytes, offset: int, insn: _AngrObject, include_jumps: bool
+    project: angr.Project, code: object, offset: cython.longlong, insn: _AngrObject, include_jumps: cython.bint
 ) -> int | None:
     """Resolve the call/jump target encoded at ``offset``, if any."""
     opcode = code[offset]
@@ -804,12 +841,14 @@ def _linear_seed_target_8616(
     return None
 
 
-def _looks_like_x86_16_function_prologue(code: bytes, offset: int) -> bool:
+@cython.ccall
+def _looks_like_x86_16_function_prologue(code: object, offset: cython.longlong) -> cython.bint:
     window = code[offset : offset + 4]
     return window.startswith(b"\x55\x8b\xec")
 
 
-def _looks_like_x86_16_entry_byte(code: bytes, offset: int) -> bool:
+@cython.ccall
+def _looks_like_x86_16_entry_byte(code: object, offset: cython.longlong) -> cython.bint:
     if offset < 0 or offset >= len(code):
         return False
     return code[offset] not in {0x00, 0x90, 0xCC}
@@ -818,7 +857,8 @@ def _looks_like_x86_16_entry_byte(code: bytes, offset: int) -> bool:
 _X86_16_EXACT_REGION_PADDING_SCAN_LIMIT = 0x80
 
 
-def _resolve_x86_16_function_start(code: bytes, offset: int, *, max_padding: int = 0x20) -> int | None:
+@cython.ccall
+def _resolve_x86_16_function_start(code: object, offset: cython.longlong, *, max_padding: cython.longlong = 0x20) -> int | None:
     if offset < 0 or offset >= len(code):
         return None
     if _looks_like_x86_16_function_prologue(code, offset):
@@ -832,7 +872,9 @@ def _resolve_x86_16_function_start(code: bytes, offset: int, *, max_padding: int
     return None
 
 
-def _resolve_x86_16_call_target(code: bytes, offset: int) -> int | None:
+@cython.ccall
+def _resolve_x86_16_call_target(code: object, offset: cython.longlong) -> int | None:
+    canonical: object
     canonical = _resolve_x86_16_function_start(code, offset)
     if canonical is not None:
         return canonical
@@ -841,8 +883,10 @@ def _resolve_x86_16_call_target(code: bytes, offset: int) -> int | None:
     return None
 
 
-def _track_ah_value_8616(text: str, ah: int | None) -> int | None:
+@cython.ccall
+def _track_ah_value_8616(text: object, ah: int | None) -> int | None:
     """Track the last known AH value from mov ah/ax instructions."""
+    ax: object
     if text.startswith("mov ah, "):
         try:
             return int(text.split(", ", 1)[1], 0)
@@ -858,7 +902,7 @@ def _track_ah_value_8616(text: str, ah: int | None) -> int | None:
     return ah
 
 
-def _region_terminator_reached_8616(project: angr.Project, insn: _AngrObject, current: int, end_limit: int, ah: int | None) -> bool:
+def _region_terminator_reached_8616(project: angr.Project, insn: _AngrObject, current: cython.longlong, end_limit: cython.longlong, ah: int | None) -> cython.bint:
     """Check a ret/int terminator ends the linear region scan."""
     if insn.mnemonic in {"ret", "retf", "iret"}:
         if current >= end_limit:
@@ -867,14 +911,16 @@ def _region_terminator_reached_8616(project: angr.Project, insn: _AngrObject, cu
             lookahead = bytes(project.loader.memory.load(current, min(16, end_limit - current)))
         except Exception:
             return True
-        return bool(lookahead) and all(byte in {0x00, 0x90, 0xCC} for byte in lookahead)
+        return bool(lookahead) and all(byte in {0x00, 0x90, 0xCC} for byte in iter(lookahead))
     if insn.mnemonic == "int":
         op = insn.op_str.lower()
         return op == "0x20" or op == "0x27" or (op == "0x21" and ah == 0x4C)
     return False
 
 
-def _infer_x86_16_linear_region(project: angr.Project, start_addr: int, *, window: int) -> tuple[int, int]:
+@cython.ccall
+def _infer_x86_16_linear_region(project: angr.Project, start_addr: cython.longlong, *, window: cython.longlong) -> tuple[cython.longlong, cython.longlong]:
+    insn: object
     end_limit = start_addr + max(window, 1)
     current = start_addr
     ah = None
@@ -902,16 +948,18 @@ def _infer_x86_16_linear_region(project: angr.Project, start_addr: int, *, windo
     return start_addr, max(start_addr + 1, current)
 
 
+@cython.ccall
 def _pick_function(
     project: angr.Project,
-    addr: int | None,
+    addr: object,
     *,
     regions: Sequence[tuple[int, int]] | None = None,
     data_references: bool | None = None,
     force_smart_scan: bool | None = None,
-    seed_calling_conventions_enabled: bool = True,
+    seed_calling_conventions_enabled: cython.bint = True,
 ) -> _FunctionCfgPair:
     """Recover a CFG while preserving the caller's convention-analysis policy."""
+    cfg: object
     target_addr = project.entry if addr is None else addr
     data_refs = True if data_references is None else data_references
     if force_smart_scan is None and project.arch.name == "86_16" and regions is not None:
@@ -932,16 +980,20 @@ def _pick_function(
     return cfg, function
 
 
+@cython.ccall
 def _recover_target_cfg_8616(
     project: angr.Project,
-    target_addr: int,
+    target_addr: cython.longlong,
     regions: Sequence[tuple[int, int]] | None,
-    data_refs: bool,
-    smart_scan_modes: tuple[bool | None, ...],
+    data_refs: cython.bint,
+    smart_scan_modes: object,
 ) -> _AngrCfg | None:
     """Try scans with independent KBs so later attempts cannot orphan functions."""
+    cfg: object
+    complete_scan: object
+    smart_scan: object
     cfg = None
-    for complete_scan in (False, True) if project.arch.name == "86_16" else (False,):
+    for complete_scan in tuple((False, True)) if project.arch.name == "86_16" else tuple((False,)):
         for smart_scan in smart_scan_modes:
             try:
                 cfg = project.analyses.CFGFast(
@@ -970,14 +1022,17 @@ def _recover_target_cfg_8616(
     return cfg
 
 
+@cython.ccall
 def _extend_cfg_86_16_8616(
     project: angr.Project,
     cfg: _AngrCfg,
     function: _AngrFunction,
-    target_addr: int,
+    target_addr: cython.longlong,
     regions: Sequence[tuple[int, int]] | None,
 ) -> tuple[_AngrCfg, _AngrFunction]:
     """Extend a recovered x86-16 CFG across far and neighbor calls."""
+    extended_cfg: object
+    extend: object
     entry_window = (regions[0][1] - regions[0][0]) if regions else 0x200
     for extend in (extend_cfg_for_far_calls, extend_cfg_for_neighbor_calls):
         extended_cfg = cast(_AngrCfg, extend(project, function, entry_window=entry_window))
@@ -993,9 +1048,9 @@ def _pick_function_lean(
     addr: int | None,
     *,
     regions: Sequence[tuple[int, int]] | None = None,
-    data_references: bool = False,
-    extend_far_calls: bool = True,
-    seed_calling_conventions_enabled: bool = True,
+    data_references: cython.bint = False,
+    extend_far_calls: cython.bint = True,
+    seed_calling_conventions_enabled: cython.bint = True,
 ) -> _FunctionCfgPair:
     def _impl() -> _FunctionCfgPair:
         """Recover a known entry point with a deliberately cheap CFGFast pass.
@@ -1005,6 +1060,7 @@ def _pick_function_lean(
         reference discovery are often unnecessary and can dominate the recovery
         budget before the function is even identified.
         """
+        extended_cfg: object
         target_addr = project.entry if addr is None else addr
         cfg = project.analyses.CFGFast(
             kb=angr.KnowledgeBase(project),
@@ -1059,22 +1115,25 @@ def _pick_function_lean(
 _DEFAULT_PICK_FUNCTION_LEAN = _pick_function_lean
 
 
-def _normalized_x86_16_recovery_window(window: int | None, *, low_memory: bool = False) -> int:
+@cython.ccall
+def _normalized_x86_16_recovery_window(window: int | None, *, low_memory: cython.bint = False) -> cython.longlong:
     floor = 0x80 if low_memory else 0x200
     if not isinstance(window, int):
         return floor
     return max(window, floor)
 
 
-def _x86_16_recovery_windows(window: int | None, *, low_memory: bool = False) -> tuple[int, ...]:
+def _x86_16_recovery_windows(window: int | None, *, low_memory: cython.bint = False) -> tuple[cython.longlong, ...]:
     base_window = _normalized_x86_16_recovery_window(window, low_memory=low_memory)
-    return tuple(base_window * factor for factor in (1, 2, 4, 8, 16))
+    return tuple(base_window * factor for factor in iter((1, 2, 4, 8, 16)))
 
 
-def _x86_16_fast_recovery_windows(window: int | None, *, low_memory: bool = False) -> tuple[int, ...]:
+@cython.ccall
+def _x86_16_fast_recovery_windows(window: int | None, *, low_memory: cython.bint = False) -> tuple[cython.longlong, ...]:
+    candidate: object
     effective_window = _normalized_x86_16_recovery_window(window, low_memory=low_memory)
     candidate_windows = (0x40, 0x80, 0x100) if low_memory else (0x80, 0x100, 0x200)
-    windows: list[int] = []
+    windows: list[cython.longlong] = []
     for candidate in candidate_windows:
         current_window = effective_window if effective_window <= candidate else candidate
         if current_window not in windows:
@@ -1089,10 +1148,11 @@ def _recover_cfg(
     project: angr.Project,
     binary_path: Path,
     *,
-    base_addr: int,
-    window: int,
-    low_memory: bool = False,
+    base_addr: cython.longlong,
+    window: cython.longlong,
+    low_memory: cython.bint = False,
 ) -> _AngrCfg:
+    extended_cfg: object
     print(
         f"[dbg] recover_cfg: entry={hex(project.entry)} base_addr={hex(base_addr)} window={hex(window)} binary={binary_path}"
     )
@@ -1140,8 +1200,8 @@ def _recover_cfg(
 def _recover_partial_cfg(
     project: angr.Project,
     *,
-    window: int,
-    low_memory: bool = False,
+    window: cython.longlong,
+    low_memory: cython.bint = False,
 ) -> _AngrCfg:
     def _impl() -> _AngrCfg:
         """Recover a bounded x86-16 catalog around the entry point.
@@ -1150,8 +1210,10 @@ def _recover_partial_cfg(
         packed startup stubs. It keeps CFGFast inside narrow entry windows instead
         of asking angr to recover the entire executable at once.
         """
+        last_error: object
+        candidate_window: object
         candidate_windows = _x86_16_recovery_windows(window, low_memory=low_memory)
-        last_error: Exception | None = None
+        last_error = None
         for candidate_window in candidate_windows:
             cast(_AngrObject, project)._inertia_decompiler_stage = f"catalog:narrow:{candidate_window:#x}"
             try:
@@ -1165,14 +1227,19 @@ def _recover_partial_cfg(
     return _impl()
 
 
-def _try_partial_cfg_window_8616(project: angr.Project, candidate_window: int) -> _AngrCfg:
+@cython.ccall
+def _try_partial_cfg_window_8616(project: angr.Project, candidate_window: cython.longlong) -> _AngrCfg:
     """Attempt one bounded CFGFast recovery inside a candidate window."""
+    extended_cfg: object
+    last_error: object
+    data_refs: object
+    extend: object
     if project.arch.name == "86_16":
         regions = [_infer_x86_16_linear_region(project, project.entry, window=candidate_window)]
     else:
         regions = [(project.entry, project.entry + candidate_window)]
-    last_error: Exception | None = None
-    for data_refs in (False, True) if project.arch.name == "86_16" else (False,):
+    last_error = None
+    for data_refs in tuple((False, True)) if project.arch.name == "86_16" else tuple((False,)):
         try:
             cfg = project.analyses.CFGFast(
                 start_at_entry=False,
@@ -1208,7 +1275,8 @@ def _try_partial_cfg_window_8616(project: angr.Project, candidate_window: int) -
     raise last_error
 
 
-def _function_skip_reason(function: _AngrFunction) -> str | None:
+@cython.ccall
+def _function_skip_reason(function: _AngrFunction) -> object:
     if _dynamic_attr(function, "is_simprocedure", False):
         return "SimProcedure (DOS helper)"
     addr = _dynamic_attr(function, "addr", None)
@@ -1217,20 +1285,22 @@ def _function_skip_reason(function: _AngrFunction) -> str | None:
     return None
 
 
-def _function_recovery_score(function: _AngrFunction) -> tuple[int, int]:
+def _function_recovery_score(function: _AngrFunction) -> tuple[cython.longlong, cython.longlong]:
     """Score coverage from a dynamic angr function object."""
     blocks = tuple(_dynamic_attr(function, "blocks", ()) or ())
     if not blocks:
         return (0, 0)
-    total_bytes = sum(max(0, int(_dynamic_attr(block, "size", 0) or 0)) for block in blocks)
+    total_bytes = sum(max(0, int(_dynamic_attr(block, "size", 0) or 0)) for block in iter(blocks))
     return (len(blocks), total_bytes)
 
 
+@cython.ccall
 def _block_ranges_for_overlap_8616(
     blocks: Sequence[_AngrBlock] | None,
-    exact_region: tuple[int, int] | None = None,
-) -> list[tuple[int, int]]:
-    ranges: list[tuple[int, int]] = []
+    exact_region: object = None,
+) -> object:
+    block: object
+    ranges: list[tuple[cython.longlong, cython.longlong]] = []
     for block in tuple(blocks or ()):
         addr = _dynamic_attr(block, "addr", None)
         size = max(0, _dynamic_attr(block, "size", 0))
@@ -1249,10 +1319,14 @@ def _block_ranges_for_overlap_8616(
     return sorted(ranges)
 
 
-def _block_overlap_count_8616(blocks: Sequence[_AngrBlock] | None, exact_region: tuple[int, int] | None = None) -> int:
+@cython.ccall
+def _block_overlap_count_8616(blocks: Sequence[_AngrBlock] | None, exact_region: object = None) -> cython.longlong:
+    last_end: object
+    end: object
+    start: object
     ranges = _block_ranges_for_overlap_8616(blocks, exact_region)
     overlap_count = 0
-    last_end: int | None = None
+    last_end = None
     for start, end in ranges:
         if last_end is not None and start < last_end:
             overlap_count += 1
@@ -1262,29 +1336,33 @@ def _block_overlap_count_8616(blocks: Sequence[_AngrBlock] | None, exact_region:
 
 def _block_unique_covered_bytes_8616(
     blocks: Sequence[_AngrBlock] | None,
-    exact_region: tuple[int, int] | None = None,
-) -> int:
+    exact_region: object = None,
+) -> cython.longlong:
+    end: object
+    start: object
     ranges = _block_ranges_for_overlap_8616(blocks, exact_region)
     if not ranges:
         return 0
-    merged: list[list[int]] = []
+    merged: list[list[cython.longlong]] = []
     for start, end in ranges:
         if not merged or start > merged[-1][1]:
             merged.append([start, end])
             continue
         merged[-1][1] = max(merged[-1][1], end)
-    return sum(end - start for start, end in merged)
+    return sum(end - start for start, end in iter(merged))
 
 
-def _function_block_overlap_count_8616(function: _AngrFunction, exact_region: tuple[int, int] | None = None) -> int:
+@cython.ccall
+def _function_block_overlap_count_8616(function: _AngrFunction, exact_region: object = None) -> cython.longlong:
     return _block_overlap_count_8616(tuple(_dynamic_attr(function, "blocks", ()) or ()), exact_region)
 
 
+@cython.ccall
 def _should_replace_exact_region_candidate_8616(
     current: _AngrFunction,
     candidate: _AngrFunction,
-    exact_region: tuple[int, int] | None,
-) -> bool:
+    exact_region: object,
+) -> cython.bint:
     current_score = _function_recovery_score(current)
     candidate_score = _function_recovery_score(candidate)
     if candidate_score <= current_score:
@@ -1297,9 +1375,12 @@ def _should_replace_exact_region_candidate_8616(
     return True
 
 
-def _function_covered_ranges(function: _AngrFunction) -> list[tuple[int, int]]:
-    def _impl() -> list[tuple[int, int]]:
-        ranges: list[tuple[int, int]] = []
+def _function_covered_ranges(function: _AngrFunction) -> object:
+    def _impl() -> object:
+        block: object
+        end: object
+        start: object
+        ranges: list[tuple[cython.longlong, cython.longlong]] = []
         for block in tuple(_dynamic_attr(function, "blocks", ()) or ()):
             addr = _dynamic_attr(block, "addr", None)
             size = max(0, _dynamic_attr(block, "size", 0))
@@ -1313,7 +1394,7 @@ def _function_covered_ranges(function: _AngrFunction) -> list[tuple[int, int]]:
                 ranges.append((addr, addr + score[1]))
         if not ranges:
             return []
-        merged: list[tuple[int, int]] = []
+        merged: list[tuple[cython.longlong, cython.longlong]] = []
         for start, end in sorted(ranges):
             if not merged or start > merged[-1][1]:
                 merged.append((start, end))
@@ -1324,9 +1405,10 @@ def _function_covered_ranges(function: _AngrFunction) -> list[tuple[int, int]]:
     return _impl()
 
 
+@cython.ccall
 def _mark_function_binary_exact_region_8616(
     function: _AngrFunction,
-    exact_region: tuple[int, int],
+    exact_region: object,
 ) -> None:
     """Attach binary-derived function bounds at the dynamic angr boundary.
 
@@ -1339,8 +1421,10 @@ def _mark_function_binary_exact_region_8616(
         info[_BINARY_EXACT_REGION_INFO_KEY_8616] = list(exact_region)
 
 
-def _function_binary_exact_region_8616(function: object) -> tuple[int, int] | None:
+@cython.ccall
+def _function_binary_exact_region_8616(function: object) -> object:
     """Return validated binary-derived bounds attached during discovery."""
+    region: object
     info = _dynamic_attr(function, "info", None)
     if not isinstance(info, Mapping):
         return None
@@ -1356,22 +1440,25 @@ def _function_binary_exact_region_8616(function: object) -> tuple[int, int] | No
     return None
 
 
-def _addr_in_ranges(addr: int, ranges: list[tuple[int, int]]) -> bool:
-    return any(start <= addr < end for start, end in ranges)
+def _addr_in_ranges(addr: cython.longlong, ranges: object) -> cython.bint:
+    return any(start <= addr < end for start, end in iter(ranges))
 
 
+@cython.ccall
 def _candidate_recovery_regions(
     metadata: LSTMetadata | None,
-    addr: int,
+    addr: cython.longlong,
     *,
-    image_end: int,
-    region_span: int,
-    project_entry: int,
-) -> list[tuple[int, int]]:
+    image_end: cython.longlong,
+    region_span: cython.longlong,
+    project_entry: cython.longlong,
+) -> object:
+    exact_region: object
+    candidate_window: object
     exact_region = _lst_code_region(metadata, addr)
     if exact_region is not None:
         return [exact_region]
-    regions: list[tuple[int, int]] = []
+    regions: list[tuple[cython.longlong, cython.longlong]] = []
     candidate_windows = _x86_16_fast_recovery_windows(region_span)
     if addr < project_entry:
         candidate_windows = (region_span,)
@@ -1382,16 +1469,18 @@ def _candidate_recovery_regions(
     return regions
 
 
+@cython.ccall
 def _richest_bounded_recovery_region(
-    addr: int,
+    addr: cython.longlong,
     *,
-    image_end: int,
-    region_span: int,
-) -> tuple[int, int]:
+    image_end: cython.longlong,
+    region_span: cython.longlong,
+) -> tuple[cython.longlong, cython.longlong]:
     return (addr, min(addr + _x86_16_recovery_windows(region_span)[-1], image_end))
 
 
-def _x86_16_region_image_end_8616(project: angr.Project | None) -> int | None:
+@cython.ccall
+def _x86_16_region_image_end_8616(project: object) -> int | None:
     """Resolve the loaded image end address for region extension."""
     if project is None:
         return None
@@ -1402,10 +1491,13 @@ def _x86_16_region_image_end_8616(project: angr.Project | None) -> int | None:
     return _x86_16_image_end_exclusive_8616(max_addr)
 
 
+@cython.ccall
 def _extended_terminator_region_8616(
-    start: int, end: int, trailer: bytes, image_end: int
-) -> tuple[int, int]:
+    start: cython.longlong, end: cython.longlong, trailer: object, image_end: cython.longlong
+) -> tuple[cython.longlong, cython.longlong]:
     """Extend a coarse region to cover a nearby return terminator."""
+    byte: object
+    idx: object
     op0 = trailer[0]
     if op0 in {0xC3, 0xCB}:  # ret / retf
         return (start, end + 1)
@@ -1422,10 +1514,12 @@ def _extended_terminator_region_8616(
     return (start, end)
 
 
+@cython.ccall
 def _maybe_extend_x86_16_exact_region_terminator(
     project: angr.Project,
-    exact_region: tuple[int, int] | None,
-) -> tuple[int, int] | None:
+    exact_region: object,
+) -> object:
+    image_end: object
     if exact_region is None:
         return None
     start, end = exact_region
@@ -1447,8 +1541,8 @@ def _maybe_extend_x86_16_exact_region_terminator(
 
 def _x86_16_exact_region_has_terminator(
     project: angr.Project,
-    exact_region: tuple[int, int] | None,
-) -> bool:
+    exact_region: object,
+) -> cython.bint:
     if exact_region is None:
         return False
     start, end = exact_region
@@ -1473,24 +1567,27 @@ def _x86_16_exact_region_has_terminator(
         return False
     # Accept plain returns, iret, and direct near/far jumps as explicit block terminators.
     terminators = {0xC2, 0xC3, 0xCA, 0xCB, 0xCF, 0xE9, 0xEA, 0xEB}
-    return any(byte in terminators for byte in raw)
+    return any(byte in terminators for byte in iter(raw))
 
 
-def _recovery_score_good_enough(score: tuple[int, int]) -> bool:
+@cython.ccall
+def _recovery_score_good_enough(score: object) -> cython.bint:
     blocks, total_bytes = score
     return total_bytes >= 0x40 or blocks >= 4
 
 
+@cython.ccall
 def _exact_region_recovery_looks_truncated(
     function: _AngrFunction,
-    exact_region: tuple[int, int] | None,
-) -> bool:
+    exact_region: object,
+) -> cython.bint:
     """Detect omitted native instructions inside independently supplied bounds.
 
     Region size and byte ratios cannot prove completeness: a short function
     may lose its entire post-call body, while a complete return may precede
     substantial padding. Only a closed Frontend census authorizes recovery.
     """
+    boundary: object
     if exact_region is None:
         return False
     boundary = bounded_entry_function_boundary_8616(
@@ -1500,17 +1597,18 @@ def _exact_region_recovery_looks_truncated(
         return False
     recovered_instructions = {
         instruction_addr
-        for block in function.blocks
-        for instruction_addr in block.instruction_addrs
+        for block in iter(function.blocks)
+        for instruction_addr in iter(block.instruction_addrs)
     }
     return bool(boundary.reachable_instruction_addrs - recovered_instructions)
 
 
+@cython.ccall
 def _stitch_x86_16_exact_function_8616(
     project: angr.Project,
     function: _AngrFunction,
-    exact_region: tuple[int, int] | None,
-) -> tuple[_AngrFunction, bool]:
+    exact_region: object,
+) -> tuple[_AngrFunction, cython.bint]:
     if exact_region is None:
         return function, False
     start, end = exact_region
@@ -1537,13 +1635,16 @@ def _stitch_x86_16_exact_function_8616(
     return function, True
 
 
+@cython.ccall
 def _collect_stitched_blocks_and_edges_8616(
-    project: angr.Project, entry: int, start: int, end: int
-) -> tuple[dict[int, object], set[tuple[int, int]]]:
-    reachable: dict[int, _AngrBlock] = {}
-    edges: set[tuple[int, int]] = set()
-    queue: list[int] = [entry]
-    visited: set[int] = set()
+    project: angr.Project, entry: cython.longlong, start: cython.longlong, end: cython.longlong
+) -> tuple[dict[cython.longlong, object], set[tuple[cython.longlong, cython.longlong]]]:
+    block_addr: object
+    succ: object
+    reachable: dict[cython.longlong, _AngrBlock] = {}
+    edges: set[tuple[cython.longlong, cython.longlong]] = set()
+    queue: list[cython.longlong] = [entry]
+    visited: set[cython.longlong] = set()
     while queue:
         block_addr = queue.pop(0)
         if block_addr in visited or not (start <= block_addr < end):
@@ -1570,15 +1671,17 @@ def _collect_stitched_blocks_and_edges_8616(
 
 def _cap_stitched_blocks_to_leaders_8616(
     project: angr.Project,
-    reachable: dict[int, _AngrBlock],
+    reachable: object,
     *,
     region_end: int | None = None,
-) -> dict[int, object]:
+) -> object:
     """Cap stitched blocks at the next leader and the authoritative region end."""
+    cap_end: object
+    block_addr: object
     if len(reachable) <= 1:
         return reachable
     leaders = sorted(reachable)
-    capped: dict[int, object] = {}
+    capped: dict[cython.longlong, object] = {}
     for block_addr in leaders:
         block = reachable[block_addr]
         block_size = int(_dynamic_attr(block, "size", 0) or 0)
@@ -1586,7 +1689,7 @@ def _cap_stitched_blocks_to_leaders_8616(
             capped[block_addr] = block
             continue
         block_end = block_addr + block_size
-        cap_end = next((leader for leader in leaders if block_addr < leader < block_end), block_end)
+        cap_end = next((leader for leader in iter(leaders) if block_addr < leader < block_end), block_end)
         if isinstance(region_end, int):
             cap_end = min(cap_end, region_end)
         if cap_end >= block_end:
@@ -1608,12 +1711,16 @@ def _cap_stitched_blocks_to_leaders_8616(
     return capped
 
 
+@cython.ccall
 def _recompute_stitched_edges_8616(
-    reachable: dict[int, _AngrBlock],
-    start: int,
-    end: int,
-) -> set[tuple[int, int]]:
-    edges: set[tuple[int, int]] = set()
+    reachable: object,
+    start: cython.longlong,
+    end: cython.longlong,
+) -> object:
+    block: object
+    block_addr: object
+    succ: object
+    edges: set[tuple[cython.longlong, cython.longlong]] = set()
     for block_addr, block in reachable.items():
         successors, _ = _x86_16_block_successors_from_capstone_8616(block, region_start=start, region_end=end)
         for succ in successors:
@@ -1623,11 +1730,11 @@ def _recompute_stitched_edges_8616(
 
 def _should_replace_function_with_stitched_graph_8616(
     function: _AngrFunction,
-    reachable: dict[int, _AngrBlock],
-    exact_region: tuple[int, int] | None = None,
-) -> bool:
+    reachable: object,
+    exact_region: object = None,
+) -> cython.bint:
     current_block_count, current_block_bytes = _function_recovery_score(function)
-    stitched_bytes = sum(len(_dynamic_attr(block, "bytes", b"")) for block in reachable.values())
+    stitched_bytes = sum(len(_dynamic_attr(block, "bytes", b"")) for block in (_forit for _forit in reachable.values()))
     current_blocks = tuple(_dynamic_attr(function, "blocks", ()) or ())
     stitched_blocks = tuple(reachable.values())
     if exact_region is not None and stitched_blocks:
@@ -1638,7 +1745,7 @@ def _should_replace_function_with_stitched_graph_8616(
                 block.addr < region_start
                 or block.addr + max(0, int(_dynamic_attr(block, "size", 0) or 0)) > region_end
             )
-            for block in current_blocks
+            for block in iter(current_blocks)
         )
         if current_escapes_region:
             return True
@@ -1652,6 +1759,7 @@ def _should_replace_function_with_stitched_graph_8616(
     return stitched_bytes > current_block_bytes or len(reachable) > current_block_count
 
 
+@cython.ccall
 def _reset_function_graph_state_8616(function: _AngrFunction) -> None:
     """Clear recovered nodes and invalidate angr's derived local CFG together."""
     try:
@@ -1674,12 +1782,18 @@ def _reset_function_graph_state_8616(function: _AngrFunction) -> None:
         pass
 
 
+@cython.ccall
 def _rebuild_function_transition_graph_8616(
     function: _AngrFunction,
-    reachable: dict[int, _AngrBlock],
-    edges: set[tuple[int, int]],
+    reachable: object,
+    edges: object,
 ) -> None:
     """Rebuild graph nodes through dynamic angr function internals."""
+    source_node: object
+    target_node: object
+    block_addr: object
+    source_addr: object
+    target_addr: object
     BlockNode = cast(
         _AngrObject, _dynamic_attr(importlib.import_module("angr.knowledge_plugins.cfg.cfg_node"), "BlockNode")
     )
@@ -1702,7 +1816,10 @@ def _rebuild_function_transition_graph_8616(
             continue
 
 
-def _mark_stitched_return_sites_8616(function: _AngrFunction, reachable: dict[int, _AngrBlock]) -> None:
+@cython.ccall
+def _mark_stitched_return_sites_8616(function: _AngrFunction, reachable: object) -> None:
+    source_node: object
+    block_addr: object
     for block_addr in sorted(reachable):
         source_node = function.get_node(block_addr)
         if source_node is None:
@@ -1717,6 +1834,7 @@ def _mark_stitched_return_sites_8616(function: _AngrFunction, reachable: dict[in
             function._add_return_site(source_node)
 
 
+@cython.ccall
 def _mark_x86_16_stitched_recovery_8616(function: _AngrFunction) -> None:
     info = _dynamic_attr(function, "info", None)
     if not isinstance(info, dict):
@@ -1733,8 +1851,8 @@ def _commit_exact_region_function_to_kb_8616(
     project: angr.Project,
     cfg: _AngrCfg,
     function: _AngrFunction,
-    exact_region: tuple[int, int] | None,
-) -> bool:
+    exact_region: object,
+) -> cython.bint:
     """Commit a selected exact-region function into later function managers.
 
     CFGFast can leave smaller region-local pseudo-functions in the project KB
@@ -1746,6 +1864,7 @@ def _commit_exact_region_function_to_kb_8616(
     Publication creates lookup aliases while retaining the originating manager.
     Native consumers resolve its CFG model through that manager's knowledge base.
     """
+    manager: object
     if _dynamic_attr(_dynamic_attr(project, "arch", None), "name", None) != "86_16":
         return False
     if exact_region is None:
@@ -1761,7 +1880,7 @@ def _commit_exact_region_function_to_kb_8616(
     project_functions = _dynamic_attr(_dynamic_attr(project, "kb", None), "functions", None)
     cfg_functions = _dynamic_attr(cfg, "functions", None)
     for manager in (project_functions, cfg_functions):
-        if manager is not None and all(id(manager) != id(existing) for existing in managers):
+        if manager is not None and all(operator.ne(id(manager), id(existing)) for existing in iter(managers)):
             managers.append(manager)
 
     changed = False
@@ -1778,11 +1897,13 @@ def _commit_exact_region_function_to_kb_8616(
 def _commit_region_to_manager_8616(
     manager: _AngrObject,
     function: _AngrFunction,
-    entry_addr: int,
-    start: int,
-    end: int,
-) -> bool:
+    entry_addr: cython.longlong,
+    start: cython.longlong,
+    end: cython.longlong,
+) -> cython.bint:
     """Evict stale region-local entries and install the committed function."""
+    function_map: object
+    candidate_addr: object
     changed = False
     keys = tuple(_dynamic_attr(manager, "keys", lambda: ())() or ())
     for candidate_addr in keys:
@@ -1819,11 +1940,12 @@ def _commit_region_to_manager_8616(
     return changed
 
 
+@cython.ccall
 def _repair_x86_16_function_graph_8616(
     project: angr.Project,
     function: _AngrFunction,
     *,
-    exact_region: tuple[int, int] | None = None,
+    exact_region: object = None,
 ) -> None:
     """Best-effort CFG completion through dynamic angr function internals.
 
@@ -1831,6 +1953,9 @@ def _repair_x86_16_function_graph_8616(
     usually a graph-completion issue from bounded CFGFast extraction, not an
     IR/lowering defect.
     """
+    entry_addr: object
+    gates: object
+    block_addr: object
     debug_indirect = os.environ.get("INERTIA_DEBUG_INDIRECT_JUMP") == "1"
     if debug_indirect:
         logging.getLogger(__name__).warning(
@@ -1882,42 +2007,44 @@ def _repair_x86_16_function_graph_8616(
         _debug_graph_repair_finish_8616(function, discovery.blocks)
 
 
-def _debug_graph_repair_finish_8616(function: _AngrFunction, discovered: dict[int, _AngrBlock]) -> None:
+def _debug_graph_repair_finish_8616(function: _AngrFunction, discovered: object) -> None:
     """Emit the graph-repair finish diagnostics for a function."""
     transition_graph = _dynamic_attr(function, "transition_graph", None)
     graph_nodes = tuple(_dynamic_attr(transition_graph, "nodes", ()) or ())
     logging.getLogger(__name__).warning(
         "x86-16 graph repair finish discovered=%r local_blocks=%r graph_nodes=%r function_blocks=%r",
-        tuple(hex(address) for address in sorted(discovered)),
-        tuple(sorted((_dynamic_attr(function, "_local_blocks", {}) or {}).keys())),
-        tuple(sorted(_dynamic_attr(node, "addr", -1) for node in graph_nodes)),
-        tuple(sorted(_dynamic_attr(block, "addr", -1) for block in tuple(_dynamic_attr(function, "blocks", ()) or ()))),
+        tuple(hex(address) for address in (_forit for _forit in sorted(discovered))),
+        tuple(sorted(tuple((_dynamic_attr(function, "_local_blocks", {}) or {}).keys()))),
+        tuple(sorted(_dynamic_attr(node, "addr", -1) for node in iter(graph_nodes))),
+        tuple(sorted(_dynamic_attr(block, "addr", -1) for block in (_forit for _forit in tuple(_dynamic_attr(function, "blocks", ()) or ())))),
     )
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _GraphRepairScanBounds8616:
     """Resolved linear-scan window for x86-16 graph repair."""
 
-    start_bound: int
-    end_bound: int
-    scan_limit: int
+    start_bound: cython.longlong
+    end_bound: cython.longlong
+    scan_limit: cython.longlong
 
-    def contains(self, addr: int) -> bool:
+    @cython.ccall
+    def contains(self, addr: cython.longlong) -> cython.bint:
         """Return whether an address lies inside the repair scan window."""
         return isinstance(addr, int) and self.start_bound <= addr < self.end_bound
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _GraphRepairDiscovery8616:
     """Discovered blocks, edges, and indirect-jump evidence for graph repair."""
 
-    blocks: dict[int, _AngrBlock]
-    edges: set[tuple[int, int]]
+    blocks: object
+    edges: object
     indirect_artifact: object | None
-    clip_ends: dict[int, int] = field(default_factory=dict)
+    clip_ends: object = field(default_factory=dict)
 
 
+@cython.ccall
 def _graph_repair_entry_addr_8616(project: angr.Project, function: _AngrFunction) -> int | None:
     """Apply the arch/entry/graph entry gates and return the entry address."""
     if _dynamic_attr(project, "arch", None) is None or _dynamic_attr(project.arch, "name", None) != "86_16":
@@ -1932,8 +2059,8 @@ def _graph_repair_entry_addr_8616(project: angr.Project, function: _AngrFunction
 
 
 def _graph_repair_block_addrs_8616(
-    function: _AngrFunction, debug_indirect: bool
-) -> tuple[list[int], int] | None:
+    function: _AngrFunction, debug_indirect: cython.bint
+) -> object:
     """Apply the repair gates and collect sorted existing block addresses."""
     if bool(_dynamic_attr(function, "returning", None)):
         if debug_indirect:
@@ -1953,20 +2080,21 @@ def _graph_repair_block_addrs_8616(
         return None
 
     block_addrs = sorted(
-        addr for addr in (_dynamic_attr(block, "addr", None) for block in existing_blocks) if isinstance(addr, int)
+        addr for addr in iter((_dynamic_attr(block, "addr", None) for block in iter(existing_blocks))) if isinstance(addr, int)
     )
     if not block_addrs:
         return None
 
-    seed_max_byte = sum(max(0, int(_dynamic_attr(block, "size", 0) or 0)) for block in existing_blocks)
+    seed_max_byte = sum(max(0, int(_dynamic_attr(block, "size", 0) or 0)) for block in iter(existing_blocks))
     return block_addrs, seed_max_byte
 
 
+@cython.ccall
 def _graph_repair_scan_bounds_8616(
-    entry_addr: int,
-    exact_region: tuple[int, int] | None,
-    block_addrs: list[int],
-    seed_max_byte: int,
+    entry_addr: cython.longlong,
+    exact_region: object,
+    block_addrs: object,
+    seed_max_byte: cython.longlong,
 ) -> _GraphRepairScanBounds8616:
     """Resolve the linear-scan window for graph repair traversal."""
     if exact_region is not None and exact_region[0] <= entry_addr < exact_region[1]:
@@ -1981,20 +2109,23 @@ def _graph_repair_scan_bounds_8616(
     return _GraphRepairScanBounds8616(start_bound, end_bound, scan_limit)
 
 
+@cython.ccall
 def _discover_graph_repair_region_8616(
     project: angr.Project,
-    entry_addr: int,
+    entry_addr: cython.longlong,
     bounds: _GraphRepairScanBounds8616,
-    debug_indirect: bool,
+    debug_indirect: cython.bint,
 ) -> _GraphRepairDiscovery8616:
     """BFS over the scan window to discover repair blocks and edges."""
-    discovered: dict[int, _AngrBlock] = {}
-    edges: set[tuple[int, int]] = set()
-    queue: list[int] = [entry_addr]
-    visited: set[int] = set()
+    source_addr: object
+    target_addr: object
+    discovered: dict[cython.longlong, _AngrBlock] = {}
+    edges: set[tuple[cython.longlong, cython.longlong]] = set()
+    queue: list[cython.longlong] = [entry_addr]
+    visited: set[cython.longlong] = set()
     visited_bytes = 0
     limit_nodes = 512
-    seen_targets: set[int] = set()
+    seen_targets: set[cython.longlong] = set()
 
     indirect_artifact = None
     while True:
@@ -2029,17 +2160,20 @@ def _discover_graph_repair_region_8616(
     return _GraphRepairDiscovery8616(discovered, edges, indirect_artifact)
 
 
+@cython.ccall
 def _scan_repair_block_8616(
     project: angr.Project,
-    queue: list[int],
-    visited: set[int],
-    visited_bytes: int,
+    queue: object,
+    visited: object,
+    visited_bytes: cython.longlong,
     bounds: _GraphRepairScanBounds8616,
-    discovered: dict[int, _AngrBlock],
-    edges: set[tuple[int, int]],
-    seen_targets: set[int],
-) -> int:
+    discovered: object,
+    edges: object,
+    seen_targets: object,
+) -> cython.longlong:
     """Scan within the remaining window and budget, retaining external edges."""
+    block_addr: object
+    succ: object
     block_addr = queue.pop(0)
     if block_addr in visited or not bounds.contains(block_addr):
         return visited_bytes
@@ -2077,8 +2211,10 @@ def _scan_repair_block_8616(
     return visited_bytes
 
 
+@cython.ccall
 def _seed_graph_repair_node_cache_8616(function: _AngrFunction, block_node_cls: _AngrObject) -> None:
     """Pre-seed the function's addr→BlockNode cache from local blocks."""
+    node: object
     try:
         local_blocks = _dynamic_attr(function, "_local_blocks", None)
         if isinstance(local_blocks, dict):
@@ -2090,10 +2226,11 @@ def _seed_graph_repair_node_cache_8616(function: _AngrFunction, block_node_cls: 
 
 
 def _repair_leader_addrs_8616(
-    function: _AngrFunction, discovered: dict[int, _AngrBlock]
-) -> set[int]:
+    function: _AngrFunction, discovered: object
+) -> object:
     """Collect graph leader addresses that repair blocks must not cross."""
-    leaders: set[int] = set(discovered)
+    node: object
+    leaders: set[cython.longlong] = set(discovered)
     transition_graph = _dynamic_attr(function, "transition_graph", None)
     for node in tuple(_dynamic_attr(transition_graph, "nodes", ()) or ()):
         addr = _dynamic_attr(node, "addr", None)
@@ -2101,7 +2238,7 @@ def _repair_leader_addrs_8616(
             leaders.add(addr)
     local_blocks = _dynamic_attr(function, "_local_blocks", None)
     if isinstance(local_blocks, dict):
-        leaders.update(key for key in local_blocks if isinstance(key, int))
+        leaders.update(key for key in iter(local_blocks) if isinstance(key, int))
     return leaders
 
 
@@ -2117,19 +2254,21 @@ def _clip_repair_blocks_at_leaders_8616(
     dropped. Leaders inside a decoded instruction are left alone so the
     coverage gate still refuses them instead of guessing a mid-instruction cut.
     """
+    block: object
+    block_addr: object
     leaders = _repair_leader_addrs_8616(function, discovery.blocks)
-    clipped: dict[int, int] = {}
+    clipped: dict[cython.longlong, cython.longlong] = {}
     for block_addr, block in discovery.blocks.items():
         block_size = int(_dynamic_attr(block, "size", 0) or 0)
         decoded_end = block_addr + max(0, block_size)
         instruction_starts = {
             insn_addr
-            for insn in tuple(_dynamic_attr(_dynamic_attr(block, "capstone", None), "insns", ()) or ())
+            for insn in (_forit for _forit in tuple(_dynamic_attr(_dynamic_attr(block, "capstone", None), "insns", ()) or ()))
             if isinstance(insn_addr := _dynamic_attr(insn, "address", None), int)
         }
         interior = sorted(
             addr
-            for addr in leaders
+            for addr in iter(leaders)
             if block_addr < addr < decoded_end
         )
         if interior and interior[0] in instruction_starts:
@@ -2139,18 +2278,20 @@ def _clip_repair_blocks_at_leaders_8616(
     discovery.clip_ends.update(clipped)
     kept = {
         (source_addr, target_addr)
-        for source_addr, target_addr in discovery.edges
+        for source_addr, target_addr in iter(discovery.edges)
         if source_addr not in clipped
     }
     discovery.edges.clear()
     discovery.edges.update(kept)
-    discovery.edges.update((addr, clip_end) for addr, clip_end in clipped.items())
+    discovery.edges.update((addr, clip_end) for addr, clip_end in (_forit for _forit in clipped.items()))
 
 
+@cython.ccall
 def _repair_node_extent_8616(
-    discovery: _GraphRepairDiscovery8616, block_addr: int, block: _AngrBlock
-) -> tuple[int, object | None]:
+    discovery: _GraphRepairDiscovery8616, block_addr: cython.longlong, block: _AngrBlock
+) -> tuple[cython.longlong, object | None]:
     """Return the leader-clipped size and byte string for a repair node."""
+    clip_end: object
     block_size = int(_dynamic_attr(block, "size", 0) or 0)
     block_bytes = _dynamic_attr(block, "bytes", None)
     clip_end = discovery.clip_ends.get(block_addr)
@@ -2162,14 +2303,18 @@ def _repair_node_extent_8616(
     return clipped_size, block_bytes
 
 
+@cython.ccall
 def _ensure_repair_block_node_8616(
     function: _AngrFunction,
     block_node_cls: _AngrObject,
     discovery: _GraphRepairDiscovery8616,
-    block_addr: int,
-    debug_indirect: bool,
+    block_addr: cython.longlong,
+    debug_indirect: cython.bint,
 ) -> object | None:
     """Resolve or register a BlockNode for one discovered repair block."""
+    candidate: object
+    discovered_block: object
+    node: object
     if not isinstance(block_addr, int):
         return None
 
@@ -2209,9 +2354,14 @@ def _install_repair_edges_8616(
     function: _AngrFunction,
     block_node_cls: _AngrObject,
     discovery: _GraphRepairDiscovery8616,
-    debug_indirect: bool,
+    debug_indirect: cython.bint,
 ) -> None:
     """Install discovered edges into the function transition graph."""
+    clip_end: object
+    source_node: object
+    target_node: object
+    source_addr: object
+    target_addr: object
     for source_addr, target_addr in sorted(discovery.edges):
         source_node = _ensure_repair_block_node_8616(
             function, block_node_cls, discovery, source_addr, debug_indirect
@@ -2229,7 +2379,7 @@ def _install_repair_edges_8616(
         if clip_end is not None:
             insns = tuple(
                 insn
-                for insn in insns
+                for insn in iter(insns)
                 if int(_dynamic_attr(insn, "address", source_addr)) < clip_end
             )
         if not insns:
@@ -2242,8 +2392,11 @@ def _install_repair_edges_8616(
 
 def _install_repair_return_sites_8616(
     function: _AngrFunction, discovery: _GraphRepairDiscovery8616
-) -> int:
+) -> cython.longlong:
     """Mark discovered blocks ending in a return as function return sites."""
+    clip_end: object
+    source_node: object
+    block_addr: object
     discovered_returns = 0
     for block_addr in sorted(discovery.blocks):
         source_node = function.get_node(block_addr)
@@ -2255,7 +2408,7 @@ def _install_repair_return_sites_8616(
         if clip_end is not None:
             block_insns = tuple(
                 insn
-                for insn in block_insns
+                for insn in iter(block_insns)
                 if int(_dynamic_attr(insn, "address", block_addr)) < clip_end
             )
         if not block_insns:
@@ -2267,31 +2420,36 @@ def _install_repair_return_sites_8616(
     return discovered_returns
 
 
-def _count_region_local_functions(cfg: _AngrCfg, exact_region: tuple[int, int] | None) -> int:
+def _count_region_local_functions(cfg: object, exact_region: object) -> cython.longlong:
+    functions: object
     if exact_region is None or cfg is None:
         return 0
     functions = _dynamic_attr(cfg, "functions", None)
     if functions is None:
         return 0
     start, end = exact_region
-    return sum(1 for addr in functions if isinstance(addr, int) and start <= addr < end)
+    return sum(1 for addr in iter(functions) if isinstance(addr, int) and start <= addr < end)
 
 
 def _best_region_function_candidate(
     cfg: _AngrCfg,
     *,
-    exact_region: tuple[int, int] | None,
+    exact_region: object,
     preferred_addr: int | None,
 ) -> _AngrFunction | None:
     def _impl() -> _AngrFunction | None:
+        best: object
+        best_rank: object
+        functions: object
+        candidate: object
         if cfg is None or exact_region is None:
             return None
         functions = _dynamic_attr(cfg, "functions", None)
         if functions is None:
             return None
         start, end = exact_region
-        best: _AngrFunction | None = None
-        best_rank: tuple[int, int, int, int] | None = None
+        best = None
+        best_rank = None
         for candidate in functions.values():
             caddr = _dynamic_attr(candidate, "addr", None)
             if not isinstance(caddr, int) or not (start <= caddr < end):
@@ -2309,12 +2467,14 @@ def _best_region_function_candidate(
     return _impl()
 
 
-def _function_recovery_truncated(function: _AngrFunction) -> bool:
+@cython.ccall
+def _function_recovery_truncated(function: _AngrFunction) -> cython.bint:
     info = _dynamic_attr(function, "info", None)
     return isinstance(info, Mapping) and bool(info.get("x86_16_recovery_truncated"))
 
 
-def _needs_pre_entry_body_supplement(function: _AngrFunction, project_entry: int) -> bool:
+@cython.ccall
+def _needs_pre_entry_body_supplement(function: _AngrFunction, project_entry: cython.longlong) -> cython.bint:
     addr = _dynamic_attr(function, "addr", None)
     if not isinstance(addr, int) or addr >= project_entry:
         return False
@@ -2323,18 +2483,20 @@ def _needs_pre_entry_body_supplement(function: _AngrFunction, project_entry: int
 
 def _prioritized_pre_entry_follow_on_targets(
     project: angr.Project,
-    function_cfg_pairs: list[_FunctionCfgPair],
+    function_cfg_pairs: object,
     *,
-    covered_ranges: list[tuple[int, int]],
-    existing_addrs: set[int],
-    image_end: int,
-) -> list[int]:
+    covered_ranges: object,
+    existing_addrs: object,
+    image_end: cython.longlong,
+) -> object:
+    function: object
+    target: object
     main_object = _dynamic_attr(project.loader, "main_object", None)
     linked_base = _dynamic_attr(main_object, "linked_base", None)
     if not isinstance(linked_base, int):
         return []
 
-    prioritized: list[int] = []
+    prioritized: list[cython.longlong] = []
     queued = set(existing_addrs)
 
     def _record(target_addrs: Iterable[object]) -> None:
@@ -2353,14 +2515,14 @@ def _prioritized_pre_entry_follow_on_targets(
 
     pre_entry_functions = [
         function
-        for _cfg, function in function_cfg_pairs
+        for _cfg, function in iter(function_cfg_pairs)
         if _needs_pre_entry_body_supplement(function, _dynamic_attr(project, "entry", 0))
     ]
     for function in pre_entry_functions:
         _record(_linear_function_seed_targets(project, function.addr, include_jumps=False))
 
     for function in pre_entry_functions:
-        neighbor_targets: list[int] = []
+        neighbor_targets: list[cython.longlong] = []
         for target in collect_neighbor_call_targets(function):
             target_addr = _dynamic_attr(target, "target_addr", None)
             if isinstance(target_addr, int):
@@ -2370,15 +2532,17 @@ def _prioritized_pre_entry_follow_on_targets(
     return prioritized
 
 
+@cython.ccall
 def _record_follow_on_targets_8616(
-    prioritized: list[int],
-    queued: set[int],
+    prioritized: object,
+    queued: object,
     target_addrs: Iterable[object],
-    covered_ranges: list[tuple[int, int]],
-    linked_base: int,
-    image_end: int,
+    covered_ranges: object,
+    linked_base: cython.longlong,
+    image_end: cython.longlong,
 ) -> None:
     """Append novel in-image follow-on targets to the prioritized list."""
+    target_addr: object
     for target_addr in target_addrs:
         if not isinstance(target_addr, int):
             continue
@@ -2390,7 +2554,8 @@ def _record_follow_on_targets_8616(
         queued.add(target_addr)
 
 
-def _mark_function_recovery_truncated(function: _AngrFunction, truncated: bool) -> None:
+@cython.ccall
+def _mark_function_recovery_truncated(function: _AngrFunction, truncated: cython.bint) -> None:
     info = _dynamic_attr(function, "info", None)
     if isinstance(info, MutableMapping):
         info["x86_16_recovery_truncated"] = truncated
@@ -2400,16 +2565,19 @@ def _mark_function_recovery_truncated(function: _AngrFunction, truncated: bool) 
 def _recover_candidate_function_pair(
     candidate_project: angr.Project,
     *,
-    candidate_addr: int,
-    image_end: int,
+    candidate_addr: cython.longlong,
+    image_end: cython.longlong,
     metadata: LSTMetadata | None,
-    project_entry: int,
-    region_span: int,
-    exact_region: tuple[int, int] | None = None,
-    seed_calling_conventions_enabled: bool = True,
+    project_entry: cython.longlong,
+    region_span: cython.longlong,
+    exact_region: object = None,
+    seed_calling_conventions_enabled: cython.bint = True,
 ) -> _FunctionCfgPair:
     """Recover one candidate without widening explicit function boundaries."""
     def _impl() -> _FunctionCfgPair:
+        best_pair: object
+        bounded_exact_region: object
+        richer_best_pair: object
         block = candidate_project.factory.block(candidate_addr, size=8, opt_level=0)
         insns = block.capstone.insns
         if len(insns) < 1:
@@ -2497,14 +2665,16 @@ def _recover_candidate_function_pair(
     return _impl()
 
 
+@cython.ccall
 def _scan_candidate_regions_8616(
     candidate_project: angr.Project,
-    candidate_addr: int,
-    candidate_regions: list[tuple[int, int]],
-    project_entry: int,
-    seed_calling_conventions_enabled: bool,
-) -> tuple[_FunctionCfgPair | None, tuple[int, int], Exception | None]:
+    candidate_addr: cython.longlong,
+    candidate_regions: object,
+    project_entry: cython.longlong,
+    seed_calling_conventions_enabled: cython.bint,
+) -> tuple[_FunctionCfgPair | None, tuple[cython.longlong, cython.longlong], Exception | None]:
     """Scan candidate regions and return the best-scoring recovered pair."""
+    candidate_region: object
     best_pair: _FunctionCfgPair | None = None
     best_score = (-1, -1)
     last_error: Exception | None = None
@@ -2523,7 +2693,7 @@ def _scan_candidate_regions_8616(
                 best_pair = recovered_pair
                 best_score = score
             if _recovery_score_good_enough(score) and not (
-                candidate_addr < project_entry and score[1] <= 0x20 and candidate_region != candidate_regions[-1]
+                candidate_addr < project_entry and score[1] <= 0x20 and operator.ne(candidate_region, candidate_regions[-1])
             ):
                 break
         except Exception as exc:
@@ -2532,13 +2702,14 @@ def _scan_candidate_regions_8616(
     return best_pair, best_score, last_error
 
 
+@cython.ccall
 def _stitch_candidate_pair_8616(
     candidate_project: angr.Project,
-    best_pair: _FunctionCfgPair | None,
-    region: tuple[int, int] | None,
-    best_score: tuple[int, int],
-    candidate_addr: int,
-) -> tuple[_FunctionCfgPair | None, tuple[int, int], bool]:
+    best_pair: object,
+    region: object,
+    best_score: object,
+    candidate_addr: cython.longlong,
+) -> tuple[_FunctionCfgPair | None, tuple[cython.longlong, cython.longlong], cython.bint]:
     """Attempt an exact-region stitch and refresh the pair/score on success."""
     if best_pair is None or region is None:
         return best_pair, best_score, False
@@ -2562,15 +2733,17 @@ def _stitch_candidate_pair_8616(
     return best_pair, best_score, False
 
 
+@cython.ccall
 def _recover_richer_bounded_pair_8616(
     candidate_project: angr.Project,
-    candidate_addr: int,
-    bounded_region: tuple[int, int],
-    best_score: tuple[int, int],
-    seed_calling_conventions_enabled: bool,
+    candidate_addr: cython.longlong,
+    bounded_region: object,
+    best_score: object,
+    seed_calling_conventions_enabled: cython.bint,
     last_error: Exception | None,
-) -> tuple[_FunctionCfgPair | None, tuple[int, int], Exception | None]:
+) -> tuple[_FunctionCfgPair | None, tuple[cython.longlong, cython.longlong], Exception | None]:
     """Retry recovery inside a bounded region across data-reference modes."""
+    data_references: object
     richer_best_pair: _FunctionCfgPair | None = None
     richer_best_score = best_score
     for data_references in (False, True):
@@ -2593,16 +2766,17 @@ def _recover_richer_bounded_pair_8616(
     return richer_best_pair, richer_best_score, last_error
 
 
+@cython.ccall
 def _recover_small_unbounded_pair_8616(
     candidate_project: angr.Project,
-    candidate_addr: int,
+    candidate_addr: cython.longlong,
     best_pair: _FunctionCfgPair | None,
-    best_score: tuple[int, int],
-    image_end: int,
-    region_span: int,
-    seed_calling_conventions_enabled: bool,
+    best_score: object,
+    image_end: cython.longlong,
+    region_span: cython.longlong,
+    seed_calling_conventions_enabled: cython.bint,
     last_error: Exception | None,
-) -> tuple[_FunctionCfgPair | None, tuple[int, int], Exception | None]:
+) -> tuple[_FunctionCfgPair | None, tuple[cython.longlong, cython.longlong], Exception | None]:
     """Retry a small unbounded pre-entry candidate inside the richest region."""
     try:
         richer_pair = _pick_function(
@@ -2627,6 +2801,7 @@ def _recover_small_unbounded_pair_8616(
 _PROVEN_CALL_RECEIPT_INFO_KEY_8616 = "x86_16_proven_call_extension_receipt"
 
 
+@cython.ccall
 def _attach_proven_call_receipt_8616(
     function: _AngrFunction,
     receipt: ProvenCallExtensionReceipt8616,
@@ -2643,6 +2818,7 @@ def _attach_proven_call_receipt_8616(
         info[_PROVEN_CALL_RECEIPT_INFO_KEY_8616] = receipt.to_dict()
 
 
+@cython.ccall
 def _preserve_candidate_function_info_8616(
     previous: _AngrFunction,
     function: _AngrFunction,
@@ -2653,6 +2829,8 @@ def _preserve_candidate_function_info_8616(
     new object); values outside its JSON-serializable contract are skipped
     as the interface's own typed boundary refusal.
     """
+    key: object
+    value: object
     info = _dynamic_attr(previous, "info", None)
     target = _dynamic_attr(function, "info", None)
     if not (isinstance(info, Mapping) and isinstance(target, MutableMapping)):
@@ -2667,11 +2845,12 @@ def _preserve_candidate_function_info_8616(
             )
 
 
+@cython.ccall
 def _extend_candidate_pair_for_proven_calls_8616(
     candidate_project: angr.Project,
     best_pair: _FunctionCfgPair,
-    repair_region: tuple[int, int] | None,
-    seed_calling_conventions_enabled: bool,
+    repair_region: object,
+    seed_calling_conventions_enabled: cython.bint,
 ) -> _FunctionCfgPair:
     """Swap in the proven-callee extension pair, preserving caller identity.
 
@@ -2682,6 +2861,7 @@ def _extend_candidate_pair_for_proven_calls_8616(
     Extension defects propagate with their cause; ``None`` is the owner's
     typed non-evaluable-surface result.
     """
+    extension: object
     extension = extend_cfg_for_proven_calls_8616(
         candidate_project,
         best_pair[0],
@@ -2708,15 +2888,16 @@ def _extend_candidate_pair_for_proven_calls_8616(
     return best_pair
 
 
+@cython.ccall
 def _finalize_candidate_pair_8616(
     candidate_project: angr.Project,
-    candidate_addr: int,
-    best_pair: _FunctionCfgPair | None,
-    truncated: bool,
-    bounded_exact_region: tuple[int, int] | None,
-    exact_region: tuple[int, int] | None,
-    last_error: Exception | None,
-    seed_calling_conventions_enabled: bool = True,
+    candidate_addr: cython.longlong,
+    best_pair: object,
+    truncated: cython.bint,
+    bounded_exact_region: object,
+    exact_region: object,
+    last_error: object,
+    seed_calling_conventions_enabled: cython.bint = True,
 ) -> _FunctionCfgPair:
     """Repair, mark, and return the best pair; otherwise raise the last error."""
     if best_pair is not None:
@@ -2741,10 +2922,12 @@ def _finalize_candidate_pair_8616(
     raise KeyError(f"Function {candidate_addr:#x} was not recovered.")
 
 
-def _interesting_functions(cfg: _AngrCfg, *, limit: int | None) -> tuple[list[object], int]:
+def _interesting_functions(cfg: _AngrCfg, *, limit: object) -> tuple[list[object], cython.longlong]:
+    reason: object
+    function: object
     functions = []
     skipped = 0
-    for function in sorted(cfg.functions.values(), key=lambda function: function.addr):
+    for function in sorted(tuple(cfg.functions.values()), key=lambda function: function.addr):
         if function.is_plt or function.name.startswith("Unresolvable"):
             continue
         reason = _function_skip_reason(function)
@@ -2759,8 +2942,10 @@ def _interesting_functions(cfg: _AngrCfg, *, limit: int | None) -> tuple[list[ob
     return functions, total
 
 
-def _function_complexity_local(function: _AngrFunction) -> tuple[int, int]:
+@cython.ccall
+def _function_complexity_local(function: _AngrFunction) -> tuple[cython.longlong, cython.longlong]:
     """Best-effort complexity from dynamic angr function fields."""
+    block: object
     blocks = tuple(_dynamic_attr(function, "blocks", ()) or ())
     if blocks:
         count = len(blocks)
@@ -2779,10 +2964,11 @@ def _function_complexity_local(function: _AngrFunction) -> tuple[int, int]:
 _function_complexity = _function_complexity_local
 
 
+@cython.ccall
 def _rank_function_cfg_pairs_for_display(
     project: angr.Project,
-    function_cfg_pairs: list[_FunctionCfgPair],
-) -> list[_FunctionCfgPair]:
+    function_cfg_pairs: object,
+) -> object:
     if not function_cfg_pairs:
         return []
     entry_addr = _dynamic_attr(project, "entry", None)
@@ -2792,7 +2978,7 @@ def _rank_function_cfg_pairs_for_display(
 
     body_seed_candidates = [
         item
-        for item in function_cfg_pairs
+        for item in iter(function_cfg_pairs)
         if isinstance(_dynamic_attr(item[1], "addr", None), int) and item[1].addr < entry_addr
     ]
     state = _DisplayRankState8616(entry_addr, direct_entry_targets, None, set())
@@ -2809,22 +2995,24 @@ def _rank_function_cfg_pairs_for_display(
     return sorted(function_cfg_pairs, key=state.priority)
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _DisplayRankState8616:
     """Rank inputs shared by the display-ordering key functions."""
 
-    entry_addr: int
-    direct_entry_targets: set[int]
+    entry_addr: cython.longlong
+    direct_entry_targets: object
     primary_body_seed: int | None
-    body_targets: set[int]
+    body_targets: object
 
-    def display_metrics(self, function: _AngrFunction) -> tuple[int, int]:
+    @cython.ccall
+    def display_metrics(self, function: _AngrFunction) -> tuple[cython.longlong, cython.longlong]:
         """Merge complexity and recovery metrics for display ranking."""
         complexity_blocks, complexity_bytes = _function_complexity_local(function)
         recovery_blocks, recovery_bytes = _function_recovery_score(function)
         return (max(complexity_blocks, recovery_blocks), max(complexity_bytes, recovery_bytes))
 
-    def body_seed_rank(self, item: _FunctionCfgPair) -> tuple[int, int, int, int, int]:
+    @cython.ccall
+    def body_seed_rank(self, item: _FunctionCfgPair) -> tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong, cython.longlong]:
         """Rank a candidate for the primary pre-entry body seed."""
         _cfg, function = item
         addr = _dynamic_attr(function, "addr", None)
@@ -2835,7 +3023,8 @@ class _DisplayRankState8616:
         distance = abs(addr - self.entry_addr) if isinstance(addr, int) else 0
         return (tiny_wrapper_like, truncation_rank, direct_entry_rank, -byte_count, distance)
 
-    def meaningful_pre_entry_body(self, addr: int | None, byte_count: int, truncated: bool) -> bool:
+    @cython.ccall
+    def meaningful_pre_entry_body(self, addr: int | None, byte_count: cython.longlong, truncated: cython.bint) -> cython.bint:
         """Check whether a pre-entry function body is meaningful enough to rank early."""
         return (
             isinstance(addr, int)
@@ -2843,7 +3032,8 @@ class _DisplayRankState8616:
             and (truncated or byte_count > 0x20)
         )
 
-    def priority(self, item: _FunctionCfgPair) -> tuple[int, int, int, int, int]:
+    @cython.ccall
+    def priority(self, item: _FunctionCfgPair) -> tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong, cython.longlong]:
         """Compute the display sort key for one recovered pair."""
         _cfg, function = item
         addr = _dynamic_attr(function, "addr", 0)
@@ -2851,9 +3041,9 @@ class _DisplayRankState8616:
         truncated = _function_recovery_truncated(function)
         tiny_wrapper_like = int(block_count <= 3 and byte_count <= 0x20 and not truncated)
         meaningful_pre_entry_body = self.meaningful_pre_entry_body(addr, byte_count, truncated)
-        if addr == self.entry_addr:
+        if operator.eq(addr, self.entry_addr):
             bucket = 0
-        elif isinstance(self.primary_body_seed, int) and addr == self.primary_body_seed:
+        elif isinstance(self.primary_body_seed, int) and operator.eq(addr, self.primary_body_seed):
             bucket = 1
         elif meaningful_pre_entry_body and addr in self.body_targets:
             bucket = 2
@@ -2871,7 +3061,8 @@ class _DisplayRankState8616:
         return (bucket, tiny_wrapper_like, block_count, byte_count, distance)
 
 
-def _expanded_exe_discovery_limit(limit: int | None) -> int | None:
+@cython.ccall
+def _expanded_exe_discovery_limit(limit: object) -> int | None:
     if limit is None or limit <= 0:
         return None
     return max(limit * 2, limit + 4)
@@ -2879,32 +3070,34 @@ def _expanded_exe_discovery_limit(limit: int | None) -> int | None:
 
 def _supplement_cached_seeded_recovery(
     project: angr.Project,
-    cached_recovered: list[_FunctionCfgPair],
-    cached_addrs: list[int],
+    cached_recovered: object,
+    cached_addrs: object,
     *,
-    region_span: int,
-    per_function_timeout: int,
+    region_span: cython.longlong,
+    per_function_timeout: cython.longlong,
     limit: int | None,
-    cache_key: dict[str, object] | None,
-) -> tuple[list[_FunctionCfgPair], list[int]]:
-    def _impl() -> tuple[list[_FunctionCfgPair], list[int]]:
+    cache_key: object,
+) -> object:
+    def _impl() -> object:
+        _cfg: object
+        function: object
         nonlocal cached_recovered, cached_addrs
         cached_seen = {
             function.addr
-            for _cfg, function in cached_recovered
+            for _cfg, function in iter(cached_recovered)
             if isinstance(_dynamic_attr(function, "addr", None), int)
         }
-        cached_covered_ranges: list[tuple[int, int]] = []
+        cached_covered_ranges: list[tuple[cython.longlong, cython.longlong]] = []
         for _cfg, function in cached_recovered:
             cached_covered_ranges.extend(_function_covered_ranges(function))
         cached_pre_entry = [
             function
-            for _cfg, function in cached_recovered
+            for _cfg, function in iter(cached_recovered)
             if isinstance(_dynamic_attr(function, "addr", None), int) and function.addr < project.entry
         ]
         needs_body_supplement = not cached_pre_entry or all(
             _function_recovery_truncated(function) or _function_recovery_score(function)[1] <= 0x20
-            for function in cached_pre_entry
+            for function in iter(cached_pre_entry)
         )
         if not needs_body_supplement:
             return cached_recovered, cached_addrs
@@ -2933,17 +3126,19 @@ def _supplement_cached_seeded_recovery(
     return _impl()
 
 
+@cython.ccall
 def _collect_supplement_pairs_8616(
     project: angr.Project,
-    cached_recovered: list[_FunctionCfgPair],
-    cached_addrs: list[int],
-    cached_covered_ranges: list[tuple[int, int]],
+    cached_recovered: object,
+    cached_addrs: object,
+    cached_covered_ranges: object,
     *,
-    region_span: int,
-    limit: int | None,
-    per_function_timeout: int,
-) -> list[_FunctionCfgPair]:
+    region_span: cython.longlong,
+    limit: object,
+    per_function_timeout: cython.longlong,
+) -> object:
     """Collect supplemental pairs via prioritized targets, else prologue scan."""
+    image_end: object
     main_object = _dynamic_attr(project.loader, "main_object", None)
     max_addr = _dynamic_attr(main_object, "max_addr", None)
     image_end = _x86_16_image_end_exclusive_8616(max_addr) if isinstance(max_addr, int) else None
@@ -2976,15 +3171,18 @@ def _collect_supplement_pairs_8616(
     return supplemental_pairs
 
 
+@cython.ccall
 def _merge_supplement_pairs_8616(
     project: angr.Project,
-    cached_recovered: list[_FunctionCfgPair],
-    cached_addrs: list[int],
-    cached_seen: set[int],
-    supplemental_pairs: list[_FunctionCfgPair],
-    cache_key: dict[str, object] | None,
-) -> tuple[list[_FunctionCfgPair], list[int]]:
+    cached_recovered: object,
+    cached_addrs: object,
+    cached_seen: object,
+    supplemental_pairs: object,
+    cache_key: object,
+) -> tuple[list[_FunctionCfgPair], list[cython.longlong]]:
     """Merge novel supplemental pairs and refresh the ranked catalog."""
+    function: object
+    function_cfg: object
     for function_cfg, function in supplemental_pairs:
         if function.addr in cached_seen:
             continue
@@ -2992,16 +3190,17 @@ def _merge_supplement_pairs_8616(
         cached_addrs.append(function.addr)
         cached_seen.add(function.addr)
     cached_recovered = _rank_function_cfg_pairs_for_display(project, cached_recovered)
-    cached_addrs = [function.addr for _cfg, function in cached_recovered]
+    cached_addrs = [function.addr for _cfg, function in iter(cached_recovered)]
     if cache_key is not None:
         _store_cache_json("recovery", cache_key, {"addrs": cached_addrs})
     return cached_recovered, cached_addrs
 
 
+@cython.ccall
 def _catalog_address_cache_key_8616(
     project: angr.Project,
     binary_path: Path,
-) -> dict[str, object] | None:
+) -> object:
     """Build a display-catalog key from binary identity and discovery policy."""
     policy = _display_catalog_cache_policy_8616(project)
     return _cache_key_object(_recovery_cache_key(
@@ -3016,12 +3215,15 @@ def _catalog_address_cache_key_8616(
     ))
 
 
+@cython.ccall
 def _store_catalog_address_cache_addrs_8616(
     project: angr.Project,
     binary_path: Path,
-    addrs: tuple[int, ...],
+    addrs: object,
 ) -> None:
     """Persist exact catalog addresses and their currently closed evidence."""
+    cache_key: object
+    source_region: object
     cache_key = _catalog_address_cache_key_8616(project, binary_path)
     if cache_key is None:
         return
@@ -3035,7 +3237,7 @@ def _store_catalog_address_cache_addrs_8616(
         except ValueError:
             pass
         else:
-            merged_addrs = tuple(dict.fromkeys((*cached_payload.addrs, *addrs)))
+            merged_addrs = tuple(dict.fromkeys(tuple(cached_payload.addrs) + tuple(addrs)))
             merged_evidence = {
                 **cached_payload.caller_return_use_by_addr(),
                 **merged_evidence,
@@ -3056,19 +3258,23 @@ def _store_catalog_address_cache_addrs_8616(
 def _store_catalog_address_cache(
     project: angr.Project,
     binary_path: Path,
-    function_cfg_pairs: list[_FunctionCfgPair],
+    function_cfg_pairs: object,
 ) -> None:
     """Persist recovered function addresses with their exact typed evidence."""
     addrs = tuple(
         function_addr
-        for _cfg, function in function_cfg_pairs
+        for _cfg, function in iter(function_cfg_pairs)
         if isinstance((function_addr := _dynamic_attr(function, "addr", None)), int)
     )
     _store_catalog_address_cache_addrs_8616(project, binary_path, addrs)
 
 
-def _load_catalog_address_cache(project: angr.Project, binary_path: Path) -> list[int]:
+@cython.ccall
+def _load_catalog_address_cache(project: angr.Project, binary_path: Path) -> list[cython.longlong]:
     """Restore a display catalog only when its typed evidence contract validates."""
+    cache_key: object
+    evidence: object
+    function_addr: object
     cache_key = _catalog_address_cache_key_8616(project, binary_path)
     cached = _load_cache_json("recovery", cache_key) if cache_key is not None else None
     try:
@@ -3084,16 +3290,17 @@ def _load_catalog_address_cache(project: angr.Project, binary_path: Path) -> lis
 
 def _supplement_functions_from_prologue_scan(
     project: angr.Project,
-    existing_addrs: set[int],
+    existing_addrs: object,
     *,
-    candidate_addrs: list[int] | None = None,
-    search_span: int = 0x2000,
-    region_span: int = 0x120,
-    scan_limit: int = 8,
-    recover_limit: int = 1,
-    per_function_timeout: int = 2,
-) -> list[_FunctionCfgPair]:
-    def _impl() -> list[_FunctionCfgPair]:
+    candidate_addrs: object = None,
+    search_span: cython.longlong = 0x2000,
+    region_span: cython.longlong = 0x120,
+    scan_limit: cython.longlong = 8,
+    recover_limit: cython.longlong = 1,
+    per_function_timeout: cython.longlong = 2,
+) -> object:
+    def _impl() -> object:
+        ctx: object
         if project.arch.name != "86_16":
             return []
 
@@ -3126,20 +3333,22 @@ def _supplement_functions_from_prologue_scan(
     return _impl()
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _PrologueScanCtx8616:
     """Resolved inputs for the supplemental prologue scan."""
 
-    ranked_candidates: list[int]
-    linked_base: int
+    ranked_candidates: object
+    linked_base: cython.longlong
     binary_path: _AngrObject
-    code: bytes
+    code: object
 
 
+@cython.ccall
 def _prologue_scan_context_8616(
-    project: angr.Project, ranked_candidates: list[int] | None
+    project: angr.Project, ranked_candidates: object
 ) -> _PrologueScanCtx8616 | None:
     """Resolve ranked candidates, image base, and loaded code for the scan."""
+    main_object: object
     if not ranked_candidates:
         return None
     main_object = _dynamic_attr(project.loader, "main_object", None)
@@ -3162,11 +3371,12 @@ def _prologue_scan_context_8616(
     return _PrologueScanCtx8616(list(ranked_candidates), linked_base, binary_path, code)
 
 
+@cython.ccall
 def _recover_prologue_candidate_8616(
     project: angr.Project,
     ctx: _PrologueScanCtx8616,
-    candidate_addr: int,
-    region_span: int,
+    candidate_addr: cython.longlong,
+    region_span: cython.longlong,
 ) -> _FunctionCfgPair:
     """Recover one prologue candidate in a bounded region."""
     candidate_project = project
@@ -3196,14 +3406,16 @@ def _recover_prologue_candidate_8616(
 def _scan_prologue_candidates_8616(
     project: angr.Project,
     ctx: _PrologueScanCtx8616,
-    existing_addrs: set[int],
+    existing_addrs: object,
     *,
-    region_span: int,
-    scan_limit: int,
-    recover_limit: int,
-    per_function_timeout: int,
-) -> list[_FunctionCfgPair]:
+    region_span: cython.longlong,
+    scan_limit: cython.longlong,
+    recover_limit: cython.longlong,
+    per_function_timeout: cython.longlong,
+) -> object:
     """Try each ranked candidate with a per-candidate timeout."""
+    reason: object
+    addr: object
     supplemental: list[_FunctionCfgPair] = []
     scanned = 0
     for addr in ctx.ranked_candidates:
@@ -3211,7 +3423,7 @@ def _scan_prologue_candidates_8616(
             break
         scanned += 1
 
-        def _recover_supplemental(candidate_addr: int = addr) -> _FunctionCfgPair:
+        def _recover_supplemental(candidate_addr: cython.longlong = addr) -> _FunctionCfgPair:
             return _recover_prologue_candidate_8616(project, ctx, candidate_addr, region_span)
 
         try:
@@ -3237,13 +3449,14 @@ def _scan_prologue_candidates_8616(
 
 def _rank_gap_scan_candidate_addrs(
     project: angr.Project,
-    recovered_function_pairs: list[_FunctionCfgPair],
-    covered_ranges: list[tuple[int, int]],
-    existing_addrs: set[int],
+    recovered_function_pairs: object,
+    covered_ranges: object,
+    existing_addrs: object,
     *,
-    image_end: int,
-    search_span: int = 0x2000,
-) -> list[int]:
+    image_end: cython.longlong,
+    search_span: cython.longlong = 0x2000,
+) -> list[cython.longlong]:
+    main_object: object
     if project.arch.name != "86_16":
         return []
     if _dynamic_attr(_dynamic_attr(project, "arch", None), "capstone", None) is None:
@@ -3261,9 +3474,10 @@ def _rank_gap_scan_candidate_addrs(
     merged_ranges = _normalize_and_merge_ranges_8616(covered_ranges, linked_base, image_end)
     gap_ranges = _compute_gap_ranges_8616(merged_ranges, linked_base, image_end)
 
-    ranked_candidates: dict[int, tuple[int, int, int]] = {}
+    ranked_candidates: dict[cython.longlong, tuple[cython.longlong, cython.longlong, cython.longlong]] = {}
 
-    def _record(addr: int, source_rank: int, gap_start: int, subrank: int) -> None:
+    def _record(addr: cython.longlong, source_rank: cython.longlong, gap_start: cython.longlong, subrank: cython.longlong) -> None:
+        current: object
         if not (linked_base <= addr < image_end):
             return
         if addr in existing_addrs or _addr_in_ranges(addr, merged_ranges):
@@ -3289,13 +3503,16 @@ def _rank_gap_scan_candidate_addrs(
         record=_record,
     )
 
-    return [addr for addr, _meta in sorted(ranked_candidates.items(), key=lambda item: (*item[1], item[0]))]
+    return [addr for addr, _meta in (_forit for _forit in sorted(tuple(ranked_candidates.items()), key=lambda item: (*item[1], item[0])))]
 
 
+@cython.ccall
 def _normalize_and_merge_ranges_8616(
-    covered_ranges: list[tuple[int, int]], linked_base: int, image_end: int
-) -> list[tuple[int, int]]:
-    merged_ranges: list[tuple[int, int]] = []
+    covered_ranges: object, linked_base: cython.longlong, image_end: cython.longlong
+) -> object:
+    end: object
+    start: object
+    merged_ranges: list[tuple[cython.longlong, cython.longlong]] = []
     for start, end in sorted(covered_ranges):
         start = max(linked_base, min(start, image_end))
         end = max(linked_base, min(end, image_end))
@@ -3308,10 +3525,13 @@ def _normalize_and_merge_ranges_8616(
     return merged_ranges
 
 
+@cython.ccall
 def _compute_gap_ranges_8616(
-    merged_ranges: list[tuple[int, int]], linked_base: int, image_end: int
-) -> list[tuple[int, int]]:
-    gap_ranges: list[tuple[int, int]] = []
+    merged_ranges: object, linked_base: cython.longlong, image_end: cython.longlong
+) -> object:
+    end: object
+    start: object
+    gap_ranges: list[tuple[cython.longlong, cython.longlong]] = []
     cursor = linked_base
     for start, end in merged_ranges:
         if cursor < start:
@@ -3322,13 +3542,18 @@ def _compute_gap_ranges_8616(
     return gap_ranges
 
 
+@cython.ccall
 def _record_recovered_block_targets_8616(
     project: angr.Project,
-    recovered_function_pairs: list[_FunctionCfgPair],
+    recovered_function_pairs: object,
     *,
-    search_span: int,
+    search_span: cython.longlong,
     record: Callable[[int, int, int, int], None],
 ) -> None:
+    _cfg: object
+    block: object
+    function: object
+    target_addr: object
     for _cfg, function in recovered_function_pairs:
         for block in tuple(_dynamic_attr(function, "blocks", ()) or ()):
             block_addr = _dynamic_attr(block, "addr", None)
@@ -3348,7 +3573,8 @@ def _record_recovered_block_targets_8616(
                 record(target_addr, 1, block_addr, target_addr)
 
 
-def _looks_like_86_16_frame_prologue_8616(project: angr.Project, addr: int) -> bool:
+@cython.ccall
+def _looks_like_86_16_frame_prologue_8616(project: angr.Project, addr: cython.longlong) -> cython.bint:
     try:
         block = project.factory.block(addr, size=16, opt_level=0)
     except Exception:
@@ -3367,12 +3593,14 @@ def _record_gap_scan_candidates_8616(
     project: angr.Project,
     main_object: _AngrObject,
     *,
-    linked_base: int,
-    gap_ranges: list[tuple[int, int]],
-    search_span: int,
+    linked_base: cython.longlong,
+    gap_ranges: object,
+    search_span: cython.longlong,
     record: Callable[[int, int, int, int], None],
 ) -> None:
     def _impl() -> None:
+        gap_end: object
+        gap_start: object
         for gap_start, gap_end in gap_ranges:
             _scan_gap_for_candidates_8616(
                 project, main_object, linked_base, gap_start, gap_end, search_span, record
@@ -3381,16 +3609,18 @@ def _record_gap_scan_candidates_8616(
     return _impl()
 
 
+@cython.ccall
 def _scan_gap_for_candidates_8616(
     project: angr.Project,
     main_object: _AngrObject,
-    linked_base: int,
-    gap_start: int,
-    gap_end: int,
-    search_span: int,
+    linked_base: cython.longlong,
+    gap_start: cython.longlong,
+    gap_end: cython.longlong,
+    search_span: cython.longlong,
     record: Callable[[int, int, int, int], None],
 ) -> None:
     """Scan one gap region for prologue and post-return seed candidates."""
+    insn: object
     align_bytes = {0x00, 0x90, 0xCC}
     scan_end = min(gap_end, gap_start + search_span)
     if scan_end - gap_start < 3:
@@ -3414,11 +3644,12 @@ def _scan_gap_for_candidates_8616(
         offset += insn.size
 
 
+@cython.ccall
 def _record_post_return_candidate_8616(
-    gap_code: bytes,
-    gap_start: int,
-    start_offset: int,
-    align_bytes: set[int],
+    gap_code: object,
+    gap_start: cython.longlong,
+    start_offset: cython.longlong,
+    align_bytes: object,
     record: Callable[[int, int, int, int], None],
 ) -> None:
     """Record a candidate following a return plus any alignment padding."""
@@ -3435,11 +3666,13 @@ def _record_post_return_candidate_8616(
 
 def _rank_prologue_scan_candidate_addrs(
     project: angr.Project,
-    existing_addrs: set[int],
+    existing_addrs: object,
     *,
-    search_span: int = 0x2000,
-) -> list[int]:
-    def _impl() -> list[int]:
+    search_span: cython.longlong = 0x2000,
+) -> object:
+    def _impl() -> list[cython.longlong]:
+        entry: object
+        loaded: object
         if project.arch.name != "86_16":
             return []
 
@@ -3449,20 +3682,22 @@ def _rank_prologue_scan_candidate_addrs(
         linked_base, code = loaded
 
         upper_bound = min(project.entry + search_span, linked_base + len(code))
-        ranked_candidates: list[tuple[int, int, int]] = []
+        ranked_candidates: list[tuple[cython.longlong, cython.longlong, cython.longlong]] = []
         for offset in range(len(code) - 2):
             entry = _prologue_rank_entry_8616(
                 project, code, offset, linked_base, upper_bound, existing_addrs
             )
             if entry is not None:
                 ranked_candidates.append(entry)
-        return [addr for _priority, _offset, addr in sorted(ranked_candidates)]
+        return [addr for _priority, _offset, addr in (_forit for _forit in sorted(ranked_candidates))]
 
     return _impl()
 
 
-def _load_main_object_code_8616(project: angr.Project) -> tuple[int, bytes] | None:
+@cython.ccall
+def _load_main_object_code_8616(project: angr.Project) -> object:
     """Resolve linked base and loaded image bytes for the main object."""
+    main_object: object
     main_object = _dynamic_attr(project.loader, "main_object", None)
     if main_object is None:
         return None
@@ -3483,12 +3718,12 @@ def _load_main_object_code_8616(project: angr.Project) -> tuple[int, bytes] | No
 
 def _prologue_rank_entry_8616(
     project: angr.Project,
-    code: bytes,
-    offset: int,
-    linked_base: int,
-    upper_bound: int,
-    existing_addrs: set[int],
-) -> tuple[int, int, int] | None:
+    code: object,
+    offset: cython.longlong,
+    linked_base: cython.longlong,
+    upper_bound: cython.longlong,
+    existing_addrs: object,
+) -> object:
     """Rank one push bp/mov bp,sp prologue candidate offset."""
     if code[offset : offset + 3] != b"\x55\x8b\xec":
         return None
@@ -3508,24 +3743,27 @@ def _prologue_rank_entry_8616(
         or insns[1].op_str != "bp, sp"
     ):
         return None
-    has_dos_interrupt = any(insn.mnemonic == "int" and insn.op_str == "0x21" for insn in insns[:8])
+    has_dos_interrupt = any(insn.mnemonic == "int" and insn.op_str == "0x21" for insn in iter(insns[:8]))
     return (0 if has_dos_interrupt else 1, offset, addr)
 
 
 def _relocation_seed_targets(
     project: angr.Project,
-    code: bytes,
+    code: object,
     *,
-    linked_base: int,
-) -> tuple[set[int], set[int]]:
-    def _impl() -> tuple[set[int], set[int]]:
+    linked_base: cython.longlong,
+) -> object:
+    def _impl() -> tuple[set[cython.longlong], set[cython.longlong]]:
+        main_object: object
+        reloc_offset: object
+        reloc_segment: object
         main_object = _dynamic_attr(project.loader, "main_object", None)
         relocation_entries = _dynamic_attr(main_object, "mz_relocation_entries", ()) if main_object is not None else ()
         if not relocation_entries:
             return set(), set()
 
-        strong_targets: set[int] = set()
-        weak_targets: set[int] = set()
+        strong_targets: set[cython.longlong] = set()
+        weak_targets: set[cython.longlong] = set()
         image_end = linked_base + len(code)
 
         for reloc_offset, reloc_segment in relocation_entries:
@@ -3550,27 +3788,27 @@ def _relocation_seed_targets(
     return _impl()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _SeedTrace16:
-    call_targets: frozenset[int]
-    jump_targets: frozenset[int]
+    call_targets: object
+    jump_targets: object
 
 
 def trace_16bit_seed_candidates(
     project: angr.Project,
-    code: bytes,
+    code: object,
     *,
-    linked_base: int,
-    windows: Sequence[tuple[int, int]],
+    linked_base: cython.longlong,
+    windows: Sequence[tuple[cython.longlong, cython.longlong]],
 ) -> _SeedTrace16:
     """Collect lightweight call/jump seed candidates from 16-bit code bytes."""
 
     def _impl() -> _SeedTrace16:
-        def _window_contains(addr: int) -> bool:
-            return any(start <= addr < end for start, end in windows)
+        def _window_contains(addr: cython.longlong) -> cython.bint:
+            return any(start <= addr < end for start, end in iter(windows))
 
-        call_targets: set[int] = set()
-        jump_targets: set[int] = set()
+        call_targets: set[cython.longlong] = set()
+        jump_targets: set[cython.longlong] = set()
 
         # near call rel16 / near jmp rel16
         for off in range(max(0, len(code) - 2)):
@@ -3585,15 +3823,17 @@ def trace_16bit_seed_candidates(
     return _impl()
 
 
+@cython.ccall
 def _record_near_transfer_seed_8616(
-    code: bytes,
-    off: int,
-    linked_base: int,
-    window_contains: Callable[[int], bool],
-    call_targets: set[int],
-    jump_targets: set[int],
+    code: object,
+    off: cython.longlong,
+    linked_base: cython.longlong,
+    window_contains: Callable[[int], cython.bint],
+    call_targets: object,
+    jump_targets: object,
 ) -> None:
     """Record a near call/jmp rel16 seed target if it resolves inside a window."""
+    canonical: object
     op = code[off]
     if op not in {0xE8, 0xE9}:
         return
@@ -3613,15 +3853,17 @@ def _record_near_transfer_seed_8616(
     jump_targets.add(resolved)
 
 
+@cython.ccall
 def _record_far_call_seed_8616(
-    code: bytes,
-    off: int,
-    linked_base: int,
-    window_contains: Callable[[int], bool],
-    call_targets: set[int],
-    jump_targets: set[int],
+    code: object,
+    off: cython.longlong,
+    linked_base: cython.longlong,
+    window_contains: Callable[[int], cython.bint],
+    call_targets: object,
+    jump_targets: object,
 ) -> None:
     """Record a far call ptr16:16 seed target if it resolves inside a window."""
+    canonical: object
     if code[off] != 0x9A:
         return
     tgt_off = int.from_bytes(code[off + 1 : off + 3], "little")
@@ -3639,8 +3881,9 @@ def _record_far_call_seed_8616(
 
 def _seed_ranking_metadata_context(
     project: angr.Project,
-) -> tuple[LSTMetadata | None, Mapping[int, str], frozenset[int], bool, dict[str, object] | None]:
+) -> tuple[LSTMetadata | None, Mapping[cython.longlong, str], frozenset[cython.longlong], cython.bint, dict[str, object] | None]:
     """Read seed ranking context from dynamic angr project metadata."""
+    metadata: object
     metadata = cast(LSTMetadata | None, _dynamic_attr(project, "_inertia_lst_metadata", None))
     recovery_labels = {}
     metadata_fingerprint = None
@@ -3657,9 +3900,9 @@ def _seed_ranking_metadata_context(
             "source_format": metadata.source_format,
             "recovery_code_addrs": sorted(recovery_labels),
             "signature_code_addrs": sorted(signature_matched_addrs),
-            "signature_code_ranges": sorted(metadata.signature_code_ranges.items()),
+            "signature_code_ranges": sorted(tuple(metadata.signature_code_ranges.items())),
             "bounded_code_range_count": sum(
-                1 for span in code_ranges.values() if span is not None and span[1] > span[0]
+                1 for span in (_forit for _forit in code_ranges.values()) if span is not None and span[1] > span[0]
             ),
         }
     else:
@@ -3668,14 +3911,15 @@ def _seed_ranking_metadata_context(
     return metadata, recovery_labels, signature_matched_addrs, allow_signature_seed, metadata_fingerprint
 
 
+@cython.ccall
 def _seed_ranking_cache_key(
     binary_path: object,
     project: angr.Project,
-    linked_base: int,
-    max_addr: int,
-    metadata_fingerprint: dict[str, object] | None,
-    include_library_functions: bool,
-) -> dict[str, object] | None:
+    linked_base: cython.longlong,
+    max_addr: cython.longlong,
+    metadata_fingerprint: object,
+    include_library_functions: cython.bint,
+) -> object:
     return _cache_key_object(_recovery_cache_key(
         binary_path=Path(binary_path) if isinstance(binary_path, (str, Path)) else None,
         kind="exe_seed_ranking",
@@ -3691,19 +3935,20 @@ def _seed_ranking_cache_key(
     ))
 
 
-def _load_seed_ranking_cache(cache_key: dict[str, object] | None) -> list[int] | None:
+def _load_seed_ranking_cache(cache_key: object) -> object:
+    cached_addrs: object
     cached_ranking = _load_cache_json("recovery", cache_key) if cache_key is not None else None
     if isinstance(cached_ranking, dict):
         cached_addrs = cached_ranking.get("addrs")
-        if isinstance(cached_addrs, list) and all(isinstance(addr, int) for addr in cached_addrs):
+        if isinstance(cached_addrs, list) and all(isinstance(addr, int) for addr in iter(cached_addrs)):
             return cached_addrs
     return None
 
 
-def _collect_neighbor_targets_for_seed_ranking(project: angr.Project, code: bytes, linked_base: int) -> set[int]:
+def _collect_neighbor_targets_for_seed_ranking(project: angr.Project, code: object, linked_base: cython.longlong) -> set[cython.longlong]:
     """Collect bounded entry-call targets without mutating the parent angr project."""
 
-    def _collect_in_child() -> tuple[int, ...]:
+    def _collect_in_child() -> tuple[cython.longlong, ...]:
         """Return the picklable target-address projection from isolated recovery."""
         _entry_cfg, entry_function = _pick_function_lean(
             project,
@@ -3712,7 +3957,7 @@ def _collect_neighbor_targets_for_seed_ranking(project: angr.Project, code: byte
             data_references=False,
             extend_far_calls=True,
         )
-        return tuple(sorted({target.target_addr for target in collect_neighbor_call_targets(entry_function)}))
+        return tuple(sorted({target.target_addr for target in (_forit for _forit in collect_neighbor_call_targets(entry_function))}))
 
     try:
         return set(_run_with_timeout_in_fork(
@@ -3723,15 +3968,17 @@ def _collect_neighbor_targets_for_seed_ranking(project: angr.Project, code: byte
         return set()
 
 
+@cython.ccall
 def _scan_opcode_seed_targets_8616(
-    code: bytes,
+    code: object,
     *,
-    linked_base: int,
+    linked_base: cython.longlong,
     consider: Callable[[int, int], None],
-) -> tuple[set[int], set[int], set[int]]:
-    near_call_targets: set[int] = set()
-    far_call_targets: set[int] = set()
-    prologue_targets: set[int] = set()
+) -> tuple[set[cython.longlong], set[cython.longlong], set[cython.longlong]]:
+    canonical: object
+    near_call_targets: set[cython.longlong] = set()
+    far_call_targets: set[cython.longlong] = set()
+    prologue_targets: set[cython.longlong] = set()
     for offset in range(len(code) - 2):
         opcode = code[offset]
         if opcode == 0xE8:
@@ -3761,17 +4008,19 @@ def _scan_opcode_seed_targets_8616(
     return near_call_targets, far_call_targets, prologue_targets
 
 
+@cython.ccall
 def _collect_terminal_next_targets_8616(
     project: angr.Project,
-    code: bytes,
-    linked_base: int,
+    code: object,
+    linked_base: cython.longlong,
     consider: Callable[[int, int], None],
-) -> set[int]:
+) -> object:
+    insn: object
     try:
         insns = _linear_disassembly(project, linked_base, linked_base + len(code))
     except Exception:
         insns = []
-    terminal_next_targets: set[int] = set()
+    terminal_next_targets: set[cython.longlong] = set()
     for insn in insns:
         mnemonic = insn.mnemonic.lower()
         if not (mnemonic.startswith("ret") or mnemonic == "iret"):
@@ -3794,22 +4043,22 @@ def _collect_terminal_next_targets_8616(
 
 def _final_seed_priority_8616(
     *,
-    addr: int,
-    distance: int,
-    project_entry: int,
-    bounded_metadata_spans: dict[int, int],
-    near_call_targets: set[int],
-    far_call_targets: set[int],
-    tracer_call_targets: set[int],
-    prologue_targets: set[int],
-    terminal_next_targets: set[int],
-    neighbor_targets: set[int],
-    entry_window_targets: set[int],
-    relocation_control_targets: set[int],
-    relocation_pointer_targets: set[int],
+    addr: cython.longlong,
+    distance: cython.longlong,
+    project_entry: cython.longlong,
+    bounded_metadata_spans: object,
+    near_call_targets: object,
+    far_call_targets: object,
+    tracer_call_targets: object,
+    prologue_targets: object,
+    terminal_next_targets: object,
+    neighbor_targets: object,
+    entry_window_targets: object,
+    relocation_control_targets: object,
+    relocation_pointer_targets: object,
     source_region_start: int | None,
-) -> tuple[int, int, int] | None:
-    def _impl() -> tuple[int, int, int] | None:
+) -> object:
+    def _impl() -> object:
         ev = _SeedEvidence8616(
             metadata_span_len=bounded_metadata_spans.get(addr),
             near_call=addr in near_call_targets,
@@ -3831,25 +4080,25 @@ def _final_seed_priority_8616(
     return _impl()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _SeedEvidence8616:
     """Membership evidence used by the final seed-priority decision."""
 
     metadata_span_len: int | None
-    near_call: bool
-    far_call: bool
-    tracer_call: bool
-    prologue: bool
-    terminal_next: bool
-    neighbor: bool
-    entry_window: bool
-    relocation_control: bool
-    relocation_pointer: bool
-    entry_descends_from_stub: bool
-    in_source_region: bool
+    near_call: cython.bint
+    far_call: cython.bint
+    tracer_call: cython.bint
+    prologue: cython.bint
+    terminal_next: cython.bint
+    neighbor: cython.bint
+    entry_window: cython.bint
+    relocation_control: cython.bint
+    relocation_pointer: cython.bint
+    entry_descends_from_stub: cython.bint
+    in_source_region: cython.bint
 
 
-_SEED_PRIORITY_RULES_8616: tuple[tuple[Callable[[_SeedEvidence8616], bool], int], ...] = (
+_SEED_PRIORITY_RULES_8616: tuple[tuple[Callable[[_SeedEvidence8616], cython.bint], cython.longlong], ...] = (
     (lambda e: e.metadata_span_len is not None
         or (e.entry_descends_from_stub and (e.neighbor or e.near_call or e.far_call)), 0),
     (lambda e: e.entry_descends_from_stub, 1),
@@ -3872,8 +4121,11 @@ _SEED_PRIORITY_RULES_8616: tuple[tuple[Callable[[_SeedEvidence8616], bool], int]
 )
 
 
-def _final_seed_priority_decision_8616(ev: _SeedEvidence8616) -> int:
+@cython.ccall
+def _final_seed_priority_decision_8616(ev: _SeedEvidence8616) -> cython.longlong:
     """Resolve the final seed priority from ordered evidence rules."""
+    predicate: object
+    priority: object
     for predicate, priority in _SEED_PRIORITY_RULES_8616:
         if predicate(ev):
             return priority
@@ -3883,8 +4135,9 @@ def _final_seed_priority_decision_8616(ev: _SeedEvidence8616) -> int:
 def _rank_exe_function_seeds(
     project: angr.Project,
     include_library_functions: bool | None = None,
-) -> list[int]:
-    def _impl() -> list[int]:
+) -> object:
+    def _impl() -> object:
+        ctx: object
         ctx = _exe_seed_context_8616(project, include_library_functions)
         if ctx is None:
             return []
@@ -3900,46 +4153,48 @@ def _rank_exe_function_seeds(
     return _impl()
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _ExeSeedCtx8616:
     """Resolved inputs for EXE function-seed ranking."""
 
     binary_path: object
-    max_addr: int
-    linked_base: int
-    code: bytes
-    seed_windows: list[tuple[int, int]]
-    entry_window_targets: set[int]
+    max_addr: cython.longlong
+    linked_base: cython.longlong
+    code: object
+    seed_windows: object
+    entry_window_targets: object
     source_region_start: int | None
     metadata: LSTMetadata | None
-    recovery_labels: Mapping[int, str]
-    signature_matched_addrs: frozenset[int]
-    allow_signature_seed: bool
-    lib_functions: bool
-    cache_key: dict[str, object] | None
-    cached_addrs: list[int] | None
+    recovery_labels: Mapping[cython.longlong, str]
+    signature_matched_addrs: object
+    allow_signature_seed: cython.bint
+    lib_functions: cython.bint
+    cache_key: object
+    cached_addrs: object
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _SeedCandidateState8616:
     """Ranked candidates plus the evidence sets gathered while collecting them."""
 
-    ranked: dict[int, tuple[int, int]]
-    bounded_metadata_spans: dict[int, int]
-    near_call_targets: set[int]
-    far_call_targets: set[int]
-    tracer_call_targets: set[int]
-    prologue_targets: set[int]
-    terminal_next_targets: set[int]
-    neighbor_targets: set[int]
-    relocation_control_targets: set[int]
-    relocation_pointer_targets: set[int]
+    ranked: object
+    bounded_metadata_spans: object
+    near_call_targets: object
+    far_call_targets: object
+    tracer_call_targets: object
+    prologue_targets: object
+    terminal_next_targets: object
+    neighbor_targets: object
+    relocation_control_targets: object
+    relocation_pointer_targets: object
 
 
 def _exe_seed_context_8616(
     project: angr.Project, include_library_functions: bool | None
 ) -> _ExeSeedCtx8616 | None:
     """Resolve image, metadata, cache, and window inputs for seed ranking."""
+    lib_functions: object
+    main_object: object
     main_object = _dynamic_attr(project.loader, "main_object", None)
     if main_object is None:
         return None
@@ -3974,7 +4229,7 @@ def _exe_seed_context_8616(
     entry_window_targets = _entry_window_seed_targets(project, code, linked_base=linked_base)
     pre_entry_start_targets = tuple(
         target
-        for target in entry_window_targets
+        for target in iter(entry_window_targets)
         if linked_base <= target < project.entry
     )
     source_region_start = min(pre_entry_start_targets) if pre_entry_start_targets else None
@@ -3996,42 +4251,44 @@ def _exe_seed_context_8616(
     )
 
 
-def _verified_library_seed_ranges_8616(ctx: _ExeSeedCtx8616) -> tuple[tuple[int, int], ...]:
+def _verified_library_seed_ranges_8616(ctx: _ExeSeedCtx8616) -> tuple[tuple[cython.longlong, cython.longlong], ...]:
     """Select binary-verified extents only; optional listing bounds are not proof."""
     if ctx.metadata is None or ctx.lib_functions:
         return ()
     return tuple(
-        span for start, span in ctx.metadata.signature_code_ranges.items()
+        span for start, span in (_forit for _forit in ctx.metadata.signature_code_ranges.items())
         if start in ctx.signature_matched_addrs and span[0] == start < span[1]
     )
 
 
 def _is_library_seed_8616(
-    ctx: _ExeSeedCtx8616, addr: int, ranges: tuple[tuple[int, int], ...],
-) -> bool:
+    ctx: _ExeSeedCtx8616, addr: cython.longlong, ranges: object,
+) -> cython.bint:
     """Combine existing public-label policy with verified body membership."""
     return (addr in ctx.signature_matched_addrs and not ctx.allow_signature_seed) or any(
-        start <= addr < end for start, end in ranges
+        start <= addr < end for start, end in iter(ranges)
     )
 
 
 def _collect_ranked_seed_state_8616(project: angr.Project, ctx: _ExeSeedCtx8616) -> _SeedCandidateState8616:
     """Collect ranked seed candidates and the evidence sets used to rerank them."""
+    target: object
     signature_ranges = _verified_library_seed_ranges_8616(ctx)
-    def _window_contains(addr: int) -> bool:
-        return any(start <= addr < end for start, end in ctx.seed_windows)
+    def _window_contains(addr: cython.longlong) -> cython.bint:
+        return any(start <= addr < end for start, end in iter(ctx.seed_windows))
 
-    ranked: dict[int, tuple[int, int]] = {}
-    bounded_metadata_spans: dict[int, int] = {}
+    ranked: dict[cython.longlong, tuple[cython.longlong, cython.longlong]] = {}
+    bounded_metadata_spans: dict[cython.longlong, cython.longlong] = {}
 
-    def _consider(addr: int, priority: int) -> None:
+    def _consider(addr: cython.longlong, priority: cython.longlong) -> None:
+        existing: object
         if not (ctx.linked_base <= addr < ctx.linked_base + len(ctx.code)):
             return
         if _is_library_seed_8616(ctx, addr, signature_ranges):
             return
         if not _window_contains(addr):
             return
-        if addr == project.entry:
+        if operator.eq(addr, project.entry):
             return
         distance = abs(addr - project.entry)
         existing = ranked.get(addr)
@@ -4081,15 +4338,19 @@ def _collect_ranked_seed_state_8616(project: angr.Project, ctx: _ExeSeedCtx8616)
     )
 
 
+@cython.ccall
 def _consider_metadata_and_tracer_seeds_8616(
     project: angr.Project,
     ctx: _ExeSeedCtx8616,
-    bounded_metadata_spans: dict[int, int],
+    bounded_metadata_spans: object,
     consider: Callable[[int, int], None],
 ) -> None:
     """Consider metadata-labelled and entry-window seed targets."""
+    metadata: object
+    addr: object
+    target: object
     metadata = ctx.metadata
-    metadata_labels: Mapping[int, str] = _visible_code_labels(metadata) if metadata is not None else {}
+    metadata_labels: Mapping[cython.longlong, str] = _visible_code_labels(metadata) if metadata is not None else {}
     if ctx.lib_functions and metadata is not None:
         metadata_labels = ctx.recovery_labels
     if not metadata_labels and metadata is not None:
@@ -4106,12 +4367,15 @@ def _consider_metadata_and_tracer_seeds_8616(
         consider(target, 0)
 
 
+@cython.ccall
 def _consider_tracer_targets_8616(
     ctx: _ExeSeedCtx8616,
     tracer: _SeedTrace16,
     consider: Callable[[int, int], None],
 ) -> None:
     """Consider canonicalized tracer call/jump targets."""
+    canonical: object
+    target: object
     for target in tracer.call_targets:
         canonical = _resolve_x86_16_call_target(ctx.code, target - ctx.linked_base)
         if canonical is not None:
@@ -4125,9 +4389,13 @@ def _consider_tracer_targets_8616(
 
 def _rerank_seed_candidates_8616(
     project: angr.Project, ctx: _ExeSeedCtx8616, state: _SeedCandidateState8616
-) -> list[int]:
+) -> list[cython.longlong]:
     """Apply the final evidence priority to each ranked candidate."""
-    reranked: list[tuple[tuple[int, int, int], int]] = []
+    priority: object
+    _priority: object
+    addr: object
+    distance: object
+    reranked: list[tuple[tuple[cython.longlong, cython.longlong, cython.longlong], cython.longlong]] = []
     for addr, (_priority, distance) in state.ranked.items():
         priority = _final_seed_priority_8616(
             addr=addr,
@@ -4147,11 +4415,12 @@ def _rerank_seed_candidates_8616(
         )
         if priority is not None:
             reranked.append((priority, addr))
-    return [addr for _meta, addr in sorted(reranked)]
+    return [addr for _meta, addr in (_forit for _forit in sorted(reranked))]
 
 
-def _rank_pre_entry_source_function_seeds_8616(project: angr.Project) -> list[int]:
+def _rank_pre_entry_source_function_seeds_8616(project: angr.Project) -> object:
     """Rank framed pre-startup candidates without assuming main is linked first."""
+    main_object: object
     if project.arch.name != "86_16":
         return []
     main_object = _dynamic_attr(project.loader, "main_object", None)
@@ -4171,7 +4440,7 @@ def _rank_pre_entry_source_function_seeds_8616(project: angr.Project) -> list[in
     entry_targets = _entry_window_seed_targets(project, code, linked_base=linked_base)
     framed_pre_entry_targets = tuple(
         target
-        for target in entry_targets
+        for target in iter(entry_targets)
         if linked_base <= target < project.entry
         and _looks_like_x86_16_function_prologue(code, target - linked_base)
     )
@@ -4181,7 +4450,7 @@ def _rank_pre_entry_source_function_seeds_8616(project: angr.Project) -> list[in
     ranked_seeds = _rank_exe_function_seeds(project)
     source_seeds = [
         addr
-        for addr in ranked_seeds
+        for addr in iter(ranked_seeds)
         # A startup call locates a root, not the first function in its object.
         if linked_base <= addr < project.entry
         and _looks_like_x86_16_function_prologue(code, addr - linked_base)
@@ -4193,14 +4462,15 @@ def _rank_pre_entry_source_function_seeds_8616(project: angr.Project) -> list[in
 
 def _pre_entry_source_function_ranges_8616(
     project: angr.Project,
-    source_seeds: Sequence[int],
-) -> tuple[tuple[int, int], ...]:
+    source_seeds: Sequence[cython.longlong],
+) -> object:
     """Build independently framed caller ranges from the startup-bounded catalog."""
+    entry_caller_range: object
     main_object = _dynamic_attr(project.loader, "main_object", None)
     max_addr = _dynamic_attr(main_object, "max_addr", None)
     if not isinstance(max_addr, int):
         return ()
-    ordered_seeds = tuple(sorted(dict.fromkeys(source_seeds)))
+    ordered_seeds = tuple(sorted(tuple(dict.fromkeys(source_seeds))))
     if not ordered_seeds:
         return ()
     image_end = _x86_16_image_end_exclusive_8616(max_addr)
@@ -4216,7 +4486,7 @@ def _pre_entry_source_function_ranges_8616(
             _binary_padding_entry_aliases_8616(project, start)[0],
             candidate_ranges[start][1],
         )
-        for start in ordered_seeds
+        for start in iter(ordered_seeds)
     )
     entry_caller_range = _entry_linear_caller_range_8616(
         project,
@@ -4229,7 +4499,7 @@ def _pre_entry_source_function_ranges_8616(
 
 def record_direct_target_caller_return_use_evidence_8616(
     project: angr.Project,
-    target_addr: int,
+    target_addr: cython.longlong,
     *,
     binary_path: Path | None = None,
 ) -> CallerReturnUseEvidence8616 | None:
@@ -4240,6 +4510,10 @@ def record_direct_target_caller_return_use_evidence_8616(
     When available, the exact display-catalog cache restores the same typed
     evidence before binary analysis is repeated.
     """
+    canonical_target: object
+    evidence: object
+    existing: object
+    evidence_target: object
     existing = caller_return_use_evidence_by_addr_8616(project).get(target_addr)
     if isinstance(existing, CallerReturnUseEvidence8616):
         return existing
@@ -4253,7 +4527,7 @@ def record_direct_target_caller_return_use_evidence_8616(
     canonical_target = next(
         (
             seed
-            for seed in source_seeds
+            for seed in iter(source_seeds)
             if target_addr in _binary_padding_entry_aliases_8616(evidence_project, seed)
         ),
         None,
@@ -4273,7 +4547,7 @@ def record_direct_target_caller_return_use_evidence_8616(
     )
     if evidence is None:
         return None
-    for evidence_target in dict.fromkeys((*target_aliases, target_addr)):
+    for evidence_target in dict.fromkeys(tuple(target_aliases) + (target_addr,)):
         _record_caller_return_use_evidence_8616(
             project,
             evidence_target,
@@ -4291,15 +4565,17 @@ def record_direct_target_caller_return_use_evidence_8616(
 def attach_direct_target_argument_evidence_context_8616(
     source_project: angr.Project,
     target_project: angr.Project,
-    target_addr: int,
-) -> bool:
+    target_addr: cython.longlong,
+) -> cython.bint:
     """Attach independently framed caller ranges for callee-interface Lowering."""
+    caller_evidence: object
+    canonical_target: object
     evidence_project = isolated_discovery_evidence_project_8616(source_project)
     source_seeds = tuple(_rank_pre_entry_source_function_seeds_8616(evidence_project))
     canonical_target = next(
         (
             seed
-            for seed in source_seeds
+            for seed in iter(source_seeds)
             if target_addr in _binary_padding_entry_aliases_8616(evidence_project, seed)
         ),
         None,
@@ -4337,19 +4613,21 @@ def attach_direct_target_argument_evidence_context_8616(
 def _recover_pre_entry_source_catalog_8616(
     project: angr.Project,
     *,
-    source_seeds: Sequence[int],
-    timeout: int,
-    per_function_timeout: int = 2,
-    region_span: int = 0x120,
+    source_seeds: Sequence[cython.longlong],
+    timeout: cython.longlong,
+    per_function_timeout: cython.longlong = 2,
+    region_span: cython.longlong = 0x120,
     raw_fact_count: int | None = None,
-    seed_calling_conventions_enabled: bool = True,
+    seed_calling_conventions_enabled: cython.bint = True,
 ) -> tuple[list[_FunctionCfgPair], SourceRegionCatalogEvidence8616]:
     """Materialize each independently framed entry in a startup-bounded region."""
+    binary_path: object
+    main_object: object
     main_object = _dynamic_attr(project.loader, "main_object", None)
     binary_path = _dynamic_attr(main_object, "binary", None)
     linked_base = _dynamic_attr(main_object, "linked_base", None)
     max_addr = _dynamic_attr(main_object, "max_addr", None)
-    normalized_seeds = tuple(dict.fromkeys(addr for addr in source_seeds if isinstance(addr, int)))
+    normalized_seeds = tuple(dict.fromkeys(addr for addr in iter(source_seeds) if isinstance(addr, int)))
     raw_count = len(source_seeds) if raw_fact_count is None else max(len(source_seeds), raw_fact_count)
     if (
         main_object is None
@@ -4375,7 +4653,7 @@ def _recover_pre_entry_source_catalog_8616(
         ordered_seeds, _signature_matched_code_addrs(metadata), end=min(project.entry, image_end),
     )
     recovered: list[_FunctionCfgPair] = []
-    recovered_addrs: set[int] = set()
+    recovered_addrs: set[cython.longlong] = set()
     failed_addrs = _recover_source_seed_attempts_8616(
         project,
         normalized_seeds,
@@ -4408,20 +4686,22 @@ def _recover_pre_entry_source_catalog_8616(
     return recovered, evidence
 
 
+@cython.ccall
 def _recover_source_seed_once_8616(
     project: angr.Project,
-    addr: int,
-    candidate_timeout: int,
+    addr: cython.longlong,
+    candidate_timeout: cython.longlong,
     *,
-    image_end: int,
+    image_end: cython.longlong,
     metadata: LSTMetadata | None,
-    exact_region_by_addr: Mapping[int, tuple[int, int]],
+    exact_region_by_addr: Mapping[cython.longlong, tuple[cython.longlong, cython.longlong]],
     binary_path: _AngrObject,
-    linked_base: int,
-    region_span: int,
-    seed_calling_conventions_enabled: bool,
+    linked_base: cython.longlong,
+    region_span: cython.longlong,
+    seed_calling_conventions_enabled: cython.bint,
 ) -> _FunctionCfgPair | None:
     """Recover one candidate, refusing only timeouts and absent candidate CFGs."""
+    exact_region: object
     try:
         recovered_pair = _recover_candidate_with_timeout(
             project,
@@ -4444,11 +4724,12 @@ def _recover_source_seed_once_8616(
         return None
 
 
+@cython.ccall
 def _record_recovered_pair_8616(
-    recovered_pair: _FunctionCfgPair | None,
-    recovered: list[_FunctionCfgPair],
-    recovered_addrs: set[int],
-) -> bool:
+    recovered_pair: object,
+    recovered: object,
+    recovered_addrs: object,
+) -> cython.bint:
     """Record a novel, non-skipped recovered pair."""
     if recovered_pair is None:
         return False
@@ -4463,16 +4744,18 @@ def _record_recovered_pair_8616(
     return True
 
 
+@cython.ccall
 def _recover_source_seed_pass_8616(
-    seeds: Iterable[int],
-    deadline: float,
-    timeout_for: Callable[[float], int],
+    seeds: Iterable[cython.longlong],
+    deadline: cython.double,
+    timeout_for: Callable[[float], cython.longlong],
     recover_one: Callable[[int, int], _FunctionCfgPair | None],
-    recovered: list[_FunctionCfgPair],
-    recovered_addrs: set[int],
-) -> list[int]:
+    recovered: object,
+    recovered_addrs: object,
+) -> object:
     """Run one timed recovery pass over seeds, returning the failed addresses."""
-    failed_addrs: list[int] = []
+    addr: object
+    failed_addrs: list[cython.longlong] = []
     for addr in seeds:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -4488,22 +4771,22 @@ def _recover_source_seed_pass_8616(
 
 def _recover_source_seed_attempts_8616(
     project: angr.Project,
-    normalized_seeds: tuple[int, ...],
-    deadline: float,
-    recovered: list[_FunctionCfgPair],
-    recovered_addrs: set[int],
+    normalized_seeds: object,
+    deadline: cython.double,
+    recovered: object,
+    recovered_addrs: object,
     *,
-    image_end: int,
+    image_end: cython.longlong,
     metadata: LSTMetadata | None,
-    exact_region_by_addr: Mapping[int, tuple[int, int]],
+    exact_region_by_addr: Mapping[cython.longlong, tuple[cython.longlong, cython.longlong]],
     binary_path: object,
-    linked_base: int,
-    region_span: int,
-    per_function_timeout: int,
-    seed_calling_conventions_enabled: bool,
-) -> list[int]:
+    linked_base: cython.longlong,
+    region_span: cython.longlong,
+    per_function_timeout: cython.longlong,
+    seed_calling_conventions_enabled: cython.bint,
+) -> object:
     """Run the initial and retry recovery passes over normalized seeds."""
-    def recover_one(addr: int, candidate_timeout: int) -> _FunctionCfgPair | None:
+    def recover_one(addr: cython.longlong, candidate_timeout: cython.longlong) -> _FunctionCfgPair | None:
         return _recover_source_seed_once_8616(
             project,
             addr,
@@ -4535,12 +4818,16 @@ def _recover_source_seed_attempts_8616(
     )
 
 
+@cython.ccall
 def _record_source_region_caller_evidence_8616(
     project: angr.Project,
-    recovered: list[_FunctionCfgPair],
-    function_ranges: tuple[tuple[int, int], ...],
+    recovered: object,
+    function_ranges: object,
 ) -> None:
     """Record caller return-use evidence for each recovered source function."""
+    caller_return_use: object
+    _function_cfg: object
+    function: object
     with caller_return_use_program_scope_8616(project, function_ranges):
         for _function_cfg, function in recovered:
             function_addr = _dynamic_attr(function, "addr", None)
@@ -4559,12 +4846,13 @@ def _record_source_region_caller_evidence_8616(
                 )
 
 
+@cython.ccall
 def _recover_fast_seed_functions(
     project: angr.Project,
     *,
-    timeout: int,
+    timeout: cython.longlong,
     limit: int | None,
-) -> list[_FunctionCfgPair]:
+) -> object:
     if project.arch.name != "86_16":
         return []
     recovered = cast(
@@ -4581,16 +4869,20 @@ def _recover_fast_seed_functions(
 def _recover_fast_exe_catalog(
     project: angr.Project,
     *,
-    timeout: int,
-    window: int,
-    low_memory: bool,
-    limit: int | None,
-    seed_calling_conventions_enabled: bool = True,
-    catalog_timeout: int = DEFAULT_CATALOG_TIMEOUT,
-) -> list[_FunctionCfgPair]:
+    timeout: cython.longlong,
+    window: cython.longlong,
+    low_memory: cython.bint,
+    limit: object,
+    seed_calling_conventions_enabled: cython.bint = True,
+    catalog_timeout: cython.longlong = DEFAULT_CATALOG_TIMEOUT,
+) -> object:
     """Recover catalog candidates with an independent bounded recovery budget."""
+    entry_pair: object
+    seed_limit: object
+    function: object
+    function_cfg: object
     recovered: list[_FunctionCfgPair] = []
-    seen_addrs: set[int] = set()
+    seen_addrs: set[cython.longlong] = set()
     source_seeds = _rank_pre_entry_source_function_seeds_8616(project)
     selected_source_seeds = source_seeds if limit is None else source_seeds[:limit]
     include_library_functions = bool(_dynamic_attr(project, "_inertia_include_library_functions", False))
@@ -4631,7 +4923,7 @@ def _recover_fast_exe_catalog(
             seed_calling_conventions_enabled=seed_calling_conventions_enabled,
         )
         cast(Any, project)._inertia_source_region_catalog_evidence = source_evidence
-        seed_limit: int | None = len(selected_source_seeds)
+        seed_limit = len(selected_source_seeds)
     else:
         seed_limit = None if limit is None else max(limit * 2, limit + 4)
         seeded = _recover_fast_seed_functions(
@@ -4662,19 +4954,21 @@ def _recover_fast_exe_catalog(
 
 def _recover_hidden_sidecar_display_pairs(
     project: angr.Project,
-    ranked_binary_offsets: Sequence[int],
+    ranked_binary_offsets: Sequence[cython.longlong],
     *,
-    timeout: int,
-    window: int,
-    low_memory: bool,
-    limit: int,
-) -> list[_FunctionCfgPair]:
-    def _impl() -> list[_FunctionCfgPair]:
+    timeout: cython.longlong,
+    window: cython.longlong,
+    low_memory: cython.bint,
+    limit: cython.longlong,
+) -> object:
+    def _impl() -> object:
+        entry_pair: object
+        item: object
         if limit <= 0 or not ranked_binary_offsets:
             return []
 
         recovered: list[_FunctionCfgPair] = []
-        seen_addrs: set[int] = set()
+        seen_addrs: set[cython.longlong] = set()
 
         try:
             entry_pair = _run_with_timeout_in_daemon_thread(
@@ -4732,15 +5026,17 @@ def _recover_hidden_sidecar_display_pairs(
 
 def _prepare_ranked_binary_preview_items(
     project: angr.Project,
-    ranked_binary_offsets: Sequence[int],
+    ranked_binary_offsets: Sequence[cython.longlong],
     *,
-    max_count: int,
-    timeout: int,
-    window: int,
-    low_memory: bool,
-) -> tuple[_RankedBinaryPreviewItem, ...]:
+    max_count: cython.longlong,
+    timeout: cython.longlong,
+    window: cython.longlong,
+    low_memory: cython.bint,
+) -> object:
     def _impl() -> tuple[_RankedBinaryPreviewItem, ...]:
         """Preview ranked entries across a dynamic angr loader/project boundary."""
+        binary_path: object
+        addr: object
         if max_count <= 0 or not ranked_binary_offsets:
             return ()
         main_object = _dynamic_attr(project.loader, "main_object", None)
@@ -4787,18 +5083,21 @@ def _prepare_ranked_binary_preview_items(
 
 def _rank_hidden_sidecar_pairs_for_display_throughput(
     project: angr.Project,
-    function_cfg_pairs: list[_FunctionCfgPair],
+    function_cfg_pairs: object,
     *,
-    limit: int,
-) -> list[_FunctionCfgPair]:
-    def _impl() -> list[_FunctionCfgPair]:
+    limit: cython.longlong,
+) -> object:
+    def _impl() -> object:
+        entry_pair: object
+        original_index: object
+        pair: object
         if not function_cfg_pairs:
             return []
 
         entry_addr = _dynamic_attr(project, "entry", None)
         indexed_pairs = list(enumerate(function_cfg_pairs))
-        entry_pair: tuple[int, _FunctionCfgPair] | None = None
-        non_entry_pairs: list[tuple[int, _FunctionCfgPair]] = []
+        entry_pair = None
+        non_entry_pairs: list[tuple[cython.longlong, _FunctionCfgPair]] = []
 
         for original_index, pair in indexed_pairs:
             _cfg, function = pair
@@ -4809,8 +5108,8 @@ def _rank_hidden_sidecar_pairs_for_display_throughput(
             non_entry_pairs.append((original_index, pair))
 
         def _throughput_priority(
-            indexed_pair: tuple[int, _FunctionCfgPair],
-        ) -> tuple[int, int, int, int, int, int, int]:
+            indexed_pair: object,
+        ) -> tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong, cython.longlong, cython.longlong, cython.longlong]:
             original_index, (_cfg, function) = indexed_pair
             addr = _dynamic_attr(function, "addr", None)
             block_count, byte_count = _function_complexity(function)
@@ -4826,7 +5125,7 @@ def _rank_hidden_sidecar_pairs_for_display_throughput(
             distance = abs(addr - entry_addr) if isinstance(addr, int) and isinstance(entry_addr, int) else 0
             return (far_pre_entry, pre_entry, tiny_wrapper_like, block_count, byte_count, distance, original_index)
 
-        ordered_non_entry = [pair for _index, pair in sorted(non_entry_pairs, key=_throughput_priority)]
+        ordered_non_entry = [pair for _index, pair in (_forit for _forit in sorted(non_entry_pairs, key=_throughput_priority))]
         if entry_pair is None:
             return ordered_non_entry[:limit] if limit > 0 else ordered_non_entry
 
@@ -4848,13 +5147,16 @@ def _rank_hidden_sidecar_pairs_for_display_throughput(
 def _recover_cached_function_pairs(
     project: angr.Project,
     *,
-    addrs: list[int],
-    timeout: int,
+    addrs: object,
+    timeout: cython.longlong,
     limit: int | None,
-    region_span: int = 0x120,
-    per_function_timeout: int = 1,
-) -> list[_FunctionCfgPair]:
-    def _impl() -> list[_FunctionCfgPair]:
+    region_span: cython.longlong = 0x120,
+    per_function_timeout: cython.longlong = 1,
+) -> object:
+    def _impl() -> object:
+        binary_path: object
+        main_object: object
+        addr: object
         main_object = _dynamic_attr(project.loader, "main_object", None)
         if main_object is None:
             return []
@@ -4868,7 +5170,7 @@ def _recover_cached_function_pairs(
         metadata = _dynamic_attr(project, "_inertia_lst_metadata", None)
         image_end = _x86_16_image_end_exclusive_8616(max_addr)
         recovered: list[_FunctionCfgPair] = []
-        seen_addrs: set[int] = set()
+        seen_addrs: set[cython.longlong] = set()
 
         for addr in addrs:
             if limit is not None and len(recovered) >= limit:
@@ -4900,8 +5202,10 @@ def _recover_cached_function_pairs(
     return _impl()
 
 
-def _report_cached_recovery_8616(project: angr.Project, recovered: list[_FunctionCfgPair]) -> None:
+@cython.ccall
+def _report_cached_recovery_8616(project: angr.Project, recovered: object) -> None:
     """Report restored cached functions and any source-region evidence."""
+    source_region_evidence: object
     if not recovered:
         return
     print(
@@ -4912,16 +5216,17 @@ def _report_cached_recovery_8616(project: angr.Project, recovered: list[_Functio
         print(source_region_catalog_evidence_comment_8616(source_region_evidence))
 
 
+@cython.ccall
 def _recover_cached_pair_once_8616(
     project: angr.Project,
-    addr: int,
+    addr: cython.longlong,
     *,
-    image_end: int,
+    image_end: cython.longlong,
     metadata: LSTMetadata | None,
-    region_span: int,
-    candidate_timeout: int,
+    region_span: cython.longlong,
+    candidate_timeout: cython.longlong,
     binary_path: _AngrObject,
-    linked_base: int,
+    linked_base: cython.longlong,
 ) -> _FunctionCfgPair | None:
     """Recover one cached entry, refusing only timeout or absent-CFG evidence."""
     try:
@@ -4940,25 +5245,27 @@ def _recover_cached_pair_once_8616(
         return None
 
 
+@cython.ccall
 def _candidate_recovery_cache_key(
     *,
-    candidate_addr: int,
-    image_end: int,
-    project_entry: int,
-    region_span: int,
-    exact_region: tuple[int, int] | None = None,
-) -> tuple[int, int, int, int, tuple[int, int] | None]:
+    candidate_addr: cython.longlong,
+    image_end: cython.longlong,
+    project_entry: cython.longlong,
+    region_span: cython.longlong,
+    exact_region: object = None,
+) -> tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong, tuple[int, int] | None]:
     return (candidate_addr, image_end, project_entry, region_span, exact_region)
 
 
+@cython.ccall
 def _lookup_candidate_recovery_cache(
     project: angr.Project,
     *,
-    candidate_addr: int,
-    image_end: int,
-    project_entry: int,
-    region_span: int,
-    exact_region: tuple[int, int] | None = None,
+    candidate_addr: cython.longlong,
+    image_end: cython.longlong,
+    project_entry: cython.longlong,
+    region_span: cython.longlong,
+    exact_region: object = None,
 ) -> _CandidateRecoveryCacheValue | None:
     cache = _dynamic_attr(project, "_inertia_candidate_recovery_cache", None)
     if not isinstance(cache, dict):
@@ -4977,11 +5284,11 @@ def _lookup_candidate_recovery_cache(
 def _store_candidate_recovery_cache(
     project: angr.Project,
     *,
-    candidate_addr: int,
-    image_end: int,
-    project_entry: int,
-    region_span: int,
-    exact_region: tuple[int, int] | None = None,
+    candidate_addr: cython.longlong,
+    image_end: cython.longlong,
+    project_entry: cython.longlong,
+    region_span: cython.longlong,
+    exact_region: object = None,
     value: _CandidateRecoveryCacheValue,
 ) -> None:
     cache = _dynamic_attr(project, "_inertia_candidate_recovery_cache", None)
@@ -4999,14 +5306,15 @@ def _store_candidate_recovery_cache(
     ] = value
 
 
+@cython.ccall
 def _persistent_recovery_attempt_cache_key(
     *,
     binary_path: Path | None,
-    addr: int,
-    mode: str,
-    window: int,
-    low_memory: bool,
-) -> dict[str, object] | None:
+    addr: cython.longlong,
+    mode: object,
+    window: cython.longlong,
+    low_memory: cython.bint,
+) -> object:
     return _cache_key_object(_recovery_cache_key(
         binary_path=binary_path,
         kind="function_recovery_attempt",
@@ -5021,15 +5329,17 @@ def _persistent_recovery_attempt_cache_key(
     ))
 
 
+@cython.ccall
 def _lookup_persistent_recovery_timeout(
     *,
     binary_path: Path | None,
-    addr: int,
-    mode: str,
-    window: int,
-    low_memory: bool,
-    timeout: int,
+    addr: cython.longlong,
+    mode: object,
+    window: cython.longlong,
+    low_memory: cython.bint,
+    timeout: cython.longlong,
 ) -> tuple[FunctionWorkResult | None, str, dict[str, object] | None]:
+    cache_key: object
     cache_key = _persistent_recovery_attempt_cache_key(
         binary_path=binary_path,
         addr=addr,
@@ -5054,16 +5364,16 @@ def _lookup_persistent_recovery_timeout(
 def _recover_candidate_with_timeout(
     project: angr.Project,
     *,
-    candidate_addr: int,
-    image_end: int,
+    candidate_addr: cython.longlong,
+    image_end: cython.longlong,
     metadata: LSTMetadata | None,
-    project_entry: int,
-    region_span: int,
-    timeout: int,
+    project_entry: cython.longlong,
+    region_span: cython.longlong,
+    timeout: cython.longlong,
     binary_path: Path,
-    linked_base: int,
-    exact_region: tuple[int, int] | None = None,
-    seed_calling_conventions_enabled: bool = True,
+    linked_base: cython.longlong,
+    exact_region: object = None,
+    seed_calling_conventions_enabled: cython.bint = True,
 ) -> _FunctionCfgPair:
     """Recover one candidate once under the timeout lane available to this thread."""
     cached_result = (
@@ -5109,19 +5419,20 @@ def _recover_candidate_with_timeout(
     ))
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _CandidateRecoveryCtx8616:
     """Inputs shared by the cached candidate-recovery attempts."""
 
-    candidate_addr: int
-    image_end: int
+    candidate_addr: cython.longlong
+    image_end: cython.longlong
     metadata: LSTMetadata | None
-    project_entry: int
-    region_span: int
-    exact_region: tuple[int, int] | None
-    seed_calling_conventions_enabled: bool
+    project_entry: cython.longlong
+    region_span: cython.longlong
+    exact_region: object
+    seed_calling_conventions_enabled: cython.bint
 
 
+@cython.ccall
 def _recover_pair_in_project_8616(
     candidate_project: angr.Project, ctx: _CandidateRecoveryCtx8616
 ) -> _FunctionCfgPair:
@@ -5138,6 +5449,7 @@ def _recover_pair_in_project_8616(
     ))
 
 
+@cython.ccall
 def _store_recovery_cache_value_8616(
     project: angr.Project, ctx: _CandidateRecoveryCtx8616, value: _CandidateRecoveryCacheValue
 ) -> None:
@@ -5155,11 +5467,12 @@ def _store_recovery_cache_value_8616(
     )
 
 
+@cython.ccall
 def _recover_once_with_cache_8616(
     project: angr.Project,
     ctx: _CandidateRecoveryCtx8616,
     binary_path: Path,
-    linked_base: int,
+    linked_base: cython.longlong,
 ) -> _FunctionCfgPair:
     """Recover the candidate once, caching ok/keyerror outcomes."""
     try:
@@ -5183,27 +5496,29 @@ def _recover_once_with_cache_8616(
         return recovered_pair
 
 
-def _seeded_recovery_empty_result(return_addrs: bool) -> _SeededRecoveryResult:
+@cython.ccall
+def _seeded_recovery_empty_result(return_addrs: cython.bint) -> _SeededRecoveryResult:
     return ([], []) if return_addrs else []
 
 
 def _load_seeded_recovery_from_cache(
     *,
     project: angr.Project,
-    timeout: int,
+    timeout: cython.longlong,
     limit: int | None,
-    region_span: int,
-    per_function_timeout: int,
-    return_addrs: bool,
-    cache_key: dict[str, object] | None,
+    region_span: cython.longlong,
+    per_function_timeout: cython.longlong,
+    return_addrs: cython.bint,
+    cache_key: object,
 ) -> _SeededRecoveryResult | None:
+    raw_cached_addrs: object
     if cache_key is None:
         return None
     cached_payload = _load_cache_json("recovery", cache_key)
     if not isinstance(cached_payload, dict):
         return None
     raw_cached_addrs = cached_payload.get("addrs")
-    if not (isinstance(raw_cached_addrs, list) and all(isinstance(addr, int) for addr in raw_cached_addrs)):
+    if not (isinstance(raw_cached_addrs, list) and all(isinstance(addr, int) for addr in iter(raw_cached_addrs))):
         return None
     cached_addrs = cast(list[int], raw_cached_addrs)
     cached_recovered = _recover_cached_function_pairs(
@@ -5233,19 +5548,21 @@ def _load_seeded_recovery_from_cache(
     return (cached_recovered, cached_addrs) if return_addrs else cached_recovered
 
 
+@cython.ccall
 def _queue_new_seed_targets_8616(
-    target_addrs: list[int],
+    target_addrs: object,
     *,
-    seen_addrs: set[int],
-    queued_addrs: set[int],
-    covered_ranges: list[tuple[int, int]],
-    linked_base: int,
-    image_end: int,
-    queue_name: str,
-    pending_gap_addrs: list[int],
-    pending_neighbor_addrs: list[int],
+    seen_addrs: object,
+    queued_addrs: object,
+    covered_ranges: object,
+    linked_base: cython.longlong,
+    image_end: cython.longlong,
+    queue_name: object,
+    pending_gap_addrs: object,
+    pending_neighbor_addrs: object,
 ) -> None:
-    queued_targets: list[int] = []
+    target_addr: object
+    queued_targets: list[cython.longlong] = []
     for target_addr in target_addrs:
         if target_addr in seen_addrs or target_addr in queued_addrs:
             continue
@@ -5266,14 +5583,17 @@ def _queue_new_seed_targets_8616(
 def _recover_seeded_exe_functions(
     project: angr.Project,
     *,
-    timeout: int,
+    timeout: cython.longlong,
     limit: int | None,
-    region_span: int = 0x120,
-    per_function_timeout: int = 1,
-    return_addrs: bool = False,
+    region_span: cython.longlong = 0x120,
+    per_function_timeout: cython.longlong = 1,
+    return_addrs: cython.bint = False,
     include_library_functions: bool | None = None,
 ) -> _SeededRecoveryResult:
     def _impl() -> _SeededRecoveryResult:
+        addr: object
+        cached_result: object
+        image: object
         image = _seeded_image_context_8616(project)
         if image is None:
             return _seeded_recovery_empty_result(return_addrs)
@@ -5347,8 +5667,11 @@ def _recover_seeded_exe_functions(
     return _impl()
 
 
-def _seeded_image_context_8616(project: angr.Project) -> tuple[_AngrObject, int, int] | None:
+@cython.ccall
+def _seeded_image_context_8616(project: angr.Project) -> object:
     """Resolve binary path, linked base, and max addr for seeded recovery."""
+    binary_path: object
+    main_object: object
     main_object = _dynamic_attr(project.loader, "main_object", None)
     if main_object is None:
         return None
@@ -5360,39 +5683,40 @@ def _seeded_image_context_8616(project: angr.Project) -> tuple[_AngrObject, int,
     return binary_path, linked_base, max_addr
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _SeededRecoveryState8616:
     """Mutable queue/range state for seeded EXE recovery."""
 
-    recovered: list[_FunctionCfgPair] = field(default_factory=list)
-    recovered_addrs: list[int] = field(default_factory=list)
-    seen_addrs: set[int] = field(default_factory=set)
-    queued_addrs: set[int] = field(default_factory=set)
-    pending_seed_addrs: list[int] = field(default_factory=list)
-    pending_gap_addrs: list[int] = field(default_factory=list)
-    pending_neighbor_addrs: list[int] = field(default_factory=list)
-    covered_ranges: list[tuple[int, int]] = field(default_factory=list)
+    recovered: object = field(default_factory=list)
+    recovered_addrs: object = field(default_factory=list)
+    seen_addrs: object = field(default_factory=set)
+    queued_addrs: object = field(default_factory=set)
+    pending_seed_addrs: object = field(default_factory=list)
+    pending_gap_addrs: object = field(default_factory=list)
+    pending_neighbor_addrs: object = field(default_factory=list)
+    covered_ranges: object = field(default_factory=list)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _SeededExeCtx8616:
     """Shared inputs for seeded EXE candidate processing."""
 
     metadata: LSTMetadata | None
-    image_end: int
+    image_end: cython.longlong
     binary_path: Path
-    linked_base: int
-    region_span: int
-    per_function_timeout: int
+    linked_base: cython.longlong
+    region_span: cython.longlong
+    per_function_timeout: cython.longlong
     limit: int | None
-    return_addrs: bool
+    return_addrs: cython.bint
 
 
+@cython.ccall
 def _inject_prologue_seed_targets_8616(
     project: angr.Project,
     state: _SeededRecoveryState8616,
-    linked_base: int,
-    image_end: int,
+    linked_base: cython.longlong,
+    image_end: cython.longlong,
 ) -> None:
     """Prepend early prologue candidates to the seed queue when available."""
     prologue_candidates = _rank_prologue_scan_candidate_addrs(
@@ -5402,7 +5726,7 @@ def _inject_prologue_seed_targets_8616(
         return
     initial_prologue_targets = [
         addr
-        for addr in prologue_candidates[:8]
+        for addr in iter(prologue_candidates[:8])
         if addr not in state.seen_addrs
         and addr not in state.queued_addrs
         and linked_base <= addr < image_end
@@ -5412,6 +5736,7 @@ def _inject_prologue_seed_targets_8616(
         state.queued_addrs.update(initial_prologue_targets)
 
 
+@cython.ccall
 def _pop_pending_seed_addr_8616(state: _SeededRecoveryState8616) -> int | None:
     """Pop the next queued address in seed→gap→neighbor order."""
     if state.pending_seed_addrs:
@@ -5423,6 +5748,7 @@ def _pop_pending_seed_addr_8616(state: _SeededRecoveryState8616) -> int | None:
     return None
 
 
+@cython.ccall
 def _queue_follow_on_targets_8616(
     project: angr.Project,
     ctx: _SeededExeCtx8616,
@@ -5431,6 +5757,7 @@ def _queue_follow_on_targets_8616(
     function: _AngrFunction,
 ) -> None:
     """Queue gap or neighbor follow-on targets for a recovered function."""
+    target: object
     if _needs_pre_entry_body_supplement(function, project.entry):
         _queue_new_seed_targets_8616(
             _prioritized_pre_entry_follow_on_targets(
@@ -5450,7 +5777,7 @@ def _queue_follow_on_targets_8616(
             pending_neighbor_addrs=state.pending_neighbor_addrs,
         )
         return
-    neighbor_targets: list[int] = []
+    neighbor_targets: list[cython.longlong] = []
     for target in collect_neighbor_call_targets(function):
         target_addr = _dynamic_attr(target, "target_addr", None)
         if isinstance(target_addr, int):
@@ -5468,14 +5795,16 @@ def _queue_follow_on_targets_8616(
     )
 
 
+@cython.ccall
 def _process_seeded_addr_8616(
     project: angr.Project,
     ctx: _SeededExeCtx8616,
     state: _SeededRecoveryState8616,
-    addr: int,
-    remaining: float,
-) -> bool:
+    addr: cython.longlong,
+    remaining: cython.double,
+) -> cython.bint:
     """Recover one queued address; return False when the scan should stop."""
+    reason: object
     try:
         function_cfg, function = _recover_candidate_with_timeout(
             project,
@@ -5511,9 +5840,10 @@ def _process_seeded_addr_8616(
     return True
 
 
+@cython.ccall
 def _finalize_seeded_recovery_8616(
     state: _SeededRecoveryState8616,
-    cache_key: dict[str, object] | None,
+    cache_key: object,
 ) -> None:
     """Persist recovered addrs and report the seeded scan outcome."""
     if not state.recovered_addrs:
@@ -5527,6 +5857,7 @@ def _finalize_seeded_recovery_8616(
     print(f"/* quick function-entry scan recovered {len(state.recovered_addrs)} additional function(s). */")
 
 
+@cython.ccall
 def _direct_recovery_inventory_count(project: angr.Project) -> int | None:
     try:
         ranked_seeds = _rank_exe_function_seeds(project)
@@ -5538,16 +5869,17 @@ def _direct_recovery_inventory_count(project: angr.Project) -> int | None:
 def _fallback_entry_function(
     project: angr.Project,
     *,
-    timeout: int,
-    window: int,
-    low_memory: bool = False,
-    prefer_fast_recovery: bool = False,
+    timeout: cython.longlong,
+    window: cython.longlong,
+    low_memory: cython.bint = False,
+    prefer_fast_recovery: cython.bint = False,
 ) -> _FunctionCfgPair:
     # If whole-binary recovery already timed out, prefer a much smaller bounded
     # entry-only recovery window instead of retrying the same expensive search.
     # When memory pressure is high, keep the scan even narrower so the fallback
     # uses less memory and avoids the whole-binary CFG path entirely.
     def _impl() -> _FunctionCfgPair:
+        pair: object
         dynamic_project = cast(_AngrObject, project)
         dynamic_project._inertia_decompiler_stage = "recovery"
         candidate_windows = _x86_16_recovery_windows(window, low_memory=low_memory)
@@ -5567,10 +5899,11 @@ def _fallback_entry_function(
     return _impl()
 
 
+@cython.ccall
 def _repair_recovered_entry_function_8616(
     project: angr.Project,
     result: _FunctionCfgPair,
-    regions: Sequence[tuple[int, int]],
+    regions: Sequence[tuple[cython.longlong, cython.longlong]],
 ) -> _FunctionCfgPair:
     """Stitch and repair a recovered entry function inside its region."""
     if project.arch.name != "86_16":
@@ -5601,13 +5934,15 @@ def _repair_recovered_entry_function_8616(
     return cfg, function
 
 
+@cython.ccall
 def _try_fast_entry_recovery_8616(
     project: angr.Project,
     dynamic_project: _AngrObject,
-    window: int,
-    low_memory: bool,
+    window: cython.longlong,
+    low_memory: cython.bint,
 ) -> _FunctionCfgPair | None:
     """Try the small fast-recovery windows before the narrow fallback."""
+    fast_window: object
     dynamic_project._inertia_decompiler_stage = "recovery:fast"
     for fast_window in _x86_16_fast_recovery_windows(window, low_memory=low_memory):
         try:
@@ -5638,12 +5973,14 @@ def _try_fast_entry_recovery_8616(
     return None
 
 
+@cython.ccall
 def _try_narrow_entry_recovery_8616(
     project: angr.Project,
     dynamic_project: _AngrObject,
-    candidate_windows: tuple[int, ...],
+    candidate_windows: object,
 ) -> _FunctionCfgPair | None:
     """Try bounded narrow-window entry recovery, lean then data-referenced."""
+    candidate_window: object
     for candidate_window in candidate_windows:
         try:
             dynamic_project._inertia_decompiler_stage = f"recovery:narrow:{candidate_window:#x}"
@@ -5686,10 +6023,11 @@ def _derive_lst_exact_region_8616(
     project: angr.Project,
     lst_metadata: LSTMetadata,
     *,
-    addr: int,
-    name: str,
-) -> tuple[int, int] | None:
-    def _impl() -> tuple[int, int] | None:
+    addr: cython.longlong,
+    name: object,
+) -> object:
+    def _impl() -> object:
+        exact_region: object
         exact_region = _lst_code_region(lst_metadata, addr)
         if exact_region is None and isinstance(name, str) and name:
             exact_region = _lst_region_by_label_name_8616(lst_metadata, addr, name)
@@ -5700,7 +6038,7 @@ def _derive_lst_exact_region_8616(
         if (
             isinstance(exact_region, tuple)
             and len(exact_region) == 2
-            and all(isinstance(value, int) for value in exact_region)
+            and all(isinstance(value, int) for value in iter(exact_region))
         ):
             return exact_region[0], exact_region[1]
         return None
@@ -5709,11 +6047,14 @@ def _derive_lst_exact_region_8616(
 
 
 def _lst_region_by_label_name_8616(
-    lst_metadata: LSTMetadata, addr: int, name: str
-) -> tuple[int, int] | None:
+    lst_metadata: LSTMetadata, addr: cython.longlong, name: object
+) -> object:
     """Recover an exact region by matching a visible sidecar label name."""
+    span: object
+    label_addr: object
+    label_name: object
     target_names = {name, name.lstrip("_")}
-    label_candidates: list[tuple[int, tuple[int, int]]] = []
+    label_candidates: list[tuple[cython.longlong, tuple[cython.longlong, cython.longlong]]] = []
     for label_addr, label_name in (_visible_code_labels(lst_metadata) or {}).items():
         if not isinstance(label_name, str) or label_name not in target_names:
             continue
@@ -5734,12 +6075,13 @@ def _lst_region_by_label_name_8616(
     return exact_region
 
 
+@cython.ccall
 def _adjust_region_to_inner_prologue_8616(
     project: angr.Project,
-    exact_region: tuple[int, int] | None,
-    addr: int,
-    name: str,
-) -> tuple[int, int] | None:
+    exact_region: object,
+    addr: cython.longlong,
+    name: object,
+) -> object:
     """Shrink a containing sidecar span to the addr's own prologue."""
     if (
         project.arch.name != "86_16"
@@ -5761,11 +6103,12 @@ def _adjust_region_to_inner_prologue_8616(
     return exact_region
 
 
+@cython.ccall
 def _adjust_region_past_padding_8616(
     project: angr.Project,
-    exact_region: tuple[int, int] | None,
-    name: str,
-) -> tuple[int, int] | None:
+    exact_region: object,
+    name: object,
+) -> object:
     """Advance the region start past leading sidecar padding."""
     if project.arch.name != "86_16" or exact_region is None:
         return exact_region
@@ -5795,10 +6138,12 @@ def _adjust_region_past_padding_8616(
     return exact_region
 
 
+@cython.ccall
 def _extend_and_validate_exact_region_8616(
-    project: angr.Project, exact_region: tuple[int, int]
-) -> tuple[int, int] | None:
+    project: angr.Project, exact_region: object
+) -> object:
     """Extend to cover a terminator and refuse tiny terminator-less regions."""
+    extended_region: object
     extended_region = _maybe_extend_x86_16_exact_region_terminator(project, exact_region)
     if extended_region is None:
         return None
@@ -5812,13 +6157,14 @@ def _extend_and_validate_exact_region_8616(
 def _try_rebased_exact_region_recovery_8616(
     project: angr.Project,
     *,
-    exact_region: tuple[int, int] | None,
-    caller_target_addrs: tuple[int, ...] = (),
-    function_ranges: tuple[tuple[int, int], ...] = (),
-    timeout: int,
-    name: str,
+    exact_region: object,
+    caller_target_addrs: object = (),
+    function_ranges: object = (),
+    timeout: cython.longlong,
+    name: object,
 ) -> _FunctionCfgPair | None:
     """Recover an adjusted exact slice while preserving its callable-entry evidence identity."""
+    project_memory: object
     if project.arch.name != "86_16" or exact_region is None:
         return None
     exact_region_size = max(0, exact_region[1] - exact_region[0])
@@ -5858,14 +6204,15 @@ def _try_rebased_exact_region_recovery_8616(
     return cfg, func
 
 
+@cython.ccall
 def _build_rebased_slice_project_8616(
     project: angr.Project,
-    code: bytes,
+    code: object,
     slice_plan: X86ExactSlicePlan,
-    exact_region: tuple[int, int],
-    function_ranges: tuple[tuple[int, int], ...],
-    caller_target_addrs: tuple[int, ...],
-    exact_region_size: int,
+    exact_region: object,
+    function_ranges: object,
+    caller_target_addrs: object,
+    exact_region_size: cython.longlong,
 ) -> angr.Project:
     """Build the rebased slice project and inherit caller policy."""
     slice_project = _build_project_from_bytes(
@@ -5889,12 +6236,13 @@ def _build_rebased_slice_project_8616(
     return slice_project
 
 
+@cython.ccall
 def _recover_rebased_slice_func_8616(
     slice_project: angr.Project,
     slice_plan: X86ExactSlicePlan,
-    slice_region: tuple[int, int],
-    timeout: int,
-    name: str,
+    slice_region: object,
+    timeout: cython.longlong,
+    name: object,
 ) -> _FunctionCfgPair:
     """Recover and stitch the rebased slice function."""
     with _analysis_timeout(max(1, timeout)):
@@ -5934,17 +6282,25 @@ def _recover_rebased_slice_func_8616(
     return cfg, func
 
 
+@cython.ccall
 def _record_rebased_slice_evidence_8616(
     project: angr.Project,
     slice_project: angr.Project,
     func: _AngrFunction,
-    slice_region: tuple[int, int],
-    exact_region: tuple[int, int],
-    caller_target_addrs: tuple[int, ...],
-    function_ranges: tuple[tuple[int, int], ...],
+    slice_region: object,
+    exact_region: object,
+    caller_target_addrs: object,
+    function_ranges: object,
 ) -> None:
     """Record caller/callee return-use evidence and inherit source info."""
-    caller_evidence_targets = tuple(dict.fromkeys((*caller_target_addrs, exact_region[0])))
+    caller_return_use: object
+    source_func: object
+    caller_evidence_target: object
+    evidence: object
+    key: object
+    target_addr: object
+    value: object
+    caller_evidence_targets = tuple(dict.fromkeys(tuple(caller_target_addrs) + (exact_region[0],)))
     caller_return_use = _collect_caller_return_use_for_entry_aliases_8616(
         project,
         caller_evidence_targets,
@@ -5977,23 +6333,25 @@ def _record_rebased_slice_evidence_8616(
 def _recover_lst_function(
     project: angr.Project,
     lst_metadata: LSTMetadata,
-    offset: int,
-    name: str,
+    offset: cython.longlong,
+    name: object,
     *,
-    timeout: int,
-    window: int,
-    low_memory: bool = False,
-    allow_rebased_exact_slice: bool = True,
+    timeout: cython.longlong,
+    window: cython.longlong,
+    low_memory: cython.bint = False,
+    allow_rebased_exact_slice: cython.bint = True,
 ) -> _FunctionCfgPair:
     """Recover one metadata-bounded function with an explicit slice policy."""
     function_entry_addrs = lst_metadata.function_entry_addrs
     function_ranges = tuple(
         lst_metadata.code_ranges[entry_addr]
-        for entry_addr in sorted(function_entry_addrs)
+        for entry_addr in (_forit for _forit in sorted(function_entry_addrs))
         if entry_addr in lst_metadata.code_ranges
     ) if function_entry_addrs else tuple(lst_metadata.code_ranges.values())
 
     def _impl() -> _FunctionCfgPair:
+        exact_region: object
+        rebased: object
         addr = offset if lst_metadata.absolute_addrs else project.entry + offset
         exact_region = _derive_lst_exact_region_8616(project, lst_metadata, addr=addr, name=name)
         caller_target_addrs = _caller_target_aliases_for_lst_function_8616(
@@ -6034,25 +6392,28 @@ def _recover_lst_function(
     return _impl()
 
 
+@cython.ccall
 def _lst_recovery_regions_8616(
     project: angr.Project,
-    addr: int,
-    exact_region: tuple[int, int] | None,
-    candidate_window: int,
-) -> list[tuple[int, int]]:
+    addr: cython.longlong,
+    exact_region: object,
+    candidate_window: cython.longlong,
+) -> list[tuple[cython.longlong, cython.longlong]]:
     """Resolve recovery regions for one candidate window."""
     if exact_region is not None:
         return [exact_region]
     return [_infer_x86_16_linear_region(project, addr, window=candidate_window)]
 
 
+@cython.ccall
 def _try_lean_lst_windows_8616(
     project: angr.Project,
-    addr: int,
-    exact_region: tuple[int, int] | None,
-    fast_windows: tuple[int, ...],
+    addr: cython.longlong,
+    exact_region: object,
+    fast_windows: object,
 ) -> _FunctionCfgPair | None:
     """Try the lean CFGFast path across fast recovery windows."""
+    candidate_window: object
     for candidate_window in fast_windows:
         regions = _lst_recovery_regions_8616(project, addr, exact_region, candidate_window)
         try:
@@ -6078,13 +6439,13 @@ def _try_lean_lst_windows_8616(
 def _report_region_split_diagnostics_8616(
     cfg: _AngrCfg,
     func: _AngrFunction,
-    exact_region: tuple[int, int],
-    name: str,
+    exact_region: object,
+    name: object,
 ) -> None:
     """Report region-split diagnostics for a truncated exact-region recovery."""
     block_addrs = tuple(
         int(_dynamic_attr(block, "addr"))
-        for block in tuple(_dynamic_attr(func, "blocks", ()) or ())
+        for block in (_forit for _forit in tuple(_dynamic_attr(func, "blocks", ()) or ()))
         if isinstance(_dynamic_attr(block, "addr", None), int)
     )
     cfg_functions = _dynamic_attr(_dynamic_attr(cfg, "kb", None), "functions", None)
@@ -6105,11 +6466,12 @@ def _report_region_split_diagnostics_8616(
         )
 
 
+@cython.ccall
 def _stitch_best_lst_func_8616(
     project: angr.Project,
     best_func: _AngrFunction,
-    exact_region: tuple[int, int],
-    addr: int,
+    exact_region: object,
+    addr: cython.longlong,
 ) -> _AngrFunction:
     """Attempt an exact-region stitch over the current best function."""
     try:
@@ -6131,14 +6493,16 @@ def _stitch_best_lst_func_8616(
     return best_func
 
 
+@cython.ccall
 def _retry_exact_region_pairs_8616(
     project: angr.Project,
-    addr: int,
+    addr: cython.longlong,
     best_cfg: _AngrCfg,
     best_func: _AngrFunction,
-    exact_region: tuple[int, int],
+    exact_region: object,
 ) -> _FunctionCfgPair:
     """Retry recovery across data-reference modes, keeping the better candidate."""
+    data_refs: object
     for data_refs in (False, True):
         try:
             retried_cfg, retried_func = _pick_function(
@@ -6160,14 +6524,15 @@ def _retry_exact_region_pairs_8616(
     return best_cfg, best_func
 
 
+@cython.ccall
 def _escalate_truncated_lst_pair_8616(
     project: angr.Project,
     lst_metadata: LSTMetadata,
-    addr: int,
+    addr: cython.longlong,
     best_cfg: _AngrCfg,
     best_func: _AngrFunction,
-    exact_region: tuple[int, int],
-    window: int,
+    exact_region: object,
+    window: cython.longlong,
 ) -> _FunctionCfgPair:
     """Escalate to richer candidate-pair recovery for a truncated region."""
     if not _exact_region_recovery_looks_truncated(best_func, exact_region):
@@ -6199,14 +6564,17 @@ def _escalate_truncated_lst_pair_8616(
     return best_cfg, best_func
 
 
+@cython.ccall
 def _pick_lst_fallback_pair_8616(
     project: angr.Project,
-    addr: int,
-    exact_region: tuple[int, int] | None,
-    candidate_windows: tuple[int, ...],
+    addr: cython.longlong,
+    exact_region: object,
+    candidate_windows: object,
 ) -> _FunctionCfgPair:
     """Fallback bounded recovery over the regular candidate windows."""
-    last_error: Exception | None = None
+    last_error: object
+    candidate_window: object
+    last_error = None
     for candidate_window in candidate_windows:
         regions = _lst_recovery_regions_8616(project, addr, exact_region, candidate_window)
         try:
@@ -6222,16 +6590,18 @@ def _pick_lst_fallback_pair_8616(
     raise KeyError(f"Function {addr:#x} was not recovered by CFGFast.")
 
 
+@cython.ccall
 def _recover_lst_bounded_pair_8616(
     project: angr.Project,
     lst_metadata: LSTMetadata,
-    addr: int,
-    exact_region: tuple[int, int] | None,
-    window: int,
-    low_memory: bool,
-    name: str,
+    addr: cython.longlong,
+    exact_region: object,
+    window: cython.longlong,
+    low_memory: cython.bint,
+    name: object,
 ) -> _FunctionCfgPair:
     """Recover an LST-bounded pair via lean, enriched, and fallback lanes."""
+    lean_pair: object
     can_run_default_lean = (
         hasattr(project, "analyses") or _pick_function_lean is not _DEFAULT_PICK_FUNCTION_LEAN
     )
@@ -6256,14 +6626,16 @@ def _recover_lst_bounded_pair_8616(
     return cfg, func
 
 
+@cython.ccall
 def _promote_region_function_8616(
     cfg: _AngrCfg,
     func: _AngrFunction,
-    exact_region: tuple[int, int] | None,
-    addr: int,
-    name: str,
+    exact_region: object,
+    addr: cython.longlong,
+    name: object,
 ) -> _AngrFunction:
     """Promote a richer region-local candidate over a tiny recovered function."""
+    promoted: object
     if exact_region is None:
         return func
     selected_blocks, selected_bytes = _function_recovery_score(func)
@@ -6292,19 +6664,23 @@ def _promote_region_function_8616(
 
 def _recover_ranked_binary_function(
     project: angr.Project,
-    addr: int,
-    name: str,
+    addr: cython.longlong,
+    name: object,
     *,
-    timeout: int,
-    window: int,
-    low_memory: bool = False,
+    timeout: cython.longlong,
+    window: cython.longlong,
+    low_memory: cython.bint = False,
 ) -> _FunctionCfgPair:
     def _impl() -> _FunctionCfgPair:
+        cfg: object
+        func: object
+        last_error: object
+        candidate_window: object
         with _analysis_timeout(max(1, timeout)):
             if project.arch.name == "86_16":
                 fast_windows = _x86_16_fast_recovery_windows(window, low_memory=low_memory)
                 candidate_windows = _x86_16_recovery_windows(window, low_memory=low_memory)
-                last_error: Exception | None = None
+                last_error = None
                 for candidate_window in fast_windows:
                     try:
                         cfg, func = _pick_function_lean(
@@ -6346,7 +6722,8 @@ def _recover_ranked_binary_function(
     return _impl()
 
 
-def _make_placeholder_function(project: angr.Project, addr: int, name: str) -> SimpleNamespace:
+@cython.ccall
+def _make_placeholder_function(project: angr.Project, addr: cython.longlong, name: object) -> SimpleNamespace:
     return SimpleNamespace(
         addr=addr,
         name=name,
@@ -6356,22 +6733,23 @@ def _make_placeholder_function(project: angr.Project, addr: int, name: str) -> S
     )
 
 
-def _is_zero_filled_region(project: angr.Project, addr: int, *, size: int = 8) -> bool:
+def _is_zero_filled_region(project: angr.Project, addr: cython.longlong, *, size: cython.longlong = 8) -> cython.bint:
     try:
         data = bytes(project.loader.memory.load(addr, size))
     except Exception:
         return False
-    return bool(data) and all(byte == 0x00 for byte in data)
+    return bool(data) and all(byte == 0x00 for byte in iter(data))
 
 
 def _is_plausible_code_seed(
     project: angr.Project,
-    addr: int,
+    addr: cython.longlong,
     *,
     metadata: LSTMetadata | None = None,
-) -> bool:
-    def _impl() -> bool:
+) -> cython.bint:
+    def _impl() -> cython.bint:
         """Probe dynamic angr block/capstone data for plausible code bytes."""
+        region: object
         region = _lst_code_region(metadata, addr)
         probe_size = 16
         if region is not None:
@@ -6393,21 +6771,21 @@ def _is_plausible_code_seed(
         # a null-padded stream, treat it as data-like unless proven otherwise.
         if region is None:
             head = data[:8]
-            if len(head) >= 4 and head[:2] == b"\x00\x00" and sum(1 for b in head if b == 0x00) >= 4:
+            if len(head) >= 4 and head[:2] == b"\x00\x00" and sum(1 for b in iter(head) if b == 0x00) >= 4:
                 return False
         return True
 
     return _impl()
 
 
-def _bytes_uniform_8616(data: bytes) -> bool:
+def _bytes_uniform_8616(data: object) -> cython.bint:
     """Check whether probed bytes are uniformly 0x00 or 0xFF."""
-    return all(byte == 0x00 for byte in data) or all(byte == 0xFF for byte in data)
+    return all(byte == 0x00 for byte in iter(data)) or all(byte == 0xFF for byte in iter(data))
 
 
 def _tiny_region_has_terminator_8616(
-    project: angr.Project, addr: int, region: tuple[int, int]
-) -> bool:
+    project: angr.Project, addr: cython.longlong, region: object
+) -> cython.bint:
     """Check a tiny exact region decodes to insns ending in a terminator."""
     region_size = max(0, region[1] - region[0])
     if not (0 < region_size <= 8):
@@ -6422,16 +6800,19 @@ def _tiny_region_has_terminator_8616(
     if not insns:
         return False
     terminators = {"ret", "retn", "retf", "jmp", "ljmp", "call", "lcall", "int", "iret"}
-    return any(_dynamic_attr(insn, "mnemonic", "").lower() in terminators for insn in insns)
+    return any(_dynamic_attr(insn, "mnemonic", "").lower() in terminators for insn in iter(insns))
 
 
+@cython.ccall
 def _filter_noncode_labeled_entries(
     project: angr.Project,
-    labeled_entries: list[tuple[int, str]],
+    labeled_entries: object,
     metadata: LSTMetadata | None = None,
-) -> list[tuple[int, str]]:
+) -> object:
+    addr: object
+    name: object
     explicit_function_entries = metadata.function_entry_addrs if metadata is not None else frozenset()
-    filtered: list[tuple[int, str]] = []
+    filtered: list[tuple[cython.longlong, str]] = []
     for addr, name in labeled_entries:
         if addr in explicit_function_entries or _is_plausible_code_seed(project, addr, metadata=metadata):
             filtered.append((addr, name))
@@ -6440,9 +6821,9 @@ def _filter_noncode_labeled_entries(
 
 def _rank_labeled_function_entries(
     project: angr.Project,
-    labeled_entries: list[tuple[int, str]],
+    labeled_entries: object,
     metadata: LSTMetadata | None = None,
-) -> list[tuple[int, str]]:
+) -> object:
     entry_addr = _dynamic_attr(project, "entry", None)
     if not isinstance(entry_addr, int):
         entry_addr = 0
@@ -6491,7 +6872,8 @@ def _rank_labeled_function_entries(
         "_dosretax",
     }
 
-    def _priority(item: tuple[int, str]) -> tuple[int, int, int]:
+    def _priority(item: object) -> tuple[cython.longlong, cython.longlong, cython.longlong]:
+        region: object
         addr, name = item
         lowered = name.lower()
         region = _lst_code_region(metadata, addr)
@@ -6505,15 +6887,18 @@ def _rank_labeled_function_entries(
     return sorted(labeled_entries, key=_priority)
 
 
+@cython.ccall
 def _labeled_entry_bucket_early_8616(
-    addr: int,
-    lowered: str,
-    size: int | None,
-    entry_addr: int,
-    preferred_app_prefix_buckets: tuple[tuple[str, int], ...],
-    runtime_helper_names: set[str],
+    addr: cython.longlong,
+    lowered: object,
+    size: object,
+    entry_addr: cython.longlong,
+    preferred_app_prefix_buckets: object,
+    runtime_helper_names: object,
 ) -> int | None:
     """Resolve the early priority buckets for a labeled entry name."""
+    bucket: object
+    prefix: object
     if addr == entry_addr:
         return 0
     if lowered in {"main", "_main"} or lowered.endswith("main"):
@@ -6530,16 +6915,18 @@ def _labeled_entry_bucket_early_8616(
     return None
 
 
+@cython.ccall
 def _labeled_entry_bucket_8616(
     project: angr.Project,
-    addr: int,
-    lowered: str,
-    size: int | None,
-    entry_addr: int,
-    preferred_app_prefix_buckets: tuple[tuple[str, int], ...],
-    runtime_helper_names: set[str],
-) -> int:
+    addr: cython.longlong,
+    lowered: object,
+    size: object,
+    entry_addr: cython.longlong,
+    preferred_app_prefix_buckets: object,
+    runtime_helper_names: object,
+) -> cython.longlong:
     """Resolve the sort bucket for a labeled entry name."""
+    early: object
     early = _labeled_entry_bucket_early_8616(
         addr, lowered, size, entry_addr, preferred_app_prefix_buckets, runtime_helper_names
     )
@@ -6556,9 +6943,9 @@ def _labeled_entry_bucket_8616(
 
 def _sidecar_label_ranking_cache_key(
     project: angr.Project,
-    labeled_entries: list[tuple[int, str]],
+    labeled_entries: object,
     metadata: LSTMetadata | None,
-) -> dict[str, object] | None:
+) -> object:
     """Build a sidecar label cache key from dynamic angr loader metadata."""
     main_object = _dynamic_attr(project.loader, "main_object", None)
     binary_path = _dynamic_attr(main_object, "binary", None)
@@ -6566,7 +6953,8 @@ def _sidecar_label_ranking_cache_key(
         return None
     code_ranges = cast(Mapping[int, Sequence[int] | None], _dynamic_attr(metadata, "code_ranges", None) or {})
 
-    def _code_range_tuple(addr: int) -> tuple[int, ...] | None:
+    def _code_range_tuple(addr: cython.longlong) -> object:
+        span: object
         span = code_ranges.get(addr)
         return tuple(span) if span is not None else None
 
@@ -6583,7 +6971,7 @@ def _sidecar_label_ranking_cache_key(
                     name,
                     _code_range_tuple(addr),
                 )
-                for addr, name in labeled_entries
+                for addr, name in iter(labeled_entries)
             ],
         },
     )
@@ -6592,10 +6980,12 @@ def _sidecar_label_ranking_cache_key(
 
 def _rank_labeled_function_entries_cached(
     project: angr.Project,
-    labeled_entries: list[tuple[int, str]],
+    labeled_entries: object,
     metadata: LSTMetadata | None = None,
-) -> tuple[list[tuple[int, str]], bool]:
-    def _impl() -> tuple[list[tuple[int, str]], bool]:
+) -> object:
+    def _impl() -> tuple[list[tuple[cython.longlong, str]], cython.bint]:
+        cache_key: object
+        entries: object
         filtered_entries = _filter_noncode_labeled_entries(project, labeled_entries, metadata)
         cache_key = _sidecar_label_ranking_cache_key(project, filtered_entries, metadata)
         cached = _load_cache_json("recovery", cache_key) if cache_key is not None else None
@@ -6606,9 +6996,9 @@ def _rank_labeled_function_entries_cached(
                 and len(item) == 2
                 and isinstance(item[0], int)
                 and isinstance(item[1], str)
-                for item in entries
+                for item in iter(entries)
             ):
-                return [(item[0], item[1]) for item in entries], True
+                return [(item[0], item[1]) for item in iter(entries)], True
 
         ranked = _rank_labeled_function_entries(project, filtered_entries, metadata)
         if cache_key is not None:
@@ -6621,12 +7011,14 @@ def _rank_labeled_function_entries_cached(
 def _select_sidecar_showcase_entries(
     project: angr.Project,
     metadata: LSTMetadata,
-    labeled_entries: list[tuple[int, str]],
+    labeled_entries: object,
     *,
-    max_count: int,
-    ranked_entries: list[tuple[int, str]] | None = None,
-) -> list[tuple[int, str]]:
-    def _impl() -> list[tuple[int, str]]:
+    max_count: cython.longlong,
+    ranked_entries: object = None,
+) -> object:
+    def _impl() -> object:
+        _name: object
+        addr: object
         ranked = (
             ranked_entries
             if ranked_entries is not None
@@ -6647,7 +7039,7 @@ def _select_sidecar_showcase_entries(
         for addr, _name in tiny_candidates[1:3]:
             state.add(addr)
         main_candidates = [
-            addr for addr, name in ranked if name.lower() in {"main", "_main"} or name.lower().endswith("main")
+            addr for addr, name in iter(ranked) if name.lower() in {"main", "_main"} or name.lower().endswith("main")
         ]
         if main_candidates:
             state.add(main_candidates[0])
@@ -6660,26 +7052,29 @@ def _select_sidecar_showcase_entries(
     return _impl()
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _SidecarShowcaseState8616:
     """Mutable selection state for sidecar showcase entry selection."""
 
     project: angr.Project
     metadata: LSTMetadata
-    by_addr: dict[int, str]
-    max_count: int
-    selected: list[tuple[int, str]] = field(default_factory=list)
-    seen: set[int] = field(default_factory=set)
+    by_addr: object
+    max_count: cython.longlong
+    selected: object = field(default_factory=list)
+    seen: object = field(default_factory=set)
 
-    def add(self, addr: int | None) -> None:
+    @cython.ccall
+    def add(self, addr: object) -> None:
         """Append one ranked entry if it is new and capacity remains."""
         if addr is None or addr in self.seen or addr not in self.by_addr or len(self.selected) >= self.max_count:
             return
         self.selected.append((addr, self.by_addr[addr]))
         self.seen.add(addr)
 
-    def tiny_candidate_priority(self, item: tuple[int, str]) -> tuple[int, int, int]:
+    @cython.ccall
+    def tiny_candidate_priority(self, item: object) -> tuple[cython.longlong, cython.longlong, cython.longlong]:
         """Rank tiny showcase candidates by name class and region size."""
+        region: object
         addr, name = item
         lowered = name.lower()
         region = _lst_code_region(self.metadata, addr)
@@ -6687,11 +7082,12 @@ class _SidecarShowcaseState8616:
         bucket = _tiny_showcase_bucket_8616(lowered)
         return (bucket, size, abs(addr - _dynamic_attr(self.project, "entry", 0)))
 
-    def collect_tiny_candidates(self, ranked: list[tuple[int, str]]) -> list[tuple[int, str]]:
+    @cython.ccall
+    def collect_tiny_candidates(self, ranked: object) -> object:
         """Collect and rank tiny region candidates for showcase selection."""
         tiny_candidates = [
             (addr, name)
-            for addr, name in ranked
+            for addr, name in iter(ranked)
             if addr not in self.seen
             and (span := _lst_code_region(self.metadata, addr)) is not None
             and (span[1] - span[0]) <= 0x20
@@ -6702,7 +7098,8 @@ class _SidecarShowcaseState8616:
         return tiny_candidates
 
 
-def _tiny_showcase_bucket_8616(lowered: str) -> int:
+@cython.ccall
+def _tiny_showcase_bucket_8616(lowered: object) -> cython.longlong:
     """Bucket tiny showcase candidates by name class."""
     if lowered.startswith("nullsub"):
         return 0
@@ -6713,14 +7110,18 @@ def _tiny_showcase_bucket_8616(lowered: str) -> int:
     return 2
 
 
+@cython.ccall
 def _format_sidecar_function_catalog(
     metadata: LSTMetadata,
     *,
     limit: int | None = None,
     code_labels: Mapping[int, str] | None = None,
 ) -> str:
+    region: object
+    addr: object
+    name: object
     lines: list[str] = []
-    entries = sorted((code_labels if code_labels is not None else _visible_code_labels(metadata)).items())
+    entries = sorted(tuple((code_labels if code_labels is not None else _visible_code_labels(metadata)).items()))
     if limit is not None and limit > 0:
         entries = entries[:limit]
     for addr, name in entries:
@@ -6733,7 +7134,8 @@ def _format_sidecar_function_catalog(
     return "\n".join(lines)
 
 
-def _recover_blob_entry_function(project: angr.Project, entry_addr: int, *, timeout: int) -> _FunctionCfgPair:
+@cython.ccall
+def _recover_blob_entry_function(project: angr.Project, entry_addr: cython.longlong, *, timeout: cython.longlong) -> _FunctionCfgPair:
     cast(_AngrObject, project)._inertia_decompiler_stage = "recovery:full"
     with _analysis_timeout(timeout):
         cfg = project.analyses.CFGFast(
@@ -6765,22 +7167,25 @@ def _recover_blob_entry_function(project: angr.Project, entry_addr: int, *, time
     return cfg, cfg.functions[entry_addr]
 
 
-def _env_flag_enabled_8616(name: str, default: str = "") -> bool:
+@cython.ccall
+def _env_flag_enabled_8616(name: object, default: object = "") -> cython.bint:
     return os.environ.get(name, default).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _try_recover_direct_addr_from_sidecar_region(
     *,
     project: angr.Project,
-    addr: int,
-    timeout: int,
-    window: int,
-    low_memory_path: bool,
+    addr: cython.longlong,
+    timeout: cython.longlong,
+    window: cython.longlong,
+    low_memory_path: cython.bint,
     lst_metadata: LSTMetadata | None,
-    function_label: str | None,
-    strict_direct_addr: bool,
+    function_label: object,
+    strict_direct_addr: cython.bint,
 ) -> _FunctionCfgPair | None:
     def _impl() -> _FunctionCfgPair | None:
+        recovered_project: object
+        sidecar_region_for_addr: object
         if lst_metadata is None or project.arch.name != "86_16":
             return None
         sidecar_region_for_addr = _lst_code_region(lst_metadata, addr)
@@ -6830,17 +7235,17 @@ def _try_recover_direct_addr_from_sidecar_region(
 
 def _sidecar_label_addr_8616(
     lst_metadata: LSTMetadata,
-    addr: int,
-    effective_label: str | None,
-    default_addr: int,
-) -> int:
+    addr: cython.longlong,
+    effective_label: object,
+    default_addr: cython.longlong,
+) -> cython.longlong:
     """Resolve the nearest sidecar label addr matching the effective label."""
     if not effective_label:
         return default_addr
     target_names = {effective_label, effective_label.lstrip("_")}
     label_matches = [
         label_addr
-        for label_addr, label_name in (_visible_code_labels(lst_metadata) or {}).items()
+        for label_addr, label_name in (_forit for _forit in (_visible_code_labels(lst_metadata) or {}).items())
         if isinstance(label_addr, int) and isinstance(label_name, str) and label_name in target_names
     ]
     if not label_matches:
@@ -6848,10 +7253,11 @@ def _sidecar_label_addr_8616(
     return min(label_matches, key=lambda la: abs(la - addr))
 
 
+@cython.ccall
 def _project_region_on_recovered_8616(
     recovered_project: object,
-    sidecar_region: tuple[int, int],
-) -> tuple[int, int]:
+    sidecar_region: object,
+) -> object:
     """Project a sidecar region onto the recovered project's original base."""
     original_delta = _dynamic_attr(recovered_project, "_inertia_original_linear_delta", 0)
     if isinstance(original_delta, int) and original_delta:
@@ -6862,12 +7268,12 @@ def _project_region_on_recovered_8616(
 def _try_recover_direct_addr_from_sidecar_label(
     *,
     project: angr.Project,
-    addr: int,
-    timeout: int,
-    window: int,
-    low_memory_path: bool,
+    addr: cython.longlong,
+    timeout: cython.longlong,
+    window: cython.longlong,
+    low_memory_path: cython.bint,
     lst_metadata: LSTMetadata | None,
-    function_label: str | None,
+    function_label: object,
 ) -> _FunctionCfgPair | None:
     def _impl() -> _FunctionCfgPair | None:
         if lst_metadata is None or project.arch.name != "86_16":
@@ -6878,7 +7284,7 @@ def _try_recover_direct_addr_from_sidecar_label(
         target_names = {effective_label, effective_label.lstrip("_")}
         label_matches = [
             label_addr
-            for label_addr, label_name in (_visible_code_labels(lst_metadata) or {}).items()
+            for label_addr, label_name in (_forit for _forit in (_visible_code_labels(lst_metadata) or {}).items())
             if isinstance(label_addr, int) and isinstance(label_name, str) and label_name in target_names
         ]
         if not label_matches:
@@ -6910,17 +7316,19 @@ def _try_recover_direct_addr_from_sidecar_label(
 @cast(Callable[..., Any], trace_function(name="discovery.recover_direct_addr"))
 def _recover_direct_addr_function(
     project: angr.Project,
-    addr: int,
+    addr: cython.longlong,
     *,
-    timeout: int,
-    window: int,
-    function_label: str | None,
+    timeout: cython.longlong,
+    window: cython.longlong,
+    function_label: object,
     lst_metadata: LSTMetadata | None,
-    low_memory_path: bool,
-    prefer_fast_recovery: bool,
-    exact_region: tuple[int, int] | None = None,
+    low_memory_path: cython.bint,
+    prefer_fast_recovery: cython.bint,
+    exact_region: object = None,
 ) -> _FunctionCfgPair:
     def _impl() -> _FunctionCfgPair:
+        fallback: object
+        recovered: object
         nonlocal addr
         addr = _rebase_addr_on_sidecar_start_8616(project, addr, lst_metadata)
         prefer_lst_direct = _env_flag_enabled_8616("INERTIA_DIRECT_ADDR_PREFER_LST", "1")
@@ -6955,12 +7363,14 @@ def _recover_direct_addr_function(
     return _impl()
 
 
+@cython.ccall
 def _rebase_addr_on_sidecar_start_8616(
     project: angr.Project,
-    addr: int,
-    lst_metadata: LSTMetadata | None,
-) -> int:
+    addr: cython.longlong,
+    lst_metadata: object,
+) -> cython.longlong:
     """Rebase the direct addr to the sidecar region start when enabled."""
+    sidecar_region: object
     use_sidecar_start = _env_flag_enabled_8616("INERTIA_DIRECT_ADDR_USE_SIDECAR_START")
     if project.arch.name != "86_16" or lst_metadata is None or not use_sidecar_start:
         return addr
@@ -6973,17 +7383,19 @@ def _rebase_addr_on_sidecar_start_8616(
     return addr
 
 
+@cython.ccall
 def _try_sidecar_direct_lanes_8616(
     *,
     project: angr.Project,
-    addr: int,
-    timeout: int,
-    window: int,
-    low_memory_path: bool,
+    addr: cython.longlong,
+    timeout: cython.longlong,
+    window: cython.longlong,
+    low_memory_path: cython.bint,
     lst_metadata: LSTMetadata | None,
-    function_label: str | None,
+    function_label: object,
 ) -> _FunctionCfgPair | None:
     """Try the sidecar region and label recovery lanes in order."""
+    recovered: object
     strict_direct_addr = _env_flag_enabled_8616("INERTIA_DIRECT_ADDR_STRICT")
     recovered = _try_recover_direct_addr_from_sidecar_region(
         project=project,
@@ -7008,19 +7420,20 @@ def _try_sidecar_direct_lanes_8616(
     )
 
 
+@cython.ccall
 def _direct_addr_fallback_8616(
     project: angr.Project,
-    addr: int,
-    exact_region: tuple[int, int] | None,
-    function_label: str | None,
+    addr: cython.longlong,
+    exact_region: object,
+    function_label: object,
     *,
-    timeout: int,
-    window: int,
-    low_memory_path: bool,
-    prefer_fast_recovery: bool,
+    timeout: cython.longlong,
+    window: cython.longlong,
+    low_memory_path: cython.bint,
+    prefer_fast_recovery: cython.bint,
 ) -> _FunctionCfgPair | None:
     """Resolve the entry-function fallback lanes for direct recovery."""
-    if exact_region is not None or function_label is None or addr != project.entry:
+    if exact_region is not None or function_label is None or operator.ne(addr, project.entry):
         return None
     if project.arch.name == "86_16":
         return _fallback_entry_function(
@@ -7033,13 +7446,15 @@ def _direct_addr_fallback_8616(
     return _recover_blob_entry_function(project, addr, timeout=timeout)
 
 
+@cython.ccall
 def _direct_addr_candidate_8616(
     project: angr.Project,
-    addr: int,
-    lst_metadata: LSTMetadata | None,
-    prefer_lst_direct: bool,
-) -> int:
+    addr: cython.longlong,
+    lst_metadata: object,
+    prefer_lst_direct: cython.bint,
+) -> cython.longlong:
     """Resolve the candidate addr for the bounded direct recovery lane."""
+    sidecar_region: object
     if prefer_lst_direct and project.arch.name == "86_16" and lst_metadata is not None:
         sidecar_region = _lst_code_region(lst_metadata, addr)
         if sidecar_region is not None and isinstance(sidecar_region[0], int):
@@ -7047,16 +7462,17 @@ def _direct_addr_candidate_8616(
     return addr
 
 
+@cython.ccall
 def _recover_direct_addr_bounded_8616(
     project: angr.Project,
-    addr: int,
-    candidate_addr: int,
-    exact_region: tuple[int, int] | None,
+    addr: cython.longlong,
+    candidate_addr: cython.longlong,
+    exact_region: object,
     *,
-    timeout: int,
-    window: int,
+    timeout: cython.longlong,
+    window: cython.longlong,
     lst_metadata: LSTMetadata | None,
-    prefer_lst_direct: bool,
+    prefer_lst_direct: cython.bint,
 ) -> _FunctionCfgPair:
     """Recover the direct addr through the bounded CFG lanes."""
     with _analysis_timeout(timeout):

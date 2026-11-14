@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Project versioned stack-memory accesses into canonical Alias identities.
 
 Layer: Alias.
@@ -8,6 +9,7 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import cython
 
 from typing import cast
 
@@ -27,11 +29,13 @@ from .stack_memory_ssa_contracts import (
     StackMemorySSAAliasAccessSlice8616,
     StackMemorySSAAliasFact8616,
 )
+import operator
 
 
+@cython.ccall
 def alias_stack_memory_storage_8616(
     address: IRAddress,
-) -> AliasStorageFacts | tuple[StackMemoryAliasRefusalKind8616, str]:
+) -> object:
     """Classify one typed address through the canonical Alias entry point."""
     result = alias_facts_for_ir_address_8616(address)
     if isinstance(result, AliasStorageFacts):
@@ -44,10 +48,12 @@ def alias_stack_memory_storage_8616(
     )
 
 
+@cython.ccall
 def project_stack_memory_access_8616(
     access: SSAMemoryAccess8616,
 ) -> StackMemorySSAAliasFact8616 | StackMemorySSAAliasAccess8616 | StackMemoryAliasRefusal8616:
     """Project one complete IR access as an exact fact or composed Alias view."""
+    item: object
     if not access.complete:
         return StackMemoryAliasRefusal8616(
             StackMemoryAliasRefusalKind8616.INCOMPLETE_ACCESS_SLICES,
@@ -99,8 +105,9 @@ def project_stack_memory_phi_8616(
     phi: SSAMemoryPhiNode8616,
 ) -> StackMemorySSAAliasFact8616 | StackMemoryAliasRefusal8616:
     """Require every phi input and target to name the same versioned storage."""
-    addresses = (phi.target, *(incoming.address for incoming in phi.incoming))
-    if any(address.version is None for address in addresses):
+    failed: object
+    addresses = (phi.target, *(incoming.address for incoming in iter(phi.incoming)))
+    if any(address.version is None for address in iter(addresses)):
         return StackMemoryAliasRefusal8616(
             StackMemoryAliasRefusalKind8616.UNVERSIONED_PHI,
             phi.block_addr,
@@ -108,12 +115,12 @@ def project_stack_memory_phi_8616(
             "memory phi target and inputs must all carry SSA versions",
             phi.target,
         )
-    storages = tuple(alias_stack_memory_storage_8616(address) for address in addresses)
-    failed = next((storage for storage in storages if isinstance(storage, tuple)), None)
+    storages = tuple(alias_stack_memory_storage_8616(address) for address in iter(addresses))
+    failed = next((storage for storage in iter(storages) if isinstance(storage, tuple)), None)
     if failed is not None:
         return StackMemoryAliasRefusal8616(failed[0], phi.block_addr, None, failed[1], phi.target)
-    typed_storages = tuple(storage for storage in storages if not isinstance(storage, tuple))
-    if any(storage != typed_storages[0] for storage in typed_storages[1:]):
+    typed_storages = tuple(storage for storage in iter(storages) if not isinstance(storage, tuple))
+    if any(operator.ne(storage, typed_storages[0]) for storage in iter(typed_storages[1:])):
         return StackMemoryAliasRefusal8616(
             StackMemoryAliasRefusalKind8616.INCONSISTENT_PHI_STORAGE,
             phi.block_addr,
@@ -127,7 +134,7 @@ def project_stack_memory_phi_8616(
         None,
         phi.target,
         typed_storages[0],
-        tuple(cast(int, incoming.address.version) for incoming in phi.incoming),
+        tuple(cast(int, incoming.address.version) for incoming in iter(phi.incoming)),
     )
 
 

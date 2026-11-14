@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Explicit callsite-keyed scoped evidence overlay for the Alias solver.
 
 Layer: Alias.
@@ -18,6 +19,8 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 
@@ -30,6 +33,8 @@ from inertia.ir.real16_invocation_domain import (
 from inertia.ir.scoped_call_stack_coordinates import (
     IRScopedCallStackCoordinates8616,
 )
+import dataclasses
+import operator
 
 __all__ = [
     "ScopedCallEntryBinding8616",
@@ -38,7 +43,7 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ScopedCallEntryBinding8616:
     """One callsite's retained carrier and the two authenticating domains."""
 
@@ -49,15 +54,18 @@ class ScopedCallEntryBinding8616:
     @property
     def callsite_addr(self) -> int | None:
         """Read the bound callsite from the physical coordinate record."""
+        coordinates: object
         coordinates = self.carrier.coordinates
         return None if coordinates is None else coordinates.callsite_addr
 
 
+@cython.ccall
 def _call_row_matches_carrier_8616(
     call: IRInstr,
     carrier: IRScopedCallStackCoordinates8616,
-) -> bool:
+) -> cython.bint:
     """Bind the carrier's physical record to this exact CALL instruction."""
+    coordinates: object
     coordinates = carrier.coordinates
     if coordinates is None or carrier.effect is None:
         return False
@@ -65,23 +73,24 @@ def _call_row_matches_carrier_8616(
             or coordinates.return_frame_bytes is None):
         return False
     if (not coordinates.source.matches_call(call)
-            or coordinates.callsite_addr != call.addr
+            or operator.ne(coordinates.callsite_addr, call.addr)
             or type(coordinates.target_addr) is not int):
         return False
     target = call.args[0] if call.args else None
     if (isinstance(target, IRValue) and target.space is MemSpace.CONST
-            and target.const != coordinates.target_addr):
+            and operator.ne(target.const, coordinates.target_addr)):
         return False
     return bool(
-        carrier.effect.callsite_addr == coordinates.callsite_addr
-        and carrier.effect.target_addr == coordinates.target_addr
+        operator.eq(carrier.effect.callsite_addr, coordinates.callsite_addr)
+        and operator.eq(carrier.effect.target_addr, coordinates.target_addr)
     )
 
 
+@cython.ccall
 def _artifact_binds_callsite_8616(
     artifact: IRFunctionArtifact,
     callee_scope: Real16InvocationDomain8616,
-) -> bool:
+) -> cython.bint:
     """Require the artifact the callee chain authenticated at link time.
 
     The retained link carries the identical registered caller artifact its
@@ -95,7 +104,7 @@ def _artifact_binds_callsite_8616(
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ScopedCallStackContext8616:
     """Immutable per-callsite bindings consumed by the scoped solver path."""
 
@@ -103,8 +112,9 @@ class ScopedCallStackContext8616:
 
     def for_callsite(self, callsite_addr: int | None) -> ScopedCallEntryBinding8616 | None:
         """Return the binding owned by one exact callsite, never by prefix."""
+        binding: object
         for binding in self.bindings:
-            if binding.callsite_addr == callsite_addr:
+            if operator.eq(binding.callsite_addr, callsite_addr):
                 return binding
         return None
 
@@ -112,7 +122,7 @@ class ScopedCallStackContext8616:
         self,
         offered_caller_scope: object,
         artifact: IRFunctionArtifact | None,
-    ) -> dict[int, int] | None:
+    ) -> object:
         """Project every bound callsite delta for one caller execution.
 
         The offered caller domain must share entry provenance with every
@@ -124,6 +134,10 @@ class ScopedCallStackContext8616:
         actual CALL row must still satisfy the carrier's physical source,
         target and frame. Any failure refuses the entire map.
         """
+        call: object
+        callsite: object
+        delta: object
+        binding: object
         if (
             type(offered_caller_scope) is not Real16InvocationDomain8616
             or offered_caller_scope.failure is not None
@@ -132,11 +146,11 @@ class ScopedCallStackContext8616:
             return None
         instructions = {
             instr.addr: instr
-            for block in artifact.blocks
-            for instr in block.instrs
+            for block in iter(artifact.blocks)
+            for instr in iter(block.instrs)
             if instr.addr is not None
         }
-        deltas: dict[int, int] = {}
+        deltas: dict[cython.longlong, cython.longlong] = {}
         for binding in self.bindings:
             callsite = binding.callsite_addr
             if callsite is None:
@@ -162,8 +176,9 @@ class ScopedCallStackContext8616:
         return deltas
 
 
+@cython.ccall
 def prove_scoped_call_stack_context_8616(
-    bindings: tuple[ScopedCallEntryBinding8616, ...],
+    bindings: object,
 ) -> ScopedCallStackContext8616 | None:
     """Authenticate one binding set; conflicting callsites refuse.
 
@@ -174,7 +189,10 @@ def prove_scoped_call_stack_context_8616(
     claiming one callsite, or a binding without a callsite, refuse the
     whole context rather than picking a winner.
     """
-    seen: set[int] = set()
+    callsite: object
+    effect: object
+    binding: object
+    seen: set[cython.longlong] = set()
     for binding in bindings:
         if type(binding) is not ScopedCallEntryBinding8616:
             return None

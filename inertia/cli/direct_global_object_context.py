@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Hydrate direct-global Widening evidence for CLI-created projects.
 
 Layer: CLI/fallback/reporting orchestration.
@@ -6,6 +7,8 @@ Lowering/Widening pipeline to classify complete recovered function catalogs.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Sequence
 
@@ -29,11 +32,13 @@ from .project_evidence_transport import (
 )
 
 
+@cython.ccall
 def attach_available_direct_global_object_evidence_8616(
     project: object,
-    cache_key: dict[str, object] | None,
-) -> bool:
+    cache_key: object,
+) -> cython.bint:
     """Attach persisted evidence unless the project already owns it."""
+    evidence: object
     if project_direct_global_object_layout_evidence_8616(project) is not None:
         return True
     if cache_key is None:
@@ -45,12 +50,13 @@ def attach_available_direct_global_object_evidence_8616(
     return True
 
 
+@cython.ccall
 def publish_recovered_direct_global_object_evidence_8616(
     evidence_project: object,
     functions: Sequence[object],
     target_project: object,
     *,
-    cache_key: dict[str, object] | None,
+    cache_key: object,
 ) -> DirectGlobalObjectLayoutEvidence8616:
     """Classify one complete catalog and publish its immutable census."""
     evidence = recover_project_direct_global_object_layout_evidence_8616(

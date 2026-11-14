@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recompilable output.
 
 Responsibility: convert proven codegen storage seeds into recompilation storage maps.
@@ -11,6 +12,8 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -21,6 +24,7 @@ from .recompilable_storage_map import (
     RecompilableStorageMapCandidate,
     build_recompilable_storage_map,
 )
+import dataclasses
 
 __all__ = [
     "SegmentedCodegenStorageSurface",
@@ -28,9 +32,9 @@ __all__ = [
     "export_recompilable_storage_map_from_codegen",
 ]
 
-type SegmentSummaryEntry = Mapping[str, object]
-type SegmentSummaryBuckets = Mapping[str, Mapping[str, SegmentSummaryEntry]]
-type SegmentLoweringMap = Mapping[str, SegmentSummaryEntry]
+SegmentSummaryEntry = typing.TypeAliasType("SegmentSummaryEntry", Mapping[str, object])
+SegmentSummaryBuckets = typing.TypeAliasType("SegmentSummaryBuckets", Mapping[str, Mapping[str, SegmentSummaryEntry]])
+SegmentLoweringMap = typing.TypeAliasType("SegmentLoweringMap", Mapping[str, SegmentSummaryEntry])
 
 
 class SegmentedCodegenStorageSurface(Protocol):
@@ -40,19 +44,22 @@ class SegmentedCodegenStorageSurface(Protocol):
     _inertia_segmented_memory_lowering: SegmentLoweringMap
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentedStorageSeed:
     """Proven segmented storage seed exported from codegen or alias evidence."""
 
-    segment_reg: str
-    offset: int
-    width: int
-    identity_kind: str
-    stable_object_kind: str | None = None
-    stable_object_name: str | None = None
+    segment_reg: object
+    offset: cython.longlong
+    width: cython.longlong
+    identity_kind: object
+    stable_object_kind: object = None
+    stable_object_name: object = None
 
 
-def _segment_summary_entry(codegen: SegmentedCodegenStorageSurface, segment_reg: str) -> SegmentSummaryEntry:
+@cython.ccall
+def _segment_summary_entry(codegen: SegmentedCodegenStorageSurface, segment_reg: object) -> SegmentSummaryEntry:
+    entry: object
+    bucket: object
     summary = codegen._inertia_segmented_memory_summary
     normalized = segment_reg.upper()
     for bucket in ("stable", "over_associated", "unknown"):
@@ -62,12 +69,15 @@ def _segment_summary_entry(codegen: SegmentedCodegenStorageSurface, segment_reg:
     return {}
 
 
-def _segment_lowering_entry(codegen: SegmentedCodegenStorageSurface, segment_reg: str) -> SegmentSummaryEntry:
+@cython.ccall
+def _segment_lowering_entry(codegen: SegmentedCodegenStorageSurface, segment_reg: object) -> SegmentSummaryEntry:
     lowering = codegen._inertia_segmented_memory_lowering
     return lowering.get(segment_reg.upper(), {})
 
 
-def _segment_value_from_summary(entry: SegmentSummaryEntry, classification: str) -> int | None:
+@cython.ccall
+def _segment_value_from_summary(entry: SegmentSummaryEntry, classification: object) -> int | None:
+    known_values: object
     if classification != "const":
         return None
     known_values = entry.get("known_values")
@@ -77,6 +87,7 @@ def _segment_value_from_summary(entry: SegmentSummaryEntry, classification: str)
     return value if isinstance(value, int) else None
 
 
+@cython.ccall
 def _candidate_from_seed(
     codegen: SegmentedCodegenStorageSurface,
     seed: SegmentedStorageSeed,
@@ -103,5 +114,5 @@ def export_recompilable_storage_map_from_codegen(
     seeds: Iterable[SegmentedStorageSeed],
 ) -> RecompilableStorageMapArtifact:
     """Export a deterministic recompilable storage map from typed codegen evidence."""
-    candidates = tuple(_candidate_from_seed(codegen, seed) for seed in seeds)
+    candidates = tuple(_candidate_from_seed(codegen, seed) for seed in iter(seeds))
     return build_recompilable_storage_map(candidates)

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize one proven carry/borrow bit at its exact C-AST uses.
 
 Layer: Types/Lowering.
@@ -7,6 +8,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import cast
 
@@ -45,12 +48,15 @@ from .carry_borrow_bit_scope import (
     node_instruction_site_8616,
     variable_key_8616,
 )
+import operator
+import builtins
 
 _EVIDENCE_TAG_8616 = "inertia_x86_16_carry_borrow_bit_lowering"
 
 
+@cython.ccall
 def normalize_carry_borrow_bit_fact_8616(
-    function_addr: int,
+    function_addr: cython.longlong,
     source: WideCarryBorrowValue8616,
 ) -> CarryBorrowBitLoweringFact8616 | CarryBorrowBitLoweringFailure8616:
     """Normalize exact instruction provenance without consulting C-AST shape."""
@@ -73,34 +79,35 @@ def normalize_carry_borrow_bit_fact_8616(
     )
 
 
-def _already_materialized_8616(root: object, fact: CarryBorrowBitLoweringFact8616) -> bool:
+def _already_materialized_8616(root: object, fact: CarryBorrowBitLoweringFact8616) -> cython.bint:
     """Return whether this exact fact owns a predicate at its high instruction."""
     return any(
-        node.tags.get(_EVIDENCE_TAG_8616) == fact and node.tags.get("ins_addr") == fact.high_ins_addr
-        for node in _iter_c_node_occurrences_8616(root)
+        operator.eq(node.tags.get(_EVIDENCE_TAG_8616), fact) and operator.eq(node.tags.get("ins_addr"), fact.high_ins_addr)
+        for node in builtins.iter(_iter_c_node_occurrences_8616(root))
         if isinstance(node, CBinaryOp)
     )
 
 
-def _one_semantic_carry_use_8616(occurrences: tuple[CarryBitOccurrence8616, ...]) -> bool:
+def _one_semantic_carry_use_8616(occurrences: object) -> cython.bint:
     """Return whether structured copies project one identical carry-variable use."""
+    first_key: object
     if not occurrences:
         return False
     first = occurrences[0]
     first_key = variable_key_8616(first.flag_variable)
     return first_key is not None and all(
-        variable_key_8616(occurrence.flag_variable) == first_key
+        operator.eq(variable_key_8616(occurrence.flag_variable), first_key)
         and _same_c_expression_8616(occurrence.node, first.node)
-        for occurrence in occurrences[1:]
+        for occurrence in iter(occurrences[1:])
     )
 
 
 def _one_semantic_inlined_carry_use_8616(
-    occurrences: tuple[InlinedCarryBitOccurrence8616, ...],
-) -> bool:
+    occurrences: object,
+) -> cython.bint:
     """Return whether structured copies project one identical inlined carry use."""
     return bool(occurrences) and all(
-        _same_c_expression_8616(occurrence.node, occurrences[0].node) for occurrence in occurrences[1:]
+        _same_c_expression_8616(occurrence.node, occurrences[0].node) for occurrence in iter(occurrences[1:])
     )
 
 
@@ -109,9 +116,11 @@ def _materialize_inlined_carry_use_8616(
     source: WideCarryBorrowValue8616,
     fact: CarryBorrowBitLoweringFact8616,
     ownership: CFGOwnershipArtifact,
-    occurrences: tuple[InlinedCarryBitOccurrence8616, ...],
+    occurrences: object,
 ) -> CarryBorrowBitLoweringResolution8616:
     """Replace one semantic family of exact inlined carry projections."""
+    occurrence: object
+    predicate: object
     if not _one_semantic_inlined_carry_use_8616(occurrences):
         return refused_carry_borrow_bit_lowering_8616(
             source,
@@ -129,15 +138,16 @@ def _materialize_inlined_carry_use_8616(
         )
     predicates = [predicate] * len(occurrences)
 
-    replacements: dict[int, CBinaryOp] = {}
+    replacements: dict[cython.longlong, CBinaryOp] = {}
     for occurrence, predicate in zip(occurrences, predicates, strict=True):
         replacement = cast(CBinaryOp, _clone_c_ast_tree_8616(predicate))
         replacement.tags = {**occurrence.high_node.tags, _EVIDENCE_TAG_8616: fact}
         replacements[id(occurrence.node)] = replacement
-    replaced_ids: set[int] = set()
+    replaced_ids: set[cython.longlong] = set()
 
     def _replace_occurrence_8616(node: object) -> object:
         """Replace one preclassified inlined projection by identity."""
+        replacement: object
         replacement = replacements.get(id(node))
         if replacement is None:
             return node
@@ -145,7 +155,7 @@ def _materialize_inlined_carry_use_8616(
         return replacement
 
     changed = _replace_c_children_8616(root, _replace_occurrence_8616)
-    if not changed or replaced_ids != replacements.keys():
+    if not changed or operator.ne(replaced_ids, replacements.keys()):
         return refused_carry_borrow_bit_lowering_8616(
             source,
             CarryBorrowBitLoweringFailure8616.REPLACEMENT_FAILED,
@@ -167,9 +177,12 @@ def _materialize_orphaned_carry_uses_8616(
     source: WideCarryBorrowValue8616,
     fact: CarryBorrowBitLoweringFact8616,
     ownership: CFGOwnershipArtifact,
-    occurrences: tuple[CarryBitOccurrence8616, ...],
+    occurrences: object,
 ) -> CarryBorrowBitLoweringResolution8616:
     """Replace exact high-site masks whose owned definitions were structured away."""
+    definitions: object
+    key: object
+    occurrence: object
     for occurrence in occurrences:
         key = variable_key_8616(occurrence.flag_variable)
         if key is None:
@@ -182,7 +195,7 @@ def _materialize_orphaned_carry_uses_8616(
         if any(
             node_instruction_site_8616(definition, ownership)
             is not CFGInstructionReachability8616.OWNER_MISSING
-            for definition in definitions
+            for definition in iter(definitions)
         ):
             return refused_carry_borrow_bit_lowering_8616(
                 source,
@@ -198,15 +211,16 @@ def _materialize_orphaned_carry_uses_8616(
             fact=fact,
             placement_classified=True,
         )
-    replacements: dict[int, CBinaryOp] = {}
+    replacements: dict[cython.longlong, CBinaryOp] = {}
     for occurrence in occurrences:
         replacement = cast(CBinaryOp, _clone_c_ast_tree_8616(predicate))
         replacement.tags = {**occurrence.node.tags, _EVIDENCE_TAG_8616: fact}
         replacements[id(occurrence.node)] = replacement
-    replaced_ids: set[int] = set()
+    replaced_ids: set[cython.longlong] = set()
 
     def _replace_occurrence_8616(node: object) -> object:
         """Replace one preclassified orphaned numeric mask by identity."""
+        replacement: object
         replacement = replacements.get(id(node))
         if replacement is None:
             return node
@@ -214,7 +228,7 @@ def _materialize_orphaned_carry_uses_8616(
         return replacement
 
     changed = _replace_c_children_8616(root, _replace_occurrence_8616)
-    if not changed or replaced_ids != replacements.keys():
+    if not changed or operator.ne(replaced_ids, replacements.keys()):
         return refused_carry_borrow_bit_lowering_8616(
             source,
             CarryBorrowBitLoweringFailure8616.REPLACEMENT_FAILED,
@@ -231,6 +245,7 @@ def _materialize_orphaned_carry_uses_8616(
     )
 
 
+@cython.ccall
 def _missing_occurrence_resolution_8616(
     root: object,
     source: WideCarryBorrowValue8616,
@@ -256,12 +271,14 @@ def _missing_occurrence_resolution_8616(
     )
 
 
+@cython.ccall
 def _carrier_closures_8616(
-    occurrences: tuple[CarryBitOccurrence8616, ...],
+    occurrences: object,
     fact: CarryBorrowBitLoweringFact8616,
     ownership: CFGOwnershipArtifact,
-) -> list[CarryBitCarrierClosure8616] | CarryBorrowBitLoweringFailure8616:
+) -> object:
     """Return every occurrence's carrier closure or the first failure."""
+    occurrence: object
     closures: list[CarryBitCarrierClosure8616] = []
     for occurrence in occurrences:
         closure = carry_bit_carrier_closure_8616(occurrence, fact, ownership)
@@ -271,22 +288,25 @@ def _carrier_closures_8616(
     return closures
 
 
+@cython.ccall
 def _carry_use_predicates_8616(
     root: object,
     fact: CarryBorrowBitLoweringFact8616,
     ownership: CFGOwnershipArtifact,
-    occurrences: tuple[CarryBitOccurrence8616, ...],
-    closures: list[CarryBitCarrierClosure8616],
-) -> list[CBinaryOp] | CarryBorrowBitLoweringFailure8616:
+    occurrences: object,
+    closures: object,
+) -> object:
     """Collect one proven predicate per occurrence or the first failure."""
+    all_nodes: object
+    closure: object
     if len(occurrences) > 1 and fact.kind is CarryBorrowKind8616.SUB_WITH_BORROW:
         nodes = tuple(_iter_c_node_occurrences_8616(root))
         predicate = carry_bit_predicate_from_arithmetic_8616(nodes, fact, ownership)
         if isinstance(predicate, CarryBorrowBitLoweringFailure8616):
             return predicate
-        return [predicate for _occurrence in occurrences]
+        return [predicate for _occurrence in iter(occurrences)]
     predicates: list[CBinaryOp] = []
-    all_nodes: tuple[object, ...] | None = None
+    all_nodes = None
     for closure in closures:
         predicate = carry_bit_predicate_8616(closure.definition_nodes, fact, ownership)
         if predicate is CarryBorrowBitLoweringFailure8616.CARRY_PREDICATE_MISSING:
@@ -303,19 +323,22 @@ def _replace_occurrence_nodes_8616(
     root: object,
     source: WideCarryBorrowValue8616,
     fact: CarryBorrowBitLoweringFact8616,
-    occurrences: tuple[CarryBitOccurrence8616, ...],
-    predicates: list[CBinaryOp],
+    occurrences: object,
+    predicates: object,
 ) -> CarryBorrowBitLoweringResolution8616 | None:
     """Swap each classified occurrence for its cloned proven predicate."""
-    replacements: dict[int, CBinaryOp] = {}
+    occurrence: object
+    predicate: object
+    replacements: dict[cython.longlong, CBinaryOp] = {}
     for occurrence, predicate in zip(occurrences, predicates, strict=True):
         replacement = cast(CBinaryOp, _clone_c_ast_tree_8616(predicate))
         replacement.tags = {**occurrence.node.tags, _EVIDENCE_TAG_8616: fact}
         replacements[id(occurrence.node)] = replacement
-    replaced_ids: set[int] = set()
+    replaced_ids: set[cython.longlong] = set()
 
     def _replace_occurrence_8616(node: object) -> object:
         """Replace one preclassified semantic-use projection by identity."""
+        replacement: object
         replacement = replacements.get(id(node))
         if replacement is None:
             return node
@@ -323,7 +346,7 @@ def _replace_occurrence_nodes_8616(
         return replacement
 
     changed = _replace_c_children_8616(root, _replace_occurrence_8616)
-    if not changed or replaced_ids != replacements.keys():
+    if not changed or operator.ne(replaced_ids, replacements.keys()):
         return refused_carry_borrow_bit_lowering_8616(
             source,
             CarryBorrowBitLoweringFailure8616.REPLACEMENT_FAILED,
@@ -340,6 +363,9 @@ def materialize_carry_borrow_bit_value_8616(
     ownership: CFGOwnershipArtifact,
 ) -> CarryBorrowBitLoweringResolution8616:
     """Materialize one proven carry predicate or return an explicit refusal."""
+    replaced: object
+    closure: object
+    occurrence: object
     occurrences = carry_bit_occurrences_8616(root, fact, ownership)
     if not occurrences:
         return _missing_occurrence_resolution_8616(root, source, fact, ownership)
@@ -348,10 +374,10 @@ def materialize_carry_borrow_bit_value_8616(
         and all(
             node_instruction_site_8616(definition, ownership)
             is CFGInstructionReachability8616.OWNER_MISSING
-            for definition in assignment_map_8616(occurrence).get(key, ())
+            for definition in builtins.iter(assignment_map_8616(occurrence).get(key, ()))
         )
-        for occurrence in occurrences
-        for key in (variable_key_8616(occurrence.flag_variable),)
+        for occurrence in iter(occurrences)
+        for key in iter((variable_key_8616(occurrence.flag_variable),))
     )
     if not _one_semantic_carry_use_8616(occurrences) or only_unowned_carriers:
         return _materialize_orphaned_carry_uses_8616(root, source, fact, ownership, occurrences)
@@ -368,7 +394,7 @@ def materialize_carry_borrow_bit_value_8616(
         return refused_carry_borrow_bit_lowering_8616(
             source, predicates, fact=fact, placement_classified=True
         )
-    if any(not _same_c_expression_8616(predicate, predicates[0]) for predicate in predicates[1:]):
+    if any(not _same_c_expression_8616(predicate, predicates[0]) for predicate in iter(predicates[1:])):
         return refused_carry_borrow_bit_lowering_8616(
             source,
             CarryBorrowBitLoweringFailure8616.CARRY_PREDICATE_AMBIGUOUS,

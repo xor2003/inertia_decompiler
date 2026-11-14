@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Scoped sibling carrier for per-call SP coordinates under dual entry scopes.
 
 Layer: IR.
@@ -18,6 +19,8 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -27,6 +30,8 @@ from inertia.semantics.scoped_callee_stack_effects import (
 )
 
 from .call_stack_coordinates import IRCallStackCoordinates8616
+import dataclasses
+import operator
 
 __all__ = [
     "IRScopedCallStackCoordinates8616",
@@ -48,12 +53,13 @@ class ScopedCallStackCoordinateFailure8616(StrEnum):
     FRAME_UNPROVEN = "frame_unproven"
 
 
-def _signed_word_delta_8616(value: int) -> int:
+@cython.ccall
+def _signed_word_delta_8616(value: cython.longlong) -> cython.longlong:
     """Express one modular word displacement in signed affine coordinates."""
     return ((value + _WORD_SIGN_8616) % _WORD_BITS_8616) - _WORD_SIGN_8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRScopedCallStackCoordinates8616:
     """Physical coordinates plus the dual-scope call-effect binding.
 
@@ -71,13 +77,13 @@ class IRScopedCallStackCoordinates8616:
     )
     failure: ScopedCallStackCoordinateFailure8616 | None = None
     detail: str = ""
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 1
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 1
 
-    def _retained_carrier_is_accepted(self) -> bool:
+    def _retained_carrier_is_accepted(self) -> cython.bint:
         """Require an accepted publication, independent of source currency."""
         counts = (
             self.raw_fact_count, self.normalized_fact_count,
@@ -86,11 +92,11 @@ class IRScopedCallStackCoordinates8616:
         )
         return bool(
             self.failure is None and counts == (1, 1, 1, 1, 0)
-            and all(type(count) is int for count in counts)
+            and all(type(count) is int for count in iter(counts))
         )
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Scoped evidence is never context-free; see ``net_sp_delta_for``."""
         return self.net_sp_delta_for(None, None) is not None
 
@@ -98,7 +104,7 @@ class IRScopedCallStackCoordinates8616:
         self,
         offered_caller_scope: object,
         offered_callee_scope: object,
-    ) -> bool:
+    ) -> cython.bint:
         """Re-authenticate both scopes and the physical coordinate contract.
 
         The offered scopes must satisfy the retained effect's dual-context
@@ -120,6 +126,8 @@ class IRScopedCallStackCoordinates8616:
         offered_callee_scope: object,
     ) -> int | None:
         """Return signed16(body delta - return frame) under both scopes."""
+        delta: object
+        frame: object
         if not self.complete_for(offered_caller_scope, offered_callee_scope):
             return None
         assert self.effect is not None and self.coordinates is not None
@@ -135,7 +143,7 @@ class IRScopedCallStackCoordinates8616:
         self,
         offered_caller_scope: object,
         offered_callee_scope: object,
-    ) -> bool:
+    ) -> cython.bint:
         """Report whether the scoped net displacement currently projects."""
         return self.net_sp_delta_for(offered_caller_scope, offered_callee_scope) is not None
 
@@ -164,6 +172,7 @@ class IRScopedCallStackCoordinates8616:
         }
 
 
+@cython.ccall
 def _conflict_8616(
     coordinates: IRCallStackCoordinates8616,
     effect: ScopedCalleeStackCallResult8616,
@@ -179,12 +188,12 @@ def _conflict_8616(
     if coordinates.return_frame_bytes is None:
         return ScopedCallStackCoordinateFailure8616.FRAME_UNPROVEN
     conflict = (
-        coordinates.callsite_addr != effect.callsite_addr
-        or coordinates.return_addr != effect.return_addr
-        or coordinates.target_addr != effect.target_addr
+        operator.ne(coordinates.callsite_addr, effect.callsite_addr)
+        or operator.ne(coordinates.return_addr, effect.return_addr)
+        or operator.ne(coordinates.target_addr, effect.target_addr)
         or coordinates.source.project is not effect.project
         or effect.frame_kind is None
-        or coordinates.return_frame_bytes != effect.frame_kind.return_frame_width
+        or operator.ne(coordinates.return_frame_bytes, effect.frame_kind.return_frame_width)
     )
     if conflict:
         return ScopedCallStackCoordinateFailure8616.COORDINATE_CONFLICT
@@ -193,9 +202,10 @@ def _conflict_8616(
     return None
 
 
+@cython.ccall
 def prove_scoped_ir_call_stack_coordinates_8616(
     coordinates: IRCallStackCoordinates8616 | None,
-    effect: ScopedCalleeStackCallResult8616 | None,
+    effect: object,
 ) -> IRScopedCallStackCoordinates8616:
     """Bind a physical coordinate record to one dual-scope call effect.
 
@@ -205,6 +215,7 @@ def prove_scoped_ir_call_stack_coordinates_8616(
     callsite, return, target, frame width or project identity — refuses as
     ``COORDINATE_CONFLICT`` rather than merging two different calls.
     """
+    failure: object
     if type(coordinates) is not IRCallStackCoordinates8616:
         return IRScopedCallStackCoordinates8616(
             coordinates if type(coordinates) is IRCallStackCoordinates8616 else None,

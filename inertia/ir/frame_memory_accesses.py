@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Project logical memory operand widths into frame-access evidence.
 
 Layer: IR.
@@ -10,49 +11,61 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import Counter
 from collections.abc import Iterator
 
 from .core import AddressStatus, IRAddress, IRFunctionArtifact, IRInstr, MemSpace
 from .logical_memory_contracts import IRLogicalMemoryAccess8616, IRMemoryAccessKind8616
+import operator
+import builtins
 
 
+@cython.ccall
 def _matches_execution(
     access: IRLogicalMemoryAccess8616,
-    instructions: dict[tuple[int, int], IRInstr],
-) -> bool:
+    instructions: object,
+) -> cython.bint:
     """Require each recorded byte to refer to the current raw instruction."""
+    instruction: object
+    part: object
     expected_op = "LOAD" if access.kind is IRMemoryAccessKind8616.READ else "STORE"
     for part in access.execution_slices:
         instruction = instructions.get((part.block_addr, part.instr_index))
-        if instruction is None or instruction.op != expected_op or instruction.addr != part.insn_addr:
+        if instruction is None or operator.ne(instruction.op, expected_op) or operator.ne(instruction.addr, part.insn_addr):
             return False
-        if not instruction.args or instruction.args[0] != part.address:
+        if not instruction.args or operator.ne(instruction.args[0], part.address):
             return False
     return True
 
 
-def frame_memory_accesses_8616(artifact: IRFunctionArtifact) -> Iterator[tuple[IRAddress, int]]:
+def frame_memory_accesses_8616(artifact: IRFunctionArtifact) -> Iterator[tuple[IRAddress, cython.longlong]]:
     """Yield logical operands once and retain every uncovered raw SS access.
 
     A word executed through two independent byte accesses remains a word-sized
     machine operand. Independent byte instructions must never be combined.
     """
-    instructions = {(block.addr, index): instruction for block in artifact.blocks
-                    for index, instruction in enumerate(block.instrs)}
+    logical: object
+    access: object
+    instruction: object
+    site: object
+    value: object
+    instructions = {(block.addr, index): instruction for block in iter(artifact.blocks)
+                    for index, instruction in builtins.iter(enumerate(block.instrs))}
     logical = artifact.logical_memory
     candidates: tuple[IRLogicalMemoryAccess8616, ...] = ()
-    if logical is not None and logical.closed and logical.function_addr == artifact.function_addr:
-        candidates = tuple(access for access in logical.accesses
-                           if access.key.function_addr == artifact.function_addr and access.address.space is MemSpace.SS)
-    owners = Counter((part.block_addr, part.instr_index) for access in candidates for part in access.execution_slices)
-    covered: set[tuple[int, int]] = set()
+    if logical is not None and logical.closed and operator.eq(logical.function_addr, artifact.function_addr):
+        candidates = tuple(access for access in iter(logical.accesses)
+                           if operator.eq(access.key.function_addr, artifact.function_addr) and access.address.space is MemSpace.SS)
+    owners = Counter((part.block_addr, part.instr_index) for access in iter(candidates) for part in iter(access.execution_slices))
+    covered: set[tuple[cython.longlong, cython.longlong]] = set()
     for access in candidates:
-        unique = all(owners[(part.block_addr, part.instr_index)] == 1 for part in access.execution_slices)
+        unique = all(owners[(part.block_addr, part.instr_index)] == 1 for part in iter(access.execution_slices))
         if not unique or not _matches_execution(access, instructions):
             continue
-        covered.update((part.block_addr, part.instr_index) for part in access.execution_slices)
+        covered.update((part.block_addr, part.instr_index) for part in iter(access.execution_slices))
         yield access.address, access.address.size
     for site, instruction in instructions.items():
         if site in covered:
@@ -69,12 +82,12 @@ def stable_bp_memory_ranges_8616(artifact: IRFunctionArtifact) -> tuple[IRAddres
     logical operand. Neither view replaces the other at a call boundary.
     """
     ranges = {
-        address for block in artifact.blocks for instruction in block.instrs
+        address for block in iter(artifact.blocks) for instruction in iter(block.instrs)
         if instruction.op in {"LOAD", "STORE"} and instruction.args
         and isinstance((address := instruction.args[0]), IRAddress)
     }
-    ranges.update(address for address, _size in frame_memory_accesses_8616(artifact))
-    return tuple(sorted((address for address in ranges
+    ranges.update(address for address, _size in builtins.iter(frame_memory_accesses_8616(artifact)))
+    return tuple(sorted((address for address in iter(ranges)
                          if address.space is MemSpace.SS and address.base == ("bp",)
                          and address.status is AddressStatus.STABLE and address.size > 0),
                         key=lambda item: (item.offset, item.size)))

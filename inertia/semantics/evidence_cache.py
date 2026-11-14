@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Compatibility imports for function-scoped logical-memory capture.
 
 Layer: Semantics compatibility boundary.
@@ -13,6 +14,7 @@ semantic reconstruction here; consumers should migrate to typed IR artifacts.
 """
 
 from __future__ import annotations
+import cython
 
 from inertia.ir.logical_memory_capture import (
     IRLogicalMemoryCaptureCollection8616,

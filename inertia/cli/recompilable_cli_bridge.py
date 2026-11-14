@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recompilable output.
 
 Responsibility: run bounded decompile/recompile probes against generated C.
@@ -11,6 +12,8 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import io
 import re
@@ -29,6 +32,7 @@ from .recompilable_storage_objects import (
     summarize_recompilable_storage_object_artifact,
 )
 from .runtime_support import run_with_timeout_in_fork
+import operator
 
 __all__ = [
     "decompile_recompilable_subset_case",
@@ -43,7 +47,8 @@ _CORPUS_DECOMPILE_TIMEOUT = 60
 _LOADPROG_REAL_DECOMPILE_TIMEOUT = 8
 
 
-def _project_from_asm(asm: str) -> angr.Project:
+@cython.ccall
+def _project_from_asm(asm: object) -> angr.Project:
     ks_ = ks.Ks(ks.KS_ARCH_X86, ks.KS_MODE_16)
     code, _ = ks_.asm(asm, as_bytes=True)
     if not isinstance(code, bytes):
@@ -59,6 +64,7 @@ def _project_from_asm(asm: str) -> angr.Project:
     )
 
 
+@cython.ccall
 def _evidence_dec_path(case: RecompilableSubsetCase) -> Path | None:
     if case.cod_path is None:
         return None
@@ -69,13 +75,17 @@ def _evidence_dec_path(case: RecompilableSubsetCase) -> Path | None:
     return (_EVIDENCE_SUBSET_ROOT / rel_path).with_suffix(".dec")
 
 
+@cython.ccall
 def _extract_proc_text_from_evidence(
-    dec_text: str,
+    dec_text: object,
     *,
-    proc_kind: str,
-    proc_name: str,
-) -> str | None:
+    proc_kind: object,
+    proc_name: object,
+) -> object:
     """Extract one named procedure body from source-evidence decompiler text."""
+    text: object
+    line: object
+    start_idx: object
     lines = dec_text.splitlines()
     section_lines, saw_any_proc_marker = _evidence_proc_section_8616(
         lines, proc_kind=proc_kind, proc_name=proc_name
@@ -96,13 +106,16 @@ def _extract_proc_text_from_evidence(
     return None
 
 
+@cython.ccall
 def _evidence_proc_section_8616(
-    lines: list[str],
+    lines: object,
     *,
-    proc_kind: str,
-    proc_name: str,
-) -> tuple[list[str], bool]:
+    proc_kind: object,
+    proc_name: object,
+) -> tuple[list[str], cython.bint]:
     """Collect the lines between the target procedure marker and the next one."""
+    marker: object
+    line: object
     section_lines: list[str] = []
     in_target_section = False
     saw_any_proc_marker = False
@@ -112,18 +125,20 @@ def _evidence_proc_section_8616(
             saw_any_proc_marker = True
             if in_target_section:
                 break
-            in_target_section = marker.group("proc") == proc_name and marker.group("kind") == proc_kind
+            in_target_section = operator.eq(marker.group("proc"), proc_name) and operator.eq(marker.group("kind"), proc_kind)
             continue
         if in_target_section:
             section_lines.append(line)
     return section_lines, saw_any_proc_marker
 
 
-def _brace_bounded_proc_text_8616(section_lines: list[str], start_idx: int) -> str | None:
+@cython.ccall
+def _brace_bounded_proc_text_8616(section_lines: object, start_idx: cython.longlong) -> object:
     """Return the header-to-close-brace text starting at ``start_idx``."""
+    end_idx: object
     brace_depth = 0
     saw_open_brace = False
-    end_idx: int | None = None
+    end_idx = None
     for idx in range(start_idx, len(section_lines)):
         current = section_lines[idx]
         if not saw_open_brace and ";" in current:
@@ -140,7 +155,9 @@ def _brace_bounded_proc_text_8616(section_lines: list[str], start_idx: int) -> s
     return "\n".join(section_lines[: end_idx + 1]).strip() + "\n"
 
 
-def _load_evidence_c_text(case: RecompilableSubsetCase) -> str | None:
+@cython.ccall
+def _load_evidence_c_text(case: RecompilableSubsetCase) -> object:
+    dec_path: object
     if case.cod_path is None or case.proc_name is None:
         return None
     dec_path = _evidence_dec_path(case)
@@ -153,11 +170,14 @@ def _load_evidence_c_text(case: RecompilableSubsetCase) -> str | None:
     )
 
 
-def _load_shape_ok_evidence_c_text(case: RecompilableSubsetCase) -> str | None:
+@cython.ccall
+def _load_shape_ok_evidence_c_text(case: RecompilableSubsetCase) -> object:
     return None
 
 
-def _rewrite_corpus_function_name(c_text: str, proc_name: str) -> str:
+@cython.ccall
+def _rewrite_corpus_function_name(c_text: object, proc_name: object) -> object:
+    match: object
     lines = c_text.splitlines()
     for index in range(len(lines) - 1):
         if lines[index + 1].strip() != "{":
@@ -168,19 +188,21 @@ def _rewrite_corpus_function_name(c_text: str, proc_name: str) -> str:
         open_paren = header.find("(")
         prefix = header[:open_paren]
         match = re.search(r"([A-Za-z_][\\w$?@]*)\\s*$", prefix)
-        if match is None or match.group(1) == proc_name:
+        if match is None or operator.eq(match.group(1), proc_name):
             return c_text
         lines[index] = f"{prefix[: match.start(1)]}{proc_name}{header[open_paren:]}"
         return "\n".join(lines)
     return c_text
 
 
-def _corpus_decompile_timeout(case: RecompilableSubsetCase) -> int:
+@cython.ccall
+def _corpus_decompile_timeout(case: RecompilableSubsetCase) -> cython.longlong:
     if case.name == "loadprog_real":
         return _LOADPROG_REAL_DECOMPILE_TIMEOUT
     return _CORPUS_DECOMPILE_TIMEOUT
 
 
+@cython.ccall
 def _storage_object_meta(project: angr.Project, function_addr: int | None) -> dict[str, object]:
     summary = summarize_recompilable_storage_object_artifact(
         build_recompilable_storage_object_artifact(project, function_addr)
@@ -193,6 +215,7 @@ def _storage_object_meta(project: angr.Project, function_addr: int | None) -> di
     }
 
 
+@cython.ccall
 def _empty_storage_object_meta() -> dict[str, object]:
     return {
         "storage_object_record_count": 0,
@@ -202,7 +225,8 @@ def _empty_storage_object_meta() -> dict[str, object]:
     }
 
 
-def _honest_live_decompile_failure_text(case: RecompilableSubsetCase, reason: str) -> str:
+@cython.ccall
+def _honest_live_decompile_failure_text(case: RecompilableSubsetCase, reason: object) -> str:
     safe_reason = reason.replace("/*", "/ *").replace("*/", "* /").strip()
     return f"/* live decompile unavailable for {case.name}: {safe_reason} */\n"
 
@@ -210,10 +234,12 @@ def _honest_live_decompile_failure_text(case: RecompilableSubsetCase, reason: st
 def _decompile_corpus_case(
     case: RecompilableSubsetCase,
     *,
-    evidence_c_text: str | None = None,
-) -> tuple[str, dict[str, object]]:
+    evidence_c_text: object = None,
+) -> object:
     def _impl() -> tuple[str, dict[str, object]]:
         """Run a bounded live decompile for one corpus-backed recompilable case."""
+        function: object
+        selected_entries: object
         if case.cod_path is None or case.proc_name is None:
             raise ValueError("expected a corpus-backed case")
 
@@ -338,11 +364,12 @@ def _decompile_corpus_case(
     return _impl()
 
 
+@cython.ccall
 def decompile_recompilable_subset_case(
     case: RecompilableSubsetCase,
     *,
-    evidence_c_text: str | None = None,
-) -> tuple[str, dict[str, object]]:
+    evidence_c_text: object = None,
+) -> object:
     """Return generated C and provenance metadata for one recompilable subset case."""
     if case.cod_path is not None:
         return _decompile_corpus_case(case, evidence_c_text=evidence_c_text)

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed store-width joins after alias compatibility proof.
 
 Layer: Widening.
@@ -9,6 +10,8 @@ CLI/reporting evidence.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from typing import Protocol, TypeGuard, cast
@@ -22,19 +25,25 @@ from angr.sim_variable import SimMemoryVariable
 class _SegmentedGlobalAccessLike8616(Protocol):
     """Structural view of lowering-owned segmented global access classifications."""
 
-    kind: str
+    kind: object
     linear: int | None
 
 
+@cython.ccall
 def _is_segmented_global_access_8616(value: object) -> TypeGuard[_SegmentedGlobalAccessLike8616]:
     """Return whether a dynamic angr/codegen boundary result names a linear global access."""
+    kind: object
+    linear: object
     kind = getattr(value, "kind", None)
     linear = getattr(value, "linear", None)
     return kind == "global" and isinstance(linear, int)
 
 
+@cython.ccall
 def _global_memory_addr(node: object) -> int | None:
     """Read a global address from dynamic angr/codegen boundary CVariable metadata."""
+    addr: object
+    variable: object
     if not isinstance(node, structured_c.CVariable):
         return None
     variable = getattr(node, "variable", None)
@@ -44,10 +53,12 @@ def _global_memory_addr(node: object) -> int | None:
     return addr if isinstance(addr, int) else None
 
 
+@cython.ccall
 def _global_load_addr(node: object, _project: angr.Project) -> int | None:
     return _global_memory_addr(node)
 
 
+@cython.ccall
 def _match_scaled_high_byte(
     node: object,
     project: angr.Project,
@@ -55,6 +66,9 @@ def _match_scaled_high_byte(
     c_constant_value: Callable[[object], object],
     global_load_addr: Callable[[object, angr.Project], int | None],
 ) -> int | None:
+    addr: object
+    maybe_load: object
+    maybe_scale: object
     if not isinstance(node, structured_c.CBinaryOp):
         return None
 
@@ -79,6 +93,7 @@ def _match_scaled_high_byte(
     return None
 
 
+@cython.ccall
 def _extract_dereference_addr_expr(node: object) -> object | None:
     if not isinstance(node, structured_c.CUnaryOp) or node.op != "Dereference":
         return None
@@ -88,6 +103,7 @@ def _extract_dereference_addr_expr(node: object) -> object | None:
     return cast(object, operand)
 
 
+@cython.ccall
 def _safe_type_bits(node: object) -> int | None:
     """Read bit width from dynamic angr/codegen boundary C AST type metadata."""
     try:
@@ -96,7 +112,9 @@ def _safe_type_bits(node: object) -> int | None:
         return None
 
 
+@cython.ccall
 def _match_byte_load_addr_expr(node: object, *, unwrap_c_casts: Callable[[object], object]) -> object | None:
+    addr_expr: object
     node = unwrap_c_casts(node)
     addr_expr = _extract_dereference_addr_expr(node)
     if addr_expr is None:
@@ -107,7 +125,9 @@ def _match_byte_load_addr_expr(node: object, *, unwrap_c_casts: Callable[[object
     return addr_expr
 
 
+@cython.ccall
 def _match_byte_store_addr_expr(node: object) -> object | None:
+    addr_expr: object
     addr_expr = _extract_dereference_addr_expr(node)
     if addr_expr is None:
         return None
@@ -117,6 +137,7 @@ def _match_byte_store_addr_expr(node: object) -> object | None:
     return addr_expr
 
 
+@cython.ccall
 def _match_shifted_high_byte_addr_expr(
     node: object,
     *,
@@ -124,6 +145,8 @@ def _match_shifted_high_byte_addr_expr(
     c_constant_value: Callable[[object], object],
     match_byte_load_addr_expr: Callable[[object], object | None],
 ) -> object | None:
+    maybe_load: object
+    maybe_scale: object
     node = unwrap_c_casts(node)
     if not isinstance(node, structured_c.CBinaryOp):
         return None
@@ -143,20 +166,22 @@ def _match_shifted_high_byte_addr_expr(
     return None
 
 
+@cython.ccall
 def _addr_exprs_are_same_or_byte_pair(
     low_addr_expr: object,
     high_addr_expr: object,
     project: angr.Project,
     *,
-    addr_exprs_are_same: Callable[[object, object, angr.Project], bool],
-    addr_exprs_are_byte_pair: Callable[[object, object, angr.Project], bool],
-) -> tuple[bool, bool]:
+    addr_exprs_are_same: Callable[[object, object, angr.Project], cython.bint],
+    addr_exprs_are_byte_pair: Callable[[object, object, angr.Project], cython.bint],
+) -> tuple[cython.bint, cython.bint]:
     return (
         addr_exprs_are_same(low_addr_expr, high_addr_expr, project),
         addr_exprs_are_byte_pair(low_addr_expr, high_addr_expr, project),
     )
 
 
+@cython.ccall
 def _match_word_pair_low_addr_expr(
     node: object,
     project: angr.Project,
@@ -166,6 +191,10 @@ def _match_word_pair_low_addr_expr(
     match_shifted_high_byte_addr_expr: Callable[[object], object | None],
     addr_exprs_are_byte_pair: Callable[[object, object, angr.Project], object],
 ) -> object | None:
+    high_addr_expr: object
+    low_addr_expr: object
+    high_expr: object
+    low_expr: object
     node = unwrap_c_casts(node)
     if not isinstance(node, structured_c.CBinaryOp) or node.op not in {"Or", "Add"}:
         return None
@@ -181,6 +210,7 @@ def _match_word_pair_low_addr_expr(
     return None
 
 
+@cython.ccall
 def _make_word_dereference_from_addr_expr(
     codegen: object, project: angr.Project, addr_expr: object
 ) -> structured_c.CUnaryOp:
@@ -194,7 +224,9 @@ def _make_word_dereference_from_addr_expr(
     )
 
 
+@cython.ccall
 def _match_word_dereference_addr_expr(node: object) -> object | None:
+    addr_expr: object
     addr_expr = _extract_dereference_addr_expr(node)
     if addr_expr is None:
         return None
@@ -204,6 +236,7 @@ def _match_word_dereference_addr_expr(node: object) -> object | None:
     return addr_expr
 
 
+@cython.ccall
 def _high_byte_store_addr(
     node: object,
     project: angr.Project,

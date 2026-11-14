@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Structuring-owned materialization for unconsumed loop-break JCCs.
 
 Layer: Structuring.
@@ -15,6 +16,8 @@ Both supported tag representations must retain instruction membership evidence.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -50,33 +53,36 @@ from inertia.pipeline.errors import PipelineHardError
 from .condition_materialization import materialize_condition_ir_expression_8616
 from .condition_storage_identity import same_condition_storage_identity_8616
 from .loop_break_topology import LoopBreakTopology8616, collect_loop_break_topology_8616
+import dataclasses
+import operator
+import builtins
 
 
-@dataclass(frozen=True, order=True, slots=True)
+@dataclasses.dataclass(frozen=True, order=True, )
 class LoopBranchGuardFact8616:
     """Binary-proven identity, targets, and semantics for one loop guard."""
 
-    jcc_addr: int
-    block_addr: int
-    body_target: int
-    fallthrough_target: int
-    false_target: int
-    decoded_condition_fingerprint: str
-    guard_condition_fingerprint: str
+    jcc_addr: cython.longlong
+    block_addr: cython.longlong
+    body_target: cython.longlong
+    fallthrough_target: cython.longlong
+    false_target: cython.longlong
+    decoded_condition_fingerprint: object
+    guard_condition_fingerprint: object
     condition_ir: ConditionIR | None = field(default=None, compare=False, repr=False)
 
 
-@dataclass(frozen=True, order=True, slots=True)
+@dataclasses.dataclass(frozen=True, order=True, )
 class LoopHeaderDuplicateGuardRemovalFact8616:
     """Exact condition evidence for one redundant loop-break guard removal."""
 
-    jcc_addr: int
-    block_addr: int
-    removed_guard_fingerprint: str
-    retained_loop_fingerprint: str
+    jcc_addr: cython.longlong
+    block_addr: cython.longlong
+    removed_guard_fingerprint: object
+    retained_loop_fingerprint: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _LoopHeaderDuplicateGuardRemovalResult8616:
     """Internal AST mutation result paired with its typed validation fact."""
 
@@ -84,60 +90,61 @@ class _LoopHeaderDuplicateGuardRemovalResult8616:
     fact: LoopHeaderDuplicateGuardRemovalFact8616
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class UnconsumedLoopBreakJccStats8616:
     """Evidence counters for unconsumed loop-break JCC materialization."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    refused_existing_condition: int = 0
-    refused_no_fallthrough_jump: int = 0
-    refused_decode: int = 0
-    refused_no_loop_anchor: int = 0
-    refused_duplicate_guard: int = 0
-    removed_loop_header_duplicate_guard: int = 0
-    split_loop_header_condition_chain: int = 0
-    ast_query_count: int = 0
-    ast_query_build_count: int = 0
-    ast_query_hit_count: int = 0
-    ast_query_invalidation_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    refused_existing_condition: cython.longlong = 0
+    refused_no_fallthrough_jump: cython.longlong = 0
+    refused_decode: cython.longlong = 0
+    refused_no_loop_anchor: cython.longlong = 0
+    refused_duplicate_guard: cython.longlong = 0
+    removed_loop_header_duplicate_guard: cython.longlong = 0
+    split_loop_header_condition_chain: cython.longlong = 0
+    ast_query_count: cython.longlong = 0
+    ast_query_build_count: cython.longlong = 0
+    ast_query_hit_count: cython.longlong = 0
+    ast_query_invalidation_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _LoopBreakInitialSurface8616:
     """Read-only AST projections captured before loop-break mutation starts."""
 
-    condition_keys: frozenset[tuple[int, int]]
-    loop_header_jcc_addrs: frozenset[int]
-    typed_loop_condition_jcc_addrs: frozenset[int]
-    break_nodes_by_key: tuple[tuple[tuple[int, int], tuple[object, ...]], ...]
+    condition_keys: object
+    loop_header_jcc_addrs: object
+    typed_loop_condition_jcc_addrs: object
+    break_nodes_by_key: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _LoopBreakAstSubtreeSurface8616:
     """Syntax-only membership projections for one unchanged AST subtree."""
 
     root: object
-    nodes: tuple[object, ...]
-    node_ids: frozenset[int]
-    instruction_addresses: frozenset[int]
+    nodes: object
+    node_ids: object
+    instruction_addresses: object
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _LoopBreakAstQuerySession8616:
     """Reuse syntax-only subtree queries until structuring mutates the AST."""
 
-    _surfaces: dict[int, _LoopBreakAstSubtreeSurface8616] = field(default_factory=dict)
-    query_count: int = 0
-    build_count: int = 0
-    hit_count: int = 0
-    invalidation_count: int = 0
+    _surfaces: object = field(default_factory=dict)
+    query_count: cython.longlong = 0
+    build_count: cython.longlong = 0
+    hit_count: cython.longlong = 0
+    invalidation_count: cython.longlong = 0
 
     def _surface(self, root: object) -> _LoopBreakAstSubtreeSurface8616:
         """Return one current subtree surface with closed query accounting."""
+        cached: object
         self.query_count += 1
         marker = id(root)
         cached = self._surfaces.get(marker)
@@ -148,10 +155,10 @@ class _LoopBreakAstQuerySession8616:
         surface = _LoopBreakAstSubtreeSurface8616(
             root=root,
             nodes=nodes,
-            node_ids=frozenset(id(node) for node in nodes),
+            node_ids=frozenset(id(node) for node in iter(nodes)),
             instruction_addresses=frozenset(
                 int(address)
-                for node in nodes
+                for node in iter(nodes)
                 if isinstance((tags := _dynamic_attr_8616(node, "tags", None)), (Mapping, Tags))
                 and isinstance((address := tags.get("ins_addr")), int)
             ),
@@ -160,26 +167,31 @@ class _LoopBreakAstQuerySession8616:
         self.build_count += 1
         return surface
 
-    def contains_instruction(self, root: object, target_addr: int) -> bool:
+    @cython.ccall
+    def contains_instruction(self, root: object, target_addr: cython.longlong) -> cython.bint:
         """Return whether one unchanged subtree carries an exact instruction tag."""
         return int(target_addr) in self._surface(root).instruction_addresses
 
-    def contains_node(self, root: object, target: object) -> bool:
+    @cython.ccall
+    def contains_node(self, root: object, target: object) -> cython.bint:
         """Return whether one unchanged subtree contains a node by identity."""
         return id(target) in self._surface(root).node_ids
 
-    def nodes(self, root: object) -> tuple[object, ...]:
+    @cython.ccall
+    def nodes(self, root: object) -> object:
         """Return current subtree nodes in deterministic traversal order."""
         return self._surface(root).nodes
 
+    @cython.ccall
     def record_mutation(self) -> None:
         """Invalidate every cached subtree after a reported AST mutation."""
         self._surfaces.clear()
         self.invalidation_count += 1
 
+    @cython.ccall
     def record_stats(self, stats: UnconsumedLoopBreakJccStats8616) -> None:
         """Publish closed acceleration accounting on the owning pass stats."""
-        if self.query_count != self.build_count + self.hit_count:
+        if operator.ne(self.query_count, self.build_count + self.hit_count):
             raise PipelineHardError("loop-break AST query accounting is not closed")
         stats.ast_query_count += self.query_count
         stats.ast_query_build_count += self.build_count
@@ -187,11 +199,11 @@ class _LoopBreakAstQuerySession8616:
         stats.ast_query_invalidation_count += self.invalidation_count
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class UnconsumedLoopBreakJccCallbacks8616:
     """Dynamic adapters for CFG/JCC proof and C AST expression handling."""
 
-    linear_jcc_block_starts: Callable[[object, object], tuple[tuple[int, object], ...]]
+    linear_jcc_block_starts: Callable[[object, object], tuple[tuple[cython.longlong, object], ...]]
     branch_target_imm: Callable[[object], int | None]
     next_unconditional_target_after_jcc: Callable[[object, int, int], int | None]
     resolve_one_hop_jmp_target: Callable[[object, int | None], int | None]
@@ -199,7 +211,7 @@ class UnconsumedLoopBreakJccCallbacks8616:
     decoded_condition_expr: Callable[[object, object, object, dict[str, int]], object | None]
     inverted_condition_expr: Callable[[object, object, object, dict[str, int]], object | None]
     expr_fingerprint: Callable[[object, object], str]
-    same_c_expression: Callable[[object, object], bool]
+    same_c_expression: Callable[[object, object], cython.bint]
     clone_c_value: Callable[[object], object]
     record_condition_evidence: Callable[[object, object, object | None, object], None]
 
@@ -209,20 +221,19 @@ class _LoopBreakJccCodegenLike8616(Protocol):
 
     cfunc: object
     _inertia_typed_conditions: object
-    _inertia_loop_branch_guard_facts_8616: tuple[LoopBranchGuardFact8616, ...]
-    _inertia_loop_header_duplicate_guard_removal_facts_8616: tuple[
-        LoopHeaderDuplicateGuardRemovalFact8616,
-        ...,
-    ]
+    _inertia_loop_branch_guard_facts_8616: object
+    _inertia_loop_header_duplicate_guard_removal_facts_8616: object
     _inertia_unconsumed_loop_break_jcc_stats_8616: UnconsumedLoopBreakJccStats8616
 
 
-def _dynamic_attr_8616(obj: object, name: str, default: object = None) -> object:
+@cython.ccall
+def _dynamic_attr_8616(obj: object, name: object, default: object = None) -> object:
     """Dynamic boundary: read optional angr/codegen C AST attributes."""
     return getattr(obj, name, default)
 
 
-def _dynamic_sequence_8616(obj: object) -> tuple[object, ...]:
+@cython.ccall
+def _dynamic_sequence_8616(obj: object) -> object:
     """Return a tuple from a dynamic angr/codegen boundary sequence-like object."""
     if isinstance(obj, tuple):
         return obj
@@ -231,8 +242,10 @@ def _dynamic_sequence_8616(obj: object) -> tuple[object, ...]:
     return ()
 
 
+@cython.ccall
 def _condition_body_pairs_8616(obj: object) -> tuple[tuple[object, object | None], ...]:
     """Return condition/body pairs from a dynamic CIfElse boundary value."""
+    item: object
     pairs: list[tuple[object, object | None]] = []
     for item in _dynamic_sequence_8616(obj):
         if not isinstance(item, tuple) or len(item) != 2:
@@ -242,12 +255,14 @@ def _condition_body_pairs_8616(obj: object) -> tuple[tuple[object, object | None
     return tuple(pairs)
 
 
+@cython.ccall
 def _typed_condition_body_pair_8616(condition: object, body: CStatement) -> list[tuple[CExpression, CStatement | None]]:
     """Return a typed single-pair CIfElse condition/body list."""
     return [(cast(CExpression, condition), body)]
 
 
-def _dynamic_int_8616(obj: object, default: int = -1) -> int:
+@cython.ccall
+def _dynamic_int_8616(obj: object, default: cython.longlong = -1) -> cython.longlong:
     """Return an integer from a dynamic angr/codegen boundary value."""
     if isinstance(obj, int):
         return int(obj)
@@ -259,25 +274,30 @@ def _dynamic_int_8616(obj: object, default: int = -1) -> int:
     return default
 
 
+@cython.ccall
 def _root_contains_ins_addr_8616(
     root: object,
-    target_addr: int,
+    target_addr: cython.longlong,
     query_session: _LoopBreakAstQuerySession8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """Return whether a C AST subtree carries the instruction address tag."""
+    node: object
     if root is None:
         return False
     if query_session is not None:
         return query_session.contains_instruction(root, target_addr)
     for node in _iter_c_nodes_deep_8616(root):
         tags = _dynamic_attr_8616(node, "tags", None)
-        if isinstance(tags, (Mapping, Tags)) and tags.get("ins_addr") == int(target_addr):
+        if isinstance(tags, (Mapping, Tags)) and operator.eq(tags.get("ins_addr"), int(target_addr)):
             return True
     return False
 
 
-def _condition_tags_8616(condition: object) -> tuple[int, int] | None:
+@cython.ccall
+def _condition_tags_8616(condition: object) -> object:
     """Extract the JCC proof tag pair from a C AST condition."""
+    block_addr: object
+    ins_addr: object
     tags = _dynamic_attr_8616(condition, "tags", None)
     if not isinstance(tags, (Mapping, Tags)):
         return None
@@ -288,12 +308,14 @@ def _condition_tags_8616(condition: object) -> tuple[int, int] | None:
     return None
 
 
-def _typed_conditions_by_key_8616(codegen: object) -> dict[tuple[int, int], tuple[ConditionIR, ...]]:
+@cython.ccall
+def _typed_conditions_by_key_8616(codegen: object) -> dict[tuple[cython.longlong, cython.longlong], tuple[ConditionIR, ...]]:
     """Index transferred ConditionIR facts by exact branch and block identity."""
+    condition: object
     raw_conditions = _dynamic_attr_8616(codegen, "_inertia_typed_conditions", ())
     if not isinstance(raw_conditions, (list, tuple)):
         return {}
-    candidates: dict[tuple[int, int], list[ConditionIR]] = {}
+    candidates: dict[tuple[cython.longlong, cython.longlong], list[ConditionIR]] = {}
     for condition in raw_conditions:
         if not isinstance(condition, ConditionIR):
             continue
@@ -303,32 +325,33 @@ def _typed_conditions_by_key_8616(codegen: object) -> dict[tuple[int, int], tupl
         bucket = candidates.setdefault(key, [])
         if condition not in bucket:
             bucket.append(condition)
-    return {key: tuple(values) for key, values in candidates.items()}
+    return {key: tuple(values) for key, values in builtins.iter(candidates.items())}
 
 
 def _typed_conditions_for_branch_8616(
-    conditions_by_key: dict[tuple[int, int], tuple[ConditionIR, ...]],
+    conditions_by_key: object,
     *,
-    jcc_addr: int,
-    block_addr: int,
-    body_target: int,
-    fallthrough_target: int,
-) -> tuple[ConditionIR, ...]:
+    jcc_addr: cython.longlong,
+    block_addr: cython.longlong,
+    body_target: cython.longlong,
+    fallthrough_target: cython.longlong,
+) -> object:
     """Select exact typed branch evidence across equivalent block boundaries."""
+    exact: object
     exact = conditions_by_key.get((jcc_addr, block_addr), ())
     if exact:
         return exact
     same_jcc = tuple(
         dict.fromkeys(
             condition
-            for (candidate_jcc, _candidate_block), conditions in conditions_by_key.items()
+            for (candidate_jcc, _candidate_block), conditions in builtins.iter(conditions_by_key.items())
             if candidate_jcc == jcc_addr
-            for condition in conditions
+            for condition in iter(conditions)
         )
     )
     target_matches = tuple(
         condition
-        for condition in same_jcc
+        for condition in iter(same_jcc)
         if _typed_condition_matches_jcc_targets_8616(
             condition,
             body_target=body_target,
@@ -338,21 +361,23 @@ def _typed_conditions_for_branch_8616(
     return target_matches if target_matches else same_jcc
 
 
+@cython.ccall
 def _typed_condition_matches_jcc_targets_8616(
     condition: ConditionIR,
     *,
-    body_target: int,
-    fallthrough_target: int,
-) -> bool:
+    body_target: cython.longlong,
+    fallthrough_target: cython.longlong,
+) -> cython.bint:
     """Require typed targets to match the direct binary branch edges exactly."""
     return (
         isinstance(condition.taken_target, int)
-        and int(condition.taken_target) == int(body_target)
+        and operator.eq(int(condition.taken_target), int(body_target))
         and isinstance(condition.fallthrough_target, int)
-        and int(condition.fallthrough_target) == int(fallthrough_target)
+        and operator.eq(int(condition.fallthrough_target), int(fallthrough_target))
     )
 
 
+@cython.ccall
 def _instruction_fallthrough_target_8616(jcc: object) -> int | None:
     """Return the direct fallthrough address for one dynamic instruction."""
     address = _dynamic_int_8616(_dynamic_attr_8616(jcc, "address", -1))
@@ -362,11 +387,12 @@ def _instruction_fallthrough_target_8616(jcc: object) -> int | None:
     return address + size
 
 
+@cython.ccall
 def _invert_materialized_condition_8616(
     condition: CExpression,
     codegen: object,
     callbacks: UnconsumedLoopBreakJccCallbacks8616,
-    tags: dict[str, int],
+    tags: object,
 ) -> CExpression:
     """Invert a typed comparison while preserving exact JCC provenance."""
     inverted_ops = {
@@ -393,6 +419,7 @@ def _invert_materialized_condition_8616(
     )
 
 
+@cython.ccall
 def _break_guard_condition_8616(node: object) -> object | None:
     """Return the condition for C AST break-guard shapes."""
     if isinstance(node, CIfBreak):
@@ -413,7 +440,8 @@ def _break_guard_condition_8616(node: object) -> object | None:
     return condition if len(statements) == 1 and isinstance(statements[0], CBreak) else None
 
 
-def _set_break_guard_condition_8616(node: object, condition: object) -> bool:
+@cython.ccall
+def _set_break_guard_condition_8616(node: object, condition: object) -> cython.bint:
     """Replace the condition for supported C AST break-guard shapes."""
     if isinstance(node, CIfBreak):
         node.condition = condition
@@ -442,10 +470,16 @@ def _collect_loop_break_initial_surface_8616(
     root: object,
 ) -> _LoopBreakInitialSurface8616:
     """Collect all pre-mutation loop-break projections in one AST walk."""
-    condition_keys: set[tuple[int, int]] = set()
-    loop_header_jcc_addrs: set[int] = set()
-    typed_loop_condition_jcc_addrs: set[int] = set()
-    break_nodes_by_key: dict[tuple[int, int], list[object]] = {}
+    break_key: object
+    condition_key: object
+    key: object
+    _body: object
+    condition: object
+    node: object
+    condition_keys: set[tuple[cython.longlong, cython.longlong]] = set()
+    loop_header_jcc_addrs: set[cython.longlong] = set()
+    typed_loop_condition_jcc_addrs: set[cython.longlong] = set()
+    break_nodes_by_key: dict[tuple[cython.longlong, cython.longlong], list[object]] = {}
     for node in _iter_c_nodes_deep_8616(root):
         for condition, _body in _condition_body_pairs_8616(
             _dynamic_attr_8616(node, "condition_and_nodes", ())
@@ -478,26 +512,29 @@ def _collect_loop_break_initial_surface_8616(
         loop_header_jcc_addrs=frozenset(loop_header_jcc_addrs),
         typed_loop_condition_jcc_addrs=frozenset(typed_loop_condition_jcc_addrs),
         break_nodes_by_key=tuple(
-            (key, tuple(nodes)) for key, nodes in sorted(break_nodes_by_key.items())
+            (key, tuple(nodes)) for key, nodes in builtins.iter(sorted(tuple(break_nodes_by_key.items())))
         ),
     )
 
 
+@cython.ccall
 def _semantic_break_guards_in_loop_8616(
     loop_body: CStatements,
     *,
     project: object,
     guard_condition: object,
-    guard_condition_fingerprint: str,
+    guard_condition_fingerprint: object,
     callbacks: UnconsumedLoopBreakJccCallbacks8616,
 ) -> tuple[object, ...]:
     """Return untagged or tagged break guards with one exact condition."""
+    condition: object
+    node: object
     expected = _normalized_condition_fingerprint_8616(
         guard_condition_fingerprint
     )
     guards: list[object] = []
-    seen: set[int] = set()
-    for node in (loop_body, *_iter_c_nodes_deep_8616(loop_body)):
+    seen: set[cython.longlong] = set()
+    for node in (loop_body, ) + tuple(_iter_c_nodes_deep_8616(loop_body)):
         condition = _break_guard_condition_8616(node)
         marker = id(node)
         if condition is None or marker in seen:
@@ -521,22 +558,24 @@ def _root_contains_node_8616(
     root: object,
     target: object,
     query_session: _LoopBreakAstQuerySession8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """Return whether a dynamic C AST subtree contains a node by identity."""
     if query_session is not None:
         return query_session.contains_node(root, target)
     if root is target:
         return True
-    return any(node is target for node in _iter_c_nodes_deep_8616(root))
+    return any(node is target for node in builtins.iter(_iter_c_nodes_deep_8616(root)))
 
 
+@cython.ccall
 def _loop_nodes_with_body_8616(
     root: object,
     query_session: _LoopBreakAstQuerySession8616 | None = None,
 ) -> tuple[CForLoop | CWhileLoop | CDoWhileLoop, ...]:
     """Return loop nodes that have a statement-list body."""
+    node: object
     loops: list[CForLoop | CWhileLoop | CDoWhileLoop] = []
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     nodes = (
         query_session.nodes(root)
         if query_session is not None
@@ -554,7 +593,8 @@ def _loop_nodes_with_body_8616(
     return tuple(loops)
 
 
-def _normalized_condition_fingerprint_8616(value: str) -> str:
+@cython.ccall
+def _normalized_condition_fingerprint_8616(value: object) -> str:
     """Return the lossless IR-normalized condition identity for exact joins."""
     return str(
         normalize_condition_fingerprint_algebraic_8616(
@@ -565,16 +605,17 @@ def _normalized_condition_fingerprint_8616(value: str) -> str:
     )
 
 
+@cython.ccall
 def _existing_nonbreak_branch_consumes_jcc_8616(
     root: object,
     *,
     project: object,
-    body_target: int,
-    false_target: int,
-    decoded_condition_fingerprint: str,
+    body_target: cython.longlong,
+    false_target: cython.longlong,
+    decoded_condition_fingerprint: object,
     callbacks: UnconsumedLoopBreakJccCallbacks8616,
     query_session: _LoopBreakAstQuerySession8616,
-) -> bool:
+) -> cython.bint:
     """Return whether an exact non-break branch already owns the decoded JCC.
 
     angr may drop JCC tags while retaining an ``if`` whose body is anchored at
@@ -582,6 +623,9 @@ def _existing_nonbreak_branch_consumes_jcc_8616(
     unconditional loop; treating it as a missing loop exit would synthesize a
     contradictory break before the already-recovered branch.
     """
+    body: object
+    condition: object
+    node: object
     expected = _normalized_condition_fingerprint_8616(
         decoded_condition_fingerprint
     )
@@ -609,18 +653,20 @@ def _existing_nonbreak_branch_consumes_jcc_8616(
     return matches == 1
 
 
+@cython.ccall
 def _loop_headers_consuming_jcc_8616(
     root: object,
     *,
     project: object,
-    body_target: int,
-    false_target: int,
+    body_target: cython.longlong,
+    false_target: cython.longlong,
     exit_target: int | None,
-    decoded_condition_fingerprint: str,
+    decoded_condition_fingerprint: object,
     callbacks: UnconsumedLoopBreakJccCallbacks8616,
     query_session: _LoopBreakAstQuerySession8616,
-) -> tuple[CForLoop | CWhileLoop | CDoWhileLoop, ...]:
+) -> object:
     """Return the unique enclosing loop header that represents the JCC."""
+    loop_node: object
     expected = _normalized_condition_fingerprint_8616(
         decoded_condition_fingerprint
     )
@@ -646,57 +692,62 @@ def _loop_headers_consuming_jcc_8616(
     return tuple(matches) if len(matches) == 1 else ()
 
 
+@cython.ccall
 def _first_statement_index_containing_ins_addr_8616(
     statements: Sequence[object],
-    target_addr: int,
+    target_addr: cython.longlong,
     query_session: _LoopBreakAstQuerySession8616 | None = None,
 ) -> int | None:
     """Return the first statement index anchored at an instruction address."""
+    idx: object
+    stmt: object
     for idx, stmt in enumerate(statements):
         if _root_contains_ins_addr_8616(stmt, int(target_addr), query_session):
             return idx
     return None
 
 
+@cython.ccall
 def _remove_loop_header_duplicate_break_guard_8616(
     project: object,
     loop_node: CForLoop | CWhileLoop | CDoWhileLoop,
     loop_body: CStatements,
-    break_nodes: tuple[object, ...],
+    break_nodes: object,
     *,
-    key: tuple[int, int],
+    key: object,
     decoded_condition: object,
     guard_condition: object,
     callbacks: UnconsumedLoopBreakJccCallbacks8616,
 ) -> _LoopHeaderDuplicateGuardRemovalResult8616 | None:
     """Remove one exact JCC break already represented by the loop header."""
+    current_condition: object
+    loop_condition_key: object
+    break_node: object
     loop_condition = loop_node.condition
     loop_condition_key = _condition_tags_8616(loop_condition)
-    if loop_condition_key is None or loop_condition_key[0] != key[0]:
+    if loop_condition_key is None or operator.ne(loop_condition_key[0], key[0]):
         return None
     decoded_matches = (
-        callbacks.expr_fingerprint(loop_condition, project)
-        == callbacks.expr_fingerprint(decoded_condition, project)
+        operator.eq(callbacks.expr_fingerprint(loop_condition, project), callbacks.expr_fingerprint(decoded_condition, project))
         or callbacks.same_c_expression(loop_condition, decoded_condition)
     )
     if not decoded_matches:
         return None
     statements = list(_dynamic_sequence_8616(loop_body.statements))
-    candidates: list[tuple[int, object]] = []
+    candidates: list[tuple[cython.longlong, object]] = []
     for break_node in break_nodes:
         current_condition = _break_guard_condition_8616(break_node)
         if current_condition is None:
             continue
         guard_matches = (
-            callbacks.expr_fingerprint(current_condition, project)
-            == callbacks.expr_fingerprint(guard_condition, project)
+            operator.eq(callbacks.expr_fingerprint(current_condition, project), callbacks.expr_fingerprint(guard_condition, project))
             or callbacks.same_c_expression(current_condition, guard_condition)
         )
         if not guard_matches:
             continue
         direct_indexes = [
             index
-            for index, statement in enumerate(statements)
+            for index, statement in builtins.iter(enumerate(statements))
             if statement is break_node
         ]
         if len(direct_indexes) == 1:
@@ -724,22 +775,26 @@ def _remove_loop_header_duplicate_break_guard_8616(
     )
 
 
-def _condition_jcc_addrs_8616(condition: object) -> frozenset[int]:
+@cython.ccall
+def _condition_jcc_addrs_8616(condition: object) -> frozenset[cython.longlong]:
     """Return every exact JCC address attached to one condition tree."""
-    addresses: set[int] = set()
-    for node in (condition, *_iter_c_nodes_deep_8616(condition)):
+    key: object
+    node: object
+    addresses: set[cython.longlong] = set()
+    for node in (condition, ) + tuple(_iter_c_nodes_deep_8616(condition)):
         key = _condition_tags_8616(node)
         if key is not None:
             addresses.add(key[0])
     return frozenset(addresses)
 
 
+@cython.ccall
 def _logical_and_prefix_matches_8616(
     project: object,
     condition: object,
     decoded_condition: object,
     callbacks: UnconsumedLoopBreakJccCallbacks8616,
-) -> bool:
+) -> cython.bint:
     """Return whether a collapsed loop chain starts with one decoded JCC."""
     if (
         isinstance(condition, CBinaryOp)
@@ -765,12 +820,13 @@ def _logical_and_prefix_matches_8616(
     )
 
 
+@cython.ccall
 def _condition_matches_decoded_8616(
     project: object,
     condition: object,
     decoded_condition: object,
     callbacks: UnconsumedLoopBreakJccCallbacks8616,
-) -> bool:
+) -> cython.bint:
     """Return whether a loop condition has one decoded semantic predicate."""
     expected = _normalized_condition_fingerprint_8616(
         callbacks.expr_fingerprint(decoded_condition, project)
@@ -793,24 +849,28 @@ def _condition_matches_decoded_8616(
     )
 
 
+@cython.ccall
 def _body_break_guard_for_fact_8616(
     loop_body: CStatements,
     fact: LoopBranchGuardFact8616,
     *,
     project: object,
     callbacks: UnconsumedLoopBreakJccCallbacks8616,
-) -> tuple[object, object] | None:
+) -> object:
     """Return one exact body break and condition for a binary JCC fact."""
+    condition: object
+    key: object
+    node: object
     expected = _normalized_condition_fingerprint_8616(
         fact.guard_condition_fingerprint
     )
     matches: list[tuple[object, object]] = []
-    for node in (loop_body, *_iter_c_nodes_deep_8616(loop_body)):
+    for node in (loop_body, ) + tuple(_iter_c_nodes_deep_8616(loop_body)):
         condition = _break_guard_condition_8616(node)
         if condition is None:
             continue
         key = _condition_tags_8616(condition)
-        if key is None or key[0] != fact.jcc_addr:
+        if key is None or operator.ne(key[0], fact.jcc_addr):
             continue
         actual = _normalized_condition_fingerprint_8616(
             callbacks.expr_fingerprint(condition, project)
@@ -820,15 +880,16 @@ def _body_break_guard_for_fact_8616(
     return matches[0] if len(matches) == 1 else None
 
 
+@cython.ccall
 def _split_materialized_loop_header_condition_chains_8616(
     project: object,
     root: object,
     codegen: object,
-    decoded_conditions_by_jcc: Mapping[int, CExpression],
+    decoded_conditions_by_jcc: Mapping[cython.longlong, CExpression],
     callbacks: UnconsumedLoopBreakJccCallbacks8616,
     stats: UnconsumedLoopBreakJccStats8616,
     query_session: _LoopBreakAstQuerySession8616,
-) -> bool:
+) -> cython.bint:
     """Move a fully materialized CFG suffix out of a collapsed loop header.
 
     angr may collapse consecutive body JCCs and their side effects into a
@@ -838,11 +899,12 @@ def _split_materialized_loop_header_condition_chains_8616(
     remove its now-redundant body break. This restores the binary CFG shape
     without deleting or inventing an effect.
     """
+    loop_node: object
     if not decoded_conditions_by_jcc:
         return False
     facts_by_jcc = {
         fact.jcc_addr: fact
-        for fact in loop_branch_guard_facts_8616(codegen)
+        for fact in builtins.iter(loop_branch_guard_facts_8616(codegen))
     }
     changed = False
     debug_jcc = bool(os.environ.get("INERTIA_DEBUG_JCC_REWRITE"))
@@ -865,14 +927,18 @@ def _split_loop_header_chain_8616(
     project: object,
     codegen: object,
     loop_node: CForLoop | CWhileLoop | CDoWhileLoop,
-    decoded_conditions_by_jcc: Mapping[int, CExpression],
-    facts_by_jcc: dict[int, LoopBranchGuardFact8616],
+    decoded_conditions_by_jcc: Mapping[cython.longlong, CExpression],
+    facts_by_jcc: object,
     callbacks: UnconsumedLoopBreakJccCallbacks8616,
     stats: UnconsumedLoopBreakJccStats8616,
     query_session: _LoopBreakAstQuerySession8616,
-    debug_jcc: bool,
-) -> bool:
+    debug_jcc: cython.bint,
+) -> cython.bint:
     """Split one collapsed loop header when every suffix JCC is materialized."""
+    decoded_condition: object
+    first_fact: object
+    first_guard: object
+    first_key: object
     loop_body = cast(CStatements, loop_node.body)
     statements = _dynamic_sequence_8616(loop_body.statements)
     if not statements:
@@ -905,7 +971,7 @@ def _split_loop_header_chain_8616(
             condition_matches,
             tuple(sorted(header_jccs)),
             tuple(sorted(facts_by_jcc)),
-            tuple(type(statement).__name__ for statement in statements[:5]),
+            tuple(type(statement).__name__ for statement in iter(statements[:5])),
         )
     if not condition_matches:
         return False
@@ -955,11 +1021,11 @@ def _suffix_chain_proven_8616(
     project: object,
     loop_body: CStatements,
     first_fact: LoopBranchGuardFact8616,
-    header_jccs: frozenset[int],
-    facts_by_jcc: dict[int, LoopBranchGuardFact8616],
+    header_jccs: object,
+    facts_by_jcc: object,
     callbacks: UnconsumedLoopBreakJccCallbacks8616,
     query_session: _LoopBreakAstQuerySession8616,
-) -> bool:
+) -> cython.bint:
     """Return whether every collapsed suffix JCC has a proven body guard."""
     suffix_jccs = (header_jccs & facts_by_jcc.keys()) - {
         first_fact.jcc_addr
@@ -985,7 +1051,7 @@ def _suffix_chain_proven_8616(
             effect_addr,
             query_session,
         )
-        for effect_addr in body_effect_addrs
+        for effect_addr in iter(body_effect_addrs)
     ):
         return False
     suffix_guards = tuple(
@@ -995,14 +1061,15 @@ def _suffix_chain_proven_8616(
             project=project,
             callbacks=callbacks,
         )
-        for jcc_addr in sorted(suffix_jccs)
+        for jcc_addr in builtins.iter(sorted(suffix_jccs))
         if jcc_addr in facts_by_jcc
     )
-    return len(suffix_guards) == len(suffix_jccs) and all(
-        guard is not None for guard in suffix_guards
+    return operator.eq(len(suffix_guards), len(suffix_jccs)) and all(
+        guard is not None for guard in iter(suffix_guards)
     )
 
 
+@cython.ccall
 def _unconsumed_loop_break_jcc_stats_8616(codegen: object) -> UnconsumedLoopBreakJccStats8616:
     """Return or initialize codegen counters for this structuring repair."""
     stats = _dynamic_attr_8616(codegen, "_inertia_unconsumed_loop_break_jcc_stats_8616", None)
@@ -1016,7 +1083,7 @@ def _unconsumed_loop_break_jcc_stats_8616(codegen: object) -> UnconsumedLoopBrea
 
 def loop_branch_guard_facts_8616(
     codegen: object,
-) -> tuple[LoopBranchGuardFact8616, ...]:
+) -> object:
     """Return the owned typed loop-branch guard fact contract."""
     typed_codegen = cast(_LoopBreakJccCodegenLike8616, codegen)
     try:
@@ -1025,7 +1092,7 @@ def loop_branch_guard_facts_8616(
         return ()
     if not isinstance(facts, tuple):
         raise TypeError("loop-branch guard facts must be a tuple")
-    if not all(isinstance(fact, LoopBranchGuardFact8616) for fact in facts):
+    if not all(isinstance(fact, LoopBranchGuardFact8616) for fact in iter(facts)):
         raise TypeError(
             "loop-branch guard facts must contain only LoopBranchGuardFact8616"
         )
@@ -1034,7 +1101,7 @@ def loop_branch_guard_facts_8616(
 
 def loop_header_duplicate_guard_removal_facts_8616(
     codegen: object,
-) -> tuple[LoopHeaderDuplicateGuardRemovalFact8616, ...]:
+) -> object:
     """Return exact Structuring-owned redundant loop-guard removal facts."""
     typed_codegen = cast(_LoopBreakJccCodegenLike8616, codegen)
     try:
@@ -1045,7 +1112,7 @@ def loop_header_duplicate_guard_removal_facts_8616(
         raise TypeError("loop-header duplicate guard removal facts must be a tuple")
     if not all(
         isinstance(fact, LoopHeaderDuplicateGuardRemovalFact8616)
-        for fact in facts
+        for fact in iter(facts)
     ):
         raise TypeError(
             "loop-header duplicate guard removal facts must contain only "
@@ -1054,33 +1121,37 @@ def loop_header_duplicate_guard_removal_facts_8616(
     return facts
 
 
+@cython.ccall
 def _record_loop_header_duplicate_guard_removal_fact_8616(
     codegen: object,
     fact: LoopHeaderDuplicateGuardRemovalFact8616,
 ) -> None:
     """Persist one exact redundant loop-guard removal for validation."""
+    existing: object
     existing_facts = loop_header_duplicate_guard_removal_facts_8616(codegen)
     for existing in existing_facts:
-        if existing.jcc_addr == fact.jcc_addr and existing != fact:
+        if operator.eq(existing.jcc_addr, fact.jcc_addr) and existing != fact:
             raise PipelineHardError(
                 "conflicting loop-header duplicate guard removal facts "
                 f"jcc={fact.jcc_addr:#x} block={fact.block_addr:#x}"
             )
     typed_codegen = cast(_LoopBreakJccCodegenLike8616, codegen)
     typed_codegen._inertia_loop_header_duplicate_guard_removal_facts_8616 = (
-        tuple(dict.fromkeys((*existing_facts, fact)))
+        tuple(dict.fromkeys(tuple(existing_facts) + (fact,)))
     )
 
 
+@cython.ccall
 def _record_loop_branch_guard_fact_8616(
     codegen: object,
     fact: LoopBranchGuardFact8616,
 ) -> None:
     """Persist one exact Structuring-owned loop-branch guard fact."""
+    existing: object
     existing_facts = loop_branch_guard_facts_8616(codegen)
     retained: list[LoopBranchGuardFact8616] = []
     for existing in existing_facts:
-        same_branch = existing.jcc_addr == fact.jcc_addr
+        same_branch = operator.eq(existing.jcc_addr, fact.jcc_addr)
         if same_branch and existing != fact:
             raise PipelineHardError(
                 "conflicting loop-branch guard facts "
@@ -1095,7 +1166,7 @@ def _record_loop_branch_guard_fact_8616(
     )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _LoopBreakJccScan8616:
     """Mutable per-function scan state for unconsumed loop-break JCCs."""
 
@@ -1106,18 +1177,20 @@ class _LoopBreakJccScan8616:
     root: object
     query_session: _LoopBreakAstQuerySession8616
     topology: LoopBreakTopology8616 | None
-    existing_condition_keys: frozenset[tuple[int, int]]
-    existing_loop_header_jcc_addrs: frozenset[int]
-    typed_loop_condition_jcc_addrs: frozenset[int]
-    existing_break_nodes_by_key: dict[tuple[int, int], tuple[object, ...]]
-    typed_conditions_by_key: dict[tuple[int, int], tuple[ConditionIR, ...]]
-    decoded_conditions_by_jcc: dict[int, CExpression] = field(default_factory=dict)
-    changed: bool = False
+    existing_condition_keys: object
+    existing_loop_header_jcc_addrs: object
+    typed_loop_condition_jcc_addrs: object
+    existing_break_nodes_by_key: object
+    typed_conditions_by_key: object
+    decoded_conditions_by_jcc: object = field(default_factory=dict)
+    changed: cython.bint = False
     log: logging.Logger = field(default_factory=lambda: logging.getLogger(__name__))
-    debug_jcc: bool = field(default_factory=lambda: bool(os.environ.get("INERTIA_DEBUG_JCC_REWRITE")))
+    debug_jcc: cython.bint = field(default_factory=lambda: bool(os.environ.get("INERTIA_DEBUG_JCC_REWRITE")))
 
-    def scan_jcc(self, block_addr: int, jcc: object) -> None:
+    def scan_jcc(self, block_addr: cython.longlong, jcc: object) -> None:
         """Materialize one JCC's loop-break guard when the proof closes."""
+        decoded: object
+        targets: object
         jcc_addr = _dynamic_int_8616(_dynamic_attr_8616(jcc, "address", -1))
         mnemonic = str(_dynamic_attr_8616(jcc, "mnemonic", "")).lower()
         if jcc_addr < 0 or mnemonic in {"jmp", "ljmp"} or not mnemonic.startswith("j"):
@@ -1126,15 +1199,15 @@ class _LoopBreakJccScan8616:
         key = (jcc_addr, int(block_addr))
         existing_break_nodes = tuple(
             node
-            for existing_key, nodes in self.existing_break_nodes_by_key.items()
-            if existing_key[0] == jcc_addr
-            for node in nodes
+            for existing_key, nodes in builtins.iter(self.existing_break_nodes_by_key.items())
+            if operator.eq(existing_key[0], jcc_addr)
+            for node in iter(nodes)
         )
         if jcc_addr in self.typed_loop_condition_jcc_addrs and not existing_break_nodes:
             self.stats.refused_existing_condition += 1
             return
         has_existing_condition_without_break = (
-            any(existing_key[0] == jcc_addr for existing_key in self.existing_condition_keys)
+            any(operator.eq(existing_key[0], jcc_addr) for existing_key in iter(self.existing_condition_keys))
             and not existing_break_nodes
         )
         targets = self._targets_8616(block_addr, jcc_addr, jcc, key)
@@ -1143,7 +1216,7 @@ class _LoopBreakJccScan8616:
         body_target, fallthrough_target, false_target, exit_target = targets
         self.stats.normalized_fact_count += 1
 
-        tags: dict[str, int] = {
+        tags: dict[str, cython.longlong] = {
             "ins_addr": jcc_addr,
             "vex_block_addr": int(block_addr),
             "inertia_jcc_materialized_8616": True,
@@ -1170,22 +1243,25 @@ class _LoopBreakJccScan8616:
             has_existing_condition_without_break,
         )
 
+    @cython.ccall
     def _materialize_8616(
         self,
-        key: tuple[int, int],
-        jcc_addr: int,
-        block_addr: int,
-        body_target: int,
-        fallthrough_target: int,
-        false_target: int,
+        key: object,
+        jcc_addr: cython.longlong,
+        block_addr: cython.longlong,
+        body_target: cython.longlong,
+        fallthrough_target: cython.longlong,
+        false_target: cython.longlong,
         exit_target: int | None,
         guard_cond: CExpression,
         decoded_cond: CExpression,
         typed_condition: ConditionIR | None,
-        existing_break_nodes: tuple[object, ...],
-        has_existing_condition_without_break: bool,
+        existing_break_nodes: object,
+        has_existing_condition_without_break: cython.bint,
     ) -> None:
         """Fingerprint, consume-check, and anchor one decoded JCC guard."""
+        fingerprints: object
+        resolved: object
         fingerprints = self._fingerprints_8616(guard_cond, decoded_cond)
         if fingerprints is None:
             return
@@ -1264,14 +1340,18 @@ class _LoopBreakJccScan8616:
                 )
             self.stats.refused_no_loop_anchor += 1
 
+    @cython.ccall
     def _targets_8616(
         self,
-        block_addr: int,
-        jcc_addr: int,
+        block_addr: cython.longlong,
+        jcc_addr: cython.longlong,
         jcc: object,
-        key: tuple[int, int],
-    ) -> tuple[int, int, int, int | None] | None:
+        key: object,
+    ) -> object:
         """Resolve body/fallthrough/false targets or count the refusal."""
+        body_target: object
+        fallthrough_target: object
+        false_target: object
         body_target = self.callbacks.branch_target_imm(jcc)
         fallthrough_target = _instruction_fallthrough_target_8616(jcc)
         false_target = self.callbacks.next_unconditional_target_after_jcc(
@@ -1292,19 +1372,22 @@ class _LoopBreakJccScan8616:
         exit_target = self.callbacks.resolve_one_hop_jmp_target(self.project, int(false_target))
         return body_target, fallthrough_target, false_target, exit_target
 
+    @cython.ccall
     def _decode_8616(
         self,
-        key: tuple[int, int],
-        jcc_addr: int,
-        block_addr: int,
-        mnemonic: str,
-        body_target: int,
-        fallthrough_target: int,
-        false_target: int,
+        key: object,
+        jcc_addr: cython.longlong,
+        block_addr: cython.longlong,
+        mnemonic: object,
+        body_target: cython.longlong,
+        fallthrough_target: cython.longlong,
+        false_target: cython.longlong,
         exit_target: int | None,
-        tags: dict[str, int],
-    ) -> tuple[CExpression, CExpression, ConditionIR | None] | None:
+        tags: object,
+    ) -> object:
         """Decode one JCC to guard/decoded conditions or count the refusal."""
+        decoded: object
+        decoded_cond: object
         typed_candidates = _typed_conditions_for_branch_8616(
             self.typed_conditions_by_key,
             jcc_addr=jcc_addr,
@@ -1391,11 +1474,12 @@ class _LoopBreakJccScan8616:
         self.decoded_conditions_by_jcc[jcc_addr] = decoded_cond
         return guard_cond, decoded_cond, typed_condition
 
+    @cython.ccall
     def _fingerprints_8616(
         self,
         guard_cond: CExpression,
         decoded_cond: CExpression,
-    ) -> tuple[str, str] | None:
+    ) -> object:
         """Return canonicalized condition fingerprints or count the refusal."""
         decoded_condition_fingerprint = (
             canonicalize_condition_storage_fingerprint_8616(
@@ -1423,14 +1507,14 @@ class _LoopBreakJccScan8616:
 
     def _consuming_break_nodes_8616(
         self,
-        body_target: int,
-        false_target: int,
+        body_target: cython.longlong,
+        false_target: cython.longlong,
         exit_target: int | None,
-        decoded_condition_fingerprint: str,
+        decoded_condition_fingerprint: object,
         guard_cond: CExpression,
-        guard_condition_fingerprint: str,
-        existing_break_nodes: tuple[object, ...],
-    ) -> tuple[tuple[object, ...], bool] | None:
+        guard_condition_fingerprint: object,
+        existing_break_nodes: object,
+    ) -> object:
         """Resolve loop-header break nodes or count the existing-condition refusal."""
         consuming_loop_headers = (
             _loop_headers_consuming_jcc_8616(
@@ -1451,14 +1535,14 @@ class _LoopBreakJccScan8616:
         resolved_nodes = tuple(
             dict.fromkeys(
                 guard
-                for loop_node in consuming_loop_headers
-                for guard in _semantic_break_guards_in_loop_8616(
+                for loop_node in iter(consuming_loop_headers)
+                for guard in builtins.iter(_semantic_break_guards_in_loop_8616(
                     cast(CStatements, loop_node.body),
                     project=self.project,
                     guard_condition=guard_cond,
                     guard_condition_fingerprint=guard_condition_fingerprint,
                     callbacks=self.callbacks,
-                )
+                ))
             )
         )
         if not resolved_nodes:
@@ -1466,22 +1550,24 @@ class _LoopBreakJccScan8616:
             return None
         return resolved_nodes, True
 
+    @cython.ccall
     def _anchor_8616(
         self,
-        key: tuple[int, int],
-        block_addr: int,
-        body_target: int,
-        fallthrough_target: int,
-        false_target: int,
+        key: object,
+        block_addr: cython.longlong,
+        body_target: cython.longlong,
+        fallthrough_target: cython.longlong,
+        false_target: cython.longlong,
         exit_target: int | None,
         guard_cond: CExpression,
         decoded_cond: CExpression,
-        decoded_condition_fingerprint: str,
-        guard_condition_fingerprint: str,
+        decoded_condition_fingerprint: object,
+        guard_condition_fingerprint: object,
         branch_fact: LoopBranchGuardFact8616,
-        existing_break_nodes: tuple[object, ...],
-    ) -> bool:
+        existing_break_nodes: object,
+    ) -> cython.bint:
         """Materialize or refuse the guard inside one matching loop anchor."""
+        loop_node: object
         for loop_node in reversed(_loop_nodes_with_body_8616(self.root, self.query_session)):
             loop_body = _dynamic_attr_8616(loop_node, "body", None)
             if not isinstance(loop_body, CStatements):
@@ -1535,19 +1621,20 @@ class _LoopBreakJccScan8616:
                 return True
         return False
 
+    @cython.ccall
     def _anchor_without_breaks_8616(
         self,
         loop_body: CStatements,
-        block_addr: int,
-        body_target: int,
-        fallthrough_target: int,
-        false_target: int,
-        key: tuple[int, int],
+        block_addr: cython.longlong,
+        body_target: cython.longlong,
+        fallthrough_target: cython.longlong,
+        false_target: cython.longlong,
+        key: object,
         guard_cond: CExpression,
-        guard_condition_fingerprint: str,
+        guard_condition_fingerprint: object,
         decoded_cond: CExpression,
         branch_fact: LoopBranchGuardFact8616,
-    ) -> bool:
+    ) -> cython.bint:
         """Census duplicate guards, then attempt the topology-proven insert."""
         semantic_break_guards = _semantic_break_guards_in_loop_8616(
             loop_body,
@@ -1575,21 +1662,24 @@ class _LoopBreakJccScan8616:
             branch_fact,
         )
 
+    @cython.ccall
     def _resolve_existing_breaks_8616(
         self,
         loop_node: CForLoop | CWhileLoop | CDoWhileLoop,
         loop_body: CStatements,
-        key: tuple[int, int],
-        existing_break_nodes: tuple[object, ...],
+        key: object,
+        existing_break_nodes: object,
         decoded_cond: CExpression,
         guard_cond: CExpression,
-        decoded_condition_fingerprint: str,
-        guard_condition_fingerprint: str,
+        decoded_condition_fingerprint: object,
+        guard_condition_fingerprint: object,
         branch_fact: LoopBranchGuardFact8616,
-        body_target: int,
-        false_target: int,
-    ) -> bool:
+        body_target: cython.longlong,
+        false_target: cython.longlong,
+    ) -> cython.bint:
         """Remove a duplicate header guard or rebind one body break."""
+        removal: object
+        break_node: object
         removal = _remove_loop_header_duplicate_break_guard_8616(
             self.project,
             loop_node,
@@ -1681,19 +1771,21 @@ class _LoopBreakJccScan8616:
             return True
         return False
 
+    @cython.ccall
     def _insert_guard_8616(
         self,
         loop_body: CStatements,
-        block_addr: int,
-        body_target: int,
-        fallthrough_target: int,
-        false_target: int,
-        key: tuple[int, int],
+        block_addr: cython.longlong,
+        body_target: cython.longlong,
+        fallthrough_target: cython.longlong,
+        false_target: cython.longlong,
+        key: object,
         guard_cond: CExpression,
         decoded_cond: CExpression,
         branch_fact: LoopBranchGuardFact8616,
-    ) -> bool:
+    ) -> cython.bint:
         """Insert a new break guard after CFG-exit and placement proof."""
+        insert_idx: object
         if self.topology is None or not self.topology.proves_exit(
             block_addr, body_target, fallthrough_target, false_target,
         ):
@@ -1721,12 +1813,17 @@ class _LoopBreakJccScan8616:
         return True
 
 
+@cython.ccall
 def materialize_unconsumed_loop_break_jcc_8616(
     project: object,
     codegen: object,
     callbacks: UnconsumedLoopBreakJccCallbacks8616,
-) -> bool:
+) -> cython.bint:
     """Materialize loop-break guards from unconsumed binary JCC evidence."""
+    cfunc: object
+    root: object
+    block_addr: object
+    jcc: object
     cfunc = _dynamic_attr_8616(codegen, "cfunc", None)
     root = _dynamic_attr_8616(cfunc, "statements", None) if cfunc is not None else None
     if root is None:

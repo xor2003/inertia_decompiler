@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Seed caller return-use evidence for isolated COD procedure images.
 
 Layer: CLI/fallback/reporting.
@@ -8,6 +9,8 @@ text; Types/Lowering consumes the resulting evidence independently.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 from dataclasses import replace
@@ -35,12 +38,13 @@ class _CallerArgumentEvidenceSurface8616(Protocol):
     """Owned caller-analysis context carried by the isolated angr project."""
 
     _inertia_caller_evidence_project_8616: object
-    _inertia_caller_evidence_target_8616: int
-    _inertia_caller_function_ranges_8616: tuple[tuple[int, int], ...]
-    _inertia_caller_target_aliases_8616: tuple[int, ...]
+    _inertia_caller_evidence_target_8616: cython.longlong
+    _inertia_caller_function_ranges_8616: object
+    _inertia_caller_target_aliases_8616: object
 
 
-def _unknown_evidence_8616(target_addr: int) -> CallerReturnUseEvidence8616:
+@cython.ccall
+def _unknown_evidence_8616(target_addr: cython.longlong) -> CallerReturnUseEvidence8616:
     """Return one closed failure result for unavailable module evidence."""
     return CallerReturnUseEvidence8616(
         target_addr=target_addr,
@@ -58,7 +62,7 @@ def _unknown_evidence_8616(target_addr: int) -> CallerReturnUseEvidence8616:
 
 def record_cod_module_caller_return_use_evidence_8616(
     cod_metadata: CODProcMetadata,
-    isolated_target_addr: int,
+    isolated_target_addr: cython.longlong,
     isolated_project: object,
 ) -> CallerReturnUseEvidence8616:
     """Record full-module caller evidence on one isolated COD procedure project."""
@@ -116,12 +120,12 @@ def record_cod_module_caller_return_use_evidence_8616(
                     else None
                 ),
             )
-            for fact in evidence.facts
+            for fact in iter(evidence.facts)
         )
         remapped = replace(
             evidence,
             target_addr=isolated_target_addr,
-            callsite_addrs=tuple(fact.callsite_addr for fact in remapped_facts),
+            callsite_addrs=tuple(fact.callsite_addr for fact in iter(remapped_facts)),
             facts=remapped_facts,
         )
     except (OSError, TypeError, ValueError) as exc:

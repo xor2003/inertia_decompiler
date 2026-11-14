@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Publish exact Boolean projections of an already-proven call return.
 
 Layer: Structuring.
@@ -12,6 +13,8 @@ recover arguments or infer ownership from a callee name.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from angr.analyses.decompiler.structured_codegen.c import (
     CITE,
@@ -28,18 +31,20 @@ from inertia.lowering.structured_tags import copy_structured_tags_8616
 
 from .condition_replay import bind_condition_replay_identity_8616
 
-_MAX_WRAPPER_DEPTH: int = 16
+_MAX_WRAPPER_DEPTH: cython.longlong = 16
 _OWNED_TAG: str = "inertia_structuring_condition_cfg_materialized_8616"
 
 
+@cython.ccall
 def _constant_8616(expression: object) -> int | None:
     """Read an exact integer constant without evaluating other expressions."""
     return expression.value if isinstance(expression, CConstant) and isinstance(expression.value, int) else None
 
 
+@cython.ccall
 def _negate_comparison_8616(
-    predicate: tuple[str, CConstant] | None,
-) -> tuple[str, CConstant] | None:
+    predicate: object,
+) -> object:
     """Invert a proven equality test without changing its operands."""
     if predicate is None:
         return None
@@ -47,10 +52,13 @@ def _negate_comparison_8616(
     return ("CmpEQ" if operator == "CmpNE" else "CmpNE"), constant
 
 
+@cython.ccall
 def _direct_call_comparison_8616(
     expression: CBinaryOp, call: CFunctionCall,
-) -> tuple[str, CConstant] | None:
+) -> object:
     """Recognize one existing call compared with one integer constant."""
+    operand: object
+    other: object
     if expression.op not in {"CmpEQ", "CmpNE"}:
         return None
     for operand, other in ((expression.lhs, expression.rhs), (expression.rhs, expression.lhs)):
@@ -59,9 +67,10 @@ def _direct_call_comparison_8616(
     return None
 
 
+@cython.ccall
 def _call_predicate_8616(
-    expression: CExpression, call: CFunctionCall, depth: int = 0,
-) -> tuple[str, CConstant] | None:
+    expression: CExpression, call: CFunctionCall, depth: cython.longlong = 0,
+) -> object:
     """Project Boolean wrappers onto one exact call comparison, or refuse."""
     if depth >= _MAX_WRAPPER_DEPTH:
         return None
@@ -80,6 +89,7 @@ def _call_predicate_8616(
     return None
 
 
+@cython.ccall
 def materialize_bound_call_condition_8616(
     expression: CExpression,
     call: CFunctionCall,
@@ -87,6 +97,7 @@ def materialize_bound_call_condition_8616(
     codegen: object,
 ) -> CExpression:
     """Publish a proven call comparison while retaining its constant and arguments."""
+    predicate: object
     predicate = _call_predicate_8616(expression, call)
     if predicate is None:
         return expression

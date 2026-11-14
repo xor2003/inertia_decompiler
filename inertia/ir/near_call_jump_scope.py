@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Conditional CALL census for an explicitly scoped entry-jump proof.
 
 Layer: IR.
@@ -7,6 +8,8 @@ Owns typed Value, Address, Condition, instruction facts, and lossless normalizat
 Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 from __future__ import annotations
+import typing
+import cython
 
 import json
 from dataclasses import dataclass, field
@@ -40,9 +43,12 @@ from .source_graph_binding import (
     canonical_source_graph_8616,
     capture_immutable_source_graph_facts_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NearCallJumpScope8616:
     """Explicit conditional entry and complete caller CALL census.
 
@@ -55,17 +61,18 @@ class NearCallJumpScope8616:
     artifact: IRFunctionArtifact
     context: NativeNearCallEntry8616
     direct_target_resolver: DirectCallTargetResolver8616
-    preservations: tuple[ConditionalNearCallPreservation8616, ...]
+    preservations: object
 
     def to_dict(self) -> dict[str, object]:
         """Serialize conditional premises without claiming universal proof."""
         return {
             "conditional_only": True,
             "context": self.context.to_dict(),
-            "preservations": [record.to_dict() for record in self.preservations],
+            "preservations": [record.to_dict() for record in iter(self.preservations)],
         }
 
 
+@cython.ccall
 def _shared_caller_graph_8616(
     artifact: IRFunctionArtifact,
 ) -> _SharedCallerGraph8616 | None:
@@ -85,10 +92,11 @@ def _shared_caller_graph_8616(
         return None
 
 
+@cython.ccall
 def authenticate_near_call_jump_scope_8616(
     scope: NearCallJumpScope8616,
     *, project: object, artifact: IRFunctionArtifact,
-) -> bool:
+) -> cython.bint:
     """Authenticate one raw caller and the complete conditional CALL census.
 
     Original caller, dependency and native snapshots precede callbacks.
@@ -98,13 +106,15 @@ def authenticate_near_call_jump_scope_8616(
     Only then does callback-free canonical derivation reconcile every CALL
     theorem. Staged results never authorize a proof or a reusable bypass.
     """
+    native_before: object
+    snapshots: object
     if type(scope) is not NearCallJumpScope8616:
         return False
     context = scope.context
     if (
         scope.project is not project or scope.artifact is not artifact
         or type(context) is not NativeNearCallEntry8616
-        or artifact.function_addr != context.target_addr
+        or operator.ne(artifact.function_addr, context.target_addr)
         or not scope.preservations
     ):
         return False
@@ -135,16 +145,19 @@ def authenticate_near_call_jump_scope_8616(
     )
 
 
+@cython.ccall
 def _stage_complete_target_census_8616(
     scope: NearCallJumpScope8616,
     project: object,
     artifact: IRFunctionArtifact,
     context: NativeNearCallEntry8616,
-    snapshots: tuple[_DetachedCallerFacts8616, ...],
-    preservations: tuple[ConditionalNearCallPreservation8616, ...],
-) -> bool:
+    snapshots: object,
+    preservations: object,
+) -> cython.bint:
     """Stage each source CALL exactly once; final admission remains separate."""
-    consumed: set[int] = set()
+    block: object
+    instruction: object
+    consumed: set[cython.longlong] = set()
     for block in artifact.blocks:
         for instruction in block.instrs:
             if instruction.op != "CALL":
@@ -154,20 +167,22 @@ def _stage_complete_target_census_8616(
                 snapshots, consumed, preservations,
             ):
                 return False
-    return len(consumed) == len(preservations)
+    return operator.eq(len(consumed), len(preservations))
 
 
+@cython.ccall
 def _final_target_census_seal_8616(
     scope: NearCallJumpScope8616,
     project: object,
     artifact: IRFunctionArtifact,
     context: NativeNearCallEntry8616,
-    preservations: tuple[ConditionalNearCallPreservation8616, ...],
-    snapshots: tuple[_DetachedCallerFacts8616, ...],
-    records_before: str,
+    preservations: object,
+    snapshots: object,
+    records_before: object,
     native_before: _NativeCensusFacts8616,
-) -> bool:
+) -> cython.bint:
     """Observe native state, seal original facts, then derive without callbacks."""
+    step: object
     if not consume_native_near_call_entry_8616(
         project, context, callsite_index=context.callsite_index,
     ):
@@ -196,10 +211,10 @@ def _staged_census_consume_8616(
     context: NativeNearCallEntry8616,
     block: object,
     instruction: object,
-    snapshots: tuple[_DetachedCallerFacts8616, ...],
-    consumed: set[int],
-    preservations: tuple[ConditionalNearCallPreservation8616, ...],
-) -> bool:
+    snapshots: object,
+    consumed: object,
+    preservations: object,
+) -> cython.bint:
     """Match and stage the unique census step for one CALL instruction.
 
     The step bound to this identical block/instruction must be unique,
@@ -208,8 +223,9 @@ def _staged_census_consume_8616(
     at its own census position. ``True`` reports only staged completion —
     the caller's final whole-census seal still owes admission.
     """
+    theorem: object
     matches = tuple(
-        index for index, step in enumerate(preservations)
+        index for index, step in builtins.iter(enumerate(preservations))
         if step.theorem is not None
         and step.theorem.block is block
         and step.theorem.instruction is instruction
@@ -235,15 +251,19 @@ def _staged_census_consume_8616(
     return True
 
 
+@cython.ccall
 def _capture_census_8616(
     scope: NearCallJumpScope8616,
-) -> tuple[_DetachedCallerFacts8616, ...] | None:
+) -> object:
     """Capture all theorem projections against one detached caller graph.
 
     The single pre-callback capture supplies every staged step's
     snapshot; any theorem missing a complete projection refuses the whole
     census before any native callback runs.
     """
+    shared: object
+    snapshot: object
+    step: object
     shared = _shared_caller_graph_8616(scope.artifact)
     if shared is None:
         return None
@@ -260,13 +280,14 @@ def _capture_census_8616(
 
 def _caller_census_unchanged_8616(
     scope: NearCallJumpScope8616,
-    snapshots: tuple[_DetachedCallerFacts8616, ...],
-    records_before: str,
-) -> bool:
+    snapshots: object,
+    records_before: object,
+) -> cython.bint:
     """Seal every record against one graph captured after the final callback."""
+    shared_after: object
     # State serialization can replay retained entry/view proofs. Finish those
     # callbacks before capturing the caller surface they may have changed.
-    if records_before != _dependency_facts_8616(scope):
+    if operator.ne(records_before, _dependency_facts_8616(scope)):
         return False
     shared_after = _shared_caller_graph_8616(scope.artifact)
     if shared_after is None:
@@ -277,20 +298,21 @@ def _caller_census_unchanged_8616(
             and not _stale_caller_facts_8616(
                 scope.project, step.theorem, snapshot, shared_fresh=shared_after,
             )
-            for step, snapshot in zip(scope.preservations, snapshots, strict=True)
+            for step, snapshot in builtins.iter(zip(scope.preservations, snapshots, strict=True))
         )
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _NativeCensusFacts8616:
     """Detached native evidence with authorities pinned until final reconciliation."""
 
-    incoming: bytes
-    keys: tuple[tuple[object, ...], ...]
-    pinned: tuple[object, ...] = field(compare=False, repr=False)
+    incoming: object
+    keys: object
+    pinned: object = field(compare=False, repr=False)
 
 
+@cython.ccall
 def _native_census_facts_8616(
     scope: NearCallJumpScope8616,
 ) -> _NativeCensusFacts8616 | None:
@@ -300,6 +322,10 @@ def _native_census_facts_8616(
     A boundary unsupported by the native-key owner refuses; it cannot borrow
     the previously authenticated IR as evidence of unchanged live bytes.
     """
+    incoming: object
+    native: object
+    boundary: object
+    step: object
     from .vex_import import build_x86_16_ir_function_artifact
 
     incoming = _live_call_encoding_8616(scope.project, scope.context.premise)
@@ -324,7 +350,8 @@ def _native_census_facts_8616(
     return _NativeCensusFacts8616(incoming, tuple(keys), tuple(pinned))
 
 
-def _dependency_facts_8616(scope: NearCallJumpScope8616) -> str:
+@cython.ccall
+def _dependency_facts_8616(scope: NearCallJumpScope8616) -> object:
     """Serialize dependencies, including live entry/view proof callbacks."""
     return json.dumps([
         {
@@ -332,12 +359,13 @@ def _dependency_facts_8616(scope: NearCallJumpScope8616) -> str:
             "identities": (id(step), id(step.theorem), id(step.callee), id(step.obligation)),
             **_callee_dependency_fields_8616(step.callee),
         }
-        for step in scope.preservations
+        for step in iter(scope.preservations)
     ], sort_keys=True)
 
 
+@cython.ccall
 def _callee_dependency_fields_8616(
-    callee: SegmentEffectClosureResult8616 | None,
+    callee: object,
 ) -> dict[str, object]:
     """Serialize the shared callee source, state and closure mutation seal.
 

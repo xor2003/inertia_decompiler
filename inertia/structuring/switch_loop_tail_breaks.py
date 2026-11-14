@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Collapse proven switch exits that target a loop-tail label.
 
 Layer: Structuring.
@@ -15,6 +16,8 @@ breakable scope all prove that ``break`` has the same destination as ``goto``.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -36,6 +39,9 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
+import dataclasses
+import operator
+import builtins
 
 
 class SwitchLoopTailBreakDecision8616(StrEnum):
@@ -52,49 +58,49 @@ class SwitchLoopTailBreakDecision8616(StrEnum):
     REFUSED_MISSING_CODEGEN = "refused_missing_codegen"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SwitchLoopTailBreakStats8616:
     """Closed evidence accounting for switch-loop tail collapse."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SwitchLoopTailBreakMaterialization8616:
     """One exact loop-tail target and its replaced switch-arm gotos."""
 
-    target: int
-    replaced_goto_count: int
+    target: cython.longlong
+    replaced_goto_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SwitchLoopTailBreakResult8616:
     """Mutation and typed-decision report for one Structuring pass."""
 
-    replaced_goto_count: int = 0
-    removed_label_count: int = 0
+    replaced_goto_count: cython.longlong = 0
+    removed_label_count: cython.longlong = 0
     materializations: tuple[SwitchLoopTailBreakMaterialization8616, ...] = ()
     decisions: tuple[SwitchLoopTailBreakDecision8616, ...] = ()
     stats: SwitchLoopTailBreakStats8616 = SwitchLoopTailBreakStats8616()
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether this pass changed the C AST."""
         return self.replaced_goto_count > 0 or self.removed_label_count > 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _SwitchLoopTailCandidate8616:
     """Exact adjacent switch/label topology inside one loop body."""
 
     loop_body: CStatements
     switch: CSwitchCase
     label: CLabel
-    label_index: int
+    label_index: cython.longlong
 
 
 class SwitchLoopTailBreakInvariantError8616(RuntimeError):
@@ -108,20 +114,20 @@ def _statement_children_8616(node: CStatement) -> tuple[CStatement, ...]:
     if isinstance(node, CIfElse):
         children = [
             body
-            for _condition, body in tuple(node.condition_and_nodes or ())
+            for _condition, body in builtins.iter(tuple(node.condition_and_nodes or ()))
             if isinstance(body, CStatement)
         ]
         if isinstance(node.else_node, CStatement):
             children.append(node.else_node)
         return tuple(children)
     if isinstance(node, CSwitchCase):
-        children = [body for _case_value, body in tuple(node.cases or ())]
+        children = [body for _case_value, body in builtins.iter(tuple(node.cases or ()))]
         if isinstance(node.default, CStatement):
             children.append(node.default)
         return tuple(children)
     if isinstance(node, CIncompleteSwitchCase):
         children = [node.head] if isinstance(node.head, CStatement) else []
-        children.extend(body for _case_value, body in tuple(node.cases or ()))
+        children.extend(body for _case_value, body in builtins.iter(tuple(node.cases or ())))
         return tuple(children)
     if isinstance(node, (CWhileLoop, CDoWhileLoop, CForLoop)) and isinstance(node.body, CStatement):
         return (node.body,)
@@ -135,30 +141,34 @@ def _loop_tail_candidates_8616(loop: object) -> tuple[_SwitchLoopTailCandidate86
     statements = tuple(cast(Iterable[CStatement], loop.body.statements or ()))
     return tuple(
         _SwitchLoopTailCandidate8616(loop.body, statement, statements[index + 1], index + 1)
-        for index, statement in enumerate(statements[:-1])
+        for index, statement in builtins.iter(enumerate(statements[:-1]))
         if isinstance(statement, CSwitchCase) and isinstance(statements[index + 1], CLabel)
     )
 
 
+@cython.ccall
 def _label_target_8616(label: CLabel) -> int | None:
     """Return the binary instruction target carried by one C label."""
+    target: object
     target = label.tags.get("ins_addr")
     return target if isinstance(target, int) else None
 
 
+@cython.ccall
 def _collect_case_target_gotos_8616(
-    node: CStatement | None,
-    target: int,
+    node: object,
+    target: cython.longlong,
     *,
-    inside_nested_breakable: bool,
-    safe: list[CGoto],
-    unsafe: list[CGoto],
+    inside_nested_breakable: cython.bint,
+    safe: object,
+    unsafe: object,
 ) -> None:
     """Partition matching case gotos by their nearest breakable owner."""
+    child: object
     if node is None:
         return
     if isinstance(node, CGoto):
-        if node.target == target:
+        if operator.eq(node.target, target):
             (unsafe if inside_nested_breakable else safe).append(node)
         return
     nested = inside_nested_breakable or isinstance(
@@ -175,11 +185,14 @@ def _collect_case_target_gotos_8616(
         )
 
 
+@cython.ccall
 def _switch_target_gotos_8616(
     switch: CSwitchCase,
-    target: int,
+    target: cython.longlong,
 ) -> tuple[tuple[CGoto, ...], tuple[CGoto, ...]]:
     """Return convertible and nested-breakable gotos for one switch."""
+    _case_value: object
+    body: object
     safe: list[CGoto] = []
     unsafe: list[CGoto] = []
     for _case_value, body in tuple(switch.cases or ()):
@@ -201,11 +214,17 @@ def _switch_target_gotos_8616(
     return tuple(safe), tuple(unsafe)
 
 
+@cython.ccall
 def _replace_gotos_8616(
     node: CStatement,
-    replacements: dict[int, CBreak],
-) -> tuple[CStatement, int]:
+    replacements: object,
+) -> tuple[CStatement, cython.longlong]:
     """Replace preclassified goto identities while preserving AST parents."""
+    replacement: object
+    body: object
+    child: object
+    condition: object
+    statement: object
     replacement = replacements.get(id(node))
     if replacement is not None:
         return replacement, 1
@@ -236,23 +255,24 @@ def _replace_gotos_8616(
     return node, replaced
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _TailBreakScan8616:
     """Mutable counters and decision log for one tail-break scan."""
 
     root: object
-    raw_count: int = 0
-    normalized_count: int = 0
-    classified_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    replaced_count: int = 0
-    removed_count: int = 0
-    materializations: list[SwitchLoopTailBreakMaterialization8616] = field(
+    raw_count: cython.longlong = 0
+    normalized_count: cython.longlong = 0
+    classified_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    replaced_count: cython.longlong = 0
+    removed_count: cython.longlong = 0
+    materializations: object = field(
         default_factory=list
     )
-    decisions: list[SwitchLoopTailBreakDecision8616] = field(default_factory=list)
+    decisions: object = field(default_factory=list)
 
+    @cython.ccall
     def _refuse(self, decision: SwitchLoopTailBreakDecision8616) -> None:
         """Record one refused candidate with its typed decision."""
         self.decisions.append(decision)
@@ -260,9 +280,10 @@ class _TailBreakScan8616:
 
     def process(self, candidate: _SwitchLoopTailCandidate8616) -> None:
         """Validate and materialize one switch-loop tail candidate."""
+        target: object
         self.raw_count += 1
         statements = tuple(cast(Iterable[CStatement], candidate.loop_body.statements or ()))
-        if candidate.label_index != len(statements) - 1:
+        if operator.ne(candidate.label_index, len(statements) - 1):
             self._refuse(SwitchLoopTailBreakDecision8616.REFUSED_EXECUTABLE_SUFFIX)
             return
         target = _label_target_8616(candidate.label)
@@ -271,8 +292,8 @@ class _TailBreakScan8616:
             return
         matching_labels = tuple(
             node
-            for node in _iter_c_nodes_deep_8616(self.root)
-            if isinstance(node, CLabel) and _label_target_8616(node) == target
+            for node in builtins.iter(_iter_c_nodes_deep_8616(self.root))
+            if isinstance(node, CLabel) and operator.eq(_label_target_8616(node), target)
         )
         if len(matching_labels) != 1 or matching_labels[0] is not candidate.label:
             self._refuse(SwitchLoopTailBreakDecision8616.REFUSED_AMBIGUOUS_LABEL)
@@ -287,33 +308,36 @@ class _TailBreakScan8616:
             return
         all_target_gotos = tuple(
             node
-            for node in _iter_c_nodes_deep_8616(self.root)
-            if isinstance(node, CGoto) and node.target == target
+            for node in builtins.iter(_iter_c_nodes_deep_8616(self.root))
+            if isinstance(node, CGoto) and operator.eq(node.target, target)
         )
-        if any(goto.target_idx is not None for goto in all_target_gotos):
+        if any(goto.target_idx is not None for goto in iter(all_target_gotos)):
             self._refuse(SwitchLoopTailBreakDecision8616.REFUSED_AMBIGUOUS_GOTO_TARGET)
             return
-        safe_ids = {id(goto) for goto in safe_gotos}
-        if {id(goto) for goto in all_target_gotos} != safe_ids:
+        safe_ids = {id(goto) for goto in iter(safe_gotos)}
+        if operator.ne({id(goto) for goto in iter(all_target_gotos)}, safe_ids):
             self._refuse(SwitchLoopTailBreakDecision8616.REFUSED_EXTERNAL_TARGET_REFERENCE)
             return
-        if any(goto.codegen is None for goto in safe_gotos):
+        if any(goto.codegen is None for goto in iter(safe_gotos)):
             self._refuse(SwitchLoopTailBreakDecision8616.REFUSED_MISSING_CODEGEN)
             return
         self.classified_count += 1
         self._materialize(candidate, statements, target, safe_gotos)
 
+    @cython.ccall
     def _materialize(
         self,
         candidate: _SwitchLoopTailCandidate8616,
-        statements: tuple[CStatement, ...],
-        target: int,
-        safe_gotos: tuple[CGoto, ...],
+        statements: object,
+        target: cython.longlong,
+        safe_gotos: object,
     ) -> None:
         """Replace proven gotos with breaks and drop the tail label."""
+        _case_value: object
+        body: object
         replacements = {
             id(goto): CBreak(codegen=goto.codegen, tags=dict(goto.tags))
-            for goto in safe_gotos
+            for goto in iter(safe_gotos)
         }
         replaced_here = 0
         for _case_value, body in tuple(candidate.switch.cases or ()):
@@ -322,7 +346,7 @@ class _TailBreakScan8616:
         if isinstance(candidate.switch.default, CStatement):
             _updated, count = _replace_gotos_8616(candidate.switch.default, replacements)
             replaced_here += count
-        if replaced_here != len(replacements):
+        if operator.ne(replaced_here, len(replacements)):
             raise SwitchLoopTailBreakInvariantError8616(
                 "classified switch-loop tail gotos did not materialize completely"
             )
@@ -338,17 +362,19 @@ class _TailBreakScan8616:
 
 def materialize_switch_loop_tail_breaks_8616(root: object) -> SwitchLoopTailBreakResult8616:
     """Collapse only complete, topology-proven switch exits at loop tails."""
+    candidate: object
+    loop: object
     scan = _TailBreakScan8616(root)
     loops = tuple(
         node
-        for node in _iter_c_nodes_deep_8616(root)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(root))
         if isinstance(node, (CWhileLoop, CDoWhileLoop, CForLoop))
     )
     for loop in loops:
         for candidate in _loop_tail_candidates_8616(loop):
             scan.process(candidate)
 
-    if scan.classified_count != scan.materialized_count:
+    if operator.ne(scan.classified_count, scan.materialized_count):
         raise SwitchLoopTailBreakInvariantError8616(
             "classified switch-loop tail evidence did not close"
         )

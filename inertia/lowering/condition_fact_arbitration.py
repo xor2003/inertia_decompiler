@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Resolve duplicate typed-condition evidence before C materialization.
 
 Layer: Types/Lowering.
@@ -16,13 +17,17 @@ alternatives remain ambiguous.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
 from inertia.ir.condition_ir import ConditionIR, deduplicate_conditions_8616
 from inertia.ir.core import IRBinaryValue, IRValue, MemSpace
+import dataclasses
+import operator
 
-type _BranchIdentity8616 = tuple[
+_BranchIdentity8616 = typing.TypeAliasType("_BranchIdentity8616", tuple[
     object,
     int,
     tuple[str, ...],
@@ -32,19 +37,20 @@ type _BranchIdentity8616 = tuple[
     int | None,
     int | None,
     int | None,
-]
+])
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionFactResolution8616:
     """Report deterministic condition-fact arbitration and refusals."""
 
-    conditions: tuple[ConditionIR, ...]
-    raw_fact_count: int
-    normalized_fact_count: int
-    failure_count: int
+    conditions: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    failure_count: cython.longlong
 
 
+@cython.ccall
 def _branch_identity_8616(condition: ConditionIR) -> _BranchIdentity8616:
     """Return the operand-independent identity of one typed CFG branch."""
     return (
@@ -60,17 +66,20 @@ def _branch_identity_8616(condition: ConditionIR) -> _BranchIdentity8616:
     )
 
 
-def _same_operands_8616(left: ConditionIR, right: ConditionIR) -> bool:
+@cython.ccall
+def _same_operands_8616(left: ConditionIR, right: ConditionIR) -> cython.bint:
     """Compare owned ConditionIR operands without rendered-text fingerprints."""
-    return left.lhs == right.lhs and left.rhs == right.rhs
+    return operator.eq(left.lhs, right.lhs) and operator.eq(left.rhs, right.rhs)
 
 
-def _is_self_comparison_8616(condition: ConditionIR) -> bool:
+@cython.ccall
+def _is_self_comparison_8616(condition: ConditionIR) -> cython.bint:
     """Return whether a binary comparison has identical owned operands."""
-    return condition.is_comparison and condition.rhs is not None and condition.lhs == condition.rhs
+    return condition.is_comparison and condition.rhs is not None and operator.eq(condition.lhs, condition.rhs)
 
 
-def _bound_value_count_8616(value: object) -> int:
+@cython.ccall
+def _bound_value_count_8616(value: object) -> cython.longlong:
     """Count concrete storage and literal leaves in one owned IR value tree."""
     bound_spaces = {MemSpace.SS, MemSpace.DS, MemSpace.ES, MemSpace.CONST}
     if isinstance(value, IRValue):
@@ -80,13 +89,14 @@ def _bound_value_count_8616(value: object) -> int:
     return 0
 
 
-def _bound_operand_count_8616(condition: ConditionIR) -> int:
+@cython.ccall
+def _bound_operand_count_8616(condition: ConditionIR) -> cython.longlong:
     """Count concrete leaves across scalar or composite condition operands."""
     return _bound_value_count_8616(condition.lhs) + _bound_value_count_8616(condition.rhs)
 
 
 def resolve_condition_fact_conflicts_8616(
-    conditions: list[ConditionIR] | tuple[ConditionIR, ...],
+    conditions: object,
 ) -> ConditionFactResolution8616:
     """Resolve exact-branch duplicates and refuse unresolved operand conflicts.
 
@@ -95,6 +105,9 @@ def resolve_condition_fact_conflicts_8616(
     alternatives. A uniquely more-bound non-self fact outranks register/TMP
     carrier alternatives. Equal-strength operand conflicts are refused.
     """
+    candidate: object
+    candidates: object
+    condition: object
     deduplicated = deduplicate_conditions_8616(list(conditions))
     grouped: dict[_BranchIdentity8616, list[ConditionIR]] = {}
     for condition in deduplicated:
@@ -105,24 +118,24 @@ def resolve_condition_fact_conflicts_8616(
     for candidates in grouped.values():
         distinct: list[ConditionIR] = []
         for candidate in candidates:
-            if not any(_same_operands_8616(candidate, prior) for prior in distinct):
+            if not any(_same_operands_8616(candidate, prior) for prior in iter(distinct)):
                 distinct.append(candidate)
         if len(distinct) == 1:
             resolved.append(distinct[0])
             continue
 
-        non_self = [candidate for candidate in distinct if not _is_self_comparison_8616(candidate)]
+        non_self = [candidate for candidate in iter(distinct) if not _is_self_comparison_8616(candidate)]
         if len(non_self) == 1:
             resolved.append(non_self[0])
             failures += len(distinct) - 1
             continue
 
         if non_self:
-            strongest_score = max(_bound_operand_count_8616(candidate) for candidate in non_self)
+            strongest_score = max(_bound_operand_count_8616(candidate) for candidate in iter(non_self))
             strongest = [
                 candidate
-                for candidate in non_self
-                if _bound_operand_count_8616(candidate) == strongest_score
+                for candidate in iter(non_self)
+                if operator.eq(_bound_operand_count_8616(candidate), strongest_score)
             ]
             if len(strongest) == 1:
                 resolved.append(strongest[0])

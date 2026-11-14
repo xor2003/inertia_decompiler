@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Replay exact segmented IR loads into retained structured register carriers.
 
 Layer: Types/Lowering
@@ -9,6 +10,8 @@ Do not guess across missing temporary and instruction provenance.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import copy
 import functools
@@ -58,6 +61,9 @@ from .gp_register_state import (
 from .segment_access_policy import instruction_addrs_from_node_8616
 from .segment_register_state import runtime_segment_state_cvar_8616
 from .segmented_load_origins import materialize_segmented_load_origins_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = ["IRSegmentedLoadCarrierStats8616", "materialize_ir_segmented_load_carriers_8616"]
 
@@ -71,7 +77,7 @@ class _Project8616(Protocol):
 class _CFunction8616(Protocol):
     """Structured function fields mutated by carrier replay."""
 
-    addr: int
+    addr: cython.longlong
     statements: object
 
 
@@ -84,65 +90,66 @@ class _Codegen8616(Protocol):
     _inertia_ir_segmented_load_carrier_stats_8616: IRSegmentedLoadCarrierStats8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRSegmentedLoadCarrierStats8616:
     """Closed evidence loop for direct segmented-load carrier replay."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _SegmentedLoadFact8616:
     """One exact IR load fact keyed by temporary and instruction identity."""
 
-    temporary_id: int
-    instruction_addr: int
+    temporary_id: cython.longlong
+    instruction_addr: cython.longlong
     address: IRAddress
     segment_constant: int | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _RegisterWriteFact8616:
     """One exact IR register write containing a proven segmented LOAD leaf."""
 
-    register_name: str
-    instruction_addr: int
+    register_name: object
+    instruction_addr: cython.longlong
     value: IRValue | IRBinaryValue
-    loads_by_temporary: dict[int, _SegmentedLoadFact8616]
+    loads_by_temporary: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _LogicalRegisterWriteFact8616:
     """One proven logical word reload into an exact physical register."""
 
-    register_name: str
-    block_addr: int
-    instruction_addr: int
+    register_name: object
+    block_addr: cython.longlong
+    instruction_addr: cython.longlong
     address: IRAddress
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _RegisterSSAIdentity8616:
     """Exact structured-codegen identity shared with def-use validation."""
 
-    reg: int
-    size: int
-    region: int
-    ident: int | str
+    reg: cython.longlong
+    size: cython.longlong
+    region: cython.longlong
+    ident: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _LogicalAssignmentMaterialization8616:
     """Inserted reload keys and SSA identities now owned by those assignments."""
 
-    keys: frozenset[tuple[str, str, int]]
-    identities: frozenset[_RegisterSSAIdentity8616]
+    keys: object
+    identities: object
 
 
+@cython.ccall
 def _store_stats_8616(
     codegen: _Codegen8616,
     stats: IRSegmentedLoadCarrierStats8616,
@@ -161,6 +168,7 @@ def _store_stats_8616(
         )
 
 
+@cython.ccall
 def _debug_assignment_identity_8616(node: structured_c.CAssignment) -> None:
     """Report bounded third-party AST identity only when explicitly requested."""
     if not os.environ.get("INERTIA_DEBUG_IR_SEGMENTED_LOAD_CARRIERS"):
@@ -181,6 +189,7 @@ def _debug_assignment_identity_8616(node: structured_c.CAssignment) -> None:
     )
 
 
+@cython.ccall
 def _temporary_id_8616(node: object) -> int | None:
     """Return an explicit temporary ID without parsing rendered names."""
     if isinstance(node, structured_c.CDirtyExpression):
@@ -198,24 +207,26 @@ def _temporary_id_8616(node: object) -> int | None:
 def _owned_load_fact_8616(
     temporary_node: object,
     provenance_node: object,
-    facts: dict[tuple[int, int], _SegmentedLoadFact8616],
+    facts: object,
 ) -> _SegmentedLoadFact8616 | None:
     """Select one load only when temporary and instruction identities agree."""
+    temporary_id: object
     temporary_id = _temporary_id_8616(temporary_node)
     if temporary_id is None:
         return None
     matches = tuple(
         facts[(temporary_id, instruction_addr)]
-        for instruction_addr in instruction_addrs_from_node_8616(provenance_node)
+        for instruction_addr in builtins.iter(instruction_addrs_from_node_8616(provenance_node))
         if (temporary_id, instruction_addr) in facts
     )
     return matches[0] if len(matches) == 1 else None
 
 
-def _iter_dereference_operands_8616(node: object) -> tuple[object, ...]:
+@cython.ccall
+def _iter_dereference_operands_8616(node: object) -> object:
     """Return dereference nodes reachable through bounded value operators."""
     if isinstance(node, structured_c.CUnaryOp):
-        return (node,) if node.op == "Dereference" else ()
+        return tuple((node,)) if node.op == "Dereference" else tuple(())
     if isinstance(node, structured_c.CBinaryOp):
         return (
             *_iter_dereference_operands_8616(node.lhs),
@@ -226,7 +237,8 @@ def _iter_dereference_operands_8616(node: object) -> tuple[object, ...]:
     return ()
 
 
-def _additive_terms_8616(node: object, sign: int = 1) -> tuple[tuple[int, object], ...]:
+@cython.ccall
+def _additive_terms_8616(node: object, sign: cython.longlong = 1) -> object:
     """Flatten only additive structured-C address terms without rewriting them."""
     if isinstance(node, structured_c.CBinaryOp) and node.op == "Add":
         return _additive_terms_8616(node.lhs, sign) + _additive_terms_8616(node.rhs, sign)
@@ -235,9 +247,13 @@ def _additive_terms_8616(node: object, sign: int = 1) -> tuple[tuple[int, object
     return ((sign, node),)
 
 
-def _register_shapes_in_expr_8616(node: object) -> frozenset[tuple[int, int]]:
+@cython.ccall
+def _register_shapes_in_expr_8616(node: object) -> frozenset[tuple[cython.longlong, cython.longlong]]:
     """Collect physical register shapes from one bounded address expression."""
-    shapes: set[tuple[int, int]] = set()
+    _sign: object
+    term: object
+    variable: object
+    shapes: set[tuple[cython.longlong, cython.longlong]] = set()
     for _sign, term in _additive_terms_8616(node):
         if not isinstance(term, structured_c.CVariable):
             continue
@@ -251,8 +267,11 @@ def _register_shapes_in_expr_8616(node: object) -> frozenset[tuple[int, int]]:
     return frozenset(shapes)
 
 
+@cython.ccall
 def _constant_integer_expr_8616(node: object) -> int | None:
     """Evaluate a bounded, side-effect-free integer expression or refuse it."""
+    lhs: object
+    rhs: object
     if isinstance(node, structured_c.CConstant) and isinstance(node.value, int):
         return node.value
     if isinstance(node, structured_c.CTypeCast):
@@ -274,11 +293,12 @@ def _constant_integer_expr_8616(node: object) -> int | None:
     return None
 
 
+@cython.ccall
 def _matches_constant_segment_linear_load_8616(
     codegen: _Codegen8616,
     expression: object,
     fact: _SegmentedLoadFact8616,
-) -> bool:
+) -> cython.bint:
     """Prove that an integer dereference is one lane of an exact IR load.
 
     The segment constant, logical address, width, and source instruction all
@@ -290,13 +310,17 @@ def _matches_constant_segment_linear_load_8616(
 
 
 def _matching_linear_base_indexes_8616(
-    terms: tuple[tuple[int, object], ...],
-    constant_values: tuple[int | None, ...],
-    linear_base: int,
-    allowed_lanes: frozenset[int],
-) -> tuple[int, ...]:
+    terms: object,
+    constant_values: object,
+    linear_base: cython.longlong,
+    allowed_lanes: object,
+) -> tuple[cython.longlong, ...]:
     """Indexes whose constant term can serve as the segment linear base."""
-    matching: list[int] = []
+    value: object
+    _term: object
+    index: object
+    sign: object
+    matching: list[cython.longlong] = []
     for index, ((sign, _term), value) in enumerate(zip(terms, constant_values, strict=True)):
         if (
             value is None
@@ -306,9 +330,9 @@ def _matching_linear_base_indexes_8616(
             continue
         residual = value - linear_base + sum(
             other_sign * other_value
-            for other_index, ((other_sign, _other_term), other_value) in enumerate(
+            for other_index, ((other_sign, _other_term), other_value) in builtins.iter(enumerate(
                 zip(terms, constant_values, strict=True)
-            )
+            ))
             if other_index != index and other_value is not None
         )
         if residual in allowed_lanes:
@@ -316,15 +340,20 @@ def _matching_linear_base_indexes_8616(
     return tuple(matching)
 
 
+@cython.ccall
 def _residual_offset_expr_8616(
     codegen: _Codegen8616,
-    terms: tuple[tuple[int, object], ...],
-    base_index: int,
-    base_value: int,
-    linear_base: int,
+    terms: object,
+    base_index: cython.longlong,
+    base_value: cython.longlong,
+    linear_base: cython.longlong,
 ) -> object | None:
     """Rebuild the additive offset after removing the linear base term."""
-    offset_terms: list[tuple[int, object]] = []
+    result: object
+    index: object
+    sign: object
+    term: object
+    offset_terms: list[tuple[cython.longlong, object]] = []
     for index, (sign, term) in enumerate(terms):
         if index == base_index:
             residual = base_value - linear_base
@@ -341,7 +370,7 @@ def _residual_offset_expr_8616(
                 )
             continue
         offset_terms.append((sign, term))
-    result: object | None = structured_c.CConstant(0, SimTypeShort(False), codegen=codegen) if not offset_terms else None
+    result = structured_c.CConstant(0, SimTypeShort(False), codegen=codegen) if not offset_terms else None
     for sign, term in offset_terms:
         if result is None:
             result = (
@@ -370,6 +399,9 @@ def _constant_segment_offset_expr_8616(
     fact: _SegmentedLoadFact8616,
 ) -> object | None:
     """Recover one SSA-preserving offset from an IR-proven linear dereference."""
+    base_value: object
+    project: object
+    segment: object
     project = codegen.project
     segment = fact.segment_constant
     if (
@@ -381,12 +413,12 @@ def _constant_segment_offset_expr_8616(
         return None
     required_shapes = {
         project.arch.registers[value.name][:2]
-        for value in fact.address.base_values
+        for value in iter(fact.address.base_values)
         if value.space is MemSpace.REG
         and isinstance(value.name, str)
         and value.name in project.arch.registers
     }
-    if len(required_shapes) != len(fact.address.base_values):
+    if operator.ne(len(required_shapes), len(fact.address.base_values)):
         return None
     linear_base = (segment & 0xFFFF) << 4
     first_lane = fact.address.offset & 0xFFFF
@@ -398,7 +430,7 @@ def _constant_segment_offset_expr_8616(
     if not required_shapes.issubset(_register_shapes_in_expr_8616(operand)):
         return None
     terms = _additive_terms_8616(operand)
-    constant_values = tuple(_constant_integer_expr_8616(term) for _sign, term in terms)
+    constant_values = tuple(_constant_integer_expr_8616(term) for _sign, term in iter(terms))
     matching_bases = _matching_linear_base_indexes_8616(
         terms, constant_values, linear_base, allowed_lanes
     )
@@ -414,12 +446,13 @@ def _constant_segment_offset_expr_8616(
 def _constant_segment_helper_for_dereference_8616(
     codegen: _Codegen8616,
     dereference: object,
-    facts: tuple[_SegmentedLoadFact8616, ...],
-) -> tuple[structured_c.CFunctionCall, _SegmentedLoadFact8616] | None:
+    facts: object,
+) -> object:
     """Materialize one uniquely matched dereference while retaining its SSA offset."""
+    helper: object
     matches = tuple(
         (fact, offset)
-        for fact in facts
+        for fact in iter(facts)
         if (offset := _constant_segment_offset_expr_8616(codegen, dereference, fact)) is not None
     )
     if len(matches) != 1:
@@ -453,15 +486,16 @@ def _constant_segment_helper_for_dereference_8616(
 def _constant_segment_facts_for_assignment_8616(
     codegen: _Codegen8616,
     assignment: structured_c.CAssignment,
-    facts: dict[tuple[int, int], _SegmentedLoadFact8616],
+    facts: object,
 ) -> tuple[_SegmentedLoadFact8616, ...]:
     """Return unique instruction-owned facts matched by a linear C dereference."""
-    matched: dict[tuple[int, MemSpace, tuple[str, ...], int, int], _SegmentedLoadFact8616] = {}
+    fact: object
+    matched: dict[tuple[cython.longlong, MemSpace, tuple[str, ...], cython.longlong, cython.longlong], _SegmentedLoadFact8616] = {}
     instruction_addrs = instruction_addrs_from_node_8616(assignment)
     if os.environ.get("INERTIA_DEBUG_IR_SEGMENTED_LOAD_CARRIERS"):
         candidates = tuple(
             fact
-            for fact in facts.values()
+            for fact in builtins.iter(facts.values())
             if fact.instruction_addr in instruction_addrs and fact.segment_constant is not None
         )
         if candidates:
@@ -472,7 +506,7 @@ def _constant_segment_facts_for_assignment_8616(
                 len(_iter_dereference_operands_8616(assignment.rhs)),
                 tuple(
                     (fact.instruction_addr, fact.address.base, fact.address.offset, fact.address.size)
-                    for fact in candidates
+                    for fact in iter(candidates)
                 ),
             )
     for fact in facts.values():
@@ -480,10 +514,8 @@ def _constant_segment_facts_for_assignment_8616(
             continue
         if not any(
             _matches_constant_segment_linear_load_8616(codegen, dereference, fact)
-            for dereference in (
-                assignment.rhs,
-                *_iter_dereference_operands_8616(assignment.rhs),
-            )
+            for dereference in iter((assignment.rhs,
+                ) + tuple(_iter_dereference_operands_8616(assignment.rhs)))
         ):
             continue
         key = (
@@ -497,17 +529,20 @@ def _constant_segment_facts_for_assignment_8616(
     return tuple(matched.values())
 
 
+@cython.ccall
 def _register_expr_8616(
-    codegen: _Codegen8616, register_name: str
+    codegen: _Codegen8616, register_name: object
 ) -> structured_c.CVariable | None:
     """Build one architecture-backed physical-register expression."""
+    project: object
+    shape: object
     project = codegen.project
     if project is None:
         return None
     shape = project.arch.registers.get(register_name)
     if shape is None or len(shape) < 2:
         return None
-    offset, size = shape[:2]
+    offset, size = tuple(shape[:2])
     return structured_c.CVariable(
         SimRegisterVariable(offset, size, name=register_name),
         variable_type=SimTypeShort(False).with_arch(project.arch),
@@ -515,13 +550,16 @@ def _register_expr_8616(
     )
 
 
+@cython.ccall
 def _offset_base_terms_8616(
     codegen: _Codegen8616,
-    cfunc: _CFunction8616 | None,
-    live_ins: frozenset[str],
+    cfunc: object,
+    live_ins: object,
     address: IRAddress,
-) -> tuple[list[str], list[object]] | None:
+) -> object:
     """Project each address base register to its runtime/GP expression."""
+    register: object
+    value: object
     register_names: list[str] = []
     terms: list[object] = []
     for value in address.base_values:
@@ -552,8 +590,14 @@ def _offset_base_terms_8616(
     return register_names, terms
 
 
+@cython.ccall
 def _offset_expr_8616(codegen: _Codegen8616, address: IRAddress) -> object | None:
     """Project one exact register-plus-displacement segmented offset."""
+    cfunc: object
+    expression: object
+    project: object
+    resolved: object
+    term: object
     project = codegen.project
     cfunc = codegen.cfunc
     live_ins: frozenset[str] = frozenset()
@@ -565,9 +609,9 @@ def _offset_expr_8616(codegen: _Codegen8616, address: IRAddress) -> object | Non
     if resolved is None:
         return None
     register_names, terms = resolved
-    if tuple(register_names) != address.base:
+    if operator.ne(tuple(register_names), address.base):
         return None
-    expression: object | None = None
+    expression = None
     for term in terms:
         expression = term if expression is None else structured_c.CBinaryOp("Add", expression, term, codegen=codegen)
     if address.offset:
@@ -581,12 +625,14 @@ def _offset_expr_8616(codegen: _Codegen8616, address: IRAddress) -> object | Non
     return expression or structured_c.CConstant(0, SimTypeShort(False), codegen=codegen)
 
 
+@cython.ccall
 def _track_mov_constants_8616(
     instruction: IRInstr,
-    register_constants: dict[str, int],
-    segment_constants: dict[MemSpace, int],
+    register_constants: object,
+    segment_constants: object,
 ) -> None:
     """Track constant propagation through ``MOV`` into GP/segment registers."""
+    constant: object
     destination = instruction.dst
     args = instruction.args
     if not (
@@ -619,6 +665,7 @@ def _track_mov_constants_8616(
             segment_constants[segment_space] = constant & 0xFFFF
 
 
+@cython.ccall
 def _stable_load_address_8616(instruction: IRInstr) -> IRAddress | None:
     """Return the instruction's stable segmented load address, if proven."""
     destination = instruction.dst
@@ -645,6 +692,7 @@ def _stable_load_address_8616(instruction: IRInstr) -> IRAddress | None:
     return address
 
 
+@cython.ccall
 def _debug_load_fact_8616(fact: _SegmentedLoadFact8616) -> None:
     """Emit one segmented-load fact debug line."""
     if not os.environ.get("INERTIA_DEBUG_IR_SEGMENTED_LOAD_CARRIERS"):
@@ -661,8 +709,20 @@ def _debug_load_fact_8616(fact: _SegmentedLoadFact8616) -> None:
     )
 
 
-def _load_facts_8616(codegen: _Codegen8616) -> dict[tuple[int, int], _SegmentedLoadFact8616]:
+@cython.ccall
+def _load_facts_8616(codegen: _Codegen8616) -> dict[tuple[cython.longlong, cython.longlong], _SegmentedLoadFact8616]:
     """Collect exact stable loads with explicit VEX temporary provenance."""
+    address: object
+    cfunc: object
+    destination: object
+    fact: object
+    instruction_addr: object
+    project: object
+    segment_constant: object
+    source_tmp: object
+    state: object
+    block: object
+    instruction: object
     project = codegen.project
     cfunc = codegen.cfunc
     if project is None or cfunc is None:
@@ -674,10 +734,10 @@ def _load_facts_8616(codegen: _Codegen8616) -> dict[tuple[int, int], _SegmentedL
         segment_state = codegen._inertia_segment_state_artifact
     except AttributeError:
         segment_state = None
-    candidates: dict[tuple[int, int], _SegmentedLoadFact8616 | None] = {}
+    candidates: dict[tuple[cython.longlong, cython.longlong], _SegmentedLoadFact8616 | None] = {}
     for block in resolution.artifact.blocks:
-        register_constants: dict[str, int] = {}
-        segment_constants: dict[MemSpace, int] = {}
+        register_constants: dict[str, cython.longlong] = {}
+        segment_constants: dict[MemSpace, cython.longlong] = {}
         for instruction in block.instrs:
             _track_mov_constants_8616(instruction, register_constants, segment_constants)
             address = _stable_load_address_8616(instruction)
@@ -702,13 +762,17 @@ def _load_facts_8616(codegen: _Codegen8616) -> dict[tuple[int, int], _SegmentedL
             _debug_load_fact_8616(fact)
             key = (fact.temporary_id, fact.instruction_addr)
             candidates[key] = fact if key not in candidates else None
-    return {key: fact for key, fact in candidates.items() if fact is not None}
+    return {key: fact for key, fact in builtins.iter(candidates.items()) if fact is not None}
 
 
+@cython.ccall
 def _ir_load_dependencies_8616(
-    value: object, loads_by_temporary: dict[int, _SegmentedLoadFact8616]
-) -> tuple[_SegmentedLoadFact8616, ...] | None:
+    value: object, loads_by_temporary: object
+) -> object:
     """Return all exact segmented-load leaves of one bounded IR value."""
+    fact: object
+    lhs: object
+    rhs: object
     if isinstance(value, IRValue):
         if value.space is MemSpace.TMP:
             if not isinstance(value.source_tmp, int):
@@ -723,11 +787,18 @@ def _ir_load_dependencies_8616(
     return None
 
 
+@cython.ccall
 def _register_write_facts_8616(
     codegen: _Codegen8616,
-    load_facts: dict[tuple[int, int], _SegmentedLoadFact8616],
-) -> dict[tuple[str, int], _RegisterWriteFact8616]:
+    load_facts: object,
+) -> dict[tuple[str, cython.longlong], _RegisterWriteFact8616]:
     """Collect unambiguous same-instruction register writes using LOAD leaves."""
+    cfunc: object
+    fact: object
+    loads: object
+    project: object
+    block: object
+    instruction: object
     project = codegen.project
     cfunc = codegen.cfunc
     if project is None or cfunc is None:
@@ -735,10 +806,10 @@ def _register_write_facts_8616(
     resolution = registered_function_ir_artifact_8616(project, cfunc.addr)
     if resolution.verdict is not FunctionIRArtifactVerdict8616.PROVEN or resolution.artifact is None:
         return {}
-    loads_by_addr: dict[int, dict[int, _SegmentedLoadFact8616]] = {}
+    loads_by_addr: dict[cython.longlong, dict[cython.longlong, _SegmentedLoadFact8616]] = {}
     for fact in load_facts.values():
         loads_by_addr.setdefault(fact.instruction_addr, {})[fact.temporary_id] = fact
-    candidates: dict[tuple[str, int], _RegisterWriteFact8616 | None] = {}
+    candidates: dict[tuple[str, cython.longlong], _RegisterWriteFact8616 | None] = {}
     for block in resolution.artifact.blocks:
         for instruction in block.instrs:
             destination = instruction.dst
@@ -761,13 +832,19 @@ def _register_write_facts_8616(
             )
             key = (write_fact.register_name, write_fact.instruction_addr)
             candidates[key] = write_fact if key not in candidates else None
-    return {key: fact for key, fact in candidates.items() if fact is not None}
+    return {key: fact for key, fact in builtins.iter(candidates.items()) if fact is not None}
 
 
+@cython.ccall
 def _logical_register_write_facts_8616(
     codegen: _Codegen8616,
-) -> dict[tuple[str, int], _LogicalRegisterWriteFact8616]:
+) -> dict[tuple[str, cython.longlong], _LogicalRegisterWriteFact8616]:
     """Collect exact logical word reloads from the authoritative SSA contract."""
+    artifact: object
+    cfunc: object
+    fact: object
+    project: object
+    access: object
     project = codegen.project
     cfunc = codegen.cfunc
     if project is None or cfunc is None:
@@ -781,11 +858,11 @@ def _logical_register_write_facts_8616(
         or not artifact.logical_memory.closed
     ):
         return {}
-    candidates: dict[tuple[str, int], _LogicalRegisterWriteFact8616 | None] = {}
+    candidates: dict[tuple[str, cython.longlong], _LogicalRegisterWriteFact8616 | None] = {}
     instruction_blocks = {
         instruction.addr: block.addr
-        for block in artifact.blocks
-        for instruction in block.instrs
+        for block in iter(artifact.blocks)
+        for instruction in iter(block.instrs)
         if isinstance(instruction.addr, int)
     }
     for access in artifact.logical_memory.accesses:
@@ -807,11 +884,13 @@ def _logical_register_write_facts_8616(
             continue
         key = (fact.register_name, fact.instruction_addr)
         candidates[key] = fact if key not in candidates else None
-    return {key: fact for key, fact in candidates.items() if fact is not None}
+    return {key: fact for key, fact in builtins.iter(candidates.items()) if fact is not None}
 
 
+@cython.ccall
 def _register_ssa_identity_8616(node: object) -> _RegisterSSAIdentity8616 | None:
     """Return the same exact structured register identity used by validation."""
+    variable: object
     if not isinstance(node, structured_c.CVariable):
         return None
     for variable in (node.unified_variable, node.variable):
@@ -829,10 +908,13 @@ def _register_ssa_identity_8616(node: object) -> _RegisterSSAIdentity8616 | None
 def _same_block_reload_for_read_8616(
     codegen: _Codegen8616,
     identity: _RegisterSSAIdentity8616,
-    use_addr: int,
-    logical_facts: dict[tuple[str, int], _LogicalRegisterWriteFact8616],
+    use_addr: cython.longlong,
+    logical_facts: object,
 ) -> _LogicalRegisterWriteFact8616 | None:
     """Prove a stable same-block reload; refuse absent ordering provenance."""
+    block: object
+    cfunc: object
+    project: object
     project = codegen.project
     cfunc = codegen.cfunc
     if project is None or cfunc is None:
@@ -848,9 +930,9 @@ def _same_block_reload_for_read_8616(
         return None
     candidates = tuple(
         fact
-        for fact in logical_facts.values()
+        for fact in builtins.iter(logical_facts.values())
         if fact.register_name in register_names
-        and fact.block_addr == block.addr
+        and operator.eq(fact.block_addr, block.addr)
         and fact.instruction_addr <= use_addr
     )
     if not candidates:
@@ -858,7 +940,7 @@ def _same_block_reload_for_read_8616(
     candidate = max(candidates, key=lambda fact: fact.instruction_addr)
     base_registers = {
         value.name.lower()
-        for value in candidate.address.base_values
+        for value in iter(candidate.address.base_values)
         if value.space is MemSpace.REG and isinstance(value.name, str)
     }
     clobber_names = frozenset(base_registers | register_names)
@@ -867,13 +949,15 @@ def _same_block_reload_for_read_8616(
     return candidate
 
 
+@cython.ccall
 def _same_block_window_clear_8616(
     block: SSABlock,
     candidate: _LogicalRegisterWriteFact8616,
-    use_addr: int,
-    clobber_names: frozenset[str],
-) -> bool:
+    use_addr: cython.longlong,
+    clobber_names: object,
+) -> cython.bint:
     """True when no CALL/STORE/register write crosses the candidate→use window."""
+    instruction: object
     for instruction in block.instrs:
         if instruction.addr is None:
             return False
@@ -892,13 +976,18 @@ def _same_block_window_clear_8616(
     return True
 
 
+@cython.ccall
 def _collect_inherited_addresses_8616(
     value: object,
-    inherited: frozenset[int] | None,
-    active: frozenset[int],
-    inherited_addresses: dict[int, frozenset[int] | None],
+    inherited: object,
+    active: object,
+    inherited_addresses: object,
 ) -> None:
     """Propagate one nearest exact instruction identity through AST children."""
+    child: object
+    current: object
+    previous: object
+    attr: object
     if isinstance(value, dict):
         for child in value.values():
             _collect_inherited_addresses_8616(child, inherited, active, inherited_addresses)
@@ -922,13 +1011,13 @@ def _collect_inherited_addresses_8616(
     ):
         body_addresses = {
             address
-            for child in _iter_c_nodes_deep_8616(value.body)
-            for address in instruction_addrs_from_node_8616(child)
+            for child in builtins.iter(_iter_c_nodes_deep_8616(value.body))
+            for address in builtins.iter(instruction_addrs_from_node_8616(child))
         }
         if body_addresses:
             current = frozenset({min(body_addresses)})
     previous = inherited_addresses.get(marker, current)
-    inherited_addresses[marker] = current if previous == current else None
+    inherited_addresses[marker] = current if operator.eq(previous, current) else None
     child_active = active | {marker}
     for attr in _structured_slot_names_8616(value):
         try:
@@ -939,11 +1028,12 @@ def _collect_inherited_addresses_8616(
         _collect_inherited_addresses_8616(child, current, child_active, inherited_addresses)
 
 
+@cython.ccall
 def _inherited_instruction_addresses_8616(
     root: object,
-) -> dict[int, frozenset[int] | None]:
+) -> object:
     """Map each AST occurrence to its nearest unambiguous instruction provenance."""
-    inherited_addresses: dict[int, frozenset[int] | None] = {}
+    inherited_addresses: dict[cython.longlong, frozenset[int] | None] = {}
     _collect_inherited_addresses_8616(root, None, frozenset(), inherited_addresses)
     return inherited_addresses
 
@@ -955,27 +1045,27 @@ def _identity_register_names_8616(
     """Register names matching the SSA identity's reg+size shape."""
     return frozenset(
         name.lower()
-        for name, shape in project.arch.registers.items()
-        if len(shape) >= 2 and shape[:2] == (identity.reg, identity.size)
+        for name, shape in builtins.iter(project.arch.registers.items())
+        if len(shape) >= 2 and operator.eq(shape[:2], (identity.reg, identity.size))
     )
 
 
-def _use_block_for_addr_8616(artifact: SSAFunctionArtifact, use_addr: int) -> SSABlock | None:
+def _use_block_for_addr_8616(artifact: SSAFunctionArtifact, use_addr: cython.longlong) -> SSABlock | None:
     """Return the unique SSA block containing ``use_addr``."""
     blocks = tuple(
         block
-        for block in artifact.blocks
-        if any(instruction.addr == use_addr for instruction in block.instrs)
+        for block in iter(artifact.blocks)
+        if any(operator.eq(instruction.addr, use_addr) for instruction in iter(block.instrs))
     )
     return blocks[0] if len(blocks) == 1 else None
 
 
 def _debug_nearest_fact_8616(
     identity: _RegisterSSAIdentity8616,
-    use_addr: int,
+    use_addr: cython.longlong,
     use_block: SSABlock,
-    logical_facts: dict[tuple[str, int], _LogicalRegisterWriteFact8616],
-    names: frozenset[str],
+    logical_facts: object,
+    names: object,
 ) -> None:
     """Emit the nearest-fact debug line for tracked identities."""
     if not (
@@ -990,47 +1080,50 @@ def _debug_nearest_fact_8616(
         use_block.addr,
         tuple(
             (fact.register_name, fact.block_addr, fact.instruction_addr)
-            for fact in logical_facts.values()
+            for fact in builtins.iter(logical_facts.values())
             if fact.register_name in names
         ),
     )
 
 
 def _nearest_dominating_fact_8616(
-    logical_facts: dict[tuple[str, int], _LogicalRegisterWriteFact8616],
-    names: frozenset[str],
+    logical_facts: object,
+    names: object,
     dominators: SSADominators8616,
-    use_block_addr: int,
-    use_addr: int,
+    use_block_addr: cython.longlong,
+    use_addr: cython.longlong,
 ) -> _LogicalRegisterWriteFact8616 | None:
     """Select the deepest dominating reload candidate before the use."""
     candidates = tuple(
         fact
-        for fact in logical_facts.values()
+        for fact in builtins.iter(logical_facts.values())
         if fact.register_name in names
         and dominators.dominates(fact.block_addr, use_block_addr) is True
-        and (fact.block_addr != use_block_addr or fact.instruction_addr < use_addr)
+        and (operator.ne(fact.block_addr, use_block_addr) or fact.instruction_addr < use_addr)
     )
     if not candidates:
         return None
     depths = {
         fact.block_addr: len(dominators.dominators(fact.block_addr) or ())
-        for fact in candidates
+        for fact in iter(candidates)
     }
     nearest_depth = max(depths.values())
-    nearest = tuple(fact for fact in candidates if depths[fact.block_addr] == nearest_depth)
+    nearest = tuple(fact for fact in iter(candidates) if operator.eq(depths[fact.block_addr], nearest_depth))
     return max(nearest, key=lambda fact: fact.instruction_addr)
 
 
+@cython.ccall
 def _ssa_reachable_set_8616(
-    edges: Callable[[int], tuple[int, ...] | None], seed: int, stop: int
-) -> set[int]:
+    edges: Callable[[int], tuple[int, ...] | None], seed: cython.longlong, stop: cython.longlong
+) -> object:
     """Blocks reachable from ``seed`` along ``edges``, stopping at ``stop``."""
+    block_addr: object
+    successor: object
     reached = {seed}
     pending = [seed]
     while pending:
         block_addr = pending.pop()
-        if block_addr == stop:
+        if operator.eq(block_addr, stop):
             continue
         for successor in edges(block_addr) or ():
             if successor not in reached:
@@ -1039,20 +1132,22 @@ def _ssa_reachable_set_8616(
     return reached
 
 
+@cython.ccall
 def _path_window_instructions_clear_8616(
     block: SSABlock,
-    block_addr: int,
+    block_addr: cython.longlong,
     candidate: _LogicalRegisterWriteFact8616,
-    use_block_addr: int,
-    use_addr: int,
-    clobber_names: frozenset[str],
-) -> bool:
+    use_block_addr: cython.longlong,
+    use_addr: cython.longlong,
+    clobber_names: object,
+) -> cython.bint:
     """True when no CALL/STORE/clobber write crosses the candidate→use window."""
+    instruction: object
     for instruction in block.instrs:
         if instruction.addr is None and block_addr in (candidate.block_addr, use_block_addr):
             return False
         if instruction.addr is not None:
-            if block_addr == candidate.block_addr and instruction.addr <= candidate.instruction_addr:
+            if operator.eq(block_addr, candidate.block_addr) and instruction.addr <= candidate.instruction_addr:
                 continue
             if block_addr == use_block_addr and instruction.addr >= use_addr:
                 continue
@@ -1069,13 +1164,20 @@ def _path_window_instructions_clear_8616(
     return True
 
 
+@cython.ccall
 def _nearest_linear_logical_fact_8616(
     codegen: _Codegen8616,
     identity: _RegisterSSAIdentity8616,
-    use_addr: int,
-    logical_facts: dict[tuple[str, int], _LogicalRegisterWriteFact8616],
+    use_addr: cython.longlong,
+    logical_facts: object,
 ) -> _LogicalRegisterWriteFact8616 | None:
     """Select a dominating reload on proven mutation-free paths; refuse unknown boundaries."""
+    block: object
+    candidate: object
+    cfunc: object
+    project: object
+    use_block: object
+    block_addr: object
     project = codegen.project
     cfunc = codegen.cfunc
     if project is None or cfunc is None:
@@ -1102,10 +1204,10 @@ def _nearest_linear_logical_fact_8616(
         return None
     base_registers = {
         value.name.lower()
-        for value in candidate.address.base_values
+        for value in iter(candidate.address.base_values)
         if value.space is MemSpace.REG and isinstance(value.name, str)
     }
-    blocks_by_addr = {block.addr: block for block in resolution.artifact.blocks}
+    blocks_by_addr = {block.addr: block for block in iter(resolution.artifact.blocks)}
     forward = _ssa_reachable_set_8616(snapshot.successors, candidate.block_addr, use_block_addr)
     reverse = _ssa_reachable_set_8616(snapshot.predecessors, use_block_addr, candidate.block_addr)
     path_blocks = forward & reverse
@@ -1121,16 +1223,19 @@ def _nearest_linear_logical_fact_8616(
     return candidate
 
 
+@cython.ccall
 def _collect_owner_paths_8616(
     value: object,
-    owners: tuple[int, ...],
-    in_condition: bool,
-    active: frozenset[int],
-    use_ids: frozenset[int],
-    ordinary_owner_paths: list[tuple[int, ...]],
-    condition_owner_paths: list[tuple[int, ...]],
+    owners: object,
+    in_condition: cython.bint,
+    active: object,
+    use_ids: object,
+    ordinary_owner_paths: object,
+    condition_owner_paths: object,
 ) -> None:
     """Record ancestry across the dynamic third-party angr C-AST boundary."""
+    child: object
+    attr: object
     if isinstance(value, dict):
         for child in value.values():
             _collect_owner_paths_8616(
@@ -1176,13 +1281,16 @@ def _collect_owner_paths_8616(
 
 def _insertion_candidates_8616(
     root: object,
-    owner_ids: set[int],
-    owner_depths: dict[int, int],
-    load_addr: int,
-    first_use_addr: int,
-) -> list[tuple[int, int, list[object], int, bool]]:
+    owner_ids: object,
+    owner_depths: object,
+    load_addr: cython.longlong,
+    first_use_addr: cython.longlong,
+) -> object:
     """Collect (nearest following address, owner depth, statements, index, is_loop)."""
-    candidates: list[tuple[int, int, list[object], int, bool]] = []
+    container: object
+    index: object
+    statement: object
+    candidates: list[tuple[cython.longlong, cython.longlong, list[object], cython.longlong, cython.bint]] = []
     for container in _iter_c_nodes_deep_8616(root):
         if not isinstance(container, structured_c.CStatements):
             continue
@@ -1194,7 +1302,7 @@ def _insertion_candidates_8616(
         for index, statement in enumerate(tuple(statements)):
             following = tuple(
                 address
-                for address in instruction_addrs_from_node_8616(statement)
+                for address in builtins.iter(instruction_addrs_from_node_8616(statement))
                 if load_addr < address <= first_use_addr
             )
             if following:
@@ -1218,26 +1326,26 @@ def _insertion_candidates_8616(
 
 
 def _select_unique_insertion_8616(
-    candidates: list[tuple[int, int, list[object], int, bool]],
-    load_addr: int,
-    first_use_addr: int,
-) -> tuple[list[object], int] | None:
+    candidates: object,
+    load_addr: cython.longlong,
+    first_use_addr: cython.longlong,
+) -> object:
     """Resolve tie-breaking to a unique (statements, index) insertion site."""
-    nearest_addr = min(candidate[0] for candidate in candidates)
-    nearest = tuple(candidate for candidate in candidates if candidate[0] == nearest_addr)
-    deepest_owner = max(candidate[1] for candidate in nearest)
-    nearest = tuple(candidate for candidate in nearest if candidate[1] == deepest_owner)
-    loop_boundaries = tuple(candidate for candidate in nearest if candidate[4])
+    nearest_addr = min(candidate[0] for candidate in iter(candidates))
+    nearest = tuple(candidate for candidate in iter(candidates) if operator.eq(candidate[0], nearest_addr))
+    deepest_owner = max(candidate[1] for candidate in iter(nearest))
+    nearest = tuple(candidate for candidate in iter(nearest) if operator.eq(candidate[1], deepest_owner))
+    loop_boundaries = tuple(candidate for candidate in iter(nearest) if candidate[4])
     if loop_boundaries:
         nearest = loop_boundaries
     locations = {
         (id(statements), index)
-        for _addr, _depth, statements, index, _is_loop in nearest
+        for _addr, _depth, statements, index, _is_loop in iter(nearest)
     }
     if len(locations) != 1:
         container_ids = {
             id(statements)
-            for _addr, _depth, statements, _index, _is_loop in nearest
+            for _addr, _depth, statements, _index, _is_loop in iter(nearest)
         }
         if len(container_ids) == 1:
             nearest = (min(nearest, key=lambda candidate: candidate[3]),)
@@ -1250,7 +1358,7 @@ def _select_unique_insertion_8616(
                 first_use_addr,
                 tuple(
                     (addr, depth, index, is_loop)
-                    for addr, depth, _statements, index, is_loop in nearest
+                    for addr, depth, _statements, index, is_loop in iter(nearest)
                 ),
             )
         return None
@@ -1260,27 +1368,28 @@ def _select_unique_insertion_8616(
 
 def _insert_before_unique_following_statement_8616(
     root: object,
-    load_addr: int,
-    first_use_addr: int,
+    load_addr: cython.longlong,
+    first_use_addr: cython.longlong,
     assignment: structured_c.CAssignment,
-    use_occurrences: tuple[structured_c.CVariable, ...],
-) -> bool:
+    use_occurrences: object,
+) -> cython.bint:
     """Insert in the structured statement ancestry that owns the exact SSA use."""
-    use_ids = {id(node) for node in use_occurrences}
-    ordinary_owner_paths: list[tuple[int, ...]] = []
-    condition_owner_paths: list[tuple[int, ...]] = []
+    site: object
+    use_ids = {id(node) for node in iter(use_occurrences)}
+    ordinary_owner_paths: list[tuple[cython.longlong, ...]] = []
+    condition_owner_paths: list[tuple[cython.longlong, ...]] = []
     _collect_owner_paths_8616(
         root, (), False, frozenset(), frozenset(use_ids), ordinary_owner_paths, condition_owner_paths
     )
     selected_paths = condition_owner_paths or ordinary_owner_paths
     owner_ids = (
-        set.intersection(*(set(path) for path in selected_paths))
+        set.intersection(*(set(path) for path in iter(selected_paths)))
         if selected_paths
         else set()
     )
     owner_depths = {
-        owner: max(path.index(owner) for path in selected_paths if owner in path)
-        for owner in owner_ids
+        owner: max(path.index(owner) for path in iter(selected_paths) if owner in path)
+        for owner in iter(owner_ids)
     }
     candidates = _insertion_candidates_8616(root, owner_ids, owner_depths, load_addr, first_use_addr)
     if not candidates:
@@ -1293,15 +1402,18 @@ def _insert_before_unique_following_statement_8616(
     return True
 
 
+@cython.ccall
 def _collect_register_def_reads_8616(
     statements: object,
 ) -> tuple[
-    dict[_RegisterSSAIdentity8616, set[int]],
+    dict[_RegisterSSAIdentity8616, set[cython.longlong]],
     dict[_RegisterSSAIdentity8616, list[structured_c.CVariable]],
 ]:
     """Collect SSA definition addresses and read occurrences per identity."""
-    definitions: dict[_RegisterSSAIdentity8616, set[int]] = {}
-    lhs_ids: set[int] = set()
+    identity: object
+    node: object
+    definitions: dict[_RegisterSSAIdentity8616, set[cython.longlong]] = {}
+    lhs_ids: set[cython.longlong] = set()
     for node in _iter_c_nodes_deep_8616(statements):
         if not isinstance(node, structured_c.CAssignment):
             continue
@@ -1322,12 +1434,13 @@ def _collect_register_def_reads_8616(
     return definitions, reads
 
 
+@cython.ccall
 def _debug_logical_insertion_8616(
     identity: _RegisterSSAIdentity8616,
-    use_addrs: set[int],
-    definitions: dict[_RegisterSSAIdentity8616, set[int]],
+    use_addrs: object,
+    definitions: object,
     fact: _LogicalRegisterWriteFact8616,
-    inserted: bool,
+    inserted: cython.bint,
 ) -> None:
     """Emit the insertion debug line for tracked identities."""
     if not (
@@ -1339,7 +1452,7 @@ def _debug_logical_insertion_8616(
         "IR segmented-load insertion identity=%r uses=%r definitions=%r fact=(%#x,%#x) inserted=%s",
         identity,
         tuple(sorted(use_addrs)),
-        tuple(sorted(definitions.get(identity, ()))),
+        tuple(sorted(tuple(definitions.get(identity, ())))),
         fact.block_addr,
         fact.instruction_addr,
         inserted,
@@ -1349,16 +1462,19 @@ def _debug_logical_insertion_8616(
 def _materialize_identity_assignment_8616(
     codegen: _Codegen8616,
     identity: _RegisterSSAIdentity8616,
-    occurrences: list[structured_c.CVariable],
-    provenance: dict[int, frozenset[int] | None],
-    definitions: dict[_RegisterSSAIdentity8616, set[int]],
-    logical_facts: dict[tuple[str, int], _LogicalRegisterWriteFact8616],
-) -> tuple[str, str, int] | None:
+    occurrences: object,
+    provenance: object,
+    definitions: object,
+    logical_facts: object,
+) -> object:
     """Insert one missing SSA assignment at its uniquely proven boundary."""
+    cfunc: object
+    fact: object
+    source: object
     cfunc = codegen.cfunc
     use_addrs = {
         next(iter(addresses))
-        for node in occurrences
+        for node in iter(occurrences)
         if (addresses := provenance.get(id(node))) is not None and len(addresses) == 1
     }
     if not use_addrs or cfunc is None:
@@ -1397,8 +1513,8 @@ def _materialize_identity_assignment_8616(
         assignment,
         tuple(
             node
-            for node in occurrences
-            if provenance.get(id(node)) == frozenset({first_use})
+            for node in iter(occurrences)
+            if operator.eq(provenance.get(id(node)), frozenset({first_use}))
         ),
     )
     _debug_logical_insertion_8616(identity, use_addrs, definitions, fact, inserted)
@@ -1407,17 +1523,22 @@ def _materialize_identity_assignment_8616(
     return ("reg", fact.register_name, fact.instruction_addr)
 
 
+@cython.ccall
 def _materialize_missing_logical_assignments_8616(
     codegen: _Codegen8616,
-    logical_facts: dict[tuple[str, int], _LogicalRegisterWriteFact8616],
+    logical_facts: object,
 ) -> _LogicalAssignmentMaterialization8616:
     """Restore exact missing SSA assignments at proven structured boundaries."""
+    cfunc: object
+    key: object
+    identity: object
+    occurrences: object
     cfunc = codegen.cfunc
     if cfunc is None:
         return _LogicalAssignmentMaterialization8616(frozenset(), frozenset())
     provenance = _inherited_instruction_addresses_8616(cfunc.statements)
     definitions, reads = _collect_register_def_reads_8616(cfunc.statements)
-    materialized: set[tuple[str, str, int]] = set()
+    materialized: set[tuple[str, str, cython.longlong]] = set()
     materialized_identities: set[_RegisterSSAIdentity8616] = set()
     for identity, occurrences in reads.items():
         key = _materialize_identity_assignment_8616(
@@ -1439,26 +1560,29 @@ def _materialize_missing_logical_assignments_8616(
 
 def _read_side_logical_replacements_8616(
     codegen: _Codegen8616,
-    logical_facts: dict[tuple[str, int], _LogicalRegisterWriteFact8616],
-    assignment_owned_identities: frozenset[_RegisterSSAIdentity8616],
-) -> dict[int, _LogicalRegisterWriteFact8616]:
+    logical_facts: object,
+    assignment_owned_identities: object,
+) -> object:
     """Classify exact SSA reads that may safely replay a stable logical reload."""
+    cfunc: object
+    fact: object
+    node: object
     cfunc = codegen.cfunc
     if cfunc is None:
         return {}
     definitions = tuple(
         node.lhs
-        for node in _iter_c_nodes_deep_8616(cfunc.statements)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(cfunc.statements))
         if isinstance(node, structured_c.CAssignment)
     )
-    lhs_nodes = {id(node) for node in definitions}
+    lhs_nodes = {id(node) for node in iter(definitions)}
     # Existing SSA definitions own their saved values, just like inserted ones.
     # Replaying their reads can discard lowered address terms and reread memory.
     assignment_owned_identities = assignment_owned_identities.union(
-        identity for node in definitions if (identity := _register_ssa_identity_8616(node)) is not None
+        identity for node in iter(definitions) if (identity := _register_ssa_identity_8616(node)) is not None
     )
     inherited_addresses = _inherited_instruction_addresses_8616(cfunc.statements)
-    replacements: dict[int, _LogicalRegisterWriteFact8616] = {}
+    replacements: dict[cython.longlong, _LogicalRegisterWriteFact8616] = {}
     for node in _iter_c_nodes_deep_8616(cfunc.statements):
         fact = _read_replacement_for_node_8616(
             codegen,
@@ -1473,15 +1597,18 @@ def _read_side_logical_replacements_8616(
     return replacements
 
 
+@cython.ccall
 def _read_replacement_for_node_8616(
     codegen: _Codegen8616,
     node: object,
-    lhs_nodes: set[int],
-    assignment_owned_identities: frozenset[_RegisterSSAIdentity8616],
-    inherited_addresses: dict[int, frozenset[int] | None],
-    logical_facts: dict[tuple[str, int], _LogicalRegisterWriteFact8616],
+    lhs_nodes: object,
+    assignment_owned_identities: object,
+    inherited_addresses: object,
+    logical_facts: object,
 ) -> _LogicalRegisterWriteFact8616 | None:
     """Classify one read-side variable against same-block reload facts."""
+    fact: object
+    identity: object
     if id(node) in lhs_nodes or not isinstance(node, structured_c.CVariable):
         return None
     identity = _register_ssa_identity_8616(node)
@@ -1521,8 +1648,10 @@ def _read_replacement_for_node_8616(
     return fact
 
 
-def _register_name_from_node_8616(codegen: _Codegen8616, node: object) -> str | None:
+@cython.ccall
+def _register_name_from_node_8616(codegen: _Codegen8616, node: object) -> object:
     """Return one exact physical register name from a structured destination."""
+    project: object
     if isinstance(node, structured_c.CVariable) and isinstance(node.variable, SimRegisterVariable):
         shape = (node.variable.reg, node.variable.size)
     elif isinstance(node, structured_c.CDirtyExpression):
@@ -1537,18 +1666,23 @@ def _register_name_from_node_8616(codegen: _Codegen8616, node: object) -> str | 
         return None
     names = {
         name.lower()
-        for name, register_shape in project.arch.registers.items()
-        if len(register_shape) >= 2 and register_shape[:2] == shape
+        for name, register_shape in builtins.iter(project.arch.registers.items())
+        if len(register_shape) >= 2 and operator.eq(register_shape[:2], shape)
     }
     return next(iter(names)) if len(names) == 1 else None
 
 
+@cython.ccall
 def _ir_value_expr_8616(
     codegen: _Codegen8616,
     value: IRValue | IRBinaryValue,
-    loads_by_temporary: dict[int, _SegmentedLoadFact8616],
+    loads_by_temporary: object,
 ) -> object | None:
     """Project one bounded IR value using only exact owned leaves."""
+    c_operation: object
+    fact: object
+    lhs: object
+    rhs: object
     if isinstance(value, IRValue):
         if value.space is MemSpace.REG and isinstance(value.name, str):
             return _register_expr_8616(codegen, value.name)
@@ -1566,10 +1700,11 @@ def _ir_value_expr_8616(
     if lhs is None or rhs is None:
         return None
     operation = value.op.rstrip("0123456789")
-    c_operation = {name: name for name in ("Add", "And", "Mul", "Or", "Sar", "Shl", "Shr", "Sub", "Xor")}.get(operation)
+    c_operation = {name: name for name in iter(("Add", "And", "Mul", "Or", "Sar", "Shl", "Shr", "Sub", "Xor"))}.get(operation)
     return structured_c.CBinaryOp(c_operation, lhs, rhs, codegen=codegen) if c_operation is not None else None
 
 
+@cython.ccall
 def _helper_for_fact_8616(
     codegen: _Codegen8616, fact: _SegmentedLoadFact8616
 ) -> structured_c.CFunctionCall | None:
@@ -1582,14 +1717,18 @@ def _helper_for_fact_8616(
     )
 
 
+@cython.ccall
 def _helper_for_address_8616(
     codegen: _Codegen8616,
     address: IRAddress,
-    instruction_addr: int,
+    instruction_addr: cython.longlong,
     *,
     segment_constant: int | None = None,
 ) -> structured_c.CFunctionCall | None:
     """Build one segmented helper from an exact logical address."""
+    cfunc: object
+    offset: object
+    segment: object
     cfunc = codegen.cfunc
     segment_type = SimTypeShort(False).with_arch(codegen.project.arch) if codegen.project is not None else None
     segment = (
@@ -1620,14 +1759,16 @@ def _helper_for_address_8616(
     )
 
 
+@cython.ccall
 def _replace_constant_dereference_8616(
     value: object,
     *,
     boundary: _Codegen8616,
-    constant_facts: tuple[_SegmentedLoadFact8616, ...],
-    replaced_facts: list[_SegmentedLoadFact8616],
+    constant_facts: object,
+    replaced_facts: object,
 ) -> object:
     """Replace one exact constant-segment dereference leaf."""
+    replacement: object
     replacement = _constant_segment_helper_for_dereference_8616(
         boundary,
         value,
@@ -1643,20 +1784,22 @@ def _replace_constant_dereference_8616(
 _CarrierKey8616 = tuple[str, int, int] | tuple[str, str, int]
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _CarrierTransform8616:
     """Mutable state shared by segmented-load carrier transform dispatch."""
 
     boundary: _Codegen8616
-    facts: dict[tuple[int, int], _SegmentedLoadFact8616]
-    register_facts: dict[tuple[str, int], _RegisterWriteFact8616]
-    logical_register_facts: dict[tuple[str, int], _LogicalRegisterWriteFact8616]
-    read_replacements: dict[int, _LogicalRegisterWriteFact8616]
-    classified: set[_CarrierKey8616]
-    materialized: set[_CarrierKey8616]
+    facts: object
+    register_facts: object
+    logical_register_facts: object
+    read_replacements: object
+    classified: object
+    materialized: object
 
+    @cython.ccall
     def transform(self, node: object) -> object:
         """Replace only nodes with exact temporary/instruction or register/instruction ownership."""
+        replaced: object
         replaced = self._read_replacement(node)
         if replaced is not None:
             return replaced
@@ -1664,8 +1807,11 @@ class _CarrierTransform8616:
             return self._assignment(node)
         return self._dirty(node)
 
+    @cython.ccall
     def _read_replacement(self, node: object) -> object | None:
         """Replay a classified read-side reload, or continue dispatch."""
+        read_fact: object
+        replacement: object
         read_fact = self.read_replacements.get(id(node))
         if read_fact is None:
             return None
@@ -1681,8 +1827,12 @@ class _CarrierTransform8616:
         self.materialized.add(read_key)
         return cast(object, replacement)
 
+    @cython.ccall
     def _assignment(self, node: structured_c.CAssignment) -> object:
         """Replay segmented helpers into one proven assignment carrier."""
+        fact: object
+        register_name: object
+        replacement: object
         _debug_assignment_identity_8616(node)
         fact = _owned_load_fact_8616(node.lhs, node, self.facts)
         if fact is not None:
@@ -1710,8 +1860,10 @@ class _CarrierTransform8616:
             return node
         return self._register_assignment(node, register_name)
 
-    def _constant_segment_rhs(self, node: structured_c.CAssignment) -> bool:
+    @cython.ccall
+    def _constant_segment_rhs(self, node: structured_c.CAssignment) -> cython.bint:
         """Replace exact constant-segment dereference leaves inside the rhs."""
+        replaced_fact: object
         constant_fact_tuple = tuple(
             _constant_segment_facts_for_assignment_8616(
                 self.boundary,
@@ -1748,11 +1900,12 @@ class _CarrierTransform8616:
             self.materialized.add(direct_key)
         return bool(replaced_facts)
 
-    def _logical_assignment(self, node: structured_c.CAssignment, register_name: str) -> bool:
+    def _logical_assignment(self, node: structured_c.CAssignment, register_name: object) -> cython.bint:
         """Replay a proven logical reload into an unmodified scalar rhs."""
+        replacement: object
         logical_matches = tuple(
             self.logical_register_facts[(register_name, instruction_addr)]
-            for instruction_addr in instruction_addrs_from_node_8616(node)
+            for instruction_addr in builtins.iter(instruction_addrs_from_node_8616(node))
             if (register_name, instruction_addr) in self.logical_register_facts
         )
         if not logical_matches:
@@ -1777,11 +1930,12 @@ class _CarrierTransform8616:
             self.materialized.add(logical_key)
         return True
 
-    def _register_assignment(self, node: structured_c.CAssignment, register_name: str) -> object:
+    def _register_assignment(self, node: structured_c.CAssignment, register_name: object) -> object:
         """Replay a same-instruction register write value into the rhs."""
+        replacement: object
         matches = tuple(
             self.register_facts[(register_name, instruction_addr)]
-            for instruction_addr in instruction_addrs_from_node_8616(node)
+            for instruction_addr in builtins.iter(instruction_addrs_from_node_8616(node))
             if (register_name, instruction_addr) in self.register_facts
         )
         if not matches:
@@ -1797,8 +1951,11 @@ class _CarrierTransform8616:
             self.materialized.add(register_key)
         return node
 
+    @cython.ccall
     def _dirty(self, node: object) -> object:
         """Replay a temporary dirty expression owned by one exact load."""
+        fact: object
+        replacement: object
         if not isinstance(node, structured_c.CDirtyExpression):
             return node
         fact = _owned_load_fact_8616(node, node, self.facts)
@@ -1813,8 +1970,9 @@ class _CarrierTransform8616:
         return replacement
 
 
-def materialize_ir_segmented_load_carriers_8616(codegen: object) -> bool:
+def materialize_ir_segmented_load_carriers_8616(codegen: object) -> cython.bint:
     """Materialize exact segmented LOADs in retained temporary/register carriers."""
+    cfunc: object
     boundary = cast(_Codegen8616, codegen)
     facts = _load_facts_8616(boundary)
     register_facts = _register_write_facts_8616(boundary, facts)
@@ -1833,7 +1991,7 @@ def materialize_ir_segmented_load_carriers_8616(codegen: object) -> bool:
     classified: set[_CarrierKey8616] = set(inserted_assignments.keys)
     materialized: set[_CarrierKey8616] = set(inserted_assignments.keys)
     origin_keys = materialize_segmented_load_origins_8616(codegen, frozenset(facts))
-    materialized.update(("tmp", temporary_id, instruction_addr) for temporary_id, instruction_addr in origin_keys)
+    materialized.update(("tmp", temporary_id, instruction_addr) for temporary_id, instruction_addr in iter(origin_keys))
     classified.update(materialized)
     transform_ctx = _CarrierTransform8616(
         boundary=boundary,

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Seed pre-decompilation callee prototypes from exact callsite stack facts.
 
 Layer: Types/lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
@@ -23,6 +26,9 @@ from archinfo import Arch
 from inertia.semantics.callsite_summary import CallsiteSummary8616, summarize_x86_16_callsite
 
 from .argument_frame_base import msc_calling_convention_for_function_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "CallsitePrototypeSeedDecision8616",
@@ -46,39 +52,38 @@ class CallsitePrototypeSeedDecision8616(StrEnum):
     SEEDED = "seeded"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallsitePrototypeSeedResult8616:
     """Closed evidence loop for one pre-decompilation prototype seed."""
 
     decision: CallsitePrototypeSeedDecision8616
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PhysicalCallsitePrototypeSeed8616:
     """Exact machine-argument prototype owned by an earlier callsite seed."""
 
-    callsite_addr: int
+    callsite_addr: cython.longlong
     target_addr: int | None
-    physical_widths: tuple[int, ...]
-    return_width_bits: int
+    physical_widths: object
+    return_width_bits: cython.longlong
 
-    def matches(self, summary: CallsiteSummary8616, current: object) -> bool:
+    def matches(self, summary: CallsiteSummary8616, current: object) -> cython.bint:
         """Authorize replacing only this unchanged physical projection."""
         return bool(
-            self.callsite_addr == summary.callsite_addr
-            and self.target_addr == summary.target_addr
-            and self.physical_widths == summary.arg_widths
+            operator.eq(self.callsite_addr, summary.callsite_addr)
+            and operator.eq(self.target_addr, summary.target_addr)
+            and operator.eq(self.physical_widths, summary.arg_widths)
             and isinstance(current, SimTypeFunction)
             and not current.variadic
-            and tuple(arg.size for arg in current.args or ())
-            == tuple(width * 8 for width in reversed(self.physical_widths))
+            and operator.eq(tuple(arg.size for arg in iter(current.args or ())), tuple(width * 8 for width in builtins.iter(reversed(self.physical_widths))))
             and current.returnty is not None
-            and current.returnty.size == self.return_width_bits
+            and operator.eq(current.returnty.size, self.return_width_bits)
         )
 
     def as_record(self) -> dict[str, object]:
@@ -103,12 +108,14 @@ class _CalleeSurface8616(Protocol):
 
     prototype: object | None
     calling_convention: object | None
-    is_prototype_guessed: bool
+    is_prototype_guessed: cython.bint
     info: MutableMapping[str, object]
 
 
 def physical_callsite_prototype_seed_8616(callee: object) -> PhysicalCallsitePrototypeSeed8616 | None:
     """Read a seed's typed ownership marker from a third-party function."""
+    record: object
+    target: object
     try:
         info = cast(_CalleeSurface8616, callee).info
     except AttributeError:
@@ -128,7 +135,7 @@ def physical_callsite_prototype_seed_8616(callee: object) -> PhysicalCallsitePro
         and (target is None or type(target) is int)
         and isinstance(widths, list)
         and widths
-        and all(type(width) is int and width > 0 for width in widths)
+        and all(type(width) is int and width > 0 for width in iter(widths))
         and type(record["return_width_bits"]) is int
     ):
         return None
@@ -138,7 +145,8 @@ def physical_callsite_prototype_seed_8616(callee: object) -> PhysicalCallsitePro
     )
 
 
-def _physical_stack_type_8616(project: _ProjectSurface8616, width: int) -> SimType | None:
+@cython.ccall
+def _physical_stack_type_8616(project: _ProjectSurface8616, width: cython.longlong) -> SimType | None:
     """Return an ABI scalar type for one proven physical stack-slot width."""
     if width == 2:
         return SimTypeShort(signed=False).with_arch(project.arch)
@@ -147,6 +155,7 @@ def _physical_stack_type_8616(project: _ProjectSurface8616, width: int) -> SimTy
     return None
 
 
+@cython.ccall
 def _physical_return_type_8616(project: _ProjectSurface8616, summary: CallsiteSummary8616) -> SimType:
     """Return the caller-observed machine return type for a seeded callee."""
     if summary.return_used is not True:
@@ -162,6 +171,7 @@ def materialize_physical_callsite_prototype_8616(
     summary: CallsiteSummary8616,
 ) -> CallsitePrototypeSeedResult8616:
     """Materialize a physical call interface without guessing logical types."""
+    return_width_bits: object
     typed_project = cast(_ProjectSurface8616, project)
     typed_callee = cast(_CalleeSurface8616, callee)
     existing = typed_callee.prototype
@@ -176,7 +186,7 @@ def materialize_physical_callsite_prototype_8616(
         )
 
     widths = summary.arg_widths
-    if not widths or summary.arg_count != len(widths):
+    if not widths or operator.ne(summary.arg_count, len(widths)):
         return CallsitePrototypeSeedResult8616(
             CallsitePrototypeSeedDecision8616.INCOMPLETE_PHYSICAL_SHAPE,
             1,
@@ -187,9 +197,9 @@ def materialize_physical_callsite_prototype_8616(
         )
     argument_types = tuple(
         _physical_stack_type_8616(typed_project, width)
-        for width in reversed(widths)
+        for width in builtins.iter(reversed(widths))
     )
-    if any(argument_type is None for argument_type in argument_types):
+    if any(argument_type is None for argument_type in iter(argument_types)):
         return CallsitePrototypeSeedResult8616(
             CallsitePrototypeSeedDecision8616.UNSUPPORTED_PHYSICAL_WIDTH,
             1,
@@ -204,7 +214,7 @@ def materialize_physical_callsite_prototype_8616(
     if return_width_bits is None:
         raise TypeError("physical callsite seed requires a sized machine return type")
     prototype = SimTypeFunction(
-        [cast(SimType, argument_type) for argument_type in argument_types],
+        [cast(SimType, argument_type) for argument_type in iter(argument_types)],
         return_type,
         arg_names=[f"a{index}" for index in range(len(argument_types))],
         variadic=False,
@@ -226,13 +236,15 @@ def materialize_physical_callsite_prototype_8616(
     )
 
 
+@cython.ccall
 def seed_physical_callsite_prototype_8616(
     project: object,
     caller: object,
     callee: object,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
 ) -> CallsitePrototypeSeedResult8616:
     """Summarize one callsite and seed its callee before C structuring runs."""
+    summary: object
     summary = summarize_x86_16_callsite(cast(SimpleNamespace, caller), callsite_addr)
     if summary is None:
         return CallsitePrototypeSeedResult8616(

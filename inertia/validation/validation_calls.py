@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Validate that typed required callsites survive structured C materialization.
 
 Layer: Tail validation.
@@ -13,6 +14,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -78,6 +81,9 @@ from .validation_call_stack_inputs import (
     CallStackInputValidation8616,
     validate_call_stack_inputs_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "CallArgumentClassIssue8616",
@@ -129,7 +135,7 @@ class _PrototypedCalleeSurface8616(Protocol):
     """Third-party callee prototype used to validate logical argument widths."""
 
     prototype: object
-    is_prototype_guessed: bool
+    is_prototype_guessed: cython.bint
 
 
 class _TypedCExpressionSurface8616(Protocol):
@@ -181,13 +187,13 @@ class _ProjectArchSurface8616(Protocol):
 class _ArchBytesSurface8616(Protocol):
     """Third-party architecture ABI byte width."""
 
-    bytes: int
+    bytes: cython.longlong
 
 
 class _SizedTypeSurface8616(Protocol):
     """Third-party SimType bit width."""
 
-    size: int
+    size: cython.longlong
 
 
 class CallInterfaceIssueKind8616(StrEnum):
@@ -220,19 +226,19 @@ class FunctionParameterIssueKind8616(StrEnum):
     TYPE_SURFACE_UNAVAILABLE = "type-surface-unavailable"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionParameterIssue8616:
     """One contradiction between Lowering parameter facts and final C types."""
 
     kind: FunctionParameterIssueKind8616
-    function_addr: int
-    stack_offset: int
+    function_addr: cython.longlong
+    stack_offset: cython.longlong
     expected_width_bytes: int | None = None
     actual_width_bytes: int | None = None
     expected_class: CallsiteArgumentClass8616 | None = None
     actual_class: CallsiteArgumentClass8616 | None = None
 
-    def token(self) -> str:
+    def token(self) -> object:
         """Return a deterministic failure token for tail-validation reports."""
         prefix = (
             f"function-parameter:{self.kind}:function={self.function_addr:#x}:"
@@ -262,41 +268,41 @@ class FunctionParameterIssue8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionParameterValidationReport8616:
     """Closed evidence-loop counters for final parameter widths and classes."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
     issues: tuple[FunctionParameterIssue8616, ...] = ()
 
     @property
-    def passed(self) -> bool:
+    def passed(self) -> cython.bint:
         """Return whether every classified parameter fact reached final C."""
-        return self.failure_count == 0 and self.classified_fact_count == self.materialized_count
+        return self.failure_count == 0 and operator.eq(self.classified_fact_count, self.materialized_count)
 
     def issue_tokens(self) -> tuple[str, ...]:
         """Return deterministic issue tokens for canonical tail snapshots."""
-        return tuple(issue.token() for issue in self.issues)
+        return tuple(issue.token() for issue in iter(self.issues))
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _FinalFunctionParameter8616:
     """One final logical C type joined to its exact ABI stack storage width."""
 
     parameter_type: SimType
-    storage_width_bytes: int
+    storage_width_bytes: cython.longlong
 
 
-@dataclass(frozen=True, order=True, slots=True)
+@dataclasses.dataclass(frozen=True, order=True, )
 class FunctionReturnClassIssue8616:
     """One mismatch between binary return evidence and the emitted declaration."""
 
     kind: FunctionReturnClassIssueKind8616
-    function_addr: int
+    function_addr: cython.longlong
     expected_class: FunctionReturnClass8616
     actual_class: FunctionReturnClass8616 | None
 
@@ -309,35 +315,35 @@ class FunctionReturnClassIssue8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionReturnClassValidationReport8616:
     """Closed evidence-loop counters for the final function return class."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
     issues: tuple[FunctionReturnClassIssue8616, ...] = ()
 
     @property
-    def passed(self) -> bool:
+    def passed(self) -> cython.bint:
         """Return whether each proven class matches the emitted declaration."""
-        return self.failure_count == 0 and self.classified_fact_count == self.materialized_count
+        return self.failure_count == 0 and operator.eq(self.classified_fact_count, self.materialized_count)
 
     def issue_tokens(self) -> tuple[str, ...]:
         """Return deterministic issue tokens for canonical tail snapshots."""
-        return tuple(issue.token() for issue in self.issues)
+        return tuple(issue.token() for issue in iter(self.issues))
 
 
-@dataclass(frozen=True, order=True, slots=True)
+@dataclasses.dataclass(frozen=True, order=True, )
 class CallArgumentClassIssue8616:
     """One pointer/value mismatch at a binary-proven logical argument."""
 
     kind: CallArgumentClassIssueKind8616
-    callsite_addr: int
-    target_addr: int
-    argument_index: int
+    callsite_addr: cython.longlong
+    target_addr: cython.longlong
+    argument_index: cython.longlong
     expected_class: CallsiteArgumentClass8616
     actual_class: CallsiteArgumentClass8616 | None
 
@@ -351,56 +357,56 @@ class CallArgumentClassIssue8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallArgumentClassValidationReport8616:
     """Closed evidence counters for final argument classes and dependencies."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
     issues: tuple[CallArgumentClassIssue8616 | CallArgumentSourceIssue8616, ...] = ()
 
     @property
-    def passed(self) -> bool:
+    def passed(self) -> cython.bint:
         """Return whether every classified argument has its proven class."""
-        return self.failure_count == 0 and self.classified_fact_count == self.materialized_count
+        return self.failure_count == 0 and operator.eq(self.classified_fact_count, self.materialized_count)
 
     def issue_tokens(self) -> tuple[str, ...]:
         """Return deterministic issue tokens for canonical tail snapshots."""
-        return tuple(issue.token() for issue in self.issues)
+        return tuple(issue.token() for issue in iter(self.issues))
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallInterfaceIssue8616:
     """One mismatch between binary callsite evidence and a final C call."""
 
     kind: CallInterfaceIssueKind8616
-    callsite_addr: int
-    target_addr: int
-    expected_argument_count: int
+    callsite_addr: cython.longlong
+    target_addr: cython.longlong
+    expected_argument_count: cython.longlong
     actual_argument_count: int | None
-    physical_argument_widths: tuple[int, ...] = ()
-    logical_argument_widths: tuple[int, ...] = ()
-    actual_argument_widths: tuple[int, ...] | None = None
-    prototype_argument_widths: tuple[int, ...] | None = None
+    physical_argument_widths: tuple[cython.longlong, ...] = ()
+    logical_argument_widths: tuple[cython.longlong, ...] = ()
+    actual_argument_widths: object = None
+    prototype_argument_widths: object = None
     prototype_variadic: bool | None = None
 
     def token(self) -> str:
         """Return a deterministic failure token for tail-validation reports."""
         actual = "unknown" if self.actual_argument_count is None else str(self.actual_argument_count)
-        physical_widths = ",".join(str(width) for width in self.physical_argument_widths) or "none"
-        logical_widths = ",".join(str(width) for width in self.logical_argument_widths) or "none"
+        physical_widths = ",".join(str(width) for width in iter(self.physical_argument_widths)) or "none"
+        logical_widths = ",".join(str(width) for width in iter(self.logical_argument_widths)) or "none"
         actual_widths = (
             "unknown"
             if self.actual_argument_widths is None
-            else ",".join(str(width) for width in self.actual_argument_widths) or "none"
+            else ",".join(str(width) for width in iter(self.actual_argument_widths)) or "none"
         )
         prototype_widths = (
             "unknown"
             if self.prototype_argument_widths is None
-            else ",".join(str(width) for width in self.prototype_argument_widths) or "none"
+            else ",".join(str(width) for width in iter(self.prototype_argument_widths)) or "none"
         )
         variadic = "unknown" if self.prototype_variadic is None else str(self.prototype_variadic).lower()
         return (
@@ -412,63 +418,64 @@ class CallInterfaceIssue8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallInterfaceValidationReport8616:
     """Closed evidence-loop counters for final direct-call interfaces."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
     issues: tuple[CallInterfaceIssue8616, ...] = ()
     architectural_stack_issues: tuple[CallStackInputIssue8616, ...] = ()
 
     @property
-    def passed(self) -> bool:
+    def passed(self) -> cython.bint:
         """Return whether every classified final call has the proven arity."""
-        return self.failure_count == 0 and self.classified_fact_count == self.materialized_count
+        return self.failure_count == 0 and operator.eq(self.classified_fact_count, self.materialized_count)
 
-    def issue_tokens(self) -> tuple[str, ...]:
+    def issue_tokens(self) -> object:
         """Return deterministic issue tokens for canonical tail snapshots."""
-        return (tuple(issue.token() for issue in self.issues)
-                + tuple(issue.token() for issue in self.architectural_stack_issues))
+        return (tuple(issue.token() for issue in iter(self.issues))
+                + tuple(issue.token() for issue in iter(self.architectural_stack_issues)))
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RequiredCallsiteValidationReport8616:
     """Closed evidence-loop counters and failures for required calls."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    missing_calls: tuple[str, ...]
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    missing_calls: object
 
     @property
-    def passed(self) -> bool:
+    def passed(self) -> cython.bint:
         """Return whether every classified required call was materialized."""
-        return self.failure_count == 0 and self.classified_fact_count == self.materialized_count
+        return self.failure_count == 0 and operator.eq(self.classified_fact_count, self.materialized_count)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RequiredCallMatch8616:
     """One canonical required summary and its surviving final call, if any."""
 
-    summary_key: int
+    summary_key: cython.longlong
     summary: CallsiteSummary8616
     call: CFunctionCall | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RequiredCallValidationSurface8616:
     """Canonical required-call matches shared by one validation request."""
 
-    raw_summary_count: int
-    matches: tuple[RequiredCallMatch8616, ...]
+    raw_summary_count: cython.longlong
+    matches: object
 
 
+@cython.ccall
 def _final_function_return_surface_8616(
     codegen: object,
 ) -> tuple[int | None, object]:
@@ -483,6 +490,7 @@ def _final_function_return_surface_8616(
     return (function_addr if isinstance(function_addr, int) else None), function_type
 
 
+@cython.ccall
 def _materialized_return_class_8616(
     function_type: object,
 ) -> FunctionReturnClass8616 | None:
@@ -506,7 +514,7 @@ def _parameter_evidence_8616(
 ) -> tuple[
     tuple[FunctionParameterWidthFact8616, ...],
     tuple[NearPointerArgumentFact8616, ...],
-    int,
+    cython.longlong,
 ]:
     """Read typed Lowering parameter facts from the codegen boundary."""
     evidence_surface = cast(_CodegenFunctionParameterEvidenceSurface8616, codegen)
@@ -533,22 +541,27 @@ def _parameter_evidence_8616(
     return (
         tuple(
             fact
-            for fact in width_values
+            for fact in iter(width_values)
             if isinstance(fact, FunctionParameterWidthFact8616)
         ),
         tuple(
             fact
-            for fact in pointer_values
+            for fact in iter(pointer_values)
             if isinstance(fact, NearPointerArgumentFact8616)
         ),
         len(width_values) + len(pointer_values),
     )
 
 
+@cython.ccall
 def _final_function_parameters_8616(
     codegen: object,
 ) -> tuple[int | None, dict[int, _FinalFunctionParameter8616] | None]:
     """Map final parameter types and ABI storage by exact positive BP offset."""
+    function_projection: object
+    arg_type: object
+    cvar: object
+    index: object
     try:
         cfunc = cast(_CodegenFunctionSurface8616, codegen).cfunc
         surface = cast(_CFunctionParameterSurface8616, cfunc)
@@ -572,19 +585,19 @@ def _final_function_parameters_8616(
             arch,
             first_argument_bp_offset=first_argument_bp_offset,
         )
-        if len(layout) != len(arg_types):
+        if operator.ne(len(layout), len(arg_types)):
             return normalized_addr, None
         return normalized_addr, {
             argument.offset: _FinalFunctionParameter8616(
                 parameter_type=argument.argument_type,
                 storage_width_bytes=argument.storage_width,
             )
-            for argument in layout
+            for argument in iter(layout)
         }
-    if len(arg_types) != len(arg_list):
+    if operator.ne(len(arg_types), len(arg_list)):
         return normalized_addr, None
     function_projection = c_function_stack_coordinate_projection_8616(cfunc)
-    by_offset: dict[int, _FinalFunctionParameter8616] = {}
+    by_offset: dict[cython.longlong, _FinalFunctionParameter8616] = {}
     for index, (cvar, arg_type) in enumerate(
         zip(arg_list, arg_types, strict=True)
     ):
@@ -612,6 +625,7 @@ def _final_function_parameters_8616(
     return normalized_addr, by_offset
 
 
+@cython.ccall
 def _normalized_arg_list_8616(surface: _CFunctionParameterSurface8616) -> tuple[object, ...]:
     try:
         raw_arg_list = surface.arg_list
@@ -622,18 +636,19 @@ def _normalized_arg_list_8616(surface: _CFunctionParameterSurface8616) -> tuple[
     return ()
 
 
+@cython.ccall
 def _parameter_bp_offset_8616(
     codegen: object,
     variable: object,
-    projected_argument: FunctionStackArgumentCoordinate8616 | None,
+    projected_argument: object,
 ) -> int | None:
     """Return a proven machine-BP coordinate across the skipped-import boundary."""
     if not isinstance(variable, SimStackVariable):
         return None
     if (
         projected_argument is not None
-        and projected_argument.entry_sp_offset == variable.offset
-        and projected_argument.size == variable.size
+        and operator.eq(projected_argument.entry_sp_offset, variable.offset)
+        and operator.eq(projected_argument.size, variable.size)
     ):
         candidate_offset: object = projected_argument.machine_bp_offset
     else:
@@ -643,13 +658,14 @@ def _parameter_bp_offset_8616(
     return None
 
 
+@cython.ccall
 def _parameter_entry_refused_8616(
     variable: object,
     bp_offset: int | None,
-    first_argument_bp_offset: int,
+    first_argument_bp_offset: cython.longlong,
     arg_type: object,
-    by_offset: dict[int, _FinalFunctionParameter8616],
-) -> bool:
+    by_offset: object,
+) -> cython.bint:
     return (
         not isinstance(variable, SimStackVariable)
         or not isinstance(bp_offset, int)
@@ -661,6 +677,7 @@ def _parameter_entry_refused_8616(
     )
 
 
+@cython.ccall
 def _parameter_type_width_bytes_8616(
     project: object,
     parameter_type: SimType,
@@ -687,6 +704,7 @@ def _parameter_type_width_bytes_8616(
     return max(1, (bits + 7) // 8)
 
 
+@cython.ccall
 def _parameter_type_class_8616(
     parameter_type: SimType,
 ) -> CallsiteArgumentClass8616 | None:
@@ -701,26 +719,37 @@ def _parameter_type_class_8616(
     return CallsiteArgumentClass8616.VALUE
 
 
+@cython.ccall
 def validate_function_parameters_8616(
     project: object,
     codegen: object,
 ) -> FunctionParameterValidationReport8616:
     """Refuse final parameter widths/classes that contradict Lowering facts."""
+    actual_class: object
+    expected_width: object
+    function_addr: object
+    logical_width: object
+    parameter: object
+    parameter_types: object
+    storage_width: object
+    stack_offset: object
+    width_bytes: object
+    widths: object
     width_facts, pointer_facts, raw_fact_count = _parameter_evidence_8616(codegen)
     width_pairs = tuple(
         sorted(
             {
                 (fact.stack_offset, fact.width_bytes)
-                for fact in width_facts
+                for fact in iter(width_facts)
                 if fact.stack_offset >= 4 and fact.width_bytes > 0
             }
         )
     )
     pointer_offsets = tuple(
-        sorted({fact.stack_offset for fact in pointer_facts if fact.stack_offset >= 4})
+        sorted({fact.stack_offset for fact in iter(pointer_facts) if fact.stack_offset >= 4})
     )
     normalized_fact_count = len(width_pairs) + len(pointer_offsets)
-    widths_by_offset: dict[int, set[int]] = {}
+    widths_by_offset: dict[cython.longlong, set[cython.longlong]] = {}
     for stack_offset, width_bytes in width_pairs:
         widths_by_offset.setdefault(stack_offset, set()).add(width_bytes)
     function_addr, parameter_types = _final_function_parameters_8616(codegen)
@@ -732,7 +761,7 @@ def validate_function_parameters_8616(
     issues: list[FunctionParameterIssue8616] = []
     classified_count = 0
     materialized_count = 0
-    for stack_offset, widths in sorted(widths_by_offset.items()):
+    for stack_offset, widths in sorted(tuple(widths_by_offset.items())):
         if len(widths) != 1:
             issues.append(
                 FunctionParameterIssue8616(
@@ -822,11 +851,16 @@ def validate_function_parameters_8616(
     )
 
 
+@cython.ccall
 def validate_function_return_class_8616(
     project: object,
     codegen: object,
 ) -> FunctionReturnClassValidationReport8616:
     """Refuse an emitted return class that contradicts closed binary evidence."""
+    actual_class: object
+    evidence: object
+    expected_class: object
+    function_addr: object
     function_addr, function_type = _final_function_return_surface_8616(codegen)
     if function_addr is None:
         return FunctionReturnClassValidationReport8616()
@@ -867,8 +901,11 @@ def validate_function_return_class_8616(
     )
 
 
+@cython.ccall
 def _callsite_addr_8616(node: CFunctionCall) -> int | None:
     """Return an exact instruction address from structured node tags."""
+    value: object
+    key: object
     exact_callsite = structured_callsite_addr_8616(node)
     if isinstance(exact_callsite, int):
         return exact_callsite
@@ -883,8 +920,10 @@ def _callsite_addr_8616(node: CFunctionCall) -> int | None:
     return None
 
 
+@cython.ccall
 def _callee_addr_8616(node: CFunctionCall) -> int | None:
     """Return the exact callee function address when angr retains it."""
+    callee: object
     callee = node.callee_func
     if callee is None:
         return None
@@ -895,6 +934,7 @@ def _callee_addr_8616(node: CFunctionCall) -> int | None:
     return addr if isinstance(addr, int) else None
 
 
+@cython.ccall
 def _required_summary_token_8616(summary: CallsiteSummary8616) -> str:
     """Render deterministic identity for one missing typed callsite."""
     target = f"{summary.target_addr:#x}" if isinstance(summary.target_addr, int) else "unknown"
@@ -905,12 +945,15 @@ def _required_summary_token_8616(summary: CallsiteSummary8616) -> str:
 
 
 def _canonical_required_summary_items_8616(
-    required: tuple[tuple[int, CallsiteSummary8616], ...],
-    calls: tuple[CFunctionCall, ...],
-) -> tuple[tuple[int, CallsiteSummary8616], ...]:
+    required: object,
+    calls: object,
+) -> tuple[tuple[cython.longlong, CallsiteSummary8616], ...]:
     """Collapse identical clone metadata while preferring surviving node identity."""
-    call_node_ids = {id(call) for call in calls}
-    canonical: list[tuple[int, CallsiteSummary8616]] = []
+    duplicate_index: object
+    summary: object
+    summary_key: object
+    call_node_ids = {id(call) for call in iter(calls)}
+    canonical: list[tuple[cython.longlong, CallsiteSummary8616]] = []
     ordered = sorted(
         required,
         key=lambda item: (
@@ -924,7 +967,7 @@ def _canonical_required_summary_items_8616(
         duplicate_index = next(
             (
                 index
-                for index, (_existing_key, existing_summary) in enumerate(canonical)
+                for index, (_existing_key, existing_summary) in builtins.iter(enumerate(canonical))
                 if existing_summary == summary
             ),
             None,
@@ -938,19 +981,22 @@ def _canonical_required_summary_items_8616(
     return tuple(canonical)
 
 
+@cython.ccall
 def _call_matches_summary_identity_8616(
     node: CFunctionCall,
-    summary_key: int,
+    summary_key: cython.longlong,
     summary: CallsiteSummary8616,
     project: object,
-) -> bool:
+) -> cython.bint:
     """Accept an object-ID match only with corroborating callsite evidence."""
-    if id(node) != summary_key:
+    node_callsite: object
+    node_target: object
+    if operator.ne(id(node), summary_key):
         return False
     node_callsite = _callsite_addr_8616(node)
     if node_callsite is not None:
         summary_callsite = summary.callsite_addr
-        return isinstance(summary_callsite, int) and node_callsite == summary_callsite
+        return isinstance(summary_callsite, int) and operator.eq(node_callsite, summary_callsite)
     node_target = _callee_addr_8616(node)
     if node_target is None:
         return False
@@ -966,16 +1012,21 @@ def _call_matches_summary_identity_8616(
     return normalized_node_target == normalized_summary_target
 
 
+@cython.ccall
 def _call_matches_resolved_target_name_8616(
     node: CFunctionCall,
     summary: CallsiteSummary8616,
     project: object,
-) -> bool:
+) -> cython.bint:
     """Match a detached call node only through resolved target name and arity."""
+    node_name: object
+    original_project: object
+    target_name: object
+    candidate_project: object
     target_addr = summary.target_addr
     if not isinstance(target_addr, int):
         return False
-    target_name: str | None = None
+    target_name = None
     projects = [project]
     # Dynamic angr project metadata boundary: the original project is optional.
     original_project = getattr(project, "_inertia_original_project", None)
@@ -1013,10 +1064,10 @@ def _call_matches_resolved_target_name_8616(
     return (
         isinstance(target_name, str)
         and isinstance(node_name, str)
-        and node_name == target_name
+        and operator.eq(node_name, target_name)
         and isinstance(args, Sequence)
         and not isinstance(args, (str, bytes))
-        and len(args) == summary.arg_count
+        and operator.eq(len(args), summary.arg_count)
     )
 
 
@@ -1027,6 +1078,9 @@ def build_required_call_validation_surface_8616(
     query_index: StructuredAstQueryIndex8616 | None = None,
 ) -> RequiredCallValidationSurface8616:
     """Match canonical non-probe callsite summaries to surviving C calls."""
+    match_index: object
+    summary: object
+    summary_key: object
     if query_index is not None:
         query_index.require_root(root)
     try:
@@ -1036,23 +1090,23 @@ def build_required_call_validation_surface_8616(
     summary_mapping = raw_summaries if isinstance(raw_summaries, Mapping) else {}
     attached_items = tuple(
         (key, summary)
-        for key, summary in summary_mapping.items()
+        for key, summary in builtins.iter(summary_mapping.items())
         if isinstance(key, int) and isinstance(summary, CallsiteSummary8616)
     )
-    attached_callsites = frozenset(summary.callsite_addr for _, summary in attached_items)
+    attached_callsites = frozenset(summary.callsite_addr for _, summary in iter(attached_items))
     inventory_items = tuple(
         (callsite_addr, summary)
-        for callsite_addr, summary in callsite_summary_inventory_8616(codegen).items()
+        for callsite_addr, summary in builtins.iter(callsite_summary_inventory_8616(codegen).items())
         if callsite_addr not in attached_callsites
     )
     typed_items = (*attached_items, *inventory_items)
     required_candidates = tuple(
         (key, summary)
-        for key, summary in typed_items
+        for key, summary in iter(typed_items)
         if not summary.stack_probe_helper and isinstance(summary.target_addr, int)
     )
     nodes = query_index.nodes if query_index is not None else _iter_c_nodes_deep_8616(root)
-    calls = tuple(node for node in nodes if isinstance(node, CFunctionCall))
+    calls = tuple(node for node in iter(nodes) if isinstance(node, CFunctionCall))
     try:
         project = cast(_CodegenProjectSurface8616, codegen).project
     except AttributeError:
@@ -1089,10 +1143,10 @@ def validate_required_callsites_8616(
     matches = surface.matches
     missing = tuple(
         _required_summary_token_8616(match.summary)
-        for match in matches
+        for match in iter(matches)
         if match.call is None
     )
-    materialized_count = sum(match.call is not None for match in matches)
+    materialized_count = sum(match.call is not None for match in iter(matches))
     failure_count = len(missing)
     return RequiredCallsiteValidationReport8616(
         raw_fact_count=raw_fact_count,
@@ -1104,6 +1158,7 @@ def validate_required_callsites_8616(
     )
 
 
+@cython.ccall
 def _expected_argument_count_8616(summary: CallsiteSummary8616) -> int | None:
     """Return a binary-proven logical argument count for final C validation."""
     logical_widths = summary.logical_arg_widths
@@ -1115,12 +1170,16 @@ def _expected_argument_count_8616(summary: CallsiteSummary8616) -> int | None:
     return None
 
 
+@cython.ccall
 def _expected_call_argument_count_8616(
     summary: CallsiteSummary8616,
     call: CFunctionCall,
     project: object | None = None,
 ) -> int | None:
     """Return typed logical arity before falling back to physical push evidence."""
+    callee: object
+    helper_widths: object
+    logical_argument_count: object
     callee = _expected_call_callee_8616(summary, call, project)
     try:
         # angr renders this third-party identity before the fallback target.
@@ -1150,8 +1209,10 @@ def _expected_call_argument_count_8616(
     return _prototype_arg_count_8616(callee)
 
 
+@cython.ccall
 def _materialized_argument_count_8616(call: CFunctionCall) -> int | None:
     """Return the final C argument count at the third-party AST boundary."""
+    args: object
     args = call.args
     if args is None:
         return 0
@@ -1160,6 +1221,7 @@ def _materialized_argument_count_8616(call: CFunctionCall) -> int | None:
     return None
 
 
+@cython.ccall
 def _type_width_bytes_8616(type_surface: object, project: object) -> int | None:
     """Read one structured-C or prototype type width at the angr boundary."""
     if not isinstance(type_surface, SimType):
@@ -1177,15 +1239,19 @@ def _type_width_bytes_8616(type_surface: object, project: object) -> int | None:
     return max(1, (size_bits + 7) // 8)
 
 
+@cython.ccall
 def _materialized_argument_widths_8616(
     call: CFunctionCall,
     project: object,
-) -> tuple[int, ...] | None:
+) -> object:
     """Return exact byte widths for every final structured-C argument."""
+    arguments: object
+    width: object
+    argument: object
     arguments = _materialized_arguments_8616(call)
     if arguments is None:
         return None
-    widths: list[int] = []
+    widths: list[cython.longlong] = []
     for argument in arguments:
         try:
             argument_type = cast(_TypedCExpressionSurface8616, argument).type
@@ -1198,12 +1264,16 @@ def _materialized_argument_widths_8616(
     return tuple(widths)
 
 
+@cython.ccall
 def _target_prototype_argument_shape_8616(
     call: CFunctionCall,
     project: object,
     target_addr: int | None = None,
-) -> tuple[tuple[int, ...], bool] | None:
+) -> object:
     """Return fixed byte widths and variadic status from the target prototype."""
+    callee: object
+    width: object
+    argument_type: object
     callee = call.callee_func
     if callee is None and isinstance(target_addr, int):
         try:
@@ -1225,7 +1295,7 @@ def _target_prototype_argument_shape_8616(
     prototype_args = prototype.args
     if not isinstance(prototype_args, Sequence) or isinstance(prototype_args, (str, bytes)):
         return None
-    widths: list[int] = []
+    widths: list[cython.longlong] = []
     for argument_type in prototype_args:
         width = _type_width_bytes_8616(argument_type, project)
         if width is None:
@@ -1234,8 +1304,10 @@ def _target_prototype_argument_shape_8616(
     return tuple(widths), prototype.variadic
 
 
-def _materialized_arguments_8616(call: CFunctionCall) -> tuple[object, ...] | None:
+@cython.ccall
+def _materialized_arguments_8616(call: CFunctionCall) -> object:
     """Return final arguments from the third-party structured-C call surface."""
+    args: object
     args = call.args
     if args is None:
         return ()
@@ -1244,10 +1316,12 @@ def _materialized_arguments_8616(call: CFunctionCall) -> tuple[object, ...] | No
     return None
 
 
+@cython.ccall
 def _materialized_argument_class_8616(
     argument: object,
 ) -> CallsiteArgumentClass8616 | None:
     """Classify one final expression from its structured-C type."""
+    argument_type: object
     try:
         argument_type = cast(_TypedCExpressionSurface8616, argument).type
     except AttributeError:
@@ -1273,11 +1347,11 @@ def validate_call_argument_classes_8616(
     matches = surface.matches
     proven_matches = tuple(
         match
-        for match in matches
+        for match in iter(matches)
         if match.call is not None and match.summary.logical_arg_classes
     )
-    raw_class_fact_count = sum(len(match.summary.logical_arg_classes) for match in matches)
-    normalized_class_fact_count = sum(len(match.summary.logical_arg_classes) for match in proven_matches)
+    raw_class_fact_count = sum(len(match.summary.logical_arg_classes) for match in iter(matches))
+    normalized_class_fact_count = sum(len(match.summary.logical_arg_classes) for match in iter(proven_matches))
     classified = _classified_argument_entries_8616(proven_matches)
     source_facts, raw_source_fact_count, normalized_source_fact_count = _collect_source_facts_8616(
         codegen, matches
@@ -1297,17 +1371,18 @@ def validate_call_argument_classes_8616(
 
 
 def _resolve_required_call_match_8616(
-    summary_key: int,
+    summary_key: cython.longlong,
     summary: CallsiteSummary8616,
-    required: tuple[tuple[int, CallsiteSummary8616], ...],
-    available: list[CFunctionCall],
-    matches: list[RequiredCallMatch8616],
+    required: object,
+    available: object,
+    matches: object,
     project: object | None,
 ) -> int | None:
+    match_index: object
     match_index = next(
         (
             index
-            for index, node in enumerate(available)
+            for index, node in builtins.iter(enumerate(available))
             if _call_matches_summary_identity_8616(node, summary_key, summary, project)
         ),
         None,
@@ -1316,8 +1391,8 @@ def _resolve_required_call_match_8616(
         match_index = next(
             (
                 index
-                for index, node in enumerate(available)
-                if _callsite_addr_8616(node) == summary.callsite_addr
+                for index, node in builtins.iter(enumerate(available))
+                if operator.eq(_callsite_addr_8616(node), summary.callsite_addr)
             ),
             None,
         )
@@ -1329,16 +1404,15 @@ def _resolve_required_call_match_8616(
         match_index = next(
             (
                 index
-                for index, node in enumerate(available)
-                if normalize_x86_16_call_target_addr_8616(project, _callee_addr_8616(node))
-                == normalized_summary_target
+                for index, node in builtins.iter(enumerate(available))
+                if operator.eq(normalize_x86_16_call_target_addr_8616(project, _callee_addr_8616(node)), normalized_summary_target)
             ),
             None,
         )
     if match_index is None:
         named_matches = [
             index
-            for index, node in enumerate(available)
+            for index, node in builtins.iter(enumerate(available))
             if _call_matches_resolved_target_name_8616(node, summary, project)
         ]
         if len(named_matches) == 1:
@@ -1350,39 +1424,40 @@ def _resolve_required_call_match_8616(
     if match_index is None:
         established_names = {
             cast(Any, match.call).callee_target
-            for match in matches
+            for match in iter(matches)
             if match.call is not None
-            and match.summary.target_addr == summary.target_addr
+            and operator.eq(match.summary.target_addr, summary.target_addr)
             and isinstance(cast(Any, match.call).callee_target, str)
         }
         named_matches = [
             index
-            for index, node in enumerate(available)
+            for index, node in builtins.iter(enumerate(available))
             if cast(Any, node).callee_target in established_names
-            and len(tuple(cast(Any, node).args or ())) == summary.arg_count
+            and operator.eq(len(tuple(cast(Any, node).args or ())), summary.arg_count)
         ]
         if len(named_matches) == 1:
             match_index = named_matches[0]
     return match_index
 
 
+@cython.ccall
 def _disambiguate_named_call_match_8616(
     summary: CallsiteSummary8616,
-    required: tuple[tuple[int, CallsiteSummary8616], ...],
-    available: list[CFunctionCall],
-    named_matches: list[int],
+    required: object,
+    available: object,
+    named_matches: object,
 ) -> int | None:
     same_target_callsites = {
         other_summary.callsite_addr
-        for _other_key, other_summary in required
-        if other_summary.target_addr == summary.target_addr
+        for _other_key, other_summary in iter(required)
+        if operator.eq(other_summary.target_addr, summary.target_addr)
     }
     untagged_matches = [
-        index for index in named_matches if _callsite_addr_8616(available[index]) is None
+        index for index in iter(named_matches) if _callsite_addr_8616(available[index]) is None
     ]
     tagged_matches = {
         _callsite_addr_8616(available[index])
-        for index in named_matches
+        for index in iter(named_matches)
         if _callsite_addr_8616(available[index]) is not None
     }
     if (
@@ -1394,9 +1469,11 @@ def _disambiguate_named_call_match_8616(
     return None
 
 
+@cython.ccall
 def _expected_call_callee_8616(
-    summary: CallsiteSummary8616, call: CFunctionCall, project: object | None
+    summary: CallsiteSummary8616, call: CFunctionCall, project: object
 ) -> object | None:
+    callee: object
     callee = call.callee_func
     if callee is None and project is not None and isinstance(summary.target_addr, int):
         try:
@@ -1407,18 +1484,21 @@ def _expected_call_callee_8616(
     return cast(object | None, callee)
 
 
+@cython.ccall
 def _logical_helper_widths_8616(
-    summary: CallsiteSummary8616, project: object | None, helper_name: str | None
+    summary: CallsiteSummary8616, project: object, helper_name: object
 ) -> tuple[tuple[int, ...] | None, str | None]:
+    helper_widths: object
     helper_widths = known_helper_logical_argument_widths_8616(helper_name)
-    metadata_name: str | None = None
+    metadata_name: object = None
     if helper_widths is None and project is not None and isinstance(summary.target_addr, int):
         metadata_name = callsite_target_name_for_project_8616(project, summary.target_addr)
         helper_widths = known_helper_logical_argument_widths_8616(metadata_name)
     return helper_widths, metadata_name
 
 
-def _prototype_arg_count_8616(callee: object | None) -> int | None:
+@cython.ccall
+def _prototype_arg_count_8616(callee: object) -> int | None:
     if callee is None:
         return None
     try:
@@ -1436,25 +1516,30 @@ def _prototype_arg_count_8616(callee: object | None) -> int | None:
 
 
 def _classified_argument_entries_8616(
-    proven_matches: tuple[RequiredCallMatch8616, ...],
-) -> list[tuple[RequiredCallMatch8616, int, CallsiteArgumentClass8616, object]]:
-    classified: list[tuple[RequiredCallMatch8616, int, CallsiteArgumentClass8616, object]] = []
+    proven_matches: object,
+) -> object:
+    arguments: object
+    match: object
+    classified: list[tuple[RequiredCallMatch8616, cython.longlong, CallsiteArgumentClass8616, object]] = []
     for match in proven_matches:
         assert match.call is not None
         arguments = _materialized_arguments_8616(match.call)
         expected_classes = match.summary.logical_arg_classes
-        if arguments is None or len(arguments) != len(expected_classes):
+        if arguments is None or operator.ne(len(arguments), len(expected_classes)):
             continue
         classified.extend(
             (match, index, expected_class, arguments[index])
-            for index, expected_class in enumerate(expected_classes)
+            for index, expected_class in builtins.iter(enumerate(expected_classes))
         )
     return classified
 
 
 def _collect_source_facts_8616(
-    codegen: object, matches: tuple[RequiredCallMatch8616, ...]
-) -> tuple[list[tuple[RequiredCallMatch8616, CallArgumentSourceDependencyFact8616]], int, int]:
+    codegen: object, matches: object
+) -> tuple[list[tuple[RequiredCallMatch8616, CallArgumentSourceDependencyFact8616]], cython.longlong, cython.longlong]:
+    arguments: object
+    dependencies: object
+    match: object
     source_facts: list[tuple[RequiredCallMatch8616, CallArgumentSourceDependencyFact8616]] = []
     raw_source_fact_count = 0
     normalized_source_fact_count = 0
@@ -1462,21 +1547,27 @@ def _collect_source_facts_8616(
         dependencies = call_argument_source_stack_dependencies_8616(match.summary)
         if dependencies is None:
             continue
-        raw_source_fact_count += sum(bool(offsets) for offsets in dependencies)
+        raw_source_fact_count += sum(bool(offsets) for offsets in iter(dependencies))
         if match.call is None:
             continue
         arguments = _materialized_arguments_8616(match.call)
-        if arguments is None or len(arguments) != len(dependencies):
+        if arguments is None or operator.ne(len(arguments), len(dependencies)):
             continue
         facts = call_argument_source_dependency_facts_8616(codegen, match.summary, arguments)
         normalized_source_fact_count += len(facts)
-        source_facts.extend((match, fact) for fact in facts)
+        source_facts.extend((match, fact) for fact in iter(facts))
     return source_facts, raw_source_fact_count, normalized_source_fact_count
 
 
+@cython.ccall
 def _call_argument_class_issues_8616(
-    classified: list[tuple[RequiredCallMatch8616, int, CallsiteArgumentClass8616, object]],
-) -> tuple[list[CallArgumentClassIssue8616 | CallArgumentSourceIssue8616], int]:
+    classified: object,
+) -> tuple[list[CallArgumentClassIssue8616 | CallArgumentSourceIssue8616], cython.longlong]:
+    actual_class: object
+    argument: object
+    expected_class: object
+    index: object
+    match: object
     issues: list[CallArgumentClassIssue8616 | CallArgumentSourceIssue8616] = []
     materialized_count = 0
     for match, index, expected_class, argument in classified:
@@ -1512,9 +1603,12 @@ def _call_argument_class_issues_8616(
     return issues, materialized_count
 
 
+@cython.ccall
 def _call_argument_source_issues_8616(
-    source_facts: list[tuple[RequiredCallMatch8616, CallArgumentSourceDependencyFact8616]],
-) -> tuple[list[CallArgumentClassIssue8616 | CallArgumentSourceIssue8616], int]:
+    source_facts: object,
+) -> tuple[list[CallArgumentClassIssue8616 | CallArgumentSourceIssue8616], cython.longlong]:
+    match: object
+    source_fact: object
     issues: list[CallArgumentClassIssue8616 | CallArgumentSourceIssue8616] = []
     materialized_count = 0
     for match, source_fact in source_facts:
@@ -1537,10 +1631,13 @@ def _call_argument_source_issues_8616(
     return issues, materialized_count
 
 
+@cython.ccall
 def _interface_classified_matches_8616(
-    matched: tuple[RequiredCallMatch8616, ...], project: object | None
-) -> list[tuple[RequiredCallMatch8616, int]]:
-    classified: list[tuple[RequiredCallMatch8616, int]] = []
+    matched: object, project: object | None
+) -> object:
+    expected_count: object
+    match: object
+    classified: list[tuple[RequiredCallMatch8616, cython.longlong]] = []
     for match in matched:
         expected_count = (
             _expected_call_argument_count_8616(match.summary, match.call, project)
@@ -1552,9 +1649,14 @@ def _interface_classified_matches_8616(
     return classified
 
 
+@cython.ccall
 def _interface_match_issues_8616(
-    classified: list[tuple[RequiredCallMatch8616, int]], project: object | None
-) -> tuple[list[CallInterfaceIssue8616], int]:
+    classified: object, project: object | None
+) -> tuple[list[CallInterfaceIssue8616], cython.longlong]:
+    actual_count: object
+    issue: object
+    expected_count: object
+    match: object
     issues: list[CallInterfaceIssue8616] = []
     materialized_count = 0
     for match, expected_count in classified:
@@ -1574,7 +1676,7 @@ def _interface_match_issues_8616(
                 )
             )
             continue
-        if actual_count != expected_count:
+        if operator.ne(actual_count, expected_count):
             issue = _argument_count_mismatch_issue_8616(match, expected_count, actual_count, project)
             if issue is None:
                 materialized_count += 1
@@ -1586,9 +1688,14 @@ def _interface_match_issues_8616(
 
 
 def _argument_count_mismatch_issue_8616(
-    match: RequiredCallMatch8616, expected_count: int, actual_count: int, project: object | None
+    match: RequiredCallMatch8616, expected_count: cython.longlong, actual_count: cython.longlong, project: object | None
 ) -> CallInterfaceIssue8616 | None:
     """Return None when grouped shape evidence accounts for the mismatch."""
+    grouped_evidence: object
+    live_widths: object
+    prototype_shape: object
+    prototype_widths: object
+    return_pair_evidence: object
     assert match.call is not None
     target_addr = match.summary.target_addr
     assert isinstance(target_addr, int)
@@ -1597,14 +1704,14 @@ def _argument_count_mismatch_issue_8616(
     return_pair_evidence = exact_call_return_pair_shape_evidence_8616(match.summary)
     if (
         return_pair_evidence is not None
-        and len(return_pair_evidence.widths) == actual_count
+        and operator.eq(len(return_pair_evidence.widths), actual_count)
         and all(
             isinstance(actual_arguments[index], CFunctionCall)
             or any(
                 isinstance(node, CFunctionCall)
-                for node in _iter_c_nodes_deep_8616(actual_arguments[index])
+                for node in builtins.iter(_iter_c_nodes_deep_8616(actual_arguments[index]))
             )
-            for index in return_pair_evidence.return_argument_indices
+            for index in iter(return_pair_evidence.return_argument_indices)
         )
     ):
         return None
@@ -1619,7 +1726,7 @@ def _argument_count_mismatch_issue_8616(
             else accounted_target_prototype_shape_evidence_8616
         )
         grouped_evidence = evidence_factory(match.summary, live_widths, prototype_widths)
-    if grouped_evidence is not None and len(grouped_evidence.widths) == actual_count:
+    if grouped_evidence is not None and operator.eq(len(grouped_evidence.widths), actual_count):
         return None
     return CallInterfaceIssue8616(
         kind=CallInterfaceIssueKind8616.ARGUMENT_COUNT_MISMATCH,
@@ -1650,7 +1757,7 @@ def validate_call_interfaces_8616(
     )
     raw_fact_count = surface.raw_summary_count
     matches = surface.matches
-    matched = tuple(match for match in matches if match.call is not None)
+    matched = tuple(match for match in iter(matches) if match.call is not None)
     try:
         project = cast(_CodegenProjectSurface8616, codegen).project
     except AttributeError:

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Veto loss of exact machine-call occurrences during argument replacement.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ memory effects, and untagged runtime helpers retain their separate validators.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import Counter
 from collections.abc import Sequence
@@ -18,27 +21,31 @@ from angr.analyses.decompiler.structured_codegen.c import CFunctionCall
 
 from inertia.lowering.c_ast_utils import _iter_c_node_occurrences_8616
 from inertia.semantics.callsite_summary import structured_callsite_addr_8616
+import dataclasses
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallArgumentCallPreservation8616:
     """Count exact embedded machine-call occurrences retained by a candidate."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def preserves_calls(self) -> bool:
+    def preserves_calls(self) -> cython.bint:
         """Allow further candidate checks only when no occurrence is lost."""
         return self.failure_count == 0
 
 
-def _call_occurrences_8616(arguments: Sequence[object]) -> Counter[int]:
+@cython.ccall
+def _call_occurrences_8616(arguments: Sequence[object]) -> Counter[cython.longlong]:
     """Count each execution edge, including repeated references to one node."""
-    occurrences: Counter[int] = Counter()
+    address: object
+    node: object
+    occurrences: Counter[cython.longlong] = Counter()
     for node in _iter_c_node_occurrences_8616(arguments):
         if isinstance(node, CFunctionCall):
             address = structured_callsite_addr_8616(node)
@@ -47,6 +54,7 @@ def _call_occurrences_8616(arguments: Sequence[object]) -> Counter[int]:
     return occurrences
 
 
+@cython.ccall
 def classify_call_argument_call_preservation_8616(
     previous: Sequence[object], candidate: Sequence[object],
 ) -> CallArgumentCallPreservation8616:

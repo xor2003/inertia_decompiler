@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Resolve the knowledge base that actually owns an angr Function.
 
 Layer: Frontend/angr compatibility.
@@ -6,6 +7,7 @@ This module does not reparent functions, merge knowledge bases or infer semantic
 """
 
 from __future__ import annotations
+import cython
 
 from typing import Protocol, cast
 
@@ -19,8 +21,10 @@ class _FunctionOwnerBoundary8616(Protocol):
     _function_manager: FunctionManager | None
 
 
+@cython.ccall
 def function_knowledge_base_8616(project: object, function: object) -> KnowledgeBase:
     """Require the exact originating function KB and matching project identity."""
+    manager: object
     manager = cast(_FunctionOwnerBoundary8616, function)._function_manager
     if manager is None:
         raise ValueError("function ownership requires an originating function manager")

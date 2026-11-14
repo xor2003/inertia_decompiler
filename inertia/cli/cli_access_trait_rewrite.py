@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: preserve legacy CLI helper surface while delegating semantic proof to X86_16 layers.
@@ -5,6 +6,7 @@ Forbidden: owning decompiler semantics, source-backed recovery, or postprocess s
 """
 
 from __future__ import annotations
+import cython
 
 import re
 import typing
@@ -18,15 +20,17 @@ from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVa
 from inertia.lowering.object_lowering import AccessTraitObjectHint, BaseKey
 
 from .cli_access_rewrite_artifact import AccessRewriteArtifact
+import dataclasses
+import operator
 
-type StableHints = dict[BaseKey, AccessTraitObjectHint]
-type ReplaceCChildren = Callable[[object, Callable[[object], object]], bool]
+StableHints = typing.TypeAliasType("StableHints", dict[BaseKey, AccessTraitObjectHint])
+ReplaceCChildren = typing.TypeAliasType("ReplaceCChildren", Callable[[object, Callable[[object], object]], bool])
 
 
 class _CFunctionLike(Protocol):
     """Structured C function surface needed by access-trait renaming."""
 
-    addr: int
+    addr: cython.longlong
     statements: object
     variables_in_use: object
 
@@ -37,26 +41,31 @@ class _CodegenLike(Protocol):
     cfunc: _CFunctionLike | None
 
 
+@cython.ccall
 def _should_attach_access_trait_names(
     codegen: object,
     *,
-    has_access_rewrite_artifact: Callable[[object], bool],
-) -> bool:
+    has_access_rewrite_artifact: Callable[[object], cython.bint],
+) -> cython.bint:
     return has_access_rewrite_artifact(codegen)
 
 
-def _is_generic_stack_name_8616(name: object) -> bool:
+@cython.ccall
+def _is_generic_stack_name_8616(name: object) -> cython.bint:
     """Return whether a rendered name is a generic temp/field placeholder."""
     return isinstance(name, str) and re.fullmatch(r"(?:v\d+|vvar_\d+)", name) is not None
 
 
+@cython.ccall
 def _load_access_artifact_8616(
     project: object,
     codegen: _CodegenLike,
-    should_attach_access_trait_names: Callable[[object], bool],
+    should_attach_access_trait_names: Callable[[object], cython.bint],
     load_access_rewrite_artifact: Callable[[object, object], AccessRewriteArtifact | None],
 ) -> AccessRewriteArtifact | None:
     """Load the access-rewrite artifact, or None when attachment must refuse."""
+    artifact: object
+    cfunc: object
     cfunc = codegen.cfunc
     if cfunc is None:
         return None
@@ -68,7 +77,7 @@ def _load_access_artifact_8616(
     return artifact
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _AccessTraitFieldRename8616:
     """Run state for stack-field name attachment."""
 
@@ -77,10 +86,12 @@ class _AccessTraitFieldRename8616:
     access_trait_variable_key: Callable[[object], BaseKey | None]
     stack_object_name: Callable[[int], str]
     access_trait_field_name: Callable[[int, int], str]
-    changed: bool = False
+    changed: cython.bint = False
 
+    @cython.ccall
     def stack_rewrite_decision(self, variable: object) -> AccessTraitObjectHint | None:
         """Return the rename decision for one stack variable, or None."""
+        base_key: object
         base_key = self.access_trait_variable_key(variable)
         if base_key is None:
             return None
@@ -88,8 +99,11 @@ class _AccessTraitFieldRename8616:
             return None
         return self.stable_access_object_hint_for_key(self.artifact.object_hints, base_key)
 
-    def rename_stack_variable(self, cvar: structured_c.CVariable, *, suffix: int = 0) -> object | None:
+    @cython.ccall
+    def rename_stack_variable(self, cvar: structured_c.CVariable, *, suffix: cython.longlong = 0) -> object | None:
         """Rename one stack CVariable to its evidence-backed field name."""
+        decision: object
+        variable: object
         # Dynamic codegen boundary: angr CVariable payloads are optional.
         variable = getattr(cvar, "variable", None)
         if not isinstance(variable, SimStackVariable):
@@ -104,11 +118,11 @@ class _AccessTraitFieldRename8616:
             field_name = self.stack_object_name(variable.offset)
         else:
             field_name = self.access_trait_field_name(suffix, variable.size)
-        if variable.name != field_name:
+        if operator.ne(variable.name, field_name):
             variable.name = field_name
             self.changed = True
         # Dynamic codegen boundary: structured C variables may expose a rendered name.
-        if getattr(cvar, "name", None) != field_name:
+        if operator.ne(getattr(cvar, "name", None), field_name):
             try:
                 # Dynamic codegen boundary: angr CVariable.name is runtime-mutable despite a read-only stub.
                 typing.cast(typing.Any, cvar).name = field_name
@@ -118,8 +132,10 @@ class _AccessTraitFieldRename8616:
                 self.changed = True
         return typing.cast(object, cvar)
 
+    @cython.ccall
     def transform(self, node: object) -> object:
         """Rename one C AST node when it is a rewritable stack CVariable."""
+        renamed: object
         if isinstance(node, structured_c.CVariable):
             renamed = self.rename_stack_variable(node, suffix=0)
             if renamed is not None:
@@ -127,18 +143,21 @@ class _AccessTraitFieldRename8616:
         return node
 
 
+@cython.ccall
 def _attach_access_trait_field_names(
     project: object,
     codegen: _CodegenLike,
     *,
-    should_attach_access_trait_names: Callable[[object], bool],
+    should_attach_access_trait_names: Callable[[object], cython.bint],
     load_access_rewrite_artifact: Callable[[object, object], AccessRewriteArtifact | None],
     stable_access_object_hint_for_key: Callable[[StableHints, BaseKey | None], AccessTraitObjectHint | None],
     access_trait_variable_key: Callable[[object], BaseKey | None],
     stack_object_name: Callable[[int], str],
     access_trait_field_name: Callable[[int, int], str],
     replace_c_children: ReplaceCChildren,
-) -> bool:
+) -> cython.bint:
+    artifact: object
+    cfunc: object
     cfunc = codegen.cfunc
     if cfunc is None:
         return False
@@ -165,7 +184,7 @@ def _attach_access_trait_field_names(
     return rename.changed
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _PointerMemberRename8616:
     """Run state for pointer/member name attachment."""
 
@@ -173,12 +192,14 @@ class _PointerMemberRename8616:
     stable_access_object_hint_for_key: Callable[[StableHints, BaseKey | None], AccessTraitObjectHint | None]
     access_trait_variable_key: Callable[[object], BaseKey | None]
     access_trait_field_name: Callable[[int, int], str]
-    changed: bool = False
-    assigned_names: dict[int, str] = field(default_factory=dict)
-    name_cursors: dict[BaseKey, int] = field(default_factory=dict)
+    changed: cython.bint = False
+    assigned_names: object = field(default_factory=dict)
+    name_cursors: object = field(default_factory=dict)
 
-    def candidate_field_names(self, base_key: BaseKey) -> tuple[str, ...]:
+    @cython.ccall
+    def candidate_field_names(self, base_key: BaseKey) -> object:
         """Return candidate field names for one non-refused base key."""
+        hint: object
         if base_key in self.artifact.refusal_reasons or (
             len(base_key) == 4 and base_key[:3] in self.artifact.refusal_reasons
         ):
@@ -190,8 +211,10 @@ class _PointerMemberRename8616:
             return ()
         return hint.candidate_field_names(access_trait_field_name=self.access_trait_field_name)
 
-    def assign_member_name(self, base_key: BaseKey) -> str | None:
+    @cython.ccall
+    def assign_member_name(self, base_key: BaseKey) -> object:
         """Return the next unused candidate name for one base key."""
+        index: object
         names = self.candidate_field_names(base_key)
         if not names:
             return None
@@ -202,8 +225,14 @@ class _PointerMemberRename8616:
             return field_name
         return names[-1]
 
+    @cython.ccall
     def assign_tracked_names(self, variables_in_use: object) -> None:
         """Pre-assign member names across variables_in_use."""
+        base_key: object
+        field_name: object
+        target: object
+        cvar: object
+        variable: object
         if not isinstance(variables_in_use, dict):
             return
         for variable, cvar in list(variables_in_use.items()):
@@ -221,20 +250,24 @@ class _PointerMemberRename8616:
             # Dynamic codegen boundary: CVariable may carry a unified variable payload.
             target = getattr(cvar, "unified_variable", None) or getattr(cvar, "variable", None)
             # Dynamic codegen boundary: target variable names are optional codegen metadata.
-            if target is not None and getattr(target, "name", None) != field_name:
+            if target is not None and operator.ne(getattr(target, "name", None), field_name):
                 target.name = field_name
                 self.changed = True
-            if variable.name != field_name:
+            if operator.ne(variable.name, field_name):
                 variable.name = field_name
                 self.changed = True
             # Dynamic codegen boundary: CVariable rendered names are optional.
-            if getattr(cvar, "name", None) != field_name:
+            if operator.ne(getattr(cvar, "name", None), field_name):
                 cvar.name = field_name
                 self.changed = True
             self.assigned_names[id(variable)] = field_name
 
+    @cython.ccall
     def rename_member_variable(self, cvar: object) -> object | None:
         """Apply an artifact-backed member name, refusing unrelated variables."""
+        base_key: object
+        field_name: object
+        variable: object
         if not isinstance(cvar, structured_c.CVariable):
             return None
         # Dynamic codegen boundary: angr CVariable payloads are optional.
@@ -256,13 +289,14 @@ class _PointerMemberRename8616:
         renamed_cvar = typing.cast(object, cvar)
         return renamed_cvar
 
-    def _apply_member_name(self, variable: SimRegisterVariable | SimStackVariable | SimMemoryVariable, cvar: structured_c.CVariable, field_name: str) -> None:
+    @cython.ccall
+    def _apply_member_name(self, variable: SimRegisterVariable | SimStackVariable | SimMemoryVariable, cvar: structured_c.CVariable, field_name: object) -> None:
         """Write the member name onto the variable and rendered CVariable."""
-        if variable.name != field_name:
+        if operator.ne(variable.name, field_name):
             variable.name = field_name
             self.changed = True
         # Dynamic codegen boundary: CVariable rendered names are optional.
-        if getattr(cvar, "name", None) != field_name:
+        if operator.ne(getattr(cvar, "name", None), field_name):
             try:
                 # Dynamic codegen boundary: angr CVariable.name is runtime-mutable despite a read-only stub.
                 typing.cast(typing.Any, cvar).name = field_name
@@ -271,8 +305,10 @@ class _PointerMemberRename8616:
             else:
                 self.changed = True
 
+    @cython.ccall
     def transform(self, node: object) -> object:
         """Rename one C AST node when it is a rewritable member CVariable."""
+        renamed: object
         if isinstance(node, structured_c.CVariable):
             renamed = self.rename_member_variable(node)
             if renamed is not None:
@@ -280,17 +316,20 @@ class _PointerMemberRename8616:
         return node
 
 
+@cython.ccall
 def _attach_pointer_member_names(
     project: object,
     codegen: _CodegenLike,
     *,
-    should_attach_access_trait_names: Callable[[object], bool],
+    should_attach_access_trait_names: Callable[[object], cython.bint],
     load_access_rewrite_artifact: Callable[[object, object], AccessRewriteArtifact | None],
     stable_access_object_hint_for_key: Callable[[StableHints, BaseKey | None], AccessTraitObjectHint | None],
     access_trait_variable_key: Callable[[object], BaseKey | None],
     access_trait_field_name: Callable[[int, int], str],
     replace_c_children: ReplaceCChildren,
-) -> bool:
+) -> cython.bint:
+    artifact: object
+    cfunc: object
     cfunc = codegen.cfunc
     if cfunc is None:
         return False

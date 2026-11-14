@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove far callback code identities from a loaded DOS image and callee ABI.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -33,9 +36,11 @@ from capstone.x86_const import (
 from inertia.frontend.x86_16.load_dos_mz import DOSMZ
 
 from .function_pointer_parameter_evidence import FunctionPointerParameterFact8616
+import dataclasses
+import operator
 
-_MAX_FUNCTION_BYTES_8616: int = 256
-_MAX_FUNCTION_INSTRUCTIONS_8616: int = 128
+_MAX_FUNCTION_BYTES_8616: cython.longlong = 256
+_MAX_FUNCTION_INSTRUCTIONS_8616: cython.longlong = 128
 
 
 class BinaryFarCallbackTargetStatus8616(StrEnum):
@@ -50,39 +55,41 @@ class BinaryFarCallbackTargetStatus8616(StrEnum):
     NON_FAR_RETURN = "non_far_return"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class BinaryFarCallbackTargetProof8616:
     """Exact far function identity with decoded exits and callee-owned ABI."""
 
-    addr: int
-    name: str
-    segment: int
-    offset: int
-    far_return_addrs: tuple[int, ...]
-    decoded_insn_addrs: tuple[int, ...]
+    addr: cython.longlong
+    name: object
+    segment: cython.longlong
+    offset: cython.longlong
+    far_return_addrs: object
+    decoded_insn_addrs: object
     parameter_fact: FunctionPointerParameterFact8616
 
 
-def _ordered_unique_addresses_8616(addresses: tuple[int, ...]) -> bool:
+@cython.ccall
+def _ordered_unique_addresses_8616(addresses: object) -> cython.bint:
     """Check that durable decoded addresses have one canonical ordering."""
-    return bool(addresses) and addresses == tuple(sorted(set(addresses)))
+    return bool(addresses) and operator.eq(addresses, tuple(sorted(tuple(set(addresses)))))
 
 
+@cython.ccall
 def _proof_matches_result_8616(
     proof: BinaryFarCallbackTargetProof8616,
-    segment: int,
-    offset: int,
-    address: int | None,
-) -> bool:
+    segment: cython.longlong,
+    offset: cython.longlong,
+    address: object,
+) -> cython.bint:
     """Keep a published code identity, ABI, and decoded exits coherent."""
     if address is None or not (0 <= segment <= 0xFFFF and 0 <= offset <= 0xFFFF):
         return False
-    if address != segment * 16 + offset or address > 0xFFFFF:
+    if operator.ne(address, segment * 16 + offset) or address > 0xFFFFF:
         return False
     identity_matches = (
-        proof.addr == address
-        and proof.segment == segment
-        and proof.offset == offset
+        operator.eq(proof.addr, address)
+        and operator.eq(proof.segment, segment)
+        and operator.eq(proof.offset, offset)
         and proof.name == f"sub_{address:x}"
         and proof.parameter_fact.pointer_width == 4
     )
@@ -93,29 +100,29 @@ def _proof_matches_result_8616(
     if not _ordered_unique_addresses_8616(returns) or not _ordered_unique_addresses_8616(decoded):
         return False
     return (
-        decoded[0] == address
+        operator.eq(decoded[0], address)
         and decoded[-1] < address + _MAX_FUNCTION_BYTES_8616
         and set(returns).issubset(decoded)
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class BinaryFarCallbackTargetResult8616:
     """Closed single-target census that never publishes an unproved symbol."""
 
     status: BinaryFarCallbackTargetStatus8616
-    segment: int
-    offset: int
+    segment: cython.longlong
+    offset: cython.longlong
     addr: int | None = None
     proof: BinaryFarCallbackTargetProof8616 | None = None
-    raw_fact_count: int = 1
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 1
+    raw_fact_count: cython.longlong = 1
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 1
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Require verdict-specific counters and matching durable proof fields."""
         if type(self.status) is not BinaryFarCallbackTargetStatus8616:
             return False
@@ -142,11 +149,12 @@ class BinaryFarCallbackTargetResult8616:
             counts == (1, 1, 0, 0, 1)
             and self.proof is None
             and self.addr is not None
-            and self.addr == self.segment * 16 + self.offset
+            and operator.eq(self.addr, self.segment * 16 + self.offset)
         )
 
 
-def _loaded_dos_address_8616(project: object, segment: int, offset: int) -> int | None:
+@cython.ccall
+def _loaded_dos_address_8616(project: object, segment: cython.longlong, offset: cython.longlong) -> int | None:
     """Resolve a non-wrapping far pair inside the exact relocated MZ image."""
     main = cast(Any, project).loader.main_object
     if not isinstance(main, DOSMZ):
@@ -161,7 +169,7 @@ def _loaded_dos_address_8616(project: object, segment: int, offset: int) -> int 
     address = segment * 16 + offset
     if not (
         0 <= load_segment <= segment
-        and image_base == load_segment * 16
+        and operator.eq(image_base, load_segment * 16)
         and image_base <= address <= image_end
         and address <= 0xFFFFF
     ):
@@ -169,8 +177,10 @@ def _loaded_dos_address_8616(project: object, segment: int, offset: int) -> int 
     return address
 
 
-def _decode_instruction_8616(project: object, decoder: Cs, address: int, image_end: int) -> CsInsn | None:
+@cython.ccall
+def _decode_instruction_8616(project: object, decoder: Cs, address: cython.longlong, image_end: cython.longlong) -> CsInsn | None:
     """Decode one image-backed 16-bit instruction without crossing its end."""
+    instruction: object
     if address > image_end:
         return None
     byte_count = min(15, image_end - address + 1)
@@ -179,35 +189,37 @@ def _decode_instruction_8616(project: object, decoder: Cs, address: int, image_e
         instruction = next(decoder.disasm(bytes(data), address, count=1), None)
     except (AttributeError, KeyError, TypeError, ValueError, CsError):
         return None
-    if instruction is None or instruction.address != address or instruction.size < 1:
+    if instruction is None or operator.ne(instruction.address, address) or instruction.size < 1:
         return None
     if address + instruction.size - 1 > image_end:
         return None
     return instruction
 
 
-def _bp_frame_entry_8616(first: CsInsn, second: CsInsn) -> bool:
+@cython.ccall
+def _bp_frame_entry_8616(first: CsInsn, second: CsInsn) -> cython.bint:
     """Require a positive decoded compiler-style entry witness."""
-    if first.id != X86_INS_PUSH or second.id != X86_INS_MOV:
+    if operator.ne(first.id, X86_INS_PUSH) or operator.ne(second.id, X86_INS_MOV):
         return False
     push_operands = tuple(first.operands)
     mov_operands = tuple(second.operands)
     return (
         len(push_operands) == 1
-        and push_operands[0].type == X86_OP_REG
-        and push_operands[0].reg == X86_REG_BP
+        and operator.eq(push_operands[0].type, X86_OP_REG)
+        and operator.eq(push_operands[0].reg, X86_REG_BP)
         and len(mov_operands) == 2
-        and mov_operands[0].type == X86_OP_REG
-        and mov_operands[0].reg == X86_REG_BP
-        and mov_operands[1].type == X86_OP_REG
-        and mov_operands[1].reg == X86_REG_SP
+        and operator.eq(mov_operands[0].type, X86_OP_REG)
+        and operator.eq(mov_operands[0].reg, X86_REG_BP)
+        and operator.eq(mov_operands[1].type, X86_OP_REG)
+        and operator.eq(mov_operands[1].reg, X86_REG_SP)
     )
 
 
+@cython.ccall
 def _direct_jump_target_8616(instruction: CsInsn) -> int | None:
     """Retain only an immediate target from a decoded branch operand."""
     operands = tuple(instruction.operands)
-    if len(operands) != 1 or operands[0].type != X86_OP_IMM:
+    if len(operands) != 1 or operator.ne(operands[0].type, X86_OP_IMM):
         return None
     return int(operands[0].imm)
 
@@ -215,12 +227,13 @@ def _direct_jump_target_8616(instruction: CsInsn) -> int | None:
 def _bounded_decoded_instruction_8616(
     project: object,
     decoder: Cs,
-    address: int,
-    entry: int,
-    image_end: int,
-    occupied: dict[int, int],
+    address: cython.longlong,
+    entry: cython.longlong,
+    image_end: cython.longlong,
+    occupied: object,
 ) -> CsInsn | None:
     """Decode one in-function instruction without accepting overlapping paths."""
+    instruction: object
     if not (entry <= address < entry + _MAX_FUNCTION_BYTES_8616):
         return None
     instruction = _decode_instruction_8616(project, decoder, address, image_end)
@@ -230,7 +243,7 @@ def _bounded_decoded_instruction_8616(
     if instruction_end > entry + _MAX_FUNCTION_BYTES_8616:
         return None
     if any(
-        byte_addr in occupied and occupied[byte_addr] != address
+        byte_addr in occupied and operator.ne(occupied[byte_addr], address)
         for byte_addr in range(address, instruction_end)
     ):
         return None
@@ -239,33 +252,39 @@ def _bounded_decoded_instruction_8616(
     return instruction
 
 
+@cython.ccall
 def _decoded_successors_8616(
     instruction: CsInsn,
-) -> tuple[BinaryFarCallbackTargetStatus8616 | None, tuple[int, ...]]:
+) -> tuple[BinaryFarCallbackTargetStatus8616 | None, tuple[cython.longlong, ...]]:
     """Classify non-far exits and enumerate every local decoded successor."""
+    target: object
     if instruction.id in {X86_INS_RET, X86_INS_IRET}:
         return BinaryFarCallbackTargetStatus8616.NON_FAR_RETURN, ()
-    if instruction.id == X86_INS_HLT or instruction.group(CS_GRP_INT):
+    if operator.eq(instruction.id, X86_INS_HLT) or instruction.group(CS_GRP_INT):
         return BinaryFarCallbackTargetStatus8616.OPEN_DECODE, ()
     next_addr = instruction.address + instruction.size
     if instruction.group(CS_GRP_JUMP):
         target = _direct_jump_target_8616(instruction)
         if target is None:
             return BinaryFarCallbackTargetStatus8616.OPEN_DECODE, ()
-        if instruction.id == X86_INS_JMP:
+        if operator.eq(instruction.id, X86_INS_JMP):
             return None, (target,)
         return None, (target, next_addr)
     return None, (next_addr,)
 
 
+@cython.ccall
 def _closed_far_return_cfg_8616(
-    project: object, decoder: Cs, entry: int, image_end: int
-) -> tuple[BinaryFarCallbackTargetStatus8616, tuple[int, ...], tuple[int, ...]]:
+    project: object, decoder: Cs, entry: cython.longlong, image_end: cython.longlong
+) -> tuple[BinaryFarCallbackTargetStatus8616, tuple[cython.longlong, ...], tuple[cython.longlong, ...]]:
     """Follow every decoded local branch until only far returns terminate it."""
+    address: object
+    instruction: object
+    refusal: object
     pending = [entry]
-    decoded: dict[int, CsInsn] = {}
-    occupied: dict[int, int] = {}
-    far_returns: set[int] = set()
+    decoded: dict[cython.longlong, CsInsn] = {}
+    occupied: dict[cython.longlong, cython.longlong] = {}
+    far_returns: set[cython.longlong] = set()
     while pending:
         address = pending.pop()
         if address in decoded:
@@ -278,7 +297,7 @@ def _closed_far_return_cfg_8616(
         if instruction is None:
             return BinaryFarCallbackTargetStatus8616.OPEN_DECODE, (), tuple(sorted(decoded))
         decoded[address] = instruction
-        if instruction.id == X86_INS_RETF:
+        if operator.eq(instruction.id, X86_INS_RETF):
             far_returns.add(address)
             continue
         refusal, successors = _decoded_successors_8616(instruction)
@@ -290,11 +309,12 @@ def _closed_far_return_cfg_8616(
     return BinaryFarCallbackTargetStatus8616.PROVEN, tuple(sorted(far_returns)), tuple(sorted(decoded))
 
 
+@cython.ccall
 def prove_binary_far_callback_target_8616(
     project: object,
     *,
-    segment: int,
-    offset: int,
+    segment: cython.longlong,
+    offset: cython.longlong,
     parameter_fact: FunctionPointerParameterFact8616,
 ) -> BinaryFarCallbackTargetResult8616:
     """Prove one caller-supplied far Value names decoded DOS code of the callee ABI.
@@ -303,6 +323,9 @@ def prove_binary_far_callback_target_8616(
     on every reaching path. A closed decode here proves only target identity;
     it neither widens caller storage nor rewrites the C call.
     """
+    address: object
+    first: object
+    second: object
     if parameter_fact.pointer_width != 4:
         return BinaryFarCallbackTargetResult8616(
             BinaryFarCallbackTargetStatus8616.INVALID_POINTER_ABI, segment, offset

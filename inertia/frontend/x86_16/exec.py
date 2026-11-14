@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/runtime.
 
 Responsibility: dispatch decoded opcodes and register/memory operands for emulator execution.
@@ -5,6 +6,8 @@ Forbidden: decompiler output repair, alias/type ownership, or source-backed sema
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import sys
 from collections.abc import Callable
@@ -77,22 +80,22 @@ class _ExecEmulatorHooks(Protocol):
         """Read a segment register."""
         ...
 
-    def set_crn(self, n: int, value: int) -> None:
+    def set_crn(self, n: cython.longlong, value: cython.longlong) -> None:
         """Write a control register."""
         ...
 
-    def get_crn(self, n: int) -> int | VexValue:
+    def get_crn(self, n: cython.longlong) -> int | VexValue:
         """Read a concrete or lifted control-register value."""
         ...
 
 
-type OpcodeExecHandler = Callable[["ExecInstr"], None]
+OpcodeExecHandler = typing.TypeAliasType("OpcodeExecHandler", Callable[["ExecInstr"], None])
 
 
 class ExecInstr(X86Instruction):  # type: ignore[misc, unused-ignore]  # dynamic frontend base contract
     """Execute decoded frontend instructions through emulator register/memory hooks."""
 
-    def __init__(self, emu: _ExecEmulatorHooks, instr: InstrData | None = None, mode32: bool = False) -> None:
+    def __init__(self, emu: _ExecEmulatorHooks, instr: InstrData | None = None, mode32: cython.bint = False) -> None:
         """Initialize opcode dispatch state while preserving legacy MRO construction."""
         # The base instruction slot is typed as the full emulator; execution only
         # requires this narrower structural hook surface at the runtime boundary.
@@ -101,10 +104,11 @@ class ExecInstr(X86Instruction):  # type: ignore[misc, unused-ignore]  # dynamic
             self.instr = instr
             self.mode32 = mode32
             self.chsz_ad = False
-        self.instrfuncs: list[OpcodeExecHandler | None] = [None] * 0x200
+        self.instrfuncs: object = [None] * 0x200
 
-    def exec(self) -> bool:
+    def exec(self) -> cython.bint:
         """Dispatch the decoded opcode to its registered frontend runtime handler."""
+        handler: object
         opcode = self.instr.opcode
 
         if opcode >> 8 == 0x0F:
@@ -221,7 +225,7 @@ class ExecInstr(X86Instruction):  # type: ignore[misc, unused-ignore]  # dynamic
         """Return the effective memory address for the decoded ModR/M operand."""
         return self.calc_modrm()
 
-    def _resolved_rm_operand(self, width_bits: int) -> ResolvedMemoryOperand:
+    def _resolved_rm_operand(self, width_bits: cython.longlong) -> ResolvedMemoryOperand:
         seg, addr = self._resolved_rm_address()
         return resolve_linear_operand(
             self.emu,
@@ -236,7 +240,7 @@ class ExecInstr(X86Instruction):  # type: ignore[misc, unused-ignore]  # dynamic
         seg = self.select_segment()
         return seg, addr
 
-    def _resolved_moffs_operand(self, width_bits: int) -> ResolvedMemoryOperand:
+    def _resolved_moffs_operand(self, width_bits: cython.longlong) -> ResolvedMemoryOperand:
         self.instr.segment = sgreg_t.DS.value
         seg = self.select_segment()
         offset = self.instr.moffs
@@ -256,7 +260,7 @@ class ExecInstr(X86Instruction):  # type: ignore[misc, unused-ignore]  # dynamic
         """Read the segment register selected by the ModR/M register field."""
         return self.emu.get_segment(coerce_sgreg_t(self.instr.modrm.reg))
 
-    def set_crn(self, value: int) -> None:
+    def set_crn(self, value: cython.longlong) -> None:
         """Write the control register selected by the ModR/M register field."""
         print(f"set CR{self.instr.modrm.reg} = {value:x}")
         self.emu.set_crn(self.instr.modrm.reg, value)

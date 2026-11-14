@@ -140,3 +140,37 @@ def test_native_callback_must_not_reuse_revoked_scope(
     )
     result = prove_segment_effect_closure_8616(coverage, state)
     assert (result.failure is not None) is revoke_scope
+
+
+@pytest.mark.parametrize("mutation", ("native_bytes", "segment_state"))
+def test_same_traversal_closure_observations_reject_changed_inputs(mutation: str) -> None:
+    """An ambient traversal must not hide changed bytes or mutable segment facts."""
+    from inertia.ir.segment_call_preservation import declared_entry_dependency_traversal_scope_8616
+
+    project = SimpleNamespace(
+        arch=Arch86_16(),
+        loader=SimpleNamespace(memory=SimpleNamespace(load=_load_native_bytes_8616(_CALLER_CODE))),
+    )
+    artifact = IRFunctionArtifact(0x1000, (IRBlock(0x1000, instrs=(
+        IRInstr("CALL", None, (), addr=0x1000),
+        IRInstr("RET", None, (), addr=0x1003),
+    )),))
+    publish_function_ir_artifact_8616(project, artifact)
+    boundary = ExactFunctionRangeBoundary8616(
+        project, 0x1000, 4, frozenset({0x1000}), frozenset({0x1000, 0x1003}), (),
+        blocks=(_decoded_block_8616(0x1000, _CALLER_CODE, ((0x1000, 3), (0x1003, 1))),),
+    )
+    coverage = prove_ir_boundary_coverage_8616(project, boundary, artifact)
+    state = build_x86_16_segment_state_artifact(artifact)
+    with declared_entry_dependency_traversal_scope_8616():
+        retained = prove_segment_effect_closure_8616(coverage, state)
+        assert retained.complete
+        assert prove_segment_effect_closure_8616(coverage, state).complete
+        if mutation == "native_bytes":
+            project.loader.memory.load = _load_native_bytes_8616(_NO_RETURN_CODE)
+        else:
+            state.entry_states[0x1000].pop("ds")
+        after = prove_segment_effect_closure_8616(coverage, state)
+        assert not after.complete
+        assert after.failure_count > 0
+        assert not retained.complete

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bind an SSA block's CALL operand producer closure to its owned projection.
 
 Layer: Types/Lowering.
@@ -29,6 +30,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import replace
 from enum import StrEnum
@@ -49,6 +52,8 @@ from inertia.ir.ssa import (
     _version_key,
     build_x86_16_block_local_ssa,
 )
+import operator
+import builtins
 
 __all__ = [
     "CallProducerIntegrityFailure8616",
@@ -73,7 +78,8 @@ class CallProducerIntegrityFailure8616(StrEnum):
     PRODUCER_MISMATCH = "producer_mismatch"
 
 
-def ssa_value_modulo_version_8616(ssa_value: IRValue, source_value: IRValue) -> bool:
+@cython.ccall
+def ssa_value_modulo_version_8616(ssa_value: IRValue, source_value: IRValue) -> cython.bint:
     """Return whether one SSA value is the source value modulo its SSA version.
 
     ``IRValue`` equality compares every ``compare=True`` field, including the
@@ -87,24 +93,26 @@ def ssa_value_modulo_version_8616(ssa_value: IRValue, source_value: IRValue) -> 
     )
 
 
+@cython.ccall
 def _active_unary_matches_projection_8616(
-    actual: IRActiveUnary8616 | None,
-    expected: IRActiveUnary8616 | None,
-) -> bool:
+    actual: object,
+    expected: object,
+) -> cython.bint:
     """Bind the pending operation and its operand's otherwise equality-exempt provenance."""
     if actual is None or expected is None:
         return actual is expected
     return (
-        actual.op == expected.op
-        and actual.result_bits == expected.result_bits
+        operator.eq(actual.op, expected.op)
+        and operator.eq(actual.result_bits, expected.result_bits)
         and _value_matches_projection_8616(actual.operand, expected.operand)
     )
 
 
+@cython.ccall
 def _value_matches_projection_8616(
     ssa_value: IRValue | IRBinaryValue,
     projection_value: IRValue | IRBinaryValue,
-) -> bool:
+) -> cython.bint:
     """Return whether one value tree is exactly the projected counterpart.
 
     Unlike the CALL-site operand check this comparison is version-exact: both
@@ -116,8 +124,8 @@ def _value_matches_projection_8616(
     if isinstance(projection_value, IRBinaryValue):
         return bool(
             isinstance(ssa_value, IRBinaryValue)
-            and ssa_value.op == projection_value.op
-            and ssa_value.size == projection_value.size
+            and operator.eq(ssa_value.op, projection_value.op)
+            and operator.eq(ssa_value.size, projection_value.size)
             and _value_matches_projection_8616(ssa_value.lhs, projection_value.lhs)
             and _value_matches_projection_8616(ssa_value.rhs, projection_value.rhs)
         )
@@ -132,12 +140,12 @@ def _value_matches_projection_8616(
         index_bound
         and _active_unary_matches_projection_8616(ssa_value.active_unary, projection_value.active_unary)
         and ssa_value == projection_value
-        and ssa_value.source_tmp == projection_value.source_tmp
-        and ssa_value.memory_access_insn == projection_value.memory_access_insn
+        and operator.eq(ssa_value.source_tmp, projection_value.source_tmp)
+        and operator.eq(ssa_value.memory_access_insn, projection_value.memory_access_insn)
     )
 
 
-def _atom_matches_projection_8616(ssa_atom: IRAtom, projection_atom: IRAtom) -> bool:
+def _atom_matches_projection_8616(ssa_atom: IRAtom, projection_atom: IRAtom) -> cython.bint:
     """Return whether one argument atom matches its owned projection.
 
     The single permitted delta is the ``version`` field of ``IRAddress``
@@ -150,27 +158,27 @@ def _atom_matches_projection_8616(ssa_atom: IRAtom, projection_atom: IRAtom) -> 
     if isinstance(projection_atom, IRAddress):
         return bool(
             isinstance(ssa_atom, IRAddress)
-            and len(ssa_atom.base_values) == len(projection_atom.base_values)
-            and replace(ssa_atom, version=projection_atom.version) == projection_atom
+            and operator.eq(len(ssa_atom.base_values), len(projection_atom.base_values))
+            and operator.eq(replace(ssa_atom, version=projection_atom.version), projection_atom)
             and all(
                 _value_matches_projection_8616(ssa_base, projection_base)
-                for ssa_base, projection_base in zip(
+                for ssa_base, projection_base in builtins.iter(zip(
                     ssa_atom.base_values, projection_atom.base_values, strict=True
-                )
+                ))
             )
         )
     if isinstance(projection_atom, IRCondition):
         return bool(
             isinstance(ssa_atom, IRCondition)
-            and ssa_atom.op == projection_atom.op
-            and ssa_atom.expr == projection_atom.expr
-            and ssa_atom.width_bits == projection_atom.width_bits
-            and len(ssa_atom.args) == len(projection_atom.args)
+            and operator.eq(ssa_atom.op, projection_atom.op)
+            and operator.eq(ssa_atom.expr, projection_atom.expr)
+            and operator.eq(ssa_atom.width_bits, projection_atom.width_bits)
+            and operator.eq(len(ssa_atom.args), len(projection_atom.args))
             and all(
                 _atom_matches_projection_8616(ssa_arg, projection_arg)
-                for ssa_arg, projection_arg in zip(
+                for ssa_arg, projection_arg in builtins.iter(zip(
                     ssa_atom.args, projection_atom.args, strict=True
-                )
+                ))
             )
         )
     if isinstance(projection_atom, (IRValue, IRBinaryValue)):
@@ -180,7 +188,7 @@ def _atom_matches_projection_8616(ssa_atom: IRAtom, projection_atom: IRAtom) -> 
     return bool(ssa_atom == projection_atom)
 
 
-def _instr_matches_projection_8616(ssa_instr: IRInstr, projection_instr: IRInstr) -> bool:
+def _instr_matches_projection_8616(ssa_instr: IRInstr, projection_instr: IRInstr) -> cython.bint:
     """Return whether one SSA instruction is exactly the projected instruction.
 
     Identity, effect, and provenance metadata must be identical; ``dst`` and
@@ -194,22 +202,23 @@ def _instr_matches_projection_8616(ssa_instr: IRInstr, projection_instr: IRInstr
     )
     return bool(
         dst_bound
-        and ssa_instr.op == projection_instr.op
-        and ssa_instr.addr == projection_instr.addr
-        and ssa_instr.size == projection_instr.size
-        and ssa_instr.call_stack_effect == projection_instr.call_stack_effect
-        and ssa_instr.origin == projection_instr.origin
-        and len(ssa_instr.args) == len(projection_instr.args)
+        and operator.eq(ssa_instr.op, projection_instr.op)
+        and operator.eq(ssa_instr.addr, projection_instr.addr)
+        and operator.eq(ssa_instr.size, projection_instr.size)
+        and operator.eq(ssa_instr.call_stack_effect, projection_instr.call_stack_effect)
+        and operator.eq(ssa_instr.origin, projection_instr.origin)
+        and operator.eq(len(ssa_instr.args), len(projection_instr.args))
         and all(
             _atom_matches_projection_8616(ssa_arg, projection_arg)
-            for ssa_arg, projection_arg in zip(
+            for ssa_arg, projection_arg in builtins.iter(zip(
                 ssa_instr.args, projection_instr.args, strict=True
-            )
+            ))
         )
     )
 
 
-def _atom_use_values_8616(atom: IRAtom) -> list[IRValue]:
+@cython.ccall
+def _atom_use_values_8616(atom: IRAtom) -> object:
     """Collect every use-position scalar value inside one argument atom.
 
     Nested indexes, address bases and pending unary operands contribute their
@@ -217,6 +226,7 @@ def _atom_use_values_8616(atom: IRAtom) -> list[IRValue]:
     temporary use: its operation is checked by exact projection comparison,
     while its operand supplies the dependency that must be bound.
     """
+    node: object
     values: list[IRValue] = []
     pending: list[IRAtom] = [atom]
     while pending:
@@ -243,6 +253,7 @@ _ProducerLedger8616 = tuple[
 ]
 
 
+@cython.ccall
 def _producer_ledger_8616(
     projection: SSABlock,
 ) -> _ProducerLedger8616 | CallProducerIntegrityFailure8616:
@@ -254,7 +265,11 @@ def _producer_ledger_8616(
     ``bindings``. A duplicated producer identity on either axis means the
     projection cannot name a unique definition and is refused.
     """
-    tmp_producers: dict[int, int] = {}
+    destination: object
+    binding: object
+    index: object
+    instruction: object
+    tmp_producers: dict[cython.longlong, cython.longlong] = {}
     for index, instruction in enumerate(projection.instrs):
         destination = instruction.dst
         if destination is None or destination.source_tmp is None:
@@ -262,7 +277,7 @@ def _producer_ledger_8616(
         if destination.source_tmp in tmp_producers:
             return CallProducerIntegrityFailure8616.PRODUCER_AMBIGUOUS
         tmp_producers[destination.source_tmp] = index
-    versioned_defs: dict[tuple[tuple[str, str | None, int], int | None], int] = {}
+    versioned_defs: dict[tuple[tuple[str, str | None, cython.longlong], int | None], cython.longlong] = {}
     for binding in projection.bindings:
         key = (_version_key(binding.target), binding.version)
         if key in versioned_defs:
@@ -271,10 +286,11 @@ def _producer_ledger_8616(
     return tmp_producers, versioned_defs
 
 
+@cython.ccall
 def _producer_index_8616(
     value: IRValue,
-    tmp_producers: dict[int, int],
-    versioned_defs: dict[tuple[tuple[str, str | None, int], int | None], int],
+    tmp_producers: object,
+    versioned_defs: object,
 ) -> int | CallProducerIntegrityFailure8616 | None:
     """Resolve one use value to its in-block producer index, leaf, or refusal.
 
@@ -283,6 +299,7 @@ def _producer_index_8616(
     that resolves on neither axis has no producer anywhere — the operand's
     dependency cannot be bound, so the obligation refuses.
     """
+    producer: object
     if value.source_tmp is not None:
         producer = tmp_producers.get(value.source_tmp)
         return (
@@ -300,8 +317,8 @@ def _producer_index_8616(
 
 def _operand_closure_8616(
     projection: SSABlock,
-    call_index: int,
-) -> frozenset[int] | CallProducerIntegrityFailure8616:
+    call_index: cython.longlong,
+) -> object:
     """Collect the transitive producer indices feeding the CALL operands.
 
     The walk runs on the owned projection of the supplied source block —
@@ -310,16 +327,18 @@ def _operand_closure_8616(
     through their argument uses; unresolved ``TMP`` uses refuse rather than
     silently truncating the closure.
     """
+    producer: object
+    value: object
     ledger = _producer_ledger_8616(projection)
     if isinstance(ledger, CallProducerIntegrityFailure8616):
         return ledger
     tmp_producers, versioned_defs = ledger
-    closure: set[int] = set()
+    closure: set[cython.longlong] = set()
     seen: set[tuple[object, ...]] = set()
     pending = [
         value
-        for atom in projection.instrs[call_index].args
-        for value in _atom_use_values_8616(atom)
+        for atom in iter(projection.instrs[call_index].args)
+        for value in builtins.iter(_atom_use_values_8616(atom))
     ]
     while pending:
         value = pending.pop()
@@ -343,26 +362,27 @@ def _operand_closure_8616(
         closure.add(producer)
         pending.extend(
             use
-            for atom in projection.instrs[producer].args
-            for use in _atom_use_values_8616(atom)
+            for atom in iter(projection.instrs[producer].args)
+            for use in builtins.iter(_atom_use_values_8616(atom))
         )
     return frozenset(closure)
 
 
-def _bindings_match_projection_8616(ssa_block: SSABlock, projection: SSABlock) -> bool:
+def _bindings_match_projection_8616(ssa_block: SSABlock, projection: SSABlock) -> cython.bint:
     """Compare binding identities including equality-exempt value provenance."""
-    return len(ssa_block.bindings) == len(projection.bindings) and all(
-        actual.version == expected.version
-        and actual.instr_index == expected.instr_index
+    return operator.eq(len(ssa_block.bindings), len(projection.bindings)) and all(
+        operator.eq(actual.version, expected.version)
+        and operator.eq(actual.instr_index, expected.instr_index)
         and _value_matches_projection_8616(actual.target, expected.target)
-        for actual, expected in zip(ssa_block.bindings, projection.bindings, strict=True)
+        for actual, expected in builtins.iter(zip(ssa_block.bindings, projection.bindings, strict=True))
     )
 
 
+@cython.ccall
 def call_operand_producer_integrity_8616(
     ssa_block: SSABlock,
     source_block: IRBlock,
-    call_index: int,
+    call_index: cython.longlong,
 ) -> CallProducerIntegrityFailure8616 | None:
     """Bind the SSA block's CALL operand closure to the source projection.
 
@@ -375,6 +395,7 @@ def call_operand_producer_integrity_8616(
     corrupted operand versions cannot slip through a modulo-version
     provenance gate.
     """
+    index: object
     if (
         type(call_index) is not int
         or not 0 <= call_index < len(source_block.instrs)
@@ -383,9 +404,9 @@ def call_operand_producer_integrity_8616(
         return CallProducerIntegrityFailure8616.PROJECTION_MISMATCH
     projection = build_x86_16_block_local_ssa(source_block)
     if (
-        ssa_block.addr != projection.addr
-        or len(ssa_block.instrs) != len(projection.instrs)
-        or ssa_block.refusals != projection.refusals
+        operator.ne(ssa_block.addr, projection.addr)
+        or operator.ne(len(ssa_block.instrs), len(projection.instrs))
+        or operator.ne(ssa_block.refusals, projection.refusals)
         or not _bindings_match_projection_8616(ssa_block, projection)
     ):
         return CallProducerIntegrityFailure8616.PROJECTION_MISMATCH

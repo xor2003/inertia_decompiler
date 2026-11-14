@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed value-domain aliases and constructors for IR values.
 
 Layer: IR.
@@ -9,21 +10,24 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from .core import IRValue, MemSpace
 
 __all__ = ["IRValue", "MemSpace", "build_value_ir_8616"]
 
 
+@cython.ccall
 def build_value_ir_8616(
     *,
     space: MemSpace,
-    name: str | None = None,
-    offset: int = 0,
+    name: object = None,
+    offset: cython.longlong = 0,
     const: int | None = None,
-    size: int = 0,
+    size: cython.longlong = 0,
     version: int | None = None,
-    expr: tuple[str, ...] | None = None,
+    expr: object = None,
 ) -> IRValue:
     """Build a typed IR value without adding alias, widening, or lowering facts."""
     return IRValue(

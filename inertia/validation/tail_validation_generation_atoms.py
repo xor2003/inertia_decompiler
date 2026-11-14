@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Normalize mutable validation inputs into exact in-process atoms.
 
 Layer: Tail validation.
@@ -19,6 +20,12 @@ from enum import Enum, EnumType
 from itertools import pairwise
 from types import GetSetDescriptorType
 from typing import TYPE_CHECKING, cast
+import cython
+import typing
+import dataclasses
+import operator
+import builtins
+DataclassInstance = typing.TypeVar("DataclassInstance")
 
 if TYPE_CHECKING:
     from _typeshed import DataclassInstance
@@ -61,16 +68,18 @@ _THIRD_PARTY_SEMANTIC_FIELDS_8616 = (
 
 
 _SCALAR_LEAF_TYPES_8616 = (bool, int, str)
-_CONTEXT_REFERENCE_LIMIT_8616: int = 4096
+_CONTEXT_REFERENCE_LIMIT_8616: cython.longlong = 4096
 
 
+@cython.ccall
 def _qualified_type_name_8616(value_type: type[object]) -> str:
     """Return a stable qualified type label for one exact type."""
     return f"{value_type.__module__}.{value_type.__qualname__}"
 
 
+@cython.ccall
 def _ordered_item_atoms_8616(
-    items: list[ValidationGenerationAtom8616],
+    items: object,
 ) -> tuple[ValidationGenerationAtom8616, ...]:
     """Return item atoms in repr order without repr work for trivial sizes.
 
@@ -83,20 +92,22 @@ def _ordered_item_atoms_8616(
     return tuple(sorted(items, key=repr))
 
 
-def _standard_enum_repr_8616(value: object) -> bool:
+def _standard_enum_repr_8616(value: object) -> cython.bint:
     """Recognize native scalar enum repr without executing an attribute hook.
 
     Enum's standard repr reads its class, name, and value. Require plain
     instance fields, ordinary class lookup, and the exact builtin value repr;
     descriptors or user formatting keep the original repr-sort path.
     """
+    base: object
+    key: object
     value_type = type(value)
     if type(value_type) is not EnumType:
         return False
     methods: dict[str, object] = {}
     for base in value_type.__mro__:
         namespace = vars(base)
-        if any(name in namespace for name in ("_name_", "_value_", "__class__")) and base is not object:
+        if any(name in namespace for name in iter(("_name_", "_value_", "__class__"))) and base is not object:
             return False
         if "__dict__" in namespace and type(namespace["__dict__"]) is not GetSetDescriptorType:
             return False
@@ -113,10 +124,12 @@ def _standard_enum_repr_8616(value: object) -> bool:
     return methods.get("_value_repr_") is scalar_type.__repr__
 
 
-def _pure_mapping_atoms_8616(items: list[ValidationGenerationAtom8616]) -> bool:
+@cython.ccall
+def _pure_mapping_atoms_8616(items: object) -> cython.bint:
     """Require pure builtin repr without expanding repeated tuple descendants."""
+    item: object
     pending = list(items)
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     while pending:
         item = pending.pop()
         item_type = type(item)
@@ -133,14 +146,15 @@ def _pure_mapping_atoms_8616(items: list[ValidationGenerationAtom8616]) -> bool:
 
 
 def _ordered_mapping_atoms_8616(
-    items: list[ValidationGenerationAtom8616],
-) -> tuple[ValidationGenerationAtom8616, ...]:
+    items: object,
+) -> object:
     """Sort by exact disjoint repr prefixes, retaining native fallback otherwise.
 
     A mapping pair begins with its key repr and a comma delimiter. Distinct,
     non-overlapping prefixes decide order without rendering potentially huge
     shared value DAGs. Custom scalar repr keeps its original call order/count.
     """
+    item: object
     if len(items) <= 1 or not _pure_mapping_atoms_8616(items):
         return _ordered_item_atoms_8616(items)
     prefixes: list[tuple[str, ValidationGenerationAtom8616]] = []
@@ -149,12 +163,12 @@ def _ordered_mapping_atoms_8616(
             return _ordered_item_atoms_8616(items)
         prefixes.append(("(" + repr(item[0]) + ", ", item))
     prefixes.sort(key=lambda pair: pair[0])
-    if any(right[0].startswith(left[0]) for left, right in pairwise(prefixes)):
+    if any(right[0].startswith(left[0]) for left, right in builtins.iter(pairwise(prefixes))):
         return _ordered_item_atoms_8616(items)
-    return tuple(item for _prefix, item in prefixes)
+    return tuple(item for _prefix, item in iter(prefixes))
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class ValidationGenerationAtomBuilder8616:
     """Build exact atoms with bounded reuse of ancestry-dependent subgraphs.
 
@@ -164,56 +178,62 @@ class ValidationGenerationAtomBuilder8616:
     so mutations between builds are still observed exactly as before.
     """
 
-    _active: dict[int, object] = field(default_factory=dict, init=False)
-    _context_memo: dict[
-        int,
-        dict[frozenset[int], tuple[object, ValidationGenerationAtom8616, tuple[object, ...]]],
-    ] = field(default_factory=dict, init=False)
-    _context_references: int = field(default=0, init=False)
-    _memo: dict[int, tuple[object, ValidationGenerationAtom8616]] = field(
+    _active: object = field(default_factory=dict, init=False)
+    _context_memo: object = field(default_factory=dict, init=False)
+    _context_references: cython.longlong = field(default=0, init=False)
+    _memo: object = field(
         default_factory=dict,
         init=False,
     )
 
+    @cython.ccall
     def atom(self, value: object) -> ValidationGenerationAtom8616:
         """Normalize one value within this request-local shared-object graph."""
         self._begin_root()
         atom, _ = self._atom_with_cacheability(value)
         return atom
 
+    @cython.ccall
     def dynamic_field_atom(
         self,
         owner: object,
-        field_name: str,
+        field_name: object,
     ) -> ValidationGenerationAtom8616:
         """Read one dynamic angr/codegen field and normalize its value."""
         self._begin_root()
         atom, _ = self._dynamic_field_atom_with_cacheability(owner, field_name)
         return atom
 
+    @cython.ccall
     def _begin_root(self) -> None:
         """Discard cyclic snapshots between roots, where inputs can mutate."""
         if not self._active:
             self._context_memo.clear()
             self._context_references = 0
 
+    @cython.ccall
     def _dynamic_field_atom_with_cacheability(
         self,
         owner: object,
-        field_name: str,
-    ) -> tuple[ValidationGenerationAtom8616, bool]:
+        field_name: object,
+    ) -> object:
         """Return one field atom and whether it is independent of ancestry."""
+        value: object
         try:
             value = getattr(owner, field_name)
         except AttributeError:
             return ("missing", field_name), True
         return self._atom_with_cacheability(value)
 
+    @cython.ccall
     def _atom_with_cacheability(
         self,
         value: object,
-    ) -> tuple[ValidationGenerationAtom8616, bool]:
+    ) -> tuple[ValidationGenerationAtom8616, cython.bint]:
         """Return an atom plus proof that no ancestor cycle shaped it."""
+        cached: object
+        context_atom: object
+        contexts: object
         if value is None:
             return value, True
         value_type = type(value)
@@ -255,6 +275,7 @@ class ValidationGenerationAtomBuilder8616:
             self._remember_context_atom(value, atom)
         return atom, cacheable
 
+    @cython.ccall
     def _remember_context_atom(
         self, value: object, atom: ValidationGenerationAtom8616,
     ) -> None:
@@ -278,11 +299,14 @@ class ValidationGenerationAtomBuilder8616:
         )
         self._context_references += references
 
+    @cython.ccall
     def _dataclass_atom(
         self,
         value: object,
-    ) -> tuple[ValidationGenerationAtom8616, bool]:
+    ) -> tuple[ValidationGenerationAtom8616, cython.bint]:
         """Normalize one dataclass instance field-by-field."""
+        field_value: object
+        dataclass_field: object
         field_atoms: list[ValidationGenerationAtom8616] = []
         cacheable = True
         atom_with_cacheability = self._atom_with_cacheability
@@ -303,11 +327,14 @@ class ValidationGenerationAtomBuilder8616:
             tuple(field_atoms),
         ), cacheable
 
+    @cython.ccall
     def _mapping_atom(
         self,
         value: Mapping[object, object],
-    ) -> tuple[ValidationGenerationAtom8616, bool]:
+    ) -> tuple[ValidationGenerationAtom8616, cython.bint]:
         """Normalize one mapping with order-independent item atoms."""
+        item: object
+        key: object
         mapping_items: list[ValidationGenerationAtom8616] = []
         cacheable = True
         atom_with_cacheability = self._atom_with_cacheability
@@ -322,11 +349,13 @@ class ValidationGenerationAtomBuilder8616:
             _ordered_mapping_atoms_8616(mapping_items),
         ), cacheable
 
+    @cython.ccall
     def _set_atom(
         self,
         value: Set[object],
-    ) -> tuple[ValidationGenerationAtom8616, bool]:
+    ) -> tuple[ValidationGenerationAtom8616, cython.bint]:
         """Normalize one set with order-independent item atoms."""
+        item: object
         set_items: list[ValidationGenerationAtom8616] = []
         cacheable = True
         atom_with_cacheability = self._atom_with_cacheability
@@ -340,11 +369,13 @@ class ValidationGenerationAtomBuilder8616:
             _ordered_item_atoms_8616(set_items),
         ), cacheable
 
+    @cython.ccall
     def _sequence_atom(
         self,
         value: Sequence[object],
-    ) -> tuple[ValidationGenerationAtom8616, bool]:
+    ) -> tuple[ValidationGenerationAtom8616, cython.bint]:
         """Normalize one ordered sequence item-by-item."""
+        item: object
         sequence_items: list[ValidationGenerationAtom8616] = []
         cacheable = True
         atom_with_cacheability = self._atom_with_cacheability
@@ -358,11 +389,15 @@ class ValidationGenerationAtomBuilder8616:
             tuple(sequence_items),
         ), cacheable
 
+    @cython.ccall
     def _uncached_atom(
         self,
         value: object,
-    ) -> tuple[ValidationGenerationAtom8616, bool]:
+    ) -> object:
         """Normalize one non-active, non-memoized compound value."""
+        container_atom: object
+        field_value: object
+        field_name: object
         value_type = type(value)
         # Exact builtin containers are never dataclass instances, so identity
         # dispatch reproduces the general branch order below without adding
@@ -430,6 +465,7 @@ _EXACT_CONTAINER_ATOMS_8616 = cast(
 )
 
 
+@cython.ccall
 def build_validation_generation_atom_8616(
     value: object,
 ) -> ValidationGenerationAtom8616:
@@ -445,23 +481,25 @@ class _PureAtomComparison8616(Enum):
     NATIVE_REQUIRED = "native_required"
 
 
+@cython.ccall
 def _queue_tuple_comparisons_8616(
-    pending: list[tuple[ValidationGenerationAtom8616, ValidationGenerationAtom8616] | None],
-    left: tuple[ValidationGenerationAtom8616, ...],
-    right: tuple[ValidationGenerationAtom8616, ...],
+    pending: object,
+    left: object,
+    right: object,
 ) -> None:
     """Schedule common-prefix comparisons before checking unequal lengths.
 
     None is a work-item marker for unequal lengths, never an atom pair.
     A custom equality method in the common prefix must precede this mismatch.
     """
-    if len(left) != len(right):
+    if operator.ne(len(left), len(right)):
         pending.append(None)
     count = min(len(left), len(right))
     for index in range(count - 1, -1, -1):
         pending.append((left[index], right[index]))
 
 
+@cython.ccall
 def _compare_pure_generation_atoms_8616(left: ValidationGenerationAtom8616, right: ValidationGenerationAtom8616) -> _PureAtomComparison8616:
     """Compare native-pure prefixes without ever invoking a custom method.
 
@@ -475,8 +513,11 @@ def _compare_pure_generation_atoms_8616(left: ValidationGenerationAtom8616, righ
     contain themselves, and both roots pin every descendant throughout this
     call, preventing identity reuse. No comparison state survives the call.
     """
+    left_node: object
+    pair: object
+    right_node: object
     pending: list[tuple[ValidationGenerationAtom8616, ValidationGenerationAtom8616] | None] = [(left, right)]
-    seen: set[tuple[int, int]] = set()
+    seen: set[tuple[cython.longlong, cython.longlong]] = set()
     while pending:
         pair = pending.pop()
         # A length mismatch follows the common prefix in native tuple order.
@@ -501,13 +542,14 @@ def _compare_pure_generation_atoms_8616(left: ValidationGenerationAtom8616, righ
         right_native = right_node is None or right_type is bool or right_type is int or right_type is str
         if not left_native or not right_native:
             return _PureAtomComparison8616.NATIVE_REQUIRED
-        values_equal = left_node == right_node
+        values_equal = operator.eq(left_node, right_node)
         if not values_equal:
             return _PureAtomComparison8616.DIFFERENT
     return _PureAtomComparison8616.EQUAL
 
 
-def validation_generation_atoms_equal_8616(left: ValidationGenerationAtom8616, right: ValidationGenerationAtom8616) -> bool:
+@cython.ccall
+def validation_generation_atoms_equal_8616(left: ValidationGenerationAtom8616, right: ValidationGenerationAtom8616) -> cython.bint:
     """Keep root protocols and fall back before custom equality has executed."""
     if type(left) is not tuple or type(right) is not tuple:
         return left == right

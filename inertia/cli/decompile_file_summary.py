@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Emit file-level decompilation summaries for diagnostics and reporting.
 
 Layer: CLI/fallback/reporting.
@@ -5,29 +6,33 @@ Responsibility: print reporting-only file summaries without changing decompiler 
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable, Sequence
 from pathlib import Path, PureWindowsPath
 
 
-def _summary_comment(text: str) -> str:
+@cython.ccall
+def _summary_comment(text: object) -> str:
     return f"/* summary: {text} */"
 
 
+@cython.ccall
 def emit_file_decompilation_summary(
     project: object,
-    metadata: object | None,
+    metadata: object,
     *,
-    shown_total: int,
-    decompiled: int,
-    failed: int,
-    skipped_signature_labels: int,
-    same_family_retry_stops: int = 0,
+    shown_total: cython.longlong,
+    decompiled: cython.longlong,
+    failed: cython.longlong,
+    skipped_signature_labels: cython.longlong,
+    same_family_retry_stops: cython.longlong = 0,
     fallback_family_labels: Sequence[str] = (),
-    dead_setup_candidates: int = 0,
-    dead_setup_pruned: int = 0,
-    dead_setup_refused: int = 0,
-    dead_setup_escaped: int = 0,
+    dead_setup_candidates: cython.longlong = 0,
+    dead_setup_pruned: cython.longlong = 0,
+    dead_setup_refused: cython.longlong = 0,
+    dead_setup_escaped: cython.longlong = 0,
 ) -> None:
     """Print one reporting-only summary block for a decompilation run."""
     compiler_versions = _compiler_versions(project)
@@ -58,7 +63,10 @@ def emit_file_decompilation_summary(
     print(_summary_comment(f"shown={shown_total} decompiled={decompiled} asm_or_detail_fallback={failed}"))
 
 
-def _compiler_versions(project: object) -> list[str]:
+@cython.ccall
+def _compiler_versions(project: object) -> object:
+    raw: object
+    name: object
     # dynamic compatibility boundary: project carries optional reporting attributes.
     raw = getattr(project, "_inertia_signature_compiler_names", ())
     filtered: list[str] = []
@@ -70,14 +78,17 @@ def _compiler_versions(project: object) -> list[str]:
     return _stable_unique_sorted(filtered)
 
 
-def _signature_sources(project: object) -> list[str]:
+@cython.ccall
+def _signature_sources(project: object) -> object:
     values: list[str] = []
     # dynamic compatibility boundary: project carries optional reporting attributes.
     values.extend(_normalize_source_names(getattr(project, "_inertia_flair_sig_titles", ())))
     return _stable_unique_sorted(values)
 
 
-def _normalize_source_names(values: Iterable[object]) -> list[str]:
+@cython.ccall
+def _normalize_source_names(values: Iterable[object]) -> object:
+    value: object
     normalized: list[str] = []
     for value in values:
         text = str(value).strip()
@@ -94,7 +105,8 @@ def _normalize_source_names(values: Iterable[object]) -> list[str]:
     return normalized
 
 
-def _looks_like_filesystem_path(text: str) -> bool:
+@cython.ccall
+def _looks_like_filesystem_path(text: object) -> cython.bint:
     if text.startswith(("/", "\\")):
         return True
     if len(text) >= 3 and text[1] == ":" and text[2] in {"\\", "/"}:
@@ -102,7 +114,8 @@ def _looks_like_filesystem_path(text: str) -> bool:
     return "\\" in text
 
 
-def _stable_unique_sorted(values: Iterable[str]) -> list[str]:
+def _stable_unique_sorted(values: Iterable[str]) -> object:
+    value: object
     deduped: dict[str, str] = {}
     for value in values:
         text = str(value).strip()
@@ -111,4 +124,4 @@ def _stable_unique_sorted(values: Iterable[str]) -> list[str]:
         key = text.casefold()
         if key not in deduped or text < deduped[key]:
             deduped[key] = text
-    return sorted(deduped.values(), key=lambda item: (item.casefold(), item))
+    return sorted(tuple(deduped.values()), key=lambda item: (item.casefold(), item))

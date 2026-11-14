@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Build structured-C expressions for Widening-proven stack subviews.
 
 Layer: Widening.
@@ -15,6 +16,8 @@ effect in the consumed Widening proof; all other side effects remain unchanged.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -26,11 +29,13 @@ from angr.sim_type import SimType, SimTypeChar, SimTypeLong, SimTypeShort
 from inertia.lowering.c_ast_utils import _clone_c_ast_tree_8616
 
 from .stack_subview_proof import StackObjectViewProof8616
+import dataclasses
 
 
-def _unsigned_scalar_type_8616(size: int) -> SimType | None:
+@cython.ccall
+def _unsigned_scalar_type_8616(size: cython.longlong) -> SimType | None:
     """Return the exact supported unsigned scalar type for a byte width."""
-    scalar_types: dict[int, SimType] = {
+    scalar_types: dict[cython.longlong, SimType] = {
         1: SimTypeChar(signed=False),
         2: SimTypeShort(signed=False),
         4: SimTypeLong(signed=False),
@@ -38,10 +43,12 @@ def _unsigned_scalar_type_8616(size: int) -> SimType | None:
     return scalar_types.get(size)
 
 
+@cython.ccall
 def _matching_view_type_8616(proof: StackObjectViewProof8616) -> SimType | None:
     """Keep an existing scalar view type only when its width is exact."""
+    expected: object
     view_type = proof.view.variable_type
-    expected_types: dict[int, type[SimType]] = {
+    expected_types: dict[cython.longlong, type[SimType]] = {
         1: SimTypeChar,
         2: SimTypeShort,
         4: SimTypeLong,
@@ -50,8 +57,9 @@ def _matching_view_type_8616(proof: StackObjectViewProof8616) -> SimType | None:
     return view_type if expected is not None and isinstance(view_type, expected) else None
 
 
+@cython.ccall
 def scalar_subview_proof_8616(
-    proof: StackObjectViewProof8616 | None,
+    proof: object,
 ) -> StackObjectViewProof8616 | None:
     """Accept one strict scalar subrange of a supported scalar owner."""
     if proof is None or proof.owner_size not in {2, 4} or proof.view_size not in {1, 2}:
@@ -71,21 +79,21 @@ class StackSubviewRhsEffectKind8616(StrEnum):
     UNSUPPORTED = "unsupported"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackSubviewRhsEffect8616:
     """Structured RHS classification plus exact callsites requiring proof."""
 
     kind: StackSubviewRhsEffectKind8616
-    callsite_addrs: tuple[int, ...] = ()
+    callsite_addrs: tuple[cython.longlong, ...] = ()
 
 
 def _combine_rhs_effects_8616(
-    effects: tuple[StackSubviewRhsEffect8616, ...],
+    effects: object,
 ) -> StackSubviewRhsEffect8616:
     """Combine child evaluations without losing exact callsite identity."""
-    if any(effect.kind is StackSubviewRhsEffectKind8616.UNSUPPORTED for effect in effects):
+    if any(effect.kind is StackSubviewRhsEffectKind8616.UNSUPPORTED for effect in iter(effects)):
         return StackSubviewRhsEffect8616(StackSubviewRhsEffectKind8616.UNSUPPORTED)
-    callsites = tuple(addr for effect in effects for addr in effect.callsite_addrs)
+    callsites = tuple(addr for effect in iter(effects) for addr in iter(effect.callsite_addrs))
     kind = (
         StackSubviewRhsEffectKind8616.OWNER_PRESERVING_CALLS
         if callsites
@@ -113,19 +121,21 @@ def classify_subview_rhs_8616(node: object) -> StackSubviewRhsEffect8616:
         if isinstance(node.callee_target, structured_c.CExpression):
             children = (node.callee_target, *children)
         combined = _combine_rhs_effects_8616(
-            tuple(classify_subview_rhs_8616(child) for child in children)
+            tuple(classify_subview_rhs_8616(child) for child in iter(children))
         )
         if combined.kind is StackSubviewRhsEffectKind8616.UNSUPPORTED:
             return combined
         return StackSubviewRhsEffect8616(
             StackSubviewRhsEffectKind8616.OWNER_PRESERVING_CALLS,
-            (*combined.callsite_addrs, callsite_addr),
+            tuple(combined.callsite_addrs) + (callsite_addr,),
         )
     return StackSubviewRhsEffect8616(StackSubviewRhsEffectKind8616.UNSUPPORTED)
 
 
-def _expression_type_or_width_8616(expr: structured_c.CExpression, size: int) -> SimType:
+@cython.ccall
+def _expression_type_or_width_8616(expr: structured_c.CExpression, size: cython.longlong) -> SimType:
     """Return a concrete boundary type for an optionally untyped expression."""
+    fallback: object
     expr_type = expr.type
     fallback = _unsigned_scalar_type_8616(size)
     if fallback is None:
@@ -133,11 +143,14 @@ def _expression_type_or_width_8616(expr: structured_c.CExpression, size: int) ->
     return expr_type if isinstance(expr_type, SimType) else fallback
 
 
+@cython.ccall
 def make_scalar_subview_read_expr_8616(
     codegen: object,
     proof: StackObjectViewProof8616,
 ) -> structured_c.CExpression:
     """Project one proven scalar rvalue from its unsigned containing owner."""
+    owner_type: object
+    view_type: object
     owner_type = _unsigned_scalar_type_8616(proof.owner_size)
     if owner_type is None:
         raise ValueError(f"unsupported scalar stack owner width {proof.owner_size}")
@@ -169,12 +182,14 @@ def make_scalar_subview_read_expr_8616(
     return value
 
 
+@cython.ccall
 def make_scalar_subview_write_assignment_8616(
     codegen: object,
     assignment: structured_c.CAssignment,
     proof: StackObjectViewProof8616,
 ) -> structured_c.CAssignment:
     """Project one proven scalar-view write as a containing-owner update."""
+    owner_type: object
     owner_type = _unsigned_scalar_type_8616(proof.owner_size)
     if owner_type is None:
         raise ValueError(f"unsupported scalar stack owner width {proof.owner_size}")

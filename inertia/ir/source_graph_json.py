@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Byte-exact JSON emission for already validated source-graph payloads.
 
 Layer: IR.
@@ -10,12 +11,14 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import cython
 
 import json
 from collections.abc import Callable
 from typing import cast
 
 
+@cython.ccall
 def _load_encoder_8616() -> Callable[[object], bytes] | None:
     """Use angr's optional CPython codec without hiding a broken installation."""
     try:
@@ -31,7 +34,8 @@ def _load_encoder_8616() -> Callable[[object], bytes] | None:
 _encode_json = _load_encoder_8616()
 
 
-def canonical_json_dumps_8616(payload: dict[str, object]) -> str:
+@cython.ccall
+def canonical_json_dumps_8616(payload: object) -> object:
     """Emit the validated graph exactly as compact, sorted stdlib JSON.
 
     UTF-8 text and DEL have different escaping in the accelerator. Accepted

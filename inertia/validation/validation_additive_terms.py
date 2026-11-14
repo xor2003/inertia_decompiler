@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Flatten additive validation expressions without losing typed value views.
 
 Layer: Validation.
@@ -10,16 +11,19 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CTypeCast
 
 from inertia.lowering.semantic_cast import CSemanticCast8616
 
 
+@cython.ccall
 def _strip_additive_casts_8616(
     node: object,
     *,
-    preserve_semantic_casts: bool,
+    preserve_semantic_casts: cython.bint,
 ) -> object:
     """Strip cast wrappers according to the requested validation policy."""
     while isinstance(node, CTypeCast) and not (
@@ -29,12 +33,13 @@ def _strip_additive_casts_8616(
     return node
 
 
+@cython.ccall
 def flatten_additive_terms_8616(
     node: object,
-    sign: int = 1,
+    sign: cython.longlong = 1,
     *,
-    preserve_semantic_casts: bool = False,
-) -> tuple[tuple[int, object], ...]:
+    preserve_semantic_casts: cython.bint = False,
+) -> object:
     """Flatten additive terms while retaining typed value views when requested."""
     node = _strip_additive_casts_8616(
         node,

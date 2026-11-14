@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify exact paired callee-saved PUSH/POP instruction evidence.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 from collections.abc import Iterable, Set
@@ -17,37 +20,39 @@ from enum import Enum
 from typing import Protocol, cast
 
 from capstone.x86_const import X86_INS_CALL, X86_INS_POP, X86_INS_PUSH, X86_INS_RET, X86_OP_REG
+import dataclasses
+import operator
 
 
 class _CapstoneOperand8616(Protocol):
     """Capstone operand fields consumed by frame-pair classification."""
 
-    type: int
-    reg: int
+    type: cython.longlong
+    reg: cython.longlong
 
 
 class _CapstoneInstruction8616(Protocol):
     """Capstone instruction fields consumed by frame-pair classification."""
 
-    address: int
-    id: int
-    operands: tuple[_CapstoneOperand8616, ...]
+    address: cython.longlong
+    id: cython.longlong
+    operands: object
 
-    def reg_name(self, reg_id: int) -> str:
+    def reg_name(self, reg_id: cython.longlong) -> object:
         """Return the architecture register name for one Capstone id."""
         ...
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CalleeSavedFramePair8616:
     """Pair one exact frame PUSH with its epilogue POP."""
 
-    register_name: str
-    push_addr: int
-    pop_addr: int
+    register_name: object
+    push_addr: cython.longlong
+    pop_addr: cython.longlong
 
     @property
-    def instruction_addresses(self) -> frozenset[int]:
+    def instruction_addresses(self) -> frozenset[cython.longlong]:
         """Return both machine instruction addresses in the pair."""
         return frozenset((self.push_addr, self.pop_addr))
 
@@ -74,16 +79,16 @@ class CalleeSavedFramePairSemantics8616(Enum):
     RESTORED_BEFORE_UPDATE = "restored_before_update"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CalleeSavedFramePruneFact8616:
     """Describe one AST assignment pruned through an exact PUSH/POP pair."""
 
-    function_addr: int
-    register_name: str
-    push_addr: int
-    pop_addr: int
-    instruction_addr: int
-    carrier_ordinal: int
+    function_addr: cython.longlong
+    register_name: object
+    push_addr: cython.longlong
+    pop_addr: cython.longlong
+    instruction_addr: cython.longlong
+    carrier_ordinal: cython.longlong
     instruction_role: CalleeSavedFrameInstructionRole8616
     carrier_kind: CalleeSavedFrameCarrierKind8616
     stack_displacement: int | None
@@ -93,16 +98,16 @@ class CalleeSavedFramePruneFact8616:
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CalleeSavedFramePruneRecord8616:
     """Closed evidence census for callee-saved frame-carrier pruning."""
 
-    evidence: tuple[CalleeSavedFramePruneFact8616, ...]
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    evidence: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @classmethod
     def closed(
@@ -122,15 +127,15 @@ class CalleeSavedFramePruneRecord8616:
         )
 
     @property
-    def closes_evidence(self) -> bool:
+    def closes_evidence(self) -> cython.bint:
         """Return whether every classified fact was materialized without loss."""
         count = len(self.evidence)
         return bool(
             count > 0
-            and self.raw_fact_count == count
-            and self.normalized_fact_count == count
-            and self.classified_fact_count == count
-            and self.materialized_count == count
+            and operator.eq(self.raw_fact_count, count)
+            and operator.eq(self.normalized_fact_count, count)
+            and operator.eq(self.classified_fact_count, count)
+            and operator.eq(self.materialized_count, count)
             and self.failure_count == 0
         )
 
@@ -141,7 +146,7 @@ class CalleeSavedFramePruneRecord8616:
         """Return exact pruned carriers visible as segmented stack writes."""
         return tuple(
             fact
-            for fact in self.evidence
+            for fact in iter(self.evidence)
             if fact.carrier_kind is CalleeSavedFrameCarrierKind8616.SEGMENTED_STACK_WRITE
         )
 
@@ -150,7 +155,9 @@ class CalleeSavedFramePruneRecord8616:
         self,
     ) -> tuple[CalleeSavedFramePruneFact8616, ...]:
         """Return one preferred store fact for each exact frame PUSH pair."""
-        stores: dict[tuple[int, int, int, str], CalleeSavedFramePruneFact8616] = {}
+        previous: object
+        fact: object
+        stores: dict[tuple[cython.longlong, cython.longlong, cython.longlong, str], CalleeSavedFramePruneFact8616] = {}
         for fact in self.evidence:
             if fact.carrier_kind not in {
                 CalleeSavedFrameCarrierKind8616.SEGMENTED_STACK_WRITE,
@@ -173,14 +180,15 @@ class CalleeSavedFramePruneRecord8616:
         return tuple(stores.values())
 
 
-def _decoded_register_name_8616(instruction: object, instruction_id: int) -> str | None:
+@cython.ccall
+def _decoded_register_name_8616(instruction: object, instruction_id: cython.longlong) -> object:
     """Return one decoded register operand at the Capstone boundary."""
     instruction_surface = cast(_CapstoneInstruction8616, instruction)
     try:
-        if instruction_surface.id != instruction_id:
+        if operator.ne(instruction_surface.id, instruction_id):
             return None
         operand = instruction_surface.operands[0]
-        if operand.type != X86_OP_REG:
+        if operator.ne(operand.type, X86_OP_REG):
             return None
         register_name = instruction_surface.reg_name(operand.reg)
     except (AttributeError, IndexError, TypeError):
@@ -199,10 +207,12 @@ def callee_saved_frame_pairs_8616(
     a callee-saved frame restoration merely because the register is otherwise
     eligible for preservation.
     """
-    normalized_saved = frozenset(name.lower() for name in saved_registers)
-    pending_pushes: dict[str, int] = {}
+    instruction: object
+    instruction_index: object
+    normalized_saved = frozenset(name.lower() for name in iter(saved_registers))
+    pending_pushes: dict[str, cython.longlong] = {}
     pairs: list[CalleeSavedFramePair8616] = []
-    seen_addresses: set[tuple[int, int]] = set()
+    seen_addresses: set[tuple[cython.longlong, cython.longlong]] = set()
     decoded_instructions = tuple(instructions)
     for instruction_index, instruction in enumerate(decoded_instructions):
         instruction_surface = cast(_CapstoneInstruction8616, instruction)
@@ -237,15 +247,17 @@ def callee_saved_frame_pairs_8616(
     return tuple(sorted(pairs, key=lambda pair: (pair.push_addr, pair.pop_addr, pair.register_name)))
 
 
+@cython.ccall
 def _track_saved_push_8616(
-    instruction_index: int,
+    instruction_index: cython.longlong,
     instruction_surface: _CapstoneInstruction8616,
-    address: int,
-    decoded_instructions: tuple[object, ...],
-    normalized_saved: frozenset[str],
-    pending_pushes: dict[str, int],
+    address: cython.longlong,
+    decoded_instructions: object,
+    normalized_saved: object,
+    pending_pushes: object,
 ) -> None:
     """Record one saved-register PUSH not immediately consumed by a CALL."""
+    register_name: object
     register_name = _decoded_register_name_8616(instruction_surface, X86_INS_PUSH)
     if register_name is None or register_name not in normalized_saved:
         return
@@ -260,14 +272,17 @@ def _track_saved_push_8616(
         pending_pushes.setdefault(register_name, address)
 
 
+@cython.ccall
 def _match_saved_pop_8616(
     instruction_surface: _CapstoneInstruction8616,
-    address: int,
-    normalized_saved: frozenset[str],
-    pending_pushes: dict[str, int],
-    pairs: list[CalleeSavedFramePair8616],
+    address: cython.longlong,
+    normalized_saved: object,
+    pending_pushes: object,
+    pairs: object,
 ) -> None:
     """Pair one saved-register POP with its pending PUSH."""
+    push_addr: object
+    register_name: object
     register_name = _decoded_register_name_8616(instruction_surface, X86_INS_POP)
     if register_name is None or register_name not in normalized_saved:
         return

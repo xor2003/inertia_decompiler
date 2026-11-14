@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed contracts for postprocess validation and recovery policy.
 
 Layer: Rewrite/Postprocess cleanup.
@@ -9,6 +10,8 @@ flow, or facts from rendered text, COD, source, or CLI/reporting evidence here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable, Mapping, MutableMapping
 from dataclasses import dataclass
@@ -16,6 +19,7 @@ from enum import Enum
 from typing import Self
 
 from inertia.structuring.guard_decisions import VoidTailCallGuardDecision8616
+import dataclasses
 
 __all__ = [
     "CfgReturnExprDeltaRefusal8616",
@@ -87,10 +91,14 @@ class PostprocessValidationBlockingReason8616(Enum):
         return None
 
 
+@cython.ccall
 def postprocess_validation_blocking_reasons_8616(
     validation: Mapping[str, object],
 ) -> tuple[PostprocessValidationBlockingReason8616, ...]:
     """Read unique typed blocking reasons from one validation result."""
+    raw_reasons: object
+    reason: object
+    raw: object
     raw_reasons = validation.get("postprocess_validation_blocking_reasons")
     if raw_reasons is None:
         return ()
@@ -117,7 +125,7 @@ def record_postprocess_validation_blocking_reason_8616(
     if reason not in reasons:
         reasons.append(reason)
     validation["postprocess_validation_blocking_reasons"] = tuple(
-        item.value for item in reasons
+        item.value for item in iter(reasons)
     )
 
 
@@ -171,16 +179,16 @@ class TerminalStackArgDecision8616(Enum):
     FALLBACK = "fallback"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PostprocessFunctionComplexity8616:
     """Bounded function-size facts used by postprocess validation policy."""
 
-    block_count: int = 0
-    byte_count: int = 0
+    block_count: cython.longlong = 0
+    byte_count: cython.longlong = 0
     source: str = "missing"
 
     @property
-    def is_expensive_for_local_validation(self) -> bool:
+    def is_expensive_for_local_validation(self) -> cython.bint:
         """Return whether bounded per-pass validation exceeds the local budget."""
         return bool(
             self.block_count >= 40
@@ -189,11 +197,11 @@ class PostprocessFunctionComplexity8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectGlobalSymbolRef8616:
     """Describe one direct global symbol projection used by postprocess."""
 
-    name: str
-    relative_disp: int
-    width: int
-    max_relative_disp: int
+    name: object
+    relative_disp: cython.longlong
+    width: cython.longlong
+    max_relative_disp: cython.longlong

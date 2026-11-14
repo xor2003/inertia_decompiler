@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Retain exact-byte typed condition evidence on function IR artifacts.
 
 Layer: IR.
@@ -8,6 +9,8 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -18,8 +21,11 @@ from .condition_cache_relift import (
 )
 from .condition_ir import ConditionIR, ConditionRegisterBindingIR, ConditionSource
 from .core import IRBinaryValue, IRBlock, IRValue
+import dataclasses
+import operator
 
 
+@cython.ccall
 def _typed_value_data_8616(value: object) -> object:
     """Return deterministic diagnostic data without parsing rendered text."""
     if isinstance(value, (IRValue, IRBinaryValue)):
@@ -30,12 +36,13 @@ def _typed_value_data_8616(value: object) -> object:
             "value": _typed_value_data_8616(value.value),
         }
     if isinstance(value, (tuple, list)):
-        return [_typed_value_data_8616(item) for item in value]
+        return [_typed_value_data_8616(item) for item in iter(value)]
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
     return {"unsupported_boundary_type": type(value).__name__}
 
 
+@cython.ccall
 def _condition_data_8616(condition: ConditionIR) -> dict[str, object]:
     """Serialize one owned typed condition for artifact diagnostics."""
     return {
@@ -55,11 +62,12 @@ def _condition_data_8616(condition: ConditionIR) -> dict[str, object]:
         ),
         "register_bindings": [
             _typed_value_data_8616(binding)
-            for binding in condition.register_bindings
+            for binding in iter(condition.register_bindings)
         ],
     }
 
 
+@cython.ccall
 def _condition_source_data_8616(source: ConditionSource) -> dict[str, object]:
     """Serialize one pending typed condition source without dynamic access."""
     return {
@@ -76,60 +84,59 @@ def _condition_source_data_8616(source: ConditionSource) -> dict[str, object]:
         "bind_operand_at_jcc": source.bind_operand_at_jcc,
         "register_bindings": [
             _typed_value_data_8616(binding)
-            for binding in source.register_bindings
+            for binding in iter(source.register_bindings)
         ],
     }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRFunctionConditionArtifact8616:
     """Closed exact condition projection for one normalized IR function."""
 
-    function_addr: int
-    block_ranges: tuple[ConditionReliftBlock8616, ...]
-    expected_condition_blocks: tuple[int, ...]
+    function_addr: cython.longlong
+    block_ranges: object
+    expected_condition_blocks: object
     source: ConditionCacheReliftArtifact8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every normalized conditional owner has evidence."""
-        block_addrs = tuple(block.address for block in self.block_ranges)
+        block_addrs = tuple(block.address for block in iter(self.block_ranges))
         condition_addrs = tuple(
-            address for address, _items in self.source.conditions_by_block
+            address for address, _items in iter(self.source.conditions_by_block)
         )
         materialized = {
             address
-            for address, conditions in self.source.conditions_by_block
+            for address, conditions in iter(self.source.conditions_by_block)
             if conditions
         }
         expected = set(self.expected_condition_blocks)
         return bool(
             self.function_addr >= 0
-            and self.block_ranges == tuple(sorted(self.block_ranges))
-            and len(block_addrs) == len(set(block_addrs))
-            and all(block.size > 0 for block in self.block_ranges)
-            and self.expected_condition_blocks
-            == tuple(sorted(set(self.expected_condition_blocks)))
+            and operator.eq(self.block_ranges, tuple(sorted(self.block_ranges)))
+            and operator.eq(len(block_addrs), len(set(block_addrs)))
+            and all(block.size > 0 for block in iter(self.block_ranges))
+            and operator.eq(self.expected_condition_blocks, tuple(sorted(tuple(set(self.expected_condition_blocks)))))
             and expected <= set(block_addrs)
             and condition_addrs == block_addrs
             and self.source.failures == ()
             and self.source.stats.complete
-            and self.source.stats.raw_fact_count == len(expected)
-            and self.source.stats.materialized_count == len(expected)
+            and operator.eq(self.source.stats.raw_fact_count, len(expected))
+            and operator.eq(self.source.stats.materialized_count, len(expected))
             and expected == materialized
             and all(
-                condition.block_addr == address
-                for address, conditions in self.source.conditions_by_block
-                for condition in conditions
+                operator.eq(condition.block_addr, address)
+                for address, conditions in iter(self.source.conditions_by_block)
+                for condition in iter(conditions)
             )
         )
 
-    def conditions_for_block(self, block_addr: int) -> tuple[ConditionIR, ...]:
+    def conditions_for_block(self, block_addr: cython.longlong) -> object:
         """Return exact typed conditions owned by one canonical block."""
         return next(
             (
                 conditions
-                for address, conditions in self.source.conditions_by_block
+                for address, conditions in iter(self.source.conditions_by_block)
                 if address == block_addr
             ),
             (),
@@ -154,7 +161,7 @@ class IRFunctionConditionArtifact8616:
             "function_addr": self.function_addr,
             "block_ranges": [
                 {"address": block.address, "size": block.size}
-                for block in self.block_ranges
+                for block in iter(self.block_ranges)
             ],
             "expected_condition_blocks": list(self.expected_condition_blocks),
             "conditions_by_block": [
@@ -162,17 +169,17 @@ class IRFunctionConditionArtifact8616:
                     "block_addr": address,
                     "conditions": [
                         _condition_data_8616(condition)
-                        for condition in conditions
+                        for condition in iter(conditions)
                     ],
                 }
-                for address, conditions in self.source.conditions_by_block
+                for address, conditions in iter(self.source.conditions_by_block)
             ],
             "pending_sources_by_addr": [
                 {
                     "address": address,
                     "source": _condition_source_data_8616(source),
                 }
-                for address, source in self.source.pending_sources_by_addr
+                for address, source in iter(self.source.pending_sources_by_addr)
             ],
             "failures": [
                 {
@@ -180,7 +187,7 @@ class IRFunctionConditionArtifact8616:
                     "reason": failure.reason.value,
                     "detail": failure.detail,
                 }
-                for failure in self.source.failures
+                for failure in iter(self.source.failures)
             ],
             "stats": {
                 "raw_fact_count": stats.raw_fact_count,
@@ -194,12 +201,16 @@ class IRFunctionConditionArtifact8616:
 
 
 def _normalized_relift_blocks_8616(
-    raw_blocks: tuple[ConditionReliftBlock8616, ...],
-    blocks: tuple[IRBlock, ...],
+    raw_blocks: object,
+    blocks: object,
 ) -> tuple[ConditionReliftBlock8616, ...]:
     """Clip overlapping raw byte ranges to canonical IR block ownership."""
-    raw_by_addr = {block.address: block for block in raw_blocks}
-    ordered_addrs = tuple(sorted(block.addr for block in blocks))
+    next_addr: object
+    raw: object
+    address: object
+    index: object
+    raw_by_addr = {block.address: block for block in iter(raw_blocks)}
+    ordered_addrs = tuple(sorted(block.addr for block in iter(blocks)))
     normalized: list[ConditionReliftBlock8616] = []
     for index, address in enumerate(ordered_addrs):
         raw = raw_by_addr.get(address)
@@ -220,19 +231,20 @@ def _normalized_relift_blocks_8616(
 
 def build_ir_function_condition_artifact_8616(
     project: object,
-    function_addr: int,
-    raw_blocks: tuple[ConditionReliftBlock8616, ...],
-    blocks: tuple[IRBlock, ...],
+    function_addr: cython.longlong,
+    raw_blocks: object,
+    blocks: object,
     captured_source: ConditionCacheReliftArtifact8616 | None = None,
 ) -> IRFunctionConditionArtifact8616 | None:
     """Build isolated typed conditions, reusing only a complete lift capture."""
+    source: object
     normalized = _normalized_relift_blocks_8616(raw_blocks, blocks)
     expected = tuple(
-        sorted(block.addr for block in blocks if len(block.successor_addrs) > 1)
+        sorted(block.addr for block in iter(blocks) if len(block.successor_addrs) > 1)
     )
-    block_addresses = tuple(block.address for block in normalized)
+    block_addresses = tuple(block.address for block in iter(normalized))
     captured_addresses = (
-        tuple(address for address, _conditions in captured_source.conditions_by_block)
+        tuple(address for address, _conditions in iter(captured_source.conditions_by_block))
         if captured_source is not None
         else ()
     )

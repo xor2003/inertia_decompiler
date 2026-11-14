@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Validate final structured branch predicates against exact ConditionIR facts.
 
 Layer: Validation.
@@ -10,6 +11,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -67,6 +70,9 @@ from .validation_condition_identity import (
 )
 from .validation_condition_precision import condition_precision_evidence_8616, condition_precision_token_8616
 from .validation_terminal_wide_conditions import TerminalWideValidation8616, validate_terminal_wide_condition_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "BranchConditionIssue8616",
@@ -87,19 +93,19 @@ class BranchConditionIssueKind8616(StrEnum):
     WIDE_PROOF_MISMATCH = "wide-proof-mismatch"
 
 
-@dataclass(frozen=True, order=True, slots=True)
+@dataclasses.dataclass(frozen=True, order=True, )
 class BranchConditionIssue8616:
     """One exact JCC whose final predicate is not uniquely evidence-backed."""
 
     kind: BranchConditionIssueKind8616
-    jcc_addr: int
-    match_count: int = 0
-    expected: str | None = None
-    actual: str | None = None
+    jcc_addr: cython.longlong
+    match_count: cython.longlong = 0
+    expected: object = None
+    actual: object = None
     precision_candidates: tuple[str, ...] = ()
     block_addr: int | None = None
 
-    def token(self) -> str:
+    def token(self) -> object:
         """Return a deterministic validation issue token."""
         token = (
             f"branch-condition:{self.kind.value}:jcc={self.jcc_addr:#x}:"
@@ -116,33 +122,33 @@ class BranchConditionIssue8616:
         return token
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class BranchConditionValidationReport8616:
     """Closed evidence-loop counters for materialized branch predicates."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
     issues: tuple[BranchConditionIssue8616, ...] = ()
 
     @property
-    def failure_count(self) -> int:
+    def failure_count(self) -> cython.longlong:
         """Return the number of predicate contradictions."""
         return len(self.issues)
 
     @property
-    def passed(self) -> bool:
+    def passed(self) -> cython.bint:
         """Return whether every classified predicate matches its typed fact."""
-        return self.failure_count == 0 and self.classified_fact_count == self.materialized_count
+        return self.failure_count == 0 and operator.eq(self.classified_fact_count, self.materialized_count)
 
 
 class _TypedConditionCodegen8616(Protocol):
     """Dynamic codegen metadata consumed at the Validation boundary."""
 
     _inertia_typed_conditions: object
-    _inertia_callsite_summaries: dict[int, CallsiteSummary8616]
-    _inertia_callsite_summary_inventory_8616: dict[int, CallsiteSummary8616]
+    _inertia_callsite_summaries: object
+    _inertia_callsite_summary_inventory_8616: object
     project: _ConditionProject8616
     cfunc: _ConditionCFunction8616
 
@@ -150,13 +156,13 @@ class _TypedConditionCodegen8616(Protocol):
 class _ConditionCFunction8616(Protocol):
     """Function identity needed to consume its proven SSA artifact."""
 
-    addr: int
+    addr: cython.longlong
 
 
 class _ConditionArch8616(Protocol):
     """Architecture register map used at the dynamic angr boundary."""
 
-    registers: Mapping[str, tuple[int, int]]
+    registers: Mapping[str, tuple[cython.longlong, cython.longlong]]
 
 
 class _ConditionProject8616(Protocol):
@@ -171,20 +177,20 @@ class _TaggedConditionNode8616(Protocol):
     tags: Mapping[str, object] | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _LogicalReloadValidationContext8616:
     """Immutable function-wide proofs reused by register reload validation."""
 
     snapshot: SSACFGSnapshot8616 | None
     dominators: SSADominators8616 | None
-    blocks_by_addr: Mapping[int, SSABlock]
+    blocks_by_addr: Mapping[cython.longlong, SSABlock]
     transfers_by_register: Mapping[
-        tuple[str, int],
+        tuple[str, cython.longlong],
         tuple[LogicalMemoryRegisterTransfer8616, ...],
     ]
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether CFG, dominance, blocks, and transfers are proven."""
         return bool(
             self.snapshot is not None
@@ -195,6 +201,7 @@ class _LogicalReloadValidationContext8616:
         )
 
 
+@cython.ccall
 def _node_tags_8616(node: object) -> Mapping[str, object]:
     """Read tags at the dynamic angr C AST boundary."""
     try:
@@ -207,19 +214,22 @@ def _node_tags_8616(node: object) -> Mapping[str, object]:
 def _materialized_conditions_8616(
     root: object,
     query_index: StructuredAstQueryIndex8616 | None = None,
-) -> tuple[tuple[int, object], ...]:
+) -> tuple[tuple[cython.longlong, object], ...]:
     """Return unique final conditions explicitly owned by Structuring."""
+    jcc_addr: object
+    condition: object
+    node: object
     if query_index is not None:
         query_index.require_root(root)
-    found: list[tuple[int, object]] = []
-    seen: set[int] = set()
+    found: list[tuple[cython.longlong, object]] = []
+    seen: set[cython.longlong] = set()
     nodes = query_index.nodes if query_index is not None else _iter_c_nodes_deep_8616(root)
     for node in nodes:
         candidates: tuple[object, ...] = ()
         if isinstance(node, CIfBreak):
             candidates = (node.condition,)
         elif isinstance(node, CIfElse):
-            candidates = tuple(condition for condition, _body in node.condition_and_nodes)
+            candidates = tuple(condition for condition, _body in iter(node.condition_and_nodes))
         elif isinstance(node, (CForLoop, CWhileLoop, CDoWhileLoop)):
             candidates = (node.condition,)
         for condition in candidates:
@@ -249,15 +259,18 @@ def _typed_conditions_8616(codegen: object) -> tuple[ConditionIR, ...]:
         return ()
     if not isinstance(value, (list, tuple)):
         return ()
-    return tuple(condition for condition in value if isinstance(condition, ConditionIR))
+    return tuple(condition for condition in iter(value) if isinstance(condition, ConditionIR))
 
 
 def _proven_call_return_condition_8616(
     codegen: object,
     fact: ConditionIR,
     candidate: object,
-) -> bool:
+) -> cython.bint:
     """Prove a bound call predicate equivalent to its AX-family comparison."""
+    input_projection: object
+    register: object
+    summary: object
     from inertia.ir.condition_zero_input import project_register_zero_input_8616
 
     input_projection = project_register_zero_input_8616(fact)
@@ -268,8 +281,8 @@ def _proven_call_return_condition_8616(
     ):
         return False
     operands = (candidate.lhs, candidate.rhs)
-    calls = tuple(operand for operand in operands if isinstance(operand, CFunctionCall))
-    constants = tuple(operand for operand in operands if isinstance(operand, CConstant))
+    calls = tuple(operand for operand in iter(operands) if isinstance(operand, CFunctionCall))
+    constants = tuple(operand for operand in iter(operands) if isinstance(operand, CConstant))
     if len(calls) != 1 or len(constants) != 1 or not isinstance(constants[0].value, int):
         return False
     surface = cast(_TypedConditionCodegen8616, codegen)
@@ -286,8 +299,8 @@ def _proven_call_return_condition_8616(
     if (
         summary.return_used is not True
         or summary.return_use_kind is not CallsiteReturnUseKind8616.CONDITION
-        or summary.return_addr != fact.block_addr
-        or callsite_addr != summary.callsite_addr
+        or operator.ne(summary.return_addr, fact.block_addr)
+        or operator.ne(callsite_addr, summary.callsite_addr)
         or not isinstance(summary.return_register, str)
     ):
         return False
@@ -299,16 +312,16 @@ def _proven_call_return_condition_8616(
         isinstance(value, IRValue)
         and value.space is MemSpace.REG
         and (int(value.offset), int(value.size or register[1])) == (int(register[0]), int(register[1]))
-        for value in values
+        for value in iter(values)
     )
     constant_matches = (
         input_projection is not None
-        and input_projection.constant == constants[0].value
+        and operator.eq(input_projection.constant, constants[0].value)
     ) or any(
         isinstance(value, IRValue)
         and value.space is MemSpace.CONST
-        and value.const == constants[0].value
-        for value in values
+        and operator.eq(value.const, constants[0].value)
+        for value in iter(values)
     )
     return not (not register_matches or not constant_matches)
 
@@ -317,14 +330,15 @@ def _proven_stored_call_return_condition_8616(
     codegen: object,
     fact: ConditionIR,
     candidate: object,
-) -> bool:
+) -> cython.bint:
     """Accept a condition bound to the exact stack store of a call return."""
+    summary: object
     if not isinstance(candidate, CBinaryOp) or candidate.op not in {"CmpEQ", "CmpNE"}:
         return False
     surface = cast(_TypedConditionCodegen8616, codegen)
     stack_nodes = tuple(
         node.variable
-        for node in _iter_c_nodes_deep_8616(candidate)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(candidate))
         if isinstance(node, CVariable)
         and isinstance(node.variable, SimStackVariable)
         and node.variable.base == "bp"
@@ -339,17 +353,18 @@ def _proven_stored_call_return_condition_8616(
     for summary in surface._inertia_callsite_summary_inventory_8616.values():
         if not isinstance(summary, CallsiteSummary8616) or summary.return_use_kind is not CallsiteReturnUseKind8616.VALUE:
             continue
-        if summary.return_addr != fact.block_addr or summary.return_store_destination != ("bp", offset):
+        if operator.ne(summary.return_addr, fact.block_addr) or operator.ne(summary.return_store_destination, ("bp", offset)):
             continue
-        if summary.return_store_width == size and summary.return_used is True:
+        if operator.eq(summary.return_store_width, size) and summary.return_used is True:
             return True
     return False
 
 
+@cython.ccall
 def _normalized_fingerprint_8616(
-    fingerprint: str,
-    normalizer: Callable[[str], str] | None,
-) -> str:
+    fingerprint: object,
+    normalizer: object,
+) -> object:
     """Canonicalize one semantic condition fingerprint."""
     normalized = str(
         normalize_condition_fingerprint_algebraic_8616(
@@ -371,19 +386,19 @@ def _normalized_fingerprint_8616(
 
 def _logical_reload_address_fingerprint_8616(
     transfer: LogicalMemoryRegisterTransfer8616,
-) -> str | None:
+) -> object:
     """Serialize one proven segmented logical reload using validation grammar."""
     address = transfer.access.address
     if address.space not in {MemSpace.DS, MemSpace.ES, MemSpace.SS}:
         return None
     base_names = tuple(
         value.name.lower()
-        for value in address.base_values
+        for value in iter(address.base_values)
         if value.space is MemSpace.REG and isinstance(value.name, str)
     )
-    if base_names != address.base:
+    if operator.ne(base_names, address.base):
         return None
-    parts = [f"reg:{name}" for name in base_names]
+    parts = [f"reg:{name}" for name in iter(base_names)]
     if address.offset or not parts:
         parts.append(f"const:{address.offset & 0xFFFF}")
     return (
@@ -392,6 +407,7 @@ def _logical_reload_address_fingerprint_8616(
     )
 
 
+@cython.ccall
 def _empty_logical_reload_validation_context_8616() -> _LogicalReloadValidationContext8616:
     """Return an explicit unproven logical-reload validation context."""
     return _LogicalReloadValidationContext8616(None, None, {}, {})
@@ -401,17 +417,20 @@ def _condition_register_operands_8616(fact: ConditionIR) -> tuple[IRValue, ...]:
     """Return named register operands that may have a proven memory origin."""
     return tuple(
         value
-        for value in (fact.lhs, fact.rhs)
+        for value in iter((fact.lhs, fact.rhs))
         if isinstance(value, IRValue)
         and value.space is MemSpace.REG
         and isinstance(value.name, str)
     )
 
 
+@cython.ccall
 def _build_logical_reload_validation_context_8616(
     codegen: object,
 ) -> _LogicalReloadValidationContext8616:
     """Build function-wide CFG and reload indexes once for validation."""
+    logical_memory: object
+    traced: object
     surface = cast(_TypedConditionCodegen8616, codegen)
     try:
         resolution = registered_function_ssa_artifact_8616(
@@ -430,7 +449,7 @@ def _build_logical_reload_validation_context_8616(
     if not snapshot.complete or not dominators.complete:
         return _empty_logical_reload_validation_context_8616()
     transfers_by_register: dict[
-        tuple[str, int],
+        tuple[str, cython.longlong],
         list[LogicalMemoryRegisterTransfer8616],
     ] = {}
     for traced in trace_logical_word_register_transfers_8616(
@@ -449,22 +468,30 @@ def _build_logical_reload_validation_context_8616(
     return _LogicalReloadValidationContext8616(
         snapshot,
         dominators,
-        {block.addr: block for block in resolution.artifact.blocks},
+        {block.addr: block for block in iter(resolution.artifact.blocks)},
         {
             key: tuple(transfers)
-            for key, transfers in transfers_by_register.items()
+            for key, transfers in builtins.iter(transfers_by_register.items())
         },
     )
 
 
+@cython.ccall
 def _proven_logical_reload_condition_fingerprints_8616(
     codegen: object,
     fact: ConditionIR,
-    expected: str,
+    expected: object,
     normalizer: Callable[[str], str] | None,
     context: _LogicalReloadValidationContext8616 | None = None,
-) -> frozenset[str]:
+) -> object:
     """Project exact versioned register operands through proven logical reloads."""
+    address_fingerprint: object
+    condition_block: object
+    condition_insn: object
+    dominators: object
+    previous: object
+    snapshot: object
+    operand: object
     condition_block, condition_insn = fact.block_addr, fact.src_insn
     if condition_block is None or condition_insn is None:
         return frozenset()
@@ -496,7 +523,7 @@ def _proven_logical_reload_condition_fingerprints_8616(
             continue
         token = f"reg:{register_name}"
         previous = replacements.get(token)
-        if previous is not None and previous != address_fingerprint:
+        if previous is not None and operator.ne(previous, address_fingerprint):
             return frozenset()
         replacements[token] = address_fingerprint
     if not replacements:
@@ -506,35 +533,39 @@ def _proven_logical_reload_condition_fingerprints_8616(
 
 def _nearest_reload_transfer_8616(
     dominators: SSADominators8616,
-    candidates: tuple[LogicalMemoryRegisterTransfer8616, ...],
+    candidates: object,
 ) -> LogicalMemoryRegisterTransfer8616:
     """Return the deepest dominating transfer, tie-broken by latest instruction."""
     depths = {
         transfer.register_site.block_addr: len(
             dominators.dominators(transfer.register_site.block_addr) or ()
         )
-        for transfer in candidates
+        for transfer in iter(candidates)
     }
     nearest_depth = max(depths.values())
     nearest = tuple(
         transfer
-        for transfer in candidates
-        if depths[transfer.register_site.block_addr] == nearest_depth
+        for transfer in iter(candidates)
+        if operator.eq(depths[transfer.register_site.block_addr], nearest_depth)
     )
     return max(nearest, key=lambda transfer: transfer.register_site.instr_addr)
 
 
+@cython.ccall
 def _reload_path_blocks_8616(
     snapshot: SSACFGSnapshot8616,
-    source_block: int,
-    target_block: int,
-) -> set[int]:
+    source_block: cython.longlong,
+    target_block: cython.longlong,
+) -> object:
     """Return blocks lying on forward paths from the transfer site to the condition."""
+    block_addr: object
+    predecessor: object
+    successor: object
     forward = {source_block}
     pending = [source_block]
     while pending:
         block_addr = pending.pop()
-        if block_addr == target_block:
+        if operator.eq(block_addr, target_block):
             continue
         for successor in snapshot.successors(block_addr) or ():
             if successor not in forward:
@@ -544,7 +575,7 @@ def _reload_path_blocks_8616(
     pending = [target_block]
     while pending:
         block_addr = pending.pop()
-        if block_addr == source_block:
+        if operator.eq(block_addr, source_block):
             continue
         for predecessor in snapshot.predecessors(block_addr) or ():
             if predecessor not in reverse:
@@ -553,22 +584,27 @@ def _reload_path_blocks_8616(
     return forward & reverse
 
 
+@cython.ccall
 def _reload_path_stable_8616(
     context: _LogicalReloadValidationContext8616,
-    path_blocks: set[int],
+    path_blocks: object,
     candidate: LogicalMemoryRegisterTransfer8616,
-    condition_block: int,
-    condition_insn: int,
-    covered_names: set[str],
-) -> bool:
+    condition_block: cython.longlong,
+    condition_insn: cython.longlong,
+    covered_names: object,
+) -> cython.bint:
     """Check no path instruction rewrites the register or its address bases."""
+    block: object
+    block_addr: object
+    instr_index: object
+    instruction: object
     for block_addr in path_blocks:
         block = context.blocks_by_addr.get(block_addr)
         if block is None:
             return False
         for instr_index, instruction in enumerate(block.instrs):
             if (
-                block_addr == candidate.register_site.block_addr
+                operator.eq(block_addr, candidate.register_site.block_addr)
                 and instr_index <= candidate.register_site.instr_index
             ):
                 continue
@@ -595,18 +631,18 @@ def _operand_reload_fingerprint_8616(
     snapshot: SSACFGSnapshot8616,
     dominators: SSADominators8616,
     operand: IRValue,
-    register_name: str,
-    condition_block: int,
-    condition_insn: int,
-) -> str | None:
+    register_name: object,
+    condition_block: cython.longlong,
+    condition_insn: cython.longlong,
+) -> object:
     """Return the proven reload fingerprint for one register operand."""
     candidates = tuple(
         transfer
-        for transfer in context.transfers_by_register.get((register_name, operand.size), ())
-        if transfer.register.size == operand.size
+        for transfer in builtins.iter(context.transfers_by_register.get((register_name, operand.size), ()))
+        if operator.eq(transfer.register.size, operand.size)
         and dominators.dominates(transfer.register_site.block_addr, condition_block) is True
         and (
-            transfer.register_site.block_addr != condition_block
+            operator.ne(transfer.register_site.block_addr, condition_block)
             or transfer.register_site.instr_addr < condition_insn
         )
     )
@@ -615,7 +651,7 @@ def _operand_reload_fingerprint_8616(
     candidate = _nearest_reload_transfer_8616(dominators, candidates)
     base_registers = {
         value.name.lower()
-        for value in candidate.access.address.base_values
+        for value in iter(candidate.access.address.base_values)
         if value.space is MemSpace.REG and isinstance(value.name, str)
     }
     path_blocks = _reload_path_blocks_8616(
@@ -632,20 +668,23 @@ def _operand_reload_fingerprint_8616(
         candidate,
         condition_block,
         condition_insn,
-        {register_name, *base_registers},
+        {register_name, } | set(base_registers),
     ):
         return None
     return _logical_reload_address_fingerprint_8616(candidate)
 
 
 def _projected_reload_fingerprints_8616(
-    expected: str,
-    replacements: dict[str, str],
+    expected: object,
+    replacements: object,
     normalizer: Callable[[str], str] | None,
 ) -> frozenset[str]:
     """Apply register-token replacements and return normalized fingerprints."""
+    inverted_raw: object
+    replacement: object
+    token: object
     projected = expected
-    for token, replacement in sorted(replacements.items()):
+    for token, replacement in sorted(tuple(replacements.items())):
         projected = projected.replace(token, replacement)
     normalized = _normalized_fingerprint_8616(projected, normalizer)
     inverted_raw = invert_condition_fingerprint_string_8616(projected)
@@ -654,10 +693,11 @@ def _projected_reload_fingerprints_8616(
         if inverted_raw is not None
         else None
     )
-    return frozenset(value for value in (normalized, inverted) if value is not None)
+    return frozenset(value for value in iter((normalized, inverted)) if value is not None)
 
 
-def _is_induction_update_8616(iterator: object) -> bool:
+@cython.ccall
+def _is_induction_update_8616(iterator: object) -> cython.bint:
     """Check the statement is ``lhs = lhs +/- const`` in C form."""
     return (
         isinstance(iterator, CAssignment)
@@ -666,7 +706,8 @@ def _is_induction_update_8616(iterator: object) -> bool:
     )
 
 
-def _binary_induction_rhs_8616(rhs: object) -> bool:
+@cython.ccall
+def _binary_induction_rhs_8616(rhs: object) -> cython.bint:
     """Check the assignment RHS is ``variable +/- constant``."""
     return (
         isinstance(rhs, CBinaryOp)
@@ -680,7 +721,7 @@ def _post_body_do_while_fingerprint_8616(
     root: object,
     candidate: object,
     condition_fingerprint: Callable[[object], str],
-) -> str | None:
+) -> object:
     """Return the guard fingerprint after one proven terminal induction update.
 
     Dynamic boundary: loop bodies are third-party angr C-AST nodes whose
@@ -688,7 +729,7 @@ def _post_body_do_while_fingerprint_8616(
     """
     loops = tuple(
         node
-        for node in _iter_c_nodes_deep_8616(root)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(root))
         if isinstance(node, CDoWhileLoop) and node.condition is candidate
     )
     if len(loops) != 1 or not isinstance(candidate, CBinaryOp):
@@ -700,14 +741,14 @@ def _post_body_do_while_fingerprint_8616(
     if not _is_induction_update_8616(iterator):
         return None
     target = condition_fingerprint(iterator.lhs)
-    if condition_fingerprint(iterator.rhs.lhs) != target:
+    if operator.ne(condition_fingerprint(iterator.rhs.lhs), target):
         return None
     replacement = condition_fingerprint(iterator.rhs)
     occurrence_count = 0
 
-    def _fingerprint(node: object) -> str:
+    def _fingerprint(node: object) -> object:
         nonlocal occurrence_count
-        if isinstance(node, CVariable) and condition_fingerprint(node) == target:
+        if isinstance(node, CVariable) and operator.eq(condition_fingerprint(node), target):
             occurrence_count += 1
             return replacement
         if isinstance(node, CBinaryOp):
@@ -718,21 +759,26 @@ def _post_body_do_while_fingerprint_8616(
     return result if occurrence_count == 1 else None
 
 
+@cython.ccall
 def _jcc_surface_groups_8616(
-    surfaces: tuple[tuple[int, object], ...],
-) -> dict[int, list[object]]:
+    surfaces: object,
+) -> object:
     """Group materialized condition surfaces by their Jcc address."""
-    surfaces_by_jcc: dict[int, list[object]] = {}
+    condition: object
+    jcc_addr: object
+    surfaces_by_jcc: dict[cython.longlong, list[object]] = {}
     for jcc_addr, condition in surfaces:
         surfaces_by_jcc.setdefault(jcc_addr, []).append(condition)
     return surfaces_by_jcc
 
 
+@cython.ccall
 def _condition_fact_index_8616(
-    typed_conditions: tuple[ConditionIR, ...],
-) -> dict[int, dict[tuple[object, ...], ConditionIR]]:
+    typed_conditions: object,
+) -> object:
     """Index typed condition facts by their Jcc instruction address."""
-    facts_by_jcc: dict[int, dict[tuple[object, ...], ConditionIR]] = {}
+    fact: object
+    facts_by_jcc: dict[cython.longlong, dict[tuple[object, ...], ConditionIR]] = {}
     for fact in typed_conditions:
         if isinstance(fact.src_insn, int):
             facts_by_jcc.setdefault(fact.src_insn, {})[
@@ -741,12 +787,14 @@ def _condition_fact_index_8616(
     return facts_by_jcc
 
 
+@cython.ccall
 def _precision_evidence_maps_8616(
     codegen: object,
-) -> tuple[dict[int, set[str]], dict[int, set[str]]]:
+) -> tuple[dict[cython.longlong, set[str]], dict[cython.longlong, set[str]]]:
     """Index precision-after and integer-view evidence by Jcc address."""
-    precision_after_by_jcc: dict[int, set[str]] = {}
-    precision_views_by_jcc: dict[int, set[str]] = {}
+    evidence: object
+    precision_after_by_jcc: dict[cython.longlong, set[str]] = {}
+    precision_views_by_jcc: dict[cython.longlong, set[str]] = {}
     for evidence in condition_precision_evidence_8616(codegen):
         if isinstance(evidence.jcc_addr, int):
             precision_after_by_jcc.setdefault(evidence.jcc_addr, set()).add(
@@ -759,19 +807,19 @@ def _precision_evidence_maps_8616(
     return precision_after_by_jcc, precision_views_by_jcc
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _JccFingerprintViews8616:
     """All normalized fingerprint projections for one condition surface."""
 
-    expected: str
-    actual: str
-    actual_precision: str
-    semantic_view: str | None
-    post_body: str | None
-    inverted: str | None
+    expected: object
+    actual: object
+    actual_precision: object
+    semantic_view: object
+    post_body: object
+    inverted: object
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _BranchValidationContext8616:
     """Shared evidence reused across per-Jcc surface validation."""
 
@@ -780,19 +828,23 @@ class _BranchValidationContext8616:
     condition_fingerprint: Callable[[object], str]
     condition_ir_fingerprint: Callable[[ConditionIR], str | None]
     condition_fingerprint_normalizer: Callable[[str], str] | None
-    facts_by_jcc: dict[int, dict[tuple[object, ...], ConditionIR]]
-    precision_after_by_jcc: dict[int, set[str]]
-    precision_views_by_jcc: dict[int, set[str]]
+    facts_by_jcc: object
+    precision_after_by_jcc: object
+    precision_views_by_jcc: object
     logical_reload_context: _LogicalReloadValidationContext8616 | None = None
 
 
+@cython.ccall
 def _jcc_fingerprint_views_8616(
     vctx: _BranchValidationContext8616,
     fact: ConditionIR,
     candidate: object,
-    expected_raw: str,
+    expected_raw: object,
 ) -> _JccFingerprintViews8616:
     """Compute every normalized fingerprint projection for one surface."""
+    inverted_raw: object
+    post_body_raw: object
+    semantic_view_raw: object
     actual_raw = vctx.condition_fingerprint(candidate)
     semantic_view_raw = condition_semantic_view_projection_fingerprint_8616(
         fact,
@@ -837,25 +889,28 @@ def _jcc_fingerprint_views_8616(
     )
 
 
+@cython.ccall
 def _jcc_evidence_matches_8616(
     vctx: _BranchValidationContext8616,
-    jcc_addr: int,
+    jcc_addr: cython.longlong,
     fact: ConditionIR,
     candidate: object,
     views: _JccFingerprintViews8616,
-    reload_fingerprints: frozenset[str],
-    chain_proven: bool,
-) -> bool:
+    reload_fingerprints: object,
+    chain_proven: cython.bint,
+) -> cython.bint:
     """Decide whether any proven evidence class matches the surface."""
+    precision_after: object
+    precision_views: object
     precision_after = vctx.precision_after_by_jcc.get(jcc_addr, set())
     precision_views = vctx.precision_views_by_jcc.get(jcc_addr, set())
-    precision_view_matches = bool(precision_views) and precision_views == {
+    precision_view_matches = bool(precision_views) and operator.eq(precision_views, {
         condition_precision_token_8616(
             condition_precision_view_fingerprint_8616(
                 candidate, vctx.condition_fingerprint
             )
         )
-    }
+    })
     fingerprint_matches = (
         views.actual in {views.expected, views.inverted}
         or views.semantic_view in {views.expected, views.inverted}
@@ -866,8 +921,8 @@ def _jcc_evidence_matches_8616(
     # a digest cannot recover the original low/high-word expressions.
     precision_matches = (
         precision_view_matches
-        or precision_after == {views.actual_precision}
-        or precision_after == {condition_precision_token_8616(views.actual)}
+        or operator.eq(precision_after, {views.actual_precision})
+        or operator.eq(precision_after, {condition_precision_token_8616(views.actual)})
     )
     return bool(
         fingerprint_matches
@@ -877,13 +932,15 @@ def _jcc_evidence_matches_8616(
     )
 
 
+@cython.ccall
 def _validate_jcc_surface_8616(
     vctx: _BranchValidationContext8616,
-    jcc_addr: int,
-    candidates: list[object],
-    facts: tuple[ConditionIR, ...],
+    jcc_addr: cython.longlong,
+    candidates: object,
+    facts: object,
 ) -> BranchConditionIssue8616 | None:
     """Validate one materialized surface; return its issue or ``None``."""
+    expected_raw: object
     wide_verdict = validate_terminal_wide_condition_8616(
         vctx.codegen,
         vctx.root,
@@ -948,7 +1005,7 @@ def _validate_jcc_surface_8616(
         expected=views.expected,
         actual=views.actual,
         precision_candidates=tuple(
-            sorted(vctx.precision_after_by_jcc.get(jcc_addr, set()))
+            sorted(tuple(vctx.precision_after_by_jcc.get(jcc_addr, set())))
         ),
     )
 
@@ -963,6 +1020,9 @@ def validate_materialized_branch_conditions_8616(
     condition_fingerprint_normalizer: Callable[[str], str] | None = None,
 ) -> BranchConditionValidationReport8616:
     """Validate each Structuring-tagged predicate against one exact typed fact."""
+    issue: object
+    candidates: object
+    jcc_addr: object
     surfaces = _materialized_conditions_8616(root, query_index)
     surfaces_by_jcc = _jcc_surface_groups_8616(surfaces)
     typed_conditions = _typed_conditions_8616(codegen)
@@ -983,7 +1043,7 @@ def validate_materialized_branch_conditions_8616(
     classified_count = 0
     materialized_count = 0
     issues: list[BranchConditionIssue8616] = []
-    for jcc_addr, candidates in sorted(surfaces_by_jcc.items()):
+    for jcc_addr, candidates in sorted(tuple(surfaces_by_jcc.items())):
         classified_count += 1
         if len(candidates) != 1:
             issues.append(
@@ -1022,7 +1082,7 @@ def validate_materialized_branch_conditions_8616(
         BranchConditionIssue8616(
             BranchConditionIssueKind8616.MISSING_SURFACE, jcc_addr, block_addr=block_addr,
         )
-        for jcc_addr, block_addr in missing_keys
+        for jcc_addr, block_addr in iter(missing_keys)
     )
     return BranchConditionValidationReport8616(
         raw_fact_count=len(surfaces) + len(missing_keys),

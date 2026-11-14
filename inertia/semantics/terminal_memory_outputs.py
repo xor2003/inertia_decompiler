@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify exact direct segmented storage reaching every function return.
 
 Layer: Semantics.
@@ -15,6 +16,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Any, cast
 
@@ -33,9 +36,12 @@ from .terminal_memory_output_contracts import (
     TerminalMemoryOutputStats8616,
     TerminalMemoryStoreSite8616,
 )
+import operator
+import builtins
 
 
-def _stable_direct_address_8616(address: object) -> bool:
+@cython.ccall
+def _stable_direct_address_8616(address: object) -> cython.bint:
     """Return whether one address is a stable base-free DS/ES word."""
     return (
         isinstance(address, IRAddress)
@@ -45,27 +51,29 @@ def _stable_direct_address_8616(address: object) -> bool:
     )
 
 
-def _width_coherent_value_8616(address: object, value: object, instruction: IRInstr) -> bool:
+@cython.ccall
+def _width_coherent_value_8616(address: object, value: object, instruction: IRInstr) -> cython.bint:
     """Return whether one STORE value's width matches its address and site."""
     return (
         isinstance(address, IRAddress)
         and isinstance(value, IRValue)
         and address.size > 0
-        and address.size == instruction.size
-        and address.size == value.size
+        and operator.eq(address.size, instruction.size)
+        and operator.eq(address.size, value.size)
         and instruction.addr is not None
     )
 
 
+@cython.ccall
 def _direct_store_8616(
-    block_addr: int,
-    instr_index: int,
+    block_addr: cython.longlong,
+    instr_index: cython.longlong,
     instruction: IRInstr,
-) -> tuple[MemoryOutputKey8616, IRAddress, TerminalMemoryStoreSite8616] | None:
+) -> object:
     """Return one width-coherent stable direct DS/ES STORE."""
     if instruction.op != "STORE" or len(instruction.args) < 2:
         return None
-    address, value = instruction.args[:2]
+    address, value = tuple(instruction.args[:2])
     if (
         not isinstance(address, IRAddress)
         or not _stable_direct_address_8616(address)
@@ -77,7 +85,8 @@ def _direct_store_8616(
     return key, address, TerminalMemoryStoreSite8616(block_addr, instr_index, instruction.addr)
 
 
-def _terminal_is_return_8616(project: object, block_addr: int) -> bool:
+@cython.ccall
+def _terminal_is_return_8616(project: object, block_addr: cython.longlong) -> cython.bint:
     """Prove a terminal block ends in a structured machine return."""
     try:
         instructions = decoded_block_instructions_8616(cast(Any, project), block_addr, opt_level=0)
@@ -97,11 +106,12 @@ def _terminal_is_return_8616(project: object, block_addr: int) -> bool:
     return mnemonic in {"iret", "ret", "retf", "retw"}
 
 
+@cython.ccall
 def _refused_8616(
     artifact: SSAFunctionArtifact,
     failure: TerminalMemoryOutputFailure8616,
-    raw_count: int,
-    normalized_count: int = 0,
+    raw_count: cython.longlong,
+    normalized_count: cython.longlong = 0,
 ) -> TerminalMemoryOutputEvidence8616:
     """Build one atomic refusal without publishing partial output facts."""
     return TerminalMemoryOutputEvidence8616(
@@ -124,18 +134,22 @@ def _reachable_blocks_8616(
     TerminalMemoryOutputFailure8616 | None,
 ]:
     """Return the closed entry-reachable SSA block set."""
-    blocks = {block.addr: block for block in artifact.blocks}
+    block_addr: object
+    predecessor: object
+    predecessors: object
+    successor: object
+    blocks = {block.addr: block for block in iter(artifact.blocks)}
     if artifact.function_addr not in blocks:
         return None, None, TerminalMemoryOutputFailure8616.ENTRY_BLOCK_MISSING
-    if set(artifact.predecessor_map) != set(blocks):
+    if operator.ne(set(artifact.predecessor_map), set(blocks)):
         return None, None, TerminalMemoryOutputFailure8616.CFG_INCOMPLETE
-    successors: dict[int, set[int]] = {address: set() for address in blocks}
+    successors: dict[cython.longlong, set[cython.longlong]] = {address: set() for address in iter(blocks)}
     for successor, predecessors in artifact.predecessor_map.items():
-        if any(predecessor not in blocks for predecessor in predecessors):
+        if any(predecessor not in blocks for predecessor in iter(predecessors)):
             return None, None, TerminalMemoryOutputFailure8616.CFG_INCOMPLETE
         for predecessor in predecessors:
             successors[predecessor].add(successor)
-    reachable: set[int] = set()
+    reachable: set[cython.longlong] = set()
     pending = [artifact.function_addr]
     while pending:
         block_addr = pending.pop()
@@ -143,26 +157,24 @@ def _reachable_blocks_8616(
             continue
         reachable.add(block_addr)
         pending.extend(successors[block_addr])
-    return reachable, {address: frozenset(values) for address, values in successors.items()}, None
+    return reachable, {address: frozenset(values) for address, values in builtins.iter(successors.items())}, None
 
 
 def _must_write_keys_8616(
     artifact: SSAFunctionArtifact,
-    reachable: set[int],
-    successors: dict[int, frozenset[int]],
-    candidate_keys: frozenset[MemoryOutputKey8616],
-) -> tuple[
-    frozenset[MemoryOutputKey8616],
-    tuple[int, ...],
-    dict[MemoryOutputKey8616, tuple[int, ...]],
-] | None:
+    reachable: object,
+    successors: object,
+    candidate_keys: object,
+) -> object:
     """Solve definite direct stores to every terminal over the exact SSA CFG."""
-    blocks = {block.addr: block for block in artifact.blocks if block.addr in reachable}
+    address: object
+    predecessor: object
+    blocks = {block.addr: block for block in iter(artifact.blocks) if block.addr in reachable}
     predecessors = {
-        address: {predecessor for predecessor in artifact.predecessor_map[address] if predecessor in reachable}
-        for address in reachable
+        address: {predecessor for predecessor in iter(artifact.predecessor_map[address]) if predecessor in reachable}
+        for address in iter(reachable)
     }
-    terminals = tuple(sorted(address for address in reachable if not successors[address]))
+    terminals = tuple(sorted(address for address in iter(reachable) if not successors[address]))
     if not terminals:
         return None
     can_reach_terminal = set(terminals)
@@ -178,10 +190,10 @@ def _must_write_keys_8616(
     local = {
         block.addr: frozenset(
             direct[0]
-            for index, instruction in enumerate(block.instrs)
+            for index, instruction in builtins.iter(enumerate(block.instrs))
             if (direct := _direct_store_8616(block.addr, index, instruction)) is not None
         )
-        for block in blocks.values()
+        for block in builtins.iter(blocks.values())
     }
     incoming = dict.fromkeys(reachable, candidate_keys)
     outgoing = dict.fromkeys(reachable, candidate_keys)
@@ -190,27 +202,32 @@ def _must_write_keys_8616(
     while changed:
         changed = False
         for address in sorted(reachable):
-            if address == artifact.function_addr:
+            if operator.eq(address, artifact.function_addr):
                 new_in: frozenset[MemoryOutputKey8616] = frozenset()
             else:
-                pred_sets = tuple(outgoing[pred] for pred in sorted(predecessors[address]))
+                pred_sets = tuple(outgoing[pred] for pred in builtins.iter(sorted(predecessors[address])))
                 new_in = frozenset.intersection(*pred_sets) if pred_sets else frozenset()
             new_out = new_in | local[address]
-            if new_in != incoming[address] or new_out != outgoing[address]:
+            if operator.ne(new_in, incoming[address]) or operator.ne(new_out, outgoing[address]):
                 incoming[address], outgoing[address], changed = new_in, new_out, True
-    terminal_sets = tuple(outgoing[address] for address in terminals)
+    terminal_sets = tuple(outgoing[address] for address in iter(terminals))
     definite_terminals = {
-        key: tuple(address for address in terminals if key in outgoing[address])
-        for key in candidate_keys
+        key: tuple(address for address in iter(terminals) if key in outgoing[address])
+        for key in iter(candidate_keys)
     }
     return frozenset.intersection(*terminal_sets), terminals, definite_terminals
 
 
+@cython.ccall
 def _grouped_store_sites_8616(
     artifact: SSAFunctionArtifact,
-    reachable: set[int],
-) -> dict[MemoryOutputKey8616, tuple[IRAddress, list[TerminalMemoryStoreSite8616]]]:
+    reachable: object,
+) -> object:
     """Group proven direct-store sites by output key over reachable blocks."""
+    direct: object
+    block: object
+    instr_index: object
+    instruction: object
     grouped: dict[MemoryOutputKey8616, tuple[IRAddress, list[TerminalMemoryStoreSite8616]]] = {}
     for block in artifact.blocks:
         if block.addr not in reachable:
@@ -228,11 +245,11 @@ def _grouped_store_sites_8616(
 
 
 def _memory_output_facts_8616(
-    grouped: dict[MemoryOutputKey8616, tuple[IRAddress, list[TerminalMemoryStoreSite8616]]],
-    keys: tuple[MemoryOutputKey8616, ...],
-    must_write: frozenset[MemoryOutputKey8616],
-    terminals: tuple[int, ...],
-    definite_terminals: dict[MemoryOutputKey8616, tuple[int, ...]],
+    grouped: object,
+    keys: object,
+    must_write: object,
+    terminals: object,
+    definite_terminals: object,
 ) -> tuple[TerminalMemoryOutputFact8616, ...]:
     """Materialize one dispositioned output fact per proven key."""
     return tuple(
@@ -247,7 +264,7 @@ def _memory_output_facts_8616(
             terminal_block_addrs=terminals,
             definitely_written_terminal_block_addrs=definite_terminals[key],
         )
-        for key in keys
+        for key in iter(keys)
     )
 
 
@@ -256,11 +273,16 @@ def collect_terminal_memory_output_evidence_8616(
     artifact: SSAFunctionArtifact,
 ) -> TerminalMemoryOutputEvidence8616:
     """Classify stable direct DS/ES ranges over every exact return path."""
-    all_direct: list[tuple[int, int, IRInstr]] = []
+    failure: object
+    reachable: object
+    solved: object
+    successors: object
+    block: object
+    all_direct: list[tuple[cython.longlong, cython.longlong, IRInstr]] = []
     for block in artifact.blocks:
         all_direct.extend(
             (block.addr, instr_index, instruction)
-            for instr_index, instruction in enumerate(block.instrs)
+            for instr_index, instruction in builtins.iter(enumerate(block.instrs))
             if _direct_store_8616(block.addr, instr_index, instruction) is not None
         )
     if not all_direct:
@@ -285,7 +307,7 @@ def collect_terminal_memory_output_evidence_8616(
             artifact, TerminalMemoryOutputFailure8616.CFG_INCOMPLETE, len(keys), len(keys)
         )
     must_write, terminals, definite_terminals = solved
-    if any(not _terminal_is_return_8616(project, address) for address in terminals):
+    if any(not _terminal_is_return_8616(project, address) for address in iter(terminals)):
         return _refused_8616(
             artifact, TerminalMemoryOutputFailure8616.TERMINAL_NOT_RETURN, len(keys), len(keys)
         )

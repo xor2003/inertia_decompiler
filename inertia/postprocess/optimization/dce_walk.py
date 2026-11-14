@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Rewrite/Postprocess cleanup.
 
 Responsibility: execute one evidence-backed backward-liveness DCE block walk.
@@ -8,6 +9,7 @@ evidence here.
 """
 
 from __future__ import annotations
+import cython
 
 import builtins
 import sys
@@ -28,22 +30,27 @@ from angr.analyses.decompiler.structured_codegen.c import (
 from inertia.lowering.stack_storage_evidence import alias_proves_private_stack_write_8616
 
 from .dce_value_identity import same_local_value_expression_8616
+import dataclasses
+import operator
 
 _DceKey8616 = tuple[str, int | str]
 _DceNameKey8616 = tuple[str, str]
 
 
-def _dynamic_dce_getattr_8616(obj: object, name: str, default: object = None) -> Any:  # noqa: ANN401
+@cython.ccall
+def _dynamic_dce_getattr_8616(obj: object, name: object, default: object = None) -> Any:  # noqa: ANN401
     """Read an attribute across the dynamic third-party angr/codegen boundary."""
     return builtins.getattr(obj, name, default)
 
 
-def _dynamic_dce_setattr_8616(obj: object, name: str, value: object) -> None:
+@cython.ccall
+def _dynamic_dce_setattr_8616(obj: object, name: object, value: object) -> None:
     """Write an attribute across the dynamic third-party angr/codegen boundary."""
     builtins.setattr(obj, name, value)
 
 
-def _bump_codegen_attr_8616(codegen: object, name: str) -> None:
+@cython.ccall
+def _bump_codegen_attr_8616(codegen: object, name: object) -> None:
     """Increment a dynamic angr/codegen boundary diagnostic counter attribute."""
     _dynamic_dce_setattr_8616(codegen, name, int(_dynamic_dce_getattr_8616(codegen, name, 0)) + 1)
 
@@ -56,70 +63,71 @@ class DceValuePurity8616(Enum):
     UNKNOWN = "unknown"
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _DceWalkContext8616:
     """Typed state and classifiers consumed by one DCE statement-block walk."""
 
     codegen: object
-    debug_optimization: bool
-    protected: set[_DceKey8616]
-    pruned_decl_keys: set[_DceKey8616]
-    pruned_decl_names: set[str]
-    changed: bool
+    debug_optimization: cython.bint
+    protected: object
+    pruned_decl_keys: object
+    pruned_decl_names: object
+    changed: cython.bint
     bump_codegen_counter: Callable[[str], None]
     call_name: Callable[[CFunctionCall], str | None]
-    callsite_materialization_complete_or_no_calls: Callable[[], bool]
-    callsite_materialization_proven_complete: Callable[[], bool]
+    callsite_materialization_complete_or_no_calls: Callable[[], cython.bint]
+    callsite_materialization_proven_complete: Callable[[], cython.bint]
     collect_nested_stmt_reads: Callable[[object], set[_DceKey8616]]
     collect_stmt_reads: Callable[[object], set[_DceKey8616]]
     debug_node_shape: Callable[[object], str]
-    dirty_is_storage_free_temp: Callable[[object], bool]
+    dirty_is_storage_free_temp: Callable[[object], cython.bint]
     dirty_key: Callable[[object], _DceKey8616 | None]
-    dirty_lhs_delete_proven: Callable[[object, object], bool]
-    dirty_temp_cleanup_mode: Callable[[object], bool]
-    expr_contains_memory_read_shape: Callable[[object], bool]
-    expr_is_discardable_dead_value: Callable[[object], bool]
-    expr_is_discardable_value: Callable[[object], bool]
-    expr_is_pure_local_value: Callable[[object], bool]
+    dirty_lhs_delete_proven: Callable[[object, object], cython.bint]
+    dirty_temp_cleanup_mode: Callable[[object], cython.bint]
+    expr_contains_memory_read_shape: Callable[[object], cython.bint]
+    expr_is_discardable_dead_value: Callable[[object], cython.bint]
+    expr_is_discardable_value: Callable[[object], cython.bint]
+    expr_is_pure_local_value: Callable[[object], cython.bint]
     expr_value_purity: Callable[[object], DceValuePurity8616]
-    has_direct_stack_write_evidence_for_offset: Callable[[int | None], bool]
+    has_direct_stack_write_evidence_for_offset: Callable[[int | None], cython.bint]
     is_dead_argument_overwrite_artifact: Callable[
         [object, object, object, _DceKey8616, _DceNameKey8616 | None, set[_DceKey8616]],
-        bool,
+        cython.bint,
     ]
-    is_frame_anchor_stack_lvalue: Callable[[object], bool]
-    is_function_argument_lvalue: Callable[[object, _DceKey8616, _DceNameKey8616 | None], bool]
-    is_observable_lvalue: Callable[[object], bool]
-    is_plain_local_lvalue: Callable[[object], bool]
-    is_pure_generated_helper_call: Callable[[CFunctionCall], bool]
-    is_structured_or_control_statement: Callable[[object], bool]
+    is_frame_anchor_stack_lvalue: Callable[[object], cython.bint]
+    is_function_argument_lvalue: Callable[[object, _DceKey8616, _DceNameKey8616 | None], cython.bint]
+    is_observable_lvalue: Callable[[object], cython.bint]
+    is_plain_local_lvalue: Callable[[object], cython.bint]
+    is_pure_generated_helper_call: Callable[[CFunctionCall], cython.bint]
+    is_structured_or_control_statement: Callable[[object], cython.bint]
     iter_with_root: Callable[[object], Iterator[object]]
     lhs_key_and_name: Callable[
         [object],
-        tuple[_DceKey8616 | None, _DceNameKey8616 | None, bool],
+        tuple[_DceKey8616 | None, _DceNameKey8616 | None, cython.bint],
     ]
     lhs_variable: Callable[[object], CVariable | None]
-    node_has_instruction_evidence: Callable[[object], bool]
-    prune_adjacent_duplicate_assignments: Callable[[object], bool]
-    rhs_evaluation_is_proven_unobservable: Callable[[object], bool]
-    rhs_has_side_effects: Callable[[object], bool]
-    rhs_is_pure_stack_base_carrier: Callable[[object], bool]
-    rhs_is_unproven_dirty_register_carrier: Callable[[object, set[_DceKey8616]], bool]
+    node_has_instruction_evidence: Callable[[object], cython.bint]
+    prune_adjacent_duplicate_assignments: Callable[[object], cython.bint]
+    rhs_evaluation_is_proven_unobservable: Callable[[object], cython.bint]
+    rhs_has_side_effects: Callable[[object], cython.bint]
+    rhs_is_pure_stack_base_carrier: Callable[[object], cython.bint]
+    rhs_is_unproven_dirty_register_carrier: Callable[[object, set[_DceKey8616]], cython.bint]
     stack_offset_from_plain_lvalue: Callable[[object], int | None]
-    standalone_expression_is_definitely_dead: Callable[[object], bool]
+    standalone_expression_is_definitely_dead: Callable[[object], cython.bint]
     standalone_expression_payload: Callable[[object], object]
-    stmt_is_consumed_boolean_carrier: Callable[[object], bool]
-    stmt_is_consumed_call_cleanup_carrier: Callable[[object], bool]
-    stmt_is_direct_stack_move_evidence: Callable[[object, object], bool]
-    stmt_is_direct_stack_update_evidence: Callable[[object, object], bool]
+    stmt_is_consumed_boolean_carrier: Callable[[object], cython.bint]
+    stmt_is_consumed_call_cleanup_carrier: Callable[[object], cython.bint]
+    stmt_is_direct_stack_move_evidence: Callable[[object, object], cython.bint]
+    stmt_is_direct_stack_update_evidence: Callable[[object, object], cython.bint]
 
 
+@cython.ccall
 def _unprotected_dead_key_8616(
     context: _DceWalkContext8616,
     key: _DceKey8616,
-    name_key: _DceNameKey8616 | None,
-    outside_reads: int,
-) -> bool:
+    name_key: object,
+    outside_reads: cython.longlong,
+) -> cython.bint:
     """Return whether a key is unprotected and has no reads outside the block."""
     protected = context.protected
     return (
@@ -129,13 +137,14 @@ def _unprotected_dead_key_8616(
     )
 
 
+@cython.ccall
 def _key_free_to_delete_8616(
     context: _DceWalkContext8616,
     key: _DceKey8616,
     name_key: _DceNameKey8616 | None,
-    live: set[_DceKey8616],
-    outside_reads: int,
-) -> bool:
+    live: object,
+    outside_reads: cython.longlong,
+) -> cython.bint:
     """Return the shared liveness/protection gate for deleting one key."""
     return key not in live and _unprotected_dead_key_8616(context, key, name_key, outside_reads)
 
@@ -144,41 +153,43 @@ def _untagged_local_artifact_gate_8616(
     context: _DceWalkContext8616,
     stmt: object,
     stmts: Sequence[object],
-    stmt_index: int,
+    stmt_index: cython.longlong,
     lhs: object,
     rhs: object,
-) -> bool:
+) -> cython.bint:
     """Return whether an untagged plain-local assignment carries a removable value."""
     return (
         context.is_plain_local_lvalue(lhs)
         and not context.node_has_instruction_evidence(stmt)
-        and not any(context.rhs_has_side_effects(prefix_stmt) for prefix_stmt in stmts[:stmt_index])
+        and not any(context.rhs_has_side_effects(prefix_stmt) for prefix_stmt in iter(stmts[:stmt_index]))
         and (context.expr_is_discardable_value(rhs) or context.expr_is_pure_local_value(rhs))
     )
 
 
+@cython.ccall
 def _key_not_live_or_dirty_only_8616(
     key: _DceKey8616,
-    live: set[_DceKey8616],
-    total_reads: dict[_DceKey8616, int],
-    dirty_carrier_reads: dict[_DceKey8616, int],
-) -> bool:
+    live: object,
+    total_reads: object,
+    dirty_carrier_reads: object,
+) -> cython.bint:
     """Return whether a key is dead or only read by dirty carrier statements."""
     return key not in live or int(total_reads.get(key, 0)) <= int(dirty_carrier_reads.get(key, 0))
 
 
+@cython.ccall
 def _record_non_temp_delete_8616(
     context: _DceWalkContext8616,
     *,
-    reason: str,
+    reason: object,
     key: _DceKey8616,
     name_key: _DceNameKey8616 | None,
-    outside_reads: int,
-    live: set[_DceKey8616],
+    outside_reads: cython.longlong,
+    live: object,
     stmt: object,
     rhs: object,
-    track_memory_read: bool,
-) -> bool:
+    track_memory_read: cython.bint,
+) -> cython.bint:
     """Emit shared debug/counter bookkeeping for a proven non-temp delete."""
     if context.debug_optimization:
         print(
@@ -196,21 +207,22 @@ def _record_non_temp_delete_8616(
     return True
 
 
+@cython.ccall
 def _delete_proven_non_temp_statement_8616(
     context: _DceWalkContext8616,
     *,
-    stmt_index: int,
+    stmt_index: cython.longlong,
     stmt: object,
     stmts: Sequence[object],
     lhs: object,
     rhs: object,
     key: _DceKey8616,
     name_key: _DceNameKey8616 | None,
-    live: set[_DceKey8616],
-    outside_reads: int,
-    total_reads: dict[_DceKey8616, int],
-    dirty_carrier_reads: dict[_DceKey8616, int],
-) -> bool:
+    live: object,
+    outside_reads: cython.longlong,
+    total_reads: object,
+    dirty_carrier_reads: object,
+) -> cython.bint:
     """Delete one non-temp assignment only when an existing proof applies."""
     if (
         _untagged_local_artifact_gate_8616(context, stmt, stmts, stmt_index, lhs, rhs)
@@ -286,46 +298,51 @@ def _delete_proven_non_temp_statement_8616(
     return False
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _DceStatementWalk8616:
     """Mutable backward-liveness walk state for one DCE statement block."""
 
     context: _DceWalkContext8616
-    stmts: list[object]
-    total_reads: dict[_DceKey8616, int]
-    local_reads: dict[_DceKey8616, int]
-    block_loop_backedge_reads: frozenset[_DceKey8616]
-    defined_keys: set[_DceKey8616]
-    observable_reads: dict[_DceKey8616, int]
-    dirty_carrier_reads: dict[_DceKey8616, int]
-    all_dirty_carrier_reads: dict[_DceKey8616, int]
-    block_changed: bool = False
-    changed: bool = False
-    live: set[_DceKey8616] = field(default_factory=set)
-    later_local_defs: set[_DceKey8616] = field(default_factory=set)
-    new_rev: list[object] = field(default_factory=list)
+    stmts: object
+    total_reads: object
+    local_reads: object
+    block_loop_backedge_reads: object
+    defined_keys: object
+    observable_reads: object
+    dirty_carrier_reads: object
+    all_dirty_carrier_reads: object
+    block_changed: cython.bint = False
+    changed: cython.bint = False
+    live: object = field(default_factory=set)
+    later_local_defs: object = field(default_factory=set)
+    new_rev: object = field(default_factory=list)
 
-    def _bump(self, name: str) -> None:
+    @cython.ccall
+    def _bump(self, name: object) -> None:
         """Increment a codegen-boundary counter through the walk context."""
         self.context.bump_codegen_counter(name)
 
-    def _key_free(self, key: _DceKey8616, name_key: _DceNameKey8616 | None, outside_reads: int) -> bool:
+    @cython.ccall
+    def _key_free(self, key: _DceKey8616, name_key: _DceNameKey8616 | None, outside_reads: cython.longlong) -> cython.bint:
         """Return the shared liveness/protection gate for deleting one key."""
         return _key_free_to_delete_8616(self.context, key, name_key, self.live, outside_reads)
 
-    def _prune_decl(self, key: _DceKey8616, name_key: _DceNameKey8616 | None) -> None:
+    @cython.ccall
+    def _prune_decl(self, key: _DceKey8616, name_key: object) -> None:
         """Record one deleted definition for later declaration pruning."""
         self.context.pruned_decl_keys.add(key)
         if name_key is not None:
             self.context.pruned_decl_names.add(name_key[1])
 
-    def _delete(self, key: _DceKey8616, name_key: _DceNameKey8616 | None = None, *, decl: bool = False) -> None:
+    @cython.ccall
+    def _delete(self, key: _DceKey8616, name_key: _DceNameKey8616 | None = None, *, decl: cython.bint = False) -> None:
         """Record a proven delete for the current statement."""
         if decl:
             self._prune_decl(key, name_key)
         self.changed = True
         self.block_changed = True
 
+    @cython.ccall
     def _keep(self, stmt: object, key: _DceKey8616) -> None:
         """Record one surviving statement into the backward-liveness walk."""
         self.live.discard(key)
@@ -333,8 +350,11 @@ class _DceStatementWalk8616:
         self.new_rev.append(stmt)
         self.later_local_defs.add(key)
 
-    def run(self, statements: object) -> bool:
+    @cython.ccall
+    def run(self, statements: object) -> cython.bint:
         """Walk the statement list backward and write the survivors back."""
+        stmt: object
+        stmt_index: object
         self.live = set(self.block_loop_backedge_reads)
         for stmt_index, stmt in reversed(list(enumerate(self.stmts))):
             if not isinstance(stmt, CAssignment):
@@ -342,7 +362,7 @@ class _DceStatementWalk8616:
                 continue
             self._assignment(stmt_index, stmt)
         new_stmts = list(reversed(self.new_rev))
-        if new_stmts != self.stmts:
+        if operator.ne(new_stmts, self.stmts):
             typing.cast(typing.Any, statements).statements = new_stmts
             self.block_changed = True
         self.context.changed = self.context.changed or self.changed or self.block_changed
@@ -358,7 +378,7 @@ class _DceStatementWalk8616:
         expr_stmt = context.standalone_expression_payload(stmt)
         if context.debug_optimization and any(
             isinstance(node, CFunctionCall) and context.is_pure_generated_helper_call(node)
-            for node in context.iter_with_root(expr_stmt)
+            for node in builtins.iter(context.iter_with_root(expr_stmt))
         ):
             print(
                 "[optimization] dce_non_assignment_helper "
@@ -388,8 +408,10 @@ class _DceStatementWalk8616:
         self.live.update(context.collect_nested_stmt_reads(stmt))
         self.new_rev.append(stmt)
 
-    def _assignment(self, stmt_index: int, stmt: object) -> None:
+    @cython.ccall
+    def _assignment(self, stmt_index: cython.longlong, stmt: object) -> None:
         """Dispatch one assignment through the ordered evidence arm ladder."""
+        key: object
         context = self.context
         lhs = _dynamic_dce_getattr_8616(stmt, "lhs", None)
         rhs = _dynamic_dce_getattr_8616(stmt, "rhs", None)
@@ -412,10 +434,11 @@ class _DceStatementWalk8616:
             return
         self._temp_fallthrough(stmt, lhs, rhs, key, name_key, outside_reads)
 
+    @cython.ccall
     def _early_arms(
         self, stmt: object, lhs: object, rhs: object, key: _DceKey8616,
-        name_key: _DceNameKey8616 | None, is_temp_like: bool,
-    ) -> bool:
+        name_key: _DceNameKey8616 | None, is_temp_like: cython.bint,
+    ) -> cython.bint:
         """Run the arms that do not depend on outside-read accounting."""
         if self._guard_direct_stack_evidence(stmt, lhs, rhs, key, name_key):
             return True
@@ -423,10 +446,11 @@ class _DceStatementWalk8616:
             return True
         return self._self_assignment(stmt, lhs, rhs, key, name_key)
 
+    @cython.ccall
     def _read_dependent_arms(
         self, stmt: object, lhs: object, rhs: object, key: _DceKey8616,
-        name_key: _DceNameKey8616 | None, is_temp_like: bool, outside_reads: int,
-    ) -> bool:
+        name_key: _DceNameKey8616 | None, is_temp_like: cython.bint, outside_reads: cython.longlong,
+    ) -> cython.bint:
         """Run the arms gated on liveness and outside-read accounting."""
         if self._boolean_carrier(stmt, lhs, rhs, key, name_key, outside_reads):
             return True
@@ -442,9 +466,10 @@ class _DceStatementWalk8616:
             return True
         return self._dirty_value(stmt, lhs, rhs, key, name_key, outside_reads)
 
+    @cython.ccall
     def _guard_direct_stack_evidence(
         self, stmt: object, lhs: object, rhs: object, key: _DceKey8616, name_key: _DceNameKey8616 | None
-    ) -> bool:
+    ) -> cython.bint:
         """Keep stack-evidence statements that are not proven private writes."""
         context = self.context
         is_exact_direct_stack_evidence = context.stmt_is_direct_stack_move_evidence(
@@ -468,7 +493,8 @@ class _DceStatementWalk8616:
             return True
         return False
 
-    def _guard_temp_backedge(self, stmt: object, key: _DceKey8616, is_temp_like: bool) -> bool:
+    @cython.ccall
+    def _guard_temp_backedge(self, stmt: object, key: _DceKey8616, is_temp_like: cython.bint) -> cython.bint:
         """Keep tagged temp statements that feed loop backedge reads."""
         if is_temp_like and key in self.block_loop_backedge_reads and self.context.node_has_instruction_evidence(stmt):
             self._bump("dce_keep_protected")
@@ -476,9 +502,10 @@ class _DceStatementWalk8616:
             return True
         return False
 
+    @cython.ccall
     def _self_assignment(
         self, stmt: object, lhs: object, rhs: object, key: _DceKey8616, name_key: _DceNameKey8616 | None
-    ) -> bool:
+    ) -> cython.bint:
         """Delete a self-assignment when the value is non-observable and pure."""
         context = self.context
         if not (
@@ -503,14 +530,14 @@ class _DceStatementWalk8616:
 
     def _boolean_carrier(
         self, stmt: object, lhs: object, rhs: object, key: _DceKey8616,
-        name_key: _DceNameKey8616 | None, outside_reads: int,
-    ) -> bool:
+        name_key: _DceNameKey8616 | None, outside_reads: cython.longlong,
+    ) -> cython.bint:
         """Delete a consumed boolean carrier when its RHS carries no call."""
         context = self.context
         if not (key[0].startswith("dirty") and context.stmt_is_consumed_boolean_carrier(stmt)):
             return False
         self._bump("dce_boolean_carrier_candidates")
-        rhs_has_call = any(isinstance(node, CFunctionCall) for node in context.iter_with_root(rhs))
+        rhs_has_call = any(isinstance(node, CFunctionCall) for node in builtins.iter(context.iter_with_root(rhs)))
         if self._key_free(key, name_key, outside_reads) and not context.is_observable_lvalue(lhs) and not rhs_has_call:
             self._bump("dce_candidates")
             self._bump("dce_deleted")
@@ -520,18 +547,19 @@ class _DceStatementWalk8616:
         self._bump("dce_boolean_carrier_refused")
         return False
 
+    @cython.ccall
     def _debug_cleanup_refusal_8616(
         self, rhs: object, key: _DceKey8616, name_key: _DceNameKey8616 | None,
-        is_temp_like: bool, outside_reads: int, rhs_unobservable: bool, lhs: object,
+        is_temp_like: cython.bint, outside_reads: cython.longlong, rhs_unobservable: cython.bint, lhs: object,
     ) -> None:
         """Emit the detailed call-cleanup refusal debug record."""
         context = self.context
-        rhs_node_types = tuple(sorted({type(node).__name__ for node in context.iter_with_root(rhs)}))
+        rhs_node_types = tuple(sorted({type(node).__name__ for node in builtins.iter(context.iter_with_root(rhs))}))
         rhs_ops = tuple(
             sorted(
                 {
                     str(op)
-                    for node in context.iter_with_root(rhs)
+                    for node in builtins.iter(context.iter_with_root(rhs))
                     if (op := _dynamic_dce_getattr_8616(node, "op", None)) is not None
                 }
             )
@@ -550,10 +578,11 @@ class _DceStatementWalk8616:
             flush=True,
         )
 
+    @cython.ccall
     def _call_cleanup_carrier(
         self, stmt: object, lhs: object, rhs: object, key: _DceKey8616,
-        name_key: _DceNameKey8616 | None, is_temp_like: bool, outside_reads: int,
-    ) -> bool:
+        name_key: _DceNameKey8616 | None, is_temp_like: cython.bint, outside_reads: cython.longlong,
+    ) -> cython.bint:
         """Delete a consumed call-cleanup carrier when its RHS is unobservable."""
         context = self.context
         if not (is_temp_like or key[0].startswith("dirty")) or not context.stmt_is_consumed_call_cleanup_carrier(stmt):
@@ -576,10 +605,11 @@ class _DceStatementWalk8616:
         self._bump("dce_call_cleanup_carrier_refused")
         return False
 
+    @cython.ccall
     def _frame_anchor(
         self, stmt: object, lhs: object, rhs: object, key: _DceKey8616,
-        name_key: _DceNameKey8616 | None, outside_reads: int,
-    ) -> bool:
+        name_key: object, outside_reads: cython.longlong,
+    ) -> cython.bint:
         """Handle the frame-anchor stack lvalue arm; always consumes the statement."""
         context = self.context
         if not context.is_frame_anchor_stack_lvalue(lhs):
@@ -621,9 +651,10 @@ class _DceStatementWalk8616:
         self._keep(stmt, key)
         return True
 
+    @cython.ccall
     def _arg_overwrite(
         self, stmt: object, lhs: object, rhs: object, key: _DceKey8616, name_key: _DceNameKey8616 | None
-    ) -> bool:
+    ) -> cython.bint:
         """Handle the function-argument overwrite arm; always consumes the statement."""
         context = self.context
         if not context.is_function_argument_lvalue(lhs, key, name_key):
@@ -660,10 +691,11 @@ class _DceStatementWalk8616:
         self._keep(stmt, key)
         return True
 
+    @cython.ccall
     def _overwritten_local(
         self, stmt: object, lhs: object, rhs: object, key: _DceKey8616,
-        name_key: _DceNameKey8616 | None, outside_reads: int,
-    ) -> bool:
+        name_key: _DceNameKey8616 | None, outside_reads: cython.longlong,
+    ) -> cython.bint:
         """Delete a plain local overwritten by a later definition in the block."""
         context = self.context
         if not (
@@ -692,7 +724,8 @@ class _DceStatementWalk8616:
         self._bump("dce_overwritten_local_refused")
         return False
 
-    def _droppable_call_result_8616(self, rhs: object) -> bool:
+    @cython.ccall
+    def _droppable_call_result_8616(self, rhs: object) -> cython.bint:
         """Return whether the RHS is a named non-helper call whose result may drop."""
         context = self.context
         return (
@@ -701,10 +734,11 @@ class _DceStatementWalk8616:
             and not context.is_pure_generated_helper_call(rhs)
         )
 
+    @cython.ccall
     def _call_result_drop(
         self, stmt: object, lhs: object, rhs: object, key: _DceKey8616,
-        name_key: _DceNameKey8616 | None, is_temp_like: bool, outside_reads: int,
-    ) -> bool:
+        name_key: _DceNameKey8616 | None, is_temp_like: cython.bint, outside_reads: cython.longlong,
+    ) -> cython.bint:
         """Replace a dead call-result assignment with the call expression itself."""
         context = self.context
         if not (
@@ -736,10 +770,11 @@ class _DceStatementWalk8616:
         self.block_changed = True
         return True
 
+    @cython.ccall
     def _dirty_cleanup_gate_8616(
         self, lhs: object, rhs: object, key: _DceKey8616,
-        name_key: _DceNameKey8616 | None, outside_reads: int,
-    ) -> bool:
+        name_key: _DceNameKey8616 | None, outside_reads: cython.longlong,
+    ) -> cython.bint:
         """Return the cleanup-mode gate for a dirty temp value."""
         context = self.context
         return (
@@ -751,10 +786,11 @@ class _DceStatementWalk8616:
             and context.rhs_evaluation_is_proven_unobservable(rhs)
         )
 
+    @cython.ccall
     def _dirty_value(
         self, stmt: object, lhs: object, rhs: object, key: _DceKey8616,
-        name_key: _DceNameKey8616 | None, outside_reads: int,
-    ) -> bool:
+        name_key: _DceNameKey8616 | None, outside_reads: cython.longlong,
+    ) -> cython.bint:
         """Delete a dirty-keyed value when proven dead or under cleanup mode."""
         context = self.context
         if not key[0].startswith("dirty"):
@@ -781,9 +817,10 @@ class _DceStatementWalk8616:
         _bump_codegen_attr_8616(codegen, "dce_dirty_value_refused")
         return False
 
+    @cython.ccall
     def _non_temp(
-        self, stmt_index: int, stmt: object, lhs: object, rhs: object,
-        key: _DceKey8616, name_key: _DceNameKey8616 | None, outside_reads: int,
+        self, stmt_index: cython.longlong, stmt: object, lhs: object, rhs: object,
+        key: _DceKey8616, name_key: object, outside_reads: cython.longlong,
     ) -> None:
         """Handle a non-temp assignment via protection or proven-delete gates."""
         context = self.context
@@ -813,9 +850,10 @@ class _DceStatementWalk8616:
         _bump_codegen_attr_8616(codegen, "dce_keep_unknown")
         self._keep(stmt, key)
 
+    @cython.ccall
     def _temp_fallthrough_keep_reason_8616(
-        self, lhs: object, rhs: object, lhs_var: CVariable | None,
-        key: _DceKey8616, name_key: _DceNameKey8616 | None, outside_reads: int,
+        self, lhs: object, rhs: object, lhs_var: object,
+        key: _DceKey8616, name_key: object, outside_reads: cython.longlong,
     ) -> str:
         """Return the keep-reason label for the final temp fallthrough debug line."""
         context = self.context
@@ -829,10 +867,11 @@ class _DceStatementWalk8616:
             return "keep_live_use"
         return "keep_unknown"
 
+    @cython.ccall
     def _temp_keep_ladder_8616(
-        self, stmt: object, lhs: object, rhs: object, lhs_var: CVariable | None,
-        key: _DceKey8616, name_key: _DceNameKey8616 | None, outside_reads: int,
-    ) -> bool:
+        self, stmt: object, lhs: object, rhs: object, lhs_var: object,
+        key: _DceKey8616, name_key: object, outside_reads: cython.longlong,
+    ) -> cython.bint:
         """Record the keep-reason counter; return whether the value is removable."""
         context = self.context
         codegen = context.codegen
@@ -867,9 +906,10 @@ class _DceStatementWalk8616:
             _bump_codegen_attr_8616(codegen, "dce_dead_memory_read_deleted")
         return True
 
+    @cython.ccall
     def _temp_fallthrough(
         self, stmt: object, lhs: object, rhs: object, key: _DceKey8616,
-        name_key: _DceNameKey8616 | None, outside_reads: int,
+        name_key: _DceNameKey8616 | None, outside_reads: cython.longlong,
     ) -> None:
         """Classify a temp-like assignment through the final keep/remove ladder."""
         context = self.context
@@ -904,17 +944,18 @@ class _DceStatementWalk8616:
         self._keep(stmt, key)
 
 
+@cython.ccall
 def _walk_statements_8616(
     context: _DceWalkContext8616,
     statements: object,
-    total_reads: dict[_DceKey8616, int],
-    block_reads: dict[int, dict[_DceKey8616, int]],
-    loop_backedge_reads: dict[int, frozenset[_DceKey8616]],
-    defined_keys: set[_DceKey8616],
-    observable_reads: dict[_DceKey8616, int],
-    dirty_carrier_reads: dict[_DceKey8616, int],
-    all_dirty_carrier_reads: dict[_DceKey8616, int],
-) -> bool:
+    total_reads: object,
+    block_reads: object,
+    loop_backedge_reads: object,
+    defined_keys: object,
+    observable_reads: object,
+    dirty_carrier_reads: object,
+    all_dirty_carrier_reads: object,
+) -> cython.bint:
     """Walk one structured statement block and remove only proven dead values."""
     duplicate_changed = context.prune_adjacent_duplicate_assignments(statements)
     stmts = list(_dynamic_dce_getattr_8616(statements, "statements", ()) or ())

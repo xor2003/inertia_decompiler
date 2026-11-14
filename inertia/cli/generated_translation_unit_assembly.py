@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: preserve legacy CLI helper surface while delegating semantic proof to X86_16 layers.
@@ -9,6 +10,8 @@ contracts without changing any function-body AST.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import subprocess
 from collections.abc import Sequence
@@ -21,6 +24,8 @@ from inertia.cli.generated_external_function_contracts import (
     canonical_external_function_decl,
 )
 from inertia.lowering.gp_word_runtime import coherent_gp_runtime_header_8616
+import dataclasses
+import operator
 
 _PARSE_PREFIX: str = (
     "typedef _Bool bool;\n"
@@ -33,7 +38,7 @@ _PARSE_PREFIX: str = (
     "typedef long clock_t;\n"
     "typedef long time_t;\n"
 )
-_PARSE_PREFIX_NODE_COUNT: int = 9
+_PARSE_PREFIX_NODE_COUNT: cython.longlong = 9
 _RUNTIME_HEADER_SOURCE: str = "inertia_owned_gp_runtime.h"
 
 
@@ -45,35 +50,36 @@ class DeclarationContractKind(StrEnum):
     EXTERNAL_FUNCTION = "external-function"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DeclarationContractConflict:
     """One named declaration for which generated payloads disagree."""
 
     kind: DeclarationContractKind
-    name: str
-    variants: tuple[str, ...]
+    name: object
+    variants: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class GeneratedTranslationUnit:
     """Canonical syntax plus declarations that require an owning-layer fix."""
 
-    source: str
-    function_count: int
-    conflicts: tuple[DeclarationContractConflict, ...]
+    source: object
+    function_count: cython.longlong
+    conflicts: object
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _NamedDeclarationSet:
     """Mutable first-seen declaration state used only during assembly."""
 
     kind: DeclarationContractKind
-    name: str
-    nodes: list[c_ast.Node]
-    variants: list[str]
+    name: object
+    nodes: object
+    variants: object
 
 
-def _preprocess_payload(payload: str, *, compiler: str) -> str:
+@cython.ccall
+def _preprocess_payload(payload: object, *, compiler: object) -> object:
     """Parse macros while retaining provenance of the exact owned ABI header.
 
     Its declarations are checked with all other contracts, but must be exported
@@ -99,7 +105,8 @@ def _preprocess_payload(payload: str, *, compiler: str) -> str:
     return completed.stdout
 
 
-def _parse_payload(payload: str, *, compiler: str) -> tuple[c_ast.Node, ...]:
+@cython.ccall
+def _parse_payload(payload: object, *, compiler: object) -> tuple[c_ast.Node, ...]:
     """Parse one independently validated C payload into top-level syntax nodes."""
     preprocessed = _preprocess_payload(payload, compiler=compiler)
     try:
@@ -109,10 +116,11 @@ def _parse_payload(payload: str, *, compiler: str) -> tuple[c_ast.Node, ...]:
     return tuple(parsed.ext[_PARSE_PREFIX_NODE_COUNT:])
 
 
+@cython.ccall
 def _declaration_identity(
     node: c_ast.Node,
     generator: c_generator.CGenerator,
-) -> tuple[str, str] | None:
+) -> object:
     """Return a stable syntax identity for one non-definition declaration."""
     rendered = generator.visit(node)
     if isinstance(node, c_ast.Typedef):
@@ -126,6 +134,7 @@ def _declaration_identity(
     return None
 
 
+@cython.ccall
 def _declaration_kind(node: c_ast.Node) -> DeclarationContractKind:
     """Classify a parsed top-level declaration without semantic inference."""
     if isinstance(node, c_ast.Typedef) or (
@@ -138,7 +147,8 @@ def _declaration_kind(node: c_ast.Node) -> DeclarationContractKind:
     return DeclarationContractKind.GLOBAL
 
 
-def _is_redundant_aggregate_forward_decl(node: c_ast.Node) -> bool:
+@cython.ccall
+def _is_redundant_aggregate_forward_decl(node: c_ast.Node) -> cython.bint:
     """Return whether a node is only ``struct/union/enum Name;``."""
     return (
         isinstance(node, c_ast.Decl)
@@ -152,12 +162,17 @@ def _is_redundant_aggregate_forward_decl(node: c_ast.Node) -> bool:
     )
 
 
+@cython.ccall
 def _collect_declaration_sets(
-    parsed_payloads: tuple[tuple[c_ast.Node, ...], ...],
-    definition_names: set[str],
+    parsed_payloads: object,
+    definition_names: object,
     generator: c_generator.CGenerator,
 ) -> tuple[list[_NamedDeclarationSet], set[tuple[DeclarationContractKind, str]]]:
     """Group top-level declarations by contract kind and name, preserving order."""
+    declaration_set: object
+    identity: object
+    node: object
+    payload_nodes: object
     declaration_order: list[_NamedDeclarationSet] = []
     declarations_by_key: dict[tuple[DeclarationContractKind, str], _NamedDeclarationSet] = {}
     runtime_keys: set[tuple[DeclarationContractKind, str]] = set()
@@ -174,7 +189,7 @@ def _collect_declaration_sets(
             name, rendered = identity
             kind = _declaration_kind(node)
             key = kind, name
-            if node.coord is not None and node.coord.file == _RUNTIME_HEADER_SOURCE:
+            if node.coord is not None and operator.eq(node.coord.file, _RUNTIME_HEADER_SOURCE):
                 runtime_keys.add(key)
             declaration_set = declarations_by_key.get(key)
             if declaration_set is None:
@@ -188,20 +203,22 @@ def _collect_declaration_sets(
 
 
 def _canonicalize_declaration_sets(
-    declaration_order: list[_NamedDeclarationSet],
+    declaration_order: object,
     generator: c_generator.CGenerator,
 ) -> None:
     """Collapse redundant aggregates and join compatible external declarations."""
+    canonical: object
+    declaration_set: object
     for declaration_set in declaration_order:
         if declaration_set.kind is DeclarationContractKind.TYPE:
             type_definitions = tuple(
                 node
-                for node in declaration_set.nodes
+                for node in iter(declaration_set.nodes)
                 if not _is_redundant_aggregate_forward_decl(node)
             )
             if len(type_definitions) == 1 and all(
                 node is type_definitions[0] or _is_redundant_aggregate_forward_decl(node)
-                for node in declaration_set.nodes
+                for node in iter(declaration_set.nodes)
             ):
                 declaration_set.nodes = [type_definitions[0]]
                 declaration_set.variants = [generator.visit(type_definitions[0])]
@@ -218,18 +235,18 @@ def _canonicalize_declaration_sets(
 def assemble_generated_translation_unit(
     payloads: Sequence[str],
     *,
-    compiler: str = "gcc",
+    compiler: object = "gcc",
 ) -> GeneratedTranslationUnit:
     """Build one declaration table and preserve every parsed function-body AST."""
-    parsed_payloads = tuple(_parse_payload(payload, compiler=compiler) for payload in payloads)
+    parsed_payloads = tuple(_parse_payload(payload, compiler=compiler) for payload in iter(payloads))
     definitions = tuple(
         node
-        for payload_nodes in parsed_payloads
-        for node in payload_nodes
+        for payload_nodes in iter(parsed_payloads)
+        for node in iter(payload_nodes)
         if isinstance(node, c_ast.FuncDef)
     )
-    definition_names = {definition.decl.name for definition in definitions}
-    if len(definition_names) != len(definitions):
+    definition_names = {definition.decl.name for definition in iter(definitions)}
+    if operator.ne(len(definition_names), len(definitions)):
         raise ValueError("generated C contains duplicate function definitions")
 
     generator = c_generator.CGenerator()
@@ -238,22 +255,22 @@ def assemble_generated_translation_unit(
 
     conflicts = tuple(
         DeclarationContractConflict(item.kind, item.name, tuple(item.variants))
-        for item in declaration_order
+        for item in iter(declaration_order)
         if len(item.variants) > 1
     )
     declaration_nodes = [
         node
-        for kind in (
+        for kind in iter((
             DeclarationContractKind.TYPE,
             DeclarationContractKind.GLOBAL,
             DeclarationContractKind.EXTERNAL_FUNCTION,
-        )
-        for item in declaration_order
+        ))
+        for item in iter(declaration_order)
         if item.kind is kind and (item.kind, item.name) not in runtime_keys
-        for node in item.nodes
+        for node in iter(item.nodes)
     ]
-    internal_prototypes = [definition.decl for definition in definitions]
-    merged = c_ast.FileAST([*declaration_nodes, *internal_prototypes, *definitions])
+    internal_prototypes = [definition.decl for definition in iter(definitions)]
+    merged = c_ast.FileAST(list(declaration_nodes) + list(internal_prototypes) + list(definitions))
     return GeneratedTranslationUnit(
         source=(coherent_gp_runtime_header_8616() if runtime_keys else "")
         + generator.visit(merged).rstrip() + "\n",

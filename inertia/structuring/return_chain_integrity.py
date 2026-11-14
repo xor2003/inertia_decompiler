@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Verify materialized return chains on the structured C AST.
 
 Layer: Structuring.
@@ -15,6 +16,8 @@ C nodes carried by third-party angr codegen objects.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -28,6 +31,8 @@ from inertia.pipeline.render_authority import install_codegen_render_integrity_g
 from inertia.validation.tail_validation_fingerprint import _expr_fingerprint
 
 from .return_chains import const_return_value_8616
+import dataclasses
+import builtins
 
 __all__ = [
     "MaterializedReturnChainIntegrity8616",
@@ -50,19 +55,19 @@ class MaterializedReturnChainIntegrityVerdict8616(StrEnum):
     MISSING_RETURN_EXPRESSION = "missing_return_expression"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class MaterializedReturnChainIntegrity8616:
     """Comparison between proven return-chain metadata and the live C AST."""
 
     verdict: MaterializedReturnChainIntegrityVerdict8616
-    expected_values: tuple[int, ...] = ()
-    observed_values: tuple[int, ...] = ()
-    missing_values: tuple[int, ...] = ()
+    expected_values: tuple[cython.longlong, ...] = ()
+    observed_values: tuple[cython.longlong, ...] = ()
+    missing_values: tuple[cython.longlong, ...] = ()
     expected_return_fingerprint: str = ""
     observed_return_fingerprints: tuple[str, ...] = ()
 
     @property
-    def accepted(self) -> bool:
+    def accepted(self) -> cython.bint:
         """Return whether no active materialized return chain was lost."""
         return self.verdict in {
             MaterializedReturnChainIntegrityVerdict8616.NOT_APPLICABLE,
@@ -70,7 +75,7 @@ class MaterializedReturnChainIntegrity8616:
         }
 
     @property
-    def active(self) -> bool:
+    def active(self) -> cython.bint:
         """Return whether Structuring claims a materialized return chain."""
         return self.verdict is not MaterializedReturnChainIntegrityVerdict8616.NOT_APPLICABLE
 
@@ -94,33 +99,37 @@ class _ReturnChainCodegenBoundary8616(Protocol):
     """Initialized return-chain metadata carried by an angr codegen object."""
 
     cfunc: _ReturnChainCFunctionBoundary8616
-    _inertia_return_chain_flattened_8616: bool
-    _inertia_return_chain_suffix_materialized_8616: bool
-    _inertia_return_chain_materialized_values_8616: tuple[int, ...]
-    _inertia_return_chain_final_value_8616: int
-    _inertia_mask_accumulator_materialized_8616: bool
-    _inertia_mask_accumulator_return_fingerprint_8616: str
+    _inertia_return_chain_flattened_8616: cython.bint
+    _inertia_return_chain_suffix_materialized_8616: cython.bint
+    _inertia_return_chain_materialized_values_8616: object
+    _inertia_return_chain_final_value_8616: cython.longlong
+    _inertia_mask_accumulator_materialized_8616: cython.bint
+    _inertia_mask_accumulator_return_fingerprint_8616: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _MaterializedReturnChainRenderGuard8616:
     """Pipeline callback that reassesses the live Structuring AST at render time."""
 
-    def verify(self, codegen: object, *, context: str) -> None:
+    def verify(self, codegen: object, *, context: object) -> None:
         """Consume the Structuring contract through the Pipeline guard protocol."""
         require_materialized_return_chain_integrity_8616(codegen, context=context)
 
 
-def _missing_values_8616(expected: tuple[int, ...], observed: tuple[int, ...]) -> tuple[int, ...]:
+def _missing_values_8616(expected: object, observed: object) -> tuple[cython.longlong, ...]:
     """Return distinct proven values absent from the live return surface."""
     observed_values = frozenset(observed)
-    return tuple(dict.fromkeys(value for value in expected if value not in observed_values))
+    return tuple(dict.fromkeys(value for value in iter(expected) if value not in observed_values))
 
 
+@cython.ccall
 def _chain_activity_8616(
     codegen: object,
-) -> tuple[bool, bool] | MaterializedReturnChainIntegrity8616:
+) -> object:
     """Return (chain_active, mask_active) or an early assessment result."""
+    flattened_marker: object
+    mask_marker: object
+    suffix_marker: object
     marker_missing = object()
     flattened_marker = getattr(codegen, "_inertia_return_chain_flattened_8616", marker_missing)
     suffix_marker = getattr(codegen, "_inertia_return_chain_suffix_materialized_8616", marker_missing)
@@ -147,14 +156,14 @@ def _chain_activity_8616(
 
 def _expected_values_8616(
     typed_codegen: _ReturnChainCodegenBoundary8616,
-    chain_active: bool,
-) -> tuple[int, ...] | MaterializedReturnChainIntegrity8616:
+    chain_active: cython.bint,
+) -> object:
     """Return the expected constant values or an early assessment result."""
     if not chain_active:
         return ()
     try:
         materialized_values = tuple(
-            int(value) for value in typed_codegen._inertia_return_chain_materialized_values_8616
+            int(value) for value in iter(typed_codegen._inertia_return_chain_materialized_values_8616)
         )
         final_value = int(typed_codegen._inertia_return_chain_final_value_8616)
     except (AttributeError, TypeError, ValueError):
@@ -168,10 +177,11 @@ def _expected_values_8616(
     return (*materialized_values, final_value)
 
 
+@cython.ccall
 def _expected_fingerprint_8616(
     typed_codegen: _ReturnChainCodegenBoundary8616,
-    mask_active: bool,
-) -> str | MaterializedReturnChainIntegrity8616:
+    mask_active: cython.bint,
+) -> object:
     """Return the expected return fingerprint or an early assessment result."""
     if not mask_active:
         return ""
@@ -186,12 +196,14 @@ def _expected_fingerprint_8616(
     return expected_return_fingerprint
 
 
+@cython.ccall
 def _proven_root_8616(
     typed_codegen: _ReturnChainCodegenBoundary8616,
-    expected_values: tuple[int, ...],
-    expected_return_fingerprint: str,
+    expected_values: object,
+    expected_return_fingerprint: object,
 ) -> object | MaterializedReturnChainIntegrity8616:
     """Return the proven AST root or a missing-root assessment result."""
+    root: object
     try:
         root = typed_codegen.cfunc.statements
     except AttributeError:
@@ -227,13 +239,13 @@ def assess_materialized_return_chain_integrity_8616(
         return root
     observed_values = tuple(
         value
-        for node in _iter_c_nodes_deep_8616(root)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(root))
         if isinstance(node, CReturn)
         if (value := const_return_value_8616(node.retval)) is not None
     )
     observed_return_fingerprints = tuple(
         _expr_fingerprint(node.retval, None)
-        for node in _iter_c_nodes_deep_8616(root)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(root))
         if isinstance(node, CReturn)
     )
     missing_values = _missing_values_8616(expected_values, observed_values)
@@ -253,12 +265,15 @@ def assess_materialized_return_chain_integrity_8616(
     )
 
 
+@cython.ccall
 def require_materialized_return_chain_integrity_8616(
     codegen: object,
     *,
-    context: str,
+    context: object,
 ) -> MaterializedReturnChainIntegrity8616:
     """Hard-fail when an active return-chain AST no longer matches its proof."""
+    cfunc: object
+    function_addr: object
     integrity = assess_materialized_return_chain_integrity_8616(codegen)
     if integrity.accepted:
         return integrity
@@ -280,6 +295,7 @@ def require_materialized_return_chain_integrity_8616(
     )
 
 
+@cython.ccall
 def install_materialized_return_chain_integrity_guard_8616(codegen: object) -> None:
     """Install the live return-chain verifier through Pipeline governance."""
     install_codegen_render_integrity_guard_8616(codegen, _MaterializedReturnChainRenderGuard8616())

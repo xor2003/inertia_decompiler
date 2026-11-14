@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Validate binary-proven software-interrupt inputs on final C calls.
 
 Layer: Tail Validation.
@@ -12,6 +13,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -34,6 +37,8 @@ from inertia.semantics.software_interrupt_inputs import (
     build_software_interrupt_input_artifact_8616,
     software_interrupt_value_fingerprint_8616,
 )
+import dataclasses
+import operator
 
 __all__ = [
     "SoftwareInterruptValidationIssue8616",
@@ -54,18 +59,18 @@ class SoftwareInterruptValidationIssueKind8616(StrEnum):
     STALE_RESULT_SELECTOR = "stale-result-selector"
 
 
-@dataclass(frozen=True, order=True, slots=True)
+@dataclasses.dataclass(frozen=True, order=True, )
 class SoftwareInterruptValidationIssue8616:
     """One contradiction between interrupt input facts and final C."""
 
     kind: SoftwareInterruptValidationIssueKind8616
-    callsite_addr: int
-    vector: int
+    callsite_addr: cython.longlong
+    vector: cython.longlong
     argument_index: int | None = None
-    expected: str | None = None
-    actual: str | None = None
+    expected: object = None
+    actual: object = None
 
-    def token(self) -> str:
+    def token(self) -> object:
         """Return a deterministic canonical validation token."""
         token = (
             f"software-interrupt:{self.kind}:callsite={self.callsite_addr:#x}:"
@@ -80,25 +85,25 @@ class SoftwareInterruptValidationIssue8616:
         return token
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SoftwareInterruptValidationReport8616:
     """Closed evidence-loop report for final interrupt call inputs."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
     issues: tuple[SoftwareInterruptValidationIssue8616, ...] = ()
 
     @property
-    def passed(self) -> bool:
+    def passed(self) -> cython.bint:
         """Return whether every classified interrupt input survived."""
-        return self.failure_count == 0 and self.classified_fact_count == self.materialized_count
+        return self.failure_count == 0 and operator.eq(self.classified_fact_count, self.materialized_count)
 
     def issue_tokens(self) -> tuple[str, ...]:
         """Return deterministic issue tokens for the final tail snapshot."""
-        return tuple(issue.token() for issue in self.issues)
+        return tuple(issue.token() for issue in iter(self.issues))
 
 
 class _CodegenInterruptSurface8616(Protocol):
@@ -121,6 +126,7 @@ class _CVariableSurface8616(Protocol):
     variable: object
 
 
+@cython.ccall
 def _artifact_8616(codegen: object) -> SoftwareInterruptInputArtifact8616 | None:
     """Read or rebuild the Semantics-owned interrupt input artifact."""
     surface = cast(_CodegenInterruptSurface8616, codegen)
@@ -134,8 +140,11 @@ def _artifact_8616(codegen: object) -> SoftwareInterruptInputArtifact8616 | None
         return None
 
 
+@cython.ccall
 def _callsite_addr_8616(call: structured_c.CFunctionCall) -> int | None:
     """Read the exact instruction address from a final C call."""
+    addr: object
+    owned_tags: object
     try:
         tags = cast(_TaggedCallSurface8616, call).tags
     except AttributeError:
@@ -147,7 +156,8 @@ def _callsite_addr_8616(call: structured_c.CFunctionCall) -> int | None:
     return addr if isinstance(addr, int) else None
 
 
-def _constant_fingerprint_8616(node: structured_c.CConstant) -> str | None:
+@cython.ccall
+def _constant_fingerprint_8616(node: structured_c.CConstant) -> object:
     """Fingerprint one integer constant with a proven byte width."""
     if isinstance(node.type, SimTypeChar):
         size = 1
@@ -158,7 +168,8 @@ def _constant_fingerprint_8616(node: structured_c.CConstant) -> str | None:
     return f"const:{node.value:#x}:size{size}"
 
 
-def _variable_fingerprint_8616(node: structured_c.CVariable) -> str | None:
+@cython.ccall
+def _variable_fingerprint_8616(node: structured_c.CVariable) -> object:
     """Fingerprint one stack or register variable with proven coordinates."""
     try:
         variable = cast(_CVariableSurface8616, node).variable
@@ -171,8 +182,12 @@ def _variable_fingerprint_8616(node: structured_c.CVariable) -> str | None:
     return None
 
 
-def _actual_value_fingerprint_8616(node: object) -> str | None:
+@cython.ccall
+def _actual_value_fingerprint_8616(node: object) -> object:
     """Fingerprint the final C subset permitted by interrupt lowering."""
+    gp_view: object
+    lhs: object
+    rhs: object
     gp_view = runtime_gp_expression_view_8616(node)
     if gp_view is not None:
         return f"reg:{gp_view.register_name}:size{gp_view.width}"
@@ -189,12 +204,17 @@ def _actual_value_fingerprint_8616(node: object) -> str | None:
     return None
 
 
+@cython.ccall
 def _validate_fact_8616(
     fact: SoftwareInterruptInputFact8616,
-    calls: tuple[structured_c.CFunctionCall, ...],
-    nodes: tuple[object, ...],
-) -> tuple[bool, list[SoftwareInterruptValidationIssue8616]]:
+    calls: object,
+    nodes: object,
+) -> tuple[cython.bint, list[SoftwareInterruptValidationIssue8616]]:
     """Validate one fact against one exact final callsite."""
+    match: object
+    actual_value: object
+    expected_value: object
+    index: object
     match = select_software_interrupt_call_8616(calls, fact)
     if match is None:
         return False, [
@@ -213,7 +233,7 @@ def _validate_fact_8616(
                 fact.vector,
             )
         ]
-    if len(args) != len(fact.argument_values):
+    if operator.ne(len(args), len(fact.argument_values)):
         return False, [
             SoftwareInterruptValidationIssue8616(
                 SoftwareInterruptValidationIssueKind8616.ARGUMENT_COUNT_MISMATCH,
@@ -258,22 +278,22 @@ def _validate_fact_8616(
 
 
 def _has_stale_selector_return_8616(
-    nodes: tuple[object, ...],
+    nodes: object,
     fact: SoftwareInterruptInputFact8616,
     call: structured_c.CFunctionCall,
-) -> bool:
+) -> cython.bint:
     """Detect a call result discarded for its pre-call selector constant."""
     assigned = any(
         isinstance(node, structured_c.CAssignment) and node.rhs is call
-        for node in nodes
+        for node in iter(nodes)
     )
     if not assigned:
         return False
     return any(
         isinstance(node, structured_c.CReturn)
         and isinstance(node.retval, structured_c.CConstant)
-        and node.retval.value == fact.selector_value
-        for node in nodes
+        and operator.eq(node.retval.value, fact.selector_value)
+        for node in iter(nodes)
     )
 
 
@@ -284,6 +304,8 @@ def validate_software_interrupt_inputs_8616(
     query_index: StructuredAstQueryIndex8616 | None = None,
 ) -> SoftwareInterruptValidationReport8616:
     """Require every known binary-proven interrupt input on final C calls."""
+    artifact: object
+    fact: object
     if query_index is not None:
         query_index.require_root(root)
     artifact = _artifact_8616(codegen)
@@ -296,12 +318,12 @@ def validate_software_interrupt_inputs_8616(
             0,
             expected=f"{kind}:{detail}",
         )
-        for callsite_addr, kind, detail in artifact.refusals
+        for callsite_addr, kind, detail in iter(artifact.refusals)
     ]
     nodes = query_index.nodes if query_index is not None else tuple(_iter_c_nodes_deep_8616(root))
     calls = tuple(
         node
-        for node in nodes
+        for node in iter(nodes)
         if isinstance(node, structured_c.CFunctionCall)
     )
     materialized_count = 0

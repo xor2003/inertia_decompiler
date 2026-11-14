@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/angr compatibility.
 
 Responsibility: deterministic structured-codegen rendering for already-proven facts.
@@ -5,6 +6,7 @@ Forbidden: semantic recovery from rendered C, source, COD, or assembly text.
 """
 
 from __future__ import annotations
+import cython
 
 import typing
 from collections.abc import Iterable, Iterator
@@ -15,23 +17,26 @@ from angr.knowledge_plugins.functions.function import Function
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable, SimTemporaryVariable
 
 from inertia.semantics.callee_name_normalization import normalize_callee_name_8616
+import operator
 
 __all__ = ["install_structured_codegen_sort_compat_8616", "repair_cfunctioncall_render_target_8616", "repair_cfunctioncall_render_targets_8616", "set_cfunctioncall_render_name_8616"]
 
 
-def _stable_ident_key_8616(value: object | None) -> tuple[int, str, str]:
+@cython.ccall
+def _stable_ident_key_8616(value: object) -> tuple[cython.longlong, str, str]:
     if value is None:
         return (0, "", "")
     return (1, type(value).__name__, str(value))
 
 
-def _stable_offset_key_8616(value: object | None) -> tuple[int, int | str]:
+@cython.ccall
+def _stable_offset_key_8616(value: object | None) -> tuple[cython.longlong, int | str]:
     if isinstance(value, int):
         return (0, value)
     return (1, str(value))
 
 
-def install_structured_codegen_sort_compat_8616() -> bool:
+def install_structured_codegen_sort_compat_8616() -> cython.bint:
     """Make angr C local-var sorting deterministic for mixed/None idents.
 
     x86-16 recovery can produce SimStackVariable instances that represent the
@@ -43,6 +48,8 @@ def install_structured_codegen_sort_compat_8616() -> bool:
     Dynamic attribute boundary: this patches third-party angr renderer classes
     and reads optional third-party angr SimVariable identity fields.
     """
+    cfunc_cls: object
+    current: object
     cfunc_cls = getattr(structured_c, "CFunction", None)
     if cfunc_cls is None:
         return False
@@ -50,8 +57,9 @@ def install_structured_codegen_sort_compat_8616() -> bool:
     if getattr(current, "_inertia_x86_16_stable_sort", False):
         return False
 
-    def _sort_local_vars(local_vars: Iterable[object]) -> list[object]:
+    def _sort_local_vars(local_vars: Iterable[object]) -> object:
         """Sort local variables across the dynamic third-party angr boundary."""
+        var: object
         reg_vars, stack_vars, mem_vars = [], [], []
         temporary_vars: list[SimTemporaryVariable] = []
         for var in local_vars:
@@ -90,8 +98,12 @@ def install_structured_codegen_sort_compat_8616() -> bool:
 
 def _iter_c_nodes_8616(root: object) -> Iterator[object]:
     """Iterate C AST nodes across the dynamic third-party angr/codegen boundary."""
+    node: object
+    value: object
+    attr: object
+    item: object
     stack = [root]
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     while stack:
         node = stack.pop()
         if node is None or not isinstance(node, structured_c.CConstruct):
@@ -132,8 +144,10 @@ def _iter_c_nodes_8616(root: object) -> Iterator[object]:
                 stack.append(value)
 
 
-def _kb_function_for_addr_8616(project: object, addr: int) -> object | None:
+@cython.ccall
+def _kb_function_for_addr_8616(project: object, addr: cython.longlong) -> object | None:
     """Find an existing function without discovery or mutating the native KB."""
+    kb_functions: object
     # Dynamic boundary: angr/plugin projects and KBs are not owned Inertia contracts.
     kb_functions = getattr(getattr(project, "kb", None), "functions", None)
     if kb_functions is None:
@@ -144,6 +158,7 @@ def _kb_function_for_addr_8616(project: object, addr: int) -> object | None:
         return None
 
 
+@cython.ccall
 def _copy_function_render_context_8616(function: Function, context: Function) -> Function:
     """Keep a native declaration while restoring only foreign render back-references."""
     restored = copy(function)
@@ -157,6 +172,7 @@ def _copy_function_render_context_8616(function: Function, context: Function) ->
     return restored
 
 
+@cython.ccall
 def _detached_native_callee_8616(call: structured_c.CFunctionCall) -> object | None:
     """Return the callee only when it is a detached native Function-like object.
 
@@ -164,7 +180,10 @@ def _detached_native_callee_8616(call: structured_c.CFunctionCall) -> object | N
     nodes; the callee may lack ``project`` or raise on attribute access, so
     detection probes the dynamic surface rather than owned fields.
     """
-    callee: object | None = getattr(call, "callee_func", None)
+    callee: object
+    callee_project: object
+    module: object
+    callee = getattr(call, "callee_func", None)
     if callee is None:
         return None
     module = getattr(type(callee), "__module__", "")
@@ -181,7 +200,8 @@ def _detached_native_callee_8616(call: structured_c.CFunctionCall) -> object | N
     return callee
 
 
-def repair_cfunctioncall_render_target_8616(project: object | None, call: structured_c.CFunctionCall) -> bool:
+@cython.ccall
+def repair_cfunctioncall_render_target_8616(project: object, call: structured_c.CFunctionCall) -> cython.bint:
     """Restore native render context while preserving the call's selected ABI.
 
     Native Function copies can lose their project. Replacing their declaration
@@ -191,6 +211,7 @@ def repair_cfunctioncall_render_target_8616(project: object | None, call: struct
     resolvable project, retain all semantic metadata and disable name ambiguity
     rendering. This does not prove an unresolved target for any semantic owner.
     """
+    callee: object
     callee = _detached_native_callee_8616(call)
     if callee is None:
         return False
@@ -203,7 +224,7 @@ def repair_cfunctioncall_render_target_8616(project: object | None, call: struct
     if not isinstance(replacement, str) or not replacement:
         replacement = normalize_callee_name_8616(getattr(call, "callee_target", None))
     changed = False
-    if isinstance(replacement, str) and replacement and getattr(call, "callee_target", None) != replacement:
+    if isinstance(replacement, str) and replacement and operator.ne(getattr(call, "callee_target", None), replacement):
         call.callee_target = replacement
         changed = True
     if getattr(call, "callee_func", None) is not None:
@@ -212,8 +233,9 @@ def repair_cfunctioncall_render_target_8616(project: object | None, call: struct
     return changed
 
 
+@cython.ccall
 def set_cfunctioncall_render_name_8616(
-    project: object | None, call: structured_c.CFunctionCall, target_addr: int, identifier: str,
+    project: object, call: structured_c.CFunctionCall, target_addr: cython.longlong, identifier: object,
 ) -> bool | None:
     """Choose a C label for an existing native target without deleting its ABI.
 
@@ -223,18 +245,18 @@ def set_cfunctioncall_render_name_8616(
     source declaration and KB stay unchanged. Repeated formatting is stable.
     """
     function = call.callee_func
-    if not isinstance(function, Function) or function.addr != target_addr or project is None:
+    if not isinstance(function, Function) or operator.ne(function.addr, target_addr) or project is None:
         return None
     changed = repair_cfunctioncall_render_target_8616(project, call)
     function = call.callee_func
     if not isinstance(function, Function) or function.project is not project:
         return None
-    if function.name != identifier:
+    if operator.ne(function.name, identifier):
         named = _copy_function_render_context_8616(function, function)
         named.name = identifier
         call.callee_func = named
         changed = True
-    if call.callee_target != identifier:
+    if operator.ne(call.callee_target, identifier):
         call.callee_target = identifier
         changed = True
     if call.show_demangled_name or call.show_disambiguated_name:
@@ -244,7 +266,8 @@ def set_cfunctioncall_render_name_8616(
     return changed
 
 
-def repair_cfunctioncall_render_targets_8616(codegen: object) -> int:
+@cython.ccall
+def repair_cfunctioncall_render_targets_8616(codegen: object) -> cython.longlong:
     """Repair copied call-target metadata before angr C rendering.
 
     angr's ``CFunctionCall`` renderer checks callee-name ambiguity through
@@ -255,6 +278,9 @@ def repair_cfunctioncall_render_targets_8616(codegen: object) -> int:
     Dynamic attribute boundary: codegen, cfunc, and C AST nodes are third-party
     angr/codegen objects with optional renderer metadata.
     """
+    project: object
+    root: object
+    node: object
     project = getattr(codegen, "project", None)
     root = getattr(getattr(codegen, "cfunc", None), "statements", None)
     if root is None:

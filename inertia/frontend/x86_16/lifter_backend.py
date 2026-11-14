@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/runtime.
 
 Responsibility: require a verified Cython build for normal Python VEX lifting,
@@ -7,6 +8,7 @@ Manifest verification itself is owned by ``inertia.native_bundle``.
 """
 
 from __future__ import annotations
+import cython
 
 import os
 from enum import StrEnum
@@ -38,18 +40,21 @@ class LifterBackend(StrEnum):
     AUTO = "auto"
 
 
+@cython.ccall
 def _verified_extension_directory(manifest_path: Path, confinement: Path, source: Path) -> Path | None:
     """Apply the shared schema/ABI/source/digest/confinement checks to one manifest."""
     directory: Path | None = verified_bundle_directory(manifest_path, confinement, source, LIFTER_EXTENSION)
     return directory
 
 
+@cython.ccall
 def verified_extension_directory(root: Path) -> Path | None:
     """Return a source/ABI/artifact-matched build, or reject an obsolete cache."""
     cache = root / ".cache/cython-vex"
     return _verified_extension_directory(cache / "active.json", cache, root / LIFTER_SOURCE)
 
 
+@cython.ccall
 def verified_packaged_extension_directory(package_dir: Path) -> Path | None:
     """Return a verified extension bundled beside an isolated copied lifter.
 
@@ -62,7 +67,8 @@ def verified_packaged_extension_directory(package_dir: Path) -> Path | None:
     return _verified_extension_directory(bundle / "active.json", bundle, package_dir / Path(LIFTER_SOURCE).name)
 
 
-def activate_lifter_backend(package_path: list[str], *, package_dir: Path | None = None) -> LifterBackend:
+@cython.ccall
+def activate_lifter_backend(package_path: object, *, package_dir: Path | None = None) -> LifterBackend:
     """Prepend a verified extension directory before the lifter's first import.
 
     Normal startup requires Cython and fails loudly if its build is absent or
@@ -75,6 +81,8 @@ def activate_lifter_backend(package_path: list[str], *, package_dir: Path | None
     An explicit package directory binds selection to the actual lifter owner
     while its verifier and source packages migrate independently.
     """
+    directory: object
+    value: object
     value = os.environ.get("INERTIA_VEX_BACKEND", LifterBackend.CYTHON.value)
     try:
         mode = LifterBackend(value)

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Replay proven call-output stack-object types after AST regeneration.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Protocol, cast
 
@@ -27,6 +30,7 @@ from .call_output_stack_objects import (
     _prepare_object_type_8616,
     _struct_type_for_fact_8616,
 )
+import operator
 
 __all__ = ["reapply_call_output_stack_object_types_8616"]
 
@@ -37,14 +41,16 @@ class _CallOutputReplayCodegen8616(_CallOutputCodegen8616, Protocol):
     _inertia_call_output_stack_object_type_replay_stats_8616: CallOutputStackObjectStats8616
 
 
+@cython.ccall
 def _all_field_projections_present_8616(
     codegen: _CallOutputReplayCodegen8616,
     fact: CallOutputStackObjectFact8616,
     base_variable: SimStackVariable,
-) -> bool:
+) -> cython.bint:
     """Prove that every persisted field still exists on the rebound base."""
-    expected = {(field.relative_offset, field.name) for field in fact.fields}
-    observed: set[tuple[int, str]] = set()
+    node: object
+    expected = {(field.relative_offset, field.name) for field in iter(fact.fields)}
+    observed: set[tuple[cython.longlong, str]] = set()
     for node in _iter_c_nodes_deep_8616(codegen.cfunc.statements):
         if not isinstance(node, CVariableField) or node.var_is_ptr:
             continue
@@ -58,8 +64,10 @@ def _all_field_projections_present_8616(
     return bool(expected) and expected <= observed
 
 
-def reapply_call_output_stack_object_types_8616(codegen: object) -> bool:
+def reapply_call_output_stack_object_types_8616(codegen: object) -> cython.bint:
     """Restore exact persisted call-output object types after regeneration."""
+    current_base: object
+    fact: object
     boundary = cast(_CallOutputReplayCodegen8616, codegen)
     try:
         facts = boundary._inertia_call_output_stack_object_facts_8616
@@ -78,9 +86,9 @@ def reapply_call_output_stack_object_types_8616(codegen: object) -> bool:
     for fact in facts:
         matching = tuple(
             base
-            for base in call_bases
-            if base.callsite_addr == fact.callsite_addr
-            and base.base_offset == fact.base_offset
+            for base in iter(call_bases)
+            if operator.eq(base.callsite_addr, fact.callsite_addr)
+            and operator.eq(base.base_offset, fact.base_offset)
             and base.base_cvar is not None
         )
         if len(matching) != 1:
@@ -104,7 +112,7 @@ def reapply_call_output_stack_object_types_8616(codegen: object) -> bool:
         )
         has_inner_boundary = any(
             fact.base_offset < boundary_offset < fact.boundary_offset
-            for boundary_offset in aggregate_boundaries
+            for boundary_offset in iter(aggregate_boundaries)
         )
         if has_inner_boundary or not _all_field_projections_present_8616(
             boundary,
@@ -117,7 +125,7 @@ def reapply_call_output_stack_object_types_8616(codegen: object) -> bool:
         struct_type = _struct_type_for_fact_8616(rebound)
         was_materialized = (
             isinstance(current_base.variable_type, SimStruct)
-            and current_base.variable_type.name == struct_type.name
+            and operator.eq(current_base.variable_type.name, struct_type.name)
         )
         declarations_changed = _prepare_object_type_8616(boundary, rebound, struct_type)
         if isinstance(current_base.variable_type, SimStruct):

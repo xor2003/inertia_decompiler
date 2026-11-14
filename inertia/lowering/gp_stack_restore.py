@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize Alias-proven 16-bit GP saves and restores.
 
 Layer: Types/Lowering.
@@ -11,6 +12,8 @@ version-dependent child containers and tags.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import copy
 import logging
@@ -40,6 +43,9 @@ from .gp_stack_restore_identity import (
     matches_gp_restore_stack_bytes_8616,
 )
 from .segment_access_policy import instruction_addrs_from_node_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "GPStackRestoreLoweringStats8616",
@@ -52,7 +58,7 @@ _GP_STACK_SAVE_ANCHOR_TAG_8616 = "inertia_x86_16_gp_stack_save_anchor"
 class _ArchRegisters8616(Protocol):
     """Third-party architecture register map used for physical identity."""
 
-    registers: Mapping[str, tuple[int, int]]
+    registers: Mapping[str, tuple[cython.longlong, cython.longlong]]
 
 
 class _Project8616(Protocol):
@@ -64,10 +70,10 @@ class _Project8616(Protocol):
 class _CFunction8616(Protocol):
     """Structured function surface consumed by this lowering owner."""
 
-    addr: int
+    addr: cython.longlong
     statements: object
-    unified_local_vars: dict[object, object]
-    variables_in_use: dict[object, object]
+    unified_local_vars: object
+    variables_in_use: object
 
 
 class _CodegenBoundary8616(Protocol):
@@ -77,60 +83,62 @@ class _CodegenBoundary8616(Protocol):
     project: _Project8616 | None
     _inertia_stack_register_restore_artifact_8616: SegmentStackRestoreArtifact8616
     _inertia_gp_stack_restore_lowering_stats_8616: GPStackRestoreLoweringStats8616
-    _inertia_gp_stack_restore_materialized_pairs_8616: frozenset[tuple[int, int, str]]
-    _inertia_gp_stack_restore_snapshots_8616: tuple[structured_c.CVariable, ...]
+    _inertia_gp_stack_restore_materialized_pairs_8616: object
+    _inertia_gp_stack_restore_snapshots_8616: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class GPStackRestoreLoweringStats8616:
     """Closed evidence census for exact GP stack save/restore lowering."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every classified fact reached a terminal lane."""
         return bool(
-            self.raw_fact_count == self.normalized_fact_count
-            and self.normalized_fact_count == self.classified_fact_count
-            and self.classified_fact_count == self.materialized_count + self.failure_count
+            operator.eq(self.raw_fact_count, self.normalized_fact_count)
+            and operator.eq(self.normalized_fact_count, self.classified_fact_count)
+            and operator.eq(self.classified_fact_count, self.materialized_count + self.failure_count)
         )
 
 
+@cython.ccall
 def _statement_containers_8616(root: object) -> tuple[structured_c.CStatements, ...]:
     """Return deterministic structured statement containers under one root."""
     return tuple(
         {
             id(node): node
-            for node in (root, *_iter_c_nodes_deep_8616(root))
+            for node in iter((root, ) + tuple(_iter_c_nodes_deep_8616(root)))
             if isinstance(node, structured_c.CStatements)
         }.values()
     )
 
 
 def _snapshot_insertion_point_8616(
-    containers: tuple[structured_c.CStatements, ...],
-    save_addr: int,
-    restore_addr: int,
-    restore_register: str,
-) -> tuple[structured_c.CStatements, int] | None:
+    containers: object,
+    save_addr: cython.longlong,
+    restore_addr: cython.longlong,
+    restore_register: object,
+) -> object:
     """Find the unique earliest structured statement following a proven save."""
+    container: object
     anchor_identity = (save_addr, restore_addr, restore_register)
-    anchored: list[tuple[structured_c.CStatements, int]] = []
+    anchored: list[tuple[structured_c.CStatements, cython.longlong]] = []
     for container in containers:
         anchored_indices = tuple(
             index
-            for index, statement in enumerate(container.statements)
+            for index, statement in builtins.iter(enumerate(container.statements))
             if isinstance(getattr(statement, "tags", None), dict)
-            and statement.tags.get(_GP_STACK_SAVE_ANCHOR_TAG_8616) == anchor_identity
+            and operator.eq(statement.tags.get(_GP_STACK_SAVE_ANCHOR_TAG_8616), anchor_identity)
         )
         if anchored_indices:
             anchored.append((container, min(anchored_indices)))
-    unique_anchors = {(id(container), index) for container, index in anchored}
+    unique_anchors = {(id(container), index) for container, index in iter(anchored)}
     if len(unique_anchors) == 1:
         return anchored[0]
     if unique_anchors:
@@ -139,9 +147,9 @@ def _snapshot_insertion_point_8616(
     candidates = _snapshot_insertion_candidates_8616(containers, save_addr, restore_addr)
     if not candidates:
         return None
-    best_score = min(candidate[:3] for candidate in candidates)
-    owners = tuple(candidate for candidate in candidates if candidate[:3] == best_score)
-    unique = {(id(container), index) for _addr, _span, _size, container, index in owners}
+    best_score = min(candidate[:3] for candidate in iter(candidates))
+    owners = tuple(candidate for candidate in iter(candidates) if operator.eq(candidate[:3], best_score))
+    unique = {(id(container), index) for _addr, _span, _size, container, index in iter(owners)}
     if len(unique) != 1:
         return None
     _addr, _size, _span, container, index = owners[0]
@@ -149,18 +157,21 @@ def _snapshot_insertion_point_8616(
 
 
 def _snapshot_insertion_candidates_8616(
-    containers: tuple[structured_c.CStatements, ...],
-    save_addr: int,
-    restore_addr: int,
-) -> list[tuple[int, int, int, structured_c.CStatements, int]]:
+    containers: object,
+    save_addr: cython.longlong,
+    restore_addr: cython.longlong,
+) -> object:
     """Score each container holding a statement after the proven save."""
-    candidates: list[tuple[int, int, int, structured_c.CStatements, int]] = []
+    container: object
+    index: object
+    statement: object
+    candidates: list[tuple[cython.longlong, cython.longlong, cython.longlong, structured_c.CStatements, cython.longlong]] = []
     for container in containers:
         container_addrs = tuple(
             instruction_addrs_from_node_8616(statement)
-            for statement in container.statements
+            for statement in iter(container.statements)
         )
-        following_indices: list[tuple[int, int]] = []
+        following_indices: list[tuple[cython.longlong, cython.longlong]] = []
         for index, statement in enumerate(container.statements):
             if not isinstance(
                 statement,
@@ -176,15 +187,15 @@ def _snapshot_insertion_candidates_8616(
                 continue
             following = tuple(
                 address
-                for address in statement_addrs
+                for address in iter(statement_addrs)
                 if save_addr < address <= restore_addr
             )
             if following:
                 following_indices.append((min(following), index))
         if following_indices:
-            earliest_addr = min(address for address, _index in following_indices)
+            earliest_addr = min(address for address, _index in iter(following_indices))
             insertion_index = min(
-                index for address, index in following_indices if address == earliest_addr
+                index for address, index in iter(following_indices) if address == earliest_addr
             )
             candidates.append(
                 (
@@ -200,24 +211,26 @@ def _snapshot_insertion_candidates_8616(
 
 def _snapshot_variable_8616(
     fact: SegmentStackRestoreFact8616,
-    containers: tuple[structured_c.CStatements, ...],
+    containers: object,
     *,
     codegen: object,
     project: _Project8616,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> structured_c.CVariable:
     """Build an unpublished snapshot for the Alias-proven save range."""
+    exact_exemplar: object
+    naming_exemplar: object
     offset = min(fact.stack_offsets)
     exemplars = tuple(
         node
-        for container in containers
-        for node in _iter_c_nodes_deep_8616(container)
+        for container in iter(containers)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(container))
         if isinstance(node, structured_c.CVariable)
         and isinstance(node.variable, SimStackVariable)
-        and node.variable.offset == offset
+        and operator.eq(node.variable.offset, offset)
     )
     exact_exemplar = next(
-        (node for node in exemplars if node.variable.size == 2),
+        (node for node in iter(exemplars) if node.variable.size == 2),
         None,
     )
     naming_exemplar = exact_exemplar or next(iter(exemplars), None)
@@ -252,9 +265,9 @@ def _snapshot_variable_8616(
 
 def _log_restore_refusal_8616(
     fact: SegmentStackRestoreFact8616,
-    insertion: tuple[structured_c.CStatements, int] | None,
+    insertion: object,
     source: object,
-    containers: tuple[structured_c.CStatements, ...],
+    containers: object,
 ) -> None:
     """Log a refused snapshot placement when debug output is enabled."""
     if not os.environ.get("INERTIA_DEBUG_GP_STACK_RESTORE"):
@@ -266,33 +279,33 @@ def _log_restore_refusal_8616(
         insertion,
         source,
         tuple(
-            tuple(sorted(instruction_addrs_from_node_8616(statement)))
-            for container in containers
-            for statement in container.statements
+            tuple(sorted(tuple(instruction_addrs_from_node_8616(statement))))
+            for container in iter(containers)
+            for statement in iter(container.statements)
         ),
     )
 
 
 def _log_no_replacement_refusal_8616(
     fact: SegmentStackRestoreFact8616,
-    containers: tuple[structured_c.CStatements, ...],
-    replacement_count: int,
+    containers: object,
+    replacement_count: cython.longlong,
 ) -> None:
     """Log observed byte offsets when no proven POP replacement matched."""
     if not os.environ.get("INERTIA_DEBUG_GP_STACK_RESTORE"):
         return
     byte_offsets = tuple(
         (
-            sorted(instruction_addrs_from_node_8616(statement)),
+            sorted(tuple(instruction_addrs_from_node_8616(statement))),
             tuple(
                 (node.variable.base, node.variable.offset, node.variable.size)
-                for node in _iter_c_nodes_deep_8616(statement)
+                for node in builtins.iter(_iter_c_nodes_deep_8616(statement))
                 if isinstance(node, structured_c.CVariable)
                 and isinstance(node.variable, SimStackVariable)
             ),
         )
-        for container in containers
-        for statement in tuple(container.statements)
+        for container in iter(containers)
+        for statement in builtins.iter(tuple(container.statements))
         if isinstance(statement, (structured_c.CAssignment, structured_c.CReturn))
         and fact.restore_instruction_addr in instruction_addrs_from_node_8616(statement)
     )
@@ -306,17 +319,19 @@ def _log_no_replacement_refusal_8616(
     )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _GpRestoreReplacer8616:
     """Replace the syntax projection only inside the proven POP owner."""
 
     fact: SegmentStackRestoreFact8616
     codegen: object
     snapshot: structured_c.CVariable
-    replacement_count: int = 0
+    replacement_count: cython.longlong = 0
 
+    @cython.ccall
     def replace_restore(self, node: object) -> object:
         """Return the snapshot copy for matching nodes, else the node."""
+        node_tags: object
         # Dynamic angr C-AST boundary: tags are the durable typed identity
         # carried through later structured-tree cloning and simplification.
         node_tags = getattr(node, "tags", None)
@@ -328,7 +343,7 @@ class _GpRestoreReplacer8616:
         if (
             isinstance(node, structured_c.CVariable)
             and isinstance(node_tags, dict)
-            and node_tags.get("inertia_x86_16_gp_stack_restore") == restore_identity
+            and operator.eq(node_tags.get("inertia_x86_16_gp_stack_restore"), restore_identity)
         ):
             self.replacement_count += 1
             return node
@@ -344,6 +359,7 @@ class _GpRestoreReplacer8616:
         return replacement
 
 
+@cython.ccall
 def _snapshot_save_assignment_8616(
     fact: SegmentStackRestoreFact8616,
     snapshot: structured_c.CVariable,
@@ -369,10 +385,13 @@ def _snapshot_save_assignment_8616(
 
 def _anchor_save_following_statements_8616(
     target: structured_c.CStatements,
-    index: int,
+    index: cython.longlong,
     fact: SegmentStackRestoreFact8616,
 ) -> None:
     """Tag later statements whose addresses fall inside the save window."""
+    saved_instruction_addr: object
+    statement_tags: object
+    statement: object
     saved_instruction_addr = fact.saved_instruction_addr
     if saved_instruction_addr is None:
         return
@@ -385,7 +404,7 @@ def _anchor_save_following_statements_8616(
         addresses = instruction_addrs_from_node_8616(statement)
         if not any(
             saved_instruction_addr < address < fact.restore_instruction_addr
-            for address in addresses
+            for address in iter(addresses)
         ):
             continue
         statement_tags = getattr(statement, "tags", None)
@@ -398,7 +417,7 @@ def _anchor_save_following_statements_8616(
 def _log_restore_placement_8616(
     fact: SegmentStackRestoreFact8616,
     target: structured_c.CStatements,
-    index: int,
+    index: cython.longlong,
 ) -> None:
     """Log the chosen insertion index when debug output is enabled."""
     if not os.environ.get("INERTIA_DEBUG_GP_STACK_RESTORE"):
@@ -411,22 +430,28 @@ def _log_restore_placement_8616(
         tuple(
             (
                 type(statement).__name__,
-                tuple(sorted(instruction_addrs_from_node_8616(statement))),
+                tuple(sorted(tuple(instruction_addrs_from_node_8616(statement)))),
             )
-            for statement in target.statements
+            for statement in iter(target.statements)
         ),
     )
 
 
+@cython.ccall
 def _materialize_fact_8616(
     fact: SegmentStackRestoreFact8616,
-    containers: tuple[structured_c.CStatements, ...],
+    containers: object,
     *,
     codegen: object,
     project: _Project8616,
-    function_addr: int,
-) -> bool:
+    function_addr: cython.longlong,
+) -> cython.bint:
     """Materialize one wide stack snapshot and consume its POP recomposition."""
+    cfunc: object
+    insertion: object
+    source: object
+    container: object
+    statement: object
     if fact.saved_instruction_addr is None or fact.saved_register is None:
         return False
     insertion = _snapshot_insertion_point_8616(
@@ -479,8 +504,11 @@ def _materialize_fact_8616(
     return True
 
 
-def materialize_gp_stack_restores_8616(codegen: object) -> bool:
+def materialize_gp_stack_restores_8616(codegen: object) -> cython.bint:
     """Materialize every Alias-proven 16-bit GP stack restoration fact."""
+    cfunc: object
+    project: object
+    fact: object
     boundary = cast(_CodegenBoundary8616, codegen)
     empty = GPStackRestoreLoweringStats8616(0, 0, 0, 0, 0)
     try:
@@ -499,25 +527,25 @@ def materialize_gp_stack_restores_8616(codegen: object) -> bool:
         return False
     facts = tuple(
         fact
-        for fact in artifact.facts
+        for fact in iter(artifact.facts)
         if fact.verdict is SegmentStackRestoreVerdict8616.PROVEN
     )
     containers = _statement_containers_8616(cfunc.statements)
     live_assignments = tuple(
         statement
-        for container in containers
-        for statement in container.statements
+        for container in iter(containers)
+        for statement in iter(container.statements)
         if isinstance(statement, structured_c.CAssignment)
         and isinstance(statement.tags, dict)
         and isinstance(statement.tags.get("inertia_x86_16_gp_stack_save"), tuple)
     )
     completed_pairs = {
         statement.tags["inertia_x86_16_gp_stack_save"]
-        for statement in live_assignments
+        for statement in iter(live_assignments)
     }
     snapshots = [
         statement.lhs
-        for statement in live_assignments
+        for statement in iter(live_assignments)
         if isinstance(statement.lhs, structured_c.CVariable)
     ]
     newly_materialized = 0
@@ -550,20 +578,19 @@ def materialize_gp_stack_restores_8616(codegen: object) -> bool:
             snapshot_offset = min(fact.stack_offsets)
             snapshots.extend(
                 node
-                for container in containers
-                for statement in container.statements
+                for container in iter(containers)
+                for statement in iter(container.statements)
                 if isinstance(statement, structured_c.CAssignment)
                 and isinstance(statement.tags, dict)
-                and statement.tags.get("inertia_x86_16_gp_stack_save")
-                == (
+                and operator.eq(statement.tags.get("inertia_x86_16_gp_stack_save"), (
                     fact.saved_instruction_addr,
                     fact.restore_instruction_addr,
                     fact.restore_register,
-                )
-                for node in (statement.lhs,)
+                ))
+                for node in iter((statement.lhs,))
                 if isinstance(node, structured_c.CVariable)
                 and isinstance(node.variable, SimStackVariable)
-                and node.variable.offset == snapshot_offset
+                and operator.eq(node.variable.offset, snapshot_offset)
             )
             completed_pairs.add(key)
             newly_materialized += 1
@@ -575,11 +602,11 @@ def materialize_gp_stack_restores_8616(codegen: object) -> bool:
             fact.restore_register,
         )
         in completed_pairs
-        for fact in facts
+        for fact in iter(facts)
     )
     boundary._inertia_gp_stack_restore_materialized_pairs_8616 = frozenset(completed_pairs)
     boundary._inertia_gp_stack_restore_snapshots_8616 = tuple(
-        {id(snapshot): snapshot for snapshot in snapshots}.values()
+        {id(snapshot): snapshot for snapshot in iter(snapshots)}.values()
     )
     stats = GPStackRestoreLoweringStats8616(
         raw_fact_count=len(facts),
@@ -606,7 +633,7 @@ def materialize_gp_stack_restores_8616(codegen: object) -> bool:
             function_addr=cfunc.addr,
             details={
                 "restore_obligations": tuple(
-                    (fact.restore_instruction_addr, fact.restore_register, fact.stack_offsets) for fact in facts
+                    (fact.restore_instruction_addr, fact.restore_register, fact.stack_offsets) for fact in iter(facts)
                 ),
                 "raw_fact_count": stats.raw_fact_count,
                 "normalized_fact_count": stats.normalized_fact_count,

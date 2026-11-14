@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize typed C expressions from proven call-argument operations.
 
 Layer: Types/Lowering.
@@ -12,6 +13,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 
@@ -19,17 +22,18 @@ from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimType, SimTypeChar, SimTypeFixedSizeArray, SimTypePointer
 
 from inertia.semantics.callsite_summary import CallsitePushExprOp8616
+import operator
 
-type CallArgumentSource8616 = tuple[object, ...]
-type CallArgumentOperation8616 = tuple[str, object]
-type CallArgumentSourceResolver8616 = Callable[
+CallArgumentSource8616 = typing.TypeAliasType("CallArgumentSource8616", tuple[object, ...])
+CallArgumentOperation8616 = typing.TypeAliasType("CallArgumentOperation8616", tuple[str, object])
+CallArgumentSourceResolver8616 = typing.TypeAliasType("CallArgumentSourceResolver8616", Callable[
     [CallArgumentSource8616],
     structured_c.CExpression | None,
-]
-type CallArgumentTypeBinder8616 = Callable[
+])
+CallArgumentTypeBinder8616 = typing.TypeAliasType("CallArgumentTypeBinder8616", Callable[
     [structured_c.CExpression],
     structured_c.CExpression,
-]
+])
 
 CALL_ARGUMENT_SOURCE_OPERATION_NAMES_8616: frozenset[str] = frozenset(
     {
@@ -67,7 +71,8 @@ __all__ = (
 )
 
 
-def call_argument_has_materialized_object_address_8616(expression: object) -> bool:
+@cython.ccall
+def call_argument_has_materialized_object_address_8616(expression: object) -> cython.bint:
     """Recognize concrete C object addresses, not guessed near-pointer values.
 
     Fixed arrays decay to addresses in argument position. A decoded character
@@ -89,8 +94,9 @@ def call_argument_has_materialized_object_address_8616(expression: object) -> bo
     )
 
 
+@cython.ccall
 def _constant_8616(
-    value: int,
+    value: cython.longlong,
     word_type: SimType,
     codegen: object,
 ) -> structured_c.CConstant:
@@ -98,10 +104,11 @@ def _constant_8616(
     return structured_c.CConstant(value, word_type, codegen=codegen)
 
 
+@cython.ccall
 def _materialize_sign_extension_high_8616(
     expression: structured_c.CExpression,
     *,
-    width_bits: int,
+    width_bits: cython.longlong,
     bind_type: CallArgumentTypeBinder8616,
     word_type: SimType,
     codegen: object,
@@ -127,6 +134,7 @@ def _materialize_sign_extension_high_8616(
     )
 
 
+@cython.ccall
 def _unsigned_shift_lhs_8616(
     expression: structured_c.CExpression,
     *,
@@ -155,9 +163,10 @@ _SCALAR_OPS_8616: dict[str, str] = {
 }
 
 
+@cython.ccall
 def materialize_call_argument_operations_8616(
     base_expression: structured_c.CExpression,
-    operations: tuple[object, ...],
+    operations: object,
     *,
     resolve_source: CallArgumentSourceResolver8616,
     bind_type: CallArgumentTypeBinder8616,
@@ -171,6 +180,8 @@ def materialize_call_argument_operations_8616(
     arithmetic right shift explicitly casts its input to a signed word; unary
     negation remains an exact ``0 - value`` operation in the generated C AST.
     """
+    applied: object
+    operation: object
     expression = base_expression
     for operation in operations:
         applied = _apply_call_argument_operation_8616(
@@ -188,9 +199,10 @@ def materialize_call_argument_operations_8616(
     return expression
 
 
+@cython.ccall
 def _apply_source_operation_8616(
     expression: structured_c.CExpression,
-    op_name: str,
+    op_name: object,
     op_value: object,
     *,
     resolve_source: CallArgumentSourceResolver8616,
@@ -198,6 +210,7 @@ def _apply_source_operation_8616(
     codegen: object,
 ) -> structured_c.CExpression | None:
     """Apply one ``*_SOURCE`` operation against a resolved right operand."""
+    rhs: object
     if not isinstance(op_value, tuple):
         return None
     rhs = resolve_source(op_value)
@@ -220,10 +233,11 @@ def _apply_source_operation_8616(
     )
 
 
+@cython.ccall
 def _apply_scalar_operation_8616(
     expression: structured_c.CExpression,
-    op_name: str,
-    op_value: int,
+    op_name: object,
+    op_value: cython.longlong,
     *,
     bind_type: CallArgumentTypeBinder8616,
     word_type: SimType,
@@ -231,13 +245,14 @@ def _apply_scalar_operation_8616(
     codegen: object,
 ) -> structured_c.CExpression | None:
     """Apply one immediate scalar operation to the accumulated expression."""
+    scalar_c_op: object
     scalar_c_op = _SCALAR_OPS_8616.get(op_name)
     if scalar_c_op is None:
         return None
     lhs = expression
-    if op_name == CallsitePushExprOp8616.SAR.value:
+    if operator.eq(op_name, CallsitePushExprOp8616.SAR.value):
         lhs = structured_c.CTypeCast(None, signed_word_type, bind_type(lhs), codegen=codegen)
-    elif op_name == CallsitePushExprOp8616.SHR.value:
+    elif operator.eq(op_name, CallsitePushExprOp8616.SHR.value):
         lhs = _unsigned_shift_lhs_8616(lhs, word_type=word_type, codegen=codegen)
     return structured_c.CBinaryOp(
         scalar_c_op,
@@ -247,6 +262,7 @@ def _apply_scalar_operation_8616(
     )
 
 
+@cython.ccall
 def _apply_call_argument_operation_8616(
     expression: structured_c.CExpression,
     operation: object,
@@ -274,7 +290,7 @@ def _apply_call_argument_operation_8616(
         )
     if not isinstance(op_value, int):
         return None
-    if op_name == CallsitePushExprOp8616.SIGN_EXT_HI.value:
+    if operator.eq(op_name, CallsitePushExprOp8616.SIGN_EXT_HI.value):
         return _materialize_sign_extension_high_8616(
             expression,
             width_bits=op_value,
@@ -282,7 +298,7 @@ def _apply_call_argument_operation_8616(
             word_type=word_type,
             codegen=codegen,
         )
-    if op_name == CallsitePushExprOp8616.NEG.value:
+    if operator.eq(op_name, CallsitePushExprOp8616.NEG.value):
         return structured_c.CBinaryOp(
             "Sub",
             _constant_8616(0, word_type, codegen),

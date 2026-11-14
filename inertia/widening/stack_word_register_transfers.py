@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bind logical word/register transfers to versioned stack storage.
 
 Layer: Widening.
@@ -9,6 +10,8 @@ Do not join values from rendered text, cosmetic shape, postprocess, or CLI/repor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -26,29 +29,33 @@ from inertia.ir.logical_memory_register_transfer_contracts import (
     LogicalMemoryRegisterTransferFailure8616,
     LogicalMemoryRegisterTransferRefusal8616,
 )
+import dataclasses
+import operator
+import builtins
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackWordStorageVersion8616:
     """One Alias-owned stack word and its exact ordered byte versions."""
 
     storage: AliasStorageFacts
-    versions: tuple[int, int]
+    versions: object
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether this is one exact non-synthesized stack word."""
+        identity: object
         identity = self.storage.identity
         return bool(
             identity is not None
             and identity[0] == "stack"
             and self.storage.domain.width == 2
             and not self.storage.needs_synthesis()
-            and all(version > 0 for version in self.versions)
+            and all(version > 0 for version in iter(self.versions))
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackWordRegisterTransfer8616:
     """One IR register transfer bound to exact Alias stack versions."""
 
@@ -57,24 +64,24 @@ class StackWordRegisterTransfer8616:
     storage_version: StackWordStorageVersion8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether IR, Alias, width, site, and versions agree."""
         access = self.alias_access
         return bool(
             self.source.complete
-            and access.source == self.source.access
+            and operator.eq(access.source, self.source.access)
             and access.address.space is MemSpace.SS
             and access.address.base == ("bp",)
             and access.address.size == 2
-            and access.storage == self.storage_version.storage
-            and access.versions == self.storage_version.versions
+            and operator.eq(access.storage, self.storage_version.storage)
+            and operator.eq(access.versions, self.storage_version.versions)
             and self.storage_version.complete
             and register_domain_for_name(self.source.register.name) is not None
-            and register_view_for_name(self.source.register.name) == FULL16
+            and operator.eq(register_view_for_name(self.source.register.name), FULL16)
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackWordRegisterTransferRefusal8616:
     """One retained Widening refusal for a logical stack word."""
 
@@ -82,29 +89,30 @@ class StackWordRegisterTransferRefusal8616:
     source_refusal: LogicalMemoryRegisterTransferRefusal8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackWordRegisterTransferArtifact8616:
     """Closed Widening outcomes for every Alias-proven logical stack word."""
 
     source_alias: StackMemorySSAAliasArtifact8616
-    transfers: tuple[StackWordRegisterTransfer8616, ...]
-    refusals: tuple[StackWordRegisterTransferRefusal8616, ...]
+    transfers: object
+    refusals: object
     stats: StackMemoryAliasStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every candidate has one transfer or refusal."""
         return bool(
             self.source_alias.complete
             and self.stats.complete
-            and len(self.transfers) == self.stats.materialized_count
-            and len(self.refusals) == self.stats.failure_count
-            and all(transfer.complete for transfer in self.transfers)
+            and operator.eq(len(self.transfers), self.stats.materialized_count)
+            and operator.eq(len(self.refusals), self.stats.failure_count)
+            and all(transfer.complete for transfer in iter(self.transfers))
         )
 
-    def by_instruction_addr(self) -> dict[int, tuple[StackWordRegisterTransfer8616, ...]]:
+    def by_instruction_addr(self) -> dict[cython.longlong, tuple[StackWordRegisterTransfer8616, ...]]:
         """Index proven transfers by stable machine instruction identity."""
-        grouped: dict[int, list[StackWordRegisterTransfer8616]] = {}
+        transfer: object
+        grouped: dict[cython.longlong, list[StackWordRegisterTransfer8616]] = {}
         for transfer in self.transfers:
             grouped.setdefault(transfer.alias_access.source.key.insn_addr, []).append(transfer)
         return {
@@ -118,7 +126,7 @@ class StackWordRegisterTransferArtifact8616:
                     ),
                 )
             )
-            for instruction_addr, items in sorted(grouped.items())
+            for instruction_addr, items in builtins.iter(sorted(tuple(grouped.items())))
         }
 
 
@@ -126,9 +134,10 @@ def build_stack_word_register_transfer_artifact_8616(
     source: StackMemorySSAAliasArtifact8616,
 ) -> StackWordRegisterTransferArtifact8616:
     """Bind every Alias-proven logical BP word to exact IR value evidence."""
+    access: object
     candidates = tuple(
         access
-        for access in source.logical_accesses
+        for access in iter(source.logical_accesses)
         if access.address.space is MemSpace.SS
         and access.address.base == ("bp",)
         and access.address.size == 2

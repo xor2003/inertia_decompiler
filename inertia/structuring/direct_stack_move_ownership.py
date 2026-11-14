@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Arbitrate typed control-flow ownership for direct stack moves.
 
 Layer: Structuring.
@@ -16,6 +17,8 @@ join must keep the move in place instead of silently broadening its execution.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -31,6 +34,9 @@ from .direct_stack_move_branches import (
     recover_direct_stack_move_branch_facts_8616,
 )
 from .direct_stack_move_loop_evidence import DirectStackMoveLoopEntryEdge8616
+import dataclasses
+import operator
+import builtins
 
 
 class DirectStackMoveControlOwner8616(Enum):
@@ -39,28 +45,30 @@ class DirectStackMoveControlOwner8616(Enum):
     CONDITIONAL_BRANCH = "conditional_branch"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectStackMoveControlClaim8616:
     """One typed claim that prevents a broader owner from taking a move."""
 
-    move_ins_addr: int
+    move_ins_addr: cython.longlong
     owner: DirectStackMoveControlOwner8616
     branch_fact: DirectStackMoveBranchFact8616
 
 
+@cython.ccall
 def direct_stack_move_loop_entry_supersedes_branch_claim_8616(
     claim: DirectStackMoveControlClaim8616,
     edge: DirectStackMoveLoopEntryEdge8616,
-) -> bool:
+) -> cython.bint:
     """Return whether an exact repeated loop is nested in the claimed arm."""
     fact = claim.branch_fact
     return (
-        claim.move_ins_addr == edge.move_addr
+        operator.eq(claim.move_ins_addr, edge.move_addr)
         and fact.arm_start <= edge.entry_addr <= edge.move_addr
         and edge.move_addr <= edge.jump_addr < fact.merge_addr
     )
 
 
+@cython.ccall
 def _boundary_tuple_8616(value: object) -> tuple[Any, ...]:
     """Convert one dynamic angr collection to a stable tuple."""
     return tuple(cast(Iterable[Any], value))
@@ -78,16 +86,16 @@ def direct_stack_move_branch_claims_8616(
     """
     conditions = tuple(
         condition
-        for condition in _boundary_tuple_8616(
+        for condition in builtins.iter(_boundary_tuple_8616(
             getattr(codegen, "_inertia_typed_conditions", ()) or ()
-        )
+        ))
         if isinstance(condition, ConditionIR)
     )
     move_facts = tuple(
         fact
-        for fact in _boundary_tuple_8616(
+        for fact in builtins.iter(_boundary_tuple_8616(
             getattr(codegen, "_inertia_direct_stack_move_facts_8616", ()) or ()
-        )
+        ))
         if isinstance(fact, DirectStackMoveFact8616)
     )
     if not conditions or not move_facts:
@@ -107,7 +115,7 @@ def direct_stack_move_branch_claims_8616(
             owner=DirectStackMoveControlOwner8616.CONDITIONAL_BRANCH,
             branch_fact=fact,
         )
-        for fact in branch_facts
+        for fact in iter(branch_facts)
     )
 
 
@@ -115,13 +123,13 @@ def direct_stack_move_branch_owned_addresses_8616(
     project: object,
     codegen: object,
     function: object,
-) -> frozenset[int]:
+) -> frozenset[cython.longlong]:
     """Return move addresses claimed by a narrower conditional branch."""
     return frozenset(
         claim.move_ins_addr
-        for claim in direct_stack_move_branch_claims_8616(
+        for claim in builtins.iter(direct_stack_move_branch_claims_8616(
             project,
             codegen,
             function,
-        )
+        ))
     )

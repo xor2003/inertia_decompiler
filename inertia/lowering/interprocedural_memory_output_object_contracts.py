@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed contracts for Alias-owned function memory-output objects.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -33,6 +36,8 @@ from .interprocedural_storage_live_out_contracts import (
 from .pointer_parameter_memory_output_contracts import (
     PointerParameterMemoryOutputObject8616,
 )
+import dataclasses
+import operator
 
 
 class MemoryOutputObjectJoinVerdict8616(StrEnum):
@@ -58,18 +63,18 @@ class MemoryOutputObjectFailure8616(StrEnum):
     POINTER_OUTPUT_REFUSED = "pointer_output_refused"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class MemoryOutputObjectStats8616:
     """Closed evidence accounting for function memory-output views."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every raw effect became one retained view."""
         return (
             self.raw_fact_count
@@ -80,19 +85,20 @@ class MemoryOutputObjectStats8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class MemoryOutputViewBinding8616:
     """One caller-specific projection of an Alias-owned memory output."""
 
-    caller_addr: int
-    callee_addr: int
-    callsite_addr: int
+    caller_addr: cython.longlong
+    callee_addr: cython.longlong
+    callsite_addr: cython.longlong
     effect: MemoryLiveOutUseFact8616
     trial: StorageTrial8616 | None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether effect and optional value trial agree exactly."""
+        trial: object
         needs_trial = bool(
             self.effect.disposition is MemoryLiveOutUseDisposition8616.USED
             and self.effect.terminal_output.disposition
@@ -103,10 +109,10 @@ class MemoryOutputViewBinding8616:
             trial is not None
             and trial.is_complete
             and trial.role is StorageTrialRole8616.LIVE_OUT
-            and trial.callee_addr == self.callee_addr
-            and trial.caller_addr == self.caller_addr
-            and trial.callsite_addr == self.callsite_addr
-            and trial.storage == self.effect.storage
+            and operator.eq(trial.callee_addr, self.callee_addr)
+            and operator.eq(trial.caller_addr, self.caller_addr)
+            and operator.eq(trial.callsite_addr, self.callsite_addr)
+            and operator.eq(trial.storage, self.effect.storage)
         )
         return bool(
             self.caller_addr >= 0
@@ -117,16 +123,16 @@ class MemoryOutputViewBinding8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class MemoryOutputObjectContract8616:
     """One canonical Alias owner and all exact caller view bindings."""
 
     alias_output: TerminalMemoryAliasFact8616
     storage: StorageIdentity8616
-    views: tuple[MemoryOutputViewBinding8616, ...]
+    views: object
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether owner identity and every projected view agree."""
         owner_address = self.alias_output.terminal_output.address
         view_keys = tuple(
@@ -136,47 +142,46 @@ class MemoryOutputObjectContract8616:
                 view.callsite_addr,
                 view.effect.storage.key,
             )
-            for view in self.views
+            for view in iter(self.views)
         )
         return bool(
             self.alias_output.complete
             and self.alias_output.is_owner
             and self.storage.kind is StorageIdentityKind8616.MEMORY
             and self.storage.is_exact
-            and self.storage.address == owner_address
+            and operator.eq(self.storage.address, owner_address)
             and self.views
-            and len(set(view_keys)) == len(view_keys)
+            and operator.eq(len(set(view_keys)), len(view_keys))
             and all(
-                view.complete and view.effect.alias_output == self.alias_output
-                for view in self.views
+                view.complete and operator.eq(view.effect.alias_output, self.alias_output)
+                for view in iter(self.views)
             )
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class MemoryOutputObjectJoinEvidence8616:
     """All function memory-output objects or one atomic typed refusal."""
 
     verdict: MemoryOutputObjectJoinVerdict8616
-    objects: tuple[MemoryOutputObjectContract8616, ...]
+    objects: object
     failure: MemoryOutputObjectFailure8616 | None
     stats: MemoryOutputObjectStats8616
     pointer_objects: tuple[PointerParameterMemoryOutputObject8616, ...] = ()
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every effect has one coherent object projection."""
         return bool(
             self.verdict is MemoryOutputObjectJoinVerdict8616.PROVEN
             and self.failure is None
             and self.stats.complete
-            and (
-                sum(len(item.views) for item in self.objects)
-                + sum(len(item.views) for item in self.pointer_objects)
-            )
-            == self.stats.materialized_count
-            and all(item.complete for item in self.objects)
-            and all(item.complete for item in self.pointer_objects)
+            and operator.eq((
+                sum(len(item.views) for item in iter(self.objects))
+                + sum(len(item.views) for item in iter(self.pointer_objects))
+            ), self.stats.materialized_count)
+            and all(item.complete for item in iter(self.objects))
+            and all(item.complete for item in iter(self.pointer_objects))
         )
 
     @property

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/runtime.
 
 Responsibility: classify real-mode low-memory segment:offset accesses for diagnostics.
@@ -5,9 +6,13 @@ Forbidden: treating low-memory labels as recovered decompiler semantics or valid
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import re
 from dataclasses import dataclass
+import dataclasses
+import operator
 
 __all__ = [
     "LowMemoryAccess",
@@ -17,17 +22,17 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LowMemoryAccess:
     """Classified real-mode low-memory diagnostic access."""
 
-    access_kind: str
-    raw_access: str
-    region: str
-    label: str
-    linear: int
-    segment: int
-    offset: int
+    access_kind: object
+    raw_access: object
+    region: object
+    label: object
+    linear: cython.longlong
+    segment: cython.longlong
+    offset: cython.longlong
     size: int | None = None
 
     def brief(self) -> str:
@@ -48,11 +53,11 @@ class LowMemoryAccess:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _FieldSpec:
-    linear: int
-    size: int
-    label: str
+    linear: cython.longlong
+    size: cython.longlong
+    label: object
 
 
 _SEG_OFF_RE = re.compile(r"^(?P<seg>0x[0-9a-fA-F]+|\d+):(?P<off>0x[0-9a-fA-F]+|\d+)(?:/(?P<size>\d+))?$")
@@ -93,12 +98,16 @@ _FIELD_SPECS: tuple[_FieldSpec, ...] = (
 )
 
 
-def linearize_x86_16_segment_offset(segment: int, offset: int) -> int:
+@cython.ccall
+def linearize_x86_16_segment_offset(segment: cython.longlong, offset: cython.longlong) -> cython.longlong:
     """Convert a real-mode segment:offset pair to its linear address."""
     return ((segment & 0xFFFF) << 4) + (offset & 0xFFFF)
 
 
-def _parse_access(access: str) -> tuple[int, int, int | None] | None:
+@cython.ccall
+def _parse_access(access: object) -> object:
+    linear_match: object
+    seg_match: object
     text = access.strip().lower()
     seg_match = _SEG_OFF_RE.fullmatch(text)
     if seg_match is not None:
@@ -114,7 +123,8 @@ def _parse_access(access: str) -> tuple[int, int, int | None] | None:
     return 0, linear, size
 
 
-def _region_for_linear(linear: int) -> tuple[str, str]:
+@cython.ccall
+def _region_for_linear(linear: cython.longlong) -> tuple[str, str]:
     if 0x0000 <= linear <= 0x03FF:
         vec = linear // 4
         slot = linear % 4
@@ -138,13 +148,17 @@ def _region_for_linear(linear: int) -> tuple[str, str]:
     return "other", f"mem+0x{linear:x}"
 
 
+@cython.ccall
 def classify_x86_16_low_memory_access(
-    access: str,
+    access: object,
     *,
-    access_kind: str = "access",
+    access_kind: object = "access",
     size: int | None = None,
 ) -> LowMemoryAccess | None:
     """Classify a textual low-memory access for diagnostics only."""
+    effective_size: object
+    parsed: object
+    spec: object
     parsed = _parse_access(access)
     if parsed is None:
         return None
@@ -152,9 +166,9 @@ def classify_x86_16_low_memory_access(
     effective_size = size if size is not None else parsed_size
     linear = linearize_x86_16_segment_offset(segment, offset)
     for spec in _FIELD_SPECS:
-        if linear != spec.linear:
+        if operator.ne(linear, spec.linear):
             continue
-        if effective_size is not None and effective_size != spec.size:
+        if effective_size is not None and operator.ne(effective_size, spec.size):
             continue
         region = spec.label.split(".", 1)[0]
         return LowMemoryAccess(
@@ -182,8 +196,10 @@ def classify_x86_16_low_memory_access(
     )
 
 
-def format_x86_16_low_memory_access(access: str, *, size: int | None = None) -> str:
+@cython.ccall
+def format_x86_16_low_memory_access(access: object, *, size: int | None = None) -> object:
     """Format a low-memory access if it is classifiable, otherwise return it unchanged."""
+    classified: object
     classified = classify_x86_16_low_memory_access(access, size=size)
     if classified is None:
         return access

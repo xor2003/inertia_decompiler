@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Project exact indexed IR value copies through Alias storage identity.
 
 Layer: Alias.
@@ -11,6 +12,7 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import cython
 
 from inertia.ir.indexed_address_contracts import IndexedAddressFact8616
 from inertia.ir.indexed_address_copy_contracts import (
@@ -35,6 +37,7 @@ from .indexed_address_copy_contracts import (
     IndexedAliasCopyRefusal8616,
     IndexedAliasCopyStats8616,
 )
+import operator
 
 
 def _alias_endpoint_8616(
@@ -45,7 +48,7 @@ def _alias_endpoint_8616(
     conflict: IndexedAliasCopyFailureKind8616,
 ) -> IndexedAddressAliasFact8616 | IndexedAliasCopyFailureKind8616:
     """Resolve one IR endpoint to exactly one canonical Alias fact."""
-    matches = tuple(fact for fact in aliases.facts if fact.source == source)
+    matches = tuple(fact for fact in iter(aliases.facts) if operator.eq(fact.source, source))
     if not matches:
         return missing
     if len(matches) != 1:
@@ -60,16 +63,17 @@ def _access_endpoint_8616(
     missing: IndexedAliasCopyFailureKind8616,
 ) -> IndexedAliasAccessFact8616 | IndexedAliasCopyFailureKind8616:
     """Resolve one Alias endpoint to its exact access-role fact."""
-    matches = tuple(fact for fact in accesses.facts if fact.source == source)
+    matches = tuple(fact for fact in iter(accesses.facts) if operator.eq(fact.source, source))
     if len(matches) != 1:
         return missing
     return matches[0]
 
 
+@cython.ccall
 def _refusal_8616(
     source: IndexedAddressCopyFact8616,
     failure: IndexedAliasCopyFailureKind8616,
-    detail: str,
+    detail: object,
 ) -> IndexedAliasCopyRefusal8616:
     """Return one typed refusal for an IR-proven copy."""
     return IndexedAliasCopyRefusal8616(
@@ -79,6 +83,7 @@ def _refusal_8616(
     )
 
 
+@cython.ccall
 def _project_copy_8616(
     source_copy: IndexedAddressCopyFact8616,
     aliases: IndexedAddressAliasEvidence8616,
@@ -136,7 +141,7 @@ def _project_copy_8616(
             IndexedAliasCopyFailureKind8616.NON_GLOBAL_ENDPOINT,
             "copy endpoint is pointer-relative rather than globally indexed",
         )
-    if source.storage.width != destination.storage.width:
+    if operator.ne(source.storage.width, destination.storage.width):
         return _refusal_8616(
             source_copy,
             IndexedAliasCopyFailureKind8616.WIDTH_CONFLICT,
@@ -145,10 +150,10 @@ def _project_copy_8616(
     source_range = source.storage.index_source_range
     destination_range = destination.storage.index_source_range
     if (
-        source.storage.index_shift != destination.storage.index_shift
+        operator.ne(source.storage.index_shift, destination.storage.index_shift)
         or source_range.space is not destination_range.space
-        or source_range.addresses != destination_range.addresses
-        or source_range.storage.identity != destination_range.storage.identity
+        or operator.ne(source_range.addresses, destination_range.addresses)
+        or operator.ne(source_range.storage.identity, destination_range.storage.identity)
     ):
         return _refusal_8616(
             source_copy,
@@ -171,22 +176,24 @@ def _project_copy_8616(
     return result
 
 
+@cython.ccall
 def project_indexed_address_copies_8616(
     source: IndexedAddressCopyEvidence8616,
     aliases: IndexedAddressAliasEvidence8616,
     accesses: IndexedAliasAccessEvidence8616,
 ) -> IndexedAliasCopyEvidence8616:
     """Project every IR copy outcome into Alias evidence or a typed refusal."""
+    source_copy: object
     if not source.closed or not aliases.closed or not accesses.closed:
         raise PipelineHardError(
             "indexed copy Alias projection requires closed input evidence",
             layer="alias",
         )
     if (
-        source.function_addr != aliases.function_addr
-        or source.function_addr != accesses.function_addr
-        or aliases.source != source.source
-        or accesses.source != aliases
+        operator.ne(source.function_addr, aliases.function_addr)
+        or operator.ne(source.function_addr, accesses.function_addr)
+        or operator.ne(aliases.source, source.source)
+        or operator.ne(accesses.source, aliases)
     ):
         raise PipelineHardError(
             "indexed copy Alias projection received incoherent source artifacts",
@@ -199,7 +206,7 @@ def project_indexed_address_copies_8616(
             f"IR refused indexed copy: {refusal.failure.value}",
             source_refusal=refusal,
         )
-        for refusal in source.refusals
+        for refusal in iter(source.refusals)
     ]
     for source_copy in source.facts:
         projected = _project_copy_8616(source_copy, aliases, accesses)

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Importer-time direct-CALL CS-preservation evidence for the entry-domain proof.
 
 Layer: IR.
@@ -33,6 +34,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -116,8 +119,24 @@ from .segment_effect_closure import (
     SegmentEffectClosureResult8616,
     prove_segment_effect_closure_8616,
 )
-from .segment_state import build_x86_16_segment_state_artifact
+from .segment_state import SegmentStateArtifact, build_x86_16_segment_state_artifact
 from .segment_state_transfer import SEGMENT_REGISTERS
+import dataclasses
+import operator
+import builtins
+CompilerHelperEvidence8616 = typing.TypeVar("CompilerHelperEvidence8616")
+DeclaredSegmentInvariant = typing.TypeVar("DeclaredSegmentInvariant")
+DeclaredSelectorCallsite8616 = typing.TypeVar("DeclaredSelectorCallsite8616")
+DirectNearCallTargetBinding8616 = typing.TypeVar("DirectNearCallTargetBinding8616")
+Real16CallChainLink8616 = typing.TypeVar("Real16CallChainLink8616")
+Real16CallInvocation8616 = typing.TypeVar("Real16CallInvocation8616")
+Real16EnclosedEntryLink8616 = typing.TypeVar("Real16EnclosedEntryLink8616")
+Real16InvocationDomain8616 = typing.TypeVar("Real16InvocationDomain8616")
+ScopedFunctionIRView8616 = typing.TypeVar("ScopedFunctionIRView8616")
+ScopedIndirectTargetView8616 = typing.TypeVar("ScopedIndirectTargetView8616")
+ScopedNearReturnContinuationView8616 = typing.TypeVar("ScopedNearReturnContinuationView8616")
+_DeclaredInvocationConstruction8616 = typing.TypeVar("_DeclaredInvocationConstruction8616")
+_PreparedCall8616 = typing.TypeVar("_PreparedCall8616")
 
 if TYPE_CHECKING:
     from inertia.semantics.compiler_helpers import CompilerHelperEvidence8616
@@ -127,8 +146,13 @@ if TYPE_CHECKING:
 
     from .declared_selector_invariant import DeclaredSegmentInvariant, DeclaredSelectorCallsite8616
     from .near_return_continuation_view import ScopedNearReturnContinuationView8616
-    from .real16_invocation_domain import Real16CallInvocation8616, Real16InvocationDomain8616
+    from .real16_invocation_domain import (
+        Real16CallInvocation8616,
+        Real16InvocationDomain8616,
+        _DeclaredInvocationConstruction8616,
+    )
     from .scoped_function_ir_view import ScopedFunctionIRView8616
+    from .scoped_indirect_target_view import ScopedIndirectTargetView8616
 
 __all__ = [
     "EntryDomainCallPreservation8616",
@@ -196,14 +220,14 @@ class _CalleeImportSurface8616(Protocol):
     recursing, and the depth counter bounds acyclic import nesting.
     """
 
-    _inertia_entry_domain_callee_imports_8616: set[int]
-    _inertia_entry_domain_callee_import_depth_8616: int
+    _inertia_entry_domain_callee_imports_8616: object
+    _inertia_entry_domain_callee_import_depth_8616: cython.longlong
 
 
 class _LoaderMemory8616(Protocol):
     """Third-party loader byte surface for the proven NOP-prefix window."""
 
-    def load(self, addr: int, size: int) -> bytes:
+    def load(self, addr: cython.longlong, size: cython.longlong) -> object:
         """Read mapped bytes at one linear coordinate."""
         ...
 
@@ -223,17 +247,17 @@ class _MappedProject8616(Protocol):
 class _DecodedBlock8616(Protocol):
     """Third-party block projection consumed only at the frontend boundary."""
 
-    addr: int
+    addr: cython.longlong
     capstone: object
 
 
 class _CapstoneDisassembly8616(Protocol):
     """Third-party decoded instruction sequence for one decoded block."""
 
-    insns: tuple[object, ...]
+    insns: object
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _CalleeResolution8616:
     """Bounded resolution session shared across one request's import tree.
 
@@ -246,8 +270,8 @@ class _CalleeResolution8616:
     """
 
     resolver: DirectCallTargetResolver8616
-    in_flight: frozenset[int] = frozenset()
-    remaining: int = _ENTRY_DOMAIN_CALLEE_MAX_RESOLUTIONS_8616
+    in_flight: frozenset[cython.longlong] = frozenset()
+    remaining: cython.longlong = _ENTRY_DOMAIN_CALLEE_MAX_RESOLUTIONS_8616
     deadline: float | None = None
     # Retained per-callee callsite proofs keyed by the resolved callee head.
     # Each entry is populated only after that callee's whole closure proved
@@ -255,19 +279,16 @@ class _CalleeResolution8616:
     # never a partial or still-in-flight claim. Reuse binds the identical
     # artifact object the registry-first resolution returns, so unregistered
     # in-flight artifacts can never collide across separate imports.
-    retained: dict[
-        int,
-        tuple[IRFunctionArtifact, tuple[SegmentCallPreservationResult8616, ...]],
-    ] = field(default_factory=dict)
+    retained: object = field(default_factory=dict)
     # Retained complete callee closures keyed by callee head. A closure is
     # callsite-independent complete evidence (coverage + state + census);
     # retaining it collapses the repeated transitive resolution of a shared
     # callee across every callsite in the session. Populated only after
     # ``closure.complete``, so in-flight and cyclic entries never appear.
-    retained_closures: dict[int, SegmentEffectClosureResult8616] = field(
+    retained_closures: object = field(
         default_factory=dict
     )
-    scoped_closures: dict[tuple[int, int], SegmentEffectClosureResult8616] = field(default_factory=dict)
+    scoped_closures: object = field(default_factory=dict)
 
 
 class _CalleeResolutionSurface8616(Protocol):
@@ -276,7 +297,7 @@ class _CalleeResolutionSurface8616(Protocol):
     _inertia_entry_domain_call_resolution_8616: object
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _PremiseResolution8616:
     """Bounded resolution session shared across one premise request tree.
 
@@ -290,11 +311,11 @@ class _PremiseResolution8616:
     direct request's absolute deadline is inherited by this same session.
     """
 
-    in_flight: frozenset[int] = frozenset()
-    remaining: int = _ENTRY_PREMISE_MAX_RESOLUTIONS_8616
+    in_flight: frozenset[cython.longlong] = frozenset()
+    remaining: cython.longlong = _ENTRY_PREMISE_MAX_RESOLUTIONS_8616
     deadline: float | None = None
-    blocked_prefixes: dict[tuple[int, int], RawBootBlockedPrefix8616] = field(default_factory=dict)
-    blocked_prefix_reuse_count: int = 0
+    blocked_prefixes: object = field(default_factory=dict)
+    blocked_prefix_reuse_count: cython.longlong = 0
     native_imports: RawBootNativeSurfaceCache8616 = field(default_factory=RawBootNativeSurfaceCache8616)
 
 
@@ -323,7 +344,7 @@ class _CallCollectionPhase8616(StrEnum):
     DECLARED_CALLEE = "declared_callee"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class EntryDomainCallPreservation8616:
     """Bound CS-preservation evidence for one in-flight caller callsite.
 
@@ -349,14 +370,14 @@ class EntryDomainCallPreservation8616:
     entry: DecodedDirectCallsite8616 | None
     callee: SegmentEffectClosureResult8616 | None
     binding: DirectNearCallTargetBinding8616 | None
-    callsite_addr: int
+    callsite_addr: cython.longlong
     target_addr: int | None
     failure: EntryDomainCallPreservationFailure8616 | None
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
     invocation_scope: Real16InvocationDomain8616 | None = None
     selector_binding: DeclaredSelectorCallsite8616 | None = None
     helper_evidence: CompilerHelperEvidence8616 | None = None
@@ -371,11 +392,13 @@ class EntryDomainCallPreservation8616:
     @property
     def selector_scope(self) -> DeclaredSegmentInvariant | None:
         """Retain the distinct declared-selector premise without universalizing it."""
+        projection: object
         projection = self.selector_projection
         return None if projection is None else projection.scope
 
-    def complete_for_selector(self, scope: DeclaredSegmentInvariant) -> bool:
+    def complete_for_selector(self, scope: DeclaredSegmentInvariant) -> cython.bint:
         """Consume only selector effects under the identical declared certificate."""
+        projection: object
         from .declared_selector_invariant import consume_declared_selector_callsite_8616
 
         projection = self.selector_projection
@@ -384,7 +407,7 @@ class EntryDomainCallPreservation8616:
         if (projection.scope is not scope or projection.block is not self.block
                 or projection.instruction is not self.instruction):
             return False
-        if (projection.callsite_addr != self.callsite_addr or projection.target_addr != self.target_addr
+        if (operator.ne(projection.callsite_addr, self.callsite_addr) or operator.ne(projection.target_addr, self.target_addr)
                 or self.invocation_scope is not None):
             return False
         if self.binding is not None and self.binding.selector_binding is not projection:
@@ -401,7 +424,7 @@ class EntryDomainCallPreservation8616:
             return True
         return consume_declared_selector_callsite_8616(self.boundary.project, projection)
 
-    def preserved_registers_for_selector(self, scope: DeclaredSegmentInvariant) -> tuple[str, ...]:
+    def preserved_registers_for_selector(self, scope: DeclaredSegmentInvariant) -> object:
         """Project segment preservation without transporting caller GP/SP/memory."""
         if not self.complete_for_selector(scope):
             return ()
@@ -417,18 +440,20 @@ class EntryDomainCallPreservation8616:
         this callsite's target. Universal evidence requires both this result
         and ``selector_scope`` to be absent.
         """
+        required: object
         required = self.invocation_scope
         if required is None and self.binding is not None and self.binding.invocation is not None:
             required = self.binding.invocation.premise
         return required
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Revalidate the retained evidence chain under one bounded traversal."""
         return self.complete_for(None)
 
-    def complete_for(self, invocation_scope: Real16InvocationDomain8616 | None) -> bool:
+    def complete_for(self, invocation_scope: Real16InvocationDomain8616 | None) -> cython.bint:
         """Consume conditional preservation only under its authenticated entry."""
+        required: object
         from .real16_invocation_domain import same_real16_entry_scope_8616
 
         if self.selector_projection is not None:
@@ -440,13 +465,13 @@ class EntryDomainCallPreservation8616:
             return _preservation_failure_8616(self) is None
 
     @property
-    def preserved_registers(self) -> tuple[str, ...]:
+    def preserved_registers(self) -> object:
         """Project segment identities shared by callee entry and all RET exits."""
         return self.preserved_registers_for(None)
 
     def preserved_registers_for(
         self, invocation_scope: Real16InvocationDomain8616 | None,
-    ) -> tuple[str, ...]:
+    ) -> object:
         """Project retained effects under the separately authenticated domain."""
         if not self.complete_for(invocation_scope):
             return ()
@@ -474,9 +499,10 @@ class EntryDomainCallPreservation8616:
         }
 
 
+@cython.ccall
 def _encoded_near_target_8616(
     entry: DecodedDirectCallsite8616,
-) -> tuple[int, int] | None:
+) -> object:
     """Recover the encoded continuation and raw target from retained bytes.
 
     The index entry's ``target_addr`` is the canonical caller-entry identity;
@@ -488,7 +514,8 @@ def _encoded_near_target_8616(
     return entry.encoded_near_coordinates()
 
 
-def _mapped_bytes_8616(project: object, addr: int, size: int) -> bytes | None:
+@cython.ccall
+def _mapped_bytes_8616(project: object, addr: cython.longlong, size: cython.longlong) -> object:
     """Load exactly ``size`` mapped bytes or ``None`` for an unmapped span."""
     try:
         memory = cast(_MappedProject8616, project).loader.memory
@@ -496,12 +523,12 @@ def _mapped_bytes_8616(project: object, addr: int, size: int) -> bytes | None:
     except (AttributeError, KeyError, TypeError):
         return None
     data = bytes(raw)
-    return data if len(data) == size else None
+    return data if operator.eq(len(data), size) else None
 
 
 def _callsite_window_8616(
     project: object, entry: DecodedDirectCallsite8616,
-) -> tuple[int, int, tuple[int, ...]] | None:
+) -> object:
     """Recompute the proven callee coordinates for one decoded callsite.
 
     Returns ``(next_addr, raw_target, candidates)``: the encoded continuation
@@ -515,6 +542,8 @@ def _callsite_window_8616(
     always remains a candidate because its artifact decodes the exact bytes
     the call lands on, prefix included.
     """
+    encoded: object
+    prefix: object
     encoded = _encoded_near_target_8616(entry)
     canonical = entry.target_addr
     if encoded is None or type(canonical) is not int or canonical < 0:
@@ -526,12 +555,13 @@ def _callsite_window_8616(
     if not 0 < window <= _CALL_PADDING_WINDOW_MAX_8616:
         return next_addr, raw_target, (raw_target,)
     prefix = _mapped_bytes_8616(project, raw_target, window)
-    if prefix is not None and all(byte == 0x90 for byte in prefix):
+    if prefix is not None and all(byte == 0x90 for byte in iter(prefix)):
         return next_addr, raw_target, (canonical, raw_target)
     return next_addr, raw_target, (raw_target,)
 
 
-def _callee_imports_in_flight_8616(project: object) -> set[int]:
+@cython.ccall
+def _callee_imports_in_flight_8616(project: object) -> object:
     """Return the project-owned set of in-flight on-demand callee imports."""
     surface = cast(_CalleeImportSurface8616, project)
     try:
@@ -544,7 +574,8 @@ def _callee_imports_in_flight_8616(project: object) -> set[int]:
     return imports
 
 
-def _callee_import_depth_8616(project: object) -> int:
+@cython.ccall
+def _callee_import_depth_8616(project: object) -> cython.longlong:
     """Return the project-owned depth of nested on-demand callee imports."""
     surface = cast(_CalleeImportSurface8616, project)
     try:
@@ -557,8 +588,10 @@ def _callee_import_depth_8616(project: object) -> int:
     return depth
 
 
+@cython.ccall
 def _active_resolution_8616(project: object) -> _CalleeResolution8616 | None:
     """Return the in-flight request resolution session, if one is running."""
+    resolution: object
     surface = cast(_CalleeResolutionSurface8616, project)
     try:
         resolution = surface._inertia_entry_domain_call_resolution_8616
@@ -569,10 +602,12 @@ def _active_resolution_8616(project: object) -> _CalleeResolution8616 | None:
     return resolution
 
 
+@cython.ccall
 def _active_premise_resolution_8616(
     project: object,
 ) -> _PremiseResolution8616 | None:
     """Return the in-flight premise resolution session, if one is running."""
+    resolution: object
     surface = cast(_PremiseResolutionSurface8616, project)
     try:
         resolution = surface._inertia_entry_domain_premise_resolution_8616
@@ -583,6 +618,7 @@ def _active_premise_resolution_8616(
     return resolution
 
 
+@cython.ccall
 def _active_direct_evidence_deadline_8616(project: object) -> float | None:
     """Return the owner-computed deadline after validating active IR sessions."""
     _active_resolution_8616(project)
@@ -590,23 +626,25 @@ def _active_direct_evidence_deadline_8616(project: object) -> float | None:
     return _owner_active_direct_evidence_deadline_8616(project)
 
 
-def direct_evidence_deadline_expired_8616(project: object) -> bool:
+@cython.ccall
+def direct_evidence_deadline_expired_8616(project: object) -> cython.bint:
     """Return whether the shared direct-evidence deadline has elapsed."""
     _active_direct_evidence_deadline_8616(project)
     return _owner_direct_evidence_deadline_expired_8616(project)
 
 
+@cython.ccall
 def _resolution_deadline_expired_8616(
     project: object,
     deadline: float | None,
-) -> bool:
+) -> cython.bint:
     """Honor both a standalone session deadline and the shared project minimum."""
     return deadline_reached_8616(deadline) or direct_evidence_deadline_expired_8616(
         project
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class Real16InvocationSource8616:
     """Retained source authority for caller-domain premise construction.
 
@@ -635,13 +673,13 @@ class Real16InvocationSource8616:
     boot: object
     boot_recompute: Callable[[object], object] | None
     callsite_index: DecodedDirectCallsiteIndex8616
-    pending_targets: tuple[int, ...] = ()
+    pending_targets: tuple[cython.longlong, ...] = ()
     declared_services: tuple[DeclaredInterruptService8616, ...] = ()
     #: Explicit conditional application entries; never inferred caller edges.
     function_entries: tuple[DeclaredFunctionEntryAdmission8616, ...] = ()
 
 
-def _function_entries_valid_8616(source: Real16InvocationSource8616) -> bool:
+def _function_entries_valid_8616(source: Real16InvocationSource8616) -> cython.bint:
     """Require immutable, unambiguous declarations before any source use.
 
     Live image and environment authentication belongs to the scoped domain
@@ -653,14 +691,14 @@ def _function_entries_valid_8616(source: Real16InvocationSource8616) -> bool:
         or type(entry.spec) is not DeclaredFunctionEntrySpec8616
         or type(entry.spec.entry_segment) is not int
         or type(entry.spec.entry_offset) is not int
-        for entry in entries
+        for entry in iter(entries)
     ):
         return False
-    heads = [(entry.spec.entry_segment << 4) + entry.spec.entry_offset for entry in entries]
-    return len(heads) == len(set(heads))
+    heads = [(entry.spec.entry_segment << 4) + entry.spec.entry_offset for entry in iter(entries)]
+    return operator.eq(len(heads), len(set(heads)))
 
 
-def _invocation_source_fields_valid_8616(source: Real16InvocationSource8616) -> bool:
+def _invocation_source_fields_valid_8616(source: Real16InvocationSource8616) -> cython.bint:
     """Validate the shared retained-source shape for installation and demand."""
     services = source.declared_services
     return (
@@ -668,7 +706,7 @@ def _invocation_source_fields_valid_8616(source: Real16InvocationSource8616) -> 
         and source.boot is not None
         and _function_entries_valid_8616(source)
         and type(services) is tuple
-        and all(type(service) is DeclaredInterruptService8616 for service in services)
+        and all(type(service) is DeclaredInterruptService8616 for service in iter(services))
     )
 
 
@@ -693,9 +731,10 @@ class _PendingStaticIntake8616(Protocol):
         ...
 
 
+@cython.ccall
 def install_real16_invocation_source_8616(
     project: object,
-    source: Real16InvocationSource8616 | None,
+    source: object,
 ) -> None:
     """Install or clear the project's invocation-source surface.
 
@@ -711,6 +750,7 @@ def install_real16_invocation_source_8616(
     )
 
 
+@cython.ccall
 def _real16_invocation_source_8616(
     project: object,
 ) -> Real16InvocationSource8616 | None:
@@ -725,6 +765,8 @@ def _real16_invocation_source_8616(
     validated before use; a malformed record is a caller contract error
     and raises, never silently substitutes.
     """
+    pending: object
+    source: object
     surface = cast(_Real16InvocationSourceHolder8616, project)
     try:
         source = surface._inertia_real16_invocation_source_8616
@@ -750,6 +792,7 @@ def _real16_invocation_source_8616(
     return source
 
 
+@cython.ccall
 def _scoped_invocation_source_8616(
     project: object,
 ) -> Real16InvocationSource8616 | None:
@@ -766,6 +809,9 @@ def _scoped_invocation_source_8616(
     demand refuses; a non-callable seam or a mistyped return is a caller
     contract error and raises, never silently substitutes.
     """
+    pending: object
+    seam: object
+    source: object
     # Dynamic boundary: third-party angr projects may lack the CLI adapter slot.
     pending = getattr(
         project, "_inertia_mz_static_invocation_request_8616", None
@@ -786,6 +832,7 @@ def _scoped_invocation_source_8616(
     return source
 
 
+@cython.ccall
 def _invocation_premise_source_8616(
     project: object,
 ) -> Real16InvocationSource8616 | None:
@@ -798,12 +845,14 @@ def _invocation_premise_source_8616(
     authority exists under either contract and the premise demand must
     keep its default refusal.
     """
+    source: object
     source = _real16_invocation_source_8616(project)
     if source is not None:
         return source
     return _scoped_invocation_source_8616(project)
 
 
+@cython.ccall
 def _premise_target_resolver_8616(project: object) -> object:
     """Return the shared decoded direct-target resolver for one project.
 
@@ -822,7 +871,7 @@ def _surface_call_preservations_8616(
     project: object,
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
-) -> tuple[EntryDomainCallPreservation8616, ...]:
+) -> object:
     """Collect in-flight callsite records bound to one census surface.
 
     The census consumes only records carrying the identical artifact,
@@ -833,8 +882,8 @@ def _surface_call_preservations_8616(
     """
     if not any(
         instruction.op == "CALL"
-        for block in artifact.blocks
-        for instruction in block.instrs
+        for block in iter(artifact.blocks)
+        for instruction in iter(block.instrs)
     ):
         return ()
     return collect_entry_domain_call_preservations_8616(
@@ -847,13 +896,10 @@ def _surface_call_preservations_8616(
     )
 
 
+@cython.ccall
 def _enclosing_surface_8616(
-    project: object, head_addr: int,
-) -> tuple[
-    ExactFunctionRangeBoundary8616,
-    IRFunctionArtifact,
-    tuple[EntryDomainCallPreservation8616, ...],
-] | None:
+    project: object, head_addr: cython.longlong,
+) -> object:
     """Resolve the exact enclosing surface rooted at a decoded edge target.
 
     ``head_addr`` is the row's raw decoded ``target_addr`` — the address
@@ -862,15 +908,16 @@ def _enclosing_surface_8616(
     census import so its blocks are the identical objects the census
     re-derivation binds; anything weaker is ``None``, never a guess.
     """
+    boundary: object
     from .real16_invocation_domain import real16_native_census_import_8616
 
     boundary = _exact_boundary_for_8616(project, head_addr)
-    if boundary is None or boundary.addr != head_addr:
+    if boundary is None or operator.ne(boundary.addr, head_addr):
         return None
     artifact = real16_native_census_import_8616(project, boundary)
     if (
         type(artifact) is not IRFunctionArtifact
-        or artifact.function_addr != head_addr
+        or operator.ne(artifact.function_addr, head_addr)
     ):
         return None
     return (
@@ -880,15 +927,16 @@ def _enclosing_surface_8616(
     )
 
 
+@cython.ccall
 def _edge_invocation_premise_8616(
     project: object,
     source: Real16InvocationSource8616,
     row: DecodedDirectCallsite8616,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     callee_artifact: IRFunctionArtifact,
     callee_boundary: ExactFunctionRangeBoundary8616,
     callee_coverage: IRBoundaryCoverageResult8616 | None,
-    callee_records: tuple[EntryDomainCallPreservation8616, ...],
+    callee_records: object,
     resolution: _PremiseResolution8616,
 ) -> Real16InvocationDomain8616 | None:
     """Prove one transported premise for a decoded edge into a callee head.
@@ -901,8 +949,12 @@ def _edge_invocation_premise_8616(
     through the same session; ``None`` is returned whenever any leg
     cannot be proved — never a partial premise.
     """
+    enclosing: object
+    encoded: object
+    parent: object
+    parent_surface: object
     encoded = row.encoded_near_coordinates()
-    if encoded is None or row.caller_start == callee_artifact.function_addr:
+    if encoded is None or operator.eq(row.caller_start, callee_artifact.function_addr):
         return None
     raw_target = encoded[1]
     parent = _registered_invocation_premise_8616(
@@ -926,7 +978,7 @@ def _edge_invocation_premise_8616(
     if parent_surface is None:
         return None
     callsite_artifact, callsite_boundary = parent_surface
-    if raw_target == callee_artifact.function_addr:
+    if operator.eq(raw_target, callee_artifact.function_addr):
         link: Real16CallChainLink8616 | Real16EnclosedEntryLink8616
         link = Real16CallChainLink8616(
             parent=parent,
@@ -981,8 +1033,8 @@ def _edge_invocation_premise_8616(
 
 
 def _caller_premise_surface_8616(
-    project: object, head_addr: int,
-) -> tuple[IRFunctionArtifact, ExactFunctionRangeBoundary8616, IRBoundaryCoverageResult8616] | None:
+    project: object, head_addr: cython.longlong,
+) -> object:
     """Resolve one native caller surface without publishing conditional evidence.
 
     The caller's premise session must guard this demand before import. Only a
@@ -990,6 +1042,8 @@ def _caller_premise_surface_8616(
     entries never trigger a replacement. Refusal-free native intake establishes
     registry ownership; byte-bound coverage must then close before premise use.
     """
+    artifact: object
+    boundary: object
     registered = registered_function_ir_artifact_8616(project, head_addr)
     if registered.verdict is FunctionIRArtifactVerdict8616.PROVEN and registered.artifact is not None:
         artifact = registered.artifact
@@ -999,7 +1053,7 @@ def _caller_premise_surface_8616(
         return None
     boundary = _exact_boundary_for_8616(project, head_addr)
     if (
-        boundary is None or boundary.addr != head_addr
+        boundary is None or operator.ne(boundary.addr, head_addr)
         or boundary.project is not project
     ):
         return None
@@ -1012,9 +1066,9 @@ def _caller_premise_surface_8616(
         return None
     if imported and (
         type(artifact) is not IRFunctionArtifact
-        or artifact.function_addr != head_addr
+        or operator.ne(artifact.function_addr, head_addr)
         or artifact.refusals
-        or any(block.refusals for block in artifact.blocks)
+        or any(block.refusals for block in iter(artifact.blocks))
     ):
         return None
     if imported:
@@ -1022,23 +1076,31 @@ def _caller_premise_surface_8616(
         if publication.verdict is not FunctionIRArtifactVerdict8616.PROVEN or publication.artifact is not artifact:
             return None
     coverage = prove_ir_boundary_coverage_8616(project, boundary, artifact)
-    if not coverage.complete:
+    if coverage.failure is not None:
+        # The producer sealed this exact typed failure from one live
+        # observation in the expression above, with no intervening call a
+        # mutation could hide behind; ``complete`` would repeat that
+        # identical observation synchronously. Retained/public consumers
+        # still replay the full check through ``complete``/``complete_for``.
         return None
     return artifact, boundary, coverage
 
 
+@cython.ccall
 def _retry_registered_parent_edges_8616(
     project: object,
-    rows: tuple[DecodedDirectCallsite8616, ...],
-    callsite_addr: int,
+    rows: object,
+    callsite_addr: cython.longlong,
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
     coverage: IRBoundaryCoverageResult8616,
-    records: tuple[EntryDomainCallPreservation8616, ...],
+    records: object,
     source: Real16InvocationSource8616,
     resolution: _PremiseResolution8616,
 ) -> Real16InvocationDomain8616 | None:
     """Try authenticated parent edges until one closes before expiry."""
+    premise: object
+    row: object
     for row in rows:
         if _resolution_deadline_expired_8616(project, resolution.deadline):
             return None
@@ -1060,19 +1122,21 @@ def _retry_registered_parent_edges_8616(
     return None
 
 
+@cython.ccall
 def _retry_registered_invocation_premise_8616(
     project: object,
-    head_addr: int,
-    callsite_addr: int,
+    head_addr: cython.longlong,
+    callsite_addr: cython.longlong,
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
     coverage: IRBoundaryCoverageResult8616,
     source: Real16InvocationSource8616,
     resolution: _PremiseResolution8616,
     *,
-    retry_boot: bool,
+    retry_boot: cython.bint,
 ) -> Real16InvocationDomain8616 | None:
     """Retry one refused caller premise only through available evidence."""
+    retried: object
     if _resolution_deadline_expired_8616(project, resolution.deadline):
         return None
     rows = source.callsite_index.for_target(head_addr)
@@ -1108,12 +1172,12 @@ def _retry_registered_invocation_premise_8616(
 
 def _raw_boot_invocation_premise_8616(
     project: object,
-    head_addr: int,
-    callsite_addr: int,
+    head_addr: cython.longlong,
+    callsite_addr: cython.longlong,
     source: Real16InvocationSource8616,
     resolution: _PremiseResolution8616 | None = None,
     *,
-    allow_call_records: bool = True,
+    allow_call_records: cython.bint = True,
 ) -> Real16InvocationDomain8616 | None:
     """Attempt source-bound startup census before recursive universal intake.
 
@@ -1131,6 +1195,8 @@ def _raw_boot_invocation_premise_8616(
     ``allow_call_records=False`` permits only an independent record-free
     census, including when a later obligation for this boot head is in flight.
     """
+    artifact: object
+    boundary: object
     deadline = None if resolution is None else resolution.deadline
     if _resolution_deadline_expired_8616(project, deadline):
         return None
@@ -1146,7 +1212,7 @@ def _raw_boot_invocation_premise_8616(
     if (
         _resolution_deadline_expired_8616(project, deadline)
         or isinstance(evidence, Real16InvocationFailure8616)
-        or evidence.entry_linear != head_addr
+        or operator.ne(evidence.entry_linear, head_addr)
     ):
         return None
     if (
@@ -1161,7 +1227,7 @@ def _raw_boot_invocation_premise_8616(
         return None
     boundary = _exact_boundary_for_8616(project, head_addr)
     if (
-        boundary is None or boundary.project is not project or boundary.addr != head_addr
+        boundary is None or boundary.project is not project or operator.ne(boundary.addr, head_addr)
         or _resolution_deadline_expired_8616(project, deadline)
     ):
         return None
@@ -1192,8 +1258,11 @@ def _raw_boot_invocation_premise_8616(
     return None if _resolution_deadline_expired_8616(project, deadline) else premise
 
 
-def _prefix_call_sites_8616(artifact: IRFunctionArtifact, callsite_addr: int) -> frozenset[int]:
+@cython.ccall
+def _prefix_call_sites_8616(artifact: IRFunctionArtifact, callsite_addr: cython.longlong) -> frozenset[cython.longlong]:
     """Select prior CALL rows using the census's own CFG ancestry relation."""
+    block: object
+    instruction: object
     from .real16_invocation_domain import (
         Real16InvocationFailure8616,
         _callsite_block_8616,
@@ -1204,24 +1273,26 @@ def _prefix_call_sites_8616(artifact: IRFunctionArtifact, callsite_addr: int) ->
     if isinstance(target, Real16InvocationFailure8616):
         return frozenset()
     ancestors = _dangerous_block_addrs_8616(artifact, target)
-    sites: set[int] = set()
+    sites: set[cython.longlong] = set()
     for block in artifact.blocks:
         if block.addr not in ancestors:
             continue
         for instruction in block.instrs:
-            if block is target and instruction.addr == callsite_addr:
+            if block is target and operator.eq(instruction.addr, callsite_addr):
                 break
             if instruction.op == "CALL" and type(instruction.addr) is int:
                 sites.add(instruction.addr)
     return frozenset(sites)
 
 
+@cython.ccall
 def _prefix_records_8616(
     project: object, artifact: IRFunctionArtifact,
-    boundary: ExactFunctionRangeBoundary8616, callsite_addr: int,
+    boundary: ExactFunctionRangeBoundary8616, callsite_addr: cython.longlong,
     resolution: _PremiseResolution8616,
-) -> tuple[EntryDomainCallPreservation8616, ...]:
+) -> object:
     """Collect exact prefix call records within the existing premise session."""
+    previous: object
     sites = _prefix_call_sites_8616(artifact, callsite_addr)
     if not sites or _resolution_deadline_expired_8616(project, resolution.deadline):
         return ()
@@ -1242,10 +1313,11 @@ def _prefix_records_8616(
             holder._inertia_entry_domain_premise_resolution_8616 = None
 
 
+@cython.ccall
 def _retry_raw_boot_call_prefix_8616(
     project: object, artifact: IRFunctionArtifact, boundary: ExactFunctionRangeBoundary8616,
-    callsite_addr: int, source: Real16InvocationSource8616,
-    resolution: _PremiseResolution8616 | None, premise: Real16InvocationDomain8616,
+    callsite_addr: cython.longlong, source: Real16InvocationSource8616,
+    resolution: object, premise: Real16InvocationDomain8616,
 ) -> Real16InvocationDomain8616:
     """Retry only a call-boundary refusal with independently proven prefix effects."""
     from .real16_boot_entry_link import RawBootEntrySurface8616
@@ -1275,12 +1347,14 @@ class _RawBootPremiseStatus8616(StrEnum):
     RETRY = "retry"
 
 
+@cython.ccall
 def _retain_blocked_boot_premise_8616(
-    project: object, head_addr: int, callsite_addr: int,
+    project: object, head_addr: cython.longlong, callsite_addr: cython.longlong,
     source: Real16InvocationSource8616, resolution: _PremiseResolution8616,
     premise: Real16InvocationDomain8616 | None,
-) -> bool:
+) -> cython.bint:
     """Store only a current native missing prerequisite in this bounded request."""
+    retained: object
     key = (head_addr, callsite_addr)
     if _resolution_deadline_expired_8616(project, resolution.deadline):
         resolution.blocked_prefixes.pop(key, None)
@@ -1293,11 +1367,13 @@ def _retain_blocked_boot_premise_8616(
     return True
 
 
+@cython.ccall
 def _request_raw_boot_premise_8616(
-    project: object, head_addr: int, callsite_addr: int,
+    project: object, head_addr: cython.longlong, callsite_addr: cython.longlong,
     source: Real16InvocationSource8616, resolution: _PremiseResolution8616,
 ) -> Real16InvocationDomain8616 | None:
     """Reuse only unchanged impossible prerequisites within this bounded request."""
+    blocked: object
     if _resolution_deadline_expired_8616(project, resolution.deadline):
         return None
     key = (head_addr, callsite_addr)
@@ -1318,11 +1394,12 @@ def _request_raw_boot_premise_8616(
     return premise
 
 
-def _raw_boot_census_retry_expired_8616(premise: Real16InvocationDomain8616) -> bool:
+@cython.ccall
+def _raw_boot_census_retry_expired_8616(premise: Real16InvocationDomain8616) -> cython.bint:
     """Check an already exhausted census budget without renewing its deadline.
 
-    An old refusal cannot exhaust a fresh request. Only the current shared
-    traversal's retained deadline can rule out all further census proofs.
+    An old refusal cannot exhaust a fresh request. Only a current request
+    or nested-operation deadline can rule out further census proofs.
     Entering an absent traversal leaves its deadline unset and permits retry.
     """
     from .real16_invocation_domain import Real16InvocationFailure8616
@@ -1331,14 +1408,15 @@ def _raw_boot_census_retry_expired_8616(premise: Real16InvocationDomain8616) -> 
     if premise.failure is not Real16InvocationFailure8616.CENSUS_DEADLINE_EXCEEDED:
         return False
     with segment_call_dependency_traversal_scope_8616() as traversal:
-        return bool(deadline_reached_8616(traversal.census_deadline))
+        return bool(deadline_reached_8616(traversal.effective_census_deadline_8616))
 
 
+@cython.ccall
 def _raw_boot_premise_status_8616(
     project: object,
-    premise: Real16InvocationDomain8616 | None,
+    premise: object,
     source: Real16InvocationSource8616,
-    head_addr: int,
+    head_addr: cython.longlong,
     deadline: float | None,
 ) -> _RawBootPremiseStatus8616:
     """Replay raw evidence and retain only useful registered-intake retries.
@@ -1366,8 +1444,9 @@ def _raw_boot_premise_status_8616(
     return _RawBootPremiseStatus8616.RETRY
 
 
+@cython.ccall
 def _current_entry_route_status_8616(
-    project: object, source: Real16InvocationSource8616, head_addr: int,
+    project: object, source: Real16InvocationSource8616, head_addr: cython.longlong,
     deadline: float | None, status: _RawBootPremiseStatus8616,
 ) -> _RawBootPremiseStatus8616:
     """Stop retry intake only when both current entry routes cannot apply.
@@ -1386,15 +1465,16 @@ def _current_entry_route_status_8616(
     evidence = _invocation_boot_evidence_8616(source.boot)
     if _resolution_deadline_expired_8616(project, deadline) or (
         not isinstance(evidence, Real16InvocationFailure8616)
-        and evidence.entry_linear != head_addr
+        and operator.ne(evidence.entry_linear, head_addr)
         and not source.callsite_index.for_target(head_addr)
     ):
         return _RawBootPremiseStatus8616.REFUSED
     return status
 
 
+@cython.ccall
 def _independent_reentrant_boot_premise_8616(
-    project: object, head_addr: int, callsite_addr: int,
+    project: object, head_addr: cython.longlong, callsite_addr: cython.longlong,
     source: Real16InvocationSource8616, resolution: _PremiseResolution8616,
 ) -> Real16InvocationDomain8616 | None:
     """Prove an earlier boot prefix without consuming recursive call records.
@@ -1404,6 +1484,7 @@ def _independent_reentrant_boot_premise_8616(
     obligation from being used as its own premise. A prior unproven CALL still
     refuses, and the existing request deadline bounds replay and consumption.
     """
+    premise: object
     if (
         resolution.remaining <= 0
         or len(resolution.in_flight) >= _ENTRY_PREMISE_MAX_DEPTH_8616
@@ -1420,23 +1501,24 @@ def _independent_reentrant_boot_premise_8616(
 
 
 def _function_entry_for_head_8616(
-    source: Real16InvocationSource8616, head_addr: int,
+    source: Real16InvocationSource8616, head_addr: cython.longlong,
 ) -> DeclaredFunctionEntryAdmission8616 | None:
     """Select an explicit entry by exact coordinate, never by a library name."""
     if not _function_entries_valid_8616(source):
         raise TypeError("invocation source requires unambiguous typed function entries")
-    return next((entry for entry in source.function_entries
-                 if (entry.spec.entry_segment << 4) + entry.spec.entry_offset == head_addr), None)
+    return next((entry for entry in iter(source.function_entries)
+                 if operator.eq((entry.spec.entry_segment << 4) + entry.spec.entry_offset, head_addr)), None)
 
 
+@cython.ccall
 def _declared_function_premise_8616(
     project: object,
     source: Real16InvocationSource8616,
     admission: DeclaredFunctionEntryAdmission8616,
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
-    callsite_addr: int,
-    records: tuple[EntryDomainCallPreservation8616, ...] = (),
+    callsite_addr: cython.longlong,
+    records: object = (),
     *, deadline: float | None = None,
 ) -> Real16InvocationDomain8616 | None:
     """Replay the declared entry over an exact native surface with no boot walk."""
@@ -1457,13 +1539,16 @@ def _declared_function_premise_8616(
     return premise
 
 
+@cython.ccall
 def _import_declared_function_premise_8616(
     project: object,
     source: Real16InvocationSource8616,
     admission: DeclaredFunctionEntryAdmission8616,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
 ) -> Real16InvocationDomain8616 | None:
     """Import only the declared extent without publishing conditional code."""
+    artifact: object
+    boundary: object
     from .real16_invocation_domain import real16_native_census_import_8616
 
     start, end = admission.spec.range_start, admission.spec.range_end
@@ -1482,13 +1567,14 @@ def _import_declared_function_premise_8616(
     )
 
 
+@cython.ccall
 def _resolve_registered_surface_8616(
     project: object,
-    head_addr: int,
-    callsite_addr: int,
+    head_addr: cython.longlong,
+    callsite_addr: cython.longlong,
     source: Real16InvocationSource8616,
     resolution: _PremiseResolution8616,
-    admission: DeclaredFunctionEntryAdmission8616 | None,
+    admission: object,
 ) -> Real16InvocationDomain8616 | None:
     """Choose explicit entry or boot provenance inside the shared demand guard."""
     if _resolution_deadline_expired_8616(project, resolution.deadline):
@@ -1520,8 +1606,9 @@ def _resolve_registered_surface_8616(
     return _registered_surface_premise_8616(project, head_addr, callsite_addr, source, resolution)
 
 
+@cython.ccall
 def _registered_surface_premise_8616(
-    project: object, head_addr: int, callsite_addr: int,
+    project: object, head_addr: cython.longlong, callsite_addr: cython.longlong,
     source: Real16InvocationSource8616, resolution: _PremiseResolution8616,
 ) -> Real16InvocationDomain8616 | None:
     """Resolve universal caller coverage, then retry only satisfiable premises.
@@ -1529,6 +1616,7 @@ def _registered_surface_premise_8616(
     A native-bound absent boot service is a missing prerequisite, not a
     successful invocation. Its request-local reuse cannot authorize a CALL.
     """
+    surface: object
     from .real16_invocation_domain import (
         Real16InvocationFailure8616,
         prove_real16_invocation_domain_8616,
@@ -1568,10 +1656,11 @@ def _registered_surface_premise_8616(
     )
 
 
+@cython.ccall
 def _registered_invocation_premise_8616(
     project: object,
-    head_addr: int,
-    callsite_addr: int,
+    head_addr: cython.longlong,
+    callsite_addr: cython.longlong,
     source: Real16InvocationSource8616,
     resolution: _PremiseResolution8616,
 ) -> Real16InvocationDomain8616 | None:
@@ -1587,6 +1676,7 @@ def _registered_invocation_premise_8616(
     the same bounded session so cyclic or over-deep caller graphs refuse
     deterministically instead of recursing without bound.
     """
+    admission: object
     admission = _function_entry_for_head_8616(source, head_addr)
     if head_addr in resolution.in_flight:
         if admission is not None:
@@ -1611,12 +1701,13 @@ def _registered_invocation_premise_8616(
         resolution.in_flight = prior_in_flight
 
 
+@cython.ccall
 def _boot_retry_invocation_premise_8616(
     project: object,
     coverage: IRBoundaryCoverageResult8616,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     source: Real16InvocationSource8616,
-    records: tuple[EntryDomainCallPreservation8616, ...],
+    records: object,
 ) -> Real16InvocationDomain8616 | None:
     """Retry a boot-rooted proof with its surface's collected records.
 
@@ -1648,12 +1739,13 @@ def _boot_retry_invocation_premise_8616(
     return None
 
 
+@cython.ccall
 def _caller_invocation_premise_8616(
     project: object,
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
-    callsite_addr: int,
-    entry_call_preservations: tuple[EntryDomainCallPreservation8616, ...],
+    callsite_addr: cython.longlong,
+    entry_call_preservations: object,
 ) -> Real16InvocationDomain8616 | None:
     """Build a transported caller-domain premise for one exact callsite.
 
@@ -1667,6 +1759,11 @@ def _caller_invocation_premise_8616(
     (``ENCLOSED_ENTRY``). ``None`` is returned whenever any leg cannot be
     proved — never a partial premise.
     """
+    admission: object
+    premise: object
+    resolution: object
+    source: object
+    row: object
     source = _invocation_premise_source_8616(project)
     if source is None:
         return None
@@ -1712,12 +1809,13 @@ def _caller_invocation_premise_8616(
             surface._inertia_entry_domain_premise_resolution_8616 = None
 
 
+@cython.ccall
 def entry_domain_invocation_premise_8616(
     project: object,
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
-    callsite_addr: int,
-    entry_call_preservations: tuple[EntryDomainCallPreservation8616, ...] = (),
+    callsite_addr: cython.longlong,
+    entry_call_preservations: object = (),
 ) -> Real16InvocationDomain8616 | None:
     """Resolve a complete caller-domain premise for one exact row.
 
@@ -1742,41 +1840,42 @@ def entry_domain_invocation_premise_8616(
 
 
 def _callee_preserved_registers_8616(
-    callee: SegmentEffectClosureResult8616 | None,
+    callee: object,
 ) -> tuple[str, ...]:
     """Project only identities proven at callee entry and every return exit."""
+    entry: object
     if callee is None:
         return ()
     state = callee.state
     entry = state.entry_states.get(callee.coverage.artifact.function_addr, {})
     return tuple(
         register
-        for register in SEGMENT_REGISTERS
+        for register in iter(SEGMENT_REGISTERS)
         if register in entry
         and entry[register].origin is SegmentOrigin.PROVEN
         and entry[register].source is not None
         and all(
             register in state.exit_states.get(block_addr, {})
             and state.exit_states[block_addr][register].origin is SegmentOrigin.PROVEN
-            and state.exit_states[block_addr][register].source == entry[register].source
-            for block_addr in callee.return_block_addrs
+            and operator.eq(state.exit_states[block_addr][register].source, entry[register].source)
+            for block_addr in iter(callee.return_block_addrs)
         )
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _CallerInstructionPosition8616:
     """Operation-local identities and slots; these facts grant no proof."""
 
     artifact: IRFunctionArtifact
     block: IRBlock
     instruction: IRInstr
-    blocks: tuple[IRBlock, ...]
-    instructions: tuple[IRInstr, ...]
-    block_index: int
-    instruction_index: int
+    blocks: object
+    instructions: object
+    block_index: cython.longlong
+    instruction_index: cython.longlong
 
-    def matches(self, artifact: IRFunctionArtifact, block: IRBlock, instruction: IRInstr) -> bool:
+    def matches(self, artifact: IRFunctionArtifact, block: IRBlock, instruction: IRInstr) -> cython.bint:
         """Check current exact owners and slots without traversing their streams."""
         return (
             artifact is self.artifact and block is self.block and instruction is self.instruction
@@ -1793,12 +1892,14 @@ def _capture_caller_instruction_position_8616(
     artifact: IRFunctionArtifact, block: IRBlock, instruction: IRInstr,
 ) -> _CallerInstructionPosition8616 | None:
     """Capture membership once before callbacks; malformed owners stay refused."""
+    block_index: object
+    instruction_index: object
     if type(artifact) is not IRFunctionArtifact or type(block) is not IRBlock:
         return None
     if type(instruction) is not IRInstr:
         return None
-    block_index = next((index for index, row in enumerate(artifact.blocks) if row is block), None)
-    instruction_index = next((index for index, row in enumerate(block.instrs) if row is instruction), None)
+    block_index = next((index for index, row in builtins.iter(enumerate(artifact.blocks)) if row is block), None)
+    instruction_index = next((index for index, row in builtins.iter(enumerate(block.instrs)) if row is instruction), None)
     if block_index is None or instruction_index is None:
         return None
     return _CallerInstructionPosition8616(
@@ -1821,14 +1922,14 @@ def _caller_surface_failure_8616(
         return EntryDomainCallPreservationFailure8616.CALLER_BINDING_MISMATCH
     if type(result.boundary) is not ExactFunctionRangeBoundary8616:
         return EntryDomainCallPreservationFailure8616.CALLER_BINDING_MISMATCH
-    if result.boundary.addr != result.artifact.function_addr:
+    if operator.ne(result.boundary.addr, result.artifact.function_addr):
         return EntryDomainCallPreservationFailure8616.CALLER_BINDING_MISMATCH
     if position is None:
         # Standalone consumers keep their existing fresh scans and allocate
         # no temporary position object. Only the synchronous collector retains
         # a pre-callback position for its repeated reconciliation.
-        member = (any(block is result.block for block in result.artifact.blocks)
-                  and any(instr is result.instruction for instr in result.block.instrs))
+        member = (any(block is result.block for block in iter(result.artifact.blocks))
+                  and any(instr is result.instruction for instr in iter(result.block.instrs)))
     else:
         member = position.matches(result.artifact, result.block, result.instruction)
     if not member:
@@ -1837,12 +1938,13 @@ def _caller_surface_failure_8616(
     if (
         instruction.op != "CALL"
         or type(result.callsite_addr) is not int
-        or instruction.addr != result.callsite_addr
+        or operator.ne(instruction.addr, result.callsite_addr)
     ):
         return EntryDomainCallPreservationFailure8616.CALLER_BINDING_MISMATCH
     return None
 
 
+@cython.ccall
 def _callsite_entry_failure_8616(
     result: EntryDomainCallPreservation8616,
 ) -> EntryDomainCallPreservationFailure8616 | None:
@@ -1854,8 +1956,8 @@ def _callsite_entry_failure_8616(
     if type(entry) is not DecodedDirectCallsite8616:
         return EntryDomainCallPreservationFailure8616.CALLSITE_UNPROVEN
     if (
-        entry.callsite_addr != result.callsite_addr
-        or entry.caller_start != result.boundary.addr
+        operator.ne(entry.callsite_addr, result.callsite_addr)
+        or operator.ne(entry.caller_start, result.boundary.addr)
         or entry.is_far
         or type(entry.target_addr) is not int
         or entry not in index.for_target(entry.target_addr)
@@ -1864,6 +1966,7 @@ def _callsite_entry_failure_8616(
     return None
 
 
+@cython.ccall
 def _callee_dependency_failure_8616(
     callee: SegmentEffectClosureResult8616,
 ) -> EntryDomainCallPreservationFailure8616 | None:
@@ -1875,11 +1978,14 @@ def _callee_dependency_failure_8616(
     callsite the callee itself records, so an uncensused nested call is
     refused instead of inherited silently.
     """
+    bound: object
+    proof: object
+    site: object
     census = frozenset(callee.callsite_addrs)
     if not census:
         return None
     artifact = callee.coverage.artifact
-    by_site: dict[int, list[SegmentCallPreservationResult8616]] = {}
+    by_site: dict[cython.longlong, list[SegmentCallPreservationResult8616]] = {}
     for proof in callee.state.call_preservations:
         if not (
             type(proof) is SegmentCallPreservationResult8616
@@ -1899,6 +2005,7 @@ def _callee_dependency_failure_8616(
     return None
 
 
+@cython.ccall
 def _operand_target_failure_8616(
     result: EntryDomainCallPreservation8616,
 ) -> EntryDomainCallPreservationFailure8616 | None:
@@ -1911,6 +2018,7 @@ def _operand_target_failure_8616(
     target — and the bound callee address must be a member of the proven
     candidate window for this callsite.
     """
+    window: object
     instruction = result.instruction
     target = instruction.args[0] if instruction.args else None
     entry = result.entry
@@ -1924,7 +2032,7 @@ def _operand_target_failure_8616(
     if window is None or result.target_addr not in window[2]:
         return EntryDomainCallPreservationFailure8616.TARGET_MISMATCH
     if target.space is MemSpace.CONST:
-        if type(target.const) is not int or target.const != result.target_addr:
+        if type(target.const) is not int or operator.ne(target.const, result.target_addr):
             return EntryDomainCallPreservationFailure8616.TARGET_MISMATCH
         return None
     binding = result.binding
@@ -1937,8 +2045,8 @@ def _operand_target_failure_8616(
     if (
         not isinstance(binding, DirectNearCallTargetBinding8616)
         or not binding.complete
-        or binding.callsite_addr != result.callsite_addr
-        or binding.target_addr != window[1]
+        or operator.ne(binding.callsite_addr, result.callsite_addr)
+        or operator.ne(binding.target_addr, window[1])
     ):
         return EntryDomainCallPreservationFailure8616.TARGET_MISMATCH
     return None
@@ -1948,6 +2056,7 @@ def _preservation_failure_8616(
     result: EntryDomainCallPreservation8616,
 ) -> EntryDomainCallPreservationFailure8616 | None:
     """Revalidate one bound callsite proof from its retained evidence."""
+    failure: object
     counts = (
         result.raw_fact_count,
         result.normalized_fact_count,
@@ -1959,7 +2068,7 @@ def _preservation_failure_8616(
         if type(result.failure) is not EntryDomainCallPreservationFailure8616:
             return EntryDomainCallPreservationFailure8616.ACCOUNTING_INCOMPLETE
         return result.failure
-    if counts != (1, 1, 1, 1, 0) or any(type(count) is not int for count in counts):
+    if counts != (1, 1, 1, 1, 0) or any(type(count) is not int for count in iter(counts)):
         return EntryDomainCallPreservationFailure8616.ACCOUNTING_INCOMPLETE
     failure = _caller_surface_failure_8616(result)
     if failure is not None:
@@ -1975,13 +2084,15 @@ def _preservation_failure_8616(
 
 def _selector_batch_record_bound_8616(
     record: EntryDomainCallPreservation8616, scope: DeclaredSegmentInvariant,
-) -> bool:
+) -> cython.bint:
     """Check the exact offered CS-only record without invoking scalar authority."""
+    link: object
+    projection: object
     counts = (record.raw_fact_count, record.normalized_fact_count, record.classified_fact_count,
               record.materialized_count, record.failure_count)
     if record.failure is not None or record.entry is None or counts != (1, 1, 1, 1, 0):
         return False
-    if any(type(count) is not int for count in counts):
+    if any(type(count) is not int for count in iter(counts)):
         return False
     projection = record.selector_projection
     link = scope.root_link
@@ -1991,14 +2102,15 @@ def _selector_batch_record_bound_8616(
             or record.boundary.project is not scope.project or record.invocation_scope is not None):
         return False
     if (projection.block is not record.block or projection.instruction is not record.instruction
-            or projection.callsite_addr != record.callsite_addr or projection.target_addr != record.target_addr):
+            or operator.ne(projection.callsite_addr, record.callsite_addr) or operator.ne(projection.target_addr, record.target_addr)):
         return False
     return (record.binding is None or record.binding.selector_binding is projection)
 
 
+@cython.ccall
 def _selector_batch_operand_matches_8616(
     original: EntryDomainCallPreservation8616, fresh: EntryDomainCallPreservation8616,
-) -> bool:
+) -> cython.bint:
     """Compare the offered operand theorem with the freshly native-bound result."""
     if fresh.failure is not None:
         return False
@@ -2009,6 +2121,7 @@ def _selector_batch_operand_matches_8616(
             and old == new and old.stats.closed)
 
 
+@cython.ccall
 def _selector_batch_record_facts_8616(record: EntryDomainCallPreservation8616) -> object:
     """Detach record and operand fields; shared indices are captured separately."""
     from .declared_selector_scoped_callee import (
@@ -2028,13 +2141,15 @@ def _selector_batch_record_facts_8616(record: EntryDomainCallPreservation8616) -
             _binding_facts(record.binding, set()))
 
 
+@cython.ccall
 def _selector_batch_index_facts_8616(
-    records: tuple[EntryDomainCallPreservation8616, ...], project: object,
-) -> dict[int, tuple[object, ...]] | None:
+    records: object, project: object,
+) -> object:
     """Capture all shared native indices before the first operand callback."""
+    record: object
     from .declared_selector_call_preservation import _charge_collection_8616, _index_facts_8616
 
-    indices: dict[int, tuple[object, ...]] = {}
+    indices: dict[cython.longlong, tuple[object, ...]] = {}
     for record in records:
         if id(record.index) in indices:
             continue
@@ -2048,14 +2163,19 @@ def _selector_batch_index_facts_8616(
 
 
 def consume_entry_selector_call_preservation_batch_8616(
-    records: tuple[EntryDomainCallPreservation8616, ...], scope: DeclaredSegmentInvariant,
-) -> tuple[bool, ...]:
+    records: object, scope: DeclaredSegmentInvariant,
+) -> tuple[cython.bint, ...]:
     """Freshly authenticate many selector records with one shared native dependency seal.
 
     Native operand preparation precedes the canonical CS batch. Final record,
     index and operand comparisons are pure; no admission survives this call.
     Existing full-callee records retain their ordinary scalar contract.
     """
+    indices: object
+    projection: object
+    item: object
+    record: object
+    slot: object
     from .declared_selector_call_preservation import (
         _bound_record_8616,
         _charge_collection_8616,
@@ -2069,12 +2189,12 @@ def consume_entry_selector_call_preservation_batch_8616(
 
     with segment_call_dependency_traversal_scope_8616():
         verdicts = [False] * len(records)
-        before = tuple(_selector_batch_record_facts_8616(record) for record in records)
+        before = tuple(_selector_batch_record_facts_8616(record) for record in iter(records))
         units = scoped_selector_facts_work_8616(before)
         indices = _selector_batch_index_facts_8616(records, scope.project)
         if indices is None or not _charge_collection_8616(scope.project, units):
             return tuple(verdicts)
-        prepared: dict[int, _PreparedCall8616] = {}
+        prepared: dict[cython.longlong, _PreparedCall8616] = {}
         for slot, record in enumerate(records):
             if not _selector_batch_record_bound_8616(record, scope):
                 continue
@@ -2089,27 +2209,30 @@ def consume_entry_selector_call_preservation_batch_8616(
                 index_facts=indices[id(record.index)])
             if isinstance(offered, _PreparedCall8616):
                 prepared[slot] = offered
-        slots = tuple(slot for slot, valid in enumerate(verdicts) if valid or slot in prepared)
+        slots = tuple(slot for slot, valid in builtins.iter(enumerate(verdicts)) if valid or slot in prepared)
         admitted = consume_declared_selector_cs_preservation_batch_8616(
             scope.project, tuple(cast("DeclaredSelectorCallsite8616", records[slot].selector_projection)
-                                 for slot in slots))
+                                 for slot in iter(slots)))
         admitted_by_slot = dict(zip(slots, admitted, strict=True))
-        index_current = indices == _selector_batch_index_facts_8616(records, scope.project)
+        index_current = operator.eq(indices, _selector_batch_index_facts_8616(records, scope.project))
         verdicts = [valid and admitted_by_slot.get(slot, False) and index_current
-                    for slot, valid in enumerate(verdicts)]
+                    for slot, valid in builtins.iter(enumerate(verdicts))]
         for slot, item in prepared.items():
             fresh = _seal_call_8616(scope.project, item, admitted_by_slot[slot], index_admitted=index_current)
             verdicts[slot] = _selector_batch_operand_matches_8616(records[slot], fresh)
         if (not _charge_collection_8616(scope.project, units)
-                or before != tuple(_selector_batch_record_facts_8616(record) for record in records)):
-            return tuple(False for _ in records)
+                or operator.ne(before, tuple(_selector_batch_record_facts_8616(record) for record in iter(records)))):
+            return tuple(False for _ in iter(records))
         return tuple(verdicts)
 
 
+@cython.ccall
 def _selector_cs_preservation_failure_8616(
     result: EntryDomainCallPreservation8616,
 ) -> EntryDomainCallPreservationFailure8616 | None:
     """Consume only the declared root's exact CS judgement after operand callbacks."""
+    failure: object
+    projection: object
     from .declared_selector_invariant import consume_declared_selector_cs_preservation_8616
 
     projection = result.selector_projection
@@ -2120,7 +2243,7 @@ def _selector_cs_preservation_failure_8616(
             or projection.scope.project is not result.boundary.project):
         return EntryDomainCallPreservationFailure8616.CALLER_BINDING_MISMATCH
     if (projection.block is not result.block or projection.instruction is not result.instruction
-            or projection.callsite_addr != result.callsite_addr or projection.target_addr != result.target_addr):
+            or operator.ne(projection.callsite_addr, result.callsite_addr) or operator.ne(projection.target_addr, result.target_addr)):
         return EntryDomainCallPreservationFailure8616.CALLER_BINDING_MISMATCH
     if (result.invocation_scope is not None
             or (result.binding is not None and result.binding.selector_binding is not projection)):
@@ -2133,10 +2256,14 @@ def _selector_cs_preservation_failure_8616(
     return None
 
 
+@cython.ccall
 def _callee_complete_in_scope_8616(
     result: EntryDomainCallPreservation8616, callee: SegmentEffectClosureResult8616,
-) -> bool:
+) -> cython.bint:
     """Authenticate exact registered or raw transport before consuming effects."""
+    callee_scope: object
+    caller_scope: object
+    parent_surface: object
     from .real16_invocation_domain import (
         Real16CallChainLink8616,
         _retained_parent_census_surface_8616,
@@ -2162,7 +2289,7 @@ def _callee_complete_in_scope_8616(
             and parent_surface[1] is result.boundary
             and link.callsite_artifact is result.artifact
             and link.callsite_boundary is result.boundary
-            and link.parent.callsite_addr == result.callsite_addr
+            and operator.eq(link.parent.callsite_addr, result.callsite_addr)
             and result.entry is not None
             and _transported_edge_bound_8616(result.boundary.project, link.callsite, result.entry)
             and same_real16_entry_scope_8616(caller_scope, link.parent)
@@ -2176,6 +2303,7 @@ def _callee_complete_in_scope_8616(
     ) and callee.complete_for(callee_scope)
 
 
+@cython.ccall
 def _stack_probe_helper_evidence_8616(
     project: object, result: EntryDomainCallPreservation8616,
 ) -> CompilerHelperEvidence8616 | None:
@@ -2189,6 +2317,10 @@ def _stack_probe_helper_evidence_8616(
     call-stack position proof; this certificate covers segment
     preservation only.
     """
+    entry: object
+    evidence: object
+    expected_far: object
+    window: object
     from inertia.semantics.compiler_helpers import (
         CompilerHelperEvidenceKind8616,
         identify_x86_16_compiler_helper_at_8616,
@@ -2202,17 +2334,18 @@ def _stack_probe_helper_evidence_8616(
     if window is None or target not in window[2]:
         return None
     evidence = identify_x86_16_compiler_helper_at_8616(project, target)
-    if evidence is None or evidence.addr != target:
+    if evidence is None or operator.ne(evidence.addr, target):
         return None
     expected_far = {
         CompilerHelperEvidenceKind8616.STACK_PROBE: False,
         CompilerHelperEvidenceKind8616.STACK_PROBE_FAR: True,
     }.get(evidence.kind)
-    if expected_far is None or entry.is_far != expected_far:
+    if expected_far is None or operator.ne(entry.is_far, expected_far):
         return None
     return evidence
 
 
+@cython.ccall
 def _helper_chain_failure_8616(
     result: EntryDomainCallPreservation8616,
 ) -> EntryDomainCallPreservationFailure8616 | None:
@@ -2225,8 +2358,11 @@ def _helper_chain_failure_8616(
     the lifted-operand selector discharge, which remains the Semantics
     binding owner's separate obligation for the IR operand itself.
     """
+    coordinates: object
+    entry: object
+    fresh: object
     fresh = _stack_probe_helper_evidence_8616(result.boundary.project, result)
-    if fresh is None or fresh != result.helper_evidence:
+    if fresh is None or operator.ne(fresh, result.helper_evidence):
         return EntryDomainCallPreservationFailure8616.CALLEE_UNRESOLVED
     entry = result.entry
     assert entry is not None  # bound by the callsite-entry check above
@@ -2236,10 +2372,15 @@ def _helper_chain_failure_8616(
     return None
 
 
+@cython.ccall
 def _callee_chain_failure_8616(
     result: EntryDomainCallPreservation8616,
 ) -> EntryDomainCallPreservationFailure8616 | None:
     """Revalidate the callee side: artifact, window, closure, operand, CS."""
+    callee: object
+    dependency_failure: object
+    operand_failure: object
+    window: object
     entry = cast(DecodedDirectCallsite8616, result.entry)
     callee = result.callee
     if type(callee) is not SegmentEffectClosureResult8616:
@@ -2253,7 +2394,7 @@ def _callee_chain_failure_8616(
         window is None
         or type(callee.coverage.artifact) is not IRFunctionArtifact
         or callee.coverage.artifact.function_addr not in window[2]
-        or result.target_addr != callee.coverage.artifact.function_addr
+        or operator.ne(result.target_addr, callee.coverage.artifact.function_addr)
     ):
         return EntryDomainCallPreservationFailure8616.TARGET_MISMATCH
     if not _callee_complete_in_scope_8616(result, callee):
@@ -2269,15 +2410,16 @@ def _callee_chain_failure_8616(
     return None
 
 
+@cython.ccall
 def _refused_result_8616(
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
     block: IRBlock,
     instruction: IRInstr,
-    index: DecodedDirectCallsiteIndex8616 | None,
+    index: object,
     entry: DecodedDirectCallsite8616 | None,
     callee: SegmentEffectClosureResult8616 | None,
-    callsite_addr: int | None,
+    callsite_addr: object,
     target_addr: int | None,
     failure: EntryDomainCallPreservationFailure8616,
 ) -> EntryDomainCallPreservation8616:
@@ -2306,11 +2448,14 @@ def _refused_result_8616(
     )
 
 
+@cython.ccall
 def _decoded_instruction_map_8616(
     boundary: ExactFunctionRangeBoundary8616,
-) -> dict[int, object]:
+) -> object:
     """Map each decoded native instruction of the boundary by its address."""
-    decoded: dict[int, object] = {}
+    block: object
+    instruction: object
+    decoded: dict[cython.longlong, object] = {}
     for block in boundary.blocks:
         insns = cast(_CapstoneDisassembly8616, cast(_DecodedBlock8616, block).capstone).insns
         for instruction in insns:
@@ -2323,11 +2468,12 @@ def _decoded_instruction_map_8616(
 def _decoded_entry_for_callsite_8616(
     index: DecodedDirectCallsiteIndex8616,
     boundary: ExactFunctionRangeBoundary8616,
-    decoded_by_addr: dict[int, object],
-    callsite_addr: int,
+    decoded_by_addr: object,
+    callsite_addr: cython.longlong,
     resolver: DirectCallTargetResolver8616,
 ) -> DecodedDirectCallsite8616 | None:
     """Return the unique indexed near-call entry for one exact callsite."""
+    instruction: object
     instruction = decoded_by_addr.get(callsite_addr)
     if instruction is None:
         return None
@@ -2339,17 +2485,18 @@ def _decoded_entry_for_callsite_8616(
         return None
     entries = tuple(
         entry
-        for entry in index.for_target(target_addr)
-        if entry.callsite_addr == callsite_addr
-        and entry.caller_start == boundary.addr
+        for entry in builtins.iter(index.for_target(target_addr))
+        if operator.eq(entry.callsite_addr, callsite_addr)
+        and operator.eq(entry.caller_start, boundary.addr)
         and not entry.is_far
     )
     return entries[0] if len(entries) == 1 else None
 
 
+@cython.ccall
 def _declared_boundary_for_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     admission: DeclaredFunctionEntryAdmission8616,
 ) -> ExactFunctionRangeBoundary8616 | None:
     """Select declared bounds without granting entry or native-byte proof.
@@ -2359,6 +2506,8 @@ def _declared_boundary_for_8616(
     wider mapped or CFG surface. Consumers still authenticate the declaration
     and native evidence through the ordinary fresh entry-domain proof.
     """
+    boundary: object
+    retained: object
     start, end = admission.spec.range_start, admission.spec.range_end
     if type(start) is not int or type(end) is not int or not 0 <= start < end:
         return None
@@ -2366,22 +2515,29 @@ def _declared_boundary_for_8616(
     if retained is not None:
         retained_boundary: ExactFunctionRangeBoundary8616 = retained.boundary
         if (
-            retained_boundary.project is not project or retained_boundary.addr != function_addr
-            or retained_boundary.decode_start != start or retained_boundary.decode_end != end
+            retained_boundary.project is not project or operator.ne(retained_boundary.addr, function_addr)
+            or operator.ne(retained_boundary.decode_start, start) or operator.ne(retained_boundary.decode_end, end)
         ):
             return None
         return retained_boundary
     boundary = exact_function_range_boundary_8616(project, start, end)
-    if boundary is None or boundary.project is not project or boundary.addr != function_addr:
+    if boundary is None or boundary.project is not project or operator.ne(boundary.addr, function_addr):
         return None
     return boundary
 
 
+@cython.ccall
 def _exact_boundary_for_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> ExactFunctionRangeBoundary8616 | None:
     """Prefer explicit declared bounds, then existing function-boundary lookup."""
+    admission: object
+    boundary: object
+    candidate: object
+    retained: object
+    source: object
+    witness: object
     # The registry imports the VEX importer, which imports this owner.
     # Boundary lookup is needed only when resolving a live call, after
     # those module contracts have finished initialization.
@@ -2391,15 +2547,10 @@ def _exact_boundary_for_8616(
     admission = None if source is None else _function_entry_for_head_8616(source, function_addr)
     if admission is not None:
         return _declared_boundary_for_8616(project, function_addr, admission)
-
-    # Reuse the census already retained for this project/head. Rediscovering
-    # the same reachable body inside different decode bounds creates a second
-    # boundary authority that the callsite registry correctly rejects.
-    boundary: ExactFunctionRangeBoundary8616 | None
     retained = registered_decoded_callsite_index_8616(project, function_addr)
     if retained is not None:
         boundary = retained.boundary
-        if boundary.project is not project or boundary.addr != function_addr:
+        if boundary.project is not project or operator.ne(boundary.addr, function_addr):
             return None
         return boundary
     candidate = function_boundary_at_address_8616(project, function_addr)
@@ -2413,19 +2564,20 @@ def _exact_boundary_for_8616(
     if (
         boundary is None
         or boundary.project is not project
-        or boundary.addr != function_addr
+        or operator.ne(boundary.addr, function_addr)
     ):
         return None
     return boundary
 
 
+@cython.ccall
 def _retained_nested_proof_8616(
     project: object,
     coverage: IRBoundaryCoverageResult8616,
     boundary: ExactFunctionRangeBoundary8616,
     index: DecodedDirectCallsiteIndex8616,
-    callsite_addr: int,
-    window: tuple[int, int, tuple[int, ...]],
+    callsite_addr: cython.longlong,
+    window: object,
     resolution: _CalleeResolution8616,
     invocation_scope: Real16InvocationDomain8616 | None = None,
 ) -> SegmentCallPreservationResult8616 | None:
@@ -2446,6 +2598,8 @@ def _retained_nested_proof_8616(
     retained claim. Lookups are linear in the callee's own callsite count
     and spend no ``remaining`` budget: reuse performs no resolution.
     """
+    entry: object
+    proof: object
     artifact = coverage.artifact
     entry = resolution.retained.get(artifact.function_addr)
     if entry is None:
@@ -2463,26 +2617,27 @@ def _retained_nested_proof_8616(
     return None
 
 
+@cython.ccall
 def _retained_proof_bound_8616(
     project: object,
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
     index: DecodedDirectCallsiteIndex8616,
-    callsite_addr: int,
-    window: tuple[int, int, tuple[int, ...]],
+    callsite_addr: cython.longlong,
+    window: object,
     proof: object,
-) -> bool:
+) -> cython.bint:
     """Bind one retained callsite proof to this exact current surface."""
     if (
         type(proof) is not SegmentCallPreservationResult8616
-        or proof.callsite_addr != callsite_addr
+        or operator.ne(proof.callsite_addr, callsite_addr)
         or type(proof.caller) is not IRBoundaryCoverageResult8616
     ):
         return False
     caller = proof.caller
     if (
         caller.artifact is not artifact
-        or caller.boundary != boundary
+        or operator.ne(caller.boundary, boundary)
         or caller.boundary.project is not project
         or proof.index is not index
     ):
@@ -2490,10 +2645,11 @@ def _retained_proof_bound_8616(
     return _retained_callee_bound_8616(proof.callee, window)
 
 
+@cython.ccall
 def _retained_callee_bound_8616(
     callee: object,
-    window: tuple[int, int, tuple[int, ...]],
-) -> bool:
+    window: object,
+) -> cython.bint:
     """Bind the retained proof's resolved callee inside the callsite window."""
     if (
         type(callee) is not SegmentEffectClosureResult8616
@@ -2505,15 +2661,14 @@ def _retained_callee_bound_8616(
     return callee.coverage.artifact.function_addr in window[2]
 
 
+@cython.ccall
 def _retained_closure_bound_8616(
     project: object,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     closure: object,
     invocation_scope: Real16InvocationDomain8616 | None = None,
-    scope_surface: tuple[
-        IRFunctionArtifact, ExactFunctionRangeBoundary8616,
-    ] | None = None,
-) -> bool:
+    scope_surface: object = None,
+) -> cython.bint:
     """Bind a retained closure to this exact callee head on this project.
 
     Reuse requires the typed closure contract, a caller coverage carrying
@@ -2530,13 +2685,14 @@ def _retained_closure_bound_8616(
     registered artifact. Same callee address under another entry, or a
     stale source, view, or dependency, is never a hit.
     """
+    view: object
     if not (
         type(closure) is SegmentEffectClosureResult8616
         and type(closure.coverage) is IRBoundaryCoverageResult8616
         and type(closure.coverage.artifact) is IRFunctionArtifact
-        and closure.coverage.artifact.function_addr == callee_addr
+        and operator.eq(closure.coverage.artifact.function_addr, callee_addr)
         and type(closure.coverage.boundary) is ExactFunctionRangeBoundary8616
-        and closure.coverage.boundary.addr == callee_addr
+        and operator.eq(closure.coverage.boundary.addr, callee_addr)
         and closure.coverage.boundary.project is project
     ):
         return False
@@ -2566,11 +2722,12 @@ def _retained_closure_bound_8616(
     )
 
 
+@cython.ccall
 def _nested_invocation_premise_8616(
     project: object,
     coverage: IRBoundaryCoverageResult8616,
     boundary: ExactFunctionRangeBoundary8616,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
 ) -> Real16InvocationDomain8616 | None:
     """Resolve the caller-head premise for one nested callsite surface.
 
@@ -2584,6 +2741,10 @@ def _nested_invocation_premise_8616(
     rather than borrowing a premise bound to another surface. No premise
     is derived for an unregistered or identity-divergent head.
     """
+    artifact: object
+    premise: object
+    resolution: object
+    source: object
     source = _invocation_premise_source_8616(project)
     if source is None:
         return None
@@ -2592,7 +2753,7 @@ def _nested_invocation_premise_8616(
         type(artifact) is not IRFunctionArtifact
         or type(boundary) is not ExactFunctionRangeBoundary8616
         or boundary.project is not project
-        or boundary.addr != artifact.function_addr
+        or operator.ne(boundary.addr, artifact.function_addr)
         or type(callsite_addr) is not int
     ):
         return None
@@ -2623,25 +2784,26 @@ def _nested_invocation_premise_8616(
     if (
         premise is None
         or premise.failure is not None
-        or premise.callsite_addr != callsite_addr
+        or operator.ne(premise.callsite_addr, callsite_addr)
         or premise.coverage is None
     ):
         return None
     if (
         premise.coverage.artifact is not artifact
         or premise.coverage.boundary.project is not project
-        or premise.coverage.boundary.addr != boundary.addr
+        or operator.ne(premise.coverage.boundary.addr, boundary.addr)
         or not premise.complete
     ):
         return None
     return premise
 
 
+@cython.ccall
 def _scoped_nested_premise_8616(
     project: object,
     coverage: IRBoundaryCoverageResult8616,
     boundary: ExactFunctionRangeBoundary8616,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     scope: Real16InvocationDomain8616,
 ) -> Real16InvocationDomain8616 | None:
     """Derive a per-callsite premise sharing the scoped consuming entry.
@@ -2663,6 +2825,7 @@ def _scoped_nested_premise_8616(
     head refuses rather than deriving authority from the proof being
     built.
     """
+    premise: object
     artifact = coverage.artifact
     records = _surface_call_preservations_8616(project, artifact, boundary)
     premise = entry_domain_invocation_premise_8616(
@@ -2672,7 +2835,7 @@ def _scoped_nested_premise_8616(
     if (
         premise is None
         or premise.failure is not None
-        or premise.callsite_addr != callsite_addr
+        or operator.ne(premise.callsite_addr, callsite_addr)
         or not premise.complete
     ):
         return None
@@ -2681,13 +2844,15 @@ def _scoped_nested_premise_8616(
     return premise if same_real16_entry_scope_8616(premise, scope) else None
 
 
+@cython.ccall
 def _chained_nested_prefix_8616(
     project: object, coverage: IRBoundaryCoverageResult8616,
-    boundary: ExactFunctionRangeBoundary8616, callsite_addr: int,
+    boundary: ExactFunctionRangeBoundary8616, callsite_addr: cython.longlong,
     scope: Real16InvocationDomain8616,
-    prior_proofs: tuple[SegmentCallPreservationResult8616, ...],
+    prior_proofs: object,
 ) -> Real16InvocationDomain8616 | None:
     """Replay the retained callee entry up to this call, without collecting itself."""
+    prefix: object
     from .real16_invocation_domain import (
         Real16CallChainLink8616,
         prove_fresh_real16_chained_invocation_domain_8616,
@@ -2712,9 +2877,15 @@ def _construct_chained_nested_scope_8616(
     project: object, coverage: IRBoundaryCoverageResult8616,
     boundary: ExactFunctionRangeBoundary8616, entry: DecodedDirectCallsite8616,
     scope: Real16InvocationDomain8616,
-    prior_proofs: tuple[SegmentCallPreservationResult8616, ...],
+    prior_proofs: object,
 ) -> tuple[_RawCalleeRoute8616, DirectNearCallTargetBinding8616 | None, Real16InvocationDomain8616 | None]:
     """Intake a nested callee before constructing its caller prefix exactly once."""
+    callee_boundary: object
+    constructed: object
+    encoded: object
+    raw: object
+    selected: object
+    source: object
     from inertia.semantics.direct_near_call_target_binding import (
         _construct_direct_near_call_target_binding_from_decoded_8616,
     )
@@ -2735,10 +2906,10 @@ def _construct_chained_nested_scope_8616(
     encoded = entry.encoded_near_coordinates()
     if source is None or encoded is None:
         return _RawCalleeRoute8616.REFUSED, None, None
-    rows = tuple(row for row in source.callsite_index.for_target(entry.target_addr)
-                 if row.caller_start == entry.caller_start and _transported_edge_bound_8616(project, row, entry))
-    calls = [(block, row) for block in coverage.artifact.blocks for row in block.instrs
-             if row.op == "CALL" and row.addr == entry.callsite_addr]
+    rows = tuple(row for row in builtins.iter(source.callsite_index.for_target(entry.target_addr))
+                 if operator.eq(row.caller_start, entry.caller_start) and _transported_edge_bound_8616(project, row, entry))
+    calls = [(block, row) for block in iter(coverage.artifact.blocks) for row in iter(block.instrs)
+             if row.op == "CALL" and operator.eq(row.addr, entry.callsite_addr)]
     if len(rows) != 1 or len(calls) != 1:
         return _RawCalleeRoute8616.REFUSED, None, None
     target = encoded[1]
@@ -2748,7 +2919,7 @@ def _construct_chained_nested_scope_8616(
     raw = real16_native_census_import_8616(project, callee_boundary)
     if raw is None or direct_evidence_deadline_expired_8616(project):
         return _RawCalleeRoute8616.REFUSED, None, None
-    if not any(block.refusals or any(row.op == "CALL" for row in block.instrs) for block in raw.blocks):
+    if not any(block.refusals or any(row.op == "CALL" for row in iter(block.instrs)) for block in iter(raw.blocks)):
         return _RawCalleeRoute8616.UNIVERSAL_BODY, None, None
     selected = _chain_callee_surface_8616(project, raw, callee_boundary, entry)
     if selected is None:
@@ -2777,18 +2948,23 @@ def _construct_chained_nested_scope_8616(
     return _RawCalleeRoute8616.SCOPED_BODY, binding, callee_scope
 
 
+@cython.ccall
 def _chained_nested_callsite_proof_8616(
     project: object, coverage: IRBoundaryCoverageResult8616,
     boundary: ExactFunctionRangeBoundary8616, index: DecodedDirectCallsiteIndex8616,
-    entry: DecodedDirectCallsite8616, window: tuple[int, int, tuple[int, ...]],
+    entry: DecodedDirectCallsite8616, window: object,
     resolution: _CalleeResolution8616, scope: Real16InvocationDomain8616,
-    prior_proofs: tuple[SegmentCallPreservationResult8616, ...],
+    prior_proofs: object,
 ) -> SegmentCallPreservationResult8616 | None:
     """Construct scoped nested edges once; keep universal target handling intact."""
+    binding: object
+    callee_scope: object
+    closure: object
+    encoded: object
     if _resolution_deadline_expired_8616(project, resolution.deadline):
         return None
     encoded = entry.encoded_near_coordinates()
-    if encoded is None or (len(window[2]) == 1 and window[2][0] != encoded[1]):
+    if encoded is None or (len(window[2]) == 1 and operator.ne(window[2][0], encoded[1])):
         return None
     if len(window[2]) != 1:
         return _ordinary_chained_nested_callsite_proof_8616(
@@ -2819,11 +2995,14 @@ def _chained_nested_callsite_proof_8616(
 def _ordinary_chained_nested_callsite_proof_8616(
     project: object, coverage: IRBoundaryCoverageResult8616,
     boundary: ExactFunctionRangeBoundary8616, index: DecodedDirectCallsiteIndex8616,
-    entry: DecodedDirectCallsite8616, window: tuple[int, int, tuple[int, ...]],
+    entry: DecodedDirectCallsite8616, window: object,
     resolution: _CalleeResolution8616, scope: Real16InvocationDomain8616,
-    prior_proofs: tuple[SegmentCallPreservationResult8616, ...],
+    prior_proofs: object,
 ) -> SegmentCallPreservationResult8616 | None:
     """Transport a fresh caller prefix to a distinct nested callee scope."""
+    closure: object
+    prefix: object
+    target: object
     from inertia.semantics.direct_near_call_target_binding import (
         _consume_direct_near_call_target_binding_from_decoded_8616,
     )
@@ -2833,12 +3012,12 @@ def _ordinary_chained_nested_callsite_proof_8616(
     )
     if prefix is None or _resolution_deadline_expired_8616(project, resolution.deadline):
         return None
-    rows = [(block, row) for block in coverage.artifact.blocks for row in block.instrs
-            if row.op == "CALL" and row.addr == entry.callsite_addr]
+    rows = [(block, row) for block in iter(coverage.artifact.blocks) for row in iter(block.instrs)
+            if row.op == "CALL" and operator.eq(row.addr, entry.callsite_addr)]
     if len(rows) != 1:
         return None
     block, instruction = rows[0]
-    def retain_entry(invocation: Real16CallInvocation8616) -> bool:
+    def retain_entry(invocation: Real16CallInvocation8616) -> cython.bint:
         """Keep entry transport even when the forward target needs no premise."""
         return invocation.complete is True
 
@@ -2867,16 +3046,17 @@ def _ordinary_chained_nested_callsite_proof_8616(
     return None
 
 
+@cython.ccall
 def _nested_callsite_proof_8616(
     project: object,
     coverage: IRBoundaryCoverageResult8616,
     boundary: ExactFunctionRangeBoundary8616,
     index: DecodedDirectCallsiteIndex8616,
-    decoded_by_addr: dict[int, object],
-    callsite_addr: int,
+    decoded_by_addr: object,
+    callsite_addr: cython.longlong,
     resolution: _CalleeResolution8616,
     invocation_scope: Real16InvocationDomain8616 | None = None,
-    prior_proofs: tuple[SegmentCallPreservationResult8616, ...] = (),
+    prior_proofs: object = (),
 ) -> SegmentCallPreservationResult8616 | None:
     """Prove one nested callsite against its recursively resolved callee.
 
@@ -2895,6 +3075,10 @@ def _nested_callsite_proof_8616(
     supplied consuming entry; a scope with no derivable premise for this
     coordinate keeps the nested call refused.
     """
+    entry: object
+    nested: object
+    retained: object
+    window: object
     if _resolution_deadline_expired_8616(project, resolution.deadline):
         return None
     entry = _decoded_entry_for_callsite_8616(
@@ -2932,18 +3116,21 @@ def _nested_callsite_proof_8616(
     )
 
 
+@cython.ccall
 def _complete_nested_callsite_proof_8616(
     project: object,
     coverage: IRBoundaryCoverageResult8616,
     boundary: ExactFunctionRangeBoundary8616,
     index: DecodedDirectCallsiteIndex8616,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     nested: SegmentEffectClosureResult8616,
     resolution: _CalleeResolution8616,
-    invocation_scope: Real16InvocationDomain8616 | None,
+    invocation_scope: object,
 ) -> SegmentCallPreservationResult8616 | None:
     """Finish a nested proof under the exact invocation and deadline scopes."""
-    invocation: Real16InvocationDomain8616 | None = None
+    invocation: object
+    retried: object
+    invocation = None
     if coverage.scoped_view is not None:
         if invocation_scope is None:
             return None
@@ -2970,9 +3157,10 @@ def _complete_nested_callsite_proof_8616(
     return proof if proof.complete_for(invocation_scope) else None
 
 
+@cython.ccall
 def _resolve_nested_closure_8616(
     project: object,
-    window: tuple[int, int, tuple[int, ...]],
+    window: object,
     resolution: _CalleeResolution8616,
     callsite: DecodedDirectCallsite8616 | None = None,
 ) -> SegmentEffectClosureResult8616 | None:
@@ -2982,7 +3170,9 @@ def _resolve_nested_closure_8616(
     exact edge being resolved; it is transported into each candidate so
     the premise-bound import names the actual transporting edge.
     """
-    nested: SegmentEffectClosureResult8616 | None = None
+    nested: object
+    candidate_addr: object
+    nested = None
     for candidate_addr in window[2]:
         nested = _callee_closure_8616(
             project, candidate_addr, resolution, callsite=callsite
@@ -2992,16 +3182,18 @@ def _resolve_nested_closure_8616(
     return nested
 
 
+@cython.ccall
 def _retried_nested_proof_8616(
     project: object,
     coverage: IRBoundaryCoverageResult8616,
     boundary: ExactFunctionRangeBoundary8616,
     index: DecodedDirectCallsiteIndex8616,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     nested: SegmentEffectClosureResult8616,
     invocation_scope: Real16InvocationDomain8616 | None,
 ) -> SegmentCallPreservationResult8616 | None:
     """Re-prove a TARGET_MISMATCH universal nested call under a derived premise."""
+    premise: object
     premise = _nested_invocation_premise_8616(
         project, coverage, boundary, callsite_addr,
     )
@@ -3013,11 +3205,12 @@ def _retried_nested_proof_8616(
     return retried if retried.complete_for(invocation_scope) else None
 
 
+@cython.ccall
 def _callee_artifact_and_boundary_8616(
     project: object,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     callsite: DecodedDirectCallsite8616 | None = None,
-) -> tuple[IRFunctionArtifact, ExactFunctionRangeBoundary8616] | None:
+) -> object:
     """Resolve one callee artifact and its exact boundary, importing on demand.
 
     Registry publication is consulted first so identical artifacts are never
@@ -3035,6 +3228,7 @@ def _callee_artifact_and_boundary_8616(
     under the authenticated chain-bound entry for that exact edge, and is
     never published, so no unrelated entry can inherit it.
     """
+    boundary: object
     resolution = registered_function_ir_artifact_8616(project, callee_addr)
     if resolution.verdict is FunctionIRArtifactVerdict8616.PROVEN:
         if resolution.artifact is None:
@@ -3055,9 +3249,10 @@ def _callee_artifact_and_boundary_8616(
     )
 
 
+@cython.ccall
 def _near_return_pending_boundary_8616(
     boundary: ExactFunctionRangeBoundary8616,
-) -> bool:
+) -> cython.bint:
     """Recognize the premise-bound conditional callee boundary.
 
     The boundary must retain the source-bound frame premise and at least
@@ -3066,6 +3261,7 @@ def _near_return_pending_boundary_8616(
     census importer. Anything less is not conditional continuation
     evidence and routes as an ordinary body.
     """
+    continuations: object
     continuations = boundary.near_return_continuations
     return (
         continuations is not None
@@ -3077,7 +3273,7 @@ def _near_return_pending_boundary_8616(
 def _near_return_pending_8616(
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
-) -> bool:
+) -> cython.bint:
     """Recognize the premise-derived conditional callee surface.
 
     The boundary must satisfy ``_near_return_pending_boundary_8616`` and
@@ -3087,9 +3283,9 @@ def _near_return_pending_8616(
     and routes as an ordinary body.
     """
     return _near_return_pending_boundary_8616(boundary) and any(
-        refusal.kind == NEAR_RETURN_CONTINUATION_PENDING_KIND_8616
-        for block in artifact.blocks
-        for refusal in block.refusals
+        operator.eq(refusal.kind, NEAR_RETURN_CONTINUATION_PENDING_KIND_8616)
+        for block in iter(artifact.blocks)
+        for refusal in iter(block.refusals)
     )
 
 
@@ -3102,14 +3298,15 @@ class _TransportedInsnWrapper8616(Protocol):
 class _TransportedInsn8616(Protocol):
     """Decoded instruction fields the edge-transport relation consumes."""
 
-    address: int
-    size: int
-    bytes: bytes
+    address: cython.longlong
+    size: cython.longlong
+    bytes: object
 
 
+@cython.ccall
 def _decoded_instruction_evidence_8616(
     instruction: object,
-) -> tuple[int, int, bytes] | None:
+) -> object:
     """Return ``(address, size, bytes)`` for one decoded instruction.
 
     The retained row's instruction may be the immutable
@@ -3134,24 +3331,25 @@ def _decoded_instruction_evidence_8616(
         # Detail-disabled Capstone objects signal missing evidence this
         # way, including during wrapper inspection. Other decoder errors
         # stay loud.
-        if error.errno != CS_ERR_DETAIL:
+        if operator.ne(error.errno, CS_ERR_DETAIL):
             raise
         return None
     if (
         type(address) is not int
         or type(size) is not int
         or size <= 0
-        or len(payload) != size
+        or operator.ne(len(payload), size)
     ):
         return None
     return address, size, payload
 
 
+@cython.ccall
 def _transported_edge_bound_8616(
     project: object,
     retained: DecodedDirectCallsite8616,
     transported: DecodedDirectCallsite8616,
-) -> bool:
+) -> cython.bint:
     """Authenticate the transported row's instruction against the source row.
 
     Distinct row objects are legitimate — the caller's boundary index and
@@ -3164,6 +3362,9 @@ def _transported_edge_bound_8616(
     push, a near ``E9`` jump, a fabricated extent, or an undecoded
     instruction borrows another instruction's coordinates and refuses.
     """
+    native: object
+    retained_evidence: object
+    transported_evidence: object
     if not (
         isinstance(retained.instructions, tuple)
         and isinstance(transported.instructions, tuple)
@@ -3181,16 +3382,16 @@ def _transported_edge_bound_8616(
     )
     if retained_evidence is None or transported_evidence is None:
         return False
-    if retained_evidence != transported_evidence:
+    if operator.ne(retained_evidence, transported_evidence):
         return False
     address, size, payload = retained_evidence
     native = _mapped_bytes_8616(project, address, size)
-    return native is not None and native == payload
+    return native is not None and operator.eq(native, payload)
 
 
 def _near_return_frame_premise_8616(
     project: object,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     callsite: DecodedDirectCallsite8616 | None = None,
 ) -> NearCallFramePremise8616 | None:
     """Bind the entry-frame premise to the resolved edge's decoded row.
@@ -3220,9 +3421,12 @@ def _near_return_frame_premise_8616(
     recorded caller head lies outside the proved closed census are
     filtered out rather than trusted.
     """
+    census_heads: object
+    local: object
+    source: object
     source = _real16_invocation_source_8616(project)
     index: DecodedDirectCallsiteIndex8616 | None
-    census_heads: frozenset[int] | None = None
+    census_heads = None
     if source is None:
         local = local_call_frame_evidence_8616(project)
         if local is None:
@@ -3236,7 +3440,7 @@ def _near_return_frame_premise_8616(
     rows = index.for_target(callee_addr)
     if census_heads is not None:
         rows = tuple(
-            row for row in rows if row.caller_start in census_heads
+            row for row in iter(rows) if row.caller_start in census_heads
         )
     if callsite is not None:
         if (
@@ -3244,16 +3448,16 @@ def _near_return_frame_premise_8616(
             or callsite.is_far
             or type(callsite.callsite_addr) is not int
             or type(callsite.caller_start) is not int
-            or callsite.target_addr != callee_addr
+            or operator.ne(callsite.target_addr, callee_addr)
         ):
             return None
         rows = tuple(
             row
-            for row in rows
+            for row in iter(rows)
             if not row.is_far
-            and row.callsite_addr == callsite.callsite_addr
-            and row.caller_start == callsite.caller_start
-            and row.target_addr == callsite.target_addr
+            and operator.eq(row.callsite_addr, callsite.callsite_addr)
+            and operator.eq(row.caller_start, callsite.caller_start)
+            and operator.eq(row.target_addr, callsite.target_addr)
         )
         if len(rows) != 1:
             return None
@@ -3265,14 +3469,15 @@ def _near_return_frame_premise_8616(
     return prove_near_call_frame_premise_8616(rows[0], index, callee_addr)
 
 
+@cython.ccall
 def _import_unregistered_callee_8616(
     project: object,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     surface: _CalleeImportSurface8616,
-    imports: set[int],
-    depth: int,
+    imports: object,
+    depth: cython.longlong,
     callsite: DecodedDirectCallsite8616 | None = None,
-) -> tuple[IRFunctionArtifact, ExactFunctionRangeBoundary8616] | None:
+) -> object:
     """Import one unregistered callee under the source-bound premise.
 
     This resolution is reachable only through an encoded near-CALL
@@ -3291,12 +3496,15 @@ def _import_unregistered_callee_8616(
     it is returned conditional and never published into the universal
     registry.
     """
+    artifact: object
+    boundary: object
+    raw: object
     boundary = mapped_entry_function_boundary_8616(
         project,
         callee_addr,
         premise=_near_return_frame_premise_8616(project, callee_addr, callsite),
     )
-    if boundary is None or boundary.addr != callee_addr:
+    if boundary is None or operator.ne(boundary.addr, callee_addr):
         return None
     # Defer the importer until resolution time: vex_import binds this module
     # through the entry-domain proof before its own body finishes loading.
@@ -3341,10 +3549,11 @@ def _import_unregistered_callee_8616(
     return artifact, boundary
 
 
+@cython.ccall
 def _callee_resolution_guard_failure_8616(
     project: object,
     resolution: _CalleeResolution8616,
-    callee_addr: int,
+    callee_addr: cython.longlong,
 ) -> EntryDomainCallPreservationFailure8616 | None:
     """Preserve cycle-first and depth short-circuit guards before retained reuse."""
     if callee_addr in resolution.in_flight:
@@ -3359,9 +3568,10 @@ def _callee_resolution_guard_failure_8616(
     return None
 
 
+@cython.ccall
 def _closure_scope_bound_8616(
-    project: object, callee_addr: int, scope: Real16InvocationDomain8616 | None,
-) -> tuple[IRFunctionArtifact, ExactFunctionRangeBoundary8616] | None:
+    project: object, callee_addr: cython.longlong, scope: object,
+) -> object:
     """Select the exact scoped surface; authenticate coverage-bound entries here.
 
     ``None`` means either a universal request (``scope is None``) or a
@@ -3379,6 +3589,7 @@ def _closure_scope_bound_8616(
     link's callee pair — never a re-derived look-alike and never the
     enclosing census surface.
     """
+    coverage: object
     if scope is None:
         return None
     from .real16_invocation_domain import (
@@ -3422,24 +3633,78 @@ def _closure_scope_bound_8616(
     selected_artifact: IRFunctionArtifact = artifact
     selected_boundary: ExactFunctionRangeBoundary8616 = boundary
     if (
-        selected_artifact.function_addr != callee_addr
-        or selected_boundary.addr != callee_addr
+        operator.ne(selected_artifact.function_addr, callee_addr)
+        or operator.ne(selected_boundary.addr, callee_addr)
         or selected_boundary.project is not project
     ):
         return None
     return selected_artifact, selected_boundary
 
 
+_CANONICAL_SEGMENT_CLOSURE_PRODUCER_8616: Callable[
+    [IRBoundaryCoverageResult8616, SegmentStateArtifact], SegmentEffectClosureResult8616
+] = prove_segment_effect_closure_8616
+
+
+def _fresh_universal_closure_verdict_8616(
+    closure: SegmentEffectClosureResult8616,
+    artifact: IRFunctionArtifact | None = None,
+) -> cython.bint:
+    """Consume one just-observed universal closure verdict without a second replay.
+
+    Only the exact fresh producer surface is shortcut: the canonical
+    module-global factory must still be installed, the result must be the
+    typed closure over a universal ``SegmentStateArtifact`` bound to the
+    resolution's identical artifact, and the producer's own sealed
+    accounting must hold. Universal state owes no consuming-entry
+    authentication, so ``complete_for(None)`` adds only a re-derivation of
+    evidence this synchronous resolution just observed — no callback or
+    mutation can intervene between the stored verdict and this read.
+    Replaced producers, foreign types and scoped state fall back to full
+    revalidation. These guards do not authenticate arbitrary externally supplied
+    closures: callers must preserve the synchronous producer or resolver window.
+    Retained pool reads and scoped consumption still revalidate their evidence.
+    """
+    if (
+        prove_segment_effect_closure_8616 is not _CANONICAL_SEGMENT_CLOSURE_PRODUCER_8616
+        or type(closure) is not SegmentEffectClosureResult8616
+        or type(closure.state) is not SegmentStateArtifact
+        or type(closure.coverage) is not IRBoundaryCoverageResult8616
+    ):
+        return cast(bool, closure.complete_for(None))
+    if (
+        closure.state.invocation_scope is not None
+        or (artifact is not None and closure.coverage.artifact is not artifact)
+    ):
+        return cast(bool, closure.complete_for(None))
+    counts = (
+        closure.raw_fact_count,
+        closure.normalized_fact_count,
+        closure.classified_fact_count,
+        closure.materialized_count,
+        closure.failure_count,
+    )
+    return (
+        closure.failure is None
+        and counts == (1, 1, 1, 1, 0)
+        and all(type(count) is int for count in iter(counts))
+    )
+
+
+@cython.ccall
 def _retain_callee_closure_8616(
     resolution: _CalleeResolution8616,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     artifact: IRFunctionArtifact,
-    proofs: tuple[SegmentCallPreservationResult8616, ...],
+    proofs: object,
     closure: SegmentEffectClosureResult8616,
-    scope: Real16InvocationDomain8616 | None,
+    scope: object,
 ) -> None:
     """Keep conditional closures and dependencies out of universal reuse pools."""
-    if not closure.complete_for(scope):
+    if scope is not None:
+        if not closure.complete_for(scope):
+            return
+    elif not _fresh_universal_closure_verdict_8616(closure, artifact):
         return
     if scope is not None:
         resolution.scoped_closures[(callee_addr, id(scope))] = closure
@@ -3447,6 +3712,40 @@ def _retain_callee_closure_8616(
     if proofs:
         resolution.retained[callee_addr] = (artifact, proofs)
     resolution.retained_closures[callee_addr] = closure
+
+
+@cython.ccall
+def _indirect_callee_view_8616(
+    project: object,
+    artifact: IRFunctionArtifact,
+    boundary: ExactFunctionRangeBoundary8616,
+    scope: Real16InvocationDomain8616,
+) -> ScopedIndirectTargetView8616 | None:
+    """Rediscover a pending indirect edge under its exact authenticated caller.
+
+    Boundary edges are decoding assumptions, not control evidence. Only the
+    native prefix theorem and the retained raw-bundle owner may supply the
+    conditional view; its consumer still reauthenticates the entire projection.
+    """
+    bundle: object
+    discovery: object
+    from .invocation_indirect_target import discover_invocation_indirect_target_8616
+    from .real16_invocation_domain import Real16CallChainLink8616
+    from .scoped_indirect_target_view import prove_scoped_indirect_target_view_8616
+    from .vex_import import raw_x86_16_import_bundle_for_artifact_8616
+
+    chain = scope.chain
+    if type(chain) is not Real16CallChainLink8616 or scope.project is not project:
+        return None
+    discovery = discover_invocation_indirect_target_8616(chain.parent, chain.callsite)
+    if discovery is None:
+        return None
+    bundle = raw_x86_16_import_bundle_for_artifact_8616(project, boundary, artifact)
+    if bundle is None or bundle.artifact is not artifact:
+        return None
+    return prove_scoped_indirect_target_view_8616(
+        project, artifact, boundary, discovery, scope, bundle.terminal_evidence,
+    )
 
 
 def _scoped_callee_coverage_8616(
@@ -3466,6 +3765,9 @@ def _scoped_callee_coverage_8616(
     leg that cannot reauthenticate returns ``None`` so the caller keeps
     its typed refusal instead of importing a look-alike.
     """
+    bundle: object
+    indirect_view: object
+    reachable: object
     from .scoped_control_obligations import (
         mixed_pending_obligations_8616,
     )
@@ -3475,17 +3777,22 @@ def _scoped_callee_coverage_8616(
         raw_x86_16_import_bundle_for_artifact_8616,
     )
 
-    if not artifact.refusals and not any(block.refusals for block in artifact.blocks):
+    if not artifact.refusals and not any(block.refusals for block in iter(artifact.blocks)):
         # A closed native CFG needs no conditional rewrite. Its effect
         # closure still consumes the separately authenticated entry scope.
         return prove_ir_boundary_coverage_8616(project, boundary, artifact) if scope.complete else None
-    view: ScopedNearReturnContinuationView8616 | ScopedFunctionIRView8616
-    if _near_return_pending_8616(artifact, boundary):
+    view: ScopedNearReturnContinuationView8616 | ScopedFunctionIRView8616 | ScopedIndirectTargetView8616
+    if boundary.conditional_edges:
+        indirect_view = _indirect_callee_view_8616(project, artifact, boundary, scope)
+        if indirect_view is None:
+            return None
+        view = indirect_view
+    elif _near_return_pending_8616(artifact, boundary):
         from .scoped_return_reachability import prove_scoped_reachable_return_view_8616
 
         reachable = (
             prove_scoped_reachable_return_view_8616(project, artifact, boundary, invocation_scope=scope)
-            if any(row.op == "CJMP" for block in artifact.blocks for row in block.instrs)
+            if any(row.op == "CJMP" for block in iter(artifact.blocks) for row in iter(block.instrs))
             else None
         )
         if reachable is not None:
@@ -3537,26 +3844,29 @@ def _scoped_callee_coverage_8616(
 
 def _callee_candidate_blocks_8616(
     coverage: IRBoundaryCoverageResult8616,
-) -> frozenset[int]:
+) -> object:
     """Select work using retained hints; the closure rechecks the actual call census.
 
     This is not admission. Coverage and the state solver authenticate the view
     before consuming any result; closure replay independently recomputes all
     live calls. A stale hint therefore cannot hide an unproved dependency.
     """
+    view: object
     from .near_return_continuation_view import ScopedNearReturnContinuationView8616
 
-    live = frozenset(block.addr for block in coverage.artifact.blocks)
+    live = frozenset(block.addr for block in iter(coverage.artifact.blocks))
     view = coverage.scoped_view
-    if type(view) is ScopedNearReturnContinuationView8616 and view.reachability_domain is not None:
+    if (view is not None and type(view) is ScopedNearReturnContinuationView8616
+            and view.reachability_domain is not None):
         return live.intersection(view.reachability_domain.path_block_addrs)
     return live
 
 
+@cython.ccall
 def _callee_scope_current_8616(
     project: object, resolution: _CalleeResolution8616,
-    scope: Real16InvocationDomain8616 | None,
-) -> bool:
+    scope: object,
+) -> cython.bint:
     """Reauthenticate entry evidence after descendants, charging its existing deadline.
 
     Nested replay can exhaust or revoke the parent evidence. An invalid scope
@@ -3571,9 +3881,10 @@ def _callee_scope_current_8616(
     return not _resolution_deadline_expired_8616(project, resolution.deadline)
 
 
+@cython.ccall
 def _callee_effect_closure_8616(
     project: object,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
     coverage: IRBoundaryCoverageResult8616,
@@ -3593,14 +3904,16 @@ def _callee_effect_closure_8616(
     CALL proof, and the retained view rides the state as conditional
     evidence — never a published artifact.
     """
+    proof: object
+    site: object
     if _resolution_deadline_expired_8616(project, resolution.deadline):
         return None, ()
     candidate_blocks = _callee_candidate_blocks_8616(coverage)
     nested_sites = sorted({
         instruction.addr
-        for block in artifact.blocks
+        for block in iter(artifact.blocks)
         if block.addr in candidate_blocks
-        for instruction in block.instrs
+        for instruction in iter(block.instrs)
         if instruction.op == "CALL" and type(instruction.addr) is int
     })
     nested_proofs: list[SegmentCallPreservationResult8616] = []
@@ -3637,13 +3950,14 @@ def _callee_effect_closure_8616(
     return prove_segment_effect_closure_8616(coverage, state), tuple(nested_proofs)
 
 
+@cython.ccall
 def _callee_closure_8616(
     project: object,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     resolution: _CalleeResolution8616,
     invocation_scope: Real16InvocationDomain8616 | None = None,
     callsite: DecodedDirectCallsite8616 | None = None,
-) -> tuple[SegmentEffectClosureResult8616 | None, EntryDomainCallPreservationFailure8616 | None]:
+) -> object:
     """Share the existing bounded traversal across one callee construction.
 
     Coverage, state and effect closure consult the same parent/domain facts.
@@ -3655,9 +3969,10 @@ def _callee_closure_8616(
         return _build_callee_closure_8616(project, callee_addr, resolution, invocation_scope, callsite)
 
 
+@cython.ccall
 def _build_callee_closure_8616(
     project: object,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     resolution: _CalleeResolution8616,
     invocation_scope: Real16InvocationDomain8616 | None = None,
     callsite: DecodedDirectCallsite8616 | None = None,
@@ -3688,6 +4003,11 @@ def _build_callee_closure_8616(
     coverage — and never through the publishing importer. Conditional
     results live only in the scope-keyed pool.
     """
+    closure: object
+    guard_failure: object
+    retained: object
+    route: object
+    surface: object
     guard_failure = _callee_resolution_guard_failure_8616(project, resolution, callee_addr)
     if guard_failure is not None:
         return None, guard_failure
@@ -3736,11 +4056,12 @@ def _build_callee_closure_8616(
     return closure, None
 
 
+@cython.ccall
 def _callee_route_8616(
     project: object,
-    callee_addr: int,
-    surface: tuple[IRFunctionArtifact, ExactFunctionRangeBoundary8616] | None,
-    invocation_scope: Real16InvocationDomain8616 | None,
+    callee_addr: cython.longlong,
+    surface: object,
+    invocation_scope: object,
     resolution: _CalleeResolution8616,
     callsite: DecodedDirectCallsite8616 | None = None,
 ) -> tuple[
@@ -3766,6 +4087,8 @@ def _callee_route_8616(
     coverage comes only from the frozen scoped owners — never the
     publishing importer.
     """
+    coverage: object
+    resolved: object
     if surface is None:
         resolved = _callee_artifact_and_boundary_8616(
             project, callee_addr, callsite
@@ -3818,18 +4141,19 @@ def _callee_route_8616(
         resolution.in_flight = prior_in_flight
 
 
+@cython.ccall
 def _bind_direct_call_target_8616(
     project: object,
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
     block: IRBlock,
     instruction: IRInstr,
-    callsite_addr: int | None,
-    window: tuple[int, int, tuple[int, ...]] | None,
-    entry_call_preservations: tuple[EntryDomainCallPreservation8616, ...],
+    callsite_addr: object,
+    window: object,
+    entry_call_preservations: object,
     collection_phase: _CallCollectionPhase8616,
-    *, defer_declared_scope: bool = False,
-) -> tuple[DirectNearCallTargetBinding8616 | None, bool]:
+    *, defer_declared_scope: cython.bint = False,
+) -> object:
     """Bind one symbolic CALL target, reporting cooperative expiry separately.
 
     A bare ``SELECTOR_WINDOW_UNPROVED`` refusal is the only binding outcome a
@@ -3841,6 +4165,8 @@ def _bind_direct_call_target_8616(
     ``premise is None`` leg produces — so refusal bookkeeping and the
     retry's selector-window guard are unaffected.
     """
+    premise: object
+    source: object
     if window is None or callsite_addr is None:
         return None, False
     operand = instruction.args[0] if instruction.args else None
@@ -3904,15 +4230,23 @@ class _RawCalleeRoute8616(StrEnum):
     REFUSED = "refused"
 
 
+@cython.ccall
 def _scoped_callee_boundary_8616(
-    project: object, callee_addr: int, callsite: DecodedDirectCallsite8616,
+    project: object, callee_addr: cython.longlong, callsite: DecodedDirectCallsite8616,
+    *, caller_scope: Real16InvocationDomain8616 | None = None,
 ) -> ExactFunctionRangeBoundary8616 | None:
     """Keep explicit bounds, or decode a return under this exact native CALL.
 
     A popped return followed by an indirect jump may have no premise-free
     boundary. Use the existing frame proof, just as the ordinary importer
     does, without publishing its conditional body or overriding owned bounds.
+    An independently authenticated caller prefix may also supply one indirect
+    decoding assumption. The resulting pending IR still requires scoped proof.
     """
+    boundary: object
+    discovery: object
+    premise: object
+    source: object
     boundary = _exact_boundary_for_8616(project, callee_addr)
     if boundary is not None:
         return boundary
@@ -3923,27 +4257,42 @@ def _scoped_callee_boundary_8616(
     premise = _near_return_frame_premise_8616(project, callee_addr, callsite)
     if premise is None:
         return None
-    return mapped_entry_function_boundary_8616(project, callee_addr, premise=premise)
+    boundary = mapped_entry_function_boundary_8616(project, callee_addr, premise=premise)
+    if boundary is not None or caller_scope is None:
+        return boundary
+    from inertia.frontend.x86_16.frontend_instruction_reachability import ConditionalIndirectEdge8616
+
+    from .invocation_indirect_target import discover_invocation_indirect_target_8616
+
+    discovery = discover_invocation_indirect_target_8616(caller_scope, callsite)
+    if discovery is None:
+        return None
+    edge = ConditionalIndirectEdge8616(
+        discovery.block_addr, discovery.instruction_addr, discovery.target,
+    )
+    return mapped_entry_function_boundary_8616(
+        project, callee_addr, premise=premise, conditional_edges=(edge,),
+    )
 
 
 def _chain_callee_surface_8616(
     project: object, artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616, callsite: DecodedDirectCallsite8616,
-) -> tuple[IRFunctionArtifact, ExactFunctionRangeBoundary8616] | None:
+) -> object:
     """Keep pending bodies raw; use canonical registered IR for ordinary bodies.
 
     A conditional effect closure does not make a refusal-free decoded body
     conditional. Its ordinary coverage still requires the registry's identical
     artifact. Pending raw bodies must never take that publishing route.
     """
-    if artifact.refusals or any(block.refusals for block in artifact.blocks):
+    if artifact.refusals or any(block.refusals for block in iter(artifact.blocks)):
         return artifact, boundary
     return _callee_artifact_and_boundary_8616(project, artifact.function_addr, callsite)
 
 
 def _raw_callee_call_scope_8616(
     project: object,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     callsite: DecodedDirectCallsite8616,
     caller_scope: Real16InvocationDomain8616,
     entry_binding: DirectNearCallTargetBinding8616,
@@ -3954,6 +4303,13 @@ def _raw_callee_call_scope_8616(
     callee remains pre-discharge native IR; its entry is a separately proved
     call-chain domain, never the caller domain relabeled as a callee scope.
     """
+    artifact: object
+    boundary: object
+    encoded: object
+    parent_surface: object
+    scope: object
+    selected: object
+    source: object
     from .real16_invocation_domain import (
         Real16CallChainLink8616,
         _retained_parent_census_surface_8616,
@@ -3964,22 +4320,24 @@ def _raw_callee_call_scope_8616(
     source = _invocation_premise_source_8616(project)
     parent_surface = _retained_parent_census_surface_8616(caller_scope)
     encoded = callsite.encoded_near_coordinates()
-    if source is None or parent_surface is None or encoded is None or encoded[1] != callee_addr:
+    if source is None or parent_surface is None or encoded is None or operator.ne(encoded[1], callee_addr):
         return _RawCalleeRoute8616.REFUSED, None
     rows = tuple(
-        row for row in source.callsite_index.for_target(callsite.target_addr)
-        if row.caller_start == callsite.caller_start
+        row for row in builtins.iter(source.callsite_index.for_target(callsite.target_addr))
+        if operator.eq(row.caller_start, callsite.caller_start)
         and _transported_edge_bound_8616(project, row, callsite)
     )
-    if len(rows) != 1 or caller_scope.callsite_addr != callsite.callsite_addr:
+    if len(rows) != 1 or operator.ne(caller_scope.callsite_addr, callsite.callsite_addr):
         return _RawCalleeRoute8616.REFUSED, None
-    boundary = _scoped_callee_boundary_8616(project, callee_addr, callsite)
+    boundary = _scoped_callee_boundary_8616(
+        project, callee_addr, rows[0], caller_scope=caller_scope,
+    )
     if boundary is None or direct_evidence_deadline_expired_8616(project):
         return _RawCalleeRoute8616.REFUSED, None
     artifact = real16_native_census_import_8616(project, boundary)
     if artifact is None or direct_evidence_deadline_expired_8616(project):
         return _RawCalleeRoute8616.REFUSED, None
-    if not any(block.refusals or any(row.op == "CALL" for row in block.instrs) for block in artifact.blocks):
+    if not any(block.refusals or any(row.op == "CALL" for row in iter(block.instrs)) for block in iter(artifact.blocks)):
         return _RawCalleeRoute8616.UNIVERSAL_BODY, None
     selected = _chain_callee_surface_8616(project, artifact, boundary, callsite)
     if selected is None:
@@ -4001,6 +4359,67 @@ def _raw_callee_call_scope_8616(
 
 
 
+def _bind_deferred_raw_callee_scope_8616(
+    caller: _DeclaredInvocationConstruction8616,
+    block: IRBlock,
+    instruction: IRInstr,
+    callsite: DecodedDirectCallsite8616,
+    callee_addr: cython.longlong,
+) -> tuple[DirectNearCallTargetBinding8616 | None, _RawCalleeRoute8616, Real16InvocationDomain8616 | None]:
+    """Bind the exact retained caller before discovering a conditional callee.
+
+    Canonical target gates run before the owned caller factory. A generic
+    project lookup may select a different raw caller identity, so construction
+    retains this request's artifact, boundary and declaration throughout.
+    """
+    invocation: object
+    from inertia.semantics.direct_near_call_target_binding import (
+        _construct_direct_near_call_target_binding_from_decoded_8616,
+    )
+
+    from .real16_invocation_domain import (
+        Real16CallInvocation8616,
+        _construct_declared_invocation_domain_8616,
+        _invocation_use_bound_8616,
+    )
+
+    invocation = None
+    attempted = False
+
+    def construct() -> Real16CallInvocation8616 | None:
+        """Capture the exact caller once after the last native binding callback."""
+        constructed: object
+        nonlocal invocation, attempted
+        if attempted:
+            return None
+        attempted = True
+        constructed = _construct_declared_invocation_domain_8616(caller)
+        if constructed is None:
+            return None
+        parent, _derived = constructed
+        if not _invocation_use_bound_8616(
+            parent, project=caller.project, block=block,
+            callsite_addr=caller.callsite_addr, target_addr=callee_addr,
+        ):
+            return None
+        invocation = Real16CallInvocation8616(
+            parent, caller.callsite_addr, callee_addr, caller.project, block,
+        )
+        return invocation
+
+    binding = _construct_direct_near_call_target_binding_from_decoded_8616(
+        caller.project, block=block, instruction=instruction, decoded=callsite, factory=construct,
+    )
+    if (invocation is None or binding.invocation is not invocation
+            or binding.failure is not None or not binding.stats.closed
+            or direct_evidence_deadline_expired_8616(caller.project)):
+        return binding, _RawCalleeRoute8616.REFUSED, None
+    route, scope = _raw_callee_call_scope_8616(
+        caller.project, callee_addr, callsite, invocation.premise, binding,
+    )
+    return binding, route, scope
+
+
 def _deferred_declared_raw_callee_scope_8616(
     project: object,
     artifact: IRFunctionArtifact,
@@ -4008,10 +4427,22 @@ def _deferred_declared_raw_callee_scope_8616(
     block: IRBlock,
     instruction: IRInstr,
     callsite: DecodedDirectCallsite8616,
-    callee_addr: int,
-    records: tuple[EntryDomainCallPreservation8616, ...],
-) -> tuple[DirectNearCallTargetBinding8616 | None, _RawCalleeRoute8616, Real16InvocationDomain8616 | None]:
-    """Intake native callee first, then construct a declared caller exactly once."""
+    callee_addr: cython.longlong,
+    records: object,
+) -> object:
+    """Construct the declared caller once, after ordinary callee intake when possible.
+
+    An open indirect edge needs the authenticated caller prefix before its
+    conditional native boundary can be discovered. Bind that prefix through
+    the ordinary target owner, then retain the raw scoped callee route.
+    """
+    admission: object
+    binding: object
+    callee_boundary: object
+    constructed: object
+    raw: object
+    selected: object
+    source: object
     from inertia.semantics.direct_near_call_target_binding import (
         _construct_direct_near_call_target_binding_from_decoded_8616,
     )
@@ -4028,17 +4459,24 @@ def _deferred_declared_raw_callee_scope_8616(
     admission = None if source is None else _function_entry_for_head_8616(source, artifact.function_addr)
     if source is None or admission is None:
         return None, _RawCalleeRoute8616.REFUSED, None
-    rows = tuple(row for row in source.callsite_index.for_target(callsite.target_addr)
-                 if row.caller_start == callsite.caller_start and _transported_edge_bound_8616(project, row, callsite))
+    rows = tuple(row for row in builtins.iter(source.callsite_index.for_target(callsite.target_addr))
+                 if operator.eq(row.caller_start, callsite.caller_start) and _transported_edge_bound_8616(project, row, callsite))
     if len(rows) != 1:
         return None, _RawCalleeRoute8616.REFUSED, None
     callee_boundary = _scoped_callee_boundary_8616(project, callee_addr, callsite)
-    if callee_boundary is None or direct_evidence_deadline_expired_8616(project):
+    if direct_evidence_deadline_expired_8616(project):
         return None, _RawCalleeRoute8616.REFUSED, None
+    if callee_boundary is None:
+        caller = _DeclaredInvocationConstruction8616(
+            project, DeclaredFunctionEntryLink8616(admission, artifact, boundary),
+            callsite.callsite_addr, source.boot, source.boot_recompute,
+            entry_call_preservations=records, declared_services=source.declared_services,
+        )
+        return _bind_deferred_raw_callee_scope_8616(caller, block, instruction, rows[0], callee_addr)
     raw = real16_native_census_import_8616(project, callee_boundary)
     if raw is None or direct_evidence_deadline_expired_8616(project):
         return None, _RawCalleeRoute8616.REFUSED, None
-    if not any(item.refusals or any(row.op == "CALL" for row in item.instrs) for item in raw.blocks):
+    if not any(item.refusals or any(row.op == "CALL" for row in iter(item.instrs)) for item in iter(raw.blocks)):
         binding, expired = _bind_direct_call_target_8616(
             project, artifact, boundary, block, instruction, callsite.callsite_addr,
             _callsite_window_8616(project, callsite), records, _CallCollectionPhase8616.COMPLETE,
@@ -4074,11 +4512,13 @@ def _deferred_declared_raw_callee_scope_8616(
 
 
 
+@cython.ccall
 def _pending_declared_binding_8616(
     project: object, artifact: IRFunctionArtifact,
-    binding: DirectNearCallTargetBinding8616 | None, phase: _CallCollectionPhase8616,
-) -> bool:
+    binding: object, phase: _CallCollectionPhase8616,
+) -> cython.bint:
     """Select declared intake for a selector refusal or incomplete body retry."""
+    source: object
     from inertia.semantics.direct_near_call_target_binding import DirectNearCallTargetBindingFailure8616
 
     if binding is None:
@@ -4093,17 +4533,20 @@ def _pending_declared_binding_8616(
     return source is not None and _function_entry_for_head_8616(source, artifact.function_addr) is not None
 
 
+@cython.ccall
 def _resolved_raw_callee_scope_8616(
     project: object, artifact: IRFunctionArtifact, boundary: ExactFunctionRangeBoundary8616,
-    block: IRBlock, instruction: IRInstr, entry: DecodedDirectCallsite8616 | None,
-    candidate_addr: int, binding: DirectNearCallTargetBinding8616 | None,
-    records: tuple[EntryDomainCallPreservation8616, ...], deferred: bool,
+    block: IRBlock, instruction: IRInstr, entry: object,
+    candidate_addr: cython.longlong, binding: object,
+    records: object, deferred: cython.bint,
     resolution: _CalleeResolution8616,
 ) -> tuple[DirectNearCallTargetBinding8616 | None, _RawCalleeRoute8616, Real16InvocationDomain8616 | None]:
     """Keep ordinary scope transport unchanged while selecting deferred declared input."""
+    constructed: object
+    universal: object
     if entry is not None and (deferred or (binding is not None and binding.invocation is not None)):
         universal, _ = _callee_closure_8616(project, candidate_addr, resolution, callsite=entry)
-        if (universal is not None and universal.complete_for(None)
+        if (universal is not None and _fresh_universal_closure_verdict_8616(universal)
                 and "cs" in _callee_preserved_registers_8616(universal)):
             # This certificate selects the route only. The caller target and
             # callee closure are revalidated after all native binding callbacks.
@@ -4128,6 +4571,7 @@ def _resolved_raw_callee_scope_8616(
     return binding, _RawCalleeRoute8616.UNIVERSAL_BODY, None
 
 
+@cython.ccall
 def _resolve_callsite_evidence_8616(
     project: object,
     artifact: IRFunctionArtifact,
@@ -4136,18 +4580,18 @@ def _resolve_callsite_evidence_8616(
     instruction: IRInstr,
     *,
     index: DecodedDirectCallsiteIndex8616,
-    decoded_by_addr: dict[int, object],
+    decoded_by_addr: object,
     resolution: _CalleeResolution8616,
-    entry_call_preservations: tuple[EntryDomainCallPreservation8616, ...],
+    entry_call_preservations: object,
     collection_phase: _CallCollectionPhase8616,
-) -> tuple[
-    DecodedDirectCallsite8616 | None,
-    SegmentEffectClosureResult8616 | None,
-    int | None,
-    EntryDomainCallPreservationFailure8616 | None,
-    DirectNearCallTargetBinding8616 | None,
-] | None:
+) -> object:
     """Bind the caller target before starting potentially recursive callee proof."""
+    binding: object
+    callsite_addr: object
+    closure: object
+    entry: object
+    window: object
+    candidate_addr: object
     callsite_addr = instruction.addr if type(instruction.addr) is int else None
     entry = (
         None
@@ -4201,6 +4645,7 @@ def _resolve_callsite_evidence_8616(
     return entry, callee, callee_addr, callee_refusal, binding
 
 
+@cython.ccall
 def prove_entry_domain_call_preservation_8616(
     project: object,
     artifact: IRFunctionArtifact,
@@ -4209,9 +4654,9 @@ def prove_entry_domain_call_preservation_8616(
     instruction: IRInstr,
     *,
     index: DecodedDirectCallsiteIndex8616,
-    decoded_by_addr: dict[int, object],
+    decoded_by_addr: object,
     resolution: _CalleeResolution8616,
-    entry_call_preservations: tuple[EntryDomainCallPreservation8616, ...] = (),
+    entry_call_preservations: object = (),
     collection_phase: _CallCollectionPhase8616 = _CallCollectionPhase8616.COMPLETE,
 ) -> EntryDomainCallPreservation8616:
     """Produce one bound callsite CS-preservation proof or typed refusal.
@@ -4228,6 +4673,13 @@ def prove_entry_domain_call_preservation_8616(
     the collector's first pass declares ``RECORD_POOL`` to defer that
     premise leg until the pool exists.
     """
+    callee_addr: object
+    callee_refusal: object
+    callsite_addr: object
+    entry: object
+    failure: object
+    helper: object
+    resolved: object
     callsite_addr = instruction.addr if type(instruction.addr) is int else None
     if direct_evidence_deadline_expired_8616(project):
         return _refused_result_8616(
@@ -4319,10 +4771,11 @@ def prove_entry_domain_call_preservation_8616(
     )
 
 
+@cython.ccall
 def entry_domain_caller_boundary_8616(
     project: object,
     function: object,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> ExactFunctionRangeBoundary8616 | None:
     """Resolve the caller's exact frontend boundary for the domain proof.
 
@@ -4331,19 +4784,21 @@ def entry_domain_caller_boundary_8616(
     boundary owners. A boundary whose root or project disagrees with the
     in-flight artifact is refused rather than repaired.
     """
+    boundary: object
     if isinstance(function, ExactFunctionRangeBoundary8616):
-        boundary: ExactFunctionRangeBoundary8616 | None = function
+        boundary = function
     else:
         boundary = _exact_boundary_for_8616(project, function_addr)
     if (
         boundary is None
         or boundary.project is not project
-        or boundary.addr != function_addr
+        or operator.ne(boundary.addr, function_addr)
     ):
         return None
     return boundary
 
 
+@cython.ccall
 def _selector_window_binding_failure_8616() -> object:
     """Return the Semantics-owned selector-window refusal enum member.
 
@@ -4360,7 +4815,7 @@ def _selector_window_binding_failure_8616() -> object:
 def _budget_exhausted_call_records_8616(
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
-    calls: tuple[tuple[IRBlock, IRInstr], ...],
+    calls: object,
     index: DecodedDirectCallsiteIndex8616 | None = None,
 ) -> tuple[EntryDomainCallPreservation8616, ...]:
     """Account every pending call as a typed refusal after request expiry."""
@@ -4377,7 +4832,7 @@ def _budget_exhausted_call_records_8616(
             None,
             EntryDomainCallPreservationFailure8616.BUDGET_EXHAUSTED,
         )
-        for block, instruction in calls
+        for block, instruction in iter(calls)
     )
 
 
@@ -4402,10 +4857,12 @@ def _collection_premise_resolution_8616(project: object) -> Iterator[None]:
         surface._inertia_entry_domain_premise_resolution_8616 = None
 
 
+@cython.ccall
 def _entry_retry_phase_8616(
-    record: EntryDomainCallPreservation8616, *, declared_entry: bool,
+    record: EntryDomainCallPreservation8616, *, declared_entry: cython.bint,
 ) -> _CallCollectionPhase8616 | None:
     """Schedule only unresolved obligations for which entry evidence can help."""
+    binding: object
     binding = record.binding
     if binding is None:
         return None
@@ -4426,8 +4883,8 @@ def collect_entry_domain_call_preservations_8616(
     boundary: ExactFunctionRangeBoundary8616,
     *,
     direct_target_resolver: DirectCallTargetResolver8616,
-    selected_callsites: frozenset[int] | None = None,
-) -> tuple[EntryDomainCallPreservation8616, ...]:
+    selected_callsites: object = None,
+) -> object:
     """Bind every reachable CALL in the in-flight artifact to callee evidence.
 
     Returns one typed record per CALL instruction in the artifact; callers
@@ -4439,17 +4896,21 @@ def collect_entry_domain_call_preservations_8616(
     default collects all calls; a prefix consumer still proves its whole path
     independently and refuses if any necessary call lacks a valid record.
     """
+    phase: object
+    resolution: object
+    record: object
+    record_index: object
     calls = tuple(
         (block, instruction)
-        for block in artifact.blocks
-        for instruction in block.instrs
+        for block in iter(artifact.blocks)
+        for instruction in iter(block.instrs)
         if instruction.op == "CALL" and (selected_callsites is None or instruction.addr in selected_callsites)
     )
     if not calls:
         return ()
     if (
         boundary.project is not project
-        or boundary.addr != artifact.function_addr
+        or operator.ne(boundary.addr, artifact.function_addr)
     ):
         return tuple(
             _refused_result_8616(
@@ -4458,7 +4919,7 @@ def collect_entry_domain_call_preservations_8616(
                 None,
                 EntryDomainCallPreservationFailure8616.CALLER_BINDING_MISMATCH,
             )
-            for block, instruction in calls
+            for block, instruction in iter(calls)
         )
     if direct_evidence_deadline_expired_8616(project):
         return _budget_exhausted_call_records_8616(
@@ -4497,7 +4958,7 @@ def collect_entry_domain_call_preservations_8616(
                     resolution=resolution,
                     collection_phase=_CallCollectionPhase8616.RECORD_POOL,
                 )
-                for block, instruction in calls
+                for block, instruction in iter(calls)
             )
             # Second pass: a selector-window refusal or an incomplete callee
             # may need a caller-domain premise, and its census needs
@@ -4513,7 +4974,7 @@ def collect_entry_domain_call_preservations_8616(
                 not direct_evidence_deadline_expired_8616(project)
                 and any(
                     _entry_retry_phase_8616(record, declared_entry=True) is not None
-                    for record in records
+                    for record in iter(records)
                 )
                 and (source := _invocation_premise_source_8616(project)) is not None
             ):

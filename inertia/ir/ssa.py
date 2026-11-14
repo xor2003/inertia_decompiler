@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Build block-local SSA over typed IR values.
 
 Layer: IR.
@@ -8,12 +9,16 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass, replace
 
 from .core import IRAddress, IRAtom, IRBinaryValue, IRBlock, IRCondition, IRInstr, IRValue, MemSpace
+import dataclasses
+import operator
 
 __all__ = ["SSABinding", "SSABlock", "build_x86_16_block_local_ssa"]
 
@@ -22,7 +27,7 @@ _TemporarySnapshots = dict[int, IRValue]
 _CurrentDefinitions = dict[_VersionKey, IRValue]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SSABinding:
     """Version assigned to one typed IR value definition inside a block.
 
@@ -31,8 +36,8 @@ class SSABinding:
     """
 
     target: IRValue
-    version: int
-    instr_index: int
+    version: cython.longlong
+    instr_index: cython.longlong
 
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-friendly representation."""
@@ -43,32 +48,34 @@ class SSABinding:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SSABlock:
     """Block-local SSA view of typed IR instructions and definitions."""
 
-    addr: int
-    instrs: tuple[IRInstr, ...]
-    bindings: tuple[SSABinding, ...]
+    addr: cython.longlong
+    instrs: object
+    bindings: object
     refusals: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-friendly representation."""
         return {
             "addr": self.addr,
-            "instrs": [item.to_dict() for item in self.instrs],
-            "bindings": [item.to_dict() for item in self.bindings],
+            "instrs": [item.to_dict() for item in iter(self.instrs)],
+            "bindings": [item.to_dict() for item in iter(self.bindings)],
             "refusals": list(self.refusals),
         }
 
 
 _BLOCK_LOCAL_SSA_CACHE_MAX_ENTRIES_8616 = 128
 _BLOCK_LOCAL_SSA_CACHE_LOCK_8616 = threading.RLock()
-_BLOCK_LOCAL_SSA_CACHE_8616: OrderedDict[int, tuple[IRBlock, SSABlock]] = OrderedDict()
+_BLOCK_LOCAL_SSA_CACHE_8616: OrderedDict[cython.longlong, tuple[IRBlock, SSABlock]] = OrderedDict()
 
 
+@cython.ccall
 def _cached_block_local_ssa_8616(block: IRBlock) -> SSABlock | None:
     """Return a projection only for the same immutable block object."""
+    cached: object
     key = id(block)
     with _BLOCK_LOCAL_SSA_CACHE_LOCK_8616:
         cached = _BLOCK_LOCAL_SSA_CACHE_8616.get(key)
@@ -82,8 +89,10 @@ def _cached_block_local_ssa_8616(block: IRBlock) -> SSABlock | None:
         return result
 
 
+@cython.ccall
 def _publish_block_local_ssa_8616(block: IRBlock, result: SSABlock) -> SSABlock:
     """Publish one bounded identity-safe immutable block projection."""
+    cached: object
     key = id(block)
     with _BLOCK_LOCAL_SSA_CACHE_LOCK_8616:
         cached = _BLOCK_LOCAL_SSA_CACHE_8616.get(key)
@@ -97,6 +106,7 @@ def _publish_block_local_ssa_8616(block: IRBlock, result: SSABlock) -> SSABlock:
     return result
 
 
+@cython.ccall
 def _version_key(value: IRValue) -> _VersionKey:
     """Key named registers independently of arithmetic value displacement.
 
@@ -108,14 +118,16 @@ def _version_key(value: IRValue) -> _VersionKey:
     return (value.space.value, value.name, storage_offset)
 
 
-def _versioned(value: IRValue, version: int) -> IRValue:
+@cython.ccall
+def _versioned(value: IRValue, version: cython.longlong) -> IRValue:
     """Assign one SSA version without dropping value provenance."""
     return replace(value, version=version)
 
 
+@cython.ccall
 def _rewrite_binary_value(
     value: IRBinaryValue,
-    versions: dict[_VersionKey, int],
+    versions: object,
     snapshots: _TemporarySnapshots,
     definitions: _CurrentDefinitions,
 ) -> IRBinaryValue:
@@ -127,9 +139,10 @@ def _rewrite_binary_value(
     )
 
 
+@cython.ccall
 def _rewrite_value_expression(
     value: IRValue | IRBinaryValue,
-    versions: dict[_VersionKey, int],
+    versions: object,
     snapshots: _TemporarySnapshots,
     definitions: _CurrentDefinitions,
 ) -> IRValue | IRBinaryValue:
@@ -139,23 +152,25 @@ def _rewrite_value_expression(
     return _rewrite_value(value, versions, snapshots, definitions)
 
 
+@cython.ccall
 def _rewrite_value(
     value: IRValue,
-    versions: dict[_VersionKey, int],
+    versions: object,
     snapshots: _TemporarySnapshots,
     definitions: _CurrentDefinitions,
 ) -> IRValue:
     """Rewrite one value and its indexed-address provenance into current SSA versions."""
+    snapshot: object
+    source_definition: object
     if value.space in {MemSpace.CONST, MemSpace.UNKNOWN}:
         return value
     key = _version_key(value)
     snapshot = None if value.source_tmp is None else snapshots.get(value.source_tmp)
-    source_definition: IRValue | None
     if (
         snapshot is not None
         and snapshot.version is not None
-        and snapshot.size == value.size
-        and _version_key(snapshot) == key
+        and operator.eq(snapshot.size, value.size)
+        and operator.eq(_version_key(snapshot), key)
     ):
         version = snapshot.version
         source_definition = snapshot
@@ -180,7 +195,7 @@ def _rewrite_value(
 
 def _rewrite_atom(
     atom: IRAtom,
-    versions: dict[_VersionKey, int],
+    versions: object,
     snapshots: _TemporarySnapshots,
     definitions: _CurrentDefinitions,
 ) -> IRAtom:
@@ -189,7 +204,7 @@ def _rewrite_atom(
         return IRCondition(
             op=atom.op,
             args=tuple(
-                _rewrite_atom(arg, versions, snapshots, definitions) for arg in atom.args
+                _rewrite_atom(arg, versions, snapshots, definitions) for arg in iter(atom.args)
             ),
             expr=atom.expr,
             width_bits=atom.width_bits,
@@ -203,16 +218,17 @@ def _rewrite_atom(
             atom,
             base_values=tuple(
                 _rewrite_value(value, versions, snapshots, definitions)
-                for value in atom.base_values
+                for value in iter(atom.base_values)
             ),
         )
     return atom
 
 
+@cython.ccall
 def _record_temporary_snapshot(
     instruction: IRInstr,
-    destination: IRValue | None,
-    arguments: tuple[IRAtom, ...],
+    destination: object,
+    arguments: object,
     snapshots: _TemporarySnapshots,
 ) -> None:
     """Record the exact scalar version captured by one VEX temporary MOV."""
@@ -224,7 +240,8 @@ def _record_temporary_snapshot(
         snapshots[destination.source_tmp] = arguments[0]
 
 
-def _is_definition_destination_8616(instruction: IRInstr) -> bool:
+@cython.ccall
+def _is_definition_destination_8616(instruction: IRInstr) -> cython.bint:
     """Return whether ``instruction`` binds a new SSA definition for its dst.
 
     Shared definition-eligibility predicate for the SSA builder and the
@@ -233,6 +250,7 @@ def _is_definition_destination_8616(instruction: IRInstr) -> bool:
     never binds. One predicate keeps the bare count provably equal to the
     real builder's ``len(bindings)`` instead of duplicating the rule.
     """
+    destination: object
     destination = instruction.dst
     return (
         instruction.op != "CALL"
@@ -241,6 +259,7 @@ def _is_definition_destination_8616(instruction: IRInstr) -> bool:
     )
 
 
+@cython.ccall
 def _build_x86_16_block_local_ssa_uncached(block: IRBlock) -> SSABlock:
     """Rewrite one typed IR block without consulting the identity cache.
 
@@ -248,7 +267,11 @@ def _build_x86_16_block_local_ssa_uncached(block: IRBlock) -> SSABlock:
     Callee output and preservation evidence is separate; this builder does not
     infer either by manufacturing a definition of the target.
     """
-    versions: dict[_VersionKey, int] = {}
+    rewritten_dst: object
+    arg: object
+    index: object
+    instr: object
+    versions: dict[_VersionKey, cython.longlong] = {}
     snapshots: _TemporarySnapshots = {}
     definitions: _CurrentDefinitions = {}
     rewritten: list[IRInstr] = []
@@ -279,7 +302,7 @@ def _build_x86_16_block_local_ssa_uncached(block: IRBlock) -> SSABlock:
     return SSABlock(addr=block.addr, instrs=tuple(rewritten), bindings=tuple(bindings))
 
 
-def _block_local_ssa_binding_count_8616(block: IRBlock) -> int:
+def _block_local_ssa_binding_count_8616(block: IRBlock) -> cython.longlong:
     """Count ``SSABlock.bindings`` without rewriting or caching the SSA view.
 
     Shares ``_is_definition_destination_8616`` with the real builder, so the
@@ -290,13 +313,15 @@ def _block_local_ssa_binding_count_8616(block: IRBlock) -> int:
     """
     return sum(
         1
-        for instruction in block.instrs
+        for instruction in iter(block.instrs)
         if _is_definition_destination_8616(instruction)
     )
 
 
+@cython.ccall
 def build_x86_16_block_local_ssa(block: IRBlock) -> SSABlock:
     """Return deterministic block-local SSA, reusing the same immutable input."""
+    cached: object
     cached = _cached_block_local_ssa_8616(block)
     if cached is not None:
         return cached

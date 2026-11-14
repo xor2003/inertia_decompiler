@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: preserve legacy CLI helper surface while delegating semantic proof to X86_16 layers.
@@ -5,6 +6,8 @@ Forbidden: owning decompiler semantics, source-backed recovery, or postprocess s
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
@@ -14,6 +17,7 @@ from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeChar, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimRegisterVariable
 from archinfo.arch import Arch
+import dataclasses
 
 
 class _ProjectLike(Protocol):
@@ -39,11 +43,11 @@ class _SegmentedDereferenceLike(Protocol):
 
     addr_expr: object | None
     cvar: object | None
-    extra_offset: int
-    seg_name: str
+    extra_offset: cython.longlong
+    seg_name: object
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _SegmentedDerefElider:
     """Visitor eliding redundant segment-scale dereferences in one cfunc."""
 
@@ -58,12 +62,15 @@ class _SegmentedDerefElider:
         [object, _ProjectLike], tuple[_SegmentedDereferenceLike, object] | None
     ]
     strip_segment_scale_from_addr_expr: Callable[[object, _ProjectLike], object | None]
-    same_c_storage: Callable[[object, object], bool]
+    same_c_storage: Callable[[object, object], cython.bint]
     iter_c_nodes_deep: Callable[[object], Iterable[object]]
-    eligible_bases: dict[int, tuple[structured_c.CVariable, set[int]]] = field(default_factory=dict)
+    eligible_bases: object = field(default_factory=dict)
 
-    def _term_is_segment_scale(self, inner: object) -> bool:
+    @cython.ccall
+    def _term_is_segment_scale(self, inner: object) -> cython.bint:
         """Return whether one add term is a `segment * 16` scale factor."""
+        maybe_scale: object
+        maybe_seg: object
         if not isinstance(inner, structured_c.CBinaryOp) or inner.op != "Mul":
             return False
         for maybe_seg, maybe_scale in ((inner.lhs, inner.rhs), (inner.rhs, inner.lhs)):
@@ -73,8 +80,10 @@ class _SegmentedDerefElider:
                 return True
         return False
 
-    def _base_terms_of(self, addr_expr: object) -> list[object]:
+    @cython.ccall
+    def _base_terms_of(self, addr_expr: object) -> object:
         """Return the single register base term of one address expression."""
+        term: object
         base_terms: list[object] = []
         for term in self.flatten_c_add_terms(addr_expr):
             inner = self.unwrap_c_casts(term)
@@ -95,8 +104,13 @@ class _SegmentedDerefElider:
 
         return base_terms
 
+    @cython.ccall
     def collect_candidate_bases(self, statements: object) -> None:
         """Record register bases whose every use carries a constant offset."""
+        base_var: object
+        classified: object
+        entry: object
+        node: object
         for node in self.iter_c_nodes_deep(statements):
             classified = self.classify_segmented_dereference(node, self.project)
             if classified is None or classified.addr_expr is None or classified.seg_name not in {"ds", "es"}:
@@ -115,7 +129,8 @@ class _SegmentedDerefElider:
             else:
                 entry[1].add(classified.extra_offset)
 
-    def _addr_expr_is_safe_projection(self, addr_expr: object) -> bool:
+    @cython.ccall
+    def _addr_expr_is_safe_projection(self, addr_expr: object) -> cython.bint:
         """Return whether one address expression contains only safe terms."""
         node = self.unwrap_c_casts(addr_expr)
         if self.c_constant_value(node) is not None:
@@ -132,7 +147,8 @@ class _SegmentedDerefElider:
             return self._addr_expr_is_safe_projection(node.lhs) and self._addr_expr_is_safe_projection(node.rhs)
         return False
 
-    def make_deref(self, base_expr: object, bits: int) -> structured_c.CUnaryOp:
+    @cython.ccall
+    def make_deref(self, base_expr: object, bits: cython.longlong) -> structured_c.CUnaryOp:
         """Build one typed dereference of the elided base expression."""
         element_type = SimTypeChar(False) if bits == 8 else SimTypeShort(False)
         ptr_type = SimTypePointer(element_type).with_arch(self.project.arch)
@@ -144,8 +160,14 @@ class _SegmentedDerefElider:
             codegen=self.codegen,
         )
 
+    @cython.ccall
     def _matched_base_expr(self, node: structured_c.CUnaryOp) -> object | None:
         """Resolve the elidable base expression for one dereference node."""
+        base_expr: object
+        base_var: object
+        classified: object
+        eligible: object
+        match: object
         match = self.match_segment_register_based_dereference(node, self.project)
         if match is None:
             classified = self.classify_segmented_dereference(node, self.project)
@@ -170,8 +192,12 @@ class _SegmentedDerefElider:
             return None
         return base_expr
 
+    @cython.ccall
     def transform(self, node: object) -> object:
         """Rewrite one dereference node when its segment scale is redundant."""
+        base_expr: object
+        bits: object
+        type_: object
         if not isinstance(node, structured_c.CUnaryOp) or node.op != "Dereference":
             return node
         base_expr = self._matched_base_expr(node)
@@ -186,6 +212,7 @@ class _SegmentedDerefElider:
         return self.make_deref(base_expr, bits)
 
 
+@cython.ccall
 def _elide_redundant_segment_pointer_dereferences(
     project: _ProjectLike,
     codegen: _CodegenLike,
@@ -200,9 +227,10 @@ def _elide_redundant_segment_pointer_dereferences(
         [object, _ProjectLike], tuple[_SegmentedDereferenceLike, object] | None
     ],
     strip_segment_scale_from_addr_expr: Callable[[object, _ProjectLike], object | None],
-    same_c_storage: Callable[[object, object], bool],
-    replace_c_children: Callable[[object, Callable[[object], object]], bool],
-) -> bool:
+    same_c_storage: Callable[[object, object], cython.bint],
+    replace_c_children: Callable[[object, Callable[[object], object]], cython.bint],
+) -> cython.bint:
+    cfunc: object
     cfunc = codegen.cfunc
     if cfunc is None:
         return False

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Project exact Alias stack accesses by source instruction address.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -23,14 +26,17 @@ from inertia.alias.stack_memory_ssa_contracts import (
 from inertia.ir.core import AddressStatus, IRAddress, MemSpace
 from inertia.ir.logical_memory_contracts import IRMemoryAccessKind8616
 from inertia.ir.ssa_memory_contracts import SSAMemoryAccessKind8616
+import dataclasses
+import operator
+import builtins
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class InstructionBpStackAccess8616:
     """One exact Alias-proven BP access at an instruction address."""
 
-    displacement: int
-    size: int
+    displacement: cython.longlong
+    size: cython.longlong
     kind: StackMemoryAliasFactKind8616
     evidence: InstructionBpStackAccessEvidence8616
 
@@ -48,58 +54,58 @@ class InstructionBpStackAccessRefusalKind8616(StrEnum):
     SOURCE_INSTRUCTION_MISSING = "source_instruction_missing"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class InstructionBpStackAccessRefusal8616:
     """One typed refusal retained by the instruction projection."""
 
     kind: InstructionBpStackAccessRefusalKind8616
-    block_addr: int
-    instr_index: int
-    detail: str
+    block_addr: cython.longlong
+    instr_index: cython.longlong
+    detail: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class InstructionBpStackAccessStats8616:
     """Closed evidence accounting for the Alias-to-Lowering projection."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every direct-BP input was indexed or refused."""
         return (
-            self.raw_fact_count == self.materialized_count + self.failure_count
+            operator.eq(self.raw_fact_count, self.materialized_count + self.failure_count)
             and self.normalized_fact_count
             == self.classified_fact_count
             == self.materialized_count
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class InstructionBpStackAccessIndex8616:
     """Immutable instruction lookup projected from one exact Alias artifact."""
 
     source_alias: StackMemorySSAAliasArtifact8616
-    by_instruction_addr: Mapping[int, tuple[InstructionBpStackAccess8616, ...]]
-    refusals: tuple[InstructionBpStackAccessRefusal8616, ...]
+    by_instruction_addr: Mapping[cython.longlong, tuple[InstructionBpStackAccess8616, ...]]
+    refusals: object
     stats: InstructionBpStackAccessStats8616
 
     @property
-    def fact_count(self) -> int:
+    def fact_count(self) -> cython.longlong:
         """Return the number of distinct indexed instruction access facts."""
-        return sum(len(facts) for facts in self.by_instruction_addr.values())
+        return sum(len(facts) for facts in builtins.iter(self.by_instruction_addr.values()))
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether evidence accounting and source Alias both close."""
         return self.source_alias.complete and self.stats.complete
 
     @property
-    def logical_inventory(self) -> tuple[tuple[int, int, int, IRMemoryAccessKind8616], ...]:
+    def logical_inventory(self) -> tuple[tuple[cython.longlong, cython.longlong, cython.longlong, IRMemoryAccessKind8616], ...]:
         """Return logical machine address, BP range, and kind diagnostics."""
         return tuple(
             (
@@ -108,7 +114,7 @@ class InstructionBpStackAccessIndex8616:
                 identity.address.size,
                 identity.source.kind,
             )
-            for identity in self.source_alias.logical_storage_identities
+            for identity in iter(self.source_alias.logical_storage_identities)
         )
 
 
@@ -118,7 +124,8 @@ class _CodegenBoundary8616(Protocol):
     _inertia_instruction_bp_stack_access_index_8616: InstructionBpStackAccessIndex8616
 
 
-def _is_direct_stable_bp_address_8616(address: IRAddress) -> bool:
+@cython.ccall
+def _is_direct_stable_bp_address_8616(address: IRAddress) -> cython.bint:
     """Return whether Alias proved one exact stable SS:BP range."""
     return (
         address.space is MemSpace.SS
@@ -130,12 +137,13 @@ def _is_direct_stable_bp_address_8616(address: IRAddress) -> bool:
 
 def _instruction_addr_8616(
     source: StackMemorySSAAliasArtifact8616,
-    block_addr: int,
-    instr_index: int,
+    block_addr: cython.longlong,
+    instr_index: cython.longlong,
 ) -> int | None:
     """Resolve one Alias source position through its exact SSA owner."""
+    block: object
     block = next(
-        (candidate for candidate in source.source_ssa.blocks if candidate.addr == block_addr),
+        (candidate for candidate in iter(source.source_ssa.blocks) if operator.eq(candidate.addr, block_addr)),
         None,
     )
     if block is None or not 0 <= instr_index < len(block.instrs):
@@ -144,6 +152,7 @@ def _instruction_addr_8616(
     return instruction_addr if isinstance(instruction_addr, int) else None
 
 
+@cython.ccall
 def _access_kind_8616(kind: SSAMemoryAccessKind8616) -> StackMemoryAliasFactKind8616:
     """Project the IR access kind into the existing Alias fact enum."""
     return (
@@ -153,6 +162,7 @@ def _access_kind_8616(kind: SSAMemoryAccessKind8616) -> StackMemoryAliasFactKind
     )
 
 
+@cython.ccall
 def _logical_access_kind_8616(
     kind: IRMemoryAccessKind8616,
 ) -> StackMemoryAliasFactKind8616:
@@ -168,9 +178,14 @@ def build_instruction_bp_stack_access_index_8616(
     source: StackMemorySSAAliasArtifact8616,
 ) -> InstructionBpStackAccessIndex8616:
     """Project direct stable BP accesses from one exact Alias artifact."""
-    candidates: list[tuple[int, int, IRAddress, StackMemoryAliasFactKind8616]] = [
+    instruction_addr: object
+    address: object
+    block_addr: object
+    instr_index: object
+    kind: object
+    candidates: list[tuple[cython.longlong, cython.longlong, IRAddress, StackMemoryAliasFactKind8616]] = [
         (fact.block_addr, fact.instr_index, fact.address, fact.kind)
-        for fact in source.facts
+        for fact in iter(source.facts)
         if fact.kind is not StackMemoryAliasFactKind8616.PHI
         and isinstance(fact.instr_index, int)
         and _is_direct_stable_bp_address_8616(fact.address)
@@ -182,7 +197,7 @@ def build_instruction_bp_stack_access_index_8616(
             access.source.address,
             _access_kind_8616(access.source.kind),
         )
-        for access in source.accesses
+        for access in iter(source.accesses)
         if _is_direct_stable_bp_address_8616(access.source.address)
     )
     logical_candidates = tuple(
@@ -191,10 +206,10 @@ def build_instruction_bp_stack_access_index_8616(
             identity.address,
             _logical_access_kind_8616(identity.source.kind),
         )
-        for identity in source.logical_storage_identities
+        for identity in iter(source.logical_storage_identities)
         if _is_direct_stable_bp_address_8616(identity.address)
     )
-    collected: dict[int, set[InstructionBpStackAccess8616]] = {}
+    collected: dict[cython.longlong, set[InstructionBpStackAccess8616]] = {}
     refusals: list[InstructionBpStackAccessRefusal8616] = []
     materialized_count = 0
     for block_addr, instr_index, address, kind in candidates:
@@ -249,13 +264,14 @@ def build_instruction_bp_stack_access_index_8616(
                     ),
                 )
             )
-            for addr, facts in sorted(collected.items())
+            for addr, facts in builtins.iter(sorted(tuple(collected.items())))
         },
         tuple(refusals),
         stats,
     )
 
 
+@cython.ccall
 def ensure_instruction_bp_stack_access_index_8616(
     codegen: object,
     source: StackMemorySSAAliasArtifact8616,
@@ -278,27 +294,28 @@ def ensure_instruction_bp_stack_access_index_8616(
 
 def select_instruction_bp_stack_access_8616(
     index: InstructionBpStackAccessIndex8616,
-    instruction_addrs: frozenset[int],
+    instruction_addrs: object,
     *,
-    displacement: int,
-    size: int,
+    displacement: cython.longlong,
+    size: cython.longlong,
     kind: StackMemoryAliasFactKind8616 | None = None,
 ) -> InstructionBpStackAccess8616 | None:
     """Keep exact execution width; a wider logical owner is not a wider access."""
+    sole_range: object
     candidates = {
         fact
-        for instruction_addr in instruction_addrs
-        for fact in index.by_instruction_addr.get(instruction_addr, ())
+        for instruction_addr in iter(instruction_addrs)
+        for fact in builtins.iter(index.by_instruction_addr.get(instruction_addr, ()))
         if kind is None or fact.kind is kind
     }
     exact = tuple(
         fact
-        for fact in candidates
-        if fact.displacement == displacement and fact.size == size
+        for fact in iter(candidates)
+        if operator.eq(fact.displacement, displacement) and operator.eq(fact.size, size)
     )
     exact_logical = tuple(
         fact
-        for fact in exact
+        for fact in iter(exact)
         if fact.evidence is InstructionBpStackAccessEvidence8616.LOGICAL_ACCESS
     )
     if exact_logical:
@@ -307,26 +324,26 @@ def select_instruction_bp_stack_access_8616(
         return min(exact, key=lambda fact: (fact.evidence.value, fact.kind.value))
     same_base_logical_owners = tuple(
         fact
-        for fact in candidates
+        for fact in iter(candidates)
         if fact.evidence is InstructionBpStackAccessEvidence8616.LOGICAL_ACCESS
-        and fact.displacement == displacement
+        and operator.eq(fact.displacement, displacement)
         and fact.size > size
     )
     if same_base_logical_owners:
         return min(same_base_logical_owners, key=lambda fact: (fact.size, fact.kind.value))
     logical = tuple(
         fact
-        for fact in candidates
+        for fact in iter(candidates)
         if fact.evidence is InstructionBpStackAccessEvidence8616.LOGICAL_ACCESS
     )
-    if len({(fact.displacement, fact.size) for fact in logical}) == 1:
+    if len({(fact.displacement, fact.size) for fact in iter(logical)}) == 1:
         return min(logical, key=lambda fact: fact.kind.value)
-    ranges = {(fact.displacement, fact.size) for fact in candidates}
+    ranges = {(fact.displacement, fact.size) for fact in iter(candidates)}
     if len(ranges) != 1:
         return None
     sole_range = next(iter(ranges))
     return min(
-        (fact for fact in candidates if (fact.displacement, fact.size) == sole_range),
+        (fact for fact in iter(candidates) if operator.eq((fact.displacement, fact.size), sole_range)),
         key=lambda fact: fact.kind.value,
     )
 

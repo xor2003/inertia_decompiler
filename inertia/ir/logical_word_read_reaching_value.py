@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Trace exact logical word reads through byte-versioned memory SSA.
 
 Layer: IR.
@@ -11,6 +12,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -32,6 +35,8 @@ from .ssa_memory_contracts import (
     SSAMemoryIncomingValue8616,
     SSAMemoryPhiNode8616,
 )
+import dataclasses
+import operator
 
 
 class LogicalWordReadValueFailureKind8616(StrEnum):
@@ -48,32 +53,36 @@ class LogicalWordReadValueFailureKind8616(StrEnum):
     NON_CONSTANT_WRITE = "non_constant_write"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LogicalWordReadIncomingValue8616:
     """One path's word value with both exact byte-reaching chains."""
 
     source_block_addr: int | None
-    constant: int
+    constant: cython.longlong
     writer: LogicalWordWriteValueFact8616
-    store_addresses: tuple[IRAddress, IRAddress]
-    phi_nodes: tuple[SSAMemoryPhiNode8616 | None, SSAMemoryPhiNode8616 | None]
-    phi_inputs: tuple[SSAMemoryIncomingValue8616 | None, SSAMemoryIncomingValue8616 | None]
+    store_addresses: object
+    phi_nodes: object
+    phi_inputs: object
 
     def complete_for(
         self,
         load: IRLogicalMemoryAccess8616,
-        read_slices: tuple[SSAMemoryAccess8616, SSAMemoryAccess8616],
-    ) -> bool:
+        read_slices: object,
+    ) -> cython.bint:
         """Check durable byte/version and selected predecessor evidence."""
-        if not self.writer.complete or not self.writer.is_constant or self.constant != self.writer.constant:
+        incoming: object
+        phi: object
+        index: object
+        read: object
+        if not self.writer.complete or not self.writer.is_constant or operator.ne(self.constant, self.writer.constant):
             return False
         if len(load.execution_slices) != 2 or not load.complete:
             return False
         for index, read in enumerate(read_slices):
             execution = load.execution_slices[index]
             read_site_matches = (
-                read.block_addr == execution.block_addr
-                and read.instr_index == execution.instr_index
+                operator.eq(read.block_addr, execution.block_addr)
+                and operator.eq(read.instr_index, execution.instr_index)
             )
             read_byte_matches = (
                 len(read.slices) == 1
@@ -92,34 +101,34 @@ class LogicalWordReadIncomingValue8616:
                     return False
             elif (
                 incoming is None
-                or phi.target != load_address
+                or operator.ne(phi.target, load_address)
                 or incoming not in phi.incoming
-                or incoming.address != store
-                or incoming.source_block_addr != self.source_block_addr
+                or operator.ne(incoming.address, store)
+                or operator.ne(incoming.source_block_addr, self.source_block_addr)
             ):
                 return False
         return True
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LogicalWordReadValueFact8616:
     """One word LOAD with a fixed value on every proved incoming CFG edge."""
 
     load: IRLogicalMemoryAccess8616
-    read_slices: tuple[SSAMemoryAccess8616, SSAMemoryAccess8616]
-    incoming: tuple[LogicalWordReadIncomingValue8616, ...]
+    read_slices: object
+    incoming: object
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Reject missing, duplicate, or corrupted path/value evidence."""
-        paths = tuple(item.source_block_addr for item in self.incoming)
-        phi_nodes = tuple(phi for item in self.incoming for phi in item.phi_nodes if phi is not None)
-        expected: tuple[int | None, ...]
+        paths = tuple(item.source_block_addr for item in iter(self.incoming))
+        phi_nodes = tuple(phi for item in iter(self.incoming) for phi in iter(item.phi_nodes) if phi is not None)
+        expected: object
         if phi_nodes:
-            expected = tuple(sorted(item.source_block_addr for item in phi_nodes[0].incoming))
+            expected = tuple(sorted(item.source_block_addr for item in iter(phi_nodes[0].incoming)))
             phi_paths_match = all(
-                tuple(sorted(item.source_block_addr for item in phi.incoming)) == expected
-                for phi in phi_nodes
+                operator.eq(tuple(sorted(item.source_block_addr for item in iter(phi.incoming))), expected)
+                for phi in iter(phi_nodes)
             )
         else:
             expected = (None,)
@@ -129,11 +138,11 @@ class LogicalWordReadValueFact8616:
             and self.load.address.size == 2
             and self.load.complete
             and paths == expected and phi_paths_match
-            and all(item.complete_for(self.load, self.read_slices) for item in self.incoming)
+            and all(item.complete_for(self.load, self.read_slices) for item in iter(self.incoming))
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LogicalWordReadValueRefusal8616:
     """An attempted LOAD and the typed reason its value remains unknown."""
 
@@ -141,7 +150,7 @@ class LogicalWordReadValueRefusal8616:
     failure: LogicalWordReadValueFailureKind8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LogicalWordReadValueArtifact8616:
     """Closed one-candidate reaching-value result for an exact word LOAD."""
 
@@ -150,7 +159,7 @@ class LogicalWordReadValueArtifact8616:
     stats: IRLogicalMemoryStats8616
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Require exactly one proved fact or typed refusal."""
         return bool(
             self.stats.closed
@@ -162,7 +171,7 @@ class LogicalWordReadValueArtifact8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _ByteSource8616:
     """One STORE-version leaf and optional selected phi edge."""
 
@@ -181,11 +190,12 @@ class _ProofFailure8616(Exception):
         self.kind = kind
 
 
-def _same_byte_location_8616(left: IRAddress, right: IRAddress) -> bool:
+@cython.ccall
+def _same_byte_location_8616(left: IRAddress, right: IRAddress) -> cython.bint:
     """Compare one segmented byte location without treating versions as identity."""
     return bool(
-        left.space is right.space and left.base == right.base
-        and left.offset == right.offset and left.size == right.size == 1
+        left.space is right.space and operator.eq(left.base, right.base)
+        and operator.eq(left.offset, right.offset) and left.size == right.size == 1
     )
 
 
@@ -193,26 +203,28 @@ def _writer_versions_8616(
     artifact: SSAFunctionArtifact,
     writes: LogicalWordWriteValueArtifact8616,
     load: IRLogicalMemoryAccess8616,
-) -> dict[IRAddress, LogicalWordWriteValueFact8616]:
+) -> object:
     """Match writes to the selected segmented word, not unrelated SP effects."""
-    stores = tuple(access for access in artifact.memory_accesses
+    fact: object
+    lane: object
+    stores = tuple(access for access in iter(artifact.memory_accesses)
                    if access.kind is SSAMemoryAccessKind8616.STORE and access.complete)
     versions: dict[IRAddress, LogicalWordWriteValueFact8616] = {}
     for fact in writes.facts:
         destination = fact.access.address
         requested = load.address
         if (
-            destination.space is not requested.space or destination.base != requested.base
-            or destination.offset != requested.offset or destination.size != requested.size
+            destination.space is not requested.space or operator.ne(destination.base, requested.base)
+            or operator.ne(destination.offset, requested.offset) or operator.ne(destination.size, requested.size)
         ):
             continue
         for lane in fact.lanes:
             execution = lane.execution_slice
             matching = tuple(
                 access.slices[0].address
-                for access in stores
-                if access.block_addr == execution.block_addr
-                and access.instr_index == execution.instr_index
+                for access in iter(stores)
+                if operator.eq(access.block_addr, execution.block_addr)
+                and operator.eq(access.instr_index, execution.instr_index)
                 and len(access.slices) == 1
                 and _same_byte_location_8616(access.address, execution.address)
             )
@@ -227,14 +239,15 @@ def _read_slices_8616(
     load: IRLogicalMemoryAccess8616,
 ) -> tuple[SSAMemoryAccess8616, SSAMemoryAccess8616]:
     """Find exactly the two byte SSA LOADs owned by one logical word READ."""
-    reads = tuple(access for access in artifact.memory_accesses
+    execution: object
+    reads = tuple(access for access in iter(artifact.memory_accesses)
                   if access.kind is SSAMemoryAccessKind8616.LOAD and access.complete)
     selected: list[SSAMemoryAccess8616] = []
     for execution in load.execution_slices:
         matching = tuple(
-            access for access in reads
-            if access.block_addr == execution.block_addr
-            and access.instr_index == execution.instr_index
+            access for access in iter(reads)
+            if operator.eq(access.block_addr, execution.block_addr)
+            and operator.eq(access.instr_index, execution.instr_index)
             and len(access.slices) == 1
             and _same_byte_location_8616(access.address, execution.address)
         )
@@ -248,33 +261,37 @@ def _byte_sources_8616(
     artifact: SSAFunctionArtifact,
     load: IRLogicalMemoryAccess8616,
     address: IRAddress,
-    writers: dict[IRAddress, LogicalWordWriteValueFact8616],
-) -> dict[int | None, _ByteSource8616]:
+    writers: object,
+) -> object:
     """Resolve a direct STORE version or one complete immediate memory phi."""
+    direct: object
+    expected: object
+    writer: object
+    item: object
     direct = writers.get(address)
     if direct is not None:
         return {None: _ByteSource8616(direct, address, None, None)}
-    matching = tuple(phi for phi in artifact.memory_phi_nodes if phi.target == address)
+    matching = tuple(phi for phi in iter(artifact.memory_phi_nodes) if operator.eq(phi.target, address))
     if len(matching) != 1:
         raise _ProofFailure8616(LogicalWordReadValueFailureKind8616.SOURCE_MISSING)
     phi = matching[0]
     expected = artifact.predecessor_map.get(phi.block_addr)
-    actual = tuple(item.source_block_addr for item in phi.incoming)
+    actual = tuple(item.source_block_addr for item in iter(phi.incoming))
     predecessors_match = (
         expected is not None and len(expected) >= 2
-        and tuple(sorted(expected)) == tuple(sorted(actual))
-        and len(set(actual)) == len(actual)
+        and operator.eq(tuple(sorted(expected)), tuple(sorted(actual)))
+        and operator.eq(len(set(actual)), len(actual))
     )
     phi_storage_matches = all(
-        _same_byte_location_8616(item.address, address) for item in phi.incoming
+        _same_byte_location_8616(item.address, address) for item in iter(phi.incoming)
     )
-    if phi.block_addr != load.key.block_addr or not predecessors_match or not phi_storage_matches:
+    if operator.ne(phi.block_addr, load.key.block_addr) or not predecessors_match or not phi_storage_matches:
         raise _ProofFailure8616(LogicalWordReadValueFailureKind8616.PHI_PREDECESSOR_CONFLICT)
     sources: dict[int | None, _ByteSource8616] = {}
     for item in phi.incoming:
         writer = writers.get(item.address)
         if writer is None:
-            nested = any(node.target == item.address for node in artifact.memory_phi_nodes)
+            nested = any(operator.eq(node.target, item.address) for node in iter(artifact.memory_phi_nodes))
             kind = (LogicalWordReadValueFailureKind8616.NESTED_PHI_UNSUPPORTED if nested
                     else LogicalWordReadValueFailureKind8616.SOURCE_MISSING)
             raise _ProofFailure8616(kind)
@@ -284,13 +301,16 @@ def _byte_sources_8616(
 
 def _incoming_values_8616(
     load: IRLogicalMemoryAccess8616,
-    read_slices: tuple[SSAMemoryAccess8616, SSAMemoryAccess8616],
-    sources: tuple[dict[int | None, _ByteSource8616], dict[int | None, _ByteSource8616]],
-) -> tuple[LogicalWordReadIncomingValue8616, ...]:
+    read_slices: object,
+    sources: object,
+) -> object:
     """Join byte lanes only when all paths have the same logical word writer."""
-    path_sets = tuple({path for path in items if path is not None} for items in sources)
-    paths: set[int] = path_sets[0] | path_sets[1]
-    if any(items and items != paths for items in path_sets):
+    high: object
+    low: object
+    path: object
+    path_sets = tuple({path for path in iter(items) if path is not None} for items in iter(sources))
+    paths: object = path_sets[0] | path_sets[1]
+    if any(items and items != paths for items in iter(path_sets)):
         raise _ProofFailure8616(LogicalWordReadValueFailureKind8616.PHI_PREDECESSOR_CONFLICT)
     incoming: list[LogicalWordReadIncomingValue8616] = []
     for path in sorted(paths) if paths else (None,):
@@ -298,7 +318,7 @@ def _incoming_values_8616(
         high = sources[1].get(path) or sources[1].get(None)
         if low is None or high is None:
             raise _ProofFailure8616(LogicalWordReadValueFailureKind8616.SOURCE_MISSING)
-        if low.writer != high.writer:
+        if operator.ne(low.writer, high.writer):
             raise _ProofFailure8616(LogicalWordReadValueFailureKind8616.BYTE_WRITERS_DIFFER)
         writer = low.writer
         if not writer.is_constant:
@@ -320,8 +340,9 @@ def trace_logical_word_read_values_8616(
     load: IRLogicalMemoryAccess8616,
 ) -> LogicalWordReadValueArtifact8616:
     """Prove one word LOAD's fixed values per direct or immediate-phi path."""
+    logical_memory: object
     try:
-        if not writes.closed or writes.function_addr != artifact.function_addr:
+        if not writes.closed or operator.ne(writes.function_addr, artifact.function_addr):
             raise _ProofFailure8616(LogicalWordReadValueFailureKind8616.WRITE_FACTS_OPEN)
         # Unrelated SP push/return accesses may be refused; the selected BP
         # read still has its own complete version/phi proof below.
@@ -336,7 +357,7 @@ def trace_logical_word_read_values_8616(
             load.kind is IRMemoryAccessKind8616.READ
             and load.address.size == 2 and load.complete
             and len(load.execution_slices) == 2
-            and tuple(item.source_byte_offset for item in load.execution_slices) == (0, 1)
+            and tuple(item.source_byte_offset for item in iter(load.execution_slices)) == (0, 1)
         )
         if not belongs_to_closed_memory or not exact_word_read:
             raise _ProofFailure8616(LogicalWordReadValueFailureKind8616.LOAD_NOT_WORD)

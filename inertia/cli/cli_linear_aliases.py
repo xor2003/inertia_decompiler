@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: preserve legacy CLI helper surface while delegating semantic proof to X86_16 layers.
@@ -5,6 +6,8 @@ Forbidden: owning decompiler semantics, source-backed recovery, or postprocess s
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import Counter
 from collections.abc import Callable, Iterable
@@ -12,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
+import dataclasses
 
 
 class _CFunctionLike(Protocol):
@@ -28,7 +32,8 @@ class _CodegenLike(Protocol):
 _ATTR_MISSING_8616 = object()
 
 
-def _safe_child_attr_8616(expr: object, attr: str) -> object:
+@cython.ccall
+def _safe_child_attr_8616(expr: object, attr: object) -> object:
     """Read one optional angr C AST child attribute."""
     if not hasattr(expr, attr):
         return _ATTR_MISSING_8616
@@ -39,13 +44,17 @@ def _safe_child_attr_8616(expr: object, attr: str) -> object:
         return _ATTR_MISSING_8616
 
 
+@cython.ccall
 def _count_variable_ids_8616(
     unwrap_c_casts: Callable[[object], object],
-    structured_codegen_node: Callable[[object], bool],
+    structured_codegen_node: Callable[[object], cython.bint],
     expr: object,
-    counts: Counter[int],
+    counts: Counter[cython.longlong],
 ) -> None:
     """Count variable identities under one expression."""
+    variable: object
+    attr: object
+    item: object
     expr = unwrap_c_casts(expr)
     if isinstance(expr, structured_c.CVariable):
         # Dynamic codegen boundary: CVariable payloads are optional in angr structured C.
@@ -71,24 +80,28 @@ def _count_variable_ids_8616(
                 )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _BytePairSeedVisitor:
     """Seed word aliases for adjacent byte-pair load assignments."""
 
     project: object
     codegen: _CodegenLike
-    structured_codegen_node: Callable[[object], bool]
+    structured_codegen_node: Callable[[object], cython.bint]
     unwrap_c_casts: Callable[[object], object]
     match_byte_load_addr_expr: Callable[[object], object | None]
-    addr_exprs_are_byte_pair: Callable[[object, object, object], bool]
+    addr_exprs_are_byte_pair: Callable[[object, object, object], cython.bint]
     make_word_dereference_from_addr_expr: Callable[
         [_CodegenLike, object, object], object
     ]
-    dereference_counts: Counter[int]
-    aliases: dict[int, object] = field(default_factory=dict)
+    dereference_counts: Counter[cython.longlong]
+    aliases: object = field(default_factory=dict)
 
+    @cython.ccall
     def visit(self, node: object) -> None:
         """Dispatch one structured-C node to the matching traversal arm."""
+        else_node: object
+        body: object
+        cond: object
         if isinstance(node, structured_c.CStatements):
             self.visit_statements(node)
             return
@@ -111,8 +124,12 @@ class _BytePairSeedVisitor:
 
         self.visit_loop_variant(node)
 
+    @cython.ccall
     def visit_loop_variant(self, node: object) -> None:
         """Visit angr-version-dependent loop payload fields."""
+        do_while_type: object
+        for_loop_type: object
+        attr: object
         # Dynamic codegen boundary: older/newer angr versions differ on loop node classes.
         do_while_type = getattr(structured_c, "CDoWhileLoop", None)
         if do_while_type is not None and isinstance(node, do_while_type):
@@ -129,8 +146,10 @@ class _BytePairSeedVisitor:
                 # Dynamic codegen boundary: for-loop payload fields vary across angr C AST nodes.
                 self.visit(getattr(node, attr, None))
 
+    @cython.ccall
     def visit_statements(self, node: structured_c.CStatements) -> None:
         """Scan adjacent assignment pairs, then recurse into each statement."""
+        stmt: object
         stmt_list = node.statements
         if isinstance(stmt_list, list):
             for index in range(len(stmt_list) - 1):
@@ -140,6 +159,8 @@ class _BytePairSeedVisitor:
 
     def visit_assignment_pair(self, low_stmt: object, high_stmt: object) -> None:
         """Seed word aliases for one adjacent byte-load assignment pair."""
+        high_addr_expr: object
+        low_addr_expr: object
         if not (
             isinstance(low_stmt, structured_c.CAssignment)
             and isinstance(high_stmt, structured_c.CAssignment)
@@ -159,7 +180,7 @@ class _BytePairSeedVisitor:
         if not self.addr_exprs_are_byte_pair(low_addr_expr, high_addr_expr, self.project):
             return
 
-        pair_counts: Counter[int] = Counter()
+        pair_counts: Counter[cython.longlong] = Counter()
         _count_variable_ids_8616(
             self.unwrap_c_casts, self.structured_codegen_node, low_addr_expr, pair_counts
         )
@@ -168,7 +189,7 @@ class _BytePairSeedVisitor:
         )
         if any(
             self.dereference_counts[var_id] > pair_counts[var_id]
-            for var_id in pair_counts
+            for var_id in iter(pair_counts)
         ):
             return
 
@@ -178,8 +199,10 @@ class _BytePairSeedVisitor:
         self.record_alias(low_stmt.lhs, word_expr)
         self.record_alias(high_stmt.lhs, word_expr)
 
+    @cython.ccall
     def record_alias(self, lhs: object, expr: object) -> None:
         """Record the word alias for one assignment lhs variable."""
+        variable: object
         # Dynamic codegen boundary: CVariable payloads are optional in angr structured C.
         variable = getattr(lhs, "variable", None)
         if variable is None:
@@ -187,18 +210,21 @@ class _BytePairSeedVisitor:
         self.aliases[id(variable)] = expr
 
 
+@cython.ccall
 def _seed_adjacent_byte_pair_aliases(
     project: object,
     codegen: _CodegenLike,
     *,
-    structured_codegen_node: Callable[[object], bool],
+    structured_codegen_node: Callable[[object], cython.bint],
     unwrap_c_casts: Callable[[object], object],
     iter_c_nodes_deep: Callable[[object], Iterable[object]],
     match_byte_load_addr_expr: Callable[[object], object | None],
-    addr_exprs_are_byte_pair: Callable[[object, object, object], bool],
+    addr_exprs_are_byte_pair: Callable[[object, object, object], cython.bint],
     make_word_dereference_from_addr_expr: Callable[[_CodegenLike, object, object], object],
-) -> dict[int, object]:
+) -> object:
     """Seed aliases mapping adjacent byte-load pairs to their word view."""
+    cfunc: object
+    node: object
     cfunc = codegen.cfunc
     if cfunc is None:
         return {}
@@ -207,7 +233,7 @@ def _seed_adjacent_byte_pair_aliases(
     if not structured_codegen_node(statements):
         return {}
 
-    dereference_counts: Counter[int] = Counter()
+    dereference_counts: Counter[cython.longlong] = Counter()
     for node in iter_c_nodes_deep(statements):
         if isinstance(node, structured_c.CUnaryOp) and node.op == "Dereference":
             _count_variable_ids_8616(

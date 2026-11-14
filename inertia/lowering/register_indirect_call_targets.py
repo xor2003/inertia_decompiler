@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Type register locals proven to be indirect near-call targets.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -28,6 +31,9 @@ from .callee_global_object_type_surface import cfunc_roots_8616
 from .near_pointer_type import SimTypeNearPointer16_8616, near_pointer_type_8616
 from .register_local_declarations import register_typed_register_local_8616
 from .semantic_cast import CSemanticCast8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "RegisterIndirectCallTargetStats8616",
@@ -38,7 +44,7 @@ __all__ = [
 class _ArchSurface8616(Protocol):
     """Architecture fields used to resolve one physical register."""
 
-    registers: dict[str, tuple[int, int]]
+    registers: object
 
 
 class _ProjectSurface8616(Protocol):
@@ -50,7 +56,7 @@ class _ProjectSurface8616(Protocol):
 class _CFunctionSurface8616(Protocol):
     """Structured function fields containing locals and the active AST."""
 
-    variables_in_use: dict[object, structured_c.CVariable]
+    variables_in_use: object
 
 
 class _CodegenSurface8616(Protocol):
@@ -58,32 +64,33 @@ class _CodegenSurface8616(Protocol):
 
     project: _ProjectSurface8616
     cfunc: _CFunctionSurface8616
-    _inertia_callsite_summary_inventory_8616: Mapping[int, CallsiteSummary8616]
+    _inertia_callsite_summary_inventory_8616: Mapping[cython.longlong, CallsiteSummary8616]
     _inertia_register_indirect_call_target_stats_8616: RegisterIndirectCallTargetStats8616
-    _inertia_codegen_decl_refresh_required_8616: bool
+    _inertia_codegen_decl_refresh_required_8616: cython.bint
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RegisterIndirectCallTargetStats8616:
     """Closed evidence census for register-indirect call target typing."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _RegisterIdentity8616:
     """Exact physical and SSA identity of one register carrier."""
 
-    offset: int
-    size: int
+    offset: cython.longlong
+    size: cython.longlong
     ident: object
     region: object
 
 
+@cython.ccall
 def _register_identity_8616(variable: object) -> _RegisterIdentity8616 | None:
     """Return an exact register-storage identity at the angr boundary."""
     if not isinstance(variable, SimRegisterVariable):
@@ -91,6 +98,7 @@ def _register_identity_8616(variable: object) -> _RegisterIdentity8616 | None:
     return _RegisterIdentity8616(variable.reg, variable.size, variable.ident, variable.region)
 
 
+@cython.ccall
 def _cvar_register_identity_8616(cvar: object) -> _RegisterIdentity8616 | None:
     """Prefer the unified identity carried by one structured register use."""
     if not isinstance(cvar, structured_c.CVariable):
@@ -99,7 +107,8 @@ def _cvar_register_identity_8616(cvar: object) -> _RegisterIdentity8616 | None:
     return _register_identity_8616(unified) or _register_identity_8616(cvar.variable)
 
 
-def _summary_inventory_8616(codegen: _CodegenSurface8616) -> Mapping[int, CallsiteSummary8616]:
+@cython.ccall
+def _summary_inventory_8616(codegen: _CodegenSurface8616) -> Mapping[cython.longlong, CallsiteSummary8616]:
     """Read the typed exact-address summary inventory."""
     try:
         inventory = codegen._inertia_callsite_summary_inventory_8616
@@ -108,20 +117,25 @@ def _summary_inventory_8616(codegen: _CodegenSurface8616) -> Mapping[int, Callsi
     return inventory if isinstance(inventory, Mapping) else {}
 
 
-def _register_shape_8616(arch: _ArchSurface8616, name: str) -> tuple[int, int] | None:
+@cython.ccall
+def _register_shape_8616(arch: _ArchSurface8616, name: object) -> object:
     """Resolve one exact architecture register name to offset and byte width."""
+    shape: object
     shape = arch.registers.get(name.lower())
     if not isinstance(shape, tuple) or len(shape) < 2:
         return None
-    offset, size = shape[:2]
+    offset, size = tuple(shape[:2])
     return (offset, size) if isinstance(offset, int) and isinstance(size, int) else None
 
 
+@cython.ccall
 def _function_pointer_type_8616(
     summary: CallsiteSummary8616,
     arch: Arch,
 ) -> SimTypeNearPointer16_8616:
     """Build the conservative near-call prototype proven at one callsite."""
+    scalar: object
+    width: object
     widths = summary.logical_arg_widths or summary.arg_widths
     args: list[SimType] = []
     for width in widths:
@@ -135,6 +149,7 @@ def _function_pointer_type_8616(
     return near_pointer_type_8616(prototype, arch)
 
 
+@cython.ccall
 def _typed_offset_cast_8616(
     codegen: object,
     rhs: object,
@@ -162,18 +177,21 @@ def _matching_declaration_8616(
     """Find the existing declaration for one exact register SSA identity."""
     matches = tuple(
         declaration
-        for declaration in cfunc.variables_in_use.values()
-        if _cvar_register_identity_8616(declaration) == identity
+        for declaration in builtins.iter(cfunc.variables_in_use.values())
+        if operator.eq(_cvar_register_identity_8616(declaration), identity)
     )
     return matches[0] if len(matches) == 1 else None
 
 
+@cython.ccall
 def _proven_call_identity_8616(
     codegen: _CodegenSurface8616,
     call: structured_c.CFunctionCall,
     summary: CallsiteSummary8616,
 ) -> _RegisterIdentity8616 | None:
     """Prove the call's callee variable carries the exact register target."""
+    expected_shape: object
+    identity: object
     target_source = summary.target_source
     if (
         not isinstance(target_source, tuple)
@@ -186,38 +204,47 @@ def _proven_call_identity_8616(
     arch = cast(_ArchSurface8616, codegen.project.arch)
     expected_shape = _register_shape_8616(arch, target_source[1])
     identity = _cvar_register_identity_8616(call.callee_target)
-    if expected_shape is None or identity is None or (identity.offset, identity.size) != expected_shape:
+    if expected_shape is None or identity is None or operator.ne((identity.offset, identity.size), expected_shape):
         return None
-    if summary.arg_count is None or summary.arg_count != len(tuple(cast(Sequence[object], call.args or ()))):
+    if summary.arg_count is None or operator.ne(summary.arg_count, len(tuple(cast(Sequence[object], call.args or ())))):
         return None
     return identity
 
 
+@cython.ccall
 def _identity_census_8616(
     codegen: _CodegenSurface8616,
     identity: _RegisterIdentity8616,
 ) -> tuple[list[structured_c.CAssignment], list[structured_c.CVariable]]:
     """Collect every variable and assignment matching the register identity."""
+    node: object
+    root: object
     assignments: list[structured_c.CAssignment] = []
     variables: list[structured_c.CVariable] = []
     for root in cfunc_roots_8616(codegen.cfunc):
         for node in _iter_c_nodes_deep_8616(root):
-            if isinstance(node, structured_c.CVariable) and _cvar_register_identity_8616(node) == identity:
+            if isinstance(node, structured_c.CVariable) and operator.eq(_cvar_register_identity_8616(node), identity):
                 variables.append(node)
             if (
                 isinstance(node, structured_c.CAssignment)
-                and _cvar_register_identity_8616(node.lhs) == identity
+                and operator.eq(_cvar_register_identity_8616(node.lhs), identity)
             ):
                 assignments.append(node)
     return assignments, variables
 
 
+@cython.ccall
 def _materialize_call_8616(
     codegen: _CodegenSurface8616,
     call: structured_c.CFunctionCall,
     summary: CallsiteSummary8616,
-) -> tuple[bool, bool]:
+) -> tuple[cython.bint, cython.bint]:
     """Materialize one exact register-indirect target and its assignments."""
+    cast_rhs: object
+    declaration: object
+    identity: object
+    assignment: object
+    variable: object
     identity = _proven_call_identity_8616(codegen, call, summary)
     if identity is None:
         return False, False
@@ -231,8 +258,8 @@ def _materialize_call_8616(
     if declaration is None:
         return False, False
     changed = False
-    for variable in (*variables, declaration):
-        if variable.variable_type != pointer_type:
+    for variable in tuple(variables) + (declaration,):
+        if operator.ne(variable.variable_type, pointer_type):
             variable.variable_type = pointer_type
             changed = True
     for assignment in assignments:
@@ -246,8 +273,11 @@ def _materialize_call_8616(
     return True, changed
 
 
-def materialize_register_indirect_call_target_types_8616(codegen_raw: object) -> bool:
+@cython.ccall
+def materialize_register_indirect_call_target_types_8616(codegen_raw: object) -> cython.bint:
     """Type every exact register-indirect near-call carrier in structured C."""
+    node: object
+    root: object
     codegen = cast(_CodegenSurface8616, codegen_raw)
     try:
         roots = cfunc_roots_8616(codegen.cfunc)
@@ -256,7 +286,7 @@ def materialize_register_indirect_call_target_types_8616(codegen_raw: object) ->
     inventory = _summary_inventory_8616(codegen)
     raw = normalized = classified = materialized = failures = 0
     changed = False
-    seen_calls: set[int] = set()
+    seen_calls: set[cython.longlong] = set()
     for root in roots:
         for node in _iter_c_nodes_deep_8616(root):
             if not isinstance(node, structured_c.CFunctionCall) or id(node) in seen_calls:

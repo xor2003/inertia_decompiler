@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Compatibility entry for previously proven unread FLAGS cleanup.
 
 Layer: Rewrite/Postprocess cleanup.
@@ -10,6 +11,7 @@ not be introduced as semantic recovery by a late Rewrite pass.
 """
 
 from __future__ import annotations
+import cython
 
 from inertia.lowering.packed_flags_liveness import prune_unread_flag_definitions_8616
 

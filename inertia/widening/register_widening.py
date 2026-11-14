@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Register-slice widening candidates and join proofs.
 
 Layer: Widening.
@@ -13,6 +14,8 @@ candidates.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Protocol, TypeGuard
@@ -33,19 +36,26 @@ from inertia.alias.domains import (
     register_view_for_name,
 )
 from inertia.alias.state import AliasState
+import dataclasses
+import operator
 
 
 class _RegisterWideningProofLike(Protocol):
     """Structural alias proof required before register slices can widen."""
 
-    ok: bool
-    register_pair: str | None
+    ok: cython.bint
+    register_pair: object
     left_version: int | None
     right_version: int | None
 
 
+@cython.ccall
 def _is_register_widening_proof_like(value: object) -> TypeGuard[_RegisterWideningProofLike]:
     """Validate dynamic boundary proof fields from the widening-model plugin contract."""
+    left_version: object
+    ok: object
+    register_pair: object
+    right_version: object
     ok = getattr(value, "ok", None)
     register_pair = getattr(value, "register_pair", None)
     left_version = getattr(value, "left_version", None)
@@ -58,7 +68,7 @@ def _is_register_widening_proof_like(value: object) -> TypeGuard[_RegisterWideni
     )
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class RegisterWideningCandidate:
     """Alias-proven register slice that may participate in a widening join."""
 
@@ -66,13 +76,16 @@ class RegisterWideningCandidate:
     view: View
     expr: object
 
-    def is_joinable_with(self, other: RegisterWideningCandidate) -> bool:
+    def is_joinable_with(self, other: RegisterWideningCandidate) -> cython.bint:
         """Return whether this slice is adjacent-compatible with another slice."""
-        return self.domain == other.domain and self.view.can_join(other.view)
+        return operator.eq(self.domain, other.domain) and self.view.can_join(other.view)
 
     @classmethod
     def from_expr(cls, expr: object) -> RegisterWideningCandidate:
         """Build a candidate across the dynamic boundary from third-party angr C expressions."""
+        domain: object
+        variable: object
+        view: object
         if not isinstance(expr, structured_c.CVariable):
             raise ValueError("expected a register CVariable")
         variable = getattr(expr, "variable", None)
@@ -84,8 +97,11 @@ class RegisterWideningCandidate:
         return cls(domain, view, expr)
 
 
-def _register_pair_name_for_variable(variable: SimRegisterVariable) -> str | None:
+@cython.ccall
+def _register_pair_name_for_variable(variable: SimRegisterVariable) -> object:
     """Read register identity across the dynamic boundary from third-party angr variables."""
+    pair_name: object
+    reg: object
     pair_name = register_pair_name(getattr(variable, "name", None))
     if pair_name is not None:
         return pair_name
@@ -99,11 +115,15 @@ def _register_pair_name_for_variable(variable: SimRegisterVariable) -> str | Non
     return None
 
 
-def _register_domain_and_view(variable: SimRegisterVariable) -> tuple[DomainKey | None, View | None]:
+def _register_domain_and_view(variable: SimRegisterVariable) -> object:
     """Return alias domain/view across the dynamic boundary from third-party angr variables."""
 
     def _impl() -> tuple[DomainKey | None, View | None]:
         """Read register view fields across the dynamic boundary from third-party angr variables."""
+        domain: object
+        pair_name: object
+        reg: object
+        view: object
         pair_name = _register_pair_name_for_variable(variable)
         if pair_name is None:
             return None, None
@@ -112,7 +132,7 @@ def _register_domain_and_view(variable: SimRegisterVariable) -> tuple[DomainKey 
             return None, None
         view = register_view_for_name(getattr(variable, "name", None))
         size = getattr(variable, "size", 0) or 0
-        if view is not None and view.bit_width == size * 8:
+        if view is not None and operator.eq(view.bit_width, size * 8):
             return domain, view
         reg = getattr(variable, "reg", None)
         if isinstance(reg, int) and size == 1:
@@ -126,24 +146,28 @@ def _register_domain_and_view(variable: SimRegisterVariable) -> tuple[DomainKey 
     return _impl()
 
 
-def _positive_matching_versions_8616(candidate_proof: _RegisterWideningProofLike) -> bool:
+@cython.ccall
+def _positive_matching_versions_8616(candidate_proof: _RegisterWideningProofLike) -> cython.bint:
     """Check both slices carry equal positive version evidence."""
     return (
         candidate_proof.left_version is not None
         and candidate_proof.right_version is not None
         and candidate_proof.left_version > 0
         and candidate_proof.right_version > 0
-        and candidate_proof.left_version == candidate_proof.right_version
+        and operator.eq(candidate_proof.left_version, candidate_proof.right_version)
     )
 
 
+@cython.ccall
 def _can_join_slices_8616(
     low_expr: object,
     high_expr: object,
-    alias_state: AliasState | None,
+    alias_state: object,
     proof: object | None,
-) -> bool:
+) -> cython.bint:
     """Run the join-evidence ladder over proof, candidates, and domain."""
+    candidate_proof: object
+    expected_domain: object
     if alias_state is None:
         return False
     candidate_proof = proof
@@ -169,18 +193,20 @@ def _can_join_slices_8616(
     expected_domain = register_domain_for_name(candidate_proof.register_pair)
     if expected_domain is None:
         return False
-    if low_candidate.domain != expected_domain or high_candidate.domain != expected_domain:
+    if operator.ne(low_candidate.domain, expected_domain) or operator.ne(high_candidate.domain, expected_domain):
         return False
     return low_candidate.is_joinable_with(high_candidate)
 
 
+@cython.ccall
 def can_join_adjacent_register_slices(
     low_expr: object, high_expr: object, *, alias_state: AliasState | None = None, proof: object | None = None
-) -> bool:
+) -> cython.bint:
     """Return whether alias/version evidence proves two register slices join."""
     return _can_join_slices_8616(low_expr, high_expr, alias_state, proof)
 
 
+@cython.ccall
 def join_adjacent_register_slices(
     low_expr: object,
     high_expr: object,
@@ -190,6 +216,12 @@ def join_adjacent_register_slices(
     proof: object | None = None,
 ) -> structured_c.CVariable | None:
     """Materialize a widened register C variable at the dynamic codegen boundary."""
+    candidate_proof: object
+    pair_name: object
+    project: object
+    reg_info: object
+    reg_offset: object
+    registers: object
     candidate_proof = proof
     if candidate_proof is None and alias_state is not None:
         from inertia.widening import widening_model as _widening_model

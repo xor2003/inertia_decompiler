@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Syntactic load matchers for legacy postprocess consumers.
 
 Layer: Rewrite/Postprocess cleanup.
@@ -23,6 +24,7 @@ rendered text, COD, source, or CLI/reporting evidence here.
 """
 
 from __future__ import annotations
+import cython
 
 from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CTypeCast
 
@@ -39,13 +41,16 @@ __all__ = [
 ]
 
 
+@cython.ccall
 def _global_load_addr_8616(node: object) -> int | None:
     while isinstance(node, CTypeCast):
         node = node.expr
     return _global_memory_addr_8616(node)
 
 
+@cython.ccall
 def _segmented_load_addr_8616(node: object, project: object) -> tuple[str | None, int | None]:
+    seg_name: object
     while isinstance(node, CTypeCast):
         node = node.expr
     seg_name, linear = _match_segmented_dereference_8616(node, project)
@@ -54,7 +59,11 @@ def _segmented_load_addr_8616(node: object, project: object) -> tuple[str | None
     return seg_name, linear
 
 
+@cython.ccall
 def _match_global_scaled_high_byte_8616(node: object) -> int | None:
+    addr: object
+    maybe_load: object
+    maybe_scale: object
     if not isinstance(node, CBinaryOp):
         return None
 

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Collect deterministic return/live-out storage trials from typed evidence.
 
 Layer: Types/Lowering.
@@ -12,6 +13,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import replace
 from typing import Protocol, cast
@@ -102,12 +105,13 @@ from .interprocedural_storage_return_type_contracts import (
 from .pointer_parameter_caller_target_contracts import (
     PointerParameterCallerTargetEvidence8616,
 )
+import operator
 
 
 class _FunctionSurface8616(Protocol):
     """Third-party function boundary required by terminal Semantics."""
 
-    addr: int
+    addr: cython.longlong
 
 
 _CONFLICT_FAILURES_8616 = frozenset(
@@ -124,9 +128,10 @@ _CONFLICT_FAILURES_8616 = frozenset(
 )
 
 
+@cython.ccall
 def _failure_8616(
     kind: ReturnStorageTrialCollectionFailureKind8616,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     fact: CallerReturnUseFact8616 | None = None,
     *,
     ssa_failure: FunctionSSAArtifactFailure8616 | None = None,
@@ -149,14 +154,14 @@ def _failure_8616(
     )
 
 
-def _return_census_complete_8616(evidence: CallerReturnUseEvidence8616) -> bool:
+def _return_census_complete_8616(evidence: CallerReturnUseEvidence8616) -> cython.bint:
     """Validate fact verdicts and counters beyond structural retention."""
-    included = tuple(fact for fact in evidence.facts if not fact.excluded_recursive_passthrough)
-    used = sum(fact.verdict is CallerReturnUseVerdict8616.USED for fact in included)
-    unused = sum(fact.verdict is CallerReturnUseVerdict8616.UNUSED for fact in included)
+    included = tuple(fact for fact in iter(evidence.facts) if not fact.excluded_recursive_passthrough)
+    used = sum(fact.verdict is CallerReturnUseVerdict8616.USED for fact in iter(included))
+    unused = sum(fact.verdict is CallerReturnUseVerdict8616.UNUSED for fact in iter(included))
     discard_facts_complete = all(
         DiscardedReturnTrial8616(evidence.target_addr, fact).is_complete
-        for fact in included if fact.verdict is CallerReturnUseVerdict8616.UNUSED
+        for fact in iter(included) if fact.verdict is CallerReturnUseVerdict8616.UNUSED
     )
     expected_verdict = CallerReturnUseVerdict8616.UNKNOWN
     if used:
@@ -168,10 +173,10 @@ def _return_census_complete_8616(evidence: CallerReturnUseEvidence8616) -> bool:
         and discard_facts_complete
         and bool(evidence.facts)
         and evidence.failure_count == 0
-        and evidence.excluded_callsite_count == len(evidence.facts) - len(included)
-        and evidence.used_callsite_count == used
-        and evidence.unused_callsite_count == unused
-        and used + unused == len(included)
+        and operator.eq(evidence.excluded_callsite_count, len(evidence.facts) - len(included))
+        and operator.eq(evidence.used_callsite_count, used)
+        and operator.eq(evidence.unused_callsite_count, unused)
+        and operator.eq(used + unused, len(included))
         and evidence.verdict is expected_verdict
     )
 
@@ -180,21 +185,27 @@ def _canonical_instruction_use_8616(
     artifact: SSAFunctionArtifact,
     condition: ConditionIR,
     storage: StorageIdentity8616,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
 ) -> StorageUseEvidence8616 | None:
     """Collapse matching SSA operations only when they share one instruction site."""
+    block_addr: object
+    instr_addr: object
+    instr_indices: object
+    block: object
+    instr_index: object
+    instruction: object
     producer = condition.producer_insn
     if not isinstance(producer, int) or isinstance(producer, bool):
         return None
-    indices_by_site: dict[tuple[int, int], list[int]] = {}
+    indices_by_site: dict[tuple[cython.longlong, cython.longlong], list[cython.longlong]] = {}
     for block in artifact.blocks:
         for instr_index, instruction in enumerate(block.instrs):
             if (
                 not isinstance(instruction.addr, int)
-                or instruction.addr != producer
+                or operator.ne(instruction.addr, producer)
                 or not any(
                     split_return_register_matches_8616(argument, storage)
-                    for argument in instruction.args
+                    for argument in iter(instruction.args)
                 )
             ):
                 continue
@@ -214,14 +225,20 @@ def _canonical_instruction_use_8616(
 
 def _materialize_canonical_split_return_trials_8616(
     project: object,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     fact: CallerReturnUseFact8616,
-    output_storages: tuple[StorageIdentity8616, ...],
-    accepted_target_addrs: tuple[int, ...],
-    conditions_by_caller: dict[int, tuple[ConditionIR, ...]],
-    caller_context: CallerSSAContext8616 | None,
-) -> tuple[StorageTrial8616, ...] | None:
+    output_storages: object,
+    accepted_target_addrs: object,
+    conditions_by_caller: object,
+    caller_context: object,
+) -> object:
     """Retry a typed split-witness conflict at exact instruction granularity."""
+    artifact: object
+    caller_project: object
+    candidate: object
+    provenance: object
+    storages_by_domain: object
+    uses_by_domain: object
     storages_by_domain = _ax_dx_storages_8616(output_storages)
     if storages_by_domain is None:
         return None
@@ -291,10 +308,13 @@ def _materialize_canonical_split_return_trials_8616(
     )
 
 
+@cython.ccall
 def _ax_dx_storages_8616(
-    output_storages: tuple[StorageIdentity8616, ...],
-) -> dict[DomainKey, StorageIdentity8616] | None:
+    output_storages: object,
+) -> object:
     """Return output storages keyed by exactly the AX and DX domains."""
+    domain: object
+    storage: object
     if len(output_storages) != 2:
         return None
     storages_by_domain: dict[DomainKey, StorageIdentity8616] = {}
@@ -303,29 +323,31 @@ def _ax_dx_storages_8616(
         if domain is None or domain in storages_by_domain:
             return None
         storages_by_domain[domain] = storage
-    return storages_by_domain if set(storages_by_domain) == {AX, DX} else None
+    return storages_by_domain if operator.eq(set(storages_by_domain), {AX, DX}) else None
 
 
 def _definitions_exact_8616(
     definitions: CallOutputDefinitionResult8616,
-    output_storages: tuple[StorageIdentity8616, ...],
-) -> bool:
+    output_storages: object,
+) -> cython.bint:
     """Return whether complete definitions name every output storage exactly."""
-    if not definitions.complete or len(definitions.definitions) != len(output_storages):
+    if not definitions.complete or operator.ne(len(definitions.definitions), len(output_storages)):
         return False
     definition_keys = tuple(
         None if definition.source_storage is None else definition.source_storage.key
-        for definition in definitions.definitions
+        for definition in iter(definitions.definitions)
     )
-    return definition_keys == tuple(storage.key for storage in output_storages)
+    return operator.eq(definition_keys, tuple(storage.key for storage in iter(output_storages)))
 
 
+@cython.ccall
 def _caller_conditions_8616(
     caller_project: object,
     fact: CallerReturnUseFact8616,
-    conditions_by_caller: dict[int, tuple[ConditionIR, ...]],
-) -> tuple[ConditionIR, ...]:
+    conditions_by_caller: object,
+) -> object:
     """Return cached caller conditions, collecting them once when absent."""
+    conditions: object
     conditions = conditions_by_caller.get(fact.caller_addr)
     if conditions is None:
         collected, _edge_evidence = collect_typed_condition_artifacts_8616(
@@ -337,13 +359,16 @@ def _caller_conditions_8616(
     return conditions
 
 
+@cython.ccall
 def _proven_split_candidate_8616(
     artifact: SSAFunctionArtifact,
     fact: CallerReturnUseFact8616,
-    conditions: tuple[ConditionIR, ...],
-    storages_by_domain: dict[DomainKey, StorageIdentity8616],
+    conditions: object,
+    storages_by_domain: object,
 ) -> SplitReturnConditionCandidate8616 | None:
     """Select the unique split condition matching the proven witness."""
+    candidate: object
+    selection_failure: object
     witness_addr = fact.witness_instruction_addr
     if not isinstance(witness_addr, int) or isinstance(witness_addr, bool):
         return None
@@ -359,13 +384,17 @@ def _proven_split_candidate_8616(
     return candidate
 
 
+@cython.ccall
 def _uses_by_domain_8616(
     artifact: SSAFunctionArtifact,
-    storages_by_domain: dict[DomainKey, StorageIdentity8616],
+    storages_by_domain: object,
     candidate: SplitReturnConditionCandidate8616,
     fact: CallerReturnUseFact8616,
-) -> dict[DomainKey, StorageUseEvidence8616] | None:
+) -> object:
     """Resolve one canonical instruction use per output domain."""
+    use: object
+    domain: object
+    storage: object
     uses_by_domain: dict[DomainKey, StorageUseEvidence8616] = {}
     for domain, storage in storages_by_domain.items():
         condition = (
@@ -383,16 +412,22 @@ def _uses_by_domain_8616(
     return uses_by_domain
 
 
+@cython.ccall
 def _split_trials_8616(
-    callee_addr: int,
+    callee_addr: cython.longlong,
     fact: CallerReturnUseFact8616,
-    output_storages: tuple[StorageIdentity8616, ...],
+    output_storages: object,
     definitions: CallOutputDefinitionResult8616,
-    uses_by_domain: dict[DomainKey, StorageUseEvidence8616],
+    uses_by_domain: object,
     signedness: StorageTrialSignedness8616,
     provenance: ValueProvenance8616,
-) -> tuple[StorageTrial8616, ...] | None:
+) -> object:
     """Build one RETURN trial per output piece."""
+    domain: object
+    use: object
+    definition: object
+    piece_index: object
+    storage: object
     piece_count = len(output_storages)
     trials: list[StorageTrial8616] = []
     for piece_index, (storage, definition) in enumerate(
@@ -428,22 +463,24 @@ def collect_function_return_storage_trials_8616(
     inputs: FunctionInputStorageTrialCollection8616,
     evidence: CallerReturnUseEvidence8616,
     *,
-    accepted_target_addrs: tuple[int, ...] = (),
+    accepted_target_addrs: object = (),
     pointer_targets: PointerParameterCallerTargetEvidence8616 | None = None,
 ) -> FunctionReturnStorageTrialCollection8616:
     """Merge exact return/live-out trials into one complete input census."""
+    callsite_merge: object
+    fact: object
     callee_addr = inputs.trials.function_addr
     targets = tuple(
         dict.fromkeys(
             address
-            for address in (callee_addr, *accepted_target_addrs)
+            for address in iter((callee_addr, ) + tuple(accepted_target_addrs))
             if isinstance(address, int) and not isinstance(address, bool)
         )
     )
     failures = _census_failures_8616(inputs, callee_addr, function, evidence, targets)
 
-    input_by_callsite = {callsite.callsite_addr: callsite for callsite in inputs.trials.callsites}
-    if len(input_by_callsite) != len(inputs.trials.callsites):
+    input_by_callsite = {callsite.callsite_addr: callsite for callsite in iter(inputs.trials.callsites)}
+    if operator.ne(len(input_by_callsite), len(inputs.trials.callsites)):
         failures.append(
             _failure_8616(
                 ReturnStorageTrialCollectionFailureKind8616.CALLSITE_SET_CONFLICT,
@@ -460,7 +497,7 @@ def collect_function_return_storage_trials_8616(
     )
     used_facts = tuple(
         fact
-        for fact in evidence.facts
+        for fact in iter(evidence.facts)
         if fact.verdict is CallerReturnUseVerdict8616.USED
         and not fact.excluded_recursive_passthrough
     )
@@ -473,7 +510,7 @@ def collect_function_return_storage_trials_8616(
     if failures:
         normalized_count = 0
     materialized_count = live_out_stats.materialized_count
-    conditions_by_caller: dict[int, tuple[ConditionIR, ...]] = {}
+    conditions_by_caller: dict[cython.longlong, tuple[ConditionIR, ...]] = {}
     if not failures:
         for fact in sorted(evidence.facts, key=lambda item: (item.callsite_addr, item.caller_addr)):
             callsite_merge, was_materialized = _merge_one_callsite_8616(
@@ -506,11 +543,11 @@ def collect_function_return_storage_trials_8616(
 
 def _census_failures_8616(
     inputs: FunctionInputStorageTrialCollection8616,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     function: object,
     evidence: CallerReturnUseEvidence8616,
-    targets: tuple[int, ...],
-) -> list[ReturnStorageTrialCollectionFailure8616]:
+    targets: object,
+) -> object:
     """Append every census-level refusal before merge begins."""
     failures: list[ReturnStorageTrialCollectionFailure8616] = []
     if not inputs.complete:
@@ -546,10 +583,10 @@ def _census_failures_8616(
                 callee_addr,
             )
         )
-    fact_addrs = tuple(fact.callsite_addr for fact in evidence.facts)
+    fact_addrs = tuple(fact.callsite_addr for fact in iter(evidence.facts))
     if (
-        len(set(fact_addrs)) != len(fact_addrs)
-        or tuple(sorted(fact_addrs)) != inputs.trials.expected_callsite_addrs
+        operator.ne(len(set(fact_addrs)), len(fact_addrs))
+        or operator.ne(tuple(sorted(fact_addrs)), inputs.trials.expected_callsite_addrs)
     ):
         failures.append(
             _failure_8616(
@@ -560,13 +597,14 @@ def _census_failures_8616(
     return failures
 
 
+@cython.ccall
 def _live_out_phase_8616(
     project: object,
-    callee_addr: int,
-    callsites: tuple[CallsiteStorageTrials8616, ...],
-    targets: tuple[int, ...],
+    callee_addr: cython.longlong,
+    callsites: object,
+    targets: object,
     pointer_targets: PointerParameterCallerTargetEvidence8616 | None,
-    failures: list[ReturnStorageTrialCollectionFailure8616],
+    failures: object,
 ) -> tuple[tuple[CallsiteMemoryLiveOutEvidence8616, ...], StorageTrialStats8616]:
     """Collect memory live-out evidence unless census failures already closed."""
     if failures:
@@ -593,14 +631,16 @@ def _live_out_phase_8616(
     return live_outs.callsites, live_outs.stats
 
 
+@cython.ccall
 def _proven_output_storages_8616(
     project: object,
     function: object,
-    used_facts: tuple[CallerReturnUseFact8616, ...],
-    failures: list[ReturnStorageTrialCollectionFailure8616],
-    callee_addr: int,
-) -> tuple[StorageIdentity8616, ...]:
+    used_facts: object,
+    failures: object,
+    callee_addr: cython.longlong,
+) -> object:
     """Resolve terminal output storages only when the census is failure-free."""
+    terminal_storage: object
     if not used_facts or failures:
         return ()
     terminal_storage = terminal_return_storage_8616(project, function)
@@ -612,24 +652,26 @@ def _proven_output_storages_8616(
             )
         )
         return ()
-    storages: tuple[StorageIdentity8616, ...] = return_output_storages_8616(
+    storages: object = return_output_storages_8616(
         terminal_storage
     )
     return storages
 
 
+@cython.ccall
 def _merge_one_callsite_8616(
     project: object,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     fact: CallerReturnUseFact8616,
-    input_by_callsite: dict[int, CallsiteStorageTrials8616],
-    memory_live_out_evidence: tuple[CallsiteMemoryLiveOutEvidence8616, ...],
-    output_storages: tuple[StorageIdentity8616, ...],
-    targets: tuple[int, ...],
-    conditions_by_caller: dict[int, tuple[ConditionIR, ...]],
-    failures: list[ReturnStorageTrialCollectionFailure8616],
-) -> tuple[CallsiteStorageTrials8616 | None, bool]:
+    input_by_callsite: object,
+    memory_live_out_evidence: object,
+    output_storages: object,
+    targets: object,
+    conditions_by_caller: object,
+    failures: object,
+) -> object:
     """Merge one caller fact into its callsite, or append its refusal."""
+    callsite: object
     callsite = input_by_callsite.get(fact.callsite_addr)
     if callsite is None:
         failures.append(
@@ -640,7 +682,7 @@ def _merge_one_callsite_8616(
             )
         )
         return None, False
-    if callsite.caller_addr != fact.caller_addr:
+    if operator.ne(callsite.caller_addr, fact.caller_addr):
         failures.append(
             _failure_8616(
                 ReturnStorageTrialCollectionFailureKind8616.CALLER_IDENTITY_CONFLICT,
@@ -687,15 +729,16 @@ def _merge_one_callsite_8616(
     )
 
 
+@cython.ccall
 def _passthrough_merge_8616(
     project: object,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     fact: CallerReturnUseFact8616,
     callsite: CallsiteStorageTrials8616,
-    targets: tuple[int, ...],
+    targets: object,
     exact_context: CallerSSAContext8616 | None,
-    failures: list[ReturnStorageTrialCollectionFailure8616],
-) -> tuple[CallsiteStorageTrials8616 | None, bool]:
+    failures: object,
+) -> tuple[CallsiteStorageTrials8616 | None, cython.bint]:
     """Materialize one recursive-passthrough return trial or append its refusal."""
     passthrough = materialize_return_passthrough_trial_8616(
         project,
@@ -717,18 +760,21 @@ def _passthrough_merge_8616(
     return replace(callsite, return_passthroughs=(passthrough.trial,)), True
 
 
+@cython.ccall
 def _return_trials_merge_8616(
     project: object,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     fact: CallerReturnUseFact8616,
     callsite: CallsiteStorageTrials8616,
-    output_storages: tuple[StorageIdentity8616, ...],
-    targets: tuple[int, ...],
-    conditions_by_caller: dict[int, tuple[ConditionIR, ...]],
+    output_storages: object,
+    targets: object,
+    conditions_by_caller: object,
     exact_context: CallerSSAContext8616 | None,
-    failures: list[ReturnStorageTrialCollectionFailure8616],
-) -> tuple[CallsiteStorageTrials8616 | None, bool]:
+    failures: object,
+) -> tuple[CallsiteStorageTrials8616 | None, cython.bint]:
     """Materialize normal return trials, retrying split-witness conflicts."""
+    failure: object
+    return_trials: object
     return_trials, failure = materialize_callsite_return_trials_8616(
         project,
         callee_addr,
@@ -765,13 +811,13 @@ def _return_trials_merge_8616(
 
 def _collection_result_8616(
     inputs: FunctionInputStorageTrialCollection8616,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     evidence: CallerReturnUseEvidence8616,
     live_out_stats: StorageTrialStats8616,
-    normalized_count: int,
-    materialized_count: int,
-    merged: list[CallsiteStorageTrials8616],
-    failures: list[ReturnStorageTrialCollectionFailure8616],
+    normalized_count: cython.longlong,
+    materialized_count: cython.longlong,
+    merged: object,
+    failures: object,
 ) -> FunctionReturnStorageTrialCollection8616:
     """Assemble the closed stats, verdict, and collection contract."""
     raw_count = evidence.raw_fact_count + live_out_stats.raw_fact_count
@@ -795,7 +841,7 @@ def _collection_result_8616(
         else (
             StorageTrialCollectionVerdict8616.CONFLICT
             if inputs.verdict is StorageTrialCollectionVerdict8616.CONFLICT
-            or any(failure.kind in _CONFLICT_FAILURES_8616 for failure in failures)
+            or any(failure.kind in _CONFLICT_FAILURES_8616 for failure in iter(failures))
             else StorageTrialCollectionVerdict8616.UNKNOWN_REFUSE
         )
     )

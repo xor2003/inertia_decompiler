@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Publish proven function-CFG flag liveness to one frontend lift.
 
 Layer: IR.
@@ -13,6 +14,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import defaultdict
 from collections.abc import Callable, Iterator, MutableMapping
@@ -29,6 +32,11 @@ from inertia.semantics.status_flag_contracts import (
     StatusFlagEffect8616,
     StatusFlagLivenessStats8616,
 )
+import dataclasses
+import operator
+import builtins
+IRSB = typing.TypeVar("IRSB")
+StatusFlagFunctionProjection8616 = typing.TypeVar("StatusFlagFunctionProjection8616")
 
 if TYPE_CHECKING:
     from pyvex import IRSB
@@ -39,7 +47,7 @@ if TYPE_CHECKING:
 class _ArchBoundary8616(Protocol):
     """Third-party architecture identity used to select this frontend bridge."""
 
-    name: str
+    name: object
 
 
 class _LiftEngineBoundary8616(Protocol):
@@ -60,20 +68,20 @@ class _ProjectBoundary8616(Protocol):
 
     arch: _ArchBoundary8616
     factory: _FactoryBoundary8616
-    _inertia_original_linear_delta: int
+    _inertia_original_linear_delta: cython.longlong
 
 
 class _FunctionBoundary8616(Protocol):
     """Third-party function identity and diagnostics mapping."""
 
-    addr: int
+    addr: cython.longlong
     info: MutableMapping[str, object]
 
 
 class _FunctionManagerLookupBoundary8616(Protocol):
     """Third-party knowledge-base function lookup surface."""
 
-    def function(self, *, addr: int, create: bool) -> object | None:
+    def function(self, *, addr: cython.longlong, create: cython.bint) -> object | None:
         """Return one exact function without creating synthetic state."""
 
 
@@ -89,26 +97,26 @@ class _ArtifactProjectBoundary8616(Protocol):
     kb: _KnowledgeBaseLookupBoundary8616
 
 
-@dataclass(frozen=True, slots=True, order=True)
+@dataclasses.dataclass(frozen=True, order=True)
 class StatusFlagLiftCandidate8616:
     """One exact instruction write with a CFG-proven dead status-bit subset."""
 
-    instruction_address: int
+    instruction_address: cython.longlong
     written: StatusFlag8616
     dead_writes: StatusFlag8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StatusFlagLiftArtifact8616:
     """Immutable frontend evidence published for downstream validation."""
 
-    function_address: int
-    candidates: tuple[StatusFlagLiftCandidate8616, ...]
-    packed_preservation_addresses: frozenset[int]
-    original_linear_delta: int = 0
-    callee_effects: tuple[tuple[int, StatusFlagEffect8616], ...] = ()
+    function_address: cython.longlong
+    candidates: object
+    packed_preservation_addresses: object
+    original_linear_delta: cython.longlong = 0
+    callee_effects: tuple[tuple[cython.longlong, StatusFlagEffect8616], ...] = ()
 
-    def covers_packed_preservation_8616(self, instruction_address: int) -> bool:
+    def covers_packed_preservation_8616(self, instruction_address: cython.longlong) -> cython.bint:
         """Match one preservation site in current or original linear space."""
         return bool(
             instruction_address in self.packed_preservation_addresses
@@ -120,12 +128,12 @@ class StatusFlagLiftArtifact8616:
         )
 
     @property
-    def partial_write_addresses(self) -> frozenset[int]:
+    def partial_write_addresses(self) -> frozenset[cython.longlong]:
         """Return writes that retain at least one status bit and omit another."""
         return frozenset(
             candidate.instruction_address
-            for candidate in self.candidates
-            if candidate.dead_writes != candidate.written
+            for candidate in iter(self.candidates)
+            if operator.ne(candidate.dead_writes, candidate.written)
         )
 
 
@@ -136,7 +144,7 @@ class StatusFlagLiftArtifactSource8616(Enum):
     PUBLISHED = "published"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ResolvedStatusFlagLiftArtifact8616:
     """One exact status-flag artifact and its durable ownership source."""
 
@@ -144,36 +152,36 @@ class ResolvedStatusFlagLiftArtifact8616:
     source: StatusFlagLiftArtifactSource8616
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class StatusFlagLiftSession8616:
     """Function-local candidates, materialization hits, and final accounting."""
 
-    function_address: int
-    candidates: tuple[StatusFlagLiftCandidate8616, ...]
-    packed_preservation_addresses: frozenset[int] = frozenset()
-    projection_failure_count: int = 0
-    original_linear_delta: int = 0
-    callee_effects: tuple[tuple[int, StatusFlagEffect8616], ...] = ()
+    function_address: cython.longlong
+    candidates: object
+    packed_preservation_addresses: frozenset[cython.longlong] = frozenset()
+    projection_failure_count: cython.longlong = 0
+    original_linear_delta: cython.longlong = 0
+    callee_effects: tuple[tuple[cython.longlong, StatusFlagEffect8616], ...] = ()
     stats: StatusFlagLivenessStats8616 = field(
         default_factory=lambda: StatusFlagLivenessStats8616(0, 0, 0, 0, 0)
     )
     source_project: object | None = field(default=None, repr=False)
     policy_consumer_identity: object = field(default_factory=object, init=False, repr=False)
-    owned_instruction_addresses: frozenset[int] = frozenset()
-    _candidate_by_address: dict[int, StatusFlagLiftCandidate8616] = field(
+    owned_instruction_addresses: frozenset[cython.longlong] = frozenset()
+    _candidate_by_address: object = field(
         init=False,
         repr=False,
     )
-    _materialized_addresses: set[int] = field(default_factory=set, init=False, repr=False)
+    _materialized_addresses: object = field(default_factory=set, init=False, repr=False)
 
     def __post_init__(self) -> None:
         """Index the immutable candidate surface for hot frontend lookups."""
         self._candidate_by_address = {
-            candidate.instruction_address: candidate for candidate in self.candidates
+            candidate.instruction_address: candidate for candidate in iter(self.candidates)
         }
 
     @property
-    def materialized_addresses(self) -> frozenset[int]:
+    def materialized_addresses(self) -> frozenset[cython.longlong]:
         """Return exact instructions whose proven flag writes were omitted."""
         return frozenset(self._materialized_addresses)
 
@@ -186,12 +194,14 @@ class StatusFlagLiftSession8616:
             self.callee_effects,
         )
 
+    @cython.ccall
     def dead_write_mask(
         self,
-        instruction_address: int,
+        instruction_address: cython.longlong,
         written: StatusFlag8616,
     ) -> StatusFlag8616:
         """Consume exact authoritative candidates; the lookup index grants no proof."""
+        candidate: object
         candidate_address = instruction_address
         candidate = self._candidate_by_address.get(candidate_address)
         if candidate is None and self.original_linear_delta:
@@ -199,12 +209,13 @@ class StatusFlagLiftSession8616:
             candidate = self._candidate_by_address.get(candidate_address)
         normalized_written = written & STATUS_FLAGS_8616
         if (candidate is None or candidate not in self.candidates
-                or candidate.instruction_address != candidate_address
-                or candidate.written != normalized_written):
+                or operator.ne(candidate.instruction_address, candidate_address)
+                or operator.ne(candidate.written, normalized_written)):
             return StatusFlag8616.NONE
         self._materialized_addresses.add(candidate_address)
         return candidate.dead_writes
 
+    @cython.ccall
     def finalize(self) -> None:
         """Close publication counters and reject wholly unconsumed evidence."""
         classified_count = len(self.candidates)
@@ -238,7 +249,7 @@ _active_session: ContextVar[StatusFlagLiftSession8616 | None] = ContextVar(
 )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StatusFlagNativeSource8616:
     """Exact source project and optional owned function head for one lift."""
 
@@ -250,7 +261,7 @@ class _NativeLiftEngineBoundary8616(Protocol):
     """Third-party engine fields authenticating the actual lazy lift source."""
 
     project: object | None
-    _inertia_status_flag_policy_key_8616: tuple[object, ...]
+    _inertia_status_flag_policy_key_8616: object
 
     def clear_cache(self) -> None:
         """Discard engine VEX when its effective flag policy changes."""
@@ -268,26 +279,31 @@ def status_flag_native_policy_key_8616(
     project: object, function_address: int | None,
 ) -> tuple[object, ...]:
     """Snapshot the policy a requested native import will consume, excluding hits."""
+    session: object
     session = _active_session.get()
     if (session is None or session.source_project is not project
-            or session.function_address != function_address):
+            or operator.ne(session.function_address, function_address)):
         return ()
     return (
         id(project), session.policy_consumer_identity,
         session.function_address, session.original_linear_delta,
         session.owned_instruction_addresses,
         tuple((candidate.instruction_address, int(candidate.written), int(candidate.dead_writes))
-              for candidate in session.candidates),
+              for candidate in iter(session.candidates)),
         tuple(sorted((address, candidate.instruction_address, int(candidate.written), int(candidate.dead_writes))
-                     for address, candidate in session._candidate_by_address.items())),
+                     for address, candidate in builtins.iter(session._candidate_by_address.items()))),
         session.packed_preservation_addresses,
         tuple((address, int(effect.reads), int(effect.overwrites))
-              for address, effect in session.callee_effects),
+              for address, effect in iter(session.callee_effects)),
     )
 
 
 def _source_bound_lift_vex_8616(self: object, *args: object, **kwargs: object) -> IRSB:
     """Bind actual engine ownership before lazy lifting or native-cache lookup."""
+    ambient: object
+    original: object
+    previous: object
+    project: object
     original = _native_lift_vex_8616
     if original is None:
         raise RuntimeError("status-flag source bridge was not installed")
@@ -303,7 +319,7 @@ def _source_bound_lift_vex_8616(self: object, *args: object, **kwargs: object) -
         # Third-party angr boundary: optional engine cache stamp derives from
         # our sole policy owner; it is not a second evidence registry.
         previous = getattr(self, "_inertia_status_flag_policy_key_8616", None)  # Dynamic third-party angr boundary.
-        if previous != before:
+        if operator.ne(previous, before):
             external.clear_cache()
         external._inertia_status_flag_policy_key_8616 = before
         result = original(self, *args, **kwargs)
@@ -316,6 +332,7 @@ def _source_bound_lift_vex_8616(self: object, *args: object, **kwargs: object) -
         _active_native_source.reset(token)
 
 
+@cython.ccall
 def _install_native_source_bridge_8616() -> None:
     """Install one task-local ownership bridge on the third-party lift boundary."""
     from angr.engines import UberEngine
@@ -328,7 +345,7 @@ def _install_native_source_bridge_8616() -> None:
 
 @contextmanager
 def status_flag_native_source_scope_8616(
-    project: object, function_address: int,
+    project: object, function_address: cython.longlong,
 ) -> Iterator[None]:
     """Bind one native import source and restore it even on exceptional exits.
 
@@ -359,13 +376,17 @@ def _suppression_candidates_8616(
     projection: StatusFlagFunctionProjection8616,
 ) -> tuple[StatusFlagLiftCandidate8616, ...]:
     """Intersect supported dead bits across every CFG use of one address."""
+    written: object
+    address: object
+    decision: object
+    decisions: object
     decisions_by_address = defaultdict(list)
     for decision in projection.liveness.decisions:
         decisions_by_address[decision.instruction_address].append(decision)
     candidates: list[StatusFlagLiftCandidate8616] = []
     for address, decisions in decisions_by_address.items():
-        written_masks = {decision.written for decision in decisions}
-        if len(written_masks) != 1 or not all(decision.suppression_supported for decision in decisions):
+        written_masks = {decision.written for decision in iter(decisions)}
+        if len(written_masks) != 1 or not all(decision.suppression_supported for decision in iter(decisions)):
             continue
         written = next(iter(written_masks))
         dead_writes = written
@@ -378,22 +399,24 @@ def _suppression_candidates_8616(
 
 def _packed_preservation_addresses_8616(
     projection: StatusFlagFunctionProjection8616,
-) -> frozenset[int]:
+) -> frozenset[cython.longlong]:
     """Return address-unambiguous flag writers that read no status input."""
+    decision: object
     decisions_by_address = defaultdict(list)
     for decision in projection.liveness.decisions:
         decisions_by_address[decision.instruction_address].append(decision)
     return frozenset(
         address
-        for address, decisions in decisions_by_address.items()
+        for address, decisions in builtins.iter(decisions_by_address.items())
         if all(
             decision.suppression_supported and int(decision.written) != 0
-            for decision in decisions
+            for decision in iter(decisions)
         )
     )
 
 
-def _function_address_8616(function: object) -> int:
+@cython.ccall
+def _function_address_8616(function: object) -> cython.longlong:
     """Read one exact third-party function address or return an inert identity."""
     try:
         return int(cast(_FunctionBoundary8616, function).addr)
@@ -401,7 +424,8 @@ def _function_address_8616(function: object) -> int:
         return -1
 
 
-def _is_x86_16_project_8616(project: object) -> bool:
+@cython.ccall
+def _is_x86_16_project_8616(project: object) -> cython.bint:
     """Return whether this third-party project uses the custom 16-bit frontend."""
     try:
         return cast(_ProjectBoundary8616, project).arch.name == "86_16"
@@ -409,7 +433,8 @@ def _is_x86_16_project_8616(project: object) -> bool:
         return False
 
 
-def _clear_lift_cache_8616(project: object) -> bool:
+@cython.ccall
+def _clear_lift_cache_8616(project: object) -> cython.bint:
     """Invalidate third-party VEX caches before publishing new lift evidence."""
     try:
         cast(_ProjectBoundary8616, project).factory.default_engine.clear_cache()
@@ -418,7 +443,8 @@ def _clear_lift_cache_8616(project: object) -> bool:
     return True
 
 
-def _original_linear_delta_8616(project: object) -> int:
+@cython.ccall
+def _original_linear_delta_8616(project: object) -> cython.longlong:
     """Return the explicit slice-to-original address delta, or zero."""
     try:
         delta = cast(_ProjectBoundary8616, project)._inertia_original_linear_delta
@@ -427,6 +453,7 @@ def _original_linear_delta_8616(project: object) -> int:
     return delta if isinstance(delta, int) else 0
 
 
+@cython.ccall
 def _publish_stats_8616(function: object, session: StatusFlagLiftSession8616) -> None:
     """Attach finalized counters without shrinking prior function evidence.
 
@@ -434,6 +461,7 @@ def _publish_stats_8616(function: object, session: StatusFlagLiftSession8616) ->
     Such a narrower projection cannot replace already-published instruction
     coverage because downstream lowering runs after the active lift context.
     """
+    previous: object
     from .status_flag_lift_codec import encode_status_flag_lift_artifact_8616
 
     try:
@@ -446,7 +474,7 @@ def _publish_stats_8616(function: object, session: StatusFlagLiftSession8616) ->
         previous = published_status_flag_lift_artifact_8616(function)
         if (
             previous is not None
-            and previous.function_address == artifact.function_address
+            and operator.eq(previous.function_address, artifact.function_address)
             and previous.packed_preservation_addresses.issuperset(
                 artifact.packed_preservation_addresses
             )
@@ -457,6 +485,7 @@ def _publish_stats_8616(function: object, session: StatusFlagLiftSession8616) ->
         )
 
 
+@cython.ccall
 def published_status_flag_lift_artifact_8616(
     function: object,
 ) -> StatusFlagLiftArtifact8616 | None:
@@ -476,11 +505,12 @@ def active_status_flag_lift_context_8616(
     function: object,
 ) -> Iterator[StatusFlagLiftSession8616]:
     """Build once, reuse nested same-function publication, and close once."""
+    active_session: object
     _install_native_source_bridge_8616()
     function_address = _function_address_8616(function)
     active_session = _active_session.get()
     if active_session is not None:
-        if (active_session.function_address != function_address
+        if (operator.ne(active_session.function_address, function_address)
                 or active_session.source_project is not project):
             raise PipelineHardError(
                 "nested status-flag lift context changed function identity",
@@ -520,8 +550,8 @@ def active_status_flag_lift_context_8616(
         callee_effects=projection.callee_effects,
         source_project=project,
         owned_instruction_addresses=frozenset(
-            instruction.address for block in projection.blocks
-            for instruction in block.instructions
+            instruction.address for block in iter(projection.blocks)
+            for instruction in iter(block.instructions)
         ),
     )
     token = _active_session.set(session)
@@ -540,7 +570,7 @@ def active_status_flag_lift_context_8616(
 
 
 @contextmanager
-def architectural_status_flag_replay_8616() -> Iterator[bool]:
+def architectural_status_flag_replay_8616() -> Iterator[cython.bint]:
     """Temporarily replay native provenance without function-CFG flag omission.
 
     Raw IR can predate the active optimized lift. Its statement/temporary
@@ -549,6 +579,7 @@ def architectural_status_flag_replay_8616() -> Iterator[bool]:
     duplicate replay when no alternate view exists. Restore the exact task-local
     session on every exit; no liveness evidence or counters are discarded.
     """
+    session: object
     session = _active_session.get()
     if (session is not None and session.source_project is not None
             and not _clear_lift_cache_8616(session.source_project)):
@@ -569,15 +600,18 @@ def architectural_status_flag_replay_8616() -> Iterator[bool]:
             )
 
 
+@cython.ccall
 def cfg_status_flag_dead_write_mask_8616(
-    instruction_address: int,
+    instruction_address: cython.longlong,
     written: StatusFlag8616,
 ) -> StatusFlag8616 | None:
     """Return an active CFG proof's dead subset, or ``None`` without a proof."""
+    session: object
+    source: object
     session = _active_session.get()
     source = _active_native_source.get()
     if (session is None or source is None or source.project is not session.source_project
-            or source.function_address != session.function_address):
+            or operator.ne(source.function_address, session.function_address)):
         return None
     owned = session.owned_instruction_addresses
     if (instruction_address not in owned
@@ -586,21 +620,27 @@ def cfg_status_flag_dead_write_mask_8616(
     return session.dead_write_mask(instruction_address, written)
 
 
+@cython.ccall
 def active_status_flag_lift_artifact_8616(
-    function_address: int,
+    function_address: cython.longlong,
 ) -> StatusFlagLiftArtifact8616 | None:
     """Return exact task-local lift evidence for the active function only."""
+    session: object
     session = _active_session.get()
-    if session is None or session.function_address != function_address:
+    if session is None or operator.ne(session.function_address, function_address):
         return None
     return session.artifact
 
 
+@cython.ccall
 def resolve_status_flag_lift_artifact_8616(
     project: object,
-    function_address: int,
+    function_address: cython.longlong,
 ) -> ResolvedStatusFlagLiftArtifact8616 | None:
     """Resolve active evidence first, then the finalized function-owned artifact."""
+    artifact: object
+    function: object
+    session: object
     session = _active_session.get()
     artifact = (active_status_flag_lift_artifact_8616(function_address)
                 if session is not None and session.source_project is project else None)

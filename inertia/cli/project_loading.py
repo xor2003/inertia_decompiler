@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Load angr projects and binary bytes for CLI orchestration.
 
 Layer: CLI/fallback/reporting.
@@ -5,6 +6,8 @@ Responsibility: construct angr project objects and binary byte views without own
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import io as io
 import os
@@ -48,12 +51,14 @@ from inertia.frontend.x86_16.pklite import unpack_pklite as unpack_pklite
 from inertia.semantics.compiler_helpers import (
     hook_x86_16_known_compiler_helpers_8616 as hook_x86_16_known_compiler_helpers_8616,
 )
+import operator
 
 _IDA_BASE_ADDRESS_RE = re.compile(r"Base Address:\s*([0-9A-Fa-f]+)h", re.IGNORECASE)
 _TRACE_FUNCTION: Any = cast(Any, trace_function)
 
 
-def _debug_print(message: str) -> None:
+@cython.ccall
+def _debug_print(message: object) -> None:
     """Keep loader diagnostics off generated-C stdout, including subprocess tests."""
     if "PYTEST_CURRENT_TEST" in os.environ:
         print(message, file=sys.stderr)
@@ -61,7 +66,8 @@ def _debug_print(message: str) -> None:
     print(f"{time.strftime('[%H:%M:%S]')} {message}", file=sys.stderr)
 
 
-def _describe_exception(ex: Exception) -> str:
+@cython.ccall
+def _describe_exception(ex: Exception) -> object:
     detail = str(ex).strip()
     ex_type = type(ex).__name__
     if detail:
@@ -72,6 +78,7 @@ def _describe_exception(ex: Exception) -> str:
     return ex_type
 
 
+@cython.ccall
 def _finalize_x86_16_project(project: angr.Project) -> angr.Project:
     """Register the verified lifter before exposing a real-mode project to analyses."""
     if isinstance(project.arch, Arch86_16):
@@ -83,7 +90,8 @@ def _finalize_x86_16_project(project: angr.Project) -> angr.Project:
     return project
 
 
-def _find_sidecar_file(binary: Path, suffix: str) -> Path | None:
+@cython.ccall
+def _find_sidecar_file(binary: Path, suffix: object) -> Path | None:
     """Find a companion sidecar path for a binary using an exact basename match when possible.
 
     Caching this lookup avoids repeated directory scans during multi-function runs where the same
@@ -93,8 +101,9 @@ def _find_sidecar_file(binary: Path, suffix: str) -> Path | None:
 
 
 @lru_cache(maxsize=256)
-def _find_sidecar_file_cached(binary: str, suffix: str) -> Path | None:
+def _find_sidecar_file_cached(binary: object, suffix: object) -> Path | None:
     """Resolve one normalized string cache key to an existing sidecar path."""
+    sibling: object
     binary_path = Path(binary)
     direct = binary_path.with_suffix(suffix)
     if direct.exists():
@@ -108,19 +117,22 @@ def _find_sidecar_file_cached(binary: str, suffix: str) -> Path | None:
         return None
     wanted = binary_path.name.lower() + suffix.lower()
     for sibling in siblings:
-        if sibling.name.lower() == wanted:
+        if operator.eq(sibling.name.lower(), wanted):
             return sibling
     return None
 
 
-def _probe_ida_base_linear(binary: Path, fallback_linear: int) -> int:
+@cython.ccall
+def _probe_ida_base_linear(binary: Path, fallback_linear: cython.longlong) -> cython.longlong:
     """Return the IDA listing base for a binary, or the supplied fallback."""
     return _probe_ida_base_linear_cached(binary, fallback_linear)
 
 
 @lru_cache(maxsize=256)
-def _probe_ida_base_linear_cached(binary: Path, fallback_linear: int) -> int:
+def _probe_ida_base_linear_cached(binary: Path, fallback_linear: cython.longlong) -> cython.longlong:
     """Cache the bounded IDA listing base probe for one binary path."""
+    lst_path: object
+    match: object
     try:
         lst_path = _find_sidecar_file_cached(binary.as_posix(), ".lst")
         if lst_path is None:
@@ -138,13 +150,14 @@ def _probe_ida_base_linear_cached(binary: Path, fallback_linear: int) -> int:
     return fallback_linear
 
 
-def _looks_like_ne_executable(path: Path) -> bool:
+@cython.ccall
+def _looks_like_ne_executable(path: Path) -> cython.bint:
     """Return whether the executable carries an NE header signature."""
     return _looks_like_ne_executable_cached(path)
 
 
 @lru_cache(maxsize=256)
-def _looks_like_ne_executable_cached(path: Path) -> bool:
+def _looks_like_ne_executable_cached(path: Path) -> cython.bint:
     """Cache the bounded NE signature probe for one executable path."""
     try:
         with path.open("rb") as fp:
@@ -160,8 +173,10 @@ def _looks_like_ne_executable_cached(path: Path) -> bool:
         return False
 
 
-def _detect_packed_mz_executable(path: Path) -> str | None:
+@cython.ccall
+def _detect_packed_mz_executable(path: Path) -> object:
     """Return the recognized MZ packer name, when one is present."""
+    detection: object
     detection = _detect_packed_mz_executable_cached(path)
     return None if detection is None else detection.label
 
@@ -172,14 +187,15 @@ def _detect_packed_mz_executable_cached(path: Path) -> PackerDetection | None:
     return detect_packer(path)
 
 
-def _is_blob_only_input(path: Path) -> bool:
+@cython.ccall
+def _is_blob_only_input(path: Path) -> cython.bint:
     return path.suffix.lower() in {".bin", ".raw", ".cod"}
 
 
 class PackedExecutableRefusedError(RuntimeError):
     """A recognized packed executable lacks a proven decoder."""
 
-    def __init__(self, *, path: Path, packer: str, reason: str) -> None:
+    def __init__(self, *, path: Path, packer: object, reason: object) -> None:
         """Record the input, packer label, and evidence-backed refusal reason."""
         self.path = path
         self.packer = packer
@@ -188,13 +204,14 @@ class PackedExecutableRefusedError(RuntimeError):
 
 
 class _PackedProjectMarker(Protocol):
-    _inertia_packed_exe: str
+    _inertia_packed_exe: object
 
 
 class _MzStaticRequestMarker(Protocol):
     _inertia_mz_static_invocation_request_8616: MzStaticIntakeRequest8616
 
 
+@cython.ccall
 def _decoded_packed_stream(path: Path, detection: PackerDetection) -> io.BytesIO:
     """Return a normal MZ stream only for a packer whose decoder is proven."""
     decoder: Callable[[bytes], UnpackedMZImage]
@@ -221,6 +238,7 @@ def _decoded_packed_stream(path: Path, detection: PackerDetection) -> io.BytesIO
     return io.BytesIO(unpacked.to_mz_bytes())
 
 
+@cython.ccall
 def _project_source(source: Path | io.BytesIO) -> Path | io.BytesIO:
     """Rewind an in-memory executable before passing it to a third-party loader."""
     if isinstance(source, io.BytesIO):
@@ -228,13 +246,15 @@ def _project_source(source: Path | io.BytesIO) -> Path | io.BytesIO:
     return source
 
 
-def _mark_packed_project(project: angr.Project, detection: PackerDetection | None) -> angr.Project:
+@cython.ccall
+def _mark_packed_project(project: angr.Project, detection: object) -> angr.Project:
     """Attach packer provenance without changing the normal project contract."""
     if detection is not None:
         cast(_PackedProjectMarker, project)._inertia_packed_exe = detection.label
     return project
 
 
+@cython.ccall
 def _defer_mz_static_invocation_8616(
     project: angr.Project, project_input: Path | io.BytesIO
 ) -> angr.Project:
@@ -254,6 +274,7 @@ def _defer_mz_static_invocation_8616(
     angr/CLE attributes, so the gate is a dynamic boundary read —
     presence plus type decides.
     """
+    main_object: object
     main_object = getattr(project.loader, "main_object", None)
     if getattr(main_object, "mz_load_segment", None) is None:
         return project
@@ -271,9 +292,9 @@ def _defer_mz_static_invocation_8616(
 
 
 def _build_project(
-    path: Path, *, force_blob: bool, base_addr: int, entry_point: int,
+    path: Path, *, force_blob: cython.bint, base_addr: cython.longlong, entry_point: cython.longlong,
     real16_declared_input: Path | None = None,
-    base_addr_is_linear: bool = False,
+    base_addr_is_linear: cython.bint = False,
 ) -> angr.Project:
     """Build a project; mapped linear bases bypass CLI paragraph/listing inference."""
     if real16_declared_input is not None:
@@ -283,6 +304,7 @@ def _build_project(
         ))
 
     def _impl() -> angr.Project:
+        packed_detection: object
         suffix = path.suffix.lower()
 
         _debug_print(f"[dbg] build_project: path={path} suffix={suffix} force_blob={force_blob}")
@@ -383,12 +405,12 @@ _build_project = cast(Callable[..., angr.Project], _TRACE_FUNCTION(name="project
 
 @lru_cache(maxsize=16)
 def _build_project_cached_impl(
-    path: str,
+    path: object,
     *,
-    force_blob: bool,
-    base_addr: int,
-    entry_point: int,
-    base_addr_is_linear: bool = False,
+    force_blob: cython.bint,
+    base_addr: cython.longlong,
+    entry_point: cython.longlong,
+    base_addr_is_linear: cython.bint = False,
 ) -> angr.Project:
     """Cache static loads with the address interpretation included in their key."""
     return _build_project(
@@ -399,10 +421,11 @@ def _build_project_cached_impl(
         base_addr_is_linear=base_addr_is_linear,
     )
 
+@cython.ccall
 def _build_project_cached(
-    path: str, *, force_blob: bool, base_addr: int, entry_point: int,
+    path: object, *, force_blob: cython.bint, base_addr: cython.longlong, entry_point: cython.longlong,
     real16_declared_input: Path | None = None,
-    base_addr_is_linear: bool = False,
+    base_addr_is_linear: cython.bint = False,
 ) -> angr.Project:
     """Reuse static projects only; live declarations reauthenticate every load."""
     if real16_declared_input is not None:
@@ -421,7 +444,8 @@ _build_project_cached = cast(
     Callable[..., angr.Project], _TRACE_FUNCTION(name="project.build_cached")(_build_project_cached)
 )
 
-def _build_project_from_bytes(code: bytes, *, base_addr: int, entry_point: int) -> angr.Project:
+@cython.ccall
+def _build_project_from_bytes(code: object, *, base_addr: cython.longlong, entry_point: cython.longlong) -> angr.Project:
     arch = Arch86_16()
     arch.bits = max(arch.bits, 32)
     arch.cs_mode = Arch86_16.cs_mode

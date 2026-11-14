@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Observe complete structured output at an owned pipeline publication boundary.
 
 Layer: Pipeline governance.
@@ -10,6 +11,8 @@ Do not recover semantic facts or perform IR, alias, widening, lowering/materiali
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import hashlib
 import json
@@ -38,12 +41,15 @@ from inertia.lowering.codegen_return_origin import ReturnValueOrigin8616
 from inertia.lowering.stack_variable_binding import StackVariableBinding
 from inertia.structuring.condition_chain_provenance import ConditionChainProvenance8616
 from inertia.widening.segmented_load_identity import SegmentedLoadIdentity8616
+import dataclasses
+import operator
+import builtins
 
 
 class _NativeTagsBoundary8616(Protocol):
     """Declared mapping export of the opaque native tag container."""
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> object:
         """Export native fields for the same strict recursive observation."""
         ...
 
@@ -69,14 +75,14 @@ class StructuredASTTypeSizing8616(StrEnum):
     UNAVAILABLE = "unavailable"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StructuredASTSnapshot8616:
     """Immutable observation of actual AST content, including declaration context."""
 
-    function_addr: int
-    payload_json: str
-    digest: str
-    node_visits: int
+    function_addr: cython.longlong
+    payload_json: object
+    digest: object
+    node_visits: cython.longlong
 
     def to_dict(self) -> dict[str, object]:
         """Expose deterministic data without retaining the mutable generator."""
@@ -88,7 +94,7 @@ class StructuredASTSnapshot8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StructuredASTObservation8616:
     """Snapshot or an explicit unsupported boundary with its exact field path."""
 
@@ -102,7 +108,7 @@ class StructuredASTObservation8616:
             raise ValueError("AST observation requires exactly one snapshot or failure")
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Require a real snapshot rather than an empty success receipt."""
         return self.snapshot is not None and self.failure is None
 
@@ -114,7 +120,7 @@ class StructuredASTPublicationOwnership8616(StrEnum):
     HANDED_TO_REWRITE = "handed_to_rewrite"
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class StructuredASTPublication8616:
     """An immutable produced version with an explicit live-output handoff.
 
@@ -128,8 +134,10 @@ class StructuredASTPublication8616:
     observation: StructuredASTObservation8616
     ownership: StructuredASTPublicationOwnership8616 = StructuredASTPublicationOwnership8616.LIVE
 
+    @cython.ccall
     def to_dict(self) -> dict[str, object]:
         """Expose version and ownership diagnostics without the live generator."""
+        snapshot: object
         snapshot = self.observation.snapshot
         return {
             "function_addr": None if snapshot is None else snapshot.function_addr,
@@ -140,6 +148,7 @@ class StructuredASTPublication8616:
             "field_path": list(self.observation.field_path),
         }
 
+    @cython.ccall
     def current_snapshot(self) -> StructuredASTSnapshot8616 | None:
         """Observe live producer data, or retain the explicitly consumed version."""
         if not self.observation.complete:
@@ -148,6 +157,7 @@ class StructuredASTPublication8616:
             return self.observation.snapshot
         return observe_structured_ast_output_8616(self.codegen).snapshot
 
+    @cython.ccall
     def handoff_to_rewrite(self, codegen: object) -> StructuredASTFailure8616 | None:
         """Release only the unchanged, representable AST to its actual consumer."""
         if self.ownership is not StructuredASTPublicationOwnership8616.LIVE:
@@ -161,12 +171,13 @@ class StructuredASTPublication8616:
         if not current.complete:
             assert current.failure is not None
             return current.failure
-        if current.snapshot != self.observation.snapshot:
+        if operator.ne(current.snapshot, self.observation.snapshot):
             return StructuredASTFailure8616.HANDOFF_OUTPUT_CHANGED
         self.ownership = StructuredASTPublicationOwnership8616.HANDED_TO_REWRITE
         return None
 
 
+@cython.ccall
 def publish_structured_ast_output_8616(codegen: object) -> StructuredASTPublication8616:
     """Capture a producer output version; unavailable data remains a non-result."""
     return StructuredASTPublication8616(codegen, observe_structured_ast_output_8616(codegen))
@@ -199,20 +210,25 @@ class _Codegen8616(Protocol):
 class _SnapshotBoundaryError8616(Exception):
     """Carry an unsupported data boundary without swallowing implementation errors."""
 
-    def __init__(self, failure: StructuredASTFailure8616, path: tuple[str, ...]) -> None:
+    def __init__(self, failure: StructuredASTFailure8616, path: object) -> None:
         super().__init__(failure.value)
         self.failure: StructuredASTFailure8616 = failure
-        self.path: tuple[str, ...] = path
+        self.path: object = path
 
 
+@cython.ccall
 def _qualified_kind_8616(value: object) -> str:
     """Name a nominal boundary type as data, never as semantic proof."""
     kind = type(value)
     return f"{kind.__module__}.{kind.__qualname__}"
 
 
-def _boundary_fields_8616(value: object, path: tuple[str, ...]) -> dict[str, object]:
+@cython.ccall
+def _boundary_fields_8616(value: object, path: object) -> object:
     """Read declared slots and dynamic fields at the third-party data boundary."""
+    declared: object
+    base: object
+    name: object
     try:
         result: dict[str, object] = dict(vars(value))
     except TypeError:
@@ -228,11 +244,12 @@ def _boundary_fields_8616(value: object, path: tuple[str, ...]) -> dict[str, obj
                 result[name] = getattr(value, name)
             except AttributeError as error:
                 raise _SnapshotBoundaryError8616(
-                    StructuredASTFailure8616.FIELD_UNAVAILABLE, (*path, name),
+                    StructuredASTFailure8616.FIELD_UNAVAILABLE, tuple(path) + (name,),
                 ) from error
     return result
 
 
+@cython.ccall
 def _type_sizing_8616(value: SimType) -> dict[str, object]:
     """Observe concrete widths, retaining non-object and unavailable type states."""
     if isinstance(value, (SimTypeBottom, SimTypeFunction)):
@@ -243,14 +260,15 @@ def _type_sizing_8616(value: SimType) -> dict[str, object]:
         return {"status": StructuredASTTypeSizing8616.UNAVAILABLE, "cause": type(error).__name__}
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _StructuredASTEncoder8616:
     """Observe AST values; identities only detect recursion during this observation."""
 
-    active: dict[int, int] = field(default_factory=dict)
-    node_visits: int = 0
+    active: object = field(default_factory=dict)
+    node_visits: cython.longlong = 0
 
-    def encode(self, value: object, path: tuple[str, ...]) -> object:
+    @cython.ccall
+    def encode(self, value: object, path: object) -> object:
         """Encode actual values and explicit recursive type references."""
         if isinstance(value, Enum):
             return {"enum": _qualified_kind_8616(value), "name": value.name, "value": self.encode(value.value, path)}
@@ -271,16 +289,16 @@ class _StructuredASTEncoder8616:
         finally:
             self.active.pop(marker)
 
-    def _compound(self, value: object, path: tuple[str, ...]) -> object:
+    def _compound(self, value: object, path: object) -> object:
         """Dispatch declared boundary interfaces without guessing unknown objects."""
         if isinstance(value, (tuple, list)):
-            return [self.encode(item, (*path, str(index))) for index, item in enumerate(value)]
+            return [self.encode(item, tuple(path) + (str(index),)) for index, item in builtins.iter(enumerate(value))]
         if isinstance(value, Tags):
             return self.encode(cast(_NativeTagsBoundary8616, value).to_dict(), path)
         if isinstance(value, dict):
-            return {"mapping": [[self.encode(key, (*path, "key")), self.encode(item, (*path, "value"))] for key, item in value.items()]}
+            return {"mapping": [[self.encode(key, tuple(path) + ("key",)), self.encode(item, tuple(path) + ("value",))] for key, item in builtins.iter(value.items())]}
         if isinstance(value, (set, frozenset)):
-            items = [self.encode(item, (*path, "item")) for item in value]
+            items = [self.encode(item, tuple(path) + ("item",)) for item in iter(value)]
             return {"set": sorted(items, key=lambda item: json.dumps(item, sort_keys=True))}
         if isinstance(value, structured_c.CConstruct):
             return self._node(value, path)
@@ -292,8 +310,9 @@ class _StructuredASTEncoder8616:
             return self._variable(value, path)
         return self._leaf(value, path)
 
+    @cython.ccall
     def _virtual_variable(
-        self, value: ailment.Expr.VirtualVariable, path: tuple[str, ...],
+        self, value: ailment.Expr.VirtualVariable, path: object,
     ) -> object:
         """Retain every native variable field, including otherwise lossy tags.
 
@@ -313,11 +332,14 @@ class _StructuredASTEncoder8616:
             "tags": value.tags,
         }
         return {"ail_virtual_variable": {
-            name: self.encode(item, (*path, name)) for name, item in fields.items()
+            name: self.encode(item, tuple(path) + (name,)) for name, item in builtins.iter(fields.items())
         }}
 
-    def _leaf(self, value: object, path: tuple[str, ...]) -> object:
+    @cython.ccall
+    def _leaf(self, value: object, path: object) -> object:
         """Capture authoritative IR and architecture leaves or refuse a foreign field."""
+        digest: object
+        owned_fact: object
         if isinstance(value, PyvexArch):
             return {"vex_architecture": self.encode(_boundary_fields_8616(value, path), path)}
         if isinstance(value, type) and issubclass(value, Arch):
@@ -336,10 +358,11 @@ class _StructuredASTEncoder8616:
             if digest is not None:
                 return {"ir_body": _qualified_kind_8616(value), "digest": digest}
         if isinstance(value, Function):
-            return {"function": value.addr, "name": value.name, "demangled_name": value.demangled_name, "prototype": self.encode(value.prototype, (*path, "prototype"))}
+            return {"function": value.addr, "name": value.name, "demangled_name": value.demangled_name, "prototype": self.encode(value.prototype, tuple(path) + ("prototype",))}
         raise _SnapshotBoundaryError8616(StructuredASTFailure8616.FIELD_UNSUPPORTED, path)
 
-    def _owned_fact(self, value: object, path: tuple[str, ...]) -> dict[str, object] | None:
+    @cython.ccall
+    def _owned_fact(self, value: object, path: object) -> object:
         """Project declared semantic facts without dropping any owned identity field."""
         # Runtime import keeps native materialization independent of snapshot
         # initialization while admitting only this explicit owned contract.
@@ -366,7 +389,7 @@ class _StructuredASTEncoder8616:
             return {"entry_sp_capture": self.encode(asdict(value), path)}
         if type(value) is ConditionChainProvenance8616:
             return {"condition_chain_provenance": {
-                "jcc_addrs": self.encode(value.jcc_addrs, (*path, "jcc_addrs")),
+                "jcc_addrs": self.encode(value.jcc_addrs, tuple(path) + ("jcc_addrs",)),
             }}
         if type(value) is StackVariableBinding:
             return {"stack_binding": self.encode(value.to_dict(), path)}
@@ -380,7 +403,7 @@ class _StructuredASTEncoder8616:
             }}
         if type(value) is SegmentedLoadIdentity8616:
             return {"segmented_load_identity": {
-                "space": self.encode(value.space, (*path, "space")),
+                "space": self.encode(value.space, tuple(path) + ("space",)),
                 "offset": value.offset,
                 "width": value.width,
                 "region": value.region,
@@ -388,7 +411,7 @@ class _StructuredASTEncoder8616:
         if type(value) is CarryBorrowBitLoweringFact8616:
             return {"carry_borrow_bit_lowering": {
                 "function_addr": value.function_addr,
-                "kind": self.encode(value.kind, (*path, "kind")),
+                "kind": self.encode(value.kind, tuple(path) + ("kind",)),
                 "low_block_addr": value.low_block_addr,
                 "low_ins_addr": value.low_ins_addr,
                 "high_block_addr": value.high_block_addr,
@@ -398,7 +421,8 @@ class _StructuredASTEncoder8616:
             return {"condition_stack_projection": self.encode(asdict(value), path)}
         return None
 
-    def _node(self, value: structured_c.CConstruct, path: tuple[str, ...]) -> object:
+    @cython.ccall
+    def _node(self, value: structured_c.CConstruct, path: object) -> object:
         """Capture every node data field and explicitly project execution context."""
         self.node_visits += 1
         fields = _boundary_fields_8616(value, path)
@@ -406,33 +430,37 @@ class _StructuredASTEncoder8616:
         if isinstance(value, structured_c.CFunction):
             fields.pop("variable_manager", None)
             fields["declaration_context"] = self._declarations(value, path)
-        return {"node": _qualified_kind_8616(value), "fields": {name: self.encode(item, (*path, name)) for name, item in sorted(fields.items())}}
+        return {"node": _qualified_kind_8616(value), "fields": {name: self.encode(item, tuple(path) + (name,)) for name, item in builtins.iter(sorted(tuple(fields.items())))}}
 
-    def _type(self, value: SimType, path: tuple[str, ...]) -> object:
+    @cython.ccall
+    def _type(self, value: SimType, path: object) -> object:
         """Capture type fields, architecture basis and derived object widths."""
         sizing = _type_sizing_8616(value)
         fields = _boundary_fields_8616(value, path)
         fields["observed_sizing"] = sizing
-        return {"type": _qualified_kind_8616(value), "fields": {name: self.encode(item, (*path, name)) for name, item in sorted(fields.items())}}
+        return {"type": _qualified_kind_8616(value), "fields": {name: self.encode(item, tuple(path) + (name,)) for name, item in builtins.iter(sorted(tuple(fields.items())))}}
 
-    def _variable(self, value: SimVariable, path: tuple[str, ...]) -> object:
+    @cython.ccall
+    def _variable(self, value: SimVariable, path: object) -> object:
         """Capture storage identities and names without Python hash memo state."""
         fields = _boundary_fields_8616(value, path)
         fields.pop("_hash", None)  # Derived Python hash cache is not variable data.
-        return {"variable": _qualified_kind_8616(value), "fields": {name: self.encode(item, (*path, name)) for name, item in sorted(fields.items())}}
+        return {"variable": _qualified_kind_8616(value), "fields": {name: self.encode(item, tuple(path) + (name,)) for name, item in builtins.iter(sorted(tuple(fields.items())))}}
 
-    def _declarations(self, root: structured_c.CFunction, path: tuple[str, ...]) -> object:
+    @cython.ccall
+    def _declarations(self, root: structured_c.CFunction, path: object) -> object:
         """Capture manager data actually consumed when emitting local declarations."""
-        variables = tuple(dict.fromkeys((*root.variables_in_use, *root.unified_local_vars)))
+        variables = tuple(dict.fromkeys(tuple(root.variables_in_use) + tuple(root.unified_local_vars)))
         if root.variable_manager is None:
             raise _SnapshotBoundaryError8616(StructuredASTFailure8616.MANAGER_UNAVAILABLE, path)
         manager = cast(_VariableManager8616, root.variable_manager)
         return {
-            "variable_types": [(variable, manager.get_variable_type(variable)) for variable in variables],
+            "variable_types": [(variable, manager.get_variable_type(variable)) for variable in iter(variables)],
             "local_types": tuple(manager.types.iter_own()),
         }
 
 
+@cython.ccall
 def observe_structured_ast_output_8616(codegen: object) -> StructuredASTObservation8616:
     """Observe a real completed function AST without using rendered C as evidence."""
     try:

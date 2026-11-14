@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed contracts for logical word/register transfer evidence.
 
 Layer: IR.
@@ -8,6 +9,8 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -15,6 +18,7 @@ from enum import StrEnum
 from .core import IRValue, MemSpace
 from .indexed_address_contracts import IndexedAddressDefinitionSite8616
 from .logical_memory_contracts import IRLogicalMemoryAccess8616, IRMemoryAccessKind8616
+import dataclasses
 
 
 class LogicalMemoryRegisterTransferKind8616(StrEnum):
@@ -37,7 +41,7 @@ class LogicalMemoryRegisterTransferFailure8616(StrEnum):
     REGISTER_CONFLICT = "register_conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LogicalMemoryRegisterTransfer8616:
     """One logical word operand and its exact full-register endpoint."""
 
@@ -45,10 +49,10 @@ class LogicalMemoryRegisterTransfer8616:
     access: IRLogicalMemoryAccess8616
     register: IRValue
     register_site: IndexedAddressDefinitionSite8616
-    definition_path: tuple[IndexedAddressDefinitionSite8616, ...]
+    definition_path: object
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether direction, width, register, and path all agree."""
         expected_kind = (
             IRMemoryAccessKind8616.WRITE
@@ -65,17 +69,17 @@ class LogicalMemoryRegisterTransfer8616:
             and self.register_site.complete
             and self.register_site in self.definition_path
             and self.definition_path
-            and all(site.complete for site in self.definition_path)
+            and all(site.complete for site in iter(self.definition_path))
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LogicalMemoryRegisterTransferRefusal8616:
     """One typed refusal for a logical word/register transfer candidate."""
 
     access: IRLogicalMemoryAccess8616
     failure: LogicalMemoryRegisterTransferFailure8616
-    detail: str
+    detail: object
 
 
 __all__ = [

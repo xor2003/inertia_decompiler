@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Lower unusable return carriers only when closed caller evidence permits it.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ symbol names or function-specific addresses.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -46,6 +49,8 @@ from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 from inertia.pipeline.errors import PipelineHardError
 
 from .return_type_evidence import function_result_is_proven_unobserved_8616
+import dataclasses
+import builtins
 
 __all__ = [
     "UnobservedReturnLoweringStats8616",
@@ -90,19 +95,21 @@ class _ReturnCodegenSurface8616(Protocol):
     _inertia_unobserved_return_lowering_stats_8616: UnobservedReturnLoweringStats8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class UnobservedReturnLoweringStats8616:
     """Closed evidence counts for one unobserved-result lowering run."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-def _pure_return_expr_state_8616(expr: object, *, depth: int = 0) -> tuple[bool, bool]:
+@cython.ccall
+def _pure_return_expr_state_8616(expr: object, *, depth: cython.longlong = 0) -> object:
     """Return ``(pure, unresolved)`` for one bounded return expression tree."""
+    leaf: object
     if expr is None:
         return True, True
     if depth > 8:
@@ -121,7 +128,8 @@ def _pure_return_expr_state_8616(expr: object, *, depth: int = 0) -> tuple[bool,
     return False, False
 
 
-def _leaf_expr_state_8616(expr: object) -> tuple[bool, bool] | None:
+@cython.ccall
+def _leaf_expr_state_8616(expr: object) -> object:
     """Return the leaf-carrier state, or None for composite expressions."""
     if isinstance(expr, CConstant):
         return True, False
@@ -135,20 +143,21 @@ def _leaf_expr_state_8616(expr: object) -> tuple[bool, bool] | None:
 
 
 def _combined_expr_state_8616(
-    items: tuple[object, ...],
+    items: object,
     *,
-    depth: int,
-) -> tuple[bool, bool]:
+    depth: cython.longlong,
+) -> tuple[cython.bint, cython.bint]:
     """Combine child states: pure only when all pure, unresolved when any."""
     states = tuple(
-        _pure_return_expr_state_8616(item, depth=depth + 1) for item in items
+        _pure_return_expr_state_8616(item, depth=depth + 1) for item in iter(items)
     )
-    return all(pure for pure, _unresolved in states), any(
-        unresolved for _pure, unresolved in states
+    return all(pure for pure, _unresolved in iter(states)), any(
+        unresolved for _pure, unresolved in iter(states)
     )
 
 
-def _dirty_expr_state_8616(expr: CDirtyExpression) -> tuple[bool, bool]:
+@cython.ccall
+def _dirty_expr_state_8616(expr: CDirtyExpression) -> tuple[cython.bint, cython.bint]:
     """Report an unresolved dirty carrier exactly once."""
     unresolved = isinstance(
         expr.dirty,
@@ -157,7 +166,8 @@ def _dirty_expr_state_8616(expr: CDirtyExpression) -> tuple[bool, bool]:
     return unresolved, unresolved
 
 
-def _variable_expr_state_8616(expr: CVariable) -> tuple[bool, bool]:
+@cython.ccall
+def _variable_expr_state_8616(expr: CVariable) -> tuple[cython.bint, cython.bint]:
     """Report register and stack carriers as pure; name the unresolved forms."""
     variable = expr.variable
     if isinstance(variable, SimRegisterVariable):
@@ -167,14 +177,17 @@ def _variable_expr_state_8616(expr: CVariable) -> tuple[bool, bool]:
     return False, False
 
 
-def return_expr_is_unresolved_carrier_8616(expr: object) -> bool:
+@cython.ccall
+def return_expr_is_unresolved_carrier_8616(expr: object) -> cython.bint:
     """Return whether an expression is pure and contains an unresolved carrier."""
     pure, unresolved = _pure_return_expr_state_8616(expr)
     return pure and unresolved
 
 
-def return_value_needs_neutralization_8616(retval: object, return_type: object) -> bool:
+@cython.ccall
+def return_value_needs_neutralization_8616(retval: object, return_type: object) -> cython.bint:
     """Classify a pure unusable scalar result without inferring a void ABI."""
+    retval_type: object
     if not isinstance(return_type, _SCALAR_RETURN_TYPES_8616):
         return False
     pure, unresolved = _pure_return_expr_state_8616(retval)
@@ -191,18 +204,19 @@ def return_value_needs_neutralization_8616(retval: object, return_type: object) 
 
 def _carrier_identity_8616(expr: object) -> _CarrierIdentity8616 | None:
     """Return exact structured storage identity for one register or stack carrier."""
+    variable: object
     if not isinstance(expr, CVariable):
         return None
     candidates = (expr.unified_variable, expr.variable)
     variables = tuple(
-        candidate for candidate in candidates if isinstance(candidate, (SimRegisterVariable, SimStackVariable))
+        candidate for candidate in iter(candidates) if isinstance(candidate, (SimRegisterVariable, SimStackVariable))
     )
     if not variables:
         return None
     variable = next(
         (
             candidate
-            for candidate in variables
+            for candidate in iter(variables)
             if isinstance(candidate.region, int) and isinstance(candidate.ident, (int, str))
         ),
         variables[0],
@@ -214,21 +228,25 @@ def _carrier_identity_8616(expr: object) -> _CarrierIdentity8616 | None:
     return "stack", region, ident, variable.offset, variable.size
 
 
+@cython.ccall
 def _unassigned_return_carrier_8616(
     retval: object,
-    assigned_carriers: frozenset[_CarrierIdentity8616],
-) -> bool:
+    assigned_carriers: object,
+) -> cython.bint:
     """Return whether a direct pure carrier has no definition anywhere in the AST."""
+    identity: object
     identity = _carrier_identity_8616(retval)
     return identity is not None and identity not in assigned_carriers
 
 
-def neutralize_unobserved_unresolved_returns_8616(project: object, codegen: object) -> bool:
+def neutralize_unobserved_unresolved_returns_8616(project: object, codegen: object) -> cython.bint:
     """Materialize typed zeroes only for proven-unobserved unusable returns.
 
     Caller liveness may authorize replacing an unresolved or unassigned carrier,
     but it never authorizes deleting a value defined by the callee.
     """
+    prototype: object
+    return_node: object
     boundary = cast(_ReturnCodegenSurface8616, codegen)
     try:
         cfunc = boundary.cfunc
@@ -240,17 +258,17 @@ def neutralize_unobserved_unresolved_returns_8616(project: object, codegen: obje
         function_addr = None
         root = None
         return_type = None
-    return_nodes = tuple(node for node in _iter_c_nodes_deep_8616(root) if isinstance(node, CReturn))
+    return_nodes = tuple(node for node in builtins.iter(_iter_c_nodes_deep_8616(root)) if isinstance(node, CReturn))
     assigned_carriers = frozenset(
         identity
-        for node in _iter_c_nodes_deep_8616(root)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(root))
         if isinstance(node, CAssignment)
         if (identity := _carrier_identity_8616(node.lhs)) is not None
     )
     try:
         argument_carriers = frozenset(
             identity
-            for argument in cfunc.arg_list
+            for argument in iter(cfunc.arg_list)
             if (identity := _carrier_identity_8616(argument)) is not None
         )
     except (AttributeError, TypeError):
@@ -275,7 +293,7 @@ def neutralize_unobserved_unresolved_returns_8616(project: object, codegen: obje
                     _pure_return_expr_state_8616(node.retval),
                     repr(node.retval),
                 )
-                for node in return_nodes
+                for node in iter(return_nodes)
             ),
         )
     if unobserved and isinstance(return_type, SimType):

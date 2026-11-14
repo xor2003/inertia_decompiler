@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Validate binary-proven segmented writes against the final structured C AST.
 
 Layer: Tail validation.
@@ -22,6 +23,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import Counter
 from collections.abc import Iterable
@@ -39,6 +42,9 @@ from inertia.lowering.segmented_global_loads import DirectSegmentedGlobalStoreEv
 from inertia.widening.segmented_load_identity import segmented_load_identity_8616
 
 from .validation_aggregate_storage import aggregate_field_storage_8616
+import dataclasses
+import operator
+import builtins
 
 _CHILD_ATTRIBUTES_8616 = (
     "statements",
@@ -71,7 +77,7 @@ class RequiredMemoryEffectIssueKind8616(Enum):
     MISSING_WRITE = "missing_write"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RequiredMemoryEffectIssue8616:
     """One malformed obligation or binary-proven write missing from final C."""
 
@@ -91,34 +97,34 @@ class RequiredMemoryEffectIssue8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RequiredMemoryEffectValidationReport8616:
     """Closed evidence result for binary-proven final memory writes."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
     issues: tuple[RequiredMemoryEffectIssue8616, ...] = ()
 
     @property
-    def passed(self) -> bool:
+    def passed(self) -> cython.bint:
         """Return whether every well-formed obligation has final AST coverage."""
         return self.failure_count == 0 and not self.issues
 
     def issue_tokens(self) -> tuple[str, ...]:
         """Return stable tokens for canonical validation snapshots."""
-        return tuple(issue.token() for issue in self.issues)
+        return tuple(issue.token() for issue in iter(self.issues))
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _FinalSegmentedWrite8616:
     """One final structured-C write classified by typed storage location."""
 
     space: MemSpace
     offset: int | None
-    width: int
+    width: cython.longlong
     segment_source: IRAddress | int | None = None
     affine_base: int | None = None
     ins_addr: int | None = None
@@ -130,11 +136,13 @@ class _ProjectArchBoundary8616(Protocol):
     arch: Arch
 
 
+@cython.ccall
 def _boundary_tuple_8616(value: object) -> tuple[object, ...]:
     """Convert one dynamic third-party collection to a stable tuple."""
     return tuple(cast(Iterable[object], value))
 
 
+@cython.ccall
 def _strip_casts_8616(node: object) -> object:
     """Remove structured-C casts from one expression."""
     while isinstance(node, structured_c.CTypeCast):
@@ -144,7 +152,11 @@ def _strip_casts_8616(node: object) -> object:
 
 def _iter_ast_nodes_8616(root: object) -> Iterable[object]:
     """Walk every structured-C occurrence without following object cycles."""
-    pending: list[tuple[object, frozenset[int]]] = [(root, frozenset())]
+    ancestors: object
+    child: object
+    node: object
+    attribute: object
+    pending: list[tuple[object, frozenset[cython.longlong]]] = [(root, frozenset())]
     while pending:
         node, ancestors = pending.pop()
         if node is None or id(node) in ancestors:
@@ -156,17 +168,18 @@ def _iter_ast_nodes_8616(root: object) -> Iterable[object]:
                 pending.append((child, child_ancestors))
             continue
         if isinstance(node, (list, tuple)):
-            pending.extend((child, child_ancestors) for child in reversed(node))
+            pending.extend((child, child_ancestors) for child in builtins.iter(reversed(node)))
             continue
         yield node
         for attribute in _CHILD_ATTRIBUTES_8616:
             child = getattr(node, attribute, None)
             if isinstance(child, (list, tuple)):
-                pending.extend((item, child_ancestors) for item in reversed(child))
+                pending.extend((item, child_ancestors) for item in builtins.iter(reversed(child)))
             elif child is not None:
                 pending.append((child, child_ancestors))
 
 
+@cython.ccall
 def _constant_int_8616(node: object) -> int | None:
     """Return one exact structured-C integer constant."""
     node = _strip_casts_8616(node)
@@ -176,8 +189,11 @@ def _constant_int_8616(node: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+@cython.ccall
 def _dynamic_affine_base_8616(node: object) -> int | None:
     """Return the constant base of one additive expression with a dynamic term."""
+    lhs_constant: object
+    rhs_constant: object
     node = _strip_casts_8616(node)
     if not isinstance(node, structured_c.CBinaryOp) or node.op != "Add":
         return None
@@ -190,8 +206,11 @@ def _dynamic_affine_base_8616(node: object) -> int | None:
     return None
 
 
+@cython.ccall
 def _instruction_address_8616(node: object) -> int | None:
     """Return exact instruction provenance from one third-party C node."""
+    tags: object
+    value: object
     tags = getattr(node, "tags", None)
     if not isinstance(tags, dict):
         return None
@@ -199,8 +218,10 @@ def _instruction_address_8616(node: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+@cython.ccall
 def _helper_width_8616(call: structured_c.CFunctionCall) -> int | None:
     """Return the byte width of one supported segmented runtime helper."""
+    callee: object
     target = call.callee_target
     if not isinstance(target, str):
         callee = call.callee_func
@@ -210,8 +231,11 @@ def _helper_width_8616(call: structured_c.CFunctionCall) -> int | None:
     )
 
 
+@cython.ccall
 def _segment_source_identity_8616(node: object) -> IRAddress | int | None:
     """Return an exact nested segment value used by a runtime helper."""
+    constant: object
+    identity: object
     constant = _constant_int_8616(node)
     if constant is not None:
         return constant & 0xFFFF
@@ -230,12 +254,17 @@ def _segment_source_identity_8616(node: object) -> IRAddress | int | None:
 _LvalueLocation8616 = tuple[MemSpace, int | None, int, IRAddress | int | None, int | None]
 
 
+@cython.ccall
 def _call_lvalue_location_8616(
     project: object,
     codegen: object,
     node: structured_c.CFunctionCall,
 ) -> _LvalueLocation8616 | None:
     """Classify one segmented helper call lvalue from typed call evidence."""
+    affine_base: object
+    offset: object
+    space: object
+    width: object
     width = _helper_width_8616(node)
     args = _boundary_tuple_8616(node.args or ())
     offset = _constant_int_8616(args[1]) if len(args) == 2 else None
@@ -247,11 +276,13 @@ def _call_lvalue_location_8616(
     return None
 
 
+@cython.ccall
 def _memory_variable_location_8616(
     project: object,
     node: structured_c.CVariable,
 ) -> _LvalueLocation8616 | None:
     """Classify one direct global variable lvalue in the DS space."""
+    variable_type: object
     variable = node.variable
     if not isinstance(variable, SimMemoryVariable):
         return None
@@ -276,10 +307,12 @@ def _memory_variable_location_8616(
     return MemSpace.DS, int(variable.addr) & 0xFFFF, width, None, None
 
 
+@cython.ccall
 def _indexed_lvalue_location_8616(
     node: structured_c.CIndexedVariable,
 ) -> _LvalueLocation8616 | None:
     """Classify one constant-indexed global array lvalue in the DS space."""
+    index: object
     base = _strip_casts_8616(node.variable)
     index = _constant_int_8616(node.index)
     if not isinstance(base, structured_c.CVariable) or index is None:
@@ -291,12 +324,15 @@ def _indexed_lvalue_location_8616(
     return MemSpace.DS, (int(variable.addr) + index * width) & 0xFFFF, width, None, None
 
 
+@cython.ccall
 def _segmented_lvalue_location_8616(
     project: object,
     codegen: object,
     lvalue: object,
 ) -> _LvalueLocation8616 | None:
     """Classify one final assignment lvalue without parsing rendered text."""
+    aggregate_storage: object
+    identity: object
     node = _strip_casts_8616(lvalue)
     aggregate_storage = aggregate_field_storage_8616(node)
     if aggregate_storage is not None:
@@ -315,12 +351,15 @@ def _segmented_lvalue_location_8616(
     return _indexed_lvalue_location_8616(node)
 
 
+@cython.ccall
 def _final_segmented_writes_8616(
     project: object,
     codegen: object,
     root: object,
 ) -> tuple[_FinalSegmentedWrite8616, ...]:
     """Collect exact segmented write locations from final structured C."""
+    location: object
+    node: object
     writes: list[_FinalSegmentedWrite8616] = []
     for node in _iter_ast_nodes_8616(root):
         if not isinstance(node, structured_c.CAssignment):
@@ -344,7 +383,8 @@ def _final_segmented_writes_8616(
     return tuple(writes)
 
 
-def _effect_is_well_formed_8616(effect: DirectSegmentedGlobalStoreEvidence8616) -> bool:
+@cython.ccall
+def _effect_is_well_formed_8616(effect: DirectSegmentedGlobalStoreEvidence8616) -> cython.bint:
     """Return whether one dynamic obligation satisfies the owned contract."""
     return bool(
         effect.space in {MemSpace.DS, MemSpace.ES, MemSpace.SS}
@@ -361,6 +401,10 @@ def validate_required_memory_effects_8616(
     root: object,
 ) -> RequiredMemoryEffectValidationReport8616:
     """Verify final C covers every typed binary-proven direct segmented store."""
+    matching: object
+    required_source: object
+    effect: object
+    write: object
     raw_values = _boundary_tuple_8616(
         getattr(
             codegen,
@@ -374,22 +418,22 @@ def validate_required_memory_effects_8616(
             RequiredMemoryEffectIssueKind8616.MALFORMED_EVIDENCE,
             source_index=index,
         )
-        for index, value in enumerate(raw_values)
+        for index, value in builtins.iter(enumerate(raw_values))
         if not isinstance(value, DirectSegmentedGlobalStoreEvidence8616)
         or not _effect_is_well_formed_8616(value)
     )
     normalized = tuple(
         dict.fromkeys(
             value
-            for value in raw_values
+            for value in iter(raw_values)
             if isinstance(value, DirectSegmentedGlobalStoreEvidence8616)
             and _effect_is_well_formed_8616(value)
         )
     )
     writes = _final_segmented_writes_8616(project, codegen, root)
-    available_bytes: Counter[tuple[MemSpace, int, IRAddress | int | None]] = Counter()
+    available_bytes: Counter[tuple[MemSpace, cython.longlong, IRAddress | int | None]] = Counter()
     available_affine: Counter[
-        tuple[MemSpace, int, int, IRAddress | int | None, int]
+        tuple[MemSpace, cython.longlong, cython.longlong, IRAddress | int | None, cython.longlong]
     ] = Counter()
     for write in writes:
         if write.offset is not None:
@@ -403,25 +447,25 @@ def validate_required_memory_effects_8616(
             ] += 1
     missing_items: list[RequiredMemoryEffectIssue8616] = []
     for effect in normalized:
-        required_source: IRAddress | int | None = effect.segment_source or effect.segment_value
-        selected: list[tuple[MemSpace, int, IRAddress | int | None]] = []
+        required_source = effect.segment_source or effect.segment_value
+        selected: list[tuple[MemSpace, cython.longlong, IRAddress | int | None]] = []
         for index in range(effect.width):
             address = (effect.offset + index) & 0xFFFF
             matching = next(
                 (
                     key
-                    for key, count in available_bytes.items()
+                    for key, count in builtins.iter(available_bytes.items())
                     if count > 0
                     and key[0] is effect.space
-                    and key[1] == address
-                    and (required_source is None or key[2] == required_source)
+                    and operator.eq(key[1], address)
+                    and (required_source is None or operator.eq(key[2], required_source))
                 ),
                 None,
             )
             if matching is None:
                 break
             selected.append(matching)
-        if len(selected) == effect.width:
+        if operator.eq(len(selected), effect.width):
             available_bytes.subtract(selected)
             continue
         affine_key = (

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed return and storage-effect contracts for proven calls.
 
 Layer: Semantics.
@@ -12,11 +13,14 @@ evidence.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import Enum
 
 from inertia.ir.core import IRAddress
+import dataclasses
 
 __all__ = [
     "CallContractEvidenceKind8616",
@@ -40,20 +44,20 @@ class CallContractEvidenceKind8616(Enum):
     DECODED_BINARY = "decoded_binary"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IntegerValueRange8616:
     """Inclusive integer range proven for one semantic value."""
 
-    minimum: int
+    minimum: cython.longlong
     maximum: int | None
 
     @property
-    def is_nonnegative(self) -> bool:
+    def is_nonnegative(self) -> cython.bint:
         """Return whether every value in this range is nonnegative."""
         return self.minimum >= 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RuntimeCallReturnContract8616:
     """Typed return-value and storage-effect contract for one proven call.
 
@@ -64,15 +68,16 @@ class RuntimeCallReturnContract8616:
 
     semantic_id: RuntimeCallSemanticId8616 | None
     value_range: IntegerValueRange8616
-    preserves_caller_storage: bool
+    preserves_caller_storage: cython.bint
     evidence_kind: CallContractEvidenceKind8616 = (
         CallContractEvidenceKind8616.IDENTIFIED_RUNTIME
     )
     exact_memory_writes: tuple[IRAddress, ...] = ()
-    has_unknown_memory_writes: bool = False
+    has_unknown_memory_writes: cython.bint = False
 
-    def preserves_address(self, address: IRAddress) -> bool:
+    def preserves_address(self, address: IRAddress) -> cython.bint:
         """Return whether this contract proves one exact address unchanged."""
+        write: object
         if self.preserves_caller_storage:
             return True
         if self.has_unknown_memory_writes or address.size <= 0:
@@ -97,8 +102,9 @@ _RUNTIME_RETURN_CONTRACTS_8616 = {
 }
 
 
+@cython.ccall
 def runtime_call_return_contract_8616(
-    canonical_name: str | None,
+    canonical_name: object,
 ) -> RuntimeCallReturnContract8616 | None:
     """Return semantics for a call identity resolved by binary/runtime evidence.
 

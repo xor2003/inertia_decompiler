@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Project typed function prototypes onto the 16-bit BP stack ABI.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Forbidden: assembly, source, symbol-name, or rendered-C inference.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -21,14 +24,17 @@ from archinfo import Arch
 
 from .argument_frame_base import proven_first_argument_machine_bp_offset_8616
 from .stack_storage_evidence import proven_bp_entry_sp_delta_8616
+import dataclasses
+import operator
+import builtins
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackPrototypeArgument8616:
     """One typed argument's exact storage slot in a near-call BP frame."""
 
-    offset: int
-    storage_width: int
+    offset: cython.longlong
+    storage_width: cython.longlong
     argument_type: SimType
 
 
@@ -53,17 +59,19 @@ class _PrototypeCodegen8616(Protocol):
     project: _PrototypeProject8616
 
 
+@cython.ccall
 def stack_prototype_argument_layout_8616(
     prototype: object,
     arch: Arch,
     *,
-    first_argument_bp_offset: int = 4,
+    first_argument_bp_offset: cython.longlong = 4,
 ) -> tuple[StackPrototypeArgument8616, ...]:
     """Return a contiguous argument layout, or no layout when a type lacks size evidence.
 
     ``first_argument_bp_offset`` is the proven machine-BP argument base: 4 for a
     near frame and 6 for a far frame whose retf reserves ``BP+4..+5`` for CS.
     """
+    raw_type: object
     if not isinstance(prototype, SimTypeFunction):
         return ()
     byte_width = arch.byte_width
@@ -90,6 +98,7 @@ def stack_prototype_argument_layout_8616(
     return tuple(layout)
 
 
+@cython.ccall
 def _typed_value_byte_width_8616(value_type: object, arch: Arch) -> int | None:
     """Return one type's byte width, or None without trustworthy size evidence."""
     if not isinstance(value_type, SimType):
@@ -112,8 +121,8 @@ def _typed_value_byte_width_8616(value_type: object, arch: Arch) -> int | None:
 
 def stack_prototype_cvar_for_machine_bp_range_8616(
     codegen: object,
-    bp_offset: int,
-    size: int,
+    bp_offset: cython.longlong,
+    size: cython.longlong,
 ) -> structured_c.CVariable | None:
     """Resolve one exact argument CVariable without mutating global coordinates.
 
@@ -122,6 +131,7 @@ def stack_prototype_cvar_for_machine_bp_range_8616(
     a wider read owned: the queried range must equal the argument's declared
     value width and the candidate's own ``variable_type`` width.
     """
+    cfunc: object
     try:
         boundary = cast(_PrototypeCodegen8616, codegen)
         cfunc = boundary.cfunc
@@ -145,20 +155,20 @@ def stack_prototype_cvar_for_machine_bp_range_8616(
     )
     arguments = tuple(cfunc.arg_list or ())
     delta = proven_bp_entry_sp_delta_8616(codegen)
-    if len(layout) != len(arguments) or not isinstance(delta, int):
+    if operator.ne(len(layout), len(arguments)) or not isinstance(delta, int):
         return None
     matches = tuple(
         candidate
-        for slot, candidate in zip(layout, arguments, strict=True)
-        if slot.offset == bp_offset
-        and slot.storage_width == size
-        and _typed_value_byte_width_8616(slot.argument_type, arch) == size
+        for slot, candidate in builtins.iter(zip(layout, arguments, strict=True))
+        if operator.eq(slot.offset, bp_offset)
+        and operator.eq(slot.storage_width, size)
+        and operator.eq(_typed_value_byte_width_8616(slot.argument_type, arch), size)
         and isinstance(candidate, structured_c.CVariable)
         and isinstance(candidate.variable, SimStackVariable)
         and candidate.variable.base == "bp"
-        and candidate.variable.offset == slot.offset + delta
-        and candidate.variable.size == slot.storage_width
-        and _typed_value_byte_width_8616(candidate.variable_type, arch) == size
+        and operator.eq(candidate.variable.offset, slot.offset + delta)
+        and operator.eq(candidate.variable.size, slot.storage_width)
+        and operator.eq(_typed_value_byte_width_8616(candidate.variable_type, arch), size)
     )
     return matches[0] if len(matches) == 1 else None
 

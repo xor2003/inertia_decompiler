@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed contracts for final pointer-parameter output validation.
 
 Layer: Tail validation.
@@ -12,9 +13,12 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
+import dataclasses
 
 
 class PointerParameterOutputIssueKind8616(StrEnum):
@@ -24,17 +28,17 @@ class PointerParameterOutputIssueKind8616(StrEnum):
     MISSING_WRITE = "missing_write"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PointerParameterWriteRequirement8616:
     """One normalized byte range written through a logical pointer input."""
 
-    logical_index: int
-    stack_offset: int
-    relative_offset: int
-    width: int
+    logical_index: cython.longlong
+    stack_offset: cython.longlong
+    relative_offset: cython.longlong
+    width: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PointerParameterOutputIssue8616:
     """One final-AST failure for an exact pointer-output requirement."""
 
@@ -51,25 +55,25 @@ class PointerParameterOutputIssue8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PointerParameterOutputValidationReport8616:
     """Closed evidence result for final pointer-parameter writes."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
     issues: tuple[PointerParameterOutputIssue8616, ...] = ()
 
     @property
-    def passed(self) -> bool:
+    def passed(self) -> cython.bint:
         """Return whether every proven pointer output remains materialized."""
         return self.failure_count == 0 and not self.issues
 
     def issue_tokens(self) -> tuple[str, ...]:
         """Return stable tokens for canonical validation snapshots."""
-        return tuple(issue.token() for issue in self.issues)
+        return tuple(issue.token() for issue in iter(self.issues))
 
 
 __all__ = [

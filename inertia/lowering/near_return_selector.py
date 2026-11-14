@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Check selector C expressions for defined, repeatable word evaluation.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Consumes alias, widening, and typed facts.
 Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from enum import IntEnum
@@ -57,7 +60,8 @@ class NearReturnSelectorEvidence8616(IntEnum):
 
 
 
-def _unsigned_int_bits_8616(type_: object, bits: int) -> bool:
+@cython.ccall
+def _unsigned_int_bits_8616(type_: object, bits: cython.longlong) -> cython.bint:
     """Return whether ``type_`` is an unsigned integer of exact bit width."""
     if not isinstance(type_, SimTypeInt):
         return False
@@ -68,7 +72,8 @@ def _unsigned_int_bits_8616(type_: object, bits: int) -> bool:
     return type_.signed is False and type(size) is int and size == bits
 
 
-def _unsigned_word_type_8616(type_: object) -> bool:
+@cython.ccall
+def _unsigned_word_type_8616(type_: object) -> cython.bint:
     """Return whether ``type_`` is an unsigned integer of at most 16 bits."""
     if not isinstance(type_, (SimTypeInt, SimTypeChar)):
         return False
@@ -79,13 +84,14 @@ def _unsigned_word_type_8616(type_: object) -> bool:
     return type_.signed is False and type(size) is int and size <= 16
 
 
-def _volatile_type_8616(type_: object) -> bool:
+def _volatile_type_8616(type_: object) -> cython.bint:
     """Return whether a generic angr SimType carries a volatile qualifier.
 
     ``SimType.qualifier`` is a free-form third-party attribute (a string or
     an arbitrary iterable); a non-``None`` qualifier that cannot be inspected
     is treated as volatile so an unknown shape fails closed.
     """
+    qualifier: object
     if not isinstance(type_, SimType):
         return False
     qualifier = type_.qualifier
@@ -94,10 +100,11 @@ def _volatile_type_8616(type_: object) -> bool:
     if isinstance(qualifier, str):
         return "volatile" in qualifier
     if isinstance(qualifier, Iterable):
-        return any(str(item) == "volatile" for item in qualifier)
+        return any(str(item) == "volatile" for item in iter(qualifier))
     return True
 
 
+@cython.ccall
 def _shift_count_proven_8616(node: object) -> TypeGuard[structured_c.CConstant]:
     """Prove a shift count is an integer literal inside ``[0, 16)``.
 
@@ -111,6 +118,7 @@ def _shift_count_proven_8616(node: object) -> TypeGuard[structured_c.CConstant]:
     )
 
 
+@cython.ccall
 def _constant_evidence_8616(node: structured_c.CConstant) -> NearReturnSelectorEvidence8616:
     """Grade one integer literal: word-valued only when unsigned-typed."""
     constant_type = node.type
@@ -126,6 +134,7 @@ def _constant_evidence_8616(node: structured_c.CConstant) -> NearReturnSelectorE
     return NearReturnSelectorEvidence8616.DEFINED
 
 
+@cython.ccall
 def _variable_evidence_8616(node: structured_c.CVariable) -> NearReturnSelectorEvidence8616:
     """Grade one variable leaf: a pure read only when nonvolatile integer."""
     variable_type = node.variable_type
@@ -141,7 +150,8 @@ def _variable_evidence_8616(node: structured_c.CVariable) -> NearReturnSelectorE
     )
 
 
-def _cast_evidence_8616(node: structured_c.CTypeCast, remaining: int) -> NearReturnSelectorEvidence8616:
+@cython.ccall
+def _cast_evidence_8616(node: structured_c.CTypeCast, remaining: cython.longlong) -> NearReturnSelectorEvidence8616:
     """Grade one cast: integer-to-integer casts are defined; u8/u16 are word."""
     dst_type = node.dst_type
     if (
@@ -158,7 +168,8 @@ def _cast_evidence_8616(node: structured_c.CTypeCast, remaining: int) -> NearRet
     )
 
 
-def _binary_evidence_8616(node: structured_c.CBinaryOp, remaining: int) -> NearReturnSelectorEvidence8616:
+@cython.ccall
+def _binary_evidence_8616(node: structured_c.CBinaryOp, remaining: cython.longlong) -> NearReturnSelectorEvidence8616:
     """Grade one binary op under the defined-arithmetic contract."""
     lhs = _selector_evidence_8616(node.lhs, remaining - 1)
     rhs = _selector_evidence_8616(node.rhs, remaining - 1)
@@ -179,7 +190,8 @@ def _binary_evidence_8616(node: structured_c.CBinaryOp, remaining: int) -> NearR
     return NearReturnSelectorEvidence8616.REJECT
 
 
-def _unsigned_int16_declared_8616(node: object) -> bool:
+@cython.ccall
+def _unsigned_int16_declared_8616(node: object) -> cython.bint:
     """Return whether ``node`` carries an exact ``uint16_t`` declared type.
 
     Only leaf and cast nodes expose an inspectable declared type; any
@@ -199,8 +211,9 @@ def _unsigned_int16_declared_8616(node: object) -> bool:
     return _unsigned_int_bits_8616(declared, 16) and not _volatile_type_8616(declared)
 
 
+@cython.ccall
 def _shift_evidence_8616(
-    op: str,
+    op: object,
     lhs_node: object,
     lhs: NearReturnSelectorEvidence8616,
     count_node: object,
@@ -229,7 +242,8 @@ def _shift_evidence_8616(
     return lhs
 
 
-def _selector_evidence_8616(node: object, remaining: int) -> NearReturnSelectorEvidence8616:
+@cython.ccall
+def _selector_evidence_8616(node: object, remaining: cython.longlong) -> NearReturnSelectorEvidence8616:
     """Classify one selector subtree's purity and unsigned-word domain.
 
     The walk is depth-bounded and never mutates the tree. Arithmetic is
@@ -264,6 +278,7 @@ def _selector_evidence_8616(node: object, remaining: int) -> NearReturnSelectorE
         return _binary_evidence_8616(node, remaining)
     return NearReturnSelectorEvidence8616.REJECT
 
+@cython.ccall
 def classify_near_return_selector_8616(node: object) -> NearReturnSelectorEvidence8616:
     """Classify one bounded selector subtree without granting segment identity."""
     return _selector_evidence_8616(node, _SELECTOR_DEPTH_BUDGET_8616)

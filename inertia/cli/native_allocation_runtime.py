@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Native-hook orchestration for restartable variable allocation.
 
 Layer: CLI/fallback/reporting.
@@ -11,6 +12,7 @@ native errors propagate with original cause after full checkpoint restore.
 """
 
 from __future__ import annotations
+import cython
 
 import dataclasses
 import typing
@@ -27,6 +29,10 @@ from inertia.lowering.allocation_convergence import (
     AllocationRestartResult,
     AllocationRestartVerdict,
 )
+import operator
+Clinic = typing.TypeVar("Clinic")
+NativeAllocationCheckpoint = typing.TypeVar("NativeAllocationCheckpoint")
+Project = typing.TypeVar("Project")
 
 if typing.TYPE_CHECKING:
     from angr.analyses.decompiler.clinic import Clinic
@@ -38,10 +44,13 @@ _SESSIONS_ATTR = "_inertia_allocation_convergence_sessions_8616"
 _DEFAULT_MAX_ROUNDS = 4
 
 
+@cython.ccall
 def _session_for(
-    project: Project, func_addr: int, max_rounds: int = _DEFAULT_MAX_ROUNDS
+    project: Project, func_addr: cython.longlong, max_rounds: cython.longlong = _DEFAULT_MAX_ROUNDS
 ) -> AllocationConvergenceSession:
     """Return the per-function convergence session stored on the project."""
+    session: object
+    sessions: object
     # dynamic third-party boundary: sessions live on the angr project object
     sessions = getattr(project, _SESSIONS_ATTR, None)
     if not isinstance(sessions, dict):
@@ -55,13 +64,15 @@ def _session_for(
     return session
 
 
+@cython.ccall
 def session_for(
-    project: Project, func_addr: int, max_rounds: int = _DEFAULT_MAX_ROUNDS
+    project: Project, func_addr: cython.longlong, max_rounds: cython.longlong = _DEFAULT_MAX_ROUNDS
 ) -> AllocationConvergenceSession:
     """Public accessor for the per-function session (diagnostics/tests)."""
     return _session_for(project, func_addr, max_rounds)
 
 
+@cython.ccall
 def _converged_invoke_8616(
     project: Project,
     clinic: Clinic,
@@ -70,7 +81,7 @@ def _converged_invoke_8616(
     entry_fp: AllocationInputFingerprint,
     checkpoint: NativeAllocationCheckpoint,
     raw_graph: object,
-) -> tuple[object, AllocationInputFingerprint, int]:
+) -> tuple[object, AllocationInputFingerprint, cython.longlong]:
     """Run the stage, iterating while input evidence is revised mid-run.
 
     Returns ``(invoke_result, final_evidence_fingerprint, preserved_types)``.
@@ -117,6 +128,7 @@ def _converged_invoke_8616(
         evidence = post_evidence
 
 
+@cython.ccall
 def run_recovery_stage_8616(
     project: Project,
     clinic: Clinic,
@@ -154,7 +166,7 @@ def run_recovery_stage_8616(
         ) from exc
     if (
         not bound
-        and entry_fp == session.accepted_output_fingerprint
+        and operator.eq(entry_fp, session.accepted_output_fingerprint)
         and alloc_native.publication_generation_current_8616(
             project, func_addr, clinic, session.accepted_handle,
         )

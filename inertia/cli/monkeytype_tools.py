@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Shared MonkeyType paths and filters for the decompiler type ratchet.
 
 Layer: CLI/fallback/reporting.
@@ -5,11 +6,15 @@ Responsibility: owns shared MonkeyType paths and repository code filters.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from pathlib import Path
 from types import CodeType
 
 from monkeytype.config import default_code_filter  # pyright: ignore[reportMissingImports]
+import operator
+import builtins
 
 REPO_ROOT: Path = Path(__file__).resolve().parents[2]
 MONKEYTYPE_CACHE_DIR: Path = REPO_ROOT / ".cache" / "monkeytype"
@@ -44,13 +49,14 @@ DEFAULT_STUB_MODULE_PREFIXES: tuple[str, ...] = (
 )
 
 
+@cython.ccall
 def ensure_monkeytype_dirs() -> None:
     """Create the MonkeyType cache and stub output directories."""
     MONKEYTYPE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     MONKEYTYPE_STUBS_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def is_traceable_repo_path(path: Path) -> bool:
+def is_traceable_repo_path(path: Path) -> cython.bint:
     """Return whether a file path belongs to traceable decompiler code."""
     try:
         resolved = path.resolve()
@@ -58,10 +64,11 @@ def is_traceable_repo_path(path: Path) -> bool:
         resolved = path
     if resolved in TRACEABLE_FILES:
         return True
-    return any(root in resolved.parents for root in TRACEABLE_ROOTS)
+    return any(root in resolved.parents for root in iter(TRACEABLE_ROOTS))
 
 
-def monkeytype_code_filter(code: CodeType) -> bool:
+@cython.ccall
+def monkeytype_code_filter(code: CodeType) -> cython.bint:
     """Return whether MonkeyType should trace a code object from this repo."""
     if not default_code_filter(code):
         return False
@@ -71,23 +78,25 @@ def monkeytype_code_filter(code: CodeType) -> bool:
     return is_traceable_repo_path(Path(filename))
 
 
-def parse_list_modules_output(text: str, prefixes: tuple[str, ...] = DEFAULT_STUB_MODULE_PREFIXES) -> tuple[str, ...]:
+def parse_list_modules_output(text: object, prefixes: object = DEFAULT_STUB_MODULE_PREFIXES) -> tuple[str, ...]:
     """Return sorted MonkeyType module names matching the allowed prefixes."""
     modules = {
         line.strip()
-        for line in text.splitlines()
-        if line.strip() and any(line.strip() == prefix or line.strip().startswith(prefix + ".") for prefix in prefixes)
+        for line in builtins.iter(text.splitlines())
+        if line.strip() and any(operator.eq(line.strip(), prefix) or line.strip().startswith(prefix + ".") for prefix in iter(prefixes))
     }
     return tuple(sorted(modules))
 
 
-def stub_path_for_module(module_name: str) -> Path:
+@cython.ccall
+def stub_path_for_module(module_name: object) -> Path:
     """Return the local stub-cache path for a Python module name."""
     parts = module_name.split(".")
     return MONKEYTYPE_STUBS_DIR.joinpath(*parts).with_suffix(".pyi")
 
 
-def source_path_for_module(module_name: str) -> Path | None:
+@cython.ccall
+def source_path_for_module(module_name: object) -> Path | None:
     """Return the repository source path for a traceable module name."""
     if module_name == "decompile":
         return REPO_ROOT / "decompile.py"
@@ -100,7 +109,7 @@ def source_path_for_module(module_name: str) -> Path | None:
     return None
 
 
-def source_line_count(path: Path) -> int:
+def source_line_count(path: Path) -> cython.longlong:
     """Return the number of text lines in a source file."""
     with path.open("r", encoding="utf-8") as handle:
-        return sum(1 for _ in handle)
+        return sum(1 for _ in iter(handle))

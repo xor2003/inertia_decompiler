@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Atomically materialize pure wide-stack predicate return graphs.
 
 Layer: Structuring.
@@ -10,6 +11,8 @@ Do not perform alias-state ownership, widening, type/materialization recovery, r
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -39,10 +42,12 @@ from .wide_stack_predicate_graphs import (
     recover_wide_stack_predicate_graph_8616,
     wide_predicate_exit_targets_8616,
 )
+import dataclasses
+import operator
 
-type WideReturnRecoverer8616 = Callable[[int], CExpression | None]
-type WideReturnComparator8616 = Callable[[CExpression, CExpression], bool]
-type WideConditionMaterializer8616 = Callable[[ConditionIR], CExpression | None]
+WideReturnRecoverer8616 = typing.TypeAliasType("WideReturnRecoverer8616", Callable[[int], CExpression | None])
+WideReturnComparator8616 = typing.TypeAliasType("WideReturnComparator8616", Callable[[CExpression, CExpression], bool])
+WideConditionMaterializer8616 = typing.TypeAliasType("WideConditionMaterializer8616", Callable[[ConditionIR], CExpression | None])
 
 
 class WideStackReturnPredicateStatus8616(Enum):
@@ -56,27 +61,27 @@ class WideStackReturnPredicateStatus8616(Enum):
     EXPRESSION_MATERIALIZATION_FAILED = "expression_materialization_failed"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideStackReturnPredicateStats8616:
     """Closed evidence accounting for one complete predicate graph."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideStackReturnPredicateResult8616:
     """Report the atomic predicate materialization outcome."""
 
     status: WideStackReturnPredicateStatus8616
     stats: WideStackReturnPredicateStats8616
-    wide_condition_count: int = 0
+    wide_condition_count: cython.longlong = 0
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether the generated C AST was replaced."""
         return self.status is WideStackReturnPredicateStatus8616.MATERIALIZED
 
@@ -94,6 +99,7 @@ class _CodegenSurface8616(Protocol):
     _inertia_wide_stack_return_predicate_result_8616: WideStackReturnPredicateResult8616
 
 
+@cython.ccall
 def _record_result_8616(
     boundary: _CodegenSurface8616,
     result: WideStackReturnPredicateResult8616,
@@ -110,7 +116,8 @@ def _record_result_8616(
     return result
 
 
-def wide_stack_return_predicate_materialized_8616(codegen: object) -> bool:
+@cython.ccall
+def wide_stack_return_predicate_materialized_8616(codegen: object) -> cython.bint:
     """Return whether the canonical owner still owns the active C root."""
     boundary = cast(_CodegenSurface8616, codegen)
     try:
@@ -123,12 +130,13 @@ def wide_stack_return_predicate_materialized_8616(codegen: object) -> bool:
     return isinstance(root_tags, dict) and root_tags.get("inertia_structuring_wide_stack_return_predicate_8616") is True
 
 
+@cython.ccall
 def _refused_8616(
     status: WideStackReturnPredicateStatus8616,
-    raw_count: int,
+    raw_count: cython.longlong,
     *,
-    normalized_count: int = 0,
-    classified_count: int = 0,
+    normalized_count: cython.longlong = 0,
+    classified_count: cython.longlong = 0,
 ) -> WideStackReturnPredicateResult8616:
     """Build one closed refusal result."""
     return WideStackReturnPredicateResult8616(
@@ -143,12 +151,16 @@ def _refused_8616(
     )
 
 
+@cython.ccall
 def _materialize_predicate_8616(
     expression: WidePredicateExpr8616,
     materialize_condition: WideConditionMaterializer8616,
     codegen: object,
 ) -> CExpression | None:
     """Lower one fully proved predicate tree to the active C AST."""
+    lhs: object
+    operand: object
+    rhs: object
     if isinstance(expression, WidePredicateLeaf8616):
         return materialize_condition(expression.condition)
     if isinstance(expression, WidePredicateNot8616):
@@ -166,7 +178,7 @@ def _materialize_predicate_8616(
     return CBinaryOp(op, lhs, rhs, codegen=codegen)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _ExitReturnCensus8616:
     """Proven unique exit returns plus the cached exit classifier."""
 
@@ -175,10 +187,12 @@ class _ExitReturnCensus8616:
     classify_exit: Callable[[int], bool | None]
 
 
+@cython.ccall
 def _previous_materialized_result_8616(
     boundary: _CodegenSurface8616,
 ) -> WideStackReturnPredicateResult8616 | None:
     """Return the recorded result when the pass already owns the C root."""
+    root: object
     try:
         previous = boundary._inertia_wide_stack_return_predicate_result_8616
     except AttributeError:
@@ -196,24 +210,26 @@ def _previous_materialized_result_8616(
 
 
 def _exit_return_census_8616(
-    conditions: tuple[ConditionIR, ...],
+    conditions: object,
     recover_return: WideReturnRecoverer8616,
     same_return: WideReturnComparator8616,
-    raw_count: int,
+    raw_count: cython.longlong,
     boundary: _CodegenSurface8616,
 ) -> _ExitReturnCensus8616 | WideStackReturnPredicateResult8616:
     """Classify exits into exactly two proven return classes or refuse."""
-    return_cache: dict[int, CExpression | None] = {}
+    expression: object
+    _target: object
+    return_cache: dict[cython.longlong, CExpression | None] = {}
 
-    def returned(target: int) -> CExpression | None:
+    def returned(target: cython.longlong) -> CExpression | None:
         """Cache one classified return leaf expression."""
         if target not in return_cache:
             return_cache[target] = recover_return(target)
         return return_cache[target]
 
     exits = wide_predicate_exit_targets_8616(conditions)
-    returns = tuple((target, returned(target)) for target in exits)
-    if any(expression is None for _target, expression in returns):
+    returns = tuple((target, returned(target)) for target in iter(exits))
+    if any(expression is None for _target, expression in iter(returns)):
         result = _refused_8616(
             WideStackReturnPredicateStatus8616.RETURN_PROOF_FAILED,
             raw_count,
@@ -222,7 +238,7 @@ def _exit_return_census_8616(
     unique_returns: list[CExpression] = []
     for _target, expression in returns:
         assert expression is not None
-        if not any(same_return(expression, prior) for prior in unique_returns):
+        if not any(same_return(expression, prior) for prior in iter(unique_returns)):
             unique_returns.append(expression)
     if len(unique_returns) != 2:
         result = _refused_8616(
@@ -232,26 +248,30 @@ def _exit_return_census_8616(
         return _record_result_8616(boundary, result)
     selected_return, alternate_return = unique_returns
 
-    def classify_exit(target: int) -> bool | None:
+    def classify_exit(target: cython.longlong) -> bool | None:
         """Classify an exit against the deterministic selected return class."""
+        expression: object
         expression = returned(target)
         return same_return(expression, selected_return) if expression is not None else None
 
     return _ExitReturnCensus8616(selected_return, alternate_return, classify_exit)
 
 
+@cython.ccall
 def materialize_wide_stack_return_predicate_8616(
     codegen: object,
-    conditions: tuple[ConditionIR, ...],
-    successors: dict[int, tuple[int, ...]],
+    conditions: object,
+    successors: object,
     prove_pair: WideStackPairProver8616,
     recover_return: WideReturnRecoverer8616,
     same_return: WideReturnComparator8616,
     materialize_condition: WideConditionMaterializer8616,
     *,
-    effects_are_safe: bool,
+    effects_are_safe: cython.bint,
 ) -> WideStackReturnPredicateResult8616:
     """Atomically replace one complete pure comparison/return CFG."""
+    materialized: object
+    previous: object
     raw_count = len(conditions)
     boundary = cast(_CodegenSurface8616, codegen)
     previous = _previous_materialized_result_8616(boundary)
@@ -342,10 +362,11 @@ def materialize_wide_stack_return_predicate_8616(
     return _record_result_8616(boundary, result)
 
 
+@cython.ccall
 def wide_stack_return_predicate_validation_delta_is_proven_8616(
-    result: WideStackReturnPredicateResult8616 | None,
-    validation: dict[str, object],
-) -> bool:
+    result: object,
+    validation: object,
+) -> cython.bint:
     """Accept only the validation delta proven by a complete predicate graph.
 
     A pre-existing structuring tree can lose one return leaf before this pass.
@@ -353,14 +374,18 @@ def wide_stack_return_predicate_validation_delta_is_proven_8616(
     the graph proof consumed every condition and the delta contains no memory,
     register, global, or call effect. Removed return effects remain unsafe.
     """
+    delta: object
+    field_delta: object
+    return_delta: object
+    field_name: object
     if result is None or result.status is not WideStackReturnPredicateStatus8616.MATERIALIZED:
         return False
     stats = result.stats
     if not (
         stats.raw_fact_count > 0
         and 0 < stats.normalized_fact_count <= stats.raw_fact_count
-        and stats.raw_fact_count == stats.classified_fact_count
-        and stats.raw_fact_count == stats.materialized_count
+        and operator.eq(stats.raw_fact_count, stats.classified_fact_count)
+        and operator.eq(stats.raw_fact_count, stats.materialized_count)
         and stats.failure_count == 0
     ):
         return False

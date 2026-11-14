@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Consume redundant guards after a proven wide call-return comparison.
 
 Layer: Structuring
@@ -12,6 +13,8 @@ rendered C, assembly text, source files, or helper names.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -30,9 +33,11 @@ from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 from inertia.pipeline.errors import PipelineHardError
 
 from .branch_return_expressions import sole_return_statement_8616
+import dataclasses
+import builtins
 
-type DirectInstructionAddress8616 = Callable[[object], int | None]
-type SameExpression8616 = Callable[[CExpression, CExpression], bool]
+DirectInstructionAddress8616 = typing.TypeAliasType("DirectInstructionAddress8616", Callable[[object], int | None])
+SameExpression8616 = typing.TypeAliasType("SameExpression8616", Callable[[CExpression, CExpression], bool])
 
 
 class WideCallReturnGuardCollapseStatus8616(StrEnum):
@@ -56,15 +61,15 @@ class WideCallReturnGuardCollapseReason8616(StrEnum):
     IDENTICAL_EXIT_RETURN = "identical_exit_return"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideCallReturnGuardCollapseStats8616:
     """Closed evidence counts for nested wide call-return guard collapse."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     def merged(
         self,
@@ -80,7 +85,7 @@ class WideCallReturnGuardCollapseStats8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideCallReturnGuardCollapseResult8616:
     """Outcome and evidence report for one structured guard candidate."""
 
@@ -89,13 +94,14 @@ class WideCallReturnGuardCollapseResult8616:
     stats: WideCallReturnGuardCollapseStats8616
 
 
+@cython.ccall
 def _result_8616(
     status: WideCallReturnGuardCollapseStatus8616,
     reason: WideCallReturnGuardCollapseReason8616,
     *,
-    normalized: int = 0,
-    classified: int = 0,
-    materialized: int = 0,
+    normalized: cython.longlong = 0,
+    classified: cython.longlong = 0,
+    materialized: cython.longlong = 0,
 ) -> WideCallReturnGuardCollapseResult8616:
     """Build one closed evidence result for an exact typed candidate."""
     raw = int(status is not WideCallReturnGuardCollapseStatus8616.NOT_APPLICABLE)
@@ -117,10 +123,11 @@ def _result_8616(
     )
 
 
+@cython.ccall
 def _nested_continuation_8616(
     node: CIfElse,
     nested: CIfElse,
-    else_statements: tuple[object, ...],
+    else_statements: object,
 ) -> object | WideCallReturnGuardCollapseResult8616:
     """Resolve the proven continuation or refuse on unsupported shape."""
     if (
@@ -146,12 +153,15 @@ def _nested_continuation_8616(
     return else_statements[1]
 
 
+@cython.ccall
 def _proven_matching_returns_8616(
     node: CIfElse,
     nested: CIfElse,
     same_expression: SameExpression8616,
 ) -> bool | WideCallReturnGuardCollapseResult8616:
     """Return whether both exits return identically or the refusal result."""
+    nested_return: object
+    outer_return: object
     outer_return = sole_return_statement_8616(node.condition_and_nodes[0][1])
     nested_return = sole_return_statement_8616(nested.condition_and_nodes[0][1])
     if outer_return is None or nested_return is None:
@@ -167,7 +177,7 @@ def _proven_matching_returns_8616(
 
 def collapse_wide_call_return_guard_chain_8616(
     node: CIfElse,
-    conditions: tuple[ConditionIR, ConditionIR, ConditionIR],
+    conditions: object,
     direct_instruction_address: DirectInstructionAddress8616,
     same_expression: SameExpression8616,
 ) -> WideCallReturnGuardCollapseResult8616:
@@ -189,7 +199,7 @@ def collapse_wide_call_return_guard_chain_8616(
     nested_source = direct_instruction_address(nested)
     remainder_sources = frozenset(
         condition.src_insn
-        for condition in conditions[1:]
+        for condition in iter(conditions[1:])
         if isinstance(condition.src_insn, int)
     )
     if nested_source not in remainder_sources:
@@ -204,7 +214,7 @@ def collapse_wide_call_return_guard_chain_8616(
     nested_condition = nested.condition_and_nodes[0][0]
     if any(
         isinstance(child, CFunctionCall)
-        for child in _iter_c_nodes_deep_8616(nested_condition)
+        for child in builtins.iter(_iter_c_nodes_deep_8616(nested_condition))
     ):
         return _result_8616(
             WideCallReturnGuardCollapseStatus8616.REFUSED,

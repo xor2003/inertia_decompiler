@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Project function CFG and decoder evidence into status-flag Semantics.
 
 Layer: IR.
@@ -11,6 +12,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Protocol, cast
@@ -37,6 +40,8 @@ from inertia.semantics.status_flag_liveness import (
 
 from .status_flag_binary_cfg import summarize_binary_status_flag_entry_reads_8616
 from .vex_import import raw_x86_16_function_bundle_8616
+import dataclasses
+import operator
 
 _CFG_SUPPRESSION_MNEMONICS_8616 = frozenset(
     {"adc", "add", "and", "cmp", "dec", "inc", "or", "sal", "sar", "sbb", "shl", "shr", "sub", "test", "xor"}
@@ -46,16 +51,16 @@ _CFG_SUPPRESSION_MNEMONICS_8616 = frozenset(
 class _CapstoneOperandBoundary8616(Protocol):
     """Third-party Capstone operand fields used for direct call targets."""
 
-    type: int
-    imm: int
+    type: cython.longlong
+    imm: cython.longlong
 
 
 class _CapstoneInstructionBoundary8616(Protocol):
     """Third-party Capstone instruction fields exposed by an angr block."""
 
-    address: int
-    mnemonic: str
-    operands: tuple[object, ...]
+    address: cython.longlong
+    mnemonic: object
+    operands: object
 
 
 class _AngrCapstoneInstructionBoundary8616(Protocol):
@@ -67,7 +72,7 @@ class _AngrCapstoneInstructionBoundary8616(Protocol):
 class _CapstoneBlockBoundary8616(Protocol):
     """Third-party angr disassembly collection."""
 
-    insns: tuple[object, ...]
+    insns: object
 
 
 class _BlockBoundary8616(Protocol):
@@ -79,7 +84,7 @@ class _BlockBoundary8616(Protocol):
 class _FactoryBoundary8616(Protocol):
     """Third-party angr block factory used at exact CFG addresses."""
 
-    def block(self, address: int, *, opt_level: int = 0) -> _BlockBoundary8616:
+    def block(self, address: cython.longlong, *, opt_level: cython.longlong = 0) -> _BlockBoundary8616:
         """Lift and disassemble one exact basic block."""
         ...
 
@@ -87,7 +92,7 @@ class _FactoryBoundary8616(Protocol):
 class _FunctionManagerBoundary8616(Protocol):
     """Third-party angr function manager lookup surface."""
 
-    def function(self, *, addr: int, create: bool = False) -> object | None:
+    def function(self, *, addr: cython.longlong, create: cython.bint = False) -> object | None:
         """Return an existing function at an exact canonical address."""
         ...
 
@@ -108,8 +113,8 @@ class _ProjectBoundary8616(Protocol):
 class _LoadedObjectBoundary8616(Protocol):
     """Third-party loaded-image bounds used to recognize rebased call targets."""
 
-    min_addr: int
-    max_addr: int
+    min_addr: cython.longlong
+    max_addr: cython.longlong
 
 
 class _LoaderBoundary8616(Protocol):
@@ -123,32 +128,33 @@ class _RebasedProjectBoundary8616(Protocol):
 
     loader: _LoaderBoundary8616
     _inertia_original_project: object
-    _inertia_original_linear_delta: int
+    _inertia_original_linear_delta: cython.longlong
 
 
 class _FunctionBoundary8616(Protocol):
     """Third-party angr function identity consumed by the projection."""
 
-    addr: int
+    addr: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _DecodedInstructionAdapter8616:
     """Expose an angr Capstone instruction through the frontend decode contract."""
 
     cs: _CapstoneInstructionBoundary8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StatusFlagFunctionProjection8616:
     """Function-level CFG blocks, liveness decisions, and callee summaries."""
 
-    function_address: int
-    blocks: tuple[StatusFlagCFGBlock8616, ...]
+    function_address: cython.longlong
+    blocks: object
     liveness: StatusFlagCFGLivenessArtifact8616
-    callee_effects: tuple[tuple[int, StatusFlagEffect8616], ...]
+    callee_effects: object
 
 
+@cython.ccall
 def _direct_call_target_8616(
     instruction: _CapstoneInstructionBoundary8616,
 ) -> int | None:
@@ -157,23 +163,30 @@ def _direct_call_target_8616(
         return None
     operand = cast(_CapstoneOperandBoundary8616, instruction.operands[0])
     try:
-        return int(operand.imm) if operand.type == CS_OP_IMM else None
+        return int(operand.imm) if operator.eq(operand.type, CS_OP_IMM) else None
     except (AttributeError, TypeError, ValueError):
         return None
 
 
+@cython.cclass
 class _StatusFlagFunctionSummaryResolver8616:
     """Recursively resolve direct-callee effects with cycle-safe refusal."""
+    _active = cython.declare(set, visibility = "public")
+    _blocks_cache = cython.declare(dict, visibility = "public")
+    _effect_cache = cython.declare(dict, visibility = "public")
+    _project = cython.declare(object, visibility = "public")
+    _project_object = cython.declare(object, visibility = "public")
 
     def __init__(self, project: object) -> None:
         """Bind one project-local function and block namespace."""
         self._project = cast(_ProjectBoundary8616, project)
         self._project_object = project
-        self._effect_cache: dict[int, StatusFlagEffect8616] = {}
-        self._blocks_cache: dict[int, tuple[StatusFlagCFGBlock8616, ...]] = {}
-        self._active: set[int] = set()
+        self._effect_cache: dict[cython.longlong, StatusFlagEffect8616] = {}
+        self._blocks_cache: dict[cython.longlong, tuple[StatusFlagCFGBlock8616, ...]] = {}
+        self._active: set[cython.longlong] = set()
 
-    def _resolve_callee(self, target: int) -> object | None:
+    @cython.ccall
+    def _resolve_callee(self, target: cython.longlong) -> object | None:
         """Resolve exact padding aliases to an existing canonical function."""
         canonical = canonicalize_x86_16_padding_call_target_8616(
             self._project_object,
@@ -183,7 +196,8 @@ class _StatusFlagFunctionSummaryResolver8616:
             return None
         return self._project.kb.functions.function(addr=canonical, create=False)
 
-    def _original_binary_target(self, target: int) -> tuple[object, int] | None:
+    @cython.ccall
+    def _original_binary_target(self, target: cython.longlong) -> object:
         """Translate an out-of-slice near-call target to the original image."""
         try:
             rebased = cast(_RebasedProjectBoundary8616, self._project_object)
@@ -198,11 +212,16 @@ class _StatusFlagFunctionSummaryResolver8616:
             return None
         return original_project, target + linear_delta
 
+    @cython.ccall
     def _instruction_effect(
         self,
         instruction: _CapstoneInstructionBoundary8616,
     ) -> StatusFlagEffect8616 | None:
         """Return decoded semantics or a recursively proven direct-call effect."""
+        callee: object
+        decoded: object
+        effect: object
+        target: object
         target = _direct_call_target_8616(instruction)
         if instruction.mnemonic.lower() == "call":
             if target is None:
@@ -222,6 +241,7 @@ class _StatusFlagFunctionSummaryResolver8616:
         )
         return None if decoded is None else status_flag_effect_8616(decoded)
 
+    @cython.ccall
     def _project_wrapped_instruction(
         self,
         wrapped: object,
@@ -234,6 +254,7 @@ class _StatusFlagFunctionSummaryResolver8616:
             return None
         return self._project_instruction(instruction)
 
+    @cython.ccall
     def _project_wrapped_effect(self, wrapped: object) -> StatusFlagEffect8616 | None:
         """Project one wrapped instruction to its typed flag effect only."""
         try:
@@ -243,11 +264,13 @@ class _StatusFlagFunctionSummaryResolver8616:
             return None
         return self._instruction_effect(instruction)
 
+    @cython.ccall
     def _project_instruction(
         self,
         instruction: _CapstoneInstructionBoundary8616,
     ) -> StatusFlagCFGInstruction8616:
         """Project one decoded instruction and distinguish call-summary effects."""
+        effect: object
         effect = self._instruction_effect(instruction)
         return StatusFlagCFGInstruction8616(
             address=int(instruction.address),
@@ -259,8 +282,13 @@ class _StatusFlagFunctionSummaryResolver8616:
             ),
         )
 
-    def blocks_for(self, function: object) -> tuple[StatusFlagCFGBlock8616, ...]:
+    @cython.ccall
+    def blocks_for(self, function: object) -> object:
         """Project one function's exact graph-owned blocks and instruction effects."""
+        cached: object
+        projected_instruction: object
+        ir_block: object
+        wrapped: object
         function_boundary = cast(_FunctionBoundary8616, function)
         function_address = int(function_boundary.addr)
         cached = self._blocks_cache.get(function_address)
@@ -305,8 +333,12 @@ class _StatusFlagFunctionSummaryResolver8616:
         self._blocks_cache[function_address] = result
         return result
 
-    def effect_for_address(self, function_address: int) -> StatusFlagEffect8616 | None:
+    @cython.ccall
+    def effect_for_address(self, function_address: cython.longlong) -> StatusFlagEffect8616 | None:
         """Summarize a binary-proven callee absent from angr's Function database."""
+        cached: object
+        effect: object
+        original_target: object
         cached = self._effect_cache.get(function_address)
         if cached is not None:
             return cached
@@ -334,8 +366,10 @@ class _StatusFlagFunctionSummaryResolver8616:
         finally:
             self._active.remove(function_address)
 
+    @cython.ccall
     def effect_for(self, function: object) -> StatusFlagEffect8616 | None:
         """Return a complete direct-callee summary, or None for recursion/absence."""
+        cached: object
         function_address = int(cast(_FunctionBoundary8616, function).addr)
         cached = self._effect_cache.get(function_address)
         if cached is not None:
@@ -356,6 +390,7 @@ class _StatusFlagFunctionSummaryResolver8616:
         finally:
             self._active.remove(function_address)
 
+    @cython.ccall
     def projection_for(
         self,
         function: object,
@@ -378,10 +413,11 @@ class _StatusFlagFunctionSummaryResolver8616:
             function_address=function_address,
             blocks=blocks,
             liveness=liveness,
-            callee_effects=tuple(sorted(self._effect_cache.items())),
+            callee_effects=tuple(sorted(tuple(self._effect_cache.items()))),
         )
 
 
+@cython.ccall
 def build_status_flag_function_projection_8616(
     project: object,
     function: object,

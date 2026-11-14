@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prune control nodes made observationally empty by dead-code elimination.
 
 Layer: Rewrite/Postprocess cleanup.
@@ -10,38 +11,41 @@ flow, or facts from rendered text, COD, source, or CLI/reporting evidence here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import cast
 
 from angr.analyses.decompiler.structured_codegen.c import CIfElse, CStatements
+import dataclasses
+import operator
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DceNoopConditionalPruneStats8616:
     """Closed evidence counters for one or more no-op conditional scans."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    refused_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    refused_count: cython.longlong = 0
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether at least one proven no-op conditional was removed."""
         return self.materialized_count > 0
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every classified fact was materialized without loss."""
         return bool(
-            self.raw_fact_count == self.normalized_fact_count
-            and self.raw_fact_count
-            == self.classified_fact_count + self.refused_count + self.failure_count
-            and self.classified_fact_count == self.materialized_count
+            operator.eq(self.raw_fact_count, self.normalized_fact_count)
+            and operator.eq(self.raw_fact_count, self.classified_fact_count + self.refused_count + self.failure_count)
+            and operator.eq(self.classified_fact_count, self.materialized_count)
             and self.failure_count == 0
         )
 
@@ -64,6 +68,7 @@ class DceNoopConditionalPruneStats8616:
         )
 
 
+@cython.ccall
 def _explicit_empty_if_else_condition_8616(statement: object) -> object | None:
     """Return the condition of an explicit two-arm no-op, else refuse it."""
     if not isinstance(statement, CIfElse):
@@ -83,17 +88,21 @@ def _explicit_empty_if_else_condition_8616(statement: object) -> object | None:
     return cast(object, condition)
 
 
+@cython.ccall
 def prune_explicit_empty_if_else_after_dce_8616(
     statement_blocks: Iterable[object],
     *,
-    condition_is_pure: Callable[[object], bool],
+    condition_is_pure: Callable[[object], cython.bint],
 ) -> DceNoopConditionalPruneStats8616:
     """Remove explicit empty branches only when condition evaluation is pure."""
+    condition: object
+    block: object
+    statement: object
     raw_count = 0
     classified_count = 0
     materialized_count = 0
     refused_count = 0
-    seen_blocks: set[int] = set()
+    seen_blocks: set[cython.longlong] = set()
     for block in statement_blocks:
         if not isinstance(block, CStatements) or id(block) in seen_blocks:
             continue

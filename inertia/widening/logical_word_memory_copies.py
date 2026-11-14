@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bind exact logical stack-word reloads to direct global word spills.
 
 Layer: Widening.
@@ -10,6 +11,8 @@ Do not join values from rendered text, cosmetic shape, postprocess, or CLI/repor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -29,6 +32,8 @@ from inertia.ir.logical_memory_register_transfer_contracts import (
     LogicalMemoryRegisterTransferKind8616,
     LogicalMemoryRegisterTransferRefusal8616,
 )
+import dataclasses
+import operator
 
 
 class LogicalWordMemoryCopyFailure8616(StrEnum):
@@ -40,7 +45,7 @@ class LogicalWordMemoryCopyFailure8616(StrEnum):
     SOURCE_TRANSFER_AMBIGUOUS = "source_transfer_ambiguous"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LogicalWordMemoryCopy8616:
     """One exact Alias stack word copied through one register to direct DS."""
 
@@ -49,7 +54,7 @@ class LogicalWordMemoryCopy8616:
     destination_transfer: LogicalMemoryRegisterTransfer8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether storage, register SSA, address, and order agree."""
         source = self.source_transfer
         destination = self.destination_transfer
@@ -60,7 +65,7 @@ class LogicalWordMemoryCopy8616:
             and destination.complete
             and source.kind is LogicalMemoryRegisterTransferKind8616.RELOAD
             and destination.kind is LogicalMemoryRegisterTransferKind8616.SPILL
-            and self.source_storage.source == source.access
+            and operator.eq(self.source_storage.source, source.access)
             and not self.source_storage.storage.needs_synthesis()
             and source_address.space is MemSpace.SS
             and source_address.base == ("bp",)
@@ -72,62 +77,61 @@ class LogicalWordMemoryCopy8616:
             and destination_address.size == 2
             and destination_address.status is AddressStatus.STABLE
             and destination_address.segment_origin is SegmentOrigin.PROVEN
-            and source.register == destination.register
-            and source.register_site.block_addr
-            == destination.register_site.block_addr
+            and operator.eq(source.register, destination.register)
+            and operator.eq(source.register_site.block_addr, destination.register_site.block_addr)
             and source.register_site.instr_index
             < destination.register_site.instr_index
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LogicalWordMemoryCopyRefusal8616:
     """One retained direct-word spill that did not close a copy proof."""
 
     destination: IRLogicalMemoryAccess8616 | None
     failure: LogicalWordMemoryCopyFailure8616
-    detail: str
+    detail: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LogicalWordMemoryCopyStats8616:
     """Closed evidence counters for direct logical word-copy recovery."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every candidate became one fact or refusal."""
         return bool(
-            self.raw_fact_count == self.materialized_count + self.failure_count
+            operator.eq(self.raw_fact_count, self.materialized_count + self.failure_count)
             and self.normalized_fact_count
             == self.classified_fact_count
             == self.materialized_count
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LogicalWordMemoryCopyArtifact8616:
     """Closed Widening outcomes for direct DS word-spill candidates."""
 
     source_alias: StackMemorySSAAliasArtifact8616
-    facts: tuple[LogicalWordMemoryCopy8616, ...]
-    refusals: tuple[LogicalWordMemoryCopyRefusal8616, ...]
+    facts: object
+    refusals: object
     stats: LogicalWordMemoryCopyStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether source evidence and all copy outcomes close."""
         return bool(
             self.source_alias.complete
             and self.stats.complete
-            and len(self.facts) == self.stats.materialized_count
-            and len(self.refusals) == self.stats.failure_count
-            and all(fact.complete for fact in self.facts)
+            and operator.eq(len(self.facts), self.stats.materialized_count)
+            and operator.eq(len(self.refusals), self.stats.failure_count)
+            and all(fact.complete for fact in iter(self.facts))
         )
 
 
@@ -135,12 +139,13 @@ def _direct_ds_word_writes_8616(
     source: StackMemorySSAAliasArtifact8616,
 ) -> tuple[IRLogicalMemoryAccess8616, ...]:
     """Return deterministic exact direct-DS word writes from logical IR."""
+    logical: object
     logical = source.source_ssa.logical_memory
     if logical is None or not logical.closed:
         return ()
     return tuple(
         access
-        for access in logical.accesses
+        for access in iter(logical.accesses)
         if access.kind is IRMemoryAccessKind8616.WRITE
         and access.address.space is MemSpace.DS
         and not access.address.base
@@ -150,11 +155,13 @@ def _direct_ds_word_writes_8616(
     )
 
 
+@cython.ccall
 def _matching_sources_8616(
     source: StackMemorySSAAliasArtifact8616,
     destination: LogicalMemoryRegisterTransfer8616,
 ) -> tuple[tuple[LogicalStackStorageIdentity8616, LogicalMemoryRegisterTransfer8616], ...]:
     """Return exact prior stack reloads carrying the destination SSA value."""
+    identity: object
     matches: list[
         tuple[LogicalStackStorageIdentity8616, LogicalMemoryRegisterTransfer8616]
     ] = []
@@ -173,9 +180,8 @@ def _matching_sources_8616(
             continue
         if (
             transfer.kind is LogicalMemoryRegisterTransferKind8616.RELOAD
-            and transfer.register == destination.register
-            and transfer.register_site.block_addr
-            == destination.register_site.block_addr
+            and operator.eq(transfer.register, destination.register)
+            and operator.eq(transfer.register_site.block_addr, destination.register_site.block_addr)
             and transfer.register_site.instr_index
             < destination.register_site.instr_index
         ):
@@ -183,10 +189,12 @@ def _matching_sources_8616(
     return tuple(matches)
 
 
+@cython.ccall
 def build_logical_word_memory_copy_artifact_8616(
     source: StackMemorySSAAliasArtifact8616,
 ) -> LogicalWordMemoryCopyArtifact8616:
     """Join every exact direct DS word spill to one Alias stack source."""
+    access: object
     if not source.complete:
         refusal = LogicalWordMemoryCopyRefusal8616(
             None,

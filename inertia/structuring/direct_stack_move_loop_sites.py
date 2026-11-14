@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Match direct stack moves to proven structured loop entry sites.
 
 Layer: Structuring.
@@ -11,6 +12,8 @@ This module changes placement only; it never infers storage, types, or semantics
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Any
@@ -29,33 +32,40 @@ from .direct_stack_move_loop_evidence import (
     candidate_addresses_8616,
     comparable_address_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectStackMoveLoopEntrySite8616:
     """One structured loop body uniquely covered by a machine loopback."""
 
-    statements: list[Any]
-    depth: int
+    statements: object
+    depth: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectStackMoveAssignmentLocation8616:
     """One exact tagged assignment location in the structured tree."""
 
-    statements: list[Any]
-    index: int
+    statements: object
+    index: cython.longlong
     assignment: structured_c.CAssignment
 
 
-def _ast_field_8616(node: object | None, name: str) -> object | None:
+@cython.ccall
+def _ast_field_8616(node: object | None, name: object) -> object | None:
     """Read one optional field from a heterogeneous third-party angr AST node."""
     # Dynamic boundary: structured-codegen nodes expose fields by concrete node shape.
     return getattr(node, name, None)
 
 
-def _node_tag_values_8616(node: object, addresses: set[int]) -> None:
+@cython.ccall
+def _node_tag_values_8616(node: object, addresses: object) -> None:
     """Collect instruction-origin tag values from one structured node."""
+    address: object
+    key: object
     tags = _ast_field_8616(node, "tags")
     if isinstance(tags, dict):
         for key in ("ins_addr", "inertia_relocated_from_ins_addr"):
@@ -64,8 +74,13 @@ def _node_tag_values_8616(node: object, addresses: set[int]) -> None:
                 addresses.add(address)
 
 
-def _push_tag_children_8616(node: object, stack: list[object]) -> None:
+@cython.ccall
+def _push_tag_children_8616(node: object, stack: object) -> None:
     """Push the structured children of one node onto the tag walk stack."""
+    child: object
+    attr: object
+    body: object
+    condition: object
     for attr in ("condition", "body", "else_node", "statements"):
         child = _ast_field_8616(node, attr)
         if child is not None:
@@ -76,10 +91,12 @@ def _push_tag_children_8616(node: object, stack: list[object]) -> None:
             stack.extend((condition, body))
 
 
-def _tree_tag_addresses_8616(root: object) -> frozenset[int]:
+@cython.ccall
+def _tree_tag_addresses_8616(root: object) -> frozenset[cython.longlong]:
     """Collect exact instruction-origin tags from one structured subtree."""
-    addresses: set[int] = set()
-    seen: set[int] = set()
+    node: object
+    addresses: set[cython.longlong] = set()
+    seen: set[cython.longlong] = set()
     stack = [root]
     while stack:
         node = stack.pop()
@@ -94,6 +111,7 @@ def _tree_tag_addresses_8616(root: object) -> frozenset[int]:
     return frozenset(addresses)
 
 
+@cython.ccall
 def _stack_offset_8616(codegen: object, expression: object) -> int | None:
     """Return the registry-proven machine-BP offset for one C variable."""
     if not isinstance(expression, structured_c.CVariable):
@@ -104,9 +122,14 @@ def _stack_offset_8616(codegen: object, expression: object) -> int | None:
     return None
 
 
-def _tree_reads_stack_offset_8616(codegen: object, root: object, offset: int) -> bool:
+@cython.ccall
+def _tree_reads_stack_offset_8616(codegen: object, root: object, offset: cython.longlong) -> cython.bint:
     """Return whether a structured subtree reads one exact stack slot."""
-    seen: set[int] = set()
+    child: object
+    node: object
+    attr: object
+    pair: object
+    seen: set[cython.longlong] = set()
     stack = [root]
     while stack:
         node = stack.pop()
@@ -119,7 +142,7 @@ def _tree_reads_stack_offset_8616(codegen: object, root: object, offset: int) ->
         if isinstance(node, structured_c.CAssignment):
             stack.append(node.rhs)
             continue
-        if _stack_offset_8616(codegen, node) == offset:
+        if operator.eq(_stack_offset_8616(codegen, node), offset):
             return True
         for attr in (
             "lhs", "rhs", "expr", "operand", "operands",
@@ -136,10 +159,14 @@ def _tree_reads_stack_offset_8616(codegen: object, root: object, offset: int) ->
 def _statement_lists_8616(root: object) -> tuple[list[Any], ...]:
     """Return every executable statement list in one structured tree."""
     results: list[list[Any]] = []
-    seen: set[int] = set()
-    seen_statement_lists: set[int] = set()
+    seen: set[cython.longlong] = set()
+    seen_statement_lists: set[cython.longlong] = set()
 
     def visit(node: object) -> None:
+        _condition: object
+        attr: object
+        body: object
+        statement: object
         if node is None or id(node) in seen:
             return
         seen.add(id(node))
@@ -161,18 +188,20 @@ def _statement_lists_8616(root: object) -> tuple[list[Any], ...]:
     return tuple(results)
 
 
+@cython.ccall
 def _same_unique_binary_block_8616(
     function: object | None,
-    first_addr: int,
-    second_addr: int,
-) -> bool:
+    first_addr: cython.longlong,
+    second_addr: cython.longlong,
+) -> cython.bint:
     """Prove that two instructions belong to one unique binary basic block."""
+    block: object
     matches = 0
     for block in boundary_tuple_8616(_ast_field_8616(function, "blocks") or ()):
         capstone = _ast_field_8616(block, "capstone")
         addresses = {
             address
-            for wrapped in boundary_tuple_8616(_ast_field_8616(capstone, "insns") or ())
+            for wrapped in builtins.iter(boundary_tuple_8616(_ast_field_8616(capstone, "insns") or ()))
             if isinstance(
                 address := _ast_field_8616(
                     _ast_field_8616(wrapped, "insn") or wrapped,
@@ -185,13 +214,14 @@ def _same_unique_binary_block_8616(
     return matches == 1
 
 
+@cython.ccall
 def _posttest_site_8616(
     node: object,
     condition: object,
     codegen: object,
-    dst_offset: int,
-    jump_owns_posttest_condition: bool,
-) -> bool:
+    dst_offset: cython.longlong,
+    jump_owns_posttest_condition: cython.bint,
+) -> cython.bint:
     """Return whether a do-while loop's posttest reads the moved stack slot."""
     return bool(
         isinstance(node, structured_c.CDoWhileLoop)
@@ -200,11 +230,12 @@ def _posttest_site_8616(
     )
 
 
+@cython.ccall
 def _pretest_site_8616(
     node: object,
     condition: object,
-    jump_owns_pretest_body_tail: bool,
-) -> bool:
+    jump_owns_pretest_body_tail: cython.bint,
+) -> cython.bint:
     """Return whether a while(1) loop's pretest tail owns the move edge."""
     return bool(
         isinstance(node, structured_c.CWhileLoop)
@@ -219,15 +250,19 @@ def loop_entry_sites_8616(
     codegen: object,
     root: object,
     edge: DirectStackMoveLoopEntryEdge8616,
-    dst_offset: int,
+    dst_offset: cython.longlong,
     *,
     function: object | None = None,
 ) -> tuple[DirectStackMoveLoopEntrySite8616, ...]:
     """Find structured loops uniquely covered by one repeated move edge."""
     sites: list[DirectStackMoveLoopEntrySite8616] = []
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
 
-    def visit(node: object, depth: int, enclosing_loop_count: int) -> None:
+    def visit(node: object, depth: cython.longlong, enclosing_loop_count: cython.longlong) -> None:
+        _condition: object
+        attr: object
+        guarded_body: object
+        statement: object
         if node is None or id(node) in seen:
             return
         seen.add(id(node))
@@ -239,16 +274,16 @@ def loop_entry_sites_8616(
         ) and isinstance(statements, list):
             body_entry_addresses = {
                 comparable_address_8616(project, address, edge.entry_addr)
-                for address in _tree_tag_addresses_8616(body)
+                for address in builtins.iter(_tree_tag_addresses_8616(body))
             }
             body_jump_addresses = {
                 comparable_address_8616(project, address, edge.jump_addr)
-                for address in _tree_tag_addresses_8616(body)
+                for address in builtins.iter(_tree_tag_addresses_8616(body))
             }
             condition = node.condition
             condition_addresses = {
                 comparable_address_8616(project, address, edge.jump_addr)
-                for address in _tree_tag_addresses_8616(condition)
+                for address in builtins.iter(_tree_tag_addresses_8616(condition))
             }
             entry_reaches_body = bool(body_entry_addresses) and (
                 edge.entry_addr <= min(body_entry_addresses)
@@ -260,7 +295,7 @@ def loop_entry_sites_8616(
             )
             body_origins_before_jump = tuple(
                 address
-                for address in body_jump_addresses
+                for address in iter(body_jump_addresses)
                 if address <= edge.jump_addr
             )
             jump_owns_pretest_body_tail = bool(body_origins_before_jump) and (
@@ -269,7 +304,7 @@ def loop_entry_sites_8616(
                     enclosing_loop_count == 0
                     and any(
                         _same_unique_binary_block_8616(function, address, edge.jump_addr)
-                        for address in body_origins_before_jump
+                        for address in iter(body_origins_before_jump)
                     )
                 )
             )
@@ -298,6 +333,7 @@ def loop_entry_sites_8616(
     return tuple(sites)
 
 
+@cython.ccall
 def tagged_assignment_locations_8616(
     project: object,
     codegen: object,
@@ -305,13 +341,16 @@ def tagged_assignment_locations_8616(
     move_fact: DirectStackMoveFact8616,
 ) -> tuple[DirectStackMoveAssignmentLocation8616, ...]:
     """Find exact assignments tagged to one move fact and destination slot."""
+    index: object
+    statement: object
+    statements: object
     candidates = candidate_addresses_8616(project, move_fact.ins_addr)
     locations: list[DirectStackMoveAssignmentLocation8616] = []
     for statements in _statement_lists_8616(root):
         for index, statement in enumerate(tuple(statements)):
             if not isinstance(statement, structured_c.CAssignment):
                 continue
-            if _stack_offset_8616(codegen, statement.lhs) != move_fact.dst_offset:
+            if operator.ne(_stack_offset_8616(codegen, statement.lhs), move_fact.dst_offset):
                 continue
             if _tree_tag_addresses_8616(statement) & candidates:
                 locations.append(
@@ -323,46 +362,50 @@ def tagged_assignment_locations_8616(
 def _ordered_insertion_index_8616(
     project: object,
     codegen: object,
-    statements: list[Any],
-    move_addr: int,
-    dst_offset: int,
+    statements: object,
+    move_addr: cython.longlong,
+    dst_offset: cython.longlong,
 ) -> int | None:
     """Return the exact tag- and data-ordered loop-entry index."""
-    following: list[tuple[int, int]] = []
+    index: object
+    statement: object
+    following: list[tuple[cython.longlong, cython.longlong]] = []
     for index, statement in enumerate(statements):
         comparable = [
             comparable_address_8616(project, tagged, move_addr)
-            for tagged in _tree_tag_addresses_8616(statement)
+            for tagged in builtins.iter(_tree_tag_addresses_8616(statement))
             if comparable_address_8616(project, tagged, move_addr) > move_addr
         ]
         if comparable:
             following.append((min(comparable), index))
     if not following:
         return None
-    first_address = min(address for address, _index in following)
-    indexes = tuple(index for address, index in following if address == first_address)
+    first_address = min(address for address, _index in iter(following))
+    indexes = tuple(index for address, index in iter(following) if address == first_address)
     if len(indexes) != 1:
         return None
     tagged_index = indexes[0]
     prior_read_indexes = tuple(
         index
-        for index, statement in enumerate(statements[:tagged_index])
+        for index, statement in builtins.iter(enumerate(statements[:tagged_index]))
         if _tree_reads_stack_offset_8616(codegen, statement, dst_offset)
     )
-    return min((tagged_index, *prior_read_indexes))
+    return min((tagged_index, ) + tuple(prior_read_indexes))
 
 
+@cython.ccall
 def place_assignment_8616(
     project: object,
     codegen: object,
     site: DirectStackMoveLoopEntrySite8616,
     move_fact: DirectStackMoveFact8616,
     assignment: structured_c.CAssignment,
-    location: DirectStackMoveAssignmentLocation8616 | None,
-) -> tuple[bool, bool]:
+    location: object,
+) -> tuple[cython.bint, cython.bint]:
     """Place one assignment at the exact ordered loop-entry site."""
+    insertion_index: object
     target = site.statements
-    ordered_target = [statement for statement in target if statement is not assignment]
+    ordered_target = [statement for statement in iter(target) if statement is not assignment]
     insertion_index = _ordered_insertion_index_8616(
         project,
         codegen,
@@ -372,7 +415,7 @@ def place_assignment_8616(
     )
     if insertion_index is None:
         return False, False
-    if location is not None and location.statements is target and location.index == insertion_index:
+    if location is not None and location.statements is target and operator.eq(location.index, insertion_index):
         return True, True
     if location is not None:
         del location.statements[location.index]

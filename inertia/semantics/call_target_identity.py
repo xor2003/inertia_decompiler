@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Canonicalize direct-call addresses across x86-16 project coordinate spaces.
 
 Layer: Traits/summaries.
@@ -14,11 +15,14 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from typing import Protocol, cast
 
 from inertia.lowering.analysis_helpers import canonicalize_x86_16_padding_call_target_8616
+import operator
 
 __all__ = (
     "normalize_x86_16_call_target_addr_8616",
@@ -53,14 +57,14 @@ class _ProjectAddressSurface8616(Protocol):
 class _FunctionSurface8616(Protocol):
     """Third-party angr function identity used by target resolution."""
 
-    addr: int
-    name: str
+    addr: cython.longlong
+    name: object
 
 
 class _FunctionManagerSurface8616(Protocol):
     """Third-party angr function manager used by exact candidate lookup."""
 
-    def function(self, *, addr: int, create: bool) -> _FunctionSurface8616 | None:
+    def function(self, *, addr: cython.longlong, create: cython.bint) -> _FunctionSurface8616 | None:
         """Return one exact existing function without creating it."""
 
 
@@ -68,7 +72,7 @@ class _KnowledgeBaseSurface8616(Protocol):
     """Third-party angr knowledge base containing functions."""
 
     functions: _FunctionManagerSurface8616
-    labels: Mapping[int, object]
+    labels: Mapping[cython.longlong, object]
 
 
 class _ProjectFunctionSurface8616(_ProjectAddressSurface8616, Protocol):
@@ -77,7 +81,8 @@ class _ProjectFunctionSurface8616(_ProjectAddressSurface8616, Protocol):
     kb: _KnowledgeBaseSurface8616
 
 
-def _project_image_bounds_8616(project: object) -> tuple[int, int] | None:
+@cython.ccall
+def _project_image_bounds_8616(project: object) -> object:
     """Return half-open linked image bounds from a third-party project."""
     try:
         loader = cast(_ProjectAddressSurface8616, project).loader
@@ -91,12 +96,14 @@ def _project_image_bounds_8616(project: object) -> tuple[int, int] | None:
     return None
 
 
-def _addr_in_image_bounds_8616(addr: int, bounds: tuple[int, int] | None) -> bool:
+@cython.ccall
+def _addr_in_image_bounds_8616(addr: cython.longlong, bounds: object) -> cython.bint:
     """Return whether an address belongs to the supplied half-open image."""
     return bounds is not None and bounds[0] <= addr < bounds[1]
 
 
-def _project_has_exact_target_evidence_8616(project: object, addr: int) -> bool:
+@cython.ccall
+def _project_has_exact_target_evidence_8616(project: object, addr: cython.longlong) -> cython.bint:
     """Return whether a third-party project owns an exact label or function."""
     try:
         knowledge_base = cast(_ProjectFunctionSurface8616, project).kb
@@ -114,10 +121,11 @@ def _project_has_exact_target_evidence_8616(project: object, addr: int) -> bool:
         return False
 
 
+@cython.ccall
 def normalize_x86_16_direct_call_target_8616(
-    target: int,
+    target: cython.longlong,
     linked_base: int | None,
-    image_end: int | None,
+    image_end: object,
 ) -> int | None:
     """Normalize a direct target between linked and image-relative coordinates."""
     if isinstance(linked_base, int):
@@ -136,6 +144,8 @@ def normalize_x86_16_direct_call_target_8616(
 
 def normalize_x86_16_call_target_addr_8616(project: object, target_addr: int | None) -> int | None:
     """Return one canonical target address for active and rebased projects."""
+    active_bounds: object
+    original_project: object
     if not isinstance(target_addr, int):
         return None
 
@@ -173,22 +183,29 @@ def normalize_x86_16_call_target_addr_8616(project: object, target_addr: int | N
     )
 
 
+@cython.ccall
 def x86_16_call_targets_equivalent_8616(
     project: object,
     lhs_addr: int | None,
     rhs_addr: int | None,
-) -> bool:
+) -> cython.bint:
     """Compare two targets after exact active/original address normalization."""
+    lhs: object
+    rhs: object
     lhs = normalize_x86_16_call_target_addr_8616(project, lhs_addr)
     rhs = normalize_x86_16_call_target_addr_8616(project, rhs_addr)
-    return lhs is not None and rhs is not None and lhs == rhs
+    return lhs is not None and rhs is not None and operator.eq(lhs, rhs)
 
 
+@cython.ccall
 def resolve_x86_16_call_target_function_8616(
     project: object,
     target_addr: int | None,
 ) -> _FunctionSurface8616 | None:
     """Resolve one canonical target to its exact active-project function."""
+    active_bounds: object
+    function: object
+    candidate_addr: object
     if not isinstance(target_addr, int):
         return None
     project_surface = cast(_ProjectFunctionSurface8616, project)
@@ -210,7 +227,7 @@ def resolve_x86_16_call_target_function_8616(
         linked_base = active_bounds[0]
         candidates.extend((target_addr - linked_base, target_addr + linked_base))
 
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     for candidate_addr in candidates:
         if candidate_addr < 0 or candidate_addr in seen:
             continue
@@ -225,11 +242,14 @@ def resolve_x86_16_call_target_function_8616(
     return None
 
 
+@cython.ccall
 def resolve_x86_16_canonical_call_target_function_8616(
     project: object,
     target_addr: int | None,
 ) -> _FunctionSurface8616 | None:
     """Prefer the original-image function for one canonical direct target."""
+    original_function: object
+    original_project: object
     project_surface = cast(_ProjectAddressSurface8616, project)
     try:
         original_project = project_surface._inertia_original_project

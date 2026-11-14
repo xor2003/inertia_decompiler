@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: preserve legacy CLI helper surface while delegating semantic proof to X86_16 layers.
@@ -5,6 +6,8 @@ Forbidden: owning decompiler semantics, source-backed recovery, or postprocess s
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import re
 from collections.abc import Callable
@@ -14,12 +17,14 @@ from typing import Protocol
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimType, SimTypeChar, SimTypeShort
 from angr.sim_variable import SimStackVariable
+import dataclasses
+import operator
 
 
 class _ArchLike(Protocol):
     """Architecture surface needed to size stack references."""
 
-    byte_width: int
+    byte_width: cython.longlong
 
 
 class _ProjectLike(Protocol):
@@ -31,7 +36,7 @@ class _ProjectLike(Protocol):
 class _CFunctionLike(Protocol):
     """Structured C function surface needed by stack-local materialization."""
 
-    addr: int
+    addr: cython.longlong
     statements: object
     unified_local_vars: object
     variables_in_use: object
@@ -46,34 +51,37 @@ class _CodegenLike(Protocol):
 class _UnifiedVariableLike(Protocol):
     """Optional unified-variable metadata surface from angr codegen."""
 
-    size: int
+    size: cython.longlong
 
 
-def _stack_type_for_size(size: int) -> SimType:
+@cython.ccall
+def _stack_type_for_size(size: cython.longlong) -> SimType:
     return SimTypeChar(False) if size == 1 else SimTypeShort(False)
 
 
 
-def _same_stack_slot_8616(candidate: object, target_base: object, target_offset: object) -> bool:
+@cython.ccall
+def _same_stack_slot_8616(candidate: object, target_base: object, target_offset: object) -> cython.bint:
     """Return whether a candidate variable aliases the target stack slot."""
     return (
         isinstance(candidate, SimStackVariable)
         # Dynamic codegen boundary: stack variable identity comes from angr SimVariable fields.
-        and getattr(candidate, "base", None) == target_base
+        and operator.eq(getattr(candidate, "base", None), target_base)
         # Dynamic codegen boundary: stack variable identity comes from angr SimVariable fields.
-        and getattr(candidate, "offset", None) == target_offset
+        and operator.eq(getattr(candidate, "offset", None), target_offset)
     )
 
 
+@cython.ccall
 def _promote_stack_view_8616(
     candidate_var: object,
     candidate_cvar: structured_c.CVariable,
     *,
     target_base: object,
     target_offset: object,
-    size: int,
+    size: cython.longlong,
     type_: SimType,
-) -> bool:
+) -> cython.bint:
     """Widen one stack-slot view and retype its CVariable."""
     if not isinstance(candidate_var, SimStackVariable) or not _same_stack_slot_8616(
         candidate_var, target_base, target_offset,
@@ -84,13 +92,14 @@ def _promote_stack_view_8616(
         candidate_var.size = size
         changed = True
     # Dynamic codegen boundary: angr CVariable type metadata is optional.
-    if getattr(candidate_cvar, "variable_type", None) != type_:
+    if operator.ne(getattr(candidate_cvar, "variable_type", None), type_):
         candidate_cvar.variable_type = type_
         changed = True
     return changed
 
 
-def _grow_unified_size_8616(unified: _UnifiedVariableLike | None, size: int) -> bool:
+@cython.ccall
+def _grow_unified_size_8616(unified: object, size: cython.longlong) -> cython.bint:
     """Grow an optional unified-variable size."""
     # Dynamic codegen boundary: unified variable size is optional codegen metadata.
     if unified is None or getattr(unified, "size", 0) >= size:
@@ -102,15 +111,18 @@ def _grow_unified_size_8616(unified: _UnifiedVariableLike | None, size: int) -> 
         return False
 
 
+@cython.ccall
 def _promote_tracked_views_8616(
     cfunc: _CFunctionLike,
     *,
     target_base: object,
     target_offset: object,
-    size: int,
+    size: cython.longlong,
     type_: SimType,
-) -> bool:
+) -> cython.bint:
     """Promote matching tracked views in variables_in_use."""
+    tracked: object
+    tracked_var: object
     changed = False
     variables_in_use = cfunc.variables_in_use
     if isinstance(variables_in_use, dict):
@@ -124,14 +136,19 @@ def _promote_tracked_views_8616(
     return changed
 
 
+@cython.ccall
 def _retype_unified_entries_8616(
     cfunc: _CFunctionLike,
     *,
     target_base: object,
     target_offset: object,
     type_: SimType,
-) -> bool:
+) -> cython.bint:
     """Retype unified-local entries for the target stack slot."""
+    _vartype: object
+    cvar_and_vartypes: object
+    tracked_cvar: object
+    tracked_var: object
     unified_locals = cfunc.unified_local_vars
     if not isinstance(unified_locals, dict):
         return False
@@ -142,7 +159,7 @@ def _retype_unified_entries_8616(
         new_entries = set()
         for tracked_cvar, _vartype in cvar_and_vartypes:
             # Dynamic codegen boundary: angr CVariable type metadata is optional.
-            if getattr(tracked_cvar, "variable_type", None) != type_:
+            if operator.ne(getattr(tracked_cvar, "variable_type", None), type_):
                 tracked_cvar.variable_type = type_
                 changed = True
             new_entries.add((tracked_cvar, type_))
@@ -153,9 +170,15 @@ def _retype_unified_entries_8616(
     return False
 
 
+@cython.ccall
 def _promote_direct_stack_cvariable(
-    codegen: _CodegenLike, cvar: structured_c.CVariable, size: int, type_: SimType
-) -> bool:
+    codegen: _CodegenLike, cvar: structured_c.CVariable, size: cython.longlong, type_: SimType
+) -> cython.bint:
+    cfunc: object
+    target_base: object
+    target_offset: object
+    unified: object
+    variable: object
     # Dynamic codegen boundary: angr CVariable nodes expose optional SimVariable payloads.
     variable = getattr(cvar, "variable", None)
     if variable is None:
@@ -187,22 +210,24 @@ def _promote_direct_stack_cvariable(
     return changed
 
 
-def _stack_object_name_8616(offset: int) -> str:
+@cython.ccall
+def _stack_object_name_8616(offset: cython.longlong) -> str:
     """Return the conventional name for a stack object at one offset."""
     if offset >= 0:
         return f"arg_{offset:x}"
     return f"local_{-offset:x}"
 
 
-def _stack_local_name_or_existing_8616(offset: int, *names: str | None) -> str:
+def _stack_local_name_or_existing_8616(offset: cython.longlong, *names: str | None) -> object:
     """Return the first stable existing name, else the conventional one."""
+    name: object
     for name in names:
         if isinstance(name, str) and name and not re.fullmatch(r"(?:v\d+|vvar_\d+)", name):
             return name
     return _stack_object_name_8616(offset)
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _SsStackAttachment8616:
     """Mutable run state for SS stack-reference attachment."""
 
@@ -211,11 +236,18 @@ class _SsStackAttachment8616:
     cfunc: _CFunctionLike
     match_ss_stack_reference: Callable[[object, _ProjectLike], tuple[SimStackVariable, structured_c.CVariable, int] | None]
     resolve_stack_cvar_at_offset: Callable[[_CodegenLike, int], structured_c.CVariable]
-    created: dict[tuple[int, int], structured_c.CVariable] = field(default_factory=dict)
-    promoted: set[tuple[int, int]] = field(default_factory=set)
+    created: object = field(default_factory=dict)
+    promoted: object = field(default_factory=set)
 
+    @cython.ccall
     def transform(self, node: object) -> object:
         """Replace one matched SS stack reference with a promoted CVariable."""
+        bits: object
+        existing: object
+        matched: object
+        resolved_offset: object
+        resolved_variable: object
+        type_: object
         matched = self.match_ss_stack_reference(node, self.project)
         if matched is None:
             return node
@@ -239,7 +271,7 @@ class _SsStackAttachment8616:
             if isinstance(resolved_variable, SimStackVariable):
                 # Dynamic codegen boundary: SimStackVariable offset is supplied by angr.
                 resolved_offset = getattr(resolved_variable, "offset", None)
-                if resolved_offset == final_offset:
+                if operator.eq(resolved_offset, final_offset):
                     _promote_direct_stack_cvariable(self.codegen, resolved_cvar, size, type_)
                     key = (final_offset, size)
                     self.promoted.add(key)
@@ -281,12 +313,18 @@ class _SsStackAttachment8616:
         return cvar
 
 
+@cython.ccall
 def _resize_promoted_vars_in_use_8616(
     cfunc: _CFunctionLike,
-    promoted: set[tuple[int, int]],
+    promoted: object,
     stack_slot_identity_for_variable: Callable[[object], object | None],
-) -> bool:
+) -> cython.bint:
     """Resize/retype tracked variables covering promoted stack slots."""
+    identity: object
+    offset: object
+    unified: object
+    cvar: object
+    variable: object
     changed = False
     variables_in_use = cfunc.variables_in_use
     for variable, cvar in variables_in_use.items() if isinstance(variables_in_use, dict) else ():
@@ -295,7 +333,7 @@ def _resize_promoted_vars_in_use_8616(
             continue
         # Dynamic codegen boundary: SimVariable subclasses differ in available stack fields.
         offset = getattr(variable, "offset", None)
-        matching = [size for promoted_offset, size in promoted if promoted_offset == offset]
+        matching = [size for promoted_offset, size in iter(promoted) if operator.eq(promoted_offset, offset)]
         if not matching:
             continue
         size = max(matching)
@@ -305,7 +343,7 @@ def _resize_promoted_vars_in_use_8616(
             variable.size = size
             changed = True
         # Dynamic codegen boundary: CVariable type metadata is optional.
-        if getattr(cvar, "variable_type", None) != target_type:
+        if operator.ne(getattr(cvar, "variable_type", None), target_type):
             cvar.variable_type = target_type
             changed = True
         # Dynamic codegen boundary: unified variables are optional codegen metadata.
@@ -314,12 +352,17 @@ def _resize_promoted_vars_in_use_8616(
     return changed
 
 
+@cython.ccall
 def _retype_promoted_unified_8616(
     cfunc: _CFunctionLike,
-    promoted: set[tuple[int, int]],
+    promoted: object,
     stack_slot_identity_for_variable: Callable[[object], object | None],
-) -> bool:
+) -> cython.bint:
     """Retype unified-local entries covering promoted stack slots."""
+    identity: object
+    offset: object
+    cvar_and_vartypes: object
+    variable: object
     changed = False
     unified_locals = cfunc.unified_local_vars
     if not isinstance(unified_locals, dict):
@@ -330,27 +373,29 @@ def _retype_promoted_unified_8616(
             continue
         # Dynamic codegen boundary: SimVariable subclasses differ in available stack fields.
         offset = getattr(variable, "offset", None)
-        matching = [size for promoted_offset, size in promoted if promoted_offset == offset]
+        matching = [size for promoted_offset, size in iter(promoted) if operator.eq(promoted_offset, offset)]
         if not matching:
             continue
         size = max(matching)
         target_type = _stack_type_for_size(size)
-        new_entries = {(cvariable, target_type) for cvariable, _vartype in cvar_and_vartypes}
+        new_entries = {(cvariable, target_type) for cvariable, _vartype in iter(cvar_and_vartypes)}
         if new_entries != cvar_and_vartypes:
             unified_locals[variable] = new_entries
             changed = True
     return changed
 
 
+@cython.ccall
 def _attach_ss_stack_variables(
     project: _ProjectLike,
     codegen: _CodegenLike,
     *,
     match_ss_stack_reference: Callable[[object, _ProjectLike], tuple[SimStackVariable, structured_c.CVariable, int] | None],
     resolve_stack_cvar_at_offset: Callable[[_CodegenLike, int], structured_c.CVariable],
-    replace_c_children: Callable[[object, Callable[[object], object]], bool],
+    replace_c_children: Callable[[object, Callable[[object], object]], cython.bint],
     stack_slot_identity_for_variable: Callable[[object], object | None],
-) -> bool:
+) -> cython.bint:
+    cfunc: object
     cfunc = codegen.cfunc
     if cfunc is None:
         return False

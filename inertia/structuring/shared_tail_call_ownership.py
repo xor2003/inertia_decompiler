@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """CFG-proven ownership for duplicated calls at structured shared tails.
 
 Layer: Structuring.
@@ -12,6 +13,8 @@ rewrite cleanup, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -40,6 +43,9 @@ from .shared_tail_structured_ancestry import (
     collect_shared_tail_call_occurrences_8616,
     standalone_follows_nested_clone_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = (
     "SharedTailCallOwnershipResult8616",
@@ -57,18 +63,18 @@ class SharedTailCallOwnershipStatus8616(Enum):
     UNKNOWN_REFUSE = "unknown_refuse"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SharedTailCallOwnershipStats8616:
     """Closed evidence counters for shared-tail call ownership."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SharedTailCallOwnershipResult8616:
     """Immutable pass result retained on the codegen boundary."""
 
@@ -77,7 +83,7 @@ class SharedTailCallOwnershipResult8616:
     refusal_reasons: tuple[str, ...] = ()
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether at least one synthetic call clone was removed."""
         return self.stats.materialized_count > 0
 
@@ -85,7 +91,7 @@ class SharedTailCallOwnershipResult8616:
 class _CFunctionSurface8616(Protocol):
     """Third-party C-function fields consumed by this pass."""
 
-    addr: int
+    addr: cython.longlong
     statements: object
 
 
@@ -93,15 +99,15 @@ class _CodegenSurface8616(Protocol):
     """Codegen metadata boundary consumed and published by this pass."""
 
     cfunc: _CFunctionSurface8616
-    _inertia_callsite_summaries: dict[int, CallsiteSummary8616]
-    _inertia_callsite_summary_inventory_8616: dict[int, CallsiteSummary8616]
+    _inertia_callsite_summaries: object
+    _inertia_callsite_summary_inventory_8616: object
     _inertia_shared_tail_call_ownership_result_8616: SharedTailCallOwnershipResult8616
 
 
 class _RegisterArchitecture8616(Protocol):
     """Architecture register map consumed at the third-party project boundary."""
 
-    registers: Mapping[str, tuple[int, int]]
+    registers: Mapping[str, tuple[cython.longlong, cython.longlong]]
 
 
 class _RegisterProject8616(Protocol):
@@ -113,22 +119,24 @@ class _RegisterProject8616(Protocol):
 def _same_call_arguments_8616(
     left: structured_c.CFunctionCall,
     right: structured_c.CFunctionCall,
-) -> bool:
+) -> cython.bint:
     """Compare cloned call arguments without depending on rendered target names."""
     left_args = tuple(left.args or ())
     right_args = tuple(right.args or ())
-    return len(left_args) == len(right_args) and all(
+    return operator.eq(len(left_args), len(right_args)) and all(
         _same_c_expression_8616(left_arg, right_arg)
-        for left_arg, right_arg in zip(left_args, right_args, strict=True)
+        for left_arg, right_arg in builtins.iter(zip(left_args, right_args, strict=True))
     )
 
 
+@cython.ccall
 def _return_carrier_matches_8616(
     project: object,
     occurrence: SharedTailCallOccurrence8616,
     summary: CallsiteSummary8616,
-) -> bool:
+) -> cython.bint:
     """Match a cloned return carrier by physical register identity and width."""
+    expected: object
     variable = occurrence.destination_variable
     if not isinstance(variable, SimRegisterVariable) or not isinstance(
         summary.return_register, str
@@ -141,20 +149,24 @@ def _return_carrier_matches_8616(
     expected = arch.registers.get(summary.return_register.lower())
     return (
         expected is not None
-        and variable.reg == expected[0]
-        and variable.size == expected[1]
+        and operator.eq(variable.reg, expected[0])
+        and operator.eq(variable.size, expected[1])
     )
 
 
+@cython.ccall
 def _owned_callsite_addr_8616(
     call: structured_c.CFunctionCall,
-    summary_map: dict[int, CallsiteSummary8616],
+    summary_map: object,
 ) -> int | None:
     """Resolve one callsite from owned evidence and reject projection drift."""
+    raw_tagged_addr: object
+    summary: object
+    tagged_addr: object
     raw_tagged_addr = structured_callsite_addr_8616(call)
     if raw_tagged_addr is not None and not isinstance(raw_tagged_addr, int):
         raise TypeError("structured callsite identity must be an integer")
-    tagged_addr: int | None = raw_tagged_addr
+    tagged_addr = raw_tagged_addr
     summary = summary_map.get(id(call))
     if summary is None:
         return tagged_addr
@@ -163,41 +175,41 @@ def _owned_callsite_addr_8616(
     summary_addr = summary.callsite_addr
     if not isinstance(summary_addr, int):
         raise TypeError("owned callsite summary identity must be an integer")
-    if tagged_addr is not None and tagged_addr != summary_addr:
+    if tagged_addr is not None and operator.ne(tagged_addr, summary_addr):
         raise PipelineHardError("structured callsite tag contradicts its owned callsite summary")
     return summary_addr
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _CallsiteOccurrenceShapes8616:
     """One callsite's occurrences bucketed by kind with derived shape flags."""
 
-    conditions: tuple[SharedTailCallOccurrence8616, ...]
-    returned: tuple[SharedTailCallOccurrence8616, ...]
-    return_carriers: tuple[SharedTailCallOccurrence8616, ...]
-    standalone: tuple[SharedTailCallOccurrence8616, ...]
-    returned_clone_shape: bool
-    nested_standalone_shape: bool
-    condition_carrier_shape: bool
+    conditions: object
+    returned: object
+    return_carriers: object
+    standalone: object
+    returned_clone_shape: cython.bint
+    nested_standalone_shape: cython.bint
+    condition_carrier_shape: cython.bint
 
 
 def _occurrence_shapes_8616(
-    occurrences: list[SharedTailCallOccurrence8616],
+    occurrences: object,
 ) -> _CallsiteOccurrenceShapes8616:
     """Bucket one callsite's occurrences by kind and derive shape flags."""
     conditions = tuple(
-        item for item in occurrences if item.kind is SharedTailCallOccurrenceKind8616.CONDITION
+        item for item in iter(occurrences) if item.kind is SharedTailCallOccurrenceKind8616.CONDITION
     )
     returned = tuple(
-        item for item in occurrences if item.kind is SharedTailCallOccurrenceKind8616.RETURNED
+        item for item in iter(occurrences) if item.kind is SharedTailCallOccurrenceKind8616.RETURNED
     )
     return_carriers = tuple(
         item
-        for item in occurrences
+        for item in iter(occurrences)
         if item.kind is SharedTailCallOccurrenceKind8616.RETURN_CARRIER
     )
     standalone = tuple(
-        item for item in occurrences if item.kind is SharedTailCallOccurrenceKind8616.STANDALONE
+        item for item in iter(occurrences) if item.kind is SharedTailCallOccurrenceKind8616.STANDALONE
     )
     return _CallsiteOccurrenceShapes8616(
         conditions,
@@ -222,11 +234,11 @@ def _ownership_proof_8616(
 ) -> tuple[
     SharedTailCallOccurrence8616 | None,
     tuple[SharedTailCallOccurrence8616, ...],
-    bool,
+    cython.bint,
 ]:
     """Prove retained-call ownership and select clone occurrences."""
-    retained: SharedTailCallOccurrence8616 | None
-    clones: tuple[SharedTailCallOccurrence8616, ...]
+    retained: object
+    clones: object
     if shapes.condition_carrier_shape:
         retained = shapes.conditions[0]
         clones = shapes.return_carriers
@@ -241,23 +253,23 @@ def _ownership_proof_8616(
         retained = shapes.standalone[0]
         clones = shapes.returned
         ownership_proven = all(
-            standalone_follows_nested_clone_8616(item, retained) for item in clones
+            standalone_follows_nested_clone_8616(item, retained) for item in iter(clones)
         )
     elif shapes.nested_standalone_shape and summary.return_used is False:
         retained_candidates = tuple(
             candidate
-            for candidate in shapes.standalone
+            for candidate in iter(shapes.standalone)
             if all(
                 other is candidate
                 or (
                     standalone_follows_nested_clone_8616(other, candidate)
                     and _same_c_expression_8616(candidate.call, other.call)
                 )
-                for other in shapes.standalone
+                for other in iter(shapes.standalone)
             )
         )
         retained = retained_candidates[0] if len(retained_candidates) == 1 else None
-        clones = tuple(item for item in shapes.standalone if item is not retained)
+        clones = tuple(item for item in iter(shapes.standalone) if item is not retained)
         ownership_proven = retained is not None and bool(clones)
     else:
         retained = None
@@ -266,28 +278,31 @@ def _ownership_proof_8616(
     return retained, clones, ownership_proven
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _OwnershipScan8616:
     """Mutable per-callsite shared-tail ownership scan state."""
 
     project: object
     topology: SharedTailCfgTopology8616 | None
-    inventory: Mapping[int, CallsiteSummary8616]
-    raw_count: int = 0
-    normalized_count: int = 0
-    classified_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    refusals: list[str] = field(default_factory=list)
-    removals: list[SharedTailCallOccurrence8616] = field(default_factory=list)
-    retained_call_ids: set[int] = field(default_factory=set)
+    inventory: Mapping[cython.longlong, CallsiteSummary8616]
+    raw_count: cython.longlong = 0
+    normalized_count: cython.longlong = 0
+    classified_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    refusals: object = field(default_factory=list)
+    removals: object = field(default_factory=list)
+    retained_call_ids: object = field(default_factory=set)
 
+    @cython.ccall
     def process(
         self,
-        callsite_addr: int,
-        occurrences: list[SharedTailCallOccurrence8616],
+        callsite_addr: cython.longlong,
+        occurrences: object,
     ) -> None:
         """Classify one callsite's occurrences into retained call and clones."""
+        retained: object
+        summary: object
         shapes = _occurrence_shapes_8616(occurrences)
         if (
             not shapes.returned_clone_shape
@@ -322,15 +337,7 @@ class _OwnershipScan8616:
 
 def _proven_surface_8616(
     codegen: object,
-) -> (
-    tuple[
-        _CodegenSurface8616,
-        structured_c.CStatements,
-        dict[int, CallsiteSummary8616],
-        dict[int, CallsiteSummary8616],
-    ]
-    | None
-):
+) -> object:
     """Return the proven codegen surface pieces, or None when absent."""
     boundary = cast(_CodegenSurface8616, codegen)
     try:
@@ -347,8 +354,8 @@ def _proven_surface_8616(
     if any(
         not isinstance(callsite_addr, int)
         or not isinstance(summary, CallsiteSummary8616)
-        or summary.callsite_addr != callsite_addr
-        for callsite_addr, summary in inventory.items()
+        or operator.ne(summary.callsite_addr, callsite_addr)
+        for callsite_addr, summary in builtins.iter(inventory.items())
     ):
         raise TypeError("shared-tail callsite inventory contains an invalid owned contract")
     return boundary, root, summary_map, inventory
@@ -356,9 +363,10 @@ def _proven_surface_8616(
 
 def _materialize_removals_8616(
     scan: _OwnershipScan8616,
-    summary_map: dict[int, CallsiteSummary8616],
+    summary_map: object,
 ) -> None:
     """Delete proven clone occurrences from their owning containers."""
+    occurrence: object
     for occurrence in sorted(
         scan.removals,
         key=lambda item: (id(item.parent), item.statement_index),
@@ -377,11 +385,16 @@ def _materialize_removals_8616(
         scan.materialized_count += 1
 
 
+@cython.ccall
 def materialize_shared_tail_call_ownership_8616(
     project: object,
     codegen: object,
 ) -> SharedTailCallOwnershipResult8616:
     """Remove only CFG-proven returned-call clones of one retained shared tail."""
+    surface: object
+    callsite_addr: object
+    occurrence: object
+    occurrences: object
     empty = SharedTailCallOwnershipResult8616(
         SharedTailCallOwnershipStatus8616.NO_CANDIDATE,
         SharedTailCallOwnershipStats8616(),
@@ -394,14 +407,14 @@ def materialize_shared_tail_call_ownership_8616(
         project,
         boundary.cfunc.addr,
     )
-    occurrences_by_callsite: dict[int, list[SharedTailCallOccurrence8616]] = {}
+    occurrences_by_callsite: dict[cython.longlong, list[SharedTailCallOccurrence8616]] = {}
     for occurrence in collect_shared_tail_call_occurrences_8616(root):
         callsite_addr = _owned_callsite_addr_8616(occurrence.call, summary_map)
         if isinstance(callsite_addr, int):
             occurrences_by_callsite.setdefault(callsite_addr, []).append(occurrence)
 
     scan = _OwnershipScan8616(project, topology, inventory)
-    for callsite_addr, occurrences in sorted(occurrences_by_callsite.items()):
+    for callsite_addr, occurrences in sorted(tuple(occurrences_by_callsite.items())):
         scan.process(callsite_addr, occurrences)
 
     _materialize_removals_8616(scan, summary_map)

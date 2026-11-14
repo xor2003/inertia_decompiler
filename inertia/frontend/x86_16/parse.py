@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/runtime.
 
 Responsibility: parse instruction prefixes, operands, and width state for the lifter.
@@ -5,6 +6,8 @@ Forbidden: decompiler semantic recovery, source/COD-backed repair, or validation
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import struct
@@ -30,8 +33,9 @@ from .instruction import (
     X86Instruction,
 )
 from .msvc_x87_interrupts import is_msvc_x87_emulation_interrupt_8616, msvc_x87_escape_opcode_8616
+import operator
 
-_CONTROL_FLOW_BY_OPCODE_8616: dict[int, str] = {
+_CONTROL_FLOW_BY_OPCODE_8616: dict[cython.longlong, str] = {
     0xCC: "interrupt",
     0xCD: "interrupt",
     0xCE: "interrupt",
@@ -47,14 +51,14 @@ _CONTROL_FLOW_BY_OPCODE_8616: dict[int, str] = {
     0xEB: "near_jump",
 }
 
-_CONTROL_FLOW_FF_REG_8616: dict[int, str] = {
+_CONTROL_FLOW_FF_REG_8616: dict[cython.longlong, str] = {
     2: "near_call",
     3: "far_call",
     4: "near_jump",
     5: "far_jump",
 }
 
-_CONDITIONAL_JUMP_OPCODES_8616: set[int] = {
+_CONDITIONAL_JUMP_OPCODES_8616: set[cython.longlong] = {
     0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77,
     0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x7E, 0x7F,
     0x0F80, 0x0F81, 0x0F82, 0x0F83, 0x0F84, 0x0F85, 0x0F86, 0x0F87,
@@ -62,11 +66,11 @@ _CONDITIONAL_JUMP_OPCODES_8616: set[int] = {
     0xE0, 0xE1, 0xE2, 0xE3,
 }
 
-CHSZ_NONE: int = 0
-CHSZ_OP: int = 1
-CHSZ_AD: int = 2
+CHSZ_NONE: cython.longlong = 0
+CHSZ_OP: cython.longlong = 1
+CHSZ_AD: cython.longlong = 2
 
-_SEGMENT_PREFIX_BY_CODE_8616: dict[int, sgreg_t] = {
+_SEGMENT_PREFIX_BY_CODE_8616: dict[cython.longlong, sgreg_t] = {
     0x26: sgreg_t.ES,
     0x2E: sgreg_t.CS,
     0x36: sgreg_t.SS,
@@ -75,12 +79,12 @@ _SEGMENT_PREFIX_BY_CODE_8616: dict[int, sgreg_t] = {
     0x65: sgreg_t.GS,
 }
 
-_PREFIX_CHSZ_BY_CODE_8616: dict[int, int] = {
+_PREFIX_CHSZ_BY_CODE_8616: dict[cython.longlong, cython.longlong] = {
     0x66: CHSZ_OP,
     0x67: CHSZ_AD,
 }
 
-_PREFIX_REPEAT_BY_CODE_8616: dict[int, int] = {
+_PREFIX_REPEAT_BY_CODE_8616: dict[cython.longlong, cython.longlong] = {
     0xF2: REPNZ,
     0xF3: REPZ,
 }
@@ -91,18 +95,18 @@ logger: logging.Logger = logging.getLogger(__name__)
 class ParseInstr(X86Instruction):
     """Parse x86 instruction bytes into frontend decode metadata."""
 
-    def __init__(self, emu: Emulator, instr: InstrData, mode32: bool) -> None:
+    def __init__(self, emu: Emulator, instr: InstrData, mode32: cython.bint) -> None:
         """Bind parser state to the current emulator byte stream and instruction record."""
         super().__init__(emu, instr, mode32)
         self.emu: Emulator = emu
-        self.chk: list[int | InstrFlags] = [InstrFlags()] * MAX_OPCODE
-        self.chsz: int = CHSZ_NONE
-        self.chsz_ad: bool = False
+        self.chk: object = [InstrFlags()] * MAX_OPCODE
+        self.chsz: cython.longlong = CHSZ_NONE
+        self.chsz_ad: cython.bint = False
 
-    def parse_prefix(self) -> int:
+    def parse_prefix(self) -> cython.longlong:
         """Consume instruction prefixes and return the operand/address-size override mask."""
 
-        def _impl() -> int:
+        def _impl() -> cython.longlong:
             chsz = 0
             prefix_len = 0
 
@@ -126,8 +130,11 @@ class ParseInstr(X86Instruction):
         return _impl()
         # self.emu.update_eip(1)
 
-    def _consume_prefix_8616(self, code: int, chsz: int) -> tuple[int, bool]:
+    def _consume_prefix_8616(self, code: cython.longlong, chsz: cython.longlong) -> tuple[cython.longlong, cython.bint]:
         """Apply one prefix byte; return the updated override mask and whether it was a prefix."""
+        repeat: object
+        segment: object
+        size_flag: object
         segment = _SEGMENT_PREFIX_BY_CODE_8616.get(code)
         if segment is not None:
             self.instr.pre_segment = segment
@@ -190,7 +197,7 @@ class ParseInstr(X86Instruction):
 
         return _impl()
 
-    def _decode_immediates_8616(self, opcode: int, opcode_flags: int) -> None:
+    def _decode_immediates_8616(self, opcode: cython.longlong, opcode_flags: cython.longlong) -> None:
         """Decode flag-selected immediates and moffs for the current instruction."""
         if opcode_flags & CHK_IMM32:
             self.instr.imm32 = self.emu.get_code32(0)
@@ -225,14 +232,15 @@ class ParseInstr(X86Instruction):
                 self.instr.imm16 = self.emu.get_code16(0)
 
     def _repeat_class_name(self) -> str:
-        if self.instr.pre_repeat == REPZ:
+        if operator.eq(self.instr.pre_repeat, REPZ):
             return "repz"
-        if self.instr.pre_repeat == REPNZ:
+        if operator.eq(self.instr.pre_repeat, REPNZ):
             return "repnz"
         return "none"
 
-    def _classify_control_flow(self, opcode: int) -> str:
-        def _impl() -> str:
+    def _classify_control_flow(self, opcode: cython.longlong) -> object:
+        def _impl() -> object:
+            fixed: object
             if opcode == 0xCD and (
                 self.instr.msvc_x87_escape
                 or (is_msvc_x87_emulation_interrupt_8616(self.instr.imm8) and (self.instr.imm8 & 0xFF) == 0x3D)

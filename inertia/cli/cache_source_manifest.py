@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Own source-component scopes for persistent decompiler caches.
 
 Layer: CLI/fallback/reporting.
@@ -8,6 +9,7 @@ semantic output as discovery-only.
 """
 
 from __future__ import annotations
+import cython
 
 from enum import StrEnum
 from pathlib import Path
@@ -16,6 +18,7 @@ from .function_ir_ssa_source_scope import (
     frontend_cache_source_files_8616,
     function_ir_ssa_cache_source_files_8616,
 )
+import builtins
 
 _ROOT = Path(__file__).resolve().parents[2]
 
@@ -271,11 +274,11 @@ def _function_discovery_cache_source_files_8616() -> tuple[Path, ...]:
     inertia_root = _ROOT / "inertia" / "cli"
     x86_root = Path(x86_16.__file__).parent
     sources = {
-        *(inertia_root / name for name in _DISCOVERY_INERTIA_NAMES_8616),
-        *(inertia_root / name for name in _DISCOVERY_X86_16_ROOT_INERTIA_NAMES_8616),
+        *(inertia_root / name for name in iter(_DISCOVERY_INERTIA_NAMES_8616)),
+        *(inertia_root / name for name in iter(_DISCOVERY_X86_16_ROOT_INERTIA_NAMES_8616)),
         *(
         path
-        for path in x86_root.glob("*.py")
+        for path in builtins.iter(x86_root.glob("*.py"))
         if not path.name.startswith(
             _DISCOVERY_X86_16_ROOT_EXCLUDED_PREFIXES_8616
         )
@@ -284,37 +287,37 @@ def _function_discovery_cache_source_files_8616() -> tuple[Path, ...]:
         *Path(semantics.__file__).parent.rglob("*.py"),
         *(
         Path(pipeline.__file__).parent / name
-        for name in _RECOVERY_PIPELINE_DEPENDENCY_NAMES_8616
+        for name in iter(_RECOVERY_PIPELINE_DEPENDENCY_NAMES_8616)
         ),
         *(
         Path(lowering.__file__).parent / name
-        for name in _DISCOVERY_X86_16_ROOT_LOWERING_NAMES_8616
+        for name in iter(_DISCOVERY_X86_16_ROOT_LOWERING_NAMES_8616)
         ),
         *(
         Path(structuring.__file__).parent / name
-        for name in _DISCOVERY_X86_16_ROOT_STRUCTURING_NAMES_8616
+        for name in iter(_DISCOVERY_X86_16_ROOT_STRUCTURING_NAMES_8616)
         ),
         *(
         Path(postprocess.__file__).parent / name
-        for name in _DISCOVERY_X86_16_ROOT_POSTPROCESS_NAMES_8616
+        for name in iter(_DISCOVERY_X86_16_ROOT_POSTPROCESS_NAMES_8616)
         ),
         *(
         Path(validation.__file__).parent / name
-        for name in _DISCOVERY_X86_16_ROOT_VALIDATION_NAMES_8616
+        for name in iter(_DISCOVERY_X86_16_ROOT_VALIDATION_NAMES_8616)
         ),
         _ROOT / "tools/signatures/omf_pat.py",
         _ROOT / "tools/signatures/signature_catalog.py",
         *frontend_cache_source_files_8616(_ROOT),
     }
-    return tuple(sorted(path for path in sources if path.is_file()))
+    return tuple(sorted(path for path in iter(sources) if path.is_file()))
 
 
-FUNCTION_DISCOVERY_CACHE_SOURCE_FILES: tuple[Path, ...] = (
+FUNCTION_DISCOVERY_CACHE_SOURCE_FILES: object = (
     _function_discovery_cache_source_files_8616()
 )
 
 
-FUNCTION_IR_SSA_CACHE_SOURCE_FILES: tuple[Path, ...] = (
+FUNCTION_IR_SSA_CACHE_SOURCE_FILES: object = (
     function_ir_ssa_cache_source_files_8616(_ROOT)
 )
 
@@ -327,35 +330,35 @@ def _indexed_alias_program_cache_source_files_8616() -> tuple[Path, ...]:
     inertia_root = _ROOT / "inertia" / "cli"
     x86_root = Path(x86_16.__file__).parent
     sources = {
-        *(inertia_root / name for name in _INDEXED_ALIAS_PROGRAM_INERTIA_NAMES_8616),
+        *(inertia_root / name for name in iter(_INDEXED_ALIAS_PROGRAM_INERTIA_NAMES_8616)),
         *FUNCTION_IR_SSA_CACHE_SOURCE_FILES,
         *(
         x86_root / path
-        for path in _INDEXED_ALIAS_PROGRAM_DISCOVERY_PATHS_8616
+        for path in iter(_INDEXED_ALIAS_PROGRAM_DISCOVERY_PATHS_8616)
         ),
         *(
         Path(semantics.__file__).parent / name
-        for name in _INDEXED_ALIAS_PROGRAM_SEMANTICS_NAMES_8616
+        for name in iter(_INDEXED_ALIAS_PROGRAM_SEMANTICS_NAMES_8616)
         ),
         *(
         Path(lowering.__file__).parent / name
-        for name in _INDEXED_ALIAS_PROGRAM_LOWERING_NAMES_8616
+        for name in iter(_INDEXED_ALIAS_PROGRAM_LOWERING_NAMES_8616)
         ),
         *Path(ir.__file__).parent.glob("*.py"),
         *(
         Path(alias.__file__).parent / name
-        for name in _INDEXED_ALIAS_PROGRAM_ALIAS_NAMES_8616
+        for name in iter(_INDEXED_ALIAS_PROGRAM_ALIAS_NAMES_8616)
         ),
         *(
         Path(widening.__file__).parent / name
-        for name in _INDEXED_ALIAS_PROGRAM_WIDENING_NAMES_8616
+        for name in iter(_INDEXED_ALIAS_PROGRAM_WIDENING_NAMES_8616)
         ),
         _ROOT / "tools/signatures/omf_pat.py", _ROOT / "tools/signatures/signature_catalog.py",
     }
-    return tuple(sorted(path for path in sources if path.is_file()))
+    return tuple(sorted(path for path in iter(sources) if path.is_file()))
 
 
-INDEXED_ALIAS_PROGRAM_CACHE_SOURCE_FILES: tuple[Path, ...] = (
+INDEXED_ALIAS_PROGRAM_CACHE_SOURCE_FILES: object = (
     _indexed_alias_program_cache_source_files_8616()
 )
 
@@ -366,21 +369,21 @@ def _program_callsite_cache_source_files_8616() -> tuple[Path, ...]:
 
     inertia_root = _ROOT / "inertia" / "cli"
     sources = {
-        *(inertia_root / name for name in _PROGRAM_CALLSITE_INERTIA_NAMES_8616),
+        *(inertia_root / name for name in iter(_PROGRAM_CALLSITE_INERTIA_NAMES_8616)),
         *FUNCTION_DISCOVERY_CACHE_SOURCE_FILES,
         *(
         Path(alias.__file__).parent / name
-        for name in _PROGRAM_CALLSITE_ALIAS_NAMES_8616
+        for name in iter(_PROGRAM_CALLSITE_ALIAS_NAMES_8616)
         ),
         *(
         Path(lowering.__file__).parent / name
-        for name in _PROGRAM_CALLSITE_LOWERING_NAMES_8616
+        for name in iter(_PROGRAM_CALLSITE_LOWERING_NAMES_8616)
         ),
     }
-    return tuple(sorted(path for path in sources if path.is_file()))
+    return tuple(sorted(path for path in iter(sources) if path.is_file()))
 
 
-PROGRAM_CALLSITE_CACHE_SOURCE_FILES: tuple[Path, ...] = (
+PROGRAM_CALLSITE_CACHE_SOURCE_FILES: object = (
     _program_callsite_cache_source_files_8616()
 )
 
@@ -393,24 +396,24 @@ def _direct_global_object_cache_source_files_8616() -> tuple[Path, ...]:
     sources = {
         *FUNCTION_DISCOVERY_CACHE_SOURCE_FILES,
         *(
-        inertia_root / name for name in _DIRECT_GLOBAL_OBJECT_INERTIA_NAMES_8616
+        inertia_root / name for name in iter(_DIRECT_GLOBAL_OBJECT_INERTIA_NAMES_8616)
         ),
         *(
         Path(lowering.__file__).parent / name
-        for name in _DIRECT_GLOBAL_OBJECT_LOWERING_NAMES_8616
+        for name in iter(_DIRECT_GLOBAL_OBJECT_LOWERING_NAMES_8616)
         ),
         *(
         Path(structuring.__file__).parent / name
-        for name in _DIRECT_GLOBAL_OBJECT_STRUCTURING_NAMES_8616
+        for name in iter(_DIRECT_GLOBAL_OBJECT_STRUCTURING_NAMES_8616)
         ),
         *(
         Path(widening.__file__).parent / name
-        for name in _DIRECT_GLOBAL_OBJECT_WIDENING_NAMES_8616
+        for name in iter(_DIRECT_GLOBAL_OBJECT_WIDENING_NAMES_8616)
         ),
     }
-    return tuple(sorted(path for path in sources if path.is_file()))
+    return tuple(sorted(path for path in iter(sources) if path.is_file()))
 
 
-DIRECT_GLOBAL_OBJECT_CACHE_SOURCE_FILES: tuple[Path, ...] = (
+DIRECT_GLOBAL_OBJECT_CACHE_SOURCE_FILES: object = (
     _direct_global_object_cache_source_files_8616()
 )

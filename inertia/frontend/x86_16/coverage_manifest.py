@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery/reporting.
 
 Responsibility: record coverage manifests that steer diagnostic sweeps.
@@ -5,6 +6,7 @@ Forbidden: changing instruction semantics, verifier verdicts, or recovery behavi
 """
 
 from __future__ import annotations
+import cython
 
 __all__ = ["COMPARE_VERIFIED_MOO_OPCODES"]
 

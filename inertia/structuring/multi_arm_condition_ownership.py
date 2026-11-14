@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Select typed conditions for multi-arm structured CFG nodes.
 
 Layer: Structuring.
@@ -23,6 +24,12 @@ from inertia.ir.ssa_function import SSAFunctionArtifact
 from inertia.lowering.structured_tags import copy_structured_tags_8616
 
 from .condition_exit_normalization import exact_condition_exit_polarity_8616
+import typing
+import cython
+import dataclasses
+import operator
+import builtins
+BodyT = typing.TypeVar("BodyT")
 
 _BINARY_ARITY = 2
 
@@ -45,57 +52,60 @@ class MultiArmConditionOwnershipStatus8616(Enum):
     AMBIGUOUS_RETURN = "ambiguous_return"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class MultiArmConditionOwnershipResult8616:
     """Return selected arm facts or one structured refusal."""
 
     status: MultiArmConditionOwnershipStatus8616
     facts: tuple[ConditionIR, ...] = ()
-    detail: str | None = None
-    taken_polarities: tuple[bool, ...] = ()
+    detail: object = None
+    taken_polarities: tuple[cython.bint, ...] = ()
 
     @property
-    def selected(self) -> bool:
+    def selected(self) -> cython.bint:
         """Return whether every arm has exact CFG-owned condition evidence."""
         return self.status is MultiArmConditionOwnershipStatus8616.SELECTED
 
 
-@dataclass(frozen=True, slots=True)
-class MultiArmConditionMaterializationResult8616[BodyT]:
+@dataclasses.dataclass(frozen=True, )
+class MultiArmConditionMaterializationResult8616(typing.Generic[BodyT]):
     """Return replacement predicates with unchanged, precisely typed arm bodies."""
 
-    condition_and_nodes: tuple[tuple[CExpression, BodyT], ...]
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    condition_and_nodes: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
+@cython.ccall
 def _refuse_8616(
     status: MultiArmConditionOwnershipStatus8616,
-    detail: str | None = None,
+    detail: object = None,
 ) -> MultiArmConditionOwnershipResult8616:
     """Build one typed ownership refusal."""
     return MultiArmConditionOwnershipResult8616(status=status, detail=detail)
 
 
 def select_multi_arm_condition_owners_8616(
-    arm_body_targets: tuple[int | None, ...],
-    conditions: tuple[ConditionIR, ...],
+    arm_body_targets: object,
+    conditions: object,
     *,
     root: ConditionIR,
-    successors: Mapping[int, tuple[int, ...]],
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
 ) -> MultiArmConditionOwnershipResult8616:
     """Select one exact taken-edge condition for every structured arm."""
+    refused: object
+    target: object
     if len(arm_body_targets) < _BINARY_ARITY:
         return _refuse_8616(MultiArmConditionOwnershipStatus8616.TOO_FEW_ARMS)
-    if any(target is None for target in arm_body_targets):
+    if any(target is None for target in iter(arm_body_targets)):
         return _refuse_8616(
             MultiArmConditionOwnershipStatus8616.MISSING_BODY_TARGET
         )
-    targets = tuple(int(target) for target in arm_body_targets if target is not None)
-    if len(set(targets)) != len(targets):
+    targets = tuple(int(target) for target in iter(arm_body_targets) if target is not None)
+    if operator.ne(len(set(targets)), len(targets)):
         return _refuse_8616(
             MultiArmConditionOwnershipStatus8616.DUPLICATE_BODY_TARGET
         )
@@ -104,8 +114,8 @@ def select_multi_arm_condition_owners_8616(
     for target in targets:
         candidates = tuple(
             condition
-            for condition in conditions
-            if condition.taken_target == target
+            for condition in iter(conditions)
+            if operator.eq(condition.taken_target, target)
             and isinstance(condition.block_addr, int)
             and isinstance(condition.fallthrough_target, int)
         )
@@ -116,11 +126,11 @@ def select_multi_arm_condition_owners_8616(
             )
         selected.append(candidates[0])
 
-    if selected[0] != root:
+    if operator.ne(selected[0], root):
         return _refuse_8616(MultiArmConditionOwnershipStatus8616.ROOT_MISMATCH)
-    if len({(fact.block_addr, fact.src_insn) for fact in selected}) != len(
+    if operator.ne(len({(fact.block_addr, fact.src_insn) for fact in iter(selected)}), len(
         selected
-    ):
+    )):
         return _refuse_8616(MultiArmConditionOwnershipStatus8616.DUPLICATE_FACT)
 
     refused = _cfg_edges_proven_8616(selected, successors)
@@ -135,11 +145,14 @@ def select_multi_arm_condition_owners_8616(
     )
 
 
+@cython.ccall
 def _cfg_edges_proven_8616(
-    selected: list[ConditionIR],
-    successors: Mapping[int, tuple[int, ...]],
+    selected: object,
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
 ) -> MultiArmConditionOwnershipResult8616 | None:
     """Refuse when any selected fact's edges are absent from the CFG."""
+    block_successors: object
+    fact: object
     for fact in selected:
         block_addr = fact.block_addr
         if not isinstance(block_addr, int):
@@ -158,12 +171,15 @@ def _cfg_edges_proven_8616(
     return None
 
 
+@cython.ccall
 def _fallthrough_connected_8616(
-    selected: list[ConditionIR],
+    selected: object,
 ) -> MultiArmConditionOwnershipResult8616 | None:
     """Refuse when consecutive selected facts are not fallthrough-linked."""
+    current: object
+    following: object
     for current, following in itertools.pairwise(selected):
-        if current.fallthrough_target != following.block_addr:
+        if operator.ne(current.fallthrough_target, following.block_addr):
             return _refuse_8616(
                 MultiArmConditionOwnershipStatus8616.DISCONNECTED_FALLTHROUGH,
                 detail=(
@@ -174,17 +190,23 @@ def _fallthrough_connected_8616(
     return None
 
 
-def materialize_multi_arm_condition_owners_8616[BodyT](
-    condition_and_nodes: tuple[tuple[CExpression, BodyT], ...],
+@cython.ccall
+def materialize_multi_arm_condition_owners_8616(
+    condition_and_nodes: object,
     ownership: MultiArmConditionOwnershipResult8616,
     materialize: Callable[[ConditionIR], CExpression | None],
     *,
     invert: Callable[[CExpression], CExpression] | None = None,
 ) -> MultiArmConditionMaterializationResult8616[BodyT]:
     """Materialize selected facts while preserving third-party AST tags."""
+    replacement: object
+    body: object
+    condition: object
+    fact: object
+    index: object
     raw_count = len(condition_and_nodes)
-    polarity_count_valid = not ownership.taken_polarities or len(ownership.taken_polarities) == raw_count
-    if not ownership.selected or len(ownership.facts) != raw_count or not polarity_count_valid:
+    polarity_count_valid = not ownership.taken_polarities or operator.eq(len(ownership.taken_polarities), raw_count)
+    if not ownership.selected or operator.ne(len(ownership.facts), raw_count) or not polarity_count_valid:
         return MultiArmConditionMaterializationResult8616(
             condition_and_nodes=(),
             raw_fact_count=raw_count,
@@ -231,11 +253,11 @@ def materialize_multi_arm_condition_owners_8616[BodyT](
 
 
 def select_exact_multi_arm_condition_owners_8616(
-    arm_body_targets: tuple[int | None, ...],
-    facts: tuple[ConditionIR, ...],
+    arm_body_targets: object,
+    facts: object,
     *,
-    else_target: int | None,
-    successors: Mapping[int, tuple[int, ...]],
+    else_target: object,
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
     artifact: SSAFunctionArtifact | None = None,
 ) -> MultiArmConditionOwnershipResult8616:
     """Prove a decision ladder through exact edges or effect-free SSA connectors.
@@ -243,16 +265,22 @@ def select_exact_multi_arm_condition_owners_8616(
     Physical ConditionIR edges remain authoritative and unchanged for replay.
     Normalization stops at every body and condition owner, never bypassing them.
     """
-    if len(facts) < _BINARY_ARITY or len(arm_body_targets) != len(facts):
+    continuation: object
+    expected_edges: object
+    polarity: object
+    target: object
+    fact: object
+    index: object
+    if len(facts) < _BINARY_ARITY or operator.ne(len(arm_body_targets), len(facts)):
         return _refuse_8616(MultiArmConditionOwnershipStatus8616.TOO_FEW_ARMS)
-    if else_target is None or any(target is None for target in arm_body_targets):
+    if else_target is None or any(target is None for target in iter(arm_body_targets)):
         return _refuse_8616(MultiArmConditionOwnershipStatus8616.MISSING_BODY_TARGET)
-    identities = {(fact.block_addr, fact.src_insn) for fact in facts}
-    if len(identities) != len(facts):
+    identities = {(fact.block_addr, fact.src_insn) for fact in iter(facts)}
+    if operator.ne(len(identities), len(facts)):
         return _refuse_8616(MultiArmConditionOwnershipStatus8616.DUPLICATE_FACT)
-    polarities: list[bool] = []
+    polarities: list[cython.bint] = []
     retained_targets = frozenset(
-        target for target in (*arm_body_targets, else_target, *(fact.block_addr for fact in facts))
+        target for target in iter(tuple(arm_body_targets) + (else_target, ) + tuple((fact.block_addr for fact in iter(facts))))
         if target is not None
     )
     for index, (target, fact) in enumerate(zip(arm_body_targets, facts, strict=True)):
@@ -260,7 +288,7 @@ def select_exact_multi_arm_condition_owners_8616(
         if fact.block_addr is None or fact.src_insn is None or continuation is None:
             return _refuse_8616(MultiArmConditionOwnershipStatus8616.MISSING_UNIQUE_FACT)
         expected_edges = {fact.taken_target, fact.fallthrough_target}
-        if None in expected_edges or len(expected_edges) != _BINARY_ARITY or set(successors.get(fact.block_addr, ())) != expected_edges:
+        if None in expected_edges or operator.ne(len(expected_edges), _BINARY_ARITY) or operator.ne(set(successors.get(fact.block_addr, ())), expected_edges):
             return _refuse_8616(MultiArmConditionOwnershipStatus8616.CFG_EDGE_MISMATCH)
         polarity = exact_condition_exit_polarity_8616(
             artifact, fact, target, continuation, successors, retained_targets=retained_targets,
@@ -283,27 +311,30 @@ class _StatementTags8616(Protocol):
 class _LabelCodegen8616(Protocol):
     """angr's authoritative label-address identity map."""
 
-    map_addr_to_label: Mapping[tuple[int, int | None], CLabel]
+    map_addr_to_label: Mapping[tuple[cython.longlong, int | None], CLabel]
 
 
+@cython.ccall
 def _label_entry_8616(label: CLabel) -> int | None:
     """Resolve one registered label by object identity, never its printed name."""
     try:
         labels = cast(_LabelCodegen8616, label.codegen).map_addr_to_label
     except AttributeError:
         return None
-    addresses = [address for (address, _index), candidate in labels.items() if candidate is label]
-    if len(addresses) != 1 or label.tags.get("ins_addr") != addresses[0]:
+    addresses = [address for (address, _index), candidate in builtins.iter(labels.items()) if candidate is label]
+    if len(addresses) != 1 or operator.ne(label.tags.get("ins_addr"), addresses[0]):
         return None
     return addresses[0]
 
 
+@cython.ccall
 def first_statement_block_8616(body: object) -> int | None:
     """Read a statement entry, registered label or already-bound guard owner.
 
     A nested condition supplies its root identity only after CFG ownership was
     materialized. Never use a descendant operand or an unbound condition tag.
     """
+    block: object
     while isinstance(body, CStatements) and body.statements:
         body = body.statements[0]
     if isinstance(body, (CStatements, CBreak, CContinue)):
@@ -313,7 +344,7 @@ def first_statement_block_8616(body: object) -> int | None:
     if isinstance(body, CIfElse) and body.condition_and_nodes:
         condition, _arm = body.condition_and_nodes[0]
         owned = condition.tags.get("inertia_structuring_condition_cfg_materialized_8616") is True
-        same_owner = condition.tags.get("ins_addr") == body.tags.get("ins_addr")
+        same_owner = operator.eq(condition.tags.get("ins_addr"), body.tags.get("ins_addr"))
         if owned and same_owner:
             block = condition.tags.get("vex_block_addr")
             if isinstance(block, int) and not isinstance(block, bool):

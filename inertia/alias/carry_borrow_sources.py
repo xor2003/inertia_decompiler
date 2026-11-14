@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Resolve exact carry/borrow operand carriers at the Alias boundary.
 
 Layer: Alias.
@@ -9,6 +10,7 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import cython
 
 from inertia.ir.core import IRValue, MemSpace
 from inertia.ir.logical_memory_contracts import (
@@ -29,17 +31,21 @@ from .carry_borrow_contracts import (
 )
 from .domains import FULL16, DomainKey, register_domain_for_name, register_view_for_name
 from .storage_fact_join import build_segmented_alias_range_8616
+import operator
+import builtins
 
 
+@cython.ccall
 def register_domain_for_value_8616(value: IRValue) -> DomainKey | None:
     """Return the canonical full-width register domain for one exact value."""
     if value.space is not MemSpace.REG or value.size != 2:
         return None
-    if register_view_for_name(value.name) != FULL16:
+    if operator.ne(register_view_for_name(value.name), FULL16):
         return None
     return register_domain_for_name(value.name)
 
 
+@cython.ccall
 def _constant_source_alias_8616(
     use: CarryBorrowOperandUse8616,
 ) -> CarryBorrowOperandAlias8616 | CarryBorrowAliasFailure8616:
@@ -53,18 +59,22 @@ def _constant_source_alias_8616(
     )
 
 
+@cython.ccall
 def _register_source_alias_8616(
     use: CarryBorrowOperandUse8616,
 ) -> CarryBorrowOperandAlias8616 | CarryBorrowAliasFailure8616:
+    definition: object
+    destination: object
+    source_domain: object
     definition = use.definition
     if definition is None or use.value.source_tmp is None:
         return CarryBorrowAliasFailure8616.SOURCE_DEFINITION_MISMATCH
     destination = definition.instruction.dst
     args = definition.instruction.args
     if (
-        definition.instruction.op != CarryBorrowIROp8616.MOV.value
+        operator.ne(definition.instruction.op, CarryBorrowIROp8616.MOV.value)
         or destination is None
-        or destination.source_tmp != use.value.source_tmp
+        or operator.ne(destination.source_tmp, use.value.source_tmp)
         or len(args) != 1
         or not isinstance(args[0], IRValue)
     ):
@@ -72,7 +82,7 @@ def _register_source_alias_8616(
     source = args[0]
     source_domain = register_domain_for_value_8616(source)
     use_domain = register_domain_for_value_8616(use.value)
-    if source_domain is None or use_domain != source_domain or source.version != use.value.version:
+    if source_domain is None or operator.ne(use_domain, source_domain) or operator.ne(source.version, use.value.version):
         return CarryBorrowAliasFailure8616.SOURCE_DEFINITION_MISMATCH
     return CarryBorrowOperandAlias8616(
         use=use,
@@ -81,12 +91,16 @@ def _register_source_alias_8616(
     )
 
 
+@cython.ccall
 def _execution_loads_shape_failure_8616(
     use: CarryBorrowOperandUse8616,
     definition: CarryBorrowDefinitionSite8616,
     memory_word: CarryBorrowMemoryWordUse8616,
 ) -> CarryBorrowAliasFailure8616 | None:
     """Return a typed refusal when the execution load shape does not match the use."""
+    destination: object
+    load_destination: object
+    execution_load: object
     destination = definition.instruction.dst
     execution_loads = memory_word.execution_loads
     if len(execution_loads) == 1:
@@ -96,24 +110,24 @@ def _execution_loads_shape_failure_8616(
     else:
         return CarryBorrowAliasFailure8616.SOURCE_DEFINITION_MISMATCH
     if (
-        definition.instruction.op != expected_op.value
+        operator.ne(definition.instruction.op, expected_op.value)
         or destination is None
-        or destination.source_tmp != use.value.source_tmp
+        or operator.ne(destination.source_tmp, use.value.source_tmp)
         or memory_word.size != 2
     ):
         return CarryBorrowAliasFailure8616.SOURCE_DEFINITION_MISMATCH
-    if expected_op is CarryBorrowIROp8616.LOAD and execution_loads[0].site != definition:
+    if expected_op is CarryBorrowIROp8616.LOAD and operator.ne(execution_loads[0].site, definition):
         return CarryBorrowAliasFailure8616.SOURCE_DEFINITION_MISMATCH
     for execution_load in execution_loads:
         load = execution_load.site
         address = execution_load.address
         load_destination = load.instruction.dst
         if (
-            load.instruction.op != CarryBorrowIROp8616.LOAD.value
+            operator.ne(load.instruction.op, CarryBorrowIROp8616.LOAD.value)
             or load_destination is None
             or load_destination.source_tmp is None
-            or load_destination.size != address.size
-            or load.instruction.args != (address,)
+            or operator.ne(load_destination.size, address.size)
+            or operator.ne(load.instruction.args, (address,))
         ):
             return CarryBorrowAliasFailure8616.SOURCE_DEFINITION_MISMATCH
     return None
@@ -123,14 +137,14 @@ def _execution_addresses_failure_8616(
     memory_word: CarryBorrowMemoryWordUse8616,
 ) -> CarryBorrowAliasFailure8616 | None:
     """Return a typed refusal when execution addresses do not cover the logical word."""
-    execution_addresses = tuple(item.address for item in memory_word.execution_loads)
-    if sum(address.size for address in execution_addresses) != memory_word.size:
+    execution_addresses = tuple(item.address for item in iter(memory_word.execution_loads))
+    if operator.ne(sum(address.size for address in iter(execution_addresses)), memory_word.size):
         return CarryBorrowAliasFailure8616.SOURCE_DEFINITION_MISMATCH
     logical_address = memory_word.logical_address
     first_execution = execution_addresses[0]
     if any(
         address.space is not first_execution.space
-        for address in execution_addresses[1:]
+        for address in iter(execution_addresses[1:])
     ) or logical_address.space is not first_execution.space:
         return CarryBorrowAliasFailure8616.SEGMENT_MISMATCH
     if any(
@@ -140,15 +154,21 @@ def _execution_addresses_failure_8616(
             source_byte_offset,
             memory_word.address_bits,
         )
-        for source_byte_offset, current in enumerate(execution_addresses)
+        for source_byte_offset, current in builtins.iter(enumerate(execution_addresses))
     ):
         return CarryBorrowAliasFailure8616.SOURCE_RANGE_MISMATCH
     return None
 
 
+@cython.ccall
 def _memory_word_alias_8616(
     use: CarryBorrowOperandUse8616,
 ) -> CarryBorrowOperandAlias8616 | CarryBorrowAliasFailure8616:
+    definition: object
+    memory: object
+    memory_word: object
+    range_failure: object
+    shape_failure: object
     definition = use.definition
     memory_word = use.memory_word
     if definition is None or memory_word is None or use.value.source_tmp is None:
@@ -187,6 +207,7 @@ def _memory_word_alias_8616(
     )
 
 
+@cython.ccall
 def resolve_carry_borrow_source_alias_8616(
     use: CarryBorrowOperandUse8616,
 ) -> CarryBorrowOperandAlias8616 | CarryBorrowAliasFailure8616:

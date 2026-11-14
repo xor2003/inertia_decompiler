@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Compatibility access to frontend-owned packed-MZ detection.
 
 Layer: CLI/fallback/reporting compatibility.
@@ -7,6 +8,8 @@ Forbidden: defining signatures, unpacking images, or creating a second packer cl
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from pathlib import Path
 
@@ -27,12 +30,15 @@ __all__ = (
 )
 
 
-def is_packed(binary_path: Path) -> bool:
+@cython.ccall
+def is_packed(binary_path: Path) -> cython.bint:
     """Return whether the frontend recognizes a packed DOS MZ executable."""
     return detect_packer(binary_path) is not None
 
 
-def get_packer_name(binary_path: Path) -> str | None:
+@cython.ccall
+def get_packer_name(binary_path: Path) -> object:
     """Return the frontend's human-readable packer label, when recognized."""
+    detection: object
     detection = detect_packer(binary_path)
     return None if detection is None else detection.label

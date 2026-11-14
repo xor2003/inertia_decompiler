@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Propagate proven terminal callee return types into caller prototypes.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
@@ -33,6 +36,7 @@ from inertia.semantics.terminal_return_storage import TerminalReturnStorage8616,
 from .argument_frame_base import msc_calling_convention_for_function_8616
 from .authoritative_function_prototypes import publish_authoritative_function_prototype_8616
 from .return_type_evidence import proven_function_result_observation_8616
+import dataclasses
 
 __all__ = (
     "CalleeResultContract8616",
@@ -54,11 +58,11 @@ class _ProjectSurface8616(Protocol):
 class _FunctionSurface8616(Protocol):
     """Third-party function fields used by prototype materialization."""
 
-    addr: int
+    addr: cython.longlong
     prototype: object | None
     calling_convention: object | None
     info: object
-    is_prototype_guessed: bool
+    is_prototype_guessed: cython.bint
     prototype_source: PrototypeSource
 
 
@@ -83,35 +87,36 @@ class TerminalCallReturnTypeSource8616(Enum):
     CALLEE_TERMINAL_AX_WORD = "callee_terminal_ax_word"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalCallReturnTypeEvidence8616:
     """Closed evidence loop for terminal call-result return typing."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
     return_type: SimType | None = None
-    call_ins_addrs: tuple[int, ...] = ()
-    target_addrs: tuple[int, ...] = ()
+    call_ins_addrs: tuple[cython.longlong, ...] = ()
+    target_addrs: tuple[cython.longlong, ...] = ()
     sources: tuple[TerminalCallReturnTypeSource8616, ...] = ()
-    inspected_target_addrs: tuple[int, ...] = ()
+    inspected_target_addrs: tuple[cython.longlong, ...] = ()
 
-    def with_materialized_count(self, count: int) -> TerminalCallReturnTypeEvidence8616:
+    def with_materialized_count(self, count: cython.longlong) -> TerminalCallReturnTypeEvidence8616:
         """Return this evidence with its consumed-fact count."""
         return replace(self, materialized_count=count)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalCallReturnTypeResult8616:
     """Result of applying terminal call-result return typing."""
 
-    changed: bool
+    changed: cython.bint
     evidence: TerminalCallReturnTypeEvidence8616
 
 
-def callee_result_contract_8616(callee: object | None) -> CalleeResultContract8616:
+@cython.ccall
+def callee_result_contract_8616(callee: object) -> CalleeResultContract8616:
     """Classify only an explicit, non-guessed callee result type."""
     if callee is None:
         return CalleeResultContract8616.UNKNOWN
@@ -135,17 +140,20 @@ def callee_result_contract_8616(callee: object | None) -> CalleeResultContract86
     )
 
 
-def _dynamic_attr_8616(obj: object, name: str, default: object = None) -> object:
+@cython.ccall
+def _dynamic_attr_8616(obj: object, name: object, default: object = None) -> object:
     """Read one field at the dynamic third-party angr/Capstone boundary."""
     return getattr(obj, name, default)
 
 
+@cython.ccall
 def _instruction_surface_8616(insn: object) -> object:
     """Return the underlying Capstone instruction from an angr wrapper."""
     return _dynamic_attr_8616(insn, "insn", insn)
 
 
-def _instruction_operands_8616(insn: object) -> tuple[object, ...]:
+@cython.ccall
+def _instruction_operands_8616(insn: object) -> object:
     """Return normalized operands for one third-party instruction."""
     raw_operands = _dynamic_attr_8616(_instruction_surface_8616(insn), "operands", ())
     return tuple(raw_operands) if isinstance(raw_operands, Iterable) else ()
@@ -159,7 +167,7 @@ def _direct_call_target_8616(insn: object) -> int | None:
         immediate = _dynamic_attr_8616(operands[0], "imm", None)
         return immediate if isinstance(immediate, int) else None
     if mnemonic == "lcall" and len(operands) == 2 and all(
-        _dynamic_attr_8616(operand, "type", -1) == 2 for operand in operands
+        _dynamic_attr_8616(operand, "type", -1) == 2 for operand in iter(operands)
     ):
         segment = _dynamic_attr_8616(operands[0], "imm", None)
         offset = _dynamic_attr_8616(operands[1], "imm", None)
@@ -168,6 +176,7 @@ def _direct_call_target_8616(insn: object) -> int | None:
     return None
 
 
+@cython.ccall
 def _return_type_key_8616(return_type: SimType) -> tuple[type[SimType], int | None, bool | None]:
     """Return the ABI-relevant identity of one scalar return type."""
     try:
@@ -181,7 +190,8 @@ def _return_type_key_8616(return_type: SimType) -> tuple[type[SimType], int | No
     return type(return_type), size if isinstance(size, int) else None, signed if isinstance(signed, bool) else None
 
 
-def _has_explicit_function_prototype_8616(function: _FunctionSurface8616) -> bool:
+@cython.ccall
+def _has_explicit_function_prototype_8616(function: _FunctionSurface8616) -> cython.bint:
     """Protect user/signature prototypes while allowing inferred contracts to improve."""
     try:
         source = function.prototype_source
@@ -196,11 +206,14 @@ def _has_explicit_function_prototype_8616(function: _FunctionSurface8616) -> boo
     return isinstance(annotated, SimTypeFunction) or source >= PrototypeSource.SIGNATURES
 
 
+@cython.ccall
 def _scalar_callee_return_type_8616(
     project: object,
-    target_addr: int,
+    target_addr: cython.longlong,
 ) -> tuple[SimType | None, TerminalCallReturnTypeSource8616 | None]:
     """Resolve a scalar callee return from typed or exact AX-width evidence."""
+    callee: object
+    prototype: object
     callee = resolve_x86_16_call_target_function_8616(project, target_addr)
     if callee is None:
         return None, None
@@ -228,24 +241,29 @@ def _scalar_callee_return_type_8616(
     return return_type, TerminalCallReturnTypeSource8616.CALLEE_PROTOTYPE
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _CallReturnCensus8616:
     """Mutable census over terminal call-clobber sites in one function."""
 
-    raw_count: int = 0
-    normalized_count: int = 0
-    failure_count: int = 0
-    classified: list[tuple[int, int, SimType, TerminalCallReturnTypeSource8616]] = field(
+    raw_count: cython.longlong = 0
+    normalized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    classified: object = field(
         default_factory=list
     )
-    inspected_targets: set[int] = field(default_factory=set)
+    inspected_targets: object = field(default_factory=set)
 
+    @cython.ccall
     def scan(
         self,
         project: object,
         callbacks: TerminalCallPathCallbacks8616,
     ) -> None:
         """Classify every proven terminal call-clobber site in the function."""
+        block: object
+        block_addr: object
+        block_size: object
+        insn: object
         for block_addr, block_size in callbacks.function_block_ranges():
             try:
                 block = callbacks.load_block(int(block_addr), int(block_size))
@@ -258,6 +276,7 @@ class _CallReturnCensus8616:
             for insn in insns:
                 self._scan_insn(project, insn, callbacks)
 
+    @cython.ccall
     def _scan_insn(
         self,
         project: object,
@@ -265,6 +284,9 @@ class _CallReturnCensus8616:
         callbacks: TerminalCallPathCallbacks8616,
     ) -> None:
         """Classify one candidate terminal call-clobber instruction."""
+        return_type: object
+        source: object
+        target_addr: object
         if terminal_ax_return_effect_8616(insn).kind is not TerminalAxReturnEffectKind8616.CALL_CLOBBER:
             return
         self.raw_count += 1
@@ -315,7 +337,7 @@ def collect_terminal_call_return_type_evidence_8616(
             failure_count=failure_count,
             inspected_target_addrs=tuple(sorted(inspected_targets)),
         )
-    return_keys = {_return_type_key_8616(return_type) for _, _, return_type, _ in classified}
+    return_keys = {_return_type_key_8616(return_type) for _, _, return_type, _ in iter(classified)}
     if len(return_keys) > 1:
         return TerminalCallReturnTypeEvidence8616(
             raw_fact_count=raw_count,
@@ -329,18 +351,20 @@ def collect_terminal_call_return_type_evidence_8616(
         classified_fact_count=len(classified),
         failure_count=failure_count,
         return_type=classified[0][2] if classified else None,
-        call_ins_addrs=tuple(call_addr for call_addr, _, _, _ in classified),
-        target_addrs=tuple(target_addr for _, target_addr, _, _ in classified),
-        sources=tuple(source for _, _, _, source in classified),
+        call_ins_addrs=tuple(call_addr for call_addr, _, _, _ in iter(classified)),
+        target_addrs=tuple(target_addr for _, target_addr, _, _ in iter(classified)),
+        sources=tuple(source for _, _, _, source in iter(classified)),
         inspected_target_addrs=tuple(sorted(inspected_targets)),
     )
 
 
+@cython.ccall
 def apply_terminal_call_return_type_evidence_8616(
     project: object,
     function: object,
 ) -> TerminalCallReturnTypeResult8616:
     """Materialize a terminal callee type for a proven observed result."""
+    existing: object
     project_surface = cast(_ProjectSurface8616, project)
     function_surface = cast(_FunctionSurface8616, function)
     if project_surface.arch.name != "86_16":

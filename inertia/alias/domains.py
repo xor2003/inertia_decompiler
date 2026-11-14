@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Alias-domain keys and register view helpers.
 
 Layer: Alias.
@@ -8,34 +9,38 @@ work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Literal
+import dataclasses
+import operator
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DomainKey:
     """Canonical key for an alias storage domain."""
 
     kind: Literal["reg"]
-    name: str
+    name: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class View:
     """Bit range within a canonical alias domain."""
 
-    bit_offset: int
-    bit_width: int
+    bit_offset: cython.longlong
+    bit_width: cython.longlong
 
     @property
-    def bit_end(self) -> int:
+    def bit_end(self) -> cython.longlong:
         """Return the exclusive bit offset for this view."""
         return self.bit_offset + self.bit_width
 
-    def can_join(self, other: View) -> bool:
+    def can_join(self, other: View) -> cython.bint:
         """Return whether two views are adjacent and can form a wider view."""
-        return self.bit_end == other.bit_offset or other.bit_end == self.bit_offset
+        return operator.eq(self.bit_end, other.bit_offset) or operator.eq(other.bit_end, self.bit_offset)
 
     def join(self, other: View) -> View | None:
         """Return a combined view when two views are adjacent."""
@@ -77,7 +82,7 @@ REGISTER_VIEWS: dict[str, tuple[DomainKey, View]] = {
     "di": (DI, FULL16),
 }
 
-REGISTER_OFFSETS: dict[str, int] = {
+REGISTER_OFFSETS: dict[str, cython.longlong] = {
     "ax": 0,
     "cx": 2,
     "dx": 4,
@@ -100,8 +105,10 @@ REGISTER_PAIR_NAMES: dict[str, str] = {
 }
 
 
-def register_domain_for_name(name: str | None) -> DomainKey | None:
+@cython.ccall
+def register_domain_for_name(name: object) -> DomainKey | None:
     """Return the canonical register alias domain for a register name."""
+    view_entry: object
     if not isinstance(name, str):
         return None
     view_entry = REGISTER_VIEWS.get(name.lower())
@@ -110,8 +117,10 @@ def register_domain_for_name(name: str | None) -> DomainKey | None:
     return view_entry[0]
 
 
-def register_view_for_name(name: str | None) -> View | None:
+@cython.ccall
+def register_view_for_name(name: object) -> View | None:
     """Return the bit view represented by a register name."""
+    view_entry: object
     if not isinstance(name, str):
         return None
     view_entry = REGISTER_VIEWS.get(name.lower())
@@ -120,7 +129,8 @@ def register_view_for_name(name: str | None) -> View | None:
     return view_entry[1]
 
 
-def register_pair_name(name: str | None) -> str | None:
+@cython.ccall
+def register_pair_name(name: object) -> object:
     """Return the full 16-bit register name for a byte or word register."""
     if not isinstance(name, str):
         return None
@@ -132,18 +142,21 @@ def register_pair_name(name: str | None) -> str | None:
     return None
 
 
-def register_offset_for_name(name: str | None) -> int | None:
+@cython.ccall
+def register_offset_for_name(name: object) -> int | None:
     """Return the 16-bit angr register offset for a register name."""
     if not isinstance(name, str):
         return None
     return REGISTER_OFFSETS.get(name.lower())
 
 
-def register_views_can_join(left: View, right: View) -> bool:
+@cython.ccall
+def register_views_can_join(left: View, right: View) -> cython.bint:
     """Return whether two register views are adjacent."""
     return left.can_join(right)
 
 
+@cython.ccall
 def join_register_views(left: View, right: View) -> View | None:
     """Return the joined register view when two views are adjacent."""
     return left.join(right)

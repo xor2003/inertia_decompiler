@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Project angr function-stack coordinates onto the 16-bit machine ABI.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -16,12 +19,14 @@ from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen.c import CVariable
 from angr.sim_variable import SimStackVariable
+import dataclasses
+import operator
 
 
 class _SizedTypeBoundary8616(Protocol):
     """Third-party angr type width used by the 16-bit ABI projection."""
 
-    size: int
+    size: cython.longlong
 
 
 class _FunctionTypeBoundary8616(Protocol):
@@ -43,44 +48,46 @@ class _CodegenBoundary8616(Protocol):
     cfunc: _CFunctionBoundary8616 | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionStackArgumentCoordinate8616:
     """One final C argument in entry-SP and machine-BP coordinates."""
 
-    argument_index: int
-    entry_sp_offset: int
-    machine_bp_offset: int
-    size: int
+    argument_index: cython.longlong
+    entry_sp_offset: cython.longlong
+    machine_bp_offset: cython.longlong
+    size: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionStackCoordinateProjection8616:
     """A coherent function-wide stack coordinate translation."""
 
-    entry_sp_to_bp_delta: int
-    arguments: tuple[FunctionStackArgumentCoordinate8616, ...]
+    entry_sp_to_bp_delta: cython.longlong
+    arguments: object
 
-    def machine_bp_offset(self, entry_sp_offset: int) -> int:
+    def machine_bp_offset(self, entry_sp_offset: cython.longlong) -> cython.longlong:
         """Translate one entry-SP offset through the proven function delta."""
         return entry_sp_offset + self.entry_sp_to_bp_delta
 
     def argument_machine_bp_offset(
         self,
-        entry_sp_offset: int,
-        size: int | None,
+        entry_sp_offset: cython.longlong,
+        size: object,
     ) -> int | None:
         """Return one unique argument offset matching an exact C stack slot."""
         matches = tuple(
             argument.machine_bp_offset
-            for argument in self.arguments
-            if argument.entry_sp_offset == entry_sp_offset
-            and (size is None or argument.size == size)
+            for argument in iter(self.arguments)
+            if operator.eq(argument.entry_sp_offset, entry_sp_offset)
+            and (size is None or operator.eq(argument.size, size))
         )
         return matches[0] if len(matches) == 1 else None
 
 
-def _x86_16_abi_type_size_bytes(type_: object, *, default: int = 2) -> int:
+@cython.ccall
+def _x86_16_abi_type_size_bytes(type_: object, *, default: cython.longlong = 2) -> cython.longlong:
     """Return one typed 16-bit ABI value width in bytes."""
+    fixed_size: object
     type_name = type(type_).__name__
     fixed_sizes = {
         "SimTypeChar": 1,
@@ -102,10 +109,15 @@ def _x86_16_abi_type_size_bytes(type_: object, *, default: int = 2) -> int:
     return max(1, (bits + 7) // 8) if isinstance(bits, int) and bits > 0 else default
 
 
+@cython.ccall
 def c_function_stack_coordinate_projection_8616(
     cfunc: object,
 ) -> FunctionStackCoordinateProjection8616 | None:
     """Derive one coherent near-function projection from final argument storage."""
+    function_type: object
+    argument: object
+    argument_type: object
+    index: object
     typed_cfunc = cast(_CFunctionBoundary8616, cfunc)
     try:
         arguments = tuple(typed_cfunc.arg_list or ())
@@ -118,11 +130,11 @@ def c_function_stack_coordinate_projection_8616(
         argument_types = ()
     if not arguments:
         return None
-    typed_layout = len(arguments) == len(argument_types)
+    typed_layout = operator.eq(len(arguments), len(argument_types))
 
     machine_bp_offset = 4
     coordinates: list[FunctionStackArgumentCoordinate8616] = []
-    deltas: set[int] = set()
+    deltas: set[cython.longlong] = set()
     for index, (argument, argument_type) in enumerate(
         zip(
             arguments,
@@ -167,23 +179,28 @@ def c_function_stack_coordinate_projection_8616(
     )
 
 
+@cython.ccall
 def c_function_argument_machine_bp_offset_8616(
     cfunc: object,
-    entry_sp_offset: int,
+    entry_sp_offset: cython.longlong,
     size: int | None,
 ) -> int | None:
     """Map one exact current C argument slot to its machine-BP ABI offset."""
+    projection: object
     projection = c_function_stack_coordinate_projection_8616(cfunc)
     if projection is None:
         return None
     return projection.argument_machine_bp_offset(entry_sp_offset, size)
 
 
+@cython.ccall
 def projected_c_function_machine_bp_offset_8616(
     codegen: object,
     variable: SimStackVariable,
 ) -> int | None:
     """Translate one C stack variable when the full typed interface proves it."""
+    cfunc: object
+    projection: object
     typed_codegen = cast(_CodegenBoundary8616, codegen)
     try:
         cfunc = typed_codegen.cfunc
@@ -197,12 +214,15 @@ def projected_c_function_machine_bp_offset_8616(
     return _registered_cvar_offset_8616(codegen, cfunc, variable)
 
 
+@cython.ccall
 def _registered_cvar_offset_8616(
     codegen: object,
     cfunc: _CFunctionBoundary8616,
     variable: SimStackVariable,
 ) -> int | None:
     """Distinguish rebound formal arguments from untouched entry-SP locals."""
+    bound: object
+    argument: object
     # Final argument lowering may replace the C argument with its machine-BP
     # view while untouched local clones retain entry-SP offsets. The owned
     # registry preserves both coordinates and the exact C argument binding.
@@ -240,16 +260,18 @@ def _registered_cvar_offset_8616(
                 return bound.bp_offset
             bound_projections.append(bound)
     deltas = {
-        item.bp_offset - item.entry_sp_offset for item in bound_projections
+        item.bp_offset - item.entry_sp_offset for item in iter(bound_projections)
     }
     return variable.offset + 2 if deltas == {2} else None
 
 
+@cython.ccall
 def final_c_function_machine_bp_offset_8616(
     codegen: object,
     variable: SimStackVariable,
 ) -> int | None:
     """Resolve a final C variable without publishing mutable C evidence as Alias truth."""
+    owned: object
     from .stack_variable_coordinates import (
         machine_bp_offset_for_stack_variable_8616,
         stack_variable_coordinate_registry_8616,
@@ -262,7 +284,7 @@ def final_c_function_machine_bp_offset_8616(
     if owned is not None:
         return owned.bp_offset
     bound_views = {
-        item.bp_offset for item in registry.projections
+        item.bp_offset for item in iter(registry.projections)
         if isinstance(item.cvar, CVariable)
         and item.cvar.unified_variable is variable
         and isinstance(item.cvar.variable, SimStackVariable)

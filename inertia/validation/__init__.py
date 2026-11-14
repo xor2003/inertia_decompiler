@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Validation-layer package exports.
 
 Layer: Validation.
@@ -6,3 +7,4 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import cython

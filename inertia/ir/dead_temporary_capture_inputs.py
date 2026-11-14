@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Select retained capture roots for block-local temporary normalization.
 
 Layer: IR.
@@ -10,6 +11,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -33,6 +36,7 @@ from .vex_terminal_jump import (
     TerminalJumpEvidenceStats8616,
     TerminalJumpRefusalReason8616,
 )
+import dataclasses
 
 
 class DeadTemporaryCaptureStatus8616(StrEnum):
@@ -42,33 +46,34 @@ class DeadTemporaryCaptureStatus8616(StrEnum):
     UNKNOWN_REFUSE = "unknown_refuse"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DeadTemporaryBlockCaptureInputs8616:
     """Payload roots and conservative refusal for one original block."""
 
-    block_addr: int
-    payloads: tuple[object, ...]
+    block_addr: cython.longlong
+    payloads: object
     status: DeadTemporaryCaptureStatus8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DeadTemporaryCaptureInputs8616:
     """Deterministic metadata selection; completeness is not deletion proof."""
 
-    blocks: tuple[DeadTemporaryBlockCaptureInputs8616, ...]
+    blocks: object
     status: DeadTemporaryCaptureStatus8616
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _Selection:
     """Accumulate producer ownership without walking value dependencies."""
 
-    payloads: dict[int, list[object]]
-    instruction_owners: dict[int, set[int]]
-    refused: set[int] = field(default_factory=set)
-    unbounded: bool = False
+    payloads: object
+    instruction_owners: object
+    refused: object = field(default_factory=set)
+    unbounded: cython.bint = False
 
-    def owners(self, block_addr: object, insn_addr: object) -> set[int]:
+    @cython.ccall
+    def owners(self, block_addr: object, insn_addr: object) -> object:
         """Intersect supplied coordinates, refusing ambiguous or foreign sites."""
         explicit = {block_addr} if _valid_coordinate(block_addr) and block_addr in self.payloads else set()
         by_instruction = self.instruction_owners.get(insn_addr, set()) if _valid_coordinate(insn_addr) else set()
@@ -85,27 +90,32 @@ class _Selection:
             return set()
         return by_instruction
 
-    def refuse(self, owners: set[int]) -> None:
+    @cython.ccall
+    def refuse(self, owners: object) -> None:
         """Retain a bounded affected set, or the whole surface if unbounded."""
         if owners:
             self.refused.update(owners)
         else:
             self.unbounded = True
 
-    def retain(self, owners: set[int], roots: tuple[object, ...], valid: bool) -> None:
+    @cython.ccall
+    def retain(self, owners: object, roots: object, valid: cython.bint) -> None:
         """Preserve root identity even when its containing metadata is refused."""
+        owner: object
         for owner in sorted(owners):
             self.payloads[owner].extend(roots)
         if not valid:
             self.refuse(owners)
 
 
-def _valid_coordinate(value: object) -> TypeGuard[int]:
+@cython.ccall
+def _valid_coordinate(value: object) -> TypeGuard[cython.longlong]:
     """Require exact nonnegative integer identity; Boolean aliases are invalid."""
     return type(value) is int and value >= 0
 
 
-def _update_metadata_valid(update: ConditionRegisterUpdateIR) -> bool:
+@cython.ccall
+def _update_metadata_valid(update: ConditionRegisterUpdateIR) -> cython.bint:
     """Validate owned update fields; only rhs carries value dependencies."""
     return (
         type(update.rhs) in (IRValue, IRBinaryValue)
@@ -115,8 +125,10 @@ def _update_metadata_valid(update: ConditionRegisterUpdateIR) -> bool:
     )
 
 
-def _binding_roots(bindings: object) -> tuple[tuple[object, ...], bool]:
+@cython.ccall
+def _binding_roots(bindings: object) -> tuple[tuple[object, ...], cython.bint]:
     """Extract exact binding payloads without interpreting their values."""
+    binding: object
     if type(bindings) is not tuple:
         return (), False
     roots: list[object] = []
@@ -138,10 +150,12 @@ def _binding_roots(bindings: object) -> tuple[tuple[object, ...], bool]:
     return tuple(roots), valid
 
 
-def _condition_roots(condition: ConditionIR | ConditionSource) -> tuple[tuple[object, ...], bool]:
+@cython.ccall
+def _condition_roots(condition: ConditionIR | ConditionSource) -> tuple[tuple[object, ...], cython.bint]:
     """Expose retained operands and semantics exactly as captured."""
+    semantics: object
     bindings, valid = _binding_roots(condition.register_bindings)
-    roots: tuple[object, ...]
+    roots: object
     if isinstance(condition, ConditionIR):
         roots = (condition.lhs, condition.rhs, condition.producer_semantics)
         semantics = condition.producer_semantics
@@ -154,8 +168,9 @@ def _condition_roots(condition: ConditionIR | ConditionSource) -> tuple[tuple[ob
     return roots + bindings, valid and (semantics is None or type(semantics) is tuple)
 
 
-def _terminal_metadata_valid(evidence: object) -> bool:
+def _terminal_metadata_valid(evidence: object) -> cython.bint:
     """Validate the exact owned terminal contract, which carries no TMP roots."""
+    refusal: object
     if type(evidence) is not TerminalJumpEvidence8616:
         return False
     typed_evidence = evidence
@@ -171,7 +186,7 @@ def _terminal_metadata_valid(evidence: object) -> bool:
         typed_evidence.stats.classified_fact_count, typed_evidence.stats.materialized_count,
         typed_evidence.stats.failure_count,
     )
-    if not all(type(count) is int and count >= 0 for count in counts):
+    if not all(type(count) is int and count >= 0 for count in iter(counts)):
         return False
     if type(typed_evidence.refusals) is not tuple:
         return False
@@ -190,10 +205,15 @@ def _terminal_metadata_valid(evidence: object) -> bool:
     )
 
 
+@cython.ccall
 def _select_cached_conditions(
     selection: _Selection, capture: ConditionLiftCaptureSession8616,
 ) -> None:
     """Assign complete cached condition roots by exact producer instruction."""
+    producer: object
+    condition: object
+    conditions: object
+    consumer: object
     for consumer, conditions in capture.condition_cache.items():
         if not _valid_coordinate(consumer):
             selection.refuse(set())
@@ -212,8 +232,11 @@ def _select_cached_conditions(
             selection.retain(owners, roots, valid)
 
 
+@cython.ccall
 def _select_conditions(selection: _Selection, capture: ConditionLiftCaptureSession8616) -> None:
     """Use producer coordinates; cache and pending keys identify consumers."""
+    source: object
+    successor: object
     if type(capture.condition_cache) is not dict or type(capture.pending_sources) is not dict:
         selection.refuse(set())
         return
@@ -229,11 +252,13 @@ def _select_conditions(selection: _Selection, capture: ConditionLiftCaptureSessi
         selection.retain(owners, roots, valid)
 
 
+@cython.ccall
 def _select_accesses(
     selection: _Selection,
-    captured_accesses: tuple[IRLogicalMemoryCaptureRecord8616, ...],
+    captured_accesses: object,
 ) -> None:
     """Preserve exact address roots and refuse incomplete logical accesses."""
+    access: object
     if type(captured_accesses) is not tuple:
         selection.refuse(set())
         return
@@ -255,8 +280,11 @@ def _select_accesses(
         selection.retain(owners, (access.address,), valid)
 
 
-def _initialize_selection(blocks: tuple[IRBlock, ...]) -> _Selection:
+@cython.ccall
+def _initialize_selection(blocks: object) -> _Selection:
     """Index exact instruction sites, refusing invalid owned coordinates."""
+    block: object
+    instruction: object
     selection = _Selection({}, {})
     for block in blocks:
         if not _valid_coordinate(block.addr):
@@ -276,10 +304,10 @@ def _initialize_selection(blocks: tuple[IRBlock, ...]) -> _Selection:
 
 
 def select_dead_temporary_capture_inputs_8616(
-    blocks: tuple[IRBlock, ...],
+    blocks: object,
     condition_capture: ConditionLiftCaptureSession8616,
-    captured_accesses: tuple[IRLogicalMemoryCaptureRecord8616, ...],
-    terminal_evidence: Mapping[int, TerminalJumpEvidence8616],
+    captured_accesses: object,
+    terminal_evidence: Mapping[cython.longlong, TerminalJumpEvidence8616],
 ) -> DeadTemporaryCaptureInputs8616:
     """Select per-producer metadata roots, retaining every uncertain block.
 
@@ -288,6 +316,8 @@ def select_dead_temporary_capture_inputs_8616(
     does not replace or mutate captures, blocks, terminal evidence, or operands.
     Foreign producers and missing bounds refuse the whole imported surface.
     """
+    evidence: object
+    owner: object
     selection = _initialize_selection(blocks)
     if type(condition_capture) is ConditionLiftCaptureSession8616:
         _select_conditions(selection, condition_capture)
@@ -308,7 +338,7 @@ def select_dead_temporary_capture_inputs_8616(
             if selection.unbounded or block.addr in selection.refused
             else DeadTemporaryCaptureStatus8616.COMPLETE,
         )
-        for block in blocks
+        for block in iter(blocks)
     )
     status = (
         DeadTemporaryCaptureStatus8616.UNKNOWN_REFUSE

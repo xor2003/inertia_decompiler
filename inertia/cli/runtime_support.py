@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Provide bounded execution helpers and runtime diagnostics for CLI runs.
 
 Layer: CLI/fallback/reporting.
@@ -8,6 +9,7 @@ angr/codegen compatibility hooks and diagnostic state attached to angr project o
 """
 
 from __future__ import annotations
+import cython
 
 import contextlib
 import faulthandler as faulthandler
@@ -25,6 +27,14 @@ import typing as _cli_compat_typing
 import weakref
 from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
 from concurrent.futures import ThreadPoolExecutor as ThreadPoolExecutor
+import dataclasses
+import operator
+import builtins
+StageParameters8616 = typing.TypeVar("StageParameters8616")
+StageResult8616 = typing.TypeVar("StageResult8616")
+TimeoutResultT = typing.TypeVar("TimeoutResultT")
+args = typing.TypeVar("args")
+kwargs = typing.TypeVar("kwargs")
 
 # Static named reexports keep the legacy CLI facade's names explicit for type checkers; runtime bindings and __all__ are unchanged.
 if _cli_compat_typing.TYPE_CHECKING:
@@ -52,25 +62,25 @@ from .variable_recovery_sub_guard import (
     build_guarded_handle_binop_sub_8616 as build_guarded_handle_binop_sub_8616,
 )
 
-DEFAULT_FREE_RAM_BUDGET_FRACTION: float = 0.45
-DEFAULT_WORKER_MEMORY_FLOOR_MB: int = 256
+DEFAULT_FREE_RAM_BUDGET_FRACTION: cython.double = 0.45
+DEFAULT_WORKER_MEMORY_FLOOR_MB: cython.longlong = 256
 FORCE_SERIAL_FUNCTION_DECOMP_ENV: str = "INERTIA_FORCE_SERIAL_FUNCTION_DECOMPILATION"
 
-START_TIME: float = time.perf_counter()
-LAST_STEP_TIME: float = START_TIME
+START_TIME: cython.double = time.perf_counter()
+LAST_STEP_TIME: cython.double = START_TIME
 DECOMPILATION_PREP_LOCK: threading.Lock = threading.Lock()
 _REAL_STDOUT = sys.stdout
 _REAL_STDERR = sys.stderr
 _CURRENT_PROJECT = None
 _FORMAT_FIRST_BLOCK_ASM: Callable[[object, int], str] | None = None
-PEEPHOLE_COMPLEX_EXPR_NODE_LIMIT: int = 96
+PEEPHOLE_COMPLEX_EXPR_NODE_LIMIT: cython.longlong = 96
 
 # Probe artifacts mirror heterogeneous angr node/plugin metadata and prefork
 # worker payloads. Keep their dynamic values behind one explicit boundary type;
 # owned runtime decisions and public results remain concretely annotated.
-type DynamicRecord = dict[str, typing.Any]
-type AngrProjectSurface = typing.Any
-type AngrPatchSurface = typing.Any
+DynamicRecord = typing.TypeAliasType("DynamicRecord", dict[str, typing.Any])
+AngrProjectSurface = typing.TypeAliasType("AngrProjectSurface", typing.Any)
+AngrPatchSurface = typing.TypeAliasType("AngrPatchSurface", typing.Any)
 
 
 class _PeepholeBlockBoundary8616(typing.Protocol):
@@ -81,6 +91,7 @@ class _PeepholeBlockBoundary8616(typing.Protocol):
         ...
 
 
+@cython.ccall
 def _dynamic_record(value: object) -> DynamicRecord:
     """Return a dynamic boundary record, or an empty record for invalid input."""
     if not isinstance(value, dict):
@@ -88,18 +99,21 @@ def _dynamic_record(value: object) -> DynamicRecord:
     return typing.cast(DynamicRecord, value)
 
 
-def _int_path_tuple(value: object) -> tuple[int, ...] | None:
+def _int_path_tuple(value: object) -> object:
     """Return a validated integer path from heterogeneous probe metadata."""
-    if not isinstance(value, list | tuple) or not all(isinstance(item, int) for item in value):
+    if not isinstance(value, list | tuple) or not all(isinstance(item, int) for item in iter(value)):
         return None
     return tuple(value)
 
 
-def _record_paths(records: object, *, key: str = "path") -> tuple[tuple[int, ...], ...]:
+@cython.ccall
+def _record_paths(records: object, *, key: object = "path") -> tuple[tuple[cython.longlong, ...], ...]:
     """Extract validated integer paths from heterogeneous diagnostic records."""
+    path: object
+    record: object
     if not isinstance(records, list | tuple):
         return ()
-    paths: list[tuple[int, ...]] = []
+    paths: list[tuple[cython.longlong, ...]] = []
     for record in records:
         if not isinstance(record, dict):
             continue
@@ -109,8 +123,10 @@ def _record_paths(records: object, *, key: str = "path") -> tuple[tuple[int, ...
     return tuple(paths)
 
 
-def timing_output_enabled() -> bool:
+@cython.ccall
+def timing_output_enabled() -> cython.bint:
     """Return whether runtime timing diagnostics are enabled."""
+    value: object
     value = os.environ.get("INERTIA_DEBUG_TIMING")
     if value is None:
         return False
@@ -118,13 +134,17 @@ def timing_output_enabled() -> bool:
 
 
 def _expr_child_nodes(expr: object) -> tuple[object, ...]:
+    node: object
+    operand: object
+    operands: object
+    attr: object
     children: list[object] = []
     operand = getattr(expr, "operand", None)
     if operand is not None:
         children.append(operand)
     operands = getattr(expr, "operands", None)
     if isinstance(operands, tuple | list):
-        children.extend(node for node in operands if node is not None)
+        children.extend(node for node in iter(operands) if node is not None)
     for attr in ("addr", "cond", "iftrue", "iffalse"):
         node = getattr(expr, attr, None)
         if node is not None:
@@ -132,7 +152,10 @@ def _expr_child_nodes(expr: object) -> tuple[object, ...]:
     return tuple(children)
 
 
-def _expr_tree_node_count(expr: object, cache: dict[int, int]) -> int:
+@cython.ccall
+def _expr_tree_node_count(expr: object, cache: object) -> cython.longlong:
+    cached: object
+    child: object
     expr_id = id(expr)
     cached = cache.get(expr_id)
     if cached is not None:
@@ -148,22 +171,27 @@ def _expr_tree_node_count(expr: object, cache: dict[int, int]) -> int:
 
 
 def _stmt_expr_children(stmt: object) -> tuple[object, ...]:
+    value: object
+    attr: object
     children: list[object] = []
     for attr in ("dst", "src", "addr", "data", "condition", "true_target", "false_target", "ret_exprs"):
         value = getattr(stmt, attr, None)
         if isinstance(value, tuple | list):
-            children.extend(node for node in value if node is not None)
+            children.extend(node for node in iter(value) if node is not None)
         elif value is not None:
             children.append(value)
     return tuple(children)
 
 
+@cython.ccall
 def _block_has_pathologically_complex_expr(
     block: object,
-    limit: int = PEEPHOLE_COMPLEX_EXPR_NODE_LIMIT,
-) -> bool:
+    limit: cython.longlong = PEEPHOLE_COMPLEX_EXPR_NODE_LIMIT,
+) -> cython.bint:
     """Return whether an AIL block contains an expression too deep to simplify safely."""
-    cache: dict[int, int] = {}
+    expr: object
+    stmt: object
+    cache: dict[cython.longlong, cython.longlong] = {}
     for stmt in getattr(block, "statements", ()) or ():
         for expr in _stmt_expr_children(stmt):
             if _expr_tree_node_count(expr, cache) > limit:
@@ -171,6 +199,7 @@ def _block_has_pathologically_complex_expr(
     return False
 
 
+@cython.ccall
 def install_jumpkind_logging_context(
     project: AngrProjectSurface | None,
     formatter: Callable[[object, int], str] | None,
@@ -181,18 +210,22 @@ def install_jumpkind_logging_context(
     _FORMAT_FIRST_BLOCK_ASM = formatter
 
 
-def default_exe_showcase_cap(total_functions: int, timeout: int) -> int:
+@cython.ccall
+def default_exe_showcase_cap(total_functions: cython.longlong, timeout: cython.longlong) -> cython.longlong:
     """Choose a bounded default number of functions for executable showcases."""
     if total_functions > 256:
         return 4
     return min(24, max(8, timeout))
 
 
+@cython.ccall
 def _normalize_replacement_bits_8616(expr: object, replacement: object) -> object:
     """Re-wrap a peephole replacement at the original expression's bit width."""
+    expr_bits: object
+    replacement_bits: object
     expr_bits = getattr(expr, "bits", None)
     replacement_bits = getattr(replacement, "bits", None)
-    if expr_bits is None or replacement_bits is None or expr_bits == replacement_bits:
+    if expr_bits is None or replacement_bits is None or operator.eq(expr_bits, replacement_bits):
         return replacement
 
     try:
@@ -224,6 +257,7 @@ def _normalize_replacement_bits_8616(expr: object, replacement: object) -> objec
     return replacement
 
 
+@cython.ccall
 def _clinic_skip_complex_expr_gate_8616(
     self: AngrPatchSurface,
     expr: object,
@@ -231,8 +265,11 @@ def _clinic_skip_complex_expr_gate_8616(
     expr_idx: object,
     block: object,
     project: AngrProjectSurface | None,
-) -> bool:
+) -> cython.bint:
     """Return whether the peephole rewrite must be skipped for a huge expr."""
+    block_addr: object
+    complex_seen: object
+    expr_node_cache: object
     if getattr(project, "_inertia_disable_complex_expr_scan", False):
         return False
     expr_node_cache = getattr(self, "_inertia_expr_node_cache", None)
@@ -265,6 +302,7 @@ def _clinic_skip_complex_expr_gate_8616(
     return True
 
 
+@cython.ccall
 def _peephole_rewrite_loop_8616(
     self: AngrPatchSurface,
     expr: object,
@@ -273,6 +311,9 @@ def _peephole_rewrite_loop_8616(
     block: object,
 ) -> object:
     """Iterate peephole expr_opts rewrites until a stable shape is reached."""
+    block_addr: object
+    replacement: object
+    expr_opt: object
     redo = True
     rewrite_iter = 0
     seen_shapes: set[tuple[str, int | None]] = set()
@@ -303,7 +344,7 @@ def _peephole_rewrite_loop_8616(
             if replacement is None or replacement is expr:
                 continue
             replacement = _normalize_replacement_bits_8616(expr, replacement)
-            if getattr(expr, "bits", None) == getattr(replacement, "bits", None):
+            if operator.eq(getattr(expr, "bits", None), getattr(replacement, "bits", None)):
                 expr = replacement
                 redo = True
                 break
@@ -323,6 +364,7 @@ def _peephole_rewrite_loop_8616(
     return expr
 
 
+@cython.ccall
 def _guarded_peephole_handle_expr_8616(
     walker_cls: AngrPatchSurface,
     project: AngrProjectSurface | None,
@@ -334,6 +376,7 @@ def _guarded_peephole_handle_expr_8616(
     block: object,
 ) -> object:
     """Peephole ``_handle_expr`` body preserving bit widths and complexity gates."""
+    block_addr: object
     if getattr(project, "_inertia_skip_clinic_simplify_block", False):
         return expr
     try:
@@ -381,8 +424,11 @@ def install_angr_peephole_expr_bitwidth_guard(
     return original_handle_expr
 
 
+@cython.ccall
 def enable_line_buffered_stdio() -> None:
     """Enable line-buffered standard streams when the host streams support it."""
+    reconfigure: object
+    stream: object
     for stream in (_REAL_STDOUT, _REAL_STDERR):
         reconfigure = getattr(stream, "reconfigure", None)
         if callable(reconfigure):
@@ -390,7 +436,12 @@ def enable_line_buffered_stdio() -> None:
                 reconfigure(line_buffering=True)
 
 
+@cython.ccall
 def _project_current_function_context(project: AngrProjectSurface) -> tuple[int | None, str | None, int | None]:
+    addr: object
+    context: object
+    name: object
+    slice_addr: object
     context = getattr(project, "_inertia_current_function_debug", None)
     if not isinstance(context, dict):
         return (None, None, None)
@@ -404,7 +455,8 @@ def _project_current_function_context(project: AngrProjectSurface) -> tuple[int 
     )
 
 
-def _project_current_function_context_suffix(project: AngrProjectSurface) -> str:
+@cython.ccall
+def _project_current_function_context_suffix(project: AngrProjectSurface) -> object:
     addr, name, slice_addr = _project_current_function_context(project)
     parts: list[str] = []
     if isinstance(addr, int):
@@ -416,6 +468,7 @@ def _project_current_function_context_suffix(project: AngrProjectSurface) -> str
     return f" {' '.join(parts)}" if parts else ""
 
 
+@cython.ccall
 def install_angr_variable_recovery_binop_sub_size_guard(
     engine_cls: typing.Any,
     *,
@@ -424,6 +477,7 @@ def install_angr_variable_recovery_binop_sub_size_guard(
     project: AngrProjectSurface | None = None,
 ) -> tuple[object, object | None]:
     """Patch angr variable-recovery binops while preserving original handlers."""
+    original_handle_binop_mul: object
     if richr_cls is None or typevars_module is None:
         from angr.analyses.typehoon import typevars as angr_typevars
         from angr.analyses.variable_recovery import engine_ail as variable_recovery_engine
@@ -460,6 +514,7 @@ def install_angr_basepointeroffset_codegen_guard(codegen_cls: AngrPatchSurface) 
         *args: typing.Any,
         **kwargs: typing.Any,
     ) -> object:
+        stackbase_handler: object
         try:
             from angr.ailment.expression import BasePointerOffset
         except ImportError:
@@ -475,28 +530,33 @@ def install_angr_basepointeroffset_codegen_guard(codegen_cls: AngrPatchSurface) 
     return original_handle
 
 
-def _seqnode_attr_children_8616(node: object) -> list[object]:
+def _seqnode_attr_children_8616(node: object) -> object:
     """Collect direct child nodes carried by named sequence-node attributes."""
+    value: object
+    attr: object
     children: list[object] = []
     for attr in ("node", "nodes", "sequence_node", "true_node", "false_node", "else_node", "default_node", "head"):
         value = getattr(node, attr, None)
         if value is None:
             continue
         if isinstance(value, dict):
-            children.extend(child for child in value.values() if child is not None)
+            children.extend(child for child in builtins.iter(value.values()) if child is not None)
         elif isinstance(value, list | tuple | set):
-            children.extend(child for child in value if child is not None)
+            children.extend(child for child in iter(value) if child is not None)
         else:
             children.append(value)
     return children
 
 
-def _seqnode_cases_children_8616(node: object) -> list[object]:
+def _seqnode_cases_children_8616(node: object) -> object:
     """Collect child nodes carried by ``cases`` dict/list payloads."""
+    cases: object
+    child: object
+    item: object
     children: list[object] = []
     cases = getattr(node, "cases", None)
     if isinstance(cases, dict):
-        children.extend(child for child in cases.values() if child is not None)
+        children.extend(child for child in builtins.iter(cases.values()) if child is not None)
     elif isinstance(cases, list | tuple):
         for item in cases:
             if isinstance(item, tuple) and item:
@@ -509,19 +569,24 @@ def _seqnode_cases_children_8616(node: object) -> list[object]:
 
 
 def _seqnode_children_8616(node: object) -> tuple[object, ...]:
+    condition_and_nodes: object
     children = _seqnode_attr_children_8616(node)
     condition_and_nodes = getattr(node, "condition_and_nodes", None)
     if isinstance(condition_and_nodes, list | tuple):
-        children.extend(child for _condition, child in condition_and_nodes if child is not None)
+        children.extend(child for _condition, child in iter(condition_and_nodes) if child is not None)
     children.extend(_seqnode_cases_children_8616(node))
     return tuple(children)
 
 
 def _seqnode_subtree_summaries_8616(sequence: object) -> tuple[DynamicRecord, ...]:
     summaries: list[DynamicRecord] = []
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
 
-    def _collect(node: object, path: tuple[int, ...]) -> frozenset[int]:
+    def _collect(node: object, path: object) -> frozenset[cython.longlong]:
+        addr: object
+        child_addr: object
+        child: object
+        index: object
         if node is None:
             return frozenset()
         marker = id(node)
@@ -529,7 +594,7 @@ def _seqnode_subtree_summaries_8616(sequence: object) -> tuple[DynamicRecord, ..
             return frozenset()
         seen.add(marker)
         addr = getattr(node, "addr", None)
-        addrs: set[int] = {addr} if isinstance(addr, int) else set()
+        addrs: object = {addr} if isinstance(addr, int) else set()
         children = _seqnode_children_8616(node)
         child_summaries: list[DynamicRecord] = []
         for index, child in enumerate(children):
@@ -540,7 +605,7 @@ def _seqnode_subtree_summaries_8616(sequence: object) -> tuple[DynamicRecord, ..
                     "type": type(child).__name__,
                 }
             )
-            addrs.update(_collect(child, (*path, index)))
+            addrs.update(_collect(child, tuple(path) + (index,)))
         summaries.append(
             {
                 "addr": addr if isinstance(addr, int) else None,
@@ -557,7 +622,9 @@ def _seqnode_subtree_summaries_8616(sequence: object) -> tuple[DynamicRecord, ..
     return tuple(sorted(summaries, key=lambda item: (len(item["path"]), item["path"], item["type"])))
 
 
+@cython.ccall
 def _seqnode_node_at_path_8616(sequence: object, path: object) -> object | None:
+    index: object
     if sequence is None or not isinstance(path, list | tuple):
         return None
     current = sequence
@@ -571,7 +638,11 @@ def _seqnode_node_at_path_8616(sequence: object, path: object) -> object | None:
     return current
 
 
+@cython.ccall
 def _seqnode_owner_node_summary_8616(sequence: object, owner_paths: DynamicRecord) -> DynamicRecord:
+    node: object
+    name: object
+    path: object
     summaries: DynamicRecord = {}
     for name, path in owner_paths.items():
         node = _seqnode_node_at_path_8616(sequence, path)
@@ -585,7 +656,10 @@ def _seqnode_owner_node_summary_8616(sequence: object, owner_paths: DynamicRecor
     return summaries
 
 
-def _seqnode_materialization_owner_blocker_8616(owner_summaries: DynamicRecord) -> str | None:
+@cython.ccall
+def _seqnode_materialization_owner_blocker_8616(owner_summaries: DynamicRecord) -> object:
+    external_default: object
+    ladder: object
     ladder = owner_summaries.get("ladder")
     external_default = owner_summaries.get("external_default")
     if not isinstance(ladder, dict) or not isinstance(external_default, dict):
@@ -599,22 +673,27 @@ def _seqnode_materialization_owner_blocker_8616(owner_summaries: DynamicRecord) 
     return None
 
 
+@cython.ccall
 def _seqnode_target_addr_8616(target: object) -> int | None:
+    addr: object
     if isinstance(target, int):
         return target
     addr = getattr(target, "addr", None)
     return addr if isinstance(addr, int) else None
 
 
+@cython.ccall
 def _collect_loop_exit_nodes_8616(
     node: object,
-    path: tuple[int, ...],
-    break_targets: list[int],
-    conditional_break_targets: list[int],
-    continue_targets: list[int],
-    break_samples: list[DynamicRecord],
+    path: object,
+    break_targets: object,
+    conditional_break_targets: object,
+    continue_targets: object,
+    break_samples: object,
 ) -> None:
     """Record break/continue node targets inside a loop sequence subtree."""
+    child: object
+    index: object
     node_type = type(node).__name__
     target_addr = _seqnode_target_addr_8616(getattr(node, "target", None))
     if node_type in {"BreakNode", "ConditionalBreakNode"}:
@@ -634,15 +713,16 @@ def _collect_loop_exit_nodes_8616(
         continue_targets.append(target_addr)
     for index, child in enumerate(_seqnode_children_8616(node)):
         _collect_loop_exit_nodes_8616(
-            child, (*path, index), break_targets, conditional_break_targets, continue_targets, break_samples
+            child, tuple(path) + (index,), break_targets, conditional_break_targets, continue_targets, break_samples
         )
 
 
+@cython.ccall
 def _loop_exit_default_status_8616(
-    loop_sequence: object | None,
+    loop_sequence: object,
     external_default_addr: object,
-    unique_break_targets: list[int],
-    external_default_is_break_target: bool,
+    unique_break_targets: object,
+    external_default_is_break_target: cython.bint,
 ) -> str:
     """Classify the external default node's relation to loop break targets."""
     if loop_sequence is None:
@@ -656,21 +736,24 @@ def _loop_exit_default_status_8616(
     return "loop_has_no_break_target"
 
 
+@cython.ccall
 def _loop_exit_default_relation_8616(loop_node: object, external_default_node: object | None) -> DynamicRecord:
+    external_default_addr: object
+    loop_sequence: object
     loop_sequence = getattr(loop_node, "sequence_node", None)
     external_default_addr = getattr(external_default_node, "addr", None)
-    break_targets: list[int] = []
-    conditional_break_targets: list[int] = []
-    continue_targets: list[int] = []
+    break_targets: list[cython.longlong] = []
+    conditional_break_targets: list[cython.longlong] = []
+    continue_targets: list[cython.longlong] = []
     break_samples: list[DynamicRecord] = []
 
     if loop_sequence is not None:
         _collect_loop_exit_nodes_8616(
             loop_sequence, (), break_targets, conditional_break_targets, continue_targets, break_samples
         )
-    unique_break_targets = sorted(set(break_targets))
-    unique_conditional_break_targets = sorted(set(conditional_break_targets))
-    unique_continue_targets = sorted(set(continue_targets))
+    unique_break_targets = sorted(tuple(set(break_targets)))
+    unique_conditional_break_targets = sorted(tuple(set(conditional_break_targets)))
+    unique_continue_targets = sorted(tuple(set(continue_targets)))
     external_default_is_break_target = (
         isinstance(external_default_addr, int) and external_default_addr in set(unique_break_targets)
     )
@@ -691,13 +774,15 @@ def _loop_exit_default_relation_8616(loop_node: object, external_default_node: o
     }
 
 
+@cython.ccall
 def _loop_preserving_switch_plan_8616(mapping: DynamicRecord, exit_relation: DynamicRecord) -> DynamicRecord:
     """Build the dynamic-boundary input record for Structuring switch materialization."""
+    body_status: object
     case_samples = tuple(mapping.get("expanded_root_case_path_samples", ()) or ())
     case_values = tuple(mapping.get("expanded_root_normalized_case_values", ()) or ())
     case_paths = [
         list(path)
-        for sample in case_samples
+        for sample in iter(case_samples)
         if isinstance(sample, dict) and (path := _int_path_tuple(sample.get("path"))) is not None
     ]
     body_status = mapping.get("expanded_root_body_mapping_status")
@@ -705,7 +790,7 @@ def _loop_preserving_switch_plan_8616(mapping: DynamicRecord, exit_relation: Dyn
     break_samples = tuple(exit_relation.get("break_path_samples", ()) or ())
     break_paths = [
         list(path)
-        for sample in break_samples
+        for sample in iter(break_samples)
         if isinstance(sample, dict) and (path := _int_path_tuple(sample.get("path"))) is not None
     ]
     if exit_relation.get("status") != "external_default_is_loop_break_target":
@@ -717,7 +802,7 @@ def _loop_preserving_switch_plan_8616(mapping: DynamicRecord, exit_relation: Dyn
             "ready": False,
             "status": "blocked",
         }
-    if not case_samples or len(case_samples) != len(case_values):
+    if not case_samples or operator.ne(len(case_samples), len(case_values)):
         return {
             "blocker": "case_path_value_count_mismatch",
             "case_count": len(case_samples),
@@ -751,10 +836,11 @@ def _loop_preserving_switch_plan_8616(mapping: DynamicRecord, exit_relation: Dyn
     }
 
 
+@cython.ccall
 def _materialize_loop_break_default_switch_8616(
     project: AngrProjectSurface | None,
     sequence: object,
-    artifacts: tuple[DynamicRecord, ...],
+    artifacts: object,
 ) -> DynamicRecord:
     """Bridge runtime SeqNode metadata to the Structuring-owned materializer."""
     from inertia.structuring.typed_switch_seqnode import (
@@ -778,10 +864,11 @@ def _materialize_loop_break_default_switch_8616(
     return typing.cast(DynamicRecord, result.as_runtime_record())
 
 
+@cython.ccall
 def _maybe_materialize_pre_codegen_typed_switch_8616(
     project: AngrProjectSurface | None,
     sequence: object,
-    artifacts: tuple[DynamicRecord, ...],
+    artifacts: object,
 ) -> DynamicRecord:
     """Materialize only complete typed switch plans at the pre-codegen boundary."""
     if not artifacts:
@@ -794,12 +881,17 @@ def _maybe_materialize_pre_codegen_typed_switch_8616(
     return _materialize_loop_break_default_switch_8616(project, sequence, artifacts)
 
 
+@cython.ccall
 def _loop_internal_switch_mapping_8616(
     sequence: object,
     owner_paths: DynamicRecord,
-    artifacts: tuple[DynamicRecord, ...],
+    artifacts: object,
 ) -> DynamicRecord:
     """Map switch artifacts inside a loop owner so materialization can preserve the loop."""
+    external_default_path: object
+    ladder_path: object
+    loop_sequence: object
+    owner_blocker: object
     ladder_path = owner_paths.get("ladder_owner_path")
     external_default_path = owner_paths.get("external_default_owner_path")
     ladder_node = _seqnode_node_at_path_8616(sequence, ladder_path)
@@ -857,14 +949,18 @@ def _loop_internal_switch_mapping_8616(
 
 
 def _graphregion_subtree_summaries_8616(region: object) -> tuple[DynamicRecord, ...]:
+    graph: object
+    head: object
     graph = getattr(region, "graph", None)
     head = getattr(region, "head", None)
     if graph is None or head is None:
         return ()
     summaries: list[DynamicRecord] = []
-    visiting: set[int] = set()
+    visiting: set[cython.longlong] = set()
 
     def _node_children(node: object, active_graph: object) -> tuple[tuple[object, object], ...]:
+        nested_graph: object
+        nested_head: object
         children: list[tuple[object, object]] = []
         nested_graph = getattr(node, "graph", None)
         nested_head = getattr(node, "head", None)
@@ -874,12 +970,17 @@ def _graphregion_subtree_summaries_8616(region: object) -> tuple[DynamicRecord, 
             successors = list(typing.cast(typing.Any, active_graph).successors(node))
         except Exception:
             successors = []
-        children.extend((successor, active_graph) for successor in successors)
+        children.extend((successor, active_graph) for successor in iter(successors))
         return tuple(
             sorted(children, key=lambda item: (getattr(item[0], "addr", -1), type(item[0]).__name__))
         )
 
-    def _collect(node: object, path: tuple[int, ...], active_graph: object) -> frozenset[int]:
+    def _collect(node: object, path: object, active_graph: object) -> frozenset[cython.longlong]:
+        addr: object
+        child_addr: object
+        child: object
+        child_graph: object
+        index: object
         if node is None:
             return frozenset()
         marker = id(node)
@@ -887,7 +988,7 @@ def _graphregion_subtree_summaries_8616(region: object) -> tuple[DynamicRecord, 
             return frozenset()
         visiting.add(marker)
         addr = getattr(node, "addr", None)
-        addrs: set[int] = {addr} if isinstance(addr, int) else set()
+        addrs: object = {addr} if isinstance(addr, int) else set()
         child_summaries: list[DynamicRecord] = []
         for index, (child, child_graph) in enumerate(_node_children(node, active_graph)):
             child_addr = getattr(child, "addr", None)
@@ -897,7 +998,7 @@ def _graphregion_subtree_summaries_8616(region: object) -> tuple[DynamicRecord, 
                     "type": type(child).__name__,
                 }
             )
-            addrs.update(_collect(child, (*path, index), child_graph))
+            addrs.update(_collect(child, tuple(path) + (index,), child_graph))
         visiting.remove(marker)
         summaries.append(
             {
@@ -927,6 +1028,7 @@ _SEQNODE_PREFERRED_TYPES_8616 = {
 }
 
 
+@cython.ccall
 def _seqnode_candidate_payload_8616(summary: DynamicRecord) -> DynamicRecord:
     """Render a subtree summary as the region-mapping candidate record."""
     children = tuple(summary.get("children", ()) or ())
@@ -940,7 +1042,7 @@ def _seqnode_candidate_payload_8616(summary: DynamicRecord) -> DynamicRecord:
     }
 
 
-def _preferred_exact_region_summary_8616(candidates: list[DynamicRecord]) -> DynamicRecord | None:
+def _preferred_exact_region_summary_8616(candidates: object) -> DynamicRecord | None:
     """Select the single preferred exact-addr subtree summary, if unambiguous."""
     if not candidates:
         return None
@@ -959,7 +1061,7 @@ def _preferred_exact_region_summary_8616(candidates: list[DynamicRecord]) -> Dyn
     )
     tied = [
         candidate
-        for candidate in ordered
+        for candidate in iter(ordered)
         if (
             _SEQNODE_PREFERRED_TYPES_8616.get(str(candidate.get("type")), 99),
             -int(candidate.get("addr_count", 0) or 0),
@@ -969,6 +1071,7 @@ def _preferred_exact_region_summary_8616(candidates: list[DynamicRecord]) -> Dyn
     return ordered[0] if len(tied) == 1 else None
 
 
+@cython.ccall
 def _region_missing_result_8616(region_id: object) -> DynamicRecord:
     """Return the shared missing-region mapping record."""
     return {
@@ -983,39 +1086,40 @@ def _region_missing_result_8616(region_id: object) -> DynamicRecord:
     }
 
 
+@cython.ccall
 def _region_containing_summaries_8616(
-    region_id: int,
-    subtree_summaries: tuple[DynamicRecord, ...],
+    region_id: cython.longlong,
+    subtree_summaries: object,
 ) -> list[DynamicRecord]:
     """Return subtree summaries whose addr sets contain ``region_id``."""
     return [
         summary
-        for summary in subtree_summaries
+        for summary in iter(subtree_summaries)
         if isinstance(addrs := summary.get("addrs"), tuple) and region_id in addrs
     ]
 
 
 def _exact_region_match_8616(
-    region_id: int,
-    subtree_summaries: tuple[DynamicRecord, ...],
+    region_id: cython.longlong,
+    subtree_summaries: object,
     selected: DynamicRecord,
-    exact: list[DynamicRecord],
+    exact: object,
 ) -> DynamicRecord:
     """Resolve the selected exact-addr summary against containing sequences."""
     small_sequence_containing = [
         summary
-        for summary in _region_containing_summaries_8616(region_id, subtree_summaries)
+        for summary in builtins.iter(_region_containing_summaries_8616(region_id, subtree_summaries))
         if summary is not selected
         and summary.get("type") == "SequenceNode"
         and 1 < int(summary.get("addr_count", 0) or 0) <= 8
         and len(summary.get("path", ()) or ()) <= len(selected.get("path", ()) or ())
     ]
     if small_sequence_containing:
-        smallest_addr_count = min(int(summary.get("addr_count", 0) or 0) for summary in small_sequence_containing)
+        smallest_addr_count = min(int(summary.get("addr_count", 0) or 0) for summary in iter(small_sequence_containing))
         small_sequence_containing = [
             summary
-            for summary in small_sequence_containing
-            if int(summary.get("addr_count", 0) or 0) == smallest_addr_count
+            for summary in iter(small_sequence_containing)
+            if operator.eq(int(summary.get("addr_count", 0) or 0), smallest_addr_count)
         ]
     if (
         selected.get("type") == "Block"
@@ -1026,7 +1130,7 @@ def _exact_region_match_8616(
     return {
         "addr_count": selected["addr_count"],
         "candidate_count": len(exact),
-        "candidates": [_seqnode_candidate_payload_8616(summary) for summary in exact[:4]],
+        "candidates": [_seqnode_candidate_payload_8616(summary) for summary in iter(exact[:4])],
         "matched_addr": selected["addr"],
         "path": list(selected["path"]),
         "region_id": region_id,
@@ -1037,12 +1141,13 @@ def _exact_region_match_8616(
 
 def _seqnode_map_region_id_8616(
     region_id: object,
-    subtree_summaries: tuple[DynamicRecord, ...],
+    subtree_summaries: object,
 ) -> DynamicRecord:
+    selected: object
     if not isinstance(region_id, int):
         return _region_missing_result_8616(region_id)
 
-    exact = [summary for summary in subtree_summaries if summary.get("addr") == region_id]
+    exact = [summary for summary in iter(subtree_summaries) if operator.eq(summary.get("addr"), region_id)]
     selected = _preferred_exact_region_summary_8616(exact)
     if selected is not None:
         return _exact_region_match_8616(region_id, subtree_summaries, selected, exact)
@@ -1050,7 +1155,7 @@ def _seqnode_map_region_id_8616(
         return {
             "addr_count": 0,
             "candidate_count": len(exact),
-            "candidates": [_seqnode_candidate_payload_8616(summary) for summary in exact[:4]],
+            "candidates": [_seqnode_candidate_payload_8616(summary) for summary in iter(exact[:4])],
             "matched_addr": region_id,
             "path": None,
             "region_id": region_id,
@@ -1063,12 +1168,12 @@ def _seqnode_map_region_id_8616(
         return _region_missing_result_8616(region_id)
     containing = sorted(containing, key=lambda item: (int(item["addr_count"]), len(item["path"]), item["path"]))
     smallest_count = containing[0]["addr_count"]
-    smallest = [summary for summary in containing if summary["addr_count"] == smallest_count]
+    smallest = [summary for summary in iter(containing) if operator.eq(summary["addr_count"], smallest_count)]
     if len(smallest) > 1:
         return {
             "addr_count": smallest_count,
             "candidate_count": len(smallest),
-            "candidates": [_seqnode_candidate_payload_8616(summary) for summary in smallest[:4]],
+            "candidates": [_seqnode_candidate_payload_8616(summary) for summary in iter(smallest[:4])],
             "matched_addr": None,
             "path": None,
             "region_id": region_id,
@@ -1090,10 +1195,10 @@ def _seqnode_map_region_id_8616(
 
 def _expanded_root_body_shape_status_8616(
     *,
-    case_paths: tuple[tuple[int, ...], ...],
-    default_paths: tuple[tuple[int, ...], ...],
-    common_parent_path: tuple[int, ...],
-    direct_sibling_span: bool,
+    case_paths: object,
+    default_paths: object,
+    common_parent_path: object,
+    direct_sibling_span: cython.bint,
 ) -> str:
     """Classify the proven expanded-root body shape without enabling lowering."""
     if direct_sibling_span:
@@ -1101,25 +1206,27 @@ def _expanded_root_body_shape_status_8616(
     if not case_paths or not default_paths:
         return "missing_case_or_default_path"
     common_len = len(common_parent_path)
-    if any(len(path) <= common_len or path[:common_len] != common_parent_path for path in (*case_paths, *default_paths)):
+    if any(len(path) <= common_len or operator.ne(path[:common_len], common_parent_path) for path in iter(tuple(case_paths) + tuple(default_paths))):
         return "non_sibling_subtrees"
-    case_child_indexes = {path[common_len] for path in case_paths}
-    default_child_indexes = {path[common_len] for path in default_paths}
+    case_child_indexes = {path[common_len] for path in iter(case_paths)}
+    default_child_indexes = {path[common_len] for path in iter(default_paths)}
     external_default_child_indexes = default_child_indexes - case_child_indexes
     if (
         len(case_child_indexes) == 1
         and len(external_default_child_indexes) == 1
-        and all(path[common_len] in case_child_indexes or len(path) == common_len + 1 for path in default_paths)
+        and all(path[common_len] in case_child_indexes or operator.eq(len(path), common_len + 1) for path in iter(default_paths))
     ):
         return "ladder_subtree_with_external_default_sibling"
     return "non_sibling_subtrees"
 
 
-def _common_int_path_8616(paths: tuple[tuple[int, ...], ...]) -> tuple[int, ...]:
+@cython.ccall
+def _common_int_path_8616(paths: object) -> tuple[cython.longlong, ...]:
     """Return the shared prefix path across mapped node paths."""
+    values: object
     if not paths:
         return ()
-    prefix: list[int] = []
+    prefix: list[cython.longlong] = []
     for values in zip(*paths, strict=False):
         if len(set(values)) != 1:
             break
@@ -1127,20 +1234,21 @@ def _common_int_path_8616(paths: tuple[tuple[int, ...], ...]) -> tuple[int, ...]
     return tuple(prefix)
 
 
-def _switch_mapping_status_8616(statuses: list[str]) -> str:
+def _switch_mapping_status_8616(statuses: object) -> str:
     """Classify a case/default region-mapping status set."""
-    if any(status == "missing" for status in statuses):
+    if any(status == "missing" for status in iter(statuses)):
         return "blocked_missing_region"
-    if any(status == "ambiguous_exact" for status in statuses):
+    if any(status == "ambiguous_exact" for status in iter(statuses)):
         return "blocked_ambiguous_exact"
-    if any(status == "ambiguous_containing" for status in statuses):
+    if any(status == "ambiguous_containing" for status in iter(statuses)):
         return "blocked_ambiguous_containing"
-    if any(status == "contained" for status in statuses):
+    if any(status == "contained" for status in iter(statuses)):
         return "mapped_contained"
     return "mapped_exact"
 
 
-def _expanded_path_samples_8616(mappings: tuple[DynamicRecord, ...], limit: int) -> list[DynamicRecord]:
+@cython.ccall
+def _expanded_path_samples_8616(mappings: object, limit: cython.longlong) -> object:
     """Render mapped region records as path samples, capped at ``limit``."""
     return [
         {
@@ -1149,38 +1257,38 @@ def _expanded_path_samples_8616(mappings: tuple[DynamicRecord, ...], limit: int)
             "status": mapping.get("status"),
             "type": mapping.get("type"),
         }
-        for mapping in mappings
+        for mapping in iter(mappings)
         if (path := _int_path_tuple(mapping.get("path"))) is not None
     ][:limit]
 
 
 def _expanded_region_mappings_8616(
     expanded_root_body: DynamicRecord,
-    subtree_summaries: tuple[DynamicRecord, ...],
+    subtree_summaries: object,
 ) -> tuple[tuple[DynamicRecord, ...], tuple[DynamicRecord, ...]]:
     """Map normalized expanded-root case/default region ids to subtree paths."""
     case_mappings = tuple(
         _seqnode_map_region_id_8616(region_id, subtree_summaries)
-        for region_id in expanded_root_body["normalized_case_region_ids"]
+        for region_id in iter(expanded_root_body["normalized_case_region_ids"])
         if isinstance(region_id, int)
     )
     default_mappings = tuple(
         _seqnode_map_region_id_8616(region_id, subtree_summaries)
-        for region_id in expanded_root_body["default_region_ids"]
+        for region_id in iter(expanded_root_body["default_region_ids"])
         if isinstance(region_id, int)
     )
     return case_mappings, default_mappings
 
 
 def _expanded_root_geometry_8616(
-    expanded_case_mappings: tuple[DynamicRecord, ...],
-    expanded_default_mappings: tuple[DynamicRecord, ...],
+    expanded_case_mappings: object,
+    expanded_default_mappings: object,
 ) -> DynamicRecord:
     """Compute shared-path geometry for expanded-root case/default mappings."""
-    expanded_paths = _record_paths((*expanded_case_mappings, *expanded_default_mappings))
+    expanded_paths = _record_paths(tuple(expanded_case_mappings) + tuple(expanded_default_mappings))
     common_parent_path = _common_int_path_8616(expanded_paths)
     direct_sibling_span = bool(expanded_paths) and all(
-        len(path) == len(common_parent_path) + 1 for path in expanded_paths
+        operator.eq(len(path), len(common_parent_path) + 1) for path in iter(expanded_paths)
     )
     return {
         "body_shape_status": _expanded_root_body_shape_status_8616(
@@ -1196,32 +1304,32 @@ def _expanded_root_geometry_8616(
 
 def _expanded_root_verdict_8616(
     expanded_root_body: DynamicRecord,
-    expanded_case_mappings: tuple[DynamicRecord, ...],
-    expanded_default_mappings: tuple[DynamicRecord, ...],
+    expanded_case_mappings: object,
+    expanded_default_mappings: object,
     geometry: DynamicRecord,
-) -> tuple[str, bool, object]:
+) -> tuple[str, cython.bint, object]:
     """Classify expanded-root body mapping status and transform readiness."""
-    expanded_statuses = [str(mapping["status"]) for mapping in expanded_case_mappings]
-    expanded_statuses.extend(str(mapping["status"]) for mapping in expanded_default_mappings)
+    expanded_statuses = [str(mapping["status"]) for mapping in iter(expanded_case_mappings)]
+    expanded_statuses.extend(str(mapping["status"]) for mapping in iter(expanded_default_mappings))
     transform_ready = bool(expanded_root_body["ready"]) and bool(expanded_case_mappings)
     blocker_reason = None
     if not expanded_root_body["ready"]:
         body_mapping_status = "normalization_not_ready"
         transform_ready = False
         blocker_reason = "expanded_root_normalization_not_ready"
-    elif len(expanded_case_mappings) != len(expanded_root_body["normalized_case_values"]):
+    elif operator.ne(len(expanded_case_mappings), len(expanded_root_body["normalized_case_values"])):
         body_mapping_status = "case_value_count_mismatch"
         transform_ready = False
         blocker_reason = "case_value_count_mismatch"
-    elif any(status == "missing" for status in expanded_statuses):
+    elif any(status == "missing" for status in iter(expanded_statuses)):
         body_mapping_status = "blocked_missing_region"
         transform_ready = False
         blocker_reason = "missing_expanded_root_region"
-    elif any(status.startswith("ambiguous") for status in expanded_statuses):
+    elif any(status.startswith("ambiguous") for status in iter(expanded_statuses)):
         body_mapping_status = "blocked_ambiguous_region"
         transform_ready = False
         blocker_reason = "ambiguous_expanded_root_region"
-    elif any(status == "contained" for status in expanded_statuses):
+    elif any(status == "contained" for status in iter(expanded_statuses)):
         body_mapping_status = "mapped_contained"
     else:
         body_mapping_status = "mapped_exact"
@@ -1237,8 +1345,8 @@ def _expanded_root_verdict_8616(
 
 def _expanded_root_switch_fields_8616(
     expanded_root_body: DynamicRecord,
-    expanded_case_mappings: tuple[DynamicRecord, ...],
-    expanded_default_mappings: tuple[DynamicRecord, ...],
+    expanded_case_mappings: object,
+    expanded_default_mappings: object,
 ) -> DynamicRecord:
     """Compute the shared ``expanded_root_*`` mapping record fields."""
     geometry = _expanded_root_geometry_8616(expanded_case_mappings, expanded_default_mappings)
@@ -1254,7 +1362,7 @@ def _expanded_root_switch_fields_8616(
         "expanded_root_direct_sibling_span": geometry["direct_sibling_span"],
         "expanded_root_common_parent_path": list(geometry["common_parent_path"]),
         "expanded_root_mapped_case_count": sum(
-            1 for mapping in expanded_case_mappings if mapping["status"] in {"exact", "contained"}
+            1 for mapping in iter(expanded_case_mappings) if mapping["status"] in {"exact", "contained"}
         ),
         "expanded_root_normalization_ready": bool(expanded_root_body["ready"]),
         "expanded_root_normalization_status": expanded_root_body["status"],
@@ -1264,7 +1372,7 @@ def _expanded_root_switch_fields_8616(
         "expanded_root_transform_ready": transform_ready,
         "expanded_root_unmapped_case_region_ids": [
             mapping["region_id"]
-            for mapping in expanded_case_mappings
+            for mapping in iter(expanded_case_mappings)
             if mapping["status"] not in {"exact", "contained"}
         ],
     }
@@ -1272,24 +1380,25 @@ def _expanded_root_switch_fields_8616(
 
 def _seqnode_switch_artifact_mapping_8616(
     artifact: DynamicRecord,
-    subtree_summaries: tuple[DynamicRecord, ...],
+    subtree_summaries: object,
 ) -> DynamicRecord:
     """Map one switch artifact's case/default regions into seqnode paths."""
-    case_region_ids = tuple(value for value in artifact.get("case_region_ids", ()) if isinstance(value, int))
-    case_mappings = tuple(_seqnode_map_region_id_8616(region_id, subtree_summaries) for region_id in case_region_ids)
+    default_path: object
+    case_region_ids = tuple(value for value in builtins.iter(artifact.get("case_region_ids", ())) if isinstance(value, int))
+    case_mappings = tuple(_seqnode_map_region_id_8616(region_id, subtree_summaries) for region_id in iter(case_region_ids))
     default_mapping = _seqnode_map_region_id_8616(artifact.get("default_region_id"), subtree_summaries)
-    statuses = [str(mapping["status"]) for mapping in case_mappings]
+    statuses = [str(mapping["status"]) for mapping in iter(case_mappings)]
     if artifact.get("default_region_id") is not None:
         statuses.append(str(default_mapping["status"]))
     status = _switch_mapping_status_8616(statuses)
     case_paths = tuple(
-        path for mapping in case_mappings if (path := _int_path_tuple(mapping.get("path"))) is not None
+        path for mapping in iter(case_mappings) if (path := _int_path_tuple(mapping.get("path"))) is not None
     )
     default_path = _int_path_tuple(default_mapping.get("path"))
     default_contains_case_count = 0
     if default_path is not None:
         default_contains_case_count = sum(
-            1 for case_path in case_paths if len(case_path) > len(default_path) and case_path[: len(default_path)] == default_path
+            1 for case_path in iter(case_paths) if len(case_path) > len(default_path) and operator.eq(case_path[: len(default_path)], default_path)
         )
     transform_ready = status in {"mapped_exact", "mapped_contained"}
     transform_blocker_reason = None
@@ -1297,7 +1406,7 @@ def _seqnode_switch_artifact_mapping_8616(
         status = "blocked_partial_switch_ladder"
         transform_ready = False
         transform_blocker_reason = "default_subtree_contains_more_switch_cases"
-    common_paths = (*case_paths, *((default_path,) if default_path is not None else ()))
+    common_paths = (*case_paths, *(tuple((default_path,)) if default_path is not None else tuple(())))
     decision_tree_summary = dict(artifact.get("decision_tree_summary") or {})
     expanded_root_body = _expanded_root_normalized_body_from_summary_8616(decision_tree_summary)
     expanded_case_mappings, expanded_default_mappings = _expanded_region_mappings_8616(
@@ -1320,7 +1429,7 @@ def _seqnode_switch_artifact_mapping_8616(
         **expanded_fields,
         "expanded_root_default_mappings": list(expanded_default_mappings),
         "expanded_root_normalized_case_mappings": list(expanded_case_mappings),
-        "mapped_case_count": sum(1 for mapping in case_mappings if mapping["status"] in {"exact", "contained"}),
+        "mapped_case_count": sum(1 for mapping in iter(case_mappings) if mapping["status"] in {"exact", "contained"}),
         "region_id": artifact.get("region_id"),
         "status": status,
         "switch_condition_lhs": artifact.get("switch_condition_lhs"),
@@ -1328,23 +1437,25 @@ def _seqnode_switch_artifact_mapping_8616(
         "transform_ready": transform_ready,
         "unmapped_case_region_ids": [
             mapping["region_id"]
-            for mapping in case_mappings
+            for mapping in iter(case_mappings)
             if mapping["status"] not in {"exact", "contained"}
         ],
     }
 
 
 def _seqnode_switch_artifact_mappings_8616(
-    sequence: object, artifacts: tuple[DynamicRecord, ...]
+    sequence: object, artifacts: object
 ) -> tuple[DynamicRecord, ...]:
     subtree_summaries = _seqnode_subtree_summaries_8616(sequence)
     return tuple(
-        _seqnode_switch_artifact_mapping_8616(artifact, subtree_summaries) for artifact in artifacts
+        _seqnode_switch_artifact_mapping_8616(artifact, subtree_summaries) for artifact in iter(artifacts)
     )
 
 
-def _append_int_values_8616(target: list[int], values: object) -> None:
+@cython.ccall
+def _append_int_values_8616(target: object, values: object) -> None:
     """Append integer items from a heterogeneous record field."""
+    value: object
     if not isinstance(values, list | tuple):
         return
     for value in values:
@@ -1352,11 +1463,12 @@ def _append_int_values_8616(target: list[int], values: object) -> None:
             target.append(value)
 
 
+@cython.ccall
 def _accumulate_branch_subtree_ids_8616(
     subtree: object,
-    case_region_ids: list[int],
-    case_values: list[int],
-    default_region_ids: list[int],
+    case_region_ids: object,
+    case_values: object,
+    default_region_ids: object,
 ) -> None:
     """Accumulate normalized case/default ids from one branch subtree."""
     if not isinstance(subtree, dict):
@@ -1366,13 +1478,15 @@ def _accumulate_branch_subtree_ids_8616(
     _append_int_values_8616(default_region_ids, subtree.get("default_candidate_region_ids"))
 
 
+@cython.ccall
 def _accumulate_branch_split_ids_8616(
     split: object,
-    case_region_ids: list[int],
-    case_values: list[int],
-    default_region_ids: list[int],
+    case_region_ids: object,
+    case_values: object,
+    default_region_ids: object,
 ) -> None:
     """Accumulate normalized ids from one decision-tree branch split."""
+    subtree: object
     if not isinstance(split, dict):
         return
     _append_int_values_8616(case_region_ids, split.get("current_case_region_ids"))
@@ -1381,13 +1495,17 @@ def _accumulate_branch_split_ids_8616(
         _accumulate_branch_subtree_ids_8616(subtree, case_region_ids, case_values, default_region_ids)
 
 
+@cython.ccall
 def _expanded_root_normalized_body_from_summary_8616(summary: DynamicRecord) -> DynamicRecord:
+    branch_subtrees: object
+    readiness: object
+    split: object
     readiness = summary.get("expanded_root_normalization_readiness")
     ready = isinstance(readiness, dict) and readiness.get("ready") is True
     branch_subtrees = summary.get("expanded_root_normalization_branch_subtrees")
-    case_region_ids: list[int] = []
-    case_values: list[int] = []
-    default_region_ids: list[int] = []
+    case_region_ids: list[cython.longlong] = []
+    case_values: list[cython.longlong] = []
+    default_region_ids: list[cython.longlong] = []
     if isinstance(branch_subtrees, list):
         for split in branch_subtrees:
             _accumulate_branch_split_ids_8616(split, case_region_ids, case_values, default_region_ids)
@@ -1400,8 +1518,11 @@ def _expanded_root_normalized_body_from_summary_8616(summary: DynamicRecord) -> 
     }
 
 
-def _common_prefix_len_8616(lhs: tuple[int, ...], rhs: tuple[int, ...]) -> int:
+@cython.ccall
+def _common_prefix_len_8616(lhs: object, rhs: object) -> cython.longlong:
     """Return the shared leading path length between two node paths."""
+    left_value: object
+    right_value: object
     count = 0
     for left_value, right_value in zip(lhs, rhs, strict=False):
         if left_value != right_value:
@@ -1410,9 +1531,13 @@ def _common_prefix_len_8616(lhs: tuple[int, ...], rhs: tuple[int, ...]) -> int:
     return count
 
 
-def _default_case_region_ids_by_default_8616(summary: DynamicRecord) -> dict[int, tuple[int, ...]]:
+def _default_case_region_ids_by_default_8616(summary: DynamicRecord) -> object:
     """Map each expanded default candidate region id to its sibling case ids."""
-    result: dict[int, tuple[int, ...]] = {}
+    branch_subtrees: object
+    default_id: object
+    split: object
+    subtree: object
+    result: dict[cython.longlong, tuple[cython.longlong, ...]] = {}
     branch_subtrees = summary.get("expanded_root_normalization_branch_subtrees")
     if not isinstance(branch_subtrees, list):
         return result
@@ -1424,7 +1549,7 @@ def _default_case_region_ids_by_default_8616(summary: DynamicRecord) -> dict[int
                 continue
             case_ids = tuple(
                 region_id
-                for region_id in tuple(subtree.get("normalized_case_region_ids", ()) or ())
+                for region_id in builtins.iter(tuple(subtree.get("normalized_case_region_ids", ()) or ()))
                 if isinstance(region_id, int)
             )
             for default_id in tuple(subtree.get("default_candidate_region_ids", ()) or ()):
@@ -1435,32 +1560,34 @@ def _default_case_region_ids_by_default_8616(summary: DynamicRecord) -> dict[int
 
 def _resolve_ambiguous_default_mapping_8616(
     mapping: DynamicRecord,
-    associated_case_region_ids: tuple[int, ...],
-    case_mappings_by_region_id: dict[int, DynamicRecord],
+    associated_case_region_ids: object,
+    case_mappings_by_region_id: object,
 ) -> DynamicRecord:
     """Resolve an ambiguous default candidate by shared-prefix proximity."""
+    candidate_path: object
+    candidate: object
     if mapping.get("status") != "ambiguous_exact":
         return mapping
     case_paths = tuple(
         path
-        for region_id in associated_case_region_ids
+        for region_id in iter(associated_case_region_ids)
         if (path := _int_path_tuple(case_mappings_by_region_id.get(region_id, {}).get("path"))) is not None
     )
     if not case_paths:
         return mapping
-    scored_candidates: list[tuple[int, int, tuple[int, ...], DynamicRecord]] = []
+    scored_candidates: list[tuple[cython.longlong, cython.longlong, tuple[cython.longlong, ...], DynamicRecord]] = []
     for candidate in tuple(mapping.get("candidates", ()) or ()):
         if not isinstance(candidate, dict):
             continue
         candidate_path = candidate.get("path")
         if (path_tuple := _int_path_tuple(candidate_path)) is None:
             continue
-        score = sum(_common_prefix_len_8616(path_tuple, case_path) for case_path in case_paths)
+        score = sum(_common_prefix_len_8616(path_tuple, case_path) for case_path in iter(case_paths))
         scored_candidates.append((score, len(path_tuple), path_tuple, candidate))
     if not scored_candidates:
         return mapping
     scored_candidates.sort(reverse=True, key=lambda item: (item[0], item[1], item[2]))
-    if len(scored_candidates) > 1 and scored_candidates[0][:2] == scored_candidates[1][:2]:
+    if len(scored_candidates) > 1 and operator.eq(scored_candidates[0][:2], scored_candidates[1][:2]):
         return mapping
     _score, _depth, _path, selected = scored_candidates[0]
     resolved = dict(mapping)
@@ -1478,14 +1605,14 @@ def _resolve_ambiguous_default_mapping_8616(
 
 
 def _disambiguated_default_mappings_8616(
-    expanded_default_mappings: tuple[DynamicRecord, ...],
-    expanded_case_mappings: tuple[DynamicRecord, ...],
+    expanded_default_mappings: object,
+    expanded_case_mappings: object,
     decision_tree_summary: DynamicRecord,
 ) -> tuple[DynamicRecord, ...]:
     """Resolve ambiguous default candidates against sibling case mappings."""
     case_mappings_by_region_id = {
         int(mapping["region_id"]): mapping
-        for mapping in expanded_case_mappings
+        for mapping in iter(expanded_case_mappings)
         if isinstance(mapping.get("region_id"), int)
     }
     default_case_region_ids_by_default = _default_case_region_ids_by_default_8616(decision_tree_summary)
@@ -1497,14 +1624,15 @@ def _disambiguated_default_mappings_8616(
             else (),
             case_mappings_by_region_id,
         )
-        for mapping in expanded_default_mappings
+        for mapping in iter(expanded_default_mappings)
     )
 
 
+@cython.ccall
 def _ambiguous_mapping_samples_8616(
-    expanded_case_mappings: tuple[DynamicRecord, ...],
-    expanded_default_mappings: tuple[DynamicRecord, ...],
-) -> list[DynamicRecord]:
+    expanded_case_mappings: object,
+    expanded_default_mappings: object,
+) -> object:
     """Render ambiguous expanded-root mappings as diagnostic samples."""
     return [
         {
@@ -1513,14 +1641,15 @@ def _ambiguous_mapping_samples_8616(
             "region_id": mapping.get("region_id"),
             "status": mapping.get("status"),
         }
-        for mapping in (*expanded_case_mappings, *expanded_default_mappings)
+        for mapping in iter(tuple(expanded_case_mappings) + tuple(expanded_default_mappings))
         if str(mapping["status"]).startswith("ambiguous")
     ][:6]
 
 
+@cython.ccall
 def _graphregion_switch_artifact_mapping_8616(
     artifact: DynamicRecord,
-    subtree_summaries: tuple[DynamicRecord, ...],
+    subtree_summaries: object,
 ) -> DynamicRecord:
     """Map one switch artifact's expanded regions into graphregion paths."""
     decision_tree_summary = dict(artifact.get("decision_tree_summary") or {})
@@ -1538,12 +1667,12 @@ def _graphregion_switch_artifact_mapping_8616(
         **expanded_fields,
         "expanded_root_ambiguous_case_region_ids": [
             mapping["region_id"]
-            for mapping in expanded_case_mappings
+            for mapping in iter(expanded_case_mappings)
             if str(mapping["status"]).startswith("ambiguous")
         ],
         "expanded_root_ambiguous_default_region_ids": [
             mapping["region_id"]
-            for mapping in expanded_default_mappings
+            for mapping in iter(expanded_default_mappings)
             if str(mapping["status"]).startswith("ambiguous")
         ],
         "expanded_root_ambiguous_mapping_samples": _ambiguous_mapping_samples_8616(
@@ -1551,7 +1680,7 @@ def _graphregion_switch_artifact_mapping_8616(
         ),
         "expanded_root_disambiguated_default_region_ids": [
             mapping["region_id"]
-            for mapping in expanded_default_mappings
+            for mapping in iter(expanded_default_mappings)
             if isinstance(mapping.get("disambiguation"), dict)
         ],
         "region_id": artifact.get("region_id"),
@@ -1559,14 +1688,15 @@ def _graphregion_switch_artifact_mapping_8616(
 
 
 def _graphregion_switch_artifact_mappings_8616(
-    region: object, artifacts: tuple[DynamicRecord, ...]
+    region: object, artifacts: object
 ) -> tuple[DynamicRecord, ...]:
     subtree_summaries = _graphregion_subtree_summaries_8616(region)
     return tuple(
-        _graphregion_switch_artifact_mapping_8616(artifact, subtree_summaries) for artifact in artifacts
+        _graphregion_switch_artifact_mapping_8616(artifact, subtree_summaries) for artifact in iter(artifacts)
     )
 
 
+@cython.ccall
 def _condition_operand_payload_8616(value: object) -> object:
     if hasattr(value, "to_dict"):
         try:
@@ -1578,6 +1708,7 @@ def _condition_operand_payload_8616(value: object) -> object:
     return repr(value)
 
 
+@cython.ccall
 def _condition_ir_payload_8616(condition: object) -> DynamicRecord:
     return {
         "block_addr": getattr(condition, "block_addr", None),
@@ -1590,11 +1721,13 @@ def _condition_ir_payload_8616(condition: object) -> DynamicRecord:
 
 
 def _seqnode_probe_summary_8616(sequence: object) -> DynamicRecord:
-    counts: dict[str, int] = {}
-    addr_samples: list[int] = []
-    seen: set[int] = set()
+    counts: dict[str, cython.longlong] = {}
+    addr_samples: list[cython.longlong] = []
+    seen: set[cython.longlong] = set()
 
     def _visit(node: object) -> None:
+        addr: object
+        child: object
         if node is None:
             return
         marker = id(node)
@@ -1619,11 +1752,13 @@ def _seqnode_probe_summary_8616(sequence: object) -> DynamicRecord:
         "cascading_condition_node_count": counts.get("CascadingConditionNode", 0),
         "loop_node_count": counts.get("LoopNode", 0),
         "addr_samples": addr_samples,
-        "type_counts": dict(sorted(counts.items())),
+        "type_counts": dict(sorted(tuple(counts.items()))),
     }
 
 
-def _record_seqnode_stage_probe_8616(project: AngrProjectSurface | None, label: str, func: object, sequence: object) -> None:
+@cython.ccall
+def _record_seqnode_stage_probe_8616(project: object, label: object, func: object, sequence: object) -> None:
+    records: object
     if project is None or sequence is None:
         return
     records = getattr(project, "_inertia_structuring_seqnode_stage_probe_8616", None)
@@ -1639,15 +1774,18 @@ def _record_seqnode_stage_probe_8616(project: AngrProjectSurface | None, label: 
 
 
 def _build_grouped_switch_artifacts_from_source_graph_8616(
-    project: AngrProjectSurface | None,
+    project: object,
     func: object,
     source_graph: object,
 ) -> tuple[tuple[DynamicRecord, ...], str | None]:
     """Build diagnostic grouped-switch artifacts from the pre-region Clinic graph."""
+    cache_snapshot: object
+    func_addr: object
+    graph: object
     func_addr = getattr(func, "addr", None)
     if project is None or not isinstance(func_addr, int) or source_graph is None:
         return (), "missing_project_function_or_source_graph"
-    cache_snapshot: tuple[object, object] | None = None
+    cache_snapshot = None
     try:
         from types import SimpleNamespace
 
@@ -1665,7 +1803,7 @@ def _build_grouped_switch_artifacts_from_source_graph_8616(
         module_cache = Instruction_ANY._inertia_module_condition_cache
         pending_sources = Instruction_ANY._inertia_pending_condition_sources_by_addr
         cache_snapshot = (
-            {key: list(value) if isinstance(value, list) else value for key, value in dict(module_cache).items()},
+            {key: list(value) if isinstance(value, list) else value for key, value in builtins.iter(dict(module_cache).items())},
             dict(dict(pending_sources).items()),
         )
         conditions, edge_evidence = collect_typed_condition_artifacts_8616(project, func_addr)
@@ -1685,7 +1823,7 @@ def _build_grouped_switch_artifacts_from_source_graph_8616(
         structured = AbnormalLoopStructureAnalysis(graph).structure()
         artifacts = tuple(
             dict(artifact)
-            for region in structured.nodes
+            for region in iter(structured.nodes)
             if isinstance(artifact := region.metadata.get("typed_edge_switch_region_artifact"), dict)
         )
         return artifacts, None
@@ -1704,13 +1842,21 @@ def _build_grouped_switch_artifacts_from_source_graph_8616(
                 pass
 
 
+@cython.ccall
 def _pre_recursive_switch_materialization_readiness_8616(
-    artifacts: tuple[DynamicRecord, ...],
-    mappings: tuple[DynamicRecord, ...],
+    artifacts: object,
+    mappings: object,
 ) -> DynamicRecord:
     """Return a fail-closed readiness summary for pre-recursive switch materialization."""
-    ready_region_ids: list[int] = []
-    blocker_reasons: dict[str, int] = {}
+    artifact_status: object
+    mapping_status: object
+    region_id: object
+    shape_status: object
+    transform_blocker: object
+    artifact: object
+    mapping: object
+    ready_region_ids: list[cython.longlong] = []
+    blocker_reasons: dict[str, cython.longlong] = {}
     for artifact, mapping in zip(artifacts, mappings, strict=False):
         if not isinstance(artifact, dict) or not isinstance(mapping, dict):
             blocker_reasons["invalid_artifact_or_mapping"] = blocker_reasons.get("invalid_artifact_or_mapping", 0) + 1
@@ -1738,14 +1884,17 @@ def _pre_recursive_switch_materialization_readiness_8616(
             reason = "missing_artifact_region_id"
         blocker_reasons[reason] = blocker_reasons.get(reason, 0) + 1
     return {
-        "blocker_reasons": dict(sorted(blocker_reasons.items())),
+        "blocker_reasons": dict(sorted(tuple(blocker_reasons.items()))),
         "ready_count": len(ready_region_ids),
         "ready_region_ids": ready_region_ids,
     }
 
 
+@cython.ccall
 def _external_default_owner_paths_8616(mapping: DynamicRecord) -> DynamicRecord:
     """Summarize owner paths for the supported ladder-subtree/default-sibling shape."""
+    external_child: object
+    ladder_child: object
     case_samples = tuple(mapping.get("expanded_root_case_path_samples", ()) or ())
     default_samples = tuple(mapping.get("expanded_root_default_path_samples", ()) or ())
     if not case_samples or not default_samples:
@@ -1766,13 +1915,13 @@ def _external_default_owner_paths_8616(mapping: DynamicRecord) -> DynamicRecord:
         }
     common_parent_path = _int_path_tuple(mapping.get("expanded_root_common_parent_path")) or ()
     common_len = len(common_parent_path)
-    child_indexes = {path[common_len] for path in (*case_paths, *default_paths) if len(path) > common_len}
-    case_child_indexes = {path[common_len] for path in case_paths if len(path) > common_len}
-    default_child_indexes = {path[common_len] for path in default_paths if len(path) > common_len}
+    child_indexes = {path[common_len] for path in iter(tuple(case_paths) + tuple(default_paths)) if len(path) > common_len}
+    case_child_indexes = {path[common_len] for path in iter(case_paths) if len(path) > common_len}
+    default_child_indexes = {path[common_len] for path in iter(default_paths) if len(path) > common_len}
     external_default_child_indexes = default_child_indexes - case_child_indexes
-    if len(case_child_indexes) != 1 or len(external_default_child_indexes) != 1 or child_indexes != (
+    if len(case_child_indexes) != 1 or len(external_default_child_indexes) != 1 or operator.ne(child_indexes, (
         case_child_indexes | external_default_child_indexes
-    ):
+    )):
         return {
             "blocker": "owner_paths_not_ladder_plus_external_default",
             "external_default_owner_path": None,
@@ -1790,12 +1939,17 @@ def _external_default_owner_paths_8616(mapping: DynamicRecord) -> DynamicRecord:
 
 
 def _graphregion_node_at_path_8616(region: object, path: object) -> object | None:
+    graph: object
+    head: object
+    index: object
     graph = getattr(region, "graph", None)
     head = getattr(region, "head", None)
     if graph is None or head is None or not isinstance(path, list | tuple):
         return None
 
     def _node_children(node: object, active_graph: object) -> tuple[tuple[object, object], ...]:
+        nested_graph: object
+        nested_head: object
         children: list[tuple[object, object]] = []
         nested_graph = getattr(node, "graph", None)
         nested_head = getattr(node, "head", None)
@@ -1805,7 +1959,7 @@ def _graphregion_node_at_path_8616(region: object, path: object) -> object | Non
             successors = list(typing.cast(typing.Any, active_graph).successors(node))
         except Exception:
             successors = []
-        children.extend((successor, active_graph) for successor in successors)
+        children.extend((successor, active_graph) for successor in iter(successors))
         return tuple(sorted(children, key=lambda item: (getattr(item[0], "addr", -1), type(item[0]).__name__)))
 
     current = head
@@ -1820,7 +1974,12 @@ def _graphregion_node_at_path_8616(region: object, path: object) -> object | Non
     return typing.cast(object, current)
 
 
+@cython.ccall
 def _graphregion_owner_node_summary_8616(region: object, owner_paths: DynamicRecord) -> DynamicRecord:
+    graph: object
+    node: object
+    name: object
+    path: object
     summaries: DynamicRecord = {}
     for name, path in owner_paths.items():
         node = _graphregion_node_at_path_8616(region, path)
@@ -1838,7 +1997,13 @@ def _graphregion_owner_node_summary_8616(region: object, owner_paths: DynamicRec
     return summaries
 
 
-def _record_graphregion_stage_probe_8616(project: AngrProjectSurface | None, label: str, func: object, region: object) -> None:
+@cython.ccall
+def _record_graphregion_stage_probe_8616(project: object, label: object, func: object, region: object) -> None:
+    full_graph: object
+    func_addr: object
+    graph: object
+    records: object
+    source_graph_by_func: object
     if project is None or region is None:
         return
     records = getattr(project, "_inertia_structuring_graphregion_stage_probe_8616", None)
@@ -1894,7 +2059,7 @@ def _record_graphregion_stage_probe_8616(project: AngrProjectSurface | None, lab
         "node_count": node_count,
         "pre_recursive_grouped_switch_artifact_count": len(pre_recursive_artifacts),
         "pre_recursive_grouped_switch_artifact_statuses": [
-            artifact.get("status") for artifact in pre_recursive_artifacts if isinstance(artifact, dict)
+            artifact.get("status") for artifact in iter(pre_recursive_artifacts) if isinstance(artifact, dict)
         ],
         "pre_recursive_grouped_switch_error": pre_recursive_error,
         "pre_recursive_grouped_switch_mappings": pre_recursive_mappings,
@@ -1917,10 +2082,13 @@ def _record_graphregion_stage_probe_8616(project: AngrProjectSurface | None, lab
     records.append(summary)
 
 
+@cython.ccall
 def _map_seqnode_stage_records_8616(
-    records: tuple[DynamicRecord, ...],
-    artifacts: tuple[DynamicRecord, ...],
+    records: object,
+    artifacts: object,
 ) -> tuple[DynamicRecord, ...]:
+    sequence: object
+    record: object
     mapped_records: list[DynamicRecord] = []
     for record in records:
         sequence = record.get("_sequence")
@@ -1928,7 +2096,7 @@ def _map_seqnode_stage_records_8616(
             continue
         mapped = {
             key: value
-            for key, value in record.items()
+            for key, value in builtins.iter(record.items())
             if key
             in {
                 "addr_samples",
@@ -2021,10 +2189,13 @@ def _map_seqnode_stage_records_8616(
     return tuple(mapped_records)
 
 
+@cython.ccall
 def _map_graphregion_stage_records_8616(
-    records: tuple[DynamicRecord, ...],
-    artifacts: tuple[DynamicRecord, ...],
+    records: object,
+    artifacts: object,
 ) -> tuple[DynamicRecord, ...]:
+    region: object
+    record: object
     mapped_records: list[DynamicRecord] = []
     for record in records:
         region = record.get("_region")
@@ -2032,7 +2203,7 @@ def _map_graphregion_stage_records_8616(
             continue
         mapped = {
             key: value
-            for key, value in record.items()
+            for key, value in builtins.iter(record.items())
             if key
             in {
                 "function_addr",
@@ -2063,11 +2234,12 @@ def _map_graphregion_stage_records_8616(
     return tuple(mapped_records)
 
 
+@cython.ccall
 def _pre_codegen_condition_evidence_8616(
     target_project: AngrProjectSurface,
-    func_addr: int,
+    func_addr: cython.longlong,
     summary: DynamicRecord,
-) -> list[ConditionEdgeEvidence]:
+) -> object:
     """Collect typed-condition artifacts for a pre-codegen seqnode probe."""
     try:
         from inertia.lowering.condition_transfer import (
@@ -2081,7 +2253,7 @@ def _pre_codegen_condition_evidence_8616(
     summary["condition_edge_evidence_count"] = len(edge_evidence)
     summary["condition_edge_block_addrs"] = [
         edge.edge_block_addr
-        for edge in edge_evidence[:16]
+        for edge in iter(edge_evidence[:16])
         if isinstance(getattr(edge, "edge_block_addr", None), int)
     ]
     summary["condition_edge_summaries"] = [
@@ -2092,20 +2264,21 @@ def _pre_codegen_condition_evidence_8616(
             "producer_semantics": list(getattr(edge, "producer_semantics", ()) or ()),
             "source_jcc": getattr(edge, "source_jcc", None),
         }
-        for edge in edge_evidence[:16]
+        for edge in iter(edge_evidence[:16])
     ]
     return edge_evidence
 
 
 def _pre_codegen_grouped_switch_artifacts_8616(
     target_project: AngrProjectSurface,
-    func_addr: int,
+    func_addr: cython.longlong,
     func: object,
     ail_graph: object,
     edge_evidence: Iterable[ConditionEdgeEvidence],
     summary: DynamicRecord,
-) -> tuple[DynamicRecord, ...]:
+) -> object:
     """Rebuild grouped-region switch artifacts for the probe summary."""
+    graph: object
     try:
         from types import SimpleNamespace
 
@@ -2131,7 +2304,7 @@ def _pre_codegen_grouped_switch_artifacts_8616(
             structured = AbnormalLoopStructureAnalysis(graph).structure()
             raw_artifacts = tuple(
                 typing.cast(DynamicRecord, artifact)
-                for region in structured.nodes
+                for region in iter(structured.nodes)
                 if isinstance(
                     artifact := region.metadata.get("typed_edge_switch_region_artifact"),
                     dict,
@@ -2140,7 +2313,7 @@ def _pre_codegen_grouped_switch_artifacts_8616(
             canonicalization = canonicalize_switch_artifacts_8616(raw_artifacts)
             artifacts = tuple(
                 typing.cast(DynamicRecord, artifact)
-                for artifact in canonicalization.artifacts
+                for artifact in iter(canonicalization.artifacts)
             )
             summary["pre_codegen_grouped_switch_raw_artifact_count"] = canonicalization.raw_fact_count
             summary["pre_codegen_grouped_switch_normalized_artifact_count"] = (
@@ -2164,17 +2337,19 @@ def _pre_codegen_grouped_switch_artifacts_8616(
 
 def _pre_codegen_stage_mappings_8616(
     target_project: AngrProjectSurface,
-    func_addr: int,
-    artifacts: tuple[DynamicRecord, ...],
+    func_addr: cython.longlong,
+    artifacts: object,
     summary: DynamicRecord,
 ) -> None:
     """Attach recorded seqnode/graphregion stage mappings to the probe."""
+    graph_region_stage_records: object
+    stage_records: object
     stage_records = getattr(target_project, "_inertia_structuring_seqnode_stage_probe_8616", None)
     if isinstance(stage_records, list):
         func_stage_records = tuple(
             record
-            for record in stage_records
-            if isinstance(record, dict) and record.get("function_addr") == func_addr
+            for record in iter(stage_records)
+            if isinstance(record, dict) and operator.eq(record.get("function_addr"), func_addr)
         )
         summary["pre_codegen_structuring_stage_mappings"] = _map_seqnode_stage_records_8616(
             func_stage_records,
@@ -2188,8 +2363,8 @@ def _pre_codegen_stage_mappings_8616(
     if isinstance(graph_region_stage_records, list):
         func_graph_region_stage_records = tuple(
             record
-            for record in graph_region_stage_records
-            if isinstance(record, dict) and record.get("function_addr") == func_addr
+            for record in iter(graph_region_stage_records)
+            if isinstance(record, dict) and operator.eq(record.get("function_addr"), func_addr)
         )
         summary["pre_codegen_graphregion_stage_mappings"] = _map_graphregion_stage_records_8616(
             func_graph_region_stage_records,
@@ -2197,15 +2372,17 @@ def _pre_codegen_stage_mappings_8616(
         )
 
 
+@cython.ccall
 def _pre_codegen_switch_replacement_probe_8616(
     target_project: AngrProjectSurface,
     sequence: object,
-    artifacts: tuple[DynamicRecord, ...],
-    func_addr: int,
+    artifacts: object,
+    func_addr: cython.longlong,
     func: object,
     summary: DynamicRecord,
 ) -> None:
     """Attempt the pre-codegen typed-switch replacement and record verdicts."""
+    replacement_results: object
     replacement_result = _maybe_materialize_pre_codegen_typed_switch_8616(
         target_project,
         sequence,
@@ -2229,14 +2406,19 @@ def _pre_codegen_switch_replacement_probe_8616(
     _pre_codegen_stage_mappings_8616(target_project, func_addr, artifacts, summary)
 
 
+@cython.ccall
 def _record_pre_codegen_seqnode_probe_8616(
-    project: AngrProjectSurface | None,
+    project: object,
     self: object,
     func: object,
     sequence: object,
     kwargs: Mapping[str, object],
 ) -> None:
     """Record the pre-codegen seqnode probe summary for ``func``."""
+    ail_graph: object
+    func_addr: object
+    records: object
+    target_project: object
     target_project = project if project is not None else getattr(self, "project", None)
     if target_project is None:
         return
@@ -2291,6 +2473,11 @@ def install_angr_structuring_seqnode_stage_probe_guard(project: AngrProjectSurfa
     original_region_simplifier_init: Callable[..., typing.Any] = region_simplifier_cls.__init__
 
     def _probe_rs_init(self: object, *args: object, **kwargs: object) -> object:
+        error: object
+        func_addr: object
+        results: object
+        source_graph_by_func: object
+        target_project: object
         target_project = project if project is not None else getattr(self, "project", None)
         func = kwargs.get("func") or getattr(self, "function", None)
         region = args[0] if args else kwargs.get("region")
@@ -2378,6 +2565,9 @@ def guard_angr_structuring_seqnode_stage_probe(project: AngrProjectSurface | Non
         *args: typing.Any,
         **kwargs: typing.Any,
     ) -> object:
+        func_addr: object
+        source_graph_by_func: object
+        target_project: object
         target_project = project if project is not None else getattr(self, "project", None)
         func_addr = getattr(getattr(self, "func", None), "addr", None)
         if target_project is not None and isinstance(func_addr, int) and graph is not None:
@@ -2446,6 +2636,7 @@ def guard_angr_variable_recovery_binop_sub_size_mismatch(
     project: AngrProjectSurface | None = None,
 ) -> Iterator[None]:
     """Temporarily guard angr variable recovery against mixed-width binops."""
+    original_handle_binop_mul: object
     from angr.analyses.variable_recovery import engine_ail as variable_recovery_engine
 
     engine_cls = typing.cast(AngrPatchSurface, variable_recovery_engine.SimEngineVRAIL)
@@ -2460,23 +2651,24 @@ def guard_angr_variable_recovery_binop_sub_size_mismatch(
             engine_cls._handle_binop_Mul = original_handle_binop_mul
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _ClinicGuardState8616:
     """Mutable counters and stage clock for the Clinic stage-marker guard."""
 
-    start: float = field(default_factory=time.perf_counter)
+    start: cython.double = field(default_factory=time.perf_counter)
     last_stage: str = "start"
-    stage_entry: float = 0.0
-    emit_logs: bool = False
-    simplify_count: int = 0
-    peephole_count: int = 0
-    simplify_total: float = 0.0
-    peephole_total: float = 0.0
+    stage_entry: cython.double = 0.0
+    emit_logs: cython.bint = False
+    simplify_count: cython.longlong = 0
+    peephole_count: cython.longlong = 0
+    simplify_total: cython.double = 0.0
+    peephole_total: cython.double = 0.0
 
     def __post_init__(self) -> None:
         self.stage_entry = self.start
 
-    def emit_stage_time(self, new_stage: str) -> None:
+    @cython.ccall
+    def emit_stage_time(self, new_stage: object) -> None:
         """Emit a stage-transition timing log and advance the clock."""
         now = time.perf_counter()
         elapsed_since_start = now - self.start
@@ -2491,8 +2683,12 @@ class _ClinicGuardState8616:
         self.last_stage = new_stage
         self.stage_entry = now
 
-    def record_peephole_stats(self, project: AngrProjectSurface, elapsed: float) -> None:
+    @cython.ccall
+    def record_peephole_stats(self, project: AngrProjectSurface, elapsed: cython.double) -> None:
         """Accumulate per-function peephole timing stats on the project."""
+        calls: object
+        stats: object
+        total: object
         self.peephole_total += elapsed
         if not os.environ.get("INERTIA_DEBUG_CLINIC_FLAGS"):
             return
@@ -2520,8 +2716,8 @@ def _clinic_stage_guard_8616(
     state: _ClinicGuardState8616,
     project: AngrProjectSurface,
     orig: Callable[..., object],
-    label: str,
-    marker: str,
+    label: object,
+    marker: object,
 ) -> Callable[..., object]:
     """Build a Clinic stage wrapper that records the stage marker."""
 
@@ -2573,15 +2769,17 @@ def _converged_recover_variables_8616(
     return _driven
 
 
+@cython.ccall
 def _guarded_simplify_block_8616(
     state: _ClinicGuardState8616,
     project: AngrProjectSurface,
     orig_simplify_block: Callable[..., object],
     self: AngrPatchSurface,
-    args: tuple[typing.Any, ...],
-    kwargs: dict[str, typing.Any],
+    args: object,
+    kwargs: object,
 ) -> object:
     """Clinic ``_simplify_block`` wrapper with skip gates and stage timing."""
+    block: object
     project._inertia_decompiler_stage = "core:clinic:simplify_block"
     block = args[0] if args else kwargs.get("block")
     if getattr(project, "_inertia_skip_clinic_simplify_block", False) and block is not None:
@@ -2616,8 +2814,10 @@ def _guarded_simplify_block_8616(
     return result
 
 
+@cython.ccall
 def _debug_clinic_flags_8616(project: AngrProjectSurface, block: object) -> None:
     """Emit the once-per-function clinic flag debug line."""
+    seen: object
     if not os.environ.get("INERTIA_DEBUG_CLINIC_FLAGS"):
         return
     seen = getattr(project, "_inertia_debug_clinic_flags_seen", None)
@@ -2641,8 +2841,12 @@ def _debug_clinic_flags_8616(project: AngrProjectSurface, block: object) -> None
     sys.stderr.flush()
 
 
-def _clinic_peephole_capped_8616(project: AngrProjectSurface, block: object) -> tuple[object, bool, bool]:
+@cython.ccall
+def _clinic_peephole_capped_8616(project: AngrProjectSurface, block: object) -> tuple[object, cython.bint, cython.bint]:
     """Return the skipped peephole result while enforcing the per-function cap."""
+    counts: object
+    ctx: object
+    key_addr: object
     cap = int(getattr(project, "_inertia_clinic_peephole_cap", 128) or 128)
     key_addr = None
     ctx = getattr(project, "_inertia_current_function_debug", None)
@@ -2667,12 +2871,13 @@ def _clinic_peephole_capped_8616(project: AngrProjectSurface, block: object) -> 
     return block, False, False
 
 
+@cython.ccall
 def _fast_block_peephole_8616(
     self: AngrPatchSurface,
     block: _PeepholeBlockBoundary8616,
-    peephole_optimize_stmts: Callable[..., tuple[object, bool]],
-    peephole_optimize_multistmts: Callable[..., tuple[object, bool]],
-) -> tuple[object, bool, bool]:
+    peephole_optimize_stmts: Callable[..., tuple[object, cython.bint]],
+    peephole_optimize_multistmts: Callable[..., tuple[object, cython.bint]],
+) -> tuple[object, cython.bint, cython.bint]:
     """Run the stmt/multistmt peephole passes on a block directly."""
     statements, stmts_updated = peephole_optimize_stmts(block, self._stmt_peephole_opts)
     new_block = block.copy(statements=statements) if stmts_updated else block
@@ -2682,8 +2887,11 @@ def _fast_block_peephole_8616(
     return new_block, bool(stmts_updated or multi_stmts_updated), False
 
 
+@cython.ccall
 def _debug_skip_complex_block_8616(project: AngrProjectSurface, block: object) -> None:
     """Emit the once-per-block complex-expr peephole skip debug line."""
+    block_addr: object
+    skipped: object
     skipped = getattr(project, "_inertia_complex_block_skip_seen", None)
     if not isinstance(skipped, set):
         skipped = set()
@@ -2701,17 +2909,19 @@ def _debug_skip_complex_block_8616(project: AngrProjectSurface, block: object) -
         sys.stderr.flush()
 
 
+@cython.ccall
 def _guarded_peephole_optimize_8616(
     state: _ClinicGuardState8616,
     project: AngrProjectSurface,
     orig_peephole_optimize: Callable[..., object],
-    peephole_optimize_stmts: Callable[..., tuple[object, bool]],
-    peephole_optimize_multistmts: Callable[..., tuple[object, bool]],
+    peephole_optimize_stmts: Callable[..., tuple[object, cython.bint]],
+    peephole_optimize_multistmts: Callable[..., tuple[object, cython.bint]],
     self: AngrPatchSurface,
-    args: tuple[typing.Any, ...],
-    kwargs: dict[str, typing.Any],
+    args: object,
+    kwargs: object,
 ) -> object:
     """Block-simplifier ``_peephole_optimize`` wrapper with fast-path bounds."""
+    block: object
     project._inertia_decompiler_stage = "core:clinic:peephole_optimize"
     state.peephole_count += 1
     t_start = time.perf_counter()
@@ -2753,8 +2963,12 @@ def _guarded_peephole_optimize_exprs_8616(
     return orig_peephole_optimize_exprs(block, expr_opts, *args, **kwargs)
 
 
+@cython.cclass
 class _NoPropagationResult8616:
     """Empty propagation result substituted when angr drops a Tmp definition."""
+    dead_vvar_ids = cython.declare(set, visibility = "public")
+    model = cython.declare(object, visibility = "public")
+    replacements = cython.declare(dict, visibility = "public")
 
     def __init__(self) -> None:
         self.replacements: dict[object, object] = {}
@@ -2762,16 +2976,17 @@ class _NoPropagationResult8616:
         self.model = self
 
 
+@cython.ccall
 def _guarded_compute_propagation_8616(
     project: AngrProjectSurface,
     orig_compute_propagation: Callable[..., object],
-    refused_attr: str,
-    debug_label: str,
-    with_dead_vvar_ids: bool,
-    tmp_types: tuple[type, ...],
+    refused_attr: object,
+    debug_label: object,
+    with_dead_vvar_ids: cython.bint,
+    tmp_types: object,
     self: AngrPatchSurface,
-    args: tuple[typing.Any, ...],
-    kwargs: dict[str, typing.Any],
+    args: object,
+    kwargs: object,
 ) -> object:
     """Refuse missing-Tmp propagation instead of raising through angr."""
     try:
@@ -2962,13 +3177,14 @@ def guard_angr_fast_post_ssa_8616(project: AngrProjectSurface) -> Iterator[None]
 
     clinic_cls = typing.cast(AngrPatchSurface, Clinic)
     orig_simplify_function = clinic_cls._simplify_function
-    _counter: dict[int, int] = {}  # id(instance) -> call count
+    _counter: dict[cython.longlong, cython.longlong] = {}  # id(instance) -> call count
 
     def _fast_simplify_function(
         self: AngrPatchSurface,
         ail_graph: object,
         **kwargs: typing.Any,
     ) -> object:
+        c: object
         c = _counter.get(id(self), 0)
         _counter[id(self)] = c + 1
         if getattr(project, "_inertia_tiny_core_aggressive_simplify", False) and c >= 1:
@@ -3040,7 +3256,7 @@ class ThreadBoundTextIO(io.TextIOBase):
     def _stream(self) -> typing.TextIO:
         return self._local.stream or self._fallback
 
-    def write(self, data: str) -> int:
+    def write(self, data: object) -> cython.longlong:
         """Write text to the active stream."""
         return self._stream().write(data)
 
@@ -3049,21 +3265,21 @@ class ThreadBoundTextIO(io.TextIOBase):
         with self._suppress_closed_flush(ValueError):
             self._stream().flush()
 
-    def isatty(self) -> bool:
+    def isatty(self) -> cython.bint:
         """Report whether the active stream is attached to a terminal."""
         return self._stream().isatty()
 
     @property
-    def encoding(self) -> str:  # type: ignore[override]
+    def encoding(self) -> object:  # type: ignore[override]
         """Expose the active stream encoding with a stable fallback."""
         return self._stream().encoding or self._fallback.encoding or "utf-8"
 
     @property
-    def errors(self) -> str | None:  # type: ignore[override]
+    def errors(self) -> object:  # type: ignore[override]
         """Expose the active stream error policy."""
         return self._stream().errors or self._fallback.errors or "strict"
 
-    def __getattr__(self, item: str) -> typing.Any:
+    def __getattr__(self, item: object) -> typing.Any:
         """Delegate optional text-stream APIs at the standard-library boundary."""
         return getattr(self._stream(), item)
 
@@ -3089,7 +3305,7 @@ class DaemonThreadPoolExecutor(ThreadPoolExecutor):
         num_threads = len(executor._threads)
         if num_threads < executor._max_workers:
             thread_name = "%s_%d" % (executor._thread_name_prefix or self, num_threads)  # noqa: UP031
-            worker_args: tuple[object, ...]
+            worker_args: object
             if hasattr(executor, "_create_worker_context"):
                 worker_args = (
                     weakref.ref(self, weakref_cb),
@@ -3114,8 +3330,9 @@ class DaemonThreadPoolExecutor(ThreadPoolExecutor):
             thread_queues = typing.cast(MutableMapping[threading.Thread, object], _threads_queues)
             thread_queues[t] = work_queue
 
-    def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
+    def shutdown(self, wait: cython.bint = True, *, cancel_futures: cython.bint = False) -> None:
         """Shut down workers and detach daemon queues when not waiting."""
+        thread: object
         try:
             super().shutdown(wait=wait, cancel_futures=cancel_futures)
         finally:
@@ -3126,7 +3343,8 @@ class DaemonThreadPoolExecutor(ThreadPoolExecutor):
                     thread_queues.pop(thread, None)
 
 
-def log_step(step: str) -> None:
+@cython.ccall
+def log_step(step: object) -> None:
     """Emit elapsed timing for one named runtime step."""
     global LAST_STEP_TIME
     now = time.perf_counter()
@@ -3138,7 +3356,8 @@ def log_step(step: str) -> None:
     sys.stdout.flush()
 
 
-def format_address(addr: int) -> str:
+@cython.ccall
+def format_address(addr: cython.longlong) -> str:
     """Format an integer address in canonical hexadecimal form."""
     return f"{addr:#x}"
 
@@ -3148,6 +3367,7 @@ class JumpkindLoggingHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         """Emit one enriched unsupported-jumpkind diagnostic."""
+        match: object
         msg = record.getMessage()
         if "Unsupported jumpkind" in msg and "address" in msg:
             match = re.search(r"address\s+(0x[0-9a-fA-F]+|[0-9]+)", msg)
@@ -3162,7 +3382,9 @@ class JumpkindLoggingHandler(logging.Handler):
                 print(f"[dbg] {msg}")
 
 
+@cython.ccall
 def _faulthandler_output_file() -> typing.TextIO | None:
+    stream: object
     for stream in (getattr(sys, "stderr", None), getattr(sys, "__stderr__", None)):
         if stream is None:
             continue
@@ -3174,8 +3396,10 @@ def _faulthandler_output_file() -> typing.TextIO | None:
     return None
 
 
+@cython.ccall
 def _enable_thread_stack_dump_8616() -> int | None:
     """Enable periodic faulthandler stack dumps when configured via env."""
+    stack_dump_file: object
     stack_dump_raw = os.environ.get("INERTIA_THREAD_STACK_DUMP_SEC", "").strip()
     if not stack_dump_raw:
         return None
@@ -3189,12 +3413,14 @@ def _enable_thread_stack_dump_8616() -> int | None:
     return stack_dump_sec
 
 
+@cython.ccall
 def _daemon_thread_result_8616(
     completed: threading.Event,
-    result_box: dict[str, object],
-    timeout_seconds: int,
+    result_box: object,
+    timeout_seconds: cython.longlong,
 ) -> object:
     """Wait for the daemon thread and return or re-raise its outcome."""
+    error: object
     if not completed.wait(timeout_seconds):
         raise _FuturesTimeoutError(f"Timed out after {timeout_seconds}s.")
     if result_box.get("kind") == "err":
@@ -3207,12 +3433,12 @@ def _daemon_thread_result_8616(
     return result_box["result"]
 
 
-def run_with_timeout_in_daemon_thread[TimeoutResultT](
+def run_with_timeout_in_daemon_thread(
     func: Callable[[], TimeoutResultT],
     *,
-    timeout: int,
-    thread_name_prefix: str,
-    prefer_process_alarm: bool = False,
+    timeout: cython.longlong,
+    thread_name_prefix: object,
+    prefer_process_alarm: cython.bint = False,
 ) -> TimeoutResultT:
     """Run a callable with a process alarm or daemon-thread bounded wait.
 
@@ -3220,6 +3446,7 @@ def run_with_timeout_in_daemon_thread[TimeoutResultT](
     stop instead of continuing in an abandoned daemon thread.
     Optional stack sampling covers either lane and is cancelled when work ends.
     """
+    stack_dump_sec: object
     timeout_seconds = max(1, timeout)
     if prefer_process_alarm and threading.current_thread() is threading.main_thread():
         stack_dump_sec = _enable_thread_stack_dump_8616()
@@ -3256,7 +3483,8 @@ def run_with_timeout_in_daemon_thread[TimeoutResultT](
             thread.join(0)
 
 
-def emit_timeout_and_exit(args_timeout: int, recovery_detail: str | None) -> None:
+@cython.ccall
+def emit_timeout_and_exit(args_timeout: cython.longlong, recovery_detail: object) -> None:
     """Emit the CLI timeout comment and terminate with the timeout status."""
     if recovery_detail is None:
         print(f"/* Timed out while recovering a function after {args_timeout}s. */")
@@ -3269,7 +3497,8 @@ def emit_timeout_and_exit(args_timeout: int, recovery_detail: str | None) -> Non
     os._exit(3)
 
 
-def apply_memory_limit(max_memory_mb: int | None) -> None:
+@cython.ccall
+def apply_memory_limit(max_memory_mb: object) -> None:
     """Apply a best-effort process address-space limit in megabytes."""
     if max_memory_mb is None or max_memory_mb <= 0:
         return
@@ -3278,8 +3507,11 @@ def apply_memory_limit(max_memory_mb: int | None) -> None:
         resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
 
 
+@cython.ccall
 def memory_available_mb() -> int | None:
     """Read available Linux memory in megabytes when procfs is available."""
+    available: object
+    line: object
     try:
         meminfo = {}
         with open("/proc/meminfo", encoding="utf-8") as fp:
@@ -3298,12 +3530,15 @@ def memory_available_mb() -> int | None:
     return None
 
 
-def prefer_low_memory_path() -> bool:
+@cython.ccall
+def prefer_low_memory_path() -> cython.bint:
     """Return whether current memory pressure requires the low-memory path."""
+    available_mb: object
     available_mb = memory_available_mb()
     return available_mb is not None and available_mb < 4096
 
 
+@cython.ccall
 def lower_process_priority() -> None:
     """Ensure niceness is at least10 without repeatedly lowering child priority."""
     with contextlib.suppress(AttributeError, OSError):
@@ -3313,8 +3548,10 @@ def lower_process_priority() -> None:
             os.nice(10 - current)
 
 
-def choose_function_parallelism(function_count: int) -> int:
+@cython.ccall
+def choose_function_parallelism(function_count: cython.longlong) -> cython.longlong:
     """Choose worker parallelism from function count, CPU, and memory evidence."""
+    available_mb: object
     if function_count <= 1:
         return 1
     if os.environ.get(FORCE_SERIAL_FUNCTION_DECOMP_ENV, "").strip().lower() in {"1", "true", "yes", "on"}:
@@ -3420,7 +3657,7 @@ def guard_angr_tail_validation_collection_timing() -> Iterator[None]:
     orig_fingerprint = ds_mod_dynamic.fingerprint_x86_16_tail_validation_boundary
     orig_collect = ds_mod_dynamic.collect_x86_16_tail_validation_summary
 
-    def _timed_fingerprint(project: object, codegen: object, *, mode: str) -> object:
+    def _timed_fingerprint(project: object, codegen: object, *, mode: object) -> object:
         _t0 = _time.perf_counter()
         print("[dbg] stage-time: tail_validation:fingerprint:before start")
         sys.stderr.flush()
@@ -3435,8 +3672,8 @@ def guard_angr_tail_validation_collection_timing() -> Iterator[None]:
         project: object,
         codegen: object,
         *,
-        mode: str,
-        boundary_fingerprint: str | None = None,
+        mode: object,
+        boundary_fingerprint: object = None,
     ) -> object:
         _t0 = _time.perf_counter()
         print("[dbg] stage-time: tail_validation:collect:before start")
@@ -3463,10 +3700,10 @@ def guard_angr_tail_validation_collection_timing() -> Iterator[None]:
         ds_mod_dynamic.collect_x86_16_tail_validation_summary = orig_collect
 
 
-def _timed_stage_guard_8616[**StageParameters8616, StageResult8616](
+def _timed_stage_guard_8616(
     orig: Callable[StageParameters8616, StageResult8616],
-    label: str,
-    emit_timing: bool,
+    label: object,
+    emit_timing: cython.bint,
 ) -> Callable[StageParameters8616, StageResult8616]:
     """Emit start/done timing while preserving the stage signature and result."""
 
@@ -3491,9 +3728,9 @@ def _timed_stage_guard_8616[**StageParameters8616, StageResult8616](
 
 def _bounded_stage_guard_8616(
     orig: Callable[..., object],
-    budget_seconds: int,
-    label: str,
-    emit_timing: bool,
+    budget_seconds: cython.longlong,
+    label: object,
+    emit_timing: cython.bint,
 ) -> Callable[..., object]:
     """Build a stage wrapper that refuses work after one analysis timeout."""
     timed_out = False
@@ -3529,7 +3766,8 @@ def _bounded_stage_guard_8616(
     return _timed
 
 
-def _install_bounded_lowering_guards_8616(emit_timing: bool) -> tuple[AngrPatchSurface, AngrPatchSurface]:
+@cython.ccall
+def _install_bounded_lowering_guards_8616(emit_timing: cython.bint) -> tuple[AngrPatchSurface, AngrPatchSurface]:
     """Patch stable-ss-linear lowering entry points with bounded-stage guards.
 
     Returns the ``stack_lowering_from_facts`` module and its original symbol so
@@ -3574,6 +3812,8 @@ def _install_bounded_lowering_guards_8616(emit_timing: bool) -> tuple[AngrPatchS
 @contextlib.contextmanager
 def guard_angr_structuring_codegen_internal_timing() -> Iterator[None]:
     """Emit timing for internal steps of _structuring_codegen_8616 before the pass loop."""
+    orig_slf: object
+    slf_mod: object
     emit_timing = timing_output_enabled()
 
     import inertia.pipeline.contracts as _contracts_mod
@@ -3604,8 +3844,10 @@ def guard_angr_structuring_codegen_internal_timing() -> Iterator[None]:
             slf_mod.lower_stack_accesses_from_alias_facts_8616 = orig_slf
 
 
-def should_force_serial_supplemental_decompilation(function_count: int) -> bool:
+@cython.ccall
+def should_force_serial_supplemental_decompilation(function_count: cython.longlong) -> cython.bint:
     """Return whether supplemental decompilation must remain serial."""
+    available_mb: object
     if function_count > 8:
         return False
     if prefer_low_memory_path():

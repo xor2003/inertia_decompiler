@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Check a structured C operand against the retained near-return IR proof.
 
 Layer: Types/Lowering.
@@ -17,6 +18,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -39,6 +42,9 @@ from .stack_variable_coordinates import (
     StackVariableCoordinateRegistry8616,
     stack_variable_coordinate_registry_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "NearReturnBoundOperand8616",
@@ -100,36 +106,36 @@ class NearReturnOperandRole8616(StrEnum):
     OFFSET_INDEX = "offset_index"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NearReturnOperandCongruenceStats8616:
     """Closed five-stage evidence loop for one requested congruence check."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NearReturnBoundOperand8616:
     """One proven storage role bound to its canonical codegen C variable."""
 
     role: NearReturnOperandRole8616
     storage: IRAddress
-    coefficient: int
+    coefficient: cython.longlong
     projection: StackVariableCoordinateProjection8616
     cvar: structured_c.CVariable
 
     def matches(
-        self, role: NearReturnOperandRole8616, storage: IRAddress, coefficient: int
-    ) -> bool:
+        self, role: NearReturnOperandRole8616, storage: IRAddress, coefficient: cython.longlong
+    ) -> cython.bint:
         """Recheck the exact retained role, storage and canonical C projection."""
-        role_matches = self.role is role and self.coefficient == coefficient
+        role_matches = self.role is role and operator.eq(self.coefficient, coefficient)
         storage_matches = (
-            self.storage == storage
-            and self.projection.bp_offset == storage.offset
-            and self.projection.size == storage.size
+            operator.eq(self.storage, storage)
+            and operator.eq(self.projection.bp_offset, storage.offset)
+            and operator.eq(self.projection.size, storage.size)
         )
         projection_matches = (
             isinstance(self.cvar, structured_c.CVariable)
@@ -138,7 +144,7 @@ class NearReturnBoundOperand8616:
         return role_matches and storage_matches and projection_matches
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NearReturnOperandCongruenceResult8616:
     """One congruent operand binding or a typed atomic refusal.
 
@@ -152,7 +158,7 @@ class NearReturnOperandCongruenceResult8616:
     verdict: NearReturnOperandCongruenceVerdict8616
     failure: NearReturnOperandCongruenceFailure8616 | None
     stats: NearReturnOperandCongruenceStats8616
-    callee_addr: int = -1
+    callee_addr: cython.longlong = -1
     candidate: NearScaledReturnCandidateResult8616 | None = None
     expression: object | None = None
     bound_operands: tuple[NearReturnBoundOperand8616, ...] = ()
@@ -160,8 +166,13 @@ class NearReturnOperandCongruenceResult8616:
     registry: StackVariableCoordinateRegistry8616 | None = None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Recheck current arithmetic and canonical bindings for both roles."""
+        base: object
+        candidate: object
+        expected: object
+        expression: object
+        index: object
         if (
             self.verdict is not NearReturnOperandCongruenceVerdict8616.CONGRUENT
             or self.failure is not None
@@ -169,9 +180,9 @@ class NearReturnOperandCongruenceResult8616:
         ):
             return False
         candidate = self.candidate
-        if candidate is None or not candidate.complete or candidate.callee_addr != self.callee_addr:
+        if candidate is None or not candidate.complete or operator.ne(candidate.callee_addr, self.callee_addr):
             return False
-        if self.expression is None or self.stats != NearReturnOperandCongruenceStats8616(1, 1, 1, 1, 0):
+        if self.expression is None or operator.ne(self.stats, NearReturnOperandCongruenceStats8616(1, 1, 1, 1, 0)):
             return False
         base, index, expression = candidate.base_storage, candidate.index_storage, candidate.offset_expression
         if base is None or index is None or expression is None:
@@ -179,15 +190,15 @@ class NearReturnOperandCongruenceResult8616:
         expected = _expected_operand_coefficients_8616(expression, base, index)
         if expected is None or len(self.bound_operands) != 2:
             return False
-        operands = {operand.role: operand for operand in self.bound_operands}
-        if set(operands) != set(NearReturnOperandRole8616):
+        operands = {operand.role: operand for operand in iter(self.bound_operands)}
+        if operator.ne(set(operands), set(NearReturnOperandRole8616)):
             return False
         bindings_match = all(
             operands[role].matches(role, storage, expected[role])
-            for role, storage in (
+            for role, storage in iter((
                 (NearReturnOperandRole8616.OFFSET_BASE, base),
                 (NearReturnOperandRole8616.OFFSET_INDEX, index),
-            )
+            ))
         )
         if not bindings_match or self.registry is None:
             return False
@@ -197,23 +208,23 @@ class NearReturnOperandCongruenceResult8616:
             return False
         modulus = _MODULAR_WORD_MODULUS_8616
         return (
-            form.base == expected[NearReturnOperandRole8616.OFFSET_BASE] % modulus
-            and form.index == expected[NearReturnOperandRole8616.OFFSET_INDEX] % modulus
-            and form.constant == expression.constant % modulus
-            and all(evaluator.projections.get(role) is operand.projection for role, operand in operands.items())
+            operator.eq(form.base, expected[NearReturnOperandRole8616.OFFSET_BASE] % modulus)
+            and operator.eq(form.index, expected[NearReturnOperandRole8616.OFFSET_INDEX] % modulus)
+            and operator.eq(form.constant, expression.constant % modulus)
+            and all(evaluator.projections.get(role) is operand.projection for role, operand in builtins.iter(operands.items()))
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _OperandAffineForm8616:
     """One mod-2^16 affine accumulator over the two proven operand roles."""
 
-    base: int = 0
-    index: int = 0
-    constant: int = 0
+    base: cython.longlong = 0
+    index: cython.longlong = 0
+    constant: cython.longlong = 0
 
     @property
-    def constant_only(self) -> bool:
+    def constant_only(self) -> cython.bint:
         """Return whether this form carries no proven operand term."""
         return self.base == 0 and self.index == 0
 
@@ -235,7 +246,7 @@ class _OperandAffineForm8616:
             (self.constant - other.constant) % modulus,
         )
 
-    def scale(self, factor: int) -> _OperandAffineForm8616:
+    def scale(self, factor: cython.longlong) -> _OperandAffineForm8616:
         """Return this form scaled by one integer constant modulo 2^16."""
         modulus = _MODULAR_WORD_MODULUS_8616
         reduced = factor % modulus
@@ -246,11 +257,12 @@ class _OperandAffineForm8616:
         )
 
 
+@cython.ccall
 def _refuse_8616(
     failure: NearReturnOperandCongruenceFailure8616,
     *,
-    normalized: bool = False,
-    classified: bool = False,
+    normalized: cython.bint = False,
+    classified: cython.bint = False,
     candidate: NearScaledReturnCandidateResult8616 | None = None,
     expression: object | None = None,
     upstream: NearScaledReturnCandidateFailure8616 | None = None,
@@ -269,8 +281,10 @@ def _refuse_8616(
     )
 
 
+@cython.ccall
 def _codegen_function_addr_8616(codegen: object) -> int | None:
     """Read the exact linear function identity at the codegen boundary."""
+    cfunc: object
     boundary = cast(_CodegenBoundary8616, codegen)
     try:
         cfunc = boundary.cfunc
@@ -280,7 +294,8 @@ def _codegen_function_addr_8616(codegen: object) -> int | None:
     return addr if type(addr) is int and addr >= 0 else None
 
 
-def _full_word_unsigned_cast_8616(dst_type: object) -> bool:
+@cython.ccall
+def _full_word_unsigned_cast_8616(dst_type: object) -> cython.bint:
     """Accept only an unsigned integer view preserving the 16-bit word.
 
     A narrower destination truncates the proven word and a signed or
@@ -297,6 +312,7 @@ def _full_word_unsigned_cast_8616(dst_type: object) -> bool:
     return signed is False and type(size) is int and size >= 16
 
 
+@cython.cclass
 class _OperandCongruenceEvaluator8616:
     """Reduce the bounded numeric fragment to a proven-role affine form.
 
@@ -304,6 +320,10 @@ class _OperandCongruenceEvaluator8616:
     operand leaves through the canonical stack-coordinate registry by object
     identity. Every refusal keeps the fragment unbound instead of guessing.
     """
+    _budget = cython.declare(object, visibility = "public")
+    _projections = cython.declare(dict, visibility = "public")
+    _registry = cython.declare(object, visibility = "public")
+    _storages = cython.declare(tuple, visibility = "public")
 
     def __init__(
         self,
@@ -325,10 +345,11 @@ class _OperandCongruenceEvaluator8616:
     @property
     def projections(
         self,
-    ) -> dict[NearReturnOperandRole8616, StackVariableCoordinateProjection8616]:
+    ) -> object:
         """Return the projections bound while evaluating, keyed by role."""
         return self._projections
 
+    @cython.ccall
     def evaluate(
         self, node: object
     ) -> _OperandAffineForm8616 | NearReturnOperandCongruenceFailure8616:
@@ -346,6 +367,7 @@ class _OperandCongruenceEvaluator8616:
             return self._cast(node)
         return NearReturnOperandCongruenceFailure8616.EXPRESSION_UNSUPPORTED
 
+    @cython.ccall
     def _constant(
         self, node: structured_c.CConstant
     ) -> _OperandAffineForm8616 | NearReturnOperandCongruenceFailure8616:
@@ -359,18 +381,20 @@ class _OperandCongruenceEvaluator8616:
         self, node: structured_c.CVariable
     ) -> _OperandAffineForm8616 | NearReturnOperandCongruenceFailure8616:
         """Bind one leaf to a proven role through exact object identity only."""
+        projection: object
+        role: object
         variables = (
-            (node.variable, node.unified_variable)
-            if node.unified_variable is not None else (node.variable,)
+            tuple((node.variable, node.unified_variable))
+            if node.unified_variable is not None else tuple((node.variable,))
         )
         projections = tuple(
             self._registry.for_variable(variable) if isinstance(variable, SimStackVariable) else None
-            for variable in variables
+            for variable in iter(variables)
         )
         projection = projections[0]
-        if projection is None or any(item is None for item in projections):
+        if projection is None or any(item is None for item in iter(projections)):
             return NearReturnOperandCongruenceFailure8616.OPERAND_UNBOUND
-        if any(item is not projection for item in projections):
+        if any(item is not projection for item in iter(projections)):
             return NearReturnOperandCongruenceFailure8616.OPERAND_STORAGE_MISMATCH
         if not isinstance(projection.cvar, structured_c.CVariable):
             return NearReturnOperandCongruenceFailure8616.OPERAND_UNBOUND
@@ -383,19 +407,23 @@ class _OperandCongruenceEvaluator8616:
             index=int(role is NearReturnOperandRole8616.OFFSET_INDEX),
         )
 
+    @cython.ccall
     def _role_for_projection(
         self, projection: StackVariableCoordinateProjection8616
     ) -> NearReturnOperandRole8616 | None:
         """Require the canonical projection to cover a proven word exactly."""
+        role: object
+        storage: object
         for role, storage in self._storages:
             if (
-                projection.bp_offset == storage.offset
-                and projection.size == storage.size
+                operator.eq(projection.bp_offset, storage.offset)
+                and operator.eq(projection.size, storage.size)
                 and self._registry.for_bp_range(storage.offset, storage.size) is projection
             ):
                 return role
         return None
 
+    @cython.ccall
     def _binary(
         self, node: structured_c.CBinaryOp
     ) -> _OperandAffineForm8616 | NearReturnOperandCongruenceFailure8616:
@@ -421,6 +449,7 @@ class _OperandCongruenceEvaluator8616:
             return lhs.scale(1 << count)
         return NearReturnOperandCongruenceFailure8616.EXPRESSION_UNSUPPORTED
 
+    @cython.ccall
     def _multiply(
         self, lhs: _OperandAffineForm8616, rhs: _OperandAffineForm8616
     ) -> _OperandAffineForm8616 | NearReturnOperandCongruenceFailure8616:
@@ -431,6 +460,7 @@ class _OperandCongruenceEvaluator8616:
             return lhs.scale(rhs.constant)
         return NearReturnOperandCongruenceFailure8616.EXPRESSION_UNSUPPORTED
 
+    @cython.ccall
     def _cast(
         self, node: structured_c.CTypeCast
     ) -> _OperandAffineForm8616 | NearReturnOperandCongruenceFailure8616:
@@ -440,12 +470,16 @@ class _OperandCongruenceEvaluator8616:
         return self.evaluate(node.expr)
 
 
+@cython.ccall
 def _expected_operand_coefficients_8616(
     expression: ScalarAffineExpression8616,
     base_storage: IRAddress,
     index_storage: IRAddress,
-) -> dict[NearReturnOperandRole8616, int] | None:
+) -> object:
     """Derive proven per-role coefficients from the retained IR proof."""
+    role: object
+    storage: object
+    term: object
     coefficients = dict.fromkeys(NearReturnOperandRole8616, 0)
     storages = (
         (NearReturnOperandRole8616.OFFSET_BASE, base_storage),
@@ -466,6 +500,7 @@ def _expected_operand_coefficients_8616(
     return coefficients
 
 
+@cython.ccall
 def bind_near_return_offset_c_ast_8616(
     codegen: object,
     candidate: NearScaledReturnCandidateResult8616,
@@ -479,6 +514,13 @@ def bind_near_return_offset_c_ast_8616(
     mutates the AST, codegen, prototype, callsite, or project state, and it
     does not decide pointer representation, segment binding, or signedness.
     """
+    base_projection: object
+    base_storage: object
+    expected: object
+    function_addr: object
+    index_projection: object
+    index_storage: object
+    offset_expression: object
     if not candidate.complete:
         return _refuse_8616(
             NearReturnOperandCongruenceFailure8616.CANDIDATE_INCOMPLETE,
@@ -493,7 +535,7 @@ def bind_near_return_offset_c_ast_8616(
             candidate=candidate,
             expression=expression,
         )
-    if function_addr != candidate.callee_addr:
+    if operator.ne(function_addr, candidate.callee_addr):
         return _refuse_8616(
             NearReturnOperandCongruenceFailure8616.FUNCTION_MISMATCH,
             candidate=candidate,
@@ -536,9 +578,9 @@ def bind_near_return_offset_c_ast_8616(
         )
     modulus = _MODULAR_WORD_MODULUS_8616
     congruent = (
-        form.base == expected[NearReturnOperandRole8616.OFFSET_BASE] % modulus
-        and form.index == expected[NearReturnOperandRole8616.OFFSET_INDEX] % modulus
-        and form.constant % modulus == offset_expression.constant % modulus
+        operator.eq(form.base, expected[NearReturnOperandRole8616.OFFSET_BASE] % modulus)
+        and operator.eq(form.index, expected[NearReturnOperandRole8616.OFFSET_INDEX] % modulus)
+        and operator.eq(form.constant % modulus, offset_expression.constant % modulus)
     )
     if not congruent:
         return _refuse_8616(

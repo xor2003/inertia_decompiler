@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Conservatively track frame-derived values through one SSA block.
 
 Layer: Alias.
@@ -10,6 +11,8 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from enum import IntEnum
@@ -19,8 +22,10 @@ from inertia.ir.scalar_value_projection import scalar_active_unary_projection_86
 from inertia.ir.ssa import SSABlock
 from inertia.ir.ssa_function import SSAFunctionArtifact
 from inertia.ir.stack_extent_evidence import StackExtentEvidence8616
+import dataclasses
+import operator
 
-type _ValueKey = tuple[str, str | int | None, int | None]
+_ValueKey = typing.TypeAliasType("_ValueKey", tuple[str, str | int | None, int | None])
 _STORE_OPERAND_COUNT = 2
 _STACK_MODULUS = 1 << 16
 _WORD_BYTES = 2
@@ -35,23 +40,24 @@ class StackAddressEscape8616(IntEnum):
     UNKNOWN_REFUSE = 2
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _EscapeValueState8616:
     """One exact destination's data dependence and produced storage width."""
 
     escape: StackAddressEscape8616
-    size: int
+    size: cython.longlong
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _StackCells:
     """Track derived-address state through exact SS byte stores and loads."""
 
     evidence: StackExtentEvidence8616
-    cells: dict[int, StackAddressEscape8616] = field(default_factory=dict)
+    cells: object = field(default_factory=dict)
 
-    def _keys(self, instruction: IRInstr, index: int) -> tuple[int, ...] | None:
+    def _keys(self, instruction: IRInstr, index: cython.longlong) -> object:
         """Resolve circular byte cells only for a complete exact SS access."""
+        offset: object
         if not instruction.args or not isinstance(instruction.args[0], IRAddress):
             return None
         address = instruction.args[0]
@@ -62,15 +68,16 @@ class _StackCells:
             return None
         return tuple((offset + displacement) % _STACK_MODULUS for displacement in range(address.size))
 
-    def load(self, instruction: IRInstr, index: int) -> StackAddressEscape8616:
+    def load(self, instruction: IRInstr, index: cython.longlong) -> StackAddressEscape8616:
         """Require a reaching state for every byte, not merely a matching base."""
         keys = self._keys(instruction, index)
         if not keys:
             return StackAddressEscape8616.UNKNOWN_REFUSE
-        return max(self.cells.get(key, StackAddressEscape8616.UNKNOWN_REFUSE) for key in keys)
+        return max(self.cells.get(key, StackAddressEscape8616.UNKNOWN_REFUSE) for key in iter(keys))
 
-    def store(self, instruction: IRInstr, index: int, state: StackAddressEscape8616) -> None:
+    def store(self, instruction: IRInstr, index: cython.longlong, state: StackAddressEscape8616) -> None:
         """Unknown SS coordinates invalidate previously tracked byte states."""
+        keys: object
         address = instruction.args[0]
         if isinstance(address, IRAddress) and address.space not in {MemSpace.SS, MemSpace.UNKNOWN}:
             return
@@ -78,9 +85,10 @@ class _StackCells:
         if keys is None:
             self.cells.clear()
         else:
-            self.cells.update((key, state) for key in keys)
+            self.cells.update((key, state) for key in iter(keys))
 
 
+@cython.ccall
 def _key(value: IRValue) -> _ValueKey:
     """Use block-local VEX temporary identity or exact scalar SSA identity."""
     if value.source_tmp is not None:
@@ -88,21 +96,25 @@ def _key(value: IRValue) -> _ValueKey:
     return value.space.value, value.name, value.version
 
 
+@cython.ccall
 def _retained_escape_8616(
-    value: IRValue, states: dict[_ValueKey, _EscapeValueState8616],
+    value: IRValue, states: object,
 ) -> StackAddressEscape8616:
     """Read dependence only from an existing definition of matching width."""
+    retained: object
     retained = states.get(_key(value))
-    if retained is None or retained.size != value.size:
+    if retained is None or operator.ne(retained.size, value.size):
         return StackAddressEscape8616.UNKNOWN_REFUSE
     return retained.escape
 
 
+@cython.ccall
 def _unary_escape_8616(
-    value: IRValue, states: dict[_ValueKey, _EscapeValueState8616],
-    frame_registers: frozenset[tuple[str, int]],
+    value: IRValue, states: object,
+    frame_registers: object,
 ) -> StackAddressEscape8616:
     """Preserve dependence through authenticated conversions, never equality."""
+    unary: object
     unary = value.active_unary
     assert unary is not None
     if scalar_active_unary_projection_8616(value) is None:
@@ -113,9 +125,10 @@ def _unary_escape_8616(
     return state
 
 
+@cython.ccall
 def _value_escape(
-    value: object, states: dict[_ValueKey, _EscapeValueState8616],
-    frame_registers: frozenset[tuple[str, int]],
+    value: object, states: object,
+    frame_registers: object,
 ) -> StackAddressEscape8616:
     """Follow typed data operands; never interpret address operands as loads."""
     if isinstance(value, IRBinaryValue):
@@ -142,33 +155,35 @@ def _value_escape(
     return StackAddressEscape8616.UNKNOWN_REFUSE
 
 
+@cython.ccall
 def _store_escape(
-    instruction: IRInstr, states: dict[_ValueKey, _EscapeValueState8616],
-    frame_registers: frozenset[tuple[str, int]],
+    instruction: IRInstr, states: object,
+    frame_registers: object,
 ) -> StackAddressEscape8616:
     """Inspect stored data without treating the store address as escaping data."""
     if instruction.op != "STORE":
         return StackAddressEscape8616.NO_DERIVED_ADDRESS_ESCAPE
-    if len(instruction.args) != _STORE_OPERAND_COUNT:
+    if operator.ne(len(instruction.args), _STORE_OPERAND_COUNT):
         return StackAddressEscape8616.UNKNOWN_REFUSE
     return _value_escape(instruction.args[1], states, frame_registers)
 
 
 def _definition_state(
-    instruction: IRInstr, states: dict[_ValueKey, _EscapeValueState8616],
-    frame_registers: frozenset[tuple[str, int]],
-    memory: _StackCells, index: int,
+    instruction: IRInstr, states: object,
+    frame_registers: object,
+    memory: _StackCells, index: cython.longlong,
 ) -> StackAddressEscape8616:
     """Retain unknown loaded data instead of substituting its address taint."""
     if instruction.op == "LOAD":
         return memory.load(instruction, index)
     return max(
-        (_value_escape(value, states, frame_registers) for value in instruction.args),
+        (_value_escape(value, states, frame_registers) for value in iter(instruction.args)),
         default=StackAddressEscape8616.UNKNOWN_REFUSE,
     )
 
 
-def _complete_output_write(destination: IRValue, widths: dict[str, int]) -> bool:
+@cython.ccall
+def _complete_output_write(destination: IRValue, widths: object) -> cython.bint:
     """Do not let a partial overwrite discard a wider pointer's retained bits."""
     if destination.name is None:
         return False
@@ -188,12 +203,15 @@ def classify_stack_address_escape_8616(
     pointer value; their data is unknown here. Architectural frame/control and
     status registers are not general-register address outputs.
     """
-    if not evidence.complete or evidence.block_addr != block.addr:
+    destination: object
+    index: object
+    instruction: object
+    if not evidence.complete or operator.ne(evidence.block_addr, block.addr):
         return StackAddressEscape8616.UNKNOWN_REFUSE
-    frame_registers = frozenset((item.name, item.version) for item in evidence.coordinates)
+    frame_registers = frozenset((item.name, item.version) for item in iter(evidence.coordinates))
     states: dict[_ValueKey, _EscapeValueState8616] = {}
     outgoing: dict[str, StackAddressEscape8616] = {}
-    outgoing_widths: dict[str, int] = {}
+    outgoing_widths: dict[str, cython.longlong] = {}
     excluded_outputs = {"sp", "ip", "flags", "d"}
     memory = _StackCells(evidence)
     for index, instruction in enumerate(block.instrs):
@@ -221,7 +239,7 @@ def classify_stack_address_escape_8616(
 
 
 def classify_function_stack_address_escape_8616(
-    function: SSAFunctionArtifact, evidence: tuple[StackExtentEvidence8616, ...],
+    function: SSAFunctionArtifact, evidence: object,
 ) -> StackAddressEscape8616:
     """Require one complete entry-to-return block before publishing closure.
 
@@ -231,8 +249,8 @@ def classify_function_stack_address_escape_8616(
     if len(function.blocks) != 1 or len(evidence) != 1 or function.phi_nodes:
         return StackAddressEscape8616.UNKNOWN_REFUSE
     block = function.blocks[0]
-    if block.addr != function.function_addr or not block.instrs:
+    if operator.ne(block.addr, function.function_addr) or not block.instrs:
         return StackAddressEscape8616.UNKNOWN_REFUSE
-    if block.instrs[-1].op != "RET" or any(instruction.op == "RET" for instruction in block.instrs[:-1]):
+    if block.instrs[-1].op != "RET" or any(instruction.op == "RET" for instruction in iter(block.instrs[:-1])):
         return StackAddressEscape8616.UNKNOWN_REFUSE
     return classify_stack_address_escape_8616(block, evidence[0])

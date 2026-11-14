@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove structured-condition ownership from typed CFG addresses.
 
 Layer: Structuring.
@@ -13,6 +14,8 @@ answers whether existing address and CFG evidence establishes ownership.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from angr.analyses.decompiler.structured_codegen.c import (
     CBinaryOp,
@@ -26,16 +29,18 @@ from inertia.ir.condition_ir import ConditionIR
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 
 from .condition_chain_provenance import condition_chain_provenance_8616
+import operator
+import builtins
 
 _MAX_PREHEADER_BLOCKS = 24
 
 
 def select_composite_preheader_root_8616(
-    node_addr: int | None,
+    node_addr: object,
     expression: object,
-    origin: ConditionIR | None,
-    conditions: tuple[ConditionIR, ...],
-    successors: dict[int, tuple[int, ...]],
+    origin: object,
+    conditions: object,
+    successors: object,
 ) -> ConditionIR | None:
     """Select an entry-owned composite root, not a descendant's origin tag.
 
@@ -43,45 +48,46 @@ def select_composite_preheader_root_8616(
     condition chain and its body endpoints before replacing any expression.
     Unknown statement effects and non-condition paths to the origin refuse.
     """
+    address: object
     if node_addr is None or origin is None or not requires_composite_condition_ownership_8616(expression):
         return None
-    if not any(fact is origin for fact in conditions):
+    if not any(fact is origin for fact in iter(conditions)):
         return None
     if any(isinstance(node, (CFunctionCall, CMultiStatementExpression, CDirtyExpression))
-           for node in _iter_c_nodes_deep_8616(expression)):
+           for node in builtins.iter(_iter_c_nodes_deep_8616(expression))):
         return None
-    blocks = frozenset(fact.block_addr for fact in conditions if isinstance(fact.block_addr, int))
-    candidates = tuple(fact for fact in conditions if structured_node_owns_condition_fact_8616(
+    blocks = frozenset(fact.block_addr for fact in iter(conditions) if isinstance(fact.block_addr, int))
+    candidates = tuple(fact for fact in iter(conditions) if structured_node_owns_condition_fact_8616(
         node_addr, fact, successors, blocks,
     ))
     if len(candidates) != 1 or candidates[0] is origin:
         return None
     root = candidates[0]
     pending = [root.block_addr]
-    visited: set[int] = set()
+    visited: set[cython.longlong] = set()
     while pending:
         address = pending.pop()
         if not isinstance(address, int) or address in visited or address not in blocks:
             continue
-        if address == origin.block_addr:
+        if operator.eq(address, origin.block_addr):
             return root
         visited.add(address)
         pending.extend(successors.get(address, ()))
     return None
 
 
-def _is_neutral_logical_root_8616(expression: object) -> bool:
+def _is_neutral_logical_root_8616(expression: object) -> cython.bint:
     """Recognize a literal Boolean identity around one direct predicate."""
     if not isinstance(expression, CBinaryOp) or expression.op not in {"LogicalAnd", "LogicalOr"}:
         return False
     neutral = 1 if expression.op == "LogicalAnd" else 0
     return any(
-        isinstance(operand, CConstant) and operand.value == neutral
-        for operand in (expression.lhs, expression.rhs)
+        isinstance(operand, CConstant) and operator.eq(operand.value, neutral)
+        for operand in iter((expression.lhs, expression.rhs))
     )
 
 
-def requires_composite_condition_ownership_8616(expression: object) -> bool:
+def requires_composite_condition_ownership_8616(expression: object) -> cython.bint:
     """Refuse single-fact replacement of wrapped logical or statement-bearing guards.
 
     One descendant's JCC tag cannot establish ownership of the full compound
@@ -90,6 +96,7 @@ def requires_composite_condition_ownership_8616(expression: object) -> bool:
     predicate. Nested identities remain refused: their enclosing polarity
     wrapper needs its own ownership proof.
     """
+    provenance: object
     provenance = condition_chain_provenance_8616(expression)
     if provenance is not None and len(provenance.jcc_addrs) > 1:
         return True
@@ -101,33 +108,35 @@ def requires_composite_condition_ownership_8616(expression: object) -> bool:
             and node.op in {"LogicalAnd", "LogicalOr"}
             and node is not neutral_root
         )
-        for node in _iter_c_nodes_deep_8616(expression)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(expression))
     )
 
 
+@cython.ccall
 def structured_node_owns_condition_fact_8616(
-    node_addr: int | None,
+    node_addr: object,
     condition: ConditionIR,
-    successors: dict[int, tuple[int, ...]],
-    condition_blocks: frozenset[int],
-) -> bool:
+    successors: object,
+    condition_blocks: object,
+) -> cython.bint:
     """Accept exact ownership or an unambiguous linear CFG preheader path."""
+    next_addrs: object
     if node_addr is None:
         return True
-    if node_addr == condition.src_insn or node_addr == condition.block_addr:
+    if operator.eq(node_addr, condition.src_insn) or operator.eq(node_addr, condition.block_addr):
         return True
     if not isinstance(condition.block_addr, int) or node_addr not in successors:
         return False
 
     current = node_addr
-    visited: set[int] = set()
+    visited: set[cython.longlong] = set()
     while current not in visited and len(visited) < _MAX_PREHEADER_BLOCKS:
         visited.add(current)
         next_addrs = successors.get(current, ())
         if len(next_addrs) != 1:
             return False
         current = next_addrs[0]
-        if current == condition.block_addr:
+        if operator.eq(current, condition.block_addr):
             return True
         if current in condition_blocks:
             return False

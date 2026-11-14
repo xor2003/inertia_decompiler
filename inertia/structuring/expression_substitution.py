@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Substitute exact leaves in structured C expressions.
 
 Layer: Structuring.
@@ -9,19 +10,24 @@ provide both the exact source node and its evidence-backed replacement.
 """
 
 from __future__ import annotations
+import cython
 
 from collections.abc import Callable, Iterable
 
 from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CExpression, CIfElse, CUnaryOp
+import builtins
 
 
 def unique_tagged_conditions_8616(
     root: object,
     iter_nodes: Callable[[object], Iterable[object]],
     condition_key: Callable[[object], object],
-) -> dict[tuple[int, int], CExpression]:
+) -> dict[tuple[cython.longlong, cython.longlong], CExpression]:
     """Index only uniquely owned structured conditions by exact JCC and block tags."""
-    candidates: dict[tuple[int, int], list[CExpression]] = {}
+    _body: object
+    condition: object
+    node: object
+    candidates: dict[tuple[cython.longlong, cython.longlong], list[CExpression]] = {}
     for node in iter_nodes(root):
         if not isinstance(node, CIfElse):
             continue
@@ -31,12 +37,13 @@ def unique_tagged_conditions_8616(
                 isinstance(condition, CExpression)
                 and isinstance(key, tuple)
                 and len(key) == 2
-                and all(isinstance(value, int) for value in key)
+                and all(isinstance(value, int) for value in iter(key))
             ):
                 candidates.setdefault((int(key[0]), int(key[1])), []).append(condition)
-    return {key: values[0] for key, values in candidates.items() if len(values) == 1}
+    return {key: values[0] for key, values in builtins.iter(candidates.items()) if len(values) == 1}
 
 
+@cython.ccall
 def replace_exact_expression_8616(
     expression: CExpression,
     source: CExpression,

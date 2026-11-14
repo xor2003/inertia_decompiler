@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Publish exact VEX ownership for source-invisible CALL return-frame effects.
 
 Layer: Semantics.
@@ -17,6 +18,8 @@ not sufficient ownership evidence.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -32,6 +35,8 @@ from .call_return_frame_projections import (
     CallReturnFrameProjectionCollection8616,
     collect_call_return_frame_store_projections_8616,
 )
+import dataclasses
+import operator
 
 __all__ = [
     "CallReturnFrameEffectCollection8616",
@@ -43,12 +48,12 @@ __all__ = [
     "decode_machine_call_frame_8616",
 ]
 
-type DynamicValue = Any
-type _CollectionCacheKey8616 = tuple[
+DynamicValue = typing.TypeAliasType("DynamicValue", Any)
+_CollectionCacheKey8616 = typing.TypeAliasType("_CollectionCacheKey8616", tuple[
     int,
     tuple[tuple[int, int], ...],
     tuple[tuple[int, int], ...],
-]
+])
 
 
 class CallReturnFrameEffectRole8616(StrEnum):
@@ -58,22 +63,22 @@ class CallReturnFrameEffectRole8616(StrEnum):
     STACK_STORE = "stack_store"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class MachineCallFrame8616:
     """Encoded CALL frame, independent of target ABI or argument cleanup."""
 
-    callsite_addr: int
-    return_addr: int
-    operand_bits: int
-    far: bool
+    callsite_addr: cython.longlong
+    return_addr: cython.longlong
+    operand_bits: cython.longlong
+    far: cython.bint
 
     @property
-    def frame_bytes(self) -> int:
+    def frame_bytes(self) -> cython.longlong:
         """Return the complete IP/EIP and optional CS slot width."""
         return (self.operand_bits // 8) * (2 if self.far else 1)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallReturnFrameEffectFact8616:
     """Exact semantic ownership of one VEX CALL-frame effect."""
 
@@ -81,31 +86,29 @@ class CallReturnFrameEffectFact8616:
     role: CallReturnFrameEffectRole8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallReturnFrameEffectCollection8616:
     """Closed evidence census for CALL-frame effect collection."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    effects: tuple[CallReturnFrameEffectFact8616, ...]
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    effects: object
     projection_collection: CallReturnFrameProjectionCollection8616
 
 
 class _ProjectCallReturnFrameCacheSurface8616(Protocol):
     """Owned project extension retaining immutable CALL-frame facts."""
 
-    _inertia_call_return_frame_effect_cache_8616: dict[
-        _CollectionCacheKey8616,
-        CallReturnFrameEffectCollection8616,
-    ]
+    _inertia_call_return_frame_effect_cache_8616: object
 
 
+@cython.ccall
 def _collection_cache_8616(
     project: object,
-) -> dict[_CollectionCacheKey8616, CallReturnFrameEffectCollection8616]:
+) -> object:
     """Return the validated project-owned CALL-frame fact cache."""
     surface = cast(_ProjectCallReturnFrameCacheSurface8616, project)
     try:
@@ -118,7 +121,8 @@ def _collection_cache_8616(
     return cache
 
 
-def decode_machine_call_frame_8616(project: object, address: int) -> MachineCallFrame8616 | None:
+@cython.ccall
+def decode_machine_call_frame_8616(project: object, address: cython.longlong) -> MachineCallFrame8616 | None:
     """Decode one exact CALL's frame at the dynamic angr/Capstone boundary."""
     project_dynamic = cast(DynamicValue, project)
     try:
@@ -135,11 +139,11 @@ def decode_machine_call_frame_8616(project: object, address: int) -> MachineCall
         instruction = wrappers[0].insn
         if instruction.id not in {X86_INS_CALL, X86_INS_LCALL}:
             return None
-        if instruction.address != address or instruction.size <= 0:
+        if operator.ne(instruction.address, address) or instruction.size <= 0:
             return None
         # Capstone labels operand-size-overridden FF /3 as CALL, not LCALL.
         # The decoded opcode and ModRM extension still identify a far transfer.
-        far = instruction.id == X86_INS_LCALL or (
+        far = operator.eq(instruction.id, X86_INS_LCALL) or (
             instruction.opcode[0] == 0xFF and (instruction.modrm & 0x38) == 0x18
         )
         return MachineCallFrame8616(
@@ -151,6 +155,7 @@ def decode_machine_call_frame_8616(project: object, address: int) -> MachineCall
         return None
 
 
+@cython.ccall
 def _unoptimized_vex_block_8616(project: object, block: object) -> DynamicValue | None:
     """Re-lift one known function block without VEX statement optimization."""
     project_dynamic = cast(DynamicValue, project)
@@ -169,7 +174,8 @@ def _unoptimized_vex_block_8616(project: object, block: object) -> DynamicValue 
         return None
 
 
-def _block_identity_8616(block: object) -> tuple[int, int] | None:
+@cython.ccall
+def _block_identity_8616(block: object) -> object:
     """Return one cache-safe address/size pair from an angr function block."""
     block_dynamic = cast(DynamicValue, block)
     try:
@@ -184,16 +190,18 @@ def _block_identity_8616(block: object) -> tuple[int, int] | None:
 
 def _effect_roles_for_call_8616(
     vex: DynamicValue,
-    callsite_addr: int,
-    return_addr: int,
+    callsite_addr: cython.longlong,
+    return_addr: cython.longlong,
     *,
-    sp_offset: int,
-    far_call: bool,
-) -> tuple[tuple[int, CallReturnFrameEffectRole8616], ...] | None:
+    sp_offset: cython.longlong,
+    far_call: cython.bint,
+) -> object:
     """Classify the complete VEX frame sequence for one exact CALL IMark."""
+    statement_index: object
+    statement_value: object
     current_addr: int | None = None
     matched_length: int | None = None
-    roles: list[tuple[int, CallReturnFrameEffectRole8616]] = []
+    roles: list[tuple[cython.longlong, CallReturnFrameEffectRole8616]] = []
     matched_imark_count = 0
     for statement_index, statement_value in enumerate(tuple(vex.statements or ())):
         statement = cast(DynamicValue, statement_value)
@@ -206,7 +214,7 @@ def _effect_roles_for_call_8616(
             continue
         if current_addr != callsite_addr:
             continue
-        if tag == "Ist_Put" and statement.offset == sp_offset:
+        if tag == "Ist_Put" and operator.eq(statement.offset, sp_offset):
             roles.append(
                 (statement_index, CallReturnFrameEffectRole8616.STACK_POINTER_UPDATE)
             )
@@ -217,10 +225,10 @@ def _effect_roles_for_call_8616(
         matched_imark_count != 1
         or not isinstance(matched_length, int)
         or matched_length <= 0
-        or callsite_addr + matched_length != return_addr
+        or operator.ne(callsite_addr + matched_length, return_addr)
     ):
         return None
-    role_sequence = tuple(role for _index, role in roles)
+    role_sequence = tuple(role for _index, role in iter(roles))
     sp_role = CallReturnFrameEffectRole8616.STACK_POINTER_UPDATE
     store_role = CallReturnFrameEffectRole8616.STACK_STORE
     accepted = (
@@ -241,9 +249,12 @@ def _effect_roles_for_call_8616(
     return tuple(roles)
 
 
-def _relift_function_blocks_8616(project: object, blocks: tuple[object, ...]) -> list[tuple[int, DynamicValue]]:
+@cython.ccall
+def _relift_function_blocks_8616(project: object, blocks: object) -> object:
     """Retain only address-bound unoptimized blocks from this function census."""
-    result: list[tuple[int, DynamicValue]] = []
+    vex: object
+    block: object
+    result: list[tuple[cython.longlong, DynamicValue]] = []
     for block in blocks:
         block_addr = cast(DynamicValue, block).addr
         vex = _unoptimized_vex_block_8616(project, block)
@@ -252,17 +263,22 @@ def _relift_function_blocks_8616(project: object, blocks: tuple[object, ...]) ->
     return result
 
 
+@cython.ccall
 def _unique_call_effects_8616(
-    project: object, callsite_addr: int, return_addr: int,
-    vex_blocks: list[tuple[int, DynamicValue]], sp_offset: int,
-) -> tuple[int, DynamicValue, tuple[tuple[int, CallReturnFrameEffectRole8616], ...]] | None:
+    project: object, callsite_addr: cython.longlong, return_addr: cython.longlong,
+    vex_blocks: object, sp_offset: cython.longlong,
+) -> object:
     """Match one decoded CALL to exactly one complete VEX effect sequence."""
+    frame: object
+    roles: object
+    block_addr: object
+    vex: object
     if not isinstance(callsite_addr, int) or not isinstance(return_addr, int):
         return None
     frame = decode_machine_call_frame_8616(project, callsite_addr)
-    if frame is None or frame.return_addr != return_addr:
+    if frame is None or operator.ne(frame.return_addr, return_addr):
         return None
-    matches: list[tuple[int, DynamicValue, tuple[tuple[int, CallReturnFrameEffectRole8616], ...]]] = []
+    matches: list[tuple[cython.longlong, DynamicValue, tuple[tuple[cython.longlong, CallReturnFrameEffectRole8616], ...]]] = []
     for block_addr, vex in vex_blocks:
         roles = _effect_roles_for_call_8616(
             vex, callsite_addr, return_addr, sp_offset=sp_offset, far_call=frame.far,
@@ -275,9 +291,13 @@ def _unique_call_effects_8616(
 def collect_call_return_frame_effects_8616(
     project: object,
     function: object,
-    return_addr_by_callsite: Mapping[int, int],
+    return_addr_by_callsite: Mapping[cython.longlong, cython.longlong],
 ) -> CallReturnFrameEffectCollection8616:
     """Collect complete exact VEX frame effects for decoded near and far CALLs."""
+    cache_key: object
+    matched: object
+    callsite_addr: object
+    return_addr: object
     project_dynamic = cast(DynamicValue, project)
     function_dynamic = cast(DynamicValue, function)
     try:
@@ -289,7 +309,7 @@ def collect_call_return_frame_effects_8616(
     raw_count = len(return_addr_by_callsite)
     block_signature = tuple(
         identity
-        for block_value in blocks
+        for block_value in iter(blocks)
         if (identity := _block_identity_8616(block_value)) is not None
     )
     try:
@@ -300,9 +320,9 @@ def collect_call_return_frame_effects_8616(
         (
             function_addr,
             block_signature,
-            tuple(sorted(return_addr_by_callsite.items())),
+            tuple(sorted(tuple(return_addr_by_callsite.items()))),
         )
-        if isinstance(function_addr, int) and len(block_signature) == len(blocks)
+        if isinstance(function_addr, int) and operator.eq(len(block_signature), len(blocks))
         else None
     )
     cache = _collection_cache_8616(project)
@@ -327,7 +347,7 @@ def collect_call_return_frame_effects_8616(
     effects: list[CallReturnFrameEffectFact8616] = []
     projection_collections: list[CallReturnFrameProjectionCollection8616] = []
     normalized_count = 0
-    for callsite_addr, return_addr in sorted(return_addr_by_callsite.items()):
+    for callsite_addr, return_addr in sorted(tuple(return_addr_by_callsite.items())):
         matched = _unique_call_effects_8616(project, callsite_addr, return_addr, vex_blocks, sp_offset)
         if matched is None:
             continue
@@ -342,7 +362,7 @@ def collect_call_return_frame_effects_8616(
                 ),
                 role,
             )
-            for statement_index, role in roles
+            for statement_index, role in iter(roles)
         )
         projection_collections.append(
             collect_call_return_frame_store_projections_8616(
@@ -351,7 +371,7 @@ def collect_call_return_frame_effects_8616(
                 vex_block_addr=block_addr,
                 store_statement_indices=(
                     statement_index
-                    for statement_index, role in roles
+                    for statement_index, role in iter(roles)
                     if role is CallReturnFrameEffectRole8616.STACK_STORE
                 ),
             )
@@ -359,13 +379,13 @@ def collect_call_return_frame_effects_8616(
 
     effect_tuple = tuple(effects)
     projection_collection = CallReturnFrameProjectionCollection8616(
-        raw_fact_count=sum(item.raw_fact_count for item in projection_collections),
-        normalized_fact_count=sum(item.normalized_fact_count for item in projection_collections),
-        classified_fact_count=sum(item.classified_fact_count for item in projection_collections),
-        materialized_count=sum(item.materialized_count for item in projection_collections),
-        failure_count=sum(item.failure_count for item in projection_collections),
-        projections=tuple(fact for item in projection_collections for fact in item.projections),
-        refusals=tuple(refusal for item in projection_collections for refusal in item.refusals),
+        raw_fact_count=sum(item.raw_fact_count for item in iter(projection_collections)),
+        normalized_fact_count=sum(item.normalized_fact_count for item in iter(projection_collections)),
+        classified_fact_count=sum(item.classified_fact_count for item in iter(projection_collections)),
+        materialized_count=sum(item.materialized_count for item in iter(projection_collections)),
+        failure_count=sum(item.failure_count for item in iter(projection_collections)),
+        projections=tuple(fact for item in iter(projection_collections) for fact in iter(item.projections)),
+        refusals=tuple(refusal for item in iter(projection_collections) for refusal in iter(item.refusals)),
     )
     if not projection_collection.closed or (
         projection_collection.classified_fact_count > 0

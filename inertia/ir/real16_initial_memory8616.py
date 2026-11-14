@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Source-authenticated contents and write-read authority for invocation LOADs.
 
 Layer: IR.
@@ -8,17 +9,21 @@ Owns typed Value, Address, Condition, instruction facts, and lossless normalizat
 Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Protocol, cast
 
 from .real16_declared_interrupt8616 import declared_environment_digest_8616
+import dataclasses
+import operator
 
-_MAX_INITIAL_CHUNKS_8616: int = 34
-_MAX_WRITE_RANGES_8616: int = 2 * _MAX_INITIAL_CHUNKS_8616
+_MAX_INITIAL_CHUNKS_8616: cython.longlong = 34
+_MAX_WRITE_RANGES_8616: cython.longlong = 2 * _MAX_INITIAL_CHUNKS_8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class InvocationInitialMemory8616:
     """One derivation's immutable contents and separate write-read authority.
 
@@ -31,15 +36,15 @@ class InvocationInitialMemory8616:
     At most two layouts of 34 bounded conventional-memory spans are admitted.
     """
 
-    chunks: tuple[tuple[int, bytes], ...]
-    write_ranges: tuple[tuple[int, int], ...] = ()
+    chunks: object
+    write_ranges: tuple[tuple[cython.longlong, cython.longlong], ...] = ()
 
     def __post_init__(self) -> None:
         """Reject more than 68 spans or invalid conventional-memory bounds."""
         if not _valid_write_ranges_8616(self.write_ranges):
             raise ValueError("write_ranges must be bounded conventional-memory spans")
 
-    def permits_write_read(self, address: int) -> bool:
+    def permits_write_read(self, address: cython.longlong) -> cython.bint:
         """Authorize a proven written byte, without supplying an original byte.
 
         Invocation owners derive ranges only from freshly authenticated source
@@ -52,10 +57,12 @@ class InvocationInitialMemory8616:
             return False
         if self.byte_at(address) is not None:
             return True
-        return any(base <= address < base + size for base, size in self.write_ranges)
+        return any(base <= address < base + size for base, size in iter(self.write_ranges))
 
-    def byte_at(self, address: int) -> int | None:
+    def byte_at(self, address: cython.longlong) -> int | None:
         """Read one explicitly initialized conventional byte, never page padding."""
+        base: object
+        data: object
         if type(address) is not int or not 0 <= address < 0xA0000:
             return None
         for base, data in reversed(self.chunks):
@@ -64,8 +71,10 @@ class InvocationInitialMemory8616:
         return None
 
 
-def _valid_write_ranges_8616(ranges: tuple[tuple[int, int], ...]) -> bool:
+@cython.ccall
+def _valid_write_ranges_8616(ranges: object) -> cython.bint:
     """Validate at most two authenticated layouts of conventional-memory spans."""
+    span: object
     if type(ranges) is not tuple or len(ranges) > _MAX_WRITE_RANGES_8616:
         return False
     for span in ranges:
@@ -82,7 +91,7 @@ def _valid_write_ranges_8616(ranges: tuple[tuple[int, int], ...]) -> bool:
 class _InitialLayout8616(Protocol):
     """Cross-layer declared layout, identical to the service-digest boundary."""
 
-    chunks: tuple[tuple[int, bytes], ...]
+    chunks: object
 
 
 class _InitialEnvironment8616(Protocol):
@@ -93,8 +102,11 @@ class _InitialEnvironment8616(Protocol):
         ...
 
 
-def _valid_chunks_8616(chunks: tuple[tuple[int, bytes], ...]) -> bool:
+@cython.ccall
+def _valid_chunks_8616(chunks: object) -> cython.bint:
     """Require a bounded immutable disjoint conventional-memory declaration."""
+    base: object
+    data: object
     if not chunks or len(chunks) > _MAX_INITIAL_CHUNKS_8616:
         return False
     end = 0
@@ -107,10 +119,11 @@ def _valid_chunks_8616(chunks: tuple[tuple[int, bytes], ...]) -> bool:
     return True
 
 
+@cython.ccall
 def invocation_initial_memory_8616(
     environment: object,
-    environment_digest: str | None,
-    image_chunks: tuple[tuple[int, bytes], ...],
+    environment_digest: object,
+    image_chunks: object,
 ) -> InvocationInitialMemory8616 | None:
     """Project initialized bytes only after the caller authenticates boot source.
 
@@ -120,7 +133,7 @@ def invocation_initial_memory_8616(
     a concrete dosunit implementation or reads arbitrary project memory. Static
     or incomplete declarations supply no digest and yield no LOAD constants.
     """
-    if environment_digest is None or declared_environment_digest_8616(environment) != environment_digest:
+    if environment_digest is None or operator.ne(declared_environment_digest_8616(environment), environment_digest):
         return None
     # The existing digest already validates this cross-layer protocol. Access
     # errors after that validation are contract errors and must remain loud.

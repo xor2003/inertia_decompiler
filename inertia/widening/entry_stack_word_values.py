@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove one entry-block word value from exact initial SS byte captures.
 
 Layer: Widening.
@@ -9,6 +10,8 @@ Do not join values from rendered text, cosmetic shape, postprocess, or CLI/repor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field, replace
 
@@ -50,9 +53,11 @@ from .entry_stack_word_value_contracts import (
 from .entry_stack_word_value_contracts import (
     EntryStackWordRefusalKind8616 as Refusal,
 )
+import dataclasses
+import operator
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _Outcome8616:
     """Proven bit transport or one retained typed reason for missing evidence."""
 
@@ -60,18 +65,19 @@ class _Outcome8616:
     refusal: Refusal | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _Definition8616:
     """One ordered SSA definition; no TMP identifier alone proves a value."""
 
-    index: int
+    index: cython.longlong
     version: int | None
-    width: int
-    produced: tuple[str, ...]
+    width: cython.longlong
+    produced: object
     outcome: _Outcome8616
 
 
-def _plain_scalar_read_8616(value: IRValue) -> bool:
+@cython.ccall
+def _plain_scalar_read_8616(value: IRValue) -> cython.bint:
     """Refuse storage/indexed views and unproved register snapshot projections.
 
     TMP identifiers establish lineage only for TMP reads. A REG value tagged
@@ -89,7 +95,8 @@ def _plain_scalar_read_8616(value: IRValue) -> bool:
     return value.const is not None if value.space is MemSpace.CONST else value.const is None
 
 
-def _plain_scalar_destination_8616(value: IRValue) -> bool:
+@cython.ccall
+def _plain_scalar_destination_8616(value: IRValue) -> cython.bint:
     """A definition is exact storage, not a displaced/decorated operand view."""
     return (
         value.space in {MemSpace.TMP, MemSpace.REG}
@@ -97,16 +104,20 @@ def _plain_scalar_destination_8616(value: IRValue) -> bool:
     )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _State8616:
     """Track exact immutable TMP definitions and current full register values."""
 
-    captures: dict[int, EntryStackByteRead8616]
-    temporaries: dict[int, _Definition8616] = field(default_factory=dict)
-    registers: dict[str, _Definition8616] = field(default_factory=dict)
+    captures: object
+    temporaries: object = field(default_factory=dict)
+    registers: object = field(default_factory=dict)
 
-    def read(self, value: IRValue, index: int) -> _Outcome8616:
+    @cython.ccall
+    def read(self, value: IRValue, index: cython.longlong) -> _Outcome8616:
         """Resolve an existing producer, check its view, then transport bits."""
+        definition: object
+        projection: object
+        result: object
         if not _plain_scalar_read_8616(value):
             return _Outcome8616(None, Refusal.UNSUPPORTED_OPERAND)
         if value.size not in {1, 2, 4, 8}:
@@ -116,7 +127,7 @@ class _State8616:
             return _Outcome8616(None, Refusal.NO_PRODUCER_SITE)
         if definition.index >= index:
             return _Outcome8616(None, Refusal.FORWARD_TMP_DEFINITION)
-        if definition.version != value.version:
+        if operator.ne(definition.version, value.version):
             return _Outcome8616(None, Refusal.STALE_TMP_VERSION)
         if definition.outcome.bits is None:
             return definition.outcome
@@ -129,6 +140,7 @@ class _State8616:
         result = project_entry_bits_8616(definition.outcome.bits, projection)
         return _Outcome8616(result, None if result is not None else Refusal.BAD_PROJECTION)
 
+    @cython.ccall
     def _definition(self, value: IRValue) -> _Definition8616 | None:
         """Resolve only a retained TMP/register producer or an explicit literal."""
         if value.source_tmp is not None:
@@ -142,8 +154,10 @@ class _State8616:
             )
         return None
 
-    def evaluate(self, instruction: IRInstr, index: int) -> _Outcome8616:
+    def evaluate(self, instruction: IRInstr, index: cython.longlong) -> _Outcome8616:
         """Interpret a scalar producer without inferring any memory effects."""
+        capture: object
+        destination: object
         if instruction.op == "LOAD":
             capture = self.captures.get(index)
             destination = instruction.dst
@@ -153,13 +167,13 @@ class _State8616:
                 capture.width == 1 and len(capture.byte_offsets) == 1
                 and destination.size == 1 and instruction.size == 1
                 and destination.space is MemSpace.TMP
-                and destination.source_tmp == capture.producer_tmp
+                and operator.eq(destination.source_tmp, capture.producer_tmp)
             )
             if not valid:
                 return _Outcome8616(None, Refusal.UNPROVEN_LOAD_SEED)
             return _Outcome8616(tuple(EntryStackWordBit8616(capture, bit) for bit in range(8)))
         arguments = instruction.args
-        if not all(isinstance(argument, IRValue) for argument in arguments):
+        if not all(isinstance(argument, IRValue) for argument in iter(arguments)):
             return _Outcome8616(None, Refusal.UNSUPPORTED_OPERAND)
         if instruction.op == "MOV" and len(arguments) == 1:
             source = arguments[0]
@@ -167,8 +181,11 @@ class _State8616:
                 return self.read(source, index)
         return self._binary(instruction, index)
 
-    def _binary(self, instruction: IRInstr, index: int) -> _Outcome8616:
+    @cython.ccall
+    def _binary(self, instruction: IRInstr, index: cython.longlong) -> _Outcome8616:
         """Apply only shared typed pure-operation descriptors at exact widths."""
+        operation: object
+        result: object
         operation = scalar_binary_operation_8616(instruction.op)
         if operation is None or len(instruction.args) != 2:
             return _Outcome8616(None, Refusal.UNSUPPORTED_PRODUCER_OP)
@@ -181,20 +198,23 @@ class _State8616:
         if right.bits is None:
             return right
         shifts = {ScalarBinaryKind8616.SHL, ScalarBinaryKind8616.SHR}
-        if len(left.bits) != operation.bits:
+        if operator.ne(len(left.bits), operation.bits):
             return _Outcome8616(None, Refusal.BAD_PROJECTION)
-        if operation.kind not in shifts and len(right.bits) != operation.bits:
+        if operation.kind not in shifts and operator.ne(len(right.bits), operation.bits):
             return _Outcome8616(None, Refusal.BAD_PROJECTION)
         result = binary_entry_bits_8616(operation.kind, left.bits, right.bits)
         return _Outcome8616(result, None if result is not None else Refusal.UNSUPPORTED_PRODUCER_OP)
 
-    def observe(self, instruction: IRInstr, index: int) -> _Outcome8616:
+    @cython.ccall
+    def observe(self, instruction: IRInstr, index: cython.longlong) -> _Outcome8616:
         """Read old definitions before publishing; unknown effects kill registers.
 
         Immutable captured TMP values remain values after unrelated effects.
         Current architectural register contents need separate preservation
         evidence across CALLs and any unmodelled instruction effect.
         """
+        destination: object
+        member: object
         effect = scalar_instruction_effect_8616(instruction)
         if effect.clobber is ScalarInstructionClobber8616.UNKNOWN:
             self.registers.clear()
@@ -208,12 +228,12 @@ class _State8616:
             return _Outcome8616(None, Refusal.NON_SCALAR_TARGET)
         if not _plain_scalar_destination_8616(destination):
             outcome = _Outcome8616(None, Refusal.UNSUPPORTED_OPERAND)
-        elif instruction.size != destination.size:
+        elif operator.ne(instruction.size, destination.size):
             outcome = _Outcome8616(None, Refusal.BAD_PROJECTION)
         else:
             outcome = self.evaluate(instruction, index)
         width = destination.size * 8
-        if outcome.bits is not None and len(outcome.bits) != width:
+        if outcome.bits is not None and operator.ne(len(outcome.bits), width):
             outcome = _Outcome8616(None, Refusal.BAD_PROJECTION)
         definition = _Definition8616(
             index, destination.version, width,
@@ -221,8 +241,11 @@ class _State8616:
         )
         return self._publish(destination, definition)
 
+    @cython.ccall
     def _publish(self, destination: IRValue, definition: _Definition8616) -> _Outcome8616:
         """Replace one exact producer, invalidating every register-family sibling."""
+        view: object
+        member: object
         if destination.space is MemSpace.TMP:
             if destination.source_tmp is not None:
                 if destination.source_tmp in self.temporaries:
@@ -239,15 +262,16 @@ class _State8616:
         for member in register_value_family_8616(name):
             self.registers.pop(member, None)
         view = register_value_projection_8616(name, name)
-        if view is None or view[1] != definition.width:
+        if view is None or operator.ne(view[1], definition.width):
             return _Outcome8616(None, Refusal.UNSUPPORTED_TARGET_WIDTH)
         self.registers[name] = definition
         return definition.outcome
 
 
+@cython.ccall
 def _refused_8616(
     artifact: IRFunctionArtifact, byte_proof: EntryStackByteProof8616,
-    reason: Refusal, index: int, *, candidate: bool = False,
+    reason: Refusal, index: cython.longlong, *, candidate: cython.bint = False,
 ) -> EntryStackWordProof8616:
     """Retain a closed typed non-result rather than inventing a word value."""
     count = int(candidate)
@@ -259,10 +283,13 @@ def _refused_8616(
     )
 
 
+@cython.ccall
 def _word_origins_8616(
     bits: BitVector8616,
 ) -> tuple[tuple[EntryStackWordBit8616, ...] | None, Refusal | None]:
     """Require every output bit to retain the exact ordered two-byte identity."""
+    bit: object
+    index: object
     origins: list[EntryStackWordBit8616] = []
     for bit in bits:
         if not isinstance(bit, EntryStackWordBit8616):
@@ -273,22 +300,23 @@ def _word_origins_8616(
     low, high = origins[0].capture, origins[8].capture
     for index, bit in enumerate(origins):
         capture = low if index < 8 else high
-        if bit.capture != capture or bit.bit_index != index % 8:
+        if operator.ne(bit.capture, capture) or operator.ne(bit.bit_index, index % 8):
             return None, Refusal.WRONG_BIT_LANES
-    if high.byte_offsets[0] != low.byte_offsets[0] + 1:
+    if operator.ne(high.byte_offsets[0], low.byte_offsets[0] + 1):
         return None, Refusal.NON_ADJACENT_BYTES
     return tuple(origins), None
 
 
+@cython.ccall
 def _entry_block_8616(
-    artifact: IRFunctionArtifact, byte_proof: EntryStackByteProof8616, target_index: int,
+    artifact: IRFunctionArtifact, byte_proof: EntryStackByteProof8616, target_index: cython.longlong,
 ) -> IRBlock | Refusal:
     """Validate the exact Alias owner and bounded selected execution site."""
     if byte_proof.artifact is not artifact:
         return Refusal.CROSS_ARTIFACT_PROOF
-    if byte_proof != prove_entry_stack_bytes_8616(artifact):
+    if operator.ne(byte_proof, prove_entry_stack_bytes_8616(artifact)):
         return Refusal.STALE_BYTE_PROOF
-    entries = [block for block in artifact.blocks if block.addr == artifact.function_addr]
+    entries = [block for block in iter(artifact.blocks) if operator.eq(block.addr, artifact.function_addr)]
     if len(entries) != 1:
         return Refusal.MISSING_ENTRY_BLOCK
     block = entries[0]
@@ -299,8 +327,9 @@ def _entry_block_8616(
     return block
 
 
+@cython.ccall
 def prove_entry_stack_word_value_8616(
-    artifact: IRFunctionArtifact, byte_proof: EntryStackByteProof8616, target_index: int,
+    artifact: IRFunctionArtifact, byte_proof: EntryStackByteProof8616, target_index: cython.longlong,
 ) -> EntryStackWordProof8616:
     """Prove one selected value using canonical Alias and locally owned SSA.
 
@@ -308,6 +337,10 @@ def prove_entry_stack_word_value_8616(
     Earlier valid captures remain usable when later unrelated LOADs refuse.
     No caller-provided SSA, serialized witness or address alone is lineage.
     """
+    destination: object
+    origins: object
+    index: object
+    instruction: object
     block = _entry_block_8616(artifact, byte_proof, target_index)
     if isinstance(block, Refusal):
         return _refused_8616(artifact, byte_proof, block, target_index)
@@ -322,7 +355,7 @@ def prove_entry_stack_word_value_8616(
         return _refused_8616(artifact, byte_proof, Refusal.UNSUPPORTED_TARGET_WIDTH, target_index)
     if destination.space is MemSpace.TMP and destination.source_tmp is None:
         return _refused_8616(artifact, byte_proof, Refusal.NON_SCALAR_TARGET, target_index)
-    state = _State8616({fact.instr_index: fact for fact in byte_proof.facts})
+    state = _State8616({fact.instr_index: fact for fact in iter(byte_proof.facts)})
     outcome = _Outcome8616(None, Refusal.NO_PRODUCER_SITE)
     for index, instruction in enumerate(ssa.instrs[:target_index + 1]):
         outcome = state.observe(instruction, index)

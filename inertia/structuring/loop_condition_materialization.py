@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize CFG-oriented typed loop continuation conditions.
 
 Layer: Structuring.
@@ -12,6 +13,8 @@ and leaves the existing loop condition unchanged.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -55,6 +58,9 @@ from .loop_condition_ownership import (
     classify_composite_loop_exit_ownership_8616,
 )
 from .pretest_condition_surface import pretest_condition_surface_8616
+import dataclasses
+import operator
+import builtins
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -63,7 +69,7 @@ def _debug_loop_selection_8616(**fields: object) -> None:
     """Report exact loop-condition ownership evidence when diagnostics are enabled."""
     if os.environ.get("INERTIA_DEBUG_CONDITION_MATERIALIZATION") != "1":
         return
-    details = " ".join(f"{key}={value!r}" for key, value in sorted(fields.items()))
+    details = " ".join(f"{key}={value!r}" for key, value in builtins.iter(sorted(tuple(fields.items()))))
     log.warning("[loop-condition-materialization] %s", details)
 
 
@@ -77,7 +83,7 @@ class LoopContinuationEdge8616(Enum):
 class _TaggedExpressionBoundary8616(Protocol):
     """Dynamic angr C-expression tag surface used at the Structuring boundary."""
 
-    tags: dict[str, object]
+    tags: object
 
 
 class _LoopBoundary8616(Protocol):
@@ -90,13 +96,13 @@ class _LoopBoundary8616(Protocol):
 class _CodegenFunctionBoundary8616(Protocol):
     """Dynamic angr C-function identity used for register ownership."""
 
-    addr: int
+    addr: cython.longlong
 
 
 class _ArchBoundary8616(Protocol):
     """Dynamic angr architecture register surface used at the boundary."""
 
-    registers: Mapping[str, tuple[int, int]]
+    registers: Mapping[str, tuple[cython.longlong, cython.longlong]]
 
 
 class _ProjectBoundary8616(Protocol):
@@ -112,46 +118,51 @@ class _CodegenBoundary8616(Protocol):
     project: _ProjectBoundary8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _RegisterUpdateMaterialization8616:
     """Internal result of one typed loop-register update materialization."""
 
-    changed: bool = False
+    changed: cython.bint = False
     target: CVariable | None = None
     update: ConditionRegisterUpdateIR | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LoopConditionMaterializationStats8616:
     """Evidence accounting for typed loop continuation materialization."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    changed_count: int = 0
-    taken_continuation_count: int = 0
-    fallthrough_continuation_count: int = 0
-    counter_update_materialized_count: int = 0
-    composite_loop_exit_owned_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    changed_count: cython.longlong = 0
+    taken_continuation_count: cython.longlong = 0
+    fallthrough_continuation_count: cython.longlong = 0
+    counter_update_materialized_count: cython.longlong = 0
+    composite_loop_exit_owned_count: cython.longlong = 0
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether at least one loop condition was replaced."""
         return self.changed_count > 0
 
 
-def _condition_key_8616(condition: ConditionIR) -> tuple[int, int] | None:
+@cython.ccall
+def _condition_key_8616(condition: ConditionIR) -> object:
     """Return the exact JCC/block identity carried by one typed condition."""
     if not isinstance(condition.src_insn, int) or not isinstance(condition.block_addr, int):
         return None
     return condition.src_insn, condition.block_addr
 
 
-def _tag_pairs_8616(expression: object) -> frozenset[tuple[int, int]]:
+@cython.ccall
+def _tag_pairs_8616(expression: object) -> frozenset[tuple[cython.longlong, cython.longlong]]:
     """Return all complete instruction/block identities in one C subtree."""
-    pairs: set[tuple[int, int]] = set()
+    block_addr: object
+    ins_addr: object
+    node: object
+    pairs: set[tuple[cython.longlong, cython.longlong]] = set()
     for node in _iter_c_nodes_deep_8616(expression):
         boundary = cast(_TaggedExpressionBoundary8616, node)
         try:
@@ -165,13 +176,15 @@ def _tag_pairs_8616(expression: object) -> frozenset[tuple[int, int]]:
     return frozenset(pairs)
 
 
-def _reaches_8616(successors: Mapping[int, tuple[int, ...]], start: int, target: int) -> bool:
+@cython.ccall
+def _reaches_8616(successors: Mapping[cython.longlong, tuple[cython.longlong, ...]], start: cython.longlong, target: cython.longlong) -> cython.bint:
     """Return whether an in-function CFG path reaches ``target``."""
+    address: object
     pending = [start]
-    visited: set[int] = set()
+    visited: set[cython.longlong] = set()
     while pending:
         address = pending.pop()
-        if address == target:
+        if operator.eq(address, target):
             return True
         if address in visited:
             continue
@@ -180,9 +193,12 @@ def _reaches_8616(successors: Mapping[int, tuple[int, ...]], start: int, target:
     return False
 
 
-def _structured_body_block_addrs_8616(body: object) -> frozenset[int]:
+@cython.ccall
+def _structured_body_block_addrs_8616(body: object) -> frozenset[cython.longlong]:
     """Return statement-owned blocks, excluding reused operand provenance."""
-    addresses: set[int] = set()
+    block_addr: object
+    node: object
+    addresses: set[cython.longlong] = set()
     for node in _iter_c_nodes_deep_8616(body):
         if not isinstance(node, CStatement):
             continue
@@ -197,8 +213,10 @@ def _structured_body_block_addrs_8616(body: object) -> frozenset[int]:
     return frozenset(addresses)
 
 
+@cython.ccall
 def _function_region_8616(codegen: object) -> int | None:
     """Return the current function's region for shared register identities."""
+    cfunc: object
     try:
         cfunc = cast(_CodegenBoundary8616, codegen).cfunc
     except AttributeError:
@@ -206,10 +224,11 @@ def _function_region_8616(codegen: object) -> int | None:
     return cfunc.addr if cfunc is not None else None
 
 
+@cython.ccall
 def _shared_loop_register_8616(
-    reg: int,
-    size: int,
-    name: str,
+    reg: cython.longlong,
+    size: cython.longlong,
+    name: object,
     region: int | None,
 ) -> SimRegisterVariable:
     """Construct the shared typed register identity for one loop carrier."""
@@ -222,10 +241,11 @@ def _shared_loop_register_8616(
     )
 
 
+@cython.ccall
 def _self_update_match_8616(
     node: object,
-    register_name: str,
-) -> tuple[CAssignment, CBinaryOp, int] | None:
+    register_name: object,
+) -> object:
     """Return the self-update triple when one node exactly matches."""
     if not isinstance(node, CAssignment) or not isinstance(node.lhs, CVariable):
         return None
@@ -233,7 +253,7 @@ def _self_update_match_8616(
     rhs = node.rhs
     if (
         not isinstance(variable, SimRegisterVariable)
-        or variable.name != register_name
+        or operator.ne(variable.name, register_name)
         or not isinstance(rhs, CBinaryOp)
     ):
         return None
@@ -252,9 +272,10 @@ def _self_update_match_8616(
     return node, rhs, dirty_varid
 
 
+@cython.ccall
 def _replaced_register_carrier_8616(
     node: object,
-    dirty_varid: int,
+    dirty_varid: cython.longlong,
     source: CVariable,
 ) -> object:
     """Replace only the unique virtual identity proven by the self-update."""
@@ -273,7 +294,7 @@ def _materialize_plain_loop_counter_update_8616(
     body: object,
     condition: ConditionIR,
     codegen: object,
-) -> int:
+) -> cython.longlong:
     """Bind one proven loop-register virtual value to its unique self-update."""
     operand = condition.lhs
     if (
@@ -285,7 +306,7 @@ def _materialize_plain_loop_counter_update_8616(
 
     matches = [
         match
-        for node in _iter_c_nodes_deep_8616(body)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(body))
         if (match := _self_update_match_8616(node, operand.name.lower())) is not None
     ]
     if len(matches) != 1:
@@ -317,6 +338,7 @@ def _materialize_plain_loop_counter_update_8616(
     return int(replacement_count > 0)
 
 
+@cython.ccall
 def _replace_update_expression_with_target_8616(
     value: IRValue | IRBinaryValue,
     update: ConditionRegisterUpdateIR,
@@ -345,9 +367,9 @@ def _condition_after_materialized_register_update_8616(
             binding,
             value=_replace_update_expression_with_target_8616(binding.value, update),
         )
-        if binding.update == update
+        if operator.eq(binding.update, update)
         else binding
-        for binding in condition.register_bindings
+        for binding in iter(condition.register_bindings)
     )
     return replace(condition, register_bindings=bindings)
 
@@ -356,7 +378,7 @@ def _bind_register_identity_to_loop_carrier_8616(
     root: object,
     source: SimRegisterVariable,
     target: CVariable,
-) -> int:
+) -> cython.longlong:
     """Bind every exact use of one SSA register identity to its loop carrier."""
     if not isinstance(target.variable, SimRegisterVariable):
         return 0
@@ -385,12 +407,14 @@ def _latest_loop_initializer_8616(
     root: object,
     loop_body: object,
     update: ConditionRegisterUpdateIR,
-    target_offset: int,
-    target_size: int,
+    target_offset: cython.longlong,
+    target_size: cython.longlong,
 ) -> CAssignment | None:
     """Return the unique latest pre-update initializer for the target register."""
-    body_ids = {id(node) for node in _iter_c_nodes_deep_8616(loop_body)}
-    initializers: list[tuple[int, CAssignment]] = []
+    ins_addr: object
+    node: object
+    body_ids = {id(node) for node in builtins.iter(_iter_c_nodes_deep_8616(loop_body))}
+    initializers: list[tuple[cython.longlong, CAssignment]] = []
     for node in _iter_c_nodes_deep_8616(root):
         if id(node) in body_ids or not isinstance(node, CAssignment):
             continue
@@ -402,19 +426,20 @@ def _latest_loop_initializer_8616(
         if (
             isinstance(ins_addr, int)
             and ins_addr < update.instruction_addr
-            and variable.reg == target_offset
-            and variable.size == target_size
+            and operator.eq(variable.reg, target_offset)
+            and operator.eq(variable.size, target_size)
         ):
             initializers.append((ins_addr, node))
     if not initializers:
         return None
-    latest_addr = max(address for address, _assignment in initializers)
+    latest_addr = max(address for address, _assignment in iter(initializers))
     latest = tuple(
-        assignment for address, assignment in initializers if address == latest_addr
+        assignment for address, assignment in iter(initializers) if address == latest_addr
     )
     return latest[0] if len(latest) == 1 else None
 
 
+@cython.ccall
 def _zero_xor_initializer_8616(initializer: CAssignment, codegen: object) -> None:
     """Normalize a proven ``x ^ x`` initializer to a literal zero."""
     if (
@@ -429,19 +454,21 @@ def _zero_xor_initializer_8616(initializer: CAssignment, codegen: object) -> Non
         )
 
 
+@cython.ccall
 def _marked_update_target_8616(
     loop: _LoopBoundary8616,
     update: ConditionRegisterUpdateIR,
-    marker: str,
+    marker: object,
 ) -> CVariable | None:
     """Return an already-materialized update target inside the loop body."""
+    statement: object
     if not isinstance(loop.body, CStatements):
         return None
     for statement in loop.body.statements or ():
         if not isinstance(statement, CAssignment):
             continue
         tags = _expression_tags_8616(statement)
-        if tags.get(marker) == update.instruction_addr:
+        if operator.eq(tags.get(marker), update.instruction_addr):
             return cast(CVariable, statement.lhs)
     return None
 
@@ -453,9 +480,12 @@ def _materialize_bound_loop_register_update_8616(
     codegen: object,
 ) -> _RegisterUpdateMaterialization8616:
     """Restore one Alias-proven full-register update at a structured loop tail."""
+    initializer: object
+    marked_target: object
+    op: object
     updates = tuple(
         binding.update
-        for binding in condition.register_bindings
+        for binding in iter(condition.register_bindings)
         if binding.update is not None
     )
     if len(updates) != 1 or not isinstance(loop.body, CStatements):
@@ -523,7 +553,7 @@ def _materialize_bound_loop_register_update_8616(
 def _bind_materialized_update_target_8616(
     expression: CExpression,
     target: CVariable,
-) -> int:
+) -> cython.longlong:
     """Bind full-register leaves in a lowered condition to the loop carrier."""
     target_variable = target.variable
     if not isinstance(target_variable, SimRegisterVariable):
@@ -536,8 +566,8 @@ def _bind_materialized_update_target_8616(
         if not isinstance(node, CVariable) or not isinstance(node.variable, SimRegisterVariable):
             return node
         if (
-            node.variable.reg != target_variable.reg
-            or node.variable.size != target_variable.size
+            operator.ne(node.variable.reg, target_variable.reg)
+            or operator.ne(node.variable.size, target_variable.size)
         ):
             return node
         replacements += 1
@@ -551,17 +581,18 @@ def _bind_existing_loop_condition_register_8616(
     current: CExpression,
     body: object,
     condition: ConditionIR,
-) -> int:
+) -> cython.longlong:
     """Bind an already-readable guard to its unique typed register identity."""
+    shared: object
     operand = condition.lhs
     if not isinstance(operand, IRValue) or operand.space is not MemSpace.REG or not isinstance(operand.name, str):
         return 0
     candidates = {
         node.variable
-        for node in _iter_c_nodes_deep_8616(body)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(body))
         if isinstance(node, CVariable)
         and isinstance(node.variable, SimRegisterVariable)
-        and node.variable.name == operand.name.lower()
+        and operator.eq(node.variable.name, operand.name.lower())
         and isinstance(node.variable.ident, str)
         and isinstance(node.variable.region, int)
     }
@@ -576,7 +607,7 @@ def _bind_existing_loop_condition_register_8616(
         if not isinstance(node, CVariable) or not isinstance(node.variable, SimRegisterVariable):
             return node
         variable = node.variable
-        if variable.reg != shared.reg or variable.size != shared.size:
+        if operator.ne(variable.reg, shared.reg) or operator.ne(variable.size, shared.size):
             return node
         if variable is shared and node.unified_variable is shared:
             return node
@@ -593,7 +624,7 @@ def _bind_existing_loop_condition_register_8616(
 def _loop_header_carries_condition_register_8616(
     current: CExpression,
     condition: ConditionIR,
-) -> bool:
+) -> cython.bint:
     """Return whether an untagged header visibly carries the typed register."""
     operand = condition.lhs
     if not isinstance(operand, IRValue) or operand.space is not MemSpace.REG or not isinstance(operand.name, str):
@@ -601,26 +632,28 @@ def _loop_header_carries_condition_register_8616(
     return any(
         isinstance(node, CVariable)
         and isinstance(node.variable, SimRegisterVariable)
-        and node.variable.name == operand.name.lower()
-        and node.variable.size == operand.size
-        for node in _iter_c_nodes_deep_8616(current)
+        and operator.eq(node.variable.name, operand.name.lower())
+        and operator.eq(node.variable.size, operand.size)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(current))
     )
 
 
+@cython.ccall
 def _enters_body_through_linear_trampoline_8616(
-    successors: Mapping[int, tuple[int, ...]],
-    start: int,
-    body_block_addrs: frozenset[int],
-    condition_block_addr: int,
-) -> bool:
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
+    start: cython.longlong,
+    body_block_addrs: object,
+    condition_block_addr: cython.longlong,
+) -> cython.bint:
     """Return whether a deterministic trampoline enters the structured body.
 
     angr may omit a terminal jump-only block from the structured loop body.
     Following only single-successor blocks recovers that exact CFG ownership
     without allowing an enclosing loop's later re-entry to claim the edge.
     """
+    next_blocks: object
     current = start
-    visited: set[int] = set()
+    visited: set[cython.longlong] = set()
     while current not in visited and current != condition_block_addr:
         if current in body_block_addrs:
             return True
@@ -634,14 +667,16 @@ def _enters_body_through_linear_trampoline_8616(
 
 def _continuation_edge_8616(
     condition: ConditionIR,
-    successors: Mapping[int, tuple[int, ...]],
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
     *,
-    body_block_addrs: frozenset[int] = frozenset(),
+    body_block_addrs: object = frozenset(),
 ) -> LoopContinuationEdge8616 | None:
     """Classify the loop-continuation edge from structured ownership or CFG reachability."""
+    owned_edge: object
+    reachable_edge: object
     if not all(
         isinstance(address, int)
-        for address in (condition.block_addr, condition.taken_target, condition.fallthrough_target)
+        for address in iter((condition.block_addr, condition.taken_target, condition.fallthrough_target))
     ):
         return None
     taken_target = cast(int, condition.taken_target)
@@ -680,7 +715,7 @@ def _consume_owned_pretest_guard_8616(
     loop: _LoopBoundary8616,
     guard: CIfBreak | CIfElse,
     codegen: object,
-) -> bool:
+) -> cython.bint:
     """Remove one exact leading break guard after promoting it to the header."""
     empty = CStatements([], codegen=codegen)
     if loop.body is guard:
@@ -694,6 +729,7 @@ def _consume_owned_pretest_guard_8616(
     )
 
 
+@cython.ccall
 def _expression_tags_8616(expression: CExpression | CAssignment) -> dict[str, object]:
     """Copy tags from one dynamic angr expression or assignment."""
     boundary = cast(_TaggedExpressionBoundary8616, expression)
@@ -703,6 +739,7 @@ def _expression_tags_8616(expression: CExpression | CAssignment) -> dict[str, ob
         return {}
 
 
+@cython.ccall
 def _invert_condition_8616(condition: CExpression, codegen: object) -> CExpression:
     """Invert one already-materialized condition without recovering semantics."""
     inverted_ops = {
@@ -731,22 +768,24 @@ def _invert_condition_8616(condition: CExpression, codegen: object) -> CExpressi
     )
 
 
+@cython.ccall
 def _is_owned_materialization_8616(
     expression: CExpression,
-    key: tuple[int, int],
+    key: object,
     edge: LoopContinuationEdge8616,
-) -> bool:
+) -> cython.bint:
     """Return whether this pass already materialized the exact condition fact."""
     tags = _expression_tags_8616(expression)
     return (
-        tags.get("inertia_typed_loop_condition_key_8616") == key
-        and tags.get("inertia_typed_loop_continuation_edge_8616") == edge.value
+        operator.eq(tags.get("inertia_typed_loop_condition_key_8616"), key)
+        and operator.eq(tags.get("inertia_typed_loop_continuation_edge_8616"), edge.value)
     )
 
 
+@cython.ccall
 def _mark_materialization_8616(
     expression: CExpression,
-    key: tuple[int, int],
+    key: object,
     edge: LoopContinuationEdge8616,
 ) -> None:
     """Record exact typed-condition ownership on a materialized expression."""
@@ -764,7 +803,8 @@ def _mark_materialization_8616(
     boundary.tags = tags
 
 
-def _mark_condition_binding_8616(expression: CExpression, key: tuple[int, int]) -> None:
+@cython.ccall
+def _mark_condition_binding_8616(expression: CExpression, key: object) -> None:
     """Expose unique typed loop ownership to the Validation layer."""
     boundary = cast(_TaggedExpressionBoundary8616, expression)
     tags = _expression_tags_8616(expression)
@@ -779,11 +819,14 @@ def _mark_condition_binding_8616(expression: CExpression, key: tuple[int, int]) 
     boundary.tags = tags
 
 
+@cython.ccall
 def _conditions_by_key_8616(
-    typed_conditions: tuple[ConditionIR, ...],
-) -> dict[tuple[int, int], list[ConditionIR]]:
+    typed_conditions: object,
+) -> object:
     """Group typed conditions by their exact proven condition key."""
-    conditions_by_key: dict[tuple[int, int], list[ConditionIR]] = {}
+    key: object
+    condition: object
+    conditions_by_key: dict[tuple[cython.longlong, cython.longlong], list[ConditionIR]] = {}
     for condition in typed_conditions:
         key = _condition_key_8616(condition)
         if key is not None:
@@ -791,37 +834,38 @@ def _conditions_by_key_8616(
     return conditions_by_key
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _LoopConditionTally8616:
     """Accumulated stats for the loop-condition materialization pass."""
 
-    raw: int = 0
-    normalized: int = 0
-    classified: int = 0
-    materialized: int = 0
-    changed: int = 0
-    taken: int = 0
-    fallthrough: int = 0
-    counter_updates: int = 0
-    composite_owned: int = 0
+    raw: cython.longlong = 0
+    normalized: cython.longlong = 0
+    classified: cython.longlong = 0
+    materialized: cython.longlong = 0
+    changed: cython.longlong = 0
+    taken: cython.longlong = 0
+    fallthrough: cython.longlong = 0
+    counter_updates: cython.longlong = 0
+    composite_owned: cython.longlong = 0
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _LoopKeySelection8616:
     """Key-narrowing state for one structured loop boundary."""
 
     loop_body: object
-    successors: Mapping[int, tuple[int, ...]]
-    conditions_by_key: Mapping[tuple[int, int], list[ConditionIR]]
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]]
+    conditions_by_key: Mapping[tuple[cython.longlong, cython.longlong], list[ConditionIR]]
     leading_break_guard: CIfBreak | CIfElse | None
-    current_keys: frozenset[tuple[int, int]]
-    body_keys: frozenset[tuple[int, int]]
-    body_block_addrs: frozenset[int]
-    matching_keys: frozenset[tuple[int, int]]
-    pretest_keys: frozenset[tuple[int, int]] = frozenset()
-    owned_pretest_keys: frozenset[tuple[int, int]] = frozenset()
+    current_keys: object
+    body_keys: object
+    body_block_addrs: object
+    matching_keys: object
+    pretest_keys: frozenset[tuple[cython.longlong, cython.longlong]] = frozenset()
+    owned_pretest_keys: frozenset[tuple[cython.longlong, cython.longlong]] = frozenset()
 
-    def _owns_pretest_guard_8616(self, key: tuple[int, int]) -> bool:
+    @cython.ccall
+    def _owns_pretest_guard_8616(self, key: object) -> cython.bint:
         """Return whether the leading break guard uniquely owns one key."""
         return (
             len(self.conditions_by_key[key]) == 1
@@ -834,7 +878,8 @@ class _LoopKeySelection8616:
             is self.leading_break_guard
         )
 
-    def _has_continuation_edge_8616(self, key: tuple[int, int]) -> bool:
+    @cython.ccall
+    def _has_continuation_edge_8616(self, key: object) -> cython.bint:
         """Return whether one key's unique condition proves a loop edge."""
         return (
             len(self.conditions_by_key[key]) == 1
@@ -853,7 +898,7 @@ class _LoopKeySelection8616:
                 self.leading_break_guard
             ).intersection(self.matching_keys)
             self.owned_pretest_keys = frozenset(
-                key for key in self.pretest_keys if self._owns_pretest_guard_8616(key)
+                key for key in iter(self.pretest_keys) if self._owns_pretest_guard_8616(key)
             )
             if len(self.owned_pretest_keys) == 1:
                 self.matching_keys = self.owned_pretest_keys
@@ -869,16 +914,17 @@ class _LoopKeySelection8616:
         if len(self.matching_keys) > 1:
             self.matching_keys = frozenset(
                 key
-                for key in self.matching_keys
+                for key in iter(self.matching_keys)
                 if self._has_continuation_edge_8616(key)
             )
 
 
+@cython.ccall
 def _materialize_loop_guard_8616(
     root: object,
     loop: _LoopBoundary8616,
     current: CExpression,
-    key: tuple[int, int],
+    key: object,
     condition: ConditionIR,
     selection: _LoopKeySelection8616,
     tally: _LoopConditionTally8616,
@@ -886,6 +932,8 @@ def _materialize_loop_guard_8616(
     codegen: object,
 ) -> None:
     """Materialize one uniquely proven continuation condition into a loop guard."""
+    edge: object
+    replacement: object
     composite_ownership = classify_composite_loop_exit_ownership_8616(
         loop.body,
         key,
@@ -966,16 +1014,19 @@ def _materialize_loop_guard_8616(
     tally.changed += 1
 
 
+@cython.ccall
 def _process_loop_node_8616(
     node: object,
     root: object,
     codegen: object,
-    conditions_by_key: Mapping[tuple[int, int], list[ConditionIR]],
-    successors: Mapping[int, tuple[int, ...]],
+    conditions_by_key: Mapping[tuple[cython.longlong, cython.longlong], list[ConditionIR]],
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
     lower_condition: Callable[[ConditionIR], CExpression | None],
     tally: _LoopConditionTally8616,
 ) -> None:
     """Materialize the proven continuation condition for one structured loop."""
+    key: object
+    leading_break_guard: object
     if not isinstance(node, (CForLoop, CWhileLoop, CDoWhileLoop)):
         return
     loop = cast(_LoopBoundary8616, node)
@@ -1033,14 +1084,16 @@ def _process_loop_node_8616(
     )
 
 
+@cython.ccall
 def materialize_typed_loop_continuation_conditions_8616(
     root: object,
     codegen: object,
-    typed_conditions: tuple[ConditionIR, ...],
-    successors: Mapping[int, tuple[int, ...]],
+    typed_conditions: object,
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
     lower_condition: Callable[[ConditionIR], CExpression | None],
 ) -> LoopConditionMaterializationStats8616:
     """Replace loop guards only when exact typed and CFG evidence agree."""
+    node: object
     conditions_by_key = _conditions_by_key_8616(typed_conditions)
     tally = _LoopConditionTally8616()
     for node in _iter_c_nodes_deep_8616(root):

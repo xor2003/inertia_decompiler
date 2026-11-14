@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed contracts for stack-memory SSA object materialization.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not perform structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -19,6 +22,8 @@ from inertia.ir.core import IRAddress
 
 from .stack_lowering_result import StackLoweringResult
 from .stack_projection_retirement import StackProjectionRetirementArtifact8616
+import dataclasses
+import operator
 
 
 class StackMemoryObjectKind8616(StrEnum):
@@ -41,16 +46,16 @@ class StackMemorySSALoweringRefusalKind8616(StrEnum):
     MATERIALIZATION_FAILED = "materialization_failed"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackMemorySSALoweringCandidate8616:
     """One exact Alias storage range ready for C-variable materialization."""
 
     role: StackMemoryObjectKind8616
     address: IRAddress
-    entry_sp_offset: int
+    entry_sp_offset: cython.longlong
     storage: AliasStorageFacts
-    versions: tuple[int, ...]
-    fact_kinds: tuple[StackMemoryAliasFactKind8616, ...]
+    versions: object
+    fact_kinds: object
 
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-friendly representation."""
@@ -59,16 +64,16 @@ class StackMemorySSALoweringCandidate8616:
             "address": self.address.to_dict(),
             "entry_sp_offset": self.entry_sp_offset,
             "versions": list(self.versions),
-            "fact_kinds": [kind.value for kind in self.fact_kinds],
+            "fact_kinds": [kind.value for kind in iter(self.fact_kinds)],
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackMemorySSALoweringRefusal8616:
     """One honestly retained stack-object materialization refusal."""
 
     kind: StackMemorySSALoweringRefusalKind8616
-    detail: str
+    detail: object
     address: IRAddress | None = None
     related_addresses: tuple[IRAddress, ...] = ()
 
@@ -78,30 +83,30 @@ class StackMemorySSALoweringRefusal8616:
             "kind": self.kind.value,
             "detail": self.detail,
             "address": self.address.to_dict() if self.address is not None else None,
-            "related_addresses": [address.to_dict() for address in self.related_addresses],
+            "related_addresses": [address.to_dict() for address in iter(self.related_addresses)],
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackMemorySSALoweringStats8616:
     """Closed evidence accounting for exact storage materialization."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every distinct storage input has one outcome."""
         return (
-            self.raw_fact_count == self.materialized_count + self.failure_count
-            and self.normalized_fact_count == self.classified_fact_count
+            operator.eq(self.raw_fact_count, self.materialized_count + self.failure_count)
+            and operator.eq(self.normalized_fact_count, self.classified_fact_count)
             and self.classified_fact_count <= self.raw_fact_count
         )
 
-    def to_dict(self) -> dict[str, int]:
+    def to_dict(self) -> dict[str, cython.longlong]:
         """Return the five mandatory evidence counters."""
         return {
             "raw_fact_count": self.raw_fact_count,
@@ -112,11 +117,11 @@ class StackMemorySSALoweringStats8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackMemorySSALoweringArtifact8616:
     """Exact stack-object candidates, outcomes, and materializer diagnostics."""
 
-    function_addr: int
+    function_addr: cython.longlong
     candidates: tuple[StackMemorySSALoweringCandidate8616, ...] = ()
     refusals: tuple[StackMemorySSALoweringRefusal8616, ...] = ()
     result: StackLoweringResult | None = None
@@ -124,7 +129,7 @@ class StackMemorySSALoweringArtifact8616:
     stats: StackMemorySSALoweringStats8616 = StackMemorySSALoweringStats8616()
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether evidence closes and the materializer accepted all candidates."""
         return self.stats.complete and (self.result is None or self.result.is_ok)
 
@@ -132,8 +137,8 @@ class StackMemorySSALoweringArtifact8616:
         """Return a deterministic JSON-friendly representation."""
         return {
             "function_addr": self.function_addr,
-            "candidates": [candidate.to_dict() for candidate in self.candidates],
-            "refusals": [refusal.to_dict() for refusal in self.refusals],
+            "candidates": [candidate.to_dict() for candidate in iter(self.candidates)],
+            "refusals": [refusal.to_dict() for refusal in iter(self.refusals)],
             "result": self.result.to_dict() if self.result is not None else None,
             "projection_retirement": self.projection_retirement.to_dict(),
             "stats": self.stats.to_dict(),

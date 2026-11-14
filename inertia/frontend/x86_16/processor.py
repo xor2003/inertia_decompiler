@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/runtime.
 
 Responsibility: model processor registers and segment state for lifting/emulation.
@@ -5,6 +6,8 @@ Forbidden: decompiler alias/type ownership, source-backed recovery, or rendered-
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Any, cast
 
@@ -19,6 +22,7 @@ from inertia.frontend.x86_16.regs import dtreg_t, reg8_t, reg16_t, reg32_t, regi
 from .cr import CR
 from .direction_step import lifted_direction_step_8616
 from .eflags import Eflags
+import operator
 
 # Constants for general-purpose registers
 
@@ -27,8 +31,8 @@ from .eflags import Eflags
 # Constants for descriptor table registers
 
 
-type RegisterName = reg8_t | reg16_t | reg32_t | sgreg_t
-type RegisterValue = int | VexValue
+RegisterName = typing.TypeAliasType("RegisterName", reg8_t | reg16_t | reg32_t | sgreg_t)
+RegisterValue = typing.TypeAliasType("RegisterValue", int | VexValue)
 
 TYPES: dict[type[RegisterName], object] = {
     reg8_t: Type.int_8,
@@ -40,40 +44,42 @@ TYPES: dict[type[RegisterName], object] = {
 # General-purpose register structure
 
 
+@cython.cclass
 class GPRegister:
     """Concrete general-purpose register storage."""
+    reg32 = cython.declare(object, visibility = "public")
 
     def __init__(self) -> None:
         """Initialize the register with a zero concrete value."""
-        self.reg32: int = 0  # 32-bit register value
+        self.reg32: cython.longlong = 0  # 32-bit register value
 
     @property
-    def reg16(self) -> int:
+    def reg16(self) -> cython.longlong:
         """Return the low 16-bit view."""
         return self.reg32 & 0xFFFF
 
     @reg16.setter
-    def reg16(self, value: int) -> None:
+    def reg16(self, value: cython.longlong) -> None:
         """Set the low 16-bit view."""
         self.reg32 = (self.reg32 & 0xFFFF0000) | (value & 0xFFFF)
 
     @property
-    def reg8_l(self) -> int:
+    def reg8_l(self) -> cython.longlong:
         """Return the low 8-bit view."""
         return self.reg32 & 0xFF
 
     @reg8_l.setter
-    def reg8_l(self, value: int) -> None:
+    def reg8_l(self, value: cython.longlong) -> None:
         """Set the low 8-bit view."""
         self.reg32 = (self.reg32 & 0xFFFFFF00) | (value & 0xFF)
 
     @property
-    def reg8_h(self) -> int:
+    def reg8_h(self) -> cython.longlong:
         """Return the high byte of the low 16-bit view."""
         return (self.reg32 >> 8) & 0xFF
 
     @reg8_h.setter
-    def reg8_h(self, value: int) -> None:
+    def reg8_h(self, value: cython.longlong) -> None:
         """Set the high byte of the low 16-bit view."""
         self.reg32 = (self.reg32 & 0xFFFF00FF) | ((value & 0xFF) << 8)
 
@@ -81,13 +87,17 @@ class GPRegister:
 # Segment register cache structure
 
 
+@cython.cclass
 class SGRegCache:
     """Cached descriptor state for a segment register."""
+    base = cython.declare(cython.longlong, visibility = "public")
+    flags = cython.declare(object, visibility = "public")
+    limit = cython.declare(cython.longlong, visibility = "public")
 
     def __init__(self) -> None:
         """Initialize the cached descriptor with a flat zero base."""
-        self.base: int = 0  # Base address of the segment
-        self.limit: int = 0  # Limit of the segment
+        self.base: cython.longlong = 0  # Base address of the segment
+        self.limit: cython.longlong = 0  # Limit of the segment
         self.flags: SegDescFlags = SegDescFlags()  # Flags for the segment descriptor
 
 
@@ -96,23 +106,24 @@ class SGRegCache:
 
 class SegDescFlags:
     """Packed segment descriptor flags."""
+    raw: object
 
     def __init__(self) -> None:
         """Initialize all descriptor flags to zero."""
-        self.raw: int = 0  # Raw flags value
+        self.raw: cython.longlong = 0  # Raw flags value
 
     @property
-    def type(self) -> int:
+    def type(self) -> cython.longlong:
         """Return the descriptor type field."""
         return self.raw & 0xF
 
     @type.setter
-    def type(self, value: int) -> None:
+    def type(self, value: cython.longlong) -> None:
         """Set the descriptor type field."""
         self.raw = (self.raw & 0xFFF0) | (value & 0xF)
 
     @property
-    def S(self) -> bool:
+    def S(self) -> cython.bint:
         """Return the descriptor kind flag."""
         return bool(self.raw & (1 << 4))
 
@@ -122,17 +133,17 @@ class SegDescFlags:
         self.raw = (self.raw & ~(1 << 4)) | (int(value) << 4)
 
     @property
-    def DPL(self) -> int:
+    def DPL(self) -> cython.longlong:
         """Return the descriptor privilege level."""
         return (self.raw >> 5) & 3
 
     @DPL.setter
-    def DPL(self, value: int) -> None:
+    def DPL(self, value: cython.longlong) -> None:
         """Set the descriptor privilege level."""
         self.raw = (self.raw & ~(3 << 5)) | (value << 5)
 
     @property
-    def P(self) -> bool:
+    def P(self) -> cython.bint:
         """Return whether the descriptor is present."""
         return bool(self.raw & (1 << 7))
 
@@ -142,7 +153,7 @@ class SegDescFlags:
         self.raw = (self.raw & ~(1 << 7)) | (int(value) << 7)
 
     @property
-    def AVL(self) -> bool:
+    def AVL(self) -> cython.bint:
         """Return the available-for-system-software flag."""
         return bool(self.raw & (1 << 8))
 
@@ -152,7 +163,7 @@ class SegDescFlags:
         self.raw = (self.raw & ~(1 << 8)) | (int(value) << 8)
 
     @property
-    def DB(self) -> bool:
+    def DB(self) -> cython.bint:
         """Return the default operand-size flag."""
         return bool(self.raw & (1 << 10))
 
@@ -162,7 +173,7 @@ class SegDescFlags:
         self.raw = (self.raw & ~(1 << 10)) | (int(value) << 10)
 
     @property
-    def G(self) -> bool:
+    def G(self) -> cython.bint:
         """Return the descriptor granularity flag."""
         return bool(self.raw & (1 << 11))
 
@@ -173,26 +184,29 @@ class SegDescFlags:
 
 
 # Segment register structure
+@cython.cclass
 class SGRegister:
     """Segment selector and cached descriptor state."""
+    cache = cython.declare(object, visibility = "public")
+    raw = cython.declare(object, visibility = "public")
 
     def __init__(self) -> None:
         """Initialize a zero segment selector."""
-        self.raw: int = 0  # Raw segment selector value
+        self.raw: cython.longlong = 0  # Raw segment selector value
         self.cache: SGRegCache = SGRegCache()  # Cached segment descriptor information
 
     @property
-    def RPL(self) -> int:
+    def RPL(self) -> cython.longlong:
         """Return the selector requested privilege level."""
         return self.raw & 3
 
     @RPL.setter
-    def RPL(self, value: int) -> None:
+    def RPL(self, value: cython.longlong) -> None:
         """Set the selector requested privilege level."""
         self.raw = (self.raw & ~3) | (value & 3)
 
     @property
-    def TI(self) -> bool:
+    def TI(self) -> cython.bint:
         """Return whether the selector targets the LDT."""
         return bool(self.raw & (1 << 2))
 
@@ -202,25 +216,29 @@ class SGRegister:
         self.raw = (self.raw & ~(1 << 2)) | (int(value) << 2)
 
     @property
-    def index(self) -> int:
+    def index(self) -> cython.longlong:
         """Return the selector table index."""
         return (self.raw >> 3) & 0x1FFF
 
     @index.setter
-    def index(self, value: int) -> None:
+    def index(self, value: cython.longlong) -> None:
         """Set the selector table index."""
         self.raw = (self.raw & 0x7) | ((value & 0x1FFF) << 3)
 
 
 # Descriptor table register structure
+@cython.cclass
 class DTRegister:
     """Descriptor table register storage."""
+    base = cython.declare(cython.longlong, visibility = "public")
+    limit = cython.declare(cython.longlong, visibility = "public")
+    selector = cython.declare(cython.longlong, visibility = "public")
 
     def __init__(self) -> None:
         """Initialize an empty descriptor table register."""
-        self.selector: int = 0  # Selector for LDTR and TR
-        self.base: int = 0  # Base address of the descriptor table
-        self.limit: int = 0  # Limit of the descriptor table
+        self.selector: cython.longlong = 0  # Selector for LDTR and TR
+        self.base: cython.longlong = 0  # Base address of the descriptor table
+        self.limit: cython.longlong = 0  # Limit of the descriptor table
 
 
 # Processor class
@@ -231,11 +249,11 @@ class Processor(Eflags, CR):  # type: ignore[misc, unused-ignore] # dynamic fron
         """Initialize reset-state processor registers and descriptor caches."""
         super().__init__()
         self.lifter_instruction: Any | None = None
-        self.vex_offsets: dict[str, int] | None = None
-        self._is_mode32: bool = False
+        self.vex_offsets: object = None
+        self._is_mode32: cython.bint = False
         self._last_condition: object | None = None
-        self.flags: int = 0
-        self.eip: int = 0  # X86Instruction pointer
+        self.flags: cython.longlong = 0
+        self.eip: cython.longlong = 0  # X86Instruction pointer
         self.gpregs: list[GPRegister] = [
             GPRegister() for _ in range(reg32_t.GPREGS_COUNT.value)
         ]  # General-purpose registers
@@ -244,7 +262,7 @@ class Processor(Eflags, CR):  # type: ignore[misc, unused-ignore] # dynamic fron
             DTRegister() for _ in range(dtreg_t.DTREGS_COUNT.value)
         ]  # Descriptor table registers
 
-        self.halt: bool = False
+        self.halt: cython.bint = False
 
         self.set_eip(0xFFFF0)
         self.set_crn(0, 0x60000010)
@@ -310,7 +328,7 @@ class Processor(Eflags, CR):  # type: ignore[misc, unused-ignore] # dynamic fron
             print(f"CR{i}=0x{self.get_crn(i):08x} ", end="")
         print()
 
-    def get_eip(self) -> int:
+    def get_eip(self) -> cython.longlong:
         """Return the concrete 32-bit instruction pointer."""
         return self.eip
 
@@ -319,11 +337,12 @@ class Processor(Eflags, CR):  # type: ignore[misc, unused-ignore] # dynamic fron
         return reg16_t(reg.value & 0b11)
 
     @staticmethod
-    def _reg8_is_high(reg: reg8_t) -> bool:
+    def _reg8_is_high(reg: reg8_t) -> cython.bint:
         return bool(reg.value >= 4)
 
     def get_ip(self) -> RegisterValue:
         """Return the 16-bit instruction pointer view."""
+        offset: object
         if self.lifter_instruction is None:
             return self.eip & 0xFFFF
         if self.vex_offsets is None:
@@ -333,6 +352,7 @@ class Processor(Eflags, CR):  # type: ignore[misc, unused-ignore] # dynamic fron
 
     def get_gpreg(self, n: reg8_t | reg16_t | reg32_t | VexValue) -> RegisterValue:
         """Return a general-purpose register in concrete or VEX lifting mode."""
+        offset: object
         if isinstance(n, VexValue):
             if self.lifter_instruction is not None:
                 return n
@@ -368,21 +388,21 @@ class Processor(Eflags, CR):  # type: ignore[misc, unused-ignore] # dynamic fron
             idx = n.value
             if idx < reg32_t.GPREGS_COUNT.value:
                 return self.gpregs[idx].reg32
-            elif idx == reg32_t.EIP.value:
+            elif operator.eq(idx, reg32_t.EIP.value):
                 return self.eip
-            elif idx == reg32_t.EFLAGS.value:
+            elif operator.eq(idx, reg32_t.EFLAGS.value):
                 return self.flags
         elif isinstance(n, reg16_t):
             idx = n.value
             if idx < reg32_t.GPREGS_COUNT.value:  # 8 for 16-bit views
                 return self.gpregs[idx].reg16
-            elif idx == reg16_t.IP.value:
+            elif operator.eq(idx, reg16_t.IP.value):
                 return self.eip & 0xFFFF
-            elif idx == reg16_t.FLAGS.value:
+            elif operator.eq(idx, reg16_t.FLAGS.value):
                 return self.flags & 0xFFFF
         raise ValueError(f"Cannot get gpreg {n} without lifter_instruction in concrete mode")
 
-    def constant(self, n: int, type_: object = Type.int_8) -> RegisterValue:
+    def constant(self, n: cython.longlong, type_: object = Type.int_8) -> RegisterValue:
         """Keep concrete values; encode lifted integers as width-bounded bits."""
         if self.lifter_instruction is not None:
             if is_int_ty(type_):
@@ -414,6 +434,7 @@ class Processor(Eflags, CR):  # type: ignore[misc, unused-ignore] # dynamic fron
 
     def get_sgreg(self, n: sgreg_t | VexValue) -> RegisterValue:
         """Return a segment register in concrete or VEX lifting mode."""
+        offset: object
         if isinstance(n, VexValue):
             if self.lifter_instruction is not None:
                 return n
@@ -449,17 +470,17 @@ class Processor(Eflags, CR):  # type: ignore[misc, unused-ignore] # dynamic fron
         self.set_gpreg(reg16_t.FLAGS, flags)
         return flags
 
-    def get_dtreg_selector(self, n: int) -> int:
+    def get_dtreg_selector(self, n: cython.longlong) -> cython.longlong:
         """Return a descriptor table register selector."""
         # assert n < dtreg_t.DTREGS_COUNT.value
         return self.dtregs[n].selector
 
-    def get_dtreg_base(self, n: int) -> int:
+    def get_dtreg_base(self, n: cython.longlong) -> cython.longlong:
         """Return a descriptor table base address."""
         assert n < dtreg_t.DTREGS_COUNT.value
         return self.dtregs[n].base
 
-    def get_dtreg_limit(self, n: int) -> int:
+    def get_dtreg_limit(self, n: cython.longlong) -> cython.longlong:
         """Return a descriptor table limit."""
         assert n < dtreg_t.DTREGS_COUNT.value
         return self.dtregs[n].limit
@@ -514,8 +535,10 @@ class Processor(Eflags, CR):  # type: ignore[misc, unused-ignore] # dynamic fron
         else:
             self.gpregs[idx].reg8_l = value
 
-    def _set_gpreg_lifted(self, n: reg16_t | reg32_t, name: str, value: object) -> None:
+    def _set_gpreg_lifted(self, n: reg16_t | reg32_t, name: object, value: object) -> None:
         """Set a 16/32-bit register in VEX lifting mode."""
+        flags_value: object
+        offset: object
         if self.vex_offsets is None:
             raise ValueError("vex_offsets not initialized for lifting mode")
         offset = self.vex_offsets.get(name, 0)
@@ -540,24 +563,25 @@ class Processor(Eflags, CR):  # type: ignore[misc, unused-ignore] # dynamic fron
                 idx = n.value
                 if idx < reg32_t.GPREGS_COUNT.value:
                     self.gpregs[idx].reg32 = value
-                elif idx == reg32_t.EIP.value:
+                elif operator.eq(idx, reg32_t.EIP.value):
                     self.eip = value
-                elif idx == reg32_t.EFLAGS.value:
+                elif operator.eq(idx, reg32_t.EFLAGS.value):
                     self.flags = value
                 return
             elif isinstance(n, reg16_t):
                 idx = n.value
                 if idx < reg32_t.GPREGS_COUNT.value:
                     self.gpregs[idx].reg16 = value
-                elif idx == reg16_t.IP.value:
+                elif operator.eq(idx, reg16_t.IP.value):
                     self.eip = (self.eip & 0xFFFF0000) | (value & 0xFFFF)
-                elif idx == reg16_t.FLAGS.value:
+                elif operator.eq(idx, reg16_t.FLAGS.value):
                     self.flags = (self.flags & 0xFFFF0000) | (value & 0xFFFF)
                 return
         raise TypeError(f"Cannot set {n} from non-concrete value of type {type(value)} in concrete mode")
 
     def set_sgreg(self, n: sgreg_t, reg: object) -> None:
         """Set a segment register in concrete or VEX lifting mode."""
+        offset: object
         name = register_name_8616(n)
         if self.lifter_instruction is not None:
             if self.vex_offsets is None:
@@ -579,7 +603,7 @@ class Processor(Eflags, CR):  # type: ignore[misc, unused-ignore] # dynamic fron
         """Set a segment register alias."""
         self.set_sgreg(n, value)
 
-    def set_dtreg(self, n: int, sel: int, base: int, limit: int) -> None:
+    def set_dtreg(self, n: cython.longlong, sel: cython.longlong, base: cython.longlong, limit: cython.longlong) -> None:
         """Set a descriptor table register."""
         assert n < dtreg_t.DTREGS_COUNT.value
         self.dtregs[n].selector = sel
@@ -612,19 +636,19 @@ class Processor(Eflags, CR):  # type: ignore[misc, unused-ignore] # dynamic fron
         self.set_gpreg(n, result)
         return result
 
-    def is_halt(self) -> bool:
+    def is_halt(self) -> cython.bint:
         """Return whether the processor is halted."""
         return self.halt
 
-    def do_halt(self, h: bool) -> None:
+    def do_halt(self, h: cython.bint) -> None:
         """Set the processor halt state."""
         self.halt = h
 
-    def is_mode32(self) -> bool:
+    def is_mode32(self) -> cython.bint:
         """Return whether the frontend currently executes 32-bit code."""
         return self._is_mode32
 
-    def set_mode32(self, value: bool) -> None:
+    def set_mode32(self, value: cython.bint) -> None:
         """Set the processor width mode for next instruction decode."""
         self._is_mode32 = bool(value)
 

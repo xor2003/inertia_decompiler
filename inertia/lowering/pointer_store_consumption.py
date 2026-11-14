@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove complete consumption before removing a pointer-store carrier.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -28,6 +31,8 @@ from inertia.lowering.c_ast_utils import (
 )
 
 from .physical_registers import PhysicalRegisterView8616, physical_register_view_8616
+import dataclasses
+import builtins
 
 
 class PointerStoreConsumptionVerdict8616(StrEnum):
@@ -49,20 +54,20 @@ class PointerStoreConsumptionFailure8616(StrEnum):
     UNCONSUMED_REGISTER = "unconsumed_register"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PointerStoreConsumptionEvidence8616:
     """One materialized guard decision, not a claim that C was mutated."""
 
     verdict: PointerStoreConsumptionVerdict8616
     failure: PointerStoreConsumptionFailure8616 | None = None
-    raw_fact_count: int = 1
-    normalized_fact_count: int = 1
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 1
+    raw_fact_count: cython.longlong = 1
+    normalized_fact_count: cython.longlong = 1
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 1
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Require a closed consumption proof before removing the setup."""
         return (
             self.verdict is PointerStoreConsumptionVerdict8616.PROVEN_CONSUMED
@@ -70,7 +75,7 @@ class PointerStoreConsumptionEvidence8616:
         )
 
     @property
-    def source_preserved(self) -> bool:
+    def source_preserved(self) -> cython.bint:
         """Authorize only value substitution; this alone never permits DCE."""
         return (
             self.verdict in {
@@ -84,6 +89,7 @@ class PointerStoreConsumptionEvidence8616:
         )
 
 
+@cython.ccall
 def _refuse(failure: PointerStoreConsumptionFailure8616) -> PointerStoreConsumptionEvidence8616:
     """Publish an atomic refusal without claiming consumed statements."""
     return PointerStoreConsumptionEvidence8616(
@@ -91,11 +97,11 @@ def _refuse(failure: PointerStoreConsumptionFailure8616) -> PointerStoreConsumpt
     )
 
 
-def _register_occurrences(nodes: Iterable[object], carrier: PhysicalRegisterView8616) -> int:
+def _register_occurrences(nodes: Iterable[object], carrier: PhysicalRegisterView8616) -> cython.longlong:
     """Count AST edges with overlapping physical bytes, including subregisters."""
     return sum(
         1
-        for node in nodes
+        for node in iter(nodes)
         if (view := physical_register_view_8616(node)) is not None
         and view.reg_offset < carrier.reg_offset + carrier.width
         and carrier.reg_offset < view.reg_offset + view.width
@@ -105,15 +111,17 @@ def _register_occurrences(nodes: Iterable[object], carrier: PhysicalRegisterView
 def prove_pointer_store_source_preservation_8616(
     carrier: object,
     pointer: object,
-    stores: tuple[CAssignment, ...],
-    intervening: tuple[object, ...],
+    stores: object,
+    intervening: object,
 ) -> PointerStoreConsumptionEvidence8616:
     """Prove an unchanged pointer source across a straight-line store interval."""
+    view: object
+    statement: object
     view = physical_register_view_8616(carrier)
     if view is None or not stores:
         return _refuse(PointerStoreConsumptionFailure8616.UNKNOWN_CARRIER)
     for statement in intervening:
-        if any(statement is store for store in stores):
+        if any(statement is store for store in iter(stores)):
             continue
         if (
             not isinstance(statement, CAssignment)
@@ -124,16 +132,16 @@ def prove_pointer_store_source_preservation_8616(
             return _refuse(PointerStoreConsumptionFailure8616.SOURCE_CHANGED)
         if any(
             isinstance(node, (CFunctionCall, CDirtyExpression))
-            for node in _iter_c_node_occurrences_8616(statement.rhs)
+            for node in builtins.iter(_iter_c_node_occurrences_8616(statement.rhs))
         ):
             return _refuse(PointerStoreConsumptionFailure8616.OPAQUE_EFFECT)
     if any(
         isinstance(node, (CFunctionCall, CDirtyExpression))
-        for store in stores
-        for node in _iter_c_node_occurrences_8616(store.rhs)
+        for store in iter(stores)
+        for node in builtins.iter(_iter_c_node_occurrences_8616(store.rhs))
     ):
         return _refuse(PointerStoreConsumptionFailure8616.OPAQUE_EFFECT)
-    if any(_register_occurrences(_iter_c_node_occurrences_8616(store.rhs), view) for store in stores):
+    if any(_register_occurrences(_iter_c_node_occurrences_8616(store.rhs), view) for store in iter(stores)):
         return _refuse(PointerStoreConsumptionFailure8616.UNCONSUMED_REGISTER)
     return PointerStoreConsumptionEvidence8616(
         PointerStoreConsumptionVerdict8616.PROVEN_SOURCE_PRESERVED,
@@ -144,9 +152,9 @@ def prove_pointer_store_source_preservation_8616(
 def _root_consumption_verdict_8616(
     root: object,
     setup: CAssignment,
-    stores: tuple[CAssignment, ...],
+    stores: object,
     view: PhysicalRegisterView8616,
-    expected: int,
+    expected: cython.longlong,
 ) -> PointerStoreConsumptionFailure8616 | bool:
     """Classify one C root: skip, consume, or refuse with a typed failure."""
     if _c_ast_cycle_path_8616(root):
@@ -154,14 +162,14 @@ def _root_consumption_verdict_8616(
     occurrences = tuple(_iter_c_node_occurrences_8616(root))
     if any(
         isinstance(node, CDirtyExpression) and physical_register_view_8616(node) is None
-        for node in occurrences
+        for node in iter(occurrences)
     ):
         return PointerStoreConsumptionFailure8616.OPAQUE_EFFECT
     count = _register_occurrences(occurrences, view)
     if not count:
         return False
-    if sum(node is setup for node in occurrences) != 1 or any(
-        sum(node is store for node in occurrences) != 1 for store in stores
+    if sum(node is setup for node in iter(occurrences)) != 1 or any(
+        sum(node is store for node in iter(occurrences)) != 1 for store in iter(stores)
     ):
         return PointerStoreConsumptionFailure8616.INCOMPLETE_PLACEMENT
     if count != expected:
@@ -170,14 +178,16 @@ def _root_consumption_verdict_8616(
 
 
 def prove_pointer_store_consumption_8616(
-    roots: tuple[object, ...],
+    roots: object,
     setup: CAssignment,
     carrier: object,
     pointer: object,
-    stores: tuple[CAssignment, ...],
-    intervening: tuple[object, ...],
+    stores: object,
+    intervening: object,
 ) -> PointerStoreConsumptionEvidence8616:
     """Require unchanged source and no carrier occurrence outside consumed LHSs."""
+    view: object
+    root: object
     view = physical_register_view_8616(carrier)
     if view is None or not roots:
         return _refuse(PointerStoreConsumptionFailure8616.UNKNOWN_CARRIER)
@@ -185,12 +195,12 @@ def prove_pointer_store_consumption_8616(
     if not source.source_preserved:
         return source
     expected = _register_occurrences(_iter_c_node_occurrences_8616(setup.lhs), view) + sum(
-        _register_occurrences(_iter_c_node_occurrences_8616(store.lhs), view) for store in stores
+        _register_occurrences(_iter_c_node_occurrences_8616(store.lhs), view) for store in iter(stores)
     )
     if expected < 2:
         return _refuse(PointerStoreConsumptionFailure8616.INCOMPLETE_PLACEMENT)
     found = False
-    for root in {id(root): root for root in roots}.values():
+    for root in {id(root): root for root in iter(roots)}.values():
         verdict = _root_consumption_verdict_8616(root, setup, stores, view, expected)
         if isinstance(verdict, PointerStoreConsumptionFailure8616):
             return _refuse(verdict)

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Optional evidence/reporting.
 
 Responsibility: describe known COD-visible library objects for diagnostics and guarded labels.
@@ -5,12 +6,16 @@ Forbidden: guessing object layouts or treating names as semantic proof.
 """
 
 from __future__ import annotations
+import dataclasses
+import typing
+import cython
 
 import re
 from collections import OrderedDict
 from dataclasses import dataclass
 
 from angr.sim_type import SimStruct, SimType, SimTypeChar, SimTypePointer, SimTypeShort, SimUnion
+import builtins
 
 __all__ = [
     "CODKnownObjectSpec",
@@ -21,22 +26,23 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class CODKnownObjectSpec:
     """Optional COD-visible object description for diagnostics and guarded labels."""
 
-    name: str
+    name: object
     type: object
-    size: int
-    field_names: tuple[str, ...]
-    field_offsets: tuple[int, ...]
-    field_widths: tuple[int, ...]
-    packed: bool
-    allowed_views: tuple[str, ...]
-    segment_domain: str
-    type_name: str
+    size: cython.longlong
+    field_names: object
+    field_offsets: object
+    field_widths: object
+    packed: cython.bint
+    allowed_views: object
+    segment_domain: object
+    type_name: object
 
 
+@cython.ccall
 def _make_union_regs_type() -> SimUnion:
     word: SimType = SimTypeShort(False)
     byte: SimType = SimTypeChar()
@@ -73,6 +79,7 @@ def _make_union_regs_type() -> SimUnion:
     )
 
 
+@cython.ccall
 def _make_sregs_type() -> SimStruct:
     word: SimType = SimTypeShort(False)
     return SimStruct(
@@ -89,6 +96,7 @@ def _make_sregs_type() -> SimStruct:
     )
 
 
+@cython.ccall
 def _make_exe_load_params_type() -> SimStruct:
     word: SimType = SimTypeShort(False)
     fields: OrderedDict[str, SimType] = OrderedDict(
@@ -109,6 +117,7 @@ def _make_exe_load_params_type() -> SimStruct:
     return SimStruct(fields, name="ExeLoadParams", pack=True)
 
 
+@cython.ccall
 def _make_ovl_load_params_type() -> SimStruct:
     word: SimType = SimTypeShort(False)
     return SimStruct(
@@ -118,6 +127,7 @@ def _make_ovl_load_params_type() -> SimStruct:
     )
 
 
+@cython.ccall
 def _make_ovl_header_type() -> SimTypePointer:
     word: SimType = SimTypeShort(False)
     header = SimStruct(
@@ -128,11 +138,13 @@ def _make_ovl_header_type() -> SimTypePointer:
     return SimTypePointer(header)
 
 
+@cython.ccall
 def _make_slot_array_type() -> SimTypePointer:
     return SimTypePointer(SimTypeShort(False))
 
 
-def _type_name(type_obj: object) -> str:
+@cython.ccall
+def _type_name(type_obj: object) -> object:
     if isinstance(type_obj, SimUnion) and type_obj.name:
         return f"union {type_obj.name}"
     if isinstance(type_obj, SimStruct) and type_obj.name:
@@ -240,7 +252,9 @@ _KNOWN_COD_OBJECT_SPECS: dict[str, CODKnownObjectSpec] = {
 }
 
 
-def _sanitize_known_object_name(name: str | None) -> str | None:
+@cython.ccall
+def _sanitize_known_object_name(name: object) -> object:
+    prefixed_match: object
     if not isinstance(name, str) or not name:
         return None
     name = name.lstrip("_")
@@ -252,22 +266,27 @@ def _sanitize_known_object_name(name: str | None) -> str | None:
     return name
 
 
-def known_cod_object_spec(name: str | None) -> CODKnownObjectSpec | None:
+@cython.ccall
+def known_cod_object_spec(name: object) -> CODKnownObjectSpec | None:
     """Return a guarded known-object spec for a sanitized COD-visible name."""
+    sanitized: object
     sanitized = _sanitize_known_object_name(name)
     if sanitized is None:
         return None
     return _KNOWN_COD_OBJECT_SPECS.get(sanitized)
 
 
-def canonical_known_cod_object_name(name: str | None) -> str | None:
+@cython.ccall
+def canonical_known_cod_object_name(name: object) -> object:
     """Return the canonical known-object name when the input matches one."""
+    spec: object
     spec = known_cod_object_spec(name)
     if spec is not None:
         return spec.name
     return _sanitize_known_object_name(name)
 
 
+@cython.ccall
 def known_cod_object_names() -> tuple[str, ...]:
     """Return all guarded known COD object names in deterministic order."""
     return tuple(_KNOWN_COD_OBJECT_SPECS)
@@ -291,6 +310,6 @@ def describe_x86_16_cod_known_objects() -> dict[str, object]:
                 "type_name": spec.type_name,
                 "type": spec.type,
             }
-            for spec in _KNOWN_COD_OBJECT_SPECS.values()
+            for spec in builtins.iter(_KNOWN_COD_OBJECT_SPECS.values())
         ),
     }

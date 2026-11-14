@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove canonical x86-16 BP-frame instruction sequences.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not inspect rendered assembly or C text and do not mutate structured C.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping, Sequence
 from typing import Protocol, cast
@@ -22,22 +25,23 @@ from capstone.x86_const import (
     X86_REG_BP,
     X86_REG_SP,
 )
+import operator
 
 
 class _CapstoneOperand8616(Protocol):
     """Capstone register operand fields consumed by frame classification."""
 
-    type: int
-    reg: int
+    type: cython.longlong
+    reg: cython.longlong
 
 
 class _CapstoneInstruction8616(Protocol):
     """Capstone instruction fields consumed by frame classification."""
 
-    address: int
-    id: int
+    address: cython.longlong
+    id: cython.longlong
     operands: Sequence[_CapstoneOperand8616]
-    size: int
+    size: cython.longlong
 
 
 class _CapstoneWrapper8616(Protocol):
@@ -46,6 +50,7 @@ class _CapstoneWrapper8616(Protocol):
     insn: _CapstoneInstruction8616
 
 
+@cython.ccall
 def _instruction_8616(value: object) -> _CapstoneInstruction8616:
     """Unwrap one angr Capstone wrapper at the third-party boundary."""
     wrapper = cast(_CapstoneWrapper8616, value)
@@ -55,18 +60,19 @@ def _instruction_8616(value: object) -> _CapstoneInstruction8616:
         return cast(_CapstoneInstruction8616, value)
 
 
-def _instruction_registers_8616(value: object) -> tuple[int, ...] | None:
+def _instruction_registers_8616(value: object) -> object:
     """Return exact register operands for one decoded instruction."""
     instruction = _instruction_8616(value)
     try:
         operands = tuple(instruction.operands)
     except (AttributeError, TypeError):
         return None
-    if any(operand.type != X86_OP_REG for operand in operands):
+    if any(operator.ne(operand.type, X86_OP_REG) for operand in iter(operands)):
         return None
-    return tuple(int(operand.reg) for operand in operands)
+    return tuple(int(operand.reg) for operand in iter(operands))
 
 
+@cython.ccall
 def _instruction_end_8616(value: object) -> int | None:
     """Return the exclusive address of one decoded instruction."""
     instruction = _instruction_8616(value)
@@ -78,11 +84,13 @@ def _instruction_end_8616(value: object) -> int | None:
     return address + size if isinstance(address, int) and isinstance(size, int) and size > 0 else None
 
 
+@cython.ccall
 def _entry_setup_end_8616(
-    instructions_by_addr: Mapping[int, object],
-    function_addr: int,
+    instructions_by_addr: Mapping[cython.longlong, object],
+    function_addr: cython.longlong,
 ) -> int | None:
     """Prove the mandatory ``push bp; mov bp, sp`` entry; return setup end."""
+    push_end: object
     push = _instruction_8616(instructions_by_addr.get(function_addr))
     try:
         push_id = push.id
@@ -91,7 +99,7 @@ def _entry_setup_end_8616(
     push_end = _instruction_end_8616(push)
     if (
         push_id != X86_INS_PUSH
-        or _instruction_registers_8616(push) != (X86_REG_BP,)
+        or operator.ne(_instruction_registers_8616(push), (X86_REG_BP,))
         or push_end is None
     ):
         return None
@@ -100,28 +108,31 @@ def _entry_setup_end_8616(
         setup_id = frame_setup.id
     except AttributeError:
         return None
-    if setup_id != X86_INS_MOV or _instruction_registers_8616(frame_setup) != (
+    if setup_id != X86_INS_MOV or operator.ne(_instruction_registers_8616(frame_setup), (
         X86_REG_BP,
         X86_REG_SP,
-    ):
+    )):
         return None
     return push_end
 
 
+@cython.ccall
 def _teardown_sequence_8616(
-    instructions_by_addr: Mapping[int, object],
+    instructions_by_addr: Mapping[cython.longlong, object],
     raw_instruction: object,
-) -> tuple[int, int] | None:
+) -> object:
     """Return ``(pop_addr, ret_addr)`` for a contiguous teardown or None."""
+    pop_addr: object
+    ret_addr: object
     instruction = _instruction_8616(raw_instruction)
     try:
         instruction_id = instruction.id
     except AttributeError:
         return None
-    if instruction_id != X86_INS_MOV or _instruction_registers_8616(instruction) != (
+    if instruction_id != X86_INS_MOV or operator.ne(_instruction_registers_8616(instruction), (
         X86_REG_SP,
         X86_REG_BP,
-    ):
+    )):
         return None
     pop_addr = _instruction_end_8616(instruction)
     if pop_addr is None:
@@ -131,7 +142,7 @@ def _teardown_sequence_8616(
         pop_id = pop.id
     except AttributeError:
         return None
-    if pop_id != X86_INS_POP or _instruction_registers_8616(pop) != (X86_REG_BP,):
+    if pop_id != X86_INS_POP or operator.ne(_instruction_registers_8616(pop), (X86_REG_BP,)):
         return None
     ret_addr = _instruction_end_8616(pop)
     if ret_addr is None:
@@ -146,10 +157,11 @@ def _teardown_sequence_8616(
     return pop_addr, ret_addr
 
 
+@cython.ccall
 def canonical_frame_instruction_addresses_8616(
-    instructions_by_addr: Mapping[int, object],
-    function_addr: int,
-) -> frozenset[int]:
+    instructions_by_addr: Mapping[cython.longlong, object],
+    function_addr: cython.longlong,
+) -> frozenset[cython.longlong]:
     """Return exact decoded entry and teardown addresses for a BP frame.
 
     The entry pair is mandatory. Teardown addresses are admitted only as a
@@ -157,6 +169,10 @@ def canonical_frame_instruction_addresses_8616(
     prove that structured C contains a matching push or setup carrier before
     pruning.
     """
+    push_end: object
+    teardown: object
+    address: object
+    raw_instruction: object
     push_end = _entry_setup_end_8616(instructions_by_addr, function_addr)
     if push_end is None:
         return frozenset()

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Decompiler structuring stage wiring for the 16-bit pipeline.
 
 Layer: Structuring.
@@ -12,6 +13,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 import logging
@@ -345,6 +348,9 @@ from inertia.widening.widening_subview_copyprop_applicability_8616 import (
     widening_subview_copyprop_applicable_8616,
 )
 from inertia.widening.word_projection_recomposition import materialize_word_projection_recompositions_8616
+import dataclasses
+import operator
+import builtins
 
 # angr project/codegen objects are plugin surfaces whose compatibility
 # metadata is attached dynamically across angr versions. Keep that boundary
@@ -358,9 +364,10 @@ class _WideningProducerBoundary8616(Protocol):
     _inertia_stack_memory_object_widening_artifact: StackMemoryObjectWideningArtifact8616
 
 
+@cython.ccall
 def _completed_widening_outputs_8616(
     codegen: object,
-) -> tuple[CarryBorrowWideningPipeline8616, StackMemoryObjectWideningArtifact8616] | None:
+) -> object:
     """Read genuine Widening artifacts; missing boundary publications prove nothing."""
     boundary = cast(_WideningProducerBoundary8616, codegen)
     try:
@@ -380,13 +387,13 @@ def _completed_widening_outputs_8616(
 class _GuardedDceResult8616(Protocol):
     """Minimal result contract returned by the CLI guarded-DCE callback."""
 
-    changed: bool
-type AngrProjectSurface = Any
-type AngrCodegenSurface = Any
-type AngrDecompilerSurface = Any
-type AngrConditionProcessorSurface = Any
-type ClaripyConditionSurface = Any
-type AngrCFuncNodeSurface = Any
+    changed: cython.bint
+AngrProjectSurface = typing.TypeAliasType("AngrProjectSurface", Any)
+AngrCodegenSurface = typing.TypeAliasType("AngrCodegenSurface", Any)
+AngrDecompilerSurface = typing.TypeAliasType("AngrDecompilerSurface", Any)
+AngrConditionProcessorSurface = typing.TypeAliasType("AngrConditionProcessorSurface", Any)
+ClaripyConditionSurface = typing.TypeAliasType("ClaripyConditionSurface", Any)
+AngrCFuncNodeSurface = typing.TypeAliasType("AngrCFuncNodeSurface", Any)
 
 __all__ = [
     "DECOMPILER_STRUCTURING_PASSES",
@@ -416,7 +423,7 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DecompilerStructuringPassSpec:
     """A pass and optional proof that its current AST has no applicable work.
 
@@ -425,46 +432,46 @@ class DecompilerStructuringPassSpec:
     but must not transform the AST. Absent callbacks preserve ordinary execution.
     """
 
-    name: str
-    func: Callable[..., bool]
-    needs_project: bool
+    name: object
+    func: Callable[..., cython.bint]
+    needs_project: cython.bint
     lowering_replay_impact: StructuringLoweringReplayImpact8616 = (
         StructuringLoweringReplayImpact8616.FULL_AST
     )
     applicable: Callable[[object], bool] | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LateTypedSwitchReplacementFinalizeResult8616:
     """Result of late typed-switch AST replacement finalization."""
 
-    replacement_changed: bool
-    segment_replay_changed: bool
+    replacement_changed: cython.bint
+    segment_replay_changed: cython.bint
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return True when replacement or replay changed the C AST."""
         return self.replacement_changed or self.segment_replay_changed
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SeqNodeSwitchReplayFinalizeResult8616:
     """Result of late SeqNode switch replay finalization."""
 
-    segment_replay_changed: bool
-    segment_dce_changed: bool
-    post_dce_segment_replay_changed: bool
-    post_dce_segment_dce_changed: bool
-    condition_replay_changed: bool
-    condition_dce_changed: bool
-    post_condition_segment_replay_changed: bool
-    post_condition_segment_dce_changed: bool
-    word_projection_replay_changed: bool
-    word_projection_dce_changed: bool
-    selector_replay_changed: bool
+    segment_replay_changed: cython.bint
+    segment_dce_changed: cython.bint
+    post_dce_segment_replay_changed: cython.bint
+    post_dce_segment_dce_changed: cython.bint
+    condition_replay_changed: cython.bint
+    condition_dce_changed: cython.bint
+    post_condition_segment_replay_changed: cython.bint
+    post_condition_segment_dce_changed: cython.bint
+    word_projection_replay_changed: cython.bint
+    word_projection_dce_changed: cython.bint
+    selector_replay_changed: cython.bint
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return True when replay or its guarded DCE callback changed the C AST."""
         return bool(
             self.segment_replay_changed
@@ -481,18 +488,18 @@ class SeqNodeSwitchReplayFinalizeResult8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectInstructionMaterializationResult8616:
     """Result of direct stack/global instruction materialization sequencing."""
 
-    direct_stack_mov_changed: bool
-    direct_stack_incdec_changed: bool
-    direct_global_incdec_changed: bool
-    callee_saved_spill_prune_changed: bool
-    control_stack_escape_changed: bool
+    direct_stack_mov_changed: cython.bint
+    direct_stack_incdec_changed: cython.bint
+    direct_global_incdec_changed: cython.bint
+    callee_saved_spill_prune_changed: cython.bint
+    control_stack_escape_changed: cython.bint
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return True when any direct instruction materializer changed the C AST."""
         return (
             self.direct_stack_mov_changed
@@ -514,7 +521,8 @@ _STRUCTURING_PASS_VALIDATION_LARGE_BLOCK_THRESHOLD_8616 = 40
 _STRUCTURING_PASS_VALIDATION_LARGE_BYTE_THRESHOLD_8616 = 0x160
 
 
-def _install_function_interface_surface_reporting_only_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def _install_function_interface_surface_reporting_only_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> cython.bint:
     """Install render-time interface comments without marking structuring changed.
 
     The interface surface wraps ``render_text`` to prepend comments from
@@ -526,7 +534,8 @@ def _install_function_interface_surface_reporting_only_8616(project: AngrProject
     return False
 
 
-def _array_matching_applicable_after_priming_8616(codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def _array_matching_applicable_after_priming_8616(codegen: AngrCodegenSurface) -> cython.bint:
     """Keep array rewriting until validation preparation has established its AST."""
     # Priming state is attached to the dynamic third-party angr codegen boundary.
     if not getattr(codegen, "_inertia_structuring_validation_semantics_primed", False):
@@ -534,7 +543,8 @@ def _array_matching_applicable_after_priming_8616(codegen: AngrCodegenSurface) -
     return array_expression_matching_applicable_8616(codegen)
 
 
-def _widening_copyprop_applicable_after_priming_8616(codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def _widening_copyprop_applicable_after_priming_8616(codegen: AngrCodegenSurface) -> cython.bint:
     """Keep the real pass until validation preparation has established its AST."""
     # Priming state is attached to the dynamic third-party angr codegen boundary.
     if not getattr(codegen, "_inertia_structuring_validation_semantics_primed", False):
@@ -542,17 +552,19 @@ def _widening_copyprop_applicable_after_priming_8616(codegen: AngrCodegenSurface
     return widening_subview_copyprop_applicable_8616(codegen)
 
 
-def _run_structuring_widening_copy_propagation_8616(codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def _run_structuring_widening_copy_propagation_8616(codegen: AngrCodegenSurface) -> cython.bint:
     """Consume alias-proven copies before structuring interprets conditions."""
     subviews_changed = materialize_contained_stack_subviews_8616(codegen)
     copies_changed = _widening_copy_propagation_8616(codegen, enable_nested=True)
     return bool(subviews_changed or copies_changed)
 
 
+@cython.ccall
 def _run_structuring_codegen_with_lowering_replay_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
-) -> bool:
+) -> cython.bint:
     """Regenerate C and replay every proof consumer invalidated by this rebuild."""
     regenerated = bool(_codegen.apply_structuring_codegen_8616(codegen))
     changed = regenerated
@@ -571,6 +583,7 @@ def _run_structuring_codegen_with_lowering_replay_8616(
     return bool(prune_unread_stack_lowered_register_carriers_8616(codegen)) or changed
 
 
+@cython.ccall
 def _build_decompiler_structuring_passes() -> tuple[DecompilerStructuringPassSpec, ...]:
     """Build the deterministic core pass sequence for 16-bit structuring."""
     return (
@@ -790,7 +803,8 @@ def _build_decompiler_structuring_passes() -> tuple[DecompilerStructuringPassSpe
     )
 
 
-def _condition_evidence_transfer_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def _condition_evidence_transfer_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> cython.bint:
     """Collect typed condition and edge evidence before region structuring.
 
     Region structuring consumes ``ConditionEdgeEvidence`` to recognize
@@ -800,6 +814,9 @@ def _condition_evidence_transfer_8616(project: AngrProjectSurface, codegen: Angr
     late refresh lets downstream structuring see a different guard surface from
     the validation baseline.
     """
+    current_root: object
+    edge_evidence: object
+    func_addr: object
     func_addr = getattr(getattr(codegen, "cfunc", None), "addr", None)
     if not isinstance(func_addr, int):
         return False
@@ -812,7 +829,7 @@ def _condition_evidence_transfer_8616(project: AngrProjectSurface, codegen: Angr
     materialization_is_current = bool(
         getattr(codegen, "_inertia_structuring_conditions_materialized_after_transfer_8616", False)
         and getattr(codegen, "_inertia_structuring_conditions_materialized_root_8616", None) is current_root
-        and getattr(codegen, "_inertia_structuring_conditions_materialized_surface_8616", None) == current_surface
+        and operator.eq(getattr(codegen, "_inertia_structuring_conditions_materialized_surface_8616", None), current_surface)
     )
     materialization_changed = False
     if not materialization_is_current:
@@ -836,7 +853,8 @@ def _condition_evidence_transfer_8616(project: AngrProjectSurface, codegen: Angr
     return materialization_changed
 
 
-def prepare_typed_edge_switch_artifacts_8616(codegen: AngrCodegenSurface, *, force: bool = False) -> None:
+@cython.ccall
+def prepare_typed_edge_switch_artifacts_8616(codegen: AngrCodegenSurface, *, force: cython.bint = False) -> None:
     """Prepare typed switch artifacts for diagnostics or guarded replacement.
 
     This is structuring orchestration, not semantic recovery: condition
@@ -845,6 +863,10 @@ def prepare_typed_edge_switch_artifacts_8616(codegen: AngrCodegenSurface, *, for
     facts for later guarded C AST replacement. Replacement orchestration uses
     ``force`` instead of mutating process-global diagnostic configuration.
     """
+    backup_edge_evidence: object
+    edge_evidence: object
+    func_addr: object
+    project: object
     if not force and os.environ.get("INERTIA_ENABLE_TYPED_SWITCH_AST_ARTIFACTS") != "1":
         return
     if getattr(codegen, "_inertia_grouped_structuring_stats_8616", None) is not None:
@@ -870,13 +892,14 @@ def prepare_typed_edge_switch_artifacts_8616(codegen: AngrCodegenSurface, *, for
         }
 
 
+@cython.ccall
 def _switch_replacement_refusal_8616(
     codegen: AngrCodegenSurface,
-    attempted_count: int,
-    reason: str,
-    refused_count: int,
-    extra: dict[str, object] | None = None,
-) -> bool:
+    attempted_count: cython.longlong,
+    reason: object,
+    refused_count: cython.longlong,
+    extra: object = None,
+) -> cython.bint:
     """Record a refused typed-switch replacement payload and return False."""
     payload: dict[str, object] = {
         "attempted_count": attempted_count,
@@ -892,15 +915,17 @@ def _switch_replacement_refusal_8616(
     return False
 
 
+@cython.ccall
 def _commit_validated_switch_replacement_8616(
-    project: AngrProjectSurface | None,
+    project: object,
     codegen: AngrCodegenSurface,
-    root: AngrCFuncNodeSurface,
-    original_statements: list[object] | None,
-    before_summary: X86_16TailValidationSummary | None,
+    root: object,
+    original_statements: object,
+    before_summary: object,
     result: _codegen.TypedEdgeSwitchAstReplacementResult8616,
-) -> bool:
+) -> cython.bint:
     """Keep a changed switch replacement only when tail validation stays stable."""
+    replacement_payload: object
     if project is None or root is None or original_statements is None or before_summary is None:
         if (
             root is not None
@@ -951,7 +976,8 @@ def _commit_validated_switch_replacement_8616(
     return True
 
 
-def apply_typed_edge_switch_ast_replacement_if_enabled_8616(codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def apply_typed_edge_switch_ast_replacement_if_enabled_8616(codegen: AngrCodegenSurface) -> cython.bint:
     """Apply typed switch C AST replacement behind opt-in and tail validation.
 
     The mutation primitive belongs to structuring codegen. This stage-level
@@ -959,6 +985,9 @@ def apply_typed_edge_switch_ast_replacement_if_enabled_8616(codegen: AngrCodegen
     so CLI fallback orchestration does not need direct imports from the
     structuring implementation.
     """
+    cfunc: object
+    project: object
+    root: object
     if os.environ.get("INERTIA_ENABLE_TYPED_SWITCH_AST_REPLACEMENT") != "1":
         return False
     prepare_typed_edge_switch_artifacts_8616(codegen, force=True)
@@ -997,6 +1026,7 @@ def apply_typed_edge_switch_ast_replacement_if_enabled_8616(codegen: AngrCodegen
     )
 
 
+@cython.ccall
 def record_typed_edge_switch_replacement_diagnostics_8616(codegen: AngrCodegenSurface) -> None:
     """Refresh typed-switch diagnostic payloads through the structuring stage."""
     prepare_typed_edge_switch_artifacts_8616(codegen)
@@ -1004,31 +1034,36 @@ def record_typed_edge_switch_replacement_diagnostics_8616(codegen: AngrCodegenSu
     _codegen.evaluate_typed_edge_switch_replacement_safety_8616(codegen)
 
 
-def seqnode_switch_replacement_changed_for_codegen_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
+def seqnode_switch_replacement_changed_for_codegen_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> cython.bint:
     """Return whether the current C function has a changed SeqNode switch replacement."""
+    current_cfunc_addr: object
+    seqnode_replacements: object
     seqnode_replacements = getattr(project, "_inertia_typed_switch_seqnode_replacement_8616", None)
     current_cfunc_addr = getattr(getattr(codegen, "cfunc", None), "addr", None)
     return any(
         isinstance(record, dict)
         and bool(record.get("changed", False))
-        and (not isinstance(current_cfunc_addr, int) or record.get("function_addr") == current_cfunc_addr)
-        for record in (seqnode_replacements if isinstance(seqnode_replacements, list) else ())
+        and (not isinstance(current_cfunc_addr, int) or operator.eq(record.get("function_addr"), current_cfunc_addr))
+        for record in iter((seqnode_replacements if isinstance(seqnode_replacements, list) else ()))
     )
 
 
-def typed_edge_switch_ast_replacement_changed_for_codegen_8616(codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def typed_edge_switch_ast_replacement_changed_for_codegen_8616(codegen: AngrCodegenSurface) -> cython.bint:
     """Return whether typed edge-switch C AST replacement changed this codegen."""
+    payload: object
     payload = getattr(codegen, "_inertia_typed_edge_switch_ast_replacement_8616", None)
     return isinstance(payload, dict) and bool(payload.get("changed", False))
 
 
+@cython.ccall
 def _replay_segment_global_lowering_after_switch_replacement_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
     synthetic_globals: object,
     *,
     cod_metadata: object | None = None,
-) -> bool:
+) -> cython.bint:
     """Replay condition provenance before late segment/global lowering."""
     provenance_changed = replay_codegen_structured_condition_segment_provenance_8616(codegen).changed
     lowering_changed = run_segment_global_materialization_8616(
@@ -1041,7 +1076,8 @@ def _replay_segment_global_lowering_after_switch_replacement_8616(
     return bool(provenance_changed or lowering_changed)
 
 
-def prune_redundant_loop_break_carriers_after_lowering_8616(codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def prune_redundant_loop_break_carriers_after_lowering_8616(codegen: AngrCodegenSurface) -> cython.bint:
     """Prune proven duplicate loop guards after globals have stable identities.
 
     The implementation remains in Structuring because it changes loop control
@@ -1051,10 +1087,11 @@ def prune_redundant_loop_break_carriers_after_lowering_8616(codegen: AngrCodegen
     return bool(prune_redundant_loop_break_carriers_8616(codegen))
 
 
+@cython.ccall
 def _replay_materialized_call_stack_metadata_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
-) -> bool:
+) -> cython.bint:
     """Replay typed PUSH and caller-cleanup consumption after AST rebuilds."""
     changed = bool(
         prune_materialized_call_push_stack_assignments_8616(
@@ -1066,21 +1103,23 @@ def _replay_materialized_call_stack_metadata_8616(
     return bool(prune_unread_stack_lowered_register_carriers_8616(codegen)) or changed
 
 
+@cython.ccall
 def run_direct_instruction_materialization_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
     *,
     function: object | None = None,
-    include_direct_stack_mov: bool = True,
-    include_direct_stack_incdec: bool = True,
-    include_direct_global_incdec: bool = True,
-    allow_stack_slot_fallback: bool = True,
-    source_kinds: frozenset[DirectStackMoveSourceKind8616] | None = None,
-    materialize_stack_reloads: bool = True,
-    include_callee_saved_spill_prune: bool = True,
-    enforce_direct_stack_branch_contract: bool = False,
+    include_direct_stack_mov: cython.bint = True,
+    include_direct_stack_incdec: cython.bint = True,
+    include_direct_global_incdec: cython.bint = True,
+    allow_stack_slot_fallback: cython.bint = True,
+    source_kinds: object = None,
+    materialize_stack_reloads: cython.bint = True,
+    include_callee_saved_spill_prune: cython.bint = True,
+    enforce_direct_stack_branch_contract: cython.bint = False,
 ) -> DirectInstructionMaterializationResult8616:
     """Run direct stack/global instruction materializers in stage-owned order."""
+    current_function: object
     current_function = function if function is not None else _current_structuring_function_8616(project, codegen)
     _bind_direct_stack_move_branch_ownership_8616(
         project,
@@ -1172,13 +1211,14 @@ def run_direct_instruction_materialization_8616(
     return result
 
 
+@cython.ccall
 def replay_typed_edge_switch_segment_lowering_after_replacement_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
     synthetic_globals: object,
     *,
     cod_metadata: object | None = None,
-) -> bool:
+) -> cython.bint:
     """Replay segment/global lowering after typed edge-switch AST replacement."""
     if not typed_edge_switch_ast_replacement_changed_for_codegen_8616(codegen):
         return False
@@ -1195,6 +1235,7 @@ def replay_typed_edge_switch_segment_lowering_after_replacement_8616(
     return changed
 
 
+@cython.ccall
 def finalize_typed_edge_switch_replacement_if_enabled_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
@@ -1235,13 +1276,14 @@ def finalize_typed_edge_switch_replacement_if_enabled_8616(
     return result
 
 
+@cython.ccall
 def replay_seqnode_switch_segment_lowering_after_replacement_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
     synthetic_globals: object,
     *,
     cod_metadata: object | None = None,
-) -> bool:
+) -> cython.bint:
     """Replay segment/global lowering exposed by late SeqNode switch replacement."""
     if not seqnode_switch_replacement_changed_for_codegen_8616(project, codegen):
         return False
@@ -1258,10 +1300,11 @@ def replay_seqnode_switch_segment_lowering_after_replacement_8616(
     return changed
 
 
+@cython.ccall
 def replay_seqnode_switch_condition_materialization_after_replacement_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
-) -> bool:
+) -> cython.bint:
     """Replay proven condition materialization for late SeqNode switch bodies.
 
     The structuring stage owns the SeqNode-replacement gate and typed condition
@@ -1269,6 +1312,7 @@ def replay_seqnode_switch_condition_materialization_after_replacement_8616(
     through the structuring condition facade so CLI keeps only the call-loss
     guarded DCE policy.
     """
+    func_addr: object
     if not seqnode_switch_replacement_changed_for_codegen_8616(project, codegen):
         return False
     changed = False
@@ -1283,7 +1327,8 @@ def replay_seqnode_switch_condition_materialization_after_replacement_8616(
     return changed
 
 
-def _dce_result_changed_8616(result: object) -> bool:
+@cython.ccall
+def _dce_result_changed_8616(result: object) -> cython.bint:
     """Read the CLI-owned guarded-DCE callback result without importing CLI types."""
     typed_result = cast(_GuardedDceResult8616, result)
     try:
@@ -1292,6 +1337,7 @@ def _dce_result_changed_8616(result: object) -> bool:
         raise TypeError("guarded-DCE callback must return an object with a boolean changed field") from exc
 
 
+@cython.ccall
 def finalize_seqnode_switch_replay_after_replacement_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
@@ -1404,7 +1450,14 @@ def finalize_seqnode_switch_replay_after_replacement_8616(
     return result
 
 
-def _induction_summary_artifact_8616(codegen: AngrCodegenSurface) -> bool:
+def _induction_summary_artifact_8616(codegen: AngrCodegenSurface) -> cython.bint:
+    cfunc: object
+    project: object
+    summary: object
+    traits: object
+    traits_cache: object
+    _base_key: object
+    profile: object
     cfunc = getattr(codegen, "cfunc", None)
     project = getattr(codegen, "project", None)
     if cfunc is None or project is None:
@@ -1420,7 +1473,7 @@ def _induction_summary_artifact_8616(codegen: AngrCodegenSurface) -> bool:
 
     summaries = []
     for _base_key, profile in sorted(
-        build_access_trait_evidence_profiles(traits).items(), key=lambda item: repr(item[0])
+        tuple(build_access_trait_evidence_profiles(traits).items()), key=lambda item: repr(item[0])
     ):
         summary = infer_induction_summary(profile)
         if summary is not None:
@@ -1429,7 +1482,8 @@ def _induction_summary_artifact_8616(codegen: AngrCodegenSurface) -> bool:
     return False
 
 
-def _materialize_structuring_selector_return_branches_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def _materialize_structuring_selector_return_branches_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> cython.bint:
     """Temporary structuring-owned entry point for CFG-proven selector returns.
 
     The implementation still lives in the legacy postprocess module while the
@@ -1438,6 +1492,7 @@ def _materialize_structuring_selector_return_branches_8616(project: AngrProjectS
     postprocess from being the first layer that repairs switch/selector return
     meaning.
     """
+    cfunc: object
     from inertia.postprocess import decompiler_postprocess_stage as _postprocess_stage
 
     # Dynamic angr boundary: partially initialized codegen fixtures and failed
@@ -1461,24 +1516,31 @@ def _materialize_structuring_selector_return_branches_8616(project: AngrProjectS
     )
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _TerminalGraphCallbacks8616:
     """Adapted angr function-graph surface for terminal call-result proofs."""
 
     project: AngrProjectSurface
     graph: object
-    nodes_by_addr: dict[int, list[object]]
+    nodes_by_addr: object
 
-    def load_block(self, block_addr: int, block_size: int) -> object | None:
+    @cython.ccall
+    def load_block(self, block_addr: cython.longlong, block_size: cython.longlong) -> object | None:
         """Load one exact-size block through angr's dynamic project factory."""
+        block_builder: object
+        factory: object
         factory = getattr(self.project, "factory", None)
         block_builder = getattr(factory, "block", None)
         if not callable(block_builder):
             return None
         return cast(object, block_builder(block_addr, size=block_size))
 
-    def successor_addrs(self, block_addr: int) -> tuple[int, ...]:
+    @cython.ccall
+    def successor_addrs(self, block_addr: cython.longlong) -> tuple[cython.longlong, ...]:
         """Return exact in-function successor addresses or raise on ambiguity."""
+        successor_addr: object
+        successor_reader: object
+        successor: object
         candidates = tuple(self.nodes_by_addr.get(block_addr, ()))
         successor_reader = getattr(self.graph, "successors", None)
         if len(candidates) != 1 or not callable(successor_reader):
@@ -1487,7 +1549,7 @@ class _TerminalGraphCallbacks8616:
         if not isinstance(raw_successors, Iterable):
             raise ValueError(f"missing Structuring successors at {block_addr:#x}")
         successors = tuple(raw_successors)
-        successor_addrs: list[int] = []
+        successor_addrs: list[cython.longlong] = []
         for successor in successors:
             successor_addr = getattr(successor, "addr", None)
             if not isinstance(successor_addr, int):
@@ -1498,6 +1560,7 @@ class _TerminalGraphCallbacks8616:
     @staticmethod
     def branch_target_imm(insn: object) -> int | None:
         """Read one direct branch target through the Capstone operand boundary."""
+        raw_operands: object
         raw_operands = getattr(insn, "operands", ())
         operands = tuple(raw_operands) if isinstance(raw_operands, Iterable) else ()
         if not operands:
@@ -1513,10 +1576,15 @@ class _TerminalGraphCallbacks8616:
         return callee_result_contract_8616(call.callee_func)
 
 
+@cython.ccall
 def _terminal_graph_census_8616(
     function: object,
-) -> tuple[object, dict[int, list[object]], list[tuple[int, int]]]:
+) -> tuple[object, dict[cython.longlong, list[object]], list[tuple[cython.longlong, cython.longlong]]]:
     """Normalize the angr function graph into node map and block ranges."""
+    graph: object
+    node_addr: object
+    node_size: object
+    node: object
     graph = getattr(function, "graph", None)
     nodes_view = getattr(graph, "nodes", ()) if graph is not None else ()
     try:
@@ -1524,8 +1592,8 @@ def _terminal_graph_census_8616(
         nodes = tuple(raw_nodes) if isinstance(raw_nodes, Iterable) else ()
     except Exception:
         nodes = ()
-    nodes_by_addr: dict[int, list[object]] = {}
-    block_ranges: list[tuple[int, int]] = []
+    nodes_by_addr: dict[cython.longlong, list[object]] = {}
+    block_ranges: list[tuple[cython.longlong, cython.longlong]] = []
     for node in nodes:
         node_addr = getattr(node, "addr", None)
         node_size = getattr(node, "size", None)
@@ -1555,11 +1623,17 @@ def _terminal_call_result_return_callbacks_8616(
     )
 
 
+@cython.ccall
 def _materialize_structuring_terminal_call_result_return_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
-) -> bool:
+) -> cython.bint:
     """Materialize one caller-observed terminal call result at Structuring."""
+    active_function: object
+    cfunc: object
+    function_addr: object
+    observation: object
+    root: object
     cfunc = getattr(codegen, "cfunc", None)
     root = getattr(cfunc, "statements", None)
     function_addr = getattr(cfunc, "addr", None)
@@ -1610,8 +1684,9 @@ def _materialize_structuring_terminal_call_result_return_8616(
 def _materialize_structuring_wide_stack_return_predicate_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
-) -> bool:
+) -> cython.bint:
     """Materialize a complete pure wide comparison/return CFG atomically."""
+    raw_conditions: object
     from inertia.postprocess import decompiler_postprocess_stage as _postprocess_stage
 
     raw_conditions = getattr(codegen, "_inertia_typed_conditions", ())
@@ -1619,13 +1694,13 @@ def _materialize_structuring_wide_stack_return_predicate_8616(
         return False
     conditions = tuple(
         condition
-        for condition in raw_conditions
+        for condition in iter(raw_conditions)
         if isinstance(condition, ConditionIR)
     )
     if len(conditions) < 2:
         return False
 
-    def prove_pair(high_value: IRValue, low_value: IRValue) -> bool:
+    def prove_pair(high_value: IRValue, low_value: IRValue) -> cython.bint:
         """Consume exact Widening evidence for one adjacent stack pair."""
         high_expression = lower_ir_value_to_c_expr_8616(
             high_value,
@@ -1654,6 +1729,7 @@ def _materialize_structuring_wide_stack_return_predicate_8616(
 
     def materialize_condition(condition: ConditionIR) -> CExpression | None:
         """Lower one graph-proven wide leaf and record its argument types."""
+        expression: object
         expression = _structuring_conditions.materialize_condition_ir_expression_8616(
             project,
             codegen,
@@ -1690,12 +1766,13 @@ def _materialize_structuring_wide_stack_return_predicate_8616(
     return bool(result.changed)
 
 
+@cython.ccall
 def _materialize_structuring_return_chains_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
     *,
-    materialize_wide_return_predicate: bool = True,
-) -> bool:
+    materialize_wide_return_predicate: cython.bint = True,
+) -> cython.bint:
     """Materialize CFG-proven return chains and redundant assignment diamonds.
 
     This is semantic control-flow materialization and must run before the
@@ -1704,6 +1781,8 @@ def _materialize_structuring_return_chains_8616(
     are dynamic angr/codegen adapters and migration debt; postprocess must never
     become the first layer that makes these semantics visible.
     """
+    cfunc: object
+    root: object
     from inertia.postprocess import decompiler_postprocess_stage as _postprocess_stage
 
     codegen._inertia_return_chains_structuring_pass_ran_8616 = True
@@ -1760,7 +1839,8 @@ def _materialize_structuring_return_chains_8616(
     return changed
 
 
-def _materialize_structuring_void_tail_call_guard_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def _materialize_structuring_void_tail_call_guard_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> cython.bint:
     """Structuring-owned repair for CFG-proven void tail-call guards.
 
     The implementation currently reuses legacy CFG return-expression helpers
@@ -1773,13 +1853,15 @@ def _materialize_structuring_void_tail_call_guard_8616(project: AngrProjectSurfa
     return bool(_postprocess_stage._materialize_void_tail_call_guard_from_cfg_8616(project, codegen))
 
 
-def _repair_structuring_loop_exit_return_guards_8616(codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def _repair_structuring_loop_exit_return_guards_8616(codegen: AngrCodegenSurface) -> cython.bint:
     """Run structuring-owned loop-exit return guard repair before validation."""
     codegen._inertia_loop_exit_guard_structuring_pass_ran_8616 = True
     return bool(repair_loop_exit_return_guards_8616(codegen, default_loop_exit_return_guard_callbacks_8616()))
 
 
-def _repair_structuring_unresolved_function_exit_gotos_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def _repair_structuring_unresolved_function_exit_gotos_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> cython.bint:
     """Run structuring-owned unresolved function-exit goto repair before validation."""
     from inertia.postprocess import decompiler_postprocess as _postprocess
 
@@ -1788,7 +1870,8 @@ def _repair_structuring_unresolved_function_exit_gotos_8616(project: AngrProject
     return changed
 
 
-def _materialize_structuring_pointer_arg_indirect_loads_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def _materialize_structuring_pointer_arg_indirect_loads_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> cython.bint:
     """Orchestrate Types/Lowering-owned pointer-argument materialization."""
     try:
         target = str(project._inertia_c_target or "portable-flat")
@@ -1823,7 +1906,8 @@ def _materialize_structuring_pointer_arg_indirect_loads_8616(project: AngrProjec
         codegen._inertia_pointer_arg_indirect_structuring_pass_ran_8616 = True
 
 
-def _materialize_structuring_callsite_prototypes_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def _materialize_structuring_callsite_prototypes_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> cython.bint:
     """Materialize typed call targets, identities, shared calls, and prototypes.
 
     Existing calls are bound and split before missing-target recovery so a
@@ -1851,10 +1935,11 @@ def _materialize_structuring_callsite_prototypes_8616(project: AngrProjectSurfac
         codegen._inertia_callsite_prototypes_structuring_pass_ran_8616 = True
 
 
+@cython.ccall
 def _close_final_structuring_callsites_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
-) -> bool:
+) -> cython.bint:
     """Materialize late-published typed callsites once at the final boundary."""
     try:
         inventory = codegen._inertia_callsite_summary_inventory_8616
@@ -1911,10 +1996,10 @@ def _replay_structuring_callsite_arguments_after_regeneration_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
     *,
-    preserve_setup: bool = False,
-) -> bool:
+    preserve_setup: cython.bint = False,
+) -> cython.bint:
     """Replay source-backed arguments through the owning call-context protocol."""
-    def consume() -> bool:
+    def consume() -> cython.bint:
         """Retain the existing typed consumer and its setup-pruning contract."""
         return _replay_unbound_structuring_callsite_arguments_after_regeneration_8616(
             project, codegen, preserve_setup=preserve_setup)
@@ -1922,12 +2007,13 @@ def _replay_structuring_callsite_arguments_after_regeneration_8616(
     return run_call_stack_input_aware_lowering_8616(codegen, consume)
 
 
+@cython.ccall
 def _replay_unbound_structuring_callsite_arguments_after_regeneration_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
     *,
-    preserve_setup: bool = False,
-) -> bool:
+    preserve_setup: cython.bint = False,
+) -> cython.bint:
     """Reconsume typed callsite facts after core replaces the structured AST."""
     from inertia.lowering.far_callback_call_materialization import materialize_binary_far_callback_calls_8616
     from inertia.postprocess import decompiler_postprocess_calls as _calls
@@ -1954,16 +2040,17 @@ def _replay_unbound_structuring_callsite_arguments_after_regeneration_8616(
         controls._inertia_callsite_disable_stack_probe_setup_prune_8616 = previous_probe_prune
 
 
-def _materialize_structuring_callsite_stack_arguments_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
+def _materialize_structuring_callsite_stack_arguments_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> cython.bint:
     """Consume typed callsite facts while keeping architectural inputs coherent."""
-    def consume() -> bool:
+    def consume() -> cython.bint:
         """Run source-backed argument consumers before rebinding their C context."""
         return _materialize_unbound_structuring_callsite_stack_arguments_8616(project, codegen)
 
     return run_call_stack_input_aware_lowering_8616(codegen, consume)
 
 
-def _materialize_unbound_structuring_callsite_stack_arguments_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def _materialize_unbound_structuring_callsite_stack_arguments_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> cython.bint:
     """Consume existing typed callsite facts before Structuring validation.
 
     Call-target discovery remains a frontend responsibility. This bridge
@@ -2005,14 +2092,16 @@ def _materialize_unbound_structuring_callsite_stack_arguments_8616(project: Angr
         codegen._inertia_callsite_stack_arguments_structuring_pass_ran_8616 = True
 
 
-def _repair_structuring_synthetic_internal_calls_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def _repair_structuring_synthetic_internal_calls_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> cython.bint:
     """Prune no-summary internal-target calls using structuring CFG evidence."""
     changed = repair_synthetic_internal_calls_from_evidence_8616(project, codegen)
     codegen._inertia_synthetic_internal_call_structuring_pass_ran_8616 = True
     return bool(changed)
 
 
-def _materialize_structuring_stdlib_call_chains_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def _materialize_structuring_stdlib_call_chains_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> cython.bint:
     """Run structuring-owned call-chain materialization before validation."""
     from inertia.postprocess import decompiler_postprocess_calls as _calls
 
@@ -2022,7 +2111,8 @@ def _materialize_structuring_stdlib_call_chains_8616(project: AngrProjectSurface
         codegen._inertia_stdlib_call_chains_structuring_pass_ran_8616 = True
 
 
-def _materialize_structuring_loop_idioms_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def _materialize_structuring_loop_idioms_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> cython.bint:
     """Run structuring-owned loop idiom materializers before validation.
 
     These passes still reuse legacy instruction/CFG proof helpers while their
@@ -2038,7 +2128,8 @@ def _materialize_structuring_loop_idioms_8616(project: AngrProjectSurface, codeg
         codegen._inertia_loop_idiom_structuring_pass_ran_8616 = True
 
 
-def _materialize_structuring_unconsumed_loop_break_jcc_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def _materialize_structuring_unconsumed_loop_break_jcc_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> cython.bint:
     """Run Structuring-owned loop-break JCC materialization exactly once.
 
     The C AST repair now lives in ``structuring.loop_break_jcc``.  The remaining
@@ -2054,16 +2145,18 @@ def _materialize_structuring_unconsumed_loop_break_jcc_8616(project: AngrProject
         codegen._inertia_unconsumed_loop_break_jcc_structuring_pass_ran_8616 = True
 
 
-def _repair_structuring_switch_loop_exit_returns_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def _repair_structuring_switch_loop_exit_returns_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> cython.bint:
     """Run structuring-owned switch loop-exit return repair before validation."""
     codegen._inertia_switch_loop_exit_return_structuring_pass_ran_8616 = True
     return bool(repair_switch_loop_exit_returns_from_evidence_8616(project, codegen))
 
 
+@cython.ccall
 def _collapse_structuring_switch_loop_tail_breaks_8616(
-    project: AngrProjectSurface,
+    project,
     codegen: AngrCodegenSurface,
-) -> bool:
+) -> cython.bint:
     """Collapse exact switch exits after condition and return materialization."""
     del project
     result = materialize_switch_loop_tail_breaks_8616(codegen.cfunc.statements)
@@ -2071,10 +2164,11 @@ def _collapse_structuring_switch_loop_tail_breaks_8616(
     return bool(result.changed)
 
 
+@cython.ccall
 def _materialize_structuring_return_shape_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
-) -> bool:
+) -> cython.bint:
     """Consume structuring-proven return shape and its AST form before validation.
 
     The legacy classifier remains in the postprocess compatibility module while
@@ -2090,30 +2184,34 @@ def _materialize_structuring_return_shape_8616(
     return void_returns_changed or changed
 
 
-def _repair_structuring_conditional_continue_guards_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def _repair_structuring_conditional_continue_guards_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> cython.bint:
     """Run structuring-owned conditional-continue guard repair before validation."""
     codegen._inertia_conditional_continue_guard_structuring_pass_ran_8616 = True
     return bool(repair_conditional_continue_guards_from_evidence_8616(project, codegen))
 
 
-def _repair_structuring_pretest_loop_break_guards_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def _repair_structuring_pretest_loop_break_guards_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> cython.bint:
     """Run structuring-owned pretest loop-break guard repair before validation."""
     codegen._inertia_pretest_loop_break_guard_structuring_pass_ran_8616 = True
     return bool(repair_pretest_loop_break_guards_from_evidence_8616(project, codegen))
 
 
-def recover_structuring_canonical_for_loops_8616(codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def recover_structuring_canonical_for_loops_8616(codegen: AngrCodegenSurface) -> cython.bint:
     """Replay Structuring-owned canonical loop recovery on a live C AST."""
     return bool(recover_canonical_for_loops_8616(codegen))
 
 
-def _repair_structuring_hoisted_jcc_target_copies_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def _repair_structuring_hoisted_jcc_target_copies_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> cython.bint:
     """Run structuring-owned hoisted JCC target-copy repair before validation."""
     codegen._inertia_hoisted_jcc_target_copy_structuring_pass_ran_8616 = True
     return bool(repair_hoisted_jcc_target_copies_from_evidence_8616(project, codegen))
 
 
-DECOMPILER_STRUCTURING_PASSES: tuple[DecompilerStructuringPassSpec, ...] = _build_decompiler_structuring_passes()
+DECOMPILER_STRUCTURING_PASSES: object = _build_decompiler_structuring_passes()
 
 
 @contextlib.contextmanager
@@ -2144,9 +2242,9 @@ def _guard_condition_processor_multibit_bool_predicates_8616(project: AngrProjec
         self: AngrConditionProcessorSurface,
         condition: object,
         *,
-        nobool: bool = False,
-        must_bool: bool = False,
-        ins_addr: int = 0,
+        nobool: cython.bint = False,
+        must_bool: cython.bint = False,
+        ins_addr: cython.longlong = 0,
     ) -> ClaripyConditionSurface:
         return _multibit_bool_ast_from_ail_8616(
             self,
@@ -2172,25 +2270,27 @@ def _guard_condition_processor_multibit_bool_predicates_8616(project: AngrProjec
             project._inertia_condition_predicate_multibit_bool_refused = current + tally.refused_count
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _MultibitBoolTally8616:
     """Mutable normalization/refusal counts for the bool-predicate monkeypatch."""
 
-    normalized_count: int = 0
-    refused_count: int = 0
+    normalized_count: cython.longlong = 0
+    refused_count: cython.longlong = 0
 
 
+@cython.ccall
 def _multibit_bool_ast_from_ail_8616(
     self: AngrConditionProcessorSurface,
     condition: object,
     orig: Callable[..., ClaripyConditionSurface],
     tally: _MultibitBoolTally8616,
     *,
-    nobool: bool = False,
-    must_bool: bool = False,
-    ins_addr: int = 0,
+    nobool: cython.bint = False,
+    must_bool: cython.bint = False,
+    ins_addr: cython.longlong = 0,
 ) -> ClaripyConditionSurface:
     """Return a Bool predicate for multi-bit AIL branch conditions."""
+    result: object
     import claripy
 
     from inertia.structuring.symbolic_ite import convert_symbolic_ite_8616
@@ -2208,11 +2308,12 @@ def _multibit_bool_ast_from_ail_8616(
         size = int(result.size())
         if size > 0:
             tally.normalized_count += 1
-            return result != claripy.BVV(0, size)
+            return operator.ne(result, claripy.BVV(0, size))
     tally.refused_count += 1
     return result
 
 
+@cython.ccall
 def _semantic_validation_pass_names_8616() -> tuple[str, ...]:
     return (
         "_simplify_structured_expressions_8616",
@@ -2224,7 +2325,17 @@ def _semantic_validation_pass_names_8616() -> tuple[str, ...]:
     )
 
 
-def _function_complexity_for_structuring_validation_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> tuple[int, int]:
+@cython.ccall
+def _function_complexity_for_structuring_validation_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> tuple[cython.longlong, cython.longlong]:
+    block_addr: object
+    blocks: object
+    bytes_: object
+    cached: object
+    func_addr: object
+    function: object
+    functions: object
+    info: object
+    block: object
     func_addr = getattr(getattr(codegen, "cfunc", None), "addr", None)
     try:
         functions = getattr(getattr(project, "kb", None), "functions", None)
@@ -2263,6 +2374,7 @@ def _function_complexity_for_structuring_validation_8616(project: AngrProjectSur
         return 0, 0
 
 
+@cython.ccall
 def _structuring_pass_validation_skip_reason_8616(
     project: AngrProjectSurface, codegen: AngrCodegenSurface
 ) -> StructuringPassValidationSkipReason8616 | None:
@@ -2274,15 +2386,24 @@ def _structuring_pass_validation_skip_reason_8616(
     return None
 
 
-def _large_function_for_structuring_pass_validation_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def _large_function_for_structuring_pass_validation_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> cython.bint:
     return _structuring_pass_validation_skip_reason_8616(project, codegen) is not None
 
 
+@cython.ccall
 def _current_structuring_function_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> object | None:
+    active_addr: object
+    active_function: object
+    func_addr: object
+    function: object
+    functions: object
+    original_delta: object
+    candidate_addr: object
     func_addr = getattr(getattr(codegen, "cfunc", None), "addr", None)
     if not isinstance(func_addr, int):
         return None
-    candidate_addrs: list[int] = []
+    candidate_addrs: list[cython.longlong] = []
     if _structuring_project_maps_addr_8616(project, func_addr):
         candidate_addrs.append(func_addr)
     original_delta = getattr(project, "_inertia_original_linear_delta", None)
@@ -2296,7 +2417,7 @@ def _current_structuring_function_8616(project: AngrProjectSurface, codegen: Ang
     functions = getattr(getattr(project, "kb", None), "functions", None)
     if functions is None:
         return None
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     for candidate_addr in candidate_addrs:
         if candidate_addr in seen or candidate_addr < 0:
             continue
@@ -2314,6 +2435,7 @@ def active_structuring_function_8616(
     function: object,
 ) -> Iterator[None]:
     """Expose the exact active angr function to Structuring for one analysis."""
+    previous: object
     attribute = "_inertia_active_structuring_function_8616"
     had_previous = hasattr(project, attribute)
     previous = getattr(project, attribute, None)
@@ -2328,8 +2450,13 @@ def active_structuring_function_8616(
                 delattr(project, attribute)
 
 
-def _structuring_project_maps_addr_8616(project: AngrProjectSurface, addr: int) -> bool:
+@cython.ccall
+def _structuring_project_maps_addr_8616(project: AngrProjectSurface, addr: cython.longlong) -> cython.bint:
     """Return whether an address belongs to the active angr loader mapping."""
+    loader: object
+    main_object: object
+    max_addr: object
+    min_addr: object
     loader = getattr(project, "loader", None)
     main_object = getattr(loader, "main_object", None)
     min_addr = getattr(main_object, "min_addr", None)
@@ -2340,15 +2467,16 @@ def _structuring_project_maps_addr_8616(project: AngrProjectSurface, addr: int) 
 def _bind_direct_stack_move_branch_ownership_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
-    function: object | None,
+    function: object,
 ) -> None:
     """Bind Structuring-owned direct-stack-move placement to an angr codegen."""
     if function is None:
         return
     cast(Any, codegen)._inertia_direct_stack_move_ownership_replayed_8616 = False
 
-    def replay() -> bool:
+    def replay() -> cython.bint:
         """Reapply proven control-flow ownership after a lowering replay."""
+        stable_generation: object
         generation_before = direct_stack_replay_scheduling_generation_8616(
             codegen,
             function,
@@ -2360,7 +2488,7 @@ def _bind_direct_stack_move_branch_ownership_8616(
         )
         if (
             isinstance(stable_generation, DirectStackReplayGeneration8616)
-            and stable_generation == generation_before
+            and operator.eq(stable_generation, generation_before)
         ):
             codegen._inertia_direct_stack_ownership_replay_skip_count_8616 = (
                 int(
@@ -2411,7 +2539,7 @@ def _bind_direct_stack_move_branch_ownership_8616(
     def place(
         move_fact: DirectStackMoveFact8616,
         assignment: CAssignment,
-    ) -> bool:
+    ) -> cython.bint:
         """Place one Lowering-built stack move at its structured CFG owner."""
         return bool(
             place_direct_stack_move_linear_prefix_assignment_8616(
@@ -2447,8 +2575,11 @@ def _bind_direct_stack_move_branch_ownership_8616(
     cast(Any, codegen)._inertia_direct_stack_move_branch_placement_service_8616 = place
 
 
-def _apply_structuring_direct_stack_materialization_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def _apply_structuring_direct_stack_materialization_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> cython.bint:
     """Prune frame scaffolding, then materialize direct effects before validation."""
+    func_addr: object
+    function: object
     from inertia.structuring.instruction_fragment_placement import apply_instruction_fragment_placement_8616
 
     started = time.perf_counter()
@@ -2537,11 +2668,13 @@ def _apply_structuring_direct_stack_materialization_8616(project: AngrProjectSur
     return bool(changed)
 
 
+@cython.ccall
 def _prime_structuring_segment_global_semantics_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
-) -> bool:
+) -> cython.bint:
     """Consume proven segment/global facts before Structuring validation."""
+    synthetic_globals: object
     collect_indexed_address_collector_parity_8616(project, codegen)
     # Synthetic-global maps are dynamic metadata on the angr project/codegen boundary.
     synthetic_globals = getattr(codegen, "_inertia_synthetic_globals", None)
@@ -2562,11 +2695,12 @@ def _prime_structuring_segment_global_semantics_8616(
     return bool(result.changed)
 
 
+@cython.ccall
 def _replay_structuring_lowering_before_validation_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
     *, prepared: _PreparedStructuringStackSemantics8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """Replay proof-consuming Lowering after Structuring rebuilds C subtrees.
 
     Structuring may clone condition calls or regenerate their argument
@@ -2612,7 +2746,7 @@ def _replay_structuring_lowering_before_validation_8616(
     return changed
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _PreparedStructuringStackSemantics8616:
     """Local sequencing receipt; never stored on codegen or used as a proof.
 
@@ -2627,10 +2761,12 @@ class _PreparedStructuringStackSemantics8616:
     projection: CallSemanticProjection8616
     function: object
     declared_entry: DeclaredEntryInput8616 | None
-    alias_surface: tuple[object, ...]
+    alias_surface: object
 
-    def matches(self, project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
+    def matches(self, project: AngrProjectSurface, codegen: AngrCodegenSurface) -> cython.bint:
         """Require the identical coherent projections in this one operation."""
+        current_aliases: object
+        resolved: object
         if project is not self.project or codegen is not self.codegen:
             return False
         resolved = _vex_ir.codegen_function_8616(project, codegen)
@@ -2639,7 +2775,7 @@ class _PreparedStructuringStackSemantics8616:
             resolved is None or resolved[0] is not self.function
             or _retained_input_8616(codegen) is not self.declared_entry
             or current_aliases is None
-            or any(left is not right for left, right in zip(self.alias_surface, current_aliases, strict=True))
+            or any(left is not right for left, right in builtins.iter(zip(self.alias_surface, current_aliases, strict=True)))
         ):
             return False
         try:
@@ -2657,12 +2793,14 @@ class _PreparedStructuringStackSemantics8616:
             return False
 
 
-def _structuring_prefix_alias_surface_8616(codegen: AngrCodegenSurface) -> tuple[object, ...] | None:
+@cython.ccall
+def _structuring_prefix_alias_surface_8616(codegen: AngrCodegenSurface) -> object:
     """Retain opaque identities of nine immutable IR/Alias producer outputs.
 
     The receipt sequences consumers only; these objects never replace the
     producing owners' typed evidence or authenticate semantic behavior.
     """
+    numeric_returns: object
     numeric_returns = numeric_stack_pointer_return_inventory_8616(codegen)
     if numeric_returns is None:
         return None
@@ -2683,7 +2821,7 @@ def _structuring_prefix_alias_surface_8616(codegen: AngrCodegenSurface) -> tuple
 
 
 @contextlib.contextmanager
-def _timed_owner(owner: str) -> Iterator[None]:
+def _timed_owner(owner: object) -> Iterator[None]:
     """Expose one semantic owner's inclusive cost in the existing timing mode."""
     started = time.perf_counter()
     try:
@@ -2698,26 +2836,29 @@ def _timed_owner(owner: str) -> Iterator[None]:
             )
 
 
+@cython.ccall
 def _native_prefix_input_bound_8616(
     project: AngrProjectSurface, codegen: AngrCodegenSurface,
     entry: NativeNearCallPipeline8616, function: object | None,
-) -> bool:
+) -> cython.bint:
     """Keep the original entry, installed source and consuming function after callbacks."""
+    resolved: object
     resolved = _vex_ir.codegen_function_8616(project, codegen)
     if resolved is None or resolved[0] is not function:
         return False
     return (
-        resolved[1] == entry.bundle.artifact.function_addr
+        operator.eq(resolved[1], entry.bundle.artifact.function_addr)
         and _retained_input_8616(codegen) is entry
         and entry._source_current(project)
     )
 
 
+@cython.ccall
 def _fresh_native_projection_bound_8616(
     project: AngrProjectSurface, codegen: AngrCodegenSurface,
     retained_entry: NativeNearCallPipeline8616,
     prior_projection: object | None, original_function: object | None,
-) -> bool:
+) -> cython.bint:
     """Require bound outputs and freshly authenticate a retained projection.
 
     The Semantics owner can restore the same checked projection after raw IR
@@ -2725,6 +2866,8 @@ def _fresh_native_projection_bound_8616(
     A retained result must still match the restored outputs and reauthenticate;
     an early return leaving raw input attached cannot satisfy that binding.
     """
+    native_before: object
+    scoped: object
     try:
         projection = codegen._inertia_call_semantic_projection_8616
         current_ir = codegen._inertia_vex_ir_artifact
@@ -2756,7 +2899,7 @@ def _fresh_native_projection_bound_8616(
             return False
         if not _native_prefix_input_bound_8616(project, codegen, retained_entry, original_function):
             return False
-        if _native_census_facts_8616(retained_entry.scope) != native_before:
+        if operator.ne(_native_census_facts_8616(retained_entry.scope), native_before):
             return False
     scoped = projection.scoped_input
     return (
@@ -2771,10 +2914,15 @@ def _fresh_native_projection_bound_8616(
     )
 
 
+@cython.ccall
 def _prepare_structuring_stack_semantics_8616(
     project: AngrProjectSurface, codegen: AngrCodegenSurface,
 ) -> _PreparedStructuringStackSemantics8616 | None:
     """Run the canonical authenticated IR-to-Alias prefix exactly once."""
+    aliases: object
+    original: object
+    resolved: object
+    retained_entry: object
     try:
         prior_projection = codegen._inertia_call_semantic_projection_8616
     except AttributeError:
@@ -2838,22 +2986,24 @@ def _prepare_structuring_stack_semantics_8616(
                 (FunctionLifecycleStage8616.IR, projection.source_ir),
                 (FunctionLifecycleStage8616.IR, codegen._inertia_vex_ir_function_ssa),
             ),
-            outputs=(projection.effects, projection.outputs, *aliases),
+            outputs=(projection.effects, projection.outputs, ) + tuple(aliases),
         )
         return prepared
     return None
 
 
-def _apply_structuring_stable_stack_semantics_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def _apply_structuring_stable_stack_semantics_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> cython.bint:
     """Prepare and lower an independent stable-stack consumption."""
     _prepare_structuring_stack_semantics_8616(project, codegen)
     return _lower_prepared_structuring_stack_semantics_8616(project, codegen)
 
 
+@cython.ccall
 def _continue_structuring_stack_semantics_8616(
     project: AngrProjectSurface, codegen: AngrCodegenSurface,
-    prepared: _PreparedStructuringStackSemantics8616 | None,
-) -> bool:
+    prepared: object,
+) -> cython.bint:
     """Continue this baseline, repreparing if intervening owners changed input."""
     if prepared is None or not prepared.matches(project, codegen):
         _prepare_structuring_stack_semantics_8616(project, codegen)
@@ -2862,8 +3012,15 @@ def _continue_structuring_stack_semantics_8616(
 
 def _lower_prepared_structuring_stack_semantics_8616(
     project: AngrProjectSurface, codegen: AngrCodegenSurface,
-) -> bool:
+) -> cython.bint:
     """Consume the current IR/Alias projections through Widening and Lowering."""
+    alias_facts: object
+    call_stack_input_lowering: object
+    memory_ssa_lowering: object
+    numeric_return_lowering: object
+    resolved: object
+    wide_call_output_lowering: object
+    widening_outputs: object
     from inertia.ir.function_readiness_contracts import FunctionLifecycleStage8616
     from inertia.pipeline.function_readiness import (
         assert_function_stage_ready_8616,
@@ -2952,7 +3109,7 @@ def _lower_prepared_structuring_stack_semantics_8616(
             producer="x86_16_stack_memory_lowering",
             upstream=tuple(
                 (FunctionLifecycleStage8616.WIDENING, artifact)
-                for artifact in (widening_outputs or ())
+                for artifact in iter((widening_outputs or ()))
             ),
             outputs=(memory_ssa_lowering, wide_call_output_lowering, numeric_return_lowering,
                      call_stack_input_lowering, render_projection),
@@ -2962,7 +3119,7 @@ def _lower_prepared_structuring_stack_semantics_8616(
     return changed
 
 
-def _apply_structuring_pointer_memory_idioms_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
+def _apply_structuring_pointer_memory_idioms_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> cython.bint:
     """Run lowering-owned pointer-memory idiom materialization before validation."""
     from inertia.postprocess import decompiler_postprocess_stage as _postprocess_stage
 
@@ -2989,9 +3146,10 @@ def _apply_structuring_pointer_memory_idioms_8616(project: AngrProjectSurface, c
         codegen._inertia_pointer_memory_idiom_lowering_pass_ran_8616 = True
 
 
+@cython.ccall
 def _replay_structuring_gp_state_after_late_cleanup_8616(
     codegen: AngrCodegenSurface,
-) -> bool:
+) -> cython.bint:
     """Rebind typed GP projections after late Structuring cleanup mutates C AST."""
     try:
         replay_count = codegen._inertia_structuring_gp_state_cleanup_replay_count_8616
@@ -3003,10 +3161,12 @@ def _replay_structuring_gp_state_after_late_cleanup_8616(
     return lower_architectural_gp_register_state_8616(codegen)
 
 
+@cython.ccall
 def _prime_validation_pipeline_prefix_8616(
     project: AngrProjectSurface, codegen: AngrCodegenSurface,
-) -> tuple[bool, _PreparedStructuringStackSemantics8616 | None]:
+) -> tuple[cython.bint, _PreparedStructuringStackSemantics8616 | None]:
     """Run consumers and retain this operation's original preparation receipt."""
+    func_addr: object
     changed = False
     prepared = _prepare_structuring_stack_semantics_8616(project, codegen)
     _segment_stack_restore.apply_x86_16_segment_stack_restore_artifact(project, codegen)
@@ -3088,24 +3248,26 @@ def _prime_validation_pipeline_prefix_8616(
     return changed, prepared
 
 
+@cython.ccall
 def _prime_terminal_return_shape_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
-    terminal_call_return_changed: bool,
-) -> bool:
+    terminal_call_return_changed: cython.bint,
+) -> cython.bint:
     """Replay return-shape materialization only when terminal call-result changed."""
     if not terminal_call_return_changed:
         return False
     return bool(_materialize_structuring_return_shape_8616(project, codegen))
 
 
+@cython.ccall
 def _prime_return_closure_segment_replay_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
-    switch_exit_changed: bool,
-    terminal_call_return_changed: bool,
-    terminal_return_shape_changed: bool,
-) -> bool:
+    switch_exit_changed: cython.bint,
+    terminal_call_return_changed: cython.bint,
+    terminal_return_shape_changed: cython.bint,
+) -> cython.bint:
     """Replay segment/global semantics when the return closure mutated the AST."""
     if not structuring_return_closure_requires_segment_replay_8616(
         switch_exit_changed=switch_exit_changed,
@@ -3116,10 +3278,12 @@ def _prime_return_closure_segment_replay_8616(
     return bool(_prime_structuring_segment_global_semantics_8616(project, codegen))
 
 
+@cython.ccall
 def _prime_validation_pipeline_suffix_8616(
-    project: AngrProjectSurface, codegen: AngrCodegenSurface, changed: bool
-) -> bool:
+    project: AngrProjectSurface, codegen: AngrCodegenSurface, changed: cython.bint
+) -> cython.bint:
     """Run the post-return-closure carriers, refresh, and publish phases."""
+    callsite_stats: object
     changed = bool(prune_unread_stack_lowered_register_carriers_8616(codegen)) or changed
     # Loop, return, callsite, and Lowering replay above may replace C AST
     # subtrees after the early condition cleanup. Refresh exact owned
@@ -3176,7 +3340,8 @@ def _prime_validation_pipeline_suffix_8616(
     return changed
 
 
-def _prime_structuring_validation_semantics_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def _prime_structuring_validation_semantics_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> cython.bint:
     """Prime proven Structuring consumers and report every resulting AST change."""
     if getattr(codegen, "_inertia_structuring_validation_semantics_primed", False):
         return False
@@ -3241,11 +3406,13 @@ def _prime_structuring_validation_semantics_8616(project: AngrProjectSurface, co
     return changed
 
 
+@cython.ccall
 def _refresh_structuring_condition_semantics_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
 ) -> _condition_refresh.StructuringConditionRefreshResult8616:
     """Delegate condition refresh to its typed, closed Structuring owner."""
+    func_addr: object
     func_addr = getattr(getattr(codegen, "cfunc", None), "addr", None)
     if not isinstance(func_addr, int):
         return _condition_refresh.StructuringConditionRefreshResult8616.stable()
@@ -3265,10 +3432,11 @@ def _refresh_structuring_condition_semantics_8616(
         return _condition_refresh.StructuringConditionRefreshResult8616.unclosed()
 
 
+@cython.ccall
 def _replay_structuring_lowering_after_condition_refresh_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
-) -> bool:
+) -> cython.bint:
     """Replay Lowering only when condition materialization changed the AST."""
     result = _refresh_structuring_condition_semantics_8616(project, codegen)
     lowering_changed = (
@@ -3279,7 +3447,8 @@ def _replay_structuring_lowering_after_condition_refresh_8616(
     return lowering_changed or result.changed
 
 
-def run_structuring_condition_cleanup_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface, func_addr: int) -> bool:
+@cython.ccall
+def run_structuring_condition_cleanup_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface, func_addr: cython.longlong) -> cython.bint:
     """Transfer proven condition facts and run condition cleanup sequencing.
 
     This is the public stage-owned boundary for the condition cleanup sequence
@@ -3311,12 +3480,14 @@ def run_structuring_condition_cleanup_8616(project: AngrProjectSurface, codegen:
     return bool(cleanup.changed)
 
 
-def _regenerate_structuring_text_safely_8616(codegen: AngrCodegenSurface, *, context: str) -> bool:
+@cython.ccall
+def _regenerate_structuring_text_safely_8616(codegen: AngrCodegenSurface, *, context: object) -> cython.bint:
     """Render pending Structuring output under its checked Types-input lease.
 
     Contract failures propagate: publishing stale text after an AST mutation
     would hide the actual semantics from executable consumers.
     """
+    cfunc: object
     cfunc = codegen.cfunc
     if cfunc is None:
         return False
@@ -3335,10 +3506,11 @@ def _regenerate_structuring_text_safely_8616(codegen: AngrCodegenSurface, *, con
     return True
 
 
+@cython.ccall
 def _is_structuring_call_chain_materialization_delta_8616(
     codegen: AngrCodegenSurface,
-    validation: dict[str, object],
-) -> bool:
+    validation: object,
+) -> cython.bint:
     """Accept a typed call-chain rebuild that replaces missing callsite carriers.
 
     Structuring can rebuild a guarded call chain after lowering has already
@@ -3349,6 +3521,10 @@ def _is_structuring_call_chain_materialization_delta_8616(
     and every helper added by the AST rebuild corresponds to an old carrier.
     The predicate deliberately does not infer meaning from rendered C text.
     """
+    delta: object
+    gate: object
+    helpers: object
+    register_delta: object
     if not isinstance(validation, dict):
         return False
     gate = _call_chain_evidence_gate_8616(codegen)
@@ -3360,7 +3536,7 @@ def _is_structuring_call_chain_materialization_delta_8616(
         return False
     touched = {
         key
-        for key, field in delta.items()
+        for key, field in builtins.iter(delta.items())
         if isinstance(field, dict) and ((field.get("added") or ()) or (field.get("removed") or ()))
     }
     if touched - {"conditions", "helper_calls", "register_writes", "control_flow_effects"}:
@@ -3383,10 +3559,14 @@ def _is_structuring_call_chain_materialization_delta_8616(
     return _call_chain_residual_gate_8616(delta, register_delta, call_return_materialization_proven)
 
 
+@cython.ccall
 def _call_chain_evidence_gate_8616(
     codegen: AngrCodegenSurface,
-) -> tuple[bool, object] | None:
+) -> object:
     """Return (call-return-proven, stats) when the materialization evidence is complete."""
+    call_return_stats: object
+    stats: object
+    summaries: object
     call_return_stats = getattr(codegen, "_inertia_call_return_condition_stats_8616", None)
     call_return_materialization_proven = (
         int(getattr(call_return_stats, "classified_fact_count", 0) or 0) > 0
@@ -3412,14 +3592,18 @@ def _call_chain_evidence_gate_8616(
     return call_return_materialization_proven, call_return_stats
 
 
+@cython.ccall
 def _call_chain_store_bridge_accept_8616(
     codegen: AngrCodegenSurface,
     register_delta: object,
-    touched: set[str],
-    call_return_materialization_proven: bool,
+    touched: object,
+    call_return_materialization_proven: cython.bint,
     call_return_stats: object,
-) -> bool:
+) -> cython.bint:
     """Accept a pure register-writes delta covered by proven store-bridge carriers."""
+    arch: object
+    project: object
+    registers: object
     store_bridge_count = int(getattr(call_return_stats, "store_bridge_materialized_count", 0) or 0)
     return_registers = tuple(getattr(call_return_stats, "store_bridge_return_registers", ()) or ())
     if not (
@@ -3438,8 +3622,10 @@ def _call_chain_store_bridge_accept_8616(
     return bool(removed_registers) and set(removed_registers) <= allowed_register_tokens
 
 
-def _return_register_alias_tokens_8616(registers: object, return_registers: tuple[object, ...]) -> set[str]:
+def _return_register_alias_tokens_8616(registers: object, return_registers: object) -> object:
     """Return reg: token aliases covering each proven store-bridge return register."""
+    register: object
+    return_register: object
     allowed: set[str] = set()
     if not isinstance(registers, dict):
         return allowed
@@ -3447,23 +3633,24 @@ def _return_register_alias_tokens_8616(registers: object, return_registers: tupl
         register = registers.get(return_register)
         if not isinstance(register, tuple) or len(register) < 2:
             continue
-        offset, width = register[:2]
+        offset, width = tuple(register[:2])
         if not isinstance(offset, int) or not isinstance(width, int):
             continue
         allowed.update(
             f"reg:{name.lower()}"
-            for name, alias in registers.items()
+            for name, alias in builtins.iter(registers.items())
             if isinstance(name, str)
             and isinstance(alias, tuple)
             and len(alias) >= 2
-            and alias[0] == offset
+            and operator.eq(alias[0], offset)
             and isinstance(alias[1], int)
             and alias[1] >= width
         )
     return allowed
 
 
-def _call_chain_target_token_8616(item: str, prefix: str) -> str:
+@cython.ccall
+def _call_chain_target_token_8616(item: object, prefix: object) -> object:
     """Normalize one helper token to its lowercase call target."""
     value = item[len(prefix) :]
     if value.startswith("addr:"):
@@ -3473,67 +3660,72 @@ def _call_chain_target_token_8616(item: str, prefix: str) -> str:
 
 
 def _call_chain_helper_deltas_8616(
-    delta: dict[str, object],
-) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+    delta: object,
+) -> object:
     """Return added/removed helper tokens only for a carrier-rebuild shape."""
+    helper_delta: object
     helper_delta = delta.get("helper_calls")
     if not isinstance(helper_delta, dict):
         return None
-    added_helpers = tuple(str(item) for item in tuple(helper_delta.get("added") or ()))
-    removed_helpers = tuple(str(item) for item in tuple(helper_delta.get("removed") or ()))
+    added_helpers = tuple(str(item) for item in builtins.iter(tuple(helper_delta.get("added") or ())))
+    removed_helpers = tuple(str(item) for item in builtins.iter(tuple(helper_delta.get("removed") or ())))
     if not added_helpers or not removed_helpers:
         return None
-    if not all(item.startswith("addr:") for item in added_helpers):
+    if not all(item.startswith("addr:") for item in iter(added_helpers)):
         return None
-    if not all(item.startswith("missing-callsite:addr:") for item in removed_helpers):
+    if not all(item.startswith("missing-callsite:addr:") for item in iter(removed_helpers)):
         return None
-    if Counter(_call_chain_target_token_8616(item, "addr:") for item in added_helpers) != Counter(
-        _call_chain_target_token_8616(item, "missing-callsite:") for item in removed_helpers
-    ):
+    if operator.ne(Counter(_call_chain_target_token_8616(item, "addr:") for item in iter(added_helpers)), Counter(
+        _call_chain_target_token_8616(item, "missing-callsite:") for item in iter(removed_helpers)
+    )):
         return None
     return added_helpers, removed_helpers
 
 
 def _call_chain_condition_gate_8616(
-    delta: dict[str, object],
-    added_helpers: tuple[str, ...],
-    call_return_materialization_proven: bool,
-) -> bool:
+    delta: object,
+    added_helpers: object,
+    call_return_materialization_proven: cython.bint,
+) -> cython.bint:
     """Gate added call conditions against the proven helper-target multiset."""
+    condition_delta: object
+    condition: object
+    helper_target: object
     if not call_return_materialization_proven:
         return True
     condition_delta = delta.get("conditions")
     if not isinstance(condition_delta, dict):
         return False
-    added_conditions = tuple(str(item) for item in tuple(condition_delta.get("added") or ()))
-    removed_conditions = tuple(str(item) for item in tuple(condition_delta.get("removed") or ()))
+    added_conditions = tuple(str(item) for item in builtins.iter(tuple(condition_delta.get("added") or ())))
+    removed_conditions = tuple(str(item) for item in builtins.iter(tuple(condition_delta.get("removed") or ())))
     if not (added_conditions or removed_conditions):
         return True
     if not added_conditions:
         return False
-    helper_targets = Counter(_call_chain_target_token_8616(item, "addr:") for item in added_helpers)
+    helper_targets = Counter(_call_chain_target_token_8616(item, "addr:") for item in iter(added_helpers))
     condition_targets: Counter[str] = Counter()
     for condition in added_conditions:
         for helper_target in helper_targets:
             marker = f"call:addr:{helper_target}"
             occurrences = condition.count(marker)
             condition_targets[helper_target] += occurrences
-        if not any(condition.count(f"call:addr:{target}") for target in helper_targets):
+        if not any(condition.count(f"call:addr:{target}") for target in iter(helper_targets)):
             return False
     if condition_targets != helper_targets:
         return False
     return not any(
         condition not in {"CmpNE(const:1,const:0)", "CmpNE(const:True,const:0)"}
-        for condition in removed_conditions
+        for condition in iter(removed_conditions)
     )
 
 
 def _call_chain_residual_gate_8616(
-    delta: dict[str, object],
+    delta: object,
     register_delta: object,
-    call_return_materialization_proven: bool,
-) -> bool:
+    call_return_materialization_proven: cython.bint,
+) -> cython.bint:
     """Gate residual register/control-flow effects for the call-chain rebuild."""
+    control_delta: object
     if isinstance(register_delta, dict):
         if tuple(register_delta.get("added") or ()):
             return False
@@ -3541,19 +3733,20 @@ def _call_chain_residual_gate_8616(
             return False
     control_delta = delta.get("control_flow_effects")
     if isinstance(control_delta, dict):
-        effects: tuple[object, ...] = tuple(control_delta.get("added") or ()) + tuple(control_delta.get("removed") or ())
-        allowed_prefixes = (
+        effects: object = tuple(control_delta.get("added") or ()) + tuple(control_delta.get("removed") or ())
+        allowed_prefixes = tuple((
             "for-body-calls:",
             "if-body-calls:",
             "if-else-body-calls:",
             "if:",
-        ) if call_return_materialization_proven else ("if-else-body-calls:",)
-        if not effects or not all(isinstance(item, str) and item.startswith(allowed_prefixes) for item in effects):
+        )) if call_return_materialization_proven else tuple(("if-else-body-calls:",))
+        if not effects or not all(isinstance(item, str) and item.startswith(allowed_prefixes) for item in iter(effects)):
             return False
     return True
 
 
-def _accept_structuring_delta_8616(validation: dict[str, object], spec_name: str) -> bool:
+@cython.ccall
+def _accept_structuring_delta_8616(validation: object, spec_name: object) -> cython.bint:
     """Mark a validation delta as accepted-stable and return True."""
     validation["changed"] = False
     validation["status"] = "stable"
@@ -3565,13 +3758,15 @@ def _accept_structuring_delta_8616(validation: dict[str, object], spec_name: str
     return True
 
 
-def _bump_validation_accept_8616(codegen: AngrCodegenSurface, name: str) -> None:
+@cython.ccall
+def _bump_validation_accept_8616(codegen: AngrCodegenSurface, name: object) -> None:
     """Increment a dynamic codegen boundary validation-accept counter."""
     setattr(codegen, name, int(getattr(codegen, name, 0) or 0) + 1)
 
 
+@cython.ccall
 def _append_validation_delta_8616(
-    codegen: AngrCodegenSurface, name: str, entry: dict[str, object]
+    codegen: AngrCodegenSurface, name: object, entry: object
 ) -> None:
     """Append one accepted-delta record to a dynamic codegen boundary tuple."""
     previous = getattr(codegen, name, ()) or ()
@@ -3583,11 +3778,12 @@ def _append_validation_delta_8616(
 _VOID_TAIL_CALL_ALLOWED_PREFIXES_8616 = ("if-body-calls:", "if-else-body-calls:else:")
 
 
-def _void_tail_call_targets_8616(effect: str) -> tuple[int, ...]:
+@cython.ccall
+def _void_tail_call_targets_8616(effect: object) -> tuple[cython.longlong, ...]:
     """Extract addr:0x call targets from one allowed control-flow effect string."""
     if not effect.startswith(_VOID_TAIL_CALL_ALLOWED_PREFIXES_8616):
         return ()
-    targets: list[int] = []
+    targets: list[cython.longlong] = []
     offset = 0
     token = "addr:0x"
     while True:
@@ -3604,9 +3800,11 @@ def _void_tail_call_targets_8616(effect: str) -> tuple[int, ...]:
     return tuple(targets)
 
 
-def _void_tail_call_target_multiset_8616(effects: tuple[str, ...]) -> Counter[int]:
+@cython.ccall
+def _void_tail_call_target_multiset_8616(effects: object) -> Counter[cython.longlong]:
     """Return the call-target multiset for a list of effects, empty on disallowed shapes."""
-    targets: Counter[int] = Counter()
+    effect: object
+    targets: Counter[cython.longlong] = Counter()
     for effect in effects:
         effect_targets = _void_tail_call_targets_8616(effect)
         if not effect_targets:
@@ -3615,9 +3813,10 @@ def _void_tail_call_target_multiset_8616(effects: tuple[str, ...]) -> Counter[in
     return targets
 
 
+@cython.ccall
 def _void_tail_call_suffix_diamond_delta_8616(
-    added: tuple[str, ...], removed: tuple[str, ...]
-) -> bool:
+    added: object, removed: object
+) -> cython.bint:
     """Return whether added/removed call effects share the same target multiset."""
     added_targets = _void_tail_call_target_multiset_8616(added)
     removed_targets = _void_tail_call_target_multiset_8616(removed)
@@ -3625,9 +3824,14 @@ def _void_tail_call_suffix_diamond_delta_8616(
 
 
 def _void_tail_call_guard_structuring_delta_8616(
-    codegen: AngrCodegenSurface, validation: dict[str, object]
-) -> bool:
+    codegen: AngrCodegenSurface, validation: object
+) -> cython.bint:
     """Return whether the delta matches a proven void tail-call guard materialization."""
+    control_delta: object
+    decision: object
+    delta: object
+    field_delta: object
+    field_name: object
     if int(getattr(codegen, "_inertia_void_tail_call_guard_materialized_8616", 0) or 0) <= 0:
         return False
     delta = validation.get("delta")
@@ -3650,31 +3854,32 @@ def _void_tail_call_guard_structuring_delta_8616(
     control_delta = delta.get("control_flow_effects")
     if not isinstance(control_delta, dict):
         return False
-    added = tuple(str(item) for item in tuple(control_delta.get("added", ()) or ()))
-    removed = tuple(str(item) for item in tuple(control_delta.get("removed", ()) or ()))
+    added = tuple(str(item) for item in builtins.iter(tuple(control_delta.get("added", ()) or ())))
+    removed = tuple(str(item) for item in builtins.iter(tuple(control_delta.get("removed", ()) or ())))
     if not added or not removed:
         return False
     decision = getattr(codegen, "_inertia_void_tail_call_guard_decision_8616", None)
-    if decision == _VoidTailCallGuardDecision8616.MATERIALIZE_SUFFIX_DIAMOND.value:
+    if operator.eq(decision, _VoidTailCallGuardDecision8616.MATERIALIZE_SUFFIX_DIAMOND.value):
         return _void_tail_call_suffix_diamond_delta_8616(added, removed)
 
-    if not all(item.startswith("if-body-calls:") for item in added):
+    if not all(item.startswith("if-body-calls:") for item in iter(added)):
         return False
     allowed_removed_prefixes = ("if-else-body-calls:else:",)
     allowed_removed_exact = {"if:else"}
     return all(
         item in allowed_removed_exact or item.startswith(allowed_removed_prefixes)
-        for item in removed
+        for item in iter(removed)
     )
 
 
+@cython.ccall
 def _accept_callsite_completeness_delta_8616(
     codegen: AngrCodegenSurface,
-    validation: dict[str, object],
-    spec_name: str,
-    before_summary: TailValidationCallsiteSummary8616 | None,
-    after_summary: TailValidationCallsiteSummary8616 | None,
-) -> bool:
+    validation: object,
+    spec_name: object,
+    before_summary: object,
+    after_summary: object,
+) -> cython.bint:
     """Classify the callsite completeness delta and accept it when complete."""
     if before_summary is None or after_summary is None:
         return False
@@ -3690,10 +3895,12 @@ def _accept_callsite_completeness_delta_8616(
     return _accept_structuring_delta_8616(validation, spec_name)
 
 
+@cython.ccall
 def _accept_identical_return_guard_delta_8616(
-    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
-) -> bool:
+    codegen: AngrCodegenSurface, validation: object, spec_name: object
+) -> cython.bint:
     """Consume the identical-return-guard collapse result and accept a clean delta."""
+    identical_return_result: object
     identical_return_result = getattr(
         codegen, "_inertia_identical_return_guard_collapse_result_8616", None
     )
@@ -3714,10 +3921,12 @@ def _accept_identical_return_guard_delta_8616(
     return True
 
 
+@cython.ccall
 def _accept_frame_prune_delta_8616(
-    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
-) -> bool:
+    codegen: AngrCodegenSurface, validation: object, spec_name: object
+) -> cython.bint:
     """Accept a callee-saved frame prune delta when the record proves it."""
+    frame_prune_record: object
     frame_prune_record = getattr(
         codegen, "_inertia_callee_saved_frame_prune_record_8616", None
     )
@@ -3734,10 +3943,12 @@ def _accept_frame_prune_delta_8616(
     return _accept_structuring_delta_8616(validation, spec_name)
 
 
+@cython.ccall
 def _accept_switch_tail_delta_8616(
-    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
-) -> bool:
+    codegen: AngrCodegenSurface, validation: object, spec_name: object
+) -> cython.bint:
     """Consume the switch loop-tail break result and accept a clean delta."""
+    switch_tail_result: object
     switch_tail_result = getattr(
         codegen, "_inertia_structuring_switch_loop_tail_break_result_8616", None
     )
@@ -3765,8 +3976,11 @@ def _accept_switch_tail_delta_8616(
     return False
 
 
+@cython.ccall
 def _codegen_function_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> object:
     """Resolve the angr function for the current codegen boundary, if available."""
+    func_addr: object
+    functions: object
     func_addr = getattr(getattr(codegen, "cfunc", None), "addr", None)
     functions = getattr(getattr(project, "kb", None), "functions", None)
     if not isinstance(func_addr, int) or functions is None:
@@ -3776,13 +3990,15 @@ def _codegen_function_8616(project: AngrProjectSurface, codegen: AngrCodegenSurf
     return None
 
 
+@cython.ccall
 def _accept_terminal_return_delta_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
-    validation: dict[str, object],
-    spec_name: str,
-) -> bool:
+    validation: object,
+    spec_name: object,
+) -> cython.bint:
     """Consume the terminal return-value materialization result and accept its delta."""
+    terminal_return_materialization: object
     terminal_return_materialization = getattr(
         codegen, "_inertia_terminal_return_value_materialization_result_8616", None
     )
@@ -3806,14 +4022,16 @@ def _accept_terminal_return_delta_8616(
     return _accept_structuring_delta_8616(validation, spec_name)
 
 
+@cython.ccall
 def _accept_selector_return_delta_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
-    validation: dict[str, object],
-    spec_name: str,
-    is_selector_delta: Callable[..., bool],
-) -> bool:
+    validation: object,
+    spec_name: object,
+    is_selector_delta: Callable[..., cython.bint],
+) -> cython.bint:
     """Accept a selector-return expression-chain materialization delta."""
+    delta: object
     if not is_selector_delta(project, None, codegen, validation):
         return False
     _bump_validation_accept_8616(
@@ -3835,9 +4053,10 @@ def _accept_selector_return_delta_8616(
     return _accept_structuring_delta_8616(validation, spec_name)
 
 
+@cython.ccall
 def _accept_call_chain_delta_8616(
-    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
-) -> bool:
+    codegen: AngrCodegenSurface, validation: object, spec_name: object
+) -> cython.bint:
     """Accept a structuring call-chain materialization delta."""
     if not _is_structuring_call_chain_materialization_delta_8616(codegen, validation):
         return False
@@ -3847,10 +4066,12 @@ def _accept_call_chain_delta_8616(
     return _accept_structuring_delta_8616(validation, spec_name)
 
 
+@cython.ccall
 def _accept_wide_stack_predicate_delta_8616(
-    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
-) -> bool:
+    codegen: AngrCodegenSurface, validation: object, spec_name: object
+) -> cython.bint:
     """Accept a proven wide-stack return-predicate delta."""
+    wide_predicate_result: object
     wide_predicate_result = getattr(
         codegen,
         "_inertia_wide_stack_return_predicate_result_8616",
@@ -3867,10 +4088,12 @@ def _accept_wide_stack_predicate_delta_8616(
     return _accept_structuring_delta_8616(validation, spec_name)
 
 
+@cython.ccall
 def _accept_dword_zero_test_delta_8616(
-    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
-) -> bool:
+    codegen: AngrCodegenSurface, validation: object, spec_name: object
+) -> cython.bint:
     """Accept the dword global zero-test materialization delta when proven."""
+    record: object
     record = getattr(codegen, "_inertia_dword_global_zero_test_materialization_record_8616", None)
     if not (
         isinstance(record, DwordGlobalZeroTestMaterializationRecord8616)
@@ -3887,10 +4110,12 @@ def _accept_dword_zero_test_delta_8616(
     return _accept_structuring_delta_8616(validation, spec_name)
 
 
+@cython.ccall
 def _accept_indexed_read_delta_8616(
-    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
-) -> bool:
+    codegen: AngrCodegenSurface, validation: object, spec_name: object
+) -> cython.bint:
     """Accept the indexed global-read carrier materialization delta when proven."""
+    record: object
     record = getattr(codegen, "_inertia_indexed_global_read_carrier_record_8616", None)
     if not (
         isinstance(record, IndexedGlobalReadCarrierMaterializationRecord8616)
@@ -3904,13 +4129,14 @@ def _accept_indexed_read_delta_8616(
 
 
 def _accept_indexed_global_delta_8616(
-    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
-) -> bool:
+    codegen: AngrCodegenSurface, validation: object, spec_name: object
+) -> cython.bint:
     """Accept the indexed segmented-global materialization delta when proven."""
+    record: object
     record = getattr(codegen, "_inertia_indexed_global_materialization_record_8616", None)
     accepted = (
         isinstance(record, IndexedSegmentedGlobalMaterializationRecord8616)
-        and all(isinstance(item, IndexedSegmentedGlobalEvidence8616) for item in record.evidence)
+        and all(isinstance(item, IndexedSegmentedGlobalEvidence8616) for item in iter(record.evidence))
         and indexed_segmented_global_precision_delta_8616(
             record.materialized_count,
             record.evidence,
@@ -3932,10 +4158,12 @@ def _accept_indexed_global_delta_8616(
     return _accept_structuring_delta_8616(validation, spec_name)
 
 
+@cython.ccall
 def _accept_pointer_swap_delta_8616(
-    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
-) -> bool:
+    codegen: AngrCodegenSurface, validation: object, spec_name: object
+) -> cython.bint:
     """Accept the pointer-swap splice delta when it is precision-only."""
+    stats: object
     stats = getattr(codegen, "_inertia_pointer_swap_splice_stats_8616", None)
     if not (
         isinstance(stats, PointerSwapSpliceStats8616)
@@ -3946,10 +4174,14 @@ def _accept_pointer_swap_delta_8616(
     return _accept_structuring_delta_8616(validation, spec_name)
 
 
+@cython.ccall
 def _pointer_memory_arm_8616(
-    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
+    codegen: AngrCodegenSurface, validation: object, spec_name: object
 ) -> bool | None:
     """Return accept for a proven pointer-memory idiom delta, refuse on segmented writes."""
+    delta: object
+    fact: object
+    facts: object
     facts = getattr(codegen, "_inertia_pointer_memory_idiom_facts_8616", ())
     fact = (
         facts[0]
@@ -3973,10 +4205,12 @@ def _pointer_memory_arm_8616(
     return None
 
 
+@cython.ccall
 def _accept_void_tail_call_guard_delta_8616(
-    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
-) -> bool:
+    codegen: AngrCodegenSurface, validation: object, spec_name: object
+) -> cython.bint:
     """Accept a proven void tail-call guard materialization delta."""
+    delta: object
     if not _void_tail_call_guard_structuring_delta_8616(codegen, validation):
         return False
     _bump_validation_accept_8616(
@@ -3995,9 +4229,10 @@ def _accept_void_tail_call_guard_delta_8616(
     return _accept_structuring_delta_8616(validation, spec_name)
 
 
+@cython.ccall
 def _accept_loop_header_guard_delta_8616(
-    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
-) -> bool:
+    codegen: AngrCodegenSurface, validation: object, spec_name: object
+) -> cython.bint:
     """Accept a loop-header duplicate-guard removal delta for gated passes."""
     facts = (
         loop_header_duplicate_guard_removal_facts_8616(codegen)
@@ -4012,10 +4247,12 @@ def _accept_loop_header_guard_delta_8616(
     return _accept_structuring_delta_8616(validation, spec_name)
 
 
+@cython.ccall
 def _accept_loop_exit_guard_delta_8616(
-    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
-) -> bool:
+    codegen: AngrCodegenSurface, validation: object, spec_name: object
+) -> cython.bint:
     """Accept a loop-exit return-guard repair delta when repaired guards exist."""
+    stats: object
     stats = getattr(codegen, "_inertia_loop_exit_guard_stats_8616", None)
     repaired = int(stats.get("repaired", 0) or 0) if isinstance(stats, dict) else 0
     if not (repaired > 0 and loop_exit_return_guard_repair_delta_8616(repaired, validation)):
@@ -4026,14 +4263,17 @@ def _accept_loop_exit_guard_delta_8616(
     return _accept_structuring_delta_8616(validation, spec_name)
 
 
+@cython.ccall
 def _accept_stack_move_update_delta_8616(
     codegen: AngrCodegenSurface,
-    validation: dict[str, object],
-    spec_name: str,
-    is_move_delta: Callable[..., bool],
-    is_update_delta: Callable[..., bool],
-) -> bool:
+    validation: object,
+    spec_name: object,
+    is_move_delta: Callable[..., cython.bint],
+    is_update_delta: Callable[..., cython.bint],
+) -> cython.bint:
     """Accept a direct stack move/update materialization delta."""
+    delta: object
+    previous: object
     move_accepted = is_move_delta(codegen, validation)
     update_accepted = is_update_delta(codegen, validation)
     if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
@@ -4071,7 +4311,7 @@ def _accept_stack_move_update_delta_8616(
             else "_inertia_structuring_direct_stack_update_validation_deltas_8616",
             (),
         )
-        accepted = (*previous, entry) if previous else (entry,)
+        accepted = tuple(tuple(previous) + (entry,)) if previous else tuple((entry,))
         if move_accepted:
             codegen._inertia_structuring_direct_stack_move_validation_deltas_8616 = accepted
         if update_accepted:
@@ -4079,10 +4319,12 @@ def _accept_stack_move_update_delta_8616(
     return _accept_structuring_delta_8616(validation, spec_name)
 
 
+@cython.ccall
 def _accept_precision_closure_delta_8616(
-    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
-) -> bool:
+    codegen: AngrCodegenSurface, validation: object, spec_name: object
+) -> cython.bint:
     """Accept a condition-precision or closure-complete validation delta."""
+    closure: object
     precision_result = condition_precision_validation_delta_8616(codegen, validation)
     closure = getattr(codegen, "_inertia_structuring_condition_evidence_closure_8616", None)
     closure_result = validate_condition_closure_delta_8616(closure, validation)
@@ -4102,15 +4344,17 @@ def _accept_precision_closure_delta_8616(
     return _accept_structuring_delta_8616(validation, spec_name)
 
 
+@cython.ccall
 def _accept_jcc_condition_delta_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
-    validation: dict[str, object],
+    validation: object,
     function: object,
-    spec_name: str,
-    is_jcc_delta: Callable[..., bool],
-) -> bool:
+    spec_name: object,
+    is_jcc_delta: Callable[..., cython.bint],
+) -> cython.bint:
     """Accept a JCC condition materialization delta when proven."""
+    delta: object
     if not is_jcc_delta(
         project,
         codegen,
@@ -4135,11 +4379,12 @@ def _accept_jcc_condition_delta_8616(
     return _accept_structuring_delta_8616(validation, spec_name)
 
 
+@cython.ccall
 def _postprocess_delta_predicates_8616(
     codegen: AngrCodegenSurface,
-    validation: dict[str, object],
-    spec_name: str,
-) -> tuple[Callable[..., bool], ...] | None:
+    validation: object,
+    spec_name: object,
+) -> object:
     """Debug-log the loop-guard context and import postprocess delta predicates."""
     if os.environ.get("INERTIA_DEBUG_LOOP_GUARD_VALIDATION") == "1":
         logging.getLogger(__name__).warning(
@@ -4169,9 +4414,10 @@ def _postprocess_delta_predicates_8616(
     )
 
 
+@cython.ccall
 def _accept_result_consumption_deltas_8616(
-    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
-) -> bool:
+    codegen: AngrCodegenSurface, validation: object, spec_name: object
+) -> cython.bint:
     """Accept deltas proven by consumed structuring results."""
     return (
         _accept_identical_return_guard_delta_8616(codegen, validation, spec_name)
@@ -4180,13 +4426,14 @@ def _accept_result_consumption_deltas_8616(
     )
 
 
+@cython.ccall
 def _accept_materialization_deltas_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
-    validation: dict[str, object],
-    spec_name: str,
-    is_selector_delta: Callable[..., bool],
-) -> bool:
+    validation: object,
+    spec_name: object,
+    is_selector_delta: Callable[..., cython.bint],
+) -> cython.bint:
     """Accept deltas proven by materialization records and predicates."""
     return (
         _accept_terminal_return_delta_8616(project, codegen, validation, spec_name)
@@ -4198,8 +4445,9 @@ def _accept_materialization_deltas_8616(
     )
 
 
+@cython.ccall
 def _accept_indexed_write_deltas_8616(
-    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
+    codegen: AngrCodegenSurface, validation: object, spec_name: object
 ) -> bool | None:
     """Accept indexed/pointer write deltas; None keeps the ladder running."""
     if _accept_dword_zero_test_delta_8616(codegen, validation, spec_name):
@@ -4213,9 +4461,10 @@ def _accept_indexed_write_deltas_8616(
     return _pointer_memory_arm_8616(codegen, validation, spec_name)
 
 
+@cython.ccall
 def _accept_loop_repair_deltas_8616(
-    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
-) -> bool:
+    codegen: AngrCodegenSurface, validation: object, spec_name: object
+) -> cython.bint:
     """Accept deltas proven by void tail-call and loop-guard repairs."""
     return (
         _accept_void_tail_call_guard_delta_8616(codegen, validation, spec_name)
@@ -4224,16 +4473,17 @@ def _accept_loop_repair_deltas_8616(
     )
 
 
+@cython.ccall
 def _accept_residual_deltas_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
-    validation: dict[str, object],
+    validation: object,
     function: object,
-    spec_name: str,
-    is_move_delta: Callable[..., bool],
-    is_update_delta: Callable[..., bool],
-    is_jcc_delta: Callable[..., bool],
-) -> bool:
+    spec_name: object,
+    is_move_delta: Callable[..., cython.bint],
+    is_update_delta: Callable[..., cython.bint],
+    is_jcc_delta: Callable[..., cython.bint],
+) -> cython.bint:
     """Accept stack-update, condition-closure, or JCC materialization deltas."""
     if _accept_stack_move_update_delta_8616(
         codegen, validation, spec_name, is_move_delta, is_update_delta
@@ -4246,16 +4496,19 @@ def _accept_residual_deltas_8616(
     )
 
 
+@cython.ccall
 def _try_accept_structuring_validation_delta_from_evidence_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
-    validation: dict[str, object],
+    validation: object,
     *,
-    spec_name: str,
+    spec_name: object,
     before_summary: TailValidationCallsiteSummary8616 | None = None,
     after_summary: TailValidationCallsiteSummary8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """Accept a structuring delta only through an existing consumed-evidence validator."""
+    indexed_verdict: object
+    predicates: object
     if not isinstance(validation, dict) or x86_16_tail_validation_result_preserves_behavior(validation):
         return False
     if _accept_callsite_completeness_delta_8616(
@@ -4291,9 +4544,11 @@ def _try_accept_structuring_validation_delta_from_evidence_8616(
     )
 
 
+@cython.ccall
 def _maybe_validate_structuring_pass_8616(
-    project: AngrProjectSurface, codegen: AngrCodegenSurface, spec_name: str
+    project: AngrProjectSurface, codegen: AngrCodegenSurface, spec_name: object
 ) -> Callable[[bool], None] | None:
+    skip_reason: object
     if not bool(getattr(project, "_inertia_tail_validation_enabled", True)):
         return None
     validate_all = os.environ.get("INERTIA_VALIDATE_ALL_STRUCTURING_PASSES") == "1"
@@ -4326,18 +4581,19 @@ def _maybe_validate_structuring_pass_8616(
     ).finalize
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _StructuringPassValidation8616:
     """Per-pass tail-validation closure bound to its captured baseline."""
 
     project: AngrProjectSurface
     codegen: AngrCodegenSurface
-    spec_name: str
-    mode: str
-    before_fingerprint: str
+    spec_name: object
+    mode: object
+    before_fingerprint: object
     before_summary: X86_16TailValidationSummary
 
-    def finalize(self, pass_changed: bool) -> None:
+    @cython.ccall
+    def finalize(self, pass_changed: cython.bint) -> None:
         """Close the per-pass tail-validation comparison and publish its result."""
         # Only a reported AST mutation needs closure. Semantic no-op passes are
         # still validated, but cannot invalidate the already-primed surface.
@@ -4367,6 +4623,7 @@ class _StructuringPassValidation8616:
         )
         self._publish(validation, after_summary)
 
+    @cython.ccall
     def _replay_changed_pass_repairs(self) -> None:
         """Re-run proof-consuming repairs after a reported AST mutation."""
         if self.spec_name == "_unconsumed_loop_break_jcc_materialization_8616":
@@ -4378,12 +4635,14 @@ class _StructuringPassValidation8616:
         _repair_structuring_switch_loop_exit_returns_8616(self.project, self.codegen)
         _materialize_structuring_selector_return_branches_8616(self.project, self.codegen)
 
+    @cython.ccall
     def _publish(
         self,
-        validation: dict[str, object],
+        validation: object,
         after_summary: TailValidationCallsiteSummary8616 | None,
     ) -> None:
         """Attempt evidence acceptance, store the result, and mark failures."""
+        existing: object
         codegen = self.codegen
         existing = getattr(codegen, "_inertia_structuring_pass_validation", None)
         if not isinstance(existing, dict):
@@ -4427,9 +4686,14 @@ class _StructuringPassValidation8616:
         )
 
 
+@cython.ccall
 def _decompiler_structuring_passes_for_function(
     project: AngrProjectSurface, codegen: AngrCodegenSurface
-) -> tuple[DecompilerStructuringPassSpec, ...]:
+) -> object:
+    func: object
+    func_addr: object
+    info: object
+    profile: object
     func_addr = getattr(getattr(codegen, "cfunc", None), "addr", None)
     if func_addr is None:
         return DECOMPILER_STRUCTURING_PASSES
@@ -4449,12 +4713,12 @@ def _decompiler_structuring_passes_for_function(
     return DECOMPILER_STRUCTURING_PASSES
 
 
-def describe_x86_16_decompiler_structuring_stage() -> tuple[tuple[str, bool], ...]:
+def describe_x86_16_decompiler_structuring_stage() -> tuple[tuple[str, cython.bint], ...]:
     """Return the configured 16-bit structuring pass names and project needs."""
-    return tuple((spec.name, spec.needs_project) for spec in DECOMPILER_STRUCTURING_PASSES)
+    return tuple((spec.name, spec.needs_project) for spec in iter(DECOMPILER_STRUCTURING_PASSES))
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _NotShiftConditionRestore8616:
     """Rewrite ``~(x) >> k`` conditions back to ``(x >> k) == 0`` comparisons."""
 
@@ -4466,12 +4730,15 @@ class _NotShiftConditionRestore8616:
             expr = getattr(expr, "expr", None)
         return expr
 
+    @cython.ccall
     def _constant_int(self, expr: object) -> int | None:
+        value: object
         expr = self._unwrap(expr)
         value = getattr(expr, "value", None)
         return int(value) if isinstance(value, int) else None
 
-    def _restore_expr(self, expr: object) -> tuple[object, bool]:
+    @cython.ccall
+    def _restore_expr(self, expr: object) -> object:
         expr = self._unwrap(expr)
         if isinstance(expr, CBinaryOp):
             return self._restore_binop(expr)
@@ -4487,7 +4754,9 @@ class _NotShiftConditionRestore8616:
             return expr, inner_changed
         return expr, False
 
-    def _restore_binop(self, expr: CBinaryOp) -> tuple[object, bool]:
+    @cython.ccall
+    def _restore_binop(self, expr: CBinaryOp) -> tuple[object, cython.bint]:
+        restored: object
         lhs, lhs_changed = self._restore_expr(expr.lhs)
         rhs, rhs_changed = self._restore_expr(expr.rhs)
         if lhs_changed:
@@ -4500,6 +4769,7 @@ class _NotShiftConditionRestore8616:
                 return restored, True
         return expr, lhs_changed or rhs_changed
 
+    @cython.ccall
     def _restored_not_shift(self, expr: CBinaryOp) -> CBinaryOp | None:
         lhs_node = self._unwrap(expr.lhs)
         shift = self._constant_int(expr.rhs)
@@ -4525,13 +4795,17 @@ class _NotShiftConditionRestore8616:
             tags=lhs_node.tags or expr.tags,
         )
 
-    def _visit(self, node: object) -> bool:
+    @cython.ccall
+    def _visit(self, node: object) -> cython.bint:
         changed = self._visit_condition_attrs(node)
         changed = self._visit_condition_pairs(node) or changed
         changed = self._visit_children(node) or changed
         return changed
 
-    def _visit_condition_attrs(self, node: object) -> bool:
+    @cython.ccall
+    def _visit_condition_attrs(self, node: object) -> cython.bint:
+        condition: object
+        attr: object
         changed = False
         for attr in ("condition", "cond"):
             condition = getattr(node, attr, None)
@@ -4543,7 +4817,11 @@ class _NotShiftConditionRestore8616:
                 changed = True
         return changed
 
-    def _visit_condition_pairs(self, node: object) -> bool:
+    @cython.ccall
+    def _visit_condition_pairs(self, node: object) -> cython.bint:
+        body: object
+        pairs: object
+        condition: object
         pairs = getattr(node, "condition_and_nodes", None)
         if not pairs:
             return False
@@ -4560,7 +4838,12 @@ class _NotShiftConditionRestore8616:
             cast(Any, node).condition_and_nodes = new_pairs
         return pair_changed or child_changed
 
-    def _visit_children(self, node: object) -> bool:
+    @cython.ccall
+    def _visit_children(self, node: object) -> cython.bint:
+        child: object
+        else_node: object
+        attr: object
+        statement: object
         changed = False
         for attr in ("body", "else_node"):
             child = getattr(node, attr, None)
@@ -4576,10 +4859,14 @@ class _NotShiftConditionRestore8616:
         return changed
 
 
-def _restore_not_shift_conditions_structuring_8616(codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def _restore_not_shift_conditions_structuring_8616(codegen: AngrCodegenSurface) -> cython.bint:
+    cfunc: object
+    root: object
+    attr: object
     cfunc = getattr(codegen, "cfunc", None)
     roots = []
-    seen_roots: set[int] = set()
+    seen_roots: set[cython.longlong] = set()
     for attr in ("body", "statements", "stmt"):
         root = getattr(cfunc, attr, None)
         if root is None or id(root) in seen_roots:
@@ -4602,24 +4889,25 @@ def _restore_not_shift_conditions_structuring_8616(codegen: AngrCodegenSurface) 
     return changed
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _StructuringCodegenRun8616:
     """One structuring-codegen run: gates, pass loop, and cycle tracking."""
 
     project: AngrProjectSurface
     codegen: AngrCodegenSurface
     func_addr: object
-    cycle_at_entry: tuple[str, ...]
-    known_cycle_path: tuple[str, ...] | None = None
-    changed: bool = False
-    last_changed_pass: str | None = None
+    cycle_at_entry: object
+    known_cycle_path: object = None
+    changed: cython.bint = False
+    last_changed_pass: object = None
     lowering_replay_impact: StructuringLoweringReplayImpact8616 = (
         StructuringLoweringReplayImpact8616.NONE
     )
-    last_spec_changed: bool = False
+    last_spec_changed: cython.bint = False
 
-    def run(self) -> bool:
+    def run(self) -> cython.bint:
         """Run the gated structuring pipeline and report AST change."""
+        spec: object
         if not self._alias_gate():
             return False
         if not self._stack_lowering_gate():
@@ -4629,7 +4917,7 @@ class _StructuringCodegenRun8616:
         self._reset_state()
         codegen = self.codegen
         pass_specs = _decompiler_structuring_passes_for_function(self.project, codegen)
-        codegen._inertia_structuring_passes = tuple(spec.name for spec in pass_specs)
+        codegen._inertia_structuring_passes = tuple(spec.name for spec in iter(pass_specs))
         structuring_start = time.perf_counter()
         for spec in pass_specs:
             if not self._run_one_pass(spec, structuring_start):
@@ -4646,7 +4934,8 @@ class _StructuringCodegenRun8616:
         self.project._inertia_decompiler_stage = "structuring"
         return self.changed
 
-    def _alias_gate(self) -> bool:
+    @cython.ccall
+    def _alias_gate(self) -> cython.bint:
         """Block structuring when the SS stack alias surface is incomplete."""
         codegen = self.codegen
         if self.cycle_at_entry:
@@ -4670,8 +4959,10 @@ class _StructuringCodegenRun8616:
             return False
         return True
 
-    def _stack_lowering_gate(self) -> bool:
+    @cython.ccall
+    def _stack_lowering_gate(self) -> cython.bint:
         """Lower SS stack facts into variables before structuring runs."""
+        alias_facts: object
         codegen = self.codegen
         if getattr(codegen, "_inertia_ss_stack_lowered", False):
             return True
@@ -4713,7 +5004,8 @@ class _StructuringCodegenRun8616:
             )
         return True
 
-    def _contract_gate(self) -> bool:
+    @cython.ccall
+    def _contract_gate(self) -> cython.bint:
         """Require completed Types and closed semantic lanes before structuring."""
         from inertia.ir.function_readiness_contracts import FunctionLifecycleStage8616
         from inertia.pipeline.contracts import assert_pipeline_contracts_8616
@@ -4724,6 +5016,7 @@ class _StructuringCodegenRun8616:
             )
         return True
 
+    @cython.ccall
     def _reset_state(self) -> None:
         codegen = self.codegen
         codegen._inertia_structuring_failed = False
@@ -4734,7 +5027,8 @@ class _StructuringCodegenRun8616:
         codegen._inertia_structuring_validation_failure_error = None
         codegen._inertia_last_structuring_pass = None
 
-    def _run_one_pass(self, spec: DecompilerStructuringPassSpec, structuring_start: float) -> bool:
+    @cython.ccall
+    def _run_one_pass(self, spec: DecompilerStructuringPassSpec, structuring_start: cython.double) -> cython.bint:
         """Run one pass under validation; return False when the loop must break."""
         codegen = self.codegen
         self.last_spec_changed = False
@@ -4757,7 +5051,8 @@ class _StructuringCodegenRun8616:
         self.last_spec_changed = bool(spec_changed)
         return True
 
-    def _execute_pass(self, spec: DecompilerStructuringPassSpec, structuring_start: float) -> bool:
+    @cython.ccall
+    def _execute_pass(self, spec: DecompilerStructuringPassSpec, structuring_start: cython.double) -> cython.bint:
         """Execute one structuring pass body with validation and cycle tracking."""
         project = self.project
         codegen = self.codegen
@@ -4795,8 +5090,10 @@ class _StructuringCodegenRun8616:
             )
         return bool(spec_changed)
 
-    def _run_pass_body(self, spec: DecompilerStructuringPassSpec) -> bool:
+    @cython.ccall
+    def _run_pass_body(self, spec: DecompilerStructuringPassSpec) -> cython.bint:
         """Invoke the pass under its span and per-pass validation closure."""
+        finalize_validation: object
         codegen = self.codegen
         with span(f"x86_16.structuring.pass.{spec.name}", function=self.func_addr):
             if (
@@ -4827,7 +5124,9 @@ class _StructuringCodegenRun8616:
         return bool(spec_changed)
 
 
-def _structuring_codegen_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
+@cython.ccall
+def _structuring_codegen_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> cython.bint:
+    func_addr: object
     if getattr(codegen, "cfunc", None) is None:
         return False
     if not bool(getattr(project, "_inertia_structuring_enabled", True)):
@@ -4851,6 +5150,7 @@ def _structuring_codegen_8616(project: AngrProjectSurface, codegen: AngrCodegenS
     return run.run()
 
 
+@cython.ccall
 def _ensure_structuring_typed_conditions_transferred_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> None:
     """Make typed condition evidence available before validation baselines.
 
@@ -4860,6 +5160,7 @@ def _ensure_structuring_typed_conditions_transferred_8616(project: AngrProjectSu
     false guard delta when the same AST is fingerprinted first without decoded
     branch evidence and later with it.
     """
+    func_addr: object
     if getattr(codegen, "_inertia_typed_conditions_transferred", False):
         return
     func_addr = getattr(getattr(codegen, "cfunc", None), "addr", None)
@@ -4869,8 +5170,12 @@ def _ensure_structuring_typed_conditions_transferred_8616(project: AngrProjectSu
     codegen._inertia_typed_conditions_transferred = True
 
 
+@cython.ccall
 def _ensure_decompiler_prototype_8616(self: AngrDecompilerSurface) -> None:
     """Install a fallback prototype when angr left the function untyped."""
+    arch: object
+    func: object
+    prototype: object
     func = getattr(self, "func", None) or getattr(self, "function", None)
     if func is None:
         return
@@ -4887,8 +5192,10 @@ def _ensure_decompiler_prototype_8616(self: AngrDecompilerSurface) -> None:
     func.prototype = fallback
 
 
-def _run_angr_core_decompile_8616(self: AngrDecompilerSurface) -> float:
+@cython.ccall
+def _run_angr_core_decompile_8616(self: AngrDecompilerSurface) -> cython.double:
     """Run angr's core decompiler under the bool-predicate guard; return elapsed."""
+    orig: object
     orig = getattr(_decompile_structuring_8616, "_orig_decompiler_decompile", None)
     if orig is None:
         orig = Decompiler._decompile
@@ -4904,12 +5211,13 @@ def _run_angr_core_decompile_8616(self: AngrDecompilerSurface) -> float:
     return time.perf_counter() - structuring_started
 
 
+@cython.ccall
 def _populate_structuring_info_8616(
     self: AngrDecompilerSurface,
     info: MutableMapping[str, object],
-    structuring_elapsed: float,
-    changed: bool,
-    tail_validation: dict[str, object] | None = None,
+    structuring_elapsed: cython.double,
+    changed: cython.bint,
+    tail_validation: object = None,
 ) -> object:
     """Publish the common per-function structuring diagnostics payload."""
     structuring_info = cast(
@@ -4948,10 +5256,13 @@ def _populate_structuring_info_8616(
     return structuring_info
 
 
+@cython.ccall
 def _decompile_structuring_unvalidated_8616(
-    self: AngrDecompilerSurface, structuring_elapsed: float
+    self: AngrDecompilerSurface, structuring_elapsed: cython.double
 ) -> None:
     """Run structuring without tail validation and publish diagnostics."""
+    function: object
+    info: object
     changed = _structuring_codegen_8616(self.project, self.codegen)
     changed = _restore_not_shift_conditions_structuring_8616(self.codegen) or changed
     changed = _apply_structuring_pointer_memory_idioms_8616(self.project, self.codegen) or changed
@@ -4991,38 +5302,40 @@ def _decompile_structuring_unvalidated_8616(
     self.project._inertia_decompiler_stage = "structuring_done"
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _ValidatedStructuringFlags8616:
     """Named per-phase change flags consumed by the lowering-replay policy."""
 
-    selector_return: bool = False
-    return_chains: bool = False
-    loop_exit_guard: bool = False
-    unresolved_exit_goto: bool = False
-    unconsumed_loop_break_jcc: bool = False
-    conditional_continue: bool = False
-    pretest_loop_guard: bool = False
-    canonical_for: bool = False
-    hoisted_jcc_target_copy: bool = False
-    void_tail_call_guard: bool = False
-    return_shape: bool = False
-    condition_broad_replay: bool = False
-    restored_not_shift: bool = False
-    pointer_memory: bool = False
-    shared_call: bool = False
-    terminal_call_return: bool = False
-    final_condition_broad_replay: bool = False
-    final_loop_break_jcc: bool = False
-    boolean_ite: bool = False
+    selector_return: cython.bint = False
+    return_chains: cython.bint = False
+    loop_exit_guard: cython.bint = False
+    unresolved_exit_goto: cython.bint = False
+    unconsumed_loop_break_jcc: cython.bint = False
+    conditional_continue: cython.bint = False
+    pretest_loop_guard: cython.bint = False
+    canonical_for: cython.bint = False
+    hoisted_jcc_target_copy: cython.bint = False
+    void_tail_call_guard: cython.bint = False
+    return_shape: cython.bint = False
+    condition_broad_replay: cython.bint = False
+    restored_not_shift: cython.bint = False
+    pointer_memory: cython.bint = False
+    shared_call: cython.bint = False
+    terminal_call_return: cython.bint = False
+    final_condition_broad_replay: cython.bint = False
+    final_loop_break_jcc: cython.bint = False
+    boolean_ite: cython.bint = False
 
 
 
+@cython.ccall
 def _validated_codegen_run_8616(
     self: AngrDecompilerSurface,
     func_addr: object,
-    prime_changed: bool,
-) -> tuple[bool, StructuringLoweringReplayImpact8616]:
+    prime_changed: cython.bint,
+) -> tuple[cython.bint, StructuringLoweringReplayImpact8616]:
     """Run structuring codegen and report the pass-declared lowering replay impact."""
+    lowering_replay_impact: object
     with span("x86_16.structuring.codegen", function=func_addr):
         changed = bool(_structuring_codegen_8616(self.project, self.codegen)) or prime_changed
         annotate_current_span(
@@ -5036,12 +5349,13 @@ def _validated_codegen_run_8616(
     )
     return changed, lowering_replay_impact
 
+@cython.ccall
 def _validated_guard_repair_phases_8616(
     self: AngrDecompilerSurface,
     func_addr: object,
-    changed: bool,
+    changed: cython.bint,
     flags: _ValidatedStructuringFlags8616,
-) -> bool:
+) -> cython.bint:
     """Run the selector/return/loop-guard repair spans and accumulate changes."""
     with span("x86_16.structuring.selector_return", function=func_addr):
         flags.selector_return = bool(
@@ -5106,12 +5420,13 @@ def _validated_guard_repair_phases_8616(
         annotate_current_span(changed=flags.pretest_loop_guard)
     return changed
 
+@cython.ccall
 def _validated_jcc_repair_phases_8616(
     self: AngrDecompilerSurface,
     func_addr: object,
-    changed: bool,
+    changed: cython.bint,
     flags: _ValidatedStructuringFlags8616,
-) -> bool:
+) -> cython.bint:
     """Run the canonical-for/JCC/return-shape/void-tail-call repair spans."""
     with span("x86_16.structuring.canonical_for_loops", function=func_addr):
         flags.canonical_for = bool(
@@ -5151,9 +5466,9 @@ def _validated_jcc_repair_phases_8616(
 def _validated_refresh_cleanup_phases_8616(
     self: AngrDecompilerSurface,
     func_addr: object,
-    changed: bool,
+    changed: cython.bint,
     flags: _ValidatedStructuringFlags8616,
-) -> bool:
+) -> cython.bint:
     """Run condition refresh, pointer-memory, and shared-call cleanup spans."""
     with span("x86_16.structuring.condition_refresh", function=func_addr):
         condition_refresh_result = _refresh_structuring_condition_semantics_8616(
@@ -5188,7 +5503,7 @@ def _validated_refresh_cleanup_phases_8616(
                 "[pointer-memory-structuring-final] lines=%r",
                 tuple(
                     line.strip()
-                    for line in pointer_text.splitlines()
+                    for line in builtins.iter(pointer_text.splitlines())
                     if "[0]" in line or "SEG_U16" in line
                 ),
             )
@@ -5203,8 +5518,9 @@ def _validated_refresh_cleanup_phases_8616(
         annotate_current_span(changed=flags.shared_call)
     return changed
 
+@cython.ccall
 def _regenerate_if_structuring_changed_8616(
-    codegen: AngrCodegenSurface, func_addr: object, changed: bool
+    codegen: AngrCodegenSurface, func_addr: object, changed: cython.bint
 ) -> None:
     """Regenerate rendered text only when a pass mutated the structured AST."""
     if changed:
@@ -5216,10 +5532,11 @@ def _regenerate_if_structuring_changed_8616(
             annotate_current_span(regenerated=bool(regenerated))
 
 
+@cython.ccall
 def _post_regen_narrow_lowering_replay_8616(
     post_codegen_lowering_replay_impact: StructuringLoweringReplayImpact8616,
     codegen: AngrCodegenSurface,
-) -> bool:
+) -> cython.bint:
     """Run the narrower-than-full post-regeneration lowering replay arms."""
     if (
         post_codegen_lowering_replay_impact
@@ -5229,9 +5546,10 @@ def _post_regen_narrow_lowering_replay_8616(
     return False
 
 
+@cython.ccall
 def _materialize_terminal_call_result_return_delta_8616(
     project: AngrProjectSurface, codegen: AngrCodegenSurface
-) -> tuple[bool, bool]:
+) -> tuple[cython.bint, cython.bint]:
     """Materialize terminal call-result returns; return (flag, combined changed)."""
     terminal_call_return = bool(
         _materialize_structuring_terminal_call_result_return_8616(
@@ -5256,7 +5574,8 @@ def _materialize_terminal_call_result_return_delta_8616(
     )
 
 
-def _final_lowering_boundary_changed_8616(flags: _ValidatedStructuringFlags8616) -> bool:
+@cython.ccall
+def _final_lowering_boundary_changed_8616(flags: _ValidatedStructuringFlags8616) -> cython.bint:
     """Return whether any final boundary flag requires the last lowering replay."""
     return bool(
         flags.terminal_call_return
@@ -5266,12 +5585,13 @@ def _final_lowering_boundary_changed_8616(flags: _ValidatedStructuringFlags8616)
     )
 
 
+@cython.ccall
 def _validated_terminal_mid_phases_8616(
     self: AngrDecompilerSurface,
     func_addr: object,
-    changed: bool,
+    changed: cython.bint,
     flags: _ValidatedStructuringFlags8616,
-) -> bool:
+) -> cython.bint:
     """Canonicalize Boolean guards before their final condition refresh."""
     with span("x86_16.structuring.boolean_condition_ites", function=func_addr):
         boolean_ite_stats = normalize_boolean_condition_ites_8616(self.codegen)
@@ -5305,11 +5625,12 @@ def _validated_terminal_mid_phases_8616(
         annotate_current_span(changed=flags.final_loop_break_jcc)
     return changed
 
+@cython.ccall
 def _validated_selector_phases_8616(
     self: AngrDecompilerSurface,
     func_addr: object,
-    changed: bool,
-) -> bool:
+    changed: cython.bint,
+) -> cython.bint:
     """Run the final switch-exit and wide-stack predicate spans."""
     with span("x86_16.structuring.final_switch_loop_exit_return", function=func_addr):
         final_switch_exit_changed = _repair_structuring_switch_loop_exit_returns_8616(
@@ -5327,11 +5648,12 @@ def _validated_selector_phases_8616(
         annotate_current_span(changed=bool(final_wide_predicate_changed))
     return changed
 
+@cython.ccall
 def _validated_callsite_closure_phases_8616(
     self: AngrDecompilerSurface,
     func_addr: object,
-    changed: bool,
-) -> bool:
+    changed: cython.bint,
+) -> cython.bint:
     """Run the identical-return-guard collapse and callsite closure spans."""
     with span("x86_16.structuring.identical_return_guards", function=func_addr):
         identical_return_guards = collapse_pure_identical_return_guards_8616(
@@ -5381,9 +5703,10 @@ def _validated_callsite_closure_phases_8616(
         annotate_current_span(changed=bool(final_callsite_changed))
     return changed
 
+@cython.ccall
 def _finalize_shared_call_ownership_8616(
     self: AngrDecompilerSurface, codegen: AngrCodegenSurface
-) -> bool:
+) -> cython.bint:
     """Close shared-call ownership and rerun pointer-memory; return its delta."""
     final_shared_call_changed = finalize_shared_call_occurrences_8616(
         self.project,
@@ -5402,8 +5725,12 @@ def _finalize_shared_call_ownership_8616(
     annotate_current_span(pointer_memory_changed=bool(final_pointer_memory_changed))
     return bool(final_pointer_memory_changed)
 
+@cython.ccall
 def _validated_decompile_function_8616(self: AngrDecompilerSurface) -> object:
     """Resolve the angr function for diagnostics, with a kb fallback."""
+    addr: object
+    function: object
+    kb_functions: object
     function = getattr(self, "function", None) or getattr(self, "func", None)
     if function is None and getattr(getattr(self, "codegen", None), "cfunc", None) is not None:
         addr = getattr(self.codegen.cfunc, "addr", None)
@@ -5414,21 +5741,22 @@ def _validated_decompile_function_8616(self: AngrDecompilerSurface) -> object:
                 function = kb_functions.function(addr, create=False)
     return function
 
-@dataclass
+@cython.dataclasses.dataclass
 class _StructuringValidationBaseline8616:
     """Tail-validation baseline captured before the structuring pass pipeline."""
 
-    prime_changed: bool
-    before_fingerprint: str
+    prime_changed: cython.bint
+    before_fingerprint: object
     before_summary: X86_16TailValidationSummary
-    before_collect_elapsed: float
+    before_collect_elapsed: cython.double
 
 
+@cython.ccall
 def _structuring_validation_baseline_8616(
     self: AngrDecompilerSurface,
     codegen: AngrCodegenSurface,
     func_addr: object,
-    validation_mode: str,
+    validation_mode: object,
 ) -> _StructuringValidationBaseline8616:
     """Prime validation semantics and capture the pre-structuring baseline."""
     with span("x86_16.structuring.validation_prime", function=func_addr):
@@ -5455,16 +5783,19 @@ def _structuring_validation_baseline_8616(
     )
 
 
+@cython.ccall
 def _validated_structuring_publish_8616(
     self: AngrDecompilerSurface,
     func_addr: object,
-    validation_mode: str,
+    validation_mode: object,
     baseline: _StructuringValidationBaseline8616,
-    after_fingerprint: str,
-    structuring_elapsed: float,
-    changed: bool,
+    after_fingerprint: object,
+    structuring_elapsed: cython.double,
+    changed: cython.bint,
 ) -> None:
     """Collect the after snapshot, run final tail validation, and publish results."""
+    function: object
+    info: object
     codegen = self.codegen
     before_fingerprint = baseline.before_fingerprint
     before_summary = baseline.before_summary
@@ -5569,8 +5900,10 @@ def _validated_structuring_publish_8616(
         log.info("%s", validation["verdict"])
     self.project._inertia_decompiler_stage = "structuring_done"
 
+@cython.ccall
 def _publish_final_structuring_ast_8616(self: AngrDecompilerSurface) -> None:
     """Publish the final AST after every structuring and validation operation."""
+    codegen: object
     from inertia.ir.function_readiness_contracts import FunctionLifecycleStage8616
     from inertia.pipeline.function_readiness import record_function_ast_stage_evidence_8616
 
@@ -5583,8 +5916,11 @@ def _publish_final_structuring_ast_8616(self: AngrDecompilerSurface) -> None:
     )
 
 
+@cython.ccall
 def _decompile_structuring_8616(self: AngrDecompilerSurface) -> None:
     """Produce the final structured AST and publish its observed output version."""
+    clinic: object
+    func_addr: object
     structuring_elapsed = _run_angr_core_decompile_8616(self)
     if self.project.arch.name != "86_16" or self.codegen is None:
         return
@@ -5611,7 +5947,7 @@ def _decompile_structuring_8616(self: AngrDecompilerSurface) -> None:
     changed, lowering_replay_impact = _validated_codegen_run_8616(
         self, func_addr, baseline.prime_changed
     )
-    if lowering_replay_impact == StructuringLoweringReplayImpact8616.FULL_AST:
+    if operator.eq(lowering_replay_impact, StructuringLoweringReplayImpact8616.FULL_AST):
         with span("x86_16.structuring.direct_stack_materialization", function=func_addr):
             direct_stack_changed = _apply_structuring_direct_stack_materialization_8616(
                 self.project,
@@ -5712,18 +6048,20 @@ def _decompile_structuring_8616(self: AngrDecompilerSurface) -> None:
     _publish_final_structuring_ast_8616(self)
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _SsAliasCensus8616:
     """SS-space tallies from the module alias fact cache."""
 
-    has_ss: bool = False
-    has_ss_stable: bool = False
-    has_ss_failure: bool = False
+    has_ss: cython.bint = False
+    has_ss_stable: cython.bint = False
+    has_ss_failure: cython.bint = False
     first_ss_failure_reason: object = None
 
 
-def _ss_alias_census_8616(facts: list[object]) -> _SsAliasCensus8616:
+@cython.ccall
+def _ss_alias_census_8616(facts: object) -> _SsAliasCensus8616:
     """Census SS-space alias facts, skipping provisional SP-relative failures."""
+    fact: object
     from inertia.alias.alias_model_impl import AliasFailure, AliasStorageFacts
 
     census = _SsAliasCensus8616()
@@ -5732,7 +6070,7 @@ def _ss_alias_census_8616(facts: list[object]) -> _SsAliasCensus8616:
             if fact.space in {"ss", "SS"}:
                 census.has_ss = True
                 address = fact.address
-                if isinstance(address, IRAddress) and address.status == AddressStatus.PROVISIONAL:
+                if isinstance(address, IRAddress) and operator.eq(address.status, AddressStatus.PROVISIONAL):
                     continue
                 census.has_ss_failure = True
                 if census.first_ss_failure_reason is None:
@@ -5743,6 +6081,7 @@ def _ss_alias_census_8616(facts: list[object]) -> _SsAliasCensus8616:
     return census
 
 
+@cython.ccall
 def _assert_alias_complete_8616(codegen: AngrCodegenSurface) -> None:
     """Block structuring when SS stack alias facts are incomplete.
 
@@ -5755,6 +6094,8 @@ def _assert_alias_complete_8616(codegen: AngrCodegenSurface) -> None:
 
     Raises PipelineHardError if any proven SS access lacks stable stack alias.
     """
+    cfunc: object
+    facts: object
     from inertia.frontend.x86_16.access import _inertia_module_alias_fact_cache
     from inertia.pipeline.errors import PipelineHardError
 
@@ -5781,20 +6122,24 @@ def _assert_alias_complete_8616(codegen: AngrCodegenSurface) -> None:
         )
 
 
-def _decompiler_wrapper_chain_contains_8616(root: object, wrapper_name: str) -> bool:
+@cython.ccall
+def _decompiler_wrapper_chain_contains_8616(root: object, wrapper_name: object) -> cython.bint:
     """Return whether an angr decompiler wrapper is already in the call chain."""
-    seen: set[int] = set()
+    current: object
+    seen: set[cython.longlong] = set()
     current = root
     while callable(current) and id(current) not in seen:
         seen.add(id(current))
-        if getattr(current, "__name__", "") == wrapper_name:
+        if operator.eq(getattr(current, "__name__", ""), wrapper_name):
             return True
         current = getattr(current, "_orig_decompiler_decompile", None)
     return False
 
 
+@cython.ccall
 def apply_x86_16_decompiler_structuring() -> None:
     """Install the 16-bit structuring wrapper around angr's decompiler."""
+    postprocess_original: object
     current = Decompiler._decompile
     if _decompiler_wrapper_chain_contains_8616(current, "_decompile_structuring_8616"):
         return

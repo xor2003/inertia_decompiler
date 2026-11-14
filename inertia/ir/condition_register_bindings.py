@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Snapshot typed register-value evidence at condition producers.
 
 Layer: IR.
@@ -9,12 +10,15 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from typing import Protocol
 
 from .condition_ir import ConditionRegisterBindingIR
 from .core import IRBinaryValue, IRValue
+import builtins
 
 
 class ConditionRegisterValueStateSurface8616(Protocol):
@@ -26,21 +30,21 @@ class ConditionRegisterValueStateSurface8616(Protocol):
         ...
 
     @property
-    def next_addr(self) -> int:
+    def next_addr(self) -> cython.longlong:
         """Return the first instruction address where the value is valid."""
         ...
 
 
 def snapshot_condition_register_bindings_8616(
-    states: Mapping[tuple[int, str], ConditionRegisterValueStateSurface8616],
+    states: Mapping[tuple[cython.longlong, str], ConditionRegisterValueStateSurface8616],
     block_addr: int | None,
-    instruction_addr: int,
+    instruction_addr: cython.longlong,
 ) -> tuple[ConditionRegisterBindingIR, ...]:
     """Return deterministic bindings valid at one condition producer."""
     if not isinstance(block_addr, int):
         return ()
     return tuple(
         ConditionRegisterBindingIR(register_name, state.value)
-        for (owner, register_name), state in sorted(states.items())
+        for (owner, register_name), state in builtins.iter(sorted(tuple(states.items())))
         if owner == block_addr and state.next_addr <= instruction_addr
     )

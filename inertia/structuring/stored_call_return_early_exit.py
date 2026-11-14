@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize early exits from stored call-return conditions.
 
 Layer: Structuring.
@@ -12,6 +13,8 @@ source/COD/name evidence, rendered text, and guessed return values are forbidden
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -37,6 +40,7 @@ from .branch_return_expressions import (
 )
 from .call_return_conditions import structured_condition_key_8616
 from .stored_call_return_operands import stored_return_operand_8616
+import dataclasses
 
 __all__ = [
     "StoredCallReturnEarlyExitEvidence8616",
@@ -55,22 +59,22 @@ class StoredCallReturnEarlyExitStatus8616(StrEnum):
     MATERIALIZED = "materialized"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StoredCallReturnEarlyExitEvidence8616:
     """Closed evidence accounting for one early-exit materialization."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StoredCallReturnEarlyExitResult8616:
     """Typed result of one early-exit Structuring pass."""
 
-    changed: bool
+    changed: cython.bint
     status: StoredCallReturnEarlyExitStatus8616
     evidence: StoredCallReturnEarlyExitEvidence8616
 
@@ -92,10 +96,10 @@ def _terminal_return_8616(body: object) -> CReturn | None:
     """Return one unique return occupying the continuation's terminal leaf."""
     returns = tuple(
         node
-        for node in (body, *_iter_c_nodes_deep_8616(body))
+        for node in iter((body, ) + tuple(_iter_c_nodes_deep_8616(body)))
         if isinstance(node, CReturn)
     )
-    if len({id(node): node for node in returns}) != 1:
+    if len({id(node): node for node in iter(returns)}) != 1:
         return None
     current = body
     for _depth in range(12):
@@ -110,10 +114,14 @@ def _terminal_return_8616(body: object) -> CReturn | None:
     return None
 
 
-def _statement_container_8616(root: CStatements, statement: object) -> tuple[CStatements, int] | None:
+@cython.ccall
+def _statement_container_8616(root: CStatements, statement: object) -> object:
     """Return the unique direct statement container and index."""
-    matches: dict[tuple[int, int], tuple[CStatements, int]] = {}
-    for candidate in (root, *_iter_c_nodes_deep_8616(root)):
+    candidate: object
+    child: object
+    index: object
+    matches: dict[tuple[cython.longlong, cython.longlong], tuple[CStatements, cython.longlong]] = {}
+    for candidate in (root, ) + tuple(_iter_c_nodes_deep_8616(root)):
         if not isinstance(candidate, CStatements):
             continue
         for index, child in enumerate(tuple(candidate.statements or ())):
@@ -122,16 +130,16 @@ def _statement_container_8616(root: CStatements, statement: object) -> tuple[CSt
     return next(iter(matches.values())) if len(matches) == 1 else None
 
 
-def _terminal_return_after_8616(container: CStatements, index: int) -> CReturn | None:
+def _terminal_return_after_8616(container: CStatements, index: cython.longlong) -> CReturn | None:
     """Return the unique terminal return after one flattened early-exit branch."""
     suffix = tuple(container.statements or ())[index + 1 :]
     returns = tuple(
         node
-        for statement in suffix
-        for node in (statement, *_iter_c_nodes_deep_8616(statement))
+        for statement in iter(suffix)
+        for node in iter((statement, ) + tuple(_iter_c_nodes_deep_8616(statement)))
         if isinstance(node, CReturn)
     )
-    if len({id(node): node for node in returns}) != 1 or not suffix:
+    if len({id(node): node for node in iter(returns)}) != 1 or not suffix:
         return None
     current = suffix[-1]
     for _depth in range(12):
@@ -146,12 +154,16 @@ def _terminal_return_after_8616(container: CStatements, index: int) -> CReturn |
     return None
 
 
+@cython.ccall
 def _matching_candidate_8616(
     project: object,
     codegen: object,
     root: CStatements,
-) -> tuple[CIfElse, CExpression, StoredCallReturnConditionEvidence8616] | None:
+) -> object:
     """Return one unique structured branch backed by exact stored-return evidence."""
+    evidence: object
+    key: object
+    node: object
     candidates: list[tuple[CIfElse, CExpression, StoredCallReturnConditionEvidence8616]] = []
     for node in _iter_c_nodes_deep_8616(root):
         if not isinstance(node, CIfElse) or len(node.condition_and_nodes) != 1:
@@ -171,12 +183,13 @@ def _matching_candidate_8616(
     return candidates[0] if len(candidates) == 1 else None
 
 
+@cython.ccall
 def _result_8616(
     codegen: _StoredReturnCodegen8616,
     status: StoredCallReturnEarlyExitStatus8616,
     evidence: StoredCallReturnEarlyExitEvidence8616,
     *,
-    changed: bool = False,
+    changed: cython.bint = False,
 ) -> StoredCallReturnEarlyExitResult8616:
     """Publish one typed Structuring result on the codegen owner."""
     result = StoredCallReturnEarlyExitResult8616(changed, status, evidence)
@@ -184,6 +197,7 @@ def _result_8616(
     return result
 
 
+@cython.ccall
 def _refused_result_8616(
     codegen: _StoredReturnCodegen8616,
 ) -> StoredCallReturnEarlyExitResult8616:
@@ -195,7 +209,7 @@ def _refused_result_8616(
     )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _EarlyExitPrelude8616:
     """Validated boundary evidence for one stored-call early exit."""
 
@@ -205,11 +219,12 @@ class _EarlyExitPrelude8616:
     true_body: object
     true_return: CReturn | None
     statement_container: CStatements
-    branch_index: int
+    branch_index: cython.longlong
     final_expression: CExpression
-    true_ready: bool
+    true_ready: cython.bint
 
 
+@cython.ccall
 def _not_applicable_result_8616(
     typed_codegen: _StoredReturnCodegen8616,
 ) -> StoredCallReturnEarlyExitResult8616:
@@ -221,11 +236,16 @@ def _not_applicable_result_8616(
     )
 
 
+@cython.ccall
 def _early_exit_prelude_8616(
     project: object,
     codegen: object,
 ) -> _EarlyExitPrelude8616 | StoredCallReturnEarlyExitResult8616:
     """Resolve and validate the early-exit boundary or produce the result."""
+    candidate: object
+    container: object
+    return_operand: object
+    true_return: object
     typed_codegen = cast(_StoredReturnCodegen8616, codegen)
     try:
         root = typed_codegen.cfunc.statements
@@ -301,6 +321,8 @@ def _materialize_flattened_exit_8616(
     prelude: _EarlyExitPrelude8616,
 ) -> StoredCallReturnEarlyExitResult8616:
     """Materialize or validate the flattened early exit without an else node."""
+    final_return: object
+    true_return: object
     typed_codegen = prelude.typed_codegen
     true_body = prelude.true_body
     true_return = prelude.true_return
@@ -311,8 +333,8 @@ def _materialize_flattened_exit_8616(
     suffix = tuple(statement_container.statements or ())[branch_index + 1 :]
     has_suffix_return = any(
         isinstance(node, CReturn)
-        for statement in suffix
-        for node in (statement, *_iter_c_nodes_deep_8616(statement))
+        for statement in iter(suffix)
+        for node in iter((statement, ) + tuple(_iter_c_nodes_deep_8616(statement)))
     )
     if true_return is None:
         if not isinstance(true_body, CStatements) or tuple(true_body.statements or ()):
@@ -347,10 +369,13 @@ def _materialize_flattened_exit_8616(
     )
 
 
+@cython.ccall
 def _materialize_spliced_exit_8616(
     prelude: _EarlyExitPrelude8616,
 ) -> StoredCallReturnEarlyExitResult8616:
     """Splice the proven continuation out of an else-body early exit."""
+    false_return: object
+    true_return: object
     typed_codegen = prelude.typed_codegen
     branch = prelude.branch
     else_node = branch.else_node
@@ -380,6 +405,7 @@ def _materialize_spliced_exit_8616(
     )
 
 
+@cython.ccall
 def materialize_stored_call_return_early_exit_8616(
     project: object,
     codegen: object,

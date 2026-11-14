@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery metadata.
 
 Responsibility: route helper refusal families to likely owner layers for diagnosis.
@@ -11,12 +12,15 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
 
 from .helper_effect_summary import HelperEligibilitySummary
+import dataclasses
 
 __all__ = [
     "HelperFamilyRoute",
@@ -24,15 +28,15 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class HelperFamilyRoute:
     """Diagnostic route from a helper eligibility signal to its owning layer."""
 
-    family: str
-    count: int
-    likely_layer: str
-    next_root_cause_file: str
-    signal: str
+    family: object
+    count: cython.longlong
+    likely_layer: object
+    next_root_cause_file: object
+    signal: object
 
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-compatible helper family route."""
@@ -45,7 +49,8 @@ class HelperFamilyRoute:
         }
 
 
-def _route_for_refusal(kind: str) -> tuple[str, str, str]:
+@cython.ccall
+def _route_for_refusal(kind: object) -> tuple[str, str, str]:
     if kind == "indirect_control":
         return (
             "helper_wrapper_indirect_control",
@@ -81,6 +86,10 @@ def summarize_x86_16_helper_family_routes(
     helper_summaries: Iterable[HelperEligibilitySummary],
 ) -> tuple[HelperFamilyRoute, ...]:
     """Group helper eligibility summaries into stable owner-layer diagnostics."""
+    count: object
+    refusal: object
+    refusal_kind: object
+    summary: object
     refusal_counter: Counter[str] = Counter()
     eligible_counter = 0
     no_signal_counter = 0
@@ -105,7 +114,7 @@ def summarize_x86_16_helper_family_routes(
                 signal="eligible",
             )
         )
-    for refusal_kind, count in sorted(refusal_counter.items()):
+    for refusal_kind, count in sorted(tuple(refusal_counter.items())):
         family, likely_layer, next_root_cause_file = _route_for_refusal(refusal_kind)
         routes.append(
             HelperFamilyRoute(

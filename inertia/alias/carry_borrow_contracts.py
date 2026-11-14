@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed Alias contracts for carry-linked split arithmetic.
 
 Layer: Alias.
@@ -9,6 +10,8 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -22,6 +25,8 @@ from inertia.semantics.carry_borrow_contracts import (
 
 from .domains import DomainKey
 from .storage_fact_join import SegmentedAliasRange8616
+import dataclasses
+import operator
 
 
 class CarryBorrowAliasVerdict8616(StrEnum):
@@ -64,7 +69,7 @@ class CarryBorrowOperandRole8616(StrEnum):
     HIGH_RHS = "high_rhs"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CarryBorrowOperandAlias8616:
     """Exact Alias or immutable constant identity for one semantic operand."""
 
@@ -75,15 +80,15 @@ class CarryBorrowOperandAlias8616:
     constant: IRValue | None = None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether exactly one supported carrier identity is present."""
         return sum(
             item is not None
-            for item in (self.register_domain, self.memory, self.constant)
+            for item in iter((self.register_domain, self.memory, self.constant))
         ) == 1
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CarryBorrowCallOutputAlias8616:
     """Exact low/high register definitions produced by one machine call."""
 
@@ -92,7 +97,7 @@ class CarryBorrowCallOutputAlias8616:
     high_output: IRValue
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CarryBorrowAliasFact8616:
     """Alias-proven result and operand identities for one carry-linked value."""
 
@@ -108,7 +113,7 @@ class CarryBorrowAliasFact8616:
     source_constant: int | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CarryBorrowAliasResolution8616:
     """Alias fact or typed refusal corresponding to one Semantics outcome."""
 
@@ -119,43 +124,43 @@ class CarryBorrowAliasResolution8616:
     failure_operand: CarryBorrowOperandRole8616 | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CarryBorrowAliasStats8616:
     """Closed accounting for carry/borrow Alias projection."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every Semantics outcome has one Alias result."""
         return (
-            self.raw_fact_count == self.normalized_fact_count
-            and self.raw_fact_count == self.materialized_count + self.failure_count
-            and self.classified_fact_count == self.materialized_count
+            operator.eq(self.raw_fact_count, self.normalized_fact_count)
+            and operator.eq(self.raw_fact_count, self.materialized_count + self.failure_count)
+            and operator.eq(self.classified_fact_count, self.materialized_count)
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CarryBorrowAliasEvidence8616:
     """Function-level Alias facts and refusals for carry-linked values."""
 
-    function_addr: int
-    resolutions: tuple[CarryBorrowAliasResolution8616, ...]
+    function_addr: cython.longlong
+    resolutions: object
     stats: CarryBorrowAliasStats8616
 
     @property
     def facts(self) -> tuple[CarryBorrowAliasFact8616, ...]:
         """Return every proven Alias fact in deterministic order."""
-        return tuple(item.fact for item in self.resolutions if item.fact is not None)
+        return tuple(item.fact for item in iter(self.resolutions) if item.fact is not None)
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether projection count and evidence accounting are closed."""
-        return self.stats.complete and len(self.resolutions) == self.stats.raw_fact_count
+        return self.stats.complete and operator.eq(len(self.resolutions), self.stats.raw_fact_count)
 
 
 __all__ = [

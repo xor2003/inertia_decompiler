@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/PyVEX compatibility.
 
 Responsibility: retain the checked symbolic-value contract across decorators.
@@ -7,10 +8,12 @@ actual wrapper, not object shape, and never creates or guesses machine state.
 """
 
 from __future__ import annotations
+import cython
 
 from pyvex.lifting.util.syntax_wrapper import VexValue
 
 
+@cython.ccall
 def require_vex_value_8616(value: object) -> VexValue:
     """Require a symbolic PyVEX value for a lifting-only operation."""
     if not isinstance(value, VexValue):

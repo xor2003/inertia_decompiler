@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Project exact scalar byte views of already-proven two-byte aggregates.
 
 Layer: Types/Lowering.
@@ -9,6 +10,7 @@ from arithmetic expressions whose inherited type merely resembles a struct.
 """
 
 from __future__ import annotations
+import cython
 
 from collections.abc import Callable
 
@@ -25,10 +27,11 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimStruct
 
-_BYTE_BITS: int = 8
-_BYTE_SHIFTS: tuple[int, ...] = (0, _BYTE_BITS)
+_BYTE_BITS: cython.longlong = 8
+_BYTE_SHIFTS: tuple[cython.longlong, ...] = (0, _BYTE_BITS)
 
 
+@cython.ccall
 def project_proven_aggregate_byte_8616(
     expression: CExpression,
     codegen: object,
@@ -40,6 +43,7 @@ def project_proven_aggregate_byte_8616(
     shift selects a byte of its operand, not a field of the shift expression.
     Do not cross other arithmetic or casts even if angr inherits their type.
     """
+    layout: object
     byte_offset = 0
     source = expression
     if isinstance(source, CBinaryOp):

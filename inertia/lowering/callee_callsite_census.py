@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Collect exact caller ownership with binary callsite summaries.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from types import SimpleNamespace
@@ -28,6 +31,8 @@ from .callee_callsite_contracts import (
 from .callee_range_callsite_facts import (
     collect_range_callsite_facts_for_target_8616,
 )
+import operator
+import builtins
 
 __all__ = [
     "CalleeCallsiteCensus8616",
@@ -55,13 +60,14 @@ class _ProjectSurface8616(Protocol):
 
     kb: _KnowledgeBase8616
     _inertia_original_project: object
-    _inertia_original_linear_delta: int
-    _inertia_caller_function_ranges_8616: tuple[tuple[int, int], ...]
-    _inertia_caller_target_aliases_8616: tuple[int, ...]
+    _inertia_original_linear_delta: cython.longlong
+    _inertia_caller_function_ranges_8616: object
+    _inertia_caller_target_aliases_8616: object
     _inertia_caller_evidence_project_8616: object
-    _inertia_caller_evidence_target_8616: int
+    _inertia_caller_evidence_target_8616: cython.longlong
 
 
+@cython.ccall
 def _function_addr_8616(function: object) -> int | None:
     """Return one exact third-party function address when available."""
     try:
@@ -73,11 +79,12 @@ def _function_addr_8616(function: object) -> int | None:
 
 def _project_target_pairs_8616(
     project: object,
-    target_addr: int,
-) -> tuple[tuple[object, int], ...]:
+    target_addr: cython.longlong,
+) -> tuple[tuple[object, cython.longlong], ...]:
     """Return active/original project targets across explicit rebasing."""
+    caller_project: object
     active = cast(_ProjectSurface8616, project)
-    pairs: list[tuple[object, int]] = [(project, target_addr)]
+    pairs: list[tuple[object, cython.longlong]] = [(project, target_addr)]
     try:
         caller_project = active._inertia_caller_evidence_project_8616
         caller_target = active._inertia_caller_evidence_target_8616
@@ -96,7 +103,7 @@ def _project_target_pairs_8616(
         original_project = active._inertia_original_project
     except AttributeError:
         if target_addr in aliases:
-            pairs.extend((project, alias) for alias in aliases if isinstance(alias, int))
+            pairs.extend((project, alias) for alias in iter(aliases) if isinstance(alias, int))
         return tuple(pairs)
     try:
         delta = active._inertia_original_linear_delta
@@ -105,16 +112,16 @@ def _project_target_pairs_8616(
     alias_scope_targets = {target_addr}
     if delta:
         alias_scope_targets.update((target_addr + delta, target_addr - delta))
-    aliases_apply = any(alias in alias_scope_targets for alias in aliases)
-    original_targets = (target_addr, target_addr + delta) if delta else (target_addr,)
-    pairs.extend((original_project, candidate) for candidate in original_targets)
+    aliases_apply = any(alias in alias_scope_targets for alias in iter(aliases))
+    original_targets = tuple((target_addr, target_addr + delta)) if delta else tuple((target_addr,))
+    pairs.extend((original_project, candidate) for candidate in iter(original_targets))
     if aliases_apply:
-        pairs.extend((project, alias) for alias in aliases if isinstance(alias, int))
-        pairs.extend((original_project, alias) for alias in aliases if isinstance(alias, int))
+        pairs.extend((project, alias) for alias in iter(aliases) if isinstance(alias, int))
+        pairs.extend((original_project, alias) for alias in iter(aliases) if isinstance(alias, int))
     return tuple(pairs)
 
 
-def _caller_function_ranges_8616(project: object) -> tuple[tuple[int, int], ...]:
+def _caller_function_ranges_8616(project: object) -> tuple[tuple[cython.longlong, cython.longlong], ...]:
     """Return independently framed original-binary caller ranges."""
     try:
         ranges = cast(_ProjectSurface8616, project)._inertia_caller_function_ranges_8616
@@ -124,25 +131,28 @@ def _caller_function_ranges_8616(project: object) -> tuple[tuple[int, int], ...]
         raise TypeError("caller function ranges must be a tuple")
     return tuple(
         (start, end)
-        for start, end in ranges
+        for start, end in iter(ranges)
         if isinstance(start, int) and isinstance(end, int) and end > start
     )
 
 
+@cython.ccall
 def _function_callsite_facts_8616(
     evidence_project: object,
-    evidence_target: int,
+    evidence_target: cython.longlong,
     function: object,
-    facts: dict[tuple[int, int], CalleeCallsiteFact8616],
-    raw_callsites: set[tuple[int, int]],
+    facts: object,
+    raw_callsites: object,
 ) -> None:
     """Record every direct callsite from one caller function."""
+    summary: object
+    target: object
     try:
         targets = collect_neighbor_call_targets(function)
     except (AttributeError, KeyError, TypeError, ValueError):
         return
     for target in targets:
-        if target.target_addr != evidence_target:
+        if operator.ne(target.target_addr, evidence_target):
             continue
         callsite_key = (id(evidence_project), target.callsite_addr)
         raw_callsites.add(callsite_key)
@@ -161,14 +171,17 @@ def _function_callsite_facts_8616(
         )
 
 
+@cython.ccall
 def _collect_project_facts_8616(
     evidence_project: object,
-    evidence_target: int,
-    function_ranges: tuple[tuple[int, int], ...],
-    facts: dict[tuple[int, int], CalleeCallsiteFact8616],
-    raw_callsites: set[tuple[int, int]],
+    evidence_target: cython.longlong,
+    function_ranges: object,
+    facts: object,
+    raw_callsites: object,
 ) -> None:
     """Collect callsite facts from one evidence project surface."""
+    fact: object
+    function: object
     try:
         functions = tuple(cast(_ProjectSurface8616, evidence_project).kb.functions.values())
     except (AttributeError, TypeError):
@@ -193,17 +206,20 @@ def _collect_project_facts_8616(
 
 def collect_callee_callsite_census_8616(
     project: object,
-    target_addr: int,
+    target_addr: cython.longlong,
 ) -> CalleeCallsiteCensus8616:
     """Collect every direct caller while retaining exact ownership facts."""
+    cached: object
+    evidence_project: object
+    evidence_target: object
     cache = callee_callsite_censuses_by_addr_8616(project)
     cached = cache.get(target_addr)
     if cached is not None:
         return cached
 
-    facts: dict[tuple[int, int], CalleeCallsiteFact8616] = {}
-    raw_callsites: set[tuple[int, int]] = set()
-    visited_projects: set[tuple[int, int]] = set()
+    facts: dict[tuple[cython.longlong, cython.longlong], CalleeCallsiteFact8616] = {}
+    raw_callsites: set[tuple[cython.longlong, cython.longlong]] = set()
+    visited_projects: set[tuple[cython.longlong, cython.longlong]] = set()
     function_ranges = _caller_function_ranges_8616(project)
     for evidence_project, evidence_target in _project_target_pairs_8616(project, target_addr):
         project_key = (id(evidence_project), evidence_target)
@@ -217,8 +233,8 @@ def collect_callee_callsite_census_8616(
             facts,
             raw_callsites,
         )
-    ordered = tuple(facts[key] for key in sorted(raw_callsites, key=lambda item: (item[1], item[0])))
-    normalized_count = sum(fact.summary is not None for fact in ordered)
+    ordered = tuple(facts[key] for key in builtins.iter(sorted(raw_callsites, key=lambda item: (item[1], item[0]))))
+    normalized_count = sum(fact.summary is not None for fact in iter(ordered))
     census = CalleeCallsiteCensus8616(
         target_addr=target_addr,
         facts=ordered,

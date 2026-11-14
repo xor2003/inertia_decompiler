@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Rewrite/Postprocess cleanup.
 
 Responsibility: own the shared typed runtime contract for the named cleanup
@@ -13,6 +14,8 @@ only; they are never semantic evidence.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 import os
@@ -21,6 +24,7 @@ from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from typing import Protocol
+import dataclasses
 
 __all__ = [
     "OPTIMIZATION_RULE_PASS_PREFIX_8616",
@@ -43,7 +47,7 @@ _DECISIONS_ATTR_8616: str = "_inertia_optimization_rule_decisions_8616"
 # Process-local set of ``id(codegen)`` values currently inside one run. The
 # guarded codegen object stays alive on the caller stack for the whole run, so
 # its id cannot be recycled while the entry is present.
-_ACTIVE_RUN_CODEGEN_IDS_8616: set[int] = set()
+_ACTIVE_RUN_CODEGEN_IDS_8616: set[cython.longlong] = set()
 
 
 class OptimizationRuleOutcome8616(Enum):
@@ -62,26 +66,26 @@ class OptimizationRuleSpec8616(Protocol):
     """Minimal runtime shape of one named cleanup optimization rule."""
 
     @property
-    def name(self) -> str:
+    def name(self) -> object:
         """Return the bare rule name used for skip policy and diagnostics."""
         ...
 
     @property
-    def func(self) -> Callable[..., bool]:
+    def func(self) -> Callable[..., cython.bint]:
         """Return the rule body; it reports True when it modified the codegen."""
         ...
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class OptimizationRuleDecision8616:
     """Audited decision recorded for one named cleanup optimization rule."""
 
-    name: str
-    canonical_name: str
+    name: object
+    canonical_name: object
     outcome: OptimizationRuleOutcome8616
 
     @property
-    def executed(self) -> bool:
+    def executed(self) -> cython.bint:
         """Return True when the rule body was invoked at all."""
         return self.outcome in {
             OptimizationRuleOutcome8616.CHANGED,
@@ -90,43 +94,45 @@ class OptimizationRuleDecision8616:
         }
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return True only when the rule reported a modification."""
         return self.outcome is OptimizationRuleOutcome8616.CHANGED
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class OptimizationRunReport8616:
     """Aggregate audited result of one optimization rule run."""
 
-    decisions: tuple[OptimizationRuleDecision8616, ...]
-    halted: bool = False
+    decisions: object
+    halted: cython.bint = False
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return True when any rule body reported a modification.
 
         This is body-reported evidence only; under a guarded executor it is
         not acceptance evidence and must not be read as a validated semantic
         improvement.
         """
-        return any(decision.changed for decision in self.decisions)
+        return any(decision.changed for decision in iter(self.decisions))
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _RuleExecutionTrace8616:
     """Mutable per-rule execution trace shared with the abort accountant."""
 
-    executed: bool = False
-    failed: bool = False
-    changed: bool = False
+    executed: cython.bint = False
+    failed: cython.bint = False
+    changed: cython.bint = False
 
 
-def optimization_rule_canonical_name_8616(name: str) -> str:
+@cython.ccall
+def optimization_rule_canonical_name_8616(name: object) -> str:
     """Return the canonical ``optimization:<rule>`` configuration name."""
     return f"{OPTIMIZATION_RULE_PASS_PREFIX_8616}{name}"
 
 
+@cython.ccall
 def optimization_rule_skip_names_8616(
     env: Mapping[str, str] | None = None,
 ) -> frozenset[str]:
@@ -135,6 +141,8 @@ def optimization_rule_skip_names_8616(
     Only canonical ``optimization:<rule>`` entries select cleanup rules; bare
     entries keep their existing meaning for top-level postprocess passes.
     """
+    raw: object
+    entry: object
     environment = os.environ if env is None else env
     raw = environment.get(_OPTIMIZATION_SKIP_ENV_8616, "")
     skipped: set[str] = set()
@@ -148,26 +156,29 @@ def optimization_rule_skip_names_8616(
     return frozenset(skipped)
 
 
-def _optimization_rules_debug_enabled_8616(env: Mapping[str, str] | None) -> bool:
+@cython.ccall
+def _optimization_rules_debug_enabled_8616(env: object) -> cython.bint:
     """Return True when optimization diagnostics are enabled for this run."""
+    value: object
     environment = os.environ if env is None else env
     value = environment.get(_OPTIMIZATION_DEBUG_ENV_8616, "")
     return value.strip().lower() in _TRUTHY_ENV_VALUES_8616
 
 
 def _run_level_decisions_8616(
-    specs: tuple[OptimizationRuleSpec8616, ...],
+    specs: object,
     outcome: OptimizationRuleOutcome8616,
     env: Mapping[str, str] | None,
-) -> tuple[OptimizationRuleDecision8616, ...]:
+) -> object:
     """Build one uniform audited decision per rule for a run-level outcome."""
+    decision: object
     decisions = tuple(
         OptimizationRuleDecision8616(
             name=spec.name,
             canonical_name=optimization_rule_canonical_name_8616(spec.name),
             outcome=outcome,
         )
-        for spec in specs
+        for spec in iter(specs)
     )
     if _optimization_rules_debug_enabled_8616(env):
         for decision in decisions:
@@ -179,9 +190,10 @@ def _run_level_decisions_8616(
     return decisions
 
 
+@cython.ccall
 def _publish_run_decisions_8616(
     codegen: object,
-    decisions: tuple[OptimizationRuleDecision8616, ...],
+    decisions: object,
 ) -> None:
     """Publish audited decisions on the dynamic codegen boundary.
 
@@ -193,7 +205,7 @@ def _publish_run_decisions_8616(
 
 
 @contextlib.contextmanager
-def _optimization_run_guard_8616(codegen: object) -> Iterator[bool]:
+def _optimization_run_guard_8616(codegen: object) -> Iterator[cython.bint]:
     """Yield False on same-codegen reentry; otherwise hold a single-flight slot.
 
     Guard state is process-local and is always released on exit, including
@@ -210,11 +222,12 @@ def _optimization_run_guard_8616(codegen: object) -> Iterator[bool]:
         _ACTIVE_RUN_CODEGEN_IDS_8616.discard(codegen_id)
 
 
+@cython.ccall
 def _invoke_rule_body_8616(
     codegen: object,
     spec: OptimizationRuleSpec8616,
     trace: _RuleExecutionTrace8616,
-) -> bool:
+) -> cython.bint:
     """Invoke the rule body once; account failure through ``finally``.
 
     The original exception propagates unchanged when the body raises; no
@@ -231,6 +244,7 @@ def _invoke_rule_body_8616(
             trace.failed = True
 
 
+@cython.ccall
 def _interrupted_rule_outcome_8616(
     trace: _RuleExecutionTrace8616,
 ) -> OptimizationRuleOutcome8616:
@@ -244,9 +258,10 @@ def _interrupted_rule_outcome_8616(
     return OptimizationRuleOutcome8616.STABLE
 
 
+@cython.ccall
 def _aborted_run_decisions_8616(
-    specs: tuple[OptimizationRuleSpec8616, ...],
-    decisions: list[OptimizationRuleDecision8616],
+    specs: object,
+    decisions: object,
     trace: _RuleExecutionTrace8616,
 ) -> tuple[OptimizationRuleDecision8616, ...]:
     """Account the interrupted rule and the unevaluated remainder.
@@ -254,6 +269,7 @@ def _aborted_run_decisions_8616(
     Called while an exception propagates so the latest run's audit replaces
     any earlier run's decisions instead of leaving stale successes visible.
     """
+    spec: object
     partial = list(decisions)
     index = len(partial)
     if index < len(specs):
@@ -280,15 +296,15 @@ def _aborted_run_decisions_8616(
 def _execute_guarded_rule_8616(
     codegen: object,
     spec: OptimizationRuleSpec8616,
-    canonical_name: str,
-    apply_rule_step: Callable[[str, Callable[[], bool]], bool],
+    canonical_name: object,
+    apply_rule_step: Callable[[str, Callable[[], bool]], cython.bint],
     trace: _RuleExecutionTrace8616,
-) -> tuple[OptimizationRuleOutcome8616, bool]:
+) -> tuple[OptimizationRuleOutcome8616, cython.bint]:
     """Execute one rule through the guarded apply callback.
 
     Returns the audited outcome plus the executor's keep-running verdict.
     """
-    def _step() -> bool:
+    def _step() -> cython.bint:
         return _invoke_rule_body_8616(codegen, spec, trace)
 
     keep_running = bool(apply_rule_step(canonical_name, _step))
@@ -301,11 +317,12 @@ def _execute_guarded_rule_8616(
     return OptimizationRuleOutcome8616.STABLE, keep_running
 
 
+@cython.ccall
 def _emit_optimization_counters_debug_8616(
     codegen: object,
     env: Mapping[str, str] | None,
     *,
-    halted: bool,
+    halted: cython.bint,
 ) -> None:
     """Emit the per-run diagnostic counters when the run fully completed."""
     if halted or not _optimization_rules_debug_enabled_8616(env):
@@ -330,10 +347,11 @@ def _emit_optimization_counters_debug_8616(
     )
 
 
+@cython.ccall
 def _execute_optimization_rules_8616(
     codegen: object,
-    specs: tuple[OptimizationRuleSpec8616, ...],
-    apply_rule_step: Callable[[str, Callable[[], bool]], bool] | None,
+    specs: object,
+    apply_rule_step: object,
     env: Mapping[str, str] | None,
 ) -> OptimizationRunReport8616:
     """Iterate the registry order once and record each audited decision.
@@ -344,6 +362,7 @@ def _execute_optimization_rules_8616(
     decisions from an earlier run are never mistaken for the latest outcome;
     the original exception then propagates unchanged.
     """
+    spec: object
     skip_names = optimization_rule_skip_names_8616(env)
     debug_enabled = _optimization_rules_debug_enabled_8616(env)
     decisions: list[OptimizationRuleDecision8616] = []
@@ -393,9 +412,10 @@ def _execute_optimization_rules_8616(
     return OptimizationRunReport8616(decisions=tuple(decisions), halted=halted)
 
 
+@cython.ccall
 def run_optimization_rules_8616(
     codegen: object,
-    specs: tuple[OptimizationRuleSpec8616, ...],
+    specs: object,
     apply_rule_step: Callable[[str, Callable[[], bool]], bool] | None = None,
     *,
     env: Mapping[str, str] | None = None,
@@ -428,13 +448,14 @@ def run_optimization_rules_8616(
     return report
 
 
+@cython.ccall
 def _run_optimization_rules_report_8616(
     codegen: object,
-    specs: tuple[OptimizationRuleSpec8616, ...],
+    specs: object,
     apply_rule_step: Callable[[str, Callable[[], bool]], bool] | None,
     *,
     env: Mapping[str, str] | None,
-    prepare: Callable[[object], None] | None,
+    prepare: object,
 ) -> OptimizationRunReport8616:
     """Evaluate the run precondition, guard, and rule loop for one report."""
     if getattr(codegen, "cfunc", None) is None:

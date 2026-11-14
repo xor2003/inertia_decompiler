@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Alias-layer package exports.
 
 Layer: Alias.
@@ -8,6 +9,7 @@ work here.
 """
 
 from __future__ import annotations
+import cython
 
 lazy import inertia.alias.alias_model as alias_model
 lazy import inertia.alias.domains as domains

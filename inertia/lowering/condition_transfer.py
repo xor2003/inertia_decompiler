@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Transfer typed branch conditions into codegen before rewrite.
 
 Layer: Types/Lowering.
@@ -7,8 +8,12 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import cython
 
 import typing
+import dataclasses
+import operator
+import builtins
 
 # Input: ConditionIR from IR lifting
 # Output: materialized C condition nodes (CBinaryOp/CUnaryOp in C AST)
@@ -75,39 +80,40 @@ from .condition_fact_arbitration import resolve_condition_fact_conflicts_8616
 log: logging.Logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _ConditionBlockOwner8616:
     """Describe the current decoded conditional terminator for one CFG block."""
 
-    block_addr: int
-    terminal_insn: int
-    mnemonic: str
+    block_addr: cython.longlong
+    terminal_insn: cython.longlong
+    mnemonic: object
     taken_target: int | None
     fallthrough_target: int | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _ConditionFunctionOwnership8616:
     """Record decoded function blocks and their current conditional terminators."""
 
-    decoded_block_addrs: frozenset[int]
-    conditional_owners: dict[int, _ConditionBlockOwner8616]
+    decoded_block_addrs: object
+    conditional_owners: object
     register_topology: ConditionRegisterTopology8616
-    relift_blocks: tuple[ConditionReliftBlock8616, ...]
+    relift_blocks: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _ConditionOwnershipStats8616:
     """Account for cached conditions classified against current binary blocks."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-def _dynamic_boundary_attr_8616(obj: object, name: str, default: object = None) -> Any:  # noqa: ANN401
+@cython.ccall
+def _dynamic_boundary_attr_8616(obj: object, name: object, default: object = None) -> Any:  # noqa: ANN401
     """Dynamic angr/codegen boundary: read optional project, lifter, or metadata attributes."""
     return getattr(obj, name, default)
 
@@ -158,8 +164,10 @@ _REP_COUNTER_ONLY_MNEMONICS_8616: frozenset[str] = frozenset(
 )
 
 
-def _direct_counter_condition_op_8616(mnemonic: str) -> str | None:
+@cython.ccall
+def _direct_counter_condition_op_8616(mnemonic: object) -> object:
     """Return the exact counter-only condition implied by LOOP or plain REP."""
+    direct: object
     direct = _DIRECT_COUNTER_CONDITION_OPS_8616.get(mnemonic)
     if direct is not None:
         return direct
@@ -175,15 +183,18 @@ def _direct_counter_condition_op_8616(mnemonic: str) -> str | None:
 
 def _current_function_condition_ownership_8616(func: object) -> _ConditionFunctionOwnership8616:
     """Decode exact current-function block terminators for condition ownership."""
+    existing: object
+    owner: object
+    block: object
     try:
         blocks = tuple(_dynamic_boundary_attr_8616(func, "blocks", ()) or ())
     except (AttributeError, TypeError):
         blocks = ()
 
-    decoded_block_addrs: set[int] = set()
-    owners: dict[int, _ConditionBlockOwner8616] = {}
-    conflicting_owners: set[int] = set()
-    relift_blocks_by_addr: dict[int, ConditionReliftBlock8616] = {}
+    decoded_block_addrs: set[cython.longlong] = set()
+    owners: dict[cython.longlong, _ConditionBlockOwner8616] = {}
+    conflicting_owners: set[cython.longlong] = set()
+    relift_blocks_by_addr: dict[cython.longlong, ConditionReliftBlock8616] = {}
     for block in blocks:
         block_addr = _dynamic_boundary_attr_8616(block, "addr", None)
         if not isinstance(block_addr, int):
@@ -197,7 +208,7 @@ def _current_function_condition_ownership_8616(func: object) -> _ConditionFuncti
         if owner is None:
             continue
         existing = owners.get(block_addr)
-        if existing is not None and existing != owner:
+        if existing is not None and operator.ne(existing, owner):
             conflicting_owners.add(block_addr)
             owners.pop(block_addr, None)
             continue
@@ -221,13 +232,14 @@ def _current_function_condition_ownership_8616(func: object) -> _ConditionFuncti
             predecessors_by_block,
             frozenset(condition_only_blocks),
         ),
-        relift_blocks=tuple(relift_blocks_by_addr[address] for address in sorted(relift_blocks_by_addr)),
+        relift_blocks=tuple(relift_blocks_by_addr[address] for address in builtins.iter(sorted(relift_blocks_by_addr))),
     )
 
 
+@cython.ccall
 def _decode_block_condition_owner_8616(
-    block: object, block_addr: int
-) -> tuple[bool, _ConditionBlockOwner8616 | None]:
+    block: object, block_addr: cython.longlong
+) -> tuple[cython.bint, _ConditionBlockOwner8616 | None]:
     """Decode one block's terminal instruction into a condition owner."""
     capstone = _dynamic_boundary_attr_8616(block, "capstone", None)
     wrappers: tuple[object, ...] = tuple(_dynamic_boundary_attr_8616(capstone, "insns", ()) or ())
@@ -262,9 +274,10 @@ def _decode_block_condition_owner_8616(
     )
 
 
-def _condition_only_block_addrs_8616(blocks: tuple[object, ...]) -> set[int]:
+def _condition_only_block_addrs_8616(blocks: object) -> object:
     """Collect blocks whose decoded instruction stream is condition-only."""
-    condition_only_blocks: set[int] = set()
+    block: object
+    condition_only_blocks: set[cython.longlong] = set()
     for block in blocks:
         block_addr = _dynamic_boundary_attr_8616(block, "addr", None)
         capstone = _dynamic_boundary_attr_8616(block, "capstone", None)
@@ -280,25 +293,25 @@ def _condition_only_block_addrs_8616(blocks: tuple[object, ...]) -> set[int]:
                 )
                 or ""
             ).strip().lower()
-            for wrapper in wrappers
+            for wrapper in iter(wrappers)
         )
         if _mnemonics_are_condition_only_8616(mnemonics):
             condition_only_blocks.add(block_addr)
     return condition_only_blocks
 
 
-def _mnemonics_are_condition_only_8616(mnemonics: tuple[str, ...]) -> bool:
+def _mnemonics_are_condition_only_8616(mnemonics: object) -> cython.bint:
     """True when a block's mnemonics form a pure compare/branch sequence."""
     return (
         all(
             item in JCC_TO_COND_8616 or _direct_counter_condition_op_8616(item) is not None
-            for item in mnemonics
+            for item in iter(mnemonics)
         )
         or (
             len(mnemonics) >= 2
             and mnemonics[-1] in JCC_TO_COND_8616
             and mnemonics[-2] == "cmp"
-            and all(item == "cmp" or item in JCC_TO_COND_8616 for item in mnemonics)
+            and all(item == "cmp" or item in JCC_TO_COND_8616 for item in iter(mnemonics))
         )
         or (
             len(mnemonics) == 2
@@ -308,9 +321,10 @@ def _mnemonics_are_condition_only_8616(mnemonics: tuple[str, ...]) -> bool:
     )
 
 
-def _graph_predecessors_by_block_8616(graph: Any) -> dict[int, frozenset[int]]:  # noqa: ANN401
+def _graph_predecessors_by_block_8616(graph: Any) -> object:  # noqa: ANN401
     """Build the predecessor map from a networkx-style block graph."""
-    predecessors_by_block: dict[int, frozenset[int]] = {}
+    node: object
+    predecessors_by_block: dict[cython.longlong, frozenset[cython.longlong]] = {}
     try:
         graph_nodes = tuple(graph.nodes())
     except (AttributeError, TypeError):
@@ -325,7 +339,7 @@ def _graph_predecessors_by_block_8616(graph: Any) -> dict[int, frozenset[int]]: 
             continue
         predecessor_addrs = frozenset(
             predecessor_addr
-            for predecessor in predecessor_nodes
+            for predecessor in iter(predecessor_nodes)
             if isinstance(
                 predecessor_addr := (
                     predecessor
@@ -339,11 +353,14 @@ def _graph_predecessors_by_block_8616(graph: Any) -> dict[int, frozenset[int]]: 
     return predecessors_by_block
 
 
+@cython.ccall
 def _expected_condition_op_for_owner_8616(
     cond: ConditionIR,
     owner: _ConditionBlockOwner8616,
-) -> str | None:
+) -> object:
     """Return the condition operator implied by the current decoded JCC."""
+    direct: object
+    expected: object
     direct = _direct_counter_condition_op_8616(owner.mnemonic)
     if direct is not None:
         return direct
@@ -361,25 +378,28 @@ def _expected_condition_op_for_owner_8616(
     return None
 
 
+@cython.ccall
 def _condition_matches_current_owner_8616(
     cond: ConditionIR,
     owner: _ConditionBlockOwner8616,
-) -> bool:
+) -> cython.bint:
     """Return whether one cached condition belongs to the current block decode."""
-    if cond.block_addr != owner.block_addr or cond.src_insn != owner.terminal_insn:
+    if operator.ne(cond.block_addr, owner.block_addr) or operator.ne(cond.src_insn, owner.terminal_insn):
         return False
-    if cond.op != _expected_condition_op_for_owner_8616(cond, owner):
+    if operator.ne(cond.op, _expected_condition_op_for_owner_8616(cond, owner)):
         return False
-    if owner.taken_target is not None and cond.taken_target != owner.taken_target:
+    if owner.taken_target is not None and operator.ne(cond.taken_target, owner.taken_target):
         return False
-    return owner.fallthrough_target is None or cond.fallthrough_target == owner.fallthrough_target
+    return owner.fallthrough_target is None or operator.eq(cond.fallthrough_target, owner.fallthrough_target)
 
 
 def _filter_conditions_to_current_function_8616(
-    conditions: list[ConditionIR],
+    conditions: object,
     ownership: _ConditionFunctionOwnership8616,
 ) -> tuple[list[ConditionIR], _ConditionOwnershipStats8616]:
     """Retain conditions proven to match the current function's decoded blocks."""
+    owner: object
+    cond: object
     carrier_resolution = normalize_condition_register_carriers_8616(conditions)
     resolution = resolve_condition_fact_conflicts_8616(carrier_resolution.conditions)
     liveness_resolution = normalize_condition_register_liveness_8616(
@@ -403,7 +423,7 @@ def _filter_conditions_to_current_function_8616(
                     condition.rhs.space.value if isinstance(condition.rhs, IRValue) else type(condition.rhs).__name__,
                     condition.rhs.offset if isinstance(condition.rhs, IRValue) else None,
                 )
-                for condition in liveness_resolution.conditions
+                for condition in iter(liveness_resolution.conditions)
             ),
         )
     normalized = list(liveness_resolution.conditions)
@@ -451,7 +471,10 @@ def _filter_conditions_to_current_function_8616(
     )
 
 
-def _decode_first_insn_at_addr_8616(project: object, addr: int) -> object | None:
+@cython.ccall
+def _decode_first_insn_at_addr_8616(project: object, addr: cython.longlong) -> object | None:
+    block: object
+    kwargs: object
     factory = _dynamic_boundary_attr_8616(project, "factory", None) if project is not None else None
     block_lifter = _dynamic_boundary_attr_8616(factory, "block", None)
     if not callable(block_lifter):
@@ -475,13 +498,16 @@ def _decode_first_insn_at_addr_8616(project: object, addr: int) -> object | None
     return typing.cast(object, insns[0])
 
 
+@cython.ccall
 def _condition_from_pending_source_8616(
     source: ConditionSource,
-    jcc_mnemonic: str,
+    jcc_mnemonic: object,
     *,
-    src_insn: int,
-    block_addr: int,
+    src_insn: cython.longlong,
+    block_addr: cython.longlong,
 ) -> ConditionIR | None:
+    lhs: object
+    rhs: object
     if source.kind == "cmp":
         lhs = source.lhs
         rhs = source.rhs
@@ -521,7 +547,8 @@ def _condition_from_pending_source_8616(
     return cond if isinstance(cond, ConditionIR) else None
 
 
-def _normalized_cmp_semantics_from_source_8616(source: ConditionSource) -> tuple[object, ...] | None:
+@cython.ccall
+def _normalized_cmp_semantics_from_source_8616(source: ConditionSource) -> object:
     """Return source-level comparison semantics when affine lifting proved it."""
     raw_semantics = source.semantics
     if isinstance(raw_semantics, tuple) and raw_semantics and raw_semantics[0] == "dec_reg16":
@@ -530,19 +557,23 @@ def _normalized_cmp_semantics_from_source_8616(source: ConditionSource) -> tuple
     rhs = source.normalized_rhs
     if not isinstance(lhs, IRValue) or not isinstance(rhs, IRValue):
         return None
-    if lhs.space != MemSpace.REG or rhs.space != MemSpace.CONST:
+    if operator.ne(lhs.space, MemSpace.REG) or operator.ne(rhs.space, MemSpace.CONST):
         return None
     if not isinstance(lhs.name, str) or not isinstance(rhs.const, int):
         return None
     return ("normalized_cmp_reg_imm16", lhs.name.lower(), int(rhs.const))
 
 
+@cython.ccall
 def _edge_evidence_from_pending_source_8616(
     source: ConditionSource,
-    mnemonic: str | None,
+    mnemonic: object,
     *,
-    edge_block_addr: int,
+    edge_block_addr: cython.longlong,
 ) -> ConditionEdgeEvidence | None:
+    condition: object
+    inverted_jcc: object
+    normalized_semantics: object
     if mnemonic not in {"jmp", "jmpw"}:
         return None
     source_jcc = str(source.fallthrough_from_jcc or "").lower()
@@ -568,8 +599,8 @@ def _edge_evidence_from_pending_source_8616(
 
 def _collect_pending_fallthrough_conditions_8616(
     project: object,
-    block_addrs: list[int],
-    pending_sources: dict[int, ConditionSource],
+    block_addrs: object,
+    pending_sources: object,
 ) -> tuple[list[ConditionIR], list[ConditionEdgeEvidence]]:
     """Materialize cached fallthrough JCC facts missed by block lift order.
 
@@ -579,14 +610,15 @@ def _collect_pending_fallthrough_conditions_8616(
     sources are single-consumer lifter state; later transfers replay the typed
     evidence already attached to the active codegen contract.
     """
+    addr: object
     block_addr_set = set(block_addrs)
     conditions: list[ConditionIR] = []
     edge_evidence: list[ConditionEdgeEvidence] = []
-    processed: set[int] = set()
+    processed: set[cython.longlong] = set()
     while True:
         candidates = sorted(
             addr
-            for addr, source in pending_sources.items()
+            for addr, source in builtins.iter(pending_sources.items())
             if addr in block_addr_set and addr not in processed and isinstance(source, ConditionSource)
         )
         if not candidates:
@@ -600,14 +632,18 @@ def _collect_pending_fallthrough_conditions_8616(
 
 
 
+@cython.ccall
 def _process_pending_fallthrough_source_8616(
     project: object,
-    pending_sources: dict[int, ConditionSource],
-    addr: int,
-    conditions: list[ConditionIR],
-    edge_evidence: list[ConditionEdgeEvidence],
+    pending_sources: object,
+    addr: cython.longlong,
+    conditions: object,
+    edge_evidence: object,
 ) -> None:
     """Convert one pending lifter source into typed condition evidence."""
+    edge: object
+    insn: object
+    source: object
     source = pending_sources.get(addr)
     if not isinstance(source, ConditionSource):
         pending_sources.pop(addr, None)
@@ -654,15 +690,10 @@ def _process_pending_fallthrough_source_8616(
 
 def _collect_typed_condition_artifacts_8616(
     project: object,
-    func_addr: int,
+    func_addr: cython.longlong,
     *,
     function: object | None = None,
-) -> tuple[
-    list[ConditionIR],
-    list[ConditionEdgeEvidence],
-    _ConditionOwnershipStats8616,
-    ConditionCacheReliftStats8616 | None,
-]:
+) -> object:
     def _impl() -> tuple[
         list[ConditionIR],
         list[ConditionEdgeEvidence],
@@ -678,6 +709,9 @@ def _collect_typed_condition_artifacts_8616(
 
         Returns a deduplicated, deterministically sorted list of ConditionIR.
         """
+        func: object
+        kb: object
+        relift_artifact: object
         kb = _dynamic_boundary_attr_8616(project, "kb", None) if project is not None else None
         if kb is None:
             return [], [], _ConditionOwnershipStats8616(0, 0, 0, 0, 0), None
@@ -686,7 +720,7 @@ def _collect_typed_condition_artifacts_8616(
         if func is None:
             return [], [], _ConditionOwnershipStats8616(0, 0, 0, 0, 0), None
 
-        block_addrs = sorted(_dynamic_boundary_attr_8616(func, "block_addrs_set", set()) or set())
+        block_addrs = sorted(tuple(_dynamic_boundary_attr_8616(func, "block_addrs_set", set()) or set()))
         if not block_addrs:
             return [], [], _ConditionOwnershipStats8616(0, 0, 0, 0, 0), None
         ownership = _current_function_condition_ownership_8616(func)
@@ -703,7 +737,7 @@ def _collect_typed_condition_artifacts_8616(
             pending_sources = relift_artifact.pending_source_cache()
         elif any(
             not has_typed_condition_cache_evidence_8616(module_cache, pending_sources, block_addr)
-            for block_addr in condition_block_addrs
+            for block_addr in iter(condition_block_addrs)
         ):
             if lifter_available:
                 reset_lifter_condition_state_8616()
@@ -728,10 +762,11 @@ def _collect_typed_condition_artifacts_8616(
 
 
 
+@cython.ccall
 def _seed_lifter_condition_caches_8616() -> tuple[
-    typing.Mapping[int, typing.Sequence[ConditionResult]],
+    typing.Mapping[cython.longlong, typing.Sequence[ConditionResult]],
     typing.Mapping[int, ConditionSource] | dict[int, ConditionSource],
-    bool,
+    cython.bint,
 ]:
     """Read the ambient lifter caches, tolerating absent lifter imports."""
     try:
@@ -753,13 +788,16 @@ def _seed_lifter_condition_caches_8616() -> tuple[
         return {}, {}, False
 
 
+@cython.ccall
 def _resolve_condition_relift_artifact_8616(
     project: object,
-    func_addr: int,
+    func_addr: cython.longlong,
     ownership: _ConditionFunctionOwnership8616,
-    condition_block_addrs: list[int],
+    condition_block_addrs: object,
 ) -> tuple[Any | None, ConditionCacheReliftStats8616 | None]:
     """Pick the proven registered artifact or relift the condition cache."""
+    registered_condition_evidence: object
+    relift_artifact: object
     registered = registered_function_ssa_artifact_8616(project, func_addr)
     registered_condition_evidence = (
         registered.artifact.condition_evidence
@@ -771,10 +809,9 @@ def _resolve_condition_relift_artifact_8616(
         registered_condition_evidence.source
         if registered_condition_evidence is not None
         and registered_condition_evidence.complete
-        and registered_condition_evidence.function_addr == func_addr
-        and registered_condition_evidence.block_ranges == ownership.relift_blocks
-        and registered_condition_evidence.expected_condition_blocks
-        == tuple(condition_block_addrs)
+        and operator.eq(registered_condition_evidence.function_addr, func_addr)
+        and operator.eq(registered_condition_evidence.block_ranges, ownership.relift_blocks)
+        and operator.eq(registered_condition_evidence.expected_condition_blocks, tuple(condition_block_addrs))
         else relift_function_condition_cache_8616(
             project,
             ownership.relift_blocks,
@@ -787,30 +824,34 @@ def _resolve_condition_relift_artifact_8616(
 
 
 def _debug_condition_transfer_cache_8616(
-    func_addr: int,
-    block_addrs: list[int],
-    module_cache: typing.Mapping[int, typing.Sequence[ConditionResult]],
-    pending_sources: typing.Mapping[int, ConditionSource] | dict[int, ConditionSource],
+    func_addr: cython.longlong,
+    block_addrs: object,
+    module_cache: typing.Mapping[cython.longlong, typing.Sequence[ConditionResult]],
+    pending_sources: object,
 ) -> None:
     """Emit the optional cache-key diagnostic for condition transfer."""
     if not os.environ.get("INERTIA_DEBUG_CONDITION_TRANSFER"):
         return
-    cache_keys = tuple(sorted(k for k in module_cache if isinstance(k, int)))
-    pending_keys = tuple(sorted(k for k in pending_sources if isinstance(k, int)))
+    cache_keys = tuple(sorted(k for k in iter(module_cache) if isinstance(k, int)))
+    pending_keys = tuple(sorted(k for k in iter(pending_sources) if isinstance(k, int)))
     log.warning(
         "[condition-transfer] func=%#x blocks=%s cache_keys=%s pending_keys=%s",
         func_addr,
-        tuple(hex(a) for a in block_addrs),
-        tuple(hex(a) for a in cache_keys),
-        tuple(hex(a) for a in pending_keys),
+        tuple(hex(a) for a in iter(block_addrs)),
+        tuple(hex(a) for a in iter(cache_keys)),
+        tuple(hex(a) for a in iter(pending_keys)),
     )
 
 
+@cython.ccall
 def _cached_block_conditions_8616(
-    block_addrs: list[int],
-    module_cache: typing.Mapping[int, typing.Sequence[ConditionResult]],
-) -> list[ConditionIR]:
+    block_addrs: object,
+    module_cache: typing.Mapping[cython.longlong, typing.Sequence[ConditionResult]],
+) -> object:
     """Flatten cached ConditionIR entries across the function's blocks."""
+    block_conds: object
+    block_addr: object
+    cond: object
     all_conditions: list[ConditionIR] = []
     for block_addr in block_addrs:
         block_conds = module_cache.get(block_addr, None)
@@ -835,11 +876,12 @@ def _cached_block_conditions_8616(
     return all_conditions
 
 
+@cython.ccall
 def _bind_and_filter_conditions_8616(
     func: object,
-    all_conditions: list[ConditionIR],
+    all_conditions: object,
     ownership: _ConditionFunctionOwnership8616,
-    relift_stats: ConditionCacheReliftStats8616 | None,
+    relift_stats: object,
 ) -> tuple[list[ConditionIR], _ConditionOwnershipStats8616]:
     """Bind register sources, filter to function ownership, merge failures."""
     binding_resolution = bind_condition_register_sources_8616(func, all_conditions)
@@ -863,10 +905,11 @@ def _bind_and_filter_conditions_8616(
         log.warning("[condition-transfer] ownership=%s", ownership_stats)
     return conditions, ownership_stats
 
+@cython.ccall
 def collect_typed_conditions_from_emulator_8616(
     project: object,
-    func_addr: int,
-) -> list[ConditionIR]:
+    func_addr: cython.longlong,
+) -> object:
     """Collect ConditionIR objects from the module-level lifter cache."""
     conditions, _edge_evidence, _ownership_stats, _relift_stats = _collect_typed_condition_artifacts_8616(
         project, func_addr
@@ -874,9 +917,10 @@ def collect_typed_conditions_from_emulator_8616(
     return conditions
 
 
+@cython.ccall
 def collect_typed_condition_artifacts_8616(
     project: object,
-    func_addr: int,
+    func_addr: cython.longlong,
     *,
     function: object | None = None,
 ) -> tuple[list[ConditionIR], list[ConditionEdgeEvidence]]:
@@ -889,10 +933,11 @@ def collect_typed_condition_artifacts_8616(
     return conditions, edge_evidence
 
 
+@cython.ccall
 def transfer_typed_conditions_from_emulator_8616(
-    instructions: list[object],
+    instructions: object,
     codegen: object,
-) -> int:
+) -> cython.longlong:
     """Transfer typed conditions from lifted instruction emulators to codegen.
 
     After block lifting, each instruction's emulator may have
@@ -901,6 +946,9 @@ def transfer_typed_conditions_from_emulator_8616(
 
     Returns the number of ConditionIR objects transferred.
     """
+    emu: object
+    cond: object
+    instr: object
     all_conditions: list[ConditionIR] = []
     for instr in instructions:
         emu = _dynamic_boundary_attr_8616(instr, "emu", None)
@@ -917,7 +965,8 @@ def transfer_typed_conditions_from_emulator_8616(
     return len(unique)
 
 
-def _transfer_condition_owner_8616(project: object, codegen: object, func_addr: int) -> object | None:
+@cython.ccall
+def _transfer_condition_owner_8616(project: object, codegen: object, func_addr: cython.longlong) -> object | None:
     """Consume the authenticated recovery owner, including private analysis KBs.
 
     Real native codegen retains the exact recovered ``Function``; the ambient
@@ -926,13 +975,14 @@ def _transfer_condition_owner_8616(project: object, codegen: object, func_addr: 
     codegen. Foreign owners and conflicting addresses must fail loudly instead
     of substituting another function's evidence.
     """
+    resolved: object
     # Defer the native IR boundary until condition transfer needs its context.
     from inertia.ir.vex_import import codegen_function_8616
 
     resolved = codegen_function_8616(project, codegen)
     if resolved is None:
         return None
-    if resolved[1] != func_addr:
+    if operator.ne(resolved[1], func_addr):
         raise PipelineHardError(
             "condition transfer requested function address differs from recovered owner",
             layer="lowering", function_addr=func_addr,
@@ -941,11 +991,12 @@ def _transfer_condition_owner_8616(project: object, codegen: object, func_addr: 
     return resolved[0]
 
 
+@cython.ccall
 def transfer_typed_conditions_to_codegen_8616(
     project: object,
-    func_addr: int,
+    func_addr: cython.longlong,
     codegen: object,
-) -> int:
+) -> cython.longlong:
     """Full pipeline: collect conditions by re-lifting, then transfer to codegen.
 
     Sets:

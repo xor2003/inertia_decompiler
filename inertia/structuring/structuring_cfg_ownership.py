@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Ownership/refusal layer over CFG snapshots.
 
 Layer: Structuring.
@@ -14,19 +15,23 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
 
 from inertia.structuring.structuring_cfg_snapshot import CFGSnapshot, build_cfg_snapshot
+import dataclasses
+import operator
 
 
-@dataclass(frozen=True, order=True, slots=True)
+@dataclasses.dataclass(frozen=True, order=True, )
 class CFGInstructionSite8616:
     """One exact instruction occurrence in a pre-join CFG block."""
 
-    block_addr: int
-    ins_addr: int
+    block_addr: cython.longlong
+    ins_addr: cython.longlong
 
 
 class CFGInstructionReachability8616(StrEnum):
@@ -39,32 +44,32 @@ class CFGInstructionReachability8616(StrEnum):
     ORDER_CONFLICT = "order_conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CFGOwnershipRecord:
     """Ownership/refusal state for one CFG region."""
 
-    region_id: int
-    ownership_kind: str
-    refusal_reason: str | None
-    predecessor_count: int
-    successor_count: int
-    reachable_from_entry: bool
+    region_id: cython.longlong
+    ownership_kind: object
+    refusal_reason: object
+    predecessor_count: cython.longlong
+    successor_count: cython.longlong
+    reachable_from_entry: cython.bint
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CFGOwnershipArtifact:
     """Typed ownership surface built from a CFG snapshot."""
 
     snapshot: CFGSnapshot
-    records: tuple[CFGOwnershipRecord, ...]
-    shared_region_ids: tuple[int, ...]
-    entry_fragment_region_ids: tuple[int, ...]
+    records: object
+    shared_region_ids: object
+    entry_fragment_region_ids: object
 
-    def instruction_sites(self, ins_addr: int) -> tuple[CFGInstructionSite8616, ...]:
+    def instruction_sites(self, ins_addr: cython.longlong) -> tuple[CFGInstructionSite8616, ...]:
         """Return deterministic exact block/instruction sites recorded for one address."""
         sites = {
             CFGInstructionSite8616(block_addr=node.block_addr, ins_addr=ins_addr)
-            for node in self.snapshot.nodes
+            for node in iter(self.snapshot.nodes)
             if node.block_addr is not None and ins_addr in node.statement_ins_addrs
         }
         return tuple(sorted(sites))
@@ -76,15 +81,15 @@ class CFGOwnershipArtifact:
         """Resolve one exact site to a unique CFG region or a typed refusal."""
         owners = tuple(
             node
-            for node in self.snapshot.nodes
-            if node.block_addr == site.block_addr and site.ins_addr in node.statement_ins_addrs
+            for node in iter(self.snapshot.nodes)
+            if operator.eq(node.block_addr, site.block_addr) and site.ins_addr in node.statement_ins_addrs
         )
         if not owners:
             return CFGInstructionReachability8616.OWNER_MISSING
         if len(owners) != 1:
             return CFGInstructionReachability8616.OWNER_AMBIGUOUS
         owner = owners[0]
-        if sum(node.region_id == owner.region_id for node in self.snapshot.nodes) != 1:
+        if sum(operator.eq(node.region_id, owner.region_id) for node in iter(self.snapshot.nodes)) != 1:
             return CFGInstructionReachability8616.OWNER_AMBIGUOUS
         return owner.region_id
 
@@ -109,18 +114,20 @@ class CFGOwnershipArtifact:
 
     def _region_reachability(
         self,
-        source_region_id: int,
-        target_region_id: int,
+        source_region_id: cython.longlong,
+        target_region_id: cython.longlong,
     ) -> CFGInstructionReachability8616:
         """Traverse the immutable snapshot after validating unique region identities."""
-        nodes_by_id = {node.region_id: node for node in self.snapshot.nodes}
-        if len(nodes_by_id) != len(self.snapshot.nodes):
+        region_id: object
+        successor_id: object
+        nodes_by_id = {node.region_id: node for node in iter(self.snapshot.nodes)}
+        if operator.ne(len(nodes_by_id), len(self.snapshot.nodes)):
             return CFGInstructionReachability8616.OWNER_AMBIGUOUS
         if source_region_id not in nodes_by_id or target_region_id not in nodes_by_id:
             return CFGInstructionReachability8616.OWNER_MISSING
 
         pending = [source_region_id]
-        visited: set[int] = set()
+        visited: set[cython.longlong] = set()
         while pending:
             region_id = pending.pop()
             if region_id in visited:
@@ -144,8 +151,8 @@ class CFGOwnershipArtifact:
         """Stable serialization for reports and artifacts."""
         return {
             "snapshot": self.snapshot.to_dict(),
-            "shared_region_ids": [hex(region_id) for region_id in self.shared_region_ids],
-            "entry_fragment_region_ids": [hex(region_id) for region_id in self.entry_fragment_region_ids],
+            "shared_region_ids": [hex(region_id) for region_id in iter(self.shared_region_ids)],
+            "entry_fragment_region_ids": [hex(region_id) for region_id in iter(self.entry_fragment_region_ids)],
             "records": [
                 {
                     "region_id": hex(record.region_id),
@@ -154,26 +161,29 @@ class CFGOwnershipArtifact:
                     "predecessor_count": record.predecessor_count,
                     "successor_count": record.successor_count,
                 }
-                for record in self.records
+                for record in iter(self.records)
             ],
         }
 
 
+@cython.ccall
 def build_cfg_ownership_artifact(codegen: object) -> CFGOwnershipArtifact | None:
     """Build the ownership/refusal surface for structuring CFGs."""
+    snapshot: object
+    node: object
     snapshot = build_cfg_snapshot(codegen)
     if snapshot is None:
         return None
 
     records: list[CFGOwnershipRecord] = []
-    shared_region_ids: list[int] = []
-    entry_fragment_region_ids: list[int] = []
-    reachable_by_id = {item.region_id: item.reachable_from_entry for item in snapshot.nodes}
+    shared_region_ids: list[cython.longlong] = []
+    entry_fragment_region_ids: list[cython.longlong] = []
+    reachable_by_id = {item.region_id: item.reachable_from_entry for item in iter(snapshot.nodes)}
 
     for node in snapshot.nodes:
         predecessor_count = len(node.predecessor_ids)
         successor_count = len(node.successor_ids)
-        if node.region_id == snapshot.entry_region_id:
+        if operator.eq(node.region_id, snapshot.entry_region_id):
             ownership_kind = "entry"
             refusal_reason = None
         elif not node.reachable_from_entry and predecessor_count == 0:
@@ -193,7 +203,7 @@ def build_cfg_ownership_artifact(codegen: object) -> CFGOwnershipArtifact | None
             refusal_reason = None
         else:
             ownership_kind = "shared_owner"
-            predecessor_reachability = {reachable_by_id.get(region_id, False) for region_id in node.predecessor_ids}
+            predecessor_reachability = {reachable_by_id.get(region_id, False) for region_id in iter(node.predecessor_ids)}
             if len(predecessor_reachability) > 1:
                 refusal_reason = "mixed_reachability_predecessors"
             else:

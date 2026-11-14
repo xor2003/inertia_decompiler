@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Project complete terminal paths onto one exact return-storage class.
 
 Layer: Semantics.
@@ -11,6 +12,7 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import cython
 
 from enum import StrEnum
 
@@ -39,6 +41,7 @@ class TerminalReturnStorage8616(StrEnum):
     DX_AX = "dx_ax"
 
 
+@cython.ccall
 def _path_storage_8616(
     state: TerminalReturnStorageState8616,
 ) -> TerminalReturnStorage8616 | None:
@@ -64,15 +67,18 @@ def consistent_terminal_return_storage_8616(
     evidence: TerminalAxReturnEvidence8616,
 ) -> TerminalReturnStorage8616 | None:
     """Return one exact carrier only when the complete path census agrees."""
+    storage: object
+    storages: object
     if not evidence.complete or not evidence.storage_states:
         return None
-    storages = frozenset(_path_storage_8616(state) for state in evidence.storage_states)
+    storages = frozenset(_path_storage_8616(state) for state in iter(evidence.storage_states))
     if None in storages or len(storages) != 1:
         return None
     storage = next(iter(storages))
     return storage if isinstance(storage, TerminalReturnStorage8616) else None
 
 
+@cython.ccall
 def terminal_return_storage_8616(
     project: object,
     function: object,

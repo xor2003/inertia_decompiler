@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bind an Alias numeric frame value to its owning machine return.
 
 Layer: Semantics.
@@ -8,6 +9,8 @@ Owns instruction effects, flags, branch meaning, and expression interpretation
 Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import asdict, dataclass
 from enum import StrEnum
@@ -21,9 +24,12 @@ from inertia.ir.core import IRFunctionArtifact, IRValue, MemSpace
 
 from .register_definition_return import RegisterReturnPath8616, unchanged_register_return_path_8616
 from .register_value_preservation import register_value_family_8616
+import dataclasses
+import operator
+import builtins
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NumericStackPointerReturn8616:
     """One scalar definition and the same-block return it necessarily reaches."""
 
@@ -38,29 +44,29 @@ class NumericStackPointerReturnRefusal8616(StrEnum):
     DUPLICATE_RETURN_SCOPE = "duplicate_return_scope"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NumericStackPointerReturnObservation8616:
     """Account for one machine return whether its scalar is proved or unknown."""
 
-    block_addr: int
+    block_addr: cython.longlong
     return_addr: int | None
     proof: NumericStackPointerReturn8616 | None
     refusal: NumericStackPointerReturnRefusal8616 | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NumericStackPointerReturnStats8616:
     """Closed source-proof publication ledger, before any C materialization."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    refusal_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    refusal_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NumericStackPointerReturnInventory8616:
     """Source-bound Alias/value and Semantics/path outputs for Types consumers.
 
@@ -70,14 +76,14 @@ class NumericStackPointerReturnInventory8616:
     """
 
     source_ir: IRFunctionArtifact
-    observations: tuple[NumericStackPointerReturnObservation8616, ...]
+    observations: object
     stats: NumericStackPointerReturnStats8616
 
     def to_dict(self) -> dict[str, object]:
         """Serialize deterministic outcomes without duplicating upstream IR."""
         return {
             "function_addr": self.source_ir.function_addr,
-            "observations": [asdict(item) for item in self.observations],
+            "observations": [asdict(item) for item in iter(self.observations)],
             "stats": asdict(self.stats),
         }
 
@@ -89,6 +95,7 @@ class _CodegenBoundary8616(Protocol):
     _inertia_numeric_stack_pointer_returns_8616: NumericStackPointerReturnInventory8616
 
 
+@cython.ccall
 def numeric_stack_pointer_return_inventory_8616(
     codegen: object,
 ) -> NumericStackPointerReturnInventory8616 | None:
@@ -102,27 +109,30 @@ def numeric_stack_pointer_return_inventory_8616(
     return inventory if isinstance(inventory, NumericStackPointerReturnInventory8616) and inventory.source_ir is source else None
 
 
+@cython.ccall
 def numeric_stack_pointer_return_inventory_is_current_8616(
     inventory: NumericStackPointerReturnInventory8616,
-) -> bool:
+) -> cython.bint:
     """Recheck source/callee effects at consumption without caching authority."""
     current = build_numeric_stack_pointer_return_inventory_8616(inventory.source_ir)
-    return current.observations == inventory.observations and current.stats == inventory.stats
+    return operator.eq(current.observations, inventory.observations) and operator.eq(current.stats, inventory.stats)
 
 
 def build_numeric_stack_pointer_return_inventory_8616(
     artifact: IRFunctionArtifact,
 ) -> NumericStackPointerReturnInventory8616:
     """Publish one typed outcome for every source RET before Alias completion."""
+    proof: object
+    block: object
+    instruction: object
     observations: list[NumericStackPointerReturnObservation8616] = []
-    seen: set[tuple[int, int | None]] = set()
+    seen: set[tuple[cython.longlong, int | None]] = set()
     failures = 0
     for block in artifact.blocks:
         for instruction in block.instrs:
             if instruction.op != "RET":
                 continue
             key = (block.addr, instruction.addr)
-            proof: NumericStackPointerReturn8616 | None
             refusal: NumericStackPointerReturnRefusal8616 | None
             if key in seen:
                 proof = None
@@ -134,16 +144,17 @@ def build_numeric_stack_pointer_return_inventory_8616(
                          if instruction.addr is not None else None)
                 refusal = None if proof is not None else NumericStackPointerReturnRefusal8616.UNKNOWN_VALUE_OR_PATH
             observations.append(NumericStackPointerReturnObservation8616(*key, proof, refusal))
-    proved = sum(item.proof is not None for item in observations)
+    proved = sum(item.proof is not None for item in iter(observations))
     return NumericStackPointerReturnInventory8616(
         artifact, tuple(observations),
         NumericStackPointerReturnStats8616(
             len(observations), len(seen), proved, proved, failures,
-            sum(item.refusal is not None for item in observations),
+            sum(item.refusal is not None for item in iter(observations)),
         ),
     )
 
 
+@cython.ccall
 def apply_numeric_stack_pointer_return_inventory_8616(
     codegen: object,
 ) -> NumericStackPointerReturnInventory8616 | None:
@@ -160,9 +171,10 @@ def apply_numeric_stack_pointer_return_inventory_8616(
     return inventory
 
 
+@cython.ccall
 def prove_numeric_stack_pointer_return_8616(
-    artifact: IRFunctionArtifact, return_block_addr: int, return_addr: int,
-    register: str = "ax",
+    artifact: IRFunctionArtifact, return_block_addr: cython.longlong, return_addr: cython.longlong,
+    register: object = "ax",
 ) -> NumericStackPointerReturn8616 | None:
     """Prove the final word definition on every path reaching this block's RET.
 
@@ -171,16 +183,18 @@ def prove_numeric_stack_pointer_return_8616(
     shared epilogue. Calls, partial writes, later clobbers and unknown effects
     remain obligations of the existing register-preservation proof.
     """
-    owners = [block for block in artifact.blocks if block.addr == return_block_addr]
+    assignment: object
+    path: object
+    owners = [block for block in iter(artifact.blocks) if operator.eq(block.addr, return_block_addr)]
     if len(owners) != 1 or not owners[0].instrs:
         return None
     block = owners[0]
     terminal = block.instrs[-1]
-    if terminal.op != "RET" or terminal.addr != return_addr:
+    if terminal.op != "RET" or operator.ne(terminal.addr, return_addr):
         return None
     family = register_value_family_8616(register)
     definitions = [
-        (index, instruction) for index, instruction in enumerate(block.instrs)
+        (index, instruction) for index, instruction in builtins.iter(enumerate(block.instrs))
         if isinstance(instruction.dst, IRValue) and instruction.dst.space is MemSpace.REG
         and instruction.dst.name in family
     ]
@@ -188,9 +202,9 @@ def prove_numeric_stack_pointer_return_8616(
         return None
     index, definition = definitions[-1]
     assignment = prove_numeric_stack_pointer_assignment_8616(artifact, block.addr, index)
-    if assignment is None or assignment.register != register or definition.addr is None:
+    if assignment is None or operator.ne(assignment.register, register) or definition.addr is None:
         return None
     path = unchanged_register_return_path_8616(artifact, definition.addr, register)
-    if path is None or path.return_addr != return_addr or path.block_addrs != (block.addr,):
+    if path is None or operator.ne(path.return_addr, return_addr) or operator.ne(path.block_addrs, (block.addr,)):
         return None
     return NumericStackPointerReturn8616(assignment, path)

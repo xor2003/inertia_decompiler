@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Native boundary adapter for restartable variable allocation.
 
 Layer: Frontend/native adapter.
@@ -10,6 +11,7 @@ Lowering; orchestration lives in the CLI runtime.
 """
 
 from __future__ import annotations
+import cython
 
 import copy
 import enum
@@ -58,6 +60,17 @@ from inertia.lowering.allocation_convergence import (
     NativeVariableKey,
 )
 from inertia.lowering.analysis_helpers import _dynamic_analysis_getattr_8616
+import dataclasses
+import operator
+import builtins
+Clinic = typing.TypeVar("Clinic")
+DecompilationVariableManager = typing.TypeVar("DecompilationVariableManager")
+DiGraph = typing.TypeVar("DiGraph")
+Project = typing.TypeVar("Project")
+PrototypeSource = typing.TypeVar("PrototypeSource")
+SimType = typing.TypeVar("SimType")
+StackItem = typing.TypeVar("StackItem")
+Typehoon = typing.TypeVar("Typehoon")
 
 if typing.TYPE_CHECKING:
     from angr.analyses.decompiler.clinic import Clinic
@@ -91,6 +104,7 @@ _VMAP_VVAR_MAPS: tuple[str, ...] = ("_vvar_id_to_variable", "_vvar_id_to_variabl
 _TYPE_MAX_DEPTH = 32
 
 
+@cython.ccall
 def _type_size(ty: object) -> object:
     """Size field for a SimType without failing on archless instances."""
     try:
@@ -100,6 +114,7 @@ def _type_size(ty: object) -> object:
     return size
 
 
+@cython.ccall
 def _base_type_fields(ty: object) -> dict[str, object]:
     """Common distinguishing fields every supported SimType contributes."""
     return {
@@ -109,7 +124,7 @@ def _base_type_fields(ty: object) -> dict[str, object]:
     }
 
 
-def _type_key(ty: object, _depth: int = 0) -> AllocationStructuralKey:
+def _type_key(ty: object, _depth: cython.longlong = 0) -> AllocationStructuralKey:
     """Structural key for a SimType, binding class, layout and signedness.
 
     Only explicit supported native forms are admitted; unknown objects and
@@ -121,17 +136,17 @@ def _type_key(ty: object, _depth: int = 0) -> AllocationStructuralKey:
         raise AllocationFingerprintRefusal("recursive type graph exceeds supported depth")
     fields = _base_type_fields(ty)
     _container_type_fields(ty, fields, _depth)
-    return tuple((name, fields[name]) for name in sorted(fields))
+    return tuple((name, fields[name]) for name in builtins.iter(sorted(fields)))
 
 
 def _container_type_fields(
-    ty: object, fields: dict[str, object], depth: int
+    ty: object, fields: object, depth: cython.longlong
 ) -> None:
     """Populate layout fields for supported container/named SimType forms."""
     sub = depth + 1
     if isinstance(ty, SimTypeFunction):
         fields["proto"] = (
-            tuple(_type_key(a, sub) for a in (_dyn(ty, "args") or ())),
+            tuple(_type_key(a, sub) for a in iter((_dyn(ty, "args") or ()))),
             _type_key(_dyn(ty, "returnty"), sub),
             tuple(_dyn(ty, "arg_names") or ()),
             bool(_dyn(ty, "variadic")),
@@ -141,14 +156,14 @@ def _container_type_fields(
     elif isinstance(ty, SimTypeArray):
         fields["elem_type"] = _type_key(_dyn(ty, "elem_type"), sub)
         fields["length"] = _scalar(_dyn(ty, "length"))
-        fields["qualifier"] = tuple(_scalar(q) for q in (_dyn(ty, "qualifier") or ()))
+        fields["qualifier"] = tuple(_scalar(q) for q in iter((_dyn(ty, "qualifier") or ())))
     elif isinstance(ty, SimStruct):
         offsets = _dyn(ty, "offsets") or {}
         fields["name"] = _scalar(_dyn(ty, "name"))
         fields["struct"] = tuple(
             sorted(
                 (name, _type_key(sub_ty, sub), offsets.get(name))
-                for name, sub_ty in dict(_dyn(ty, "fields") or {}).items()
+                for name, sub_ty in builtins.iter(dict(_dyn(ty, "fields") or {}).items())
             )
         )
     elif isinstance(ty, SimUnion):
@@ -156,12 +171,12 @@ def _container_type_fields(
         fields["union"] = tuple(
             sorted(
                 (name, _type_key(sub_ty, sub))
-                for name, sub_ty in dict(_dyn(ty, "members") or {}).items()
+                for name, sub_ty in builtins.iter(dict(_dyn(ty, "members") or {}).items())
             )
         )
     elif isinstance(ty, SimTypeEnum):
         fields["name"] = _scalar(_dyn(ty, "name"))
-        fields["enum_members"] = tuple(sorted(dict(_dyn(ty, "members") or {}).items()))
+        fields["enum_members"] = tuple(sorted(tuple(dict(_dyn(ty, "members") or {}).items())))
     elif isinstance(ty, (SimTypeString, SimTypeWString)):
         fields["name"] = _scalar(_dyn(ty, "name"))
         fields["length"] = _scalar(_dyn(ty, "length"))
@@ -183,6 +198,7 @@ def _container_type_fields(
         raise AllocationFingerprintRefusal(f"unsupported type form {type(ty).__name__}")
 
 
+@cython.ccall
 def _variable_key(var: SimVariable) -> NativeVariableKey:
     """Structural identity of one SimVariable without rendered text."""
     if isinstance(var, SimStackVariable):
@@ -200,6 +216,7 @@ def _variable_key(var: SimVariable) -> NativeVariableKey:
     raise AllocationFingerprintRefusal(f"unsupported variable form {type(var).__name__}")
 
 
+@cython.ccall
 def _scalar(value: object) -> object:
     """Key a scalar field; refuse unkeyable values instead of dropping them."""
     if value is None or isinstance(value, (bool, int, str)):
@@ -222,7 +239,7 @@ def _register_expr_keyers() -> tuple[tuple[type[Any], Callable[[object], Allocat
         oident = _dyn(expr, "oident")
         return (
             "vvar", _dyn(expr, "varid"), _dyn(expr, "size"), _scalar(_dyn(expr, "category")),
-            tuple(_scalar(x) for x in oident) if isinstance(oident, (tuple, list)) else _scalar(oident),
+            tuple(_scalar(x) for x in iter(oident)) if isinstance(oident, (tuple, list)) else _scalar(oident),
         )
 
     def _call(expr: object) -> AllocationStructuralKey:
@@ -230,15 +247,19 @@ def _register_expr_keyers() -> tuple[tuple[type[Any], Callable[[object], Allocat
         return (
             "call",
             target if isinstance(target, str) else _expr_key(target),
-            tuple(_expr_key(a) for a in (_dyn(expr, "args") or ())),
+            tuple(_expr_key(a) for a in iter((_dyn(expr, "args") or ()))),
             _type_key(_dyn(expr, "prototype")),
             _scalar(type(_dyn(expr, "calling_convention")).__name__),
         )
 
     def _phi(expr: object) -> AllocationStructuralKey:
+        """Bind every predecessor, preserving an absent incoming value explicitly."""
         return (
             "phi",
-            tuple(sorted((src, _expr_key(v)) for src, v in (_dyn(expr, "src_and_vvars") or ()))),
+            tuple(sorted(
+                (src, ("absent_phi_input",) if v is None else _expr_key(v))
+                for src, v in iter((_dyn(expr, "src_and_vvars") or ()))
+            )),
         )
 
     return (
@@ -252,7 +273,7 @@ def _register_expr_keyers() -> tuple[tuple[type[Any], Callable[[object], Allocat
         (E.BinaryOp, lambda e: (
             "binop", _dyn(e, "op"), _dyn(e, "bits"), _dyn(e, "depth"),
             _dyn(e, "floating_point"), _dyn(e, "signed"),
-            tuple(_expr_key(op) for op in _dyn(e, "operands")), _scalar(_dyn(e, "idx")),
+            tuple(_expr_key(op) for op in builtins.iter(_dyn(e, "operands"))), _scalar(_dyn(e, "idx")),
         )),
         (E.UnaryOp, lambda e: ("unop", _dyn(e, "op"), _dyn(e, "bits"), _expr_key(_dyn(e, "operand")), _scalar(_dyn(e, "idx")))),
         (E.Convert, lambda e: (
@@ -270,7 +291,9 @@ def _register_expr_keyers() -> tuple[tuple[type[Any], Callable[[object], Allocat
     )
 
 
+@cython.ccall
 def _reference_key(expr: object) -> AllocationStructuralKey:
+    inner: object
     # rustylib 'Reference' expression: kind tag verified against pykind
     if _dyn(expr, "pykind") != 6:
         raise AllocationFingerprintRefusal(f"unsupported expression form pykind={_dyn(expr, 'pykind')}")
@@ -285,8 +308,11 @@ def _reference_key(expr: object) -> AllocationStructuralKey:
 _EXPR_KEYERS = _register_expr_keyers()
 
 
+@cython.ccall
 def _expr_key(expr: object) -> AllocationStructuralKey:
     """Full recursive structural key for a native AIL expression."""
+    expr_cls: object
+    keyer: object
     for expr_cls, keyer in _EXPR_KEYERS:
         if isinstance(expr, expr_cls):
             return keyer(expr)
@@ -308,7 +334,7 @@ def _register_stmt_keyers() -> tuple[tuple[type[Any], Callable[[object], Allocat
             "cas", _dyn(stmt, "ins_addr"), _scalar(_dyn(stmt, "idx")),
             tuple(
                 _expr_key(e)
-                for e in (_dyn(stmt, "addr"), _dyn(stmt, "data_lo"), _dyn(stmt, "data_hi"), _dyn(stmt, "expd_lo"), _dyn(stmt, "expd_hi"), _dyn(stmt, "old_lo"), _dyn(stmt, "old_hi"))
+                for e in iter((_dyn(stmt, "addr"), _dyn(stmt, "data_lo"), _dyn(stmt, "data_hi"), _dyn(stmt, "expd_lo"), _dyn(stmt, "expd_hi"), _dyn(stmt, "old_lo"), _dyn(stmt, "old_hi")))
                 if e is not None
             ),
         )
@@ -325,7 +351,7 @@ def _register_stmt_keyers() -> tuple[tuple[type[Any], Callable[[object], Allocat
         (S.WeakAssignment, lambda s_: ("weak_assign", _dyn(s_, "ins_addr"), _scalar(_dyn(s_, "idx")), _expr_key(_dyn(s_, "dst")), _expr_key(_dyn(s_, "src")))),
         (S.ConditionalJump, _cjump),
         (S.Jump, lambda s_: ("jump", _dyn(s_, "ins_addr"), _scalar(_dyn(s_, "idx")), _expr_key(_dyn(s_, "target")))),
-        (S.Return, lambda s_: ("return", _dyn(s_, "ins_addr"), _scalar(_dyn(s_, "idx")), tuple(_expr_key(e) for e in (_dyn(s_, "ret_exprs") or ())))),
+        (S.Return, lambda s_: ("return", _dyn(s_, "ins_addr"), _scalar(_dyn(s_, "idx")), tuple(_expr_key(e) for e in iter((_dyn(s_, "ret_exprs") or ()))))),
         (S.Label, lambda s_: ("label", _dyn(s_, "ins_addr"), _scalar(_dyn(s_, "idx")), _dyn(s_, "name"), _dyn(s_, "block_idx"))),
         (S.CAS, _cas),
         (S.SideEffectStatement, _sideeffect),
@@ -337,8 +363,11 @@ def _register_stmt_keyers() -> tuple[tuple[type[Any], Callable[[object], Allocat
 _STMT_KEYERS = _register_stmt_keyers()
 
 
+@cython.ccall
 def _stmt_key(stmt: object) -> AllocationStructuralKey:
     """Full structural key for a native AIL statement including operands."""
+    keyer: object
+    stmt_cls: object
     for stmt_cls, keyer in _STMT_KEYERS:
         if isinstance(stmt, stmt_cls):
             return keyer(stmt)
@@ -347,6 +376,7 @@ def _stmt_key(stmt: object) -> AllocationStructuralKey:
 
 def _calling_convention_key(cc: object) -> AllocationStructuralKey | None:
     """Relevant calling-convention fields (arch, stack delta, arg registers)."""
+    arch: object
     if cc is None:
         return None
     arch = _dyn(cc, "arch")
@@ -354,17 +384,17 @@ def _calling_convention_key(cc: object) -> AllocationStructuralKey | None:
         type(cc).__name__,
         _scalar(_dyn(arch, "name")) if arch is not None else None,
         _dyn(cc, "sp_delta"),
-        tuple(_scalar(a) for a in (_dyn(cc, "ARGS") or ())),
-        tuple(_scalar(a) for a in (_dyn(cc, "FP_ARGS") or ())),
+        tuple(_scalar(a) for a in iter((_dyn(cc, "ARGS") or ()))),
+        tuple(_scalar(a) for a in iter((_dyn(cc, "FP_ARGS") or ()))),
     )
 
 
 class _NativeGraphBlock8616(typing.Protocol):
     """Installed AIL block input consumed by the structural graph owner."""
 
-    addr: int
+    addr: cython.longlong
     idx: int | None
-    statements: list[object]
+    statements: object
 
 
 class _NativeGraph8616(typing.Protocol):
@@ -381,21 +411,24 @@ class _NativeGraph8616(typing.Protocol):
 
 def fingerprint_allocation_graph_8616(graph: object) -> tuple[AllocationGraphNodes, AllocationGraphEdges]:
     """Read exactly the supplied raw graph without swapping a live Clinic."""
+    data: object
+    destination: object
+    source: object
     if graph is None:
         return (), ()
     native = typing.cast(_NativeGraph8616, graph)
-    nodes = [(block.addr, block.idx, tuple(_stmt_key(stmt) for stmt in block.statements)) for block in native]
+    nodes = [(block.addr, block.idx, tuple(_stmt_key(stmt) for stmt in iter(block.statements))) for block in iter(native)]
     nodes.sort(key=lambda row: (row[0], -1 if row[1] is None else row[1]))
     edges = []
     for source, destination, data in native.edges(data=True):
-        metadata = tuple(sorted((name, _scalar(value)) for name, value in data.items()))
+        metadata = tuple(sorted((name, _scalar(value)) for name, value in builtins.iter(data.items())))
         edges.append(((source.addr, source.idx), (destination.addr, destination.idx), metadata))
     edges.sort(key=lambda row: (row[0][0], row[1][0]))
     return tuple(nodes), tuple(edges)
 
 
 def fingerprint_allocation_inputs(
-    clinic: Clinic, *, include_graph: bool = True
+    clinic: Clinic, *, include_graph: cython.bint = True
 ) -> AllocationInputFingerprint:
     """Capture the typed structural inputs the native allocator consumes.
 
@@ -407,6 +440,8 @@ def fingerprint_allocation_inputs(
     Raises AllocationFingerprintRefusal for unsupported native forms rather
     than collapsing them into a generic bucket.
     """
+    graph: object
+    var: object
     func = clinic.function
     graph = clinic._ail_graph if include_graph else None
     if include_graph and graph is None:
@@ -418,13 +453,13 @@ def fingerprint_allocation_inputs(
             (
                 varid,
                 _variable_key(var),
-                tuple(_scalar(x) for x in (_dyn(vvar, "oident") or ())),
+                tuple(_scalar(x) for x in iter((_dyn(vvar, "oident") or ()))),
                 _dyn(vvar, "bits"),
             )
-            for varid, (vvar, var) in (clinic.arg_vvars or {}).items()
+            for varid, (vvar, var) in builtins.iter((clinic.arg_vvars or {}).items())
         )
     )
-    vvar_to_vvar = tuple(sorted((clinic.vvar_to_vvar or {}).items()))
+    vvar_to_vvar = tuple(sorted(tuple((clinic.vvar_to_vvar or {}).items())))
 
     manual: list[tuple[NativeVariableKey, AllocationStructuralKey]] = []
     var_manager = clinic.project.kb.dec_variables[func.addr]
@@ -436,14 +471,14 @@ def fingerprint_allocation_inputs(
     stack_items = tuple(
         sorted(
             (offset, item.name, item.size, item.item_type.name)
-            for offset, item in (clinic.stack_items or {}).items()
+            for offset, item in builtins.iter((clinic.stack_items or {}).items())
         )
     )
 
     prototype = None
     if func.prototype is not None:
         prototype = (
-            tuple(_type_key(a) for a in func.prototype.args),
+            tuple(_type_key(a) for a in iter(func.prototype.args)),
             _type_key(func.prototype.returnty),
             tuple(func.prototype.arg_names or ()),
             bool(_dyn(func.prototype, "variadic")),
@@ -457,10 +492,10 @@ def fingerprint_allocation_inputs(
 
     return AllocationInputFingerprint(
         function_addr=func.addr,
-        argument_variables=tuple(_variable_key(v) for v in (clinic.arg_list or ())),
+        argument_variables=tuple(_variable_key(v) for v in iter((clinic.arg_list or ()))),
         argument_vvars=arg_vvars,
         vvar_to_vvar=vvar_to_vvar,
-        type_hints=tuple(sorted(_type_hint_key(loc, hint) for loc, hint in (clinic._type_hints or ()))),
+        type_hints=tuple(sorted(_type_hint_key(loc, hint) for loc, hint in iter((clinic._type_hints or ())))),
         manual_types=manual_types,
         stack_items=stack_items,
         prototype=prototype,
@@ -471,7 +506,8 @@ def fingerprint_allocation_inputs(
     )
 
 
-def _type_hint_key(loc: object, hint: str) -> tuple[str, str]:
+@cython.ccall
+def _type_hint_key(loc: object, hint: object) -> tuple[str, str]:
     """Key a type-hint location without text matching.
 
     Only vvar ids and integer memory addr/offset forms are supported; anything
@@ -502,8 +538,8 @@ else:
 class _VariableNamingSurface8616(typing.Protocol):
     """Native names can be unset, including before allocator naming."""
 
-    name: str | None
-    renamed: bool
+    name: object
+    renamed: cython.bint
 
 
 class _AtomIndexCollector(_NativeBlockWalker8616):
@@ -511,10 +547,10 @@ class _AtomIndexCollector(_NativeBlockWalker8616):
 
     def __init__(self) -> None:
         super().__init__()
-        self.atom_idxs: set[int] = set()
-        self.vvar_ids: set[int] = set()
+        self.atom_idxs: set[cython.longlong] = set()
+        self.vvar_ids: set[cython.longlong] = set()
 
-    def _top(self, expr_idx: int, expr: object, stmt_idx: int, stmt: object, block: object) -> None:
+    def _top(self, expr_idx: cython.longlong, expr: object, stmt_idx: cython.longlong, stmt: object, block: object) -> None:
         idx = _dyn(expr, "idx")
         if isinstance(idx, int):
             self.atom_idxs.add(idx)
@@ -523,17 +559,17 @@ class _AtomIndexCollector(_NativeBlockWalker8616):
             self.vvar_ids.add(varid)
         return None
 
-    def _stmt_top(self, stmt_idx: int, stmt: object, block: object) -> None:
+    def _stmt_top(self, stmt_idx: cython.longlong, stmt: object, block: object) -> None:
         idx = _dyn(stmt, "idx")
         if isinstance(idx, int):
             self.atom_idxs.add(idx)
         return None
 
-    def _handle_block_end(self, stmt_results: list[object], block: object) -> object:
+    def _handle_block_end(self, stmt_results: object, block: object) -> object:
         return block
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class NativeAllocationCheckpoint:
     """Full native checkpoint covering every surface the stage mutates.
 
@@ -545,41 +581,43 @@ class NativeAllocationCheckpoint:
 
     manager: VariableManagerInternal | None
     global_manager: VariableManagerInternal
-    variable_map_maps: dict[str, dict[object, object]]
-    variable_names: list[tuple[SimVariable, str | None, bool]]
-    manual_type_copies: list[tuple[SimVariable, SimType]]
+    variable_map_maps: object
+    variable_names: object
+    manual_type_copies: object
     ail_graph: DiGraph
-    arg_vvars: dict[int, tuple[object, SimVariable]]
-    vvar_to_vvar: dict[int, int]
-    arg_list: list[SimVariable]
-    stack_items: dict[int, StackItem]
+    arg_vvars: object
+    vvar_to_vvar: object
+    arg_list: object
+    stack_items: object
     prototype: SimTypeFunction | None
     prototype_source: PrototypeSource
-    prototype_libname: str | None
-    variables_recovered: bool
+    prototype_libname: object
+    variables_recovered: cython.bint
     typehoon: Typehoon | None
-    has_typehoon: bool
+    has_typehoon: cython.bint
 
 
+@cython.ccall
 def capture_native_checkpoint(project: Project, clinic: Clinic) -> NativeAllocationCheckpoint:
     """Snapshot manager, link map, graph and prototype before a rerun."""
+    manager: object
     func = clinic.function
     plugin = project.kb.dec_variables
     vmap = clinic.variable_map
-    maps = {name: dict(_dyn(vmap, name) or {}) for name in _VMAP_IDX_MAPS + _VMAP_VVAR_MAPS}
+    maps = {name: dict(_dyn(vmap, name) or {}) for name in iter(_VMAP_IDX_MAPS + _VMAP_VVAR_MAPS)}
     manager = plugin.function_managers.get(func.addr)
     ail_graph = clinic.copy_graph(clinic._ail_graph)
-    names: list[tuple[SimVariable, str | None, bool]] = []
+    names: list[tuple[SimVariable, str | None, cython.bint]] = []
     if manager is not None:
-        names += [(v, v.name, v.renamed) for v in manager._variables]
-    names += [(v, v.name, v.renamed) for v in (clinic.arg_list or ()) if isinstance(v, SimVariable)]
+        names += [(v, v.name, v.renamed) for v in iter(manager._variables)]
+    names += [(v, v.name, v.renamed) for v in iter((clinic.arg_list or ())) if isinstance(v, SimVariable)]
     # SimType objects are mutable in place (e.g. .signed); deep-copy manual-type
     # and prototype evidence so a partial run cannot corrupt the checkpoint
     manual_type_copies: list[tuple[SimVariable, SimType]] = []
     if manager is not None:
         manual_type_copies = [
             (v, copy.deepcopy(manager.variable_to_types[v]))
-            for v in manager.variables_with_manual_types
+            for v in iter(manager.variables_with_manual_types)
             if v in manager.variable_to_types
         ]
     return NativeAllocationCheckpoint(
@@ -602,8 +640,15 @@ def capture_native_checkpoint(project: Project, clinic: Clinic) -> NativeAllocat
     )
 
 
+@cython.ccall
 def restore_native_checkpoint(project: Project, clinic: Clinic, cp: NativeAllocationCheckpoint) -> None:
     """Reinstate every snapshotted native surface after a failed rerun."""
+    mapping: object
+    name: object
+    original_name: object
+    renamed: object
+    ty: object
+    var: object
     func = clinic.function
     plugin = project.kb.dec_variables
     if cp.manager is None:
@@ -637,14 +682,20 @@ def restore_native_checkpoint(project: Project, clinic: Clinic, cp: NativeAlloca
         del clinic.typehoon
 
 
-def reset_function_variables(project: Project, func_addr: int) -> int:
+@cython.ccall
+def reset_function_variables(project: Project, func_addr: cython.longlong) -> cython.longlong:
     """Drop the function's dec_variables manager; re-apply manual-type evidence.
 
     Returns the number of preserved manual types.
     """
+    name: object
+    old: object
+    ty: object
+    renamed: object
+    var: object
     plugin: DecompilationVariableManager = project.kb.dec_variables
     old = plugin.function_managers.get(func_addr)
-    preserved: list[tuple[SimVariable, SimType, str | None, bool]] = []
+    preserved: list[tuple[SimVariable, SimType, str | None, cython.bint]] = []
     if old is not None:
         for var in old.variables_with_manual_types:
             ty = old.variable_to_types.get(var)
@@ -662,8 +713,12 @@ def reset_function_variables(project: Project, func_addr: int) -> int:
     return len(preserved)
 
 
-def prune_unpublished_links(clinic: Clinic) -> int:
+@cython.ccall
+def prune_unpublished_links(clinic: Clinic) -> cython.longlong:
     """Drop link-map entries whose atom/vvar no longer exists in the graph."""
+    block: object
+    key: object
+    name: object
     collector = _AtomIndexCollector()
     for block in clinic._ail_graph or ():
         collector.walk(block)
@@ -688,6 +743,7 @@ def prune_unpublished_links(clinic: Clinic) -> int:
     return dropped
 
 
+@cython.ccall
 def _publication_keyers_8616() -> NativeAllocationKeyers8616:
     """Use the canonical input serializers to seal native publication values."""
     return NativeAllocationKeyers8616(
@@ -695,10 +751,12 @@ def _publication_keyers_8616() -> NativeAllocationKeyers8616:
     )
 
 
+@cython.ccall
 def published_handle(
-    project: Project, func_addr: int, clinic: Clinic, *, input_graph: object,
+    project: Project, func_addr: cython.longlong, clinic: Clinic, *, input_graph: object,
 ) -> NativeAllocationPublication8616:
     """Bind published objects and contents to the detached raw input consumed."""
+    manager: object
     manager = project.kb.dec_variables.function_managers.get(func_addr)
     if manager is None:
         raise AllocationFingerprintRefusal("recovery published no native variable manager")
@@ -711,9 +769,10 @@ def published_handle(
     )
 
 
+@cython.ccall
 def publication_generation_current_8616(
-    project: Project, func_addr: int, clinic: Clinic, handle: object,
-) -> bool:
+    project: Project, func_addr: cython.longlong, clinic: Clinic, handle: object,
+) -> cython.bint:
     """Check the native manager, map and graph generation before content reuse."""
     return (
         isinstance(handle, NativeAllocationPublication8616)
@@ -723,9 +782,10 @@ def publication_generation_current_8616(
     )
 
 
+@cython.ccall
 def accepted_publication_bound(
-    project: Project, func_addr: int, clinic: Clinic, handle: object,
-) -> bool:
+    project: Project, func_addr: cython.longlong, clinic: Clinic, handle: object,
+) -> cython.bint:
     """Require the live generation AND every sealed manager/link projection."""
     if not isinstance(handle, NativeAllocationPublication8616):
         return False
@@ -735,9 +795,10 @@ def accepted_publication_bound(
         handle.manager, clinic.variable_map, _VMAP_IDX_MAPS + _VMAP_VVAR_MAPS,
         _publication_keyers_8616(),
     )
-    return current == handle.records
+    return operator.eq(current, handle.records)
 
 
+@cython.ccall
 def copy_input_graph(
     clinic: Clinic, *, handle: object = None,
     entry: AllocationInputFingerprint | None = None,
@@ -756,21 +817,24 @@ def copy_input_graph(
         return clinic.copy_graph(source)
     same_generation = clinic._ail_graph is handle.graph and clinic.variable_map is handle.variable_map
     same_content = (
-        entry.graph_nodes == accepted_output.graph_nodes
-        and entry.graph_edges == accepted_output.graph_edges
+        operator.eq(entry.graph_nodes, accepted_output.graph_nodes)
+        and operator.eq(entry.graph_edges, accepted_output.graph_edges)
     )
     if same_generation and same_content:
         source = typing.cast("DiGraph | None", handle.input_graph)
     return clinic.copy_graph(source)
 
 
+@cython.ccall
 def install_input_graph(clinic: Clinic, graph: object) -> None:
     """Replace the clinic's AIL graph with a fresh copy of retained raw input."""
     clinic._ail_graph = clinic.copy_graph(graph)
 
 
-def output_surface_counts(project: Project, func_addr: int, clinic: Clinic) -> tuple[int, int]:
+@cython.ccall
+def output_surface_counts(project: Project, func_addr: cython.longlong, clinic: Clinic) -> tuple[cython.longlong, cython.longlong]:
     """(variable count, link count) currently published for the function."""
+    manager: object
     plugin = project.kb.dec_variables
     manager = plugin.function_managers.get(func_addr)
     n_vars = len(manager._variables) if manager is not None else 0

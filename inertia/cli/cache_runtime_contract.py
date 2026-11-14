@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed runtime eligibility for semantic decompiler caches.
 
 Layer: CLI/fallback/reporting.
@@ -6,11 +7,14 @@ diagnostics that must execute instead of reusing final generated-C results.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+import dataclasses
 
 TIMING_DIAGNOSTIC_ENV_8616: str = "INERTIA_DEBUG_TIMING"
 WORKER_CPROFILE_ENV_8616: str = "INERTIA_OTEL_CPROFILE_PATH"
@@ -26,23 +30,25 @@ class CacheRuntimeVerdict8616(StrEnum):
     HASH_SEED_NONZERO = "hash_seed_nonzero"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CacheRuntimeContract8616:
     """Determinism evidence required before semantic cache reuse."""
 
     verdict: CacheRuntimeVerdict8616
-    python_hash_seed: str | None
+    python_hash_seed: object
 
     @property
-    def allows_semantic_cache(self) -> bool:
+    def allows_semantic_cache(self) -> cython.bint:
         """Return whether this process may read or write semantic cache entries."""
         return self.verdict is CacheRuntimeVerdict8616.DETERMINISTIC
 
 
+@cython.ccall
 def cache_runtime_contract_8616(
     environment: Mapping[str, str] | None = None,
 ) -> CacheRuntimeContract8616:
     """Classify the current process from explicit hash-seed evidence."""
+    raw_seed: object
     source = os.environ if environment is None else environment
     raw_seed = source.get("PYTHONHASHSEED")
     if raw_seed is None or not raw_seed.strip():
@@ -54,18 +60,21 @@ def cache_runtime_contract_8616(
     return CacheRuntimeContract8616(verdict=verdict, python_hash_seed=raw_seed)
 
 
+@cython.ccall
 def timing_diagnostics_requested_8616(
     environment: Mapping[str, str] | None = None,
-) -> bool:
+) -> cython.bint:
     """Return whether the current request needs live stage timing output."""
+    raw_value: object
     source = os.environ if environment is None else environment
     raw_value = source.get(TIMING_DIAGNOSTIC_ENV_8616)
     return bool(raw_value is not None and raw_value.strip().lower() not in _DISABLED_DIAGNOSTIC_VALUES_8616)
 
 
+@cython.ccall
 def live_decompilation_diagnostics_requested_8616(
     environment: Mapping[str, str] | None = None,
-) -> bool:
+) -> cython.bint:
     """Return whether final-C caches must yield to live diagnostic execution."""
     source = os.environ if environment is None else environment
     profile_path = source.get(WORKER_CPROFILE_ENV_8616, "").strip()

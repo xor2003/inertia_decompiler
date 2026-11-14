@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize typed condition views over proven stack declarations.
 
 Layer: Structuring.
@@ -12,6 +13,8 @@ work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_variable import SimStackVariable
@@ -24,11 +27,12 @@ from inertia.lowering.stack_variable_coordinates import (
 )
 
 
+@cython.ccall
 def materialize_condition_stack_declaration_view_8616(
     codegen: object,
     declaration: structured_c.CVariable,
     *,
-    signed: bool,
+    signed: cython.bint,
 ) -> structured_c.CExpression | None:
     """Return a typed view without confusing entry-SP and machine-BP offsets."""
     variable = declaration.variable

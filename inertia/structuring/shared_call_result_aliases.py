@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Own regenerated aliases of one proven call-result store.
 
 Layer: Structuring.
@@ -13,6 +14,8 @@ or conflicting evidence is an explicit refusal, leaving strict validation to rej
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -35,6 +38,9 @@ from angr.sim_variable import SimStackVariable
 from inertia.lowering.c_ast_utils import _clone_c_ast_tree_8616, _iter_c_nodes_deep_8616
 from inertia.lowering.stack_variable_coordinates import machine_bp_offset_for_stack_variable_8616
 from inertia.semantics.callsite_summary import CallsiteSummary8616
+import dataclasses
+import operator
+import builtins
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -65,36 +71,36 @@ class CallResultAliasRefusalReason8616(Enum):
     INTERVENING_EFFECT_CONFLICT = "intervening_effect_conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallResultAliasRefusal8616:
     """One exact callsite whose regenerated aliases cannot be owned."""
 
-    callsite_addr: int
+    callsite_addr: cython.longlong
     reason: CallResultAliasRefusalReason8616
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class CallResultAliasOwnershipStats8616:
     """Closed evidence counters for regenerated call-result aliases."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    rewritten_assignment_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    rewritten_assignment_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallResultAliasOwnershipResult8616:
     """Typed result published by the Structuring alias owner."""
 
     verdict: CallResultAliasOwnershipVerdict8616
     stats: CallResultAliasOwnershipStats8616
-    refusals: tuple[CallResultAliasRefusal8616, ...]
+    refusals: object
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether at least one alias assignment was rewritten."""
         return self.stats.materialized_count > 0
 
@@ -109,27 +115,29 @@ class _CodegenSurface8616(Protocol):
     """Owned and third-party codegen fields consumed or published here."""
 
     cfunc: _CFunctionSurface8616
-    _inertia_callsite_summaries: dict[int, CallsiteSummary8616]
+    _inertia_callsite_summaries: object
     _inertia_call_result_alias_ownership_8616: CallResultAliasOwnershipResult8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _DirectCallAssignmentOccurrence8616:
     """One direct call assignment at an exact structured-list position."""
 
     call: CFunctionCall
     assignment: CAssignment
     parent: CStatements
-    statement_index: int
+    statement_index: cython.longlong
 
 
-def _canonical_stack_offset_8616(offset: int) -> int:
+@cython.ccall
+def _canonical_stack_offset_8616(offset: cython.longlong) -> cython.longlong:
     """Normalize one 16-bit BP displacement to signed storage identity."""
     normalized = offset & 0xFFFF
     return normalized - 0x10000 if normalized >= 0x8000 else normalized
 
 
-def _exact_bp_destination_8616(destination: object, width: object) -> bool:
+@cython.ccall
+def _exact_bp_destination_8616(destination: object, width: object) -> cython.bint:
     """Return whether the pair is an exact ``("bp", int-offset)`` + positive width."""
     return (
         isinstance(destination, tuple)
@@ -141,11 +149,12 @@ def _exact_bp_destination_8616(destination: object, width: object) -> bool:
     )
 
 
+@cython.ccall
 def _is_exact_summary_destination_8616(
     codegen: object,
     expression: object,
     summary: CallsiteSummary8616,
-) -> bool:
+) -> cython.bint:
     """Match one C lvalue to the summary's exact BP-relative destination."""
     destination = summary.return_store_destination
     width = summary.return_store_width
@@ -164,16 +173,21 @@ def _is_exact_summary_destination_8616(
     return (
         variable.base == "bp"
         and isinstance(machine_offset, int)
-        and _canonical_stack_offset_8616(machine_offset) == _canonical_stack_offset_8616(destination[1])
-        and int(variable.size) == width
+        and operator.eq(_canonical_stack_offset_8616(machine_offset), _canonical_stack_offset_8616(destination[1]))
+        and operator.eq(int(variable.size), width)
     )
 
 
+@cython.ccall
 def _direct_call_assignments_8616(
     root: CStatements,
-) -> dict[int, tuple[CFunctionCall, tuple[_DirectCallAssignmentOccurrence8616, ...]]]:
+) -> dict[cython.longlong, tuple[CFunctionCall, tuple[_DirectCallAssignmentOccurrence8616, ...]]]:
     """Group physical assignment occurrences by exact shared call identity."""
-    grouped: dict[int, tuple[CFunctionCall, list[_DirectCallAssignmentOccurrence8616]]] = {}
+    prior: object
+    parent: object
+    statement: object
+    statement_index: object
+    grouped: dict[cython.longlong, tuple[CFunctionCall, list[_DirectCallAssignmentOccurrence8616]]] = {}
     for parent in _iter_c_nodes_deep_8616(root):
         if not isinstance(parent, CStatements) or not isinstance(parent.statements, list):
             continue
@@ -189,10 +203,11 @@ def _direct_call_assignments_8616(
             grouped[id(call)] = (call, occurrences)
     return {
         call_id: (call, tuple(occurrences))
-        for call_id, (call, occurrences) in grouped.items()
+        for call_id, (call, occurrences) in builtins.iter(grouped.items())
     }
 
 
+@cython.ccall
 def _structured_alias_refusal_8616(
     codegen: object,
     owner: _DirectCallAssignmentOccurrence8616,
@@ -200,6 +215,8 @@ def _structured_alias_refusal_8616(
     summary: CallsiteSummary8616,
 ) -> CallResultAliasRefusalReason8616 | None:
     """Return why one structured alias is not dominated by its result owner."""
+    node: object
+    statement: object
     if alias.parent is not owner.parent or alias.statement_index <= owner.statement_index:
         return CallResultAliasRefusalReason8616.STRUCTURED_ORDER_UNKNOWN
     intervening = owner.parent.statements[owner.statement_index + 1 : alias.statement_index]
@@ -216,9 +233,10 @@ def _structured_alias_refusal_8616(
     return None
 
 
+@cython.ccall
 def _refuse_8616(
     stats: CallResultAliasOwnershipStats8616,
-    refusals: list[CallResultAliasRefusal8616],
+    refusals: object,
     summary: CallsiteSummary8616,
     reason: CallResultAliasRefusalReason8616,
 ) -> None:
@@ -230,11 +248,13 @@ def _refuse_8616(
 def _process_call_group_8616(
     codegen: object,
     summary: CallsiteSummary8616,
-    occurrences: tuple[_DirectCallAssignmentOccurrence8616, ...],
+    occurrences: object,
     stats: CallResultAliasOwnershipStats8616,
-    refusals: list[CallResultAliasRefusal8616],
+    refusals: object,
 ) -> None:
     """Apply the alias-ownership evidence ladder to one call group."""
+    refusal_reason: object
+    alias: object
     stats.raw_fact_count += 1
     if not _exact_bp_destination_8616(
         summary.return_store_destination,
@@ -250,7 +270,7 @@ def _process_call_group_8616(
     stats.normalized_fact_count += 1
     destinations = tuple(
         occurrence
-        for occurrence in occurrences
+        for occurrence in iter(occurrences)
         if _is_exact_summary_destination_8616(codegen, occurrence.assignment.lhs, summary)
     )
     if len(destinations) != 1:
@@ -262,11 +282,11 @@ def _process_call_group_8616(
         )
         return
     owner = destinations[0]
-    aliases = tuple(occurrence for occurrence in occurrences if occurrence is not owner)
+    aliases = tuple(occurrence for occurrence in iter(occurrences) if occurrence is not owner)
     refusal_reason = next(
         (
             reason
-            for alias in aliases
+            for alias in iter(aliases)
             if (reason := _structured_alias_refusal_8616(codegen, owner, alias, summary))
             is not None
         ),
@@ -281,7 +301,7 @@ def _process_call_group_8616(
         )
         return
     stats.classified_fact_count += 1
-    rewritten_assignments: set[int] = set()
+    rewritten_assignments: set[cython.longlong] = set()
     for alias in aliases:
         assignment = alias.assignment
         if id(assignment) in rewritten_assignments:
@@ -296,6 +316,10 @@ def materialize_shared_call_result_aliases_8616(
     codegen: object,
 ) -> CallResultAliasOwnershipResult8616:
     """Replace later aliases of one exact stored call result with value copies."""
+    summary: object
+    _call: object
+    call_id: object
+    occurrences: object
     boundary = cast(_CodegenSurface8616, codegen)
     stats = CallResultAliasOwnershipStats8616()
     refusals: list[CallResultAliasRefusal8616] = []
@@ -320,7 +344,7 @@ def materialize_shared_call_result_aliases_8616(
         return result
     if not isinstance(summary_map, dict) or any(
         not isinstance(key, int) or not isinstance(summary, CallsiteSummary8616)
-        for key, summary in summary_map.items()
+        for key, summary in builtins.iter(summary_map.items())
     ):
         raise TypeError("callsite summary carrier contains an invalid owned contract")
 
@@ -336,7 +360,7 @@ def materialize_shared_call_result_aliases_8616(
                 None if summary is None else summary.return_store_width,
                 tuple(
                     (id(occurrence.parent), occurrence.statement_index)
-                    for occurrence in occurrences
+                    for occurrence in iter(occurrences)
                 ),
                 tuple(
                     False
@@ -344,7 +368,7 @@ def materialize_shared_call_result_aliases_8616(
                     else _is_exact_summary_destination_8616(
                         codegen, occurrence.assignment.lhs, summary
                     )
-                    for occurrence in occurrences
+                    for occurrence in iter(occurrences)
                 ),
             )
         )

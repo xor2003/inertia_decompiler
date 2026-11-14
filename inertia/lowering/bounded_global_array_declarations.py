@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize exact global array extents from project Widening evidence.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import re
 from dataclasses import dataclass
@@ -31,6 +34,8 @@ from .global_declaration_extents import (
     apply_existing_global_array_extent_8616,
 )
 from .indexed_global_evidence import IndexedSegmentedGlobalEvidence8616
+import dataclasses
+import operator
 
 
 class BoundedGlobalArrayLoweringStatus8616(StrEnum):
@@ -49,53 +54,53 @@ class BoundedGlobalArrayLoweringFailureKind8616(StrEnum):
     DECLARATION_CONFLICT = "declaration_conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class BoundedGlobalArrayDeclarationFact8616:
     """One exact range materialized as an existing named C array."""
 
     source: BoundedGlobalObjectRange8616
-    global_name: str
+    global_name: object
     application: GlobalDeclarationExtentApplication8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether name, extent, and retained declaration type agree."""
         return bool(
             self.source.complete
             and re.fullmatch(r"[A-Za-z_]\w*", self.global_name)
             and self.application.materialized
-            and self.application.name == self.global_name
-            and self.application.array_len == self.source.element_count
+            and operator.eq(self.application.name, self.global_name)
+            and operator.eq(self.application.array_len, self.source.element_count)
             and self.application.ctype
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class BoundedGlobalArrayDeclarationRefusal8616:
     """One accepted Widening range refused at the declaration boundary."""
 
     source: BoundedGlobalObjectRange8616
     failure: BoundedGlobalArrayLoweringFailureKind8616
-    detail: str
+    detail: object
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether the refusal retains its exact source and reason."""
         return self.source.complete and bool(self.detail)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class BoundedGlobalArrayLoweringStats8616:
     """Closed accounting for accepted Widening ranges at Types/Lowering."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every accepted range has one declaration outcome."""
         counts = (
             self.raw_fact_count,
@@ -105,7 +110,7 @@ class BoundedGlobalArrayLoweringStats8616:
             self.failure_count,
         )
         return bool(
-            all(count >= 0 for count in counts)
+            all(count >= 0 for count in iter(counts))
             and self.raw_fact_count
             == self.normalized_fact_count
             == self.classified_fact_count
@@ -113,19 +118,19 @@ class BoundedGlobalArrayLoweringStats8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class BoundedGlobalArrayLoweringEvidence8616:
     """Final declaration facts plus upstream and local typed refusals."""
 
     status: BoundedGlobalArrayLoweringStatus8616
-    facts: tuple[BoundedGlobalArrayDeclarationFact8616, ...]
-    refusals: tuple[BoundedGlobalArrayDeclarationRefusal8616, ...]
-    upstream_refusals: tuple[BoundedGlobalObjectRangeRefusal8616, ...]
+    facts: object
+    refusals: object
+    upstream_refusals: object
     stats: BoundedGlobalArrayLoweringStats8616
     source: ProjectBoundedGlobalObjectRangeEvidence8616 | None
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether source availability and every local outcome agree."""
         if self.status is BoundedGlobalArrayLoweringStatus8616.NOT_AVAILABLE:
             return bool(
@@ -139,13 +144,13 @@ class BoundedGlobalArrayLoweringEvidence8616:
         return bool(
             self.source is not None
             and self.source.closed
-            and self.upstream_refusals == self.source.refusals
+            and operator.eq(self.upstream_refusals, self.source.refusals)
             and self.stats.closed
-            and len(self.facts) == self.stats.materialized_count
-            and len(self.refusals) == self.stats.failure_count
-            and len(self.source.ranges) == self.stats.raw_fact_count
-            and all(fact.complete for fact in self.facts)
-            and all(refusal.complete for refusal in self.refusals)
+            and operator.eq(len(self.facts), self.stats.materialized_count)
+            and operator.eq(len(self.refusals), self.stats.failure_count)
+            and operator.eq(len(self.source.ranges), self.stats.raw_fact_count)
+            and all(fact.complete for fact in iter(self.facts))
+            and all(refusal.complete for refusal in iter(self.refusals))
         )
 
 
@@ -161,6 +166,7 @@ class _CodegenBoundedGlobalArraySurface8616(Protocol):
     _inertia_bounded_global_array_lowering_evidence_8616: BoundedGlobalArrayLoweringEvidence8616
 
 
+@cython.ccall
 def _project_ranges_8616(
     project: object,
 ) -> ProjectBoundedGlobalObjectRangeEvidence8616 | None:
@@ -179,25 +185,27 @@ def _project_ranges_8616(
     return evidence
 
 
+@cython.ccall
 def _exact_global_names_8616(
     source: BoundedGlobalObjectRange8616,
-    indexed_evidence: tuple[IndexedSegmentedGlobalEvidence8616, ...],
+    indexed_evidence: object,
 ) -> tuple[str, ...]:
     """Return exact names whose base, displacement, and element width match."""
     return tuple(
         sorted(
             {
                 item.name
-                for item in indexed_evidence
-                if item.base_offset & 0xFFFF == source.base
+                for item in iter(indexed_evidence)
+                if operator.eq(item.base_offset & 0xFFFF, source.base)
                 and item.relative_disp == 0
-                and item.width == source.element_width
+                and operator.eq(item.width, source.element_width)
                 and re.fullmatch(r"[A-Za-z_]\w*", item.name)
             }
         )
     )
 
 
+@cython.ccall
 def _application_failure_8616(
     application: GlobalDeclarationExtentApplication8616,
 ) -> BoundedGlobalArrayLoweringFailureKind8616:
@@ -210,12 +218,15 @@ def _application_failure_8616(
     return BoundedGlobalArrayLoweringFailureKind8616.DECLARATION_CONFLICT
 
 
+@cython.ccall
 def lower_project_bounded_global_arrays_8616(
     project: object,
     codegen: object,
-    indexed_evidence: tuple[IndexedSegmentedGlobalEvidence8616, ...],
+    indexed_evidence: object,
 ) -> BoundedGlobalArrayLoweringEvidence8616:
     """Apply every accepted project range to one exact existing declaration."""
+    source: object
+    object_range: object
     source = _project_ranges_8616(project)
     if source is None:
         return BoundedGlobalArrayLoweringEvidence8616(
@@ -292,8 +303,8 @@ def lower_project_bounded_global_arrays_8616(
 def materialize_project_bounded_global_arrays_8616(
     project: object,
     codegen: object,
-    indexed_evidence: tuple[IndexedSegmentedGlobalEvidence8616, ...],
-) -> bool:
+    indexed_evidence: object,
+) -> cython.bint:
     """Publish one closed result and hard-fail unmaterialized classified facts."""
     result = lower_project_bounded_global_arrays_8616(
         project,
@@ -312,7 +323,7 @@ def materialize_project_bounded_global_arrays_8616(
     return any(
         fact.application.status
         is GlobalDeclarationExtentApplicationStatus8616.APPLIED
-        for fact in result.facts
+        for fact in iter(result.facts)
     )
 
 

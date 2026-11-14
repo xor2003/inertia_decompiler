@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery/reporting.
 
 Responsibility: describe readability goals and diagnostic clusters for recovered output.
@@ -11,33 +12,37 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+import dataclasses
+import builtins
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ReadabilityClusterSpec:
     """Describe one ugly-output pattern and its owning architectural surface."""
 
-    name: str
-    pattern: str
-    purpose: str
-    owner: str
+    name: object
+    pattern: object
+    purpose: object
+    owner: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ReadabilityGoalSpec:
     """Describe a bounded readability goal without making it semantic proof."""
 
-    step: str
-    title: str
-    priority: str
-    deterministic_goal: str
-    target_clusters: tuple[str, ...]
-    owner_surfaces: tuple[str, ...]
-    completion_signal: str
+    step: object
+    title: object
+    priority: object
+    deterministic_goal: object
+    target_clusters: object
+    owner_surfaces: object
+    completion_signal: object
 
 
 READABILITY_CLUSTER_SPECS: tuple[ReadabilityClusterSpec, ...] = (
@@ -153,7 +158,9 @@ READABILITY_GOALS: tuple[ReadabilityGoalSpec, ...] = (
 )
 
 
-def _record_count(item: Mapping[str, object]) -> int:
+@cython.ccall
+def _record_count(item: Mapping[str, object]) -> cython.longlong:
+    count: object
     count = item.get("count", 0)
     if isinstance(count, bool):
         return int(count)
@@ -167,7 +174,7 @@ def _record_count(item: Mapping[str, object]) -> int:
 def _mapping_sequence(value: object) -> tuple[Mapping[str, object], ...]:
     if not isinstance(value, list | tuple):
         return ()
-    return tuple(item for item in value if isinstance(item, Mapping))
+    return tuple(item for item in iter(value) if isinstance(item, Mapping))
 
 
 def describe_x86_16_readability_goals() -> tuple[tuple[str, str, str, tuple[str, ...], tuple[str, ...], str], ...]:
@@ -181,12 +188,14 @@ def describe_x86_16_readability_goals() -> tuple[tuple[str, str, str, tuple[str,
             goal.owner_surfaces,
             goal.completion_signal,
         )
-        for goal in READABILITY_GOALS
+        for goal in iter(READABILITY_GOALS)
     )
 
 
-def classify_readability_cluster(text: str | None) -> tuple[str | None, str | None]:
+@cython.ccall
+def classify_readability_cluster(text: object) -> tuple[str | None, str | None]:
     """Classify one emitted text fragment into a known readability cluster."""
+    spec: object
     if not text:
         return None, None
     for spec in READABILITY_CLUSTER_SPECS:
@@ -196,30 +205,31 @@ def classify_readability_cluster(text: str | None) -> tuple[str | None, str | No
 
 
 def summarize_readability_goals(
-    top_ugly_clusters: list[dict[str, object]],
-    readability_clusters: list[dict[str, object]],
+    top_ugly_clusters: object,
+    readability_clusters: object,
     family_ownership: Mapping[str, object],
-) -> tuple[dict[str, object], ...]:
+) -> object:
     """Summarize observed readability debt against the declared goal set."""
 
     def _impl() -> tuple[dict[str, object], ...]:
+        goal: object
         cluster_counts = {
             str(item.get("cluster")): _record_count(item)
-            for item in (readability_clusters or top_ugly_clusters)
+            for item in iter((readability_clusters or top_ugly_clusters))
             if item.get("cluster") is not None
         }
         family_clusters = {
             (str(item.get("cluster")), str(item.get("family"))): _record_count(item)
-            for item in _mapping_sequence(family_ownership.get("top_ugly_clusters", ()))
+            for item in builtins.iter(_mapping_sequence(family_ownership.get("top_ugly_clusters", ())))
             if item.get("cluster") is not None and item.get("family") is not None
         }
         summaries: list[dict[str, object]] = []
         for goal in READABILITY_GOALS:
-            observed_cluster_count = sum(cluster_counts.get(cluster, 0) for cluster in goal.target_clusters)
+            observed_cluster_count = sum(cluster_counts.get(cluster, 0) for cluster in iter(goal.target_clusters))
             observed_family_count = sum(
                 count
-                for cluster in goal.target_clusters
-                for (family_cluster, _family), count in family_clusters.items()
+                for cluster in iter(goal.target_clusters)
+                for (family_cluster, _family), count in builtins.iter(family_clusters.items())
                 if family_cluster == cluster
             )
             summaries.append(
@@ -241,9 +251,11 @@ def summarize_readability_goals(
 
 
 def rank_readability_goal_queue(
-    goal_summary: tuple[dict[str, object], ...] | list[dict[str, object]],
+    goal_summary: object,
 ) -> tuple[dict[str, object], ...]:
     """Rank readability goals by observed cluster pressure."""
+    item: object
+    rank: object
     ordered = sorted(
         goal_summary,
         key=lambda item: (
@@ -264,9 +276,10 @@ def rank_readability_goal_queue(
     return tuple(queue)
 
 
+@cython.ccall
 def summarize_readability_focus(
-    top_ugly_clusters: list[dict[str, object]],
-    readability_clusters: list[dict[str, object]],
+    top_ugly_clusters: object,
+    readability_clusters: object,
     family_ownership: Mapping[str, object],
 ) -> dict[str, object]:
     """Build the milestone-report readability focus payload."""

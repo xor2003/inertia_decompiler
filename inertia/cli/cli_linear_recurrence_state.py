@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: preserve legacy CLI helper surface while delegating semantic proof to X86_16 layers.
@@ -5,6 +6,8 @@ Forbidden: owning decompiler semantics, source-backed recovery, or postprocess s
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import re
 from collections.abc import Callable, Iterable
@@ -14,9 +17,11 @@ from typing import Protocol, cast
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
+import dataclasses
+import operator
 
-type CExpr = object
-type LinearDelta = tuple[CExpr | None, int]
+CExpr = typing.TypeAliasType("CExpr", object)
+LinearDelta = typing.TypeAliasType("LinearDelta", tuple[CExpr | None, int])
 
 
 class _CFunctionLike(Protocol):
@@ -29,9 +34,9 @@ class _CodegenLike(Protocol):
     """Codegen surface needed by linear recurrence state."""
 
     cfunc: _CFunctionLike | None
-    _inertia_stack_lowering_debug: dict[str, object]
+    _inertia_stack_lowering_debug: object
     _inertia_stack_variable_bindings: object
-    _inertia_has_rebound_materialized_recurrence: bool
+    _inertia_has_rebound_materialized_recurrence: cython.bint
 
 
 class _AliasStorageLike(Protocol):
@@ -43,21 +48,21 @@ class _AliasStorageLike(Protocol):
 class _WideningAnalysisLike(Protocol):
     """Widening analysis fields consumed by linear recurrence rebuilding."""
 
-    kind: str
+    kind: object
     base_expr: CExpr
-    delta: int
+    delta: cython.longlong
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class LinearRecurrenceState:
     """Carry state and callback contracts for CLI linear-recurrence cleanup."""
 
     project: object
     codegen: _CodegenLike
     unwrap_c_casts: Callable[[CExpr], CExpr]
-    structured_codegen_node: Callable[[CExpr], bool]
+    structured_codegen_node: Callable[[CExpr], cython.bint]
     iter_c_nodes_deep: Callable[[CExpr], Iterable[CExpr]]
-    same_c_expression: Callable[[CExpr, CExpr], bool]
+    same_c_expression: Callable[[CExpr, CExpr], cython.bint]
     c_constant_value: Callable[[CExpr], object | None]
     canonicalize_stack_cvar_expr: Callable[[CExpr, _CodegenLike], CExpr]
     seed_adjacent_byte_pair_aliases: Callable[[object, _CodegenLike], dict[object, CExpr]]
@@ -68,24 +73,28 @@ class LinearRecurrenceState:
     match_high_byte_projection_base: Callable[..., CExpr | None]
     match_duplicate_word_base_expr: Callable[..., CExpr | None]
     match_duplicate_word_increment_shift_expr: Callable[..., CExpr | None]
-    same_stack_slot_identity_var: Callable[..., bool]
-    changed: bool = False
-    linear_defs: dict[object, tuple[object, int]] = field(default_factory=dict)
-    protected_linear_defs: set[int] = field(default_factory=set)
-    shift_defs: dict[int, tuple[object, int]] = field(default_factory=dict)
-    expr_aliases: dict[object, object] = field(default_factory=dict)
-    dereferenced_variable_ids: set[int] = field(default_factory=set)
-    protected_linear_alias_ids: set[int] = field(default_factory=set)
-    variable_use_counts: dict[int, int] = field(default_factory=dict)
-    recurrence_candidates: int = 0
-    recurrence_bound_to_materialized_local: int = 0
-    recurrence_failed_to_bind: int = 0
-    recurrence_reasons: dict[str, int] = field(default_factory=dict)
+    same_stack_slot_identity_var: Callable[..., cython.bint]
+    changed: cython.bint = False
+    linear_defs: object = field(default_factory=dict)
+    protected_linear_defs: object = field(default_factory=set)
+    shift_defs: object = field(default_factory=dict)
+    expr_aliases: object = field(default_factory=dict)
+    dereferenced_variable_ids: object = field(default_factory=set)
+    protected_linear_alias_ids: object = field(default_factory=set)
+    variable_use_counts: object = field(default_factory=dict)
+    recurrence_candidates: cython.longlong = 0
+    recurrence_bound_to_materialized_local: cython.longlong = 0
+    recurrence_failed_to_bind: cython.longlong = 0
+    recurrence_reasons: object = field(default_factory=dict)
 
     def prepare(self) -> None:
         """Seed recurrence bookkeeping from codegen C-AST statements."""
 
         def _impl() -> None:
+            cfunc: object
+            debug_stats: object
+            variable: object
+            walk_node: object
             # Dynamic codegen boundary: CLI codegen metadata may be attached lazily.
             debug_stats = getattr(self.codegen, "_inertia_stack_lowering_debug", None)
             if not isinstance(debug_stats, dict):
@@ -114,8 +123,11 @@ class LinearRecurrenceState:
 
         return _impl()
 
+    @cython.ccall
     def _seed_deref_alias_protection(self) -> None:
         """Protect aliases whose proven target is a dereference."""
+        alias_expr: object
+        alias_var_id: object
         for alias_var_id, alias_expr in self.expr_aliases.items():
             if not isinstance(alias_var_id, int):
                 continue
@@ -126,8 +138,11 @@ class LinearRecurrenceState:
             # Dynamic codegen boundary: CUnaryOp operand is supplied by angr structured codegen.
             self.collect_variable_ids(getattr(alias_expr, "operand", None), self.protected_linear_alias_ids)
 
+    @cython.ccall
     def _seed_resolved_alias_protection(self) -> None:
         """Protect aliases whose resolved form contains a dereference."""
+        alias_expr: object
+        alias_var_id: object
         for alias_var_id, alias_expr in list(self.expr_aliases.items()):
             if not isinstance(alias_var_id, int):
                 continue
@@ -136,8 +151,10 @@ class LinearRecurrenceState:
                 self.protected_linear_alias_ids.add(alias_var_id)
                 self.collect_variable_ids(resolved_alias, self.protected_linear_alias_ids)
 
-    def collect_variable_ids(self, expr: CExpr, ids: set[int]) -> None:
+    @cython.ccall
+    def collect_variable_ids(self, expr: CExpr, ids: object) -> None:
         """Collect underlying variable identities referenced by a C expression."""
+        variable: object
         expr = self.unwrap_c_casts(expr)
         if isinstance(expr, structured_c.CVariable):
             # Dynamic codegen boundary: CVariable payloads are optional in angr structured C.
@@ -148,8 +165,11 @@ class LinearRecurrenceState:
         self._collect_scalar_child_ids(expr, ids)
         self._collect_sequence_child_ids(expr, ids)
 
-    def _collect_scalar_child_ids(self, expr: object, ids: set[int]) -> None:
+    @cython.ccall
+    def _collect_scalar_child_ids(self, expr: object, ids: object) -> None:
         """Recurse into scalar child fields of one C expression."""
+        value: object
+        attr: object
         for attr in ("lhs", "rhs", "operand", "expr"):
             if not hasattr(expr, attr):
                 continue
@@ -161,8 +181,12 @@ class LinearRecurrenceState:
             if self.structured_codegen_node(value):
                 self.collect_variable_ids(value, ids)
 
-    def _collect_sequence_child_ids(self, expr: object, ids: set[int]) -> None:
+    @cython.ccall
+    def _collect_sequence_child_ids(self, expr: object, ids: object) -> None:
         """Recurse into sequence child fields of one C expression."""
+        items: object
+        attr: object
+        item: object
         for attr in ("args", "operands", "statements"):
             if not hasattr(expr, attr):
                 continue
@@ -175,8 +199,11 @@ class LinearRecurrenceState:
                 if self.structured_codegen_node(item):
                     self.collect_variable_ids(item, ids)
 
-    def is_linear_register_temp(self, cvar: CExpr) -> bool:
+    @cython.ccall
+    def is_linear_register_temp(self, cvar: CExpr) -> cython.bint:
         """Return whether a C variable is a synthetic linear-register temp."""
+        name: object
+        variable: object
         if not isinstance(cvar, structured_c.CVariable):
             return False
         # Dynamic codegen boundary: generated CVariable names may be absent.
@@ -189,11 +216,13 @@ class LinearRecurrenceState:
         variable = getattr(cvar, "variable", None)
         return isinstance(variable, SimRegisterVariable) and re.fullmatch(r"[A-Za-z]{1,3}_\d+", name) is not None
 
-    def is_copy_alias_candidate(self, expr: CExpr) -> bool:
+    @cython.ccall
+    def is_copy_alias_candidate(self, expr: CExpr) -> cython.bint:
         """Return whether an expression can seed a copy-alias candidate."""
         return isinstance(self.unwrap_c_casts(expr), structured_c.CVariable)
 
-    def expr_contains_stack_base_carrier(self, expr: CExpr, active_expr_ids: set[int] | None = None) -> bool:
+    @cython.ccall
+    def expr_contains_stack_base_carrier(self, expr: CExpr, active_expr_ids: object = None) -> cython.bint:
         """Return whether an expression recursively references the stack-base carrier."""
         expr = self.unwrap_c_casts(expr)
         active_expr_ids = set() if active_expr_ids is None else active_expr_ids
@@ -212,8 +241,11 @@ class LinearRecurrenceState:
         active_expr_ids.discard(expr_id)
         return False
 
-    def _scalar_child_has_stack_base(self, expr: object, active_expr_ids: set[int], expr_id: int) -> bool:
+    @cython.ccall
+    def _scalar_child_has_stack_base(self, expr: object, active_expr_ids: object, expr_id: cython.longlong) -> cython.bint:
         """Probe scalar child fields for a stack-base carrier reference."""
+        value: object
+        attr: object
         for attr in ("lhs", "rhs", "operand", "expr", "variable", "index"):
             if not hasattr(expr, attr):
                 continue
@@ -227,8 +259,12 @@ class LinearRecurrenceState:
                 return True
         return False
 
-    def _sequence_child_has_stack_base(self, expr: object, active_expr_ids: set[int], expr_id: int) -> bool:
+    @cython.ccall
+    def _sequence_child_has_stack_base(self, expr: object, active_expr_ids: object, expr_id: cython.longlong) -> cython.bint:
         """Probe sequence child fields for a stack-base carrier reference."""
+        items: object
+        attr: object
+        item: object
         for attr in ("args", "operands"):
             if not hasattr(expr, attr):
                 continue
@@ -247,6 +283,9 @@ class LinearRecurrenceState:
         """Split a linear expression into a base expression and integer delta."""
 
         def _impl() -> LinearDelta:
+            duplicate_word_base: object
+            left_base: object
+            right_base: object
             nonlocal expr
             expr = self.unwrap_c_casts(expr)
             if isinstance(expr, structured_c.CConstant) and isinstance(expr.value, int):
@@ -273,7 +312,8 @@ class LinearRecurrenceState:
 
         return _impl()
 
-    def build_binary_op_or_none(self, op: str, lhs: CExpr, rhs: CExpr, *, codegen: _CodegenLike | None = None) -> CExpr | None:
+    @cython.ccall
+    def build_binary_op_or_none(self, op: object, lhs: CExpr, rhs: CExpr, *, codegen: _CodegenLike | None = None) -> CExpr | None:
         """Build a binary C expression, refusing known unarched-type rebuild failures."""
         try:
             return cast(CExpr, structured_c.CBinaryOp(op, lhs, rhs, codegen=codegen or self.codegen))
@@ -283,8 +323,10 @@ class LinearRecurrenceState:
                 return None
             raise
 
-    def build_linear_expr(self, base_expr: CExpr, delta: int) -> CExpr:
+    @cython.ccall
+    def build_linear_expr(self, base_expr: CExpr, delta: cython.longlong) -> CExpr:
         """Build `base_expr +/- delta`, preserving the original expression on rebuild failure."""
+        rebuilt: object
         if delta == 0:
             return base_expr
         op = "Add" if delta > 0 else "Sub"
@@ -296,8 +338,10 @@ class LinearRecurrenceState:
         )
         return rebuilt if rebuilt is not None else base_expr
 
-    def build_shift_expr(self, base_expr: CExpr, count: int) -> CExpr:
+    @cython.ccall
+    def build_shift_expr(self, base_expr: CExpr, count: cython.longlong) -> CExpr:
         """Build `base_expr >> count`, preserving the original expression on rebuild failure."""
+        rebuilt: object
         if count == 0:
             return base_expr
         rebuilt = self.build_binary_op_or_none(
@@ -307,8 +351,9 @@ class LinearRecurrenceState:
         )
         return rebuilt if rebuilt is not None else base_expr
 
+    @cython.ccall
     def inline_known_linear_defs(
-        self, expr: CExpr, seen_vars: set[int] | None = None, seen_exprs: set[int] | None = None, depth: int = 0
+        self, expr: CExpr, seen_vars: object = None, seen_exprs: object = None, depth: cython.longlong = 0
     ) -> CExpr:
         """Inline already-proven linear definitions into a C expression."""
 
@@ -333,10 +378,14 @@ class LinearRecurrenceState:
                 return structured_c.CUnaryOp(expr.op, cast(structured_c.CExpression, operand), codegen=self.codegen)
         return expr
 
+    @cython.ccall
     def _inline_variable_linear_defs(
-        self, expr: structured_c.CVariable, seen_vars: set[int], seen_exprs: set[int], depth: int
+        self, expr: structured_c.CVariable, seen_vars: object, seen_exprs: object, depth: cython.longlong
     ) -> CExpr:
         """Inline a proven linear definition behind one C variable."""
+        alias: object
+        linear: object
+        variable: object
         if self.is_materialized_stack_local(expr):
             return expr
         linear = None
@@ -373,10 +422,13 @@ class LinearRecurrenceState:
             return self.build_linear_expr(base_expr, delta)
         return expr
 
+    @cython.ccall
     def _inline_binop_linear_defs(
-        self, expr: structured_c.CBinaryOp, seen_vars: set[int], seen_exprs: set[int], depth: int
+        self, expr: structured_c.CBinaryOp, seen_vars: object, seen_exprs: object, depth: cython.longlong
     ) -> CExpr:
         """Inline linear defs under a binary op and re-fold word deltas."""
+        linear_expr: object
+        rebuilt: object
         lhs = self.inline_known_linear_defs(expr.lhs, seen_vars, seen_exprs, depth + 1)
         rhs = self.inline_known_linear_defs(expr.rhs, seen_vars, seen_exprs, depth + 1)
         if lhs is not expr.lhs or rhs is not expr.rhs:
@@ -389,8 +441,11 @@ class LinearRecurrenceState:
             return linear_expr
         return expr
 
+    @cython.ccall
     def extract_shift_delta(self, expr: CExpr) -> LinearDelta:
         """Split a shift expression into a base expression and shift count."""
+        alias: object
+        variable: object
         expr = self.unwrap_c_casts(expr)
         if isinstance(expr, structured_c.CConstant) and isinstance(expr.value, int):
             return None, int(expr.value)
@@ -410,18 +465,21 @@ class LinearRecurrenceState:
                     return alias_base, alias_shift + shift
         return base, shift
 
+    @cython.ccall
     def alias_storage_key(self, expr: CExpr) -> object:
         """Return alias-storage identity for an expression when one is available."""
+        storage: object
         storage = self.describe_alias_storage(expr)
         return None if storage is None else storage.identity
 
+    @cython.ccall
     def resolve_known_copy_alias_expr(
         self,
         expr: CExpr,
-        active_expr_ids: set[int] | None = None,
-        seen_var_ids: set[int] | None = None,
-        seen_storage: set[object] | None = None,
-        depth: int = 0,
+        active_expr_ids: object = None,
+        seen_var_ids: object = None,
+        seen_storage: object = None,
+        depth: cython.longlong = 0,
     ) -> CExpr:
         """Resolve copy-alias chains while preserving materialized stack locals."""
 
@@ -447,8 +505,12 @@ class LinearRecurrenceState:
         active_expr_ids.discard(expr_id)
         return self.canonicalize_stack_cvar_expr(expr, self.codegen)
 
-    def _chase_copy_alias_chain(self, expr: CExpr, seen_var_ids: set[int], seen_storage: set[object]) -> CExpr:
+    @cython.ccall
+    def _chase_copy_alias_chain(self, expr: CExpr, seen_var_ids: object, seen_storage: object) -> CExpr:
         """Walk variable -> alias edges until the chain ends or repeats."""
+        alias: object
+        storage_key: object
+        variable: object
         while isinstance(expr, structured_c.CVariable):
             # Dynamic codegen boundary: CVariable payloads are optional in angr structured C.
             variable = getattr(expr, "variable", None)
@@ -469,8 +531,11 @@ class LinearRecurrenceState:
             expr = self.unwrap_c_casts(alias)
         return expr
 
-    def _copy_alias_for_variable(self, key: int, storage_key: object | None) -> CExpr | None:
+    @cython.ccall
+    def _copy_alias_for_variable(self, key: cython.longlong, storage_key: object) -> CExpr | None:
         """Resolve the next alias target for a variable key, or None to stop."""
+        alias: object
+        linear: object
         alias = self.expr_aliases.get(key)
         if alias is None and storage_key is not None:
             alias = self.expr_aliases.get(storage_key)
@@ -484,16 +549,18 @@ class LinearRecurrenceState:
                     alias = self.build_linear_expr(base_expr, delta)
         return alias
 
+    @cython.ccall
     def _resolve_alias_typecast(
         self,
         expr: structured_c.CTypeCast,
-        active_expr_ids: set[int],
-        seen_var_ids: set[int],
-        seen_storage: set[object],
-        depth: int,
-        expr_id: int,
+        active_expr_ids: object,
+        seen_var_ids: object,
+        seen_storage: object,
+        depth: cython.longlong,
+        expr_id: cython.longlong,
     ) -> CExpr:
         """Resolve through a CTypeCast node and rebuild when the operand moved."""
+        codegen_metadata: object
         inner = self.resolve_known_copy_alias_expr(
             expr.expr, active_expr_ids, seen_var_ids.copy(), seen_storage.copy(), depth + 1
         )
@@ -509,16 +576,18 @@ class LinearRecurrenceState:
             )
         return self.canonicalize_stack_cvar_expr(expr, self.codegen)
 
+    @cython.ccall
     def _resolve_alias_unary(
         self,
         expr: structured_c.CUnaryOp,
-        active_expr_ids: set[int],
-        seen_var_ids: set[int],
-        seen_storage: set[object],
-        depth: int,
-        expr_id: int,
+        active_expr_ids: object,
+        seen_var_ids: object,
+        seen_storage: object,
+        depth: cython.longlong,
+        expr_id: cython.longlong,
     ) -> CExpr:
         """Resolve through a CUnaryOp node and rebuild when the operand moved."""
+        codegen_metadata: object
         operand = self.resolve_known_copy_alias_expr(
             expr.operand, active_expr_ids, seen_var_ids.copy(), seen_storage.copy(), depth + 1
         )
@@ -533,16 +602,18 @@ class LinearRecurrenceState:
             )
         return self.canonicalize_stack_cvar_expr(expr, self.codegen)
 
+    @cython.ccall
     def _resolve_alias_binop(
         self,
         expr: structured_c.CBinaryOp,
-        active_expr_ids: set[int],
-        seen_var_ids: set[int],
-        seen_storage: set[object],
-        depth: int,
-        expr_id: int,
+        active_expr_ids: object,
+        seen_var_ids: object,
+        seen_storage: object,
+        depth: cython.longlong,
+        expr_id: cython.longlong,
     ) -> CExpr:
         """Resolve through a CBinaryOp node and rebuild when either operand moved."""
+        rebuilt: object
         lhs = self.resolve_known_copy_alias_expr(
             expr.lhs, active_expr_ids, seen_var_ids.copy(), seen_storage.copy(), depth + 1
         )
@@ -557,10 +628,10 @@ class LinearRecurrenceState:
                 return rebuilt
         return self.canonicalize_stack_cvar_expr(expr, self.codegen)
 
-    def expr_contains_dereference(self, expr: CExpr, active_expr_ids: set[int] | None = None) -> bool:
+    def expr_contains_dereference(self, expr: CExpr, active_expr_ids: object = None) -> cython.bint:
         """Return whether an expression recursively contains a dereference."""
 
-        def _impl() -> bool:
+        def _impl() -> cython.bint:
             nonlocal expr, active_expr_ids
             expr = self.unwrap_c_casts(expr)
             active_expr_ids = set() if active_expr_ids is None else active_expr_ids
@@ -588,7 +659,7 @@ class LinearRecurrenceState:
             if isinstance(expr, structured_c.CFunctionCall):
                 result = any(
                     # Dynamic codegen boundary: function-call args are an optional angr C AST sequence.
-                    self.expr_contains_dereference(arg, active_expr_ids) for arg in getattr(expr, "args", ()) or ()
+                    self.expr_contains_dereference(arg, active_expr_ids) for arg in iter(getattr(expr, "args", ()) or ())
                 )
                 active_expr_ids.discard(expr_id)
                 return result
@@ -597,8 +668,10 @@ class LinearRecurrenceState:
 
         return _impl()
 
+    @cython.ccall
     def match_linear_word_delta_expr(self, expr: CExpr) -> CExpr | None:
         """Return a rebuilt linear word expression when widening analysis proves one."""
+        analysis: object
         analysis = self.analyze_widening_expr(
             expr, self.resolve_known_copy_alias_expr, self.match_high_byte_projection_base
         )
@@ -611,7 +684,9 @@ class LinearRecurrenceState:
             return analysis.base_expr
         return self.build_linear_expr(analysis.base_expr, analysis.delta)
 
-    def _record_recurrence_reason(self, reason: str) -> None:
+    @cython.ccall
+    def _record_recurrence_reason(self, reason: object) -> None:
+        debug_stats: object
         self.recurrence_failed_to_bind += 1
         self.recurrence_reasons[reason] = self.recurrence_reasons.get(reason, 0) + 1
         # Dynamic codegen boundary: CLI codegen metadata may be attached lazily.
@@ -622,14 +697,18 @@ class LinearRecurrenceState:
             if isinstance(reasons, dict):
                 reasons[reason] = int(reasons.get(reason, 0) or 0) + 1
 
+    @cython.ccall
     def _record_recurrence_candidate(self) -> None:
+        debug_stats: object
         self.recurrence_candidates += 1
         # Dynamic codegen boundary: CLI codegen metadata may be attached lazily.
         debug_stats = getattr(self.codegen, "_inertia_stack_lowering_debug", None)
         if isinstance(debug_stats, dict):
             debug_stats["recurrence_candidates"] = int(debug_stats.get("recurrence_candidates", 0) or 0) + 1
 
+    @cython.ccall
     def _record_recurrence_success(self) -> None:
+        debug_stats: object
         self.recurrence_bound_to_materialized_local += 1
         # Dynamic codegen boundary: CLI codegen metadata may be attached lazily.
         debug_stats = getattr(self.codegen, "_inertia_stack_lowering_debug", None)
@@ -639,10 +718,15 @@ class LinearRecurrenceState:
             )
         self.codegen._inertia_has_rebound_materialized_recurrence = True
 
-    def is_materialized_stack_local(self, cvar: CExpr) -> bool:
+    def is_materialized_stack_local(self, cvar: CExpr) -> cython.bint:
         """Return whether a variable already represents a materialized stack local."""
 
-        def _impl() -> bool:
+        def _impl() -> cython.bint:
+            binding_offset: object
+            binding_size: object
+            bindings: object
+            variable: object
+            binding: object
             if not isinstance(cvar, structured_c.CVariable):
                 return False
             # Dynamic codegen boundary: CVariable payloads are optional in angr structured C.
@@ -675,7 +759,7 @@ class LinearRecurrenceState:
                     isinstance(binding_offset, int)
                     and isinstance(binding_size, int)
                     and binding_size >= 2
-                    and binding_offset == offset
+                    and operator.eq(binding_offset, offset)
                     and size >= 2
                 ):
                     return True

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize proven near-pointer memory idioms.
 
 Layer: Types/Lowering.
@@ -12,6 +13,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import copy
 import re
@@ -39,17 +42,20 @@ from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 
 from .authoritative_function_prototypes import publish_codegen_function_prototype_8616
 from .stack_variable_coordinates import machine_bp_offset_for_stack_variable_8616
+import dataclasses
+import operator
+import builtins
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PointerMemoryIdiomCallbacks8616:
     """Callbacks needed to consume legacy pointer-memory proof helpers."""
 
     linear_function_insns: Callable[[object, object], tuple[object, ...]]
-    word_pair_pointer_accumulation_loop: Callable[[object, object, tuple[object, ...], dict[int, int]], bool]
-    word_pointer_first_gt_loop: Callable[[object, object, tuple[object, ...], dict[int, int]], bool]
-    word_pointer_rotate3: Callable[[object, object, tuple[object, ...], dict[int, int]], bool]
-    pointer_swap: Callable[[object, object, tuple[object, ...], dict[int, int]], bool]
+    word_pair_pointer_accumulation_loop: Callable[[object, object, tuple[object, ...], dict[int, int]], cython.bint]
+    word_pointer_first_gt_loop: Callable[[object, object, tuple[object, ...], dict[int, int]], cython.bint]
+    word_pointer_rotate3: Callable[[object, object, tuple[object, ...], dict[int, int]], cython.bint]
+    pointer_swap: Callable[[object, object, tuple[object, ...], dict[int, int]], cython.bint]
 
 
 class _PointerSwapCFunctionBoundary8616(Protocol):
@@ -76,8 +82,8 @@ class _PointerMemoryCodegenBoundary8616(Protocol):
     """Typed view of codegen state owned by pointer-memory Lowering."""
 
     cfunc: _PointerSwapCFunctionBoundary8616
-    _inertia_pointer_memory_idiom_facts_8616: tuple[PointerMemoryIdiomMaterializationFact8616, ...]
-    _inertia_pointer_memory_materialized_8616: str
+    _inertia_pointer_memory_idiom_facts_8616: object
+    _inertia_pointer_memory_materialized_8616: object
     _inertia_pointer_swap_splice_stats_8616: PointerSwapSpliceStats8616
 
 
@@ -92,17 +98,17 @@ class PointerMemoryIdiomKind8616(StrEnum):
     POINTER_SWAP = "pointer_swap"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PointerMemoryIdiomMaterializationFact8616:
     """Closed evidence counters for one materialized pointer-memory idiom."""
 
     kind: PointerMemoryIdiomKind8616
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    counted_loop_normalized: bool
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    counted_loop_normalized: cython.bint
     pointer_stack_offset: int | None
     index_stack_offset: int | None
     element_stride: int | None
@@ -110,21 +116,26 @@ class PointerMemoryIdiomMaterializationFact8616:
 
 def _validation_delta_tokens_8616(
     delta: Mapping[str, object],
-    field_name: str,
-    direction: str,
-) -> tuple[str, ...] | None:
+    field_name: object,
+    direction: object,
+) -> object:
     """Return typed string fingerprints from one validation delta field."""
+    field_delta: object
+    values: object
     field_delta = delta.get(field_name)
     if not isinstance(field_delta, Mapping):
         return None
     values = field_delta.get(direction)
-    if not isinstance(values, tuple) or not all(isinstance(value, str) for value in values):
+    if not isinstance(values, tuple) or not all(isinstance(value, str) for value in iter(values)):
         return None
     return values
 
 
-def _nonempty_validation_delta_fields_8616(delta: Mapping[str, object]) -> set[str]:
+@cython.ccall
+def _nonempty_validation_delta_fields_8616(delta: Mapping[str, object]) -> object:
     """Return validation fields containing at least one added or removed token."""
+    field_delta: object
+    field_name: object
     fields: set[str] = set()
     for field_name, field_delta in delta.items():
         if not isinstance(field_delta, Mapping):
@@ -134,16 +145,19 @@ def _nonempty_validation_delta_fields_8616(delta: Mapping[str, object]) -> set[s
     return fields
 
 
-def _stack_offsets_in_validation_fingerprint_8616(token: str) -> set[int]:
+@cython.ccall
+def _stack_offsets_in_validation_fingerprint_8616(token: object) -> object:
     """Extract BP-relative storage identities from a validation fingerprint."""
-    offsets: set[int] = set()
+    match: object
+    offsets: set[cython.longlong] = set()
     for match in re.finditer(r"(?:stack_slot:SS:BP|stack_arg:[^:,]+(?::size[0-9]+)?:bp)([+-])0x([0-9a-fA-F]+)", token):
         magnitude = int(match.group(2), 16)
         offsets.add(magnitude if match.group(1) == "+" else -magnitude)
     return offsets
 
 
-def _control_write_location_8616(token: str) -> tuple[str, str] | None:
+@cython.ccall
+def _control_write_location_8616(token: object) -> object:
     """Split one loop-body write fingerprint into control prefix and location."""
     marker = ":deref:"
     marker_index = token.find(marker)
@@ -152,11 +166,16 @@ def _control_write_location_8616(token: str) -> tuple[str, str] | None:
     return token[:marker_index], token[marker_index + 1 :]
 
 
+@cython.ccall
 def pointer_memory_loop_validation_delta_is_precision_only_8616(
     fact: PointerMemoryIdiomMaterializationFact8616,
     validation: Mapping[str, object],
-) -> bool:
+) -> cython.bint:
     """Accept only the exact byte-fill pointer-write representation delta."""
+    added_control: object
+    delta: object
+    fields: object
+    removed_control: object
     if not _byte_fill_fact_gate_8616(fact):
         return False
     delta = validation.get("delta")
@@ -182,7 +201,7 @@ def pointer_memory_loop_validation_delta_is_precision_only_8616(
     expected_offsets = {fact.pointer_stack_offset, fact.index_stack_offset}
     if (
         not added_location.startswith("deref:Add(Mul(reg:ds,const:16),")
-        or _stack_offsets_in_validation_fingerprint_8616(added_location) != expected_offsets
+        or operator.ne(_stack_offsets_in_validation_fingerprint_8616(added_location), expected_offsets)
         or not removed_location.startswith("deref:Add(")
         or not expected_offsets <= _stack_offsets_in_validation_fingerprint_8616(removed_location)
     ):
@@ -197,37 +216,41 @@ def pointer_memory_loop_validation_delta_is_precision_only_8616(
         added_prefix == removed_prefix
         and added_prefix.startswith("for-body-writes:")
         and added_control_location.startswith("deref:Add(Mul(reg:ds,const:16),")
-        and _stack_offsets_in_validation_fingerprint_8616(added_control_location) == expected_offsets
+        and operator.eq(_stack_offsets_in_validation_fingerprint_8616(added_control_location), expected_offsets)
         and removed_control_location == removed_location
     )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class PointerSwapSpliceStats8616:
     """Closed evidence counters for pointer-swap statement materialization."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    idempotent_count: int = 0
-    proven_ins_addrs: tuple[int, ...] = ()
-    required_write_ins_addrs: tuple[int, ...] = ()
-    observed_ins_addrs: tuple[int, ...] = ()
-    statement_ins_addrs: tuple[tuple[int, ...], ...] = ()
-    statement_nonvariable_ins_addrs: tuple[tuple[int, ...], ...] = ()
-    statement_stack_flows: tuple[tuple[int | None, tuple[int, ...]], ...] = ()
-    stale_temp_assignment_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    idempotent_count: cython.longlong = 0
+    proven_ins_addrs: tuple[cython.longlong, ...] = ()
+    required_write_ins_addrs: tuple[cython.longlong, ...] = ()
+    observed_ins_addrs: tuple[cython.longlong, ...] = ()
+    statement_ins_addrs: tuple[tuple[cython.longlong, ...], ...] = ()
+    statement_nonvariable_ins_addrs: tuple[tuple[cython.longlong, ...], ...] = ()
+    statement_stack_flows: tuple[tuple[int | None, tuple[cython.longlong, ...]], ...] = ()
+    stale_temp_assignment_count: cython.longlong = 0
     left_machine_bp_offset: int | None = None
     right_machine_bp_offset: int | None = None
 
 
 def pointer_swap_validation_delta_is_precision_only_8616(
     stats: PointerSwapSpliceStats8616,
-    validation: dict[str, object],
-) -> bool:
+    validation: object,
+) -> cython.bint:
     """Prove that validation changed only pointer-swap write representation."""
+    delta: object
+    writes: object
+    field_delta: object
+    field_name: object
     if not _pointer_swap_stats_gate_8616(stats):
         return False
     delta = validation.get("delta")
@@ -236,15 +259,15 @@ def pointer_swap_validation_delta_is_precision_only_8616(
     for field_name, field_delta in delta.items():
         if not isinstance(field_delta, dict):
             return False
-        added = tuple(str(item) for item in tuple(field_delta.get("added", ()) or ()))
-        removed = tuple(str(item) for item in tuple(field_delta.get("removed", ()) or ()))
+        added = tuple(str(item) for item in builtins.iter(tuple(field_delta.get("added", ()) or ())))
+        removed = tuple(str(item) for item in builtins.iter(tuple(field_delta.get("removed", ()) or ())))
         if field_name != "segmented_writes" and (added or removed):
             return False
     writes = delta.get("segmented_writes")
     if not isinstance(writes, dict):
         return False
-    added_writes = tuple(str(item) for item in tuple(writes.get("added", ()) or ()))
-    removed_writes = tuple(str(item) for item in tuple(writes.get("removed", ()) or ()))
+    added_writes = tuple(str(item) for item in builtins.iter(tuple(writes.get("added", ()) or ())))
+    removed_writes = tuple(str(item) for item in builtins.iter(tuple(writes.get("removed", ()) or ())))
     pointer_prefix = "deref:Add(Mul(reg:ds,const:16),stack_slot:SS:BP+"
     expected_added_offsets = {
         frozenset({stats.left_machine_bp_offset}),
@@ -253,17 +276,17 @@ def pointer_swap_validation_delta_is_precision_only_8616(
     return (
         len(added_writes) == 2
         and len(set(added_writes)) == 2
-        and all(item.startswith(pointer_prefix) for item in added_writes)
-        and {
+        and all(item.startswith(pointer_prefix) for item in iter(added_writes))
+        and operator.eq({
             frozenset(_stack_offsets_in_validation_fingerprint_8616(item))
-            for item in added_writes
-        }
-        == expected_added_offsets
+            for item in iter(added_writes)
+        }, expected_added_offsets)
         and len(removed_writes) >= 2
-        and all(item.startswith("deref:") and "stack_slot:SS:BP+" in item for item in removed_writes)
+        and all(item.startswith("deref:") and "stack_slot:SS:BP+" in item for item in iter(removed_writes))
     )
 
 
+@cython.ccall
 def _stack_slot_offset_8616(cvar: object) -> int | None:
     if not isinstance(cvar, CVariable):
         return None
@@ -271,6 +294,7 @@ def _stack_slot_offset_8616(cvar: object) -> int | None:
     return variable.offset if isinstance(variable, SimStackVariable) and isinstance(variable.offset, int) else None
 
 
+@cython.ccall
 def _indexed_stack_slot_offset_8616(expr: object) -> int | None:
     """Return the stack base offset for an exact zero-indexed C expression."""
     if not isinstance(expr, CIndexedVariable):
@@ -281,20 +305,21 @@ def _indexed_stack_slot_offset_8616(expr: object) -> int | None:
     return _stack_slot_offset_8616(expr.variable)
 
 
+@cython.ccall
 def _materialized_pointer_swap_sequence_8616(
-    leaf_positions: list[tuple[list[CStatement], int, CStatement]],
+    leaf_positions: object,
     *,
-    left_offset: int | None,
-    right_offset: int | None,
-    temporary_offset: int | None,
-) -> tuple[CAssignment, CAssignment, CAssignment] | None:
+    left_offset: object,
+    right_offset: object,
+    temporary_offset: object,
+) -> object:
     """Return the unique exact pointer-swap sequence among unrelated effects."""
-    assignments = [statement for _, _, statement in leaf_positions if isinstance(statement, CAssignment)]
+    assignments = [statement for _, _, statement in iter(leaf_positions) if isinstance(statement, CAssignment)]
     if left_offset is None or right_offset is None or temporary_offset is None:
         return None
     matches: list[tuple[CAssignment, CAssignment, CAssignment]] = []
     for index in range(len(assignments) - 2):
-        temporary_load, left_store, right_store = assignments[index : index + 3]
+        temporary_load, left_store, right_store = tuple(assignments[index : index + 3])
         if _is_pointer_swap_triple_8616(
             temporary_load,
             left_store,
@@ -307,6 +332,7 @@ def _materialized_pointer_swap_sequence_8616(
     return matches[0] if len(matches) == 1 else None
 
 
+@cython.ccall
 def _optional_c_node_ins_addr_8616(node: object) -> int | None:
     """Read optional instruction tags at the dynamic third-party C-AST boundary."""
     try:
@@ -317,7 +343,8 @@ def _optional_c_node_ins_addr_8616(node: object) -> int | None:
     return int(ins_addr) if isinstance(ins_addr, int) else None
 
 
-def _byte_fill_fact_gate_8616(fact: PointerMemoryIdiomMaterializationFact8616) -> bool:
+@cython.ccall
+def _byte_fill_fact_gate_8616(fact: PointerMemoryIdiomMaterializationFact8616) -> cython.bint:
     """True when the materialization fact is the singular proven byte-fill."""
     return (
         fact.kind is PointerMemoryIdiomKind8616.BYTE_FILL_LOOP
@@ -334,14 +361,14 @@ def _byte_fill_fact_gate_8616(fact: PointerMemoryIdiomMaterializationFact8616) -
 
 
 def _single_delta_token_fields_8616(
-    segmented_added: tuple[str, ...] | None,
-    segmented_removed: tuple[str, ...] | None,
-    control_added: tuple[str, ...] | None,
-    control_removed: tuple[str, ...] | None,
-) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...], tuple[str, ...]] | None:
+    segmented_added: object,
+    segmented_removed: object,
+    control_added: object,
+    control_removed: object,
+) -> object:
     """Return the four token groups when each holds exactly one entry."""
     groups = (segmented_added, segmented_removed, control_added, control_removed)
-    if any(group is None or len(group) != 1 for group in groups):
+    if any(group is None or len(group) != 1 for group in iter(groups)):
         return None
     return cast(
         "tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...], tuple[str, ...]]",
@@ -349,7 +376,8 @@ def _single_delta_token_fields_8616(
     )
 
 
-def _pointer_swap_stats_gate_8616(stats: PointerSwapSpliceStats8616) -> bool:
+@cython.ccall
+def _pointer_swap_stats_gate_8616(stats: PointerSwapSpliceStats8616) -> cython.bint:
     """True when the splice stats describe the singular proven swap."""
     return (
         stats.raw_fact_count > 0
@@ -359,10 +387,11 @@ def _pointer_swap_stats_gate_8616(stats: PointerSwapSpliceStats8616) -> bool:
         and stats.failure_count == 0
         and stats.left_machine_bp_offset is not None
         and stats.right_machine_bp_offset is not None
-        and stats.left_machine_bp_offset != stats.right_machine_bp_offset
+        and operator.ne(stats.left_machine_bp_offset, stats.right_machine_bp_offset)
     )
 
 
+@cython.ccall
 def _is_pointer_swap_triple_8616(
     temporary_load: CAssignment,
     left_store: CAssignment,
@@ -371,15 +400,15 @@ def _is_pointer_swap_triple_8616(
     temporary_offset: int | None,
     left_offset: int | None,
     right_offset: int | None,
-) -> bool:
+) -> cython.bint:
     """True when three consecutive assignments form the proven swap."""
     return (
-        _stack_slot_offset_8616(temporary_load.lhs) == temporary_offset
-        and _indexed_stack_slot_offset_8616(temporary_load.rhs) == left_offset
-        and _indexed_stack_slot_offset_8616(left_store.lhs) == left_offset
-        and _indexed_stack_slot_offset_8616(left_store.rhs) == right_offset
-        and _indexed_stack_slot_offset_8616(right_store.lhs) == right_offset
-        and _stack_slot_offset_8616(right_store.rhs) == temporary_offset
+        operator.eq(_stack_slot_offset_8616(temporary_load.lhs), temporary_offset)
+        and operator.eq(_indexed_stack_slot_offset_8616(temporary_load.rhs), left_offset)
+        and operator.eq(_indexed_stack_slot_offset_8616(left_store.lhs), left_offset)
+        and operator.eq(_indexed_stack_slot_offset_8616(left_store.rhs), right_offset)
+        and operator.eq(_indexed_stack_slot_offset_8616(right_store.lhs), right_offset)
+        and operator.eq(_stack_slot_offset_8616(right_store.rhs), temporary_offset)
     )
 
 
@@ -388,10 +417,11 @@ def splice_proven_pointer_swap_statements_8616(
     left_expr: CVariable,
     right_expr: CVariable,
     temporary_expr: CVariable,
-    proven_ins_addrs: frozenset[int],
-    required_write_ins_addrs: frozenset[int],
-) -> bool:
+    proven_ins_addrs: object,
+    required_write_ins_addrs: object,
+) -> cython.bint:
     """Replace assignments owned solely by the proven swap instruction region."""
+    materialized_sequence: object
     stats = PointerSwapSpliceStats8616()
     stats.proven_ins_addrs = tuple(sorted(proven_ins_addrs))
     stats.required_write_ins_addrs = tuple(sorted(required_write_ins_addrs))
@@ -411,7 +441,7 @@ def splice_proven_pointer_swap_statements_8616(
     if (
         stats.left_machine_bp_offset is None
         or stats.right_machine_bp_offset is None
-        or stats.left_machine_bp_offset == stats.right_machine_bp_offset
+        or operator.eq(stats.left_machine_bp_offset, stats.right_machine_bp_offset)
     ):
         stats.failure_count = 1
         typed_codegen._inertia_pointer_swap_splice_stats_8616 = stats
@@ -429,10 +459,12 @@ def splice_proven_pointer_swap_statements_8616(
         typed_codegen._inertia_pointer_swap_splice_stats_8616 = stats
         return False
 
-    leaf_positions: list[tuple[list[CStatement], int, CStatement]] = []
+    leaf_positions: list[tuple[list[CStatement], cython.longlong, CStatement]] = []
 
     def collect_leaf_positions(container: CStatements) -> None:
         """Collect replaceable leaves without crossing structured controls."""
+        index: object
+        statement: object
         for index, statement in enumerate(container.statements):
             if isinstance(statement, CStatements):
                 collect_leaf_positions(statement)
@@ -440,13 +472,13 @@ def splice_proven_pointer_swap_statements_8616(
                 leaf_positions.append((container.statements, index, statement))
 
     collect_leaf_positions(root)
-    affected: list[tuple[list[CStatement], int]] = []
+    affected: list[tuple[list[CStatement], cython.longlong]] = []
     stale_temp_assignments: list[tuple[list[CStatement], CAssignment]] = []
     mixed_ownership = False
-    observed_addrs: set[int] = set()
-    statement_addrs: list[tuple[int, ...]] = []
-    statement_nonvariable_addrs: list[tuple[int, ...]] = []
-    statement_stack_flows: list[tuple[int | None, tuple[int, ...]]] = []
+    observed_addrs: set[cython.longlong] = set()
+    statement_addrs: list[tuple[cython.longlong, ...]] = []
+    statement_nonvariable_addrs: list[tuple[cython.longlong, ...]] = []
+    statement_stack_flows: list[tuple[int | None, tuple[cython.longlong, ...]]] = []
     raw_intersections = 0
     temporary_offset = _stack_slot_offset_8616(temporary_expr)
     left_offset = _stack_slot_offset_8616(left_expr)
@@ -506,25 +538,26 @@ def splice_proven_pointer_swap_statements_8616(
     )
 
 
+@cython.ccall
 def _pointer_swap_materialized_early_8616(
     stats: PointerSwapSpliceStats8616,
     typed_codegen: _PointerSwapCodegenBoundary8616,
-    leaf_positions: list[tuple[list[CStatement], int, CStatement]],
-    materialized_sequence: tuple[object, ...] | list[object],
+    leaf_positions: object,
+    materialized_sequence: object,
     *,
     temporary_offset: int | None,
     left_offset: int | None,
-    proven_ins_addrs: frozenset[int],
-) -> bool:
+    proven_ins_addrs: object,
+) -> cython.bint:
     """Prune stale temp copies when the swap sequence is already materialized."""
-    materialized_ids = {id(statement) for statement in materialized_sequence}
+    materialized_ids = {id(statement) for statement in iter(materialized_sequence)}
     stale_temp_assignments = [
         (parent, statement)
-        for parent, _index, statement in leaf_positions
+        for parent, _index, statement in iter(leaf_positions)
         if isinstance(statement, CAssignment)
         if id(statement) not in materialized_ids
-        if _stack_slot_offset_8616(statement.lhs) == temporary_offset
-        if _indexed_stack_slot_offset_8616(statement.rhs) == left_offset
+        if operator.eq(_stack_slot_offset_8616(statement.lhs), temporary_offset)
+        if operator.eq(_indexed_stack_slot_offset_8616(statement.rhs), left_offset)
         if _optional_c_node_ins_addr_8616(statement) in proven_ins_addrs
     ]
     _prune_stale_temp_assignments_8616(stale_temp_assignments)
@@ -538,45 +571,51 @@ def _pointer_swap_materialized_early_8616(
     return bool(stale_temp_assignments)
 
 
+@cython.ccall
 def _prune_stale_temp_assignments_8616(
-    stale_temp_assignments: list[tuple[list[CStatement], CAssignment]],
+    stale_temp_assignments: object,
 ) -> None:
     """Remove each stale temp assignment from its parent statement list."""
+    stale_parent: object
+    stale_statement: object
     for stale_parent, stale_statement in stale_temp_assignments:
-        stale_parent[:] = [statement for statement in stale_parent if statement is not stale_statement]
+        stale_parent[:] = [statement for statement in iter(stale_parent) if statement is not stale_statement]
 
 
 def _scan_pointer_swap_leaves_8616(
-    leaf_positions: list[tuple[list[CStatement], int, CStatement]],
+    leaf_positions: object,
     *,
     temporary_offset: int | None,
     left_offset: int | None,
-    proven_ins_addrs: frozenset[int],
+    proven_ins_addrs: object,
 ) -> tuple[
-    list[tuple[list[CStatement], int]],
-    set[int],
+    list[tuple[list[CStatement], cython.longlong]],
+    set[cython.longlong],
     list[tuple[list[CStatement], CAssignment]],
-    bool,
-    set[int],
-    list[tuple[int, ...]],
-    list[tuple[int, ...]],
-    list[tuple[int | None, tuple[int, ...]]],
-    int,
+    cython.bint,
+    set[cython.longlong],
+    list[tuple[cython.longlong, ...]],
+    list[tuple[cython.longlong, ...]],
+    list[tuple[int | None, tuple[cython.longlong, ...]]],
+    cython.longlong,
 ]:
     """Classify each leaf statement's address ownership and stack flow."""
-    affected: list[tuple[list[CStatement], int]] = []
-    affected_ins_addrs: set[int] = set()
+    index: object
+    parent: object
+    statement: object
+    affected: list[tuple[list[CStatement], cython.longlong]] = []
+    affected_ins_addrs: set[cython.longlong] = set()
     stale_temp_assignments: list[tuple[list[CStatement], CAssignment]] = []
     mixed_ownership = False
-    observed_addrs: set[int] = set()
-    statement_addrs: list[tuple[int, ...]] = []
-    statement_nonvariable_addrs: list[tuple[int, ...]] = []
-    statement_stack_flows: list[tuple[int | None, tuple[int, ...]]] = []
+    observed_addrs: set[cython.longlong] = set()
+    statement_addrs: list[tuple[cython.longlong, ...]] = []
+    statement_nonvariable_addrs: list[tuple[cython.longlong, ...]] = []
+    statement_stack_flows: list[tuple[int | None, tuple[cython.longlong, ...]]] = []
     raw_intersections = 0
     for parent, index, statement in leaf_positions:
         nonvariable_addrs = {
             ins_addr
-            for node in _iter_c_nodes_deep_8616(statement)
+            for node in builtins.iter(_iter_c_nodes_deep_8616(statement))
             if not isinstance(node, CVariable)
             if isinstance((ins_addr := _optional_c_node_ins_addr_8616(node)), int)
         }
@@ -585,7 +624,7 @@ def _scan_pointer_swap_leaves_8616(
                 sorted(
                     {
                         offset
-                        for node in _iter_c_nodes_deep_8616(statement.rhs)
+                        for node in builtins.iter(_iter_c_nodes_deep_8616(statement.rhs))
                         if isinstance(node, CVariable)
                         if isinstance((offset := _stack_slot_offset_8616(node)), int)
                     }
@@ -602,10 +641,10 @@ def _scan_pointer_swap_leaves_8616(
         )
         if (
             isinstance(statement, CAssignment)
-            and _stack_slot_offset_8616(statement.lhs) == temporary_offset
+            and operator.eq(_stack_slot_offset_8616(statement.lhs), temporary_offset)
             and any(
-                isinstance(node, CVariable) and _stack_slot_offset_8616(node) == left_offset
-                for node in _iter_c_nodes_deep_8616(statement.rhs)
+                isinstance(node, CVariable) and operator.eq(_stack_slot_offset_8616(node), left_offset)
+                for node in builtins.iter(_iter_c_nodes_deep_8616(statement.rhs))
             )
         ):
             stale_temp_assignments.append((parent, statement))
@@ -641,22 +680,22 @@ def _splice_pointer_swap_region_8616(
     codegen: object,
     typed_codegen: _PointerSwapCodegenBoundary8616,
     stats: PointerSwapSpliceStats8616,
-    affected: list[tuple[list[CStatement], int]],
-    stale_temp_assignments: list[tuple[list[CStatement], CAssignment]],
+    affected: object,
+    stale_temp_assignments: object,
     *,
     temporary_expr: CVariable,
     left_expr: CVariable,
     right_expr: CVariable,
-) -> bool:
+) -> cython.bint:
     """Splice the indexed swap sequence into the proven contiguous region."""
     parent = affected[0][0]
-    indexes = [index for candidate_parent, index in affected if candidate_parent is parent]
-    if len(indexes) != len(affected):
+    indexes = [index for candidate_parent, index in iter(affected) if candidate_parent is parent]
+    if operator.ne(len(indexes), len(affected)):
         stats.failure_count = 1
         typed_codegen._inertia_pointer_swap_splice_stats_8616 = stats
         return False
     first, last = indexes[0], indexes[-1]
-    if indexes != list(range(first, last + 1)):
+    if operator.ne(indexes, list(range(first, last + 1))):
         stats.failure_count = 1
         typed_codegen._inertia_pointer_swap_splice_stats_8616 = stats
         return False
@@ -685,15 +724,17 @@ def _splice_pointer_swap_region_8616(
     return True
 
 
-def _instruction_address_8616(insn: object) -> int:
+@cython.ccall
+def _instruction_address_8616(insn: object) -> cython.longlong:
     """Read a Capstone instruction address at the dynamic third-party boundary."""
     return int(cast(Any, insn).address)
 
 
+@cython.ccall
 def _normalize_materialized_counted_loop_8616(
     codegen: _PointerMemoryCodegenBoundary8616,
     kind: PointerMemoryIdiomKind8616,
-) -> bool:
+) -> cython.bint:
     """Keep proven fill/sum loops in canonical CForLoop form before validation."""
     if kind not in {
         PointerMemoryIdiomKind8616.BYTE_FILL_LOOP,
@@ -732,22 +773,25 @@ def _normalize_materialized_counted_loop_8616(
         codegen=cast(Any, codegen),
     )
     codegen.cfunc.statements = CStatements(
-        [*prefix, normalized_loop, *suffix],
+        list(prefix) + [normalized_loop, ] + list(suffix),
         codegen=cast(Any, codegen),
     )
     return True
 
 
+@cython.ccall
 def materialize_pointer_memory_idioms_from_evidence_8616(
     project: object,
     codegen: object,
     callbacks: PointerMemoryIdiomCallbacks8616,
-) -> bool:
+) -> cython.bint:
     """Materialize the first proven pointer-memory idiom for a function."""
+    kind: object
+    materializer: object
     insns = callbacks.linear_function_insns(project, codegen)
     if not insns:
         return False
-    index_by_addr = {_instruction_address_8616(insn): idx for idx, insn in enumerate(insns)}
+    index_by_addr = {_instruction_address_8616(insn): idx for idx, insn in builtins.iter(enumerate(insns))}
     attempts = (
         (
             PointerMemoryIdiomKind8616.WORD_PAIR_ACCUMULATION_LOOP,

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify terminal AX byte-lane writes from bounded binary paths.
 
 Layer: Semantics.
@@ -10,6 +11,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -41,6 +44,8 @@ from .branch_target_return import (
     TerminalAxReturnEffectKind8616,
     terminal_ax_return_effect_8616,
 )
+import dataclasses
+import operator
 
 __all__ = [
     "TerminalAxReturnEvidence8616",
@@ -60,29 +65,31 @@ _CONDITIONAL_BRANCHES_8616 = frozenset({
 class _FunctionSurface8616(Protocol):
     """angr function fields consumed by terminal-path semantics."""
 
-    addr: int
-    block_addrs_set: set[int]
+    addr: cython.longlong
+    block_addrs_set: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _TerminalAxScanState8616:
     """One finite typed transfer state at a function block entry."""
 
-    block_addr: int
+    block_addr: cython.longlong
     lanes: TerminalAxReturnLane8616
-    dx_ax_pair_proven: bool
+    dx_ax_pair_proven: cython.bint
     call_output_lanes: TerminalAxReturnLane8616
     local_definition_lanes: TerminalAxReturnLane8616
     local_pointer_output_lanes: TerminalAxReturnLane8616
 
 
+@cython.ccall
 def _inner_instruction_8616(insn: object) -> object:
     """Return an angr wrapper's underlying capstone instruction."""
     # Dynamic angr/capstone compatibility boundary.
     return getattr(insn, "insn", insn)
 
 
-def _register_name_8616(insn: object, reg_id: int) -> str:
+@cython.ccall
+def _register_name_8616(insn: object, reg_id: cython.longlong) -> object:
     """Return a normalized capstone register name."""
     try:
         return str(cast(Any, _inner_instruction_8616(insn)).reg_name(reg_id)).lower()
@@ -90,7 +97,8 @@ def _register_name_8616(insn: object, reg_id: int) -> str:
         return ""
 
 
-def _written_register_8616(insn: object, effect_dst: str | None) -> str | None:
+@cython.ccall
+def _written_register_8616(insn: object, effect_dst: object) -> object:
     """Return the explicitly written return-carrier register, if proven."""
     if effect_dst in {"ax", "al", "ah", "dx"}:
         return effect_dst
@@ -116,7 +124,8 @@ def _written_register_8616(insn: object, effect_dst: str | None) -> str | None:
     return reg_name if reg_name in {"ax", "al", "ah", "dx"} else None
 
 
-def _written_lane_8616(insn: object, effect_dst: str | None) -> TerminalAxReturnLane8616:
+@cython.ccall
+def _written_lane_8616(insn: object, effect_dst: object) -> TerminalAxReturnLane8616:
     """Return a proven AX lane written by one instruction."""
     return {
         "ax": TerminalAxReturnLane8616.WORD,
@@ -125,7 +134,7 @@ def _written_lane_8616(insn: object, effect_dst: str | None) -> TerminalAxReturn
     }.get(_written_register_8616(insn, effect_dst) or "", TerminalAxReturnLane8616.NONE)
 
 
-def _preserves_terminal_return_storage_8616(insn: object, mnemonic: str) -> bool:
+def _preserves_terminal_return_storage_8616(insn: object, mnemonic: object) -> cython.bint:
     """Return whether one proven epilogue instruction preserves DX:AX."""
     if mnemonic in {"nop", "pop", "leave", "jmp", "ljmp", "ret", "retf", "iret"}:
         return True
@@ -133,14 +142,16 @@ def _preserves_terminal_return_storage_8616(insn: object, mnemonic: str) -> bool
         return False
     inner = cast(Any, _inner_instruction_8616(insn))
     operands: tuple[Any, ...] = tuple(inner.operands or ())
-    if len(operands) != 2 or any(int(cast(Any, operand).type) != 1 for operand in operands):
+    if len(operands) != 2 or any(int(cast(Any, operand).type) != 1 for operand in iter(operands)):
         return False
-    names = tuple(_register_name_8616(insn, int(cast(Any, operand).reg or 0)) for operand in operands)
+    names = tuple(_register_name_8616(insn, int(cast(Any, operand).reg or 0)) for operand in iter(operands))
     return names == ("sp", "bp")
 
 
+@cython.ccall
 def _direct_jump_target_8616(insn: object) -> int | None:
     """Return a direct immediate jump target, if present."""
+    target: object
     inner = _inner_instruction_8616(insn)
     # Dynamic capstone compatibility boundary.
     operands = tuple(getattr(inner, "operands", ()) or ())
@@ -155,6 +166,7 @@ def _direct_jump_target_8616(insn: object) -> int | None:
     return target if isinstance(target, int) else None
 
 
+@cython.ccall
 def _instruction_fallthrough_8616(insn: object) -> int | None:
     """Return the next instruction address across the Capstone boundary."""
     inner = cast(Any, _inner_instruction_8616(insn))
@@ -168,21 +180,25 @@ def _instruction_fallthrough_8616(insn: object) -> int | None:
     return address + size
 
 
+@cython.ccall
 def _instruction_address_8616(insn: object) -> int | None:
     """Return one decoded instruction address across a dynamic third-party Capstone boundary."""
+    address: object
     address = getattr(_inner_instruction_8616(insn), "address", None)
     return address if isinstance(address, int) else None
 
 
+@cython.ccall
 def _decoded_instructions_by_block_8616(
     project: object,
-    block_addrs: frozenset[int],
+    block_addrs: object,
     direct_decode: FunctionBlockDecodeArtifact8616,
-) -> dict[int, tuple[object, ...]]:
+) -> object:
     """Return complete direct evidence or rebuild the legacy exact fallback."""
+    block_addr: object
     if direct_decode.complete:
         return direct_decode.instructions_by_block()
-    decoded: dict[int, tuple[object, ...]] = {}
+    decoded: dict[cython.longlong, tuple[object, ...]] = {}
     for block_addr in sorted(block_addrs):
         try:
             instructions = decoded_block_instructions_8616(cast(Any, project), block_addr, opt_level=0)
@@ -193,16 +209,17 @@ def _decoded_instructions_by_block_8616(
     return decoded
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _LaneFlow8616:
     """Mutable per-path lane state carried across one terminal AX scan."""
 
     lanes: TerminalAxReturnLane8616
-    dx_ax_pair_proven: bool
+    dx_ax_pair_proven: cython.bint
     call_output_lanes: TerminalAxReturnLane8616
     local_definition_lanes: TerminalAxReturnLane8616
     local_pointer_output_lanes: TerminalAxReturnLane8616
 
+    @cython.ccall
     def snapshot(self) -> _LaneFlow8616:
         """Return an independent copy for one successor path."""
         return _LaneFlow8616(
@@ -214,22 +231,23 @@ class _LaneFlow8616:
         )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _TerminalAxEvidenceScan8616:
     """Bounded path scan collecting terminal AX lane evidence."""
 
     project_dynamic: Any
-    block_addrs: frozenset[int]
-    decoded_by_block: Mapping[int, tuple[object, ...]]
-    explicit_restore_sites: frozenset[int]
-    terminal_states: set[TerminalReturnStorageState8616] = field(default_factory=set)
-    visited_states: set[_TerminalAxScanState8616] = field(default_factory=set)
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    block_addrs: object
+    decoded_by_block: Mapping[cython.longlong, tuple[object, ...]]
+    explicit_restore_sites: object
+    terminal_states: object = field(default_factory=set)
+    visited_states: object = field(default_factory=set)
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
+    @cython.ccall
     def _record_terminal(self, flow: _LaneFlow8616) -> None:
         """Materialize one classified terminal-path state into the evidence set."""
         self.raw_fact_count += 1
@@ -245,13 +263,16 @@ class _TerminalAxEvidenceScan8616:
             )
         )
 
+    @cython.ccall
     def _record_failure(self) -> None:
         """Record one reachable control-flow fact that could not be classified."""
         self.raw_fact_count += 1
         self.failure_count += 1
 
-    def _block_instructions(self, block_addr: int) -> tuple[object, ...]:
+    @cython.ccall
+    def _block_instructions(self, block_addr: cython.longlong) -> object:
         """Return decoded instructions for one block or empty on refusal."""
+        insns: object
         insns = self.decoded_by_block.get(block_addr)
         if insns is not None:
             return insns
@@ -263,8 +284,10 @@ class _TerminalAxEvidenceScan8616:
         except (KeyError, SimEngineError, SimTranslationError, ValueError):
             return ()
 
-    def scan(self, block_addr: int, flow: _LaneFlow8616) -> None:
+    @cython.ccall
+    def scan(self, block_addr: cython.longlong, flow: _LaneFlow8616) -> None:
         """Propagate one finite typed state once through an entry-reachable block."""
+        insn: object
         state = _TerminalAxScanState8616(
             block_addr,
             flow.lanes,
@@ -290,14 +313,15 @@ class _TerminalAxEvidenceScan8616:
                 return
         self._propagate_fallthrough(insns[-1], flow)
 
+    @cython.ccall
     def _apply_effect(
         self,
         insn: object,
         effect: TerminalAxReturnEffect8616,
         ax_use: TerminalAxUse8616,
-        mnemonic: str,
+        mnemonic: object,
         flow: _LaneFlow8616,
-    ) -> bool:
+    ) -> cython.bint:
         """Apply one instruction's lane effects; return True to skip edges."""
         if effect.kind is TerminalAxReturnEffectKind8616.CALL_CLOBBER:
             flow.lanes = TerminalAxReturnLane8616.WORD
@@ -315,7 +339,7 @@ class _TerminalAxEvidenceScan8616:
         return False
 
     @staticmethod
-    def _apply_restore(written_register: str | None, flow: _LaneFlow8616) -> None:
+    def _apply_restore(written_register: object, flow: _LaneFlow8616) -> None:
         """Reset lanes proven consumed by an explicit terminal restore."""
         if written_register in {"ax", "al", "ah"}:
             flow.lanes = TerminalAxReturnLane8616.NONE
@@ -330,15 +354,15 @@ class _TerminalAxEvidenceScan8616:
     def _apply_write(
         insn: object,
         effect: TerminalAxReturnEffect8616,
-        written_register: str | None,
-        mnemonic: str,
+        written_register: object,
+        mnemonic: object,
         flow: _LaneFlow8616,
     ) -> None:
         """Apply register-write lane effects for one instruction."""
         if written_register in {"ax", "al", "ah"}:
             written = _written_lane_8616(insn, effect.dst_reg)
             flow.lanes = (
-                written if written == TerminalAxReturnLane8616.WORD else flow.lanes | written
+                written if operator.eq(written, TerminalAxReturnLane8616.WORD) else flow.lanes | written
             )
             flow.call_output_lanes &= ~written
             flow.local_definition_lanes &= ~written
@@ -353,7 +377,7 @@ class _TerminalAxEvidenceScan8616:
         elif written_register == "dx":
             explicit_lanes = flow.lanes & ~flow.call_output_lanes
             flow.dx_ax_pair_proven = (
-                explicit_lanes == TerminalAxReturnLane8616.WORD
+                operator.eq(explicit_lanes, TerminalAxReturnLane8616.WORD)
                 and mnemonic in {"adc", "mov", "sbb"}
             )
         elif flow.dx_ax_pair_proven and not _preserves_terminal_return_storage_8616(insn, mnemonic):
@@ -372,13 +396,15 @@ class _TerminalAxEvidenceScan8616:
         }:
             flow.local_pointer_output_lanes &= ~ax_use.lanes
 
+    @cython.ccall
     def _dispatch_edge(
         self,
         insn: object,
-        mnemonic: str,
+        mnemonic: object,
         flow: _LaneFlow8616,
-    ) -> bool:
+    ) -> cython.bint:
         """Handle terminal/branch mnemonics; return whether the block ends."""
+        successor: object
         if mnemonic in {"ret", "retf", "iret"}:
             self._record_terminal(flow)
             return True
@@ -401,6 +427,7 @@ class _TerminalAxEvidenceScan8616:
             return True
         return False
 
+    @cython.ccall
     def _propagate_fallthrough(self, last_insn: object, flow: _LaneFlow8616) -> None:
         """Propagate the lane state along the block's fallthrough edge."""
         fallthrough = _instruction_fallthrough_8616(last_insn)
@@ -418,7 +445,7 @@ def _collect_terminal_ax_return_evidence_uncached_8616(
     """Collect closed AX lane evidence along bounded paths to binary returns."""
     function_surface = cast(_FunctionSurface8616, function)
     try:
-        block_addrs = frozenset(int(addr) for addr in (function_surface.block_addrs_set or ()))
+        block_addrs = frozenset(int(addr) for addr in iter((function_surface.block_addrs_set or ())))
     except AttributeError:
         block_addrs = frozenset()
     try:
@@ -437,7 +464,7 @@ def _collect_terminal_ax_return_evidence_uncached_8616(
     )
     explicit_restore_sites = (
         terminal_register_restore_sites_8616(decoded_by_block, entry_addr)
-        if frozenset(decoded_by_block) == block_addrs
+        if operator.eq(frozenset(decoded_by_block), block_addrs)
         else frozenset()
     )
     scan = _TerminalAxEvidenceScan8616(
@@ -474,7 +501,7 @@ def collect_terminal_ax_return_evidence_8616(
     direct_decode = collect_function_block_decode_artifact_8616(project, function)
 
     def _build(
-        cached_project: object | None,
+        cached_project: object,
         cached_function: object,
     ) -> tuple[TerminalAxReturnEvidence8616]:
         """Adapt the semantic collector to the binary evidence inventory."""
@@ -487,7 +514,7 @@ def collect_terminal_ax_return_evidence_8616(
             ),
         )
 
-    cached: tuple[TerminalAxReturnEvidence8616, ...] = collect_function_binary_evidence_8616(
+    cached: object = collect_function_binary_evidence_8616(
         project,
         function,
         kind=FunctionEvidenceKind8616.TERMINAL_AX_RETURNS,
@@ -499,10 +526,11 @@ def collect_terminal_ax_return_evidence_8616(
     return cached[0]
 
 
+@cython.ccall
 def terminal_ax_return_lane_states_8616(
     project: object,
     function: object,
-) -> frozenset[TerminalAxReturnLane8616]:
+) -> object:
     """Return the compatibility lane-state view of closed terminal evidence."""
     evidence = collect_terminal_ax_return_evidence_8616(project, function)
     return evidence.states if evidence.complete else frozenset()

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Connect direct local Alias input construction to persisted raw IR/SSA.
 
 Layer: CLI/fallback/reporting orchestration.
@@ -6,6 +7,7 @@ runs, then persist any newly built pair without classifying semantic facts.
 """
 
 from __future__ import annotations
+import cython
 
 from inertia.alias.indexed_address_program import (
     IndexedAliasFunctionRefusal8616,
@@ -26,6 +28,7 @@ from .function_ir_ssa_cache import (
 )
 
 
+@cython.ccall
 def _deadline_refusal_program_8616(
     function: object,
 ) -> IndexedAliasProgramEvidence8616:
@@ -44,6 +47,7 @@ def _deadline_refusal_program_8616(
     )
 
 
+@cython.ccall
 def build_cached_direct_indexed_alias_local_evidence_8616(
     project: object,
     function: object,

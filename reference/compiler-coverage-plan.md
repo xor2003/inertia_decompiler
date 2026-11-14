@@ -16,6 +16,838 @@ an optimization-only milestone for the required decompiler result.
 
 ### Current verification
 
+Current concrete blocker (2026-11-11): the normal SIMPLE MAIN run now
+materializes all five jump-domain edges: counts **18/5/5/5/0**. Application
+then refuses because CALL dependencies cannot be freshly closed
+(`APPLICATION_REFUSED`, `STALE_INPUT`/`STALE_SOURCE`):
+`simple-snapshot-final60.log`, exit 4. The unchanged-producer observer confirms
+that the first selector batch succeeds at work 118207, while application's
+fresh selector batch reaches **128302/128000**, with about 31 seconds remaining
+(`call-consumer-final-observations.jsonl`). No function C is emitted; actual
+acceptance remains **0/16 and 0/118**. All time/work/cache limits are unchanged.
+
+The open repair authenticates an offered root without repeating its resolver,
+snapshots each shared CALL index once per fresh proof graph, and shares only
+the beginning scoped-record snapshot within a synchronous selector batch.
+Fresh closure authentication, ending snapshots and late-mutation refusals
+remain mandatory. The two-CALL resource regression now fits 6500 work
+(previously 7529). Final scoped cohort: **51 passed, 7 skipped** (canonical
+BITNBR not staged); scoped lint and MyPy pass. Earlier actual attempts sometimes
+stopped at the selector deadline under host load; they are not acceptance.
+Next: combine compatible collection obligations into one fresh native seal,
+without weakening target or CS requirements, then repeat normal SIMPLE and
+the required full acceptance gates. This coherent repair remains open until
+actual generated-C acceptance increases.
+
+Declared scoped CALL-target follow-up (2026-11-11): a native two-CALL
+regression reproduced `UNPROVED` admission for valid original scoped callee
+records. The view producer had omitted their explicitly supplied root scope,
+and declared target admission only consumed selector-projection records.
+The producer now retains the conditional root; application consumes the full
+canonical CALL dependencies and native continuations while preserving original
+records and raw operands. Scoped lint passed; focused native tests passed,
+including native corruption, foreign scope, altered target and late-mutation
+controls. Evidence and preimages are in `parent-declared-scoped-target/`.
+The actual SIMPLE retry still exited 4 with `APPLICATION_EMPTY`; a subsequent
+observed run stopped earlier at `scope_unbound`. No corpus acceptance follows.
+The full architecture check remains failed on files outside this change:
+`render_compat.py`, `cli_access_profiles.py`, `cli_storage_objects.py`, and
+`hotspot_import.py`; retain `scoped-target-architecture.log` for diagnostics.
+Declared-entry errors now retain typed selector verdict and per-CALL refusal
+states to make the normal CLI's next failure actionable without an observer.
+
+Allocation fingerprint follow-up (2026-11-11): an observed actual CLI run
+refused `fingerprint: unsupported expression form NoneType/None`. The installed
+native AIL contract permits absent incoming Phi values, and a focused native
+regression independently reproduced that exact fingerprint refusal. The
+frontend adapter now records an explicit absent-Phi-input structural key while
+retaining the predecessor and still refusing missing required expressions.
+Scoped lint passed; all 32 tests in the native allocation restart and Lowering
+convergence modules passed. Preimages, diff and review are retained in
+`parent-phi-fingerprint/`. The original CLI exception's parent expression was
+not captured: a later observer run stopped earlier at `scope_unbound`. This
+fix therefore remains a component result, not a claim that SIMPLE is fixed.
+The uninstrumented post-fix CLI retry (`simple-phi-fingerprint60.log`)
+finished with exit 4 and `scope_unbound`, before allocation; tail validation is
+uncollected and no function C was written. It neither validates the full function
+nor exercises the new Phi handling end to end. All probes are terminal.
+
+Latest standalone selector evidence (2026-11-11): the unchanged-limit
+`selector-native-binding-counts` probe completed with `proven_conditional`,
+all five CALL edges preserved, and a successful `ScopedIndirectTargetView8616`
+projection for `switch_fold` at `0x225a`. It used 19836 local/55598 shared work,
+22.01 seconds elapsed and 21.56 seconds CPU. The observer only recorded native
+callee sizes and did not replace proof producers. This is component evidence,
+not generated C, tail validation, or round-trip acceptance. The subsequent
+actual SIMPLE retry is recorded in `simple-selector-indirect-proven60.log`.
+That actual retry is terminal, exit 4: `APPLICATION_EMPTY`, tail validation
+uncollected, and no output C directory. It does not establish that the actual
+CLI selector succeeded merely because the separate standalone probe did.
+Subsequent standalone preparation observations instead refused `scope_unbound`.
+The stage trace (`simple-entry-stages-result.json`) records the selector refusing
+at 26.83 seconds elapsed, with 33044 shared work and 23.44 seconds remaining in
+the shared request. Later scope authentication exhausted the original shared
+50-second deadline at 61842 work, below the 128000 cap. These are distinct runs;
+the exact CALL-target admission reason in the actual `APPLICATION_EMPTY` run
+is still unobserved. Neither guard relaxation nor budget expansion is justified.
+
+Bounded follow-up (2026-11-11): the selector recheck again refused
+`DEADLINE_EXCEEDED` before reaching the indirect-control consumer (27.38 seconds
+elapsed, 18.09 seconds CPU; 1249 local/20741 shared work). A separate diagnostic
+cProfile run identified 153183 native term comparisons and 73252 sequence
+comparisons; profiling perturbs timing and does not establish acceptance.
+Raw data is retained as `selector-indirect-proof.pstats` and
+`selector-indirect-profile-summary.json` in the resume directory. The native
+comparator already memoizes within each comparison; do not add redundant caches
+or bypass fresh source binding. No production edits resulted from this profile.
+The root filesystem subsequently reported no free space, causing intermittent
+sandbox startup failures. `/home` retained 13 GiB free, and the existing plan
+was checked intact after failed writes. This environmental issue is separate
+from the previously observed proof deadline. Acceptance remains unchanged.
+
+Provisional indirect-control consumer (2026-11-11): selector CFG induction and
+control binding now consume `ScopedIndirectTargetView8616` through fresh scoped
+projection, exact native-byte/instruction binding and target geometry. Pending
+marker discharge is restricted to the proved block. Scoped lint and startup
+architecture passed. The focused run completed with 70 passed and one
+`DEADLINE_EXCEEDED` failure in the existing conditional near-return test; all
+eight new binding tests passed. Both exact preimage and candidate controls later
+passed at unchanged limits, although an earlier isolated candidate retry failed
+the deadline. The optional timing observer captured no calls and is not CPU evidence.
+A further native-marker regression caught a wrong `IRRefusal.addr` access;
+the consumer now uses the authoritative `block_addr`. Marker/corruption and
+near-return controls passed together (two tests). Final scoped lint passed;
+explicit MyPy on both consumers reports only the two existing baseline errors.
+No new corpus acceptance is claimed. Candidate/preimages/review and the unresolved exploratory caller-fixture
+diagnostic are retained in `parent-selector-indirect-control/`; the live test
+results and continuation steps are recorded in the resume `CONTINUE.md`.
+
+The actual indirect-consumer SIMPLE retry reached the unchanged outer supervisor
+limit (exit 124), without a function verdict or accepted C. Its recovery banner
+appeared about 80 seconds after log creation, leaving about 40 seconds of the
+120-second process envelope. The standalone probe also stopped before reaching
+the indirect consumer: `DEADLINE_EXCEEDED`, no call edges, 33.61 wall / 15.53 CPU
+seconds and 6,427 shared work units. Integration correctness remains unverified.
+Separate `--help` import profiling found 38.10 seconds cumulative beneath
+`direct_request_fast_path`, including 18.71 seconds for `default_signature_catalog`
+and 17.19 seconds for `cache_source_manifest`. These overlapping times must not
+be summed. Inspect eager imports and preserve all cache source fingerprints and
+the original acceptance limits; faster help alone is not completion.
+
+Selector loop-entry correction (2026-11-11): two real native loop layouts
+reproduced `cs_unbound`. The solver now distinguishes unvisited predecessor
+edges from visited states with unknown registers and propagates only from
+reached predecessors. Bounded convergence, full equation replay, native checks
+and source seals remain mandatory. The focused suite passed **59 tests**, with
+14 BITNBR-dependent tests skipped because their corpus fixture is not staged;
+scoped lint passed. Scoped MyPy still reports the same two baseline errors.
+
+The ordinary SIMPLE retry exits 4 with **`APPLICATION_EMPTY`**, rather than the
+earlier `SCOPE_UNBOUND`; tail validation remains uncollected and no C is accepted.
+A separate one-function observer completed in 22.12 wall / 20.70 CPU seconds:
+all five calls retain segment effects, and only switch-fold remains refused.
+Its authenticated callee carries `ScopedIndirectTargetView8616`, unsupported by
+the selector's near-return-only conditional projection/control consumers.
+Sum-to's loop and classify no longer produce selector obligations in that probe.
+The next repair must consume the existing invocation-scoped indirect-target
+authority without bypassing native control binding or guessing a target.
+Evidence: `parent-selector-loop-entry/`, `selector-loop-corrected-records-result.json`
+under the resume directory; logs `selector-loop-entry-focused.log` and
+`simple-selector-loop-entry60.log` under `.cache/agent-tool-output/`.
+Acceptance remains **0/16 round trips and 0/118 matrix cells**.
+
+Retained native-callee correction (2026-11-11): selector induction previously
+required a conditional near-return CFG view even for authenticated raw-native
+callee records. A real `MOV AX,7; RET` regression failed for that reason while
+failed-record and foreign-artifact controls refused correctly. Native records
+now retain authentication and use the ordinary closed-native-CFG path; conditional
+near-return records retain their projection requirements. The focused suite
+passed 55 tests, including changed-native-byte refusal, and scoped lint passed.
+Scoped MyPy reports two `no-any-return` errors also reproduced with exact
+pre-change source through MyPy's shadow-file facility.
+
+The ordinary SIMPLE retry still exits 4 with `SCOPE_UNBOUND` and no accepted C.
+The subsequent unchanged-limit standalone selector probe completed in 19.42
+wall / 18.64 CPU seconds with all five call effects preserved. The old three
+generic callee refusals narrowed to an unsupported conditional view for
+switch-fold and `FETCH_OUT_OF_WINDOW` / `cs_unbound` at sum-to's loop join.
+This is a repaired regression and more precise evidence, not corpus acceptance.
+Candidate/preimages/review: `parent-native-selector-callee/`; probe receipt:
+`selector-native-callee-result.json` in the resume evidence directory. Logs:
+`.cache/agent-tool-output/selector-native-callee-focused.log` and
+`.cache/agent-tool-output/simple-native-selector-callee60.log`.
+
+Nested selector deadline follow-up (2026-11-11): nested callsite collection
+now receives the earliest selector, request and project deadline. The local
+cap restores on exit, including exceptions, without renewing the request or
+resetting charged work. All deadline consumers use the effective cap.
+Six new baseline cases failed before this change; all eight new cases pass
+within the focused candidate run (155 passed, 14 skipped, five failures).
+The same five nonleaf-budget integration failures reproduce with the exact
+pre-change owner modules (23 passed); they remain open baseline failures.
+Additional selector controls passed 78 tests, and scoped lint passed.
+
+The ordinary SIMPLE retry still fails acceptance: exit 4, `SCOPE_UNBOUND`,
+tail validation uncollected, no generated C. Its 60-second function and
+120-second supervisor limits were unchanged. This is a resource-contract
+correction, not an accepted semantic improvement. Acceptance remains
+**0/16 round trips and 0/118 matrix cells**. Evidence and four-question review:
+`.cache/compiler-coverage-resume-20261110/parent-selector-nested-deadline/`;
+runtime log: `.cache/agent-tool-output/simple-nested-deadline60.log`.
+
+The separate selector diagnostic completed in 19.91 wall / 19.65 CPU seconds
+with 35,801 shared work units. All five call edges retained segment effects,
+but selector induction refused all three callee heads with `CFG_INCOMPLETE`
+(unproved scoped callee). This is diagnostic evidence, not full CLI acceptance.
+Two subsequent return-observer runs exhausted the selector deadline before
+reaching that final check (27.01/15.25 and 31.81/23.96 wall/CPU seconds).
+A later host snapshot showed load 22.81 on eight CPUs; contention is plausible,
+but these runs do not establish the cause of the earlier CFG refusal.
+The next diagnostic must distinguish the retained scoped-view type from
+record reauthentication failure without adding proof calls or loosening limits.
+Receipts: `selected-call-nested-deadline-result.json`,
+`selector-authentication-observer-result.json`, and
+`selector-scoped-records-result.json` under the resume evidence directory.
+
+Current cost evidence (2026-11-11): baseline logs also contain normalization
+and callee-stub registration; the candidate's core timeout is not evidence of
+progress beyond the earlier scope refusal. Worker-thread samples remain in
+native lifting, source authentication and invocation/selector proof work.
+The first sampler only saw the waiting parent; its data must not be treated
+as worker profiling. The all-thread sampler reached the unchanged120s outer
+supervisor (exit124), so it provides sampled stacks, not a function verdict.
+
+A separate nine-operation cost observer completed with the ordinary core
+timeout (exit3). Its last cumulative snapshot reports **inclusive** CPU/wall
+seconds: declared preparation39.12/50.97; selector proof35.79/46.95; scoped
+call collection25.94/32.98; five invocation derivations16.03/20.82. Native
+surface requests consumed8.88CPU across16 calls. Entry-source digest58 calls
+consumed5.50CPU; artifact-body digest41 calls consumed4.84CPU. These nested
+totals must not be added. Evidence: `proof-cost-summary.json`,
+`proof-cost-observer/`, `simple-proof-cost-observation.log` under the existing
+resume/output directories. The candidate's three code/test/doc files still
+match their tested hashes.
+
+No optional prefix was selected in a separate residency observation, which
+exited4/SCOPE_UNBOUND. Do not implement cache-residency advice on the basis of
+that run. Earlier encoder/serialization experiments also did not establish a
+safe pipeline improvement. The current concrete target is deadline
+propagation: the selector defaults to25s, but nested scoped collection inherits
+the enclosing declared census deadline (50s) through `_census_deadline_8616`.
+`_Budget.charge` observes the tighter selector deadline only after nested work
+returns. A repair must bound the nested work while preserving/restoring the
+parent allowance, rather than permanently shrinking or renewing the outer
+request. Native/source/call guards and acceptance limits remain mandatory.
+No accepted function or round trip is established.
+
+Current scoped-selector prerequisite candidate (2026-11-11): the standalone
+SIMPLE selector refuses `CALLEE_MISSING` for `switch_fold` at MAIN callsite
+`0x22b1`. A narrow native observation shows ordinary surfaces for `classify`
+and `sum_to`, but no closed boundary for `switch_fold`. Scoped collection then
+selects only `0x22b1` and accepts no record. Its ordinary invocation census
+still requires preceding CALLs; the restricted collection omitted those
+prerequisite proofs. Restored-source baseline: selector refused in8.20s wall,
+8.01s CPU, work1299/shared2743, with the same obligation. This diagnostic is
+not whole-function acceptance (`selected-call-baseline.log`).
+
+`declared_selector_scoped_callee.py` now expands missing-callee requests to
+CALLs in the canonical invocation predecessor cone, bounded by instruction
+order in the terminal block. It does not demand later calls in that block,
+assume address order, grant call effects, or change resource limits. Two
+regressions fail on the preimage; scoped lint and126 native/selector controls
+pass. The same selector probe now attempts the prerequisite proofs but refuses
+`DEADLINE_EXCEEDED`:51.69s wall/44.30s CPU, shared work33475. This does not
+increase acceptance. The normal60s SIMPLE retry exits3 with a **core** timeout,
+after function normalization and direct-callee stub registration. The earlier
+normal retry stopped at SCOPE_UNBOUND, but inspection confirms those earlier
+runs also normalized and registered stubs. Therefore the changed terminal
+status does **not** establish progress to a later stage. A subsequent run
+with a parent-only stack sampler again exits4/SCOPE_UNBOUND. No accepted
+function gain is established; tail validation remains uncollected. Evidence:
+`simple-prerequisites60.log` and
+`parent-selected-call-prerequisites/runtime-result.json`. The next diagnostic
+must sample the actual forked CLI worker, not the parent waiting for its
+result. The narrower selector probe does not reproduce all CLI discovery
+and context state. Evidence and review:
+`.cache/compiler-coverage-resume-20261110/parent-selected-call-prerequisites/`.
+
+The prior scratch-source isolation experiment is **withdrawn**, despite104
+focused passes: `_PrefixSourceBindings8616` explicitly requires shared
+invalidation so scratch scopes cannot hide missing authority. Independent
+source records had not been shown to preserve that contract and produced no
+accepted corpus gain. Its three files were restored from hash-checked exact
+preimages; candidate code and results remain in
+`parent-scratch-source-isolation/withdrawn-candidate/` and `withdrawal.json`.
+Earlier budget-reservation work and unrelated edits were preserved. The normal
+SIMPLE retry for that withdrawn experiment exited4/SCOPE_UNBOUND; a candidate
+observer timed out. Do not treat either as an accepted repair.
+
+Earlier SIMPLE work-allocation observation (2026-11-11; superseded next steps): the context-identity
+observer completed with exit 4. Its three successful `sum_to` simulations and
+one exhausted simulation belonged to four distinct proof contexts, although
+they shared an artifact identity. This does not support a context-local cache
+as a remedy for the observed repetition. Evidence:
+`.cache/compiler-coverage-resume-20261110/simple-loop-context-analysis.json`;
+full run: `.cache/agent-tool-output/simple-loop-context-observation.log`.
+
+A separate production observation, without producer replacement, recorded 35
+completed callee/scope operations. Successful `sum_to` calls charged 1,469 units
+for optional feasibility and 2,574 for mandatory simulation. A later proof
+context entered MAIN simulation already at 17,346 units; its first `classify`
+simulation returned a typed failure at 18,922 units. This run alone does not
+identify that typed failure's reason: the observer retained the result type,
+not its fields. The command exited 4 with `SCOPE_UNBOUND` and CLI
+`validation=failed`, not semantic equivalence. The next diagnostic must locate
+work charged before MAIN simulation and retain typed failure reasons, rather
+than assume optional loop feasibility is the remaining cause. Evidence:
+`.cache/compiler-coverage-resume-20261110/context-cost-analysis.json` and
+`.cache/agent-tool-output/simple-context-cost-observation.log`. Both observer
+runs are terminal; acceptance remains **0/16 and 0/118**.
+
+Native build recovery: dangling `.cache/mypyc` and `.cache/cython-vex` links
+were preserved before replacing them with local build directories. The VEX
+build exited 0, and the strict mypyc import smoke passed for all 39 modules
+without forcing a Python-backend fallback. Evidence: `cython-vex-build-after-cache-repair.log`
+and `mypyc-after-vex-repair.log` under `.cache/agent-tool-output/`. The full
+`quality-fast` rerun passed groups of 309, 1,509 and 26 tests, but its large
+pipeline group was interrupted after reported failures, deadline exhaustion
+and memory-allocation failures under contention. In particular,
+`test_loop_constant_scratch_register[msc8-none]` passed alone but failed after
+20 tests in its containing module; the proof refusal remains unresolved.
+Full gate evidence is `quality-fast-after-native-cache-repair.log`; no clean
+gate or compiler round-trip acceptance is claimed.
+
+A separate per-case diagnostic run, `first16-individual-current/` under the
+evidence root, completed all 16 frozen starters with unchanged budgets:
+15 decompile timeouts and one original-build failure; **0 accepted**. Original
+build and execution passed for 15 cases. All 1,353 tracked source/input hashes
+were unchanged across that run. It overlapped the gate, so these contended
+timings cannot establish a performance improvement. See `parent-summary.json`
+and the retained per-case logs in that directory.
+
+The Microsoft comparison build produced a fresh, nonempty executable that the
+harness rejected because DOS write timestamps have two-second granularity.
+The reviewed repair is now integrated: clear and verify removal of prior
+artifacts before each stage, require completion evidence, and allow strictly
+less than two seconds of timestamp quantization. Missing, empty and genuinely
+stale artifacts remain failures. Scoped lint and production-file type checking passed. The first canonical
+regression run passed 144 tests; two pre-existing default-registry controls
+expected KvikDOS drift instead of the earlier missing-DOSBox refusal. Their
+helper now checks both configured runners. The final run passed 145 tests;
+the process-cleanup timing control failed at 1.80 seconds against its unchanged
+1.50-second ceiling under host contention (it passed in the earlier run).
+Both registry controls now pass. See `canonical-ts-tests-final.log`; this is
+not a clean module or full-gate result.
+All four fresh native compiler probes passed and their new registry was admitted
+by the normal loader (`timestamp-profile-admission.json`,
+`toolchains-dosbox-timestamp-fixed.json`). The affected Microsoft comparison
+case now builds and runs successfully (exit 255) with unchanged budgets,
+then times out during decompilation: `case000-timestamp-fixed/case-000/coverage-result.json`.
+The rebuilt executable is byte-identical to the previously rejected artifact
+(`timestamp-affected-case-receipt.json`). The artifact rejection is repaired;
+the round trip remains unaccepted. The isolated
+native build/run and 18 independent timestamp controls also passed; none of
+these results constitutes a decompiler round trip.
+
+A provisional universal-closure trial now occupies the canonical
+`inertia/ir/entry_domain_call_preservation.py`, with a hash-checked preimage
+and `tests/ir/test_fresh_universal_closure.py`. It skips only the immediate
+repeat of a fresh universal closure verdict; scoped and retained consumption
+keep their evidence revalidation. The isolated candidate passed 23 tests;
+the independent baseline reproduced the extra replay. The isolated MAIN
+attempt was refused by startup architecture checks because the copied
+package did not have canonical repository paths; it supplied no decompilation
+evidence. Canonical lint and startup architecture checks passed. Scoped
+type checking now reports the same 38 errors as the independent preimage,
+with no added errors; it is not a clean typing gate. The new regression is
+registered in the authoritative `reference/components/decompiler.json` and
+its compatibility catalog. All 62 canonical freshness, mutation, scoped-consumption and budget controls
+passed (`universal-canonical-controls-v3.log`). Normal-CLI MAIN verification
+still timed out at 60 seconds and generated no C
+(`universal-canonical-main60-result.json`). A separate isolated encoder trial
+now tests avoiding unused record-factory allocation on operation-local memo
+hits. Both native variants built and passed all 98 graph controls. Canonical
+encoder source and its matching native bundle remain unchanged. Paired compiled
+CPU ratios were 1.033, 1.031, 1.094 and 0.970 across four synthetic cases;
+the candidate is rejected as a general optimization. Evidence: `parent-encoder-factory-trial/native-benchmark.json`.
+A second isolated variant moves the memo lookup without repeating it on misses;
+its native build and all 98 graph controls passed. Paired compiled CPU ratios
+were 1.004, 0.974, 0.893 and 1.124: mixed results, not a general improvement
+(`native-benchmark-single_lookup.json`). A real-MAIN artifact benchmark exhausted
+its unchanged 120-second bound before reaching encoder timing; it supplies no
+real-artifact speed result. The lower-load normal-CLI MAIN retry also exhausted
+its unchanged 60-second bound (`universal-main60-lower-load.log`). These trials
+remain unaccepted.
+
+An isolated scalar-dispatch shortcut passed 16 differential controls but
+duplicated the existing scalar path in `_native_sequence_equal_8616`: lookup
+counts were unchanged and CPU ratios were 0.971, 1.035 and 1.067. It is rejected
+(`parent-native-leaf-dispatch-trial/measurement.json`). A separate immutable
+registry index trial passed 16 differential controls and 23 focused native
+binding regressions; its independent baseline also passed those 23 regressions.
+After adding fallback on replacement of the derived index, 17 differential
+controls passed. Initial synthetic CPU ratios were 1.006, 1.011 and 0.904;
+with the extra guard they were 1.168, 0.945 and 0.954. These mixed results do
+not establish a real workflow gain. The latest guarded variant still needs
+its focused regression rerun if pursued. Its source remains isolated in
+`parent-native-indexed-dispatch-trial/`; canonical comparator bytes still match
+the pinned preimage. No production comparator change or additional accepted
+function is claimed.
+
+
+A direct raw-MAIN diagnostic completed import in 4.82 seconds: 59 blocks,
+3,957 instructions, with 4,182 raw temporary facts and 225 classified/materialized
+removals (zero normalization failures). This is a raw surface, not a finished
+artifact or accepted function. An isolated native build of the unchanged whole
+invocation-domain module was rejected by Cython's parser at its Python type
+alias. A generated subset containing the exact 16 comparator definitions built
+and passed 16 differential controls; its real raw-MAIN comparison CPU ratio was
+0.904. It is not integrated. Evidence: `parent-native-comparator-subset/`.
+
+Selected-stage monitoring of direct artifact construction then narrowed the
+cost to repeated target binding. The 120-second diagnostic ended with exit124;
+35 completed `_bind_direct_call_target_8616` calls accumulated 80.35 seconds of
+inclusive time, versus 10.00 seconds across 11 `_callee_closure_8616` calls.
+Individual MAIN callsites 0x1dfd, 0x1e13, 0x1e2a and 0x1e58 took 12.91–18.10
+seconds in binding. Inclusive timings overlap enclosing stages and are not a
+baseline speed comparison. Producers were not replaced. The earlier normal-CLI
+monitor emitted no selected-stage events and provides no stage-cost evidence.
+See `callsite-stage-events.jsonl` and `callsite-stage-analysis.json`. The next
+investigation is caller-premise construction versus its consumption in direct
+near-call binding; scalar/encoder microbenchmarks do not address this evidence.
+
+
+A narrower trace attributes 69.87 inclusive seconds across ten completed requests
+to caller-premise construction, versus 11.01 seconds in 45 binding-core calls.
+Normal CLI route observation confirms the direct indexed-Alias preflight asks
+for universal SSA before declared-entry preparation
+(`cli-route-observer/route-1961268.txt`). A provisional orchestration repair now
+selects authenticated exact-head declarations through the IR owner and returns
+`DECLARED_ENTRY_DEFERRED` from that optional preflight, without publishing scoped
+IR or asserting any global-object requirement. Its new regression failed before
+the change on the unwanted universal probe. Focused controls then produced
+62 passes and one existing cache-reuse failure; that failure also reproduces
+with both changed production files restored to their independent preimages.
+Scoped lint passes. The normal MAIN run now reaches decompilation but still
+exhausts the unchanged 60-second limit with uncollected tail validation and no
+accepted function. This is not delivery. Preimages, hashes and the four-question
+review are in `parent-declared-probe-deferral/`; `declared-probe-main60.log` holds
+the real run. Post-change observation confirms declared-entry preparation now
+runs first (`declared-probe-route-observer/route-1997401.txt`).
+
+A second provisional repair changes bounded native-surface cache eviction to
+prefer retaining surfaces with more blocks, using oldest insertion for ties;
+the four-record/256-block caps and all source/proof checks remain unchanged.
+The new final-rebind regression failed before the change; 73 focused cache,
+native-rebind, census and scoped-view tests pass afterward, as does scoped lint.
+Inside actual preparation, the selector now returns `proven_conditional` with
+zero obligations (`retention-main-selector-result.json`, 11.959 seconds including
+construction), versus refusal with five obligations before the change. Its
+25-second/20,000-work limits are unchanged. This subproof is not acceptance:
+the normal MAIN run still times out at 60 seconds with uncollected tail validation
+(`native-retention-main60.log`). A subsequent unmodified-stage observation
+reaches CALL collection but refuses the scoped CFG: retained dependencies do not
+close over the source CALL census (`retention-declared-stage-error.json`).
+A following unchanged-producer observation completes scoped preparation in
+44.374 seconds with all 20 source CALL dependencies matched
+(`census-declared-observation.log` and `census-declared-stage-events.jsonl`).
+The refusal is therefore intermittent in current observations, rather than
+evidence that a CALL record is always absent. Scoped-view proof takes 26.588
+inclusive seconds, including 12.814 seconds reconstructing the CALL census.
+Batch-consumption cost and deadline behavior remain under investigation; no
+proof check has been relaxed. A subsequent typed observer explicitly returns
+`UnprovedDeclaredEntry8616` with `unknown_refuse` / `scope_absent`, following a
+refused selector (`typed-batch-outcomes.jsonl`). An ordinary producer return
+must therefore not be counted as scoped proof success. This observation took
+54.808 seconds in preparation, including 26.479 in the refusing selector;
+contemporaneous host load was roughly 23 on eight CPUs. Timing variability is
+not permission to raise proof limits or claim acceptance. Another normal
+60-second MAIN run (`typed-outcome-main60.log`) still times out; its worker
+observer produced no outcome receipt, so it does not localize the timeout.
+A CPU/wall observer then measured 24.226 CPU seconds in the selector's 25.233
+wall seconds (`cpu-batch-costs.json`): scheduler waiting alone does not explain
+that refusal. The subsequent ordinary CALL collection consumed another 25.587
+CPU seconds and ended with `scope_unbound` (`cpu-batch-declared-stage-error.json`).
+Native import and artifact-digest reuse remain the investigation target; high
+host load is not established as the blocker. A separate-process capacity experiment returned a proven scoped entry with
+16 records/256 blocks (41.251 wall seconds,39.257 CPU seconds,227600KiB peak RSS),
+versus a CALL-census refusal at four records (50.617 wall seconds,44.859 CPU
+seconds,226640KiB peak RSS). This does not establish a function gain. The normal
+CLI candidate hit its120-second outer supervisor without a terminal function
+result (`capacity16-main60.log`), so the exact four-record preimage was restored
+under hash guards (`parent-capacity-trial/result.json`). No capacity change is
+integrated and no proof limits are changed.
+
+A fresh normal-CLI boundary observer confirms declared preparation starts in
+an angr `Clinic` for MAIN, but records no return before the normal function
+request times out (`cli-preparation-observer/`, `cli-preparation-observation.log`).
+This does not establish repeated preparation or a successful scoped result.
+The smaller SIMPLE starter is the next affected-case check: current declaration
+`declared-main-fresh.json` matches the retained Borland SIMPLE binary SHA256
+`db648516dff460be1d1c631a492bb010975dd21cf4b197d2496644a50d5b86ab` and its
+capture-authentication receipt, selecting entry0x2291 with the table-memory
+premise. Older `.cache/simple-main-capture/` paths are absent in this workspace;
+`simple-current-identity.json` records the current matches. Its normal60-second MAIN check finishes with `scope_unbound`, not acceptance
+(`simple-main-current60.log`). Replay observation also produces
+`application_empty`; the earlier derivation refuses with
+`census_work_exceeded` at the sum_to call0x22a6 (539 raw/normalized/classified
+facts,538 materialized,one failure). The budget observer locates the local
+20,007/20,000 exhaustion inside optional callee feasibility before mandatory
+simulation; shared work is56,638/128,000, so the local limit is decisive.
+Evidence: `simple-auth-observer/`, `simple-budget-observer/`.
+
+An unconditional full-scope cyclic bypass was rejected despite89 passing
+focused controls: a native cyclic guard with an unreachable self-modifying
+write passes the pre-edit orchestrator but the candidate refuses
+`code_write_violation`. Its normal SIMPLE run still failed. Exact preimages,
+including the attempted geometry-advice changes, were restored; retained
+comparison is `cyclic-pruning-preservation-result.json` and rejected source is
+under `parent-cyclic-feasibility/`.
+
+The replacement candidate preserves optional pruning but offers an unordered
+refinement only half of the remaining local work, leaving room for required
+simulation. Ordered refinement keeps its original allowance; actual work and
+all original limits remain accounted. Native live/dead code-write controls
+pass before this change, while a new optional-exhaustion regression fails as
+expected. Scoped lint and all91 focused controls pass (`callee-reservation-controls.log`).
+Scoped MyPy passes for both the exact pre-edit shadow and current owner.
+The normal SIMPLE retry still exits4 with `scope_unbound`
+(`simple-main-reservation60.log`), so no function or matrix gain is claimed.
+Post-change observation shows exhaustion has moved into mandatory simulation:
+20,001 units at instruction simulation and20,026 at block rebinding, against
+the unchanged20,000 local limit (`simple-reservation-observer/`).
+The next trace finds five successful sum_to simulations that converge in at
+most five visits per block (0.113–0.340CPU seconds), plus two attempts that
+exhaust work after only three/one block visits. All seven have the same recorded
+register/known-memory/unknown-memory input hash. Thus nonconvergence or lost
+argument transport is not established; repeated attempts with depleted work
+are the next target (`simple-loop-analysis.json`, `simple-loop-observer/`).
+Context identity and complete source/input freshness still need checking before
+any reuse is considered. Preimages, hashes and review are in
+`parent-callee-budget-reservation/`.
+
+Preimages and review are in `parent-native-cache-retention/`.
+Acceptance remains **0/16 starter round trips and 0/118 matrix cells**.
+
+Supporting WIP: the pure Python-code encoding candidate passed 14 independent
+baseline-equivalence, depth, mutable-constant/default/closure and deep-refusal
+controls. Only successful encodings of proved-immutable code-value graphs are
+retained, with code identity/depth keys, strong references and a 4,096-entry cap;
+source/native/artifact verdicts remain freshly observed. This is not delivered
+compiler coverage: the real MAIN run still times out and emits no C. Review:
+`.cache/compiler-coverage-resume-20261110/devin-closure-observation/followup-code-fingerprint/PARENT_REVIEW.md`.
+The recursive timing sums are inclusive and do not prove a whole-pipeline gain;
+normal admission completed at unchanged 101,873 work units, 49.42 wall/48.93 CPU
+seconds. The cause of timing variation has not been isolated. The canonical-body
+serialization follow-up finished without a patch: all six owned files match
+its baseline hashes. Parent foreign-payload codec controls pass (23 tests),
+but this adds no accepted functions. Worker stage measurements identify graph
+canonicalization as the dominant digest cost; those timings remain diagnostic,
+not independently established pipeline savings. Evidence:
+`.cache/compiler-coverage-resume-20261110/devin-closure-observation/followup-body-serialization/PARENT_REVIEW.md`.
+Current parent CLI verification of helper0x1ce2 on the declared BC31 binary
+exits0 with statusOK, validation=passed and emitted C, at ordinary60s timeout.
+Receipt: `.cache/compiler-coverage-resume-20261110/cmp-helper-full-route-baseline/parent-receipt.json`.
+The separate near-call intake rejects its three incoming edges as
+`entry_ambiguous`, but the normal pipeline succeeds; this narrow refusal does
+not justify changing multi-caller authority. Legacy0x102c2 maps to0x1ce2 when
+the load base changes from0x10000 to0x1a20. Work returns to repeated boundary
+coverage authentication in MAIN, with the original worker deadline and all
+freshness/cardinality gates preserved. The helper baseline is not a new
+accepted round trip or evidence of an improvement.
+The boundary-local memo experiment was not retained: real MAIN still timed
+out with validation uncollected, and measured bindings remained153/51blocks.
+Its two owned files were restored to verified dirty preimages;16focused tests
+pass. Candidate and parent review remain under
+`.cache/compiler-coverage-resume-20261110/devin-closure-observation/followup-boundary-observation/`.
+The immediate producer/caller repeat was in `_caller_premise_surface_8616`.
+It now consumes the freshly produced typed failure; retained/public coverage
+checks still reauthenticate. Parent native-byte and registry-republication
+controls within one traversal both pass, and the supported catalog checker
+passes. Worker reports3focused and67neighbor tests plus lint passed.
+Admission work fell101873→101715 at unchanged128000 limit, but MAIN still
+times out60s with validation uncollected and no C. This remains supporting
+WIP, not a function gain. Parent review and hashes:
+`.cache/compiler-coverage-resume-20261110/devin-closure-observation/followup-fresh-caller-observation/PARENT_REVIEW.md`.
+The graph profiling follow-up identified no safe local encoder repair and
+left all four owned files byte-identical. Its interpreted profile includes
+Cython-Shadow costs absent from the compiled backend; no production gain was
+claimed. Next work measures whether fresh live-to-existing-snapshot comparison
+can avoid table reconstruction in the scoped native seal while preserving
+all current-field, snapshot-canonicality and refusal checks. This is an
+investigated hypothesis, with no patch retained: the current-source capture
+subset measured22calls/3.21s, but a generic matcher would duplicate schemas
+and miss computed observation callbacks. All four owned files remained
+baseline-identical. No cross-request verdict cache or budget increase is
+authorized.
+
+The traversal-wide closure-verdict cache from Devin `married-cormorant` was
+rejected and removed after independent review. Its final code accepted changed
+native bytes and changed segment-state facts between queries in the same
+ambient traversal; both parent controls failed. The final MAIN run also still
+timed out with validation uncollected. Exact dirty pre-worker closure source
+was restored after the session exited, with final source hashes checked before
+restoration. Two permanent same-traversal freshness controls were retained;
+scoped lint and 49 closure/preservation/nonleaf tests pass. Candidate archives,
+review and logs are under
+`.cache/compiler-coverage-resume-20261110/devin-closure-observation/` and
+`.cache/agent-tool-output/closure-final-candidate-parent-controls.log`.
+Reduced observation counts are not proof that a whole traversal is immutable.
+
+Fresh BC31 comparison MAIN entry admission now has a successful bounded probe
+under the authenticated native declaration: `DeclaredEntryPipeline8616`, exit 0,
+101,873/128,000 ambient work units, 21.64 seconds (unchanged local proof limits).
+This is admission evidence only. Full direct decompilation at `0x1dc3` still
+expires after the unchanged 60-second recovery budget and emits no C. Evidence:
+`.cache/agent-tool-output/compare-main-budget-baseline.log` and
+`compare-main-declared-decompile.log` in the same directory.
+
+The diagnostic MS worker run confirms that cold imports alone do not explain
+the timeouts. Five-second stack sampling catches repeated SSA canonicalization
+from source-readiness fingerprints/registry admission and postprocess activity
+in `0x101b3`; that function still times out. These are samples, not exclusive CPU
+costs or permission to weaken source authentication. The profiled case remains
+`decompile_failed`; its only `ok` record is the `astart` helper model. Full stacks
+and per-function sample chains are retained in
+`.cache/compiler-coverage-resume-20261110/worker-profile-final-analysis.json`.
+
+Local gate checkpoint: `quality-fast` exposed four optional read-trace list
+errors in the replay helper. The already-admitted collection is now passed
+explicitly; scoped lint, MyPy and 58 replay tests pass. The repeated full gate
+previously failed on dangling `.cache/locks` and `.cache/npm-cache` symlinks.
+Those links are now preserved under
+`.cache/agent-tool-output/gate-symlinks-20261110T220533Z/` and replaced by
+writable local directories; external targets were untouched. The fresh
+`quality-fast` now reaches MyPy and fails at
+`function_readiness_contracts.py:520`: an exact-type-guarded container remains
+`object` to the type checker. This retained CodeType optimization now uses
+an explicit guarded container union; direct MyPy/Ruff,46owned tests and
+14independent controls pass. The full rerun then failed on another dangling
+cache link, `.cache/mypyc` (the typing error was gone). That link was also
+preserved and replaced by a local directory; the isolated mypyc target is now
+building successfully past directory creation. Completion remains pending.
+No broad gate pass is claimed. Full rerun log:
+`.cache/agent-tool-output/quality-fast-after-readiness-typing.log` (exit2);
+active build: `.cache/agent-tool-output/mypyc-after-cache-repair.log`.
+
+The current full-batch invocation (`first16-dosbox-current/` under the evidence
+root below) stopped after the first MS C comparison case exceeded the unchanged
+120-second decompiler stage limit. Original compilation/execution passed;
+all 1,408 recorded source hashes stayed unchanged. Schema-2 runner policy stops
+on a timeout, so the remaining fifteen cases are **not attempted**, not failed
+or passed. Two serialized function results timed out (`0x101b3`, `0x100d6`);
+the latter reports 82.46 seconds in the clean-process path. The next diagnostic
+must separate worker startup from decompilation work without extending frozen
+budgets. Raw cases and source stability are recorded in
+`.cache/compiler-coverage-resume-20261110/first16-current-progress.json`.
+
+The Devin callee-transcript experiment was rejected after independent review.
+Its native-cache/identity guard accepted cached exits after the live IR block
+inventory changed; the new negative regression failed. It also still refused
+MAIN within the unchanged local budget. The exact worker delta was removed,
+restoring the recorded dirty pre-worker invocation source. Candidate sources,
+failed control and review are retained under
+`.cache/compiler-coverage-resume-20261110/rejected-callee-transcript/`.
+This is not an accepted optimization or function improvement.
+
+The fresh MS C5.1 `word_comparisons` baseline ends `decompile_failed`:
+one passed and four failed function records are serialized before a CLI
+`AttributeError` aborts the sweep at `0x10402`. The receiving process tries to
+export a new scalar interface from a `SimpleNamespace` function identity that
+has no prototype. Transport now uses typed execution origin: new interfaces
+come only from live in-process function authority; cache/clean-worker results
+with no receipt keep that optional evidence absent. Retained receipts still
+undergo source/generation authentication. Both cache and fresh-worker
+identity regressions failed before their guards; 22 related tests and scoped
+lint pass afterward (`scalar-cache-before.log`, `scalar-clean-before.log`,
+`scalar-clean-after.log`, `scalar-clean-lint.log`). The frozen-tree rerun completed its sweep without that exception and serialized
+all eight selected function records, including `0x10402`. Binary SHA-256 is
+unchanged and all five recorded source hashes remained stable. This repairs
+result transport, not semantic acceptance: seven records failed or timed out;
+the sole `ok` result is the existing `astart` helper model. Previously passing
+`0x101b3` timed out in this sweep, but the same-binary focused rerun completed
+with `status=ok`, `validation=passed` and exit 0
+(`.cache/agent-tool-output/msc-101b3-focused.log`). The sweep timeout remains
+unresolved; this focused success does not accept the whole case. The case
+still ends `decompile_failed`; no starter or matrix cell is accepted. Evidence:
+`.cache/compiler-coverage-resume-20261110/msc-transport-review.json` and
+`compare16-msc51-after-worker-transport/` in that same evidence directory.
+
+Current-host toolchain prerequisite: all four MS C5.1/Borland3.1
+small/large profiles now have successful explicit DOSBox compile/link/run
+probes (exit255, int2/long4, data/function pointers2 for small and4 for large,
+arithmetic checks PASS). Canonical admission of
+`.cache/compiler-coverage-resume-20261110/toolchains-dosbox-all.json`
+accepts all four profiles; its evidence registry pins current runner bytes,
+compiler dependencies and complete probe artifacts. A copied registry with an
+altered runner hash is refused (`dosbox-profile-negative-control.json`).
+The repository's default KVM registry is unchanged. These are environment
+prerequisites only; all round-trip and matrix acceptance counts remain zero.
+
+The latest follow-up keeps **0/16 and 0/118** unchanged. The absorbing
+prefix now performs one structural row census; 108 related tests passed, but
+the uninstrumented MAIN probe still refuses (101,415 ambient charged work,
+18.26 seconds). Reversed cyclic scheduling was measured and rejected: it did
+not improve acceptance and increased the loop's work. Its implementation was
+removed. Scoped indirect-view diagnostics now reauthenticate their retained
+entry before publishing edges; stale or absent authority emits no accepted
+edges. The regression failed before the repair; 22 indirect-view/segment
+closure tests and the three-owner MyPy check pass afterward (logs
+`view-serialization-before.log`, `view-diagnostics-after-fixed.log`, and
+`view-diagnostics-types.log` under `.cache/agent-tool-output/`).
+
+A fresh frozen `word_comparisons@bc31-small` round trip using the measured
+DOSBox registry finished `decompile_failed`; no feature witness was accepted.
+The raw report is in
+`.cache/compiler-coverage-resume-20261110/compare16-bc31-roundtrip/`.
+Observed failures include `entry_ambiguous`. Native entry capture and converter
+source authentication subsequently passed in `compare16-native-entry-current/`.
+The current native debugger build requires a different dispatch coordinate;
+the diagnostic adapter records the binary/source/script hashes and retains the
+live CS:IP and linear-IP guards. Failed capture attempts remain preserved.
+The binary-bound declared-input rerun in `compare16-bc31-bound-roundtrip/`
+finished `timed_out`. `cmp_i16` (module offset `0x2c2`) validates under the
+measured entry, whereas the undeclared baseline refused it. This is a change
+of explicit premises, not a same-input before/after code acceptance claim.
+The undeclared baseline contains two passed and eight failed function verdicts;
+the declared attempt times out before completing the same function set.
+Limits and frozen corpus hashes remain unchanged.
+
+**2026-11-10 continuation — MAIN still unaccepted.** On the authenticated
+Borland small-model `simple_control` input, local invocation censuses for CALLs
+at `0x22bc` and `0x22cd` exhaust the unchanged 20,000-work limit. The ambient
+128,000-work budget and wall deadline are not the initial cause. Two generic
+repairs remain intermediate evidence: absorbing prefix cuts now exclude only
+exact mirrored refusals in blocks outside their absorbing region, and a separately
+authorized snapshot walk can omit a confined terminal CALL effect after fresh
+pre-CALL capture. Raw refusals and full-function refusal remain intact.
+The latter reduced the uninstrumented MAIN probe's charged work from 109,822
+to 100,713, but it still exits with `declared entry scoped CFG is unproved`.
+The initial failure was source reauthentication of the retained prefix.
+Mapped callee discovery had retained the image suffix as its extent (3,226
+bytes for `classify`, 3,186 for `sum_to`). Native freshness already reads only
+decoded blocks; no accounting discount was introduced. The frontend now
+independently reproves a tighter upper bound for owned native blocks, retains
+backward reachability, and checks live bytes against cached decode records.
+Twenty boundary/context regressions pass. Prefix source authentication now
+passes with 468 charged operations, but the subsequent terminal CALL transfer
+still exhausts the local budget at 20,004. No function or round-trip acceptance
+count increased. Focused evidence is in
+`.cache/agent-tool-output/prefix-suffix-before.log`,
+`prefix-suffix-after.log`, `captured-call-before.log`,
+`captured-call-related-after.log` (151 passed), and
+`captured-final-guard-tests.log` (36 passed after the fresh-capture guard).
+These checks do not replace the required pipeline and semantic gates.
+
+**2026-11-10 environment recovery — not round-trip acceptance.** The earlier
+cache artifacts referenced below are absent in the current workspace. All46
+source/runtime/signature references of the frozen16-case manifest still match
+their recorded hashes. The default registry currently refuses because its
+`/usr/bin/dosbox` path is missing; `/dev/kvm` is also unavailable. A fresh
+Borland3.1 small-model probe compiled, linked and executed under the installed
+`/usr/local/bin/dosbox`: observed exit255, expected width/arithmetic/indirect-call
+output and `PASS failures=0`, with stable runner hash and seven dependency hashes
+verified. The first Boolean of the runtime helper denotes exit0, so its false
+value for the expected255 is not an execution failure. Exact native observations
+and the separately checked explicit DOSBox registry are retained under
+`.cache/compiler-coverage-resume-20261110/`. The canonical
+`branches_loops@bc31-small` PTY run completed with `timed_out`: original
+build/run succeeded (exit255, empty stdout), but decompilation emitted zero
+functions before the unchanged120-second stage budget (120.49s observed).
+Binary discovery queued seven functions. Evidence is in
+`simple-dosbox-pty/summary.json` and `case-000/runner.log` beneath that directory.
+The earlier non-PTY run ended with SIGTERM143; its initial summary is not a final
+result. A separate same-budget diagnostic records periodic process stacks to
+locate the delay. Both canonical and stack-instrumented runs timed out.
+The retained worker results additionally refuse CLASSIFY because multiple
+incoming CALL rows are ambiguous to the current single-entry owner. A focused
+MAIN diagnostic (exit4) preserves the deeper typed failure:
+`native_near_call_entry_selector_window_unproved`, caused by
+`near_call_selector_target_not_window_invariant` at callsite0x10158 to0x10341.
+This requires authenticated selector context; choosing a convenient CS or
+weakening the universal selector-window check would be unsound. Fresh capture
+recovery succeeded for the executable entry using the installed debug DOSBox
+and its current loader/interpreter ABI: CS0x1f5, IP0, a full1MiB memory snapshot,
+and full-width registers. The canonical capture converter returned exit0 and
+`status=captured`; its report explicitly retains
+`proof_status=not_established_by_execution`. See `native-entry-v2/` and
+`native-entry-verified/`. A fresh two-stop MAIN capture
+now also exists in `native-main-raw-flags/`. The temporary guest INT3 byte was
+restored before the MAIN memory snapshot, and the full115-byte function and
+eight-byte table match the relocated source. The caller E8 target and captured
+return slot agree. `declared-main-authentication.json` records canonical
+declaration admission (exit0), source/tool/script hashes and exact premises.
+`declared-main-fresh.json` fixes the observed word registers, two return-slot
+bytes and eight table bytes; environment-memory reuse is disabled. Lazy flags
+type23 is retained as raw evidence and flags are omitted from the declaration.
+The external DOS-vector coordinate comes from the authenticated IVT as an
+explicit conditional policy; no service sites or handler semantics are inferred.
+The focused MAIN check at0x2291 with that declaration completed exit4:
+`declared entry scoped CFG is unproved`, typed `application_empty` because the
+retained application did not satisfy the unchanged-surface acceptance contract.
+Evidence: `.cache/agent-tool-output/latest-main-declared-baseline.log`. The
+underlying application is `empty`, with no application refusals and
+CALL-target status `not_requested`. Per-check observation localizes the failed
+identity check to five retained `terminal_jump_selector_window_unproved`
+refusals in the raw MAIN artifact (blocks0x22d5,0x22e0,0x22eb,0x22f6,0x22fb).
+They must be discharged by the scoped jump owner, not erased by the view.
+See `main-scope-applications.jsonl` and `main-scope-checks.jsonl`; both diagnostic
+runs returned exit4. Further observation confirms all five pending jumps reach the proof owner:
+its ledger retains five `entry_jump_domain_call_on_path` refusals because
+CALL0x22a6 to sum_to0x223a lacks preservation evidence. The first CALL0x229b
+to classify0x2212 has a complete retained callee closure. sum_to and later
+calls return `entry_domain_call_callee_incomplete`, not budget exhaustion.
+Evidence: `main-domain-proof.jsonl`, `main-domain-preservations.jsonl` and
+`main-raw-callee-receipts.jsonl`. A focused check of the authenticated32-byte sum_to body at0x223a passes
+canonical IR publication, boundary coverage and segment-effect closure:
+no refusals, closure counts[1,1,1,1,0], complete=true (0.79s owner work).
+Evidence: `sum-to-leaf-published.json`; native body SHA-256
+`7d074076942bf457ab7c778b195875f7a5df68ad0cde9fabf90cf8bb3ef0a459`.
+This proves isolated closure, not generated-C equivalence or caller acceptance.
+Fresh direct MAIN preparation both with and without preimporting sum_to still
+refuses. A later instrumented direct run binds sum_to successfully (21.94s),
+so its earlier missing closure is not a context-independent leaf defect.
+The next CALL, 0x22b1 to switch_fold0x225a, has a valid near-return frame premise
+but no mapped callee boundary. Both ordinary and deferred scoped boundary
+lookups refuse before importing the CS-indexed indirect jump at0x2269.
+Evidence: `direct-factory-refusals.jsonl` and `switch-scope-refusals.jsonl`.
+These direct owner runs do not establish exact equivalence with CLI recovery.
+
+A separate producer-to-consumer regression confirms an integration gap:
+`ScopedIndirectTargetView8616` produces an authenticated CFG projection, but
+scoped boundary coverage refuses it with `scoped_view_refused`. The existing
+indirect theorem is not admitted by that consumer. The baseline regression
+failed1/1 in49.54s; retained log:
+`.cache/agent-tool-output/indirect-coverage-gap-before.log`.
+The provisional repair now admits the exact owned view through scoped
+coverage and segment-state analysis. Its producer→coverage→segment-effect
+regression passes1/1 (115.90s), including foreign-project/stale-native coverage
+refusal and context-free incompleteness. Scoped lint, startup architecture and
+MyPy pass for the three changed owners. Evidence:
+`.cache/agent-tool-output/indirect-effects-after.log`.
+On-demand theorem selection, source-bound conditional callee boundaries and
+deferred exact-caller construction are now connected. Known-input intake
+succeeds conditionally; unknown inputs refuse without universal publication.
+The five related regression files pass62tests (42.43s), including mutation
+controls and existing nested-call behavior. Retained log:
+`.cache/agent-tool-output/indirect-callee-related-regressions.log`.
+Combined MyPy retains the same38 pre-existing call-owner diagnostics at the
+same original lines/error codes; the other changed owners pass. No new type
+errors are hidden. The subsequent canonical MAIN run still times out during
+function recovery at the unchanged60s diagnostic limit, with tail validation
+`uncollected` (exit3), so this is not a decompiled-function gain. Evidence:
+`.cache/agent-tool-output/main-declared-after-indirect-intake.log`.
+Separate direct MAIN preparation is being rechecked before attributing that
+CLI timeout to this repaired proof path. The repair remains open until canonical function and corpus
+acceptance improves; admitting a view alone is not delivery. Later broad diagnostic runs
+were inconclusive under host load around24 on8CPUs and hit recovery/watchdog
+limits; their timeouts are not new semantic defects. Capture authentication is not semantic
+equivalence. KVM absence does not block this DOSBox capture path. Evidence: `main-binding-refusals.jsonl`,
+`retained-worker-results/`, and `diagnostic-site/` in the same recovery directory.
+No new accepted function or round trip is claimed.
+The following paragraphs describe earlier retained reports, not reverified
+current artifacts.
+
 The fresh run in `.cache/bc31-seven-word-casts/` validates all six helpers and
 emits conditional MAIN (340.22s). All seven exact generated bodies rebuild with
 Borland3.1; fresh original/rebuilt executions both return255 with empty stdout
@@ -109,6 +941,11 @@ entry-jump owner handles decoded relative jumps, so indirect discharge must
 retain its own evidence rather than inventing a relative-jump record.
 
 ### Retained generated-only Borland 3.1 CMP16 evidence
+
+Historical evidence below is not currently available at its recorded
+`.cache/bc31-prototype-integration/` path. It must be reproduced or recovered
+before it can support present acceptance; the fresh helper receipt above
+proves only that one function.
 
 All seven application functions now compose into one generated C translation
 unit. GCC accepts it; the pinned original Borland toolchain compiles/links it;

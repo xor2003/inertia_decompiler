@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/runtime.
 
 Responsibility: define decoded instruction data and operand metadata for the lifter.
@@ -5,6 +6,8 @@ Forbidden: decompiler structuring, alias/type recovery, or rendered-C cleanup.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from inertia.frontend.x86_16.addressing_helpers import (
     WidthProfile,
@@ -18,19 +21,19 @@ from inertia.frontend.x86_16.regs import sgreg_t
 from .emulator import Emulator
 
 # Constants for repeat prefixes
-NONE: int = 0
-REPZ: int = 1
-REPNZ: int = 2
+NONE: cython.longlong = 0
+REPZ: cython.longlong = 1
+REPNZ: cython.longlong = 2
 
 # Constants for instruction flags
-CHK_MODRM: int = 1 << 0
-CHK_IMM32: int = 1 << 1
-CHK_IMM16: int = 1 << 2
-CHK_IMM8: int = 1 << 3
-CHK_PTR16: int = 1 << 4
-CHK_MOFFS: int = 1 << 5
+CHK_MODRM: cython.longlong = 1 << 0
+CHK_IMM32: cython.longlong = 1 << 1
+CHK_IMM16: cython.longlong = 1 << 2
+CHK_IMM8: cython.longlong = 1 << 3
+CHK_PTR16: cython.longlong = 1 << 4
+CHK_MOFFS: cython.longlong = 1 << 5
 
-MAX_OPCODE: int = 0x200
+MAX_OPCODE: cython.longlong = 0x200
 
 
 # ModR/M byte structure
@@ -41,9 +44,9 @@ class ModRM:
 
     def __init__(self) -> None:
         """Initialize an empty ModR/M operand descriptor."""
-        self.rm: int = 0  # Register/memory operand
-        self.reg: int = 0  # Register operand or opcode extension
-        self.mod: int = 0  # Addressing mode
+        self.rm: cython.longlong = 0  # Register/memory operand
+        self.reg: cython.longlong = 0  # Register operand or opcode extension
+        self.mod: cython.longlong = 0  # Addressing mode
 
 
 # SIB byte structure
@@ -54,9 +57,9 @@ class SIB:
 
     def __init__(self) -> None:
         """Initialize an empty SIB operand descriptor."""
-        self.base: int = 0  # Base register
-        self.index: int = 0  # Index register
-        self.scale: int = 0  # Scaling factor
+        self.base: cython.longlong = 0  # Base register
+        self.index: cython.longlong = 0  # Index register
+        self.scale: cython.longlong = 0  # Scaling factor
 
 
 # X86Instruction data structure
@@ -95,36 +98,37 @@ class InstrData:
 
     def __init__(self) -> None:
         """Initialize a decoded instruction record with neutral frontend defaults."""
-        self.prefix: int = 0  # X86Instruction prefix
+        self.prefix: cython.longlong = 0  # X86Instruction prefix
         self.pre_segment: sgreg_t | None = None  # Segment override prefix
-        self.pre_repeat: int = NONE  # Repeat prefix
+        self.pre_repeat: cython.longlong = NONE  # Repeat prefix
 
-        self.segment: int = 0  # Default segment register
-        self.opcode: int = 0  # Opcode
+        self.segment: cython.longlong = 0  # Default segment register
+        self.opcode: cython.longlong = 0  # Opcode
         self.modrm: ModRM = ModRM()  # ModR/M byte
         self.sib: SIB = SIB()  # SIB byte
-        self.disp8: int = 0  # 8-bit displacement
-        self.disp16: int = 0  # 16-bit displacement
-        self.disp32: int = 0  # 32-bit displacement
-        self.imm8: int = 0  # 8-bit immediate value
-        self.imm16: int = 0  # 16-bit immediate value
-        self.imm32: int = 0  # 32-bit immediate value
-        self.invalid_lock: bool = False  # LOCK prefix rejected for this opcode/form
-        self.invalid_opcode_extension: bool = False  # Reserved ModR/M opcode extension
-        self.msvc_x87_escape: bool = False  # INT byte stream consumed as an MSVC x87 ESC payload
-        self.ptr16: int = 0  # 16-bit far pointer
-        self.moffs: int = 0  # Memory offset
-        self.prefix_len: int = 0  # number of prefix bytes consumed
-        self.size: int = 0  # total instruction size in bytes including prefixes
-        self.operand_bits: int = 0  # normalized effective operand width
-        self.address_bits: int = 0  # normalized effective address width
-        self.displacement_bits: int = 0  # normalized displacement width, if any
-        self.mode32: bool = False  # active processor width mode for string/repeat helpers
+        self.disp8: cython.longlong = 0  # 8-bit displacement
+        self.disp16: cython.longlong = 0  # 16-bit displacement
+        self.disp32: cython.longlong = 0  # 32-bit displacement
+        self.imm8: cython.longlong = 0  # 8-bit immediate value
+        self.imm16: cython.longlong = 0  # 16-bit immediate value
+        self.imm32: cython.longlong = 0  # 32-bit immediate value
+        self.invalid_lock: cython.bint = False  # LOCK prefix rejected for this opcode/form
+        self.invalid_opcode_extension: cython.bint = False  # Reserved ModR/M opcode extension
+        self.msvc_x87_escape: cython.bint = False  # INT byte stream consumed as an MSVC x87 ESC payload
+        self.ptr16: cython.longlong = 0  # 16-bit far pointer
+        self.moffs: cython.longlong = 0  # Memory offset
+        self.prefix_len: cython.longlong = 0  # number of prefix bytes consumed
+        self.size: cython.longlong = 0  # total instruction size in bytes including prefixes
+        self.operand_bits: cython.longlong = 0  # normalized effective operand width
+        self.address_bits: cython.longlong = 0  # normalized effective address width
+        self.displacement_bits: cython.longlong = 0  # normalized displacement width, if any
+        self.mode32: cython.bint = False  # active processor width mode for string/repeat helpers
         self.repeat_class: str = "none"  # normalized repeat prefix class
         self.control_flow_class: str = "none"  # normalized control-transfer family
         self.width_case: str = ""  # normalized decode matrix case label
 
 
+@cython.ccall
 def describe_x86_16_instruction_metadata_surface() -> dict[str, object]:
     """Describe normalized decode metadata exposed to architecture checks."""
     return {
@@ -158,7 +162,7 @@ class X86Instruction:
 
     __slots__ = ("chsz_ad", "emu", "instr", "mode32")
 
-    def __init__(self, emu: Emulator, instr: InstrData, mode32: bool) -> None:
+    def __init__(self, emu: Emulator, instr: InstrData, mode32: cython.bint) -> None:
         """Bind emulator state and decoded instruction metadata."""
         self.emu = emu
         self.instr = instr
@@ -171,19 +175,19 @@ class X86Instruction:
         seg = self.instr.pre_segment if self.instr.pre_segment is not None else self.instr.segment
         return sgreg_t(seg)
 
-    def effective_operand_bits(self) -> int:
+    def effective_operand_bits(self) -> cython.longlong:
         """Return the normalized operand width for this instruction."""
         return self.instr.operand_bits or operand_width_bits(self.mode32, False)
 
-    def effective_address_bits(self) -> int:
+    def effective_address_bits(self) -> cython.longlong:
         """Return the normalized address width for this instruction."""
         return self.instr.address_bits or address_width_bits(self.mode32, self.chsz_ad)
 
-    def repeat_kind(self) -> str:
+    def repeat_kind(self) -> object:
         """Return the normalized repeat-prefix class."""
         return self.instr.repeat_class or "none"
 
-    def control_flow_kind(self) -> str:
+    def control_flow_kind(self) -> object:
         """Return the normalized control-flow class."""
         return self.instr.control_flow_class or "none"
 
@@ -194,7 +198,7 @@ class X86Instruction:
             address_bits=self.effective_address_bits(),
         )
 
-    def width_case_name(self) -> str:
+    def width_case_name(self) -> object:
         """Return the decode matrix case name for the effective widths."""
         if self.instr.width_case:
             return self.instr.width_case
@@ -223,7 +227,7 @@ class InstrFlags:
         self.moffs8 = False
 
     @property
-    def flags(self) -> int:
+    def flags(self) -> cython.longlong:
         """Returns a byte representation of the flags."""
         return (
             (self.modrm << 0)
@@ -236,7 +240,7 @@ class InstrFlags:
         )
 
     @flags.setter
-    def flags(self, value: int) -> None:
+    def flags(self, value: cython.longlong) -> None:
         """Sets the flags from a byte representation."""
         self.modrm = bool(value & 1)
         self.imm32 = bool(value & (1 << 1))

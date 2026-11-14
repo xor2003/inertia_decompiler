@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Read already-executed call outputs from proven architectural register state.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ or intervening effects refuse reuse; physical register spelling is not proof.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -29,12 +32,15 @@ from .gp_register_state import (
     runtime_gp_name_for_variable_8616,
     runtime_gp_state_expr_8616,
 )
+import dataclasses
+import operator
+import builtins
 
-_WORD_BYTES: int = 2
-_DWORD_BYTES: int = 4
-_BITS_PER_BYTE: int = 8
-_LOWER_WORD_MASK: int = 0xFFFF
-_UPPER_WORD_MASK: int = 0xFFFF0000
+_WORD_BYTES: cython.longlong = 2
+_DWORD_BYTES: cython.longlong = 4
+_BITS_PER_BYTE: cython.longlong = 8
+_LOWER_WORD_MASK: cython.longlong = 0xFFFF
+_UPPER_WORD_MASK: cython.longlong = 0xFFFF0000
 _LOG = logging.getLogger(__name__)
 
 
@@ -60,31 +66,33 @@ class RuntimeCallResultRefusal8616(StrEnum):
     INTERVENING_EFFECT = "intervening_effect"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RuntimeCallResultRead8616:
     """One return-source request and its explicit materialization counters."""
 
     verdict: RuntimeCallResultVerdict8616
     expression: structured_c.CExpression | None = None
-    raw_fact_count: int = 1
-    normalized_fact_count: int = 1
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 1
+    normalized_fact_count: cython.longlong = 1
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
     refusal_reason: RuntimeCallResultRefusal8616 | None = None
 
 
-def _calls_at_8616(root: object, callsite_addr: int) -> tuple[structured_c.CFunctionCall, ...]:
+def _calls_at_8616(root: object, callsite_addr: cython.longlong) -> tuple[structured_c.CFunctionCall, ...]:
     """Find exact tagged call nodes, without resolving targets by name."""
     return tuple(
-        node for node in _iter_c_nodes_deep_8616(root)
+        node for node in builtins.iter(_iter_c_nodes_deep_8616(root))
         if isinstance(node, structured_c.CFunctionCall)
-        and structured_callsite_addr_8616(node) == callsite_addr
+        and operator.eq(structured_callsite_addr_8616(node), callsite_addr)
     )
 
 
-def _flatten_8616(statements: Sequence[object]) -> list[object]:
+@cython.ccall
+def _flatten_8616(statements: Sequence[object]) -> object:
     """Flatten transparent sequences only, retaining control-flow boundaries."""
+    statement: object
     result: list[object] = []
     for statement in statements:
         if isinstance(statement, structured_c.CStatements):
@@ -94,36 +102,38 @@ def _flatten_8616(statements: Sequence[object]) -> list[object]:
     return result
 
 
+@cython.ccall
 def _masked_value_write_8616(
     statement: object, source: structured_c.CExpression, requested: RuntimeGPExpressionView8616,
-) -> bool:
+) -> cython.bint:
     """Recognize the exact low-word publication emitted by GP-state Lowering."""
+    lhs: object
     if not isinstance(statement, structured_c.CAssignment):
         return False
     lhs = runtime_gp_expression_view_8616(statement.lhs)
     rhs = statement.rhs
-    if lhs is None or lhs.width != _DWORD_BYTES or not isinstance(rhs, structured_c.CBinaryOp) or rhs.op != "Or":
+    if lhs is None or operator.ne(lhs.width, _DWORD_BYTES) or not isinstance(rhs, structured_c.CBinaryOp) or rhs.op != "Or":
         return False
     preserved, inserted = rhs.lhs, rhs.rhs
     if not isinstance(preserved, structured_c.CBinaryOp) or preserved.op != "And":
         return False
     preserved_view = runtime_gp_expression_view_8616(preserved.lhs)
-    if preserved_view != lhs or not isinstance(preserved.rhs, structured_c.CConstant):
+    if operator.ne(preserved_view, lhs) or not isinstance(preserved.rhs, structured_c.CConstant):
         return False
-    if preserved.rhs.value != _UPPER_WORD_MASK:
+    if operator.ne(preserved.rhs.value, _UPPER_WORD_MASK):
         return False
     if not isinstance(inserted, structured_c.CBinaryOp) or inserted.op != "And":
         return False
     if inserted.lhs is not source or not isinstance(inserted.rhs, structured_c.CConstant):
         return False
     return bool(
-        inserted.rhs.value == _LOWER_WORD_MASK
-        and requested.width == _WORD_BYTES and requested.bit_shift == 0
-        and requested.parent_name == lhs.parent_name
+        operator.eq(inserted.rhs.value, _LOWER_WORD_MASK)
+        and operator.eq(requested.width, _WORD_BYTES) and requested.bit_shift == 0
+        and operator.eq(requested.parent_name, lhs.parent_name)
     )
 
 
-def _enclosing_prefix_8616(root: object, prefix: list[object]) -> list[object]:
+def _enclosing_prefix_8616(root: object, prefix: object) -> object:
     """Extend an exact live prefix through transparent sibling sequences only.
 
     Branches and loops remain opaque barriers. Rebuilt or ambiguous prefix
@@ -133,19 +143,20 @@ def _enclosing_prefix_8616(root: object, prefix: list[object]) -> list[object]:
     if not prefix or not isinstance(root, structured_c.CStatements):
         return prefix
     statements = _flatten_8616(root.statements)
-    positions = [index for index, statement in enumerate(statements) if statement is prefix[0]]
+    positions = [index for index, statement in builtins.iter(enumerate(statements)) if statement is prefix[0]]
     if len(positions) != 1:
         return prefix
     start = positions[0]
     end = start + len(prefix)
     candidate = statements[start:end]
-    if len(candidate) != len(prefix) or any(lhs is not rhs for lhs, rhs in zip(candidate, prefix, strict=True)):
+    if operator.ne(len(candidate), len(prefix)) or any(lhs is not rhs for lhs, rhs in builtins.iter(zip(candidate, prefix, strict=True))):
         return prefix
     return statements[:end]
 
 
+@cython.ccall
 def _publication_index_8616(
-    statements: Sequence[object], index: int, call: structured_c.CFunctionCall,
+    statements: Sequence[object], index: cython.longlong, call: structured_c.CFunctionCall,
     requested: RuntimeGPExpressionView8616,
 ) -> int | RuntimeCallResultRefusal8616:
     """Prove direct publication or one adjacent, exact temporary capture.
@@ -154,6 +165,7 @@ def _publication_index_8616(
     temporary has no aliasable storage; stack captures require a separate proof.
     The publication must read this same expression, not a similarly named value.
     """
+    target_type: object
     statement = statements[index]
     if _masked_value_write_8616(statement, call, requested):
         return index
@@ -162,7 +174,7 @@ def _publication_index_8616(
     target = statement.lhs
     if not isinstance(target, structured_c.CVariable) or not isinstance(target.variable, SimTemporaryVariable):
         return RuntimeCallResultRefusal8616.CAPTURE_STORAGE
-    if target.variable.size != requested.width:
+    if operator.ne(target.variable.size, requested.width):
         return RuntimeCallResultRefusal8616.CAPTURE_WIDTH
     if index + 1 >= len(statements):
         return RuntimeCallResultRefusal8616.MISSING_PUBLICATION
@@ -170,7 +182,7 @@ def _publication_index_8616(
     if target_type is None:
         return RuntimeCallResultRefusal8616.CAPTURE_TYPE
     try:
-        if target_type.size != requested.width * _BITS_PER_BYTE:
+        if operator.ne(target_type.size, requested.width * _BITS_PER_BYTE):
             return RuntimeCallResultRefusal8616.CAPTURE_TYPE
     except ValueError:
         # Native architecture-dependent types may not yet have a known width.
@@ -180,13 +192,14 @@ def _publication_index_8616(
     return index + 1
 
 
-def _preserves_result_8616(statement: object, parent_name: str) -> bool:
+def _preserves_result_8616(statement: object, parent_name: object) -> cython.bint:
     """Allow only explicit writes to disjoint stack storage or other GP lanes."""
+    register: object
     if not isinstance(statement, structured_c.CAssignment):
         return False
     if any(not isinstance(node, (structured_c.CVariable, structured_c.CConstant,
                                  structured_c.CBinaryOp, structured_c.CTypeCast))
-           for node in _iter_c_nodes_deep_8616(statement.rhs)):
+           for node in builtins.iter(_iter_c_nodes_deep_8616(statement.rhs))):
         return False
     lhs = statement.lhs
     while isinstance(lhs, structured_c.CTypeCast):
@@ -196,19 +209,20 @@ def _preserves_result_8616(statement: object, parent_name: str) -> bool:
     if isinstance(lhs.variable, SimStackVariable):
         return True
     register = runtime_gp_name_for_variable_8616(lhs.variable)
-    return register is not None and register != parent_name
+    return register is not None and operator.ne(register, parent_name)
 
 
 def materialize_runtime_call_result_read_8616(
     root: object,
     prefix: Sequence[object],
-    callsite_addr: int,
-    register_name: str,
+    callsite_addr: cython.longlong,
+    register_name: object,
     *,
     codegen: object,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> RuntimeCallResultRead8616:
     """Read a uniquely placed, unchanged GP call result or refuse live replay."""
+    view: object
     calls = _calls_at_8616(root, callsite_addr)
     statements = _flatten_8616(prefix)
     def refuse(
@@ -231,10 +245,10 @@ def materialize_runtime_call_result_read_8616(
             failure_count=1, refusal_reason=reason,
         )
 
-    positions = [index for index, statement in enumerate(statements) if _calls_at_8616(statement, callsite_addr)]
+    positions = [index for index, statement in builtins.iter(enumerate(statements)) if _calls_at_8616(statement, callsite_addr)]
     if calls and not positions:
         statements = _enclosing_prefix_8616(root, statements)
-        positions = [index for index, statement in enumerate(statements) if _calls_at_8616(statement, callsite_addr)]
+        positions = [index for index, statement in builtins.iter(enumerate(statements)) if _calls_at_8616(statement, callsite_addr)]
     if not calls and not positions:
         return RuntimeCallResultRead8616(RuntimeCallResultVerdict8616.ABSENT)
     if len(calls) > 1 or len(positions) != 1:

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Structuring-owned repairs for loop bodies and pretest guards.
 
 Layer: Structuring.
@@ -15,6 +16,8 @@ rendered C text or source declarations as proof.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -53,10 +56,14 @@ from inertia.semantics.alias_query import describe_alias_storage
 from .loop_break_jcc import loop_branch_guard_facts_8616
 from .shared_loop_exit_publication import publish_shared_loop_exit_report_8616
 from .simple_loop_recovery import InsnSummary8616, _function_instruction_summaries_8616, _summarize_capstone_insn_8616
+import dataclasses
+import operator
+import builtins
 
 log: logging.Logger = logging.getLogger(__name__)
 
 
+@cython.ccall
 def _dynamic_int_8616(value: object) -> int | None:
     """Return an int from a dynamic angr/C AST payload only when it is explicit."""
     if isinstance(value, int):
@@ -64,7 +71,8 @@ def _dynamic_int_8616(value: object) -> int | None:
     return None
 
 
-def _dynamic_sequence_8616(value: object) -> tuple[object, ...]:
+@cython.ccall
+def _dynamic_sequence_8616(value: object) -> object:
     """Return a tuple for dynamic angr/C AST sequence payloads."""
     if isinstance(value, tuple):
         return value
@@ -73,6 +81,7 @@ def _dynamic_sequence_8616(value: object) -> tuple[object, ...]:
     return ()
 
 
+@cython.ccall
 def _codegen_cfunc_8616(codegen: object) -> object | None:
     """Return the dynamic angr codegen C function payload."""
     if codegen is None:
@@ -157,58 +166,59 @@ class SyntheticInternalCallRepairDecision8616(Enum):
     REFUSED_NO_MATCHING_CALL = "refused_no_matching_call"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackAccumulatorLoopEvidence8616:
     """Binary evidence for a counted loop that updates a stack accumulator."""
 
-    induction_disp: int
-    accumulator_disp: int
-    step: int
-    accumulator_zero_initialized: bool
+    induction_disp: cython.longlong
+    accumulator_disp: cython.longlong
+    step: cython.longlong
+    accumulator_zero_initialized: cython.bint
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionalContinueEvidence8616:
     """Binary evidence proving a conditional branch skips to loop continue."""
 
-    branch_addr: int
-    body_target: int
-    continue_target: int
+    branch_addr: cython.longlong
+    body_target: cython.longlong
+    continue_target: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class HoistedJccTargetCopyEvidence8616:
     """Binary evidence for a stack-slot copy at a JCC body target."""
 
-    branch_addr: int
-    body_target: int
-    copy_addr: int
-    dest_disp: int
-    src_disp: int
+    branch_addr: cython.longlong
+    body_target: cython.longlong
+    copy_addr: cython.longlong
+    dest_disp: cython.longlong
+    src_disp: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PretestLoopGuardEvidence8616:
     """Binary evidence for a pretest branch whose taken edge enters the loop body."""
 
-    branch_addr: int
-    body_target: int
-    exit_target: int
+    branch_addr: cython.longlong
+    body_target: cython.longlong
+    exit_target: cython.longlong
     mnemonic: str = ""
-    body_condition_op: str | None = None
+    body_condition_op: object = None
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class RedundantLoopBreakCarrierStats8616:
     """Closed-loop counters for duplicate loop break-carrier pruning."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    decision_counts: dict[RedundantLoopBreakCarrierDecision8616, int] = field(default_factory=dict)
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    decision_counts: object = field(default_factory=dict)
 
+    @cython.ccall
     def record(self, decision: RedundantLoopBreakCarrierDecision8616) -> None:
         """Record one typed terminal decision."""
         self.decision_counts[decision] = self.decision_counts.get(decision, 0) + 1
@@ -218,31 +228,32 @@ class RedundantLoopBreakCarrierStats8616:
             self.failure_count += 1
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SwitchLoopExitReturnEvidence8616:
     """Binary evidence for a switch case whose target exits an unconditional loop."""
 
-    case_value: int
-    case_target: int
-    exit_target: int
+    case_value: cython.longlong
+    case_target: cython.longlong
+    exit_target: cython.longlong
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class LoopBodyRepairStats8616:
     """Evidence-loop counters for empty counted-loop body repair."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    refused_no_evidence: int = 0
-    refused_no_cfunc: int = 0
-    refused_no_statements: int = 0
-    refused_nonempty_body: int = 0
-    refused_no_following_update: int = 0
-    refused_slot_mismatch: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    refused_no_evidence: cython.longlong = 0
+    refused_no_cfunc: cython.longlong = 0
+    refused_no_statements: cython.longlong = 0
+    refused_nonempty_body: cython.longlong = 0
+    refused_no_following_update: cython.longlong = 0
+    refused_slot_mismatch: cython.longlong = 0
 
+    @cython.ccall
     def record(self, decision: LoopBodyRepairDecision8616) -> None:
         """Record one repair decision."""
         if decision is LoopBodyRepairDecision8616.MATERIALIZED:
@@ -263,19 +274,20 @@ class LoopBodyRepairStats8616:
             self.refused_slot_mismatch += 1
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class ConditionalContinueRepairStats8616:
     """Evidence-loop counters for conditional-continue repair."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    refused_no_evidence: int = 0
-    refused_no_cfunc: int = 0
-    refused_no_complementary_guard: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    refused_no_evidence: cython.longlong = 0
+    refused_no_cfunc: cython.longlong = 0
+    refused_no_complementary_guard: cython.longlong = 0
 
+    @cython.ccall
     def record(self, decision: ConditionalContinueRepairDecision8616) -> None:
         """Record one repair decision."""
         if decision is ConditionalContinueRepairDecision8616.MATERIALIZED:
@@ -290,22 +302,23 @@ class ConditionalContinueRepairStats8616:
             self.refused_no_complementary_guard += 1
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class HoistedJccTargetCopyRepairStats8616:
     """Evidence-loop counters for displaced JCC target-copy repair."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    refused_no_evidence: int = 0
-    refused_no_cfunc: int = 0
-    refused_no_matching_if: int = 0
-    refused_no_hoisted_copy: int = 0
-    refused_ambiguous_copy: int = 0
-    refused_body_target_unproven: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    refused_no_evidence: cython.longlong = 0
+    refused_no_cfunc: cython.longlong = 0
+    refused_no_matching_if: cython.longlong = 0
+    refused_no_hoisted_copy: cython.longlong = 0
+    refused_ambiguous_copy: cython.longlong = 0
+    refused_body_target_unproven: cython.longlong = 0
 
+    @cython.ccall
     def record(self, decision: HoistedJccTargetCopyRepairDecision8616) -> None:
         """Record one repair decision."""
         if decision is HoistedJccTargetCopyRepairDecision8616.MATERIALIZED:
@@ -326,22 +339,23 @@ class HoistedJccTargetCopyRepairStats8616:
             self.refused_body_target_unproven += 1
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class PretestLoopGuardRepairStats8616:
     """Evidence-loop counters for pretest loop guard repair."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    refused_no_evidence: int = 0
-    refused_no_cfunc: int = 0
-    refused_no_matching_loop: int = 0
-    refused_body_target_unproven: int = 0
-    iterator_moved_count: int = 0
-    call_return_carriers_removed_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    refused_no_evidence: cython.longlong = 0
+    refused_no_cfunc: cython.longlong = 0
+    refused_no_matching_loop: cython.longlong = 0
+    refused_body_target_unproven: cython.longlong = 0
+    iterator_moved_count: cython.longlong = 0
+    call_return_carriers_removed_count: cython.longlong = 0
 
+    @cython.ccall
     def record(self, decision: PretestLoopGuardRepairDecision8616) -> None:
         """Record one repair decision."""
         if decision is PretestLoopGuardRepairDecision8616.MATERIALIZED:
@@ -358,26 +372,27 @@ class PretestLoopGuardRepairStats8616:
             self.refused_body_target_unproven += 1
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class SwitchLoopExitReturnRepairStats8616:
     """Evidence-loop counters for switch loop-exit return repair."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    trailing_unreachable_pruned_count: int = 0
-    refused_no_evidence: int = 0
-    refused_no_cfunc: int = 0
-    refused_no_statements: int = 0
-    refused_no_matching_loop: int = 0
-    refused_ambiguous_loop: int = 0
-    refused_loop_has_break: int = 0
-    refused_no_switch: int = 0
-    refused_case_already_present: int = 0
-    preserved_shared_exit_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    trailing_unreachable_pruned_count: cython.longlong = 0
+    refused_no_evidence: cython.longlong = 0
+    refused_no_cfunc: cython.longlong = 0
+    refused_no_statements: cython.longlong = 0
+    refused_no_matching_loop: cython.longlong = 0
+    refused_ambiguous_loop: cython.longlong = 0
+    refused_loop_has_break: cython.longlong = 0
+    refused_no_switch: cython.longlong = 0
+    refused_case_already_present: cython.longlong = 0
+    preserved_shared_exit_count: cython.longlong = 0
 
+    @cython.ccall
     def record(self, decision: SwitchLoopExitReturnRepairDecision8616) -> None:
         """Record one repair decision."""
         if decision is SwitchLoopExitReturnRepairDecision8616.MATERIALIZED:
@@ -402,21 +417,22 @@ class SwitchLoopExitReturnRepairStats8616:
             self.refused_case_already_present += 1
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class SyntheticInternalCallRepairStats8616:
     """Evidence-loop counters for synthetic internal-target call pruning."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    refused_no_evidence: int = 0
-    refused_no_cfunc: int = 0
-    refused_no_statements: int = 0
-    refused_no_callsite_evidence: int = 0
-    refused_no_matching_call: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    refused_no_evidence: cython.longlong = 0
+    refused_no_cfunc: cython.longlong = 0
+    refused_no_statements: cython.longlong = 0
+    refused_no_callsite_evidence: cython.longlong = 0
+    refused_no_matching_call: cython.longlong = 0
 
+    @cython.ccall
     def record(self, decision: SyntheticInternalCallRepairDecision8616) -> None:
         """Record one repair decision."""
         if decision is SyntheticInternalCallRepairDecision8616.MATERIALIZED:
@@ -435,26 +451,28 @@ class SyntheticInternalCallRepairStats8616:
             self.refused_no_matching_call += 1
 
 
+@cython.ccall
 def _word_bp_mem_update_8616(
     insn: InsnSummary8616,
-    mnemonic: str,
-    op0_int: int | None,
-) -> bool:
+    mnemonic: object,
+    op0_int: object,
+) -> cython.bint:
     """Check one instruction updates a BP-relative word slot."""
     return (
-        insn.mnemonic.lower() == mnemonic
+        operator.eq(insn.mnemonic.lower(), mnemonic)
         and insn.op0_kind == "bp_mem"
         and insn.op0_size in {None, 2}
         and op0_int is not None
     )
 
 
+@cython.ccall
 def _zero_init_shape_8616(
     insn: InsnSummary8616,
-    mnemonic: str,
-    op0_int: int | None,
+    mnemonic: object,
+    op0_int: object,
     op1_int: int | None,
-) -> bool:
+) -> cython.bint:
     """Check one mov zero-initializes a BP-relative word slot."""
     return (
         mnemonic == "mov"
@@ -466,12 +484,13 @@ def _zero_init_shape_8616(
     )
 
 
+@cython.ccall
 def _accumulator_add_shape_8616(
     insn: InsnSummary8616,
-    mnemonic: str,
-    op0_int: int | None,
-    previous_ax_load: int | None,
-) -> bool:
+    mnemonic: object,
+    op0_int: object,
+    previous_ax_load: object,
+) -> cython.bint:
     """Check one add feeds a BP slot from a remembered AX load."""
     return (
         mnemonic == "add"
@@ -483,18 +502,21 @@ def _accumulator_add_shape_8616(
     )
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _AccumulatorInsnScan8616:
     """Track BP-slot accumulator evidence across normalized instructions."""
 
-    zero_inits: set[int] = field(default_factory=set)
-    inc_slots: set[int] = field(default_factory=set)
-    dec_slots: set[int] = field(default_factory=set)
-    add_pairs: set[tuple[int, int]] = field(default_factory=set)
+    zero_inits: object = field(default_factory=set)
+    inc_slots: object = field(default_factory=set)
+    dec_slots: object = field(default_factory=set)
+    add_pairs: object = field(default_factory=set)
     previous_ax_load: int | None = None
 
+    @cython.ccall
     def visit(self, insn: InsnSummary8616) -> None:
         """Fold one normalized instruction into the accumulator evidence."""
+        op0_int: object
+        op1_int: object
         mnemonic = insn.mnemonic.lower()
         op0_int = _dynamic_int_8616(insn.op0_value)
         op1_int = _dynamic_int_8616(insn.op1_value)
@@ -531,10 +553,13 @@ class _AccumulatorInsnScan8616:
             self.previous_ax_load = None
 
 
+@cython.ccall
 def _accumulator_evidence_8616(
     scan: _AccumulatorInsnScan8616,
 ) -> tuple[StackAccumulatorLoopEvidence8616, ...]:
     """Join proven add pairs with zero-init and step evidence."""
+    accumulator_disp: object
+    induction_disp: object
     recovered: list[StackAccumulatorLoopEvidence8616] = []
     for accumulator_disp, induction_disp in sorted(scan.add_pairs):
         if accumulator_disp >= 0 or induction_disp >= 0 or accumulator_disp == induction_disp:
@@ -562,16 +587,19 @@ def _accumulator_evidence_8616(
     return tuple(recovered)
 
 
+@cython.ccall
 def recover_stack_accumulator_loop_evidence_8616(
-    summaries: list[InsnSummary8616],
-) -> tuple[StackAccumulatorLoopEvidence8616, ...]:
+    summaries: object,
+) -> object:
     """Recover stack accumulator loop evidence from normalized instructions."""
+    insn: object
     scan = _AccumulatorInsnScan8616()
     for insn in summaries:
         scan.visit(insn)
     return _accumulator_evidence_8616(scan)
 
 
+@cython.ccall
 def recover_hoisted_jcc_target_copy_evidence_8616(
     project: object,
     function: object,
@@ -590,6 +618,14 @@ def recover_hoisted_jcc_target_copy_evidence_8616(
     must be moved back under the JCC guard. This evidence is binary-derived and
     later consumed by AST repair; rendered C text is not consulted.
     """
+    body_target: object
+    body_target_int: object
+    copy: object
+    function_end: object
+    function_size: object
+    function_start: object
+    function_start_int: object
+    insn: object
     insns = _linear_capstone_insns_8616(project, function)
     recovered: list[HoistedJccTargetCopyEvidence8616] = []
     if len(insns) < 2:
@@ -631,6 +667,7 @@ def recover_hoisted_jcc_target_copy_evidence_8616(
     return tuple(recovered)
 
 
+@cython.ccall
 def recover_conditional_continue_evidence_8616(
     project: object,
     function: object,
@@ -646,6 +683,17 @@ def recover_conditional_continue_evidence_8616(
     consumes only the count of proven conditional-continue sites; the semantic
     branch target proof comes from binary instructions, not rendered C.
     """
+    body_target: object
+    body_target_int: object
+    continue_target: object
+    function_end: object
+    function_size: object
+    function_start: object
+    function_start_int: object
+    skip_target: object
+    skip_target_int: object
+    idx: object
+    insn: object
     insns = _linear_capstone_insns_8616(project, function)
     recovered: list[ConditionalContinueEvidence8616] = []
     if len(insns) < 3:
@@ -690,8 +738,12 @@ def recover_conditional_continue_evidence_8616(
     return tuple(recovered)
 
 
-def _cfg_node_containing_addr_8616(graph: object, addr: int) -> object | None:
+@cython.ccall
+def _cfg_node_containing_addr_8616(graph: object, addr: cython.longlong) -> object | None:
     """Return the unique CFG node containing an instruction address."""
+    node_addr: object
+    node_size: object
+    node: object
     nodes = tuple(cast(Any, graph).nodes or ())
     matches: list[object] = []
     for node in nodes:
@@ -699,13 +751,15 @@ def _cfg_node_containing_addr_8616(graph: object, addr: int) -> object | None:
         node_size = _dynamic_int_8616(cast(Any, node).size)
         if node_addr is None:
             continue
-        if node_addr == addr or (node_size is not None and node_size > 0 and node_addr <= addr < node_addr + node_size):
+        if operator.eq(node_addr, addr) or (node_size is not None and node_size > 0 and node_addr <= addr < node_addr + node_size):
             matches.append(node)
     return matches[0] if len(matches) == 1 else None
 
 
-def _cfg_node_reaches_8616(graph: object, source: object, target: object) -> bool:
+@cython.ccall
+def _cfg_node_reaches_8616(graph: object, source: object, target: object) -> cython.bint:
     """Return whether a CFG path exists using the graph successor contract."""
+    node: object
     successors = cast(Any, graph).successors
     if not callable(successors):
         return False
@@ -713,7 +767,7 @@ def _cfg_node_reaches_8616(graph: object, source: object, target: object) -> boo
     seen: set[object] = set()
     while pending:
         node = pending.pop()
-        if node == target:
+        if operator.eq(node, target):
             return True
         if node in seen:
             continue
@@ -728,13 +782,18 @@ def _cfg_node_reaches_8616(graph: object, source: object, target: object) -> boo
     return False
 
 
+@cython.ccall
 def _classify_pretest_targets_from_cfg_8616(
     function: object,
-    branch_addr: int,
-    jcc_target: int,
-    jump_target: int,
-) -> tuple[int, int] | None:
+    branch_addr: cython.longlong,
+    jcc_target: cython.longlong,
+    jump_target: cython.longlong,
+) -> object:
     """Return ``(body, exit)`` only when CFG cycle reachability proves both roles."""
+    branch_node: object
+    graph: object
+    jcc_node: object
+    jump_node: object
     graph = getattr(cast(Any, function), "graph", None)
     if graph is None:
         return None
@@ -750,15 +809,24 @@ def _classify_pretest_targets_from_cfg_8616(
     return (jcc_target, jump_target) if jcc_reaches_test else (jump_target, jcc_target)
 
 
+@cython.ccall
 def _pretest_branch_evidence_8616(
     function: object,
-    function_start_int: int | None,
-    function_end: int | None,
+    function_start_int: object,
+    function_end: object,
     insn: object,
     fallthrough_jmp: object,
-    mnemonic: str,
+    mnemonic: object,
 ) -> PretestLoopGuardEvidence8616 | None:
     """Classify one JCC+JMP pair as a proven pre-test loop guard."""
+    body_condition_op: object
+    branch_addr: object
+    classified_targets: object
+    jcc_target: object
+    jcc_target_int: object
+    jump_target: object
+    jump_target_int: object
+    taken_op: object
     jcc_target = _branch_target_imm_from_capstone_8616(insn)
     jump_target = _branch_target_imm_from_capstone_8616(fallthrough_jmp)
     if jcc_target is None or jump_target is None:
@@ -783,7 +851,7 @@ def _pretest_branch_evidence_8616(
         if function_start_int is not None and not (function_start_int <= exit_target_int <= function_end):
             return None
     taken_op = _JCC_TAKEN_COMPARISON_OPS_8616.get(mnemonic)
-    body_condition_op = taken_op if body_target_int == jcc_target_int else _complementary_cmp_op_8616(taken_op)
+    body_condition_op = taken_op if operator.eq(body_target_int, jcc_target_int) else _complementary_cmp_op_8616(taken_op)
     if body_condition_op is None:
         return None
     return PretestLoopGuardEvidence8616(
@@ -795,6 +863,7 @@ def _pretest_branch_evidence_8616(
     )
 
 
+@cython.ccall
 def recover_pretest_loop_guard_evidence_8616(
     project: object,
     function: object,
@@ -817,6 +886,11 @@ def recover_pretest_loop_guard_evidence_8616(
     break guard has the body-edge condition instead of the exit-edge condition.
     This function only recovers the binary edge fact; AST mutation is separate.
     """
+    evidence: object
+    function_size: object
+    function_start: object
+    idx: object
+    insn: object
     insns = _linear_capstone_insns_8616(project, function)
     recovered: list[PretestLoopGuardEvidence8616] = []
     if len(insns) < 3:
@@ -851,13 +925,17 @@ def recover_pretest_loop_guard_evidence_8616(
 
 def _short_circuit_branch_evidence_8616(
     graph: object,
-    known: dict[int, PretestLoopGuardEvidence8616],
+    known: object,
     insn: object,
     fallthrough_jmp: object,
-    mnemonic: str,
-    branch_addr: int,
+    mnemonic: object,
+    branch_addr: cython.longlong,
 ) -> PretestLoopGuardEvidence8616 | None:
     """Prove one predecessor predicate shares a downstream exit edge."""
+    body_condition_op: object
+    body_target: object
+    continuation_node: object
+    exit_target: object
     body_target = _branch_target_imm_from_capstone_8616(insn)
     exit_target = _branch_target_imm_from_capstone_8616(fallthrough_jmp)
     if body_target is None or exit_target is None:
@@ -867,9 +945,9 @@ def _short_circuit_branch_evidence_8616(
         return None
     downstream = tuple(
         item
-        for item in known.values()
-        if item.exit_target == exit_target
-        and _cfg_node_containing_addr_8616(graph, item.branch_addr) == continuation_node
+        for item in builtins.iter(known.values())
+        if operator.eq(item.exit_target, exit_target)
+        and operator.eq(_cfg_node_containing_addr_8616(graph, item.branch_addr), continuation_node)
     )
     if len(downstream) != 1:
         return None
@@ -885,10 +963,11 @@ def _short_circuit_branch_evidence_8616(
     )
 
 
+@cython.ccall
 def _recover_short_circuit_pretest_guard_evidence_8616(
     project: object,
     function: object,
-    seed_evidence: tuple[PretestLoopGuardEvidence8616, ...],
+    seed_evidence: object,
 ) -> tuple[PretestLoopGuardEvidence8616, ...]:
     """Recover predecessor predicates that share a proven loop-exit edge.
 
@@ -896,11 +975,16 @@ def _recover_short_circuit_pretest_guard_evidence_8616(
     loop body. The predecessor is still a body-edge guard when its other edge
     is the exact exit of a typed downstream predicate in that target block.
     """
+    branch_addr: object
+    fact: object
+    graph: object
+    index: object
+    insn: object
     graph = getattr(cast(Any, function), "graph", None)
     if graph is None or not seed_evidence:
         return ()
     insns = _linear_capstone_insns_8616(project, function)
-    known = {item.branch_addr: item for item in seed_evidence}
+    known = {item.branch_addr: item for item in iter(seed_evidence)}
     recovered: list[PretestLoopGuardEvidence8616] = []
     progress = True
     while progress:
@@ -931,6 +1015,7 @@ def _recover_short_circuit_pretest_guard_evidence_8616(
     return tuple(recovered)
 
 
+@cython.ccall
 def recover_switch_loop_exit_return_evidence_8616(
     project: object,
     function: object,
@@ -951,6 +1036,8 @@ def recover_switch_loop_exit_return_evidence_8616(
     The returned fact is still only CFG evidence.  The AST mutation below owns
     the structuring decision, and rendered C text is never consulted.
     """
+    function_addr: object
+    function_size: object
     function_addr = getattr(function, "addr", None)
     function_size = getattr(function, "size", None)
     scan_function = function
@@ -965,7 +1052,7 @@ def recover_switch_loop_exit_return_evidence_8616(
         function_end = function_addr + function_size
         recovered = [
             item
-            for item in recovered
+            for item in iter(recovered)
             if function_addr <= item.case_target < function_end
             and function_addr <= item.exit_target < function_end
         ]
@@ -975,12 +1062,18 @@ def recover_switch_loop_exit_return_evidence_8616(
     return tuple(_dedupe_switch_loop_exit_return_evidence_8616(recovered))
 
 
+@cython.ccall
 def _recover_switch_loop_exit_return_evidence_from_summaries_8616(
-    summaries: list[InsnSummary8616],
+    summaries: object,
 ) -> tuple[SwitchLoopExitReturnEvidence8616, ...]:
-    by_addr = {summary.address: summary for summary in summaries if isinstance(summary.address, int)}
+    case_entry: object
+    case_target: object
+    case_value: object
+    index: object
+    summary: object
+    by_addr = {summary.address: summary for summary in iter(summaries) if isinstance(summary.address, int)}
     recovered: list[SwitchLoopExitReturnEvidence8616] = []
-    seen: set[tuple[int, int, int]] = set()
+    seen: set[tuple[cython.longlong, cython.longlong, cython.longlong]] = set()
     for index, summary in enumerate(summaries[:-2]):
         if not _is_sub_ax_immediate_8616(summary):
             continue
@@ -1020,6 +1113,10 @@ def _recover_switch_loop_exit_return_evidence_from_original_slice_8616(
     project: object,
     function: object,
 ) -> tuple[SwitchLoopExitReturnEvidence8616, ...]:
+    active_addr: object
+    active_size: object
+    delta: object
+    original_project: object
     original_project = getattr(project, "_inertia_original_project", None)
     delta = getattr(project, "_inertia_original_linear_delta", None)
     active_addr = getattr(function, "addr", None)
@@ -1039,7 +1136,7 @@ def _recover_switch_loop_exit_return_evidence_from_original_slice_8616(
         )
         recovered.extend(
             item
-            for item in evidence
+            for item in iter(evidence)
             if original_addr <= item.case_target <= original_addr + size + 0x40
             and original_addr <= item.exit_target <= original_addr + size + 0x40
         )
@@ -1048,10 +1145,12 @@ def _recover_switch_loop_exit_return_evidence_from_original_slice_8616(
     return tuple(_dedupe_switch_loop_exit_return_evidence_8616(recovered))
 
 
+@cython.ccall
 def _dedupe_switch_loop_exit_return_evidence_8616(
-    evidence: list[SwitchLoopExitReturnEvidence8616],
+    evidence: object,
 ) -> tuple[SwitchLoopExitReturnEvidence8616, ...]:
-    seen: set[tuple[int, int, int]] = set()
+    item: object
+    seen: set[tuple[cython.longlong, cython.longlong, cython.longlong]] = set()
     deduped: list[SwitchLoopExitReturnEvidence8616] = []
     for item in evidence:
         key = (item.case_value, item.case_target, item.exit_target)
@@ -1062,13 +1161,17 @@ def _dedupe_switch_loop_exit_return_evidence_8616(
     return tuple(deduped)
 
 
-def repair_hoisted_jcc_target_copies_from_evidence_8616(project: object, codegen: object) -> bool:
+@cython.ccall
+def repair_hoisted_jcc_target_copies_from_evidence_8616(project: object, codegen: object) -> cython.bint:
     """Move displaced stack-slot copies back under their proven JCC target body.
 
     angr may place the leading target-block copy on either side of the
     structured guard. The binary branch target, instruction tag, and stack-slot
     identities must identify exactly one sibling before it can be moved.
     """
+    cfunc: object
+    function: object
+    root: object
     stats = HoistedJccTargetCopyRepairStats8616()
     function = _active_function_8616(project, codegen)
     evidence = recover_hoisted_jcc_target_copy_evidence_8616(project, function) if function is not None else ()
@@ -1093,8 +1196,12 @@ def repair_hoisted_jcc_target_copies_from_evidence_8616(project: object, codegen
     return changed
 
 
-def repair_conditional_continue_guards_from_evidence_8616(project: object, codegen: object) -> bool:
+@cython.ccall
+def repair_conditional_continue_guards_from_evidence_8616(project: object, codegen: object) -> cython.bint:
     """Remove false loop-break guards when CFG evidence proves continue."""
+    cfunc: object
+    function: object
+    root: object
     stats = ConditionalContinueRepairStats8616()
     function = _active_function_8616(project, codegen)
     evidence = recover_conditional_continue_evidence_8616(project, function) if function is not None else ()
@@ -1127,8 +1234,12 @@ def repair_conditional_continue_guards_from_evidence_8616(project: object, codeg
     return changed
 
 
-def repair_switch_loop_exit_returns_from_evidence_8616(project: object, codegen: object) -> bool:
+@cython.ccall
+def repair_switch_loop_exit_returns_from_evidence_8616(project: object, codegen: object) -> cython.bint:
     """Preserve proven shared exits or add missing exact switch-return cases."""
+    cfunc: object
+    function: object
+    root: object
     stats = SwitchLoopExitReturnRepairStats8616()
     cfunc = _codegen_cfunc_8616(codegen)
     if cfunc is None:
@@ -1151,7 +1262,7 @@ def repair_switch_loop_exit_returns_from_evidence_8616(project: object, codegen:
         _store_switch_loop_exit_return_stats_8616(codegen, stats)
         return False
     shared = publish_shared_loop_exit_report_8616(project, codegen, evidence)
-    if shared.materialized_count == len(evidence):
+    if operator.eq(shared.materialized_count, len(evidence)):
         stats = SwitchLoopExitReturnRepairStats8616(preserved_shared_exit_count=shared.materialized_count)
         _store_switch_loop_exit_return_stats_8616(codegen, stats)
         return False
@@ -1176,35 +1287,43 @@ def repair_switch_loop_exit_returns_from_evidence_8616(project: object, codegen:
     return changed
 
 
-def _switch_loop_exit_return_candidate_count_8616(roots: tuple[object, ...]) -> int:
+def _switch_loop_exit_return_candidate_count_8616(roots: object) -> cython.longlong:
     """Count unique loop bodies that could own one proven switch exit."""
-    candidate_ids: set[int] = set()
+    body: object
+    loop: object
+    node: object
+    root: object
+    candidate_ids: set[cython.longlong] = set()
     for root in roots:
         for node in _iter_node_and_children_8616(root):
             loop = _statement_as_single_wrapped_while_loop_8616(node)
             if loop is None:
                 continue
             body = getattr(loop, "body", None)
-            if any(isinstance(child, CSwitchCase) for child in _iter_node_and_children_8616(body)):
+            if any(isinstance(child, CSwitchCase) for child in builtins.iter(_iter_node_and_children_8616(body))):
                 candidate_ids.add(id(loop))
     return len(candidate_ids)
 
 
-def repair_pretest_loop_break_guards_from_evidence_8616(project: object, codegen: object) -> bool:
+@cython.ccall
+def repair_pretest_loop_break_guards_from_evidence_8616(project: object, codegen: object) -> cython.bint:
     """Invert pretest body-edge break guards using binary branch evidence."""
+    cfunc: object
+    function: object
+    root: object
     stats = PretestLoopGuardRepairStats8616()
     function = _active_function_8616(project, codegen)
     recovered_evidence = recover_pretest_loop_guard_evidence_8616(project, function) if function is not None else ()
     typed_evidence = _typed_pretest_loop_guard_evidence_8616(codegen)
-    evidence_by_branch = {item.branch_addr: item for item in recovered_evidence}
-    evidence_by_branch.update({item.branch_addr: item for item in typed_evidence})
+    evidence_by_branch = {item.branch_addr: item for item in iter(recovered_evidence)}
+    evidence_by_branch.update({item.branch_addr: item for item in iter(typed_evidence)})
     if function is not None:
         short_circuit_evidence = _recover_short_circuit_pretest_guard_evidence_8616(
             project,
             function,
             tuple(evidence_by_branch.values()),
         )
-        evidence_by_branch.update({item.branch_addr: item for item in short_circuit_evidence})
+        evidence_by_branch.update({item.branch_addr: item for item in iter(short_circuit_evidence)})
     evidence = tuple(evidence_by_branch.values())
     stats.raw_fact_count = len(evidence)
     stats.normalized_fact_count = len(evidence)
@@ -1228,7 +1347,8 @@ def repair_pretest_loop_break_guards_from_evidence_8616(project: object, codegen
     return changed
 
 
-def prune_redundant_loop_break_carriers_8616(codegen: object) -> bool:
+@cython.ccall
+def prune_redundant_loop_break_carriers_8616(codegen: object) -> cython.bint:
     """Prune adjacent equivalent loop breaks proven through exact carrier definitions.
 
     This pass owns only structured control-flow redundancy. Alias supplies
@@ -1236,6 +1356,9 @@ def prune_redundant_loop_break_carriers_8616(codegen: object) -> bool:
     condition IR supplies comparison inversion. The pass preserves all carrier
     assignments so evidence-aware DCE can decide whether they are dead later.
     """
+    cfunc: object
+    node: object
+    root: object
     stats = RedundantLoopBreakCarrierStats8616()
     cfunc = _codegen_cfunc_8616(codegen)
     if cfunc is None:
@@ -1258,11 +1381,16 @@ def prune_redundant_loop_break_carriers_8616(codegen: object) -> bool:
     return changed
 
 
+@cython.ccall
 def _prune_redundant_breaks_in_loop_body_8616(
     body: CStatements,
     stats: RedundantLoopBreakCarrierStats8616,
-) -> bool:
+) -> cython.bint:
     """Remove only the second guard in each proven adjacent duplicate pair."""
+    first_comparison: object
+    first_condition: object
+    second_comparison: object
+    second_condition: object
     statements = body.statements
     if not isinstance(statements, list):
         return False
@@ -1304,15 +1432,15 @@ def _prune_redundant_breaks_in_loop_body_8616(
 
 
 def _ordered_pure_carrier_definitions_8616(
-    prefix: list[object],
-) -> tuple[tuple[CVariable, object], ...] | None:
+    prefix: object,
+) -> object:
     """Collect ordered local/register definitions or refuse an effectful prefix."""
     definitions: list[tuple[CVariable, object]] = []
 
-    def collect(node: object) -> bool:
+    def collect(node: object) -> cython.bint:
         """Collect assignments from transparent statement wrappers."""
         if isinstance(node, CStatements):
-            return all(collect(child) for child in node.statements or ())
+            return all(collect(child) for child in iter(node.statements or ()))
         if not isinstance(node, CAssignment) or not isinstance(node.lhs, CVariable):
             return False
         variable = node.lhs.variable
@@ -1323,14 +1451,18 @@ def _ordered_pure_carrier_definitions_8616(
         definitions.append((node.lhs, node.rhs))
         return True
 
-    return tuple(definitions) if all(collect(node) for node in prefix) else None
+    return tuple(definitions) if all(collect(node) for node in iter(prefix)) else None
 
 
+@cython.ccall
 def _canonical_break_comparison_8616(
     condition: object,
-    definitions: tuple[tuple[CVariable, object], ...] | None,
-) -> tuple[str, object, object] | None:
+    definitions: object,
+) -> object:
     """Normalize one pure break comparison and resolve exact SSA carriers."""
+    lhs: object
+    op: object
+    rhs: object
     if definitions is None or _node_contains_effectful_call_8616(condition):
         return None
     comparison = condition
@@ -1350,11 +1482,12 @@ def _canonical_break_comparison_8616(
     return op, lhs, rhs
 
 
+@cython.ccall
 def _resolve_exact_carrier_definition_8616(
     expression: object,
-    definitions: tuple[tuple[CVariable, object], ...],
+    definitions: object,
     *,
-    active: frozenset[int] = frozenset(),
+    active: object = frozenset(),
 ) -> object | None:
     """Resolve a variable through preceding exact definitions without guessing."""
     if not isinstance(expression, CVariable):
@@ -1374,19 +1507,21 @@ def _resolve_exact_carrier_definition_8616(
     return cast(object, expression)
 
 
+@cython.ccall
 def _canonical_comparisons_are_equivalent_8616(
-    left: tuple[str, object, object],
-    right: tuple[str, object, object],
-) -> bool:
+    left: object,
+    right: object,
+) -> cython.bint:
     """Return whether canonical comparisons have identical proven operands."""
     return (
-        left[0] == right[0]
+        operator.eq(left[0], right[0])
         and _carrier_expressions_are_equivalent_8616(left[1], right[1])
         and _carrier_expressions_are_equivalent_8616(left[2], right[2])
     )
 
 
-def _carrier_expressions_are_equivalent_8616(left: object, right: object) -> bool:
+@cython.ccall
+def _carrier_expressions_are_equivalent_8616(left: object, right: object) -> cython.bint:
     """Compare expressions using exact shape or explicit alias storage identity."""
     if _same_c_expression_8616(left, right):
         return True
@@ -1395,24 +1530,25 @@ def _carrier_expressions_are_equivalent_8616(left: object, right: object) -> boo
         right_facts = describe_alias_storage(right)
         return (
             left_facts.identity is not None
-            and left_facts.identity == right_facts.identity
-            and left_facts.domain.space == right_facts.domain.space
+            and operator.eq(left_facts.identity, right_facts.identity)
+            and operator.eq(left_facts.domain.space, right_facts.domain.space)
         )
     if isinstance(left, CConstant) and isinstance(right, CConstant):
         left_value = cast(object, left.value)
         right_value = cast(object, right.value)
         return bool(left_value == right_value)
     if isinstance(left, CUnaryOp) and isinstance(right, CUnaryOp):
-        return left.op == right.op and _carrier_expressions_are_equivalent_8616(left.operand, right.operand)
+        return operator.eq(left.op, right.op) and _carrier_expressions_are_equivalent_8616(left.operand, right.operand)
     if isinstance(left, CBinaryOp) and isinstance(right, CBinaryOp):
         return (
-            left.op == right.op
+            operator.eq(left.op, right.op)
             and _carrier_expressions_are_equivalent_8616(left.lhs, right.lhs)
             and _carrier_expressions_are_equivalent_8616(left.rhs, right.rhs)
         )
     return False
 
 
+@cython.ccall
 def _store_redundant_loop_break_carrier_stats_8616(
     codegen: object,
     stats: RedundantLoopBreakCarrierStats8616,
@@ -1422,8 +1558,11 @@ def _store_redundant_loop_break_carrier_stats_8616(
         cast(Any, codegen)._inertia_redundant_loop_break_carrier_stats_8616 = stats
 
 
-def _pretest_shape_visit_8616(node: object, depth: int, rows: list[str]) -> None:
+@cython.ccall
+def _pretest_shape_visit_8616(node: object, depth: cython.longlong, rows: object) -> None:
     """Collect a bounded structural debug view of nested loop nodes."""
+    child: object
+    pair: object
     if node is None or depth > 11 or len(rows) >= 420:
         return
     row = f"{'  ' * depth}{type(node).__name__}"
@@ -1458,6 +1597,7 @@ def _pretest_shape_visit_8616(node: object, depth: int, rows: list[str]) -> None
     rows.append(row)
 
 
+@cython.ccall
 def _debug_pretest_loop_shape_8616(root: object) -> None:
     if not os.environ.get("INERTIA_DEBUG_PRETEST_LOOP_GUARD_REPAIR_VERBOSE"):
         return
@@ -1467,8 +1607,12 @@ def _debug_pretest_loop_shape_8616(root: object) -> None:
         log.warning("[pretest-loop-guard-repair] ast-shape\n%s", "\n".join(rows))
 
 
-def repair_empty_counted_loop_body_from_evidence_8616(project: object, codegen: object) -> bool:
+@cython.ccall
+def repair_empty_counted_loop_body_from_evidence_8616(project: object, codegen: object) -> cython.bint:
     """Move proven accumulator updates into empty counted-loop bodies."""
+    cfunc: object
+    function: object
+    root: object
     stats = LoopBodyRepairStats8616()
     function = _active_function_8616(project, codegen)
     summaries = _function_instruction_summaries_8616(project, function) if function is not None else []
@@ -1496,7 +1640,7 @@ def repair_empty_counted_loop_body_from_evidence_8616(project: object, codegen: 
     return changed
 
 
-def repair_synthetic_internal_calls_from_evidence_8616(project: object, codegen: object) -> bool:
+def repair_synthetic_internal_calls_from_evidence_8616(project: object, codegen: object) -> cython.bint:
     """Remove synthetic call nodes that target internal CFG ranges.
 
     Generic structuring can model a split 16-bit function fragment as a call to
@@ -1504,6 +1648,10 @@ def repair_synthetic_internal_calls_from_evidence_8616(project: object, codegen:
     decoded callsite evidence has no matching call target, so prune it before
     call-argument cleanup treats surrounding loop state as call arguments.
     """
+    callsite_targets: object
+    cfunc: object
+    function_addr: object
+    root: object
     stats = SyntheticInternalCallRepairStats8616()
     cfunc = _codegen_cfunc_8616(codegen)
     if cfunc is None:
@@ -1528,20 +1676,20 @@ def repair_synthetic_internal_calls_from_evidence_8616(project: object, codegen:
         return False
     summary_node_ids = {
         int(node_id)
-        for node_id in (getattr(codegen, "_inertia_callsite_summaries", {}) or {})
+        for node_id in iter((getattr(codegen, "_inertia_callsite_summaries", {}) or {}))
         if isinstance(node_id, int)
     }
     function_addr = getattr(function, "addr", None)
     candidates = tuple(
         call
-        for root in roots
-        for call in _iter_synthetic_internal_call_candidates_8616(
+        for root in iter(roots)
+        for call in builtins.iter(_iter_synthetic_internal_call_candidates_8616(
             root,
             internal_ranges=internal_ranges,
             callsite_targets=callsite_targets,
             summary_node_ids=summary_node_ids,
             function_addr=function_addr if isinstance(function_addr, int) else None,
-        )
+        ))
     )
     stats.raw_fact_count = len(candidates)
     stats.normalized_fact_count = len(candidates)
@@ -1550,7 +1698,7 @@ def repair_synthetic_internal_calls_from_evidence_8616(project: object, codegen:
         stats.record(SyntheticInternalCallRepairDecision8616.REFUSED_NO_MATCHING_CALL)
         _store_synthetic_internal_call_stats_8616(codegen, stats)
         return False
-    candidate_ids = {id(call) for call in candidates}
+    candidate_ids = {id(call) for call in iter(candidates)}
     changed = False
     for root in roots:
         changed = _prune_call_expression_statements_8616(root, candidate_ids, stats) or changed
@@ -1560,21 +1708,27 @@ def repair_synthetic_internal_calls_from_evidence_8616(project: object, codegen:
     return changed
 
 
+@cython.ccall
 def _active_function_8616(project: object, codegen: object) -> object | None:
     """Use the same retained function owner as the IR supplying repair evidence."""
+    resolved: object
     resolved = codegen_function_8616(project, codegen)
     return resolved[0] if resolved is not None else None
 
 
-def _function_callsite_targets_8616(function: object | None) -> frozenset[int] | None:
+@cython.ccall
+def _function_callsite_targets_8616(function: object) -> object:
     """Return decoded call targets for a function, or None when unavailable."""
+    get_call_sites: object
+    get_call_target: object
+    callsite: object
     if function is None:
         return None
     get_call_sites = getattr(function, "get_call_sites", None)
     get_call_target = getattr(function, "get_call_target", None)
     if not callable(get_call_sites) or not callable(get_call_target):
         return None
-    targets: set[int] = set()
+    targets: set[cython.longlong] = set()
     try:
         callsites = _dynamic_sequence_8616(get_call_sites())
     except Exception:
@@ -1589,14 +1743,19 @@ def _function_callsite_targets_8616(function: object | None) -> frozenset[int] |
     return frozenset(targets)
 
 
-def _function_block_ranges_8616(project: object, function: object | None) -> tuple[tuple[int, int], ...]:
+@cython.ccall
+def _function_block_ranges_8616(project: object, function: object) -> tuple[tuple[cython.longlong, cython.longlong], ...]:
     """Return byte ranges for blocks owned by the current function."""
+    block_lifter: object
+    block_size: object
+    factory: object
+    raw_addr: object
     if function is None:
         return ()
-    ranges: list[tuple[int, int]] = []
+    ranges: list[tuple[cython.longlong, cython.longlong]] = []
     factory = getattr(project, "factory", None)
     block_lifter = getattr(factory, "block", None)
-    for raw_addr in sorted(getattr(function, "block_addrs_set", ()) or ()):
+    for raw_addr in sorted(tuple(getattr(function, "block_addrs_set", ()) or ())):
         if not isinstance(raw_addr, int):
             continue
         size = 1
@@ -1612,8 +1771,12 @@ def _function_block_ranges_8616(project: object, function: object | None) -> tup
     return tuple(ranges)
 
 
+@cython.ccall
 def _call_target_addr_8616(call: CFunctionCall) -> int | None:
     """Return a structured call target address when the AST carries one."""
+    callee_addr: object
+    callee_func: object
+    target: object
     callee_func = getattr(call, "callee_func", None)
     callee_addr = getattr(callee_func, "addr", None)
     if isinstance(callee_addr, int):
@@ -1622,20 +1785,21 @@ def _call_target_addr_8616(call: CFunctionCall) -> int | None:
     return target if isinstance(target, int) else None
 
 
-def _addr_in_ranges_8616(addr: int, ranges: tuple[tuple[int, int], ...]) -> bool:
+def _addr_in_ranges_8616(addr: cython.longlong, ranges: object) -> cython.bint:
     """Return whether an address belongs to any owned function block range."""
-    return any(start <= addr < end for start, end in ranges)
+    return any(start <= addr < end for start, end in iter(ranges))
 
 
 def _iter_synthetic_internal_call_candidates_8616(
     node: object,
     *,
-    internal_ranges: tuple[tuple[int, int], ...],
-    callsite_targets: frozenset[int],
-    summary_node_ids: set[int],
+    internal_ranges: object,
+    callsite_targets: object,
+    summary_node_ids: object,
     function_addr: int | None,
 ) -> Iterator[CFunctionCall]:
     """Yield no-summary call nodes proven to target current-function ranges."""
+    child: object
     for child in _iter_node_and_children_8616(node):
         if not isinstance(child, CFunctionCall):
             continue
@@ -1652,12 +1816,14 @@ def _iter_synthetic_internal_call_candidates_8616(
             yield child
 
 
+@cython.ccall
 def _retained_statements_8616(
     statements: Iterable[object],
-    candidate_ids: set[int],
+    candidate_ids: object,
     stats: SyntheticInternalCallRepairStats8616,
-) -> tuple[list[object], bool]:
+) -> tuple[list[object], cython.bint]:
     """Drop proven synthetic-call expression statements from one block."""
+    stmt: object
     retained: list[object] = []
     changed = False
     for stmt in statements:
@@ -1670,12 +1836,16 @@ def _retained_statements_8616(
     return retained, changed
 
 
+@cython.ccall
 def _prune_call_expression_statements_8616(
     node: object,
-    candidate_ids: set[int],
+    candidate_ids: object,
     stats: SyntheticInternalCallRepairStats8616,
-) -> bool:
+) -> cython.bint:
     """Remove expression statements whose expression is a proven synthetic call."""
+    child_statements: object
+    statements: object
+    child: object
     changed = False
     statements = getattr(node, "statements", None)
     if isinstance(statements, (list, tuple)):
@@ -1692,6 +1862,7 @@ def _prune_call_expression_statements_8616(
     return changed
 
 
+@cython.ccall
 def _store_stats_8616(codegen: object, stats: LoopBodyRepairStats8616) -> None:
     if codegen is not None:
         cast(Any, codegen)._inertia_structuring_loop_body_repair_stats_8616 = stats
@@ -1712,6 +1883,7 @@ def _store_stats_8616(codegen: object, stats: LoopBodyRepairStats8616) -> None:
         )
 
 
+@cython.ccall
 def _store_synthetic_internal_call_stats_8616(
     codegen: object,
     stats: SyntheticInternalCallRepairStats8616,
@@ -1803,8 +1975,11 @@ _JCC_TAKEN_COMPARISON_OPS_8616 = {
 }
 
 
-def _complementary_cmp_op_8616(op: object) -> str | None:
+@cython.ccall
+def _complementary_cmp_op_8616(op: object) -> object:
     """Return the structured comparison operator complement."""
+    left: object
+    right: object
     if not isinstance(op, str):
         return None
     for left, right in _COMPLEMENTARY_COMPARISONS_8616:
@@ -1813,7 +1988,8 @@ def _complementary_cmp_op_8616(op: object) -> str | None:
     return None
 
 
-def _pretest_body_edge_op_8616(evidence: PretestLoopGuardEvidence8616) -> str | None:
+@cython.ccall
+def _pretest_body_edge_op_8616(evidence: PretestLoopGuardEvidence8616) -> object:
     """Return the comparison operator for the proven taken body edge."""
     if evidence.body_condition_op is not None:
         return evidence.body_condition_op
@@ -1823,6 +1999,9 @@ def _pretest_body_edge_op_8616(evidence: PretestLoopGuardEvidence8616) -> str | 
 
 def _typed_pretest_loop_guard_evidence_8616(codegen: object) -> tuple[PretestLoopGuardEvidence8616, ...]:
     """Adapt exact loop JCC facts into pretest guard evidence."""
+    body_condition_op: object
+    condition_op: object
+    fact: object
     condition_ops = {
         "eq": "CmpEQ",
         "ne": "CmpNE",
@@ -1846,7 +2025,7 @@ def _typed_pretest_loop_guard_evidence_8616(codegen: object) -> tuple[PretestLoo
             continue
         if not all(
             isinstance(value, int)
-            for value in (fact.jcc_addr, fact.body_target, fact.false_target)
+            for value in iter((fact.jcc_addr, fact.body_target, fact.false_target))
         ):
             continue
         recovered.append(
@@ -1861,11 +2040,13 @@ def _typed_pretest_loop_guard_evidence_8616(codegen: object) -> tuple[PretestLoo
     return tuple(recovered)
 
 
+@cython.ccall
 def _pretest_guard_already_exit_edge_8616(
     condition: object,
     evidence: PretestLoopGuardEvidence8616,
-) -> bool:
+) -> cython.bint:
     """Detect guards already inverted from body-edge condition to exit-edge condition."""
+    body_op: object
     if isinstance(condition, CUnaryOp) and condition.op == "Not":
         return True
     if not isinstance(condition, CBinaryOp):
@@ -1874,9 +2055,10 @@ def _pretest_guard_already_exit_edge_8616(
     if body_op is None:
         return False
     condition_op = cast(str, condition.op)
-    return bool(condition_op == _complementary_cmp_op_8616(body_op))
+    return bool(operator.eq(condition_op, _complementary_cmp_op_8616(body_op)))
 
 
+@cython.ccall
 def _store_conditional_continue_stats_8616(codegen: object, stats: ConditionalContinueRepairStats8616) -> None:
     if codegen is not None:
         cast(Any, codegen)._inertia_structuring_conditional_continue_stats_8616 = stats
@@ -1894,6 +2076,7 @@ def _store_conditional_continue_stats_8616(codegen: object, stats: ConditionalCo
         )
 
 
+@cython.ccall
 def _store_hoisted_jcc_target_copy_stats_8616(codegen: object, stats: HoistedJccTargetCopyRepairStats8616) -> None:
     if codegen is not None:
         cast(Any, codegen)._inertia_structuring_hoisted_jcc_target_copy_stats_8616 = stats
@@ -1914,6 +2097,7 @@ def _store_hoisted_jcc_target_copy_stats_8616(codegen: object, stats: HoistedJcc
         )
 
 
+@cython.ccall
 def _store_pretest_loop_guard_stats_8616(codegen: object, stats: PretestLoopGuardRepairStats8616) -> None:
     if codegen is not None:
         cast(Any, codegen)._inertia_structuring_pretest_loop_guard_stats_8616 = stats
@@ -1934,6 +2118,7 @@ def _store_pretest_loop_guard_stats_8616(codegen: object, stats: PretestLoopGuar
         )
 
 
+@cython.ccall
 def _store_switch_loop_exit_return_stats_8616(
     codegen: object,
     stats: SwitchLoopExitReturnRepairStats8616,
@@ -1963,7 +2148,11 @@ def _store_switch_loop_exit_return_stats_8616(
         )
 
 
+@cython.ccall
 def _linear_capstone_insns_8616(project: object, function: object) -> tuple[object, ...]:
+    addr: object
+    capstone: object
+    size: object
     addr = getattr(function, "addr", None)
     if not isinstance(addr, int):
         return ()
@@ -1983,7 +2172,9 @@ def _linear_capstone_insns_8616(project: object, function: object) -> tuple[obje
         return ()
 
 
+@cython.ccall
 def _branch_target_imm_from_capstone_8616(insn: object) -> int | None:
+    value: object
     operands = tuple(getattr(insn, "operands", ()) or ())
     if len(operands) != 1:
         return None
@@ -1994,9 +2185,11 @@ def _branch_target_imm_from_capstone_8616(insn: object) -> int | None:
     return int(value) if isinstance(value, int) else None
 
 
-def _resolve_unconditional_jmp_chain_8616(project: object, target: int) -> int | None:
+@cython.ccall
+def _resolve_unconditional_jmp_chain_8616(project: object, target: cython.longlong) -> int | None:
+    next_target: object
     current = int(target)
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     for _ in range(4):
         if current in seen:
             return None
@@ -2014,7 +2207,8 @@ def _resolve_unconditional_jmp_chain_8616(project: object, target: int) -> int |
     return current
 
 
-def _target_starts_with_iterator_update_8616(project: object, target: int) -> bool:
+@cython.ccall
+def _target_starts_with_iterator_update_8616(project: object, target: cython.longlong) -> cython.bint:
     insns = _block_insns_8616(project, target)
     if not insns:
         return False
@@ -2031,7 +2225,8 @@ def _target_starts_with_iterator_update_8616(project: object, target: int) -> bo
     )
 
 
-def _is_sub_ax_immediate_8616(summary: InsnSummary8616) -> bool:
+@cython.ccall
+def _is_sub_ax_immediate_8616(summary: InsnSummary8616) -> cython.bint:
     return (
         str(summary.mnemonic).lower() == "sub"
         and summary.op0_kind == "reg"
@@ -2042,8 +2237,10 @@ def _is_sub_ax_immediate_8616(summary: InsnSummary8616) -> bool:
     )
 
 
-def _instruction_stream_reaches_ret_8616(summaries: list[InsnSummary8616], start_addr: int) -> bool:
-    start_index = next((index for index, summary in enumerate(summaries) if summary.address == start_addr), None)
+def _instruction_stream_reaches_ret_8616(summaries: object, start_addr: cython.longlong) -> cython.bint:
+    start_index: object
+    summary: object
+    start_index = next((index for index, summary in builtins.iter(enumerate(summaries)) if operator.eq(summary.address, start_addr)), None)
     if start_index is None:
         return False
     for summary in summaries[start_index : start_index + 12]:
@@ -2052,12 +2249,13 @@ def _instruction_stream_reaches_ret_8616(summaries: list[InsnSummary8616], start
             return True
         if mnemonic in _CONDITIONAL_BRANCH_MNEMONICS_8616:
             return False
-        if mnemonic in _UNCONDITIONAL_JMP_MNEMONICS_8616 and summary.address != start_addr:
+        if mnemonic in _UNCONDITIONAL_JMP_MNEMONICS_8616 and operator.ne(summary.address, start_addr):
             return False
     return False
 
 
-def _block_insns_8616(project: object, addr: int) -> tuple[object, ...]:
+@cython.ccall
+def _block_insns_8616(project: object, addr: cython.longlong) -> tuple[object, ...]:
     try:
         block = cast(Any, project).factory.block(addr, opt_level=0)
     except Exception:
@@ -2065,12 +2263,17 @@ def _block_insns_8616(project: object, addr: int) -> tuple[object, ...]:
     return tuple(getattr(getattr(block, "capstone", None), "insns", ()) or ())
 
 
+@cython.ccall
 def _repair_switch_loop_exit_return_in_statement_list_8616(
     node: object,
-    evidence: tuple[SwitchLoopExitReturnEvidence8616, ...],
+    evidence: object,
     stats: SwitchLoopExitReturnRepairStats8616,
     codegen: object,
-) -> bool:
+) -> cython.bint:
+    loop: object
+    child: object
+    index: object
+    statement: object
     changed = False
     if not isinstance(node, CStatements):
         for child in _iter_node_and_children_8616(node):
@@ -2095,14 +2298,18 @@ def _repair_switch_loop_exit_return_in_statement_list_8616(
     return changed
 
 
+@cython.ccall
 def _repair_one_switch_loop_exit_return_8616(
     loop: CWhileLoop,
-    statements: list[object],
-    loop_index: int,
-    evidence: tuple[SwitchLoopExitReturnEvidence8616, ...],
+    statements: object,
+    loop_index: cython.longlong,
+    evidence: object,
     stats: SwitchLoopExitReturnRepairStats8616,
     codegen: object,
 ) -> SwitchLoopExitReturnRepairDecision8616:
+    body: object
+    switch: object
+    item: object
     body = getattr(loop, "body", None)
     if not isinstance(body, CStatements):
         return SwitchLoopExitReturnRepairDecision8616.REFUSED_NO_MATCHING_LOOP
@@ -2113,7 +2320,7 @@ def _repair_one_switch_loop_exit_return_8616(
         return SwitchLoopExitReturnRepairDecision8616.REFUSED_NO_SWITCH
     unconditional_loop = _is_const_true_8616(getattr(loop, "condition", None))
     existing = _switch_case_values_8616(switch)
-    missing = [item for item in evidence if item.case_value not in existing]
+    missing = [item for item in iter(evidence) if item.case_value not in existing]
     if not missing:
         pruned = _prune_trailing_returns_after_loop_8616(statements, loop_index) if unconditional_loop else 0
         if pruned > 0:
@@ -2134,10 +2341,12 @@ def _repair_one_switch_loop_exit_return_8616(
     return SwitchLoopExitReturnRepairDecision8616.MATERIALIZED
 
 
-def _is_const_true_8616(node: object) -> bool:
+@cython.ccall
+def _is_const_true_8616(node: object) -> cython.bint:
     return isinstance(node, CConstant) and isinstance(node.value, int) and node.value != 0
 
 
+@cython.ccall
 def _statement_as_single_wrapped_while_loop_8616(statement: object) -> CWhileLoop | None:
     if isinstance(statement, CWhileLoop):
         return statement
@@ -2155,11 +2364,14 @@ def _statement_as_single_wrapped_while_loop_8616(statement: object) -> CWhileLoo
     return None
 
 
-def _contains_break_8616(node: object) -> bool:
+@cython.ccall
+def _contains_break_8616(node: object) -> cython.bint:
     return _contains_break_outside_switch_8616(node, inside_switch=False)
 
 
-def _contains_break_outside_switch_8616(node: object, *, inside_switch: bool) -> bool:
+def _contains_break_outside_switch_8616(node: object, *, inside_switch: cython.bint) -> cython.bint:
+    _case_value: object
+    case_body: object
     if node is None:
         return False
     if isinstance(node, CBreak):
@@ -2172,13 +2384,13 @@ def _contains_break_outside_switch_8616(node: object, *, inside_switch: bool) ->
     if isinstance(node, CStatements):
         return any(
             _contains_break_outside_switch_8616(statement, inside_switch=inside_switch)
-            for statement in tuple(node.statements or ())
+            for statement in builtins.iter(tuple(node.statements or ()))
         )
     if isinstance(node, CIfElse):
         pairs = _dynamic_sequence_8616(node.condition_and_nodes)
         if any(
             _contains_break_outside_switch_8616(pair[1], inside_switch=inside_switch)
-            for pair in pairs
+            for pair in iter(pairs)
             if isinstance(pair, tuple) and len(pair) >= 2
         ):
             return True
@@ -2188,7 +2400,9 @@ def _contains_break_outside_switch_8616(node: object, *, inside_switch: bool) ->
     return False
 
 
+@cython.ccall
 def _first_switch_in_node_8616(node: object) -> CSwitchCase | None:
+    child: object
     if isinstance(node, CSwitchCase):
         return node
     for child in _iter_node_and_children_8616(node):
@@ -2197,11 +2411,12 @@ def _first_switch_in_node_8616(node: object) -> CSwitchCase | None:
     return None
 
 
-def _switch_case_values_8616(switch: CSwitchCase) -> frozenset[int]:
+def _switch_case_values_8616(switch: CSwitchCase) -> frozenset[cython.longlong]:
+    item: object
     cases = getattr(switch, "cases", ()) or ()
     if isinstance(cases, dict):
-        return frozenset(int(value) for value in cases if isinstance(value, int))
-    values: set[int] = set()
+        return frozenset(int(value) for value in iter(cases) if isinstance(value, int))
+    values: set[cython.longlong] = set()
     for item in _dynamic_sequence_8616(cases):
         if not isinstance(item, tuple) or not item:
             continue
@@ -2211,7 +2426,10 @@ def _switch_case_values_8616(switch: CSwitchCase) -> frozenset[int]:
     return frozenset(values)
 
 
-def _iter_switch_case_bodies_8616(switch: CSwitchCase) -> Iterator[tuple[int, object]]:
+def _iter_switch_case_bodies_8616(switch: CSwitchCase) -> Iterator[tuple[cython.longlong, object]]:
+    body: object
+    item: object
+    value: object
     cases = getattr(switch, "cases", ()) or ()
     if isinstance(cases, dict):
         for value, body in cases.items():
@@ -2226,7 +2444,8 @@ def _iter_switch_case_bodies_8616(switch: CSwitchCase) -> Iterator[tuple[int, ob
             yield int(value), body
 
 
-def _append_switch_case_8616(switch: CSwitchCase, case_value: int, body: CStatements) -> None:
+@cython.ccall
+def _append_switch_case_8616(switch: CSwitchCase, case_value: cython.longlong, body: CStatements) -> None:
     cases = getattr(switch, "cases", ()) or ()
     if isinstance(cases, dict):
         cases[int(case_value)] = body
@@ -2235,31 +2454,35 @@ def _append_switch_case_8616(switch: CSwitchCase, case_value: int, body: CStatem
     cast(Any, switch).cases = [*list(_dynamic_sequence_8616(cases)), (int(case_value), body)]
 
 
-def _prune_trailing_returns_after_loop_8616(statements: list[object], loop_index: int) -> int:
+@cython.ccall
+def _prune_trailing_returns_after_loop_8616(statements: object, loop_index: cython.longlong) -> cython.longlong:
     tail = statements[loop_index + 1 :]
-    removable = [statement for statement in tail if _statement_contains_only_returns_8616(statement)]
-    if len(removable) != len(tail):
+    removable = [statement for statement in iter(tail) if _statement_contains_only_returns_8616(statement)]
+    if operator.ne(len(removable), len(tail)):
         return 0
     removed = len(tail)
     del statements[loop_index + 1 :]
     return removed
 
 
-def _statement_contains_only_returns_8616(statement: object) -> bool:
+def _statement_contains_only_returns_8616(statement: object) -> cython.bint:
     if isinstance(statement, CReturn):
         return True
     if not isinstance(statement, CStatements):
         return False
     children = _dynamic_sequence_8616(statement.statements)
-    return bool(children) and all(_statement_contains_only_returns_8616(child) for child in children)
+    return bool(children) and all(_statement_contains_only_returns_8616(child) for child in iter(children))
 
 
+@cython.ccall
 def _repair_pretest_loop_guard_in_node_8616(
     node: object,
-    evidence: tuple[PretestLoopGuardEvidence8616, ...],
+    evidence: object,
     stats: PretestLoopGuardRepairStats8616,
     codegen: object,
-) -> bool:
+) -> cython.bint:
+    pair: object
+    stmt: object
     changed = False
     if isinstance(node, CStatements):
         for stmt in _dynamic_sequence_8616(node.statements):
@@ -2281,14 +2504,16 @@ def _repair_pretest_loop_guard_in_node_8616(
     return _repair_pretest_guard_body_8616(body, evidence, stats, codegen)
 
 
+@cython.ccall
 def _splice_complementary_return_8616(
-    statements: list[object],
+    statements: object,
     body: CStatements,
-    break_index: int,
+    break_index: cython.longlong,
     break_condition: object,
     stats: PretestLoopGuardRepairStats8616,
-) -> bool:
+) -> cython.bint:
     """Drop a redundant break guard before a complementary return arm."""
+    following_condition: object
     if break_index + 1 >= len(statements):
         return False
     following = statements[break_index + 1]
@@ -2305,10 +2530,13 @@ def _splice_complementary_return_8616(
     return False
 
 
+@cython.ccall
 def _pretest_guard_site_8616(
     body: CStatements,
-) -> tuple[list[object], int, object, object] | None:
+) -> object:
     """Locate the proven IfBreak guard inside one flattened loop body."""
+    break_condition: object
+    break_index: object
     raw_statements: list[object] = list(_dynamic_sequence_8616(body.statements))
     statements, flattened_wrappers = _flatten_direct_statement_wrappers_8616(raw_statements)
     if flattened_wrappers:
@@ -2325,14 +2553,15 @@ def _pretest_guard_site_8616(
     return statements, break_index, guard, break_condition
 
 
+@cython.ccall
 def _normalize_pretest_prefix_8616(
-    statements: list[object],
+    statements: object,
     body: CStatements,
-    break_index: int,
+    break_index: cython.longlong,
     break_condition: object,
     rest: CStatements,
     stats: PretestLoopGuardRepairStats8616,
-) -> tuple[int, object, int, int]:
+) -> tuple[cython.longlong, object, cython.longlong, cython.longlong]:
     """Remove consumed call carriers, then move iterator updates to tail."""
     removed_call_carriers = _remove_pretest_consumed_call_return_carriers_8616(
         statements,
@@ -2354,13 +2583,15 @@ def _normalize_pretest_prefix_8616(
 
 def _repair_pretest_guard_body_8616(
     body: CStatements,
-    evidence: tuple[PretestLoopGuardEvidence8616, ...],
+    evidence: object,
     stats: PretestLoopGuardRepairStats8616,
     codegen: object,
-) -> bool:
+) -> cython.bint:
     """Run the pretest guard repair ladder on one loop body."""
+    matched: object
+    site: object
 
-    def repair_nested_body() -> bool:
+    def repair_nested_body() -> cython.bint:
         """Continue searching nested nodes when this loop is not repairable."""
         return _repair_pretest_loop_guard_in_node_8616(body, evidence, stats, codegen)
 
@@ -2394,11 +2625,14 @@ def _repair_pretest_guard_body_8616(
     return True
 
 
+@cython.ccall
 def _move_pretest_prefix_iterator_updates_to_tail_8616(
-    statements: list[object],
-    break_index: int,
+    statements: object,
+    break_index: cython.longlong,
     break_condition: object,
-) -> int:
+) -> cython.longlong:
+    kept_stmt: object
+    stmt: object
     if break_index <= 0:
         return 0
     guard_reads = _stack_offsets_read_8616(break_condition)
@@ -2418,10 +2652,13 @@ def _move_pretest_prefix_iterator_updates_to_tail_8616(
     return len(moved)
 
 
+@cython.ccall
 def _extract_unit_stack_updates_for_slots_8616(
     stmt: object,
-    slots: frozenset[int],
+    slots: object,
 ) -> tuple[object | None, tuple[object, ...]]:
+    kept_child: object
+    child: object
     if _assignment_is_unit_stack_update_for_slots_8616(stmt, slots):
         return None, (stmt,)
     if not isinstance(stmt, CStatements):
@@ -2444,7 +2681,10 @@ def _extract_unit_stack_updates_for_slots_8616(
     return None, tuple(moved)
 
 
-def _assignment_is_unit_stack_update_for_slots_8616(stmt: object, slots: frozenset[int]) -> bool:
+@cython.ccall
+def _assignment_is_unit_stack_update_for_slots_8616(stmt: object, slots: object) -> cython.bint:
+    lhs: object
+    rhs_node: object
     if not isinstance(stmt, CAssignment):
         return False
     lhs_offset = _assignment_lhs_stack_offset_8616(stmt)
@@ -2455,16 +2695,18 @@ def _assignment_is_unit_stack_update_for_slots_8616(stmt: object, slots: frozens
         return False
     lhs = getattr(rhs, "lhs", None)
     rhs_node = getattr(rhs, "rhs", None)
-    if _stack_offset_8616(lhs) == lhs_offset and _constant_int_8616(rhs_node) == 1:
+    if operator.eq(_stack_offset_8616(lhs), lhs_offset) and _constant_int_8616(rhs_node) == 1:
         return True
-    return bool(rhs.op == "Add" and _stack_offset_8616(rhs_node) == lhs_offset and _constant_int_8616(lhs) == 1)
+    return bool(rhs.op == "Add" and operator.eq(_stack_offset_8616(rhs_node), lhs_offset) and _constant_int_8616(lhs) == 1)
 
 
+@cython.ccall
 def _constant_int_8616(node: object) -> int | None:
     return int(node.value) if isinstance(node, CConstant) and isinstance(node.value, int) else None
 
 
-def _first_pretest_break_guard_index_8616(statements: list[object]) -> int | None:
+def _first_pretest_break_guard_index_8616(statements: object) -> int | None:
+    condition: object
     max_prefix = min(len(statements), 6)
     for index in range(max_prefix):
         condition = _ifbreak_condition_8616(statements[index])
@@ -2478,12 +2720,12 @@ def _first_pretest_break_guard_index_8616(statements: list[object]) -> int | Non
                     or _is_inverted_break_guard_condition_8616(_ifbreak_condition_8616(item))
                 )
                 and not _node_contains_effectful_call_8616(item)
-                for item in prefix
+                for item in iter(prefix)
             )
             if not prefix_safe:
                 prefix_safe = all(
                     _is_consumed_call_return_carrier_prefix_8616(item, condition, statements[index + 1 :])
-                    for item in prefix
+                    for item in iter(prefix)
                 )
             if os.environ.get("INERTIA_DEBUG_PRETEST_LOOP_GUARD_REPAIR_VERBOSE"):
                 log.warning(
@@ -2496,7 +2738,7 @@ def _first_pretest_break_guard_index_8616(statements: list[object]) -> int | Non
                             _node_contains_call_8616(item),
                             len(tuple(getattr(item, "statements", ()) or ())),
                         )
-                        for item in prefix
+                        for item in iter(prefix)
                     ),
                 )
             if prefix_safe:
@@ -2512,27 +2754,28 @@ def _first_pretest_break_guard_index_8616(statements: list[object]) -> int | Non
                     _node_contains_call_8616(item),
                     len(tuple(getattr(item, "statements", ()) or ())),
                 )
-                for item in statements[:max_prefix]
+                for item in iter(statements[:max_prefix])
             ),
         )
     return None
 
 
-def _is_inverted_break_guard_condition_8616(condition: object) -> bool:
+@cython.ccall
+def _is_inverted_break_guard_condition_8616(condition: object) -> cython.bint:
     return isinstance(condition, CUnaryOp) and condition.op == "Not"
 
 
 def _pretest_evidence_for_loop_body_8616(
     condition: object,
     body: object,
-    evidence: tuple[PretestLoopGuardEvidence8616, ...],
+    evidence: object,
     *,
     guard: object | None = None,
 ) -> PretestLoopGuardEvidence8616 | None:
     branch_addrs = tuple(
         dict.fromkeys(
             branch_addr
-            for candidate in (guard, condition)
+            for candidate in iter((guard, condition))
             if candidate is not None
             if isinstance(
                 branch_addr := _condition_branch_addr_8616(candidate),
@@ -2541,40 +2784,44 @@ def _pretest_evidence_for_loop_body_8616(
         )
     )
     branch_matches = tuple(
-        item for item in evidence if item.branch_addr in branch_addrs
+        item for item in iter(evidence) if item.branch_addr in branch_addrs
     )
     if len(branch_matches) == 1:
         return branch_matches[0]
     if branch_addrs:
         return None
-    exact_body_matches = tuple(item for item in evidence if _node_has_ins_addr_8616(body, item.body_target))
+    exact_body_matches = tuple(item for item in iter(evidence) if _node_has_ins_addr_8616(body, item.body_target))
     if len(exact_body_matches) == 1:
         return exact_body_matches[0]
-    body_matches = tuple(item for item in evidence if _node_has_ins_addr_in_window_8616(body, item.body_target, 0x80))
+    body_matches = tuple(item for item in iter(evidence) if _node_has_ins_addr_in_window_8616(body, item.body_target, 0x80))
     if len(body_matches) == 1:
         return body_matches[0]
     if os.environ.get("INERTIA_DEBUG_PRETEST_LOOP_GUARD_REPAIR_VERBOSE"):
         log.warning(
             "[pretest-loop-guard-repair] body target unproven branch=<none> body_addrs=%r evidence=%r",
-            sorted(_node_ins_addrs_8616(body))[:24],
+            sorted(tuple(_node_ins_addrs_8616(body)))[:24],
             evidence,
         )
     return None
 
 
-def _node_is_empty_statements_8616(node: object) -> bool:
+@cython.ccall
+def _node_is_empty_statements_8616(node: object) -> cython.bint:
     return isinstance(node, CStatements) and not tuple(getattr(node, "statements", ()) or ())
 
 
+@cython.ccall
 def _remove_pretest_consumed_call_return_carriers_8616(
-    statements: list[object],
-    break_index: int,
+    statements: object,
+    break_index: cython.longlong,
     break_condition: object,
     rest: object,
-) -> int:
+) -> cython.longlong:
+    index: object
+    stmt: object
     if break_index <= 0:
         return 0
-    removable_indices: list[int] = []
+    removable_indices: list[cython.longlong] = []
     for index, stmt in enumerate(statements[:break_index]):
         if _is_consumed_call_return_carrier_prefix_8616(stmt, break_condition, statements[index + 1 : break_index]):
             if not isinstance(stmt, CAssignment):
@@ -2592,11 +2839,14 @@ def _remove_pretest_consumed_call_return_carriers_8616(
     return len(removable_indices)
 
 
+@cython.ccall
 def _is_consumed_call_return_carrier_prefix_8616(
     stmt: object,
     break_condition: object,
-    later_prefix: list[object] | tuple[object, ...],
-) -> bool:
+    later_prefix: object,
+) -> cython.bint:
+    condition_call: object
+    rhs_call: object
     if not isinstance(stmt, CAssignment):
         return False
     lhs = stmt.lhs
@@ -2608,15 +2858,18 @@ def _is_consumed_call_return_carrier_prefix_8616(
     condition_call = _matching_condition_call_8616(rhs_call, break_condition)
     if condition_call is None:
         return False
-    return not _carrier_lhs_read_by_nodes_8616(stmt, (break_condition, *tuple(later_prefix)))
+    return not _carrier_lhs_read_by_nodes_8616(stmt, (break_condition, ) + tuple(tuple(later_prefix)))
 
 
 def _single_function_call_8616(node: object) -> CFunctionCall | None:
-    calls = tuple(current for current in _iter_node_and_children_8616(node) if isinstance(current, CFunctionCall))
+    calls = tuple(current for current in builtins.iter(_iter_node_and_children_8616(node)) if isinstance(current, CFunctionCall))
     return calls[0] if len(calls) == 1 else None
 
 
+@cython.ccall
 def _matching_condition_call_8616(source_call: CFunctionCall, condition: object) -> CFunctionCall | None:
+    source_name: object
+    current: object
     source_name = _function_call_name_8616(source_call)
     if source_name is None:
         return None
@@ -2624,7 +2877,7 @@ def _matching_condition_call_8616(source_call: CFunctionCall, condition: object)
     for current in _iter_node_and_children_8616(condition):
         if not isinstance(current, CFunctionCall):
             continue
-        if _function_call_name_8616(current) != source_name:
+        if operator.ne(_function_call_name_8616(current), source_name):
             continue
         current_addrs = _node_ins_addrs_8616(current)
         if source_addrs and current_addrs and not (source_addrs & current_addrs):
@@ -2634,7 +2887,10 @@ def _matching_condition_call_8616(source_call: CFunctionCall, condition: object)
     return None
 
 
-def _function_call_name_8616(node: CFunctionCall) -> str | None:
+@cython.ccall
+def _function_call_name_8616(node: CFunctionCall) -> object:
+    func: object
+    target: object
     target = getattr(node, "callee_target", None)
     if isinstance(target, str):
         return target
@@ -2643,7 +2899,12 @@ def _function_call_name_8616(node: CFunctionCall) -> str | None:
     return name if isinstance(name, str) else None
 
 
-def _carrier_lhs_read_by_nodes_8616(stmt: CAssignment, nodes: tuple[object, ...]) -> bool:
+@cython.ccall
+def _carrier_lhs_read_by_nodes_8616(stmt: CAssignment, nodes: object) -> cython.bint:
+    lhs: object
+    lhs_key: object
+    current: object
+    node: object
     lhs = getattr(stmt, "lhs", None)
     lhs_key = _variable_key_8616(lhs)
     if lhs_key is None:
@@ -2652,12 +2913,14 @@ def _carrier_lhs_read_by_nodes_8616(stmt: CAssignment, nodes: tuple[object, ...]
         for current in _iter_node_and_children_8616(node):
             if current is lhs:
                 continue
-            if _variable_key_8616(current) == lhs_key:
+            if operator.eq(_variable_key_8616(current), lhs_key):
                 return True
     return False
 
 
-def _variable_key_8616(node: object) -> tuple[object, ...] | None:
+@cython.ccall
+def _variable_key_8616(node: object) -> object:
+    name: object
     if not isinstance(node, CVariable):
         return None
     variable = node.variable
@@ -2685,9 +2948,10 @@ def _variable_key_8616(node: object) -> tuple[object, ...] | None:
 
 
 def _iter_node_and_children_8616(node: object) -> Iterator[object]:
+    child: object
     if node is None:
         return
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     seen.add(id(node))
     yield node
     for child in _iter_c_nodes_deep_8616(node):
@@ -2698,7 +2962,9 @@ def _iter_node_and_children_8616(node: object) -> Iterator[object]:
         yield child
 
 
-def _invert_ifbreak_condition_8616(node: object, codegen: object) -> bool:
+@cython.ccall
+def _invert_ifbreak_condition_8616(node: object, codegen: object) -> cython.bint:
+    condition: object
     if isinstance(node, CIfBreak):
         condition = node.condition
         if isinstance(condition, CUnaryOp) and condition.op == "Not":
@@ -2727,7 +2993,11 @@ def _invert_ifbreak_condition_8616(node: object, codegen: object) -> bool:
     return True
 
 
-def _leading_stack_slot_copy_8616(insns: tuple[object, ...]) -> tuple[int, int, int] | None:
+@cython.ccall
+def _leading_stack_slot_copy_8616(insns: object) -> object:
+    copy_addr: object
+    dest_disp: object
+    src_disp: object
     if len(insns) < 2:
         return None
     first = _summarize_capstone_insn_8616(insns[0])
@@ -2738,7 +3008,7 @@ def _leading_stack_slot_copy_8616(insns: tuple[object, ...]) -> tuple[int, int, 
         return None
     if second.op0_kind != "bp_mem" or second.op1_kind != "reg":
         return None
-    if first.op0_value != second.op1_value:
+    if operator.ne(first.op0_value, second.op1_value):
         return None
     if first.op1_size not in {None, 2} or second.op0_size not in {None, 2}:
         return None
@@ -2754,15 +3024,17 @@ def _leading_stack_slot_copy_8616(insns: tuple[object, ...]) -> tuple[int, int, 
 
 def _debug_conditional_continue_body_8616(
     node: object,
-    body_statements: list[object],
+    body_statements: object,
 ) -> None:
     """Emit the verbose per-statement debug census for one loop body."""
+    dbg_idx: object
+    dbg_stmt: object
     if not os.environ.get("INERTIA_DEBUG_CONDITIONAL_CONTINUE_REPAIR_VERBOSE"):
         return
     log.warning(
         "[conditional-continue-repair] loop=%s body_types=%r",
         type(node).__name__,
-        tuple(type(stmt).__name__ for stmt in body_statements),
+        tuple(type(stmt).__name__ for stmt in iter(body_statements)),
     )
     for dbg_idx, dbg_stmt in enumerate(body_statements):
         dbg_cond_nodes = (
@@ -2774,7 +3046,7 @@ def _debug_conditional_continue_body_8616(
         dbg_condition = dbg_first_pair[0] if isinstance(dbg_first_pair, tuple) and len(dbg_first_pair) >= 2 else None
         dbg_if_body = dbg_first_pair[1] if isinstance(dbg_first_pair, tuple) and len(dbg_first_pair) >= 2 else None
         dbg_if_body_types = (
-            tuple(type(child).__name__ for child in _dynamic_sequence_8616(getattr(dbg_if_body, "statements", ())))
+            tuple(type(child).__name__ for child in builtins.iter(_dynamic_sequence_8616(getattr(dbg_if_body, "statements", ()))))
             if isinstance(dbg_if_body, CStatements)
             else (type(dbg_if_body).__name__,)
         )
@@ -2792,13 +3064,16 @@ def _debug_conditional_continue_body_8616(
         )
 
 
+@cython.ccall
 def _step_continue_body_repair_8616(
-    body_statements: list[object],
-    idx: int,
-    remaining_repairs: int,
+    body_statements: object,
+    idx: cython.longlong,
+    remaining_repairs: cython.longlong,
     stats: ConditionalContinueRepairStats8616,
-) -> tuple[bool, int, int]:
+) -> tuple[cython.bint, cython.longlong, cython.longlong]:
     """Advance one body statement through the continue-repair ladder."""
+    break_cond: object
+    guarded_cond: object
     current_stmt = body_statements[idx]
     if isinstance(current_stmt, CIfElse):
         ifelse_changed, remaining_repairs = _repair_conditional_continue_in_ifelse_node_8616(
@@ -2830,11 +3105,12 @@ def _step_continue_body_repair_8616(
     return child_changed, remaining_repairs, idx + 1
 
 
+@cython.ccall
 def _repair_conditional_continue_in_node_8616(
     node: object,
-    remaining_repairs: int,
+    remaining_repairs: cython.longlong,
     stats: ConditionalContinueRepairStats8616,
-) -> tuple[bool, int]:
+) -> object:
     if remaining_repairs <= 0:
         return False, remaining_repairs
     changed = False
@@ -2866,12 +3142,13 @@ def _repair_conditional_continue_in_node_8616(
     return _repair_continue_loop_body_8616(node, body, remaining_repairs, stats)
 
 
+@cython.ccall
 def _repair_continue_loop_body_8616(
     node: object,
     body: CStatements,
-    remaining_repairs: int,
+    remaining_repairs: cython.longlong,
     stats: ConditionalContinueRepairStats8616,
-) -> tuple[bool, int]:
+) -> tuple[cython.bint, cython.longlong]:
     """Run the continue-repair ladder on one proven loop body."""
     raw_body_statements: list[object] = list(_dynamic_sequence_8616(body.statements))
     body_statements, _flattened_wrappers = _flatten_direct_statement_wrappers_8616(raw_body_statements)
@@ -2906,11 +3183,16 @@ def _repair_continue_loop_body_8616(
     return local_changed, remaining_repairs
 
 
+@cython.ccall
 def _repair_conditional_continue_in_ifelse_node_8616(
     node: CIfElse,
-    remaining_repairs: int,
+    remaining_repairs: cython.longlong,
     stats: ConditionalContinueRepairStats8616,
-) -> tuple[bool, int]:
+) -> tuple[cython.bint, cython.longlong]:
+    break_idx: object
+    break_pair: object
+    guarded_idx: object
+    guarded_pair: object
     if remaining_repairs <= 0 or getattr(node, "else_node", None) is not None:
         return False, remaining_repairs
     pairs: list[object] = list(_dynamic_sequence_8616(getattr(node, "condition_and_nodes", ())))
@@ -2938,12 +3220,14 @@ def _repair_conditional_continue_in_ifelse_node_8616(
     return False, remaining_repairs
 
 
+@cython.ccall
 def _repair_hoisted_copy_statements_8616(
     node: CStatements,
-    evidence: tuple[HoistedJccTargetCopyEvidence8616, ...],
+    evidence: object,
     stats: HoistedJccTargetCopyRepairStats8616,
-) -> bool:
+) -> cython.bint:
     """Run the displaced-copy repair across one statement block."""
+    removed_index: object
     changed = False
     raw_statements: list[object] = list(_dynamic_sequence_8616(node.statements))
     statements, _flattened_wrappers = _flatten_direct_statement_wrappers_8616(raw_statements)
@@ -2972,12 +3256,14 @@ def _repair_hoisted_copy_statements_8616(
     return changed
 
 
+@cython.ccall
 def _repair_hoisted_copy_ifelse_8616(
     node: CIfElse,
-    evidence: tuple[HoistedJccTargetCopyEvidence8616, ...],
+    evidence: object,
     stats: HoistedJccTargetCopyRepairStats8616,
-) -> bool:
+) -> cython.bint:
     """Recurse the displaced-copy repair through one if/else node."""
+    pair: object
     local_changed = False
     pairs = _dynamic_sequence_8616(node.condition_and_nodes)
     for pair in pairs:
@@ -2990,11 +3276,12 @@ def _repair_hoisted_copy_ifelse_8616(
     return local_changed
 
 
+@cython.ccall
 def _repair_hoisted_jcc_target_copy_in_node_8616(
     node: object,
-    evidence: tuple[HoistedJccTargetCopyEvidence8616, ...],
+    evidence: object,
     stats: HoistedJccTargetCopyRepairStats8616,
-) -> bool:
+) -> cython.bint:
     if isinstance(node, CStatements):
         return _repair_hoisted_copy_statements_8616(node, evidence, stats)
     if isinstance(node, (CForLoop, CWhileLoop, CDoWhileLoop)):
@@ -3007,13 +3294,18 @@ def _repair_hoisted_jcc_target_copy_in_node_8616(
     return False
 
 
+@cython.ccall
 def _try_repair_displaced_jcc_target_copy_8616(
-    statements: list[object],
-    if_index: int,
+    statements: object,
+    if_index: cython.longlong,
     if_stmt: CIfElse,
-    evidence: tuple[HoistedJccTargetCopyEvidence8616, ...],
+    evidence: object,
 ) -> tuple[HoistedJccTargetCopyRepairDecision8616, int | None]:
     """Move one uniquely proven sibling copy into its JCC target body."""
+    body: object
+    candidate: object
+    condition: object
+    matched_evidence: object
     condition, body = _single_ifelse_pair_8616(if_stmt)
     if condition is None or body is None:
         return HoistedJccTargetCopyRepairDecision8616.REFUSED_NO_MATCHING_IF, None
@@ -3044,13 +3336,16 @@ def _try_repair_displaced_jcc_target_copy_8616(
     return HoistedJccTargetCopyRepairDecision8616.MATERIALIZED, candidate_index
 
 
+@cython.ccall
 def _hoisted_copy_candidate_indices_8616(
-    statements: list[object],
-    if_index: int,
+    statements: object,
+    if_index: cython.longlong,
     matched_evidence: HoistedJccTargetCopyEvidence8616,
-) -> list[int]:
+) -> object:
     """Census statements matching the uniquely proven displaced copy."""
-    candidate_indices: list[int] = []
+    idx: object
+    stmt: object
+    candidate_indices: list[cython.longlong] = []
     for idx, stmt in enumerate(statements):
         if idx == if_index:
             continue
@@ -3063,8 +3358,8 @@ def _hoisted_copy_candidate_indices_8616(
                 idx,
                 "before" if idx < if_index else "after",
                 _assignment_lhs_stack_offset_8616(stmt),
-                sorted(_stack_offsets_read_8616(stmt.rhs)),
-                sorted(_node_ins_addrs_8616(stmt)),
+                sorted(tuple(_stack_offsets_read_8616(stmt.rhs))),
+                sorted(tuple(_node_ins_addrs_8616(stmt))),
                 matched_evidence.body_target,
                 matched_evidence.copy_addr,
                 _debug_c_expr_string_8616(stmt),
@@ -3075,20 +3370,22 @@ def _hoisted_copy_candidate_indices_8616(
 def _evidence_for_if_body_8616(
     condition: object,
     body: object,
-    evidence: tuple[HoistedJccTargetCopyEvidence8616, ...],
+    evidence: object,
 ) -> HoistedJccTargetCopyEvidence8616 | None:
+    item: object
     branch_addr = _condition_branch_addr_8616(condition)
     if isinstance(branch_addr, int):
         for item in evidence:
-            if item.branch_addr == branch_addr and _node_has_ins_addr_in_window_8616(body, item.body_target, 0x40):
+            if operator.eq(item.branch_addr, branch_addr) and _node_has_ins_addr_in_window_8616(body, item.body_target, 0x40):
                 return item
         return None
-    body_matches = tuple(item for item in evidence if _node_has_ins_addr_in_window_8616(body, item.body_target, 0x40))
+    body_matches = tuple(item for item in iter(evidence) if _node_has_ins_addr_in_window_8616(body, item.body_target, 0x40))
     if len(body_matches) == 1:
         return body_matches[0]
     return None
 
 
+@cython.ccall
 def _single_ifelse_pair_8616(node: CIfElse) -> tuple[object | None, object | None]:
     if getattr(node, "else_node", None) is not None:
         return None, None
@@ -3101,8 +3398,12 @@ def _single_ifelse_pair_8616(node: CIfElse) -> tuple[object | None, object | Non
     return pair[0], pair[1]
 
 
+@cython.ccall
 def _condition_branch_addr_8616(condition: object) -> int | None:
     """Return the tagged branch instruction address for structuring evidence matching."""
+    ins_addr: object
+    tags: object
+    node: object
     for node in _iter_node_and_children_8616(condition):
         tags = getattr(node, "tags", None)
         if not isinstance(tags, dict):
@@ -3113,10 +3414,11 @@ def _condition_branch_addr_8616(condition: object) -> int | None:
     return None
 
 
+@cython.ccall
 def _assignment_matches_hoisted_jcc_target_copy_8616(
     stmt: object,
     evidence: HoistedJccTargetCopyEvidence8616,
-) -> bool:
+) -> cython.bint:
     if not isinstance(stmt, CAssignment):
         return False
     has_exact_copy_tag = _node_has_ins_addr_8616(stmt, evidence.copy_addr)
@@ -3125,16 +3427,21 @@ def _assignment_matches_hoisted_jcc_target_copy_8616(
         return False
     if _node_contains_call_8616(stmt):
         return False
-    if _assignment_lhs_stack_offset_8616(stmt) != evidence.dest_disp:
+    if operator.ne(_assignment_lhs_stack_offset_8616(stmt), evidence.dest_disp):
         return False
     return evidence.src_disp in _stack_offsets_read_8616(stmt.rhs)
 
 
-def _node_has_ins_addr_8616(node: object, target_addr: int) -> bool:
+@cython.ccall
+def _node_has_ins_addr_8616(node: object, target_addr: cython.longlong) -> cython.bint:
     return _node_has_ins_addr_in_window_8616(node, int(target_addr), 0)
 
 
-def _node_has_ins_addr_in_window_8616(node: object, start_addr: int, max_forward_bytes: int) -> bool:
+@cython.ccall
+def _node_has_ins_addr_in_window_8616(node: object, start_addr: cython.longlong, max_forward_bytes: cython.longlong) -> cython.bint:
+    ins_addr: object
+    tags: object
+    current: object
     if node is None:
         return False
     for current in _iter_node_and_children_8616(node):
@@ -3144,15 +3451,19 @@ def _node_has_ins_addr_in_window_8616(node: object, start_addr: int, max_forward
         ins_addr = tags.get("ins_addr")
         if not isinstance(ins_addr, int):
             continue
-        if ins_addr == start_addr:
+        if operator.eq(ins_addr, start_addr):
             return True
         if max_forward_bytes > 0 and int(start_addr) <= ins_addr <= int(start_addr) + int(max_forward_bytes):
             return True
     return False
 
 
-def _node_ins_addrs_8616(node: object) -> frozenset[int]:
-    addrs: set[int] = set()
+@cython.ccall
+def _node_ins_addrs_8616(node: object) -> frozenset[cython.longlong]:
+    ins_addr: object
+    tags: object
+    current: object
+    addrs: set[cython.longlong] = set()
     for current in _iter_node_and_children_8616(node):
         tags = getattr(current, "tags", None)
         if not isinstance(tags, dict):
@@ -3163,11 +3474,13 @@ def _node_ins_addrs_8616(node: object) -> frozenset[int]:
     return frozenset(addrs)
 
 
-def _node_contains_call_8616(node: object) -> bool:
-    return any(isinstance(current, CFunctionCall) for current in _iter_node_and_children_8616(node))
+def _node_contains_call_8616(node: object) -> cython.bint:
+    return any(isinstance(current, CFunctionCall) for current in builtins.iter(_iter_node_and_children_8616(node)))
 
 
-def _node_contains_effectful_call_8616(node: object) -> bool:
+@cython.ccall
+def _node_contains_effectful_call_8616(node: object) -> cython.bint:
+    current: object
     for current in _iter_node_and_children_8616(node):
         if not isinstance(current, CFunctionCall):
             continue
@@ -3177,7 +3490,12 @@ def _node_contains_effectful_call_8616(node: object) -> bool:
     return False
 
 
-def _pure_memory_helper_call_name_8616(node: CFunctionCall) -> str | None:
+@cython.ccall
+def _pure_memory_helper_call_name_8616(node: CFunctionCall) -> object:
+    callee: object
+    func: object
+    name: object
+    target: object
     callee = getattr(node, "callee", None)
     name = callee if isinstance(callee, str) else None
     if name is None:
@@ -3196,7 +3514,8 @@ def _pure_memory_helper_call_name_8616(node: CFunctionCall) -> str | None:
     return None
 
 
-def _body_is_single_loop_exit_8616(body: object) -> bool:
+@cython.ccall
+def _body_is_single_loop_exit_8616(body: object) -> cython.bint:
     if isinstance(body, CBreak):
         return True
     if _is_void_return_8616(body):
@@ -3207,11 +3526,13 @@ def _body_is_single_loop_exit_8616(body: object) -> bool:
     return len(statements) == 1 and (isinstance(statements[0], CBreak) or _is_void_return_8616(statements[0]))
 
 
-def _body_is_single_break_8616(body: object) -> bool:
+@cython.ccall
+def _body_is_single_break_8616(body: object) -> cython.bint:
     return _body_is_single_loop_exit_8616(body)
 
 
-def _ifelse_body_is_single_return_8616(node: object) -> bool:
+@cython.ccall
+def _ifelse_body_is_single_return_8616(node: object) -> cython.bint:
     """Return whether a single-arm if contains exactly one return statement."""
     if not isinstance(node, CIfElse):
         return False
@@ -3227,11 +3548,14 @@ def _ifelse_body_is_single_return_8616(node: object) -> bool:
     return len(statements) == 1 and isinstance(statements[0], CReturn)
 
 
-def _is_void_return_8616(node: object) -> bool:
+@cython.ccall
+def _is_void_return_8616(node: object) -> cython.bint:
     return isinstance(node, CReturn) and getattr(node, "retval", None) is None
 
 
-def _flatten_direct_statement_wrappers_8616(statements: list[object]) -> tuple[list[object], bool]:
+@cython.ccall
+def _flatten_direct_statement_wrappers_8616(statements: object) -> tuple[list[object], cython.bint]:
+    stmt: object
     flattened: list[object] = []
     changed = False
     for stmt in statements:
@@ -3247,6 +3571,7 @@ def _flatten_direct_statement_wrappers_8616(statements: list[object]) -> tuple[l
     return flattened, changed
 
 
+@cython.ccall
 def _ifbreak_condition_8616(node: object) -> object | None:
     if isinstance(node, CIfBreak):
         return cast(object, node.condition)
@@ -3272,6 +3597,7 @@ def _ifbreak_condition_8616(node: object) -> object | None:
     return None
 
 
+@cython.ccall
 def _single_ifelse_condition_8616(node: object) -> object | None:
     if not isinstance(node, CIfElse):
         return None
@@ -3286,7 +3612,12 @@ def _single_ifelse_condition_8616(node: object) -> object | None:
     return cast(object, pair[0])
 
 
-def _conditions_are_complementary_8616(left: object, right: object) -> bool:
+@cython.ccall
+def _conditions_are_complementary_8616(left: object, right: object) -> cython.bint:
+    left_lhs: object
+    left_rhs: object
+    right_lhs: object
+    right_rhs: object
     if not isinstance(left, CBinaryOp) or not isinstance(right, CBinaryOp):
         return False
     if (getattr(left, "op", None), getattr(right, "op", None)) not in _COMPLEMENTARY_COMPARISONS_8616:
@@ -3320,7 +3651,8 @@ def _conditions_are_complementary_8616(left: object, right: object) -> bool:
     return bool(same_operands)
 
 
-def _debug_c_expr_string_8616(expr: object) -> str:
+@cython.ccall
+def _debug_c_expr_string_8616(expr: object) -> object:
     if expr is None:
         return "<none>"
     try:
@@ -3329,9 +3661,12 @@ def _debug_c_expr_string_8616(expr: object) -> str:
         return repr(expr)
 
 
+@cython.ccall
 def _cfunc_roots_8616(cfunc: object) -> tuple[object, ...]:
+    root: object
+    attr: object
     roots: list[object] = []
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     for attr in ("body", "statements", "stmt"):
         root = getattr(cfunc, attr, None)
         if root is None or id(root) in seen:
@@ -3343,10 +3678,12 @@ def _cfunc_roots_8616(cfunc: object) -> tuple[object, ...]:
 
 def _repair_statement_list_8616(
     node: object,
-    evidence: tuple[StackAccumulatorLoopEvidence8616, ...],
+    evidence: object,
     stats: LoopBodyRepairStats8616,
     codegen: object,
-) -> bool:
+) -> cython.bint:
+    child: object
+    attr: object
     if not isinstance(node, CStatements):
         stats.record(LoopBodyRepairDecision8616.REFUSED_NO_STATEMENTS)
         return False
@@ -3355,7 +3692,7 @@ def _repair_statement_list_8616(
         log.warning(
             "[loop-body-repair] root=%s statements=%r",
             type(node).__name__,
-            tuple(type(stmt).__name__ for stmt in statements),
+            tuple(type(stmt).__name__ for stmt in iter(statements)),
         )
     changed = False
     idx = 0
@@ -3385,12 +3722,12 @@ def _repair_statement_list_8616(
 
 
 def _nonempty_loop_body_outcome_8616(
-    statements: list[object],
-    loop_index: int,
+    statements: object,
+    loop_index: cython.longlong,
     body: object,
-    evidence: tuple[StackAccumulatorLoopEvidence8616, ...],
+    evidence: object,
     codegen: object,
-) -> tuple[LoopBodyRepairDecision8616, bool]:
+) -> tuple[LoopBodyRepairDecision8616, cython.bint]:
     """Try the missing-init rescue, else refuse a nonempty loop body."""
     if isinstance(body, CStatements):
         init_decision = _try_insert_missing_accumulator_init_8616(statements, loop_index, body, evidence, codegen)
@@ -3401,22 +3738,24 @@ def _nonempty_loop_body_outcome_8616(
         log.warning(
             "[loop-body-repair] refused nonempty body_type=%s child_types=%r",
             type(body).__name__,
-            tuple(type(child).__name__ for child in raw_body_statements),
+            tuple(type(child).__name__ for child in iter(raw_body_statements)),
         )
     return LoopBodyRepairDecision8616.REFUSED_NONEMPTY_BODY, False
 
 
+@cython.ccall
 def _matched_accumulator_evidence_8616(
-    loop_induction_disp: int,
-    update_accumulator_disp: int,
-    update_read_disps: frozenset[int],
-    evidence: tuple[StackAccumulatorLoopEvidence8616, ...],
+    loop_induction_disp: cython.longlong,
+    update_accumulator_disp: cython.longlong,
+    update_read_disps: object,
+    evidence: object,
 ) -> StackAccumulatorLoopEvidence8616 | None:
     """Return the evidence item whose slots match this loop and update."""
+    item: object
     for item in evidence:
         if (
-            item.induction_disp == loop_induction_disp
-            and item.accumulator_disp == update_accumulator_disp
+            operator.eq(item.induction_disp, loop_induction_disp)
+            and operator.eq(item.accumulator_disp, update_accumulator_disp)
             and item.accumulator_disp in update_read_disps
             and item.induction_disp in update_read_disps
         ):
@@ -3424,14 +3763,16 @@ def _matched_accumulator_evidence_8616(
     return None
 
 
+@cython.ccall
 def _insert_missing_zero_init_8616(
-    statements: list[object],
-    loop_index: int,
+    statements: object,
+    loop_index: cython.longlong,
     matched: StackAccumulatorLoopEvidence8616,
     update_stmt: object,
     codegen: object,
-) -> bool:
+) -> cython.bint:
     """Insert the proven zero-initializer before the loop when absent."""
+    lhs: object
     if not matched.accumulator_zero_initialized or _preceded_by_zero_init_8616(
         statements,
         loop_index,
@@ -3444,12 +3785,18 @@ def _insert_missing_zero_init_8616(
     return True
 
 
+@cython.ccall
 def _try_repair_loop_at_8616(
-    statements: list[object],
-    loop_index: int,
-    evidence: tuple[StackAccumulatorLoopEvidence8616, ...],
+    statements: object,
+    loop_index: cython.longlong,
+    evidence: object,
     codegen: object,
-) -> tuple[LoopBodyRepairDecision8616, bool]:
+) -> object:
+    body: object
+    following_update: object
+    loop_induction_disp: object
+    matched: object
+    update_accumulator_disp: object
     loop = statements[loop_index]
     body = getattr(loop, "body", None)
     if not _body_semantically_empty_8616(body):
@@ -3489,13 +3836,19 @@ def _try_repair_loop_at_8616(
     return LoopBodyRepairDecision8616.MATERIALIZED, inserted
 
 
+@cython.ccall
 def _try_insert_missing_accumulator_init_8616(
-    statements: list[object],
-    loop_index: int,
+    statements: object,
+    loop_index: cython.longlong,
     body: CStatements,
-    evidence: tuple[StackAccumulatorLoopEvidence8616, ...],
+    evidence: object,
     codegen: object,
 ) -> LoopBodyRepairDecision8616:
+    accumulator_disp: object
+    lhs: object
+    loop_induction_disp: object
+    matched: object
+    item: object
     body_statements = tuple(getattr(body, "statements", ()) or ())
     if not body_statements or not isinstance(body_statements[0], CAssignment):
         return LoopBodyRepairDecision8616.REFUSED_NONEMPTY_BODY
@@ -3509,8 +3862,8 @@ def _try_insert_missing_accumulator_init_8616(
     matched = None
     for item in evidence:
         if (
-            item.induction_disp == loop_induction_disp
-            and item.accumulator_disp == accumulator_disp
+            operator.eq(item.induction_disp, loop_induction_disp)
+            and operator.eq(item.accumulator_disp, accumulator_disp)
             and item.accumulator_disp in update_read_disps
             and item.induction_disp in update_read_disps
         ):
@@ -3526,10 +3879,11 @@ def _try_insert_missing_accumulator_init_8616(
     return LoopBodyRepairDecision8616.MATERIALIZED
 
 
+@cython.ccall
 def _next_assignment_after_loop_8616(
-    statements: list[object],
-    loop_index: int,
-) -> tuple[list[object], int, CAssignment] | None:
+    statements: object,
+    loop_index: cython.longlong,
+) -> object:
     if loop_index + 1 >= len(statements):
         return None
     direct = statements[loop_index + 1]
@@ -3544,15 +3898,18 @@ def _next_assignment_after_loop_8616(
     return None
 
 
-def _body_semantically_empty_8616(body: object) -> bool:
+def _body_semantically_empty_8616(body: object) -> cython.bint:
     if body is None:
         return True
     if not isinstance(body, CStatements):
         return False
-    return all(_body_semantically_empty_8616(child) for child in tuple(body.statements or ()))
+    return all(_body_semantically_empty_8616(child) for child in builtins.iter(tuple(body.statements or ())))
 
 
+@cython.ccall
 def _loop_induction_disp_8616(loop: object) -> int | None:
+    assignment: object
+    attr: object
     for attr in ("initializer", "init", "iterator", "iteration"):
         assignment = getattr(loop, attr, None)
         disp = _assignment_lhs_stack_offset_8616(assignment)
@@ -3561,11 +3918,14 @@ def _loop_induction_disp_8616(loop: object) -> int | None:
     return None
 
 
+@cython.ccall
 def _assignment_lhs_stack_offset_8616(node: object) -> int | None:
     return _stack_offset_8616(getattr(node, "lhs", None)) if isinstance(node, CAssignment) else None
 
 
+@cython.ccall
 def _stack_offset_8616(node: object) -> int | None:
+    offset: object
     if not isinstance(node, CVariable):
         return None
     variable = node.variable
@@ -3575,8 +3935,10 @@ def _stack_offset_8616(node: object) -> int | None:
     return offset if isinstance(offset, int) else None
 
 
-def _stack_offsets_read_8616(node: object) -> frozenset[int]:
-    offsets: set[int] = set()
+@cython.ccall
+def _stack_offsets_read_8616(node: object) -> frozenset[cython.longlong]:
+    child: object
+    offsets: set[cython.longlong] = set()
     for child in _iter_c_nodes_deep_8616(node):
         offset = _stack_offset_8616(child)
         if isinstance(offset, int):
@@ -3584,13 +3946,14 @@ def _stack_offsets_read_8616(node: object) -> frozenset[int]:
     return frozenset(offsets)
 
 
-def _preceded_by_zero_init_8616(statements: list[object], loop_index: int, accumulator_disp: int) -> bool:
+@cython.ccall
+def _preceded_by_zero_init_8616(statements: object, loop_index: cython.longlong, accumulator_disp: cython.longlong) -> cython.bint:
     if loop_index <= 0:
         return False
     previous = statements[loop_index - 1]
     if not isinstance(previous, CAssignment):
         return False
-    if _assignment_lhs_stack_offset_8616(previous) != accumulator_disp:
+    if operator.ne(_assignment_lhs_stack_offset_8616(previous), accumulator_disp):
         return False
     rhs = previous.rhs
     return isinstance(rhs, CConstant) and getattr(rhs, "value", None) == 0

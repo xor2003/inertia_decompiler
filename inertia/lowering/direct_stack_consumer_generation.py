@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Publish direct-stack invalidation generations for covered owner scopes.
 
 Layer: Types/Lowering.
@@ -9,6 +10,7 @@ Dynamic boundary: generation state is attached to third-party angr codegen.
 """
 
 from __future__ import annotations
+import cython
 
 import contextlib
 from typing import Any, Protocol, cast
@@ -30,9 +32,10 @@ class _ConsumerGenerationBoundary8616(Protocol):
     """Dynamic codegen fields owned by direct-stack invalidation tracking."""
 
     _inertia_direct_stack_consumer_generation_8616: DirectStackConsumerGeneration8616
-    _inertia_direct_stack_consumer_generation_counter_8616: int
+    _inertia_direct_stack_consumer_generation_counter_8616: cython.longlong
 
 
+@cython.ccall
 def current_direct_stack_consumer_generation_8616(
     codegen: object,
 ) -> DirectStackConsumerGeneration8616 | None:
@@ -47,6 +50,7 @@ def current_direct_stack_consumer_generation_8616(
     return generation if isinstance(generation, DirectStackConsumerGeneration8616) else None
 
 
+@cython.ccall
 def begin_direct_stack_consumer_generation_scope_8616(
     codegen: object,
 ) -> DirectStackConsumerGenerationScope8616:
@@ -64,6 +68,7 @@ def begin_direct_stack_consumer_generation_scope_8616(
     return DirectStackConsumerGenerationScope8616(previous=previous)
 
 
+@cython.ccall
 def advance_direct_stack_consumer_generation_8616(
     codegen: object,
 ) -> DirectStackConsumerGeneration8616 | None:
@@ -78,6 +83,7 @@ def advance_direct_stack_consumer_generation_8616(
     return generation
 
 
+@cython.ccall
 def end_direct_stack_consumer_generation_scope_8616(
     codegen: object,
     scope: DirectStackConsumerGenerationScope8616,

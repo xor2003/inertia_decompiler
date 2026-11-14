@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Authenticate retained CALL semantic block overlays.
 
 Layer: Semantics.
@@ -9,6 +10,8 @@ Do not perform alias-state ownership, widening, lowering/materialization,
 structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import replace
 from enum import StrEnum
@@ -18,6 +21,9 @@ from inertia.ir.core import IRAddress, IRBinaryValue, IRBlock, IRCondition, IRIn
 
 from .call_output_contracts import CallOutputVerdict8616
 from .call_stack_effect_contracts import CallStackEffectFact8616
+import operator
+import builtins
+CallSemanticProjection8616 = typing.TypeVar("CallSemanticProjection8616")
 
 if TYPE_CHECKING:
     from .call_stack_effect_pipeline import CallSemanticProjection8616
@@ -36,21 +42,22 @@ def output_prefix_length_8616(
     effects_block: IRBlock,
 ) -> int | OutputPrefixFailure8616:
     """Return the exact accounted prefix length, preserving every suffix object."""
+    prefix: object
     prefix = _expected_output_prefix_8616(projection, outputs_block.addr)
     if (
         prefix is None
-        or len(outputs_block.instrs) != len(prefix) + len(effects_block.instrs)
-        or outputs_block.refusals != effects_block.refusals
-        or outputs_block.successor_addrs != effects_block.successor_addrs
+        or operator.ne(len(outputs_block.instrs), len(prefix) + len(effects_block.instrs))
+        or operator.ne(outputs_block.refusals, effects_block.refusals)
+        or operator.ne(outputs_block.successor_addrs, effects_block.successor_addrs)
         or not all(
             _injected_instr_accounted_8616(actual, expected)
-            for actual, expected in zip(outputs_block.instrs[:len(prefix)], prefix, strict=True)
+            for actual, expected in builtins.iter(zip(outputs_block.instrs[:len(prefix)], prefix, strict=True))
         )
     ):
         return OutputPrefixFailure8616.PREFIX
     if not all(
         outputs_block.instrs[len(prefix) + index] is instruction
-        for index, instruction in enumerate(effects_block.instrs)
+        for index, instruction in builtins.iter(enumerate(effects_block.instrs))
     ):
         return OutputPrefixFailure8616.SUFFIX
     return len(prefix)
@@ -58,15 +65,16 @@ def output_prefix_length_8616(
 
 def projected_call_source_8616(
     projection: CallSemanticProjection8616, block: IRBlock, instruction: IRInstr
-) -> tuple[IRBlock, IRInstr] | None:
+) -> object:
     """Resolve an output CALL to its exact raw producer through accounted overlays.
 
     The caller must authenticate this projection against project registries.
     Equal coordinates alone never authorize a foreign block or CALL object.
     """
-    raw = tuple(item for item in projection.source_ir.blocks if item.addr == block.addr)
-    effects = tuple(item for item in projection.effects.function.blocks if item.addr == block.addr)
-    outputs = tuple(item for item in projection.outputs.function.blocks if item.addr == block.addr)
+    facts: object
+    raw = tuple(item for item in iter(projection.source_ir.blocks) if operator.eq(item.addr, block.addr))
+    effects = tuple(item for item in iter(projection.effects.function.blocks) if operator.eq(item.addr, block.addr))
+    outputs = tuple(item for item in iter(projection.outputs.function.blocks) if operator.eq(item.addr, block.addr))
     if len(raw) != 1 or len(effects) != 1 or len(outputs) != 1 or outputs[0] is not block:
         return None
     facts = _block_facts_8616(projection, block.addr)
@@ -75,7 +83,7 @@ def projected_call_source_8616(
     prefix = output_prefix_length_8616(projection, block, effects[0])
     if isinstance(prefix, OutputPrefixFailure8616):
         return None
-    positions = tuple(index for index, item in enumerate(block.instrs) if item is instruction)
+    positions = tuple(index for index, item in builtins.iter(enumerate(block.instrs)) if item is instruction)
     if len(positions) != 1:
         return None
     index = positions[0] - prefix
@@ -84,15 +92,15 @@ def projected_call_source_8616(
     source = raw[0].instrs[index]
     if (
         source.op != "CALL" or instruction.op != "CALL"
-        or source.addr != instruction.addr or source.origin is None
-        or source.origin != instruction.origin
+        or operator.ne(source.addr, instruction.addr) or source.origin is None
+        or operator.ne(source.origin, instruction.origin)
     ):
         return None
     return raw[0], source
 
 def _expected_output_prefix_8616(
-    projection: CallSemanticProjection8616, block_addr: int
-) -> tuple[IRInstr, ...] | None:
+    projection: CallSemanticProjection8616, block_addr: cython.longlong
+) -> object:
     """Reconstruct one block's CALL_OUTPUT prefix from retained typed facts.
 
     ``materialize_call_outputs_8616`` assigns ``injections[return_block]``
@@ -101,9 +109,10 @@ def _expected_output_prefix_8616(
     complete coordinates is retained-artifact corruption, not a projection:
     the caller refuses on ``None``.
     """
+    fact: object
     expected: tuple[IRInstr, ...] = ()
     for fact in projection.outputs.facts:
-        if fact.return_block_addr != block_addr or not fact.outputs:
+        if operator.ne(fact.return_block_addr, block_addr) or not fact.outputs:
             continue
         if (
             fact.verdict is not CallOutputVerdict8616.PROVEN
@@ -120,12 +129,13 @@ def _expected_output_prefix_8616(
                 size=output.size,
                 addr=fact.callsite_addr,
             )
-            for output in fact.outputs
+            for output in iter(fact.outputs)
         )
     return expected
 
 
-def _injected_instr_accounted_8616(actual: IRInstr, expected: IRInstr) -> bool:
+@cython.ccall
+def _injected_instr_accounted_8616(actual: IRInstr, expected: IRInstr) -> cython.bint:
     """Return whether one injected instr equals its fact-derived reconstruction.
 
     ``IRInstr`` equality compares ``op``/``dst``/``args``/``size``/``addr``/
@@ -134,6 +144,7 @@ def _injected_instr_accounted_8616(actual: IRInstr, expected: IRInstr) -> bool:
     checked explicitly so a smuggled temporary identity cannot hide inside a
     prefix.
     """
+    node: object
     if actual != expected:
         return False
     pending: list[object] = [actual.dst, *actual.args]
@@ -153,13 +164,15 @@ def _injected_instr_accounted_8616(actual: IRInstr, expected: IRInstr) -> bool:
     return True
 
 
+@cython.ccall
 def _block_facts_8616(
-    projection: CallSemanticProjection8616, block_addr: int
-) -> dict[int, CallStackEffectFact8616] | None:
+    projection: CallSemanticProjection8616, block_addr: cython.longlong
+) -> object:
     """Index the retained effect facts for one block by instruction index."""
-    facts_by_index: dict[int, CallStackEffectFact8616] = {}
+    fact: object
+    facts_by_index: dict[cython.longlong, CallStackEffectFact8616] = {}
     for fact in projection.effects.facts:
-        if fact.block_addr != block_addr:
+        if operator.ne(fact.block_addr, block_addr):
             continue
         if fact.instr_index in facts_by_index:
             return None
@@ -170,8 +183,8 @@ def _block_facts_8616(
 def _effects_overlay_holds_8616(
     source_block: IRBlock,
     effects_block: IRBlock,
-    facts_by_index: dict[int, CallStackEffectFact8616],
-) -> bool:
+    facts_by_index: object,
+) -> cython.bint:
     """Return whether the effects block is the typed overlay of the source.
 
     Non-CALL instructions must be the identical retained object; every CALL
@@ -180,11 +193,15 @@ def _effects_overlay_holds_8616(
     may claim a non-CALL or out-of-range index — the annotation is
     accounted to the Semantics owner, never erased for comparison.
     """
+    fact: object
+    effects_instr: object
+    index: object
+    source_instr: object
     if (
-        source_block.addr != effects_block.addr
-        or source_block.refusals != effects_block.refusals
-        or source_block.successor_addrs != effects_block.successor_addrs
-        or len(source_block.instrs) != len(effects_block.instrs)
+        operator.ne(source_block.addr, effects_block.addr)
+        or operator.ne(source_block.refusals, effects_block.refusals)
+        or operator.ne(source_block.successor_addrs, effects_block.successor_addrs)
+        or operator.ne(len(source_block.instrs), len(effects_block.instrs))
     ):
         return False
     for index, (source_instr, effects_instr) in enumerate(
@@ -197,15 +214,14 @@ def _effects_overlay_holds_8616(
         fact = facts_by_index.get(index)
         if (
             fact is None
-            or fact.callsite_addr != source_instr.addr
+            or operator.ne(fact.callsite_addr, source_instr.addr)
             or effects_instr.args is not source_instr.args
             or effects_instr.dst is not source_instr.dst
-            or replace(source_instr, call_stack_effect=fact.effect)
-            != effects_instr
+            or operator.ne(replace(source_instr, call_stack_effect=fact.effect), effects_instr)
         ):
             return False
     return all(
         0 <= fact.instr_index < len(source_block.instrs)
         and source_block.instrs[fact.instr_index].op == "CALL"
-        for fact in facts_by_index.values()
+        for fact in builtins.iter(facts_by_index.values())
     )

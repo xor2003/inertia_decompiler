@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Runtime patch to override angr VEX dirty helpers for x86 IN/OUT.
 
 Layer: Frontend/runtime.
@@ -11,6 +12,7 @@ angr modules and sys.modules monkeypatch compatibility.
 """
 
 from __future__ import annotations
+import cython
 
 import sys
 import typing
@@ -24,11 +26,11 @@ __all__ = ["apply_patch"]
 class _DirtySolver(Protocol):
     """Minimal solver surface used by x86 dirty-helper fallback callbacks."""
 
-    def eval(self, value: object) -> int:
+    def eval(self, value: object) -> cython.longlong:
         """Evaluate a dirty-helper size expression."""
         ...
 
-    def BVV(self, value: int, bits: int) -> object:
+    def BVV(self, value: cython.longlong, bits: cython.longlong) -> object:
         """Create a concrete bit-vector value."""
         ...
 
@@ -39,13 +41,15 @@ class _DirtyState(Protocol):
     solver: _DirtySolver
 
 
-def _dirty_helper_size(state: _DirtyState, sz: object) -> int:
+@cython.ccall
+def _dirty_helper_size(state: _DirtyState, sz: object) -> cython.longlong:
     try:
         return int(sz) if isinstance(sz, int) else int(state.solver.eval(sz))
     except Exception:
         return 32
 
 
+@cython.ccall
 def _default_in(state: _DirtyState, _portno: object, sz: object) -> tuple[object, list[object]]:
     try:
         szv = _dirty_helper_size(state, sz)
@@ -58,10 +62,12 @@ def _default_in(state: _DirtyState, _portno: object, sz: object) -> tuple[object
     return claripy.BVV(0xFFFFFFFF, 32), []
 
 
+@cython.ccall
 def _default_out(_state: _DirtyState, _portno: object, _data: object, _sz: object) -> tuple[None, list[object]]:
     return None, []
 
 
+@cython.ccall
 def _register_io_simprocedures_8616() -> None:
     """Register the x86 IN/OUT SimProcedures when angr is importable."""
     try:
@@ -110,8 +116,11 @@ def _patch_vex_dirty_module_8616() -> None:
         pass
 
 
-def _patch_loaded_module_helpers_8616() -> int:
+@cython.ccall
+def _patch_loaded_module_helpers_8616() -> cython.longlong:
     """Replace dirty-helper attributes on every module already imported."""
+    _name: object
+    mod: object
     patched = 0
     for _name, mod in list(sys.modules.items()):
         if not mod:
@@ -128,7 +137,8 @@ def _patch_loaded_module_helpers_8616() -> int:
     return patched
 
 
-def apply_patch() -> int:
+@cython.ccall
+def apply_patch() -> cython.longlong:
     """Install best-effort x86 IN/OUT dirty-helper fallbacks.
 
     Dynamic attribute boundary: this function patches optional attributes on

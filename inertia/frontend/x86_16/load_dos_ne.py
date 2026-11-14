@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/runtime.
 
 Responsibility: load DOS NE executables and resource metadata into the frontend model.
@@ -7,6 +8,8 @@ keyword arguments through a third-party plugin API.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import BinaryIO, cast
@@ -16,10 +19,12 @@ from cle.backends import Blob, register_backend
 
 from .arch_86_16 import Arch86_16
 from .ne_resources import NEResourceTable, parse_ne_resources_bytes
+import dataclasses
 
 __all__ = ("DOSNE", "DOSNEHeader", "NESegmentMapping", "NESegmentRecord")
 
 
+@cython.ccall
 def _read_mz_new_header_offset(stream: BinaryIO) -> int | None:
     """Read the NE header offset from an MZ-compatible binary stream."""
     stream.seek(0)
@@ -29,23 +34,24 @@ def _read_mz_new_header_offset(stream: BinaryIO) -> int | None:
     return int.from_bytes(header[0x3C:0x40], "little")
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class DOSNEHeader:
     """Parsed NE header fields that seed frontend segment and entry state."""
 
-    ne_header_offset: int
-    entry_ip: int
-    entry_segment: int
-    stack_sp: int
-    stack_segment: int
-    segment_count: int
-    segment_table_offset: int
-    alignment_shift: int
-    target_os: int
+    ne_header_offset: cython.longlong
+    entry_ip: cython.longlong
+    entry_segment: cython.longlong
+    stack_sp: cython.longlong
+    stack_segment: cython.longlong
+    segment_count: cython.longlong
+    segment_table_offset: cython.longlong
+    alignment_shift: cython.longlong
+    target_os: cython.longlong
 
     @classmethod
     def from_stream(cls, stream: BinaryIO) -> DOSNEHeader:
         """Parse the core DOS NE header fields from a binary stream."""
+        ne_header_offset: object
         ne_header_offset = _read_mz_new_header_offset(stream)
         if ne_header_offset is None:
             raise ValueError("Not an MZ executable")
@@ -67,28 +73,28 @@ class DOSNEHeader:
         )
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class NESegmentRecord:
     """Raw NE segment-table record before frontend selector assignment."""
 
-    segment_number: int
-    file_offset: int
-    length: int
-    flags: int
-    min_alloc: int
+    segment_number: cython.longlong
+    file_offset: cython.longlong
+    length: cython.longlong
+    flags: cython.longlong
+    min_alloc: cython.longlong
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class NESegmentMapping:
     """Frontend memory mapping for one NE segment selector."""
 
-    segment_number: int
-    selector: int
-    mem_addr: int
-    file_offset: int
-    length: int
-    flags: int
-    min_alloc: int
+    segment_number: cython.longlong
+    selector: cython.longlong
+    mem_addr: cython.longlong
+    file_offset: cython.longlong
+    length: cython.longlong
+    flags: cython.longlong
+    min_alloc: cython.longlong
 
 
 class DOSNE(Blob):  # type: ignore[misc, unused-ignore] # dynamic CLE backend base
@@ -100,13 +106,14 @@ class DOSNE(Blob):  # type: ignore[misc, unused-ignore] # dynamic CLE backend ba
     addresses without flattening the executable into one guessed object.
     """
 
-    is_default: bool = True
+    is_default: cython.bint = True
 
-    DEFAULT_LOAD_BASE: int = 0x1000
-    initial_register_values: dict[str, int]
+    DEFAULT_LOAD_BASE: cython.longlong = 0x1000
+    initial_register_values: object
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         """Initialize a CLE blob backend from the third-party loader API."""
+        mapping: object
         if len(args) < 2:
             raise ValueError("DOSNE expects binary path and binary stream")
 
@@ -122,11 +129,11 @@ class DOSNE(Blob):  # type: ignore[misc, unused-ignore] # dynamic CLE backend ba
         segment_mappings = self._build_segment_mappings(segment_records, load_base)
         segments = [
             (mapping.file_offset, mapping.mem_addr, mapping.length)
-            for mapping in segment_mappings
+            for mapping in iter(segment_mappings)
             if mapping.file_offset > 0 and mapping.length > 0
         ]
 
-        selector_by_segment = {mapping.segment_number: mapping.selector for mapping in segment_mappings}
+        selector_by_segment = {mapping.segment_number: mapping.selector for mapping in iter(segment_mappings)}
         entry_point = load_base
         if header.entry_segment in selector_by_segment:
             entry_point = (selector_by_segment[header.entry_segment] << 4) + header.entry_ip
@@ -188,10 +195,11 @@ class DOSNE(Blob):  # type: ignore[misc, unused-ignore] # dynamic CLE backend ba
 
     @staticmethod
     def _build_segment_mappings(
-        records: tuple[NESegmentRecord, ...],
-        load_base: int,
+        records: object,
+        load_base: cython.longlong,
     ) -> tuple[NESegmentMapping, ...]:
         """Map NE segment records to paragraph-aligned frontend selectors."""
+        record: object
         mappings: list[NESegmentMapping] = []
         current_addr = load_base
         for record in records:
@@ -212,8 +220,9 @@ class DOSNE(Blob):  # type: ignore[misc, unused-ignore] # dynamic CLE backend ba
         return tuple(mappings)
 
     @staticmethod
-    def is_compatible(stream: BinaryIO) -> bool:
+    def is_compatible(stream: BinaryIO) -> cython.bint:
         """Return whether the binary stream contains a DOS NE executable."""
+        ne_header_offset: object
         ne_header_offset = _read_mz_new_header_offset(stream)
         if ne_header_offset is None:
             return False

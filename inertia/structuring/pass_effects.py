@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Describe which Lowering consumers a Structuring mutation can invalidate.
 
 Layer: Structuring.
@@ -12,6 +13,8 @@ rewrite cleanup, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from enum import IntEnum
 
@@ -34,11 +37,12 @@ class StructuringLoweringReplayImpact8616(IntEnum):
         return max(self, other)
 
 
+@cython.ccall
 def structuring_lowering_replay_impact_after_changes_8616(
     current: StructuringLoweringReplayImpact8616,
     *,
-    return_liveness_changed: bool,
-    full_ast_changes: tuple[bool, ...],
+    return_liveness_changed: cython.bint,
+    full_ast_changes: object,
 ) -> StructuringLoweringReplayImpact8616:
     """Upgrade replay when a post-prime Structuring pass invalidates Lowering.
 
@@ -55,12 +59,13 @@ def structuring_lowering_replay_impact_after_changes_8616(
     return current
 
 
+@cython.ccall
 def structuring_return_closure_requires_segment_replay_8616(
     *,
-    switch_exit_changed: bool,
-    terminal_call_return_changed: bool,
-    terminal_return_shape_changed: bool,
-) -> bool:
+    switch_exit_changed: cython.bint,
+    terminal_call_return_changed: cython.bint,
+    terminal_return_shape_changed: cython.bint,
+) -> cython.bint:
     """Return whether return closure rebuilt a segment/global consumer."""
     return bool(
         switch_exit_changed

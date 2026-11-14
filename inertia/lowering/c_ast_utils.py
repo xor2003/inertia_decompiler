@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Syntax-only helpers for angr structured C AST nodes.
 
 Layer: Helper boundary.
@@ -20,6 +21,7 @@ Consumes alias, widening, and typed facts.
 Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 from __future__ import annotations
+import cython
 
 import copy
 import typing
@@ -43,6 +45,8 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CVariable,
 )
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
+import operator
+import builtins
 
 __all__ = [
     "_c_ast_cycle_path_8616",
@@ -109,8 +113,10 @@ class _SwitchCases8616(Protocol):
     cases: Sequence[object] | None
 
 
+@cython.ccall
 def _unwrap_statements_8616(node: object) -> tuple[object, ...]:
     """Safely extract statement children across the dynamic third-party angr boundary."""
+    raw: object
     if node is None:
         return ()
     if isinstance(node, CStatements):
@@ -125,7 +131,8 @@ def _unwrap_statements_8616(node: object) -> tuple[object, ...]:
     return ()
 
 
-def _structured_codegen_node_8616(value: object) -> bool:
+@cython.ccall
+def _structured_codegen_node_8616(value: object) -> cython.bint:
     """Return whether a value participates in the structured C AST boundary."""
     # Empty fields and numeric literals dominate non-node children. Only exact
     # builtins bypass the boundary; foreign subclasses retain their metadata.
@@ -136,8 +143,11 @@ def _structured_codegen_node_8616(value: object) -> bool:
     )
 
 
-def _labeled_c_children_8616(value: object, label: str) -> Iterator[tuple[str, object]]:
+def _labeled_c_children_8616(value: object, label: object) -> Iterator[tuple[str, object]]:
     """Yield labeled structured nodes from one dynamic child container."""
+    child: object
+    index: object
+    key: object
     if _structured_codegen_node_8616(value):
         yield label, value
         return
@@ -150,15 +160,20 @@ def _labeled_c_children_8616(value: object, label: str) -> Iterator[tuple[str, o
             yield from _labeled_c_children_8616(child, f"{label}[{index}]")
 
 
-def _c_ast_cycle_path_8616(node: object, *, max_nodes: int = 16_384) -> tuple[str, ...]:
+def _c_ast_cycle_path_8616(node: object, *, max_nodes: cython.longlong = 16_384) -> object:
     """Return one owned-child path that proves a structured C AST cycle."""
-    active_indexes: dict[int, int] = {}
-    completed: set[int] = set()
+    active_indexes: dict[cython.longlong, cython.longlong] = {}
+    completed: set[cython.longlong] = set()
     path: list[str] = []
     visited = 0
 
-    def _walk(current: object, edge: str) -> tuple[str, ...]:
+    def _walk(current: object, edge: object) -> object:
         """Depth-first search using active-path identity, not shared-node identity."""
+        op: object
+        value: object
+        attr: object
+        child: object
+        child_edge: object
         nonlocal visited
         if not _structured_codegen_node_8616(current):
             return ()
@@ -188,8 +203,9 @@ def _c_ast_cycle_path_8616(node: object, *, max_nodes: int = 16_384) -> tuple[st
     return _walk(node, "root")
 
 
-def _clone_c_ast_tree_8616(node: object, memo: dict[int, object] | None = None) -> object:
+def _clone_c_ast_tree_8616(node: object, memo: object = None) -> object:
     """Clone structured C nodes while preserving non-AST boundary objects."""
+    attr: object
     if not _structured_codegen_node_8616(node):
         return node
     if memo is None:
@@ -206,11 +222,11 @@ def _clone_c_ast_tree_8616(node: object, memo: dict[int, object] | None = None) 
         if _structured_codegen_node_8616(value):
             return _clone_c_ast_tree_8616(value, memo)
         if isinstance(value, list):
-            return [_clone_value(item) for item in value]
+            return [_clone_value(item) for item in iter(value)]
         if isinstance(value, tuple):
-            return tuple(_clone_value(item) for item in value)
+            return tuple(_clone_value(item) for item in iter(value))
         if isinstance(value, dict):
-            return {key: _clone_value(item) for key, item in value.items()}
+            return {key: _clone_value(item) for key, item in builtins.iter(value.items())}
         return value
 
     for attr in _structured_slot_names_8616(node):
@@ -219,6 +235,7 @@ def _clone_c_ast_tree_8616(node: object, memo: dict[int, object] | None = None) 
     return cloned
 
 
+@cython.ccall
 def _safe_assign_cfunc_statements_8616(codegen: object, new_root: object, old_root: object) -> object:
     """Assign cfunc statements across the dynamic third-party angr boundary."""
     if isinstance(old_root, CStatements) and not isinstance(new_root, CStatements):
@@ -233,13 +250,17 @@ def _safe_assign_cfunc_statements_8616(codegen: object, new_root: object, old_ro
 @lru_cache(maxsize=256)
 def _structured_slot_names_for_type_8616(
     value_type: type,
-    excluded_attrs: frozenset[str] = _STRUCTURED_NON_CHILD_ATTRS_8616,
+    excluded_attrs: object = _STRUCTURED_NON_CHILD_ATTRS_8616,
 ) -> tuple[str, ...]:
     """Cache class layouts while retaining each consumer's field exclusions.
 
     Only immutable class slot metadata is cached. Instance dictionaries and
     child values are read on every traversal, including after AST mutations.
     """
+    slots: object
+    attr: object
+    cls: object
+    slot: object
     attrs: list[str] = []
     if value_type is object:
         return ()
@@ -264,8 +285,10 @@ def _structured_slot_names_for_type_8616(
     return tuple(ordered)
 
 
-def _structured_slot_names_8616(value: object) -> tuple[str, ...]:
+def _structured_slot_names_8616(value: object) -> object:
     """List child slots across the dynamic third-party angr C AST boundary."""
+    child_attrs: object
+    attr: object
     # These exact leaf classes own every value/reference field in their slots.
     # Inherited ident/collapsed fields are display metadata, not AST children.
     # Subclasses and same-named extensions must retain generic field discovery.
@@ -290,7 +313,7 @@ def _structured_slot_names_8616(value: object) -> tuple[str, ...]:
         return base_attrs
     attrs.extend(
         attr
-        for attr in dynamic_keys
+        for attr in iter(dynamic_keys)
         if isinstance(attr, str) and not attr.startswith("_") and attr not in _STRUCTURED_NON_CHILD_ATTRS_8616
     )
     if not attrs:
@@ -306,8 +329,9 @@ def _structured_slot_names_8616(value: object) -> tuple[str, ...]:
     return tuple(ordered)
 
 
-def _iter_c_node_children_8616(value: object, seen_values: set[int] | None = None) -> Iterator[object]:
+def _iter_c_node_children_8616(value: object, seen_values: object = None) -> Iterator[object]:
     """Yield structured nodes directly contained by a dynamic boundary value."""
+    current: object
     if seen_values is None:
         seen_values = set()
 
@@ -342,8 +366,12 @@ def _iter_c_node_children_8616(value: object, seen_values: set[int] | None = Non
 
 def _iter_c_statement_nodes_8616(root: object) -> Iterator[object]:
     """Iterate control-flow containers without descending into expressions."""
+    current: object
+    value: object
+    attr: object
+    item: object
     stack = [root]
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     while stack:
         current = stack.pop()
         if not _structured_codegen_node_8616(current):
@@ -377,7 +405,7 @@ class CTraversalFailure8616(StrEnum):
 class CTraversalContractError8616(RuntimeError):
     """Report the exact AST field where structural traversal became unsafe."""
 
-    def __init__(self, node_type: str, child_path: str, reason: CTraversalFailure8616) -> None:
+    def __init__(self, node_type: object, child_path: object, reason: CTraversalFailure8616) -> None:
         """Retain structured context and provide an actionable error message."""
         self.node_type = node_type
         self.child_path = child_path
@@ -385,11 +413,15 @@ class CTraversalContractError8616(RuntimeError):
         super().__init__(f"C AST traversal failed at {node_type}.{child_path}: {reason.value}")
 
 
+@cython.ccall
 def _replace_c_child_value_8616(
-    value: object, parent: object, path: str, active: frozenset[int],
-    pending: list[object], transform: Callable[[object], object],
-) -> tuple[object, bool]:
+    value: object, parent: object, path: object, active: object,
+    pending: object, transform: Callable[[object], object],
+) -> tuple[object, cython.bint]:
     """Project one child edge without losing nested container structure."""
+    index: object
+    item: object
+    key: object
     if _structured_codegen_node_8616(value):
         replacement = transform(value)
         pending.append(replacement)
@@ -417,28 +449,31 @@ def _replace_c_child_value_8616(
         result = value.copy()
         result.update(replacements)
         return result, True
-    values = [replacement for _, replacement in replacements]
+    values = [replacement for _, replacement in iter(replacements)]
     return (tuple(values) if isinstance(value, tuple) else values), True
 
 
 def _replace_c_children_8616(
     node: object,
     transform: Callable[[object], object],
-    seen: set[int] | None = None,
+    seen: object = None,
     *,
     should_process_child: Callable[[object, str], object] | None = None,
-) -> bool:
+) -> cython.bint:
     """Replace every declared child using the same schema as read traversal.
 
     Preserve container kinds and mapping keys. Report malformed child access
     and cyclic containers at the responsible node/field, not as absent children.
     """
+    current: object
+    attr: object
     visited = set() if seen is None else seen
     pending = [node]
     changed = False
 
-    def process_field(current: object, attr: str) -> bool:
+    def process_field(current: object, attr: object) -> cython.bint:
         """Apply the child policy and contextualize dynamic field-access errors."""
+        value: object
         if should_process_child is not None and not should_process_child(current, attr):
             return False
         try:
@@ -470,8 +505,11 @@ def _replace_c_children_8616(
     return changed
 
 
-def _iter_c_nodes_deep_8616(node: object, seen: set[int] | None = None) -> Iterator[object]:
+def _iter_c_nodes_deep_8616(node: object, seen: object = None) -> Iterator[object]:
     """Iterate C AST nodes across the dynamic third-party angr boundary."""
+    current: object
+    value: object
+    attr: object
     if seen is None:
         seen = set()
     if not _structured_codegen_node_8616(node):
@@ -486,7 +524,7 @@ def _iter_c_nodes_deep_8616(node: object, seen: set[int] | None = None) -> Itera
         seen.add(node_id)
         yield current
 
-        seen_values: set[int] = set()
+        seen_values: set[cython.longlong] = set()
         for attr in _structured_slot_names_8616(current):
             try:
                 value = getattr(current, attr)
@@ -504,6 +542,10 @@ def iter_c_direct_children_8616(node: CConstruct) -> Iterator[CConstruct]:
     Dynamic boundary: the canonical native-node slot metadata determines field
     names. Missing fields violate that contract; they are not empty children.
     """
+    value: object
+    _path: object
+    attribute: object
+    child: object
     for attribute in _structured_slot_names_8616(node):
         try:
             value = getattr(node, attribute)
@@ -517,9 +559,11 @@ def iter_c_direct_children_8616(node: CConstruct) -> Iterator[CConstruct]:
 
 def _iter_c_node_occurrences_8616(
     value: object,
-    active_node_ids: frozenset[int] = frozenset(),
+    active_node_ids: object = frozenset(),
 ) -> Iterator[object]:
     """Yield each AST edge occurrence while refusing active-path cycles."""
+    attr: object
+    child: object
     if isinstance(value, dict):
         for child in value.values():
             yield from _iter_c_node_occurrences_8616(child, active_node_ids)
@@ -544,8 +588,13 @@ def _iter_c_node_occurrences_8616(
             )
 
 
-def _dirty_register_identity_8616(dirty: object) -> tuple[str, object] | None:
+@cython.ccall
+def _dirty_register_identity_8616(dirty: object) -> object:
     """Read register identity from version-dependent third-party dirty nodes."""
+    bits: object
+    size: object
+    value: object
+    attr: object
     for attr in ("reg_offset", "reg", "variable_offset"):
         value = None
         with suppress(AttributeError, TypeError, ValueError):
@@ -562,8 +611,13 @@ def _dirty_register_identity_8616(dirty: object) -> tuple[str, object] | None:
     return None
 
 
-def _dirty_identity_8616(node: CDirtyExpression) -> tuple[str, object] | None:
+@cython.ccall
+def _dirty_identity_8616(node: CDirtyExpression) -> object:
     """Preserve native dirty identity precedence without guessing unknown nodes."""
+    name: object
+    register: object
+    tmp_idx: object
+    varid: object
     dirty = node.dirty
     register = _dirty_register_identity_8616(dirty)
     if register is not None:
@@ -582,44 +636,48 @@ def _dirty_identity_8616(node: CDirtyExpression) -> tuple[str, object] | None:
     return None
 
 
-def _same_c_variable_8616(lhs: CVariable, rhs: CVariable) -> bool:
+@cython.ccall
+def _same_c_variable_8616(lhs: CVariable, rhs: CVariable) -> cython.bint:
     """Compare existing storage coordinates at the native C-variable boundary."""
     lvar = lhs.variable
     rvar = rhs.variable
     if type(lvar) is not type(rvar):
         return False
     if isinstance(lvar, SimRegisterVariable):
-        return bool(lvar.reg == cast(SimRegisterVariable, rvar).reg)
+        return bool(operator.eq(lvar.reg, cast(SimRegisterVariable, rvar).reg))
     # Stack variables subclass memory variables but also require frame identity.
     if isinstance(lvar, SimStackVariable):
         rhs_stack = cast(SimStackVariable, rvar)
         return bool(
-            lvar.offset == rhs_stack.offset and lvar.size == rhs_stack.size
-            and lvar.base == rhs_stack.base and lvar.region == rhs_stack.region
+            operator.eq(lvar.offset, rhs_stack.offset) and operator.eq(lvar.size, rhs_stack.size)
+            and operator.eq(lvar.base, rhs_stack.base) and operator.eq(lvar.region, rhs_stack.region)
         )
     if isinstance(lvar, SimMemoryVariable):
         rhs_memory = cast(SimMemoryVariable, rvar)
-        return bool(lvar.addr == rhs_memory.addr and lvar.size == rhs_memory.size)
+        return bool(operator.eq(lvar.addr, rhs_memory.addr) and operator.eq(lvar.size, rhs_memory.size))
     return lhs is rhs
 
 
-def _same_c_leaf_8616(lhs: object, rhs: object) -> bool:
+@cython.ccall
+def _same_c_leaf_8616(lhs: object, rhs: object) -> cython.bint:
     """Compare same-class leaves, retaining identity fallback for unknown nodes."""
+    lhs_key: object
+    rhs_key: object
     if isinstance(lhs, CConstant):
-        return bool(lhs.value == cast(CConstant, rhs).value)
+        return bool(operator.eq(lhs.value, cast(CConstant, rhs).value))
     if isinstance(lhs, CDirtyExpression):
         rhs_dirty = cast(CDirtyExpression, rhs)
         lhs_key = _dirty_identity_8616(lhs)
         rhs_key = _dirty_identity_8616(rhs_dirty)
         if lhs_key is not None or rhs_key is not None:
-            return lhs_key == rhs_key
+            return operator.eq(lhs_key, rhs_key)
         return lhs.dirty is rhs_dirty.dirty
     if isinstance(lhs, CVariable):
         return _same_c_variable_8616(lhs, cast(CVariable, rhs))
     return lhs is rhs
 
 
-def _same_c_expression_8616(lhs: object, rhs: object) -> bool:
+def _same_c_expression_8616(lhs: object, rhs: object) -> cython.bint:
     """Compare C expressions across the dynamic third-party angr boundary."""
     if type(lhs) is not type(rhs):
         return False
@@ -628,11 +686,11 @@ def _same_c_expression_8616(lhs: object, rhs: object) -> bool:
         return _same_c_expression_8616(lhs.expr, rhs_cast.expr)
     if isinstance(lhs, CUnaryOp):
         rhs_unary = cast(CUnaryOp, rhs)
-        return lhs.op == rhs_unary.op and _same_c_expression_8616(lhs.operand, rhs_unary.operand)
+        return operator.eq(lhs.op, rhs_unary.op) and _same_c_expression_8616(lhs.operand, rhs_unary.operand)
     if isinstance(lhs, CBinaryOp):
         rhs_binary = cast(CBinaryOp, rhs)
         return (
-            lhs.op == rhs_binary.op
+            operator.eq(lhs.op, rhs_binary.op)
             and _same_c_expression_8616(lhs.lhs, rhs_binary.lhs)
             and _same_c_expression_8616(lhs.rhs, rhs_binary.rhs)
         )
@@ -649,8 +707,8 @@ def _same_c_expression_8616(lhs: object, rhs: object) -> bool:
             return False
         lhs_args = tuple(lhs.args or ())
         rhs_args = tuple(rhs_call.args or ())
-        return len(lhs_args) == len(rhs_args) and all(
-            _same_c_expression_8616(lhs_arg, rhs_arg) for lhs_arg, rhs_arg in zip(lhs_args, rhs_args, strict=True)
+        return operator.eq(len(lhs_args), len(rhs_args)) and all(
+            _same_c_expression_8616(lhs_arg, rhs_arg) for lhs_arg, rhs_arg in builtins.iter(zip(lhs_args, rhs_args, strict=True))
         )
     if isinstance(lhs, CIndexedVariable):
         rhs_indexed = cast(CIndexedVariable, rhs)
@@ -660,8 +718,15 @@ def _same_c_expression_8616(lhs: object, rhs: object) -> bool:
     return _same_c_leaf_8616(lhs, rhs)
 
 
-def _same_call_target_8616(lhs: CFunctionCall, rhs: CFunctionCall) -> bool:
+@cython.ccall
+def _same_call_target_8616(lhs: CFunctionCall, rhs: CFunctionCall) -> cython.bint:
     """Compare call targets across the dynamic third-party angr boundary."""
+    lhs_addr: object
+    lhs_func: object
+    lhs_target: object
+    rhs_addr: object
+    rhs_func: object
+    rhs_target: object
     lhs_func = lhs.callee_func
     rhs_func = rhs.callee_func
     if lhs_func is not None or rhs_func is not None:
@@ -670,8 +735,8 @@ def _same_call_target_8616(lhs: CFunctionCall, rhs: CFunctionCall) -> bool:
         lhs_addr = getattr(lhs_func, "addr", None)
         rhs_addr = getattr(rhs_func, "addr", None)
         if isinstance(lhs_addr, int) or isinstance(rhs_addr, int):
-            return lhs_addr == rhs_addr
-        return getattr(lhs_func, "name", None) == getattr(rhs_func, "name", None)
+            return operator.eq(lhs_addr, rhs_addr)
+        return operator.eq(getattr(lhs_func, "name", None), getattr(rhs_func, "name", None))
     lhs_target = lhs.callee_target
     rhs_target = rhs.callee_target
     if lhs_target is None or rhs_target is None:

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Verify source identity before grouping multiple SSA reads as one witness.
 
 Layer: Types/Lowering.
@@ -9,19 +10,27 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from inertia.ir.ssa_function import SSAFunctionArtifact
+import operator
 
 
+@cython.ccall
 def distinct_return_witness_sources_8616(
     artifact: SSAFunctionArtifact,
-    candidates: tuple[tuple[int, int, int], ...],
-) -> bool:
+    candidates: object,
+) -> cython.bint:
     """Require one exact, unique source statement per selected SSA operation."""
+    origin: object
+    block: object
+    index: object
+    instruction: object
     sites = set(candidates)
-    if not sites or len(sites) != len(candidates):
+    if not sites or operator.ne(len(sites), len(candidates)):
         return False
-    origins: list[tuple[int, int]] = []
+    origins: list[tuple[cython.longlong, cython.longlong]] = []
     for block in artifact.blocks:
         for index, instruction in enumerate(block.instrs):
             if (block.addr, index, instruction.addr) not in sites:
@@ -31,10 +40,10 @@ def distinct_return_witness_sources_8616(
                 return False
             if (
                 type(origin.block_addr) is not int
-                or origin.block_addr != block.addr
+                or operator.ne(origin.block_addr, block.addr)
                 or type(origin.statement_index) is not int
                 or origin.statement_index < 0
             ):
                 return False
             origins.append((origin.block_addr, origin.statement_index))
-    return len(origins) == len(candidates) and len(set(origins)) == len(origins)
+    return operator.eq(len(origins), len(candidates)) and operator.eq(len(set(origins)), len(origins))

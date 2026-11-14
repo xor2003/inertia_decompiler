@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed provenance for CFG-materialized composite conditions.
 
 Layer: Structuring.
@@ -15,6 +16,7 @@ work here.
 """
 
 from __future__ import annotations
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -22,17 +24,19 @@ from typing import Protocol, cast
 
 from inertia.ir.condition_ir import ConditionIR
 from inertia.lowering.structured_tags import copy_structured_tags_8616
+import dataclasses
+import operator
 
 CONDITION_CHAIN_PROVENANCE_TAG_8616: str = (
     "inertia_structuring_condition_chain_provenance_8616"
 )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionChainProvenance8616:
     """Exact JCC identities consumed into one structured condition chain."""
 
-    jcc_addrs: tuple[int, ...]
+    jcc_addrs: object
 
 
 class _TaggedConditionExpression8616(Protocol):
@@ -43,17 +47,17 @@ class _TaggedConditionExpression8616(Protocol):
 
 def bind_condition_chain_provenance_8616(
     expression: object,
-    conditions: tuple[ConditionIR, ...],
+    conditions: object,
 ) -> ConditionChainProvenance8616 | None:
     """Attach complete, unique JCC provenance to one materialized expression."""
     jcc_addrs = tuple(
         dict.fromkeys(
             condition.src_insn
-            for condition in conditions
+            for condition in iter(conditions)
             if isinstance(condition.src_insn, int)
         )
     )
-    if len(jcc_addrs) != len(conditions) or not jcc_addrs:
+    if operator.ne(len(jcc_addrs), len(conditions)) or not jcc_addrs:
         return None
     provenance = ConditionChainProvenance8616(jcc_addrs)
     surface = cast(_TaggedConditionExpression8616, expression)
@@ -66,10 +70,12 @@ def bind_condition_chain_provenance_8616(
     return provenance
 
 
+@cython.ccall
 def condition_chain_provenance_8616(
     expression: object,
 ) -> ConditionChainProvenance8616 | None:
     """Read valid composite-condition provenance from a C expression."""
+    provenance: object
     surface = cast(_TaggedConditionExpression8616, expression)
     try:
         tags = surface.tags

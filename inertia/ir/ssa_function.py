@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Build function-level SSA artifacts and phi nodes over typed IR.
 
 Layer: IR.
@@ -8,6 +9,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 
@@ -31,6 +34,8 @@ from .ssa_memory_contracts import (
     SSAMemoryPhiNode8616,
     SSAMemoryStats8616,
 )
+import dataclasses
+import builtins
 
 _MIN_PHI_INPUTS_8616 = 2
 
@@ -49,11 +54,11 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SSAIncomingValue:
     """Incoming SSA value from one predecessor block."""
 
-    source_block_addr: int
+    source_block_addr: cython.longlong
     value: IRValue
 
     def to_dict(self) -> dict[str, object]:
@@ -64,14 +69,14 @@ class SSAIncomingValue:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SSAPhiNode:
     """Phi node for a typed IR value with multiple predecessor definitions."""
 
-    block_addr: int
-    key: tuple[str, str | None, int]
+    block_addr: cython.longlong
+    key: object
     target: IRValue
-    incoming: tuple[SSAIncomingValue, ...]
+    incoming: object
 
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-friendly representation."""
@@ -79,16 +84,16 @@ class SSAPhiNode:
             "block_addr": self.block_addr,
             "key": list(self.key),
             "target": self.target.to_dict(),
-            "incoming": [item.to_dict() for item in self.incoming],
+            "incoming": [item.to_dict() for item in iter(self.incoming)],
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SSAFunctionArtifact:
     """Function SSA projection sharing the raw IR owner's lifecycle and refusal state."""
 
-    function_addr: int
-    blocks: tuple[SSABlock, ...]
+    function_addr: cython.longlong
+    blocks: object
     phi_nodes: tuple[SSAPhiNode, ...] = ()
     memory_bindings: tuple[SSAMemoryBinding8616, ...] = ()
     memory_accesses: tuple[SSAMemoryAccess8616, ...] = ()
@@ -97,12 +102,12 @@ class SSAFunctionArtifact:
     memory_call_effects: tuple[SSACallStackEffectSite8616, ...] = ()
     memory_refusals: tuple[IRRefusal, ...] = ()
     memory_stats: SSAMemoryStats8616 = SSAMemoryStats8616()  # noqa: RUF009
-    predecessor_map: dict[int, tuple[int, ...]] = field(default_factory=dict)
-    summary: dict[str, object] = field(default_factory=dict)
+    predecessor_map: object = field(default_factory=dict)
+    summary: object = field(default_factory=dict)
     logical_memory: IRLogicalMemoryArtifact8616 | None = None
     condition_evidence: IRFunctionConditionArtifact8616 | None = None
     source_revision: FunctionSourceRevision8616 | None = None
-    parent_digest: str | None = None
+    parent_digest: object = None
     lifecycle_stage: FunctionLifecycleStage8616 = FunctionLifecycleStage8616.IR
 
     lifecycle: FunctionLifecycle8616 = field(default_factory=FunctionLifecycle8616, compare=False, repr=False)
@@ -111,12 +116,14 @@ class SSAFunctionArtifact:
         """Return a deterministic JSON-friendly representation."""
         return {
             "function_addr": self.function_addr,
-            "blocks": [block.to_dict() for block in self.blocks],
+            "blocks": [block.to_dict() for block in iter(self.blocks)],
             **self.non_block_payload_8616(),
         }
 
     def canonical_blocks_payload_8616(self) -> dict[str, object]:
         """Bind raw instructions and SSA definitions without expanding expression DAGs."""
+        binding: object
+        block: object
         from .source_graph_binding import canonical_ir_instruction_graph_8616
 
         targets: list[IRValue] = []
@@ -137,7 +144,7 @@ class SSAFunctionArtifact:
             })
         return {
             "instruction_graph": canonical_ir_instruction_graph_8616(
-                tuple(block.instrs for block in self.blocks), tuple(targets),
+                tuple(block.instrs for block in iter(self.blocks)), tuple(targets),
             ),
             "blocks": blocks,
         }
@@ -146,13 +153,13 @@ class SSAFunctionArtifact:
         """Share non-block fields between diagnostics and finite body attestation."""
         return {
             "function_addr": self.function_addr,
-            "phi_nodes": [phi.to_dict() for phi in self.phi_nodes],
-            "memory_bindings": [binding.to_dict() for binding in self.memory_bindings],
-            "memory_accesses": [access.to_dict() for access in self.memory_accesses],
-            "memory_phi_nodes": [phi.to_dict() for phi in self.memory_phi_nodes],
-            "memory_overlaps": [overlap.to_dict() for overlap in self.memory_overlaps],
-            "memory_call_effects": [effect.to_dict() for effect in self.memory_call_effects],
-            "memory_refusals": [refusal.to_dict() for refusal in self.memory_refusals],
+            "phi_nodes": [phi.to_dict() for phi in iter(self.phi_nodes)],
+            "memory_bindings": [binding.to_dict() for binding in iter(self.memory_bindings)],
+            "memory_accesses": [access.to_dict() for access in iter(self.memory_accesses)],
+            "memory_phi_nodes": [phi.to_dict() for phi in iter(self.memory_phi_nodes)],
+            "memory_overlaps": [overlap.to_dict() for overlap in iter(self.memory_overlaps)],
+            "memory_call_effects": [effect.to_dict() for effect in iter(self.memory_call_effects)],
+            "memory_refusals": [refusal.to_dict() for refusal in iter(self.memory_refusals)],
             "memory_stats": {
                 "raw_fact_count": self.memory_stats.raw_fact_count,
                 "normalized_fact_count": self.memory_stats.normalized_fact_count,
@@ -161,7 +168,7 @@ class SSAFunctionArtifact:
                 "failure_count": self.memory_stats.failure_count,
             },
             "predecessor_map": {
-                hex(addr): [hex(pred) for pred in preds] for addr, preds in sorted(self.predecessor_map.items())
+                hex(addr): [hex(pred) for pred in iter(preds)] for addr, preds in builtins.iter(sorted(tuple(self.predecessor_map.items())))
             },
             "summary": dict(self.summary),
             "logical_memory": (
@@ -181,15 +188,19 @@ class SSAFunctionArtifact:
         }
 
 
-def _value_key(value: IRValue) -> tuple[str, str | None, int] | None:
+@cython.ccall
+def _value_key(value: IRValue) -> object:
     """Use the same storage identity for block definitions and function joins."""
     if value.space in {MemSpace.CONST, MemSpace.UNKNOWN}:
         return None
     return _version_key(value)
 
 
-def _block_exit_versions(block: SSABlock) -> dict[tuple[str, str | None, int], IRValue]:
-    exit_versions: dict[tuple[str, str | None, int], IRValue] = {}
+@cython.ccall
+def _block_exit_versions(block: SSABlock) -> object:
+    key: object
+    binding: object
+    exit_versions: dict[tuple[str, str | None, cython.longlong], IRValue] = {}
     for binding in block.bindings:
         key = _value_key(binding.target)
         if key is None:
@@ -198,18 +209,22 @@ def _block_exit_versions(block: SSABlock) -> dict[tuple[str, str | None, int], I
     return exit_versions
 
 
-def build_x86_16_ir_predecessor_map(artifact: IRFunctionArtifact) -> dict[int, tuple[int, ...]]:
+@cython.ccall
+def build_x86_16_ir_predecessor_map(artifact: IRFunctionArtifact) -> dict[cython.longlong, tuple[cython.longlong, ...]]:
     """Derive deterministic in-function predecessors from typed IR CFG edges."""
-    block_addrs = {block.addr for block in artifact.blocks}
-    pred_map: dict[int, set[int]] = {block.addr: set() for block in artifact.blocks}
+    block: object
+    succ: object
+    block_addrs = {block.addr for block in iter(artifact.blocks)}
+    pred_map: dict[cython.longlong, set[cython.longlong]] = {block.addr: set() for block in iter(artifact.blocks)}
     for block in artifact.blocks:
         for succ in block.successor_addrs:
             if succ in block_addrs:
                 pred_map.setdefault(succ, set()).add(block.addr)
-    return {addr: tuple(sorted(preds)) for addr, preds in sorted(pred_map.items())}
+    return {addr: tuple(sorted(preds)) for addr, preds in builtins.iter(sorted(tuple(pred_map.items())))}
 
 
-def _distinct_incoming_values(values: tuple[SSAIncomingValue, ...]) -> bool:
+@cython.ccall
+def _distinct_incoming_values(values: object) -> cython.bint:
     seen = {
         (
             item.source_block_addr,
@@ -219,20 +234,20 @@ def _distinct_incoming_values(values: tuple[SSAIncomingValue, ...]) -> bool:
             item.value.const,
             item.value.version,
         )
-        for item in values
+        for item in iter(values)
     }
     return len(seen) > 1
 
 
 def _make_phi_target(
-    block_addr: int, key: tuple[str, str | None, int], incoming: tuple[SSAIncomingValue, ...]
+    block_addr: cython.longlong, key: object, incoming: object
 ) -> IRValue:
-    max_version = max((item.value.version or 0) for item in incoming)
+    max_version = max((item.value.version or 0) for item in iter(incoming))
     return IRValue(
         space=MemSpace(key[0]),
         name=key[1],
         offset=key[2],
-        size=max((item.value.size for item in incoming), default=0),
+        size=max((item.value.size for item in iter(incoming)), default=0),
         version=max_version + 1,
         expr=("phi", hex(block_addr)),
     )
@@ -242,7 +257,10 @@ def build_x86_16_function_ssa(artifact: IRFunctionArtifact) -> SSAFunctionArtifa
     """Build function-level SSA and phi-node facts from typed IR CFG edges."""
 
     def _impl() -> SSAFunctionArtifact:
-        local_blocks = tuple(build_x86_16_block_local_ssa(block) for block in artifact.blocks)
+        block_addr: object
+        key: object
+        preds: object
+        local_blocks = tuple(build_x86_16_block_local_ssa(block) for block in iter(artifact.blocks))
         pred_map = build_x86_16_ir_predecessor_map(artifact)
         memory_ssa = build_x86_16_function_memory_ssa(
             artifact.function_addr,
@@ -251,18 +269,18 @@ def build_x86_16_function_ssa(artifact: IRFunctionArtifact) -> SSAFunctionArtifa
             artifact.logical_memory,
         )
         local_blocks = memory_ssa.blocks
-        local_by_addr = {block.addr: block for block in local_blocks}
-        exits_by_addr = {block.addr: _block_exit_versions(block) for block in local_blocks}
+        local_by_addr = {block.addr: block for block in iter(local_blocks)}
+        exits_by_addr = {block.addr: _block_exit_versions(block) for block in iter(local_blocks)}
         phi_nodes: list[SSAPhiNode] = []
 
         for block_addr, preds in pred_map.items():
             if len(preds) < _MIN_PHI_INPUTS_8616:
                 continue
-            candidate_keys = sorted({key for pred in preds for key in exits_by_addr.get(pred, {})})
+            candidate_keys = sorted({key for pred in iter(preds) for key in builtins.iter(exits_by_addr.get(pred, {}))})
             for key in candidate_keys:
                 incoming = tuple(
                     SSAIncomingValue(source_block_addr=pred, value=exits_by_addr[pred][key])
-                    for pred in preds
+                    for pred in iter(preds)
                     if key in exits_by_addr.get(pred, {})
                 )
                 if len(incoming) < _MIN_PHI_INPUTS_8616 or not _distinct_incoming_values(incoming):
@@ -279,7 +297,7 @@ def build_x86_16_function_ssa(artifact: IRFunctionArtifact) -> SSAFunctionArtifa
         summary: dict[str, object] = {
             "block_count": len(local_blocks),
             "phi_node_count": len(phi_nodes),
-            "join_block_count": sum(1 for preds in pred_map.values() if len(preds) > 1),
+            "join_block_count": sum(1 for preds in builtins.iter(pred_map.values()) if len(preds) > 1),
             "memory_binding_count": len(memory_ssa.bindings),
             "memory_access_count": len(memory_ssa.accesses),
             "memory_phi_node_count": len(memory_ssa.phi_nodes),
@@ -289,7 +307,7 @@ def build_x86_16_function_ssa(artifact: IRFunctionArtifact) -> SSAFunctionArtifa
         }
         return SSAFunctionArtifact(
             function_addr=artifact.function_addr,
-            blocks=tuple(sorted(local_by_addr.values(), key=lambda block: block.addr)),
+            blocks=tuple(sorted(tuple(local_by_addr.values()), key=lambda block: block.addr)),
             phi_nodes=tuple(sorted(phi_nodes, key=lambda node: (node.block_addr, node.key))),
             memory_bindings=memory_ssa.bindings,
             memory_accesses=memory_ssa.accesses,

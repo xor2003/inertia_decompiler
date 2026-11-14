@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Synchronize names for exact segmented-global storage identities.
 
 Layer: Types/Lowering.
@@ -13,6 +14,8 @@ inspects rendered C, assembly text, or source text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -23,6 +26,9 @@ from angr.sim_variable import SimMemoryVariable, SimStackVariable, SimVariable
 
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 from inertia.pipeline.errors import PipelineHardError
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "DSGlobalLocalDeclarationStats8616",
@@ -32,13 +38,13 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DSGlobalSymbolNameFact8616:
     """One exact DS storage identity with a proven C symbol name."""
 
-    offset: int
-    width: int
-    name: str
+    offset: cython.longlong
+    width: cython.longlong
+    name: object
 
     def __post_init__(self) -> None:
         """Reject malformed owned name facts before AST mutation."""
@@ -50,15 +56,15 @@ class DSGlobalSymbolNameFact8616:
             raise ValueError("DS global symbol name must be nonempty")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DSGlobalLocalDeclarationStats8616:
     """Closed counters for exact global/local declaration reconciliation."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
 class _CFunctionBoundary8616(Protocol):
@@ -76,18 +82,20 @@ class _CodegenBoundary8616(Protocol):
     _inertia_ds_global_local_declaration_stats_8616: DSGlobalLocalDeclarationStats8616
 
 
+@cython.ccall
 def _names_by_storage_8616(
     facts: Iterable[DSGlobalSymbolNameFact8616],
-) -> tuple[dict[tuple[int, int], str], int]:
+) -> tuple[dict[tuple[cython.longlong, cython.longlong], str], cython.longlong]:
     """Normalize exact DS facts and reject conflicting names."""
+    fact: object
     fact_tuple = tuple(facts)
-    names_by_storage: dict[tuple[int, int], str] = {}
+    names_by_storage: dict[tuple[cython.longlong, cython.longlong], str] = {}
     for fact in fact_tuple:
         if not isinstance(fact, DSGlobalSymbolNameFact8616):
             raise TypeError("facts must contain DSGlobalSymbolNameFact8616")
         key = (fact.offset, fact.width)
         previous = names_by_storage.setdefault(key, fact.name)
-        if previous != fact.name:
+        if operator.ne(previous, fact.name):
             raise ValueError(
                 "conflicting names for exact DS global storage identity "
                 f"0x{fact.offset:04x}:{fact.width}"
@@ -95,7 +103,8 @@ def _names_by_storage_8616(
     return names_by_storage, len(fact_tuple)
 
 
-def _nonstack_memory_storage_key_8616(variable: object) -> tuple[int, int] | None:
+@cython.ccall
+def _nonstack_memory_storage_key_8616(variable: object) -> object:
     """Return one concrete non-stack memory identity from angr metadata."""
     if not isinstance(variable, SimMemoryVariable) or isinstance(variable, SimStackVariable):
         return None
@@ -104,11 +113,13 @@ def _nonstack_memory_storage_key_8616(variable: object) -> tuple[int, int] | Non
     return variable.addr & 0xFFFF, variable.size
 
 
+@cython.ccall
 def _rename_memory_variable_8616(
     variable: object,
-    names_by_storage: Mapping[tuple[int, int], str],
-) -> bool:
+    names_by_storage: Mapping[tuple[cython.longlong, cython.longlong], str],
+) -> cython.bint:
     """Rename one exact third-party memory-variable view when proven."""
+    preferred_name: object
     if not isinstance(variable, SimMemoryVariable):
         return False
     if not isinstance(variable.addr, int) or not isinstance(variable.size, int):
@@ -116,17 +127,18 @@ def _rename_memory_variable_8616(
     preferred_name = names_by_storage.get(
         (variable.addr & 0xFFFF, variable.size)
     )
-    if preferred_name is None or variable.name == preferred_name:
+    if preferred_name is None or operator.eq(variable.name, preferred_name):
         return False
     variable.name = preferred_name
     return True
 
 
+@cython.ccall
 def _rename_variable_pair_8616(
     variable: object,
     unified: object,
-    names_by_storage: Mapping[tuple[int, int], str],
-) -> bool:
+    names_by_storage: Mapping[tuple[cython.longlong, cython.longlong], str],
+) -> cython.bint:
     """Rename one variable and its unified view to the proven DS name."""
     changed = _rename_memory_variable_8616(variable, names_by_storage)
     if isinstance(unified, SimVariable) and _rename_memory_variable_8616(
@@ -136,11 +148,14 @@ def _rename_variable_pair_8616(
     return changed
 
 
+@cython.ccall
 def synchronize_ds_global_symbol_names_8616(
     codegen: object,
     facts: Iterable[DSGlobalSymbolNameFact8616],
-) -> bool:
+) -> cython.bint:
     """Give all exact C-variable views of each proven DS object one name."""
+    cfunc: object
+    node: object
     names_by_storage, _raw_fact_count = _names_by_storage_8616(facts)
     if not names_by_storage:
         return False
@@ -165,11 +180,14 @@ def synchronize_ds_global_symbol_names_8616(
     return changed
 
 
+@cython.ccall
 def _rename_variables_in_use_8616(
     variables_in_use: object,
-    names_by_storage: Mapping[tuple[int, int], str],
-) -> bool:
+    names_by_storage: Mapping[tuple[cython.longlong, cython.longlong], str],
+) -> cython.bint:
     """Rename every in-use variable and C-view to the proven DS name."""
+    cvariable: object
+    variable: object
     if not isinstance(variables_in_use, Mapping):
         return False
     changed = False
@@ -181,10 +199,11 @@ def _rename_variables_in_use_8616(
     return changed
 
 
+@cython.ccall
 def _rename_variable_view_8616(
     cvariable: object,
-    names_by_storage: Mapping[tuple[int, int], str],
-) -> bool:
+    names_by_storage: Mapping[tuple[cython.longlong, cython.longlong], str],
+) -> cython.bint:
     """Rename one C-variable view and its unified payload to the DS name."""
     if not isinstance(cvariable, CVariable):
         return False
@@ -195,14 +214,15 @@ def _rename_variable_view_8616(
 
 def _drop_stale_unified_locals_8616(
     unified_local_vars: object,
-    names_by_storage: Mapping[tuple[int, int], str],
-) -> tuple[int, int]:
+    names_by_storage: Mapping[tuple[cython.longlong, cython.longlong], str],
+) -> tuple[cython.longlong, cython.longlong]:
     """Drop unified-local entries whose storage key is a proven DS global."""
+    variable: object
     if not isinstance(unified_local_vars, Mapping):
         return 0, 0
     stale_local_variables = tuple(
         variable
-        for variable in unified_local_vars
+        for variable in iter(unified_local_vars)
         if _nonstack_memory_storage_key_8616(variable) in names_by_storage
     )
     materialized_count = 0
@@ -215,15 +235,16 @@ def _drop_stale_unified_locals_8616(
 
 def _drop_stale_variables_in_use_8616(
     variables_in_use: object,
-    referenced_variable_ids: set[int],
-    names_by_storage: Mapping[tuple[int, int], str],
-) -> tuple[int, int]:
+    referenced_variable_ids: object,
+    names_by_storage: Mapping[tuple[cython.longlong, cython.longlong], str],
+) -> tuple[cython.longlong, cython.longlong]:
     """Drop in-use carriers that only shadow a proven DS global view."""
+    variable: object
     if not isinstance(variables_in_use, Mapping):
         return 0, 0
     stale_carriers = tuple(
         variable
-        for variable, cvariable in variables_in_use.items()
+        for variable, cvariable in builtins.iter(variables_in_use.items())
         if id(variable) not in referenced_variable_ids
         and _nonstack_memory_storage_key_8616(variable) is None
         and isinstance(cvariable, CVariable)
@@ -240,10 +261,11 @@ def _drop_stale_variables_in_use_8616(
     return len(stale_carriers), materialized_count
 
 
+@cython.ccall
 def reconcile_ds_global_local_declarations_8616(
     codegen: object,
     facts: Iterable[DSGlobalSymbolNameFact8616],
-) -> bool:
+) -> cython.bint:
     """Remove local declaration metadata for exact proven DS globals.
 
     angr may unify a transient register carrier with a non-stack memory
@@ -252,6 +274,7 @@ def reconcile_ds_global_local_declarations_8616(
     external declaration. This reconciliation consumes the same exact
     offset/width facts as global materialization and never classifies by name.
     """
+    cfunc: object
     names_by_storage, raw_fact_count = _names_by_storage_8616(facts)
     carrier = cast(_CodegenBoundary8616, codegen)
     try:
@@ -269,7 +292,7 @@ def reconcile_ds_global_local_declarations_8616(
 
     referenced_variable_ids = {
         id(node.variable)
-        for node in _iter_c_nodes_deep_8616(cfunc.statements)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(cfunc.statements))
         if isinstance(node, CVariable)
     }
 

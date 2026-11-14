@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bounded process-local reuse for exact cache-input file digests.
 
 Layer: CLI/fallback/reporting.
@@ -9,6 +10,8 @@ cache keys continue to contain the content digest, never metadata alone.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import hashlib
 import os
@@ -16,20 +19,21 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import BinaryIO
+import dataclasses
 
-_CACHE_FILE_DIGEST_MEMO_SIZE_8616: int = 128
-_CACHE_FILE_DIGEST_READ_ATTEMPTS_8616: int = 3
+_CACHE_FILE_DIGEST_MEMO_SIZE_8616: cython.longlong = 128
+_CACHE_FILE_DIGEST_READ_ATTEMPTS_8616: cython.longlong = 3
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CacheFileStatIdentity8616:
     """Mutation-sensitive identity used only for process-local memo admission."""
 
-    device: int
-    inode: int
-    size: int
-    mtime_ns: int
-    ctime_ns: int
+    device: cython.longlong
+    inode: cython.longlong
+    size: cython.longlong
+    mtime_ns: cython.longlong
+    ctime_ns: cython.longlong
 
     @classmethod
     def from_stat(cls, stat: os.stat_result) -> CacheFileStatIdentity8616:
@@ -43,21 +47,22 @@ class CacheFileStatIdentity8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CacheFileDigest8616:
     """Exact content digest paired with the stable file state that produced it."""
 
     resolved_path: Path
     stat_identity: CacheFileStatIdentity8616
-    sha256: str
+    sha256: object
 
 
 class CacheFileChangedDuringDigest8616(OSError):
     """Raised when no stable file generation can be hashed within the retry bound."""
 
 
-def _stream_sha256_8616(stream: BinaryIO) -> str:
+def _stream_sha256_8616(stream: BinaryIO) -> object:
     """Hash one already-open binary stream without retaining its contents."""
+    chunk: object
     digest = hashlib.sha256()
     for chunk in iter(lambda: stream.read(1024 * 1024), b""):
         digest.update(chunk)
@@ -68,7 +73,7 @@ def _stream_sha256_8616(stream: BinaryIO) -> str:
 def _sha256_for_stat_identity_8616(
     resolved_path: Path,
     expected: CacheFileStatIdentity8616,
-) -> str:
+) -> object:
     """Hash one file generation, refusing a mutation while the stream is open."""
     with resolved_path.open("rb") as stream:
         opened_before = CacheFileStatIdentity8616.from_stat(os.fstat(stream.fileno()))
@@ -81,6 +86,7 @@ def _sha256_for_stat_identity_8616(
     return sha256
 
 
+@cython.ccall
 def cache_file_digest_8616(path: Path) -> CacheFileDigest8616:
     """Return an exact stable digest, retrying bounded concurrent mutations."""
     resolved_path = path.resolve()
@@ -100,12 +106,14 @@ def cache_file_digest_8616(path: Path) -> CacheFileDigest8616:
     raise CacheFileChangedDuringDigest8616(str(resolved_path))
 
 
+@cython.ccall
 def clear_cache_file_digest_memo_8616() -> None:
     """Clear process-local digest reuse for tests and explicit lifecycle resets."""
     _sha256_for_stat_identity_8616.cache_clear()
 
 
-def cache_file_fingerprint_8616(path: Path | None) -> dict[str, object] | None:
+@cython.ccall
+def cache_file_fingerprint_8616(path: object) -> object:
     """Return path-qualified exact content identity for one cache input."""
     if path is None:
         return None
@@ -121,10 +129,12 @@ def cache_file_fingerprint_8616(path: Path | None) -> dict[str, object] | None:
     }
 
 
-def cache_content_fingerprint_8616(path: Path | None) -> dict[str, object] | None:
+@cython.ccall
+def cache_content_fingerprint_8616(path: Path | None) -> object:
     """Return path-independent exact content identity for one cache input."""
+    fingerprint: object
     fingerprint = cache_file_fingerprint_8616(path)
     if fingerprint is None:
         return None
-    return {key: fingerprint[key] for key in ("size", "sha256")}
+    return {key: fingerprint[key] for key in iter(("size", "sha256"))}
 

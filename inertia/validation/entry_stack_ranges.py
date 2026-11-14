@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Collect proven entry-defined stack argument ranges for tail validation.
 
 Layer: Validation.
@@ -10,6 +11,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -32,6 +35,8 @@ from inertia.lowering.stack_variable_coordinates import (
 )
 
 from .validation_dataflow import DefUseEntryStackRange8616
+import dataclasses
+import operator
 
 _BITS_PER_BYTE_8616 = 8
 _FIRST_ARGUMENT_BP_OFFSET_8616 = 4
@@ -49,28 +54,28 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class EntryStackRangeCollectionStats8616:
     """Closed-loop counters for structured entry-stack argument evidence."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every stack argument reached one explicit verdict."""
         return (
-            self.raw_fact_count == self.materialized_count + self.failure_count
+            operator.eq(self.raw_fact_count, self.materialized_count + self.failure_count)
             and self.normalized_fact_count
             == self.classified_fact_count
             == self.materialized_count
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class EntryStackRangeCollection8616:
     """Exact machine-BP entry ranges plus their collection accounting."""
 
@@ -102,6 +107,7 @@ class _CodegenBoundary8616(Protocol):
     _inertia_vex_ir_artifact: object
 
 
+@cython.ccall
 def _stack_argument_variable_8616(argument: object) -> SimStackVariable | None:
     """Return the exact angr stack variable carried by one C argument."""
     if not isinstance(argument, CVariable):
@@ -112,7 +118,8 @@ def _stack_argument_variable_8616(argument: object) -> SimStackVariable | None:
     return variable if isinstance(variable, SimStackVariable) else None
 
 
-def _declared_argument_type_8616(prototype: object, index: int, argument: CVariable) -> SimType | None:
+@cython.ccall
+def _declared_argument_type_8616(prototype: object, index: cython.longlong, argument: CVariable) -> SimType | None:
     """Read the rendered signature type, falling back only for a partial C AST."""
     if isinstance(prototype, SimTypeFunction):
         arguments = prototype.args or ()
@@ -120,7 +127,8 @@ def _declared_argument_type_8616(prototype: object, index: int, argument: CVaria
     return argument.variable_type if prototype is None else None
 
 
-def _argument_value_width_8616(argument_type: SimType | None, slot_width: object) -> int | None:
+@cython.ccall
+def _argument_value_width_8616(argument_type: object, slot_width: object) -> int | None:
     """Limit initialized bytes to the C value, never padding or a unified owner."""
     if not isinstance(slot_width, int) or slot_width <= 0:
         return None
@@ -135,6 +143,7 @@ def _argument_value_width_8616(argument_type: SimType | None, slot_width: object
     return min(slot_width, bits // _BITS_PER_BYTE_8616)
 
 
+@cython.ccall
 def _far_return_cs_entry_ranges_8616(
     boundary: _CodegenBoundary8616,
 ) -> tuple[DefUseEntryStackRange8616, ...]:
@@ -146,6 +155,7 @@ def _far_return_cs_entry_ranges_8616(
     RET proves the far return frame, whose CS word at machine BP+4..+5 was
     defined by the caller before entry.
     """
+    fact: object
     try:
         artifact = boundary._inertia_segment_stack_restore_artifact
     except AttributeError:
@@ -173,9 +183,10 @@ def _far_return_cs_entry_ranges_8616(
                     width=_FAR_RETURN_CS_WIDTH_8616,
                 )
             )
-    return tuple(sorted(set(ranges)))
+    return tuple(sorted(tuple(set(ranges))))
 
 
+@cython.ccall
 def entry_stack_ranges_from_codegen_8616(
     codegen: object,
 ) -> EntryStackRangeCollection8616:
@@ -187,6 +198,12 @@ def entry_stack_ranges_from_codegen_8616(
     Far return CS slots proven by a terminal retf restore are also
     entry-defined: the caller's far call pushed them before entry.
     """
+    arguments: object
+    function_projection: object
+    projected_argument: object
+    variable: object
+    argument: object
+    index: object
     boundary = cast(_CodegenBoundary8616, codegen)
     far_return_ranges = _far_return_cs_entry_ranges_8616(boundary)
     try:
@@ -244,8 +261,8 @@ def entry_stack_ranges_from_codegen_8616(
         bp_offset = (
             projected_argument.machine_bp_offset
             if projected_argument is not None
-            and projected_argument.entry_sp_offset == variable.offset
-            and projected_argument.size == slot_width
+            and operator.eq(projected_argument.entry_sp_offset, variable.offset)
+            and operator.eq(projected_argument.size, slot_width)
             else machine_bp_offset_for_stack_variable_8616(codegen, variable)
         )
         if (
@@ -265,7 +282,7 @@ def entry_stack_ranges_from_codegen_8616(
     materialized_count += len(far_return_ranges)
     raw_fact_count += len(far_return_ranges)
     return EntryStackRangeCollection8616(
-        ranges=tuple(sorted(set(ranges + list(far_return_ranges)))),
+        ranges=tuple(sorted(tuple(set(ranges + list(far_return_ranges))))),
         stats=EntryStackRangeCollectionStats8616(
             raw_fact_count=raw_fact_count,
             normalized_fact_count=materialized_count,

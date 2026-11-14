@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Reconcile binary-proven calls with known external-helper ABI metadata.
 
 Layer: Types/Lowering.
@@ -11,6 +12,8 @@ using COD/source/rendered C, or replacing helper bodies.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Protocol, cast
@@ -27,6 +30,9 @@ from inertia.semantics.helper_abi import known_helper_prototype_8616
 from .callee_global_object_type_surface import resolved_type_8616
 from .near_pointer_type import near_pointer_type_8616
 from .semantic_cast import CSemanticCast8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = (
     "KnownHelperCallInterfaceStats8616",
@@ -62,7 +68,7 @@ class _CalleeBoundary8616(Protocol):
     addr: object
     name: object
     prototype: object
-    is_prototype_guessed: bool
+    is_prototype_guessed: cython.bint
 
 
 class _ExpressionBoundary8616(Protocol):
@@ -71,21 +77,23 @@ class _ExpressionBoundary8616(Protocol):
     type: object
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class KnownHelperCallInterfaceStats8616:
     """Closed evidence loop for known-helper interface materialization."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    prototype_materialized_count: int = 0
-    pointer_cast_materialized_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    prototype_materialized_count: cython.longlong = 0
+    pointer_cast_materialized_count: cython.longlong = 0
 
 
+@cython.ccall
 def _structured_root_8616(cfunc: object) -> object | None:
     """Return the current structured root through the third-party boundary."""
+    statements: object
     if cfunc is None:
         return None
     typed_cfunc = cast(_CFunctionBoundary8616, cfunc)
@@ -101,18 +109,20 @@ def _structured_root_8616(cfunc: object) -> object | None:
         return None
 
 
-def _summary_map_8616(codegen: _CodegenBoundary8616) -> dict[int, CallsiteSummary8616]:
+@cython.ccall
+def _summary_map_8616(codegen: _CodegenBoundary8616) -> dict[cython.longlong, CallsiteSummary8616]:
     """Return only complete owned callsite-summary entries."""
     raw = codegen._inertia_callsite_summaries
     if not isinstance(raw, dict):
         return {}
     return {
         node_id: summary
-        for node_id, summary in raw.items()
+        for node_id, summary in builtins.iter(raw.items())
         if isinstance(node_id, int) and isinstance(summary, CallsiteSummary8616)
     }
 
 
+@cython.ccall
 def _type_width_bytes_8616(type_: object) -> int | None:
     """Return one architecture-bound SimType width in bytes."""
     if not isinstance(type_, SimType):
@@ -123,38 +133,40 @@ def _type_width_bytes_8616(type_: object) -> int | None:
     return size_bits // 8
 
 
-def _summary_argument_widths_8616(summary: CallsiteSummary8616) -> tuple[int, ...] | None:
+def _summary_argument_widths_8616(summary: CallsiteSummary8616) -> object:
     """Return the exact logical argument widths represented by structured C."""
     widths = summary.logical_arg_widths or summary.arg_widths
     if (
-        len(widths) != summary.arg_count
-        or any(not isinstance(width, int) or width <= 0 for width in widths)
+        operator.ne(len(widths), summary.arg_count)
+        or any(not isinstance(width, int) or width <= 0 for width in iter(widths))
     ):
         return None
-    return tuple(int(width) for width in widths)
+    return tuple(int(width) for width in iter(widths))
 
 
 def _prototype_matches_summary_8616(
     prototype: SimTypeFunction,
     summary: CallsiteSummary8616,
-    materialized_arg_count: int,
-) -> bool:
+    materialized_arg_count: cython.longlong,
+) -> cython.bint:
     """Prove that helper metadata preserves the binary call shape."""
+    widths: object
     widths = _summary_argument_widths_8616(summary)
     fixed_args = tuple(prototype.args)
-    if widths is None or materialized_arg_count != summary.arg_count:
+    if widths is None or operator.ne(materialized_arg_count, summary.arg_count):
         return False
     if prototype.variadic:
         if len(fixed_args) > len(widths):
             return False
-    elif len(fixed_args) != len(widths):
+    elif operator.ne(len(fixed_args), len(widths)):
         return False
-    expected_widths = tuple(_type_width_bytes_8616(argument) for argument in fixed_args)
-    return all(width is not None for width in expected_widths) and tuple(
-        cast(int, width) for width in expected_widths
-    ) == widths[: len(fixed_args)]
+    expected_widths = tuple(_type_width_bytes_8616(argument) for argument in iter(fixed_args))
+    return all(width is not None for width in iter(expected_widths)) and operator.eq(tuple(
+        cast(int, width) for width in iter(expected_widths)
+    ), widths[: len(fixed_args)])
 
 
+@cython.ccall
 def _prototype_with_exact_pointer_widths_8616(
     prototype: SimTypeFunction,
     summary: CallsiteSummary8616,
@@ -167,6 +179,9 @@ def _prototype_with_exact_pointer_widths_8616(
     proves a two-byte near pointer. The callsite owns width; helper ABI metadata
     contributes only the pointee type.
     """
+    widths: object
+    argument_raw: object
+    index: object
     widths = _summary_argument_widths_8616(summary)
     if widths is None:
         return None
@@ -188,18 +203,22 @@ def _prototype_with_exact_pointer_widths_8616(
     ).with_arch(arch)
 
 
+@cython.ccall
 def _prototype_return_width_compatible_8616(
     current: object,
     expected: SimTypeFunction,
-) -> bool:
+) -> cython.bint:
     """Require helper metadata to preserve the current machine return width."""
+    current_width: object
+    expected_width: object
     if not isinstance(current, SimTypeFunction):
         return True
     current_width = _type_width_bytes_8616(current.returnty)
     expected_width = _type_width_bytes_8616(expected.returnty)
-    return current_width is None or expected_width is None or current_width == expected_width
+    return current_width is None or expected_width is None or operator.eq(current_width, expected_width)
 
 
+@cython.ccall
 def _expression_type_8616(expression: object) -> SimType | None:
     """Read one structured expression type at the dynamic angr boundary."""
     try:
@@ -209,20 +228,26 @@ def _expression_type_8616(expression: object) -> SimType | None:
     return type_ if isinstance(type_, SimType) else None
 
 
-def _pointer_types_compatible_8616(current: SimTypePointer, expected: SimTypePointer) -> bool:
+@cython.ccall
+def _pointer_types_compatible_8616(current: SimTypePointer, expected: SimTypePointer) -> cython.bint:
     """Return whether no explicit pointer conversion is required."""
     current_pointee = resolved_type_8616(current.pts_to)
     expected_pointee = resolved_type_8616(expected.pts_to)
     return bool(current_pointee == expected_pointee)
 
 
+@cython.ccall
 def _materialize_required_pointer_casts_8616(
     codegen: _CodegenBoundary8616,
     call: structured_c.CFunctionCall,
     prototype: SimTypeFunction,
     summary: CallsiteSummary8616,
-) -> tuple[bool, bool, int]:
+) -> tuple[cython.bint, cython.bint, cython.longlong]:
     """Cast only proven-width pointer expressions to fixed helper ABI types."""
+    coerced: object
+    widths: object
+    expected_raw: object
+    index: object
     changed = False
     materialized = 0
     args = list(call.args)
@@ -235,7 +260,7 @@ def _materialize_required_pointer_casts_8616(
         expected = resolved_type_8616(expected_raw)
         if not isinstance(expected, SimTypePointer):
             continue
-        if _type_width_bytes_8616(expected) != widths[index]:
+        if operator.ne(_type_width_bytes_8616(expected), widths[index]):
             return False, False, 0
         coerced = _coerce_pointer_arg_8616(codegen, args[index], expected)
         if coerced is None:
@@ -248,13 +273,14 @@ def _materialize_required_pointer_casts_8616(
     return True, changed, materialized
 
 
+@cython.ccall
 def _coerce_pointer_arg_8616(
     codegen: _CodegenBoundary8616,
     argument: object,
     expected: SimTypePointer,
-) -> tuple[object, bool] | None:
+) -> object:
     """Return (arg, changed) when the arg can satisfy the expected pointer type."""
-    if isinstance(argument, CSemanticCast8616) and argument.dst_type == expected:
+    if isinstance(argument, CSemanticCast8616) and operator.eq(argument.dst_type, expected):
         return argument, False
     current = _expression_type_8616(argument)
     if isinstance(current, SimTypeArray):
@@ -266,10 +292,12 @@ def _coerce_pointer_arg_8616(
     return CSemanticCast8616(current, expected, argument, codegen=codegen), True
 
 
+@cython.ccall
 def _bound_call_callee_8616(
     node: structured_c.CFunctionCall,
-) -> tuple[_CalleeBoundary8616, object, object] | None:
+) -> object:
     """Bind a call node's callee name/address at the angr object boundary."""
+    callee_obj: object
     callee_obj = node.callee_func
     if callee_obj is None:
         return None
@@ -280,16 +308,18 @@ def _bound_call_callee_8616(
         return None
 
 
+@cython.ccall
 def _exact_helper_prototype_8616(
     node: structured_c.CFunctionCall,
     callee: _CalleeBoundary8616,
     callee_addr: object,
     prototype: SimTypeFunction,
-    summary: CallsiteSummary8616 | None,
+    summary: object,
     arch: Arch,
 ) -> SimTypeFunction | None:
     """Return the exact-width helper prototype when callsite evidence agrees."""
-    if summary is None or not isinstance(callee_addr, int) or summary.target_addr != callee_addr:
+    exact_prototype: object
+    if summary is None or not isinstance(callee_addr, int) or operator.ne(summary.target_addr, callee_addr):
         return None
     exact_prototype = _prototype_with_exact_pointer_widths_8616(prototype, summary, arch)
     if (
@@ -301,11 +331,14 @@ def _exact_helper_prototype_8616(
     return exact_prototype
 
 
+@cython.ccall
 def materialize_known_helper_call_interfaces_8616(
-    project: object,
+    project,
     codegen: object,
-) -> bool:
+) -> cython.bint:
     """Refine exactly identified helper calls without changing machine shape."""
+    root: object
+    node: object
     del project
     typed_codegen = cast(_CodegenBoundary8616, codegen)
     try:
@@ -330,13 +363,18 @@ def materialize_known_helper_call_interfaces_8616(
     return changed
 
 
+@cython.ccall
 def _materialize_helper_call_node_8616(
     codegen: _CodegenBoundary8616,
     node: structured_c.CFunctionCall,
-    summaries: dict[int, CallsiteSummary8616],
+    summaries: object,
     stats: KnownHelperCallInterfaceStats8616,
-) -> bool:
+) -> cython.bint:
     """Materialize one known-helper call node and record evidence counts."""
+    bound: object
+    exact_prototype: object
+    prototype: object
+    summary: object
     bound = _bound_call_callee_8616(node)
     if bound is None:
         return False
@@ -367,7 +405,7 @@ def _materialize_helper_call_node_8616(
     stats.normalized_fact_count += 1
     stats.classified_fact_count += 1
     changed = cast_changed
-    if callee.prototype != exact_prototype:
+    if operator.ne(callee.prototype, exact_prototype):
         callee.prototype = exact_prototype
         callee.is_prototype_guessed = False
         stats.prototype_materialized_count += 1

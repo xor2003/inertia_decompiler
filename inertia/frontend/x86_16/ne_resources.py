@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Optional evidence/reporting.
 
 Responsibility: parse NE resource tables for reporting and artifact extraction.
@@ -5,12 +6,16 @@ Forbidden: deriving code semantics, types, or validation success from resource n
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import struct
 from dataclasses import dataclass
 from pathlib import Path
+import dataclasses
+import builtins
 
-_WIN16_RESOURCE_TYPES: dict[int, tuple[str, str]] = {
+_WIN16_RESOURCE_TYPES: dict[cython.longlong, tuple[str, str]] = {
     1: ("CURSOR", ".cur"),
     2: ("BITMAP", ".bmp"),
     3: ("ICON", ".ico"),
@@ -28,7 +33,7 @@ _WIN16_RESOURCE_TYPES: dict[int, tuple[str, str]] = {
     16: ("VERSION", ".bin"),
 }
 
-_OS2_RESOURCE_TYPES: dict[int, tuple[str, str]] = {
+_OS2_RESOURCE_TYPES: dict[cython.longlong, tuple[str, str]] = {
     1: ("POINTER", ".ptr"),
     2: ("BITMAP", ".bmp"),
     3: ("MENU", ".bin"),
@@ -42,51 +47,53 @@ _OS2_RESOURCE_TYPES: dict[int, tuple[str, str]] = {
 }
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class NEResourceEntry:
     """One NE resource table entry and its optional extracted payload bytes."""
 
-    type_id: int
-    type_name: str
-    name: str
-    file_offset: int
-    length: int
-    flags: int
-    handle: int
-    usage: int
-    file_extension: str
+    type_id: cython.longlong
+    type_name: object
+    name: object
+    file_offset: cython.longlong
+    length: cython.longlong
+    flags: cython.longlong
+    handle: cython.longlong
+    usage: cython.longlong
+    file_extension: object
     bytes_data: bytes = b""
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class NEResourceGroup:
     """NE resources grouped by their resource type id."""
 
-    type_id: int
-    name: str
+    type_id: cython.longlong
+    name: object
     entries: tuple[NEResourceEntry, ...] = ()
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class NEResourceTable:
     """Parsed NE resource metadata for reporting and artifact extraction."""
 
-    kind: str
-    alignment_shift: int
+    kind: object
+    alignment_shift: cython.longlong
     groups: tuple[NEResourceGroup, ...] = ()
 
     @property
     def flat_entries(self) -> tuple[NEResourceEntry, ...]:
         """Return every parsed resource entry in table order."""
-        return tuple(entry for group in self.groups for entry in group.entries)
+        return tuple(entry for group in iter(self.groups) for entry in iter(group.entries))
 
 
+@cython.ccall
 def parse_ne_resources(path: Path) -> NEResourceTable | None:
     """Parse an NE resource table from an executable path, if present."""
     return parse_ne_resources_bytes(path.read_bytes())
 
 
-def parse_ne_resources_bytes(data: bytes) -> NEResourceTable | None:
+@cython.ccall
+def parse_ne_resources_bytes(data: object) -> NEResourceTable | None:
     """Parse Win16 or OS/2 NE resource metadata from executable bytes."""
     if len(data) < 0x40 or data[:2] != b"MZ":
         return None
@@ -104,7 +111,8 @@ def parse_ne_resources_bytes(data: bytes) -> NEResourceTable | None:
     return _parse_win16_resource_table(data, resource_table_offset)
 
 
-def _parse_win16_resource_table(data: bytes, resource_table_offset: int) -> NEResourceTable | None:
+@cython.ccall
+def _parse_win16_resource_table(data: object, resource_table_offset: cython.longlong) -> NEResourceTable | None:
     if resource_table_offset + 2 > len(data):
         return None
     shift = struct.unpack_from("<H", data, resource_table_offset)[0]
@@ -148,10 +156,13 @@ def _parse_win16_resource_table(data: bytes, resource_table_offset: int) -> NERe
     return NEResourceTable(kind="win16", alignment_shift=shift, groups=tuple(groups))
 
 
-def _parse_os2_resource_table(data: bytes, resource_table_offset: int, resource_count: int) -> NEResourceTable | None:
+def _parse_os2_resource_table(data: object, resource_table_offset: cython.longlong, resource_count: cython.longlong) -> NEResourceTable | None:
+    _index: object
+    name_id: object
+    type_id: object
     if resource_table_offset < 0 or resource_table_offset + resource_count * 4 > len(data):
         return None
-    entries_by_type: dict[int, list[NEResourceEntry]] = {}
+    entries_by_type: dict[cython.longlong, list[NEResourceEntry]] = {}
     cursor = resource_table_offset
     table_entries = [struct.unpack_from("<HH", data, cursor + i * 4) for i in range(resource_count)]
     for _index, (type_id, name_id) in enumerate(table_entries):
@@ -171,21 +182,24 @@ def _parse_os2_resource_table(data: bytes, resource_table_offset: int, resource_
         entries_by_type.setdefault(type_id, []).append(entry)
     groups = tuple(
         NEResourceGroup(type_id=type_id, name=_decode_os2_type(type_id)[0], entries=tuple(entries))
-        for type_id, entries in sorted(entries_by_type.items())
+        for type_id, entries in builtins.iter(sorted(tuple(entries_by_type.items())))
     )
     return NEResourceTable(kind="os2", alignment_shift=0, groups=groups)
 
 
-def _decode_win16_type(type_id: int) -> tuple[str, str]:
+@cython.ccall
+def _decode_win16_type(type_id: cython.longlong) -> object:
     normalized = type_id & 0x7FFF
     return _WIN16_RESOURCE_TYPES.get(normalized, (f"TYPE_{normalized}", ".bin"))
 
 
-def _decode_os2_type(type_id: int) -> tuple[str, str]:
+@cython.ccall
+def _decode_os2_type(type_id: cython.longlong) -> object:
     return _OS2_RESOURCE_TYPES.get(type_id, (f"OS2_TYPE_{type_id}", ".bin"))
 
 
-def _decode_ne_name(data: bytes, resource_table_offset: int, name_id: int) -> str:
+@cython.ccall
+def _decode_ne_name(data: object, resource_table_offset: cython.longlong, name_id: cython.longlong) -> object:
     if name_id & 0x8000:
         return str(name_id & 0x7FFF)
     name_offset = resource_table_offset + name_id

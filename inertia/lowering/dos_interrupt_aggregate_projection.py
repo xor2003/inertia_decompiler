@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Project DOS interrupt aggregate arguments and scalar field accesses.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -26,6 +29,8 @@ from .dos_interrupt_aggregate_evidence import (
     DosInterruptAggregateObjectFact8616,
 )
 from .indexed_global_evidence import IndexedSegmentedGlobalEvidence8616
+import dataclasses
+import operator
 
 __all__ = [
     "materialize_dos_interrupt_call_arguments_8616",
@@ -33,19 +38,19 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _GlobalAccessSurface8616:
     """One structured global scalar access before aggregate projection."""
 
-    offset: int
-    width: int
-    name: str | None
+    offset: cython.longlong
+    width: cython.longlong
+    name: object
 
 
 class _CFunctionSurface8616(Protocol):
     """Third-party C function identity used for global variable regions."""
 
-    addr: int
+    addr: cython.longlong
 
 
 class _CodegenSurface8616(Protocol):
@@ -54,11 +59,13 @@ class _CodegenSurface8616(Protocol):
     cfunc: _CFunctionSurface8616
 
 
-def _aggregate_size_8616(kind: DosInterruptAbiArgumentKind8616) -> int:
+@cython.ccall
+def _aggregate_size_8616(kind: DosInterruptAbiArgumentKind8616) -> cython.longlong:
     """Return the ABI byte extent for one aggregate kind."""
     return 14 if kind is DosInterruptAbiArgumentKind8616.REGS else 8
 
 
+@cython.ccall
 def _aggregate_base_8616(
     codegen: object,
     fact: DosInterruptAggregateObjectFact8616,
@@ -83,10 +90,11 @@ def _aggregate_base_8616(
     )
 
 
+@cython.ccall
 def _reference_matches_object_8616(
     node: object,
     fact: DosInterruptAggregateObjectFact8616,
-) -> bool:
+) -> cython.bint:
     """Return whether an argument references the exact typed global base."""
     if not isinstance(node, structured_c.CUnaryOp) or node.op != "Reference":
         return False
@@ -96,8 +104,8 @@ def _reference_matches_object_8616(
     variable = operand.variable
     return (
         isinstance(variable, SimMemoryVariable)
-        and variable.addr == fact.base_offset
-        and variable.name == fact.display_name
+        and operator.eq(variable.addr, fact.base_offset)
+        and operator.eq(variable.name, fact.display_name)
     )
 
 
@@ -105,10 +113,11 @@ def materialize_dos_interrupt_call_arguments_8616(
     codegen: object,
     fact: DosInterruptAggregateCallFact8616,
     types: DosInterruptAggregateTypes8616,
-) -> tuple[bool, bool]:
+) -> tuple[cython.bint, cython.bint]:
     """Materialize all aggregate arguments atomically and report success/change."""
+    obj: object
     args = tuple(cast(Sequence[object], fact.call.args or ()))
-    if len(args) != len(fact.contract.argument_kinds):
+    if operator.ne(len(args), len(fact.contract.argument_kinds)):
         return False, False
     rewritten = list(args)
     changed = False
@@ -122,11 +131,12 @@ def materialize_dos_interrupt_call_arguments_8616(
         fact.call.args = rewritten
     materialized = all(
         _reference_matches_object_8616(fact.call.args[obj.argument_index], obj)
-        for obj in fact.objects
+        for obj in iter(fact.objects)
     )
     return materialized, changed
 
 
+@cython.ccall
 def _simtype_width_8616(type_: object) -> int | None:
     """Return a C expression type width in bytes at the third-party boundary."""
     if not isinstance(type_, SimType):
@@ -138,8 +148,10 @@ def _simtype_width_8616(type_: object) -> int | None:
     return bits // 8 if isinstance(bits, int) and bits > 0 and bits % 8 == 0 else None
 
 
+@cython.ccall
 def _access_surface_8616(node: object) -> _GlobalAccessSurface8616 | None:
     """Return exact address, width, and name for supported scalar global nodes."""
+    width: object
     if isinstance(node, structured_c.CVariable):
         variable = node.variable
         if isinstance(variable, SimMemoryVariable) and isinstance(variable.addr, int):
@@ -169,10 +181,11 @@ def _access_surface_8616(node: object) -> _GlobalAccessSurface8616 | None:
     )
 
 
+@cython.ccall
 def _name_matches_object_8616(
-    name: str | None,
+    name: object,
     fact: DosInterruptAggregateObjectFact8616,
-) -> bool:
+) -> cython.bint:
     """Match optional display identity without using it as type proof."""
     return isinstance(name, str) and name in {fact.display_name, *fact.canonical_names}
 
@@ -180,33 +193,34 @@ def _name_matches_object_8616(
 def _evidence_matches_object_8616(
     surface: _GlobalAccessSurface8616,
     fact: DosInterruptAggregateObjectFact8616,
-    evidence: tuple[IndexedSegmentedGlobalEvidence8616, ...],
-    identities: tuple[CodGlobalIdentityFact8616, ...],
-) -> bool:
+    evidence: object,
+    identities: object,
+) -> cython.bint:
     """Return whether exact storage evidence associates an access with an object."""
     if _name_matches_object_8616(surface.name, fact):
         return True
     if any(
-        item.base_offset == surface.offset
-        and item.width == surface.width
+        operator.eq(item.base_offset, surface.offset)
+        and operator.eq(item.width, surface.width)
         and item.name in fact.canonical_names
-        for item in evidence
+        for item in iter(evidence)
     ):
         return True
     return any(
-        item.offset == surface.offset
-        and item.width == surface.width
-        and item.source_alias == fact.display_name
-        for item in identities
+        operator.eq(item.offset, surface.offset)
+        and operator.eq(item.width, surface.width)
+        and operator.eq(item.source_alias, fact.display_name)
+        for item in iter(identities)
     )
 
 
+@cython.ccall
 def _projection_path_8616(
     fact: DosInterruptAggregateObjectFact8616,
-    access_offset: int,
-    width: int,
+    access_offset: cython.longlong,
+    width: cython.longlong,
     types: DosInterruptAggregateTypes8616,
-) -> tuple[tuple[SimStruct, int, str], ...] | None:
+) -> object:
     """Return the unique ABI field path for one exact offset and width."""
     relative = (access_offset - fact.base_offset) & 0xFFFF
     if fact.kind is DosInterruptAbiArgumentKind8616.SREGS:
@@ -232,18 +246,21 @@ def _projection_path_8616(
 def _access_candidates_8616(
     node: object,
     surface: _GlobalAccessSurface8616,
-    objects: tuple[DosInterruptAggregateObjectFact8616, ...],
-    evidence: tuple[IndexedSegmentedGlobalEvidence8616, ...],
-    identities: tuple[CodGlobalIdentityFact8616, ...],
+    objects: object,
+    evidence: object,
+    identities: object,
     types: DosInterruptAggregateTypes8616,
     *,
-    alternate_evidence_widths: bool,
+    alternate_evidence_widths: cython.bint,
 ) -> tuple[
-    tuple[DosInterruptAggregateObjectFact8616, tuple[tuple[SimStruct, int, str], ...]], ...
+    tuple[DosInterruptAggregateObjectFact8616, tuple[tuple[SimStruct, cython.longlong, str], ...]], ...
 ]:
     """Collect unique projections for exact or fallback width evidence."""
+    path: object
+    fact: object
+    width: object
     candidates: list[
-        tuple[DosInterruptAggregateObjectFact8616, tuple[tuple[SimStruct, int, str], ...]]
+        tuple[DosInterruptAggregateObjectFact8616, tuple[tuple[SimStruct, cython.longlong, str], ...]]
     ] = []
     for fact in objects:
         widths = {surface.width}
@@ -254,13 +271,13 @@ def _access_candidates_8616(
             ):
                 widths.update(
                     item.width
-                    for item in evidence
-                    if item.base_offset == surface.offset and item.name in fact.canonical_names
+                    for item in iter(evidence)
+                    if operator.eq(item.base_offset, surface.offset) and item.name in fact.canonical_names
                 )
                 widths.update(
                     item.width
-                    for item in identities
-                    if item.offset == surface.offset and item.source_alias == fact.display_name
+                    for item in iter(identities)
+                    if operator.eq(item.offset, surface.offset) and operator.eq(item.source_alias, fact.display_name)
                 )
             widths.discard(surface.width)
         for width in widths:
@@ -273,15 +290,20 @@ def _access_candidates_8616(
     return tuple(dict.fromkeys(candidates))
 
 
+@cython.ccall
 def project_dos_interrupt_global_access_8616(
     codegen: object,
     node: object,
-    objects: tuple[DosInterruptAggregateObjectFact8616, ...],
-    evidence: tuple[IndexedSegmentedGlobalEvidence8616, ...],
-    identities: tuple[CodGlobalIdentityFact8616, ...],
+    objects: object,
+    evidence: object,
+    identities: object,
     types: DosInterruptAggregateTypes8616,
 ) -> structured_c.CExpression | None:
     """Project one scalar global node only when exactly one ABI field matches."""
+    surface: object
+    container: object
+    field_name: object
+    offset: object
     surface = _access_surface_8616(node)
     if surface is None:
         return None

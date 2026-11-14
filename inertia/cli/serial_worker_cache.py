@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Content-addressed cache for validated serial clean-worker results.
 
 Layer: CLI/fallback/reporting.
@@ -10,6 +11,8 @@ compiler-acceptance hashes.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import hashlib
 from collections.abc import Mapping
@@ -32,10 +35,13 @@ from inertia.cli.direct_addr_failure_family import FailureFamilySnapshot
 from inertia.pipeline.errors import PipelineHardError
 from inertia.semantics.segment_program_layout_codec import segment_program_function_evidence_from_record_8616
 from inertia.validation.tail_validation import x86_16_tail_validation_snapshot_passed
+import dataclasses
+import operator
+import builtins
 
 SERIAL_WORKER_CACHE_NAMESPACE_8616: str = "serial_clean_worker"
-SERIAL_WORKER_CACHE_SCHEMA_8616: int = 2
-SERIAL_WORKER_CACHE_MAX_ENTRIES_8616: int = 4096
+SERIAL_WORKER_CACHE_SCHEMA_8616: cython.longlong = 2
+SERIAL_WORKER_CACHE_MAX_ENTRIES_8616: cython.longlong = 4096
 SERIAL_WORKER_CACHE_ANALYSIS_TIMEOUT_FIELD_8616: str = "cache_analysis_timeout"
 
 
@@ -60,38 +66,38 @@ class SerialWorkerCacheReason8616(StrEnum):
     VALIDATED = "validated"
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class SerialWorkerCacheInputs8616:
     """Complete deterministic input contract for one clean worker."""
 
     binary_path: Path
-    requested_addr: int
-    recovery_addr: int
-    timeout: int
-    window: int
-    base_addr: int
-    entry_point: int
-    c_target: str
-    api_style: str
-    pat_backend: str
-    blob: bool
+    requested_addr: cython.longlong
+    recovery_addr: cython.longlong
+    timeout: cython.longlong
+    window: cython.longlong
+    base_addr: cython.longlong
+    entry_point: cython.longlong
+    c_target: object
+    api_style: object
+    pat_backend: object
+    blob: cython.bint
     signature_catalog: Path | None
-    evidence_sha256: str
-    semantic_environment: tuple[tuple[str, str], ...]
-    result_schema: int
+    evidence_sha256: object
+    semantic_environment: object
+    result_schema: cython.longlong
     declared_call_effects: tuple[Path, ...] = ()
     real16_declared_input: Path | None = None
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class SerialWorkerCacheLookup8616:
     """Validated cache lookup result and its content-addressed key."""
 
     verdict: SerialWorkerCacheVerdict8616
-    key: dict[str, object] | None
-    record: dict[str, object] | None
+    key: object
+    record: object
     reason: SerialWorkerCacheReason8616
-    requested_timeout: int
+    requested_timeout: cython.longlong
 
 
 def semantic_worker_environment_8616(environment: Mapping[str, str]) -> tuple[tuple[str, str], ...]:
@@ -99,26 +105,28 @@ def semantic_worker_environment_8616(environment: Mapping[str, str]) -> tuple[tu
     return tuple(
         sorted(
             (name, value)
-            for name, value in environment.items()
+            for name, value in builtins.iter(environment.items())
             if name.startswith("INERTIA_") and not is_non_semantic_cache_environment_name(name)
         )
     )
 
 
-def evidence_file_digest_8616(path: Path) -> str:
+@cython.ccall
+def evidence_file_digest_8616(path: Path) -> object:
     """Hash the exact typed-evidence payload handed to a clean worker."""
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+@cython.ccall
 def serial_worker_cache_inputs_8616(
     args: CliArguments,
     *,
-    requested_addr: int,
-    recovery_addr: int,
-    timeout: int,
+    requested_addr: cython.longlong,
+    recovery_addr: cython.longlong,
+    timeout: cython.longlong,
     evidence_path: Path,
     environment: Mapping[str, str],
-    result_schema: int,
+    result_schema: cython.longlong,
 ) -> SerialWorkerCacheInputs8616:
     """Build typed cache inputs from the clean worker's exact CLI contract."""
     return SerialWorkerCacheInputs8616(
@@ -142,7 +150,8 @@ def serial_worker_cache_inputs_8616(
     )
 
 
-def build_serial_worker_cache_key_8616(inputs: SerialWorkerCacheInputs8616) -> dict[str, object] | None:
+@cython.ccall
+def build_serial_worker_cache_key_8616(inputs: SerialWorkerCacheInputs8616) -> object:
     """Build the content key for an immutable clean-worker result."""
     signature_fingerprint = _cache_file_fingerprint(inputs.signature_catalog)
     cache_key = _recovery_cache_key(
@@ -164,7 +173,7 @@ def build_serial_worker_cache_key_8616(inputs: SerialWorkerCacheInputs8616) -> d
             "evidence_sha256": inputs.evidence_sha256,
             "real16_declared_input": _cache_file_fingerprint(inputs.real16_declared_input),
             "declared_call_effects": [
-                _cache_file_fingerprint(path) for path in inputs.declared_call_effects
+                _cache_file_fingerprint(path) for path in iter(inputs.declared_call_effects)
             ],
             "semantic_environment": inputs.semantic_environment,
             "worker_policy": {
@@ -177,17 +186,22 @@ def build_serial_worker_cache_key_8616(inputs: SerialWorkerCacheInputs8616) -> d
     )
     if not isinstance(cache_key, dict):
         return None
-    return {str(key): value for key, value in cache_key.items()}
+    return {str(key): value for key, value in builtins.iter(cache_key.items())}
 
 
+@cython.ccall
 def _validated_result_record_8616(
     record: Mapping[str, object],
     *,
-    result_schema: int,
-    expected_function_addrs: tuple[int, ...] = (),
-) -> dict[str, object] | None:
+    result_schema: cython.longlong,
+    expected_function_addrs: object = (),
+) -> object:
     """Return a cacheable result record only when acceptance proof is closed."""
-    if record.get("schema") != result_schema or record.get("status") != "ok":
+    gcc_hash: object
+    payload: object
+    tail_validation: object
+    validated_hash: object
+    if operator.ne(record.get("schema"), result_schema) or record.get("status") != "ok":
         return None
     payload = record.get("payload")
     validated_hash = record.get("validated_payload_hash")
@@ -196,7 +210,7 @@ def _validated_result_record_8616(
     if not isinstance(payload, str) or not payload.strip():
         return None
     payload_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
-    if validated_hash != payload_hash or gcc_hash != payload_hash:
+    if operator.ne(validated_hash, payload_hash) or operator.ne(gcc_hash, payload_hash):
         return None
     if not isinstance(tail_validation, Mapping) or not x86_16_tail_validation_snapshot_passed(tail_validation):
         return None
@@ -206,7 +220,7 @@ def _validated_result_record_8616(
         segment_evidence = segment_program_function_evidence_from_record_8616(
             record.get("segment_program_function_evidence")
         )
-    except PipelineHardError, ValueError:
+    except (PipelineHardError, ValueError):
         return None
     # This cache owns no live project/source authority for conditional effects.
     if segment_evidence.declared_call_consumptions:
@@ -216,12 +230,17 @@ def _validated_result_record_8616(
     return dict(record)
 
 
+@cython.ccall
 def load_serial_worker_cache_8616(
     inputs: SerialWorkerCacheInputs8616,
     *,
-    enabled: bool,
+    enabled: cython.bint,
 ) -> SerialWorkerCacheLookup8616:
     """Load one exact validated result or return an explicit miss/refusal."""
+    cached: object
+    cached_timeout: object
+    key: object
+    record: object
     if inputs.declared_call_effects or inputs.real16_declared_input is not None:
         return SerialWorkerCacheLookup8616(
             SerialWorkerCacheVerdict8616.DISABLED, None, None,
@@ -286,12 +305,15 @@ def load_serial_worker_cache_8616(
     )
 
 
-def _prune_serial_worker_cache_8616(max_entries: int) -> None:
+def _prune_serial_worker_cache_8616(max_entries: cython.longlong) -> None:
     """Bound the dedicated cache without touching other cache namespaces."""
+    _mtime_ns: object
+    _name: object
+    path: object
     namespace_dir = DECOMPILATION_CACHE_DIR / SERIAL_WORKER_CACHE_NAMESPACE_8616
     try:
         entries = sorted(
-            (path.stat().st_mtime_ns, path.name, path) for path in namespace_dir.glob("*.json") if path.is_file()
+            (path.stat().st_mtime_ns, path.name, path) for path in builtins.iter(namespace_dir.glob("*.json")) if path.is_file()
         )
     except OSError:
         return
@@ -302,14 +324,18 @@ def _prune_serial_worker_cache_8616(max_entries: int) -> None:
             continue
 
 
+@cython.ccall
 def store_serial_worker_cache_8616(
     lookup: SerialWorkerCacheLookup8616,
     record: Mapping[str, object],
     *,
-    result_schema: int,
-    max_entries: int = SERIAL_WORKER_CACHE_MAX_ENTRIES_8616,
-) -> bool:
+    result_schema: cython.longlong,
+    max_entries: cython.longlong = SERIAL_WORKER_CACHE_MAX_ENTRIES_8616,
+) -> cython.bint:
     """Persist one immutable validated result and enforce the cache bound."""
+    existing: object
+    existing_validated: object
+    validated: object
     if lookup.key is None or lookup.verdict is SerialWorkerCacheVerdict8616.DISABLED:
         return False
     validated = _validated_result_record_8616(record, result_schema=result_schema)
@@ -333,9 +359,9 @@ def store_serial_worker_cache_8616(
             ):
                 return True
             _store_cache_json(SERIAL_WORKER_CACHE_NAMESPACE_8616, lookup.key, validated)
-            if _load_cache_json(SERIAL_WORKER_CACHE_NAMESPACE_8616, lookup.key) != validated:
+            if operator.ne(_load_cache_json(SERIAL_WORKER_CACHE_NAMESPACE_8616, lookup.key), validated):
                 return False
-    except OSError, TimeoutError:
+    except (OSError, TimeoutError):
         return False
     _prune_serial_worker_cache_8616(max_entries)
     return True

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed declared interrupt-service relation for the real16 invocation census.
 
 Layer: IR — invocation-domain evidence contracts.
@@ -22,6 +23,8 @@ conditional evidence, never a universal DOS model.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import hashlib
 from collections.abc import Callable
@@ -45,6 +48,8 @@ from inertia.frontend.real16_version_response8616 import (
 from inertia.frontend.x86_16.interrupt_contract import interrupt_vector_from_core_addr_8616
 
 from .core import IRInstr, IRValue, MemSpace
+import dataclasses
+import operator
 
 __all__ = [
     "DECLARED_DOS_VECTOR_8616",
@@ -83,7 +88,7 @@ __all__ = [
 ]
 
 # Architectural real-mode INT entry frame: pushed FLAGS, CS, IP (3 words).
-INT_FRAME_BYTES_8616: int = 6
+INT_FRAME_BYTES_8616: cython.longlong = 6
 
 # The admitted declared services share the DOS vector: INT 21h / AH=30h /
 # AL=00h (Get DOS Version) and INT 21h / AH=4Ah (Resize Memory Block).
@@ -91,21 +96,21 @@ INT_FRAME_BYTES_8616: int = 6
 # ``inertia.frontend.real16_version_response8616`` and
 # ``inertia.frontend.real16_resize_response8616`` — the conditional contract
 # shapes only; they do not assert any installed DOS.
-DECLARED_DOS_VECTOR_8616: int = INT21_VERSION_VECTOR_8616
-DECLARED_VERSION_FUNCTION_8616: int = INT21_VERSION_FUNCTION_8616
-DECLARED_VERSION_SELECTOR_8616: int = INT21_VERSION_SELECTOR_8616
-DECLARED_RESIZE_FUNCTION_8616: int = INT21_RESIZE_FUNCTION_8616
+DECLARED_DOS_VECTOR_8616: cython.longlong = INT21_VERSION_VECTOR_8616
+DECLARED_VERSION_FUNCTION_8616: cython.longlong = INT21_VERSION_FUNCTION_8616
+DECLARED_VERSION_SELECTOR_8616: cython.longlong = INT21_VERSION_SELECTOR_8616
+DECLARED_RESIZE_FUNCTION_8616: cython.longlong = INT21_RESIZE_FUNCTION_8616
 
 # INT21/AH=35h (Get Interrupt Vector) and INT21/AH=25h (Set Interrupt
 # Vector) are the declared live-IVT services. These names project the shared
 # platform-neutral owner ``inertia.frontend.real16_vector_response8616``.
-DECLARED_VECTOR_FUNCTIONS_8616: tuple[int, int] = (
+DECLARED_VECTOR_FUNCTIONS_8616: tuple[cython.longlong, cython.longlong] = (
     INT21_GET_VECTOR_8616,
     INT21_SET_VECTOR_8616,
 )
 
 # The architectural IVT span every vector relation binds: all 256 slots.
-IVT_IMAGE_BYTES_8616: int = 0x400
+IVT_IMAGE_BYTES_8616: cython.longlong = 0x400
 
 # Every 16-bit lane the canonical AH=35h contract leaves unchanged: the
 # response writes only ES and BX, so ``ax`` (carrying the proven AL vector
@@ -151,7 +156,7 @@ RESIZE_PRESERVED_LANES_8616: tuple[str, ...] = (
 # declared environment at consumption so a relation whose effect fields
 # were replaced coherently under an unchanged environment cannot keep
 # authority.
-version_response_fields_8616: Callable[[int, int, int, int], tuple[int, int, int]] = (
+version_response_fields_8616: Callable[[int, int, int, int], tuple[cython.longlong, cython.longlong, cython.longlong]] = (
     version_response_words_8616
 )
 
@@ -177,7 +182,7 @@ class DeclaredInterruptRefusal8616(StrEnum):
     ENVIRONMENT_INCOMPLETE = "declared_service_environment_incomplete"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DeclaredResizeSurface8616:
     """The declared allocator surface one INT21/AH=4A relation binds.
 
@@ -198,14 +203,14 @@ class DeclaredResizeSurface8616:
     four fields alone are authoritative.
     """
 
-    block_segment: int
-    metadata_linear: int
-    metadata: bytes
-    maximum: int
+    block_segment: cython.longlong
+    metadata_linear: cython.longlong
+    metadata: object
+    maximum: cython.longlong
     dosbox: DosboxResizePolicy | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DeclaredVectorSurface8616:
     """The declared live-IVT surface one INT21/AH=35h or AH=25h relation binds.
 
@@ -218,10 +223,10 @@ class DeclaredVectorSurface8616:
     live slot bytes at consumption, never from mint-time snapshots.
     """
 
-    ivt: bytes
+    ivt: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DeclaredInterruptService8616:
     """One caller-declared conditional interrupt-service relation.
 
@@ -252,26 +257,26 @@ class DeclaredInterruptService8616:
     ``vector_response_8616``.
     """
 
-    caller_addr: int
-    callsite_addr: int
-    vector: int
-    function: int
+    caller_addr: cython.longlong
+    callsite_addr: cython.longlong
+    vector: cython.longlong
+    function: cython.longlong
     selector: int | None
     answer_ax: int | None
     answer_bx: int | None
     answer_cx: int | None
-    frame_bytes: int
-    preserved: tuple[str, ...]
-    ivt_entry_segment: int
-    ivt_entry_offset: int
-    ivt_slot_bytes: bytes
-    environment_sha256: str
+    frame_bytes: cython.longlong
+    preserved: object
+    ivt_entry_segment: cython.longlong
+    ivt_entry_offset: cython.longlong
+    ivt_slot_bytes: object
+    environment_sha256: object
     resize: DeclaredResizeSurface8616 | None = None
     dosbox_int21_entry_policy: DosBoxInt21EntryPolicy8616 | None = None
     vectors: DeclaredVectorSurface8616 | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DeclaredServiceConsumption8616:
     """One census consumption of a declared version-service relation.
 
@@ -281,19 +286,19 @@ class DeclaredServiceConsumption8616:
     proven stack region the architectural frame transiently writes.
     """
 
-    callsite_addr: int
-    vector: int
-    function: int
-    selector: int
-    answer_ax: int
-    answer_bx: int
-    answer_cx: int
-    frame_linear: int
-    frame_bytes: int
-    relation_sha256: str
+    callsite_addr: cython.longlong
+    vector: cython.longlong
+    function: cython.longlong
+    selector: cython.longlong
+    answer_ax: cython.longlong
+    answer_bx: cython.longlong
+    answer_cx: cython.longlong
+    frame_linear: cython.longlong
+    frame_bytes: cython.longlong
+    relation_sha256: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DeclaredResizeConsumption8616:
     """One census consumption of a declared tail-resize relation.
 
@@ -314,25 +319,25 @@ class DeclaredResizeConsumption8616:
     ``metadata_before``/``metadata_after`` remain authoritative.
     """
 
-    callsite_addr: int
-    vector: int
-    function: int
-    request_ax: int
-    answer_ax: int
-    answer_bx: int
-    carry: bool
-    metadata_linear: int
-    metadata_before: bytes
-    metadata_after: bytes
-    frame_linear: int
-    frame_bytes: int
-    relation_sha256: str
-    dosbox_writes: tuple[DosboxResizeWrite, ...] | None = None
-    dosbox_current_chain: tuple[bytes, ...] | None = None
-    dosbox_new_header_before: bytes | None = None
+    callsite_addr: cython.longlong
+    vector: cython.longlong
+    function: cython.longlong
+    request_ax: cython.longlong
+    answer_ax: cython.longlong
+    answer_bx: cython.longlong
+    carry: cython.bint
+    metadata_linear: cython.longlong
+    metadata_before: object
+    metadata_after: object
+    frame_linear: cython.longlong
+    frame_bytes: cython.longlong
+    relation_sha256: object
+    dosbox_writes: object = None
+    dosbox_current_chain: object = None
+    dosbox_new_header_before: object = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DeclaredVectorConsumption8616:
     """One census consumption of a declared get/set-vector relation.
 
@@ -348,28 +353,28 @@ class DeclaredVectorConsumption8616:
     consumed record fields.
     """
 
-    callsite_addr: int
-    vector: int
-    function: int
-    number: int
-    slot_linear: int
-    slot_before: bytes
-    slot_after: bytes | None
+    callsite_addr: cython.longlong
+    vector: cython.longlong
+    function: cython.longlong
+    number: cython.longlong
+    slot_linear: cython.longlong
+    slot_before: object
+    slot_after: object
     answer_es: int | None
     answer_bx: int | None
     request_ds: int | None
     request_dx: int | None
-    frame_linear: int
-    frame_bytes: int
-    relation_sha256: str
+    frame_linear: cython.longlong
+    frame_bytes: cython.longlong
+    relation_sha256: object
 
 
-def _relation_sha256_8616(relation: DeclaredInterruptService8616) -> str:
+def _relation_sha256_8616(relation: DeclaredInterruptService8616) -> object:
     """Digest every field one consumed relation binds, including ``resize``."""
     return hashlib.sha256(
         "|".join(
             str(field_value)
-            for field_value in (
+            for field_value in iter((
                 relation.caller_addr,
                 relation.callsite_addr,
                 relation.vector,
@@ -387,15 +392,16 @@ def _relation_sha256_8616(relation: DeclaredInterruptService8616) -> str:
                 relation.resize,
                 relation.dosbox_int21_entry_policy,
                 relation.vectors,
-            )
+            ))
         ).encode("utf-8")
     ).hexdigest()
 
 
+@cython.ccall
 def declared_service_consumption_8616(
     relation: DeclaredInterruptService8616,
     *,
-    frame_linear: int,
+    frame_linear: cython.longlong,
 ) -> DeclaredServiceConsumption8616:
     """Project one consumed version relation into the retained record."""
     return DeclaredServiceConsumption8616(
@@ -412,19 +418,20 @@ def declared_service_consumption_8616(
     )
 
 
+@cython.ccall
 def declared_resize_consumption_8616(
     relation: DeclaredInterruptService8616,
     *,
-    frame_linear: int,
-    request_ax: int,
-    answer_ax: int,
-    answer_bx: int,
-    carry: bool,
-    metadata_before: bytes,
-    metadata_after: bytes,
-    dosbox_writes: tuple[DosboxResizeWrite, ...] | None = None,
-    dosbox_current_chain: tuple[bytes, ...] | None = None,
-    dosbox_new_header_before: bytes | None = None,
+    frame_linear: cython.longlong,
+    request_ax: cython.longlong,
+    answer_ax: cython.longlong,
+    answer_bx: cython.longlong,
+    carry: cython.bint,
+    metadata_before: object,
+    metadata_after: object,
+    dosbox_writes: object = None,
+    dosbox_current_chain: object = None,
+    dosbox_new_header_before: object = None,
 ) -> DeclaredResizeConsumption8616:
     """Project one consumed resize relation into the retained record.
 
@@ -432,6 +439,7 @@ def declared_resize_consumption_8616(
     current-chain and split-header evidence; they stay ``None`` under the
     KvikDOS tail profile.
     """
+    surface: object
     surface = relation.resize
     return DeclaredResizeConsumption8616(
         callsite_addr=relation.callsite_addr,
@@ -455,13 +463,14 @@ def declared_resize_consumption_8616(
     )
 
 
+@cython.ccall
 def declared_vector_consumption_8616(
     relation: DeclaredInterruptService8616,
     *,
-    frame_linear: int,
-    number: int,
-    slot_before: bytes,
-    slot_after: bytes | None,
+    frame_linear: cython.longlong,
+    number: cython.longlong,
+    slot_before: object,
+    slot_after: object,
     answer_es: int | None,
     answer_bx: int | None,
     request_ds: int | None,
@@ -493,11 +502,11 @@ class _ServiceEnvironmentSurface8616(Protocol):
     reads, never mutates.
     """
 
-    psp_segment: int
-    allocation: bytes
-    registers: tuple[tuple[str, int], ...]
-    fs: int
-    gs: int
+    psp_segment: cython.longlong
+    allocation: object
+    registers: object
+    fs: cython.longlong
+    gs: cython.longlong
     version_policy: object
     resize_policy: object
     vector_policy: object
@@ -510,19 +519,19 @@ class _ServiceEnvironmentSurface8616(Protocol):
 class _VersionPolicySurface8616(Protocol):
     """Typed fields of one declared version-response policy."""
 
-    major: int
-    minor: int
-    oem: int
-    serial: int
+    major: cython.longlong
+    minor: cython.longlong
+    oem: cython.longlong
+    serial: cython.longlong
 
 
 class _ResizePolicySurface8616(Protocol):
     """Typed fields of one declared tail-resize policy."""
 
-    segment: int
-    initial_mcb: bytes
-    maximum: int
-    metadata_address: int
+    segment: cython.longlong
+    initial_mcb: object
+    maximum: cython.longlong
+    metadata_address: cython.longlong
 
 
 class _VectorPolicySurface8616(Protocol):
@@ -534,17 +543,17 @@ class _VectorPolicySurface8616(Protocol):
 class _SegOffsetSurface8616(Protocol):
     """Typed segmented coordinate used by declared policies."""
 
-    segment: int
-    offset: int
+    segment: cython.longlong
+    offset: cython.longlong
 
 
 class _MemoryLayoutSurface8616(Protocol):
     """Declared initial-memory chunks as (linear, bytes) pairs."""
 
-    chunks: tuple[tuple[int, bytes], ...]
+    chunks: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DeclaredServiceExpectation8616:
     """The canonical relation fields one declared environment authenticates.
 
@@ -559,23 +568,24 @@ class DeclaredServiceExpectation8616:
     vector expectation ``vectors`` carries the declared initial IVT image.
     """
 
-    vector: int
-    function: int
+    vector: cython.longlong
+    function: cython.longlong
     selector: int | None
     answer_ax: int | None
     answer_bx: int | None
     answer_cx: int | None
-    frame_bytes: int
-    preserved: tuple[str, ...]
-    ivt_entry_segment: int
-    ivt_entry_offset: int
-    ivt_slot_bytes: bytes
+    frame_bytes: cython.longlong
+    preserved: object
+    ivt_entry_segment: cython.longlong
+    ivt_entry_offset: cython.longlong
+    ivt_slot_bytes: object
     resize: DeclaredResizeSurface8616 | None = None
     dosbox_int21_entry_policy: DosBoxInt21EntryPolicy8616 | None = None
     vectors: DeclaredVectorSurface8616 | None = None
 
 
-def declared_service_arena_8616(environment: object) -> tuple[int, int] | None:
+@cython.ccall
+def declared_service_arena_8616(environment: object) -> object:
     """Return the declared arena ``[start, end)`` the environment grants.
 
     The DOS entry must lie outside it: a handler inside program-allocated
@@ -603,9 +613,10 @@ def declared_service_arena_8616(environment: object) -> tuple[int, int] | None:
     return start, end
 
 
+@cython.ccall
 def _ivt_expectation_surface_8616(
     environment: object,
-) -> tuple[int, int, bytes] | DeclaredInterruptRefusal8616:
+) -> object:
     """Re-derive the declared DOS entry and live slot bytes both kinds share.
 
     Returns ``(entry_segment, entry_offset, slot_bytes)`` on success. The
@@ -613,6 +624,8 @@ def _ivt_expectation_surface_8616(
     must contain the 0x21 slot bytes, and they must equal the architectural
     offset-then-segment encoding of the declared entry.
     """
+    entry: object
+    slot: object
     entry = _vector_entry_fields_8616(environment)
     if entry is None:
         return DeclaredInterruptRefusal8616.ENVIRONMENT_INCOMPLETE
@@ -625,11 +638,12 @@ def _ivt_expectation_surface_8616(
     expected_slot = (
         entry_offset.to_bytes(2, "little") + entry_segment.to_bytes(2, "little")
     )
-    if slot != expected_slot:
+    if operator.ne(slot, expected_slot):
         return DeclaredInterruptRefusal8616.IVT_MISMATCH
     return entry_segment, entry_offset, slot
 
 
+@cython.ccall
 def declared_service_expectation_8616(
     environment: object,
 ) -> DeclaredServiceExpectation8616 | DeclaredInterruptRefusal8616:
@@ -641,6 +655,7 @@ def declared_service_expectation_8616(
     boot's declared policies and layout. A presented relation must equal
     every field; anything the environment cannot supply refuses.
     """
+    version_fields: object
     version_fields = _version_policy_fields_8616(environment)
     if version_fields is None:
         return DeclaredInterruptRefusal8616.ENVIRONMENT_INCOMPLETE
@@ -671,6 +686,7 @@ def declared_service_expectation_8616(
     )
 
 
+@cython.ccall
 def _dosbox_resize_surface_8616(policy: DosboxResizePolicy) -> DeclaredResizeSurface8616:
     """Project the declared DOSBox chain's final block into the surface.
 
@@ -688,6 +704,7 @@ def _dosbox_resize_surface_8616(policy: DosboxResizePolicy) -> DeclaredResizeSur
     )
 
 
+@cython.ccall
 def _resize_policy_fields_8616(
     environment: object,
 ) -> DeclaredResizeSurface8616 | None:
@@ -699,6 +716,7 @@ def _resize_policy_fields_8616(
     segment value: a ``DosboxResizePolicy`` projects its final block and
     binds the whole chain, anything else is read as the legacy tail shape.
     """
+    policy: object
     try:
         policy = cast(
             _ServiceEnvironmentSurface8616, environment
@@ -725,7 +743,7 @@ def _resize_policy_fields_8616(
         and type(metadata_linear) is int
         and 0 <= metadata_linear <= 0xFFFFF
         and isinstance(metadata, bytes | bytearray)
-        and len(metadata) == RESIZE_MCB_BYTES_8616
+        and operator.eq(len(metadata), RESIZE_MCB_BYTES_8616)
     ):
         return None
     return DeclaredResizeSurface8616(
@@ -736,6 +754,7 @@ def _resize_policy_fields_8616(
     )
 
 
+@cython.ccall
 def declared_resize_expectation_8616(
     environment: object,
 ) -> DeclaredServiceExpectation8616 | DeclaredInterruptRefusal8616:
@@ -749,10 +768,12 @@ def declared_resize_expectation_8616(
     address; a missing or divergent span is an incomplete declaration, not
     allocator state to infer.
     """
+    declared: object
+    resize: object
     resize = _resize_policy_fields_8616(environment)
     if resize is None:
         return DeclaredInterruptRefusal8616.ENVIRONMENT_INCOMPLETE
-    if resize.metadata_linear != (resize.block_segment - 1) << 4:
+    if operator.ne(resize.metadata_linear, (resize.block_segment - 1) << 4):
         return DeclaredInterruptRefusal8616.RELATION_MALFORMED
     env = cast(_ServiceEnvironmentSurface8616, environment)
     if resize.dosbox is not None and not dosbox_entry_policy_matches(
@@ -769,7 +790,7 @@ def declared_resize_expectation_8616(
     declared = declared_memory_span_8616(
         environment, resize.metadata_linear, RESIZE_MCB_BYTES_8616
     )
-    if declared is None or declared != resize.metadata:
+    if declared is None or operator.ne(declared, resize.metadata):
         return DeclaredInterruptRefusal8616.ENVIRONMENT_INCOMPLETE
     if resize.dosbox is not None and not _dosbox_chain_declared_8616(environment, resize.dosbox):
         return DeclaredInterruptRefusal8616.ENVIRONMENT_INCOMPLETE
@@ -790,8 +811,9 @@ def declared_resize_expectation_8616(
     )
 
 
+@cython.ccall
 def declared_vector_expectation_8616(
-    environment: object, function: int
+    environment: object, function: cython.longlong
 ) -> DeclaredServiceExpectation8616 | DeclaredInterruptRefusal8616:
     """Derive the canonical declared-vector fields from the environment.
 
@@ -804,6 +826,7 @@ def declared_vector_expectation_8616(
     layout must present the complete 1024-byte IVT — a missing or truncated
     span is an incomplete declaration, never live table state to infer.
     """
+    declared_ivt: object
     if type(function) is not int:
         return DeclaredInterruptRefusal8616.RELATION_MALFORMED
     if function == INT21_GET_VECTOR_8616:
@@ -837,19 +860,21 @@ def declared_vector_expectation_8616(
     )
 
 
-def _dosbox_chain_declared_8616(environment: object, policy: DosboxResizePolicy) -> bool:
+def _dosbox_chain_declared_8616(environment: object, policy: DosboxResizePolicy) -> cython.bint:
     """Require every declared DOSBox MCB image to be present initial memory."""
     return all(
-        declared_memory_span_8616(environment, entry.address, RESIZE_MCB_BYTES_8616)
-        == entry.image
-        for entry in policy.chain
+        operator.eq(declared_memory_span_8616(environment, entry.address, RESIZE_MCB_BYTES_8616), entry.image)
+        for entry in iter(policy.chain)
     )
 
 
+@cython.ccall
 def declared_memory_span_8616(
-    environment: object, linear: int, size: int
-) -> bytes | None:
+    environment: object, linear: cython.longlong, size: cython.longlong
+) -> object:
     """Return the declared ``size`` bytes at ``linear`` or ``None``."""
+    data: object
+    start: object
     try:
         layout = cast(
             _ServiceEnvironmentSurface8616, environment
@@ -873,14 +898,15 @@ def declared_memory_span_8616(
     return None
 
 
-def declared_ivt_slot_bytes_8616(environment: object, vector: int) -> bytes | None:
+@cython.ccall
+def declared_ivt_slot_bytes_8616(environment: object, vector: cython.longlong) -> object:
     """Return the declared 4 IVT bytes for ``vector`` or ``None``."""
     return declared_memory_span_8616(environment, vector * 4, 4)
 
 
 def _version_policy_fields_8616(
     environment: object,
-) -> tuple[int, int, int, int] | None:
+) -> object:
     """Project the declared version-policy fields or ``None``."""
     try:
         policy = cast(
@@ -890,12 +916,12 @@ def _version_policy_fields_8616(
         fields = (policy.major, policy.minor, policy.oem, policy.serial)
     except (AttributeError, TypeError):
         return None
-    if any(type(value) is not int or value < 0 for value in fields):
+    if any(type(value) is not int or value < 0 for value in iter(fields)):
         return None
     return fields
 
 
-def _vector_entry_fields_8616(environment: object) -> tuple[int, int] | None:
+def _vector_entry_fields_8616(environment: object) -> object:
     """Project the declared DOS entry coordinates or ``None``."""
     try:
         dos_entry = cast(
@@ -908,13 +934,16 @@ def _vector_entry_fields_8616(environment: object) -> tuple[int, int] | None:
         fields = (dos_entry.segment, dos_entry.offset)
     except (AttributeError, TypeError):
         return None
-    if any(type(value) is not int or value < 0 for value in fields):
+    if any(type(value) is not int or value < 0 for value in iter(fields)):
         return None
     return fields
 
 
-def _service_policy_fields_8616(environment: object) -> tuple[int, ...] | None:
+@cython.ccall
+def _service_policy_fields_8616(environment: object) -> object:
     """Project the declared version/vector policy fields or ``None``."""
+    entry_fields: object
+    version_fields: object
     version_fields = _version_policy_fields_8616(environment)
     entry_fields = _vector_entry_fields_8616(environment)
     if version_fields is None or entry_fields is None:
@@ -922,7 +951,7 @@ def _service_policy_fields_8616(environment: object) -> tuple[int, ...] | None:
     return (*version_fields, *entry_fields)
 
 
-def _resize_digest_part_8616(resize: DeclaredResizeSurface8616 | None) -> bytes:
+def _resize_digest_part_8616(resize: object) -> object:
     """Serialize the declared resize surface into the environment digest.
 
     The KvikDOS tail profile keeps its exact legacy ``R`` encoding; the
@@ -930,6 +959,7 @@ def _resize_digest_part_8616(resize: DeclaredResizeSurface8616 | None) -> bytes:
     PSP, the chain length and every entry's segment plus exact 16-byte
     image — the whole chain, not only the projected final block.
     """
+    dosbox: object
     if resize is None:
         return b"R\x00"
     common = (
@@ -948,12 +978,12 @@ def _resize_digest_part_8616(resize: DeclaredResizeSurface8616 | None) -> bytes:
         + len(dosbox.chain).to_bytes(4, "little")
         + b"".join(
             entry.segment.to_bytes(2, "little") + entry.image
-            for entry in dosbox.chain
+            for entry in iter(dosbox.chain)
         )
     )
 
 
-def declared_environment_digest_8616(environment: object) -> str | None:
+def declared_environment_digest_8616(environment: object) -> object:
     """Digest the complete declared service surface of one environment.
 
     The digest binds every field a declared service relation may depend on:
@@ -968,6 +998,12 @@ def declared_environment_digest_8616(environment: object) -> str | None:
     ``None`` means the environment cannot present the complete declared
     surface — any relation minted against it is unbindable.
     """
+    entry_fields: object
+    entry_policy: object
+    version_fields: object
+    data: object
+    pair: object
+    start: object
     try:
         env = cast(_ServiceEnvironmentSurface8616, environment)
         psp_segment = env.psp_segment
@@ -982,7 +1018,7 @@ def declared_environment_digest_8616(environment: object) -> str | None:
     if not isinstance(registers, tuple) or not isinstance(chunks, tuple):
         return None
     words = (psp_segment, fs, gs)
-    if (any(type(value) is not int or not 0 <= value <= 0xFFFF for value in words)
+    if (any(type(value) is not int or not 0 <= value <= 0xFFFF for value in iter(words))
             or not dosbox_entry_policy_matches(entry_policy, psp_segment)):
         return None
     parts = [
@@ -1001,12 +1037,12 @@ def declared_environment_digest_8616(environment: object) -> str | None:
     entry_fields = _vector_entry_fields_8616(environment)
     if entry_fields is None:
         return None
-    parts.append(b"E" + b"".join(field.to_bytes(2, "little") for field in entry_fields))
+    parts.append(b"E" + b"".join(field.to_bytes(2, "little") for field in iter(entry_fields)))
     version_fields = _version_policy_fields_8616(environment)
     parts.append(
         b"V\x00"
         if version_fields is None
-        else b"V" + b"".join(field.to_bytes(4, "little") for field in version_fields)
+        else b"V" + b"".join(field.to_bytes(4, "little") for field in iter(version_fields))
     )
     parts.append(_resize_digest_part_8616(_resize_policy_fields_8616(environment)))
     for start, data in sorted(chunks):
@@ -1016,6 +1052,7 @@ def declared_environment_digest_8616(environment: object) -> str | None:
     return hashlib.sha256(b"|".join(parts)).hexdigest()
 
 
+@cython.ccall
 def interrupt_call_vector_8616(instruction: IRInstr) -> int | None:
     """Return the interrupt vector a CALL row lifts to, or ``None``.
 
@@ -1033,13 +1070,15 @@ def interrupt_call_vector_8616(instruction: IRInstr) -> int | None:
     return interrupt_vector_from_core_addr_8616(target.const)
 
 
-def _resize_surface_valid_8616(surface: object) -> bool:
+@cython.ccall
+def _resize_surface_valid_8616(surface: object) -> cython.bint:
     """Return whether one declared resize surface is structurally bounded.
 
     A DOSBox surface additionally requires its typed chain policy to be
     internally coherent with the projected final-block fields — a forged
     surface mixing a policy with divergent fields fails closed.
     """
+    dosbox: object
     if type(surface) is not DeclaredResizeSurface8616:
         return False
     bounded = (
@@ -1047,11 +1086,11 @@ def _resize_surface_valid_8616(surface: object) -> bool:
         and 0 <= surface.block_segment <= 0xFFFF
         and type(surface.metadata_linear) is int
         and 0 <= surface.metadata_linear <= 0xFFFFF
-        and surface.metadata_linear == (surface.block_segment - 1) << 4
+        and operator.eq(surface.metadata_linear, (surface.block_segment - 1) << 4)
         and type(surface.maximum) is int
         and 0 <= surface.maximum <= 0xFFFF
         and type(surface.metadata) is bytes
-        and len(surface.metadata) == RESIZE_MCB_BYTES_8616
+        and operator.eq(len(surface.metadata), RESIZE_MCB_BYTES_8616)
     )
     if not bounded:
         return False
@@ -1062,26 +1101,27 @@ def _resize_surface_valid_8616(surface: object) -> bool:
         return False
     final = dosbox.final_entry
     return (
-        dosbox.psp_segment == surface.block_segment
-        and final.data_segment == surface.block_segment
-        and final.address == surface.metadata_linear
-        and final.image == surface.metadata
-        and final.size == surface.maximum
+        operator.eq(dosbox.psp_segment, surface.block_segment)
+        and operator.eq(final.data_segment, surface.block_segment)
+        and operator.eq(final.address, surface.metadata_linear)
+        and operator.eq(final.image, surface.metadata)
+        and operator.eq(final.size, surface.maximum)
     )
 
 
-def _vector_surface_valid_8616(surface: object) -> bool:
+@cython.ccall
+def _vector_surface_valid_8616(surface: object) -> cython.bint:
     """Return whether one declared vector surface is structurally bounded."""
     return (
         type(surface) is DeclaredVectorSurface8616
         and type(surface.ivt) is bytes
-        and len(surface.ivt) == IVT_IMAGE_BYTES_8616
+        and operator.eq(len(surface.ivt), IVT_IMAGE_BYTES_8616)
     )
 
 
 def _service_shape_fields_valid_8616(
     relation: DeclaredInterruptService8616,
-) -> bool:
+) -> cython.bint:
     """Enforce the exclusive version/resize/vector effect-field shapes.
 
     A version relation (``resize`` and ``vectors`` both absent) must carry
@@ -1101,11 +1141,11 @@ def _service_shape_fields_valid_8616(
             return False
         return all(
             type(value) is int and 0 <= value <= 0xFFFF
-            for value in (
+            for value in iter((
                 relation.answer_ax,
                 relation.answer_bx,
                 relation.answer_cx,
-            )
+            ))
         )
     if relation.vectors is not None:
         if not (
@@ -1120,10 +1160,10 @@ def _service_shape_fields_valid_8616(
             return False
         expected_preserved = (
             VECTOR_GET_PRESERVED_LANES_8616
-            if relation.function == INT21_GET_VECTOR_8616
+            if operator.eq(relation.function, INT21_GET_VECTOR_8616)
             else VECTOR_SET_PRESERVED_LANES_8616
         )
-        return relation.preserved == expected_preserved
+        return operator.eq(relation.preserved, expected_preserved)
     if relation.resize is None:
         return False
     if not (
@@ -1164,14 +1204,14 @@ def validated_declared_service_8616(
     address_fields = (relation.caller_addr, relation.callsite_addr)
     if any(
         type(value) is not int or not 0 <= value <= 0xFFFFF
-        for value in address_fields
+        for value in iter(address_fields)
     ):
         return DeclaredInterruptRefusal8616.RELATION_MALFORMED
     word_fields = (
         relation.ivt_entry_segment,
         relation.ivt_entry_offset,
     )
-    if any(type(value) is not int or not 0 <= value <= 0xFFFF for value in word_fields):
+    if any(type(value) is not int or not 0 <= value <= 0xFFFF for value in iter(word_fields)):
         return DeclaredInterruptRefusal8616.RELATION_MALFORMED
     if type(relation.vector) is not int or not 0 <= relation.vector <= 0xFF:
         return DeclaredInterruptRefusal8616.RELATION_MALFORMED
@@ -1186,17 +1226,17 @@ def _service_evidence_fields_8616(
     relation: DeclaredInterruptService8616,
 ) -> DeclaredInterruptService8616 | DeclaredInterruptRefusal8616:
     """Validate the frame/preserved/IVT/digest fields of one relation."""
-    if relation.frame_bytes != INT_FRAME_BYTES_8616:
+    if operator.ne(relation.frame_bytes, INT_FRAME_BYTES_8616):
         return DeclaredInterruptRefusal8616.RELATION_MALFORMED
     if not isinstance(relation.preserved, tuple) or not all(
-        type(name) is str for name in relation.preserved
+        type(name) is str for name in iter(relation.preserved)
     ):
         return DeclaredInterruptRefusal8616.RELATION_MALFORMED
     expected_slot = (
         relation.ivt_entry_offset.to_bytes(2, "little")
         + relation.ivt_entry_segment.to_bytes(2, "little")
     )
-    if type(relation.ivt_slot_bytes) is not bytes or relation.ivt_slot_bytes != expected_slot:
+    if type(relation.ivt_slot_bytes) is not bytes or operator.ne(relation.ivt_slot_bytes, expected_slot):
         return DeclaredInterruptRefusal8616.IVT_MISMATCH
     if (
         type(relation.environment_sha256) is not str
@@ -1206,38 +1246,40 @@ def _service_evidence_fields_8616(
     return relation
 
 
+@cython.ccall
 def _expectation_matches_8616(
     checked: DeclaredInterruptService8616,
     expectation: DeclaredServiceExpectation8616,
-) -> bool:
+) -> cython.bint:
     """Require every canonical effect field to equal the derived surface."""
     return (
-        checked.vector == expectation.vector
-        and checked.function == expectation.function
-        and checked.selector == expectation.selector
-        and checked.answer_ax == expectation.answer_ax
-        and checked.answer_bx == expectation.answer_bx
-        and checked.answer_cx == expectation.answer_cx
-        and checked.frame_bytes == expectation.frame_bytes
-        and checked.preserved == expectation.preserved
-        and checked.ivt_entry_segment == expectation.ivt_entry_segment
-        and checked.ivt_entry_offset == expectation.ivt_entry_offset
-        and checked.ivt_slot_bytes == expectation.ivt_slot_bytes
-        and checked.resize == expectation.resize
-        and checked.dosbox_int21_entry_policy == expectation.dosbox_int21_entry_policy
-        and checked.vectors == expectation.vectors
+        operator.eq(checked.vector, expectation.vector)
+        and operator.eq(checked.function, expectation.function)
+        and operator.eq(checked.selector, expectation.selector)
+        and operator.eq(checked.answer_ax, expectation.answer_ax)
+        and operator.eq(checked.answer_bx, expectation.answer_bx)
+        and operator.eq(checked.answer_cx, expectation.answer_cx)
+        and operator.eq(checked.frame_bytes, expectation.frame_bytes)
+        and operator.eq(checked.preserved, expectation.preserved)
+        and operator.eq(checked.ivt_entry_segment, expectation.ivt_entry_segment)
+        and operator.eq(checked.ivt_entry_offset, expectation.ivt_entry_offset)
+        and operator.eq(checked.ivt_slot_bytes, expectation.ivt_slot_bytes)
+        and operator.eq(checked.resize, expectation.resize)
+        and operator.eq(checked.dosbox_int21_entry_policy, expectation.dosbox_int21_entry_policy)
+        and operator.eq(checked.vectors, expectation.vectors)
     )
 
 
+@cython.ccall
 def _relation_matches_site_8616(
     checked: DeclaredInterruptService8616,
     *,
-    caller_addr: int,
-    callsite_addr: int,
-    vector: int,
-    function: int,
-    selector: int,
-    environment_sha256: str | None,
+    caller_addr: cython.longlong,
+    callsite_addr: cython.longlong,
+    vector: cython.longlong,
+    function: cython.longlong,
+    selector: cython.longlong,
+    environment_sha256: object,
     environment: object,
 ) -> DeclaredInterruptService8616 | DeclaredInterruptRefusal8616 | None:
     """Bind one validated relation to the proven site.
@@ -1252,21 +1294,21 @@ def _relation_matches_site_8616(
     vector relation.
     """
     if not (
-        checked.caller_addr == caller_addr
-        and checked.callsite_addr == callsite_addr
-        and checked.vector == vector
+        operator.eq(checked.caller_addr, caller_addr)
+        and operator.eq(checked.callsite_addr, callsite_addr)
+        and operator.eq(checked.vector, vector)
     ):
         return None
-    if checked.environment_sha256 != environment_sha256:
+    if operator.ne(checked.environment_sha256, environment_sha256):
         return DeclaredInterruptRefusal8616.ENVIRONMENT_MISMATCH
-    if checked.function != function:
+    if operator.ne(checked.function, function):
         return DeclaredInterruptRefusal8616.SELECTOR_MISMATCH
     if checked.resize is not None:
         expectation = declared_resize_expectation_8616(environment)
     elif checked.vectors is not None:
         expectation = declared_vector_expectation_8616(environment, function)
     else:
-        if checked.selector != selector:
+        if operator.ne(checked.selector, selector):
             return DeclaredInterruptRefusal8616.SELECTOR_MISMATCH
         expectation = declared_service_expectation_8616(environment)
     if type(expectation) is not DeclaredServiceExpectation8616:
@@ -1276,15 +1318,16 @@ def _relation_matches_site_8616(
     return checked
 
 
+@cython.ccall
 def service_relation_for_8616(
-    relations: tuple[DeclaredInterruptService8616, ...],
+    relations: object,
     *,
-    caller_addr: int,
-    callsite_addr: int,
-    vector: int,
-    function: int,
-    selector: int,
-    environment_sha256: str | None,
+    caller_addr: cython.longlong,
+    callsite_addr: cython.longlong,
+    vector: cython.longlong,
+    function: cython.longlong,
+    selector: cython.longlong,
+    environment_sha256: object,
     environment: object,
 ) -> DeclaredInterruptService8616 | DeclaredInterruptRefusal8616:
     """Bind exactly one authenticated relation to this exact boundary.
@@ -1304,6 +1347,8 @@ def service_relation_for_8616(
     Exactly-one matching wins; zero is ``RELATION_ABSENT``, two-or-more
     and malformed records refuse rather than pick.
     """
+    verdict: object
+    candidate: object
     matched: list[DeclaredInterruptService8616] = []
     malformed = False
     for candidate in relations:

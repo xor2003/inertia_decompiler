@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Transport exact callee callsite censuses across JSON boundaries.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Protocol, cast
 
@@ -27,6 +30,8 @@ from .callee_callsite_contracts import (
     CalleeCallsiteFact8616,
     callee_callsite_censuses_by_addr_8616,
 )
+import operator
+import builtins
 
 __all__ = [
     "callee_callsite_census_map_from_record_8616",
@@ -40,14 +45,15 @@ class _OriginalProjectSurface8616(Protocol):
     _inertia_original_project: object
 
 
-def _record_8616(value: object, label: str) -> dict[str, object]:
+def _record_8616(value: object, label: object) -> object:
     """Return one string-keyed record or reject malformed JSON data."""
-    if not isinstance(value, dict) or any(not isinstance(key, str) for key in value):
+    if not isinstance(value, dict) or any(not isinstance(key, str) for key in iter(value)):
         raise ValueError(f"{label} must be an object")
     return value
 
 
-def _int_8616(value: object, label: str) -> int:
+@cython.ccall
+def _int_8616(value: object, label: object) -> cython.longlong:
     """Return one exact nonnegative integer."""
     if (
         not isinstance(value, int)
@@ -58,11 +64,13 @@ def _int_8616(value: object, label: str) -> int:
     return value
 
 
-def _optional_int_8616(value: object, label: str) -> int | None:
+@cython.ccall
+def _optional_int_8616(value: object, label: object) -> int | None:
     """Return one optional nonnegative integer."""
     return None if value is None else _int_8616(value, label)
 
 
+@cython.ccall
 def _original_project_8616(project: object) -> object | None:
     """Return the explicit original project at the third-party boundary."""
     try:
@@ -71,6 +79,7 @@ def _original_project_8616(project: object) -> object | None:
         return None
 
 
+@cython.ccall
 def _owner_kind_8616(project: object, evidence_project: object) -> str:
     """Encode one evidence owner using only an explicit project relation."""
     if evidence_project is project:
@@ -80,8 +89,10 @@ def _owner_kind_8616(project: object, evidence_project: object) -> str:
     raise ValueError("callee callsite fact has an untransportable evidence owner")
 
 
+@cython.ccall
 def _owner_from_kind_8616(project: object, kind: object) -> object:
     """Rebind one encoded evidence owner to the freshly loaded project."""
+    original: object
     if kind == "active":
         return project
     if kind == "original":
@@ -92,6 +103,7 @@ def _owner_from_kind_8616(project: object, kind: object) -> object:
     raise ValueError("callee callsite evidence owner kind is invalid")
 
 
+@cython.ccall
 def _fact_record_8616(
     project: object,
     fact: CalleeCallsiteFact8616,
@@ -114,11 +126,15 @@ def _fact_record_8616(
     }
 
 
+@cython.ccall
 def _fact_from_record_8616(
     project: object,
     value: object,
 ) -> CalleeCallsiteFact8616:
     """Decode one fact and bind it to the fresh evidence project."""
+    boundary: object
+    raw_summary: object
+    summary: object
     record = _record_8616(value, "callee callsite fact")
     if set(record) != {
         "owner",
@@ -136,13 +152,13 @@ def _fact_from_record_8616(
         else callsite_summary_from_record_8616(raw_summary)
     )
     callsite_addr = _int_8616(record["callsite_addr"], "callee callsite address")
-    if summary is not None and summary.callsite_addr != callsite_addr:
+    if summary is not None and operator.ne(summary.callsite_addr, callsite_addr):
         raise ValueError("callee callsite summary address disagrees with its fact")
     owner = _owner_from_kind_8616(project, record["owner"])
     caller_addr = _optional_int_8616(record["caller_addr"], "callee callsite caller address")
     boundary = function_boundary_from_record_8616(owner, record["caller_boundary"])
     boundary_disagrees = boundary is not None and (
-        boundary.addr != caller_addr or callsite_addr not in boundary.reachable_instruction_addrs
+        operator.ne(boundary.addr, caller_addr) or callsite_addr not in boundary.reachable_instruction_addrs
     )
     if boundary_disagrees:
         raise ValueError(
@@ -162,6 +178,7 @@ def _fact_from_record_8616(
     )
 
 
+@cython.ccall
 def callee_callsite_census_map_record_8616(
     project: object,
 ) -> list[dict[str, object]]:
@@ -169,25 +186,26 @@ def callee_callsite_census_map_record_8616(
     return [
         {
             "target_addr": target_addr,
-            "facts": [_fact_record_8616(project, fact) for fact in census.facts],
+            "facts": [_fact_record_8616(project, fact) for fact in iter(census.facts)],
             "raw_fact_count": census.raw_fact_count,
             "normalized_fact_count": census.normalized_fact_count,
             "failure_count": census.failure_count,
         }
-        for target_addr, census in sorted(
-            callee_callsite_censuses_by_addr_8616(project).items()
-        )
+        for target_addr, census in builtins.iter(sorted(
+            tuple(callee_callsite_censuses_by_addr_8616(project).items())
+        ))
     ]
 
 
 def callee_callsite_census_map_from_record_8616(
     project: object,
     value: object,
-) -> dict[int, CalleeCallsiteCensus8616]:
+) -> object:
     """Decode and validate one complete project census registry."""
+    item: object
     if not isinstance(value, list):
         raise ValueError("callee callsite census transport must be an array")
-    result: dict[int, CalleeCallsiteCensus8616] = {}
+    result: dict[cython.longlong, CalleeCallsiteCensus8616] = {}
     for item in value:
         record = _record_8616(item, "callee callsite census")
         if set(record) != {
@@ -206,7 +224,7 @@ def callee_callsite_census_map_from_record_8616(
             raise ValueError("callee callsite census facts must be an array")
         census = CalleeCallsiteCensus8616(
             target_addr=target_addr,
-            facts=tuple(_fact_from_record_8616(project, fact) for fact in raw_facts),
+            facts=tuple(_fact_from_record_8616(project, fact) for fact in iter(raw_facts)),
             raw_fact_count=_int_8616(record["raw_fact_count"], "callee census raw count"),
             normalized_fact_count=_int_8616(
                 record["normalized_fact_count"],

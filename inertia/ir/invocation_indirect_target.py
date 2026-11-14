@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Invocation-bound discovery of one native indirect destination.
 
 Layer: IR.
@@ -9,6 +10,8 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Protocol, cast
@@ -24,8 +27,12 @@ from .real16_fused_caller_prefix import FusedCallerPrefix8616
 from .real16_path_memory8616 import restore_path_memory_8616
 from .segment_call_preservation import segment_call_dependency_traversal_scope_8616
 from .vex_import import IRImportRefusalReason8616, _block_to_ir
+import dataclasses
+import operator
+import builtins
 
 
+@cython.ccall
 def _producers() -> tuple[object, ...]:
     """Reuse existing native-import and scalar-effect producer inventories."""
     return (_block_to_ir, *importer._native_import_producers_8616(), *census._fused_callee_producers_8616())
@@ -34,18 +41,18 @@ def _producers() -> tuple[object, ...]:
 _CANONICAL_PRODUCERS = _producers()
 
 
-def _producers_current() -> bool:
+def _producers_current() -> cython.bint:
     """Refuse substituted native/effect producers before granting an edge."""
     current = _producers()
-    return len(current) == len(_CANONICAL_PRODUCERS) and all(
-        actual is expected for actual, expected in zip(current, _CANONICAL_PRODUCERS, strict=True)
+    return operator.eq(len(current), len(_CANONICAL_PRODUCERS)) and all(
+        actual is expected for actual, expected in builtins.iter(zip(current, _CANONICAL_PRODUCERS, strict=True))
     )
 
 
 class _Factory(Protocol):
     """Angr native block boundary used only for fresh import."""
 
-    def block(self, addr: int, *, opt_level: int) -> object:
+    def block(self, addr: cython.longlong, *, opt_level: cython.longlong) -> object:
         """Lift native bytes at one requested instruction boundary."""
         ...
 
@@ -56,19 +63,20 @@ class _Project(Protocol):
     factory: _Factory
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class InvocationIndirectTarget8616:
     """One replayable conditional edge, without complete-function authority."""
 
     invocation: census.Real16InvocationDomain8616
     decoded_call: DecodedDirectCallsite8616
-    function_addr: int
-    block_addr: int
-    instruction_addr: int
-    target: int
-    native_spans: tuple[tuple[int, bytes], ...]
+    function_addr: cython.longlong
+    block_addr: cython.longlong
+    instruction_addr: cython.longlong
+    target: cython.longlong
+    native_spans: object
 
 
+@cython.ccall
 def discover_invocation_indirect_target_8616(
     invocation: census.Real16InvocationDomain8616,
     decoded_call: DecodedDirectCallsite8616,
@@ -87,6 +95,9 @@ def _discover(
     decoded_call: DecodedDirectCallsite8616,
 ) -> InvocationIndirectTarget8616 | None:
     """Bind a current near CALL before evaluating its pending native prefix."""
+    seed_authority: object
+    selector: object
+    surface: object
     if not _producers_current() or type(invocation) is not census.Real16InvocationDomain8616 or not invocation.complete:
         return None
     surface = census._retained_parent_census_surface_8616(invocation)
@@ -96,7 +107,7 @@ def _discover(
     block = census._callsite_block_8616(caller, invocation.callsite_addr)
     if isinstance(block, census.Real16InvocationFailure8616):
         return None
-    calls = tuple(row for row in block.instrs if row.op == "CALL" and row.addr == invocation.callsite_addr)
+    calls = tuple(row for row in iter(block.instrs) if row.op == "CALL" and operator.eq(row.addr, invocation.callsite_addr))
     if len(calls) != 1:
         return None
     binding = prove_direct_near_call_target_binding_from_decoded_8616(
@@ -121,7 +132,7 @@ def _discover(
         environment_digest=evidence.environment_digest, environment=evidence.environment,
         arena=evidence.arena, service_consumptions=[], stop_block_addr=None, callsite_addr=None,
         callsite_call_state=None, callsite_memory=None,
-        manifest={(base, len(data)) for base, data in evidence.image.chunks},
+        manifest={(base, len(data)) for base, data in iter(evidence.image.chunks)},
         machine_bytes={}, native_blocks={}, checked_stores=0, censused_callees=set(),
         raw_facts=set(), normalized_facts=set(), classified_facts=set(), materialized_facts=set(),
         failures=0, work_units=0, work_limit=census._CENSUS_WORK_LIMIT_8616,
@@ -129,19 +140,21 @@ def _discover(
         initial_memory=census._invocation_initial_memory_for_entry_8616(evidence, invocation.chain),
     )
     state = census._PathState8616(registers, restore_path_memory_8616(invocation.callsite_memory))
-    if _seed_authority(invocation) != seed_authority:
+    if operator.ne(_seed_authority(invocation), seed_authority):
         return None
     return _walk(ctx, invocation, decoded_call, binding.target_addr, state, seed_authority)
 
 
+@cython.ccall
 def _walk(
     ctx: census._PathCensusContext8616, invocation: census.Real16InvocationDomain8616,
-    decoded_call: DecodedDirectCallsite8616, head: int, state: census._PathState8616,
-    seed_authority: tuple[object, ...],
+    decoded_call: DecodedDirectCallsite8616, head: cython.longlong, state: census._PathState8616,
+    seed_authority: object,
 ) -> InvocationIndirectTarget8616 | None:
     """Visit a bounded unique native path, preserving all scalar/store checks."""
-    visited: set[int] = set()
-    spans: dict[int, bytes] = {}
+    native: object
+    visited: set[cython.longlong] = set()
+    spans: dict[cython.longlong, bytes] = {}
     current = head
     for _ in range(64):
         if current in visited or not (ctx.selector << 4) <= current < (ctx.selector << 4) + 0x10000:
@@ -175,7 +188,8 @@ def _walk(
     return None
 
 
-def _native_block(project: object, address: int) -> object | None:
+@cython.ccall
+def _native_block(project: object, address: cython.longlong) -> object | None:
     """Translate only known frontend decode boundary failures to refusal."""
     try:
         return cast(_Project, project).factory.block(address, opt_level=0)
@@ -183,7 +197,8 @@ def _native_block(project: object, address: int) -> object | None:
         return None
 
 
-def _discovery_block(native: object) -> tuple[IRBlock, bool]:
+@cython.ccall
+def _discovery_block(native: object) -> tuple[IRBlock, cython.bint]:
     """Retain a missing terminal only with the explicit pending refusal."""
     block, _, _ = _block_to_ir(native)
     pending = not block.instrs or block.instrs[-1].op not in ("CJMP", "JMP", "RET", "CALL")
@@ -192,23 +207,24 @@ def _discovery_block(native: object) -> tuple[IRBlock, bool]:
     return block, pending
 
 
-def _supported_block(block: IRBlock) -> bool:
+def _supported_block(block: IRBlock) -> cython.bint:
     """Never skip an unsupported effect or silently cross another call."""
     return bool(
         block.instrs and block.instrs[-1].op in ("CJMP", "JMP")
-        and not any(row.op == "CALL" for row in block.instrs)
-        and all(item.kind is IRImportRefusalReason8616.INDIRECT_TERMINAL_PENDING for item in block.refusals)
+        and not any(row.op == "CALL" for row in iter(block.instrs))
+        and all(item.kind is IRImportRefusalReason8616.INDIRECT_TERMINAL_PENDING for item in iter(block.refusals))
     )
 
 
+@cython.ccall
 def _target(block: IRBlock, prefix: FusedCallerPrefix8616) -> int | None:
     """Use canonical known-bits branch and scalar target interpretation."""
     terminal = block.instrs[-1]
     if terminal.op == "CJMP":
         return edges._cjmp_live_successor_8616(
             terminal, block.successor_addrs,
-            {name: (0xFFFFFFFF, value) for name, value in prefix.registers.items()},
-            {name: (0xFFFFFFFF, value) for name, value in prefix.tmps.items()},
+            {name: (0xFFFFFFFF, value) for name, value in builtins.iter(prefix.registers.items())},
+            {name: (0xFFFFFFFF, value) for name, value in builtins.iter(prefix.tmps.items())},
         )
     if terminal.op == "JMP" and len(terminal.args) == 1 and isinstance(terminal.args[0], IRValue):
         return census._eval_value_8616(terminal.args[0], prefix.registers, prefix.tmps)
@@ -217,9 +233,9 @@ def _target(block: IRBlock, prefix: FusedCallerPrefix8616) -> int | None:
 
 def _seal(
     ctx: census._PathCensusContext8616, invocation: census.Real16InvocationDomain8616,
-    decoded_call: DecodedDirectCallsite8616, head: int, block: IRBlock, target: int,
-    spans: dict[int, bytes],
-    seed_authority: tuple[object, ...],
+    decoded_call: DecodedDirectCallsite8616, head: cython.longlong, block: IRBlock, target: cython.longlong,
+    spans: object,
+    seed_authority: object,
 ) -> InvocationIndirectTarget8616 | None:
     """Keep fresh source authority and closed resource/effect accounting."""
     terminal = block.instrs[-1]
@@ -231,23 +247,26 @@ def _seal(
     if isinstance(decoded, census.Real16InvocationFailure8616) or target not in decoded:
         return None
     size, encoded = decoded[target]
-    if census._loaded_bytes_8616(ctx.project, target, size) != encoded:
+    if operator.ne(census._loaded_bytes_8616(ctx.project, target, size), encoded):
         return None
     if not invocation.complete or not _producers_current() or census._census_resource_failure_8616(ctx) is not None:
         return None
-    if not all(census._loaded_bytes_8616(ctx.project, addr, len(data)) == data for addr, data in spans.items()):
+    if not all(operator.eq(census._loaded_bytes_8616(ctx.project, addr, len(data)), data) for addr, data in builtins.iter(spans.items())):
         return None
-    if _seed_authority(invocation) != seed_authority:
+    if operator.ne(_seed_authority(invocation), seed_authority):
         return None
-    if ctx.failures or ctx.classified_facts != ctx.materialized_facts:
+    if ctx.failures or operator.ne(ctx.classified_facts, ctx.materialized_facts):
         return None
     return InvocationIndirectTarget8616(
-        invocation, decoded_call, head, block.addr, terminal.addr, target, tuple(sorted(spans.items())),
+        invocation, decoded_call, head, block.addr, terminal.addr, target, tuple(sorted(tuple(spans.items()))),
     )
 
 
-def _seed_authority(invocation: census.Real16InvocationDomain8616) -> tuple[object, ...] | None:
+@cython.ccall
+def _seed_authority(invocation: census.Real16InvocationDomain8616) -> object:
     """Detach actual scalar/memory inputs so replay cannot silently replace them."""
+    initial: object
+    memory: object
     evidence = census._invocation_boot_evidence_8616(invocation.boot)
     memory = invocation.callsite_memory
     if isinstance(evidence, census.Real16InvocationFailure8616) or memory is None:

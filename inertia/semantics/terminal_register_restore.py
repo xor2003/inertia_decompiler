@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify balanced entry-save and terminal-restore register sites.
 
 Layer: Semantics.
@@ -10,9 +11,13 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping, Sequence
 from typing import Protocol, cast
+import operator
+import builtins
 
 __all__ = ["terminal_register_restore_sites_8616"]
 
@@ -20,22 +25,23 @@ __all__ = ["terminal_register_restore_sites_8616"]
 class _OperandBoundary8616(Protocol):
     """Capstone register operand fields consumed by restore classification."""
 
-    type: int
-    reg: int
+    type: cython.longlong
+    reg: cython.longlong
 
 
 class _InstructionBoundary8616(Protocol):
     """Capstone instruction fields consumed by restore classification."""
 
-    address: int
-    bytes: Sequence[int]
-    mnemonic: str
-    operands: tuple[_OperandBoundary8616, ...]
+    address: cython.longlong
+    bytes: Sequence[cython.longlong]
+    mnemonic: object
+    operands: object
 
-    def reg_name(self, reg_id: int) -> str:
+    def reg_name(self, reg_id: cython.longlong) -> object:
         """Return an architecture register name."""
 
 
+@cython.ccall
 def _inner_instruction_8616(instruction: object) -> object:
     """Return an angr wrapper's underlying Capstone instruction."""
     try:
@@ -44,7 +50,8 @@ def _inner_instruction_8616(instruction: object) -> object:
         return instruction
 
 
-def _register_operand_name_8616(instruction: object) -> str | None:
+@cython.ccall
+def _register_operand_name_8616(instruction: object) -> object:
     """Return one exact register operand name, or refuse the instruction."""
     inner = cast(_InstructionBoundary8616, _inner_instruction_8616(instruction))
     try:
@@ -59,7 +66,8 @@ def _register_operand_name_8616(instruction: object) -> str | None:
         return None
 
 
-def _instruction_mnemonic_8616(instruction: object) -> str:
+@cython.ccall
+def _instruction_mnemonic_8616(instruction: object) -> object:
     """Return a normalized Capstone mnemonic."""
     try:
         return str(cast(_InstructionBoundary8616, _inner_instruction_8616(instruction)).mnemonic).lower()
@@ -67,6 +75,7 @@ def _instruction_mnemonic_8616(instruction: object) -> str:
         return ""
 
 
+@cython.ccall
 def _instruction_address_8616(instruction: object) -> int | None:
     """Return an exact Capstone instruction address."""
     try:
@@ -76,7 +85,8 @@ def _instruction_address_8616(instruction: object) -> int | None:
     return address if isinstance(address, int) else None
 
 
-def _instruction_bytes_8616(instruction: object) -> bytes | None:
+@cython.ccall
+def _instruction_bytes_8616(instruction: object) -> object:
     """Return exact decoded bytes for duplicate-site arbitration."""
     try:
         raw_bytes = cast(_InstructionBoundary8616, _inner_instruction_8616(instruction)).bytes
@@ -87,15 +97,21 @@ def _instruction_bytes_8616(instruction: object) -> bytes | None:
 
 
 def _address_ordered_unique_instructions_8616(
-    instructions_by_block: Mapping[int, tuple[object, ...]],
-) -> tuple[object, ...] | None:
+    instructions_by_block: Mapping[cython.longlong, tuple[object, ...]],
+) -> object:
     """Normalize overlapping blocks by exact address and byte identity.
 
     Frontend block extents may overlap at loop headers. Equal instruction bytes
     prove that those views describe one site; conflicting or byte-less duplicate
     evidence is refused instead of choosing one block by iteration order.
     """
-    by_address: dict[int, tuple[bytes | None, object]] = {}
+    existing: object
+    existing_bytes: object
+    instruction_addr: object
+    instruction_bytes: object
+    instruction: object
+    instructions: object
+    by_address: dict[cython.longlong, tuple[bytes | None, object]] = {}
     for instructions in instructions_by_block.values():
         for instruction in instructions:
             instruction_addr = _instruction_address_8616(instruction)
@@ -110,16 +126,16 @@ def _address_ordered_unique_instructions_8616(
             if (
                 existing_bytes is None
                 or instruction_bytes is None
-                or existing_bytes != instruction_bytes
+                or operator.ne(existing_bytes, instruction_bytes)
             ):
                 return None
-    return tuple(by_address[address][1] for address in sorted(by_address))
+    return tuple(by_address[address][1] for address in builtins.iter(sorted(by_address)))
 
 
 def terminal_register_restore_sites_8616(
-    instructions_by_block: Mapping[int, tuple[object, ...]],
-    entry_addr: int,
-) -> frozenset[int]:
+    instructions_by_block: Mapping[cython.longlong, tuple[object, ...]],
+    entry_addr: cython.longlong,
+) -> frozenset[cython.longlong]:
     """Return balanced restore sites using complete decoded block evidence.
 
     The current semantic contract intentionally preserves the legacy ordering:
@@ -127,6 +143,8 @@ def terminal_register_restore_sites_8616(
     immediately preceding the first address-ordered return. The Frontend owns
     byte decoding; this owner only classifies register-transfer meaning.
     """
+    ordered: object
+    terminal_index: object
     entry_saves = _entry_save_registers_8616(instructions_by_block.get(entry_addr, ()))
     if not entry_saves:
         return frozenset()
@@ -137,7 +155,7 @@ def terminal_register_restore_sites_8616(
     terminal_index = next(
         (
             index
-            for index, instruction in enumerate(ordered)
+            for index, instruction in builtins.iter(enumerate(ordered))
             if _instruction_mnemonic_8616(instruction) in {"ret", "retf", "iret"}
         ),
         None,
@@ -146,13 +164,16 @@ def terminal_register_restore_sites_8616(
         return frozenset()
 
     restores = _terminal_restore_registers_8616(ordered[:terminal_index])
-    if tuple(name for name, _address in restores) != tuple(entry_saves):
+    if operator.ne(tuple(name for name, _address in iter(restores)), tuple(entry_saves)):
         return frozenset()
-    return frozenset(address for _name, address in restores)
+    return frozenset(address for _name, address in iter(restores))
 
 
-def _entry_save_registers_8616(entry_instructions: tuple[object, ...]) -> list[str]:
+@cython.ccall
+def _entry_save_registers_8616(entry_instructions: object) -> object:
     """Collect the leading PUSH register sequence for the entry block."""
+    register_name: object
+    instruction: object
     entry_saves: list[str] = []
     for instruction in entry_instructions:
         if _instruction_mnemonic_8616(instruction) != "push":
@@ -164,11 +185,15 @@ def _entry_save_registers_8616(entry_instructions: tuple[object, ...]) -> list[s
     return entry_saves
 
 
+@cython.ccall
 def _terminal_restore_registers_8616(
-    pre_terminal: tuple[object, ...] | list[object],
-) -> list[tuple[str, int]]:
+    pre_terminal: object,
+) -> object:
     """Collect the POP register/address sequence before the first return."""
-    restores: list[tuple[str, int]] = []
+    address: object
+    register_name: object
+    instruction: object
+    restores: list[tuple[str, cython.longlong]] = []
     for instruction in reversed(pre_terminal):
         if _instruction_mnemonic_8616(instruction) != "pop":
             break

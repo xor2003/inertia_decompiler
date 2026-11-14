@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery metadata.
 
 Responsibility: own typed declarations and ABI shape metadata for known helpers.
@@ -12,6 +13,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -20,6 +23,9 @@ from types import MappingProxyType
 from angr.sim_type import SimTypeFunction
 from angr.utils.library import convert_cproto_to_py
 from archinfo import Arch
+import dataclasses
+import operator
+import builtins
 
 __all__ = (
     "KNOWN_HELPER_ABIS_8616",
@@ -33,13 +39,13 @@ __all__ = (
 )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class KnownHelperAbi8616:
     """Typed, optional ABI facts for one externally known helper label."""
 
-    declaration: str | None = None
-    variadic: bool = False
-    logical_argument_widths: tuple[int, ...] | None = None
+    declaration: object = None
+    variadic: cython.bint = False
+    logical_argument_widths: object = None
 
 
 KNOWN_HELPER_ABIS_8616: Mapping[str, KnownHelperAbi8616] = MappingProxyType(
@@ -166,15 +172,19 @@ KNOWN_HELPER_ABIS_8616: Mapping[str, KnownHelperAbi8616] = MappingProxyType(
 )
 
 
-def known_helper_abi_8616(name: str | None) -> KnownHelperAbi8616 | None:
+@cython.ccall
+def known_helper_abi_8616(name: object) -> KnownHelperAbi8616 | None:
     """Return ABI metadata only for an exact helper label."""
     if not isinstance(name, str) or not name:
         return None
     return KNOWN_HELPER_ABIS_8616.get(name)
 
 
-def preferred_known_helper_abi_8616(name: str | None) -> KnownHelperAbi8616 | None:
+@cython.ccall
+def preferred_known_helper_abi_8616(name: object) -> KnownHelperAbi8616 | None:
     """Resolve a helper label while preserving canonical underscore preference."""
+    abi: object
+    candidate: object
     if not isinstance(name, str) or not name:
         return None
     stripped = name.lstrip("_")
@@ -186,30 +196,36 @@ def preferred_known_helper_abi_8616(name: str | None) -> KnownHelperAbi8616 | No
             return abi
     folded = stripped.casefold()
     for candidate, abi in KNOWN_HELPER_ABIS_8616.items():
-        if candidate.lstrip("_").casefold() == folded:
+        if operator.eq(candidate.lstrip("_").casefold(), folded):
             return abi
     return None
 
 
+@cython.ccall
 def known_helper_logical_argument_widths_8616(
-    name: str | None,
-) -> tuple[int, ...] | None:
+    name: object,
+) -> object:
     """Return helper ABI widths without treating them as callsite evidence."""
+    abi: object
     abi = preferred_known_helper_abi_8616(name)
     return None if abi is None else abi.logical_argument_widths
 
 
-def known_helper_is_variadic_8616(name: str | None) -> bool:
+@cython.ccall
+def known_helper_is_variadic_8616(name: object) -> cython.bint:
     """Return whether the helper declaration permits trailing arguments."""
+    abi: object
     abi = preferred_known_helper_abi_8616(name)
     return abi is not None and abi.variadic
 
 
+@cython.ccall
 def known_helper_prototype_8616(
-    name: str | None,
+    name: object,
     arch: Arch,
 ) -> SimTypeFunction | None:
     """Project one owned helper declaration into an architecture-bound type."""
+    abi: object
     abi = preferred_known_helper_abi_8616(name)
     if abi is None or abi.declaration is None:
         return None
@@ -225,10 +241,11 @@ def known_helper_prototype_8616(
     return bound_prototype if isinstance(bound_prototype, SimTypeFunction) else None
 
 
+@cython.ccall
 def known_helper_signature_declarations_8616() -> dict[str, str]:
     """Project the typed ABI catalog into the legacy declaration mapping."""
     return {
         name: abi.declaration
-        for name, abi in KNOWN_HELPER_ABIS_8616.items()
+        for name, abi in builtins.iter(KNOWN_HELPER_ABIS_8616.items())
         if abi.declaration is not None
     }

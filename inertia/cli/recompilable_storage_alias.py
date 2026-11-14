@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recompilable output.
 
 Responsibility: export alias-proven storage identities into recompilation artifacts.
@@ -11,6 +12,7 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import cython
 
 from dataclasses import dataclass
 
@@ -22,6 +24,7 @@ from .recompilable_storage_map_producer import (
     SegmentedStorageSeed,
     export_recompilable_storage_map_from_codegen,
 )
+import dataclasses
 
 __all__ = [
     "AliasBackedStorageSeed",
@@ -29,17 +32,19 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class AliasBackedStorageSeed:
     """Alias-proven storage seed prepared for recompilable storage-map export."""
 
     alias_facts: AliasStorageFacts
-    segment_reg: str | None = None
-    stable_object_kind: str | None = None
-    stable_object_name: str | None = None
+    segment_reg: object = None
+    stable_object_kind: object = None
+    stable_object_name: object = None
 
 
+@cython.ccall
 def _segment_seed_from_alias_seed(seed: AliasBackedStorageSeed) -> SegmentedStorageSeed | None:
+    identity: object
     facts = seed.alias_facts
     identity = facts.identity
     domain = facts.domain
@@ -81,13 +86,13 @@ def _segment_seed_from_alias_seed(seed: AliasBackedStorageSeed) -> SegmentedStor
 
 def export_recompilable_storage_map_from_alias_facts(
     codegen: SegmentedCodegenStorageSurface,
-    seeds: tuple[AliasBackedStorageSeed, ...],
+    seeds: object,
 ) -> RecompilableStorageMapArtifact:
     """Export alias-proven storage facts into a recompilable segmented map."""
     mapped = tuple(
         segment_seed
-        for seed in seeds
-        for segment_seed in (_segment_seed_from_alias_seed(seed),)
+        for seed in iter(seeds)
+        for segment_seed in iter((_segment_seed_from_alias_seed(seed),))
         if segment_seed is not None
     )
     return export_recompilable_storage_map_from_codegen(codegen, mapped)

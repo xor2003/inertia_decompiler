@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Run ordered postprocess bootstrap commands through one guarded callback.
 
 Layer: Rewrite/Postprocess cleanup.
@@ -11,30 +12,33 @@ Structuring boundary. Dynamic boundary: codegen is a third-party angr object.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol, cast
+import dataclasses
 
 __all__ = [
     "PostprocessBootstrapOperations8616",
     "run_postprocess_bootstrap_steps_8616",
 ]
 
-type BootstrapOperation8616 = Callable[[], bool]
-type GuardedBootstrapApply8616 = Callable[[str, BootstrapOperation8616], bool]
+BootstrapOperation8616 = typing.TypeAliasType("BootstrapOperation8616", Callable[[], bool])
+GuardedBootstrapApply8616 = typing.TypeAliasType("GuardedBootstrapApply8616", Callable[[str, BootstrapOperation8616], bool])
 
 
 class _BootstrapCodegenBoundary8616(Protocol):
     """Third-party codegen status consumed by bootstrap orchestration."""
 
     cfunc: object
-    _inertia_postprocess_validation_failed: bool
+    _inertia_postprocess_validation_failed: cython.bint
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PostprocessBootstrapOperations8616:
     """Every semantic operation scheduled by the bootstrap transaction."""
 
@@ -45,7 +49,7 @@ class PostprocessBootstrapOperations8616:
     materialize_global_byte_index_sum_loop: BootstrapOperation8616
     materialize_selector_return_branches: BootstrapOperation8616
     rewrite_decoded_jcc_conditions: BootstrapOperation8616
-    selector_return_contract_active: Callable[[], bool]
+    selector_return_contract_active: Callable[[], cython.bint]
 
     def ordered(self) -> tuple[tuple[str, BootstrapOperation8616], ...]:
         """Return the unconditional bootstrap prefix in exact execution order."""
@@ -74,8 +78,10 @@ class PostprocessBootstrapOperations8616:
         )
 
 
+@cython.ccall
 def _function_addr_8616(codegen: object) -> int | None:
     """Return the active address at the explicit third-party CFunction boundary."""
+    addr: object
     try:
         cfunc = cast(_BootstrapCodegenBoundary8616, codegen).cfunc
     except AttributeError:
@@ -87,14 +93,16 @@ def _function_addr_8616(codegen: object) -> int | None:
 
 def run_postprocess_bootstrap_steps_8616(
     codegen: object,
-    skip_names: set[str],
+    skip_names: object,
     apply_step: GuardedBootstrapApply8616,
     operations: PostprocessBootstrapOperations8616,
     *,
-    debug_enabled: bool = False,
-    timing_enabled: bool = False,
-) -> bool:
+    debug_enabled: cython.bint = False,
+    timing_enabled: cython.bint = False,
+) -> cython.bint:
     """Run every enabled bootstrap command through guarded validation."""
+    operation: object
+    pass_name: object
     surface = cast(_BootstrapCodegenBoundary8616, codegen)
     if debug_enabled:
         print(
@@ -105,7 +113,7 @@ def run_postprocess_bootstrap_steps_8616(
             flush=True,
         )
 
-    def execute(pass_name: str, operation: BootstrapOperation8616) -> bool:
+    def execute(pass_name: object, operation: BootstrapOperation8616) -> cython.bint:
         """Run one enabled command and close its timing/validation lane."""
         if pass_name in skip_names:
             return True

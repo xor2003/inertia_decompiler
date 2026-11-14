@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove a callee's returning SP transfer under one authenticated entry scope.
 
 Layer: Alias.
@@ -14,6 +15,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -38,12 +41,15 @@ from inertia.semantics.register_value_preservation import register_value_family_
 from .callee_stack_pointer import _word_delta_8616
 from .segment_stack_restore import _solve_stack_states
 from .stack_pointer_snapshots import _GENERAL_WORD_REGISTERS
+import dataclasses
+import operator
+import builtins
 
 _EXTERNAL_OPS_8616 = frozenset({"CALL", "INT", "INTERRUPT", "SYSCALL", "IRET"})
 _SEEDABLE_REGISTERS_8616 = frozenset(
     member
-    for register in sorted(_GENERAL_WORD_REGISTERS)
-    for member in register_value_family_8616(register)
+    for register in builtins.iter(sorted(_GENERAL_WORD_REGISTERS))
+    for member in builtins.iter(register_value_family_8616(register))
 )
 
 
@@ -63,7 +69,7 @@ class ScopedCalleeStackPointerFailure8616(StrEnum):
     RETURN_DELTAS_DISAGREE = "return_deltas_disagree"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ScopedCalleeStackPointerResult8616:
     """A scope-bound returning-SP transfer, or one explicit refusal.
 
@@ -80,14 +86,14 @@ class ScopedCalleeStackPointerResult8616:
     )
     failure: ScopedCalleeStackPointerFailure8616 | None = None
     detail: str = ""
-    return_transfers: tuple[tuple[int, int], ...] = ()
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 1
+    return_transfers: tuple[tuple[cython.longlong, cython.longlong], ...] = ()
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 1
 
-    def _retained_transfer_is_accepted(self) -> bool:
+    def _retained_transfer_is_accepted(self) -> cython.bint:
         """Require an accepted publication, independently of its source."""
         counts = (
             self.raw_fact_count, self.normalized_fact_count,
@@ -96,17 +102,17 @@ class ScopedCalleeStackPointerResult8616:
         )
         return bool(
             self.failure is None and counts == (1, 1, 1, 1, 0)
-            and all(type(count) is int for count in counts)
+            and all(type(count) is int for count in iter(counts))
         )
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Scoped evidence is never context-free; see ``complete_for``."""
         return self.complete_for(None)
 
     def complete_for(
         self, offered_scope: object,
-    ) -> bool:
+    ) -> cython.bint:
         """Authorize only under shared entry provenance and fresh evidence.
 
         The offered scope must be a typed invocation domain sharing
@@ -115,6 +121,7 @@ class ScopedCalleeStackPointerResult8616:
         retained transfers bit-for-bit. A foreign scope, a mutated surface,
         or a stale view revokes the verdict.
         """
+        failure: object
         if not self._retained_transfer_is_accepted():
             return False
         if self.coverage is None or self.scope is None:
@@ -128,7 +135,7 @@ class ScopedCalleeStackPointerResult8616:
         failure, transfers, _detail = _scoped_return_transfers_8616(
             self.coverage, offered_scope,
         )
-        return failure is None and transfers == self.return_transfers
+        return failure is None and operator.eq(transfers, self.return_transfers)
 
     @property
     def observed_return_sp_delta(self) -> int | None:
@@ -142,6 +149,7 @@ class ScopedCalleeStackPointerResult8616:
         return self.observed_return_sp_delta if self.complete_for(offered_scope) else None
 
 
+@cython.ccall
 def _seed_registers_8616(
     scope: Real16InvocationDomain8616,
 ) -> tuple[dict[str, int] | None, ScopedCalleeStackPointerFailure8616 | None, str]:
@@ -154,8 +162,11 @@ def _seed_registers_8616(
     members are seedable — frame and selector registers carry distinct
     coordinate meanings and are never numeric constants here.
     """
+    pairs: object
+    name: object
+    word: object
     link = scope.chain
-    pairs: tuple[tuple[str, int], ...] | None = None
+    pairs = None
     if type(link) is Real16CallChainLink8616:
         if not link.complete:
             return None, ScopedCalleeStackPointerFailure8616.ENTRY_STATE_UNPROVEN, "chain_incomplete"
@@ -166,14 +177,14 @@ def _seed_registers_8616(
         pairs = link.admission.spec.registers
     if pairs is None:
         return None, ScopedCalleeStackPointerFailure8616.ENTRY_STATE_UNPROVEN, "chain_kind"
-    seed: dict[str, int] = {}
+    seed: dict[str, cython.longlong] = {}
     for name, word in pairs:
         if type(name) is not str or type(word) is not int:
             return None, ScopedCalleeStackPointerFailure8616.ENTRY_SEED_CONFLICT, "pair_shape"
         key = name.lower()
         if key not in _SEEDABLE_REGISTERS_8616:
             continue
-        if word < 0 or word > 0xFFFF or (key in seed and seed[key] != word):
+        if word < 0 or word > 0xFFFF or (key in seed and operator.ne(seed[key], word)):
             return None, ScopedCalleeStackPointerFailure8616.ENTRY_SEED_CONFLICT, key
         seed[key] = word
     return seed, None, ""
@@ -181,7 +192,7 @@ def _seed_registers_8616(
 
 def _live_scoped_blocks_8616(
     projection: ScopedFunctionCFGProjection8616,
-) -> tuple[tuple[IRBlock, ...] | None, dict[int, tuple[int, ...]], ScopedCalleeStackPointerFailure8616 | None]:
+) -> tuple[tuple[IRBlock, ...] | None, dict[cython.longlong, tuple[cython.longlong, ...]], ScopedCalleeStackPointerFailure8616 | None]:
     """Restrict the authenticated projection to its live effective surface.
 
     Unreachable block addresses stay on the shared artifact's pending
@@ -189,42 +200,43 @@ def _live_scoped_blocks_8616(
     refusal on a live block, or an edge leaving the live set, means the
     conditioned surface is not closed and the transfer refuses.
     """
+    block: object
     unreachable = projection.unreachable_block_addrs
-    live = tuple(block for block in projection.blocks if block.addr not in unreachable)
-    live_addrs = frozenset(block.addr for block in live)
+    live = tuple(block for block in iter(projection.blocks) if block.addr not in unreachable)
+    live_addrs = frozenset(block.addr for block in iter(live))
     if not live or projection.function_addr not in live_addrs:
         return None, {}, ScopedCalleeStackPointerFailure8616.PROJECTION_REFUSED
     if any(
-        addr in live_addrs and projection.pending[addr] for addr in projection.pending
+        addr in live_addrs and projection.pending[addr] for addr in iter(projection.pending)
     ):
         return None, {}, ScopedCalleeStackPointerFailure8616.RETURN_UNPROVEN
-    successors: dict[int, tuple[int, ...]] = {}
+    successors: dict[cython.longlong, tuple[cython.longlong, ...]] = {}
     for block in live:
         outgoing = tuple(projection.successors.get(block.addr, ()))
-        if any(target not in live_addrs for target in outgoing):
+        if any(target not in live_addrs for target in iter(outgoing)):
             return None, {}, ScopedCalleeStackPointerFailure8616.PROJECTION_REFUSED
         successors[block.addr] = outgoing
     return live, successors, None
 
 
 def _scoped_exit_blocks_8616(
-    live: tuple[IRBlock, ...],
-    successors: Mapping[int, tuple[int, ...]],
+    live: object,
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
 ) -> tuple[tuple[IRBlock, ...] | None, ScopedCalleeStackPointerFailure8616 | None]:
     """Require every scoped exit to be exactly one final RET."""
-    exits = tuple(block for block in live if not successors[block.addr])
+    exits = tuple(block for block in iter(live) if not successors[block.addr])
     mid_ret = any(
-        instruction.op == "RET" and index != len(block.instrs) - 1
-        for block in live
-        for index, instruction in enumerate(block.instrs)
+        instruction.op == "RET" and operator.ne(index, len(block.instrs) - 1)
+        for block in iter(live)
+        for index, instruction in builtins.iter(enumerate(block.instrs))
     )
     terminal_ret_with_flow = any(
         successors[block.addr] and block.instrs and block.instrs[-1].op == "RET"
-        for block in live
+        for block in iter(live)
     )
     if (
         not exits
-        or any(not block.instrs or block.instrs[-1].op != "RET" for block in exits)
+        or any(not block.instrs or block.instrs[-1].op != "RET" for block in iter(exits))
         or mid_ret
         or terminal_ret_with_flow
     ):
@@ -232,11 +244,13 @@ def _scoped_exit_blocks_8616(
     return exits, None
 
 
+@cython.ccall
 def _scoped_projection_8616(
     coverage: IRBoundaryCoverageResult8616,
     scope: Real16InvocationDomain8616,
 ) -> tuple[ScopedFunctionCFGProjection8616 | None, ScopedCalleeStackPointerFailure8616 | None]:
     """Authenticate the coverage under the scope and yield its projection."""
+    projection: object
     if not coverage.complete_for(scope):
         return None, ScopedCalleeStackPointerFailure8616.COVERAGE_INCOMPLETE
     view = coverage.scoped_view
@@ -256,11 +270,15 @@ def _scoped_projection_8616(
 def _exit_transfers_8616(
     coverage: IRBoundaryCoverageResult8616,
     scope: Real16InvocationDomain8616,
-    live: tuple[IRBlock, ...],
-    successors: Mapping[int, tuple[int, ...]],
-    exits: tuple[IRBlock, ...],
-) -> tuple[ScopedCalleeStackPointerFailure8616 | None, tuple[tuple[int, int], ...], str]:
+    live: object,
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
+    exits: object,
+) -> tuple[ScopedCalleeStackPointerFailure8616 | None, tuple[tuple[cython.longlong, cython.longlong], ...], str]:
     """Seed authenticated entry constants and read a common exit delta."""
+    delta: object
+    seed: object
+    seed_failure: object
+    block: object
     seed, seed_failure, detail = _seed_registers_8616(scope)
     if seed_failure is not None or seed is None:
         return seed_failure, (), detail
@@ -270,14 +288,14 @@ def _exit_transfers_8616(
         scoped_blocks=live,
         scoped_successors=successors,
     )
-    transfers: list[tuple[int, int]] = []
+    transfers: list[tuple[cython.longlong, cython.longlong]] = []
     for block in sorted(exits, key=lambda item: item.addr):
         delta = states[block.addr].sp_delta
         if delta is None:
             return ScopedCalleeStackPointerFailure8616.STACK_POINTER_UNKNOWN, (), ""
         transfers.append((block.addr, _word_delta_8616(delta)))
     retained = tuple(transfers)
-    if len({delta for _, delta in retained}) != 1:
+    if len({delta for _, delta in iter(retained)}) != 1:
         return ScopedCalleeStackPointerFailure8616.RETURN_DELTAS_DISAGREE, retained, ""
     return None, retained, ""
 
@@ -285,8 +303,12 @@ def _exit_transfers_8616(
 def _scoped_return_transfers_8616(
     coverage: IRBoundaryCoverageResult8616,
     scope: Real16InvocationDomain8616,
-) -> tuple[ScopedCalleeStackPointerFailure8616 | None, tuple[tuple[int, int], ...], str]:
+) -> object:
     """Solve the scope's live surface and collect a common returning delta."""
+    exits: object
+    failure: object
+    live: object
+    projection: object
     projection, failure = _scoped_projection_8616(coverage, scope)
     if projection is None or failure is not None:
         return failure, (), ""
@@ -294,11 +316,11 @@ def _scoped_return_transfers_8616(
     if live is None or failure is not None:
         return failure, (), ""
     if any(
-        coverage.artifact.function_addr in outgoing for outgoing in successors.values()
+        coverage.artifact.function_addr in outgoing for outgoing in builtins.iter(successors.values())
     ):
         return ScopedCalleeStackPointerFailure8616.ENTRY_REENTERED, (), ""
     if any(
-        row.op in _EXTERNAL_OPS_8616 for block in live for row in block.instrs
+        row.op in _EXTERNAL_OPS_8616 for block in iter(live) for row in iter(block.instrs)
     ):
         return ScopedCalleeStackPointerFailure8616.EXTERNAL_EFFECT, (), ""
     exits, failure = _scoped_exit_blocks_8616(live, successors)
@@ -307,9 +329,10 @@ def _scoped_return_transfers_8616(
     return _exit_transfers_8616(coverage, scope, live, successors, exits)
 
 
+@cython.ccall
 def prove_scoped_callee_stack_pointer_8616(
     coverage: IRBoundaryCoverageResult8616 | None,
-    consuming_scope: Real16InvocationDomain8616 | None,
+    consuming_scope: object,
 ) -> ScopedCalleeStackPointerResult8616:
     """Publish one scope-bound returning-SP transfer or a typed refusal.
 
@@ -320,6 +343,7 @@ def prove_scoped_callee_stack_pointer_8616(
     solve runs on the live effective surface only — pending unreachable
     markers on the shared artifact are never removed or ignored.
     """
+    failure: object
     if consuming_scope is None:
         return ScopedCalleeStackPointerResult8616(
             coverage, None, ScopedCalleeStackPointerFailure8616.SCOPE_ABSENT, "",

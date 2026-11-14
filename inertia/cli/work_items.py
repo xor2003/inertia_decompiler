@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Define queued decompilation work items and per-item reporting state.
 
 Layer: CLI/fallback/reporting.
@@ -5,6 +6,8 @@ Responsibility: carry decompiler work-item status and reporting snapshots withou
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import builtins
 import os
@@ -15,6 +18,11 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
+import dataclasses
+import operator
+FailureFamilySnapshot = typing.TypeVar("FailureFamilySnapshot")
+ScalarInterface8616 = typing.TypeVar("ScalarInterface8616")
+SegmentProgramFunctionEvidence8616 = typing.TypeVar("SegmentProgramFunctionEvidence8616")
 
 if TYPE_CHECKING:
     from inertia.cli.direct_addr_failure_family import FailureFamilySnapshot
@@ -52,7 +60,7 @@ class FunctionWorkExecutionOrigin8616(StrEnum):
     CLEAN_PROCESS = "clean_process"
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TerminalDecompileFailure8616:
     """Typed terminal pipeline failure carried across the stats/work boundary.
 
@@ -63,8 +71,8 @@ class TerminalDecompileFailure8616:
     structurer, direct-address or non-optimized recovery lanes.
     """
 
-    message: str
-    layer: str
+    message: object
+    layer: object
     function_addr: int | None
     # mypyc resolves unqualified object annotations through module globals.
     # Qualifying the builtin keeps native and Python dataclass contracts equal.
@@ -83,8 +91,9 @@ class TailValidationDisplayOutcome(StrEnum):
     UNCOLLECTED = "uncollected"
 
 
+@cython.ccall
 def normalize_tail_validation_status(
-    raw_status: str | None,
+    raw_status: object,
 ) -> TailValidationDisplayOutcome:
     """Normalize a raw tail-validation status string to the owned display outcome.
 
@@ -102,8 +111,9 @@ def normalize_tail_validation_status(
         return TailValidationDisplayOutcome.UNCOLLECTED
 
 
+@cython.ccall
 def _tail_validation_to_item_status(
-    raw_status: str | None,
+    raw_status: object,
 ) -> WorkItemStatus:
     status = normalize_tail_validation_status(raw_status)
     if status is TailValidationDisplayOutcome.CONDITIONAL:
@@ -123,7 +133,8 @@ def _tail_validation_to_item_status(
     return WorkItemStatus.UNCOLLECTED
 
 
-def _work_item_status_display(result: WorkItemStatus | str) -> WorkItemStatus:
+@cython.ccall
+def _work_item_status_display(result: object) -> WorkItemStatus:
     if isinstance(result, WorkItemStatus):
         return result
     try:
@@ -132,7 +143,8 @@ def _work_item_status_display(result: WorkItemStatus | str) -> WorkItemStatus:
         return WorkItemStatus.UNCOLLECTED
 
 
-def _diagnostic_print(line: str) -> None:
+@cython.ccall
+def _diagnostic_print(line: object) -> None:
     """Emit work-item diagnostics without contaminating generated-C stdout."""
     if "PYTEST_CURRENT_TEST" in os.environ:
         print(line, file=sys.stderr)
@@ -140,33 +152,34 @@ def _diagnostic_print(line: str) -> None:
     print(f"{time.strftime('[%H:%M:%S]')} {line}", file=sys.stderr)
 
 
-def _visible_source_format(source_format: str | None) -> str:
+@cython.ccall
+def _visible_source_format(source_format: object) -> object:
     raw = source_format or ""
-    parts = [part for part in raw.split("+") if part]
+    parts = [part for part in builtins.iter(raw.split("+")) if part]
     return "+".join(parts) or "sidecars"
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class FunctionDecompileTask:
     """Inputs needed to decompile one discovered function."""
 
-    index: int
+    index: cython.longlong
     cfg: Any
     function: Any
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class FunctionDecompileResult:
     """Raw result produced by one function decompilation attempt."""
 
-    index: int
-    status: str
-    payload: str
-    debug_output: str
-    elapsed: float
+    index: cython.longlong
+    status: object
+    payload: object
+    debug_output: object
+    elapsed: cython.double
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class FunctionWorkItem:
     """Queue entry used by CLI recovery, decompilation, and fallback reporting.
 
@@ -176,14 +189,14 @@ class FunctionWorkItem:
     alive for in-process retries; worker IPC must continue to rebuild projects.
     """
 
-    index: int
+    index: cython.longlong
     function_cfg: Any
     function: Any
     recovery_addr: int | None = None
     retained_project: Any | None = field(default=None, repr=False, compare=False)
 
     @property
-    def c_target(self) -> str:
+    def c_target(self) -> object:
         """Return the compiler target attached at the dynamic angr boundary."""
         try:
             target = self.function.project._inertia_c_target
@@ -192,7 +205,7 @@ class FunctionWorkItem:
         return target if isinstance(target, str) and target else "portable-flat"
 
     @property
-    def name(self) -> str | None:
+    def name(self) -> object:
         """Return the function label exposed by the dynamic angr boundary."""
         try:
             name = self.function.name
@@ -201,7 +214,7 @@ class FunctionWorkItem:
         return name if isinstance(name, str) and name else None
 
     @property
-    def active_addr(self) -> int:
+    def active_addr(self) -> cython.longlong:
         """Return the address used by the active recovered function project."""
         try:
             active_addr = self.function.addr
@@ -210,55 +223,56 @@ class FunctionWorkItem:
         return active_addr if isinstance(active_addr, int) else 0
 
     @property
-    def original_addr(self) -> int:
+    def original_addr(self) -> cython.longlong:
         """Return the function address in the original binary address space."""
-        original_addr: int = function_original_addr(cast(object, self.function))
+        original_addr: cython.longlong = function_original_addr(cast(object, self.function))
         return original_addr
 
     @property
-    def sidecar_metadata_digest(self) -> str | None:
+    def sidecar_metadata_digest(self) -> object:
         """Return content identity for sidecar evidence attached to the project."""
+        metadata: object
         try:
             metadata = self.function.project._inertia_lst_metadata
         except AttributeError:
             return None
         if metadata is None:
             return None
-        metadata_digest: str = lst_metadata_content_digest_8616(metadata)
+        metadata_digest: object = lst_metadata_content_digest_8616(metadata)
         return metadata_digest
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class FunctionWorkResult:
     """Reported result plus its retry-relevant execution provenance."""
 
-    index: int
-    status: str
-    payload: str
-    debug_output: str
+    index: cython.longlong
+    status: object
+    payload: object
+    debug_output: object
     function: Any
     function_cfg: Any
-    partial_payload: str | None = None
-    tail_validation: dict[str, object] | None = None
-    skip_heavy_fallbacks: bool = False
+    partial_payload: object = None
+    tail_validation: object = None
+    skip_heavy_fallbacks: cython.bint = False
     elapsed: float | None = None
-    from_cache: bool = False
-    failure_stage: str | None = None
+    from_cache: cython.bint = False
+    failure_stage: object = None
     block_count: int | None = None
     byte_count: int | None = None
-    same_family_retry_stops: int = 0
+    same_family_retry_stops: cython.longlong = 0
     fallback_family_labels: tuple[str, ...] = ()
-    validated_payload_hash: str | None = None
-    gcc_checked_payload_hash: str | None = None
+    validated_payload_hash: object = None
+    gcc_checked_payload_hash: object = None
     scalar_interface: ScalarInterface8616 | None = None
-    scalar_interface_generation: str | None = None
+    scalar_interface_generation: object = None
     segment_program_function_evidence: SegmentProgramFunctionEvidence8616 | None = None
     failure_family_snapshot: FailureFamilySnapshot | None = None
     execution_origin: FunctionWorkExecutionOrigin8616 = (
         FunctionWorkExecutionOrigin8616.IN_PROCESS
     )
 
-    def retry_may_change_evidence(self, *, sidecar_available: bool) -> bool:
+    def retry_may_change_evidence(self, *, sidecar_available: cython.bint) -> cython.bint:
         """Return whether a recovery retry can consume distinct evidence."""
         return (
             self.execution_origin is not FunctionWorkExecutionOrigin8616.CLEAN_PROCESS
@@ -266,12 +280,13 @@ class FunctionWorkResult:
         )
 
 
+@cython.ccall
 def emit_tail_validation_for_function_run_or_uncollected(
     project: object,
     function_cfg: object,
     function: object,
     *,
-    allow_project_fallback: bool = True,
+    allow_project_fallback: cython.bint = True,
     binary_path: Path | None = None,
 ) -> None:
     """Emit a tail-validation line or an explicit uncollected result for one function."""
@@ -300,6 +315,7 @@ def emit_tail_validation_for_function_run_or_uncollected(
     emit_tail_validation_console_summary([item], {1: result}, binary_path=binary_path)
 
 
+@cython.ccall
 def emit_tail_validation_snapshot_or_uncollected(
     function_cfg: object,
     function: object,
@@ -308,6 +324,7 @@ def emit_tail_validation_snapshot_or_uncollected(
     binary_path: Path | None = None,
 ) -> None:
     """Emit an existing tail-validation snapshot or an uncollected placeholder."""
+    project: object
     # Dynamic angr boundary: Function objects expose project through angr-managed attributes.
     project = getattr(function, "project", None)
     if project is not None and not tail_validation_runtime_enabled(project):
@@ -331,27 +348,32 @@ def emit_tail_validation_snapshot_or_uncollected(
     emit_tail_validation_console_summary([item], {1: result}, binary_path=binary_path)
 
 
-def function_attempt_display_status(result: FunctionWorkResult) -> str:
+@cython.ccall
+def function_attempt_display_status(result: FunctionWorkResult) -> object:
     """Return the compact display status for one work result."""
     result_status = _work_item_status_display(result.status)
-    if result_status == WorkItemStatus.OK:
+    if operator.eq(result_status, WorkItemStatus.OK):
         return "decompiled"
-    if result_status == WorkItemStatus.TIMEOUT:
+    if operator.eq(result_status, WorkItemStatus.TIMEOUT):
         return "timed_out"
-    if result_status == WorkItemStatus.EMPTY:
+    if operator.eq(result_status, WorkItemStatus.EMPTY):
         return "empty"
     if result.partial_payload:
         return "fallback"
     return result_status.value
 
 
+@cython.ccall
 def print_function_attempt_status(
     function: object,
     *,
-    attempt: str,
+    attempt: object,
     validation_snapshot: Mapping[str, object] | None,
 ) -> None:
     """Print one diagnostic line for a function attempt."""
+    function_addr: object
+    function_name: object
+    project: object
     # Dynamic angr boundary: Function exposes project/addr/name through angr-managed attributes.
     project = getattr(function, "project", None)
     validation_status = (
@@ -377,9 +399,9 @@ def recovery_evidence_line(binary_path: Path, metadata: object) -> str:
         return "/* info: recovery evidence: pure binary recovery mode (binary signatures only; no local source/debug evidence) */"
     # Dynamic sidecar compatibility boundary: callers may pass legacy metadata carriers.
     source_format = _visible_source_format(getattr(metadata, "source_format", None))
-    source_parts = tuple(part for part in source_format.split("+") if part)
+    source_parts = tuple(part for part in builtins.iter(source_format.split("+")) if part)
     debug_markers = ("codeview", "turbo_debug", "tdinfo", "debug")
-    has_debug_info = any(any(marker in part for marker in debug_markers) for part in source_parts)
+    has_debug_info = any(any(marker in part for marker in iter(debug_markers)) for part in iter(source_parts))
     if has_debug_info:
         return f"/* info: recovery evidence: sidecar/debug-assisted recovery ({source_format}) */"
     return f"/* info: recovery evidence: sidecar-assisted recovery ({source_format}) */"

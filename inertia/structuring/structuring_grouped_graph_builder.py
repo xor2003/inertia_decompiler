@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Grouped region graph construction for the 16-bit decompiler pipeline.
 
 Layer: Structuring.
@@ -10,6 +11,7 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import cython
 
 import builtins
 import typing
@@ -24,9 +26,11 @@ from inertia.structuring.structuring_grouped_units import (
     CrossEntryGroupedUnitArtifact,
     build_x86_16_cross_entry_grouped_units,
 )
+import dataclasses
+import operator
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class GroupedRegionGraphBuildResult:
     """Region graph plus optional cross-entry grouping evidence."""
 
@@ -34,12 +38,14 @@ class GroupedRegionGraphBuildResult:
     grouped_units: CrossEntryGroupedUnitArtifact | None
 
 
-def _dynamic_grouped_graph_getattr_8616(obj: object, name: str, default: object = None) -> Any:  # noqa: ANN401
+@cython.ccall
+def _dynamic_grouped_graph_getattr_8616(obj: object, name: object, default: object = None) -> Any:  # noqa: ANN401
     """Read an attribute across the dynamic codegen/Capstone/graph boundary."""
     return builtins.getattr(obj, name, default)
 
 
-def _object_tuple_8616(value: object) -> tuple[object, ...]:
+@cython.ccall
+def _object_tuple_8616(value: object) -> object:
     """Return tuple-like dynamic metadata as a tuple."""
     try:
         return tuple(cast(Any, value)) if value is not None else ()
@@ -47,43 +53,51 @@ def _object_tuple_8616(value: object) -> tuple[object, ...]:
         return ()
 
 
-def _object_tuple_attr_8616(obj: object, name: str) -> tuple[object, ...]:
+@cython.ccall
+def _object_tuple_attr_8616(obj: object, name: object) -> object:
     """Return a tuple attribute from dynamic codegen metadata."""
     return _object_tuple_8616(_dynamic_grouped_graph_getattr_8616(obj, name, ()))
 
 
-def _dict_tuple_8616(entry: dict[str, object], key: str) -> tuple[object, ...]:
+@cython.ccall
+def _dict_tuple_8616(entry: object, key: object) -> object:
     """Return a tuple-valued metadata entry."""
     return _object_tuple_8616(entry.get(key, ()))
 
 
-def _dict_set_8616(entry: dict[str, object], key: str) -> set[object]:
+@cython.ccall
+def _dict_set_8616(entry: object, key: object) -> set[object]:
     """Return a set-valued metadata entry."""
     return set(_dict_tuple_8616(entry, key))
 
 
-def _dict_str_tuple_8616(entry: dict[str, object], key: str) -> tuple[str, ...]:
+def _dict_str_tuple_8616(entry: object, key: object) -> tuple[str, ...]:
     """Return a sorted string tuple metadata entry."""
-    return tuple(sorted(str(item) for item in _dict_tuple_8616(entry, key)))
+    return tuple(sorted(str(item) for item in builtins.iter(_dict_tuple_8616(entry, key))))
 
 
+@cython.ccall
 def _value_str_set_8616(value: object) -> set[str]:
     """Return a string set from dynamic metadata."""
-    return {str(item) for item in _object_tuple_8616(value)}
+    return {str(item) for item in builtins.iter(_object_tuple_8616(value))}
 
 
-def _dict_int_8616(entry: dict[str, object], key: str) -> int:
+@cython.ccall
+def _dict_int_8616(entry: object, key: object) -> cython.longlong:
     """Return an integer metadata entry with zero as the absent value."""
+    value: object
     value = entry.get(key, 0)
     return int(value) if isinstance(value, int) else 0
 
 
-def _graph_nodes_8616(graph: object) -> tuple[object, ...]:
+@cython.ccall
+def _graph_nodes_8616(graph: object) -> object:
     """Return graph nodes from a dynamic NetworkX-like graph object."""
     return _object_tuple_8616(_dynamic_grouped_graph_getattr_8616(graph, "nodes", ()))
 
 
-def _region_metadata_8616(region: object) -> dict[str, object]:
+@cython.ccall
+def _region_metadata_8616(region: object) -> object:
     """Return the mutable metadata dictionary on a dynamic region node."""
     metadata = _dynamic_grouped_graph_getattr_8616(region, "metadata", None)
     if isinstance(metadata, dict):
@@ -93,10 +107,11 @@ def _region_metadata_8616(region: object) -> dict[str, object]:
     return metadata
 
 
-def _format_ir_value_8616(value: IRAtom) -> str | None:
+@cython.ccall
+def _format_ir_value_8616(value: IRAtom) -> object:
     if not isinstance(value, IRValue):
         return None
-    if value.space == MemSpace.CONST:
+    if operator.eq(value.space, MemSpace.CONST):
         return str(int(value.const)) if isinstance(value.const, int) else None
     if value.space in {MemSpace.REG, MemSpace.TMP} and isinstance(value.name, str) and value.name:
         if int(value.offset or 0) == 0:
@@ -106,12 +121,12 @@ def _format_ir_value_8616(value: IRAtom) -> str | None:
     return None
 
 
-def _format_ir_address_hint_8616(address: IRAddress) -> str | None:
-    def _impl() -> str | None:
+def _format_ir_address_hint_8616(address: IRAddress) -> object:
+    def _impl() -> object:
         base = tuple(address.base or ())
         if not base:
             return None
-        parts = [str(item) for item in base if isinstance(item, str) and item]
+        parts = [str(item) for item in iter(base) if isinstance(item, str) and item]
         if not parts:
             return None
         offset = int(address.offset or 0)
@@ -128,8 +143,9 @@ def _format_ir_address_hint_8616(address: IRAddress) -> str | None:
     return _impl()
 
 
-def _format_ir_condition_hint_8616(condition: IRCondition) -> str | None:
-    def _impl() -> str | None:
+def _format_ir_condition_hint_8616(condition: IRCondition) -> object:
+    def _impl() -> object:
+        logical: object
         args = tuple(condition.args or ())
         op = str(condition.op)
         logical = _logical_condition_hint_8616(op, args)
@@ -140,8 +156,12 @@ def _format_ir_condition_hint_8616(condition: IRCondition) -> str | None:
     return _impl()
 
 
-def _logical_condition_hint_8616(op: str, args: tuple[IRAtom, ...]) -> str | None:
+@cython.ccall
+def _logical_condition_hint_8616(op: object, args: object) -> object:
     """Render the not/and/or condition shapes as a hint."""
+    inner: object
+    left: object
+    right: object
     if op == "not" and len(args) == 1 and isinstance(args[0], IRCondition):
         inner = _format_ir_condition_hint_8616(args[0])
         if inner is None:
@@ -162,8 +182,13 @@ def _logical_condition_hint_8616(op: str, args: tuple[IRAtom, ...]) -> str | Non
     return None
 
 
-def _comparison_condition_hint_8616(op: str, args: tuple[IRAtom, ...]) -> str | None:
+@cython.ccall
+def _comparison_condition_hint_8616(op: object, args: object) -> object:
     """Render the zero/masked/compare condition shapes as a hint."""
+    cmp_symbol: object
+    left: object
+    right: object
+    value: object
     if op in {"zero", "nonzero"} and len(args) == 1:
         value = _format_ir_value_8616(args[0])
         if value is None:
@@ -185,7 +210,9 @@ def _comparison_condition_hint_8616(op: str, args: tuple[IRAtom, ...]) -> str | 
     return None
 
 
-def _edge_jump_target_region_id_8616(codegen: object, edge_block_addr: int) -> int | None:
+@cython.ccall
+def _edge_jump_target_region_id_8616(codegen: object, edge_block_addr: cython.longlong) -> int | None:
+    project: object
     project = _dynamic_grouped_graph_getattr_8616(codegen, "project", None)
     factory = _dynamic_grouped_graph_getattr_8616(project, "factory", None) if project is not None else None
     block_lifter = _dynamic_grouped_graph_getattr_8616(factory, "block", None)
@@ -214,18 +241,23 @@ def _edge_jump_target_region_id_8616(codegen: object, edge_block_addr: int) -> i
     return int(imm) if isinstance(imm, int) else None
 
 
-def _edge_producer_semantics_payload_8616(edge: ConditionEdgeEvidence) -> tuple[object, ...] | None:
+@cython.ccall
+def _edge_producer_semantics_payload_8616(edge: ConditionEdgeEvidence) -> object:
     semantics = edge.producer_semantics
     if not isinstance(semantics, tuple):
         return None
     return tuple(semantics)
 
 
-def _typed_ir_support_by_region_id(codegen: object) -> dict[int, dict[str, object]]:
-    def _impl() -> dict[int, dict[str, object]]:
+def _typed_ir_support_by_region_id(codegen: object) -> object:
+    def _impl() -> object:
+        artifact: object
+        condition_ir_support: object
+        block: object
+        phi: object
         artifact = _dynamic_grouped_graph_getattr_8616(codegen, "_inertia_vex_ir_artifact", None)
         function_ssa = _dynamic_grouped_graph_getattr_8616(codegen, "_inertia_vex_ir_function_ssa", None)
-        support: dict[int, dict[str, object]] = _condition_ir_support_by_region_id_8616(codegen)
+        support: object = _condition_ir_support_by_region_id_8616(codegen)
         if artifact is None or not hasattr(artifact, "blocks"):
             return support
 
@@ -243,15 +275,15 @@ def _typed_ir_support_by_region_id(codegen: object) -> dict[int, dict[str, objec
             condition_ir_ops = _dict_tuple_8616(condition_ir_support, "condition_ir_ops")
             condition_edge_ops = _dict_tuple_8616(condition_ir_support, "condition_edge_guard_ops")
             has_condition = any(
-                any(isinstance(arg, IRCondition) for arg in _object_tuple_attr_8616(instr, "args"))
-                for instr in _object_tuple_attr_8616(block, "instrs")
+                any(isinstance(arg, IRCondition) for arg in builtins.iter(_object_tuple_attr_8616(instr, "args")))
+                for instr in builtins.iter(_object_tuple_attr_8616(block, "instrs"))
             )
             condition_kinds = tuple(
                 sorted(
                     {
                         str(arg.op)
-                        for instr in _object_tuple_attr_8616(block, "instrs")
-                        for arg in _object_tuple_attr_8616(instr, "args")
+                        for instr in builtins.iter(_object_tuple_attr_8616(block, "instrs"))
+                        for arg in builtins.iter(_object_tuple_attr_8616(instr, "args"))
                         if isinstance(arg, IRCondition)
                     }
                 )
@@ -265,7 +297,7 @@ def _typed_ir_support_by_region_id(codegen: object) -> dict[int, dict[str, objec
                         bool(condition_ir_support.get("condition_edge_has_guard", False)),
                     )
                 ),
-                "condition_kinds": tuple(sorted(str(item) for item in (*condition_kinds, *condition_ir_ops, *condition_edge_ops))),
+                "condition_kinds": tuple(sorted(str(item) for item in iter(tuple(condition_kinds) + tuple(condition_ir_ops) + tuple(condition_edge_ops)))),
                 "condition_hint": cjmp_condition_hint
                 or condition_ir_support.get("condition_ir_hint")
                 or condition_ir_support.get("condition_hint"),
@@ -309,9 +341,9 @@ def _typed_ir_support_by_region_id(codegen: object) -> dict[int, dict[str, objec
     return _impl()
 
 
-def _condition_ir_support_by_region_id_8616(codegen: object) -> dict[int, dict[str, object]]:
-    def _impl() -> dict[int, dict[str, object]]:
-        support: dict[int, dict[str, object]] = {}
+def _condition_ir_support_by_region_id_8616(codegen: object) -> object:
+    def _impl() -> object:
+        support: dict[cython.longlong, dict[str, object]] = {}
         conditions = _dynamic_grouped_graph_getattr_8616(codegen, "_inertia_typed_conditions", None)
         if isinstance(conditions, (list, tuple)):
             _collect_condition_ir_support_8616(support, conditions)
@@ -323,7 +355,8 @@ def _condition_ir_support_by_region_id_8616(codegen: object) -> dict[int, dict[s
     return _impl()
 
 
-def _empty_support_entry_8616(*, has_condition: bool, condition_ir: bool, edge_guard: bool) -> dict[str, object]:
+@cython.ccall
+def _empty_support_entry_8616(*, has_condition: cython.bint, condition_ir: cython.bint, edge_guard: cython.bint) -> dict[str, object]:
     """Return the canonical empty per-region support record."""
     return {
         "has_condition": has_condition,
@@ -349,16 +382,19 @@ def _empty_support_entry_8616(*, has_condition: bool, condition_ir: bool, edge_g
 
 
 def _collect_condition_ir_support_8616(
-    support: dict[int, dict[str, object]], conditions: typing.Iterable[object]
+    support: object, conditions: typing.Iterable[object]
 ) -> None:
     """Fold typed-IR conditions into the per-region support map."""
+    hint: object
+    cond: object
+    region_id: object
     for cond in conditions:
         if not isinstance(cond, ConditionIR):
             continue
         region_ids = tuple(
             dict.fromkeys(
                 region_id
-                for region_id in (cond.block_addr, cond.src_insn)
+                for region_id in iter((cond.block_addr, cond.src_insn))
                 if isinstance(region_id, int)
             )
         )
@@ -371,9 +407,9 @@ def _collect_condition_ir_support_8616(
             )
             ops = _dict_set_8616(entry, "condition_ir_ops")
             ops.add(str(cond.op))
-            entry["condition_ir_ops"] = tuple(sorted(str(item) for item in ops))
+            entry["condition_ir_ops"] = tuple(sorted(str(item) for item in iter(ops)))
             entry["condition_kinds"] = tuple(
-                sorted(str(item) for item in (*_dict_tuple_8616(entry, "condition_kinds"), str(cond.op)))
+                sorted(str(item) for item in iter(tuple(_dict_tuple_8616(entry, "condition_kinds")) + (str(cond.op),)))
             )
             entry["condition_ir_count"] = _dict_int_8616(entry, "condition_ir_count") + 1
             if entry.get("condition_ir_hint") is None:
@@ -384,12 +420,13 @@ def _collect_condition_ir_support_8616(
 
 
 def _record_edge_guard_8616(
-    support: dict[int, dict[str, object]],
-    region_id: int,
+    support: object,
+    region_id: cython.longlong,
     condition: ConditionIR,
-    producer_semantics: tuple[object, ...] | None,
+    producer_semantics: object,
 ) -> None:
     """Fold one guarded-edge condition into a region's support record."""
+    hint: object
     entry = support.setdefault(
         region_id,
         _empty_support_entry_8616(has_condition=True, condition_ir=False, edge_guard=True),
@@ -398,9 +435,9 @@ def _record_edge_guard_8616(
     entry["condition_edge_has_guard"] = True
     edge_ops = _dict_set_8616(entry, "condition_edge_guard_ops")
     edge_ops.add(str(condition.op))
-    entry["condition_edge_guard_ops"] = tuple(sorted(str(item) for item in edge_ops))
+    entry["condition_edge_guard_ops"] = tuple(sorted(str(item) for item in iter(edge_ops)))
     entry["condition_kinds"] = tuple(
-        sorted(str(item) for item in (*_dict_tuple_8616(entry, "condition_kinds"), str(condition.op)))
+        sorted(str(item) for item in iter(tuple(_dict_tuple_8616(entry, "condition_kinds")) + (str(condition.op),)))
     )
     edge_guards = _dict_tuple_8616(entry, "condition_edge_guards")
     if condition not in edge_guards:
@@ -419,12 +456,14 @@ def _record_edge_guard_8616(
             entry["condition_hint"] = hint
 
 
+@cython.ccall
 def _record_producer_semantics_8616(
-    support: dict[int, dict[str, object]],
-    producer_region_ids: tuple[int, ...],
-    producer_semantics: tuple[object, ...],
+    support: object,
+    producer_region_ids: object,
+    producer_semantics: object,
 ) -> None:
     """Fold producer-side semantics into each producer region's support record."""
+    producer_region_id: object
     for producer_region_id in producer_region_ids:
         entry = support.setdefault(
             producer_region_id,
@@ -436,13 +475,16 @@ def _record_producer_semantics_8616(
 
 
 def _collect_edge_evidence_support_8616(
-    codegen: object, support: dict[int, dict[str, object]], edge_evidence: typing.Iterable[object]
+    codegen: object, support: object, edge_evidence: typing.Iterable[object]
 ) -> None:
     """Fold guarded-edge evidence into the per-region support map."""
+    producer_semantics: object
+    edge: object
+    region_id: object
     for edge in edge_evidence:
         if not isinstance(edge, ConditionEdgeEvidence):
             continue
-        edge_region_ids: list[int] = [edge.edge_block_addr]
+        edge_region_ids: list[cython.longlong] = [edge.edge_block_addr]
         target_region_id = _edge_jump_target_region_id_8616(codegen, edge.edge_block_addr)
         if isinstance(target_region_id, int):
             edge_region_ids.append(target_region_id)
@@ -453,10 +495,10 @@ def _collect_edge_evidence_support_8616(
         producer_region_ids = tuple(
             dict.fromkeys(
                 region_id
-                for region_id in (
+                for region_id in iter((
                     edge.producer_insn,
                     _dynamic_grouped_graph_getattr_8616(condition, "producer_insn", None),
-                )
+                ))
                 if isinstance(region_id, int)
             )
         )
@@ -464,8 +506,12 @@ def _collect_edge_evidence_support_8616(
             _record_producer_semantics_8616(support, producer_region_ids, producer_semantics)
 
 
-def _scan_typed_ir_block_8616(block: object) -> dict[str, object]:
+def _scan_typed_ir_block_8616(block: object) -> object:
     def _impl() -> dict[str, object]:
+        address_hint: object
+        cjmp_condition_hint: object
+        arg: object
+        instr: object
         cjmp_condition_hint = None
         address_spaces: set[str] = set()
         stable_address_spaces: set[str] = set()
@@ -476,10 +522,10 @@ def _scan_typed_ir_block_8616(block: object) -> dict[str, object]:
                 if not isinstance(arg, IRAddress):
                     continue
                 address_spaces.add(arg.space.value)
-                if arg.status == AddressStatus.STABLE:
+                if operator.eq(arg.status, AddressStatus.STABLE):
                     stable_address_spaces.add(arg.space.value)
                 segment_origin_kinds.add(arg.segment_origin.value)
-                if (address_hint is None and (arg.status == AddressStatus.STABLE or arg.segment_origin == SegmentOrigin.PROVEN)) or address_hint is None:
+                if (address_hint is None and (operator.eq(arg.status, AddressStatus.STABLE) or operator.eq(arg.segment_origin, SegmentOrigin.PROVEN))) or address_hint is None:
                     address_hint = _format_ir_address_hint_8616(arg)
             if _dynamic_grouped_graph_getattr_8616(instr, "op", None) != "CJMP":
                 continue
@@ -500,7 +546,10 @@ def _scan_typed_ir_block_8616(block: object) -> dict[str, object]:
     return _impl()
 
 
-def _annotate_typed_ir_support_on_graph(graph: object, typed_ir_support: dict[int, dict[str, object]]) -> None:
+@cython.ccall
+def _annotate_typed_ir_support_on_graph(graph: object, typed_ir_support: object) -> None:
+    ir_support: object
+    region: object
     for region in _graph_nodes_8616(graph):
         region_id = _dynamic_grouped_graph_getattr_8616(region, "region_id", None)
         if not isinstance(region_id, int):
@@ -547,6 +596,10 @@ def build_grouped_region_graph(codegen: object) -> GroupedRegionGraphBuildResult
     """Build the region graph and attach grouped/typed-IR evidence metadata."""
 
     def _impl() -> GroupedRegionGraphBuildResult:
+        graph: object
+        grouped_units: object
+        role: object
+        region: object
         graph_result = build_region_graph(codegen)
         grouped_units = build_x86_16_cross_entry_grouped_units(codegen)
         graph = graph_result.graph
@@ -576,9 +629,13 @@ def build_grouped_region_graph(codegen: object) -> GroupedRegionGraphBuildResult
     return _impl()
 
 
-def _role_by_region_id_8616(grouped_units: CrossEntryGroupedUnitArtifact) -> dict[int, tuple[str, int]]:
+@cython.ccall
+def _role_by_region_id_8616(grouped_units: CrossEntryGroupedUnitArtifact) -> object:
     """Map each region id to its (grouping kind, unit index) role."""
-    role_by_region_id: dict[int, tuple[str, int]] = {}
+    region_id: object
+    unit: object
+    unit_index: object
+    role_by_region_id: dict[cython.longlong, tuple[str, cython.longlong]] = {}
     for unit_index, unit in enumerate(grouped_units.units):
         for region_id in unit.primary_entry_region_ids:
             role_by_region_id[region_id] = ("primary_entry", unit_index)
@@ -589,6 +646,7 @@ def _role_by_region_id_8616(grouped_units: CrossEntryGroupedUnitArtifact) -> dic
     return role_by_region_id
 
 
+@cython.ccall
 def describe_x86_16_grouped_region_graph_surface() -> dict[str, object]:
     """Describe the stable metadata surface produced by this builder."""
     return {

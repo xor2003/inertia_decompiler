@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Named canonical IR pattern table with typed proof and verified actions.
 
 Layer: IR.
@@ -14,6 +15,8 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import os
 from collections.abc import Callable, Iterable, Mapping
@@ -23,6 +26,9 @@ from enum import StrEnum
 from . import real16_edge_feasibility8616 as kb
 from . import scalar_instruction_effects as scalar
 from .core import IRActiveUnary8616, IRInstr, IRValue, MemSpace
+import dataclasses
+import operator
+import builtins
 
 SELECT_KNOWN_GUARD_PATTERN_8616: str = "select_known_guard"
 
@@ -31,7 +37,7 @@ _CANONICAL_PATTERN_DISABLE_ENV_8616: str = "INERTIA_DISABLE_CANONICAL_PATTERNS"
 # (pattern name, row identity) pairs currently inside one attempt. Guarded
 # rows stay alive on the replay stack for the whole attempt, so an id key
 # cannot be recycled while its entry is present.
-_ACTIVE_PATTERN_KEYS_8616: set[tuple[str, int]] = set()
+_ACTIVE_PATTERN_KEYS_8616: set[tuple[str, cython.longlong]] = set()
 
 
 class CanonicalPatternOutcome8616(StrEnum):
@@ -48,7 +54,7 @@ class CanonicalPatternOutcome8616(StrEnum):
     REFUSED_REENTRY = "refused_reentry"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CanonicalPatternState8616:
     """Live known-bits replay state viewed by one pattern attempt.
 
@@ -57,11 +63,11 @@ class CanonicalPatternState8616:
     apply-time state, which is exactly what stale-proof refusal requires.
     """
 
-    registers: dict[str, tuple[int, int]]
-    tmps: dict[int, tuple[int, int]]
+    registers: object
+    tmps: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SelectKnownGuardProof8616:
     """Typed precondition proof bound to one SELECT row at one replay step.
 
@@ -71,31 +77,31 @@ class SelectKnownGuardProof8616:
     """
 
     row: IRInstr
-    bits: int
-    guard_mask: int
-    guard_value: int
+    bits: cython.longlong
+    guard_mask: cython.longlong
+    guard_value: cython.longlong
     chosen: IRValue
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CanonicalPatternMatch8616:
     """One match attempt: admission verdict plus optional applicable proof."""
 
-    admitted: bool
+    admitted: cython.bint
     proof: SelectKnownGuardProof8616 | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CanonicalPatternSpec8616:
     """One named auditable pattern: cheap gate, typed match, verified action."""
 
-    name: str
-    candidate: Callable[[IRInstr], bool]
+    name: object
+    candidate: Callable[[IRInstr], cython.bint]
     match: Callable[[IRInstr, CanonicalPatternState8616], CanonicalPatternMatch8616]
     apply: Callable[[SelectKnownGuardProof8616, IRInstr, CanonicalPatternState8616], IRInstr | None]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CanonicalPatternStep8616:
     """Audited decision for one pattern attempt on one row.
 
@@ -105,14 +111,14 @@ class CanonicalPatternStep8616:
     itself a transform certificate.
     """
 
-    pattern: str
+    pattern: object
     outcome: CanonicalPatternOutcome8616
-    admitted: bool
+    admitted: cython.bint
     row: IRInstr
     proof: SelectKnownGuardProof8616 | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CanonicalPatternConfig8616:
     """Typed per-pattern enable/disable policy for canonical IR patterns.
 
@@ -135,7 +141,7 @@ class CanonicalPatternConfig8616:
 
 def canonical_pattern_names_8616() -> frozenset[str]:
     """Return the registered pattern names accepted by typed config."""
-    return frozenset(spec.name for spec in CANONICAL_PATTERN_SPECS_8616)
+    return frozenset(spec.name for spec in iter(CANONICAL_PATTERN_SPECS_8616))
 
 
 def canonical_pattern_config_8616(
@@ -150,21 +156,24 @@ def canonical_pattern_config_8616(
     typed constructor performs the registry validation, so every policy —
     explicit, resolved, or directly built — obeys the same refusal.
     """
+    raw: object
     names: set[str] = set()
     if disabled is not None:
         names.update(disabled)
     else:
         environment = os.environ if env is None else env
         raw = environment.get(_CANONICAL_PATTERN_DISABLE_ENV_8616, "")
-        names.update(entry.strip() for entry in raw.split(",") if entry.strip())
+        names.update(entry.strip() for entry in builtins.iter(raw.split(",")) if entry.strip())
     return CanonicalPatternConfig8616(disabled=frozenset(names))
 
 
-def _select_candidate_8616(row: IRInstr) -> bool:
+@cython.ccall
+def _select_candidate_8616(row: IRInstr) -> cython.bint:
     """Recognize only operation names registered by the scalar owner."""
     return scalar.frozen_dispatch_lookup(scalar._SELECT_BITS_8616, row.op) is not None
 
 
+@cython.ccall
 def match_select_known_guard_8616(
     row: IRInstr, state: CanonicalPatternState8616,
 ) -> CanonicalPatternMatch8616:
@@ -175,6 +184,8 @@ def match_select_known_guard_8616(
     0 set). A known mask with an unknown guard bit admits the row but keeps
     it unchanged.
     """
+    bits: object
+    guard: object
     bits = scalar.scalar_select_result_bits_8616(row)
     if bits is None:
         return CanonicalPatternMatch8616(admitted=False)
@@ -193,6 +204,7 @@ def match_select_known_guard_8616(
     )
 
 
+@cython.ccall
 def _select_known_guard_move_8616(proof: SelectKnownGuardProof8616) -> IRInstr:
     """Preserve exact width and captured value identity of the proven arm."""
     source = proof.chosen
@@ -204,6 +216,7 @@ def _select_known_guard_move_8616(proof: SelectKnownGuardProof8616) -> IRInstr:
     return replace(proof.row, op="MOV", args=(source,))
 
 
+@cython.ccall
 def apply_select_known_guard_8616(
     proof: SelectKnownGuardProof8616,
     live_row: IRInstr,
@@ -218,19 +231,21 @@ def apply_select_known_guard_8616(
     mask's bit 0 must be set: an unknown selecting bit can never authorize a
     chosen arm, regardless of what the bound pair claims.
     """
+    guard: object
     if live_row is not proof.row:
         return None
     row = proof.row
-    if scalar.scalar_select_result_bits_8616(row) != proof.bits:
+    if operator.ne(scalar.scalar_select_result_bits_8616(row), proof.bits):
         return None
     if row.args[1 if proof.guard_value & 1 else 2] is not proof.chosen:
         return None
     guard = kb._kb_eval_value_8616(row.args[0], state.registers, state.tmps)
-    if guard is None or not guard[0] & 1 or guard != (proof.guard_mask, proof.guard_value):
+    if guard is None or not guard[0] & 1 or operator.ne(guard, (proof.guard_mask, proof.guard_value)):
         return None
     return _select_known_guard_move_8616(proof)
 
 
+@cython.ccall
 def _run_canonical_pattern_inner_8616(
     spec: CanonicalPatternSpec8616,
     row: IRInstr,
@@ -238,6 +253,8 @@ def _run_canonical_pattern_inner_8616(
     config: CanonicalPatternConfig8616,
 ) -> CanonicalPatternStep8616:
     """Evaluate one pattern's policy, match and verified action once."""
+    applied: object
+    match: object
     if spec.name in config.disabled:
         return CanonicalPatternStep8616(
             spec.name, CanonicalPatternOutcome8616.SKIPPED_DISABLED, False, row,
@@ -257,6 +274,7 @@ def _run_canonical_pattern_inner_8616(
     )
 
 
+@cython.ccall
 def run_canonical_pattern_8616(
     spec: CanonicalPatternSpec8616,
     row: IRInstr,
@@ -292,17 +310,20 @@ CANONICAL_PATTERN_SPECS_8616: tuple[CanonicalPatternSpec8616, ...] = (
 )
 
 
+@cython.ccall
 def canonical_pattern_census_8616(
-    steps: tuple[CanonicalPatternStep8616, ...] | list[CanonicalPatternStep8616],
-) -> dict[str, int]:
+    steps: object,
+) -> object:
     """Aggregate audited steps into deterministic per-pattern outcome counts."""
-    census: dict[str, int] = {}
+    step: object
+    census: dict[str, cython.longlong] = {}
     for step in steps:
         key = f"{step.pattern}_{step.outcome.value}"
         census[key] = census.get(key, 0) + 1
     return census
 
 
+@cython.ccall
 def canonical_pattern_producers_8616() -> tuple[object, ...]:
     """Bind the pattern table and every match/action/config authority used."""
     return (

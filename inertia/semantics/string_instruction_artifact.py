@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Helper boundary.
 
 Responsibility: collect structured string-instruction facts and refusals from decoded instructions.
@@ -11,11 +12,14 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable, MutableMapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, cast
+import dataclasses
 
 __all__ = (
     "StringInstructionArtifact",
@@ -36,13 +40,13 @@ class StringInstructionCoverage8616(StrEnum):
 
 
 class _DecodedInstruction(Protocol):
-    address: int
-    mnemonic: str
-    op_str: str
+    address: cython.longlong
+    mnemonic: object
+    op_str: object
 
 
 class _LinearMemory(Protocol):
-    def load(self, start: int, size: int) -> bytes:
+    def load(self, start: cython.longlong, size: cython.longlong) -> object:
         """Read bytes from the project loader memory."""
         ...
 
@@ -52,9 +56,9 @@ class _ProjectLoader(Protocol):
 
 
 class _CapstoneDisassembler(Protocol):
-    detail: bool
+    detail: cython.bint
 
-    def disasm(self, code: bytes, start: int) -> Iterable[object]:
+    def disasm(self, code: object, start: cython.longlong) -> Iterable[object]:
         """Decode bytes into instruction objects."""
         ...
 
@@ -69,7 +73,7 @@ class _LinearDecodeProject(Protocol):
 
 
 class _CapstoneBlock(Protocol):
-    insns: tuple[object, ...]
+    insns: object
 
 
 class _ProjectBlock(Protocol):
@@ -77,20 +81,20 @@ class _ProjectBlock(Protocol):
 
 
 class _ProjectFactory(Protocol):
-    def block(self, addr: int, *, opt_level: int = 0) -> _ProjectBlock:
+    def block(self, addr: cython.longlong, *, opt_level = 0) -> _ProjectBlock:
         """Load a project block with decoded capstone instructions."""
         del opt_level
         raise NotImplementedError
 
 
 class _FunctionForStringArtifact(Protocol):
-    addr: int
-    block_addrs_set: set[int]
+    addr: cython.longlong
+    block_addrs_set: object
     info: MutableMapping[str, object]
 
 
 class _FunctionManager(Protocol):
-    def function(self, *, addr: int, create: bool = False) -> object | None:
+    def function(self, *, addr: cython.longlong, create: cython.bint = False) -> object | None:
         """Look up a function by address without requiring creation."""
         ...
 
@@ -105,7 +109,7 @@ class _BlockDecodeProject(Protocol):
 
 
 class _CodegenCFunction(Protocol):
-    addr: int
+    addr: cython.longlong
 
 
 class _StringArtifactCodegen(Protocol):
@@ -113,32 +117,32 @@ class _StringArtifactCodegen(Protocol):
     _inertia_string_instruction_artifact: StringInstructionArtifact
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StringInstructionRecord:
     """One proven x86 string-instruction fact collected from decoded instructions."""
 
-    index: int
-    family: str
-    mnemonic: str
-    repeat_kind: str
-    width: int
-    source_segment: str | None
-    destination_segment: str | None
-    direction_mode: str
+    index: cython.longlong
+    family: object
+    mnemonic: object
+    repeat_kind: object
+    width: cython.longlong
+    source_segment: object
+    destination_segment: object
+    direction_mode: object
     zero_seeded_accumulator: bool | None
-    zf_sensitive: bool
+    zf_sensitive: cython.bint
     instruction_addr: int | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StringInstructionRefusal:
     """Reason a string-instruction artifact could not be fully trusted."""
 
-    kind: str
-    detail: str
+    kind: object
+    detail: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StringInstructionArtifact:
     """Collected string-instruction facts plus honest refusals."""
 
@@ -164,13 +168,14 @@ class StringInstructionArtifact:
                     "zf_sensitive": rec.zf_sensitive,
                     "instruction_addr": rec.instruction_addr,
                 }
-                for rec in self.records
+                for rec in iter(self.records)
             ],
-            "refusals": [{"kind": item.kind, "detail": item.detail} for item in self.refusals],
+            "refusals": [{"kind": item.kind, "detail": item.detail} for item in iter(self.refusals)],
         }
 
 
-def _decode_linear_insns(project: _LinearDecodeProject, start: int, end: int) -> tuple[object, ...]:
+@cython.ccall
+def _decode_linear_insns(project: _LinearDecodeProject, start: cython.longlong, end: cython.longlong) -> tuple[object, ...]:
     """Decode a linear byte range through the project capstone boundary."""
     if end <= start:
         return ()
@@ -184,8 +189,10 @@ def _decode_linear_insns(project: _LinearDecodeProject, start: int, end: int) ->
         capstone.detail = previous_detail
 
 
+@cython.ccall
 def _block_insns(project: _BlockDecodeProject, function: _FunctionForStringArtifact) -> tuple[object, ...]:
     """Collect decoded instructions from a function's known basic blocks."""
+    block_addr: object
     block_addrs = tuple(sorted(function.block_addrs_set))
     if not block_addrs:
         return ()
@@ -199,7 +206,8 @@ def _block_insns(project: _BlockDecodeProject, function: _FunctionForStringArtif
     return tuple(insns)
 
 
-def _normalize_string_mnemonic(mnemonic: str) -> tuple[str, str]:
+@cython.ccall
+def _normalize_string_mnemonic(mnemonic: object) -> tuple[str, str]:
     parts = mnemonic.strip().lower().split()
     if not parts:
         return "none", ""
@@ -211,7 +219,8 @@ def _normalize_string_mnemonic(mnemonic: str) -> tuple[str, str]:
     return "none", parts[-1]
 
 
-def _string_family(base: str) -> tuple[str, int, str | None, str | None, bool] | None:
+@cython.ccall
+def _string_family(base: object) -> object:
     if base.startswith("movs"):
         return "movs", _width_for_base(base), "ds", "es", False
     if base.startswith("lods"):
@@ -229,7 +238,8 @@ def _string_family(base: str) -> tuple[str, int, str | None, str | None, bool] |
     return None
 
 
-def _width_for_base(base: str) -> int:
+@cython.ccall
+def _width_for_base(base: object) -> cython.longlong:
     if base.endswith("b"):
         return 1
     if base.endswith("w"):
@@ -239,7 +249,8 @@ def _width_for_base(base: str) -> int:
     return 0
 
 
-def _register_zero_seed(insn: object, al_zero: bool, ax_zero: bool) -> tuple[bool, bool]:
+@cython.ccall
+def _register_zero_seed(insn: object, al_zero: cython.bint, ax_zero: cython.bint) -> tuple[cython.bint, cython.bint]:
     """Update accumulator zero-seed state from one decoded instruction."""
     decoded = cast(_DecodedInstruction, insn)
     mnemonic = decoded.mnemonic.strip().lower()
@@ -256,7 +267,8 @@ def _register_zero_seed(insn: object, al_zero: bool, ax_zero: bool) -> tuple[boo
     return al_zero, ax_zero
 
 
-def _direction_state(insn: object, current: str) -> str:
+@cython.ccall
+def _direction_state(insn: object, current: object) -> object:
     """Update string direction state from one decoded instruction."""
     mnemonic = cast(_DecodedInstruction, insn).mnemonic.strip().lower()
     if mnemonic == "cld":
@@ -266,8 +278,11 @@ def _direction_state(insn: object, current: str) -> str:
     return current
 
 
-def _records_from_insns(insns: tuple[object, ...]) -> StringInstructionArtifact:
+@cython.ccall
+def _records_from_insns(insns: object) -> StringInstructionArtifact:
     """Build a string-instruction artifact from decoded instruction objects."""
+    info: object
+    insn: object
     if not insns:
         return StringInstructionArtifact(
             refusals=(StringInstructionRefusal("no_instruction_signal", "no instruction stream available"),)
@@ -329,7 +344,7 @@ def _records_from_insns(insns: tuple[object, ...]) -> StringInstructionArtifact:
             )
         )
     refusals: list[StringInstructionRefusal] = []
-    concrete_directions = {item.direction_mode for item in records if item.direction_mode in {"forward", "backward"}}
+    concrete_directions = {item.direction_mode for item in iter(records) if item.direction_mode in {"forward", "backward"}}
     if len(concrete_directions) > 1:
         refusals.append(
             StringInstructionRefusal(
@@ -348,6 +363,7 @@ def _records_from_insns(insns: tuple[object, ...]) -> StringInstructionArtifact:
     )
 
 
+@cython.ccall
 def build_x86_16_string_instruction_artifact(
     project: object, function: object
 ) -> StringInstructionArtifact:
@@ -357,18 +373,22 @@ def build_x86_16_string_instruction_artifact(
     )
 
 
+@cython.ccall
 def build_x86_16_string_instruction_artifact_from_linear_range(
     project: object,
     *,
-    start: int,
-    end: int,
+    start: cython.longlong,
+    end: cython.longlong,
 ) -> StringInstructionArtifact:
     """Collect string-instruction facts from a linear decoded byte range."""
     return _records_from_insns(_decode_linear_insns(cast(_LinearDecodeProject, project), start, end))
 
 
-def apply_x86_16_string_instruction_artifact(project: object, codegen: object) -> bool:
+@cython.ccall
+def apply_x86_16_string_instruction_artifact(project: object, codegen: object) -> cython.bint:
     """Attach string-instruction facts at the third-party angr/codegen boundary."""
+    cfunc: object
+    function: object
     typed_project = cast(_BlockDecodeProject, project)
     typed_codegen = cast(_StringArtifactCodegen, codegen)
     cfunc = typed_codegen.cfunc

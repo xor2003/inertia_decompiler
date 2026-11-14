@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize call arguments that vary across several CFG predecessors.
 
 Layer: Structuring.
@@ -10,6 +11,8 @@ Do not perform alias-state ownership, widening, type/materialization recovery, r
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import Enum
@@ -29,6 +32,9 @@ from .call_argument_path_conditions import (
     CallArgumentPathConditionStatus8616,
     materialize_call_argument_path_expressions_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "CallArgumentPathJoinDecision8616",
@@ -47,43 +53,46 @@ class CallArgumentPathJoinDecision8616(Enum):
     ALREADY_MATERIALIZED = "already_materialized"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallArgumentPathJoinResult8616:
     """Return one decision and its closed evidence counters."""
 
     decision: CallArgumentPathJoinDecision8616
-    changed: bool = False
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    changed: cython.bint = False
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _NormalizedPathJoin8616:
     """Complete path-indexed immediate values for varying physical lanes."""
 
-    values_by_predecessor: dict[int, tuple[int, ...]]
-    varying_lanes: tuple[int, ...]
+    values_by_predecessor: object
+    varying_lanes: object
 
 
-def _is_path_join_candidate_8616(summary: CallsiteSummary8616) -> bool:
+def _is_path_join_candidate_8616(summary: CallsiteSummary8616) -> cython.bint:
     """Return whether evidence exceeds the existing binary single-lane pass."""
+    merge: object
     merge = summary.predecessor_stack_merge
     return bool(
         merge is not None
         and merge.traces
         and (
             len(merge.traces) > 2
-            or sum(source is None for source in summary.push_arg_sources) > 1
+            or sum(source is None for source in iter(summary.push_arg_sources)) > 1
         )
     )
 
 
+@cython.ccall
 def _unique_sources_8616(
-    sources: tuple[CallsiteSource8616 | None, ...],
+    sources: object,
 ) -> tuple[CallsiteSource8616 | None, ...]:
     """Deduplicate source facts without assuming payload hashability."""
+    source: object
     unique: list[CallsiteSource8616 | None] = []
     for source in sources:
         if source not in unique:
@@ -95,87 +104,91 @@ class _ClosedEvidence8616(Protocol):
     """Common closed-evidence counter shape shared by merge and join records."""
 
     @property
-    def raw_fact_count(self) -> int:
+    def raw_fact_count(self) -> cython.longlong:
         """Raw predecessor trace count observed before normalization."""
         ...
 
     @property
-    def normalized_fact_count(self) -> int:
+    def normalized_fact_count(self) -> cython.longlong:
         """Trace count surviving normalization."""
         ...
 
     @property
-    def classified_fact_count(self) -> int:
+    def classified_fact_count(self) -> cython.longlong:
         """Count of joins classified as materializable."""
         ...
 
     @property
-    def materialized_count(self) -> int:
+    def materialized_count(self) -> cython.longlong:
         """Count of materialized join outputs."""
         ...
 
     @property
-    def failure_count(self) -> int:
+    def failure_count(self) -> cython.longlong:
         """Count of evidence failures."""
         ...
 
 
-def _closed_evidence_counts_8616(evidence: _ClosedEvidence8616, trace_count: int) -> bool:
+@cython.ccall
+def _closed_evidence_counts_8616(evidence: _ClosedEvidence8616, trace_count: cython.longlong) -> cython.bint:
     """Check one merge/join evidence record closed exactly once per trace."""
     return (
-        evidence.raw_fact_count == trace_count
-        and evidence.normalized_fact_count == trace_count
+        operator.eq(evidence.raw_fact_count, trace_count)
+        and operator.eq(evidence.normalized_fact_count, trace_count)
         and evidence.classified_fact_count == 1
         and evidence.materialized_count == 1
         and evidence.failure_count == 0
     )
 
 
-def _summary_lanes_align_8616(summary: CallsiteSummary8616, merge: CallsitePredecessorStackMerge8616) -> bool:
+def _summary_lanes_align_8616(summary: CallsiteSummary8616, merge: CallsitePredecessorStackMerge8616) -> cython.bint:
     """Check the summary lanes are word-wide and agree with merge prefixes."""
     widths = summary.arg_widths
     sources = summary.push_arg_sources
     addresses = summary.push_arg_instruction_addrs
-    if not widths or any(width != 2 for width in widths):
+    if not widths or any(width != 2 for width in iter(widths)):
         return False
-    if len(widths) != len(sources) or len(widths) != len(addresses):
+    if operator.ne(len(widths), len(sources)) or operator.ne(len(widths), len(addresses)):
         return False
-    if len(merge.widths) > len(widths) or merge.widths != widths[: len(merge.widths)]:
+    if len(merge.widths) > len(widths) or operator.ne(merge.widths, widths[: len(merge.widths)]):
         return False
-    return bool(merge.sources == sources[: len(merge.sources)])
+    return bool(operator.eq(merge.sources, sources[: len(merge.sources)]))
 
 
 def _register_join_lanes_8616(
     merge: CallsitePredecessorStackMerge8616,
-    addresses: tuple[int, ...],
-    predecessors: tuple[object, ...],
-) -> tuple[int | None, dict[int, CallsiteSource8616 | None]] | None:
+    addresses: object,
+    predecessors: object,
+) -> object:
     """Bind the optional register-join lane to per-predecessor sources."""
+    join: object
     join = merge.register_join
     if join is None:
         return None, {}
-    if not _closed_evidence_counts_8616(join, len(merge.traces)) or len(join.traces) != len(merge.traces):
+    if not _closed_evidence_counts_8616(join, len(merge.traces)) or operator.ne(len(join.traces), len(merge.traces)):
         return None
-    join_lanes = tuple(index for index, addr in enumerate(addresses) if addr == join.push_instruction_addr)
+    join_lanes = tuple(index for index, addr in builtins.iter(enumerate(addresses)) if operator.eq(addr, join.push_instruction_addr))
     if len(join_lanes) != 1:
         return None
-    register_sources = {trace.predecessor_addr: trace.source for trace in join.traces}
-    if set(register_sources) != set(predecessors):
+    register_sources = {trace.predecessor_addr: trace.source for trace in iter(join.traces)}
+    if operator.ne(set(register_sources), set(predecessors)):
         return None
     return join_lanes[0], register_sources
 
 
+@cython.ccall
 def _predecessor_path_sources_8616(
     merge: CallsitePredecessorStackMerge8616,
-    sources: tuple[CallsiteSource8616 | None, ...],
-    register_lane: int | None,
-    register_sources: dict[int, CallsiteSource8616 | None],
-) -> dict[int, tuple[CallsiteSource8616 | None, ...]] | None:
+    sources: object,
+    register_lane: object,
+    register_sources: object,
+) -> object:
     """Expand each predecessor trace into complete physical lanes."""
-    path_sources: dict[int, tuple[CallsiteSource8616 | None, ...]] = {}
+    trace: object
+    path_sources: dict[cython.longlong, tuple[CallsiteSource8616 | None, ...]] = {}
     for trace in merge.traces:
         predecessor_addr = trace.predecessor_addr
-        if not isinstance(predecessor_addr, int) or not trace.is_well_formed() or trace.widths != merge.widths:
+        if not isinstance(predecessor_addr, int) or not trace.is_well_formed() or operator.ne(trace.widths, merge.widths):
             return None
         physical = list(sources)
         physical[: len(trace.sources)] = trace.sources
@@ -187,6 +200,11 @@ def _predecessor_path_sources_8616(
 
 def _normalize_path_join_8616(summary: CallsiteSummary8616) -> _NormalizedPathJoin8616 | None:
     """Validate and expand predecessor traces into complete physical lanes."""
+    joined: object
+    merge: object
+    path_sources: object
+    path: object
+    predecessor_addr: object
     merge = summary.predecessor_stack_merge
     if merge is None or len(merge.traces) < 2:
         return None
@@ -198,8 +216,8 @@ def _normalize_path_join_8616(summary: CallsiteSummary8616) -> _NormalizedPathJo
     addresses = summary.push_arg_instruction_addrs
     if not _summary_lanes_align_8616(summary, merge):
         return None
-    predecessors = tuple(trace.predecessor_addr for trace in traces)
-    if any(not isinstance(addr, int) for addr in predecessors) or len(set(predecessors)) != len(predecessors):
+    predecessors = tuple(trace.predecessor_addr for trace in iter(traces))
+    if any(not isinstance(addr, int) for addr in iter(predecessors)) or operator.ne(len(set(predecessors)), len(predecessors)):
         return None
 
     joined = _register_join_lanes_8616(merge, addresses, predecessors)
@@ -214,14 +232,14 @@ def _normalize_path_join_8616(summary: CallsiteSummary8616) -> _NormalizedPathJo
     varying_lanes = tuple(
         lane
         for lane in range(len(widths))
-        if len(_unique_sources_8616(tuple(values[lane] for values in path_sources.values()))) > 1
+        if len(_unique_sources_8616(tuple(values[lane] for values in builtins.iter(path_sources.values())))) > 1
     )
     if not varying_lanes:
         return None
-    values_by_predecessor: dict[int, tuple[int, ...]] = {}
+    values_by_predecessor: dict[cython.longlong, tuple[cython.longlong, ...]] = {}
     for predecessor_addr, path in path_sources.items():
-        values = tuple(exact_call_argument_immediate_8616(path[lane]) for lane in varying_lanes)
-        if any(value is None for value in values):
+        values = tuple(exact_call_argument_immediate_8616(path[lane]) for lane in iter(varying_lanes))
+        if any(value is None for value in iter(values)):
             return None
         values_by_predecessor[predecessor_addr] = cast(tuple[int, ...], values)
     return _NormalizedPathJoin8616(values_by_predecessor, varying_lanes)
@@ -234,6 +252,9 @@ def materialize_call_argument_path_join_8616(
     summary: CallsiteSummary8616,
 ) -> CallArgumentPathJoinResult8616:
     """Replace every exact N-path immediate lane in one structured call."""
+    normalized: object
+    expression: object
+    physical_lane: object
     if not _is_path_join_candidate_8616(summary):
         return CallArgumentPathJoinResult8616(CallArgumentPathJoinDecision8616.NOT_APPLICABLE)
     normalized = _normalize_path_join_8616(summary)
@@ -243,7 +264,7 @@ def materialize_call_argument_path_join_8616(
             failure_count=1,
         )
     existing = tuple(call.args or ())
-    if len(existing) != len(summary.arg_widths):
+    if operator.ne(len(existing), len(summary.arg_widths)):
         return CallArgumentPathJoinResult8616(
             CallArgumentPathJoinDecision8616.REFUSED_EVIDENCE,
             normalized_fact_count=1,
@@ -274,7 +295,7 @@ def materialize_call_argument_path_join_8616(
         strict=True,
     ):
         expected[len(expected) - 1 - physical_lane] = expression
-    if all(_same_c_expression_8616(lhs, rhs) for lhs, rhs in zip(existing, expected, strict=True)):
+    if all(_same_c_expression_8616(lhs, rhs) for lhs, rhs in builtins.iter(zip(existing, expected, strict=True))):
         return CallArgumentPathJoinResult8616(
             CallArgumentPathJoinDecision8616.ALREADY_MATERIALIZED,
             normalized_fact_count=1,

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Snapshot consumed calling-convention dependencies for in-process reuse.
 
 Layer: Analysis/calling-convention coordination.
@@ -11,6 +12,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable, Mapping
 from copy import deepcopy
@@ -25,12 +28,14 @@ from inertia.semantics.call_target_identity import resolve_x86_16_call_target_fu
 from inertia.semantics.callsite_summary import CallerReturnUseVerdict8616
 
 from .return_type_evidence import proven_function_result_observation_8616
+import dataclasses
+import builtins
 
 
 class _Node8616(Protocol):
     """Third-party CFG node identity used by terminal path proofs."""
 
-    addr: int
+    addr: cython.longlong
     size: int | None
 
 
@@ -46,46 +51,47 @@ class _Graph8616(Protocol):
 class _Function8616(Protocol):
     """Optional third-party function fields read at the cache boundary."""
 
-    addr: int
-    block_addrs_set: Iterable[int]
+    addr: cython.longlong
+    block_addrs_set: Iterable[cython.longlong]
     graph: _Graph8616
     prototype: SimTypeFunction | None
-    is_prototype_guessed: bool
+    is_prototype_guessed: cython.bint
     prototype_source: PrototypeSource
     info: Mapping[str, object]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionSeedState8616:
     """Detached local inputs; prototype copies detect in-place type changes."""
 
     address: int | None
-    blocks: tuple[int, ...]
-    graph: tuple[tuple[int, int | None, tuple[int, ...]], ...] | None
+    blocks: object
+    graph: object
     prototype: SimTypeFunction | None
-    guessed: bool
+    guessed: cython.bint
     source: PrototypeSource | None
     annotated_prototype: SimTypeFunction | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CalleeSeedDependency8616:
     """One inspected target, including a missing or refused callee contract."""
 
-    target_addr: int
+    target_addr: cython.longlong
     state: FunctionSeedState8616 | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallingConventionSeedRevision8616:
     """Local inputs and exact terminal-callee dependencies for one seed result."""
 
-    project_identity: int
+    project_identity: cython.longlong
     local: FunctionSeedState8616
     observation: CallerReturnUseVerdict8616 | None
-    callees: tuple[CalleeSeedDependency8616, ...]
+    callees: object
 
 
+@cython.ccall
 def _prototype_snapshot(prototype: object) -> SimTypeFunction | None:
     """Copy mutable type facts without copying the immutable architecture."""
     if not isinstance(prototype, SimTypeFunction):
@@ -93,20 +99,22 @@ def _prototype_snapshot(prototype: object) -> SimTypeFunction | None:
     return deepcopy(prototype, {id(prototype._arch): prototype._arch})
 
 
-def _graph_snapshot(function: _Function8616) -> tuple[tuple[int, int | None, tuple[int, ...]], ...] | None:
+def _graph_snapshot(function: _Function8616) -> object:
     """Snapshot the exact graph fields consumed by terminal-return traversal."""
     try:
         graph = function.graph
         return tuple(sorted(
-            (node.addr, node.size, tuple(sorted(successor.addr for successor in graph.successors(node))))
-            for node in graph.nodes
+            (node.addr, node.size, tuple(sorted(successor.addr for successor in builtins.iter(graph.successors(node)))))
+            for node in iter(graph.nodes)
         ))
     except (AttributeError, TypeError):
         return None
 
 
+@cython.ccall
 def _function_state(function: object) -> FunctionSeedState8616:
     """Read optional angr fields without relying on mutable prototype identity."""
+    annotations: object
     boundary = cast(_Function8616, function)
     try:
         address = boundary.addr
@@ -136,12 +144,15 @@ def _function_state(function: object) -> FunctionSeedState8616:
     return FunctionSeedState8616(address, blocks, _graph_snapshot(boundary), prototype, guessed, source, annotated)
 
 
+@cython.ccall
 def calling_convention_seed_revision_8616(
-    project: object | None,
+    project: object,
     function: object,
-    inspected_targets: tuple[int, ...],
+    inspected_targets: object,
 ) -> CallingConventionSeedRevision8616:
     """Refresh only the local facts and callees consumed by the previous seed."""
+    callee: object
+    target: object
     local = _function_state(function)
     observation = (
         proven_function_result_observation_8616(project, local.address)

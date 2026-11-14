@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Preserve a proven loop-carried AX value through structured C returns.
 
 Layer: Structuring.
@@ -9,6 +10,8 @@ rewrite cleanup, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import cast
 
@@ -40,6 +43,8 @@ from .loop_carried_terminal_return_contracts import (
     _FunctionSurface8616,
     _ProjectSurface8616,
 )
+import operator
+import builtins
 
 __all__ = [
     "LoopCarriedTerminalReturnEvidence8616",
@@ -52,6 +57,7 @@ __all__ = [
 _MATERIALIZED_TAG = "inertia_loop_carried_terminal_return_8616"
 
 
+@cython.ccall
 def _result_8616(
     codegen: _CodegenSurface8616,
     status: LoopCarriedTerminalReturnStatus8616,
@@ -69,13 +75,14 @@ def _result_8616(
     return result
 
 
+@cython.ccall
 def _refused_8616(
     codegen: _CodegenSurface8616,
     refusal: LoopCarriedTerminalReturnRefusal8616,
     *,
-    raw: int = 1,
-    normalized: int = 0,
-    failures: int = 0,
+    raw: cython.longlong = 1,
+    normalized: cython.longlong = 0,
+    failures: cython.longlong = 0,
 ) -> LoopCarriedTerminalReturnResult8616:
     """Build one conservative refusal before semantic classification."""
     return _result_8616(
@@ -86,8 +93,10 @@ def _refused_8616(
     )
 
 
+@cython.ccall
 def _linear_statements_8616(root: object) -> tuple[object, ...]:
     """Flatten transparent CStatements wrappers without crossing control flow."""
+    statement: object
     if not isinstance(root, CStatements):
         return (root,)
     statements: list[object] = []
@@ -96,27 +105,33 @@ def _linear_statements_8616(root: object) -> tuple[object, ...]:
     return tuple(statements)
 
 
+@cython.ccall
 def _overlaps_ax_8616(
     view: PhysicalRegisterView8616,
-    ax_offset: int,
-    ax_width: int,
-) -> bool:
+    ax_offset: cython.longlong,
+    ax_width: cython.longlong,
+) -> cython.bint:
     """Return whether one physical register view overlaps the AX word."""
     return bool(view.reg_offset < ax_offset + ax_width and ax_offset < view.reg_offset + view.width)
 
 
+@cython.ccall
 def _is_full_ax_8616(
     node: object,
-    ax_offset: int,
-    ax_width: int,
-) -> bool:
+    ax_offset: cython.longlong,
+    ax_width: cython.longlong,
+) -> cython.bint:
     """Return whether one C expression denotes exactly the full AX storage."""
+    view: object
     view = physical_register_view_8616(node)
-    return view is not None and view.reg_offset == ax_offset and view.width == ax_width
+    return view is not None and operator.eq(view.reg_offset, ax_offset) and operator.eq(view.width, ax_width)
 
 
-def _ax_views_8616(node: object, ax_offset: int, ax_width: int) -> tuple[PhysicalRegisterView8616, ...]:
+@cython.ccall
+def _ax_views_8616(node: object, ax_offset: cython.longlong, ax_width: cython.longlong) -> tuple[PhysicalRegisterView8616, ...]:
     """Collect physical C-expression views overlapping AX in one subtree."""
+    view: object
+    candidate: object
     views: list[PhysicalRegisterView8616] = []
     for candidate in _iter_c_nodes_deep_8616(node):
         view = physical_register_view_8616(candidate)
@@ -125,6 +140,7 @@ def _ax_views_8616(node: object, ax_offset: int, ax_width: int) -> tuple[Physica
     return tuple(views)
 
 
+@cython.ccall
 def _typed_word_8616(expression: object, arch: Arch) -> SimTypeInt | SimTypeShort | None:
     """Return one existing typed 16-bit scalar without inferring signedness."""
     if not isinstance(expression, CExpression) or not isinstance(expression.type, (SimTypeInt, SimTypeShort)):
@@ -132,7 +148,8 @@ def _typed_word_8616(expression: object, arch: Arch) -> SimTypeInt | SimTypeShor
     return expression.type.with_arch(arch)
 
 
-def _already_materialized_8616(returns: tuple[CReturn, ...]) -> bool:
+@cython.ccall
+def _already_materialized_8616(returns: object) -> cython.bint:
     """Return whether the current AST already carries this pass's durable tag."""
     if len(returns) != 1 or not isinstance(returns[0].retval, CVariable):
         return False
@@ -143,11 +160,12 @@ def _already_materialized_8616(returns: tuple[CReturn, ...]) -> bool:
     )
 
 
-def _next_temporary_id_8616(root: object, seed: int) -> int:
+@cython.ccall
+def _next_temporary_id_8616(root: object, seed: cython.longlong) -> cython.longlong:
     """Choose one deterministic temporary identity absent from the current AST."""
     used = {
         node.variable.tmp_id
-        for node in _iter_c_nodes_deep_8616(root)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(root))
         if isinstance(node, CVariable) and isinstance(node.variable, SimTemporaryVariable)
     }
     candidate = max(0, seed)
@@ -158,16 +176,18 @@ def _next_temporary_id_8616(root: object, seed: int) -> int:
 
 def _c_return_nodes_8616(root: object) -> tuple[CReturn, ...]:
     """Collect every structured return node."""
-    return tuple(node for node in _iter_c_nodes_deep_8616(root) if isinstance(node, CReturn))
+    return tuple(node for node in builtins.iter(_iter_c_nodes_deep_8616(root)) if isinstance(node, CReturn))
 
 
+@cython.ccall
 def _terminal_ax_function_8616(
     project: object,
     project_surface: _ProjectSurface8616,
     codegen_surface: _CodegenSurface8616,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> _FunctionSurface8616 | LoopCarriedTerminalReturnResult8616:
     """Resolve the owning function and prove AX terminal storage."""
+    function: object
     function = project_surface.kb.functions.function(addr=function_addr, create=False)
     if function is None:
         return _refused_8616(
@@ -183,10 +203,11 @@ def _terminal_ax_function_8616(
     return function
 
 
+@cython.ccall
 def _loop_carried_prelude_8616(
     project_surface: _ProjectSurface8616,
     codegen_surface: _CodegenSurface8616,
-) -> tuple[_CFunctionSurface8616, CStatements] | LoopCarriedTerminalReturnResult8616:
+) -> object:
     """Prove the applicable codegen shape or return NOT_APPLICABLE."""
     cfunc = codegen_surface.cfunc
     prototype = cfunc.functy
@@ -206,11 +227,13 @@ def _loop_carried_prelude_8616(
     return cfunc, root
 
 
+@cython.ccall
 def _ax_geometry_8616(
     project_surface: _ProjectSurface8616,
     codegen_surface: _CodegenSurface8616,
-) -> tuple[int, int] | LoopCarriedTerminalReturnResult8616:
+) -> object:
     """Return the proven AX register geometry or refuse."""
+    ax_register: object
     ax_register = project_surface.arch.registers.get("ax")
     if not isinstance(ax_register, tuple) or len(ax_register) < 2:
         return _refused_8616(
@@ -219,7 +242,7 @@ def _ax_geometry_8616(
             normalized=1,
             failures=1,
         )
-    ax_offset, ax_width = ax_register[:2]
+    ax_offset, ax_width = tuple(ax_register[:2])
     if not isinstance(ax_offset, int) or not isinstance(ax_width, int):
         return _refused_8616(
             codegen_surface,
@@ -233,11 +256,11 @@ def _ax_geometry_8616(
 def _loop_carried_shape_8616(
     codegen_surface: _CodegenSurface8616,
     root: CStatements,
-    returns: tuple[CReturn, ...],
-) -> tuple[tuple[object, ...], CReturn] | LoopCarriedTerminalReturnResult8616:
+    returns: object,
+) -> object:
     """Prove the single mandatory loop + bare terminal return shape."""
     top_level = _linear_statements_8616(root)
-    loops = tuple(node for node in top_level if isinstance(node, CDoWhileLoop))
+    loops = tuple(node for node in iter(top_level) if isinstance(node, CDoWhileLoop))
     if len(loops) != 1 or len(returns) != 1 or returns[0].retval is not None:
         return _refused_8616(
             codegen_surface,
@@ -247,14 +270,14 @@ def _loop_carried_shape_8616(
     loop = loops[0]
     return_node = returns[0]
     loop_index = top_level.index(loop)
-    if top_level[loop_index + 1 :] != (return_node,):
+    if operator.ne(top_level[loop_index + 1 :], (return_node,)):
         return _refused_8616(
             codegen_surface,
             LoopCarriedTerminalReturnRefusal8616.INCOMPLETE_STRUCTURED_SHAPE,
             normalized=1,
         )
     body = _linear_statements_8616(loop.body)
-    if not body or not all(isinstance(node, (CAssignment, CExpressionStatement)) for node in body):
+    if not body or not all(isinstance(node, (CAssignment, CExpressionStatement)) for node in iter(body)):
         return _refused_8616(
             codegen_surface,
             LoopCarriedTerminalReturnRefusal8616.INCOMPLETE_STRUCTURED_SHAPE,
@@ -265,14 +288,14 @@ def _loop_carried_shape_8616(
 
 def _proven_ax_assignment_8616(
     codegen_surface: _CodegenSurface8616,
-    body: tuple[object, ...],
-    ax_offset: int,
-    ax_width: int,
-) -> tuple[CAssignment, int] | LoopCarriedTerminalReturnResult8616:
+    body: object,
+    ax_offset: cython.longlong,
+    ax_width: cython.longlong,
+) -> object:
     """Return the sole self-contained full-AX assignment or refuse."""
     assignments = tuple(
         node
-        for node in body
+        for node in iter(body)
         if isinstance(node, CAssignment) and _is_full_ax_8616(node.lhs, ax_offset, ax_width)
     )
     if len(assignments) != 1:
@@ -293,11 +316,14 @@ def _proven_ax_assignment_8616(
 
 def _suffix_ax_safety_8616(
     codegen_surface: _CodegenSurface8616,
-    suffix: tuple[object, ...],
-    ax_offset: int,
-    ax_width: int,
+    suffix: object,
+    ax_offset: cython.longlong,
+    ax_width: cython.longlong,
 ) -> LoopCarriedTerminalReturnResult8616 | None:
     """Refuse when the suffix writes or partially reads physical AX."""
+    view: object
+    nested: object
+    statement: object
     for statement in suffix:
         for nested in _iter_c_nodes_deep_8616(statement):
             if isinstance(nested, CAssignment):
@@ -309,8 +335,8 @@ def _suffix_ax_safety_8616(
                         normalized=1,
                     )
         if any(
-            view.reg_offset != ax_offset or view.width != ax_width
-            for view in _ax_views_8616(statement, ax_offset, ax_width)
+            operator.ne(view.reg_offset, ax_offset) or operator.ne(view.width, ax_width)
+            for view in builtins.iter(_ax_views_8616(statement, ax_offset, ax_width))
         ):
             return _refused_8616(
                 codegen_surface,
@@ -320,11 +346,14 @@ def _suffix_ax_safety_8616(
     return None
 
 
+@cython.ccall
 def materialize_loop_carried_terminal_return_8616(
     project: object,
     codegen: object,
 ) -> LoopCarriedTerminalReturnResult8616:
     """Preserve one mandatory loop's exact full-AX carrier as a C temporary."""
+    unsafe: object
+    word_type: object
     project_surface = cast(_ProjectSurface8616, project)
     codegen_surface = cast(_CodegenSurface8616, codegen)
     prelude = _loop_carried_prelude_8616(project_surface, codegen_surface)
@@ -393,12 +422,14 @@ def _materialize_loop_carrier_8616(
     root: CStatements,
     return_node: CReturn,
     assignment: CAssignment,
-    suffix: tuple[object, ...],
-    ax_offset: int,
-    ax_width: int,
+    suffix: object,
+    ax_offset: cython.longlong,
+    ax_width: cython.longlong,
     word_type: SimTypeInt | SimTypeShort,
 ) -> LoopCarriedTerminalReturnResult8616:
     """Install the temporary carrier and rewrite all proven AX reads."""
+    instruction_addr: object
+    statement: object
     assignment_tags = copy_structured_tags_8616(assignment.tags) or {}
     instruction_addr = assignment_tags.get("ins_addr")
     if not isinstance(instruction_addr, int) or isinstance(instruction_addr, bool):
@@ -427,7 +458,7 @@ def _materialize_loop_carrier_8616(
     assignment.tags = carrier_tags
     expected_reads = sum(
         len(_ax_views_8616(statement, ax_offset, ax_width))
-        for statement in suffix
+        for statement in iter(suffix)
     )
     for statement in suffix:
         _replace_c_children_8616(
@@ -436,7 +467,7 @@ def _materialize_loop_carrier_8616(
         )
     remaining_reads = sum(
         len(_ax_views_8616(statement, ax_offset, ax_width))
-        for statement in suffix
+        for statement in iter(suffix)
     )
     if remaining_reads != 0:
         raise RuntimeError(

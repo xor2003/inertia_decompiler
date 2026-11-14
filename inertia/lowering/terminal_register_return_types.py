@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize a terminal AX word as a generated C return type.
 
 Layer: Types/lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -37,6 +40,9 @@ from .unused_void_return_types import (
     UnusedVoidReturnTypeResult8616,
     materialize_unused_caller_void_codegen_type_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "TerminalRegisterReturnTypeResult8616",
@@ -56,6 +62,7 @@ class _TypedReturnCodegenSurface8616(Protocol):
 
 def _typed_terminal_return_type_8616(cfunc: object) -> SimType | None:
     """Return one explicit scalar C return type when terminal lowering preserved it."""
+    statements: object
     surface = cast(_TypedReturnCodegenSurface8616, cfunc)
     try:
         statements = surface.statements
@@ -65,12 +72,12 @@ def _typed_terminal_return_type_8616(cfunc: object) -> SimType | None:
         return None
     candidates = tuple(
         node.retval.type
-        for node in _iter_c_nodes_deep_8616(statements)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(statements))
         if isinstance(node, CReturn)
         and node.retval is not None
         and isinstance(node.retval.type, (SimTypeChar, SimTypeInt, SimTypeLong, SimTypeShort))
     )
-    if not candidates or any(candidate != candidates[0] for candidate in candidates[1:]):
+    if not candidates or any(operator.ne(candidate, candidates[0]) for candidate in iter(candidates[1:])):
         return None
     candidate = candidates[0]
     if isinstance(candidate, SimTypeChar):
@@ -79,7 +86,7 @@ def _typed_terminal_return_type_8616(cfunc: object) -> SimType | None:
         prototype = surface.functy
         if isinstance(prototype, SimTypeFunction) and any(
             isinstance(argument, (SimTypeInt, SimTypeLong)) and argument.size > 16
-            for argument in prototype.args
+            for argument in iter(prototype.args)
         ):
             return candidate
     return None
@@ -96,57 +103,60 @@ class _CodegenSurface8616(Protocol):
     """Third-party codegen fields used by return type lowering."""
 
     cfunc: object
-    _inertia_codegen_decl_refresh_required_8616: bool
-    _inertia_force_codegen_regeneration_8616: bool
+    _inertia_codegen_decl_refresh_required_8616: cython.bint
+    _inertia_force_codegen_regeneration_8616: cython.bint
     _inertia_terminal_register_return_type_result_8616: TerminalRegisterReturnTypeResult8616
 
 
 class _CFunctionSurface8616(Protocol):
     """angr CFunction fields updated by this lowering pass."""
 
-    addr: int
+    addr: cython.longlong
     functy: object
 
 
 class _FunctionSurface8616(Protocol):
     """Third-party function metadata and blocks consumed as evidence."""
 
-    addr: int
-    block_addrs_set: set[int]
+    addr: cython.longlong
+    block_addrs_set: object
     calling_convention: object | None
     info: object
-    is_prototype_guessed: bool
+    is_prototype_guessed: cython.bint
     prototype: object | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalRegisterReturnTypeStats8616:
     """Evidence accounting for one terminal register return type decision."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalRegisterReturnTypeResult8616:
     """Result of refining one generated function return type."""
 
-    changed: bool
+    changed: cython.bint
     stats: TerminalRegisterReturnTypeStats8616
 
 
-def _has_explicit_prototype_8616(function: _FunctionSurface8616) -> bool:
+@cython.ccall
+def _has_explicit_prototype_8616(function: _FunctionSurface8616) -> cython.bint:
     """Return whether source/debug annotations own the prototype."""
+    annotations: object
     if not isinstance(function.info, Mapping):
         return False
     annotations = function.info.get(ANNOTATION_KEY)
     return isinstance(annotations, Mapping) and isinstance(annotations.get("prototype"), SimTypeFunction)
 
 
-def _refinable_generated_word_return_8616(type_: object) -> bool:
+@cython.ccall
+def _refinable_generated_word_return_8616(type_: object) -> cython.bint:
     """Return whether terminal AX width may refine one generated scalar header."""
     # Arch86_16 is VEX-wide, so generated SimTypes may not carry an arch and
     # SimTypeInt.size is not the target C ABI width. These classes are the
@@ -154,10 +164,13 @@ def _refinable_generated_word_return_8616(type_: object) -> bool:
     return isinstance(type_, (SimTypeChar, SimTypeInt, SimTypeShort))
 
 
+@cython.ccall
 def _terminal_result_from_byte_8616(
     byte_result: CallerObservedByteReturnTypeResult8616,
 ) -> TerminalRegisterReturnTypeResult8616:
     """Project byte evidence counters into the terminal-register result."""
+    evidence: object
+    stats: object
     evidence = byte_result.evidence
     stats = evidence.stats if evidence is not None else None
     return TerminalRegisterReturnTypeResult8616(
@@ -176,11 +189,14 @@ def _terminal_result_from_byte_8616(
     )
 
 
+@cython.ccall
 def apply_terminal_register_return_type_evidence_8616(
     project: object,
     function: object,
 ) -> TerminalRegisterReturnTypeResult8616:
     """Seed a word result from terminal AX and observed-caller evidence."""
+    prototype: object
+    storage: object
     project_surface = cast(_ProjectSurface8616, project)
     function_surface = cast(_FunctionSurface8616, function)
     prototype = function_surface.prototype
@@ -245,6 +261,7 @@ def apply_terminal_register_return_type_evidence_8616(
     )
 
 
+@cython.ccall
 def _record_result_8616(
     codegen_surface: _CodegenSurface8616,
     result: TerminalRegisterReturnTypeResult8616,
@@ -254,9 +271,10 @@ def _record_result_8616(
     return result
 
 
+@cython.ccall
 def _debug_return_type_candidate_8616(
     cfunc: _CFunctionSurface8616,
-    function: _FunctionSurface8616 | None,
+    function: object,
     prototype: object,
 ) -> None:
     """Emit the opt-in terminal AX return-type candidate dump."""
@@ -274,11 +292,16 @@ def _debug_return_type_candidate_8616(
     )
 
 
+@cython.ccall
 def materialize_terminal_register_return_type_8616(
     project: object,
     codegen: object,
 ) -> TerminalRegisterReturnTypeResult8616:
     """Replace a guessed byte header with an unsigned word from AX evidence."""
+    delegated: object
+    function: object
+    resolved: object
+    storage: object
     project_surface = cast(_ProjectSurface8616, project)
     codegen_surface = cast(_CodegenSurface8616, codegen)
     try:
@@ -345,11 +368,12 @@ def materialize_terminal_register_return_type_8616(
     )
 
 
+@cython.ccall
 def _refinement_permitted_8616(
     project: object,
     cfunc: _CFunctionSurface8616,
     prototype: SimTypeFunction,
-) -> bool:
+) -> cython.bint:
     """Return whether the generated scalar return may be refined."""
     return _refinable_generated_word_return_8616(
         prototype.returnty
@@ -358,6 +382,7 @@ def _refinement_permitted_8616(
     ) is not CallerReturnUseVerdict8616.UNUSED
 
 
+@cython.ccall
 def _delegated_void_result_8616(
     void_result: UnusedVoidReturnTypeResult8616,
 ) -> TerminalRegisterReturnTypeResult8616 | None:
@@ -377,6 +402,7 @@ def _delegated_void_result_8616(
     )
 
 
+@cython.ccall
 def _apply_ax_terminal_type_8616(
     project_surface: _ProjectSurface8616,
     codegen_surface: _CodegenSurface8616,
@@ -385,7 +411,7 @@ def _apply_ax_terminal_type_8616(
 ) -> TerminalRegisterReturnTypeResult8616:
     """Rewrite a guessed scalar header to the proven AX word type."""
     terminal_type = _typed_terminal_return_type_8616(cfunc) or SimTypeShort(signed=False).with_arch(project_surface.arch)
-    if prototype.returnty == terminal_type:
+    if operator.eq(prototype.returnty, terminal_type):
         return TerminalRegisterReturnTypeResult8616(
             False,
             TerminalRegisterReturnTypeStats8616(1, 1, 1, 1, 0),

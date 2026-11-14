@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed contracts for carry-linked split arithmetic.
 
 Layer: Semantics.
@@ -10,11 +11,15 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
 
 from inertia.ir.core import IRAddress, IRInstr, IRValue
+import dataclasses
+import operator
 
 
 class CarryBorrowKind8616(StrEnum):
@@ -68,12 +73,12 @@ class CarryBorrowFailure8616(StrEnum):
     TEMP_DEFINITION_MISSING = "temp_definition_missing"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CarryBorrowDefinitionSite8616:
     """One exact instruction definition retained from function SSA."""
 
-    block_addr: int
-    instr_index: int
+    block_addr: cython.longlong
+    instr_index: cython.longlong
     instruction: IRInstr
 
     @property
@@ -82,7 +87,7 @@ class CarryBorrowDefinitionSite8616:
         return self.instruction.dst
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CarryBorrowMemoryLoadUse8616:
     """One raw LOAD definition and its exact segmented execution address."""
 
@@ -90,21 +95,21 @@ class CarryBorrowMemoryLoadUse8616:
     address: IRAddress
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CarryBorrowMemoryWordUse8616:
     """Raw load executions and the authoritative address for one memory word."""
 
-    execution_loads: tuple[CarryBorrowMemoryLoadUse8616, ...]
+    execution_loads: object
     logical_address: IRAddress
-    address_bits: int
+    address_bits: cython.longlong
 
     @property
-    def size(self) -> int:
+    def size(self) -> cython.longlong:
         """Return the authoritative logical width of this memory operand."""
         return int(self.logical_address.size)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CarryBorrowOperandUse8616:
     """One arithmetic operand and its exact temporary definition, if required."""
 
@@ -113,11 +118,11 @@ class CarryBorrowOperandUse8616:
     memory_word: CarryBorrowMemoryWordUse8616 | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CarryBorrowLink8616:
     """Exact low/high arithmetic and flags chain for one split value."""
 
-    function_addr: int
+    function_addr: cython.longlong
     kind: CarryBorrowKind8616
     low_result_write: CarryBorrowDefinitionSite8616
     low_arithmetic: CarryBorrowDefinitionSite8616
@@ -136,7 +141,7 @@ class CarryBorrowLink8616:
     high_rhs: CarryBorrowOperandUse8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CarryBorrowResolution8616:
     """Proven link or typed refusal for one candidate result write."""
 
@@ -146,43 +151,43 @@ class CarryBorrowResolution8616:
     failure: CarryBorrowFailure8616 | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CarryBorrowStats8616:
     """Closed evidence accounting for carry/borrow candidates."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every raw candidate has one retained outcome."""
         return (
-            self.raw_fact_count == self.normalized_fact_count
-            and self.raw_fact_count == self.materialized_count + self.failure_count
-            and self.classified_fact_count == self.materialized_count
+            operator.eq(self.raw_fact_count, self.normalized_fact_count)
+            and operator.eq(self.raw_fact_count, self.materialized_count + self.failure_count)
+            and operator.eq(self.classified_fact_count, self.materialized_count)
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CarryBorrowEvidence8616:
     """Function-level collection of proven carry links and refusals."""
 
-    function_addr: int
-    resolutions: tuple[CarryBorrowResolution8616, ...]
+    function_addr: cython.longlong
+    resolutions: object
     stats: CarryBorrowStats8616
 
     @property
     def links(self) -> tuple[CarryBorrowLink8616, ...]:
         """Return every proven carry/borrow link in deterministic order."""
-        return tuple(item.link for item in self.resolutions if item.link is not None)
+        return tuple(item.link for item in iter(self.resolutions) if item.link is not None)
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether resolution count and evidence accounting are closed."""
-        return self.stats.complete and len(self.resolutions) == self.stats.raw_fact_count
+        return self.stats.complete and operator.eq(len(self.resolutions), self.stats.raw_fact_count)
 
 
 __all__ = [

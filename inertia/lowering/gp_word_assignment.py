@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Render proven partial GP writes through coherent word lvalues.
 
 Layer: Types/Lowering.
@@ -11,6 +12,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterator
 
@@ -21,10 +24,13 @@ from angr.sim_variable import SimTemporaryVariable
 from .gp_word_runtime import GP_WORD_RUNTIME_LANES_8616, GPRegisterRuntimeABI8616, gp_runtime_abi_8616
 from .stack_value_projection import project_pointer_storage_value_8616
 from .terminal_return_expressions import _safe_scalar_expression_8616
+import operator
 
 
-def _word_projection(assignment: c.CAssignment) -> tuple[str, c.CExpression] | None:
+def _word_projection(assignment: c.CAssignment) -> object:
     """Require the current exact partial-write identity and pure value tree."""
+    lane: object
+    target: object
     # The register owner calls our factory after constructing its canonical
     # effect. Import here to avoid a module-initialization cycle with that owner.
     from .gp_register_state import runtime_gp_expression_view_8616
@@ -44,16 +50,17 @@ def _word_projection(assignment: c.CAssignment) -> tuple[str, c.CExpression] | N
     # upper bits. Preservation requires the direct full-register value.
     if not isinstance(preserved.lhs, c.CVariable):
         return None
-    if runtime_gp_expression_view_8616(preserved.lhs) != target:
+    if operator.ne(runtime_gp_expression_view_8616(preserved.lhs), target):
         return None
     value = inserted.lhs
     if not isinstance(value, c.CExpression) or not _pure_word_value(value):
         return None
-    lane = next((lane for lane in GP_WORD_RUNTIME_LANES_8616 if lane.full_register == target.parent_name), None)
+    lane = next((lane for lane in iter(GP_WORD_RUNTIME_LANES_8616) if operator.eq(lane.full_register, target.parent_name)), None)
     return (lane.word_symbol, value) if lane is not None else None
 
 
-def _pure_word_value(value: c.CExpression) -> bool:
+@cython.ccall
+def _pure_word_value(value: c.CExpression) -> cython.bint:
     """Permit an integer temporary read without substituting its definition.
 
     Return recovery requires resolved provenance; this projection only changes
@@ -69,11 +76,12 @@ def _pure_word_value(value: c.CExpression) -> bool:
     return bool(_safe_scalar_expression_8616(value))
 
 
-def _exact_mask(expression: object, mask: int) -> bool:
+@cython.ccall
+def _exact_mask(expression: object, mask: cython.longlong) -> cython.bint:
     """Recognize only the register owner's explicit bit-preservation operator."""
     return (
         isinstance(expression, c.CBinaryOp) and expression.op == "And"
-        and isinstance(expression.rhs, c.CConstant) and expression.rhs.value == mask
+        and isinstance(expression.rhs, c.CConstant) and operator.eq(expression.rhs.value, mask)
     )
 
 
@@ -82,8 +90,9 @@ class CGPWordAssignment8616(c.CAssignment):  # type: ignore[misc]  # dynamic ang
 
     __slots__ = ()
 
-    def c_repr_chunks(self, indent: int = 0, asexpr: bool = False) -> Iterator[tuple[str, object]]:
+    def c_repr_chunks(self, indent: cython.longlong = 0, asexpr: cython.bint = False) -> Iterator[tuple[str, object]]:
         """Render a word lvalue only while its ABI and exact proof still hold."""
+        projection: object
         projection = (
             _word_projection(self)
             if gp_runtime_abi_8616(self.codegen) is GPRegisterRuntimeABI8616.COHERENT_WORD_VIEWS else None
@@ -101,6 +110,7 @@ class CGPWordAssignment8616(c.CAssignment):  # type: ignore[misc]  # dynamic ang
         yield ";\n", self
 
 
+@cython.ccall
 def project_gp_word_assignment_8616(assignment: c.CAssignment) -> c.CAssignment:
     """Attach a word projection without mutating or hiding the canonical effect."""
     if gp_runtime_abi_8616(assignment.codegen) is not GPRegisterRuntimeABI8616.COHERENT_WORD_VIEWS:
@@ -112,6 +122,7 @@ def project_gp_word_assignment_8616(assignment: c.CAssignment) -> c.CAssignment:
     )
 
 
+@cython.ccall
 def refresh_gp_word_pointer_projection_8616(assignment: c.CAssignment) -> c.CAssignment | None:
     """Consume a typed pointer substituted into an existing canonical GP write.
 
@@ -119,6 +130,8 @@ def refresh_gp_word_pointer_projection_8616(assignment: c.CAssignment) -> c.CAss
     register-lowering pass. Update the canonical effect before validation,
     rather than inserting a conversion only in the rendered word view.
     """
+    projection: object
+    scalar: object
     projection = _word_projection(assignment)
     if projection is None:
         return None

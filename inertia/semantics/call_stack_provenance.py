@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Interpret physical PUSH provenance without guessing pointer identities.
 
 Layer: Semantics.
@@ -9,27 +10,31 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import cython
 
 from inertia.semantics.callsite_summary import CallsitePushExprOp8616, CallsitePushSourceKind8616
 
 from .call_stack_effect_contracts import CallStackEffectFailure8616
+import operator
 
-_EXPRESSION_FIELD_COUNT: int = 3
-_OPERAND_FIELD_COUNT: int = 2
+_EXPRESSION_FIELD_COUNT: cython.longlong = 3
+_OPERAND_FIELD_COUNT: cython.longlong = 2
 
 
+@cython.ccall
 def _expression_parts(
-    source: tuple[object, ...],
-) -> tuple[tuple[object, ...], tuple[object, ...]] | None:
+    source: object,
+) -> object:
     """Validate the base and operation sequence before interpreting either."""
-    if len(source) != _EXPRESSION_FIELD_COUNT:
+    if operator.ne(len(source), _EXPRESSION_FIELD_COUNT):
         return None
-    base, operations = source[1:]
+    base, operations = tuple(source[1:])
     if not isinstance(base, tuple) or not isinstance(operations, tuple):
         return None
     return base, operations
 
 
+@cython.ccall
 def _operation_kind(operation: object) -> CallsitePushExprOp8616 | None:
     """Decode the structured operation tag, retaining invalid tags as unknown."""
     if not isinstance(operation, tuple) or not operation:
@@ -40,6 +45,7 @@ def _operation_kind(operation: object) -> CallsitePushExprOp8616 | None:
     except (TypeError, ValueError):
         return None
 
+@cython.ccall
 def _source_kind_8616(source: object) -> CallsitePushSourceKind8616 | None:
     """Normalize one structured physical source kind without text heuristics."""
     if not isinstance(source, tuple) or not source:
@@ -55,10 +61,14 @@ def _source_kind_8616(source: object) -> CallsitePushSourceKind8616 | None:
         return None
 
 
+@cython.ccall
 def _expression_stack_offset_8616(
-    source: tuple[object, ...],
+    source: object,
 ) -> tuple[int | None, CallStackEffectFailure8616 | None]:
     """Resolve an exact BP-derived address expression or retain typed uncertainty."""
+    failure: object
+    parts: object
+    operation: object
     parts = _expression_parts(source)
     if parts is None:
         return None, CallStackEffectFailure8616.ARGUMENT_SOURCES_INCOMPLETE
@@ -73,15 +83,19 @@ def _expression_stack_offset_8616(
     return offset, None
 
 
+@cython.ccall
 def _apply_stack_operation(
-    offset: int | None, operation: object,
+    offset: object, operation: object,
 ) -> tuple[int | None, CallStackEffectFailure8616 | None]:
     """Apply one proven constant displacement; refuse ambiguous pointer arithmetic."""
+    nested_failure: object
+    nested_offset: object
+    op: object
     op = _operation_kind(operation)
     if op is None or not isinstance(operation, tuple):
         return None, CallStackEffectFailure8616.ARGUMENT_SOURCES_INCOMPLETE
     if op in {CallsitePushExprOp8616.ADD, CallsitePushExprOp8616.SUB}:
-        if len(operation) != _OPERAND_FIELD_COUNT or not isinstance(operation[1], int):
+        if operator.ne(len(operation), _OPERAND_FIELD_COUNT) or not isinstance(operation[1], int):
             return None, CallStackEffectFailure8616.ARGUMENT_SOURCES_INCOMPLETE
         if offset is not None:
             offset += operation[1] if op is CallsitePushExprOp8616.ADD else -operation[1]
@@ -92,7 +106,7 @@ def _apply_stack_operation(
         CallsitePushExprOp8616.SUB_SOURCE,
         CallsitePushExprOp8616.SBB_SOURCE,
     }:
-        if len(operation) != _OPERAND_FIELD_COUNT or not isinstance(operation[1], tuple):
+        if operator.ne(len(operation), _OPERAND_FIELD_COUNT) or not isinstance(operation[1], tuple):
             return None, CallStackEffectFailure8616.ARGUMENT_SOURCES_INCOMPLETE
         nested_offset, nested_failure = stack_address_offset_8616(operation[1])
         if nested_failure is not None:
@@ -105,8 +119,10 @@ def _apply_stack_operation(
     return offset, None
 
 
-def stack_address_offset_8616(source: object) -> tuple[int | None, CallStackEffectFailure8616 | None]:
+@cython.ccall
+def stack_address_offset_8616(source: object) -> object:
     """Return exact caller-frame address provenance from one physical PUSH source."""
+    kind: object
     kind = _source_kind_8616(source)
     if kind is None or not isinstance(source, tuple):
         return None, CallStackEffectFailure8616.ARGUMENT_SOURCES_INCOMPLETE

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/runtime.
 
 Responsibility: load DOS MZ executables into the 16-bit x86 frontend model.
@@ -7,6 +8,8 @@ keyword arguments through a third-party plugin API.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import BinaryIO, cast
@@ -15,11 +18,13 @@ from archinfo import arch_from_id
 from cle.backends import Blob, register_backend
 
 from .arch_86_16 import Arch86_16
+import dataclasses
 
 __all__ = ("DOSMZ", "DOSMZHeader", "MZSegmentSpan")
 
 
-def _read_mz_extended_signature(stream: BinaryIO) -> bytes | None:
+@cython.ccall
+def _read_mz_extended_signature(stream: BinaryIO) -> object:
     """Read the optional extended executable signature from an MZ stream."""
     stream.seek(0)
     header = stream.read(0x40)
@@ -35,17 +40,17 @@ def _read_mz_extended_signature(stream: BinaryIO) -> bytes | None:
     return signature
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class DOSMZHeader:
     """Parsed DOS MZ fields that seed frontend entry, stack, and relocation state."""
 
-    header_paragraphs: int
-    relocation_count: int
-    relocation_offset: int
-    initial_ip: int
-    initial_cs: int
-    initial_sp: int
-    initial_ss: int
+    header_paragraphs: cython.longlong
+    relocation_count: cython.longlong
+    relocation_offset: cython.longlong
+    initial_ip: cython.longlong
+    initial_cs: cython.longlong
+    initial_sp: cython.longlong
+    initial_ss: cython.longlong
 
     @classmethod
     def from_stream(cls, stream: BinaryIO) -> DOSMZHeader:
@@ -66,14 +71,14 @@ class DOSMZHeader:
         )
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class MZSegmentSpan:
     """Evidence-backed linear span for a DOS real-mode segment."""
 
-    segment: int
-    start_linear: int
-    end_linear: int
-    evidence: tuple[str, ...]
+    segment: cython.longlong
+    start_linear: cython.longlong
+    end_linear: cython.longlong
+    evidence: object
 
 
 class DOSMZ(Blob):  # type: ignore[misc, unused-ignore] # dynamic CLE backend base
@@ -83,10 +88,10 @@ class DOSMZ(Blob):  # type: ignore[misc, unused-ignore] # dynamic CLE backend ba
     references inside the executable line up with the relocated program image.
     """
 
-    is_default: bool = True
+    is_default: cython.bint = True
 
-    DEFAULT_LOAD_BASE: int = 0x1000
-    initial_register_values: dict[str, int]
+    DEFAULT_LOAD_BASE: cython.longlong = 0x1000
+    initial_register_values: object
 
     def __init__(self, *args: object, offset: int | None = None, **kwargs: object) -> None:
         """Initialize a CLE blob backend from the third-party loader API."""
@@ -137,15 +142,15 @@ class DOSMZ(Blob):  # type: ignore[misc, unused-ignore] # dynamic CLE backend ba
         )
 
     @staticmethod
-    def _image_end_linear(stream: BinaryIO, image_offset: int, load_base: int) -> int:
+    def _image_end_linear(stream: BinaryIO, image_offset: cython.longlong, load_base: cython.longlong) -> cython.longlong:
         """Return the loaded-image end address for the MZ payload."""
         stream.seek(0, 2)
         return load_base + max(0, stream.tell() - image_offset)
 
     @staticmethod
-    def _read_relocation_entries(stream: BinaryIO, header: DOSMZHeader) -> list[tuple[int, int]]:
+    def _read_relocation_entries(stream: BinaryIO, header: DOSMZHeader) -> object:
         """Read MZ relocation entries as offset/segment pairs."""
-        entries: list[tuple[int, int]] = []
+        entries: list[tuple[cython.longlong, cython.longlong]] = []
         for idx in range(header.relocation_count):
             entry_off = header.relocation_offset + idx * 4
             stream.seek(entry_off)
@@ -160,13 +165,17 @@ class DOSMZ(Blob):  # type: ignore[misc, unused-ignore] # dynamic CLE backend ba
     @staticmethod
     def _infer_segment_spans(
         header: DOSMZHeader,
-        relocation_entries: list[tuple[int, int]],
+        relocation_entries: object,
         *,
-        load_base: int,
-        image_end: int,
+        load_base: cython.longlong,
+        image_end: cython.longlong,
     ) -> tuple[MZSegmentSpan, ...]:
         """Infer segment spans from entry, stack, and relocation evidence only."""
-        evidence_by_segment: dict[int, set[str]] = {
+        _reloc_offset: object
+        idx: object
+        reloc_segment: object
+        segment: object
+        evidence_by_segment: dict[cython.longlong, set[str]] = {
             header.initial_cs: {"entry_cs:ip"},
             header.initial_ss: {"stack_ss:sp"},
         }
@@ -194,8 +203,10 @@ class DOSMZ(Blob):  # type: ignore[misc, unused-ignore] # dynamic CLE backend ba
             )
         return tuple(spans)
 
-    def _apply_relocations(self, relocation_entries: list[tuple[int, int]], load_base: int, load_segment: int) -> None:
+    def _apply_relocations(self, relocation_entries: object, load_base: cython.longlong, load_segment: cython.longlong) -> None:
         """Apply load-segment relocation fixups to the mapped MZ image."""
+        reloc_offset: object
+        reloc_segment: object
         for reloc_offset, reloc_segment in relocation_entries:
             reloc_addr = load_base + (reloc_segment << 4) + reloc_offset
             relative_addr = reloc_addr - self.linked_base
@@ -210,7 +221,7 @@ class DOSMZ(Blob):  # type: ignore[misc, unused-ignore] # dynamic CLE backend ba
             self.memory.store(relative_addr, patched.to_bytes(2, "little"))
 
     @staticmethod
-    def is_compatible(stream: BinaryIO) -> bool:
+    def is_compatible(stream: BinaryIO) -> cython.bint:
         """Return whether the binary stream should be handled as a plain DOS MZ image."""
         stream.seek(0)
         magic = stream.read(2)

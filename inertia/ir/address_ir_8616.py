@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: IR.
 
 Responsibility: typed address artifacts bridged from resolved operands.
@@ -10,11 +11,14 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
 from inertia.frontend.x86_16.addressing_helpers import ResolvedMemoryOperand
 from inertia.ir.core import AddressStatus, IRAddress, MemSpace, SegmentOrigin
+import dataclasses
 
 __all__ = [
     "AddressIR8616",
@@ -23,14 +27,14 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class AddressIR8616:
     """Root compatibility Address wrapper for proven segmented IR addresses."""
 
     space: MemSpace
-    base: tuple[str, ...]
-    offset: int
-    size: int
+    base: object
+    offset: cython.longlong
+    size: cython.longlong
     status: AddressStatus
     segment_origin: SegmentOrigin
 
@@ -46,12 +50,13 @@ class AddressIR8616:
         )
 
 
+@cython.ccall
 def build_address_ir_8616(
     space: MemSpace,
-    base: tuple[str, ...] = (),
+    base: object = (),
     *,
-    offset: int = 0,
-    size: int = 0,
+    offset: cython.longlong = 0,
+    size: cython.longlong = 0,
     status: AddressStatus = AddressStatus.UNKNOWN,
     segment_origin: SegmentOrigin = SegmentOrigin.UNKNOWN,
 ) -> AddressIR8616:
@@ -66,6 +71,7 @@ def build_address_ir_8616(
     )
 
 
+@cython.ccall
 def resolved_operand_to_address_ir_8616(operand: ResolvedMemoryOperand) -> IRAddress:
     """Convert a resolved frontend memory operand to the canonical IR address."""
     return operand.typed_address()

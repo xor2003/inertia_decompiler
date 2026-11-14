@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Semantics-enriched route of the shared SSA CALL-target binder.
 
 Layer: Types/Lowering (staged candidate under
@@ -14,6 +15,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from inertia.ir.core import IRBlock, IRFunctionArtifact, IRInstr
 from inertia.ir.function_ssa_registry import (
@@ -48,16 +51,18 @@ from .call_target_ssa_contracts import (
     _BoundProducer8616,
     _refuse_8616,
 )
+import operator
 
 
+@cython.ccall
 def _semantic_route_producer_8616(
     project: object,
     projection: CallSemanticProjection8616,
     artifact: SSAFunctionArtifact,
-    caller_addr: int,
-    callsite_addr: int,
-    ssa_block_addr: int,
-    ssa_instr_index: int,
+    caller_addr: cython.longlong,
+    callsite_addr: cython.longlong,
+    ssa_block_addr: cython.longlong,
+    ssa_instr_index: cython.longlong,
     ssa_instr: IRInstr,
 ) -> _BoundProducer8616 | CallTargetBindResult8616:
     """Bind a semantic-stage SSA CALL to its retained raw producer.
@@ -139,11 +144,12 @@ def _semantic_route_producer_8616(
 
 
 
+@cython.ccall
 def _outputs_block_prefix_8616(
     projection: CallSemanticProjection8616,
     outputs_block: IRBlock,
     effects_block: IRBlock,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
 ) -> int | CallTargetBindResult8616:
     """Return the accounted CALL_OUTPUT prefix length, or a typed refusal.
 
@@ -166,16 +172,21 @@ def _outputs_block_prefix_8616(
     return prefix
 
 
+@cython.ccall
 def _semantic_bound_block_8616(
     projection: CallSemanticProjection8616,
     artifact: SSAFunctionArtifact,
-    callsite_addr: int,
-    ssa_block_addr: int,
-    ssa_instr_index: int,
+    callsite_addr: cython.longlong,
+    ssa_block_addr: cython.longlong,
+    ssa_instr_index: cython.longlong,
     ssa_instr: IRInstr,
     source_ir: IRFunctionArtifact,
 ) -> _BoundProducer8616 | CallTargetBindResult8616:
     """Verify the bound block's retained chain and return the raw producer."""
+    effects_block: object
+    facts_by_index: object
+    outputs_block: object
+    source_block: object
     source_block = _unique_block_8616(source_ir, ssa_block_addr)
     effects_block = _unique_block_8616(projection.effects.function, ssa_block_addr)
     outputs_block = _unique_block_8616(projection.outputs.function, ssa_block_addr)
@@ -226,15 +237,17 @@ def _semantic_bound_block_8616(
     return bound
 
 
+@cython.ccall
 def _semantic_raw_call_8616(
     source_block: IRBlock,
-    facts_by_index: dict[int, CallStackEffectFact8616],
-    prefix_len: int,
-    ssa_instr_index: int,
+    facts_by_index: object,
+    prefix_len: cython.longlong,
+    ssa_instr_index: cython.longlong,
     ssa_instr: IRInstr,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
 ) -> _BoundProducer8616 | CallTargetBindResult8616:
     """Bind the raw CALL at the prefix-shifted position plus origin."""
+    fact: object
     raw_index = ssa_instr_index - prefix_len
     if not 0 <= raw_index < len(source_block.instrs):
         return _refuse_8616(
@@ -259,7 +272,7 @@ def _semantic_raw_call_8616(
             CallTargetBindStage8616.SSA_ORIGIN_MISSING,
             normalized=True,
         )
-    if ssa_instr.origin != raw_instr.origin:
+    if operator.ne(ssa_instr.origin, raw_instr.origin):
         return _refuse_8616(
             callsite_addr,
             CallTargetBindVerdict8616.CONFLICT,
@@ -268,9 +281,9 @@ def _semantic_raw_call_8616(
         )
     if (
         raw_instr.op != "CALL"
-        or raw_instr.addr != callsite_addr
-        or fact.callsite_addr != callsite_addr
-        or fact.effect != ssa_instr.call_stack_effect
+        or operator.ne(raw_instr.addr, callsite_addr)
+        or operator.ne(fact.callsite_addr, callsite_addr)
+        or operator.ne(fact.effect, ssa_instr.call_stack_effect)
     ):
         return _refuse_8616(
             callsite_addr,

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Collect closed leaf-call proofs and refresh their IR state projection.
 
 Layer: function summaries.
@@ -13,6 +14,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import Counter
 from collections.abc import Mapping
@@ -40,18 +43,20 @@ from inertia.ir.segment_state import (
     build_x86_16_segment_state_artifact,
 )
 from inertia.ir.vex_import import build_x86_16_ir_function_artifact
+import dataclasses
+import operator
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentCallPreservationRequest8616:
     """One already-proven near-call target supplied by the frontend summary."""
 
-    callsite_addr: int
-    target_addr: int
+    callsite_addr: cython.longlong
+    target_addr: cython.longlong
 
     def __post_init__(self) -> None:
         """Reject malformed coordinates rather than normalize guessed targets."""
-        if any(type(value) is not int or value < 0 for value in (self.callsite_addr, self.target_addr)):
+        if any(type(value) is not int or value < 0 for value in iter((self.callsite_addr, self.target_addr))):
             raise ValueError("preservation request requires nonnegative integer coordinates")
 
 
@@ -66,7 +71,7 @@ class SegmentCallCollectionFailure8616(StrEnum):
     IR_PROOF_REFUSED = "ir_proof_refused"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentCallCollectionRefusal8616:
     """Keep a refused request and any exact upstream proof failure."""
 
@@ -75,44 +80,46 @@ class SegmentCallCollectionRefusal8616:
     proof: SegmentCallPreservationResult8616 | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentCallPreservationCollection8616:
     """Request-scoped accepted proofs, refusals and closed evidence counts."""
 
-    proofs: tuple[SegmentCallPreservationResult8616, ...]
-    refusals: tuple[SegmentCallCollectionRefusal8616, ...]
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    proofs: object
+    refusals: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Require every request accounted for and every retained proof still valid."""
         counts = (self.raw_fact_count, self.normalized_fact_count,
                   self.classified_fact_count, self.materialized_count, self.failure_count)
-        if any(type(count) is not int for count in counts):
+        if any(type(count) is not int for count in iter(counts)):
             return False
         return bool(
             self.raw_fact_count == self.normalized_fact_count == len(self.proofs) + len(self.refusals)
             and self.classified_fact_count == self.materialized_count == len(self.proofs)
-            and self.failure_count == len(self.refusals)
-            and all(proof.complete for proof in self.proofs)
+            and operator.eq(self.failure_count, len(self.refusals))
+            and all(proof.complete for proof in iter(self.proofs))
         )
 
 
 def collect_segment_call_preservations_8616(
     project: object,
     caller: SegmentFunctionContract,
-    contracts: Mapping[int, SegmentFunctionContract],
-    requests: tuple[SegmentCallPreservationRequest8616, ...],
-    program: CallerReturnUseProgramEvidence8616 | None,
+    contracts: Mapping[cython.longlong, SegmentFunctionContract],
+    requests: object,
+    program: object,
 ) -> SegmentCallPreservationCollection8616:
     """Collect per-request proofs without counting unrequested calls as covered."""
+    refusal: object
+    request: object
     proofs: list[SegmentCallPreservationResult8616] = []
     refusals: list[SegmentCallCollectionRefusal8616] = []
-    site_counts = Counter(request.callsite_addr for request in requests)
+    site_counts = Counter(request.callsite_addr for request in iter(requests))
     for request in sorted(requests, key=lambda item: (item.callsite_addr, item.target_addr)):
         refusal = _request_refusal_8616(project, caller, contracts, request, program, site_counts)
         if refusal is not None:
@@ -133,17 +140,20 @@ def collect_segment_call_preservations_8616(
     )
 
 
+@cython.ccall
 def _request_refusal_8616(
     project: object,
     caller: SegmentFunctionContract,
-    contracts: Mapping[int, SegmentFunctionContract],
+    contracts: Mapping[cython.longlong, SegmentFunctionContract],
     request: SegmentCallPreservationRequest8616,
-    program: CallerReturnUseProgramEvidence8616 | None,
-    site_counts: Counter[int],
+    program: object,
+    site_counts: Counter[cython.longlong],
 ) -> SegmentCallCollectionRefusal8616 | None:
     """Refuse missing ownership/evidence before requesting the exact IR proof."""
+    closure: object
+    reason: object
     closure = caller.effect_closure
-    reason: SegmentCallCollectionFailure8616 | None = None
+    reason = None
     if closure is None or not closure.coverage.complete or closure.coverage.boundary.project is not project:
         reason = SegmentCallCollectionFailure8616.CALLER_COVERAGE_MISSING
     elif site_counts[request.callsite_addr] != 1:
@@ -164,11 +174,11 @@ class _PreservationCodegenBoundary8616(Protocol):
     """Owned metadata carried through the dynamic codegen boundary."""
 
     _inertia_segment_function_contract: SegmentFunctionContract
-    _inertia_segment_call_preservations_8616: tuple[SegmentCallPreservationResult8616, ...]
+    _inertia_segment_call_preservations_8616: object
     _inertia_segment_call_preservation_collection_8616: SegmentCallPreservationCollection8616
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _LocalContractSurface8616:
     """Minimal typed codegen projection for registered binary-derived callee IR."""
 
@@ -177,7 +187,8 @@ class _LocalContractSurface8616:
     _inertia_segment_function_contract: SegmentFunctionContract
 
 
-def resolve_callee_segment_contract_8616(project: object, address: int) -> SegmentFunctionContract | None:
+@cython.ccall
+def resolve_callee_segment_contract_8616(project: object, address: cython.longlong) -> SegmentFunctionContract | None:
     """Resolve exact callee IR through its existing owner, then derive effects.
 
     Only this callee is requested: no recursive segment-summary expansion occurs.
@@ -186,6 +197,8 @@ def resolve_callee_segment_contract_8616(project: object, address: int) -> Segme
     Missing catalogs may use closed mapped-entry reachability. Existing raw
     artifacts are never rebuilt, so repeated callers retain identical evidence.
     """
+    artifact: object
+    boundary: object
     resolution = registered_function_ir_artifact_8616(project, address)
     artifact = resolution.artifact
     if artifact is None:
@@ -214,16 +227,19 @@ def refresh_segment_call_preservation_state_8616(
     project: object,
     codegen: object,
     caller: SegmentFunctionContract,
-    contracts: Mapping[int, SegmentFunctionContract],
-    requests: tuple[SegmentCallPreservationRequest8616, ...],
+    contracts: Mapping[cython.longlong, SegmentFunctionContract],
+    requests: object,
 ) -> SegmentFunctionContract:
     """Decode through the existing request owner and refresh accepted IR effects."""
+    closure: object
+    contract: object
+    address: object
     # Defer the large callsite-summary module until the stage runs; its public
     # scope owns decoder configuration and restores the outer request context.
     from .callsite_summary import caller_return_use_program_scope_8616
 
     resolved_contracts = dict(contracts)
-    for address in sorted({request.target_addr for request in requests}):
+    for address in sorted({request.target_addr for request in iter(requests)}):
         if address not in resolved_contracts:
             contract = resolve_callee_segment_contract_8616(project, address)
             if contract is not None:
@@ -231,7 +247,7 @@ def refresh_segment_call_preservation_state_8616(
     program = None
     closure = caller.effect_closure
     candidates = any(request.target_addr in resolved_contracts and resolved_contracts[request.target_addr].effects_complete
-                     for request in requests)
+                     for request in iter(requests))
     if closure is not None and closure.coverage.complete and candidates:
         boundary = closure.coverage.boundary
         ranges = ((boundary.addr, boundary.addr + boundary.size),)

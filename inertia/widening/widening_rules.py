@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Coordinator for deterministic widening-owned passes.
 
 Layer: Widening.
@@ -9,6 +10,8 @@ CLI/reporting evidence.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import copy
 import os
@@ -43,30 +46,37 @@ from .widening_copyprop_8616 import _widening_copy_propagation_8616
 from .word_projection_recomposition import (
     materialize_word_projection_recompositions_8616,
 )
+import dataclasses
+import operator
 
 
-def _dynamic_attr_8616(obj: object, name: str, default: object = None) -> Any:  # noqa: ANN401
+@cython.ccall
+def _dynamic_attr_8616(obj: object, name: object, default: object = None) -> Any:  # noqa: ANN401
     """Dynamic angr/codegen/C-AST boundary: read optional third-party attributes."""
     return getattr(obj, name, default)
 
 
+@cython.ccall
 def _is_segmented_access_8616(value: object) -> TypeGuard[_SegmentedAccess]:
     """Return whether a classifier result is the owned segmented-access contract."""
     return isinstance(value, _SegmentedAccess)
 
 
+@cython.ccall
 def _is_alias_storage_facts_8616(value: object) -> TypeGuard[AliasStorageFacts]:
     """Return whether an alias callback returned the owned alias-facts contract."""
     return isinstance(value, AliasStorageFacts)
 
 
-def _pair_result_8616(value: object) -> tuple[object, object] | None:
+@cython.ccall
+def _pair_result_8616(value: object) -> object:
     """Return a two-item callback result from a dynamic helper boundary."""
     if not isinstance(value, tuple) or len(value) != 2:
         return None
     return value
 
 
+@cython.ccall
 def run_typed_widening_pass_8616(
     project: object,
     codegen: object,
@@ -77,7 +87,7 @@ def run_typed_widening_pass_8616(
     promote_stack_slots_from_instruction_widths: Callable[..., object] | None = None,
     materialize_stack_subviews_fn: Callable[[object], object] = materialize_contained_stack_subviews_8616,
     materialize_word_projections_fn: Callable[[object], object] = materialize_word_projection_recompositions_8616,
-) -> bool:
+) -> cython.bint:
     """Execute widening-owned passes in deterministic order.
 
     Order:
@@ -101,8 +111,12 @@ def run_typed_widening_pass_8616(
     return changed
 
 
-def _insn_summary_bp_widths_8616(insn: InsnSummary8616, widths: dict[int, int]) -> None:
+@cython.ccall
+def _insn_summary_bp_widths_8616(insn: InsnSummary8616, widths: object) -> None:
     """Merge BP-mem operand widths from one decoded instruction summary."""
+    operand_kind: object
+    operand_size: object
+    operand_value: object
     for operand_kind, operand_value, operand_size in (
         (insn.op0_kind, insn.op0_value, insn.op0_size),
         (insn.op1_kind, insn.op1_value, insn.op1_size),
@@ -115,12 +129,13 @@ def _insn_summary_bp_widths_8616(insn: InsnSummary8616, widths: dict[int, int]) 
         widths[int(operand_value)] = max(widths.get(int(operand_value), 0), size)
 
 
+@cython.ccall
 def _capstone_operand_bp_width_8616(
     insn: _CapstoneInsnLike8616,
-    operands: tuple[object, ...],
-    operand_index: int,
+    operands: object,
+    operand_index: cython.longlong,
     operand: object,
-    widths: dict[int, int],
+    widths: object,
 ) -> None:
     """Merge the BP-disp width of one capstone memory operand."""
     if int(_dynamic_attr_8616(operand, "type", -1)) != 3 or _dynamic_attr_8616(operand, "mem", None) is None:
@@ -148,8 +163,11 @@ def _capstone_operand_bp_width_8616(
     widths[disp] = max(widths.get(disp, 0), size)
 
 
-def _capstone_insn_bp_widths_8616(insn: _CapstoneInsnLike8616, widths: dict[int, int]) -> None:
+@cython.ccall
+def _capstone_insn_bp_widths_8616(insn: _CapstoneInsnLike8616, widths: object) -> None:
     """Merge BP-mem widths from one capstone instruction."""
+    operand: object
+    operand_index: object
     if str(_dynamic_attr_8616(insn, "mnemonic", "")).lower() == "lea":
         return
     operands = cast(tuple[object, ...], tuple(_dynamic_attr_8616(insn, "operands", ()) or ()))
@@ -157,8 +175,10 @@ def _capstone_insn_bp_widths_8616(insn: _CapstoneInsnLike8616, widths: dict[int,
         _capstone_operand_bp_width_8616(insn, operands, operand_index, operand, widths)
 
 
-def _resolve_codegen_function_8616(project: object, cfunc: object, func_addr: int) -> object:
+@cython.ccall
+def _resolve_codegen_function_8616(project: object, cfunc: object, func_addr: cython.longlong) -> object:
     """Resolve the angr function for ``func_addr`` or a stub namespace."""
+    functions: object
     kb = _dynamic_attr_8616(project, "kb", None)
     functions = _dynamic_attr_8616(kb, "functions", None)
     if functions is not None:
@@ -173,8 +193,11 @@ def _resolve_codegen_function_8616(project: object, cfunc: object, func_addr: in
     )
 
 
-def collect_bp_stack_access_widths_from_instructions_8616(project: object, codegen: object) -> dict[int, int]:
+@cython.ccall
+def collect_bp_stack_access_widths_from_instructions_8616(project: object, codegen: object) -> object:
     """Collect BP-relative stack slot widths directly from decoded instructions."""
+    block_addr: object
+    insn: object
     cfunc = _dynamic_attr_8616(codegen, "cfunc", None)
     func_addr = _dynamic_attr_8616(cfunc, "addr", None)
     if not isinstance(func_addr, int):
@@ -182,7 +205,7 @@ def collect_bp_stack_access_widths_from_instructions_8616(project: object, codeg
 
     function = _resolve_codegen_function_8616(project, cfunc, int(func_addr))
 
-    widths: dict[int, int] = {}
+    widths: dict[cython.longlong, cython.longlong] = {}
     for insn in _function_instruction_summaries_8616(project, function):
         if insn.mnemonic.lower() == "lea":
             continue
@@ -190,7 +213,7 @@ def collect_bp_stack_access_widths_from_instructions_8616(project: object, codeg
     if widths:
         return widths
 
-    block_addrs = tuple(sorted(_dynamic_attr_8616(function, "block_addrs", ()) or ()))
+    block_addrs = tuple(sorted(tuple(_dynamic_attr_8616(function, "block_addrs", ()) or ())))
     if not block_addrs:
         block_addrs = (int(func_addr),)
 
@@ -204,6 +227,7 @@ def collect_bp_stack_access_widths_from_instructions_8616(project: object, codeg
     return widths
 
 
+@cython.ccall
 def promote_stack_slots_from_instruction_widths_8616(
     project: object,
     codegen: object,
@@ -211,25 +235,28 @@ def promote_stack_slots_from_instruction_widths_8616(
     resolve_stack_cvar_at_offset: Callable[..., object],
     promote_direct_stack_cvariable: Callable[..., object],
     stack_type_for_size: Callable[..., object],
-) -> bool:
+) -> cython.bint:
     """Promote stack variables only when an access proves a larger storage extent.
 
     A decoded access width is a lower bound on the containing logical object. It
     must not narrow a wider stack variable or replace independently proven type
     signedness merely because the object is accessed one word at a time.
     """
+    variable: object
+    offset: object
+    size: object
     if _dynamic_attr_8616(codegen, "cfunc", None) is None:
         return False
 
     changed = False
     promoted = 0
     widths = collect_bp_stack_access_widths_from_instructions_8616(project, codegen)
-    for offset, size in sorted(widths.items()):
+    for offset, size in sorted(tuple(widths.items())):
         if size <= 1:
             continue
         cvar = resolve_stack_cvar_at_offset(codegen, offset, preferred_size=size)
         variable = _dynamic_attr_8616(cvar, "variable", None)
-        if variable is None or _dynamic_attr_8616(variable, "offset", None) != offset:
+        if variable is None or operator.ne(_dynamic_attr_8616(variable, "offset", None), offset):
             continue
         current_size = _dynamic_attr_8616(variable, "size", None)
         if isinstance(current_size, int) and current_size >= size:
@@ -252,7 +279,7 @@ def promote_stack_slots_from_instruction_widths_8616(
     return changed
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _DirectSSLocalCtx8616:
     """Callables plus mutable flag for direct SS-local word coalescing."""
 
@@ -270,11 +297,15 @@ class _DirectSSLocalCtx8616:
     addr_exprs_are_byte_pair: Callable[..., object]
     resolve_stack_cvar_from_addr_expr: Callable[..., object]
     canonicalize_stack_cvar_expr: Callable[..., object]
-    changed: bool = False
+    changed: cython.bint = False
 
 
-def _visit_structured_children_8616(node: object, visit_fn: Callable[[object], None]) -> bool:
+@cython.ccall
+def _visit_structured_children_8616(node: object, visit_fn: Callable[[object], None]) -> cython.bint:
     """Recurse into branch/loop children of ``node``; True when dispatched."""
+    _cond: object
+    attr: object
+    body: object
     if isinstance(node, structured_c.CIfElse):
         for _cond, body in node.condition_and_nodes:
             visit_fn(body)
@@ -295,10 +326,13 @@ def _visit_structured_children_8616(node: object, visit_fn: Callable[[object], N
     return False
 
 
+@cython.ccall
 def _ss_local_pair_lhs_8616(
     ctx: _DirectSSLocalCtx8616, stmt: structured_c.CAssignment, next_stmt: structured_c.CAssignment
 ) -> object | None:
     """Return ``stmt.lhs`` when the pair is a ``SS:local+1`` high-byte join."""
+    high_expr: object
+    matched: object
     if not isinstance(stmt.lhs, structured_c.CVariable):
         return None
     matched = _pair_result_8616(ctx.match_ss_local_plus_const(next_stmt.lhs, ctx.project))
@@ -318,10 +352,14 @@ def _ss_local_pair_lhs_8616(
     return cast(object, stmt.lhs)
 
 
+@cython.ccall
 def _byte_store_pair_lhs_8616(
     ctx: _DirectSSLocalCtx8616, stmt: structured_c.CAssignment, next_stmt: structured_c.CAssignment
 ) -> object | None:
     """Resolve a word lvalue for adjacent byte-store address expressions."""
+    high_addr_expr: object
+    high_expr: object
+    low_addr_expr: object
     low_addr_expr = ctx.match_byte_store_addr_expr(stmt.lhs)
     high_addr_expr = ctx.match_byte_store_addr_expr(next_stmt.lhs)
     high_expr = ctx.match_shift_right_8_expr(next_stmt.rhs)
@@ -339,10 +377,12 @@ def _byte_store_pair_lhs_8616(
     return ctx.canonicalize_stack_cvar_expr(resolved_lhs, ctx.codegen)
 
 
+@cython.ccall
 def _direct_ss_pair_step_8616(
-    statements: list[object], i: int, ctx: _DirectSSLocalCtx8616
-) -> tuple[object, int] | None:
+    statements: object, i: cython.longlong, ctx: _DirectSSLocalCtx8616
+) -> object:
     """Try to merge statements ``i``/``i+1`` into one word assignment."""
+    replacement_lhs: object
     stmt = statements[i]
     if not (
         i + 1 < len(statements)
@@ -361,8 +401,10 @@ def _direct_ss_pair_step_8616(
     return structured_c.CAssignment(replacement_lhs, stmt.rhs, codegen=ctx.codegen), 2
 
 
+@cython.ccall
 def _direct_ss_local_seq_8616(node: structured_c.CStatements, ctx: _DirectSSLocalCtx8616) -> None:
     """Coalesce adjacent byte assignments in one ``CStatements`` sequence."""
+    outcome: object
     new_statements = []
     i = 0
     while i < len(node.statements):
@@ -378,7 +420,7 @@ def _direct_ss_local_seq_8616(node: structured_c.CStatements, ctx: _DirectSSLoca
         new_statements.append(stmt)
         i += 1
 
-    if ctx.changed or new_statements != node.statements:
+    if ctx.changed or operator.ne(new_statements, node.statements):
         node.statements = new_statements
 
 
@@ -390,6 +432,7 @@ def _visit_direct_ss_local_8616(node: object, ctx: _DirectSSLocalCtx8616) -> Non
     _visit_structured_children_8616(node, lambda child: _visit_direct_ss_local_8616(child, ctx))
 
 
+@cython.ccall
 def _coalesce_direct_ss_local_word_statements(
     project: object,
     codegen: object,
@@ -406,7 +449,7 @@ def _coalesce_direct_ss_local_word_statements(
     addr_exprs_are_byte_pair: Callable[..., object],
     resolve_stack_cvar_from_addr_expr: Callable[..., object],
     canonicalize_stack_cvar_expr: Callable[..., object],
-) -> bool:
+) -> cython.bint:
     if _dynamic_attr_8616(codegen, "cfunc", None) is None:
         return False
 
@@ -432,7 +475,7 @@ def _coalesce_direct_ss_local_word_statements(
     return ctx.changed
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _QuadAddrFacts8616:
     """Address facts for the four-statement load+store probe."""
 
@@ -441,22 +484,22 @@ class _QuadAddrFacts8616:
     low_store_addr: object
     high_store_addr: object
     high_store_base: object
-    has_addrs: bool
-    load_pair: bool
-    store_pair: bool
-    same_low: bool
-    same_high: bool
-    same_rhs: bool
+    has_addrs: cython.bint
+    load_pair: cython.bint
+    store_pair: cython.bint
+    same_low: cython.bint
+    same_high: cython.bint
+    same_rhs: cython.bint
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _WordStoreCoalesceCtx8616:
     """Callables plus mutable state for segmented word-store coalescing."""
 
     project: object
     codegen: object
     target_type: object
-    debug_widening: bool
+    debug_widening: cython.bint
     runtime_access_context: RuntimeSegmentAccessContext8616
     match_ss_local_plus_const: Callable[..., object]
     match_word_rhs_from_byte_pair: Callable[..., object]
@@ -472,12 +515,14 @@ class _WordStoreCoalesceCtx8616:
     describe_alias_storage: Callable[..., object]
     match_byte_load_addr_expr: Callable[..., object] | None
     same_c_expression: Callable[..., object] | None
-    changed: bool = False
-    promoted: bool = False
+    changed: cython.bint = False
+    promoted: cython.bint = False
 
 
-def _wstore_debug_8616(enabled: bool, reason: str, **attrs: object) -> None:
+def _wstore_debug_8616(enabled: cython.bint, reason: object, **attrs: object) -> None:
     """Emit one widening debug line when ``enabled``."""
+    value: object
+    key: object
     if not enabled:
         return
     parts = [f"reason={reason}"]
@@ -489,24 +534,28 @@ def _wstore_debug_8616(enabled: bool, reason: str, **attrs: object) -> None:
     print("[widening.coalesce_word_store] " + " ".join(parts), file=sys.stderr)
 
 
-def _same_expr_8616(ctx: _WordStoreCoalesceCtx8616, lhs: object, rhs: object) -> bool:
+@cython.ccall
+def _same_expr_8616(ctx: _WordStoreCoalesceCtx8616, lhs: object, rhs: object) -> cython.bint:
     """Expression equality via the configured comparator or identity."""
     if callable(ctx.same_c_expression):
         return bool(ctx.same_c_expression(lhs, rhs))
     return lhs is rhs
 
 
-def _node_kind_8616(node: object) -> str:
+@cython.ccall
+def _node_kind_8616(node: object) -> object:
     """Debug kind name for a node."""
     return "-" if node is None else type(node).__name__
 
 
-def _node_op_8616(node: object) -> str:
+@cython.ccall
+def _node_op_8616(node: object) -> object:
     """Debug op name for a node."""
     return str(_dynamic_attr_8616(node, "op", "-")) if node is not None else "-"
 
 
-def _node_child_kind_8616(node: object, attr: str) -> str:
+@cython.ccall
+def _node_child_kind_8616(node: object, attr: object) -> object:
     """Debug kind name for a node child attribute."""
     if node is None or not hasattr(node, attr):
         return "-"
@@ -516,13 +565,16 @@ def _node_child_kind_8616(node: object, attr: str) -> str:
         return "error"
 
 
-def _node_type_bits_8616(node: object) -> str:
+@cython.ccall
+def _node_type_bits_8616(node: object) -> object:
     """Debug bit-size string for a node type."""
+    bits: object
     type_ = _dynamic_attr_8616(node, "type", None)
     bits = _dynamic_attr_8616(type_, "size", None)
     return "-" if bits is None else str(bits)
 
 
+@cython.ccall
 def _expr_width_bits_8616(node: object) -> int | None:
     """Bit width of an expression, from its type or backing variable."""
     type_ = _dynamic_attr_8616(node, "type", None)
@@ -539,6 +591,7 @@ def _expr_width_bits_8616(node: object) -> int | None:
     return None
 
 
+@cython.ccall
 def _wstore_unwrap_casts_8616(node: object) -> object:
     """Strip ``CTypeCast`` wrappers."""
     while isinstance(node, structured_c.CTypeCast):
@@ -546,8 +599,10 @@ def _wstore_unwrap_casts_8616(node: object) -> object:
     return node
 
 
+@cython.ccall
 def _match_byte_load_addr_8616(ctx: _WordStoreCoalesceCtx8616, lhs: object, rhs: object) -> object | None:
     """Return the byte-load address behind ``rhs`` (or via the matcher)."""
+    matched: object
     if callable(ctx.match_byte_load_addr_expr):
         matched = ctx.match_byte_load_addr_expr(rhs)
         if matched is not None:
@@ -560,7 +615,8 @@ def _match_byte_load_addr_8616(ctx: _WordStoreCoalesceCtx8616, lhs: object, rhs:
     return _wstore_unwrap_casts_8616(_dynamic_attr_8616(rhs, "operand", None))
 
 
-def _same_c_variable_8616(lhs: object, rhs: object) -> bool:
+@cython.ccall
+def _same_c_variable_8616(lhs: object, rhs: object) -> cython.bint:
     """Variable identity by object or by name."""
     if not isinstance(lhs, structured_c.CVariable) or not isinstance(rhs, structured_c.CVariable):
         return False
@@ -573,18 +629,23 @@ def _same_c_variable_8616(lhs: object, rhs: object) -> bool:
     return bool(isinstance(lhs_name, str) and lhs_name and lhs_name == rhs_name)
 
 
-def _is_byte_cvar_8616(node: object) -> bool:
+@cython.ccall
+def _is_byte_cvar_8616(node: object) -> cython.bint:
     """True when ``node`` is a byte-width variable."""
     return isinstance(node, structured_c.CVariable) and _expr_width_bits_8616(node) == 8
 
 
-def _is_word_or_wider_cvar_8616(node: object) -> bool:
+@cython.ccall
+def _is_word_or_wider_cvar_8616(node: object) -> cython.bint:
     """True when ``node`` is a word-or-wider variable."""
     return isinstance(node, structured_c.CVariable) and (_expr_width_bits_8616(node) or 0) >= 16
 
 
-def _match_loaded_word_pair_expr_8616(expr: object, low_var: object, high_var: object) -> bool:
+@cython.ccall
+def _match_loaded_word_pair_expr_8616(expr: object, low_var: object, high_var: object) -> cython.bint:
     """True when ``expr`` is ``low_var | (high_var << 8)`` in either order."""
+    low_expr: object
+    shifted_high: object
     if not isinstance(expr, structured_c.CBinaryOp) or expr.op != "Or":
         return False
     candidates = (
@@ -602,7 +663,8 @@ def _match_loaded_word_pair_expr_8616(expr: object, low_var: object, high_var: o
     return False
 
 
-def _segmented_class_allows_object_rewrite_8616(classified: object) -> bool:
+@cython.ccall
+def _segmented_class_allows_object_rewrite_8616(classified: object) -> cython.bint:
     """True when the classified access permits object-level rewriting."""
     if classified is None:
         return False
@@ -615,24 +677,26 @@ def _segmented_class_allows_object_rewrite_8616(classified: object) -> bool:
     return bool(_dynamic_attr_8616(classified, "assoc_kind", "unknown") != "over")
 
 
-def _stable_segment_const_byte_pair_8616(low_class: object, high_class: object) -> bool:
+@cython.ccall
+def _stable_segment_const_byte_pair_8616(low_class: object, high_class: object) -> cython.bint:
     """True for a stable adjacent ``segment_const`` byte pair on ds/es."""
     if not _is_segmented_access_8616(low_class) or not _is_segmented_access_8616(high_class):
         return False
     if low_class.kind != "segment_const" or high_class.kind != "segment_const":
         return False
-    if low_class.seg_name != high_class.seg_name or low_class.seg_name not in {"ds", "es"}:
+    if operator.ne(low_class.seg_name, high_class.seg_name) or low_class.seg_name not in {"ds", "es"}:
         return False
-    if low_class.linear is None or high_class.linear != low_class.linear + 1:
+    if low_class.linear is None or operator.ne(high_class.linear, low_class.linear + 1):
         return False
     return _segmented_class_allows_object_rewrite_8616(low_class) and _segmented_class_allows_object_rewrite_8616(
         high_class
     )
 
 
+@cython.ccall
 def _replace_loaded_word_pair_expr_8616(
     expr: object, low_var: object, high_var: object, replacement: object
-) -> tuple[object, bool]:
+) -> tuple[object, cython.bint]:
     """Rewrite ``low | (high << 8)`` subexpressions to ``replacement``."""
     if _match_loaded_word_pair_expr_8616(expr, low_var, high_var):
         return replacement, True
@@ -664,8 +728,10 @@ def _replace_loaded_word_pair_expr_8616(
     return expr, False
 
 
+@cython.ccall
 def _word_lvalue_for_addr_8616(ctx: _WordStoreCoalesceCtx8616, low_addr_expr: object) -> object | None:
     """Resolve a word-width lvalue for ``low_addr_expr``."""
+    resolved_lhs: object
     low_class = ctx.classify_segmented_addr_expr(low_addr_expr, ctx.project)
     _wstore_debug_8616(
         ctx.debug_widening,
@@ -693,6 +759,7 @@ def _word_lvalue_for_addr_8616(ctx: _WordStoreCoalesceCtx8616, low_addr_expr: ob
     return ctx.make_word_dereference_from_addr_expr(ctx.codegen, ctx.project, low_addr_expr)
 
 
+@cython.ccall
 def _runtime_word_store_lvalue_8616(
     ctx: _WordStoreCoalesceCtx8616, low_lhs: object, high_lhs: object
 ) -> structured_c.CFunctionCall | None:
@@ -702,6 +769,10 @@ def _runtime_word_store_lvalue_8616(
     native byte offsets wrap at16bits. Unknown offsets retain their byte stores.
     The joined identity survives into subsequent lowering and diagnostics.
     """
+    high_offset: object
+    identity: object
+    low_offset: object
+    space: object
     low_access = _wstore_unwrap_casts_8616(low_lhs)
     high_access = _wstore_unwrap_casts_8616(high_lhs)
     identity = join_adjacent_segmented_load_identities_8616(
@@ -752,9 +823,10 @@ def _runtime_word_store_lvalue_8616(
     return None
 
 
+@cython.ccall
 def _wstore_triple_gate_8616(
     ctx: _WordStoreCoalesceCtx8616, stmt: object, next_stmt: object, third_stmt: object
-) -> bool:
+) -> cython.bint:
     """Gate: ``low = word; high = word; word = f(low, high)`` triple."""
     return (
         isinstance(stmt, structured_c.CAssignment)
@@ -768,9 +840,10 @@ def _wstore_triple_gate_8616(
     )
 
 
+@cython.ccall
 def _word_store_triple_step_8616(
-    statements: list[object], i: int, ctx: _WordStoreCoalesceCtx8616
-) -> tuple[object, int] | None:
+    statements: object, i: cython.longlong, ctx: _WordStoreCoalesceCtx8616
+) -> object:
     """Merge a loaded-word-pair triple into one assignment."""
     stmt = statements[i]
     next_stmt = statements[i + 1] if i + 1 < len(statements) else None
@@ -795,13 +868,14 @@ def _word_store_triple_step_8616(
     )
 
 
+@cython.ccall
 def _wstore_quad_gate_8616(
     ctx: _WordStoreCoalesceCtx8616,
     stmt: object,
     next_stmt: object,
     third_stmt: object,
     fourth_stmt: object,
-) -> bool:
+) -> cython.bint:
     """Gate: ``low = *p; high = *(p+1); *q = low; *(q+1) = high >> 8`` quad."""
     return (
         callable(ctx.match_byte_load_addr_expr)
@@ -833,7 +907,7 @@ def _quad_addr_facts_8616(
     high_store_base = ctx.match_shift_right_8_expr(_dynamic_attr_8616(fourth_stmt, "rhs", None))
     has_addrs = all(
         value is not None
-        for value in (low_load_addr, high_load_addr, low_store_addr, high_store_addr, high_store_base)
+        for value in iter((low_load_addr, high_load_addr, low_store_addr, high_store_addr, high_store_base))
     )
     load_pair = (
         bool(ctx.addr_exprs_are_byte_pair(low_load_addr, high_load_addr, ctx.project)) if has_addrs else False
@@ -869,13 +943,13 @@ def _wstore_debug_quad_8616(
         ctx.debug_widening
         and any(
             value is not None
-            for value in (
+            for value in iter((
                 facts.low_load_addr,
                 facts.high_load_addr,
                 facts.low_store_addr,
                 facts.high_store_addr,
                 facts.high_store_base,
-            )
+            ))
         )
     ):
         return
@@ -905,10 +979,13 @@ def _wstore_debug_quad_8616(
     )
 
 
+@cython.ccall
 def _word_store_quad_step_8616(
-    statements: list[object], i: int, ctx: _WordStoreCoalesceCtx8616
-) -> tuple[object, int] | None:
+    statements: object, i: cython.longlong, ctx: _WordStoreCoalesceCtx8616
+) -> object:
     """Merge a load+store byte quad into one word assignment."""
+    loaded_word: object
+    store_lhs: object
     stmt = statements[i]
     next_stmt = statements[i + 1] if i + 1 < len(statements) else None
     third_stmt = statements[i + 2] if i + 2 < len(statements) else None
@@ -961,10 +1038,13 @@ def _word_store_quad_step_8616(
     )
 
 
+@cython.ccall
 def _wstore_runtime_pair_8616(
     ctx: _WordStoreCoalesceCtx8616, stmt: structured_c.CAssignment, next_stmt: structured_c.CAssignment
 ) -> object | None:
     """Word assignment for a runtime segment-helper byte pair."""
+    runtime_word_lhs: object
+    runtime_word_rhs: object
     runtime_word_lhs = _runtime_word_store_lvalue_8616(ctx, stmt.lhs, next_stmt.lhs)
     runtime_word_rhs = ctx.match_word_rhs_from_byte_pair(stmt.rhs, next_stmt.rhs, ctx.codegen, ctx.project)
     if runtime_word_lhs is None or runtime_word_rhs is None:
@@ -972,10 +1052,14 @@ def _wstore_runtime_pair_8616(
     return cast(object, structured_c.CAssignment(runtime_word_lhs, runtime_word_rhs, codegen=ctx.codegen))
 
 
+@cython.ccall
 def _wstore_ss_local_pair_8616(
     ctx: _WordStoreCoalesceCtx8616, stmt: structured_c.CAssignment, next_stmt: structured_c.CAssignment
 ) -> object | None:
     """Word assignment for an ``SS:local + 1`` high-byte store pair."""
+    matched: object
+    rhs_word: object
+    target_cvar: object
     if not isinstance(stmt.lhs, structured_c.CVariable):
         return None
     matched = _pair_result_8616(ctx.match_ss_local_plus_const(next_stmt.lhs, ctx.project))
@@ -998,12 +1082,13 @@ def _wstore_ss_local_pair_8616(
     return cast(object, structured_c.CAssignment(replacement_lhs, rhs_word, codegen=ctx.codegen))
 
 
+@cython.ccall
 def _wstore_alias_pair_unjoinable_8616(
     low_facts: object,
     high_facts: object,
-    joinable_segment_const_pair: bool,
-    joinable_stack_alias_pair: bool,
-) -> bool:
+    joinable_segment_const_pair: cython.bint,
+    joinable_stack_alias_pair: cython.bint,
+) -> cython.bint:
     """True when the byte-pair alias facts cannot join into a word store."""
     if joinable_segment_const_pair or joinable_stack_alias_pair:
         return False
@@ -1016,10 +1101,16 @@ def _wstore_alias_pair_unjoinable_8616(
     )
 
 
+@cython.ccall
 def _wstore_alias_pair_8616(
     ctx: _WordStoreCoalesceCtx8616, stmt: structured_c.CAssignment, next_stmt: structured_c.CAssignment
 ) -> object | None:
     """Word assignment for an adjacent byte-store alias pair."""
+    high_addr_expr: object
+    high_class: object
+    low_addr_expr: object
+    resolved_lhs: object
+    rhs_word: object
     low_addr_expr = ctx.match_byte_store_addr_expr(stmt.lhs)
     high_addr_expr = ctx.match_byte_store_addr_expr(next_stmt.lhs)
     rhs_word = ctx.match_word_rhs_from_byte_pair(stmt.rhs, next_stmt.rhs, ctx.codegen, ctx.project)
@@ -1061,10 +1152,12 @@ def _wstore_alias_pair_8616(
     ))
 
 
+@cython.ccall
 def _word_store_pair_step_8616(
-    statements: list[object], i: int, ctx: _WordStoreCoalesceCtx8616
-) -> tuple[object, int] | None:
+    statements: object, i: cython.longlong, ctx: _WordStoreCoalesceCtx8616
+) -> object:
     """Try to merge statements ``i``/``i+1`` into one word assignment."""
+    replacement: object
     stmt = statements[i]
     next_stmt = statements[i + 1] if i + 1 < len(statements) else None
     if not (isinstance(stmt, structured_c.CAssignment) and isinstance(next_stmt, structured_c.CAssignment)):
@@ -1079,8 +1172,10 @@ def _word_store_pair_step_8616(
     return replacement, 2
 
 
+@cython.ccall
 def _coalesce_word_store_seq_8616(node: structured_c.CStatements, ctx: _WordStoreCoalesceCtx8616) -> None:
     """Coalesce adjacent byte statements in one ``CStatements`` sequence."""
+    outcome: object
     new_statements = []
     i = 0
     while i < len(node.statements):
@@ -1100,7 +1195,7 @@ def _coalesce_word_store_seq_8616(node: structured_c.CStatements, ctx: _WordStor
         new_statements.append(stmt)
         i += 1
 
-    if ctx.changed or new_statements != node.statements:
+    if ctx.changed or operator.ne(new_statements, node.statements):
         node.statements = new_statements
 
 
@@ -1112,6 +1207,7 @@ def _visit_word_store_node_8616(node: object, ctx: _WordStoreCoalesceCtx8616) ->
     _visit_structured_children_8616(node, lambda child: _visit_word_store_node_8616(child, ctx))
 
 
+@cython.ccall
 def _coalesce_segmented_word_store_statements(
     project: object,
     codegen: object,
@@ -1131,7 +1227,7 @@ def _coalesce_segmented_word_store_statements(
     describe_alias_storage: Callable[..., object],
     match_byte_load_addr_expr: Callable[..., object] | None = None,
     same_c_expression: Callable[..., object] | None = None,
-) -> bool:
+) -> cython.bint:
     if _dynamic_attr_8616(codegen, "cfunc", None) is None:
         return False
 

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Index exact scalar SSA definitions for IR-owned evidence producers.
 
 Layer: IR.
@@ -10,20 +11,25 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
 from .core import IRFunctionArtifact, IRInstr, IRValue, MemSpace
 from .ssa_function import SSAFunctionArtifact
+import dataclasses
+import operator
+import builtins
 
-type ScalarDefinitionKey8616 = tuple[str, str | None, int, int, int | None]
-type ScalarDefinitionIndex8616 = dict[
+ScalarDefinitionKey8616 = typing.TypeAliasType("ScalarDefinitionKey8616", tuple[str, str | None, int, int, int | None])
+ScalarDefinitionIndex8616 = typing.TypeAliasType("ScalarDefinitionIndex8616", dict[
     ScalarDefinitionKey8616,
     tuple["ScalarDefinition8616", ...],
-]
+])
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ScalarDefinition8616:
     """One exact scalar SSA definition and its block-local location.
 
@@ -31,12 +37,12 @@ class ScalarDefinition8616:
     instructions retain their own records; this index does not infer effects.
     """
 
-    block_addr: int
-    instr_index: int
+    block_addr: cython.longlong
+    instr_index: cython.longlong
     instruction: IRInstr
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Require a defining operation, not merely a nonempty CALL target."""
         return bool(
             self.block_addr >= 0
@@ -46,6 +52,7 @@ class ScalarDefinition8616:
         )
 
 
+@cython.ccall
 def scalar_definition_key_8616(value: IRValue) -> ScalarDefinitionKey8616:
     """Return the exact scalar identity used by IR definition tracing."""
     if value.source_tmp is not None:
@@ -68,6 +75,7 @@ def scalar_definition_key_8616(value: IRValue) -> ScalarDefinitionKey8616:
     )
 
 
+@cython.ccall
 def build_scalar_definition_index_8616(
     artifact: IRFunctionArtifact | SSAFunctionArtifact,
 ) -> ScalarDefinitionIndex8616:
@@ -77,6 +85,9 @@ def build_scalar_definition_index_8616(
     values. All actual definitions remain visible, including their conflicts.
     This exclusion proves neither register nor memory preservation across CALL.
     """
+    block: object
+    instr_index: object
+    instruction: object
     grouped: dict[ScalarDefinitionKey8616, list[ScalarDefinition8616]] = {}
     for block in artifact.blocks:
         for instr_index, instruction in enumerate(block.instrs):
@@ -86,21 +97,21 @@ def build_scalar_definition_index_8616(
             grouped.setdefault(key, []).append(
                 ScalarDefinition8616(block.addr, instr_index, instruction)
             )
-    return {key: tuple(items) for key, items in grouped.items()}
+    return {key: tuple(items) for key, items in builtins.iter(grouped.items())}
 
 
 def reaching_scalar_definitions_8616(
     definitions: ScalarDefinitionIndex8616,
     value: IRValue,
     *,
-    block_addr: int,
-    before_index: int,
+    block_addr: cython.longlong,
+    before_index: cython.longlong,
 ) -> tuple[ScalarDefinition8616, ...]:
     """Return same-block definitions of one value preceding an exact use."""
     return tuple(
         item
-        for item in definitions.get(scalar_definition_key_8616(value), ())
-        if item.block_addr == block_addr and item.instr_index < before_index
+        for item in builtins.iter(definitions.get(scalar_definition_key_8616(value), ()))
+        if operator.eq(item.block_addr, block_addr) and item.instr_index < before_index
     )
 
 

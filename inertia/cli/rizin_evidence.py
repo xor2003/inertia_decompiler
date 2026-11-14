@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Collect optional rizin evidence for diagnostics and candidate ranking.
 
 Layer: CLI/fallback/reporting.
@@ -5,6 +6,8 @@ Responsibility: collect optional rizin diagnostics without making them semantic 
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import json
 import shutil
@@ -14,6 +17,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any, cast
+import dataclasses
 
 _RIZIN_FUNCTION_ANALYSIS_COMMAND = "aa;aflj"
 
@@ -27,96 +31,99 @@ class RizinEvidenceStatus(Enum):
     ERROR = "error"
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class RizinFunctionFact:
     """Function-level fact reported by rizin for diagnostics."""
 
-    addr: int
-    size: int
-    name: str
-    n_blocks: int
-    n_callrefs: int
+    addr: cython.longlong
+    size: cython.longlong
+    name: object
+    n_blocks: cython.longlong
+    n_callrefs: cython.longlong
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class RizinXrefFact:
     """Cross-reference fact reported by rizin for diagnostics."""
 
-    src: int
-    dst: int
-    kind: str
+    src: cython.longlong
+    dst: cython.longlong
+    kind: object
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class RizinStringFact:
     """String fact reported by rizin for diagnostics."""
 
-    vaddr: int
-    value: str
+    vaddr: cython.longlong
+    value: object
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class RizinSymbolFact:
     """Symbol fact reported by rizin for diagnostics."""
 
-    vaddr: int
-    name: str
-    kind: str
+    vaddr: cython.longlong
+    name: object
+    kind: object
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class RizinStackVarFact:
     """Stack-variable fact reported by rizin for diagnostics."""
 
-    function_addr: int
-    name: str
-    kind: str
+    function_addr: cython.longlong
+    name: object
+    kind: object
     offset: int | None
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class RizinCcFact:
     """Calling-convention fact reported by rizin for diagnostics."""
 
-    function_addr: int
-    cc: str
+    function_addr: cython.longlong
+    cc: object
     nargs: int | None
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class RizinEvidence:
     """Collected optional rizin evidence for one binary."""
 
     status: RizinEvidenceStatus
-    elapsed_ms: float
-    detail: str
-    functions: tuple[RizinFunctionFact, ...]
-    xrefs: tuple[RizinXrefFact, ...]
-    strings: tuple[RizinStringFact, ...]
-    symbols: tuple[RizinSymbolFact, ...]
-    stack_vars: tuple[RizinStackVarFact, ...]
-    calling_conventions: tuple[RizinCcFact, ...]
+    elapsed_ms: cython.double
+    detail: object
+    functions: object
+    xrefs: object
+    strings: object
+    symbols: object
+    stack_vars: object
+    calling_conventions: object
 
     @property
-    def function_offsets(self) -> tuple[int, ...]:
+    def function_offsets(self) -> tuple[cython.longlong, ...]:
         """Return discovered function offsets from optional rizin evidence."""
-        return tuple(f.addr for f in self.functions)
+        return tuple(f.addr for f in iter(self.functions))
 
     @property
-    def function_name_by_addr(self) -> dict[int, str]:
+    def function_name_by_addr(self) -> object:
         """Return rizin function names keyed by address."""
-        out: dict[int, str] = {}
+        fact: object
+        out: dict[cython.longlong, str] = {}
         for fact in self.functions:
             if fact.name:
                 out[fact.addr] = fact.name
         return out
 
 
-def _rizin_available() -> bool:
+@cython.ccall
+def _rizin_available() -> cython.bint:
     return shutil.which("rizin") is not None
 
 
-def _run_json(binary_path: Path, command: str, *, timeout_sec: int) -> object:
+@cython.ccall
+def _run_json(binary_path: Path, command: object, *, timeout_sec: cython.longlong) -> object:
     cmd = ["rizin", "-2", "-q", "-c", command, str(binary_path)]
     completed = subprocess.run(
         cmd,
@@ -133,7 +140,8 @@ def _run_json(binary_path: Path, command: str, *, timeout_sec: int) -> object:
         return None
 
 
-def _empty_evidence(status: RizinEvidenceStatus, elapsed_ms: float, detail: str) -> RizinEvidence:
+@cython.ccall
+def _empty_evidence(status: RizinEvidenceStatus, elapsed_ms: cython.double, detail: object) -> RizinEvidence:
     """Return an evidence record carrying only a status and detail."""
     return RizinEvidence(
         status=status,
@@ -148,6 +156,7 @@ def _empty_evidence(status: RizinEvidenceStatus, elapsed_ms: float, detail: str)
     )
 
 
+@cython.ccall
 def _optional_int(raw: object) -> int | None:
     """Decode an optional integer field without failing the fact."""
     if raw is None:
@@ -159,8 +168,10 @@ def _optional_int(raw: object) -> int | None:
         return None
 
 
+@cython.ccall
 def _function_facts(payload: object) -> tuple[RizinFunctionFact, ...]:
     """Decode function facts from the aflj payload."""
+    item: object
     facts: list[RizinFunctionFact] = []
     if isinstance(payload, list):
         for item in payload:
@@ -184,8 +195,10 @@ def _function_facts(payload: object) -> tuple[RizinFunctionFact, ...]:
     return tuple(facts)
 
 
+@cython.ccall
 def _xref_facts(payload: object) -> tuple[RizinXrefFact, ...]:
     """Decode cross-reference facts from the axtj payload."""
+    item: object
     facts: list[RizinXrefFact] = []
     if isinstance(payload, list):
         for item in payload:
@@ -198,8 +211,10 @@ def _xref_facts(payload: object) -> tuple[RizinXrefFact, ...]:
     return tuple(facts)
 
 
+@cython.ccall
 def _string_facts(payload: object) -> tuple[RizinStringFact, ...]:
     """Decode string facts from the izj payload."""
+    item: object
     facts: list[RizinStringFact] = []
     if isinstance(payload, list):
         for item in payload:
@@ -212,8 +227,10 @@ def _string_facts(payload: object) -> tuple[RizinStringFact, ...]:
     return tuple(facts)
 
 
+@cython.ccall
 def _symbol_facts(payload: object) -> tuple[RizinSymbolFact, ...]:
     """Decode symbol facts from the isj payload."""
+    item: object
     facts: list[RizinSymbolFact] = []
     if isinstance(payload, list):
         for item in payload:
@@ -226,8 +243,10 @@ def _symbol_facts(payload: object) -> tuple[RizinSymbolFact, ...]:
     return tuple(facts)
 
 
+@cython.ccall
 def _stack_var_facts(payload: object) -> tuple[RizinStackVarFact, ...]:
     """Decode stack-variable facts from the afvrj payload."""
+    item: object
     facts: list[RizinStackVarFact] = []
     if isinstance(payload, list):
         for item in payload:
@@ -248,8 +267,10 @@ def _stack_var_facts(payload: object) -> tuple[RizinStackVarFact, ...]:
     return tuple(facts)
 
 
+@cython.ccall
 def _cc_facts(payload: object) -> tuple[RizinCcFact, ...]:
     """Decode calling-convention facts from the afcfj payload."""
+    item: object
     facts: list[RizinCcFact] = []
     if isinstance(payload, list):
         for item in payload:
@@ -268,7 +289,8 @@ def _cc_facts(payload: object) -> tuple[RizinCcFact, ...]:
     return tuple(facts)
 
 
-def collect_rizin_evidence(binary_path: Path, *, timeout_sec: int = 8) -> RizinEvidence:
+@cython.ccall
+def collect_rizin_evidence(binary_path: Path, *, timeout_sec: cython.longlong = 8) -> RizinEvidence:
     """Collect optional rizin facts for diagnostics and candidate ranking."""
     started = time.perf_counter()
     if not _rizin_available():

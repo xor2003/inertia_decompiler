@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Publish terminal pointer-output bindings on the Types/Lowering path.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Protocol, cast
 
@@ -42,12 +45,14 @@ from .pointer_parameter_output_contracts import (
     PointerParameterOutputFailure8616,
     PointerParameterOutputStats8616,
 )
+import operator
+import builtins
 
 
 class _FunctionManager8616(Protocol):
     """Third-party function lookup required at the exact boundary."""
 
-    def function(self, *, addr: int, create: bool = False) -> object | None:
+    def function(self, *, addr: cython.longlong, create: cython.bint = False) -> object | None:
         """Return one existing function without creating a guessed owner."""
         ...
 
@@ -62,17 +67,16 @@ class _ProjectSurface8616(Protocol):
     """Owned project registry plus the third-party knowledge base."""
 
     kb: _KnowledgeBase8616
-    _inertia_pointer_parameter_outputs_8616: dict[
-        int, PointerParameterOutputEvidence8616
-    ]
+    _inertia_pointer_parameter_outputs_8616: object
 
 
+@cython.ccall
 def _refused_8616(
-    function_addr: int,
+    function_addr: cython.longlong,
     failure: PointerParameterOutputFailure8616,
     *,
-    raw_count: int = 1,
-    normalized_count: int = 0,
+    raw_count: cython.longlong = 1,
+    normalized_count: cython.longlong = 0,
     ssa_failure: FunctionSSAArtifactFailure8616 | None = None,
     terminal: TerminalPointerOutputEvidence8616 | None = None,
     aliases: TerminalPointerAliasEvidence8616 | None = None,
@@ -95,9 +99,10 @@ def _refused_8616(
     )
 
 
+@cython.ccall
 def _registry_8616(
     project: object,
-) -> dict[int, PointerParameterOutputEvidence8616]:
+) -> object:
     """Return the owned per-project immutable publication registry."""
     surface = cast(_ProjectSurface8616, project)
     try:
@@ -110,14 +115,16 @@ def _registry_8616(
     return registry
 
 
+@cython.ccall
 def _publish_8616(
     project: object,
     evidence: PointerParameterOutputEvidence8616,
 ) -> PointerParameterOutputEvidence8616:
     """Publish once, replay equal evidence, and reject conflicting truth."""
+    existing: object
     registry = _registry_8616(project)
     existing = registry.get(evidence.function_addr)
-    if existing is not None and existing != evidence:
+    if existing is not None and operator.ne(existing, evidence):
         raise PipelineHardError(
             "pointer-parameter output publication conflict",
             layer="types/lowering",
@@ -127,9 +134,10 @@ def _publish_8616(
     return evidence
 
 
+@cython.ccall
 def pointer_parameter_output_evidence_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> PointerParameterOutputEvidence8616 | None:
     """Return the published exact-function result when available."""
     return _registry_8616(project).get(function_addr)
@@ -138,9 +146,9 @@ def pointer_parameter_output_evidence_8616(
 def _output_contract_8616(
     view: TerminalPointerOutputViewFact8616,
     widths: CalleeArgumentWidthEvidence8616,
-    function_addr: int,
-    raw_count: int,
-    normalized_count: int,
+    function_addr: cython.longlong,
+    raw_count: cython.longlong,
+    normalized_count: cython.longlong,
     terminal: TerminalPointerOutputEvidence8616,
     aliases: TerminalPointerAliasEvidence8616,
     views: TerminalPointerOutputViewEvidence8616,
@@ -148,11 +156,11 @@ def _output_contract_8616(
     """Bind one terminal view to its unique logical-input storage or refuse."""
     matches = tuple(
         (logical_index, storage)
-        for logical_index, storage in enumerate(widths.argument_storage)
+        for logical_index, storage in builtins.iter(enumerate(widths.argument_storage))
         if storage.space is view.parameter_storage.space
-        and storage.base == view.parameter_storage.base
-        and storage.offset == view.parameter_storage.offset
-        and storage.size == view.parameter_storage.size
+        and operator.eq(storage.base, view.parameter_storage.base)
+        and operator.eq(storage.offset, view.parameter_storage.offset)
+        and operator.eq(storage.size, view.parameter_storage.size)
     )
     if len(matches) != 1:
         failure = (
@@ -173,18 +181,12 @@ def _output_contract_8616(
     return PointerParameterOutputContract8616(logical_index, storage, view)
 
 
+@cython.ccall
 def _proven_views_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     owner: object,
-) -> (
-    tuple[
-        TerminalPointerOutputEvidence8616,
-        TerminalPointerAliasEvidence8616,
-        TerminalPointerOutputViewEvidence8616,
-    ]
-    | PointerParameterOutputEvidence8616
-):
+) -> object:
     """Run semantics→alias→widening stages or return one typed refusal."""
     ssa = semantic_function_ssa_artifact_at_address_8616(
         project,
@@ -230,13 +232,16 @@ def _proven_views_8616(
     return terminal, aliases, views
 
 
+@cython.ccall
 def publish_pointer_parameter_outputs_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     *,
     function: object | None = None,
 ) -> PointerParameterOutputEvidence8616:
     """Materialize exact logical-input output bindings for one function."""
+    owner: object
+    view: object
     owner = function
     if owner is None:
         try:

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bounded candidate-private CFG extension across proven near CALL targets.
 
 Layer: lowering / object recovery.
@@ -20,6 +21,8 @@ Consumes alias, widening, and typed facts
 Do not recover semantics from COD, source, assembly, or rendered C text
 """
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 from collections.abc import Callable, Sequence
@@ -46,6 +49,9 @@ from inertia.semantics.direct_near_call_target_binding import (
 )
 
 from .analysis_helpers import seed_calling_conventions
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "PROVEN_CALLEE_MAX_TARGETS_8616",
@@ -59,8 +65,8 @@ __all__ = [
     "extend_cfg_for_proven_calls_8616",
 ]
 
-PROVEN_CALLEE_WINDOW_8616: int = 0x200
-PROVEN_CALLEE_MAX_TARGETS_8616: int = 32
+PROVEN_CALLEE_WINDOW_8616: cython.longlong = 0x200
+PROVEN_CALLEE_MAX_TARGETS_8616: cython.longlong = 32
 
 
 class ProvenCallAdmission8616(StrEnum):
@@ -82,7 +88,7 @@ class ProvenCallExtensionLimit8616(StrEnum):
     UNIQUE_TARGET_CAP = "unique_target_cap"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ProvenCallSiteRecord8616:
     """One collected terminal-CALL surface and its admission outcome.
 
@@ -91,7 +97,7 @@ class ProvenCallSiteRecord8616:
     unadmitted surfaces so nothing proven-but-refused becomes invisible.
     """
 
-    block_addr: int
+    block_addr: cython.longlong
     callsite_addr: int | None
     target_addr: int | None
     status: ProvenCallAdmission8616
@@ -110,7 +116,7 @@ class ProvenCallSiteRecord8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ProvenCallExtensionReceipt8616:
     """Closed census of every terminal-CALL surface seen in one caller.
 
@@ -119,21 +125,21 @@ class ProvenCallExtensionReceipt8616:
     refusals instead of being silently truncated.
     """
 
-    caller_addr: int
-    blocks_scanned: int
-    records: tuple[ProvenCallSiteRecord8616, ...]
-    max_targets: int
+    caller_addr: cython.longlong
+    blocks_scanned: cython.longlong
+    records: object
+    max_targets: cython.longlong
 
     @property
-    def collected_count(self) -> int:
+    def collected_count(self) -> cython.longlong:
         """Return terminal-CALL surfaces evaluated for evidence."""
         return len(self.records)
 
-    def _count(self, status: ProvenCallAdmission8616) -> int:
-        return sum(1 for record in self.records if record.status is status)
+    def _count(self, status: ProvenCallAdmission8616) -> cython.longlong:
+        return sum(1 for record in iter(self.records) if record.status is status)
 
     @property
-    def proven_count(self) -> int:
+    def proven_count(self) -> cython.longlong:
         """Return surfaces whose native binding verdict was complete."""
         return (
             self._count(ProvenCallAdmission8616.PROVEN_ADMITTED)
@@ -143,17 +149,17 @@ class ProvenCallExtensionReceipt8616:
         )
 
     @property
-    def admitted_count(self) -> int:
+    def admitted_count(self) -> cython.longlong:
         """Return proven unique callees admitted as extra CFG starts."""
         return self._count(ProvenCallAdmission8616.PROVEN_ADMITTED)
 
     @property
-    def refused_count(self) -> int:
+    def refused_count(self) -> cython.longlong:
         """Return collected surfaces that did not seed a callee."""
         return self.collected_count - self.admitted_count
 
     @property
-    def cap_refused_count(self) -> int:
+    def cap_refused_count(self) -> cython.longlong:
         """Return proven unique callees refused only by the fixed cap."""
         return self._count(ProvenCallAdmission8616.PROVEN_CAP_REFUSED)
 
@@ -164,11 +170,11 @@ class ProvenCallExtensionReceipt8616:
             return ProvenCallExtensionLimit8616.UNIQUE_TARGET_CAP
         return None
 
-    def admitted_targets(self) -> tuple[int, ...]:
+    def admitted_targets(self) -> tuple[cython.longlong, ...]:
         """Return the admitted unique callee entry addresses, in order."""
         return tuple(
             cast(int, record.target_addr)
-            for record in self.records
+            for record in iter(self.records)
             if record.status is ProvenCallAdmission8616.PROVEN_ADMITTED
         )
 
@@ -185,11 +191,11 @@ class ProvenCallExtensionReceipt8616:
             "limit_reason": (
                 None if self.limit_reason is None else self.limit_reason.value
             ),
-            "records": [record.to_dict() for record in self.records],
+            "records": [record.to_dict() for record in iter(self.records)],
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ProvenCallCfgExtension8616:
     """Extended candidate-private CFG plus the caller rebound inside it.
 
@@ -203,18 +209,20 @@ class ProvenCallCfgExtension8616:
     cfg: object | None
     function: object | None
     receipt: ProvenCallExtensionReceipt8616
-    body_targets: tuple[int, ...] = ()
+    body_targets: tuple[cython.longlong, ...] = ()
 
 
-type EvidenceProvider8616 = Callable[..., object]
+EvidenceProvider8616 = typing.TypeAliasType("EvidenceProvider8616", Callable[..., object])
 
 
-def _dynamic_attr_8616(obj: object, name: str, default: object = None) -> object:
+@cython.ccall
+def _dynamic_attr_8616(obj: object, name: object, default: object = None) -> object:
     """Read a dynamic third-party (angr) attribute at the plugin boundary."""
     return getattr(obj, name, default)
 
 
-def _validate_max_targets_8616(max_targets: int) -> int:
+@cython.ccall
+def _validate_max_targets_8616(max_targets: cython.longlong) -> cython.longlong:
     """Enforce the fixed unique-callee ceiling before any evidence work."""
     if type(max_targets) is not int or not 0 <= max_targets <= PROVEN_CALLEE_MAX_TARGETS_8616:
         raise ValueError(
@@ -224,7 +232,8 @@ def _validate_max_targets_8616(max_targets: int) -> int:
     return max_targets
 
 
-def _validate_callee_window_8616(callee_window: int) -> int:
+@cython.ccall
+def _validate_callee_window_8616(callee_window: cython.longlong) -> cython.longlong:
     """Enforce the fixed per-callee byte window before any evidence work."""
     if type(callee_window) is not int or not 1 <= callee_window <= PROVEN_CALLEE_WINDOW_8616:
         raise ValueError(
@@ -234,13 +243,14 @@ def _validate_callee_window_8616(callee_window: int) -> int:
     return callee_window
 
 
-def _terminal_call_facts_8616(vex: object) -> tuple[int, int] | None:
+@cython.ccall
+def _terminal_call_facts_8616(vex: object) -> object:
     """Return the terminal CALL instruction's ``(head, end)`` from IMarks."""
     if not isinstance(vex, pyvex.IRSB):
         return None
     marks = [
         row
-        for row in vex.statements
+        for row in iter(vex.statements)
         if isinstance(row, pyvex.stmt.IMark)
     ]
     if not marks:
@@ -250,9 +260,11 @@ def _terminal_call_facts_8616(vex: object) -> tuple[int, int] | None:
     return head, head + int(cast(Any, last.len))
 
 
-def _caller_block_bounds_8616(function: object) -> tuple[tuple[int, int], ...]:
+@cython.ccall
+def _caller_block_bounds_8616(function: object) -> tuple[tuple[cython.longlong, cython.longlong], ...]:
     """Return sorted unique ``(addr, size)`` bounds of the caller's blocks."""
-    bounds: set[tuple[int, int]] = set()
+    block: object
+    bounds: set[tuple[cython.longlong, cython.longlong]] = set()
     blocks = cast(Any, _dynamic_attr_8616(function, "blocks", ()))
     for block in tuple(blocks or ()):
         addr = _dynamic_attr_8616(block, "addr", None)
@@ -262,16 +274,18 @@ def _caller_block_bounds_8616(function: object) -> tuple[tuple[int, int], ...]:
     return tuple(sorted(bounds))
 
 
-def _caller_covered_regions_8616(function: object) -> tuple[tuple[int, int], ...]:
+def _caller_covered_regions_8616(function: object) -> tuple[tuple[cython.longlong, cython.longlong], ...]:
     """Return merged disjoint regions covering exactly the caller's blocks.
 
     These bounds describe only what recovery already proved; they never
     widen to reach callee neighbors.
     """
+    end: object
+    start: object
     spans = sorted(
-        (addr, addr + size) for addr, size in _caller_block_bounds_8616(function)
+        (addr, addr + size) for addr, size in builtins.iter(_caller_block_bounds_8616(function))
     )
-    merged: list[tuple[int, int]] = []
+    merged: list[tuple[cython.longlong, cython.longlong]] = []
     for start, end in spans:
         if not merged or start > merged[-1][1]:
             merged.append((start, end))
@@ -280,13 +294,14 @@ def _caller_covered_regions_8616(function: object) -> tuple[tuple[int, int], ...
     return tuple(merged)
 
 
+@cython.ccall
 def _binding_binds_this_surface_8616(
     evidence: DirectNearCallTargetBinding8616,
-    block_addr: int,
-    block_end: int,
-    terminal_head: int,
-    terminal_end: int,
-) -> bool:
+    block_addr: cython.longlong,
+    block_end: cython.longlong,
+    terminal_head: cython.longlong,
+    terminal_end: cython.longlong,
+) -> cython.bint:
     """Bind a complete verdict to *this* retained block's terminal call.
 
     A complete binding is still foreign evidence unless its callsite is the
@@ -296,24 +311,26 @@ def _binding_binds_this_surface_8616(
     unrelated complete verdict cannot bypass this consumer identity check.
     """
     return bool(
-        evidence.callsite_addr == terminal_head
+        operator.eq(evidence.callsite_addr, terminal_head)
         and block_addr <= terminal_head < block_end
         and terminal_end == block_end
         and evidence.shape is not None
-        and evidence.shape.next_linear_addr == terminal_end
+        and operator.eq(evidence.shape.next_linear_addr, terminal_end)
     )
 
 
+@cython.ccall
 def _classify_call_surface_8616(
     project: object,
-    block_addr: int,
-    block_size: int,
+    block_addr: cython.longlong,
+    block_size: cython.longlong,
     discovery_irsb: object,
-    terminal_head: int,
-    terminal_end: int,
+    terminal_head: cython.longlong,
+    terminal_end: cython.longlong,
     provider: EvidenceProvider8616,
 ) -> ProvenCallSiteRecord8616:
     """Evaluate one terminal-CALL block into a typed admission verdict."""
+    evidence: object
     evidence = provider(
         project,
         block_addr=block_addr,
@@ -368,8 +385,9 @@ def _classify_call_surface_8616(
     )
 
 
+@cython.ccall
 def _admission_status_for_target_8616(
-    target: int, caller_addr: int, admitted: set[int], max_targets: int
+    target: cython.longlong, caller_addr: cython.longlong, admitted: object, max_targets: cython.longlong
 ) -> ProvenCallAdmission8616:
     """Apply self/duplicate/cap accounting to a proven admitted target."""
     if target == caller_addr:
@@ -382,17 +400,19 @@ def _admission_status_for_target_8616(
     return ProvenCallAdmission8616.PROVEN_ADMITTED
 
 
+@cython.ccall
 def _census_call_surface_8616(
     project: object,
-    caller_addr: int,
-    block_addr: int,
-    block_size: int,
+    caller_addr: cython.longlong,
+    block_addr: cython.longlong,
+    block_size: cython.longlong,
     vex: pyvex.IRSB,
     provider: EvidenceProvider8616,
-    admitted: set[int],
-    max_targets: int,
+    admitted: object,
+    max_targets: cython.longlong,
 ) -> ProvenCallSiteRecord8616:
     """Classify one terminal-CALL block and apply admission accounting."""
+    terminal: object
     terminal = _terminal_call_facts_8616(vex)
     if terminal is None:
         return ProvenCallSiteRecord8616(
@@ -420,11 +440,12 @@ def _census_call_surface_8616(
     )
 
 
+@cython.ccall
 def collect_proven_call_targets_8616(
     project: object,
     function: object,
     *,
-    max_targets: int = PROVEN_CALLEE_MAX_TARGETS_8616,
+    max_targets: cython.longlong = PROVEN_CALLEE_MAX_TARGETS_8616,
     evidence_provider: EvidenceProvider8616 | None = None,
 ) -> ProvenCallExtensionReceipt8616 | None:
     """Evaluate every retained caller block's terminal near CALL exactly.
@@ -439,6 +460,8 @@ def collect_proven_call_targets_8616(
     Returns ``None`` for non-x86-16 projects and callers without a concrete
     entry address; there is no evaluable native surface to census.
     """
+    block_addr: object
+    block_size: object
     _validate_max_targets_8616(max_targets)
     if not (
         isinstance(project, angr.Project)
@@ -452,7 +475,7 @@ def collect_proven_call_targets_8616(
     provider = evidence_provider or native_direct_call_evidence_8616
 
     records: list[ProvenCallSiteRecord8616] = []
-    admitted: set[int] = set()
+    admitted: set[cython.longlong] = set()
     for block_addr, block_size in _caller_block_bounds_8616(function):
         native = project.factory.block(block_addr, size=block_size, opt_level=0)
         vex = native.vex
@@ -474,13 +497,13 @@ def collect_proven_call_targets_8616(
 
 def extend_cfg_for_proven_calls_8616(
     project: object,
-    cfg: object,
+    cfg,
     function: object,
     *,
     caller_regions: Sequence[tuple[int, int]] | None = None,
-    callee_window: int = PROVEN_CALLEE_WINDOW_8616,
-    max_targets: int = PROVEN_CALLEE_MAX_TARGETS_8616,
-    seed_calling_conventions_enabled: bool = True,
+    callee_window: cython.longlong = PROVEN_CALLEE_WINDOW_8616,
+    max_targets: cython.longlong = PROVEN_CALLEE_MAX_TARGETS_8616,
+    seed_calling_conventions_enabled: cython.bint = True,
     evidence_provider: EvidenceProvider8616 | None = None,
 ) -> ProvenCallCfgExtension8616 | None:
     """Re-run bounded CFGFast with only proven near-CALL callees seeded.
@@ -497,6 +520,9 @@ def extend_cfg_for_proven_calls_8616(
     (non-x86-16 or missing entry); a result with ``cfg=None`` means surfaces
     were evaluated but nothing was admitted — the receipt records why.
     """
+    callee: object
+    receipt: object
+    target: object
     del cfg  # context only; extension never mutates the supplied CFG or KB
     _validate_max_targets_8616(max_targets)
     _validate_callee_window_8616(callee_window)
@@ -521,12 +547,12 @@ def extend_cfg_for_proven_calls_8616(
             hex(receipt.caller_addr),
         )
         return ProvenCallCfgExtension8616(None, None, receipt)
-    regions.extend((target, target + callee_window) for target in targets)
+    regions.extend((target, target + callee_window) for target in iter(targets))
 
     extended = cast(Any, project).analyses.CFGFast(
         kb=KnowledgeBase(cast(Any, project)),
         start_at_entry=False,
-        function_starts=sorted({receipt.caller_addr, *targets}),
+        function_starts=sorted({receipt.caller_addr, } | set(targets)),
         # These roots have native call evidence. A prologue-shaped byte string
         # elsewhere in a callee window is not evidence for another root.
         function_prologues=False,
@@ -545,7 +571,7 @@ def extend_cfg_for_proven_calls_8616(
     caller = extended.functions[receipt.caller_addr]
     body_targets = tuple(
         target
-        for target in targets
+        for target in iter(targets)
         if target in extended.functions
         and bool(_caller_block_bounds_8616(extended.functions[target]))
     )

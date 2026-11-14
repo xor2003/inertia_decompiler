@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: enter one isolated serial function worker through the typed CLI core.
@@ -5,6 +6,8 @@ Forbidden: owning decompiler semantics, source-backed recovery, or postprocess s
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import cProfile
 import os
@@ -18,12 +21,14 @@ from inertia.cli.cache_runtime_contract import (
 from inertia.cli.cli_core import main as _core_main
 
 
-def _worker_profile_path_8616(raw_path: str) -> Path:
+@cython.ccall
+def _worker_profile_path_8616(raw_path: object) -> Path:
     """Expand the process placeholder in one explicit worker profile path."""
     return Path(raw_path.replace("{pid}", str(os.getpid()))).expanduser()
 
 
-def main(argv: list[str] | None = None) -> int:
+@cython.ccall
+def main(argv: object = None) -> cython.longlong:
     """Run one clean worker, optionally recording opt-in cProfile evidence."""
     raw_profile_path = os.environ.get(WORKER_CPROFILE_ENV_8616, "").strip()
     if not raw_profile_path:

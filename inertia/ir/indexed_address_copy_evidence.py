@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Collect exact indexed LOAD-to-STORE value-copy evidence.
 
 Layer: IR.
@@ -11,6 +12,7 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import cython
 
 from .core import IRAddress
 from .indexed_address_access_normalization import (
@@ -41,14 +43,16 @@ from .scalar_definitions import (
 )
 from .ssa import SSABlock
 from .ssa_function import SSAFunctionArtifact
+import operator
 
 
 def _order_indexed_store_members_8616(
     block: SSABlock,
     access: NormalizedIndexedAddressAccess8616,
-) -> tuple[int, ...] | None:
+) -> object:
     """Order one direct member or exact little-endian pair by byte offset."""
-    entries: list[tuple[int, int]] = []
+    instr_index: object
+    entries: list[tuple[cython.longlong, cython.longlong]] = []
     for instr_index in access.member_instr_indices:
         if not 0 <= instr_index < len(block.instrs):
             return None
@@ -58,10 +62,10 @@ def _order_indexed_store_members_8616(
             return None
         entries.append((address.offset, instr_index))
     ordered_entries = tuple(sorted(entries))
-    ordered = tuple(index for _offset, index in ordered_entries)
+    ordered = tuple(index for _offset, index in iter(ordered_entries))
     if len(ordered) == 1:
         return ordered
-    offsets = tuple(offset for offset, _index in ordered_entries)
+    offsets = tuple(offset for offset, _index in iter(ordered_entries))
     if len(ordered) == 2 and offsets == (
         access.address.offset,
         access.address.offset + 1,
@@ -77,7 +81,7 @@ def _source_fact_8616(
     """Resolve one path endpoint to exactly one indexed LOAD fact."""
     matches = tuple(
         fact
-        for fact in evidence.facts
+        for fact in iter(evidence.facts)
         if fact.kind is IndexedAddressAccessKind8616.LOAD
         and path.matches_source(fact)
     )
@@ -88,6 +92,7 @@ def _source_fact_8616(
     return matches[0]
 
 
+@cython.ccall
 def _copy_or_refusal_8616(
     artifact: SSAFunctionArtifact,
     destination: IndexedAddressFact8616,
@@ -97,6 +102,9 @@ def _copy_or_refusal_8616(
     evidence: IndexedAddressEvidence8616,
 ) -> IndexedAddressCopyFact8616 | IndexedAddressCopyRefusal8616:
     """Classify one normalized indexed STORE without inferring Alias identity."""
+    members: object
+    instr_index: object
+    lane: object
     members = _order_indexed_store_members_8616(block, access)
     if members is None or len(members) not in {1, 2}:
         return IndexedAddressCopyRefusal8616(
@@ -105,12 +113,12 @@ def _copy_or_refusal_8616(
             "normalized STORE members are not one direct access or little-endian pair",
         )
     lanes = (
-        (IndexedAddressCopyLane8616.DIRECT,)
+        tuple((IndexedAddressCopyLane8616.DIRECT,))
         if len(members) == 1
-        else (
+        else tuple((
             IndexedAddressCopyLane8616.LOW_BYTE,
             IndexedAddressCopyLane8616.HIGH_BYTE,
-        )
+        ))
     )
     paths: list[IndexedAddressCopyValuePath8616] = []
     for instr_index, lane in zip(members, lanes, strict=True):
@@ -131,7 +139,7 @@ def _copy_or_refusal_8616(
         paths.append(path)
     load_sites = {
         (path.load_block_addr, path.load_instr_index, path.load_instr_addr)
-        for path in paths
+        for path in iter(paths)
     }
     if len(load_sites) != 1:
         return IndexedAddressCopyRefusal8616(
@@ -146,7 +154,7 @@ def _copy_or_refusal_8616(
             source,
             "value-path endpoint does not identify one indexed LOAD fact",
         )
-    if source.address.size != destination.address.size:
+    if operator.ne(source.address.size, destination.address.size):
         return IndexedAddressCopyRefusal8616(
             destination,
             IndexedAddressCopyFailureKind8616.VALUE_WIDTH_CONFLICT,
@@ -167,13 +175,16 @@ def collect_indexed_address_copy_evidence_8616(
     evidence: IndexedAddressEvidence8616,
 ) -> IndexedAddressCopyEvidence8616:
     """Classify every proven indexed STORE as one exact copy or refusal."""
-    if not evidence.closed or artifact.function_addr != evidence.function_addr:
+    block: object
+    access: object
+    destination: object
+    if not evidence.closed or operator.ne(artifact.function_addr, evidence.function_addr):
         raise ValueError("indexed copy collection requires matching closed IR evidence")
     definitions = build_scalar_definition_index_8616(artifact)
     normalization = normalize_indexed_address_accesses_8616(artifact)
-    blocks = {block.addr: block for block in artifact.blocks}
+    blocks = {block.addr: block for block in iter(artifact.blocks)}
     normalized_stores: dict[
-        tuple[int, int, int], list[NormalizedIndexedAddressAccess8616]
+        tuple[cython.longlong, cython.longlong, cython.longlong], list[NormalizedIndexedAddressAccess8616]
     ] = {}
     for access in normalization.accesses:
         if access.op != "STORE":
@@ -184,7 +195,7 @@ def collect_indexed_address_copy_evidence_8616(
     refusals: list[IndexedAddressCopyRefusal8616] = []
     destinations = tuple(
         fact
-        for fact in evidence.facts
+        for fact in iter(evidence.facts)
         if fact.kind is IndexedAddressAccessKind8616.STORE
     )
     for destination in destinations:

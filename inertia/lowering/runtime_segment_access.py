@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify typed runtime segmented accesses.
 
 Layer: Types/Lowering.
@@ -17,6 +18,8 @@ traversal and project architecture lookup.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import defaultdict
 from collections.abc import Iterator, Mapping
@@ -30,9 +33,12 @@ from inertia.ir.core import MemSpace
 from inertia.widening.segmented_load_identity import segmented_load_identity_8616
 
 from .segment_register_state import runtime_segment_name_for_variable_8616
+import dataclasses
+import operator
+import builtins
 
-type _VariableKey8616 = tuple[str, object, object, object]
-type _AssignmentSources8616 = Mapping[_VariableKey8616, tuple[object, ...]]
+_VariableKey8616 = typing.TypeAliasType("_VariableKey8616", tuple[str, object, object, object])
+_AssignmentSources8616 = typing.TypeAliasType("_AssignmentSources8616", Mapping[_VariableKey8616, tuple[object, ...]])
 _CHILD_ATTRIBUTES_8616 = (
     "statements",
     "lhs",
@@ -49,7 +55,7 @@ _CHILD_ATTRIBUTES_8616 = (
 )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class RuntimeSegmentAccessContext8616:
     """Lazily indexed segment-carrier context for one structured C pass."""
 
@@ -64,6 +70,7 @@ class RuntimeSegmentAccessContext8616:
         return self._sources
 
 
+@cython.ccall
 def _strip_casts_8616(node: object) -> object:
     """Remove structured-C casts from one expression."""
     while isinstance(node, structured_c.CTypeCast):
@@ -71,8 +78,11 @@ def _strip_casts_8616(node: object) -> object:
     return node
 
 
-def _runtime_helper_name_8616(call: structured_c.CFunctionCall) -> str | None:
+@cython.ccall
+def _runtime_helper_name_8616(call: structured_c.CFunctionCall) -> object:
     """Read one runtime helper name from the angr call boundary."""
+    callee: object
+    marker: object
     marker = call.tags.get("inertia_x86_16_runtime_segment_helper")
     if isinstance(marker, str) and marker:
         return marker.upper()
@@ -83,7 +93,8 @@ def _runtime_helper_name_8616(call: structured_c.CFunctionCall) -> str | None:
     return name.upper() if isinstance(name, str) and name else None
 
 
-def is_runtime_segment_load_helper_8616(node: object) -> bool:
+@cython.ccall
+def is_runtime_segment_load_helper_8616(node: object) -> cython.bint:
     """Return whether one structured call is a pure typed segmented load."""
     return (
         isinstance(node, structured_c.CFunctionCall)
@@ -91,6 +102,7 @@ def is_runtime_segment_load_helper_8616(node: object) -> bool:
     )
 
 
+@cython.ccall
 def _variable_key_8616(node: object) -> _VariableKey8616 | None:
     """Return a stable key for one structured-C segment carrier variable."""
     node = _strip_casts_8616(node)
@@ -106,8 +118,11 @@ def _variable_key_8616(node: object) -> _VariableKey8616 | None:
 
 def _iter_ast_nodes_8616(root: object) -> Iterator[object]:
     """Walk supported third-party structured-C children without following cycles."""
+    child: object
+    node: object
+    attribute: object
     pending = [root]
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     while pending:
         node = pending.pop()
         if node is None or id(node) in seen:
@@ -122,10 +137,13 @@ def _iter_ast_nodes_8616(root: object) -> Iterator[object]:
                 pending.append(child)
 
 
+@cython.ccall
 def _assignment_sources_8616(
     root: object,
 ) -> dict[_VariableKey8616, tuple[object, ...]]:
     """Collect explicit C copy sources for segment-carrier resolution."""
+    key: object
+    node: object
     mutable: defaultdict[_VariableKey8616, list[object]] = defaultdict(list)
     for node in _iter_ast_nodes_8616(root):
         if not isinstance(node, structured_c.CAssignment):
@@ -133,18 +151,28 @@ def _assignment_sources_8616(
         key = _variable_key_8616(node.lhs)
         if key is not None:
             mutable[key].append(node.rhs)
-    return {key: tuple(values) for key, values in mutable.items()}
+    return {key: tuple(values) for key, values in builtins.iter(mutable.items())}
 
 
+@cython.ccall
 def build_runtime_segment_access_context_8616(codegen: object) -> RuntimeSegmentAccessContext8616:
     """Build one reusable lazy segment-carrier context for the current C AST."""
+    cfunc: object
+    root: object
     cfunc = getattr(codegen, "cfunc", None)
     root = getattr(cfunc, "statements", None)
     return RuntimeSegmentAccessContext8616(root=root)
 
 
+@cython.ccall
 def _direct_segment_space_8616(project: object, expression: object) -> MemSpace | None:
     """Resolve an explicit runtime-state or architectural segment variable."""
+    arch: object
+    register: object
+    registers: object
+    runtime_name: object
+    name: object
+    space: object
     expression = _strip_casts_8616(expression)
     if not isinstance(expression, structured_c.CVariable):
         return None
@@ -160,18 +188,23 @@ def _direct_segment_space_8616(project: object, expression: object) -> MemSpace 
         return None
     for name, space in (("ds", MemSpace.DS), ("es", MemSpace.ES), ("ss", MemSpace.SS)):
         register = registers.get(name)
-        if isinstance(register, tuple) and register and variable.reg == register[0]:
+        if isinstance(register, tuple) and register and operator.eq(variable.reg, register[0]):
             return space
     return None
 
 
+@cython.ccall
 def _resolve_segment_space_8616(
     project: object,
     expression: object,
     sources: _AssignmentSources8616,
-    seen: frozenset[_VariableKey8616],
+    seen: object,
 ) -> MemSpace | None:
     """Resolve one segment carrier through an unambiguous bounded copy chain."""
+    direct: object
+    key: object
+    resolved: object
+    rhs_values: object
     direct = _direct_segment_space_8616(project, expression)
     if direct is not None:
         return direct
@@ -183,11 +216,12 @@ def _resolve_segment_space_8616(
         return None
     resolved = {
         _resolve_segment_space_8616(project, rhs, sources, seen | {key})
-        for rhs in rhs_values
+        for rhs in iter(rhs_values)
     }
     return resolved.pop() if len(resolved) == 1 and None not in resolved else None
 
 
+@cython.ccall
 def runtime_segment_access_space_8616(
     project: object,
     codegen: object,
@@ -196,6 +230,8 @@ def runtime_segment_access_space_8616(
     context: RuntimeSegmentAccessContext8616 | None = None,
 ) -> MemSpace | None:
     """Return the proven space of a ``SEG_U*`` access, if any."""
+    direct: object
+    identity: object
     node = _strip_casts_8616(lvalue)
     if not isinstance(node, structured_c.CFunctionCall):
         return None
@@ -221,21 +257,23 @@ def runtime_segment_access_space_8616(
     )
 
 
+@cython.ccall
 def runtime_segment_access_offset_expr_8616(
     project: object,
     codegen: object,
     access: object,
     *,
     expected_space: MemSpace,
-    width: int,
+    width: cython.longlong,
     context: RuntimeSegmentAccessContext8616 | None = None,
 ) -> object | None:
     """Return a proven runtime access's structured offset expression."""
+    expected_helper: object
     node = _strip_casts_8616(access)
     if not isinstance(node, structured_c.CFunctionCall):
         return None
     expected_helper = {1: "SEG_U8", 2: "SEG_U16", 4: "SEG_U32"}.get(width)
-    if expected_helper is None or _runtime_helper_name_8616(node) != expected_helper:
+    if expected_helper is None or operator.ne(_runtime_helper_name_8616(node), expected_helper):
         return None
     if runtime_segment_access_space_8616(project, codegen, node, context=context) is not expected_space:
         return None

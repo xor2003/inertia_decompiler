@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Expose an addressed byte view for Alias-proven GP restoration consumers.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Protocol, cast
@@ -28,12 +31,14 @@ from angr.sim_variable import SimRegisterVariable, SimStackVariable
 from .c_ast_utils import _iter_c_nodes_deep_8616
 from .segment_register_state import runtime_segment_name_for_variable_8616
 from .stack_c_ast_matching import _flatten_add_sub_terms_8616
+import dataclasses
+import operator
 
 
 class _Architecture(Protocol):
     """Third-party register layout needed to authenticate a physical SS view."""
 
-    register_names: dict[int, str]
+    register_names: object
 
 
 class _Project(Protocol):
@@ -42,20 +47,21 @@ class _Project(Protocol):
     arch: _Architecture
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class AddressedStackByte8616:
     """One stack reference and constant displacement, without coordinate proof."""
 
     local: c.CVariable
-    displacement: int
+    displacement: cython.longlong
 
 
-def _ss_base(node: object, project: _Project) -> bool:
+@cython.ccall
+def _ss_base(node: object, project: _Project) -> cython.bint:
     """Require exactly one positively scaled physical or owned runtime SS."""
     if not isinstance(node, c.CBinaryOp) or node.op not in {"Shl", "Mul"}:
         return False
     scale = node.rhs
-    if not isinstance(scale, c.CConstant) or scale.value != (4 if node.op == "Shl" else 16):
+    if not isinstance(scale, c.CConstant) or operator.ne(scale.value, (4 if node.op == "Shl" else 16)):
         return False
     register = _segment_carrier(node.lhs)
     if not isinstance(register, c.CVariable):
@@ -72,6 +78,7 @@ def _ss_base(node: object, project: _Project) -> bool:
             and project.arch.register_names.get(variable.reg) == "ss")
 
 
+@cython.ccall
 def _segment_carrier(node: object) -> object | None:
     """Strip only integer casts that preserve every unsigned selector value."""
     while isinstance(node, c.CTypeCast):
@@ -84,7 +91,7 @@ def _segment_carrier(node: object) -> object | None:
     return node
 
 
-def _address_casts_preserve_ss(node: object, project: _Project) -> bool:
+def _address_casts_preserve_ss(node: object, project: _Project) -> cython.bint:
     """Reject casts that lose a selector, stack reference or physical address.
 
     Flattening removes casts, so authenticate every removed cast first. Physical
@@ -92,6 +99,7 @@ def _address_casts_preserve_ss(node: object, project: _Project) -> bool:
     unscaled unsigned selector permits a 16-bit carrier. Casted constants and
     other carriers remain unsupported rather than acquiring guessed values.
     """
+    child: object
     for child in _iter_c_nodes_deep_8616(node):
         if not isinstance(child, c.CTypeCast):
             continue
@@ -99,7 +107,7 @@ def _address_casts_preserve_ss(node: object, project: _Project) -> bool:
         address_carrier = any(
             _ss_base(term, project)
             or (isinstance(term, c.CUnaryOp) and term.op == "Reference")
-            for term in terms
+            for term in iter(terms)
         )
         if address_carrier:
             kind = child.dst_type
@@ -120,6 +128,7 @@ def _address_casts_preserve_ss(node: object, project: _Project) -> bool:
     return True
 
 
+@cython.ccall
 def addressed_stack_byte_8616(node: object, project: object) -> AddressedStackByte8616 | None:
     """Recognize one byte read with one SS base, one stack reference and constants.
 
@@ -127,11 +136,14 @@ def addressed_stack_byte_8616(node: object, project: object) -> AddressedStackBy
     and wider loads refuse. Consumers must bind the resulting referenced object
     through their authoritative coordinate registry and Alias fact.
     """
+    reference: object
+    sign: object
+    term: object
     if not isinstance(node, c.CUnaryOp) or node.op != "Dereference" or not isinstance(node.type, SimTypeChar):
         return None
     if not _address_casts_preserve_ss(node.operand, cast(_Project, project)):
         return None
-    reference: c.CVariable | None = None
+    reference = None
     displacement = 0
     segments = 0
     for term, sign in _flatten_add_sub_terms_8616(node.operand):

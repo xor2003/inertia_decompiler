@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Helper boundary (frontend instruction execution).
 
 Responsibility: execute string-instruction repeat, segment, direction, and branch helper effects.
@@ -5,6 +6,8 @@ Forbidden: replacing string-instruction semantics with source-backed or rendered
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from typing import Protocol, TypeGuard, cast, runtime_checkable
@@ -16,6 +19,7 @@ from inertia.frontend.x86_16.instruction import REPNZ, REPZ
 from inertia.semantics.alu_semantics import compare_operation
 
 from .regs import reg16_t, reg32_t, sgreg_t
+import operator
 
 _WORD_BYTES = 2
 _DWORD_BYTES = 4
@@ -66,33 +70,33 @@ class StringInstruction(Protocol):
         ...
 
     @property
-    def pre_repeat(self) -> int:
+    def pre_repeat(self) -> cython.longlong:
         """Return the decoded repeat-prefix value."""
         ...
 
     @property
-    def repeat_class(self) -> str:
+    def repeat_class(self) -> object:
         """Return the normalized repeat-prefix class."""
         ...
 
     @property
-    def address_bits(self) -> int:
+    def address_bits(self) -> cython.longlong:
         """Return the effective string address width."""
         ...
 
     @property
-    def mode32(self) -> bool:
+    def mode32(self) -> cython.bint:
         """Return whether string indices use 32-bit registers."""
         ...
 
     @property
-    def size(self) -> int:
+    def size(self) -> cython.longlong:
         """Return the encoded instruction size including prefixes."""
         ...
 
 
 class _StringLifterInstruction(Protocol):
-    addr: int
+    addr: cython.longlong
     irsb_c: _StringIrsbCustomizer
 
     def jump(self, _condition: object, _target: object, _jumpkind: object) -> None:
@@ -101,10 +105,10 @@ class _StringLifterInstruction(Protocol):
 
     def record_loop_counter_condition_8616(
         self,
-        counter_name: str,
-        counter_size: int,
-        displacement: int,
-        instruction_size: int,
+        counter_name: object,
+        counter_size: cython.longlong,
+        displacement: cython.longlong,
+        instruction_size: cython.longlong,
     ) -> None:
         """Publish an exact typed post-decrement counter continuation."""
         ...
@@ -123,7 +127,7 @@ class StringEmulator(Protocol):
         """Return the normalized architectural string-index step."""
         ...
 
-    def constant(self, value: int, ty: object) -> object:
+    def constant(self, value: cython.longlong, ty: object) -> object:
         """Return a VEX constant wrapper for the requested helper type."""
         ...
 
@@ -168,15 +172,18 @@ class StringEmulator(Protocol):
         ...
 
 
+@cython.ccall
 def _has_rdt(value: object) -> TypeGuard[_RdtCarrier]:
     return isinstance(value, _RdtCarrier)
 
 
+@cython.ccall
 def _rdt_or_self(value: object) -> object:
     return value.rdt if _has_rdt(value) else value
 
 
-def string_delta(emu: StringEmulator, width: int, value_type: str = Type.int_16) -> object:
+@cython.ccall
+def string_delta(emu: StringEmulator, width: cython.longlong, value_type: object = Type.int_16) -> object:
     """Return a width-typed signed index delta implied by the direction flag."""
     step = cast(_AddSubValue, emu.get_direction_step(value_type))
     if width == 1:
@@ -185,6 +192,7 @@ def string_delta(emu: StringEmulator, width: int, value_type: str = Type.int_16)
     return doubled if width == _WORD_BYTES else doubled + doubled
 
 
+@cython.ccall
 def string_source_segment(instr: StringInstruction) -> sgreg_t:
     """Return the source segment for a string instruction."""
     if instr.pre_segment is not None:
@@ -192,25 +200,27 @@ def string_source_segment(instr: StringInstruction) -> sgreg_t:
     return sgreg_t.DS
 
 
-def repeat_kind(instr: StringInstruction) -> str:
+@cython.ccall
+def repeat_kind(instr: StringInstruction) -> object:
     """Return the normalized repeat prefix class for a string instruction."""
     normalized = instr.repeat_class
     if normalized not in (None, ""):
         return normalized
-    if instr.pre_repeat == REPZ:
+    if operator.eq(instr.pre_repeat, REPZ):
         return "repz"
-    if instr.pre_repeat == REPNZ:
+    if operator.eq(instr.pre_repeat, REPNZ):
         return "repnz"
     return "none"
 
 
+@cython.ccall
 def repeat_prefix_cond(emu: StringEmulator, instr: StringInstruction) -> _CastableToRdt | bool | None:
     """Consume CX and return whether a repeated string operation should continue."""
     if repeat_kind(instr) == "none":
         return None
 
-    counter_reg = reg32_t.ECX if instr.address_bits == _WIDE_ADDRESS_BITS else reg16_t.CX
-    counter_type = Type.int_32 if instr.address_bits == _WIDE_ADDRESS_BITS else Type.int_16
+    counter_reg = reg32_t.ECX if operator.eq(instr.address_bits, _WIDE_ADDRESS_BITS) else reg16_t.CX
+    counter_type = Type.int_32 if operator.eq(instr.address_bits, _WIDE_ADDRESS_BITS) else Type.int_16
     counter = cast(_AddSubValue, emu.get_gpreg(counter_reg))
     zero = emu.constant(0, counter_type)
     execute_operation = counter != zero
@@ -229,11 +239,12 @@ def repeat_prefix_cond(emu: StringEmulator, instr: StringInstruction) -> _Castab
     return cast(_CastableToRdt | bool, remaining != zero)
 
 
+@cython.ccall
 def repeat_jump(
     emu: StringEmulator,
     instr: StringInstruction,
-    repeat_cond: _CastableToRdt | bool | None,
-    zf_sensitive: bool = False,
+    repeat_cond: object,
+    zf_sensitive: cython.bint = False,
 ) -> None:
     """Use the header count guard for non-comparing REP, preserving native SSA.
 
@@ -255,7 +266,7 @@ def repeat_jump(
     if kind == "repz":
         cond = cast(_AndValue, cond) & emu.is_zero()
     elif kind == "repnz":
-        cond = cast(_AndValue, cond) & (emu.is_zero() == emu.constant(0, Type.int_1))
+        cond = cast(_AndValue, cond) & operator.eq(emu.is_zero(), emu.constant(0, Type.int_1))
     repeat_target = emu.constant(emu.lifter_instruction.addr, Type.int_32)
     if isinstance(cond, bool):
         if not cond:
@@ -273,9 +284,11 @@ def repeat_jump(
     emu.lifter_instruction.jump(cond, repeat_target, JumpKind.Boring)
 
 
-def string_advance_indices(emu: StringEmulator, width: int, *regs: object) -> object:
+def string_advance_indices(emu: StringEmulator, width: cython.longlong, *regs: object) -> object:
     """Advance each string index register according to direction flag and width."""
-    delta: object | None = None
+    delta: object
+    reg: object
+    delta = None
     for reg in regs:
         delta = string_delta(emu, width, Type.int_32 if isinstance(reg, reg32_t) else Type.int_16)
         emu.set_gpreg(reg, cast(_AddSubValue, emu.get_gpreg(reg)) + delta)
@@ -287,7 +300,8 @@ def string_compare_values(lhs: object, rhs: object, update_flags: Callable[[obje
     compare_operation(lambda: lhs, lambda: rhs, update_flags)
 
 
-def string_load(emu: StringEmulator, segment: sgreg_t, offset: object, width: int) -> object:
+@cython.ccall
+def string_load(emu: StringEmulator, segment: sgreg_t, offset: object, width: cython.longlong) -> object:
     """Load a segmented string operand with the requested width."""
     if width == 1:
         return emu.get_data8(segment, offset)
@@ -298,7 +312,8 @@ def string_load(emu: StringEmulator, segment: sgreg_t, offset: object, width: in
     raise ValueError(f"unsupported string width: {width}")
 
 
-def string_store(emu: StringEmulator, segment: sgreg_t, offset: object, value: object, width: int) -> None:
+@cython.ccall
+def string_store(emu: StringEmulator, segment: sgreg_t, offset: object, value: object, width: cython.longlong) -> None:
     """Store a segmented string operand with the requested width."""
     if width == 1:
         emu.put_data8(segment, offset, value)

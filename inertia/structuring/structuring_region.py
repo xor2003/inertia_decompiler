@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Region-based control-flow graph representation for structuring.
 
 Layer: Structuring.
@@ -19,20 +20,27 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import enum
 import logging
 from dataclasses import dataclass, field
+import dataclasses
+import operator
+import builtins
 
-type CNode = object
+CNode = typing.TypeAliasType("CNode", object)
 
 
-def _dynamic_codegen_attr_8616(obj: object, name: str, default: object = None) -> object:
+@cython.ccall
+def _dynamic_codegen_attr_8616(obj: object, name: object, default: object = None) -> object:
     """Read optional angr/codegen attributes at the dynamic compatibility boundary."""
     return getattr(obj, name, default)
 
 
-def _metadata_tuple_8616(value: object) -> tuple[object, ...]:
+@cython.ccall
+def _metadata_tuple_8616(value: object) -> object:
     """Normalize optional region metadata sequences to an immutable tuple."""
     if isinstance(value, tuple):
         return value
@@ -41,9 +49,9 @@ def _metadata_tuple_8616(value: object) -> tuple[object, ...]:
     return ()
 
 
-def _metadata_int_tuple_8616(value: object) -> tuple[int, ...]:
+def _metadata_int_tuple_8616(value: object) -> tuple[cython.longlong, ...]:
     """Normalize optional region metadata address sequences to integer tuples."""
-    return tuple(item for item in _metadata_tuple_8616(value) if isinstance(item, int))
+    return tuple(item for item in builtins.iter(_metadata_tuple_8616(value)) if isinstance(item, int))
 
 
 class RegionType(enum.Enum):
@@ -65,7 +73,7 @@ class RegionType(enum.Enum):
     Loop = "loop"
 
 
-@dataclass(frozen=False)
+@cython.dataclasses.dataclass(frozen=False)
 class Region:
     """A region represents a set of statements with unified control-flow semantics.
 
@@ -87,27 +95,27 @@ class Region:
     block_addr: int | None = None
     region_id: int | None = None
     region_type: RegionType = RegionType.Linear
-    statements: list[CNode] = field(default_factory=list)
+    statements: object = field(default_factory=list)
     condition_expr: CNode | None = None
-    predecessors: set[Region] = field(default_factory=set)
-    successors: set[Region] = field(default_factory=set)
-    is_switch_pad: bool = False
-    metadata: dict[str, object] = field(default_factory=dict)
+    predecessors: object = field(default_factory=set)
+    successors: object = field(default_factory=set)
+    is_switch_pad: cython.bint = False
+    metadata: object = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Ensure region_id defaults to block_addr if not set."""
         if self.region_id is None and self.block_addr is not None:
             self.region_id = self.block_addr
 
-    def __hash__(self) -> int:
+    def __hash__(self) -> cython.longlong:
         """Regions are hashable by their ID."""
         return hash(self.region_id)
 
-    def __eq__(self, other: object) -> bool:
+    def __eq__(self, other: object) -> cython.bint:
         """Regions are equal if they have the same ID."""
         if not isinstance(other, Region):
             return False
-        return self.region_id == other.region_id
+        return operator.eq(self.region_id, other.region_id)
 
     def __repr__(self) -> str:
         """String representation of region."""
@@ -117,60 +125,68 @@ class Region:
         return f"Region({addr_str}:{type_str}{switch_marker})"
 
     @property
-    def is_linear(self) -> bool:
+    def is_linear(self) -> cython.bint:
         """True if this region is a simple linear sequence."""
-        return self.region_type == RegionType.Linear
+        return operator.eq(self.region_type, RegionType.Linear)
 
     @property
-    def is_condition(self) -> bool:
+    def is_condition(self) -> cython.bint:
         """True if this region represents a conditional split."""
-        return self.region_type == RegionType.Condition
+        return operator.eq(self.region_type, RegionType.Condition)
 
     @property
-    def is_cyclic(self) -> bool:
+    def is_cyclic(self) -> cython.bint:
         """True if this region is part of a cycle (loop)."""
         # A region is cyclic if any successor dominates it
         # This is determined by the dominator graph, not stored here
         return False
 
     @property
-    def is_tail(self) -> bool:
+    def is_tail(self) -> cython.bint:
         """True if this region ends in a return/exit."""
-        return self.region_type == RegionType.Tail
+        return operator.eq(self.region_type, RegionType.Tail)
 
+    @cython.ccall
     def add_statement(self, stmt: CNode) -> None:
         """Add a statement to this region."""
         self.statements.append(stmt)
 
+    @cython.ccall
     def add_successor(self, successor: Region) -> None:
         """Add a successor edge to another region."""
         if successor not in self.successors:
             self.successors.add(successor)
             successor.predecessors.add(self)
 
+    @cython.ccall
     def add_predecessor(self, predecessor: Region) -> None:
         """Add a predecessor edge from another region."""
         if predecessor not in self.predecessors:
             self.predecessors.add(predecessor)
             predecessor.successors.add(self)
 
+    @cython.ccall
     def remove_successor(self, successor: Region) -> None:
         """Remove a successor edge."""
         if successor in self.successors:
             self.successors.discard(successor)
             successor.predecessors.discard(self)
 
+    @cython.ccall
     def remove_predecessor(self, predecessor: Region) -> None:
         """Remove a predecessor edge."""
         if predecessor in self.predecessors:
             self.predecessors.discard(predecessor)
             predecessor.successors.discard(self)
 
+    @cython.ccall
     def redirect_edges_to(self, target: Region) -> None:
         """Redirect all successors and predecessors to point to target instead.
 
         Used when merging or replacing regions.
         """
+        pred: object
+        succ: object
         # Redirect predecessors
         for pred in list(self.predecessors):
             pred.remove_successor(self)
@@ -186,7 +202,7 @@ class Region:
         self.successors.clear()
 
 
-@dataclass(frozen=False)
+@cython.dataclasses.dataclass(frozen=False)
 class RegionGraph:
     """A directed graph of regions representing the control-flow structure.
 
@@ -199,10 +215,11 @@ class RegionGraph:
         _adjacency: Internal representation of edges
     """
 
-    nodes: set[Region] = field(default_factory=set)
+    nodes: object = field(default_factory=set)
     entry: Region | None = None
-    _adjacency: dict[Region, set[Region]] = field(default_factory=dict)
+    _adjacency: object = field(default_factory=dict)
 
+    @cython.ccall
     def add_node(self, region: Region) -> None:
         """Add a region to the graph."""
         if region not in self.nodes:
@@ -210,8 +227,11 @@ class RegionGraph:
             if region not in self._adjacency:
                 self._adjacency[region] = set()
 
+    @cython.ccall
     def remove_node(self, region: Region) -> None:
         """Remove a region from the graph."""
+        pred: object
+        succ: object
         if region in self.nodes:
             self.nodes.discard(region)
             for pred in list(region.predecessors):
@@ -224,6 +244,7 @@ class RegionGraph:
             region.successors.clear()
             self._adjacency.pop(region, None)
 
+    @cython.ccall
     def add_edge(self, src: Region, dst: Region) -> None:
         """Add a directed edge from src to dst."""
         self.add_node(src)
@@ -233,22 +254,28 @@ class RegionGraph:
             self._adjacency[src] = set()
         self._adjacency[src].add(dst)
 
+    @cython.ccall
     def remove_edge(self, src: Region, dst: Region) -> None:
         """Remove a directed edge from src to dst."""
         src.remove_successor(dst)
         if src in self._adjacency:
             self._adjacency[src].discard(dst)
 
+    @cython.ccall
     def predecessors(self, region: Region) -> list[Region]:
         """Return all predecessors of a region."""
         return list(region.predecessors)
 
+    @cython.ccall
     def successors(self, region: Region) -> list[Region]:
         """Return all successors of a region."""
         return list(region.successors)
 
+    @cython.ccall
     def _merge_region_metadata_8616(self, src: Region, dst: Region) -> None:
         """Merge statement provenance and free metadata from src into dst."""
+        key: object
+        value: object
         src_statement_addrs = _metadata_int_tuple_8616(src.metadata.get("region_statement_ins_addrs", ()))
         dst_statement_addrs = _metadata_int_tuple_8616(dst.metadata.get("region_statement_ins_addrs", ()))
         src_statement_keys = _metadata_tuple_8616(src.metadata.get("region_statement_provenance_keys", ()))
@@ -256,24 +283,24 @@ class RegionGraph:
         if src_statement_addrs or dst_statement_addrs:
             dst.metadata["region_statement_ins_addrs"] = tuple(
                 dict.fromkeys(
-                    [
-                        *dst_statement_addrs,
-                        *src_statement_addrs,
-                    ]
+                    list(dst_statement_addrs) + list(src_statement_addrs)
                 )
             )
             dst.metadata["region_statement_span_source"] = "merged_region_statement_ins_addrs"
         if src_statement_keys or dst_statement_keys:
             dst.metadata["region_statement_provenance_keys"] = tuple(
-                dict.fromkeys([*dst_statement_keys, *src_statement_keys])
+                dict.fromkeys(list(dst_statement_keys) + list(src_statement_keys))
             )
             dst.metadata["region_statement_span_source"] = "merged_region_statement_provenance"
         for key, value in src.metadata.items():
             if key not in dst.metadata:
                 dst.metadata[key] = value
 
-    def _transfer_merge_edges_8616(self, src: Region, dst: Region, transfer_edges: str) -> None:
+    @cython.ccall
+    def _transfer_merge_edges_8616(self, src: Region, dst: Region, transfer_edges: object) -> None:
         """Transfer selected src edges onto dst during a region merge."""
+        pred: object
+        succ: object
         if transfer_edges in ("both", "pred"):
             for pred in list(src.predecessors):
                 pred.remove_successor(src)
@@ -286,7 +313,8 @@ class RegionGraph:
                 if succ != dst:
                     dst.add_successor(succ)
 
-    def _merge_regions_impl_8616(self, src: Region, dst: Region, transfer_edges: str) -> None:
+    @cython.ccall
+    def _merge_regions_impl_8616(self, src: Region, dst: Region, transfer_edges: object) -> None:
         """Apply the merge after the public method records the contract.
 
         Args:
@@ -306,7 +334,7 @@ class RegionGraph:
 
         # Preserve structured region types (Loop, IncSwitch, Condition) over Linear
         # If either region has a more specific type, use that
-        if src.region_type != RegionType.Linear:
+        if operator.ne(src.region_type, RegionType.Linear):
             dst.region_type = src.region_type
         # Also merge metadata from src to dst
         self._merge_region_metadata_8616(src, dst)
@@ -327,11 +355,12 @@ class RegionGraph:
             self.nodes.discard(src)
             del self._adjacency[src]
 
-    def merge_regions(self, src: Region, dst: Region, transfer_edges: str = "both") -> None:
+    @cython.ccall
+    def merge_regions(self, src: Region, dst: Region, transfer_edges: object = "both") -> None:
         """Merge src into dst, combining statements and selected graph edges."""
         return self._merge_regions_impl_8616(src, dst, transfer_edges)
 
-    def iter_postorder(self) -> list[Region]:
+    def iter_postorder(self) -> object:
         """Return regions in post-order (children before parents).
 
         Used by structuring algorithm to ensure children are processed
@@ -341,6 +370,7 @@ class RegionGraph:
         postorder = []
 
         def dfs(node: Region) -> None:
+            succ: object
             if node in visited:
                 return
             visited.add(node)
@@ -353,20 +383,22 @@ class RegionGraph:
 
         return postorder
 
+    @cython.ccall
     def iter_nodes(self) -> list[Region]:
         """Return all regions."""
         return list(self.nodes)
 
+    @cython.ccall
     def copy(self) -> RegionGraph:
         """Create a shallow copy of this graph."""
         new_graph = RegionGraph()
         new_graph.entry = self.entry
         new_graph.nodes = set(self.nodes)
-        new_graph._adjacency = {k: set(v) for k, v in self._adjacency.items()}
+        new_graph._adjacency = {k: set(v) for k, v in builtins.iter(self._adjacency.items())}
         return new_graph
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class DominatorInfo:
     """Cached dominator and post-dominator relationships.
 
@@ -379,39 +411,43 @@ class DominatorInfo:
         strictly_post_dominates_map: Set of regions strictly post-dominated by each region
     """
 
-    dominators: dict[Region, set[Region]] = field(default_factory=dict)
-    immediate_dominator: dict[Region, Region | None] = field(default_factory=dict)
-    strictly_dominates_map: dict[Region, set[Region]] = field(default_factory=dict)
-    post_dominators: dict[Region, set[Region]] = field(default_factory=dict)
-    immediate_post_dominator: dict[Region, Region | None] = field(default_factory=dict)
-    strictly_post_dominates_map: dict[Region, set[Region]] = field(default_factory=dict)
+    dominators: object = field(default_factory=dict)
+    immediate_dominator: object = field(default_factory=dict)
+    strictly_dominates_map: object = field(default_factory=dict)
+    post_dominators: object = field(default_factory=dict)
+    immediate_post_dominator: object = field(default_factory=dict)
+    strictly_post_dominates_map: object = field(default_factory=dict)
 
-    def dominates(self, dom: Region, node: Region) -> bool:
+    def dominates(self, dom: Region, node: Region) -> cython.bint:
         """True if dom dominates node."""
         return dom in self.dominators.get(node, set())
 
-    def strictly_dominates(self, dom: Region, node: Region) -> bool:
+    def strictly_dominates(self, dom: Region, node: Region) -> cython.bint:
         """True if dom strictly dominates node (dominates and is not equal)."""
         return node in self.strictly_dominates_map.get(dom, set())
 
-    def is_back_edge(self, src: Region, dst: Region) -> bool:
+    def is_back_edge(self, src: Region, dst: Region) -> cython.bint:
         """True if src -> dst is a back edge.
 
         A back edge is one where the target dominates the source.
         """
         return self.strictly_dominates(dst, src)
 
-    def post_dominates(self, pdom: Region, node: Region) -> bool:
+    def post_dominates(self, pdom: Region, node: Region) -> cython.bint:
         """True if pdom post-dominates node."""
         return pdom in self.post_dominators.get(node, set())
 
-    def strictly_post_dominates(self, pdom: Region, node: Region) -> bool:
+    def strictly_post_dominates(self, pdom: Region, node: Region) -> cython.bint:
         """True if pdom strictly post-dominates node (post-dominates and is not equal)."""
         return node in self.strictly_post_dominates_map.get(pdom, set())
 
 
+@cython.cclass
 class RegionGraphBuilder:
     """Builds a region graph from an angr CFG."""
+    cfunc = cython.declare(object, visibility = "public")
+    logger = cython.declare(object, visibility = "public")
+    regions_by_addr = cython.declare(dict, visibility = "public")
 
     def __init__(self, cfunc: object, logger: logging.Logger | None = None) -> None:
         """Initialize the builder.
@@ -422,14 +458,20 @@ class RegionGraphBuilder:
         """
         self.cfunc = cfunc
         self.logger = logger or logging.getLogger(__name__)
-        self.regions_by_addr: dict[int, Region] = {}
+        self.regions_by_addr: dict[cython.longlong, Region] = {}
 
+    @cython.ccall
     def build(self) -> tuple[RegionGraph, Region | None]:
         """Build a region graph from the CFG.
 
         Returns:
             Tuple of (region_graph, entry_region)
         """
+        dst_region: object
+        src_region: object
+        block_addr: object
+        dst_addr: object
+        src_addr: object
         graph = RegionGraph()
 
         # Extract blocks from CFG (angr stores these in the codegen)
@@ -466,15 +508,17 @@ class RegionGraphBuilder:
 
         return graph, graph.entry
 
-    def _extract_blocks(self) -> list[int]:
+    @cython.ccall
+    def _extract_blocks(self) -> object:
         """Extract basic block addresses from the CFG.
 
         Returns:
             List of block addresses
         """
+        block: object
         # This is a simplified version - in real implementation,
         # we'd extract from angr's CFG structure in codegen
-        blocks: list[int] = []
+        blocks: list[cython.longlong] = []
 
         # Try to get blocks from cfunc
         blocks_attr = _dynamic_codegen_attr_8616(self.cfunc, "blocks", ())
@@ -486,7 +530,8 @@ class RegionGraphBuilder:
 
         return blocks
 
-    def _extract_edges(self, blocks: list[int]) -> list[tuple[int, int]]:
+    @cython.ccall
+    def _extract_edges(self, blocks: object) -> object:
         """Extract control-flow edges from the CFG.
 
         Args:
@@ -495,9 +540,12 @@ class RegionGraphBuilder:
         Returns:
             List of (src_addr, dst_addr) tuples
         """
+        succs: object
+        block_addr: object
+        succ_addr: object
         # This is a simplified version - in real implementation,
         # we'd extract from angr's execution graph
-        edges: list[tuple[int, int]] = []
+        edges: list[tuple[cython.longlong, cython.longlong]] = []
 
         # Try to get successors from cfunc
         successors = _dynamic_codegen_attr_8616(self.cfunc, "successors", None)
@@ -514,12 +562,15 @@ class RegionGraphBuilder:
 
 
 def _immediate_dominators_8616(
-    dominators: dict[Region, set[Region]],
-    all_regions: list[Region],
+    dominators: object,
+    all_regions: object,
 ) -> tuple[dict[Region, Region | None], dict[Region, set[Region]]]:
     """Derive immediate dominators and strict-dominance from dominator sets."""
+    dom: object
+    doms: object
+    region: object
     immediate_dominator: dict[Region, Region | None] = {}
-    strictly_dominates_map: dict[Region, set[Region]] = {r: set() for r in all_regions}
+    strictly_dominates_map: dict[Region, set[Region]] = {r: set() for r in iter(all_regions)}
 
     for region in all_regions:
         doms = dominators[region] - {region}
@@ -532,12 +583,15 @@ def _immediate_dominators_8616(
 
 
 def _immediate_post_dominators_8616(
-    post_dominators: dict[Region, set[Region]],
-    all_regions: list[Region],
+    post_dominators: object,
+    all_regions: object,
 ) -> tuple[dict[Region, Region | None], dict[Region, set[Region]]]:
     """Derive immediate post-dominators and strict post-dominance."""
+    pdom: object
+    pdoms: object
+    region: object
     immediate_post_dominator: dict[Region, Region | None] = {}
-    strictly_post_dominates_map: dict[Region, set[Region]] = {r: set() for r in all_regions}
+    strictly_post_dominates_map: dict[Region, set[Region]] = {r: set() for r in iter(all_regions)}
 
     for region in all_regions:
         pdoms = post_dominators[region] - {region}
@@ -556,6 +610,7 @@ def _immediate_post_dominators_8616(
     return immediate_post_dominator, strictly_post_dominates_map
 
 
+@cython.ccall
 def _compute_dominators_impl_8616(graph: RegionGraph) -> DominatorInfo:
     """Run the iterative dominator and post-dominator fixpoint algorithms.
 
@@ -582,7 +637,7 @@ def _compute_dominators_impl_8616(graph: RegionGraph) -> DominatorInfo:
 
     # Compute post-dominators (dominators in reverse graph)
     # Identify exit nodes (regions with no successors)
-    exit_nodes = [r for r in all_regions if not graph.successors(r)]
+    exit_nodes = [r for r in iter(all_regions) if not graph.successors(r)]
 
     post_dominators = _compute_fixpoint_post_dominators(graph, all_regions, exit_nodes)
 
@@ -601,39 +656,44 @@ def _compute_dominators_impl_8616(graph: RegionGraph) -> DominatorInfo:
     )
 
 
+@cython.ccall
 def compute_dominators(graph: RegionGraph) -> DominatorInfo:
     """Compute dominator relationships for all regions."""
     return _compute_dominators_impl_8616(graph)
 
 
-def _compute_fixpoint_dominators(graph: RegionGraph, all_regions: list[Region]) -> dict[Region, set[Region]]:
+def _compute_fixpoint_dominators(graph: RegionGraph, all_regions: object) -> object:
+    entry: object
+    region: object
     entry = graph.entry
     if entry is None:
         return {}
-    dominators: dict[Region, set[Region]] = {region: set(all_regions) for region in all_regions}
+    dominators: dict[Region, set[Region]] = {region: set(all_regions) for region in iter(all_regions)}
     dominators[entry] = {entry}
     changed = True
     while changed:
         changed = False
         for region in all_regions:
-            if region == entry:
+            if operator.eq(region, entry):
                 continue
             preds = graph.predecessors(region)
             new_dom = (
                 {region}
                 if not preds
-                else {region} | set.intersection(*(dominators.get(p, set(all_regions)) for p in preds))
+                else {region} | set.intersection(*(dominators.get(p, set(all_regions)) for p in iter(preds)))
             )
-            if new_dom != dominators[region]:
+            if operator.ne(new_dom, dominators[region]):
                 dominators[region] = new_dom
                 changed = True
     return dominators
 
 
 def _compute_fixpoint_post_dominators(
-    graph: RegionGraph, all_regions: list[Region], exit_nodes: list[Region]
-) -> dict[Region, set[Region]]:
-    post_dominators: dict[Region, set[Region]] = {region: set(all_regions) for region in all_regions}
+    graph: RegionGraph, all_regions: object, exit_nodes: object
+) -> object:
+    exit_node: object
+    region: object
+    post_dominators: dict[Region, set[Region]] = {region: set(all_regions) for region in iter(all_regions)}
     for exit_node in exit_nodes:
         post_dominators[exit_node] = {exit_node}
     changed = True
@@ -646,9 +706,9 @@ def _compute_fixpoint_post_dominators(
             new_pdom = (
                 {region}
                 if not succs
-                else {region} | set.intersection(*(post_dominators.get(s, set(all_regions)) for s in succs))
+                else {region} | set.intersection(*(post_dominators.get(s, set(all_regions)) for s in iter(succs)))
             )
-            if new_pdom != post_dominators[region]:
+            if operator.ne(new_pdom, post_dominators[region]):
                 post_dominators[region] = new_pdom
                 changed = True
     return post_dominators

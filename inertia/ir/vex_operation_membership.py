@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Registered VEX operation membership adapter for IR consumers.
 
 Layer: IR backend adapter.
@@ -13,11 +14,14 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from pyvex.enums import get_int_from_enum
 
 
-def is_registered_vex_operation_8616(op: str) -> bool:
+@cython.ccall
+def is_registered_vex_operation_8616(op: object) -> cython.bint:
     """Return whether ``op`` is a registered VEX expression operation."""
     try:
         get_int_from_enum(op)

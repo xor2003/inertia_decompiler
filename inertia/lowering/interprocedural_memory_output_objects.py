@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Join caller memory views into Alias-owned function output objects.
 
 Layer: Types/Lowering.
@@ -11,6 +12,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from inertia.alias.storage_fact_join import (
     SegmentedAccessRelation8616,
@@ -42,12 +45,15 @@ from .interprocedural_storage_live_out_contracts import (
 from .pointer_parameter_memory_outputs import (
     join_pointer_parameter_memory_outputs_8616,
 )
+import operator
+import builtins
 
 
+@cython.ccall
 def _refused_8616(
     failure: MemoryOutputObjectFailure8616,
-    raw_count: int,
-    normalized_count: int,
+    raw_count: cython.longlong,
+    normalized_count: cython.longlong,
 ) -> MemoryOutputObjectJoinEvidence8616:
     """Build one atomic refusal without publishing partial objects."""
     conflict = failure in {
@@ -74,20 +80,24 @@ def _refused_8616(
     )
 
 
+@cython.ccall
 def _owner_storage_8616(alias_output: TerminalMemoryAliasFact8616) -> StorageIdentity8616:
     """Project one Alias owner to the function-contract storage identity."""
     address = alias_output.terminal_output.address
     return StorageIdentity8616(StorageIdentityKind8616.MEMORY, address.size, address)
 
 
-def _storage_order_8616(storage: StorageIdentity8616) -> tuple[str, int, int]:
+@cython.ccall
+def _storage_order_8616(storage: StorageIdentity8616) -> tuple[str, cython.longlong, cython.longlong]:
     """Return a primitive deterministic key for exact segmented memory."""
+    address: object
     address = storage.address
     if address is None:
         return ("", -1, storage.width)
     return (address.space.value, address.offset, address.size)
 
 
+@cython.ccall
 def _view_order_8616(view: MemoryOutputViewBinding8616) -> tuple[object, ...]:
     """Return deterministic callsite and projected-storage order."""
     return (
@@ -103,11 +113,12 @@ _GroupedOwnerViews8616 = dict[
 ]
 
 
+@cython.ccall
 def _effect_trial_8616(
     effect: MemoryLiveOutUseFact8616,
-    candidates: list[StorageTrial8616],
-    raw_count: int,
-    normalized_count: int,
+    candidates: object,
+    raw_count: cython.longlong,
+    normalized_count: cython.longlong,
 ) -> StorageTrial8616 | MemoryOutputObjectJoinEvidence8616 | None:
     """Bind at most one matching live-out trial to one memory effect."""
     needs_trial = bool(
@@ -136,15 +147,17 @@ def _effect_trial_8616(
     return candidates[0] if candidates else None
 
 
+@cython.ccall
 def _record_owner_view_8616(
     callsite: CallsiteStorageTrials8616,
     effect: MemoryLiveOutUseFact8616,
     trial: StorageTrial8616 | None,
     grouped: _GroupedOwnerViews8616,
-    raw_count: int,
-    normalized_count: int,
+    raw_count: cython.longlong,
+    normalized_count: cython.longlong,
 ) -> MemoryOutputObjectJoinEvidence8616 | None:
     """Attach one complete view to its canonical Alias owner group."""
+    previous: object
     view = MemoryOutputViewBinding8616(
         callsite.caller_addr,
         callsite.callee_addr,
@@ -164,7 +177,7 @@ def _record_owner_view_8616(
     previous = grouped.get(owner_key)
     if previous is None:
         grouped[owner_key] = (owner, owner_storage, [view])
-    elif previous[0] != owner or previous[1] != owner_storage:
+    elif operator.ne(previous[0], owner) or operator.ne(previous[1], owner_storage):
         return _refused_8616(
             MemoryOutputObjectFailure8616.OWNER_CONFLICT,
             raw_count,
@@ -178,15 +191,20 @@ def _record_owner_view_8616(
 def _group_callsite_effects_8616(
     callsite: CallsiteStorageTrials8616,
     grouped: _GroupedOwnerViews8616,
-    raw_count: int,
-    normalized_count: int,
+    raw_count: cython.longlong,
+    normalized_count: cython.longlong,
 ) -> int | MemoryOutputObjectJoinEvidence8616:
     """Fold one callsite's effects under their canonical Alias owners."""
+    candidates: object
+    owner_refusal: object
+    trial: object
+    effect: object
+    live_out_trial: object
     trials_by_storage: dict[tuple[object, ...], list[StorageTrial8616]] = {}
     for live_out_trial in callsite.live_outs:
         trials_by_storage.setdefault(live_out_trial.storage.key, []).append(live_out_trial)
     seen_effects: set[tuple[object, ...]] = set()
-    consumed_trials: set[int] = set()
+    consumed_trials: set[cython.longlong] = set()
     effects = sorted(callsite.memory_effects, key=lambda item: _storage_order_8616(item.storage))
     for effect in effects:
         if not effect.complete:
@@ -215,7 +233,7 @@ def _group_callsite_effects_8616(
         )
         if owner_refusal is not None:
             return owner_refusal
-    if any(id(item) not in consumed_trials for item in callsite.live_outs):
+    if any(id(item) not in consumed_trials for item in iter(callsite.live_outs)):
         return _refused_8616(
             MemoryOutputObjectFailure8616.EXTRA_TRIAL,
             raw_count,
@@ -224,25 +242,31 @@ def _group_callsite_effects_8616(
     return normalized_count
 
 
+@cython.ccall
 def _owner_trial_consistency_8616(
     grouped: _GroupedOwnerViews8616,
-    raw_count: int,
-    normalized_count: int,
+    raw_count: cython.longlong,
+    normalized_count: cython.longlong,
 ) -> MemoryOutputObjectJoinEvidence8616 | None:
     """Require uniform signedness and value class per owner trial group."""
+    _owner: object
+    _storage: object
+    trials: object
+    view: object
+    views: object
     for _owner, _storage, views in grouped.values():
         by_storage: dict[tuple[object, ...], list[StorageTrial8616]] = {}
         for view in views:
             if view.trial is not None:
                 by_storage.setdefault(view.trial.storage.key, []).append(view.trial)
         for trials in by_storage.values():
-            if len({trial.signedness for trial in trials}) != 1:
+            if len({trial.signedness for trial in iter(trials)}) != 1:
                 return _refused_8616(
                     MemoryOutputObjectFailure8616.SIGNEDNESS_CONFLICT,
                     raw_count,
                     normalized_count,
                 )
-            if len({trial.value_class for trial in trials}) != 1:
+            if len({trial.value_class for trial in iter(trials)}) != 1:
                 return _refused_8616(
                     MemoryOutputObjectFailure8616.VALUE_CLASS_CONFLICT,
                     raw_count,
@@ -251,12 +275,16 @@ def _owner_trial_consistency_8616(
     return None
 
 
+@cython.ccall
 def _owner_disjointness_8616(
-    owners: tuple[TerminalMemoryAliasFact8616, ...],
-    raw_count: int,
-    normalized_count: int,
+    owners: object,
+    raw_count: cython.longlong,
+    normalized_count: cython.longlong,
 ) -> MemoryOutputObjectJoinEvidence8616 | None:
     """Require every pair of Alias owners to be disjoint or exact."""
+    index: object
+    left: object
+    right: object
     for index, left in enumerate(owners):
         for right in owners[index + 1 :]:
             relation = segmented_access_relation_8616(
@@ -276,11 +304,14 @@ def _owner_disjointness_8616(
 
 
 def join_memory_output_object_contracts_8616(
-    callsites: tuple[CallsiteStorageTrials8616, ...],
+    callsites: object,
 ) -> MemoryOutputObjectJoinEvidence8616:
     """Join complete caller memory effects under canonical Alias owners."""
+    consistency: object
+    overlap: object
+    callsite: object
     pointer_join = join_pointer_parameter_memory_outputs_8616(callsites)
-    direct_count = sum(len(callsite.memory_effects) for callsite in callsites)
+    direct_count = sum(len(callsite.memory_effects) for callsite in iter(callsites))
     raw_count = direct_count + pointer_join.stats.raw_fact_count
     normalized_count = pointer_join.stats.normalized_fact_count
     if not pointer_join.complete:
@@ -298,7 +329,7 @@ def join_memory_output_object_contracts_8616(
             return grouped_result
         normalized_count = grouped_result
 
-    owners = tuple(item[0] for _key, item in sorted(grouped.items()))
+    owners = tuple(item[0] for _key, item in builtins.iter(sorted(tuple(grouped.items()))))
     consistency = _owner_trial_consistency_8616(grouped, raw_count, normalized_count)
     if consistency is not None:
         return consistency
@@ -308,7 +339,7 @@ def join_memory_output_object_contracts_8616(
 
     objects = tuple(
         MemoryOutputObjectContract8616(owner, storage, tuple(sorted(views, key=_view_order_8616)))
-        for _key, (owner, storage, views) in sorted(grouped.items())
+        for _key, (owner, storage, views) in builtins.iter(sorted(tuple(grouped.items())))
     )
     return MemoryOutputObjectJoinEvidence8616(
         MemoryOutputObjectJoinVerdict8616.PROVEN,

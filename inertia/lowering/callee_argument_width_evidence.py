@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Aggregate exact incoming call widths for one callee interface.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -20,6 +23,8 @@ from .callee_argument_count_evidence import (
     CalleeArgumentCountEvidence8616,
     collect_callee_argument_count_evidence_8616,
 )
+import dataclasses
+import operator
 
 __all__ = [
     "CalleeArgumentWidthEvidence8616",
@@ -36,18 +41,18 @@ class CalleeArgumentWidthVerdict8616(StrEnum):
     CONFLICT = "conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CalleeArgumentWidthEvidence8616:
     """Closed incoming-width evidence mapped to architectural BP offsets."""
 
-    target_addr: int
+    target_addr: cython.longlong
     verdict: CalleeArgumentWidthVerdict8616
-    widths_by_offset: tuple[tuple[int, int], ...] = ()
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    widths_by_offset: tuple[tuple[cython.longlong, cython.longlong], ...] = ()
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
     argument_count: int | None = None
     argument_storage: tuple[IRAddress, ...] = ()
     count_evidence: CalleeArgumentCountEvidence8616 | None = field(
@@ -55,17 +60,18 @@ class CalleeArgumentWidthEvidence8616:
         compare=False,
     )
 
-    def _verdict_and_evidence_close_8616(self) -> bool:
+    def _verdict_and_evidence_close_8616(self) -> cython.bint:
         """Prove the width verdict and retained count census agree."""
+        count_evidence: object
         count_evidence = self.count_evidence
         return (
             self.verdict is CalleeArgumentWidthVerdict8616.CONSISTENT
             and count_evidence is not None
             and count_evidence.closes_census
-            and self.argument_count == count_evidence.argument_count
+            and operator.eq(self.argument_count, count_evidence.argument_count)
         )
 
-    def _census_counts_clean_8616(self) -> bool:
+    def _census_counts_clean_8616(self) -> cython.bint:
         """Prove every collected fact classified and materialized exactly."""
         return (
             self.raw_fact_count > 0
@@ -77,20 +83,20 @@ class CalleeArgumentWidthEvidence8616:
         )
 
     @property
-    def closes_census(self) -> bool:
+    def closes_census(self) -> cython.bint:
         """Return whether all callers prove one exact callee stack layout."""
         if not self._verdict_and_evidence_close_8616():
             return False
         if not self._census_counts_clean_8616():
             return False
-        return len(self.argument_storage) == self.argument_count
+        return operator.eq(len(self.argument_storage), self.argument_count)
 
     @property
-    def argument_widths(self) -> tuple[int, ...]:
+    def argument_widths(self) -> tuple[cython.longlong, ...]:
         """Return source-order widths from the accepted stack identities."""
         if not self.closes_census:
             return ()
-        return tuple(address.size for address in self.argument_storage)
+        return tuple(address.size for address in iter(self.argument_storage))
 
     @property
     def required_count_evidence(self) -> CalleeArgumentCountEvidence8616:
@@ -100,13 +106,15 @@ class CalleeArgumentWidthEvidence8616:
         return self.count_evidence
 
 
+@cython.ccall
 def _widths_by_offset_8616(
-    widths: tuple[int, ...],
-    first_argument_bp_offset: int = 4,
-) -> tuple[tuple[int, int], ...]:
+    widths: object,
+    first_argument_bp_offset: cython.longlong = 4,
+) -> tuple[tuple[cython.longlong, cython.longlong], ...]:
     """Map source-order argument widths onto the callee's BP argument storage."""
+    width: object
     offset = first_argument_bp_offset
-    mapped: list[tuple[int, int]] = []
+    mapped: list[tuple[cython.longlong, cython.longlong]] = []
     for width in widths:
         mapped.append((offset, width))
         offset += width
@@ -114,7 +122,7 @@ def _widths_by_offset_8616(
 
 
 def _argument_storage_8616(
-    widths_by_offset: tuple[tuple[int, int], ...],
+    widths_by_offset: object,
 ) -> tuple[IRAddress, ...]:
     """Build exact callee `SS:BP+offset` identities for source arguments."""
     return tuple(
@@ -126,37 +134,38 @@ def _argument_storage_8616(
             status=AddressStatus.STABLE,
             segment_origin=SegmentOrigin.DEFAULTED,
         )
-        for offset, width in widths_by_offset
+        for offset, width in iter(widths_by_offset)
     )
 
 
 def _logical_widths_for_proven_count_8616(
     summary: CallsiteSummary8616,
-    argument_count: int,
-) -> tuple[int, ...] | None:
+    argument_count: cython.longlong,
+) -> object:
     """Project widths after arity proof without requiring value provenance."""
-    explicit_widths: tuple[int, ...] = summary.logical_arg_widths
-    physical_widths: tuple[int, ...] = summary.arg_widths
+    widths: object
+    explicit_widths: object = summary.logical_arg_widths
+    physical_widths: object = summary.arg_widths
     if explicit_widths:
         if (
-            len(explicit_widths) != argument_count
-            or any(width <= 0 for width in explicit_widths)
-            or any(width <= 0 for width in physical_widths)
-            or sum(explicit_widths) != sum(physical_widths)
-            or summary.stack_cleanup != sum(explicit_widths)
+            operator.ne(len(explicit_widths), argument_count)
+            or any(width <= 0 for width in iter(explicit_widths))
+            or any(width <= 0 for width in iter(physical_widths))
+            or operator.ne(sum(explicit_widths), sum(physical_widths))
+            or operator.ne(summary.stack_cleanup, sum(explicit_widths))
         ):
             return None
         return explicit_widths
-    widths: tuple[int, ...] | None = logical_argument_widths_from_callsite_8616(
+    widths = logical_argument_widths_from_callsite_8616(
         summary,
         expected_arg_count=argument_count,
     )
     if widths is not None:
         return widths
     if (
-        len(physical_widths) != argument_count
-        or summary.stack_cleanup != sum(physical_widths)
-        or any(not isinstance(width, int) or width <= 0 for width in physical_widths)
+        operator.ne(len(physical_widths), argument_count)
+        or operator.ne(summary.stack_cleanup, sum(physical_widths))
+        or any(not isinstance(width, int) or width <= 0 for width in iter(physical_widths))
     ):
         return None
     return tuple(reversed(physical_widths))
@@ -164,9 +173,10 @@ def _logical_widths_for_proven_count_8616(
 
 def collect_callee_argument_width_evidence_8616(
     project: object,
-    target_addr: int,
+    target_addr: cython.longlong,
 ) -> CalleeArgumentWidthEvidence8616:
     """Join exact logical widths from every completely classified caller."""
+    widths: object
     count_evidence = collect_callee_argument_count_evidence_8616(project, target_addr)
     summaries = count_evidence.callsite_summaries
     raw_count = count_evidence.raw_fact_count
@@ -195,7 +205,7 @@ def collect_callee_argument_width_evidence_8616(
         )
     classified_widths = tuple(
         widths
-        for summary in summaries
+        for summary in iter(summaries)
         if (
             widths := _logical_widths_for_proven_count_8616(
                 summary,

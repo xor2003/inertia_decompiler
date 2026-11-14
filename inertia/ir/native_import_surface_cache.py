@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: IR.
 Responsibility: reuse isolated native facts inside one import request, never proofs.
 
@@ -10,6 +11,8 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import os
 from collections.abc import Callable, Iterator
@@ -27,25 +30,30 @@ from .direct_evidence_deadline import direct_evidence_deadline_expired_8616
 from .native_copy_memo import seed_native_copy_memo_8616
 from .raw_boot_native_surface_cache import _native_surface_key_8616
 from .source_graph_binding import ImmutableSourceGraphFacts8616
+import dataclasses
+import operator
+import builtins
+T = typing.TypeVar("T")
 
 _MAX_RECORDS = 4
 _MAX_BLOCKS = 256
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NativeCensusSourceBinding8616:
     """Retained source identity only, never proof or callback-reuse authority."""
 
     project: object = field(compare=False, repr=False)
     boundary: ExactFunctionRangeBoundary8616 = field(compare=False, repr=False)
-    key: tuple[object, ...]
-    pinned: tuple[object, ...] = field(compare=False, repr=False)
+    key: object
+    pinned: object = field(compare=False, repr=False)
 
 
+@cython.ccall
 def native_census_source_current_8616(
-    binding: NativeCensusSourceBinding8616, *, producers: tuple[object, ...],
-    allow_conditional_source: bool = False,
-) -> bool:
+    binding: NativeCensusSourceBinding8616, *, producers: object,
+    allow_conditional_source: cython.bint = False,
+) -> cython.bint:
     """Check the original import key against current source/configuration inputs.
 
     Supply the current fetch/import producers, never the retained old objects.
@@ -54,6 +62,7 @@ def native_census_source_current_8616(
     Conditional input checks require explicit opt-in; that opt-in authenticates
     only raw lift inputs, never the retained return premise or call effects.
     """
+    current: object
     if direct_evidence_deadline_expired_8616(binding.project):
         return False
     conditional = (binding.boundary.near_return_continuations is not None
@@ -61,24 +70,24 @@ def native_census_source_current_8616(
     if conditional and not allow_conditional_source:
         return False
     current = _source_key_8616(binding.project, binding.boundary, producers)
-    unchanged = current is not None and current[0] == binding.key
+    unchanged = current is not None and operator.eq(current[0], binding.key)
     return unchanged and not direct_evidence_deadline_expired_8616(binding.project)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NativeCensusBlockSelection8616:
     """Raw native blocks and the indexing work actually performed this time."""
 
-    blocks: dict[int, IRBlock]
-    work_units: int
+    blocks: object
+    work_units: cython.longlong
     source_binding: NativeCensusSourceBinding8616 | None = field(default=None, repr=False)
     #: ``(block_addr, stop_after)`` for each returned block whose detached
     #: copy carries only the consumed row prefix. Empty for ordinary full
     #: selections; a listed block can never satisfy a whole-block binding.
-    prefix_rows: tuple[tuple[int, int], ...] = ()
+    prefix_rows: tuple[tuple[cython.longlong, cython.longlong], ...] = ()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _CensusProjection:
     """One private index of raw rows, owned by the existing raw record.
 
@@ -87,18 +96,18 @@ class _CensusProjection:
     address; same-key growth replaces it with a fresh detached copy.
     """
 
-    key: tuple[object, ...]
-    pinned: tuple[object, ...]
-    blocks: dict[int, IRBlock]
-    complete_inventory: bool
-    prefix_rows: tuple[tuple[int, int], ...]
+    key: object
+    pinned: object
+    blocks: object
+    complete_inventory: cython.bint
+    prefix_rows: object
 
 
 def _projection_covers_8616(
     projection: _CensusProjection,
-    selected_blocks: frozenset[int] | None,
-    terminal: tuple[int, int] | None,
-) -> bool:
+    selected_blocks: object,
+    terminal: object,
+) -> cython.bint:
     """Require every requested block and every requested row to be retained."""
     if selected_blocks is None:
         if not projection.complete_inventory:
@@ -108,32 +117,35 @@ def _projection_covers_8616(
     return all(
         (selected_blocks is not None and addr not in selected_blocks)
         or terminal == (addr, stop)
-        for addr, stop in projection.prefix_rows
+        for addr, stop in iter(projection.prefix_rows)
     )
 
 
+@cython.ccall
 def _select_census_rows_8616(
-    blocks: dict[int, IRBlock], selected_blocks: frozenset[int] | None,
-    terminal: tuple[int, int] | None,
-) -> tuple[dict[int, IRBlock], tuple[tuple[int, int], ...]]:
+    blocks: object, selected_blocks: object,
+    terminal: object,
+) -> object:
     """Choose raw row references before allocating any detached graph."""
     selected = blocks if selected_blocks is None else {
-        addr: block for addr, block in blocks.items() if addr in selected_blocks
+        addr: block for addr, block in builtins.iter(blocks.items()) if addr in selected_blocks
     }
     return _census_terminal_prefix_8616(selected, terminal)
 
 
+@cython.ccall
 def _retained_projection_source_8616(
-    projection: _CensusProjection | None,
-    current: tuple[tuple[object, ...], tuple[object, ...]],
-) -> tuple[tuple[object, ...], tuple[object, ...]]:
+    projection: object,
+    current: object,
+) -> object:
     """Keep source identity across inventory growth only after fresh equality."""
-    if projection is not None and projection.key == current[0]:
+    if projection is not None and operator.eq(projection.key, current[0]):
         return projection.key, projection.pinned
     return current
 
 
-def _copy_census_blocks_8616(blocks: dict[int, IRBlock]) -> dict[int, IRBlock]:
+@cython.ccall
+def _copy_census_blocks_8616(blocks: object) -> object:
     """Detach selected graphs with the canonical typed deepcopy memo.
 
     The memo owns fresh clones, never shared frozen source nodes. One memo
@@ -144,12 +156,12 @@ def _copy_census_blocks_8616(blocks: dict[int, IRBlock]) -> dict[int, IRBlock]:
 
 
 def _grow_census_projection_8616(
-    retained: _CensusProjection | None,
-    key: tuple[object, ...],
-    available: dict[int, IRBlock],
-    selected: dict[int, IRBlock],
-    prefix_rows: tuple[tuple[int, int], ...],
-) -> tuple[dict[int, IRBlock], tuple[tuple[int, int], ...], int]:
+    retained: object,
+    key: object,
+    available: object,
+    selected: object,
+    prefix_rows: object,
+) -> tuple[dict[cython.longlong, IRBlock], tuple[tuple[cython.longlong, cython.longlong], ...], cython.longlong]:
     """Extend one same-source projection without re-copying private blocks.
 
     Only a projection authenticated against the freshly checked ``key``
@@ -168,11 +180,13 @@ def _grow_census_projection_8616(
     Only addresses in the fresh raw inventory may be retained, so growth
     cannot accumulate stale addresses or exceed that inventory's bound.
     """
-    donated: dict[int, IRBlock] = {}
-    markers: list[tuple[int, int]] = []
-    if retained is None or retained.key != key:
+    addr: object
+    block: object
+    donated: dict[cython.longlong, IRBlock] = {}
+    markers: list[tuple[cython.longlong, cython.longlong]] = []
+    if retained is None or operator.ne(retained.key, key):
         copied = _copy_census_blocks_8616(selected)
-        return copied, prefix_rows, len(copied) + sum(len(block.instrs) for block in copied.values())
+        return copied, prefix_rows, len(copied) + sum(len(block.instrs) for block in builtins.iter(copied.values()))
     work = len(selected) + len(retained.prefix_rows)
     truncated = dict(retained.prefix_rows)
     for addr, block in retained.blocks.items():
@@ -184,21 +198,24 @@ def _grow_census_projection_8616(
                 continue
             markers.append((addr, truncated[addr]))
         donated[addr] = block
-    missing = {addr: block for addr, block in selected.items() if addr not in donated}
+    missing = {addr: block for addr, block in builtins.iter(selected.items()) if addr not in donated}
     copied = _copy_census_blocks_8616(missing)
-    work += len(copied) + sum(len(block.instrs) for block in copied.values())
-    markers.extend(row for row in prefix_rows if row[0] in missing)
+    work += len(copied) + sum(len(block.instrs) for block in builtins.iter(copied.values()))
+    markers.extend(row for row in iter(prefix_rows) if row[0] in missing)
     donated.update(copied)
     return donated, tuple(markers), work
 
 
-def _census_prefix_count_8616(block: IRBlock, stop_after: int) -> int | None:
+@cython.ccall
+def _census_prefix_count_8616(block: IRBlock, stop_after: cython.longlong) -> int | None:
     """Select exactly the ordered native prefix an exact cutoff consumes.
 
     ``None`` on a non-int stop or row address or a stop before the block
     head; otherwise the index of the first row past the cutoff. Rows after
     the returned index are never copied or authorized for the caller.
     """
+    index: object
+    instruction: object
     if type(stop_after) is not int or type(block.addr) is not int or stop_after < block.addr:
         return None
     for index, instruction in enumerate(block.instrs):
@@ -209,9 +226,10 @@ def _census_prefix_count_8616(block: IRBlock, stop_after: int) -> int | None:
     return len(block.instrs)
 
 
+@cython.ccall
 def _census_terminal_prefix_8616(
-    selected: dict[int, IRBlock], terminal: tuple[int, int] | None,
-) -> tuple[dict[int, IRBlock], tuple[tuple[int, int], ...]]:
+    selected: object, terminal: object,
+) -> tuple[dict[cython.longlong, IRBlock], tuple[tuple[cython.longlong, cython.longlong], ...]]:
     """Apply one caller-declared consumed-row cutoff to the detached set.
 
     Returns the original selection unchanged with empty ``prefix_rows``
@@ -220,6 +238,7 @@ def _census_terminal_prefix_8616(
     template carries only the consumed prefix rows. Invalid, missing or
     degenerate cutoffs authorize nothing and are silently full.
     """
+    count: object
     if not (
         type(terminal) is tuple
         and len(terminal) == 2
@@ -242,10 +261,10 @@ def _request_native_census_blocks_8616(
     boundary: ExactFunctionRangeBoundary8616,
     fetch: Callable[[object, object], tuple[IRBlock, ...] | None],
     *,
-    selected_blocks: frozenset[int] | None = None,
-    producers: tuple[object, ...],
-    terminal: tuple[int, int] | None = None,
-    allow_conditional_source: bool = False,
+    selected_blocks: object = None,
+    producers: object,
+    terminal: object = None,
+    allow_conditional_source: cython.bint = False,
 ) -> NativeCensusBlockSelection8616 | None:
     """Select detached raw rows from the existing bounded native-fact session.
 
@@ -274,6 +293,12 @@ def _request_native_census_blocks_8616(
     that independently reauthenticates conditional call effects. It does not
     authorize path reuse; default consumers receive no conditional binding.
     """
+    after: object
+    before: object
+    projection: object
+    record: object
+    rows: object
+    session: object
     session = _ACTIVE.get()
     if session is None or direct_evidence_deadline_expired_8616(project):
         return None
@@ -288,19 +313,19 @@ def _request_native_census_blocks_8616(
     record = session.records.get(slot)
     projection = None if record is None else record.census
     work_units = 0
-    if (projection is None or projection.key != before[0]
+    if (projection is None or operator.ne(projection.key, before[0])
             or not _projection_covers_8616(projection, selected_blocks, terminal)):
         rows = fetch(project, boundary)
         if rows is None or direct_evidence_deadline_expired_8616(project):
             return None
         after = _source_key_8616(project, boundary, authorities)
         record = session.records.get(slot)
-        if after is None or before[0] != after[0] or record is None:
+        if after is None or operator.ne(before[0], after[0]) or record is None:
             return None
-        if len(rows) > _MAX_BLOCKS or any(type(row.addr) is not int for row in rows):
+        if len(rows) > _MAX_BLOCKS or any(type(row.addr) is not int for row in iter(rows)):
             return None
-        blocks = {row.addr: row for row in rows}
-        if len(blocks) != len(rows):
+        blocks = {row.addr: row for row in iter(rows)}
+        if operator.ne(len(blocks), len(rows)):
             return None
         selected, prefix_rows = _select_census_rows_8616(blocks, selected_blocks, terminal)
         private_rows, stored_prefixes, growth_work = _grow_census_projection_8616(
@@ -309,33 +334,33 @@ def _request_native_census_blocks_8616(
             return None
         key, pinned = _retained_projection_source_8616(projection, after)
         projection = _CensusProjection(
-            key, pinned, private_rows, len(private_rows) == len(blocks), stored_prefixes,
+            key, pinned, private_rows, operator.eq(len(private_rows), len(blocks)), stored_prefixes,
         )
         _retain_8616(session, slot, replace(record, census=projection))
         # Index every raw block header, but copy only the rows not already private.
         work_units = len(rows) + growth_work
     selected, narrowed_prefixes = _select_census_rows_8616(projection.blocks, selected_blocks, terminal)
-    inherited_prefixes = tuple(row for row in projection.prefix_rows if row[0] in selected)
-    prefix_rows = inherited_prefixes + tuple(row for row in narrowed_prefixes if row not in inherited_prefixes)
+    inherited_prefixes = tuple(row for row in iter(projection.prefix_rows) if row[0] in selected)
+    prefix_rows = inherited_prefixes + tuple(row for row in iter(narrowed_prefixes) if row not in inherited_prefixes)
     detached = _copy_census_blocks_8616(selected)
     if direct_evidence_deadline_expired_8616(project):
         return None
-    work_units += len(detached) + sum(len(block.instrs) for block in detached.values())
+    work_units += len(detached) + sum(len(block.instrs) for block in builtins.iter(detached.values()))
     binding = None if (boundary.near_return_continuations is not None and not allow_conditional_source) else NativeCensusSourceBinding8616(
         project, boundary, projection.key, projection.pinned,
     )
     return NativeCensusBlockSelection8616(detached, work_units, binding, prefix_rows)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _Record:
     """Private facts and the live identities that authenticate their source."""
 
     project: object
-    key: tuple[object, ...]
-    pinned: tuple[object, ...]
+    key: object
+    pinned: object
     surface: object
-    blocks: int
+    blocks: cython.longlong
     census: _CensusProjection | None = None
     #: Canonical facts detached from ``surface`` on first rebind demand. The
     #: retained graph itself is never re-encoded once this is populated.
@@ -344,7 +369,7 @@ class _Record:
     facts_producer: object = None
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _Session:
     """Bounded storage owned by exactly one outer import operation.
 
@@ -354,16 +379,17 @@ class _Session:
     variants; the global record and block caps bound all variants together.
     """
 
-    records: dict[tuple[int, int, object], _Record] = field(default_factory=dict)
+    records: object = field(default_factory=dict)
     #: Opaque terminal-fact records pinned by owning consumers. Released with
     #: the session on outer request exit; no global or cross-request store.
-    terminal_facts: dict[tuple[int, int, int, int | None], object] = field(default_factory=dict)
+    terminal_facts: object = field(default_factory=dict)
 
 
 _ACTIVE: ContextVar[_Session | None] = ContextVar("native_import_surface", default=None)
 
 
-def native_terminal_fact_store_8616() -> dict[tuple[int, int, int, int | None], object] | None:
+@cython.ccall
+def native_terminal_fact_store_8616() -> object:
     """Return the active request's bounded terminal-fact map, or ``None``.
 
     Owning consumers may pin typed detached-fact records keyed by their own
@@ -371,6 +397,7 @@ def native_terminal_fact_store_8616() -> dict[tuple[int, int, int, int | None], 
     with the session on outer ``native_import_request_8616`` exit, so records
     can never outlive the request that produced them.
     """
+    session: object
     session = _ACTIVE.get()
     return None if session is None else session.terminal_facts
 
@@ -390,7 +417,7 @@ def native_import_request_8616() -> Iterator[None]:
         _ACTIVE.reset(token)
 
 
-def _configuration_8616(project: object) -> tuple[tuple[object, ...], tuple[object, ...]] | None:
+def _configuration_8616(project: object) -> object:
     """Bind canonical angr byte sources, stop points and native lift producers."""
     from angr import Project
     from angr.engines import UberEngine
@@ -424,7 +451,7 @@ def _configuration_8616(project: object) -> tuple[tuple[object, ...], tuple[obje
         record_access, *registered, *Lifter86_16.instrs,
     )
     key = (
-        tuple(id(producer) for producer in producers),
+        tuple(id(producer) for producer in iter(producers)),
         engine._single_step, engine.default_strict_block_end,
         tuple(sorted(external._sim_procedures)),
         os.environ.get("INERTIA_ENABLE_AFFINE_SWITCH_CONDITIONS") == "1",
@@ -435,9 +462,11 @@ def _configuration_8616(project: object) -> tuple[tuple[object, ...], tuple[obje
 
 def _source_key_8616(
     project: object, boundary: ExactFunctionRangeBoundary8616,
-    producers: tuple[object, ...],
-) -> tuple[tuple[object, ...], tuple[object, ...]] | None:
+    producers: object,
+) -> object:
     """Authenticate the exact native source and retain every identity authority."""
+    configuration: object
+    source: object
     from .vex_import import build_x86_16_ir_function_artifact
 
     configuration = _configuration_8616(project)
@@ -449,13 +478,14 @@ def _source_key_8616(
     if source is None:
         return None
     producers = (*producers, _copy_census_blocks_8616, seed_native_copy_memo_8616)
-    key = source[0], configuration[0], tuple(id(producer) for producer in producers)
+    key = source[0], configuration[0], tuple(id(producer) for producer in iter(producers))
     return key, (*source[1], *configuration[1], *producers)
 
 
+@cython.ccall
 def _variant_slot_8616(
-    project: object, addr: int, source: object,
-) -> tuple[int, int, object]:
+    project: object, addr: cython.longlong, source: object,
+) -> tuple[cython.longlong, cython.longlong, object]:
     """Name the bounded slot of one exact authenticated raw surface variant.
 
     ``source`` is the raw surface key (``before[0][0]``): bytes, boundary
@@ -466,40 +496,55 @@ def _variant_slot_8616(
     return id(project), addr, source
 
 
-def _drop_address_variants_8616(session: _Session, project: object, addr: int) -> None:
+@cython.ccall
+def _drop_address_variants_8616(session: _Session, project: object, addr: cython.longlong) -> None:
     """Release every retained raw variant of one address deterministically."""
+    slot: object
     owner = id(project)
-    for slot in [slot for slot in session.records if slot[0] == owner and slot[1] == addr]:
+    for slot in [slot for slot in iter(session.records) if operator.eq(slot[0], owner) and operator.eq(slot[1], addr)]:
         del session.records[slot]
 
 
 def _retain_8616(
-    session: _Session, slot: tuple[int, int, object], record: _Record,
+    session: _Session, slot: object, record: _Record,
 ) -> None:
-    """Evict oldest variant facts deterministically before exceeding the caps.
+    """Evict smaller resident surfaces first without exceeding either cap.
 
     ``_MAX_RECORDS`` counts every retained variant, not distinct addresses;
     ``_MAX_BLOCKS`` sums blocks across all variants together. The same slot
     is released before counting so replacement never double-counts, and every
     insertion — including reinsertion after a reentrant copy/projection
     callback — passes through this bound-aware path.
+
+    Native block count estimates the lifting work retained for later source
+    revalidation. Equal-size victims keep insertion order, and the newly
+    supplied record is still admitted for its immediate consumers. This changes
+    residency only; every cache read retains its source and producer checks.
     """
+    victim: object
+    candidate: object
+    retained: object
     session.records.pop(slot, None)
     while session.records and (
         len(session.records) >= _MAX_RECORDS
-        or sum(item.blocks for item in session.records.values()) + record.blocks > _MAX_BLOCKS
+        or sum(item.blocks for item in builtins.iter(session.records.values())) + record.blocks > _MAX_BLOCKS
     ):
-        del session.records[next(iter(session.records))]
+        victim = next(iter(session.records))
+        for candidate, retained in session.records.items():
+            if retained.blocks < session.records[victim].blocks:
+                victim = candidate
+        del session.records[victim]
     session.records[slot] = record
 
 
-def request_native_surface_8616[T](
+@cython.ccall
+def request_native_surface_8616(
     project: object,
     function: object,
     importer: Callable[[object, object], T],
     *,
-    producers: tuple[object, ...],
-    admit: Callable[[T, ExactFunctionRangeBoundary8616], bool],
+    producers: object,
+    admit: Callable[[T, ExactFunctionRangeBoundary8616], cython.bint],
     clone: Callable[[T], T] = deepcopy,
 ) -> T:
     """Reuse private fact copies only; the caller always reruns proof and finishing.
@@ -512,6 +557,10 @@ def request_native_surface_8616[T](
     path return its typed incomplete surface. No proof verdict or transient
     import failure is memoized; unresolved native facts retain their reasons.
     """
+    after: object
+    before: object
+    record: object
+    session: object
     session = _ACTIVE.get()
     if session is None or type(function) is not ExactFunctionRangeBoundary8616:
         return importer(project, function)
@@ -531,7 +580,7 @@ def request_native_surface_8616[T](
             # current boundary. Equivalent reconstructed boundaries may share
             # only lifting. Other raw variants of this address stay retained;
             # a mismatched key is never authenticated as current.
-            unchanged = record.project is project and record.key == before[0]
+            unchanged = record.project is project and operator.eq(record.key, before[0])
             if unchanged and not direct_evidence_deadline_expired_8616(project):
                 result = clone(cast(T, record.surface))
                 if not direct_evidence_deadline_expired_8616(project):
@@ -541,7 +590,7 @@ def request_native_surface_8616[T](
     if before is None or direct_evidence_deadline_expired_8616(project) or not admit(result, boundary):
         return result
     after = _source_key_8616(project, boundary, authorities)
-    if after is not None and before[0] == after[0]:
+    if after is not None and operator.eq(before[0], after[0]):
         private = clone(result)
         if not direct_evidence_deadline_expired_8616(project):
             _retain_8616(session, _variant_slot_8616(
@@ -563,7 +612,7 @@ class NativeFactRebindState8616(Enum):
     UNRESOLVED = "unresolved"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NativeFactRebind8616:
     """One rebind outcome; ``evidence`` is a detached, caller-owned value."""
 
@@ -575,9 +624,10 @@ _REBIND_UNRESOLVED_8616 = NativeFactRebind8616(NativeFactRebindState8616.UNRESOL
 _REBIND_REFUSED_8616 = NativeFactRebind8616(NativeFactRebindState8616.REFUSED)
 
 
+@cython.ccall
 def _immutable_facts_equal_8616(
     caller: ImmutableSourceGraphFacts8616, native: ImmutableSourceGraphFacts8616,
-) -> bool:
+) -> cython.bint:
     """Replay the sealed graph/refusal comparison over frozen canonical facts.
 
     Dataclass ``==`` covers ``function_addr``, ``roots`` and ``records`` — the
@@ -588,18 +638,18 @@ def _immutable_facts_equal_8616(
     """
     return bool(
         caller == native
-        and caller.function_refusals == native.function_refusals
-        and caller.block_refusals == native.block_refusals
+        and operator.eq(caller.function_refusals, native.function_refusals)
+        and operator.eq(caller.block_refusals, native.block_refusals)
     )
 
 
-def request_native_fact_rebind_8616[T](
+def request_native_fact_rebind_8616(
     project: object,
     function: object,
     importer: Callable[[object, object], T],
     *,
-    producers: tuple[object, ...],
-    admit: Callable[[T, ExactFunctionRangeBoundary8616], bool],
+    producers: object,
+    admit: Callable[[T, ExactFunctionRangeBoundary8616], cython.bint],
     clone: Callable[[T], T] = deepcopy,
     native_facts: Callable[[T], ImmutableSourceGraphFacts8616 | None],
     caller_facts: Callable[[], ImmutableSourceGraphFacts8616 | None],
@@ -621,6 +671,11 @@ def request_native_fact_rebind_8616[T](
     Malformed caller or native graphs propagate the canonical owner's typed
     ``SourceGraphSerializationError8616`` exactly like the shared encoder.
     """
+    after: object
+    before: object
+    facts: object
+    record: object
+    session: object
     session = _ACTIVE.get()
     if session is None or type(function) is not ExactFunctionRangeBoundary8616:
         return _REBIND_UNRESOLVED_8616
@@ -638,7 +693,7 @@ def request_native_fact_rebind_8616[T](
     if (
         record is None
         or record.project is not project
-        or record.key != before[0]
+        or operator.ne(record.key, before[0])
         or direct_evidence_deadline_expired_8616(project)
     ):
         return _REBIND_UNRESOLVED_8616
@@ -670,7 +725,7 @@ def request_native_fact_rebind_8616[T](
     # Recheck bytes and configuration after every projection/copy callback.
     # A record authenticated before a callback is not evidence about its edits.
     after = _source_key_8616(project, boundary, authorities)
-    if (after is None or after[0] != before[0]
+    if (after is None or operator.ne(after[0], before[0])
             or direct_evidence_deadline_expired_8616(project)):
         session.records.pop(slot, None)
         return _REBIND_REFUSED_8616

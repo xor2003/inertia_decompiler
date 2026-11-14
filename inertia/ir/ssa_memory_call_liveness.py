@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify call clobbers that can reach typed stack-memory loads.
 
 Layer: IR.
@@ -9,6 +10,8 @@ This module does not infer call effects, aliases, C variables, or types.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 
@@ -16,22 +19,27 @@ from .core import IRAddress, IRCallStackEffect8616
 from .ssa import SSABlock
 from .ssa_memory_contracts import MemoryRangeKey8616
 from .ssa_memory_ranges import memory_range_key_8616, stack_memory_access_8616
+import operator
+import builtins
 
 __all__ = ["call_clobbered_load_ranges_8616"]
 
 
 def _call_clobber_cells_8616(
-    ordered_blocks: tuple[SSABlock, ...],
-    ordered_range_keys: tuple[MemoryRangeKey8616, ...],
+    ordered_blocks: object,
+    ordered_range_keys: object,
     range_addresses: Mapping[MemoryRangeKey8616, IRAddress],
     cells_by_range: Mapping[
         MemoryRangeKey8616,
         tuple[MemoryRangeKey8616, ...],
     ],
-) -> dict[tuple[int, int], frozenset[MemoryRangeKey8616]]:
+) -> object:
     """Collect the cells each CALL may clobber, keyed by exact site."""
+    block: object
+    instruction: object
+    instruction_index: object
     call_clobbered_cells: dict[
-        tuple[int, int],
+        tuple[cython.longlong, cython.longlong],
         frozenset[MemoryRangeKey8616],
     ] = {}
     for block in ordered_blocks:
@@ -41,18 +49,18 @@ def _call_clobber_cells_8616(
             effect = instruction.call_stack_effect or IRCallStackEffect8616()
             call_clobbered_cells[(block.addr, instruction_index)] = frozenset(
                 cell
-                for range_key in ordered_range_keys
+                for range_key in iter(ordered_range_keys)
                 if not effect.preserves(range_addresses[range_key])
-                for cell in cells_by_range[range_key]
+                for cell in iter(cells_by_range[range_key])
             )
     return call_clobbered_cells
 
 
 def _propagate_block_clobbers_8616(
     block: SSABlock,
-    predecessor_map: Mapping[int, tuple[int, ...]],
+    predecessor_map: Mapping[cython.longlong, tuple[cython.longlong, ...]],
     call_clobbered_cells: Mapping[
-        tuple[int, int],
+        tuple[cython.longlong, cython.longlong],
         frozenset[MemoryRangeKey8616],
     ],
     cells_by_range: Mapping[
@@ -60,10 +68,15 @@ def _propagate_block_clobbers_8616(
         tuple[MemoryRangeKey8616, ...],
     ],
     range_addresses: Mapping[MemoryRangeKey8616, IRAddress],
-    exit_clobbered_cells: dict[int, frozenset[MemoryRangeKey8616]],
-    refused_ranges: set[MemoryRangeKey8616],
-) -> bool:
+    exit_clobbered_cells: object,
+    refused_ranges: object,
+) -> cython.bint:
     """Run one forward clobber transfer for a block; report any exit change."""
+    address: object
+    range_key: object
+    instruction: object
+    instruction_index: object
+    predecessor: object
     current_cells: set[MemoryRangeKey8616] = set()
     for predecessor in predecessor_map.get(block.addr, ()):
         current_cells.update(exit_clobbered_cells.get(predecessor, ()))
@@ -81,19 +94,19 @@ def _propagate_block_clobbers_8616(
         if instruction.op == "STORE":
             current_cells.difference_update(cells)
         elif instruction.op == "LOAD" and any(
-            cell in current_cells for cell in cells
+            cell in current_cells for cell in iter(cells)
         ):
             refused_ranges.add(range_key)
     current_exit = frozenset(current_cells)
-    if exit_clobbered_cells[block.addr] == current_exit:
+    if operator.eq(exit_clobbered_cells[block.addr], current_exit):
         return False
     exit_clobbered_cells[block.addr] = current_exit
     return True
 
 
 def call_clobbered_load_ranges_8616(
-    blocks: tuple[SSABlock, ...],
-    predecessor_map: Mapping[int, tuple[int, ...]],
+    blocks: object,
+    predecessor_map: Mapping[cython.longlong, tuple[cython.longlong, ...]],
     range_addresses: Mapping[MemoryRangeKey8616, IRAddress],
     cells_by_range: Mapping[
         MemoryRangeKey8616,
@@ -108,6 +121,7 @@ def call_clobbered_load_ranges_8616(
     iterated to a fixed point so a call after a load can still affect the next
     iteration.
     """
+    block: object
     ordered_blocks = tuple(sorted(blocks, key=lambda item: item.addr))
     ordered_range_keys = tuple(sorted(range_addresses))
     call_clobbered_cells = _call_clobber_cells_8616(
@@ -117,11 +131,11 @@ def call_clobbered_load_ranges_8616(
         cells_by_range,
     )
 
-    exit_clobbered_cells: dict[int, frozenset[MemoryRangeKey8616]] = {
-        block.addr: frozenset() for block in ordered_blocks
+    exit_clobbered_cells: dict[cython.longlong, frozenset[MemoryRangeKey8616]] = {
+        block.addr: frozenset() for block in iter(ordered_blocks)
     }
     refused_ranges: set[MemoryRangeKey8616] = set()
-    cell_count = len({cell for cells in cells_by_range.values() for cell in cells})
+    cell_count = len({cell for cells in builtins.iter(cells_by_range.values()) for cell in iter(cells)})
     iteration_limit = max(1, len(ordered_blocks) * max(1, cell_count) + 1)
     for _iteration in range(iteration_limit):
         changed = False

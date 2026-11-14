@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Report generated-C acceptance markers without defining semantic truth.
 
 Layer: CLI/fallback/reporting.
@@ -5,6 +6,8 @@ Responsibility: summarize generated-output quality markers without deciding sema
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import json
 import re
@@ -15,6 +18,7 @@ from inertia.cli.work_items import (
     TailValidationDisplayOutcome,
     normalize_tail_validation_status,
 )
+import dataclasses
 
 __all__ = [
     "AcceptanceScorecard",
@@ -44,15 +48,15 @@ class X86_16QualityMetrics:
     def __init__(
         self,
         *,
-        function_name: str = "unknown",
-        function_addr: int = 0,
-        tmp_condition_count: int = 0,
-        raw_flag_condition_count: int = 0,
-        raw_ss_linear_expr_count: int = 0,
-        asm_fallback_count: int = 0,
-        validation_uncollected_count: int = 0,
-        typed_condition_count: int = 0,
-        named_local_count: int = 0,
+        function_name: object = "unknown",
+        function_addr: cython.longlong = 0,
+        tmp_condition_count: cython.longlong = 0,
+        raw_flag_condition_count: cython.longlong = 0,
+        raw_ss_linear_expr_count: cython.longlong = 0,
+        asm_fallback_count: cython.longlong = 0,
+        validation_uncollected_count: cython.longlong = 0,
+        typed_condition_count: cython.longlong = 0,
+        named_local_count: cython.longlong = 0,
     ) -> None:
         """Initialize a deterministic quality metric row for one function."""
         self.function_name = function_name
@@ -80,7 +84,7 @@ class X86_16QualityMetrics:
         }
 
     @property
-    def total_bad_patterns(self) -> int:
+    def total_bad_patterns(self) -> cython.longlong:
         """Return the total count of emitted-C patterns that lower quality."""
         return (
             self.tmp_condition_count
@@ -90,7 +94,7 @@ class X86_16QualityMetrics:
         )
 
     @property
-    def quality_score(self) -> float:
+    def quality_score(self) -> cython.double:
         """Return the bounded quality score derived from bad-pattern counters."""
         penalty = self.total_bad_patterns * 0.1 + self.validation_uncollected_count * 0.5
         penalty = min(penalty, 0.95)
@@ -104,25 +108,30 @@ _CMP_NE_RE = re.compile(r"CmpNE\(", re.IGNORECASE)
 _CMP_EQ_RE = re.compile(r"CmpEQ\(", re.IGNORECASE)
 
 
-def _int_field(aggregate: Mapping[str, object], name: str) -> int:
+@cython.ccall
+def _int_field(aggregate: Mapping[str, object], name: object) -> cython.longlong:
     """Return one integer aggregate field or a reporting-safe zero."""
+    value: object
     value = aggregate.get(name, 0)
     return value if isinstance(value, int) else 0
 
 
-def _float_field(aggregate: Mapping[str, object], name: str) -> float:
+@cython.ccall
+def _float_field(aggregate: Mapping[str, object], name: object) -> cython.double:
     """Return one float aggregate field or a reporting-safe zero."""
+    value: object
     value = aggregate.get(name, 0.0)
     return value if isinstance(value, float) else 0.0
 
 
+@cython.ccall
 def measure_x86_16_codegen_quality_8616(
-    c_text: str,
+    c_text: object,
     *,
-    function_name: str = "unknown",
-    function_addr: int = 0,
-    asm_fallback: bool = False,
-    validation_uncollected: bool = False,
+    function_name: object = "unknown",
+    function_addr: cython.longlong = 0,
+    asm_fallback: cython.bint = False,
+    validation_uncollected: cython.bint = False,
 ) -> X86_16QualityMetrics:
     """Measure reporting-only VEX/tmp leakage metrics from generated C text."""
     return X86_16QualityMetrics(
@@ -139,7 +148,7 @@ def measure_x86_16_codegen_quality_8616(
 
 
 def measure_x86_16_function_quality_8616(
-    metrics_list: list[X86_16QualityMetrics],
+    metrics_list: object,
 ) -> dict[str, object]:
     """Aggregate reporting-only quality metrics across multiple functions."""
     if not metrics_list:
@@ -157,17 +166,18 @@ def measure_x86_16_function_quality_8616(
     total = len(metrics_list)
     return {
         "function_count": total,
-        "total_tmp_conditions": sum(m.tmp_condition_count for m in metrics_list),
-        "total_raw_flag_conditions": sum(m.raw_flag_condition_count for m in metrics_list),
-        "total_raw_ss_linear_exprs": sum(m.raw_ss_linear_expr_count for m in metrics_list),
-        "total_asm_fallbacks": sum(m.asm_fallback_count for m in metrics_list),
-        "total_validation_uncollected": sum(m.validation_uncollected_count for m in metrics_list),
-        "total_typed_conditions": sum(m.typed_condition_count for m in metrics_list),
-        "total_named_locals": sum(m.named_local_count for m in metrics_list),
-        "avg_quality_score": round(sum(m.quality_score for m in metrics_list) / max(total, 1), 3),
+        "total_tmp_conditions": sum(m.tmp_condition_count for m in iter(metrics_list)),
+        "total_raw_flag_conditions": sum(m.raw_flag_condition_count for m in iter(metrics_list)),
+        "total_raw_ss_linear_exprs": sum(m.raw_ss_linear_expr_count for m in iter(metrics_list)),
+        "total_asm_fallbacks": sum(m.asm_fallback_count for m in iter(metrics_list)),
+        "total_validation_uncollected": sum(m.validation_uncollected_count for m in iter(metrics_list)),
+        "total_typed_conditions": sum(m.typed_condition_count for m in iter(metrics_list)),
+        "total_named_locals": sum(m.named_local_count for m in iter(metrics_list)),
+        "avg_quality_score": round(sum(m.quality_score for m in iter(metrics_list)) / max(total, 1), 3),
     }
 
 
+@cython.ccall
 def format_x86_16_quality_report_8616(aggregate: Mapping[str, object]) -> str:
     """Format aggregate generated-C quality metrics for diagnostics."""
     total = _int_field(aggregate, "function_count")
@@ -198,19 +208,19 @@ _DS_HELPER_LINEAR_RE = re.compile(r"\b(?:SEG_PTR|MK_FP|SEG_U8|SEG_U16|SEG_U32)\s
 _SS_LINEAR_RE = re.compile(r"\bss\s*\*\s*16\b")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class AcceptanceScorecard:
     """Generated-output quality counters for one recovered function."""
 
-    function_name: str
-    raw_flags_count: int
-    raw_ss_linear_count: int
-    raw_ds_linear_count: int
-    vvar_count: int
-    anonymous_sub_count: int
-    recovery_mode: str
-    validation_verdict: str
-    source_present: bool
+    function_name: object
+    raw_flags_count: cython.longlong
+    raw_ss_linear_count: cython.longlong
+    raw_ds_linear_count: cython.longlong
+    vvar_count: cython.longlong
+    anonymous_sub_count: cython.longlong
+    recovery_mode: object
+    validation_verdict: object
+    source_present: cython.bint
 
     def to_row(self) -> dict[str, object]:
         """Return a stable JSON-serializable scorecard row."""
@@ -227,7 +237,8 @@ class AcceptanceScorecard:
         }
 
 
-def _recovery_mode_from_output(output: str) -> str:
+@cython.ccall
+def _recovery_mode_from_output(output: object) -> str:
     lowered = output.lower()
     if "/* == asm fallback == */" in lowered:
         return "asm_fallback"
@@ -238,8 +249,10 @@ def _recovery_mode_from_output(output: str) -> str:
     return "unknown"
 
 
-def _metadata_validation_verdict(output: str) -> str | None:
+@cython.ccall
+def _metadata_validation_verdict(output: object) -> object:
     """Decode the legacy structured report without treating arbitrary JSON as evidence."""
+    match: object
     match = _TAIL_VALIDATION_METADATA_RE.search(output)
     if match is None:
         return None
@@ -256,8 +269,12 @@ def _metadata_validation_verdict(output: str) -> str | None:
     return "failed" if severity == "changed" else severity
 
 
-def _validation_verdict_from_output(output: str) -> str:
+@cython.ccall
+def _validation_verdict_from_output(output: object) -> object:
     """Prefer published validation reports over diagnostics of rejected attempts."""
+    metadata: object
+    reports: object
+    verdict: object
     metadata = _metadata_validation_verdict(output)
     if metadata is not None:
         return metadata
@@ -277,11 +294,12 @@ def _validation_verdict_from_output(output: str) -> str:
     return "uncollected"
 
 
+@cython.ccall
 def build_acceptance_scorecard(
-    function_name: str,
-    recovered_output: str,
+    function_name: object,
+    recovered_output: object,
     *,
-    source_text: str | None = None,
+    source_text: object = None,
 ) -> AcceptanceScorecard:
     """Build reporting-only quality counters for one recovered output."""
     recovery_mode = _recovery_mode_from_output(recovered_output)

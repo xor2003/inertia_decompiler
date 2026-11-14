@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Architectural return offsets and loader control coordinates.
 
 Layer: frontend control semantics.
@@ -8,6 +9,8 @@ frontend execution use the same width and segment rules.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from enum import IntEnum, StrEnum
@@ -66,16 +69,18 @@ class CoordinateExpr(Protocol):
         ...
 
 
-type CoordinateValue = int | CoordinateExpr
-type CoordinateConstant = Callable[[object, object], CoordinateExpr]
+CoordinateValue = typing.TypeAliasType("CoordinateValue", int | CoordinateExpr)
+CoordinateConstant = typing.TypeAliasType("CoordinateConstant", Callable[[object, object], CoordinateExpr])
 
 
+@cython.ccall
 def _expression(value: CoordinateValue, ty: object, constant: CoordinateConstant) -> CoordinateExpr:
     """Represent concrete and symbolic operands at the requested width."""
     return constant(value, ty) if isinstance(value, int) else value.cast_to(ty)
 
 
-def _type_for(width: ControlWidth) -> str:
+@cython.ccall
+def _type_for(width: ControlWidth) -> object:
     """Choose the VEX type for an explicitly declared control width."""
     if width is ControlWidth.WORD:
         return cast(str, Type.int_16)
@@ -84,6 +89,7 @@ def _type_for(width: ControlWidth) -> str:
     raise ValueError("control width must be WORD or DWORD")
 
 
+@cython.ccall
 def architectural_offset(
     linear: CoordinateValue, cs: CoordinateValue, width: ControlWidth,
     constant: CoordinateConstant, *,
@@ -108,6 +114,7 @@ def architectural_offset(
     return (address - base).cast_to(ty)
 
 
+@cython.ccall
 def linear_continuation(
     cs: CoordinateValue, offset: CoordinateValue, offset_width: ControlWidth,
     constant: CoordinateConstant, *, control_width: ControlWidth = ControlWidth.DWORD,
@@ -134,6 +141,7 @@ def linear_continuation(
     return ((segment << constant(4, Type.int_8)) + ip).cast_to(control_ty)
 
 
+@cython.ccall
 def relative_offset(
     linear_next: CoordinateValue, cs: CoordinateValue,
     displacement: CoordinateValue, width: ControlWidth,
@@ -155,6 +163,7 @@ def relative_offset(
             + _expression(displacement_bits, ty, constant)).cast_to(ty)
 
 
+@cython.ccall
 def relative_continuation(
     linear_next: CoordinateValue, cs: CoordinateValue,
     displacement: CoordinateValue, width: ControlWidth,

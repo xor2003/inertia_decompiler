@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """CFG-proven return-chain materialization helpers.
 
 Layer: Structuring.
@@ -11,6 +12,7 @@ out of legacy postprocess code.
 """
 
 from __future__ import annotations
+import cython
 
 import contextlib
 import logging
@@ -102,12 +104,15 @@ from .terminal_register_values import (
 from .terminal_register_values import (
     terminal_ax_value_supports_widths_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 
 class _ReturnChainCFunction8616(Protocol):
     """Dynamic angr/codegen C function object carrying a mutable statement root."""
 
-    addr: int
+    addr: cython.longlong
     statements: object
 
 
@@ -115,27 +120,28 @@ class _ReturnChainCodegen8616(Protocol):
     """Dynamic angr/codegen object plus Inertia return-chain metadata fields."""
 
     cfunc: _ReturnChainCFunction8616
-    _inertia_cfg_selector_return_stats_8616: dict[str, int]
-    _inertia_return_selector_materialized_8616: bool
-    _inertia_return_chain_flattened_8616: bool
-    _inertia_return_chain_suffix_materialized_8616: bool
-    _inertia_return_chain_materialized_values_8616: tuple[int, ...]
-    _inertia_return_chain_materialized_condition_fingerprints_8616: tuple[str, ...]
-    _inertia_return_chain_final_value_8616: int
-    _inertia_empty_return_branch_stats_8616: dict[str, int]
-    _inertia_empty_return_branch_refused_unsafe_effects_8616: int
-    _inertia_empty_return_branch_values_8616: tuple[int, ...]
-    _inertia_return_expr_chain_materialized_8616: bool
-    _inertia_return_expr_chain_materialized_return_fingerprints_8616: tuple[str, ...]
-    _inertia_mask_accumulator_materialized_8616: bool
-    _inertia_mask_accumulator_condition_fingerprints_8616: tuple[str, ...]
-    _inertia_mask_accumulator_return_fingerprint_8616: str
-    _inertia_mask_accumulator_update_immediates_8616: tuple[int, ...]
-    _inertia_decrement_switch_return_materialized_8616: bool
-    _inertia_sequential_decrement_switch_return_materialized_8616: bool
-    _inertia_return_selector_raw_stack_slot_aliases_8616: dict[str, tuple[str, ...]]
+    _inertia_cfg_selector_return_stats_8616: object
+    _inertia_return_selector_materialized_8616: cython.bint
+    _inertia_return_chain_flattened_8616: cython.bint
+    _inertia_return_chain_suffix_materialized_8616: cython.bint
+    _inertia_return_chain_materialized_values_8616: object
+    _inertia_return_chain_materialized_condition_fingerprints_8616: object
+    _inertia_return_chain_final_value_8616: cython.longlong
+    _inertia_empty_return_branch_stats_8616: object
+    _inertia_empty_return_branch_refused_unsafe_effects_8616: cython.longlong
+    _inertia_empty_return_branch_values_8616: object
+    _inertia_return_expr_chain_materialized_8616: cython.bint
+    _inertia_return_expr_chain_materialized_return_fingerprints_8616: object
+    _inertia_mask_accumulator_materialized_8616: cython.bint
+    _inertia_mask_accumulator_condition_fingerprints_8616: object
+    _inertia_mask_accumulator_return_fingerprint_8616: object
+    _inertia_mask_accumulator_update_immediates_8616: object
+    _inertia_decrement_switch_return_materialized_8616: cython.bint
+    _inertia_sequential_decrement_switch_return_materialized_8616: cython.bint
+    _inertia_return_selector_raw_stack_slot_aliases_8616: object
 
 
+@cython.ccall
 def _ensure_return_chain_counter_state_8616(
     codegen: object,
     typed_codegen: _ReturnChainCodegen8616,
@@ -159,6 +165,7 @@ def _ensure_return_chain_counter_state_8616(
         typed_codegen._inertia_return_chain_final_value_8616 = 0
 
 
+@cython.ccall
 def _ensure_return_chain_flag_state_8616(
     codegen: object,
     typed_codegen: _ReturnChainCodegen8616,
@@ -180,6 +187,7 @@ def _ensure_return_chain_flag_state_8616(
         typed_codegen._inertia_sequential_decrement_switch_return_materialized_8616 = False
 
 
+@cython.ccall
 def _ensure_return_chain_evidence_state_8616(
     codegen: object,
     typed_codegen: _ReturnChainCodegen8616,
@@ -201,6 +209,7 @@ def _ensure_return_chain_evidence_state_8616(
         typed_codegen._inertia_mask_accumulator_update_immediates_8616 = ()
 
 
+@cython.ccall
 def ensure_return_chain_codegen_state_8616(codegen: object) -> None:
     """Initialize structuring-owned return-chain state on a dynamic angr codegen object."""
     # Dynamic boundary: angr creates CStructuredCodeGenerator instances without
@@ -228,19 +237,19 @@ class IdenticalAssignmentArmCollapseStatus8616(Enum):
     NO_ELIGIBLE_CANDIDATE = "no_eligible_candidate"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IdenticalAssignmentArmCollapseStats8616:
     """Closed evidence loop for redundant conditional-arm collapse."""
 
     status: IdenticalAssignmentArmCollapseStatus8616
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
     branch_count: int | None
-    total_if_count: int
-    branch_backed_refusal_count: int
+    total_if_count: cython.longlong
+    branch_backed_refusal_count: cython.longlong
 
 
 class VoidTailCallSuffixDiamondStatus8616(Enum):
@@ -262,13 +271,13 @@ class VoidTailCallGuardStatus8616(Enum):
     MISSING_FOLLOWING_TAIL = "missing_following_tail"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class VoidTailCallGuardProof8616:
     """Bind one CFG-proven true branch condition to its tail-call fingerprint."""
 
     condition: CExpression
-    condition_keys: frozenset[object]
-    true_fingerprint: str
+    condition_keys: object
+    true_fingerprint: object
 
 
 class DuplicateEmptyReturnGuardPruneReason8616(Enum):
@@ -288,7 +297,7 @@ class ConditionBranchTagEvidence8616(Enum):
     UNKNOWN = "unknown"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionIdentityCallbacks8616:
     """Dynamic adapters needed to fingerprint a structured branch condition."""
 
@@ -296,16 +305,16 @@ class ConditionIdentityCallbacks8616:
     expr_fingerprint: Callable[[object, object], str]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionBranchTagCallbacks8616:
     """Dynamic adapters needed to classify condition tag branch evidence."""
 
     condition_tags: Callable[[object], object]
     load_block: Callable[[int], object | None]
-    is_conditional_branch_insn: Callable[[object], bool]
+    is_conditional_branch_insn: Callable[[object], cython.bint]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ExpressionFingerprintCallbacks8616:
     """Dynamic adapters needed to fingerprint C AST expressions and components."""
 
@@ -313,79 +322,81 @@ class ExpressionFingerprintCallbacks8616:
     iter_c_nodes_deep: Callable[[object], Iterable[object]]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ReturnChainCountCallbacks8616:
     """Dynamic adapters needed to account for structured return-chain AST nodes."""
 
     iter_c_nodes_deep: Callable[[object], Iterable[object]]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LastAxReturnValueCallbacks8616:
     """Dynamic adapters needed to scan codegen instructions for final AX return values."""
 
     function_insns: Callable[[object, object], Iterable[object]]
-    signed_i16_immediate: Callable[[int], int]
+    signed_i16_immediate: Callable[[int], cython.longlong]
 
 
-def _capstone_attr_8616(obj: object, name: str, default: object = None) -> object:
+@cython.ccall
+def _capstone_attr_8616(obj: object, name: object, default: object = None) -> object:
     """Dynamic third-party boundary: read optional Capstone instruction/operand attributes."""
     return getattr(obj, name, default)
 
 
-def _capstone_int_attr_8616(obj: object, name: str, default: int = 0) -> int:
+@cython.ccall
+def _capstone_int_attr_8616(obj: object, name: object, default: cython.longlong = 0) -> cython.longlong:
     """Dynamic third-party boundary: coerce optional Capstone numeric metadata."""
     value = _capstone_attr_8616(obj, name, default)
     return int(value) if isinstance(value, (int, str)) else int(default)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class VoidTailCallShapeCallbacks8616:
     """Dynamic adapters needed to classify void-tail-call guard statement shapes."""
 
-    c_node_semantically_empty: Callable[[object], bool]
+    c_node_semantically_empty: Callable[[object], cython.bint]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class VoidTailCallSuffixDiamondCallbacks8616:
     """Dynamic adapters needed to materialize a CFG-proven suffix diamond."""
 
-    c_node_semantically_empty: Callable[[object], bool]
+    c_node_semantically_empty: Callable[[object], cython.bint]
     calls_in_nodes: Callable[[Iterable[object]], tuple[CFunctionCall, ...]]
     node_component_fingerprints: Callable[[object], frozenset[str]]
     call_argument_component_fingerprints: Callable[[CFunctionCall], frozenset[str]]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class VoidTailCallSuffixDiamondResult8616:
     """Outcome of a suffix-diamond materialization attempt."""
 
     status: VoidTailCallSuffixDiamondStatus8616
-    match_fingerprint: str | None = None
+    match_fingerprint: object = None
     suffix_types: tuple[str, ...] = ()
-    match_count: int = 0
-    suffix_from_else: bool = False
+    match_count: cython.longlong = 0
+    suffix_from_else: cython.bint = False
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class VoidTailCallGuardResult8616:
     """Outcome of a plain void-tail-call guard materialization attempt."""
 
     status: VoidTailCallGuardStatus8616
-    payload_type: str | None = None
-    removed_following_tail: bool = False
+    payload_type: object = None
+    removed_following_tail: cython.bint = False
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DuplicateEmptyReturnGuardPrunePlan8616:
     """Prune plan for a CFG-proven duplicate empty return guard."""
 
-    index: int
+    index: cython.longlong
     reason: DuplicateEmptyReturnGuardPruneReason8616
     value: int | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ReturnChainFlattenCallbacks8616:
     """Dynamic adapters needed to compare and rebuild angr C AST return chains."""
 
@@ -397,16 +408,17 @@ class ReturnChainFlattenCallbacks8616:
     const_return_value: Callable[[object], int | None]
 
 
-def return_chain_counts_8616(root: object | None, callbacks: ReturnChainCountCallbacks8616) -> tuple[int, int]:
+def return_chain_counts_8616(root: object, callbacks: ReturnChainCountCallbacks8616) -> tuple[cython.longlong, cython.longlong]:
     """Count structured if/return nodes in a materialized return-chain C AST root."""
     if root is None:
         return 0, 0
-    if_count = sum(1 for node in callbacks.iter_c_nodes_deep(root) if isinstance(node, CIfElse))
-    return_count = sum(1 for node in callbacks.iter_c_nodes_deep(root) if isinstance(node, CReturn))
+    if_count = sum(1 for node in builtins.iter(callbacks.iter_c_nodes_deep(root)) if isinstance(node, CIfElse))
+    return_count = sum(1 for node in builtins.iter(callbacks.iter_c_nodes_deep(root)) if isinstance(node, CReturn))
     return if_count, return_count
 
 
-def return_chain_expected_counts_8616(codegen: _ReturnChainCodegen8616) -> tuple[int, int] | None:
+@cython.ccall
+def return_chain_expected_counts_8616(codegen: _ReturnChainCodegen8616) -> object:
     """Return minimum if/return counts implied by structuring materialization metadata."""
     if not (codegen._inertia_return_chain_flattened_8616 or codegen._inertia_return_chain_suffix_materialized_8616):
         return None
@@ -427,7 +439,7 @@ def condition_identity_keys_8616(
         tags = callbacks.condition_tags(cond)
     except Exception:
         tags = None
-    if isinstance(tags, tuple) and len(tags) == 2 and all(isinstance(item, int) for item in tags):
+    if isinstance(tags, tuple) and len(tags) == 2 and all(isinstance(item, int) for item in iter(tags)):
         keys.add(("tags", tags))
     with contextlib.suppress(Exception):
         keys.add(("fp", callbacks.expr_fingerprint(cond, project)))
@@ -439,11 +451,12 @@ def condition_branch_tag_evidence_8616(
     callbacks: ConditionBranchTagCallbacks8616,
 ) -> ConditionBranchTagEvidence8616:
     """Classify condition tags through a dynamic boundary: third-party Capstone CFG blocks."""
+    block: object
     try:
         tags = callbacks.condition_tags(cond)
     except Exception:
         return ConditionBranchTagEvidence8616.UNKNOWN
-    if not (isinstance(tags, tuple) and len(tags) == 2 and all(isinstance(item, int) for item in tags)):
+    if not (isinstance(tags, tuple) and len(tags) == 2 and all(isinstance(item, int) for item in iter(tags))):
         return ConditionBranchTagEvidence8616.NO_TAG
     try:
         block = callbacks.load_block(int(tags[0]))
@@ -457,10 +470,11 @@ def condition_branch_tag_evidence_8616(
     return ConditionBranchTagEvidence8616.NON_BRANCH
 
 
+@cython.ccall
 def condition_has_jcc_evidence_8616(
     cond: object,
     callbacks: ConditionBranchTagCallbacks8616,
-) -> bool:
+) -> cython.bint:
     """Return whether condition tag evidence is branch-backed or conservatively unknown."""
     return condition_branch_tag_evidence_8616(cond, callbacks) in {
         ConditionBranchTagEvidence8616.CONDITIONAL_BRANCH,
@@ -468,12 +482,14 @@ def condition_has_jcc_evidence_8616(
     }
 
 
+@cython.ccall
 def call_argument_fingerprints_8616(
     project: object,
     call: CFunctionCall,
     callbacks: ExpressionFingerprintCallbacks8616,
 ) -> frozenset[str]:
     """Return fingerprints for direct call arguments from a dynamic boundary: angr codegen C AST calls."""
+    arg: object
     fingerprints: set[str] = set()
     for arg in tuple(getattr(call, "args", ()) or ()):
         with contextlib.suppress(Exception):
@@ -481,28 +497,33 @@ def call_argument_fingerprints_8616(
     return frozenset(fingerprints)
 
 
+@cython.ccall
 def call_argument_component_fingerprints_8616(
     project: object,
     call: CFunctionCall,
     callbacks: ExpressionFingerprintCallbacks8616,
 ) -> frozenset[str]:
     """Return fingerprints for call arguments from a dynamic boundary: angr codegen C AST components."""
+    arg: object
+    node: object
     fingerprints: set[str] = set(call_argument_fingerprints_8616(project, call, callbacks))
     for arg in tuple(getattr(call, "args", ()) or ()):
-        for node in (arg, *callbacks.iter_c_nodes_deep(arg)):
+        for node in (arg, ) + tuple(callbacks.iter_c_nodes_deep(arg)):
             with contextlib.suppress(Exception):
                 fingerprints.add(callbacks.expr_fingerprint(node, project))
     return frozenset(fingerprints)
 
 
+@cython.ccall
 def node_component_fingerprints_8616(
     project: object,
     node: object,
     callbacks: ExpressionFingerprintCallbacks8616,
 ) -> frozenset[str]:
     """Return fingerprints for a C AST node and its nested components."""
+    item: object
     fingerprints: set[str] = set()
-    for item in (node, *callbacks.iter_c_nodes_deep(node)):
+    for item in (node, ) + tuple(callbacks.iter_c_nodes_deep(node)):
         with contextlib.suppress(Exception):
             fingerprints.add(callbacks.expr_fingerprint(item, project))
     return frozenset(fingerprints)
@@ -515,7 +536,7 @@ def tail_call_from_statement_8616(
     """Return the single tail call from a dynamic boundary: angr codegen C AST statements."""
     if isinstance(stmt, CStatements):
         nested = tuple(stmt.statements or ())
-        semantic_children = tuple(child for child in nested if not callbacks.c_node_semantically_empty(child))
+        semantic_children = tuple(child for child in iter(nested) if not callbacks.c_node_semantically_empty(child))
         if len(semantic_children) == 1:
             return tail_call_from_statement_8616(semantic_children[0], callbacks)
         return None
@@ -532,11 +553,14 @@ def tail_call_from_statement_8616(
     return None
 
 
+@cython.ccall
 def flatten_straightline_c_statements_8616(
     stmt: object,
     callbacks: VoidTailCallShapeCallbacks8616,
-) -> tuple[object, ...] | None:
+) -> object:
     """Flatten straight-line statements from a dynamic boundary: angr codegen C AST."""
+    child_flattened: object
+    child: object
     if isinstance(stmt, CStatements):
         flattened: list[object] = []
         for child in tuple(stmt.statements or ()):
@@ -552,12 +576,16 @@ def flatten_straightline_c_statements_8616(
     return None
 
 
+@cython.ccall
 def tail_call_payload_from_statement_8616(
     stmt: object,
     codegen: object,
     callbacks: VoidTailCallShapeCallbacks8616,
-) -> tuple[CFunctionCall, object] | None:
+) -> object:
     """Extract tail-call payload from a dynamic boundary: angr codegen C AST statements."""
+    collected: object
+    direct_call: object
+    flat: object
     direct_call = tail_call_from_statement_8616(stmt, callbacks)
     if direct_call is not None:
         if isinstance(stmt, CReturn):
@@ -583,10 +611,12 @@ def tail_call_payload_from_statement_8616(
     return calls[0], CStatements(statements=list(payload), codegen=codegen)
 
 
+@cython.ccall
 def _tail_call_flat_payload_8616(
-    flat: tuple[object, ...] | list[object],
-) -> tuple[list[CFunctionCall], list[object]] | None:
+    flat: object,
+) -> object:
     """Split a flattened tail-call sequence into calls and payload statements."""
+    item: object
     calls: list[CFunctionCall] = []
     payload: list[object] = []
     for item in flat:
@@ -611,7 +641,8 @@ def _tail_call_flat_payload_8616(
     return calls, payload
 
 
-def else_node_empty_8616(node: object | None) -> bool:
+@cython.ccall
+def else_node_empty_8616(node: object) -> cython.bint:
     """Return whether a dynamic boundary: angr codegen C AST else-node is empty."""
     if node is None:
         return True
@@ -620,14 +651,14 @@ def else_node_empty_8616(node: object | None) -> bool:
     return False
 
 
-def c_statement_shape_8616(stmt: object, *, max_depth: int = 3) -> object:
+def c_statement_shape_8616(stmt: object, *, max_depth: cython.longlong = 3) -> object:
     """Return a bounded shape from a dynamic boundary: angr codegen C AST statements."""
     if max_depth <= 0 or stmt is None:
         return type(stmt).__name__
     if isinstance(stmt, CStatements):
         return (
             type(stmt).__name__,
-            tuple(c_statement_shape_8616(child, max_depth=max_depth - 1) for child in tuple(stmt.statements or ())),
+            tuple(c_statement_shape_8616(child, max_depth=max_depth - 1) for child in builtins.iter(tuple(stmt.statements or ()))),
         )
     if isinstance(stmt, CReturn):
         return (type(stmt).__name__, type(stmt.retval).__name__)
@@ -640,36 +671,36 @@ def c_statement_shape_8616(stmt: object, *, max_depth: int = 3) -> object:
         )
         return (
             type(stmt).__name__,
-            tuple(c_statement_shape_8616(body, max_depth=max_depth - 1) for _cond, body in condition_nodes),
+            tuple(c_statement_shape_8616(body, max_depth=max_depth - 1) for _cond, body in iter(condition_nodes)),
             c_statement_shape_8616(stmt.else_node, max_depth=max_depth - 1),
         )
     return type(stmt).__name__
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ReturnSelectorCallbacks8616:
     """Dynamic adapters for CFG-proven selector-return orchestration."""
 
-    materialize_decrement_switch_return_chain: Callable[[object, _ReturnChainCodegen8616], bool]
+    materialize_decrement_switch_return_chain: Callable[[object, _ReturnChainCodegen8616], cython.bint]
     ordered_32bit_selector_return_expr_pairs: Callable[
         [object, _ReturnChainCodegen8616], list[tuple[CExpression, CExpression, CExpression]]
     ]
     ordered_conditional_return_expr_pairs: Callable[
         [object, _ReturnChainCodegen8616], list[tuple[CExpression, CExpression, CExpression]]
     ]
-    selector_condition_call_addrs: Callable[[list[tuple[CExpression, CExpression, CExpression]]], frozenset[int]]
-    selector_condition_call_addrs_from_cfg: Callable[[object, _ReturnChainCodegen8616], frozenset[int]]
-    selector_function_has_unsafe_effects: Callable[[object, _ReturnChainCodegen8616, frozenset[int]], bool]
+    selector_condition_call_addrs: Callable[[list[tuple[CExpression, CExpression, CExpression]]], frozenset[cython.longlong]]
+    selector_condition_call_addrs_from_cfg: Callable[[object, _ReturnChainCodegen8616], frozenset[cython.longlong]]
+    selector_function_has_unsafe_effects: Callable[[object, _ReturnChainCodegen8616, frozenset[int]], cython.bint]
     clone_c_value_for_codegen_tree: Callable[[CExpression], CExpression]
     set_cfunc_statements_root: Callable[[_ReturnChainCodegen8616, CStatements], None]
     expr_fingerprint: Callable[[object, object], str]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ReturnSelectorCallsiteProofCallbacks8616:
     """Dynamic adapters for selector-return condition-call CFG proof."""
 
-    linear_jcc_block_starts: Callable[[object, object], Iterable[tuple[int, object]]]
+    linear_jcc_block_starts: Callable[[object, object], Iterable[tuple[cython.longlong, object]]]
     branch_target_imm: Callable[[object], int | None]
     next_unconditional_target_after_jcc: Callable[[object, int, int], int | None]
     branch_target_return_expr: Callable[[object, object, int], CExpression | None]
@@ -677,11 +708,11 @@ class ReturnSelectorCallsiteProofCallbacks8616:
     last_call_addr_before_jcc_in_function: Callable[[object, object, int], int | None]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ReturnSelector32BitPairCallbacks8616:
     """Dynamic adapters for CFG-proven 32-bit selector-return pair ordering."""
 
-    function_block_addrs: Callable[[object, _ReturnChainCodegen8616], Iterable[int]]
+    function_block_addrs: Callable[[object, _ReturnChainCodegen8616], Iterable[cython.longlong]]
     load_block: Callable[[int], object | None]
     branch_target_imm: Callable[[object], int | None]
     next_unconditional_target_after_jcc: Callable[[object, int, int], int | None]
@@ -690,11 +721,11 @@ class ReturnSelector32BitPairCallbacks8616:
     branch_target_return_expr: Callable[[object, _ReturnChainCodegen8616, int], CExpression | None]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ReturnConditionalExprPairCallbacks8616:
     """Dynamic adapters for CFG-proven conditional return-expression pair ordering."""
 
-    linear_jcc_block_starts: Callable[[object, _ReturnChainCodegen8616], Iterable[tuple[int, object]]]
+    linear_jcc_block_starts: Callable[[object, _ReturnChainCodegen8616], Iterable[tuple[cython.longlong, object]]]
     branch_target_imm: Callable[[object], int | None]
     next_unconditional_target_after_jcc: Callable[[object, int, int], int | None]
     branch_target_return_expr: Callable[[object, _ReturnChainCodegen8616, int], CExpression | None]
@@ -703,11 +734,11 @@ class ReturnConditionalExprPairCallbacks8616:
     last_call_addr_before_jcc_in_function: Callable[[object, _ReturnChainCodegen8616, int], int | None]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ReturnConditionalVoidTailCallCallbacks8616:
     """Dynamic adapters for CFG-proven conditional void-tail-call proof ordering."""
 
-    linear_jcc_block_starts: Callable[[object, _ReturnChainCodegen8616], Iterable[tuple[int, object]]]
+    linear_jcc_block_starts: Callable[[object, _ReturnChainCodegen8616], Iterable[tuple[cython.longlong, object]]]
     branch_target_imm: Callable[[object], int | None]
     next_unconditional_target_after_jcc: Callable[[object, int, int], int | None]
     branch_target_return_expr: Callable[[object, _ReturnChainCodegen8616, int], CExpression | None]
@@ -715,11 +746,11 @@ class ReturnConditionalVoidTailCallCallbacks8616:
     decoded_condition_expr: Callable[[object, _ReturnChainCodegen8616, object], CExpression | None]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class Return32BitConditionalPairCallbacks8616:
     """Dynamic adapters for CFG-proven 32-bit conditional return-value ordering."""
 
-    function_block_addrs: Callable[[object, _ReturnChainCodegen8616], Iterable[int]]
+    function_block_addrs: Callable[[object, _ReturnChainCodegen8616], Iterable[cython.longlong]]
     load_block: Callable[[int], object | None]
     branch_target_imm: Callable[[object], int | None]
     next_unconditional_target_after_jcc: Callable[[object, int, int], int | None]
@@ -729,11 +760,11 @@ class Return32BitConditionalPairCallbacks8616:
     expr_fingerprint: Callable[[object, object], str]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class MaskAccumulatorPairCallbacks8616:
     """Dynamic adapters for CFG-proven mask-accumulator condition/value ordering."""
 
-    linear_jcc_block_starts: Callable[[object, _ReturnChainCodegen8616], Iterable[tuple[int, object]]]
+    linear_jcc_block_starts: Callable[[object, _ReturnChainCodegen8616], Iterable[tuple[cython.longlong, object]]]
     selector_targets_from_32bit_jcc_chain: Callable[[int, object], tuple[int, int] | None]
     equality_return_target_from_32bit_jcc_chain: Callable[[int, object], int | None]
     inequality_target_from_32bit_jcc_chain: Callable[[int, object], int | None]
@@ -745,17 +776,17 @@ class MaskAccumulatorPairCallbacks8616:
     expr_fingerprint: Callable[[object, object], str]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class MaskAccumulatorMaterializationCallbacks8616:
     """Dynamic adapters for CFG-proven mask-accumulator AST materialization."""
 
     first_stack_zero_init: Callable[[object, _ReturnChainCodegen8616], int | None]
-    ordered_mask_update_pairs: Callable[[object, _ReturnChainCodegen8616, int], list[tuple[CExpression, int]]]
+    ordered_mask_update_pairs: Callable[[object, _ReturnChainCodegen8616, int], list[tuple[CExpression, cython.longlong]]]
     stack_slot_expr: Callable[[_ReturnChainCodegen8616, int, int], CExpression | None]
     expr_fingerprint: Callable[[object, object], str]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SelectorStackExprCallbacks8616:
     """Dynamic adapters for selector stack-expression recovery from instruction evidence."""
 
@@ -763,13 +794,13 @@ class SelectorStackExprCallbacks8616:
     stack_slot_expr: Callable[[_ReturnChainCodegen8616, int, int, object], CExpression | None]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SequentialDecrementSwitchCallbacks8616:
     """Dynamic adapters for sequential decrement-switch return materialization."""
 
     set_cfunc_statements_root: Callable[[_ReturnChainCodegen8616, CStatements], None]
     selector_stack_expr: Callable[[object, _ReturnChainCodegen8616], CExpression | None]
-    selector_function_has_unsafe_effects: Callable[[object, _ReturnChainCodegen8616], bool]
+    selector_function_has_unsafe_effects: Callable[[object, _ReturnChainCodegen8616], cython.bint]
     selector_raw_stack_aliases: Callable[[object, CExpression], dict[str, tuple[str, ...]]]
     linear_function_insns: Callable[[object, _ReturnChainCodegen8616], Iterable[object]]
     next_linear_jmp_target: Callable[[tuple[object, ...], int], int | None]
@@ -780,13 +811,13 @@ class SequentialDecrementSwitchCallbacks8616:
     expr_fingerprint: Callable[[object, object], str]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ComplexDecrementSwitchCallbacks8616:
     """Dynamic adapters for complex decrement-switch return materialization."""
 
     set_cfunc_statements_root: Callable[[_ReturnChainCodegen8616, CStatements], None]
     selector_stack_expr: Callable[[object, _ReturnChainCodegen8616], CExpression | None]
-    selector_function_has_unsafe_effects: Callable[[object, _ReturnChainCodegen8616], bool]
+    selector_function_has_unsafe_effects: Callable[[object, _ReturnChainCodegen8616], cython.bint]
     selector_raw_stack_aliases: Callable[[object, CExpression], dict[str, tuple[str, ...]]]
     linear_function_insns: Callable[[object, _ReturnChainCodegen8616], Iterable[object]]
     next_linear_jmp_target: Callable[[tuple[object, ...], int], int | None]
@@ -797,7 +828,7 @@ class ComplexDecrementSwitchCallbacks8616:
     expr_fingerprint: Callable[[object, object], str]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SelectorUnsafeEffectsCallbacks8616:
     """Dynamic adapters for selector-return unsafe instruction-effect scans."""
 
@@ -807,14 +838,14 @@ class SelectorUnsafeEffectsCallbacks8616:
     ]
     direct_call_target: Callable[[object], int | None]
     callee_name_for_target: Callable[[object, int], tuple[str | None, object | None]]
-    target_is_stack_probe_helper: Callable[[object, int | None, str | None], bool]
+    target_is_stack_probe_helper: Callable[[object, int | None, str | None], cython.bint]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ReturnChainProofCallbacks8616:
     """Dynamic adapters needed to read CFG/JCC return-chain proof from angr state."""
 
-    linear_jcc_block_starts: Callable[[object, object], Iterable[tuple[int, object]]]
+    linear_jcc_block_starts: Callable[[object, object], Iterable[tuple[cython.longlong, object]]]
     branch_target_imm: Callable[[object], int | None]
     branch_target_return_value: Callable[[object, int], int | None]
     decoded_condition_expr: Callable[[object, object, object, dict[str, int] | None], CExpression | None]
@@ -824,29 +855,29 @@ class ReturnChainProofCallbacks8616:
     iter_c_nodes_deep: Callable[[object], Iterable[object]]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ReturnChainEmptyIfCallbacks8616:
     """Dynamic adapters for CFG-proven empty-if return-chain orchestration."""
 
-    ordered_return_values: Callable[[object, object], list[int]]
-    selector_function_has_unsafe_effects: Callable[[object, object, frozenset[int]], bool]
-    condition_call_addrs: Callable[[Iterable[CExpression]], frozenset[int]]
+    ordered_return_values: Callable[[object, object], list[cython.longlong]]
+    selector_function_has_unsafe_effects: Callable[[object, object, frozenset[int]], cython.bint]
+    condition_call_addrs: Callable[[Iterable[CExpression]], frozenset[cython.longlong]]
     condition_branch_return_value: Callable[[object, object], int | None]
-    condition_branch_is_non_branch: Callable[[object, object], bool]
+    condition_branch_is_non_branch: Callable[[object, object], cython.bint]
     condition_tags: Callable[[object], object]
     ordered_return_expr_pairs: Callable[[object, object], list[tuple[CExpression, CExpression, CExpression]]]
-    ordered_return_pairs: Callable[[object, object], list[tuple[CExpression, int]]]
-    ordered_32bit_return_pairs: Callable[[object, object], list[tuple[CExpression, int]]]
-    flatten_conditional_return_chain: Callable[[object, _ReturnChainCodegen8616, list[tuple[CExpression, int]]], bool]
+    ordered_return_pairs: Callable[[object, object], list[tuple[CExpression, cython.longlong]]]
+    ordered_32bit_return_pairs: Callable[[object, object], list[tuple[CExpression, cython.longlong]]]
+    flatten_conditional_return_chain: Callable[[object, _ReturnChainCodegen8616, list[tuple[CExpression, int]]], cython.bint]
     materialize_conditional_return_suffix: Callable[
-        [object, _ReturnChainCodegen8616, list[tuple[CExpression, int]]], bool
+        [object, _ReturnChainCodegen8616, list[tuple[CExpression, int]]], cython.bint
     ]
-    prune_duplicate_empty_return_guard: Callable[[object, _ReturnChainCodegen8616], bool]
+    prune_duplicate_empty_return_guard: Callable[[object, _ReturnChainCodegen8616], cython.bint]
     expr_fingerprint: Callable[[object, object], str]
     iter_c_nodes_deep: Callable[[object], Iterable[object]]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class BranchTargetReturnBlockResult8616:
     """Block value plus any jump tail still requiring preservation proof.
 
@@ -857,7 +888,7 @@ class BranchTargetReturnBlockResult8616:
     next_target: int | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class BranchTargetReturnScanCallbacks8616:
     """Dynamic adapters for branch-target return block scanning and materialization."""
 
@@ -873,15 +904,15 @@ class BranchTargetReturnScanCallbacks8616:
     materialize_reg_copy: Callable[[int, str], object | None] | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalAxInstructionAction8616:
     """Result of consuming one instruction during terminal-AX return scanning."""
 
-    classified: bool = False
-    abort: bool = False
+    classified: cython.bint = False
+    abort: cython.bint = False
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalAxScanCallbacks8616:
     """Dynamic adapters for terminal-AX scan control and instruction materialization."""
 
@@ -889,14 +920,14 @@ class TerminalAxScanCallbacks8616:
     process_instruction: Callable[[object, TerminalAxReturnEffect8616], TerminalAxInstructionAction8616]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalAxScanResult8616:
     """Result of structuring-owned terminal-AX linear scan control."""
 
     expr: object | None = None
-    raw_insns: int = 0
-    classified: int = 0
-    terminal_value_block_count: int = 0
+    raw_insns: cython.longlong = 0
+    classified: cython.longlong = 0
+    terminal_value_block_count: cython.longlong = 0
 
 
 class TerminalCallResultReturnStatus8616(Enum):
@@ -919,6 +950,7 @@ class TerminalCallResultReturnStatus8616(Enum):
     RETURN_NOT_REACHED = "return_not_reached"
 
 
+@cython.ccall
 def _unknown_terminal_call_result_contract_8616(
     _call: CFunctionCall,
 ) -> TerminalCallResultContract8616:
@@ -926,35 +958,35 @@ def _unknown_terminal_call_result_contract_8616(
     return TerminalCallResultContract8616.UNKNOWN
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalCallResultReturnCallbacks8616:
     """Dynamic adapters for proving a terminal call-result return path."""
 
     iter_c_nodes_deep: Callable[[object], Iterable[object]]
-    function_block_ranges: Callable[[], Iterable[tuple[int, int]]]
+    function_block_ranges: Callable[[], Iterable[tuple[cython.longlong, cython.longlong]]]
     load_block: Callable[[int, int], object | None]
-    successor_addrs: Callable[[int], Iterable[int]]
+    successor_addrs: Callable[[int], Iterable[cython.longlong]]
     branch_target_imm: Callable[[object], int | None]
     call_result_contract: Callable[
         [CFunctionCall], TerminalCallResultContract8616
     ] = _unknown_terminal_call_result_contract_8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalCallResultReturnStats8616:
     """Closed evidence loop for terminal call-result return materialization."""
 
     status: TerminalCallResultReturnStatus8616
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
     call_ins_addr: int | None = None
-    path_block_addrs: tuple[int, ...] = ()
+    path_block_addrs: tuple[cython.longlong, ...] = ()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _TerminalCallReturnCandidate8616:
     """One exact structured terminal-call return candidate."""
 
@@ -962,39 +994,41 @@ class _TerminalCallReturnCandidate8616:
     return_container: CStatements
     call: CFunctionCall
     call_statement_index: int | None
-    return_index: int
-    already_materialized: bool
-    return_use_proven_locally: bool
+    return_index: cython.longlong
+    already_materialized: cython.bint
+    return_use_proven_locally: cython.bint
     return_statement: CReturn | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _TerminalAssignedCall8616:
     """One call assigned to an exact structured-C result carrier."""
 
     container: CStatements
-    index: int
+    index: cython.longlong
     call: CFunctionCall
     carrier: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _TerminalCarrierReturn8616:
     """One structured return of an exact result-carrier object."""
 
     container: CStatements
-    index: int
+    index: cython.longlong
     statement: CReturn
 
 
+@cython.ccall
 def _terminal_call_return_containers_8616(
     root: object,
     callbacks: TerminalCallResultReturnCallbacks8616,
 ) -> tuple[CStatements, ...]:
     """Return unique C statement containers from a dynamic angr AST boundary."""
+    node: object
     containers: list[CStatements] = []
-    seen: set[int] = set()
-    for node in (root, *callbacks.iter_c_nodes_deep(root)):
+    seen: set[cython.longlong] = set()
+    for node in (root, ) + tuple(callbacks.iter_c_nodes_deep(root)):
         if not isinstance(node, CStatements) or id(node) in seen:
             continue
         seen.add(id(node))
@@ -1002,10 +1036,12 @@ def _terminal_call_return_containers_8616(
     return tuple(containers)
 
 
+@cython.ccall
 def _terminal_call_return_leaf_8616(
     statement: object,
-) -> tuple[str, CFunctionCall | None, CReturn | None] | None:
+) -> object:
     """Unwrap one transparent statement wrapper to a terminal call/return leaf."""
+    current: object
     current = _terminal_call_return_statement_8616(statement)
     if current is None:
         return None
@@ -1019,10 +1055,11 @@ def _terminal_call_return_leaf_8616(
     return None
 
 
+@cython.ccall
 def _terminal_call_return_statement_8616(statement: object) -> object | None:
     """Unwrap one transparent statement container without inferring meaning."""
     current = statement
-    visited: set[int] = set()
+    visited: set[cython.longlong] = set()
     while isinstance(current, CStatements):
         if id(current) in visited:
             return None
@@ -1034,13 +1071,16 @@ def _terminal_call_return_statement_8616(statement: object) -> object | None:
     return current
 
 
+@cython.ccall
 def _container_assigned_carriers_8616(
     container: object,
-    statements: tuple[object, ...],
-    assigned_calls: list[_TerminalAssignedCall8616],
-    carrier_returns: list[_TerminalCarrierReturn8616],
+    statements: object,
+    assigned_calls: object,
+    carrier_returns: object,
 ) -> None:
     """Census assignment-carried calls and carrier returns in one container."""
+    index: object
+    statement: object
     for index, statement in enumerate(statements):
         leaf_statement = _terminal_call_return_statement_8616(statement)
         if isinstance(leaf_statement, CAssignment) and isinstance(
@@ -1068,13 +1108,17 @@ def _container_assigned_carriers_8616(
             )
 
 
+@cython.ccall
 def _container_returned_call_candidates_8616(
     container: CStatements,
-    leaves: tuple[tuple[str, CFunctionCall | None, CReturn | None] | None, ...],
-    candidates: list[_TerminalCallReturnCandidate8616],
-    candidate_keys: set[tuple[int, int, bool]],
+    leaves: object,
+    candidates: object,
+    candidate_keys: object,
 ) -> None:
     """Record already-materialized returned-call candidates in one container."""
+    call: object
+    leaf: object
+    return_index: object
     for return_index, leaf in enumerate(leaves):
         if leaf is None or leaf[0] != "returned_call":
             continue
@@ -1099,14 +1143,20 @@ def _container_returned_call_candidates_8616(
         )
 
 
+@cython.ccall
 def _container_adjacent_candidates_8616(
     container: CStatements,
-    leaves: tuple[tuple[str, CFunctionCall | None, CReturn | None] | None, ...],
-    empty_return_indexes: tuple[int, ...],
-    candidates: list[_TerminalCallReturnCandidate8616],
-    candidate_keys: set[tuple[int, int, bool]],
+    leaves: object,
+    empty_return_indexes: object,
+    candidates: object,
+    candidate_keys: object,
 ) -> None:
     """Record exact adjacent call→empty-return candidates in one container."""
+    call: object
+    call_leaf: object
+    empty_return: object
+    return_leaf: object
+    return_index: object
     for return_index in empty_return_indexes:
         call_index = return_index - 1
         if call_index < 0:
@@ -1137,19 +1187,22 @@ def _container_adjacent_candidates_8616(
         )
 
 
+@cython.ccall
 def _carrier_join_candidates_8616(
-    assigned_calls: list[_TerminalAssignedCall8616],
-    carrier_returns: list[_TerminalCarrierReturn8616],
-    candidates: list[_TerminalCallReturnCandidate8616],
-    candidate_keys: set[tuple[int, int, bool]],
+    assigned_calls: object,
+    carrier_returns: object,
+    candidates: object,
+    candidate_keys: object,
 ) -> None:
     """Join assigned calls to carrier returns across containers."""
+    assigned_call: object
+    carrier_return: object
     for assigned_call in assigned_calls:
         for carrier_return in carrier_returns:
             if carrier_return.statement.retval is not assigned_call.carrier:
                 continue
             same_container = assigned_call.container is carrier_return.container
-            if same_container and carrier_return.index != assigned_call.index + 1:
+            if same_container and operator.ne(carrier_return.index, assigned_call.index + 1):
                 continue
             key = (id(assigned_call.call), id(carrier_return.statement), False)
             if key in candidate_keys:
@@ -1172,26 +1225,27 @@ def _carrier_join_candidates_8616(
 def _terminal_call_return_candidates_8616(
     root: object,
     callbacks: TerminalCallResultReturnCallbacks8616,
-) -> tuple[tuple[_TerminalCallReturnCandidate8616, ...], bool]:
+) -> tuple[tuple[_TerminalCallReturnCandidate8616, ...], cython.bint]:
     """Collect exact adjacent candidates and report a unique non-adjacent shape."""
+    container: object
     candidates: list[_TerminalCallReturnCandidate8616] = []
-    candidate_keys: set[tuple[int, int, bool]] = set()
+    candidate_keys: set[tuple[cython.longlong, cython.longlong, cython.bint]] = set()
     assigned_calls: list[_TerminalAssignedCall8616] = []
     carrier_returns: list[_TerminalCarrierReturn8616] = []
     non_adjacent = False
     containers = _terminal_call_return_containers_8616(root, callbacks)
     for container in containers:
         statements = tuple(container.statements or ())
-        leaves = tuple(_terminal_call_return_leaf_8616(statement) for statement in statements)
+        leaves = tuple(_terminal_call_return_leaf_8616(statement) for statement in iter(statements))
         _container_assigned_carriers_8616(
             container,
             statements,
             assigned_calls,
             carrier_returns,
         )
-        call_indexes = tuple(index for index, leaf in enumerate(leaves) if leaf is not None and leaf[0] == "call")
+        call_indexes = tuple(index for index, leaf in builtins.iter(enumerate(leaves)) if leaf is not None and leaf[0] == "call")
         empty_return_indexes = tuple(
-            index for index, leaf in enumerate(leaves) if leaf is not None and leaf[0] == "empty_return"
+            index for index, leaf in builtins.iter(enumerate(leaves)) if leaf is not None and leaf[0] == "empty_return"
         )
         _container_returned_call_candidates_8616(
             container,
@@ -1222,6 +1276,7 @@ def _terminal_call_return_candidates_8616(
     return tuple(candidates), non_adjacent
 
 
+@cython.ccall
 def _dynamic_object_tuple_8616(value: object) -> tuple[object, ...]:
     """Narrow one third-party iterable boundary to an owned object tuple."""
     if isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
@@ -1229,7 +1284,8 @@ def _dynamic_object_tuple_8616(value: object) -> tuple[object, ...]:
     return ()
 
 
-def _terminal_call_path_stack_adjust_8616(insn: object) -> bool:
+@cython.ccall
+def _terminal_call_path_stack_adjust_8616(insn: object) -> cython.bint:
     """Return whether an instruction is an exact caller stack cleanup."""
     operands = _dynamic_object_tuple_8616(_capstone_attr_8616(insn, "operands", ()))
     return (
@@ -1241,7 +1297,7 @@ def _terminal_call_path_stack_adjust_8616(insn: object) -> bool:
     )
 
 
-def _terminal_call_path_frame_teardown_8616(insn: object) -> bool:
+def _terminal_call_path_frame_teardown_8616(insn: object) -> cython.bint:
     """Return whether an instruction preserves an AX-family call result."""
     mnemonic = str(_capstone_attr_8616(insn, "mnemonic", "")).lower()
     operands = _dynamic_object_tuple_8616(_capstone_attr_8616(insn, "operands", ()))
@@ -1259,16 +1315,17 @@ def _terminal_call_path_frame_teardown_8616(insn: object) -> bool:
     return (
         mnemonic == "mov"
         and len(operands) == 2
-        and all(_capstone_int_attr_8616(operand, "type", -1) == 1 for operand in operands)
+        and all(_capstone_int_attr_8616(operand, "type", -1) == 1 for operand in iter(operands))
         and _return_chain_reg_name_8616(insn, operands[0]) == "sp"
         and _return_chain_reg_name_8616(insn, operands[1]) == "bp"
     )
 
 
+@cython.ccall
 def prove_terminal_call_result_path_8616(
-    call_ins_addr: int,
+    call_ins_addr: cython.longlong,
     callbacks: TerminalCallResultReturnCallbacks8616,
-) -> tuple[TerminalCallResultReturnStatus8616, tuple[int, ...]]:
+) -> tuple[TerminalCallResultReturnStatus8616, tuple[cython.longlong, ...]]:
     """Prove one AX-preserving CFG path from an exact call instruction to return."""
     result = prove_terminal_call_path_8616(
         call_ins_addr,
@@ -1294,6 +1351,7 @@ def prove_terminal_call_result_path_8616(
     return status, result.path_block_addrs
 
 
+@cython.ccall
 def materialize_terminal_call_result_return_8616(
     root: object,
     codegen: object,
@@ -1302,6 +1360,7 @@ def materialize_terminal_call_result_return_8616(
     callbacks: TerminalCallResultReturnCallbacks8616,
 ) -> TerminalCallResultReturnStats8616:
     """Replace one CFG-proven terminal call plus empty return with a returned call."""
+    refusal: object
     candidates, non_adjacent = _terminal_call_return_candidates_8616(root, callbacks)
     raw_count = len(candidates) or int(non_adjacent)
     if not candidates:
@@ -1380,10 +1439,11 @@ def materialize_terminal_call_result_return_8616(
     )
 
 
+@cython.ccall
 def _terminal_candidate_refusal_8616(
     candidate: _TerminalCallReturnCandidate8616,
     caller_use: CallerReturnUseVerdict8616,
-    call_ins_addr: int,
+    call_ins_addr: cython.longlong,
     callbacks: TerminalCallResultReturnCallbacks8616,
 ) -> TerminalCallResultReturnStats8616 | None:
     """Return a typed refusal when the sole candidate fails a proof gate."""
@@ -1434,6 +1494,7 @@ def _terminal_candidate_refusal_8616(
     return None
 
 
+@cython.ccall
 def _splice_terminal_call_return_8616(
     candidate: _TerminalCallReturnCandidate8616,
     codegen: object,
@@ -1470,6 +1531,7 @@ def _splice_terminal_call_return_8616(
     candidate.return_container.statements = return_statements
 
 
+@cython.ccall
 def _mov_effect_value_8616(
     effect: BranchTargetReturnEffect8616,
     callbacks: BranchTargetReturnScanCallbacks8616,
@@ -1484,9 +1546,10 @@ def _mov_effect_value_8616(
     return None
 
 
+@cython.ccall
 def _ax_update_effect_8616(
     effect: BranchTargetReturnEffect8616,
-    ax_value: object | None,
+    ax_value: object,
     callbacks: BranchTargetReturnScanCallbacks8616,
 ) -> object | None:
     """Apply one consumed AX-update effect to the tracked AX expression."""
@@ -1499,16 +1562,17 @@ def _ax_update_effect_8616(
     return None
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class BranchTargetReturnRegisterState8616:
     """Retain written return halves and killed incoming sources across CFG jumps."""
 
     ax_value: object | None = None
     dx_value: object | None = None
-    clobbered_sources: set[str] = field(default_factory=set)
+    clobbered_sources: object = field(default_factory=set)
 
 
-def _preserve_write_registers_8616(insn: object) -> tuple[str, ...]:
+@cython.ccall
+def _preserve_write_registers_8616(insn: object) -> object:
     """Return registers written by an instruction already proven AX/DX-preserving.
 
     Epilogue steps that pass the return-register preservation check can still
@@ -1522,16 +1586,17 @@ def _preserve_write_registers_8616(insn: object) -> tuple[str, ...]:
         return ("sp", "bp")
     if mnemonic == "pop":
         name = _return_chain_reg_name_8616(insn, operands[0]) if operands else ""
-        return (name, "sp") if name else ("sp",)
+        return tuple((name, "sp")) if name else tuple(("sp",))
     if mnemonic == "mov" and operands:
         name = _return_chain_reg_name_8616(insn, operands[0])
-        return (name,) if name else ()
+        return tuple((name,)) if name else tuple(())
     return ()
 
 
+@cython.ccall
 def _branch_copy_source_8616(
-    instruction_addr: int,
-    register: str,
+    instruction_addr: cython.longlong,
+    register: object,
     callbacks: BranchTargetReturnScanCallbacks8616,
     state: BranchTargetReturnRegisterState8616,
 ) -> object | None:
@@ -1545,13 +1610,15 @@ def _branch_copy_source_8616(
     return callbacks.materialize_reg_copy(instruction_addr, register)
 
 
+@cython.ccall
 def _apply_branch_return_move_8616(
     effect: BranchTargetReturnEffect8616,
     insn: object,
     callbacks: BranchTargetReturnScanCallbacks8616,
     state: BranchTargetReturnRegisterState8616,
-) -> bool:
+) -> cython.bint:
     """Consume one fully materialized write to a return half."""
+    value: object
     if effect.kind is BranchTargetReturnEffectKind8616.MOV_REG_REG:
         # Dynamic Capstone boundary: the proof sink is this exact native instruction.
         value = _branch_copy_source_8616(
@@ -1570,10 +1637,12 @@ def _apply_branch_return_move_8616(
     return True
 
 
+@cython.ccall
 def _record_preserved_source_clobbers_8616(
     insn: object, state: BranchTargetReturnRegisterState8616,
 ) -> None:
     """Kill every alias of an epilogue-written source for subsequent CFG blocks."""
+    register: object
     for register in _preserve_write_registers_8616(insn):
         state.clobbered_sources.update(register_value_family_8616(register))
 
@@ -1585,6 +1654,9 @@ def scan_branch_target_return_block_8616(
     register_state: BranchTargetReturnRegisterState8616 | None = None,
 ) -> BranchTargetReturnBlockResult8616:
     """Consume effects with optional path state that survives transparent jumps."""
+    next_ax: object
+    terminal: object
+    insn: object
     state = register_state if register_state is not None else BranchTargetReturnRegisterState8616()
 
     def _combined_return_expr() -> object | None:
@@ -1610,6 +1682,7 @@ def scan_branch_target_return_block_8616(
     return BranchTargetReturnBlockResult8616()
 
 
+@cython.ccall
 def _terminal_effect_result_8616(
     effect: BranchTargetReturnEffect8616,
     combined_expr: object | None,
@@ -1628,8 +1701,11 @@ def _terminal_effect_result_8616(
     return None
 
 
-def _return_chain_reg_name_8616(insn: object, operand: object) -> str:
+@cython.ccall
+def _return_chain_reg_name_8616(insn: object, operand: object) -> object:
     """Return a lower-case capstone register name for structuring pattern checks."""
+    reg: object
+    reg_name: object
     # Dynamic third-party capstone boundary: register ids are decoded by capstone wrappers.
     reg = getattr(operand, "reg", None)
     # Dynamic third-party capstone boundary: register-name rendering is supplied by capstone.
@@ -1639,7 +1715,8 @@ def _return_chain_reg_name_8616(insn: object, operand: object) -> str:
     return str(reg_name(reg)).lower()
 
 
-def _mov_sp_bp_shape_8616(insn: object, operands: tuple[object, ...]) -> bool:
+@cython.ccall
+def _mov_sp_bp_shape_8616(insn: object, operands: object) -> cython.bint:
     """Return whether one capstone instruction is ``mov sp, bp``."""
     return (
         len(operands) == 2
@@ -1650,8 +1727,10 @@ def _mov_sp_bp_shape_8616(insn: object, operands: tuple[object, ...]) -> bool:
     )
 
 
-def return_epilogue_block_8616(block: object) -> bool:
+@cython.ccall
+def return_epilogue_block_8616(block: object) -> cython.bint:
     """Return whether a dynamic boundary: third-party Capstone block is only an epilogue."""
+    insn: object
     saw_ret = False
     for insn in tuple(getattr(getattr(block, "capstone", None), "insns", ()) or ()):
         mnemonic = str(getattr(insn, "mnemonic", "")).lower()
@@ -1667,13 +1746,18 @@ def return_epilogue_block_8616(block: object) -> bool:
     return saw_ret
 
 
+@cython.ccall
 def terminal_value_block_addrs_8616(
-    block_addrs: Iterable[int],
+    block_addrs: Iterable[cython.longlong],
     load_block: Callable[[int], object | None],
     branch_target_imm: Callable[[object], int | None],
-) -> tuple[int, ...]:
+) -> tuple[cython.longlong, ...]:
     """Return value-producing blocks from a dynamic boundary: third-party Capstone CFG blocks."""
-    value_block_addrs: list[int] = []
+    candidate_block: object
+    epilogue_block: object
+    target: object
+    block_addr: object
+    value_block_addrs: list[cython.longlong] = []
     for block_addr in block_addrs:
         try:
             candidate_block = load_block(int(block_addr))
@@ -1701,19 +1785,20 @@ def terminal_value_block_addrs_8616(
     return tuple(sorted(value_block_addrs))
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _TerminalAxScan8616:
     """Mutable tallies for one terminal-block AX return scan."""
 
     load_block: Callable[[int], object | None]
     branch_target_imm: Callable[[object], int | None]
     callbacks: TerminalAxScanCallbacks8616
-    terminal_block_count: int
-    raw_insns: int = 0
-    classified: int = 0
-    ret_count: int = 0
-    conditional_branches: int = 0
+    terminal_block_count: cython.longlong
+    raw_insns: cython.longlong = 0
+    classified: cython.longlong = 0
+    ret_count: cython.longlong = 0
+    conditional_branches: cython.longlong = 0
 
+    @cython.ccall
     def _tally_result(self, expr: object | None = None) -> TerminalAxScanResult8616:
         """Assemble the scan result with the current tallies."""
         return TerminalAxScanResult8616(
@@ -1723,8 +1808,10 @@ class _TerminalAxScan8616:
             terminal_value_block_count=self.terminal_block_count,
         )
 
-    def _jmp_result(self, insn: object, block_addr: int) -> TerminalAxScanResult8616:
+    @cython.ccall
+    def _jmp_result(self, insn: object, block_addr: cython.longlong) -> TerminalAxScanResult8616:
         """Resolve one unconditional-jump terminal through the epilogue gate."""
+        target: object
         target = self.branch_target_imm(insn)
         if (
             target is None
@@ -1737,6 +1824,7 @@ class _TerminalAxScan8616:
             return self._tally_result()
         return self._tally_result(expr=self.callbacks.combined_return_expr())
 
+    @cython.ccall
     def _ret_result(self) -> TerminalAxScanResult8616:
         """Resolve one return instruction through the single-return gate."""
         self.ret_count += 1
@@ -1744,7 +1832,8 @@ class _TerminalAxScan8616:
             return self._tally_result()
         return self._tally_result(expr=self.callbacks.combined_return_expr())
 
-    def _scan_insn(self, insn: object, block_addr: int) -> TerminalAxScanResult8616 | None:
+    @cython.ccall
+    def _scan_insn(self, insn: object, block_addr: cython.longlong) -> TerminalAxScanResult8616 | None:
         """Consume one instruction; return a terminal result or None."""
         self.raw_insns += 1
         mnemonic = str(getattr(insn, "mnemonic", "")).lower()
@@ -1764,8 +1853,13 @@ class _TerminalAxScan8616:
             self.classified += 1
         return None
 
-    def scan(self, ordered_block_addrs: tuple[int, ...]) -> TerminalAxScanResult8616:
+    @cython.ccall
+    def scan(self, ordered_block_addrs: object) -> TerminalAxScanResult8616:
         """Walk each terminal block's instructions in order."""
+        block: object
+        result: object
+        block_addr: object
+        insn: object
         for block_addr in ordered_block_addrs:
             try:
                 block = self.load_block(int(block_addr))
@@ -1785,13 +1879,13 @@ class _TerminalAxScan8616:
 
 
 def linear_terminal_ax_return_scan_8616(
-    block_addrs: Iterable[int],
+    block_addrs: Iterable[cython.longlong],
     load_block: Callable[[int], object | None],
     branch_target_imm: Callable[[object], int | None],
     callbacks: TerminalAxScanCallbacks8616,
 ) -> TerminalAxScanResult8616:
     """Scan terminal blocks through a dynamic boundary: third-party Capstone instructions."""
-    ordered_block_addrs = tuple(sorted(int(addr) for addr in block_addrs))
+    ordered_block_addrs = tuple(sorted(int(addr) for addr in iter(block_addrs)))
     if not ordered_block_addrs:
         return TerminalAxScanResult8616()
     terminal_blocks = terminal_value_block_addrs_8616(ordered_block_addrs, load_block, branch_target_imm)
@@ -1811,12 +1905,14 @@ def linear_terminal_ax_return_scan_8616(
     return scan.scan(ordered_block_addrs)
 
 
+@cython.ccall
 def last_ax_return_value_8616(
     project: object,
     codegen: object,
     callbacks: LastAxReturnValueCallbacks8616,
 ) -> int | None:
     """Return the last immediate AX value proven by codegen instructions."""
+    insn: object
     value: int | None = None
     for insn in callbacks.function_insns(project, codegen):
         mnemonic = str(_capstone_attr_8616(insn, "mnemonic", "")).lower()
@@ -1839,7 +1935,8 @@ def last_ax_return_value_8616(
     return value
 
 
-def _debug_cvar_slot_8616(expr: object) -> str:
+@cython.ccall
+def _debug_cvar_slot_8616(expr: object) -> object:
     """Render C variable slot details from a dynamic boundary: angr codegen debug C AST."""
     if not isinstance(expr, CVariable):
         return type(expr).__name__
@@ -1853,12 +1950,18 @@ def _debug_cvar_slot_8616(expr: object) -> str:
     )
 
 
+@cython.ccall
 def selector_condition_call_addrs_8616(
     pairs: Iterable[tuple[CExpression, ...]],
     iter_c_nodes_deep: Callable[[object], Iterable[object]],
-) -> frozenset[int]:
+) -> frozenset[cython.longlong]:
     """Return condition call addresses from dynamic angr codegen proof nodes."""
-    addrs: set[int] = set()
+    cond_tags: object
+    condition_call_addr: object
+    ins_addr: object
+    node: object
+    pair: object
+    addrs: set[cython.longlong] = set()
     for pair in pairs:
         cond = pair[0]
         cond_tags = getattr(cond, "tags", None)
@@ -1866,7 +1969,7 @@ def selector_condition_call_addrs_8616(
             condition_call_addr = cond_tags.get("condition_call_ins_addr")
             if isinstance(condition_call_addr, int):
                 addrs.add(condition_call_addr)
-        for node in (cond, *iter_c_nodes_deep(cond)):
+        for node in (cond, ) + tuple(iter_c_nodes_deep(cond)):
             if not isinstance(node, CFunctionCall):
                 continue
             tags = node.tags
@@ -1881,13 +1984,22 @@ def selector_condition_call_addrs_8616(
     return frozenset(addrs)
 
 
+@cython.ccall
 def selector_condition_call_addrs_from_cfg_8616(
     project: object,
     codegen: object,
     callbacks: ReturnSelectorCallsiteProofCallbacks8616,
-) -> frozenset[int]:
+) -> frozenset[cython.longlong]:
     """Return pre-JCC callsites from a dynamic boundary: third-party Capstone CFG."""
-    addrs: set[int] = set()
+    condition_call_addr: object
+    decoded: object
+    false_expr: object
+    false_target: object
+    true_expr: object
+    true_target: object
+    block_addr: object
+    insn: object
+    addrs: set[cython.longlong] = set()
     for block_addr, insn in callbacks.linear_jcc_block_starts(project, codegen):
         insn_addr = int(getattr(insn, "address", 0) or 0)
         true_target = callbacks.branch_target_imm(insn)
@@ -1907,8 +2019,10 @@ def selector_condition_call_addrs_from_cfg_8616(
     return frozenset(addrs)
 
 
-def last_call_addr_before_jcc_in_function_8616(insns: Iterable[object], jcc_addr: int) -> int | None:
+@cython.ccall
+def last_call_addr_before_jcc_in_function_8616(insns: Iterable[object], jcc_addr: cython.longlong) -> int | None:
     """Return last callsite before a JCC from a dynamic boundary: third-party Capstone instructions."""
+    insn: object
     last_call_addr: int | None = None
     for insn in insns:
         insn_addr = int(getattr(insn, "address", -1))
@@ -1923,9 +2037,12 @@ def last_call_addr_before_jcc_in_function_8616(insns: Iterable[object], jcc_addr
     return last_call_addr
 
 
-def linear_jcc_block_starts_8616(insns: Iterable[object]) -> tuple[tuple[int, object], ...]:
+@cython.ccall
+def linear_jcc_block_starts_8616(insns: Iterable[object]) -> tuple[tuple[cython.longlong, object], ...]:
     """Return linear JCC block starts from a dynamic boundary: third-party Capstone instructions."""
-    pairs: list[tuple[int, object]] = []
+    index: object
+    insn: object
+    pairs: list[tuple[cython.longlong, object]] = []
     terminators = {"jmp", "ljmp", "ret", "retf", "iret"}
     indexed_insns = tuple(insns)
     for index, insn in enumerate(indexed_insns):
@@ -1943,7 +2060,8 @@ def linear_jcc_block_starts_8616(insns: Iterable[object]) -> tuple[tuple[int, ob
     return tuple(pairs)
 
 
-def is_conditional_branch_insn_8616(insn: object) -> bool:
+@cython.ccall
+def is_conditional_branch_insn_8616(insn: object) -> cython.bint:
     """Return whether a dynamic boundary: third-party Capstone instruction is conditional."""
     mnemonic = str(getattr(insn, "mnemonic", "") or "").lower()
     if mnemonic in {"jmp", "ljmp"}:
@@ -1958,19 +2076,23 @@ def conditional_branch_count_8616(insns: Iterable[object]) -> int | None:
     indexed_insns = tuple(insns)
     if not indexed_insns:
         return None
-    return sum(1 for insn in indexed_insns if is_conditional_branch_insn_8616(insn))
+    return sum(1 for insn in iter(indexed_insns) if is_conditional_branch_insn_8616(insn))
 
 
+@cython.ccall
 def next_unconditional_target_after_jcc_8616(
     block: object,
-    jcc_addr: int,
+    jcc_addr: cython.longlong,
     load_block: Callable[[int], object | None],
     branch_target_imm: Callable[[object], int | None],
 ) -> int | None:
     """Return following jump target from a dynamic boundary: third-party Capstone CFG blocks."""
+    next_block: object
+    idx: object
+    insn: object
     insns = tuple(getattr(getattr(block, "capstone", None), "insns", ()) or ())
     for idx, insn in enumerate(insns):
-        if int(getattr(insn, "address", -1)) != int(jcc_addr):
+        if operator.ne(int(getattr(insn, "address", -1)), int(jcc_addr)):
             continue
         if idx + 1 >= len(insns):
             next_addr = int(jcc_addr) + int(getattr(insn, "size", 0) or 0)
@@ -1993,8 +2115,10 @@ def next_unconditional_target_after_jcc_8616(
     return None
 
 
+@cython.ccall
 def first_conditional_jcc_8616(block: object) -> object | None:
     """Return first conditional JCC from a dynamic boundary: third-party Capstone CFG block."""
+    insn: object
     insns = tuple(getattr(getattr(block, "capstone", None), "insns", ()) or ())
     for insn in insns:
         mnemonic = str(getattr(insn, "mnemonic", "")).lower()
@@ -2003,13 +2127,18 @@ def first_conditional_jcc_8616(block: object) -> object | None:
     return None
 
 
+@cython.ccall
 def _jcc_chain_step_8616(
-    block_addr: int,
+    block_addr: cython.longlong,
     load_block: Callable[[int], object | None],
     branch_target_imm: Callable[[object], int | None],
     next_unconditional_target_after_jcc: Callable[[object, int, int], int | None],
-) -> tuple[int, int] | None:
+) -> object:
     """Return the true/false targets of the first JCC inside one block."""
+    block: object
+    false_target: object
+    jcc: object
+    true_target: object
     block = load_block(int(block_addr))
     if block is None:
         return None
@@ -2025,14 +2154,20 @@ def _jcc_chain_step_8616(
     return int(true_target), int(false_target)
 
 
+@cython.ccall
 def selector_targets_from_32bit_jcc_chain_8616(
-    block_addr: int,
+    block_addr: cython.longlong,
     jcc_insn: object,
     load_block: Callable[[int], object | None],
     branch_target_imm: Callable[[object], int | None],
     next_unconditional_target_after_jcc: Callable[[object, int, int], int | None],
-) -> tuple[int, int] | None:
+) -> object:
     """Return true/false targets proven by a three-JCC 32-bit selector chain."""
+    false_target: object
+    low_step: object
+    mid_step: object
+    start_block: object
+    true_mid: object
     true_mid = branch_target_imm(jcc_insn)
     start_block = load_block(int(block_addr))
     if start_block is None:
@@ -2054,21 +2189,29 @@ def selector_targets_from_32bit_jcc_chain_8616(
     if low_step is None:
         return None
     low_true, low_false = low_step
-    if int(mid_false) == int(low_true) and int(false_target) == int(low_false):
+    if operator.eq(int(mid_false), int(low_true)) and operator.eq(int(false_target), int(low_false)):
         return int(low_true), int(false_target)
-    if int(mid_false) == int(low_false) and int(false_target) == int(low_true):
+    if operator.eq(int(mid_false), int(low_false)) and operator.eq(int(false_target), int(low_true)):
         return int(low_false), int(false_target)
     return None
 
 
+@cython.ccall
 def equality_return_target_from_32bit_jcc_chain_8616(
-    block_addr: int,
+    block_addr: cython.longlong,
     jcc_insn: object,
     load_block: Callable[[int], object | None],
     branch_target_imm: Callable[[object], int | None],
     next_unconditional_target_after_jcc: Callable[[object, int, int], int | None],
 ) -> int | None:
     """Return equality target from a dynamic boundary: third-party Capstone JCC chain."""
+    false_target: object
+    jcc2: object
+    mid_addr: object
+    mid_block: object
+    second_false: object
+    start_block: object
+    true_target: object
     if str(getattr(jcc_insn, "mnemonic", "")).lower() not in {"je", "jz"}:
         return None
     mid_addr = branch_target_imm(jcc_insn)
@@ -2092,19 +2235,26 @@ def equality_return_target_from_32bit_jcc_chain_8616(
     second_false = next_unconditional_target_after_jcc(mid_block, int(mid_addr), second_jcc_addr)
     if true_target is None or second_false is None:
         return None
-    if int(false_target) != int(second_false):
+    if operator.ne(int(false_target), int(second_false)):
         return None
     return int(true_target)
 
 
+@cython.ccall
 def inequality_target_from_32bit_jcc_chain_8616(
-    block_addr: int,
+    block_addr: cython.longlong,
     jcc_insn: object,
     load_block: Callable[[int], object | None],
     branch_target_imm: Callable[[object], int | None],
     next_unconditional_target_after_jcc: Callable[[object, int, int], int | None],
 ) -> int | None:
     """Return inequality target from a dynamic boundary: third-party Capstone JCC chain."""
+    false_target: object
+    jcc2: object
+    mid_addr: object
+    mid_block: object
+    start_block: object
+    true_target: object
     if str(getattr(jcc_insn, "mnemonic", "")).lower() not in {"je", "jz"}:
         return None
     mid_addr = branch_target_imm(jcc_insn)
@@ -2125,17 +2275,20 @@ def inequality_target_from_32bit_jcc_chain_8616(
     true_target = branch_target_imm(jcc2)
     if true_target is None:
         return None
-    if int(false_target) != int(true_target):
+    if operator.ne(int(false_target), int(true_target)):
         return None
     return int(true_target)
 
 
+@cython.ccall
 def resolve_one_hop_jmp_target_8616(
-    target: int | None,
+    target: object,
     load_block: Callable[[int], object | None],
     branch_target_imm: Callable[[object], int | None],
 ) -> int | None:
     """Resolve one-hop target through a dynamic boundary: third-party Capstone jump stub."""
+    block: object
+    resolved: object
     if target is None:
         return None
     target_addr = int(target)
@@ -2156,12 +2309,15 @@ def resolve_one_hop_jmp_target_8616(
     return target_addr
 
 
+@cython.ccall
 def branch_target_return_value_8616(
-    target_addr: int,
+    target_addr: cython.longlong,
     load_block: Callable[[int], object | None],
-    signed_i16_immediate: Callable[[int], int],
+    signed_i16_immediate: Callable[[int], cython.longlong],
 ) -> int | None:
     """Return CFG target AX value from a dynamic boundary: third-party Capstone block."""
+    block: object
+    insn: object
     try:
         block = load_block(int(target_addr))
     except Exception:
@@ -2184,21 +2340,23 @@ def branch_target_return_value_8616(
     return None
 
 
+@cython.ccall
 def combine_dx_ax_return_expr_8616(
-    ax_value: object | None,
-    dx_value: object | None,
+    ax_value: object,
+    dx_value: object,
     codegen: object,
     stack_offset: Callable[[object], int | None],
     wide_stack_expr: Callable[[int, int], object | None],
 ) -> object | None:
     """Compose a proven DX:AX return without discarding either word."""
+    wide: object
     if ax_value is None:
         return None
     if dx_value is None:
         return ax_value
     ax_offset = stack_offset(ax_value)
     dx_offset = stack_offset(dx_value)
-    if isinstance(ax_offset, int) and isinstance(dx_offset, int) and dx_offset == ax_offset + 2:
+    if isinstance(ax_offset, int) and isinstance(dx_offset, int) and operator.eq(dx_offset, ax_offset + 2):
         wide = wide_stack_expr(ax_offset, 4)
         if wide is not None:
             return wide
@@ -2221,21 +2379,24 @@ def combine_dx_ax_return_expr_8616(
     return cast(object, CBinaryOp("Or", shifted_high, low, codegen=codegen))
 
 
-def terminal_ax_fallback_supports_widths_8616(return_widths: Iterable[int | None]) -> bool:
+@cython.ccall
+def terminal_ax_fallback_supports_widths_8616(return_widths: Iterable[int | None]) -> cython.bint:
     """Preserve the compatibility name for the Structuring value-width contract."""
     return bool(terminal_ax_value_supports_widths_8616(return_widths))
 
 
+@cython.ccall
 def branch_target_return_expr_8616(
-    target_addr: int,
+    target_addr: cython.longlong,
     load_block: Callable[[int], object | None],
     scan_block: Callable[[object], BranchTargetReturnBlockResult8616],
     *,
-    max_depth: int = 4,
-    _depth: int = 0,
-    _seen: set[int] | None = None,
+    max_depth: cython.longlong = 4,
+    _depth: cython.longlong = 0,
+    _seen: object = None,
 ) -> object | None:
     """Follow CFG target jumps while a callback recovers per-block return expressions."""
+    block: object
     if _depth > max_depth:
         return None
     if _seen is None:
@@ -2273,10 +2434,18 @@ def ordered_32bit_selector_return_expr_pairs_from_cfg_8616(
     project: object,
     codegen: _ReturnChainCodegen8616,
     callbacks: ReturnSelector32BitPairCallbacks8616,
-) -> list[tuple[CExpression, CExpression, CExpression]]:
+) -> object:
     """Return selector pairs from a dynamic boundary: third-party Capstone 32-bit chains."""
+    block: object
+    cond: object
+    decoded: object
+    false_expr: object
+    targets: object
+    true_expr: object
+    block_addr: object
+    insn: object
     pairs: list[tuple[CExpression, CExpression, CExpression]] = []
-    for block_addr in sorted(int(addr) for addr in callbacks.function_block_addrs(project, codegen)):
+    for block_addr in sorted(int(addr) for addr in builtins.iter(callbacks.function_block_addrs(project, codegen))):
         block = callbacks.load_block(int(block_addr))
         if block is None:
             continue
@@ -2311,12 +2480,22 @@ def ordered_32bit_selector_return_expr_pairs_from_cfg_8616(
     return pairs
 
 
+@cython.ccall
 def ordered_conditional_return_expr_pairs_from_cfg_8616(
     project: object,
     codegen: _ReturnChainCodegen8616,
     callbacks: ReturnConditionalExprPairCallbacks8616,
-) -> list[tuple[CExpression, CExpression, CExpression]]:
+) -> object:
     """Return CFG-proven conditional return expression pairs for ordinary JCCs."""
+    cond: object
+    condition_call_addr: object
+    decoded: object
+    false_expr: object
+    false_target: object
+    true_expr: object
+    true_target: object
+    block_addr: object
+    insn: object
     pairs: list[tuple[CExpression, CExpression, CExpression]] = []
     for block_addr, insn in callbacks.linear_jcc_block_starts(project, codegen):
         true_target = callbacks.branch_target_imm(insn)
@@ -2345,12 +2524,21 @@ def ordered_conditional_return_expr_pairs_from_cfg_8616(
     return pairs
 
 
+@cython.ccall
 def ordered_conditional_void_tail_call_proofs_from_cfg_8616(
     project: object,
     codegen: _ReturnChainCodegen8616,
     callbacks: ReturnConditionalVoidTailCallCallbacks8616,
-) -> list[tuple[CExpression, CExpression]]:
+) -> object:
     """Return CFG-proven conditional void-tail-call guard proofs."""
+    cond: object
+    decoded: object
+    false_expr: object
+    false_target: object
+    true_expr: object
+    true_target: object
+    block_addr: object
+    insn: object
     proofs: list[tuple[CExpression, CExpression]] = []
     for block_addr, insn in callbacks.linear_jcc_block_starts(project, codegen):
         true_target = callbacks.branch_target_imm(insn)
@@ -2373,12 +2561,14 @@ def ordered_conditional_void_tail_call_proofs_from_cfg_8616(
     return proofs
 
 
+@cython.ccall
 def _jcc_chain_target_8616(
-    block_addr: int,
+    block_addr: cython.longlong,
     insn: object,
     callbacks: Return32BitConditionalPairCallbacks8616,
 ) -> int | None:
     """Resolve one JCC to a return target via selector/equality/inequality chains."""
+    target_pair: object
     target_pair = selector_targets_from_32bit_jcc_chain_8616(
         int(block_addr),
         insn,
@@ -2406,11 +2596,12 @@ def _jcc_chain_target_8616(
     )
 
 
+@cython.ccall
 def _dedup_condition_pair_8616(
     cond: object,
-    value: int,
-    seen_conditions: set[str],
-    pairs: list[tuple[CExpression, int]],
+    value: cython.longlong,
+    seen_conditions: object,
+    pairs: object,
     expr_fingerprint: Callable[[object, object], str],
     project: object,
 ) -> None:
@@ -2426,11 +2617,18 @@ def ordered_32bit_conditional_return_pairs_from_cfg_8616(
     project: object,
     codegen: _ReturnChainCodegen8616,
     callbacks: Return32BitConditionalPairCallbacks8616,
-) -> list[tuple[CExpression, int]]:
+) -> object:
     """Return condition/value pairs from a dynamic boundary: third-party Capstone chains."""
-    pairs: list[tuple[CExpression, int]] = []
+    block: object
+    cond: object
+    decoded: object
+    target: object
+    value: object
+    block_addr: object
+    insn: object
+    pairs: list[tuple[CExpression, cython.longlong]] = []
     seen_conditions: set[str] = set()
-    for block_addr in sorted(int(addr) for addr in callbacks.function_block_addrs(project, codegen)):
+    for block_addr in sorted(int(addr) for addr in builtins.iter(callbacks.function_block_addrs(project, codegen))):
         block = callbacks.load_block(int(block_addr))
         if block is None:
             continue
@@ -2465,14 +2663,19 @@ def ordered_32bit_conditional_return_pairs_from_cfg_8616(
     return pairs
 
 
+@cython.ccall
 def _mask_update_target_8616(
     project: object,
-    block_addr: int,
+    block_addr: cython.longlong,
     insn: object,
-    slot_offset: int,
+    slot_offset: cython.longlong,
     callbacks: MaskAccumulatorPairCallbacks8616,
 ) -> int | None:
     """Resolve one JCC to a mask-update target through all fallback ladders."""
+    branch_target: object
+    false_target: object
+    target: object
+    target_pair: object
     target_pair = callbacks.selector_targets_from_32bit_jcc_chain(int(block_addr), insn)
     target = (
         target_pair[0]
@@ -2500,14 +2703,21 @@ def _mask_update_target_8616(
     return target
 
 
+@cython.ccall
 def ordered_32bit_mask_update_pairs_from_cfg_8616(
     project: object,
     codegen: _ReturnChainCodegen8616,
-    slot_offset: int,
+    slot_offset: cython.longlong,
     callbacks: MaskAccumulatorPairCallbacks8616,
-) -> list[tuple[CExpression, int]]:
+) -> object:
     """Return mask accumulator pairs from a dynamic boundary: third-party Capstone CFG."""
-    pairs: list[tuple[CExpression, int]] = []
+    cond: object
+    decoded: object
+    imm: object
+    target: object
+    block_addr: object
+    insn: object
+    pairs: list[tuple[CExpression, cython.longlong]] = []
     seen_conditions: set[str] = set()
     for block_addr, insn in callbacks.linear_jcc_block_starts(project, codegen):
         mnemonic = str(getattr(insn, "mnemonic", "")).lower()
@@ -2542,8 +2752,14 @@ def materialize_cfg_mask_accumulator_8616(
     project: object,
     codegen: _ReturnChainCodegen8616,
     callbacks: MaskAccumulatorMaterializationCallbacks8616,
-) -> bool:
+) -> cython.bint:
     """Materialize mask accumulator chain into a dynamic boundary: angr codegen C AST."""
+    cfunc: object
+    eq_cond: object
+    mask_expr: object
+    slot_offset: object
+    cond: object
+    imm: object
     cfunc = codegen.cfunc
     if cfunc is None:
         return False
@@ -2551,12 +2767,12 @@ def materialize_cfg_mask_accumulator_8616(
     if slot_offset is None:
         return False
     pairs = list(callbacks.ordered_mask_update_pairs(project, codegen, int(slot_offset)))
-    imms = tuple(int(imm) for _cond, imm in pairs)
+    imms = tuple(int(imm) for _cond, imm in iter(pairs))
     if imms == (1, 2, 4, 8, 16):
         eq_cond = next(
             (
                 cond
-                for cond, imm in pairs
+                for cond, imm in iter(pairs)
                 if int(imm) == 16 and isinstance(cond, CBinaryOp) and getattr(cond, "op", None) == "CmpEQ"
             ),
             None,
@@ -2581,19 +2797,24 @@ def materialize_cfg_mask_accumulator_8616(
     cfunc.statements = CStatements(statements=statements, codegen=codegen)
     codegen._inertia_mask_accumulator_materialized_8616 = True
     codegen._inertia_mask_accumulator_condition_fingerprints_8616 = tuple(
-        callbacks.expr_fingerprint(cond, project) for cond, _imm in pairs
+        callbacks.expr_fingerprint(cond, project) for cond, _imm in iter(pairs)
     )
     codegen._inertia_mask_accumulator_return_fingerprint_8616 = callbacks.expr_fingerprint(mask_expr, project)
-    codegen._inertia_mask_accumulator_update_immediates_8616 = tuple(int(imm) for _cond, imm in pairs)
+    codegen._inertia_mask_accumulator_update_immediates_8616 = tuple(int(imm) for _cond, imm in iter(pairs))
     return True
 
 
+@cython.ccall
 def selector_stack_expr_from_ax_load_8616(
     project: object,
     codegen: _ReturnChainCodegen8616,
     callbacks: SelectorStackExprCallbacks8616,
 ) -> CExpression | None:
     """Recover selector stack expression from a dynamic boundary: third-party Capstone instructions."""
+    mem: object
+    mem_base: object
+    reg_name: object
+    insn: object
     for insn in callbacks.linear_function_insns(project, codegen):
         # Dynamic third-party capstone boundary: instructions expose mnemonic/operands/reg_name.
         operands = tuple(getattr(insn, "operands", ()) or ())
@@ -2619,15 +2840,16 @@ def selector_stack_expr_from_ax_load_8616(
     return None
 
 
-def _ax_decrement_chain_insn_8616(insn: object) -> bool:
+def _ax_decrement_chain_insn_8616(insn: object) -> cython.bint:
     """Return whether one instruction is an ``or ax,ax``/``dec ax`` chain step."""
+    raw_operands: object
     mnemonic = str(getattr(insn, "mnemonic", "")).lower()
     raw_operands = getattr(insn, "operands", ())
-    operands: tuple[object, ...] = tuple(raw_operands) if isinstance(raw_operands, (list, tuple)) else ()
+    operands: object = tuple(raw_operands) if isinstance(raw_operands, (list, tuple)) else ()
     if mnemonic == "or" and len(operands) == 2:
         return all(
             int(getattr(op, "type", -1)) == 1 and _return_chain_reg_name_8616(insn, op) == "ax"
-            for op in operands
+            for op in iter(operands)
         )
     if mnemonic == "dec" and len(operands) == 1:
         return (
@@ -2637,13 +2859,15 @@ def _ax_decrement_chain_insn_8616(insn: object) -> bool:
     return False
 
 
+@cython.ccall
 def _following_jcc_8616(
-    insns: tuple[object, ...],
-    index_by_addr: dict[int, int],
+    insns: object,
+    index_by_addr: object,
     insn: object,
-    expected: set[str],
+    expected: object,
 ) -> object | None:
     """Return following JCC from a dynamic boundary: third-party Capstone instructions."""
+    start: object
     start = index_by_addr.get(int(getattr(insn, "address", -1)))
     if start is None or start + 1 >= len(insns):
         return None
@@ -2652,15 +2876,17 @@ def _following_jcc_8616(
     return jcc if mnemonic in expected else None
 
 
+@cython.ccall
 def _fallthrough_target_8616(
-    insns: tuple[object, ...],
-    index_by_addr: dict[int, int],
-    jcc: object | None,
+    insns: object,
+    index_by_addr: object,
+    jcc: object,
     project: object,
     next_linear_jmp_target: Callable[[tuple[object, ...], int], int | None],
     resolve_one_hop_jmp_target: Callable[[object, int | None], int | None],
 ) -> int | None:
     """Return fallthrough target from a dynamic boundary: third-party Capstone instructions."""
+    jcc_idx: object
     if jcc is None:
         return None
     jcc_idx = index_by_addr.get(int(getattr(jcc, "address", -1)))
@@ -2669,15 +2895,18 @@ def _fallthrough_target_8616(
     return resolve_one_hop_jmp_target(project, next_linear_jmp_target(insns, jcc_idx))
 
 
+@cython.ccall
 def _sequential_switch_statements_8616(
-    case_exprs: list[object],
+    case_exprs: object,
     default_expr: object,
     selector: object,
     project: object,
     codegen: _ReturnChainCodegen8616,
     callbacks: SequentialDecrementSwitchCallbacks8616,
-) -> tuple[list[CStatement], list[str]] | None:
+) -> object:
     """Build CmpEQ-guarded return statements for each sequential case."""
+    expr: object
+    case_value: object
     statements: list[CStatement] = []
     condition_fingerprints: list[str] = []
     for case_value, expr in enumerate(case_exprs):
@@ -2710,8 +2939,11 @@ def _sequential_switch_statements_8616(
     return statements, condition_fingerprints
 
 
-def _sequential_chain_insns_8616(insns: tuple[object, ...]) -> list[object]:
+@cython.ccall
+def _sequential_chain_insns_8616(insns: object) -> object:
     """Collect the ``or ax,ax``/``dec ax`` chain instructions in linear order."""
+    reg_name: object
+    insn: object
     chain: list[object] = []
     for insn in insns:
         # Dynamic third-party capstone boundary: instructions expose mnemonic/operands/reg_name/address.
@@ -2726,19 +2958,24 @@ def _sequential_chain_insns_8616(insns: tuple[object, ...]) -> list[object]:
 def _sequential_switch_evidence_8616(
     project: object,
     codegen: _ReturnChainCodegen8616,
-    insns: tuple[object, ...],
+    insns: object,
     callbacks: SequentialDecrementSwitchCallbacks8616,
-) -> tuple[list[object], object] | None:
+) -> object:
     """Resolve the sequential chain's case/default return expressions."""
+    default_expr: object
+    default_target: object
+    jcc: object
+    last_jcc: object
+    target: object
     chain = _sequential_chain_insns_8616(insns)
     if len(chain) < 2:
         return None
-    index_by_addr = {int(getattr(insn, "address", -1)): idx for idx, insn in enumerate(insns)}
+    index_by_addr = {int(getattr(insn, "address", -1)): idx for idx, insn in builtins.iter(enumerate(insns))}
 
-    jccs = [_following_jcc_8616(insns, index_by_addr, insn, {"jne", "jnz"}) for insn in chain]
-    if any(jcc is None for jcc in jccs):
+    jccs = [_following_jcc_8616(insns, index_by_addr, insn, {"jne", "jnz"}) for insn in iter(chain)]
+    if any(jcc is None for jcc in iter(jccs)):
         return None
-    case_targets: list[int] = []
+    case_targets: list[cython.longlong] = []
     for jcc in jccs:
         target = _fallthrough_target_8616(
             insns,
@@ -2757,9 +2994,9 @@ def _sequential_switch_evidence_8616(
     default_target = callbacks.resolve_one_hop_jmp_target(project, callbacks.branch_target_imm(last_jcc))
     if default_target is None:
         return None
-    case_exprs = [callbacks.branch_target_return_expr(project, codegen, target) for target in case_targets]
+    case_exprs = [callbacks.branch_target_return_expr(project, codegen, target) for target in iter(case_targets)]
     default_expr = callbacks.branch_target_return_expr(project, codegen, int(default_target))
-    if default_expr is None or any(expr is None for expr in case_exprs):
+    if default_expr is None or any(expr is None for expr in iter(case_exprs)):
         return None
     return case_exprs, default_expr
 
@@ -2768,8 +3005,11 @@ def materialize_sequential_decrement_switch_return_chain_8616(
     project: object,
     codegen: _ReturnChainCodegen8616,
     callbacks: SequentialDecrementSwitchCallbacks8616,
-) -> bool:
+) -> cython.bint:
     """Materialize decrement/JNE chains from a dynamic boundary: third-party Capstone instructions."""
+    built: object
+    evidence: object
+    selector: object
     selector = callbacks.selector_stack_expr(project, codegen)
     if selector is None:
         return False
@@ -2794,7 +3034,7 @@ def materialize_sequential_decrement_switch_return_chain_8616(
     codegen._inertia_return_selector_materialized_8616 = True
     codegen._inertia_return_chain_materialized_condition_fingerprints_8616 = tuple(condition_fingerprints)
     codegen._inertia_return_expr_chain_materialized_return_fingerprints_8616 = tuple(
-        callbacks.expr_fingerprint(expr, project) for expr in (*case_exprs, default_expr)
+        callbacks.expr_fingerprint(expr, project) for expr in iter(tuple(case_exprs) + (default_expr,))
     )
     codegen._inertia_return_selector_raw_stack_slot_aliases_8616 = callbacks.selector_raw_stack_aliases(
         project, selector
@@ -2804,17 +3044,23 @@ def materialize_sequential_decrement_switch_return_chain_8616(
 
 def _complex_switch_targets_8616(
     project: object,
-    chain: list[object],
-    insns: tuple[object, ...],
-    index_by_addr: dict[int, int],
+    chain: object,
+    insns: object,
+    index_by_addr: object,
     callbacks: ComplexDecrementSwitchCallbacks8616,
-) -> tuple[int, int, int, int] | None:
+) -> object:
     """Resolve the four case targets and prove the shared default target."""
+    jcc3: object
+    target_case0: object
+    target_case12: object
+    target_case3: object
+    target_default_1: object
+    target_default_2: object
     jcc0 = _following_jcc_8616(insns, index_by_addr, chain[0], {"jne", "jnz"})
     jcc1 = _following_jcc_8616(insns, index_by_addr, chain[1], {"jge", "jnl"})
     jcc2 = _following_jcc_8616(insns, index_by_addr, chain[2], {"jg", "jnle"})
     jcc3 = _following_jcc_8616(insns, index_by_addr, chain[3], {"jne", "jnz"})
-    if any(jcc is None for jcc in (jcc0, jcc1, jcc2, jcc3)):
+    if any(jcc is None for jcc in iter((jcc0, jcc1, jcc2, jcc3))):
         return None
 
     target_case0 = _fallthrough_target_8616(
@@ -2856,9 +3102,10 @@ def _complex_switch_targets_8616(
     return target_case0_int, target_default_int, target_case12_int, target_case3_int
 
 
+@cython.ccall
 def _selector_cmp_guard_8616(
-    op: str,
-    value: int,
+    op: object,
+    value: cython.longlong,
     selector: object,
     codegen: _ReturnChainCodegen8616,
     clone_c_value: Callable[[object], CExpression],
@@ -2876,8 +3123,14 @@ def materialize_complex_decrement_switch_return_chain_8616(
     project: object,
     codegen: _ReturnChainCodegen8616,
     callbacks: ComplexDecrementSwitchCallbacks8616,
-) -> bool:
+) -> cython.bint:
     """Materialize four-guard switch chains from a dynamic boundary: third-party Capstone instructions."""
+    expr_case0: object
+    expr_case12: object
+    expr_case3: object
+    expr_default: object
+    selector: object
+    targets: object
     selector = callbacks.selector_stack_expr(project, codegen)
     if selector is None:
         return False
@@ -2885,11 +3138,11 @@ def materialize_complex_decrement_switch_return_chain_8616(
         return False
     insns = tuple(callbacks.linear_function_insns(project, codegen))
     chain: list[object] = [
-        insn for insn in insns if _ax_decrement_chain_insn_8616(insn)
+        insn for insn in iter(insns) if _ax_decrement_chain_insn_8616(insn)
     ]
     if len(chain) < 4:
         return False
-    index_by_addr = {int(getattr(insn, "address", -1)): idx for idx, insn in enumerate(insns)}
+    index_by_addr = {int(getattr(insn, "address", -1)): idx for idx, insn in builtins.iter(enumerate(insns))}
 
     targets = _complex_switch_targets_8616(project, chain, insns, index_by_addr, callbacks)
     if targets is None:
@@ -2899,7 +3152,7 @@ def materialize_complex_decrement_switch_return_chain_8616(
     expr_default = callbacks.branch_target_return_expr(project, codegen, target_default_int)
     expr_case12 = callbacks.branch_target_return_expr(project, codegen, target_case12_int)
     expr_case3 = callbacks.branch_target_return_expr(project, codegen, target_case3_int)
-    if any(expr is None for expr in (expr_case0, expr_default, expr_case12, expr_case3)):
+    if any(expr is None for expr in iter((expr_case0, expr_default, expr_case12, expr_case3))):
         return False
     if expr_case0 is None or expr_default is None or expr_case12 is None or expr_case3 is None:
         return False
@@ -2925,7 +3178,7 @@ def materialize_complex_decrement_switch_return_chain_8616(
             cstyle_ifs=True,
             codegen=codegen,
         )
-        for cond, expr in ordered
+        for cond, expr in iter(ordered)
     ]
     statements.append(CReturn(callbacks.clone_c_value(expr_default), codegen=codegen))
     callbacks.set_cfunc_statements_root(codegen, CStatements(statements=statements, codegen=codegen))
@@ -2933,10 +3186,10 @@ def materialize_complex_decrement_switch_return_chain_8616(
     codegen._inertia_return_expr_chain_materialized_8616 = True
     codegen._inertia_return_selector_materialized_8616 = True
     codegen._inertia_return_chain_materialized_condition_fingerprints_8616 = tuple(
-        callbacks.expr_fingerprint(cond, project) for cond, _expr in ordered
+        callbacks.expr_fingerprint(cond, project) for cond, _expr in iter(ordered)
     )
     codegen._inertia_return_expr_chain_materialized_return_fingerprints_8616 = (
-        *tuple(callbacks.expr_fingerprint(expr, project) for _cond, expr in ordered),
+        *tuple(callbacks.expr_fingerprint(expr, project) for _cond, expr in iter(ordered)),
         callbacks.expr_fingerprint(expr_default, project),
     )
     codegen._inertia_return_selector_raw_stack_slot_aliases_8616 = callbacks.selector_raw_stack_aliases(
@@ -2945,14 +3198,16 @@ def materialize_complex_decrement_switch_return_chain_8616(
     return True
 
 
+@cython.ccall
 def selector_function_has_unsafe_effects_8616(
     project: object,
     codegen: _ReturnChainCodegen8616,
     callbacks: SelectorUnsafeEffectsCallbacks8616,
     *,
-    allowed_call_addrs: frozenset[int] = frozenset(),
-) -> bool:
+    allowed_call_addrs: object = frozenset(),
+) -> cython.bint:
     """Return side-effect risk from a dynamic boundary: third-party Capstone instructions."""
+    insn: object
     # Some instruction-only callers run before angr publishes a C function.
     try:
         root = codegen.cfunc.statements
@@ -2997,7 +3252,8 @@ def selector_function_has_unsafe_effects_8616(
     return False
 
 
-def _memory_write_effect_8616(mnemonic: str, operands: tuple[object, ...]) -> bool:
+@cython.ccall
+def _memory_write_effect_8616(mnemonic: object, operands: object) -> cython.bint:
     """Return whether one non-call instruction writes memory."""
     if mnemonic.startswith(("stos", "movs")):
         return True
@@ -3027,15 +3283,17 @@ _MEMORY_WRITE_MNEMONICS_8616: frozenset[str] = frozenset(
 )
 
 
+@cython.ccall
 def _unsafe_call_effect_8616(
     insn: object,
-    previous_insn: object | None,
-    seen_branch: bool,
-    allowed_call_addrs: frozenset[int],
+    previous_insn: object,
+    seen_branch: cython.bint,
+    allowed_call_addrs: object,
     project: object,
     callbacks: SelectorUnsafeEffectsCallbacks8616,
-) -> bool:
+) -> cython.bint:
     """Return whether one call instruction is an unproven side effect."""
+    target: object
     target = callbacks.direct_call_target(insn)
     if target is None:
         return True
@@ -3053,7 +3311,7 @@ def _unsafe_call_effect_8616(
     next_addr = int(getattr(insn, "address", 0) or 0) + int(getattr(insn, "size", 0) or 0)
     stack_probe_rel0 = (
         not seen_branch
-        and int(target) == next_addr
+        and operator.eq(int(target), next_addr)
         and str(getattr(previous_insn, "mnemonic", "")).lower() == "mov"
         and len(prev_operands) == 2
         and int(getattr(prev_operands[0], "type", -1)) == 1
@@ -3065,13 +3323,14 @@ def _unsafe_call_effect_8616(
     return int(getattr(insn, "address", -1)) not in allowed_call_addrs
 
 
+@cython.ccall
 def _selector_refuse_8616(
     codegen: _ReturnChainCodegen8616,
     project: object,
-    repairing_stale_projection: bool,
-    reason: str,
+    repairing_stale_projection: cython.bint,
+    reason: object,
     expr_fingerprint: Callable[[object, object], str],
-) -> bool:
+) -> cython.bint:
     """Refuse initial discovery, but hard-fail a classified stale projection."""
     if repairing_stale_projection:
         require_selector_return_projection_8616(
@@ -3083,11 +3342,12 @@ def _selector_refuse_8616(
     return False
 
 
+@cython.ccall
 def _selector_pair_candidates_8616(
     project: object,
     codegen: _ReturnChainCodegen8616,
     callbacks: ReturnSelectorCallbacks8616,
-    stats: dict[str, int],
+    stats: object,
     debug: object,
     log: logging.Logger,
 ) -> tuple[list[tuple[CExpression, CExpression, CExpression]], str, str | None]:
@@ -3107,9 +3367,9 @@ def _selector_pair_candidates_8616(
         return pairs, pair_source, "missing-pairs"
     if len(pairs) > 1:
         fingerprints = [
-            callbacks.expr_fingerprint(cond, project) for cond, _true_expr, _false_expr in pairs
+            callbacks.expr_fingerprint(cond, project) for cond, _true_expr, _false_expr in iter(pairs)
         ]
-        if len(set(fingerprints)) != len(fingerprints):
+        if operator.ne(len(set(fingerprints)), len(fingerprints)):
             stats["refused"] += len(pairs)
             return pairs, pair_source, "duplicate-conditions"
     return pairs, pair_source, None
@@ -3119,11 +3379,11 @@ def _publish_selector_return_8616(
     project: object,
     codegen: _ReturnChainCodegen8616,
     callbacks: ReturnSelectorCallbacks8616,
-    pairs: list[tuple[CExpression, CExpression, CExpression]],
-    stats: dict[str, int],
+    pairs: object,
+    stats: object,
     debug: object,
     log: logging.Logger,
-) -> bool:
+) -> cython.bint:
     """Splice the selector statements, publish fingerprints, and assert the projection."""
     statements, return_fingerprints = _selector_pair_statements_8616(
         pairs, project, codegen, callbacks, debug, log
@@ -3133,7 +3393,7 @@ def _publish_selector_return_8616(
     codegen._inertia_return_expr_chain_materialized_8616 = True
     codegen._inertia_return_selector_materialized_8616 = True
     codegen._inertia_return_chain_materialized_condition_fingerprints_8616 = tuple(
-        callbacks.expr_fingerprint(cond, project) for cond, _true_expr, _false_expr in pairs
+        callbacks.expr_fingerprint(cond, project) for cond, _true_expr, _false_expr in iter(pairs)
     )
     codegen._inertia_return_expr_chain_materialized_return_fingerprints_8616 = tuple(return_fingerprints)
     require_selector_return_projection_8616(
@@ -3147,12 +3407,15 @@ def _publish_selector_return_8616(
     return True
 
 
+@cython.ccall
 def materialize_cfg_selector_return_branches_8616(
     project: object,
     codegen: _ReturnChainCodegen8616,
     callbacks: ReturnSelectorCallbacks8616,
-) -> bool:
+) -> cython.bint:
     """Materialize selector returns into a dynamic boundary: angr codegen C AST."""
+    debug: object
+    refusal: object
     ensure_return_chain_codegen_state_8616(codegen)
     projection_before = assess_selector_return_projection_8616(codegen, project, callbacks.expr_fingerprint)
     if projection_before.active and projection_before.accepted:
@@ -3215,7 +3478,8 @@ def materialize_cfg_selector_return_branches_8616(
     return _publish_selector_return_8616(project, codegen, callbacks, pairs, stats, debug, log)
 
 
-def _selector_return_stats_8616(codegen: _ReturnChainCodegen8616) -> dict[str, int]:
+@cython.ccall
+def _selector_return_stats_8616(codegen: _ReturnChainCodegen8616) -> object:
     """Return the lazily initialized selector-return stats dict."""
     stats = codegen._inertia_cfg_selector_return_stats_8616
     if not isinstance(stats, dict):
@@ -3226,9 +3490,9 @@ def _selector_return_stats_8616(codegen: _ReturnChainCodegen8616) -> dict[str, i
 
 def _debug_unsafe_effects_8616(
     log: logging.Logger,
-    stats: dict[str, int],
-    allowed_call_addrs: frozenset[int],
-    pairs: list[tuple[CExpression, CExpression, CExpression]],
+    stats: object,
+    allowed_call_addrs: object,
+    pairs: object,
 ) -> None:
     """Emit the unsafe-effects refusal diagnostics."""
     log.warning(
@@ -3237,14 +3501,15 @@ def _debug_unsafe_effects_8616(
         tuple(sorted(allowed_call_addrs)),
         tuple(
             (_debug_cvar_slot_8616(cond.lhs), _debug_cvar_slot_8616(cond.rhs))
-            for cond, _true_expr, _false_expr in pairs
+            for cond, _true_expr, _false_expr in iter(pairs)
             if isinstance(cond, CBinaryOp)
         ),
     )
 
 
+@cython.ccall
 def _selector_pair_statements_8616(
-    pairs: list[tuple[CExpression, CExpression, CExpression]],
+    pairs: object,
     project: object,
     codegen: _ReturnChainCodegen8616,
     callbacks: ReturnSelectorCallbacks8616,
@@ -3252,6 +3517,9 @@ def _selector_pair_statements_8616(
     log: logging.Logger,
 ) -> tuple[list[object], list[str]]:
     """Build the guarded return statements and collect return fingerprints."""
+    cond: object
+    false_expr: object
+    true_expr: object
     statements: list[object] = []
     return_fingerprints: list[str] = []
     for cond, true_expr, false_expr in pairs:
@@ -3283,6 +3551,7 @@ def _selector_pair_statements_8616(
     return statements, return_fingerprints
 
 
+@cython.ccall
 def _debug_materialized_root_8616(
     log: logging.Logger,
     codegen: _ReturnChainCodegen8616,
@@ -3290,6 +3559,9 @@ def _debug_materialized_root_8616(
     expr_fingerprint: Callable[[object, object], str],
 ) -> None:
     """Emit the materialized-root diagnostics for a selector return."""
+    debug_root: object
+    first_cond: object
+    first_stmt: object
     debug_cfunc = codegen.cfunc
     debug_root = getattr(debug_cfunc, "statements", None)
     first_stmt = next(iter(getattr(debug_root, "statements", ()) or ()), None)
@@ -3307,12 +3579,15 @@ def _debug_materialized_root_8616(
     )
 
 
+@cython.ccall
 def condition_branch_return_value_8616(
     project: object,
     cond: object,
     callbacks: ReturnChainProofCallbacks8616,
 ) -> int | None:
     """Return branch return constant from a dynamic boundary: third-party Capstone block."""
+    target: object
+    insn: object
     key = callbacks.condition_tags(cond)
     if not isinstance(key, tuple) or len(key) != 2:
         return None
@@ -3324,7 +3599,7 @@ def condition_branch_return_value_8616(
     except Exception:
         return None
     for insn in tuple(getattr(getattr(block, "capstone", None), "insns", ()) or ()):
-        if int(getattr(insn, "address", -1)) != int(jcc_addr):
+        if operator.ne(int(getattr(insn, "address", -1)), int(jcc_addr)):
             continue
         target = callbacks.branch_target_imm(insn)
         if target is None:
@@ -3333,13 +3608,18 @@ def condition_branch_return_value_8616(
     return None
 
 
+@cython.ccall
 def ordered_conditional_return_values_8616(
     project: object,
     codegen: object,
     callbacks: ReturnChainProofCallbacks8616,
-) -> list[int]:
+) -> object:
     """Return CFG-proven JCC branch return constants in instruction order."""
-    values: list[int] = []
+    target: object
+    value: object
+    _block_addr: object
+    insn: object
+    values: list[cython.longlong] = []
     for _block_addr, insn in callbacks.linear_jcc_block_starts(project, codegen):
         target = callbacks.branch_target_imm(insn)
         if target is None:
@@ -3350,13 +3630,22 @@ def ordered_conditional_return_values_8616(
     return values
 
 
+@cython.ccall
 def ordered_conditional_return_pairs_from_cfg_8616(
     project: object,
     codegen: _ReturnChainCodegen8616,
     callbacks: ReturnChainProofCallbacks8616,
-) -> list[tuple[CExpression, int]]:
+) -> object:
     """Return condition/return pairs from a dynamic boundary: third-party Capstone JCC order."""
-    pairs: list[tuple[CExpression, int]] = []
+    condition_call_addr: object
+    debug: object
+    decoded: object
+    expr: object
+    target: object
+    value: object
+    block_addr: object
+    insn: object
+    pairs: list[tuple[CExpression, cython.longlong]] = []
     debug = os.environ.get("INERTIA_DEBUG_RETURN_BRANCH")
     log = logging.getLogger(__name__)
     jcc_count = 0
@@ -3413,20 +3702,23 @@ def ordered_conditional_return_pairs_from_cfg_8616(
     return pairs
 
 
+@cython.ccall
 def _selected_return_condition_8616(
     project: object,
     codegen: _ReturnChainCodegen8616,
     callbacks: ReturnChainProofCallbacks8616,
-    structured_conditions: dict[tuple[int, int], CExpression],
+    structured_conditions: object,
     decoded: object,
     *,
-    decoded_expr_tags: dict[str, int],
-    insn_addr: int,
-    block_addr: int,
-    condition_call_addr: int | None,
-    selection_verdicts: list[str],
+    decoded_expr_tags: object,
+    insn_addr: cython.longlong,
+    block_addr: cython.longlong,
+    condition_call_addr: object,
+    selection_verdicts: object,
 ) -> CExpression | None:
     """Select the proven structured or decoded condition for one JCC."""
+    decoded_expr: object
+    expr: object
     decoded_expr = callbacks.decoded_condition_expr(project, codegen, decoded, decoded_expr_tags)
     expr = structured_conditions.get((insn_addr, int(block_addr)))
     if expr is not None and condition_call_addr is not None:
@@ -3443,16 +3735,18 @@ def _selected_return_condition_8616(
         expr,
         decoded_expr,
         same_branch_proven=(
-            callbacks.condition_tags(expr) == branch_key
-            and callbacks.condition_tags(decoded_expr) == branch_key
+            operator.eq(callbacks.condition_tags(expr), branch_key)
+            and operator.eq(callbacks.condition_tags(decoded_expr), branch_key)
         ),
     )
     selection_verdicts.append(selection.verdict.value)
     return selection.condition
 
 
-def single_if_return_8616(stmt: object) -> tuple[object, object] | None:
+@cython.ccall
+def single_if_return_8616(stmt: object) -> object:
     """Return condition and retval from a dynamic boundary: angr codegen C AST if-return."""
+    cond_body: object
     if not isinstance(stmt, CIfElse):
         return None
     cond_nodes = stmt.condition_and_nodes or ()
@@ -3473,6 +3767,7 @@ def single_if_return_8616(stmt: object) -> tuple[object, object] | None:
     return cond, getattr(body_statements[0], "retval", None)
 
 
+@cython.ccall
 def const_return_value_8616(expr: object) -> int | None:
     """Return integer value from a dynamic boundary: angr codegen C constant."""
     if not isinstance(expr, CConstant):
@@ -3483,7 +3778,8 @@ def const_return_value_8616(expr: object) -> int | None:
         return None
 
 
-def is_empty_return_statement_8616(stmt: object) -> bool:
+@cython.ccall
+def is_empty_return_statement_8616(stmt: object) -> cython.bint:
     """Return whether a dynamic boundary: angr codegen C AST statement is empty return."""
     if isinstance(stmt, CReturn):
         return stmt.retval is None
@@ -3496,12 +3792,14 @@ def is_empty_return_statement_8616(stmt: object) -> bool:
 def duplicate_empty_return_guard_prune_plan_8616(
     project: object,
     statements: Sequence[object],
-    values: Sequence[int],
+    values: Sequence[cython.longlong],
     callbacks: ReturnChainFlattenCallbacks8616,
 ) -> DuplicateEmptyReturnGuardPrunePlan8616 | None:
     """Plan removal of a CFG-proven duplicate empty return guard before a return chain."""
+    adjacent: object
+    chain_index: object
     indexed_statements = tuple(statements)
-    expected_values = tuple(int(value) for value in values)
+    expected_values = tuple(int(value) for value in iter(values))
     if not expected_values or len(indexed_statements) <= len(expected_values):
         return None
 
@@ -3526,13 +3824,17 @@ def duplicate_empty_return_guard_prune_plan_8616(
     )
 
 
+@cython.ccall
 def _adjacent_duplicate_guard_8616(
     project: object,
-    indexed_statements: tuple[object, ...],
-    expected_values: tuple[int, ...],
+    indexed_statements: object,
+    expected_values: object,
     callbacks: ReturnChainFlattenCallbacks8616,
 ) -> DuplicateEmptyReturnGuardPrunePlan8616 | None:
     """Find an adjacent identical-condition empty guard before a chain value."""
+    following: object
+    previous: object
+    previous_retval: object
     for index in range(len(indexed_statements) - 1):
         previous = callbacks.single_if_return(indexed_statements[index])
         following = callbacks.single_if_return(indexed_statements[index + 1])
@@ -3558,17 +3860,21 @@ def _adjacent_duplicate_guard_8616(
     return None
 
 
+@cython.ccall
 def _return_chain_index_8616(
-    indexed_statements: tuple[object, ...],
-    expected_values: tuple[int, ...],
+    indexed_statements: object,
+    expected_values: object,
     callbacks: ReturnChainFlattenCallbacks8616,
 ) -> int | None:
     """Locate the first consecutive if-return chain matching expected values."""
+    item: object
+    expected_value: object
+    offset: object
     for index in range(len(indexed_statements) - len(expected_values) + 1):
         matched = True
         for offset, expected_value in enumerate(expected_values):
             item = callbacks.single_if_return(indexed_statements[index + offset])
-            if item is None or callbacks.const_return_value(item[1]) != expected_value:
+            if item is None or operator.ne(callbacks.const_return_value(item[1]), expected_value):
                 matched = False
                 break
         if matched:
@@ -3576,13 +3882,17 @@ def _return_chain_index_8616(
     return None
 
 
+@cython.ccall
 def _duplicate_prefix_plan_8616(
     project: object,
-    indexed_statements: tuple[object, ...],
-    chain_index: int,
+    indexed_statements: object,
+    chain_index: cython.longlong,
     callbacks: ReturnChainFlattenCallbacks8616,
 ) -> DuplicateEmptyReturnGuardPrunePlan8616 | None:
     """Plan removal when the pre-chain statement duplicates the chain guard."""
+    first: object
+    previous: object
+    previous_retval: object
     previous = callbacks.single_if_return(indexed_statements[chain_index - 1])
     first = callbacks.single_if_return(indexed_statements[chain_index])
     if previous is None or first is None:
@@ -3592,7 +3902,7 @@ def _duplicate_prefix_plan_8616(
     if previous_retval is not None:
         return None
     try:
-        if callbacks.expr_fingerprint(previous_cond, project) != callbacks.expr_fingerprint(first_cond, project):
+        if operator.ne(callbacks.expr_fingerprint(previous_cond, project), callbacks.expr_fingerprint(first_cond, project)):
             return None
     except Exception:
         return None
@@ -3605,54 +3915,63 @@ def _duplicate_prefix_plan_8616(
 def record_flattened_return_chain_8616(
     project: object,
     codegen: _ReturnChainCodegen8616,
-    cond_return_pairs: list[tuple[CExpression, int]],
-    final_value: int,
+    cond_return_pairs: object,
+    final_value: cython.longlong,
     callbacks: ReturnChainFlattenCallbacks8616,
 ) -> None:
     """Record the CFG return-chain evidence consumed by the flattened C AST."""
     codegen._inertia_return_chain_flattened_8616 = True
-    codegen._inertia_return_chain_materialized_values_8616 = tuple(int(value) for _cond, value in cond_return_pairs)
+    codegen._inertia_return_chain_materialized_values_8616 = tuple(int(value) for _cond, value in iter(cond_return_pairs))
     codegen._inertia_return_chain_materialized_condition_fingerprints_8616 = tuple(
-        callbacks.expr_fingerprint(cond, project) for cond, _value in cond_return_pairs
+        callbacks.expr_fingerprint(cond, project) for cond, _value in iter(cond_return_pairs)
     )
     codegen._inertia_return_chain_final_value_8616 = int(final_value)
 
 
+@cython.ccall
 def root_matches_flattened_return_chain_8616(
     project: object,
     codegen: _ReturnChainCodegen8616,
-    cond_return_pairs: list[tuple[CExpression, int]],
-    final_value: int,
+    cond_return_pairs: object,
+    final_value: cython.longlong,
     callbacks: ReturnChainFlattenCallbacks8616,
-) -> bool:
+) -> cython.bint:
     """Return true when a dynamic boundary: angr codegen C AST already matches CFG evidence."""
+    existing: object
+    root: object
+    cond: object
+    stmt: object
+    value: object
     cfunc = codegen.cfunc
     root = getattr(cfunc, "statements", None)
     statements = list(getattr(root, "statements", ()) or ())
-    if len(statements) != len(cond_return_pairs) + 1:
+    if operator.ne(len(statements), len(cond_return_pairs) + 1):
         return False
     for stmt, (cond, value) in zip(statements[:-1], cond_return_pairs, strict=False):
         existing = callbacks.single_if_return(stmt)
         if existing is None:
             return False
         existing_cond, existing_retval = existing
-        if callbacks.const_return_value(existing_retval) != int(value):
+        if operator.ne(callbacks.const_return_value(existing_retval), int(value)):
             return False
         try:
-            if callbacks.expr_fingerprint(existing_cond, project) != callbacks.expr_fingerprint(cond, project):
+            if operator.ne(callbacks.expr_fingerprint(existing_cond, project), callbacks.expr_fingerprint(cond, project)):
                 return False
         except Exception:
             return False
-    return callbacks.const_return_value(getattr(statements[-1], "retval", None)) == int(final_value)
+    return operator.eq(callbacks.const_return_value(getattr(statements[-1], "retval", None)), int(final_value))
 
 
 def flatten_conditional_return_chain_8616(
     project: object,
     codegen: _ReturnChainCodegen8616,
-    cond_return_pairs: list[tuple[CExpression, int]],
+    cond_return_pairs: object,
     callbacks: ReturnChainFlattenCallbacks8616,
-) -> bool:
+) -> cython.bint:
     """Flatten CFG-proven conditional returns, reporting changes only for real AST deltas."""
+    cond: object
+    final_value: object
+    value: object
     if len(cond_return_pairs) < 2:
         return False
     final_value = callbacks.final_return_value(project, codegen)
@@ -3673,10 +3992,10 @@ def flatten_conditional_return_chain_8616(
     statements.append(CReturn(CConstant(int(final_value), SimTypeShort(False), codegen=codegen), codegen=codegen))
     callbacks.set_cfunc_statements_root(codegen, CStatements(statements=statements, codegen=codegen))
     materialized_ifs = sum(
-        1 for node in callbacks.iter_c_nodes_deep(codegen.cfunc.statements) if isinstance(node, CIfElse)
+        1 for node in builtins.iter(callbacks.iter_c_nodes_deep(codegen.cfunc.statements)) if isinstance(node, CIfElse)
     )
     materialized_returns = sum(
-        1 for node in callbacks.iter_c_nodes_deep(codegen.cfunc.statements) if isinstance(node, CReturn)
+        1 for node in builtins.iter(callbacks.iter_c_nodes_deep(codegen.cfunc.statements)) if isinstance(node, CReturn)
     )
     if os.environ.get("INERTIA_DEBUG_RETURN_BRANCH"):
         logging.getLogger(__name__).warning(
@@ -3687,23 +4006,26 @@ def flatten_conditional_return_chain_8616(
             len(cond_return_pairs) + 1,
             final_value,
         )
-    if materialized_ifs != len(cond_return_pairs) or materialized_returns != len(cond_return_pairs) + 1:
+    if operator.ne(materialized_ifs, len(cond_return_pairs)) or operator.ne(materialized_returns, len(cond_return_pairs) + 1):
         return False
     record_flattened_return_chain_8616(project, codegen, cond_return_pairs, final_value, callbacks)
     return True
 
 
-def node_contains_call_8616(node: object, callbacks: ReturnChainFlattenCallbacks8616) -> bool:
+def node_contains_call_8616(node: object, callbacks: ReturnChainFlattenCallbacks8616) -> cython.bint:
     """Return whether a dynamic boundary: angr codegen C AST node contains a call."""
-    return any(isinstance(child, CFunctionCall) for child in callbacks.iter_c_nodes_deep(node))
+    return any(isinstance(child, CFunctionCall) for child in builtins.iter(callbacks.iter_c_nodes_deep(node)))
 
 
+@cython.ccall
 def calls_in_nodes_8616(
     nodes: Iterable[object], callbacks: ReturnChainFlattenCallbacks8616
 ) -> tuple[CFunctionCall, ...]:
     """Collect calls from a dynamic boundary: angr codegen C AST nodes."""
+    child: object
+    node: object
     calls: list[CFunctionCall] = []
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     for node in nodes:
         if isinstance(node, CFunctionCall):
             seen.add(id(node))
@@ -3717,14 +4039,15 @@ def calls_in_nodes_8616(
     return tuple(calls)
 
 
+@cython.ccall
 def materialize_void_tail_call_suffix_diamond_8616(
     *,
     stmt: CIfElse,
-    statements: list[object],
-    index: int,
+    statements: object,
+    index: cython.longlong,
     cond: object,
     false_body: object,
-    cond_keys: frozenset[object],
+    cond_keys: object,
     proofs: Iterable[tuple[frozenset[object], str]],
     codegen: object,
     callbacks: VoidTailCallSuffixDiamondCallbacks8616,
@@ -3758,14 +4081,16 @@ def materialize_void_tail_call_suffix_diamond_8616(
     )
 
 
+@cython.ccall
 def _suffix_diamond_body_8616(
     stmt: CIfElse,
-    statements: list[object],
-    index: int,
+    statements: object,
+    index: cython.longlong,
     codegen: object,
     callbacks: VoidTailCallSuffixDiamondCallbacks8616,
-) -> tuple[list[object], bool, object] | VoidTailCallSuffixDiamondResult8616:
+) -> object:
     """Resolve the suffix statements and build the new true body."""
+    else_node: object
     suffix_from_else = False
     else_node = getattr(stmt, "else_node", None)
     if index + 1 >= len(statements):
@@ -3798,16 +4123,17 @@ def _suffix_diamond_body_8616(
 
 
 def _suffix_diamond_match_refusal_8616(
-    suffix: list[object],
-    suffix_from_else: bool,
-    cond_keys: frozenset[object],
+    suffix: object,
+    suffix_from_else: cython.bint,
+    cond_keys: object,
     false_body: object,
     proofs: Iterable[tuple[frozenset[object], str]],
     callbacks: VoidTailCallSuffixDiamondCallbacks8616,
-) -> str | VoidTailCallSuffixDiamondResult8616:
+) -> object:
     """Return the proven true fingerprint or a typed refusal result."""
+    suffix_stmt: object
     suffix_calls = callbacks.calls_in_nodes(suffix)
-    exact_matches = [true_fp for proof_keys, true_fp in proofs if cond_keys & proof_keys]
+    exact_matches = [true_fp for proof_keys, true_fp in iter(proofs) if cond_keys & proof_keys]
     if len(set(exact_matches)) != 1:
         return VoidTailCallSuffixDiamondResult8616(
             status=VoidTailCallSuffixDiamondStatus8616.BRANCH_MATCH_MISSING_OR_AMBIGUOUS,
@@ -3829,11 +4155,11 @@ def _suffix_diamond_match_refusal_8616(
         return VoidTailCallSuffixDiamondResult8616(
             status=VoidTailCallSuffixDiamondStatus8616.SUFFIX_MISSING_TRUE,
             match_fingerprint=proven_true_fp,
-            suffix_types=tuple(type(item).__name__ for item in suffix),
+            suffix_types=tuple(type(item).__name__ for item in iter(suffix)),
             suffix_from_else=suffix_from_else,
         )
     matching_suffix_calls = [
-        call for call in suffix_calls if proven_true_fp in callbacks.call_argument_component_fingerprints(call)
+        call for call in iter(suffix_calls) if proven_true_fp in callbacks.call_argument_component_fingerprints(call)
     ]
     if len(matching_suffix_calls) > 1:
         return VoidTailCallSuffixDiamondResult8616(
@@ -3845,14 +4171,15 @@ def _suffix_diamond_match_refusal_8616(
     return proven_true_fp
 
 
+@cython.ccall
 def materialize_void_tail_call_guard_8616(
     *,
     stmt: CIfElse,
-    statements: list[object],
-    index: int,
+    statements: object,
+    index: cython.longlong,
     proof: VoidTailCallGuardProof8616,
-    tail_from_else: bool,
-    tail_payload: tuple[CFunctionCall, object],
+    tail_from_else: cython.bint,
+    tail_payload: object,
     codegen: object,
 ) -> VoidTailCallGuardResult8616:
     """Materialize a tail call under the CFG-proven true branch condition."""
@@ -3880,28 +4207,30 @@ def materialize_void_tail_call_guard_8616(
     )
 
 
-def c_node_semantically_empty_8616(node: object, callbacks: ReturnChainFlattenCallbacks8616) -> bool:
+def c_node_semantically_empty_8616(node: object, callbacks: ReturnChainFlattenCallbacks8616) -> cython.bint:
     """Return whether a dynamic boundary: angr codegen C AST subtree has semantics."""
     if node is None:
         return True
     if isinstance(node, CStatements):
-        return all(c_node_semantically_empty_8616(stmt, callbacks) for stmt in (node.statements or ()))
+        return all(c_node_semantically_empty_8616(stmt, callbacks) for stmt in iter((node.statements or ())))
     if isinstance(node, CIfElse):
         if node_contains_call_8616(getattr(node, "condition", None), callbacks):
             return False
         cond_nodes = node.condition_and_nodes or ()
-        if any(node_contains_call_8616(cond, callbacks) for cond, _body in cond_nodes):
+        if any(node_contains_call_8616(cond, callbacks) for cond, _body in iter(cond_nodes)):
             return False
-        bodies_empty = all(c_node_semantically_empty_8616(body, callbacks) for _cond, body in cond_nodes)
+        bodies_empty = all(c_node_semantically_empty_8616(body, callbacks) for _cond, body in iter(cond_nodes))
         return bodies_empty and c_node_semantically_empty_8616(node.else_node, callbacks)
     return False
 
 
+@cython.ccall
 def surplus_empty_guard_condition_8616(
     stmt: object,
     callbacks: ReturnChainFlattenCallbacks8616,
-) -> tuple[object, SurplusIfGuardKind8616] | None:
+) -> object:
     """Return surplus empty-if guard from a dynamic boundary: angr codegen C AST."""
+    cond_body: object
     if not isinstance(stmt, CIfElse):
         return None
     if not c_node_semantically_empty_8616(stmt.else_node, callbacks):
@@ -3926,8 +4255,9 @@ def identical_assignment_arm_condition_8616(
     stmt: object,
     project: object,
     callbacks: ExpressionFingerprintCallbacks8616,
-) -> tuple[object, tuple[object, ...]] | None:
+) -> object:
     """Return a condition and one preserved arm when both arms assign identically."""
+    cond_body: object
     if not isinstance(stmt, CIfElse):
         return None
     cond_nodes = stmt.condition_and_nodes or ()
@@ -3939,23 +4269,23 @@ def identical_assignment_arm_condition_8616(
     cond, body = cond_body
     if any(
         isinstance(node, CFunctionCall)
-        for node in (cond, *callbacks.iter_c_nodes_deep(cond))
+        for node in iter((cond, ) + tuple(callbacks.iter_c_nodes_deep(cond)))
     ):
         return None
     if not isinstance(body, CStatements) or not isinstance(stmt.else_node, CStatements):
         return None
     body_statements = tuple(body.statements or ())
     else_statements = tuple(stmt.else_node.statements or ())
-    if not body_statements or len(body_statements) != len(else_statements):
+    if not body_statements or operator.ne(len(body_statements), len(else_statements)):
         return None
     if not all(
         isinstance(body_assignment, CAssignment)
         and isinstance(else_assignment, CAssignment)
-        for body_assignment, else_assignment in zip(
+        for body_assignment, else_assignment in builtins.iter(zip(
             body_statements,
             else_statements,
             strict=True,
-        )
+        ))
     ):
         return None
     body_assignments = body_statements
@@ -3966,14 +4296,14 @@ def identical_assignment_arm_condition_8616(
                 callbacks.expr_fingerprint(body_assignment.lhs, project),
                 callbacks.expr_fingerprint(body_assignment.rhs, project),
             )
-            for body_assignment in body_assignments
+            for body_assignment in iter(body_assignments)
         )
         else_fingerprint = tuple(
             (
                 callbacks.expr_fingerprint(else_assignment.lhs, project),
                 callbacks.expr_fingerprint(else_assignment.rhs, project),
             )
-            for else_assignment in else_assignments
+            for else_assignment in iter(else_assignments)
         )
     except Exception:
         return None
@@ -3987,14 +4317,18 @@ def _arm_collapse_candidates_8616(
     project: object,
     expression_callbacks: ExpressionFingerprintCallbacks8616,
     branch_callbacks: ConditionBranchTagCallbacks8616,
-) -> tuple[list[tuple[CStatements, int, tuple[object, ...]]], int]:
+) -> tuple[list[tuple[CStatements, cython.longlong, tuple[object, ...]]], cython.longlong]:
     """Census eligible identical-arm diamonds and branch-backed refusals."""
-    candidates: list[tuple[CStatements, int, tuple[object, ...]]] = []
+    candidate: object
+    block: object
+    index: object
+    statement: object
+    candidates: list[tuple[CStatements, cython.longlong, tuple[object, ...]]] = []
     branch_backed_refusals = 0
-    seen_blocks: set[int] = set()
+    seen_blocks: set[cython.longlong] = set()
     blocks = (
         node
-        for node in (root, *expression_callbacks.iter_c_nodes_deep(root))
+        for node in iter((root, ) + tuple(expression_callbacks.iter_c_nodes_deep(root)))
         if isinstance(node, CStatements)
     )
     for block in blocks:
@@ -4017,13 +4351,20 @@ def _arm_collapse_candidates_8616(
     return candidates, branch_backed_refusals
 
 
+@cython.ccall
 def _apply_arm_collapse_8616(
-    candidates: list[tuple[CStatements, int, tuple[object, ...]]],
-    surplus: int,
-) -> int:
+    candidates: object,
+    surplus: cython.longlong,
+) -> cython.longlong:
     """Splice the selected replacement arms into their statement blocks."""
+    replacement_for_index: object
+    block: object
+    index: object
+    replacement: object
+    replacements: object
+    statement: object
     selected = candidates[: min(surplus, len(candidates))]
-    replacements_by_block: dict[int, tuple[CStatements, dict[int, tuple[object, ...]]]] = {}
+    replacements_by_block: dict[cython.longlong, tuple[CStatements, dict[cython.longlong, tuple[object, ...]]]] = {}
     for block, index, replacement in selected:
         block_entry = replacements_by_block.setdefault(id(block), (block, {}))
         block_entry[1][index] = replacement
@@ -4045,14 +4386,14 @@ def collapse_surplus_identical_assignment_arms_8616(
     root: object,
     project: object,
     *,
-    branch_count: int | None,
+    branch_count: object,
     expression_callbacks: ExpressionFingerprintCallbacks8616,
     branch_callbacks: ConditionBranchTagCallbacks8616,
 ) -> IdenticalAssignmentArmCollapseStats8616:
     """Collapse non-branch-backed identical diamonds within the machine branch budget."""
     total_if_count = sum(
         1
-        for node in (root, *expression_callbacks.iter_c_nodes_deep(root))
+        for node in iter((root, ) + tuple(expression_callbacks.iter_c_nodes_deep(root)))
         if isinstance(node, CIfElse)
     )
     if branch_count is None:
@@ -4113,7 +4454,8 @@ def collapse_surplus_identical_assignment_arms_8616(
     )
 
 
-def is_register_call_assignment_8616(stmt: object, callbacks: ReturnChainFlattenCallbacks8616) -> bool:
+@cython.ccall
+def is_register_call_assignment_8616(stmt: object, callbacks: ReturnChainFlattenCallbacks8616) -> cython.bint:
     """Return whether a dynamic boundary: angr codegen C AST assigns call to register."""
     if not isinstance(stmt, CAssignment):
         return False
@@ -4124,15 +4466,16 @@ def is_register_call_assignment_8616(stmt: object, callbacks: ReturnChainFlatten
 
 
 def _suffix_semantic_prefix_8616(
-    statements: list[object],
-    cond_return_pairs: list[tuple[CExpression, int]],
+    statements: object,
+    cond_return_pairs: object,
     callbacks: ReturnChainFlattenCallbacks8616,
     debug: object,
     log: logging.Logger,
-) -> list[object] | None:
+) -> object:
     """Cut the setup-statement prefix that precedes the return suffix."""
+    cut_index: object
     cut_index = next(
-        (index for index, stmt in enumerate(statements) if isinstance(stmt, (CIfElse, CReturn, CGoto))),
+        (index for index, stmt in builtins.iter(enumerate(statements)) if isinstance(stmt, (CIfElse, CReturn, CGoto))),
         None,
     )
     if cut_index is None:
@@ -4153,13 +4496,16 @@ def _suffix_semantic_prefix_8616(
     return prefix
 
 
+@cython.ccall
 def _suffix_rebuilt_statements_8616(
-    prefix: list[object],
-    cond_return_pairs: list[tuple[CExpression, int]],
-    final_value: int,
+    prefix: object,
+    cond_return_pairs: object,
+    final_value: cython.longlong,
     codegen: _ReturnChainCodegen8616,
-) -> list[object]:
+) -> object:
     """Append the guarded return chain and the final return to the prefix."""
+    cond: object
+    value: object
     rebuilt: list[object] = list(prefix)
     for cond, value in cond_return_pairs:
         body = CStatements(
@@ -4174,10 +4520,14 @@ def _suffix_rebuilt_statements_8616(
 def materialize_cfg_conditional_return_suffix_8616(
     project: object,
     codegen: _ReturnChainCodegen8616,
-    cond_return_pairs: list[tuple[CExpression, int]],
+    cond_return_pairs: object,
     callbacks: ReturnChainFlattenCallbacks8616,
-) -> bool:
+) -> cython.bint:
     """Rebuild return suffix from a dynamic boundary: angr codegen C AST statements."""
+    debug: object
+    final_value: object
+    prefix: object
+    statements_node: object
     debug = os.environ.get("INERTIA_DEBUG_RETURN_BRANCH")
     log = logging.getLogger(__name__)
     if len(cond_return_pairs) < 2:
@@ -4201,15 +4551,16 @@ def materialize_cfg_conditional_return_suffix_8616(
     rebuilt = _suffix_rebuilt_statements_8616(prefix, cond_return_pairs, int(final_value), codegen)
     callbacks.set_cfunc_statements_root(codegen, CStatements(statements=rebuilt, codegen=codegen))
     codegen._inertia_return_chain_suffix_materialized_8616 = True
-    codegen._inertia_return_chain_materialized_values_8616 = tuple(int(value) for _cond, value in cond_return_pairs)
+    codegen._inertia_return_chain_materialized_values_8616 = tuple(int(value) for _cond, value in iter(cond_return_pairs))
     codegen._inertia_return_chain_materialized_condition_fingerprints_8616 = tuple(
-        callbacks.expr_fingerprint(cond, project) for cond, _value in cond_return_pairs
+        callbacks.expr_fingerprint(cond, project) for cond, _value in iter(cond_return_pairs)
     )
     codegen._inertia_return_chain_final_value_8616 = int(final_value)
     return True
 
 
-def _empty_if_body_is_empty_8616(body: object) -> bool:
+@cython.ccall
+def _empty_if_body_is_empty_8616(body: object) -> cython.bint:
     """Return whether a dynamic boundary: angr codegen C AST branch body is empty."""
     if isinstance(body, CStatements):
         return not tuple(body.statements or ())
@@ -4219,8 +4570,9 @@ def _empty_if_body_is_empty_8616(body: object) -> bool:
 def _empty_if_body_is_cfg_return_setup_only_8616(
     body: object,
     callbacks: ReturnChainEmptyIfCallbacks8616,
-) -> bool:
+) -> cython.bint:
     """Return whether a dynamic boundary: angr codegen C AST body is CFG setup only."""
+    stmt: object
     if _empty_if_body_is_empty_8616(body):
         return True
     if not isinstance(body, CStatements):
@@ -4232,15 +4584,16 @@ def _empty_if_body_is_cfg_return_setup_only_8616(
         if not isinstance(stmt, CAssignment):
             return False
         nodes = (stmt, *callbacks.iter_c_nodes_deep(stmt))
-        if any(isinstance(node, CFunctionCall) for node in nodes):
+        if any(isinstance(node, CFunctionCall) for node in iter(nodes)):
             return False
         if any(
-            isinstance(node, (CIfElse, CReturn, CGoto, CBreak, CWhileLoop, CDoWhileLoop, CForLoop)) for node in nodes
+            isinstance(node, (CIfElse, CReturn, CGoto, CBreak, CWhileLoop, CDoWhileLoop, CForLoop)) for node in iter(nodes)
         ):
             return False
     return True
 
 
+@cython.ccall
 def _set_if_true_body_compat_8616(node: CIfElse, cond: object, body: CStatements) -> None:
     """Update true-branch aliases on a dynamic boundary: angr codegen CIfElse compatibility objects."""
     condition_and_nodes: list[tuple[CExpression, CStatement | None]] = [
@@ -4254,7 +4607,7 @@ def _set_if_true_body_compat_8616(node: CIfElse, cond: object, body: CStatements
         typing.cast(typing.Any, node).true_node = body
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _EmptyIfReturnScan8616:
     """Stateful scan/materialization for empty-if return branches."""
 
@@ -4264,18 +4617,19 @@ class _EmptyIfReturnScan8616:
     cfunc: _ReturnChainCFunction8616
     debug: object
     log: logging.Logger
-    stats: dict[str, int]
-    ordered_return_values: list[int]
-    ordered_cfg_return_pairs: list[tuple[CExpression, int]]
-    ordered_32bit_cfg_return_pairs: list[tuple[CExpression, int]]
-    allowed_call_addrs: frozenset[int]
-    unsafe_effects: bool
-    changed: bool = False
-    ordered_index: int = 0
-    cond_return_pairs: list[tuple[CExpression, int]] = field(default_factory=list)
-    empty_if_nodes: list[CIfElse] = field(default_factory=list)
+    stats: object
+    ordered_return_values: object
+    ordered_cfg_return_pairs: object
+    ordered_32bit_cfg_return_pairs: object
+    allowed_call_addrs: object
+    unsafe_effects: cython.bint
+    changed: cython.bint = False
+    ordered_index: cython.longlong = 0
+    cond_return_pairs: object = field(default_factory=list)
+    empty_if_nodes: object = field(default_factory=list)
 
-    def _return_stmt(self, value: int) -> CReturn:
+    @cython.ccall
+    def _return_stmt(self, value: cython.longlong) -> CReturn:
         """Build a typed short return statement for the dynamic codegen tree."""
         return CReturn(
             CConstant(int(value), SimTypeShort(False), codegen=self.codegen),
@@ -4286,7 +4640,7 @@ class _EmptyIfReturnScan8616:
         """Emit the node/conditional census diagnostics."""
         try:
             nodes = tuple(self.callbacks.iter_c_nodes_deep(getattr(self.cfunc, "statements", None)))
-            if_nodes = tuple(node for node in nodes if isinstance(node, CIfElse))
+            if_nodes = tuple(node for node in iter(nodes) if isinstance(node, CIfElse))
             self.log.warning(
                 "[empty-return-branch] scan nodes=%d ifs=%d root_type=%s",
                 len(nodes),
@@ -4298,6 +4652,8 @@ class _EmptyIfReturnScan8616:
 
     def _debug_nonempty_body(self, body: object, cond: object) -> None:
         """Emit the refused nonempty-body diagnostics for one candidate."""
+        body_statements: object
+        child: object
         body_statements = getattr(body, "statements", None)
         if isinstance(body_statements, CStatements):
             body_count = len(tuple(body_statements.statements or ()))
@@ -4308,10 +4664,10 @@ class _EmptyIfReturnScan8616:
         child_types: tuple[str, ...] = ()
         if isinstance(body_statements, CStatements):
             child_items = tuple(body_statements.statements or ())
-            child_types = tuple(type(child).__name__ for child in child_items)
+            child_types = tuple(type(child).__name__ for child in iter(child_items))
         elif isinstance(body_statements, (list, tuple)):
             child_items = tuple(body_statements)
-            child_types = tuple(type(child).__name__ for child in child_items)
+            child_types = tuple(type(child).__name__ for child in iter(child_items))
         else:
             child_items = ()
         assignment_fps = []
@@ -4333,8 +4689,10 @@ class _EmptyIfReturnScan8616:
             self.callbacks.condition_tags(cond),
         )
 
+    @cython.ccall
     def _resolved_value(self, cond: object) -> int | None:
         """Resolve the CFG-proven or ordered return value for one condition."""
+        value: object
         value = self.callbacks.condition_branch_return_value(self.project, cond)
         if value is None and self.callbacks.condition_branch_is_non_branch(self.project, cond):
             self.stats["refused"] += 1
@@ -4349,6 +4707,7 @@ class _EmptyIfReturnScan8616:
             self.ordered_index += 1
         return value
 
+    @cython.ccall
     def _process_empty_if(self, node: CIfElse) -> None:
         """Census one empty-if node and materialize its return when proven."""
         cond_pairs = node.condition_and_nodes
@@ -4384,8 +4743,10 @@ class _EmptyIfReturnScan8616:
             return
         self._materialize_candidate(node, cond, body)
 
+    @cython.ccall
     def _materialize_candidate(self, node: CIfElse, cond: object, body: object) -> None:
         """Resolve the candidate's return value and splice its true body."""
+        value: object
         value = self._resolved_value(cond)
         if self.debug:
             self.log.warning(
@@ -4405,9 +4766,13 @@ class _EmptyIfReturnScan8616:
 
     def _cfg_expr_rebuild(self) -> None:
         """Rebuild the single-candidate empty-if root from CFG expression pairs."""
+        cond: object
+        false_expr: object
+        node: object
+        true_expr: object
         total_if_nodes = sum(
             1
-            for current in self.callbacks.iter_c_nodes_deep(getattr(self.cfunc, "statements", None))
+            for current in builtins.iter(self.callbacks.iter_c_nodes_deep(getattr(self.cfunc, "statements", None)))
             if isinstance(current, CIfElse)
         )
         if len(self.empty_if_nodes) != 1 or total_if_nodes != 1:
@@ -4448,16 +4813,17 @@ class _EmptyIfReturnScan8616:
             self.codegen._inertia_return_expr_chain_materialized_8616 = True
             self.codegen._inertia_return_chain_materialized_condition_fingerprints_8616 = tuple(
                 self.callbacks.expr_fingerprint(cond, self.project)
-                for cond, _true_expr, _false_expr in cfg_expr_pairs[: len(self.empty_if_nodes)]
+                for cond, _true_expr, _false_expr in iter(cfg_expr_pairs[: len(self.empty_if_nodes)])
             )
             self.codegen._inertia_return_expr_chain_materialized_return_fingerprints_8616 = tuple(
                 self.callbacks.expr_fingerprint(expr, self.project)
-                for _cond, true_expr, false_expr in cfg_expr_pairs[: len(self.empty_if_nodes)]
-                for expr in (true_expr, false_expr)
+                for _cond, true_expr, false_expr in iter(cfg_expr_pairs[: len(self.empty_if_nodes)])
+                for expr in iter((true_expr, false_expr))
             )
             self.stats["materialized"] += len(rebuilt_statements)
             self.changed = True
 
+    @cython.ccall
     def _flatten_pairs_phase(self) -> None:
         """Flatten the collected or CFG-decoded pairs when two or more exist."""
         if len(self.cond_return_pairs) < 2:
@@ -4477,6 +4843,7 @@ class _EmptyIfReturnScan8616:
         )
         self.cond_return_pairs = flatten_pairs
 
+    @cython.ccall
     def _flatten_32bit_phase(self) -> None:
         """Flatten the 32-bit decoded pairs when no pairs were collected."""
         if self.cond_return_pairs:
@@ -4498,6 +4865,7 @@ class _EmptyIfReturnScan8616:
         )
         self.cond_return_pairs = cfg_return_pairs
 
+    @cython.ccall
     def _flatten_full_phase(self) -> None:
         """Flatten the full decoded pairs when earlier phases produced nothing."""
         if self.cond_return_pairs:
@@ -4521,6 +4889,7 @@ class _EmptyIfReturnScan8616:
         )
         self.cond_return_pairs = cfg_return_pairs
 
+    @cython.ccall
     def _suffix_phase(self) -> None:
         """Materialize the conditional return suffix when no pairs exist."""
         if self.cond_return_pairs or self.codegen._inertia_return_chain_suffix_materialized_8616:
@@ -4541,8 +4910,9 @@ class _EmptyIfReturnScan8616:
             self.changed = True
             self.cond_return_pairs = cfg_return_pairs
 
-    def run(self) -> bool:
+    def run(self) -> cython.bint:
         """Run the scan and the ordered flatten/suffix phases."""
+        node: object
         if self.debug:
             self._debug_scan()
         for node in self.callbacks.iter_c_nodes_deep(getattr(self.cfunc, "statements", None)):
@@ -4561,7 +4931,7 @@ class _EmptyIfReturnScan8616:
         )
         if self.cond_return_pairs:
             self.codegen._inertia_empty_return_branch_values_8616 = tuple(
-                int(value) for _cond, value in self.cond_return_pairs
+                int(value) for _cond, value in iter(self.cond_return_pairs)
             )
         if self.debug:
             self.log.warning("[empty-return-branch] stats=%r changed=%s", self.stats, self.changed)
@@ -4572,8 +4942,9 @@ def materialize_empty_if_return_branches_8616(
     project: object,
     codegen: _ReturnChainCodegen8616,
     callbacks: ReturnChainEmptyIfCallbacks8616,
-) -> bool:
+) -> cython.bint:
     """Materialize return chains from a dynamic boundary: angr codegen empty-if C AST."""
+    debug: object
     cfunc = codegen.cfunc
     debug = os.environ.get("INERTIA_DEBUG_RETURN_BRANCH")
     log = logging.getLogger(__name__)
@@ -4598,7 +4969,7 @@ def materialize_empty_if_return_branches_8616(
     ordered_cfg_return_pairs = callbacks.ordered_return_pairs(project, codegen)
     ordered_32bit_cfg_return_pairs = callbacks.ordered_32bit_return_pairs(project, codegen)
     allowed_call_addrs = callbacks.condition_call_addrs(
-        cond for cond, _value in (*ordered_cfg_return_pairs, *ordered_32bit_cfg_return_pairs)
+        cond for cond, _value in iter(tuple(ordered_cfg_return_pairs) + tuple(ordered_32bit_cfg_return_pairs))
     )
     unsafe_effects = callbacks.selector_function_has_unsafe_effects(project, codegen, allowed_call_addrs)
     if unsafe_effects:

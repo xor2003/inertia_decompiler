@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Join exact register-source transfers across a function CFG.
 
 Layer: Alias.
@@ -9,11 +10,15 @@ Widening remains a downstream consumer of this Alias proof.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
 
 from .callsite_stack_merge import CallsiteSource8616
+import dataclasses
+import operator
 
 __all__ = (
     "RegisterBlockTransfer8616",
@@ -33,21 +38,21 @@ class RegisterBlockTransferKind8616(StrEnum):
     KILL = "kill"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RegisterBlockTransfer8616:
     """One exact block transfer and its complete in-function predecessors."""
 
-    block_addr: int
-    predecessor_addrs: tuple[int, ...]
+    block_addr: cython.longlong
+    predecessor_addrs: object
     kind: RegisterBlockTransferKind8616
     source: CallsiteSource8616 | None = None
-    clobbers_memory_sources: bool = False
+    clobbers_memory_sources: cython.bint = False
 
-    def is_well_formed(self) -> bool:
+    def is_well_formed(self) -> cython.bint:
         """Return whether the transfer carries a coherent typed payload."""
         return (
             self.block_addr >= 0
-            and len(set(self.predecessor_addrs)) == len(self.predecessor_addrs)
+            and operator.eq(len(set(self.predecessor_addrs)), len(self.predecessor_addrs))
             and ((self.kind is RegisterBlockTransferKind8616.REPLACE) == (self.source is not None))
             and isinstance(self.clobbers_memory_sources, bool)
             and (
@@ -64,17 +69,17 @@ class RegisterReachingSourceVerdict8616(StrEnum):
     UNKNOWN_REFUSE = "unknown_refuse"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RegisterReachingSourceResult8616:
     """One reaching source plus the required closed evidence counters."""
 
     verdict: RegisterReachingSourceVerdict8616
     source: CallsiteSource8616 | None
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
 class _FlowKind8616(StrEnum):
@@ -85,7 +90,7 @@ class _FlowKind8616(StrEnum):
     UNKNOWN = "unknown"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _FlowState8616:
     """One internal reaching-source lattice value."""
 
@@ -97,7 +102,7 @@ _BOTTOM_8616 = _FlowState8616(_FlowKind8616.BOTTOM)
 _UNKNOWN_8616 = _FlowState8616(_FlowKind8616.UNKNOWN)
 
 
-def callsite_source_reads_memory_8616(source: CallsiteSource8616 | None) -> bool:
+def callsite_source_reads_memory_8616(source: CallsiteSource8616 | None) -> cython.bint:
     """Find memory reads through source, operation and operand tuple layers.
 
     Expression operations carry nested sources independently of the base
@@ -111,24 +116,26 @@ def callsite_source_reads_memory_8616(source: CallsiteSource8616 | None) -> bool
         return True
     return any(
         callsite_source_reads_memory_8616(item)
-        for item in source
+        for item in iter(source)
         if isinstance(item, tuple)
     )
 
 
-def _join_states_8616(states: tuple[_FlowState8616, ...]) -> _FlowState8616:
+def _join_states_8616(states: object) -> _FlowState8616:
     """Join reached predecessors; conflicts and unknown paths stay unknown."""
-    reached = tuple(state for state in states if state.kind is not _FlowKind8616.BOTTOM)
+    first: object
+    reached = tuple(state for state in iter(states) if state.kind is not _FlowKind8616.BOTTOM)
     if not reached:
         return _BOTTOM_8616
-    if any(state.kind is _FlowKind8616.UNKNOWN for state in reached):
+    if any(state.kind is _FlowKind8616.UNKNOWN for state in iter(reached)):
         return _UNKNOWN_8616
     first = reached[0].source
-    if first is None or any(state.source != first for state in reached[1:]):
+    if first is None or any(operator.ne(state.source, first) for state in iter(reached[1:])):
         return _UNKNOWN_8616
     return _FlowState8616(_FlowKind8616.KNOWN, first)
 
 
+@cython.ccall
 def _apply_transfer_8616(
     incoming: _FlowState8616,
     transfer: RegisterBlockTransfer8616,
@@ -146,21 +153,23 @@ def _apply_transfer_8616(
 
 
 def resolve_register_reaching_source_8616(
-    transfers: tuple[RegisterBlockTransfer8616, ...],
+    transfers: object,
     *,
-    entry_addr: int,
-    sink_addr: int,
+    entry_addr: cython.longlong,
+    sink_addr: cython.longlong,
 ) -> RegisterReachingSourceResult8616:
     """Prove the same exact register source reaches ``sink_addr`` on all paths."""
+    block_addr: object
+    transfer: object
     raw_count = len(transfers)
-    normalized = tuple(transfer for transfer in transfers if transfer.is_well_formed())
-    by_addr = {transfer.block_addr: transfer for transfer in normalized}
+    normalized = tuple(transfer for transfer in iter(transfers) if transfer.is_well_formed())
+    by_addr = {transfer.block_addr: transfer for transfer in iter(normalized)}
     malformed = (
-        len(normalized) != raw_count
-        or len(by_addr) != len(normalized)
+        operator.ne(len(normalized), raw_count)
+        or operator.ne(len(by_addr), len(normalized))
         or entry_addr not in by_addr
         or sink_addr not in by_addr
-        or any(pred not in by_addr for transfer in normalized for pred in transfer.predecessor_addrs)
+        or any(pred not in by_addr for transfer in iter(normalized) for pred in iter(transfer.predecessor_addrs))
     )
     if malformed:
         return RegisterReachingSourceResult8616(
@@ -177,16 +186,16 @@ def resolve_register_reaching_source_8616(
     iteration_limit = max(len(by_addr) * 3, 1)
     for _iteration in range(iteration_limit):
         changed = False
-        for block_addr, transfer in sorted(by_addr.items()):
+        for block_addr, transfer in sorted(tuple(by_addr.items())):
             incoming = (
                 _UNKNOWN_8616
                 if block_addr == entry_addr
                 else _join_states_8616(
-                    tuple(outputs[pred] for pred in transfer.predecessor_addrs)
+                    tuple(outputs[pred] for pred in iter(transfer.predecessor_addrs))
                 )
             )
             updated = _apply_transfer_8616(incoming, transfer)
-            if updated != outputs[block_addr]:
+            if operator.ne(updated, outputs[block_addr]):
                 outputs[block_addr] = updated
                 changed = True
         if not changed:

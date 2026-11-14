@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: IR.
 Responsibility: consume explicit entry premises at initial pipeline attachment.
 
@@ -8,6 +9,8 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from enum import Enum
@@ -44,6 +47,12 @@ from .segment_call_preservation import (
     segment_call_dependency_traversal_scope_8616,
 )
 from .segment_state import apply_x86_16_segment_state_artifact
+import dataclasses
+import operator
+import builtins
+EntryDomainCallPreservation8616 = typing.TypeVar("EntryDomainCallPreservation8616")
+RawIRFunctionImportBundle8616 = typing.TypeVar("RawIRFunctionImportBundle8616")
+_BootSurface8616 = typing.TypeVar("_BootSurface8616")
 
 if TYPE_CHECKING:
     from .entry_domain_call_preservation import EntryDomainCallPreservation8616
@@ -64,7 +73,7 @@ class DeclaredEntryPremise8616(Enum):
     UNKNOWN_REFUSE = "unknown_refuse"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DeclaredEntryPipeline8616:
     """One codegen's source-bound, explicitly conditional initial IR input."""
 
@@ -79,7 +88,7 @@ class DeclaredEntryPipeline8616:
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class UnprovedDeclaredEntry8616:
     """Authenticated raw declared input whose entry premise is unproved.
 
@@ -103,7 +112,7 @@ class UnprovedDeclaredEntry8616:
 
 # Union of the canonical retained inputs: proven conditional record or the
 # typed non-proof record carrying the identical authenticated raw surface.
-type DeclaredEntryInput8616 = DeclaredEntryPipeline8616 | UnprovedDeclaredEntry8616 | NativeNearCallPipeline8616
+DeclaredEntryInput8616 = typing.TypeAliasType("DeclaredEntryInput8616", DeclaredEntryPipeline8616 | UnprovedDeclaredEntry8616 | NativeNearCallPipeline8616)
 
 
 class _CodegenEntryBoundary8616(Protocol):
@@ -121,11 +130,11 @@ class _ProjectSourceBoundary8616(Protocol):
 class _DeferredDeclarationBoundary8616(Protocol):
     """Optional explicit-entry intake fields at the third-party adapter boundary."""
 
-    function_entries: tuple[DeclaredFunctionEntryAdmission8616, ...]
+    function_entries: object
 
     def validate_installed_source_8616(
         self, project: object, source: Real16InvocationSource8616,
-    ) -> bool:
+    ) -> cython.bint:
         """Reauthenticate the installed source against the current request."""
         ...
 
@@ -134,8 +143,11 @@ class _DeferredDeclarationBoundary8616(Protocol):
         ...
 
 
-def _declared_source_8616(project: object, function_addr: int) -> Real16InvocationSource8616 | None:
+def _declared_source_8616(project: object, function_addr: cython.longlong) -> Real16InvocationSource8616 | None:
     """Peek installed/declaration-only authority without triggering boot intake."""
+    entries: object
+    request: object
+    source: object
     try:
         source = cast(_ProjectSourceBoundary8616, project)._inertia_real16_invocation_source_8616
     except AttributeError:
@@ -153,9 +165,9 @@ def _declared_source_8616(project: object, function_addr: int) -> Real16Invocati
     request = getattr(project, "_inertia_mz_static_invocation_request_8616", None)
     # Dynamic boundary: historical third-party adapters may lack declarations.
     entries = getattr(request, "function_entries", ())
-    if type(entries) is not tuple or any(type(entry) is not DeclaredFunctionEntryAdmission8616 for entry in entries):
+    if type(entries) is not tuple or any(type(entry) is not DeclaredFunctionEntryAdmission8616 for entry in iter(entries)):
         raise TypeError("deferred function entries must be typed immutable admissions")
-    if not any((entry.spec.entry_segment << 4) + entry.spec.entry_offset == function_addr for entry in entries):
+    if not any(operator.eq((entry.spec.entry_segment << 4) + entry.spec.entry_offset, function_addr) for entry in iter(entries)):
         return None
     cast(_DeferredDeclarationBoundary8616, request).install(project)
     try:
@@ -167,6 +179,7 @@ def _declared_source_8616(project: object, function_addr: int) -> Real16Invocati
     return source
 
 
+@cython.ccall
 def _retained_input_8616(codegen: object) -> DeclaredEntryInput8616 | None:
     """Read a consumed pipeline input without manufacturing a project premise."""
     try:
@@ -178,8 +191,9 @@ def _retained_input_8616(codegen: object) -> DeclaredEntryInput8616 | None:
     return retained
 
 
+@cython.ccall
 def _retained_native_entry_for_8616(
-    project: object, codegen: object, function_addr: int,
+    project: object, codegen: object, function_addr: cython.longlong,
 ) -> NativeNearCallPipeline8616 | None:
     """Validate a retained native entry's source membership without proof.
 
@@ -207,15 +221,16 @@ def _retained_native_entry_for_8616(
     return retained
 
 
+@cython.ccall
 def _retained_native_entry_current_8616(
-    project: object, source: Real16InvocationSource8616 | None, function_addr: int,
+    project: object, source: object, function_addr: cython.longlong,
     retained: NativeNearCallPipeline8616,
-) -> bool:
+) -> cython.bint:
     """Cheap source/identity membership for a retained native entry."""
     return (
         source is not None
         and retained.source is source
-        and retained.bundle.artifact.function_addr == function_addr
+        and operator.eq(retained.bundle.artifact.function_addr, function_addr)
         and retained.scope.project is project
         and retained.view.source_artifact is retained.bundle.artifact
         and retained.scope.artifact is retained.bundle.artifact
@@ -224,15 +239,32 @@ def _retained_native_entry_current_8616(
     )
 
 
+@cython.ccall
+def declared_entry_pipeline_requested_8616(project: object, function_addr: cython.longlong) -> cython.bint:
+    """Select authenticated declared-entry intake without constructing its proof.
+
+    This is orchestration evidence only: it grants neither a scoped verdict nor
+    universal IR authority. Use the same source validation and exact-head lookup
+    as preparation so optional universal probes cannot precede scoped intake.
+    """
+    source: object
+    source = _declared_source_8616(project, function_addr)
+    return source is not None and _function_entry_for_head_8616(source, function_addr) is not None
+
+
+@cython.ccall
 def prepare_declared_entry_pipeline_8616(
-    project: object, codegen: object, function_addr: int,
+    project: object, codegen: object, function_addr: cython.longlong,
 ) -> DeclaredEntryInput8616 | None:
     """Resolve an explicit entry before universal IR import or publication."""
+    admission: object
+    retained: object
+    source: object
     source = _declared_source_8616(project, function_addr)
     admission = None if source is None else _function_entry_for_head_8616(source, function_addr)
     retained = _retained_input_8616(codegen)
     if isinstance(retained, NativeNearCallPipeline8616):
-        if (retained.bundle.artifact.function_addr != function_addr
+        if (operator.ne(retained.bundle.artifact.function_addr, function_addr)
                 or not retained.authenticates(project)):
             raise PipelineHardError("consumed native entry changed", layer="ir", function_addr=function_addr)
         return retained
@@ -247,7 +279,7 @@ def prepare_declared_entry_pipeline_8616(
 
 
 def _prepare_pending_native_entry_8616(
-    project: object, source: Real16InvocationSource8616 | None, function_addr: int,
+    project: object, source: object, function_addr: cython.longlong,
 ) -> NativeNearCallPipeline8616 | None:
     """Use indexed native entry only for unresolved selector-dependent control.
 
@@ -255,6 +287,8 @@ def _prepare_pending_native_entry_8616(
     is demanded only after a recovered body exposes pending selector control;
     this collects lookup facts, never a startup reachability theorem.
     """
+    boundary: object
+    recovered: object
     from .entry_domain_call_preservation import _exact_boundary_for_8616, _invocation_premise_source_8616
     from .function_ssa_registry import function_boundary_at_address_8616
     from .near_call_entry_pipeline import prepare_near_call_entry_pipeline_8616
@@ -268,7 +302,7 @@ def _prepare_pending_native_entry_8616(
                 return None
             pending = raw_x86_16_function_bundle_8616(project, recovered)
             if not any(evidence.failure is TerminalJumpRefusalReason8616.SELECTOR_WINDOW_UNPROVED
-                       for evidence in pending.terminal_evidence.values()):
+                       for evidence in builtins.iter(pending.terminal_evidence.values())):
                 return None
             source = _invocation_premise_source_8616(project)
         if source is None or not source.callsite_index.for_target(function_addr):
@@ -278,7 +312,7 @@ def _prepare_pending_native_entry_8616(
             return None
         bundle = raw_x86_16_function_bundle_8616(project, boundary)
         if not any(evidence.failure is TerminalJumpRefusalReason8616.SELECTOR_WINDOW_UNPROVED
-                   for evidence in bundle.terminal_evidence.values()):
+                   for evidence in builtins.iter(bundle.terminal_evidence.values())):
             return None
         if _universal_pending_control_complete_8616(project, bundle):
             return None
@@ -290,9 +324,10 @@ def _prepare_pending_native_entry_8616(
 
 
 
+@cython.ccall
 def _universal_pending_control_complete_8616(
     project: object, bundle: RawIRFunctionImportBundle8616,
-) -> bool:
+) -> cython.bint:
     """Keep native root-fetch discharge ahead of conditional caller selection.
 
     Raw selector-dependent terminals are candidates, not evidence that a caller
@@ -310,24 +345,29 @@ def _universal_pending_control_complete_8616(
     pending = collect_pending_terminal_jumps_8616(bundle.terminal_evidence)
     proof = prove_entry_jump_domains_8616(
         bundle.artifact, bundle.terminal_evidence, project=project)
-    if not pending or proof.stats.failure_count or len(proof.admitted) != len(pending):
+    if not pending or proof.stats.failure_count or operator.ne(len(proof.admitted), len(pending)):
         return False
     application = apply_entry_jump_domain_8616(bundle.artifact, proof)
     return (application.status is EntryJumpDomainApplicationStatus8616.APPLIED
-            and not application.refusals and len(application.applied) == len(pending))
+            and not application.refusals and operator.eq(len(application.applied), len(pending)))
 
 
 def _prepare_native_entry_8616(
     project: object, source: Real16InvocationSource8616, admission: DeclaredFunctionEntryAdmission8616,
 ) -> DeclaredEntryInput8616:
     """Prove the declared head and scoped raw CFG without traversing startup."""
+    artifact: object
+    boundary: object
+    bundle: object
+    scope: object
+    selector_scope: object
     from .vex_import import (
         prove_scoped_x86_16_ir_function_view_8616,
         raw_x86_16_import_bundle_for_artifact_8616,
     )
 
     spec = admission.spec
-    if (spec.entry_segment << 4) + spec.entry_offset != spec.range_start:
+    if operator.ne((spec.entry_segment << 4) + spec.entry_offset, spec.range_start):
         raise PipelineHardError("initial pipeline requires a declared function-head entry", layer="ir",
                                 function_addr=(spec.entry_segment << 4) + spec.entry_offset)
     boundary = exact_function_range_boundary_8616(project, spec.range_start, spec.range_end)
@@ -338,9 +378,9 @@ def _prepare_native_entry_8616(
     selector_scope = None
     records: tuple[EntryDomainCallPreservation8616, ...] = ()
     needs_call_targets = any(
-        instruction.op == "CALL" for block in artifact.blocks for instruction in block.instrs
+        instruction.op == "CALL" for block in iter(artifact.blocks) for instruction in iter(block.instrs)
     )
-    if needs_call_targets or artifact.refusals or any(block.refusals for block in artifact.blocks):
+    if needs_call_targets or artifact.refusals or any(block.refusals for block in iter(artifact.blocks)):
         # A raw CALL can retain a symbolic CS-relative target without an IR
         # refusal. Request its existing bounded selector authority explicitly;
         # instruction presence alone never admits a target or callee effect.
@@ -372,15 +412,39 @@ def _prepare_native_entry_8616(
                             and selector_scope.status is InvariantStatus.PROVEN_CONDITIONAL else None),
     )
     if view.failure is not None:
-        raise PipelineHardError("declared entry scoped CFG is unproved", layer="ir", function_addr=spec.range_start,
-                                details={"failure": view.failure, "detail": view.detail})
+        raise PipelineHardError(
+            "declared entry scoped CFG is unproved", layer="ir", function_addr=spec.range_start,
+            details={
+                "failure": view.failure,
+                "detail": view.detail,
+                "jump_stats": view.proof.stats.to_dict(),
+                "jump_refusals": tuple(refusal.to_dict() for refusal in iter(view.proof.refusals)),
+                "selector_status": None if selector_scope is None else selector_scope.status,
+                "call_preservations": tuple({
+                    "callsite_addr": record.callsite_addr,
+                    "failure": record.failure,
+                    "selector_projection": record.selector_projection is not None,
+                } for record in iter(records)),
+                "proof_scope_is_consuming": view.proof.invocation_scope is scope,
+                "application_status": None if view.application is None else view.application.status,
+                "call_target_status": None if view.application is None else view.application.call_target_status,
+                "call_target_stats": (None if view.application is None
+                                      else view.application.call_target_stats.to_dict()),
+                "native_refusals": tuple(
+                    {"block_addr": refusal.block_addr, "kind": refusal.kind}
+                    for refusals in iter((artifact.refusals, ) + tuple((block.refusals for block in iter(artifact.blocks))))
+                    for refusal in iter(refusals)
+                ),
+            },
+        )
     return DeclaredEntryPipeline8616(source, admission, bundle, scope, view, selector_scope)
 
 
+@cython.ccall
 def _declared_entry_surface_current_8616(
     project: object, source: Real16InvocationSource8616,
     link: DeclaredFunctionEntryLink8616, boundary: ExactFunctionRangeBoundary8616,
-) -> bool:
+) -> cython.bint:
     """Reauthenticate a declaration against current boot and mapped bytes.
 
     Mirrors the entry-domain proof's own admission currency gates using the
@@ -390,6 +454,7 @@ def _declared_entry_surface_current_8616(
     boundary. Any forged spec or changed native image returns ``False`` so
     the caller keeps its hard error instead of minting an unproved record.
     """
+    environment_digest: object
     from inertia.frontend.x86_16.declared_function_entry import (
         DeclaredFunctionEntryAdmission8616 as _Admission8616,
     )
@@ -410,7 +475,7 @@ def _declared_entry_surface_current_8616(
         return False
     boot = cast(_BootSurface8616, source.boot)
     chunks = boot.image.chunks
-    if len(chunks) != 1 or chunks[0][0] != boot.image.load_segment << 4:
+    if len(chunks) != 1 or operator.ne(chunks[0][0], boot.image.load_segment << 4):
         return False
     base, module = chunks[0]
     environment_digest = declared_environment_digest_8616(boot.environment)
@@ -421,13 +486,14 @@ def _declared_entry_surface_current_8616(
             link.admission, source=boot.source, loaded_module=module,
             environment_sha256=environment_digest,
         )
-        and _loaded_bytes_8616(project, base, len(module)) == module
-        and spec.load_segment == boot.image.load_segment
-        and spec.range_start == boundary.addr
-        and spec.range_end == boundary.addr + boundary.size
+        and operator.eq(_loaded_bytes_8616(project, base, len(module)), module)
+        and operator.eq(spec.load_segment, boot.image.load_segment)
+        and operator.eq(spec.range_start, boundary.addr)
+        and operator.eq(spec.range_end, boundary.addr + boundary.size)
     )
 
 
+@cython.ccall
 def retain_declared_entry_pipeline_8616(codegen: object, entry: DeclaredEntryInput8616) -> None:
     """Retain a typed input for this consumer, without granting proof authority.
 
@@ -438,8 +504,10 @@ def retain_declared_entry_pipeline_8616(codegen: object, entry: DeclaredEntryInp
     cast(_CodegenEntryBoundary8616, codegen)._inertia_declared_entry_pipeline_8616 = entry
 
 
-def apply_pipeline_segment_state_8616(project: object, codegen: object) -> bool:
+@cython.ccall
+def apply_pipeline_segment_state_8616(project: object, codegen: object) -> cython.bint:
     """Consume prepared initial entry evidence; preserve normal unscoped refreshes."""
+    entry: object
     entry = _retained_input_8616(codegen)
     if entry is None:
         return bool(apply_x86_16_segment_state_artifact(project, codegen))

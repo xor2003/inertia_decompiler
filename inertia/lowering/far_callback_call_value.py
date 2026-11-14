@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Join exact caller word values into a path-correlated far callback value.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -26,6 +29,9 @@ from inertia.semantics.callsite_summary import CallsiteSummary8616
 
 from .call_argument_shape import exact_far_callback_call_shape_evidence_8616
 from .function_pointer_parameter_evidence import FunctionPointerParameterFact8616
+import dataclasses
+import operator
+import builtins
 
 
 class FarCallbackCallValueFailureKind8616(StrEnum):
@@ -38,44 +44,46 @@ class FarCallbackCallValueFailureKind8616(StrEnum):
     PATH_MISMATCH = "path_mismatch"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FarCallbackPathValue8616:
     """One CFG predecessor's exact far offset/segment and their IR origins."""
 
     source_block_addr: int | None
-    offset: int
-    segment: int
+    offset: cython.longlong
+    segment: cython.longlong
     offset_incoming: LogicalWordReadIncomingValue8616
     segment_incoming: LogicalWordReadIncomingValue8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Keep path correlation and both word values visible after publication."""
         return bool(
             self.source_block_addr == self.offset_incoming.source_block_addr
             == self.segment_incoming.source_block_addr
-            and self.offset == self.offset_incoming.constant
-            and self.segment == self.segment_incoming.constant
+            and operator.eq(self.offset, self.offset_incoming.constant)
+            and operator.eq(self.segment, self.segment_incoming.constant)
             and 0 <= self.offset <= 0xFFFF
             and 0 <= self.segment <= 0xFFFF
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FarCallbackCallValueProof8616:
     """Closed two-word caller Value proof and the exact callee ABI witness."""
 
     caller: CallsiteSummary8616
     callee_fact: FunctionPointerParameterFact8616
-    callee_indirect_calls: tuple[CallsiteSummary8616, ...]
+    callee_indirect_calls: object
     offset_read: LogicalWordReadValueFact8616
     segment_read: LogicalWordReadValueFact8616
-    paths: tuple[FarCallbackPathValue8616, ...]
-    logical_widths: tuple[int, ...]
+    paths: object
+    logical_widths: object
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Recheck machine PUSHs, two READs, ABI, and all predecessor pairs."""
+        callee_addr: object
+        shape: object
         callee_addr = self.caller.target_addr
         if callee_addr is None:
             return False
@@ -85,7 +93,7 @@ class FarCallbackCallValueProof8616:
             callee_fact=self.callee_fact,
             callee_indirect_calls=self.callee_indirect_calls,
         )
-        if shape is None or shape.widths != self.logical_widths:
+        if shape is None or operator.ne(shape.widths, self.logical_widths):
             return False
         if not self.offset_read.complete or not self.segment_read.complete:
             return False
@@ -93,66 +101,66 @@ class FarCallbackCallValueProof8616:
             return False
         if not _push_read_matches_8616(self.caller, 1, self.segment_read.load):
             return False
-        if self.offset_read.load.key.function_addr != self.segment_read.load.key.function_addr:
+        if operator.ne(self.offset_read.load.key.function_addr, self.segment_read.load.key.function_addr):
             return False
         offsets = self.offset_read.incoming
         segments = self.segment_read.incoming
         expected = tuple(
             FarCallbackPathValue8616(offset.source_block_addr, offset.constant,
                                      segment.constant, offset, segment)
-            for offset, segment in zip(offsets, segments, strict=True)
-        ) if len(offsets) == len(segments) else ()
+            for offset, segment in builtins.iter(zip(offsets, segments, strict=True))
+        ) if operator.eq(len(offsets), len(segments)) else ()
         return bool(
             expected
-            and tuple(item.source_block_addr for item in offsets)
-            == tuple(item.source_block_addr for item in segments)
-            and self.paths == expected
-            and all(path.complete for path in self.paths)
+            and operator.eq(tuple(item.source_block_addr for item in iter(offsets)), tuple(item.source_block_addr for item in iter(segments)))
+            and operator.eq(self.paths, expected)
+            and all(path.complete for path in iter(self.paths))
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FarCallbackCallValueRefusal8616:
     """Typed refusal for one direct-far callsite candidate."""
 
-    callsite_addr: int
+    callsite_addr: cython.longlong
     kind: FarCallbackCallValueFailureKind8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FarCallbackCallValueResult8616:
     """One candidate's five-counter proof or explicit non-result."""
 
-    callsite_addr: int
+    callsite_addr: cython.longlong
     proof: FarCallbackCallValueProof8616 | None
     refusal: FarCallbackCallValueRefusal8616 | None
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Require exactly one complete result or one reason-coded refusal."""
         return bool(
             self.callsite_addr >= 0
             and self.raw_fact_count == 1
-            and self.raw_fact_count == self.materialized_count + self.failure_count
+            and operator.eq(self.raw_fact_count, self.materialized_count + self.failure_count)
             and self.raw_fact_count >= self.normalized_fact_count >= self.classified_fact_count
-            and self.classified_fact_count == self.materialized_count
+            and operator.eq(self.classified_fact_count, self.materialized_count)
             and ((self.proof is not None and self.proof.complete and self.refusal is None
-                  and self.proof.caller.callsite_addr == self.callsite_addr
+                  and operator.eq(self.proof.caller.callsite_addr, self.callsite_addr)
                   and self.materialized_count == 1 and self.failure_count == 0)
                  or (self.proof is None and self.refusal is not None
-                     and self.refusal.callsite_addr == self.callsite_addr
+                     and operator.eq(self.refusal.callsite_addr, self.callsite_addr)
                      and self.materialized_count == 0 and self.failure_count == 1))
         )
 
 
+@cython.ccall
 def _push_read_matches_8616(
-    caller: CallsiteSummary8616, index: int, read: IRLogicalMemoryAccess8616,
-) -> bool:
+    caller: CallsiteSummary8616, index: cython.longlong, read: IRLogicalMemoryAccess8616,
+) -> cython.bint:
     """Match a selected logical READ to one decoded BP-word PUSH operand."""
     sources = caller.push_arg_sources
     addresses = caller.push_arg_instruction_addrs
@@ -166,33 +174,35 @@ def _push_read_matches_8616(
         kind == "bp" and isinstance(offset, int) and not isinstance(offset, bool)
         and width == 2 and read.complete
         and read.kind is IRMemoryAccessKind8616.READ
-        and read.key.insn_addr == addresses[index]
+        and operator.eq(read.key.insn_addr, addresses[index])
         and read.address.space is MemSpace.SS
         and read.address.base == ("bp",)
-        and read.address.offset == offset and read.address.size == width
+        and operator.eq(read.address.offset, offset) and operator.eq(read.address.size, width)
     )
 
 
 def _word_read_for_push_8616(
-    artifact: SSAFunctionArtifact, caller: CallsiteSummary8616, index: int,
+    artifact: SSAFunctionArtifact, caller: CallsiteSummary8616, index: cython.longlong,
 ) -> IRLogicalMemoryAccess8616 | None:
     """Select exactly one IR word READ at the decoded PUSH instruction."""
+    logical_memory: object
     logical_memory = artifact.logical_memory
     if logical_memory is None or not logical_memory.closed:
         return None
     matches = tuple(
-        access for access in logical_memory.accesses
-        if access.key.function_addr == artifact.function_addr
+        access for access in iter(logical_memory.accesses)
+        if operator.eq(access.key.function_addr, artifact.function_addr)
         and _push_read_matches_8616(caller, index, access)
     )
     return matches[0] if len(matches) == 1 else None
 
 
+@cython.ccall
 def _refuse_8616(
     caller: CallsiteSummary8616,
     kind: FarCallbackCallValueFailureKind8616,
     *,
-    normalized: bool,
+    normalized: cython.bint,
 ) -> FarCallbackCallValueResult8616:
     """Close one candidate without manufacturing an unknown callback value."""
     return FarCallbackCallValueResult8616(
@@ -207,9 +217,15 @@ def prove_far_callback_call_path_values_8616(
     caller: CallsiteSummary8616,
     *,
     callee_fact: FunctionPointerParameterFact8616,
-    callee_indirect_calls: tuple[CallsiteSummary8616, ...],
+    callee_indirect_calls: object,
 ) -> FarCallbackCallValueResult8616:
     """Join exact offset/segment LOAD values only on the same incoming path."""
+    callee_addr: object
+    offset_fact: object
+    offset_load: object
+    segment_fact: object
+    segment_load: object
+    shape: object
     callee_addr = caller.target_addr
     shape = None if callee_addr is None else exact_far_callback_call_shape_evidence_8616(
         caller, callee_addr=callee_addr, callee_fact=callee_fact,
@@ -236,15 +252,15 @@ def prove_far_callback_call_path_values_8616(
         return _refuse_8616(caller, FarCallbackCallValueFailureKind8616.WORD_VALUE_UNPROVEN,
                             normalized=True)
     offsets, segments = offset_fact.incoming, segment_fact.incoming
-    if tuple(item.source_block_addr for item in offsets) != tuple(
-        item.source_block_addr for item in segments
-    ):
+    if operator.ne(tuple(item.source_block_addr for item in iter(offsets)), tuple(
+        item.source_block_addr for item in iter(segments)
+    )):
         return _refuse_8616(caller, FarCallbackCallValueFailureKind8616.PATH_MISMATCH,
                             normalized=True)
     paths = tuple(
         FarCallbackPathValue8616(offset.source_block_addr, offset.constant,
                                  segment.constant, offset, segment)
-        for offset, segment in zip(offsets, segments, strict=True)
+        for offset, segment in builtins.iter(zip(offsets, segments, strict=True))
     )
     proof = FarCallbackCallValueProof8616(
         caller, callee_fact, callee_indirect_calls, offset_fact, segment_fact,

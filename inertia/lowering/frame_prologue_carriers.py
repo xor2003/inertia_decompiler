@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify exact canonical x86-16 frame-prologue C AST carriers.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from typing import Final, Protocol
@@ -33,6 +36,8 @@ from .frame_register_carriers import FrameRegisterCarrierResolution8616
 from .gp_register_state import runtime_gp_expression_view_8616
 from .physical_registers import physical_register_view_8616
 from .runtime_segment_access import RuntimeSegmentAccessContext8616, runtime_segment_access_space_8616
+import operator
+import builtins
 
 _WORD_BYTES: Final = 2
 _BYTE_BITS: Final = 8
@@ -42,7 +47,7 @@ _SEGMENTED_ACCESS_ARITY: Final = 2
 class _ArchitectureRegisters8616(Protocol):
     """Architecture register contracts required by frame classification."""
 
-    registers: Mapping[str, tuple[int, int]]
+    registers: Mapping[str, tuple[cython.longlong, cython.longlong]]
 
 
 class _ProjectRegisters8616(Protocol):
@@ -51,6 +56,7 @@ class _ProjectRegisters8616(Protocol):
     arch: _ArchitectureRegisters8616
 
 
+@cython.ccall
 def _unwrap_casts_8616(value: object) -> object:
     """Remove type-only wrappers from one structured expression."""
     while isinstance(value, CTypeCast):
@@ -58,19 +64,24 @@ def _unwrap_casts_8616(value: object) -> object:
     return value
 
 
+@cython.ccall
 def _constant_8616(value: object) -> int | None:
     """Return one explicit structured integer constant."""
     value = _unwrap_casts_8616(value)
     return value.value if isinstance(value, CConstant) and isinstance(value.value, int) else None
 
 
+@cython.ccall
 def _matches_register_8616(
     value: object,
     project: _ProjectRegisters8616,
-    register_name: str,
+    register_name: object,
     register_carriers: FrameRegisterCarrierResolution8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """Return whether one carrier exactly covers the named physical register."""
+    expected: object
+    runtime_view: object
+    view: object
     expected = project.arch.registers.get(register_name)
     view = (
         register_carriers.resolve(value)
@@ -80,29 +91,32 @@ def _matches_register_8616(
     if expected is None:
         return False
     if view is not None:
-        return (view.reg_offset, view.width) == expected
+        return operator.eq((view.reg_offset, view.width), expected)
     runtime_view = runtime_gp_expression_view_8616(value)
     return (
         runtime_view is not None
-        and runtime_view.width == expected[1]
-        and project.arch.registers.get(runtime_view.register_name) == expected
+        and operator.eq(runtime_view.width, expected[1])
+        and operator.eq(project.arch.registers.get(runtime_view.register_name), expected)
     )
 
 
+@cython.ccall
 def _statement_addr_8616(statement: CAssignment) -> int | None:
     """Return the exact machine instruction tag on one structured assignment."""
+    value: object
     value = statement.tags.get("ins_addr")
     return value if isinstance(value, int) else None
 
 
+@cython.ccall
 def _is_entry_sp_decrement_8616(
     statement: object,
     project: _ProjectRegisters8616,
-    function_addr: int,
+    function_addr: cython.longlong,
     register_carriers: FrameRegisterCarrierResolution8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """Match the exact ``SP = SP - 2`` carrier emitted for ``push bp``."""
-    if not isinstance(statement, CAssignment) or _statement_addr_8616(statement) != function_addr:
+    if not isinstance(statement, CAssignment) or operator.ne(_statement_addr_8616(statement), function_addr):
         return False
     rhs = _unwrap_casts_8616(statement.rhs)
     return (
@@ -110,11 +124,12 @@ def _is_entry_sp_decrement_8616(
         and isinstance(rhs, CBinaryOp)
         and rhs.op == "Sub"
         and _matches_register_8616(rhs.lhs, project, "sp", register_carriers)
-        and _constant_8616(rhs.rhs) == _WORD_BYTES
+        and operator.eq(_constant_8616(rhs.rhs), _WORD_BYTES)
     )
 
 
-def _flatten_frame_address_8616(term: object, sign: int = 1) -> list[tuple[object, int]]:
+@cython.ccall
+def _flatten_frame_address_8616(term: object, sign: cython.longlong = 1) -> object:
     """Flatten structured addition/subtraction without changing address meaning."""
     term = _unwrap_casts_8616(term)
     if isinstance(term, CBinaryOp) and term.op == "Add":
@@ -124,19 +139,23 @@ def _flatten_frame_address_8616(term: object, sign: int = 1) -> list[tuple[objec
     return [(term, sign)]
 
 
+@cython.ccall
 def _entry_ss_sp_displacement_8616(
     value: object,
     root: object,
     project: _ProjectRegisters8616,
-    codegen: object | None,
+    codegen: object,
     register_carriers: FrameRegisterCarrierResolution8616 | None,
 ) -> int | None:
     """Return displacement for an exact ``SS:SP+constant`` dereference."""
+    constant: object
+    sign: object
+    term: object
     value = _unwrap_casts_8616(value)
     required_ss_terms = 1
     if isinstance(value, CFunctionCall):
         args = tuple(value.args or ())
-        if len(args) != _SEGMENTED_ACCESS_ARITY:
+        if operator.ne(len(args), _SEGMENTED_ACCESS_ARITY):
             return None
         segment_space = (
             runtime_segment_access_space_8616(
@@ -170,10 +189,10 @@ def _entry_ss_sp_displacement_8616(
             scale = 16 if term.op == "Mul" else 4
             if (
                 _matches_register_8616(term.lhs, project, "ss", register_carriers)
-                and _constant_8616(term.rhs) == scale
+                and operator.eq(_constant_8616(term.rhs), scale)
             ) or (
                 _matches_register_8616(term.rhs, project, "ss", register_carriers)
-                and _constant_8616(term.lhs) == scale
+                and operator.eq(_constant_8616(term.lhs), scale)
             ):
                 ss_terms += 1
                 continue
@@ -193,43 +212,46 @@ def is_exact_push_bp_store_carrier_8616(
     statement: object,
     root: object,
     project: _ProjectRegisters8616,
-    function_addr: int,
+    function_addr: cython.longlong,
     *,
-    canonical_frame_proven: bool = False,
+    canonical_frame_proven: cython.bint = False,
     codegen: object | None = None,
     register_carriers: FrameRegisterCarrierResolution8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """Prove one saved-BP store from AST pairing or decoded frame evidence."""
-    if not isinstance(statement, CAssignment) or _statement_addr_8616(statement) != function_addr:
+    if not isinstance(statement, CAssignment) or operator.ne(_statement_addr_8616(statement), function_addr):
         return False
     if not _matches_register_8616(statement.rhs, project, "bp", register_carriers):
         return False
-    if _entry_ss_sp_displacement_8616(
+    if operator.ne(_entry_ss_sp_displacement_8616(
         statement.lhs,
         root,
         project,
         codegen,
         register_carriers,
-    ) != -_WORD_BYTES:
+    ), -_WORD_BYTES):
         return False
     return canonical_frame_proven or any(
         _is_entry_sp_decrement_8616(node, project, function_addr, register_carriers)
-        for node in _iter_c_nodes_deep_8616(root)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(root))
     )
 
 
+@cython.ccall
 def _paired_bp_byte_store_8616(
     statement: CAssignment,
     root: object,
     project: _ProjectRegisters8616,
-    function_addr: int,
+    function_addr: cython.longlong,
     codegen: object | None,
     register_carriers: FrameRegisterCarrierResolution8616 | None,
-) -> bool:
+) -> cython.bint:
     """Require both exact saved-word byte slots and the same captured BP value."""
+    store_type: object
+    candidate: object
     lhs = _unwrap_casts_8616(statement.lhs)
     if not (isinstance(lhs, CVariable) and isinstance(lhs.variable, SimStackVariable)
-            and lhs.variable.size == 1 and lhs.variable.offset == -_WORD_BYTES):
+            and lhs.variable.size == 1 and operator.eq(lhs.variable.offset, -_WORD_BYTES)):
         return False
     source = _unwrap_casts_8616(statement.rhs)
     source_id = _scalar_identity_8616(source)
@@ -237,23 +259,23 @@ def _paired_bp_byte_store_8616(
         return False
     matches = 0
     for candidate in _iter_c_nodes_deep_8616(root):
-        if not isinstance(candidate, CAssignment) or _statement_addr_8616(candidate) != function_addr:
+        if not isinstance(candidate, CAssignment) or operator.ne(_statement_addr_8616(candidate), function_addr):
             continue
         other = _unwrap_casts_8616(candidate.lhs)
         duplicate_low = (candidate is not statement and isinstance(other, CVariable)
-                         and isinstance(other.variable, SimStackVariable) and other.variable.offset == -_WORD_BYTES)
+                         and isinstance(other.variable, SimStackVariable) and operator.eq(other.variable.offset, -_WORD_BYTES))
         if duplicate_low:
             return False
         if _entry_ss_sp_displacement_8616(candidate.lhs, root, project, codegen, register_carriers) != -1:
             continue
         high = _unwrap_casts_8616(candidate.rhs)
-        if not (isinstance(high, CBinaryOp) and high.op == "Shr" and _constant_8616(high.rhs) == _BYTE_BITS
-                and _scalar_identity_8616(high.lhs) == source_id
+        if not (isinstance(high, CBinaryOp) and high.op == "Shr" and operator.eq(_constant_8616(high.rhs), _BYTE_BITS)
+                and operator.eq(_scalar_identity_8616(high.lhs), source_id)
                 and _matches_register_8616(high.lhs, project, "bp", register_carriers)):
             return False
         try:
             store_type = candidate.lhs.type
-            byte_store = store_type is not None and store_type.size == _BYTE_BITS
+            byte_store = store_type is not None and operator.eq(store_type.size, _BYTE_BITS)
         except (AttributeError, TypeError, ValueError):
             byte_store = False
         if not byte_store:
@@ -262,17 +284,19 @@ def _paired_bp_byte_store_8616(
     return matches == 1
 
 
+@cython.ccall
 def is_exact_push_bp_carrier_8616(
     statement: object,
     root: object,
     project: _ProjectRegisters8616,
-    function_addr: int,
+    function_addr: cython.longlong,
     *,
-    canonical_frame_proven: bool = False,
+    canonical_frame_proven: cython.bint = False,
     codegen: object | None = None,
     register_carriers: FrameRegisterCarrierResolution8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """Prove one stack-update or saved-BP carrier of the entry ``push bp``."""
+    expected_bp: object
     if _is_entry_sp_decrement_8616(
         statement,
         project,
@@ -288,7 +312,7 @@ def is_exact_push_bp_carrier_8616(
         register_carriers=register_carriers,
     ):
         return True
-    if not isinstance(statement, CAssignment) or _statement_addr_8616(statement) != function_addr:
+    if not isinstance(statement, CAssignment) or operator.ne(_statement_addr_8616(statement), function_addr):
         return False
     lhs = _unwrap_casts_8616(statement.lhs)
     if not (
@@ -305,7 +329,7 @@ def is_exact_push_bp_carrier_8616(
     expected_bp = project.arch.registers.get("bp")
     if (
         expected_bp is not None
-        and lhs.variable.size == expected_bp[1]
+        and operator.eq(lhs.variable.size, expected_bp[1])
         and _matches_register_8616(rhs, project, "bp", register_carriers)
     ):
         return True
@@ -320,20 +344,22 @@ def is_exact_push_bp_carrier_8616(
     )
 
 
+@cython.ccall
 def is_exact_bp_frame_setup_carrier_8616(
     statement: object,
     project: _ProjectRegisters8616,
-    setup_addr: int,
+    setup_addr: cython.longlong,
     *,
     register_carriers: FrameRegisterCarrierResolution8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """Match one owned BP write at a decoded ``mov bp, sp`` instruction.
 
     GP-state lowering represents a 16-bit BP write as a coherent 32-bit EBP
     lane assignment. That typed owner remains valid evidence after an earlier
     pass has consumed every structured carrier for the preceding ``push bp``.
     """
-    if not isinstance(statement, CAssignment) or _statement_addr_8616(statement) != setup_addr:
+    runtime_view: object
+    if not isinstance(statement, CAssignment) or operator.ne(_statement_addr_8616(statement), setup_addr):
         return False
     if _matches_register_8616(statement.lhs, project, "bp", register_carriers):
         return True

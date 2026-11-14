@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: bind explicit conditional real16 input to an exact MZ load.
@@ -5,6 +6,8 @@ Environment and service semantics remain with the canonical dosunit owners.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import io
 from pathlib import Path
@@ -16,6 +19,7 @@ from inertia.cli.mz_static_intake import MzStaticIntakeRequest8616
 from inertia.frontend.x86_16.load_dos_mz import DOSMZ
 from tools.dosunit.catalog.real16_declared_input import read_declared_real16_input_8616
 from tools.dosunit.catalog.real16_scoped_invocation import recompute_declared_program_boot_8616
+import operator
 
 
 class _DeclaredProjectMarker8616(Protocol):
@@ -25,12 +29,14 @@ class _DeclaredProjectMarker8616(Protocol):
     _inertia_real16_declared_input_path_8616: Path
 
 
+@cython.ccall
 def declared_input_path_8616(project: object) -> Path | None:
     """Read optional declaration provenance from the third-party project.
 
     Rebuilds re-read and authenticate the named file; this accessor grants
     neither a cached declaration nor a reusable proof.
     """
+    value: object
     # Dynamic third-party angr boundary: undeclared projects have no marker.
     value = getattr(project, "_inertia_real16_declared_input_path_8616", None)
     if value is None or isinstance(value, Path):
@@ -38,13 +44,14 @@ def declared_input_path_8616(project: object) -> Path | None:
     raise TypeError("project declaration provenance must be a Path")
 
 
+@cython.ccall
 def build_declared_project_8616(
     binary: Path,
     declaration_path: Path,
     *,
-    force_blob: bool,
-    base_addr: int,
-    entry_point: int,
+    force_blob: cython.bint,
+    base_addr: cython.longlong,
+    entry_point: cython.longlong,
 ) -> angr.Project:
     """Load source-bound conditional input without loader fallback or inference.
 
@@ -52,6 +59,8 @@ def build_declared_project_8616(
     mapped image is checked before the deferred request becomes visible.
     No inventory, native census or universal proof is minted here.
     """
+    address: object
+    data: object
     if force_blob:
         raise ValueError("declared real16 input requires the DOS MZ backend")
     source = binary.read_bytes()
@@ -63,7 +72,7 @@ def build_declared_project_8616(
     # CLI policy supplies a paragraph; isolated CLE rebuilds supply a linear
     # linked_base, which may also be below 64K. The declaration owns the one
     # actual load address, so accept only its exact two coordinate projections.
-    if base_addr not in (boot.image.load_segment, load_base) or entry_point != boot.entry.linear():
+    if base_addr not in (boot.image.load_segment, load_base) or operator.ne(entry_point, boot.entry.linear()):
         raise ValueError("load coordinates differ from the declared real16 boot")
     project = angr.Project(
         binary,
@@ -72,12 +81,12 @@ def build_declared_project_8616(
         simos="DOS",
     )
     main_object = project.loader.main_object
-    if not isinstance(main_object, DOSMZ) or main_object.mz_load_segment != boot.image.load_segment:
+    if not isinstance(main_object, DOSMZ) or operator.ne(main_object.mz_load_segment, boot.image.load_segment):
         raise ValueError("loaded backend differs from the declared real16 boot")
-    if project.entry != boot.entry.linear():
+    if operator.ne(project.entry, boot.entry.linear()):
         raise ValueError("loaded entry differs from the declared real16 boot")
     for address, data in boot.image.chunks:
-        if project.loader.memory.load(address, len(data)) != data:
+        if operator.ne(project.loader.memory.load(address, len(data)), data):
             raise ValueError("mapped image differs from the declared real16 source")
     marker = cast(_DeclaredProjectMarker8616, project)
     marker._inertia_mz_static_invocation_request_8616 = MzStaticIntakeRequest8616(

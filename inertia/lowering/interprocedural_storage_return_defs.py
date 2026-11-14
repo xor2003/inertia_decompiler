@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Resolve exact typed CALL producers for interprocedural return trials.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -37,6 +40,9 @@ from .interprocedural_storage_contracts import (
     StorageTrialStats8616,
     ValueProvenance8616,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "CallOutputDefinitionFailure8616",
@@ -71,18 +77,18 @@ class CallOutputDefinitionFailure8616(StrEnum):
     OUTPUT_STORAGE_CONFLICT = "output_storage_conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallOutputDefinitionResult8616:
     """Exact call-output definitions or one atomic typed refusal."""
 
     verdict: CallOutputDefinitionVerdict8616
-    definitions: tuple[StorageReachingDefinition8616, ...]
+    definitions: object
     provenance: ValueProvenance8616 | None
     failure: CallOutputDefinitionFailure8616 | None
     stats: StorageTrialStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every requested output piece has one CALL producer."""
         return (
             self.verdict is CallOutputDefinitionVerdict8616.PROVEN
@@ -94,16 +100,17 @@ class CallOutputDefinitionResult8616:
                 definition.is_complete
                 and definition.definition_kind
                 is StorageDefinitionKind8616.CALL_OUTPUT
-                for definition in self.definitions
+                for definition in iter(self.definitions)
             )
         )
 
 
+@cython.ccall
 def _refused_result_8616(
     verdict: CallOutputDefinitionVerdict8616,
     failure: CallOutputDefinitionFailure8616,
-    raw_count: int,
-    normalized_count: int = 0,
+    raw_count: cython.longlong,
+    normalized_count: cython.longlong = 0,
 ) -> CallOutputDefinitionResult8616:
     """Build one atomic refusal without leaking partial definitions."""
     return CallOutputDefinitionResult8616(
@@ -121,19 +128,21 @@ def _refused_result_8616(
 
 def call_candidates_at_address_8616(
     artifact: SSAFunctionArtifact,
-    callsite_addr: int,
-) -> tuple[tuple[int, int, IRInstr], ...]:
+    callsite_addr: cython.longlong,
+) -> tuple[tuple[cython.longlong, cython.longlong, IRInstr], ...]:
     """Return typed CALLs carrying one exact machine-call address."""
     return tuple(
         (block.addr, instr_index, instruction)
-        for block in artifact.blocks
-        for instr_index, instruction in enumerate(block.instrs)
-        if instruction.op == "CALL" and instruction.addr == callsite_addr
+        for block in iter(artifact.blocks)
+        for instr_index, instruction in builtins.iter(enumerate(block.instrs))
+        if instruction.op == "CALL" and operator.eq(instruction.addr, callsite_addr)
     )
 
 
+@cython.ccall
 def _call_output_value_8616(storage: StorageIdentity8616) -> IRValue | None:
     """Project one exact physical output without inventing an SSA version."""
+    address: object
     if storage.kind is StorageIdentityKind8616.REGISTER:
         return IRValue(space=MemSpace.REG, name=storage.register, size=storage.width)
     address = storage.address
@@ -149,12 +158,13 @@ def _call_output_value_8616(storage: StorageIdentity8616) -> IRValue | None:
     )
 
 
+@cython.ccall
 def resolve_call_output_definitions_8616(
     artifact: SSAFunctionArtifact,
     fact: CallerReturnUseFact8616,
-    callee_addr: int,
-    accepted_target_addrs: tuple[int, ...],
-    output_storages: tuple[StorageIdentity8616, ...],
+    callee_addr: cython.longlong,
+    accepted_target_addrs: object,
+    output_storages: object,
     *,
     project: object | None = None,
     callsite_index: DecodedDirectCallsiteIndex8616 | None = None,
@@ -162,7 +172,7 @@ def resolve_call_output_definitions_8616(
 ) -> CallOutputDefinitionResult8616:
     """Bind exact return carriers to one observed typed CALL producer."""
     raw_count = len(output_storages)
-    if artifact.function_addr != fact.caller_addr:
+    if operator.ne(artifact.function_addr, fact.caller_addr):
         return _refused_result_8616(
             CallOutputDefinitionVerdict8616.CONFLICT,
             CallOutputDefinitionFailure8616.CALLER_IDENTITY_CONFLICT,
@@ -193,14 +203,15 @@ def resolve_call_output_definitions_8616(
     )
 
 
+@cython.ccall
 def _validated_call_gate_8616(
     artifact: SSAFunctionArtifact,
-    caller_addr: int,
-    callsite_addr: int,
-    raw_count: int,
-) -> tuple[int, int, IRInstr] | CallOutputDefinitionResult8616:
+    caller_addr: cython.longlong,
+    callsite_addr: cython.longlong,
+    raw_count: cython.longlong,
+) -> object:
     """Return the single proven CALL site or a typed refusal result."""
-    if artifact.function_addr != caller_addr:
+    if operator.ne(artifact.function_addr, caller_addr):
         return _refused_result_8616(
             CallOutputDefinitionVerdict8616.CONFLICT,
             CallOutputDefinitionFailure8616.CALLER_IDENTITY_CONFLICT,
@@ -236,14 +247,14 @@ def _validated_call_gate_8616(
 
 
 def _call_target_match_8616(
-    target_const: int,
-    accepted_target_addrs: tuple[int, ...],
-    project: object | None,
-) -> bool:
+    target_const: cython.longlong,
+    accepted_target_addrs: object,
+    project: object,
+) -> cython.bint:
     """Return whether the constant callee matches accepted target evidence."""
     targets = frozenset(
         address
-        for address in accepted_target_addrs
+        for address in iter(accepted_target_addrs)
         if isinstance(address, int) and not isinstance(address, bool)
     )
     if not targets:
@@ -252,7 +263,7 @@ def _call_target_match_8616(
         project is not None
         and any(
             x86_16_call_targets_equivalent_8616(project, target_const, accepted)
-            for accepted in targets
+            for accepted in iter(targets)
         )
     )
 
@@ -308,11 +319,14 @@ _BOUND_UNKNOWN_FAILURES_8616: dict[
 }
 
 
+@cython.ccall
 def _bound_target_refusal_8616(
     binding: CallTargetBindResult8616,
-    raw_count: int,
+    raw_count: cython.longlong,
 ) -> CallOutputDefinitionResult8616:
     """Translate a shared-binder refusal without leaking partial definitions."""
+    conflict: object
+    unknown: object
     conflict = _BOUND_CONFLICT_FAILURES_8616.get(binding.stage)
     if conflict is not None:
         return _refused_result_8616(
@@ -330,13 +344,14 @@ def _bound_target_refusal_8616(
     )
 
 
+@cython.ccall
 def _proven_call_target_const_8616(
     artifact: SSAFunctionArtifact,
-    caller_addr: int,
-    callsite_addr: int,
+    caller_addr: cython.longlong,
+    callsite_addr: cython.longlong,
     target: IRValue,
-    accepted_target_addrs: tuple[int, ...],
-    raw_count: int,
+    accepted_target_addrs: object,
+    raw_count: cython.longlong,
     project: object | None,
     callsite_index: DecodedDirectCallsiteIndex8616 | None,
     projection: CallSemanticProjection8616 | None,
@@ -365,11 +380,11 @@ def _proven_call_target_const_8616(
 
 def resolve_storage_call_output_definitions_8616(
     artifact: SSAFunctionArtifact,
-    caller_addr: int,
-    callsite_addr: int,
-    callee_addr: int,
-    accepted_target_addrs: tuple[int, ...],
-    output_storages: tuple[StorageIdentity8616, ...],
+    caller_addr: cython.longlong,
+    callsite_addr: cython.longlong,
+    callee_addr: cython.longlong,
+    accepted_target_addrs: object,
+    output_storages: object,
     *,
     project: object | None = None,
     callsite_index: DecodedDirectCallsiteIndex8616 | None = None,
@@ -415,9 +430,9 @@ def resolve_storage_call_output_definitions_8616(
             raw_count,
             raw_count,
         )
-    values = tuple(_call_output_value_8616(storage) for storage in output_storages)
-    if any(not storage.is_exact for storage in output_storages) or any(
-        value is None for value in values
+    values = tuple(_call_output_value_8616(storage) for storage in iter(output_storages))
+    if any(not storage.is_exact for storage in iter(output_storages)) or any(
+        value is None for value in iter(values)
     ):
         return _refused_result_8616(
             CallOutputDefinitionVerdict8616.UNKNOWN_REFUSE,
@@ -425,14 +440,14 @@ def resolve_storage_call_output_definitions_8616(
             raw_count,
             raw_count,
         )
-    if len({storage.key for storage in output_storages}) != raw_count:
+    if operator.ne(len({storage.key for storage in iter(output_storages)}), raw_count):
         return _refused_result_8616(
             CallOutputDefinitionVerdict8616.CONFLICT,
             CallOutputDefinitionFailure8616.OUTPUT_STORAGE_CONFLICT,
             raw_count,
             raw_count,
         )
-    typed_values = tuple(value for value in values if value is not None)
+    typed_values = tuple(value for value in iter(values) if value is not None)
     definitions = tuple(
         StorageReachingDefinition8616(
             value=value,
@@ -442,7 +457,7 @@ def resolve_storage_call_output_definitions_8616(
             source_storage=storage,
             definition_kind=StorageDefinitionKind8616.CALL_OUTPUT,
         )
-        for storage, value in zip(output_storages, typed_values, strict=True)
+        for storage, value in builtins.iter(zip(output_storages, typed_values, strict=True))
     )
     provenance = ValueProvenance8616(
         function_addr=callee_addr,

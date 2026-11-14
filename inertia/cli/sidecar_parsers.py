@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Parse sidecar formats into structured optional evidence records.
 
 Layer: CLI/fallback/reporting.
@@ -6,6 +7,7 @@ Dynamic angr boundary: sidecar probing reads loader/project/memory attributes su
 """
 
 from __future__ import annotations
+import cython
 
 import re
 import struct as struct
@@ -45,12 +47,14 @@ from tools.signatures.omf_pat import (
 )
 from tools.signatures.signature_catalog import match_signature_catalog as match_signature_catalog
 from tools.signatures.signature_catalog import registered_pat_architecture as registered_pat_architecture
+import operator
+import builtins
 
 
 class _AngrMemoryLoader8616(Protocol):
     """Dynamic angr loader-memory surface used for sidecar byte probes."""
 
-    def load(self, addr: int, size: int) -> bytes | bytearray | memoryview:
+    def load(self, addr: cython.longlong, size: cython.longlong) -> object:
         """Return bytes from an angr loader memory object."""
         ...
 
@@ -106,32 +110,37 @@ _IDA_MAP_DATA_CLASSES = {
 }
 
 
-def _label_looks_like_code(name: str) -> bool:
+@cython.ccall
+def _label_looks_like_code(name: object) -> cython.bint:
     return _label_looks_like_function(name)
 
 
-def _label_looks_like_function(name: str) -> bool:
+def _label_looks_like_function(name: object) -> cython.bint:
     lowered = name.lower()
     if lowered.startswith(_NON_FUNCTION_CODE_PREFIXES):
         return False
     if "_" not in lowered:
         return True
     prefix, suffix = lowered.rsplit("_", 1)
-    if suffix and all(ch in "0123456789abcdef" for ch in suffix):  # noqa: SIM102
-        if any(token in prefix for token in _CONTROL_FLOW_LABEL_TOKENS):
+    if suffix and all(ch in "0123456789abcdef" for ch in iter(suffix)):  # noqa: SIM102
+        if any(token in prefix for token in iter(_CONTROL_FLOW_LABEL_TOKENS)):
             return False
     return True
 
 
+@cython.ccall
 def _parse_ida_map_metadata(
     map_path: Path,
     *,
-    load_base_linear: int,
-) -> tuple[dict[int, str], dict[int, str], dict[str, int]]:
-    code_labels: dict[int, str] = {}
-    data_labels: dict[int, str] = {}
-    segment_offsets: dict[str, int] = {}
-    segment_classes: dict[int, str] = {}
+    load_base_linear: cython.longlong,
+) -> tuple[dict[cython.longlong, str], dict[cython.longlong, str], dict[str, cython.longlong]]:
+    match: object
+    segment_class: object
+    line: object
+    code_labels: dict[cython.longlong, str] = {}
+    data_labels: dict[cython.longlong, str] = {}
+    segment_offsets: dict[str, cython.longlong] = {}
+    segment_classes: dict[cython.longlong, str] = {}
     in_publics = False
     for line in map_path.read_text(errors="ignore").splitlines():
         stripped = line.strip()
@@ -173,13 +182,16 @@ def _parse_ida_map_metadata(
     return code_labels, data_labels, segment_offsets
 
 
+@cython.ccall
 def _parse_ida_lst_proc_metadata(
     lst_path: Path,
     *,
-    load_base_linear: int,
-    segment_offsets: dict[str, int],
-) -> dict[int, str]:
-    code_labels: dict[int, str] = {}
+    load_base_linear: cython.longlong,
+    segment_offsets: object,
+) -> object:
+    match: object
+    line: object
+    code_labels: dict[cython.longlong, str] = {}
     for line in lst_path.read_text(errors="ignore").splitlines():
         match = _IDA_LST_PROC_RE.match(line.strip())
         if match is None:
@@ -193,23 +205,30 @@ def _parse_ida_lst_proc_metadata(
     return code_labels
 
 
+@cython.ccall
 def _parse_ida_lst_proc_ranges(
     lst_path: Path,
     *,
-    load_base_linear: int,
-    segment_offsets: dict[str, int],
-) -> dict[int, tuple[int, int]]:
+    load_base_linear: cython.longlong,
+    segment_offsets: object,
+) -> object:
     """Return exact IDA ``proc``/``endp`` ranges in linear address space."""
+    endp_match: object
+    match: object
+    offsets: object
+    proc_match: object
+    start_offset: object
+    line: object
     lines = lst_path.read_text(errors="ignore").splitlines()
-    offsets_by_segment: dict[str, set[int]] = {}
+    offsets_by_segment: dict[str, set[cython.longlong]] = {}
     for line in lines:
         match = _IDA_LST_ADDR_RE.match(line.strip())
         if match is not None:
             offsets_by_segment.setdefault(match.group("seg"), set()).add(int(match.group("off"), 16))
-    ordered_offsets = {segment: sorted(offsets) for segment, offsets in offsets_by_segment.items()}
+    ordered_offsets = {segment: sorted(offsets) for segment, offsets in builtins.iter(offsets_by_segment.items())}
 
-    starts: dict[tuple[str, str], int] = {}
-    ranges: dict[int, tuple[int, int]] = {}
+    starts: dict[tuple[str, str], cython.longlong] = {}
+    ranges: dict[cython.longlong, tuple[cython.longlong, cython.longlong]] = {}
     for line in lines:
         stripped = line.strip()
         proc_match = _IDA_LST_PROC_RE.match(stripped)
@@ -238,9 +257,12 @@ def _parse_ida_lst_proc_ranges(
     return ranges
 
 
-def _parse_idc_metadata(idc_path: Path) -> tuple[dict[int, str], dict[int, str]]:
-    code_labels: dict[int, str] = {}
-    data_labels: dict[int, str] = {}
+@cython.ccall
+def _parse_idc_metadata(idc_path: Path) -> tuple[dict[cython.longlong, str], dict[cython.longlong, str]]:
+    match: object
+    line: object
+    code_labels: dict[cython.longlong, str] = {}
+    data_labels: dict[cython.longlong, str] = {}
     for line in idc_path.read_text(errors="ignore").splitlines():
         match = _IDC_SET_NAME_RE.search(line)
         if match is None:
@@ -254,7 +276,10 @@ def _parse_idc_metadata(idc_path: Path) -> tuple[dict[int, str], dict[int, str]]
     return code_labels, data_labels
 
 
+@cython.ccall
 def _parse_inc_struct_names(inc_path: Path) -> tuple[str, ...]:
+    match: object
+    line: object
     names: list[str] = []
     for line in inc_path.read_text(errors="ignore").splitlines():
         match = _INC_STRUCT_RE.match(line)
@@ -263,26 +288,28 @@ def _parse_inc_struct_names(inc_path: Path) -> tuple[str, ...]:
     return tuple(names)
 
 
+@cython.ccall
 def _parse_codeview_nb00_metadata(
     binary: Path,
     *,
-    load_base_linear: int,
-) -> tuple[dict[int, str], dict[int, str], dict[int, tuple[int, int]]]:
+    load_base_linear: cython.longlong,
+) -> tuple[dict[cython.longlong, str], dict[cython.longlong, str], dict[cython.longlong, tuple[cython.longlong, cython.longlong]]]:
+    parsed: object
     parsed = parse_codeview_nb00(binary, load_base_linear=load_base_linear)
     if parsed is None:
         return {}, {}, {}
-    code_labels = {addr: name for addr, name in parsed.code_labels.items() if _label_looks_like_code(name)}
-    data_labels = {addr: name for addr, name in parsed.data_labels.items() if addr not in code_labels}
-    code_ranges = {addr: span for addr, span in parsed.code_ranges.items() if addr in code_labels and span[0] < span[1]}
+    code_labels = {addr: name for addr, name in builtins.iter(parsed.code_labels.items()) if _label_looks_like_code(name)}
+    data_labels = {addr: name for addr, name in builtins.iter(parsed.data_labels.items()) if addr not in code_labels}
+    code_ranges = {addr: span for addr, span in builtins.iter(parsed.code_ranges.items()) if addr in code_labels and span[0] < span[1]}
     return code_labels, data_labels, code_ranges
 
 
 def _parse_codeview_nb0204_metadata(
     binary: Path,
     *,
-    load_base_linear: int,
-) -> tuple[dict[int, str], dict[int, str], dict[int, tuple[int, int]]]:
-    def _impl() -> tuple[dict[int, str], dict[int, str], dict[int, tuple[int, int]]]:
+    load_base_linear: cython.longlong,
+) -> object:
+    def _impl() -> tuple[dict[cython.longlong, str], dict[cython.longlong, str], dict[cython.longlong, tuple[cython.longlong, cython.longlong]]]:
         """Parse CodeView NB02/NB04 debug information.
 
         Extracts:
@@ -290,6 +317,8 @@ def _parse_codeview_nb0204_metadata(
         - Global/local data (from S_GDATA16, S_LDATA16)
         - Stack variables (from S_BPREL16, available via procedures dict)
         """
+        parsed: object
+        proc: object
         try:
             data = binary.read_bytes()
             parsed = parse_codeview_nb0204_bytes(data, load_base_linear=load_base_linear)
@@ -299,11 +328,11 @@ def _parse_codeview_nb0204_metadata(
         if parsed is None:
             return {}, {}, {}
 
-        code_labels = {addr: name for addr, name in parsed.code_labels.items() if _label_looks_like_code(name)}
-        data_labels = {addr: name for addr, name in parsed.data_labels.items() if addr not in code_labels}
+        code_labels = {addr: name for addr, name in builtins.iter(parsed.code_labels.items()) if _label_looks_like_code(name)}
+        data_labels = {addr: name for addr, name in builtins.iter(parsed.data_labels.items()) if addr not in code_labels}
 
         # Synthesize code ranges from procedures if available
-        code_ranges: dict[int, tuple[int, int]] = {}
+        code_ranges: dict[cython.longlong, tuple[cython.longlong, cython.longlong]] = {}
         for proc in parsed.procedures:
             if proc.is_procedure() and proc.name:
                 linear_start = (
@@ -321,12 +350,13 @@ def _parse_codeview_nb0204_metadata(
     return _impl()
 
 
+@cython.ccall
 def _parse_ne_exe_metadata(
     binary: Path,
     *,
-    load_base_linear: int,
+    load_base_linear: cython.longlong,
     project: angr.Project | None = None,
-) -> tuple[dict[int, str], dict[int, str], dict[int, tuple[int, int]]]:
+) -> tuple[dict[cython.longlong, str], dict[cython.longlong, str], dict[cython.longlong, tuple[cython.longlong, cython.longlong]]]:
     """Parse NE (New Executable) format Windows/OS2 16-bit binaries.
 
     Integrates with CLE DOSNE loader for accurate segment-to-linear address mapping.
@@ -336,6 +366,7 @@ def _parse_ne_exe_metadata(
     - Entry point addresses from entry table + segment table
     - Uses loader's segment mappings if project available
     """
+    ne_info: object
     try:
         ne_info = parse_ne_exe(binary, load_base_linear=load_base_linear, project=project)
     except (OSError, ValueError, struct.error):
@@ -344,11 +375,11 @@ def _parse_ne_exe_metadata(
     if ne_info is None or not ne_info.code_labels:
         return {}, {}, {}
 
-    code_labels = {addr: name for addr, name in ne_info.code_labels.items() if _label_looks_like_code(name)}
-    data_labels = {addr: name for addr, name in ne_info.data_labels.items() if addr not in code_labels}
+    code_labels = {addr: name for addr, name in builtins.iter(ne_info.code_labels.items()) if _label_looks_like_code(name)}
+    data_labels = {addr: name for addr, name in builtins.iter(ne_info.data_labels.items()) if addr not in code_labels}
 
     # NE format doesn't provide code range info directly, would need debug tables
-    code_ranges: dict[int, tuple[int, int]] = {}
+    code_ranges: dict[cython.longlong, tuple[cython.longlong, cython.longlong]] = {}
 
     return code_labels, data_labels, code_ranges
 
@@ -356,16 +387,17 @@ def _parse_ne_exe_metadata(
 def _parse_cod_sidecar_metadata(
     cod_path: Path,
     *,
-    load_base_linear: int,
-    existing_code_labels: dict[int, str] | None = None,
+    load_base_linear: cython.longlong,
+    existing_code_labels: object = None,
     project: angr.Project | None = None,
 ) -> CODListingMetadata:
     def _impl() -> CODListingMetadata:
+        memory: object
         metadata = extract_cod_listing_metadata(cod_path)
         existing = existing_code_labels or {}
-        base_candidates: dict[int, int] = {}
-        delta_candidates: dict[int, int] = {}
-        normalized_existing = {name.lstrip("_"): addr for addr, name in existing.items()}
+        base_candidates: dict[cython.longlong, cython.longlong] = {}
+        delta_candidates: dict[cython.longlong, cython.longlong] = {}
+        normalized_existing = {name.lstrip("_"): addr for addr, name in builtins.iter(existing.items())}
 
         _accumulate_base_candidates_8616(metadata, normalized_existing, base_candidates)
         if project is not None:
@@ -375,24 +407,26 @@ def _parse_cod_sidecar_metadata(
                 _scan_cod_base_deltas_8616(metadata, cod_path, load_base_linear, memory, delta_candidates)
         cod_linear_base = load_base_linear
         if base_candidates:
-            cod_linear_base = sorted(base_candidates.items(), key=lambda item: (-item[1], item[0]))[0][0]
+            cod_linear_base = sorted(tuple(base_candidates.items()), key=lambda item: (-item[1], item[0]))[0][0]
         if delta_candidates:
             cod_linear_base = (
                 load_base_linear
-                + sorted(delta_candidates.items(), key=lambda item: (-item[1], abs(item[0]), item[0]))[0][0]
+                + sorted(tuple(delta_candidates.items()), key=lambda item: (-item[1], abs(item[0]), item[0]))[0][0]
             )
-        code_labels = {cod_linear_base + offset: name.lstrip("_") for offset, name in metadata.code_labels.items()}
+        code_labels = {cod_linear_base + offset: name.lstrip("_") for offset, name in builtins.iter(metadata.code_labels.items())}
         code_ranges = {
             cod_linear_base + offset: (cod_linear_base + span[0], cod_linear_base + span[1])
-            for offset, span in metadata.code_ranges.items()
+            for offset, span in builtins.iter(metadata.code_ranges.items())
         }
-        proc_kinds = {cod_linear_base + offset: kind for offset, kind in metadata.proc_kinds.items()}
+        proc_kinds = {cod_linear_base + offset: kind for offset, kind in builtins.iter(metadata.proc_kinds.items())}
         return CODListingMetadata(code_labels=code_labels, code_ranges=code_ranges, proc_kinds=proc_kinds)
 
     return _impl()
 
 
-def _cod_entry_pattern_8616(entries: list[dict[str, object]]) -> tuple[int | None, ...]:
+def _cod_entry_pattern_8616(entries: object) -> object:
+    entry_bytes: object
+    entry: object
     pattern: list[int | None] = []
     concrete = 0
     for entry in entries:
@@ -407,7 +441,7 @@ def _cod_entry_pattern_8616(entries: list[dict[str, object]]) -> tuple[int | Non
             pattern.extend((first, None, None, None, None))
             concrete += 1
         else:
-            pattern.extend(int(byte) for byte in entry_bytes)
+            pattern.extend(int(byte) for byte in iter(entry_bytes))
             concrete += len(entry_bytes)
         if len(pattern) >= 24 and concrete >= 12:
             break
@@ -415,20 +449,24 @@ def _cod_entry_pattern_8616(entries: list[dict[str, object]]) -> tuple[int | Non
 
 
 def _memory_matches_cod_pattern_8616(
-    memory_obj: object, candidate: int, pattern: tuple[int | None, ...]
-) -> bool:
+    memory_obj: object, candidate: cython.longlong, pattern: object
+) -> cython.bint:
     try:
         observed = bytes(cast(_AngrMemoryLoader8616, memory_obj).load(candidate, len(pattern)))
     except Exception:
         return False
-    return all(expected is None or observed[idx] == expected for idx, expected in enumerate(pattern))
+    return all(expected is None or operator.eq(observed[idx], expected) for idx, expected in builtins.iter(enumerate(pattern)))
 
 
+@cython.ccall
 def _accumulate_base_candidates_8616(
     metadata: CODListingMetadata,
-    normalized_existing: dict[str, int],
-    base_candidates: dict[int, int],
+    normalized_existing: object,
+    base_candidates: object,
 ) -> None:
+    existing_addr: object
+    name: object
+    offset: object
     for offset, name in metadata.code_labels.items():
         existing_addr = normalized_existing.get(name.lstrip("_"))
         if existing_addr is None:
@@ -437,13 +475,17 @@ def _accumulate_base_candidates_8616(
         base_candidates[base] = base_candidates.get(base, 0) + 1
 
 
+@cython.ccall
 def _scan_cod_base_deltas_8616(
     metadata: CODListingMetadata,
     cod_path: Path,
-    load_base_linear: int,
+    load_base_linear: cython.longlong,
     memory: object,
-    delta_candidates: dict[int, int],
+    delta_candidates: object,
 ) -> None:
+    proc_kind: object
+    name: object
+    offset: object
     for offset, name in metadata.code_labels.items():
         proc_kind = metadata.proc_kinds.get(offset, "NEAR")
         try:
@@ -461,7 +503,8 @@ def _scan_cod_base_deltas_8616(
                 break
 
 
-def _ranges_overlap_or_touch(left: tuple[int, int] | None, right: tuple[int, int] | None, *, slop: int = 0x20) -> bool:
+@cython.ccall
+def _ranges_overlap_or_touch(left: object, right: object, *, slop: cython.longlong = 0x20) -> cython.bint:
     if left is None or right is None:
         return False
     return max(left[0], right[0]) <= min(left[1], right[1]) + slop
@@ -469,20 +512,22 @@ def _ranges_overlap_or_touch(left: tuple[int, int] | None, right: tuple[int, int
 
 def _reconcile_cod_listing_with_codeview(
     cod_listing: CODListingMetadata,
-    codeview_code: dict[int, str],
-    codeview_ranges: dict[int, tuple[int, int]],
+    codeview_code: object,
+    codeview_ranges: object,
 ) -> CODListingMetadata:
     """Re-key matching COD evidence to the authoritative CodeView entry."""
 
     def _impl() -> CODListingMetadata:
+        addr: object
+        name: object
         if not cod_listing.code_labels or not codeview_code:
             return cod_listing
-        codeview_by_name: dict[str, list[tuple[int, tuple[int, int] | None]]] = {}
+        codeview_by_name: dict[str, list[tuple[cython.longlong, tuple[int, int] | None]]] = {}
         for addr, name in codeview_code.items():
             codeview_by_name.setdefault(name.lstrip("_"), []).append((addr, codeview_ranges.get(addr)))
-        filtered_labels: dict[int, str] = {}
-        filtered_ranges: dict[int, tuple[int, int]] = {}
-        filtered_proc_kinds: dict[int, str] = {}
+        filtered_labels: dict[cython.longlong, str] = {}
+        filtered_ranges: dict[cython.longlong, tuple[cython.longlong, cython.longlong]] = {}
+        filtered_proc_kinds: dict[cython.longlong, str] = {}
         for addr, name in cod_listing.code_labels.items():
             _reconcile_cod_label_8616(
                 addr,
@@ -500,18 +545,24 @@ def _reconcile_cod_listing_with_codeview(
     return _impl()
 
 
+@cython.ccall
 def _reconcile_cod_label_8616(
-    addr: int,
-    name: str,
+    addr: cython.longlong,
+    name: object,
     cod_listing: CODListingMetadata,
-    codeview_by_name: dict[str, list[tuple[int, tuple[int, int] | None]]],
-    filtered_labels: dict[int, str],
-    filtered_ranges: dict[int, tuple[int, int]],
-    filtered_proc_kinds: dict[int, str],
+    codeview_by_name: object,
+    filtered_labels: object,
+    filtered_ranges: object,
+    filtered_proc_kinds: object,
 ) -> None:
+    cod_range: object
+    matched_codeview_addr: object
+    proc_kind: object
+    codeview_addr: object
+    codeview_range: object
     normalized_name = name.lstrip("_")
     cod_range = cod_listing.code_ranges.get(addr)
-    matched_codeview_addr: int | None = None
+    matched_codeview_addr = None
     for codeview_addr, codeview_range in codeview_by_name.get(normalized_name, ()):
         if abs(codeview_addr - addr) <= 0x400 or _ranges_overlap_or_touch(cod_range, codeview_range):
             matched_codeview_addr = codeview_addr
@@ -535,11 +586,12 @@ def _detect_flair_metadata(
     binary: Path,
     project: angr.Project,
     *,
-    pat_backend: str | None = None,
+    pat_backend: object = None,
     signature_catalog: Path | None = None,
-) -> tuple[dict[int, str], dict[int, tuple[int, int]], tuple[str, ...]]:
+) -> object:
     """Merge independent optional startup patterns and binary catalog matches."""
-    def _impl() -> tuple[dict[int, str], dict[int, tuple[int, int]], tuple[str, ...]]:
+    def _impl() -> tuple[dict[cython.longlong, str], dict[cython.longlong, tuple[cython.longlong, cython.longlong]], tuple[str, ...]]:
+        main_object: object
         flair_root = flair_signature_root()
         # Startup matchers tolerate missing assets; an explicit catalog is independent.
         # Dynamic angr boundary: loader objects expose backend-specific main object metadata.
@@ -550,8 +602,8 @@ def _detect_flair_metadata(
             entry_bytes = bytes(project.loader.memory.load(project.entry, 32))
         except Exception:
             entry_bytes = b""
-        code_labels: dict[int, str] = {}
-        code_ranges: dict[int, tuple[int, int]] = {}
+        code_labels: dict[cython.longlong, str] = {}
+        code_ranges: dict[cython.longlong, tuple[cython.longlong, cython.longlong]] = {}
         matched_compiler_names: list[str] = []
         source_parts: list[str] = []
 
@@ -589,7 +641,8 @@ def _detect_flair_metadata(
     return _impl()
 
 
-def _remember_compiler_8616(matched_compiler_names: list[str], name: str | None) -> None:
+@cython.ccall
+def _remember_compiler_8616(matched_compiler_names: object, name: object) -> None:
     if not name:
         return
     normalized = name.strip()
@@ -599,14 +652,20 @@ def _remember_compiler_8616(matched_compiler_names: list[str], name: str | None)
 
 def _merge_startup_flair_evidence_8616(
     project: angr.Project,
-    startup_matches: tuple[FlairStartupPattern, ...],
+    startup_matches: object,
     startup_pat_result: LocalPatMatchResult,
-    code_labels: dict[int, str],
-    code_ranges: dict[int, tuple[int, int]],
-    matched_compiler_names: list[str],
-    source_parts: list[str],
+    code_labels: object,
+    code_ranges: object,
+    matched_compiler_names: object,
+    source_parts: object,
 ) -> None:
     """Merge startup labels while retaining only matcher-proven body extents."""
+    addr: object
+    compiler_name: object
+    match: object
+    name: object
+    offset: object
+    span: object
     if startup_pat_result.code_labels or startup_pat_result.code_ranges:
         source_parts.append("startup_flair_pat")
         for compiler_name in startup_pat_result.matched_compiler_names:
@@ -625,21 +684,26 @@ def _merge_startup_flair_evidence_8616(
         # An entry-prefix match proves labels, not an arbitrary body extent.
     if startup_matches:
         # Dynamic angr boundary: project metadata is attached to the live angr project.
-        typing.cast(typing.Any, project)._inertia_flair_startup_matches = tuple(match.pat_path for match in startup_matches)
+        typing.cast(typing.Any, project)._inertia_flair_startup_matches = tuple(match.pat_path for match in iter(startup_matches))
         for match in startup_matches:
             _remember_compiler_8616(matched_compiler_names, match.compiler_tag)
 
 
+@cython.ccall
 def _merge_signature_catalog_8616(
     signature_catalog: Path,
     binary: Path,
     project: angr.Project,
-    pat_backend: str | None,
-    matched_compiler_names: list[str],
-    code_labels: dict[int, str],
-    code_ranges: dict[int, tuple[int, int]],
-    source_parts: list[str],
+    pat_backend: object,
+    matched_compiler_names: object,
+    code_labels: object,
+    code_ranges: object,
+    source_parts: object,
 ) -> None:
+    addr: object
+    compiler_name: object
+    name: object
+    span: object
     catalog_matches = match_signature_catalog(
         signature_catalog,
         binary,
@@ -659,11 +723,12 @@ def _merge_signature_catalog_8616(
 
 
 @lru_cache(maxsize=1)
-def _load_flair_startup_pat_modules(flair_root: str) -> tuple[CachedPatRegexSpec, ...]:
+def _load_flair_startup_pat_modules(flair_root: object) -> tuple[CachedPatRegexSpec, ...]:
+    pat_path: object
     root = Path(flair_root)
     cache_dir = _startup_pat_cache_dir(root / "startup")
     modules: list[CachedPatRegexSpec] = []
-    for pat_path in sorted((root / "startup").rglob("*.pat")):
+    for pat_path in sorted(tuple((root / "startup").rglob("*.pat"))):
         try:
             modules.extend(load_cached_pat_regex_specs(pat_path, cache_dir))
         except OSError:
@@ -671,6 +736,7 @@ def _load_flair_startup_pat_modules(flair_root: str) -> tuple[CachedPatRegexSpec
     return tuple(modules)
 
 
+@cython.ccall
 def _startup_pat_cache_dir(pat_root: Path) -> Path:
     preferred = pat_root / ".inertia_pat_cache"
     try:
@@ -685,12 +751,17 @@ def _startup_pat_cache_dir(pat_root: Path) -> Path:
         return fallback
 
 
+@cython.ccall
 def _match_flair_startup_pat_functions(
     project: angr.Project,
     flair_root: Path,
     *,
-    backend: str | None = None,
+    backend: object = None,
 ) -> LocalPatMatchResult:
+    main_object: object
+    max_addr: object
+    memory: object
+    min_addr: object
     # Dynamic angr boundary: loader objects expose backend-specific main object metadata.
     main_object = getattr(project.loader, "main_object", None)
     # Dynamic angr boundary: project loader memory is supplied by angr backends.
@@ -719,15 +790,19 @@ def _match_flair_startup_pat_functions(
     )
 
 
+@cython.ccall
 def _parse_mzre_map_metadata(
     map_path: Path,
     *,
-    load_base_linear: int,
-) -> tuple[dict[int, str], dict[int, str], dict[int, tuple[int, int]]]:
-    code_labels: dict[int, str] = {}
-    data_labels: dict[int, str] = {}
-    code_ranges: dict[int, tuple[int, int]] = {}
-    segment_paragraphs: dict[str, int] = {}
+    load_base_linear: cython.longlong,
+) -> tuple[dict[cython.longlong, str], dict[cython.longlong, str], dict[cython.longlong, tuple[cython.longlong, cython.longlong]]]:
+    routine_match: object
+    segment_match: object
+    line: object
+    code_labels: dict[cython.longlong, str] = {}
+    data_labels: dict[cython.longlong, str] = {}
+    code_ranges: dict[cython.longlong, tuple[cython.longlong, cython.longlong]] = {}
+    segment_paragraphs: dict[str, cython.longlong] = {}
     for line in map_path.read_text(errors="ignore").splitlines():
         stripped = line.strip()
         if not stripped:
@@ -750,12 +825,16 @@ def _parse_mzre_map_metadata(
     return code_labels, data_labels, code_ranges
 
 
+@cython.ccall
 def _synthesize_code_ranges(
-    code_labels: dict[int, str],
-    existing_ranges: dict[int, tuple[int, int]],
+    code_labels: object,
+    existing_ranges: object,
     *,
     image_end: int | None,
-) -> dict[int, tuple[int, int]]:
+) -> object:
+    next_start: object
+    index: object
+    start: object
     synthesized = dict(existing_ranges)
     ordered = sorted(code_labels)
     for index, start in enumerate(ordered):

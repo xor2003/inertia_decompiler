@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Structuring-owned condition materialization boundary.
 
 Layer: Structuring.
@@ -26,6 +27,8 @@ consumers are migrated, keep this API and replace the delegates.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -195,6 +198,9 @@ from .wide_stack_return_predicates import (
     wide_stack_return_predicate_materialized_8616,
 )
 from .wide_stack_single_branches import recover_wide_stack_single_body_condition_8616
+import dataclasses
+import operator
+import builtins
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -213,13 +219,14 @@ def materialize_condition_ir_expression_8616(
     must provide the exact typed condition selected from CFG ownership; this
     function performs no condition discovery or instruction decoding.
     """
+    value: object
     bound_condition = replace(
         condition,
         lhs=condition_operand_storage_binding_8616(condition, condition.lhs),
         rhs=condition_operand_storage_binding_8616(condition, condition.rhs),
     )
     projection_stats = []
-    projected_operands: dict[int, CExpression] = {}
+    projected_operands: dict[cython.longlong, CExpression] = {}
     for value in (bound_condition.lhs, bound_condition.rhs):
         if isinstance(value, IRValue):
             projection = materialize_same_block_register_projection_8616(
@@ -239,6 +246,7 @@ def materialize_condition_ir_expression_8616(
 
     def build_operand(value: object) -> object | None:
         """Use a proven view before attempting the general register binding."""
+        projected: object
         projected = projected_operands.get(id(value))
         if projected is not None:
             return cast(object, projected)
@@ -268,23 +276,23 @@ def materialize_condition_ir_expression_8616(
     return expression if isinstance(expression, CExpression) else None
 
 
-def _debug_condition_chain_8616(event: str, **fields: object) -> None:
+def _debug_condition_chain_8616(event: object, **fields: object) -> None:
     """Log one structuring condition-chain decision when diagnostics are enabled."""
     if os.environ.get("INERTIA_DEBUG_CONDITION_MATERIALIZATION") != "1":
         return
-    details = " ".join(f"{key}={value!r}" for key, value in sorted(fields.items()))
+    details = " ".join(f"{key}={value!r}" for key, value in builtins.iter(sorted(tuple(fields.items()))))
     log.warning("[condition-materialization] event=%s %s", event, details)
 
 
 class _ConditionMaterializationCodegen8616(Protocol):
     """Dynamic codegen metadata slots written by structuring condition materialization."""
 
-    _inertia_structuring_condition_materialization_8616: dict[str, object]
+    _inertia_structuring_condition_materialization_8616: object
     _inertia_structuring_condition_materialization_result_8616: StructuringConditionMaterializationResult8616
-    _inertia_structuring_condition_replay_cleanup_8616: dict[str, object]
-    _inertia_structuring_dead_flag_cleanup_8616: dict[str, object]
+    _inertia_structuring_condition_replay_cleanup_8616: object
+    _inertia_structuring_dead_flag_cleanup_8616: object
     _inertia_packed_flags_cycle_stats_8616: PackedFlagsCycleStats8616
-    _inertia_condition_materialization_structuring_pass_ran_8616: bool
+    _inertia_condition_materialization_structuring_pass_ran_8616: cython.bint
     _inertia_structuring_condition_chain_stats_8616: StructuringConditionChainStats8616
     _inertia_structuring_condition_evidence_closure_8616: ConditionEvidenceClosure8616
     _inertia_typed_loop_condition_stats_8616: LoopConditionMaterializationStats8616
@@ -293,9 +301,9 @@ class _ConditionMaterializationCodegen8616(Protocol):
     _inertia_terminal_loop_exit_condition_stats_8616: ExistingLoopExitStats8616
     _inertia_structured_condition_provenance_stats_8616: StructuredConditionProvenanceStats8616
     _inertia_same_block_condition_register_projection_stats_8616: SameBlockConditionRegisterProjectionStats8616
-    _inertia_multi_arm_return_chain_materialized_8616: bool
-    _inertia_multi_arm_return_expressions_8616: tuple[CExpression, ...]
-    _inertia_return_expr_chain_materialized_8616: bool
+    _inertia_multi_arm_return_chain_materialized_8616: cython.bint
+    _inertia_multi_arm_return_expressions_8616: object
+    _inertia_return_expr_chain_materialized_8616: cython.bint
     _inertia_total_return_suffix_prune_stats_8616: TotalReturnSuffixPruneStats8616
     _inertia_wide_call_return_guard_collapse_stats_8616: WideCallReturnGuardCollapseStats8616
     _inertia_call_execution_frame_carrier_stats_8616: CallExecutionFrameCarrierStats8616
@@ -307,14 +315,14 @@ class _ConditionMaterializationCodegen8616(Protocol):
 class _ConditionMaterializationProject8616(Protocol):
     """Project diagnostics written while condition consumers run."""
 
-    _inertia_decompiler_stage: str
+    _inertia_decompiler_stage: object
     kb: _ConditionMaterializationKnowledgeBase8616
 
 
 class _ConditionMaterializationCFunction8616(Protocol):
     """Dynamic angr CFunction fields consumed at the structuring boundary."""
 
-    addr: int
+    addr: cython.longlong
     statements: object
 
 
@@ -327,7 +335,7 @@ class _ConditionMaterializationKnowledgeBase8616(Protocol):
 class _ConditionMaterializationFunctionManager8616(Protocol):
     """Dynamic angr function lookup used by structuring condition chains."""
 
-    def function(self, *, addr: int, create: bool) -> object | None:
+    def function(self, *, addr: cython.longlong, create: cython.bint) -> object | None:
         """Return one function without creating it."""
 
 
@@ -335,19 +343,19 @@ class _ConditionMaterializationFunction8616(Protocol):
     """Dynamic angr Function fields consumed by CFG condition materialization."""
 
     transition_graph: object
-    block_addrs_set: set[int]
+    block_addrs_set: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SameBlockConditionRegisterProjectionStats8616:
     """Account for exact same-block subregister projections in conditions."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    changed_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    changed_count: cython.longlong = 0
 
 
 class _ConditionMaterializationGraph8616(Protocol):
@@ -362,48 +370,48 @@ class _ConditionMaterializationGraph8616(Protocol):
 class _ConditionMaterializationGraphNode8616(Protocol):
     """Dynamic angr CFG node address."""
 
-    addr: int
+    addr: cython.longlong
 
 
 class _ConditionMaterializationTaggedNode8616(Protocol):
     """Dynamic angr C-AST tag dictionary."""
 
-    tags: dict[str, object]
+    tags: object
 
 
 class _StructuredSubtreeEntryTagsBoundary8616(Protocol):
     """Typed boundary for immutable subtree-entry tag projections."""
 
     first_instruction_addr: int | None
-    block_addrs: tuple[int, ...]
+    block_addrs: object
     first_block_addr: int | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StructuringConditionChainStats8616:
     """Evidence accounting for CFG-proven short-circuit condition chains."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    preserved_side_effect_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    preserved_side_effect_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StructuringConditionMaterializationResult8616:
     """Structured result for condition materialization during structuring."""
 
-    typed_conditions_changed: bool
-    condition_chains_changed: bool
-    decoded_jcc_changed: bool
-    loop_conditions_changed: bool
-    segment_access_provenance_changed: bool
-    condition_evidence_complete: bool = True
+    typed_conditions_changed: cython.bint
+    condition_chains_changed: cython.bint
+    decoded_jcc_changed: cython.bint
+    loop_conditions_changed: cython.bint
+    segment_access_provenance_changed: cython.bint
+    condition_evidence_complete: cython.bint = True
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return True when any delegated materializer changed the AST."""
         return (
             self.typed_conditions_changed
@@ -414,19 +422,19 @@ class StructuringConditionMaterializationResult8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StructuringConditionReplayCleanupResult8616:
     """Structured result for late condition replay cleanup."""
 
     materialization: StructuringConditionMaterializationResult8616
-    flag_condition_pairs_changed: bool
-    flag_bit_values_changed: bool
-    interval_guards_changed: bool
-    unused_flag_assignments_pruned: bool
-    overwritten_flag_assignments_pruned: bool
+    flag_condition_pairs_changed: cython.bint
+    flag_bit_values_changed: cython.bint
+    interval_guards_changed: cython.bint
+    unused_flag_assignments_pruned: cython.bint
+    overwritten_flag_assignments_pruned: cython.bint
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return True when materialization or cleanup changed the AST."""
         return (
             self.materialization.changed
@@ -438,30 +446,31 @@ class StructuringConditionReplayCleanupResult8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StructuringDeadFlagCleanupResult8616:
     """Typed result for final proven-dead flag-assignment cleanup."""
 
-    overwritten_flag_assignments_pruned: bool
-    unused_flag_assignments_pruned: bool
+    overwritten_flag_assignments_pruned: cython.bint
+    unused_flag_assignments_pruned: cython.bint
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether the final Structuring cleanup changed the AST."""
         return self.overwritten_flag_assignments_pruned or self.unused_flag_assignments_pruned
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _AssignmentDiamond8616:
     """One CFG-proven conditional assignment diamond ready for structuring."""
 
     condition: CExpression
     true_assignment: CAssignment
     false_assignment: CAssignment
-    true_target: int
-    false_target: int
+    true_target: cython.longlong
+    false_target: cython.longlong
 
 
+@cython.ccall
 def _cfg_node_addr_8616(node: object) -> int | None:
     """Return one address from a dynamic angr CFG node."""
     if isinstance(node, int):
@@ -473,8 +482,10 @@ def _cfg_node_addr_8616(node: object) -> int | None:
         return None
 
 
-def condition_chain_successors_8616(project: object, codegen: object) -> dict[int, tuple[int, ...]]:
+def condition_chain_successors_8616(project: object, codegen: object) -> object:
     """Consume the authenticated function's in-region CFG, including private KBs."""
+    resolved: object
+    node: object
     from inertia.ir.vex_import import codegen_function_8616
 
     try:
@@ -486,7 +497,7 @@ def condition_chain_successors_8616(project: object, codegen: object) -> dict[in
         block_addrs = set(function.block_addrs_set)
     except (AttributeError, TypeError):
         return {}
-    successors: dict[int, tuple[int, ...]] = {}
+    successors: dict[cython.longlong, tuple[cython.longlong, ...]] = {}
     try:
         nodes = tuple(cast(Any, graph.nodes))
     except (AttributeError, TypeError):
@@ -498,7 +509,7 @@ def condition_chain_successors_8616(project: object, codegen: object) -> dict[in
         try:
             target_addrs = tuple(
                 target_addr
-                for successor in cast(Any, graph.successors(node))
+                for successor in builtins.iter(cast(Any, graph.successors(node)))
                 if (target_addr := _cfg_node_addr_8616(successor)) in block_addrs
             )
         except (AttributeError, TypeError):
@@ -507,6 +518,7 @@ def condition_chain_successors_8616(project: object, codegen: object) -> dict[in
     return successors
 
 
+@cython.ccall
 def _first_tagged_ins_addr_8616(node: object) -> int | None:
     """Return the first binary instruction tag in one structured C subtree."""
     return cast(
@@ -515,10 +527,11 @@ def _first_tagged_ins_addr_8616(node: object) -> int | None:
     ).first_instruction_addr
 
 
+@cython.ccall
 def _tagged_block_addrs_8616(
     node: object,
     session: StructuredSubtreeEntryTagQuerySession8616 | None = None,
-) -> tuple[int, ...]:
+) -> object:
     """Return every VEX block tag in one structured C subtree."""
     if session is not None:
         return cast(_StructuredSubtreeEntryTagsBoundary8616, session.current(node)).block_addrs
@@ -528,6 +541,7 @@ def _tagged_block_addrs_8616(
     ).block_addrs
 
 
+@cython.ccall
 def _first_tagged_block_addr_8616(node: object) -> int | None:
     """Return the first VEX block tag in one structured C subtree."""
     return cast(
@@ -536,6 +550,7 @@ def _first_tagged_block_addr_8616(node: object) -> int | None:
     ).first_block_addr
 
 
+@cython.ccall
 def _first_tagged_cfg_target_8616(node: object) -> int | None:
     """Return the first executed statement's exact CFG block identity.
 
@@ -543,6 +558,7 @@ def _first_tagged_cfg_target_8616(node: object) -> int | None:
     definition. Neither proves its entry, especially for backward dispatch.
     Keep subtree tag inventories for membership queries, not execution order.
     """
+    block: object
     # A tagged arm container retains its entry even after its body is folded
     # into a return. Do not replace that explicit identity with a child tag.
     block = _copied_condition_tags_8616(node).get("vex_block_addr")
@@ -551,21 +567,23 @@ def _first_tagged_cfg_target_8616(node: object) -> int | None:
     return first_statement_block_8616(node)
 
 
+@cython.ccall
 def _cfg_reaches_address_8616(
-    successors: dict[int, tuple[int, ...]],
-    start: int,
-    target: int,
+    successors: object,
+    start: cython.longlong,
+    target: cython.longlong,
     *,
     stop_at: int | None = None,
-) -> bool:
+) -> cython.bint:
     """Return whether a bounded CFG path reaches ``target`` before ``stop_at``."""
+    address: object
     pending = [start]
-    visited: set[int] = set()
+    visited: set[cython.longlong] = set()
     while pending and len(visited) < 64:
         address = pending.pop()
-        if address == target:
+        if operator.eq(address, target):
             return True
-        if address == stop_at:
+        if operator.eq(address, stop_at):
             continue
         if address in visited:
             continue
@@ -574,8 +592,13 @@ def _cfg_reaches_address_8616(
     return False
 
 
-def condition_key_from_tags_8616(node: object) -> tuple[int, int] | None:
+@cython.ccall
+def condition_key_from_tags_8616(node: object) -> object:
     """Return the first complete instruction/block tag pair in a C expression."""
+    block_addr: object
+    copied_tags: object
+    ins_addr: object
+    current: object
     for current in _iter_c_nodes_deep_8616(node):
         boundary = cast(_ConditionMaterializationTaggedNode8616, current)
         try:
@@ -592,31 +615,34 @@ def condition_key_from_tags_8616(node: object) -> tuple[int, int] | None:
     return None
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _ProjectionNodeDelta8616:
     """Stat deltas from projecting one comparison node."""
 
-    raw: int = 0
-    normalized: int = 0
-    classified: int = 0
-    materialized: int = 0
-    failure: int = 0
-    changed: int = 0
+    raw: cython.longlong = 0
+    normalized: cython.longlong = 0
+    classified: cython.longlong = 0
+    materialized: cython.longlong = 0
+    failure: cython.longlong = 0
+    changed: cython.longlong = 0
 
 
+@cython.ccall
 def _project_binary_condition_node_8616(
     node: CBinaryOp,
     condition: ConditionIR,
-    tags: dict[str, object],
+    tags: object,
     project: object,
     codegen: object,
     assignment_index: SameBlockRegisterAssignmentIndex8616 | None,
 ) -> _ProjectionNodeDelta8616:
     """Apply one matched condition's projections to a comparison node."""
+    side: object
+    value: object
     delta = _ProjectionNodeDelta8616()
     bound_lhs = condition_operand_storage_binding_8616(condition, condition.lhs)
     bound_rhs = condition_operand_storage_binding_8616(condition, condition.rhs)
-    if bound_lhs != condition.lhs or bound_rhs != condition.rhs:
+    if operator.ne(bound_lhs, condition.lhs) or operator.ne(bound_rhs, condition.rhs):
         lowered = materialize_condition_ir_expression_8616(
             project,
             codegen,
@@ -625,7 +651,7 @@ def _project_binary_condition_node_8616(
         )
         delta.raw += 1
         delta.normalized += 1
-        if not isinstance(lowered, CBinaryOp) or lowered.op != node.op:
+        if not isinstance(lowered, CBinaryOp) or operator.ne(lowered.op, node.op):
             delta.failure += 1
             return delta
         delta.classified += 1
@@ -676,12 +702,14 @@ def _project_binary_condition_node_8616(
     return delta
 
 
+@cython.ccall
 def _matching_conditions_for_node_8616(
     node: CBinaryOp,
-    conditions_by_key: dict[tuple[int, int], list[ConditionIR]],
-    conditions_by_block: dict[int, list[ConditionIR]],
+    conditions_by_key: object,
+    conditions_by_block: object,
 ) -> tuple[tuple[ConditionIR, ...], dict[str, object] | None]:
     """Return candidate conditions and tags for one comparison node."""
+    key: object
     if not str(node.op).startswith("Cmp"):
         return (), None
     tags = _copied_condition_tags_8616(node)
@@ -695,21 +723,25 @@ def _matching_conditions_for_node_8616(
     if key is None:
         return (), None
     matching = tuple(conditions_by_key.get(key, ()))
-    if not matching and key[0] == key[1]:
+    if not matching and operator.eq(key[0], key[1]):
         matching = tuple(conditions_by_block.get(key[1], ()))
     return matching, tags
 
 
+@cython.ccall
 def materialize_same_block_condition_register_projections_8616(
     root: object,
     project: object,
     codegen: object,
-    conditions: tuple[ConditionIR, ...],
+    conditions: object,
 ) -> SameBlockConditionRegisterProjectionStats8616:
     """Replay exact same-block register projections into typed comparisons."""
+    tags: object
+    condition: object
+    node: object
     assignment_index = build_same_block_register_assignment_index_8616(codegen)
-    conditions_by_key: dict[tuple[int, int], list[ConditionIR]] = {}
-    conditions_by_block: dict[int, list[ConditionIR]] = {}
+    conditions_by_key: dict[tuple[cython.longlong, cython.longlong], list[ConditionIR]] = {}
+    conditions_by_block: dict[cython.longlong, list[ConditionIR]] = {}
     for condition in conditions:
         if isinstance(condition.src_insn, int) and isinstance(condition.block_addr, int):
             conditions_by_key.setdefault(
@@ -720,7 +752,7 @@ def materialize_same_block_condition_register_projections_8616(
 
     raw_count = normalized_count = classified_count = 0
     materialized_count = failure_count = changed_count = 0
-    seen_nodes: set[int] = set()
+    seen_nodes: set[cython.longlong] = set()
     for node in _iter_c_nodes_deep_8616(root):
         if id(node) in seen_nodes or not isinstance(node, CBinaryOp):
             continue
@@ -736,7 +768,7 @@ def materialize_same_block_condition_register_projections_8616(
                 failure_count += 1
             continue
         condition = matching[0]
-        if node.op != condition_op_to_structured_kind_8616(condition.op):
+        if operator.ne(node.op, condition_op_to_structured_kind_8616(condition.op)):
             continue
         delta = _project_binary_condition_node_8616(
             node,
@@ -771,8 +803,11 @@ def materialize_same_block_condition_register_projections_8616(
     return stats
 
 
+@cython.ccall
 def _direct_tagged_ins_addr_8616(node: object) -> int | None:
     """Return the instruction tag owned directly by one structured node."""
+    copied_tags: object
+    ins_addr: object
     boundary = cast(_ConditionMaterializationTaggedNode8616, node)
     try:
         tags = boundary.tags
@@ -785,7 +820,8 @@ def _direct_tagged_ins_addr_8616(node: object) -> int | None:
     return ins_addr if isinstance(ins_addr, int) else None
 
 
-def _copied_condition_tags_8616(node: object) -> dict[str, object]:
+@cython.ccall
+def _copied_condition_tags_8616(node: object) -> object:
     """Copy C-expression tags at the dynamic angr boundary."""
     boundary = cast(_ConditionMaterializationTaggedNode8616, node)
     try:
@@ -795,10 +831,11 @@ def _copied_condition_tags_8616(node: object) -> dict[str, object]:
     return copy_structured_tags_8616(tags) or {}
 
 
+@cython.ccall
 def _condition_structure_token_8616(
     condition: object,
     *,
-    depth: int = 0,
+    depth: cython.longlong = 0,
 ) -> tuple[object, ...]:
     """Return a bounded identity-sensitive token for one structured condition."""
     if depth >= 8:
@@ -830,7 +867,8 @@ def _condition_structure_token_8616(
     return (type(condition).__name__, id(condition))
 
 
-def _condition_debug_tree_8616(condition: object, *, depth: int = 0) -> tuple[object, ...]:
+@cython.ccall
+def _condition_debug_tree_8616(condition: object, *, depth: cython.longlong = 0) -> tuple[object, ...]:
     """Return a bounded operator tree for opt-in condition diagnostics."""
     if depth >= 8:
         return ("depth-limit",)
@@ -853,8 +891,12 @@ def _condition_debug_tree_8616(condition: object, *, depth: int = 0) -> tuple[ob
     return (type(condition).__name__,)
 
 
+@cython.ccall
 def structuring_condition_surface_token_8616(codegen: object) -> tuple[tuple[object, ...], ...]:
     """Describe branch ownership so later AST mutation invalidates materialization."""
+    body: object
+    condition: object
+    node: object
     try:
         cfunc = cast(
             _ConditionMaterializationCFunction8616,
@@ -914,6 +956,7 @@ def structuring_condition_surface_token_8616(codegen: object) -> tuple[tuple[obj
     return tuple(surface)
 
 
+@cython.ccall
 def invert_structured_condition_8616(condition: CExpression, codegen: object) -> CExpression:
     """Invert one materialized comparison without recovering new semantics."""
     inverted_ops = {
@@ -934,6 +977,7 @@ def invert_structured_condition_8616(condition: CExpression, codegen: object) ->
     return result
 
 
+@cython.ccall
 def _combine_condition_outcomes_8616(
     condition: CExpression,
     taken: CExpression | bool,
@@ -976,22 +1020,23 @@ def _combine_condition_outcomes_8616(
     )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _CfgChainBuilder8616:
     """Cycle-guarded predicate builder over typed CFG conditions."""
 
     project: object
     codegen: object
-    conditions_by_block: dict[int, ConditionIR]
-    successors: dict[int, tuple[int, ...]]
-    true_target: int
-    false_target: int
+    conditions_by_block: object
+    successors: object
+    true_target: cython.longlong
+    false_target: cython.longlong
     assignment_index: SameBlockRegisterAssignmentIndex8616 | None
-    consumed_conditions: list[ConditionIR] = field(default_factory=list)
-    materialized_by_address: dict[int, CExpression | bool] = field(default_factory=dict)
-    active_addresses: set[int] = field(default_factory=set)
+    consumed_conditions: object = field(default_factory=list)
+    materialized_by_address: object = field(default_factory=dict)
+    active_addresses: object = field(default_factory=set)
 
-    def prove_wide_pair(self, high_value: IRValue, low_value: IRValue) -> bool:
+    @cython.ccall
+    def prove_wide_pair(self, high_value: IRValue, low_value: IRValue) -> cython.bint:
         """Prove one high/low stack pair lowers to a wide proven value."""
         high_expression = lower_ir_value_to_c_expr_8616(high_value, self.project, self.codegen)
         low_expression = lower_ir_value_to_c_expr_8616(low_value, self.project, self.codegen)
@@ -1002,11 +1047,16 @@ class _CfgChainBuilder8616:
             low_expression,
         ))
 
-    def build_from_address(self, address: int) -> CExpression | bool | None:
+    @cython.ccall
+    def build_from_address(self, address: cython.longlong) -> CExpression | bool | None:
         """Build one acyclic CFG suffix once and reuse its identical predicate."""
-        if address == self.true_target:
+        cached: object
+        condition: object
+        next_addrs: object
+        result: object
+        if operator.eq(address, self.true_target):
             return True
-        if address == self.false_target:
+        if operator.eq(address, self.false_target):
             return False
         cached = self.materialized_by_address.get(address)
         if cached is not None:
@@ -1040,8 +1090,13 @@ class _CfgChainBuilder8616:
             self.materialized_by_address[address] = result
         return result
 
+    @cython.ccall
     def _build_local_wide_8616(self, condition: ConditionIR) -> CExpression | bool | None:
         """Build the predicate for one locally proven wide chain."""
+        fallthrough: object
+        materialized_wide: object
+        taken: object
+        consumed: object
         local_wide = recover_local_wide_stack_condition_chain_8616(
             condition,
             self.conditions_by_block,
@@ -1071,7 +1126,7 @@ class _CfgChainBuilder8616:
         )
         consumed_addrs = {
             consumed.block_addr
-            for consumed in local_wide.consumed_conditions
+            for consumed in iter(local_wide.consumed_conditions)
             if isinstance(consumed.block_addr, int)
         }
         newly_active = consumed_addrs - self.active_addresses
@@ -1090,8 +1145,13 @@ class _CfgChainBuilder8616:
             self.codegen,
         )
 
+    @cython.ccall
     def build_from_condition(self, condition: ConditionIR) -> CExpression | bool | None:
         """Materialize one typed branch after its owning address is cycle-guarded."""
+        fallthrough: object
+        materialized: object
+        taken: object
+        wide_result: object
         if not isinstance(condition.taken_target, int) or not isinstance(condition.fallthrough_target, int):
             _debug_condition_chain_8616(
                 "cfg-chain-target-refused",
@@ -1136,21 +1196,23 @@ class _CfgChainBuilder8616:
 def _proven_call_chain_expression_8616(
     codegen: object,
     root_condition: ConditionIR,
-    conditions_by_block: dict[int, ConditionIR],
-    successors: dict[int, tuple[int, ...]],
-    true_target: int,
-    false_target: int,
+    conditions_by_block: object,
+    successors: object,
+    true_target: cython.longlong,
+    false_target: cython.longlong,
     *,
     condition_ssa: SSAFunctionArtifact | None,
-    required_conditions: tuple[ConditionIR, ...],
+    required_conditions: object,
 ) -> CExpression | None:
     """Build the proven wide-call predicate covering every required condition."""
+    call_expression: object
+    call_plan: object
     call_plan = plan_wide_call_condition_8616(
         root_condition, conditions_by_block, successors, true_target, false_target,
         artifact=condition_ssa,
     )
     if call_plan is None or not all(
-        condition in call_plan.conditions for condition in required_conditions
+        condition in call_plan.conditions for condition in iter(required_conditions)
     ):
         return None
     call_expression = build_proven_wide_call_condition_8616(
@@ -1166,14 +1228,16 @@ def _materialize_cfg_condition_chain_expr_8616(
     project: object,
     codegen: object,
     root_condition: ConditionIR,
-    conditions_by_block: dict[int, ConditionIR],
-    successors: dict[int, tuple[int, ...]],
-    true_target: int,
-    false_target: int,
+    conditions_by_block: object,
+    successors: object,
+    true_target: cython.longlong,
+    false_target: cython.longlong,
     *,
-    required_conditions: tuple[ConditionIR, ...] = (),
+    required_conditions: object = (),
 ) -> CExpression | None:
     """Materialize one target-directed predicate from typed conditions and CFG."""
+    call_expression: object
+    wide_expression: object
     metadata = cast(_ConditionMaterializationCodegen8616, codegen)
     try:
         function_addr = cast(_ConditionMaterializationCFunction8616, metadata.cfunc).addr
@@ -1248,13 +1312,13 @@ def _materialize_cfg_condition_chain_expr_8616(
         return None
     consumed_conditions = builder.consumed_conditions
     if any(
-        all(consumed is not required for consumed in consumed_conditions)
-        for required in required_conditions
+        all(consumed is not required for consumed in iter(consumed_conditions))
+        for required in iter(required_conditions)
     ):
         _debug_condition_chain_8616(
             "cfg-chain-required-condition-refused",
-            consumed_sources=tuple(condition.src_insn for condition in consumed_conditions),
-            required_sources=tuple(condition.src_insn for condition in required_conditions),
+            consumed_sources=tuple(condition.src_insn for condition in iter(consumed_conditions)),
+            required_sources=tuple(condition.src_insn for condition in iter(required_conditions)),
         )
         return None
     lowering = lower_call_output_stack_fields_in_condition_8616(codegen, result, tuple(consumed_conditions))
@@ -1265,8 +1329,10 @@ def _materialize_cfg_condition_chain_expr_8616(
     return lowering.expression
 
 
+@cython.ccall
 def _tagged_statement_block_addr_8616(node: object) -> int | None:
     """Return the exact CFG block tag attached to one structured statement."""
+    value: object
     boundary = cast(_ConditionMaterializationTaggedNode8616, node)
     try:
         value = boundary.tags.get("vex_block_addr")
@@ -1278,9 +1344,11 @@ def _tagged_statement_block_addr_8616(node: object) -> int | None:
 def _assignment_diamond_nested_conditions_8616(
     node: CIfElse,
     root_condition: ConditionIR,
-    conditions_by_src: dict[int, ConditionIR],
-) -> tuple[ConditionIR, ...] | None:
+    conditions_by_src: object,
+) -> object:
     """Collect every typed guard represented by one nested conditional subtree."""
+    condition: object
+    current: object
     conditions: list[ConditionIR] = [root_condition]
     for current in _iter_c_nodes_deep_8616(node):
         if not isinstance(current, CIfElse) or current is node:
@@ -1289,17 +1357,18 @@ def _assignment_diamond_nested_conditions_8616(
         condition = conditions_by_src.get(source) if isinstance(source, int) else None
         if condition is None:
             return None
-        if all(existing is not condition for existing in conditions):
+        if all(existing is not condition for existing in iter(conditions)):
             conditions.append(condition)
     return tuple(conditions) if len(conditions) > 1 else None
 
 
+@cython.ccall
 def _diamond_scaffolding_node_ok_8616(
     current: object,
-    leaf_ids: set[int],
-    condition_blocks: frozenset[int],
-    leaf_targets: frozenset[int],
-) -> bool:
+    leaf_ids: object,
+    condition_blocks: object,
+    leaf_targets: object,
+) -> cython.bint:
     """Check whether one discarded node is pure control scaffolding."""
     if isinstance(current, CFunctionCall):
         return False
@@ -1315,15 +1384,17 @@ def _diamond_scaffolding_node_ok_8616(
     return not isinstance(current, CStatement) or isinstance(current, (CIfElse, CStatements))
 
 
+@cython.ccall
 def _assignment_diamond_scaffolding_is_safe_8616(
     node: CIfElse,
     *,
-    condition_blocks: frozenset[int],
-    leaf_assignments: tuple[CAssignment, CAssignment],
-    leaf_targets: frozenset[int],
-) -> bool:
+    condition_blocks: object,
+    leaf_assignments: object,
+    leaf_targets: object,
+) -> cython.bint:
     """Refuse a malformed diamond unless discarded nodes are control-only scaffolding."""
-    leaf_ids = {id(assignment) for assignment in leaf_assignments}
+    current: object
+    leaf_ids = {id(assignment) for assignment in iter(leaf_assignments)}
     for current in _iter_c_nodes_deep_8616(node):
         if not _diamond_scaffolding_node_ok_8616(
             current, leaf_ids, condition_blocks, leaf_targets
@@ -1337,11 +1408,15 @@ def _materialize_cfg_assignment_diamond_8616(
     codegen: object,
     node: CIfElse,
     root_condition: ConditionIR,
-    conditions_by_src: dict[int, ConditionIR],
-    conditions_by_block: dict[int, ConditionIR],
-    successors: dict[int, tuple[int, ...]],
+    conditions_by_src: object,
+    conditions_by_block: object,
+    successors: object,
 ) -> _AssignmentDiamond8616 | None:
     """Collapse one nested-goto assignment diamond from typed CFG evidence."""
+    false_successors: object
+    replacement: object
+    required_conditions: object
+    true_successors: object
     required_conditions = _assignment_diamond_nested_conditions_8616(
         node,
         root_condition,
@@ -1351,12 +1426,12 @@ def _materialize_cfg_assignment_diamond_8616(
         return None
     condition_blocks = frozenset(
         condition.block_addr
-        for condition in required_conditions
+        for condition in iter(required_conditions)
         if isinstance(condition.block_addr, int)
     )
     leaf_candidates = tuple(
         (block_addr, current)
-        for current in _iter_c_nodes_deep_8616(node)
+        for current in builtins.iter(_iter_c_nodes_deep_8616(node))
         if isinstance(current, CAssignment)
         and isinstance(block_addr := _tagged_statement_block_addr_8616(current), int)
         and block_addr not in condition_blocks
@@ -1375,7 +1450,7 @@ def _materialize_cfg_assignment_diamond_8616(
     if (
         len(true_successors) != 1
         or len(false_successors) != 1
-        or true_successors[0] != false_successors[0]
+        or operator.ne(true_successors[0], false_successors[0])
     ):
         return None
     root_block = root_condition.block_addr
@@ -1415,20 +1490,23 @@ def _materialize_cfg_assignment_diamond_8616(
     )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _SharedBodyBuilder8616:
     """Cycle-guarded builder for shared-body condition-chain predicates."""
 
     project: object
     codegen: object
-    conditions_by_block: dict[int, ConditionIR]
-    successors: dict[int, tuple[int, ...]]
-    body_target: int
-    consumed_conditions: list[ConditionIR] = field(default_factory=list)
+    conditions_by_block: object
+    successors: object
+    body_target: cython.longlong
+    consumed_conditions: object = field(default_factory=list)
 
-    def build_from_address(self, address: int, visited: frozenset[int]) -> CExpression | bool | None:
+    @cython.ccall
+    def build_from_address(self, address: cython.longlong, visited: object) -> CExpression | bool | None:
         """Build the predicate for one CFG address inside the visited bound."""
-        if address == self.body_target:
+        condition: object
+        next_addrs: object
+        if operator.eq(address, self.body_target):
             return True
         if address in visited or len(visited) >= 24:
             return False
@@ -1443,12 +1521,14 @@ class _SharedBodyBuilder8616:
         return self.build_from_address(next_addrs[0], visited | {address})
 
     def build_from_condition(
-        self, condition: ConditionIR, visited: frozenset[int]
+        self, condition: ConditionIR, visited: object
     ) -> CExpression | bool | None:
         """Materialize one typed branch and its two outcome predicates."""
+        fallthrough: object
+        taken: object
         if not isinstance(condition.taken_target, int) or not isinstance(condition.fallthrough_target, int):
             return None
-        if all(existing is not condition for existing in self.consumed_conditions):
+        if all(existing is not condition for existing in iter(self.consumed_conditions)):
             self.consumed_conditions.append(condition)
         materialized = materialize_condition_ir_expression_8616(self.project, self.codegen, condition)
         if not isinstance(materialized, CExpression):
@@ -1464,10 +1544,10 @@ def _materialize_cfg_shared_body_condition_chain_expr_8616(
     project: object,
     codegen: object,
     root_condition: ConditionIR,
-    required_conditions: tuple[ConditionIR, ...],
-    conditions_by_block: dict[int, ConditionIR],
-    successors: dict[int, tuple[int, ...]],
-    body_target: int,
+    required_conditions: object,
+    conditions_by_block: object,
+    successors: object,
+    body_target: cython.longlong,
 ) -> CExpression | None:
     """Build the predicate that reaches one body before repeating the condition chain.
 
@@ -1492,8 +1572,8 @@ def _materialize_cfg_shared_body_condition_chain_expr_8616(
         return None
     consumed_conditions = builder.consumed_conditions
     if any(
-        all(consumed is not required for consumed in consumed_conditions)
-        for required in required_conditions
+        all(consumed is not required for consumed in iter(consumed_conditions))
+        for required in iter(required_conditions)
     ):
         return None
     _debug_condition_chain_8616(
@@ -1507,9 +1587,9 @@ def _materialize_cfg_shared_body_condition_chain_expr_8616(
                 condition.taken_target,
                 condition.fallthrough_target,
             )
-            for condition in consumed_conditions
+            for condition in iter(consumed_conditions)
         ),
-        consumed_sources=tuple(condition.src_insn for condition in consumed_conditions),
+        consumed_sources=tuple(condition.src_insn for condition in iter(consumed_conditions)),
         expression_tree=_condition_debug_tree_8616(result),
     )
     # The CFG shape is owned here; the typed DX:AX join remains Lowering-owned.
@@ -1550,10 +1630,13 @@ def _materialize_cfg_shared_body_condition_chain_expr_8616(
 
 
 def _shared_body_target_8616(
-    condition_and_nodes: tuple[tuple[object, object], ...],
+    condition_and_nodes: object,
 ) -> int | None:
     """Return one exact CFG entry shared by every structured branch body."""
-    targets: list[int] = []
+    target: object
+    _condition: object
+    body: object
+    targets: list[cython.longlong] = []
     for _condition, body in condition_and_nodes:
         target = _first_tagged_block_addr_8616(body)
         if target is None:
@@ -1561,16 +1644,17 @@ def _shared_body_target_8616(
         if target is None:
             return None
         targets.append(target)
-    return targets[0] if targets and all(target == targets[0] for target in targets) else None
+    return targets[0] if targets and all(operator.eq(target, targets[0]) for target in iter(targets)) else None
 
 
 def _return_exit_classifier_8616(
-    exit_expressions: dict[int, CExpression | None],
+    exit_expressions: object,
 ) -> Callable[[int, CExpression], bool | None]:
     """Return a target classifier bound to recovered exit expressions."""
 
-    def classify_return_exit(target: int, candidate: CExpression) -> bool | None:
+    def classify_return_exit(target: cython.longlong, candidate: CExpression) -> bool | None:
         """Classify one target against the active return candidate."""
+        recovered: object
         recovered = exit_expressions.get(target)
         if recovered is None:
             return None
@@ -1579,7 +1663,8 @@ def _return_exit_classifier_8616(
     return classify_return_exit
 
 
-def _prove_wide_pair_8616(project: object, codegen: object, high_value: IRValue, low_value: IRValue) -> bool:
+@cython.ccall
+def _prove_wide_pair_8616(project: object, codegen: object, high_value: IRValue, low_value: IRValue) -> cython.bint:
     """Require active stack-object evidence for one high/low pair."""
     high_expression = lower_ir_value_to_c_expr_8616(high_value, project, codegen)
     low_expression = lower_ir_value_to_c_expr_8616(low_value, project, codegen)
@@ -1590,7 +1675,7 @@ def _prove_wide_pair_8616(project: object, codegen: object, high_value: IRValue,
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _SingleReturnProof8616:
     """Outcome of return-orientation proof: materialized expression or polarity."""
 
@@ -1602,18 +1687,19 @@ def _single_return_proofs_8616(
     project: object,
     codegen: object,
     condition: ConditionIR,
-    candidate_returns: list[CExpression],
-    exit_expressions: dict[int, CExpression | None],
-    conditions_by_block: dict[int, ConditionIR],
-    successors: dict[int, tuple[int, ...]],
+    candidate_returns: object,
+    exit_expressions: object,
+    conditions_by_block: object,
+    successors: object,
     root_orientation: bool | None,
-) -> list[tuple[ConditionIR, CExpression]]:
+) -> object:
     """Collect the unique wide-chain proofs matching return candidates."""
+    candidate_return: object
     classify_return_exit = _return_exit_classifier_8616(exit_expressions)
     proofs: list[tuple[ConditionIR, CExpression]] = []
     for candidate_return in candidate_returns:
 
-        def classify_bound_exit_8616(target: int, candidate: CExpression = candidate_return) -> bool | None:
+        def classify_bound_exit_8616(target: cython.longlong, candidate: CExpression = candidate_return) -> bool | None:
             """Classify one target against the bound return candidate."""
             return classify_return_exit(target, candidate)
 
@@ -1633,14 +1719,16 @@ def _single_return_proofs_8616(
 def _collect_return_exit_candidates_8616(
     project: object,
     codegen: object,
-    successors: dict[int, tuple[int, ...]],
-    expected_return: CExpression | None,
-) -> tuple[dict[int, CExpression | None], list[CExpression], tuple[CExpression, ...]]:
+    successors: object,
+    expected_return: object,
+) -> tuple[dict[cython.longlong, CExpression | None], list[CExpression], tuple[CExpression, ...]]:
     """Recover per-target return expressions and unique return candidates."""
-    exit_expressions: dict[int, CExpression | None] = {}
+    recovered: object
+    target: object
+    exit_expressions: dict[cython.longlong, CExpression | None] = {}
     candidate_returns: list[CExpression] = []
     cfg_addresses = set(successors)
-    cfg_addresses.update(target for targets in successors.values() for target in targets)
+    cfg_addresses.update(target for targets in builtins.iter(successors.values()) for target in iter(targets))
     for target in sorted(cfg_addresses):
         recovered = recover_branch_target_return_expression_8616(
             project, codegen, target
@@ -1648,14 +1736,14 @@ def _collect_return_exit_candidates_8616(
         exit_expressions[target] = recovered
         if recovered is not None and not any(
             _same_c_expression_8616(recovered, existing)
-            for existing in candidate_returns
+            for existing in iter(candidate_returns)
         ):
             candidate_returns.append(recovered)
     recovered_returns = tuple(candidate_returns)
     if expected_return is not None:
         candidate_returns = [
             candidate
-            for candidate in candidate_returns
+            for candidate in iter(candidate_returns)
             if _same_c_expression_8616(candidate, expected_return)
         ]
     return exit_expressions, candidate_returns, recovered_returns
@@ -1667,12 +1755,14 @@ def _proven_single_return_orientation_8616(
     condition: ConditionIR,
     structured_condition: CExpression,
     body_return: CReturn,
-    expected_return: CExpression | None,
-    conditions_by_block: dict[int, ConditionIR],
-    successors: dict[int, tuple[int, ...]],
-    materialize_return: bool,
+    expected_return: object,
+    conditions_by_block: object,
+    successors: object,
+    materialize_return: cython.bint,
 ) -> _SingleReturnProof8616:
     """Prove branch orientation from recovered per-target return expressions."""
+    materialized_wide: object
+    root_expression: object
     root_expression = materialize_condition_ir_expression_8616(project, codegen, condition)
     root_orientation: bool | None = None
     if root_expression is not None:
@@ -1701,7 +1791,7 @@ def _proven_single_return_orientation_8616(
         "single-return-wide-proof",
         exit_tokens=tuple(
             (target, _condition_structure_token_8616(expression))
-            for target, expression in sorted(exit_expressions.items())
+            for target, expression in builtins.iter(sorted(tuple(exit_expressions.items())))
             if expression is not None
         ),
         expected_token=(
@@ -1756,16 +1846,18 @@ def _proven_single_return_orientation_8616(
     return _SingleReturnProof8616(orientation=orientation_evidence.orientation.as_taken_polarity())
 
 
+@cython.ccall
 def _single_branch_early_expr_8616(
     project: object,
     codegen: object,
     condition: ConditionIR,
     body: object,
-    continuation: int | None,
-    conditions_by_block: dict[int, ConditionIR],
-    successors: dict[int, tuple[int, ...]],
+    continuation: object,
+    conditions_by_block: object,
+    successors: object,
 ) -> CExpression | None:
     """Try goto-polarity and local-region proofs before orientation analysis."""
+    early: object
     artifact = None
     if continuation is not None:
         metadata = cast(_ConditionMaterializationCodegen8616, codegen)
@@ -1782,6 +1874,7 @@ def _single_branch_early_expr_8616(
     )
 
 
+@cython.ccall
 def _single_branch_goto_polarity_expr_8616(
     project: object,
     codegen: object,
@@ -1789,9 +1882,11 @@ def _single_branch_goto_polarity_expr_8616(
     body: object,
     artifact: SSAFunctionArtifact | None,
     continuation: int | None,
-    successors: dict[int, tuple[int, ...]],
+    successors: object,
 ) -> CExpression | None:
     """Materialize the branch when a conditional-goto polarity is proven."""
+    goto_polarity: object
+    replacement: object
     goto_polarity = conditional_goto_polarity_8616(body, artifact, condition, continuation, successors)
     if goto_polarity is None:
         return None
@@ -1801,17 +1896,21 @@ def _single_branch_goto_polarity_expr_8616(
     return replacement if goto_polarity else invert_structured_condition_8616(replacement, codegen)
 
 
+@cython.ccall
 def _single_branch_region_expr_8616(
     project: object,
     codegen: object,
     condition: ConditionIR,
     body: object,
     artifact: SSAFunctionArtifact | None,
-    continuation: int | None,
-    conditions_by_block: dict[int, ConditionIR],
-    successors: dict[int, tuple[int, ...]],
+    continuation: object,
+    conditions_by_block: object,
+    successors: object,
 ) -> CExpression | None:
     """Materialize the branch when a local condition region is proven."""
+    body_target: object
+    region: object
+    replacement: object
     body_target = first_statement_block_8616(body)
     if continuation is None or body_target is None:
         return None
@@ -1830,18 +1929,21 @@ def _single_branch_region_expr_8616(
     return replacement
 
 
+@cython.ccall
 def _single_branch_body_chain_expr_8616(
     project: object,
     codegen: object,
     condition: ConditionIR,
     body: object,
-    orientation: bool,
+    orientation: cython.bint,
     body_orientation: bool | None,
     false_target: int | None,
-    conditions_by_block: dict[int, ConditionIR],
-    successors: dict[int, tuple[int, ...]],
+    conditions_by_block: object,
+    successors: object,
 ) -> tuple[CExpression | None, int | None]:
     """Extend the true-target chain through the structured body on match."""
+    body_target: object
+    replacement: object
     if body_orientation != orientation or not isinstance(false_target, int):
         return None, None
     for body_target in (
@@ -1850,13 +1952,12 @@ def _single_branch_body_chain_expr_8616(
     ):
         if (
             body_target is None
-            or body_target == condition.block_addr
-            or _single_branch_orientation_8616(
+            or operator.eq(body_target, condition.block_addr)
+            or operator.ne(_single_branch_orientation_8616(
                 condition,
                 body_target,
                 successors,
-            )
-            != orientation
+            ), orientation)
         ):
             continue
         replacement = _materialize_cfg_condition_chain_expr_8616(
@@ -1873,8 +1974,10 @@ def _single_branch_body_chain_expr_8616(
     return None, None
 
 
-def _strict_sim_type_identity_8616(lhs: object, rhs: object) -> bool:
+@cython.ccall
+def _strict_sim_type_identity_8616(lhs: object, rhs: object) -> cython.bint:
     """Compare SimType width and signedness across the dynamic angr boundary."""
+    left_size: object
     if lhs is rhs:
         return True
     if not isinstance(lhs, SimType) or not isinstance(rhs, SimType) or type(lhs) is not type(rhs):
@@ -1884,10 +1987,11 @@ def _strict_sim_type_identity_8616(lhs: object, rhs: object) -> bool:
     except ValueError:
         # angr cannot resolve architecture-dependent C widths before binding.
         return False
-    return left_size is not None and left_size == right_size and lhs == rhs
+    return left_size is not None and operator.eq(left_size, right_size) and lhs == rhs
 
 
-def _strict_guard_variable_identity_8616(lhs: CVariable, rhs: CVariable) -> bool:
+@cython.ccall
+def _strict_guard_variable_identity_8616(lhs: CVariable, rhs: CVariable) -> cython.bint:
     """Require one captured value identity, not a physical-register spelling."""
     if not _strict_sim_type_identity_8616(lhs.variable_type, rhs.variable_type):
         return False
@@ -1904,30 +2008,31 @@ def _strict_guard_variable_identity_8616(lhs: CVariable, rhs: CVariable) -> bool
     if isinstance(lvar, SimRegisterVariable):
         rhs_register = cast(SimRegisterVariable, rvar)
         return bool(
-            lvar.reg == rhs_register.reg
-            and lvar.size == rhs_register.size
-            and lvar.region == rhs_register.region
+            operator.eq(lvar.reg, rhs_register.reg)
+            and operator.eq(lvar.size, rhs_register.size)
+            and operator.eq(lvar.region, rhs_register.region)
             and lvar.ident is not None
-            and lvar.ident == rhs_register.ident
+            and operator.eq(lvar.ident, rhs_register.ident)
         )
     if isinstance(lvar, SimStackVariable):
         rhs_stack = cast(SimStackVariable, rvar)
         return bool(
-            lvar.offset == rhs_stack.offset and lvar.size == rhs_stack.size
-            and lvar.base == rhs_stack.base and lvar.region == rhs_stack.region
-            and lvar.ident is not None and lvar.ident == rhs_stack.ident
+            operator.eq(lvar.offset, rhs_stack.offset) and operator.eq(lvar.size, rhs_stack.size)
+            and operator.eq(lvar.base, rhs_stack.base) and operator.eq(lvar.region, rhs_stack.region)
+            and lvar.ident is not None and operator.eq(lvar.ident, rhs_stack.ident)
         )
     if isinstance(lvar, SimMemoryVariable):
         rhs_memory = cast(SimMemoryVariable, rvar)
         return bool(
-            lvar.addr == rhs_memory.addr and lvar.size == rhs_memory.size
-            and lvar.region == rhs_memory.region
-            and lvar.ident is not None and lvar.ident == rhs_memory.ident
+            operator.eq(lvar.addr, rhs_memory.addr) and operator.eq(lvar.size, rhs_memory.size)
+            and operator.eq(lvar.region, rhs_memory.region)
+            and lvar.ident is not None and operator.eq(lvar.ident, rhs_memory.ident)
         )
     return False
 
 
-def _strict_guard_expression_identity_8616(lhs: object, rhs: object) -> bool:
+@cython.ccall
+def _strict_guard_expression_identity_8616(lhs: object, rhs: object) -> cython.bint:
     """Compare guard expressions with exact capture, cast and width identity."""
     if type(lhs) is not type(rhs):
         return False
@@ -1940,13 +2045,13 @@ def _strict_guard_expression_identity_8616(lhs: object, rhs: object) -> bool:
         )
     if isinstance(lhs, CUnaryOp):
         rhs_unary = cast(CUnaryOp, rhs)
-        return lhs.op == rhs_unary.op and _strict_guard_expression_identity_8616(
+        return operator.eq(lhs.op, rhs_unary.op) and _strict_guard_expression_identity_8616(
             lhs.operand, rhs_unary.operand
         )
     if isinstance(lhs, CBinaryOp):
         rhs_binary = cast(CBinaryOp, rhs)
         return (
-            lhs.op == rhs_binary.op
+            operator.eq(lhs.op, rhs_binary.op)
             and _strict_guard_expression_identity_8616(lhs.lhs, rhs_binary.lhs)
             and _strict_guard_expression_identity_8616(lhs.rhs, rhs_binary.rhs)
         )
@@ -1966,21 +2071,22 @@ def _strict_guard_expression_identity_8616(lhs: object, rhs: object) -> bool:
         return _strict_guard_variable_identity_8616(lhs, cast(CVariable, rhs))
     if isinstance(lhs, CConstant):
         rhs_constant = cast(CConstant, rhs)
-        return lhs.value == rhs_constant.value and _strict_sim_type_identity_8616(
+        return operator.eq(lhs.value, rhs_constant.value) and _strict_sim_type_identity_8616(
             lhs.type, rhs_constant.type
         )
     # Distinct calls/dirty nodes can read different state despite equal syntax.
     return lhs is rhs
 
 
+@cython.ccall
 def _shared_guard_identity_orientation_8616(
     project: object,
     codegen: object,
     condition: ConditionIR,
     structured_condition: CExpression,
     body: object,
-    conditions_by_block: dict[int, ConditionIR],
-    successors: dict[int, tuple[int, ...]],
+    conditions_by_block: object,
+    successors: object,
 ) -> bool | None:
     """Orient one branch from strict guard identity and corroborated edges.
 
@@ -1992,6 +2098,7 @@ def _shared_guard_identity_orientation_8616(
     vetoes evidence from other domains, since body tags can be stale. Guard
     identity alone never claims exclusive ownership of a shared return target.
     """
+    root_expression: object
     taken = condition.taken_target
     fallthrough = condition.fallthrough_target
     if (
@@ -2008,7 +2115,7 @@ def _shared_guard_identity_orientation_8616(
         structured_condition, codegen
     )
     owner_addr = _direct_tagged_ins_addr_8616(normalized)
-    if not isinstance(owner_addr, int) or owner_addr != condition.src_insn:
+    if not isinstance(owner_addr, int) or operator.ne(owner_addr, condition.src_insn):
         return None
     root_expression = materialize_condition_ir_expression_8616(
         project, codegen, condition
@@ -2027,10 +2134,10 @@ def _shared_guard_identity_orientation_8616(
     false_target = fallthrough if claimed else taken
     body_targets = {
         target
-        for target in (
+        for target in iter((
             _first_tagged_ins_addr_8616(body),
             _first_tagged_block_addr_8616(body),
-        )
+        ))
         if target is not None
     }
     if (
@@ -2046,26 +2153,35 @@ def _shared_guard_identity_orientation_8616(
     return claimed
 
 
+@cython.ccall
 def _materialize_cfg_single_branch_expr_8616(
     project: object,
     codegen: object,
     condition: ConditionIR,
     structured_condition: CExpression,
     body: object,
-    conditions_by_block: dict[int, ConditionIR],
-    successors: dict[int, tuple[int, ...]],
+    conditions_by_block: object,
+    successors: object,
     *,
-    materialize_return: bool = True,
+    materialize_return: cython.bint = True,
     continuation: int | None = None,
 ) -> CExpression | None:
     """Orient one no-else branch from typed targets and exclusive CFG reachability."""
+    body_return: object
+    chained_target: object
+    early: object
+    expected_return: object
+    guard_orientation: object
+    orientation: object
+    proven_return_orientation: object
+    replacement: object
     early = _single_branch_early_expr_8616(
         project, codegen, condition, body, continuation,
         conditions_by_block, successors,
     )
     if early is not None:
         return early
-    proven_return_orientation: bool | None = None
+    proven_return_orientation = None
     body_return = sole_return_statement_8616(body)
     expected_return = sole_return_expression_8616(body)
     if body_return is not None and (expected_return is not None or body_return.retval is None):
@@ -2102,7 +2218,7 @@ def _materialize_cfg_single_branch_expr_8616(
         conditions_by_block,
         successors,
     )
-    if guard_orientation is not None and orientation is not None and orientation != guard_orientation:
+    if guard_orientation is not None and orientation is not None and operator.ne(orientation, guard_orientation):
         return None
     orientation = guard_orientation if guard_orientation is not None else orientation
     if orientation is None:
@@ -2138,13 +2254,14 @@ def _single_branch_fallback_expr_8616(
     codegen: object,
     condition: ConditionIR,
     structured_condition: CExpression,
-    orientation: bool,
+    orientation: cython.bint,
 ) -> CExpression | None:
     """Materialize the lone root guard when no body chain was proven."""
+    materialized: object
     # Root-edge orientation does not prove every guard in a compound body.
     if any(
         isinstance(node, CBinaryOp) and node.op in {"LogicalAnd", "LogicalOr"}
-        for node in _iter_c_nodes_deep_8616(structured_condition)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(structured_condition))
     ):
         return None
     materialized = materialize_condition_ir_expression_8616(
@@ -2166,10 +2283,11 @@ def _single_branch_fallback_expr_8616(
     ).expression
 
 
+@cython.ccall
 def _single_branch_orientation_8616(
     condition: ConditionIR,
-    body_target: int,
-    successors: dict[int, tuple[int, ...]],
+    body_target: cython.longlong,
+    successors: object,
 ) -> bool | None:
     """Return whether the taken side uniquely owns one structured body."""
     direct_orientation = classify_direct_or_one_hop_target_orientation_8616(
@@ -2198,12 +2316,16 @@ def _single_branch_orientation_8616(
     return taken_reaches
 
 
+@cython.ccall
 def _single_branch_body_orientation_8616(
     condition: ConditionIR,
     body: object,
-    successors: dict[int, tuple[int, ...]],
+    successors: object,
 ) -> bool | None:
     """Resolve body ownership; loop-jump origins cannot prove their destinations."""
+    broad_target: object
+    exact_target: object
+    orientation: object
     terminal = body
     while isinstance(terminal, CStatements) and len(terminal.statements) == 1:
         terminal = terminal.statements[0]
@@ -2216,39 +2338,39 @@ def _single_branch_body_orientation_8616(
         if orientation is not None:
             return orientation
     broad_target = _first_tagged_block_addr_8616(body)
-    if broad_target is None or broad_target == exact_target:
+    if broad_target is None or operator.eq(broad_target, exact_target):
         return None
     return _single_branch_orientation_8616(condition, broad_target, successors)
 
 
 def _select_single_branch_condition_8616(
-    preferred: ConditionIR | None,
-    conditions: tuple[ConditionIR, ...],
+    preferred: object,
+    conditions: object,
     body: object,
-    successors: dict[int, tuple[int, ...]],
+    successors: object,
 ) -> ConditionIR | None:
     """Preserve a tagged owner, or infer one from exclusive CFG body ownership."""
     if preferred is not None:
         return preferred
     owners = tuple(
         condition
-        for condition in conditions
+        for condition in iter(conditions)
         if _single_branch_body_orientation_8616(condition, body, successors) is not None
     )
     return owners[0] if len(owners) == 1 else None
 
 
 def _wide_condition_chain_cfg_connected_8616(
-    chain: tuple[ConditionIR, ConditionIR, ConditionIR],
-    successors: dict[int, tuple[int, ...]],
-) -> bool:
+    chain: object,
+    successors: object,
+) -> cython.bint:
     """Return whether each typed wide-condition stage reaches the next stage."""
 
-    def reaches_next(condition: ConditionIR, target_block: int) -> bool:
+    def reaches_next(condition: ConditionIR, target_block: cython.longlong) -> cython.bint:
         """Check both explicit condition outcomes for bounded CFG reachability."""
         return any(
             _cfg_reaches_address_8616(successors, start, target_block)
-            for start in (condition.taken_target, condition.fallthrough_target)
+            for start in iter((condition.taken_target, condition.fallthrough_target))
             if isinstance(start, int)
         )
 
@@ -2261,17 +2383,17 @@ def _wide_condition_chain_cfg_connected_8616(
     )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _WideReturnPairDelta8616:
     """Stat deltas and pair replacement for one condition-and-node entry."""
 
-    raw: int = 0
-    normalized: int = 0
-    classified: int = 0
-    materialized: int = 0
-    failure: int = 0
-    changed: bool = False
-    pair: tuple[CExpression, CStatement | None] | None = None
+    raw: cython.longlong = 0
+    normalized: cython.longlong = 0
+    classified: cython.longlong = 0
+    materialized: cython.longlong = 0
+    failure: cython.longlong = 0
+    changed: cython.bint = False
+    pair: object = None
 
 
 def _lower_wide_call_return_pair_8616(
@@ -2279,12 +2401,16 @@ def _lower_wide_call_return_pair_8616(
     node: CIfElse,
     expression: CExpression,
     body: CStatement | None,
-    targeted: tuple[ConditionIR, ...],
-    conditions_by_src: dict[int, ConditionIR],
-    successors: dict[int, tuple[int, ...]],
-    pending_execution_frames: list[tuple[CFunctionCall, int, int]],
+    targeted: object,
+    conditions_by_src: object,
+    successors: object,
+    pending_execution_frames: object,
 ) -> tuple[_WideReturnPairDelta8616, WideCallReturnGuardCollapseStats8616]:
     """Lower one branch expression through its wide call-return chain."""
+    chain: object
+    frame_kind: object
+    key: object
+    root_condition: object
     delta = _WideReturnPairDelta8616(pair=(expression, body))
     collapse_stats = WideCallReturnGuardCollapseStats8616()
     tags = _copied_condition_tags_8616(expression)
@@ -2295,7 +2421,7 @@ def _lower_wide_call_return_pair_8616(
     if (
         root_condition is None
         or key is None
-        or root_condition.block_addr != key[1]
+        or operator.ne(root_condition.block_addr, key[1])
     ):
         return delta, collapse_stats
     chain = select_wide_call_return_condition_chain_8616(root_condition, targeted)
@@ -2322,7 +2448,7 @@ def _lower_wide_call_return_pair_8616(
     collapse_stats = collapse_stats.merged(guard_collapse.stats)
     _debug_condition_chain_8616(
         "wide-call-return-guard-collapse",
-        chain_sources=tuple(condition.src_insn for condition in chain),
+        chain_sources=tuple(condition.src_insn for condition in iter(chain)),
         reason=guard_collapse.reason,
         stats=guard_collapse.stats,
         status=guard_collapse.status,
@@ -2357,13 +2483,20 @@ def _lower_wide_call_return_pair_8616(
     return delta, collapse_stats
 
 
+@cython.ccall
 def _materialize_existing_wide_call_return_conditions_8616(
     codegen: object,
-    targeted: tuple[ConditionIR, ...],
-    conditions_by_src: dict[int, ConditionIR],
-    successors: dict[int, tuple[int, ...]],
-) -> tuple[bool, StructuringConditionChainStats8616]:
+    targeted: object,
+    conditions_by_src: object,
+    successors: object,
+) -> tuple[cython.bint, StructuringConditionChainStats8616]:
     """Lower already-structured split DX:AX predicates from typed IR and CFG."""
+    body: object
+    call: object
+    callsite_addr: object
+    expression: object
+    node: object
+    return_frame_width: object
     metadata_codegen = cast(_ConditionMaterializationCodegen8616, codegen)
     try:
         root = cast(_ConditionMaterializationCFunction8616, metadata_codegen.cfunc).statements
@@ -2376,7 +2509,7 @@ def _materialize_existing_wide_call_return_conditions_8616(
     failure_count = 0
     guard_collapse_stats = WideCallReturnGuardCollapseStats8616()
     execution_frame_stats = CallExecutionFrameCarrierStats8616()
-    pending_execution_frames: list[tuple[CFunctionCall, int, int]] = []
+    pending_execution_frames: list[tuple[CFunctionCall, cython.longlong, cython.longlong]] = []
     changed = False
     for node in _iter_c_nodes_deep_8616(root):
         if not isinstance(node, CIfElse):
@@ -2407,7 +2540,7 @@ def _materialize_existing_wide_call_return_conditions_8616(
             )
         if pair_changed:
             node.condition_and_nodes = replacement_pairs
-    seen_frame_calls: set[int] = set()
+    seen_frame_calls: set[cython.longlong] = set()
     for call, callsite_addr, return_frame_width in pending_execution_frames:
         if id(call) in seen_frame_calls:
             continue
@@ -2436,7 +2569,7 @@ def _materialize_existing_wide_call_return_conditions_8616(
     return changed, stats
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _SingleArm8616:
     """Per-node state while materializing a single-arm structured branch."""
 
@@ -2448,23 +2581,23 @@ class _SingleArm8616:
     condition_fact: ConditionIR | None = None
     node_fact: ConditionIR | None = None
     root_fact: ConditionIR | None = None
-    node_owner_overrode_condition_origin: bool = False
-    composite_root_selected: bool = False
-    semantic_owner_proven: bool = False
-    tags: dict[str, object] = field(default_factory=dict)
+    node_owner_overrode_condition_origin: cython.bint = False
+    composite_root_selected: cython.bint = False
+    semantic_owner_proven: cython.bint = False
+    tags: object = field(default_factory=dict)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _ArmReplacement8616:
     """One materialized arm replacement, or a logged refusal."""
 
     replacement: CExpression | None
     marker: str = ""
-    prune_call_output_carriers: bool = True
-    refused: bool = False
+    prune_call_output_carriers: cython.bint = True
+    refused: cython.bint = False
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _ConditionChainRun8616:
     """Shared evidence and counters for one condition-chain pass."""
 
@@ -2472,29 +2605,29 @@ class _ConditionChainRun8616:
     codegen: object
     metadata_codegen: _ConditionMaterializationCodegen8616
     cfunc: _ConditionMaterializationCFunction8616
-    targeted: tuple[ConditionIR, ...]
-    successors: dict[int, tuple[int, ...]]
-    conditions_by_src: dict[int, ConditionIR]
-    conditions_by_block: dict[int, ConditionIR]
-    condition_blocks: frozenset[int]
+    targeted: object
+    successors: object
+    conditions_by_src: object
+    conditions_by_block: object
+    condition_blocks: object
     tag_session: StructuredSubtreeEntryTagQuerySession8616
-    local_continuations: dict[int, int]
-    typed_surface_ids_by_key: dict[tuple[int, int], set[int]]
-    raw_count: int = 0
-    classified_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    preserved_side_effect_count: int = 0
-    changed: bool = False
+    local_continuations: object
+    typed_surface_ids_by_key: object
+    raw_count: cython.longlong = 0
+    classified_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    preserved_side_effect_count: cython.longlong = 0
+    changed: cython.bint = False
 
     def process_node_8616(self, node: CIfElse) -> None:
         """Dispatch one structured branch to its materialization arm."""
         call_effects = tuple(
             classify_condition_call_effects_8616(condition)
-            for condition, _body in node.condition_and_nodes
+            for condition, _body in iter(node.condition_and_nodes)
         )
         semantic_call_count = sum(
-            evidence.semantic_call_count for evidence in call_effects
+            evidence.semantic_call_count for evidence in iter(call_effects)
         )
         if semantic_call_count:
             self._semantic_call_arm_8616(node, semantic_call_count)
@@ -2504,8 +2637,11 @@ class _ConditionChainRun8616:
             return
         self._single_arm_node_8616(node)
 
-    def _semantic_call_arm_8616(self, node: CIfElse, semantic_call_count: int) -> None:
+    @cython.ccall
+    def _semantic_call_arm_8616(self, node: CIfElse, semantic_call_count: cython.longlong) -> None:
         """Preserve a guard containing semantic calls as already materialized."""
+        key: object
+        semantic_root_fact: object
         self.raw_count += semantic_call_count
         self.classified_count += semantic_call_count
         self.materialized_count += semantic_call_count
@@ -2519,7 +2655,7 @@ class _ConditionChainRun8616:
                 semantic_root_fact is not None
                 and isinstance(semantic_root_fact.taken_target, int)
                 and isinstance(semantic_root_fact.fallthrough_target, int)
-                and key == (semantic_root_fact.src_insn, semantic_root_fact.block_addr)
+                and operator.eq(key, (semantic_root_fact.src_insn, semantic_root_fact.block_addr))
                 and node.else_node is not None
             ):
                 replay_evidence = classify_cfg_binary_arm_orientation_8616(
@@ -2549,6 +2685,7 @@ class _ConditionChainRun8616:
 
     def _multi_arm_node_8616(self, node: CIfElse) -> None:
         """Materialize or refuse one multi-arm condition ladder."""
+        root_source_fact: object
         condition_and_nodes = tuple(node.condition_and_nodes)
         if is_materialized_multi_arm_return_chain_8616(
             cast(tuple[tuple[CExpression, object], ...], condition_and_nodes),
@@ -2558,10 +2695,10 @@ class _ConditionChainRun8616:
             self.classified_count += len(condition_and_nodes)
             self.materialized_count += len(condition_and_nodes)
             return
-        keys = tuple(condition_key_from_tags_8616(condition) for condition, _body in condition_and_nodes)
+        keys = tuple(condition_key_from_tags_8616(condition) for condition, _body in iter(condition_and_nodes))
         source_facts = tuple(
             self.conditions_by_src.get(key[0]) if key is not None else None
-            for key in keys
+            for key in iter(keys)
         )
         # These subtree inventories serve only the diagnostic record. Avoid
         # constructing them when its logger would immediately discard them.
@@ -2572,33 +2709,33 @@ class _ConditionChainRun8616:
                 arm_condition_addrs=keys,
                 arm_body_addrs=tuple(
                     _first_tagged_ins_addr_8616(arm_body)
-                    for _condition, arm_body in condition_and_nodes
+                    for _condition, arm_body in iter(condition_and_nodes)
                 ),
                 arm_body_types=tuple(
-                    tuple(type(child).__name__ for child in _iter_c_nodes_deep_8616(arm_body))
-                    for _condition, arm_body in condition_and_nodes
+                    tuple(type(child).__name__ for child in builtins.iter(_iter_c_nodes_deep_8616(arm_body)))
+                    for _condition, arm_body in iter(condition_and_nodes)
                 ),
                 else_body_addr=_first_tagged_ins_addr_8616(node.else_node),
                 else_body_types=tuple(
                     type(child).__name__
-                    for child in _iter_c_nodes_deep_8616(node.else_node)
+                    for child in builtins.iter(_iter_c_nodes_deep_8616(node.else_node))
                 ),
             )
-        if not any(fact is not None for fact in source_facts):
+        if not any(fact is not None for fact in iter(source_facts)):
             return
         exact_facts = tuple(
             fact
             if fact is not None
             and key is not None
-            and fact.src_insn == key[0]
-            and fact.block_addr == key[1]
+            and operator.eq(fact.src_insn, key[0])
+            and operator.eq(fact.block_addr, key[1])
             else None
-            for key, fact in zip(keys, source_facts, strict=True)
+            for key, fact in builtins.iter(zip(keys, source_facts, strict=True))
         )
         candidate_raw_count = (
             len(condition_and_nodes) if node.else_node is not None else 1
         )
-        duplicate_origins = all(key is not None for key in keys) and len(
+        duplicate_origins = all(key is not None for key in iter(keys)) and len(
             set(keys)
         ) < len(keys)
         root_source_fact = source_facts[0] if source_facts else None
@@ -2618,12 +2755,12 @@ class _ConditionChainRun8616:
                 node, condition_and_nodes, root_source_fact
             )
             return
-        if not self.successors or any(fact is None for fact in exact_facts):
+        if not self.successors or any(fact is None for fact in iter(exact_facts)):
             self.raw_count += candidate_raw_count
             _debug_condition_chain_8616(
                 "multi-arm-proof-refused",
                 else_present=node.else_node is not None,
-                exact_fact_count=sum(fact is not None for fact in exact_facts),
+                exact_fact_count=sum(fact is not None for fact in iter(exact_facts)),
                 successor_count=len(self.successors),
             )
             self.failure_count += 1
@@ -2657,14 +2794,18 @@ class _ConditionChainRun8616:
     def _multi_arm_duplicate_owners_8616(
         self,
         node: CIfElse,
-        condition_and_nodes: tuple[tuple[CExpression, object], ...],
+        condition_and_nodes: object,
         root_source_fact: ConditionIR,
     ) -> None:
         """Materialize a duplicate-origin ladder when ownership selects arms."""
+        _body: object
+        _replacement_body: object
+        after: object
+        before: object
         ownership = select_multi_arm_condition_owners_8616(
             tuple(
                 _first_tagged_ins_addr_8616(body)
-                for _condition, body in condition_and_nodes
+                for _condition, body in iter(condition_and_nodes)
             ),
             self.targeted,
             root=root_source_fact,
@@ -2706,27 +2847,35 @@ class _ConditionChainRun8616:
                 "multi-arm-owner-materialized",
                 arm_count=owned_arms.materialized_count,
                 fact_sources=tuple(
-                    fact.src_insn for fact in ownership.facts
+                    fact.src_insn for fact in iter(ownership.facts)
                 ),
             )
         else:
             _debug_condition_chain_8616(
                 "multi-arm-owner-materialization-refused",
                 fact_sources=tuple(
-                    fact.src_insn for fact in ownership.facts
+                    fact.src_insn for fact in iter(ownership.facts)
                 ),
             )
 
     def _multi_arm_exact_else_8616(
         self,
         node: CIfElse,
-        proven_facts: tuple[ConditionIR, ...],
-        condition_and_nodes: tuple[tuple[CExpression, object], ...],
-    ) -> bool:
+        proven_facts: object,
+        condition_and_nodes: object,
+    ) -> cython.bint:
         """Materialize an exact-owned else ladder; False falls through."""
+        fallthrough_target: object
+        taken_target: object
+        _: object
+        _body: object
+        after: object
+        before: object
+        fact: object
+        taken: object
         artifact = registered_function_ssa_artifact_8616(self.project, self.cfunc.addr).artifact
         exact_ownership = select_exact_multi_arm_condition_owners_8616(
-            tuple(first_statement_block_8616(body) for _condition, body in condition_and_nodes),
+            tuple(first_statement_block_8616(body) for _condition, body in iter(condition_and_nodes)),
             proven_facts, else_target=first_statement_block_8616(node.else_node),
             successors=self.successors,
             artifact=artifact,
@@ -2735,7 +2884,7 @@ class _ConditionChainRun8616:
             # Cloned shared-epilogue returns collapse every statement target;
             # prove ownership from CFG continuations plus native return leaves.
             exact_ownership = select_scalar_return_arm_owners_8616(
-                tuple(body for _condition, body in condition_and_nodes),
+                tuple(body for _condition, body in iter(condition_and_nodes)),
                 node.else_node,
                 proven_facts,
                 successors=self.successors,
@@ -2778,10 +2927,14 @@ class _ConditionChainRun8616:
     def _multi_arm_wide_return_8616(
         self,
         node: CIfElse,
-        proven_facts: tuple[ConditionIR, ...],
-        condition_and_nodes: tuple[tuple[CExpression, object], ...],
+        proven_facts: object,
+        condition_and_nodes: object,
     ) -> None:
         """Recover a wide-return chain spanning the ladder's else arm."""
+        _after_body: object
+        _before_body: object
+        after: object
+        before: object
         multi_arm = recover_structured_multi_arm_wide_return_chain_8616(
             self.codegen,
             condition_and_nodes,
@@ -2835,23 +2988,26 @@ class _ConditionChainRun8616:
             _debug_condition_chain_8616(
                 "multi-arm-return-chain-materialized",
                 arm_count=len(multi_arm.condition_and_nodes),
-                fact_sources=tuple(fact.src_insn for fact in proven_facts),
+                fact_sources=tuple(fact.src_insn for fact in iter(proven_facts)),
             )
         else:
             _debug_condition_chain_8616(
                 "multi-arm-return-chain-refused",
-                fact_sources=tuple(fact.src_insn for fact in proven_facts),
+                fact_sources=tuple(fact.src_insn for fact in iter(proven_facts)),
                 stats=multi_arm.stats,
             )
 
+    @cython.ccall
     def _multi_arm_shared_body_8616(
         self,
         node: CIfElse,
-        proven_facts: tuple[ConditionIR, ...],
+        proven_facts: object,
         multi_arm_root_fact: ConditionIR,
-        condition_and_nodes: tuple[tuple[CExpression, object], ...],
+        condition_and_nodes: object,
     ) -> None:
         """Materialize a no-else ladder through its shared body target."""
+        body_target: object
+        replacement: object
         self.raw_count += 1
         body_target = _shared_body_target_8616(condition_and_nodes)
         if body_target is None:
@@ -2913,8 +3069,12 @@ class _ConditionChainRun8616:
         )
 
 
+    @cython.ccall
     def _single_arm_node_8616(self, node: CIfElse) -> None:
         """Materialize or refuse a single-condition structured branch."""
+        key: object
+        root_fact: object
+        shared_body_target: object
         condition, body = node.condition_and_nodes[0]
         condition_tags = _copied_condition_tags_8616(condition)
         shared_body_target = condition_tags.get(
@@ -2926,7 +3086,7 @@ class _ConditionChainRun8616:
             )
             is True
             and isinstance(shared_body_target, int)
-            and _first_tagged_cfg_target_8616(body) == shared_body_target
+            and operator.eq(_first_tagged_cfg_target_8616(body), shared_body_target)
         ):
             self.raw_count += 1
             self.classified_count += 1
@@ -2968,7 +3128,7 @@ class _ConditionChainRun8616:
             return
         if (
             arm.condition_ins_addr is not None
-            and root_fact.src_insn != arm.condition_ins_addr
+            and operator.ne(root_fact.src_insn, arm.condition_ins_addr)
             and not arm.node_owner_overrode_condition_origin
         ):
             _debug_condition_chain_8616(
@@ -3006,8 +3166,11 @@ class _ConditionChainRun8616:
             return
         self._apply_single_replacement_8616(arm, outcome)
 
-    def _select_single_root_fact_8616(self, arm: _SingleArm8616) -> bool:
+    @cython.ccall
+    def _select_single_root_fact_8616(self, arm: _SingleArm8616) -> cython.bint:
         """Select the owning typed condition for a single-arm branch."""
+        composite_root: object
+        node_fact: object
         condition_fact = (
             self.conditions_by_src.get(arm.condition_ins_addr)
             if arm.condition_ins_addr is not None else None
@@ -3049,8 +3212,11 @@ class _ConditionChainRun8616:
             return False
         return True
 
-    def _untagged_root_fallback_8616(self, arm: _SingleArm8616) -> bool:
+    def _untagged_root_fallback_8616(self, arm: _SingleArm8616) -> cython.bint:
         """Recover the root fact for an untagged no-else branch."""
+        candidate_replacement: object
+        tagged_fact: object
+        candidate: object
         tagged_fact = arm.root_fact
         has_tagged_owner = arm.condition_ins_addr is not None or arm.node_ins_addr is not None
         if arm.root_fact is None and not has_tagged_owner:
@@ -3096,8 +3262,11 @@ class _ConditionChainRun8616:
             return False
         return True
 
-    def _apply_assignment_diamond_8616(self, arm: _SingleArm8616) -> bool:
+    @cython.ccall
+    def _apply_assignment_diamond_8616(self, arm: _SingleArm8616) -> cython.bint:
         """Collapse a nested-goto diamond when the arm is a binary scaffold."""
+        assignment_diamond: object
+        root_fact: object
         root_fact = arm.root_fact
         assert root_fact is not None
         assignment_diamond = (
@@ -3161,8 +3330,12 @@ class _ConditionChainRun8616:
         )
         return True
 
+    @cython.ccall
     def _arm_replacement_8616(self, arm: _SingleArm8616) -> _ArmReplacement8616:
         """Materialize the branch replacement via single-branch or binary arms."""
+        replacement: object
+        replay: object
+        root_fact: object
         root_fact = arm.root_fact
         assert root_fact is not None
         if arm.node.else_node is None:
@@ -3212,8 +3385,11 @@ class _ConditionChainRun8616:
 
     def _else_arm_polarity_8616(
         self, arm: _SingleArm8616
-    ) -> tuple[StructuredBinaryArmOrientationEvidence8616, bool | None, tuple[int | None, int | None], bool]:
+    ) -> tuple[StructuredBinaryArmOrientationEvidence8616, bool | None, tuple[int | None, int | None], cython.bint]:
         """Resolve arm orientation evidence and proven taken polarity."""
+        exact_polarity: object
+        return_polarity: object
+        root_fact: object
         root_fact = arm.root_fact
         assert root_fact is not None
         arm_orientation = classify_cfg_binary_arm_orientation_8616(
@@ -3242,13 +3418,19 @@ class _ConditionChainRun8616:
                 direct_complementary_arms = True
         return arm_orientation, true_polarity, (true_target, false_target), direct_complementary_arms
 
+    @cython.ccall
     def _else_arm_replacement_8616(
         self,
         arm: _SingleArm8616,
-        replay: StructuringConditionReplayFact8616 | None,
-        assignment_replay_required: bool,
+        replay: object,
+        assignment_replay_required: cython.bint,
     ) -> _ArmReplacement8616:
         """Materialize the replacement for a two-arm structured branch."""
+        materialized: object
+        replacement: object
+        replay_false_target: object
+        replay_true_target: object
+        root_fact: object
         root_fact = arm.root_fact
         assert root_fact is not None
         arm_orientation, true_polarity, arm_targets, direct_complementary_arms = (
@@ -3311,9 +3493,9 @@ class _ConditionChainRun8616:
                 replay_true_target,
                 replay_false_target,
                 required_conditions=(
-                    (arm.condition_fact,)
+                    tuple((arm.condition_fact,))
                     if arm.composite_root_selected and arm.condition_fact is not None
-                    else ()
+                    else tuple(())
                 ),
             )
         if replacement is not None:
@@ -3335,10 +3517,13 @@ class _ConditionChainRun8616:
             prune_call_output_carriers=prune_call_output_carriers,
         )
 
+    @cython.ccall
     def _apply_single_replacement_8616(
         self, arm: _SingleArm8616, outcome: _ArmReplacement8616
     ) -> None:
         """Install a materialized replacement on the structured branch."""
+        replacement: object
+        root_fact: object
         root_fact = arm.root_fact
         assert root_fact is not None
         replacement = outcome.replacement
@@ -3385,9 +3570,14 @@ class _ConditionChainRun8616:
         )
 
 
-def _typed_surface_ids_by_key_8616(root: object) -> dict[tuple[int, int], set[int]]:
+@cython.ccall
+def _typed_surface_ids_by_key_8616(root: object) -> object:
     """Index typed-condition surface expression identities by provenance key."""
-    typed_surface_ids_by_key: dict[tuple[int, int], set[int]] = {}
+    candidate_key: object
+    _candidate_body: object
+    candidate_condition: object
+    candidate_node: object
+    typed_surface_ids_by_key: dict[tuple[cython.longlong, cython.longlong], set[cython.longlong]] = {}
     for candidate_node in _iter_c_nodes_deep_8616(root):
         if not isinstance(candidate_node, CIfElse):
             continue
@@ -3401,29 +3591,32 @@ def _typed_surface_ids_by_key_8616(root: object) -> dict[tuple[int, int], set[in
     return typed_surface_ids_by_key
 
 
+@cython.ccall
 def _condition_chain_indexes_8616(
-    targeted: tuple[ConditionIR, ...],
-) -> tuple[dict[int, ConditionIR], dict[int, ConditionIR]]:
+    targeted: object,
+) -> tuple[dict[cython.longlong, ConditionIR], dict[cython.longlong, ConditionIR]]:
     """Index targeted conditions by source instruction and unique block."""
+    item: object
     conditions_by_src = {
         item.src_insn: item
-        for item in targeted
+        for item in iter(targeted)
         if isinstance(item.src_insn, int)
     }
-    conditions_by_block_candidates: dict[int, list[ConditionIR]] = {}
+    conditions_by_block_candidates: dict[cython.longlong, list[ConditionIR]] = {}
     for item in targeted:
         if isinstance(item.block_addr, int):
             conditions_by_block_candidates.setdefault(item.block_addr, []).append(item)
     conditions_by_block = {
         block_addr: candidates[0]
-        for block_addr, candidates in conditions_by_block_candidates.items()
+        for block_addr, candidates in builtins.iter(conditions_by_block_candidates.items())
         if len(candidates) == 1
     }
     return conditions_by_src, conditions_by_block
 
 
-def materialize_structuring_condition_chains_8616(project: object, codegen: object) -> bool:
+def materialize_structuring_condition_chains_8616(project: object, codegen: object) -> cython.bint:
     """Materialize CFG-proven branch predicates from target-bearing ConditionIR."""
+    node: object
     metadata_codegen = cast(_ConditionMaterializationCodegen8616, codegen)
     try:
         conditions_value = metadata_codegen._inertia_typed_conditions
@@ -3432,12 +3625,12 @@ def materialize_structuring_condition_chains_8616(project: object, codegen: obje
     except AttributeError:
         return False
     try:
-        conditions = tuple(item for item in cast(Any, conditions_value) if isinstance(item, ConditionIR))
+        conditions = tuple(item for item in builtins.iter(cast(Any, conditions_value)) if isinstance(item, ConditionIR))
     except TypeError:
         return False
     targeted = tuple(
         item
-        for item in conditions
+        for item in iter(conditions)
         if isinstance(item.src_insn, int)
         and isinstance(item.block_addr, int)
         and isinstance(item.taken_target, int)
@@ -3455,13 +3648,13 @@ def materialize_structuring_condition_chains_8616(project: object, codegen: obje
                 item.op,
                 item.producer_insn,
             )
-            for item in targeted
+            for item in iter(targeted)
         ),
-        successors=tuple(sorted(successors.items())),
+        successors=tuple(sorted(tuple(successors.items()))),
     )
     conditions_by_src, conditions_by_block = _condition_chain_indexes_8616(targeted)
     condition_blocks = frozenset(
-        item.block_addr for item in targeted if isinstance(item.block_addr, int)
+        item.block_addr for item in iter(targeted) if isinstance(item.block_addr, int)
     )
     raw_count = 0
     classified_count = 0
@@ -3499,9 +3692,9 @@ def materialize_structuring_condition_chains_8616(project: object, codegen: obje
     preserved_side_effect_count = run.preserved_side_effect_count
     changed = run.changed
     scalar_returns = materialize_complete_scalar_return_leaves_8616(
-        tuple(node for node in _iter_c_nodes_deep_8616(root) if isinstance(node, CReturn)),
+        tuple(node for node in builtins.iter(_iter_c_nodes_deep_8616(root)) if isinstance(node, CReturn)),
         set(successors).union(
-            target for targets in successors.values() for target in targets
+            target for targets in builtins.iter(successors.values()) for target in iter(targets)
         ),
         lambda target: recover_branch_target_return_expression_8616(
             project, codegen, target
@@ -3558,6 +3751,7 @@ def materialize_structuring_conditions_8616(
     codegen: object,
 ) -> StructuringConditionMaterializationResult8616:
     """Apply already-proven condition facts at the structuring boundary."""
+    root: object
     legacy_project = cast(SimpleNamespace, project)
     legacy_codegen = cast(SimpleNamespace, codegen)
     metadata_codegen = cast(_ConditionMaterializationCodegen8616, codegen)
@@ -3574,7 +3768,7 @@ def materialize_structuring_conditions_8616(
     except AttributeError:
         raw_typed_conditions = ()
     typed_conditions = (
-        tuple(condition for condition in raw_typed_conditions if isinstance(condition, ConditionIR))
+        tuple(condition for condition in iter(raw_typed_conditions) if isinstance(condition, ConditionIR))
         if isinstance(raw_typed_conditions, (list, tuple))
         else ()
     )
@@ -3651,7 +3845,7 @@ def materialize_structuring_conditions_8616(
         registered_function_ssa_artifact_8616(project, function_addr).artifact if isinstance(function_addr, int) else None,
         lambda plan: _materialize_cfg_condition_chain_expr_8616(
             project, codegen, plan.root_condition,
-            {cast(int, fact.block_addr): fact for fact in plan.conditions},
+            {cast(int, fact.block_addr): fact for fact in iter(plan.conditions)},
             condition_chain_successors_8616(project, codegen),
             plan.exit_target, plan.body_target, required_conditions=plan.conditions,
         ),
@@ -3709,11 +3903,13 @@ def materialize_structuring_conditions_8616(
     return result
 
 
-def apply_structuring_condition_materialization_8616(project: object, codegen: object) -> bool:
+@cython.ccall
+def apply_structuring_condition_materialization_8616(project: object, codegen: object) -> cython.bint:
     """Compatibility bool-returning entry point for structuring passes."""
     return materialize_structuring_conditions_8616(project, codegen).changed
 
 
+@cython.ccall
 def cleanup_structuring_conditions_after_replay_8616(
     project: object,
     codegen: object,
@@ -3771,6 +3967,7 @@ def cleanup_structuring_conditions_after_replay_8616(
     return result
 
 
+@cython.ccall
 def prune_dead_flag_assignments_after_structuring_8616(
     project: object,
     codegen: object,
@@ -3845,6 +4042,7 @@ def prune_dead_flag_assignments_after_structuring_8616(
     return result
 
 
-def apply_structuring_condition_replay_cleanup_8616(project: object, codegen: object) -> bool:
+@cython.ccall
+def apply_structuring_condition_replay_cleanup_8616(project: object, codegen: object) -> cython.bint:
     """Compatibility bool-returning entry point for late condition replay."""
     return cleanup_structuring_conditions_after_replay_8616(project, codegen).changed

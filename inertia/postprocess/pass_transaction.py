@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Own typed state and preflight policy for guarded postprocess passes.
 
 Layer: Rewrite/Postprocess cleanup.
@@ -16,6 +17,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, cast
+import typing
+import cython
+import dataclasses
+import operator
+T = typing.TypeVar("T")
+X86_16TailValidationSummary = typing.TypeVar("X86_16TailValidationSummary")
 
 if TYPE_CHECKING:
     from inertia.validation.tail_validation import X86_16TailValidationSummary
@@ -49,20 +56,20 @@ class PostprocessPassPreflightAction8616(Enum):
     SKIP_REJECT_BUDGET = "skip_reject_budget"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PostprocessPassPreflightInput8616:
     """Collect immutable inputs used to select one guarded-pass action."""
 
-    pass_name: str
-    validation_enabled: bool
-    per_pass_validation_enabled: bool
-    large_function_skip: bool
-    force_per_pass_requested: bool
-    optional_reject_budget: int
-    optional_reject_count: int
+    pass_name: object
+    validation_enabled: cython.bint
+    per_pass_validation_enabled: cython.bint
+    large_function_skip: cython.bint
+    force_per_pass_requested: cython.bint
+    optional_reject_budget: cython.longlong
+    optional_reject_count: cython.longlong
     local_evidence_present: bool | None = None
 
-    def with_local_evidence(self, present: bool) -> PostprocessPassPreflightInput8616:
+    def with_local_evidence(self, present: cython.bint) -> PostprocessPassPreflightInput8616:
         """Return the same preflight request with its lazy evidence probe closed."""
         return PostprocessPassPreflightInput8616(
             pass_name=self.pass_name,
@@ -76,23 +83,23 @@ class PostprocessPassPreflightInput8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PostprocessPassPreflightDecision8616:
     """Return one action and the validation obligations for an executable pass."""
 
     action: PostprocessPassPreflightAction8616
-    is_optimization_pass: bool
-    force_pass_validation: bool
-    requires_snapshot: bool
-    enforce_pass_validation: bool
+    is_optimization_pass: cython.bint
+    force_pass_validation: cython.bint
+    requires_snapshot: cython.bint
+    enforce_pass_validation: cython.bint
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PostprocessMutationGeneration8616:
     """Accepted AST mutation generation published by one guarded transaction."""
 
-    value: int
-    last_changed_pass: str | None
+    value: cython.longlong
+    last_changed_pass: object
 
     def __post_init__(self) -> None:
         """Reject an invalid monotonic generation at its owning boundary."""
@@ -100,18 +107,18 @@ class PostprocessMutationGeneration8616:
             raise ValueError("postprocess mutation generation must be non-negative")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PostprocessMutationWitnessStats8616:
     """Closed accounting for exact transaction-local witness reuse."""
 
-    lookup_count: int
-    rebuild_count: int
-    reuse_count: int
-    record_count: int
-    invalidation_count: int
+    lookup_count: cython.longlong
+    rebuild_count: cython.longlong
+    reuse_count: cython.longlong
+    record_count: cython.longlong
+    invalidation_count: cython.longlong
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every lookup was rebuilt or safely reused."""
         counts = (
             self.lookup_count,
@@ -120,13 +127,20 @@ class PostprocessMutationWitnessStats8616:
             self.record_count,
             self.invalidation_count,
         )
-        return all(count >= 0 for count in counts) and self.lookup_count == (
+        return all(count >= 0 for count in iter(counts)) and operator.eq(self.lookup_count, (
             self.rebuild_count + self.reuse_count
-        )
+        ))
 
 
-class PostprocessMutationWitnessCache8616[T]:
+class PostprocessMutationWitnessCache8616(typing.Generic[T]):
     """Reuse one exact witness only while guarded passes report no mutation."""
+    _generation: object
+    _has_generation: cython.bint
+    _invalidation_count: cython.longlong
+    _lookup_count: cython.longlong
+    _rebuild_count: cython.longlong
+    _record_count: cython.longlong
+    _reuse_count: cython.longlong
 
     def __init__(self) -> None:
         """Start without a proven witness or accounting events."""
@@ -176,22 +190,24 @@ class PostprocessMutationWitnessCache8616[T]:
         return stats
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class PostprocessPassTransactionState8616:
     """Own mutable state shared by all guarded passes in one rewrite request."""
 
     baseline_summary: X86_16TailValidationSummary | None
-    known_cycle_path: tuple[str, ...] | None
-    accepted_changed: bool = False
-    last_changed_pass: str | None = None
-    accepted_mutation_count: int = 0
+    known_cycle_path: object
+    accepted_changed: cython.bint = False
+    last_changed_pass: object = None
+    accepted_mutation_count: cython.longlong = 0
 
-    def accept_change(self, pass_name: str) -> None:
+    @cython.ccall
+    def accept_change(self, pass_name: object) -> None:
         """Record one accepted mutation and its deterministic pass identity."""
         self.accepted_changed = True
         self.last_changed_pass = pass_name
         self.accepted_mutation_count += 1
 
+    @cython.ccall
     def mutation_generation(self) -> PostprocessMutationGeneration8616:
         """Return the immutable accepted generation for downstream consumers."""
         return PostprocessMutationGeneration8616(
@@ -199,15 +215,18 @@ class PostprocessPassTransactionState8616:
             last_changed_pass=self.last_changed_pass,
         )
 
+    @cython.ccall
     def replace_baseline(self, summary: X86_16TailValidationSummary) -> None:
         """Advance validation baseline after an explicitly accepted delta."""
         self.baseline_summary = summary
 
-    def record_cycle_path(self, cycle_path: tuple[str, ...] | None) -> None:
+    @cython.ccall
+    def record_cycle_path(self, cycle_path: object) -> None:
         """Publish the cycle witness for the current accepted AST state."""
         self.known_cycle_path = cycle_path
 
 
+@cython.ccall
 def decide_postprocess_pass_preflight_8616(
     request: PostprocessPassPreflightInput8616,
 ) -> PostprocessPassPreflightDecision8616:

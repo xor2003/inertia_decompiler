@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Rewrite/Postprocess cleanup.
 
 Responsibility: canonicalize declarations and retire DCE-proven unused declarations.
@@ -13,6 +14,8 @@ It must not merge expressions, infer alias/type facts, or repair rendered C text
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import os
 import sys
@@ -22,22 +25,25 @@ from typing import Protocol, cast
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeBool, SimTypeChar, SimTypeFloat, SimTypeInt, SimTypeNum
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
+import operator
 
 _DeclarationKey8616 = tuple[str, int | str]
-_UNIFIED_ENTRY_ARITY_8616: int = 2
+_UNIFIED_ENTRY_ARITY_8616: cython.longlong = 2
 
 
+@cython.ccall
 def _declaration_entry_keys_8616(
     entry: object, key_of: Callable[[structured_c.CVariable], _DeclarationKey8616],
-) -> frozenset[_DeclarationKey8616] | None:
+) -> object:
     """Read exact keys from an angr variable or unified declaration entry."""
+    candidate: object
     if isinstance(entry, structured_c.CVariable):
         return frozenset({key_of(entry)})
     if not isinstance(entry, (set, list, tuple)) or not entry:
         return None
     keys: set[_DeclarationKey8616] = set()
     for candidate in entry:
-        if not isinstance(candidate, tuple) or len(candidate) != _UNIFIED_ENTRY_ARITY_8616:
+        if not isinstance(candidate, tuple) or operator.ne(len(candidate), _UNIFIED_ENTRY_ARITY_8616):
             return None
         cvar = candidate[0]
         if not isinstance(cvar, structured_c.CVariable):
@@ -46,8 +52,10 @@ def _declaration_entry_keys_8616(
     return frozenset(keys)
 
 
+@cython.ccall
 def _declaration_maps_8616(codegen: object) -> tuple[object, object]:
     """Read optional third-party declaration maps without inventing surfaces."""
+    cfunc: object
     try:
         cfunc = cast(_CodegenLike, codegen).cfunc
     except AttributeError:
@@ -65,13 +73,17 @@ def _declaration_maps_8616(codegen: object) -> tuple[object, object]:
     return variables, unified
 
 
+@cython.ccall
 def prune_dce_proven_declarations_8616(
     codegen: object,
     *,
-    dead_keys: frozenset[_DeclarationKey8616],
+    dead_keys: object,
     key_of: Callable[[structured_c.CVariable], _DeclarationKey8616],
-) -> bool:
+) -> cython.bint:
     """Consume DCE deletion keys after all surviving references are excluded."""
+    entry: object
+    mapping: object
+    variable: object
     if not dead_keys:
         return False
     changed = False
@@ -100,8 +112,11 @@ class _CodegenLike(Protocol):
     cfunc: _CFunctionLike | None
 
 
-def _scalar_declaration_nodes_8616(entry: object) -> tuple[structured_c.CVariable, ...] | None:
+@cython.ccall
+def _scalar_declaration_nodes_8616(entry: object) -> object:
     """Accept only complete, fixed scalar declarators without initializer code."""
+    item: object
+    node: object
     if isinstance(entry, structured_c.CVariable):
         nodes = (entry,)
     elif isinstance(entry, (set, list, tuple)) and entry:
@@ -109,7 +124,7 @@ def _scalar_declaration_nodes_8616(entry: object) -> tuple[structured_c.CVariabl
         for item in entry:
             if not isinstance(item, tuple) or len(item) != 2 or not isinstance(item[0], structured_c.CVariable):
                 return None
-            if item[1] != item[0].variable_type:
+            if operator.ne(item[1], item[0].variable_type):
                 return None
             collected.append(item[0])
         nodes = tuple(collected)
@@ -130,8 +145,11 @@ def _scalar_declaration_nodes_8616(entry: object) -> tuple[structured_c.CVariabl
 
 def _declaration_references_8616(
     cfunc: _CFunctionLike,
-) -> tuple[set[int], set[tuple[object, ...]], bool, bool] | None:
+) -> object:
     """Collect complete body/parameter references, keeping opaque code unknown."""
+    identity: object
+    node: object
+    root: object
     from inertia.postprocess.decompiler_postprocess_utils import _iter_c_nodes_deep_8616
     from inertia.semantics.alias_query import describe_alias_storage
 
@@ -142,13 +160,13 @@ def _declaration_references_8616(
         return None
     if not isinstance(arguments, (list, tuple)) or not isinstance(body, structured_c.CConstruct):
         return None
-    if any(not isinstance(argument, structured_c.CConstruct) for argument in arguments):
+    if any(not isinstance(argument, structured_c.CConstruct) for argument in iter(arguments)):
         return None
-    variables: set[int] = set()
+    variables: set[cython.longlong] = set()
     storage: set[tuple[object, ...]] = set()
     any_reference = False
     unknown_storage = False
-    for root in (body, *arguments):
+    for root in (body, ) + tuple(arguments):
         for node in _iter_c_nodes_deep_8616(root):
             if isinstance(node, (structured_c.CDirtyExpression, structured_c.CDirtyStatement)):
                 return None
@@ -164,13 +182,19 @@ def _declaration_references_8616(
     return variables, storage, any_reference, unknown_storage
 
 
-def prune_unreferenced_scalar_declarations_8616(codegen: _CodegenLike) -> bool:
+def prune_unreferenced_scalar_declarations_8616(codegen: _CodegenLike) -> cython.bint:
     """Retire pure scalar declaration metadata after complete use exclusion.
 
     Parameters, body references and alias-equivalent storage remain declared.
     Arrays, pointer declarators, unknown types and opaque code remain unchanged.
     This changes no statements and derives no machine storage identity.
     """
+    cfunc: object
+    nodes: object
+    references: object
+    entry: object
+    mapping: object
+    variable: object
     from inertia.semantics.alias_query import describe_alias_storage
 
     cfunc = codegen.cfunc
@@ -190,18 +214,19 @@ def prune_unreferenced_scalar_declarations_8616(codegen: _CodegenLike) -> bool:
             nodes = _scalar_declaration_nodes_8616(entry)
             if nodes is None or unknown_storage:
                 continue
-            identities = tuple(describe_alias_storage(node).identity for node in nodes)
-            if any(identity in storage or (identity is None and any_reference) for identity in identities):
+            identities = tuple(describe_alias_storage(node).identity for node in iter(nodes))
+            if any(identity in storage or (identity is None and any_reference) for identity in iter(identities)):
                 continue
             del mapping[variable]
             changed = True
     return changed
 
 
+@cython.ccall
 def _stack_declaration_identity(
     variable: object,
     cvar: object,
-) -> tuple[object, ...] | None:
+) -> object:
     """Return exact physical and emitted-name identity for one stack declaration."""
     if not isinstance(variable, SimStackVariable):
         return None
@@ -212,7 +237,8 @@ def _stack_declaration_identity(
     return (variable.base, variable.offset, variable.size, cvar.name)
 
 
-def _unified_stack_declaration_identity(variable: object) -> tuple[object, ...] | None:
+@cython.ccall
+def _unified_stack_declaration_identity(variable: object) -> object:
     """Return exact physical identity for one named unified stack declaration."""
     if not isinstance(variable, SimStackVariable):
         return None
@@ -223,13 +249,15 @@ def _unified_stack_declaration_identity(variable: object) -> tuple[object, ...] 
     return (variable.base, variable.offset, variable.size, variable.name)
 
 
-def _unified_declaration_types(entries: object) -> frozenset[object] | None:
+@cython.ccall
+def _unified_declaration_types(entries: object) -> object:
     """Return the complete declared type set or refuse malformed angr entries."""
+    entry: object
     if not isinstance(entries, (list, set, tuple)):
         return None
     types: list[object] = []
     for entry in entries:
-        if not isinstance(entry, tuple) or len(entry) != _UNIFIED_ENTRY_ARITY_8616:
+        if not isinstance(entry, tuple) or operator.ne(len(entry), _UNIFIED_ENTRY_ARITY_8616):
             return None
         types.append(entry[1])
     try:
@@ -238,8 +266,13 @@ def _unified_declaration_types(entries: object) -> frozenset[object] | None:
         return None
 
 
-def _dedupe_variables_in_use_8616(cfunc: _CFunctionLike, debug: bool) -> bool:
+@cython.ccall
+def _dedupe_variables_in_use_8616(cfunc: _CFunctionLike, debug: cython.bint) -> cython.bint:
     """Drop duplicate variables_in_use entries sharing identity and C type."""
+    canonical: object
+    identity: object
+    cvar: object
+    variable: object
     variables_in_use = cfunc.variables_in_use
     if not isinstance(variables_in_use, dict):
         return False
@@ -261,15 +294,21 @@ def _dedupe_variables_in_use_8616(cfunc: _CFunctionLike, debug: bool) -> bool:
         if canonical is None:
             canonical_by_identity[identity] = cvar
             continue
-        if cvar.variable_type != canonical.variable_type:
+        if operator.ne(cvar.variable_type, canonical.variable_type):
             continue
         del variables_in_use[variable]
         changed = True
     return changed
 
 
-def _dedupe_unified_local_vars_8616(cfunc: _CFunctionLike, debug: bool) -> bool:
+@cython.ccall
+def _dedupe_unified_local_vars_8616(cfunc: _CFunctionLike, debug: cython.bint) -> cython.bint:
     """Drop duplicate unified_local_vars entries sharing identity and types."""
+    canonical_types: object
+    declared_types: object
+    identity: object
+    entries: object
+    variable: object
     unified_local_vars = cfunc.unified_local_vars
     if not isinstance(unified_local_vars, dict):
         return False
@@ -292,15 +331,17 @@ def _dedupe_unified_local_vars_8616(cfunc: _CFunctionLike, debug: bool) -> bool:
         if canonical_types is None:
             canonical_unified[identity] = declared_types
             continue
-        if declared_types != canonical_types:
+        if operator.ne(declared_types, canonical_types):
             continue
         del unified_local_vars[variable]
         changed = True
     return changed
 
 
-def dedupe_equivalent_stack_local_declarations_8616(codegen: _CodegenLike) -> bool:
+@cython.ccall
+def dedupe_equivalent_stack_local_declarations_8616(codegen: _CodegenLike) -> cython.bint:
     """Remove only exact duplicate stack declarations with equivalent C types."""
+    cfunc: object
     cfunc = codegen.cfunc
     if cfunc is None:
         return False

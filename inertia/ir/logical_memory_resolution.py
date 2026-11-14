@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Resolve captured machine memory operands into logical IR artifacts.
 
 Layer: IR.
@@ -9,6 +10,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import Counter
 
@@ -29,15 +32,19 @@ from .logical_memory_matching import (
     logical_memory_execution_candidates_8616,
     raw_logical_memory_sites_8616,
 )
+import operator
+import builtins
 
 _MEMORY_SPACES = frozenset({MemSpace.DS, MemSpace.ES, MemSpace.SS})
 
 
-def _optional_int_key(value: int | None) -> tuple[bool, int]:
+@cython.ccall
+def _optional_int_key(value: object) -> tuple[cython.bint, cython.longlong]:
     """Return a stable ordering key that places present integers first."""
     return (value is None, -1 if value is None else value)
 
 
+@cython.ccall
 def _capture_sort_key(
     capture: IRLogicalMemoryCaptureRecord8616,
 ) -> tuple[object, ...]:
@@ -58,8 +65,12 @@ def _capture_sort_key(
     )
 
 
-def _capture_identity(capture: IRLogicalMemoryCaptureRecord8616) -> tuple[int, int, int, int] | None:
+@cython.ccall
+def _capture_identity(capture: IRLogicalMemoryCaptureRecord8616) -> object:
     """Return a complete durable capture key, or ``None`` for missing identity."""
+    access_ordinal: object
+    block_addr: object
+    insn_addr: object
     block_addr = capture.block_addr
     insn_addr = capture.insn_addr
     access_ordinal = capture.access_ordinal
@@ -70,10 +81,11 @@ def _capture_identity(capture: IRLogicalMemoryCaptureRecord8616) -> tuple[int, i
     return (capture.function_addr, block_addr, insn_addr, access_ordinal)
 
 
+@cython.ccall
 def _refusal(
     capture: IRLogicalMemoryCaptureRecord8616,
     failure: IRLogicalMemoryFailureKind8616,
-    detail: str,
+    detail: object,
 ) -> IRLogicalMemoryRefusal8616:
     """Build one deterministic refusal from its raw capture identity."""
     return IRLogicalMemoryRefusal8616(
@@ -86,13 +98,14 @@ def _refusal(
     )
 
 
+@cython.ccall
 def _preflight_failure(
-    function_addr: int,
+    function_addr: cython.longlong,
     capture: IRLogicalMemoryCaptureRecord8616,
-    duplicate_identities: frozenset[tuple[int, int, int, int]],
-) -> tuple[IRLogicalMemoryFailureKind8616, str] | None:
+    duplicate_identities: object,
+) -> object:
     """Validate capture-owned identity, mode, width, and segmented address."""
-    if capture.function_addr != function_addr:
+    if operator.ne(capture.function_addr, function_addr):
         return (
             IRLogicalMemoryFailureKind8616.INVALID_ADDRESS,
             "capture function does not match resolver function",
@@ -141,36 +154,42 @@ def _preflight_failure(
 
 
 def _assign_candidates(
-    candidates: tuple[tuple[LogicalMemoryExecutionCandidate8616, ...], ...],
+    candidates: object,
 ) -> tuple[tuple[LogicalMemoryExecutionCandidate8616, ...], ...]:
     """Find at most two ordered, non-overlapping site assignments."""
     assignments: list[tuple[LogicalMemoryExecutionCandidate8616, ...]] = []
 
     def visit(
-        capture_index: int,
-        previous_end: int,
-        selected: tuple[LogicalMemoryExecutionCandidate8616, ...],
+        capture_index: cython.longlong,
+        previous_end: cython.longlong,
+        selected: object,
     ) -> None:
         """Enumerate enough complete assignments to prove uniqueness or ambiguity."""
+        candidate: object
         if len(assignments) >= 2:
             return
-        if capture_index == len(candidates):
+        if operator.eq(capture_index, len(candidates)):
             assignments.append(selected)
             return
         for candidate in candidates[capture_index]:
             if candidate.start_position > previous_end:
-                visit(capture_index + 1, candidate.end_position, (*selected, candidate))
+                visit(capture_index + 1, candidate.end_position, tuple(selected) + (candidate,))
 
     visit(0, -1, ())
     return tuple(assignments)
 
 
+@cython.ccall
 def _access_from_candidate(
-    function_addr: int,
+    function_addr: cython.longlong,
     capture: IRLogicalMemoryCaptureRecord8616,
     candidate: LogicalMemoryExecutionCandidate8616,
 ) -> IRLogicalMemoryAccess8616 | IRLogicalMemoryRefusal8616:
     """Materialize one complete candidate, refusing internal inconsistency."""
+    access_ordinal: object
+    address_bits: object
+    block_addr: object
+    insn_addr: object
     block_addr = capture.block_addr
     insn_addr = capture.insn_addr
     access_ordinal = capture.access_ordinal
@@ -201,16 +220,18 @@ def _access_from_candidate(
 
 
 def _resolve_site(
-    function_addr: int,
+    function_addr: cython.longlong,
     block: IRBlock,
-    insn_addr: int,
-    captures: tuple[IRLogicalMemoryCaptureRecord8616, ...],
+    insn_addr: cython.longlong,
+    captures: object,
 ) -> tuple[tuple[IRLogicalMemoryAccess8616, ...], tuple[IRLogicalMemoryRefusal8616, ...]]:
     """Resolve one instruction's captures atomically in ordinal order."""
+    candidate: object
+    capture: object
     sites = raw_logical_memory_sites_8616(block, insn_addr)
     ordered = tuple(sorted(captures, key=lambda capture: capture.access_ordinal or 0))
     candidate_sets = tuple(
-        logical_memory_execution_candidates_8616(capture, sites) for capture in ordered
+        logical_memory_execution_candidates_8616(capture, sites) for capture in iter(ordered)
     )
     assignments = _assign_candidates(candidate_sets)
     if len(assignments) > 1:
@@ -220,7 +241,7 @@ def _resolve_site(
                 IRLogicalMemoryFailureKind8616.AMBIGUOUS_EXECUTION_SLICES,
                 "multiple ordered execution-slice assignments satisfy the capture site",
             )
-            for capture in ordered
+            for capture in iter(ordered)
         )
     if not assignments:
         refusals = tuple(
@@ -235,7 +256,7 @@ def _resolve_site(
                     else logical_memory_candidate_failure_8616(capture, sites)
                 ),
             )
-            for capture, candidate_set in zip(ordered, candidate_sets, strict=True)
+            for capture, candidate_set in builtins.iter(zip(ordered, candidate_sets, strict=True))
         )
         return (), refusals
     accesses: list[IRLogicalMemoryAccess8616] = []
@@ -250,9 +271,9 @@ def _resolve_site(
 
 
 def resolve_logical_memory_accesses_8616(
-    function_addr: int,
-    blocks: tuple[IRBlock, ...],
-    captures: tuple[IRLogicalMemoryCaptureRecord8616, ...],
+    function_addr: cython.longlong,
+    blocks: object,
+    captures: object,
 ) -> IRLogicalMemoryArtifact8616:
     """Resolve each captured operand to one exact wide/byte IR site or refusal.
 
@@ -260,22 +281,28 @@ def resolve_logical_memory_accesses_8616(
     kind, and per-instruction ordinal evidence. Uncaptured memory operations are
     never published merely because they are adjacent to a captured operation.
     """
+    preflight: object
+    block: object
+    block_addr: object
+    capture: object
+    insn_addr: object
+    site_captures: object
     ordered_captures = tuple(sorted(captures, key=_capture_sort_key))
     identities = tuple(
         identity
-        for capture in ordered_captures
+        for capture in iter(ordered_captures)
         if (identity := _capture_identity(capture)) is not None
     )
     identity_counts = Counter(identities)
     duplicate_identities = frozenset(
-        identity for identity, count in identity_counts.items() if count > 1
+        identity for identity, count in builtins.iter(identity_counts.items()) if count > 1
     )
-    blocks_by_addr: dict[int, list[IRBlock]] = {}
+    blocks_by_addr: dict[cython.longlong, list[IRBlock]] = {}
     for block in blocks:
         blocks_by_addr.setdefault(block.addr, []).append(block)
     accesses: list[IRLogicalMemoryAccess8616] = []
     refusals: list[IRLogicalMemoryRefusal8616] = []
-    valid_by_site: dict[tuple[int, int], list[IRLogicalMemoryCaptureRecord8616]] = {}
+    valid_by_site: dict[tuple[cython.longlong, cython.longlong], list[IRLogicalMemoryCaptureRecord8616]] = {}
     for capture in ordered_captures:
         preflight = _preflight_failure(function_addr, capture, duplicate_identities)
         if preflight is not None:
@@ -285,7 +312,7 @@ def resolve_logical_memory_accesses_8616(
         assert capture.insn_addr is not None
         valid_by_site.setdefault((capture.block_addr, capture.insn_addr), []).append(capture)
 
-    for (block_addr, insn_addr), site_captures in sorted(valid_by_site.items()):
+    for (block_addr, insn_addr), site_captures in sorted(tuple(valid_by_site.items())):
         matching_blocks = tuple(blocks_by_addr.get(block_addr, ()))
         if len(matching_blocks) != 1:
             failure = (
@@ -298,7 +325,7 @@ def resolve_logical_memory_accesses_8616(
                 if not matching_blocks
                 else "multiple imported blocks share the capture block address"
             )
-            refusals.extend(_refusal(capture, failure, detail) for capture in site_captures)
+            refusals.extend(_refusal(capture, failure, detail) for capture in iter(site_captures))
             continue
         site_accesses, site_refusals = _resolve_site(
             function_addr,

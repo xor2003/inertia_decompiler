@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Recover exact register sources at decoded instruction boundaries.
 
 Layer: Recovery metadata.
@@ -14,6 +15,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Protocol, cast
 
@@ -45,6 +48,7 @@ from .register_source_block_inventory import (
     RegisterSourceBlockInventory8616,
     collect_register_source_block_inventory_8616,
 )
+import operator
 
 __all__ = (
     "recover_callsite_register_source_8616",
@@ -55,16 +59,17 @@ __all__ = (
 class _Function8616(Protocol):
     """angr function fields consumed by exact register-source recovery."""
 
-    addr: int
+    addr: cython.longlong
     project: object
 
 
+@cython.ccall
 def _call_instruction_preserves_register_8616(
     project: object,
     instruction: DecodedInstructionFactSurface8616,
-    register: str,
+    register: object,
     caller_inventory: RegisterSourceBlockInventory8616 | None,
-) -> bool:
+) -> cython.bint:
     """Prove one call instruction leaves ``register`` intact.
 
     The decision delegates to the canonical Alias consumer over the exact
@@ -91,11 +96,13 @@ def _call_instruction_preserves_register_8616(
     return call_role_preserves_register_8616(fact, register)
 
 
+@cython.ccall
 def _register_write_transfer_8616(
     instruction: DecodedInstructionFactSurface8616,
-    register: str,
-) -> tuple[RegisterBlockTransferKind8616, tuple[object, ...] | None] | None:
+    register: object,
+) -> object:
     """Classify one non-call register write as replace, kill, or untouched."""
+    replacement: object
     if not instruction_writes_register_8616(instruction, register):
         return None
     if decoded_instruction_preserves_register_value_8616(instruction, register):
@@ -106,15 +113,19 @@ def _register_write_transfer_8616(
     return RegisterBlockTransferKind8616.REPLACE, replacement
 
 
+@cython.ccall
 def _block_transfer_8616(
     project: object,
-    instructions: tuple[DecodedInstructionFactSurface8616, ...],
-    register: str,
+    instructions: object,
+    register: object,
     caller_inventory: RegisterSourceBlockInventory8616 | None = None,
-) -> tuple[RegisterBlockTransferKind8616, tuple[object, ...] | None, bool]:
+) -> tuple[RegisterBlockTransferKind8616, tuple[object, ...] | None, cython.bint]:
     """Collect one ordered block-prefix transfer from decoded instructions."""
+    storage_source: object
+    write_transfer: object
+    instruction: object
     kind = RegisterBlockTransferKind8616.PRESERVE
-    source: tuple[object, ...] | None = None
+    source: object = None
     clobbers_memory_sources = False
     for instruction in instructions:
         mnemonic = instruction.mnemonic.lower()
@@ -147,13 +158,17 @@ def _block_transfer_8616(
     return kind, source, clobbers_memory_sources
 
 
+@cython.ccall
 def recover_register_source_before_instruction_8616(
     function: object,
     *,
-    instruction_addr: int,
-    register: str,
+    instruction_addr: cython.longlong,
+    register: object,
 ) -> RegisterReachingSourceResult8616:
     """Prove one register source reaches an exact instruction on every path."""
+    sink_addr: object
+    block: object
+    instruction: object
     boundary = cast(_Function8616, function)
     try:
         project = boundary.project
@@ -161,18 +176,18 @@ def recover_register_source_before_instruction_8616(
     except (AttributeError, TypeError):
         return resolve_register_reaching_source_8616((), entry_addr=0, sink_addr=0)
     inventory = collect_register_source_block_inventory_8616(function)
-    if not inventory.complete or inventory.function_addr != entry_addr:
+    if not inventory.complete or operator.ne(inventory.function_addr, entry_addr):
         return resolve_register_reaching_source_8616(
             (),
             entry_addr=entry_addr,
             sink_addr=0,
         )
     transfers: list[RegisterBlockTransfer8616] = []
-    sink_addr: int | None = None
+    sink_addr = None
     for block in inventory.blocks:
         prefix: list[DecodedInstructionFactSurface8616] = []
         for instruction in cast(tuple[DecodedInstructionFactSurface8616, ...], block.instructions):
-            if instruction.address == instruction_addr:
+            if operator.eq(instruction.address, instruction_addr):
                 if sink_addr is not None:
                     return resolve_register_reaching_source_8616(
                         (),
@@ -206,11 +221,12 @@ def recover_register_source_before_instruction_8616(
     )
 
 
+@cython.ccall
 def recover_callsite_register_source_8616(
     function: object,
     *,
-    push_instruction_addr: int,
-    register: str,
+    push_instruction_addr: cython.longlong,
+    register: object,
 ) -> RegisterReachingSourceResult8616:
     """Prove one register source reaches an exact argument PUSH on every path."""
     return recover_register_source_before_instruction_8616(

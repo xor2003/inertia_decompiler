@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Lower typed condition/value IR into structured-codegen C AST nodes.
 
 Layer: Structuring.
@@ -8,6 +9,8 @@ rewrite cleanup, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 from dataclasses import dataclass
@@ -46,6 +49,11 @@ from inertia.widening.segmented_load_identity import segmented_load_identity_861
 from .condition_binary_value import materialize_binary_ir_value_8616
 from .condition_stack_views import materialize_condition_stack_declaration_view_8616
 from .indexed_condition_values import materialize_indexed_segmented_condition_value_8616
+import dataclasses
+import operator
+import builtins
+CConstant = typing.TypeVar("CConstant")
+CExpression = typing.TypeVar("CExpression")
 
 if TYPE_CHECKING:
     from angr.analyses.decompiler.structured_codegen.c import CConstant, CExpression
@@ -106,18 +114,18 @@ class SameBlockRegisterProjectionVerdict8616(StrEnum):
     UNKNOWN_REFUSE = "unknown_refuse"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SameBlockRegisterProjectionStats8616:
     """Closed evidence counters for a same-block register projection."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SameBlockRegisterProjectionResult8616:
     """Return one projected expression with its typed evidence accounting."""
 
@@ -126,39 +134,39 @@ class SameBlockRegisterProjectionResult8616:
     stats: SameBlockRegisterProjectionStats8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SameBlockRegisterAssignment8616:
     """One tagged register assignment available to typed condition lowering."""
 
-    instruction_addr: int
+    instruction_addr: cython.longlong
     lhs: object
     rhs: object
-    register_offset: int
-    register_size: int
-    use_stored_value: bool = False
+    register_offset: cython.longlong
+    register_size: cython.longlong
+    use_stored_value: cython.bint = False
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SameBlockRegisterAssignmentIndex8616:
     """Immutable per-AST index of tagged register assignments by CFG block."""
 
-    assignments_by_block: tuple[
-        tuple[int, tuple[SameBlockRegisterAssignment8616, ...]],
-        ...,
-    ]
+    assignments_by_block: object
 
     def assignments_for_block(
         self,
-        block_addr: int,
-    ) -> tuple[SameBlockRegisterAssignment8616, ...]:
+        block_addr: cython.longlong,
+    ) -> object:
         """Return assignments indexed for one exact CFG block address."""
+        assignments: object
+        indexed_block: object
         for indexed_block, assignments in self.assignments_by_block:
             if indexed_block == block_addr:
                 return assignments
         return ()
 
 
-def _make_c_constant_8616(value: int, codegen: object, signed: bool = False) -> CConstant:
+@cython.ccall
+def _make_c_constant_8616(value: cython.longlong, codegen: object, signed: cython.bint = False) -> CConstant:
     """Create a structured-codegen CConstant node."""
     from angr.analyses.decompiler.structured_codegen.c import CConstant
     from angr.sim_type import SimTypeShort
@@ -166,8 +174,10 @@ def _make_c_constant_8616(value: int, codegen: object, signed: bool = False) -> 
     return CConstant(int(value), SimTypeShort(signed), codegen=codegen)
 
 
-def _register_offset_size_for_value_8616(value: IRValue, project: object) -> tuple[int, int]:
+@cython.ccall
+def _register_offset_size_for_value_8616(value: IRValue, project: object) -> tuple[cython.longlong, cython.longlong]:
     """Read register metadata through the dynamic third-party angr project boundary."""
+    arch: object
     arch = getattr(project, "arch", None)
     registers = getattr(arch, "registers", {}) if arch is not None else {}
     if isinstance(value.name, str) and value.name in registers:
@@ -180,6 +190,12 @@ def build_same_block_register_assignment_index_8616(
     codegen: object,
 ) -> SameBlockRegisterAssignmentIndex8616:
     """Index the current C AST once for same-block register projections."""
+    block_addr: object
+    cfunc: object
+    instruction_addr: object
+    runtime_name: object
+    node: object
+    root: object
     from angr.analyses.decompiler.structured_codegen.c import CAssignment, CVariable
     from angr.sim_variable import SimRegisterVariable
 
@@ -195,8 +211,8 @@ def build_same_block_register_assignment_index_8616(
         with contextlib.suppress(AttributeError):
             roots.append(cast(_CFunctionBodyBoundary8616, cfunc).body)
 
-    indexed: dict[int, list[SameBlockRegisterAssignment8616]] = {}
-    seen_nodes: set[int] = set()
+    indexed: dict[cython.longlong, list[SameBlockRegisterAssignment8616]] = {}
+    seen_nodes: set[cython.longlong] = set()
     for root in roots:
         for node in _iter_c_nodes_deep_8616(root):
             if id(node) in seen_nodes:
@@ -235,7 +251,7 @@ def build_same_block_register_assignment_index_8616(
     return SameBlockRegisterAssignmentIndex8616(
         assignments_by_block=tuple(
             (block_addr, tuple(assignments))
-            for block_addr, assignments in sorted(indexed.items())
+            for block_addr, assignments in builtins.iter(sorted(tuple(indexed.items())))
         )
     )
 
@@ -245,7 +261,7 @@ def lower_ir_value_to_c_expr_8616(
     project: object,
     codegen: object,
     *,
-    resolve_register_name: bool = False,
+    resolve_register_name: cython.bint = False,
 ) -> object | None:
     """Convert typed IR value evidence into a structured-codegen C expression."""
     if isinstance(value, IRBinaryValue):
@@ -305,7 +321,7 @@ def materialize_same_block_register_projection_8616(
     )
     candidates = [
         assignment
-        for assignment in active_index.assignments_for_block(condition.block_addr)
+        for assignment in builtins.iter(active_index.assignments_for_block(condition.block_addr))
         if assignment.instruction_addr < bind_addr
         and requested_offset < assignment.register_offset + assignment.register_size
         and assignment.register_offset < requested_end
@@ -317,11 +333,11 @@ def materialize_same_block_register_projection_8616(
             SameBlockRegisterProjectionVerdict8616.NO_CANDIDATE,
             SameBlockRegisterProjectionStats8616(raw_fact_count=1),
         )
-    latest_addr = max(candidate.instruction_addr for candidate in candidates)
+    latest_addr = max(candidate.instruction_addr for candidate in iter(candidates))
     latest = tuple(
         candidate
-        for candidate in candidates
-        if candidate.instruction_addr == latest_addr
+        for candidate in iter(candidates)
+        if operator.eq(candidate.instruction_addr, latest_addr)
     )
     normalized = len(latest)
     if len(latest) != 1:
@@ -356,7 +372,7 @@ def materialize_same_block_register_projection_8616(
         lhs
         if candidate.use_stored_value or any(
             isinstance(child, CFunctionCall)
-            for child in _iter_c_nodes_deep_8616(rhs)
+            for child in builtins.iter(_iter_c_nodes_deep_8616(rhs))
         )
         else rhs
     )
@@ -403,12 +419,16 @@ def materialize_same_block_register_projection_8616(
     )
 
 
-def _register_lane_identity_8616(variable: object, project: object) -> tuple[int, int] | None:
+@cython.ccall
+def _register_lane_identity_8616(variable: object, project: object) -> object:
     """Return the architectural byte view owned by one register variable.
 
     Register metadata is read through the dynamic third-party angr project
     boundary only for runtime GP names; owned variables resolve directly.
     """
+    register: object
+    registers: object
+    runtime_name: object
     from angr.sim_variable import SimRegisterVariable
 
     if isinstance(variable, SimRegisterVariable):
@@ -423,6 +443,7 @@ def _register_lane_identity_8616(variable: object, project: object) -> tuple[int
     return int(register[0]), int(register[1])
 
 
+@cython.ccall
 def _low_word_lane_value_8616(
     assignment: SameBlockRegisterAssignment8616,
     project: object,
@@ -462,7 +483,7 @@ def _low_word_lane_value_8616(
     lane = (assignment.register_offset, assignment.register_size)
     if not (
         isinstance(preserved.lhs, CVariable)
-        and _register_lane_identity_8616(preserved.lhs.variable, project) == lane
+        and operator.eq(_register_lane_identity_8616(preserved.lhs.variable, project), lane)
     ):
         return None
     value = inserted.lhs
@@ -484,6 +505,7 @@ def _low_word_lane_value_8616(
     return cast(object, inserted)
 
 
+@cython.ccall
 def _stored_low_word_expression_8616(
     assignment: SameBlockRegisterAssignment8616, project: object,
 ) -> object | None:
@@ -496,9 +518,9 @@ def _stored_low_word_expression_8616(
     from angr.sim_type import SimTypeLong
 
     lhs = assignment.lhs
-    if not isinstance(lhs, CVariable) or _register_lane_identity_8616(lhs.variable, project) != (
+    if not isinstance(lhs, CVariable) or operator.ne(_register_lane_identity_8616(lhs.variable, project), (
         assignment.register_offset, assignment.register_size,
-    ):
+    )):
         return None
     return cast(object, CBinaryOp(
         "And", lhs, CConstant(0xFFFF, SimTypeLong(signed=False), codegen=lhs.codegen),
@@ -508,8 +530,8 @@ def _stored_low_word_expression_8616(
 
 def _reaching_lane_expression_8616(
     assignment: SameBlockRegisterAssignment8616,
-    requested_offset: int,
-    requested_size: int,
+    requested_offset: cython.longlong,
+    requested_size: cython.longlong,
     project: object,
 ) -> object | None:
     """Return the value a contained byte view receives, or refuse staleness.
@@ -519,6 +541,7 @@ def _reaching_lane_expression_8616(
     the retained destination through a word mask. Neither route re-evaluates
     the assignment RHS; native reaching-definition binding follows selection.
     """
+    projected: object
     from angr.analyses.decompiler.structured_codegen.c import (
         CFunctionCall,
         CVariable,
@@ -536,17 +559,17 @@ def _reaching_lane_expression_8616(
     if written_offset == requested_offset and written_size == requested_size:
         if assignment.use_stored_value or any(
             isinstance(child, CFunctionCall)
-            for child in _iter_c_nodes_deep_8616(rhs)
+            for child in builtins.iter(_iter_c_nodes_deep_8616(rhs))
         ):
             return assignment.lhs
         variables = [
             node
-            for node in _iter_c_nodes_deep_8616(rhs)
+            for node in builtins.iter(_iter_c_nodes_deep_8616(rhs))
             if isinstance(node, CVariable)
         ]
         if any(
             not isinstance(node.variable, SimTemporaryVariable)
-            for node in variables
+            for node in iter(variables)
         ):
             return None
         return rhs
@@ -556,18 +579,25 @@ def _reaching_lane_expression_8616(
     return None
 
 
+@cython.ccall
 def _reaching_register_candidates_8616(
     index: SameBlockRegisterAssignmentIndex8616,
-    register_name: str,
-    requested_offset: int,
-    requested_size: int,
+    register_name: object,
+    requested_offset: cython.longlong,
+    requested_size: cython.longlong,
     project: object,
-) -> tuple[int, int, dict[tuple[int, str, int], object]]:
+) -> tuple[cython.longlong, cython.longlong, dict[tuple[cython.longlong, str, cython.longlong], object]]:
     """Census non-conflicting reaching-definition expressions for one view."""
+    existing: object
+    expression: object
+    _block_addr: object
+    address: object
+    assignment: object
+    assignments: object
     raw_count = 0
     classified_count = 0
-    candidates: dict[tuple[int, str, int], object] = {}
-    conflicted_addrs: set[int] = set()
+    candidates: dict[tuple[cython.longlong, str, cython.longlong], object] = {}
+    conflicted_addrs: set[cython.longlong] = set()
     for _block_addr, assignments in index.assignments_by_block:
         for assignment in assignments:
             expression = _reaching_lane_expression_8616(
@@ -591,19 +621,24 @@ def _reaching_register_candidates_8616(
     return raw_count, classified_count, candidates
 
 
+@cython.ccall
 def _runtime_storage_write_census_8616(
-    index: SameBlockRegisterAssignmentIndex8616, offset: int, size: int,
-) -> tuple[tuple[object, ...], frozenset[int]] | None:
+    index: SameBlockRegisterAssignmentIndex8616, offset: cython.longlong, size: cython.longlong,
+) -> object:
     """Require represented assignments to one exact owned runtime carrier."""
+    parent: object
+    _block: object
+    assignment: object
+    assignments: object
     from angr.analyses.decompiler.structured_codegen.c import CVariable
     from angr.sim_variable import SimMemoryVariable
 
-    writes: set[int] = set()
+    writes: set[cython.longlong] = set()
     identities: set[tuple[object, ...]] = set()
-    duplicates: set[int] = set()
+    duplicates: set[cython.longlong] = set()
     for _block, assignments in index.assignments_by_block:
         for assignment in assignments:
-            if assignment.register_offset != offset or assignment.register_size < size:
+            if operator.ne(assignment.register_offset, offset) or assignment.register_size < size:
                 continue
             if not assignment.use_stored_value or not isinstance(assignment.lhs, CVariable):
                 continue
@@ -620,11 +655,14 @@ def _runtime_storage_write_census_8616(
     return next(iter(identities)), frozenset(writes)
 
 
+@cython.ccall
 def _materialized_runtime_register_storage_8616(
     index: SameBlockRegisterAssignmentIndex8616,
     value: IRValue, condition: ConditionIR, project: object, codegen: object,
 ) -> object | None:
     """Read retained runtime state only after Alias proves all-path write coverage."""
+    census: object
+    resolved: object
     from angr.analyses.decompiler.structured_codegen.c import CVariable
     from angr.sim_variable import SimMemoryVariable
 
@@ -650,13 +688,13 @@ def _materialized_runtime_register_storage_8616(
         return None
     # Return the existing carrier's view, retaining its function storage region.
     region = identity[3]
-    if not isinstance(region, int) or region != inventory.function_addr:
+    if not isinstance(region, int) or operator.ne(region, inventory.function_addr):
         return None
     parent_expression = runtime_gp_state_expr_8616(str(identity[0]), codegen=codegen, function_addr=region)
     if not isinstance(parent_expression, CVariable) or not isinstance(parent_expression.variable, SimMemoryVariable):
         return None
     canonical = parent_expression.variable
-    if (canonical.addr, canonical.size, canonical.region) != identity[1:]:
+    if operator.ne((canonical.addr, canonical.size, canonical.region), identity[1:]):
         return None
     return cast(object, runtime_gp_state_expr_8616(value.name, codegen=codegen, function_addr=region))
 
@@ -680,6 +718,7 @@ def materialize_reaching_register_projection_8616(
     producer-to-branch interval. Missing writes and clobbers still refuse.
     Returned expressions never contain calls or replay assignment effects.
     """
+    expression: object
     from angr.analyses.decompiler.structured_codegen.c import (
         CExpression,
         CFunctionCall,
@@ -742,7 +781,7 @@ def materialize_reaching_register_projection_8616(
         not isinstance(expression, CExpression)
         or any(
             isinstance(child, CFunctionCall)
-            for child in _iter_c_nodes_deep_8616(expression)
+            for child in builtins.iter(_iter_c_nodes_deep_8616(expression))
         )
     ):
         return SameBlockRegisterProjectionResult8616(
@@ -767,18 +806,20 @@ def materialize_reaching_register_projection_8616(
     )
 
 
+@cython.ccall
 def stable_stack_condition_binding_tags_8616(
-    bp_offset: int,
-    size: int,
+    bp_offset: cython.longlong,
+    size: cython.longlong,
     *,
-    name: str | None = None,
+    name: object = None,
 ) -> dict[str, object]:
     """Return exact stack-slot tags for one proven ConditionIR operand."""
     binding = StackVariableBinding(bp_offset, size, var_name=name)
-    return {str(key): value for key, value in stable_stack_binding_tags_8616(binding).items()}
+    return {str(key): value for key, value in builtins.iter(stable_stack_binding_tags_8616(binding).items())}
 
 
-def condition_origin_tags_8616(condition: ConditionIR | IRCondition) -> dict[str, object]:
+@cython.ccall
+def condition_origin_tags_8616(condition: ConditionIR | IRCondition) -> object:
     """Return C-AST provenance tags for a typed branch condition."""
     tags: dict[str, object] = {"typed_condition": True}
     if not isinstance(condition, ConditionIR):
@@ -794,10 +835,11 @@ def condition_origin_tags_8616(condition: ConditionIR | IRCondition) -> dict[str
     return tags
 
 
+@cython.ccall
 def condition_segment_access_tags_8616(
     operand: IRValue,
-    helper: str,
-) -> dict[str, object]:
+    helper: object,
+) -> object:
     """Return typed tags for a segment access already proven by ConditionIR."""
     if operand.space not in {MemSpace.DS, MemSpace.ES, MemSpace.SS}:
         raise ValueError("condition segment access requires a segmented IRValue")
@@ -817,6 +859,7 @@ def condition_segment_access_tags_8616(
     return tags
 
 
+@cython.ccall
 def _condition_segment_accesses_8616(
     value: object,
 ) -> tuple[IRValue, ...]:
@@ -835,23 +878,25 @@ def _condition_segment_accesses_8616(
     return ()
 
 
+@cython.ccall
 def attach_condition_segment_access_provenance_8616(
     expression: CExpression,
     condition: ConditionIR,
-) -> int:
+) -> cython.longlong:
     """Carry exact operand access provenance onto matching segment helpers.
 
     The condition producer defines flags and is not necessarily a memory load.
     This boundary therefore matches typed operand addresses and refuses absent
     or ambiguous access evidence instead of borrowing CMP/JCC provenance.
     """
+    identity: object
+    sources: object
+    candidate: object
+    operand: object
     from angr.analyses.decompiler.structured_codegen.c import CFunctionCall
 
-    sources_by_access: dict[tuple[MemSpace, int, int], set[int]] = {}
-    for operand in (
-        *_condition_segment_accesses_8616(condition.lhs),
-        *_condition_segment_accesses_8616(condition.rhs),
-    ):
+    sources_by_access: dict[tuple[MemSpace, cython.longlong, cython.longlong], set[cython.longlong]] = {}
+    for operand in tuple(_condition_segment_accesses_8616(condition.lhs)) + tuple(_condition_segment_accesses_8616(condition.rhs)):
         key = (
             operand.space,
             int(operand.offset) & 0xFFFF,
@@ -875,7 +920,7 @@ def attach_condition_segment_access_provenance_8616(
         if len(sources) != 1:
             continue
         exact_sources = tuple(sorted(sources))
-        if tags.get(_SOURCE_INSTRUCTION_ADDRS_TAG_8616) == exact_sources:
+        if operator.eq(tags.get(_SOURCE_INSTRUCTION_ADDRS_TAG_8616), exact_sources):
             continue
         updated_tags = dict(tags)
         updated_tags[_SOURCE_INSTRUCTION_ADDRS_TAG_8616] = exact_sources
@@ -884,23 +929,25 @@ def attach_condition_segment_access_provenance_8616(
     return tagged_count
 
 
+@cython.ccall
 def _ir_value_to_cvar_8616(
     value: IRValue,
     project: object,
     codegen: object,
     *,
-    resolve_register_name: bool = False,
-    signed: bool = False,
+    resolve_register_name: cython.bint = False,
+    signed: cython.bint = False,
     condition_width_bits: int | None = None,
 ) -> object:
     """Convert an IRValue to a CVariable node for structured codegen."""
+    lowered: object
     from angr.analyses.decompiler.structured_codegen.c import CVariable
     from angr.sim_variable import SimRegisterVariable, SimStackVariable
 
-    if value.space == MemSpace.CONST:
+    if operator.eq(value.space, MemSpace.CONST):
         return _make_c_constant_8616(int(value.const or 0), codegen)
 
-    if value.space == MemSpace.REG:
+    if operator.eq(value.space, MemSpace.REG):
         register_name = value.name if isinstance(value.name, str) else None
         try:
             cfunc = cast(_CodegenFunctionBoundary8616, codegen).cfunc
@@ -920,7 +967,7 @@ def _ir_value_to_cvar_8616(
         )
         return CVariable(variable=var, codegen=codegen)
 
-    if value.space == MemSpace.SS:
+    if operator.eq(value.space, MemSpace.SS):
         size = max(1, int(value.size or 2))
         if isinstance(condition_width_bits, int) and condition_width_bits > 0:
             condition_size = max(1, (condition_width_bits + 7) // 8)
@@ -948,6 +995,7 @@ def _ir_value_to_cvar_8616(
     return CVariable(variable=var, codegen=codegen)
 
 
+@cython.ccall
 def lower_typed_condition_to_c_expr_8616(
     recovered: object,  # RecoveredCondition
     project: object,
@@ -966,9 +1014,10 @@ def lower_typed_condition_to_c_expr_8616(
     return _lower_condition_ir_to_c_expr_8616(condition, project, codegen)
 
 
+@cython.ccall
 def _lowered_condition_arg_8616(
     condition: IRCondition,
-    index: int,
+    index: cython.longlong,
     project: object,
     codegen: object,
 ) -> object:
@@ -982,9 +1031,10 @@ def _lowered_condition_arg_8616(
     )
 
 
+@cython.ccall
 def _lower_zero_test_8616(
     condition: IRCondition,
-    angr_op: str,
+    angr_op: object,
     project: object,
     codegen: object,
 ) -> object | None:
@@ -1002,12 +1052,15 @@ def _lower_zero_test_8616(
     ))
 
 
+@cython.ccall
 def _lower_compare_family_8616(
     condition: IRCondition,
     project: object,
     codegen: object,
 ) -> object | None:
     """Lower a typed compare-family condition to its angr binary operator."""
+    angr_op: object
+    sym: object
     from angr.analyses.decompiler.structured_codegen.c import CBinaryOp
 
     sym = condition_compare_symbol_8616(condition.op)
@@ -1026,12 +1079,14 @@ def _lower_compare_family_8616(
     ))
 
 
+@cython.ccall
 def _lower_not_8616(
     condition: IRCondition,
     project: object,
     codegen: object,
 ) -> object | None:
     """Lower a not condition wrapping a nested IRCondition."""
+    inner_expr: object
     from angr.analyses.decompiler.structured_codegen.c import CUnaryOp
 
     inner = condition.args[0]
@@ -1047,6 +1102,7 @@ def _lower_not_8616(
     return None
 
 
+@cython.ccall
 def _lower_generic_compare_8616(
     condition: IRCondition,
     project: object,
@@ -1064,7 +1120,8 @@ def _lower_generic_compare_8616(
     ))
 
 
-def _binary_ir_operands_8616(condition: IRCondition) -> bool:
+@cython.ccall
+def _binary_ir_operands_8616(condition: IRCondition) -> cython.bint:
     """Check that the condition carries two IRValue operands."""
     return (
         len(condition.args) >= 2
@@ -1073,6 +1130,7 @@ def _binary_ir_operands_8616(condition: IRCondition) -> bool:
     )
 
 
+@cython.ccall
 def _lower_condition_ir_to_c_expr_8616(
     condition: IRCondition,
     project: object,
@@ -1102,7 +1160,8 @@ def _lower_condition_ir_to_c_expr_8616(
     return None
 
 
-def condition_op_to_structured_kind_8616(op: str) -> str:
+@cython.ccall
+def condition_op_to_structured_kind_8616(op: object) -> str:
     """Map a ConditionOp to the kind string used in structured-codegen node kinds."""
     if op == "zero":
         return "CmpEQ"
@@ -1131,6 +1190,7 @@ _ANGr_BINARY_OP_MAP_8616: dict[str, str] = {
 }
 
 
-def _condition_ir_op_to_angr_binary_op_8616(symbol: str) -> str | None:
+@cython.ccall
+def _condition_ir_op_to_angr_binary_op_8616(symbol: object) -> object:
     """Map a condition op symbol ('==', '!=' etc.) to angr CBinaryOp operator name."""
     return _ANGr_BINARY_OP_MAP_8616.get(symbol)

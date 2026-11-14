@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Entry-prefix narrowing of the shared stack-pointer snapshot owner.
 
 Layer: Alias.
@@ -23,6 +24,9 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import typing
+import dataclasses
+import cython
 
 from dataclasses import dataclass, field
 
@@ -40,6 +44,7 @@ from .stack_pointer_snapshots import (
     StackFrameBase8616,
     StackPointerSnapshots8616,
 )
+import operator
 
 _WORD_BYTES = 2
 _MOD16 = 1 << 16
@@ -50,7 +55,7 @@ _SP_FAMILY = register_value_family_8616("sp")
 _BP_FAMILY = register_value_family_8616("bp")
 
 
-def _undecorated_8616(value: IRValue) -> bool:
+def _undecorated_8616(value: IRValue) -> cython.bint:
     """Return whether an operand carries no structural decorations.
 
     ``expr`` is deliberately absent here: tmp-refs legitimately re-present the
@@ -60,18 +65,19 @@ def _undecorated_8616(value: IRValue) -> bool:
     """
     return value.index_shift == 0 and all(
         field is None
-        for field in (
+        for field in iter((
             value.const,
             value.index,
             value.version,
             value.call_output,
             value.memory_access_size,
             value.active_unary,
-        )
+        ))
     )
 
 
-def _bare_constant_8616(value: IRValue) -> bool:
+@cython.ccall
+def _bare_constant_8616(value: IRValue) -> cython.bint:
     """Return whether ``value`` is an undecorated CONST operand.
 
     Affine producers accept a constant displacement only when the operand is
@@ -94,7 +100,7 @@ def _bare_constant_8616(value: IRValue) -> bool:
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class EntryProducerEvidence8616:
     """Exact production evidence for one immutable temporary.
 
@@ -106,14 +112,15 @@ class EntryProducerEvidence8616:
     a wide destination can never be borrowed as a word frame value.
     """
 
-    tmp: int
-    instr_index: int
-    op: str
-    dst_size: int
+    tmp: cython.longlong
+    instr_index: cython.longlong
+    op: object
+    dst_size: cython.longlong
     view: IRValue | None
 
 
-def _matches_producer_view_8616(value: IRValue, producer: EntryProducerEvidence8616) -> bool:
+@cython.ccall
+def _matches_producer_view_8616(value: IRValue, producer: EntryProducerEvidence8616) -> cython.bint:
     """Match a retained view or the scalar TMP projection of proven affine IR.
 
     Captured operands no longer fold into a live register descriptor. Their
@@ -121,7 +128,8 @@ def _matches_producer_view_8616(value: IRValue, producer: EntryProducerEvidence8
     recorded definition, word width, zero displacement and exact earned
     operation establish this projection; pending computations never do.
     """
-    if value == producer.view:
+    projection: object
+    if operator.eq(value, producer.view):
         return True
     if (value.space is not MemSpace.TMP or value.offset != 0
             or producer.op not in _AFFINE_OPS or producer.view is None):
@@ -133,7 +141,7 @@ def _matches_producer_view_8616(value: IRValue, producer: EntryProducerEvidence8
     return projection is not None and projection.kind is ScalarProjectionKind8616.EARNED_REDECORATION
 
 
-@dataclass(slots=True)
+@dataclasses.dataclass()
 class EntryStackPointerSnapshots8616(StackPointerSnapshots8616):
     """Single owner for entry-prefix frame coordinates and producer evidence.
 
@@ -147,10 +155,10 @@ class EntryStackPointerSnapshots8616(StackPointerSnapshots8616):
 
     current_sp: int | None = 0
     current_bp: int | None = None
-    producers: dict[int, EntryProducerEvidence8616] = field(default_factory=dict)
+    producers: object = field(default_factory=dict)
 
     def observe_entry_instruction(
-        self, instruction: IRInstr, instruction_index: int
+        self, instruction: IRInstr, instruction_index: cython.longlong
     ) -> None:
         """Record strict producer evidence and advance current frame registers.
 
@@ -189,14 +197,16 @@ class EntryStackPointerSnapshots8616(StackPointerSnapshots8616):
         an unearned ``Iop_*`` label — is inconsistent evidence and refuses; a
         plain register-name fallback is never attempted.
         """
-        if value.size != _WORD_BYTES or not _undecorated_8616(value):
+        coordinate: object
+        producer: object
+        if operator.ne(value.size, _WORD_BYTES) or not _undecorated_8616(value):
             return None
         if value.source_tmp is not None:
             producer = self.producers.get(value.source_tmp)
             if (
                 producer is None
                 or producer.view is None
-                or producer.dst_size != _WORD_BYTES
+                or operator.ne(producer.dst_size, _WORD_BYTES)
                 or not _matches_producer_view_8616(value, producer)
             ):
                 return None
@@ -214,6 +224,8 @@ class EntryStackPointerSnapshots8616(StackPointerSnapshots8616):
         for undecorated register reads, while decorated tmp-refs prove their
         displacement through view equality instead.
         """
+        coordinate: object
+        current: object
         if len(address.base) != 1 or address.base[0] not in _ENTRY_FRAME_REGISTERS:
             return None
         register: FrameRegister8616 = "sp" if address.base[0] == "sp" else "bp"
@@ -223,7 +235,7 @@ class EntryStackPointerSnapshots8616(StackPointerSnapshots8616):
         if len(address.base_values) != 1:
             return None
         base = address.base_values[0]
-        if base.space is not MemSpace.REG or base.name != register:
+        if base.space is not MemSpace.REG or operator.ne(base.name, register):
             return None
         if base.source_tmp is None and base.offset != 0:
             return None
@@ -232,7 +244,7 @@ class EntryStackPointerSnapshots8616(StackPointerSnapshots8616):
 
     def _production(
         self, instruction: IRInstr, destination: IRValue
-    ) -> tuple[int | None, IRValue | None]:
+    ) -> object:
         """Compute one producer's strict coordinate and re-presentation view.
 
         Only word-width productions earn coordinates: destination, instruction,
@@ -243,20 +255,20 @@ class EntryStackPointerSnapshots8616(StackPointerSnapshots8616):
         importer-equivalent ``REG name / canonical offset / (op,)`` descriptor
         for supported affine producers.
         """
-        args: tuple[object, ...] = instruction.args
+        args: object = instruction.args
         if instruction.op == "MOV" and len(args) == 1 and isinstance(args[0], IRValue):
             source = args[0]
             coordinate = None
             if (
-                destination.size == _WORD_BYTES
-                and instruction.size == _WORD_BYTES
-                and source.size == _WORD_BYTES
+                operator.eq(destination.size, _WORD_BYTES)
+                and operator.eq(instruction.size, _WORD_BYTES)
+                and operator.eq(source.size, _WORD_BYTES)
                 and _undecorated_8616(destination)
                 and not destination.expr
             ):
                 coordinate = self.strict_value_coordinate(source)
             return coordinate, source
-        if instruction.op in _AFFINE_OPS and len(args) == _BINARY_OPERAND_COUNT:
+        if instruction.op in _AFFINE_OPS and operator.eq(len(args), _BINARY_OPERAND_COUNT):
             return self._affine_production(instruction, destination)
         return None, None
 
@@ -271,6 +283,7 @@ class EntryStackPointerSnapshots8616(StackPointerSnapshots8616):
         decoration the producing expression earned. Any other operand shape is
         an opaque production whose consumers refuse.
         """
+        base: object
         left, right = instruction.args
         if not isinstance(left, IRValue) or not isinstance(right, IRValue):
             return None, None
@@ -292,10 +305,10 @@ class EntryStackPointerSnapshots8616(StackPointerSnapshots8616):
         base = self.strict_value_coordinate(left)
         if (
             base is None
-            or destination.size != _WORD_BYTES
-            or instruction.size != _WORD_BYTES
-            or left.size != _WORD_BYTES
-            or right.size != _WORD_BYTES
+            or operator.ne(destination.size, _WORD_BYTES)
+            or operator.ne(instruction.size, _WORD_BYTES)
+            or operator.ne(left.size, _WORD_BYTES)
+            or operator.ne(right.size, _WORD_BYTES)
         ):
             return None, view
         return (base + delta) % _MOD16, view
@@ -327,10 +340,10 @@ class EntryStackPointerSnapshots8616(StackPointerSnapshots8616):
         """
         destination = instruction.dst
         assert isinstance(destination, IRValue)
-        args: tuple[object, ...] = instruction.args
+        args: object = instruction.args
         exact_word = (
-            destination.name == register
-            and destination.size == _WORD_BYTES
+            operator.eq(destination.name, register)
+            and operator.eq(destination.size, _WORD_BYTES)
             and destination.offset == 0
             and destination.index_shift == 0
             and not destination.expr
@@ -344,7 +357,7 @@ class EntryStackPointerSnapshots8616(StackPointerSnapshots8616):
         )
         if (
             instruction.op != "MOV"
-            or instruction.size != _WORD_BYTES
+            or operator.ne(instruction.size, _WORD_BYTES)
             or not exact_word
             or len(args) != 1
             or not isinstance(args[0], IRValue)

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Optional evidence/reporting.
 
 Responsibility: parse LST/debug evidence into optional labels and diagnostics.
@@ -11,17 +12,20 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+import dataclasses
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class DebugTypeMemberEvidence:
     """Optional debug evidence for one member of a recovered type."""
 
-    name: str
+    name: object
     offset: int | None = None
     owner_type_index: int | None = None
     type_index: int | None = None
@@ -30,21 +34,21 @@ class DebugTypeMemberEvidence:
     source: str = ""
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class DebugTypeReferenceEvidence:
     """Optional debug evidence linking a symbol name to a type index."""
 
-    name: str
-    type_index: int
+    name: object
+    type_index: cython.longlong
     symbol_class: str = ""
     source: str = ""
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class DebugSymbolEvidence:
     """Optional debug evidence for one named data or code symbol."""
 
-    name: str
+    name: object
     symbol_class: str = ""
     storage: str = ""
     offset: int | None = None
@@ -58,12 +62,12 @@ class DebugSymbolEvidence:
     source: str = ""
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class DebugTypeDescriptorEvidence:
     """Optional debug evidence describing a type record from listing metadata."""
 
-    type_index: int
-    kind: str
+    type_index: cython.longlong
+    kind: object
     name: str = ""
     size: int | None = None
     base_type_index: int | None = None
@@ -76,27 +80,27 @@ class DebugTypeDescriptorEvidence:
     source: str = ""
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class DebugEnumMemberEvidence:
     """Optional debug evidence for one enum member value."""
 
-    name: str
-    value: int
+    name: object
+    value: cython.longlong
     owner_type_index: int | None = None
     attributes: int | None = None
     source: str = ""
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class LSTMetadata:
     """Optional listing metadata consumed as labels and diagnostics only."""
 
-    data_labels: dict[int, str]
-    code_labels: dict[int, str]
-    code_ranges: dict[int, tuple[int, int]] = field(default_factory=dict)
-    function_entry_addrs: frozenset[int] = field(default_factory=frozenset)
-    signature_code_addrs: frozenset[int] = field(default_factory=frozenset)
-    absolute_addrs: bool = False
+    data_labels: object
+    code_labels: object
+    code_ranges: object = field(default_factory=dict)
+    function_entry_addrs: object = field(default_factory=frozenset)
+    signature_code_addrs: object = field(default_factory=frozenset)
+    absolute_addrs: cython.bint = False
     source_format: str = "generic_lst"
     struct_names: tuple[str, ...] = ()
     debug_source_files: tuple[str, ...] = ()
@@ -107,11 +111,11 @@ class LSTMetadata:
     debug_type_members: tuple[DebugTypeMemberEvidence, ...] = ()
     debug_enum_members: tuple[DebugEnumMemberEvidence, ...] = ()
     debug_identifiers: tuple[str, ...] = ()
-    debug_line_map: dict[int, tuple[int, int]] = field(default_factory=dict)
-    cod_path: str | None = None
-    cod_proc_kinds: dict[int, str] = field(default_factory=dict)
+    debug_line_map: object = field(default_factory=dict)
+    cod_path: object = None
+    cod_proc_kinds: object = field(default_factory=dict)
     # Binary-pattern extents only; never synthesized from labels or debug bounds.
-    signature_code_ranges: dict[int, tuple[int, int]] = field(default_factory=dict)
+    signature_code_ranges: object = field(default_factory=dict)
 
 
 _DATA_LABEL_RE = re.compile(
@@ -148,7 +152,8 @@ _MASM_SYMBOL_ROW_RE = re.compile(
 )
 
 
-def _update_summary_section_8616(stripped: str, current_summary_section: str | None) -> str | None:
+@cython.ccall
+def _update_summary_section_8616(stripped: object, current_summary_section: object) -> object:
     if _PROCEDURES_HEADER_RE.match(stripped):
         return "procedures"
     if _SYMBOLS_HEADER_RE.match(stripped):
@@ -158,13 +163,16 @@ def _update_summary_section_8616(stripped: str, current_summary_section: str | N
     return current_summary_section
 
 
+@cython.ccall
 def _consume_summary_row_8616(
-    stripped: str,
-    current_summary_section: str | None,
-    code_labels: dict[int, str],
-    code_ranges: dict[int, tuple[int, int]],
-    data_labels: dict[int, str],
-) -> bool:
+    stripped: object,
+    current_summary_section: object,
+    code_labels: object,
+    code_ranges: object,
+    data_labels: object,
+) -> cython.bint:
+    procedure_row: object
+    symbol_row: object
     if current_summary_section == "procedures":
         procedure_row = _MASM_PROCEDURE_ROW_RE.match(stripped)
         if procedure_row is not None:
@@ -183,10 +191,12 @@ def _consume_summary_row_8616(
     return False
 
 
+@cython.ccall
 def _segment_directive_target_8616(
-    stripped: str, current_segment: str | None
-) -> tuple[str | None, bool] | None:
+    stripped: object, current_segment: object
+) -> object:
     """Resolve one ``SEGMENT`` directive to its space or keep the current one."""
+    segment_match: object
     segment_match = _SEGMENT_RE.match(stripped)
     if segment_match is None:
         return None
@@ -198,10 +208,12 @@ def _segment_directive_target_8616(
     return current_segment, True
 
 
+@cython.ccall
 def _ends_directive_target_8616(
-    stripped: str, current_segment: str | None
-) -> tuple[str | None, bool] | None:
+    stripped: object, current_segment: object
+) -> object:
     """Resolve one ``ENDS`` directive closing the matching space."""
+    ends_match: object
     ends_match = _ENDS_RE.match(stripped)
     if ends_match is None:
         return None
@@ -213,10 +225,13 @@ def _ends_directive_target_8616(
     return current_segment, True
 
 
+@cython.ccall
 def _maybe_update_current_segment_8616(
-    stripped: str, upper: str, current_segment: str | None
-) -> tuple[str | None, bool]:
+    stripped: object, upper: object, current_segment: object
+) -> object:
     """Track the listing's current segment space from its directives."""
+    dot_segment_match: object
+    target: object
     target = _segment_directive_target_8616(stripped, current_segment)
     if target is not None:
         return target
@@ -235,13 +250,18 @@ def _maybe_update_current_segment_8616(
     return current_segment, False
 
 
+@cython.ccall
 def _consume_code_segment_line_8616(
-    stripped: str,
-    code_labels: dict[int, str],
-    code_ranges: dict[int, tuple[int, int]],
-    colon_code_labels: dict[str, int],
-    open_proc_starts: dict[str, int],
+    stripped: object,
+    code_labels: object,
+    code_ranges: object,
+    colon_code_labels: object,
+    open_proc_starts: object,
 ) -> None:
+    endp_match: object
+    label_match: object
+    proc_match: object
+    start_offset: object
     proc_match = _PROC_RE.match(stripped)
     if proc_match is not None:
         offset = int(proc_match.group(1), 16)
@@ -262,28 +282,34 @@ def _consume_code_segment_line_8616(
         colon_code_labels.setdefault(label_match.group(2), int(label_match.group(1), 16))
 
 
-def _infer_lst_source_format_8616(lines: list[str]) -> str:
+def _infer_lst_source_format_8616(lines: object) -> str:
     if lines and lines[0].startswith("UASM "):
         return "uasm_lst"
     if lines and lines[0].startswith("Microsoft (R) Macro Assembler"):
         return "masm_lst"
-    if any(line.startswith("seg") and "; |" not in line for line in lines[:32]):
+    if any(line.startswith("seg") and "; |" not in line for line in iter(lines[:32])):
         return "ida_lst"
     return "generic_lst"
 
 
+@cython.ccall
 def extract_lst_metadata(lst_path: Path) -> LSTMetadata:
     """Parse optional LST labels without making listing text semantic proof."""
+    end_match: object
+    entry_label_name: object
+    entry_offset: object
+    match: object
+    line: object
     lines = lst_path.read_text(errors="ignore").splitlines()
-    data_labels: dict[int, str] = {}
-    code_labels: dict[int, str] = {}
-    code_ranges: dict[int, tuple[int, int]] = {}
-    colon_code_labels: dict[str, int] = {}
+    data_labels: dict[cython.longlong, str] = {}
+    code_labels: dict[cython.longlong, str] = {}
+    code_ranges: dict[cython.longlong, tuple[cython.longlong, cython.longlong]] = {}
+    colon_code_labels: dict[str, cython.longlong] = {}
 
-    current_segment: str | None = None
-    current_summary_section: str | None = None
-    open_proc_starts: dict[str, int] = {}
-    entry_label_name: str | None = None
+    current_segment: object = None
+    current_summary_section: object = None
+    open_proc_starts: dict[str, cython.longlong] = {}
+    entry_label_name = None
 
     for line in lines:
         stripped = line.strip()

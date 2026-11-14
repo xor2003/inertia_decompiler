@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Reject unknown cross-selector writes during saved stack-byte lifetimes.
 
 Layer: Alias.
@@ -10,22 +11,28 @@ work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from inertia.ir.core import IRAddress, IRFunctionArtifact, MemSpace
+import operator
+import builtins
 
 
+@cython.ccall
 def _site_reaches_8616(
-    artifact: IRFunctionArtifact, source: tuple[int, int], target: tuple[int, int],
-) -> bool:
+    artifact: IRFunctionArtifact, source: object, target: object,
+) -> cython.bint:
     """Test instruction-order reachability, retaining paths through backedges."""
-    if source[0] == target[0] and source[1] <= target[1]:
+    address: object
+    if operator.eq(source[0], target[0]) and source[1] <= target[1]:
         return True
-    blocks = {block.addr: block for block in artifact.blocks}
+    blocks = {block.addr: block for block in iter(artifact.blocks)}
     pending = list(blocks[source[0]].successor_addrs)
-    visited: set[int] = set()
+    visited: set[cython.longlong] = set()
     while pending:
         address = pending.pop()
-        if address == target[0]:
+        if operator.eq(address, target[0]):
             return True
         if address not in visited:
             visited.add(address)
@@ -34,8 +41,8 @@ def _site_reaches_8616(
 
 
 def unproved_cross_selector_store_on_restore_path_8616(
-    artifact: IRFunctionArtifact, saved: tuple[int, int], restored: tuple[int, int],
-) -> bool:
+    artifact: IRFunctionArtifact, saved: object, restored: object,
+) -> cython.bint:
     """Refuse non-SS stores on any closed CFG save-to-restore path.
 
     Coordinates are (block address, machine instruction address). Stores
@@ -44,12 +51,17 @@ def unproved_cross_selector_store_on_restore_path_8616(
     Include whole machine instructions so shared addresses cannot hide writes.
     Callers must first establish closed CFG coverage and saved-byte lineage.
     """
-    blocks = {block.addr: block for block in artifact.blocks}
+    restore_block: object
+    save_block: object
+    block: object
+    index: object
+    instruction: object
+    blocks = {block.addr: block for block in iter(artifact.blocks)}
     save_block, restore_block = blocks.get(saved[0]), blocks.get(restored[0])
     if save_block is None or restore_block is None:
         return True
-    saves = tuple(index for index, item in enumerate(save_block.instrs) if item.addr == saved[1])
-    restores = tuple(index for index, item in enumerate(restore_block.instrs) if item.addr == restored[1])
+    saves = tuple(index for index, item in builtins.iter(enumerate(save_block.instrs)) if operator.eq(item.addr, saved[1]))
+    restores = tuple(index for index, item in builtins.iter(enumerate(restore_block.instrs)) if operator.eq(item.addr, restored[1]))
     if not saves or not restores:
         return True
     source = (save_block.addr, min(saves))

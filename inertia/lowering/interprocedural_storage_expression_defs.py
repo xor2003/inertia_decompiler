@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove structured call-argument expressions against exact IR/SSA lineage.
 
 Layer: Types/Lowering.
@@ -11,6 +12,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -33,19 +36,22 @@ from .interprocedural_storage_reaching_contracts import (
     PhysicalCallArgumentPiece8616,
     SSAInstructionSite8616,
 )
+import dataclasses
+import operator
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _ExpectedAffine8616:
     """Normalized callsite expression before comparison with IR evidence."""
 
-    width: int
-    constant: int
-    terms: tuple[tuple[int, int, int], ...]
+    width: cython.longlong
+    constant: cython.longlong
+    terms: object
 
 
+@cython.ccall
 def _source_kind_8616(
-    source: tuple[object, ...],
+    source: object,
 ) -> CallsitePushSourceKind8616 | None:
     """Decode one structured source category without textual heuristics."""
     if not source:
@@ -61,6 +67,7 @@ def _source_kind_8616(
         return None
 
 
+@cython.ccall
 def _expression_op_8616(
     raw_op: object,
 ) -> CallsitePushExprOp8616 | None:
@@ -77,8 +84,8 @@ def _expression_op_8616(
 
 def _scale_expected_8616(
     value: _ExpectedAffine8616,
-    factor: int,
-    mask: int,
+    factor: cython.longlong,
+    mask: cython.longlong,
 ) -> _ExpectedAffine8616:
     """Apply one modular scale to an expected structured expression."""
     return _ExpectedAffine8616(
@@ -86,33 +93,39 @@ def _scale_expected_8616(
         value.constant * factor & mask,
         tuple(
             (offset, width, coefficient)
-            for offset, width, raw_coefficient in value.terms
+            for offset, width, raw_coefficient in iter(value.terms)
             if (coefficient := raw_coefficient * factor & mask) != 0
         ),
     )
 
 
+@cython.ccall
 def _combine_expected_8616(
     left: _ExpectedAffine8616,
     right: _ExpectedAffine8616,
     *,
-    sign: int,
-    mask: int,
+    sign: cython.longlong,
+    mask: cython.longlong,
 ) -> _ExpectedAffine8616:
     """Combine two normalized expected expressions modulo pointer width."""
     scaled_right = _scale_expected_8616(right, sign, mask)
     return _ExpectedAffine8616(
         left.width,
         (left.constant + scaled_right.constant) & mask,
-        (*left.terms, *scaled_right.terms),
+        tuple(left.terms) + tuple(scaled_right.terms),
     )
 
 
+@cython.ccall
 def _expected_source_8616(
-    source: tuple[object, ...],
-    width: int,
+    source: object,
+    width: cython.longlong,
 ) -> tuple[_ExpectedAffine8616 | None, CallArgumentDefinitionFailure8616 | None]:
     """Normalize a typed source tuple to modular affine terms."""
+    current: object
+    failure: object
+    step_failure: object
+    raw_operation: object
     mask = (1 << (width * 8)) - 1
     kind = _source_kind_8616(source)
     if kind is CallsitePushSourceKind8616.IMMEDIATE:
@@ -123,7 +136,7 @@ def _expected_source_8616(
         if (
             len(source) not in {2, 3}
             or not isinstance(source[1], int)
-            or (len(source) == 3 and source[2] != width)
+            or (len(source) == 3 and operator.ne(source[2], width))
         ):
             return None, CallArgumentDefinitionFailure8616.EXPRESSION_WIDTH_CONFLICT
         return _ExpectedAffine8616(width, 0, ((source[1], width, 1),)), None
@@ -148,12 +161,13 @@ def _expected_source_8616(
     return current, None
 
 
+@cython.ccall
 def _apply_expected_operation_8616(
     current: _ExpectedAffine8616,
     raw_operation: object,
-    width: int,
-    mask: int,
-) -> tuple[_ExpectedAffine8616 | None, CallArgumentDefinitionFailure8616 | None]:
+    width: cython.longlong,
+    mask: cython.longlong,
+) -> object:
     """Apply one typed EXPR operation to the running expected affine."""
     if not isinstance(raw_operation, tuple) or len(raw_operation) != 2:
         return None, CallArgumentDefinitionFailure8616.EXPRESSION_SHAPE_CONFLICT
@@ -190,14 +204,17 @@ def _apply_expected_operation_8616(
     return None, CallArgumentDefinitionFailure8616.EXPRESSION_OPERATION_UNSUPPORTED
 
 
+@cython.ccall
 def _combine_source_operand_8616(
     current: _ExpectedAffine8616,
     op: CallsitePushExprOp8616,
     operand: object,
-    width: int,
-    mask: int,
+    width: cython.longlong,
+    mask: cython.longlong,
 ) -> tuple[_ExpectedAffine8616 | None, CallArgumentDefinitionFailure8616 | None]:
     """Merge one nested source operand into the running expected affine."""
+    right: object
+    right_failure: object
     if not isinstance(operand, tuple):
         return None, CallArgumentDefinitionFailure8616.EXPRESSION_SHAPE_CONFLICT
     right, right_failure = _expected_source_8616(operand, width)
@@ -219,9 +236,9 @@ def _combine_source_operand_8616(
 
 def _actual_terms_8616(
     expression: ScalarAffineExpression8616,
-) -> tuple[tuple[int, int, int], ...] | None:
+) -> object:
     """Project exact IR terms to their comparable stack-source identities."""
-    if any(not isinstance(term.source, IRAddress) for term in expression.terms):
+    if any(not isinstance(term.source, IRAddress) for term in iter(expression.terms)):
         return None
     return tuple(
         sorted(
@@ -230,12 +247,13 @@ def _actual_terms_8616(
                 term.source.size,
                 term.coefficient,
             )
-            for term in expression.terms
+            for term in iter(expression.terms)
             if isinstance(term.source, IRAddress)
         )
     )
 
 
+@cython.ccall
 def _trace_failure_8616(
     failure: ScalarAffineFailure8616 | None,
 ) -> CallArgumentDefinitionFailure8616:
@@ -251,9 +269,10 @@ def _trace_failure_8616(
     return CallArgumentDefinitionFailure8616.EXPRESSION_CONTROL_FLOW_UNPROVEN
 
 
+@cython.ccall
 def resolve_expression_argument_definitions_8616(
     function_ssa: SSAFunctionArtifact,
-    sites: tuple[SSAInstructionSite8616, ...],
+    sites: object,
     piece: PhysicalCallArgumentPiece8616,
 ) -> tuple[
     tuple[StorageReachingDefinition8616, ...] | None,
@@ -261,6 +280,13 @@ def resolve_expression_argument_definitions_8616(
     CallArgumentDefinitionFailure8616 | None,
 ]:
     """Prove one structured expression against its exact outgoing SSA value."""
+    definition_failure: object
+    definitions: object
+    expected: object
+    expected_failure: object
+    expression: object
+    logical: object
+    logical_failure: object
     expected, expected_failure = _expected_source_8616(piece.source, piece.width)
     if expected_failure is not None or expected is None:
         return None, None, expected_failure or CallArgumentDefinitionFailure8616.EXPRESSION_SHAPE_CONFLICT
@@ -273,7 +299,7 @@ def resolve_expression_argument_definitions_8616(
     logical, logical_failure = logical_push_value_8616(sites, piece)
     if logical_failure is not None or logical is None:
         return None, None, logical_failure or CallArgumentDefinitionFailure8616.SOURCE_DEFINITION_NOT_FOUND
-    block_addrs = {item.site.block.addr for item in logical.slices}
+    block_addrs = {item.site.block.addr for item in iter(logical.slices)}
     if len(block_addrs) != 1:
         return None, None, CallArgumentDefinitionFailure8616.EXPRESSION_CONTROL_FLOW_UNPROVEN
     trace = trace_scalar_affine_expression_8616(
@@ -287,9 +313,9 @@ def resolve_expression_argument_definitions_8616(
         return None, None, _trace_failure_8616(trace.failure)
     expected_terms = tuple(sorted(expected.terms))
     if (
-        expression.width != expected.width
-        or expression.constant != expected.constant
-        or _actual_terms_8616(expression) != expected_terms
+        operator.ne(expression.width, expected.width)
+        or operator.ne(expression.constant, expected.constant)
+        or operator.ne(_actual_terms_8616(expression), expected_terms)
     ):
         return None, None, CallArgumentDefinitionFailure8616.EXPRESSION_SOURCE_MISMATCH
     return definitions, expression, None

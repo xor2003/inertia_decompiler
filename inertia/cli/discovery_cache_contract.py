@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed persistence contract for CLI-owned function-discovery evidence.
 
 Layer: CLI/fallback/reporting.
@@ -6,6 +7,8 @@ Forbidden: discovering functions or deriving call/return semantics from cached t
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -20,44 +23,47 @@ from inertia.semantics.callsite_summary import (
     CallerReturnUseVerdict8616,
     CallsiteReturnUseKind8616,
 )
+import dataclasses
+import operator
 
-DISPLAY_CATALOG_CACHE_PAYLOAD_SCHEMA_8616: int = 3
+DISPLAY_CATALOG_CACHE_PAYLOAD_SCHEMA_8616: cython.longlong = 3
 
 
-def _nonnegative_int_8616(value: object) -> int:
+@cython.ccall
+def _nonnegative_int_8616(value: object) -> cython.longlong:
     """Return a validated nonnegative integer that is not a boolean."""
     if type(value) is not int or value < 0:
         raise ValueError("evidence count or address must be a nonnegative integer")
     return value
 
 
-def _nonnegative_int_tuple_8616(value: object, *, field_name: str) -> tuple[int, ...]:
+def _nonnegative_int_tuple_8616(value: object, *, field_name: object) -> object:
     """Return a validated JSON integer list as an immutable tuple."""
     if not isinstance(value, list):
         raise ValueError(f"{field_name} must be a list")
-    items = tuple(_nonnegative_int_8616(item) for item in value)
-    if len(items) != len(set(items)):
+    items = tuple(_nonnegative_int_8616(item) for item in iter(value))
+    if operator.ne(len(items), len(set(items))):
         raise ValueError(f"{field_name} must not contain duplicates")
     return items
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SourceRegionCatalogEvidence8616:
     """Closed evidence counts for a startup-bounded application catalog."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    failed_addrs: tuple[int, ...]
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    failed_addrs: object
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every classified source entry was materialized."""
         return (
             self.classified_fact_count > 0
-            and self.materialized_count == self.classified_fact_count
+            and operator.eq(self.materialized_count, self.classified_fact_count)
             and self.failure_count == 0
         )
 
@@ -66,7 +72,7 @@ def source_region_catalog_evidence_comment_8616(
     evidence: SourceRegionCatalogEvidence8616,
 ) -> str:
     """Render the stable C-comment diagnostic for one discovery evidence loop."""
-    failed_addrs = ",".join(hex(addr) for addr in evidence.failed_addrs) or "none"
+    failed_addrs = ",".join(hex(addr) for addr in iter(evidence.failed_addrs)) or "none"
     return (
         "/* source-region discovery evidence: "
         f"raw_fact_count={evidence.raw_fact_count} "
@@ -77,19 +83,20 @@ def source_region_catalog_evidence_comment_8616(
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DisplayCatalogCachePayload8616:
     """Validated display catalog and the exact evidence available when it was built."""
 
-    addrs: tuple[int, ...]
-    caller_return_use: tuple[tuple[int, CallerReturnUseEvidence8616], ...]
+    addrs: object
+    caller_return_use: object
     source_region: SourceRegionCatalogEvidence8616 | None
 
-    def caller_return_use_by_addr(self) -> dict[int, CallerReturnUseEvidence8616]:
+    def caller_return_use_by_addr(self) -> dict[cython.longlong, CallerReturnUseEvidence8616]:
         """Return caller-return evidence keyed by its project carrier address."""
         return dict(self.caller_return_use)
 
 
+@cython.ccall
 def _caller_return_use_fact_record_8616(fact: CallerReturnUseFact8616) -> dict[str, object]:
     """Serialize one exact caller-return fact without discarding its witness."""
     return {
@@ -109,8 +116,16 @@ def _caller_return_use_fact_record_8616(fact: CallerReturnUseFact8616) -> dict[s
     }
 
 
+@cython.ccall
 def _caller_return_use_fact_from_record_8616(record: object) -> CallerReturnUseFact8616:
     """Validate and restore one exact caller-return fact."""
+    excluded: object
+    raw_extension: object
+    raw_extension_addr: object
+    raw_kind: object
+    raw_verdict: object
+    raw_view: object
+    raw_witness: object
     if not isinstance(record, dict):
         raise ValueError("caller-return fact must be an object")
     try:
@@ -159,6 +174,7 @@ def _caller_return_use_fact_from_record_8616(record: object) -> CallerReturnUseF
     return fact
 
 
+@cython.ccall
 def caller_return_use_evidence_record_8616(
     evidence: CallerReturnUseEvidence8616,
 ) -> dict[str, object]:
@@ -177,26 +193,27 @@ def caller_return_use_evidence_record_8616(
         "unused_callsite_count": evidence.unused_callsite_count,
         "excluded_callsite_count": evidence.excluded_callsite_count,
         "callsite_addrs": list(evidence.callsite_addrs),
-        "facts": [_caller_return_use_fact_record_8616(fact) for fact in evidence.facts],
+        "facts": [_caller_return_use_fact_record_8616(fact) for fact in iter(evidence.facts)],
     }
 
 
-def _assert_unused_verdict_closed_8616(counts: dict[str, int]) -> None:
+@cython.ccall
+def _assert_unused_verdict_closed_8616(counts: object) -> None:
     """An unused verdict requires every classified fact accounted for."""
     if (
         counts["used_callsite_count"] != 0
         or counts["raw_fact_count"] == 0
-        or counts["normalized_fact_count"] != counts["raw_fact_count"]
+        or operator.ne(counts["normalized_fact_count"], counts["raw_fact_count"])
         or counts["classified_fact_count"] == 0
-        or counts["classified_fact_count"] + counts["excluded_callsite_count"]
-        != counts["normalized_fact_count"]
+        or operator.ne(counts["classified_fact_count"] + counts["excluded_callsite_count"], counts["normalized_fact_count"])
     ):
         raise ValueError("unused caller-return verdict is not fully classified")
 
 
+@cython.ccall
 def _assert_caller_return_count_closure_8616(
-    counts: dict[str, int],
-    callsite_addrs: tuple[int, ...],
+    counts: object,
+    callsite_addrs: object,
     verdict: CallerReturnUseVerdict8616,
 ) -> None:
     """Enforce the closed-loop counter invariants for caller-return evidence."""
@@ -204,11 +221,11 @@ def _assert_caller_return_count_closure_8616(
         raise ValueError("caller-return normalized facts exceed raw facts")
     if counts["classified_fact_count"] > counts["normalized_fact_count"]:
         raise ValueError("caller-return classified facts exceed normalized facts")
-    if counts["materialized_count"] != counts["classified_fact_count"]:
+    if operator.ne(counts["materialized_count"], counts["classified_fact_count"]):
         raise ValueError("caller-return materialized facts do not close classified facts")
-    if counts["used_callsite_count"] + counts["unused_callsite_count"] != counts["classified_fact_count"]:
+    if operator.ne(counts["used_callsite_count"] + counts["unused_callsite_count"], counts["classified_fact_count"]):
         raise ValueError("caller-return callsite classifications do not close")
-    if len(callsite_addrs) != counts["raw_fact_count"]:
+    if operator.ne(len(callsite_addrs), counts["raw_fact_count"]):
         raise ValueError("caller-return callsite addresses do not match raw facts")
     if verdict is CallerReturnUseVerdict8616.USED and counts["used_callsite_count"] == 0:
         raise ValueError("used caller-return verdict has no used callsite")
@@ -218,6 +235,8 @@ def _assert_caller_return_count_closure_8616(
 
 def caller_return_use_evidence_from_record_8616(record: object) -> CallerReturnUseEvidence8616:
     """Validate and deserialize one caller-return evidence record."""
+    raw_facts: object
+    raw_verdict: object
     if not isinstance(record, dict):
         raise ValueError("caller-return evidence entry must be an object")
     target_addr = _nonnegative_int_8616(record.get("target_addr"))
@@ -237,7 +256,7 @@ def caller_return_use_evidence_from_record_8616(record: object) -> CallerReturnU
         "used_callsite_count",
         "unused_callsite_count",
     )
-    counts = {name: _nonnegative_int_8616(record.get(name)) for name in count_names}
+    counts = {name: _nonnegative_int_8616(record.get(name)) for name in iter(count_names)}
     counts["excluded_callsite_count"] = _nonnegative_int_8616(
         record.get("excluded_callsite_count", 0)
     )
@@ -245,7 +264,7 @@ def caller_return_use_evidence_from_record_8616(record: object) -> CallerReturnU
     raw_facts = record.get("facts")
     if not isinstance(raw_facts, list):
         raise ValueError("caller-return facts must be a list")
-    facts = tuple(_caller_return_use_fact_from_record_8616(item) for item in raw_facts)
+    facts = tuple(_caller_return_use_fact_from_record_8616(item) for item in iter(raw_facts))
     _assert_caller_return_count_closure_8616(counts, callsite_addrs, verdict)
     evidence = CallerReturnUseEvidence8616(
         target_addr=target_addr,
@@ -263,11 +282,12 @@ def caller_return_use_evidence_from_record_8616(record: object) -> CallerReturnU
     )
     if counts["raw_fact_count"] and not evidence.fact_census_complete:
         raise ValueError("caller-return retained facts do not close their counters")
-    if tuple(fact.callsite_addr for fact in facts) != callsite_addrs:
+    if operator.ne(tuple(fact.callsite_addr for fact in iter(facts)), callsite_addrs):
         raise ValueError("caller-return fact addresses do not match the census")
     return evidence
 
 
+@cython.ccall
 def _source_region_record_8616(evidence: SourceRegionCatalogEvidence8616) -> dict[str, object]:
     """Serialize one closed source-region catalog evidence loop."""
     return {
@@ -280,6 +300,7 @@ def _source_region_record_8616(evidence: SourceRegionCatalogEvidence8616) -> dic
     }
 
 
+@cython.ccall
 def _source_region_from_record_8616(record: object) -> SourceRegionCatalogEvidence8616:
     """Validate one cached source-region catalog evidence loop."""
     if not isinstance(record, dict):
@@ -292,9 +313,9 @@ def _source_region_from_record_8616(record: object) -> SourceRegionCatalogEviden
     failed_addrs = _nonnegative_int_tuple_8616(record.get("failed_addrs"), field_name="failed_addrs")
     if normalized_count > raw_count or classified_count > normalized_count:
         raise ValueError("source-region evidence counts are not monotonic")
-    if materialized_count > classified_count or failure_count != classified_count - materialized_count:
+    if materialized_count > classified_count or operator.ne(failure_count, classified_count - materialized_count):
         raise ValueError("source-region materialization evidence does not close")
-    if failure_count != len(failed_addrs):
+    if operator.ne(failure_count, len(failed_addrs)):
         raise ValueError("source-region failed addresses do not match failure count")
     evidence = SourceRegionCatalogEvidence8616(
         raw_fact_count=raw_count,
@@ -310,20 +331,22 @@ def _source_region_from_record_8616(record: object) -> SourceRegionCatalogEviden
 
 
 def display_catalog_cache_record_8616(
-    addrs: tuple[int, ...],
-    caller_return_use_by_addr: Mapping[int, CallerReturnUseEvidence8616],
-    source_region: SourceRegionCatalogEvidence8616 | None,
+    addrs: object,
+    caller_return_use_by_addr: Mapping[cython.longlong, CallerReturnUseEvidence8616],
+    source_region: object,
 ) -> dict[str, object]:
     """Build a versioned JSON record preserving the complete discovery evidence state."""
-    normalized_addrs = tuple(_nonnegative_int_8616(addr) for addr in addrs)
-    if not normalized_addrs or len(normalized_addrs) != len(set(normalized_addrs)):
+    evidence: object
+    function_addr: object
+    normalized_addrs = tuple(_nonnegative_int_8616(addr) for addr in iter(addrs))
+    if not normalized_addrs or operator.ne(len(normalized_addrs), len(set(normalized_addrs))):
         raise ValueError("display catalog addresses must be nonempty and unique")
     if source_region is not None and not source_region.complete:
         raise ValueError("refusing to cache an incomplete source-region catalog")
     caller_records: list[dict[str, object]] = []
-    for function_addr, evidence in sorted(caller_return_use_by_addr.items()):
+    for function_addr, evidence in sorted(tuple(caller_return_use_by_addr.items())):
         validated_addr = _nonnegative_int_8616(function_addr)
-        if validated_addr != evidence.target_addr:
+        if operator.ne(validated_addr, evidence.target_addr):
             raise ValueError("caller-return cache key and evidence target differ")
         evidence_record = caller_return_use_evidence_record_8616(evidence)
         caller_return_use_evidence_from_record_8616(evidence_record)
@@ -341,9 +364,13 @@ def display_catalog_cache_record_8616(
     }
 
 
+@cython.ccall
 def display_catalog_cache_payload_from_record_8616(record: object) -> DisplayCatalogCachePayload8616:
     """Validate and deserialize a display-catalog cache record."""
-    if not isinstance(record, dict) or record.get("schema") != DISPLAY_CATALOG_CACHE_PAYLOAD_SCHEMA_8616:
+    raw_caller_records: object
+    raw_source_region: object
+    raw_record: object
+    if not isinstance(record, dict) or operator.ne(record.get("schema"), DISPLAY_CATALOG_CACHE_PAYLOAD_SCHEMA_8616):
         raise ValueError("display catalog cache has an unsupported schema")
     addrs = _nonnegative_int_tuple_8616(record.get("addrs"), field_name="display catalog addresses")
     if not addrs:
@@ -351,8 +378,8 @@ def display_catalog_cache_payload_from_record_8616(record: object) -> DisplayCat
     raw_caller_records = record.get("caller_return_use")
     if not isinstance(raw_caller_records, list):
         raise ValueError("display catalog caller-return evidence must be a list")
-    caller_return_use: list[tuple[int, CallerReturnUseEvidence8616]] = []
-    seen_function_addrs: set[int] = set()
+    caller_return_use: list[tuple[cython.longlong, CallerReturnUseEvidence8616]] = []
+    seen_function_addrs: set[cython.longlong] = set()
     for raw_record in raw_caller_records:
         if not isinstance(raw_record, dict):
             raise ValueError("display catalog caller-return entry must be an object")
@@ -360,7 +387,7 @@ def display_catalog_cache_payload_from_record_8616(record: object) -> DisplayCat
         evidence = caller_return_use_evidence_from_record_8616(raw_record.get("evidence"))
         if function_addr in seen_function_addrs:
             raise ValueError("display catalog caller-return evidence contains duplicate addresses")
-        if function_addr != evidence.target_addr:
+        if operator.ne(function_addr, evidence.target_addr):
             raise ValueError("display catalog caller-return key and target differ")
         seen_function_addrs.add(function_addr)
         caller_return_use.append((function_addr, evidence))

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Resolve indexed global accesses against proven element layouts.
 
 Layer: Widening.
@@ -8,6 +9,8 @@ Do not join values from rendered text, cosmetic shape, postprocess, or CLI/repor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from inertia.alias.indexed_address_access_contracts import IndexedAliasAccessFact8616
 from inertia.ir.core import MemSpace
@@ -17,21 +20,24 @@ from .global_object_layout import (
     GlobalObjectLayoutEvidence8616,
 )
 from .indexed_global_object_ranges import BoundedGlobalObjectRangeFailureKind8616
+import operator
 
-type IndexedGlobalObjectKey8616 = tuple[MemSpace, int]
+IndexedGlobalObjectKey8616 = typing.TypeAliasType("IndexedGlobalObjectKey8616", tuple[MemSpace, int])
 
 
+@cython.ccall
 def indexed_global_object_sort_key_8616(
     key: IndexedGlobalObjectKey8616,
-) -> tuple[str, int]:
+) -> tuple[str, cython.longlong]:
     """Return deterministic segmented-object ordering."""
     return key[0].value, key[1]
 
 
+@cython.ccall
 def _layout_contains_access_8616(
     layout: GlobalObjectLayout8616,
     access: IndexedAliasAccessFact8616,
-) -> bool:
+) -> cython.bint:
     """Return whether one exact access is a field of the proven layout."""
     storage = access.source.storage
     relative = storage.base_offset - layout.address.offset
@@ -40,7 +46,7 @@ def _layout_contains_access_8616(
         and 0 <= relative < layout.element_width
         and relative in layout.field_offsets
         and relative + storage.width <= layout.element_width
-        and (1 << storage.index_shift) == layout.element_width
+        and operator.eq((1 << storage.index_shift), layout.element_width)
     )
 
 
@@ -51,7 +57,7 @@ def matching_indexed_global_layouts_8616(
     """Return every proven element layout that contains one access."""
     return tuple(
         layout
-        for layout in layouts.layouts
+        for layout in iter(layouts.layouts)
         if _layout_contains_access_8616(layout, access)
     )
 
@@ -64,16 +70,16 @@ def unmatched_indexed_global_layout_failure_8616(
     storage = access.source.storage
     numeric = tuple(
         layout
-        for layout in layouts.layouts
+        for layout in iter(layouts.layouts)
         if 0 <= storage.base_offset - layout.address.offset < layout.element_width
     )
-    if numeric and all(layout.address.space is not storage.space for layout in numeric):
+    if numeric and all(layout.address.space is not storage.space for layout in iter(numeric)):
         return BoundedGlobalObjectRangeFailureKind8616.SEGMENT_MISMATCH
     same_space = tuple(
-        layout for layout in numeric if layout.address.space is storage.space
+        layout for layout in iter(numeric) if layout.address.space is storage.space
     )
     if same_space and all(
-        (1 << storage.index_shift) != layout.element_width for layout in same_space
+        operator.ne((1 << storage.index_shift), layout.element_width) for layout in iter(same_space)
     ):
         return BoundedGlobalObjectRangeFailureKind8616.STRIDE_WIDTH_MISMATCH
     return BoundedGlobalObjectRangeFailureKind8616.LAYOUT_NOT_PROVEN
@@ -87,7 +93,7 @@ def indexed_global_access_object_keys_8616(
     matches = matching_indexed_global_layouts_8616(access, layouts)
     if matches:
         return tuple(
-            (layout.address.space, layout.address.offset) for layout in matches
+            (layout.address.space, layout.address.offset) for layout in iter(matches)
         )
     storage = access.source.storage
     return ((storage.space, storage.base_offset),)

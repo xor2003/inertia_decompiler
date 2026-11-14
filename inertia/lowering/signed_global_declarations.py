@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize signed scalar global declarations from typed conditions.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ or signed promotion without an exact canonical scalar and high-word join.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -35,6 +38,9 @@ from .project_global_signedness import (
     ProjectGlobalSignednessEvidence8616,
     collect_project_global_signedness_evidence_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -49,40 +55,38 @@ class _CodegenSurface8616(Protocol):
     """Owned codegen metadata consumed and produced by this lowering pass."""
 
     cfunc: object
-    _inertia_global_declaration_specs_8616: tuple[
-        tuple[str, str, GlobalDeclarationArrayLength8616], ...
-    ]
-    _inertia_signed_global_declaration_facts_8616: tuple[SignedGlobalDeclarationFact8616, ...]
+    _inertia_global_declaration_specs_8616: object
+    _inertia_signed_global_declaration_facts_8616: object
     _inertia_signed_global_declaration_stats_8616: SignedGlobalDeclarationStats8616
     _inertia_typed_conditions: object
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class SignedGlobalDeclarationStats8616:
     """Closed evidence census for signed wide-global declaration lowering."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SignedGlobalDeclarationFact8616:
     """One canonical scalar whose high word has signed comparison semantics."""
 
-    base_offset: int
-    name: str
-    width: int = 4
+    base_offset: cython.longlong
+    name: object
+    width: cython.longlong = 4
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _WideScalarCandidate8616:
     """One exact canonical four-byte scalar visible in the current C AST."""
 
-    base_offset: int
-    name: str
+    base_offset: cython.longlong
+    name: object
 
 
 def _typed_conditions_8616(codegen: _CodegenSurface8616) -> tuple[ConditionIR, ...]:
@@ -93,10 +97,11 @@ def _typed_conditions_8616(codegen: _CodegenSurface8616) -> tuple[ConditionIR, .
         return ()
     if not isinstance(raw_conditions, (list, tuple)):
         return ()
-    return tuple(condition for condition in raw_conditions if isinstance(condition, ConditionIR))
+    return tuple(condition for condition in iter(raw_conditions) if isinstance(condition, ConditionIR))
 
 
-def _condition_key_8616(condition: ConditionIR) -> tuple[int, int] | None:
+@cython.ccall
+def _condition_key_8616(condition: ConditionIR) -> object:
     """Return exact instruction/block provenance for one ordering condition."""
     if (
         not (condition.is_signed or condition.is_unsigned)
@@ -107,8 +112,11 @@ def _condition_key_8616(condition: ConditionIR) -> tuple[int, int] | None:
     return condition.src_insn, condition.block_addr
 
 
-def _ast_condition_key_8616(node: CBinaryOp) -> tuple[int, int] | None:
+@cython.ccall
+def _ast_condition_key_8616(node: CBinaryOp) -> object:
     """Return typed provenance from one materialized C comparison."""
+    block_addr: object
+    ins_addr: object
     ins_addr = node.tags.get("ins_addr")
     block_addr = node.tags.get("vex_block_addr")
     if not isinstance(ins_addr, int) or not isinstance(block_addr, int):
@@ -126,7 +134,7 @@ def _global_declaration_specs_8616(
         return ()
     return tuple(
         (ctype, name, array_len)
-        for ctype, name, array_len in raw_specs
+        for ctype, name, array_len in iter(raw_specs)
         if isinstance(ctype, str) and isinstance(name, str)
     )
 
@@ -135,14 +143,15 @@ def _canonical_scalar_names_8616(codegen: _CodegenSurface8616) -> frozenset[str]
     """Return four-byte scalar names already proven by widening."""
     return frozenset(
         name
-        for ctype, name, array_len in _global_declaration_specs_8616(codegen)
+        for ctype, name, array_len in builtins.iter(_global_declaration_specs_8616(codegen))
         if ctype in {"long", "unsigned long", "int32_t", "uint32_t"} and array_len is None
     )
 
 
+@cython.ccall
 def _wide_scalar_candidate_8616(
     node: object,
-    scalar_names: frozenset[str],
+    scalar_names: object,
 ) -> _WideScalarCandidate8616 | None:
     """Return a canonical scalar from an exact high-word projection."""
     base: object | None = None
@@ -162,9 +171,10 @@ def _wide_scalar_candidate_8616(
     return _wide_scalar_variable_candidate_8616(base, scalar_names)
 
 
+@cython.ccall
 def _wide_scalar_variable_candidate_8616(
     node: object,
-    scalar_names: frozenset[str],
+    scalar_names: object,
 ) -> _WideScalarCandidate8616 | None:
     """Return an exact canonical four-byte scalar variable."""
     if not isinstance(node, CVariable) or not isinstance(node.variable, SimMemoryVariable):
@@ -183,9 +193,11 @@ def _wide_scalar_variable_candidate_8616(
 
 def _condition_high_word_candidate_8616(
     condition: ConditionIR,
-    candidates: frozenset[_WideScalarCandidate8616],
+    candidates: object,
 ) -> _WideScalarCandidate8616 | None:
     """Join one typed DS high-word comparison to one canonical wide scalar."""
+    other: object
+    value: object
     if not isinstance(condition.lhs, IRValue) or not isinstance(condition.rhs, IRValue):
         return None
     operands = ((condition.lhs, condition.rhs), (condition.rhs, condition.lhs))
@@ -200,8 +212,8 @@ def _condition_high_word_candidate_8616(
             continue
         matched.update(
             candidate
-            for candidate in candidates
-            if ((candidate.base_offset + 2) & 0xFFFF) == (value.offset & 0xFFFF)
+            for candidate in iter(candidates)
+            if operator.eq(((candidate.base_offset + 2) & 0xFFFF), (value.offset & 0xFFFF))
         )
     if len(matched) != 1:
         return None
@@ -210,17 +222,17 @@ def _condition_high_word_candidate_8616(
 
 def _comparison_high_word_candidate_8616(
     node: object,
-    scalar_names: frozenset[str],
+    scalar_names: object,
 ) -> _WideScalarCandidate8616 | None:
     """Return the sole canonical high-word projection in one comparison."""
     if not isinstance(node, CBinaryOp) or not str(node.op).startswith("Cmp"):
         return None
     candidates = tuple(
         candidate
-        for candidate in (
+        for candidate in iter((
             _wide_scalar_candidate_8616(node.lhs, scalar_names),
             _wide_scalar_candidate_8616(node.rhs, scalar_names),
-        )
+        ))
         if candidate is not None
     )
     other_is_constant = isinstance(node.rhs, CConstant) or isinstance(node.lhs, CConstant)
@@ -229,33 +241,35 @@ def _comparison_high_word_candidate_8616(
     return candidates[0]
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _SignedCandidateCensus8616:
     """Join signedness evidence into signed/unsigned candidate buckets."""
 
-    scalar_names: frozenset[str]
-    signed_keys: set[tuple[int, int]]
-    unsigned_keys: set[tuple[int, int]]
-    signed_candidates: set[_WideScalarCandidate8616] = field(default_factory=set)
-    unsigned_candidates: set[_WideScalarCandidate8616] = field(default_factory=set)
-    normalized_joins: set[tuple[tuple[int, int], _WideScalarCandidate8616]] = field(
+    scalar_names: object
+    signed_keys: object
+    unsigned_keys: object
+    signed_candidates: object = field(default_factory=set)
+    unsigned_candidates: object = field(default_factory=set)
+    normalized_joins: object = field(
         default_factory=set
     )
 
+    @cython.ccall
     def bucket_project_bases(
         self,
-        scalar_candidates: frozenset[_WideScalarCandidate8616],
+        scalar_candidates: object,
         project_evidence: ProjectGlobalSignednessEvidence8616,
     ) -> None:
         """Bucket candidates by proven project-level ordering contracts."""
+        candidate: object
         signed_bases = {
             contract.base_offset
-            for contract in project_evidence.contracts
+            for contract in iter(project_evidence.contracts)
             if contract.ordering is DirectGlobalOrdering8616.SIGNED
         }
         unsigned_bases = {
             contract.base_offset
-            for contract in project_evidence.contracts
+            for contract in iter(project_evidence.contracts)
             if contract.ordering is DirectGlobalOrdering8616.UNSIGNED
         }
         conflicting_bases = set(project_evidence.conflicting_base_offsets)
@@ -268,8 +282,10 @@ class _SignedCandidateCensus8616:
                 self.signed_candidates.add(candidate)
                 self.unsigned_candidates.add(candidate)
 
+    @cython.ccall
     def join_ast(self, node: object) -> None:
         """Join one AST comparison node into the candidate buckets."""
+        candidate: object
         if not isinstance(node, CBinaryOp):
             return
         key = _ast_condition_key_8616(node)
@@ -284,12 +300,15 @@ class _SignedCandidateCensus8616:
         if key in self.unsigned_keys:
             self.unsigned_candidates.add(candidate)
 
+    @cython.ccall
     def join_condition(
         self,
         condition: ConditionIR,
-        scalar_candidates: frozenset[_WideScalarCandidate8616],
+        scalar_candidates: object,
     ) -> None:
         """Join one typed condition into the candidate buckets."""
+        candidate: object
+        key: object
         key = _condition_key_8616(condition)
         if key is None:
             return
@@ -303,12 +322,15 @@ class _SignedCandidateCensus8616:
             self.unsigned_candidates.add(candidate)
 
 
+@cython.ccall
 def _condition_key_sets_8616(
-    conditions: tuple[ConditionIR, ...],
-) -> tuple[set[tuple[int, int]], set[tuple[int, int]]]:
+    conditions: object,
+) -> tuple[set[tuple[cython.longlong, cython.longlong]], set[tuple[cython.longlong, cython.longlong]]]:
     """Bucket proven condition keys by signedness."""
-    signed_keys: set[tuple[int, int]] = set()
-    unsigned_keys: set[tuple[int, int]] = set()
+    key: object
+    condition: object
+    signed_keys: set[tuple[cython.longlong, cython.longlong]] = set()
+    unsigned_keys: set[tuple[cython.longlong, cython.longlong]] = set()
     for condition in conditions:
         key = _condition_key_8616(condition)
         if key is None:
@@ -319,24 +341,24 @@ def _condition_key_sets_8616(
 
 
 def _project_candidate_fact_count_8616(
-    scalar_candidates: frozenset[_WideScalarCandidate8616],
+    scalar_candidates: object,
     project_evidence: ProjectGlobalSignednessEvidence8616,
-) -> int:
+) -> cython.longlong:
     """Count scalar candidates backed by any project-level ordering evidence."""
     signed_bases = {
         contract.base_offset
-        for contract in project_evidence.contracts
+        for contract in iter(project_evidence.contracts)
         if contract.ordering is DirectGlobalOrdering8616.SIGNED
     }
     unsigned_bases = {
         contract.base_offset
-        for contract in project_evidence.contracts
+        for contract in iter(project_evidence.contracts)
         if contract.ordering is DirectGlobalOrdering8616.UNSIGNED
     }
     conflicting_bases = set(project_evidence.conflicting_base_offsets)
     return sum(
         candidate.base_offset in signed_bases | unsigned_bases | conflicting_bases
-        for candidate in scalar_candidates
+        for candidate in iter(scalar_candidates)
     )
 
 
@@ -344,10 +366,11 @@ def _materialize_signed_facts_8616(
     codegen: object,
     surface: _CodegenSurface8616,
     census: _SignedCandidateCensus8616,
-    previous_facts: tuple[SignedGlobalDeclarationFact8616, ...],
+    previous_facts: object,
     stats: SignedGlobalDeclarationStats8616,
 ) -> tuple[SignedGlobalDeclarationFact8616, ...]:
     """Materialize proven signed-only candidates into declaration specs."""
+    candidate: object
     materialized_facts: list[SignedGlobalDeclarationFact8616] = []
     for candidate in sorted(
         census.signed_candidates, key=lambda item: (item.base_offset, item.name)
@@ -372,7 +395,7 @@ def _materialize_signed_facts_8616(
     return tuple(dict.fromkeys(materialized_facts))
 
 
-def materialize_signed_global_declarations_8616(project: object, codegen: object) -> bool:
+def materialize_signed_global_declarations_8616(project: object, codegen: object) -> cython.bint:
     """Materialize signed wide globals from exact high-word condition evidence.
 
     A signed ordering comparison of the high word gives the sign semantics of
@@ -381,6 +404,8 @@ def materialize_signed_global_declarations_8616(project: object, codegen: object
     intentionally unchanged so validation continues to compare semantics, not
     declaration representation.
     """
+    condition: object
+    node: object
     surface = cast(_CodegenSurface8616, codegen)
     initialize_global_declaration_specs_8616(codegen)
     project_evidence = collect_project_global_signedness_evidence_8616(project)
@@ -409,7 +434,7 @@ def materialize_signed_global_declarations_8616(project: object, codegen: object
     c_nodes = tuple(_iter_c_nodes_deep_8616(cfunc))
     scalar_candidates = frozenset(
         candidate
-        for node in c_nodes
+        for node in iter(c_nodes)
         if (candidate := _wide_scalar_variable_candidate_8616(node, scalar_names)) is not None
     )
     census = _SignedCandidateCensus8616(scalar_names, signed_keys, unsigned_keys)
@@ -438,4 +463,4 @@ def materialize_signed_global_declarations_8616(project: object, codegen: object
     surface._inertia_signed_global_declaration_stats_8616 = stats
     if stats.classified_fact_count > 0 and stats.materialized_count == 0:
         raise PipelineHardError("classified signed global declarations were not materialized")
-    return facts != previous_facts or _global_declaration_specs_8616(surface) != before_specs
+    return facts != previous_facts or operator.ne(_global_declaration_specs_8616(surface), before_specs)

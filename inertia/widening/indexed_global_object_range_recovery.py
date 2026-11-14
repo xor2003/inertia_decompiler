@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Recover exact bounded extents for Alias-backed global object layouts.
 
 Layer: Widening.
@@ -10,6 +11,7 @@ Do not join values from rendered text, cosmetic shape, postprocess, or CLI/repor
 """
 
 from __future__ import annotations
+import cython
 
 from inertia.alias.indexed_address_access_contracts import (
     IndexedAliasAccessFact8616,
@@ -45,8 +47,10 @@ from .indexed_global_object_ranges import (
     BoundedGlobalObjectRangeStats8616,
     indexed_global_access_key_8616,
 )
+import builtins
 
 
+@cython.ccall
 def _failure_detail_8616(
     failure: BoundedGlobalObjectRangeFailureKind8616,
 ) -> str:
@@ -64,11 +68,14 @@ def _collect_inputs_8616(
     dict[IndexedGlobalObjectKey8616, BoundedGlobalObjectRangeFailureKind8616],
 ]:
     """Group exact accesses and accepted ranges by proven segmented layout."""
+    access: object
+    fact: object
+    key: object
     accesses: dict[IndexedGlobalObjectKey8616, list[IndexedAliasAccessFact8616]] = {}
     ranges: dict[IndexedGlobalObjectKey8616, list[IndexedAliasLoopRangeFact8616]] = {}
     layout_by_key = {
         (layout.address.space, layout.address.offset): layout
-        for layout in layouts.layouts
+        for layout in iter(layouts.layouts)
     }
     failures: dict[
         IndexedGlobalObjectKey8616,
@@ -76,7 +83,7 @@ def _collect_inputs_8616(
     ] = {}
     global_accesses = tuple(
         access
-        for access in source.accesses.facts
+        for access in iter(source.accesses.facts)
         if access.role is IndexedAliasAccessRole8616.GLOBAL_INDEXED
     )
     for access in global_accesses:
@@ -84,7 +91,7 @@ def _collect_inputs_8616(
         keys = (
             tuple(
                 (layout.address.space, layout.address.offset)
-                for layout in matches
+                for layout in iter(matches)
             )
             if matches
             else (
@@ -114,13 +121,13 @@ def _collect_inputs_8616(
 def recover_bounded_global_object_ranges_8616(
     source: IndexedAliasLoopRangeEvidence8616,
     layouts: GlobalObjectLayoutEvidence8616,
-    copies: tuple[IndexedAliasCopyFact8616, ...] = (),
+    copies: object = (),
 ) -> BoundedGlobalObjectRangeEvidence8616:
     """Materialize exact layout-backed ranges or refuse each segmented object."""
     if (
         not source.closed
         or not layouts.closed
-        or not all(copy.complete for copy in copies)
+        or not all(copy.complete for copy in iter(copies))
     ):
         raise ValueError("bounded global object Widening requires closed typed inputs")
     accesses, range_facts, layout_by_key, failures = _collect_inputs_8616(
@@ -142,7 +149,7 @@ def recover_bounded_global_object_ranges_8616(
     )
     ranges = tuple(
         provisional[key]
-        for key in sorted(provisional, key=indexed_global_object_sort_key_8616)
+        for key in builtins.iter(sorted(provisional, key=indexed_global_object_sort_key_8616))
         if key not in failures
     )
     refusals = tuple(
@@ -155,7 +162,7 @@ def recover_bounded_global_object_ranges_8616(
                 sorted(
                     {
                         indexed_global_access_key_8616(item)
-                        for item in accesses[key]
+                        for item in iter(accesses[key])
                     }
                 )
             ),
@@ -163,10 +170,10 @@ def recover_bounded_global_object_ranges_8616(
                 tuple(range_facts.get(key, ()))
             ),
         )
-        for key, failure in sorted(
-            failures.items(),
+        for key, failure in builtins.iter(sorted(
+            tuple(failures.items()),
             key=lambda item: indexed_global_object_sort_key_8616(item[0]),
-        )
+        ))
     )
     raw_count = len(accesses)
     result = BoundedGlobalObjectRangeEvidence8616(

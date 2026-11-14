@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/runtime.
 
 Responsibility: compose processor, memory, and IO emulator state.
@@ -5,6 +6,8 @@ Forbidden: decompiler semantic recovery, alias/type ownership, or rewrite cleanu
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from .cr import CR
 from .io import IO
@@ -17,7 +20,7 @@ __all__ = ["Hardware"]
 class Hardware(Processor, Memory, IO):  # type: ignore[misc, unused-ignore] # intentional frontend mixin state
     """Frontend runtime state composed from processor, memory, and IO surfaces."""
 
-    def __init__(self, size: int = 0) -> None:
+    def __init__(self, size: cython.longlong = 0) -> None:
         """Initialize processor state, backing memory size, and IO maps."""
         super().__init__()  # Processor
         super(CR, self).__init__(size)  # Memory

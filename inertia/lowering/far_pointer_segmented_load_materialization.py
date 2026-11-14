@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize typed far-pointer segmented-load evidence in generated C.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Protocol, cast
@@ -24,6 +27,8 @@ from .segment_access_policy import instruction_addrs_from_node_8616
 from .stack_frame_projection import entry_sp_offset_for_machine_bp_range_8616
 from .stack_lowering_from_facts import materialize_stack_cvar_at_offset_from_facts_8616
 from .stack_variable_coordinates import stack_cvar_for_machine_bp_range_8616
+import dataclasses
+import operator
 
 
 class _CFunctionBoundary8616(Protocol):
@@ -38,31 +43,33 @@ class _CodegenBoundary8616(Protocol):
     cfunc: _CFunctionBoundary8616 | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FarPointerSegmentedLoadStats8616:
     """Closed evidence loop for far-pointer segmented-load materialization."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FarPointerSegmentedLoadResult8616:
     """Materialization result and its closed evidence counters."""
 
-    changed: bool
+    changed: cython.bint
     stats: FarPointerSegmentedLoadStats8616
 
 
+@cython.ccall
 def _stack_cvar_for_machine_bp_fact_8616(
     codegen: object,
-    bp_offset: int,
-    size: int,
+    bp_offset: cython.longlong,
+    size: cython.longlong,
 ) -> CExpression | None:
     """Resolve one machine-BP fact without treating it as an entry-SP offset."""
+    entry_sp_offset: object
     existing = stack_cvar_for_machine_bp_range_8616(codegen, bp_offset, size)
     if isinstance(existing, CExpression):
         return existing
@@ -82,11 +89,14 @@ def _stack_cvar_for_machine_bp_fact_8616(
     return materialized if isinstance(materialized, CExpression) else None
 
 
+@cython.ccall
 def _materialized_offset_expr_8616(
     codegen: object,
     fact: FarPointerSegmentedLoadEvidence8616,
-) -> tuple[CExpression, CExpression] | None:
+) -> object:
     """Build exact segment and offset expressions from stack facts."""
+    offset_constant: object
+    segment_source: object
     segment_source = fact.pointer_source.segment_value_source
     segment_stack_offset = (
         segment_source.stack_offset
@@ -141,20 +151,20 @@ def _materialized_offset_expr_8616(
     return segment, result
 
 
-def _is_materializable_load_shape_8616(node: object, width: int) -> bool:
+def _is_materializable_load_shape_8616(node: object, width: cython.longlong) -> cython.bint:
     """Accept only structural dereference shapes for the binary-proven width."""
     if isinstance(node, structured_c.CUnaryOp) and node.op == "Dereference":
         return True
     if width != 2 or not isinstance(node, structured_c.CBinaryOp) or node.op != "Or":
         return False
 
-    def _is_byte_load(candidate: object) -> bool:
+    def _is_byte_load(candidate: object) -> cython.bint:
         """Recognize one direct byte-load arm through scalar casts only."""
         while isinstance(candidate, structured_c.CTypeCast):
             candidate = candidate.expr
         return isinstance(candidate, structured_c.CUnaryOp) and candidate.op == "Dereference"
 
-    def _is_high_byte(candidate: object) -> bool:
+    def _is_high_byte(candidate: object) -> cython.bint:
         """Recognize the exact high-byte load shifted into a 16-bit word."""
         while isinstance(candidate, structured_c.CTypeCast):
             candidate = candidate.expr
@@ -174,23 +184,28 @@ def _is_materializable_load_shape_8616(node: object, width: int) -> bool:
 
 def materialize_far_pointer_segmented_loads_8616(
     codegen: object,
-    evidence: tuple[FarPointerSegmentedLoadEvidence8616, ...],
+    evidence: object,
 ) -> FarPointerSegmentedLoadResult8616:
     """Materialize exact LES/LDS-backed loads on the current structured C AST."""
+    cfunc: object
+    root: object
     typed_codegen = cast(_CodegenBoundary8616, codegen)
     cfunc = typed_codegen.cfunc
     root = cfunc.statements if cfunc is not None else None
     if cfunc is None or root is None or not evidence:
         stats = FarPointerSegmentedLoadStats8616(len(evidence), len(evidence), 0, 0, 0)
         return FarPointerSegmentedLoadResult8616(False, stats)
-    by_address = {fact.ins_addr: fact for fact in evidence}
-    classified: set[int] = set()
-    materialized: set[int] = set()
-    failures: set[int] = set()
+    by_address = {fact.ins_addr: fact for fact in iter(evidence)}
+    classified: set[cython.longlong] = set()
+    materialized: set[cython.longlong] = set()
+    failures: set[cython.longlong] = set()
     changed = False
 
     def transform(node: object) -> object:
         """Replace one exact structural load node and refuse all ambiguity."""
+        address: object
+        expressions: object
+        helper: object
         nonlocal changed
         addresses = instruction_addrs_from_node_8616(node) & by_address.keys()
         if len(addresses) != 1:
@@ -198,7 +213,7 @@ def materialize_far_pointer_segmented_loads_8616(
         address = next(iter(addresses))
         fact = by_address[address]
         if isinstance(node, structured_c.CFunctionCall):
-            if node.tags.get("inertia_x86_16_far_pointer_segmented_load") == address:
+            if operator.eq(node.tags.get("inertia_x86_16_far_pointer_segmented_load"), address):
                 classified.add(address)
                 materialized.add(address)
             return node

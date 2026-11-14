@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify VEX temporaries that require eager Condition materialization.
 
 Layer: IR.
@@ -12,10 +13,14 @@ work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol, SupportsInt, cast
+import dataclasses
+import operator
 
 
 class _VexStatementBoundary8616(Protocol):
@@ -32,49 +37,50 @@ class _VexExpressionBoundary8616(Protocol):
     tmp: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class VexConditionDemandStats8616:
     """Closed accounting for direct temporary exit-guard candidates."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every candidate became typed demand or refusal."""
         return bool(
-            self.raw_fact_count == self.materialized_count + self.failure_count
+            operator.eq(self.raw_fact_count, self.materialized_count + self.failure_count)
             and self.normalized_fact_count
             == self.classified_fact_count
             == self.materialized_count
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class VexConditionDemand8616:
     """Exact temporary IDs whose definitions feed a conditional exit."""
 
-    eager_tmp_ids: frozenset[int]
+    eager_tmp_ids: object
     stats: VexConditionDemandStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether demand collection can safely suppress other work."""
         return bool(
             self.stats.closed
             and self.stats.failure_count == 0
-            and all(tmp_id >= 0 for tmp_id in self.eager_tmp_ids)
+            and all(tmp_id >= 0 for tmp_id in iter(self.eager_tmp_ids))
         )
 
-    def requires_eager_condition(self, tmp_id: int) -> bool:
+    def requires_eager_condition(self, tmp_id: cython.longlong) -> cython.bint:
         """Keep legacy eager behavior when collection is incomplete."""
         return not self.complete or tmp_id in self.eager_tmp_ids
 
 
-def _boundary_tag_8616(value: object) -> str:
+@cython.ccall
+def _boundary_tag_8616(value: object) -> object:
     """Read one dynamic VEX tag at the third-party boundary."""
     try:
         tag = cast(_VexExpressionBoundary8616, value).tag
@@ -83,7 +89,8 @@ def _boundary_tag_8616(value: object) -> str:
     return tag if isinstance(tag, str) else ""
 
 
-def _direct_guard_tmp_8616(statement: object) -> tuple[bool, int | None]:
+@cython.ccall
+def _direct_guard_tmp_8616(statement: object) -> tuple[cython.bint, int | None]:
     """Return whether an Exit guard is a direct temporary and its ID."""
     try:
         guard = cast(_VexStatementBoundary8616, statement).guard
@@ -104,14 +111,17 @@ def _direct_guard_tmp_8616(statement: object) -> tuple[bool, int | None]:
     return True, tmp_id if tmp_id >= 0 else None
 
 
+@cython.ccall
 def collect_vex_condition_demand_8616(
     statements: Sequence[object],
 ) -> VexConditionDemand8616:
     """Collect direct RdTmp exit guards before importing their definitions."""
+    tmp_id: object
+    statement: object
     raw_fact_count = 0
     materialized_count = 0
     failure_count = 0
-    eager_tmp_ids: set[int] = set()
+    eager_tmp_ids: set[cython.longlong] = set()
     for statement in statements:
         if _boundary_tag_8616(statement) != "Ist_Exit":
             continue

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bind emitted generated C to its completed acceptance proof.
 
 Layer: CLI/fallback/reporting.
@@ -7,28 +8,31 @@ Forbidden: decompiler semantics, rendered-C inference, or proof regeneration.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import hashlib
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
+import dataclasses
 
 
 class AcceptedPayloadWorkResult8616(Protocol):
     """Read-only accepted-result surface; verification must not rewrite proofs."""
 
     @property
-    def payload(self) -> str:
+    def payload(self) -> object:
         """Return the exact generated C selected for emission."""
         ...
 
     @property
-    def validated_payload_hash(self) -> str | None:
+    def validated_payload_hash(self) -> object:
         """Return the hash independently recorded by semantic validation."""
         ...
 
     @property
-    def gcc_checked_payload_hash(self) -> str | None:
+    def gcc_checked_payload_hash(self) -> object:
         """Return the hash independently recorded by the compiler check."""
         ...
 
@@ -44,15 +48,15 @@ class AcceptedPayloadIntegrityVerdict8616(StrEnum):
     COMPILER_PAYLOAD_MISMATCH = "compiler_payload_mismatch"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class AcceptedPayloadIntegrity8616:
     """Closed payload-identity proof immediately before C emission."""
 
     verdict: AcceptedPayloadIntegrityVerdict8616
-    payload_hash: str | None
+    payload_hash: object
 
     @property
-    def passed(self) -> bool:
+    def passed(self) -> cython.bint:
         """Return whether both acceptance hashes identify the current payload."""
         return self.verdict is AcceptedPayloadIntegrityVerdict8616.PASSED
 
@@ -61,11 +65,12 @@ class AcceptedPayloadIntegrity8616:
         return f"accepted generated-C payload integrity={self.verdict.value}"
 
 
+@cython.ccall
 def verify_accepted_payload_integrity_8616(
-    payload: str,
+    payload: object,
     *,
-    validated_payload_hash: str | None,
-    gcc_checked_payload_hash: str | None,
+    validated_payload_hash: object,
+    gcc_checked_payload_hash: object,
 ) -> AcceptedPayloadIntegrity8616:
     """Verify one payload against both independently recorded acceptance hashes."""
     if not payload.strip():
@@ -87,6 +92,7 @@ def verify_accepted_payload_integrity_8616(
     return AcceptedPayloadIntegrity8616(verdict, payload_hash)
 
 
+@cython.ccall
 def verify_function_work_result_payload_integrity_8616(
     result: AcceptedPayloadWorkResult8616,
 ) -> AcceptedPayloadIntegrity8616:

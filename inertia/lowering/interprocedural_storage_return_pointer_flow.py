@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Trace returned pointer carriers through typed caller CFG and phi facts.
 
 Layer: Types/Lowering.
@@ -12,6 +13,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 
@@ -43,55 +46,62 @@ from .interprocedural_storage_return_type_contracts import (
     ReturnPointerUseEvidence8616,
     ReturnStorageTypeFailure8616,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = ["scan_pointer_return_flow_8616"]
 
 
 def _phi_for_domain_8616(
     artifact: SSAFunctionArtifact,
-    block_addr: int,
+    block_addr: cython.longlong,
     domain: DomainKey,
 ) -> tuple[SSAPhiNode, ...]:
     """Return exact register phi candidates for one join and Alias domain."""
     return tuple(
         phi
-        for phi in artifact.phi_nodes
-        if phi.block_addr == block_addr and full_word_pointer_domain_8616(phi.target) == domain
+        for phi in iter(artifact.phi_nodes)
+        if operator.eq(phi.block_addr, block_addr) and operator.eq(full_word_pointer_domain_8616(phi.target), domain)
     )
 
 
 def _join_carriers_8616(
     artifact: SSAFunctionArtifact,
-    block_addr: int,
-    predecessors: tuple[int, ...],
-    outputs: dict[int, dict[DomainKey, PointerCarrier8616]],
-) -> tuple[dict[DomainKey, PointerCarrier8616], bool, bool]:
+    block_addr: cython.longlong,
+    predecessors: object,
+    outputs: object,
+) -> tuple[dict[DomainKey, PointerCarrier8616], cython.bint, cython.bint]:
     """Join only carriers proven on every predecessor and exact phi input."""
-    if not predecessors or any(predecessor not in outputs for predecessor in predecessors):
+    phi_evidence: object
+    carrier: object
+    domain: object
+    predecessor: object
+    if not predecessors or any(predecessor not in outputs for predecessor in iter(predecessors)):
         return {}, True, False
-    domain_sets = tuple(set(outputs[predecessor]) for predecessor in predecessors)
+    domain_sets = tuple(set(outputs[predecessor]) for predecessor in iter(predecessors))
     common = set.intersection(*domain_sets)
     join_conflict = bool(set.union(*domain_sets) - common)
     joined: dict[DomainKey, PointerCarrier8616] = {}
     phi_conflict = False
     for domain in sorted(common, key=lambda item: item.name):
-        incoming_carriers = tuple(outputs[pred][domain] for pred in predecessors)
+        incoming_carriers = tuple(outputs[pred][domain] for pred in iter(predecessors))
         phi_candidates = _phi_for_domain_8616(artifact, block_addr, domain)
         if len(phi_candidates) > 1:
             phi_conflict = True
             continue
-        phi_evidence: ReturnPointerPhiEvidence8616 | None = None
+        phi_evidence = None
         if phi_candidates:
             phi = phi_candidates[0]
             expected = tuple(
                 (predecessor, carrier.value)
-                for predecessor, carrier in zip(
+                for predecessor, carrier in builtins.iter(zip(
                     predecessors,
                     incoming_carriers,
                     strict=True,
-                )
+                ))
             )
-            actual = tuple((item.source_block_addr, item.value) for item in phi.incoming)
+            actual = tuple((item.source_block_addr, item.value) for item in iter(phi.incoming))
             phi_evidence = ReturnPointerPhiEvidence8616(
                 block_addr=block_addr,
                 carrier_register=phi.target.name or "",
@@ -104,7 +114,7 @@ def _join_carriers_8616(
             value = phi.target
         else:
             value = incoming_carriers[0].value
-            if any(carrier.value != value for carrier in incoming_carriers[1:]):
+            if any(operator.ne(carrier.value, value) for carrier in iter(incoming_carriers[1:])):
                 phi_conflict = True
                 continue
         aliases: tuple[ReturnPointerAliasStep8616, ...] = ()
@@ -136,29 +146,36 @@ def _join_carriers_8616(
                 (),
                 tuple(
                     transfer
-                    for carrier in incoming_carriers
-                    for transfer in carrier.stack_transfers
+                    for carrier in iter(incoming_carriers)
+                    for transfer in iter(carrier.stack_transfers)
                 ),
             ),
         )
     return joined, join_conflict, phi_conflict
 
 
-def _successors_8616(artifact: SSAFunctionArtifact) -> dict[int, tuple[int, ...]]:
+@cython.ccall
+def _successors_8616(artifact: SSAFunctionArtifact) -> dict[cython.longlong, tuple[cython.longlong, ...]]:
     """Invert the authoritative predecessor map deterministically."""
-    successors: dict[int, list[int]] = {block.addr: [] for block in artifact.blocks}
+    predecessor: object
+    predecessors: object
+    target: object
+    successors: dict[cython.longlong, list[cython.longlong]] = {block.addr: [] for block in iter(artifact.blocks)}
     for target, predecessors in artifact.predecessor_map.items():
         for predecessor in predecessors:
             if predecessor in successors:
                 successors[predecessor].append(target)
-    return {addr: tuple(sorted(set(targets))) for addr, targets in successors.items()}
+    return {addr: tuple(sorted(tuple(set(targets)))) for addr, targets in builtins.iter(successors.items())}
 
 
+@cython.ccall
 def _reachable_blocks_8616(
-    start_addr: int,
-    successors: dict[int, tuple[int, ...]],
-) -> set[int]:
+    start_addr: cython.longlong,
+    successors: object,
+) -> object:
     """Return the deterministic in-function CFG reachability set."""
+    source: object
+    target: object
     reachable = {start_addr}
     frontier = [start_addr]
     while frontier:
@@ -171,15 +188,17 @@ def _reachable_blocks_8616(
 
 
 def _has_cycle_8616(
-    reachable: set[int],
-    successors: dict[int, tuple[int, ...]],
-) -> bool:
+    reachable: object,
+    successors: object,
+) -> cython.bint:
     """Return whether the reachable CFG requires an unsupported fixed point."""
+    source: object
+    target: object
     remaining_predecessors = {
-        block_addr: sum(source in reachable and block_addr in successors[source] for source in reachable)
-        for block_addr in reachable
+        block_addr: sum(source in reachable and block_addr in successors[source] for source in iter(reachable))
+        for block_addr in iter(reachable)
     }
-    ready = sorted(block_addr for block_addr, count in remaining_predecessors.items() if count == 0)
+    ready = sorted(block_addr for block_addr, count in builtins.iter(remaining_predecessors.items()) if count == 0)
     removed = 0
     while ready:
         source = ready.pop(0)
@@ -191,16 +210,17 @@ def _has_cycle_8616(
             if remaining_predecessors[target] == 0:
                 ready.append(target)
                 ready.sort()
-    return removed != len(reachable)
+    return operator.ne(removed, len(reachable))
 
 
+@cython.ccall
 def _failure_8616(
     *,
-    ambiguous: bool,
-    unknown: bool,
-    phi: bool,
-    join: bool,
-    clobber: bool,
+    ambiguous: cython.bint,
+    unknown: cython.bint,
+    phi: cython.bint,
+    join: cython.bint,
+    clobber: cython.bint,
 ) -> ReturnStorageTypeFailure8616:
     """Select the most specific deterministic pointer-flow refusal."""
     if ambiguous:
@@ -219,11 +239,12 @@ def _failure_8616(
 def _witness_scan_entry_8616(
     artifact: SSAFunctionArtifact,
     fact: CallerReturnUseFact8616,
-) -> tuple[SSABlock, IRValue, int, int] | ReturnPointerFlowScan8616:
+) -> object:
     """Return the unique witness block, seed value, and start index."""
+    witness: object
     witness = fact.witness_instruction_addr
     candidates = tuple(
-        block for block in artifact.blocks if witness is not None and pointer_witness_seed_values_8616(block, witness)
+        block for block in iter(artifact.blocks) if witness is not None and pointer_witness_seed_values_8616(block, witness)
     )
     if not candidates:
         return ReturnPointerFlowScan8616(failure=ReturnStorageTypeFailure8616.POINTER_WITNESS_NOT_FOUND)
@@ -233,7 +254,7 @@ def _witness_scan_entry_8616(
     seeds = pointer_witness_seed_values_8616(block, witness)
     if len(seeds) != 1:
         return ReturnPointerFlowScan8616(failure=ReturnStorageTypeFailure8616.POINTER_WITNESS_CONFLICT)
-    start_indices = tuple(index for index, instruction in enumerate(block.instrs) if instruction.addr == witness)
+    start_indices = tuple(index for index, instruction in builtins.iter(enumerate(block.instrs)) if operator.eq(instruction.addr, witness))
     if not start_indices:
         return ReturnPointerFlowScan8616(failure=ReturnStorageTypeFailure8616.POINTER_WITNESS_NOT_FOUND)
     return block, seeds[0], start_indices[0], witness
@@ -241,15 +262,15 @@ def _witness_scan_entry_8616(
 
 def _pointer_cfg_context_8616(
     artifact: SSAFunctionArtifact,
-    origin_addr: int,
-) -> tuple[dict[int, SSABlock], dict[int, tuple[int, ...]], set[int]] | ReturnPointerFlowScan8616:
+    origin_addr: cython.longlong,
+) -> object:
     """Validate the acyclic CFG and return deterministic traversal surfaces."""
-    block_by_addr = {item.addr: item for item in artifact.blocks}
+    block_by_addr = {item.addr: item for item in iter(artifact.blocks)}
     block_addrs = set(block_by_addr)
-    if set(artifact.predecessor_map) != block_addrs or any(
+    if operator.ne(set(artifact.predecessor_map), block_addrs) or any(
         predecessor not in block_addrs
-        for predecessors in artifact.predecessor_map.values()
-        for predecessor in predecessors
+        for predecessors in builtins.iter(artifact.predecessor_map.values())
+        for predecessor in iter(predecessors)
     ):
         return ReturnPointerFlowScan8616(failure=ReturnStorageTypeFailure8616.POINTER_CFG_INCOMPLETE)
     successors = _successors_8616(artifact)
@@ -259,32 +280,33 @@ def _pointer_cfg_context_8616(
     return block_by_addr, successors, reachable
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _PointerFlowPropagation8616:
     """Evidence and refusal flags collected across the acyclic worklist."""
 
-    evidence: list[ReturnPointerUseEvidence8616] = field(default_factory=list)
-    ambiguous: bool = False
-    unknown: bool = False
-    clobber: bool = False
-    join_conflict: bool = False
-    phi_conflict: bool = False
+    evidence: object = field(default_factory=list)
+    ambiguous: cython.bint = False
+    unknown: cython.bint = False
+    clobber: cython.bint = False
+    join_conflict: cython.bint = False
+    phi_conflict: cython.bint = False
 
 
 def _propagate_pointer_carriers_8616(
     artifact: SSAFunctionArtifact,
     fact: CallerReturnUseFact8616,
     start: PointerBlockScan8616,
-    origin_addr: int,
-    pending: set[int],
-    block_by_addr: dict[int, SSABlock],
+    origin_addr: cython.longlong,
+    pending: object,
+    block_by_addr: object,
     stack_context: PointerStackTransferContext8616,
-    witness: int,
+    witness: cython.longlong,
 ) -> _PointerFlowPropagation8616 | ReturnPointerFlowScan8616:
     """Advance carriers through the acyclic worklist in deterministic order."""
+    block_addr: object
     outputs = {origin_addr: start.carriers}
     stack_outputs: dict[
-        int,
+        cython.longlong,
         dict[StackWordStorageVersion8616, PointerCarrier8616],
     ] = {origin_addr: start.stack_carriers}
     collected = _PointerFlowPropagation8616(
@@ -296,7 +318,7 @@ def _propagate_pointer_carriers_8616(
         progress = False
         for block_addr in sorted(pending):
             predecessors = artifact.predecessor_map[block_addr]
-            if any(predecessor not in outputs for predecessor in predecessors):
+            if any(predecessor not in outputs for predecessor in iter(predecessors)):
                 continue
             entry, joined_bad, phi_bad = _join_carriers_8616(
                 artifact,

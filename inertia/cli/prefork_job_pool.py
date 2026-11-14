@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Provide a bounded POSIX prefork pool for isolated CLI jobs.
 
 Layer: CLI/fallback/reporting.
@@ -7,6 +8,8 @@ single-job dispatch without owning decompiler semantics.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 import os
@@ -16,21 +19,23 @@ import threading
 from collections import deque
 from collections.abc import Callable, Iterator
 from typing import TypedDict
+import operator
 
 
 class _PreforkWorkerRecord(TypedDict):
     """Track one owned prefork worker and its pipe state."""
 
-    pid: int
-    job_write: int
-    result_read: int
-    busy: bool
-    alive: bool
+    pid: cython.longlong
+    job_write: cython.longlong
+    result_read: cython.longlong
+    busy: cython.bint
+    alive: cython.bint
     job_id: object | None
-    name: str
+    name: object
 
 
-def _read_framed_pickle(fd: int) -> object:
+@cython.ccall
+def _read_framed_pickle(fd: cython.longlong) -> object:
     """Read one length-prefixed pickle payload from an owned pipe."""
     header = b""
     while len(header) < 8:
@@ -48,7 +53,8 @@ def _read_framed_pickle(fd: int) -> object:
     return pickle.loads(bytes(data))
 
 
-def _write_framed_pickle(fd: int, payload: object) -> None:
+@cython.ccall
+def _write_framed_pickle(fd: cython.longlong, payload: object) -> None:
     """Write one length-prefixed pickle payload to an owned pipe."""
     data = pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL)
     framed_data = len(data).to_bytes(8, "little") + data
@@ -61,15 +67,20 @@ def _write_framed_pickle(fd: int, payload: object) -> None:
         written += chunk_size
 
 
+@cython.cclass
 class PreforkJobPool:
     """Manage bounded POSIX workers created before caller threads exist."""
+    _closed = cython.declare(cython.bint, visibility = "public")
+    _condition = cython.declare(object, visibility = "public")
+    _worker_func = cython.declare(object, visibility = "public")
+    _workers = cython.declare(list, visibility = "public")
 
     def __init__(
         self,
         *,
-        max_workers: int,
+        max_workers: cython.longlong,
         worker_func: Callable[[object], object],
-        name_prefix: str = "prefork",
+        name_prefix: object = "prefork",
     ) -> None:
         """Start ``max_workers`` from a single-threaded POSIX parent."""
         if os.name != "posix" or not hasattr(os, "fork"):
@@ -86,13 +97,15 @@ class PreforkJobPool:
             self._start_worker(index, name_prefix)
 
     @property
-    def worker_count(self) -> int:
+    def worker_count(self) -> cython.longlong:
         """Return the number of live workers owned by this pool."""
         with self._condition:
-            return sum(worker["alive"] for worker in self._workers)
+            return sum(worker["alive"] for worker in iter(self._workers))
 
-    def _start_worker(self, index: int, name_prefix: str) -> None:
+    @cython.ccall
+    def _start_worker(self, index: cython.longlong, name_prefix: object) -> None:
         """Fork one worker while the constructing parent is single-threaded."""
+        inherited_worker: object
         job_read, job_write = os.pipe()
         result_read, result_write = os.pipe()
         pid = os.fork()
@@ -124,8 +137,10 @@ class PreforkJobPool:
             }
         )
 
-    def _worker_loop(self, job_read: int, result_write: int) -> None:
+    @cython.ccall
+    def _worker_loop(self, job_read: cython.longlong, result_write: cython.longlong) -> None:
         """Execute framed requests in one isolated prefork worker."""
+        job: object
         while True:
             job = _read_framed_pickle(job_read)
             if job is None or job == ("shutdown",):
@@ -143,6 +158,7 @@ class PreforkJobPool:
 
     def _acquire_worker(self, job_id: object) -> _PreforkWorkerRecord:
         """Reserve one live worker for a caller without serializing peers."""
+        worker: object
         with self._condition:
             while True:
                 if self._closed:
@@ -152,11 +168,12 @@ class PreforkJobPool:
                         worker["busy"] = True
                         worker["job_id"] = job_id
                         return worker
-                if not any(worker["alive"] for worker in self._workers):
+                if not any(worker["alive"] for worker in iter(self._workers)):
                     raise RuntimeError("prefork pool has no live workers")
                 self._condition.wait()
 
-    def _release_worker(self, worker: _PreforkWorkerRecord, *, alive: bool) -> None:
+    @cython.ccall
+    def _release_worker(self, worker: _PreforkWorkerRecord, *, alive: cython.bint) -> None:
         """Release one worker reservation and wake a waiting caller."""
         with self._condition:
             worker["busy"] = False
@@ -173,7 +190,7 @@ class PreforkJobPool:
         """Validate one worker response and return its typed payload."""
         if not isinstance(response, tuple) or len(response) < 3:
             raise RuntimeError(f"{worker['name']} exited without a valid result")
-        if response[0] != expected_job_id:
+        if operator.ne(response[0], expected_job_id):
             raise RuntimeError(
                 f"{worker['name']} returned job {response[0]!r}, expected {expected_job_id!r}"
             )
@@ -182,10 +199,12 @@ class PreforkJobPool:
         detail = response[3] if len(response) > 3 else "unknown worker failure"
         raise RuntimeError(f"{response[2]}: {detail}")
 
+    @cython.ccall
     def run_one(self, job_id: object, payload: object) -> object:
         """Run one job from any caller thread on a prestarted worker."""
+        response: object
         worker = self._acquire_worker(job_id)
-        response: object = None
+        response = None
         alive = True
         try:
             _write_framed_pickle(worker["job_write"], (job_id, payload))
@@ -200,13 +219,16 @@ class PreforkJobPool:
 
     def run_unordered(
         self,
-        jobs: list[tuple[object, object]],
+        jobs: object,
         *,
-        poll_timeout: float = 0.25,
+        poll_timeout: cython.double = 0.25,
     ) -> Iterator[tuple[object | None, object]]:
         """Yield completed prefork jobs without imposing submission order."""
+        response: object
+        worker: object
+        fd: object
         pending = deque(jobs)
-        active: dict[int, _PreforkWorkerRecord] = {}
+        active: dict[cython.longlong, _PreforkWorkerRecord] = {}
 
         def _dispatch_available() -> None:
             while pending:
@@ -242,8 +264,10 @@ class PreforkJobPool:
                     yield expected_job_id, error
             _dispatch_available()
 
+    @cython.ccall
     def shutdown(self) -> None:
         """Request worker shutdown, close pipes, and reap child processes."""
+        worker: object
         with self._condition:
             if self._closed:
                 return

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/runtime.
 
 Responsibility: install x86-16 compatibility, structuring, return, and cleanup bootstrap hooks.
@@ -5,6 +6,7 @@ Forbidden: owning decompiler semantics or adding source-backed recovery during s
 """
 
 from __future__ import annotations
+import cython
 
 from inertia.lowering.native_integer_constants import apply_native_integer_constant_values_8616
 from inertia.postprocess.decompiler_postprocess_stage import apply_x86_16_decompiler_postprocess
@@ -24,6 +26,7 @@ from .variable_recovery_compat import apply_stack_reference_compatibility_8616
 __all__ = ["apply_x86_16_bootstrap"]
 
 
+@cython.ccall
 def describe_x86_16_bootstrap() -> tuple[str, ...]:
     """Return the startup hooks installed by the x86-16 frontend bootstrap."""
     return (
@@ -43,6 +46,7 @@ def describe_x86_16_bootstrap() -> tuple[str, ...]:
     )
 
 
+@cython.ccall
 def apply_x86_16_bootstrap() -> None:
     """Install x86-16 frontend compatibility, structuring, return, and cleanup hooks."""
     apply_pyvex_runtime_compatibility()

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Collect bounded indexed-address ranges from explicit typed witnesses.
 
 Layer: IR.
@@ -10,6 +11,8 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import Counter
 from collections.abc import Iterable
@@ -24,8 +27,11 @@ from .indexed_address_range_contracts import (
     IndexedLoopRangeStats8616,
     canonical_induction_source_identity_8616,
 )
+import operator
+import builtins
 
 
+@cython.ccall
 def _candidate_key_8616(candidate: IndexedLoopRangeCandidate8616) -> tuple[object, ...]:
     """Return the exact machine identity of one candidate access."""
     source = candidate.source
@@ -38,22 +44,24 @@ def _candidate_key_8616(candidate: IndexedLoopRangeCandidate8616) -> tuple[objec
     )
 
 
+@cython.ccall
 def _failure_8616(
     candidate: IndexedLoopRangeCandidate8616,
     failure: IndexedLoopRangeFailureKind8616,
-    detail: str,
+    detail: object,
 ) -> IndexedLoopRangeRefusal8616:
     """Create one typed refusal retaining the complete candidate input."""
     return IndexedLoopRangeRefusal8616(candidate, failure, detail)
 
 
+@cython.ccall
 def _validate_source_identity_8616(
-    function_addr: int,
+    function_addr: cython.longlong,
     candidate: IndexedLoopRangeCandidate8616,
 ) -> IndexedLoopRangeRefusal8616 | None:
     """Check the candidate source belongs to the function and is complete."""
     source = candidate.source
-    if source.function_addr != function_addr:
+    if operator.ne(source.function_addr, function_addr):
         return _failure_8616(
             candidate,
             IndexedLoopRangeFailureKind8616.FUNCTION_MISMATCH,
@@ -74,10 +82,12 @@ def _validate_source_identity_8616(
     return None
 
 
+@cython.ccall
 def _proven_induction_identity_8616(
     candidate: IndexedLoopRangeCandidate8616,
 ) -> IndexedInductionSourceIdentity8616 | IndexedLoopRangeRefusal8616:
     """Return the proven canonical induction identity or a typed refusal."""
+    canonical: object
     canonical = canonical_induction_source_identity_8616(
         candidate.source.index_source
     )
@@ -87,7 +97,7 @@ def _proven_induction_identity_8616(
             IndexedLoopRangeFailureKind8616.INDUCTION_IDENTITY_UNPROVEN,
             "canonical induction storage identity is absent",
         )
-    if candidate.induction_source != canonical:
+    if operator.ne(candidate.induction_source, canonical):
         return _failure_8616(
             candidate,
             IndexedLoopRangeFailureKind8616.INDUCTION_IDENTITY_MISMATCH,
@@ -96,6 +106,7 @@ def _proven_induction_identity_8616(
     return canonical
 
 
+@cython.ccall
 def _validate_induction_update_8616(
     candidate: IndexedLoopRangeCandidate8616,
 ) -> IndexedLoopRangeRefusal8616 | None:
@@ -147,6 +158,7 @@ def _validate_induction_update_8616(
     return None
 
 
+@cython.ccall
 def _validate_candidate_bound_8616(
     candidate: IndexedLoopRangeCandidate8616,
 ) -> IndexedLoopRangeRefusal8616 | None:
@@ -173,10 +185,13 @@ def _validate_candidate_bound_8616(
     return None
 
 
+@cython.ccall
 def _validate_guard_loop_and_access_8616(
     candidate: IndexedLoopRangeCandidate8616,
 ) -> IndexedLoopRangeRefusal8616 | None:
     """Check the strict guard, natural loop, backedge, and access site."""
+    guard: object
+    loop: object
     guard = candidate.guard
     if guard is None or not guard.complete or candidate.guard_site is None:
         return _failure_8616(
@@ -205,8 +220,8 @@ def _validate_guard_loop_and_access_8616(
         )
     if (
         not loop.backedge_proven
-        or loop.backedge_source_addr != loop.latch_block_addr
-        or loop.backedge_target_addr != loop.header_block_addr
+        or operator.ne(loop.backedge_source_addr, loop.latch_block_addr)
+        or operator.ne(loop.backedge_target_addr, loop.header_block_addr)
     ):
         return _failure_8616(
             candidate,
@@ -222,10 +237,13 @@ def _validate_guard_loop_and_access_8616(
     return _validate_loop_access_site_8616(candidate)
 
 
+@cython.ccall
 def _validate_loop_access_site_8616(
     candidate: IndexedLoopRangeCandidate8616,
 ) -> IndexedLoopRangeRefusal8616 | None:
     """Check the access site matches the retained indexed fact inside the loop."""
+    access_site: object
+    loop: object
     loop = candidate.natural_loop
     access_site = candidate.access_site
     if access_site is None:
@@ -254,11 +272,25 @@ def _validate_loop_access_site_8616(
     return None
 
 
+@cython.ccall
 def _validate_candidate_8616(
-    function_addr: int,
+    function_addr: cython.longlong,
     candidate: IndexedLoopRangeCandidate8616,
 ) -> IndexedLoopRangeFact8616 | IndexedLoopRangeRefusal8616:
     """Validate one explicit witness without deriving any missing proof."""
+    access_site: object
+    census: object
+    guard: object
+    guard_site: object
+    init: object
+    init_site: object
+    init_write: object
+    loop: object
+    refusal: object
+    step: object
+    step_site: object
+    step_write: object
+    upper_bound: object
     source = candidate.source
     refusal = _validate_source_identity_8616(function_addr, candidate)
     if refusal is not None:
@@ -324,10 +356,11 @@ def _validate_candidate_8616(
 
 
 def collect_indexed_loop_range_evidence_8616(
-    function_addr: int,
+    function_addr: cython.longlong,
     candidates: Iterable[IndexedLoopRangeCandidate8616],
 ) -> IndexedLoopRangeEvidence8616:
     """Close explicit typed candidates without consulting rendered or backend text."""
+    candidate: object
     ordered = tuple(
         sorted(
             candidates,
@@ -341,7 +374,7 @@ def collect_indexed_loop_range_evidence_8616(
     )
     duplicate_keys = {
         key
-        for key, count in Counter(_candidate_key_8616(item) for item in ordered).items()
+        for key, count in builtins.iter(Counter(_candidate_key_8616(item) for item in iter(ordered)).items())
         if count > 1
     }
     facts: list[IndexedLoopRangeFact8616] = []

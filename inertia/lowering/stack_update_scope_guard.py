@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Reject unproven changes to the execution scope of stack updates.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -18,21 +21,23 @@ from angr.analyses.decompiler.structured_codegen.c import CAssignment, CForLoop,
 
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 from inertia.pipeline.errors import PipelineHardError
+import dataclasses
+import builtins
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackUpdateScopeConflict8616:
     """Instruction fragments whose execution scopes cannot be merged by tags."""
 
-    instruction_addr: int
+    instruction_addr: cython.longlong
     iterator_scope: str = "for_iterator"
     guarded_scope: str = "conditional_body"
 
 
 def require_stack_update_scope_8616(
     root: object,
-    instruction_addr: int,
-    matches_instruction: Callable[[object], bool],
+    instruction_addr: cython.longlong,
+    matches_instruction: Callable[[object], cython.bint],
 ) -> None:
     """Fail before mutation when an iterator shares an instruction with an arm.
 
@@ -40,6 +45,9 @@ def require_stack_update_scope_8616(
     one fragment was legally hoisted, promoting it to a whole storage update
     can execute the other fragment's effect on previously excluded paths.
     """
+    body: object
+    loop: object
+    node: object
     for loop in _iter_c_nodes_deep_8616(root):
         if not isinstance(loop, CForLoop) or loop.iterator is None:
             continue
@@ -48,13 +56,13 @@ def require_stack_update_scope_8616(
         for node in _iter_c_nodes_deep_8616(loop.body):
             if not isinstance(node, CIfElse):
                 continue
-            bodies = [body for _condition, body in node.condition_and_nodes]
+            bodies = [body for _condition, body in iter(node.condition_and_nodes)]
             if node.else_node is not None:
                 bodies.append(node.else_node)
             for body in bodies:
                 has_fragment = any(
                     isinstance(statement, CAssignment) and matches_instruction(statement)
-                    for statement in _iter_c_nodes_deep_8616(body)
+                    for statement in builtins.iter(_iter_c_nodes_deep_8616(body))
                 )
                 if has_fragment:
                     raise PipelineHardError(

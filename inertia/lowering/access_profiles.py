@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Types/lowering.
 
 Responsibility: group existing access-trait evidence into typed profiles, induction candidates, and naming hints.
@@ -8,55 +9,59 @@ Do not recover semantics from COD, source, assembly, or rendered C text
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import cast
+import dataclasses
+import builtins
 
-type NamingCandidate = tuple[int, int, int]
+NamingCandidate = typing.TypeAliasType("NamingCandidate", tuple[int, int, int])
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class AccessTraitStrideEvidence:
     """Evidence that a storage access follows a stable base/index/stride pattern."""
 
-    segment: str
-    base_key: tuple[object, ...] | None
-    index_key: tuple[object, ...] | None
-    stride: int
-    offset: int
-    width: int
-    count: int
-    kind: str
+    segment: object
+    base_key: object
+    index_key: object
+    stride: cython.longlong
+    offset: cython.longlong
+    width: cython.longlong
+    count: cython.longlong
+    kind: object
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class AccessTraitInductionVar:
     """Induction-variable candidate derived from stable access evidence."""
 
-    base_key: tuple[object, ...] | None
-    index_key: tuple[object, ...] | None
-    stride: int
-    width: int
-    offset: int
-    count: int
+    base_key: object
+    index_key: object
+    stride: cython.longlong
+    width: cython.longlong
+    offset: cython.longlong
+    count: cython.longlong
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class InductionSummary:
     """Normalized induction summary for array-like or loop-carried access."""
 
-    base_key: tuple[object, ...] | None
-    index_key: tuple[object, ...] | None
-    stride: int
-    direction: str
+    base_key: object
+    index_key: object
+    stride: cython.longlong
+    direction: object
     bound_candidate: int | None
-    width: int
-    offset: int
-    count: int
+    width: cython.longlong
+    offset: cython.longlong
+    count: cython.longlong
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class AccessTraitEvidenceProfile:
     """Grouped access evidence used to choose safe cleanup naming hints."""
 
@@ -68,6 +73,7 @@ class AccessTraitEvidenceProfile:
     stride_evidence: tuple[AccessTraitStrideEvidence, ...] = ()
 
     def _structured_candidates(self) -> tuple[NamingCandidate, ...]:
+        evidence: object
         candidates: list[NamingCandidate] = []
         seen: set[NamingCandidate] = set()
         for evidence in sorted(
@@ -81,8 +87,9 @@ class AccessTraitEvidenceProfile:
             candidates.append(candidate)
         return tuple(candidates)
 
-    def naming_candidates(self, base_key: tuple[object, ...] | None = None) -> tuple[NamingCandidate, ...]:
+    def naming_candidates(self, base_key: object = None) -> tuple[NamingCandidate, ...]:
         """Return deduplicated candidate offsets ordered by evidence strength."""
+        candidate: object
         structured = self._structured_candidates()
         if base_key is not None and base_key and base_key[0] == "stack":
             ordered = self.stack_like + structured + self.member_like + self.array_like + self.induction_like
@@ -98,7 +105,7 @@ class AccessTraitEvidenceProfile:
             deduped.append(candidate)
         return tuple(deduped)
 
-    def has_any_evidence(self) -> bool:
+    def has_any_evidence(self) -> cython.bint:
         """Return whether this profile contains any accepted access evidence."""
         return bool(
             self.member_like
@@ -109,7 +116,7 @@ class AccessTraitEvidenceProfile:
             or self.stride_evidence
         )
 
-    def best_rewrite_kind(self, base_key: tuple[object, ...] | None = None) -> str | None:
+    def best_rewrite_kind(self, base_key: object = None) -> object:
         """Return the safest rewrite category implied by this profile."""
         if base_key is not None and base_key and base_key[0] == "stack" and self.stack_like:
             return "stack"
@@ -132,9 +139,10 @@ class AccessTraitEvidenceProfile:
             return "stack"
         return None
 
-    def _dominant_structured_kind(self) -> str | None:
+    def _dominant_structured_kind(self) -> object:
         """Return the dominant structured-evidence kind, or None."""
-        structured_counts: dict[str, int] = {}
+        evidence: object
+        structured_counts: dict[str, cython.longlong] = {}
         for evidence in self.induction_evidence + self.stride_evidence:
             structured_counts[evidence.kind] = structured_counts.get(evidence.kind, 0) + max(int(evidence.count), 1)
         if not structured_counts:
@@ -149,8 +157,10 @@ class AccessTraitEvidenceProfile:
         )[0]
 
 
+@cython.ccall
 def infer_induction_variable(profile: AccessTraitEvidenceProfile) -> AccessTraitInductionVar | None:
     """Return the induction variable candidate for a stable induction profile."""
+    summary: object
     summary = infer_induction_summary(profile)
     if summary is None:
         return None
@@ -170,16 +180,16 @@ def infer_induction_summary(profile: AccessTraitEvidenceProfile) -> InductionSum
     def _impl() -> InductionSummary | None:
         candidates = tuple(
             evidence
-            for evidence in profile.induction_evidence + profile.stride_evidence
+            for evidence in iter(profile.induction_evidence + profile.stride_evidence)
             if evidence.kind == "induction_like"
         )
         if not candidates:
             return None
 
-        stride_set = {int(evidence.stride) for evidence in candidates}
-        index_keys = {evidence.index_key for evidence in candidates}
-        base_keys = {evidence.base_key for evidence in candidates}
-        widths = {int(evidence.width) for evidence in candidates}
+        stride_set = {int(evidence.stride) for evidence in iter(candidates)}
+        index_keys = {evidence.index_key for evidence in iter(candidates)}
+        base_keys = {evidence.base_key for evidence in iter(candidates)}
+        widths = {int(evidence.width) for evidence in iter(candidates)}
         if len(stride_set) != 1 or len(index_keys) != 1 or len(base_keys) != 1 or len(widths) != 1:
             return None
 
@@ -202,23 +212,26 @@ def infer_induction_summary(profile: AccessTraitEvidenceProfile) -> InductionSum
     return _impl()
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class AccessTraitRewriteDecision:
     """Decision helper for naming access-trait-backed storage objects."""
 
-    base_key: tuple[object, ...]
+    base_key: object
     profile: AccessTraitEvidenceProfile
 
-    def should_rename_stack(self) -> bool:
+    def should_rename_stack(self) -> cython.bint:
         """Return whether stack naming can follow this profile."""
         return self.profile.best_rewrite_kind(self.base_key) in {"member", "array", "stack"}
 
-    def preferred_kind(self) -> str | None:
+    def preferred_kind(self) -> object:
         """Return the preferred rewrite category for this base key."""
         return self.profile.best_rewrite_kind(self.base_key)
 
     def candidate_field_names(self, access_trait_field_name: Callable[[int, int], str]) -> tuple[str, ...]:
         """Return stable field-name candidates for this decision."""
+        _count: object
+        _size: object
+        offset: object
         if self.preferred_kind() is None:
             return ()
         candidates = self.profile.naming_candidates(self.base_key)
@@ -235,11 +248,13 @@ class AccessTraitRewriteDecision:
         return tuple(names)
 
 
+@cython.ccall
 def access_trait_profile_for_key(
     evidence_profiles: Mapping[tuple[object, ...], AccessTraitEvidenceProfile],
-    base_key: tuple[object, ...],
+    base_key: object,
 ) -> AccessTraitEvidenceProfile | None:
     """Return an evidence profile, falling back from stack-region keys when needed."""
+    profile: object
     profile = evidence_profiles.get(base_key)
     if profile is not None:
         return profile
@@ -248,10 +263,11 @@ def access_trait_profile_for_key(
     return None
 
 
+@cython.ccall
 def _raw_profile_entry_8616(
-    raw_profiles: dict[tuple[object, ...], dict[str, list[object]]],
-    group_key: tuple[object, ...],
-) -> dict[str, list[object]]:
+    raw_profiles: object,
+    group_key: object,
+) -> object:
     """Return the mutable raw-profile bucket set for one base key."""
     return raw_profiles.setdefault(
         group_key,
@@ -266,13 +282,14 @@ def _raw_profile_entry_8616(
     )
 
 
+@cython.ccall
 def _decoded_bucket_candidate_8616(
     key: object,
     count: object,
-    base_index: int,
-    offset_index: int,
-    size_index: int | None,
-) -> tuple[tuple[object, ...], int, int, int] | None:
+    base_index: cython.longlong,
+    offset_index: cython.longlong,
+    size_index: object,
+) -> object:
     """Return a decoded storage key, access width, and validated integer count."""
     if not isinstance(key, tuple) or len(key) <= max(base_index, offset_index):
         return None
@@ -294,16 +311,21 @@ def _decoded_bucket_candidate_8616(
     return base_key, offset, size, count
 
 
+@cython.ccall
 def _add_access_trait_bucket_8616(
-    raw_profiles: dict[tuple[object, ...], dict[str, list[object]]],
-    traits: dict[str, dict[tuple[object, ...], object]],
-    bucket_name: str,
-    category: str,
-    base_index: int,
-    offset_index: int,
+    raw_profiles: object,
+    traits: object,
+    bucket_name: object,
+    category: object,
+    base_index: cython.longlong,
+    offset_index: cython.longlong,
     size_index: int | None = None,
 ) -> None:
     """Fold one keyed trait bucket into the per-base raw profile lists."""
+    bucket: object
+    decoded: object
+    count: object
+    key: object
     bucket = traits.get(bucket_name, {})
     if not isinstance(bucket, dict):
         return
@@ -318,14 +340,17 @@ def _add_access_trait_bucket_8616(
             cast(list[NamingCandidate], profile["stack_like"]).append((offset, size, decoded_count))
 
 
+@cython.ccall
 def _add_access_trait_structured_bucket_8616(
-    raw_profiles: dict[tuple[object, ...], dict[str, list[object]]],
-    traits: dict[str, dict[tuple[object, ...], object]],
-    bucket_name: str,
-    profile_bucket: str,
-    category: str | None = None,
+    raw_profiles: object,
+    traits: object,
+    bucket_name: object,
+    profile_bucket: object,
+    category: object = None,
 ) -> None:
     """Fold one structured-evidence trait bucket into the raw profile lists."""
+    bucket: object
+    evidence: object
     bucket = traits.get(bucket_name, {})
     if not isinstance(bucket, dict):
         return
@@ -343,8 +368,9 @@ def _add_access_trait_structured_bucket_8616(
         cast(list[AccessTraitStrideEvidence], profile[profile_bucket]).append(evidence)
 
 
+@cython.ccall
 def build_access_trait_evidence_profiles(
-    traits: dict[str, dict[tuple[object, ...], object]],
+    traits: object,
 ) -> dict[tuple[object, ...], AccessTraitEvidenceProfile]:
     """Group raw access trait buckets into typed evidence profiles."""
     raw_profiles: dict[tuple[object, ...], dict[str, list[object]]] = {}
@@ -368,17 +394,18 @@ def build_access_trait_evidence_profiles(
             induction_evidence=tuple(cast(list[AccessTraitStrideEvidence], data["induction_evidence"])),
             stride_evidence=tuple(cast(list[AccessTraitStrideEvidence], data["stride_evidence"])),
         )
-        for base_key, data in raw_profiles.items()
+        for base_key, data in builtins.iter(raw_profiles.items())
     }
 
 
+@cython.ccall
 def access_trait_member_candidates(
-    traits: dict[str, dict[tuple[object, ...], object]],
+    traits: object,
 ) -> dict[tuple[object, ...], list[NamingCandidate]]:
     """Return member-name candidates for all bases with accepted evidence."""
     profiles = build_access_trait_evidence_profiles(traits)
     return {
         base_key: list(profile.naming_candidates(base_key))
-        for base_key, profile in profiles.items()
+        for base_key, profile in builtins.iter(profiles.items())
         if profile.has_any_evidence()
     }

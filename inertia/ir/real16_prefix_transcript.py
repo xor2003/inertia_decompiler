@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Detach a bounded prefix census candidate without minting reuse authority.
 
 Layer: IR.
@@ -8,6 +9,8 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -15,6 +18,8 @@ from time import monotonic
 
 from .core import IRBlock, IRFunctionArtifact, IRInstr
 from .real16_path_memory8616 import PathMemory8616, PathMemorySnapshot8616, snapshot_path_memory_8616
+import dataclasses
+import operator
 
 
 class PrefixCaptureOrigin8616(StrEnum):
@@ -47,15 +52,16 @@ class _Refused(Exception):
         super().__init__(failure.value)
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class PrefixCaptureBudget8616:
     """Capture allowance to be debited from the existing ambient traversal."""
 
-    max_work_units: int
-    deadline: float
-    work_units: int = 0
+    max_work_units: cython.longlong
+    deadline: cython.double
+    work_units: cython.longlong = 0
 
-    def charge(self, units: int = 1) -> None:
+    @cython.ccall
+    def charge(self, units: cython.longlong = 1) -> None:
         """Refuse before consuming work beyond the existing allowance."""
         if not monotonic() < self.deadline:
             raise _Refused(PrefixCaptureFailure8616.DEADLINE)
@@ -63,12 +69,13 @@ class PrefixCaptureBudget8616:
             raise _Refused(PrefixCaptureFailure8616.WORK)
         self.work_units += units
 
-    def sorting(self, size: int) -> None:
+    @cython.ccall
+    def sorting(self, size: cython.longlong) -> None:
         """Prepay comparisons and tuple construction for a bounded scalar sort."""
         self.charge(size * (size.bit_length() + 2))
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PrefixCaptureBinding8616:
     """Exact current input/admission claims, retained solely as opaque identities."""
 
@@ -82,52 +89,52 @@ class PrefixCaptureBinding8616:
     traversal: object
     producer: object
     derivation: object
-    services: tuple[object, ...]
-    call_proofs: tuple[object, ...]
-    entry_call_proofs: tuple[object, ...]
+    services: object
+    call_proofs: object
+    entry_call_proofs: object
     initial_memory: object | None = None
     environment: object | None = None
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class PrefixCaptureState8616:
     """Core-normalized mutable scalar state immediately before the CALL transfer."""
 
-    registers: dict[str, int]
+    registers: object
     memory: PathMemory8616
     direction: bool | None
-    tmps: dict[int, int] = field(default_factory=dict)
-    dirty: set[str] = field(default_factory=set)
-    instruction_entry: dict[str, int] = field(default_factory=dict)
+    tmps: object = field(default_factory=dict)
+    dirty: object = field(default_factory=set)
+    instruction_entry: object = field(default_factory=dict)
     current_addr: int | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PrefixCapturedState8616:
     """Detached scalar continuation data; direction alone is not tracker authority."""
 
-    registers: tuple[tuple[str, int], ...]
+    registers: object
     memory: PathMemorySnapshot8616
     direction: bool | None
-    tmps: tuple[tuple[int, int], ...]
-    dirty: tuple[str, ...]
-    instruction_entry: tuple[tuple[str, int], ...]
+    tmps: object
+    dirty: object
+    instruction_entry: object
     current_addr: int | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PrefixCaptureRow8616:
     """One census key's exact IR and current native block/instruction owners."""
 
     artifact: IRFunctionArtifact
     block: IRBlock
-    index: int
+    index: cython.longlong
     row: IRInstr
     native_block: IRBlock
     native_row: IRInstr
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class PrefixCaptureInput8616:
     """Explicit core projection; successful provenance is still an untrusted claim."""
 
@@ -136,17 +143,17 @@ class PrefixCaptureInput8616:
     seed: PrefixCaptureState8616
     call_state: PrefixCaptureState8616
     call_row: PrefixCaptureRow8616
-    raw_facts: set[tuple[int, int]]
-    normalized_facts: set[tuple[int, int]]
-    classified_facts: set[tuple[int, int]]
-    materialized_facts: set[tuple[int, int]]
-    counts: tuple[int, int, int, int, int]
-    rows: tuple[PrefixCaptureRow8616, ...]
-    manifest: set[tuple[int, int]]
-    machine_bytes: dict[int, bytes]
+    raw_facts: object
+    normalized_facts: object
+    classified_facts: object
+    materialized_facts: object
+    counts: object
+    rows: object
+    manifest: object
+    machine_bytes: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PrefixTranscriptData8616:
     """Ephemeral detached data, never an authenticated successful-census receipt."""
 
@@ -154,32 +161,35 @@ class PrefixTranscriptData8616:
     seed: PrefixCapturedState8616
     call_state: PrefixCapturedState8616
     call_row: PrefixCaptureRow8616
-    raw_facts: frozenset[tuple[int, int]]
-    normalized_facts: frozenset[tuple[int, int]]
-    classified_facts: frozenset[tuple[int, int]]
-    materialized_facts: frozenset[tuple[int, int]]
-    counts: tuple[int, int, int, int, int]
-    rows: tuple[PrefixCaptureRow8616, ...]
-    manifest: tuple[tuple[int, int], ...]
-    machine_bytes: tuple[tuple[int, bytes], ...]
+    raw_facts: object
+    normalized_facts: object
+    classified_facts: object
+    materialized_facts: object
+    counts: object
+    rows: object
+    manifest: object
+    machine_bytes: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PrefixCaptureResult8616:
     """DATA_ONLY capture outcome; no completion or reuse verdict is exposed."""
 
     payload: PrefixTranscriptData8616 | None
     failure: PrefixCaptureFailure8616 | None
-    work_units: int
+    work_units: cython.longlong
 
     @property
-    def authorizes_reuse(self) -> bool:
+    def authorizes_reuse(self) -> cython.bint:
         """Always refuse authority, including for forged CURRENT provenance claims."""
         return False
 
 
+@cython.ccall
 def _memory(source: PathMemory8616, budget: PrefixCaptureBudget8616) -> PathMemorySnapshot8616:
     """Consume the existing snapshot owner after bounded overlay validation."""
+    address: object
+    value: object
     budget.charge()
     if source.tainted:
         raise _Refused(PrefixCaptureFailure8616.MEMORY)
@@ -197,8 +207,13 @@ def _memory(source: PathMemory8616, budget: PrefixCaptureBudget8616) -> PathMemo
     return snapshot_path_memory_8616(source)
 
 
+@cython.ccall
 def _state(source: PrefixCaptureState8616, budget: PrefixCaptureBudget8616) -> PrefixCapturedState8616:
     """Validate and detach registers, continuation scalars and touched-byte overlay."""
+    entries: object
+    name: object
+    tmp: object
+    value: object
     memory = _memory(source.memory, budget)
     if source.direction is not None and type(source.direction) is not bool:
         raise _Refused(PrefixCaptureFailure8616.STATE)
@@ -219,22 +234,25 @@ def _state(source: PrefixCaptureState8616, budget: PrefixCaptureBudget8616) -> P
         if type(name) is not str:
             raise _Refused(PrefixCaptureFailure8616.STATE)
     budget.sorting(len(source.tmps) + len(source.dirty))
-    return PrefixCapturedState8616(tuple(sorted(source.registers.items())), memory, source.direction,
-        tuple(sorted(source.tmps.items())), tuple(sorted(source.dirty)),
-        tuple(sorted(source.instruction_entry.items())), source.current_addr)
+    return PrefixCapturedState8616(tuple(sorted(tuple(source.registers.items()))), memory, source.direction,
+        tuple(sorted(tuple(source.tmps.items()))), tuple(sorted(source.dirty)),
+        tuple(sorted(tuple(source.instruction_entry.items()))), source.current_addr)
 
 
-def _rows(source: PrefixCaptureInput8616, budget: PrefixCaptureBudget8616) -> set[tuple[int, int]]:
+@cython.ccall
+def _rows(source: PrefixCaptureInput8616, budget: PrefixCaptureBudget8616) -> object:
     """Bind exact row positions without deep equality or nested artifact hashing."""
+    block: object
+    ref: object
     if type(source.rows) is not tuple:
         raise _Refused(PrefixCaptureFailure8616.ROWS)
-    owners: dict[int, dict[int, IRBlock]] = {}
-    keys: set[tuple[int, int]] = set()
+    owners: dict[cython.longlong, dict[cython.longlong, IRBlock]] = {}
+    keys: set[tuple[cython.longlong, cython.longlong]] = set()
     selected = False
     for ref in source.rows:
         budget.charge()
         if id(ref.artifact) not in owners:
-            blocks: dict[int, IRBlock] = {}
+            blocks: dict[cython.longlong, IRBlock] = {}
             for block in ref.artifact.blocks:
                 budget.charge()
                 blocks[id(block)] = block
@@ -255,20 +273,23 @@ def _rows(source: PrefixCaptureInput8616, budget: PrefixCaptureBudget8616) -> se
     return keys
 
 
-def _facts(source: PrefixCaptureInput8616, keys: set[tuple[int, int]],
-           budget: PrefixCaptureBudget8616) -> frozenset[tuple[int, int]]:
+def _facts(source: PrefixCaptureInput8616, keys: object,
+           budget: PrefixCaptureBudget8616) -> frozenset[tuple[cython.longlong, cython.longlong]]:
     """Preserve exact four stage sets and reject partial or inconsistent counts."""
+    facts: object
+    index: object
+    key: object
     stages = (source.raw_facts, source.normalized_facts, source.classified_facts, source.materialized_facts)
     if type(source.counts) is not tuple or len(source.counts) != 5:
         raise _Refused(PrefixCaptureFailure8616.FACTS)
-    if any(type(count) is not int for count in source.counts):
+    if any(type(count) is not int for count in iter(source.counts)):
         raise _Refused(PrefixCaptureFailure8616.FACTS)
     for index, facts in enumerate(stages):
         for key in facts:
             budget.charge()
             if key not in keys:
                 raise _Refused(PrefixCaptureFailure8616.FACTS)
-        if len(facts) != len(keys) or len(facts) != source.counts[index]:
+        if operator.ne(len(facts), len(keys)) or operator.ne(len(facts), source.counts[index]):
             raise _Refused(PrefixCaptureFailure8616.FACTS)
     if not keys or source.counts[4] != 0:
         raise _Refused(PrefixCaptureFailure8616.FACTS)
@@ -278,9 +299,13 @@ def _facts(source: PrefixCaptureInput8616, keys: set[tuple[int, int]],
     return frozenset(keys)
 
 
+@cython.ccall
 def capture_prefix_transcript_8616(source: PrefixCaptureInput8616, *,
                                   budget: PrefixCaptureBudget8616) -> PrefixCaptureResult8616:
     """Capture detached data only; core must separately seal CURRENT provenance."""
+    address: object
+    data: object
+    size: object
     start = budget.work_units
     try:
         budget.charge()
@@ -300,7 +325,7 @@ def capture_prefix_transcript_8616(source: PrefixCaptureInput8616, *,
         budget.sorting(len(source.manifest) + len(source.machine_bytes))
         payload = PrefixTranscriptData8616(source.binding, seed, state, source.call_row,
             facts, facts, facts, facts, source.counts, source.rows,
-            tuple(sorted(source.manifest)), tuple(sorted(source.machine_bytes.items())))
+            tuple(sorted(source.manifest)), tuple(sorted(tuple(source.machine_bytes.items()))))
         budget.charge(0)
     except _Refused as refused:
         return PrefixCaptureResult8616(None, refused.failure, budget.work_units - start)

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: IR.
 Responsibility: decline record-free startup routes behind an ordinary call.
 
@@ -8,6 +9,8 @@ Owns typed Value, Address, Condition, instruction facts, and lossless normalizat
 Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 from __future__ import annotations
+import typing
+import cython
 
 from enum import Enum
 from typing import cast
@@ -17,6 +20,7 @@ from capstone import CS_GRP_CALL, CS_GRP_IRET, CS_GRP_JUMP, CS_GRP_RET, CsInsn
 from inertia.frontend.x86_16.frontend_capstone_block import DirectCapstoneBlock8616, DirectCapstoneInstruction8616
 from inertia.frontend.x86_16.frontend_capstone_decode import decode_bounded_capstone_block_8616
 from inertia.frontend.x86_16.frontend_function_boundary import ExactFunctionRangeBoundary8616
+import operator
 
 _MAX_PREFIX_BYTES = 512
 _MAX_PREFIX_BLOCKS = 16
@@ -30,25 +34,27 @@ class RawBootRouteAdmission8616(Enum):
     CONTINUE_PREFIX = "continue_prefix"
 
 
-def _prefix_block_8616(block: DirectCapstoneBlock8616, callsite_addr: int) -> RawBootRouteAdmission8616:
+def _prefix_block_8616(block: DirectCapstoneBlock8616, callsite_addr: cython.longlong) -> RawBootRouteAdmission8616:
     """Inspect one freshly decoded linear block without crossing a branch."""
+    row: object
     for row in block.instructions:
         if type(row) is not DirectCapstoneInstruction8616 or type(row.insn) is not CsInsn:
             return RawBootRouteAdmission8616.RETAIN_ATTEMPT
-        if row.address == callsite_addr:
+        if operator.eq(row.address, callsite_addr):
             return RawBootRouteAdmission8616.RETAIN_ATTEMPT
         groups = cast(CsInsn, row.insn).groups
         if CS_GRP_CALL in groups:
             return RawBootRouteAdmission8616.ORDINARY_CALL_BARRIER
-        if any(group in groups for group in (CS_GRP_JUMP, CS_GRP_RET, CS_GRP_IRET)):
+        if any(group in groups for group in iter((CS_GRP_JUMP, CS_GRP_RET, CS_GRP_IRET))):
             return RawBootRouteAdmission8616.RETAIN_ATTEMPT
     # A returning declared INT can carry the raw census to its fallthrough;
     # an undeclared/terminating INT cannot create a successful later proof.
     return RawBootRouteAdmission8616.CONTINUE_PREFIX
 
 
+@cython.ccall
 def raw_boot_route_admission_8616(
-    project: object, boundary: ExactFunctionRangeBoundary8616, callsite_addr: int,
+    project: object, boundary: ExactFunctionRangeBoundary8616, callsite_addr: cython.longlong,
 ) -> RawBootRouteAdmission8616:
     """Skip only a bounded straight-line prefix ending in a prior ordinary CALL.
 
@@ -57,6 +63,7 @@ CALL. Branches, decode failures, continuation premises and exhausted scanning
 retain the existing attempt. No result is cached and no call-backed route uses
 this admission decision.
     """
+    block: object
     if boundary.project is not project or boundary.near_return_continuations is not None:
         return RawBootRouteAdmission8616.RETAIN_ATTEMPT
     if callsite_addr not in boundary.reachable_instruction_addrs:

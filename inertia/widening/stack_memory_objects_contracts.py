@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed contracts for widening stack-memory byte views into objects.
 
 Layer: Widening.
@@ -10,6 +11,8 @@ CLI/reporting evidence.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -24,6 +27,9 @@ from inertia.alias.stack_memory_ssa_contracts import (
 )
 from inertia.ir.core import IRAddress
 from inertia.ir.ssa_memory_contracts import SSACallStackEffectSite8616
+import dataclasses
+import operator
+LogicalStackMemoryAliasRefusal8616 = typing.TypeVar("LogicalStackMemoryAliasRefusal8616")
 
 if TYPE_CHECKING:
     from inertia.alias.logical_stack_memory_projection import LogicalStackMemoryAliasRefusal8616
@@ -40,26 +46,27 @@ class StackMemoryObjectWideningRefusalKind8616(StrEnum):
     SOURCE_LOGICAL_ALIAS_REFUSAL = "source_logical_alias_refusal"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackMemoryObjectWideningCandidate8616:
     """One nested overlap component with a unique containing stack range."""
 
     address: IRAddress
     storage: AliasStorageFacts
-    covered_addresses: tuple[IRAddress, ...]
-    source_accesses: tuple[StackMemorySSAAliasAccess8616, ...]
-    source_facts: tuple[StackMemorySSAAliasFact8616, ...]
-    versions: tuple[int, ...]
-    fact_kinds: tuple[StackMemoryAliasFactKind8616, ...]
+    covered_addresses: object
+    source_accesses: object
+    source_facts: object
+    versions: object
+    fact_kinds: object
     call_effects: tuple[SSACallStackEffectSite8616, ...] = ()
 
-    def calls_preserve_owner(self, callsite_addrs: tuple[int, ...]) -> bool:
+    def calls_preserve_owner(self, callsite_addrs: object) -> cython.bint:
         """Require one exact owner-preserving IR effect for every structured call."""
-        if len(frozenset(callsite_addrs)) != len(callsite_addrs):
+        callsite_addr: object
+        if operator.ne(len(frozenset(callsite_addrs)), len(callsite_addrs)):
             return False
         for callsite_addr in callsite_addrs:
             matches = tuple(
-                site for site in self.call_effects if site.callsite_addr == callsite_addr
+                site for site in iter(self.call_effects) if operator.eq(site.callsite_addr, callsite_addr)
             )
             if len(matches) != 1 or not matches[0].effect.preserves(self.address):
                 return False
@@ -69,22 +76,22 @@ class StackMemoryObjectWideningCandidate8616:
         """Return a deterministic JSON-friendly representation."""
         return {
             "address": self.address.to_dict(),
-            "covered_addresses": [address.to_dict() for address in self.covered_addresses],
+            "covered_addresses": [address.to_dict() for address in iter(self.covered_addresses)],
             "source_access_count": len(self.source_accesses),
             "source_fact_count": len(self.source_facts),
             "versions": list(self.versions),
-            "fact_kinds": [kind.value for kind in self.fact_kinds],
+            "fact_kinds": [kind.value for kind in iter(self.fact_kinds)],
             "call_effect_count": len(self.call_effects),
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackMemoryObjectWideningRefusal8616:
     """One honestly retained overlap-component widening failure."""
 
     kind: StackMemoryObjectWideningRefusalKind8616
-    detail: str
-    addresses: tuple[IRAddress, ...]
+    detail: object
+    addresses: object
     source_logical_refusal: LogicalStackMemoryAliasRefusal8616 | None = None
 
     def to_dict(self) -> dict[str, object]:
@@ -92,7 +99,7 @@ class StackMemoryObjectWideningRefusal8616:
         return {
             "kind": self.kind.value,
             "detail": self.detail,
-            "addresses": [address.to_dict() for address in self.addresses],
+            "addresses": [address.to_dict() for address in iter(self.addresses)],
             "source_logical_refusal": (
                 None
                 if self.source_logical_refusal is None
@@ -101,27 +108,27 @@ class StackMemoryObjectWideningRefusal8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackMemoryObjectWideningStats8616:
     """Closed evidence accounting for composed overlap components."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every component became one candidate or refusal."""
         return (
-            self.raw_fact_count == self.materialized_count + self.failure_count
+            operator.eq(self.raw_fact_count, self.materialized_count + self.failure_count)
             and self.normalized_fact_count
             == self.classified_fact_count
             == self.materialized_count
         )
 
-    def to_dict(self) -> dict[str, int]:
+    def to_dict(self) -> dict[str, cython.longlong]:
         """Return the five mandatory evidence counters."""
         return {
             "raw_fact_count": self.raw_fact_count,
@@ -132,18 +139,18 @@ class StackMemoryObjectWideningStats8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackMemoryObjectWideningArtifact8616:
     """Widening outcomes for every composed Alias overlap component."""
 
-    function_addr: int
+    function_addr: cython.longlong
     source_alias: StackMemorySSAAliasArtifact8616
     candidates: tuple[StackMemoryObjectWideningCandidate8616, ...] = ()
     refusals: tuple[StackMemoryObjectWideningRefusal8616, ...] = ()
     stats: StackMemoryObjectWideningStats8616 = StackMemoryObjectWideningStats8616()
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether source and Widening accounting both close."""
         return self.source_alias.complete and self.stats.complete
 
@@ -151,8 +158,8 @@ class StackMemoryObjectWideningArtifact8616:
         """Return a deterministic JSON-friendly representation."""
         return {
             "function_addr": self.function_addr,
-            "candidates": [candidate.to_dict() for candidate in self.candidates],
-            "refusals": [refusal.to_dict() for refusal in self.refusals],
+            "candidates": [candidate.to_dict() for candidate in iter(self.candidates)],
+            "refusals": [refusal.to_dict() for refusal in iter(self.refusals)],
             "stats": self.stats.to_dict(),
             "complete": self.complete,
         }

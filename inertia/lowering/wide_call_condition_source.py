@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Select a wide call result through Alias reaching-definition evidence.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Protocol, cast
 
@@ -20,7 +23,7 @@ from inertia.semantics import register_source_block_inventory as register_source
 class _Functions(Protocol):
     """Existing angr function lookup boundary."""
 
-    def function(self, *, addr: int, create: bool) -> object | None:
+    def function(self, *, addr: cython.longlong, create: cython.bint) -> object | None:
         """Find a function without changing CFG discovery."""
 
 
@@ -39,7 +42,7 @@ class _Project(Protocol):
 class _Function(Protocol):
     """Current generated function coordinate."""
 
-    addr: int
+    addr: cython.longlong
 
 
 class _Codegen(Protocol):
@@ -49,16 +52,19 @@ class _Codegen(Protocol):
     cfunc: _Function
 
 
+@cython.ccall
 def proven_wide_condition_callsite_8616(
     codegen: object,
-    conditions: tuple[ConditionIR, ...],
-    candidate_addrs: frozenset[int],
+    conditions: object,
+    candidate_addrs: object,
 ) -> int | None:
     """Require the same candidate at every operand's producer boundary.
 
     Candidate addresses must already carry a typed DX:AX call-result contract.
     Unknown, partial or conflicting definitions refuse before AST mutation.
     """
+    function: object
+    condition: object
     boundary = cast(_Codegen, codegen)
     try:
         function = boundary.project.kb.functions.function(addr=boundary.cfunc.addr, create=False)
@@ -67,7 +73,7 @@ def proven_wide_condition_callsite_8616(
     if function is None or not conditions or not candidate_addrs:
         return None
     inventory = register_source_block_inventory.collect_register_source_block_inventory_8616(function)
-    definitions: set[int] = set()
+    definitions: set[cython.longlong] = set()
     for condition in conditions:
         operand = condition.lhs
         address = condition.producer_insn if isinstance(condition.producer_insn, int) else condition.src_insn

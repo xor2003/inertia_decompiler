@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove bounded, effect-free structured guard regions.
 
 Layer: Structuring.
@@ -8,6 +9,8 @@ rewrite cleanup, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import itertools
 from collections.abc import Iterable, Mapping
@@ -21,32 +24,38 @@ from inertia.ir.ssa_function import SSAFunctionArtifact
 from inertia.lowering.structured_tags import copy_structured_tags_8616
 
 from .multi_arm_condition_ownership import first_statement_block_8616
+import dataclasses
+import operator
+import builtins
 
 _BINARY_ARITY = 2
 # An explicit total integer-operation contract, not an Iop-prefix purity guess.
 _TOTAL_TEMP_OPS = frozenset({"MOV"}) | frozenset(
     f"Iop_{operation}{width}"
-    for operation in ("Add", "Sub", "And", "Or", "Xor", "Shl", "Shr", "Sar")
-    for width in (8, 16, 32, 64)
+    for operation in iter(("Add", "Sub", "And", "Or", "Xor", "Shl", "Shr", "Sar"))
+    for width in iter((8, 16, 32, 64))
 ) | frozenset(
     f"Iop_Cmp{relation}{width}{signedness}"
-    for relation in ("LT", "LE", "GT", "GE")
-    for width in (8, 16, 32, 64)
-    for signedness in ("S", "U")
+    for relation in iter(("LT", "LE", "GT", "GE"))
+    for width in iter((8, 16, 32, 64))
+    for signedness in iter(("S", "U"))
 )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LocalConditionRegion8616:
     """Retain the exact condition inventory and both non-bypassed boundaries."""
 
-    conditions: tuple[ConditionIR, ...]
-    body_target: int
-    continuation: int
+    conditions: object
+    body_target: cython.longlong
+    continuation: cython.longlong
 
 
-def _statement_entry(statement: object, facts: Mapping[int, ConditionIR]) -> int | None:
+@cython.ccall
+def _statement_entry(statement: object, facts: Mapping[cython.longlong, ConditionIR]) -> int | None:
     """Resolve direct ownership only; operand and container tags are not entries."""
+    fact: object
+    instruction: object
     while isinstance(statement, CStatements) and statement.statements:
         statement = statement.statements[0]
     if isinstance(statement, CIfElse):
@@ -59,13 +68,18 @@ def _statement_entry(statement: object, facts: Mapping[int, ConditionIR]) -> int
     return first_statement_block_8616(statement)
 
 
+@cython.ccall
 def local_condition_continuations_8616(
-    nodes: Iterable[object], facts: Mapping[int, ConditionIR],
-) -> dict[int, int]:
+    nodes: Iterable[object], facts: Mapping[cython.longlong, ConditionIR],
+) -> dict[cython.longlong, cython.longlong]:
     """Index unique no-else guards by their immediate sibling's proven entry."""
-    candidates: dict[int, int] = {}
-    seen: set[int] = set()
-    ambiguous: set[int] = set()
+    entry: object
+    container: object
+    following: object
+    statement: object
+    candidates: dict[cython.longlong, cython.longlong] = {}
+    seen: set[cython.longlong] = set()
+    ambiguous: set[cython.longlong] = set()
     for container in nodes:
         if not isinstance(container, CStatements):
             continue
@@ -81,10 +95,11 @@ def local_condition_continuations_8616(
             entry = _statement_entry(following, facts)
             if entry is not None:
                 candidates[identity] = entry
-    return {identity: entry for identity, entry in candidates.items() if identity not in ambiguous}
+    return {identity: entry for identity, entry in builtins.iter(candidates.items()) if identity not in ambiguous}
 
 
-def _instruction_is_guard_only(instruction: IRInstr) -> bool:
+@cython.ccall
+def _instruction_is_guard_only(instruction: IRInstr) -> cython.bint:
     """Allow only total temporary computations, stable stack reads and branches."""
     if instruction.call_stack_effect is not None:
         return False
@@ -108,31 +123,35 @@ def _instruction_is_guard_only(instruction: IRInstr) -> bool:
 
 def prove_local_condition_region_8616(
     root: ConditionIR,
-    body_target: int,
-    continuation: int,
-    facts: Mapping[int, ConditionIR],
-    successors: Mapping[int, tuple[int, ...]],
-    artifact: SSAFunctionArtifact | None,
+    body_target: cython.longlong,
+    continuation: cython.longlong,
+    facts: Mapping[cython.longlong, ConditionIR],
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
+    artifact: object,
 ) -> LocalConditionRegion8616 | None:
     """Refuse effects, unknown branches, cycles and inconsistent SSA/CFG edges."""
+    refused: object
     if artifact is None or body_target == continuation or root.block_addr is None or root.block_addr in (body_target, continuation):
         return None
     boundaries = {body_target, continuation}
-    blocks = {block.addr: block for block in artifact.blocks}
-    refused = {refusal.block_addr for refusal in artifact.memory_refusals}
+    blocks = {block.addr: block for block in iter(artifact.blocks)}
+    refused = {refusal.block_addr for refusal in iter(artifact.memory_refusals)}
     if None in refused:
         return None
-    phi_blocks = {phi.block_addr for phi in artifact.phi_nodes}
-    phi_blocks.update(phi.block_addr for phi in artifact.memory_phi_nodes)
+    phi_blocks = {phi.block_addr for phi in iter(artifact.phi_nodes)}
+    phi_blocks.update(phi.block_addr for phi in iter(artifact.memory_phi_nodes))
     safe_blocks = {
-        block.addr for block in artifact.blocks
-        if all(_instruction_is_guard_only(instruction) for instruction in block.instrs)
+        block.addr for block in iter(artifact.blocks)
+        if all(_instruction_is_guard_only(instruction) for instruction in iter(block.instrs))
     }
-    visited: set[int] = set()
-    active: set[int] = set()
+    visited: set[cython.longlong] = set()
+    active: set[cython.longlong] = set()
     consumed: list[ConditionIR] = []
 
-    def visit(address: int) -> bool:
+    def visit(address: cython.longlong) -> cython.bint:
+        block: object
+        edges: object
+        fact: object
         if address in boundaries:
             return True
         if address in active:
@@ -144,16 +163,16 @@ def prove_local_condition_region_8616(
         if fact is None or block is None or block.refusals or blocked:
             return False
         edges = {fact.taken_target, fact.fallthrough_target}
-        ssa_edges = {target for target, parents in artifact.predecessor_map.items() if address in parents}
-        if None in edges or len(edges) != _BINARY_ARITY or edges != set(successors.get(address, ())) or edges != ssa_edges:
+        ssa_edges = {target for target, parents in builtins.iter(artifact.predecessor_map.items()) if address in parents}
+        if None in edges or operator.ne(len(edges), _BINARY_ARITY) or operator.ne(edges, set(successors.get(address, ()))) or operator.ne(edges, ssa_edges):
             return False
         active.add(address)
         consumed.append(fact)
-        valid = all(visit(target) for target in successors[address])
+        valid = all(visit(target) for target in iter(successors[address]))
         active.remove(address)
         visited.add(address)
         return valid
 
-    if facts.get(root.block_addr) != root or not visit(root.block_addr):
+    if operator.ne(facts.get(root.block_addr), root) or not visit(root.block_addr):
         return None
     return LocalConditionRegion8616(tuple(consumed), body_target, continuation)

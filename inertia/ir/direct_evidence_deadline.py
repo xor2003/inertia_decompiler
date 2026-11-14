@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Shared cooperative deadline for direct Alias and IR evidence work.
 
 Layer: IR.
@@ -11,6 +12,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import time
 from collections.abc import Iterator
@@ -39,13 +42,16 @@ class _ProjectDeadlineSurface8616(Protocol):
     _inertia_entry_domain_premise_resolution_8616: object
 
 
-def deadline_reached_8616(deadline: float | None) -> bool:
+@cython.ccall
+def deadline_reached_8616(deadline: object) -> cython.bint:
     """Return whether one absolute monotonic deadline has elapsed."""
     return deadline is not None and time.monotonic() >= deadline
 
 
+@cython.ccall
 def _project_deadline_8616(project: object) -> float | None:
     """Read and validate the optional project-scoped absolute deadline."""
+    deadline: object
     surface = cast(_ProjectDeadlineSurface8616, project)
     try:
         deadline = surface._inertia_direct_evidence_deadline_8616
@@ -56,8 +62,10 @@ def _project_deadline_8616(project: object) -> float | None:
     return deadline
 
 
-def _session_deadline_8616(session: object | None) -> float | None:
+@cython.ccall
+def _session_deadline_8616(session: object) -> float | None:
     """Read a bounded session deadline without importing its proof owner."""
+    deadline: object
     if session is None:
         return None
     try:
@@ -69,6 +77,7 @@ def _session_deadline_8616(session: object | None) -> float | None:
     return deadline
 
 
+@cython.ccall
 def _active_session_deadlines_8616(project: object) -> tuple[float | None, float | None]:
     """Return active callee and premise deadlines from their project slots."""
     surface = cast(_ProjectDeadlineSurface8616, project)
@@ -89,11 +98,12 @@ def active_direct_evidence_deadline_8616(project: object) -> float | None:
         _project_deadline_8616(project),
         *_active_session_deadlines_8616(project),
     )
-    active = tuple(deadline for deadline in candidates if deadline is not None)
+    active = tuple(deadline for deadline in iter(candidates) if deadline is not None)
     return min(active) if active else None
 
 
-def direct_evidence_deadline_expired_8616(project: object) -> bool:
+@cython.ccall
+def direct_evidence_deadline_expired_8616(project: object) -> cython.bint:
     """Return whether the earliest active direct-evidence deadline elapsed."""
     return deadline_reached_8616(active_direct_evidence_deadline_8616(project))
 
@@ -101,7 +111,7 @@ def direct_evidence_deadline_expired_8616(project: object) -> bool:
 @contextmanager
 def direct_evidence_deadline_scope_8616(
     project: object,
-    deadline: float | None,
+    deadline: object,
 ) -> Iterator[None]:
     """Install the earliest request/session deadline and restore the old slot."""
     if deadline is not None and type(deadline) is not float:
@@ -110,7 +120,7 @@ def direct_evidence_deadline_scope_8616(
     inherited = active_direct_evidence_deadline_8616(project)
     candidates = tuple(
         active
-        for active in (deadline, inherited)
+        for active in iter((deadline, inherited))
         if active is not None
     )
     if not candidates:

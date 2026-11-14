@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: frontend import boundary.
 
 Responsibility: select the verified native lifter only when its module is requested.
@@ -5,6 +6,7 @@ Pure architecture and backend contracts must not initialize the legacy pipeline.
 """
 
 from __future__ import annotations
+import cython
 
 import sys
 from collections.abc import Sequence
@@ -16,16 +18,17 @@ from pathlib import Path
 from types import ModuleType
 
 from .lifter_backend import LifterBackend, activate_lifter_backend
+import dataclasses
 
 LIFTER_MODULE: str = "inertia.frontend.x86_16.lift_86_16"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LifterImportSelection:
     """Bind a startup backend to its verified import search paths."""
 
     backend: LifterBackend
-    search_paths: tuple[str, ...]
+    search_paths: object
 
 
 class LifterImportFinder(MetaPathFinder):
@@ -45,9 +48,10 @@ class LifterImportFinder(MetaPathFinder):
         return self._selection
 
     def find_spec(
-        self, fullname: str, path: Sequence[str] | None = None, target: ModuleType | None = None,
+        self, fullname: object, path: Sequence[str] | None = None, target: ModuleType | None = None,
     ) -> ModuleSpec | None:
         """Use an extension-only lookup for native mode and exact source for Python."""
+        spec: object
         if fullname != LIFTER_MODULE:
             return None
         selection = self.selection()
@@ -64,10 +68,11 @@ _FINDER: LifterImportFinder = LifterImportFinder(Path(__file__).resolve().parent
 
 def install_lifter_import() -> None:
     """Register this narrow import boundary once without selecting a backend."""
-    if not any(finder is _FINDER for finder in sys.meta_path):
+    if not any(finder is _FINDER for finder in iter(sys.meta_path)):
         sys.meta_path.insert(0, _FINDER)
 
 
+@cython.ccall
 def selected_lifter_backend() -> LifterBackend:
     """Expose the verified choice to the historical public package surface."""
     return _FINDER.selection().backend

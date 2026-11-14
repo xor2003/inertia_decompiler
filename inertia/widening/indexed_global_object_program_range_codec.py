@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Encode final project-wide indexed ranges for clean workers.
 
 Layer: Widening.
@@ -9,6 +10,8 @@ Do not join values from rendered text, cosmetic shape, postprocess, or CLI/repor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from inertia.ir.core import MemSpace
 from inertia.ir.indexed_address_contracts import IndexedAddressAccessKind8616
@@ -31,24 +34,29 @@ from .indexed_global_object_ranges import (
     BoundedGlobalObjectRangeStats8616,
     IndexedGlobalAccessKey8616,
 )
+import operator
+import builtins
 
 _SCHEMA_8616 = 1
 
 
-def _nonnegative_int_8616(value: object, *, field: str) -> int:
+@cython.ccall
+def _nonnegative_int_8616(value: object, *, field: object) -> cython.longlong:
     """Parse one strict nonnegative integer transport field."""
     if not isinstance(value, int) or isinstance(value, bool) or value < 0:
         raise ValueError(f"project-range transport has invalid {field}")
     return value
 
 
-def _nonempty_string_8616(value: object, *, field: str) -> str:
+@cython.ccall
+def _nonempty_string_8616(value: object, *, field: object) -> object:
     """Parse one strict nonempty string transport field."""
     if not isinstance(value, str) or not value:
         raise ValueError(f"project-range transport has invalid {field}")
     return value
 
 
+@cython.ccall
 def _access_key_record_8616(key: IndexedGlobalAccessKey8616) -> dict[str, object]:
     """Reduce one exact indexed access identity to stable scalar fields."""
     return {
@@ -60,6 +68,7 @@ def _access_key_record_8616(key: IndexedGlobalAccessKey8616) -> dict[str, object
     }
 
 
+@cython.ccall
 def _access_key_from_record_8616(record: object) -> IndexedGlobalAccessKey8616:
     """Restore and validate one exact indexed access identity."""
     if not isinstance(record, dict):
@@ -78,7 +87,8 @@ def _access_key_from_record_8616(record: object) -> IndexedGlobalAccessKey8616:
     return key
 
 
-def _proof_site_record_8616(site: IndexedLoopProofSite8616) -> dict[str, int]:
+@cython.ccall
+def _proof_site_record_8616(site: IndexedLoopProofSite8616) -> dict[str, cython.longlong]:
     """Reduce one exact IR proof site to stable scalar fields."""
     return {
         "block_addr": site.block_addr,
@@ -87,6 +97,7 @@ def _proof_site_record_8616(site: IndexedLoopProofSite8616) -> dict[str, int]:
     }
 
 
+@cython.ccall
 def _proof_site_from_record_8616(record: object) -> IndexedLoopProofSite8616:
     """Restore and validate one exact IR proof site."""
     if not isinstance(record, dict):
@@ -101,14 +112,17 @@ def _proof_site_from_record_8616(record: object) -> IndexedLoopProofSite8616:
     return site
 
 
-def _sequence_8616(record: dict[object, object], field: str) -> list[object]:
+@cython.ccall
+def _sequence_8616(record: object, field: object) -> object:
     """Return one mandatory JSON array from a transport object."""
+    value: object
     value = record.get(field)
     if not isinstance(value, list):
         raise ValueError(f"project-range transport has invalid {field}")
     return value
 
 
+@cython.ccall
 def _range_record_8616(item: BoundedGlobalObjectRange8616) -> dict[str, object]:
     """Serialize one accepted bounded global object."""
     return {
@@ -119,8 +133,8 @@ def _range_record_8616(item: BoundedGlobalObjectRange8616) -> dict[str, object]:
         "element_width": item.element_width,
         "element_count": item.element_count,
         "byte_extent": item.byte_extent,
-        "access_keys": [_access_key_record_8616(key) for key in item.covered_access_keys],
-        "proof_sites": [_proof_site_record_8616(site) for site in item.proof_sites],
+        "access_keys": [_access_key_record_8616(key) for key in iter(item.covered_access_keys)],
+        "proof_sites": [_proof_site_record_8616(site) for site in iter(item.proof_sites)],
     }
 
 
@@ -136,14 +150,15 @@ def _range_from_record_8616(record: object) -> BoundedGlobalObjectRange8616:
         _nonnegative_int_8616(record.get("element_width"), field="element width"),
         _nonnegative_int_8616(record.get("element_count"), field="element count"),
         _nonnegative_int_8616(record.get("byte_extent"), field="byte extent"),
-        tuple(_access_key_from_record_8616(value) for value in _sequence_8616(record, "access_keys")),
-        tuple(_proof_site_from_record_8616(value) for value in _sequence_8616(record, "proof_sites")),
+        tuple(_access_key_from_record_8616(value) for value in builtins.iter(_sequence_8616(record, "access_keys"))),
+        tuple(_proof_site_from_record_8616(value) for value in builtins.iter(_sequence_8616(record, "proof_sites"))),
     )
     if not item.complete:
         raise ValueError("project-range transport contains an incomplete accepted item")
     return item
 
 
+@cython.ccall
 def _refusal_record_8616(item: BoundedGlobalObjectRangeRefusal8616) -> dict[str, object]:
     """Serialize one atomic object-level refusal."""
     return {
@@ -151,8 +166,8 @@ def _refusal_record_8616(item: BoundedGlobalObjectRangeRefusal8616) -> dict[str,
         "base": item.base,
         "failure": item.failure.value,
         "detail": item.detail,
-        "access_keys": [_access_key_record_8616(key) for key in item.access_keys],
-        "proof_sites": [_proof_site_record_8616(site) for site in item.proof_sites],
+        "access_keys": [_access_key_record_8616(key) for key in iter(item.access_keys)],
+        "proof_sites": [_proof_site_record_8616(site) for site in iter(item.proof_sites)],
     }
 
 
@@ -167,14 +182,15 @@ def _refusal_from_record_8616(record: object) -> BoundedGlobalObjectRangeRefusal
             _nonempty_string_8616(record.get("failure"), field="refusal failure")
         ),
         _nonempty_string_8616(record.get("detail"), field="refusal detail"),
-        tuple(_access_key_from_record_8616(value) for value in _sequence_8616(record, "access_keys")),
-        tuple(_proof_site_from_record_8616(value) for value in _sequence_8616(record, "proof_sites")),
+        tuple(_access_key_from_record_8616(value) for value in builtins.iter(_sequence_8616(record, "access_keys"))),
+        tuple(_proof_site_from_record_8616(value) for value in builtins.iter(_sequence_8616(record, "proof_sites"))),
     )
     if not item.complete:
         raise ValueError("project-range transport contains an incomplete refusal")
     return item
 
 
+@cython.ccall
 def project_bounded_global_ranges_record_8616(
     evidence: ProjectBoundedGlobalObjectRangeEvidence8616,
 ) -> dict[str, object]:
@@ -192,8 +208,8 @@ def project_bounded_global_ranges_record_8616(
             "closed_ranges": evidence.source.closed_function_range_count,
         },
         "layouts": global_object_layout_evidence_record_8616(evidence.layouts),
-        "ranges": [_range_record_8616(item) for item in evidence.ranges],
-        "refusals": [_refusal_record_8616(item) for item in evidence.refusals],
+        "ranges": [_range_record_8616(item) for item in iter(evidence.ranges)],
+        "refusals": [_refusal_record_8616(item) for item in iter(evidence.refusals)],
         "counts": {
             "raw": evidence.stats.raw_fact_count,
             "normalized": evidence.stats.normalized_fact_count,
@@ -208,7 +224,9 @@ def project_bounded_global_ranges_from_record_8616(
     record: object,
 ) -> ProjectBoundedGlobalObjectRangeEvidence8616:
     """Restore and close one clean-worker project bounded-range record."""
-    if not isinstance(record, dict) or record.get("schema") != _SCHEMA_8616:
+    counts: object
+    source_record: object
+    if not isinstance(record, dict) or operator.ne(record.get("schema"), _SCHEMA_8616):
         raise ValueError("project-range transport has an unsupported schema")
     source_record = record.get("source")
     counts = record.get("counts")
@@ -230,8 +248,8 @@ def project_bounded_global_ranges_from_record_8616(
         _nonnegative_int_8616(source_record.get("closed_ranges"), field="closed range count"),
     )
     result = ProjectBoundedGlobalObjectRangeEvidence8616(
-        tuple(_range_from_record_8616(value) for value in _sequence_8616(record, "ranges")),
-        tuple(_refusal_from_record_8616(value) for value in _sequence_8616(record, "refusals")),
+        tuple(_range_from_record_8616(value) for value in builtins.iter(_sequence_8616(record, "ranges"))),
+        tuple(_refusal_from_record_8616(value) for value in builtins.iter(_sequence_8616(record, "refusals"))),
         BoundedGlobalObjectRangeStats8616(
             _nonnegative_int_8616(counts.get("raw"), field="raw count"),
             _nonnegative_int_8616(counts.get("normalized"), field="normalized count"),

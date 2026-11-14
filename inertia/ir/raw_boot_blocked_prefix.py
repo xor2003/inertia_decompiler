@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: IR.
 Responsibility: retain immutable missing-service prerequisites within one request.
 
@@ -7,6 +8,8 @@ Owns typed Value, Address, Condition, instruction facts, and lossless normalizat
 Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 from __future__ import annotations
+import typing
+import cython
 
 import json
 from dataclasses import dataclass
@@ -26,38 +29,43 @@ from .function_ir_registry import _existing_registry_8616
 from .real16_boot_entry_link import RawBootEntrySurface8616
 from .real16_declared_interrupt8616 import interrupt_call_vector_8616
 from .real16_invocation_domain import Real16InvocationDomain8616, Real16InvocationFailure8616, Real16InvocationKind8616
+import dataclasses
+import operator
+import builtins
+Real16InvocationSource8616 = typing.TypeVar("Real16InvocationSource8616")
 
 if TYPE_CHECKING:
     from .entry_domain_call_preservation import Real16InvocationSource8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RawBootBlockedPrefix8616:
     """Pinned missing-service dependency with conservative snapshot guards."""
 
     project: object
     source: Real16InvocationSource8616
-    head_addr: int
-    callsite_addr: int
+    head_addr: cython.longlong
+    callsite_addr: cython.longlong
     premise: Real16InvocationDomain8616
     architecture: Arch86_16
-    architecture_key: tuple[object, ...]
-    index_key: tuple[object, ...]
-    registry: dict[int, IRFunctionArtifact] | None
-    registry_items: tuple[tuple[int, IRFunctionArtifact], ...]
+    architecture_key: object
+    index_key: object
+    registry: object
+    registry_items: object
 
 
+@cython.ccall
 def _architecture_key_8616(architecture: Arch) -> tuple[object, ...]:
     """Bind native lifting inputs, preserving the established segmented key."""
     if isinstance(architecture, Arch86_16):
         lifting_key = architecture.lifting_semantics_key_8616()
-        vex_offsets = tuple(sorted(architecture.vex_offsets.items()))
+        vex_offsets = tuple(sorted(tuple(architecture.vex_offsets.items())))
     else:
         lifting_key = (
             "native-vex", architecture.name, architecture.bits, architecture.vex_arch,
             architecture.memory_endness, architecture.register_endness,
             architecture.instruction_endness,
-            tuple(sorted(architecture.register_names.items())),
+            tuple(sorted(tuple(architecture.register_names.items()))),
             json.dumps(architecture.vex_archinfo, sort_keys=True, allow_nan=False),
         )
         # Standard VEX architectures use their register map without the
@@ -66,22 +74,24 @@ def _architecture_key_8616(architecture: Arch) -> tuple[object, ...]:
     return (
         lifting_key,
         architecture.cs_arch, architecture.cs_mode,
-        tuple(sorted(architecture.registers.items())),
+        tuple(sorted(tuple(architecture.registers.items()))),
         vex_offsets,
     )
 
 
+@cython.ccall
 def _index_key_8616(source: Real16InvocationSource8616) -> tuple[object, ...]:
     """Snapshot mutable index maps as well as the frozen caller inventory."""
     index = source.callsite_index
     return (
-        tuple(sorted(index._entries_by_normalized_target.items())),
-        tuple(sorted(index._entries_by_exact_far_target.items())),
+        tuple(sorted(tuple(index._entries_by_normalized_target.items()))),
+        tuple(sorted(tuple(index._entries_by_exact_far_target.items()))),
         index.stats, index.entry_identities, index.caller_censuses,
     )
 
 
-def _static_service_missing_8616(source: Real16InvocationSource8616, head_addr: int) -> bool:
+@cython.ccall
+def _static_service_missing_8616(source: Real16InvocationSource8616, head_addr: cython.longlong) -> cython.bint:
     """Require immutable header state and no alternative service or entry inputs."""
     return (
         type(source.boot) is MzStaticBoot8616
@@ -90,14 +100,17 @@ def _static_service_missing_8616(source: Real16InvocationSource8616, head_addr: 
     )
 
 
+@cython.ccall
 def _refusal_surface_8616(
     premise: Real16InvocationDomain8616,
-) -> tuple[IRFunctionArtifact, ExactFunctionRangeBoundary8616] | None:
+) -> object:
     """Locate only raw boot intake or the exact registered universal boot body.
 
     This selects native inputs for a missing-prerequisite check. It neither
     authenticates a successful invocation nor turns scoped IR into universal IR.
     """
+    coverage: object
+    registry: object
     if type(premise.chain) is RawBootEntrySurface8616:
         return premise.chain.artifact, premise.chain.boundary
     if premise.chain is not None or premise.kind is not Real16InvocationKind8616.BOOT_ENTRY_PATH:
@@ -111,9 +124,12 @@ def _refusal_surface_8616(
     return coverage.artifact, coverage.boundary
 
 
-def _native_instructions_8616(boundary: ExactFunctionRangeBoundary8616) -> dict[int, Any]:
+@cython.ccall
+def _native_instructions_8616(boundary: ExactFunctionRangeBoundary8616) -> object:
     """Index retained Capstone instructions at the third-party decode boundary."""
-    native: dict[int, Any] = {}
+    block: object
+    instruction: object
+    native: dict[cython.longlong, Any] = {}
     for block in boundary.blocks:
         for instruction in cast(Any, block).capstone.insns:
             if type(instruction) is not DirectCapstoneInstruction8616:
@@ -122,8 +138,11 @@ def _native_instructions_8616(boundary: ExactFunctionRangeBoundary8616) -> dict[
     return native
 
 
-def _boot_bytes_8616(boot: MzStaticBoot8616, address: int, size: int) -> bytes | None:
+@cython.ccall
+def _boot_bytes_8616(boot: MzStaticBoot8616, address: cython.longlong, size: cython.longlong) -> object:
     """Read one contiguous span from the retained immutable relocated image."""
+    chunk: object
+    start: object
     for start, chunk in boot.image.chunks:
         if start <= address and address + size <= start + len(chunk):
             return bytes(chunk[address - start:address - start + size])
@@ -132,21 +151,22 @@ def _boot_bytes_8616(boot: MzStaticBoot8616, address: int, size: int) -> bytes |
 
 def _native_prefix_reaches_int_8616(
     artifact: IRFunctionArtifact, boundary: ExactFunctionRangeBoundary8616, boot: MzStaticBoot8616,
-    instruction_addr: int, vector: int,
-) -> bool:
+    instruction_addr: cython.longlong, vector: cython.longlong,
+) -> cython.bint:
     """Bind native bytes and forbid preceding transfers before the refused INT."""
+    instruction: object
     native = _native_instructions_8616(boundary)
     address = artifact.function_addr
     while address <= instruction_addr:
         instruction = native.get(address)
         if instruction is None or instruction.size <= 0:
             return False
-        if bytes(instruction.bytes) != _boot_bytes_8616(boot, address, instruction.size):
+        if operator.ne(bytes(instruction.bytes), _boot_bytes_8616(boot, address, instruction.size)):
             return False
         if address == instruction_addr:
-            return instruction.id == X86_INS_INT and len(instruction.operands) == 1 and instruction.operands[0].imm == vector
+            return operator.eq(instruction.id, X86_INS_INT) and len(instruction.operands) == 1 and operator.eq(instruction.operands[0].imm, vector)
         if (
-            any(instruction.group(group) for group in (CS_GRP_CALL, CS_GRP_INT, CS_GRP_IRET, CS_GRP_JUMP, CS_GRP_RET))
+            any(instruction.group(group) for group in iter((CS_GRP_CALL, CS_GRP_INT, CS_GRP_IRET, CS_GRP_JUMP, CS_GRP_RET)))
             or instruction.id in (X86_INS_HLT, X86_INS_UD2)
         ):
             return False
@@ -154,51 +174,58 @@ def _native_prefix_reaches_int_8616(
     return False
 
 
-def _unavoidable_interrupt_8616(premise: Real16InvocationDomain8616, boot: MzStaticBoot8616) -> bool:
+def _unavoidable_interrupt_8616(premise: Real16InvocationDomain8616, boot: MzStaticBoot8616) -> cython.bint:
     """Authenticate contiguous native entry rows before the exact refused INT."""
+    site: object
+    surface: object
+    vector: object
     surface = _refusal_surface_8616(premise)
     site = premise.refusal_site
     if surface is None or site is None:
         return False
     artifact, boundary = surface
     head = artifact.function_addr
-    if site.function_addr != head or site.block_addr != head:
+    if operator.ne(site.function_addr, head) or operator.ne(site.block_addr, head):
         return False
-    blocks = tuple(block for block in artifact.blocks if block.addr == head)
+    blocks = tuple(block for block in iter(artifact.blocks) if operator.eq(block.addr, head))
     if len(blocks) != 1:
         return False
-    refused = tuple(row for row in blocks[0].instrs if row.addr == site.instruction_addr and row.op == "CALL")
+    refused = tuple(row for row in iter(blocks[0].instrs) if operator.eq(row.addr, site.instruction_addr) and row.op == "CALL")
     if len(refused) != 1:
         return False
     vector = interrupt_call_vector_8616(refused[0])
     return vector is not None and _native_prefix_reaches_int_8616(artifact, boundary, boot, site.instruction_addr, vector)
 
 
+@cython.ccall
 def _bound_refusal_8616(
     premise: Real16InvocationDomain8616, project: object, source: Real16InvocationSource8616,
-    head_addr: int, callsite_addr: int,
-) -> bool:
+    head_addr: cython.longlong, callsite_addr: cython.longlong,
+) -> cython.bint:
     """Reject foreign surfaces and non-classified failures before retention."""
+    surface: object
     surface = _refusal_surface_8616(premise)
     if surface is None:
         return False
     artifact, boundary = surface
     return (
         premise.project is project and premise.boot is source.boot
-        and premise.callsite_addr == callsite_addr
-        and artifact.function_addr == head_addr
+        and operator.eq(premise.callsite_addr, callsite_addr)
+        and operator.eq(artifact.function_addr, head_addr)
         and boundary.project is project
-        and boundary.addr == head_addr
+        and operator.eq(boundary.addr, head_addr)
         and premise.failure_count > 0
-        and premise.classified_fact_count == premise.materialized_count + premise.failure_count
+        and operator.eq(premise.classified_fact_count, premise.materialized_count + premise.failure_count)
     )
 
 
+@cython.ccall
 def retain_raw_boot_blocked_prefix_8616(
     project: object, source: Real16InvocationSource8616,
-    head_addr: int, callsite_addr: int, premise: Real16InvocationDomain8616 | None,
+    head_addr: cython.longlong, callsite_addr: cython.longlong, premise: object,
 ) -> RawBootBlockedPrefix8616 | None:
     """Retain only a real, immutable, unavoidable missing-service dependency."""
+    registry: object
     if (
         premise is None
         or premise.failure is not Real16InvocationFailure8616.DECLARED_SERVICE_UNPROVEN
@@ -214,40 +241,41 @@ def retain_raw_boot_blocked_prefix_8616(
     record = RawBootBlockedPrefix8616(
         project, source, head_addr, callsite_addr, premise, architecture,
         _architecture_key_8616(architecture), _index_key_8616(source), registry,
-        () if registry is None else tuple(sorted(registry.items())),
+        () if registry is None else tuple(sorted(tuple(registry.items()))),
     )
     return record if raw_boot_blocked_prefix_matches_8616(record, project, source, head_addr, callsite_addr) else None
 
 
 def raw_boot_blocked_prefix_matches_8616(
     record: RawBootBlockedPrefix8616, project: object,
-    source: Real16InvocationSource8616, head_addr: int, callsite_addr: int,
-) -> bool:
+    source: Real16InvocationSource8616, head_addr: cython.longlong, callsite_addr: cython.longlong,
+) -> cython.bint:
     """Recheck current inputs without replaying or claiming a successful proof."""
+    registry: object
     if (
         record.project is not project or record.source is not source
-        or record.head_addr != head_addr or record.callsite_addr != callsite_addr
+        or operator.ne(record.head_addr, head_addr) or operator.ne(record.callsite_addr, callsite_addr)
         or not _static_service_missing_8616(source, head_addr)
     ):
         return False
     architecture = cast(Any, project).arch
-    if architecture is not record.architecture or _architecture_key_8616(architecture) != record.architecture_key:
+    if architecture is not record.architecture or operator.ne(_architecture_key_8616(architecture), record.architecture_key):
         return False
-    if _index_key_8616(source) != record.index_key:
+    if operator.ne(_index_key_8616(source), record.index_key):
         return False
     registry = _existing_registry_8616(project)
     if registry is not record.registry:
         return False
-    current = () if registry is None else tuple(sorted(registry.items()))
-    if len(current) != len(record.registry_items) or any(
+    current = () if registry is None else tuple(sorted(tuple(registry.items())))
+    if operator.ne(len(current), len(record.registry_items)) or any(
         address != prior_address or artifact is not prior_artifact
-        for (address, artifact), (prior_address, prior_artifact) in zip(current, record.registry_items, strict=True)
+        for (address, artifact), (prior_address, prior_artifact) in builtins.iter(zip(current, record.registry_items, strict=True))
     ):
         return False
     boot = cast(MzStaticBoot8616, source.boot)
     memory = cast(Any, project).loader.memory
     try:
-        return all(bytes(memory.load(address, len(chunk))) == chunk for address, chunk in boot.image.chunks)
+        return all(operator.eq(bytes(memory.load(address, len(chunk))), chunk) for address, chunk in iter(boot.image.chunks))
     except KeyError:
         # CLE's mapped-byte boundary reports an unmapped span by KeyError.
         return False

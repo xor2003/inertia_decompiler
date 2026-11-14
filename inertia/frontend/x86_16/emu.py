@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/runtime.
 
 Responsibility: execute instruction side effects against emulator state during lifting.
@@ -5,6 +6,8 @@ Forbidden: decompiler semantic repair, alias/type recovery, or rendered-C rewrit
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import cast
 
@@ -28,32 +31,32 @@ from .instruction import InstrData, X86Instruction
 class EmuInstr(X86Instruction):
     """Execute far control-transfer helper effects through shared stack helpers."""
 
-    def __init__(self, emu: Emulator, instr: InstrData, mode32: bool) -> None:
+    def __init__(self, emu: Emulator, instr: InstrData, mode32: cython.bint) -> None:
         """Initialize an emulator instruction helper for one decoded instruction."""
         super().__init__(emu, instr, mode32)
 
-    def type_descriptor(self, _instr: dict[str, object], _sel: int) -> int:
+    def type_descriptor(self, _instr: object, _sel: cython.longlong) -> cython.longlong:
         """Return a selector type descriptor when protected-mode support exists."""
         raise NotImplementedError
 
-    def set_ldtr(self, _sel: int) -> None:
+    def set_ldtr(self, _sel: cython.longlong) -> None:
         """Set LDTR when protected-mode support exists."""
         raise NotImplementedError
 
-    def set_tr(self, _sel: int) -> None:
+    def set_tr(self, _sel: cython.longlong) -> None:
         """Set TR when protected-mode task support exists."""
         raise NotImplementedError
 
-    def switch_task(self, _sel: int) -> None:
+    def switch_task(self, _sel: cython.longlong) -> None:
         """Switch task state when protected-mode task support exists."""
         raise NotImplementedError
 
-    def jmpf(self, _instr: dict[str, object], sel: int, eip: int) -> None:
+    def jmpf(self, _instr: object, sel: cython.longlong, eip: cython.longlong) -> None:
         """Jump to a far code segment and instruction pointer."""
         self.emu.set_segment(sgreg_t.CS, sel)
         self.emu.set_eip(eip)
 
-    def callf(self, _instr: dict[str, object], sel: int, eip: int, return_ip: object | None = None) -> None:
+    def callf(self, _instr: object, sel: cython.longlong, eip: cython.longlong, return_ip: object | None = None) -> None:
         """Push a far return frame and transfer to a far call target."""
         cs = cast(int, self.emu.get_segment(sgreg_t.CS))
         rpl = sel & 3
@@ -72,7 +75,7 @@ class EmuInstr(X86Instruction):
         self.emu.set_segment(sgreg_t.CS, sel)
         self.emu.set_eip(eip)
 
-    def retf(self, _instr: dict[str, object]) -> None:
+    def retf(self, _instr: object) -> None:
         """Pop a far return frame and restore CS:IP/EIP."""
         if self.mode32:
             eip, cs = pop_far_return_frame32(cast(StackEmulator, self.emu))
@@ -83,13 +86,13 @@ class EmuInstr(X86Instruction):
             self.emu.set_segment(sgreg_t.CS, cs)
             self.emu.set_ip(ip)
 
-    def iret(self, _instr: dict[str, object]) -> None:
+    def iret(self, _instr: object) -> None:
         """Pop an interrupt return frame and restore flags plus CS:IP/EIP."""
         if self.mode32:
             return_interrupt32(cast(StackEmulator, self.emu))
         else:
             return_interrupt16(cast(StackEmulator, self.emu))
 
-    def chk_ring(self, _dpl: int) -> bool:
+    def chk_ring(self, _dpl: cython.longlong) -> cython.bint:
         """Return whether the current privilege level permits an operation."""
         raise NotImplementedError

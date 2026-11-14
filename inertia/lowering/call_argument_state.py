@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Preserve materialized call arguments without reusable object-id aliases.
 
 Layer: Types/Lowering.
@@ -11,43 +12,50 @@ assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from typing import Any
+import dataclasses
 
 # Opaque angr structured-codegen values are intentionally dynamic at this
 # boundary; mypyc cannot import dataclass fields annotated as builtin object.
-type OpaqueCodegenValue8616 = Any
+OpaqueCodegenValue8616 = typing.TypeAliasType("OpaqueCodegenValue8616", Any)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ProtectedCallArgument8616:
     """One quality-ranked argument tied to its original structured call."""
 
     call: OpaqueCodegenValue8616
     expression: OpaqueCodegenValue8616
-    score: int
+    score: cython.longlong
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class ProtectedCallArgumentStore8616:
     """Identity-verified protected arguments for one codegen lifecycle."""
 
-    entries: dict[tuple[int, int], ProtectedCallArgument8616] = field(default_factory=dict)
+    entries: object = field(default_factory=dict)
 
-    def get(self, call: OpaqueCodegenValue8616, argument_index: int) -> ProtectedCallArgument8616 | None:
+    @cython.ccall
+    def get(self, call: OpaqueCodegenValue8616, argument_index: cython.longlong) -> ProtectedCallArgument8616 | None:
         """Return an entry only when the retained call is the exact live object."""
+        entry: object
         entry = self.entries.get((id(call), argument_index))
         return entry if entry is not None and entry.call is call else None
 
+    @cython.ccall
     def remember(
         self,
         call: OpaqueCodegenValue8616,
-        argument_index: int,
+        argument_index: cython.longlong,
         expression: OpaqueCodegenValue8616,
-        score: int,
+        score: cython.longlong,
     ) -> None:
         """Retain the highest-quality expression for one exact live call argument."""
+        current: object
         current = self.get(call, argument_index)
         if current is None or score >= current.score:
             self.entries[(id(call), argument_index)] = ProtectedCallArgument8616(
@@ -56,8 +64,11 @@ class ProtectedCallArgumentStore8616:
                 score=score,
             )
 
+    @cython.ccall
     def discard_call(self, call: OpaqueCodegenValue8616) -> None:
         """Discard every protected argument owned by one exact call object."""
+        entry: object
+        key: object
         for key, entry in tuple(self.entries.items()):
             if entry.call is call:
                 del self.entries[key]

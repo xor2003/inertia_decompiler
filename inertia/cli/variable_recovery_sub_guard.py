@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Guard variable-recovery subprocess helpers with width-safe coercions.
 
 Layer: CLI/fallback/reporting.
@@ -7,14 +8,16 @@ Dynamic attributes here are limited to third-party angr/claripy variable-recover
 """
 
 from __future__ import annotations
+import cython
 
 import sys
 import typing
 from collections.abc import Callable
 from typing import Any, Protocol, cast
+import operator
 
-type ContextSuffixCallbacks = tuple[Callable[[object], tuple[object, object, object]], Callable[[object], str]]
-type GuardHandler = Callable[[Any, Any], object]
+ContextSuffixCallbacks = typing.TypeAliasType("ContextSuffixCallbacks", tuple[Callable[[object], tuple[object, object, object]], Callable[[object], str]])
+GuardHandler = typing.TypeAliasType("GuardHandler", Callable[[Any, Any], object])
 
 
 class _DerivedTypeVariableFactory8616(Protocol):
@@ -24,6 +27,7 @@ class _DerivedTypeVariableFactory8616(Protocol):
     new_dtv: Callable[..., object]
 
 
+@cython.ccall
 def _derived_type_variable_8616(typevars: object, typevar: object, label: object) -> object:
     """Build a derived type variable across supported third-party angr APIs."""
     factory = cast(_DerivedTypeVariableFactory8616, typevars)
@@ -33,7 +37,8 @@ def _derived_type_variable_8616(typevars: object, typevar: object, label: object
         return factory.new_dtv(typevar, label=label)
 
 
-def _coerce_bv_width_8616(data: object, bits: int) -> object:
+@cython.ccall
+def _coerce_bv_width_8616(data: object, bits: cython.longlong) -> object:
     data_bv = cast(Any, data)
     size = data_bv.size()
     if size == bits:
@@ -49,7 +54,8 @@ def _coerce_bv_width_8616(data: object, bits: int) -> object:
         return data
 
 
-def _sign_bit_is_set_8616(data: object) -> bool:
+@cython.ccall
+def _sign_bit_is_set_8616(data: object) -> cython.bint:
     data_bv = cast(Any, data)
     try:
         size = int(data_bv.size())
@@ -68,7 +74,8 @@ def _sign_bit_is_set_8616(data: object) -> bool:
     return False
 
 
-def _widen_sub_operand_8616(data: object, bits: int) -> object:
+@cython.ccall
+def _widen_sub_operand_8616(data: object, bits: cython.longlong) -> object:
     data_bv = cast(Any, data)
     size = data_bv.size()
     if size == bits:
@@ -90,7 +97,8 @@ def _widen_sub_operand_8616(data: object, bits: int) -> object:
         return data
 
 
-def _narrow_bv_width_8616(data: object, bits: int, state: object) -> object:
+@cython.ccall
+def _narrow_bv_width_8616(data: object, bits: cython.longlong, state: object) -> object:
     data_bv = cast(Any, data)
     state_obj = cast(Any, state)
     current = data_bv.size()
@@ -107,6 +115,7 @@ def _narrow_bv_width_8616(data: object, bits: int, state: object) -> object:
         return state_obj.top(bits)
 
 
+@cython.ccall
 def _log_size_mismatch_once_8616(
     self: object,
     expr: object,
@@ -115,6 +124,7 @@ def _log_size_mismatch_once_8616(
     project: object,
     context_suffix: ContextSuffixCallbacks,
 ) -> None:
+    mismatch_seen: object
     expr_obj = cast(Any, expr)
     r0_obj = cast(Any, r0)
     r1_obj = cast(Any, r1)
@@ -151,6 +161,7 @@ def _log_size_mismatch_once_8616(
     sys.stderr.flush()
 
 
+@cython.ccall
 def _log_variable_recovery_guard_fallback_once_8616(
     self: object,
     expr: object,
@@ -158,6 +169,7 @@ def _log_variable_recovery_guard_fallback_once_8616(
     project: object,
     context_suffix: ContextSuffixCallbacks,
 ) -> None:
+    seen: object
     seen = None
     if project is not None:
         # Dynamic angr boundary: fallback seen-set is attached to third-party Project objects.
@@ -207,7 +219,7 @@ def build_guarded_handle_binop_sub_8616(
         try:
             arg0, arg1 = expr_obj.operands
             r0, r1 = self_engine._expr_pair(arg0, arg1)
-            mismatch_bits = r0.data.size() != r1.data.size()
+            mismatch_bits = operator.ne(r0.data.size(), r1.data.size())
             unresolved_mismatch = False
 
             if r0.data.size() == r1.data.size() == expr_obj.bits:
@@ -264,7 +276,7 @@ def build_guarded_handle_binop_mul_8616(
         try:
             arg0, arg1 = expr_obj.operands
             r0, r1 = self_engine._expr_pair(arg0, arg1)
-            mismatch_bits = r0.data.size() != r1.data.size()
+            mismatch_bits = operator.ne(r0.data.size(), r1.data.size())
             unresolved_mismatch = False
 
             if r0.data.size() == r1.data.size() == expr_obj.bits:

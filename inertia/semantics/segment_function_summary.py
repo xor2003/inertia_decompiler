@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Join function-local segment facts with typed control-transfer evidence.
 
 Layer: function summaries.
@@ -12,6 +13,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
@@ -20,6 +23,10 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from inertia.ir.segment_contract import SegmentFactVerdict, SegmentFunctionContract
 from inertia.lowering.analysis_helpers import CallTargetKind8616, CallTargetSeed, collect_neighbor_call_targets
+import dataclasses
+import operator
+import builtins
+DeclaredCallEffectConsumption8616 = typing.TypeVar("DeclaredCallEffectConsumption8616")
 
 if TYPE_CHECKING:
     from inertia.frontend.x86_16.declared_external_call_evidence import DeclaredCallEffectConsumption8616
@@ -38,9 +45,9 @@ _CALL_KINDS = frozenset({
 class _FunctionSurface8616(Protocol):
     """Dynamic angr function fields used at the frontend-summary boundary."""
 
-    addr: int
+    addr: cython.longlong
 
-    def get_call_sites(self) -> Iterable[int]:
+    def get_call_sites(self) -> Iterable[cython.longlong]:
         """Return machine addresses for calls represented in the CFG."""
         ...
 
@@ -48,7 +55,7 @@ class _FunctionSurface8616(Protocol):
 class _FunctionManagerSurface8616(Protocol):
     """Dynamic angr function-manager lookup used by the summary attachment."""
 
-    def function(self, *, addr: int, create: bool) -> object | None:
+    def function(self, *, addr: cython.longlong, create: cython.bint) -> object | None:
         """Return the function at an exact address when present."""
         ...
 
@@ -64,9 +71,9 @@ class _CodegenBoundary8616(Protocol):
 class _ProjectBoundary8616(Protocol):
     """Project registry for incrementally recovered segment summaries."""
 
-    _inertia_segment_local_contracts_8616: dict[int, SegmentFunctionContract]
-    _inertia_segment_transfer_facts_8616: dict[int, tuple[SegmentControlTransferFact8616, ...]]
-    _inertia_segment_function_summaries_8616: dict[int, SegmentFunctionSummary8616]
+    _inertia_segment_local_contracts_8616: object
+    _inertia_segment_transfer_facts_8616: object
+    _inertia_segment_function_summaries_8616: object
 
 
 class SegmentControlTransferKind8616(StrEnum):
@@ -94,11 +101,11 @@ _DISTANCE_BY_KIND = {
 }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentControlTransferFact8616:
     """Typed target and architectural distance for one control transfer."""
 
-    instruction_addr: int
+    instruction_addr: cython.longlong
     kind: SegmentControlTransferKind8616
     distance: SegmentControlTransferDistance8616
     target_addr: int | None
@@ -117,13 +124,13 @@ class SegmentControlTransferFact8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentCalleeEffectFact8616:
     """Known clobber floor and completeness verdict for one callee edge."""
 
-    instruction_addr: int
+    instruction_addr: cython.longlong
     target_addr: int | None
-    clobbered_registers: tuple[str, ...]
+    clobbered_registers: object
     verdict: SegmentFactVerdict
 
     def to_dict(self) -> dict[str, object]:
@@ -136,18 +143,18 @@ class SegmentCalleeEffectFact8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentFunctionSummary8616:
     """Function-local contract plus transitive, conservative callee effects."""
 
-    function_addr: int
+    function_addr: cython.longlong
     local_contract: SegmentFunctionContract
     control_transfers: tuple[SegmentControlTransferFact8616, ...] = ()
     callee_effects: tuple[SegmentCalleeEffectFact8616, ...] = ()
     effective_clobbered_registers: tuple[str, ...] = ()
-    unresolved_effect_sites: tuple[int, ...] = ()
-    summary: dict[str, int] = field(default_factory=dict)
-    local_effects_complete: bool = False
+    unresolved_effect_sites: tuple[cython.longlong, ...] = ()
+    summary: object = field(default_factory=dict)
+    local_effects_complete: cython.bint = False
     declared_call_consumptions: tuple[DeclaredCallEffectConsumption8616, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
@@ -155,29 +162,32 @@ class SegmentFunctionSummary8616:
         return {
             "function_addr": self.function_addr,
             "local_contract": self.local_contract.to_dict(),
-            "control_transfers": [fact.to_dict() for fact in self.control_transfers],
-            "callee_effects": [fact.to_dict() for fact in self.callee_effects],
+            "control_transfers": [fact.to_dict() for fact in iter(self.control_transfers)],
+            "callee_effects": [fact.to_dict() for fact in iter(self.callee_effects)],
             "effective_clobbered_registers": list(self.effective_clobbered_registers),
             "unresolved_effect_sites": list(self.unresolved_effect_sites),
             "declared_call_consumptions": [
-                consumption.to_record() for consumption in self.declared_call_consumptions
+                consumption.to_record() for consumption in iter(self.declared_call_consumptions)
             ],
             "summary": dict(self.summary),
             "local_effects_complete": self.local_effects_complete,
         }
 
 
-def _callsite_addrs(function: object) -> tuple[int, ...]:
+@cython.ccall
+def _callsite_addrs(function: object) -> tuple[cython.longlong, ...]:
     """Read exact CFG callsites at the dynamic angr function boundary."""
     try:
         raw = cast(_FunctionSurface8616, function).get_call_sites()
     except (AttributeError, TypeError):
         return ()
-    return tuple(sorted({addr for addr in raw if isinstance(addr, int)}))
+    return tuple(sorted({addr for addr in iter(raw) if isinstance(addr, int)}))
 
 
+@cython.ccall
 def _transfer_from_seed(seed: CallTargetSeed) -> SegmentControlTransferFact8616:
     """Normalize one typed frontend seed into a segment-summary transfer."""
+    distance: object
     kind = (
         SegmentControlTransferKind8616.CALL
         if seed.kind in _CALL_KINDS
@@ -203,7 +213,7 @@ def build_x86_16_segment_control_transfers(function: object) -> tuple[SegmentCon
     """Collect resolved near/far transfers and retain unresolved CFG calls."""
     seeds = tuple(collect_neighbor_call_targets(function))
     callsites = _callsite_addrs(function)
-    seed_callsites = {seed.callsite_addr for seed in seeds if seed.kind in _CALL_KINDS}
+    seed_callsites = {seed.callsite_addr for seed in iter(seeds) if seed.kind in _CALL_KINDS}
     unresolved = tuple(
         SegmentControlTransferFact8616(
             instruction_addr=addr,
@@ -213,45 +223,48 @@ def build_x86_16_segment_control_transfers(function: object) -> tuple[SegmentCon
             return_addr=None,
             verdict=SegmentFactVerdict.UNKNOWN_REFUSE,
         )
-        for addr in callsites
+        for addr in iter(callsites)
         if addr not in seed_callsites
     )
-    return tuple(sorted((*(_transfer_from_seed(seed) for seed in seeds), *unresolved), key=lambda fact: fact.instruction_addr))
+    return tuple(sorted(tuple((_transfer_from_seed(seed) for seed in iter(seeds))) + tuple(unresolved), key=lambda fact: fact.instruction_addr))
 
 
 def _local_effect_census_complete_8616(
     contract: SegmentFunctionContract,
-    facts: tuple[SegmentControlTransferFact8616, ...],
-) -> bool:
+    facts: object,
+) -> cython.bint:
     """Require complete local effects and an exact nonduplicated call census."""
+    proof: object
     proof = contract.effect_closure
     if not contract.effects_complete or proof is None:
         return False
-    sites = tuple(sorted(fact.instruction_addr for fact in facts))
+    sites = tuple(sorted(fact.instruction_addr for fact in iter(facts)))
     return bool(
-        sites == proof.callsite_addrs
-        and len(set(sites)) == len(sites)
-        and all(fact.kind is SegmentControlTransferKind8616.CALL for fact in facts)
+        operator.eq(sites, proof.callsite_addrs)
+        and operator.eq(len(set(sites)), len(sites))
+        and all(fact.kind is SegmentControlTransferKind8616.CALL for fact in iter(facts))
     )
 
 
 def _unknown_effect_functions(
-    contracts: Mapping[int, SegmentFunctionContract],
-    transfers: Mapping[int, tuple[SegmentControlTransferFact8616, ...]],
-) -> set[int]:
+    contracts: Mapping[cython.longlong, SegmentFunctionContract],
+    transfers: Mapping[cython.longlong, tuple[SegmentControlTransferFact8616, ...]],
+) -> object:
     """Find functions whose transitive callee effects are incomplete."""
+    facts: object
+    function_addr: object
     unknown = {
-        addr for addr, contract in contracts.items()
+        addr for addr, contract in builtins.iter(contracts.items())
         if not _local_effect_census_complete_8616(contract, transfers.get(addr, ()))
     }
     unknown.update({
         function_addr
-        for function_addr, facts in transfers.items()
+        for function_addr, facts in builtins.iter(transfers.items())
         if any(
             fact.verdict is not SegmentFactVerdict.PROVEN
             or fact.target_addr not in contracts
             or not _effect_projects_match_8616(contracts.get(function_addr), contracts.get(cast(int, fact.target_addr)))
-            for fact in facts
+            for fact in iter(facts)
         )
     })
     changed = True
@@ -260,17 +273,20 @@ def _unknown_effect_functions(
         for function_addr, facts in transfers.items():
             if function_addr in unknown:
                 continue
-            if any(fact.target_addr in unknown for fact in facts):
+            if any(fact.target_addr in unknown for fact in iter(facts)):
                 unknown.add(function_addr)
                 changed = True
     return unknown
 
 
+@cython.ccall
 def _effect_projects_match_8616(
-    caller: SegmentFunctionContract | None,
-    callee: SegmentFunctionContract | None,
-) -> bool:
+    caller: object,
+    callee: object,
+) -> cython.bint:
     """Forbid borrowing a target body's effects from another project."""
+    callee_proof: object
+    caller_proof: object
     if caller is None or callee is None:
         return False
     caller_proof, callee_proof = caller.effect_closure, callee.effect_closure
@@ -280,12 +296,16 @@ def _effect_projects_match_8616(
     )
 
 
+@cython.ccall
 def _effective_clobbers(
-    contracts: Mapping[int, SegmentFunctionContract],
-    transfers: Mapping[int, tuple[SegmentControlTransferFact8616, ...]],
-) -> dict[int, set[str]]:
+    contracts: Mapping[cython.longlong, SegmentFunctionContract],
+    transfers: Mapping[cython.longlong, tuple[SegmentControlTransferFact8616, ...]],
+) -> object:
     """Reach a deterministic fixed point for known transitive clobbers."""
-    effective = {addr: set(contract.clobbered_registers) for addr, contract in contracts.items()}
+    fact: object
+    facts: object
+    function_addr: object
+    effective = {addr: set(contract.clobbered_registers) for addr, contract in builtins.iter(contracts.items())}
     changed = True
     while changed:
         changed = False
@@ -295,18 +315,24 @@ def _effective_clobbers(
             for fact in facts:
                 if fact.target_addr in effective:
                     current.update(effective[fact.target_addr])
-            changed = changed or len(current) != before
+            changed = changed or operator.ne(len(current), before)
     return effective
 
 
 def join_x86_16_segment_function_summaries(
-    contracts: Mapping[int, SegmentFunctionContract],
-    transfers: Mapping[int, tuple[SegmentControlTransferFact8616, ...]],
-) -> dict[int, SegmentFunctionSummary8616]:
+    contracts: Mapping[cython.longlong, SegmentFunctionContract],
+    transfers: Mapping[cython.longlong, tuple[SegmentControlTransferFact8616, ...]],
+) -> object:
     """Join local contracts and callee effects without guessing missing callees."""
+    function_transfers: object
+    local_classified: object
+    local_failures: object
+    local_materialized: object
+    local_raw: object
+    function_addr: object
     effective = _effective_clobbers(contracts, transfers)
     unknown = _unknown_effect_functions(contracts, transfers)
-    summaries: dict[int, SegmentFunctionSummary8616] = {}
+    summaries: dict[cython.longlong, SegmentFunctionSummary8616] = {}
     for function_addr in sorted(contracts):
         local = contracts[function_addr]
         function_transfers = transfers.get(function_addr, ())
@@ -315,7 +341,7 @@ def join_x86_16_segment_function_summaries(
             SegmentCalleeEffectFact8616(
                 instruction_addr=fact.instruction_addr,
                 target_addr=fact.target_addr,
-                clobbered_registers=tuple(sorted(effective.get(cast(int, fact.target_addr), set()))),
+                clobbered_registers=tuple(sorted(tuple(effective.get(cast(int, fact.target_addr), set())))),
                 verdict=(
                     SegmentFactVerdict.PROVEN
                     if fact.verdict is SegmentFactVerdict.PROVEN
@@ -326,23 +352,23 @@ def join_x86_16_segment_function_summaries(
                     else SegmentFactVerdict.UNKNOWN_REFUSE
                 ),
             )
-            for fact in function_transfers
+            for fact in iter(function_transfers)
         )
         local_raw = local.summary.get("raw_fact_count", 0)
         local_classified = local.summary.get("classified_fact_count", 0)
         local_materialized = local.summary.get("materialized_count", 0)
         local_failures = local.summary.get("failure_count", 0)
-        transfer_classified = sum(fact.verdict is SegmentFactVerdict.PROVEN for fact in function_transfers)
-        effect_classified = sum(fact.verdict is SegmentFactVerdict.PROVEN for fact in effects)
+        transfer_classified = sum(fact.verdict is SegmentFactVerdict.PROVEN for fact in iter(function_transfers))
+        effect_classified = sum(fact.verdict is SegmentFactVerdict.PROVEN for fact in iter(effects))
         summaries[function_addr] = SegmentFunctionSummary8616(
             function_addr=function_addr,
             local_contract=local,
             local_effects_complete=local_complete,
             control_transfers=function_transfers,
             callee_effects=effects,
-            effective_clobbered_registers=tuple(sorted(effective.get(function_addr, set()))),
+            effective_clobbered_registers=tuple(sorted(tuple(effective.get(function_addr, set())))),
             unresolved_effect_sites=tuple(
-                fact.instruction_addr for fact in effects if fact.verdict is SegmentFactVerdict.UNKNOWN_REFUSE
+                fact.instruction_addr for fact in iter(effects) if fact.verdict is SegmentFactVerdict.UNKNOWN_REFUSE
             ),
             summary={
                 "raw_fact_count": local_raw + len(function_transfers) + len(effects) + 1,
@@ -361,12 +387,13 @@ def join_x86_16_segment_function_summaries(
     return summaries
 
 
-def _function_for_contract(project: object, function_addr: int) -> object | None:
+@cython.ccall
+def _function_for_contract(project: object, function_addr: cython.longlong) -> object | None:
     """Resolve the active angr function for one exact local IR contract."""
     boundary = cast(Any, project)
     try:
         active = boundary._inertia_active_structuring_function_8616
-        if cast(_FunctionSurface8616, active).addr == function_addr:
+        if operator.eq(cast(_FunctionSurface8616, active).addr, function_addr):
             return cast(object, active)
     except (AttributeError, TypeError):
         pass
@@ -377,8 +404,10 @@ def _function_for_contract(project: object, function_addr: int) -> object | None
         return None
 
 
-def apply_x86_16_segment_function_summary(project: object, codegen: object) -> bool:
+def apply_x86_16_segment_function_summary(project: object, codegen: object) -> cython.bint:
     """Attach and register the current typed interprocedural segment summary."""
+    function: object
+    proof: object
     codegen_boundary = cast(_CodegenBoundary8616, codegen)
     project_boundary = cast(_ProjectBoundary8616, project)
     try:
@@ -410,7 +439,7 @@ def apply_x86_16_segment_function_summary(project: object, codegen: object) -> b
 
     requests = tuple(
         SegmentCallPreservationRequest8616(fact.instruction_addr, fact.target_addr)
-        for fact in transfer_facts
+        for fact in iter(transfer_facts)
         if fact.kind is SegmentControlTransferKind8616.CALL
         and fact.distance is SegmentControlTransferDistance8616.NEAR
         and fact.verdict is SegmentFactVerdict.PROVEN

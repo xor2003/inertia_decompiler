@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Transfer returned pointer carriers through one typed caller SSA block.
 
 Layer: Types/Lowering.
@@ -11,6 +12,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -36,6 +39,10 @@ from .interprocedural_storage_return_type_contracts import (
     ReturnPointerPhiEvidence8616,
     ReturnPointerUseEvidence8616,
 )
+import dataclasses
+import operator
+import builtins
+ProofT = typing.TypeVar("ProofT")
 
 __all__ = [
     "PointerBlockScan8616",
@@ -49,7 +56,7 @@ __all__ = [
 _ValueKey8616 = tuple[MemSpace, str | None, int, int, int | None]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PointerCarrier8616:
     """One exact call-output-derived register carrier and its proof path."""
 
@@ -60,23 +67,25 @@ class PointerCarrier8616:
     stack_transfers: tuple[StackWordRegisterTransfer8616, ...] = ()
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class PointerBlockScan8616:
     """Output carriers and refusal observations from one block scan."""
 
-    carriers: dict[DomainKey, PointerCarrier8616]
-    stack_carriers: dict[StackWordStorageVersion8616, PointerCarrier8616]
+    carriers: object
+    stack_carriers: object
     evidence: ReturnPointerUseEvidence8616 | None = None
-    saw_unknown_address: bool = False
-    saw_ambiguous_address: bool = False
-    saw_alias_clobber: bool = False
+    saw_unknown_address: cython.bint = False
+    saw_ambiguous_address: cython.bint = False
+    saw_alias_clobber: cython.bint = False
 
 
-def append_unique_pointer_proofs_8616[ProofT](
-    values: tuple[ProofT, ...],
-    additions: tuple[ProofT, ...],
+@cython.ccall
+def append_unique_pointer_proofs_8616(
+    values: object,
+    additions: object,
 ) -> tuple[ProofT, ...]:
     """Append equal proof records once while preserving deterministic order."""
+    addition: object
     merged = list(values)
     for addition in additions:
         if addition not in merged:
@@ -84,28 +93,32 @@ def append_unique_pointer_proofs_8616[ProofT](
     return tuple(merged)
 
 
+@cython.ccall
 def full_word_pointer_domain_8616(value: IRValue) -> DomainKey | None:
     """Return Alias-owned full-word register identity for a typed value."""
     if value.space is not MemSpace.REG or value.size != 2:
         return None
-    if register_view_for_name(value.name) != FULL16:
+    if operator.ne(register_view_for_name(value.name), FULL16):
         return None
     return register_domain_for_name(value.name)
 
 
+@cython.ccall
 def pointer_witness_seed_values_8616(
     block: SSABlock,
-    witness: int,
+    witness: cython.longlong,
 ) -> tuple[IRValue, ...]:
     """Return exact AX-domain reads performed by one witnessed instruction."""
+    argument: object
+    instruction: object
     values: list[IRValue] = []
     for instruction in block.instrs:
-        if instruction.addr != witness:
+        if operator.ne(instruction.addr, witness):
             continue
         for argument in instruction.args:
             if (
                 isinstance(argument, IRValue)
-                and full_word_pointer_domain_8616(argument) == AX
+                and operator.eq(full_word_pointer_domain_8616(argument), AX)
                 and isinstance(argument.version, int)
                 and argument not in values
             ):
@@ -113,18 +126,22 @@ def pointer_witness_seed_values_8616(
     return tuple(values)
 
 
+@cython.ccall
 def _value_key_8616(value: IRValue) -> _ValueKey8616:
     """Return exact block-local SSA identity for one typed value."""
     return (value.space, value.name, value.offset, value.size, value.version)
 
 
+@cython.ccall
 def _copy_source_8616(
     instruction: IRInstr,
-    tainted: dict[_ValueKey8616, PointerCarrier8616],
-    live: dict[DomainKey, PointerCarrier8616],
-    entry_domains: set[DomainKey],
-) -> tuple[IRValue, PointerCarrier8616] | None:
+    tainted: object,
+    live: object,
+    entry_domains: object,
+) -> object:
     """Resolve one exact tainted source of an equal-width semantic MOV."""
+    carrier: object
+    destination: object
     destination = instruction.dst
     if (
         instruction.op != "MOV"
@@ -134,7 +151,7 @@ def _copy_source_8616(
     ):
         return None
     source = instruction.args[0]
-    if source.expr is not None or source.size != 2 or destination.size != source.size:
+    if source.expr is not None or source.size != 2 or operator.ne(destination.size, source.size):
         return None
     carrier = tainted.get(_value_key_8616(source))
     source_domain = full_word_pointer_domain_8616(source)
@@ -147,16 +164,17 @@ def _address_uses_8616(instruction: IRInstr) -> tuple[IRAddress, ...]:
     """Return typed memory addresses consumed by a LOAD or STORE."""
     if instruction.op not in {"LOAD", "STORE"}:
         return ()
-    return tuple(argument for argument in instruction.args if isinstance(argument, IRAddress))
+    return tuple(argument for argument in iter(instruction.args) if isinstance(argument, IRAddress))
 
 
 def _address_carrier_8616(
     address: IRAddress,
-    live: dict[DomainKey, PointerCarrier8616],
-) -> tuple[PointerCarrier8616 | None, str | None, bool, bool]:
+    live: object,
+) -> tuple[PointerCarrier8616 | None, str | None, cython.bint, cython.bint]:
     """Classify exact, ambiguous, and unknown use of a live pointer carrier."""
+    domain: object
     live_names = tuple(
-        name for name in address.base if (domain := register_domain_for_name(name)) is not None and domain in live
+        name for name in iter(address.base) if (domain := register_domain_for_name(name)) is not None and domain in live
     )
     if not live_names:
         return None, None, False, False
@@ -176,12 +194,16 @@ def _address_carrier_8616(
     return live[domain], name, False, False
 
 
+@cython.ccall
 def _apply_stack_transfers_8616(
-    transfers: tuple[StackWordRegisterTransfer8616, ...],
-    live: dict[DomainKey, PointerCarrier8616],
-    stack_live: dict[StackWordStorageVersion8616, PointerCarrier8616],
-) -> bool:
+    transfers: object,
+    live: object,
+    stack_live: object,
+) -> cython.bint:
     """Apply Alias-versioned spills and reloads at one machine instruction."""
+    carrier: object
+    domain: object
+    transfer: object
     saw_clobber = False
     for transfer in transfers:
         register = transfer.source.register
@@ -193,7 +215,7 @@ def _apply_stack_transfers_8616(
             carrier = live.get(domain)
             if carrier is None:
                 continue
-            if carrier.value != register:
+            if operator.ne(carrier.value, register):
                 saw_clobber = True
                 continue
             stack_live[key] = PointerCarrier8616(
@@ -223,27 +245,31 @@ def _apply_stack_transfers_8616(
     return saw_clobber
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _PointerBlockScanState8616:
     """Mutable carrier-propagation state for one block scan."""
 
     block: SSABlock
-    live: dict[DomainKey, PointerCarrier8616]
-    stack_live: dict[StackWordStorageVersion8616, PointerCarrier8616]
-    entry_domains: set[DomainKey]
-    tainted: dict[_ValueKey8616, PointerCarrier8616]
-    saw_unknown: bool = False
-    saw_ambiguous: bool = False
-    saw_clobber: bool = False
+    live: object
+    stack_live: object
+    entry_domains: object
+    tainted: object
+    saw_unknown: cython.bint = False
+    saw_ambiguous: cython.bint = False
+    saw_clobber: cython.bint = False
 
+    @cython.ccall
     def deref_evidence(
         self,
         instruction: IRInstr,
-        instr_addr: int,
+        instr_addr: cython.longlong,
         fact: CallerReturnUseFact8616,
-        witness: int,
+        witness: cython.longlong,
     ) -> ReturnPointerUseEvidence8616 | None:
         """Return complete dereference evidence for one instruction or None."""
+        carrier: object
+        name: object
+        address: object
         for address in _address_uses_8616(instruction):
             carrier, name, ambiguous, unknown = _address_carrier_8616(address, self.live)
             self.saw_ambiguous = self.saw_ambiguous or ambiguous
@@ -266,13 +292,17 @@ class _PointerBlockScanState8616:
                 self.saw_unknown = True
         return None
 
+    @cython.ccall
     def apply_copy(
         self,
-        instr_index: int,
+        instr_index: cython.longlong,
         instruction: IRInstr,
         instr_addr: int | None,
     ) -> None:
         """Propagate one exact carrier through a proven register copy."""
+        copy: object
+        destination: object
+        destination_domain: object
         destination = instruction.dst
         copy = (
             None
@@ -312,11 +342,12 @@ class _PointerBlockScanState8616:
             if destination_domain is not None:
                 self.live[destination_domain] = carrier
 
+    @cython.ccall
     def apply_transfers(
         self,
-        instr_index: int,
+        instr_index: cython.longlong,
         instr_addr: int | None,
-        stack_transfers_by_instruction: dict[int, tuple[StackWordRegisterTransfer8616, ...]],
+        stack_transfers_by_instruction: object,
     ) -> None:
         """Apply stack-transfer clobbers between adjacent addressed instructions."""
         next_addr = (
@@ -333,23 +364,25 @@ class _PointerBlockScanState8616:
             self.saw_clobber = self.saw_clobber or transfer_clobber
 
 
+@cython.ccall
 def scan_pointer_carriers_in_block_8616(
     block: SSABlock,
     fact: CallerReturnUseFact8616,
-    entry_carriers: dict[DomainKey, PointerCarrier8616],
-    entry_stack_carriers: dict[StackWordStorageVersion8616, PointerCarrier8616],
-    stack_transfers_by_instruction: dict[int, tuple[StackWordRegisterTransfer8616, ...]],
-    start_index: int,
-    witness: int,
+    entry_carriers: object,
+    entry_stack_carriers: object,
+    stack_transfers_by_instruction: object,
+    start_index: cython.longlong,
+    witness: cython.longlong,
 ) -> PointerBlockScan8616:
     """Propagate exact carriers through one block from a proven entry state."""
+    evidence: object
     live = dict(entry_carriers)
     state = _PointerBlockScanState8616(
         block=block,
         live=live,
         stack_live=dict(entry_stack_carriers),
         entry_domains=set(live),
-        tainted={_value_key_8616(carrier.value): carrier for carrier in live.values()},
+        tainted={_value_key_8616(carrier.value): carrier for carrier in builtins.iter(live.values())},
     )
 
     for instr_index in range(start_index, len(block.instrs)):

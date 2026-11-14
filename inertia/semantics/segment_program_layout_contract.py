@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Define typed contracts for conservative whole-program segment evidence.
 
 Layer: function/program summaries.
@@ -12,6 +13,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -21,6 +24,9 @@ from inertia.ir.segment_contract import SegmentFactVerdict
 from inertia.pipeline.errors import PipelineHardError
 
 from .segment_function_summary import SegmentControlTransferFact8616
+import dataclasses
+import operator
+DeclaredCallEffectConsumption8616 = typing.TypeVar("DeclaredCallEffectConsumption8616")
 
 if TYPE_CHECKING:
     from inertia.frontend.x86_16.declared_external_call_evidence import DeclaredCallEffectConsumption8616
@@ -67,42 +73,42 @@ class SegmentProgramLayoutVerdict8616(StrEnum):
     UNKNOWN_REFUSE = "unknown_refuse"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentProgramDiscoveryEvidence8616:
     """Exact expected function set and its closed discovery census."""
 
-    expected_function_addrs: tuple[int, ...]
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    failed_addrs: tuple[int, ...] = ()
+    expected_function_addrs: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    failed_addrs: tuple[cython.longlong, ...] = ()
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether discovery proved and materialized the exact set."""
         expected_count = len(self.expected_function_addrs)
         return (
             expected_count > 0
-            and len(set(self.expected_function_addrs)) == expected_count
-            and self.raw_fact_count == expected_count
-            and self.normalized_fact_count == expected_count
-            and self.classified_fact_count == expected_count
-            and self.materialized_count == expected_count
+            and operator.eq(len(set(self.expected_function_addrs)), expected_count)
+            and operator.eq(self.raw_fact_count, expected_count)
+            and operator.eq(self.normalized_fact_count, expected_count)
+            and operator.eq(self.classified_fact_count, expected_count)
+            and operator.eq(self.materialized_count, expected_count)
             and self.failure_count == 0
             and not self.failed_addrs
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentProgramAccessEvidence8616:
     """Reduced exact segment evidence for one typed memory access."""
 
-    block_addr: int
+    block_addr: cython.longlong
     instruction_addr: int | None
-    segment_register: str | None
-    physical_source: str | None
+    segment_register: object
+    physical_source: object
     verdict: SegmentFactVerdict
 
     def to_dict(self) -> dict[str, object]:
@@ -116,17 +122,17 @@ class SegmentProgramAccessEvidence8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentProgramFunctionEvidence8616:
     """Worker-transportable local facts needed by the program join."""
 
-    function_addr: int
-    entry_requirements: tuple[str, ...]
-    accesses: tuple[SegmentProgramAccessEvidence8616, ...]
-    local_clobbered_registers: tuple[str, ...]
-    restored_registers: tuple[str, ...]
-    control_transfers: tuple[SegmentControlTransferFact8616, ...]
-    summary: dict[str, int] = field(default_factory=dict)
+    function_addr: cython.longlong
+    entry_requirements: object
+    accesses: object
+    local_clobbered_registers: object
+    restored_registers: object
+    control_transfers: object
+    summary: object = field(default_factory=dict)
     declared_call_consumptions: tuple[DeclaredCallEffectConsumption8616, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
@@ -135,43 +141,43 @@ class SegmentProgramFunctionEvidence8616:
             "schema": 1,
             "function_addr": self.function_addr,
             "entry_requirements": list(self.entry_requirements),
-            "accesses": [fact.to_dict() for fact in self.accesses],
+            "accesses": [fact.to_dict() for fact in iter(self.accesses)],
             "local_clobbered_registers": list(self.local_clobbered_registers),
             "restored_registers": list(self.restored_registers),
-            "control_transfers": [fact.to_dict() for fact in self.control_transfers],
+            "control_transfers": [fact.to_dict() for fact in iter(self.control_transfers)],
             "declared_call_consumptions": [
-                consumption.to_record() for consumption in self.declared_call_consumptions
+                consumption.to_record() for consumption in iter(self.declared_call_consumptions)
             ],
             "summary": dict(self.summary),
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentProgramSupplementalEvidence8616:
     """Typed completeness supplied by later frontend and pointer analyses."""
 
     indirect_control_coverage: SegmentProgramEvidenceCoverage8616 = SegmentProgramEvidenceCoverage8616.UNAVAILABLE
-    unresolved_indirect_control_sites: tuple[int, ...] = ()
+    unresolved_indirect_control_sites: tuple[cython.longlong, ...] = ()
     overlay_coverage: SegmentProgramEvidenceCoverage8616 = SegmentProgramEvidenceCoverage8616.UNAVAILABLE
-    overlap_sites: tuple[int, ...] = ()
+    overlap_sites: tuple[cython.longlong, ...] = ()
     primary_static_data_coverage: SegmentProgramEvidenceCoverage8616 = SegmentProgramEvidenceCoverage8616.UNAVAILABLE
-    primary_static_data_region: str | None = None
+    primary_static_data_region: object = None
     far_data_coverage: SegmentProgramEvidenceCoverage8616 = SegmentProgramEvidenceCoverage8616.UNAVAILABLE
-    far_data_sites: tuple[int, ...] = ()
+    far_data_sites: tuple[cython.longlong, ...] = ()
     huge_pointer_coverage: SegmentProgramEvidenceCoverage8616 = SegmentProgramEvidenceCoverage8616.UNAVAILABLE
-    huge_pointer_sites: tuple[int, ...] = ()
+    huge_pointer_sites: tuple[cython.longlong, ...] = ()
     entry_relation_coverage: SegmentProgramEvidenceCoverage8616 = SegmentProgramEvidenceCoverage8616.UNAVAILABLE
-    cs_ds_entry_relation: str | None = None
-    ss_ds_entry_relation: str | None = None
+    cs_ds_entry_relation: object = None
+    ss_ds_entry_relation: object = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentProgramLayoutFact8616:
     """One independently proven or explicitly refused layout conclusion."""
 
     aspect: SegmentProgramLayoutAspect8616
     verdict: SegmentProgramLayoutVerdict8616
-    evidence_sites: tuple[int, ...] = ()
+    evidence_sites: tuple[cython.longlong, ...] = ()
     detail: str = ""
 
     def to_dict(self) -> dict[str, object]:
@@ -184,16 +190,17 @@ class SegmentProgramLayoutFact8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentProgramLayoutContract8616:
     """Closed whole-program segment/layout evidence with independent verdicts."""
 
-    function_addrs: tuple[int, ...]
-    facts: tuple[SegmentProgramLayoutFact8616, ...]
-    summary: dict[str, int] = field(default_factory=dict)
+    function_addrs: object
+    facts: object
+    summary: object = field(default_factory=dict)
 
     def fact(self, aspect: SegmentProgramLayoutAspect8616) -> SegmentProgramLayoutFact8616:
         """Return the unique fact for an aspect."""
+        fact: object
         for fact in self.facts:
             if fact.aspect is aspect:
                 return fact
@@ -203,22 +210,25 @@ class SegmentProgramLayoutContract8616:
         """Return a deterministic JSON-friendly representation."""
         return {
             "function_addrs": list(self.function_addrs),
-            "facts": [fact.to_dict() for fact in self.facts],
+            "facts": [fact.to_dict() for fact in iter(self.facts)],
             "summary": dict(self.summary),
         }
 
 
-def validated_segment_program_counts_8616(summary: object, *, owner: str) -> dict[str, int]:
+@cython.ccall
+def validated_segment_program_counts_8616(summary: object, *, owner: object) -> object:
     """Validate one owned evidence census and return its required counts."""
+    value: object
+    field_name: object
     if not isinstance(summary, dict):
         raise PipelineHardError(f"{owner} has no typed evidence census")
-    counts: dict[str, int] = {}
+    counts: dict[str, cython.longlong] = {}
     for field_name in _COUNT_FIELDS:
         value = summary.get(field_name)
         if not isinstance(value, int) or isinstance(value, bool) or value < 0:
             raise PipelineHardError(f"{owner} has invalid {field_name}")
         counts[field_name] = value
-    if counts["classified_fact_count"] != counts["materialized_count"]:
+    if operator.ne(counts["classified_fact_count"], counts["materialized_count"]):
         raise PipelineHardError(f"{owner} classified evidence was not fully materialized")
     if not (
         counts["raw_fact_count"] >= counts["normalized_fact_count"] >= counts["classified_fact_count"]

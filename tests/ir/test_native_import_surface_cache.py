@@ -587,3 +587,21 @@ def test_identical_new_flag_session_requires_fresh_consumer_lift():
             assert len(calls) == 2
         finally:
             flags._active_session.reset(token)
+
+
+def test_bounded_cache_retains_costly_surface_for_final_rebind():
+    """A larger consumed surface stays available across a small-callee survey."""
+    _, root_boundary, root_calls, root_request = _world(b"\xeb\x00" * 5 + b"\xc3")
+    children = [_world() for _ in range(cache._MAX_RECORDS)]
+    assert len(root_boundary.blocks) > len(children[0][1].blocks)
+    with cache.native_import_request_8616():
+        assert root_request() == {"capture": [1]}
+        for _, _, _, child_request in children:
+            assert child_request() == {"capture": [1]}
+            session = cache._ACTIVE.get()
+            assert session is not None
+            assert len(session.records) <= cache._MAX_RECORDS
+            assert sum(record.blocks for record in session.records.values()) <= cache._MAX_BLOCKS
+        assert root_request() == {"capture": [1]}
+        assert children[-1][3]() == {"capture": [1]}
+    assert len(root_calls) == 1

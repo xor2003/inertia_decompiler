@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Validate exact switch-to-loop-tail goto collapse.
 
 Layer: Tail validation.
@@ -15,6 +16,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
@@ -24,6 +27,8 @@ from inertia.structuring.switch_loop_tail_breaks import (
     SwitchLoopTailBreakDecision8616,
     SwitchLoopTailBreakResult8616,
 )
+import dataclasses
+import operator
 
 
 class SwitchLoopTailBreakValidationStatus8616(StrEnum):
@@ -36,20 +41,21 @@ class SwitchLoopTailBreakValidationStatus8616(StrEnum):
     REFUSED_MISSING_TARGET = "refused_missing_target"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SwitchLoopTailBreakValidationResult8616:
     """Consumed goto fingerprints and remaining validation state."""
 
     status: SwitchLoopTailBreakValidationStatus8616
     consumed_gotos: tuple[str, ...] = ()
-    residual_changed: bool = True
+    residual_changed: cython.bint = True
 
     @property
-    def accepted(self) -> bool:
+    def accepted(self) -> cython.bint:
         """Return whether exact Structuring evidence consumed a delta."""
         return self.status is SwitchLoopTailBreakValidationStatus8616.ACCEPTED
 
 
+@cython.ccall
 def _boundary_tuple_8616(value: object) -> tuple[object, ...]:
     """Normalize one validation boundary without iterating text or mappings."""
     if isinstance(value, (tuple, list, set, frozenset)):
@@ -57,29 +63,30 @@ def _boundary_tuple_8616(value: object) -> tuple[object, ...]:
     return ()
 
 
-def _evidence_is_closed_8616(result: SwitchLoopTailBreakResult8616) -> bool:
+def _evidence_is_closed_8616(result: SwitchLoopTailBreakResult8616) -> cython.bint:
     """Return whether every classified collapse has one durable materialization."""
     stats = result.stats
     materialized_decisions = sum(
         decision is SwitchLoopTailBreakDecision8616.MATERIALIZED
-        for decision in result.decisions
+        for decision in iter(result.decisions)
     )
-    targets = tuple(item.target for item in result.materializations)
+    targets = tuple(item.target for item in iter(result.materializations))
     return (
         stats.classified_fact_count > 0
-        and stats.classified_fact_count == stats.materialized_count
-        and stats.materialized_count == result.removed_label_count
-        and stats.materialized_count == len(result.materializations)
-        and stats.materialized_count == materialized_decisions
-        and result.replaced_goto_count
-        == sum(item.replaced_goto_count for item in result.materializations)
-        and all(item.replaced_goto_count > 0 for item in result.materializations)
-        and len(set(targets)) == len(targets)
+        and operator.eq(stats.classified_fact_count, stats.materialized_count)
+        and operator.eq(stats.materialized_count, result.removed_label_count)
+        and operator.eq(stats.materialized_count, len(result.materializations))
+        and operator.eq(stats.materialized_count, materialized_decisions)
+        and operator.eq(result.replaced_goto_count, sum(item.replaced_goto_count for item in iter(result.materializations)))
+        and all(item.replaced_goto_count > 0 for item in iter(result.materializations))
+        and operator.eq(len(set(targets)), len(targets))
     )
 
 
-def _delta_still_changed_8616(delta: Mapping[str, object]) -> bool:
+@cython.ccall
+def _delta_still_changed_8616(delta: Mapping[str, object]) -> cython.bint:
     """Return whether any observable field retains an added or removed value."""
+    field_delta: object
     for field_delta in delta.values():
         if not isinstance(field_delta, Mapping):
             continue
@@ -91,10 +98,13 @@ def _delta_still_changed_8616(delta: Mapping[str, object]) -> bool:
 
 
 def consume_switch_loop_tail_break_validation_delta_8616(
-    result: SwitchLoopTailBreakResult8616 | None,
+    result: object,
     validation: MutableMapping[str, object],
 ) -> SwitchLoopTailBreakValidationResult8616:
     """Consume only goto removals proved by a closed Structuring result."""
+    control_delta: object
+    delta: object
+    precision: object
     if result is None:
         return SwitchLoopTailBreakValidationResult8616(
             SwitchLoopTailBreakValidationStatus8616.REFUSED_NO_RESULT
@@ -115,18 +125,18 @@ def consume_switch_loop_tail_break_validation_delta_8616(
             SwitchLoopTailBreakValidationStatus8616.REFUSED_MALFORMED_DELTA
         )
     removed = _boundary_tuple_8616(control_delta.get("removed", ()))
-    expected = frozenset(f"goto:{item.target}" for item in result.materializations)
-    removed_strings = frozenset(item for item in removed if isinstance(item, str))
+    expected = frozenset(f"goto:{item.target}" for item in iter(result.materializations))
+    removed_strings = frozenset(item for item in iter(removed) if isinstance(item, str))
     if not expected or not expected <= removed_strings:
         return SwitchLoopTailBreakValidationResult8616(
             SwitchLoopTailBreakValidationStatus8616.REFUSED_MISSING_TARGET
         )
 
-    consumed = tuple(item for item in removed if isinstance(item, str) and item in expected)
-    control_delta["removed"] = tuple(item for item in removed if item not in expected)
+    consumed = tuple(item for item in iter(removed) if isinstance(item, str) and item in expected)
+    control_delta["removed"] = tuple(item for item in iter(removed) if item not in expected)
     precision["switch_loop_tail_breaks"] = {
         "removed": consumed,
-        "targets": tuple(item.target for item in result.materializations),
+        "targets": tuple(item.target for item in iter(result.materializations)),
         "replaced_goto_count": result.replaced_goto_count,
     }
     residual_changed = _delta_still_changed_8616(delta)

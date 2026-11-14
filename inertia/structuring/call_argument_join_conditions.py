@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Lower typed CFG conditions that select branch-carried call arguments.
 
 Layer: Structuring.
@@ -8,6 +9,7 @@ Do not perform alias-state ownership, widening, type/materialization recovery, r
 """
 
 from __future__ import annotations
+import cython
 
 from typing import Protocol, cast
 
@@ -19,6 +21,8 @@ from inertia.ir.condition_ir import ConditionIR
 from inertia.semantics.callsite_summary import CallsitePushSourceKind8616
 
 from .condition_materialization import materialize_condition_ir_expression_8616
+import operator
+import builtins
 
 __all__ = [
     "conditional_call_argument_join_expression_8616",
@@ -32,39 +36,43 @@ class _CallArgumentJoinConditionCodegen8616(Protocol):
     _inertia_typed_conditions: object
 
 
+@cython.ccall
 def exact_call_argument_immediate_8616(source: CallsiteSource8616 | None) -> int | None:
     """Return an exact immediate from one Alias source fact."""
     if not isinstance(source, tuple) or len(source) != 2:
         return None
     kind, value = source
-    if kind != CallsitePushSourceKind8616.IMMEDIATE.value:
+    if operator.ne(kind, CallsitePushSourceKind8616.IMMEDIATE.value):
         return None
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
-def _join_values_by_predecessor_8616(join: CallsiteRegisterJoin8616) -> dict[int, int] | None:
+@cython.ccall
+def _join_values_by_predecessor_8616(join: CallsiteRegisterJoin8616) -> object:
     """Map every unique join predecessor to its exact incoming value."""
-    values: dict[int, int] = {}
+    value: object
+    trace: object
+    values: dict[cython.longlong, cython.longlong] = {}
     for trace in join.traces:
         value = exact_call_argument_immediate_8616(trace.source)
         if value is None or trace.predecessor_addr in values:
             return None
         values[trace.predecessor_addr] = value
-    return values if len(values) == len(join.traces) else None
+    return values if operator.eq(len(values), len(join.traces)) else None
 
 
 def _select_join_condition_8616(
-    conditions: tuple[ConditionIR, ...],
-    predecessor_addrs: frozenset[int],
+    conditions: object,
+    predecessor_addrs: object,
 ) -> ConditionIR | None:
     """Select one condition whose two CFG edges are the join predecessors."""
     matches = tuple(
         condition
-        for condition in conditions
+        for condition in iter(conditions)
         if isinstance(condition.taken_target, int)
         and isinstance(condition.fallthrough_target, int)
-        and condition.taken_target != condition.fallthrough_target
-        and frozenset((condition.taken_target, condition.fallthrough_target)) == predecessor_addrs
+        and operator.ne(condition.taken_target, condition.fallthrough_target)
+        and operator.eq(frozenset((condition.taken_target, condition.fallthrough_target)), predecessor_addrs)
     )
     return matches[0] if len(matches) == 1 else None
 
@@ -75,11 +83,14 @@ def conditional_call_argument_join_expression_8616(
     join: CallsiteRegisterJoin8616,
 ) -> CExpression | None:
     """Build an exact C conditional expression for one typed register join."""
+    condition: object
+    condition_expression: object
+    values_by_predecessor: object
     typed_codegen = cast(_CallArgumentJoinConditionCodegen8616, codegen)
     try:
         conditions = tuple(
             condition
-            for condition in cast(tuple[object, ...], typed_codegen._inertia_typed_conditions)
+            for condition in builtins.iter(cast(tuple[object, ...], typed_codegen._inertia_typed_conditions))
             if isinstance(condition, ConditionIR)
         )
     except (AttributeError, TypeError):

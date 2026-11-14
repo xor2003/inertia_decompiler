@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: preserve legacy CLI helper surface while delegating semantic proof to X86_16 layers.
@@ -5,6 +6,8 @@ Forbidden: owning decompiler semantics, source-backed recovery, or postprocess s
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import re
 from collections.abc import Callable, Iterable
@@ -23,12 +26,14 @@ from inertia.lowering.storage_objects import (
     build_storage_object_artifact,
     storage_object_record_for_key,
 )
+import operator
+import builtins
 
 
 class _CFunctionLike(Protocol):
     """Structured C function surface needed by far-pointer stack coalescing."""
 
-    addr: int
+    addr: cython.longlong
     statements: object
 
 
@@ -47,13 +52,13 @@ class _ProjectLike(Protocol):
 class _AliasStorageLike(Protocol):
     """Alias-storage summary needed to prove far-pointer stack pieces join."""
 
-    identity: tuple[object, ...] | None
+    identity: object
 
-    def needs_synthesis(self) -> bool:
+    def needs_synthesis(self) -> cython.bint:
         """Return whether storage identity is too synthetic for this rewrite."""
         ...
 
-    def can_join(self, other: object) -> bool:
+    def can_join(self, other: object) -> cython.bint:
         """Return whether two storage identities are adjacent compatible pieces."""
         ...
 
@@ -63,13 +68,16 @@ def _build_copy_aliases(
     *,
     iter_c_nodes_deep: Callable[[object], Iterable[object]],
     unwrap_c_casts: Callable[[object], object],
-    expr_is_safe_inline_candidate: Callable[[object], bool],
-    expr_is_bare_storage_alias: Callable[[object], bool],
+    expr_is_safe_inline_candidate: Callable[[object], cython.bint],
+    expr_is_bare_storage_alias: Callable[[object], cython.bint],
     member_offset_for_variable: Callable[[object], int | None],
-    stack_variable_is_promoted: Callable[[object], bool],
-) -> dict[int, object]:
-    def _impl() -> dict[int, object]:
-        copy_aliases: dict[int, object] = {}
+    stack_variable_is_promoted: Callable[[object], cython.bint],
+) -> object:
+    def _impl() -> object:
+        classified: object
+        lhs_member_offset: object
+        walk_node: object
+        copy_aliases: dict[cython.longlong, object] = {}
         for _ in range(3):
             changed_alias = False
             for walk_node in iter_c_nodes_deep(statements):
@@ -86,7 +94,7 @@ def _build_copy_aliases(
                 lhs_member_offset = member_offset_for_variable(lhs_var)
                 if lhs_member_offset is not None and not stack_variable_is_promoted(lhs_var):
                     continue
-                if copy_aliases.get(id(lhs_var)) != resolved_rhs:
+                if operator.ne(copy_aliases.get(id(lhs_var)), resolved_rhs):
                     copy_aliases[id(lhs_var)] = resolved_rhs
                     changed_alias = True
             if not changed_alias:
@@ -96,15 +104,19 @@ def _build_copy_aliases(
     return _impl()
 
 
+@cython.ccall
 def _classify_copy_assignment(
     walk_node: object,
-    copy_aliases: dict[int, object],
+    copy_aliases: object,
     *,
     unwrap_c_casts: Callable[[object], object],
-    expr_is_safe_inline_candidate: Callable[[object], bool],
-    expr_is_bare_storage_alias: Callable[[object], bool],
-) -> tuple[object, object] | None:
+    expr_is_safe_inline_candidate: Callable[[object], cython.bint],
+    expr_is_bare_storage_alias: Callable[[object], cython.bint],
+) -> object:
     """Return ``(lhs_var, resolved_rhs)`` when the node records a copy alias, or ``None``."""
+    lhs_var: object
+    resolved_rhs: object
+    rhs_var: object
     if not isinstance(walk_node, structured_c.CAssignment) or not isinstance(
         walk_node.lhs, structured_c.CVariable
     ):
@@ -132,8 +144,9 @@ def _classify_copy_assignment(
     return lhs_var, resolved_rhs
 
 
-def _source_score(_cvar: object, expr: object) -> tuple[int, int, int]:
-    def _impl() -> tuple[int, int, int]:
+def _source_score(_cvar: object, expr: object) -> object:
+    def _impl() -> tuple[cython.longlong, cython.longlong, cython.longlong]:
+        variable: object
         current_expr = _unwrap_expr_identity(expr)
         # Dynamic codegen boundary: CVariable payloads are optional in angr structured C.
         variable = getattr(current_expr, "variable", None)
@@ -153,6 +166,7 @@ def _source_score(_cvar: object, expr: object) -> tuple[int, int, int]:
     return _impl()
 
 
+@cython.ccall
 def _unwrap_expr_identity(expr: object) -> object:
     return expr
 
@@ -163,15 +177,20 @@ def _build_far_pointer_aliases(
     iter_c_nodes_deep: Callable[[object], Iterable[object]],
     unwrap_c_casts: Callable[[object], object],
     describe_alias_storage: Callable[[object], _AliasStorageLike],
-    expr_is_safe_inline_candidate: Callable[[object], bool],
+    expr_is_safe_inline_candidate: Callable[[object], cython.bint],
     resolve_alias_expr: Callable[[object], object],
     member_offset_for_variable: Callable[[object], int | None],
-    stack_variable_is_promoted: Callable[[object], bool],
-    expr_uses_promoted_stack_storage: Callable[[object], bool],
+    stack_variable_is_promoted: Callable[[object], cython.bint],
+    expr_uses_promoted_stack_storage: Callable[[object], cython.bint],
     make_mk_fp: Callable[[object, object], object],
     codegen: _CodegenLike,
-) -> dict[int, object]:
-    def _impl() -> dict[int, object]:
+) -> object:
+    def _impl() -> object:
+        source_expr: object
+        variable: object
+        _rhs: object
+        cvar: object
+        parts: object
         groups = _collect_far_pointer_groups(
             statements,
             iter_c_nodes_deep=iter_c_nodes_deep,
@@ -179,7 +198,7 @@ def _build_far_pointer_aliases(
             describe_alias_storage=describe_alias_storage,
             expr_is_safe_inline_candidate=expr_is_safe_inline_candidate,
         )
-        far_pointer_aliases: dict[int, object] = {}
+        far_pointer_aliases: dict[cython.longlong, object] = {}
         for parts in groups.values():
             source_expr = _select_group_source_expr(
                 parts,
@@ -203,15 +222,18 @@ def _build_far_pointer_aliases(
     return _impl()
 
 
+@cython.ccall
 def _collect_far_pointer_groups(
     statements: object,
     *,
     iter_c_nodes_deep: Callable[[object], Iterable[object]],
     unwrap_c_casts: Callable[[object], object],
     describe_alias_storage: Callable[[object], _AliasStorageLike],
-    expr_is_safe_inline_candidate: Callable[[object], bool],
-) -> dict[object, dict[str, list[tuple[structured_c.CVariable, object]]]]:
+    expr_is_safe_inline_candidate: Callable[[object], cython.bint],
+) -> object:
     """Bucket stack-targeting copy assignments by their alias-storage identity."""
+    lhs_var: object
+    walk_node: object
     groups: dict[object, dict[str, list[tuple[structured_c.CVariable, object]]]] = {}
     for walk_node in iter_c_nodes_deep(statements):
         if not isinstance(walk_node, structured_c.CAssignment) or not isinstance(
@@ -239,29 +261,33 @@ def _collect_far_pointer_groups(
 
 
 def _select_group_source_expr(
-    parts: dict[str, list[tuple[structured_c.CVariable, object]]],
+    parts: object,
     *,
     describe_alias_storage: Callable[[object], _AliasStorageLike],
     resolve_alias_expr: Callable[[object], object],
     member_offset_for_variable: Callable[[object], int | None],
-    stack_variable_is_promoted: Callable[[object], bool],
-    expr_uses_promoted_stack_storage: Callable[[object], bool],
+    stack_variable_is_promoted: Callable[[object], cython.bint],
+    expr_uses_promoted_stack_storage: Callable[[object], cython.bint],
     make_mk_fp: Callable[[object, object], object],
     codegen: _CodegenLike,
 ) -> object | None:
     """Return the resolved far-pointer source expression for one identity group, or ``None``."""
+    member_offset: object
+    variable: object
+    cvar: object
+    rhs: object
     if not parts["source"]:
         return None
-    candidate_exprs = [cvar for cvar, _rhs in parts["source"] + parts["zero"]]
+    candidate_exprs = [cvar for cvar, _rhs in iter(parts["source"] + parts["zero"])]
     if not candidate_exprs:
         return None
-    candidate_facts = [describe_alias_storage(expr) for expr in candidate_exprs]
-    if any(facts.needs_synthesis() or facts.identity is None for facts in candidate_facts):
+    candidate_facts = [describe_alias_storage(expr) for expr in iter(candidate_exprs)]
+    if any(facts.needs_synthesis() or facts.identity is None for facts in iter(candidate_facts)):
         return None
     if any(
         not left.can_join(right)
-        for idx, left in enumerate(candidate_facts)
-        for right in candidate_facts[idx + 1 :]
+        for idx, left in builtins.iter(enumerate(candidate_facts))
+        for right in iter(candidate_facts[idx + 1 :])
     ):
         return None
     source_expr = None
@@ -296,9 +322,11 @@ def _coalesce_far_pointer_stack_expressions(
     build_access_trait_evidence_profiles: Callable[[dict[str, dict[BaseKey, object]]], EvidenceProfiles],
     build_stable_access_object_hints: Callable[[dict[str, dict[BaseKey, object]]], StableHints],
     access_trait_variable_key: Callable[[object], BaseKey | None],
-    replace_c_children: Callable[[object, Callable[[object], object]], bool],
+    replace_c_children: Callable[[object, Callable[[object], object]], cython.bint],
     describe_alias_storage: Callable[[object], _AliasStorageLike],
-) -> bool:
+) -> cython.bint:
+    cfunc: object
+    traits: object
     cfunc = codegen.cfunc
     if cfunc is None:
         return False
@@ -365,7 +393,7 @@ def _coalesce_far_pointer_stack_expressions(
         stack_variable_is_promoted=stack_variable_is_promoted,
     )
 
-    far_pointer_aliases: dict[int, object] = {}
+    far_pointer_aliases: dict[cython.longlong, object] = {}
 
     resolve_alias_expr = partial(
         _resolve_alias_expr,
@@ -419,14 +447,16 @@ def _coalesce_far_pointer_stack_expressions(
     return changed
 
 
+@cython.ccall
 def _expr_is_safe_inline_candidate(
     expr: object,
     *,
     unwrap_c_casts: Callable[[object], object],
     segment_reg_name: Callable[[object, _ProjectLike], str | None],
     project: _ProjectLike,
-) -> bool:
+) -> cython.bint:
     """Return whether the expression is safe to inline into an ``MK_FP`` form."""
+    variable: object
     expr = unwrap_c_casts(expr)
     if isinstance(expr, (structured_c.CConstant, structured_c.CVariable)):
         if isinstance(expr, structured_c.CVariable):
@@ -456,14 +486,16 @@ def _expr_is_safe_inline_candidate(
     return False
 
 
+@cython.ccall
 def _expr_is_bare_storage_alias(
     expr: object,
     *,
     unwrap_c_casts: Callable[[object], object],
     segment_reg_name: Callable[[object, _ProjectLike], str | None],
     project: _ProjectLike,
-) -> bool:
+) -> cython.bint:
     """Return whether the expression is a bare stack/segment storage alias."""
+    variable: object
     expr = unwrap_c_casts(expr)
     if not isinstance(expr, structured_c.CVariable):
         return False
@@ -474,15 +506,19 @@ def _expr_is_bare_storage_alias(
     return segment_reg_name(expr, project) is not None
 
 
+@cython.ccall
 def _expr_uses_promoted_stack_storage(
     expr: object,
     *,
     iter_c_nodes_deep: Callable[[object], Iterable[object]],
     resolve_stack_cvar_at_offset: Callable[[_CodegenLike, int], object],
     codegen: _CodegenLike,
-    minimum_size: int = 4,
-) -> bool:
+    minimum_size: cython.longlong = 4,
+) -> cython.bint:
     """Return whether every stack variable in the expression resolves to promoted storage."""
+    resolved_variable: object
+    variable: object
+    walk_node: object
     for walk_node in iter_c_nodes_deep(expr):
         if not isinstance(walk_node, structured_c.CVariable):
             continue
@@ -503,14 +539,16 @@ def _expr_uses_promoted_stack_storage(
     return True
 
 
+@cython.ccall
 def _stack_variable_is_promoted(
     variable: object,
     *,
     resolve_stack_cvar_at_offset: Callable[[_CodegenLike, int], object],
     codegen: _CodegenLike,
-    minimum_size: int = 4,
-) -> bool:
+    minimum_size: cython.longlong = 4,
+) -> cython.bint:
     """Return whether a stack variable is itself, or resolves to, promoted storage."""
+    resolved_variable: object
     if not isinstance(variable, SimStackVariable):
         return False
     if variable.size >= minimum_size:
@@ -525,6 +563,7 @@ def _stack_variable_is_promoted(
     return False
 
 
+@cython.ccall
 def _member_offset_for_variable(
     variable: object,
     *,
@@ -532,6 +571,8 @@ def _member_offset_for_variable(
     storage_object_artifact: StorageObjectArtifact,
 ) -> int | None:
     """Return the recorded member offset for a stack variable, or ``None``."""
+    base_key: object
+    record: object
     base_key = access_trait_variable_key(variable)
     if base_key is None:
         return None
@@ -541,16 +582,19 @@ def _member_offset_for_variable(
     return record.primary_member_offset()
 
 
+@cython.ccall
 def _resolve_alias_expr(
     expr: object,
     *,
     unwrap_c_casts: Callable[[object], object],
-    far_pointer_aliases: dict[int, object],
-    copy_aliases: dict[int, object],
+    far_pointer_aliases: object,
+    copy_aliases: object,
 ) -> object:
     """Chase copy/far-pointer aliases to the effective source expression."""
+    alias_expr: object
+    variable: object
     expr = unwrap_c_casts(expr)
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     while isinstance(expr, structured_c.CVariable):
         # Dynamic codegen boundary: CVariable payloads are optional in angr structured C.
         variable = getattr(expr, "variable", None)
@@ -570,15 +614,18 @@ def _resolve_alias_expr(
     return expr
 
 
+@cython.ccall
 def _transform_far_pointer_add_node(
     node: object,
     *,
     resolve_alias_expr: Callable[[object], object],
-    expr_is_bare_storage_alias: Callable[[object], bool],
-    expr_is_safe_inline_candidate: Callable[[object], bool],
+    expr_is_bare_storage_alias: Callable[[object], cython.bint],
+    expr_is_safe_inline_candidate: Callable[[object], cython.bint],
     make_mk_fp: Callable[[object, object], object],
-) -> tuple[bool, object]:
+) -> tuple[cython.bint, object]:
     """Rewrite a binary ``Add`` node into ``MK_FP`` form when aliases prove a far pointer."""
+    lhs: object
+    rhs: object
     if not isinstance(node, structured_c.CBinaryOp) or node.op != "Add":
         return False, node
     for lhs, rhs in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
@@ -603,6 +650,7 @@ def _transform_far_pointer_add_node(
     return False, node
 
 
+@cython.ccall
 def _make_mk_fp(
     codegen: _CodegenLike, segment_expr: object, offset_expr: object
 ) -> structured_c.CFunctionCall:

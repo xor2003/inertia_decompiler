@@ -42,6 +42,7 @@ from inertia.lowering.gp_word_runtime import (  # noqa: E402
     GPRegisterRuntimeABI8616,
 )
 from tools.compiler_toolchain.compiler_profile import (  # noqa: E402
+    DOS_MTIME_QUANTUM_SECONDS,
     MSC6_AX_PROFILE_ID,
     TAIL_COMPILER_CONTEXT_ENV,
     CompileBackend,
@@ -1647,7 +1648,7 @@ def _read_dosbox_run_artifact(
         payload = path.read_bytes()
     except OSError as error:
         return None, f"cannot read DOSBox runtime artifact {name}: {error}"
-    if stat.st_mtime < wall_start - 1.0:
+    if stat.st_mtime <= wall_start - DOS_MTIME_QUANTUM_SECONDS:
         return None, f"stale DOSBox runtime artifact {name}"
     if not allow_empty and not payload:
         return None, f"empty DOSBox runtime artifact {name}"
@@ -1737,6 +1738,9 @@ def _prepare_dosbox_runtime(
                 stale.unlink()
             except OSError as error:
                 return f"cannot clear owned DOSBox artifact {name}: {error}"
+    survivors = [name for name in names if _dos_case_file(out_dir, name) is not None]
+    if survivors:
+        return "unremovable stale DOSBox runtime artifacts: " + ", ".join(survivors)
     try:
         (out_dir / batch_name).write_text(
             _dosbox_run_batch(guest_name, stdout_name, status_name, exit_name, done_name),

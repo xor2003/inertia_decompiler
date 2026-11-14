@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Exact block-local register-snapshot view evidence for word transport.
 
 Layer: Widening.
@@ -15,6 +16,8 @@ Do not join values from rendered text, cosmetic shape, postprocess, or CLI/repor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -27,9 +30,11 @@ from .entry_word_transport_contracts import (
 from .entry_word_transport_contracts import (
     EntryWordTransportRefusalKind8616 as Refusal,
 )
+import dataclasses
+import operator
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SnapshotCapture8616:
     """The exact register view one block-local TMP producer captured.
 
@@ -38,12 +43,13 @@ class SnapshotCapture8616:
     whether that view carried the proven entry word when captured.
     """
 
-    register: str
-    register_version: int
-    word: bool
+    register: object
+    register_version: cython.longlong
+    word: cython.bint
 
 
-def snapshot_capture_view_8616(source: IRValue) -> tuple[str, int] | None:
+@cython.ccall
+def snapshot_capture_view_8616(source: IRValue) -> object:
     """The producer view of a plain current-register MOV source, if exact.
 
     Only an undecorated current ``REG`` operand earns a capture: a nested
@@ -65,10 +71,11 @@ def snapshot_capture_view_8616(source: IRValue) -> tuple[str, int] | None:
     return source.name.lower(), source.version
 
 
+@cython.ccall
 def captured_word_8616(
-    capture: SnapshotCapture8616 | None,
+    capture: object,
     value: IRValue,
-) -> tuple[bool, EntryWordTransportRefusal8616 | None]:
+) -> tuple[cython.bint, EntryWordTransportRefusal8616 | None]:
     """Resolve a captured-register read through retained producer evidence.
 
     Every incoherent view refuses with a typed reason rather than falling
@@ -80,12 +87,12 @@ def captured_word_8616(
             Refusal.UNSUPPORTED_OPERAND,
             "snapshot producer absent or not a register capture",
         )
-    if value.name is None or capture.register != value.name.lower():
+    if value.name is None or operator.ne(capture.register, value.name.lower()):
         return False, EntryWordTransportRefusal8616(
             Refusal.UNSUPPORTED_OPERAND,
             "captured register differs from the snapshot view",
         )
-    if capture.register_version != value.version:
+    if operator.ne(capture.register_version, value.version):
         return False, EntryWordTransportRefusal8616(
             Refusal.STALE_TMP_VERSION,
             "snapshot view version differs from retained producer",

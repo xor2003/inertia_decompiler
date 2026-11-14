@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify stack parameters used as indirect call targets.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import defaultdict
 from collections.abc import Sequence
@@ -17,6 +20,8 @@ from dataclasses import dataclass
 from enum import Enum
 
 from inertia.semantics.callsite_summary import CallsiteSummary8616
+import dataclasses
+import operator
 
 
 class FunctionPointerParameterFailure8616(Enum):
@@ -28,7 +33,7 @@ class FunctionPointerParameterFailure8616(Enum):
     VARIABLE_MANAGER_REJECTED = "variable_manager_rejected"
 
 
-@dataclass(frozen=True, order=True, slots=True)
+@dataclasses.dataclass(frozen=True, order=True, )
 class FunctionPointerParameterFact8616:
     """One consistent indirect-call contract for an exact BP parameter.
 
@@ -36,48 +41,49 @@ class FunctionPointerParameterFact8616:
     function pointer and 4 for a far (segment:offset) function pointer.
     """
 
-    stack_offset: int
-    argument_widths: tuple[int, ...]
-    return_width: int
-    callsite_addresses: tuple[int, ...]
-    pointer_width: int = 2
+    stack_offset: cython.longlong
+    argument_widths: object
+    return_width: cython.longlong
+    callsite_addresses: object
+    pointer_width: cython.longlong = 2
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionPointerCallTargetStats8616:
     """Closed census of call-target offset projections consumed by Lowering."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionPointerParameterEvidence8616:
     """Closed evidence census for function-pointer parameter recovery."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
     facts: tuple[FunctionPointerParameterFact8616, ...] = ()
     failures: tuple[FunctionPointerParameterFailure8616, ...] = ()
     call_target_stats: FunctionPointerCallTargetStats8616 = FunctionPointerCallTargetStats8616()
 
 
-def _supported_widths_8616(summary: CallsiteSummary8616) -> tuple[int, ...] | None:
+def _supported_widths_8616(summary: CallsiteSummary8616) -> object:
     """Return one exact supported argument-width vector, or refuse it."""
     widths = summary.logical_arg_widths or summary.arg_widths
-    if summary.arg_count is not None and summary.arg_count != len(widths):
+    if summary.arg_count is not None and operator.ne(summary.arg_count, len(widths)):
         return None
-    if any(width not in {1, 2, 4} for width in widths):
+    if any(width not in {1, 2, 4} for width in iter(widths)):
         return None
     return widths
 
 
+@cython.ccall
 def _used_return_width_8616(summary: CallsiteSummary8616) -> int | None:
     """Return the binary-proven used return width for one indirect call."""
     if summary.return_used is not True:
@@ -89,7 +95,8 @@ def _used_return_width_8616(summary: CallsiteSummary8616) -> int | None:
     return None
 
 
-def _bp_target_source_8616(target_source: tuple[object, ...]) -> tuple[int, int] | None:
+@cython.ccall
+def _bp_target_source_8616(target_source: object) -> object:
     """Return the (BP displacement, pointer width) of one proven call target.
 
     A BP-memory indirect call target must carry an integer displacement at or
@@ -109,7 +116,15 @@ def collect_function_pointer_parameter_evidence_8616(
     summaries: Sequence[CallsiteSummary8616],
 ) -> FunctionPointerParameterEvidence8616:
     """Join consistent BP-indirect call summaries into parameter type facts."""
-    grouped: dict[int, list[tuple[CallsiteSummary8616, tuple[int, ...], int, int]]] = defaultdict(list)
+    argument_widths: object
+    pointer_width: object
+    proven_target: object
+    return_width: object
+    widths: object
+    candidates: object
+    stack_offset: object
+    summary: object
+    grouped: object = defaultdict(list)
     raw_count = 0
     normalized_count = 0
     failures: list[FunctionPointerParameterFailure8616] = []
@@ -134,14 +149,14 @@ def collect_function_pointer_parameter_evidence_8616(
         grouped[stack_offset].append((summary, widths, return_width, pointer_width))
 
     facts: list[FunctionPointerParameterFact8616] = []
-    for stack_offset, candidates in sorted(grouped.items()):
+    for stack_offset, candidates in sorted(tuple(grouped.items())):
         signatures = {
             (widths, return_width, pointer_width)
-            for _summary, widths, return_width, pointer_width in candidates
+            for _summary, widths, return_width, pointer_width in iter(candidates)
         }
         if len(signatures) != 1:
             failures.extend(
-                FunctionPointerParameterFailure8616.CONFLICTING_CALL_SIGNATURES for _candidate in candidates
+                FunctionPointerParameterFailure8616.CONFLICTING_CALL_SIGNATURES for _candidate in iter(candidates)
             )
             continue
         argument_widths, return_width, pointer_width = next(iter(signatures))
@@ -150,7 +165,7 @@ def collect_function_pointer_parameter_evidence_8616(
                 stack_offset=stack_offset,
                 argument_widths=argument_widths,
                 return_width=return_width,
-                callsite_addresses=tuple(sorted(summary.callsite_addr for summary, _widths, _ret, _ptr in candidates)),
+                callsite_addresses=tuple(sorted(summary.callsite_addr for summary, _widths, _ret, _ptr in iter(candidates))),
                 pointer_width=pointer_width,
             )
         )

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Match structured call-argument sources to exact IR/SSA definitions.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from inertia.ir.core import AddressStatus, IRAddress, IRInstr, IRValue, MemSpace, SegmentOrigin
 from inertia.semantics.callsite_summary import CallsitePushSourceKind8616
@@ -23,10 +26,12 @@ from .interprocedural_storage_reaching_contracts import (
     PhysicalCallArgumentPiece8616,
     SSAInstructionSite8616,
 )
+import operator
 
 __all__ = ["resolve_argument_source_definitions_8616"]
 
 
+@cython.ccall
 def _storage_for_address_8616(address: IRAddress) -> StorageIdentity8616:
     """Project one stable segmented address to its architectural category."""
     kind = StorageIdentityKind8616.STACK if address.space is MemSpace.SS else StorageIdentityKind8616.MEMORY
@@ -34,19 +39,20 @@ def _storage_for_address_8616(address: IRAddress) -> StorageIdentity8616:
 
 
 def _load_definitions_8616(
-    sites: tuple[SSAInstructionSite8616, ...],
+    sites: object,
     fact: PhysicalCallArgumentPiece8616,
     *,
     space: MemSpace | None,
-    base: tuple[str, ...],
-    offset: int,
+    base: object,
+    offset: cython.longlong,
 ) -> tuple[tuple[StorageReachingDefinition8616, ...] | None, CallArgumentDefinitionFailure8616 | None]:
     """Prove byte-accurate LOAD coverage for one pushed memory value."""
+    site: object
     end = offset + fact.width
     candidates: list[tuple[SSAInstructionSite8616, IRAddress, IRValue]] = []
     for site in sites:
         instr = site.instr
-        if instr.op != "LOAD" or instr.addr != fact.push_addr or instr.dst is None or not instr.args:
+        if instr.op != "LOAD" or operator.ne(instr.addr, fact.push_addr) or instr.dst is None or not instr.args:
             continue
         address = instr.args[0]
         if not isinstance(address, IRAddress):
@@ -57,14 +63,14 @@ def _load_definitions_8616(
     selected: list[tuple[SSAInstructionSite8616, IRAddress, IRValue]] = []
     cursor = offset
     while cursor < end:
-        choices = tuple(candidate for candidate in candidates if candidate[1].offset == cursor)
+        choices = tuple(candidate for candidate in iter(candidates) if operator.eq(candidate[1].offset, cursor))
         if not choices:
             return None, CallArgumentDefinitionFailure8616.SOURCE_DEFINITION_NOT_FOUND
         if len(choices) != 1:
             return None, CallArgumentDefinitionFailure8616.SOURCE_DEFINITION_CONFLICT
         selected.append(choices[0])
         cursor += choices[0][1].size
-    if len(selected) != len(candidates):
+    if operator.ne(len(selected), len(candidates)):
         return None, CallArgumentDefinitionFailure8616.SOURCE_DEFINITION_CONFLICT
     definitions = tuple(
         StorageReachingDefinition8616(
@@ -74,22 +80,24 @@ def _load_definitions_8616(
             instr_addr=fact.push_addr,
             source_storage=_storage_for_address_8616(address),
         )
-        for site, address, value in selected
+        for site, address, value in iter(selected)
     )
-    if not definitions or any(not definition.is_complete for definition in definitions):
+    if not definitions or any(not definition.is_complete for definition in iter(definitions)):
         return None, CallArgumentDefinitionFailure8616.SOURCE_DEFINITION_NOT_FOUND
     return definitions, None
 
 
+@cython.ccall
 def _store_data_sites_8616(
-    sites: tuple[SSAInstructionSite8616, ...],
+    sites: object,
     fact: PhysicalCallArgumentPiece8616,
 ) -> tuple[tuple[SSAInstructionSite8616, IRValue], ...]:
     """Return outgoing SS:SP stores emitted by one physical push."""
+    site: object
     stores: list[tuple[SSAInstructionSite8616, IRValue]] = []
     for site in sites:
         instr = site.instr
-        if instr.op != "STORE" or instr.addr != fact.push_addr or len(instr.args) != 2:
+        if instr.op != "STORE" or operator.ne(instr.addr, fact.push_addr) or len(instr.args) != 2:
             continue
         address, value = instr.args
         if (
@@ -101,7 +109,8 @@ def _store_data_sites_8616(
     return tuple(stores)
 
 
-def _is_ss_sp_address_8616(address: object) -> bool:
+@cython.ccall
+def _is_ss_sp_address_8616(address: object) -> cython.bint:
     """Check the STORE target is the SS:SP push slot."""
     return (
         isinstance(address, IRAddress)
@@ -110,18 +119,20 @@ def _is_ss_sp_address_8616(address: object) -> bool:
     )
 
 
-def _store_value_matches_8616(value: object, width: int) -> bool:
+@cython.ccall
+def _store_value_matches_8616(value: object, width: cython.longlong) -> cython.bint:
     """Check the stored IRValue's size agrees with the pushed piece width."""
-    return isinstance(value, IRValue) and (value.size <= 0 or value.size == width)
+    return isinstance(value, IRValue) and (value.size <= 0 or operator.eq(value.size, width))
 
 
+@cython.ccall
 def _load_address_covers_8616(
     address: object,
-    base: tuple[str, ...],
+    base: object,
     space: MemSpace | None,
-    offset: int,
-    end: int,
-) -> bool:
+    offset: cython.longlong,
+    end: cython.longlong,
+) -> cython.bint:
     """Check a LOAD address lands fully inside the pushed memory window."""
     return (
         isinstance(address, IRAddress)
@@ -130,14 +141,16 @@ def _load_address_covers_8616(
     )
 
 
+@cython.ccall
 def _address_origin_matches_8616(
-    address: IRAddress, base: tuple[str, ...], space: MemSpace | None
-) -> bool:
+    address: IRAddress, base: object, space: object
+) -> cython.bint:
     """Check the LOAD address shares the expected base and segment space."""
-    return address.base == base and (space is None or address.space is space)
+    return operator.eq(address.base, base) and (space is None or address.space is space)
 
 
-def _address_range_covers_8616(address: IRAddress, offset: int, end: int) -> bool:
+@cython.ccall
+def _address_range_covers_8616(address: IRAddress, offset: cython.longlong, end: cython.longlong) -> cython.bint:
     """Check the LOAD range is bounded by the pushed window."""
     return bool(
         address.offset >= offset
@@ -146,18 +159,19 @@ def _address_range_covers_8616(address: IRAddress, offset: int, end: int) -> boo
     )
 
 
-def _has_prior_binding_8616(site: SSAInstructionSite8616, value: IRValue) -> bool:
+def _has_prior_binding_8616(site: SSAInstructionSite8616, value: IRValue) -> cython.bint:
     """Return whether this block defines the exact value before its push."""
     return any(
         binding.instr_index < site.instr_index
         and binding.target.space is value.space
-        and binding.target.name == value.name
-        and binding.target.version == value.version
-        for binding in site.block.bindings
+        and operator.eq(binding.target.name, value.name)
+        and operator.eq(binding.target.version, value.version)
+        for binding in iter(site.block.bindings)
     )
 
 
-def _same_ssa_value_8616(lhs: IRValue, rhs: IRValue) -> bool:
+@cython.ccall
+def _same_ssa_value_8616(lhs: IRValue, rhs: IRValue) -> cython.bint:
     """Return whether two values name the same constant or SSA definition."""
     lhs_size = lhs.size
     rhs_size = rhs.size
@@ -172,7 +186,7 @@ def _same_ssa_value_8616(lhs: IRValue, rhs: IRValue) -> bool:
             and lhs_const == rhs_const
             and lhs_size == rhs_size
         )
-    return lhs.space is rhs.space and lhs.name == rhs.name and lhs.version == rhs.version and lhs_size == rhs_size
+    return lhs.space is rhs.space and operator.eq(lhs.name, rhs.name) and operator.eq(lhs.version, rhs.version) and lhs_size == rhs_size
 
 
 def _prior_definition_8616(
@@ -182,21 +196,23 @@ def _prior_definition_8616(
     """Return the unique local instruction defining one exact SSA value."""
     candidates = tuple(
         instr
-        for instr in site.block.instrs[: site.instr_index]
+        for instr in iter(site.block.instrs[: site.instr_index])
         if instr.dst is not None and _same_ssa_value_8616(instr.dst, value)
     )
     return candidates[0] if len(candidates) == 1 else None
 
 
+@cython.ccall
 def _has_bp_address_origin_8616(
     site: SSAInstructionSite8616,
     value: IRValue,
     *,
-    offset: int,
-    width: int,
-    seen: frozenset[tuple[MemSpace, str | None, int | None]] = frozenset(),
-) -> bool:
+    offset: cython.longlong,
+    width: cython.longlong,
+    seen: object = frozenset(),
+) -> cython.bint:
     """Trace one local SSA value to the exact structured ``BP+offset`` origin."""
+    definition: object
     key = (value.space, value.name, value.version)
     if key in seen:
         return False
@@ -212,7 +228,7 @@ def _has_bp_address_origin_8616(
         return (
             isinstance(source_offset, int)
             and isinstance(source_size, int)
-            and source_offset == (offset & 0xFFFF)
+            and operator.eq(source_offset, (offset & 0xFFFF))
             and source_size == width
         )
     if source.const is not None or not isinstance(source.version, int):
@@ -227,22 +243,22 @@ def _has_bp_address_origin_8616(
 
 
 def _store_definition_8616(
-    sites: tuple[SSAInstructionSite8616, ...],
+    sites: object,
     fact: PhysicalCallArgumentPiece8616,
     *,
     expected_const: int | None = None,
     source_storage: StorageIdentity8616 | None = None,
-    source_register: str | None = None,
+    source_register: object = None,
 ) -> tuple[tuple[StorageReachingDefinition8616, ...] | None, CallArgumentDefinitionFailure8616 | None]:
     """Prove one immediate, address, or locally defined register push."""
     candidates = _store_data_sites_8616(sites, fact)
     if expected_const is not None:
-        candidates = tuple(candidate for candidate in candidates if candidate[1].const == expected_const)
+        candidates = tuple(candidate for candidate in iter(candidates) if operator.eq(candidate[1].const, expected_const))
     if source_register is not None:
         candidates = tuple(
             candidate
-            for candidate in candidates
-            if candidate[1].space is MemSpace.REG and candidate[1].name == source_register
+            for candidate in iter(candidates)
+            if candidate[1].space is MemSpace.REG and operator.eq(candidate[1].name, source_register)
         )
     if not candidates:
         return None, CallArgumentDefinitionFailure8616.SOURCE_DEFINITION_NOT_FOUND
@@ -263,11 +279,12 @@ def _store_definition_8616(
     return (definition,), None
 
 
+@cython.ccall
 def _bp_address_definition_8616(
-    sites: tuple[SSAInstructionSite8616, ...],
+    sites: object,
     fact: PhysicalCallArgumentPiece8616,
     *,
-    offset: int,
+    offset: cython.longlong,
 ) -> tuple[
     tuple[StorageReachingDefinition8616, ...] | None,
     CallArgumentDefinitionFailure8616 | None,
@@ -310,9 +327,10 @@ def _bp_address_definition_8616(
     return (definition,), None
 
 
+@cython.ccall
 def _source_kind_8616(
-    source: tuple[object, ...],
-) -> CallsitePushSourceKind8616 | str | None:
+    source: object,
+) -> object:
     """Decode the structured source category, including legacy register facts."""
     if not source:
         return None
@@ -329,10 +347,11 @@ def _source_kind_8616(
         return None
 
 
+@cython.ccall
 def resolve_argument_source_definitions_8616(
-    sites: tuple[SSAInstructionSite8616, ...],
+    sites: object,
     fact: PhysicalCallArgumentPiece8616,
-) -> tuple[tuple[StorageReachingDefinition8616, ...] | None, CallArgumentDefinitionFailure8616 | None]:
+) -> object:
     """Resolve one structured physical source to exact IR/SSA definitions."""
     source = fact.source
     kind = _source_kind_8616(source)
@@ -351,26 +370,28 @@ def resolve_argument_source_definitions_8616(
     return None, CallArgumentDefinitionFailure8616.UNSUPPORTED_SOURCE_KIND
 
 
+@cython.ccall
 def _resolve_immediate_source_8616(
-    sites: tuple[SSAInstructionSite8616, ...],
+    sites: object,
     fact: PhysicalCallArgumentPiece8616,
-    source: tuple[object, ...],
-) -> tuple[tuple[StorageReachingDefinition8616, ...] | None, CallArgumentDefinitionFailure8616 | None]:
+    source: object,
+) -> object:
     """Resolve a pushed immediate to its exact STORE definition."""
     if len(source) != 2 or not isinstance(source[1], int):
         return None, CallArgumentDefinitionFailure8616.SOURCE_SHAPE_CONFLICT
     return _store_definition_8616(sites, fact, expected_const=source[1])
 
 
+@cython.ccall
 def _resolve_bp_value_source_8616(
-    sites: tuple[SSAInstructionSite8616, ...],
+    sites: object,
     fact: PhysicalCallArgumentPiece8616,
-    source: tuple[object, ...],
-) -> tuple[tuple[StorageReachingDefinition8616, ...] | None, CallArgumentDefinitionFailure8616 | None]:
+    source: object,
+) -> object:
     """Resolve a pushed SS:BP load to its exact LOAD definitions."""
     if len(source) not in {2, 3} or not isinstance(source[1], int):
         return None, CallArgumentDefinitionFailure8616.SOURCE_SHAPE_CONFLICT
-    if len(source) == 3 and source[2] != fact.width:
+    if len(source) == 3 and operator.ne(source[2], fact.width):
         return None, CallArgumentDefinitionFailure8616.SOURCE_WIDTH_CONFLICT
     return _load_definitions_8616(
         sites,
@@ -381,22 +402,24 @@ def _resolve_bp_value_source_8616(
     )
 
 
+@cython.ccall
 def _resolve_global_value_source_8616(
-    sites: tuple[SSAInstructionSite8616, ...],
+    sites: object,
     fact: PhysicalCallArgumentPiece8616,
-    source: tuple[object, ...],
-) -> tuple[tuple[StorageReachingDefinition8616, ...] | None, CallArgumentDefinitionFailure8616 | None]:
+    source: object,
+) -> object:
     """Resolve a pushed global load to its exact LOAD definitions."""
-    if len(source) != 3 or not isinstance(source[1], int) or source[2] != fact.width:
+    if len(source) != 3 or not isinstance(source[1], int) or operator.ne(source[2], fact.width):
         return None, CallArgumentDefinitionFailure8616.SOURCE_WIDTH_CONFLICT
     return _load_definitions_8616(sites, fact, space=None, base=(), offset=source[1])
 
 
+@cython.ccall
 def _resolve_bp_address_source_8616(
-    sites: tuple[SSAInstructionSite8616, ...],
+    sites: object,
     fact: PhysicalCallArgumentPiece8616,
-    source: tuple[object, ...],
-) -> tuple[tuple[StorageReachingDefinition8616, ...] | None, CallArgumentDefinitionFailure8616 | None]:
+    source: object,
+) -> object:
     """Resolve a pushed BP-address value to its exact definition."""
     if len(source) != 2 or not isinstance(source[1], int):
         return None, CallArgumentDefinitionFailure8616.SOURCE_SHAPE_CONFLICT
@@ -407,11 +430,12 @@ def _resolve_bp_address_source_8616(
     )
 
 
+@cython.ccall
 def _resolve_register_source_8616(
-    sites: tuple[SSAInstructionSite8616, ...],
+    sites: object,
     fact: PhysicalCallArgumentPiece8616,
-    source: tuple[object, ...],
-) -> tuple[tuple[StorageReachingDefinition8616, ...] | None, CallArgumentDefinitionFailure8616 | None]:
+    source: object,
+) -> object:
     """Resolve a pushed register value to its exact STORE definition."""
     if len(source) != 2 or not isinstance(source[1], str):
         return None, CallArgumentDefinitionFailure8616.SOURCE_SHAPE_CONFLICT

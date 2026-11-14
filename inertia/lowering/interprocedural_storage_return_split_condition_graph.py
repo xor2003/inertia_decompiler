@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove exact decision graphs that consume split DX:AX returns.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -31,6 +34,9 @@ from .interprocedural_storage_return_type_contracts import (
     ReturnStorageTypeFailure8616,
     SplitReturnRelation8616,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "SplitReturnConditionCandidate8616",
@@ -39,7 +45,7 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _OrderingPattern8616:
     """One normalized wide ordering relation and its branch topology."""
 
@@ -47,21 +53,21 @@ class _OrderingPattern8616:
     second_high_op: ConditionOp
     low_op: ConditionOp
     relation: SplitReturnRelation8616
-    strict: bool
+    strict: cython.bint
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SplitReturnConditionCandidate8616:
     """One closed split-return decision-graph interpretation."""
 
     relation: SplitReturnRelation8616
-    conditions: tuple[ConditionIR, ...]
+    conditions: object
     high_condition: ConditionIR
     low_condition: ConditionIR
     signedness: StorageTrialSignedness8616
-    true_sink_addr: int
-    false_sink_addr: int
-    transparent_block_addrs: tuple[int, ...]
+    true_sink_addr: cython.longlong
+    false_sink_addr: cython.longlong
+    transparent_block_addrs: object
 
 
 _ORDERING_PATTERNS_8616 = (
@@ -81,28 +87,28 @@ _SWAPPED_OP_8616: dict[ConditionOp, ConditionOp] = {
 }
 
 
+@cython.ccall
 def split_return_register_matches_8616(
     value: object,
     storage: StorageIdentity8616,
-) -> bool:
+) -> cython.bint:
     """Match one typed operand to one exact Alias-owned output view."""
     return bool(
         isinstance(value, IRValue)
         and value.space is MemSpace.REG
-        and value.size == storage.width
-        and register_domain_for_name(value.name)
-        == register_domain_for_name(storage.register)
-        and register_view_for_name(value.name)
-        == register_view_for_name(storage.register)
+        and operator.eq(value.size, storage.width)
+        and operator.eq(register_domain_for_name(value.name), register_domain_for_name(storage.register))
+        and operator.eq(register_view_for_name(value.name), register_view_for_name(storage.register))
     )
 
 
+@cython.ccall
 def _normalized_condition_8616(
     condition: ConditionIR,
     storage: StorageIdentity8616,
-) -> tuple[ConditionOp, object] | None:
+) -> object:
     """Place the selected output piece on the left of one comparison."""
-    if not condition.is_comparison or condition.width_bits != storage.width * 8:
+    if not condition.is_comparison or operator.ne(condition.width_bits, storage.width * 8):
         return None
     lhs_matches = split_return_register_matches_8616(condition.lhs, storage)
     rhs_matches = split_return_register_matches_8616(condition.rhs, storage)
@@ -113,7 +119,8 @@ def _normalized_condition_8616(
     return _SWAPPED_OP_8616[condition.op], condition.lhs
 
 
-def _other_pieces_compatible_8616(high: object, low: object) -> bool:
+@cython.ccall
+def _other_pieces_compatible_8616(high: object, low: object) -> cython.bint:
     """Prove comparison operands are adjacent pieces of one logical value."""
     if not isinstance(high, IRValue) or not isinstance(low, IRValue):
         return False
@@ -129,37 +136,39 @@ def _other_pieces_compatible_8616(high: object, low: object) -> bool:
     if high.space not in {MemSpace.SS, MemSpace.DS, MemSpace.ES}:
         return False
     return bool(
-        high.name == low.name
-        and high.offset == low.offset + low.size
-        and high.index == low.index
-        and high.index_shift == low.index_shift
-        and high.expr == low.expr
+        operator.eq(high.name, low.name)
+        and operator.eq(high.offset, low.offset + low.size)
+        and operator.eq(high.index, low.index)
+        and operator.eq(high.index_shift, low.index_shift)
+        and operator.eq(high.expr, low.expr)
     )
 
 
-def _successors_8616(artifact: SSAFunctionArtifact, source_addr: int) -> tuple[int, ...]:
+def _successors_8616(artifact: SSAFunctionArtifact, source_addr: cython.longlong) -> tuple[cython.longlong, ...]:
     """Return exact sorted successors retained by function SSA."""
     return tuple(
         sorted(
             target
-            for target, predecessors in artifact.predecessor_map.items()
+            for target, predecessors in builtins.iter(artifact.predecessor_map.items())
             if source_addr in predecessors
         )
     )
 
 
+@cython.ccall
 def _transparent_branch_path_8616(
     artifact: SSAFunctionArtifact,
-    source_addr: int,
-    branch_target: int,
-    destination_addr: int,
-) -> tuple[int, ...] | None:
+    source_addr: cython.longlong,
+    branch_target: cython.longlong,
+    destination_addr: cython.longlong,
+) -> object:
     """Prove a branch traverses only empty or exact transfer-only blocks."""
+    block: object
     if branch_target not in _successors_8616(artifact, source_addr):
         return None
-    blocks = {block.addr: block for block in artifact.blocks}
+    blocks = {block.addr: block for block in iter(artifact.blocks)}
     current = branch_target
-    visited: list[int] = []
+    visited: list[cython.longlong] = []
     while current != destination_addr:
         if current in visited or len(visited) >= len(blocks):
             return None
@@ -176,7 +185,7 @@ def _transparent_branch_path_8616(
     return tuple(visited)
 
 
-def _temporary_control_computation_8616(instruction: IRInstr, jump_addr: int | None) -> bool:
+def _temporary_control_computation_8616(instruction: IRInstr, jump_addr: int | None) -> cython.bint:
     """Admit only pure temporary effects from the terminal instruction.
 
     Faithful near jumps evaluate segmented coordinates before the explicit
@@ -186,22 +195,22 @@ def _temporary_control_computation_8616(instruction: IRInstr, jump_addr: int | N
     """
     effect = scalar_instruction_effect_8616(instruction)
     return bool(
-        instruction.addr == jump_addr
+        operator.eq(instruction.addr, jump_addr)
         and instruction.call_stack_effect is None
         and instruction.dst is not None
         and instruction.dst.space is MemSpace.TMP
         and effect.kind is ScalarInstructionEffectKind8616.CLOSED_DESTINATION
         and effect.clobber is ScalarInstructionClobber8616.NONE
-        and all(isinstance(arg, IRValue) and arg.space in {MemSpace.TMP, MemSpace.REG, MemSpace.CONST} for arg in instruction.args)
+        and all(isinstance(arg, IRValue) and arg.space in {MemSpace.TMP, MemSpace.REG, MemSpace.CONST} for arg in iter(instruction.args))
     )
 
 
-def _exact_jump_only_8616(instructions: tuple[IRInstr, ...], successor: int) -> bool:
+def _exact_jump_only_8616(instructions: object, successor: cython.longlong) -> cython.bint:
     """Accept a literal JMP with only closed temporary coordinate effects."""
     if not instructions:
         return False
     instruction = instructions[-1]
-    if not all(_temporary_control_computation_8616(item, instruction.addr) for item in instructions[:-1]):
+    if not all(_temporary_control_computation_8616(item, instruction.addr) for item in iter(instructions[:-1])):
         return False
     if (
         instruction.op != "JMP"
@@ -216,11 +225,12 @@ def _exact_jump_only_8616(instructions: tuple[IRInstr, ...], successor: int) -> 
         and target.space is MemSpace.CONST
         and isinstance(target.const, int)
         and not isinstance(target.const, bool)
-        and target.const == successor
+        and operator.eq(target.const, successor)
     )
 
 
-def _condition_edges_8616(condition: ConditionIR) -> tuple[int, int, int] | None:
+@cython.ccall
+def _condition_edges_8616(condition: ConditionIR) -> object:
     """Project a known block and both branch targets without optional fields."""
     block, taken, fallthrough = condition.block_addr, condition.taken_target, condition.fallthrough_target
     if not isinstance(block, int) or not isinstance(taken, int) or not isinstance(fallthrough, int):
@@ -238,12 +248,18 @@ def _ordering_candidate_8616(
     ax_storage: StorageIdentity8616,
 ) -> tuple[SplitReturnConditionCandidate8616 | None, ReturnStorageTypeFailure8616 | None]:
     """Validate one strict or non-strict three-condition ordering graph."""
+    first_edges: object
+    first_norm: object
+    low_edges: object
+    low_norm: object
+    second_edges: object
+    second_norm: object
     first_norm = _normalized_condition_8616(first, dx_storage)
     second_norm = _normalized_condition_8616(second, dx_storage)
     low_norm = _normalized_condition_8616(low, ax_storage)
     if first_norm is None or second_norm is None or low_norm is None:
         return None, None
-    if first.producer_insn != second.producer_insn or first_norm[1] != second_norm[1]:
+    if operator.ne(first.producer_insn, second.producer_insn) or operator.ne(first_norm[1], second_norm[1]):
         return None, ReturnStorageTypeFailure8616.SPLIT_OPERAND_CONFLICT
     if not _other_pieces_compatible_8616(first_norm[1], low_norm[1]):
         return None, ReturnStorageTypeFailure8616.SPLIT_OPERAND_CONFLICT
@@ -273,7 +289,7 @@ def _ordering_candidate_8616(
         _transparent_branch_path_8616(artifact, low_block, true_sink, true_sink),
         _transparent_branch_path_8616(artifact, low_block, false_sink, false_sink),
     )
-    if any(path is None for path in (*paths, *low_paths)):
+    if any(path is None for path in iter(tuple(paths) + tuple(low_paths))):
         return None, ReturnStorageTypeFailure8616.SPLIT_CFG_INCOMPLETE
     signed_relations = {
         SplitReturnRelation8616.SLT, SplitReturnRelation8616.SLE,
@@ -284,7 +300,7 @@ def _ordering_candidate_8616(
         if pattern.relation in signed_relations
         else StorageTrialSignedness8616.UNSIGNED
     )
-    transparent = tuple(sorted({block for path in paths for block in path or ()}))
+    transparent = tuple(sorted({block for path in iter(paths) for block in iter(path or ())}))
     return SplitReturnConditionCandidate8616(
         pattern.relation, (first, second, low), first, low, signedness,
         true_sink, false_sink, transparent,
@@ -300,6 +316,10 @@ def _equality_candidate_8616(
     ax_storage: StorageIdentity8616,
 ) -> tuple[SplitReturnConditionCandidate8616 | None, ReturnStorageTypeFailure8616 | None]:
     """Validate one sign-insensitive two-condition equality decision graph."""
+    first_edges: object
+    first_norm: object
+    low_edges: object
+    low_norm: object
     first_norm = _normalized_condition_8616(first, dx_storage)
     low_norm = _normalized_condition_8616(low, ax_storage)
     if first_norm is None or low_norm is None:
@@ -323,9 +343,9 @@ def _equality_candidate_8616(
         _transparent_branch_path_8616(artifact, low_block, true_sink, true_sink),
         _transparent_branch_path_8616(artifact, low_block, false_sink, false_sink),
     )
-    if any(path is None for path in paths):
+    if any(path is None for path in iter(paths)):
         return None, ReturnStorageTypeFailure8616.SPLIT_CFG_INCOMPLETE
-    transparent = tuple(sorted({block for path in paths for block in path or ()}))
+    transparent = tuple(sorted({block for path in iter(paths) for block in iter(path or ())}))
     return SplitReturnConditionCandidate8616(
         relation, (first, low), first, low,
         StorageTrialSignedness8616.SIGN_INSENSITIVE,
@@ -333,17 +353,18 @@ def _equality_candidate_8616(
     ), None
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _SplitCandidateCensus8616:
     """Collected split-condition candidates and first retained refusal."""
 
-    structural_count: int = 0
-    candidates: list[SplitReturnConditionCandidate8616] = field(default_factory=list)
+    structural_count: cython.longlong = 0
+    candidates: object = field(default_factory=list)
     retained_failure: ReturnStorageTypeFailure8616 | None = None
 
+    @cython.ccall
     def record(
         self,
-        candidate: SplitReturnConditionCandidate8616 | None,
+        candidate: object,
         failure: ReturnStorageTypeFailure8616 | None,
     ) -> None:
         """Retain one unique candidate or remember the first refusal."""
@@ -352,27 +373,35 @@ class _SplitCandidateCensus8616:
         self.retained_failure = failure or self.retained_failure
 
 
+@cython.ccall
 def _ordering_candidates_8616(
     artifact: SSAFunctionArtifact,
-    unique: tuple[ConditionIR, ...],
-    witness_addr: int,
+    unique: object,
+    witness_addr: cython.longlong,
     dx_storage: StorageIdentity8616,
     ax_storage: StorageIdentity8616,
     census: _SplitCandidateCensus8616,
 ) -> None:
     """Collect candidates matching each high/low ordering pattern."""
+    first_norm: object
+    low_norm: object
+    second_norm: object
+    first: object
+    low: object
+    pattern: object
+    second: object
     for pattern in _ORDERING_PATTERNS_8616:
         for first in unique:
             first_norm = _normalized_condition_8616(first, dx_storage)
-            if first.producer_insn != witness_addr or first_norm is None or first_norm[0] != pattern.first_high_op:
+            if operator.ne(first.producer_insn, witness_addr) or first_norm is None or operator.ne(first_norm[0], pattern.first_high_op):
                 continue
             for second in unique:
                 second_norm = _normalized_condition_8616(second, dx_storage)
-                if second is first or second_norm is None or second_norm[0] != pattern.second_high_op:
+                if second is first or second_norm is None or operator.ne(second_norm[0], pattern.second_high_op):
                     continue
                 for low in unique:
                     low_norm = _normalized_condition_8616(low, ax_storage)
-                    if low in {first, second} or low_norm is None or low_norm[0] != pattern.low_op:
+                    if low in {first, second} or low_norm is None or operator.ne(low_norm[0], pattern.low_op):
                         continue
                     census.structural_count += 1
                     candidate, failure = _ordering_candidate_8616(
@@ -381,15 +410,22 @@ def _ordering_candidates_8616(
                     census.record(candidate, failure)
 
 
+@cython.ccall
 def _equality_candidates_8616(
     artifact: SSAFunctionArtifact,
-    unique: tuple[ConditionIR, ...],
-    witness_addr: int,
+    unique: object,
+    witness_addr: cython.longlong,
     dx_storage: StorageIdentity8616,
     ax_storage: StorageIdentity8616,
     census: _SplitCandidateCensus8616,
 ) -> None:
     """Collect candidates matching each equality low-word pattern."""
+    first_norm: object
+    low_norm: object
+    first: object
+    low: object
+    low_op: object
+    relation: object
     equality_patterns = (
         (SplitReturnRelation8616.EQ, "eq"),
         (SplitReturnRelation8616.NE, "ne"),
@@ -397,11 +433,11 @@ def _equality_candidates_8616(
     for relation, low_op in equality_patterns:
         for first in unique:
             first_norm = _normalized_condition_8616(first, dx_storage)
-            if first.producer_insn != witness_addr or first_norm is None or first_norm[0] not in {"eq", "ne"}:
+            if operator.ne(first.producer_insn, witness_addr) or first_norm is None or first_norm[0] not in {"eq", "ne"}:
                 continue
             for low in unique:
                 low_norm = _normalized_condition_8616(low, ax_storage)
-                if low is first or low_norm is None or low_norm[0] != low_op:
+                if low is first or low_norm is None or operator.ne(low_norm[0], low_op):
                     continue
                 census.structural_count += 1
                 candidate, failure = _equality_candidate_8616(
@@ -410,9 +446,10 @@ def _equality_candidates_8616(
                 census.record(candidate, failure)
 
 
+@cython.ccall
 def select_split_return_condition_8616(
     artifact: SSAFunctionArtifact,
-    witness_addr: int,
+    witness_addr: cython.longlong,
     conditions: Sequence[ConditionIR],
     dx_storage: StorageIdentity8616,
     ax_storage: StorageIdentity8616,

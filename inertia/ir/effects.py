@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed memory, register, and flag effect records.
 
 Layer: IR.
@@ -8,11 +9,14 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import Enum
 
 from .core import IRAddress, IRValue
+import dataclasses
 
 __all__ = [
     "EffectKind",
@@ -34,13 +38,13 @@ class EffectKind(Enum):
     UNKNOWN = "unknown"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LoadEffect:
     """A typed memory LOAD: read from an address into a value."""
 
     address: IRAddress
     dst: IRValue | None = None
-    width_bits: int = 0
+    width_bits: cython.longlong = 0
     addr: int | None = None
 
     def to_dict(self) -> dict[str, object]:
@@ -54,13 +58,13 @@ class LoadEffect:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StoreEffect:
     """A typed memory STORE: write a value to an address."""
 
     address: IRAddress
     value: IRValue
-    width_bits: int = 0
+    width_bits: cython.longlong = 0
     addr: int | None = None
 
     def to_dict(self) -> dict[str, object]:
@@ -74,13 +78,13 @@ class StoreEffect:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RegisterWriteEffect:
     """A typed register write: assign a value to a named register."""
 
-    register: str
+    register: object
     value: IRValue
-    width_bits: int = 0
+    width_bits: cython.longlong = 0
     addr: int | None = None
 
     def to_dict(self) -> dict[str, object]:
@@ -94,13 +98,13 @@ class RegisterWriteEffect:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FlagWriteEffect:
     """A typed flag write: set a CPU flag to a value."""
 
-    flag: str
+    flag: object
     value: IRValue | None = None
-    width_bits: int = 0
+    width_bits: cython.longlong = 0
     addr: int | None = None
 
     def to_dict(self) -> dict[str, object]:
@@ -122,6 +126,7 @@ _EFFECT_TO_IR_INSTR_OP_8616: dict[str, str] = {
 }
 
 
-def effect_to_ir_instr_op_8616(kind: str) -> str:
+@cython.ccall
+def effect_to_ir_instr_op_8616(kind: object) -> object:
     """Map an effect kind to an IRInstr op string."""
     return _EFFECT_TO_IR_INSTR_OP_8616.get(kind, "UNKNOWN")

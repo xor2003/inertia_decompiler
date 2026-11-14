@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery/reporting.
 
 Responsibility: list golden readability anchors used by bounded diagnostics and tests.
@@ -11,17 +12,19 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import cython
 
 from dataclasses import dataclass
+import dataclasses
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class GoldenReadabilityCase:
     """Describe one bounded readability fixture and the anchors it should keep."""
 
-    source: str
-    proc_name: str
-    anchors: tuple[str, ...]
+    source: object
+    proc_name: object
+    anchors: object
 
 
 GOLDEN_READABILITY_SET: tuple[GoldenReadabilityCase, ...] = (
@@ -77,14 +80,15 @@ GOLDEN_READABILITY_SET: tuple[GoldenReadabilityCase, ...] = (
 )
 
 
-def describe_x86_16_golden_readability_set() -> tuple[GoldenReadabilityCase, ...]:
+@cython.ccall
+def describe_x86_16_golden_readability_set() -> object:
     """Return the deterministic golden readability fixture set."""
     return GOLDEN_READABILITY_SET
 
 
-def summarize_x86_16_golden_readability_set() -> tuple[tuple[str, str, int], ...]:
+def summarize_x86_16_golden_readability_set() -> tuple[tuple[str, str, cython.longlong], ...]:
     """Return compact fixture summaries for reports and milestone checks."""
-    return tuple((case.source, case.proc_name, len(case.anchors)) for case in GOLDEN_READABILITY_SET)
+    return tuple((case.source, case.proc_name, len(case.anchors)) for case in iter(GOLDEN_READABILITY_SET))
 
 
 __all__ = [

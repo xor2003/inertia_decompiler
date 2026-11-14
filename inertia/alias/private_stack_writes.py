@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify exact unread writes inside released, non-escaping stack extents.
 
 Layer: Alias.
@@ -9,6 +10,8 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -23,6 +26,9 @@ from inertia.ir.stack_range_overlap import stack_ranges_may_overlap_8616
 
 from .stack_address_escape import StackAddressEscape8616
 from .stack_memory_ssa_contracts import StackMemoryAliasFactKind8616
+import dataclasses
+import operator
+StackMemorySSAAliasArtifact8616 = typing.TypeVar("StackMemorySSAAliasArtifact8616")
 
 if TYPE_CHECKING:
     from .stack_memory_ssa_contracts import StackMemorySSAAliasArtifact8616
@@ -39,17 +45,17 @@ class PrivateStackWriteVerdict8616(StrEnum):
     READ_OVERLAP = "read_overlap"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PrivateStackWriteDecision8616:
     """A complete group of raw stores from one source instruction."""
 
-    block_addr: int
+    block_addr: cython.longlong
     source_addr: int | None
-    instruction_indices: tuple[int, ...]
+    instruction_indices: object
     verdict: PrivateStackWriteVerdict8616
 
     @property
-    def proven(self) -> bool:
+    def proven(self) -> cython.bint:
         """Return whether every source store passed the complete proof."""
         return self.verdict is PrivateStackWriteVerdict8616.UNREAD_RELEASED
 
@@ -59,13 +65,18 @@ class PrivateStackWriteDecision8616:
                 "instruction_indices": list(self.instruction_indices), "verdict": self.verdict.value}
 
 
-def _entry_range(offset: int, size: int) -> IRAddress:
+@cython.ccall
+def _entry_range(offset: cython.longlong, size: cython.longlong) -> IRAddress:
     """Use one common block-entry coordinate for circular overlap checks."""
     return IRAddress(MemSpace.SS, ("sp",), offset, size, AddressStatus.STABLE, SegmentOrigin.PROVEN)
 
 
-def _read_ranges(block: SSABlock, evidence: StackExtentEvidence8616) -> tuple[IRAddress, ...] | None:
+@cython.ccall
+def _read_ranges(block: SSABlock, evidence: StackExtentEvidence8616) -> object:
     """Refuse unresolved reads; a different unproven memory view is not disjoint."""
+    offset: object
+    index: object
+    instruction: object
     reads = []
     for index, instruction in enumerate(block.instrs):
         if instruction.op != "LOAD":
@@ -81,10 +92,12 @@ def _read_ranges(block: SSABlock, evidence: StackExtentEvidence8616) -> tuple[IR
 
 
 def _store_verdict(
-    block: SSABlock, index: int, evidence: StackExtentEvidence8616,
-    identities: dict[tuple[int, int | None], IRAddress], reads: tuple[IRAddress, ...],
+    block: SSABlock, index: cython.longlong, evidence: StackExtentEvidence8616,
+    identities: object, reads: object,
 ) -> PrivateStackWriteVerdict8616:
     """Require exact Alias identity, allocation coverage and no overlapping read."""
+    alias_address: object
+    offset: object
     instruction = block.instrs[index]
     if not instruction.args or not isinstance(instruction.args[0], IRAddress):
         return PrivateStackWriteVerdict8616.NO_ALIAS
@@ -98,22 +111,24 @@ def _store_verdict(
     contained = any(
         extent.allocation_index < index < extent.release_index
         and extent.lower_offset <= offset and offset + address.size <= extent.upper_offset
-        for extent in evidence.extents
+        for extent in iter(evidence.extents)
     )
     if not contained:
         return PrivateStackWriteVerdict8616.OUTSIDE_LIFETIME
     candidate = _entry_range(offset, address.size)
-    if any(stack_ranges_may_overlap_8616(candidate, read) for read in reads):
+    if any(stack_ranges_may_overlap_8616(candidate, read) for read in iter(reads)):
         return PrivateStackWriteVerdict8616.READ_OVERLAP
     return PrivateStackWriteVerdict8616.UNREAD_RELEASED
 
 
-def _same_versioned_range(alias_address: IRAddress, source: IRAddress) -> bool:
+@cython.ccall
+def _same_versioned_range(alias_address: IRAddress, source: IRAddress) -> cython.bint:
     """Compare canonical Alias identity, not discarded expression provenance."""
+    key: object
     key = memory_range_key_8616(alias_address)
     return (
-        key is not None and key == memory_range_key_8616(source)
-        and alias_address.version is not None and alias_address.version == source.version
+        key is not None and operator.eq(key, memory_range_key_8616(source))
+        and alias_address.version is not None and operator.eq(alias_address.version, source.version)
     )
 
 
@@ -126,19 +141,27 @@ def classify_private_stack_writes_8616(
     Every raw store belonging to a source instruction must pass: accepting
     just one byte of a word instruction would lose a live memory effect.
     """
+    evidence: object
+    reads: object
+    source_addr: object
+    verdict: object
+    block: object
+    index: object
+    indices: object
+    instruction: object
     function = artifact.source_ssa
     context_complete = (
         artifact.complete
         and artifact.frame_address_escape is StackAddressEscape8616.NO_DERIVED_ADDRESS_ESCAPE
         and len(function.blocks) == 1 and len(artifact.stack_extent_evidence) == 1
     )
-    identities = {(fact.block_addr, fact.instr_index): fact.address for fact in artifact.facts
+    identities = {(fact.block_addr, fact.instr_index): fact.address for fact in iter(artifact.facts)
                   if fact.kind is StackMemoryAliasFactKind8616.STORE}
     identities.update({(access.source.block_addr, access.source.instr_index): access.source.address
-                       for access in artifact.accesses if access.source.kind is SSAMemoryAccessKind8616.STORE})
+                       for access in iter(artifact.accesses) if access.source.kind is SSAMemoryAccessKind8616.STORE})
     decisions = []
     for block in function.blocks:
-        groups: dict[int | None, list[int]] = {}
+        groups: dict[int | None, list[cython.longlong]] = {}
         for index, instruction in enumerate(block.instrs):
             if instruction.op == "STORE":
                 groups.setdefault(instruction.addr, []).append(index)
@@ -149,7 +172,7 @@ def classify_private_stack_writes_8616(
             if evidence is not None and source_addr is not None:
                 verdict = PrivateStackWriteVerdict8616.UNKNOWN_READ
                 if reads is not None:
-                    verdict = next((result for index in indices
+                    verdict = next((result for index in iter(indices)
                                     if (result := _store_verdict(block, index, evidence, identities, reads))
                                     is not PrivateStackWriteVerdict8616.UNREAD_RELEASED),
                                    PrivateStackWriteVerdict8616.UNREAD_RELEASED)

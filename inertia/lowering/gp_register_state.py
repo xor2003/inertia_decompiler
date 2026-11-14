@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Lower proven GP architectural live-ins to explicit C runtime state.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
@@ -51,6 +54,9 @@ from .gp_word_assignment import project_gp_word_assignment_8616, refresh_gp_word
 from .gp_word_runtime import initialize_gp_runtime_abi_8616
 from .stack_value_projection import project_pointer_storage_value_8616
 from .terminal_return_expressions import contains_effectful_call_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "GPRegisterStateLoweringStats8616",
@@ -67,8 +73,8 @@ __all__ = [
     "runtime_gp_state_symbols_8616",
 ]
 
-_ENTRY_STATEMENT_PHASES: int = 2
-_ENTRY_STORE_PHASE: int = 1
+_ENTRY_STATEMENT_PHASES: cython.longlong = 2
+_ENTRY_STORE_PHASE: cython.longlong = 1
 
 _RUNTIME_GP_STATE_SYMBOLS_8616 = {
     "eax": "inertia_eax",
@@ -92,9 +98,10 @@ _RUNTIME_GP_STATE_ADDRESSES_8616 = {
 }
 
 
+@cython.ccall
 def runtime_gp_state_symbols_8616() -> tuple[str, ...]:
     """Expose the emitted GP storage ABI to target runtime providers."""
-    return tuple(sorted(_RUNTIME_GP_STATE_SYMBOLS_8616.values()))
+    return tuple(sorted(tuple(_RUNTIME_GP_STATE_SYMBOLS_8616.values())))
 
 
 _GP_REGISTER_VIEWS_8616 = {
@@ -127,17 +134,17 @@ _GP_REGISTER_VIEWS_8616 = {
 _POINTER_WORD_BYTES_8616 = 2
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RuntimeGPExpressionView8616:
     """One structured-C projection of an owned architectural GP lane."""
 
-    register_name: str
-    parent_name: str
-    bit_shift: int
-    width: int
+    register_name: object
+    parent_name: object
+    bit_shift: cython.longlong
+    width: cython.longlong
 
 
-def runtime_gp_name_for_variable_8616(variable: object) -> str | None:
+def runtime_gp_name_for_variable_8616(variable: object) -> object:
     """Return the architectural GP name owned by one runtime-state variable."""
     if not isinstance(variable, SimMemoryVariable):
         return None
@@ -149,7 +156,7 @@ def runtime_gp_name_for_variable_8616(variable: object) -> str | None:
     return next(
         (
             register_name
-            for register_name, symbol_name in _RUNTIME_GP_STATE_SYMBOLS_8616.items()
+            for register_name, symbol_name in builtins.iter(_RUNTIME_GP_STATE_SYMBOLS_8616.items())
             if symbol_name == name
         ),
         None,
@@ -160,9 +167,13 @@ def runtime_gp_expression_view_8616(
     expression: object,
 ) -> RuntimeGPExpressionView8616 | None:
     """Classify the exact structured projection emitted by this owner."""
+    mask: object
+    parent_name: object
+    register_name: object
+    width: object
     while isinstance(expression, structured_c.CTypeCast):
         expression = expression.expr
-    mask: int | None = None
+    mask = None
     if isinstance(expression, structured_c.CBinaryOp) and expression.op == "And":
         if not isinstance(expression.rhs, structured_c.CConstant) or not isinstance(
             expression.rhs.value,
@@ -191,7 +202,7 @@ def runtime_gp_expression_view_8616(
     register_name = next(
         (
             name
-            for name, view in _GP_REGISTER_VIEWS_8616.items()
+            for name, view in builtins.iter(_GP_REGISTER_VIEWS_8616.items())
             if view == (parent_name, bit_shift, width)
         ),
         None,
@@ -206,19 +217,23 @@ def runtime_gp_expression_view_8616(
     )
 
 
-def runtime_gp_live_in_name_8616(register_name: str) -> str | None:
+@cython.ccall
+def runtime_gp_live_in_name_8616(register_name: object) -> object:
     """Return the canonical runtime lane for one supported GP register view."""
+    view: object
     view = _GP_REGISTER_VIEWS_8616.get(register_name.strip().lower())
     return view[0] if view is not None else None
 
 
+@cython.ccall
 def runtime_gp_state_expr_8616(
-    register_name: str,
+    register_name: object,
     *,
     codegen: object,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> structured_c.CExpression | None:
     """Materialize one supported GP view from explicit architectural runtime state."""
+    view: object
     view = _GP_REGISTER_VIEWS_8616.get(register_name.strip().lower())
     if view is None:
         return None
@@ -256,14 +271,17 @@ def runtime_gp_state_expr_8616(
     )
 
 
+@cython.ccall
 def runtime_gp_state_assignment_8616(
-    register_name: str,
+    register_name: object,
     value: structured_c.CExpression,
     *,
     codegen: object,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> structured_c.CAssignment | None:
     """Materialize one proven architectural GP write into coherent runtime state."""
+    projected: object
+    view: object
     view = _GP_REGISTER_VIEWS_8616.get(register_name.strip().lower())
     if view is None:
         return None
@@ -307,7 +325,7 @@ class _ProjectGPRegisters8616(Protocol):
 class _CFunctionGPRegisters8616(Protocol):
     """Structured function boundary mutated by GP-state lowering."""
 
-    addr: int
+    addr: cython.longlong
     statements: object
     unified_local_vars: MutableMapping[object, object]
 
@@ -321,18 +339,23 @@ class _CodegenGPRegisters8616(Protocol):
     _inertia_gp_state_ssa_readiness_8616: FunctionSSAArtifactResolution8616
 
 
+@cython.ccall
 def _runtime_gp_lane_type_8616(codegen: object) -> SimTypeLong:
     """Return the architecture-bound 32-bit type for one coherent GP lane."""
+    project: object
     project = cast(_CodegenGPRegisters8616, codegen).project
     lane_type = SimTypeLong(False)
     return cast(SimTypeLong, lane_type.with_arch(project.arch)) if project is not None else lane_type
 
 
+@cython.ccall
 def _bind_gp_write_value_type_8616(
     codegen: object,
     value: structured_c.CExpression,
 ) -> None:
     """Bind an angr variable's existing value type before width comparison."""
+    project: object
+    value_type: object
     project = cast(_CodegenGPRegisters8616, codegen).project
     if project is None or not isinstance(value, structured_c.CVariable):
         return
@@ -341,27 +364,30 @@ def _bind_gp_write_value_type_8616(
         value.variable_type = value_type.with_arch(project.arch)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class GPRegisterStateLoweringStats8616:
     """Closed evidence counters for architectural GP-state lowering."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-def gp_live_in_names_from_ssa_8616(artifact: SSAFunctionArtifact) -> frozenset[str]:
+@cython.ccall
+def gp_live_in_names_from_ssa_8616(artifact: SSAFunctionArtifact) -> object:
     """Return GP parents with upward-exposed bits using the owned view inventory."""
     return register_live_in_names_8616(artifact, _GP_REGISTER_VIEWS_8616)
 
 
+@cython.ccall
 def _c_register_identity_8616(
     node: object,
     project: _ProjectGPRegisters8616,
-) -> tuple[RegisterIdentity8616, str] | None:
+) -> object:
     """Return one exact structured-C register identity and its GP parent."""
+    projection: object
     if not isinstance(node, structured_c.CVariable) or not isinstance(
         node.variable,
         SimRegisterVariable,
@@ -380,10 +406,11 @@ def _c_register_identity_8616(
     )
 
 
+@cython.ccall
 def _c_dirty_register_identity_8616(
     node: object,
     project: _ProjectGPRegisters8616,
-) -> tuple[RegisterIdentity8616, str] | None:
+) -> object:
     """Return the exact SSA identity for a ``CDirtyExpression`` register carrier.
 
     Only a projectable register view carrying an explicit SSA ``varid`` proves
@@ -391,6 +418,9 @@ def _c_dirty_register_identity_8616(
     identities, or offsets outside the GP view inventory) refuse instead of
     inheriting unproven entry evidence.
     """
+    identity: object
+    projection: object
+    view: object
     if not isinstance(node, structured_c.CDirtyExpression):
         return None
     # Dynamic angr boundary: opaque dirty payloads only expose typed offsets
@@ -412,6 +442,7 @@ def _c_dirty_register_identity_8616(
     )
 
 
+@cython.ccall
 def _c_ast_dirty_carrier_census_8616(
     root: object,
     project: _ProjectGPRegisters8616,
@@ -421,10 +452,13 @@ def _c_ast_dirty_carrier_census_8616(
     A write-only destination needs no snapshot. Count AST edge occurrences so
     a shared destination/read object still requires value capture.
     """
+    identity: object
+    lhs_identity: object
+    node: object
     observed: dict[RegisterIdentity8616, str] = {}
     defined: set[RegisterIdentity8616] = set()
-    occurrences: dict[RegisterIdentity8616, int] = {}
-    definitions: dict[RegisterIdentity8616, int] = {}
+    occurrences: dict[RegisterIdentity8616, cython.longlong] = {}
+    definitions: dict[RegisterIdentity8616, cython.longlong] = {}
     for node in _iter_c_node_occurrences_8616(root):
         identity = _c_dirty_register_identity_8616(node, project)
         if identity is not None:
@@ -436,7 +470,7 @@ def _c_ast_dirty_carrier_census_8616(
                 defined.add(lhs_identity[0])
                 definitions[lhs_identity[0]] = definitions.get(lhs_identity[0], 0) + 1
     capture_lanes = {
-        observed[key] for key in defined if occurrences.get(key, 0) > definitions[key]
+        observed[key] for key in iter(defined) if occurrences.get(key, 0) > definitions[key]
     }
     return observed, defined, capture_lanes
 
@@ -451,6 +485,9 @@ def gp_live_in_names_from_c_ast_8616(
     carriers with an explicit ``varid`` participate; a version is a live-in
     only when no assignment inside the AST defines that exact identity.
     """
+    identity: object
+    lhs_identity: object
+    node: object
     observed: dict[RegisterIdentity8616, str] = {}
     defined: set[RegisterIdentity8616] = set()
     for node in _iter_c_nodes_deep_8616(root):
@@ -467,32 +504,34 @@ def gp_live_in_names_from_c_ast_8616(
                 defined.add(lhs_identity[0])
     return frozenset(
         register_name
-        for key, register_name in observed.items()
+        for key, register_name in builtins.iter(observed.items())
         if key not in defined
     )
 
 
+@cython.ccall
 def _register_projection_for_shape_8616(
     project: _ProjectGPRegisters8616,
-    offset: int,
-    size: int,
-) -> tuple[str, int, int] | None:
+    offset: cython.longlong,
+    size: cython.longlong,
+) -> object:
     """Resolve one exact GP view into its coherent 32-bit runtime lane."""
     projections = {
         _GP_REGISTER_VIEWS_8616[name.lower()]
-        for name, shape in project.arch.registers.items()
+        for name, shape in builtins.iter(project.arch.registers.items())
         if len(shape) >= 2
-        and shape[0] == offset
-        and shape[1] == size
+        and operator.eq(shape[0], offset)
+        and operator.eq(shape[1], size)
         and name.lower() in _GP_REGISTER_VIEWS_8616
     }
     return next(iter(projections)) if len(projections) == 1 else None
 
 
+@cython.ccall
 def _runtime_gp_cvar_8616(
-    register_name: str,
+    register_name: object,
     source: structured_c.CVariable | structured_c.CDirtyExpression,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> structured_c.CVariable:
     """Build one explicit runtime-state C variable at its canonical width."""
     return structured_c.CVariable(
@@ -508,12 +547,13 @@ def _runtime_gp_cvar_8616(
     )
 
 
+@cython.ccall
 def _runtime_gp_expr_8616(
-    register_name: str,
-    bit_shift: int,
-    view_width: int,
+    register_name: object,
+    bit_shift: cython.longlong,
+    view_width: cython.longlong,
     source: structured_c.CVariable | structured_c.CDirtyExpression,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> structured_c.CExpression:
     """Build one coherent full-register state expression or narrow view."""
     parent = _runtime_gp_cvar_8616(register_name, source, function_addr)
@@ -544,12 +584,15 @@ def _runtime_gp_expr_8616(
     )
 
 
+@cython.ccall
 def _runtime_gp_parent_mask_8616(
     expression: structured_c.CExpression,
-    parent_name: str,
+    parent_name: object,
     codegen: object,
 ) -> int | None:
     """Return the constant mask on one unshifted runtime GP parent."""
+    project: object
+    projection: object
     mask = 0xFFFF_FFFF
     while isinstance(expression, structured_c.CTypeCast):
         expression = expression.expr
@@ -565,7 +608,7 @@ def _runtime_gp_parent_mask_8616(
             expression = expression.expr
     if (
         isinstance(expression, structured_c.CVariable)
-        and runtime_gp_name_for_variable_8616(expression.variable) == parent_name
+        and operator.eq(runtime_gp_name_for_variable_8616(expression.variable), parent_name)
     ):
         return mask
     if isinstance(expression, structured_c.CVariable) and isinstance(
@@ -587,17 +630,20 @@ def _runtime_gp_parent_mask_8616(
     return None
 
 
+@cython.ccall
 def _runtime_gp_subview_write_8616(
-    register_name: str,
-    bit_shift: int,
-    view_width: int,
+    register_name: object,
+    bit_shift: cython.longlong,
+    view_width: cython.longlong,
     source: structured_c.CVariable | structured_c.CDirtyExpression,
     value: structured_c.CExpression,
-    function_addr: int,
+    function_addr: cython.longlong,
     *,
     tags: Mapping[str, object] | None = None,
 ) -> structured_c.CAssignment:
     """Project one narrow-register write while preserving its origin tags."""
+    projected: object
+    self_mask: object
     codegen = source.codegen
     _bind_gp_write_value_type_8616(codegen, value)
     # Byte-register writes consume the low byte of the pointer's offset word.
@@ -654,6 +700,7 @@ def _runtime_gp_subview_write_8616(
     ))
 
 
+@cython.ccall
 def _strip_gp_casts_8616(candidate: object) -> object:
     """Remove representational casts from an angr address expression."""
     while isinstance(candidate, structured_c.CTypeCast):
@@ -661,10 +708,13 @@ def _strip_gp_casts_8616(candidate: object) -> object:
     return candidate
 
 
+@cython.ccall
 def _byte_one_address_reference_8616(
     address: structured_c.CBinaryOp,
 ) -> structured_c.CUnaryOp | None:
     """Find the ``&register + 1`` reference inside a stripped Add expression."""
+    candidate_displacement: object
+    candidate_reference: object
     for candidate_reference, candidate_displacement in (
         (address.lhs, address.rhs),
         (address.rhs, address.lhs),
@@ -684,8 +734,11 @@ def _byte_one_address_reference_8616(
 def _addressed_carrier_projection_8616(
     carrier: object,
     project: _ProjectGPRegisters8616,
-) -> tuple[str, int, int, structured_c.CVariable] | None:
+) -> object:
     """Resolve a stripped carrier to (register name, bit shift, width, source)."""
+    projection: object
+    runtime_view: object
+    source: object
     if isinstance(carrier, structured_c.CVariable) and isinstance(
         carrier.variable,
         SimRegisterVariable,
@@ -705,9 +758,9 @@ def _addressed_carrier_projection_8616(
     source = next(
         (
             candidate
-            for candidate in (carrier, *_iter_c_nodes_deep_8616(carrier))
+            for candidate in iter((carrier, ) + tuple(_iter_c_nodes_deep_8616(carrier)))
             if isinstance(candidate, structured_c.CVariable)
-            and runtime_gp_name_for_variable_8616(candidate.variable) == runtime_view.parent_name
+            and operator.eq(runtime_gp_name_for_variable_8616(candidate.variable), runtime_view.parent_name)
         ),
         None,
     )
@@ -716,11 +769,14 @@ def _addressed_carrier_projection_8616(
     return runtime_view.parent_name, runtime_view.bit_shift, runtime_view.width, source
 
 
+@cython.ccall
 def _addressed_gp_high_byte_view_8616(
     node: object,
     project: _ProjectGPRegisters8616,
-) -> tuple[str, structured_c.CVariable] | None:
+) -> object:
     """Recognize angr's ``*((byte *)&word_register + 1)`` high-byte view."""
+    reference: object
+    resolved: object
     if not isinstance(node, structured_c.CUnaryOp) or node.op != "Dereference":
         return None
     address = _strip_gp_casts_8616(node.operand)
@@ -742,6 +798,8 @@ def _addressed_gp_high_byte_view_8616(
 
 def runtime_gp_state_names_8616(codegen: object) -> frozenset[str]:
     """Return authoritative runtime lanes for both lowering and effect retention."""
+    cfunc: object
+    project: object
     boundary = cast(_CodegenGPRegisters8616, codegen)
     cfunc = boundary.cfunc
     project = boundary.project
@@ -759,15 +817,16 @@ def runtime_gp_state_names_8616(codegen: object) -> frozenset[str]:
     state_owned_names = set(live_ins)
     state_owned_names.update(
         register_name
-        for node in _iter_c_nodes_deep_8616(cfunc.statements)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(cfunc.statements))
         if isinstance(node, structured_c.CVariable)
-        for register_name in (runtime_gp_name_for_variable_8616(node.variable),)
+        for register_name in iter((runtime_gp_name_for_variable_8616(node.variable),))
         if register_name is not None
     )
     return frozenset(state_owned_names)
 
 
-def _record_runtime_gp_global_8616(codegen: object, register_name: str) -> None:
+@cython.ccall
+def _record_runtime_gp_global_8616(codegen: object, register_name: object) -> None:
     """Record the runtime global declaration for one lowered register lane."""
     record_global_declaration_spec_8616(
         codegen,
@@ -777,24 +836,25 @@ def _record_runtime_gp_global_8616(codegen: object, register_name: str) -> None:
     )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _GpStateLoweringContext8616:
     """Mutable evidence and boundary context for the GP-state traversal."""
 
     codegen: object
-    cfunc_addr: int
+    cfunc_addr: cython.longlong
     project: _ProjectGPRegisters8616
-    state_owned_names: frozenset[str]
-    raw_ids: set[int]
-    materialized_ids: set[int]
-    undefined_entry_identities: frozenset[RegisterIdentity8616]
-    first_lane_write_index: Mapping[str, int]
-    entry_read_index: Mapping[int, int]
+    state_owned_names: object
+    raw_ids: object
+    materialized_ids: object
+    undefined_entry_identities: object
+    first_lane_write_index: Mapping[str, cython.longlong]
+    entry_read_index: Mapping[cython.longlong, cython.longlong]
 
 
+@cython.ccall
 def _lhs_register_projection_8616(
     project: _ProjectGPRegisters8616, lhs: object
-) -> tuple[str, int, int] | None:
+) -> object:
     """Resolve a register projection from an assignment lvalue."""
     if isinstance(lhs, structured_c.CDirtyExpression):
         dirty = lhs.dirty
@@ -823,17 +883,22 @@ def _lhs_register_projection_8616(
     return None
 
 
+@cython.ccall
 def _lane_write_parents_8616(
     project: _ProjectGPRegisters8616,
     lhs: object,
-    state_owned_names: frozenset[str],
-) -> frozenset[str]:
+    state_owned_names: object,
+) -> object:
     """Return owned runtime lanes an assignment destination may overwrite.
 
     A projected register destination clobbers its parent lane; a register
     dirty destination without a provable offset/width conservatively clobbers
     every owned lane. Provably non-register destinations clobber none.
     """
+    oident: object
+    projection: object
+    runtime_view: object
+    size: object
     projection = _lhs_register_projection_8616(project, lhs)
     if projection is not None:
         return (
@@ -861,16 +926,20 @@ def _lane_write_parents_8616(
 def _entry_version_placement_8616(
     root: object,
     project: _ProjectGPRegisters8616,
-    state_owned_names: frozenset[str],
-) -> tuple[dict[str, int], dict[int, int]]:
+    state_owned_names: object,
+) -> tuple[dict[str, cython.longlong], dict[cython.longlong, cython.longlong]]:
     """Locate clobbers and dirty reads using operand/store phase positions.
 
     Pure scalar assignments read operands before publishing their store.
     Conditional/loop statements and unsupported effects stay atomic. Shared
     nodes retain their latest read position, so every evaluation must be safe.
     """
-    first_write: dict[str, int] = {}
-    read_index: dict[int, int] = {}
+    index: object
+    node: object
+    parent: object
+    statement: object
+    first_write: dict[str, cython.longlong] = {}
+    read_index: dict[cython.longlong, cython.longlong] = {}
     for index, statement in enumerate(_linear_sequence(root)):
         read_position = index * _ENTRY_STATEMENT_PHASES
         order = register_update_read_order_8616(
@@ -892,17 +961,21 @@ def _entry_version_placement_8616(
     return first_write, read_index
 
 
+@cython.ccall
 def _unsafe_entry_version_read_8616(
     ctx: _GpStateLoweringContext8616,
     node: object,
-    register_name: str,
-) -> bool:
+    register_name: object,
+) -> cython.bint:
     """Refuse projecting a never-defined version that may follow a lane write.
 
     An entry-version dirty read denotes the architectural live-in only while
     no owned-lane write can execute first. A read placed at or past the
     earliest write conservatively refuses rather than reading current state.
     """
+    first_write: object
+    identity: object
+    read_index: object
     if not isinstance(node, structured_c.CDirtyExpression):
         return False
     identity = _c_dirty_register_identity_8616(node, ctx.project)
@@ -915,10 +988,12 @@ def _unsafe_entry_version_read_8616(
     return read_index is None or read_index >= first_write
 
 
+@cython.ccall
 def _node_register_projection_8616(
     project: _ProjectGPRegisters8616, node: object
-) -> tuple[str, int, int] | None:
+) -> object:
     """Resolve a register projection from a bare expression node."""
+    size: object
     if isinstance(node, structured_c.CDirtyExpression):
         dirty = node.dirty
         # Dynamic angr boundary: opaque dirty expressions may omit category.
@@ -936,10 +1011,12 @@ def _node_register_projection_8616(
     return None
 
 
+@cython.ccall
 def _transform_high_byte_view_8616(
     ctx: _GpStateLoweringContext8616, node: object
 ) -> object | None:
     """Materialize one addressed high-byte view read, or None."""
+    high_byte_view: object
     high_byte_view = _addressed_gp_high_byte_view_8616(node, ctx.project)
     if high_byte_view is None:
         return None
@@ -961,10 +1038,13 @@ def _transform_high_byte_view_8616(
     )
 
 
+@cython.ccall
 def _transform_assignment_lhs_8616(
     ctx: _GpStateLoweringContext8616, node: object
 ) -> object | None:
     """Materialize a subview write assignment to a live-in lane, or None."""
+    lhs_projection: object
+    refreshed: object
     if not isinstance(node, structured_c.CAssignment):
         return None
     lhs = node.lhs
@@ -996,10 +1076,12 @@ def _transform_assignment_lhs_8616(
     )
 
 
+@cython.ccall
 def _transform_node_projection_8616(
     ctx: _GpStateLoweringContext8616, node: object
 ) -> object:
     """Materialize one bare live-in register read/write expression node."""
+    projection: object
     projection = _node_register_projection_8616(ctx.project, node)
     if projection is None:
         return node
@@ -1023,8 +1105,10 @@ def _transform_node_projection_8616(
     )
 
 
+@cython.ccall
 def _transform_gp_state_node_8616(ctx: _GpStateLoweringContext8616, node: object) -> object:
     """Apply the high-byte view, assignment-lhs, or bare-projection arm."""
+    result: object
     result = _transform_high_byte_view_8616(ctx, node)
     if result is not None:
         return result
@@ -1034,12 +1118,16 @@ def _transform_gp_state_node_8616(ctx: _GpStateLoweringContext8616, node: object
     return _transform_node_projection_8616(ctx, node)
 
 
+@cython.ccall
 def _drop_shadowed_unified_locals_8616(
     cfunc: object,
     project: _ProjectGPRegisters8616,
-    state_owned_names: frozenset[str],
-) -> bool:
+    state_owned_names: object,
+) -> cython.bint:
     """Remove unified-local register entries shadowed by lowered runtime lanes."""
+    projection: object
+    unified_local_vars: object
+    variable: object
     # Dynamic angr/codegen boundary adapters may omit the unified-local mapping.
     unified_local_vars = getattr(cfunc, "unified_local_vars", None)
     if not isinstance(unified_local_vars, MutableMapping):
@@ -1054,13 +1142,15 @@ def _drop_shadowed_unified_locals_8616(
     return changed
 
 
-def lower_architectural_gp_register_state_8616(codegen: object) -> bool:
+def lower_architectural_gp_register_state_8616(codegen: object) -> cython.bint:
     """Materialize SSA-proven GP live-ins as explicit runtime globals.
 
     Entry-version dirty register reads lower to the runtime lane only while
     no owned-lane write can execute first; a read placed at or past the
     earliest lane write is refused instead of silently reading current state.
     """
+    cfunc: object
+    project: object
     initialize_gp_runtime_abi_8616(codegen)
     boundary = cast(_CodegenGPRegisters8616, codegen)
     cfunc = boundary.cfunc
@@ -1090,7 +1180,7 @@ def lower_architectural_gp_register_state_8616(codegen: object) -> bool:
         state_owned_names,
         set(),
         set(),
-        frozenset(key for key in dirty_observed if key not in dirty_defined),
+        frozenset(key for key in iter(dirty_observed) if key not in dirty_defined),
         first_lane_write_index,
         entry_read_index,
     )

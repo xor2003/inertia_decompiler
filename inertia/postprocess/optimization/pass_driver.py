@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Rewrite/Postprocess cleanup.
 
 Responsibility: run cleanup optimization passes after semantics have been recovered.
@@ -8,6 +9,8 @@ dynamic attribute access limited to that boundary and diagnostic counters.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -22,6 +25,7 @@ from .dead_setup import _prune_dead_setup_carriers_8616
 from .local_declarations import dedupe_equivalent_stack_local_declarations_8616
 from .rule_runtime import run_optimization_rules_8616
 from .trivial_copy import prune_adjacent_temporary_copy_assignments_8616
+import dataclasses
 
 __all__ = [
     "OPTIMIZATION_PASSES",
@@ -43,6 +47,7 @@ if not hasattr(_CStatements, "__iter__"):
     cast(Any, _CStatements).__iter__ = lambda self: iter(self.statements)
 
 
+@cython.ccall
 def _normalize_cfunc_root_for_optimization_8616(codegen: object) -> None:
     """No-op: CStatements is now iterable via the module-level monkey-patch.
 
@@ -55,6 +60,7 @@ def _normalize_cfunc_root_for_optimization_8616(codegen: object) -> None:
 
     Kept as a hook point for future optimization setup.
     """
+    cfunc: object
     cfunc = getattr(codegen, "cfunc", None)
     if cfunc is None:
         return
@@ -62,13 +68,13 @@ def _normalize_cfunc_root_for_optimization_8616(codegen: object) -> None:
         return
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class OptimizationPassSpec:
     """Declared cleanup optimization pass and human-readable ownership summary."""
 
-    name: str
-    func: Callable[..., bool]
-    description: str
+    name: object
+    func: Callable[..., cython.bint]
+    description: object
 
 
 OPTIMIZATION_PASSES: tuple[OptimizationPassSpec, ...] = (
@@ -111,10 +117,11 @@ OPTIMIZATION_PASSES: tuple[OptimizationPassSpec, ...] = (
 
 def describe_x86_16_optimization_passes() -> tuple[tuple[str, str], ...]:
     """Return the cleanup optimization inventory for tests and diagnostics."""
-    return tuple((spec.name, spec.description) for spec in OPTIMIZATION_PASSES)
+    return tuple((spec.name, spec.description) for spec in iter(OPTIMIZATION_PASSES))
 
 
-def _run_optimization_passes_8616(codegen: object) -> bool:
+@cython.ccall
+def _run_optimization_passes_8616(codegen: object) -> cython.bint:
     """Run optimization passes on codegen.
 
     The codegen object crosses a dynamic third-party angr boundary; this driver

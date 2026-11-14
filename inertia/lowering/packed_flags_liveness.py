@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Remove unread captured FLAGS definitions using whole-function evidence.
 
 Layer: Types/Lowering.
@@ -11,6 +12,8 @@ SSA values remain consumers. Unknown identities and side effects are retained.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -31,12 +34,17 @@ from inertia.semantics.expression_analysis import (
 
 from .packed_flags_calls import call_has_no_implicit_status_inputs_8616, flag_artifact_for_structured_root_8616
 from .physical_registers import physical_register_offset_8616
+import dataclasses
+import operator
+import builtins
 
-type _ValueKey = tuple[str, int | str, int | str | None]
+_ValueKey = typing.TypeAliasType("_ValueKey", tuple[str, int | str, int | str | None])
 
 
+@cython.ccall
 def _value_keys(node: object) -> frozenset[_ValueKey]:
     """Consume exact SSA and shared emitted-storage identities, never names."""
+    identity: object
     if isinstance(node, c.CVariable) and isinstance(node.variable, SimRegisterVariable):
         keys: set[_ValueKey] = set()
         variable = node.variable
@@ -56,13 +64,17 @@ def _value_keys(node: object) -> frozenset[_ValueKey]:
     return frozenset()
 
 
+@cython.ccall
 def _read_keys(
-    root: object, flags_offset: int, ignored_assignments: frozenset[int] = frozenset(),
-) -> set[_ValueKey] | None:
+    root: object, flags_offset: cython.longlong, ignored_assignments: object = frozenset(),
+) -> object:
     """Collect reads across all structured scopes, excluding plain write targets."""
+    node: object
+    value: object
+    attribute: object
     reads: set[_ValueKey] = set()
     work = [root]
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     while work:
         node = work.pop()
         if id(node) in seen:
@@ -80,7 +92,7 @@ def _read_keys(
         if isinstance(node, c.CDirtyExpression) and not isinstance(node.dirty, VirtualVariable):
             return None
         keys = _value_keys(node)
-        if physical_register_offset_8616(node) == flags_offset and not keys:
+        if operator.eq(physical_register_offset_8616(node), flags_offset) and not keys:
             return None
         reads.update(keys)
         for attribute in _structured_slot_names_8616(node):
@@ -90,8 +102,10 @@ def _read_keys(
     return reads
 
 
-def _pure_value(root: object) -> bool:
+@cython.ccall
+def _pure_value(root: object) -> cython.bint:
     """Refuse calls, memory reads, trapping operations and opaque expressions."""
+    node: object
     for node in _iter_c_nodes_deep_8616(root):
         if isinstance(node, c.CConstant):
             continue
@@ -110,12 +124,16 @@ def _pure_value(root: object) -> bool:
     return isinstance(root, c.CExpression)
 
 
-def prune_unread_flag_definitions_8616(root: object, flags_offset: int) -> bool:
+@cython.ccall
+def prune_unread_flag_definitions_8616(root: object, flags_offset: cython.longlong) -> cython.bint:
     """Remove only globally unread, pure flag definitions, to a fixed point.
 
     Each successful iteration removes at least one assignment. Cyclic or
     unknown dependencies are retained rather than presumed dead.
     """
+    reads: object
+    node: object
+    statement: object
     changed = False
     while True:
         reads = _read_keys(root, flags_offset)
@@ -130,7 +148,7 @@ def prune_unread_flag_definitions_8616(root: object, flags_offset: int) -> bool:
                 keys = _value_keys(statement.lhs) if isinstance(statement, c.CAssignment) else frozenset()
                 unread_flag = (
                     isinstance(statement, c.CAssignment)
-                    and physical_register_offset_8616(statement.lhs) == flags_offset
+                    and operator.eq(physical_register_offset_8616(statement.lhs), flags_offset)
                     and bool(keys)
                     and keys.isdisjoint(reads)
                 )
@@ -144,33 +162,36 @@ def prune_unread_flag_definitions_8616(root: object, flags_offset: int) -> bool:
         changed = True
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PackedFlagsCycleStats8616:
     """Closed accounting for pure definitions disconnected from observable uses."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
+@cython.ccall
 def _flag_component_candidates(
-    blocks: tuple[c.CStatements, ...], flags_offset: int,
-) -> tuple[dict[int, c.CAssignment], int]:
+    blocks: object, flags_offset: cython.longlong,
+) -> tuple[dict[cython.longlong, c.CAssignment], cython.longlong]:
     """Include pure register carriers connected to physical FLAGS definitions."""
+    identity: object
+    statement: object
     definitions = {
         id(statement): statement
-        for block in blocks for statement in block.statements
+        for block in iter(blocks) for statement in iter(block.statements)
         if isinstance(statement, c.CAssignment) and _value_keys(statement.lhs)
     }
     connected = {
-        key for statement in definitions.values()
-        if physical_register_offset_8616(statement.lhs) == flags_offset
-        for key in _value_keys(statement.lhs)
+        key for statement in builtins.iter(definitions.values())
+        if operator.eq(physical_register_offset_8616(statement.lhs), flags_offset)
+        for key in builtins.iter(_value_keys(statement.lhs))
     }
-    pure = {identity: statement for identity, statement in definitions.items() if _pure_value(statement.rhs)}
-    selected: dict[int, c.CAssignment] = {}
+    pure = {identity: statement for identity, statement in builtins.iter(definitions.items()) if _pure_value(statement.rhs)}
+    selected: dict[cython.longlong, c.CAssignment] = {}
     while True:
         added = False
         for identity, statement in pure.items():
@@ -184,7 +205,7 @@ def _flag_component_candidates(
 
 
 def prune_unobserved_flag_cycles_8616(
-    root: object, flags_offset: int, *, lift_artifact: StatusFlagLiftArtifact8616 | None = None,
+    root: object, flags_offset: cython.longlong, *, lift_artifact: StatusFlagLiftArtifact8616 | None = None,
 ) -> PackedFlagsCycleStats8616:
     """Remove pure flag-only dependency components without an external consumer.
 
@@ -194,23 +215,27 @@ def prune_unobserved_flag_cycles_8616(
     proving no implicit status inputs; explicit arguments always remain roots.
     Opaque payloads refuse effects outside this census.
     """
+    inputs: object
+    live: object
+    block: object
+    outputs: object
     nodes = tuple(_iter_c_nodes_deep_8616(root))
     lift_artifact = lift_artifact or flag_artifact_for_structured_root_8616(root)
     opaque_types = (c.CDirtyStatement, c.CUnsupportedStatement, c.CAILBlock, c.CVEXCCallExpression)
     if any(
         isinstance(node, opaque_types)
         or (isinstance(node, c.CFunctionCall) and not call_has_no_implicit_status_inputs_8616(node, lift_artifact))
-        for node in nodes
+        for node in iter(nodes)
     ):
         return PackedFlagsCycleStats8616(failure_count=1)
-    blocks = tuple(node for node in nodes if isinstance(node, c.CStatements))
+    blocks = tuple(node for node in iter(nodes) if isinstance(node, c.CStatements))
     definitions = {
         id(statement): statement
-        for block in blocks for statement in block.statements
+        for block in iter(blocks) for statement in iter(block.statements)
         if isinstance(statement, c.CAssignment)
-        and physical_register_offset_8616(statement.lhs) == flags_offset
+        and operator.eq(physical_register_offset_8616(statement.lhs), flags_offset)
     }
-    if any(not _value_keys(statement.lhs) for statement in definitions.values()):
+    if any(not _value_keys(statement.lhs) for statement in builtins.iter(definitions.values())):
         return PackedFlagsCycleStats8616(len(definitions), failure_count=1)
     candidates, definition_count = _flag_component_candidates(blocks, flags_offset)
     live = _read_keys(root, flags_offset, frozenset(candidates))
@@ -218,9 +243,9 @@ def prune_unobserved_flag_cycles_8616(
         return PackedFlagsCycleStats8616(definition_count, len(candidates), failure_count=1)
     dependencies = {
         key: (_value_keys(statement.lhs), _read_keys(statement.rhs, flags_offset))
-        for key, statement in candidates.items()
+        for key, statement in builtins.iter(candidates.items())
     }
-    if any(inputs is None for _outputs, inputs in dependencies.values()):
+    if any(inputs is None for _outputs, inputs in builtins.iter(dependencies.values())):
         return PackedFlagsCycleStats8616(definition_count, len(candidates), failure_count=1)
     # Start at observable reads, not at the cycle's own reads. This is the least
     # fixed point; seeding every backedge read would keep every dead cycle alive.
@@ -230,10 +255,10 @@ def prune_unobserved_flag_cycles_8616(
             if not outputs.isdisjoint(live):
                 expanded.update(outputs)
                 expanded.update(inputs or ())
-        if expanded == live:
+        if operator.eq(expanded, live):
             break
         live = expanded
-    dead = {key for key, (outputs, _inputs) in dependencies.items() if outputs.isdisjoint(live)}
+    dead = {key for key, (outputs, _inputs) in builtins.iter(dependencies.items()) if outputs.isdisjoint(live)}
     for block in blocks:
-        block.statements = [statement for statement in block.statements if id(statement) not in dead]
+        block.statements = [statement for statement in iter(block.statements) if id(statement) not in dead]
     return PackedFlagsCycleStats8616(definition_count, len(candidates), len(dead), len(dead))

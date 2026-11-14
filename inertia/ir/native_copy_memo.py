@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Seed a deepcopy memo with detached typed IR nodes for native surface copies.
 
 Layer: IR.
@@ -13,6 +14,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from copy import deepcopy
@@ -37,6 +40,7 @@ from .core import (
 )
 from .dead_temporary_normalization import DeadTemporaryDecision8616, DeadTemporaryDecisionKind8616
 from .instruction_origin import IRInstructionOrigin8616
+import builtins
 
 __all__ = ["native_copy_memo_producers_8616", "seed_native_copy_memo_8616", "seed_native_decisions_8616"]
 
@@ -52,8 +56,9 @@ _SHARED_SCALAR_TYPES_8616: frozenset[type] = frozenset({
 _MISSING_8616: object = object()
 
 
+@cython.ccall
 def seed_native_decisions_8616(
-    decisions: tuple[DeadTemporaryDecision8616, ...], memo: dict[int, object],
+    decisions: object, memo: object,
 ) -> None:
     """Detach exact scalar decisions in the shared surface-copy memo.
 
@@ -61,6 +66,7 @@ def seed_native_decisions_8616(
     entries must survive so repeated decisions and cross-field aliases keep
     one detached identity, including nodes already reached through IR fields.
     """
+    decision: object
     if type(decisions) is not tuple:
         return
     for decision in decisions:
@@ -71,7 +77,8 @@ def seed_native_decisions_8616(
             memo[id(decision)] = DeadTemporaryDecision8616(decision.instruction_index, decision.kind)
 
 
-def seed_native_copy_memo_8616(blocks: tuple[IRBlock, ...]) -> dict[int, object]:
+@cython.ccall
+def seed_native_copy_memo_8616(blocks: object) -> object:
     """Prebuild detached clones of every owned node reachable from ``blocks``.
 
     The returned mapping is a ready ``copy.deepcopy`` memo: copying a native
@@ -85,7 +92,8 @@ def seed_native_copy_memo_8616(blocks: tuple[IRBlock, ...]) -> dict[int, object]
     valid node fall back to ``deepcopy`` against this memo, so they retain
     ordinary reconstruction and sharing semantics.
     """
-    memo: dict[int, object] = {}
+    block: object
+    memo: dict[cython.longlong, object] = {}
     if type(blocks) is not tuple:
         return memo
     for block in blocks:
@@ -94,7 +102,8 @@ def seed_native_copy_memo_8616(blocks: tuple[IRBlock, ...]) -> dict[int, object]
     return memo
 
 
-def _detach_native_field_8616(value: object, memo: dict[int, object]) -> object:
+@cython.ccall
+def _detach_native_field_8616(value: object, memo: object) -> object:
     """Detach one field payload, sharing only exact immutable scalars."""
     value_type = type(value)
     if value_type in _SHARED_SCALAR_TYPES_8616:
@@ -105,27 +114,29 @@ def _detach_native_field_8616(value: object, memo: dict[int, object]) -> object:
 
 
 def _detach_native_tuple_8616(
-    items: tuple[object, ...], memo: dict[int, object],
-) -> tuple[object, ...]:
+    items: object, memo: object,
+) -> object:
     """Preserve tuple aliases, including tuples completed by recursive copying."""
+    existing: object
     identity = id(items)
     existing = memo.get(identity, _MISSING_8616)
     if existing is not _MISSING_8616:
         return cast(tuple[object, ...], existing)
-    detached = [_detach_native_field_8616(item, memo) for item in items]
+    detached = [_detach_native_field_8616(item, memo) for item in iter(items)]
     # A mutable child may recursively copy this tuple before returning.
     # Reuse that completed tuple so the child's back-reference stays exact.
     existing = memo.get(identity, _MISSING_8616)
     if existing is not _MISSING_8616:
         return cast(tuple[object, ...], existing)
-    if all(new is old for new, old in zip(detached, items, strict=True)):
+    if all(new is old for new, old in builtins.iter(zip(detached, items, strict=True))):
         return items
     result = tuple(detached)
     memo[identity] = result
     return result
 
 
-def _detach_native_node_8616(node: object, memo: dict[int, object]) -> object:
+@cython.ccall
+def _detach_native_node_8616(node: object, memo: object) -> object:
     """Detach one node, dispatching exact owned types to typed clones.
 
     A memo hit returns the registered clone, which may be an unfilled shell
@@ -133,6 +144,8 @@ def _detach_native_node_8616(node: object, memo: dict[int, object]) -> object:
     types, subclasses and foreign payloads keep ordinary deepcopy
     reconstruction against the same memo.
     """
+    detacher: object
+    existing: object
     existing = memo.get(id(node), _MISSING_8616)
     if existing is not _MISSING_8616:
         return existing
@@ -142,7 +155,8 @@ def _detach_native_node_8616(node: object, memo: dict[int, object]) -> object:
     return detacher(node, memo)
 
 
-def _detach_native_value_8616(value: IRValue, memo: dict[int, object]) -> IRValue:
+@cython.ccall
+def _detach_native_value_8616(value: IRValue, memo: object) -> IRValue:
     """Detach one exact ``IRValue``: direct leaf build or shell then fields."""
     if _is_seedable_native_leaf_8616(value):
         clone = _detach_native_leaf_8616(value)
@@ -179,7 +193,8 @@ def _detach_native_value_8616(value: IRValue, memo: dict[int, object]) -> IRValu
     return clone
 
 
-def _detach_native_instr_8616(instr: IRInstr, memo: dict[int, object]) -> IRInstr:
+@cython.ccall
+def _detach_native_instr_8616(instr: IRInstr, memo: object) -> IRInstr:
     """Detach one exact ``IRInstr`` shell-first so cyclic args terminate."""
     clone = IRInstr.__new__(IRInstr)
     memo[id(instr)] = clone
@@ -198,8 +213,9 @@ def _detach_native_instr_8616(instr: IRInstr, memo: dict[int, object]) -> IRInst
     return clone
 
 
+@cython.ccall
 def _detach_native_address_8616(
-    address: IRAddress, memo: dict[int, object],
+    address: IRAddress, memo: object,
 ) -> IRAddress:
     """Detach one exact ``IRAddress`` shell-first for shared base values."""
     clone = IRAddress.__new__(IRAddress)
@@ -227,8 +243,9 @@ def _detach_native_address_8616(
     return clone
 
 
+@cython.ccall
 def _detach_native_condition_8616(
-    condition: IRCondition, memo: dict[int, object],
+    condition: IRCondition, memo: object,
 ) -> IRCondition:
     """Detach one exact ``IRCondition`` shell-first for cyclic args."""
     clone = IRCondition.__new__(IRCondition)
@@ -246,8 +263,9 @@ def _detach_native_condition_8616(
     return clone
 
 
+@cython.ccall
 def _detach_native_binary_8616(
-    value: IRBinaryValue, memo: dict[int, object],
+    value: IRBinaryValue, memo: object,
 ) -> IRBinaryValue:
     """Detach one exact ``IRBinaryValue`` shell-first for shared operands."""
     clone = IRBinaryValue.__new__(IRBinaryValue)
@@ -259,8 +277,9 @@ def _detach_native_binary_8616(
     return clone
 
 
+@cython.ccall
 def _detach_native_call_stack_8616(
-    effect: IRCallStackEffect8616, memo: dict[int, object],
+    effect: IRCallStackEffect8616, memo: object,
 ) -> IRCallStackEffect8616:
     """Detach effect data while retaining immutable external proof scopes.
 
@@ -269,6 +288,8 @@ def _detach_native_call_stack_8616(
     data: copying the project would change their meaning. Coordinate and range
     data still detach normally through the shared memo.
     """
+    authority: object
+    scoped: object
     clone = IRCallStackEffect8616.__new__(IRCallStackEffect8616)
     memo[id(effect)] = clone
     object.__setattr__(
@@ -309,8 +330,9 @@ def _detach_native_call_stack_8616(
     return clone
 
 
+@cython.ccall
 def _detach_native_active_unary_8616(
-    active: IRActiveUnary8616, memo: dict[int, object],
+    active: IRActiveUnary8616, memo: object,
 ) -> IRActiveUnary8616:
     """Detach one exact active unary with its operand value."""
     clone = IRActiveUnary8616.__new__(IRActiveUnary8616)
@@ -325,8 +347,9 @@ def _detach_native_active_unary_8616(
     return clone
 
 
+@cython.ccall
 def _detach_native_refusal_8616(
-    refusal: IRRefusal, memo: dict[int, object],
+    refusal: IRRefusal, memo: object,
 ) -> IRRefusal:
     """Detach one exact ``IRRefusal``; shell-first keeps parity with cycles."""
     clone = IRRefusal.__new__(IRRefusal)
@@ -343,8 +366,9 @@ def _detach_native_refusal_8616(
     return clone
 
 
+@cython.ccall
 def _detach_native_call_output_8616(
-    provenance: IRCallOutputProvenance8616, memo: dict[int, object],
+    provenance: IRCallOutputProvenance8616, memo: object,
 ) -> IRCallOutputProvenance8616:
     """Detach one exact call-output provenance record."""
     clone = IRCallOutputProvenance8616.__new__(IRCallOutputProvenance8616)
@@ -363,8 +387,9 @@ def _detach_native_call_output_8616(
     return clone
 
 
+@cython.ccall
 def _detach_native_origin_8616(
-    origin: IRInstructionOrigin8616, memo: dict[int, object],
+    origin: IRInstructionOrigin8616, memo: object,
 ) -> IRInstructionOrigin8616:
     """Detach one exact instruction origin; shell-first for cycle parity."""
     clone = IRInstructionOrigin8616.__new__(IRInstructionOrigin8616)
@@ -395,7 +420,8 @@ def _detach_native_origin_8616(
     return clone
 
 
-def _detach_native_block_8616(block: IRBlock, memo: dict[int, object]) -> IRBlock:
+@cython.ccall
+def _detach_native_block_8616(block: IRBlock, memo: object) -> IRBlock:
     """Detach one exact ``IRBlock`` shell-first for cyclic instructions."""
     clone = IRBlock.__new__(IRBlock)
     memo[id(block)] = clone
@@ -431,7 +457,8 @@ _TYPED_NODE_DETACHERS_8616: dict[type, Callable[..., object]] = {
 }
 
 
-def _is_seedable_native_leaf_8616(value: IRValue) -> bool:
+@cython.ccall
+def _is_seedable_native_leaf_8616(value: IRValue) -> cython.bint:
     """Return whether ``value`` is an exact leaf safe to rebuild directly.
 
     Nested provenance (``index``, ``call_output``, ``active_unary``) or any
@@ -447,7 +474,8 @@ def _is_seedable_native_leaf_8616(value: IRValue) -> bool:
     )
 
 
-def _seedable_native_scalar_fields_8616(value: IRValue) -> bool:
+@cython.ccall
+def _seedable_native_scalar_fields_8616(value: IRValue) -> cython.bint:
     """Return whether every scalar field is an exact immutable builtin."""
     return (
         type(value.space) is MemSpace
@@ -464,21 +492,24 @@ def _seedable_native_scalar_fields_8616(value: IRValue) -> bool:
     )
 
 
-def _exact_optional_int_8616(value: object) -> bool:
+@cython.ccall
+def _exact_optional_int_8616(value: object) -> cython.bint:
     """Return whether ``value`` is absent or an exact immutable int."""
     return value is None or type(value) in _EXACT_INT_TYPES_8616
 
 
-def _exact_optional_str_8616(value: object) -> bool:
+@cython.ccall
+def _exact_optional_str_8616(value: object) -> cython.bint:
     """Return whether ``value`` is absent or an exact string."""
     return value is None or type(value) is str
 
 
-def _exact_str_tuple_8616(value: tuple[object, ...]) -> bool:
+def _exact_str_tuple_8616(value: object) -> cython.bint:
     """Return whether ``value`` is an exact tuple of exact strings."""
-    return type(value) is tuple and all(type(item) is str for item in value)
+    return type(value) is tuple and all(type(item) is str for item in iter(value))
 
 
+@cython.ccall
 def _detach_native_leaf_8616(value: IRValue) -> IRValue:
     """Rebuild one detached leaf preserving every field, ``compare=False`` too.
 
@@ -503,6 +534,7 @@ def _detach_native_leaf_8616(value: IRValue) -> IRValue:
     )
 
 
+@cython.ccall
 def native_copy_memo_producers_8616() -> tuple[object, ...]:
     """Bind copier helpers to the native import's existing source identity."""
     return (

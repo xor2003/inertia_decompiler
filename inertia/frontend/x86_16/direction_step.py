@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Derive native string direction from the architectural DF bit.
 
 Layer: Frontend.
@@ -7,6 +8,7 @@ direction state is stale. This never skips a FLAGS or direction-state write.
 """
 
 from __future__ import annotations
+import cython
 
 from typing import Protocol, cast
 
@@ -22,10 +24,11 @@ from .vex_value_contract import require_vex_value_8616
 class _DirectionProof8616(Protocol):
     """Per-instruction evidence for every consumed DF source projection."""
 
-    _inertia_direction_projection_reports_8616: tuple[BitSourceProjection8616, ...]
+    _inertia_direction_projection_reports_8616: object
     irsb_c: IRSBCustomizer
 
 
+@cython.ccall
 def lifted_direction_step_8616(instruction: object, flags_value: object) -> VexValue:
     """Project DF through the lifter facade's native customizer-compatible API."""
     # The facade deliberately emulates IRSBCustomizer while retaining its own

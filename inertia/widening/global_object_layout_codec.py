@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Encode closed indexed-global Widening evidence for clean workers.
 
 Layer: Widening.
@@ -9,6 +10,8 @@ Do not join values from rendered text, cosmetic shape, postprocess, or CLI/repor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from inertia.alias.indexed_address_access_contracts import (
     IndexedAliasAccessFact8616,
@@ -29,10 +32,12 @@ from .global_object_layout import (
     GlobalObjectLayoutSourceKind8616,
     TransportedGlobalObjectLayoutSource8616,
 )
+import operator
 
 _SCHEMA_8616 = 1
 
 
+@cython.ccall
 def _source_record_8616(refusal: GlobalObjectLayoutRefusal8616) -> dict[str, str]:
     """Reduce one typed Alias source to its stable category and verdict."""
     source = refusal.source
@@ -57,6 +62,7 @@ def _source_record_8616(refusal: GlobalObjectLayoutRefusal8616) -> dict[str, str
     return {"kind": kind.value, "summary": summary}
 
 
+@cython.ccall
 def global_object_layout_evidence_record_8616(
     evidence: GlobalObjectLayoutEvidence8616,
 ) -> dict[str, object]:
@@ -76,7 +82,7 @@ def global_object_layout_evidence_record_8616(
                 "field_offsets": list(layout.field_offsets),
                 "family_base_offset": layout.family_base_offset,
             }
-            for layout in evidence.layouts
+            for layout in iter(evidence.layouts)
         ],
         "counts": {
             "raw": evidence.raw_fact_count,
@@ -92,19 +98,21 @@ def global_object_layout_evidence_record_8616(
                 "detail": refusal.detail,
                 "source": _source_record_8616(refusal),
             }
-            for refusal in evidence.refusals
+            for refusal in iter(evidence.refusals)
         ],
     }
 
 
-def _nonnegative_int_8616(value: object, *, field: str) -> int:
+@cython.ccall
+def _nonnegative_int_8616(value: object, *, field: object) -> cython.longlong:
     """Parse one strict nonnegative integer transport field."""
     if not isinstance(value, int) or isinstance(value, bool) or value < 0:
         raise ValueError(f"global-object transport has invalid {field}")
     return value
 
 
-def _nonempty_string_8616(value: object, *, field: str) -> str:
+@cython.ccall
+def _nonempty_string_8616(value: object, *, field: object) -> object:
     """Parse one strict nonempty string transport field."""
     if not isinstance(value, str) or not value:
         raise ValueError(f"global-object transport has invalid {field}")
@@ -113,13 +121,14 @@ def _nonempty_string_8616(value: object, *, field: str) -> str:
 
 def _layout_from_record_8616(record: object) -> GlobalObjectLayout8616:
     """Validate and restore one transported layout."""
+    raw_fields: object
     if not isinstance(record, dict):
         raise ValueError("global-object transport layout must be an object")
     raw_fields = record.get("field_offsets")
     if not isinstance(raw_fields, list):
         raise ValueError("global-object transport has invalid field offsets")
     fields = tuple(
-        _nonnegative_int_8616(value, field="field offset") for value in raw_fields
+        _nonnegative_int_8616(value, field="field offset") for value in iter(raw_fields)
     )
     layout = GlobalObjectLayout8616(
         address=IRAddress(
@@ -144,8 +153,10 @@ def _layout_from_record_8616(record: object) -> GlobalObjectLayout8616:
     return layout
 
 
+@cython.ccall
 def _refusal_from_record_8616(record: object) -> GlobalObjectLayoutRefusal8616:
     """Validate and restore one transported refusal summary."""
+    source_record: object
     if not isinstance(record, dict):
         raise ValueError("global-object transport refusal must be an object")
     source_record = record.get("source")
@@ -181,7 +192,10 @@ def global_object_layout_evidence_from_record_8616(
     record: object,
 ) -> GlobalObjectLayoutEvidence8616:
     """Restore and close one clean-worker Widening evidence record."""
-    if not isinstance(record, dict) or record.get("schema") != _SCHEMA_8616:
+    counts: object
+    raw_layouts: object
+    raw_refusals: object
+    if not isinstance(record, dict) or operator.ne(record.get("schema"), _SCHEMA_8616):
         raise ValueError("global-object transport has an unsupported schema")
     raw_layouts = record.get("layouts")
     raw_refusals = record.get("refusals")
@@ -193,7 +207,7 @@ def global_object_layout_evidence_from_record_8616(
     ):
         raise ValueError("global-object transport has invalid evidence collections")
     evidence = GlobalObjectLayoutEvidence8616(
-        layouts=tuple(_layout_from_record_8616(item) for item in raw_layouts),
+        layouts=tuple(_layout_from_record_8616(item) for item in iter(raw_layouts)),
         raw_fact_count=_nonnegative_int_8616(counts.get("raw"), field="raw count"),
         normalized_fact_count=_nonnegative_int_8616(
             counts.get("normalized"),
@@ -211,7 +225,7 @@ def global_object_layout_evidence_from_record_8616(
             counts.get("failure"),
             field="failure count",
         ),
-        refusals=tuple(_refusal_from_record_8616(item) for item in raw_refusals),
+        refusals=tuple(_refusal_from_record_8616(item) for item in iter(raw_refusals)),
     )
     if not evidence.closed:
         raise ValueError("transported global-object Widening evidence did not close")

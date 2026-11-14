@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify typed condition-producer register bindings.
 
 Layer: Alias.
@@ -11,6 +12,8 @@ source, COD, or sidecars.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, replace
 from enum import StrEnum
@@ -32,6 +35,9 @@ from .condition_register_storage import (
     zero_extended_register_storage_8616,
 )
 from .register_reaching_source import RegisterReachingSourceVerdict8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = (
     "ConditionRegisterSourceBindingResult8616",
@@ -44,8 +50,8 @@ __all__ = (
     "condition_semantic_register_operands_8616",
 )
 
-_BINARY_PRODUCER_ARITY: int = 3
-_REGISTER_SUBVIEW_SOURCE_ARITY: int = 7
+_BINARY_PRODUCER_ARITY: cython.longlong = 3
+_REGISTER_SUBVIEW_SOURCE_ARITY: cython.longlong = 7
 
 
 class ConditionRegisterSourceBindingVerdict8616(StrEnum):
@@ -56,29 +62,30 @@ class ConditionRegisterSourceBindingVerdict8616(StrEnum):
     UNKNOWN_REFUSE = "unknown_refuse"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionRegisterSourceBindingStats8616:
     """Closed evidence counters for cross-block condition-register binding."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionRegisterSourceBindingResult8616:
     """Return bound conditions, a typed verdict, and closed evidence counts."""
 
-    conditions: tuple[ConditionIR, ...]
+    conditions: object
     verdict: ConditionRegisterSourceBindingVerdict8616
     stats: ConditionRegisterSourceBindingStats8616
 
 
+@cython.ccall
 def condition_self_test_register_binding_8616(
     condition: ConditionIR,
-) -> tuple[str, object] | None:
+) -> object:
     """Return the register and operand proven by a logical self-test."""
     semantics = condition.producer_semantics
     if (
@@ -90,7 +97,7 @@ def condition_self_test_register_binding_8616(
     if (
         not isinstance(semantics[1], str)
         or not isinstance(semantics[2], str)
-        or semantics[1].lower() != semantics[2].lower()
+        or operator.ne(semantics[1].lower(), semantics[2].lower())
     ):
         return None
     return semantics[1].lower(), condition.lhs
@@ -100,21 +107,24 @@ def condition_self_test_storage_bindings_8616(
     condition: ConditionIR,
 ) -> tuple[tuple[str, object], ...]:
     """Return explicit bindings for the register used by one logical self-test."""
+    self_test: object
     self_test = condition_self_test_register_binding_8616(condition)
     if self_test is None:
         return ()
     register_name, _operand = self_test
     return tuple(
         (register_name, binding.value)
-        for binding in condition.register_bindings
-        if binding.register_name.lower() == register_name
+        for binding in iter(condition.register_bindings)
+        if operator.eq(binding.register_name.lower(), register_name)
     )
 
 
+@cython.ccall
 def condition_semantic_register_operands_8616(
     condition: ConditionIR,
 ) -> tuple[tuple[str, object], ...]:
     """Map canonical condition-producer semantics to register operands."""
+    self_test: object
     self_test = condition_self_test_register_binding_8616(condition)
     if self_test is not None:
         return (self_test,)
@@ -124,7 +134,7 @@ def condition_semantic_register_operands_8616(
     kind = semantics[0]
     if (
         kind == "loop_counter_predecrement"
-        and len(semantics) == _BINARY_PRODUCER_ARITY
+        and operator.eq(len(semantics), _BINARY_PRODUCER_ARITY)
         and isinstance(semantics[1], str)
         and semantics[2] == 1
     ):
@@ -153,33 +163,35 @@ def condition_operand_storage_binding_8616(
     """Resolve one semantic register operand to its exact Alias storage fact."""
     register_names = tuple(
         register_name
-        for register_name, semantic_operand in condition_semantic_register_operands_8616(
+        for register_name, semantic_operand in builtins.iter(condition_semantic_register_operands_8616(
             condition
-        )
+        ))
         if semantic_operand is operand
     )
     if len(register_names) != 1:
         return operand
     bindings = tuple(
         binding.value
-        for binding in condition.register_bindings
-        if binding.register_name.lower() == register_names[0]
+        for binding in iter(condition.register_bindings)
+        if operator.eq(binding.register_name.lower(), register_names[0])
     )
-    if not bindings or any(binding != bindings[0] for binding in bindings[1:]):
+    if not bindings or any(operator.ne(binding, bindings[0]) for binding in iter(bindings[1:])):
         return operand
     return bindings[0]
 
 
+@cython.ccall
 def _register_update_binding_from_reaching_source_8616(
     function: object,
-    source: tuple[object, ...] | None,
+    source: object,
     *,
-    width_bits: int,
-) -> tuple[IRBinaryValue, ConditionRegisterUpdateIR] | None:
+    width_bits: cython.longlong,
+) -> object:
     """Materialize one decoded full-register update and projected condition view."""
-    if not source or source[0] != "register_binary_subview" or len(source) != _REGISTER_SUBVIEW_SOURCE_ARITY:
+    rhs: object
+    if not source or source[0] != "register_binary_subview" or operator.ne(len(source), _REGISTER_SUBVIEW_SOURCE_ARITY):
         return None
-    op, lhs_name, rhs_name, shift_bits, view_bits, instruction_addr = source[1:]
+    op, lhs_name, rhs_name, shift_bits, view_bits, instruction_addr = tuple(source[1:])
     width = max(1, (width_bits + 7) // 8)
     if not (
         isinstance(op, str)
@@ -188,7 +200,7 @@ def _register_update_binding_from_reaching_source_8616(
         and isinstance(shift_bits, int)
         and isinstance(view_bits, int)
         and isinstance(instruction_addr, int)
-        and view_bits == width * 8
+        and operator.eq(view_bits, width * 8)
     ):
         return None
     rhs_reaching = recover_register_source_before_instruction_8616(
@@ -237,18 +249,18 @@ def _register_update_binding_from_reaching_source_8616(
 def _with_register_storage_binding_8616(
     condition: ConditionIR,
     *,
-    register_name: str,
+    register_name: object,
     storage: IRValue | IRBinaryValue,
     update: ConditionRegisterUpdateIR | None = None,
 ) -> ConditionIR:
     """Attach one coherent storage binding or fail on competing owned truth."""
     same_register = tuple(
         binding
-        for binding in condition.register_bindings
-        if binding.register_name.lower() == register_name
+        for binding in iter(condition.register_bindings)
+        if operator.eq(binding.register_name.lower(), register_name)
     )
     candidate = ConditionRegisterBindingIR(register_name, storage, update)
-    if any(binding != candidate for binding in same_register):
+    if any(binding != candidate for binding in iter(same_register)):
         raise PipelineHardError(
             "proven condition-register source conflicts with an existing binding",
             layer="alias",
@@ -262,18 +274,21 @@ def _with_register_storage_binding_8616(
         return condition
     return replace(
         condition,
-        register_bindings=(
-            *condition.register_bindings,
-            candidate,
-        ),
+        register_bindings=tuple(condition.register_bindings) + (candidate,),
     )
 
 
+@cython.ccall
 def bind_condition_register_sources_8616(
     function: object,
-    conditions: list[ConditionIR] | tuple[ConditionIR, ...],
+    conditions: object,
 ) -> ConditionRegisterSourceBindingResult8616:
     """Bind semantic register operands to storage proven at their producer."""
+    storage: object
+    update_binding: object
+    condition: object
+    operand: object
+    register_name: object
     ordered = tuple(sorted(conditions, key=condition_sort_key_8616))
     bound: list[ConditionIR] = []
     normalized = 0

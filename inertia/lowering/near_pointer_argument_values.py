@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize values after a call argument is proven to be a near pointer.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Any, cast
 
@@ -19,9 +22,11 @@ from angr.sim_type import SimTypeChar, SimTypeInt, SimTypeNum, SimTypePointer
 from inertia.lowering.c_ast_utils import _clone_c_ast_tree_8616
 
 from .near_pointer_value_runtime import NearPointerArgumentHelper8616
+import operator
 
 
-def is_near_pointer_argument_helper_call_8616(expression: object) -> bool:
+@cython.ccall
+def is_near_pointer_argument_helper_call_8616(expression: object) -> cython.bint:
     """Return True only for this module's retained single-evaluation wrapper.
 
     Representation identity, not a name match: the exact foreign AST class
@@ -39,19 +44,20 @@ def is_near_pointer_argument_helper_call_8616(expression: object) -> bool:
     call_expression = cast(structured_c.CFunctionCall, expression)
     return (
         call_expression.callee_func is None
-        and call_expression.callee_target == helper_identity.value
+        and operator.eq(call_expression.callee_target, helper_identity.value)
         and len(call_expression.args) == 2
         and call_expression.tags.get("inertia_near_pointer_argument_helper") is helper_identity
     )
 
 
+@cython.ccall
 def materialize_near_pointer_argument_value_8616(
     expression: object,
     segment: object,
     *,
     codegen: object,
-    c_target: str,
-) -> tuple[object, bool]:
+    c_target,
+) -> tuple[object, cython.bint]:
     """Lower an already-classified near pointer; return whether wrapping occurred."""
     if is_near_pointer_argument_helper_call_8616(expression):
         # A name alone never suppresses conversion of a machine call's

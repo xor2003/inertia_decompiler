@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Normalize encoded x86 immediates before frontend effect construction.
 
 Layer: Semantics.
@@ -9,11 +10,14 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 __all__ = ("sign_extend_u8_to_u16",)
 
 
-def sign_extend_u8_to_u16(value: int) -> int:
+@cython.ccall
+def sign_extend_u8_to_u16(value: cython.longlong) -> cython.longlong:
     """Return the 16-bit bit pattern for one sign-extended encoded byte."""
     encoded = value & 0xFF
     return encoded | (0xFF00 if encoded & 0x80 else 0)

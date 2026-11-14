@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Authoritative structured-C stack-pointer alias result and cache contract.
 
 Layer: Alias.
@@ -34,6 +35,7 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import cython
 
 import enum
 import types
@@ -58,6 +60,9 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypePointer
 from angr.sim_variable import SimStackVariable
+import dataclasses
+import operator
+import builtins
 
 _STACK_POINTER_ALIAS_CACHE_ATTR_8616 = "_inertia_stack_pointer_aliases_for_cvars"
 _STACK_POINTER_ALIAS_NODE_BUDGET_8616 = 4096
@@ -98,7 +103,7 @@ class StackPointerAliasStatus8616(enum.Enum):
     NODE_BUDGET_EXHAUSTED = "node_budget_exhausted"
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class StackPointerAliasResult8616:
     """One authoritative stack-alias result with verdict and closed counters.
 
@@ -124,16 +129,16 @@ class StackPointerAliasResult8616:
 
     root: object
     status: StackPointerAliasStatus8616
-    aliases: typing.Mapping[int, tuple[object, int]]
-    definition_index: typing.Mapping[int, int]
-    refused: frozenset[int]
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    decision_count: int = 0
-    visited_nodes: int = 0
+    aliases: typing.Mapping[cython.longlong, tuple[object, cython.longlong]]
+    definition_index: typing.Mapping[cython.longlong, cython.longlong]
+    refused: object
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    decision_count: cython.longlong = 0
+    visited_nodes: cython.longlong = 0
 
     def __post_init__(self) -> None:
         """Freeze the proof payload and enforce census invariants.
@@ -149,13 +154,13 @@ class StackPointerAliasResult8616:
         if set(self.aliases) & self.refused:
             raise ValueError("alias result has overlapping proven and refused variables")
         if self.status is StackPointerAliasStatus8616.COMPLETE:
-            if self.materialized_count != len(self.aliases):
+            if operator.ne(self.materialized_count, len(self.aliases)):
                 raise ValueError("complete alias result with unmaterialized aliases")
-            if self.classified_fact_count != self.materialized_count:
+            if operator.ne(self.classified_fact_count, self.materialized_count):
                 raise ValueError("complete alias result with non-positive classification")
-            if self.failure_count != len(self.refused):
+            if operator.ne(self.failure_count, len(self.refused)):
                 raise ValueError("complete alias result with inconsistent failure census")
-            if self.decision_count != self.classified_fact_count + self.failure_count:
+            if operator.ne(self.decision_count, self.classified_fact_count + self.failure_count):
                 raise ValueError("complete alias result with inconsistent decision census")
             if not (
                 self.raw_fact_count
@@ -167,16 +172,18 @@ class StackPointerAliasResult8616:
                 raise ValueError("complete alias result with inverted evidence funnel")
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether the evidence walk finished inside its budget."""
         return self.status is StackPointerAliasStatus8616.COMPLETE
 
 
-def _codegen_attr_8616(owner: object, name: str, default: object = None) -> object:
+@cython.ccall
+def _codegen_attr_8616(owner: object, name: object, default: object = None) -> object:
     """Dynamic third-party angr boundary: read optional codegen attributes."""
     return getattr(owner, name, default)
 
 
+@cython.ccall
 def read_stack_pointer_alias_map_8616(
     codegen: object,
 ) -> StackPointerAliasResult8616 | None:
@@ -188,6 +195,7 @@ def read_stack_pointer_alias_map_8616(
     mutation does not replace the root, so the postprocess invalidation hooks
     that clear the shared slot remain the authoritative stale-cache defense.
     """
+    root: object
     entry = _codegen_attr_8616(codegen, _STACK_POINTER_ALIAS_CACHE_ATTR_8616)
     if not isinstance(entry, StackPointerAliasResult8616):
         return None
@@ -198,6 +206,7 @@ def read_stack_pointer_alias_map_8616(
     return entry
 
 
+@cython.ccall
 def write_stack_pointer_alias_map_8616(codegen: object, entry: StackPointerAliasResult8616) -> None:
     """Store ``entry`` in the shared codegen alias-map cache slot."""
     # dynamic-boundary: the cache slot lives on angr codegen objects shared by
@@ -205,15 +214,17 @@ def write_stack_pointer_alias_map_8616(codegen: object, entry: StackPointerAlias
     typing.cast(typing.Any, codegen)._inertia_stack_pointer_aliases_for_cvars = entry
 
 
-def _iter_statements_in_order_8616(root: object) -> Iterator[tuple[object, bool]]:
+def _iter_statements_in_order_8616(root: object) -> Iterator[tuple[object, cython.bint]]:
     """Yield ``(node, conditional)`` in program order (depth-first pre-order).
 
     Children of any container other than a plain ``CStatements``/list sequence
     are conditional: branches, loop bodies, switch cases, and unknown control
     or statement nodes cannot prove an unconditional global alias.
     """
-    stack: list[tuple[object, bool]] = [(root, False)]
-    seen: set[int] = set()
+    conditional: object
+    node: object
+    stack: list[tuple[object, cython.bint]] = [(root, False)]
+    seen: set[cython.longlong] = set()
     while stack:
         node, conditional = stack.pop()
         if node is None:
@@ -227,11 +238,11 @@ def _iter_statements_in_order_8616(root: object) -> Iterator[tuple[object, bool]
 
 
 def _push_children_in_program_order_8616(
-    node: object, stack: list[tuple[object, bool]], conditional: bool
+    node: object, stack: object, conditional: cython.bint
 ) -> None:
     """Queue a node's children so they pop in program order."""
     if isinstance(node, CStatements):
-        stack.extend((child, conditional) for child in reversed(tuple(node.statements or ())))
+        stack.extend((child, conditional) for child in builtins.iter(reversed(tuple(node.statements or ()))))
     elif isinstance(node, CExpressionStatement):
         _push_loop_children_8616((node.expr,), stack, conditional)
     elif isinstance(node, CIfElse):
@@ -241,20 +252,24 @@ def _push_children_in_program_order_8616(
     elif isinstance(node, (CWhileLoop, CDoWhileLoop)):
         _push_loop_children_8616((node.body,), stack, True)
     elif isinstance(node, (list, tuple)):
-        stack.extend((child, True) for child in reversed(tuple(node)))
+        stack.extend((child, True) for child in builtins.iter(reversed(tuple(node))))
 
 
+@cython.ccall
 def _push_loop_children_8616(
-    children: tuple[object, ...], stack: list[tuple[object, bool]], conditional: bool
+    children: object, stack: object, conditional: cython.bint
 ) -> None:
     """Queue children so they pop in program order."""
+    child: object
     for child in children:
         if child is not None:
             stack.append((child, conditional))
 
 
-def _push_if_else_children_8616(node: CIfElse, stack: list[tuple[object, bool]]) -> None:
+@cython.ccall
+def _push_if_else_children_8616(node: CIfElse, stack: object) -> None:
     """Queue branch bodies of an if-else node in program order; each is conditional."""
+    pair: object
     if node.else_node is not None:
         stack.append((node.else_node, True))
     for pair in reversed(tuple(node.condition_and_nodes or ())):
@@ -262,7 +277,8 @@ def _push_if_else_children_8616(node: CIfElse, stack: list[tuple[object, bool]])
             stack.append((pair[1], True))
 
 
-def _stack_var_pointer_capable_8616(var: object, cvar: object) -> bool:
+@cython.ccall
+def _stack_var_pointer_capable_8616(var: object, cvar: object) -> cython.bint:
     """Return whether a stack variable may carry a pointer-shaped value."""
     if not isinstance(var, SimStackVariable) or var.base != "bp":
         return False
@@ -271,7 +287,8 @@ def _stack_var_pointer_capable_8616(var: object, cvar: object) -> bool:
     return isinstance(_codegen_attr_8616(cvar, "variable_type"), SimTypePointer)
 
 
-def _resolve_reference_alias_8616(node: CUnaryOp) -> tuple[object, int] | None:
+@cython.ccall
+def _resolve_reference_alias_8616(node: CUnaryOp) -> object:
     """Resolve ``&operand`` to a stack-slot alias.
 
     Address-of names the operand's own storage: only a bp slot has provable
@@ -286,7 +303,8 @@ def _resolve_reference_alias_8616(node: CUnaryOp) -> tuple[object, int] | None:
     return None
 
 
-def _rhs_is_pointer_shaped_8616(rhs: object) -> bool:
+@cython.ccall
+def _rhs_is_pointer_shaped_8616(rhs: object) -> cython.bint:
     """Return whether an unwrapped rhs can carry a stack-pointer alias.
 
     A residual ``CTypeCast`` counts so a narrowing cast is refused rather
@@ -297,6 +315,7 @@ def _rhs_is_pointer_shaped_8616(rhs: object) -> bool:
     )
 
 
+@cython.ccall
 def _canonical_unwrap_8616(node: object) -> object:
     """Unwrap only representation-preserving casts; never erase narrowing.
 
@@ -315,10 +334,11 @@ def _canonical_unwrap_8616(node: object) -> object:
     return node
 
 
+@cython.ccall
 def _resolve_rhs_alias_8616(
     expr: object,
-    proven: dict[int, tuple[object, int]],
-) -> tuple[object, int] | None:
+    proven: object,
+) -> object:
     """Resolve one rhs expression against earlier proven definitions.
 
     A rhs variable resolves only through a definition already proven (an
@@ -326,6 +346,9 @@ def _resolve_rhs_alias_8616(
     Add/Sub adjusts a proven or referenced base by a constant. Any other
     shape cannot prove a stack address.
     """
+    lhs: object
+    rhs: object
+    variable: object
     node = _canonical_unwrap_8616(expr)
     if isinstance(node, CVariable):
         # A plain copy carries the rhs VALUE: only a proven carrier qualifies.
@@ -351,8 +374,10 @@ def _resolve_rhs_alias_8616(
     return None
 
 
+@cython.ccall
 def _carrier_lhs_variable_8616(stmt: object) -> object | None:
     """Return the carrier-eligible lhs variable of one assignment, if any."""
+    variable: object
     lhs = _canonical_unwrap_8616(_codegen_attr_8616(stmt, "lhs"))
     if not isinstance(lhs, CVariable):
         return None
@@ -362,7 +387,8 @@ def _carrier_lhs_variable_8616(stmt: object) -> object | None:
     return typing.cast(object, variable)
 
 
-def _lhs_carrier_gate_ok_8616(variable: object, lhs: object, rhs: object) -> bool:
+@cython.ccall
+def _lhs_carrier_gate_ok_8616(variable: object, lhs: object, rhs: object) -> cython.bint:
     """Return whether a non-pointer-capable stack lhs may still carry a pointer."""
     if not isinstance(variable, SimStackVariable) or _stack_var_pointer_capable_8616(variable, lhs):
         return True
@@ -371,22 +397,26 @@ def _lhs_carrier_gate_ok_8616(variable: object, lhs: object, rhs: object) -> boo
 
 def _expr_children_8616(node: object) -> Iterator[object]:
     """Yield expression-level children of a structured-C node."""
+    child: object
+    attr: object
     for attr in _EXPR_CHILD_ATTRS_8616:
         child = _codegen_attr_8616(node, attr)
         if child is None:
             continue
         if isinstance(child, (list, tuple)):
-            yield from (item for item in child if item is not None)
+            yield from (item for item in iter(child) if item is not None)
         else:
             yield child
 
 
+@cython.ccall
 def _mark_lhs_vars_mutated_8616(
-    lhs: object, mutated: set[int], budget: list[int]
-) -> bool:
+    lhs: object, mutated: object, budget: object
+) -> cython.bint:
     """Mark every variable under a write-position expression as mutated."""
+    node: object
     stack: list[object] = [lhs]
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     while stack:
         node = stack.pop()
         if node is None or id(node) in seen:
@@ -403,8 +433,9 @@ def _mark_lhs_vars_mutated_8616(
     return True
 
 
+@cython.ccall
 def _unary_op_evidence_8616(
-    item: CUnaryOp, in_call: bool, escaped: set[int], mutated: set[int]
+    item: CUnaryOp, in_call: cython.bint, escaped: object, mutated: object
 ) -> None:
     """Record escape/mutation evidence from one unary-op node."""
     operand = item.operand
@@ -419,15 +450,15 @@ def _unary_op_evidence_8616(
 
 def _scan_expr_evidence_8616(
     node: object,
-    index: int,
+    index: cython.longlong,
     *,
-    prune_containers: bool,
-    reads: dict[int, int],
-    escaped: set[int],
-    mutated: set[int],
-    call_reads: dict[int, list[int]],
-    budget: list[int],
-) -> bool:
+    prune_containers: cython.bint,
+    reads: object,
+    escaped: object,
+    mutated: object,
+    call_reads: object,
+    budget: object,
+) -> cython.bint:
     """Collect reads, escapes, and mutations under one expression subtree.
 
     ``reads`` records each variable's earliest read index. ``escaped``
@@ -436,8 +467,11 @@ def _scan_expr_evidence_8616(
     (increments, nested assignments). ``prune_containers`` stops descent into
     statement containers that the ordered walk yields separately.
     """
-    stack: list[tuple[object, bool]] = [(node, False)]
-    seen: set[int] = set()
+    in_call: object
+    item: object
+    rhs: object
+    stack: list[tuple[object, cython.bint]] = [(node, False)]
+    seen: set[cython.longlong] = set()
     while stack:
         item, in_call = stack.pop()
         if item is None or id(item) in seen:
@@ -460,20 +494,22 @@ def _scan_expr_evidence_8616(
         if _scan_leaf_evidence_8616(item, index, in_call, reads, escaped, mutated, call_reads):
             continue
         child_in_call = in_call or isinstance(item, CFunctionCall)
-        stack.extend((child, child_in_call) for child in _expr_children_8616(item))
+        stack.extend((child, child_in_call) for child in builtins.iter(_expr_children_8616(item)))
     return True
 
 
+@cython.ccall
 def _scan_leaf_evidence_8616(
     item: object,
-    index: int,
-    in_call: bool,
-    reads: dict[int, int],
-    escaped: set[int],
-    mutated: set[int],
-    call_reads: dict[int, list[int]],
-) -> bool:
+    index: cython.longlong,
+    in_call: cython.bint,
+    reads: object,
+    escaped: object,
+    mutated: object,
+    call_reads: object,
+) -> cython.bint:
     """Handle leaf-level evidence for one scanned node; True if it is a leaf."""
+    variable: object
     if isinstance(item, CVariable):
         variable = item.variable
         if variable is not None:
@@ -487,8 +523,10 @@ def _scan_leaf_evidence_8616(
     return False
 
 
+@cython.ccall
 def _lhs_base_variable_8616(lhs: object) -> object | None:
     """Return the base variable of a write-position expression, if any."""
+    child: object
     node = _canonical_unwrap_8616(lhs)
     if isinstance(node, CVariable):
         return typing.cast(object, node.variable)
@@ -498,12 +536,16 @@ def _lhs_base_variable_8616(lhs: object) -> object | None:
     return None
 
 
+@cython.ccall
 def _scan_assignment_evidence_8616(
     node: object,
-    index: int,
-    out: tuple[dict[int, int], set[int], set[int], dict[int, list[int]], list[int]],
-) -> bool:
+    index: cython.longlong,
+    out: object,
+) -> cython.bint:
     """Scan an assignment's lhs index/pointee expressions and rhs."""
+    base_var: object
+    lhs: object
+    rhs: object
     reads, escaped, mutated, call_reads, budget = out
     lhs = _codegen_attr_8616(node, "lhs")
     if lhs is not None and not isinstance(_canonical_unwrap_8616(lhs), CVariable):
@@ -530,13 +572,14 @@ def _scan_assignment_evidence_8616(
 
 def _scan_statement_evidence_8616(
     node: object,
-    index: int,
-    out: tuple[dict[int, int], set[int], set[int], dict[int, list[int]], list[int]],
-) -> bool:
+    index: cython.longlong,
+    out: object,
+) -> cython.bint:
     """Scan one statement node's non-child evidence (conditions and exprs)."""
+    pair: object
     reads, escaped, mutated, call_reads, budget = out
 
-    def scan(sub: object) -> bool:
+    def scan(sub: object) -> cython.bint:
         if sub is None:
             return True
         return _scan_expr_evidence_8616(
@@ -566,17 +609,19 @@ def _scan_statement_evidence_8616(
     )
 
 
-def _is_control_unsafe_node_8616(node: object) -> bool:
+@cython.ccall
+def _is_control_unsafe_node_8616(node: object) -> cython.bint:
     """Return whether a top-level node can alter execution order.
 
     Labels, jumps, switch constructs, and unknown statement types can make a
     later definition unreachable or reachable without dominating uses, so
     definitions after them cannot publish unconditional aliases.
     """
-    return not isinstance(node, (*_CONTAINER_TYPES_8616, CAssignment, CExpression))
+    return not isinstance(node, tuple(_CONTAINER_TYPES_8616) + (CAssignment, CExpression))
 
 
-def _write_range_8616(lhs: object) -> tuple[int, int, int] | None:
+@cython.ccall
+def _write_range_8616(lhs: object) -> object:
     """Return ``(start, end, var_id)`` of a write to a bp stack slot, if any."""
     base_var = _lhs_base_variable_8616(lhs)
     if not isinstance(base_var, SimStackVariable) or base_var.base != "bp":
@@ -586,25 +631,30 @@ def _write_range_8616(lhs: object) -> tuple[int, int, int] | None:
     return None
 
 
+@cython.ccall
 def _collect_evidence_8616(
-    root: object, max_nodes: int
+    root: object, max_nodes: cython.longlong
 ) -> tuple[
-    list[tuple[int, object, bool]],
-    dict[int, int],
-    set[int],
-    set[int],
-    dict[int, list[int]],
-    list[tuple[int, int, int]],
-    int,
-    bool,
+    list[tuple[cython.longlong, object, cython.bint]],
+    dict[cython.longlong, cython.longlong],
+    set[cython.longlong],
+    set[cython.longlong],
+    dict[cython.longlong, list[cython.longlong]],
+    list[tuple[cython.longlong, cython.longlong, cython.longlong]],
+    cython.longlong,
+    cython.bint,
 ]:
     """Collect ordered assignments plus read/escape/mutation/write evidence."""
-    assignments: list[tuple[int, object, bool]] = []
-    reads: dict[int, int] = {}
-    escaped: set[int] = set()
-    mutated: set[int] = set()
-    call_reads: dict[int, list[int]] = {}
-    write_ranges: list[tuple[int, int, int]] = []
+    write_range: object
+    conditional: object
+    index: object
+    node: object
+    assignments: list[tuple[cython.longlong, object, cython.bint]] = []
+    reads: dict[cython.longlong, cython.longlong] = {}
+    escaped: set[cython.longlong] = set()
+    mutated: set[cython.longlong] = set()
+    call_reads: dict[cython.longlong, list[cython.longlong]] = {}
+    write_ranges: list[tuple[cython.longlong, cython.longlong, cython.longlong]] = []
     control_unsafe = False
     budget = [max_nodes]
     for index, (node, conditional) in enumerate(_iter_statements_in_order_8616(root)):
@@ -628,8 +678,9 @@ def _collect_evidence_8616(
     return assignments, reads, escaped, mutated, call_reads, write_ranges, visited_nodes, False
 
 
+@cython.ccall
 def _pointer_target_of_rhs_8616(
-    rhs: object, latest_targets: dict[int, int | None]
+    rhs: object, latest_targets: object
 ) -> int | None:
     """Return the variable id whose slot address an rhs may carry, if any.
 
@@ -637,6 +688,8 @@ def _pointer_target_of_rhs_8616(
     propagates that carrier's current target. Other shapes carry no known
     stack address.
     """
+    target: object
+    side: object
     node = _canonical_unwrap_8616(rhs)
     if isinstance(node, CUnaryOp) and node.op == "Reference":
         operand = _canonical_unwrap_8616(node.operand)
@@ -656,9 +709,9 @@ def _pointer_target_of_rhs_8616(
 
 
 def _resolve_escaped_vars_8616(
-    assignments: list[tuple[int, object, bool]],
-    call_reads: dict[int, list[int]],
-    escaped: set[int],
+    assignments: object,
+    call_reads: object,
+    escaped: object,
 ) -> None:
     """Extend ``escaped`` with carriers whose addresses reach call args.
 
@@ -667,8 +720,16 @@ def _resolve_escaped_vars_8616(
     read escapes; copies propagate targets transitively. One ordered pass,
     monotonic and bounded.
     """
-    latest_targets: dict[int, int | None] = {}
-    defs: dict[int, list[tuple[int, int | None]]] = {}
+    target: object
+    variable: object
+    _conditional: object
+    carrier_id: object
+    index: object
+    read_index: object
+    read_indices: object
+    stmt: object
+    latest_targets: dict[cython.longlong, int | None] = {}
+    defs: dict[cython.longlong, list[tuple[cython.longlong, int | None]]] = {}
     for index, stmt, _conditional in assignments:
         variable = _carrier_lhs_variable_8616(stmt)
         if variable is None:
@@ -683,7 +744,7 @@ def _resolve_escaped_vars_8616(
         for read_index in read_indices:
             earlier = [
                 (def_index, target)
-                for def_index, target in defs.get(carrier_id, ())
+                for def_index, target in builtins.iter(defs.get(carrier_id, ()))
                 if def_index < read_index
             ]
             if not earlier:
@@ -693,15 +754,19 @@ def _resolve_escaped_vars_8616(
                 escaped.add(target)
 
 
+@cython.ccall
 def _carrier_slot_overlapped_8616(
-    variable: object, key: int, write_ranges: list[tuple[int, int, int]]
-) -> bool:
+    variable: object, key: cython.longlong, write_ranges: object
+) -> cython.bint:
     """Return whether another bp slot write overlaps this carrier's storage.
 
     Distinct ``SimStackVariable`` objects are different views: a byte or word
     view overlapping the carrier's range can mutate its stored value even
     when the object identity differs, so object id alone is not proof.
     """
+    write_end: object
+    write_id: object
+    write_start: object
     if not isinstance(variable, SimStackVariable):
         return False
     if not (isinstance(variable.offset, int) and isinstance(variable.size, int)):
@@ -714,17 +779,18 @@ def _carrier_slot_overlapped_8616(
     return False
 
 
+@cython.ccall
 def _candidate_is_unproven_8616(
-    key: int,
-    index: int,
-    conditional: bool,
+    key: cython.longlong,
+    index: cython.longlong,
+    conditional: cython.bint,
     variable: object,
-    def_counts: dict[int, int],
-    reads: dict[int, int],
-    escaped: set[int],
-    mutated: set[int],
-    write_ranges: list[tuple[int, int, int]],
-) -> bool:
+    def_counts: object,
+    reads: object,
+    escaped: object,
+    mutated: object,
+    write_ranges: object,
+) -> cython.bint:
     """Return whether a classified candidate lacks a publishable proof."""
     if def_counts.get(key, 0) != 1 or conditional:
         return True
@@ -735,18 +801,24 @@ def _candidate_is_unproven_8616(
     )
 
 
+@cython.ccall
 def _propagate_ordered_defs_8616(
-    assignments: list[tuple[int, object, bool]],
-    def_counts: dict[int, int],
-    reads: dict[int, int],
-    escaped: set[int],
-    mutated: set[int],
-    write_ranges: list[tuple[int, int, int]],
-) -> tuple[dict[int, tuple[object, int]], dict[int, int], set[int], int]:
+    assignments: object,
+    def_counts: object,
+    reads: object,
+    escaped: object,
+    mutated: object,
+    write_ranges: object,
+) -> tuple[dict[cython.longlong, tuple[object, cython.longlong]], dict[cython.longlong, cython.longlong], set[cython.longlong], cython.longlong]:
     """Propagate aliases through ordered unique unconditional definitions."""
-    proven: dict[int, tuple[object, int]] = {}
-    definition_index: dict[int, int] = {}
-    refused: set[int] = set()
+    resolved: object
+    variable: object
+    conditional: object
+    index: object
+    stmt: object
+    proven: dict[cython.longlong, tuple[object, cython.longlong]] = {}
+    definition_index: dict[cython.longlong, cython.longlong] = {}
+    refused: set[cython.longlong] = set()
     normalized_count = 0
     for index, stmt, conditional in assignments:
         lhs = _canonical_unwrap_8616(_codegen_attr_8616(stmt, "lhs"))
@@ -775,11 +847,12 @@ def _propagate_ordered_defs_8616(
     return proven, definition_index, refused, normalized_count
 
 
+@cython.ccall
 def compute_stack_pointer_aliases_8616(
     codegen: object,
     root: object,
     *,
-    max_nodes: int = _STACK_POINTER_ALIAS_NODE_BUDGET_8616,
+    max_nodes: cython.longlong = _STACK_POINTER_ALIAS_NODE_BUDGET_8616,
 ) -> StackPointerAliasResult8616:
     """Compute the authoritative ordered-unique-definition stack alias map.
 
@@ -789,6 +862,10 @@ def compute_stack_pointer_aliases_8616(
     definition, and no unsupported write or escaped address can mutate it.
     All other carrier candidates refuse explicitly.
     """
+    variable: object
+    _conditional: object
+    _index: object
+    stmt: object
     evidence = _collect_evidence_8616(root, max_nodes)
     (
         assignments,
@@ -802,7 +879,7 @@ def compute_stack_pointer_aliases_8616(
     ) = evidence
 
     raw_fact_count = len(assignments)
-    def_counts: dict[int, int] = {}
+    def_counts: dict[cython.longlong, cython.longlong] = {}
     for _index, stmt, _conditional in assignments:
         variable = _carrier_lhs_variable_8616(stmt)
         if variable is None:

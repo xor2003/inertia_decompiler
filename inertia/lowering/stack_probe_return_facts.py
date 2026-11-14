@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Build lowering-owned stack-probe return facts from callsite summaries.
 
 Layer: Types/Lowering.
@@ -7,14 +8,16 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import cython
 
 import typing
 from dataclasses import dataclass
 from typing import Any
 
 from inertia.semantics.callsite_summary import CallsiteSummary8616
+import dataclasses
 
-type CarrierKey8616 = tuple[str, str | int]
+CarrierKey8616 = typing.TypeAliasType("CarrierKey8616", tuple[str, str | int])
 
 __all__ = [
     "CarrierKey8616",
@@ -23,23 +26,25 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TypedStackProbeReturnFact8616:
     """Lowering-owned proof that a stack-probe call returns an SS stack address."""
 
-    call_node_id: int
-    segment_space: str
-    width: int
+    call_node_id: cython.longlong
+    segment_space: object
+    width: cython.longlong
     carrier_keys: tuple[CarrierKey8616, ...] = ()
 
 
-def _dynamic_codegen_attr_8616(obj: object, name: str, default: object = None) -> Any:  # noqa: ANN401
+@cython.ccall
+def _dynamic_codegen_attr_8616(obj: object, name: object, default: object = None) -> Any:  # noqa: ANN401
     """Dynamic codegen boundary: read optional metadata attached by angr codegen passes."""
     return getattr(obj, name, default)
 
 
+@cython.ccall
 def _stack_probe_summary_fact_8616(
-    call_node_id: int, summary: CallsiteSummary8616
+    call_node_id: cython.longlong, summary: CallsiteSummary8616
 ) -> TypedStackProbeReturnFact8616 | None:
     """Project one callsite summary into a stack-probe return fact, or refuse."""
     if not summary.stack_probe_helper:
@@ -64,10 +69,14 @@ def _stack_probe_summary_fact_8616(
     )
 
 
-def build_typed_stack_probe_return_facts_8616(codegen: object) -> dict[int, TypedStackProbeReturnFact8616]:
+@cython.ccall
+def build_typed_stack_probe_return_facts_8616(codegen: object) -> object:
     """Build lowering-owned stack-probe facts from typed callsite summaries."""
+    fact: object
+    call_node_id: object
+    summary: object
     summary_map = _dynamic_codegen_attr_8616(codegen, "_inertia_callsite_summaries", None)
-    facts: dict[int, TypedStackProbeReturnFact8616] = {}
+    facts: dict[cython.longlong, TypedStackProbeReturnFact8616] = {}
     if isinstance(summary_map, dict):
         for call_node_id, summary in summary_map.items():
             if not isinstance(call_node_id, int):

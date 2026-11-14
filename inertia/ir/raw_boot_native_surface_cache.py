@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: IR.
 Responsibility: reuse authenticated native import surfaces within one request.
 
@@ -7,6 +8,8 @@ Owns typed Value, Address, Condition, instruction facts, and lossless normalizat
 Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 from __future__ import annotations
+import typing
+import cython
 
 import json
 from collections.abc import Callable, Mapping
@@ -22,9 +25,11 @@ from inertia.frontend.x86_16.frontend_function_boundary import ExactFunctionRang
 from .core import IRFunctionArtifact
 from .function_ir_registry import _existing_registry_8616
 from .raw_boot_blocked_prefix import _architecture_key_8616
+import dataclasses
+import operator
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RawBootNativeSurfaceRecord8616:
     """An imported surface with a value snapshot of all mutable authorities."""
 
@@ -32,20 +37,21 @@ class RawBootNativeSurfaceRecord8616:
     source: object
     boundary: ExactFunctionRangeBoundary8616
     artifact: IRFunctionArtifact
-    key: tuple[object, ...]
-    artifact_key: str
-    pinned: tuple[object, ...]
+    key: object
+    artifact_key: object
+    pinned: object
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class RawBootNativeSurfaceCache8616:
     """Request-local imports; a fresh resolution always starts empty."""
 
-    records: dict[int, RawBootNativeSurfaceRecord8616] = field(default_factory=dict)
-    reuse_count: int = 0
+    records: object = field(default_factory=dict)
+    reuse_count: cython.longlong = 0
 
 
-def _json_key_8616(value: object) -> str | None:
+@cython.ccall
+def _json_key_8616(value: object) -> object:
     """Snapshot owned JSON projections, refusing unknown object metadata."""
     try:
         return json.dumps(value, sort_keys=True, allow_nan=False)
@@ -53,12 +59,16 @@ def _json_key_8616(value: object) -> str | None:
         return None
 
 
+@cython.ccall
 def _registry_snapshot_8616(
-    registry: Mapping[int, IRFunctionArtifact] | None,
-) -> tuple[tuple[tuple[int, IRFunctionArtifact], ...], tuple[tuple[int, int, str], ...]] | None:
+    registry: object,
+) -> object:
     """Retain registry entries only with a JSON snapshot of every authority."""
-    items = () if registry is None else tuple(sorted(registry.items()))
-    snapshots: list[tuple[int, int, str]] = []
+    snapshot: object
+    address: object
+    artifact: object
+    items = () if registry is None else tuple(sorted(tuple(registry.items())))
+    snapshots: list[tuple[cython.longlong, cython.longlong, str]] = []
     for address, artifact in items:
         snapshot = _json_key_8616(artifact.to_dict())
         if snapshot is None:
@@ -67,7 +77,8 @@ def _registry_snapshot_8616(
     return items, tuple(snapshots)
 
 
-def _decoded_instruction_key_8616(row: object) -> tuple[object, ...] | None:
+@cython.ccall
+def _decoded_instruction_key_8616(row: object) -> object:
     """Snapshot canonical Capstone detail without admitting unknown decoders."""
     if type(row) is not DirectCapstoneInstruction8616:
         return None
@@ -86,8 +97,8 @@ def _decoded_instruction_key_8616(row: object) -> tuple[object, ...] | None:
 def _native_surface_key_8616(
     project: object, boundary: ExactFunctionRangeBoundary8616,
     importer: Callable[[object, ExactFunctionRangeBoundary8616], IRFunctionArtifact | None],
-    *, raw_lift_only: bool = False,
-) -> tuple[tuple[object, ...], tuple[object, ...]] | None:
+    *, raw_lift_only: cython.bint = False,
+) -> object:
     """Bind bytes, decoded metadata, graph and native import producers.
 
     Returns the freshness key together with the identity-only authorities that
@@ -96,6 +107,11 @@ def _native_surface_key_8616(
     ``raw_lift_only`` admits serialized conditional return-lift inputs, never
     their proof authority. Completed-artifact callers must keep the default.
     """
+    continuation_key: object
+    info: object
+    instruction: object
+    block: object
+    row: object
     from .status_flag_lift_context import status_flag_native_policy_key_8616
     from .vex_import import build_x86_16_ir_function_artifact
 
@@ -117,7 +133,7 @@ def _native_surface_key_8616(
             mapped = bytes(external.loader.memory.load(block.addr, block.size))
         except KeyError:
             return None
-        if len(mapped) != block.size or mapped != block.code:
+        if operator.ne(len(mapped), block.size) or operator.ne(mapped, block.code):
             return None
         instructions: list[object] = []
         for row in block.instructions:
@@ -135,15 +151,16 @@ def _native_surface_key_8616(
         status_flag_native_policy_key_8616(project, boundary.addr),
         continuation_key,
         tuple((edge.block_addr, edge.instruction_addr, edge.target_addr)
-              for edge in boundary.conditional_edges),
+              for edge in iter(boundary.conditional_edges)),
     )
     pinned = (arch, importer, build_x86_16_ir_function_artifact)
     return key, pinned
 
 
+@cython.ccall
 def _raw_continuation_input_key_8616(
-    boundary: ExactFunctionRangeBoundary8616, raw_lift_only: bool,
-) -> tuple[object, ...] | None:
+    boundary: ExactFunctionRangeBoundary8616, raw_lift_only: cython.bint,
+) -> object:
     """Snapshot return-lift inputs without caching their invocation authority.
 
     The raw lifter consumes the proved return-block set. Retain the full owned
@@ -151,6 +168,8 @@ def _raw_continuation_input_key_8616(
     reuse. Premise identity/authentication belongs to each semantic consumer;
     this key must never authorize replay of a previously proved invocation.
     """
+    continuation: object
+    serialized: object
     from inertia.frontend.x86_16.frontend_near_return_continuation import (
         NearReturnContinuationArtifact8616,
     )
@@ -167,8 +186,10 @@ def _raw_continuation_input_key_8616(
 def _surface_key_8616(
     project: object, boundary: ExactFunctionRangeBoundary8616,
     importer: Callable[[object, ExactFunctionRangeBoundary8616], IRFunctionArtifact | None],
-) -> tuple[tuple[object, ...], tuple[object, ...]] | None:
+) -> object:
     """Add semantic registry freshness for finished artifacts, beyond raw lifts."""
+    native: object
+    snapshot: object
     native = _native_surface_key_8616(project, boundary, importer)
     if native is None:
         return None
@@ -179,10 +200,11 @@ def _surface_key_8616(
     items, registry_key = snapshot
     return (
         (*native[0], id(registry), registry_key),
-        (*native[1], registry, *(artifact for _address, artifact in items)),
+        (*native[1], registry, *(artifact for _address, artifact in iter(items))),
     )
 
 
+@cython.ccall
 def request_raw_boot_native_import_8616(
     cache: RawBootNativeSurfaceCache8616, project: object, source: object,
     boundary: ExactFunctionRangeBoundary8616,
@@ -194,6 +216,10 @@ def request_raw_boot_native_import_8616(
     The optional abort predicate is execution policy, never cache authority.
     Expiry evicts retained evidence rather than exposing it to a late consumer.
     """
+    artifact: object
+    artifact_key: object
+    retained: object
+    snapshot: object
     if should_abort is not None and should_abort():
         cache.records.pop(boundary.addr, None)
         return None
@@ -201,7 +227,7 @@ def request_raw_boot_native_import_8616(
     retained = cache.records.pop(boundary.addr, None)
     if retained is not None and snapshot is not None:
         same_owners = retained.project is project and retained.source is source and retained.boundary is boundary
-        unchanged = retained.key == snapshot[0] and _json_key_8616(retained.artifact.to_dict()) == retained.artifact_key
+        unchanged = operator.eq(retained.key, snapshot[0]) and operator.eq(_json_key_8616(retained.artifact.to_dict()), retained.artifact_key)
         if should_abort is not None and should_abort():
             return None
         if same_owners and unchanged:
@@ -217,7 +243,7 @@ def request_raw_boot_native_import_8616(
     artifact_key = _json_key_8616(artifact.to_dict())
     if should_abort is not None and should_abort():
         return None
-    if snapshot is not None and after == snapshot and artifact_key is not None:
+    if snapshot is not None and operator.eq(after, snapshot) and artifact_key is not None:
         cache.records[boundary.addr] = RawBootNativeSurfaceRecord8616(
             project, source, boundary, artifact, snapshot[0], artifact_key, snapshot[1],
         )

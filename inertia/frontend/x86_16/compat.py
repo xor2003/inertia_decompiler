@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/runtime.
 
 Responsibility: install runtime compatibility patches needed before x86-16 decompilation.
@@ -5,6 +6,8 @@ Forbidden: recovering alias, type, or validation semantics through compatibility
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Protocol, cast
@@ -32,6 +35,7 @@ from .patch_dirty import apply_patch as _apply_dirty_patch
 from .stack_anchor_compat import apply_native_stack_anchor_compatibility_8616
 from .stack_compat import apply_x86_16_stack_compatibility as _apply_stack_compatibility
 from .typehoon_compat import apply_x86_16_typehoon_compatibility as _apply_typehoon_compatibility
+import operator
 
 __all__ = ["apply_x86_16_compatibility"]
 
@@ -41,7 +45,7 @@ _OUT_HELPER_OPERAND_COUNT = 3
 class _AilBlockStatements8616(Protocol):
     """Mutable statement sequence shared by Python and Rust AIL blocks."""
 
-    statements: list[object]
+    statements: object
 
 
 class _AilConstantValue8616(Protocol):
@@ -53,7 +57,7 @@ class _AilConstantValue8616(Protocol):
 class _AilDirtyExpression8616(Protocol):
     """Decoded dirty-helper fields needed to preserve an OUT side effect."""
 
-    callee: str
+    callee: object
     operands: Sequence[object]
     idx: int | None
     tags: Mapping[str, object]
@@ -70,7 +74,7 @@ class _AilDirtyStatement8616(Protocol):
 class _ClinicArchBoundary8616(Protocol):
     """Third-party architecture identity required by the Clinic guard."""
 
-    name: str
+    name: object
 
 
 class _ClinicProjectBoundary8616(Protocol):
@@ -88,7 +92,7 @@ class _ClinicBoundary8616(Protocol):
 class _AilManagerBoundary8616(Protocol):
     """Third-party AIL atom allocator required by the terminal transport."""
 
-    next_atom: Callable[[], int]
+    next_atom: Callable[[], cython.longlong]
 
 
 class _ClinicConversionBoundary8616(_ClinicBoundary8616, Protocol):
@@ -98,10 +102,14 @@ class _ClinicConversionBoundary8616(_ClinicBoundary8616, Protocol):
     function: Any
 
 
+@cython.ccall
 def _normalize_x86_16_io_dirty_statements(
     block: object,
-) -> tuple[object, int, int, int, int]:
+) -> tuple[object, cython.longlong, cython.longlong, cython.longlong, cython.longlong]:
     """Convert typed OUT Dirty statements into ordinary AIL side-effect calls."""
+    helper: object
+    width: object
+    statement: object
     if not isinstance(block, ailment.Block):
         return block, 0, 0, 0, 0
     ail_block = cast(_AilBlockStatements8616, block)
@@ -128,7 +136,7 @@ def _normalize_x86_16_io_dirty_statements(
         operands = tuple(dirty.operands)
         width_value = (
             cast(_AilConstantValue8616, operands[-1]).value
-            if len(operands) == _OUT_HELPER_OPERAND_COUNT and isinstance(operands[-1], ailment.Expr.Const) else None
+            if operator.eq(len(operands), _OUT_HELPER_OPERAND_COUNT) and isinstance(operands[-1], ailment.Expr.Const) else None
         )
         width = width_value if isinstance(width_value, int) else None
         helper = helper_by_width.get(width) if width is not None else None
@@ -162,7 +170,7 @@ def _apply_function_prototype_source_compatibility() -> None:
     if guessed_property.fset is not None:
         return
 
-    def _set_is_prototype_guessed(function: Function, guessed: bool) -> None:
+    def _set_is_prototype_guessed(function: Function, guessed: cython.bint) -> None:
         """Translate the legacy boolean assignment into typed prototype provenance."""
         if guessed:
             function.prototype_source = PrototypeSource.GUESSED
@@ -245,6 +253,7 @@ def _install_clinic_entry_jump_conversion_8616() -> None:
 
     def _convert_all_with_entry_domain_transport(clinic: _ClinicConversionBoundary8616) -> None:
         """Consume one source-bound function proof before SSA and structuring."""
+        entry: object
         if clinic.project.arch.name != "86_16":
             current_all(clinic)
             return
@@ -279,6 +288,7 @@ def _install_clinic_entry_jump_conversion_8616() -> None:
     Clinic._convert_all = cast(Any, _convert_all_with_entry_domain_transport)
 
 
+@cython.ccall
 def apply_x86_16_compatibility() -> None:
     """Install all frontend/runtime compatibility patches for x86-16 support."""
     _apply_function_prototype_source_compatibility()

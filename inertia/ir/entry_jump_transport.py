@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bound entry-domain proof product for the AIL conversion boundary.
 
 Layer: IR / control-domain evidence.
@@ -22,6 +23,7 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -44,6 +46,7 @@ from .vex_import import (
     native_census_import_active_8616,
     raw_x86_16_function_bundle_8616,
 )
+import dataclasses
 
 __all__ = [
     "EntryJumpTransportProof8616",
@@ -61,7 +64,7 @@ class EntryJumpTransportRefusal8616(StrEnum):
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class EntryJumpTransportProof8616:
     """Bound entry-domain proof product for one converted function surface.
 
@@ -85,14 +88,15 @@ class EntryJumpTransportProof8616:
     application: EntryJumpDomainApplication8616 | None
     refusal: IRRefusal | None
 
-    def pending_terminal_jumps(self) -> Mapping[int, PendingTerminalJump8616]:
+    def pending_terminal_jumps(self) -> Mapping[cython.longlong, PendingTerminalJump8616]:
         """Project the consumed terminal evidence into domain candidates."""
         return collect_pending_terminal_jumps_8616(
             self.bundle.terminal_evidence
         )
 
-    def admitted_terminal_jumps(self) -> tuple[AdmittedTerminalJump8616, ...]:
+    def admitted_terminal_jumps(self) -> object:
         """Return the revalidated admissions, or empty when none stand."""
+        application: object
         application = self.application
         if (
             self.refusal is not None
@@ -135,7 +139,7 @@ def prove_entry_jump_transport_8616(
 
     def _refused(
         reason: EntryJumpTransportRefusal8616,
-        detail: str,
+        detail: object,
         *,
         proof: EntryJumpDomainProof8616 | None = None,
         application: EntryJumpDomainApplication8616 | None = None,

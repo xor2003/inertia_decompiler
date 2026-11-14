@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Check statement placement without inferring dataflow or branch semantics.
 
 Layer: Types/Lowering.
@@ -9,22 +10,28 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from angr.analyses.decompiler.structured_codegen.c import CStatements
+import operator
+import builtins
 
 
+@cython.ccall
 def adjacent_straight_line_statements_8616(
     root: CStatements, first: object, second: object,
-) -> bool:
+) -> cython.bint:
     """Require unique adjacent occurrences in the same unconditional sequence.
 
     Only CStatements is transparent. In particular, do not enter conditional
     bodies: adjacency of their descendants is not an execution-order proof.
     Shared occurrences are ambiguous and must not authorize moving an effect.
     """
+    node: object
     pending: list[object] = [root]
     flattened: list[object] = []
-    expanded: set[int] = set()
+    expanded: set[cython.longlong] = set()
     while pending:
         node = pending.pop()
         if isinstance(node, CStatements):
@@ -34,9 +41,9 @@ def adjacent_straight_line_statements_8616(
             pending.extend(reversed(node.statements))
         else:
             flattened.append(node)
-    first_positions = [index for index, node in enumerate(flattened) if node is first]
-    second_positions = [index for index, node in enumerate(flattened) if node is second]
+    first_positions = [index for index, node in builtins.iter(enumerate(flattened)) if node is first]
+    second_positions = [index for index, node in builtins.iter(enumerate(flattened)) if node is second]
     return (
         len(first_positions) == len(second_positions) == 1
-        and second_positions[0] == first_positions[0] + 1
+        and operator.eq(second_positions[0], first_positions[0] + 1)
     )

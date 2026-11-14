@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: IR.
 
 Responsibility: retain typed outcomes and five-stage accounting for modular
@@ -7,11 +8,14 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import Enum
 
 from .logical_memory_contracts import IRLogicalMemoryAccessKey8616
+import dataclasses
 
 
 class ModularArgumentUseVerdict8616(Enum):
@@ -41,18 +45,18 @@ class ModularArgumentUseFailure8616(Enum):
     RETURN_FLOW_UNKNOWN = "return_flow_unknown"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ModularArgumentUseStats8616:
     """Account for the one requested input-use proof without hidden success."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ModularArgumentUseResult8616:
     """Closed bit-pattern use evidence or an explicit typed refusal."""
 

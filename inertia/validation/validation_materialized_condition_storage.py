@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Validate storage identity for conditions materialized by Structuring.
 
 Layer: Tail Validation.
@@ -15,6 +16,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import Enum
@@ -32,6 +35,7 @@ from angr.sim_variable import SimStackVariable
 
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 from inertia.structuring.condition_materialization import condition_key_from_tags_8616
+import dataclasses
 
 
 class _CodegenBoundary8616(Protocol):
@@ -51,36 +55,36 @@ class _CFunctionBoundary8616(Protocol):
 class _ValidationFailureBoundary8616(Protocol):
     """Describe validation-failure metadata attached to angr codegen."""
 
-    _inertia_postprocess_validation_failed: bool
-    _inertia_postprocess_validation_failure_pass: str
-    _inertia_postprocess_validation_failure_error: str
+    _inertia_postprocess_validation_failed: cython.bint
+    _inertia_postprocess_validation_failure_pass: object
+    _inertia_postprocess_validation_failure_error: object
 
 
-@dataclass(frozen=True, order=True)
+@dataclasses.dataclass(frozen=True, order=True)
 class ConditionStackStorageView8616:
     """Identify one stack variable without relying on its display name."""
 
-    base: str
-    offset: int
-    size: int
+    base: object
+    offset: cython.longlong
+    size: cython.longlong
 
 
-@dataclass(frozen=True, order=True)
+@dataclasses.dataclass(frozen=True, order=True)
 class MaterializedConditionStorageEntry8616:
     """Bind one Structuring condition origin to its stack-storage views."""
 
-    key: tuple[int, int]
-    stack_views: tuple[ConditionStackStorageView8616, ...]
+    key: object
+    stack_views: object
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class MaterializedConditionStorageSurface8616:
     """Hold the deterministic storage surface for all owned conditions."""
 
-    entries: tuple[MaterializedConditionStorageEntry8616, ...]
+    entries: object
 
     @property
-    def has_materialized_conditions(self) -> bool:
+    def has_materialized_conditions(self) -> cython.bint:
         """Return whether at least one keyed Structuring condition was found."""
         return bool(self.entries)
 
@@ -93,7 +97,7 @@ class MaterializedConditionStorageIntegrityStatus8616(Enum):
     DRIFTED = "drifted"
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class MaterializedConditionStorageIntegrityResult8616:
     """Describe a before/after condition-storage integrity comparison."""
 
@@ -102,13 +106,16 @@ class MaterializedConditionStorageIntegrityResult8616:
     after: MaterializedConditionStorageSurface8616
 
     @property
-    def drifted(self) -> bool:
+    def drifted(self) -> cython.bint:
         """Return whether Rewrite changed a previously observed surface."""
         return self.status is MaterializedConditionStorageIntegrityStatus8616.DRIFTED
 
 
+@cython.ccall
 def _codegen_root_8616(codegen: object) -> object | None:
     """Return the structured C root through the dynamic angr boundary."""
+    root: object
+    field_name: object
     try:
         cfunc = cast(_CodegenBoundary8616, codegen).cfunc
     except AttributeError:
@@ -122,19 +129,22 @@ def _codegen_root_8616(codegen: object) -> object | None:
     return cfunc
 
 
-def _condition_expressions_8616(node: object) -> tuple[object, ...]:
+def _condition_expressions_8616(node: object) -> object:
     """Return condition expressions owned directly by one structured node."""
     if isinstance(node, CIfElse):
         # Dynamic third-party boundary: angr stores if/elif pairs in this field.
         pairs = tuple(getattr(node, "condition_and_nodes", ()) or ())
-        return tuple(condition for condition, _body in pairs)
+        return tuple(condition for condition, _body in iter(pairs))
     if isinstance(node, (CIfBreak, CForLoop, CWhileLoop, CDoWhileLoop)):
-        return (node.condition,) if node.condition is not None else ()
+        return tuple((node.condition,)) if node.condition is not None else tuple(())
     return ()
 
 
-def _is_cfg_materialized_condition_8616(condition: object) -> bool:
+@cython.ccall
+def _is_cfg_materialized_condition_8616(condition: object) -> cython.bint:
     """Return whether Structuring marked this condition as CFG-materialized."""
+    tags: object
+    node: object
     for node in _iter_c_nodes_deep_8616(condition):
         # Dynamic third-party boundary: structured C tags are optional mappings.
         tags = getattr(node, "tags", None)
@@ -143,8 +153,10 @@ def _is_cfg_materialized_condition_8616(condition: object) -> bool:
     return False
 
 
+@cython.ccall
 def _stack_views_8616(condition: object) -> tuple[ConditionStackStorageView8616, ...]:
     """Collect deterministic stack coordinates used by one C condition."""
+    node: object
     views: set[ConditionStackStorageView8616] = set()
     for node in _iter_c_nodes_deep_8616(condition):
         if not isinstance(node, CVariable) or not isinstance(node.variable, SimStackVariable):
@@ -162,10 +174,15 @@ def _stack_views_8616(condition: object) -> tuple[ConditionStackStorageView8616,
     return tuple(sorted(views))
 
 
+@cython.ccall
 def capture_materialized_condition_storage_surface_8616(
     codegen: object,
 ) -> MaterializedConditionStorageSurface8616:
     """Capture keyed stack storage for every CFG-materialized condition."""
+    key: object
+    root: object
+    condition: object
+    node: object
     root = _codegen_root_8616(codegen)
     if root is None:
         return MaterializedConditionStorageSurface8616(entries=())
@@ -186,6 +203,7 @@ def capture_materialized_condition_storage_surface_8616(
     return MaterializedConditionStorageSurface8616(entries=tuple(sorted(entries)))
 
 
+@cython.ccall
 def compare_materialized_condition_storage_surfaces_8616(
     before: MaterializedConditionStorageSurface8616,
     after: MaterializedConditionStorageSurface8616,
@@ -204,10 +222,11 @@ def compare_materialized_condition_storage_surfaces_8616(
     )
 
 
+@cython.ccall
 def record_materialized_condition_storage_failure_8616(
     codegen: object,
     result: MaterializedConditionStorageIntegrityResult8616,
-) -> bool:
+) -> cython.bint:
     """Record a hard postprocess failure when a protected surface drifted."""
     if not result.drifted:
         return False

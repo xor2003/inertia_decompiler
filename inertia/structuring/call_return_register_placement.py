@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify an existing register-return call before its structured condition.
 
 Layer: Structuring.
@@ -12,6 +13,8 @@ or repair missing call arguments.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -29,6 +32,8 @@ from .call_return_register_index import (
     CallReturnRegisterIndex8616,
     build_call_return_register_index_8616,
 )
+import dataclasses
+import operator
 
 
 class CallReturnRegisterPlacementVerdict8616(StrEnum):
@@ -41,12 +46,12 @@ class CallReturnRegisterPlacementVerdict8616(StrEnum):
     CONFLICT = "conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallReturnRegisterPlacement8616:
     """One classified register-return assignment and condition relationship."""
 
     verdict: CallReturnRegisterPlacementVerdict8616
-    raw_candidate_count: int
+    raw_candidate_count: cython.longlong
     assignment: CAssignment | None = None
     call: CFunctionCall | None = None
     assignment_container: CStatements | None = None
@@ -55,25 +60,25 @@ class CallReturnRegisterPlacement8616:
     source_index: CallReturnRegisterIndex8616 | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallReturnRegisterAssignment8616:
     """One same-callsite assignment proven adjacent to the condition."""
 
     assignment: CAssignment
     call: CFunctionCall
     container: CStatements
-    index: int
+    index: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _StatementPosition8616:
     """One direct statement position on an exact structured control path."""
 
     container: CStatements
-    index: int
+    index: cython.longlong
     statement: object
-    control_path: tuple[tuple[int, str, int], ...]
-    sequence_path: tuple[tuple[CStatements, int], ...]
+    control_path: object
+    sequence_path: object
 
 
 class _StructuredStatementChildren8616(Protocol):
@@ -83,8 +88,11 @@ class _StructuredStatementChildren8616(Protocol):
     default: object
 
 
+@cython.ccall
 def _case_statement_blocks_8616(statement: object) -> tuple[CStatements, ...]:
     """Return switch-case blocks across the dynamic angr AST boundary."""
+    cases: object
+    item: object
     cases = getattr(statement, "cases", None)
     if isinstance(cases, dict):
         raw_cases: Iterable[object] = cases.items()
@@ -100,20 +108,27 @@ def _case_statement_blocks_8616(statement: object) -> tuple[CStatements, ...]:
     return tuple(blocks)
 
 
+@cython.ccall
 def _visit_statement_branches_8616(
-    positions: list[_StatementPosition8616],
-    seen: set[tuple[int, tuple[tuple[int, str, int], ...]]],
+    positions: object,
+    seen: object,
     statement: object,
-    control_path: tuple[tuple[int, str, int], ...],
+    control_path: object,
 ) -> None:
     """Recurse into every control alternative of one structured statement."""
+    attr: object
+    branch_index: object
+    case_index: object
+    child: object
+    child_index: object
+    pair: object
     marker = id(statement)
     if isinstance(statement, CIfElse):
         for branch_index, pair in enumerate(tuple(statement.condition_and_nodes or ())):
             if isinstance(pair, (list, tuple)) and len(pair) >= 2 and isinstance(pair[1], CStatements):
-                _visit_statements_8616(positions, seen, pair[1], (*control_path, (marker, "if", branch_index)), ())
+                _visit_statements_8616(positions, seen, pair[1], tuple(control_path) + ((marker, "if", branch_index),), ())
         if isinstance(statement.else_node, CStatements):
-            _visit_statements_8616(positions, seen, statement.else_node, (*control_path, (marker, "else", 0)), ())
+            _visit_statements_8616(positions, seen, statement.else_node, tuple(control_path) + ((marker, "else", 0),), ())
         return
     for child_index, attr in enumerate(("body", "default")):
         boundary = cast(_StructuredStatementChildren8616, statement)
@@ -122,19 +137,22 @@ def _visit_statement_branches_8616(
         except AttributeError:
             continue
         if isinstance(child, CStatements):
-            _visit_statements_8616(positions, seen, child, (*control_path, (marker, attr, child_index)), ())
+            _visit_statements_8616(positions, seen, child, tuple(control_path) + ((marker, attr, child_index),), ())
     for case_index, child in enumerate(_case_statement_blocks_8616(statement)):
-        _visit_statements_8616(positions, seen, child, (*control_path, (marker, "case", case_index)), ())
+        _visit_statements_8616(positions, seen, child, tuple(control_path) + ((marker, "case", case_index),), ())
 
 
+@cython.ccall
 def _visit_statements_8616(
-    positions: list[_StatementPosition8616],
-    seen: set[tuple[int, tuple[tuple[int, str, int], ...]]],
+    positions: object,
+    seen: object,
     block: CStatements,
-    control_path: tuple[tuple[int, str, int], ...],
-    sequence_path: tuple[tuple[CStatements, int], ...],
+    control_path: object,
+    sequence_path: object,
 ) -> None:
     """Index one sequence block, recursing through control alternatives."""
+    index: object
+    statement: object
     key = (id(block), control_path)
     if key in seen:
         return
@@ -156,20 +174,22 @@ def _visit_statements_8616(
         _visit_statement_branches_8616(positions, seen, statement, control_path)
 
 
+@cython.ccall
 def _statement_positions_8616(root: object) -> tuple[_StatementPosition8616, ...]:
     """Index transparent sequence groups while preserving control alternatives."""
     if not isinstance(root, CStatements):
         return ()
     positions: list[_StatementPosition8616] = []
-    seen: set[tuple[int, tuple[tuple[int, str, int], ...]]] = set()
+    seen: set[tuple[cython.longlong, tuple[tuple[cython.longlong, str, cython.longlong], ...]]] = set()
     _visit_statements_8616(positions, seen, root, (), ())
     return tuple(positions)
 
 
+@cython.ccall
 def _sequence_paths_are_adjacent_8616(
     assignment: _StatementPosition8616,
     condition: _StatementPosition8616,
-) -> bool:
+) -> cython.bint:
     """Return whether two statements first diverge at adjacent sibling slots."""
     assignment_path = assignment.sequence_path
     condition_path = condition.sequence_path
@@ -184,44 +204,46 @@ def _sequence_paths_are_adjacent_8616(
         return False
     assignment_container, assignment_index = assignment_path[shared]
     condition_container, condition_index = condition_path[shared]
-    return assignment_container is condition_container and condition_index == assignment_index + 1
+    return assignment_container is condition_container and operator.eq(condition_index, assignment_index + 1)
 
 
 def _unique_adjacent_owner_8616(
-    positions: tuple[_StatementPosition8616, ...],
+    positions: object,
     assignment: CAssignment,
     condition_owner: object,
-) -> tuple[CStatements, int] | None:
+) -> object:
     """Return the direct owner after exact same-path adjacency proof."""
-    assignment_positions = tuple(position for position in positions if position.statement is assignment)
-    condition_positions = tuple(position for position in positions if position.statement is condition_owner)
+    assignment_positions = tuple(position for position in iter(positions) if position.statement is assignment)
+    condition_positions = tuple(position for position in iter(positions) if position.statement is condition_owner)
     if len(assignment_positions) != 1 or len(condition_positions) != 1:
         return None
     assignment_position = assignment_positions[0]
     condition_position = condition_positions[0]
-    if assignment_position.control_path != condition_position.control_path:
+    if operator.ne(assignment_position.control_path, condition_position.control_path):
         return None
     if not _sequence_paths_are_adjacent_8616(assignment_position, condition_position):
         return None
     return assignment_position.container, assignment_position.index
 
 
+@cython.ccall
 def _placement_candidates_8616(
     register_index: CallReturnRegisterIndex8616,
-    register_slice: tuple[int, int],
-    callsite_addr: int,
-    condition_producer_insn: int,
+    register_slice: object,
+    callsite_addr: cython.longlong,
+    condition_producer_insn: cython.longlong,
 ) -> tuple[
-    dict[int, tuple[CAssignment, CFunctionCall]],
-    dict[int, tuple[CAssignment, CFunctionCall]],
+    dict[cython.longlong, tuple[CAssignment, CFunctionCall]],
+    dict[cython.longlong, tuple[CAssignment, CFunctionCall]],
 ]:
     """Census candidate and bound assignments matching slice and callsite."""
-    candidates: dict[int, tuple[CAssignment, CFunctionCall]] = {}
-    bound_assignments: dict[int, tuple[CAssignment, CFunctionCall]] = {}
+    record: object
+    candidates: dict[cython.longlong, tuple[CAssignment, CFunctionCall]] = {}
+    bound_assignments: dict[cython.longlong, tuple[CAssignment, CFunctionCall]] = {}
     for record in register_index.assignments:
         if (
-            record.register_slice != register_slice
-            or record.callsite_addr != callsite_addr
+            operator.ne(record.register_slice, register_slice)
+            or operator.ne(record.callsite_addr, callsite_addr)
         ):
             continue
         node = record.assignment
@@ -236,15 +258,19 @@ def _placement_candidates_8616(
     return candidates, bound_assignments
 
 
+@cython.ccall
 def _exact_placement_8616(
-    positions: tuple[_StatementPosition8616, ...],
-    candidates: dict[int, tuple[CAssignment, CFunctionCall]],
-    bound_assignments: dict[int, tuple[CAssignment, CFunctionCall]],
-    adjacent: tuple[CAssignment, CFunctionCall, CStatements, int],
+    positions: object,
+    candidates: object,
+    bound_assignments: object,
+    adjacent: object,
     condition_owner: object,
     register_index: CallReturnRegisterIndex8616,
 ) -> CallReturnRegisterPlacement8616:
     """Confirm the single adjacent candidate and census redundant duplicates."""
+    duplicate_owner: object
+    duplicate: object
+    duplicate_call: object
     assignment, call, owner, index = adjacent
     redundant: list[CallReturnRegisterAssignment8616] = []
     for duplicate, duplicate_call in bound_assignments.values():
@@ -280,16 +306,20 @@ def _exact_placement_8616(
     )
 
 
+@cython.ccall
 def classify_call_return_register_placement_8616(
     root: object,
     condition_owner: object,
     *,
-    callsite_addr: int,
-    condition_producer_insn: int,
-    register_slice: tuple[int, int],
+    callsite_addr: cython.longlong,
+    condition_producer_insn: cython.longlong,
+    register_slice: object,
     assignment_index: CallReturnRegisterIndex8616 | None = None,
 ) -> CallReturnRegisterPlacement8616:
     """Classify the unique exact call assignment feeding one condition."""
+    assignment: object
+    call: object
+    owner: object
     register_index = (
         assignment_index
         if assignment_index is not None and assignment_index.matches_root(root)
@@ -304,7 +334,7 @@ def classify_call_return_register_placement_8616(
             0,
         )
     positions = _statement_positions_8616(root)
-    adjacent: list[tuple[CAssignment, CFunctionCall, CStatements, int]] = []
+    adjacent: list[tuple[CAssignment, CFunctionCall, CStatements, cython.longlong]] = []
     for assignment, call in candidates.values():
         owner = _unique_adjacent_owner_8616(positions, assignment, condition_owner)
         if owner is not None:
@@ -334,8 +364,13 @@ def classify_call_return_register_placement_8616(
 
 def consume_exact_call_return_register_placement_8616(
     placement: CallReturnRegisterPlacement8616,
-) -> bool:
+) -> cython.bint:
     """Atomically remove every assignment represented by one exact placement."""
+    assignment: object
+    container: object
+    index: object
+    record: object
+    removals: object
     if (
         placement.verdict is not CallReturnRegisterPlacementVerdict8616.EXACT
         or placement.assignment is None
@@ -353,7 +388,7 @@ def consume_exact_call_return_register_placement_8616(
         ),
         *placement.redundant_assignments,
     )
-    grouped: dict[int, tuple[CStatements, list[tuple[int, CAssignment]]]] = {}
+    grouped: dict[cython.longlong, tuple[CStatements, list[tuple[cython.longlong, CAssignment]]]] = {}
     for record in records:
         snapshot = tuple(record.container.statements or ())
         if not 0 <= record.index < len(snapshot) or snapshot[record.index] is not record.assignment:

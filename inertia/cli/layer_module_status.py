@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery/reporting.
 
 Responsibility: record whether architectural modules are production-wired,
@@ -12,9 +13,11 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import cython
 
 from dataclasses import dataclass
 from enum import Enum
+import dataclasses
 
 
 class LayerModuleAdmission(Enum):
@@ -25,14 +28,14 @@ class LayerModuleAdmission(Enum):
     TEST_ONLY_PROTOTYPE = "test_only_prototype"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LayerModuleRecord:
     """Document whether a module is production, compatibility, or prototype code."""
 
-    module: str
+    module: object
     admission: LayerModuleAdmission
-    owner_layer: str
-    note: str
+    owner_layer: object
+    note: object
 
 
 LAYER_MODULE_RECORDS: tuple[LayerModuleRecord, ...] = (
@@ -117,9 +120,10 @@ LAYER_MODULE_RECORDS: tuple[LayerModuleRecord, ...] = (
 )
 
 
+@cython.ccall
 def layer_module_records_by_module() -> dict[str, LayerModuleRecord]:
     """Return layer module admission records keyed by module name."""
-    return {record.module: record for record in LAYER_MODULE_RECORDS}
+    return {record.module: record for record in iter(LAYER_MODULE_RECORDS)}
 
 
 __all__ = [

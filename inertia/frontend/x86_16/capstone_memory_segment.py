@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Resolve effective segments from decoded 16/32-bit memory operands.
 
 Layer: Frontend.
@@ -7,6 +8,7 @@ does not select SS; the decoded base register determines the default.
 """
 
 from __future__ import annotations
+import cython
 
 from capstone.x86_const import (
     X86_REG_BP,
@@ -19,8 +21,9 @@ from capstone.x86_const import (
 )
 
 
+@cython.ccall
 def effective_capstone_memory_segment_8616(
-    override: int | None, base: int | None,
+    override: int | None, base: object,
 ) -> int | None:
     """Preserve an override or resolve the decoded base's default segment."""
     if override not in (None, X86_REG_INVALID):

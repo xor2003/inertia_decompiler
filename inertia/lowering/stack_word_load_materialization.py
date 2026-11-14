@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize Alias-proven stack word-load recompositions in C ASTs.
 
 Layer: Types/Lowering.
@@ -12,6 +13,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -50,6 +53,9 @@ from .stack_word_load_projection import (
 )
 from .stack_word_projection import stack_word_projection_owner_8616
 from .stack_word_recomposition import recognize_stack_word_recomposition_8616
+import dataclasses
+import operator
+import builtins
 
 _LOG = logging.getLogger(__name__)
 
@@ -67,53 +73,53 @@ class StackWordLoadRefusalKind8616(StrEnum):
     VALUE_WIDTH_UNPROVEN = "value_width_unproven"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackWordLoadRefusal8616:
     """One retained word projection and its typed refusal reason."""
 
     kind: StackWordLoadRefusalKind8616
-    instruction_addrs: tuple[int, ...] = ()
+    instruction_addrs: tuple[cython.longlong, ...] = ()
     detail: str = ""
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackWordLoadMaterializationStats8616:
     """Closed evidence accounting for stack word-load materialization."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every candidate was materialized or refused."""
         return (
-            self.raw_fact_count == self.materialized_count + self.failure_count
+            operator.eq(self.raw_fact_count, self.materialized_count + self.failure_count)
             and self.normalized_fact_count
             == self.classified_fact_count
             == self.materialized_count
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackWordLoadMaterializationArtifact8616:
     """Result of one AST replay against an exact Alias artifact."""
 
     source_alias: StackMemorySSAAliasArtifact8616 | None
-    refusals: tuple[StackWordLoadRefusal8616, ...]
+    refusals: object
     stats: StackWordLoadMaterializationStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether the materialization evidence loop closes."""
         return self.stats.complete and (
             self.source_alias is None or self.source_alias.complete
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackWordLoadMaterializationResult8616:
     """Possibly replaced AST root plus its durable evidence artifact."""
 
@@ -121,7 +127,7 @@ class StackWordLoadMaterializationResult8616:
     artifact: StackWordLoadMaterializationArtifact8616
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether at least one proven projection was materialized."""
         return self.artifact.stats.materialized_count > 0
 
@@ -137,18 +143,19 @@ class _CodegenBoundary8616(Protocol):
 
 def _word_load_candidates_8616(
     index: InstructionBpStackAccessIndex8616,
-    instruction_addrs: frozenset[int],
+    instruction_addrs: object,
 ) -> tuple[InstructionBpStackAccess8616, ...]:
     """Return deterministic exact two-byte Alias loads in one C subtree."""
     return tuple(sorted({
         fact
-        for instruction_addr in instruction_addrs
-        for fact in index.by_instruction_addr.get(instruction_addr, ())
+        for instruction_addr in iter(instruction_addrs)
+        for fact in builtins.iter(index.by_instruction_addr.get(instruction_addr, ()))
         if fact.kind is StackMemoryAliasFactKind8616.LOAD and fact.size == 2
     }, key=lambda fact: (fact.displacement, fact.size, fact.kind.value)))
 
 
-def _owner_represents_word_value_8616(owner: structured_c.CVariable) -> bool:
+@cython.ccall
+def _owner_represents_word_value_8616(owner: structured_c.CVariable) -> cython.bint:
     """Require all loaded bits in the C value, independently of slot padding."""
     value_type = owner.variable_type
     if not isinstance(value_type, SimType):
@@ -161,22 +168,23 @@ def _owner_represents_word_value_8616(owner: structured_c.CVariable) -> bool:
         return False
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _StackWordRecomposition8616:
     """Replace proven word projections and retain every typed refusal."""
 
     codegen: object
     source_alias: StackMemorySSAAliasArtifact8616 | None
     index: InstructionBpStackAccessIndex8616 | None = None
-    raw_fact_count: int = 0
-    materialized_count: int = 0
-    refusals: list[StackWordLoadRefusal8616] = field(default_factory=list)
+    raw_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    refusals: object = field(default_factory=list)
 
+    @cython.ccall
     def _refuse(
         self,
         kind: StackWordLoadRefusalKind8616,
-        instruction_addrs: frozenset[int] = frozenset(),
-        detail: str = "",
+        instruction_addrs: object = frozenset(),
+        detail: object = "",
     ) -> None:
         """Retain one candidate with deterministic typed diagnostics."""
         self.refusals.append(
@@ -187,10 +195,11 @@ class _StackWordRecomposition8616:
             )
         )
 
+    @cython.ccall
     def _materialized_word_value(
         self,
         owner: structured_c.CExpression,
-        instruction_addrs: frozenset[int] = frozenset(),
+        instruction_addrs: object = frozenset(),
     ) -> structured_c.CExpression | None:
         """Return the guest scalar storage value for one proven word owner.
 
@@ -200,6 +209,7 @@ class _StackWordRecomposition8616:
         gate rejects wider pointer owners before this projection; a missing
         storage projection retains the original expression with a typed refusal.
         """
+        projected: object
         projected = project_pointer_storage_value_8616(self.codegen, owner, 2)
         if projected is None:
             self._refuse(
@@ -211,8 +221,10 @@ class _StackWordRecomposition8616:
         self.materialized_count += 1
         return projected
 
+    @cython.ccall
     def _logical_owner(self, node: object, low: object, high: object) -> object:
         """Resolve an owner when no instruction provenance exists."""
+        value: object
         if not isinstance(low, structured_c.CVariable):
             self._refuse(
                 StackWordLoadRefusalKind8616.NO_INSTRUCTION_PROVENANCE,
@@ -240,7 +252,7 @@ class _StackWordRecomposition8616:
 
     def _single_load(
         self,
-        instruction_addrs: frozenset[int],
+        instruction_addrs: object,
     ) -> InstructionBpStackAccess8616 | None:
         """Require exactly one Alias-proven BP load range."""
         assert self.index is not None
@@ -253,17 +265,19 @@ class _StackWordRecomposition8616:
             else StackWordLoadRefusalKind8616.ALIAS_LOAD_AMBIGUOUS,
             instruction_addrs,
             detail=(
-                f"candidate BP ranges={tuple((load.displacement, load.size) for load in loads)!r}; "
+                f"candidate BP ranges={tuple((load.displacement, load.size) for load in iter(loads))!r}; "
                 f"logical inventory={self.index.logical_inventory!r}"
             ),
         )
         return None
 
+    @cython.ccall
     def _canonical_owner(
         self,
         load: InstructionBpStackAccess8616,
     ) -> structured_c.CVariable | None:
         """Return the canonical or prototype BP owner for one proven load."""
+        canonical_owner: object
         canonical_owner = stack_cvar_for_machine_bp_range_8616(
             self.codegen,
             load.displacement,
@@ -279,15 +293,18 @@ class _StackWordRecomposition8616:
             return canonical_owner
         return None
 
+    @cython.ccall
     def _projected_owner(
         self,
         node: object,
         low: object,
         high: object,
         load: InstructionBpStackAccess8616,
-        instruction_addrs: frozenset[int],
+        instruction_addrs: object,
     ) -> object:
         """Resolve the remaining owner ladder after canonical lookup fails."""
+        direct_owner: object
+        value: object
         if not stack_word_byte_pair_matches_machine_bp_view_8616(low, high):
             self._refuse(
                 StackWordLoadRefusalKind8616.STACK_PROJECTION_MISMATCH,
@@ -335,9 +352,9 @@ class _StackWordRecomposition8616:
         value = self._materialized_word_value(resolution.cvar, instruction_addrs)
         return node if value is None else value
 
-    def _operand_gates(self, low: object, high: object) -> bool:
+    def _operand_gates(self, low: object, high: object) -> cython.bint:
         """Refuse captured, side-effectful, or alias-unproven candidates."""
-        if any(stack_word_operand_is_captured_value_8616(operand) for operand in (low, high)):
+        if any(stack_word_operand_is_captured_value_8616(operand) for operand in iter((low, high))):
             self._refuse(
                 StackWordLoadRefusalKind8616.CAPTURED_VALUE,
                 detail="saved scalar bytes have no current-memory value-lifetime proof",
@@ -351,8 +368,14 @@ class _StackWordRecomposition8616:
             return False
         return True
 
+    @cython.ccall
     def transform(self, node: object) -> object:
         """Replace one proven word projection and retain every refusal."""
+        canonical_owner: object
+        load: object
+        projected_owner: object
+        recomposition: object
+        value: object
         projected_owner = stack_word_projection_owner_8616(self.codegen, node)
         if projected_owner is not None:
             self.raw_fact_count += 1
@@ -389,11 +412,13 @@ class _StackWordRecomposition8616:
         return self._projected_owner(node, low, high, load, instruction_addrs)
 
 
+@cython.ccall
 def materialize_stack_word_load_recompositions_8616(
     codegen: object,
     root: object,
 ) -> StackWordLoadMaterializationResult8616:
     """Materialize only word projections closed by exact Alias evidence."""
+    source_alias: object
     boundary = cast(_CodegenBoundary8616, codegen)
     try:
         source = boundary._inertia_stack_memory_ssa_alias_artifact

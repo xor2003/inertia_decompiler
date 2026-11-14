@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery metadata.
 
 Responsibility: summarize helper/wrapper eligibility from recovered function effects.
@@ -11,10 +12,13 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
 from .function_effect_summary import FunctionEffectSource, FunctionEffectSummary, summarize_x86_16_function_effects
+import dataclasses
 
 __all__ = [
     "HelperEligibilityRefusal",
@@ -23,26 +27,26 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class HelperEligibilityRefusal:
     """Reason that a function is not eligible for helper-wrapper treatment."""
 
-    kind: str
-    detail: str
+    kind: object
+    detail: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class HelperEligibilitySummary:
     """Decision summary for helper/wrapper eligibility from recovered effects."""
 
-    status: str
+    status: object
     candidate_kind: str = "none"
     effect_summary: FunctionEffectSummary = FunctionEffectSummary()  # noqa: RUF009
     refusals: tuple[HelperEligibilityRefusal, ...] = ()
 
     def brief(self) -> str:
         """Return a compact stable helper eligibility diagnostic string."""
-        refusal_kinds = ",".join(item.kind for item in self.refusals) or "none"
+        refusal_kinds = ",".join(item.kind for item in iter(self.refusals)) or "none"
         return f"status={self.status} candidate={self.candidate_kind} refusals={refusal_kinds}"
 
     def to_dict(self) -> dict[str, object]:
@@ -51,14 +55,15 @@ class HelperEligibilitySummary:
             "status": self.status,
             "candidate_kind": self.candidate_kind,
             "effect_summary": self.effect_summary.to_dict(),
-            "refusals": [{"kind": item.kind, "detail": item.detail} for item in self.refusals],
+            "refusals": [{"kind": item.kind, "detail": item.detail} for item in iter(self.refusals)],
         }
 
 
+@cython.ccall
 def _eligibility_refusals_8616(
     effect_summary: FunctionEffectSummary,
-    stack_probe_helper: bool,
-) -> list[HelperEligibilityRefusal]:
+    stack_probe_helper: cython.bint,
+) -> object:
     """Collect every proven refusal against single-wrapper helper eligibility."""
     refusals: list[HelperEligibilityRefusal] = []
     if effect_summary.indirect_call_count > 0 or effect_summary.indirect_branch_count > 0:
@@ -126,6 +131,7 @@ def _eligibility_refusals_8616(
     return refusals
 
 
+@cython.ccall
 def summarize_x86_16_helper_eligibility(source: FunctionEffectSource) -> HelperEligibilitySummary:
     """Classify helper-wrapper eligibility from existing function-effect facts."""
     effect_summary = summarize_x86_16_function_effects(source)

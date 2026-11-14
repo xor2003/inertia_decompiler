@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Normalize VEX-only condition transport loads at the IR import boundary.
 
 Layer: IR.
@@ -10,11 +11,16 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from typing import Any, Protocol, cast
 
 from .core import IRAddress, IRInstr, IRValue
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "VexConditionTransportLayout8616",
@@ -56,51 +62,50 @@ class _VexExpressionBoundary(Protocol):
     iffalse: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class VexConditionTransportLayout8616:
     """Typed instruction layout needed to prove one transport-only load."""
 
-    exit_instruction_addrs: frozenset[int]
-    predecessor_pairs: tuple[tuple[int, int], ...]
-    transport_load_tmps: frozenset[tuple[int, int]]
+    exit_instruction_addrs: object
+    predecessor_pairs: object
+    transport_load_tmps: object
 
-    def predecessor_of(self, instruction_addr: int) -> int | None:
+    def predecessor_of(self, instruction_addr: cython.longlong) -> int | None:
         """Return the immediately preceding IMark address, when present."""
         return next(
             (
                 predecessor
-                for current, predecessor in self.predecessor_pairs
+                for current, predecessor in iter(self.predecessor_pairs)
                 if current == instruction_addr
             ),
             None,
         )
 
-    def owns_transport_load(self, instruction_addr: int, tmp_id: int) -> bool:
+    def owns_transport_load(self, instruction_addr: cython.longlong, tmp_id: cython.longlong) -> cython.bint:
         """Return whether this exact load temporary reaches the Exit guard."""
         return (instruction_addr, tmp_id) in self.transport_load_tmps
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class VexConditionTransportStats8616:
     """Closed evidence counters for removed VEX condition transport loads."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every exact candidate was classified and rebound."""
         return bool(
-            self.raw_fact_count == self.normalized_fact_count
-            and self.normalized_fact_count == self.classified_fact_count
-            and self.classified_fact_count
-            == self.materialized_count + self.failure_count
+            operator.eq(self.raw_fact_count, self.normalized_fact_count)
+            and operator.eq(self.normalized_fact_count, self.classified_fact_count)
+            and operator.eq(self.classified_fact_count, self.materialized_count + self.failure_count)
         )
 
-    def to_summary(self) -> dict[str, int]:
+    def to_summary(self) -> dict[str, cython.longlong]:
         """Serialize counters with an owner-specific summary prefix."""
         return {
             "condition_transport_raw_fact_count": self.raw_fact_count,
@@ -111,6 +116,7 @@ class VexConditionTransportStats8616:
         }
 
 
+@cython.ccall
 def _statement_tag_8616(statement: object) -> str:
     """Read one tag at the dynamic pyvex statement boundary."""
     try:
@@ -119,6 +125,7 @@ def _statement_tag_8616(statement: object) -> str:
         return ""
 
 
+@cython.ccall
 def _imark_addr_8616(statement: object) -> int | None:
     """Read one IMark address at the dynamic pyvex statement boundary."""
     try:
@@ -127,6 +134,7 @@ def _imark_addr_8616(statement: object) -> int | None:
         return None
 
 
+@cython.ccall
 def _statement_tmp_8616(statement: object) -> int | None:
     """Read one WrTmp identifier at the dynamic pyvex boundary."""
     try:
@@ -135,6 +143,7 @@ def _statement_tmp_8616(statement: object) -> int | None:
         return None
 
 
+@cython.ccall
 def _statement_data_8616(statement: object) -> object | None:
     """Read one WrTmp expression at the dynamic pyvex boundary."""
     try:
@@ -143,6 +152,7 @@ def _statement_data_8616(statement: object) -> object | None:
         return None
 
 
+@cython.ccall
 def _statement_guard_8616(statement: object) -> object | None:
     """Read one Exit guard at the dynamic pyvex boundary."""
     try:
@@ -151,7 +161,8 @@ def _statement_guard_8616(statement: object) -> object | None:
         return None
 
 
-def _expression_tag_8616(expression: object | None) -> str:
+@cython.ccall
+def _expression_tag_8616(expression: object) -> str:
     """Read one expression tag at the dynamic pyvex boundary."""
     if expression is None:
         return ""
@@ -161,6 +172,7 @@ def _expression_tag_8616(expression: object | None) -> str:
         return ""
 
 
+@cython.ccall
 def _expression_tmp_8616(expression: object) -> int | None:
     """Read one RdTmp identifier at the dynamic pyvex boundary."""
     try:
@@ -169,7 +181,8 @@ def _expression_tmp_8616(expression: object) -> int | None:
         return None
 
 
-def _expression_args_8616(expression: object | None) -> tuple[object, ...]:
+@cython.ccall
+def _expression_args_8616(expression: object) -> object:
     """Read child expressions at the dynamic pyvex boundary."""
     if expression is None:
         return ()
@@ -190,22 +203,26 @@ def _expression_args_8616(expression: object | None) -> tuple[object, ...]:
     return ()
 
 
+@cython.ccall
 def _guard_load_tmps_8616(
-    expression: object | None,
-    tmp_exprs: dict[int, object],
-    load_sites: dict[int, int],
-    instruction_addr: int,
-    seen: set[int] | None = None,
-) -> frozenset[int]:
+    expression: object,
+    tmp_exprs: object,
+    load_sites: object,
+    instruction_addr: cython.longlong,
+    seen: object = None,
+) -> frozenset[cython.longlong]:
     """Return current-instruction load temporaries reaching one Exit guard."""
+    source: object
+    tmp_id: object
+    child: object
     visited = set() if seen is None else seen
-    result: set[int] = set()
+    result: set[cython.longlong] = set()
     if _expression_tag_8616(expression) == "Iex_RdTmp" and expression is not None:
         tmp_id = _expression_tmp_8616(expression)
         if tmp_id is None or tmp_id in visited:
             return frozenset()
         visited.add(tmp_id)
-        if load_sites.get(tmp_id) == instruction_addr:
+        if operator.eq(load_sites.get(tmp_id), instruction_addr):
             result.add(tmp_id)
         source = tmp_exprs.get(tmp_id)
         if source is not None:
@@ -232,16 +249,22 @@ def _guard_load_tmps_8616(
 
 
 def build_vex_condition_transport_layout_8616(
-    statements: tuple[object, ...],
+    statements: object,
 ) -> VexConditionTransportLayout8616:
     """Build exact IMark predecessor and Exit ownership facts."""
-    current_addr: int | None = None
-    previous_addr: int | None = None
-    predecessors: dict[int, int] = {}
-    exit_addrs: set[int] = set()
-    tmp_exprs: dict[int, object] = {}
-    load_sites: dict[int, int] = {}
-    transport_load_tmps: set[tuple[int, int]] = set()
+    candidate: object
+    current_addr: object
+    data: object
+    previous_addr: object
+    tmp_id: object
+    statement: object
+    current_addr = None
+    previous_addr = None
+    predecessors: dict[cython.longlong, cython.longlong] = {}
+    exit_addrs: set[cython.longlong] = set()
+    tmp_exprs: dict[cython.longlong, object] = {}
+    load_sites: dict[cython.longlong, cython.longlong] = {}
+    transport_load_tmps: set[tuple[cython.longlong, cython.longlong]] = set()
     for statement in statements:
         tag = _statement_tag_8616(statement)
         if tag == "Ist_IMark":
@@ -249,10 +272,10 @@ def build_vex_condition_transport_layout_8616(
             if candidate is None:
                 current_addr = None
                 continue
-            if current_addr is not None and candidate != current_addr:
+            if current_addr is not None and operator.ne(candidate, current_addr):
                 previous_addr = current_addr
             current_addr = candidate
-            if previous_addr is not None and previous_addr != current_addr:
+            if previous_addr is not None and operator.ne(previous_addr, current_addr):
                 predecessors[current_addr] = previous_addr
             continue
         if tag == "Ist_WrTmp":
@@ -267,21 +290,22 @@ def build_vex_condition_transport_layout_8616(
             exit_addrs.add(current_addr)
             transport_load_tmps.update(
                 (current_addr, tmp_id)
-                for tmp_id in _guard_load_tmps_8616(
+                for tmp_id in builtins.iter(_guard_load_tmps_8616(
                     _statement_guard_8616(statement),
                     tmp_exprs,
                     load_sites,
                     current_addr,
-                )
+                ))
             )
     return VexConditionTransportLayout8616(
         frozenset(exit_addrs),
-        tuple(sorted(predecessors.items())),
+        tuple(sorted(tuple(predecessors.items()))),
         frozenset(transport_load_tmps),
     )
 
 
-def _load_key_8616(instruction: IRInstr) -> tuple[IRAddress, int] | None:
+@cython.ccall
+def _load_key_8616(instruction: IRInstr) -> object:
     """Return exact segmented identity for one imported load."""
     address = instruction.args[0] if instruction.args else None
     if (
@@ -293,21 +317,25 @@ def _load_key_8616(instruction: IRInstr) -> tuple[IRAddress, int] | None:
     return address, instruction.size
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class VexConditionTransportNormalizer8616:
     """Track imported loads and rebind only proven JCC transport duplicates."""
 
     layout: VexConditionTransportLayout8616
-    _loads: dict[tuple[int, IRAddress, int], IRValue] = field(default_factory=dict, init=False)
-    _materialized_count: int = field(default=0, init=False)
+    _loads: object = field(default_factory=dict, init=False)
+    _materialized_count: cython.longlong = field(default=0, init=False)
 
+    @cython.ccall
     def observe_load(
         self,
         instruction: IRInstr,
         loaded_value: IRValue,
-        tmp_id: int,
+        tmp_id: cython.longlong,
     ) -> IRValue | None:
         """Return a prior CMP value when this load is exact JCC transport."""
+        key: object
+        predecessor_addr: object
+        replacement: object
         key = _load_key_8616(instruction)
         if key is None or instruction.addr is None:
             return None
@@ -326,6 +354,7 @@ class VexConditionTransportNormalizer8616:
             self._materialized_count += 1
         return replacement
 
+    @cython.ccall
     def stats(self) -> VexConditionTransportStats8616:
         """Return closed counters for all exact transport candidates seen."""
         count = self._materialized_count
@@ -333,15 +362,15 @@ class VexConditionTransportNormalizer8616:
 
 
 def aggregate_vex_condition_transport_stats_8616(
-    reports: tuple[VexConditionTransportStats8616, ...],
+    reports: object,
 ) -> VexConditionTransportStats8616:
     """Aggregate per-block transport counters and enforce closure."""
     result = VexConditionTransportStats8616(
-        raw_fact_count=sum(report.raw_fact_count for report in reports),
-        normalized_fact_count=sum(report.normalized_fact_count for report in reports),
-        classified_fact_count=sum(report.classified_fact_count for report in reports),
-        materialized_count=sum(report.materialized_count for report in reports),
-        failure_count=sum(report.failure_count for report in reports),
+        raw_fact_count=sum(report.raw_fact_count for report in iter(reports)),
+        normalized_fact_count=sum(report.normalized_fact_count for report in iter(reports)),
+        classified_fact_count=sum(report.classified_fact_count for report in iter(reports)),
+        materialized_count=sum(report.materialized_count for report in iter(reports)),
+        failure_count=sum(report.failure_count for report in iter(reports)),
     )
     if not result.closed:
         raise ValueError("VEX condition transport normalization did not close")

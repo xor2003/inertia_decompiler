@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Convert string-instruction artifacts into typed IR string effects.
 
 Layer: IR.
@@ -8,6 +9,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Protocol, cast
@@ -16,6 +19,9 @@ from inertia.semantics.string_instruction_artifact import StringInstructionArtif
 
 from .core import AddressStatus, IRAddress, MemSpace, SegmentOrigin
 from .segment_state import SegmentStateArtifact
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "IRStringEffectArtifact",
@@ -33,18 +39,18 @@ class _StringEffectCodegenBoundary(Protocol):
     _inertia_string_effect_artifact: IRStringEffectArtifact
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRStringEffectRecord:
     """Typed IR effect recovered from one 16-bit string instruction."""
 
-    index: int
-    family: str
-    repeat_kind: str
-    width: int
-    direction_mode: str
+    index: cython.longlong
+    family: object
+    repeat_kind: object
+    width: cython.longlong
+    direction_mode: object
     source: IRAddress | None
     destination: IRAddress | None
-    zf_sensitive: bool
+    zf_sensitive: cython.bint
     zero_seeded_accumulator: bool | None
 
     def to_dict(self) -> dict[str, object]:
@@ -62,7 +68,7 @@ class IRStringEffectRecord:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRStringEffectArtifact:
     """Typed string-effect facts available to later IR consumers."""
 
@@ -72,12 +78,13 @@ class IRStringEffectArtifact:
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-friendly representation."""
         return {
-            "records": [record.to_dict() for record in self.records],
+            "records": [record.to_dict() for record in iter(self.records)],
             "refusal_kinds": list(self.refusal_kinds),
         }
 
 
-def _space_for_segment(segment: str | None) -> MemSpace | None:
+@cython.ccall
+def _space_for_segment(segment: object) -> MemSpace | None:
     if segment == "ds":
         return MemSpace.DS
     if segment == "es":
@@ -87,23 +94,27 @@ def _space_for_segment(segment: str | None) -> MemSpace | None:
     return None
 
 
-def _source_base_for_family(family: str) -> tuple[str, ...]:
+@cython.ccall
+def _source_base_for_family(family: object) -> tuple[str, ...]:
     if family in {"movs", "lods", "cmps", "outs"}:
         return ("si",)
     return ()
 
 
-def _destination_base_for_family(family: str) -> tuple[str, ...]:
+@cython.ccall
+def _destination_base_for_family(family: object) -> tuple[str, ...]:
     if family in {"movs", "stos", "scas", "cmps", "ins"}:
         return ("di",)
     return ()
 
 
+@cython.ccall
 def _segment_state_status(
-    segment: str | None,
-    segment_state_artifact: SegmentStateArtifact | None,
-    instruction_addr: int | None,
+    segment: object,
+    segment_state_artifact: object,
+    instruction_addr: object,
 ) -> AddressStatus:
+    state: object
     if segment_state_artifact is None:
         return AddressStatus.PROVISIONAL
     if segment is None:
@@ -115,20 +126,22 @@ def _segment_state_status(
     )
     if state is None:
         return AddressStatus.PROVISIONAL
-    if state.origin == SegmentOrigin.PROVEN:
+    if operator.eq(state.origin, SegmentOrigin.PROVEN):
         return AddressStatus.STABLE
     return AddressStatus.PROVISIONAL
 
 
+@cython.ccall
 def _typed_address(
-    segment: str | None,
-    base: tuple[str, ...],
-    width: int,
-    expr: str,
+    segment: object,
+    base: object,
+    width: cython.longlong,
+    expr: object,
     *,
     segment_state_artifact: SegmentStateArtifact | None = None,
     instruction_addr: int | None = None,
 ) -> IRAddress | None:
+    space: object
     space = _space_for_segment(segment)
     if space is None:
         return None
@@ -143,8 +156,9 @@ def _typed_address(
     )
 
 
+@cython.ccall
 def _typed_record(
-    index: int,
+    index: cython.longlong,
     record: StringInstructionRecord,
     *,
     segment_state_artifact: SegmentStateArtifact | None = None,
@@ -185,13 +199,14 @@ def build_x86_16_typed_string_effect_artifact(
     return IRStringEffectArtifact(
         records=tuple(
             _typed_record(index, record, segment_state_artifact=segment_state_artifact)
-            for index, record in enumerate(artifact.records)
+            for index, record in builtins.iter(enumerate(artifact.records))
         ),
-        refusal_kinds=tuple(item.kind for item in artifact.refusals),
+        refusal_kinds=tuple(item.kind for item in iter(artifact.refusals)),
     )
 
 
-def apply_x86_16_typed_string_effect_artifact(project: object, codegen: object) -> bool:
+@cython.ccall
+def apply_x86_16_typed_string_effect_artifact(project: object, codegen: object) -> cython.bint:
     """Attach typed string effects to codegen for later IR consumers."""
     boundary = cast(_StringEffectCodegenBoundary, codegen)
     try:

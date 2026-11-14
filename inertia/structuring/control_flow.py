@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Compatibility exports for control-flow structuring helpers.
 
 Layer: Structuring.
@@ -8,5 +9,6 @@ rewrite cleanup, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import cython
 
 from inertia.structuring.decompiler_structuring_stage import *  # noqa: F403

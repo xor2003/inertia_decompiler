@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Collect stack-argument sign-interpretation facts from proven conditions.
 
 Layer: Types/lowering.
@@ -12,6 +13,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -24,6 +27,9 @@ from inertia.ir.condition_ir import ConditionIR
 from inertia.ir.core import IRValue, MemSpace
 
 from .stack_variable_coordinates import machine_bp_offset_for_stack_variable_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "ConditionArgumentFactsResult8616",
@@ -39,8 +45,8 @@ class _CodegenFactSurface8616(Protocol):
     """Dynamic condition-transfer metadata consumed by fact collection."""
 
     _inertia_typed_conditions: object
-    _inertia_typed_condition_register_exprs_by_ins_addr_8616: dict[tuple[int, str, int], object]
-    _inertia_wide_condition_argument_type_evidence_8616: tuple[ConditionIR, ...]
+    _inertia_typed_condition_register_exprs_by_ins_addr_8616: object
+    _inertia_wide_condition_argument_type_evidence_8616: object
 
 
 class StackArgumentSignedness8616(StrEnum):
@@ -51,29 +57,30 @@ class StackArgumentSignedness8616(StrEnum):
     UNSIGNED = "unsigned"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackArgumentTypeFact8616:
     """One normalized typed-condition fact for a positive-BP stack slice."""
 
-    offset: int
-    size: int
+    offset: cython.longlong
+    size: cython.longlong
     signedness: StackArgumentSignedness8616
-    source: str
+    source: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionArgumentFactsResult8616:
     """Closed accounting for normalized stack-argument type facts."""
 
-    facts: tuple[StackArgumentTypeFact8616, ...]
-    raw_fact_count: int
-    failure_count: int
+    facts: object
+    raw_fact_count: cython.longlong
+    failure_count: cython.longlong
 
 
+@cython.ccall
 def record_wide_condition_argument_type_evidence_8616(
     codegen: object,
     condition: ConditionIR,
-) -> bool:
+) -> cython.bint:
     """Record one CFG-proven wide condition for the later Types/Lowering pass."""
     if condition.width_bits != 32 or _condition_signedness_8616(condition) is None:
         return False
@@ -92,14 +99,14 @@ def proven_recorded_wide_condition_stack_pair_8616(
     codegen: object,
     high_value: IRValue,
     low_value: IRValue,
-) -> bool:
+) -> cython.bint:
     """Return whether prior CFG proof owns this exact adjacent stack pair."""
     if not (
         high_value.space is MemSpace.SS
         and low_value.space is MemSpace.SS
         and high_value.name == low_value.name == "bp"
         and high_value.size == low_value.size == 2
-        and high_value.offset == low_value.offset + 2
+        and operator.eq(high_value.offset, low_value.offset + 2)
     ):
         return False
     try:
@@ -114,13 +121,14 @@ def proven_recorded_wide_condition_stack_pair_8616(
         and operand.space is MemSpace.SS
         and operand.name == "bp"
         and operand.size == 4
-        and operand.offset == low_value.offset
-        for condition in conditions
-        for operand in (condition.lhs, condition.rhs)
+        and operator.eq(operand.offset, low_value.offset)
+        for condition in iter(conditions)
+        for operand in iter((condition.lhs, condition.rhs))
     )
 
 
-def _stack_slice_8616(operand: object) -> tuple[int, int] | None:
+@cython.ccall
+def _stack_slice_8616(operand: object) -> object:
     """Return a direct positive-BP stack slice from one IR operand."""
     if not isinstance(operand, IRValue) or operand.space is not MemSpace.SS or operand.name != "bp":
         return None
@@ -134,8 +142,9 @@ def _registered_stack_slice_8616(
     codegen: object,
     condition: ConditionIR,
     operand: object,
-) -> tuple[int, int] | None:
+) -> object:
     """Resolve a register operand through typed condition-transfer metadata."""
+    direct: object
     direct = _stack_slice_8616(operand)
     if direct is not None:
         return direct
@@ -156,8 +165,8 @@ def _registered_stack_slice_8616(
     size = max(1, int(operand.size or 2))
     candidates = [
         (ins_addr, expression)
-        for (ins_addr, name, expression_size), expression in expressions.items()
-        if name.lower() == operand.name.lower() and expression_size == size and ins_addr <= bind_addr
+        for (ins_addr, name, expression_size), expression in builtins.iter(expressions.items())
+        if operator.eq(name.lower(), operand.name.lower()) and expression_size == size and ins_addr <= bind_addr
     ]
     if not candidates:
         return None
@@ -171,12 +180,17 @@ def _registered_stack_slice_8616(
     return bp_offset, max(1, int(variable.size or size))
 
 
+@cython.ccall
 def _condition_facts_8616(
     codegen: object,
-    conditions: tuple[ConditionIR, ...],
-    source: str,
+    conditions: object,
+    source: object,
 ) -> tuple[StackArgumentTypeFact8616, ...]:
     """Normalize type-relevant predicates into stack-slice facts."""
+    signedness: object
+    stack_slice: object
+    condition: object
+    operand: object
     facts: list[StackArgumentTypeFact8616] = []
     for condition in conditions:
         signedness = _condition_signedness_8616(condition)
@@ -189,6 +203,7 @@ def _condition_facts_8616(
     return tuple(facts)
 
 
+@cython.ccall
 def _condition_signedness_8616(
     condition: ConditionIR,
 ) -> StackArgumentSignedness8616 | None:
@@ -203,24 +218,28 @@ def _condition_signedness_8616(
 
 
 def _joined_signedness_fact_8616(
-    candidates: list[StackArgumentTypeFact8616],
+    candidates: object,
 ) -> StackArgumentTypeFact8616 | None:
     """Join neutral equality evidence with at most one ordering interpretation."""
+    selected: object
     ordering = {
         candidate.signedness
-        for candidate in candidates
+        for candidate in iter(candidates)
         if candidate.signedness is not StackArgumentSignedness8616.SIGN_INSENSITIVE
     }
     if len(ordering) > 1:
         return None
     selected = next(iter(ordering), StackArgumentSignedness8616.SIGN_INSENSITIVE)
-    return next(candidate for candidate in candidates if candidate.signedness is selected)
+    return next(candidate for candidate in iter(candidates) if candidate.signedness is selected)
 
 
 def collect_condition_argument_type_facts_8616(
     codegen: object,
 ) -> ConditionArgumentFactsResult8616:
     """Collect wide proofs first and refuse conflicting raw word signedness."""
+    joined: object
+    candidates: object
+    fact: object
     surface = cast(_CodegenFactSurface8616, codegen)
     try:
         wide_conditions = surface._inertia_wide_condition_argument_type_evidence_8616
@@ -231,19 +250,19 @@ def collect_condition_argument_type_facts_8616(
     except AttributeError:
         raw_value = ()
     raw_conditions = (
-        tuple(condition for condition in raw_value if isinstance(condition, ConditionIR))
+        tuple(condition for condition in iter(raw_value) if isinstance(condition, ConditionIR))
         if isinstance(raw_value, (list, tuple))
         else ()
     )
     wide_facts = _condition_facts_8616(codegen, wide_conditions, "wide-condition")
-    covered = tuple((fact.offset, fact.offset + fact.size) for fact in wide_facts)
+    covered = tuple((fact.offset, fact.offset + fact.size) for fact in iter(wide_facts))
     raw_facts = tuple(
         fact
-        for fact in _condition_facts_8616(codegen, raw_conditions, "condition")
-        if not any(start <= fact.offset and fact.offset + fact.size <= end for start, end in covered)
+        for fact in builtins.iter(_condition_facts_8616(codegen, raw_conditions, "condition"))
+        if not any(start <= fact.offset and fact.offset + fact.size <= end for start, end in iter(covered))
     )
-    grouped: dict[tuple[int, int], list[StackArgumentTypeFact8616]] = {}
-    for fact in (*wide_facts, *raw_facts):
+    grouped: dict[tuple[cython.longlong, cython.longlong], list[StackArgumentTypeFact8616]] = {}
+    for fact in tuple(wide_facts) + tuple(raw_facts):
         grouped.setdefault((fact.offset, fact.size), []).append(fact)
     selected: list[StackArgumentTypeFact8616] = []
     failures = 0

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify virtual carrier definitions retained by materialized call arguments.
 
 Layer: Types/Lowering.
@@ -12,12 +13,16 @@ values, repair calls, or decide whether any unrelated stack effect is dead.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
 
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 from inertia.semantics.expression_analysis import describe_virtual_value_identity_8616
+import dataclasses
+import builtins
 
 __all__ = (
     "CallArgumentCarrierLivenessEvidence8616",
@@ -58,19 +63,19 @@ class CallArgumentSetupLivenessVerdict8616(StrEnum):
     UNKNOWN_REFUSE = "unknown_refuse"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallArgumentCarrierLivenessEvidence8616:
     """Closed evidence loop for one virtual carrier liveness decision."""
 
     verdict: CallArgumentCarrierLivenessVerdict8616
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def closes_evidence(self) -> bool:
+    def closes_evidence(self) -> cython.bint:
         """Return whether the input produced one applicable typed verdict."""
         return (
             self.raw_fact_count
@@ -82,19 +87,19 @@ class CallArgumentCarrierLivenessEvidence8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallArgumentMaterializationEvidence8616:
     """Closed evidence loop for one existing call-argument expression."""
 
     verdict: CallArgumentMaterializationVerdict8616
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def closes_evidence(self) -> bool:
+    def closes_evidence(self) -> cython.bint:
         """Return whether the argument produced one applicable typed verdict."""
         return (
             self.raw_fact_count
@@ -106,19 +111,19 @@ class CallArgumentMaterializationEvidence8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallArgumentSetupLivenessEvidence8616:
     """Closed evidence loop for one consumed setup-definition decision."""
 
     verdict: CallArgumentSetupLivenessVerdict8616
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def closes_evidence(self) -> bool:
+    def closes_evidence(self) -> cython.bint:
         """Return whether the identity facts produced one typed verdict."""
         return (
             self.raw_fact_count
@@ -132,9 +137,10 @@ class CallArgumentSetupLivenessEvidence8616:
 
 def classify_call_argument_carrier_liveness_8616(
     assignment_lhs: object,
-    materialized_arguments: tuple[object, ...],
+    materialized_arguments: object,
 ) -> CallArgumentCarrierLivenessEvidence8616:
     """Classify whether an exact virtual lvalue remains live in call arguments."""
+    lhs_identity: object
     lhs_identity = describe_virtual_value_identity_8616(assignment_lhs)
     if lhs_identity is None or not materialized_arguments:
         return CallArgumentCarrierLivenessEvidence8616(
@@ -148,8 +154,8 @@ def classify_call_argument_carrier_liveness_8616(
 
     argument_identities = frozenset(
         identity
-        for argument in materialized_arguments
-        for node in _iter_c_nodes_deep_8616(argument)
+        for argument in iter(materialized_arguments)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(argument))
         if (identity := describe_virtual_value_identity_8616(node)) is not None
     )
     verdict = (
@@ -182,7 +188,7 @@ def classify_call_argument_materialization_8616(
             failure_count=1,
         )
     has_virtual_carrier = any(
-        describe_virtual_value_identity_8616(node) is not None for node in nodes
+        describe_virtual_value_identity_8616(node) is not None for node in iter(nodes)
     )
     return CallArgumentMaterializationEvidence8616(
         verdict=(
@@ -198,9 +204,10 @@ def classify_call_argument_materialization_8616(
     )
 
 
+@cython.ccall
 def classify_call_argument_setup_liveness_8616(
-    assignment_identity: tuple[object, ...] | None,
-    later_identities: frozenset[tuple[object, ...]],
+    assignment_identity: object,
+    later_identities: object,
 ) -> CallArgumentSetupLivenessEvidence8616:
     """Classify whether a consumed setup definition is referenced later."""
     if assignment_identity is None:
@@ -226,10 +233,11 @@ def classify_call_argument_setup_liveness_8616(
     )
 
 
+@cython.ccall
 def call_argument_setup_is_proven_dead_8616(
-    assignment_identity: tuple[object, ...] | None,
-    later_identities: frozenset[tuple[object, ...]],
-) -> bool:
+    assignment_identity: object,
+    later_identities: object,
+) -> cython.bint:
     """Return whether closed Lowering evidence permits setup deletion."""
     evidence = classify_call_argument_setup_liveness_8616(
         assignment_identity,
@@ -241,7 +249,8 @@ def call_argument_setup_is_proven_dead_8616(
     )
 
 
-def call_argument_requires_typed_rematerialization_8616(argument: object) -> bool:
+@cython.ccall
+def call_argument_requires_typed_rematerialization_8616(argument: object) -> cython.bint:
     """Return whether closed Lowering evidence rejects an existing argument."""
     evidence = classify_call_argument_materialization_8616(argument)
     return bool(

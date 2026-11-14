@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Build complete semantic identity for one function-result cache lookup.
 
 Layer: CLI/fallback/reporting.
@@ -6,6 +7,8 @@ cache partitioning without inferring decompiler semantics.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import hashlib
 import json
@@ -23,8 +26,10 @@ from inertia.cli.work_items import FunctionWorkItem
 from inertia.frontend.x86_16.cod_extract import CODProcMetadata
 from inertia.semantics.callsite_summary import caller_return_use_evidence_by_addr_8616
 from inertia.semantics.compiler_helpers import x86_16_compiler_helper_targets_8616
+import dataclasses
+import builtins
 
-type StableJsonValue = bool | int | float | str | list["StableJsonValue"] | dict[str, "StableJsonValue"] | None
+StableJsonValue = typing.TypeAliasType("StableJsonValue", bool | int | float | str | list["StableJsonValue"] | dict[str, "StableJsonValue"] | None)
 
 
 class _GraphSurface8616(Protocol):
@@ -40,7 +45,7 @@ class _GraphSurface8616(Protocol):
 class _FunctionSurface8616(Protocol):
     """Dynamic angr function fields consumed for cache identity."""
 
-    block_addrs_set: Iterable[int]
+    block_addrs_set: Iterable[cython.longlong]
     transition_graph: _GraphSurface8616
     info: Mapping[str, object]
     project: object
@@ -49,18 +54,18 @@ class _FunctionSurface8616(Protocol):
 class _GraphNodeSurface8616(Protocol):
     """Dynamic angr graph-node address fields consumed for cache identity."""
 
-    addr: int
-    size: int
+    addr: cython.longlong
+    size: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionCacheContext8616:
     """Deterministic semantic evidence digests for one recovered function."""
 
-    recovery_shape_digest: str
-    annotation_evidence_digest: str
-    project_evidence_digest: str
-    sidecar_metadata_digest: str | None
+    recovery_shape_digest: object
+    annotation_evidence_digest: object
+    project_evidence_digest: object
+    sidecar_metadata_digest: object
 
 
 def _stable_json_value(value: object) -> StableJsonValue:
@@ -75,21 +80,22 @@ def _stable_json_value(value: object) -> StableJsonValue:
         return {"enum": value.__class__.__qualname__, "value": _stable_json_value(value.value)}
     if isinstance(value, Mapping):
         entries: list[tuple[StableJsonValue, StableJsonValue]] = [
-            (_stable_json_value(key), _stable_json_value(item_value)) for key, item_value in value.items()
+            (_stable_json_value(key), _stable_json_value(item_value)) for key, item_value in builtins.iter(value.items())
         ]
         entries.sort(key=lambda item: json.dumps(item[0], sort_keys=True, separators=(",", ":")))
-        normalized_entries: list[StableJsonValue] = [{"key": key, "value": item_value} for key, item_value in entries]
+        normalized_entries: list[StableJsonValue] = [{"key": key, "value": item_value} for key, item_value in iter(entries)]
         return {"mapping": normalized_entries}
     if isinstance(value, tuple | list):
-        return {"sequence": [_stable_json_value(item) for item in value]}
+        return {"sequence": [_stable_json_value(item) for item in iter(value)]}
     if isinstance(value, set | frozenset):
-        items = [_stable_json_value(item) for item in value]
+        items = [_stable_json_value(item) for item in iter(value)]
         items.sort(key=lambda item: json.dumps(item, sort_keys=True, separators=(",", ":")))
         return {"set": items}
     raise TypeError(f"unsupported function-cache evidence value: {type(value).__qualname__}")
 
 
-def _stable_digest(value: object) -> str:
+@cython.ccall
+def _stable_digest(value: object) -> object:
     """Return a SHA-256 digest for one canonical evidence value."""
     encoded = json.dumps(
         _stable_json_value(value),
@@ -99,8 +105,10 @@ def _stable_digest(value: object) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _graph_node_record(node: object) -> tuple[int, int | None]:
+@cython.ccall
+def _graph_node_record(node: object) -> tuple[cython.longlong, int | None]:
     """Return a stable address/size pair from one dynamic graph node."""
+    size: object
     if isinstance(node, int):
         return node, None
     surface = cast(_GraphNodeSurface8616, node)
@@ -121,20 +129,22 @@ def _graph_node_record(node: object) -> tuple[int, int | None]:
 
 def _function_recovery_shape_record(function: object) -> dict[str, object]:
     """Return recovered block, edge, and exact-region identity."""
+    graph: object
+    edge: object
     surface = cast(_FunctionSurface8616, function)
     try:
-        block_addrs = tuple(sorted(int(addr) for addr in surface.block_addrs_set))
+        block_addrs = tuple(sorted(int(addr) for addr in iter(surface.block_addrs_set)))
     except AttributeError:
         block_addrs = ()
     try:
         graph = surface.transition_graph
     except AttributeError:
         graph = None
-    nodes: tuple[tuple[int, int | None], ...] = ()
-    edges: tuple[tuple[tuple[int, int | None], tuple[int, int | None], object], ...] = ()
+    nodes: tuple[tuple[cython.longlong, int | None], ...] = ()
+    edges: tuple[tuple[tuple[cython.longlong, int | None], tuple[cython.longlong, int | None], object], ...] = ()
     if graph is not None:
-        nodes = tuple(sorted(_graph_node_record(node) for node in graph.nodes))
-        edge_records: list[tuple[tuple[int, int | None], tuple[int, int | None], object]] = []
+        nodes = tuple(sorted(_graph_node_record(node) for node in iter(graph.nodes)))
+        edge_records: list[tuple[tuple[cython.longlong, int | None], tuple[cython.longlong, int | None], object]] = []
         for edge in graph.edges:
             if not isinstance(edge, tuple) or len(edge) < 2:
                 raise TypeError("function CFG edge must expose source and destination nodes")
@@ -164,8 +174,9 @@ def _function_recovery_shape_record(function: object) -> dict[str, object]:
     }
 
 
+@cython.ccall
 def _annotation_evidence_record(
-    cod_metadata: CODProcMetadata | None,
+    cod_metadata: object,
     synthetic_globals: Mapping[int, tuple[str, int]] | None,
 ) -> dict[str, object]:
     """Return complete explicit annotation inputs used by CLI decompilation."""
@@ -175,12 +186,13 @@ def _annotation_evidence_record(
     }
 
 
-def _project_evidence_record(project: object | None) -> dict[str, object]:
+@cython.ccall
+def _project_evidence_record(project: object) -> dict[str, object]:
     """Return typed project evidence known to alter lowering or signatures."""
     if project is None:
         return {"caller_return_use": {}, "compiler_helper_targets": ()}
     caller_evidence = {
-        addr: asdict(evidence) for addr, evidence in caller_return_use_evidence_by_addr_8616(project).items()
+        addr: asdict(evidence) for addr, evidence in builtins.iter(caller_return_use_evidence_by_addr_8616(project).items())
     }
     return {
         "caller_return_use": caller_evidence,
@@ -188,12 +200,13 @@ def _project_evidence_record(project: object | None) -> dict[str, object]:
     }
 
 
+@cython.ccall
 def build_function_cache_context_8616(
     item: FunctionWorkItem,
     *,
     cod_metadata: CODProcMetadata | None,
     synthetic_globals: Mapping[int, tuple[str, int]] | None,
-    lst_metadata: LSTMetadata | None,
+    lst_metadata: object,
 ) -> FunctionCacheContext8616:
     """Build complete cache evidence from one work item and explicit inputs."""
     try:
@@ -211,17 +224,18 @@ def build_function_cache_context_8616(
     )
 
 
+@cython.ccall
 def function_decompilation_cache_key_8616(
     item: FunctionWorkItem,
     *,
     binary_path: Path | None,
-    api_style: str,
+    api_style: object,
     cod_metadata: CODProcMetadata | None,
     synthetic_globals: Mapping[int, tuple[str, int]] | None,
     lst_metadata: LSTMetadata | None,
-    enable_structured_simplify: bool,
-    enable_postprocess: bool,
-) -> dict[str, object] | None:
+    enable_structured_simplify: cython.bint,
+    enable_postprocess: cython.bint,
+) -> object:
     """Build a cache key or refuse reuse for unsupported semantic evidence."""
     if live_decompilation_diagnostics_requested_8616():
         return None

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Define the pure structured-C operators shared by cleanup DCE passes.
 
 Layer: Rewrite/Postprocess cleanup.
@@ -11,6 +12,7 @@ flow, or facts from rendered text, COD, source, or CLI/reporting evidence here.
 """
 
 from __future__ import annotations
+import cython
 
 PURE_LOCAL_BINARY_OPS_8616: frozenset[str] = frozenset(
     {

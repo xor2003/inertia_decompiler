@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Mutable alias-state cells keyed by canonical storage domains.
 
 Layer: Alias.
@@ -8,39 +9,43 @@ work here.
 """
 
 from __future__ import annotations
+import dataclasses
+import typing
+import cython
 
 from dataclasses import dataclass, field
 
 from .domains import DomainKey, View
+import operator
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class AliasCell:
     """Store one versioned expression for a canonical alias domain/view."""
 
     domain: DomainKey
     view: View
     expr: object
-    needs_synthesis: bool = False
-    version: int = 0
+    needs_synthesis: cython.bint = False
+    version: cython.longlong = 0
 
-    def is_ready(self) -> bool:
+    def is_ready(self) -> cython.bint:
         """Return whether this cell can be consumed without synthesis."""
         return not self.needs_synthesis
 
 
-@dataclass(slots=True)
+@dataclasses.dataclass()
 class AliasState:
     """Track versioned alias cells keyed by storage domain and bit view."""
 
-    _cells: dict[tuple[DomainKey, View], AliasCell] = field(default_factory=dict)
-    _versions: dict[DomainKey, int] = field(default_factory=dict)
+    _cells: object = field(default_factory=dict)
+    _versions: object = field(default_factory=dict)
 
-    def version_of(self, domain: DomainKey) -> int:
+    def version_of(self, domain: DomainKey) -> cython.longlong:
         """Return the current version for a storage domain."""
         return self._versions.get(domain, 0)
 
-    def bump_domain(self, domain: DomainKey) -> int:
+    def bump_domain(self, domain: DomainKey) -> cython.longlong:
         """Advance and return the version for a storage domain."""
         new_version = self.version_of(domain) + 1
         self._versions[domain] = new_version
@@ -51,7 +56,7 @@ class AliasState:
         return self._cells.get((domain, view))
 
     def set(
-        self, domain: DomainKey, view: View, expr: object, *, needs_synthesis: bool = False, version: int | None = None
+        self, domain: DomainKey, view: View, expr: object, *, needs_synthesis: cython.bint = False, version: int | None = None
     ) -> AliasCell:
         """Store and return an alias cell for a storage domain/view pair."""
         if version is None:
@@ -62,6 +67,7 @@ class AliasState:
 
     def mark_needs_synthesis(self, domain: DomainKey, view: View) -> None:
         """Mark an existing alias cell as requiring later synthesis."""
+        cell: object
         cell = self.get(domain, view)
         if cell is not None:
             self._cells[(domain, view)] = AliasCell(
@@ -70,7 +76,8 @@ class AliasState:
 
     def clear_domain(self, domain: DomainKey) -> None:
         """Remove every alias cell associated with a storage domain."""
-        doomed = [key for key in self._cells if key[0] == domain]
+        key: object
+        doomed = [key for key in iter(self._cells) if operator.eq(key[0], domain)]
         for key in doomed:
             del self._cells[key]
 

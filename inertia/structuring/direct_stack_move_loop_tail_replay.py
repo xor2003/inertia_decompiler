@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Replay binary-proven direct stack moves at structured loop tails.
 
 Layer: Structuring.
@@ -9,6 +10,8 @@ rewrite cleanup, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -27,20 +30,22 @@ from .direct_stack_move_loops import (
 from .direct_stack_move_ownership import (
     direct_stack_move_branch_owned_addresses_8616,
 )
+import dataclasses
+import operator
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectStackMoveLoopTailReplayStats8616:
     """Closed evidence census for regenerated loop-tail assignments."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    moved_count: int
-    already_materialized_count: int
-    refused_branch_owner_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    moved_count: cython.longlong
+    already_materialized_count: cython.longlong
+    refused_branch_owner_count: cython.longlong
 
 
 class _StructuredFunctionBoundary8616(Protocol):
@@ -61,8 +66,11 @@ def materialize_direct_stack_move_loop_tail_ownership_8616(
     project: object,
     codegen: object,
     function: object,
-) -> bool:
+) -> cython.bint:
     """Move unique regenerated assignments to their unique proven loop tail."""
+    cfunc: object
+    root: object
+    fact: object
     codegen_boundary = cast(_CodegenBoundary8616, codegen)
     try:
         cfunc = codegen_boundary.cfunc
@@ -73,7 +81,7 @@ def materialize_direct_stack_move_loop_tail_ownership_8616(
         raw_facts = codegen_boundary._inertia_direct_stack_move_facts_8616
     except AttributeError:
         raw_facts = ()
-    facts = tuple(fact for fact in raw_facts if isinstance(fact, DirectStackMoveFact8616))
+    facts = tuple(fact for fact in iter(raw_facts) if isinstance(fact, DirectStackMoveFact8616))
     normalized_count = 0
     classified_count = 0
     materialized_count = 0
@@ -97,7 +105,7 @@ def materialize_direct_stack_move_loop_tail_ownership_8616(
         ):
             continue
         normalized_count += 1
-        locations: tuple[DirectStackMoveAssignmentLocation8616, ...] = (
+        locations: object = (
             tagged_assignment_locations_8616(project, codegen, root, fact)
             if root is not None
             else ()
@@ -124,7 +132,7 @@ def materialize_direct_stack_move_loop_tail_ownership_8616(
             len(relocated) == 1
             and (
                 relocated[0].statements is not original_owner
-                or relocated[0].index != original_index
+                or operator.ne(relocated[0].index, original_index)
             )
         )
         moved_count += int(moved)

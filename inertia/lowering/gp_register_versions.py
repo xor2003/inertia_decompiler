@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Preserve defined register values while publishing architectural writes.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, MutableMapping
 from dataclasses import dataclass, field
@@ -34,12 +37,15 @@ from inertia.pipeline.errors import PipelineHardError
 
 from .stack_value_projection import project_pointer_storage_value_8616
 from .terminal_return_expressions import contains_effectful_call_8616
+import dataclasses
+import operator
+import builtins
 
-type RegisterIdentity8616 = tuple[int, int, int | str | None, int | None]
-type RegisterClassifier8616 = Callable[[object], tuple[RegisterIdentity8616, str] | None]
+RegisterIdentity8616 = typing.TypeAliasType("RegisterIdentity8616", tuple[int, int, int | str | None, int | None])
+RegisterClassifier8616 = typing.TypeAliasType("RegisterClassifier8616", Callable[[object], tuple[RegisterIdentity8616, str] | None])
 _CAPTURE_TAG: str = "inertia_gp_version_capture_8616"
-_POINTER_WORD_BYTES: int = 2
-_STATEMENT_CENSUS_OCCURRENCE_MULTIPLIER: int = 2
+_POINTER_WORD_BYTES: cython.longlong = 2
+_STATEMENT_CENSUS_OCCURRENCE_MULTIPLIER: cython.longlong = 2
 
 
 class _VariableManager8616(Protocol):
@@ -52,7 +58,7 @@ class _VariableManager8616(Protocol):
 class _Function8616(Protocol):
     """Function storage and declaration surfaces required for capture."""
 
-    addr: int
+    addr: cython.longlong
     statements: object
     variables_in_use: MutableMapping[SimVariable, CVariable]
     variable_manager: _VariableManager8616
@@ -75,18 +81,18 @@ class _Codegen8616(Protocol):
     _inertia_gp_register_version_capture_stats_8616: GPVersionCaptureStats8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class GPVersionCaptureStats8616:
     """Closed census of exact register definitions requiring value storage."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _CapturePlan8616:
     """One uniquely defined version and its dominating statement group."""
 
@@ -96,11 +102,14 @@ class _CapturePlan8616:
     source: CVariable | CDirtyExpression
 
 
+@cython.ccall
 def _occurrence_histogram(
     root: object, classify: RegisterClassifier8616,
-) -> dict[RegisterIdentity8616, int]:
+) -> object:
     """Count classify-positive identities across every AST edge occurrence."""
-    counts: dict[RegisterIdentity8616, int] = {}
+    fact: object
+    node: object
+    counts: dict[RegisterIdentity8616, cython.longlong] = {}
     for node in _iter_c_node_occurrences_8616(root):
         fact = classify(node)
         if fact is not None:
@@ -108,7 +117,7 @@ def _occurrence_histogram(
     return counts
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _CaptureScan8616:
     """Bounded per-invocation census shared across candidate plans.
 
@@ -126,18 +135,19 @@ class _CaptureScan8616:
 
     root: object
     classify: RegisterClassifier8616
-    groups: tuple[CStatements, ...]
-    _occurrences: dict[RegisterIdentity8616, int] | None = None
-    _owners: dict[int, list[CStatements]] | None = None
-    _statement_occurrences: dict[int, tuple[object, dict[RegisterIdentity8616, int]]] = field(
+    groups: object
+    _occurrences: object = None
+    _owners: object = None
+    _statement_occurrences: object = field(
         default_factory=dict,
     )
-    _statement_identity_entries: int = 0
-    _statement_identity_limit: int = 0
-    _effectful: dict[int, tuple[object, bool]] = field(default_factory=dict)
-    _overwrites: dict[tuple[int, str], tuple[object, bool]] = field(default_factory=dict)
+    _statement_identity_entries: cython.longlong = 0
+    _statement_identity_limit: cython.longlong = 0
+    _effectful: object = field(default_factory=dict)
+    _overwrites: object = field(default_factory=dict)
 
-    def total(self, identity: RegisterIdentity8616) -> int:
+    @cython.ccall
+    def total(self, identity: RegisterIdentity8616) -> cython.longlong:
         """Return the whole-root occurrence count, building the census once."""
         if self._occurrences is None:
             self._occurrences = _occurrence_histogram(self.root, self.classify)
@@ -146,12 +156,15 @@ class _CaptureScan8616:
             )
         return self._occurrences.get(identity, 0)
 
+    @cython.ccall
     def owner_groups(self, assignment: CAssignment) -> tuple[CStatements, ...]:
         """Return deep-ordered statement groups directly listing the assignment."""
+        group: object
+        statement: object
         if self._owners is None:
-            owners: dict[int, list[CStatements]] = {}
+            owners: dict[cython.longlong, list[CStatements]] = {}
             for group in self.groups:
-                seen: set[int] = set()
+                seen: set[cython.longlong] = set()
                 for statement in group.statements:
                     marker = id(statement)
                     if marker in seen or not isinstance(statement, CAssignment):
@@ -161,8 +174,10 @@ class _CaptureScan8616:
             self._owners = owners
         return tuple(self._owners.get(id(assignment), ()))
 
-    def statement_reads(self, statement: object, identity: RegisterIdentity8616) -> int:
+    @cython.ccall
+    def statement_reads(self, statement: object, identity: RegisterIdentity8616) -> cython.longlong:
         """Count a subtree with bounded temporary reuse of overlapping censuses."""
+        cached: object
         marker = id(statement)
         cached = self._statement_occurrences.get(marker)
         if cached is None or cached[0] is not statement:
@@ -179,8 +194,10 @@ class _CaptureScan8616:
                 self._statement_identity_entries += entries
         return cached[1].get(identity, 0)
 
-    def clobbers(self, statement: object) -> bool:
+    @cython.ccall
+    def clobbers(self, statement: object) -> cython.bint:
         """Return whether the subtree holds an effectful call, memoized per node."""
+        cached: object
         marker = id(statement)
         cached = self._effectful.get(marker)
         if cached is None or cached[0] is not statement:
@@ -188,8 +205,10 @@ class _CaptureScan8616:
             self._effectful[marker] = cached
         return cached[1]
 
-    def overwrites(self, statement: object, parent: str) -> bool:
+    @cython.ccall
+    def overwrites(self, statement: object, parent: object) -> cython.bint:
         """Return whether the subtree may write the lane, memoized per node."""
+        cached: object
         key = (id(statement), parent)
         cached = self._overwrites.get(key)
         if cached is None or cached[0] is not statement:
@@ -202,6 +221,7 @@ def _capture_plan(
     scan: _CaptureScan8616, assignment: CAssignment, identity: RegisterIdentity8616,
 ) -> _CapturePlan8616 | None:
     """Require every read to follow the unique definition in its own group."""
+    dominating: object
     total = scan.total(identity)
     if total <= 1:
         return None
@@ -212,7 +232,7 @@ def _capture_plan(
     # A definition can dominate its own branch/loop body without dominating
     # the function. Count against the whole function to reject escaping reads.
     dominating = next(
-        (scope for scope in scan.groups if _dominates_reads(scan, scope, assignment, identity, total)),
+        (scope for scope in iter(scan.groups) if _dominates_reads(scan, scope, assignment, identity, total)),
         None,
     )
     if dominating is None:
@@ -224,12 +244,15 @@ def _capture_plan(
     return _CapturePlan8616(identity, assignment, group, cast(CVariable | CDirtyExpression, assignment.lhs))
 
 
-def _may_overwrite_lane(statement: object, parent: str, classify: RegisterClassifier8616) -> bool:
+@cython.ccall
+def _may_overwrite_lane(statement: object, parent: object, classify: RegisterClassifier8616) -> cython.bint:
     """Keep unknown destinations conservative; distinguish known register lanes."""
+    destination: object
+    node: object
     for node in _iter_c_nodes_deep_8616(statement):
         if isinstance(node, CAssignment):
             destination = classify(node.lhs)
-            if destination is None or destination[1] == parent:
+            if destination is None or operator.eq(destination[1], parent):
                 return True
     return False
 
@@ -237,17 +260,20 @@ def _may_overwrite_lane(statement: object, parent: str, classify: RegisterClassi
 def _outlives_register_value(
     scan: _CaptureScan8616, scope: CStatements, assignment: CAssignment,
     identity: RegisterIdentity8616,
-) -> bool:
+) -> cython.bint:
     """Capture only when a use can follow an overwrite or an effectful call.
 
     Pure generated memory helpers do not clobber registers. A compound statement
     can revisit reads on a backedge, so a nested overwrite is conservative even
     if its first read precedes the write. No assignments or effects are removed.
     """
+    position: object
+    source: object
+    statement: object
     source = scan.classify(assignment.lhs)
     assert source is not None
     linear = _linear_sequence(scope)
-    position = next(index for index, node in enumerate(linear) if node is assignment)
+    position = next(index for index, node in builtins.iter(enumerate(linear)) if node is assignment)
     clobbered = False
     for statement in linear[position + 1:]:
         clobbered |= scan.clobbers(statement)
@@ -261,28 +287,33 @@ def _outlives_register_value(
 
 def _dominates_reads(
     scan: _CaptureScan8616, scope: CStatements, assignment: CAssignment,
-    identity: RegisterIdentity8616, total: int,
-) -> bool:
+    identity: RegisterIdentity8616, total: cython.longlong,
+) -> cython.bint:
     """Prove all reads follow a definition without crossing a control boundary."""
     linear = _linear_sequence(scope)
-    positions = tuple(index for index, statement in enumerate(linear) if statement is assignment)
+    positions = tuple(index for index, statement in builtins.iter(enumerate(linear)) if statement is assignment)
     if len(positions) != 1:
         return False
-    later_reads = sum(scan.statement_reads(statement, identity) for statement in linear[positions[0] + 1:])
-    return total == later_reads + 1
+    later_reads = sum(scan.statement_reads(statement, identity) for statement in iter(linear[positions[0] + 1:]))
+    return operator.eq(total, later_reads + 1)
 
 
 def _linear_sequence(root: object) -> tuple[object, ...]:
     """Flatten grouping only; never enter a conditional or loop body."""
     if isinstance(root, CStatements):
-        return tuple(child for statement in root.statements for child in _linear_sequence(statement))
+        return tuple(child for statement in iter(root.statements) for child in builtins.iter(_linear_sequence(statement)))
     return (root,)
 
 
 def _plans(
-    root: object, state_names: frozenset[str], classify: RegisterClassifier8616,
+    root: object, state_names: object, classify: RegisterClassifier8616,
 ) -> tuple[_CapturePlan8616, ...]:
     """Select distinct defined versions sharing an architectural state lane."""
+    fact: object
+    plan: object
+    assignments: object
+    identity: object
+    node: object
     definitions: dict[RegisterIdentity8616, list[CAssignment]] = {}
     parents: dict[RegisterIdentity8616, str] = {}
     groups: list[CStatements] = []
@@ -298,7 +329,7 @@ def _plans(
     scan = _CaptureScan8616(root, classify, tuple(groups))
     selected: list[_CapturePlan8616] = []
     for identity, assignments in definitions.items():
-        shares_lane = any(key != identity and parent == parents[identity] for key, parent in parents.items())
+        shares_lane = any(key != identity and operator.eq(parent, parents[identity]) for key, parent in builtins.iter(parents.items()))
         if len(assignments) != 1:
             continue
         if not shares_lane and not isinstance(assignments[0].lhs, CDirtyExpression):
@@ -310,11 +341,12 @@ def _plans(
 
 
 
+@cython.ccall
 def _capture_storage_type_8616(plan: _CapturePlan8616, codegen: _Codegen8616) -> SimType:
     """Consume a typed C variable or the exact machine width of a dirty SSA value."""
     if isinstance(plan.source, CVariable):
         return plan.source.variable_type
-    types: dict[int, SimType] = {
+    types: dict[cython.longlong, SimType] = {
         1: SimTypeChar(False), 2: SimTypeShort(False), 4: SimTypeLong(False),
     }
     size = plan.identity[1]
@@ -324,9 +356,13 @@ def _capture_storage_type_8616(plan: _CapturePlan8616, codegen: _Codegen8616) ->
 
 
 def capture_gp_register_versions_8616(
-    codegen: object, state_names: frozenset[str], classify: RegisterClassifier8616,
-) -> bool:
+    codegen: object, state_names: object, classify: RegisterClassifier8616,
+) -> cython.bint:
     """Keep local values and publish each original register write exactly once."""
+    position: object
+    projected: object
+    plan: object
+    publication: object
     boundary = cast(_Codegen8616, codegen)
     function = boundary.cfunc
     root = function.statements
@@ -337,7 +373,7 @@ def capture_gp_register_versions_8616(
         raise PipelineHardError(f"GP version capture function={function.addr:#x}: {error}") from error
     existing = sum(
         isinstance(node, CAssignment) and node.tags.get(_CAPTURE_TAG) is True
-        for node in _iter_c_nodes_deep_8616(root)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(root))
     )
     if not plans:
         boundary._inertia_gp_register_version_capture_stats_8616 = GPVersionCaptureStats8616(
@@ -345,16 +381,17 @@ def capture_gp_register_versions_8616(
         )
         return False
     used_ids = {
-        node.variable.tmp_id for node in _iter_c_nodes_deep_8616(root)
+        node.variable.tmp_id for node in builtins.iter(_iter_c_nodes_deep_8616(root))
         if isinstance(node, CVariable) and isinstance(node.variable, SimTemporaryVariable)
     }
-    used_ids.update(variable.tmp_id for variable in function.variables_in_use if isinstance(variable, SimTemporaryVariable))
+    used_ids.update(variable.tmp_id for variable in iter(function.variables_in_use) if isinstance(variable, SimTemporaryVariable))
     next_id = max(used_ids, default=-1) + 1
     replacements: dict[RegisterIdentity8616, CVariable] = {}
     publications: list[tuple[_CapturePlan8616, CAssignment]] = []
 
     def replace_version(node: object) -> object:
         """Project selected full identities without merging architectural lanes."""
+        fact: object
         fact = classify(node)
         return replacements.get(fact[0], node) if fact is not None else node
 
@@ -385,7 +422,7 @@ def capture_gp_register_versions_8616(
         function.variable_manager.set_variable_type(temporary, capture_type)
     _replace_c_children_8616(root, replace_version)
     for plan, publication in publications:
-        position = next(index for index, statement in enumerate(plan.group.statements) if statement is plan.assignment)
+        position = next(index for index, statement in builtins.iter(enumerate(plan.group.statements)) if statement is plan.assignment)
         plan.group.statements = [*plan.group.statements[:position + 1], publication, *plan.group.statements[position + 1:]]
     function.refresh()
     count = existing + len(plans)

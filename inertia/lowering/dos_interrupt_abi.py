@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Define typed aggregate contracts for standard DOS interrupt wrappers.
 
 Layer: Types/Lowering.
@@ -11,6 +12,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -19,6 +22,7 @@ from typing import Any, cast
 
 from angr.sim_type import SimStruct, SimType, SimTypeChar, SimTypeShort, SimUnion
 from archinfo import Arch
+import dataclasses
 
 __all__ = [
     "DosInterruptAbiArgumentKind8616",
@@ -39,20 +43,20 @@ class DosInterruptAbiArgumentKind8616(Enum):
     SREGS = "sregs"
 
     @property
-    def is_aggregate(self) -> bool:
+    def is_aggregate(self) -> cython.bint:
         """Return whether this argument points to a typed aggregate object."""
         return self in {self.REGS, self.SREGS}
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DosInterruptAbiContract8616:
     """One resolved standard helper ABI in source argument order."""
 
-    canonical_name: str
-    argument_kinds: tuple[DosInterruptAbiArgumentKind8616, ...]
+    canonical_name: object
+    argument_kinds: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DosInterruptAggregateTypes8616:
     """Architecture-bound DOS register aggregate types used by C lowering."""
 
@@ -95,15 +99,18 @@ _ABI_CONTRACTS_8616: dict[str, DosInterruptAbiContract8616] = {
 }
 
 
-def dos_interrupt_abi_contract_8616(name: str | None) -> DosInterruptAbiContract8616 | None:
+@cython.ccall
+def dos_interrupt_abi_contract_8616(name: object) -> DosInterruptAbiContract8616 | None:
     """Return the standard ABI for one exact resolved external helper name."""
     if not isinstance(name, str):
         return None
     return _ABI_CONTRACTS_8616.get(name.strip().lstrip("_").lower())
 
 
-def dos_interrupt_prototype_declaration_8616(name: str | None) -> str | None:
+@cython.ccall
+def dos_interrupt_prototype_declaration_8616(name: object) -> object:
     """Return the exact C declaration for a resolved DOS interrupt wrapper."""
+    contract: object
     contract = dos_interrupt_abi_contract_8616(name)
     if contract is None or not isinstance(name, str):
         return None
@@ -122,12 +129,12 @@ def dos_interrupt_aggregate_types_8616(arch: Arch) -> DosInterruptAggregateTypes
     word: SimType = SimTypeShort(False)
     byte: SimType = SimTypeChar(False)
     regs_words = SimStruct(
-        OrderedDict((name, word) for name in ("ax", "bx", "cx", "dx", "si", "di", "cflag")),
+        OrderedDict((name, word) for name in iter(("ax", "bx", "cx", "dx", "si", "di", "cflag"))),
         name="REGS_WORDS",
         pack=True,
     ).with_arch(arch)
     regs_bytes = SimStruct(
-        OrderedDict((name, byte) for name in ("al", "ah", "bl", "bh", "cl", "ch", "dl", "dh")),
+        OrderedDict((name, byte) for name in iter(("al", "ah", "bl", "bh", "cl", "ch", "dl", "dh"))),
         name="REGS_BYTES",
         pack=True,
     ).with_arch(arch)
@@ -137,15 +144,16 @@ def dos_interrupt_aggregate_types_8616(arch: Arch) -> DosInterruptAggregateTypes
     regs.name = "REGS"
     cast(Any, regs).fields = regs.members
     sregs = SimStruct(
-        OrderedDict((name, word) for name in ("es", "cs", "ss", "ds")),
+        OrderedDict((name, word) for name in iter(("es", "cs", "ss", "ds"))),
         name="SREGS",
         pack=True,
     ).with_arch(arch)
     return DosInterruptAggregateTypes8616(regs, regs_words, regs_bytes, sregs)
 
 
+@cython.ccall
 def dos_interrupt_aggregate_type_definitions_8616(
-    kinds: tuple[DosInterruptAbiArgumentKind8616, ...],
+    kinds: object,
 ) -> tuple[str, ...]:
     """Return complete C definitions required by aggregate argument kinds."""
     definitions: list[str] = []

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Compatibility exports for cleanup-stage postprocess passes.
 
 Layer: Rewrite/Postprocess cleanup.
@@ -8,5 +9,6 @@ flow, or facts from rendered text, COD, source, or CLI/reporting evidence here.
 """
 
 from __future__ import annotations
+import cython
 
 __all__: tuple[str, ...] = ()

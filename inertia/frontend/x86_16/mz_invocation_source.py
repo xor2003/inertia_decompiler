@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Derive invocation entry and relocated code from immutable MZ source.
 
 Layer: Frontend.
@@ -9,27 +10,31 @@ separate obligations for consumers.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import hashlib
 from dataclasses import dataclass
 
 from .mz_load_source import MzExe, parse_mz, relocate_mz_load_module
+import dataclasses
 
-_WORD_LIMIT: int = 0xFFFF
-_REAL_MODE_LIMIT: int = 0x100000
+_WORD_LIMIT: cython.longlong = 0xFFFF
+_REAL_MODE_LIMIT: cython.longlong = 0x100000
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class MzBootCoordinates8616:
     """Header coordinates projected under one explicitly declared load paragraph."""
 
-    entry_segment: int
-    entry_offset: int
-    stack_segment: int
-    stack_offset: int
+    entry_segment: cython.longlong
+    entry_offset: cython.longlong
+    stack_segment: cython.longlong
+    stack_offset: cython.longlong
 
 
-def mz_boot_coordinates_8616(exe: MzExe, load_segment: int) -> MzBootCoordinates8616:
+@cython.ccall
+def mz_boot_coordinates_8616(exe: MzExe, load_segment: cython.longlong) -> MzBootCoordinates8616:
     """Project a parsed source header without reparsing or relocating its image.
 
     The caller owns the source-to-parser provenance. These coordinate facts
@@ -46,7 +51,7 @@ def mz_boot_coordinates_8616(exe: MzExe, load_segment: int) -> MzBootCoordinates
     return MzBootCoordinates8616(entry_segment, exe.entry_ip, stack_segment, exe.stack_sp)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class MzInvocationSource8616:
     """Source-derived load projection, never an unconditional call proof.
 
@@ -56,18 +61,18 @@ class MzInvocationSource8616:
     invocation declaration, not inferred universal DOS behavior.
     """
 
-    source: bytes
-    load_segment: int
-    module: bytes
-    entry_segment: int
-    entry_offset: int
-    stack_segment: int
-    stack_offset: int
-    minalloc: int
-    maxalloc: int
+    source: object
+    load_segment: cython.longlong
+    module: object
+    entry_segment: cython.longlong
+    entry_offset: cython.longlong
+    stack_segment: cython.longlong
+    stack_offset: cython.longlong
+    minalloc: cython.longlong
+    maxalloc: cython.longlong
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Require exact agreement with a fresh source-derived projection."""
         if type(self) is not MzInvocationSource8616:
             return False
@@ -75,28 +80,29 @@ class MzInvocationSource8616:
             derived = mz_invocation_source_8616(self.source, self.load_segment)
         except (TypeError, ValueError):
             return False
-        return self == derived and all(type(value) is int for value in (
+        return self == derived and all(type(value) is int for value in iter((
             self.entry_segment, self.entry_offset, self.stack_segment,
             self.stack_offset, self.minalloc, self.maxalloc,
-        )) and type(self.module) is bytes
+        ))) and type(self.module) is bytes
 
     @property
-    def file_sha256(self) -> str:
+    def file_sha256(self) -> object:
         """Fingerprint the exact serialized source, including trailing bytes."""
         return hashlib.sha256(self.source).hexdigest()
 
     @property
-    def module_base(self) -> int:
+    def module_base(self) -> cython.longlong:
         """Return the physical load-module base for this declared invocation."""
         return self.load_segment * 16
 
     @property
-    def entry_linear(self) -> int:
+    def entry_linear(self) -> cython.longlong:
         """Return the header-derived physical entry under the declared load."""
         return self.entry_segment * 16 + self.entry_offset
 
 
-def mz_invocation_source_8616(source: bytes, load_segment: int) -> MzInvocationSource8616:
+@cython.ccall
+def mz_invocation_source_8616(source: object, load_segment: cython.longlong) -> MzInvocationSource8616:
     """Derive a checked entry/module projection from source and load paragraph.
 
     This function deliberately does not validate a program arena, services,

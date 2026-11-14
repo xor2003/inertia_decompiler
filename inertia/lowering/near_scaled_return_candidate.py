@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Expose one binary scaled-return IR proof as a near-return candidate.
 
 Layer: Types/Lowering.
@@ -15,6 +16,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -39,6 +42,8 @@ from inertia.ir.stack_argument_scaled_return import (
     ScaledReturnResult8616,
     prove_stack_argument_scaled_return_8616,
 )
+import dataclasses
+import operator
 
 __all__ = [
     "NearScaledReturnCandidateFailure8616",
@@ -81,18 +86,18 @@ class NearScaledReturnCandidateFailure8616(StrEnum):
     UPSTREAM_PROOF_REFUSED = "upstream_proof_refused"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NearScaledReturnCandidateStats8616:
     """Closed five-stage evidence loop for one requested candidate."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NearScaledReturnCandidateResult8616:
     """One proven near scaled-return candidate or a typed atomic refusal.
 
@@ -101,7 +106,7 @@ class NearScaledReturnCandidateResult8616:
     This contract never authorizes a C return expression or pointer type.
     """
 
-    callee_addr: int
+    callee_addr: cython.longlong
     verdict: NearScaledReturnCandidateVerdict8616
     failure: NearScaledReturnCandidateFailure8616 | None
     stats: NearScaledReturnCandidateStats8616
@@ -113,7 +118,7 @@ class NearScaledReturnCandidateResult8616:
     ) = None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Require a complete retained IR proof and closed accounting."""
         return bool(
             self.verdict is NearScaledReturnCandidateVerdict8616.PROVEN
@@ -126,7 +131,7 @@ class NearScaledReturnCandidateResult8616:
             and self.proof.complete
             and self.proof.matches_storage_inputs(self.base_storage, self.index_storage)
             and self.upstream_failure is None
-            and self.stats == NearScaledReturnCandidateStats8616(1, 1, 1, 1, 0)
+            and operator.eq(self.stats, NearScaledReturnCandidateStats8616(1, 1, 1, 1, 0))
         )
 
     @property
@@ -142,11 +147,12 @@ class NearScaledReturnCandidateResult8616:
         return self.proof.offset_expression
 
 
+@cython.ccall
 def _refuse_8616(
-    callee_addr: int,
+    callee_addr: cython.longlong,
     failure: NearScaledReturnCandidateFailure8616,
     *,
-    normalized: bool = False,
+    normalized: cython.bint = False,
     base_storage: IRAddress | None = None,
     index_storage: IRAddress | None = None,
     proof: ScaledReturnResult8616 | None = None,
@@ -167,7 +173,8 @@ def _refuse_8616(
     )
 
 
-def _proven_bp_word_storage_8616(storage: object) -> bool:
+@cython.ccall
+def _proven_bp_word_storage_8616(storage: object) -> cython.bint:
     """Require one proven stable two-byte SS:BP storage identity."""
     return bool(
         isinstance(storage, IRAddress)
@@ -179,7 +186,8 @@ def _proven_bp_word_storage_8616(storage: object) -> bool:
     )
 
 
-def _semantic_registry_exists_8616(project: object) -> bool:
+@cython.ccall
+def _semantic_registry_exists_8616(project: object) -> cython.bint:
     """Check cache presence without letting the registry lookup create it."""
     surface = cast(_ProjectSSARegistry8616, project)
     try:
@@ -192,11 +200,13 @@ def _semantic_registry_exists_8616(project: object) -> bool:
     return True
 
 
+@cython.ccall
 def _restored_exact_boundary_8616(
     project: object,
     function: object,
 ) -> ExactFunctionRangeBoundary8616 | None:
     """Rebuild a byte-verified exact boundary from recovered block extents."""
+    witness: object
     try:
         witness = capture_function_boundary_8616(project, function)
         boundary = (
@@ -209,9 +219,10 @@ def _restored_exact_boundary_8616(
     return boundary
 
 
+@cython.ccall
 def _exact_callee_boundary_8616(
     project: object,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     function: object | None,
 ) -> tuple[
     ExactFunctionRangeBoundary8616 | None,
@@ -222,13 +233,15 @@ def _exact_callee_boundary_8616(
     An absent boundary stays absent: without a CFG function, a registered
     exact range, or byte-verified recovered extents, no range is invented.
     """
+    boundary: object
+    resolved: object
     resolved = function
     if resolved is None:
         resolved = function_boundary_at_address_8616(project, callee_addr)
     if resolved is None:
         return None, NearScaledReturnCandidateFailure8616.CALLEE_BOUNDARY_UNPROVEN
     if isinstance(resolved, ExactFunctionRangeBoundary8616):
-        if resolved.addr != callee_addr:
+        if operator.ne(resolved.addr, callee_addr):
             return None, NearScaledReturnCandidateFailure8616.FUNCTION_MISMATCH
         if resolved.project is not project:
             return None, NearScaledReturnCandidateFailure8616.BOUNDARY_PROJECT_MISMATCH
@@ -240,14 +253,15 @@ def _exact_callee_boundary_8616(
     if resolved_addr != callee_addr:
         return None, NearScaledReturnCandidateFailure8616.FUNCTION_MISMATCH
     boundary = _restored_exact_boundary_8616(project, resolved)
-    if boundary is None or boundary.addr != callee_addr:
+    if boundary is None or operator.ne(boundary.addr, callee_addr):
         return None, NearScaledReturnCandidateFailure8616.CALLEE_BOUNDARY_UNPROVEN
     return boundary, None
 
 
+@cython.ccall
 def collect_near_scaled_return_candidate_8616(
     project: object,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     base_storage: IRAddress,
     index_storage: IRAddress,
     *,
@@ -260,6 +274,9 @@ def collect_near_scaled_return_candidate_8616(
     The result is a candidate only: it retains IR evidence and never installs
     a type, prototype, storage acceptance, or emitted C change.
     """
+    artifact: object
+    boundary: object
+    boundary_failure: object
     if type(callee_addr) is not int or callee_addr < 0:
         return _refuse_8616(
             -1, NearScaledReturnCandidateFailure8616.CALLEE_ADDR_INVALID,
@@ -298,7 +315,7 @@ def collect_near_scaled_return_candidate_8616(
         resolution.verdict is not FunctionSSAArtifactVerdict8616.PROVEN
         or resolution.stage is not FunctionSSAArtifactStage8616.SEMANTIC
         or artifact is None
-        or artifact.function_addr != callee_addr
+        or operator.ne(artifact.function_addr, callee_addr)
     ):
         return _refuse_8616(
             callee_addr,

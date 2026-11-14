@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bind one symbolic SSA CALL to its native-proven full-width target.
 
 Layer: Types/Lowering (staged candidate under
@@ -34,6 +35,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from inertia.frontend.x86_16.frontend_direct_callsite_index import (
     DecodedDirectCallsite8616,
@@ -69,6 +72,7 @@ from .call_target_ssa_contracts import (
     _BoundProducer8616,
     _refuse_8616,
 )
+import operator
 
 __all__ = [
     "CallTargetBindResult8616",
@@ -82,14 +86,16 @@ __all__ = [
 def _decoded_entry_candidates_8616(
     callsite_index: DecodedDirectCallsiteIndex8616,
     project: object,
-    caller_addr: int,
-    callsite_addr: int,
-    accepted_target_addrs: tuple[int, ...],
+    caller_addr: cython.longlong,
+    callsite_addr: cython.longlong,
+    accepted_target_addrs: object,
 ) -> tuple[DecodedDirectCallsite8616, ...]:
     """Collect unique admitted near entries for the exact caller callsite."""
+    accepted_addr: object
+    entry: object
     accepted = {
         address
-        for address in accepted_target_addrs
+        for address in iter(accepted_target_addrs)
         if type(address) is int and address >= 0
     }
     # The admitted relation may use image-relative coordinates while the
@@ -97,16 +103,16 @@ def _decoded_entry_candidates_8616(
     # lookup only; native proof and final full-width admission still decide.
     normalized = {
         target
-        for address in accepted
+        for address in iter(accepted)
         if (target := normalize_x86_16_call_target_addr_8616(project, address)) is not None
     }
-    seen: set[tuple[int, int, int, int]] = set()
+    seen: set[tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong]] = set()
     entries: list[DecodedDirectCallsite8616] = []
     for accepted_addr in sorted(accepted | normalized):
         for entry in callsite_index.for_target(accepted_addr):
             if (
-                entry.caller_start != caller_addr
-                or entry.callsite_addr != callsite_addr
+                operator.ne(entry.caller_start, caller_addr)
+                or operator.ne(entry.callsite_addr, callsite_addr)
                 or entry.is_far
             ):
                 continue
@@ -125,30 +131,31 @@ def _decoded_entry_candidates_8616(
 
 def _target_admitted_8616(
     project: object,
-    target_addr: int,
-    accepted_target_addrs: tuple[int, ...],
-) -> bool:
+    target_addr: cython.longlong,
+    accepted_target_addrs: object,
+) -> cython.bint:
     """Require the proven target inside the admitted exact/alias relation."""
     accepted = frozenset(
         address
-        for address in accepted_target_addrs
+        for address in iter(accepted_target_addrs)
         if type(address) is int and not isinstance(address, bool)
     )
     if not accepted:
         return False
     return target_addr in accepted or any(
         x86_16_call_targets_equivalent_8616(project, target_addr, address)
-        for address in accepted
+        for address in iter(accepted)
     )
 
 
+@cython.ccall
 def bind_ssa_call_target_8616(
     artifact: SSAFunctionArtifact,
-    caller_addr: int,
-    callsite_addr: int,
-    accepted_target_addrs: tuple[int, ...],
+    caller_addr: cython.longlong,
+    callsite_addr: cython.longlong,
+    accepted_target_addrs: object,
     *,
-    project: object | None,
+    project: object,
     callsite_index: DecodedDirectCallsiteIndex8616 | None,
     projection: CallSemanticProjection8616 | None = None,
 ) -> CallTargetBindResult8616:
@@ -239,15 +246,16 @@ def bind_ssa_call_target_8616(
 
 
 
+@cython.ccall
 def _prove_admitted_8616(
     project: object,
     producer: _BoundProducer8616,
     callsite_index: DecodedDirectCallsiteIndex8616 | None,
-    caller_addr: int,
-    callsite_addr: int,
-    accepted_target_addrs: tuple[int, ...],
-    ssa_block_addr: int,
-    ssa_instr_index: int,
+    caller_addr: cython.longlong,
+    callsite_addr: cython.longlong,
+    accepted_target_addrs: object,
+    ssa_block_addr: cython.longlong,
+    ssa_instr_index: cython.longlong,
 ) -> CallTargetBindResult8616:
     """Discharge the Semantics binding against admitted decoded evidence.
 
@@ -257,6 +265,7 @@ def _prove_admitted_8616(
     already carried a complete materialization-time binding, it must agree
     with the decoded-route target — it corroborates, never substitutes.
     """
+    entry: object
     if not isinstance(callsite_index, DecodedDirectCallsiteIndex8616) or not (
         callsite_index.stats.closed
     ):
@@ -276,7 +285,7 @@ def _prove_admitted_8616(
             CallTargetBindStage8616.DECODED_ENTRY_MISSING,
             normalized=True,
         )
-    if len({entry.target_addr for entry in entries}) != 1:
+    if len({entry.target_addr for entry in iter(entries)}) != 1:
         return _refuse_8616(
             callsite_addr,
             CallTargetBindVerdict8616.CONFLICT,
@@ -294,9 +303,9 @@ def _prove_admitted_8616(
             decoded=entry,
         )
         last_binding = proof
-        if proof.complete and proof.callsite_addr == callsite_addr:
+        if proof.complete and operator.eq(proof.callsite_addr, callsite_addr):
             proven.append(proof)
-    proven_targets = {binding.target_addr for binding in proven}
+    proven_targets = {binding.target_addr for binding in iter(proven)}
     if len(proven_targets) > 1:
         return _refuse_8616(
             callsite_addr,
@@ -326,14 +335,15 @@ def _prove_admitted_8616(
     )
 
 
+@cython.ccall
 def _admit_proven_8616(
     project: object,
     producer: _BoundProducer8616,
     binding: DirectNearCallTargetBinding8616,
-    callsite_addr: int,
-    accepted_target_addrs: tuple[int, ...],
-    ssa_block_addr: int,
-    ssa_instr_index: int,
+    callsite_addr: cython.longlong,
+    accepted_target_addrs: object,
+    ssa_block_addr: cython.longlong,
+    ssa_instr_index: cython.longlong,
 ) -> CallTargetBindResult8616:
     """Admit one decoded-proof target, corroborated by retained evidence.
 
@@ -342,6 +352,7 @@ def _admit_proven_8616(
     the decoded route — and the proven coordinate must sit inside the
     admitted exact/alias target relation.
     """
+    retained: object
     target_addr = binding.target_addr
     if type(target_addr) is not int or target_addr < 0:
         return _refuse_8616(
@@ -356,7 +367,7 @@ def _admit_proven_8616(
     if (
         retained is not None
         and retained.complete
-        and retained.target_addr != target_addr
+        and operator.ne(retained.target_addr, target_addr)
     ):
         return _refuse_8616(
             callsite_addr,

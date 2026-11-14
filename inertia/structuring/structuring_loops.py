@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Adapt typed region graphs to authoritative natural-loop topology evidence.
 
 Layer: Structuring.
@@ -12,6 +13,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -22,6 +25,9 @@ from inertia.structuring.natural_loop_topology import (
     classify_natural_loop_topology_8616,
 )
 from inertia.structuring.structuring_region import DominatorInfo, Region, RegionGraph
+import dataclasses
+import operator
+import builtins
 
 __all__ = (
     "LoopTopologyStats8616",
@@ -31,53 +37,55 @@ __all__ = (
 )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _RegionIdGraph8616:
     """Immutable integer-ID snapshot of one RegionGraph."""
 
-    successor_map: dict[int, tuple[int, ...]]
-    predecessor_map: dict[int, tuple[int, ...]]
+    successor_map: object
+    predecessor_map: object
 
-    def successors(self, node: int) -> tuple[int, ...]:
+    def successors(self, node: cython.longlong) -> object:
         """Return deterministic successor IDs for one region."""
         return self.successor_map[node]
 
-    def predecessors(self, node: int) -> tuple[int, ...]:
+    def predecessors(self, node: cython.longlong) -> object:
         """Return deterministic predecessor IDs for one region."""
         return self.predecessor_map[node]
 
 
-def _region_id_graph_8616(graph: RegionGraph) -> tuple[_RegionIdGraph8616, dict[int, Region]] | None:
+def _region_id_graph_8616(graph: RegionGraph) -> object:
     """Snapshot a RegionGraph only when every node has one unique integer ID."""
+    region: object
+    region_id: object
     regions = tuple(graph.nodes)
-    if any(not isinstance(region.region_id, int) for region in regions):
+    if any(not isinstance(region.region_id, int) for region in iter(regions)):
         return None
-    regions_by_id = {region.region_id: region for region in regions if isinstance(region.region_id, int)}
-    if len(regions_by_id) != len(regions):
+    regions_by_id = {region.region_id: region for region in iter(regions) if isinstance(region.region_id, int)}
+    if operator.ne(len(regions_by_id), len(regions)):
         return None
 
-    successor_map: dict[int, tuple[int, ...]] = {}
-    predecessor_map: dict[int, tuple[int, ...]] = {}
-    for region_id, region in sorted(regions_by_id.items()):
+    successor_map: dict[cython.longlong, tuple[cython.longlong, ...]] = {}
+    predecessor_map: dict[cython.longlong, tuple[cython.longlong, ...]] = {}
+    for region_id, region in sorted(tuple(regions_by_id.items())):
         successors = graph.successors(region)
         predecessors = graph.predecessors(region)
         if any(
             not isinstance(neighbor.region_id, int) or neighbor.region_id not in regions_by_id
-            for neighbor in (*successors, *predecessors)
+            for neighbor in iter(tuple(successors) + tuple(predecessors))
         ):
             return None
         successor_map[region_id] = tuple(
-            sorted({neighbor.region_id for neighbor in successors if neighbor.region_id is not None})
+            sorted({neighbor.region_id for neighbor in iter(successors) if neighbor.region_id is not None})
         )
         predecessor_map[region_id] = tuple(
-            sorted({neighbor.region_id for neighbor in predecessors if neighbor.region_id is not None})
+            sorted({neighbor.region_id for neighbor in iter(predecessors) if neighbor.region_id is not None})
         )
     return _RegionIdGraph8616(successor_map, predecessor_map), regions_by_id
 
 
 def detect_natural_loop(
     graph: RegionGraph,
-    dominators: DominatorInfo,
+    dominators,
     region: Region,
 ) -> NaturalLoopTopology8616 | None:
     """Classify deterministic loop-header candidates without mutating them.
@@ -86,6 +94,7 @@ def detect_natural_loop(
     that abnormal entries cannot erase the latch by invalidating dominance.
     ``None`` means that no predecessor has a loop-body path from the header.
     """
+    snapshot: object
     del dominators
     if region not in graph.nodes or not isinstance(region.region_id, int):
         return None
@@ -95,14 +104,14 @@ def detect_natural_loop(
     id_graph, _regions_by_id = snapshot
     candidates = tuple(
         classify_natural_loop_topology_8616(id_graph, region.region_id, latch_id)
-        for latch_id in id_graph.predecessors(region.region_id)
+        for latch_id in builtins.iter(id_graph.predecessors(region.region_id))
     )
-    proven = tuple(candidate for candidate in candidates if candidate.is_proven)
+    proven = tuple(candidate for candidate in iter(candidates) if candidate.is_proven)
     if len(proven) == 1:
         return proven[0]
     substantive_refusals = tuple(
         candidate
-        for candidate in candidates
+        for candidate in iter(candidates)
         if candidate.refusal_reason not in {"incomplete-loop-body", "missing-latch-backedge"}
     )
     return substantive_refusals[0] if substantive_refusals else None

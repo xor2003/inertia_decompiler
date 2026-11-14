@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Coordinate typed DOS interrupt aggregate global materialization.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -42,6 +45,9 @@ from .global_declarations import (
 )
 from .indexed_global_evidence import IndexedSegmentedGlobalEvidence8616
 from .named_type_definitions import record_named_type_definitions_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "DosInterruptAggregateMaterializationStats8616",
@@ -49,18 +55,18 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DosInterruptAggregateMaterializationStats8616:
     """Closed evidence loop for DOS interrupt aggregate lowering."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    object_count: int = 0
-    argument_count: int = 0
-    field_projection_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    object_count: cython.longlong = 0
+    argument_count: cython.longlong = 0
+    field_projection_count: cython.longlong = 0
 
 
 class _CFunctionSurface8616(Protocol):
@@ -82,18 +88,20 @@ class _CodegenSurface8616(Protocol):
     _inertia_dos_interrupt_aggregate_stats_8616: DosInterruptAggregateMaterializationStats8616
 
 
+@cython.ccall
 def _root_8616(cfunc: _CFunctionSurface8616) -> object | None:
     """Return the current structured root without reading rendered C."""
     return cfunc.statements if cfunc.statements is not None else cfunc.body
 
 
-def _typed_summaries_8616(value: object) -> dict[int, CallsiteSummary8616]:
+@cython.ccall
+def _typed_summaries_8616(value: object) -> dict[cython.longlong, CallsiteSummary8616]:
     """Narrow owned summary metadata to its typed mapping contract."""
     if not isinstance(value, Mapping):
         return {}
     return {
         key: summary
-        for key, summary in value.items()
+        for key, summary in builtins.iter(value.items())
         if isinstance(key, int) and isinstance(summary, CallsiteSummary8616)
     }
 
@@ -102,22 +110,23 @@ def _indexed_evidence_8616(value: object) -> tuple[IndexedSegmentedGlobalEvidenc
     """Narrow persistent indexed-global evidence to typed facts."""
     if not isinstance(value, tuple):
         return ()
-    return tuple(item for item in value if isinstance(item, IndexedSegmentedGlobalEvidence8616))
+    return tuple(item for item in iter(value) if isinstance(item, IndexedSegmentedGlobalEvidence8616))
 
 
 def _identity_facts_8616(value: object) -> tuple[CodGlobalIdentityFact8616, ...]:
     """Narrow optional COD alias metadata to typed identity facts."""
     if not isinstance(value, tuple):
         return ()
-    return tuple(item for item in value if isinstance(item, CodGlobalIdentityFact8616))
+    return tuple(item for item in iter(value) if isinstance(item, CodGlobalIdentityFact8616))
 
 
 def _record_object_types_8616(
     codegen: object,
-    objects: tuple[DosInterruptAggregateObjectFact8616, ...],
-) -> bool:
+    objects: object,
+) -> cython.bint:
     """Record complete definitions and stronger scalar global declarations."""
-    kinds = tuple(dict.fromkeys(obj.kind for obj in objects))
+    obj: object
+    kinds = tuple(dict.fromkeys(obj.kind for obj in iter(objects)))
     type_definitions = dos_interrupt_aggregate_type_definitions_8616(kinds)
     changed = record_named_type_definitions_8616(codegen, type_definitions)
     definitions = dict(zip(kinds, type_definitions, strict=True))
@@ -131,22 +140,23 @@ def _record_object_types_8616(
             name=obj.display_name,
             array_len=None,
         )
-    return changed or declarations_before != surface._inertia_global_declaration_specs_8616
+    return changed or operator.ne(declarations_before, surface._inertia_global_declaration_specs_8616)
 
 
 def _project_interrupt_accesses_8616(
     root: object,
     codegen: object,
-    objects: tuple[DosInterruptAggregateObjectFact8616, ...],
-    evidence: tuple[IndexedSegmentedGlobalEvidence8616, ...],
-    identities: tuple[CodGlobalIdentityFact8616, ...],
+    objects: object,
+    evidence: object,
+    identities: object,
     types: DosInterruptAggregateTypes8616,
-) -> tuple[bool, int]:
+) -> tuple[cython.bint, cython.longlong]:
     """Project exact scalar accesses; return ``(changed, projection_count)``."""
     projection_count = 0
 
     def transform(node: object) -> object:
         """Project exact scalar accesses while preserving whole-object references."""
+        replacement: object
         nonlocal projection_count
         replacement = project_dos_interrupt_global_access_8616(
             codegen,
@@ -161,7 +171,7 @@ def _project_interrupt_accesses_8616(
             return replacement
         return node
 
-    def should_process_child(parent: object, attr: str) -> bool:
+    def should_process_child(parent: object, attr: object) -> cython.bint:
         """Keep aggregate bases whole beneath references and existing fields."""
         if isinstance(parent, structured_c.CUnaryOp) and parent.op == "Reference" and attr == "operand":
             return False
@@ -175,8 +185,10 @@ def _project_interrupt_accesses_8616(
     return changed, projection_count
 
 
-def materialize_dos_interrupt_aggregate_globals_8616(codegen: object) -> bool:
+def materialize_dos_interrupt_aggregate_globals_8616(codegen: object) -> cython.bint:
     """Materialize every fully classified DOS interrupt aggregate call."""
+    root: object
+    fact: object
     surface = cast(_CodegenSurface8616, codegen)
     try:
         root = _root_8616(surface.cfunc)
@@ -202,7 +214,7 @@ def materialize_dos_interrupt_aggregate_globals_8616(codegen: object) -> bool:
         identities,
     )
     types = dos_interrupt_aggregate_types_8616(surface.project.arch)
-    objects = tuple(dict.fromkeys(obj for fact in facts for obj in fact.objects))
+    objects = tuple(dict.fromkeys(obj for fact in iter(facts) for obj in iter(fact.objects)))
     changed = _record_object_types_8616(codegen, objects) if objects else False
     materialized_count = 0
     argument_count = 0
@@ -237,7 +249,7 @@ def materialize_dos_interrupt_aggregate_globals_8616(codegen: object) -> bool:
         field_projection_count=projection_count,
     )
     surface._inertia_dos_interrupt_aggregate_stats_8616 = stats
-    if stats.classified_fact_count > 0 and stats.materialized_count != stats.classified_fact_count:
+    if stats.classified_fact_count > 0 and operator.ne(stats.materialized_count, stats.classified_fact_count):
         raise PipelineHardError(
             "classified DOS interrupt aggregate calls were not fully materialized",
             layer="lowering",

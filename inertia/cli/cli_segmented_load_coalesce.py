@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: preserve legacy CLI helper surface while delegating semantic proof to X86_16 layers.
@@ -5,12 +6,15 @@ Forbidden: owning decompiler semantics, source-backed recovery, or postprocess s
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Protocol
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
+import dataclasses
 
 
 class _CFunctionLike(Protocol):
@@ -28,9 +32,9 @@ class _CodegenLike(Protocol):
 class _AliasStorageLike(Protocol):
     """Alias-storage summary needed for adjacent byte-load proof."""
 
-    identity: tuple[object, ...] | None
+    identity: object
 
-    def can_join(self, other: object) -> bool:
+    def can_join(self, other: object) -> cython.bint:
         """Return whether two byte-load storage facts prove one joined word."""
         ...
 
@@ -38,28 +42,32 @@ class _AliasStorageLike(Protocol):
 class _SegmentedAddrClassLike(Protocol):
     """Segmented-address classification surface used by this CLI helper."""
 
-    kind: str
+    kind: object
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _SegmentedWordLoadCoalescer:
     """Visitor folding adjacent byte loads into one segmented word load."""
 
     project: object
     codegen: _CodegenLike
     unwrap_c_casts: Callable[[object], object]
-    structured_codegen_node: Callable[[object], bool]
+    structured_codegen_node: Callable[[object], cython.bint]
     match_byte_load_addr_expr: Callable[[object], object | None]
     match_shifted_high_byte_addr_expr: Callable[[object], object | None]
-    addr_exprs_are_byte_pair: Callable[[object, object, object], bool]
+    addr_exprs_are_byte_pair: Callable[[object, object, object], cython.bint]
     classify_segmented_addr_expr: Callable[[object, object], _SegmentedAddrClassLike | None]
     resolve_stack_cvar_from_addr_expr: Callable[[object, _CodegenLike, object], object | None]
     make_word_dereference_from_addr_expr: Callable[[_CodegenLike, object, object], object]
     describe_alias_storage: Callable[[object], _AliasStorageLike]
-    dereferenced_variable_ids: set[int] = field(default_factory=set)
+    dereferenced_variable_ids: object = field(default_factory=set)
 
-    def _collect_variable_ids(self, expr: object, ids: set[int]) -> None:
+    @cython.ccall
+    def _collect_variable_ids(self, expr: object, ids: object) -> None:
         """Collect backend variable identities referenced by one expression."""
+        value: object
+        variable: object
+        attr: object
         expr = self.unwrap_c_casts(expr)
         if isinstance(expr, structured_c.CVariable):
             # Dynamic codegen boundary: angr structured C variable nodes expose optional payloads.
@@ -80,8 +88,12 @@ class _SegmentedWordLoadCoalescer:
                 self._collect_variable_ids(value, ids)
         self._collect_sequence_variable_ids(expr, ids)
 
-    def _collect_sequence_variable_ids(self, expr: object, ids: set[int]) -> None:
+    @cython.ccall
+    def _collect_sequence_variable_ids(self, expr: object, ids: object) -> None:
         """Collect variable identities from sequence-valued node attributes."""
+        items: object
+        attr: object
+        item: object
         for attr in ("args", "operands", "statements"):
             # Dynamic codegen boundary: statement containers are node-specific in angr C ASTs.
             if not hasattr(expr, attr):
@@ -95,10 +107,15 @@ class _SegmentedWordLoadCoalescer:
                 if self.structured_codegen_node(item):
                     self._collect_variable_ids(item, ids)
 
+    @cython.ccall
     def _try_join_byte_pair(
         self, low_expr: object, high_expr: object
     ) -> object | None:
         """Return the joined word expression for one proven byte pair."""
+        high_addr_expr: object
+        low_addr_expr: object
+        low_class: object
+        resolved_lhs: object
         low_addr_expr = self.match_byte_load_addr_expr(self.unwrap_c_casts(low_expr))
         if low_addr_expr is None:
             return None
@@ -114,8 +131,8 @@ class _SegmentedWordLoadCoalescer:
         if not low_facts.can_join(high_facts):
             return None
 
-        low_addr_ids: set[int] = set()
-        high_addr_ids: set[int] = set()
+        low_addr_ids: set[cython.longlong] = set()
+        high_addr_ids: set[cython.longlong] = set()
         self._collect_variable_ids(low_addr_expr, low_addr_ids)
         self._collect_variable_ids(high_addr_expr, high_addr_ids)
         if low_addr_ids & self.dereferenced_variable_ids or high_addr_ids & self.dereferenced_variable_ids:
@@ -129,8 +146,12 @@ class _SegmentedWordLoadCoalescer:
             return self.make_word_dereference_from_addr_expr(self.codegen, self.project, low_addr_expr)
         return None
 
+    @cython.ccall
     def transform(self, node: object) -> object:
         """Rewrite one Or/Add byte-pair node into a word load when proven."""
+        joined: object
+        high_expr: object
+        low_expr: object
         if not isinstance(node, structured_c.CBinaryOp) or node.op not in {"Or", "Add"}:
             return node
 
@@ -142,22 +163,25 @@ class _SegmentedWordLoadCoalescer:
         return node
 
 
+@cython.ccall
 def _coalesce_segmented_word_load_expressions(
     project: object,
     codegen: _CodegenLike,
     *,
     unwrap_c_casts: Callable[[object], object],
     iter_c_nodes_deep: Callable[[object], Iterable[object]],
-    replace_c_children: Callable[[object, Callable[[object], object]], bool],
-    structured_codegen_node: Callable[[object], bool],
+    replace_c_children: Callable[[object, Callable[[object], object]], cython.bint],
+    structured_codegen_node: Callable[[object], cython.bint],
     match_byte_load_addr_expr: Callable[[object], object | None],
     match_shifted_high_byte_addr_expr: Callable[[object], object | None],
-    addr_exprs_are_byte_pair: Callable[[object, object, object], bool],
+    addr_exprs_are_byte_pair: Callable[[object, object, object], cython.bint],
     classify_segmented_addr_expr: Callable[[object, object], _SegmentedAddrClassLike | None],
     resolve_stack_cvar_from_addr_expr: Callable[[object, _CodegenLike, object], object | None],
     make_word_dereference_from_addr_expr: Callable[[_CodegenLike, object, object], object],
     describe_alias_storage: Callable[[object], _AliasStorageLike],
-) -> bool:
+) -> cython.bint:
+    cfunc: object
+    walk_node: object
     cfunc = codegen.cfunc
     if cfunc is None:
         return False

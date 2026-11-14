@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize branch-leaf return expressions from typed semantic effects.
 
 Layer: Structuring.
@@ -13,6 +14,8 @@ and refuses leaves whose return expression cannot be proved.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -47,12 +50,14 @@ from .return_chains import (
 )
 from .return_path_preservation import branch_target_imm_8616 as branch_target_imm_8616
 from .return_path_preservation import return_path_preserves_return_registers_8616
+import dataclasses
+import operator
 
 
 class _BlockFactory8616(Protocol):
     """Dynamic angr block-factory boundary used by branch-leaf scanning."""
 
-    def block(self, addr: int, *, opt_level: int = 0) -> object:
+    def block(self, addr: cython.longlong, *, opt_level: cython.longlong = 0) -> object:
         """Return a decoded block beginning at one CFG address."""
 
 
@@ -62,15 +67,16 @@ class _Project8616(Protocol):
     factory: _BlockFactory8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _StackReturnSlice8616:
     """Keep one typed BP-relative return slice until DX:AX is combined."""
 
-    offset: int
-    size: int
+    offset: cython.longlong
+    size: cython.longlong
 
 
-def _signed_i16_8616(value: int) -> int:
+@cython.ccall
+def _signed_i16_8616(value: cython.longlong) -> cython.longlong:
     """Normalize one decoded immediate to its signed 16-bit value."""
     normalized = value & 0xFFFF
     return normalized - 0x10000 if normalized & 0x8000 else normalized
@@ -78,10 +84,10 @@ def _signed_i16_8616(value: int) -> int:
 
 def branch_target_preserves_return_registers_8616(
     project: object,
-    target_addr: int,
+    target_addr: cython.longlong,
     *,
-    max_depth: int = 4,
-) -> bool:
+    max_depth: cython.longlong = 4,
+) -> cython.bint:
     """Prove a bounded jump path reaches return without changing AX or DX."""
     typed_project = cast(_Project8616, project)
     return return_path_preserves_return_registers_8616(
@@ -91,6 +97,7 @@ def branch_target_preserves_return_registers_8616(
     )
 
 
+@cython.ccall
 def _stack_ir_value_8616(value: _StackReturnSlice8616, *, size: int | None = None) -> IRValue:
     """Build one typed stack value from a classified return slice."""
     return IRValue(
@@ -101,13 +108,14 @@ def _stack_ir_value_8616(value: _StackReturnSlice8616, *, size: int | None = Non
     )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _BranchReturnLowering8616:
     """Bound project/codegen context for branch-target return recovery."""
 
     project: object
     codegen: object
 
+    @cython.ccall
     def lower_stack(
         self, value: _StackReturnSlice8616, *, size: int | None = None
     ) -> CExpression | None:
@@ -117,8 +125,9 @@ class _BranchReturnLowering8616:
         )
         return lowered if isinstance(lowered, CExpression) else None
 
+    @cython.ccall
     def combine(
-        self, ax_value: object | None, dx_value: object | None
+        self, ax_value: object | None, dx_value: object
     ) -> CExpression | None:
         """Combine proven AX/DX return halves into one expression."""
         if isinstance(ax_value, _StackReturnSlice8616):
@@ -126,7 +135,7 @@ class _BranchReturnLowering8616:
                 return self.lower_stack(ax_value)
             if (
                 isinstance(dx_value, _StackReturnSlice8616)
-                and dx_value.offset == ax_value.offset + 2
+                and operator.eq(dx_value.offset, ax_value.offset + 2)
             ):
                 return self.lower_stack(ax_value, size=4)
             return None
@@ -143,35 +152,42 @@ class _BranchReturnLowering8616:
             return CConstant(combined, SimTypeLong(True), codegen=self.codegen)
         return None
 
-    def reg_imm(self, value: int) -> CExpression:
+    @cython.ccall
+    def reg_imm(self, value: cython.longlong) -> CExpression:
         """Materialize one signed register immediate."""
         return CConstant(_signed_i16_8616(value), SimTypeShort(True), codegen=self.codegen)
 
-    def stack_load(self, offset: int, size: int) -> _StackReturnSlice8616:
+    @cython.ccall
+    def stack_load(self, offset: cython.longlong, size: cython.longlong) -> _StackReturnSlice8616:
         """Materialize one deferred stack return slice."""
         return _StackReturnSlice8616(offset, size)
 
-    def ax_alu_imm(self, ax_value: object, op: str, value: int) -> CExpression | None:
+    @cython.ccall
+    def ax_alu_imm(self, ax_value: object, op: object, value: cython.longlong) -> CExpression | None:
         """Materialize one proven AX-immediate ALU return expression."""
+        expression: object
         expression = self.combine(ax_value, None)
         if expression is None:
             return None
         immediate = CConstant(_signed_i16_8616(value), SimTypeShort(False), codegen=self.codegen)
         return CBinaryOp(op, expression, immediate, codegen=self.codegen)
 
-    def ax_incdec(self, ax_value: object, op: str) -> CExpression | None:
+    @cython.ccall
+    def ax_incdec(self, ax_value: object, op: object) -> CExpression | None:
         """Materialize one proven AX increment/decrement return expression."""
+        expression: object
         expression = self.combine(ax_value, None)
         if expression is None:
             return None
         return CBinaryOp(op, expression, CConstant(1, SimTypeShort(False), codegen=self.codegen), codegen=self.codegen)
 
 
+@cython.ccall
 def branch_return_register_source_8616(
     project: object,
     codegen: object,
-    instruction_addr: int,
-    register: str,
+    instruction_addr: cython.longlong,
+    register: object,
 ) -> IRValue | None:
     """Consume the retained whole-function source proof at an exact native MOV.
 
@@ -179,6 +195,7 @@ def branch_return_register_source_8616(
     invented. The canonical resolver checks complete current block inventory
     and all reaching paths, including calls and memory/register clobbers.
     """
+    resolved: object
     resolved = codegen_function_8616(project, codegen)
     if resolved is None or instruction_addr < 0:
         return None
@@ -193,14 +210,15 @@ def branch_return_register_source_8616(
 def recover_branch_target_return_expression_8616(
     project: object,
     codegen: object,
-    target_addr: int,
+    target_addr: cython.longlong,
 ) -> CExpression | None:
     """Recover one CFG leaf return expression from classified semantic effects."""
     typed_project = cast(_Project8616, project)
     lowering = _BranchReturnLowering8616(project, codegen)
     state = BranchTargetReturnRegisterState8616()
 
-    def _reg_copy(instruction_addr: int, register: str) -> CExpression | None:
+    def _reg_copy(instruction_addr: cython.longlong, register: object) -> CExpression | None:
+        value: object
         value = branch_return_register_source_8616(project, codegen, instruction_addr, register)
         if value is None:
             return None
@@ -218,7 +236,7 @@ def recover_branch_target_return_expression_8616(
         materialize_reg_copy=_reg_copy,
     )
 
-    def _load_block(addr: int) -> object:
+    def _load_block(addr: cython.longlong) -> object:
         return typed_project.factory.block(addr, opt_level=0)
 
     def _scan_block(block: object) -> BranchTargetReturnBlockResult8616:
@@ -228,12 +246,15 @@ def recover_branch_target_return_expression_8616(
     return result if isinstance(result, CExpression) else None
 
 
+@cython.ccall
 def sole_return_expression_8616(body: object) -> CExpression | None:
     """Return the expression from one body containing exactly one return."""
+    statement: object
     statement = sole_return_statement_8616(body)
     return statement.retval if statement is not None and isinstance(statement.retval, CExpression) else None
 
 
+@cython.ccall
 def binary_return_arm_polarity_8616(
     condition: ConditionIR,
     true_body: object,
@@ -245,6 +266,13 @@ def binary_return_arm_polarity_8616(
     Cloned shared epilogues have the same statement origin. Their return values
     may distinguish the paths, but only when both complete binary paths agree.
     """
+    fallthrough: object
+    fallthrough_value: object
+    false_value: object
+    resolved: object
+    taken: object
+    taken_value: object
+    true_value: object
     true_value = sole_return_expression_8616(true_body)
     false_value = sole_return_expression_8616(false_body)
     if true_value is None or false_value is None:
@@ -258,7 +286,7 @@ def binary_return_arm_polarity_8616(
         if resolved is not None:
             false_value = resolved
     taken, fallthrough = condition.taken_target, condition.fallthrough_target
-    if taken is None or fallthrough is None or taken == fallthrough:
+    if taken is None or fallthrough is None or operator.eq(taken, fallthrough):
         return None
     taken_value, fallthrough_value = recover(taken), recover(fallthrough)
     if taken_value is None or fallthrough_value is None:
@@ -270,6 +298,7 @@ def binary_return_arm_polarity_8616(
     return direct if direct != inverse else None
 
 
+@cython.ccall
 def sole_return_statement_8616(body: object) -> CReturn | None:
     """Return one body-owned return statement, including an empty placeholder."""
     current = body

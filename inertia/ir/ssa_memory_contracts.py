@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed contracts emitted by exact stack-memory SSA.
 
 Layer: IR.
@@ -9,6 +10,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -16,8 +19,10 @@ from enum import StrEnum
 from .core import IRAddress, IRCallStackEffect8616, IRRefusal
 from .logical_memory_contracts import IRLogicalMemoryArtifact8616
 from .ssa import SSABlock
+import dataclasses
+import operator
 
-type MemoryRangeKey8616 = tuple[str, tuple[str, ...], int, int]
+MemoryRangeKey8616 = typing.TypeAliasType("MemoryRangeKey8616", tuple[str, tuple[str, ...], int, int])
 
 
 class SSAMemoryOverlapRelation8616(StrEnum):
@@ -28,7 +33,7 @@ class SSAMemoryOverlapRelation8616(StrEnum):
     PARTIAL = "partial"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SSAMemoryOverlap8616:
     """One canonical pair of stack ranges and their exact byte intersection."""
 
@@ -54,12 +59,12 @@ class SSAMemoryAccessKind8616(StrEnum):
     STORE = "store"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SSACallStackEffectSite8616:
     """One exact CALL and its typed stack effect retained by memory SSA."""
 
-    block_addr: int
-    instr_index: int
+    block_addr: cython.longlong
+    instr_index: cython.longlong
     callsite_addr: int | None
     effect: IRCallStackEffect8616
 
@@ -73,11 +78,11 @@ class SSACallStackEffectSite8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SSAMemoryAccessSlice8616:
     """One canonical byte-range slice and its reaching SSA version."""
 
-    source_byte_offset: int
+    source_byte_offset: cython.longlong
     address: IRAddress
 
     def to_dict(self) -> dict[str, object]:
@@ -88,41 +93,42 @@ class SSAMemoryAccessSlice8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SSAMemoryAccess8616:
     """One original stack access composed from exact versioned byte slices."""
 
     kind: SSAMemoryAccessKind8616
-    block_addr: int
-    instr_index: int
+    block_addr: cython.longlong
+    instr_index: cython.longlong
     address: IRAddress
-    slices: tuple[SSAMemoryAccessSlice8616, ...]
+    slices: object
 
     def _slice_matches_8616(
         self,
         item: SSAMemoryAccessSlice8616,
-        expected_offset: int,
-    ) -> bool:
+        expected_offset: cython.longlong,
+    ) -> cython.bint:
         """Return whether one versioned slice continues the access exactly."""
         cell = item.address
         return (
-            item.source_byte_offset == expected_offset - self.address.offset
+            operator.eq(item.source_byte_offset, expected_offset - self.address.offset)
             and cell.space is self.address.space
-            and cell.base == self.address.base
-            and cell.offset == expected_offset
+            and operator.eq(cell.base, self.address.base)
+            and operator.eq(cell.offset, expected_offset)
             and cell.size > 0
             and cell.version is not None
         )
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether ordered versioned slices exactly cover the access."""
+        item: object
         expected_offset = self.address.offset
         for item in self.slices:
             if not self._slice_matches_8616(item, expected_offset):
                 return False
             expected_offset += item.address.size
-        return bool(self.slices and expected_offset == self.address.offset + self.address.size)
+        return bool(self.slices and operator.eq(expected_offset, self.address.offset + self.address.size))
 
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-friendly representation."""
@@ -131,17 +137,17 @@ class SSAMemoryAccess8616:
             "block_addr": self.block_addr,
             "instr_index": self.instr_index,
             "address": self.address.to_dict(),
-            "slices": [item.to_dict() for item in self.slices],
+            "slices": [item.to_dict() for item in iter(self.slices)],
             "complete": self.complete,
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SSAMemoryBinding8616:
     """One versioned definition of an exact stack-memory range."""
 
-    block_addr: int
-    instr_index: int
+    block_addr: cython.longlong
+    instr_index: cython.longlong
     address: IRAddress
 
     def to_dict(self) -> dict[str, object]:
@@ -153,11 +159,11 @@ class SSAMemoryBinding8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SSAMemoryIncomingValue8616:
     """One predecessor's reaching version of an exact memory range."""
 
-    source_block_addr: int
+    source_block_addr: cython.longlong
     address: IRAddress
 
     def to_dict(self) -> dict[str, object]:
@@ -168,14 +174,14 @@ class SSAMemoryIncomingValue8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SSAMemoryPhiNode8616:
     """Phi node joining exact versions of one stack-memory range."""
 
-    block_addr: int
+    block_addr: cython.longlong
     key: MemoryRangeKey8616
     target: IRAddress
-    incoming: tuple[SSAMemoryIncomingValue8616, ...]
+    incoming: object
 
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-friendly representation."""
@@ -183,39 +189,39 @@ class SSAMemoryPhiNode8616:
             "block_addr": self.block_addr,
             "key": [self.key[0], list(self.key[1]), self.key[2], self.key[3]],
             "target": self.target.to_dict(),
-            "incoming": [item.to_dict() for item in self.incoming],
+            "incoming": [item.to_dict() for item in iter(self.incoming)],
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SSAMemoryStats8616:
     """Closed evidence accounting for stack accesses and overlap relations."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every discovered memory fact was handled honestly."""
         return (
-            self.raw_fact_count == self.materialized_count + self.failure_count
+            operator.eq(self.raw_fact_count, self.materialized_count + self.failure_count)
             and self.normalized_fact_count
             == self.classified_fact_count
             == self.materialized_count
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SSAFunctionMemoryResult8616:
     """Rewritten blocks plus exact memory definitions, joins, and refusals."""
 
-    blocks: tuple[SSABlock, ...]
-    bindings: tuple[SSAMemoryBinding8616, ...]
-    phi_nodes: tuple[SSAMemoryPhiNode8616, ...]
-    refusals: tuple[IRRefusal, ...]
+    blocks: object
+    bindings: object
+    phi_nodes: object
+    refusals: object
     stats: SSAMemoryStats8616
     overlaps: tuple[SSAMemoryOverlap8616, ...] = ()
     accesses: tuple[SSAMemoryAccess8616, ...] = ()

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Conditional CS selector interval for one source-bound near-CALL premise.
 
 Layer: frontend x86_16.
@@ -14,6 +15,8 @@ admitted here still owes its own CS-preservation proof before any
 consumer may use the interval.
 """
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -24,6 +27,7 @@ from .frontend_near_return_continuation import (
     NearCallFramePremise8616,
     prove_near_call_frame_premise_8616,
 )
+import dataclasses
 
 __all__ = [
     "NearCallSelectorWindow8616",
@@ -52,7 +56,7 @@ class NearCallSelectorWindowFailure8616(StrEnum):
     TARGET_NOT_WINDOW_INVARIANT = "near_call_selector_target_not_window_invariant"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NearCallSelectorWindow8616:
     """Proven closed selector interval for one exact near-CALL premise.
 
@@ -68,14 +72,14 @@ class NearCallSelectorWindow8616:
     cs_preservation_required: ClassVar[bool] = True
 
     premise: NearCallFramePremise8616 = field(compare=False, repr=False)
-    selector_low: int = 0
-    selector_high: int = 0
-    callsite_addr: int = 0
-    next_addr: int = 0
-    target_addr: int = 0
-    callee_addr: int = 0
+    selector_low: cython.longlong = 0
+    selector_high: cython.longlong = 0
+    callsite_addr: cython.longlong = 0
+    next_addr: cython.longlong = 0
+    target_addr: cython.longlong = 0
+    callee_addr: cython.longlong = 0
 
-    def admits_linear_destination(self, destination: int) -> bool:
+    def admits_linear_destination(self, destination: cython.longlong) -> cython.bint:
         """Return whether ``destination`` lies inside every retained CS window.
 
         Pure interval arithmetic: the destination must satisfy
@@ -105,7 +109,7 @@ class NearCallSelectorWindow8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NearCallSelectorWindowRefusal8616:
     """Honest non-result for a premise that cannot yield a window."""
 
@@ -122,6 +126,7 @@ class NearCallSelectorWindowRefusal8616:
         }
 
 
+@cython.ccall
 def _refusal_8616(
     failure: NearCallSelectorWindowFailure8616,
     premise: NearCallFramePremise8616 | None = None,
@@ -134,6 +139,7 @@ def _refusal_8616(
     )
 
 
+@cython.ccall
 def project_near_call_selector_window_8616(
     premise: object,
 ) -> NearCallSelectorWindow8616 | NearCallSelectorWindowRefusal8616:
@@ -150,6 +156,8 @@ def project_near_call_selector_window_8616(
     destination must then be identical under every admitted selector,
     otherwise the whole projection refuses.
     """
+    coordinates: object
+    reproven: object
     if (
         type(premise) is not NearCallFramePremise8616
         or premise.kind

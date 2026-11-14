@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Rebind exact balanced PUSH/POP transfers across caller-neutral calls.
 
 Layer: Types/Lowering.
@@ -15,6 +16,8 @@ function, and codegen objects expose third-party compatibility attributes.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import copy
 import logging
@@ -50,6 +53,9 @@ from .gp_register_state import (
 )
 from .segment_access_policy import instruction_addrs_from_node_8616
 from .stack_word_recomposition import recognize_stack_word_recomposition_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "BalancedImmediateRegisterRestoreStats8616",
@@ -58,8 +64,8 @@ __all__ = [
     "rebind_balanced_memory_stack_restores_8616",
 ]
 
-type _DynamicValue8616 = Any
-type _MemoryOperandKey8616 = tuple[int, int, int, int, int, int]
+_DynamicValue8616 = typing.TypeAliasType("_DynamicValue8616", Any)
+_MemoryOperandKey8616 = typing.TypeAliasType("_MemoryOperandKey8616", tuple[int, int, int, int, int, int])
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -67,7 +73,7 @@ log: logging.Logger = logging.getLogger(__name__)
 class _CFunctionSurface8616(Protocol):
     """Structured function fields consumed by balanced restore lowering."""
 
-    addr: int
+    addr: cython.longlong
     statements: object
 
 
@@ -79,42 +85,47 @@ class _CodegenSurface8616(Protocol):
     _inertia_balanced_memory_stack_restore_stats_8616: BalancedMemoryStackRestoreStats8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class BalancedMemoryStackRestoreStats8616:
     """Closed evidence census for exact memory PUSH/POP stack rebinding."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class BalancedImmediateRegisterRestoreStats8616:
     """Closed evidence census for exact immediate PUSH/register POP transfers."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _ImmediateRegisterTransfer8616:
     """One decoded caller-neutral immediate PUSH/register POP transfer."""
 
-    push_addr: int
-    pop_addr: int
-    value: int
-    register_name: str
-    width: int
+    push_addr: cython.longlong
+    pop_addr: cython.longlong
+    value: cython.longlong
+    register_name: object
+    width: cython.longlong
 
 
 def _instruction_stream_8616(function: object) -> tuple[_DynamicValue8616, ...]:
     """Return one deterministic instruction stream, refusing duplicate addresses."""
-    instructions: dict[int, _DynamicValue8616] = {}
+    address: object
+    instruction: object
+    prior: object
+    block: object
+    wrapper: object
+    instructions: dict[cython.longlong, _DynamicValue8616] = {}
     try:
         blocks = tuple(cast(_DynamicValue8616, function).blocks or ())
     except (AttributeError, TypeError):
@@ -131,20 +142,22 @@ def _instruction_stream_8616(function: object) -> tuple[_DynamicValue8616, ...]:
                 return ()
             prior = instructions.get(address)
             if prior is not None:
-                if getattr(prior, "id", None) != getattr(instruction, "id", None):
+                if operator.ne(getattr(prior, "id", None), getattr(instruction, "id", None)):
                     return ()
                 continue
             instructions[address] = instruction
-    return tuple(instructions[address] for address in sorted(instructions))
+    return tuple(instructions[address] for address in builtins.iter(sorted(instructions)))
 
 
 def _memory_operand_key_8616(instruction: object) -> _MemoryOperandKey8616 | None:
     """Return an exact one-operand x86 memory identity and width."""
+    memory: object
+    size: object
     try:
         operands = tuple(cast(_DynamicValue8616, instruction).operands or ())
     except (AttributeError, TypeError):
         return None
-    if len(operands) != 1 or getattr(operands[0], "type", None) != X86_OP_MEM:
+    if len(operands) != 1 or operator.ne(getattr(operands[0], "type", None), X86_OP_MEM):
         return None
     operand = operands[0]
     memory = getattr(operand, "mem", None)
@@ -157,29 +170,38 @@ def _memory_operand_key_8616(instruction: object) -> _MemoryOperandKey8616 | Non
         getattr(memory, "disp", None),
         size,
     )
-    if not all(isinstance(value, int) and not isinstance(value, bool) for value in values):
+    if not all(isinstance(value, int) and not isinstance(value, bool) for value in iter(values)):
         return None
     return cast(_MemoryOperandKey8616, values)
 
 
+@cython.ccall
 def _register_operand_width_8616(instruction: object) -> int | None:
     """Return the exact width of one register-only stack operand."""
+    width: object
     try:
         operands = tuple(cast(_DynamicValue8616, instruction).operands or ())
     except (AttributeError, TypeError):
         return None
-    if len(operands) != 1 or getattr(operands[0], "type", None) != X86_OP_REG:
+    if len(operands) != 1 or operator.ne(getattr(operands[0], "type", None), X86_OP_REG):
         return None
     width = getattr(operands[0], "size", None)
     return width if isinstance(width, int) and not isinstance(width, bool) and width in {2, 4} else None
 
 
+@cython.ccall
 def _balanced_pairs_8616(
     instructions: Iterable[object],
-) -> tuple[tuple[int, int, int | None], ...]:
+) -> tuple[tuple[cython.longlong, cython.longlong, int | None], ...]:
     """Pair exact LIFO memory saves and register transfers across calls."""
-    stack: list[tuple[int, _MemoryOperandKey8616 | None, int | None]] = []
-    pairs: list[tuple[int, int, int | None]] = []
+    address: object
+    instruction_id: object
+    push_addr: object
+    push_key: object
+    push_register_width: object
+    instruction: object
+    stack: list[tuple[cython.longlong, _MemoryOperandKey8616 | None, int | None]] = []
+    pairs: list[tuple[cython.longlong, cython.longlong, int | None]] = []
     for instruction in instructions:
         instruction_id = getattr(instruction, "id", None)
         address = getattr(instruction, "address", None)
@@ -187,7 +209,7 @@ def _balanced_pairs_8616(
             return ()
         if instruction_id in {X86_INS_CALL, X86_INS_LCALL}:
             continue
-        if instruction_id == X86_INS_PUSH:
+        if operator.eq(instruction_id, X86_INS_PUSH):
             stack.append(
                 (
                     address,
@@ -196,7 +218,7 @@ def _balanced_pairs_8616(
                 )
             )
             continue
-        if instruction_id != X86_INS_POP:
+        if operator.ne(instruction_id, X86_INS_POP):
             groups = frozenset(getattr(instruction, "groups", ()) or ())
             if groups & {X86_GRP_JUMP, X86_GRP_RET}:
                 # End only the current straight-line pairing window. Later
@@ -209,20 +231,25 @@ def _balanced_pairs_8616(
             continue
         push_addr, push_key, push_register_width = stack.pop()
         pop_key = _memory_operand_key_8616(instruction)
-        if push_key is not None and push_key == pop_key:
+        if push_key is not None and operator.eq(push_key, pop_key):
             pairs.append((push_addr, address, push_key[-1]))
             continue
         pop_register_width = _register_operand_width_8616(instruction)
-        if push_register_width is not None and push_register_width == pop_register_width:
+        if push_register_width is not None and operator.eq(push_register_width, pop_register_width):
             pairs.append((push_addr, address, push_register_width))
     return tuple(pairs)
 
 
+@cython.ccall
 def _balanced_immediate_register_transfers_8616(
     instructions: Iterable[object],
 ) -> tuple[_ImmediateRegisterTransfer8616, ...]:
     """Pair exact LIFO immediate/register transfers in straight-line windows."""
-    stack: list[tuple[int, int | None, int | None]] = []
+    address: object
+    instruction_id: object
+    transfer: object
+    instruction: object
+    stack: list[tuple[cython.longlong, int | None, int | None]] = []
     transfers: list[_ImmediateRegisterTransfer8616] = []
     for instruction in instructions:
         instruction_id = getattr(instruction, "id", None)
@@ -235,10 +262,10 @@ def _balanced_immediate_register_transfers_8616(
             return ()
         if instruction_id in {X86_INS_CALL, X86_INS_LCALL}:
             continue
-        if instruction_id == X86_INS_PUSH:
+        if operator.eq(instruction_id, X86_INS_PUSH):
             stack.append(_immediate_push_entry_8616(address, operands))
             continue
-        if instruction_id == X86_INS_POP:
+        if operator.eq(instruction_id, X86_INS_POP):
             if not stack:
                 # Skip only this unpaired POP, preserving independent windows.
                 continue
@@ -252,12 +279,15 @@ def _balanced_immediate_register_transfers_8616(
     return tuple(transfers)
 
 
+@cython.ccall
 def _immediate_push_entry_8616(
-    address: int,
-    operands: tuple[_DynamicValue8616, ...],
-) -> tuple[int, int | None, int | None]:
+    address: cython.longlong,
+    operands: object,
+) -> tuple[cython.longlong, int | None, int | None]:
     """Return one decoded immediate-PUSH stack entry."""
-    if len(operands) != 1 or getattr(operands[0], "type", None) != X86_OP_IMM:
+    immediate: object
+    width: object
+    if len(operands) != 1 or operator.ne(getattr(operands[0], "type", None), X86_OP_IMM):
         return (address, None, None)
     immediate = getattr(operands[0], "imm", None)
     width = getattr(operands[0], "size", None)
@@ -268,12 +298,13 @@ def _immediate_push_entry_8616(
     )
 
 
+@cython.ccall
 def _immediate_pop_operand_shape_8616(
-    immediate: int | None,
-    immediate_width: int | None,
+    immediate: object,
+    immediate_width: object,
     register_id: object,
     width: object,
-) -> tuple[int, int, int, int] | None:
+) -> object:
     """Return validated (immediate, immediate_width, register_id, width) or None."""
     if immediate is None or immediate_width is None or not isinstance(register_id, int):
         return None
@@ -282,15 +313,19 @@ def _immediate_pop_operand_shape_8616(
     return (immediate, immediate_width, register_id, width)
 
 
+@cython.ccall
 def _immediate_pop_transfer_8616(
     instruction: object,
-    operands: tuple[_DynamicValue8616, ...],
-    address: int,
-    entry: tuple[int, int | None, int | None],
+    operands: object,
+    address: cython.longlong,
+    entry: object,
 ) -> _ImmediateRegisterTransfer8616 | None:
     """Return one proven register-POP transfer for its paired immediate PUSH."""
+    register_id: object
+    shape: object
+    width: object
     push_addr, immediate, immediate_width = entry
-    if len(operands) != 1 or getattr(operands[0], "type", None) != X86_OP_REG:
+    if len(operands) != 1 or operator.ne(getattr(operands[0], "type", None), X86_OP_REG):
         return None
     register_id = getattr(operands[0], "reg", None)
     width = getattr(operands[0], "size", None)
@@ -317,25 +352,27 @@ def _immediate_pop_transfer_8616(
     )
 
 
+@cython.ccall
 def _register_cvar_matches_8616(
     node: object,
     *,
-    register_offset: int,
-    width: int,
-) -> bool:
+    register_offset: cython.longlong,
+    width: cython.longlong,
+) -> cython.bint:
     """Return whether one C variable is the exact decoded register view."""
     return (
         isinstance(node, structured_c.CVariable)
         and isinstance(node.variable, SimRegisterVariable)
-        and node.variable.reg == register_offset
-        and node.variable.size == width
+        and operator.eq(node.variable.reg, register_offset)
+        and operator.eq(node.variable.size, width)
     )
 
 
+@cython.ccall
 def _assignment_writes_stack_pointer_8616(
     statement: object,
-    registers: dict[str, tuple[int, int]],
-) -> bool:
+    registers: object,
+) -> cython.bint:
     """Return whether one assignment owns the decoded POP stack increment."""
     if not isinstance(statement, structured_c.CAssignment):
         return False
@@ -348,19 +385,24 @@ def _assignment_writes_stack_pointer_8616(
         return False
     shapes = {
         shape
-        for name, shape in registers.items()
+        for name, shape in builtins.iter(registers.items())
         if name.lower() in {"sp", "esp"} and isinstance(shape, tuple) and len(shape) >= 2
     }
     return (lhs.variable.reg, lhs.variable.size) in shapes
 
 
+@cython.ccall
 def materialize_balanced_immediate_register_restores_8616(
     codegen: object,
-    function: object | None,
+    function: object,
     *,
     project: object | None = None,
-) -> bool:
+) -> cython.bint:
     """Materialize exact immediate PUSH/register POP transfers into GP state."""
+    arch: object
+    cfunc: object
+    registers: object
+    transfer: object
     surface = cast(_CodegenSurface8616, codegen)
     cfunc = surface.cfunc
     empty = BalancedImmediateRegisterRestoreStats8616(0, 0, 0, 0, 0)
@@ -419,6 +461,7 @@ def materialize_balanced_immediate_register_restores_8616(
     return changed
 
 
+@cython.ccall
 def _statements_containers_8616(
     root: structured_c.CStatements,
 ) -> tuple[structured_c.CStatements, ...]:
@@ -426,19 +469,23 @@ def _statements_containers_8616(
     return tuple(
         {
             id(node): node
-            for node in (root, *_iter_c_nodes_deep_8616(root))
+            for node in iter((root, ) + tuple(_iter_c_nodes_deep_8616(root)))
             if isinstance(node, structured_c.CStatements)
         }.values()
     )
 
 
+@cython.ccall
 def _pop_match_containers_8616(
-    containers: tuple[structured_c.CStatements, ...],
+    containers: object,
     transfer: _ImmediateRegisterTransfer8616,
-    registers: dict[str, tuple[int, int]],
-) -> list[tuple[structured_c.CStatements, int]]:
+    registers: object,
+) -> object:
     """Collect every POP-stack-pointer assignment site matching one transfer."""
-    matches: list[tuple[structured_c.CStatements, int]] = []
+    container: object
+    index: object
+    statement: object
+    matches: list[tuple[structured_c.CStatements, cython.longlong]] = []
     for container in containers:
         for index, statement in enumerate(tuple(container.statements)):
             addresses = (
@@ -454,9 +501,10 @@ def _pop_match_containers_8616(
     return matches
 
 
+@cython.ccall
 def _debug_pop_matches_8616(
     transfer: _ImmediateRegisterTransfer8616,
-    matches: list[tuple[structured_c.CStatements, int]],
+    matches: object,
 ) -> None:
     """Report an unmatched or ambiguous POP marker site when debugging."""
     if os.environ.get("INERTIA_DEBUG_BALANCED_REGISTER_RESTORE"):
@@ -469,23 +517,25 @@ def _debug_pop_matches_8616(
 
 def _ensure_immediate_assignment_8616(
     container: structured_c.CStatements,
-    marker_index: int,
+    marker_index: cython.longlong,
     transfer: _ImmediateRegisterTransfer8616,
     codegen: object,
     arch: object,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> bool | None:
     """Insert the immediate-restore assignment unless already present.
 
     Returns whether an assignment was inserted; None when the runtime GP state
     assignment cannot be built and the transfer must be abandoned.
     """
+    assignment: object
+    existing: object
     existing = next(
         (
             statement
-            for statement in container.statements
+            for statement in iter(container.statements)
             if isinstance(statement, structured_c.CAssignment)
-            and statement.tags.get("inertia_x86_16_balanced_immediate_pop") == transfer.pop_addr
+            and operator.eq(statement.tags.get("inertia_x86_16_balanced_immediate_pop"), transfer.pop_addr)
         ),
         None,
     )
@@ -518,16 +568,18 @@ def _ensure_immediate_assignment_8616(
     return True
 
 
+@cython.ccall
 def _immediate_read_replacement_8616(
     node: object,
     *,
-    register_offset: int,
-    width: int,
-    register_name: str,
+    register_offset: cython.longlong,
+    width: cython.longlong,
+    register_name: object,
     codegen: object,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> object:
     """Project one post-POP register read from coherent runtime state."""
+    replacement: object
     if not _register_cvar_matches_8616(
         node,
         register_offset=register_offset,
@@ -542,16 +594,18 @@ def _immediate_read_replacement_8616(
     return replacement if replacement is not None else node
 
 
+@cython.ccall
 def _replace_register_reads_8616(
     container: structured_c.CStatements,
-    marker_index: int,
-    register_offset: int,
-    width: int,
-    register_name: str,
+    marker_index: cython.longlong,
+    register_offset: cython.longlong,
+    width: cython.longlong,
+    register_name: object,
     codegen: object,
-    function_addr: int,
-) -> bool:
+    function_addr: cython.longlong,
+) -> cython.bint:
     """Rewrite post-POP register reads through coherent runtime state."""
+    statement: object
     changed = False
     replace_read = partial(
         _immediate_read_replacement_8616,
@@ -575,18 +629,21 @@ def _replace_register_reads_8616(
 
 
 
+@cython.ccall
 def _materialize_transfer_8616(
     *,
-    containers: tuple[structured_c.CStatements, ...],
+    containers: object,
     transfer: _ImmediateRegisterTransfer8616,
-    registers: dict[str, tuple[int, int]],
+    registers: object,
     codegen: object,
     arch: object,
-    function_addr: int,
-) -> tuple[int, int, bool]:
+    function_addr: cython.longlong,
+) -> tuple[cython.longlong, cython.longlong, cython.bint]:
     """Materialize one transfer; return (classified, materialized, changed) deltas."""
+    inserted: object
+    shape: object
     shape = registers.get(transfer.register_name)
-    if not isinstance(shape, tuple) or len(shape) < 2 or shape[1] != transfer.width:
+    if not isinstance(shape, tuple) or len(shape) < 2 or operator.ne(shape[1], transfer.width):
         return (0, 0, False)
     register_offset = shape[0]
     if not isinstance(register_offset, int):
@@ -625,7 +682,8 @@ def _materialize_transfer_8616(
 
 
 
-def _decode_instruction_8616(project: object, address: int) -> object | None:
+@cython.ccall
+def _decode_instruction_8616(project: object, address: cython.longlong) -> object | None:
     """Decode one exact tagged instruction from immutable project bytes."""
     try:
         wrappers = tuple(
@@ -643,12 +701,17 @@ def _decode_instruction_8616(project: object, address: int) -> object | None:
     return cast(object, getattr(wrappers[0], "insn", wrappers[0]))
 
 
+@cython.ccall
 def _decode_stack_instruction_8616(
     project: object,
     function: object,
-    address: int,
+    address: cython.longlong,
 ) -> object | None:
     """Decode one PUSH/POP across normalized and original linear projections."""
+    delta: object
+    instruction: object
+    inventory: object
+    candidate: object
     candidates = [address]
     delta = getattr(project, "_inertia_original_linear_delta", None)
     if isinstance(delta, int) and not isinstance(delta, bool) and delta:
@@ -672,40 +735,49 @@ def _structured_pairs_8616(
     project: object,
     function: object,
     root: structured_c.CStatements,
-) -> tuple[tuple[int, int], ...]:
+) -> tuple[tuple[cython.longlong, cython.longlong], ...]:
     """Pair exact tagged memory saves inside one flat structured sequence."""
+    candidates: object
     pairs = _structured_window_pairs_8616(project, function, root)
     candidates_by_key = _ordered_push_pop_candidates_8616(project, function, root)
     for candidates in candidates_by_key.values():
-        pushes = tuple(item for item in candidates if item[2] == X86_INS_PUSH)
-        pops = tuple(item for item in candidates if item[2] == X86_INS_POP)
+        pushes = tuple(item for item in iter(candidates) if operator.eq(item[2], X86_INS_PUSH))
+        pops = tuple(item for item in iter(candidates) if operator.eq(item[2], X86_INS_POP))
         if len(pushes) == len(pops) == 1 and pushes[0][0] < pops[0][0]:
             pairs.add((pushes[0][1], pops[0][1]))
     return tuple(sorted(pairs))
 
 
+@cython.ccall
 def _structured_window_pairs_8616(
     project: object,
     function: object,
     root: structured_c.CStatements,
-) -> set[tuple[int, int]]:
+) -> object:
     """Collect LIFO PUSH/POP pairs inside each straight-line statement window."""
-    pairs: set[tuple[int, int]] = set()
-    for container in (root, *_iter_c_nodes_deep_8616(root)):
+    container: object
+    pairs: set[tuple[cython.longlong, cython.longlong]] = set()
+    for container in (root, ) + tuple(_iter_c_nodes_deep_8616(root)):
         if isinstance(container, structured_c.CStatements):
             _scan_container_window_pairs_8616(project, function, container, pairs)
     return pairs
 
 
+@cython.ccall
 def _scan_container_window_pairs_8616(
     project: object,
     function: object,
     container: structured_c.CStatements,
-    pairs: set[tuple[int, int]],
+    pairs: object,
 ) -> None:
     """Pair exact PUSH/POP addresses inside one flat statement window."""
-    stack: list[tuple[int, _MemoryOperandKey8616 | None]] = []
-    seen_addresses: set[int] = set()
+    address: object
+    instruction_id: object
+    push_addr: object
+    push_key: object
+    statement: object
+    stack: list[tuple[cython.longlong, _MemoryOperandKey8616 | None]] = []
+    seen_addresses: set[cython.longlong] = set()
     for statement in tuple(container.statements):
         if not isinstance(statement, (structured_c.CAssignment, structured_c.CFunctionCall)):
             stack.clear()
@@ -722,25 +794,30 @@ def _scan_container_window_pairs_8616(
         seen_addresses.add(address)
         instruction = _decode_stack_instruction_8616(project, function, address)
         instruction_id = getattr(instruction, "id", None)
-        if instruction_id == X86_INS_PUSH:
+        if operator.eq(instruction_id, X86_INS_PUSH):
             stack.append((address, _memory_operand_key_8616(instruction)))
             continue
-        if instruction_id != X86_INS_POP or not stack:
+        if operator.ne(instruction_id, X86_INS_POP) or not stack:
             continue
         push_addr, push_key = stack.pop()
         pop_key = _memory_operand_key_8616(instruction)
-        if push_key is not None and push_key == pop_key:
+        if push_key is not None and operator.eq(push_key, pop_key):
             pairs.add((push_addr, address))
 
 
+@cython.ccall
 def _ordered_push_pop_candidates_8616(
     project: object,
     function: object,
     root: structured_c.CStatements,
-) -> dict[_MemoryOperandKey8616, list[tuple[int, int, int]]]:
+) -> object:
     """Collect ordered exact PUSH/POP addresses grouped by memory operand key."""
-    candidates_by_key: dict[_MemoryOperandKey8616, list[tuple[int, int, int]]] = {}
-    ordered_addresses: list[int] = []
+    address: object
+    instruction_id: object
+    memory_key: object
+    statement: object
+    candidates_by_key: dict[_MemoryOperandKey8616, list[tuple[cython.longlong, cython.longlong, cython.longlong]]] = {}
+    ordered_addresses: list[cython.longlong] = []
     for statement in _iter_c_nodes_deep_8616(root):
         if not isinstance(statement, structured_c.CAssignment) or not _stack_variables_8616(statement):
             continue
@@ -762,9 +839,12 @@ def _ordered_push_pop_candidates_8616(
     return candidates_by_key
 
 
-def _stack_variables_8616(root: object) -> dict[tuple[int, int], structured_c.CVariable]:
+@cython.ccall
+def _stack_variables_8616(root: object) -> object:
     """Return unambiguous BP-relative stack variables in one C subtree."""
-    result: dict[tuple[int, int], structured_c.CVariable] = {}
+    node: object
+    owner: object
+    result: dict[tuple[cython.longlong, cython.longlong], structured_c.CVariable] = {}
     roots = root if isinstance(root, tuple) else (root,)
     for owner in roots:
         for node in _iter_c_nodes_deep_8616(owner):
@@ -777,8 +857,10 @@ def _stack_variables_8616(root: object) -> dict[tuple[int, int], structured_c.CV
     return result
 
 
-def _statement_instruction_addrs_8616(statement: structured_c.CAssignment) -> frozenset[int]:
+@cython.ccall
+def _statement_instruction_addrs_8616(statement: structured_c.CAssignment) -> frozenset[cython.longlong]:
     """Return owner and descendant instruction provenance for one assignment."""
+    owner: object
     addresses = set(instruction_addrs_from_node_8616(statement))
     owner = statement.tags.get("ins_addr")
     if isinstance(owner, int) and not isinstance(owner, bool):
@@ -786,26 +868,29 @@ def _statement_instruction_addrs_8616(statement: structured_c.CAssignment) -> fr
     return frozenset(addresses)
 
 
-def _remove_statements_8616(root: object, removed: frozenset[int]) -> bool:
+@cython.ccall
+def _remove_statements_8616(root: object, removed: object) -> cython.bint:
     """Remove exact assignment objects from every structured statement owner."""
+    node: object
     changed = False
-    for node in (root, *_iter_c_nodes_deep_8616(root)):
+    for node in (root, ) + tuple(_iter_c_nodes_deep_8616(root)):
         if not isinstance(node, structured_c.CStatements):
             continue
-        retained = [statement for statement in node.statements if id(statement) not in removed]
-        if len(retained) != len(node.statements):
+        retained = [statement for statement in iter(node.statements) if id(statement) not in removed]
+        if operator.ne(len(retained), len(node.statements)):
             node.statements[:] = retained
             changed = True
     return changed
 
 
+@cython.ccall
 def _debug_memory_pair_8616(
-    push_addr: int,
-    pop_addr: int,
-    push_statements: tuple[structured_c.CAssignment, ...],
-    pop_statements: tuple[structured_c.CAssignment, ...],
-    push_variables: dict[tuple[int, int], structured_c.CVariable],
-    pop_variables: dict[tuple[int, int], structured_c.CVariable],
+    push_addr: cython.longlong,
+    pop_addr: cython.longlong,
+    push_statements: object,
+    pop_statements: object,
+    push_variables: object,
+    pop_variables: object,
 ) -> None:
     """Report one decoded pair inventory when debugging."""
     if os.environ.get("INERTIA_DEBUG_BALANCED_REGISTER_RESTORE"):
@@ -821,9 +906,9 @@ def _debug_memory_pair_8616(
 
 
 def _select_push_exemplar_8616(
-    push_variables: dict[tuple[int, int], structured_c.CVariable],
-    word_pair: bool,
-) -> tuple[tuple[int, int], structured_c.CVariable] | None:
+    push_variables: object,
+    word_pair: cython.bint,
+) -> object:
     """Return the unique (or exact word) PUSH exemplar identity, or None."""
     if len(push_variables) == 1:
         (selected,) = push_variables.items()
@@ -831,21 +916,23 @@ def _select_push_exemplar_8616(
     if (
         word_pair
         and len(push_variables) == 2
-        and all(identity[1] == 1 for identity in push_variables)
+        and all(identity[1] == 1 for identity in iter(push_variables))
     ):
         push_identity = min(push_variables, key=lambda identity: identity[0])
         return (push_identity, push_variables[push_identity])
     return None
 
 
+@cython.ccall
 def _balanced_pop_transform_8616(
     node: object,
     *,
-    target_identity: tuple[int, int],
+    target_identity: object,
     push_exemplar: structured_c.CVariable,
-    word_mode: bool,
+    word_mode: cython.bint,
 ) -> object:
     """Rewrite one POP-projection node to the paired PUSH exemplar."""
+    recomposition: object
     recomposition = recognize_stack_word_recomposition_8616(node) if word_mode else None
     if recomposition is not None:
         recomposed_variables = _stack_variables_8616((recomposition.low, recomposition.high))
@@ -869,13 +956,15 @@ def _balanced_pop_transform_8616(
     return replacement
 
 
+@cython.ccall
 def _rebind_pop_statements_8616(
-    pop_statements: tuple[structured_c.CAssignment, ...],
-    pop_identity: tuple[int, int],
+    pop_statements: object,
+    pop_identity: object,
     exemplar: structured_c.CVariable,
-    word_pair: bool,
-) -> bool:
+    word_pair: cython.bint,
+) -> cython.bint:
     """Rewrite POP reads inside every paired statement; return change flag."""
+    statement: object
     transform = partial(
         _balanced_pop_transform_8616,
         target_identity=pop_identity,
@@ -891,15 +980,16 @@ def _rebind_pop_statements_8616(
 
 def _rewrite_word_pair_push_8616(
     root: structured_c.CStatements,
-    push_statements: tuple[structured_c.CAssignment, ...],
-    push_identity: tuple[int, int],
+    push_statements: object,
+    push_identity: object,
     exemplar: structured_c.CVariable,
-) -> bool:
+) -> cython.bint:
     """Widen the primary PUSH lhs and drop its redundant twin statements."""
+    primary_push: object
     primary_push = next(
         (
             statement
-            for statement in push_statements
+            for statement in iter(push_statements)
             if isinstance(statement.lhs, structured_c.CVariable)
             and isinstance(statement.lhs.variable, SimStackVariable)
             and (statement.lhs.variable.offset, statement.lhs.variable.size)
@@ -915,7 +1005,7 @@ def _rewrite_word_pair_push_8616(
     )
     redundant = frozenset(
         id(statement)
-        for statement in push_statements
+        for statement in iter(push_statements)
         if statement is not primary_push
     )
     return _remove_statements_8616(root, redundant)
@@ -923,20 +1013,22 @@ def _rewrite_word_pair_push_8616(
 
 def _rebind_pair_8616(
     *,
-    project: object | None,
+    project: object,
     function: object,
-    statements: tuple[structured_c.CAssignment, ...],
-    push_addr: int,
-    pop_addr: int,
+    statements: object,
+    push_addr: cython.longlong,
+    pop_addr: cython.longlong,
     pair_width: int | None,
     root: structured_c.CStatements,
-) -> tuple[int, int]:
+) -> tuple[cython.longlong, cython.longlong]:
     """Rebind one decoded PUSH/POP pair; return (classified, materialized) deltas."""
+    push_memory_key: object
+    selected: object
     push_statements = tuple(
-        statement for statement in statements if push_addr in _statement_instruction_addrs_8616(statement)
+        statement for statement in iter(statements) if push_addr in _statement_instruction_addrs_8616(statement)
     )
     pop_statements = tuple(
-        statement for statement in statements if pop_addr in _statement_instruction_addrs_8616(statement)
+        statement for statement in iter(statements) if pop_addr in _statement_instruction_addrs_8616(statement)
     )
     push_variables = _stack_variables_8616(push_statements)
     pop_variables = _stack_variables_8616(pop_statements)
@@ -962,7 +1054,7 @@ def _rebind_pair_8616(
         return (0, 0)
     push_identity, exemplar = selected
     (pop_identity, _pop_exemplar), = pop_variables.items()
-    if push_identity[1] != pop_identity[1] and not (
+    if operator.ne(push_identity[1], pop_identity[1]) and not (
         word_pair and {push_identity[1], pop_identity[1]} <= {1, 2}
     ):
         return (0, 0)
@@ -980,11 +1072,15 @@ def _rebind_pair_8616(
 
 def rebind_balanced_memory_stack_restores_8616(
     codegen: object,
-    function: object | None,
+    function: object,
     *,
     project: object | None = None,
-) -> bool:
+) -> cython.bint:
     """Rebind exact memory POP reads to their paired PUSH stack object."""
+    cfunc: object
+    pair_width: object
+    pop_addr: object
+    push_addr: object
     surface = cast(_CodegenSurface8616, codegen)
     cfunc = surface.cfunc
     empty = BalancedMemoryStackRestoreStats8616(0, 0, 0, 0, 0)
@@ -1009,7 +1105,7 @@ def rebind_balanced_memory_stack_restores_8616(
     pairs = tuple(
         sorted(
             set(_balanced_pairs_8616(_instruction_stream_8616(function)))
-            | {(push_addr, pop_addr, None) for push_addr, pop_addr in structured_pairs}
+            | {(push_addr, pop_addr, None) for push_addr, pop_addr in iter(structured_pairs)}
         )
     )
     if os.environ.get("INERTIA_DEBUG_BALANCED_REGISTER_RESTORE"):
@@ -1023,7 +1119,7 @@ def rebind_balanced_memory_stack_restores_8616(
     materialized = 0
     statements = tuple(
         node
-        for node in _iter_c_nodes_deep_8616(cfunc.statements)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(cfunc.statements))
         if isinstance(node, structured_c.CAssignment)
     )
     for push_addr, pop_addr, pair_width in pairs:

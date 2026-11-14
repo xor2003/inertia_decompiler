@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Runtime contracts for closed-loop semantic evidence.
 
 Layer: Pipeline governance.
@@ -29,6 +30,8 @@ Do not add new recovery logic here.  This module only enforces contracts.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -40,6 +43,7 @@ from inertia.ir.function_readiness_contracts import (
 )
 
 from .errors import PipelineHardError
+import dataclasses
 
 __all__ = [
     "CORE_DECOMPILER_PIPELINE_ORDER_8616",
@@ -50,7 +54,7 @@ __all__ = [
 # The public ordering projection derives from the canonical typed lifecycle
 # owner so the two descriptions can never drift apart.
 CORE_DECOMPILER_PIPELINE_ORDER_8616: tuple[str, ...] = tuple(
-    stage.value for stage in FUNCTION_LIFECYCLE_STAGES_8616
+    stage.value for stage in iter(FUNCTION_LIFECYCLE_STAGES_8616)
 )
 
 
@@ -79,7 +83,7 @@ class _FunctionSizeLike(Protocol):
 class _FunctionManagerLike(Protocol):
     """Minimal angr function manager lookup used by the contract gate."""
 
-    def function(self, *, addr: object, create: bool) -> object | None:
+    def function(self, *, addr, create) -> object | None:
         """Return a function object for the requested address if one exists."""
 
         del addr, create
@@ -98,7 +102,7 @@ class _ProjectLike(Protocol):
     kb: _KnowledgeBaseLike
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class SemanticLaneState:
     """Closed-loop counter for one semantic lane (stack / condition).
 
@@ -108,15 +112,16 @@ class SemanticLaneState:
     """
 
     name: str = ""
-    raw: int = 0
-    normalized: int = 0
-    classified: int = 0
-    bound: int = 0
-    materialized: int = 0
-    verified: int = 0
-    failures: int = 0
+    raw: cython.longlong = 0
+    normalized: cython.longlong = 0
+    classified: cython.longlong = 0
+    bound: cython.longlong = 0
+    materialized: cython.longlong = 0
+    verified: cython.longlong = 0
+    failures: cython.longlong = 0
 
-    def assert_closed_loop(self, *, layer: str = "") -> None:
+    @cython.ccall
+    def assert_closed_loop(self, *, layer: object = "") -> None:
         """Raise PipelineHardError if the lane is broken.
 
         Rules:
@@ -159,35 +164,36 @@ class SemanticLaneState:
             )
 
     @property
-    def raw_fact_count(self) -> int:
+    def raw_fact_count(self) -> cython.longlong:
         """Return the number of raw facts entering this semantic lane."""
 
         return self.raw
 
     @property
-    def normalized_fact_count(self) -> int:
+    def normalized_fact_count(self) -> cython.longlong:
         """Return the number of facts normalized into owned IR."""
 
         return self.normalized
 
     @property
-    def classified_fact_count(self) -> int:
+    def classified_fact_count(self) -> cython.longlong:
         """Return the number of facts assigned an owned semantic class."""
 
         return self.classified
 
     @property
-    def materialized_count(self) -> int:
+    def materialized_count(self) -> cython.longlong:
         """Return the number of classified facts materialized into output."""
 
         return self.materialized
 
     @property
-    def failure_count(self) -> int:
+    def failure_count(self) -> cython.longlong:
         """Return the number of facts that failed closed-loop processing."""
 
         return self.failures
 
+    @cython.ccall
     def to_dict(self) -> dict[str, object]:
         """Return a stable dictionary for diagnostics and JSON reports."""
 
@@ -208,7 +214,7 @@ class SemanticLaneState:
         }
 
     @property
-    def is_closed(self) -> bool:
+    def is_closed(self) -> cython.bint:
         """True if the lane has no un-materialized facts and all raw inputs were normalized."""
         if self.raw > 0 and self.normalized == 0:
             return False
@@ -218,7 +224,8 @@ class SemanticLaneState:
             return False
         return self.failures == 0
 
-    def summary_line(self) -> str:
+    @cython.ccall
+    def summary_line(self) -> object:
         """Single-line summary for diagnostic output."""
         parts = [
             f"raw={self.raw}",
@@ -233,6 +240,7 @@ class SemanticLaneState:
         return f"{self.name}: [{status}] " + " ".join(parts)
 
 
+@cython.ccall
 def _primary_semantic_lanes_8616(contract: _PipelineCodegenContract) -> tuple[object | None, object | None]:
     """Read optional owned attachments independently at the codegen boundary.
 
@@ -250,7 +258,8 @@ def _primary_semantic_lanes_8616(contract: _PipelineCodegenContract) -> tuple[ob
     return stack_lane, condition_lane
 
 
-def _assert_semantic_lane_type_8616(lane: object, lane_name: str, layer_tag: str) -> None:
+@cython.ccall
+def _assert_semantic_lane_type_8616(lane: object, lane_name: object, layer_tag: object) -> None:
     """Reject lanes that are not ``SemanticLaneState`` contracts."""
     if lane is not None and not isinstance(lane, SemanticLaneState):
         raise PipelineHardError(
@@ -259,8 +268,12 @@ def _assert_semantic_lane_type_8616(lane: object, lane_name: str, layer_tag: str
         )
 
 
+@cython.ccall
 def _pipeline_function_size_8616(contract: _PipelineCodegenContract) -> int | None:
     """Best-effort function size for the tiny-thunk stack-lane allowance."""
+    cfunc: object
+    kb_func: object
+    project: object
     try:
         cfunc = contract.cfunc
     except AttributeError:
@@ -285,6 +298,7 @@ def _pipeline_function_size_8616(contract: _PipelineCodegenContract) -> int | No
     return None
 
 
+@cython.ccall
 def _assert_stack_lane_closed_8616(contract: _PipelineCodegenContract, stack_lane: SemanticLaneState) -> None:
     """Close the stack lane, with a documented allowance for micro bridge thunks."""
     # Tiny thunk allowance:
@@ -306,12 +320,14 @@ def _assert_stack_lane_closed_8616(contract: _PipelineCodegenContract, stack_lan
         stack_lane.assert_closed_loop(layer="pipeline_contract:stack_lane")
 
 
+@cython.ccall
 def _assert_extra_semantic_lanes_8616(
     contract: _PipelineCodegenContract,
     stack_lane: object,
     condition_lane: object,
 ) -> None:
     """Close every registered semantic lane beyond the two primary lanes."""
+    lane: object
     try:
         extra_lanes = contract._inertia_semantic_lanes_8616
     except AttributeError:
@@ -330,6 +346,7 @@ def _assert_extra_semantic_lanes_8616(
         lane.assert_closed_loop(layer=f"pipeline_contract:{lane_name}")
 
 
+@cython.ccall
 def _assert_function_source_readiness_8616(
     codegen: object, required_stage: FunctionLifecycleStage8616,
 ) -> None:
@@ -339,6 +356,8 @@ def _assert_function_source_readiness_8616(
     and Rewrite checks request their completed input stage; final emission uses
     Rewrite. A live source, output or consumer mismatch refuses consumption.
     """
+    cfunc: object
+    project: object
     contract = cast(_PipelineCodegenContract, codegen)
     try:
         project = contract.project
@@ -364,6 +383,7 @@ def _assert_function_source_readiness_8616(
     )
 
 
+@cython.ccall
 def assert_pipeline_contracts_8616(
     codegen: object,
     *,
@@ -376,6 +396,8 @@ def assert_pipeline_contracts_8616(
     Raises PipelineHardError if any lane has un-materialized facts or any
     recorded stage evidence was invalidated by changed inputs.
     """
+    condition_lane: object
+    stack_lane: object
     contract = cast(_PipelineCodegenContract, codegen)
     _assert_function_source_readiness_8616(codegen, required_stage)
     stack_lane, condition_lane = _primary_semantic_lanes_8616(contract)

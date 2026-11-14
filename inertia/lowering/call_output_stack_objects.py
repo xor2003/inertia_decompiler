@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Recover call-addressed stack objects and project proven condition fields.
 
 Layer: Types/Lowering.
@@ -14,6 +15,8 @@ protocols; owned evidence contracts use direct fields.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -76,6 +79,9 @@ from .stack_variable_coordinates import (
     stack_variable_coordinate_registry_8616,
 )
 from .wide_call_condition_source import proven_wide_condition_callsite_8616
+import dataclasses
+import operator
+import builtins
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -83,7 +89,7 @@ _LOGGER = logging.getLogger(__name__)
 class _CallOutputTypesStore8616(Protocol):
     """Minimal angr type-store boundary used for local struct declarations."""
 
-    def __setitem__(self, name: str, value: TypeRef) -> None:
+    def __setitem__(self, name: object, value: TypeRef) -> None:
         """Register one named type reference."""
 
 
@@ -99,9 +105,9 @@ class _CallOutputVariableManager8616(Protocol):
 class _CallOutputCFunction8616(Protocol):
     """Dynamic angr CFunction fields required by call-output object lowering."""
 
-    addr: int
+    addr: cython.longlong
     statements: object
-    variables_in_use: dict[SimVariable, CVariable]
+    variables_in_use: object
     variable_manager: _CallOutputVariableManager8616
 
     def refresh(self) -> None:
@@ -124,7 +130,7 @@ class _CallOutputKnowledgeBase8616(Protocol):
 class _CallOutputFunctionManager8616(Protocol):
     """Dynamic angr function lookup used by call-output lowering."""
 
-    def function(self, *, addr: int, create: bool) -> Function | None:
+    def function(self, *, addr: cython.longlong, create: cython.bint) -> Function | None:
         """Return one existing function without creating it."""
 
 
@@ -133,45 +139,45 @@ class _CallOutputCodegen8616(Protocol):
 
     cfunc: _CallOutputCFunction8616
     project: _CallOutputProject8616
-    show_local_types: bool
-    _inertia_callsite_summaries: dict[int, CallsiteSummary8616]
-    _inertia_callsite_summary_inventory_8616: dict[int, CallsiteSummary8616]
-    _inertia_call_output_stack_object_facts_8616: tuple[CallOutputStackObjectFact8616, ...]
+    show_local_types: cython.bint
+    _inertia_callsite_summaries: object
+    _inertia_callsite_summary_inventory_8616: object
+    _inertia_call_output_stack_object_facts_8616: object
     _inertia_call_output_stack_object_stats_8616: CallOutputStackObjectStats8616
     _inertia_wide_call_return_condition_stats_8616: WideCallReturnConditionStats8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallOutputStackField8616:
     """One field slice proven inside a call-addressed stack object."""
 
-    absolute_offset: int
-    relative_offset: int
-    width: int
-    name: str
+    absolute_offset: cython.longlong
+    relative_offset: cython.longlong
+    width: cython.longlong
+    name: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallOutputStackObjectFact8616:
     """One call-addressed stack object with a closed upper boundary."""
 
-    callsite_addr: int
-    base_offset: int
-    boundary_offset: int
+    callsite_addr: cython.longlong
+    base_offset: cython.longlong
+    boundary_offset: cython.longlong
     base_variable: SimStackVariable
     base_cvar: CVariable
-    fields: tuple[CallOutputStackField8616, ...]
+    fields: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallOutputStackObjectStats8616:
     """Closed evidence accounting for call-output stack-object lowering."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     def merged(self, other: CallOutputStackObjectStats8616) -> CallOutputStackObjectStats8616:
         """Return component-wise accumulated evidence counts."""
@@ -184,27 +190,27 @@ class CallOutputStackObjectStats8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallOutputConditionLoweringResult8616:
     """Result of projecting stack-object fields into one condition expression."""
 
     expression: CExpression
-    facts: tuple[CallOutputStackObjectFact8616, ...]
+    facts: object
     stats: CallOutputStackObjectStats8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideCallReturnConditionStats8616:
     """Closed evidence accounting for one DX:AX wide condition join."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideCallReturnConditionResult8616:
     """Result of lowering one proven split-register wide comparison."""
 
@@ -214,15 +220,16 @@ class WideCallReturnConditionResult8616:
     consumed_callsite: CallsiteSummary8616 | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _CallAddressedStackBase8616:
     """One exact BP address passed at a typed binary callsite."""
 
-    callsite_addr: int
-    base_offset: int
+    callsite_addr: cython.longlong
+    base_offset: cython.longlong
     base_cvar: CVariable | None
 
 
+@cython.ccall
 def _strip_condition_casts_8616(expression: CExpression) -> CExpression:
     """Strip transparent C casts around one call argument."""
     current = expression
@@ -231,6 +238,7 @@ def _strip_condition_casts_8616(expression: CExpression) -> CExpression:
     return current
 
 
+@cython.ccall
 def _referenced_stack_cvar_8616(expression: CExpression) -> CVariable | None:
     """Return the BP stack variable referenced by one call argument."""
     current = _strip_condition_casts_8616(expression)
@@ -245,9 +253,12 @@ def _referenced_stack_cvar_8616(expression: CExpression) -> CVariable | None:
     return operand
 
 
-def _condition_stack_slices_8616(conditions: tuple[ConditionIR, ...]) -> tuple[tuple[int, int, int], ...]:
+@cython.ccall
+def _condition_stack_slices_8616(conditions: object) -> tuple[tuple[cython.longlong, cython.longlong, cython.longlong], ...]:
     """Return unique ``(instruction, offset, width)`` condition stack slices."""
-    slices: set[tuple[int, int, int]] = set()
+    condition: object
+    operand: object
+    slices: set[tuple[cython.longlong, cython.longlong, cython.longlong]] = set()
     for condition in conditions:
         if not isinstance(condition.src_insn, int):
             continue
@@ -263,16 +274,17 @@ def _condition_stack_slices_8616(conditions: tuple[ConditionIR, ...]) -> tuple[t
     return tuple(sorted(slices))
 
 
+@cython.ccall
 def _wide_call_return_condition_ir_8616(
-    conditions: tuple[ConditionIR, ...],
-) -> tuple[IRValue, IRValue] | None:
+    conditions: object,
+) -> object:
     """Return the high and low stack values from one exact wide comparison chain."""
     if len(conditions) != 3:
         return None
     high_le, high_ge, low_le = conditions
     if (high_le.op, high_ge.op, low_le.op) != ("sle", "sge", "ule"):
         return None
-    if high_le.lhs != high_ge.lhs or high_le.rhs != high_ge.rhs:
+    if operator.ne(high_le.lhs, high_ge.lhs) or operator.ne(high_le.rhs, high_ge.rhs):
         return None
     high_register = high_le.lhs
     low_register = low_le.lhs
@@ -295,15 +307,16 @@ def _wide_call_return_condition_ir_8616(
         and low_stack.space is MemSpace.SS
         and low_stack.name == "bp"
         and low_stack.size == 2
-        and high_stack.offset == low_stack.offset + 2
+        and operator.eq(high_stack.offset, low_stack.offset + 2)
     ):
         return None
     return high_stack, low_stack
 
 
+@cython.ccall
 def _wide_call_return_condition_expression_parts_8616(
     expression: CExpression,
-) -> tuple[CExpression, CExpression] | None:
+) -> object:
     """Return high and low stack operands from the target-directed Boolean form."""
     if isinstance(expression, CUnaryOp) and expression.op == "Not":
         non_break = expression.operand
@@ -323,23 +336,24 @@ def _wide_call_return_condition_expression_parts_8616(
     return high_gt.rhs, gated_low.rhs.rhs
 
 
+@cython.ccall
 def _gated_low_parts_8616(
     high: CExpression,
-    high_op: str,
+    high_op: object,
     gated_low: CExpression,
-    gate_lhs_op: str,
-    gate_rhs_op: str,
-) -> bool:
+    gate_lhs_op: object,
+    gate_rhs_op: object,
+) -> cython.bint:
     """Match the high comparison and gated low pair for one Boolean form."""
     return (
         isinstance(high, CBinaryOp)
-        and high.op == high_op
+        and operator.eq(high.op, high_op)
         and isinstance(gated_low, CBinaryOp)
         and gated_low.op == "LogicalAnd"
         and isinstance(gated_low.lhs, CBinaryOp)
-        and gated_low.lhs.op == gate_lhs_op
+        and operator.eq(gated_low.lhs.op, gate_lhs_op)
         and isinstance(gated_low.rhs, CBinaryOp)
-        and gated_low.rhs.op == gate_rhs_op
+        and operator.eq(gated_low.rhs.op, gate_rhs_op)
     )
 
 
@@ -353,7 +367,7 @@ def _wide_condition_stack_cvar_8616(
     """Return the existing four-byte stack object proven by adjacent word views."""
     low_offset = low_stack.offset
     high_offset = high_stack.offset
-    if not isinstance(low_offset, int) or not isinstance(high_offset, int) or high_offset != low_offset + 2:
+    if not isinstance(low_offset, int) or not isinstance(high_offset, int) or operator.ne(high_offset, low_offset + 2):
         return None
 
     if not _matches_stack_projection_8616(
@@ -364,11 +378,11 @@ def _wide_condition_stack_cvar_8616(
         return None
     candidates = tuple(
         cvar
-        for variable, cvar in codegen.cfunc.variables_in_use.items()
+        for variable, cvar in builtins.iter(codegen.cfunc.variables_in_use.items())
         if _is_wide_stack_owner_variable_8616(codegen, variable, low_offset)
         and isinstance(cvar, CVariable)
     )
-    unique_candidates = tuple({id(candidate): candidate for candidate in candidates}.values())
+    unique_candidates = tuple({id(candidate): candidate for candidate in iter(candidates)}.values())
     if len(unique_candidates) != 1:
         return None
     wide_cvar = unique_candidates[0]
@@ -378,26 +392,28 @@ def _wide_condition_stack_cvar_8616(
     return wide_cvar
 
 
+@cython.ccall
 def _is_wide_stack_owner_variable_8616(
-    codegen: _CallOutputCodegen8616, variable: object, low_offset: int
-) -> bool:
+    codegen: _CallOutputCodegen8616, variable: object, low_offset: cython.longlong
+) -> cython.bint:
     """Match the four-byte BP stack owner covering ``low_offset``."""
     return (
         isinstance(variable, SimStackVariable)
         and variable.base == "bp"
-        and machine_bp_offset_for_stack_variable_8616(codegen, variable) == low_offset
+        and operator.eq(machine_bp_offset_for_stack_variable_8616(codegen, variable), low_offset)
         and variable.size == 4
     )
 
 
+@cython.ccall
 def _matches_stack_projection_8616(
     codegen: _CallOutputCodegen8616,
     expression: CExpression,
-    expected_offset: int,
+    expected_offset: cython.longlong,
     *,
-    owner_offset: int,
-    allow_owner: bool,
-) -> bool:
+    owner_offset: cython.longlong,
+    allow_owner: cython.bint,
+) -> cython.bint:
     """Match one expression through typed projection or exact stack identity."""
     projection = condition_stack_projection_fact_8616(expression)
     expected_projection = ConditionStackProjectionFact8616(
@@ -415,15 +431,19 @@ def _matches_stack_projection_8616(
     variable = direct.variable
     return (
         variable.base == "bp"
-        and machine_bp_offset_for_stack_variable_8616(codegen, variable) == expected_offset
+        and operator.eq(machine_bp_offset_for_stack_variable_8616(codegen, variable), expected_offset)
         and variable.size in ({2, 4} if allow_owner else {2})
     )
 
 
+@cython.ccall
 def _propagate_wide_stack_type_8616(
-    codegen: _CallOutputCodegen8616, low_offset: int, wide_type: SimTypeLong
+    codegen: _CallOutputCodegen8616, low_offset: cython.longlong, wide_type: SimTypeLong
 ) -> None:
     """Widen the variable manager, in-use cvars, and AST nodes to the wide type."""
+    cvar: object
+    node: object
+    variable: object
     for variable, cvar in codegen.cfunc.variables_in_use.items():
         if _is_wide_stack_owner_variable_8616(codegen, variable, low_offset):
             codegen.cfunc.variable_manager.set_variable_type(variable, wide_type)
@@ -438,9 +458,11 @@ def _propagate_wide_stack_type_8616(
 
 def select_wide_call_return_condition_chain_8616(
     root_condition: ConditionIR,
-    conditions: tuple[ConditionIR, ...],
-) -> tuple[ConditionIR, ConditionIR, ConditionIR] | None:
+    conditions: object,
+) -> object:
     """Select one unique typed DX:AX condition chain rooted at ``root_condition``."""
+    high_ge: object
+    low_le: object
     candidates: list[tuple[ConditionIR, ConditionIR, ConditionIR]] = []
     for high_ge in conditions:
         if high_ge is root_condition:
@@ -453,18 +475,20 @@ def select_wide_call_return_condition_chain_8616(
                 candidates.append(candidate)
     unique = tuple(
         {
-            tuple(id(condition) for condition in candidate): candidate
-            for candidate in candidates
+            tuple(id(condition) for condition in iter(candidate)): candidate
+            for candidate in iter(candidates)
         }.values()
     )
     return unique[0] if len(unique) == 1 else None
 
 
+@cython.ccall
 def _wide_condition_call_8616(
     codegen: _CallOutputCodegen8616,
-    conditions: tuple[ConditionIR, ...],
-) -> tuple[CFunctionCall, CallsiteSummary8616] | None:
+    conditions: object,
+) -> object:
     """Return the unique typed DX:AX call proven to reach the whole chain."""
+    proven_callsite: object
     try:
         summary_map = codegen._inertia_callsite_summaries
     except AttributeError:
@@ -478,7 +502,7 @@ def _wide_condition_call_8616(
     proven_callsite = proven_wide_condition_callsite_8616(codegen, conditions, frozenset(candidates))
     if proven_callsite is None:
         return None
-    proven_calls = tuple({id(call): call for call in candidates[proven_callsite]}.values())
+    proven_calls = tuple({id(call): call for call in iter(candidates[proven_callsite])}.values())
     if len(proven_calls) != 1:
         return None
     call = proven_calls[0]
@@ -489,24 +513,29 @@ def _wide_condition_call_8616(
     return call, summary
 
 
-def _wide_condition_summary_matches_8616(summary: CallsiteSummary8616) -> bool:
+@cython.ccall
+def _wide_condition_summary_matches_8616(summary: CallsiteSummary8616) -> cython.bint:
     """Require the typed DX:AX condition evidence on one callsite summary."""
     return (
         summary.return_used is True
         and summary.return_use_kind is CallsiteReturnUseKind8616.CONDITION
-        and summary.return_shape == CallsiteReturnShape8616.DX_AX.value
+        and operator.eq(summary.return_shape, CallsiteReturnShape8616.DX_AX.value)
         and isinstance(summary.callsite_addr, int)
         and isinstance(summary.return_addr, int)
     )
 
 
+@cython.ccall
 def _wide_condition_call_candidates_8616(
     codegen: _CallOutputCodegen8616,
-    summary_map: dict[int, CallsiteSummary8616],
-    inventory: dict[int, CallsiteSummary8616],
-) -> dict[int, list[CFunctionCall]]:
+    summary_map: object,
+    inventory: object,
+) -> object:
     """Collect zero-arg calls carrying a proven wide-condition callsite summary."""
-    candidates: dict[int, list[CFunctionCall]] = {}
+    summary: object
+    tagged_callsite: object
+    node: object
+    candidates: dict[cython.longlong, list[CFunctionCall]] = {}
     for node in _iter_c_nodes_deep_8616(codegen.cfunc.statements):
         if not isinstance(node, CFunctionCall) or tuple(node.args or ()):
             continue
@@ -526,13 +555,15 @@ def _wide_condition_call_candidates_8616(
     return candidates
 
 
+@cython.ccall
 def _rebind_wide_condition_call_8616(
     codegen: _CallOutputCodegen8616,
     call: CFunctionCall,
     summary: CallsiteSummary8616,
-    summary_map: dict[int, CallsiteSummary8616],
+    summary_map: object,
 ) -> None:
     """Rebind the callsite summary and resolve the canonical callee target."""
+    callee: object
     rebound = dict(summary_map)
     rebound[id(call)] = summary
     codegen._inertia_callsite_summaries = rebound
@@ -548,18 +579,20 @@ def _rebind_wide_condition_call_8616(
             call.callee_func = cast(Function, callee)
 
 
+@cython.ccall
 def prune_materialized_wide_condition_call_carrier_8616(
     codegen: object,
     call: CFunctionCall,
-) -> int:
+) -> cython.longlong:
     """Remove the exact standalone or AX carrier consumed by a wide condition."""
     boundary = cast(_CallOutputCodegen8616, codegen)
     return _prune_consumed_carriers_8616(boundary, call, boundary.cfunc.statements, set())
 
 
+@cython.ccall
 def _is_consumed_wide_call_carrier_8616(
     boundary: _CallOutputCodegen8616, call: CFunctionCall, statement: object
-) -> bool:
+) -> cython.bint:
     """Return whether one statement exists only to carry ``call`` through AX."""
     if statement is call:
         return True
@@ -579,13 +612,19 @@ def _is_consumed_wide_call_carrier_8616(
     return isinstance(register_name, str) and register_name.lower() == "ax"
 
 
+@cython.ccall
 def _prune_consumed_carriers_8616(
     boundary: _CallOutputCodegen8616,
     call: CFunctionCall,
     node: object,
-    seen: set[int],
-) -> int:
+    seen: object,
+) -> cython.longlong:
     """Prune carrier statements from structured statement containers."""
+    child: object
+    _condition: object
+    attr: object
+    body: object
+    statement: object
     if node is None or id(node) in seen:
         return 0
     seen.add(id(node))
@@ -614,12 +653,18 @@ def _prune_consumed_carriers_8616(
     return removed
 
 
+@cython.ccall
 def lower_wide_call_return_condition_chain_8616(
     codegen: object,
     expression: CExpression,
-    conditions: tuple[ConditionIR, ...],
+    conditions: object,
 ) -> WideCallReturnConditionResult8616:
     """Join a proven DX:AX lexicographic condition into one signed wide comparison."""
+    call: object
+    call_selection: object
+    expression_parts: object
+    ir_pair: object
+    wide_stack: object
     boundary = cast(_CallOutputCodegen8616, codegen)
     raw_count = int(len(conditions) == 3)
     normalized_count = 0
@@ -677,9 +722,11 @@ def lower_wide_call_return_condition_chain_8616(
     )
 
 
-def _aggregate_boundaries_8616(codegen: object, root: object) -> tuple[int, ...]:
+@cython.ccall
+def _aggregate_boundaries_8616(codegen: object, root: object) -> tuple[cython.longlong, ...]:
     """Return stack offsets with independently proven aggregate types."""
-    offsets: set[int] = set()
+    node: object
+    offsets: set[cython.longlong] = set()
     for node in _iter_c_nodes_deep_8616(root):
         if not isinstance(node, CVariable):
             continue
@@ -694,26 +741,29 @@ def _aggregate_boundaries_8616(codegen: object, root: object) -> tuple[int, ...]
     return tuple(sorted(offsets))
 
 
+@cython.ccall
 def _stack_cvar_at_base_offset_8616(
     codegen: _CallOutputCodegen8616,
-    base_offset: int,
+    base_offset: cython.longlong,
 ) -> CVariable | None:
     """Return the authoritative projected owner rooted at ``base_offset``."""
+    cvar: object
+    variable: object
     projected = {
         id(projection.variable): projection.cvar
-        for projection in stack_variable_coordinate_registry_8616(codegen).projections
-        if projection.bp_offset == base_offset and isinstance(projection.cvar, CVariable)
+        for projection in iter(stack_variable_coordinate_registry_8616(codegen).projections)
+        if operator.eq(projection.bp_offset, base_offset) and isinstance(projection.cvar, CVariable)
     }
     if len(projected) == 1:
         return next(iter(projected.values()))
     if projected:
         return None
-    candidates: dict[int, CVariable] = {}
+    candidates: dict[cython.longlong, CVariable] = {}
     for variable, cvar in codegen.cfunc.variables_in_use.items():
         if (
             isinstance(variable, SimStackVariable)
             and variable.base == "bp"
-            and machine_bp_offset_for_stack_variable_8616(codegen, variable) == base_offset
+            and operator.eq(machine_bp_offset_for_stack_variable_8616(codegen, variable), base_offset)
             and isinstance(cvar, CVariable)
         ):
             candidates[id(variable)] = cvar
@@ -722,9 +772,11 @@ def _stack_cvar_at_base_offset_8616(
     return next(iter(candidates.values()))
 
 
-def _summary_bp_address_offsets_8616(summary: CallsiteSummary8616) -> tuple[int, ...]:
+@cython.ccall
+def _summary_bp_address_offsets_8616(summary: CallsiteSummary8616) -> tuple[cython.longlong, ...]:
     """Return exact BP-address arguments proven by one typed callsite summary."""
-    offsets: list[int] = []
+    source: object
+    offsets: list[cython.longlong] = []
     for source in summary.push_arg_sources:
         if (
             isinstance(source, tuple)
@@ -737,17 +789,20 @@ def _summary_bp_address_offsets_8616(summary: CallsiteSummary8616) -> tuple[int,
     return tuple(dict.fromkeys(offsets))
 
 
+@cython.ccall
 def _call_addressed_bases_8616(
     codegen: _CallOutputCodegen8616,
 ) -> tuple[_CallAddressedStackBase8616, ...]:
     """Return callsite-addressed stack bases from structured call arguments."""
+    previous: object
+    base: object
     try:
         summary_map = codegen._inertia_callsite_summaries
     except AttributeError:
         summary_map = {}
     bases = _call_bases_from_statements_8616(codegen, summary_map)
     bases += _call_bases_from_inventory_8616(codegen)
-    unique: dict[tuple[int, int], _CallAddressedStackBase8616] = {}
+    unique: dict[tuple[cython.longlong, cython.longlong], _CallAddressedStackBase8616] = {}
     for base in bases:
         key = base.callsite_addr, base.base_offset
         previous = unique.get(key)
@@ -756,10 +811,16 @@ def _call_addressed_bases_8616(
     return tuple(unique.values())
 
 
+@cython.ccall
 def _call_bases_from_statements_8616(
-    codegen: _CallOutputCodegen8616, summary_map: dict[int, CallsiteSummary8616]
-) -> list[_CallAddressedStackBase8616]:
+    codegen: _CallOutputCodegen8616, summary_map: object
+) -> object:
     """Collect addressed stack bases from structured call arguments."""
+    base: object
+    base_offset: object
+    summary: object
+    argument: object
+    node: object
     bases: list[_CallAddressedStackBase8616] = []
     for node in _iter_c_nodes_deep_8616(codegen.cfunc.statements):
         if not isinstance(node, CFunctionCall):
@@ -799,10 +860,14 @@ def _call_bases_from_statements_8616(
     return bases
 
 
+@cython.ccall
 def _call_bases_from_inventory_8616(
     codegen: _CallOutputCodegen8616,
-) -> list[_CallAddressedStackBase8616]:
+) -> object:
     """Collect addressed stack bases from the callsite inventory summaries."""
+    base_offset: object
+    callsite_addr: object
+    summary: object
     bases: list[_CallAddressedStackBase8616] = []
     for callsite_addr, summary in _callsite_inventory_8616(codegen).items():
         for base_offset in _summary_bp_address_offsets_8616(summary):
@@ -817,10 +882,11 @@ def _call_bases_from_inventory_8616(
     return bases
 
 
+@cython.ccall
 def _synthetic_stack_object_base_8616(
     codegen: _CallOutputCodegen8616,
-    base_offset: int,
-    boundary_offset: int,
+    base_offset: cython.longlong,
+    boundary_offset: cython.longlong,
 ) -> CVariable:
     """Create an unregistered aggregate carrier from one closed stack extent."""
     byte_size = boundary_offset - base_offset
@@ -840,11 +906,14 @@ def _synthetic_stack_object_base_8616(
     )
 
 
+@cython.ccall
 def _nonoverlapping_fields_8616(
-    slices: set[tuple[int, int]],
-    base_offset: int,
-) -> tuple[CallOutputStackField8616, ...] | None:
+    slices: object,
+    base_offset: cython.longlong,
+) -> object:
     """Classify non-overlapping field slices relative to one object base."""
+    absolute_offset: object
+    width: object
     ordered = sorted(slices)
     previous_end = base_offset
     fields: list[CallOutputStackField8616] = []
@@ -866,7 +935,7 @@ def _nonoverlapping_fields_8616(
 
 def recover_call_output_stack_object_facts_8616(
     codegen: object,
-    conditions: tuple[ConditionIR, ...],
+    conditions: object,
 ) -> tuple[tuple[CallOutputStackObjectFact8616, ...], CallOutputStackObjectStats8616]:
     """Recover closed stack-object field facts for one structured condition set."""
     boundary = cast(_CallOutputCodegen8616, codegen)
@@ -894,7 +963,7 @@ def recover_call_output_stack_object_facts_8616(
     stats = CallOutputStackObjectStats8616(
         raw_fact_count=raw_count,
         normalized_fact_count=len(condition_slices),
-        classified_fact_count=sum(len(fact.fields) for fact in facts),
+        classified_fact_count=sum(len(fact.fields) for fact in iter(facts)),
         materialized_count=0,
         failure_count=failures,
     )
@@ -908,17 +977,23 @@ def recover_call_output_stack_object_facts_8616(
 
 
 def _group_condition_slice_candidates_8616(
-    call_bases: tuple[_CallAddressedStackBase8616, ...],
-    condition_slices: tuple[tuple[int, int, int], ...],
-    aggregate_boundaries: tuple[int, ...],
-) -> tuple[dict[tuple[int, int, int], tuple[CVariable | None, set[tuple[int, int]]]], int]:
+    call_bases: object,
+    condition_slices: object,
+    aggregate_boundaries: object,
+) -> tuple[dict[tuple[cython.longlong, cython.longlong, cython.longlong], tuple[CVariable | None, set[tuple[cython.longlong, cython.longlong]]]], cython.longlong]:
     """Group condition field slices under their proven callsite/object boundary."""
-    grouped: dict[tuple[int, int, int], tuple[CVariable | None, set[tuple[int, int]]]] = {}
+    base_cvar: object
+    stored_base: object
+    absolute_offset: object
+    call_base: object
+    instruction_addr: object
+    width: object
+    grouped: dict[tuple[cython.longlong, cython.longlong, cython.longlong], tuple[CVariable | None, set[tuple[cython.longlong, cython.longlong]]]] = {}
     failures = 0
     for instruction_addr, absolute_offset, width in condition_slices:
-        candidates: list[tuple[_CallAddressedStackBase8616, int]] = []
+        candidates: list[tuple[_CallAddressedStackBase8616, cython.longlong]] = []
         for call_base in call_bases:
-            upper_offsets = tuple(offset for offset in aggregate_boundaries if offset > call_base.base_offset)
+            upper_offsets = tuple(offset for offset in iter(aggregate_boundaries) if offset > call_base.base_offset)
             if not upper_offsets:
                 continue
             boundary_offset = min(upper_offsets)
@@ -945,14 +1020,20 @@ def _group_condition_slice_candidates_8616(
     return grouped, failures
 
 
+@cython.ccall
 def _materialize_stack_object_facts_8616(
     boundary: _CallOutputCodegen8616,
-    grouped: dict[tuple[int, int, int], tuple[CVariable | None, set[tuple[int, int]]]],
-) -> tuple[list[CallOutputStackObjectFact8616], int]:
+    grouped: object,
+) -> tuple[list[CallOutputStackObjectFact8616], cython.longlong]:
     """Materialize non-overlapping object facts, synthesizing missing bases."""
+    base_cvar: object
+    base_offset: object
+    boundary_offset: object
+    callsite_addr: object
+    slices: object
     facts: list[CallOutputStackObjectFact8616] = []
     failures = 0
-    for (callsite_addr, base_offset, boundary_offset), (base_cvar, slices) in sorted(grouped.items()):
+    for (callsite_addr, base_offset, boundary_offset), (base_cvar, slices) in sorted(tuple(grouped.items())):
         fields = _nonoverlapping_fields_8616(slices, base_offset)
         if not fields:
             failures += 1
@@ -978,8 +1059,8 @@ def _materialize_stack_object_facts_8616(
 
 def _replay_call_output_stack_object_facts_8616(
     codegen: _CallOutputCodegen8616,
-    conditions: tuple[ConditionIR, ...],
-    previous_facts: tuple[CallOutputStackObjectFact8616, ...],
+    conditions: object,
+    previous_facts: object,
 ) -> tuple[CallOutputStackObjectFact8616, ...]:
     """Rebind previously proven object facts after structured AST regeneration.
 
@@ -988,6 +1069,7 @@ def _replay_call_output_stack_object_facts_8616(
     typed callsite/base pair and every ConditionIR field slice. A newly visible
     aggregate boundary inside the proven object invalidates the old fact.
     """
+    fact: object
     if not previous_facts:
         return ()
     try:
@@ -997,29 +1079,29 @@ def _replay_call_output_stack_object_facts_8616(
         return ()
     condition_slices = {
         (absolute_offset, width)
-        for _instruction_addr, absolute_offset, width in _condition_stack_slices_8616(
+        for _instruction_addr, absolute_offset, width in builtins.iter(_condition_stack_slices_8616(
             conditions
-        )
+        ))
     }
     aggregate_boundaries = _aggregate_boundaries_8616(codegen, root)
     replayed: list[CallOutputStackObjectFact8616] = []
     for fact in previous_facts:
         matching_bases = tuple(
             call_base
-            for call_base in call_bases
-            if call_base.callsite_addr == fact.callsite_addr
-            and call_base.base_offset == fact.base_offset
+            for call_base in iter(call_bases)
+            if operator.eq(call_base.callsite_addr, fact.callsite_addr)
+            and operator.eq(call_base.base_offset, fact.base_offset)
         )
         if len(matching_bases) != 1:
             continue
         if any(
             (field.absolute_offset, field.width) not in condition_slices
-            for field in fact.fields
+            for field in iter(fact.fields)
         ):
             continue
         if any(
             fact.base_offset < boundary < fact.boundary_offset
-            for boundary in aggregate_boundaries
+            for boundary in iter(aggregate_boundaries)
         ):
             continue
         current_base = matching_bases[0].base_cvar or fact.base_cvar
@@ -1039,7 +1121,8 @@ def _replay_call_output_stack_object_facts_8616(
     return tuple(replayed)
 
 
-def _field_type_8616(width: int) -> SimType:
+@cython.ccall
+def _field_type_8616(width: cython.longlong) -> SimType:
     """Return an unsigned scalar type for one proven field width."""
     if width == 1:
         return SimTypeChar(False)
@@ -1052,6 +1135,7 @@ def _field_type_8616(width: int) -> SimType:
 
 def _struct_type_for_fact_8616(fact: CallOutputStackObjectFact8616) -> SimStruct:
     """Build a packed generic struct preserving all proven field offsets."""
+    field: object
     fields: OrderedDict[str, SimType] = OrderedDict()
     cursor = 0
     for field in fact.fields:
@@ -1062,16 +1146,19 @@ def _struct_type_for_fact_8616(fact: CallOutputStackObjectFact8616) -> SimStruct
     byte_size = fact.boundary_offset - fact.base_offset
     if cursor < byte_size:
         fields[f"padding_{cursor}"] = SimTypeArray(SimTypeChar(False), byte_size - cursor)
-    layout = "_".join(f"{field.relative_offset}w{field.width}" for field in fact.fields)
+    layout = "_".join(f"{field.relative_offset}w{field.width}" for field in iter(fact.fields))
     return SimStruct(fields, name=f"inertia_stack_object_{byte_size}_{layout}", pack=True)
 
 
+@cython.ccall
 def _prepare_object_type_8616(
     codegen: _CallOutputCodegen8616,
     fact: CallOutputStackObjectFact8616,
     struct_type: SimStruct,
-) -> bool:
+) -> cython.bint:
     """Publish the object type and report changes to its declaration cache."""
+    base_in_use: object
+    node: object
     publish_call_output_object_projection_8616(
         codegen, fact.base_cvar, bp_offset=fact.base_offset,
         byte_size=fact.boundary_offset - fact.base_offset,
@@ -1092,12 +1179,15 @@ def _prepare_object_type_8616(
     return bool(declarations_changed)
 
 
+@cython.ccall
 def _replace_stack_fields_8616(
     expression: CExpression,
     codegen: _CallOutputCodegen8616,
-    field_map: dict[int, tuple[CallOutputStackObjectFact8616, CallOutputStackField8616, SimStruct]],
-) -> tuple[CExpression, int]:
+    field_map: object,
+) -> tuple[CExpression, cython.longlong]:
     """Replace exact stack variables in one condition expression with fields."""
+    bp_offset: object
+    match: object
     if isinstance(expression, CVariableField) and not expression.var_is_ptr:
         base = expression.variable
         variable = base.variable if isinstance(base, CVariable) else None
@@ -1110,9 +1200,9 @@ def _replace_stack_fields_8616(
             match = field_map.get(bp_offset + field_offset)
             if (
                 match is not None
-                and match[0].base_offset == bp_offset
-                and match[1].relative_offset == field_offset
-                and match[1].name == expression.field.field
+                and operator.eq(match[0].base_offset, bp_offset)
+                and operator.eq(match[1].relative_offset, field_offset)
+                and operator.eq(match[1].name, expression.field.field)
             ):
                 return expression, 1
         return expression, 0
@@ -1159,9 +1249,11 @@ def _replace_stack_fields_8616(
 def lower_call_output_stack_fields_in_condition_8616(
     codegen: object,
     expression: CExpression,
-    conditions: tuple[ConditionIR, ...],
+    conditions: object,
 ) -> CallOutputConditionLoweringResult8616:
     """Project proven call-output stack fields into one condition expression."""
+    fact: object
+    field: object
     boundary = cast(_CallOutputCodegen8616, codegen)
     recovered_facts, recovery_stats = recover_call_output_stack_object_facts_8616(
         codegen,
@@ -1177,10 +1269,10 @@ def lower_call_output_stack_fields_in_condition_8616(
         previous_facts,
     )
     facts_by_key: dict[
-        tuple[int, int, int, tuple[CallOutputStackField8616, ...]],
+        tuple[cython.longlong, cython.longlong, cython.longlong, tuple[CallOutputStackField8616, ...]],
         CallOutputStackObjectFact8616,
     ] = {}
-    for fact in (*recovered_facts, *replayed_facts):
+    for fact in tuple(recovered_facts) + tuple(replayed_facts):
         key = (
             fact.callsite_addr,
             fact.base_offset,
@@ -1189,8 +1281,8 @@ def lower_call_output_stack_fields_in_condition_8616(
         )
         facts_by_key.setdefault(key, fact)
     facts = tuple(facts_by_key.values())
-    classified_count = sum(len(fact.fields) for fact in facts)
-    field_map: dict[int, tuple[CallOutputStackObjectFact8616, CallOutputStackField8616, SimStruct]] = {}
+    classified_count = sum(len(fact.fields) for fact in iter(facts))
+    field_map: dict[cython.longlong, tuple[CallOutputStackObjectFact8616, CallOutputStackField8616, SimStruct]] = {}
     for fact in facts:
         struct_type = _struct_type_for_fact_8616(fact)
         _prepare_object_type_8616(boundary, fact, struct_type)
@@ -1210,14 +1302,16 @@ def lower_call_output_stack_fields_in_condition_8616(
     except AttributeError:
         previous_stats = CallOutputStackObjectStats8616()
     boundary._inertia_call_output_stack_object_stats_8616 = previous_stats.merged(stats)
-    boundary._inertia_call_output_stack_object_facts_8616 = tuple(dict.fromkeys((*previous_facts, *facts)))
+    boundary._inertia_call_output_stack_object_facts_8616 = tuple(dict.fromkeys(tuple(previous_facts) + tuple(facts)))
     if stats.classified_fact_count > 0 and stats.materialized_count == 0:
         raise PipelineHardError("classified call-output stack fields were not materialized")
     return CallOutputConditionLoweringResult8616(lowered, facts, stats)
 
 
-def prune_materialized_call_output_stack_carriers_8616(codegen: object) -> int:
+@cython.ccall
+def prune_materialized_call_output_stack_carriers_8616(codegen: object) -> cython.longlong:
     """Remove declarations for field slices no longer referenced as scalars."""
+    variable: object
     boundary = cast(_CallOutputCodegen8616, codegen)
     try:
         facts = boundary._inertia_call_output_stack_object_facts_8616
@@ -1228,12 +1322,12 @@ def prune_materialized_call_output_stack_carriers_8616(codegen: object) -> int:
         return 0
     remaining_offsets = {
         bp_offset
-        for node in _iter_c_nodes_deep_8616(cfunc.statements)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(cfunc.statements))
         if isinstance(node, CVariable)
         and isinstance((variable := node.variable), SimStackVariable)
         and isinstance((bp_offset := machine_bp_offset_for_stack_variable_8616(boundary, variable)), int)
     }
-    projected_offsets = {field.absolute_offset for fact in facts for field in fact.fields}
+    projected_offsets = {field.absolute_offset for fact in iter(facts) for field in iter(fact.fields)}
     removed = 0
     for variable in tuple(cfunc.variables_in_use):
         if (

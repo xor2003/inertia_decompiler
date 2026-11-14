@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bounded cache for immutable exact-byte condition-relift artifacts.
 
 Layer: IR.
@@ -14,58 +15,68 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
+import typing
+import cython
+import dataclasses
+import operator
+ArtifactT = typing.TypeVar("ArtifactT")
 
 __all__ = (
     "ConditionReliftArtifactCache8616",
     "ConditionReliftCacheRequest8616",
 )
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionReliftCacheRequest8616:
     """Exact immutable inputs that determine one condition-relift artifact."""
 
-    block_bytes: tuple[tuple[int, int, bytes], ...]
-    expected_condition_blocks: frozenset[int]
+    block_bytes: object
+    expected_condition_blocks: object
 
 
 @runtime_checkable
 class _LiftSemanticsKeyBoundary8616(Protocol):
     """Frontend boundary for architectures with stable lift semantics."""
 
-    def lifting_semantics_key_8616(self) -> tuple[object, ...]:
+    def lifting_semantics_key_8616(self) -> object:
         """Return immutable fields that determine exact-byte lifting."""
 
 
+@cython.ccall
 def _architecture_semantics_key_8616(
     architecture: object,
-) -> tuple[object, ...] | None:
+) -> object:
     """Return an owned lift key, retaining identity for unknown boundaries."""
     if not isinstance(architecture, _LiftSemanticsKeyBoundary8616):
         return None
     return architecture.lifting_semantics_key_8616()
 
 
-@dataclass(frozen=True, slots=True)
-class _ConditionReliftCacheEntry8616[ArtifactT]:
+@dataclasses.dataclass(frozen=True, )
+class _ConditionReliftCacheEntry8616(typing.Generic[ArtifactT]):
     """One architecture-scoped immutable cache entry."""
 
     architecture: object
-    architecture_semantics_key: tuple[object, ...] | None
+    architecture_semantics_key: object
     request: ConditionReliftCacheRequest8616
     artifact: ArtifactT
 
-    def matches_architecture(self, architecture: object) -> bool:
+    def matches_architecture(self, architecture: object) -> cython.bint:
         """Match owned equivalent architectures or unknown exact identities."""
+        candidate_key: object
         candidate_key = _architecture_semantics_key_8616(architecture)
         if self.architecture_semantics_key is not None and candidate_key is not None:
-            return self.architecture_semantics_key == candidate_key
+            return operator.eq(self.architecture_semantics_key, candidate_key)
         return self.architecture is architecture
 
 
-class ConditionReliftArtifactCache8616[ArtifactT]:
+class ConditionReliftArtifactCache8616(typing.Generic[ArtifactT]):
     """Keep a fixed number of most-recent exact relift artifacts."""
+    _entries: object
+    _lock: object
+    _max_entries: object
 
-    def __init__(self, *, max_entries: int) -> None:
+    def __init__(self, *, max_entries: cython.longlong) -> None:
         """Create a bounded cache with an explicit positive capacity."""
         if max_entries <= 0:
             msg = "condition relift cache capacity must be positive"
@@ -76,10 +87,12 @@ class ConditionReliftArtifactCache8616[ArtifactT]:
 
     def lookup(self, architecture: object, request: ConditionReliftCacheRequest8616) -> ArtifactT | None:
         """Return and promote an exact lift-semantics cache hit."""
+        entry: object
+        index: object
         with self._lock:
             for index, entry in enumerate(self._entries):
-                if entry.matches_architecture(architecture) and entry.request == request:
-                    if index != len(self._entries) - 1:
+                if entry.matches_architecture(architecture) and operator.eq(entry.request, request):
+                    if operator.ne(index, len(self._entries) - 1):
                         self._entries.append(self._entries.pop(index))
                     return entry.artifact
         return None
@@ -94,8 +107,8 @@ class ConditionReliftArtifactCache8616[ArtifactT]:
         with self._lock:
             self._entries = [
                 entry
-                for entry in self._entries
-                if not (entry.matches_architecture(architecture) and entry.request == request)
+                for entry in iter(self._entries)
+                if not (entry.matches_architecture(architecture) and operator.eq(entry.request, request))
             ]
             self._entries.append(
                 _ConditionReliftCacheEntry8616(

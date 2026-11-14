@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed contracts for exact scalar affine-expression provenance.
 
 Layer: IR.
@@ -12,12 +13,16 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
 
 from .core import AddressStatus, IRAddress, IRValue, MemSpace, SegmentOrigin
 from .indexed_address_contracts import IndexedAddressDefinitionSite8616
+import dataclasses
+import operator
 
 
 class ScalarAffineFailure8616(StrEnum):
@@ -31,37 +36,37 @@ class ScalarAffineFailure8616(StrEnum):
     SOURCE_UNPROVEN = "source_unproven"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ScalarAffineEntryRegister8616:
     """An exact 16-bit SP/BP value at one function's entry boundary."""
 
-    function_addr: int
-    register_name: str
-    size: int
+    function_addr: cython.longlong
+    register_name: object
+    size: cython.longlong
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Refuse non-stack registers, unknown entries and non-word roots."""
         return self.function_addr >= 0 and self.register_name in {"sp", "bp"} and self.size == 2
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ScalarAffineTerm8616:
     """One proven scalar source multiplied by a modular coefficient."""
 
     value: IRValue
     source: IRAddress | ScalarAffineEntryRegister8616
-    coefficient: int
+    coefficient: cython.longlong
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether this term retains exact value and stack identity."""
         if isinstance(self.source, ScalarAffineEntryRegister8616):
             return bool(
                 self.coefficient != 0 and self.source.complete
                 and self.value.space is MemSpace.REG
-                and self.value.name == self.source.register_name
-                and self.value.size == self.source.size
+                and operator.eq(self.value.name, self.source.register_name)
+                and operator.eq(self.value.size, self.source.size)
                 and self.value.version == 0 and self.value.source_tmp is None
                 and self.value.offset == 0 and self.value.index is None
             )
@@ -73,24 +78,24 @@ class ScalarAffineTerm8616:
             )
             and self.source.space is MemSpace.SS
             and self.source.base == ("bp",)
-            and self.source.size == self.value.size
+            and operator.eq(self.source.size, self.value.size)
             and self.source.status is AddressStatus.STABLE
             and self.source.segment_origin is SegmentOrigin.PROVEN
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ScalarAffineExpression8616:
     """One exact width-bounded affine value and its complete SSA proof path."""
 
     root: IRValue
-    width: int
-    constant: int
-    terms: tuple[ScalarAffineTerm8616, ...]
-    definition_path: tuple[IndexedAddressDefinitionSite8616, ...]
+    width: cython.longlong
+    constant: cython.longlong
+    terms: object
+    definition_path: object
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether the root, terms, constant, and path agree."""
         mask = (1 << (self.width * 8)) - 1 if self.width in {1, 2, 4} else -1
         root_exact = bool(
@@ -100,29 +105,29 @@ class ScalarAffineExpression8616:
         )
         return bool(
             mask >= 0
-            and self.root.size == self.width
+            and operator.eq(self.root.size, self.width)
             and root_exact
             and 0 <= self.constant <= mask
-            and all(term.complete for term in self.terms)
+            and all(term.complete for term in iter(self.terms))
             and (not self.terms or self.definition_path or all(
-                isinstance(term.source, ScalarAffineEntryRegister8616) for term in self.terms
+                isinstance(term.source, ScalarAffineEntryRegister8616) for term in iter(self.terms)
             ))
-            and all(site.complete for site in self.definition_path)
+            and all(site.complete for site in iter(self.definition_path))
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ScalarAffineTraceStats8616:
     """Closed accounting for one scalar affine trace attempt."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether one raw value became one retained expression."""
         return bool(
             self.raw_fact_count
@@ -134,7 +139,7 @@ class ScalarAffineTraceStats8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ScalarAffineTrace8616:
     """One proven scalar affine expression or one atomic typed refusal."""
 
@@ -143,7 +148,7 @@ class ScalarAffineTrace8616:
     stats: ScalarAffineTraceStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether the trace closed without partial publication."""
         return bool(
             self.failure is None

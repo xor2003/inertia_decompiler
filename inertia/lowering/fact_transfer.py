@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Transfer semantic alias facts from lifting into codegen materialization.
 
 Layer: Types/Lowering.
@@ -7,6 +8,7 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import cython
 
 import logging
 import os
@@ -36,20 +38,23 @@ __all__ = [
 
 
 class _StackSlotIdentityLike(Protocol):
-    offset: int
+    offset: cython.longlong
     width: int | None
 
 
-def _dynamic_boundary_attr_8616(obj: object, name: str, default: object = None) -> object:
+@cython.ccall
+def _dynamic_boundary_attr_8616(obj: object, name: object, default: object = None) -> object:
     """Dynamic angr/codegen boundary: read optional project, KB, function, or metadata attributes."""
     return getattr(obj, name, default)
 
 
-def _has_dynamic_codegen_attr_8616(obj: object, name: str) -> bool:
+@cython.ccall
+def _has_dynamic_codegen_attr_8616(obj: object, name: object) -> cython.bint:
     """Dynamic codegen boundary: check optional semantic fact-transfer metadata."""
     return hasattr(obj, name)
 
 
+@cython.ccall
 def _stack_slot_identity_from_fact_8616(fact: object) -> _StackSlotIdentityLike | None:
     """Return the owned stack-slot identity carried by an alias fact."""
     from inertia.alias.alias_model_impl import AliasStorageFacts
@@ -62,15 +67,16 @@ def _stack_slot_identity_from_fact_8616(fact: object) -> _StackSlotIdentityLike 
     return cast(_StackSlotIdentityLike, identity[1])
 
 
-def _sorted_int_iterable_attr_8616(obj: object, name: str) -> list[int]:
+def _sorted_int_iterable_attr_8616(obj: object, name: object) -> object:
     """Dynamic angr boundary: read and sort optional integer address sets."""
     value = _dynamic_boundary_attr_8616(obj, name, ())
     if not isinstance(value, Iterable):
         return []
-    return sorted(item for item in value if isinstance(item, int))
+    return sorted(item for item in iter(value) if isinstance(item, int))
 
 
-def _lift_block_and_collect_facts(project: object, block_addr: int) -> list[object]:
+@cython.ccall
+def _lift_block_and_collect_facts(project: object, block_addr: cython.longlong) -> list[object]:
     """Lift one block and collect semantic alias facts from the MODULE CACHE.
 
     During VEX lifting, _record_semantic_memory_access() writes AliasStorageFacts
@@ -80,6 +86,7 @@ def _lift_block_and_collect_facts(project: object, block_addr: int) -> list[obje
 
     Returns list of AliasStorageFacts / AliasFailure objects.
     """
+    facts: object
     try:
         # Re-lift to populate the module cache (keyed by block_addr)
         factory = _dynamic_boundary_attr_8616(project, "factory")
@@ -104,8 +111,11 @@ def _lift_block_and_collect_facts(project: object, block_addr: int) -> list[obje
     return []
 
 
-def _function_block_addrs_8616(project: object, function_addr: int) -> list[int]:
+@cython.ccall
+def _function_block_addrs_8616(project: object, function_addr: cython.longlong) -> object:
     """Return the sorted block addresses proven to belong to one function."""
+    func: object
+    kb: object
     kb = _dynamic_boundary_attr_8616(project, "kb") if project is not None else None
     if kb is None:
         return []
@@ -117,8 +127,10 @@ def _function_block_addrs_8616(project: object, function_addr: int) -> list[int]
     return _sorted_int_iterable_attr_8616(func, "block_addrs_set")
 
 
-def _relift_function_blocks_8616(project: object, block_addrs: list[int]) -> None:
+@cython.ccall
+def _relift_function_blocks_8616(project: object, block_addrs: object) -> None:
     """Re-lift each owned block so the collection context records accesses."""
+    block_addr: object
     factory = _dynamic_boundary_attr_8616(project, "factory")
     lift_block = _dynamic_boundary_attr_8616(factory, "block")
     if not callable(lift_block):
@@ -134,12 +146,13 @@ def _relift_function_blocks_8616(project: object, block_addrs: list[int]) -> Non
             )
 
 
+@cython.ccall
 def _collected_facts_8616(
     project: object,
     codegen: object,
-    func_addr: int,
-    allow_legacy: bool,
-) -> tuple[list[object], list[object], list[object]]:
+    func_addr: cython.longlong,
+    allow_legacy: cython.bint,
+) -> object:
     """Collect normalized facts; only the debug flag permits legacy fallback."""
     try:
         return collect_normalized_semantic_alias_facts_from_project_8616(
@@ -154,6 +167,7 @@ def _collected_facts_8616(
         return facts, [], []
 
 
+@cython.ccall
 def _init_consumption_counters_8616(codegen: object) -> None:
     """Initialize consumption counters (filled later by materialization passes)."""
     if not _has_dynamic_codegen_attr_8616(codegen, "_inertia_semantic_stack_materialized_count"):
@@ -165,8 +179,8 @@ def _init_consumption_counters_8616(codegen: object) -> None:
 
 
 def collect_normalized_semantic_alias_facts_from_project_8616(
-    project: object, function_addr: int
-) -> tuple[list[object], list[object], list[object]]:
+    project: object, function_addr: cython.longlong
+) -> object:
     """Collect normalized facts, failures, and their function-owned raw evidence."""
 
     def _impl() -> tuple[list[object], list[object], list[object]]:
@@ -184,6 +198,9 @@ def collect_normalized_semantic_alias_facts_from_project_8616(
         This replaces the old pattern where alias facts were created during lifting
         before frame normalization.
         """
+        fact: object
+        proven_sp_delta: object
+        acc: object
         from inertia.alias.alias_model_impl import AliasFailure, alias_facts_for_ir_address_8616
         from inertia.frontend.x86_16.access import _inertia_module_alias_fact_cache
         from inertia.ir.core import IRAddress
@@ -207,7 +224,7 @@ def collect_normalized_semantic_alias_facts_from_project_8616(
 
         raw_access_tuples = [
             (access.mode, access.addr)
-            for access in raw_accesses
+            for access in iter(raw_accesses)
             if isinstance(access.addr, IRAddress)
         ]
 
@@ -230,7 +247,7 @@ def collect_normalized_semantic_alias_facts_from_project_8616(
                 sp_delta_known=True,
                 frame_base="bp",
                 frame_kind="bp",
-                evidence=(*tuple(frame.evidence), f"proven_sp_delta={proven_sp_delta}"),
+                evidence=tuple(tuple(frame.evidence)) + (f"proven_sp_delta={proven_sp_delta}",),
             )
 
         normalized = normalize_semantic_accesses_8616(raw_accesses, frame)
@@ -253,7 +270,7 @@ def collect_normalized_semantic_alias_facts_from_project_8616(
     return _impl()
 
 
-def collect_semantic_alias_facts_from_project_8616(project: object, func_addr: int) -> list[object]:
+def collect_semantic_alias_facts_from_project_8616(project: object, func_addr: cython.longlong) -> object:
     """Collect semantic alias facts for a function by re-lifting its blocks.
 
     During VEX→IR lifting, _record_semantic_memory_access() writes facts into
@@ -263,6 +280,10 @@ def collect_semantic_alias_facts_from_project_8616(project: object, func_addr: i
 
     Returns a deduplicated, deterministic list of alias facts.
     """
+    func: object
+    kb: object
+    block_addr: object
+    fact: object
     kb = _dynamic_boundary_attr_8616(project, "kb") if project is not None else None
     if kb is None:
         return []
@@ -284,7 +305,7 @@ def collect_semantic_alias_facts_from_project_8616(project: object, func_addr: i
         all_facts.extend(_lift_block_and_collect_facts(project, block_addr))
 
     # Deduplicate — AliasStorageFacts and AliasFailure are frozen dataclasses
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     unique: list[object] = []
     for fact in all_facts:
         try:
@@ -296,7 +317,10 @@ def collect_semantic_alias_facts_from_project_8616(project: object, func_addr: i
             unique.append(fact)
 
     # Deterministic sort: stack facts by offset, then others
-    def _sort_key(fact: object) -> tuple[str, int, int]:
+    def _sort_key(fact: object) -> tuple[str, cython.longlong, cython.longlong]:
+        identity: object
+        order: object
+        slot: object
         identity = fact.identity if isinstance(fact, AliasStorageFacts) else None
         if identity is None:
             return ("z", 0, 0)
@@ -311,10 +335,10 @@ def collect_semantic_alias_facts_from_project_8616(project: object, func_addr: i
     return unique
 
 
-def transfer_semantic_alias_facts_to_codegen_8616(project: object, codegen: object) -> int:
+def transfer_semantic_alias_facts_to_codegen_8616(project: object, codegen: object) -> cython.longlong:
     """Transfer normalized semantic alias facts into codegen pipeline diagnostics."""
 
-    def _impl() -> int:
+    def _impl() -> cython.longlong:
         """Transfer semantic alias facts from project blocks to codegen.
 
         This bridges the gap between the VEX lifter (which records facts on
@@ -324,6 +348,8 @@ def transfer_semantic_alias_facts_to_codegen_8616(project: object, codegen: obje
         Sets codegen._inertia_stack_lane with a SemanticLaneState for the STACK lane.
         Returns the number of facts transferred.
         """
+        cfunc: object
+        fact: object
         from inertia.alias.alias_model_impl import AliasStorageFacts
         from inertia.pipeline.contracts import SemanticLaneState
 
@@ -355,11 +381,11 @@ def transfer_semantic_alias_facts_to_codegen_8616(project: object, codegen: obje
 
         # Count stack facts and normalized accesses for diagnostics
         normalized_count = sum(
-            1 for fact in facts if isinstance(fact, AliasStorageFacts) and isinstance(fact.identity, tuple)
+            1 for fact in iter(facts) if isinstance(fact, AliasStorageFacts) and isinstance(fact.identity, tuple)
         )
         stack_count = sum(
             1
-            for fact in facts
+            for fact in iter(facts)
             if isinstance(fact, AliasStorageFacts)
             and isinstance(fact.identity, tuple)
             and len(fact.identity) >= 2
@@ -425,7 +451,8 @@ def transfer_semantic_alias_facts_to_codegen_8616(project: object, codegen: obje
     return _impl()
 
 
-def emit_pipeline_diagnostic_8616(codegen: object) -> dict[str, object]:
+@cython.ccall
+def emit_pipeline_diagnostic_8616(codegen: object) -> object:
     """Return the compact pipeline diagnostic dict for this function.
 
     Callers should print or log this dict.  The dict is already attached

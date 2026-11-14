@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify structured C value uses before architectural call-context binding.
 
 Layer: Types/Lowering.
@@ -7,6 +8,8 @@ Consumes alias, widening, and typed facts
 Do not recover semantics from COD, source, assembly, or rendered C text
 """
 from __future__ import annotations
+import typing
+import cython
 
 from enum import StrEnum
 
@@ -14,6 +17,7 @@ from angr.analyses.decompiler.structured_codegen import c
 from angr.sim_type import SimTypeBottom
 
 from .c_ast_utils import iter_c_direct_children_8616
+import builtins
 
 
 class CallStackValueUse8616(StrEnum):
@@ -29,6 +33,7 @@ _DISCARDED: CallStackValueUse8616 = CallStackValueUse8616.DISCARDED
 _UNKNOWN: CallStackValueUse8616 = CallStackValueUse8616.UNKNOWN
 
 
+@cython.ccall
 def _merge_use(previous: CallStackValueUse8616, current: CallStackValueUse8616) -> CallStackValueUse8616:
     """Any value consumer retains the result; uncertainty forbids discarding."""
     if _VALUE in (previous, current):
@@ -38,10 +43,12 @@ def _merge_use(previous: CallStackValueUse8616, current: CallStackValueUse8616) 
     return _DISCARDED
 
 
-def _control_uses(node: c.CConstruct) -> tuple[tuple[object, CallStackValueUse8616], ...] | None:
+def _control_uses(node: c.CConstruct) -> object:
     """Identify statement versus condition positions in native control nodes."""
+    branch: object
+    condition: object
     if isinstance(node, c.CStatements):
-        return tuple((statement, _DISCARDED) for statement in node.statements)
+        return tuple((statement, _DISCARDED) for statement in iter(node.statements))
     if isinstance(node, c.CExpressionStatement):
         return ((node.expr, _DISCARDED),)
     if isinstance(node, c.CIfElse):
@@ -56,13 +63,14 @@ def _control_uses(node: c.CConstruct) -> tuple[tuple[object, CallStackValueUse86
     if isinstance(node, (c.CWhileLoop, c.CDoWhileLoop)):
         return ((node.condition, _VALUE), (node.body, _DISCARDED))
     if isinstance(node, c.CSwitchCase):
-        return ((node.switch, _VALUE), *((body, _DISCARDED) for _labels, body in node.cases),
+        return ((node.switch, _VALUE), *((body, _DISCARDED) for _labels, body in iter(node.cases)),
                 (node.default, _DISCARDED))
     return None
 
 
-def _child_uses(node: c.CConstruct, use: CallStackValueUse8616) -> tuple[tuple[object, CallStackValueUse8616], ...]:
+def _child_uses(node: c.CConstruct, use: CallStackValueUse8616) -> object:
     """Follow actual C grammar roles, retaining unknown syntax conservatively."""
+    controls: object
     controls = _control_uses(node)
     if controls is not None:
         return controls
@@ -75,11 +83,12 @@ def _child_uses(node: c.CConstruct, use: CallStackValueUse8616) -> tuple[tuple[o
     if isinstance(node, (c.CConstant, c.CVariable)):
         return ()
     if isinstance(node, (c.CExpression, c.CReturn, c.CAssignment)):
-        return tuple((child, _VALUE) for child in iter_c_direct_children_8616(node))
-    return tuple((child, _UNKNOWN) for child in iter_c_direct_children_8616(node))
+        return tuple((child, _VALUE) for child in builtins.iter(iter_c_direct_children_8616(node)))
+    return tuple((child, _UNKNOWN) for child in builtins.iter(iter_c_direct_children_8616(node)))
 
 
-def call_stack_value_uses_8616(root: object) -> dict[int, CallStackValueUse8616]:
+@cython.ccall
+def call_stack_value_uses_8616(root: object) -> object:
     """Classify every occurrence; a shared node retains any required value use.
 
     Function bodies and control bodies discard bare expression values. Return,
@@ -87,9 +96,11 @@ def call_stack_value_uses_8616(root: object) -> dict[int, CallStackValueUse8616]
     node/use pair preserves DAG sharing without conflating statement and value
     occurrences or following metadata back-references.
     """
+    node: object
+    use: object
     pending = [(root, _DISCARDED)]
-    seen: set[tuple[int, CallStackValueUse8616]] = set()
-    result: dict[int, CallStackValueUse8616] = {}
+    seen: set[tuple[cython.longlong, CallStackValueUse8616]] = set()
+    result: dict[cython.longlong, CallStackValueUse8616] = {}
     while pending:
         node, use = pending.pop()
         if not isinstance(node, c.CConstruct) or (id(node), use) in seen:

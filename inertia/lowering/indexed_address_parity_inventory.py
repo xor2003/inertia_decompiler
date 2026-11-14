@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Build a side-effect-free indexed-address collector migration inventory.
 
 Layer: Types/Lowering diagnostics.
@@ -10,6 +11,7 @@ Do not perform structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import cython
 
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
@@ -49,6 +51,8 @@ from .segmented_global_loads import (
     recover_indexed_segmented_global_load_site_evidence_8616,
     recover_indexed_segmented_global_store_evidence_8616,
 )
+import operator
+import builtins
 
 
 class _FunctionBoundary8616(Protocol):
@@ -57,6 +61,7 @@ class _FunctionBoundary8616(Protocol):
     addr: object
 
 
+@cython.ccall
 def _key_order_8616(key: IndexedAddressCollectorKey8616) -> tuple[object, ...]:
     """Return deterministic primitive ordering for collector keys."""
     return (
@@ -70,6 +75,7 @@ def _key_order_8616(key: IndexedAddressCollectorKey8616) -> tuple[object, ...]:
     )
 
 
+@cython.ccall
 def _mismatch_order_8616(
     mismatch: IndexedAddressCollectorMismatch8616,
 ) -> tuple[object, ...]:
@@ -77,25 +83,27 @@ def _mismatch_order_8616(
     return (mismatch.side.value, *_key_order_8616(mismatch.key))
 
 
+@cython.ccall
 def _keys_by_site_8616(
-    keys: tuple[IndexedAddressCollectorKey8616, ...],
-) -> dict[tuple[object, int], tuple[IndexedAddressCollectorKey8616, ...]]:
+    keys: object,
+) -> dict[tuple[object, cython.longlong], tuple[IndexedAddressCollectorKey8616, ...]]:
     """Group keys by exact access kind and machine instruction address."""
-    grouped: defaultdict[tuple[object, int], list[IndexedAddressCollectorKey8616]] = defaultdict(list)
+    key: object
+    grouped: defaultdict[tuple[object, cython.longlong], list[IndexedAddressCollectorKey8616]] = defaultdict(list)
     for key in keys:
         grouped[(key.kind, key.instr_addr)].append(key)
     return {
         site: tuple(sorted(site_keys, key=_key_order_8616))
-        for site, site_keys in grouped.items()
+        for site, site_keys in builtins.iter(grouped.items())
     }
 
 
 def _classify_unmatched_key_8616(
     side: IndexedAddressCollectorSide8616,
     key: IndexedAddressCollectorKey8616,
-    counterparts: tuple[IndexedAddressCollectorKey8616, ...],
-    alias_failures_by_addr: Mapping[int, list[IndexedAddressAliasFailureKind8616]],
-    ir_failures_by_addr: Mapping[int, list[IndexedAddressFailureKind8616]],
+    counterparts: object,
+    alias_failures_by_addr: Mapping[cython.longlong, list[IndexedAddressAliasFailureKind8616]],
+    ir_failures_by_addr: Mapping[cython.longlong, list[IndexedAddressFailureKind8616]],
 ) -> IndexedAddressCollectorMismatch8616:
     """Classify one unmatched key against counterparts and typed refusals."""
     if counterparts:
@@ -112,10 +120,10 @@ def _classify_unmatched_key_8616(
             key,
         )
     alias_failures = tuple(
-        sorted(alias_failures_by_addr.get(key.instr_addr, ()), key=lambda item: item.value)
+        sorted(tuple(alias_failures_by_addr.get(key.instr_addr, ())), key=lambda item: item.value)
     )
     ir_failures = tuple(
-        sorted(ir_failures_by_addr.get(key.instr_addr, ()), key=lambda item: item.value)
+        sorted(tuple(ir_failures_by_addr.get(key.instr_addr, ())), key=lambda item: item.value)
     )
     if alias_failures:
         return IndexedAddressCollectorMismatch8616(
@@ -141,26 +149,32 @@ def _classify_unmatched_key_8616(
 def classify_indexed_address_mismatches_8616(
     alias_evidence: IndexedAddressAliasEvidence8616,
     parity: IndexedAddressCollectorParity8616,
-) -> tuple[IndexedAddressCollectorMismatch8616, ...]:
+) -> object:
     """Classify unmatched keys only from exact identities and typed refusals."""
+    alias_refusal: object
+    counterparts_by_site: object
+    ir_refusal: object
+    key: object
+    side: object
+    unmatched: object
     if not alias_evidence.closed or not parity.closed:
         raise PipelineHardError(
             "indexed-address mismatch classification requires closed evidence",
             layer="lowering",
         )
-    if alias_evidence.function_addr != parity.function_addr:
+    if operator.ne(alias_evidence.function_addr, parity.function_addr):
         raise PipelineHardError(
             "indexed-address mismatch inputs belong to different functions",
             layer="lowering",
         )
 
-    alias_keys_by_site = _keys_by_site_8616((*parity.matched, *parity.alias_only))
-    legacy_keys_by_site = _keys_by_site_8616((*parity.matched, *parity.legacy_only))
-    ir_failures_by_addr: defaultdict[int, list[IndexedAddressFailureKind8616]] = defaultdict(list)
+    alias_keys_by_site = _keys_by_site_8616(tuple(parity.matched) + tuple(parity.alias_only))
+    legacy_keys_by_site = _keys_by_site_8616(tuple(parity.matched) + tuple(parity.legacy_only))
+    ir_failures_by_addr: defaultdict[cython.longlong, list[IndexedAddressFailureKind8616]] = defaultdict(list)
     for ir_refusal in alias_evidence.source.refusals:
         ir_failures_by_addr[ir_refusal.instr_addr].append(ir_refusal.failure)
     alias_failures_by_addr: defaultdict[
-        int, list[IndexedAddressAliasFailureKind8616]
+        cython.longlong, list[IndexedAddressAliasFailureKind8616]
     ] = defaultdict(list)
     for alias_refusal in alias_evidence.refusals:
         if alias_refusal.source_fact is not None:
@@ -182,7 +196,7 @@ def classify_indexed_address_mismatches_8616(
                 )
             )
     result = tuple(sorted(mismatches, key=_mismatch_order_8616))
-    if not all(mismatch.complete for mismatch in result):
+    if not all(mismatch.complete for mismatch in iter(result)):
         raise PipelineHardError(
             "indexed-address mismatch classification is incomplete",
             layer="lowering",
@@ -225,7 +239,7 @@ def build_indexed_address_function_parity_report_8616(
         ir_evidence.stats,
         alias_evidence.stats,
         access_evidence.stats,
-        tuple(fact.role for fact in access_evidence.facts),
+        tuple(fact.role for fact in iter(access_evidence.facts)),
         copy_evidence.stats,
         alias_copy_evidence.stats,
         tuple(
@@ -235,7 +249,7 @@ def build_indexed_address_function_parity_report_8616(
                 fact.source.storage.base_offset,
                 fact.destination.storage.base_offset,
             )
-            for fact in alias_copy_evidence.facts
+            for fact in iter(alias_copy_evidence.facts)
         ),
         parity,
         classify_indexed_address_mismatches_8616(alias_evidence, parity),
@@ -257,7 +271,7 @@ def build_indexed_address_parity_inventory_8616(
         sorted(
             (
                 build_indexed_address_function_parity_report_8616(project, function)
-                for function in functions
+                for function in iter(functions)
             ),
             key=lambda report: report.function_addr,
         )

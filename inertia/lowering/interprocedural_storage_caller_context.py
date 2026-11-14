@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Resolve exact caller execution context from the direct-call census.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -16,6 +19,8 @@ from enum import StrEnum
 from inertia.semantics.caller_return_use_contracts import CallerReturnUseFact8616
 
 from .callee_callsite_census import collect_callee_callsite_census_8616
+import dataclasses
+import operator
 
 __all__ = [
     "CallerSSAContext8616",
@@ -33,18 +38,18 @@ class CallerSSAContextVerdict8616(StrEnum):
     CONFLICT = "conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallerSSAContext8616:
     """One exact caller project and function boundary, or a typed refusal."""
 
     verdict: CallerSSAContextVerdict8616
-    caller_addr: int
-    callsite_addr: int
+    caller_addr: cython.longlong
+    callsite_addr: cython.longlong
     evidence_project: object | None = field(default=None, compare=False, repr=False)
     caller_function: object | None = field(default=None, compare=False, repr=False)
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether both execution owner and exact boundary are retained."""
         return (
             self.verdict is CallerSSAContextVerdict8616.PROVEN
@@ -53,9 +58,10 @@ class CallerSSAContext8616:
         )
 
 
+@cython.ccall
 def caller_ssa_context_for_return_use_8616(
     project: object,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     fact: CallerReturnUseFact8616,
 ) -> CallerSSAContext8616:
     """Join one return-use fact to its unique normalized direct-call fact."""
@@ -66,17 +72,17 @@ def caller_ssa_context_for_return_use_8616(
 
 def caller_ssa_context_for_callsite_8616(
     project: object,
-    callee_addr: int,
-    caller_addr: int,
-    callsite_addr: int,
+    callee_addr: cython.longlong,
+    caller_addr: cython.longlong,
+    callsite_addr: cython.longlong,
 ) -> CallerSSAContext8616:
     """Select the exact caller owner shared by return and memory-effect consumers."""
     census = collect_callee_callsite_census_8616(project, callee_addr)
     matches = tuple(
         caller
-        for caller in census.facts
-        if caller.caller_addr == caller_addr
-        and caller.callsite_addr == callsite_addr
+        for caller in iter(census.facts)
+        if operator.eq(caller.caller_addr, caller_addr)
+        and operator.eq(caller.callsite_addr, callsite_addr)
         and caller.summary is not None
     )
     if len(matches) == 1:

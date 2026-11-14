@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Optional evidence/reporting.
 
 Responsibility: decode Borland C++ mangled names (``@scope@name$Q<types>``)
@@ -13,9 +14,13 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import cython
 
 from dataclasses import dataclass
 from enum import Enum
+import dataclasses
+import operator
+import builtins
 
 
 class BorlandSpecial(Enum):
@@ -112,7 +117,7 @@ _BORLAND_OPERATORS = {
 }
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class BorlandType:
     """One node of a decoded Borland mangled type."""
 
@@ -128,13 +133,13 @@ class BorlandType:
     member_of: str = ""
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class BorlandSignature:
     """A decoded Borland mangled symbol."""
 
-    raw: str
-    scopes: tuple[str, ...]
-    name: str
+    raw: object
+    scopes: object
+    name: object
     special: BorlandSpecial
     params: tuple[BorlandType, ...] = ()
     operator: str = ""
@@ -142,7 +147,7 @@ class BorlandSignature:
     parse_error: str = ""
 
 
-def _render_type(type_node: BorlandType | None) -> str:
+def _render_type(type_node: object) -> object:
     """Render optional decoded type evidence, retaining missing children as unknown."""
     if type_node is None:
         return "?"
@@ -154,7 +159,7 @@ def _render_type(type_node: BorlandType | None) -> str:
     if type_node.kind is BorlandTypeKind.POINTER:
         if type_node.target is not None and type_node.target.kind is BorlandTypeKind.FUNCTION:
             params = ", ".join(
-                _render_type(p) for p in type_node.target.params
+                _render_type(p) for p in iter(type_node.target.params)
             )
             return (
                 f"{_render_type(type_node.target.result)}"
@@ -164,7 +169,7 @@ def _render_type(type_node: BorlandType | None) -> str:
     if type_node.kind is BorlandTypeKind.REFERENCE:
         return f"{_render_type(type_node.target)} {type_node.space} &".strip()
     if type_node.kind is BorlandTypeKind.FUNCTION:
-        params = ", ".join(_render_type(p) for p in type_node.params) or "void"
+        params = ", ".join(_render_type(p) for p in iter(type_node.params)) or "void"
         return f"({params}) -> {_render_type(type_node.result)}"
     if type_node.kind is BorlandTypeKind.ARRAY:
         return f"{_render_type(type_node.target)}[{type_node.array_size}]"
@@ -173,7 +178,8 @@ def _render_type(type_node: BorlandType | None) -> str:
     return "?"
 
 
-def _render_callable_name(sig: BorlandSignature, prefix: str) -> str:
+@cython.ccall
+def _render_callable_name(sig: BorlandSignature, prefix: object) -> str:
     """Pick the display name and scope prefix for a callable symbol."""
     if sig.special is BorlandSpecial.CONSTRUCTOR:
         leaf = sig.scopes[-1] if sig.scopes else sig.name
@@ -190,7 +196,7 @@ def _render_callable_name(sig: BorlandSignature, prefix: str) -> str:
     return f"{prefix}{sig.name}"
 
 
-def render_borland_signature(sig: BorlandSignature) -> str:
+def render_borland_signature(sig: BorlandSignature) -> object:
     """Render a decoded symbol as TDUMP-style demangled text."""
     if sig.parse_error:
         return sig.raw
@@ -200,38 +206,47 @@ def render_borland_signature(sig: BorlandSignature) -> str:
         return f"{prefix}vtable"
     if sig.special is BorlandSpecial.DATA_MEMBER:
         return f"{prefix}{sig.name}"
-    params = ", ".join(_render_type(p) for p in sig.params)
-    if all(p.builtin in ("void", "...") for p in sig.params):
+    params = ", ".join(_render_type(p) for p in iter(sig.params))
+    if all(p.builtin in ("void", "...") for p in iter(sig.params)):
         params = ""
     return f"{_render_callable_name(sig, prefix)}({params})"
 
 
+@cython.cclass
 class _BorlandNameParser:
     """Recursive-descent parser for Borland C++ mangled names."""
+    history = cython.declare(list, visibility = "public")
+    pos = cython.declare(object, visibility = "public")
+    text = cython.declare(object, visibility = "public")
 
-    def __init__(self, text: str) -> None:
+    def __init__(self, text: object) -> None:
         self.text = text
         self.pos = 0
         self.history: list[BorlandType] = []
 
-    def _peek(self) -> str:
+    @cython.ccall
+    def _peek(self) -> object:
         return self.text[self.pos] if self.pos < len(self.text) else ""
 
-    def _take(self) -> str:
+    @cython.ccall
+    def _take(self) -> object:
         ch = self._peek()
         self.pos += 1
         return ch
 
+    @cython.ccall
     def _take_decimal(self) -> int | None:
         start = self.pos
         while self._peek().isdigit():
             self.pos += 1
-        if self.pos == start:
+        if operator.eq(self.pos, start):
             return None
         return int(self.text[start : self.pos])
 
-    def _take_class_name(self) -> str | None:
+    @cython.ccall
+    def _take_class_name(self) -> object:
         """Parse a <decimal-length><name> class token."""
+        length: object
         length = self._take_decimal()
         if length is None or length <= 0 or self.pos + length > len(self.text):
             return None
@@ -239,6 +254,7 @@ class _BorlandNameParser:
         self.pos += length
         return name
 
+    @cython.ccall
     def _take_quals(self) -> frozenset[str]:
         """Consume leading signedness/CV qualifier letters."""
         quals: set[str] = set()
@@ -247,7 +263,8 @@ class _BorlandNameParser:
             quals.add({"U": "unsigned", "Z": "signed", "X": "const", "W": "volatile"}[ch])
         return frozenset(quals)
 
-    def _parse_indirection(self, ch: str, quals: frozenset[str]) -> BorlandType:
+    @cython.ccall
+    def _parse_indirection(self, ch: object, quals: object) -> BorlandType:
         """Parse P/N/R/M indirections, including member pointers."""
         self.pos += 1
         space = _BORLAND_POINTER_SPACES[ch]
@@ -269,14 +286,17 @@ class _BorlandNameParser:
             kind, space=space, target=self.parse_type(), quals=quals
         )
 
+    @cython.ccall
     def _parse_repeat(self) -> BorlandType:
         """Resolve a T<n> back-reference to an earlier argument type."""
+        index: object
         self.pos += 1
         index = self._take_decimal()
         if index is None or index < 1 or index > len(self.history):
             return BorlandType(BorlandTypeKind.UNKNOWN)
         return self.history[index - 1]
 
+    @cython.ccall
     def _parse_function_type(self) -> BorlandType:
         """Parse a function type in pointer position (params, '$', result)."""
         self.pos += 1
@@ -287,7 +307,8 @@ class _BorlandNameParser:
             BorlandTypeKind.FUNCTION, params=params, result=self.parse_type()
         )
 
-    def _parse_array_type(self, quals: frozenset[str]) -> BorlandType:
+    @cython.ccall
+    def _parse_array_type(self, quals: object) -> BorlandType:
         """Parse an ``a<size>$<element>`` array type."""
         self.pos += 1
         size = self._take_decimal()
@@ -300,8 +321,10 @@ class _BorlandNameParser:
             quals=quals,
         )
 
+    @cython.ccall
     def parse_type(self) -> BorlandType:
         """Parse one type at the cursor, honouring T<n> arg repeats."""
+        name: object
         quals = self._take_quals()
         ch = self._peek().upper()
         if ch == "T":
@@ -328,21 +351,23 @@ class _BorlandNameParser:
             )
         return BorlandType(BorlandTypeKind.UNKNOWN)
 
-    def parse_param_list(self, *, until: str = "") -> tuple[BorlandType, ...]:
+    @cython.ccall
+    def parse_param_list(self, *, until: object = "") -> tuple[BorlandType, ...]:
         """Parse parameter types into the repeat history."""
         params: list[BorlandType] = []
-        while self.pos < len(self.text) and self._peek() != until:
+        while self.pos < len(self.text) and operator.ne(self._peek(), until):
             before = self.pos
             param = self.parse_type()
             params.append(param)
             self.history.append(param)
-            if self.pos == before:
+            if operator.eq(self.pos, before):
                 break
         return tuple(params)
 
 
+@cython.ccall
 def _parse_special_tail(
-    tail: str,
+    tail: object,
 ) -> tuple[
     BorlandSpecial,
     str,
@@ -351,6 +376,7 @@ def _parse_special_tail(
     str,
 ]:
     """Parse the ``$``-tail of a mangled name into signature components."""
+    code: object
     parser = _BorlandNameParser(tail)
     lower = tail.lower()
     special = BorlandSpecial.NONE
@@ -385,7 +411,8 @@ def _parse_special_tail(
     return special, operator, conversion_target, params, parse_error
 
 
-def demangle_borland_name(name: str) -> BorlandSignature:
+@cython.ccall
+def demangle_borland_name(name: object) -> BorlandSignature:
     """Decode one Borland C++ mangled name into a typed signature.
 
     Grammar (Borland Open Architecture): ``@scope@...@name$q<types>`` where
@@ -400,7 +427,7 @@ def demangle_borland_name(name: str) -> BorlandSignature:
     body = name[1:]
     dollar = body.find("$")
     head = body if dollar < 0 else body[:dollar]
-    parts = [part for part in head.split("@") if part]
+    parts = [part for part in builtins.iter(head.split("@")) if part]
     scopes = tuple(parts[:-1])
     leaf = parts[-1] if parts else ""
     special = BorlandSpecial.NONE

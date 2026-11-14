@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Project angr entry-SP coordinates into Alias-owned machine-BP ranges.
 
 Layer: Alias.
@@ -10,6 +11,8 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -18,6 +21,8 @@ from inertia.ir.analysis.stack_frame_ir import FrameAccessArtifact, FrameCoordin
 from inertia.ir.core import AddressStatus, IRAddress, MemSpace
 
 from .stack_memory_ssa_contracts import StackMemorySSAAliasArtifact8616
+import dataclasses
+import operator
 
 
 class StackCoordinateProjectionStatus8616(StrEnum):
@@ -30,18 +35,18 @@ class StackCoordinateProjectionStatus8616(StrEnum):
     INVALID_RANGE = "invalid-range"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackCoordinateProjectionStats8616:
     """Closed evidence accounting for one coordinate classification."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether the single candidate has one explicit outcome."""
         return (
             self.raw_fact_count
@@ -51,7 +56,7 @@ class StackCoordinateProjectionStats8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackCoordinateProjection8616:
     """One selected machine-BP offset or an evidence-backed refusal."""
 
@@ -60,12 +65,13 @@ class StackCoordinateProjection8616:
     stats: StackCoordinateProjectionStats8616
 
     @property
-    def materialized(self) -> bool:
+    def materialized(self) -> cython.bint:
         """Return whether this projection selected one machine-BP offset."""
         return self.bp_offset is not None
 
 
-def _contains_range_8616(address: IRAddress, offset: int, size: int) -> bool:
+@cython.ccall
+def _contains_range_8616(address: IRAddress, offset: cython.longlong, size: cython.longlong) -> cython.bint:
     """Return whether one stable Alias address contains the requested range."""
     return (
         address.space is MemSpace.SS
@@ -78,26 +84,27 @@ def _contains_range_8616(address: IRAddress, offset: int, size: int) -> bool:
 
 def _alias_proves_range_8616(
     source: StackMemorySSAAliasArtifact8616,
-    offset: int,
-    size: int,
-) -> bool:
+    offset: cython.longlong,
+    size: cython.longlong,
+) -> cython.bint:
     """Return whether current complete Alias evidence contains one BP range."""
     if not source.complete:
         return False
     return any(
-        _contains_range_8616(fact.address, offset, size) for fact in source.facts
+        _contains_range_8616(fact.address, offset, size) for fact in iter(source.facts)
     ) or any(
         _contains_range_8616(access.source.address, offset, size)
-        for access in source.accesses
+        for access in iter(source.accesses)
     ) or any(
         _contains_range_8616(access.source.address, offset, size)
-        for access in source.logical_accesses
+        for access in iter(source.logical_accesses)
     )
 
 
+@cython.ccall
 def _result_8616(
     status: StackCoordinateProjectionStatus8616,
-    bp_offset: int | None,
+    bp_offset: object,
 ) -> StackCoordinateProjection8616:
     """Build one closed single-fact outcome."""
     materialized = int(bp_offset is not None)
@@ -114,17 +121,19 @@ def _result_8616(
     )
 
 
+@cython.ccall
 def project_stack_offset_to_machine_bp_8616(
     source: StackMemorySSAAliasArtifact8616,
     frame: FrameAccessArtifact | None,
-    raw_offset: int,
-    size: int,
+    raw_offset: cython.longlong,
+    size: cython.longlong,
 ) -> StackCoordinateProjection8616:
     """Select raw-BP or projected entry-SP identity from typed evidence."""
+    projected_offset: object
     if size <= 0:
         return _result_8616(StackCoordinateProjectionStatus8616.INVALID_RANGE, None)
     raw_proven = _alias_proves_range_8616(source, raw_offset, size)
-    projected_offset: int | None = None
+    projected_offset = None
     if (
         isinstance(frame, FrameAccessArtifact)
         and frame.bp_coordinate.complete
@@ -136,7 +145,7 @@ def project_stack_offset_to_machine_bp_8616(
         projected_offset is not None
         and _alias_proves_range_8616(source, projected_offset, size)
     )
-    if projected_proven and raw_proven and projected_offset != raw_offset:
+    if projected_proven and raw_proven and operator.ne(projected_offset, raw_offset):
         return _result_8616(StackCoordinateProjectionStatus8616.AMBIGUOUS, None)
     if projected_proven and not raw_proven:
         return _result_8616(

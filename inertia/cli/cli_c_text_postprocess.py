@@ -1,4 +1,5 @@
 # AUTO-GENERATED split from cli_runtime_shared.py
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: perform final emitted-C text cleanup and reporting-only normalization.
@@ -6,6 +7,8 @@ Forbidden: owning decompiler semantics, source-backed recovery, or postprocess s
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 import re
@@ -37,6 +40,9 @@ from .cli_c_ast_rewrites import (
     _normalize_16bit_signed_offset,
 )
 from .cli_interrupt_modeling import _interrupt_wrapper_call_text as _interrupt_wrapper_call_text
+import dataclasses
+import operator
+import builtins
 
 print: Any = _timestamped_print
 __all__ = [
@@ -82,21 +88,23 @@ __all__ = [
 ]
 
 
-def _dynamic_text_attr(obj: object, name: str, default: Any = None) -> Any:
+@cython.ccall
+def _dynamic_text_attr(obj: object, name: object, default: Any = None) -> Any:
     """Read a dynamic CLI/codegen/angr text-postprocess attribute."""
     # Dynamic codegen boundary: angr functions, prototypes, and project plugins expose version-dependent fields.
     return getattr(obj, name, default)
 
 
-def _is_strict_c_identifier_8616(name: object) -> bool:
+@cython.ccall
+def _is_strict_c_identifier_8616(name: object) -> cython.bint:
     """Return whether a dynamic text token is one complete C identifier."""
     return isinstance(name, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) is not None
 
 
-def _is_plausible_simple_return_type_8616(type_text: str) -> bool:
+def _is_plausible_simple_return_type_8616(type_text: object) -> cython.bint:
     """Validate a simple declaration return type without accepting split names."""
     normalized = type_text.replace("*", " * ")
-    tokens = tuple(token for token in normalized.split() if token != "*")
+    tokens = tuple(token for token in builtins.iter(normalized.split()) if token != "*")
     if not tokens:
         return False
     if len(tokens) == 1:
@@ -117,13 +125,15 @@ def _is_plausible_simple_return_type_8616(type_text: str) -> bool:
         "void",
         "volatile",
     }
-    return all(token in type_words for token in tokens)
+    return all(token in type_words for token in iter(tokens))
 
 
-def _prune_invalid_simple_function_prototypes_text(c_text: str) -> str:
+def _prune_invalid_simple_function_prototypes_text(c_text: object) -> object:
     """Remove malformed zero-argument prototypes while preserving valid C types."""
 
-    def _impl() -> str:
+    def _impl() -> object:
+        match: object
+        line: object
         lines = c_text.splitlines()
         if not lines:
             return c_text
@@ -160,7 +170,8 @@ _PROTOTYPE_CALL_RE_8616 = re.compile(
 )
 
 
-def _update_bracket_depths_8616(ch: str, depths: tuple[int, int, int]) -> tuple[int, int, int]:
+@cython.ccall
+def _update_bracket_depths_8616(ch: object, depths: object) -> tuple[cython.longlong, cython.longlong, cython.longlong]:
     """Track paren/bracket/brace depth for one character."""
 
     depth_paren, depth_bracket, depth_brace = depths
@@ -179,8 +190,10 @@ def _update_bracket_depths_8616(ch: str, depths: tuple[int, int, int]) -> tuple[
     return depth_paren, depth_bracket, depth_brace
 
 
-def _split_top_level_call_args_8616(args_text: str) -> list[str]:
+@cython.ccall
+def _split_top_level_call_args_8616(args_text: object) -> list[str]:
     """Split an argument list at top-level commas only."""
+    ch: object
 
     text = args_text.strip()
     if not text:
@@ -199,10 +212,11 @@ def _split_top_level_call_args_8616(args_text: str) -> list[str]:
         )
     if current:
         parts.append("".join(current).strip())
-    return [part for part in parts if part]
+    return [part for part in iter(parts) if part]
 
 
-def _prototype_declared_arity_8616(args: str) -> int | None:
+@cython.ccall
+def _prototype_declared_arity_8616(args: object) -> int | None:
     """Return the declared arity of one prototype argument string."""
 
     text = args.strip()
@@ -215,14 +229,16 @@ def _prototype_declared_arity_8616(args: str) -> int | None:
     return len(_split_top_level_call_args_8616(text))
 
 
+@cython.ccall
 def _prototype_score_8616(
-    ret: str,
-    args: str,
-    decl: str,
-    name: str,
-    observed_min_arity: Mapping[str, int],
-) -> tuple[int, int]:
+    ret: object,
+    args: object,
+    decl: object,
+    name: object,
+    observed_min_arity: Mapping[str, cython.longlong],
+) -> tuple[cython.longlong, cython.longlong]:
     """Score a candidate prototype declaration for conflict selection."""
+    observed: object
 
     ret = ret.strip()
     args = args.strip()
@@ -236,20 +252,24 @@ def _prototype_score_8616(
     return ((2 if has_typed_args else 0) + (0 if is_generic else 1), len(decl))
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _PruneConflictingPrototypesRun8616:
     """Run state for pruning weaker conflicting prototypes."""
 
-    c_text: str
-    lines: list[str]
-    observed_min_arity: dict[str, int] = field(default_factory=dict)
-    top_level_by_index: list[bool] = field(default_factory=list)
-    best_by_name: dict[str, str] = field(default_factory=dict)
-    best_score_by_name: dict[str, tuple[int, int]] = field(default_factory=dict)
-    replacement_by_name: dict[str, str] = field(default_factory=dict)
+    c_text: object
+    lines: object
+    observed_min_arity: object = field(default_factory=dict)
+    top_level_by_index: object = field(default_factory=list)
+    best_by_name: object = field(default_factory=dict)
+    best_score_by_name: object = field(default_factory=dict)
+    replacement_by_name: object = field(default_factory=dict)
 
+    @cython.ccall
     def collect_arities(self) -> None:
         """Record the minimum observed call arity per name."""
+        prev: object
+        call_match: object
+        line: object
 
         for line in self.lines:
             for call_match in _PROTOTYPE_CALL_RE_8616.finditer(line):
@@ -260,8 +280,10 @@ class _PruneConflictingPrototypesRun8616:
                 if prev is None or arity < prev:
                     self.observed_min_arity[name] = arity
 
+    @cython.ccall
     def collect_top_level_mask(self) -> None:
         """Record which lines sit at top-level brace depth."""
+        line: object
 
         brace_depth = 0
         for line in self.lines:
@@ -270,8 +292,13 @@ class _PruneConflictingPrototypesRun8616:
             if brace_depth < 0:
                 brace_depth = 0
 
+    @cython.ccall
     def collect_best_decls(self) -> None:
         """Select the strongest prototype spelling per name."""
+        match: object
+        prev_score: object
+        index: object
+        line: object
 
         for index, line in enumerate(self.lines):
             if not self.top_level_by_index[index]:
@@ -284,13 +311,18 @@ class _PruneConflictingPrototypesRun8616:
             score = _prototype_score_8616(
                 match.group("ret"), match.group("args"), stripped, name, self.observed_min_arity
             )
-            prev_score: tuple[int, int] | None = self.best_score_by_name.get(name)
+            prev_score = self.best_score_by_name.get(name)
             if prev_score is None or score > prev_score:
                 self.best_score_by_name[name] = score
                 self.best_by_name[name] = stripped
 
+    @cython.ccall
     def collect_replacements(self) -> None:
         """Mark arity-conflicting prototypes for generic redeclaration."""
+        match: object
+        observed: object
+        decl: object
+        name: object
 
         protected_standard_names = {
             "time",
@@ -306,8 +338,14 @@ class _PruneConflictingPrototypesRun8616:
             if isinstance(observed, int) and isinstance(declared, int) and declared > observed:
                 self.replacement_by_name[name] = f"int {name}();"
 
-    def apply_replacements(self) -> str:
+    @cython.ccall
+    def apply_replacements(self) -> object:
         """Rewrite the lines carrying a weaker winning prototype."""
+        indent_match: object
+        match: object
+        replacement: object
+        index: object
+        line: object
 
         out_lines: list[str] = []
         for index, line in enumerate(self.lines):
@@ -317,7 +355,7 @@ class _PruneConflictingPrototypesRun8616:
                 out_lines.append(line)
                 continue
             name = match.group("name")
-            if self.best_by_name.get(name) != stripped:
+            if operator.ne(self.best_by_name.get(name), stripped):
                 continue
             replacement = self.replacement_by_name.get(name)
             if replacement is None:
@@ -332,7 +370,8 @@ class _PruneConflictingPrototypesRun8616:
         return normalized
 
 
-def _prune_weaker_conflicting_prototypes_text(c_text: str) -> str:
+@cython.ccall
+def _prune_weaker_conflicting_prototypes_text(c_text: object) -> object:
     """Drop top-level prototypes that conflict with observed call arity."""
 
     lines = c_text.splitlines()
@@ -361,18 +400,24 @@ _INCDEC_FOR_HIGH_RE_8616 = re.compile(
 )
 
 
-def _norm_incdec_expr_8616(expr: str) -> str:
+@cython.ccall
+def _norm_incdec_expr_8616(expr: object) -> object:
     """Normalize whitespace out of one expression for comparisons."""
 
     return re.sub(r"\s+", "", expr.strip())
 
 
+@cython.ccall
 def _split_incdec_word_pattern_8616(
-    lines: list[str],
-    index: int,
-    local_names: set[str],
-) -> str | None:
+    lines: object,
+    index: cython.longlong,
+    local_names: object,
+) -> object:
     """Return the coalesced ``+= 1`` line for a split word inc/dec window."""
+    high_load: object
+    high_store: object
+    low_load: object
+    word_store: object
 
     if index < 2 or index + 1 >= len(lines):
         return None
@@ -388,22 +433,25 @@ def _split_incdec_word_pattern_8616(
     high_mem = high_load.group("rhs")
     expected_rhs = f"({low_var} | {high_var} * 0x100) + 1"
     if not (
-        word_lhs == low_load.group("rhs")
+        operator.eq(word_lhs, low_load.group("rhs"))
         and word_lhs not in local_names
-        and high_mem == high_store.group("lhs")
+        and operator.eq(high_mem, high_store.group("lhs"))
         and high_mem.startswith("mem_")
-        and _norm_incdec_expr_8616(word_store.group("rhs")) == _norm_incdec_expr_8616(expected_rhs)
-        and _norm_incdec_expr_8616(high_store.group("rhs")) == _norm_incdec_expr_8616(expected_rhs)
+        and operator.eq(_norm_incdec_expr_8616(word_store.group("rhs")), _norm_incdec_expr_8616(expected_rhs))
+        and operator.eq(_norm_incdec_expr_8616(high_store.group("rhs")), _norm_incdec_expr_8616(expected_rhs))
     ):
         return None
     return f"{word_store.group('indent')}{word_lhs} += 1;"
 
 
-def _coalesce_redundant_split_global_incdec_text(c_text: str) -> str:
+@cython.ccall
+def _coalesce_redundant_split_global_incdec_text(c_text: object) -> object:
+    coalesced: object
+    for_high: object
     lines = c_text.splitlines()
     if not lines:
         return c_text
-    local_names = {match.group("name") for line in lines if (match := _INCDEC_LOCAL_DECL_RE_8616.match(line))}
+    local_names = {match.group("name") for line in iter(lines) if (match := _INCDEC_LOCAL_DECL_RE_8616.match(line))}
 
     out: list[str] = []
     changed = False
@@ -413,14 +461,14 @@ def _coalesce_redundant_split_global_incdec_text(c_text: str) -> str:
         if for_high is not None and out and _INCDEC_INC_RE_8616.match(out[-1]) is not None:
             low = int(for_high.group("low"))
             high = int(for_high.group("high"))
-            if high == low + 1:
+            if operator.eq(high, low + 1):
                 out.append(f"{for_high.group('indent')}for (; {for_high.group('rest')}")
                 index += 1
                 changed = True
                 continue
         coalesced = _split_incdec_word_pattern_8616(lines, index, local_names)
         if coalesced is not None:
-            if len(out) >= 2 and out[-2] == lines[index - 2] and out[-1] == lines[index - 1]:
+            if len(out) >= 2 and operator.eq(out[-2], lines[index - 2]) and operator.eq(out[-1], lines[index - 1]):
                 out.pop()
                 out.pop()
             out.append(coalesced)
@@ -437,7 +485,9 @@ def _coalesce_redundant_split_global_incdec_text(c_text: str) -> str:
     return normalized
 
 
-def _helper_name(project: angr.Project, addr: int) -> str | None:
+@cython.ccall
+def _helper_name(project: angr.Project, addr: cython.longlong) -> object:
+    proc: object
     proc = project.hooked_by(addr)
     if proc is None:
         return None
@@ -450,10 +500,10 @@ def _helper_name(project: angr.Project, addr: int) -> str | None:
     return str(proc.__class__.__name__)
 
 
-def _normalize_anonymous_call_targets(c_text: str) -> str:
+def _normalize_anonymous_call_targets(c_text: object) -> object:
     pattern = re.compile(r"(?<![A-Za-z0-9_])(?P<target>0x[0-9a-fA-F]+|\d+)(?![A-Za-z0-9_])\s*\(\s*\)")
 
-    def _replace(match: re.Match[str]) -> str:
+    def _replace(match: re.Match[str]) -> object:
         try:
             target = int(match.group("target"), 0)
         except ValueError:
@@ -469,15 +519,16 @@ _VOID_BARE_RETURN_RE_8616 = re.compile(r"^\s*return;\s*$")
 _VOID_SIDE_EFFECT_CALL_RE_8616 = re.compile(r"^(?:(?:::0x[0-9a-fA-F]+::)?[A-Za-z_]\w*)\s*\(.*\)$")
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _PruneVoidReturnsRun8616:
     """Run state for pruning return values from void function bodies."""
 
-    lines: list[str]
-    out_lines: list[str] = field(default_factory=list)
-    changed: bool = False
+    lines: object
+    out_lines: object = field(default_factory=list)
+    changed: cython.bint = False
 
-    def _return_line_is_terminal(self, start_index: int, current_depth: int) -> bool:
+    @cython.ccall
+    def _return_line_is_terminal(self, start_index: cython.longlong, current_depth: cython.longlong) -> cython.bint:
         """Return whether the return line closes the enclosing brace block."""
 
         depth = current_depth
@@ -493,8 +544,10 @@ class _PruneVoidReturnsRun8616:
             scan_index += 1
         return False
 
-    def process_body(self, index: int, brace_depth: int, is_void: bool) -> int:
+    @cython.ccall
+    def process_body(self, index: cython.longlong, brace_depth: cython.longlong, is_void: cython.bint) -> cython.longlong:
         """Rewrite returns inside one function body; return the next index."""
+        return_match: object
 
         line_count = len(self.lines)
         while index < line_count and brace_depth > 0:
@@ -522,11 +575,12 @@ class _PruneVoidReturnsRun8616:
             index += 1
         return index
 
-    def handle_multiline_header(self, index: int, header_lines: list[str], is_void: bool) -> int:
+    def handle_multiline_header(self, index: cython.longlong, header_lines: object, is_void: cython.bint) -> cython.longlong:
         """Scan a split function header and process its body if present."""
+        brace_index_scan: object
 
         line_count = len(self.lines)
-        brace_index_scan: int | None = None
+        brace_index_scan = None
         scan_index = index + 1
         is_forward_decl = False
         while scan_index < line_count and brace_index_scan is None:
@@ -553,11 +607,13 @@ class _PruneVoidReturnsRun8616:
             return brace_index_scan + 1
 
         self.out_lines.extend(header_lines)
-        brace_depth = sum(part.count("{") - part.count("}") for part in header_lines)
+        brace_depth = sum(part.count("{") - part.count("}") for part in iter(header_lines))
         return self.process_body(brace_index_scan + 1, brace_depth, is_void)
 
-    def run(self) -> int:
+    @cython.ccall
+    def run(self) -> cython.longlong:
         """Process every top-level line; return the final changed flag."""
+        header_match: object
 
         index = 0
         line_count = len(self.lines)
@@ -585,7 +641,8 @@ class _PruneVoidReturnsRun8616:
         return self.changed
 
 
-def _prune_void_function_return_values_text(c_text: str) -> str:
+@cython.ccall
+def _prune_void_function_return_values_text(c_text: object) -> object:
     """Drop ``return expr;`` values inside void definitions."""
 
     run = _PruneVoidReturnsRun8616(lines=c_text.splitlines())
@@ -596,7 +653,10 @@ def _prune_void_function_return_values_text(c_text: str) -> str:
         result += "\n"
     return result
 
-def _collect_void_function_names_from_c_text_8616(c_text: str) -> set[str]:
+@cython.ccall
+def _collect_void_function_names_from_c_text_8616(c_text: object) -> object:
+    match: object
+    line: object
     names: set[str] = set()
     header_re = re.compile(r"^\s*void\s+(?P<name>[A-Za-z_]\w*)\s*\([^;{}]*\)\s*(?:;|\{)?\s*$")
     for line in c_text.splitlines():
@@ -606,8 +666,10 @@ def _collect_void_function_names_from_c_text_8616(c_text: str) -> set[str]:
     return names
 
 
-def _prune_void_call_assignments_text(c_text: str) -> str:
-    def _impl() -> str:
+def _prune_void_call_assignments_text(c_text: object) -> object:
+    def _impl() -> object:
+        match: object
+        line: object
         void_names = _collect_void_function_names_from_c_text_8616(c_text)
         if not void_names:
             return c_text
@@ -634,7 +696,8 @@ def _prune_void_call_assignments_text(c_text: str) -> str:
     return _impl()
 
 
-def _contains_void_function_definition_text(c_text: str) -> bool:
+@cython.ccall
+def _contains_void_function_definition_text(c_text: object) -> cython.bint:
     lines = c_text.splitlines()
     header_start_re = re.compile(r"^\s*void\s+[A-Za-z_]\w*\s*\(")
 
@@ -680,8 +743,10 @@ _SIGNATURE_TYPE_KEYWORDS_8616 = {
 _SIGNATURE_CONTROL_NAMES_8616 = {"if", "for", "while", "switch"}
 
 
-def _signature_split_args_8616(args_text: str) -> list[str]:
+@cython.ccall
+def _signature_split_args_8616(args_text: object) -> object:
     """Split one signature argument list at top-level commas."""
+    char: object
 
     if not args_text.strip():
         return []
@@ -700,7 +765,8 @@ def _signature_split_args_8616(args_text: str) -> list[str]:
     return parts
 
 
-def _signature_split_decl_name_8616(arg_text: str) -> tuple[str, str] | None:
+@cython.ccall
+def _signature_split_decl_name_8616(arg_text: object) -> object:
     """Split a declaration argument into (type-prefix, name)."""
 
     text = arg_text.rstrip()
@@ -723,8 +789,12 @@ def _signature_split_decl_name_8616(arg_text: str) -> tuple[str, str] | None:
     return prefix, name
 
 
-def _normalize_signature_args_8616(args_text: str, declared_local_names: set[str]) -> str:
+@cython.ccall
+def _normalize_signature_args_8616(args_text: object, declared_local_names: object) -> object:
     """Rename signature parameters to canonical arg/local spellings."""
+    split: object
+    suffix_match: object
+    arg: object
 
     args = _signature_split_args_8616(args_text)
     if not args:
@@ -754,7 +824,10 @@ def _normalize_signature_args_8616(args_text: str, declared_local_names: set[str
     return ", ".join(normalized)
 
 
-def _normalize_function_signature_arg_names(c_text: str) -> str:
+def _normalize_function_signature_arg_names(c_text: object) -> object:
+    match: object
+    index: object
+    line: object
     trailing_newline = c_text.endswith("\n")
     header_pattern = re.compile(
         r"^(?P<indent>\s*)(?P<ret>[A-Za-z_][\w\s\*\[\]]*?)\s+(?P<name>[A-Za-z_]\w*)\s*\((?P<args>[^()]*)\)\s*(?P<suffix>[{;]?)\s*$"
@@ -763,15 +836,15 @@ def _normalize_function_signature_arg_names(c_text: str) -> str:
 
     declared_local_names = {
         match.group("name")
-        for match in re.finditer(
+        for match in builtins.iter(re.finditer(
             r"(?m)^\s*(?:unsigned\s+short|short|unsigned\s+int|int|unsigned\s+long|long|char|unsigned\s+char|signed\s+char|[A-Za-z_]\w*(?:\s*\*)?)\s+"
             r"(?P<name>local_\d+)\s*(?:;|=)",
             c_text,
-        )
+        ))
     }
     declared_local_names.update(
         match.group("name")
-        for match in re.finditer(r"(?m)^\s*.+\(\s*\*(?P<name>local_\d+)\s*\)\s*\([^;]*\)\s*;", c_text)
+        for match in builtins.iter(re.finditer(r"(?m)^\s*.+\(\s*\*(?P<name>local_\d+)\s*\)\s*\([^;]*\)\s*;", c_text))
     )
 
     lines = c_text.splitlines()
@@ -820,8 +893,11 @@ _GENERIC_HEADER_RE_8616 = re.compile(
 )
 
 
-def _declared_generic_local_name_8616(line: str) -> tuple[bool, str | None]:
+@cython.ccall
+def _declared_generic_local_name_8616(line: object) -> tuple[cython.bint, str | None]:
     """Return whether a line is a declaration and its generic name, if any."""
+    funcptr_match: object
+    match: object
 
     decl_part = line.split("//", 1)[0].strip()
     if not decl_part or decl_part.startswith(("/*", "*")):
@@ -841,7 +917,8 @@ def _declared_generic_local_name_8616(line: str) -> tuple[bool, str | None]:
     return True, name if _GENERIC_LOCAL_NAME_RE_8616.fullmatch(name) else None
 
 
-def _generic_block_body_end_8616(lines: list[str], brace_index: int) -> int:
+@cython.ccall
+def _generic_block_body_end_8616(lines: object, brace_index: cython.longlong) -> cython.longlong:
     """Return the exclusive end index of the body opened at brace_index."""
 
     body_start = brace_index + 1
@@ -853,10 +930,12 @@ def _generic_block_body_end_8616(lines: list[str], brace_index: int) -> int:
     return body_end
 
 
+@cython.ccall
 def _generic_declared_names_8616(
-    lines: list[str], body_start: int, body_end: int
-) -> tuple[set[str], int]:
+    lines: object, body_start: cython.longlong, body_end: cython.longlong
+) -> tuple[set[str], cython.longlong]:
     """Scan the leading declaration block for generic names."""
+    declared_name: object
 
     declared_names: set[str] = set()
     insertion_index = body_start
@@ -875,8 +954,10 @@ def _generic_declared_names_8616(
     return declared_names, insertion_index
 
 
-def _generic_used_names_8616(lines: list[str], body_start: int, body_end: int) -> list[str]:
+@cython.ccall
+def _generic_used_names_8616(lines: object, body_start: cython.longlong, body_end: cython.longlong) -> object:
     """Collect generic name uses in first-seen order within the body."""
+    use_match: object
 
     used_names: list[str] = []
     seen_used: set[str] = set()
@@ -891,7 +972,8 @@ def _generic_used_names_8616(lines: list[str], body_start: int, body_end: int) -
     return used_names
 
 
-def _generic_block_brace_index_8616(lines: list[str], index: int) -> tuple[int | None, int]:
+@cython.ccall
+def _generic_block_brace_index_8616(lines: object, index: cython.longlong) -> tuple[int | None, cython.longlong]:
     """Scan forward from a header for the body's opening brace."""
 
     scan_index = index
@@ -904,8 +986,13 @@ def _generic_block_brace_index_8616(lines: list[str], index: int) -> tuple[int |
     return None, scan_index
 
 
-def _materialize_generic_locals_block_8616(lines: list[str], index: int) -> tuple[int, bool]:
+@cython.ccall
+def _materialize_generic_locals_block_8616(lines: object, index: cython.longlong) -> tuple[cython.longlong, cython.bint]:
     """Insert missing generic local declarations for one function block."""
+    arg_match: object
+    brace_index: object
+    match: object
+    arg: object
 
     match = _GENERIC_HEADER_RE_8616.match(lines[index])
     if match is None:
@@ -927,17 +1014,18 @@ def _materialize_generic_locals_block_8616(lines: list[str], index: int) -> tupl
     declared_names, insertion_index = _generic_declared_names_8616(lines, body_start, body_end)
     used_names = _generic_used_names_8616(lines, body_start, body_end)
 
-    missing_names = [name for name in used_names if name not in declared_names and name not in arg_names]
+    missing_names = [name for name in iter(used_names) if name not in declared_names and name not in arg_names]
     if not missing_names:
         return body_end, False
 
-    decl_lines = [f"    unsigned short {name};" for name in missing_names]
+    decl_lines = [f"    unsigned short {name};" for name in iter(missing_names)]
     lines[insertion_index:insertion_index] = decl_lines
     body_end += len(decl_lines)
     return body_end, True
 
 
-def _materialize_missing_generic_local_declarations_text(c_text: str) -> str:
+@cython.ccall
+def _materialize_missing_generic_local_declarations_text(c_text: object) -> object:
     """Declare emitted generic locals that have no existing C declarator."""
     # Text-layer rule:
     # This helper is compile hygiene only. It may add missing declarations for names
@@ -971,20 +1059,22 @@ _C89_DECL_RE_8616 = re.compile(
 )
 
 
+@cython.ccall
 def _c89_collect_decl_entries_8616(
-    lines: list[str], brace_index: int, body_end: int, body_indent: str
-) -> list[tuple[int, str, str]]:
+    lines: object, brace_index: cython.longlong, body_end: cython.longlong, body_indent: object
+) -> object:
     """Collect top-depth C89 declarations inside one function body."""
+    match: object
 
     depth = 1
-    decl_entries: list[tuple[int, str, str]] = []
+    decl_entries: list[tuple[cython.longlong, str, str]] = []
     scan = brace_index + 1
     while scan < body_end:
         line = lines[scan]
         stripped = line.strip()
         if depth == 1:
             match = _C89_DECL_RE_8616.match(line)
-            if match is not None and match.group("indent") == body_indent and "=" not in line:
+            if match is not None and operator.eq(match.group("indent"), body_indent) and "=" not in line:
                 decl_entries.append((scan, match.group("name"), line))
         depth += stripped.count("{") - stripped.count("}")
         scan += 1
@@ -992,8 +1082,8 @@ def _c89_collect_decl_entries_8616(
 
 
 def _c89_insertion_index_8616(
-    lines: list[str], brace_index: int, body_end: int, decl_entries: list[tuple[int, str, str]]
-) -> int:
+    lines: object, brace_index: cython.longlong, body_end: cython.longlong, decl_entries: object
+) -> cython.longlong:
     """Return where hoisted declarations should be inserted."""
 
     insertion = brace_index + 1
@@ -1002,21 +1092,25 @@ def _c89_insertion_index_8616(
         if not stripped or stripped.startswith(("//", "/*", "*")):
             insertion += 1
             continue
-        if any(entry_index == insertion for entry_index, _name, _line in decl_entries):
+        if any(entry_index == insertion for entry_index, _name, _line in iter(decl_entries)):
             insertion += 1
             continue
         break
     return insertion
 
 
+@cython.ccall
 def _c89_hoist_plan_8616(
-    decl_entries: list[tuple[int, str, str]], insertion: int
-) -> tuple[list[str], set[int], bool]:
+    decl_entries: object, insertion: cython.longlong
+) -> tuple[list[str], set[cython.longlong], cython.bint]:
     """Compute the hoisted lines, removed indexes, and changed flag."""
+    line: object
+    line_index: object
+    name: object
 
     seen_names: set[str] = set()
     hoisted: list[str] = []
-    remove_indexes: set[int] = set()
+    remove_indexes: set[cython.longlong] = set()
     local_changed = False
     for line_index, name, line in decl_entries:
         if name in seen_names:
@@ -1031,8 +1125,10 @@ def _c89_hoist_plan_8616(
     return hoisted, remove_indexes, local_changed
 
 
-def _hoist_c89_decls_block_8616(lines: list[str], index: int) -> tuple[list[str], int, bool]:
+def _hoist_c89_decls_block_8616(lines: object, index: cython.longlong) -> tuple[list[str], cython.longlong, cython.bint]:
     """Hoist C89 declarations for one function; return (lines, index, changed)."""
+    brace_index: object
+    indent_match: object
 
     if _C89_HEADER_RE_8616.match(lines[index]) is None:
         return lines, index + 1, False
@@ -1052,8 +1148,8 @@ def _hoist_c89_decls_block_8616(lines: list[str], index: int) -> tuple[list[str]
     if not local_changed:
         return lines, body_end, False
 
-    kept = [line for line_index, line in enumerate(lines) if line_index not in remove_indexes]
-    removed_before_insertion = sum(1 for line_index in remove_indexes if line_index < insertion)
+    kept = [line for line_index, line in builtins.iter(enumerate(lines)) if line_index not in remove_indexes]
+    removed_before_insertion = sum(1 for line_index in iter(remove_indexes) if line_index < insertion)
     insertion_after_removal = insertion - removed_before_insertion
     kept[insertion_after_removal:insertion_after_removal] = hoisted
     lines = kept
@@ -1061,7 +1157,8 @@ def _hoist_c89_decls_block_8616(lines: list[str], index: int) -> tuple[list[str]
     return lines, body_end, True
 
 
-def _hoist_c89_local_declarations_text(c_text: str) -> str:
+@cython.ccall
+def _hoist_c89_local_declarations_text(c_text: object) -> object:
     """Hoist depth-1 C89 local declarations to the top of each body."""
 
     trailing_newline = c_text.endswith("\n")
@@ -1078,15 +1175,19 @@ def _hoist_c89_local_declarations_text(c_text: str) -> str:
         normalized += "\n"
     return normalized
 
-def _codegen_signature_authoritative_8616(function: object | None = None, codegen: object | None = None) -> bool:
+@cython.ccall
+def _codegen_signature_authoritative_8616(function: object | None = None, codegen: object | None = None) -> cython.bint:
+    obj: object
     for obj in (codegen, function):
         if obj is not None and _dynamic_text_attr(obj, "_inertia_codegen_signature_authoritative_8616", None):
             return True
     return False
 
 
-def _rewrite_cod_arg_decl_8616(arg_text: str, pointer_evidence_text: str) -> str:
+@cython.ccall
+def _rewrite_cod_arg_decl_8616(arg_text: object, pointer_evidence_text: object) -> object:
     """Add a pointer star to one argument spelling when evidence requires it."""
+    split_match: object
 
     split_match = re.search(r"([A-Za-z_]\w*)\s*(?:\[[^\]]*\])?\s*$", arg_text.strip())
     if split_match is None:
@@ -1102,17 +1203,19 @@ def _rewrite_cod_arg_decl_8616(arg_text: str, pointer_evidence_text: str) -> str
     return f"{prefix}{arg_name}{suffix}"
 
 
+@cython.ccall
 def _rewrite_cod_header_8616(
-    lines: list[str],
-    header_index: int,
+    lines: object,
+    header_index: cython.longlong,
     header_re: re.Pattern[str],
-    func_name: str,
-    rewritten_args: tuple[str, ...],
-    current_args: list[str],
+    func_name: object,
+    rewritten_args: object,
+    current_args: object,
 ) -> bool | None:
     """Rewrite the function header line; None means the header was lost."""
+    header_match: object
 
-    if rewritten_args == tuple(current_args):
+    if operator.eq(rewritten_args, tuple(current_args)):
         return False
     header_match = header_re.match(lines[header_index])
     if header_match is None:
@@ -1125,21 +1228,22 @@ def _rewrite_cod_header_8616(
         replacement_header += " {"
     elif header_match.group("suffix") == ";":
         replacement_header += ";"
-    if lines[header_index] == replacement_header:
+    if operator.eq(lines[header_index], replacement_header):
         return False
     lines[header_index] = replacement_header
     return True
 
 
+@cython.ccall
 def _cod_decls_finish_8616(
-    lines: list[str],
-    c_text: str,
-    header_index: int,
-    insertion_index: int,
-    prototype_declarations: list[str],
-    declarations: list[str],
-    header_changed: bool,
-) -> str:
+    lines: object,
+    c_text: object,
+    header_index: cython.longlong,
+    insertion_index: cython.longlong,
+    prototype_declarations: object,
+    declarations: object,
+    header_changed: cython.bint,
+) -> object:
     """Splice prototype/body declarations and join like the input."""
 
     if prototype_declarations:
@@ -1153,15 +1257,19 @@ def _cod_decls_finish_8616(
 
 
 def _materialize_annotated_cod_declarations_text(
-    c_text: str,
+    c_text: object,
     function: object,
     metadata: CODProcMetadata | None,
     *,
-    preserve_source_header: bool = False,
-) -> str:
+    preserve_source_header: cython.bint = False,
+) -> object:
     """Materialize cleanup-only COD declarations without overriding authoritative headers."""
 
-    def _impl() -> str:
+    def _impl() -> object:
+        current_match: object
+        header_index: object
+        header_result: object
+        span: object
         if metadata is None or function is None:
             return c_text
 
@@ -1206,7 +1314,7 @@ def _materialize_annotated_cod_declarations_text(
         rewritten_args = (
             tuple(current_args)
             if preserve_source_header
-            else tuple(_rewrite_cod_arg_decl_8616(arg_text, pointer_evidence_text) for arg_text in current_args)
+            else tuple(_rewrite_cod_arg_decl_8616(arg_text, pointer_evidence_text) for arg_text in iter(current_args))
         )
         header_result = _rewrite_cod_header_8616(
             lines, header_index, header_re, func_name, rewritten_args, current_args
@@ -1238,14 +1346,18 @@ def _materialize_annotated_cod_declarations_text(
     return _impl()
 
 
-def _find_header_index_8616(lines: list[str], header_re: re.Pattern[str]) -> int | None:
+@cython.ccall
+def _find_header_index_8616(lines: object, header_re: re.Pattern[str]) -> int | None:
+    index: object
+    line: object
     for index, line in enumerate(lines):
         if header_re.match(line):
             return index
     return None
 
 
-def _find_body_span_8616(lines: list[str], header_index: int) -> tuple[int, int, int] | None:
+@cython.ccall
+def _find_body_span_8616(lines: object, header_index: cython.longlong) -> object:
     brace_index = header_index
     while brace_index < len(lines):
         if "{" in lines[brace_index]:
@@ -1264,7 +1376,9 @@ def _find_body_span_8616(lines: list[str], header_index: int) -> tuple[int, int,
     return brace_index, body_start, body_end
 
 
-def _split_args_8616(arg_text: str) -> list[str]:
+@cython.ccall
+def _split_args_8616(arg_text: object) -> object:
+    char: object
     args: list[str] = []
     current: list[str] = []
     depths = (0, 0, 0)
@@ -1280,7 +1394,7 @@ def _split_args_8616(arg_text: str) -> list[str]:
     return args
 
 
-def _arg_has_pointer_evidence_8616(pointer_evidence_text: str, arg_name: str) -> bool:
+def _arg_has_pointer_evidence_8616(pointer_evidence_text: object, arg_name: object) -> cython.bint:
     name = re.escape(arg_name)
     patterns = (
         rf"(?m)(?:^|[=({{[,?:!]|return\s+)\s*\*\s*{name}\s*\+\+",
@@ -1289,17 +1403,21 @@ def _arg_has_pointer_evidence_8616(pointer_evidence_text: str, arg_name: str) ->
         rf"(?<![A-Za-z_]){name}\s*\[",
         rf"(?<![A-Za-z_]){name}\s*->",
     )
-    return any(re.search(pattern, pointer_evidence_text) is not None for pattern in patterns)
+    return any(re.search(pattern, pointer_evidence_text) is not None for pattern in iter(patterns))
 
 
-def _join_lines_like_input_8616(lines: list[str], original_text: str) -> str:
+@cython.ccall
+def _join_lines_like_input_8616(lines: object, original_text: object) -> object:
     normalized = "\n".join(lines)
     if original_text.endswith("\n"):
         normalized += "\n"
     return normalized
 
 
-def _source_decl_has_custom_ptr_8616(source_args: list[str]) -> bool:
+@cython.ccall
+def _source_decl_has_custom_ptr_8616(source_args: object) -> cython.bint:
+    source_name_match: object
+    source_arg: object
     for source_arg in source_args:
         source_name_match = re.search(r"([A-Za-z_]\w*)\s*(?:\[[^\]]*\])?\s*$", source_arg)
         if source_name_match is None:
@@ -1307,7 +1425,7 @@ def _source_decl_has_custom_ptr_8616(source_args: list[str]) -> bool:
         source_prefix = source_arg[: source_name_match.start(1)].strip()
         if "*" not in source_prefix:
             continue
-        base_tokens = [token for token in re.split(r"\s+", source_prefix.replace("*", " ").strip()) if token]
+        base_tokens = [token for token in builtins.iter(re.split(r"\s+", source_prefix.replace("*", " ").strip())) if token]
         if not base_tokens:
             continue
         base_type = base_tokens[-1]
@@ -1319,16 +1437,19 @@ def _source_decl_has_custom_ptr_8616(source_args: list[str]) -> bool:
     return False
 
 
-def _arg_name_used_in_body_8616(body_text: str, name: str) -> bool:
+@cython.ccall
+def _arg_name_used_in_body_8616(body_text: object, name: object) -> cython.bint:
     """Return whether an argument name appears in the function body text."""
 
     return re.search(rf"(?<![A-Za-z_]){re.escape(name)}(?![A-Za-z_])", body_text) is not None
 
 
+@cython.ccall
 def _unmaterialized_source_arg_probe_8616(
-    body_text: str, current_parts: list[str]
-) -> bool:
+    body_text: object, current_parts: object
+) -> cython.bint:
     """Return whether a current arg name is used while the source had none."""
+    current_part: object
 
     for current_part in current_parts:
         current_name = _decl_arg_name_8616(current_part)
@@ -1339,13 +1460,16 @@ def _unmaterialized_source_arg_probe_8616(
     return False
 
 
+@cython.ccall
 def _renamed_arg_mismatch_probe_8616(
-    body_text: str,
-    current_parts: list[str],
-    source_parts: list[str],
-    allowed_aliases: set[str],
-) -> bool:
+    body_text: object,
+    current_parts: object,
+    source_parts: object,
+    allowed_aliases: object,
+) -> cython.bint:
     """Return whether a renamed arg still sees use its source name lacks."""
+    current_part: object
+    source_part: object
 
     for current_part, source_part in zip(current_parts, source_parts, strict=False):
         current_name = _decl_arg_name_8616(current_part)
@@ -1361,14 +1485,16 @@ def _renamed_arg_mismatch_probe_8616(
     return False
 
 
+@cython.ccall
 def _source_header_args_unmaterialized_8616(
-    c_text: str,
+    c_text: object,
     *,
-    func_name: str,
-    source_decl: str | None,
-    source_arg_text: str | None = None,
+    func_name: object,
+    source_decl: object,
+    source_arg_text: object = None,
     allowed_positive_arg_aliases: Sequence[str] | None = None,
-) -> bool:
+) -> cython.bint:
+    current_header: object
     if not isinstance(func_name, str) or not func_name:
         return False
     if not source_decl and not source_arg_text:
@@ -1394,18 +1520,21 @@ def _source_header_args_unmaterialized_8616(
         and _unmaterialized_source_arg_probe_8616(body_text, current_parts)
     ):
         return True
-    if not source_parts or len(source_parts) != len(current_parts):
+    if not source_parts or operator.ne(len(source_parts), len(current_parts)):
         return False
     allowed_aliases = set(allowed_positive_arg_aliases or ())
     return _renamed_arg_mismatch_probe_8616(body_text, current_parts, source_parts, allowed_aliases)
 
 
+@cython.ccall
 def _restore_codegen_header_for_unmaterialized_source_args_8616(
-    before_text: str,
-    after_text: str,
+    before_text: object,
+    after_text: object,
     *,
-    func_name: str,
-) -> str:
+    func_name: object,
+) -> object:
+    after_match: object
+    before_match: object
     if not isinstance(func_name, str) or not func_name:
         return after_text
     header_re = re.compile(
@@ -1423,15 +1552,17 @@ def _restore_codegen_header_for_unmaterialized_source_args_8616(
     return after_text[: after_match.start()] + replacement + after_text[after_match.end() :]
 
 
+@cython.ccall
 def _apply_local_return_type_to_header_8616(
-    lines: list[str],
+    lines: object,
     *,
-    header_index: int,
+    header_index: cython.longlong,
     header_re: re.Pattern[str],
-    func_name: str,
-    local_return_type: str | None,
-    header_changed: bool,
-) -> bool:
+    func_name: object,
+    local_return_type: object,
+    header_changed: cython.bint,
+) -> cython.bint:
+    current_header: object
     if not isinstance(local_return_type, str):
         return header_changed
     normalized_return_type = " ".join(local_return_type.strip().split())
@@ -1447,19 +1578,22 @@ def _apply_local_return_type_to_header_8616(
         replacement_header += " {"
     elif current_header.group("suffix") == ";":
         replacement_header += ";"
-    if lines[header_index] != replacement_header:
+    if operator.ne(lines[header_index], replacement_header):
         lines[header_index] = replacement_header
         return True
     return header_changed
 
 
+@cython.ccall
 def _normalize_existing_decl_names_8616(
-    lines: list[str],
+    lines: object,
     *,
-    body_start: int,
+    body_start: cython.longlong,
     decl_re: re.Pattern[str],
-    declared_names: set[str],
+    declared_names: object,
 ) -> None:
+    decl_match: object
+    spec: object
     for scan_index in range(body_start):
         line = lines[scan_index]
         stripped = line.split("//", 1)[0].strip()
@@ -1484,7 +1618,8 @@ def _normalize_existing_decl_names_8616(
             )
 
 
-def _return_only_helper_decl_8616(name: str, helper_decl: str) -> str:
+@cython.ccall
+def _return_only_helper_decl_8616(name: object, helper_decl: object) -> str:
     head = helper_decl.split("(", 1)[0].strip()
     if head.endswith(name):
         return_type = head[: -len(name)].strip()
@@ -1496,12 +1631,16 @@ def _return_only_helper_decl_8616(name: str, helper_decl: str) -> str:
 def _collect_cod_materialized_decls_8616(
     *,
     metadata: CODProcMetadata,
-    source_prototypes: dict[str, str],
-    func_name: str,
-    body_text: str,
-    declared_names: set[str],
-) -> tuple[list[str], list[str]]:
+    source_prototypes: object,
+    func_name: object,
+    body_text: object,
+    declared_names: object,
+) -> object:
     def _impl() -> tuple[list[str], list[str]]:
+        spec: object
+        global_name: object
+        proto_name: object
+        source_proto: object
         declarations: list[str] = []
         prototype_declarations: list[str] = []
         seen_declared = set(declared_names)
@@ -1538,8 +1677,10 @@ def _collect_cod_materialized_decls_8616(
     return _impl()
 
 
-def _normalize_scalar_assigned_extern_arrays_text(c_text: str) -> str:
-    def _impl() -> str:
+def _normalize_scalar_assigned_extern_arrays_text(c_text: object) -> object:
+    def _impl() -> object:
+        match: object
+        line: object
         lines = c_text.splitlines()
         if not lines:
             return c_text
@@ -1553,7 +1694,7 @@ def _normalize_scalar_assigned_extern_arrays_text(c_text: str) -> str:
                 normalized_lines.append(line)
                 continue
             name = match.group("name")
-            usage_body = "\n".join(candidate for candidate in lines if not decl_re.match(candidate))
+            usage_body = "\n".join(candidate for candidate in iter(lines) if not decl_re.match(candidate))
             direct_assign = re.search(rf"(?m)^\s*{re.escape(name)}\s*=", usage_body) is not None
             scalar_arith = (
                 re.search(
@@ -1591,7 +1732,8 @@ def _normalize_scalar_assigned_extern_arrays_text(c_text: str) -> str:
     return _impl()
 
 
-def _normalize_concat_zero_text(c_text: str) -> str:
+@cython.ccall
+def _normalize_concat_zero_text(c_text: object) -> object:
     # Lower decompiler textual CONCAT forms that represent zero-extension.
     # Examples:
     #   "x CONCAT 0" -> "x"
@@ -1602,7 +1744,10 @@ def _normalize_concat_zero_text(c_text: str) -> str:
     return normalized
 
 
-def _prune_dead_stack_base_assignments_text(c_text: str) -> str:
+@cython.ccall
+def _prune_dead_stack_base_assignments_text(c_text: object) -> object:
+    m: object
+    line: object
     lines = c_text.splitlines()
     if not lines:
         return c_text
@@ -1631,7 +1776,11 @@ def _prune_dead_stack_base_assignments_text(c_text: str) -> str:
     return out
 
 
-def _materialize_stack_base_placeholder_declaration_text(c_text: str) -> str:
+@cython.ccall
+def _materialize_stack_base_placeholder_declaration_text(c_text: object) -> object:
+    insert_at: object
+    idx: object
+    line: object
     if "stack_base" not in c_text:
         return c_text
     decl_re = re.compile(r"(?m)^\s*[A-Za-z_][\w\s\*]*\bstack_base\b\s*(?:[;=,\[])")
@@ -1654,7 +1803,8 @@ def _materialize_stack_base_placeholder_declaration_text(c_text: str) -> str:
     return out
 
 
-def _normalize_integer_dereference_stores_text(c_text: str) -> str:
+@cython.ccall
+def _normalize_integer_dereference_stores_text(c_text: object) -> object:
     # Semantic lowering belongs to the typed x86-16 lowering pipeline.  This
     # legacy text hook used to synthesize SEG_U8(0, addr) for raw integer stores,
     # which invented an unproven segment and produced invalid MS C lvalues.
@@ -1662,12 +1812,14 @@ def _normalize_integer_dereference_stores_text(c_text: str) -> str:
     return c_text
 
 
-def _materialize_missing_g_hex_externs_text(c_text: str) -> str:
+def _materialize_missing_g_hex_externs_text(c_text: object) -> object:
+    idx: object
+    line: object
     token_re = re.compile(r"(?<![A-Za-z_0-9])(g_[0-9a-fA-F]+)(?![A-Za-z_0-9])")
     decl_re = re.compile(r"(?m)^\s*extern\s+[^\n;]*\b(g_[0-9a-fA-F]+)\b[^\n;]*;\s*$")
     used = set(token_re.findall(c_text))
     declared = set(decl_re.findall(c_text))
-    missing = sorted(name for name in used if name not in declared)
+    missing = sorted(name for name in iter(used) if name not in declared)
     if not missing:
         return c_text
     lines = c_text.splitlines()
@@ -1675,7 +1827,7 @@ def _materialize_missing_g_hex_externs_text(c_text: str) -> str:
     for idx, line in enumerate(lines):
         if line.strip().startswith("extern "):
             insert_at = idx + 1
-    decl_lines = [f"extern unsigned short {name};" for name in missing]
+    decl_lines = [f"extern unsigned short {name};" for name in iter(missing)]
     lines[insert_at:insert_at] = decl_lines
     out = "\n".join(lines)
     if c_text.endswith("\n"):
@@ -1699,10 +1851,16 @@ _EXTERN_TYPE_RANK_8616 = {
 }
 
 
-def _extern_decl_winners_8616(lines: list[str]) -> dict[str, tuple[int, str, str, int]]:
+@cython.ccall
+def _extern_decl_winners_8616(lines: object) -> object:
     """Select the strongest extern declaration spelling per name."""
+    match: object
+    prior: object
+    rank: object
+    idx: object
+    line: object
 
-    winners: dict[str, tuple[int, str, str, int]] = {}
+    winners: dict[str, tuple[cython.longlong, str, str, cython.longlong]] = {}
     for idx, line in enumerate(lines):
         match = _EXTERN_DECL_RE_8616.match(line)
         if match is None:
@@ -1716,10 +1874,14 @@ def _extern_decl_winners_8616(lines: list[str]) -> dict[str, tuple[int, str, str
     return winners
 
 
+@cython.ccall
 def _extern_decl_rewrite_8616(
-    lines: list[str], winners: dict[str, tuple[int, str, str, int]]
-) -> tuple[list[str], bool]:
+    lines: object, winners: object
+) -> tuple[list[str], cython.bint]:
     """Keep the first winning extern decl per name, drop the rest."""
+    match: object
+    winner: object
+    line: object
 
     kept: list[str] = []
     emitted: set[str] = set()
@@ -1747,7 +1909,8 @@ def _extern_decl_rewrite_8616(
     return kept, changed
 
 
-def _dedupe_conflicting_extern_variable_declarations_text(c_text: str) -> str:
+@cython.ccall
+def _dedupe_conflicting_extern_variable_declarations_text(c_text: object) -> object:
     """Collapse duplicate extern variable declarations to the strongest type."""
 
     lines = c_text.splitlines()
@@ -1764,11 +1927,13 @@ def _dedupe_conflicting_extern_variable_declarations_text(c_text: str) -> str:
         out += "\n"
     return out
 
-def _materialize_missing_segment_macro_locals_text(c_text: str) -> str:
-    def _impl() -> str:
+def _materialize_missing_segment_macro_locals_text(c_text: object) -> object:
+    def _impl() -> object:
+        index: object
+        line: object
         needed = {
             segment
-            for segment in ("ds", "es", "ss")
+            for segment in iter(("ds", "es", "ss"))
             if re.search(rf"\b(?:SEG_U8|SEG_U16|SEG_U32|SEG_PTR|MK_FP)\s*\(\s*{segment}\b", c_text)
         }
         if not needed:
@@ -1776,8 +1941,8 @@ def _materialize_missing_segment_macro_locals_text(c_text: str) -> str:
         lines = c_text.splitlines()
         existing = {
             match.group("name")
-            for line in lines
-            for match in (re.match(r"\s*unsigned\s+short\s+(?P<name>ds|es|ss)\s*(?:;|,)", line),)
+            for line in iter(lines)
+            for match in iter((re.match(r"\s*unsigned\s+short\s+(?P<name>ds|es|ss)\s*(?:;|,)", line),))
             if match is not None
         }
         missing = sorted(needed - existing)
@@ -1786,7 +1951,7 @@ def _materialize_missing_segment_macro_locals_text(c_text: str) -> str:
         for index, line in enumerate(lines):
             if line.strip() == "{":
                 insert_at = index + 1
-                lines[insert_at:insert_at] = [f"    unsigned short {name};" for name in missing]
+                lines[insert_at:insert_at] = [f"    unsigned short {name};" for name in iter(missing)]
                 normalized = "\n".join(lines)
                 if c_text.endswith("\n"):
                     normalized += "\n"
@@ -1796,10 +1961,13 @@ def _materialize_missing_segment_macro_locals_text(c_text: str) -> str:
     return _impl()
 
 
+@cython.ccall
 def _prototype_for_direct_call(
-    name: str,
+    name: object,
     observed_arg_count: int | None,
-) -> str:
+) -> object:
+    helper_decl: object
+    match: object
     helper_decl = preferred_known_helper_signature_decl(name)
     if helper_decl is not None:
         match = re.search(r"\((?P<args>[^)]*)\)", helper_decl)
@@ -1809,7 +1977,7 @@ def _prototype_for_direct_call(
             if not arg_text or arg_text == "void":
                 helper_arg_count = 0
             else:
-                helper_arg_count = len([part for part in arg_text.split(",") if part.strip()])
+                helper_arg_count = len([part for part in builtins.iter(arg_text.split(",")) if part.strip()])
         if isinstance(helper_arg_count, int) and isinstance(observed_arg_count, int):  # noqa: SIM102
             if helper_arg_count != observed_arg_count:
                 return _return_only_helper_decl_8616(name, helper_decl)
@@ -1817,7 +1985,11 @@ def _prototype_for_direct_call(
     return f"int {name}();"
 
 
-def _parameter_names_from_args_text_8616(args_text: str) -> set[str]:
+@cython.ccall
+def _parameter_names_from_args_text_8616(args_text: object) -> object:
+    fnptr_match: object
+    match: object
+    part: object
     names: set[str] = set()
     if not args_text.strip() or args_text.strip() == "void":
         return names
@@ -1832,8 +2004,10 @@ def _parameter_names_from_args_text_8616(args_text: str) -> set[str]:
     return names
 
 
-def _extract_function_header_args_8616(line: str) -> str | None:
+@cython.ccall
+def _extract_function_header_args_8616(line: object) -> object:
     """Read declaration arguments, never preprocessor replacement expressions."""
+    open_idx: object
     header = line.split("{", 1)[0].strip()
     if not header or header.startswith("#") or header.endswith(";"):
         return None
@@ -1859,14 +2033,17 @@ def _extract_function_header_args_8616(line: str) -> str | None:
     return header[open_idx + 1 : close_idx]
 
 
-def _collect_declared_and_defined_function_names(lines: list[str]) -> set[str]:
-    def _impl() -> set[str]:
+def _collect_declared_and_defined_function_names(lines: object) -> object:
+    def _impl() -> object:
+        match: object
+        index: object
+        line: object
         declared = {
             match.group("name")
-            for line in lines
-            for match in (
+            for line in iter(lines)
+            for match in iter((
                 re.match(r"\s*(?:extern\s+)?[A-Za-z_][\w\s\*]*\s+(?P<name>[A-Za-z_]\w*)\s*\([^;{}]*\)\s*;", line),
-            )
+            ))
             if match is not None
         }
         defined: set[str] = set()
@@ -1888,7 +2065,8 @@ def _collect_declared_and_defined_function_names(lines: list[str]) -> set[str]:
     return _impl()
 
 
-def _has_decl_or_def_in_text(c_text: str, declared: set[str], name: str) -> bool:
+@cython.ccall
+def _has_decl_or_def_in_text(c_text: object, declared: object, name: object) -> cython.bint:
     escaped = re.escape(name)
     decl_or_def_re = re.compile(
         rf"(?m)^\s*(?:extern\s+)?[A-Za-z_][\w\s\*]*?\s+(?:\*\s*)?{escaped}\s*\([^;{{}}]*\)\s*(?:;|\{{.*$)"
@@ -1899,9 +2077,11 @@ def _has_decl_or_def_in_text(c_text: str, declared: set[str], name: str) -> bool
 
 
 def _collect_direct_calls_and_observed_arity(
-    lines: list[str], c_text: str, declared: set[str]
-) -> tuple[list[str], dict[str, int]]:
-    def _impl() -> tuple[list[str], dict[str, int]]:
+    lines: object, c_text: object, declared: object
+) -> object:
+    def _impl() -> tuple[list[str], dict[str, cython.longlong]]:
+        line: object
+        match: object
         keywords = {
             "auto",
             "char",
@@ -1958,7 +2138,7 @@ def _collect_direct_calls_and_observed_arity(
         }
         parameter_names = _collect_function_parameter_names_8616(lines)
         calls: list[str] = []
-        observed_args: dict[str, int] = {}
+        observed_args: dict[str, cython.longlong] = {}
         for line in lines:
             stripped = line.strip()
             if stripped.startswith(("/*", "*", "//", "#")):
@@ -1969,7 +2149,7 @@ def _collect_direct_calls_and_observed_arity(
                 close_idx = after.find(")")
                 if close_idx >= 0:
                     arg_expr = after[:close_idx].strip()
-                    argc = 0 if not arg_expr else len([part for part in arg_expr.split(",") if part.strip()])
+                    argc = 0 if not arg_expr else len([part for part in builtins.iter(arg_expr.split(",")) if part.strip()])
                     observed_args[name] = max(observed_args.get(name, 0), argc)
                 if _name_has_known_binding_8616(
                     c_text,
@@ -1988,7 +2168,10 @@ def _collect_direct_calls_and_observed_arity(
     return _impl()
 
 
-def _find_first_function_insert_index(lines: list[str]) -> int | None:
+@cython.ccall
+def _find_first_function_insert_index(lines: object) -> int | None:
+    index: object
+    line: object
     for index, line in enumerate(lines):
         if re.match(r"\s*[A-Za-z_][\w\s\*]*\s+[A-Za-z_]\w*\s*\([^;{}]*\)\s*\{", line):
             return index
@@ -2001,13 +2184,15 @@ def _find_first_function_insert_index(lines: list[str]) -> int | None:
     return None
 
 
+@cython.ccall
 def _materialize_missing_direct_call_prototypes_text(
-    c_text: str,
-) -> str:
+    c_text: object,
+) -> object:
     return c_text
 
 
-def _strip_comments_and_strings_8616(text: str) -> str:
+@cython.ccall
+def _strip_comments_and_strings_8616(text: object) -> object:
     text = re.sub(r"(?s)/\*.*?\*/", " ", text)
     text = re.sub(r"//.*?$", " ", text, flags=re.M)
     text = re.sub(r"^\s*#.*?$", " ", text, flags=re.M)
@@ -2016,16 +2201,17 @@ def _strip_comments_and_strings_8616(text: str) -> str:
     return text
 
 
+@cython.ccall
 def _name_has_known_binding_8616(
-    c_text: str,
-    name: str,
-    keywords: set[str],
-    standard_c_functions: set[str],
-    runtime_helpers: set[str],
-    parameter_names: set[str],
-    calls: list[str],
-    declared: set[str],
-) -> bool:
+    c_text: object,
+    name: object,
+    keywords: object,
+    standard_c_functions: object,
+    runtime_helpers: object,
+    parameter_names: object,
+    calls: object,
+    declared: object,
+) -> cython.bint:
     """Return whether a call-shaped name already has a known binding."""
 
     return (
@@ -2052,8 +2238,11 @@ _DECL_STMT_RE_8616 = re.compile(
 _DECL_SKIP_TOKENS_8616 = {"return", "if", "for", "while", "switch", "case", "else", "do", "goto"}
 
 
-def _signature_arg_names_8616(args_text: str) -> set[str]:
+@cython.ccall
+def _signature_arg_names_8616(args_text: object) -> object:
     """Collect the trailing identifier of each signature argument."""
+    arg_match: object
+    arg: object
 
     names: set[str] = set()
     for arg in re.split(r",", args_text):
@@ -2063,8 +2252,11 @@ def _signature_arg_names_8616(args_text: str) -> set[str]:
     return names
 
 
-def _comma_tail_names_8616(line: str) -> set[str]:
+@cython.ccall
+def _comma_tail_names_8616(line: object) -> object:
     """Collect leading identifiers in each comma-separated tail segment."""
+    nested: object
+    segment: object
 
     names: set[str] = set()
     for segment in line.split(",")[1:]:
@@ -2074,8 +2266,12 @@ def _comma_tail_names_8616(line: str) -> set[str]:
     return names
 
 
-def _collect_declared_identifiers_line_8616(line: str, declared: set[str]) -> None:
+def _collect_declared_identifiers_line_8616(line: object, declared: object) -> None:
     """Add every identifier declared by one stripped line."""
+    decl_match: object
+    macro: object
+    sig_match: object
+    typedef_match: object
 
     macro = re.match(r"^#\s*define\s+(?P<name>[A-Za-z_]\w*)\b", line)
     if macro is not None:
@@ -2084,7 +2280,7 @@ def _collect_declared_identifiers_line_8616(line: str, declared: set[str]) -> No
     first_token = line.split(None, 1)[0] if line.split(None, 1) else ""
     if first_token in _DECL_SKIP_TOKENS_8616:
         return
-    declared.update(match.group("name") for match in _DECL_TYPE_TAG_RE_8616.finditer(line))
+    declared.update(match.group("name") for match in builtins.iter(_DECL_TYPE_TAG_RE_8616.finditer(line)))
     typedef_match = _DECL_TYPEDEF_ALIAS_RE_8616.match(line)
     if typedef_match is not None:
         declared.add(typedef_match.group("name"))
@@ -2103,8 +2299,10 @@ def _collect_declared_identifiers_line_8616(line: str, declared: set[str]) -> No
     declared.update(_comma_tail_names_8616(line))
 
 
-def _collect_declared_identifiers_8616(text_lines: list[str]) -> set[str]:
+@cython.ccall
+def _collect_declared_identifiers_8616(text_lines: object) -> object:
     """Collect every identifier the text already declares."""
+    raw_line: object
 
     declared: set[str] = set()
     for raw_line in text_lines:
@@ -2113,8 +2311,11 @@ def _collect_declared_identifiers_8616(text_lines: list[str]) -> set[str]:
             continue
         _collect_declared_identifiers_line_8616(line, declared)
     return declared
-def _collect_declared_global_names_8616(text_lines: list[str]) -> set[str]:
+@cython.ccall
+def _collect_declared_global_names_8616(text_lines: object) -> object:
     """Collect global extern names already materialized by typed lowering."""
+    match: object
+    raw_line: object
 
     declared: set[str] = set()
     extern_re = re.compile(r"^\s*extern\b.*\b(?P<name>[A-Za-z_]\w*)\s*(?:\[[^\]]*\])?\s*;\s*$")
@@ -2125,18 +2326,20 @@ def _collect_declared_global_names_8616(text_lines: list[str]) -> set[str]:
     return declared
 
 
-def _collect_member_access_names_8616(text: str) -> set[str]:
+@cython.ccall
+def _collect_member_access_names_8616(text: object) -> set[str]:
     """Collect struct member names so metadata cannot promote them to globals."""
 
     work = _strip_comments_and_strings_8616(text)
     return {
         match.group("name")
-        for match in re.finditer(r"\.\s*(?P<name>[A-Za-z_]\w*)\b", work)
+        for match in builtins.iter(re.finditer(r"\.\s*(?P<name>[A-Za-z_]\w*)\b", work))
         if _is_strict_c_identifier_8616(match.group("name"))
     }
 
 
-def _is_known_compiler_temp_8616(name: str) -> bool:
+@cython.ccall
+def _is_known_compiler_temp_8616(name: object) -> cython.bint:
     return bool(re.match(r"^(?:vvar_\d+|s_[0-9a-fA-F]+(?:_[0-9a-fA-F]*)*|tmp_\d+|ir_\d+|arg_[0-9a-fA-F]+)$", name))
 
 
@@ -2195,7 +2398,8 @@ _GLOBAL_DECL_INFERENCE_RESERVED_IDENTIFIERS_8616 = frozenset(
 )
 
 
-def _safe_finditer_8616(pattern: str, text_value: str) -> Iterable[re.Match[str]]:
+@cython.ccall
+def _safe_finditer_8616(pattern: object, text_value: object) -> Iterable[re.Match[str]]:
     try:
         return re.finditer(pattern, text_value)
     except re.error:
@@ -2203,13 +2407,15 @@ def _safe_finditer_8616(pattern: str, text_value: str) -> Iterable[re.Match[str]
 
 
 def _global_call_arg_candidates_8616(
-    work: str, function_like: set[str], candidates: list[str]
+    work: object, function_like: object, candidates: object
 ) -> None:
     """Collect identifiers passed to known function-like names."""
+    arg_match: object
+    call_match: object
 
     executable_work = "\n".join(
         line
-        for line in work.splitlines()
+        for line in builtins.iter(work.splitlines())
         if re.match(r"^\s*[A-Za-z_][\w\s\*]*\s+[A-Za-z_][\w$?@]*\s*\([^;{}]*\)\s*;", line) is None
     )
     for call_match in _safe_finditer_8616(
@@ -2228,10 +2434,13 @@ def _global_call_arg_candidates_8616(
                 candidates.append(name)
 
 
+@cython.ccall
 def _global_binop_candidates_8616(
-    work: str, function_like: set[str], candidates: list[str]
+    work: object, function_like: object, candidates: object
 ) -> None:
     """Collect identifiers compared or combined in binary operators."""
+    group_name: object
+    match: object
 
     for match in _safe_finditer_8616(
         r"(?<![A-Za-z_])(?P<lhs>[A-Za-z_][\w$?@]*)(?![A-Za-z0-9_])\s*(?:[<>]=?|==|!=)\s*"
@@ -2253,21 +2462,23 @@ def _global_binop_candidates_8616(
                 candidates.append(name)
 
 
-def _collect_global_usage_candidates_from_body_8616(text: str, declared: set[str]) -> list[str]:
-    def _impl() -> list[str]:
+def _collect_global_usage_candidates_from_body_8616(text: object, declared: object) -> object:
+    def _impl() -> object:
+        match: object
+        name: object
         work = _strip_comments_and_strings_8616(text)
         function_like = {
-            m.group("name") for m in _safe_finditer_8616(r"(?<![A-Za-z_])(?P<name>[A-Za-z_][\w$?@]*)(?=\s*\()", work)
+            m.group("name") for m in builtins.iter(_safe_finditer_8616(r"(?<![A-Za-z_])(?P<name>[A-Za-z_][\w$?@]*)(?=\s*\()", work))
         }
         candidates: list[str] = []
         candidates.extend(
             m.group("name")
-            for m in _safe_finditer_8616(r"(?<![A-Za-z_])(?P<name>[A-Za-z_][\w$?@]*)\s*\[", work)
+            for m in builtins.iter(_safe_finditer_8616(r"(?<![A-Za-z_])(?P<name>[A-Za-z_][\w$?@]*)\s*\[", work))
             if m.group("name") not in function_like
         )
         candidates.extend(
             m.group("name")
-            for m in _safe_finditer_8616(r"(?<![A-Za-z_])(?P<name>[A-Za-z_][\w$?@]*)\.[A-Za-z_][\w$?@]*", work)
+            for m in builtins.iter(_safe_finditer_8616(r"(?<![A-Za-z_])(?P<name>[A-Za-z_][\w$?@]*)\.[A-Za-z_][\w$?@]*", work))
             if m.group("name") not in function_like
         )
         for match in _safe_finditer_8616(
@@ -2279,28 +2490,28 @@ def _collect_global_usage_candidates_from_body_8616(text: str, declared: set[str
                 candidates.append(name)
         candidates.extend(
             m.group("name")
-            for m in _safe_finditer_8616(r"&\s*(?P<name>[A-Za-z_][\w$?@]*)", work)
+            for m in builtins.iter(_safe_finditer_8616(r"&\s*(?P<name>[A-Za-z_][\w$?@]*)", work))
             if m.group("name") not in function_like
         )
         candidates.extend(
             m.group("name")
-            for m in _safe_finditer_8616(
+            for m in builtins.iter(_safe_finditer_8616(
                 r"(?m)^\s*(?P<name>[A-Za-z_][\w$?@]*)(?![A-Za-z0-9_])\s*(?:[+\-*/%&|^]?=|\+\+|--)",
                 work,
-            )
+            ))
             if m.group("name") not in function_like
         )
         _global_call_arg_candidates_8616(work, function_like, candidates)
         candidates.extend(
             m.group("name")
-            for m in _safe_finditer_8616(r"(?<![A-Za-z_])(?P<name>g_[0-9a-fA-F]+)(?![A-Za-z0-9_])", work)
+            for m in builtins.iter(_safe_finditer_8616(r"(?<![A-Za-z_])(?P<name>g_[0-9a-fA-F]+)(?![A-Za-z0-9_])", work))
         )
         candidates.extend(
             m.group("name")
-            for m in _safe_finditer_8616(
+            for m in builtins.iter(_safe_finditer_8616(
                 r"(?<![A-Za-z_])(?P<name>global_(?:u8|word)_[0-9a-fA-F]+)(?![A-Za-z0-9_])",
                 work,
-            )
+            ))
         )
         _global_binop_candidates_8616(work, function_like, candidates)
         ordered: list[str] = []
@@ -2320,8 +2531,10 @@ def _collect_global_usage_candidates_from_body_8616(text: str, declared: set[str
     return _impl()
 
 
-def _collect_function_parameter_names_8616(lines: list[str]) -> set[str]:
+@cython.ccall
+def _collect_function_parameter_names_8616(lines: object) -> object:
     """Collect parameter identifiers so global inference does not redeclare them."""
+    args_text: object
     names: set[str] = set()
     index = 0
     while index < len(lines):
@@ -2341,8 +2554,11 @@ def _collect_function_parameter_names_8616(lines: list[str]) -> set[str]:
     return names
 
 
-def _synthetic_name_width_map_8616(synthetic_globals: dict[int, tuple[str, int]] | None) -> dict[str, int]:
-    name_to_width: dict[str, int] = {}
+@cython.ccall
+def _synthetic_name_width_map_8616(synthetic_globals: object) -> object:
+    global_name: object
+    width: object
+    name_to_width: dict[str, cython.longlong] = {}
     if not synthetic_globals:
         return name_to_width
     for (global_name, width) in synthetic_globals.values():
@@ -2351,10 +2567,14 @@ def _synthetic_name_width_map_8616(synthetic_globals: dict[int, tuple[str, int]]
     return name_to_width
 
 
+@cython.ccall
 def _used_global_names_per_line_8616(
-    lines: list[str], declared: set[str], missing_synthetic: list[str]
-) -> list[str]:
+    lines: object, declared: object, missing_synthetic: object
+) -> object:
     """Collect g_b and synthetic names in first-seen line order."""
+    line: object
+    match: object
+    name: object
 
     used: list[str] = []
     for line in lines:
@@ -2374,19 +2594,21 @@ def _used_global_names_per_line_8616(
     return used
 
 
-def _name_in_text_8616(name: str, text: str) -> bool:
+@cython.ccall
+def _name_in_text_8616(name: object, text: object) -> cython.bint:
     """Return whether the name appears as a whole identifier."""
 
     return re.search(rf"(?<![A-Za-z_]){re.escape(name)}(?![A-Za-z0-9_])", text) is not None
 
 
 def _used_global_names_8616(
-    lines: list[str], body_text: str, declared: set[str], candidate_names: set[str]
-) -> list[str]:
-    def _impl() -> list[str]:
+    lines: object, body_text: object, declared: object, candidate_names: object
+) -> object:
+    def _impl() -> object:
+        name: object
         missing_synthetic = sorted(
             name
-            for name in candidate_names
+            for name in iter(candidate_names)
             if name not in declared and _name_in_text_8616(name, body_text)
         )
         used = _used_global_names_per_line_8616(lines, declared, missing_synthetic)
@@ -2404,8 +2626,10 @@ def _used_global_names_8616(
     return _impl()
 
 
-def _first_function_insert_index_8616(lines: list[str]) -> int | None:
+def _first_function_insert_index_8616(lines: object) -> int | None:
     def _impl() -> int | None:
+        index: object
+        line: object
         insert_at = 0
         function_found = False
         for index, line in enumerate(lines):
@@ -2428,19 +2652,20 @@ def _first_function_insert_index_8616(lines: list[str]) -> int | None:
     return _impl()
 
 
-def _strip_comments_for_global_decl_inference_8616(text: str) -> str:
+def _strip_comments_for_global_decl_inference_8616(text: object) -> str:
     without_blocks = re.sub(r"/\*.*?\*/", " ", text, flags=re.DOTALL)
-    return "\n".join(line.split("//", 1)[0] for line in without_blocks.splitlines())
+    return "\n".join(line.split("//", 1)[0] for line in builtins.iter(without_blocks.splitlines()))
 
 
-def _infer_decl_for_global_8616(name: str, width: int | None, body_text: str) -> list[str]:
+def _infer_decl_for_global_8616(name: object, width: int | None, body_text: object) -> list[str]:
+    inferred_width: object
     escaped = re.escape(name)
     code_text = _strip_comments_for_global_decl_inference_8616(body_text)
     members = {
         match.group("field")
-        for match in re.finditer(
+        for match in builtins.iter(re.finditer(
             rf"(?<![A-Za-z_]){escaped}\s*\[[^\]]+\]\s*\.\s*(?P<field>[A-Za-z_][A-Za-z0-9_]*)", code_text
-        )
+        ))
     }
     has_indexed_use = re.search(rf"(?<![A-Za-z_]){escaped}\s*\[", code_text) is not None
     inferred_width = width
@@ -2453,10 +2678,10 @@ def _infer_decl_for_global_8616(name: str, width: int | None, body_text: str) ->
     c_decl_type = f"unsigned {declared_type}"
     if members:
         struct_name = f"_inertia_global_{re.sub(r'[^A-Za-z0-9_]', '_', name)}"
-        field_names = sorted(field for field in members if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", field)) or ["value"]
+        field_names = sorted(field for field in iter(members) if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", field)) or ["value"]
         return [
             f"    struct {struct_name} {{",
-            *[f"        {c_decl_type} {field};" for field in field_names],
+            *[f"        {c_decl_type} {field};" for field in iter(field_names)],
             "    };",
             f"    extern struct {struct_name} {name}[1];",
         ]
@@ -2465,12 +2690,16 @@ def _infer_decl_for_global_8616(name: str, width: int | None, body_text: str) ->
     return [f"    extern {c_decl_type} {name};"]
 
 
-def _normalize_duplicate_generic_hex_global_names_8616(c_text: str) -> str:
+def _normalize_duplicate_generic_hex_global_names_8616(c_text: object) -> object:
+    name: object
+    value: object
+    variant: object
+    variants: object
     names = {
         match.group("name")
-        for match in re.finditer(r"(?<![A-Za-z_])(?P<name>g_[0-9a-fA-F]{1,4})(?![A-Za-z0-9_])", c_text)
+        for match in builtins.iter(re.finditer(r"(?<![A-Za-z_])(?P<name>g_[0-9a-fA-F]{1,4})(?![A-Za-z0-9_])", c_text))
     }
-    by_value: dict[int, set[str]] = {}
+    by_value: dict[cython.longlong, set[str]] = {}
     for name in names:
         with contextlib.suppress(ValueError):
             by_value.setdefault(int(name[2:], 16), set()).add(name)
@@ -2485,13 +2714,14 @@ def _normalize_duplicate_generic_hex_global_names_8616(c_text: str) -> str:
     if not replacements:
         return c_text
 
-    def _replace(match: re.Match[str]) -> str:
+    def _replace(match: re.Match[str]) -> object:
         return replacements.get(match.group("name"), match.group("name"))
 
     return re.sub(r"(?<![A-Za-z_])(?P<name>g_[0-9a-fA-F]{1,4})(?![A-Za-z0-9_])", _replace, c_text)
 
 
-def _declared_names_for_synthetic_globals_8616(lines: list[str], body_text: str) -> set[str]:
+@cython.ccall
+def _declared_names_for_synthetic_globals_8616(lines: object, body_text: object) -> object:
     """Union every identifier spelling already declared in the text."""
 
     declared = _collect_declared_identifiers_8616(lines)
@@ -2500,26 +2730,29 @@ def _declared_names_for_synthetic_globals_8616(lines: list[str], body_text: str)
     declared |= _collect_function_parameter_names_8616(lines)
     declared |= {
         match.group("name")
-        for line in lines
-        for match in (
+        for line in iter(lines)
+        for match in iter((
             re.match(
                 r"\s*(?:extern\s+)?(?:unsigned\s+)?(?:char|short|int|long|uint\d+_t|int\d+_t)\s+"
                 r"(?P<name>g_b[0-9a-fA-F]+)\s*(?:\[[^\]]*\])?\s*(?:;|=|,)",
                 line,
             ),
-        )
+        ))
         if match is not None
     }
     return declared
 
 
+@cython.ccall
 def _synthetic_global_declarations_8616(
-    used: list[str],
-    candidate_names: set[str],
-    name_to_width: dict[str, int],
-    body_text: str,
-) -> list[str]:
+    used: object,
+    candidate_names: object,
+    name_to_width: object,
+    body_text: object,
+) -> object:
     """Infer the declaration lines for each used global candidate."""
+    width: object
+    name: object
 
     declarations: list[str] = []
     for name in used:
@@ -2531,12 +2764,13 @@ def _synthetic_global_declarations_8616(
 
 
 def _materialize_missing_synthetic_global_declarations_text(
-    c_text: str,
+    c_text: object,
     metadata: CODProcMetadata | None = None,
-    synthetic_globals: dict[int, tuple[str, int]] | None = None,
-) -> str:
+    synthetic_globals: object = None,
+) -> object:
     """Keep reserved runtime lvalues out of legacy missing-global declarations."""
-    def _impl() -> str:
+    def _impl() -> object:
+        insert_at: object
         c_text_normalized = _normalize_duplicate_generic_hex_global_names_8616(c_text)
         if c_text_normalized != c_text:
             return _materialize_missing_synthetic_global_declarations_text(
@@ -2553,7 +2787,7 @@ def _materialize_missing_synthetic_global_declarations_text(
 
         synthetic_names = {
             global_name
-            for global_name, _width in (synthetic_globals or {}).values()
+            for global_name, _width in builtins.iter((synthetic_globals or {}).values())
             if _is_strict_c_identifier_8616(global_name)
         }
         candidate_names = set(synthetic_names)
@@ -2562,7 +2796,7 @@ def _materialize_missing_synthetic_global_declarations_text(
 
         if body_text:
             candidate_names.update(_collect_global_usage_candidates_from_body_8616(body_text, declared))
-        candidate_names = {name for name in candidate_names if _is_strict_c_identifier_8616(name)}
+        candidate_names = {name for name in iter(candidate_names) if _is_strict_c_identifier_8616(name)}
         candidate_names.difference_update(runtime_gp_word_symbols_8616())
 
         used = _used_global_names_8616(lines, body_text, declared, candidate_names)
@@ -2586,7 +2820,8 @@ def _materialize_missing_synthetic_global_declarations_text(
     return _impl()
 
 
-def _gb_array_scalar_use_res_8616(name: str) -> tuple[re.Pattern[str], re.Pattern[str], re.Pattern[str]]:
+@cython.ccall
+def _gb_array_scalar_use_res_8616(name: object) -> tuple[re.Pattern[str], re.Pattern[str], re.Pattern[str]]:
     """Build the scalar/indexed/assignment use patterns for one name."""
 
     scalar_use_re = re.compile(
@@ -2599,7 +2834,8 @@ def _gb_array_scalar_use_res_8616(name: str) -> tuple[re.Pattern[str], re.Patter
     return scalar_use_re, indexed_use_re, assignment_use_re
 
 
-def _gb_array_name_needs_scalar_8616(name: str, body_without_gb_decls: str) -> bool:
+@cython.ccall
+def _gb_array_name_needs_scalar_8616(name: object, body_without_gb_decls: object) -> cython.bint:
     """Return whether the name is used as a scalar and never indexed."""
 
     scalar_use_re, indexed_use_re, assignment_use_re = _gb_array_scalar_use_res_8616(name)
@@ -2610,14 +2846,20 @@ def _gb_array_name_needs_scalar_8616(name: str, body_without_gb_decls: str) -> b
     )
 
 
-def _normalize_scalar_gb_array_declarations_text(c_text: str) -> str:
-    def _impl() -> str:
+def _normalize_scalar_gb_array_declarations_text(c_text: object) -> object:
+    def _impl() -> object:
+        indent_match: object
+        match: object
+        _size: object
+        idx: object
+        line: object
+        name: object
         lines = c_text.splitlines()
         if not lines:
             return c_text
 
         decl_re = re.compile(r"^(?P<indent>\s*)extern\s+char\s+(?P<name>g_[0-9a-fA-F]+)\s*\[(?P<size>\d+)\]\s*;\s*$")
-        names: dict[str, tuple[int, int]] = {}
+        names: dict[str, tuple[cython.longlong, cython.longlong]] = {}
         for idx, line in enumerate(lines):
             match = decl_re.match(line)
             if match is None:
@@ -2626,7 +2868,7 @@ def _normalize_scalar_gb_array_declarations_text(c_text: str) -> str:
         if not names:
             return c_text
 
-        body_without_gb_decls = "\n".join(line for line in lines if decl_re.match(line) is None)
+        body_without_gb_decls = "\n".join(line for line in iter(lines) if decl_re.match(line) is None)
         changed = False
         for name, (idx, _size) in names.items():
             # Scalar usage evidence: arithmetic on the symbol itself (not indexing)
@@ -2645,16 +2887,20 @@ def _normalize_scalar_gb_array_declarations_text(c_text: str) -> str:
     return _impl()
 
 
+@cython.ccall
 def _source_function_prototype_decls_from_cod_source_lines(source_lines: Sequence[str] | None) -> dict[str, str]:
     return {}
 
 
+@cython.ccall
 def _normalize_portable_flat_main_signature_text(
-    c_text: str,
+    c_text: object,
     function: object,
     *,
-    c_target: str,
-) -> str:
+    c_target: object,
+) -> object:
+    bounds: object
+    header_result: object
     if c_target != "portable-flat":
         return c_text
     if _dynamic_text_attr(function, "name", None) != "main":
@@ -2677,17 +2923,23 @@ def _normalize_portable_flat_main_signature_text(
     return _join_with_original_trailing_newline(lines, c_text)
 
 
-def _join_with_original_trailing_newline(lines: list[str], original_text: str) -> str:
+@cython.ccall
+def _join_with_original_trailing_newline(lines: object, original_text: object) -> object:
     normalized = "\n".join(lines)
     if original_text.endswith("\n"):
         normalized += "\n"
     return normalized
 
 
+@cython.ccall
 def _normalize_main_header_args(
-    lines: list[str], header_re: re.Pattern[str]
-) -> tuple[int, bool] | None:
-    header_index: int | None = None
+    lines: object, header_re: re.Pattern[str]
+) -> object:
+    header_index: object
+    match: object
+    index: object
+    line: object
+    header_index = None
     nonportable_return_type = False
     for index, line in enumerate(lines):
         match = header_re.match(line)
@@ -2711,7 +2963,8 @@ def _normalize_main_header_args(
     return None if header_index is None else (header_index, nonportable_return_type)
 
 
-def _is_portable_main_argument_list(args_text: str) -> bool:
+@cython.ccall
+def _is_portable_main_argument_list(args_text: object) -> cython.bint:
     """Return whether an emitted main parameter list has a portable C ABI."""
     normalized = re.sub(r"\s+", " ", args_text.strip())
     if normalized in {"", "void"}:
@@ -2728,10 +2981,12 @@ def _is_portable_main_argument_list(args_text: str) -> bool:
     )
 
 
+@cython.ccall
 def _normalize_nonportable_main_void_call_returns(
-    lines: list[str], bounds: tuple[int, int]
+    lines: object, bounds: object
 ) -> None:
     """Turn a returned call in a nonportable entry into a statement."""
+    match: object
     return_re = re.compile(r"^(?P<indent>\s*)return\s+(?P<name>[A-Za-z_]\w*)\s*(?P<args>\([^;]+\));\s*$")
     for index in range(bounds[0], min(bounds[1], len(lines))):
         match = return_re.match(lines[index])
@@ -2741,14 +2996,16 @@ def _normalize_nonportable_main_void_call_returns(
         lines[index] = f"{indent}{match.group('name')}{match.group('args')};"
 
 
-def _has_open_brace_in_lookahead(lines: list[str], start_index: int) -> bool:
+@cython.ccall
+def _has_open_brace_in_lookahead(lines: object, start_index: cython.longlong) -> cython.bint:
     lookahead = start_index
     while lookahead < len(lines) and not lines[lookahead].strip():
         lookahead += 1
     return lookahead < len(lines) and lines[lookahead].lstrip().startswith("{")
 
 
-def _find_function_body_bounds(lines: list[str], header_index: int) -> tuple[int, int] | None:
+@cython.ccall
+def _find_function_body_bounds(lines: object, header_index: cython.longlong) -> object:
     brace_index = header_index
     while brace_index < len(lines) and "{" not in lines[brace_index]:
         brace_index += 1
@@ -2763,7 +3020,8 @@ def _find_function_body_bounds(lines: list[str], header_index: int) -> tuple[int
     return body_start, body_end
 
 
-def _ensure_main_returns_zero(lines: list[str], body_start: int, body_end: int) -> None:
+@cython.ccall
+def _ensure_main_returns_zero(lines: object, body_start: cython.longlong, body_end: cython.longlong) -> None:
     saw_explicit_return = False
     for index in range(body_end - 2, body_start - 1, -1):
         stripped = lines[index].strip()
@@ -2784,8 +3042,11 @@ def _ensure_main_returns_zero(lines: list[str], body_start: int, body_end: int) 
     lines.insert(body_end - 1, f"{return_indent}return 0;")
 
 
-def _source_args_from_cod_source_lines(source_lines: tuple[str, ...], func_name: str | None) -> str | None:
-    def _impl() -> str | None:
+def _source_args_from_cod_source_lines(source_lines: object, func_name: object) -> object:
+    def _impl() -> object:
+        decl_match: object
+        decl_re: object
+        line: object
         if not isinstance(func_name, str) or not func_name:
             return None
 
@@ -2817,25 +3078,30 @@ def _source_args_from_cod_source_lines(source_lines: tuple[str, ...], func_name:
     return _impl()
 
 
-def _repair_missing_cod_function_header_text(c_text: str, function: object, metadata: CODProcMetadata | None) -> str:
+@cython.ccall
+def _repair_missing_cod_function_header_text(c_text: object, function: object, metadata: CODProcMetadata | None) -> object:
     return c_text
 
 
+@cython.ccall
 def _align_function_header_with_cod_source_decl_text(
-    c_text: str,
+    c_text: object,
     function: object,
     metadata: CODProcMetadata | None,
     *,
     codegen: object | None = None,
-) -> str:
+) -> object:
     """Preserve the recovered header; source declarations are optional annotations."""
     return c_text
 
 
+@cython.ccall
 def _func_header_match_8616(
-    c_text: str, func_name: str
-) -> tuple[list[str], re.Match[str], int] | None:
+    c_text: object, func_name: object
+) -> object:
     """Locate the function's header line and return (lines, match, index)."""
+    header_index: object
+    match: object
 
     lines = c_text.splitlines()
     header_re = re.compile(
@@ -2850,10 +3116,12 @@ def _func_header_match_8616(
     return lines, match, header_index
 
 
+@cython.ccall
 def _codegen_prototype_parts_8616(
     function: object, codegen: object
 ) -> tuple[object, tuple[object, ...]]:
     """Resolve the (return_type, arg_types) pair from the codegen prototype."""
+    prototype: object
 
     cfunc = _dynamic_text_attr(codegen, "cfunc", None)
     prototype = _dynamic_text_attr(cfunc, "functy", None) or _dynamic_text_attr(cfunc, "prototype", None)
@@ -2864,16 +3132,17 @@ def _codegen_prototype_parts_8616(
     return return_type, arg_types
 
 
+@cython.ccall
 def _replace_header_and_join_8616(
-    lines: list[str],
-    header_index: int,
-    indent: str,
-    ret_text: str,
-    func_name: str,
-    rewritten_args: list[str],
-    suffix: str,
-    c_text: str,
-) -> str:
+    lines: object,
+    header_index: cython.longlong,
+    indent: object,
+    ret_text: object,
+    func_name: object,
+    rewritten_args: object,
+    suffix: object,
+    c_text: object,
+) -> object:
     """Replace the header line and join preserving the input newline."""
 
     replacement = f"{indent}{ret_text} {func_name}({', '.join(rewritten_args)})"
@@ -2885,15 +3154,18 @@ def _replace_header_and_join_8616(
     return _join_lines_like_input_8616(lines, c_text)
 
 
-def _normalize_signed_char_function_signature_text(c_text: str, function: object, codegen: object | None) -> str:
+def _normalize_signed_char_function_signature_text(c_text: object, function: object, codegen: object) -> object:
     """Render typed signed-byte function signatures explicitly as ``signed char``."""
+    located: object
+    arg_text: object
+    index: object
     if codegen is None:
         return c_text
     func_name = _dynamic_text_attr(function, "name", None)
     if not isinstance(func_name, str) or not func_name:
         return c_text
     return_type, arg_types = _codegen_prototype_parts_8616(function, codegen)
-    if not isinstance(return_type, SimTypeChar) and not any(isinstance(arg_type, SimTypeChar) for arg_type in arg_types):
+    if not isinstance(return_type, SimTypeChar) and not any(isinstance(arg_type, SimTypeChar) for arg_type in iter(arg_types)):
         return c_text
 
     located = _func_header_match_8616(c_text, func_name)
@@ -2907,7 +3179,7 @@ def _normalize_signed_char_function_signature_text(c_text: str, function: object
 
     args = _split_args_8616(match.group("args"))
     rewritten_args: list[str] = []
-    changed = ret_text != match.group("ret").strip()
+    changed = operator.ne(ret_text, match.group("ret").strip())
     for index, arg_text in enumerate(args):
         arg_type = arg_types[index] if index < len(arg_types) else None
         stripped = arg_text.strip()
@@ -2931,7 +3203,8 @@ def _normalize_signed_char_function_signature_text(c_text: str, function: object
     )
 
 
-def _msc_signed_arg_text_8616(arg_text: str, arg_type: object) -> str:
+@cython.ccall
+def _msc_signed_arg_text_8616(arg_text: object, arg_type: object) -> object:
     """Rewrite a ``short`` arg spelling to MS C ``int`` when proven signed."""
 
     stripped = arg_text.strip()
@@ -2944,8 +3217,12 @@ def _msc_signed_arg_text_8616(arg_text: str, arg_type: object) -> str:
     return arg_text
 
 
-def _normalize_msc_signed_int_function_signature_text(c_text: str, function: object, codegen: object | None) -> str:
+@cython.ccall
+def _normalize_msc_signed_int_function_signature_text(c_text: object, function: object, codegen: object) -> object:
     """Render typed-condition-proven signed 16-bit signatures as MS C ``int``."""
+    located: object
+    arg_text: object
+    index: object
     if codegen is None:
         return c_text
     changed_fields = tuple(_dynamic_text_attr(codegen, "_inertia_typed_condition_signed_stack_arg_changed_fields_8616", ()) or ())
@@ -2991,13 +3268,15 @@ def _normalize_msc_signed_int_function_signature_text(c_text: str, function: obj
     )
 
 
-def _split_function_args_preserving_nesting(args_text: str) -> list[str]:
+@cython.ccall
+def _split_function_args_preserving_nesting(args_text: object) -> object:
     """Split one argument list at top-level commas, preserving nesting."""
 
     return _signature_split_args_8616(args_text)
 
 
-def _find_function_brace_index(lines: list[str], start_index: int) -> int | None:
+@cython.ccall
+def _find_function_brace_index(lines: object, start_index: cython.longlong) -> int | None:
     scan_index = start_index
     while scan_index < len(lines):
         if "{" in lines[scan_index]:
@@ -3008,7 +3287,8 @@ def _find_function_brace_index(lines: list[str], start_index: int) -> int | None
     return None
 
 
-def _find_block_end(lines: list[str], brace_index: int) -> int:
+@cython.ccall
+def _find_block_end(lines: object, brace_index: cython.longlong) -> cython.longlong:
     body_end = brace_index + 1
     brace_depth = lines[brace_index].count("{") - lines[brace_index].count("}")
     while body_end < len(lines) and brace_depth > 0:
@@ -3017,18 +3297,22 @@ def _find_block_end(lines: list[str], brace_index: int) -> int:
     return body_end
 
 
-def _extract_reserved_arg_names(args_text: str) -> set[str]:
+@cython.ccall
+def _extract_reserved_arg_names(args_text: object) -> object:
     return _parameter_names_from_args_text_8616(args_text)
 
 
-def _function_definition_args_text_8616(line: str) -> str | None:
+@cython.ccall
+def _function_definition_args_text_8616(line: object) -> object:
     stripped = line.strip()
     if stripped.startswith(("if", "while", "for", "switch")):
         return None
     return _extract_function_header_args_8616(line)
 
 
-def _source_decl_args_text_8616(source_decl: str | None) -> str | None:
+@cython.ccall
+def _source_decl_args_text_8616(source_decl: object) -> object:
+    open_idx: object
     if source_decl is None:
         return None
     text = source_decl.strip().rstrip(";")
@@ -3056,21 +3340,23 @@ class _LocalDeclKind8616(Enum):
     FUNCTION_POINTER = "function_pointer"
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class _LocalDeclEntry8616:
-    line_index: int
-    name: str
-    comment: str
+    line_index: cython.longlong
+    name: object
+    comment: object
     kind: _LocalDeclKind8616
 
 
+@cython.ccall
 def _collect_local_decl_entries(
-    lines: list[str],
-    body_start: int,
-    body_end: int,
+    lines: object,
+    body_start: cython.longlong,
+    body_end: cython.longlong,
     decl_re: re.Pattern[str],
     func_ptr_decl_re: re.Pattern[str],
 ) -> tuple[list[_LocalDeclEntry8616], set[str]]:
+    decl_match: object
     decl_lines: list[_LocalDeclEntry8616] = []
     used_names: set[str] = set()
     for scan_index in range(body_start, body_end):
@@ -3090,15 +3376,18 @@ def _collect_local_decl_entries(
 
 
 def _rewrite_or_prune_duplicate_locals(
-    lines: list[str],
+    lines: object,
     decl_re: re.Pattern[str],
-    reserved_names: set[str],
-    used_names: set[str],
-    decl_lines: list[_LocalDeclEntry8616],
-) -> tuple[bool, set[int]]:
-    def _impl() -> tuple[bool, set[int]]:
+    reserved_names: object,
+    used_names: object,
+    decl_lines: object,
+) -> object:
+    def _impl() -> tuple[cython.bint, set[cython.longlong]]:
+        entries: object
+        entry: object
+        name: object
         changed = False
-        remove_line_indexes: set[int] = set()
+        remove_line_indexes: set[cython.longlong] = set()
         grouped: dict[str, list[_LocalDeclEntry8616]] = {}
         for entry in decl_lines:
             grouped.setdefault(entry.name, []).append(entry)
@@ -3107,7 +3396,7 @@ def _rewrite_or_prune_duplicate_locals(
                 for entry in entries:
                     unique_name = _make_unique_identifier(name, used_names)
                     old_line = lines[entry.line_index]
-                    def replace_decl(match: re.Match[str]) -> str:
+                    def replace_decl(match: re.Match[str]) -> object:
                         return (
                             f"{match.group('indent')}{match.group('type')} {unique_name}{match.group('array') or ''};"  # noqa: B023
                             + (f" {match.group('comment')}" if match.group("comment") else "")
@@ -3133,7 +3422,7 @@ def _rewrite_or_prune_duplicate_locals(
                 ),
             )
             for entry in entries:
-                if entry.line_index == keep_entry.line_index:
+                if operator.eq(entry.line_index, keep_entry.line_index):
                     continue
                 remove_line_indexes.add(entry.line_index)
                 changed = True
@@ -3142,8 +3431,11 @@ def _rewrite_or_prune_duplicate_locals(
     return _impl()
 
 
-def _dedupe_duplicate_local_declarations_text(c_text: str) -> str:
-    def _impl() -> str:
+def _dedupe_duplicate_local_declarations_text(c_text: object) -> object:
+    def _impl() -> object:
+        args_text: object
+        brace_index: object
+        match: object
         trailing_newline = c_text.endswith("\n")
         lines = c_text.splitlines()
         header_re = re.compile(
@@ -3189,7 +3481,7 @@ def _dedupe_duplicate_local_declarations_text(c_text: str) -> str:
             changed = changed or local_changed
 
             if remove_line_indexes:
-                lines = [line for i, line in enumerate(lines) if i not in remove_line_indexes]
+                lines = [line for i, line in builtins.iter(enumerate(lines)) if i not in remove_line_indexes]
                 body_end -= len(remove_line_indexes)
 
             index = body_end
@@ -3215,8 +3507,13 @@ _SPURIOUS_HEADER_RE_8616 = re.compile(
 )
 
 
-def _spurious_declared_names_8616(lines: list[str]) -> set[str]:
+@cython.ccall
+def _spurious_declared_names_8616(lines: object) -> object:
     """Collect names declared by locals or function headers."""
+    arg_match: object
+    match: object
+    arg_text: object
+    line: object
 
     declared_names: set[str] = set()
     for line in lines:
@@ -3239,8 +3536,9 @@ def _spurious_declared_names_8616(lines: list[str]) -> set[str]:
     return declared_names
 
 
-def _spurious_rename_map_8616(lines: list[str], declared_names: set[str]) -> dict[str, str]:
+def _spurious_rename_map_8616(lines: object, declared_names: object) -> object:
     """Map each stray ``name_2`` use back to the declared base name."""
+    name: object
 
     rename_map: dict[str, str] = {}
     for name in declared_names:
@@ -3249,25 +3547,27 @@ def _spurious_rename_map_8616(lines: list[str], declared_names: set[str]) -> dic
             continue
         if any(
             re.search(rf"(?<![A-Za-z0-9_]){re.escape(suffixed)}(?![A-Za-z0-9_])", line) is not None
-            for line in lines
+            for line in iter(lines)
         ):
             rename_map[suffixed] = name
     return rename_map
 
 
-def _apply_spurious_renames_8616(c_text: str, rename_map: dict[str, str]) -> str:
+def _apply_spurious_renames_8616(c_text: object, rename_map: object) -> object:
     """Rename every stray suffixed token back to its base name."""
 
     pattern = re.compile(
         r"(?<![A-Za-z0-9_])("
-        + "|".join(sorted((re.escape(name) for name in rename_map), key=len, reverse=True))
+        + "|".join(sorted((re.escape(name) for name in iter(rename_map)), key=len, reverse=True))
         + r")(?![A-Za-z0-9_])"
     )
     return pattern.sub(lambda match: rename_map.get(match.group(1), match.group(1)), c_text)
 
 
-def _canonicalize_suffixed_helper_calls_8616(normalized: str, declared_names: set[str]) -> str:
+@cython.ccall
+def _canonicalize_suffixed_helper_calls_8616(normalized: object, declared_names: object) -> object:
     """Canonicalize known two-index helper calls onto declared base names."""
+    base_name: object
 
     # Canonicalize known two-index helper calls where materialized alias
     # locals use a "_2" suffix even when the base local exists.
@@ -3288,7 +3588,8 @@ def _canonicalize_suffixed_helper_calls_8616(normalized: str, declared_names: se
     return normalized
 
 
-def _normalize_spurious_duplicate_local_suffixes(c_text: str) -> str:
+@cython.ccall
+def _normalize_spurious_duplicate_local_suffixes(c_text: object) -> object:
     """Fold stray ``name_2`` locals back onto their declared base names."""
 
     trailing_newline = c_text.endswith("\n")
@@ -3302,7 +3603,10 @@ def _normalize_spurious_duplicate_local_suffixes(c_text: str) -> str:
     return normalized
 
 
-def _collapse_duplicate_type_keywords_text(c_text: str) -> str:
+@cython.ccall
+def _collapse_duplicate_type_keywords_text(c_text: object) -> object:
+    pattern: object
+    replacement: object
     replacements = (
         (r"\bextern\s+union\s+union\s+REGS\b", "extern union REGS"),
         (r"\bunion\s+union\s+REGS\b", "union REGS"),
@@ -3315,12 +3619,14 @@ def _collapse_duplicate_type_keywords_text(c_text: str) -> str:
     return normalized
 
 
-def _dedupe_adjacent_prototype_lines(c_text: str) -> str:
+@cython.ccall
+def _dedupe_adjacent_prototype_lines(c_text: object) -> object:
+    line: object
     trailing_newline = c_text.endswith("\n")
     lines = c_text.splitlines()
     prototype_re = re.compile(r"^\s*[A-Za-z_][\w\s\*\[\]]*?\s+[A-Za-z_]\w*\s*\([^)]*\)\s*;\s*$")
     deduped: list[str] = []
-    last_prototype: str | None = None
+    last_prototype: object = None
 
     for line in lines:
         stripped = line.strip()
@@ -3358,7 +3664,8 @@ _OPAQUE_HEADER_RE_8616 = re.compile(r"^\s*[A-Za-z_][\w\s\*]*?\s+[A-Za-z_]\w*\s*\
 _OPAQUE_POINTER_TYPE_RE_8616 = re.compile(r"\b(?P<type>[A-Z][A-Za-z_]\w*)\s*\*")
 
 
-def _opaque_known_types_8616(text: str) -> set[str]:
+@cython.ccall
+def _opaque_known_types_8616(text: object) -> object:
     """Union builtin and text-declared pointer base types."""
 
     known_types = set(_OPAQUE_BASE_TYPES_8616)
@@ -3369,10 +3676,12 @@ def _opaque_known_types_8616(text: str) -> set[str]:
     return known_types
 
 
+@cython.ccall
 def _opaque_collect_args_types_8616(
-    args: str, known_types: set[str], needed: list[str]
+    args: object, known_types: object, needed: object
 ) -> None:
     """Append unresolved Capitalized pointer base types from one arg list."""
+    type_name: object
 
     for type_name in _OPAQUE_POINTER_TYPE_RE_8616.findall(args):
         if type_name in known_types or type_name in needed:
@@ -3380,8 +3689,12 @@ def _opaque_collect_args_types_8616(
         needed.append(type_name)
 
 
-def _opaque_needed_pointer_types_8616(lines: list[str], known_types: set[str]) -> list[str]:
+@cython.ccall
+def _opaque_needed_pointer_types_8616(lines: object, known_types: object) -> object:
     """Collect unresolved Capitalized pointer base types from signatures."""
+    match: object
+    index: object
+    line: object
 
     needed: list[str] = []
     for line in lines:
@@ -3404,8 +3717,9 @@ def _opaque_needed_pointer_types_8616(lines: list[str], known_types: set[str]) -
     return needed
 
 
-def _materialize_opaque_pointer_typedefs_text(c_text: str) -> str:
+def _materialize_opaque_pointer_typedefs_text(c_text: object) -> object:
     """Declare opaque struct typedefs for unresolved pointer base types."""
+    insert_at: object
 
     lines = c_text.splitlines()
     text = "\n".join(lines)
@@ -3414,9 +3728,9 @@ def _materialize_opaque_pointer_typedefs_text(c_text: str) -> str:
     if not needed:
         return c_text
 
-    typedef_lines = [f"typedef struct {type_name} {type_name};" for type_name in needed]
+    typedef_lines = [f"typedef struct {type_name} {type_name};" for type_name in iter(needed)]
     insert_at = next(
-        (idx for idx, line in enumerate(lines) if _OPAQUE_PROTOTYPE_RE_8616.match(line.strip())), 0
+        (idx for idx, line in builtins.iter(enumerate(lines)) if _OPAQUE_PROTOTYPE_RE_8616.match(line.strip())), 0
     )
     lines[insert_at:insert_at] = [*typedef_lines, ""]
     normalized = "\n".join(lines)
@@ -3425,22 +3739,24 @@ def _materialize_opaque_pointer_typedefs_text(c_text: str) -> str:
     return normalized
 
 
-def _sanitize_mangled_autonames_text(c_text: str) -> str:
+def _sanitize_mangled_autonames_text(c_text: object) -> object:
     token_re = re.compile(
         r"\b(?:(?P<sub>sub_[0-9a-f]+)sub_[0-9a-f]+|(?P<dos>dos_int[0-9]+)sub_[0-9a-f]+|(?P<dos_dup>dos_int[0-9]+)_[0-9]+)\b"
     )
 
-    def _replace(match: re.Match[str]) -> str:
+    def _replace(match: re.Match[str]) -> object:
         return match.group("sub") or match.group("dos") or match.group("dos_dup") or match.group(0)
 
     return token_re.sub(_replace, c_text)
 
 
-def _strip_register_fragment_suffixes_text(c_text: str) -> str:
+@cython.ccall
+def _strip_register_fragment_suffixes_text(c_text: object) -> object:
     return re.sub(r"(?<![A-Za-z_])([A-Za-z_]\w*)\{r\d+\|\d+b\}(?![A-Za-z0-9_])", r"\1", c_text)
 
 
-def _normalize_symbol_name_text(name: str | None) -> str | None:
+@cython.ccall
+def _normalize_symbol_name_text(name: object) -> object:
     if not isinstance(name, str):
         return None
     text = name.strip()
@@ -3451,15 +3767,18 @@ def _normalize_symbol_name_text(name: str | None) -> str | None:
     return text or None
 
 
-def _align_unknown_call_names_from_cod_evidence_text(c_text: str) -> str:
+@cython.ccall
+def _align_unknown_call_names_from_cod_evidence_text(c_text: object) -> object:
     """Compatibility surface only; COD call comments must not rename emitted calls."""
     return c_text
 
 
-def _prune_trailing_generic_return_text(c_text: str) -> str:
+def _prune_trailing_generic_return_text(c_text: object) -> object:
     """Remove only an adjacent unreachable generic return in legacy text output."""
 
-    def _impl() -> str:
+    def _impl() -> object:
+        match: object
+        previous_match: object
         trailing_newline = c_text.endswith("\n")
         lines = c_text.splitlines()
         return_re = re.compile(r"^\s*return\s+(?P<expr>[A-Za-z_]\w*)\s*;\s*$")
@@ -3495,10 +3814,12 @@ def _prune_trailing_generic_return_text(c_text: str) -> str:
     return _impl()
 
 
-def _collapse_annotated_stack_aliases_text(c_text: str) -> str:
+@cython.ccall
+def _collapse_annotated_stack_aliases_text(c_text: object) -> object:
     return c_text
 
-def _split_top_level_binary(expr: str, op: str) -> tuple[str, str] | None:
+@cython.ccall
+def _split_top_level_binary(expr: object, op: object) -> object:
     depth = 0
     i = 0
     while i <= len(expr) - len(op):
@@ -3513,7 +3834,8 @@ def _split_top_level_binary(expr: str, op: str) -> tuple[str, str] | None:
     return None
 
 
-def _simplify_negated_condition(expr: str) -> str:
+@cython.ccall
+def _simplify_negated_condition(expr: object) -> object:
     expr = expr.strip()
     if not expr.startswith("!(") or not expr.endswith(")"):
         return expr
@@ -3527,7 +3849,8 @@ def _simplify_negated_condition(expr: str) -> str:
     return expr
 
 
-def _simplify_condition_line(line: str) -> str:
+@cython.ccall
+def _simplify_condition_line(line: object) -> object:
     marker = "if ("
     start = line.find(marker)
     if start < 0:
@@ -3552,11 +3875,11 @@ def _simplify_condition_line(line: str) -> str:
     return line
 
 
-def _simplify_x86_16_conditions(c_text: str) -> str:
-    return "\n".join(_simplify_condition_line(line) for line in c_text.splitlines())
+def _simplify_x86_16_conditions(c_text: object) -> str:
+    return "\n".join(_simplify_condition_line(line) for line in builtins.iter(c_text.splitlines()))
 
 
-def _normalize_unary_not_shift_precedence_text(c_text: str) -> str:
+def _normalize_unary_not_shift_precedence_text(c_text: object) -> object:
     """Canonicalize renderer-leaked unary-not shifts into explicit conditions.
 
     ``!x >> n`` and ``!(x) >> n`` are not acceptable final C condition forms.
@@ -3580,7 +3903,7 @@ def _normalize_unary_not_shift_precedence_text(c_text: str) -> str:
     return bare_pattern.sub(_replace, c_text)
 
 
-def _split_simple_assignment_conditions(c_text: str) -> str:
+def _split_simple_assignment_conditions(c_text: object) -> object:
     pattern = re.compile(
         r"(?m)^(?P<indent>\s*)if\s*\(\(\s*(?P<name>[A-Za-z_][\w$?@]*)\s*=\s*(?P<expr>[^;\n]+?)\s*\)\s*!=\s*0\s*\)\s*\n"
         r"(?P=indent)    return\s+(?P=name)\s*;\s*(?P<comment>//[^\n]*)?$"
@@ -3597,9 +3920,13 @@ def _split_simple_assignment_conditions(c_text: str) -> str:
     return pattern.sub(_replace, c_text)
 
 
-def _split_top_level_ternary_8616(expr: str) -> tuple[str, str, str] | None:
+@cython.ccall
+def _split_top_level_ternary_8616(expr: object) -> object:
+    question_index: object
+    ch: object
+    index: object
     depth = 0
-    question_index: int | None = None
+    question_index = None
     for index, ch in enumerate(expr):
         if ch == "(":
             depth += 1
@@ -3616,7 +3943,10 @@ def _split_top_level_ternary_8616(expr: str) -> tuple[str, str, str] | None:
     return None
 
 
-def _strip_single_outer_parens_8616(expr: str) -> str:
+@cython.ccall
+def _strip_single_outer_parens_8616(expr: object) -> object:
+    ch: object
+    index: object
     stripped = expr.strip()
     if len(stripped) < 2 or not stripped.startswith("(") or not stripped.endswith(")"):
         return stripped
@@ -3626,14 +3956,16 @@ def _strip_single_outer_parens_8616(expr: str) -> str:
             depth += 1
         elif ch == ")":
             depth -= 1
-            if depth == 0 and index != len(stripped) - 1:
+            if depth == 0 and operator.ne(index, len(stripped) - 1):
                 return stripped
     if depth != 0:
         return stripped
     return stripped[1:-1].strip()
 
 
-def _simplify_negated_zero_one_ternary_condition_8616(condition: str) -> str:
+@cython.ccall
+def _simplify_negated_zero_one_ternary_condition_8616(condition: object) -> object:
+    ternary: object
     stripped = condition.strip()
     if not stripped.startswith("!((") or not stripped.endswith("))"):
         return condition
@@ -3650,7 +3982,10 @@ def _simplify_negated_zero_one_ternary_condition_8616(condition: str) -> str:
     return _strip_single_outer_parens_8616(predicate)
 
 
-def _split_for_header_8616(header: str) -> list[str] | None:
+@cython.ccall
+def _split_for_header_8616(header: object) -> object:
+    ch: object
+    index: object
     parts: list[str] = []
     depth = 0
     start = 0
@@ -3666,8 +4001,8 @@ def _split_for_header_8616(header: str) -> list[str] | None:
     return parts if len(parts) == 3 else None
 
 
-def _simplify_x86_16_wrapped_stack_offsets(c_text: str) -> str:
-    def _replace(match: re.Match[str]) -> str:
+def _simplify_x86_16_wrapped_stack_offsets(c_text: object) -> object:
+    def _replace(match: re.Match[str]) -> object:
         name = match.group("name")
         value = int(match.group("value"), 0)
         normalized = _normalize_16bit_signed_offset(value)
@@ -3748,13 +4083,15 @@ _BYTE_WALK_LOOP_RE_8616 = re.compile(
 )
 
 
-def _stack_norm_rhs_8616(rhs: str) -> str:
+@cython.ccall
+def _stack_norm_rhs_8616(rhs: object) -> object:
     """Strip the redundant unsigned-short cast from one rhs."""
 
     return rhs.replace("(unsigned short)", "").strip()
 
 
-def _stack_rhs_base_8616(rhs: str) -> str:
+@cython.ccall
+def _stack_rhs_base_8616(rhs: object) -> object:
     """Strip a trailing ``>> 8`` from one rhs expression."""
 
     rhs = rhs.strip()
@@ -3762,7 +4099,8 @@ def _stack_rhs_base_8616(rhs: str) -> str:
     return rhs.strip()
 
 
-def _stack_norm_far_offset_8616(off: str) -> str:
+@cython.ccall
+def _stack_norm_far_offset_8616(off: object) -> object:
     """Normalize a far-pointer offset spelling."""
 
     off = off.strip()
@@ -3772,7 +4110,8 @@ def _stack_norm_far_offset_8616(off: str) -> str:
     return off.strip()
 
 
-def _linear_addr_to_mk_fp_8616(addr: int) -> tuple[int, int] | None:
+@cython.ccall
+def _linear_addr_to_mk_fp_8616(addr: cython.longlong) -> object:
     """Return (segment, offset) for a BIOS-data-area linear address."""
 
     if 0x400 <= addr < 0x500:
@@ -3780,6 +4119,7 @@ def _linear_addr_to_mk_fp_8616(addr: int) -> tuple[int, int] | None:
     return None
 
 
+@cython.ccall
 def _rewrite_direct_ss_stack_expr_8616(match: re.Match[str]) -> str:
     """Rewrite a direct ``(ss << 4) + &base`` dereference."""
 
@@ -3791,6 +4131,7 @@ def _rewrite_direct_ss_stack_expr_8616(match: re.Match[str]) -> str:
     return f"*(({match.group('type').strip()} *){addr_expr})"
 
 
+@cython.ccall
 def _rewrite_indexed_ss_local_expr_8616(match: re.Match[str]) -> str:
     """Rewrite an indexed ``(&base)[ss*16 + delta]`` dereference."""
 
@@ -3803,6 +4144,7 @@ def _rewrite_indexed_ss_local_expr_8616(match: re.Match[str]) -> str:
     return f"*((char *){addr_expr})"
 
 
+@cython.ccall
 def _rewrite_byte_walk_loop_8616(match: re.Match[str]) -> str:
     """Rewrite the split-byte pointer-walk loop into a while (*ptr++)."""
 
@@ -3812,8 +4154,12 @@ def _rewrite_byte_walk_loop_8616(match: re.Match[str]) -> str:
     return f"{indent}while (*{ptr}++)\n{indent}{{\n{indent}    {counter} += 1;\n{indent}}}\n"
 
 
-def _immutable_pointer_names_8616(lines: list[str]) -> set[str]:
+@cython.ccall
+def _immutable_pointer_names_8616(lines: object) -> object:
     """Collect const-pointer parameter names from the first function header."""
+    match: object
+    line: object
+    param: object
 
     immutable_pointer_names: set[str] = set()
     for line in lines:
@@ -3835,17 +4181,20 @@ def _immutable_pointer_names_8616(lines: list[str]) -> set[str]:
     return immutable_pointer_names
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _StackAliasResolver8616:
     """Resolve chained vvar/ir/tmp stack-pointer expressions to (base, offset)."""
 
-    seeds: dict[str, tuple[str, int]] = field(default_factory=dict)
-    exprs: dict[str, str] = field(default_factory=dict)
-    cache: dict[str, tuple[str, int] | None] = field(default_factory=dict)
+    seeds: object = field(default_factory=dict)
+    exprs: object = field(default_factory=dict)
+    cache: object = field(default_factory=dict)
 
     @classmethod
-    def collect(cls, lines: list[str]) -> _StackAliasResolver8616:
+    def collect(cls, lines: object) -> _StackAliasResolver8616:
         """Scan seed assignments and chained expressions from the lines."""
+        base_match: object
+        chain_match: object
+        line: object
 
         run = cls()
         for line in lines:
@@ -3861,8 +4210,13 @@ class _StackAliasResolver8616:
                 run.exprs[chain_match.group("name")] = chain_match.group("expr").strip()
         return run
 
-    def resolve(self, expr: str, seen: set[str] | None = None) -> tuple[str, int] | None:
+    @cython.ccall
+    def resolve(self, expr: object, seen: object = None) -> object:
         """Resolve one stack-pointer expression to (base, offset)."""
+        base: object
+        first_match: object
+        sign: object
+        value: object
 
         expr = expr.strip()
         if not expr:
@@ -3892,7 +4246,7 @@ class _StackAliasResolver8616:
         return base[0], offset
 
     @staticmethod
-    def render(base: str, offset: int) -> str:
+    def render(base: object, offset: cython.longlong) -> str:
         """Render a resolved (base, offset) as a pointer expression."""
 
         if offset == 0:
@@ -3901,7 +4255,8 @@ class _StackAliasResolver8616:
         return f"(&{base} {op} {abs(offset)})"
 
 
-def _simplify_x86_16_stack_byte_pointers(c_text: str, metadata: CODProcMetadata | None = None) -> str:
+@cython.ccall
+def _simplify_x86_16_stack_byte_pointers(c_text: object, metadata: CODProcMetadata | None = None) -> object:
     # Text-layer rule:
     # Keep this limited to surface normalization of already-proven address forms.
     # Do not add new stack-alias discovery or sample-specific carrier recovery here.
@@ -3961,9 +4316,10 @@ def _simplify_x86_16_stack_byte_pointers(c_text: str, metadata: CODProcMetadata 
         result += "\n"
     return result
 
+@cython.ccall
 def _rewrite_stack_pointer_store_lines_8616(
     *,
-    lines: list[str],
+    lines: object,
     low_store_re: re.Pattern[str],
     high_store_re: re.Pattern[str],
     low_store_uncast_re: re.Pattern[str],
@@ -3974,8 +4330,8 @@ def _rewrite_stack_pointer_store_lines_8616(
     ss_stack_store_re: re.Pattern[str],
     plain_stack_store_re: re.Pattern[str],
     direct_ss_stack_store_re: re.Pattern[str],
-    stack_pointer_names: set[str],
-    immutable_pointer_names: set[str],
+    stack_pointer_names: object,
+    immutable_pointer_names: object,
     resolve_stack_alias_expr: Callable[[str], tuple[str, int] | None],
     render_stack_pointer_expr: Callable[[str, int], str],
     normalize_far_offset: Callable[[str], str],
@@ -4017,10 +4373,10 @@ def _rewrite_stack_pointer_store_lines_8616(
 
 def _rewrite_stack_pointer_load_patterns_8616(
     *,
-    result: str,
+    result: object,
     segmented_byte_pair_load_re: re.Pattern[str],
     stack_byte_pair_load_re: re.Pattern[str],
-) -> str:
+) -> object:
     result = segmented_byte_pair_load_re.sub(
         lambda match: f"*((unsigned short far *)MK_FP({match.group('seg')}, {match.group('off')}))",
         result,
@@ -4031,7 +4387,7 @@ def _rewrite_stack_pointer_load_patterns_8616(
     )
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _StackPointerLineCtx8616:
     """Shared matchers and rewriters for one stack-pointer line pass."""
 
@@ -4045,8 +4401,8 @@ class _StackPointerLineCtx8616:
     ss_stack_store_re: re.Pattern[str]
     plain_stack_store_re: re.Pattern[str]
     direct_ss_stack_store_re: re.Pattern[str]
-    stack_pointer_names: set[str]
-    immutable_pointer_names: set[str]
+    stack_pointer_names: object
+    immutable_pointer_names: object
     resolve_stack_alias_expr: Callable[[str], tuple[str, int] | None]
     render_stack_pointer_expr: Callable[[str, int], str]
     normalize_far_offset: Callable[[str], str]
@@ -4054,8 +4410,10 @@ class _StackPointerLineCtx8616:
     normalize_rhs: Callable[[str], str]
     rhs_base: Callable[[str], str]
 
-    def try_raw_stack_store(self, current: str) -> tuple[str, int] | None:
+    @cython.ccall
+    def try_raw_stack_store(self, current: object) -> object:
         """Comment out a raw STORE(addr=stack_base...) diagnostic line."""
+        raw_stack_store_match: object
 
         raw_stack_store_match = re.match(
             r"^(?P<indent>\s*)STORE\(addr=stack_base[^\n]*\)\s*$", current
@@ -4064,8 +4422,12 @@ class _StackPointerLineCtx8616:
             return f"{raw_stack_store_match.group('indent')}/* {current.strip().replace('/*', '/ *')} */", 1
         return None
 
-    def try_alias_store(self, current: str) -> tuple[str, int] | None:
+    @cython.ccall
+    def try_alias_store(self, current: object) -> object:
         """Rewrite stores through a resolvable vvar/ir/tmp alias chain."""
+        stack_match: object
+        stack_pointer: object
+        store_re: object
 
         for store_re in (self.ss_stack_store_re, self.plain_stack_store_re):
             stack_match = store_re.match(current)
@@ -4080,8 +4442,10 @@ class _StackPointerLineCtx8616:
                 )
         return None
 
-    def try_direct_ss_store(self, current: str) -> tuple[str, int] | None:
+    @cython.ccall
+    def try_direct_ss_store(self, current: object) -> object:
         """Rewrite a direct ``*(type *)((ss << 4) + &base)`` store."""
+        direct_match: object
 
         direct_match = self.direct_ss_stack_store_re.match(current)
         if direct_match is None:
@@ -4096,9 +4460,10 @@ class _StackPointerLineCtx8616:
             1,
         )
 
+    @cython.ccall
     def _byte_pair_match(
         self, low_match: re.Match[str], high_match: re.Match[str]
-    ) -> tuple[int, str, str] | None:
+    ) -> object:
         """Return (low_off, low_seg, low_rhs) when the pair is a split store."""
 
         low_seg = low_match.group("seg").strip()
@@ -4109,14 +4474,18 @@ class _StackPointerLineCtx8616:
         high_rhs = high_match.group("rhs").strip()
         if not (
             low_seg == high_seg
-            and high_off == low_off + 1
-            and self.rhs_base(high_rhs) == self.normalize_rhs(low_rhs)
+            and operator.eq(high_off, low_off + 1)
+            and operator.eq(self.rhs_base(high_rhs), self.normalize_rhs(low_rhs))
         ):
             return None
         return low_off, low_seg, low_rhs
 
-    def try_cast_byte_pair(self, current: str, next_line: str | None) -> tuple[str, int] | None:
+    @cython.ccall
+    def try_cast_byte_pair(self, current: object, next_line: object) -> object:
         """Coalesce a casted low/high byte-store pair into a word store."""
+        high_match: object
+        low_match: object
+        pair: object
 
         if next_line is None:
             return None
@@ -4133,8 +4502,13 @@ class _StackPointerLineCtx8616:
             2,
         )
 
-    def try_uncast_byte_pair(self, current: str, next_line: str | None) -> tuple[str, int] | None:
+    @cython.ccall
+    def try_uncast_byte_pair(self, current: object, next_line: object) -> object:
         """Coalesce an uncasted low/high byte-store pair into a word store."""
+        high_match: object
+        low_match: object
+        mk_fp_components: object
+        pair: object
 
         if next_line is None:
             return None
@@ -4158,8 +4532,11 @@ class _StackPointerLineCtx8616:
             2,
         )
 
-    def try_far_pointer_store(self, current: str) -> tuple[str, int] | None:
+    @cython.ccall
+    def try_far_pointer_store(self, current: object) -> object:
         """Rewrite a far-pointer store onto a proven stack local."""
+        far_pointer_match: object
+        stack_target_name: object
 
         far_pointer_match = self.far_pointer_store_re.match(current)
         if far_pointer_match is None:
@@ -4178,8 +4555,11 @@ class _StackPointerLineCtx8616:
             1,
         )
 
-    def try_raw_linear_pointer_store(self, current: str) -> tuple[str, int] | None:
+    @cython.ccall
+    def try_raw_linear_pointer_store(self, current: object) -> object:
         """Rewrite a raw linear-address pointer store as MK_FP when known."""
+        mk_fp_components: object
+        raw_match: object
 
         raw_match = self.raw_linear_pointer_store_re.match(current)
         if raw_match is None:
@@ -4198,8 +4578,10 @@ class _StackPointerLineCtx8616:
             1,
         )
 
-    def try_typed_pointer_store(self, current: str) -> tuple[str, int] | None:
+    @cython.ccall
+    def try_typed_pointer_store(self, current: object) -> object:
         """Rewrite a typed ``seg * 16 + off`` store as MK_FP."""
+        pointer_match: object
 
         pointer_match = self.pointer_store_re.match(current)
         if pointer_match is None:
@@ -4218,8 +4600,10 @@ class _StackPointerLineCtx8616:
             1,
         )
 
-    def rewrite_line(self, current: str, next_line: str | None) -> tuple[str, int]:
+    def rewrite_line(self, current: object, next_line: object) -> object:
         """Rewrite one line pair; return (line, lines-consumed)."""
+        rewritten: object
+        attempt: object
 
         attempts: tuple[Callable[[], tuple[str, int] | None], ...] = (
             lambda: self.try_raw_stack_store(current),
@@ -4238,10 +4622,11 @@ class _StackPointerLineCtx8616:
         return current, 1
 
 
+@cython.ccall
 def _rewrite_single_stack_pointer_line_8616(
     *,
-    current: str,
-    next_line: str | None,
+    current: object,
+    next_line: object,
     low_store_re: re.Pattern[str],
     high_store_re: re.Pattern[str],
     low_store_uncast_re: re.Pattern[str],
@@ -4252,15 +4637,15 @@ def _rewrite_single_stack_pointer_line_8616(
     ss_stack_store_re: re.Pattern[str],
     plain_stack_store_re: re.Pattern[str],
     direct_ss_stack_store_re: re.Pattern[str],
-    stack_pointer_names: set[str],
-    immutable_pointer_names: set[str],
+    stack_pointer_names: object,
+    immutable_pointer_names: object,
     resolve_stack_alias_expr: Callable[[str], tuple[str, int] | None],
     render_stack_pointer_expr: Callable[[str, int], str],
     normalize_far_offset: Callable[[str], str],
     linear_address_to_mk_fp_components: Callable[[int], tuple[int, int] | None],
     normalize_rhs: Callable[[str], str],
     rhs_base: Callable[[str], str],
-) -> tuple[str, int]:
+) -> object:
     """Dispatch a single stack-pointer line rewrite."""
 
     ctx = _StackPointerLineCtx8616(
@@ -4285,30 +4670,32 @@ def _rewrite_single_stack_pointer_line_8616(
     )
     return ctx.rewrite_line(current, next_line)
 
-def _format_bp_disp(disp: int) -> str:
+@cython.ccall
+def _format_bp_disp(disp: cython.longlong) -> str:
     if disp >= 0:
         return f"[bp+0x{disp:x}]"
     return f"[bp-0x{-disp:x}]"
 
 
 def _sorted_metadata_stack_aliases(
-    metadata: CODProcMetadata | None,
+    metadata: object,
     *,
-    negatives_last: bool = False,
-) -> list[tuple[int, str]]:
+    negatives_last: cython.bint = False,
+) -> object:
     if metadata is None:
         return []
     aliases = metadata.stack_aliases
     if not aliases:
         return []
     if negatives_last:
-        return sorted(aliases.items(), key=lambda item: (item[0] < 0, item[0], str(item[1])))
-    return sorted(aliases.items(), key=lambda item: (item[0], str(item[1])))
+        return sorted(tuple(aliases.items()), key=lambda item: (item[0] < 0, item[0], str(item[1])))
+    return sorted(tuple(aliases.items()), key=lambda item: (item[0], str(item[1])))
 
 
+@cython.ccall
 def _annotate_cod_proc_output(
-    c_text: str, function: object, metadata: CODProcMetadata | None, *, codegen: object | None = None
-) -> str:
+    c_text: object, function: object, metadata: CODProcMetadata | None, *, codegen: object | None = None
+) -> object:
     return c_text
 
 
@@ -4318,8 +4705,11 @@ _COD_LINE_HEADER_RE_8616 = re.compile(
 )
 
 
-def _alias_replacements_from_metadata_8616(metadata: CODProcMetadata) -> dict[str, str]:
+@cython.ccall
+def _alias_replacements_from_metadata_8616(metadata: CODProcMetadata) -> object:
     """Seed arg_N -> alias replacements from positive stack aliases."""
+    alias: object
+    disp: object
 
     alias_replacements: dict[str, str] = {}
     for disp, alias in _sorted_metadata_stack_aliases(metadata):
@@ -4334,13 +4724,16 @@ def _alias_replacements_from_metadata_8616(metadata: CODProcMetadata) -> dict[st
     return alias_replacements
 
 
+@cython.ccall
 def _collect_header_arg_aliases_8616(
-    line_header_match: re.Match[str] | None,
-    is_function_header_line: bool,
-    local_positive_arg_aliases: list[str],
-    alias_replacements: dict[str, str],
-) -> bool:
+    line_header_match: object,
+    is_function_header_line: cython.bint,
+    local_positive_arg_aliases: object,
+    alias_replacements: object,
+) -> cython.bint:
     """Map header arg names onto positive arg aliases; False = skip line."""
+    arg_index: object
+    part: object
 
     if not (is_function_header_line and local_positive_arg_aliases):
         return False
@@ -4357,13 +4750,17 @@ def _collect_header_arg_aliases_8616(
     return False
 
 
+@cython.ccall
 def _annotate_bp_comment_line_8616(
-    line: str,
+    line: object,
     metadata: CODProcMetadata,
-    positive_aliases: dict[int, str],
-    alias_replacements: dict[str, str],
-) -> str | None:
+    positive_aliases: object,
+    alias_replacements: object,
+) -> object:
     """Annotate a [bp+-0x] comment line; None = skip the line."""
+    decl_match: object
+    match: object
+    stack_alias: object
 
     match = re.search(r"// \[bp([+-])0x([0-9a-f]+)\]", line)
     if match is None:
@@ -4385,29 +4782,34 @@ def _annotate_bp_comment_line_8616(
     return line
 
 
-def _apply_alias_replacements_8616(lines: list[str], alias_replacements: dict[str, str]) -> list[str]:
+def _apply_alias_replacements_8616(lines: object, alias_replacements: object) -> list[str]:
     """Apply collected alias renames across the annotated lines."""
 
     replacement_pattern = re.compile(
         r"(?<![A-Za-z_])("
-        + "|".join(sorted((re.escape(name) for name in alias_replacements), key=len, reverse=True))
+        + "|".join(sorted((re.escape(name) for name in iter(alias_replacements)), key=len, reverse=True))
         + r")(?![A-Za-z_])"
     )
     return [
-        replacement_pattern.sub(lambda m: alias_replacements.get(m.group(1), m.group(1)), line) for line in lines
+        replacement_pattern.sub(lambda m: alias_replacements.get(m.group(1), m.group(1)), line) for line in iter(lines)
     ]
 
 
 def _annotate_cod_lines_with_aliases_8616(
-    c_text: str,
+    c_text: object,
     *,
     metadata: CODProcMetadata,
-    positive_aliases: dict[int, str],
-    positive_arg_aliases: list[str],
-    source_decl: str | None,
-    source_arg_text: str | None,
-) -> list[str]:
-    def _impl() -> list[str]:
+    positive_aliases: object,
+    positive_arg_aliases: object,
+    source_decl: object,
+    source_arg_text: object,
+) -> object:
+    def _impl() -> object:
+        annotated: object
+        line_header_match: object
+        next_line: object
+        index: object
+        line: object
         alias_replacements = _alias_replacements_from_metadata_8616(metadata)
         lines: list[str] = []
         input_lines = c_text.splitlines()
@@ -4458,15 +4860,16 @@ def _annotate_cod_lines_with_aliases_8616(
 
 
 def _rewrite_cod_header_args_line_8616(
-    line: str,
+    line: object,
     *,
-    next_line: str | None,
+    next_line: object,
     metadata: CODProcMetadata,
-    positive_arg_aliases: list[str],
-    source_decl: str | None,
-    source_arg_text: str | None,
-) -> str:
-    def _impl() -> str:
+    positive_arg_aliases: object,
+    source_decl: object,
+    source_arg_text: object,
+) -> object:
+    def _impl() -> object:
+        header_match: object
         if not positive_arg_aliases:
             return line
         header_match = re.match(
@@ -4494,7 +4897,8 @@ def _rewrite_cod_header_args_line_8616(
     return _impl()
 
 
-def _split_source_decl_args_8616(source_decl: str | None, source_arg_text: str | None) -> list[str]:
+@cython.ccall
+def _split_source_decl_args_8616(source_decl: object, source_arg_text: object) -> object:
     if source_decl is not None:
         source_args = _source_decl_args_text_8616(source_decl)
         if source_args and source_args != "void":
@@ -4508,12 +4912,15 @@ def _split_source_decl_args_8616(source_decl: str | None, source_arg_text: str |
 
 def _rewrite_cod_header_arg_parts_8616(
     *,
-    parts: list[str],
-    args_text: str,
-    positive_arg_aliases: list[str],
-) -> tuple[list[str], bool]:
-    def _impl() -> tuple[list[str], bool]:
-        def normalize_arg_text(part: str) -> str:
+    parts: object,
+    args_text: object,
+    positive_arg_aliases: object,
+) -> object:
+    def _impl() -> tuple[list[str], cython.bint]:
+        split: object
+        index: object
+        part: object
+        def normalize_arg_text(part: object) -> object:
             text = part
             text = re.sub(r"\buint16\b", "unsigned short", text)
             text = re.sub(r"\bint16\b", "short", text)
@@ -4524,7 +4931,7 @@ def _rewrite_cod_header_arg_parts_8616(
             text = re.sub(r"\(\s+\*", "(*", text)
             return re.sub(r"\s+", " ", text).strip()
 
-        normalized_candidate_parts = [normalize_arg_text(part) for part in parts]
+        normalized_candidate_parts = [normalize_arg_text(part) for part in iter(parts)]
         candidate_parts = normalized_candidate_parts or parts
         rewritten: list[str] = []
         changed = False
@@ -4534,7 +4941,7 @@ def _rewrite_cod_header_arg_parts_8616(
                 rewritten.append(part)
                 continue
             alias = positive_arg_aliases[index]
-            if split == alias:
+            if operator.eq(split, alias):
                 rewritten.append(part)
                 continue
             rewritten.append(_replace_decl_arg_name_8616(part, split, alias))
@@ -4544,7 +4951,8 @@ def _rewrite_cod_header_arg_parts_8616(
     return _impl()
 
 
-def _finalize_cod_annotation_text_8616(c_text: str, metadata: CODProcMetadata) -> str:
+@cython.ccall
+def _finalize_cod_annotation_text_8616(c_text: object, metadata: CODProcMetadata) -> object:
     c_text = _prune_unused_staging_assignments(c_text)
     c_text = _simplify_x86_16_stack_references(c_text)
     c_text = _normalize_mk_fp_segment_names(c_text, metadata)
@@ -4563,7 +4971,9 @@ class _StagingAssignmentRhsEffect8616(Enum):
     CALL_LIKE = "call_like"
 
 
-def _classify_staging_assignment_rhs_effect_8616(rhs: str) -> _StagingAssignmentRhsEffect8616:
+@cython.ccall
+def _classify_staging_assignment_rhs_effect_8616(rhs: object) -> _StagingAssignmentRhsEffect8616:
+    match: object
     if not isinstance(rhs, str) or not rhs.strip():
         return _StagingAssignmentRhsEffect8616.PURE
     call_like_re = re.compile(r"(?<![A-Za-z_])(?P<name>[A-Za-z_]\w*)\s*\(")
@@ -4574,8 +4984,11 @@ def _classify_staging_assignment_rhs_effect_8616(rhs: str) -> _StagingAssignment
     return _StagingAssignmentRhsEffect8616.PURE
 
 
-def _prune_standalone_memory_helper_reads_text(c_text: str) -> str:
+@cython.ccall
+def _prune_standalone_memory_helper_reads_text(c_text: object) -> object:
     """Drop pure generated memory-helper reads left behind after lowering."""
+    match: object
+    line: object
     lines = c_text.splitlines()
     if not lines:
         return c_text
@@ -4616,15 +5029,21 @@ _STAGING_SELF_ADDR_RE_8616 = re.compile(r"^\s*(?P<name>[A-Za-z_]\w*)\s*=\s*&\s*(
 _STAGING_IDENT_RE_8616 = re.compile(r"\b[A-Za-z_]\w*\b")
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _StagingPrunePass8616:
     """One staging-assignment prune pass over the current text lines."""
 
-    ident_use_counts: dict[str, int] = field(default_factory=dict)
-    used_names: dict[str, int] = field(default_factory=dict)
+    ident_use_counts: object = field(default_factory=dict)
+    used_names: object = field(default_factory=dict)
 
-    def collect_uses(self, lines: list[str]) -> None:
+    @cython.ccall
+    def collect_uses(self, lines: object) -> None:
         """Count identifier and staging-name uses across the lines."""
+        assign_match: object
+        decl_match: object
+        ident: object
+        line: object
+        name: object
 
         for line in lines:
             for ident in _STAGING_IDENT_RE_8616.findall(line):
@@ -4648,8 +5067,10 @@ class _StagingPrunePass8616:
             for name in _STAGING_NAME_RE_8616.findall(line):
                 self.used_names[name] = self.used_names.get(name, 0) + 1
 
-    def _try_generic_dead_carrier(self, stripped: str) -> bool:
+    @cython.ccall
+    def _try_generic_dead_carrier(self, stripped: object) -> cython.bint:
         """Drop an assignment whose lhs is a dead raw-fragment carrier."""
+        generic_match: object
 
         generic_match = _STAGING_GENERIC_ASSIGN_RE_8616.match(stripped)
         if generic_match is None or _STAGING_RAW_REGISTER_FRAG_RE_8616.search(generic_match.group("rhs")) is None:
@@ -4659,8 +5080,11 @@ class _StagingPrunePass8616:
         # a dead carrier of raw register-fragment text.
         return self.ident_use_counts.get(lhs_name, 0) <= 2
 
-    def prune(self, lines: list[str]) -> tuple[list[str], bool]:
+    @cython.ccall
+    def prune(self, lines: object) -> tuple[list[str], cython.bint]:
         """Drop unused staging assigns; keep call-like rhs effects."""
+        match: object
+        line: object
 
         kept_lines: list[str] = []
         changed = False
@@ -4688,13 +5112,13 @@ class _StagingPrunePass8616:
         return kept_lines, changed
 
 
-def _prune_unused_staging_assignments(c_text: str) -> str:
+def _prune_unused_staging_assignments(c_text: object) -> object:
     """Prune legacy text-only staging assignments while preserving observed values."""
 
     current = c_text
     while True:
         lines = current.splitlines()
-        if not any(_STAGING_NAME_RE_8616.search(line) for line in lines):
+        if not any(_STAGING_NAME_RE_8616.search(line) for line in iter(lines)):
             return current
         run = _StagingPrunePass8616()
         run.collect_uses(lines)
@@ -4717,8 +5141,11 @@ _SHADOW_FUNC_PTR_RE_8616 = re.compile(
 )
 
 
-def _shadow_function_arg_names_8616(out: list[str], idx: int) -> tuple[set[str], int] | None:
+@cython.ccall
+def _shadow_function_arg_names_8616(out: object, idx: cython.longlong) -> object:
     """Return (arg_names, brace_idx) for the function at idx, else None."""
+    args_text: object
+    m: object
 
     m = _SHADOW_HEADER_RE_8616.match(out[idx])
     if m is not None:
@@ -4741,7 +5168,8 @@ def _shadow_function_arg_names_8616(out: list[str], idx: int) -> tuple[set[str],
     return arg_names, brace_idx
 
 
-def _shadow_body_end_8616(out: list[str], brace_idx: int) -> int:
+@cython.ccall
+def _shadow_body_end_8616(out: object, brace_idx: cython.longlong) -> cython.longlong:
     """Return the exclusive end of the body opened at brace_idx."""
 
     body_end = brace_idx + 1
@@ -4752,10 +5180,12 @@ def _shadow_body_end_8616(out: list[str], brace_idx: int) -> int:
     return body_end
 
 
+@cython.ccall
 def _prune_shadow_decls_in_body_8616(
-    out: list[str], body_start: int, body_end: int, arg_names: set[str]
-) -> tuple[int, bool]:
+    out: object, body_start: cython.longlong, body_end: cython.longlong, arg_names: object
+) -> tuple[cython.longlong, cython.bint]:
     """Delete declarations that shadow parameter names; return (end, changed)."""
+    dm: object
 
     scan = body_start
     changed = False
@@ -4777,8 +5207,10 @@ def _prune_shadow_decls_in_body_8616(
     return body_end, changed
 
 
-def _prune_parameter_shadow_declarations_text(c_text: str) -> str:
+@cython.ccall
+def _prune_parameter_shadow_declarations_text(c_text: object) -> object:
     """Drop local declarations that shadow function parameter names."""
+    located: object
 
     lines = c_text.splitlines()
     if not lines:
@@ -4822,8 +5254,11 @@ _FRAG_DECL_RE_8616 = re.compile(
 _FRAG_LHS_ASSIGN_RE_8616 = re.compile(r"^\s*(?P<lhs>[A-Za-z_]\w*)\s*=\s*.*;\s*$")
 
 
-def _frag_declared_names_8616(lines: list[str]) -> set[str]:
+@cython.ccall
+def _frag_declared_names_8616(lines: object) -> object:
     """Collect declared names from decl-shaped lines."""
+    dm: object
+    line: object
 
     declared: set[str] = set()
     for line in lines:
@@ -4833,27 +5268,35 @@ def _frag_declared_names_8616(lines: list[str]) -> set[str]:
     return declared
 
 
-def _frag_read_usage_8616(lines: list[str]) -> dict[str, int]:
+@cython.ccall
+def _frag_read_usage_8616(lines: object) -> object:
     """Count non-lhs identifier reads across non-decl lines."""
+    dm: object
+    lhs_name: object
+    lm: object
+    line: object
+    name: object
 
-    read_usage: dict[str, int] = {}
+    read_usage: dict[str, cython.longlong] = {}
     for line in lines:
         dm = _FRAG_DECL_RE_8616.match(line)
         if dm is not None:
             continue
-        lhs_name: str | None = None
+        lhs_name = None
         lm = _FRAG_LHS_ASSIGN_RE_8616.match(line)
         if lm is not None:
             lhs_name = lm.group("lhs")
         for name in _FRAG_IDENT_RE_8616.findall(line):
-            if lhs_name is not None and name == lhs_name:
+            if lhs_name is not None and operator.eq(name, lhs_name):
                 continue
             read_usage[name] = read_usage.get(name, 0) + 1
     return read_usage
 
 
-def _frag_carrier_line_dropped_8616(line: str, declared: set[str], read_usage: dict[str, int]) -> bool:
+@cython.ccall
+def _frag_carrier_line_dropped_8616(line: object, declared: object, read_usage: object) -> cython.bint:
     """Return whether the line is a dead undefined-fragment carrier assign."""
+    am: object
 
     am = _FRAG_ASSIGN_RE_8616.match(line.strip())
     if am is None:
@@ -4866,10 +5309,16 @@ def _frag_carrier_line_dropped_8616(line: str, declared: set[str], read_usage: d
     return read_usage.get(lhs, 0) == 0 and (rhs_is_undefined_fragment or rhs_is_dead_carrier_arithmetic)
 
 
-def _frag_live_assigns_reads_8616(out: list[str]) -> tuple[dict[str, int], set[str]]:
+@cython.ccall
+def _frag_live_assigns_reads_8616(out: object) -> tuple[dict[str, cython.longlong], set[str]]:
     """Count live reads and assigned names after the carrier prune."""
+    dm: object
+    lhs_name: object
+    lm: object
+    line: object
+    name: object
 
-    live_reads: dict[str, int] = {}
+    live_reads: dict[str, cython.longlong] = {}
     live_assigns: set[str] = set()
     for line in out:
         dm = _FRAG_DECL_RE_8616.match(line)
@@ -4882,14 +5331,17 @@ def _frag_live_assigns_reads_8616(out: list[str]) -> tuple[dict[str, int], set[s
             if lhs_name is not None:
                 live_assigns.add(lhs_name)
         for name in _FRAG_IDENT_RE_8616.findall(line):
-            if lhs_name is not None and name == lhs_name:
+            if lhs_name is not None and operator.eq(name, lhs_name):
                 continue
             live_reads[name] = live_reads.get(name, 0) + 1
     return live_reads, live_assigns
 
 
-def _prune_undefined_fragment_carrier_assignments_text(c_text: str) -> str:
+@cython.ccall
+def _prune_undefined_fragment_carrier_assignments_text(c_text: object) -> object:
     """Drop assignments that only carry unresolvable register-fragment text."""
+    dm: object
+    line: object
 
     lines = c_text.splitlines()
     if not lines:
@@ -4923,7 +5375,8 @@ def _prune_undefined_fragment_carrier_assignments_text(c_text: str) -> str:
         normalized += "\n"
     return normalized
 
-def _prune_non_lvalue_arithmetic_assignments(c_text: str) -> str:
+@cython.ccall
+def _prune_non_lvalue_arithmetic_assignments(c_text: object) -> object:
     """Preserve assignment effects at the legacy text-cleanup boundary.
 
     Compatibility only: retire this entry point with its formatter callers.
@@ -4941,8 +5394,11 @@ _SEG_OFF_HEADER_RE_8616 = re.compile(
 )
 
 
-def _seg_off_rewritten_args_8616(args: str, body: str) -> str:
+@cython.ccall
+def _seg_off_rewritten_args_8616(args: object, body: object) -> object:
     """Rewrite ``void*`` args used as seg-offset to ``unsigned short``."""
+    used_as_seg_off: object
+    am: object
 
     rewritten = args
     for am in re.finditer(r"\bvoid\s*\*\s*(?P<arg>[A-Za-z_]\w*)\b", args):
@@ -4961,11 +5417,14 @@ def _seg_off_rewritten_args_8616(args: str, body: str) -> str:
     return rewritten
 
 
-def _normalize_seg_offset_void_pointer_args_text(c_text: str) -> str:
+def _normalize_seg_offset_void_pointer_args_text(c_text: object) -> object:
     # Normalize nested address-index carriers produced by stack/materialization
     # lanes into scalar offset expressions accepted by C compilers:
     #   &(&v2)[52700 + v6] -> (52700 + v6)
-    def _impl() -> str:
+    def _impl() -> object:
+        m: object
+        idx: object
+        line: object
         nonlocal c_text
         c_text = re.sub(
             r"&\s*\(\s*&\s*[A-Za-z_]\w*\s*\)\s*\[\s*([^\]]+?)\s*\]",
@@ -5002,7 +5461,7 @@ def _normalize_seg_offset_void_pointer_args_text(c_text: str) -> str:
     return _impl()
 
 
-def _normalize_shift_add_precedence_in_assignments(c_text: str) -> str:
+def _normalize_shift_add_precedence_in_assignments(c_text: object) -> str:
     """Normalize assignment RHS expressions that parse incorrectly without explicit parentheses.
 
     Examples:
@@ -5010,7 +5469,8 @@ def _normalize_shift_add_precedence_in_assignments(c_text: str) -> str:
     """
     assign_re = re.compile(r"^(?P<indent>\s*)(?P<lhs>[^=;]+?)\s*=\s*(?P<rhs>[^;]+);\s*$")
 
-    def _rewrite_match(match: re.Match[str]) -> str:
+    def _rewrite_match(match: re.Match[str]) -> object:
+        full_match: object
         rhs = match.group("rhs").strip()
         full_match = re.fullmatch(r"(?P<base>.+?)\+\s*1\s*>>\s*8", rhs)
         if full_match is None:
@@ -5023,17 +5483,17 @@ def _normalize_shift_add_precedence_in_assignments(c_text: str) -> str:
         return f"{match.group('indent')}{match.group('lhs').strip()} = ({base_expr} + 1) >> 8;"
 
     lines = c_text.splitlines()
-    rewritten = [_rewrite_match(match) if (match := assign_re.match(line)) else line for line in lines]
+    rewritten = [_rewrite_match(match) if (match := assign_re.match(line)) else line for line in iter(lines)]
     return "\n".join(rewritten)
 
 
-def _normalize_unsupported_computed_goto_text(c_text: str) -> str:
+def _normalize_unsupported_computed_goto_text(c_text: object) -> object:
     """Rewrite GCC-style computed goto into a compilable conservative fallback.
 
     MS C does not support ``goto <expression>;`` forms.
     """
 
-    def _replace(match: re.Match[str]) -> str:
+    def _replace(match: re.Match[str]) -> object:
         indent = match.group("indent")
         expr = match.group("expr").strip()
         if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", expr):
@@ -5044,7 +5504,8 @@ def _normalize_unsupported_computed_goto_text(c_text: str) -> str:
     return pattern.sub(_replace, c_text)
 
 
-def _rewrite_known_helper_signature_text(c_text: str, function: object, *, codegen: object | None = None) -> str:
+@cython.ccall
+def _rewrite_known_helper_signature_text(c_text: object, function: object, *, codegen: object | None = None) -> object:
     """Preserve typed recovery; a helper label cannot authorize ABI text changes.
 
     Compatibility entry point only. Prototype evidence belongs in Types/Lowering,
@@ -5053,15 +5514,20 @@ def _rewrite_known_helper_signature_text(c_text: str, function: object, *, codeg
     return c_text
 
 
-def _compile_function_header_pattern_8616(func_name: str) -> re.Pattern[str]:
+@cython.ccall
+def _compile_function_header_pattern_8616(func_name: object) -> re.Pattern[str]:
     return re.compile(
         rf"^(?P<indent>\s*)(?P<ret>[A-Za-z_][\w\s\*\[\]]*?)\s+{re.escape(func_name)}\s*\((?P<args>[^()]*)\)\s*(?P<suffix>[{{;]?)\s*$"
     )
 
 
+@cython.ccall
 def _find_function_body_open_8616(
-    lines: list[str], header_pattern: re.Pattern[str]
+    lines: object, header_pattern: re.Pattern[str]
 ) -> tuple[int | None, int | None]:
+    match: object
+    index: object
+    line: object
     for index, line in enumerate(lines):
         match = header_pattern.match(line)
         if match is None:
@@ -5074,13 +5540,16 @@ def _find_function_body_open_8616(
     return None, None
 
 
-def _split_c_signature_args_8616(arg_text: str) -> list[str]:
+@cython.ccall
+def _split_c_signature_args_8616(arg_text: object) -> object:
     """Split a signature arg list at top-level commas."""
 
     return _split_args_8616(arg_text)
 
 
-def _decl_arg_name_8616(arg_text: str) -> str | None:
+@cython.ccall
+def _decl_arg_name_8616(arg_text: object) -> object:
+    fnptr_match: object
     text = arg_text.rstrip()
     if not text or text in {"void", "..."}:
         return None
@@ -5100,7 +5569,10 @@ def _decl_arg_name_8616(arg_text: str) -> str | None:
     return name if prefix.strip() else None
 
 
-def _replace_decl_arg_name_8616(arg_text: str, old_name: str, new_name: str) -> str:
+@cython.ccall
+def _replace_decl_arg_name_8616(arg_text: object, old_name: object, new_name: object) -> object:
+    fnptr_match: object
+    name_match: object
     fnptr_match = re.search(r"\(\s*\*\s*" + re.escape(old_name) + r"\s*\)", arg_text)
     if fnptr_match is not None:
         start, end = fnptr_match.span()
@@ -5112,7 +5584,10 @@ def _replace_decl_arg_name_8616(arg_text: str, old_name: str, new_name: str) -> 
     return f"{arg_text[: name_match.start()]}{new_name}{arg_text[name_match.end() :]}"
 
 
-def _annotated_bp_arg_names_8616(lines_before_header: list[str]) -> list[str]:
+@cython.ccall
+def _annotated_bp_arg_names_8616(lines_before_header: object) -> object:
+    match: object
+    line: object
     names: list[str] = []
     for line in lines_before_header:
         match = re.match(r"^\s*\*\s+\[bp\+(?P<disp>0x[0-9a-f]+)\]\s*=\s*(?P<name>[A-Za-z_][\w$?@]*)\s*$", line)
@@ -5121,7 +5596,8 @@ def _annotated_bp_arg_names_8616(lines_before_header: list[str]) -> list[str]:
     return names
 
 
-def _find_body_end_index_8616(lines: list[str], body_open_index: int) -> int:
+@cython.ccall
+def _find_body_end_index_8616(lines: object, body_open_index: cython.longlong) -> cython.longlong:
     body_end = body_open_index + 1
     brace_depth = lines[body_open_index].count("{") - lines[body_open_index].count("}")
     while body_end < len(lines) and brace_depth > 0:
@@ -5130,10 +5606,13 @@ def _find_body_end_index_8616(lines: list[str], body_open_index: int) -> int:
     return body_end
 
 
+@cython.ccall
 def _rename_identifiers_in_body_8616(
-    lines: list[str], start: int, end: int, renamed_pairs: list[tuple[str, str]]
+    lines: object, start: cython.longlong, end: cython.longlong, renamed_pairs: object
 ) -> None:
-    rename_patterns = [(re.compile(rf"(?<![A-Za-z_]){re.escape(old)}(?![A-Za-z_])"), new) for old, new in renamed_pairs]
+    new: object
+    pattern: object
+    rename_patterns = [(re.compile(rf"(?<![A-Za-z_]){re.escape(old)}(?![A-Za-z_])"), new) for old, new in iter(renamed_pairs)]
     for index in range(start, end):
         line = lines[index]
         for pattern, new in rename_patterns:
@@ -5141,7 +5620,7 @@ def _rename_identifiers_in_body_8616(
         lines[index] = line
 
 
-def _remove_missing_arg_decls_8616(lines: list[str], start: int, end: int, helper_arg_names: tuple[str, ...]) -> None:
+def _remove_missing_arg_decls_8616(lines: object, start: cython.longlong, end: cython.longlong, helper_arg_names: object) -> None:
     helper_arg_name_set = set(helper_arg_names)
     for index in range(start, end):
         line = lines[index]
@@ -5149,7 +5628,7 @@ def _remove_missing_arg_decls_8616(lines: list[str], start: int, end: int, helpe
             continue
         stripped = line.strip()
         if any(
-            re.match(rf"^<missing-[^>]+>\s+{re.escape(arg)}\s*;\s*(?://.*)?$", stripped) for arg in helper_arg_name_set
+            re.match(rf"^<missing-[^>]+>\s+{re.escape(arg)}\s*;\s*(?://.*)?$", stripped) for arg in iter(helper_arg_name_set)
         ):
             lines[index] = ""
 
@@ -5176,10 +5655,12 @@ _UNUSED_LOCAL_SKIP_PREFIXES_8616 = (
 )
 
 
+@cython.ccall
 def _unused_local_block_span_8616(
-    lines: list[str], index: int
-) -> tuple[int, int, int] | None:
+    lines: object, index: cython.longlong
+) -> object:
     """Return (brace_index, scan_index, body_end) for the body after index."""
+    brace_index: object
 
     brace_index = None
     scan_index = index
@@ -5201,12 +5682,14 @@ def _unused_local_block_span_8616(
     return brace_index, scan_index, body_end
 
 
+@cython.ccall
 def _unused_local_decl_names_8616(
-    lines: list[str], body_start: int, body_end: int
-) -> list[tuple[int, str]]:
+    lines: object, body_start: cython.longlong, body_end: cython.longlong
+) -> object:
     """Collect (line index, name) of removably-shaped local declarations."""
+    decl_match: object
 
-    local_decl_names: list[tuple[int, str]] = []
+    local_decl_names: list[tuple[cython.longlong, str]] = []
     for scan_index in range(body_start, body_end):
         stripped_line = lines[scan_index].lstrip()
         if stripped_line.startswith(_UNUSED_LOCAL_SKIP_PREFIXES_8616):
@@ -5219,12 +5702,14 @@ def _unused_local_decl_names_8616(
     return local_decl_names
 
 
+@cython.ccall
 def _body_identifier_counts_8616(
-    lines: list[str], body_start: int, body_end: int, declaration_indexes: set[int]
-) -> dict[str, int]:
+    lines: object, body_start: cython.longlong, body_end: cython.longlong, declaration_indexes: object
+) -> object:
     """Count identifier uses across non-declaration body lines."""
+    token_match: object
 
-    body_identifier_counts: dict[str, int] = {}
+    body_identifier_counts: dict[str, cython.longlong] = {}
     for scan_index in range(body_start, body_end):
         if scan_index in declaration_indexes:
             continue
@@ -5235,18 +5720,21 @@ def _body_identifier_counts_8616(
     return body_identifier_counts
 
 
+@cython.ccall
 def _unused_locals_removal_8616(
-    lines: list[str], body_start: int, body_end: int, arg_names: set[str]
-) -> tuple[list[str], bool]:
+    lines: object, body_start: cython.longlong, body_end: cython.longlong, arg_names: object
+) -> tuple[list[str], cython.bint]:
     """Remove unused local decls in the body span; (lines, removed)."""
+    line_index: object
+    name: object
 
     local_decl_names = _unused_local_decl_names_8616(lines, body_start, body_end)
     if not local_decl_names:
         return lines, False
 
-    declaration_indexes = {line_index for line_index, _name in local_decl_names}
+    declaration_indexes = {line_index for line_index, _name in iter(local_decl_names)}
     body_identifier_counts = _body_identifier_counts_8616(lines, body_start, body_end, declaration_indexes)
-    removed_indexes: set[int] = set()
+    removed_indexes: set[cython.longlong] = set()
     for line_index, name in local_decl_names:
         if name in arg_names:
             continue
@@ -5254,13 +5742,17 @@ def _unused_locals_removal_8616(
             removed_indexes.add(line_index)
     if not removed_indexes:
         return lines, False
-    return [line for idx, line in enumerate(lines) if idx not in removed_indexes], True
+    return [line for idx, line in builtins.iter(enumerate(lines)) if idx not in removed_indexes], True
 
 
+@cython.ccall
 def _prune_unused_locals_block_8616(
-    lines: list[str], index: int
-) -> tuple[list[str], int, bool]:
+    lines: object, index: cython.longlong
+) -> tuple[list[str], cython.longlong, cython.bint]:
     """Remove unused local decls in one function body; (lines, index, changed)."""
+    args_text: object
+    match: object
+    span: object
 
     match = _UNUSED_LOCAL_HEADER_RE_8616.match(lines[index])
     args_text = match.group("args") if match is not None else _function_definition_args_text_8616(lines[index])
@@ -5290,7 +5782,8 @@ def _prune_unused_locals_block_8616(
     return pruned_lines, 0, True
 
 
-def _prune_unused_local_declarations_text(c_text: str) -> str:
+@cython.ccall
+def _prune_unused_local_declarations_text(c_text: object) -> object:
     """Drop local declarations whose names are never referenced in the body."""
 
     trailing_newline = c_text.endswith("\n")
@@ -5310,8 +5803,10 @@ def _prune_unused_local_declarations_text(c_text: str) -> str:
         normalized += "\n"
     return normalized
 
-def _helper_literal_mappings_8616(project: angr.Project) -> dict[str, str]:
+@cython.ccall
+def _helper_literal_mappings_8616(project: angr.Project) -> object:
     """Map literal address spellings to sim-procedure helper names."""
+    addr: object
 
     mappings: dict[str, str] = {}
     for addr in _dynamic_text_attr(project, "_sim_procedures", {}):
@@ -5324,8 +5819,11 @@ def _helper_literal_mappings_8616(project: angr.Project) -> dict[str, str]:
     return mappings
 
 
-def _apply_wrapper_calls_8616(project: angr.Project, function: object, c_text: str) -> str:
+@cython.ccall
+def _apply_wrapper_calls_8616(project: angr.Project, function: object, c_text: object) -> object:
     """Replace ``CallReturn();`` markers with interrupt wrapper call text."""
+    wrapper_entry: object
+    sig: object
 
     wrapper_cache = _dynamic_text_attr(project, "_inertia_interrupt_wrappers", None)
     if not isinstance(wrapper_cache, dict):
@@ -5340,8 +5838,11 @@ def _apply_wrapper_calls_8616(project: angr.Project, function: object, c_text: s
     return c_text
 
 
-def _apply_int21_helper_replacements_8616(replacements: list[str], c_text: str) -> str:
+@cython.ccall
+def _apply_int21_helper_replacements_8616(replacements: object, c_text: object) -> object:
     """Apply the first matching helper-name pattern per replacement."""
+    pattern: object
+    replacement: object
 
     for replacement in replacements:
         helper_name = replacement.split("(", 1)[0]
@@ -5361,11 +5862,14 @@ def _apply_int21_helper_replacements_8616(replacements: list[str], c_text: str) 
     return c_text
 
 
-def _apply_interrupt_replacements_8616(interrupt_replacements: Mapping[str, Sequence[str]], c_text: str) -> str:
+def _apply_interrupt_replacements_8616(interrupt_replacements: Mapping[str, Sequence[str]], c_text: object) -> object:
     """Apply one replacement per interrupt source name (longest first)."""
+    replacement: object
+    source_name: object
+    source_replacements: object
 
     for source_name, source_replacements in sorted(
-        interrupt_replacements.items(), key=lambda item: len(item[0]), reverse=True
+        tuple(interrupt_replacements.items()), key=lambda item: len(item[0]), reverse=True
     ):
         for replacement in source_replacements:
             c_text, count = re.subn(
@@ -5382,18 +5886,20 @@ def _apply_interrupt_replacements_8616(interrupt_replacements: Mapping[str, Sequ
 def _format_known_helper_calls(
     project: angr.Project,
     function: object,
-    c_text: str,
-    api_style: str,
+    c_text: object,
+    api_style: object,
     binary_path: Path | None,
     cod_metadata: CODProcMetadata | None = None,
     codegen: object | None = None,
-) -> str:
+) -> object:
     """Preserve legacy helper rendering; new semantic recovery belongs to X86_16."""
-    def _impl() -> str:
+    def _impl() -> object:
         """Keep the existing helper replacement and declaration order unchanged."""
+        literal: object
+        name: object
         nonlocal c_text
         mappings = _helper_literal_mappings_8616(project)
-        for literal, name in sorted(mappings.items(), key=lambda item: len(item[0]), reverse=True):
+        for literal, name in sorted(tuple(mappings.items()), key=lambda item: len(item[0]), reverse=True):
             c_text = re.sub(rf"(?<![A-Za-z_]){re.escape(literal)}(?=\s*\()", name, c_text)
 
         c_text = _apply_wrapper_calls_8616(project, function, c_text)
@@ -5427,8 +5933,10 @@ _FALLTHROUGH_TERMINAL_RETURN_RE_8616 = re.compile(r"^return\s+(?P<expr>[A-Za-z_]
 _FALLTHROUGH_ANY_RETURN_RE_8616 = re.compile(r"return(?:\s+.+)?;\s*")
 
 
-def _fallthrough_header_match_8616(lines: list[str]) -> re.Match[str] | None:
+@cython.ccall
+def _fallthrough_header_match_8616(lines: object) -> re.Match[str] | None:
     """Find the last function-header-shaped line."""
+    match: object
 
     for idx in range(len(lines) - 1, -1, -1):
         match = _FALLTHROUGH_HEADER_RE_8616.match(lines[idx].strip())
@@ -5437,10 +5945,13 @@ def _fallthrough_header_match_8616(lines: list[str]) -> re.Match[str] | None:
     return None
 
 
-def _fallthrough_return_candidates_8616(body_text: str) -> list[tuple[int, int, str]]:
+@cython.ccall
+def _fallthrough_return_candidates_8616(body_text: object) -> object:
     """Collect (priority, assign_count, name) for ax/dx/al/ah-annotated decls."""
+    priority: object
+    line: object
 
-    candidates: list[tuple[int, int, str]] = []
+    candidates: list[tuple[cython.longlong, cython.longlong, str]] = []
     for line in body_text.splitlines():
         stripped = line.strip()
         if not stripped.startswith(("unsigned short", "char", "short", "int")):
@@ -5467,7 +5978,8 @@ def _fallthrough_return_candidates_8616(body_text: str) -> list[tuple[int, int, 
     return candidates
 
 
-def _fallthrough_terminal_index_8616(body_lines: list[str]) -> int | None:
+@cython.ccall
+def _fallthrough_terminal_index_8616(body_lines: object) -> int | None:
     """Index of the last non-trivial, non-comment body line."""
 
     for line_index in range(len(body_lines) - 1, -1, -1):
@@ -5478,10 +5990,13 @@ def _fallthrough_terminal_index_8616(body_lines: list[str]) -> int | None:
     return None
 
 
+@cython.ccall
 def _fallthrough_terminal_result_8616(
-    body_lines: list[str], closing_brace: str, return_name: str, c_text: str
-) -> str | None:
+    body_lines: object, closing_brace: object, return_name: object, c_text: object
+) -> object:
     """Resolve the terminal-line case; None means append a new return."""
+    terminal_index: object
+    terminal_return: object
 
     terminal_index = _fallthrough_terminal_index_8616(body_lines)
     if terminal_index is not None:
@@ -5500,8 +6015,10 @@ def _fallthrough_terminal_result_8616(
     return None
 
 
-def _repair_missing_fallthrough_returns(c_text: str) -> str:
-    def _impl() -> str:
+def _repair_missing_fallthrough_returns(c_text: object) -> object:
+    def _impl() -> object:
+        header_match: object
+        terminal_result: object
         nonlocal c_text
         c_text = re.sub(
             r"(?m)^(?P<indent>\s*)if \((?P<cond>[^\n]+)\)\s*(?=\n\s*(?:\}|$))",
@@ -5549,8 +6066,11 @@ _BOOL_IF_LINE_RE_8616 = re.compile(r"^(?P<indent>\s*)if \((?P<cond>[^\n]+)\)\s*$
 _BOOL_ELSE_LINE_RE_8616 = re.compile(r"^(?P<indent>\s*)else\s*$")
 
 
-def _repair_empty_if_else_gaps_8616(text: str) -> str:
+@cython.ccall
+def _repair_empty_if_else_gaps_8616(text: object) -> object:
     """Fill empty if/else bodies with braces so old C compilers accept them."""
+    else_match: object
+    match: object
 
     lines = text.splitlines()
     if not lines:
@@ -5567,7 +6087,7 @@ def _repair_empty_if_else_gaps_8616(text: str) -> str:
             continue
 
         else_match = _BOOL_ELSE_LINE_RE_8616.match(lines[index + 1])
-        if else_match is None or else_match.group("indent") != match.group("indent"):
+        if else_match is None or operator.ne(else_match.group("indent"), match.group("indent")):
             out.append(line)
             index += 1
             continue
@@ -5597,7 +6117,7 @@ def _repair_empty_if_else_gaps_8616(text: str) -> str:
     return "\n".join(out) + suffix
 
 
-def _normalize_boolean_conditions(c_text: str) -> str:
+def _normalize_boolean_conditions(c_text: object) -> object:
     plus_not_pattern = re.compile(
         r"(?m)^(?P<indent>\s*)(?P<kind>if|while) \(!(?P<lhs>[A-Za-z_][\w$?@]*) \+ (?P<rhs>0x[0-9a-fA-F]+|\d+)\)$"
     )
@@ -5623,9 +6143,9 @@ def _normalize_boolean_conditions(c_text: str) -> str:
         r"(?m)^(?P<indent>\s*)(?P<kind>if|while) \((?P<condition>!\(\(.+\)\))\)(?P<suffix>.*)$"
     )
 
-    def _rewrite_control_ternary(match: re.Match[str]) -> str:
+    def _rewrite_control_ternary(match: re.Match[str]) -> object:
         simplified = _simplify_negated_zero_one_ternary_condition_8616(match.group("condition"))
-        if simplified == match.group("condition"):
+        if operator.eq(simplified, match.group("condition")):
             return match.group(0)
         return f"{match.group('indent')}{match.group('kind')} ({simplified}){match.group('suffix')}"
 
@@ -5633,12 +6153,13 @@ def _normalize_boolean_conditions(c_text: str) -> str:
 
     for_ternary_pattern = re.compile(r"(?m)^(?P<indent>\s*)for \((?P<header>.+)\)(?P<suffix>.*)$")
 
-    def _rewrite_for_ternary(match: re.Match[str]) -> str:
+    def _rewrite_for_ternary(match: re.Match[str]) -> object:
+        parts: object
         parts = _split_for_header_8616(match.group("header"))
         if parts is None:
             return match.group(0)
         simplified = _simplify_negated_zero_one_ternary_condition_8616(parts[1])
-        if simplified == parts[1]:
+        if operator.eq(simplified, parts[1]):
             return match.group(0)
         return f"{match.group('indent')}for ({parts[0]}; {simplified}; {parts[2]}){match.group('suffix')}"
 
@@ -5691,11 +6212,14 @@ def _normalize_boolean_conditions(c_text: str) -> str:
     return rewritten
 
 
-def _normalize_mk_fp_segment_names(c_text: str, metadata: CODProcMetadata | None) -> str:
+@cython.ccall
+def _normalize_mk_fp_segment_names(c_text: object, metadata: CODProcMetadata | None) -> object:
     return c_text
 
 
-def _simplify_x86_16_stack_references(c_text: str) -> str:
+def _simplify_x86_16_stack_references(c_text: object) -> object:
+    match: object
+    line: object
     lines = c_text.splitlines()
     if not lines:
         return c_text
@@ -5704,7 +6228,7 @@ def _simplify_x86_16_stack_references(c_text: str) -> str:
         r"^\s*(?P<decl>[A-Za-z_][\w\s\*\[\]]*?)\s+(?P<name>[A-Za-z_][\w$?@]*)\s*;\s*// \[bp(?P<sign>[+-])0x(?P<value>[0-9A-Fa-f]+)\](?P<suffix>.*)$"
     )
 
-    offset_to_name: dict[int, str] = {}
+    offset_to_name: dict[cython.longlong, str] = {}
     for line in lines:
         match = decl_re.match(line)
         if match is None:
@@ -5718,7 +6242,8 @@ def _simplify_x86_16_stack_references(c_text: str) -> str:
     if not offset_to_name:
         return c_text
 
-    def _replace(match: re.Match[str]) -> str:
+    def _replace(match: re.Match[str]) -> object:
+        name: object
         sign = match.group("sign")
         value = int(match.group("value"), 0)
         offset = value if sign == "+" else -value

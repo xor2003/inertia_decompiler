@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Define implementation owners for the persistent function IR/SSA cache.
 
 Layer: CLI/fallback/reporting orchestration.
@@ -11,6 +12,7 @@ because package initialization imports them.
 """
 
 from __future__ import annotations
+import cython
 
 from pathlib import Path
 
@@ -138,7 +140,7 @@ def frontend_cache_source_files_8616(root: Path) -> tuple[Path, ...]:
         status_flag_cfg_liveness, string_instruction_artifact,
     )
     return (
-        *(Path(module.__file__) for module in modules if module.__file__ is not None),
+        *(Path(module.__file__) for module in iter(modules) if module.__file__ is not None),
         root / lifter_backend.LIFTER_SOURCE,
     )
 
@@ -156,10 +158,10 @@ def function_ir_ssa_cache_source_files_8616(root: Path) -> tuple[Path, ...]:
     semantics_root = Path(semantics.__file__).parent
     pipeline_root = Path(pipeline.__file__).parent
     discovered = {
-        *(inertia_root / name for name in _INERTIA_OWNER_NAMES_8616),
-        *(x86_root / name for name in _FRONTEND_OWNER_NAMES_8616),
-        *(analysis_root / name for name in _ANALYSIS_OWNER_NAMES_8616),
-        *(semantics_root / name for name in _SEMANTICS_OWNER_NAMES_8616),
+        *(inertia_root / name for name in iter(_INERTIA_OWNER_NAMES_8616)),
+        *(x86_root / name for name in iter(_FRONTEND_OWNER_NAMES_8616)),
+        *(analysis_root / name for name in iter(_ANALYSIS_OWNER_NAMES_8616)),
+        *(semantics_root / name for name in iter(_SEMANTICS_OWNER_NAMES_8616)),
         pipeline_root / "errors.py",
         root / "pyvex_compat.py",
         root / "angr_platforms/__init__.py",
@@ -168,7 +170,7 @@ def function_ir_ssa_cache_source_files_8616(root: Path) -> tuple[Path, ...]:
         *ir_root.rglob("*.py"),
         *frontend_cache_source_files_8616(root),
     }
-    return tuple(sorted(path for path in discovered if path.is_file()))
+    return tuple(sorted(path for path in iter(discovered) if path.is_file()))
 
 
 __all__ = ["function_ir_ssa_cache_source_files_8616"]

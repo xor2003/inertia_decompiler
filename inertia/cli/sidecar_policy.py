@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Define sidecar precision policy for CLI discovery decisions.
 
 Layer: CLI/fallback/reporting.
@@ -5,14 +6,17 @@ Responsibility: classify optional sidecar precision without owning semantic reco
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Protocol
+import builtins
 
 __all__ = ["metadata_has_precise_code_regions"]
 
 
 class _MetadataLike(Protocol):
-    source_format: str
+    source_format: object
 
 
 _PRECISE_SOURCE_MARKERS = (
@@ -28,10 +32,10 @@ _PRECISE_SOURCE_MARKERS = (
 )
 
 
-def metadata_has_precise_code_regions(metadata: _MetadataLike | None) -> bool:
+def metadata_has_precise_code_regions(metadata: object) -> cython.bint:
     """Return whether sidecar metadata includes precise code-region evidence."""
     if metadata is None:
         return False
     source_format = metadata.source_format or ""
-    parts = tuple(part.strip().lower() for part in source_format.split("+") if part.strip())
-    return any(any(marker in part for marker in _PRECISE_SOURCE_MARKERS) for part in parts)
+    parts = tuple(part.strip().lower() for part in builtins.iter(source_format.split("+")) if part.strip())
+    return any(any(marker in part for marker in iter(_PRECISE_SOURCE_MARKERS)) for part in iter(parts))

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery/reporting.
 
 Responsibility: assemble immutable recovery artifacts from already-produced summaries.
@@ -11,6 +12,8 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -23,6 +26,8 @@ from inertia.structuring.ir_recovery_summary import IRRecoverySummary, summarize
 from inertia.validation.recovery_confidence import RecoveryConfidenceSummary, classify_x86_16_recovery_confidence
 
 from .runtime_trace_refinement import RuntimeTraceRefinementSummary, summarize_x86_16_runtime_trace_refinement
+import dataclasses
+import builtins
 
 __all__ = [
     "CorpusRecoveryArtifact",
@@ -31,25 +36,26 @@ __all__ = [
     "build_x86_16_function_recovery_artifact",
 ]
 
-type RecoverySource = Mapping[str, object]
+RecoverySource = typing.TypeAliasType("RecoverySource", Mapping[str, object])
 
 
-def _value(source: RecoverySource, name: str, default: object = None) -> object:
+@cython.ccall
+def _value(source: RecoverySource, name: object, default: object = None) -> object:
     return source.get(name, default)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionRecoveryArtifact:
     """Immutable function-level recovery report assembled from existing summaries."""
 
-    cod_file: str
-    proc_name: str
-    proc_kind: str
-    ok: bool
-    stage_reached: str
-    failure_class: str | None
-    fallback_kind: str | None
-    semantic_family: str | None
+    cod_file: object
+    proc_name: object
+    proc_kind: object
+    ok: cython.bint
+    stage_reached: object
+    failure_class: object
+    fallback_kind: object
+    semantic_family: object
     ir_summary: IRRecoverySummary
     ir_readiness: IRReadinessSummary
     effect_summary: FunctionEffectSummary
@@ -79,24 +85,24 @@ class FunctionRecoveryArtifact:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CorpusRecoveryArtifact:
     """Immutable corpus-level recovery report assembled from function artifacts."""
 
-    function_rows: tuple[FunctionRecoveryArtifact, ...]
-    confidence_status_counts: dict[str, int]
-    ir_readiness_level_counts: dict[str, int]
-    low_memory_read_region_counts: dict[str, int]
-    low_memory_write_region_counts: dict[str, int]
-    helper_status_counts: dict[str, int]
-    helper_candidate_counts: dict[str, int]
-    helper_refusal_counts: dict[str, int]
-    helper_family_rows: tuple[dict[str, object], ...]
+    function_rows: object
+    confidence_status_counts: object
+    ir_readiness_level_counts: object
+    low_memory_read_region_counts: object
+    low_memory_write_region_counts: object
+    helper_status_counts: object
+    helper_candidate_counts: object
+    helper_refusal_counts: object
+    helper_family_rows: object
 
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-compatible corpus artifact."""
         return {
-            "function_rows": [row.to_dict() for row in self.function_rows],
+            "function_rows": [row.to_dict() for row in iter(self.function_rows)],
             "confidence_status_counts": dict(self.confidence_status_counts),
             "ir_readiness_level_counts": dict(self.ir_readiness_level_counts),
             "low_memory_read_region_counts": dict(self.low_memory_read_region_counts),
@@ -104,36 +110,43 @@ class CorpusRecoveryArtifact:
             "helper_status_counts": dict(self.helper_status_counts),
             "helper_candidate_counts": dict(self.helper_candidate_counts),
             "helper_refusal_counts": dict(self.helper_refusal_counts),
-            "helper_family_rows": [dict(row) for row in self.helper_family_rows],
+            "helper_family_rows": [dict(row) for row in iter(self.helper_family_rows)],
         }
 
 
-def _optional_text(value: object) -> str | None:
+@cython.ccall
+def _optional_text(value: object) -> object:
     if value is None:
         return None
     return str(value)
 
 
-def _string_int_counts(value: object) -> dict[str, int]:
+@cython.ccall
+def _string_int_counts(value: object) -> object:
+    count: object
+    key: object
     if not isinstance(value, Mapping):
         return {}
-    counts: dict[str, int] = {}
+    counts: dict[str, cython.longlong] = {}
     for key, count in value.items():
         if isinstance(count, int):
             counts[str(key)] = count
     return counts
 
 
+@cython.ccall
 def _mapping_rows(value: object) -> tuple[dict[str, object], ...]:
+    item: object
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
         return ()
     rows: list[dict[str, object]] = []
     for item in value:
         if isinstance(item, Mapping):
-            rows.append({str(key): row_value for key, row_value in item.items()})
+            rows.append({str(key): row_value for key, row_value in builtins.iter(item.items())})
     return tuple(rows)
 
 
+@cython.ccall
 def build_x86_16_function_recovery_artifact(source: RecoverySource) -> FunctionRecoveryArtifact:
     """Build one function recovery artifact from an already-produced mapping row."""
     return FunctionRecoveryArtifact(
@@ -157,20 +170,22 @@ def build_x86_16_function_recovery_artifact(source: RecoverySource) -> FunctionR
 
 def build_x86_16_corpus_recovery_artifact(results: Sequence[RecoverySource]) -> CorpusRecoveryArtifact:
     """Build a deterministic corpus recovery artifact from existing mapping rows."""
+    access: object
+    row: object
     from inertia.validation.recovery_confidence import summarize_recovery_confidence
 
-    def _sorted_counts(counts: dict[str, int]) -> dict[str, int]:
-        return dict(sorted(counts.items()))
+    def _sorted_counts(counts: object) -> dict[str, cython.longlong]:
+        return dict(sorted(tuple(counts.items())))
 
     function_rows = tuple(
         sorted(
-            (build_x86_16_function_recovery_artifact(result) for result in results),
+            (build_x86_16_function_recovery_artifact(result) for result in iter(results)),
             key=lambda row: (row.cod_file, row.proc_name, row.proc_kind),
         )
     )
-    ir_readiness_level_counts: dict[str, int] = {}
-    low_memory_read_region_counts: dict[str, int] = {}
-    low_memory_write_region_counts: dict[str, int] = {}
+    ir_readiness_level_counts: dict[str, cython.longlong] = {}
+    low_memory_read_region_counts: dict[str, cython.longlong] = {}
+    low_memory_write_region_counts: dict[str, cython.longlong] = {}
     for row in function_rows:
         ir_readiness_level_counts[row.ir_readiness.level] = ir_readiness_level_counts.get(row.ir_readiness.level, 0) + 1
         for access in row.state_summary.low_memory_reads:

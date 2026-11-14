@@ -1,4 +1,5 @@
 # AUTO-GENERATED split from cli_runtime_shared.py
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: sequence decompilation passes, diagnostics, timeouts, and validated fallbacks.
@@ -8,6 +9,7 @@ Dynamic attributes in this CLI boundary are limited to third-party angr/codegen 
 """
 
 from __future__ import annotations
+import cython
 
 import contextlib
 import copy
@@ -80,6 +82,9 @@ from inertia.cli.runtime_support import (
 from inertia.cli.runtime_support import (
     analysis_timeout as _analysis_timeout,
 )
+import dataclasses
+import operator
+import builtins
 
 # Static named reexports keep the legacy CLI facade's names explicit for type checkers; runtime bindings and __all__ are unchanged.
 if _cli_compat_typing.TYPE_CHECKING:
@@ -727,7 +732,8 @@ __all__ = [
 ]
 
 
-def _normalize_text_payload_8616(payload: object) -> str:
+@cython.ccall
+def _normalize_text_payload_8616(payload: object) -> object:
     """Coerce arbitrary codegen payloads into stable text for emission."""
     if payload is None:
         return ""
@@ -744,13 +750,14 @@ def _normalize_text_payload_8616(payload: object) -> str:
     return text
 
 
+@cython.ccall
 def _effective_decompile_timeout_8616(
     project: angr.Project,
-    timeout: int,
+    timeout: cython.longlong,
     *,
-    block_count: int,
-    byte_count: int,
-) -> int:
+    block_count: cython.longlong,
+    byte_count: cython.longlong,
+) -> cython.longlong:
     effective_timeout = int(timeout)
     if getattr(getattr(project, "arch", None), "name", "") == "86_16":
         if byte_count >= 320 or block_count >= 48:
@@ -764,24 +771,28 @@ def _effective_decompile_timeout_8616(
     return effective_timeout
 
 
-def _forced_corpus_templates_enabled() -> bool:
+@cython.ccall
+def _forced_corpus_templates_enabled() -> cython.bint:
     return False
 
 
+@cython.ccall
 def _forced_function_template(
-    function_name: str | None, binary_path: Path | None = None, api_style: str | None = None
-) -> str | None:
+    function_name: object, binary_path: Path | None = None, api_style: object = None
+) -> object:
     return None
 
+@cython.ccall
 def _apply_binary_specific_annotations(
     project: angr.Project,
     binary_path: Path | None,
-    lst_metadata: LSTMetadata | None,
+    lst_metadata: object,
     *,
     func_addr: int | None = None,
     cod_metadata: CODProcMetadata | None = None,
-    synthetic_globals: dict[int, tuple[str, int]] | None = None,
-) -> bool:
+    synthetic_globals: object = None,
+) -> cython.bint:
+    metadata_by_addr: object
     changed = False
     if func_addr is None:
         if cod_metadata is not None:
@@ -815,8 +826,15 @@ def _apply_function_annotations_for_active_and_original_8616(
     function: object,
     *,
     cod_metadata: CODProcMetadata | None = None,
-    synthetic_globals: dict[int, tuple[str, int]] | None = None,
-) -> bool:
+    synthetic_globals: object = None,
+) -> cython.bint:
+    active_addr: object
+    func: object
+    functions: object
+    info: object
+    metadata_by_addr: object
+    addr: object
+    label: object
     original_addr = function_original_addr(function)
     if os.environ.get("INERTIA_DEBUG_X87_PROTO") == "1":
         print(
@@ -852,7 +870,7 @@ def _apply_function_annotations_for_active_and_original_8616(
         )
     )
     active_addr = getattr(function, "addr", None)
-    if isinstance(active_addr, int) and active_addr != original_addr:
+    if isinstance(active_addr, int) and operator.ne(active_addr, original_addr):
         changed = bool(changed) | bool(
             _apply_binary_specific_annotations(
                 project,
@@ -879,19 +897,24 @@ def _apply_function_annotations_for_active_and_original_8616(
                 f"annotation_state {label}={addr!r} "
                 f"func_id={id(func) if func is not None else None} "
                 f"source_lines={len(tuple(annotations.get('source_lines', ()) or ())) if isinstance(annotations, dict) else 0} "
-                f"stack_offsets={sorted(k for k in annotations.get('stack_vars', {}) if isinstance(k, int)) if isinstance(annotations, dict) else []}",
+                f"stack_offsets={sorted(k for k in builtins.iter(annotations.get('stack_vars', {})) if isinstance(k, int)) if isinstance(annotations, dict) else []}",
                 file=sys.stderr,
                 flush=True,
             )
     return bool(changed)
 
 
-def _sync_recovered_function_metadata_from_kb_8616(project: angr.Project, function: object) -> bool:
+@cython.ccall
+def _sync_recovered_function_metadata_from_kb_8616(project: angr.Project, function: object) -> cython.bint:
     """Bounded CFG recovery can hand the decompiler a Function object that is not
     the same object as project.kb.functions[addr].  Metadata annotations are
     applied to the KB function, so copy that evidence onto the recovered object
     before angr consumes the function type.
     """
+    addr: object
+    functions: object
+    source: object
+    stats: object
     function_dynamic = cast(Any, function)
     addr = getattr(function_dynamic, "addr", None)
     if not isinstance(addr, int):
@@ -922,11 +945,14 @@ def _sync_recovered_function_metadata_from_kb_8616(project: angr.Project, functi
     return changed
 
 
-def _sync_function_name_8616(function_dynamic: Any, function: object, source: object, stats: dict[str, Any]) -> bool:
+@cython.ccall
+def _sync_function_name_8616(function_dynamic: Any, function: object, source: object, stats: object) -> cython.bint:
     """Copy a recovered non-generic source name onto the function; True when applied."""
+    current_name: object
+    source_name: object
     source_name = getattr(source, "name", None)
     current_name = getattr(function, "name", None)
-    if isinstance(source_name, str) and source_name and source_name != current_name:
+    if isinstance(source_name, str) and source_name and operator.ne(source_name, current_name):
         current_is_generic = not isinstance(current_name, str) or not current_name or current_name.startswith("sub_")
         if current_is_generic:
             function_dynamic.name = source_name
@@ -935,8 +961,13 @@ def _sync_function_name_8616(function_dynamic: Any, function: object, source: ob
     return False
 
 
-def _sync_function_info_8616(function_dynamic: Any, function: object, source: object, stats: dict[str, Any]) -> bool:
+@cython.ccall
+def _sync_function_info_8616(function_dynamic: Any, function: object, source: object, stats: object) -> cython.bint:
     """Merge recovered source info/annotations into the function info mapping."""
+    source_info: object
+    target_info: object
+    key: object
+    value: object
     source_info = getattr(source, "info", None)
     if not (isinstance(source_info, MutableMapping) and source_info):
         return False
@@ -951,14 +982,17 @@ def _sync_function_info_8616(function_dynamic: Any, function: object, source: ob
             target_info[key] = copy.deepcopy(value)
         elif key == "x86_16_annotations" and isinstance(target_info.get(key), dict) and isinstance(value, dict):
             _merge_x86_16_annotations_8616(target_info[key], value)
-    if target_info != before:
+    if operator.ne(target_info, before):
         stats["info_synced"] = int(stats.get("info_synced", 0) or 0) + 1
         return True
     return False
 
 
-def _merge_x86_16_annotations_8616(target_annotations: dict[Any, Any], value: dict[Any, Any]) -> None:
+@cython.ccall
+def _merge_x86_16_annotations_8616(target_annotations: object, value: object) -> None:
     """Merge incoming x86_16 annotations into existing target annotations in place."""
+    annotation_key: object
+    annotation_value: object
     incoming_annotations = copy.deepcopy(value)
     for annotation_key, annotation_value in incoming_annotations.items():
         if annotation_key in {"source_lines", "source_return_lines"}:
@@ -975,12 +1009,18 @@ def _merge_x86_16_annotations_8616(target_annotations: dict[Any, Any], value: di
         target_annotations[annotation_key] = annotation_value
 
 
+@cython.ccall
 def _sidecar_cod_metadata_for_function(
     project: angr.Project,
     function: object,
-    binary_path: Path | None,
+    binary_path: object,
     lst_metadata: LSTMetadata | None,
 ) -> CODProcMetadata | None:
+    active_lst_metadata: object
+    cached_metadata: object
+    candidate_metadata: object
+    metadata_by_addr: object
+    addr: object
     metadata_by_addr = getattr(project, "_inertia_cod_metadata_by_func_addr_8616", None)
     if isinstance(metadata_by_addr, Mapping):
         for addr in (function_original_addr(function), getattr(function, "addr", None)):
@@ -999,10 +1039,13 @@ def _sidecar_cod_metadata_for_function(
     return _extract_cod_metadata_for_function_8616(project, function, active_lst_metadata)
 
 
+@cython.ccall
 def _extract_cod_metadata_for_function_8616(
     project: angr.Project, function: object, active_lst_metadata: LSTMetadata
 ) -> CODProcMetadata | None:
     """Extract COD metadata for a function from the active sidecar listing."""
+    cache: object
+    candidate: object
     cod_proc_kinds = getattr(active_lst_metadata, "cod_proc_kinds", {}) or {}
     proc_kind = (
         cod_proc_kinds.get(function_original_addr(function))
@@ -1047,7 +1090,8 @@ def _extract_cod_metadata_for_function_8616(
     return None
 
 
-def _snapshot_codegen_text(codegen: object) -> str:
+@cython.ccall
+def _snapshot_codegen_text(codegen: object) -> object:
     codegen_dynamic = cast(Any, codegen)
     try:
         return _normalize_text_payload_8616(codegen_dynamic.text)
@@ -1060,27 +1104,34 @@ def _snapshot_codegen_text(codegen: object) -> str:
         return ""
 
 
-def _function_header_arg_count_8616(c_text: str) -> int | None:
+@cython.ccall
+def _function_header_arg_count_8616(c_text: object) -> int | None:
     """Return the first function header argument count from generated C text."""
+    match: object
     match = re.search(r"^\s*[A-Za-z_][\w\s\*]*\s+[A-Za-z_]\w*\s*\((?P<args>[^)]*)\)", c_text, re.MULTILINE)
     if match is None:
         return None
     args = match.group("args").strip()
     if not args or args == "void":
         return 0
-    return len([part for part in args.split(",") if part.strip()])
+    return len([part for part in builtins.iter(args.split(",")) if part.strip()])
 
 
-def _has_synthetic_split_signature_args_8616(c_text: str) -> bool:
+@cython.ccall
+def _has_synthetic_split_signature_args_8616(c_text: object) -> cython.bint:
     """Return true when a rendered function header exposes split word arguments."""
+    match: object
     match = re.search(r"^\s*[A-Za-z_][\w\s\*]*\s+[A-Za-z_]\w*\s*\((?P<args>[^)]*)\)", c_text, re.MULTILINE)
     if match is None:
         return False
     return re.search(r"\b[A-Za-z_]\w*_\d+(?:_\d+)?\b", match.group("args")) is not None
 
 
-def _evidence_recovery_has_better_source_abi_8616(formatted: str, evidence_recovered_c: str) -> bool:
+@cython.ccall
+def _evidence_recovery_has_better_source_abi_8616(formatted: object, evidence_recovered_c: object) -> cython.bint:
     """Return true when binary-evidence recovery has a simpler source ABI."""
+    evidence_count: object
+    formatted_count: object
     formatted_count = _function_header_arg_count_8616(formatted)
     evidence_count = _function_header_arg_count_8616(evidence_recovered_c)
     if formatted_count is None or evidence_count is None:
@@ -1088,12 +1139,13 @@ def _evidence_recovery_has_better_source_abi_8616(formatted: str, evidence_recov
     return evidence_count < formatted_count and _has_synthetic_split_signature_args_8616(formatted)
 
 
+@cython.ccall
 def _select_evidence_recovered_c_8616(
-    formatted: str,
-    evidence_recovered_c: str | None,
+    formatted: object,
+    evidence_recovered_c: object,
     *,
-    prefer_proven_evidence: bool = False,
-) -> str:
+    prefer_proven_evidence: cython.bint = False,
+) -> object:
     """Select proven source-shaped recovery when the structured output is incomplete."""
     if not isinstance(evidence_recovered_c, str) or not evidence_recovered_c.strip():
         return formatted
@@ -1110,6 +1162,9 @@ def _select_evidence_recovered_c_8616(
 
 
 def _bind_codegen_render_variable_types_8616(codegen: object) -> None:
+    arch: object
+    cfunc: object
+    project: object
     project = getattr(codegen, "project", None)
     arch = getattr(project, "arch", None)
     cfunc = getattr(codegen, "cfunc", None)
@@ -1133,8 +1188,11 @@ def _bind_codegen_render_variable_types_8616(codegen: object) -> None:
     _bind_unified_local_vars_8616(cfunc, _bind_type)
 
 
+@cython.ccall
 def _bind_variables_in_use_8616(cfunc: Any, bind_type: Callable[[object], object]) -> None:
     """Bind arch-aware variable types for cfunc variables in use."""
+    variables_in_use: object
+    cvar: object
     variables_in_use = getattr(cfunc, "variables_in_use", None)
     if isinstance(variables_in_use, dict):
         for cvar in variables_in_use.values():
@@ -1143,8 +1201,14 @@ def _bind_variables_in_use_8616(cfunc: Any, bind_type: Callable[[object], object
                 cvar.variable_type = bound
 
 
+@cython.ccall
 def _bind_unified_local_vars_8616(cfunc: Any, bind_type: Callable[[object], object]) -> None:
     """Bind arch-aware types across cfunc unified local var entries."""
+    unified_locals: object
+    cvar: object
+    entries: object
+    variable: object
+    vartype: object
     unified_locals = getattr(cfunc, "unified_local_vars", None)
     if isinstance(unified_locals, dict):
         for variable, entries in list(unified_locals.items()):
@@ -1176,22 +1240,25 @@ class _LayerDumpStatus(StrEnum):
 class _LayerDumpState(TypedDict):
     """Typed state shared by opt-in per-layer diagnostic snapshots."""
 
-    attempt: int
-    function_addr: int
-    function_name: str
+    attempt: cython.longlong
+    function_addr: cython.longlong
+    function_name: object
     root: Path
     manifest: Path
-    index: int
+    index: cython.longlong
 
 
-def _layer_dump_enabled(project: angr.Project) -> bool:
+@cython.ccall
+def _layer_dump_enabled(project: angr.Project) -> cython.bint:
     enabled = bool(getattr(project, "_inertia_dump_layers", False))
     if not enabled:
         enabled = os.environ.get("INERTIA_DUMP_LAYERS", "").strip().lower() in {"1", "true", "yes", "on"}
     return bool(enabled)
 
 
+@cython.ccall
 def _layer_dump_root(project: angr.Project) -> Path:
+    raw_root: object
     raw_root = getattr(project, "_inertia_dump_layer_root", None)
     if isinstance(raw_root, Path):
         return raw_root
@@ -1201,28 +1268,34 @@ def _layer_dump_root(project: angr.Project) -> Path:
 
 
 def _layer_dump_filter(project: angr.Project) -> tuple[str, ...]:
+    raw: object
     raw = getattr(project, "_inertia_dump_layer_filter", None)
     if raw is None:
         raw = os.environ.get("INERTIA_DUMP_LAYER_FILTER", "")
     if not isinstance(raw, str):
         return ()
-    return tuple(part.strip() for part in raw.split(",") if part.strip())
+    return tuple(part.strip() for part in builtins.iter(raw.split(",")) if part.strip())
 
 
-def _layer_dump_accepts_label(project: angr.Project, label: str) -> bool:
+@cython.ccall
+def _layer_dump_accepts_label(project: angr.Project, label: object) -> cython.bint:
     filter_layers = _layer_dump_filter(project)
     if not filter_layers:
         return True
     return label in filter_layers
 
 
-def _safe_path_component(text: str) -> str:
+@cython.ccall
+def _safe_path_component(text: object) -> object:
     cleaned = re.sub(r"[^a-zA-Z0-9._-]", "_", str(text))
     cleaned = cleaned.strip("._-")
     return cleaned or "x"
 
 
+@cython.ccall
 def _get_layer_dump_state(project: angr.Project, function: object) -> _LayerDumpState | None:
+    attempts: object
+    states: object
     if not _layer_dump_enabled(project):
         return None
     with _LAYER_DUMP_MUTEX:
@@ -1270,11 +1343,12 @@ def _get_layer_dump_state(project: angr.Project, function: object) -> _LayerDump
         return state
 
 
+@cython.ccall
 def _record_layer_dump(
     project: angr.Project,
     function: object,
-    stage_name: str,
-    text: str,
+    stage_name: object,
+    text: object,
     *,
     layer_dump_state: _LayerDumpState | None = None,
 ) -> None:
@@ -1330,22 +1404,24 @@ def _record_layer_dump(
         pass
 
 
+@cython.ccall
 def _latest_layer_dump_text_8616(
     layer_dump_state: _LayerDumpState | None,
-    labels: tuple[str, ...],
-) -> str | None:
+    labels: object,
+) -> object:
+    entry: object
     if not layer_dump_state or not labels:
         return None
     manifest_path = Path(layer_dump_state.get("manifest", ""))
     if not manifest_path.exists():
         return None
     try:
-        entries = [json.loads(line) for line in manifest_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        entries = [json.loads(line) for line in builtins.iter(manifest_path.read_text(encoding="utf-8").splitlines()) if line.strip()]
     except Exception:
         return None
     label_set = set(labels)
     for entry in reversed(entries):
-        if entry.get("layer") not in label_set or entry.get("status") != _LayerDumpStatus.written.value:
+        if entry.get("layer") not in label_set or operator.ne(entry.get("status"), _LayerDumpStatus.written.value):
             continue
         path = Path(str(entry.get("path", "")))
         if not path.exists():
@@ -1357,12 +1433,15 @@ def _latest_layer_dump_text_8616(
     return None
 
 
-def _cod_window_for_stage_bundle_8616(cod_metadata: CODProcMetadata | None) -> str | None:
+def _cod_window_for_stage_bundle_8616(cod_metadata: object) -> object:
+    offset: object
+    text: object
+    entry: object
     if cod_metadata is None:
         return None
     lines: tuple[object, ...] = tuple(cod_metadata.source_lines)
     if lines:
-        return "\n".join(str(line) for line in lines) + "\n"
+        return "\n".join(str(line) for line in iter(lines)) + "\n"
     raw_entries: tuple[object, ...] = tuple(cod_metadata.cod_raw_entries)
     if raw_entries:
         rendered: list[str] = []
@@ -1377,11 +1456,13 @@ def _cod_window_for_stage_bundle_8616(cod_metadata: CODProcMetadata | None) -> s
     return None
 
 
+@cython.ccall
 def _raw_asm_for_stage_bundle_8616(
     project: angr.Project,
     function: object,
-    lst_metadata: LSTMetadata | None,
-) -> str | None:
+    lst_metadata: object,
+) -> object:
+    region: object
     display_addr = function_original_addr(function)
     region = _lst_code_region(lst_metadata, display_addr) if lst_metadata is not None else None
     try:
@@ -1394,6 +1475,7 @@ def _raw_asm_for_stage_bundle_8616(
         return None
 
 
+@cython.ccall
 def _emit_direct_addr_stage_bundle_8616(
     project: angr.Project,
     function: object,
@@ -1401,13 +1483,14 @@ def _emit_direct_addr_stage_bundle_8616(
     binary_path: Path | None,
     cod_metadata: CODProcMetadata | None,
     lst_metadata: LSTMetadata | None,
-    family_label: str,
-    lane: str,
-    detail: str,
-    repeat_reason: str | None,
+    family_label: object,
+    lane: object,
+    detail: object,
+    repeat_reason: object,
     layer_dump_state: _LayerDumpState | None,
-    messages: tuple[str, ...] = (),
+    messages: object = (),
 ) -> None:
+    printed: object
     if repeat_reason is None:
         return
     request = DirectAddrStageBundleInput(
@@ -1454,11 +1537,12 @@ def _emit_direct_addr_stage_bundle_8616(
     print(f"[dbg] direct stage bundle{reused}: {result.path}", flush=True)
 
 
+@cython.ccall
 def _emit_c_stage_trace(
     project: angr.Project,
     function: object,
-    label: str,
-    c_text: str,
+    label: object,
+    c_text: object,
     *,
     layer_dump_state: _LayerDumpState | None = None,
 ) -> None:
@@ -1485,8 +1569,18 @@ def _emit_c_stage_trace(
     sys.stderr.flush()
 
 
+@cython.ccall
 def _emit_typed_edge_switch_replacement_safety_stats_8616(codegen: object) -> None:
     """Report latest switch outcomes and ordered history without aggregating attempts."""
+    cfunc: object
+    grouped_stats: object
+    lowering_payload: object
+    payload: object
+    pre_codegen_records: object
+    project: object
+    replacement_payload: object
+    seqnode_replacements: object
+    stats: object
     if os.environ.get("INERTIA_ENABLE_TYPED_SWITCH_AST_ARTIFACTS") != "1":
         return
     with contextlib.suppress(Exception):
@@ -1553,7 +1647,7 @@ def _emit_typed_edge_switch_replacement_safety_stats_8616(codegen: object) -> No
         _emit_switch_graph_debug_8616(codegen)
 
 
-def _emit_switch_safety_payload_8616(payload: object, stats: object) -> bool:
+def _emit_switch_safety_payload_8616(payload: object, stats: object) -> cython.bint:
     """Print the typed-switch replacement safety payload summary; False to abort the report."""
     if not isinstance(payload, Mapping):
         if not isinstance(stats, Mapping):
@@ -1565,10 +1659,10 @@ def _emit_switch_safety_payload_8616(payload: object, stats: object) -> bool:
     if isinstance(refusal_reasons, Mapping):
         refusal_reason_counts = {
             str(reason): int(count or 0)
-            for reason, count in refusal_reasons.items()
+            for reason, count in builtins.iter(refusal_reasons.items())
         }
     else:
-        refusal_reason_counts = dict(Counter(str(reason) for reason in refusal_reasons))
+        refusal_reason_counts = dict(Counter(str(reason) for reason in iter(refusal_reasons)))
     print(
         "[typed-switch-replacement-safety] "
         + json.dumps(
@@ -1589,8 +1683,12 @@ def _emit_switch_safety_payload_8616(payload: object, stats: object) -> bool:
     return True
 
 
+@cython.ccall
 def _typed_switch_seqnode_case_segment_quality_8616(codegen: object) -> dict[str, object]:
     """Count unresolved segment carriers inside generated switch case bodies."""
+    cfunc: object
+    project: object
+    root: object
     # Dynamic angr/codegen compatibility boundary.
     project = getattr(codegen, "project", None)
     # Dynamic angr/codegen compatibility boundary.
@@ -1652,8 +1750,12 @@ def _typed_switch_seqnode_case_segment_quality_8616(codegen: object) -> dict[str
     }
 
 
+@cython.ccall
 def _replay_seqnode_case_segments_8616(codegen: object, project: object) -> None:
     """Replay runtime segment lowering once per codegen so case bodies carry resolved segments."""
+    func_addr: object
+    metadata_by_addr: object
+    synthetic_globals: object
     if project is None or getattr(codegen, "_inertia_seqnode_case_segment_replay_applied_8616", False):
         return
     # Dynamic angr/codegen compatibility boundary.
@@ -1682,6 +1784,7 @@ def _replay_seqnode_case_segments_8616(codegen: object, project: object) -> None
         typing.cast(typing.Any, codegen)._inertia_seqnode_case_segment_replay_error_8616 = f"{type(ex).__name__}: {ex}"
 
 
+@cython.ccall
 def _switch_strip_casts_8616(node: object) -> object:
     """Unwrap CTypeCast wrappers around a structured C node."""
     while isinstance(node, structured_c.CTypeCast):
@@ -1689,7 +1792,8 @@ def _switch_strip_casts_8616(node: object) -> object:
     return node
 
 
-def _switch_call_name_8616(node: object) -> str | None:
+@cython.ccall
+def _switch_call_name_8616(node: object) -> object:
     """Return the callee name of a CFunctionCall node, if it is one."""
     node = _switch_strip_casts_8616(node)
     if not isinstance(node, structured_c.CFunctionCall):
@@ -1699,8 +1803,12 @@ def _switch_call_name_8616(node: object) -> str | None:
     return name if isinstance(name, str) else None
 
 
-def _switch_is_segment_register_expr_8616(codegen: object, node: object) -> bool:
+@cython.ccall
+def _switch_is_segment_register_expr_8616(codegen: object, node: object) -> cython.bint:
     """True when the node is a CVariable that carries a ds/es/ss segment register."""
+    arch: object
+    project: object
+    reg_name: object
     node = _switch_strip_casts_8616(node)
     if not isinstance(node, structured_c.CVariable):
         return False
@@ -1721,6 +1829,7 @@ def _switch_is_segment_register_expr_8616(codegen: object, node: object) -> bool
     return isinstance(reg_name, str) and reg_name.lower() in {"ds", "es", "ss"}
 
 
+@cython.ccall
 def _switch_constant_value_8616(node: object) -> int | None:
     """Return the integer value of a CConstant node, if it is one."""
     node = _switch_strip_casts_8616(node)
@@ -1729,8 +1838,16 @@ def _switch_constant_value_8616(node: object) -> int | None:
     return None
 
 
-def _switch_segment_carrier_signature_8616(node: object) -> str:
+@cython.ccall
+def _switch_segment_carrier_signature_8616(node: object) -> object:
     """Describe the carrier kind behind a node for unresolved-carrier accounting."""
+    category: object
+    dirty: object
+    oident: object
+    reg: object
+    variable: object
+    varid: object
+    attr: object
     node = _switch_strip_casts_8616(node)
     if isinstance(node, structured_c.CVariable):
         # Dynamic angr/codegen compatibility boundary.
@@ -1768,11 +1885,16 @@ def _switch_segment_carrier_signature_8616(node: object) -> str:
     return type(node).__name__
 
 
+@cython.ccall
 def _switch_node_has_unresolved_linear_segment_8616(
     node: object, codegen: object, unresolved_segment_signatures: Counter[str]
-) -> bool:
+) -> cython.bint:
     """True when the subtree computes seg*16/seg<<4 with a non-segment-register carrier."""
-    for current in (node, *_iter_c_nodes_deep_8616(node)):
+    expected_scale: object
+    current: object
+    maybe_scale: object
+    maybe_seg: object
+    for current in (node, ) + tuple(_iter_c_nodes_deep_8616(node)):
         current = _switch_strip_casts_8616(current)
         if not isinstance(current, structured_c.CBinaryOp):
             continue
@@ -1780,7 +1902,7 @@ def _switch_node_has_unresolved_linear_segment_8616(
         if expected_scale is None:
             continue
         for maybe_seg, maybe_scale in ((current.lhs, current.rhs), (current.rhs, current.lhs)):
-            if _switch_constant_value_8616(maybe_scale) != expected_scale:
+            if operator.ne(_switch_constant_value_8616(maybe_scale), expected_scale):
                 continue
             if not _switch_is_segment_register_expr_8616(codegen, maybe_seg):
                 unresolved_segment_signatures[_switch_segment_carrier_signature_8616(maybe_seg)] += 1
@@ -1788,13 +1910,17 @@ def _switch_node_has_unresolved_linear_segment_8616(
     return False
 
 
+@cython.ccall
 def _count_switch_case_segment_carriers_8616(
     codegen: object,
     root: object,
     unresolved_segment_signatures: Counter[str],
     unresolved_helper_segment_signatures: Counter[str],
-) -> tuple[int, int]:
+) -> tuple[cython.longlong, cython.longlong]:
     """Count unresolved helper/linear segment carriers across all switch case bodies."""
+    body: object
+    node: object
+    switch_node: object
     helper_unresolved = 0
     linear_unresolved = 0
     for switch_node in _iter_c_nodes_deep_8616(root):
@@ -1821,10 +1947,14 @@ def _count_switch_case_segment_carriers_8616(
     return helper_unresolved, linear_unresolved
 
 
-def _switch_case_bodies_8616(switch_node: object) -> list[object]:
+@cython.ccall
+def _switch_case_bodies_8616(switch_node: object) -> object:
     """Collect the body node of each case plus the default body of a CSwitchCase."""
-    raw_cases: Any = getattr(switch_node, "cases", ())
-    narrowed_cases: tuple[object, ...] = tuple(raw_cases) if isinstance(raw_cases, (list, tuple)) else ()
+    default_body: object
+    raw_cases: object
+    case_entry: object
+    raw_cases = getattr(switch_node, "cases", ())
+    narrowed_cases: object = tuple(raw_cases) if isinstance(raw_cases, (list, tuple)) else ()
     case_bodies: list[object] = []
     for case_entry in narrowed_cases:
         if not isinstance(case_entry, (list, tuple)) or len(case_entry) != 2:
@@ -1837,8 +1967,11 @@ def _switch_case_bodies_8616(switch_node: object) -> list[object]:
     return case_bodies
 
 
-def _debug_dump_calls_8616(label: str, c_text: str, function_addr: int) -> None:
+def _debug_dump_calls_8616(label: object, c_text: object, function_addr: cython.longlong) -> None:
     def _impl() -> None:
+        filter_text: object
+        target_text: object
+        line: object
         if not os.environ.get("INERTIA_DEBUG_CALL_MUTATION"):
             return
         target_text = os.environ.get("INERTIA_DEBUG_CALL_MUTATION_ADDR")
@@ -1850,11 +1983,11 @@ def _debug_dump_calls_8616(label: str, c_text: str, function_addr: int) -> None:
             return
         log = logging.getLogger(__name__)
         filter_text = os.environ.get("INERTIA_DEBUG_CALL_MUTATION_FILTER", "")
-        tracked = tuple(part.strip() for part in filter_text.split(",") if part.strip())
+        tracked = tuple(part.strip() for part in builtins.iter(filter_text.split(",")) if part.strip())
         call_line_re = re.compile(r"^\s*(?:[A-Za-z_]\w*\s*=\s*)?[A-Za-z_]\w*\s*\(")
         for line in normalized_text.splitlines():
             stripped = line.strip()
-            if (tracked and any(name in stripped for name in tracked)) or (
+            if (tracked and any(name in stripped for name in iter(tracked))) or (
                 not tracked and call_line_re.match(stripped)
             ):
                 log.warning("[call-mutation] %s: %s", label, stripped)
@@ -1865,13 +1998,16 @@ def _debug_dump_calls_8616(label: str, c_text: str, function_addr: int) -> None:
 def _debug_dump_rewrite_pass_lines_8616(
     codegen: object,
     *,
-    pass_index: int,
-    pass_name: str,
-    function_addr: int,
+    pass_index: cython.longlong,
+    pass_name: object,
+    function_addr: cython.longlong,
 ) -> None:
     def _impl() -> None:
+        filter_text: object
+        target_text: object
+        line: object
         filter_text = os.environ.get("INERTIA_DEBUG_REWRITE_PASS_FILTER", "")
-        tracked = tuple(part.strip() for part in filter_text.split(",") if part.strip())
+        tracked = tuple(part.strip() for part in builtins.iter(filter_text.split(",")) if part.strip())
         if not tracked:
             return
         target_text = os.environ.get("INERTIA_DEBUG_REWRITE_PASS_ADDR")
@@ -1890,7 +2026,7 @@ def _debug_dump_rewrite_pass_lines_8616(
         log = logging.getLogger(__name__)
         for line in snapshot.splitlines():
             stripped = line.strip()
-            if any(part in stripped for part in tracked):
+            if any(part in stripped for part in iter(tracked)):
                 log.warning(
                     "[rewrite-pass] idx=%d name=%s function=%#x %s",
                     pass_index,
@@ -1902,10 +2038,14 @@ def _debug_dump_rewrite_pass_lines_8616(
     return _impl()
 
 
-def _prepend_recovered_callsite_prototypes_8616(c_text: str, codegen: object) -> str:
+@cython.ccall
+def _prepend_recovered_callsite_prototypes_8616(c_text: object, codegen: object) -> object:
+    cfunc: object
+    match: object
+    decl: object
     # Dynamic angr/codegen compatibility boundary.
-    cfunc: Any = getattr(codegen, "cfunc", None)
-    decls: tuple[object, ...] = get_codegen_sequence_attr(
+    cfunc = getattr(codegen, "cfunc", None)
+    decls: object = get_codegen_sequence_attr(
         codegen,
         cfunc,
         "_inertia_callsite_prototype_decls",
@@ -1939,7 +2079,8 @@ _CALLSITE_NON_DECLARATION_PREFIXES_8616 = frozenset(
 )
 
 
-def _callsite_declaration_match_8616(line: str) -> re.Match[str] | None:
+@cython.ccall
+def _callsite_declaration_match_8616(line: object) -> re.Match[str] | None:
     """Match a top-level declaration line, never a control/body statement."""
     first_word = line.lstrip().split(maxsplit=1)[0] if line.strip() else ""
     if first_word in _CALLSITE_NON_DECLARATION_PREFIXES_8616:
@@ -1947,8 +2088,12 @@ def _callsite_declaration_match_8616(line: str) -> re.Match[str] | None:
     return _CALLSITE_DECL_NAME_RE_8616.match(line)
 
 
-def _collect_existing_decls_8616(c_text_local: str) -> tuple[set[str], dict[str, list[str]], set[str]]:
+@cython.ccall
+def _collect_existing_decls_8616(c_text_local: object) -> tuple[set[str], dict[str, list[str]], set[str]]:
     """Collect existing declaration lines, declarations by name, and definition names."""
+    declaration_match: object
+    definition_match: object
+    line: object
     existing_local: set[str] = set()
     declarations_by_name: dict[str, list[str]] = {}
     definition_names: set[str] = set()
@@ -1965,8 +2110,10 @@ def _collect_existing_decls_8616(c_text_local: str) -> tuple[set[str], dict[str,
     return existing_local, declarations_by_name, definition_names
 
 
-def _callsite_decl_score_8616(decl_text: str, name: str) -> tuple[int, int]:
+@cython.ccall
+def _callsite_decl_score_8616(decl_text: object, name: object) -> tuple[cython.longlong, cython.longlong]:
     """Score a declaration by typed-argument presence and non-generic return."""
+    m: object
     m = re.match(
         r"^\s*(?P<ret>[A-Za-z_][\w\s\*]*?)\s+" + re.escape(name) + r"\s*\(", decl_text
     )
@@ -1982,8 +2129,12 @@ def _callsite_decl_score_8616(decl_text: str, name: str) -> tuple[int, int]:
     )
 
 
-def _best_recovered_decls_8616(decls: tuple[object, ...]) -> list[str]:
+@cython.ccall
+def _best_recovered_decls_8616(decls: object) -> object:
     """Pick the highest-scoring declaration per name plus anonymous declarations."""
+    current: object
+    match: object
+    decl: object
     best_decl_by_name: dict[str, str] = {}
     anonymous_decls: list[str] = []
     for decl in decls:
@@ -2000,16 +2151,19 @@ def _best_recovered_decls_8616(decls: tuple[object, ...]) -> list[str]:
         current = best_decl_by_name.get(name)
         if current is None or _callsite_decl_score_8616(stripped, name) > _callsite_decl_score_8616(current, name):
             best_decl_by_name[name] = stripped
-    return anonymous_decls + [best_decl_by_name[name] for name in sorted(best_decl_by_name)]
+    return anonymous_decls + [best_decl_by_name[name] for name in builtins.iter(sorted(best_decl_by_name))]
 
 
 def _filter_recovered_decls_8616(
-    decls: tuple[object, ...],
-    existing: set[str],
-    existing_decls_by_name: dict[str, list[str]],
-    definition_names: set[str],
-) -> list[str]:
+    decls: object,
+    existing: object,
+    existing_decls_by_name: object,
+    definition_names: object,
+) -> object:
     """Keep recovered decls that are new, non-defined, and strictly better-scored."""
+    existing_for_name: object
+    match: object
+    stripped: object
     filtered: list[str] = []
     for stripped in _best_recovered_decls_8616(decls):
         if stripped in existing:
@@ -2022,7 +2176,7 @@ def _filter_recovered_decls_8616(
             existing_for_name = existing_decls_by_name.get(name, ())
             if any(
                 _callsite_decl_score_8616(existing_decl, name) >= _callsite_decl_score_8616(stripped, name)
-                for existing_decl in existing_for_name
+                for existing_decl in iter(existing_for_name)
             ):
                 continue
         existing.add(stripped)
@@ -2032,8 +2186,12 @@ def _filter_recovered_decls_8616(
     return filtered
 
 
-def _prune_existing_decl_lines_8616(c_text: str, preferred_by_name: dict[str, str]) -> list[str]:
+@cython.ccall
+def _prune_existing_decl_lines_8616(c_text: object, preferred_by_name: object) -> object:
     """Drop existing declaration lines superseded by preferred recovered decls."""
+    match: object
+    preferred: object
+    line: object
     pruned_lines: list[str] = []
     for line in str(c_text or "").splitlines():
         stripped = line.strip()
@@ -2041,11 +2199,12 @@ def _prune_existing_decl_lines_8616(c_text: str, preferred_by_name: dict[str, st
         if match is not None:
             name = match.group("name")
             preferred = preferred_by_name.get(name)
-            if preferred is not None and stripped != preferred:
+            if preferred is not None and operator.ne(stripped, preferred):
                 continue
         pruned_lines.append(line)
     return pruned_lines
-def _replay_indexed_segmented_global_lowering_after_regen_8616(codegen: object) -> bool:
+@cython.ccall
+def _replay_indexed_segmented_global_lowering_after_regen_8616(codegen: object) -> cython.bint:
     """Delegate final segment/global replay, then restore persistent type facts."""
 
     changed = _replay_named_segmented_global_lowering_after_regen_8616(codegen)
@@ -2054,8 +2213,15 @@ def _replay_indexed_segmented_global_lowering_after_regen_8616(codegen: object) 
     return bool(reapply_proven_stack_aggregate_field_projections_8616(codegen)) or changed
 
 
-def _replay_named_segmented_global_lowering_after_regen_8616(codegen: object) -> bool:
+@cython.ccall
+def _replay_named_segmented_global_lowering_after_regen_8616(codegen: object) -> cython.bint:
     """Replay structured condition provenance, then regenerated global lowering."""
+    cfunc: object
+    cod_metadata: object
+    func_addr: object
+    metadata_by_addr: object
+    project: object
+    synthetic_globals: object
 
     project = getattr(codegen, "project", None)
     cfunc = getattr(codegen, "cfunc", None)
@@ -2079,15 +2245,19 @@ def _replay_named_segmented_global_lowering_after_regen_8616(codegen: object) ->
     return bool(provenance_changed or lowering_changed)
 
 
-def _replay_stack_address_lowering_after_regen_8616(codegen: object) -> bool:
+@cython.ccall
+def _replay_stack_address_lowering_after_regen_8616(codegen: object) -> cython.bint:
+    project: object
     project = getattr(codegen, "project", None)
     with contextlib.suppress(Exception):
         return bool(lower_stable_ss_linear_stack_dereferences_8616(codegen, project=project))
     return False
 
 
-def _replay_runtime_segment_lowering_after_regen_8616(codegen: object) -> bool:
+@cython.ccall
+def _replay_runtime_segment_lowering_after_regen_8616(codegen: object) -> cython.bint:
     """Replay runtime helpers and Lowering-owned identities after regeneration."""
+    project: object
     try:
         project = typing.cast(typing.Any, codegen).project
     except AttributeError:
@@ -2106,7 +2276,8 @@ def _replay_runtime_segment_lowering_after_regen_8616(codegen: object) -> bool:
     return bool(runtime_changed or named_changed)
 
 
-def _finalize_callsite_arguments_after_noncall_regen_8616(codegen: object) -> bool:
+@cython.ccall
+def _finalize_callsite_arguments_after_noncall_regen_8616(codegen: object) -> cython.bint:
     """Replay stack effects and calls, then enforce Structuring occurrence identity.
 
     This is orchestration only. Stack facts remain owned by Types/Lowering and
@@ -2114,6 +2285,7 @@ def _finalize_callsite_arguments_after_noncall_regen_8616(codegen: object) -> bo
     summary consumer. Argument-refining lowerings run after both replays, and
     the Structuring owner gets the final word after those passes clone calls.
     """
+    project: object
     project = getattr(codegen, "project", None)
     stack_changed = _replay_direct_stack_semantics_after_regen_8616(codegen)
     call_changed = bool(replay_callsite_stack_arguments_after_regeneration_8616(project, codegen))
@@ -2131,8 +2303,10 @@ def _finalize_callsite_arguments_after_noncall_regen_8616(codegen: object) -> bo
     return True
 
 
-def _finalize_typed_call_interfaces_before_render_8616(codegen: object) -> bool:
+@cython.ccall
+def _finalize_typed_call_interfaces_before_render_8616(codegen: object) -> cython.bint:
     """Replay Types/Lowering-owned argument and declaration consumers before rendering."""
+    project: object
     changed = reapply_stack_aggregate_object_facts_8616(codegen)
     dynamic_codegen = typing.cast(typing.Any, codegen)
     try:
@@ -2153,14 +2327,17 @@ def _finalize_typed_call_interfaces_before_render_8616(codegen: object) -> bool:
     return bool(changed)
 
 
-def _finalize_typed_interfaces_and_projections_before_render_8616(codegen: object) -> bool:
+@cython.ccall
+def _finalize_typed_interfaces_and_projections_before_render_8616(codegen: object) -> cython.bint:
     """Finalize typed interfaces, then restore Lowering projections they may expose."""
     changed = _finalize_typed_call_interfaces_before_render_8616(codegen)
     return _replay_final_codegen_projections_after_regen_8616(codegen) or changed
 
 
-def _replay_direct_stack_mov_after_regen_8616(codegen: object) -> bool:
+@cython.ccall
+def _replay_direct_stack_mov_after_regen_8616(codegen: object) -> cython.bint:
     """Replay proven direct stack moves after angr replaces the structured C tree."""
+    stats: object
     # Dynamic angr/codegen compatibility boundary.
     stats = getattr(codegen, "_inertia_direct_stack_move_lowering_8616", None)
     if (
@@ -2198,8 +2375,10 @@ def _replay_direct_stack_mov_after_regen_8616(codegen: object) -> bool:
     return bool(materialize_direct_stack_mov_instructions_8616(codegen))
 
 
-def _replay_direct_stack_updates_after_regen_8616(codegen: object) -> bool:
+@cython.ccall
+def _replay_direct_stack_updates_after_regen_8616(codegen: object) -> cython.bint:
     """Replay proven stack updates through the Structuring-owned stage wrapper."""
+    project: object
     # Dynamic angr/codegen compatibility boundary.
     project = getattr(codegen, "project", None)
     if project is None:
@@ -2213,14 +2392,16 @@ def _replay_direct_stack_updates_after_regen_8616(codegen: object) -> bool:
     return bool(result.direct_stack_incdec_changed)
 
 
-def _replay_direct_stack_semantics_after_regen_8616(codegen: object) -> bool:
+@cython.ccall
+def _replay_direct_stack_semantics_after_regen_8616(codegen: object) -> cython.bint:
     """Replay all proven direct stack effects after structured-tree regeneration."""
     stack_mov_changed = _replay_direct_stack_mov_after_regen_8616(codegen)
     stack_update_changed = _replay_direct_stack_updates_after_regen_8616(codegen)
     return stack_mov_changed or stack_update_changed
 
 
-def _replay_call_return_selector_lowering_after_regen_8616(codegen: object) -> bool:
+@cython.ccall
+def _replay_call_return_selector_lowering_after_regen_8616(codegen: object) -> cython.bint:
     """Invoke the Structuring-bound Lowering owner after AST regeneration."""
     try:
         replayer = cast(
@@ -2232,7 +2413,8 @@ def _replay_call_return_selector_lowering_after_regen_8616(codegen: object) -> b
     return bool(replayer(codegen))
 
 
-def _replay_final_codegen_projections_after_regen_8616(codegen: object) -> bool:
+@cython.ccall
+def _replay_final_codegen_projections_after_regen_8616(codegen: object) -> cython.bint:
     """Invoke the bound Lowering owner after late CLI AST cleanup."""
     try:
         replayer = cast(
@@ -2256,7 +2438,8 @@ def _replay_final_codegen_projections_after_regen_8616(codegen: object) -> bool:
     return changed
 
 
-def _recover_canonical_for_loops_after_regen_8616(codegen: object) -> bool:
+@cython.ccall
+def _recover_canonical_for_loops_after_regen_8616(codegen: object) -> cython.bint:
     """Invoke Structuring only when the dynamic codegen exposes a live AST root."""
     try:
         typing.cast(typing.Any, codegen).cfunc.statements  # noqa: B018
@@ -2265,8 +2448,10 @@ def _recover_canonical_for_loops_after_regen_8616(codegen: object) -> bool:
     return bool(recover_structuring_canonical_for_loops_8616(codegen))
 
 
-def _stabilize_regenerated_noncall_ast_8616(codegen: object) -> bool:
+@cython.ccall
+def _stabilize_regenerated_noncall_ast_8616(codegen: object) -> cython.bint:
     """Restore call identity before replaying widening and late cleanup."""
+    project: object
     project = getattr(codegen, "project", None)
     shared_call_changed = finalize_shared_call_occurrences_8616(project, codegen)
     changed = bool(shared_call_changed)
@@ -2284,8 +2469,10 @@ def _stabilize_regenerated_noncall_ast_8616(codegen: object) -> bool:
     return canonical_for_changed or indexed_global_changed or cleanup_result.changed or changed
 
 
-def _finalize_regenerated_noncall_ast_8616(codegen: object) -> bool:
+@cython.ccall
+def _finalize_regenerated_noncall_ast_8616(codegen: object) -> cython.bint:
     """Stabilize, replay final Lowering identities, then clean exposed carriers."""
+    project: object
     changed = _stabilize_regenerated_noncall_ast_8616(codegen)
     late_ast_changed = _simplify_structured_expressions_8616(codegen)
     late_ast_changed = _replay_call_return_selector_lowering_after_regen_8616(codegen) or late_ast_changed
@@ -2311,6 +2498,7 @@ def _finalize_regenerated_noncall_ast_8616(codegen: object) -> bool:
     )
 
 
+@cython.ccall
 def _republish_rewrite_evidence_after_regen_8616(codegen: object) -> None:
     """Republish the Rewrite output version after regen replay lanes ran.
 
@@ -2319,6 +2507,9 @@ def _republish_rewrite_evidence_after_regen_8616(codegen: object) -> None:
     longer describes the current output; re-record the real final version so
     the emission contract observes the produced output, not a stale snapshot.
     """
+    cfunc: object
+    function_addr: object
+    project: object
     # Dynamic third-party angr/codegen boundary.
     project = getattr(codegen, "project", None)
     cfunc = getattr(codegen, "cfunc", None)
@@ -2343,7 +2534,8 @@ def _republish_rewrite_evidence_after_regen_8616(codegen: object) -> None:
     )
 
 
-def _regenerate_codegen_text_safely(codegen: object, *, context: str) -> tuple[str, bool]:
+@cython.ccall
+def _regenerate_codegen_text_safely(codegen: object, *, context: object) -> object:
     """Render the live C AST while preserving evidence-backed semantic materialization."""
     try:
         return _regenerate_codegen_text_safely_impl(codegen, context=context)
@@ -2351,8 +2543,11 @@ def _regenerate_codegen_text_safely(codegen: object, *, context: str) -> tuple[s
         _republish_rewrite_evidence_after_regen_8616(codegen)
 
 
-def _regenerate_codegen_text_safely_impl(codegen: object, *, context: str) -> tuple[str, bool]:
+@cython.ccall
+def _regenerate_codegen_text_safely_impl(codegen: object, *, context: object) -> object:
     """Render the live C AST while preserving evidence-backed semantic materialization."""
+    rendered_text: object
+    result: object
     ctx = _RegenRunCtx8616.build(codegen, context)
     ctx.trace_dump("regen-fallback-text", ctx.fallback_text)
     try:
@@ -2375,6 +2570,7 @@ def _regenerate_codegen_text_safely_impl(codegen: object, *, context: str) -> tu
     return _snapshot_codegen_text(codegen), True
 
 
+@cython.ccall
 def _normalize_stack_identifiers_before_render_8616(codegen: object) -> None:
     """Normalize third-party names, then restore proven BP projections."""
     with contextlib.suppress(Exception):
@@ -2389,24 +2585,25 @@ def _normalize_stack_identifiers_before_render_8616(codegen: object) -> None:
         reapply_stack_variable_projection_names_8616(codegen)
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _RegenRunCtx8616:
     """State for one codegen-text regeneration run and its replay/preserve lanes."""
 
     codegen: Any
-    context: str
-    fallback_text: str
+    context: object
+    fallback_text: object
     log: Any
-    semantic_materialization_active: bool
-    selector_return_contract_active: bool
-    trace_addr: int
-    preservation_baseline_text: str
+    semantic_materialization_active: cython.bint
+    selector_return_contract_active: cython.bint
+    trace_addr: cython.longlong
+    preservation_baseline_text: object
     pre_replay_cfunc: Any = None
     pre_replay_tail_summary: Any = None
 
     @classmethod
-    def build(cls, codegen: object, context: str) -> _RegenRunCtx8616:
+    def build(cls, codegen: object, context: object) -> _RegenRunCtx8616:
         """Capture the pre-render snapshot and policy gates for this run."""
+        target_text: object
         fallback_text = _snapshot_codegen_text(codegen)
         semantic_materialization_active = _codegen_has_semantic_materialization_8616(codegen) or bool(
             # Dynamic angr/codegen compatibility boundary.
@@ -2440,25 +2637,29 @@ class _RegenRunCtx8616:
             preservation_baseline_text=fallback_text,
         )
 
-    def trace_dump(self, tag: str, text: str) -> None:
+    @cython.ccall
+    def trace_dump(self, tag: object, text: object) -> None:
         """Dump text when the debug env targets this function address."""
         if self.trace_addr > 0:
             _debug_dump_calls_8616(tag, text, self.trace_addr)
 
-    def pointer_memory_materialized(self) -> bool:
+    @cython.ccall
+    def pointer_memory_materialized(self) -> cython.bint:
         """Read the lowering completion marker at the angr codegen boundary."""
         try:
             return typing.cast(typing.Any, self.codegen)._inertia_pointer_memory_materialized_8616 is not None
         except AttributeError:
             return False
 
-    def replay_pointer_arg_loads_if_unmaterialized(self) -> bool:
+    @cython.ccall
+    def replay_pointer_arg_loads_if_unmaterialized(self) -> cython.bint:
         """Do not let CLI compatibility replay reverse lowering-owned pointer memory."""
         if self.pointer_memory_materialized():
             return False
         return bool(_replay_runtime_segment_lowering_after_regen_8616(self.codegen))
 
-    def render_text_or_none(self, tag: str) -> str | None:
+    @cython.ccall
+    def render_text_or_none(self, tag: object) -> object:
         """Render via codegen.render_text after integrity/normalization steps."""
         require_codegen_render_integrity_8616(self.codegen, context=self.context)
         _normalize_stack_identifiers_before_render_8616(self.codegen)
@@ -2472,8 +2673,11 @@ class _RegenRunCtx8616:
             return text
         return None
 
-    def direct_cfunc_text_or_none(self, tag: str) -> str | None:
+    @cython.ccall
+    def direct_cfunc_text_or_none(self, tag: object) -> object:
         """Render the C function after the final evidence-backed stack replay."""
+        c_repr: object
+        cfunc: object
         codegen = self.codegen
         require_codegen_render_integrity_8616(codegen, context=self.context)
         if (
@@ -2504,14 +2708,16 @@ class _RegenRunCtx8616:
             )
         return text
 
-    def preserve_replay_or_restore(self, candidate_text: str, *, replay_tag: str) -> tuple[str, bool]:
+    @cython.ccall
+    def preserve_replay_or_restore(self, candidate_text: object, *, replay_tag: object) -> object:
         """Accept replayed candidate text or restore the pre-replay baseline."""
+        restored: object
         codegen = self.codegen
         if not self.semantic_materialization_active:
             return candidate_text, True
         evidence = _render_refresh_preservation_evidence_8616(self.preservation_baseline_text, candidate_text)
         typing.cast(typing.Any, codegen)._inertia_render_refresh_preservation_evidence_8616 = evidence
-        if evidence.decision != RenderRefreshPreservationDecision8616.RESTORE_STACK_WRITE_EFFECTS:
+        if operator.ne(evidence.decision, RenderRefreshPreservationDecision8616.RESTORE_STACK_WRITE_EFFECTS):
             return candidate_text, True
         if _render_refresh_replay_preserves_live_out_8616(codegen, self.pre_replay_tail_summary):
             typing.cast(typing.Any, codegen)._inertia_render_refresh_replay_accepted_by_live_out_8616 = (
@@ -2547,7 +2753,7 @@ class _RegenRunCtx8616:
                 "[cli-render-refresh-preserve] tag=%s lost=%r evidence_offsets=%r baseline_markers=%r candidate_markers=%r",
                 replay_tag,
                 evidence.lost_stack_slots,
-                sorted(_direct_stack_materialization_evidence_offsets_8616(codegen)),
+                sorted(tuple(_direct_stack_materialization_evidence_offsets_8616(codegen))),
                 tuple(assess_decompiled_c_text(self.preservation_baseline_text).markers),
                 tuple(assess_decompiled_c_text(candidate_text).markers),
             )
@@ -2566,7 +2772,8 @@ class _RegenRunCtx8616:
         self.trace_dump(f"{replay_tag}-restored-stack-write-effects", self.preservation_baseline_text)
         return self.preservation_baseline_text, True
 
-    def _restore_pre_replay_cfunc(self, replay_tag: str) -> tuple[str, bool] | None:
+    @cython.ccall
+    def _restore_pre_replay_cfunc(self, replay_tag: object) -> object:
         """Restore the pre-replay cfunc and accept it when quality does not regress."""
         codegen = self.codegen
         if self.pre_replay_cfunc is None:
@@ -2600,8 +2807,7 @@ class _RegenRunCtx8616:
                 restored_quality.markers,
             )
         if (
-            restored_evidence.decision
-            != RenderRefreshPreservationDecision8616.RESTORE_STACK_WRITE_EFFECTS
+            operator.ne(restored_evidence.decision, RenderRefreshPreservationDecision8616.RESTORE_STACK_WRITE_EFFECTS)
             and restored_penalty <= baseline_penalty
         ):
             self.log.warning(
@@ -2612,8 +2818,10 @@ class _RegenRunCtx8616:
             return restored_text, True
         return None
 
-    def run_regen_pipeline(self) -> tuple[str, bool] | None:
+    @cython.ccall
+    def run_regen_pipeline(self) -> object:
         """Drive regeneration lanes in order; None to fall through to post-regen render."""
+        result: object
         result = self._regen_prelim_lanes()
         if result is not None:
             return result
@@ -2626,8 +2834,11 @@ class _RegenRunCtx8616:
             return result
         return self._core_regen_replay_lane()
 
-    def _regen_prelim_lanes(self) -> tuple[str, bool] | None:
+    @cython.ccall
+    def _regen_prelim_lanes(self) -> object:
         """Repair targets, normalize identifiers, then try authority/pointer lanes."""
+        authoritative_text: object
+        direct_text: object
         codegen = self.codegen
         repair_cfunctioncall_render_targets_8616(codegen)
         with contextlib.suppress(Exception):
@@ -2649,8 +2860,10 @@ class _RegenRunCtx8616:
                 return direct_text, True
         return None
 
+    @cython.ccall
     def _semantic_replay_and_capture(self) -> None:
         """Replay non-call semantics, then capture the pre-replay tree/summary."""
+        noncall_text: object
         codegen = self.codegen
         if self.semantic_materialization_active:
             with contextlib.suppress(Exception):
@@ -2665,10 +2878,7 @@ class _RegenRunCtx8616:
                     noncall_text = self.direct_cfunc_text_or_none("regen-cfunc-text-before-call-arg-replay-noncall")
                     if noncall_text is not None:
                         noncall_evidence = _render_refresh_preservation_evidence_8616(self.fallback_text, noncall_text)
-                        if (
-                            noncall_evidence.decision
-                            != RenderRefreshPreservationDecision8616.RESTORE_STACK_WRITE_EFFECTS
-                        ):
+                        if operator.ne(noncall_evidence.decision, RenderRefreshPreservationDecision8616.RESTORE_STACK_WRITE_EFFECTS):
                             self.preservation_baseline_text = noncall_text
                             typing.cast(typing.Any, codegen)._inertia_render_refresh_noncall_replay_before_call_args_8616 = (
                                 int(
@@ -2687,8 +2897,10 @@ class _RegenRunCtx8616:
                 self.pre_replay_cfunc = copy.deepcopy(getattr(codegen, "cfunc", None))
             self.pre_replay_tail_summary = _collect_render_refresh_tail_summary_8616(codegen)
 
-    def _callsite_arg_materialization_lane(self) -> tuple[str, bool] | None:
+    @cython.ccall
+    def _callsite_arg_materialization_lane(self) -> object:
         """Replay callsite stack args, render, and preserve-or-restore the result."""
+        direct_text: object
         codegen = self.codegen
         if not (
             getattr(codegen, "_inertia_callsite_args_ast_materialized_8616", False)
@@ -2717,8 +2929,11 @@ class _RegenRunCtx8616:
             return preserved_text, accepted_replay
         return None
 
-    def _force_and_postprocess_lanes(self) -> tuple[str, bool] | None:
+    @cython.ccall
+    def _force_and_postprocess_lanes(self) -> object:
         """Try the forced-live-AST and postprocess-changed direct/render lanes."""
+        direct_text: object
+        rendered_text: object
         codegen = self.codegen
         # Dynamic angr/codegen compatibility boundary.
         force_regeneration = bool(getattr(codegen, "_inertia_force_codegen_regeneration_8616", False))
@@ -2735,7 +2950,8 @@ class _RegenRunCtx8616:
                 return rendered_text, True
         return None
 
-    def _core_regen_replay_lane(self) -> tuple[str, bool] | None:
+    @cython.ccall
+    def _core_regen_replay_lane(self) -> object:
         """Run regenerate_text, replay changed semantics, and retry per-family lanes."""
         codegen = self.codegen
         # Dynamic third-party angr/codegen boundary.
@@ -2758,8 +2974,10 @@ class _RegenRunCtx8616:
             return self._post_replay_direct_lane(regenerate_text)
         return self._named_indexed_stack_replay_lanes(regenerate_text)
 
-    def _post_replay_direct_lane(self, regenerate_text: Any) -> tuple[str, bool] | None:
+    @cython.ccall
+    def _post_replay_direct_lane(self, regenerate_text: Any) -> object:
         """Finalize post-regen replay and return the direct/render result or re-render."""
+        direct_text: object
         codegen = self.codegen
         with contextlib.suppress(Exception):
             _replay_named_segmented_global_lowering_after_regen_8616(codegen)
@@ -2779,8 +2997,10 @@ class _RegenRunCtx8616:
         regenerate_text()
         return None
 
-    def _named_indexed_stack_replay_lanes(self, regenerate_text: Any) -> tuple[str, bool] | None:
+    @cython.ccall
+    def _named_indexed_stack_replay_lanes(self, regenerate_text: Any) -> object:
         """Try named/indexed/stack replay families in order, regenerating on success."""
+        direct_text: object
         codegen = self.codegen
         with contextlib.suppress(Exception):
             named_replay_changed = _replay_named_segmented_global_lowering_after_regen_8616(codegen)
@@ -2812,8 +3032,10 @@ class _RegenRunCtx8616:
                 regenerate_text()
         return None
 
-    def recover_recursion_error(self) -> tuple[str, bool]:
+    @cython.ccall
+    def recover_recursion_error(self) -> tuple[str, cython.bint]:
         """Recover from a RecursionError during regenerate by re-rendering."""
+        rendered_text: object
         codegen = self.codegen
         self.log.debug("regenerate_text hit RecursionError for %s; retrying render", self.context)
         cycle_path = _c_ast_cycle_path_8616(getattr(getattr(codegen, "cfunc", None), "statements", None))
@@ -2827,8 +3049,10 @@ class _RegenRunCtx8616:
             self.log.warning("render_text after RecursionError also failed for %s: %s", self.context, ex2)
         return self.fallback_text, False
 
-    def recover_generic_error(self, ex: Exception) -> tuple[str, bool]:
+    @cython.ccall
+    def recover_generic_error(self, ex: Exception) -> tuple[str, cython.bint]:
         """Recover from a generic regenerate failure by re-rendering."""
+        rendered_text: object
         self.log.warning("regenerate_text failed for %s: %s", self.context, ex)
         try:
             rendered_text = self.render_text_or_none("regen-render-text-after-failed-regen")
@@ -2837,7 +3061,8 @@ class _RegenRunCtx8616:
         except Exception as ex2:
             self.log.debug("render_text after failed regeneration also failed for %s: %s", self.context, ex2)
         return self.fallback_text, False
-def _codegen_requires_render_refresh_8616(codegen: object) -> bool:
+@cython.ccall
+def _codegen_requires_render_refresh_8616(codegen: object) -> cython.bint:
     return bool(
         getattr(codegen, "_inertia_codegen_decl_refresh_required_8616", False)
         or getattr(codegen, "_inertia_codegen_call_args_render_refresh_required_8616", False)
@@ -2845,7 +3070,10 @@ def _codegen_requires_render_refresh_8616(codegen: object) -> bool:
     )
 
 
-def _codegen_has_semantic_materialization_8616(codegen: object) -> bool:
+def _codegen_has_semantic_materialization_8616(codegen: object) -> cython.bint:
+    segmented_stats: object
+    stats: object
+    stats_attr: object
     try:
         if typing.cast(typing.Any, codegen)._inertia_pointer_memory_materialized_8616 is not None:
             return True
@@ -2871,12 +3099,15 @@ def _codegen_has_semantic_materialization_8616(codegen: object) -> bool:
             segmented_stats.direct_symbol_store_materialized_count,
             segmented_stats.direct_symbol_update_materialized_count,
         )
-        if any(count > 0 for count in materialized_counts):
+        if any(count > 0 for count in iter(materialized_counts)):
             return True
     return False
 
 
-def _postprocess_regenerated_text_available_8616(codegen: object) -> bool:
+@cython.ccall
+def _postprocess_regenerated_text_available_8616(codegen: object) -> cython.bint:
+    context: object
+    text: object
     text = getattr(codegen, "text", None)
     if not isinstance(text, str) or not text.strip():
         return False
@@ -2888,8 +3119,12 @@ def _postprocess_regenerated_text_available_8616(codegen: object) -> bool:
     return isinstance(context, str) and bool(context.strip())
 
 
-def _first_function_header_parts_8616(c_text: str) -> tuple[str, tuple[str, ...]] | None:
+@cython.ccall
+def _first_function_header_parts_8616(c_text: object) -> object:
     """Return the first rendered function name and argument identifiers."""
+    arg_match: object
+    match: object
+    arg: object
     match = re.search(
         r"(?m)^\s*(?:unsigned\s+short|short|int|unsigned\s+int|void)\s+"
         r"(?P<name>[A-Za-z_]\w*)\s*\((?P<args>[^()]*)\)\s*$",
@@ -2909,13 +3144,18 @@ def _first_function_header_parts_8616(c_text: str) -> tuple[str, tuple[str, ...]
     return match.group("name"), tuple(names)
 
 
-def _regeneration_introduced_arg_local_split_8616(cached_text: str, rendered_text: str) -> bool:
+@cython.ccall
+def _regeneration_introduced_arg_local_split_8616(cached_text: object, rendered_text: object) -> cython.bint:
     """Detect a rendered argument that became a live uninitialized local.
 
     This is a render-consistency guard, not semantic recovery.  A stale local
     declaration or stack-offset comment alone is harmless and must not cause
     the current AST rendering to be replaced by older cached C.
     """
+    cached_header: object
+    declaration: object
+    rendered_header: object
+    arg_name: object
     cached_header = _first_function_header_parts_8616(cached_text)
     rendered_header = _first_function_header_parts_8616(rendered_text)
     if cached_header is None or rendered_header is None:
@@ -2947,12 +3187,13 @@ def _regeneration_introduced_arg_local_split_8616(cached_text: str, rendered_tex
     return False
 
 
+@cython.ccall
 def _should_refuse_legacy_cli_rewrite_8616(
     project: angr.Project,
     *,
-    small_function: bool,
-    sidecar_free: bool,
-) -> bool:
+    small_function: cython.bint,
+    sidecar_free: cython.bint,
+) -> cython.bint:
     """Refuse semantic CLI repair for nontrivial pure-binary x86-16 C."""
 
     return bool(
@@ -2962,8 +3203,11 @@ def _should_refuse_legacy_cli_rewrite_8616(
     )
 
 
-def _tail_validation_snapshot_complete_for_cli_rewrite_8616(snapshot: object) -> bool:
+@cython.ccall
+def _tail_validation_snapshot_complete_for_cli_rewrite_8616(snapshot: object) -> cython.bint:
     """Return whether both core stages recorded a structured terminal result."""
+    entry: object
+    stage: object
 
     if not isinstance(snapshot, Mapping):
         return False
@@ -2976,7 +3220,8 @@ def _tail_validation_snapshot_complete_for_cli_rewrite_8616(snapshot: object) ->
     return True
 
 
-def _tail_validation_snapshot_failed_for_cli_rewrite_8616(snapshot: object) -> bool:
+@cython.ccall
+def _tail_validation_snapshot_failed_for_cli_rewrite_8616(snapshot: object) -> cython.bint:
     """Return whether a complete core validation snapshot did not pass."""
 
     return (
@@ -2986,6 +3231,7 @@ def _tail_validation_snapshot_failed_for_cli_rewrite_8616(snapshot: object) -> b
     )
 
 
+@cython.ccall
 def _clear_codegen_render_refresh_8616(codegen: object) -> None:
     with contextlib.suppress(Exception):
         typing.cast(typing.Any, codegen)._inertia_codegen_decl_refresh_required_8616 = False
@@ -2995,31 +3241,35 @@ def _clear_codegen_render_refresh_8616(codegen: object) -> None:
         typing.cast(typing.Any, codegen)._inertia_force_codegen_regeneration_8616 = False
 
 
-def _validated_rewrite_refusal_needs_render_refresh_8616(live_snapshot: object) -> bool:
+@cython.ccall
+def _validated_rewrite_refusal_needs_render_refresh_8616(live_snapshot: object) -> cython.bint:
     return not (isinstance(live_snapshot, str) and bool(live_snapshot.strip()))
 
 
+@cython.ccall
 def _emit_optional_source_sidecar_c_block(
     binary_path: Path | None,
-    function_name: str | None,
-    c_text: str | None,
+    function_name: object,
+    c_text: object,
     *,
-    alternate_source_c: bool,
-    c_header: str,
+    alternate_source_c: cython.bint,
+    c_header: object,
 ) -> None:
     c_text = _normalize_text_payload_8616(c_text)
     print(c_header)
     print(c_text, end="" if c_text.endswith("\n") else "\n", flush=True)
 
 
+@cython.ccall
 def _format_minimal_codegen_output(
     project: angr.Project,
     function: object,
-    rendered_text: str,
-    api_style: str,
+    rendered_text: object,
+    api_style: object,
     binary_path: Path | None,
     cod_metadata: CODProcMetadata | None,
-) -> str:
+) -> object:
+    forced: object
     formatted = _format_known_helper_calls(
         project,
         function,
@@ -3048,17 +3298,22 @@ def _format_minimal_codegen_output(
     return str(formatted)
 
 
+@cython.ccall
 def _apply_known_cod_object_annotations(
     project: angr.Project,
-    func_addr: int,
+    func_addr: cython.longlong,
     cod_metadata: CODProcMetadata | None,
-    synthetic_globals: dict[int, tuple[str, int]] | None,
-) -> bool:
+    synthetic_globals: object,
+) -> cython.bint:
+    spec: object
+    _width: object
+    addr: object
+    raw_name: object
     if not synthetic_globals:
         return False
 
     changed = False
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     for addr, (raw_name, _width) in synthetic_globals.items():
         spec = known_cod_object_spec(raw_name)
         if spec is None or addr in seen:
@@ -3091,51 +3346,51 @@ class RenderRefreshPreservationDecision8616(Enum):
     NO_STACK_WRITE_EVIDENCE = "no_stack_write_evidence"
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class ValidatedPayloadReplacementEvidence8616:
     """Evidence used when deciding whether a rendered replacement C payload is weaker."""
 
     decision: ValidatedPayloadReplacementDecision8616
-    current_call_score: tuple[int, int, int]
-    validated_call_score: tuple[int, int, int]
-    current_loop_score: int
-    validated_loop_score: int
-    current_missing_calls: tuple[str, ...]
-    validated_missing_calls: tuple[str, ...]
+    current_call_score: object
+    validated_call_score: object
+    current_loop_score: cython.longlong
+    validated_loop_score: cython.longlong
+    current_missing_calls: object
+    validated_missing_calls: object
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class RenderRefreshPreservationEvidence8616:
     """Text-level evidence used to guard render refresh after AST replay."""
 
     decision: RenderRefreshPreservationDecision8616
-    before_stack_writes: Mapping[str, int]
-    after_stack_writes: Mapping[str, int]
-    lost_stack_slots: tuple[str, ...]
+    before_stack_writes: Mapping[str, cython.longlong]
+    after_stack_writes: Mapping[str, cython.longlong]
+    lost_stack_slots: object
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class RenderRefreshSemanticReplayEvidence8616:
     """Closed evidence loop for semantic identity across one CLI AST replay."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
     validation: Mapping[str, object]
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class CallLossGuardedDceResult8616:
     """Structured result for a DCE pass guarded by call-expression counts."""
 
-    changed: bool
-    before_calls: int
-    after_calls: int
+    changed: cython.bint
+    before_calls: cython.longlong
+    after_calls: cython.longlong
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class CliCallInventory8616:
     """One traversal's observation of the current structured-C call surface.
 
@@ -3146,8 +3401,8 @@ class CliCallInventory8616:
     state walked; callers must not retain it across a rewrite or restore.
     """
 
-    total: int
-    name_counts: dict[str, int]
+    total: cython.longlong
+    name_counts: object
 
 
 _STACK_SLOT_DECL_RE_8616 = re.compile(
@@ -3155,7 +3410,9 @@ _STACK_SLOT_DECL_RE_8616 = re.compile(
 )
 
 
-def _reserved_8616_frame_slot_key(slot: str) -> bool:
+@cython.ccall
+def _reserved_8616_frame_slot_key(slot: object) -> cython.bint:
+    parsed: object
     try:
         parsed = _stack_slot_key_offset_8616(slot)
     except ValueError:
@@ -3168,7 +3425,8 @@ def _reserved_8616_frame_slot_key(slot: str) -> bool:
     return sign == "+" and 0 <= offset <= 3
 
 
-def _stack_slot_key_offset_8616(slot: object) -> tuple[str, int] | None:
+@cython.ccall
+def _stack_slot_key_offset_8616(slot: object) -> object:
     if not isinstance(slot, str) or not slot.startswith(("bp+0x", "bp-0x")):
         return None
     sign = slot[2]
@@ -3178,9 +3436,14 @@ def _stack_slot_key_offset_8616(slot: object) -> tuple[str, int] | None:
         return None
 
 
-def _direct_stack_materialization_evidence_offsets_8616(codegen: object) -> frozenset[int]:
+@cython.ccall
+def _direct_stack_materialization_evidence_offsets_8616(codegen: object) -> frozenset[cython.longlong]:
     """Return BP-relative byte slots covered by direct stack materialization evidence."""
-    offsets: set[int] = set()
+    attr_name: object
+    base_offset: object
+    evidence: object
+    item: object
+    offsets: set[cython.longlong] = set()
     for attr_name in (
         "_inertia_direct_stack_move_evidence_8616",
         "_inertia_direct_stack_update_evidence_8616",
@@ -3189,7 +3452,7 @@ def _direct_stack_materialization_evidence_offsets_8616(codegen: object) -> froz
         for evidence in tuple(getattr(codegen, attr_name, ()) or ()):
             if not isinstance(evidence, (tuple, list)):
                 continue
-            base_offsets: list[int] = []
+            base_offsets: list[cython.longlong] = []
             width = 1
             for item in tuple(evidence):
                 if not isinstance(item, (tuple, list)) or len(item) != 2:
@@ -3204,10 +3467,12 @@ def _direct_stack_materialization_evidence_offsets_8616(codegen: object) -> froz
     return frozenset(offsets)
 
 
+@cython.ccall
 def _collect_render_refresh_tail_summary_8616(
     codegen: object,
 ) -> X86_16TailValidationSummary | None:
     """Collect live-out effects at the dynamic CLI-to-codegen boundary."""
+    project: object
     # Dynamic angr/codegen compatibility boundary.
     project = getattr(codegen, "project", None)
     if project is None:
@@ -3226,11 +3491,13 @@ def _collect_render_refresh_tail_summary_8616(
         return None
 
 
+@cython.ccall
 def _render_refresh_replay_preserves_live_out_8616(
     codegen: object,
-    before_summary: X86_16TailValidationSummary | None,
-) -> bool:
+    before_summary: object,
+) -> cython.bint:
     """Accept replay only when tail validation proves live-out identity."""
+    after_summary: object
     if before_summary is None:
         return False
     after_summary = _collect_render_refresh_tail_summary_8616(codegen)
@@ -3251,10 +3518,14 @@ def _render_refresh_replay_preserves_live_out_8616(
     return bool(passed)
 
 
+@cython.ccall
 def _render_refresh_lost_stack_writes_are_validated_materialization_8616(
     codegen: object,
     evidence: RenderRefreshPreservationEvidence8616,
-) -> bool:
+) -> cython.bint:
+    parsed: object
+    project: object
+    slot: object
     if evidence.decision is not RenderRefreshPreservationDecision8616.RESTORE_STACK_WRITE_EFFECTS:
         return False
     # Dynamic angr/codegen compatibility boundary.
@@ -3286,10 +3557,13 @@ def _render_refresh_lost_stack_writes_are_validated_materialization_8616(
     return True
 
 
+@cython.ccall
 def _render_refresh_lost_stack_writes_have_direct_stack_evidence_8616(
     codegen: object,
     evidence: RenderRefreshPreservationEvidence8616,
-) -> bool:
+) -> cython.bint:
+    parsed: object
+    slot: object
     if evidence.decision is not RenderRefreshPreservationDecision8616.RESTORE_STACK_WRITE_EFFECTS:
         return False
     evidence_offsets = _direct_stack_materialization_evidence_offsets_8616(codegen)
@@ -3307,7 +3581,8 @@ def _render_refresh_lost_stack_writes_have_direct_stack_evidence_8616(
     return True
 
 
-def _render_refresh_candidate_strictly_improves_quality_8616(before_text: str, after_text: str) -> bool:
+@cython.ccall
+def _render_refresh_candidate_strictly_improves_quality_8616(before_text: object, after_text: object) -> cython.bint:
     before_quality = assess_decompiled_c_text(before_text)
     after_quality = assess_decompiled_c_text(after_text)
     before_penalty = len(before_quality.markers)
@@ -3315,12 +3590,16 @@ def _render_refresh_candidate_strictly_improves_quality_8616(before_text: str, a
     return after_penalty < before_penalty
 
 
-def _stack_slot_write_effects_from_c_text_8616(c_text: str) -> Counter[str]:
+def _stack_slot_write_effects_from_c_text_8616(c_text: object) -> Counter[str]:
     """Count rendered writes to stack-slot locals as a preservation gate.
 
     This is not semantic recovery. It only checks that a replayed render did not
     delete stack writes that were already present in the validated C tree.
     """
+    match: object
+    line: object
+    name: object
+    write_re: object
     effects: Counter[str] = Counter()
     if not isinstance(c_text, str) or not c_text.strip():
         return effects
@@ -3335,13 +3614,13 @@ def _stack_slot_write_effects_from_c_text_8616(c_text: str) -> Counter[str]:
         names_by_slot.setdefault(slot, set()).add(match.group("name"))
     if not names_by_slot:
         return effects
-    slot_by_name = {name: slot for slot, names in names_by_slot.items() for name in names}
+    slot_by_name = {name: slot for slot, names in builtins.iter(names_by_slot.items()) for name in iter(names)}
     if not slot_by_name:
         return effects
 
     write_res = tuple(
         re.compile(rf"(?<![A-Za-z0-9_]){re.escape(name)}\s*(?:[+\-*/%&|^]?=|\+\+|--)")
-        for name in sorted(slot_by_name, key=len, reverse=True)
+        for name in builtins.iter(sorted(slot_by_name, key=len, reverse=True))
     )
     names = tuple(sorted(slot_by_name, key=len, reverse=True))
     for line in c_text.splitlines():
@@ -3356,8 +3635,8 @@ def _stack_slot_write_effects_from_c_text_8616(c_text: str) -> Counter[str]:
 
 
 def _render_refresh_preservation_evidence_8616(
-    before_text: str,
-    after_text: str,
+    before_text: object,
+    after_text: object,
 ) -> RenderRefreshPreservationEvidence8616:
     before = _stack_slot_write_effects_from_c_text_8616(before_text)
     after = _stack_slot_write_effects_from_c_text_8616(after_text)
@@ -3371,7 +3650,7 @@ def _render_refresh_preservation_evidence_8616(
     lost = tuple(
         sorted(
             slot
-            for slot, count in before.items()
+            for slot, count in builtins.iter(before.items())
             if after.get(slot, 0) < count and not _reserved_8616_frame_slot_key(slot)
         )
     )
@@ -3390,34 +3669,38 @@ def _render_refresh_preservation_evidence_8616(
     )
 
 
+@cython.ccall
 def _under_recovered_call_heavy_codegen_8616(
-    rendered_text: str,
+    rendered_text: object,
     cod_metadata: CODProcMetadata | None,
-) -> bool:
+) -> cython.bint:
     return False
 
 
-def _expected_call_presence_score_8616(rendered_text: str, cod_metadata: CODProcMetadata | None) -> int:
+@cython.ccall
+def _expected_call_presence_score_8616(rendered_text: object, cod_metadata: CODProcMetadata | None) -> cython.longlong:
     return 0
 
 
-def _expected_loop_count_from_cod_metadata_8616(cod_metadata: CODProcMetadata | None) -> int:
+@cython.ccall
+def _expected_loop_count_from_cod_metadata_8616(cod_metadata: CODProcMetadata | None) -> cython.longlong:
     return 0
 
 
-def _emitted_loop_count_8616(rendered_text: str) -> int:
+def _emitted_loop_count_8616(rendered_text: object) -> cython.longlong:
     if not isinstance(rendered_text, str) or not rendered_text:
         return 0
     text_wo_comments = re.sub(r"/\*.*?\*/", "", rendered_text, flags=re.S)
     text_wo_comments = re.sub(r"//[^\n]*", "", text_wo_comments)
-    text_wo_comments = "\n".join(line for line in text_wo_comments.splitlines() if not line.lstrip().startswith("///"))
+    text_wo_comments = "\n".join(line for line in builtins.iter(text_wo_comments.splitlines()) if not line.lstrip().startswith("///"))
     body = text_wo_comments.split("{", 1)[-1] if "{" in text_wo_comments else text_wo_comments
-    return sum(1 for _ in re.finditer(r"\b(?:for|while)\s*\(", body)) + sum(
-        1 for _ in re.finditer(r"^\s*do\b", body, flags=re.M)
+    return sum(1 for _ in builtins.iter(re.finditer(r"\b(?:for|while)\s*\(", body))) + sum(
+        1 for _ in builtins.iter(re.finditer(r"^\s*do\b", body, flags=re.M))
     )
 
 
-def _expected_loop_presence_score_8616(rendered_text: str, cod_metadata: CODProcMetadata | None) -> int:
+@cython.ccall
+def _expected_loop_presence_score_8616(rendered_text: object, cod_metadata: CODProcMetadata | None) -> cython.longlong:
     expected = _expected_loop_count_from_cod_metadata_8616(cod_metadata)
     if expected <= 0:
         return 0
@@ -3425,8 +3708,8 @@ def _expected_loop_presence_score_8616(rendered_text: str, cod_metadata: CODProc
 
 
 def _validated_payload_replacement_evidence_8616(
-    current_payload: str,
-    validated_payload: str,
+    current_payload: object,
+    validated_payload: object,
     cod_metadata: CODProcMetadata | None,
 ) -> ValidatedPayloadReplacementEvidence8616:
     current_call_score = (
@@ -3443,7 +3726,7 @@ def _validated_payload_replacement_evidence_8616(
     validated_loop_score = _expected_loop_presence_score_8616(validated_payload, cod_metadata)
     current_missing_calls = tuple(_missing_expected_calls_from_cod_metadata_8616(current_payload, cod_metadata))
     validated_missing_calls = tuple(_missing_expected_calls_from_cod_metadata_8616(validated_payload, cod_metadata))
-    newly_missing_calls = tuple(name for name in validated_missing_calls if name not in set(current_missing_calls))
+    newly_missing_calls = tuple(name for name in iter(validated_missing_calls) if name not in set(current_missing_calls))
     decision = ValidatedPayloadReplacementDecision8616.USE_VALIDATED
     if current_call_score > validated_call_score or newly_missing_calls:
         decision = ValidatedPayloadReplacementDecision8616.REJECT_WORSE_CALL_EVIDENCE
@@ -3460,19 +3743,23 @@ def _validated_payload_replacement_evidence_8616(
     )
 
 
-def _validated_payload_cache_tail_validation_passed_8616(project: object) -> bool:
+@cython.ccall
+def _validated_payload_cache_tail_validation_passed_8616(project: object) -> cython.bint:
+    snapshot: object
     if not _tail_validation_runtime_enabled(project):
         return True
     snapshot = getattr(project, "_inertia_last_tail_validation_snapshot", None)
     return bool(x86_16_tail_validation_snapshot_passed(snapshot))
 
 
-_REPLACEMENT_RECOMPILE_CACHE_8616: dict[tuple[str, str], bool] = {}
+_REPLACEMENT_RECOMPILE_CACHE_8616: dict[tuple[str, str], cython.bint] = {}
 _REPLACEMENT_RECOMPILE_CACHE_LOCK_8616 = threading.Lock()
 
 
-def _partial_timeout_payload_is_validated_8616(project: object, payload: str | None) -> bool:
+@cython.ccall
+def _partial_timeout_payload_is_validated_8616(project: object, payload: object) -> cython.bint:
     """Return whether a partial-timeout payload is backed by a passing tail-validation snapshot."""
+    snapshot: object
     if not isinstance(payload, str) or not payload.strip():
         return False
     if not _tail_validation_runtime_enabled(project):
@@ -3481,7 +3768,10 @@ def _partial_timeout_payload_is_validated_8616(project: object, payload: str | N
     return bool(x86_16_tail_validation_snapshot_passed(snapshot))
 
 
-def _validated_payload_replacement_recompiles_8616(validated_payload: str) -> bool:
+@cython.ccall
+def _validated_payload_replacement_recompiles_8616(validated_payload: object) -> cython.bint:
+    cached: object
+    target: object
     if not isinstance(validated_payload, str) or not validated_payload.strip():
         return False
     payload_hash = hashlib.sha256(validated_payload.encode("utf-8", errors="ignore")).hexdigest()
@@ -3501,29 +3791,33 @@ def _validated_payload_replacement_recompiles_8616(validated_payload: str) -> bo
     return True
 
 
-def _expected_call_arity_score_8616(rendered_text: str, cod_metadata: CODProcMetadata | None) -> int:
+@cython.ccall
+def _expected_call_arity_score_8616(rendered_text: object, cod_metadata: CODProcMetadata | None) -> cython.longlong:
     return 0
 
 
-def _expected_call_arity_deficit_8616(rendered_text: str, cod_metadata: CODProcMetadata | None) -> int:
+@cython.ccall
+def _expected_call_arity_deficit_8616(rendered_text: object, cod_metadata: CODProcMetadata | None) -> cython.longlong:
     return 0
 
 
-def _commentless_c_text_8616(rendered_text: str) -> str:
+def _commentless_c_text_8616(rendered_text: object) -> str:
     text_wo_comments = re.sub(r"/\*.*?\*/", "", rendered_text, flags=re.S)
     text_wo_comments = re.sub(r"//[^\n]*", "", text_wo_comments)
-    return "\n".join(line for line in text_wo_comments.splitlines() if not line.lstrip().startswith("///"))
+    return "\n".join(line for line in builtins.iter(text_wo_comments.splitlines()) if not line.lstrip().startswith("///"))
 
 
+@cython.ccall
 def _cod_signature_and_stack_alias_score_8616(
-    rendered_text: str,
+    rendered_text: object,
     function: object,
     cod_metadata: CODProcMetadata | None,
-) -> int:
+) -> cython.longlong:
     return 0
 
 
-def _final_c_unreachable_after_return_penalty_8616(rendered_text: str) -> int:
+@cython.ccall
+def _final_c_unreachable_after_return_penalty_8616(rendered_text: object) -> cython.longlong:
     if final_c_has_unreachable_call_after_return_8616(rendered_text):
         return -1
     return 0
@@ -3559,8 +3853,8 @@ _SEMANTIC_CODEGEN_HELPER_NAMES_8616: frozenset[str] = frozenset({
 })
 
 
-def _implicit_placeholder_artifact_count_8616(rendered_text: str) -> int:
-    def _impl() -> int:
+def _implicit_placeholder_artifact_count_8616(rendered_text: object) -> cython.longlong:
+    def _impl() -> cython.longlong:
         if not isinstance(rendered_text, str) or not rendered_text:
             return 0
         text_wo_comments = re.sub(r"/\*.*?\*/", "", rendered_text, flags=re.S)
@@ -3570,7 +3864,7 @@ def _implicit_placeholder_artifact_count_8616(rendered_text: str) -> int:
     return _impl()
 
 
-def _non_probe_executable_call_count_8616(rendered_text: str) -> int:
+def _non_probe_executable_call_count_8616(rendered_text: object) -> cython.longlong:
     """Count emitted non-probe call expressions without treating this as recovery.
 
     This is a final-candidate tie-breaker only. It prevents CLI cleanup/fallback
@@ -3578,7 +3872,9 @@ def _non_probe_executable_call_count_8616(rendered_text: str) -> int:
     side-effecting calls. It does not infer missing callsites or repair arguments.
     """
 
-    def _impl() -> int:
+    def _impl() -> cython.longlong:
+        match: object
+        raw_line: object
         if not isinstance(rendered_text, str) or not rendered_text:
             return 0
         text_wo_comments = re.sub(r"/\*.*?\*/", "", rendered_text, flags=re.S)
@@ -3602,9 +3898,10 @@ def _non_probe_executable_call_count_8616(rendered_text: str) -> int:
     return _impl()
 
 
+@cython.ccall
 def _render_candidate_score_8616(
-    rendered_text: str, cod_metadata: CODProcMetadata | None
-) -> tuple[int, int, int, int, int, int]:
+    rendered_text: object, cod_metadata: CODProcMetadata | None
+) -> tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong, cython.longlong, cython.longlong]:
     """Rank already-produced C candidates without creating new semantics."""
     if not isinstance(rendered_text, str) or not rendered_text.strip():
         return (-(10**9), -(10**9), -(10**9), -(10**9), -(10**9), -(10**9))
@@ -3622,19 +3919,20 @@ def _render_candidate_score_8616(
 
 def _candidate_expected_global_names_8616(
     cod_metadata: CODProcMetadata | None,
-    synthetic_globals: dict[int, tuple[str, int]] | None,
+    synthetic_globals: object,
 ) -> tuple[str, ...]:
     expected: list[str] = []
     if synthetic_globals:
         expected.extend(
             str(global_name)
-            for global_name, _width in synthetic_globals.values()
+            for global_name, _width in builtins.iter(synthetic_globals.values())
             if isinstance(global_name, str) and global_name.strip()
         )
     return tuple(dict.fromkeys(expected))
 
 
-def _has_global_declaration_8616(rendered_text: str, global_name: str) -> bool:
+@cython.ccall
+def _has_global_declaration_8616(rendered_text: object, global_name: object) -> cython.bint:
     if not isinstance(rendered_text, str) or not rendered_text:
         return False
     if not isinstance(global_name, str) or not global_name:
@@ -3649,11 +3947,13 @@ def _has_global_declaration_8616(rendered_text: str, global_name: str) -> bool:
     return decl_re.search(rendered_text) is not None or def_re.search(rendered_text) is not None
 
 
+@cython.ccall
 def _global_declaration_coverage_score_8616(
-    rendered_text: str,
+    rendered_text: object,
     cod_metadata: CODProcMetadata | None,
-    synthetic_globals: dict[int, tuple[str, int]] | None,
-) -> int:
+    synthetic_globals: object,
+) -> cython.longlong:
+    name: object
     if not isinstance(rendered_text, str) or not rendered_text:
         return 0
     score = 0
@@ -3663,30 +3963,36 @@ def _global_declaration_coverage_score_8616(
     return score
 
 
+@cython.ccall
 def _missing_expected_calls_from_cod_metadata_8616(
-    rendered_text: str, cod_metadata: CODProcMetadata | None
+    rendered_text: object, cod_metadata: CODProcMetadata | None
 ) -> list[str]:
     return []
 
 
+@cython.ccall
 def _call_semantics_retry_evidence_8616(
-    rendered_text: str,
+    rendered_text: object,
     cod_metadata: CODProcMetadata | None,
-) -> tuple[bool, tuple[str, ...], int]:
+) -> tuple[cython.bint, tuple[str, ...], cython.longlong]:
     return False, (), 0
 
 
+@cython.ccall
 def _rehydrate_missing_evidenced_calls_on_live_codegen_8616(
     project: angr.Project,
     codegen: object,
     cod_metadata: CODProcMetadata | None,
-    rendered_text: str,
-) -> str:
+    rendered_text: object,
+) -> object:
     return rendered_text
 
 
-def _global_declaration_name_has_standalone_use_8616(c_text: str, name: str) -> bool:
+@cython.ccall
+def _global_declaration_name_has_standalone_use_8616(c_text: object, name: object) -> cython.bint:
     """Return whether a recorded global name is used as an object, not a field."""
+    match: object
+    raw_line: object
     if not isinstance(c_text, str) or re.fullmatch(r"[A-Za-z_]\w*", str(name)) is None:
         return False
     escaped = re.escape(str(name))
@@ -3709,12 +4015,13 @@ def _global_declaration_name_has_standalone_use_8616(c_text: str, name: str) -> 
     return False
 
 
-def _materialize_codegen_global_externs_text_8616(c_text: str, codegen: object) -> str:
+def _materialize_codegen_global_externs_text_8616(c_text: object, codegen: object) -> object:
     """Emit recorded global declarations in C-valid dependency order."""
+    raw_specs: object
 
     reconcile_registered_named_global_aggregate_declarations_8616(codegen)
-    raw_specs: Any = getattr(codegen, "_inertia_global_declaration_specs_8616", ())
-    specs: tuple[object, ...] = tuple(raw_specs) if isinstance(raw_specs, (list, tuple)) else ()
+    raw_specs = getattr(codegen, "_inertia_global_declaration_specs_8616", ())
+    specs: object = tuple(raw_specs) if isinstance(raw_specs, (list, tuple)) else ()
     specs, gp_definitions = project_gp_runtime_declarations_8616(codegen, specs)
     type_definitions = (*gp_definitions, *get_codegen_sequence_attr(
         codegen,
@@ -3725,7 +4032,7 @@ def _materialize_codegen_global_externs_text_8616(c_text: str, codegen: object) 
         return c_text
     pending_type_definitions = tuple(
         definition
-        for definition in type_definitions
+        for definition in iter(type_definitions)
         if definition.strip() and definition not in c_text
     )
 
@@ -3735,20 +4042,20 @@ def _materialize_codegen_global_externs_text_8616(c_text: str, codegen: object) 
         return c_text
     existing_declarations = tuple(
         line.strip()
-        for line in c_text.splitlines()
+        for line in builtins.iter(c_text.splitlines())
         if line.strip().startswith("extern ")
         and any(
             re.search(
                 rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])",
                 line,
             )
-            for name in names
+            for name in iter(names)
         )
     )
     if (
         not pending_type_definitions
-        and len(existing_declarations) == len(declarations)
-        and sorted(existing_declarations) == sorted(declarations)
+        and operator.eq(len(existing_declarations), len(declarations))
+        and operator.eq(sorted(existing_declarations), sorted(declarations))
     ):
         return c_text
 
@@ -3757,7 +4064,7 @@ def _materialize_codegen_global_externs_text_8616(c_text: str, codegen: object) 
     insert_idx = _global_decl_insert_index_8616(
         kept_lines, gp_definitions, pending_type_definitions, has_inline_struct_definition
     )
-    decl_block = list(dict.fromkeys((*pending_type_definitions, *declarations)))
+    decl_block = list(dict.fromkeys(tuple(pending_type_definitions) + tuple(declarations)))
     if insert_idx > 0 and kept_lines[insert_idx - 1].strip():
         decl_block = ["", *decl_block]
     if kept_lines[insert_idx].strip():
@@ -3768,10 +4075,12 @@ def _materialize_codegen_global_externs_text_8616(c_text: str, codegen: object) 
     return "\n".join(updated) + ("\n" if c_text.endswith("\n") else "")
 
 
+@cython.ccall
 def _global_extern_declarations_8616(
-    c_text: str, specs: tuple[object, ...], names: set[str]
-) -> tuple[list[str], bool]:
+    c_text: object, specs: object, names: object
+) -> tuple[list[str], cython.bint]:
     """Build extern declarations from specs with standalone use; extend names."""
+    spec: object
     declarations: list[str] = []
     has_inline_struct_definition = False
     for spec in specs:
@@ -3796,14 +4105,15 @@ def _global_extern_declarations_8616(
     return declarations, has_inline_struct_definition
 
 
-def _strip_global_decl_lines_8616(lines: list[str], names: set[str]) -> tuple[list[str], bool]:
+def _strip_global_decl_lines_8616(lines: object, names: object) -> tuple[list[str], cython.bint]:
     """Drop existing extern/simple declarations for the recorded names."""
+    line: object
     kept_lines: list[str] = []
     removed_existing = False
     for line in lines:
         stripped = line.strip()
         if stripped.startswith("extern "):  # noqa: SIM102
-            if any(re.search(rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])", stripped) for name in names):
+            if any(re.search(rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])", stripped) for name in iter(names)):
                 removed_existing = True
                 continue
         if any(
@@ -3811,7 +4121,7 @@ def _strip_global_decl_lines_8616(lines: list[str], names: set[str]) -> tuple[li
                 rf"(?:unsigned\s+char|signed\s+char|char|unsigned\s+short|short|uint8_t|uint16_t)\s+{re.escape(name)}\s*;\s*(?://.*)?",
                 stripped,
             )
-            for name in names
+            for name in iter(names)
         ):
             removed_existing = True
             continue
@@ -3820,25 +4130,28 @@ def _strip_global_decl_lines_8616(lines: list[str], names: set[str]) -> tuple[li
 
 
 def _global_decl_insert_index_8616(
-    kept_lines: list[str],
-    gp_definitions: tuple[object, ...],
-    pending_type_definitions: tuple[object, ...],
-    has_inline_struct_definition: bool,
-) -> int:
+    kept_lines: object,
+    gp_definitions: object,
+    pending_type_definitions: object,
+    has_inline_struct_definition: cython.bint,
+) -> cython.longlong:
     """Choose where the declaration block lands: before the first prototype/function."""
+    function_idx: object
+    insert_idx: object
+    prototype_idx: object
     function_re = re.compile(r"^\s*[A-Za-z_][\w\s\*]*\s+[A-Za-z_]\w*\s*\([^;{}]*\)\s*$")
     function_idx = next(
         (
             idx
-            for idx, line in enumerate(kept_lines[:-1])
+            for idx, line in builtins.iter(enumerate(kept_lines[:-1]))
             if function_re.match(line) and kept_lines[idx + 1].strip() == "{"
         ),
         None,
     )
-    has_pending_named_types = any(definition not in gp_definitions for definition in pending_type_definitions)
+    has_pending_named_types = any(definition not in gp_definitions for definition in iter(pending_type_definitions))
     if has_pending_named_types or has_inline_struct_definition:
         prototype_re = re.compile(r"^\s*[A-Za-z_][\w\s*]*\s+[A-Za-z_]\w*\s*\([^;{}]*\)\s*;\s*$")
-        prototype_idx = next((idx for idx, line in enumerate(kept_lines) if prototype_re.match(line)), None)
+        prototype_idx = next((idx for idx, line in builtins.iter(enumerate(kept_lines)) if prototype_re.match(line)), None)
         insert_idx = prototype_idx if prototype_idx is not None else function_idx
     else:
         insert_idx = function_idx
@@ -3847,9 +4160,16 @@ def _global_decl_insert_index_8616(
     return insert_idx
 
 
+@cython.ccall
 def _preserve_source_label_for_same_addr_function_8616(
     source_function: object, recovered_function: object
-) -> bool:
+) -> cython.bint:
+    recovered_info: object
+    recovered_name: object
+    source_info: object
+    source_name: object
+    key: object
+    value: object
     recovered_dynamic = cast(Any, recovered_function)
     source_addr = function_original_addr(source_function)
     recovered_addr = function_original_addr(recovered_function)
@@ -3877,9 +4197,12 @@ def _preserve_source_label_for_same_addr_function_8616(
     return True
 
 
-def _call_node_stack_probe_candidates_8616(node: object, target_addr: object, raw_name: object) -> set[int]:
+@cython.ccall
+def _call_node_stack_probe_candidates_8616(node: object, target_addr: object, raw_name: object) -> object:
     """Collect candidate target addresses for compiler-helper identification."""
-    candidates: set[int] = set()
+    callee_addr: object
+    match: object
+    candidates: set[cython.longlong] = set()
     if isinstance(target_addr, int):
         candidates.add(target_addr)
         candidates.add(target_addr & 0xFFFF)
@@ -3898,8 +4221,16 @@ def _call_node_stack_probe_candidates_8616(node: object, target_addr: object, ra
     return candidates
 
 
-def _call_node_is_proven_stack_probe_8616(node: object, codegen: object, project: object) -> bool:
+@cython.ccall
+def _call_node_is_proven_stack_probe_8616(node: object, codegen: object, project: object) -> cython.bint:
     """Return True when a call node is a proven compiler stack-probe helper."""
+    candidate_project: object
+    evidence: object
+    original_project: object
+    raw_name: object
+    summary_map: object
+    candidate: object
+    candidate_addr: object
     if not isinstance(node, structured_c.CFunctionCall):
         return False
     raw_name = node.callee_target
@@ -3930,14 +4261,16 @@ def _call_node_is_proven_stack_probe_8616(node: object, codegen: object, project
     return False
 
 
-def _render_text_usable_8616(text: object) -> bool:
+@cython.ccall
+def _render_text_usable_8616(text: object) -> cython.bint:
     """Return True for non-empty rendered C text."""
     return isinstance(text, str) and bool(text.strip())
 
 
+@cython.ccall
 def _prefer_cached_render_when_regen_empty_8616(
-    regenerated: bool, cached_rendered_text: object, recurrence_rebound: bool, rendered_text: object
-) -> bool:
+    regenerated: cython.bint, cached_rendered_text: object, recurrence_rebound: cython.bint, rendered_text: object
+) -> cython.bint:
     """Prefer cached text when regeneration produced nothing and no rebound occurred."""
     return (
         not regenerated
@@ -3947,13 +4280,14 @@ def _prefer_cached_render_when_regen_empty_8616(
     )
 
 
+@cython.ccall
 def _prefer_richer_cached_render_8616(
-    regenerated: bool,
-    semantic_materialization_active: bool,
-    cached_rendered_text: str,
-    rendered_text: str,
+    regenerated: cython.bint,
+    semantic_materialization_active: cython.bint,
+    cached_rendered_text: object,
+    rendered_text: object,
     effective_cod_metadata: CODProcMetadata | None,
-) -> bool:
+) -> cython.bint:
     """Prefer richer cached text when regen collapsed a call-heavy body."""
     if not (
         regenerated
@@ -3973,18 +4307,18 @@ def _decompile_function(
     project: angr.Project,
     cfg: Any,
     function: Any,
-    timeout: int,
-    api_style: str,
+    timeout: cython.longlong,
+    api_style: object,
     binary_path: Path | None = None,
     cod_metadata: CODProcMetadata | None = None,
-    synthetic_globals: dict[int, tuple[str, int]] | None = None,
+    synthetic_globals: object = None,
     lst_metadata: LSTMetadata | None = None,
-    enable_structured_simplify: bool = True,
-    enable_postprocess: bool = True,
-    allow_isolated_retry: bool = True,
+    enable_structured_simplify: cython.bint = True,
+    enable_postprocess: cython.bint = True,
+    allow_isolated_retry: cython.bint = True,
     deadline: float | None = None,
     failure_family_state: FailureFamilyState | None = None,
-) -> tuple[str, str]:
+) -> object:
     """Run one worker-local function with bounded, source-checked raw imports.
 
     Nested consumers share only native lifting records during this call;
@@ -3997,16 +4331,198 @@ def _decompile_function(
         ).run_8616()
 
 
+@cython.cclass
 class _DecompileRun8616:
     """State for one ``_decompile_function`` run; phases preserve the original order."""
+    _ = cython.declare(object, visibility = "public")
+    _dump_root = cython.declare(object, visibility = "public")
+    _live_snapshot = cython.declare(object, visibility = "public")
+    _pre_helper_format_text = cython.declare(object, visibility = "public")
+    _regenerated = cython.declare(object, visibility = "public")
+    _rehydrated = cython.declare(object, visibility = "public")
+    _stack_lowering_already_attempted = cython.declare(object, visibility = "public")
+    active_func_addr = cython.declare(object, visibility = "public")
+    after_calls = cython.declare(object, visibility = "public")
+    after_late_dce_calls = cython.declare(object, visibility = "public")
+    after_materialized = cython.declare(object, visibility = "public")
+    after_missing = cython.declare(object, visibility = "public")
+    after_safe_dce_calls = cython.declare(object, visibility = "public")
+    alias_facts = cython.declare(object, visibility = "public")
+    allow_isolated_retry = cython.declare(object, visibility = "public")
+    annotation_project = cython.declare(object, visibility = "public")
+    api_style = cython.declare(object, visibility = "public")
+    arg_state = cython.declare(object, visibility = "public")
+    arity_deficit_for_retry = cython.declare(object, visibility = "public")
+    before_calls = cython.declare(object, visibility = "public")
+    before_late_dce_calls = cython.declare(object, visibility = "public")
+    before_materialized = cython.declare(object, visibility = "public")
+    before_missing = cython.declare(object, visibility = "public")
+    before_safe_dce_calls = cython.declare(object, visibility = "public")
+    best_payload = cython.declare(object, visibility = "public")
+    best_rendered_text = cython.declare(object, visibility = "public")
+    best_score = cython.declare(object, visibility = "public")
+    best_status = cython.declare(object, visibility = "public")
+    best_text = cython.declare(object, visibility = "public")
+    binary_path = cython.declare(object, visibility = "public")
+    block_count = cython.declare(object, visibility = "public")
+    bounded_stack_result = cython.declare(object, visibility = "public")
+    byte_count = cython.declare(object, visibility = "public")
+    cached_rendered_text = cython.declare(object, visibility = "public")
+    call_args_render_refresh_required = cython.declare(object, visibility = "public")
+    call_loss_guard_active = cython.declare(object, visibility = "public")
+    candidate_score = cython.declare(object, visibility = "public")
+    candidate_text = cython.declare(object, visibility = "public")
+    cfg = cython.declare(object, visibility = "public")
+    cfunc = cython.declare(object, visibility = "public")
+    cfunc_dynamic = cython.declare(object, visibility = "public")
+    cfunc_repr = cython.declare(object, visibility = "public")
+    changed = cython.declare(object, visibility = "public")
+    clinic_failure = cython.declare(object, visibility = "public")
+    cod_metadata = cython.declare(object, visibility = "public")
+    codegen_dynamic = cython.declare(object, visibility = "public")
+    compare_register_global_changed = cython.declare(object, visibility = "public")
+    current_func_addr = cython.declare(object, visibility = "public")
+    deadline = cython.declare(object, visibility = "public")
+    debug_call_addr = cython.declare(object, visibility = "public")
+    dec = cython.declare(object, visibility = "public")
+    decompiler_options = cython.declare(object, visibility = "public")
+    detail = cython.declare(object, visibility = "public")
+    direct_global_instruction_result = cython.declare(object, visibility = "public")
+    direct_global_store_changed = cython.declare(object, visibility = "public")
+    direct_stack_instruction_result = cython.declare(object, visibility = "public")
+    dynamic_codegen = cython.declare(object, visibility = "public")
+    effective_cod_metadata = cython.declare(object, visibility = "public")
+    enable_postprocess = cython.declare(object, visibility = "public")
+    enable_structured_simplify = cython.declare(object, visibility = "public")
+    evidence_recovered_c = cython.declare(object, visibility = "public")
+    evidence_recovery_is_proven = cython.declare(object, visibility = "public")
+    expected_call_guard_active = cython.declare(object, visibility = "public")
+    expected_non_prologue_calls = cython.declare(tuple, visibility = "public")
+    expr_collapse_depth = cython.declare(object, visibility = "public")
+    failure_family_state = cython.declare(object, visibility = "public")
+    failure_snapshot = cython.declare(object, visibility = "public")
+    fallback_candidates = cython.declare(object, visibility = "public")
+    fallback_snapshot = cython.declare(object, visibility = "public")
+    fast_forced = cython.declare(object, visibility = "public")
+    final_callsite_changed = cython.declare(object, visibility = "public")
+    final_direct_instruction_result = cython.declare(object, visibility = "public")
+    final_stack_stats = cython.declare(object, visibility = "public")
+    fold_values_cod_outlier = cython.declare(object, visibility = "public")
+    force_codegen_regeneration = cython.declare(object, visibility = "public")
+    forced_template = cython.declare(object, visibility = "public")
+    formatted = cython.declare(object, visibility = "public")
+    function = cython.declare(object, visibility = "public")
+    function_has_call_evidence = cython.declare(object, visibility = "public")
+    function_info = cython.declare(object, visibility = "public")
+    had_dirty_value_reads_attr = cython.declare(object, visibility = "public")
+    had_storage_free_dirty_attr = cython.declare(object, visibility = "public")
+    helper_guard_active = cython.declare(object, visibility = "public")
+    indexed_segmented_global_changed = cython.declare(object, visibility = "public")
+    isolated_retry_budget_exhausted = cython.declare(cython.bint, visibility = "public")
+    iter_changed = cython.declare(object, visibility = "public")
+    large_x86_16_function = cython.declare(object, visibility = "public")
+    late_ast_cleanup_result = cython.declare(object, visibility = "public")
+    late_compare_register_global_changed = cython.declare(object, visibility = "public")
+    late_dce_changed = cython.declare(object, visibility = "public")
+    late_declaration_prune_changed = cython.declare(object, visibility = "public")
+    late_direct_global_store_changed = cython.declare(object, visibility = "public")
+    late_direct_instruction_result = cython.declare(object, visibility = "public")
+    late_indexed_segmented_global_changed = cython.declare(object, visibility = "public")
+    late_loop_body_repair_changed = cython.declare(object, visibility = "public")
+    late_lowering_changed = cython.declare(object, visibility = "public")
+    late_segmented_global_load_changed = cython.declare(object, visibility = "public")
+    layer_dump_state = cython.declare(object, visibility = "public")
+    loop_body_repair_changed = cython.declare(object, visibility = "public")
+    lst_metadata = cython.declare(object, visibility = "public")
+    marker_summary = cython.declare(object, visibility = "public")
+    messages = cython.declare(object, visibility = "public")
+    metadata_repairs = cython.declare(object, visibility = "public")
+    missing_calls_for_retry = cython.declare(object, visibility = "public")
+    no_call_helper_guard = cython.declare(object, visibility = "public")
+    partial_payload = cython.declare(object, visibility = "public")
+    partial_text = cython.declare(object, visibility = "public")
+    pass_name = cython.declare(object, visibility = "public")
+    pointer_memory_contract_active = cython.declare(object, visibility = "public")
+    post_arity_score = cython.declare(object, visibility = "public")
+    post_score = cython.declare(object, visibility = "public")
+    post_switch_cleanup_result = cython.declare(object, visibility = "public")
+    post_switch_dce_result = cython.declare(object, visibility = "public")
+    postprocess_already_lowered_stack_moves = cython.declare(object, visibility = "public")
+    postprocess_semantic_changed = cython.declare(object, visibility = "public")
+    postprocess_semantic_contract_active = cython.declare(object, visibility = "public")
+    pre_arity_score = cython.declare(object, visibility = "public")
+    pre_block_count = cython.declare(object, visibility = "public")
+    pre_byte_count = cython.declare(object, visibility = "public")
+    pre_final_text_cleanup = cython.declare(object, visibility = "public")
+    pre_rewrite_text = cython.declare(object, visibility = "public")
+    pre_score = cython.declare(object, visibility = "public")
+    prev_disable_ail_narrowing = cython.declare(object, visibility = "public")
+    prev_disable_complex_expr_scan = cython.declare(object, visibility = "public")
+    prev_fast_block_peephole = cython.declare(object, visibility = "public")
+    previous_dirty_value_reads = cython.declare(object, visibility = "public")
+    previous_storage_free_dirty = cython.declare(object, visibility = "public")
+    previous_validated_payload = cython.declare(object, visibility = "public")
+    profile = cython.declare(object, visibility = "public")
+    profile_info = cython.declare(object, visibility = "public")
+    project = cython.declare(object, visibility = "public")
+    quality = cython.declare(object, visibility = "public")
+    recovery_coverage = cython.declare(object, visibility = "public")
+    recurrence_rebound = cython.declare(object, visibility = "public")
+    regenerated = cython.declare(object, visibility = "public")
+    rehydrate_metadata = cython.declare(object, visibility = "public")
+    rejected_passes = cython.declare(object, visibility = "public")
+    remaining = cython.declare(object, visibility = "public")
+    render_refresh_required = cython.declare(object, visibility = "public")
+    rendered_text = cython.declare(object, visibility = "public")
+    repeat_reason = cython.declare(object, visibility = "public")
+    replay_changed = cython.declare(object, visibility = "public")
+    retried = cython.declare(object, visibility = "public")
+    retry_for_call_semantics = cython.declare(object, visibility = "public")
+    retry_payload = cython.declare(object, visibility = "public")
+    retry_score = cython.declare(object, visibility = "public")
+    retry_status = cython.declare(object, visibility = "public")
+    rewrite_codegen = cython.declare(object, visibility = "public")
+    rewrite_pass_names = cython.declare(object, visibility = "public")
+    rewrite_passes = cython.declare(object, visibility = "public")
+    safe_dce_changed = cython.declare(object, visibility = "public")
+    segmented_global_load_changed = cython.declare(object, visibility = "public")
+    semantic_call_helper_names = cython.declare(object, visibility = "public")
+    semantic_materialization_active = cython.declare(object, visibility = "public")
+    seqnode_replay_finalize_result = cython.declare(object, visibility = "public")
+    sidecar_free_for_rewrite_gate = cython.declare(object, visibility = "public")
+    simplified_formatted = cython.declare(object, visibility = "public")
+    small_function = cython.declare(object, visibility = "public")
+    snapshot = cython.declare(object, visibility = "public")
+    stack_local_candidates = cython.declare(object, visibility = "public")
+    stack_lowering_dirty = cython.declare(object, visibility = "public")
+    stack_node_state = cython.declare(object, visibility = "public")
+    stack_probe_fact_stats = cython.declare(object, visibility = "public")
+    stack_semantics_changed = cython.declare(object, visibility = "public")
+    stale_record = cython.declare(object, visibility = "public")
+    stats_obj = cython.declare(object, visibility = "public")
+    synthetic_globals = cython.declare(object, visibility = "public")
+    tail_validation_cache_passed = cython.declare(object, visibility = "public")
+    tail_validation_complete_for_rewrite_gate = cython.declare(object, visibility = "public")
+    tail_validation_failed_for_rewrite_gate = cython.declare(object, visibility = "public")
+    tail_validation_snapshot_for_rewrite_gate = cython.declare(object, visibility = "public")
+    timeout = cython.declare(object, visibility = "public")
+    timeout_payload = cython.declare(object, visibility = "public")
+    timeout_stage = cython.declare(object, visibility = "public")
+    tiny_core_guard = cython.declare(object, visibility = "public")
+    trusted_core_cfunc = cython.declare(object, visibility = "public")
+    trusted_core_snapshot = cython.declare(object, visibility = "public")
+    trusted_core_tail_snapshot = cython.declare(object, visibility = "public")
+    typed_switch_finalize_result = cython.declare(object, visibility = "public")
+    validated_snapshot = cython.declare(object, visibility = "public")
+    width_stats = cython.declare(object, visibility = "public")
 
-    def __init__(self, project: angr.Project, cfg: Any, function: Any, timeout: int,
-                 api_style: str, binary_path: Path | None = None,
+    def __init__(self, project: angr.Project, cfg: Any, function: Any, timeout: cython.longlong,
+                 api_style: object, binary_path: Path | None = None,
                  cod_metadata: CODProcMetadata | None = None,
-                 synthetic_globals: dict[int, tuple[str, int]] | None = None,
+                 synthetic_globals: object = None,
                  lst_metadata: LSTMetadata | None = None,
-                 enable_structured_simplify: bool = True, enable_postprocess: bool = True,
-                 allow_isolated_retry: bool = True, deadline: float | None = None,
+                 enable_structured_simplify: cython.bint = True, enable_postprocess: cython.bint = True,
+                 allow_isolated_retry: cython.bint = True, deadline: float | None = None,
                  failure_family_state: FailureFamilyState | None = None) -> None:
         """Store the run parameters as fields used across phases."""
         self.project = project
@@ -4097,7 +4613,7 @@ class _DecompileRun8616:
         self.had_storage_free_dirty_attr: Any = None
         self.helper_guard_active: Any = None
         self.indexed_segmented_global_changed: Any = None
-        self.isolated_retry_budget_exhausted: bool = False
+        self.isolated_retry_budget_exhausted: cython.bint = False
         self.iter_changed: Any = None
         self.large_x86_16_function: Any = None
         self.late_ast_cleanup_result: Any = None
@@ -4191,8 +4707,10 @@ class _DecompileRun8616:
         self.validated_snapshot: Any = None
         self.width_stats: Any = None
 
-    def run_8616(self) -> tuple[str, str]:
+    @cython.ccall
+    def run_8616(self) -> object:
         """Run decompilation phases in the original order, propagating early exits."""
+        result: object
         result = self._run_phases_8616((
             self.phase_setup_8616,
             self.phase_prep_span_8616,
@@ -4221,29 +4739,33 @@ class _DecompileRun8616:
         assert result is not None
         return result
 
+    @cython.ccall
     def _run_phases_8616(
-        self, phases: tuple[Callable[[], tuple[str, str] | None], ...]
-    ) -> tuple[str, str] | None:
+        self, phases: object
+    ) -> object:
         """Run phase methods until one returns a result."""
+        result: object
+        phase: object
         for phase in phases:
             result = phase()
             if result is not None:
                 return result
         return None
 
-    def phase_setup_8616(self) -> tuple[str, str] | None:
+    @cython.ccall
+    def phase_setup_8616(self) -> object:
         """Phase of ``_decompile_function`` spanning original lines 3558-3604."""
         attach_lst_metadata_to_project(self.project, self.lst_metadata)
         typing.cast(typing.Any, self.project)._inertia_partial_codegen_text = None
         self.current_func_addr = function_original_addr(self.function)
         self.active_func_addr = getattr(self.project, "_inertia_tv_active_function_addr", None)
-        if self.active_func_addr != self.current_func_addr:
+        if operator.ne(self.active_func_addr, self.current_func_addr):
             typing.cast(typing.Any, self.project)._inertia_last_tail_validation_snapshot = None
         typing.cast(typing.Any, self.project)._inertia_tv_active_function_addr = self.current_func_addr
         self.layer_dump_state = _get_layer_dump_state(self.project, self.function)
         if self.layer_dump_state and _layer_dump_enabled(self.project):
             self._dump_root = Path(self.layer_dump_state["root"]).parent
-            if getattr(self.project, "_inertia_dump_root_printed", None) != str(self._dump_root):
+            if operator.ne(getattr(self.project, "_inertia_dump_root_printed", None), str(self._dump_root)):
                 print(f"[dbg] layer dump: {self.layer_dump_state['root']}", file=sys.stderr)
                 typing.cast(typing.Any, self.project)._inertia_dump_root_printed = str(self._dump_root)
         self.effective_cod_metadata = self.cod_metadata or _sidecar_cod_metadata_for_function(
@@ -4282,7 +4804,8 @@ class _DecompileRun8616:
             return "ok", self.fast_forced
         return None
 
-    def phase_prep_span_8616(self) -> tuple[str, str] | None:
+    @cython.ccall
+    def phase_prep_span_8616(self) -> object:
         """Phase of ``_decompile_function`` spanning original lines 3605-3663."""
         with span("decompile.prep", addr=hex(self.current_func_addr), name=getattr(self.function, "name", None)):  # noqa: SIM117
             with DECOMPILATION_PREP_LOCK:
@@ -4345,7 +4868,8 @@ class _DecompileRun8616:
                 )
         return None
 
-    def phase_guards_8616(self) -> tuple[str, str] | None:
+    @cython.ccall
+    def phase_guards_8616(self) -> object:
         """Phase of ``_decompile_function`` spanning original lines 3664-3690."""
         self.tiny_core_guard = bool(
             self.profile.get("wrapper_like")
@@ -4375,8 +4899,10 @@ class _DecompileRun8616:
             typing.cast(typing.Any, self.project)._inertia_fast_block_peephole = True
         return None
 
-    def phase_decompiler_run_8616(self) -> tuple[str, str] | None:
+    @cython.ccall
+    def phase_decompiler_run_8616(self) -> object:
         """Phase of ``_decompile_function`` spanning original lines 3904-4201."""
+        result: object
         self.dec = None
         result = self._decompiler_attempt_8616()
         if result is not None:
@@ -4386,8 +4912,10 @@ class _DecompileRun8616:
             return result
         return self._decompiler_codegen_none_lane_8616()
 
-    def _decompiler_attempt_8616(self) -> tuple[str, str] | None:
+    @cython.ccall
+    def _decompiler_attempt_8616(self) -> object:
         """Run the guarded decompiler attempt and its exception lanes."""
+        _stop: object
         try:
             with (  # noqa: SIM117
                 active_structuring_function_8616(self.project, self.function),
@@ -4452,7 +4980,8 @@ class _DecompileRun8616:
                 typing.cast(typing.Any, self.project)._inertia_fast_block_peephole = self.prev_fast_block_peephole
         return None
 
-    def _decompiler_codegen_empty_stop_8616(self) -> tuple[str, str] | None:
+    @cython.ccall
+    def _decompiler_codegen_empty_stop_8616(self) -> object:
         """Stop the attempt early when the selected structurer produced no codegen."""
         if self.dec.codegen is None:
             self.failure_snapshot = build_failure_family_snapshot(
@@ -4511,7 +5040,8 @@ class _DecompileRun8616:
         )
         return None
 
-    def _decompiler_timeout_lane_8616(self) -> tuple[str, str] | None:
+    @cython.ccall
+    def _decompiler_timeout_lane_8616(self) -> object:
         """Handle ``_AnalysisTimeout``: recover validated/partial payload or build the timeout result."""
         self.previous_validated_payload = self._validated_payload_from_project_record_8616()
         if self.previous_validated_payload is not None:
@@ -4538,6 +5068,7 @@ class _DecompileRun8616:
             self.timeout_payload += " Decompiler produced unresolved IR-shaped C."
         return "timeout", self.timeout_payload
 
+    @cython.ccall
     def _decompiler_timeout_stage_detail_8616(self) -> None:
         """Map the recorded decompiler stage to a human detail phrase."""
         if self.timeout_stage == "core":
@@ -4555,6 +5086,7 @@ class _DecompileRun8616:
         else:
             self.detail = None
 
+    @cython.ccall
     def _decompiler_timeout_partial_payload_8616(self) -> None:
         """Recover the best partial codegen payload recorded before the timeout."""
         if self.dec is not None and getattr(self.dec, "codegen", None) is not None:
@@ -4604,7 +5136,8 @@ class _DecompileRun8616:
             )
 
 
-    def _decompiler_post_run_lane_8616(self) -> tuple[str, str] | None:
+    @cython.ccall
+    def _decompiler_post_run_lane_8616(self) -> object:
         """Handle the no-dec / message-lane transitions after the attempt."""
         if self.dec is None:
             return "error", "Decompiler analysis completed without a result."
@@ -4623,8 +5156,10 @@ class _DecompileRun8616:
 
         return None
 
-    def _decompiler_codegen_none_lane_8616(self) -> tuple[str, str] | None:
+    @cython.ccall
+    def _decompiler_codegen_none_lane_8616(self) -> object:
         """Handle the codegen-None lane: retry, diagnostics, and fallbacks."""
+        _r: object
         if self.dec.codegen is None:
             self.messages = self._analysis_log_messages(self.dec)
             _r = self._decompiler_codegen_none_isolated_retry_8616()
@@ -4646,7 +5181,8 @@ class _DecompileRun8616:
             typing.cast(typing.Any, self.project)._inertia_partial_codegen_text = None
             return "empty", self.detail
         return None
-    def _decompiler_codegen_none_isolated_retry_8616(self) -> tuple[str, str] | None:
+    @cython.ccall
+    def _decompiler_codegen_none_isolated_retry_8616(self) -> object:
         """Retry the empty-codegen lane in an isolated project when policy allows."""
         if self._should_retry_in_isolation(self.dec):
             self.failure_snapshot = build_failure_family_snapshot(
@@ -4694,7 +5230,8 @@ class _DecompileRun8616:
                 return typing.cast(tuple[str, str] | None, self.retried)
         return None
 
-    def _decompiler_codegen_none_options_lane_8616(self) -> tuple[str, str] | None:
+    @cython.ccall
+    def _decompiler_codegen_none_options_lane_8616(self) -> object:
         """Handle the no-options codegen-None lane diagnostics and result."""
         if self.decompiler_options is None:
             self.fallback_snapshot = build_failure_family_snapshot(
@@ -4739,7 +5276,8 @@ class _DecompileRun8616:
         return None
 
 
-    def phase_no_postprocess_lane_8616(self) -> tuple[str, str] | None:
+    @cython.ccall
+    def phase_no_postprocess_lane_8616(self) -> object:
         """Phase of ``_decompile_function`` spanning original lines 4202-4360."""
         if not self.enable_postprocess:
             self._nonpost_arch_facts_8616()
@@ -4779,6 +5317,7 @@ class _DecompileRun8616:
             typing.cast(typing.Any, self.project)._inertia_partial_codegen_text = None
             return "ok", self.formatted
         return None
+    @cython.ccall
     def _nonpost_arch_facts_8616(self) -> None:
         """Transfer semantic alias facts and record stack/stats state for the non-postprocess lane."""
         if getattr(getattr(self.project, "arch", None), "name", None) == "86_16":
@@ -4853,6 +5392,7 @@ class _DecompileRun8616:
                     ex,
                 )
 
+    @cython.ccall
     def _nonpost_call_arity_replay_8616(self) -> None:
         """Replay callsite stack arguments to close the expected-call arity deficit."""
         if self.effective_cod_metadata is not None:
@@ -4910,7 +5450,8 @@ class _DecompileRun8616:
                         break
 
 
-    def phase_postprocess_setup_8616(self) -> tuple[str, str] | None:
+    @cython.ccall
+    def phase_postprocess_setup_8616(self) -> object:
         """Phase of ``_decompile_function`` spanning original lines 4361-4496."""
         self._debug_cli_stage_marker_8616("postprocess-cli-entry")
         typing.cast(typing.Any, self.project)._inertia_rewrite_cache = {}
@@ -4949,7 +5490,7 @@ class _DecompileRun8616:
         )
         return None
 
-    def phase_rewrite_registry_8616(self) -> tuple[str, str] | None:
+    def phase_rewrite_registry_8616(self) -> object:
         """Phase of ``_decompile_function`` spanning original lines 4670-4756."""
         self.postprocess_semantic_contract_active = bool(
             getattr(self.dec.codegen, "_inertia_return_selector_materialized_8616", False)
@@ -5040,7 +5581,7 @@ class _DecompileRun8616:
         )
         return None
 
-    def phase_rewrite_dispatch_8616(self) -> tuple[str, str] | None:
+    def phase_rewrite_dispatch_8616(self) -> object:
         """Phase of ``_decompile_function`` spanning original lines 4757-4851."""
         if self.small_function:
             self.rewrite_passes = (
@@ -5135,12 +5676,14 @@ class _DecompileRun8616:
         self.call_loss_guard_active = self.function_has_call_evidence or self.expected_call_guard_active
         self._stack_lowering_already_attempted = False
         self.rewrite_pass_names = {
-            id(rewrite): getattr(rewrite, "__name__", type(rewrite).__name__) for rewrite in self.rewrite_passes
+            id(rewrite): getattr(rewrite, "__name__", type(rewrite).__name__) for rewrite in iter(self.rewrite_passes)
         }
         return None
 
-    def phase_rewrite_loop_8616(self) -> tuple[str, str] | None:
+    @cython.ccall
+    def phase_rewrite_loop_8616(self) -> object:
         """Phase of ``_decompile_function`` spanning original lines 4852-5145."""
+        result: object
         try:
             self.rehydrate_metadata = self.effective_cod_metadata or _sidecar_cod_metadata_for_function(
                 self.project,
@@ -5179,6 +5722,7 @@ class _DecompileRun8616:
         self._debug_cli_stage_marker_8616("after-cli-rewrite-loop")
         return None
 
+    @cython.ccall
     def _rewrite_late_materialize_8616(self) -> None:
         """Run the late materialization lanes before the rewrite loop."""
         if self.loop_body_repair_changed:
@@ -5255,7 +5799,8 @@ class _DecompileRun8616:
             typing.cast(typing.Any, self.dec.codegen)._inertia_force_codegen_regeneration_8616 = True
             self._live_snapshot = ""
 
-    def _rewrite_safe_dce_and_gate_8616(self) -> tuple[str, str] | None:
+    @cython.ccall
+    def _rewrite_safe_dce_and_gate_8616(self) -> object:
         """Run evidence DCE and the legacy-CLI-rewrite refusal gate."""
         self.before_safe_dce_calls = self._codegen_call_expr_count() if self.call_loss_guard_active else 0
         self.safe_dce_changed = self._run_evidence_dce_pass()
@@ -5339,8 +5884,11 @@ class _DecompileRun8616:
                 pass
         return None
 
-    def _rewrite_round_8616(self, round_idx: int) -> bool:
+    @cython.ccall
+    def _rewrite_round_8616(self, round_idx: cython.longlong) -> cython.bint:
         """Run one rewrite-loop round; False stops the loop."""
+        rewrite: object
+        rewrite_idx: object
         self.iter_changed = False
         self.stack_lowering_dirty = not self._stack_lowering_already_attempted
         for rewrite_idx, rewrite in enumerate(self.rewrite_passes):
@@ -5352,7 +5900,8 @@ class _DecompileRun8616:
         self.changed = True
         return True
 
-    def phase_callsite_guard_8616(self) -> tuple[str, str] | None:
+    @cython.ccall
+    def phase_callsite_guard_8616(self) -> object:
         """Phase of ``_decompile_function`` spanning original lines 5146-5188."""
         if self.function_has_call_evidence and self.rewrite_passes:
             self.before_calls = self._codegen_call_expr_count() if self.call_loss_guard_active else 0
@@ -5399,10 +5948,11 @@ class _DecompileRun8616:
         self._debug_cli_stage_marker_8616("after-final-callsite-pass")
         return None
 
-    def _rewrite_round_prepare_8616(self, rewrite: Callable[[], bool], round_idx: int) -> bool:
+    @cython.ccall
+    def _rewrite_round_prepare_8616(self, rewrite: Callable[[], cython.bint], round_idx: cython.longlong) -> cython.bint:
         """Return False when the pass should be skipped this iteration."""
         # Method lookup creates a fresh wrapper; equality retains its binding.
-        if rewrite == self._run_stack_lowering_pass and not self.stack_lowering_dirty:
+        if operator.eq(rewrite, self._run_stack_lowering_pass) and not self.stack_lowering_dirty:
             return False
         self.recurrence_rebound = bool(
             getattr(self.dec.codegen, "_inertia_has_rebound_materialized_recurrence", False)
@@ -5428,7 +5978,8 @@ class _DecompileRun8616:
         self.pass_name = self.rewrite_pass_names.get(id(rewrite), getattr(rewrite, "__name__", type(rewrite).__name__))
         return True
 
-    def _rewrite_round_apply_8616(self, rewrite: Callable[[], bool], round_idx: int, rewrite_idx: int) -> None:
+    @cython.ccall
+    def _rewrite_round_apply_8616(self, rewrite: Callable[[], cython.bint], round_idx: cython.longlong, rewrite_idx: cython.longlong) -> None:
         """Run one rewrite pass and fold its result into round state."""
         with span(
             "decompile.cli_rewrite_pass",
@@ -5451,7 +6002,7 @@ class _DecompileRun8616:
             )
             # A zero call count cannot decrease. Keep the guard itself active
             # and retain snapshots whenever named-call coverage is checked.
-            needs_call_loss_snapshot: bool = self.call_loss_guard_active and (
+            needs_call_loss_snapshot: cython.bint = self.call_loss_guard_active and (
                 self.before_calls != 0 or self.expected_call_guard_active
             )
             self.snapshot = self._snapshot_codegen_cfunc() if needs_call_loss_snapshot else None
@@ -5465,12 +6016,13 @@ class _DecompileRun8616:
                 pass_name=self.pass_name,
                 function_addr=function_original_addr(self.function),
             )
-        if rewrite == self._run_stack_lowering_pass:
+        if operator.eq(rewrite, self._run_stack_lowering_pass):
             self._stack_lowering_already_attempted = True
             self.stack_lowering_dirty = False
         elif rewrite_changed and self._stack_lowering_already_attempted:
             self.stack_lowering_dirty = True
-    def _rewrite_round_guarded_evidence_8616(self, rewrite_idx: int, rewrite_changed: bool) -> bool:
+    @cython.ccall
+    def _rewrite_round_guarded_evidence_8616(self, rewrite_idx: cython.longlong, rewrite_changed: cython.bint) -> cython.bint:
         """Apply the call-loss evidence guard; return the effective pass-changed flag."""
         if rewrite_changed and self.call_loss_guard_active:
             after_inventory = self._codegen_call_inventory_8616(
@@ -5535,13 +6087,15 @@ class _DecompileRun8616:
 
         return rewrite_changed
 
-    def phase_late_lowering_8616(self) -> tuple[str, str] | None:
+    @cython.ccall
+    def phase_late_lowering_8616(self) -> object:
         """Phase of ``_decompile_function`` spanning original lines 5189-5283."""
         self._late_lowering_globals_a_8616()
         self._late_lowering_globals_b_8616()
         self._late_lowering_finalize_8616()
         return None
 
+    @cython.ccall
     def _late_lowering_globals_a_8616(self) -> None:
         """Repair loop bodies, then materialize segmented/compare-register globals."""
         with span(
@@ -5578,6 +6132,7 @@ class _DecompileRun8616:
             typing.cast(typing.Any, self.dec.codegen)._inertia_codegen_decl_refresh_required_8616 = True
             typing.cast(typing.Any, self.dec.codegen)._inertia_force_codegen_regeneration_8616 = True
 
+    @cython.ccall
     def _late_lowering_globals_b_8616(self) -> None:
         """Materialize direct-global stores, instruction results, and indexed globals."""
         self.late_direct_global_store_changed = materialize_direct_global_symbol_stores_8616(
@@ -5617,6 +6172,7 @@ class _DecompileRun8616:
             typing.cast(typing.Any, self.dec.codegen)._inertia_codegen_decl_refresh_required_8616 = True
             typing.cast(typing.Any, self.dec.codegen)._inertia_force_codegen_regeneration_8616 = True
 
+    @cython.ccall
     def _late_lowering_finalize_8616(self) -> None:
         """Run late-lowering dependent repair and refresh when any pass changed codegen."""
         if self.late_lowering_changed:
@@ -5646,7 +6202,8 @@ class _DecompileRun8616:
                 typing.cast(typing.Any, self.dec.codegen)._inertia_force_codegen_regeneration_8616 = True
 
 
-    def phase_cleanup_finalize_8616(self) -> tuple[str, str] | None:
+    @cython.ccall
+    def phase_cleanup_finalize_8616(self) -> object:
         """Phase of ``_decompile_function`` spanning original lines 5284-5398."""
         self._cleanup_dead_local_and_stats_8616()
         self.postprocess_semantic_changed = bool(
@@ -5697,6 +6254,7 @@ class _DecompileRun8616:
             typing.cast(typing.Any, self.dec.codegen)._inertia_force_codegen_regeneration_8616 = True
         return None
 
+    @cython.ccall
     def _cleanup_dead_local_and_stats_8616(self) -> None:
         """Dead-local prune, late AST cleanup, and stack-probe stats."""
         self.postprocess_already_lowered_stack_moves = bool(getattr(self.dec.codegen, "_inertia_postprocess_changed", False))
@@ -5742,6 +6300,7 @@ class _DecompileRun8616:
                 self.stack_probe_fact_stats,
             )
 
+    @cython.ccall
     def _finalize_typed_switch_cleanup_8616(self) -> None:
         """Finalize typed edge-switch replacement and mark codegen refresh."""
         self.typed_switch_finalize_result = finalize_typed_edge_switch_replacement_if_enabled_8616(
@@ -5753,6 +6312,7 @@ class _DecompileRun8616:
         if self.typed_switch_finalize_result.changed:
             self.changed = True
 
+    @cython.ccall
     def _finalize_seqnode_replay_cleanup_8616(self) -> None:
         """Finalize SeqNode switch replay and mark codegen refresh."""
         self.seqnode_replay_finalize_result = finalize_seqnode_switch_replay_after_replacement_8616(
@@ -5765,12 +6325,14 @@ class _DecompileRun8616:
         if self.seqnode_replay_finalize_result.changed:
             self.changed = True
 
+    @cython.ccall
     def _finalize_post_switch_cleanup_8616(self) -> None:
         """Finalize post-switch cleanup and mark codegen refresh."""
         self.post_switch_cleanup_result = finalize_post_switch_cleanup_after_seqnode_replacement_8616(self.project, self.dec.codegen)
         if self.post_switch_cleanup_result.changed:
             self.changed = True
 
+    @cython.ccall
     def _cleanup_switch_finalize_8616(self) -> None:
         """Typed-switch and SeqNode-replay finalization cleanup."""
         self._finalize_typed_switch_cleanup_8616()
@@ -5785,7 +6347,7 @@ class _DecompileRun8616:
                 typing.cast(typing.Any, self.dec.codegen)._inertia_force_codegen_regeneration_8616 = True
             self.changed = True
 
-    def phase_render_refresh_8616(self) -> tuple[str, str] | None:
+    def phase_render_refresh_8616(self) -> object:
         """Phase of ``_decompile_function`` spanning original lines 5399-5497."""
         if rollback_final_semantic_drift_8616(
             self.project,
@@ -5888,7 +6450,8 @@ class _DecompileRun8616:
             self.rendered_text = _snapshot_codegen_text(self.dec.codegen)
         return None
 
-    def phase_emit_retry_8616(self) -> tuple[str, str] | None:
+    @cython.ccall
+    def phase_emit_retry_8616(self) -> object:
         """Phase of ``_decompile_function`` spanning original lines 5498-5622."""
         self.debug_call_addr = function_original_addr(self.function)
         _debug_dump_calls_8616("post-structured-codegen", self.rendered_text, self.debug_call_addr)
@@ -5938,7 +6501,7 @@ class _DecompileRun8616:
                     arg.name,
                     repr(arg.variable_type),
                 )
-                for arg in tuple(self.cfunc_dynamic.arg_list or ())
+                for arg in builtins.iter(tuple(self.cfunc_dynamic.arg_list or ()))
             ) if self.cfunc is not None else ()
             self.stack_node_state = tuple(
                 (
@@ -5948,7 +6511,7 @@ class _DecompileRun8616:
                     node.name,
                     node.unified_variable.name if node.unified_variable is not None else None,
                 )
-                for node in _iter_c_nodes_deep_8616(self.cfunc_dynamic.statements)
+                for node in builtins.iter(_iter_c_nodes_deep_8616(self.cfunc_dynamic.statements))
                 if isinstance(node, structured_c.CVariable)
                 and isinstance(node.variable, SimStackVariable)
             ) if self.cfunc is not None else ()
@@ -5963,8 +6526,10 @@ class _DecompileRun8616:
                 flush=True,
             )
 
-    def _call_semantics_retry_lane_8616(self) -> tuple[str, str] | None:
+    @cython.ccall
+    def _call_semantics_retry_lane_8616(self) -> object:
         """Retry via the recovered-candidate lane when call semantics are missing."""
+        _r: object
         if self.retry_for_call_semantics:
             # Evidence-first fallback for call-heavy functions:
             # keep the candidate with the strongest expected-call preservation score.
@@ -5992,7 +6557,8 @@ class _DecompileRun8616:
                 self.arity_deficit_for_retry,
             )
         return None
-    def _call_semantics_retry_attempt_8616(self) -> tuple[str, str] | None:
+    @cython.ccall
+    def _call_semantics_retry_attempt_8616(self) -> object:
         """Run one isolated retry attempt; a returned tuple propagates as the phase result."""
         if self.deadline is not None:
             self.remaining = self.deadline - time.monotonic()
@@ -6017,6 +6583,7 @@ class _DecompileRun8616:
             return self.best_status, self.best_payload
         return None
 
+    @cython.ccall
     def _call_semantics_retry_score_8616(self) -> None:
         """Score a successful retry payload and keep it when it beats the current best."""
         self.retry_score = (
@@ -6037,7 +6604,8 @@ class _DecompileRun8616:
             self.best_status = "ok"
 
 
-    def phase_text_normalize_8616(self) -> tuple[str, str] | None:
+    @cython.ccall
+    def phase_text_normalize_8616(self) -> object:
         """Normalize rendered output while retaining generated standalone calls."""
         self.rendered_text = _prepend_recovered_callsite_prototypes_8616(self.rendered_text, self.dec.codegen)
         _debug_dump_calls_8616("post-recovered-callsite-prototypes", self.rendered_text, self.debug_call_addr)
@@ -6164,7 +6732,8 @@ class _DecompileRun8616:
         _debug_dump_calls_8616("post-prune-unused-local-decls-final", self.formatted, self.debug_call_addr)
         return None
 
-    def phase_final_cleanup_8616(self) -> tuple[str, str] | None:
+    @cython.ccall
+    def phase_final_cleanup_8616(self) -> object:
         """Apply final output cleanups without pruning generated calls by name."""
         self.pre_final_text_cleanup = self.formatted
         _emit_c_stage_trace(
@@ -6181,7 +6750,7 @@ class _DecompileRun8616:
         ):
             self.simplified_formatted = _simplify_x86_16_stack_byte_pointers(self.formatted, self.effective_cod_metadata)
             _debug_dump_calls_8616("post-simplify-x86-16-stack-byte-pointers", self.simplified_formatted, self.debug_call_addr)
-            if self.simplified_formatted != self.formatted:
+            if operator.ne(self.simplified_formatted, self.formatted):
                 self.simplified_formatted = _materialize_missing_generic_local_declarations_text(self.simplified_formatted)
                 _debug_dump_calls_8616(
                     "post-materialize-missing-generic-locals-after-simplify",
@@ -6234,7 +6803,8 @@ class _DecompileRun8616:
             self.formatted = _prune_unused_local_declarations_text(self.formatted)
         return None
 
-    def _finish_format_and_quality_8616(self) -> tuple[str, str] | None:
+    @cython.ccall
+    def _finish_format_and_quality_8616(self) -> object:
         """Retain emitted calls through output selection, formatting and quality checks."""
         self.formatted = _select_evidence_recovered_c_8616(
             self.formatted,
@@ -6303,8 +6873,10 @@ class _DecompileRun8616:
 
         return None
 
-    def phase_finish_8616(self) -> tuple[str, str] | None:
+    @cython.ccall
+    def phase_finish_8616(self) -> object:
         """Phase of ``_decompile_function`` spanning original lines 5824-5945."""
+        result: object
         self.forced_template = _forced_function_template(getattr(self.function, "name", None), self.binary_path, self.api_style)
         if self.forced_template is not None:
             self.formatted = self.forced_template
@@ -6351,7 +6923,7 @@ class _DecompileRun8616:
             if (
                 isinstance(self.stale_record, tuple)
                 and len(self.stale_record) == 2
-                and self.stale_record[0] == function_original_addr(self.function)
+                and operator.eq(self.stale_record[0], function_original_addr(self.function))
             ):
                 typing.cast(typing.Any, self.project)._inertia_last_validated_function_payload = None
                 typing.cast(typing.Any, self.project)._inertia_last_validated_function_payload_snapshot = None
@@ -6365,7 +6937,13 @@ class _DecompileRun8616:
         typing.cast(typing.Any, self.project)._inertia_partial_codegen_text = None
         return "ok", self.formatted
 
-    def _analysis_log_messages(self, dec_obj: object) -> list[str]:
+    @cython.ccall
+    def _analysis_log_messages(self, dec_obj: object) -> object:
+        error: object
+        exc_tb: object
+        exc_type: object
+        exc_value: object
+        entry: object
         messages: list[str] = []
         for entry in getattr(dec_obj, "errors", ()) or ():
             exc_type = getattr(entry, "exc_type", None)
@@ -6389,22 +6967,25 @@ class _DecompileRun8616:
                 messages.append(text)
         return messages
 
-    def _remaining_timeout(self, default: int | None = None) -> int:
+    @cython.ccall
+    def _remaining_timeout(self, default: int | None = None) -> cython.longlong:
         base = self.timeout if default is None else default
         if self.deadline is None:
             return max(1, base)
         remaining = int(self.deadline - time.monotonic())
         return max(1, min(base, remaining))
 
-    def _should_retry_in_isolation(self, dec_obj: object) -> bool:
-        return any(message.startswith("KeyError:") for message in self._analysis_log_messages(dec_obj))
+    def _should_retry_in_isolation(self, dec_obj: object) -> cython.bint:
+        return any(message.startswith("KeyError:") for message in builtins.iter(self._analysis_log_messages(dec_obj)))
 
+    @cython.ccall
     def _remember_tail_validation_snapshot(self, 
         codegen: object,
         *,
-        include_virtual_carriers: bool = False,
+        include_virtual_carriers: cython.bint = False,
     ) -> None:
         """Refresh and retain one validation snapshot at the current CLI boundary."""
+        snapshot: object
         if (
             _tail_validation_runtime_enabled(self.project)
             and getattr(self.project.arch, "name", "") == "86_16"
@@ -6420,7 +7001,11 @@ class _DecompileRun8616:
         elif not isinstance(getattr(self.project, "_inertia_last_tail_validation_snapshot", None), dict):
             typing.cast(typing.Any, self.project)._inertia_last_tail_validation_snapshot = None
 
-    def _validated_payload_from_project_record_8616(self) -> str | None:
+    @cython.ccall
+    def _validated_payload_from_project_record_8616(self) -> object:
+        active_addr: object
+        original_delta: object
+        record: object
         record = getattr(self.project, "_inertia_last_validated_function_payload", None)
         if not isinstance(record, tuple) or len(record) != 2:
             return None
@@ -6444,7 +7029,9 @@ class _DecompileRun8616:
             return None
         return validated_payload
 
-    def _clinic_failure_detail(self) -> str | None:
+    @cython.ccall
+    def _clinic_failure_detail(self) -> object:
+        clinic_analysis: object
         clinic_analysis = getattr(getattr(self.project, "analyses", None), "Clinic", None)
         if clinic_analysis is None:
             return None
@@ -6467,8 +7054,11 @@ class _DecompileRun8616:
             return detail
         return None
 
-    def _retry_in_isolated_project(self) -> tuple[str, str] | None:
+    def _retry_in_isolated_project(self) -> object:
         """Retry within the deadline; an unstarted attempt preserves prior evidence."""
+        linked_base: object
+        main_object: object
+        max_addr: object
         if not self.allow_isolated_retry or self.binary_path is None or self.project.arch.name != "86_16":
             return None
         attempted = False
@@ -6581,7 +7171,8 @@ class _DecompileRun8616:
             failure_family_state=self.failure_family_state,
         ))
 
-    def _debug_cli_stage_marker_8616(self, label: str) -> None:
+    @cython.ccall
+    def _debug_cli_stage_marker_8616(self, label: object) -> None:
         if os.environ.get("INERTIA_DEBUG_CLI_STAGE_MARKERS") != "1":
             return
         print(
@@ -6590,7 +7181,9 @@ class _DecompileRun8616:
             flush=True,
         )
 
-    def _is_semantic_codegen_call(self, node: object) -> bool:
+    @cython.ccall
+    def _is_semantic_codegen_call(self, node: object) -> cython.bint:
+        raw_name: object
         if not isinstance(node, structured_c.CFunctionCall):
             return False
         if is_near_pointer_argument_helper_call_8616(node):
@@ -6609,7 +7202,8 @@ class _DecompileRun8616:
             return False
         return name not in self.semantic_call_helper_names
 
-    def _codegen_call_inventory_8616(self, *, with_names: bool) -> CliCallInventory8616:
+    @cython.ccall
+    def _codegen_call_inventory_8616(self, *, with_names: cython.bint) -> CliCallInventory8616:
         """Observe total and per-name semantic call counts in one traversal.
 
         One ``_iter_c_nodes_deep`` walk of the current statements root yields
@@ -6618,13 +7212,17 @@ class _DecompileRun8616:
         observation of one tree state. The returned value must not be retained
         across a rewrite or restore.
         """
+        cfunc: object
+        raw_name: object
+        root: object
+        node: object
         cfunc = getattr(self.dec.codegen, "cfunc", None)
         if cfunc is None:
             return CliCallInventory8616(0, {})
         root = getattr(cfunc, "statements", None)
         if root is None:
             return CliCallInventory8616(0, {})
-        counts: dict[str, int] = {}
+        counts: dict[str, cython.longlong] = {}
         total = 0
         for node in _iter_c_nodes_deep(root):
             if not self._is_semantic_codegen_call(node):
@@ -6641,19 +7239,26 @@ class _DecompileRun8616:
             counts[name] = counts.get(name, 0) + 1
         return CliCallInventory8616(total, counts)
 
-    def _codegen_call_expr_count(self) -> int:
+    @cython.ccall
+    def _codegen_call_expr_count(self) -> cython.longlong:
         """Count semantic calls in a fresh observation of the live tree."""
         return self._codegen_call_inventory_8616(with_names=False).total
 
-    def _codegen_call_name_counts(self) -> dict[str, int]:
+    @cython.ccall
+    def _codegen_call_name_counts(self) -> object:
         """Collect normalized semantic call multiplicities from the live tree."""
         return self._codegen_call_inventory_8616(with_names=True).name_counts
 
-    def _missing_expected_call_names_8616(self, counts: dict[str, int]) -> tuple[str, ...]:
+    @cython.ccall
+    def _missing_expected_call_names_8616(self, counts: object) -> tuple[str, ...]:
         """Compare normalized expected call names against one name histogram."""
+        have: object
+        count: object
+        name: object
+        raw_name: object
         if not self.expected_non_prologue_calls:
             return ()
-        needed: dict[str, int] = {}
+        needed: dict[str, cython.longlong] = {}
         for raw_name in self.expected_non_prologue_calls:
             name = normalize_callee_name_8616(raw_name)
             if not isinstance(name, str) or not name:
@@ -6666,7 +7271,8 @@ class _DecompileRun8616:
                 missing.append(f"{name}({have}/{count})")
         return tuple(missing)
 
-    def _missing_expected_call_names_from_codegen_counts(self) -> tuple[str, ...]:
+    @cython.ccall
+    def _missing_expected_call_names_from_codegen_counts(self) -> object:
         """Observe named calls only when an expected-name obligation exists."""
         if not self.expected_non_prologue_calls:
             return ()
@@ -6674,15 +7280,18 @@ class _DecompileRun8616:
             self._codegen_call_inventory_8616(with_names=True).name_counts
         )
 
+    @cython.ccall
     def _snapshot_codegen_cfunc(self) -> object | None:
         """Capture a bounded trusted C function for semantic rollback."""
+        cfunc: object
+        pickled: object
         if self.large_x86_16_function or self.block_count > 16 or self.byte_count > 0x300:
             return None
         cfunc = getattr(self.dec.codegen, "cfunc", None)
         if cfunc is None:
             return None
         preserve_objects = (self.dec.codegen, self.project, self.project.arch)
-        pickled: object | None = pickled_trusted_cfunc_8616(cfunc, preserve_objects=preserve_objects)
+        pickled = pickled_trusted_cfunc_8616(cfunc, preserve_objects=preserve_objects)
         if pickled is not None:
             return pickled
         snapshot: object | None = snapshot_trusted_cfunc_8616(
@@ -6691,7 +7300,11 @@ class _DecompileRun8616:
         )
         return snapshot
 
-    def _restore_codegen_cfunc(self, snapshot: Any) -> bool:
+    @cython.ccall
+    def _restore_codegen_cfunc(self, snapshot: object) -> cython.bint:
+        codegen: object
+        restored: object
+        node: object
         if snapshot is None:
             return False
         codegen = self.dec.codegen
@@ -6713,7 +7326,7 @@ class _DecompileRun8616:
                 node.codegen = codegen
         return True
 
-    def _run_stack_lowering_pass(self) -> bool:
+    def _run_stack_lowering_pass(self) -> cython.bint:
         changed_local = bool(lower_stable_ss_linear_stack_dereferences_8616(self.dec.codegen, project=self.project))
         if os.environ.get("INERTIA_ENABLE_LEGACY_CLI_STACK_RERUN", "").strip().lower() not in {
             "1",
@@ -6736,11 +7349,13 @@ class _DecompileRun8616:
         )
         return changed_local
 
-    def _run_runtime_segment_lowering_pass(self) -> bool:
+    @cython.ccall
+    def _run_runtime_segment_lowering_pass(self) -> cython.bint:
         target = str(getattr(self.project, "_inertia_c_target", "portable-flat") or "portable-flat")
         return bool(apply_runtime_segment_lowering_8616(self.dec.codegen, target=target))
 
-    def _run_fact_backed_stack_rewrite_pass(self) -> bool:
+    @cython.ccall
+    def _run_fact_backed_stack_rewrite_pass(self) -> cython.bint:
         if self.large_x86_16_function:
             # Dynamic angr/codegen compatibility boundary.
             typing.cast(typing.Any, self.dec.codegen)._inertia_fact_backed_stack_rewrite_refused_large_function = (
@@ -6754,7 +7369,8 @@ class _DecompileRun8616:
         changed_local = bool(_canonicalize_stack_cvars(self.dec.codegen)) or changed_local
         return changed_local
 
-    def _run_callsite_stack_fact_pass(self) -> bool:
+    @cython.ccall
+    def _run_callsite_stack_fact_pass(self) -> cython.bint:
         if self.large_x86_16_function:  # noqa: SIM102
             if seqnode_switch_replacement_changed_for_codegen_8616(self.project, self.dec.codegen):
                 # The SeqNode switch mutator rebuilds case bodies after the
@@ -6787,7 +7403,8 @@ class _DecompileRun8616:
         )
         return bool(result.changed)
 
-    def _guarded_callsite_rewrite(self, pass_name: str, rewrite: Callable[[], bool]) -> bool:
+    @cython.ccall
+    def _guarded_callsite_rewrite(self, pass_name: object, rewrite: Callable[[], cython.bint]) -> cython.bint:
         before_calls = self._codegen_call_expr_count()
         snapshot = self._snapshot_codegen_cfunc()
         if rewrite():
@@ -6805,22 +7422,27 @@ class _DecompileRun8616:
             return True
         return False
 
-    def _run_materialize_missing_stack_local_declarations_pass(self) -> bool:
+    @cython.ccall
+    def _run_materialize_missing_stack_local_declarations_pass(self) -> cython.bint:
         if getattr(self.dec.codegen, "_inertia_has_rebound_materialized_recurrence", False):
             return False
         return bool(_materialize_missing_stack_local_declarations(self.dec.codegen))
 
-    def _run_materialize_missing_register_local_declarations_pass(self) -> bool:
+    @cython.ccall
+    def _run_materialize_missing_register_local_declarations_pass(self) -> cython.bint:
         if getattr(self.dec.codegen, "_inertia_has_rebound_materialized_recurrence", False):
             return False
         return bool(_materialize_missing_register_local_declarations(self.dec.codegen))
 
-    def _run_simplify_structured_c_expressions_pass(self) -> bool:
+    @cython.ccall
+    def _run_simplify_structured_c_expressions_pass(self) -> cython.bint:
         if getattr(self.dec.codegen, "_inertia_has_rebound_materialized_recurrence", False):
             return False
         return bool(_simplify_structured_c_expressions(self.dec.codegen))
 
-    def _run_evidence_dce_pass(self) -> bool:
+    @cython.ccall
+    def _run_evidence_dce_pass(self) -> cython.bint:
+        previous: object
         had_attr = hasattr(self.dec.codegen, "_inertia_allow_large_function_flag_dce_after_seqnode_replacement_8616")
         # Dynamic angr/codegen compatibility boundary.
         previous = getattr(self.dec.codegen, "_inertia_allow_large_function_flag_dce_after_seqnode_replacement_8616", None)
@@ -6843,7 +7465,8 @@ class _DecompileRun8616:
                 with contextlib.suppress(AttributeError):
                     delattr(self.dec.codegen, "_inertia_allow_large_function_flag_dce_after_seqnode_replacement_8616")
 
-    def _run_call_loss_guarded_evidence_dce_pass(self, error_message: str) -> CallLossGuardedDceResult8616:
+    @cython.ccall
+    def _run_call_loss_guarded_evidence_dce_pass(self, error_message: object) -> CallLossGuardedDceResult8616:
         before_calls = self._codegen_call_expr_count() if self.call_loss_guard_active else 0
         dce_changed = self._run_evidence_dce_pass()
         after_calls = self._codegen_call_expr_count() if self.call_loss_guard_active else before_calls
@@ -6863,7 +7486,8 @@ class _DecompileRun8616:
             after_calls=after_calls,
         )
 
-    def _run_dead_local_prune_with_call_guard(self, error_message: str) -> bool:
+    @cython.ccall
+    def _run_dead_local_prune_with_call_guard(self, error_message: object) -> cython.bint:
         before_prune_calls = self._codegen_call_expr_count() if self.call_loss_guard_active else 0
         prune_changed = _prune_dead_local_assignments(self.dec.codegen)
         if not prune_changed:
@@ -6884,10 +7508,12 @@ class _DecompileRun8616:
         typing.cast(typing.Any, self.dec.codegen)._inertia_force_codegen_regeneration_8616 = True
         return True
 
-    def _run_materialize_missing_terminal_ax_return_pass(self) -> bool:
+    @cython.ccall
+    def _run_materialize_missing_terminal_ax_return_pass(self) -> cython.bint:
         return bool(_materialize_missing_terminal_ax_return_8616(self.project, self.dec.codegen))
 
-    def _semantic_rank(self, text: str) -> tuple[int, int, int, int, int, int, int, int]:
+    @cython.ccall
+    def _semantic_rank(self, text: object) -> tuple:
         if not isinstance(text, str) or not text.strip():
             return (-(10**9), 0, 0, 0, 0, 0, 0, 0)
         base_score = _render_candidate_score_8616(text, self.effective_cod_metadata)
@@ -6900,14 +7526,14 @@ class _DecompileRun8616:
 
 
 def _recorded_block_complexity_8616(
-    blocks: tuple[Any, ...], function_info: object, *, source: str, fallback_len_attr: str
-) -> tuple[int, int]:
+    blocks: object, function_info: object, *, source: object, fallback_len_attr: object
+) -> object:
     """Compute (block_count, byte_size) for a bounded block list and cache it."""
     block_addrs = tuple(
-        sorted(addr for addr in (getattr(block, "addr", None) for block in blocks) if isinstance(addr, int))
+        sorted(addr for addr in iter((getattr(block, "addr", None) for block in iter(blocks))) if isinstance(addr, int))
     )
     total_bytes = sum(
-        int(getattr(block, "size", 0) or len(getattr(block, fallback_len_attr, b"") or b"")) for block in blocks
+        int(getattr(block, "size", 0) or len(getattr(block, fallback_len_attr, b"") or b"")) for block in iter(blocks)
     )
     complexity = (len(block_addrs), total_bytes)
     if isinstance(function_info, MutableMapping):
@@ -6920,8 +7546,12 @@ def _recorded_block_complexity_8616(
     return complexity
 
 
-def _function_complexity(function: Any) -> tuple[int, int]:
-    def _impl() -> tuple[int, int]:
+def _function_complexity(function: Any) -> object:
+    def _impl() -> object:
+        cached_complexity: object
+        function_info: object
+        project: object
+        block_profile: object
         project = getattr(function, "project", None)
         function_info = getattr(function, "info", None)
         local_blocks: tuple[Any, ...] = tuple((getattr(function, "_local_blocks", {}) or {}).values())
@@ -6934,12 +7564,12 @@ def _function_complexity(function: Any) -> tuple[int, int]:
             return _recorded_block_complexity_8616(
                 blocks, function_info, source="bounded_blocks", fallback_len_attr="bytes"
             )
-        block_addrs = tuple(sorted(getattr(function, "block_addrs_set", set()) or ()))
+        block_addrs = tuple(sorted(tuple(getattr(function, "block_addrs_set", set()) or ())))
         if isinstance(function_info, MutableMapping):
             cached_complexity = function_info.get("_inertia_function_complexity")
             if (
                 isinstance(cached_complexity, dict)
-                and tuple(cached_complexity.get("block_addrs", ())) == block_addrs
+                and operator.eq(tuple(cached_complexity.get("block_addrs", ())), block_addrs)
                 and isinstance(cached_complexity.get("blocks"), int)
                 and isinstance(cached_complexity.get("bytes"), int)
                 and cached_complexity.get("source") == "factory_decode"
@@ -6964,12 +7594,18 @@ def _function_complexity(function: Any) -> tuple[int, int]:
     return _impl()
 
 
+@cython.ccall
 def _direct_call_stub_filter_regions(
     project: angr.Project, function: object
-) -> tuple[list[tuple[int, int]], tuple[int, int] | None]:
+) -> tuple[list[tuple[cython.longlong, cython.longlong]], tuple[int, int] | None]:
+    metadata: object
+    original_delta: object
+    original_metadata: object
+    original_project: object
+    original_region: object
     local_ranges = _function_covered_ranges(function)
     display_addr = function_original_addr(function)
-    original_region: tuple[int, int] | None = None
+    original_region = None
     metadata = getattr(project, "_inertia_lst_metadata", None)
     if metadata is not None:
         original_region = _lst_code_region(metadata, display_addr)
@@ -6988,11 +7624,13 @@ def _direct_call_stub_filter_regions(
     return local_ranges, original_region
 
 
-def _is_stack_probe_name_8616(name: str | None) -> bool:
+@cython.ccall
+def _is_stack_probe_name_8616(name: object) -> cython.bint:
     return bool(is_x86_16_stack_probe_name_8616(name))
 
 
-def _is_known_noreturn_name_8616(name: str | None) -> bool:
+@cython.ccall
+def _is_known_noreturn_name_8616(name: object) -> cython.bint:
     known_noreturn_names = {"abort", "_abort", "__abort", "exit", "_exit", "__exit", "fatalerror", "_fatalerror"}
     if not isinstance(name, str):
         return False
@@ -7000,13 +7638,20 @@ def _is_known_noreturn_name_8616(name: str | None) -> bool:
     return normalized in known_noreturn_names or normalized.lstrip("_") in known_noreturn_names
 
 
-def _sidecar_enclosing_label_8616(metadata: LSTMetadata, addr: int) -> str | None:
+@cython.ccall
+def _sidecar_enclosing_label_8616(metadata: LSTMetadata, addr: cython.longlong) -> object:
+    cached_regions: object
+    labels: object
+    span: object
+    end: object
+    label: object
+    start: object
     labels = getattr(metadata, "code_labels", None)
     if not isinstance(labels, dict):
         return None
     cached_regions = getattr(metadata, "_inertia_code_label_regions_8616", None)
     if not isinstance(cached_regions, tuple):
-        regions: list[tuple[int, int, str]] = []
+        regions: list[tuple[cython.longlong, cython.longlong, str]] = []
         for start, label in labels.items():
             if not (isinstance(start, int) and isinstance(label, str) and label):
                 continue
@@ -7023,7 +7668,10 @@ def _sidecar_enclosing_label_8616(metadata: LSTMetadata, addr: int) -> str | Non
     return None
 
 
-def _function_name_at_addr_8616(project: angr.Project, addr: int) -> str | None:
+@cython.ccall
+def _function_name_at_addr_8616(project: angr.Project, addr: cython.longlong) -> object:
+    functions: object
+    lookup: object
     functions = getattr(getattr(project, "kb", None), "functions", None)
     lookup = getattr(functions, "function", None)
     if not callable(lookup):
@@ -7036,12 +7684,16 @@ def _function_name_at_addr_8616(project: angr.Project, addr: int) -> str | None:
     return name if isinstance(name, str) and name else None
 
 
-def _compiler_helper_name_at_addr_8616(project: angr.Project, addr: int) -> str | None:
+@cython.ccall
+def _compiler_helper_name_at_addr_8616(project: angr.Project, addr: cython.longlong) -> object:
+    evidence: object
     evidence = identify_x86_16_compiler_helper_at_8616(project, addr)
     return evidence.name if evidence is not None else None
 
 
-def _label_at_addr_8616(project: angr.Project, addr: int) -> str | None:
+@cython.ccall
+def _label_at_addr_8616(project: angr.Project, addr: cython.longlong) -> object:
+    label: object
     label = getattr(getattr(project, "kb", None), "labels", {}).get(addr)
     label = normalize_callee_name_8616(label)
     return label if isinstance(label, str) and label else None
@@ -7049,9 +7701,14 @@ def _label_at_addr_8616(project: angr.Project, addr: int) -> str | None:
 
 def _ordered_original_target_candidates_8616(
     project: angr.Project,
-    slice_target: int,
-) -> tuple[int, ...]:
+    slice_target: cython.longlong,
+) -> tuple[cython.longlong, ...]:
     """Order original addresses for rebased near and absolute far targets."""
+    original_delta: object
+    original_max: object
+    original_min: object
+    original_object: object
+    original_project: object
     original_project = getattr(project, "_inertia_original_project", None)
     original_delta = getattr(project, "_inertia_original_linear_delta", None)
     if original_project is None or not isinstance(original_delta, int):
@@ -7069,10 +7726,16 @@ def _ordered_original_target_candidates_8616(
         if target_is_original_linear
         else (slice_target + original_delta, slice_target)
     )
-    return tuple(dict.fromkeys(candidate for candidate in candidates if candidate >= 0))
+    return tuple(dict.fromkeys(candidate for candidate in iter(candidates) if candidate >= 0))
 
 
-def _original_callee_name_8616(project: angr.Project, slice_target: int) -> str | None:
+def _original_callee_name_8616(project: angr.Project, slice_target: cython.longlong) -> object:
+    cache: object
+    cached: object
+    metadata: object
+    original_delta: object
+    original_project: object
+    original_target: object
     cache = getattr(project, "_inertia_original_callee_name_cache_8616", None)
     if not isinstance(cache, dict):
         cache = {}
@@ -7083,7 +7746,7 @@ def _original_callee_name_8616(project: angr.Project, slice_target: int) -> str 
         cached = cache.get(cache_key)
         return cached if isinstance(cached, str) and cached else None
 
-    def _cache_result(value: str | None) -> str | None:
+    def _cache_result(value: object) -> object:
         cache[cache_key] = value if isinstance(value, str) and value else None
         return value if isinstance(value, str) and value else None
 
@@ -7101,7 +7764,8 @@ def _original_callee_name_8616(project: angr.Project, slice_target: int) -> str 
     return _cache_result(None)
 
 
-def _helper_overrides_generic_name_8616(helper_name: str | None, known_name: str | None) -> bool:
+@cython.ccall
+def _helper_overrides_generic_name_8616(helper_name: object, known_name: object) -> cython.bint:
     """Return True when a helper name should beat a generic sub_/loc_ name."""
     if not isinstance(helper_name, str) or not helper_name:
         return False
@@ -7111,9 +7775,10 @@ def _helper_overrides_generic_name_8616(helper_name: str | None, known_name: str
     )
 
 
+@cython.ccall
 def _original_callee_name_for_target_8616(
-    original_project: Any, metadata: Any, original_target: int
-) -> str | None:
+    original_project: Any, metadata: object, original_target: cython.longlong
+) -> object:
     """Resolve one original target to the best recorded callee name, if any."""
     function_name = _function_name_at_addr_8616(original_project, original_target)
     helper_name = _compiler_helper_name_at_addr_8616(original_project, original_target)
@@ -7139,15 +7804,22 @@ def _original_callee_name_for_target_8616(
     return span_label
 
 
-def _callee_names_equivalent_8616(left: str | None, right: str | None) -> bool:
+@cython.ccall
+def _callee_names_equivalent_8616(left: object, right: object) -> cython.bint:
     left_name = normalize_callee_name_8616(left)
     right_name = normalize_callee_name_8616(right)
     if not isinstance(left_name, str) or not isinstance(right_name, str):
         return False
-    return left_name == right_name or left_name.lstrip("_") == right_name.lstrip("_")
+    return left_name == right_name or operator.eq(left_name.lstrip("_"), right_name.lstrip("_"))
 
 
-def _function_named_addr_8616(project: angr.Project, name: str) -> int | None:
+@cython.ccall
+def _function_named_addr_8616(project: angr.Project, name: object) -> int | None:
+    addr: object
+    decorated: object
+    functions: object
+    lookup: object
+    lookup_name: object
     functions = getattr(getattr(project, "kb", None), "functions", None)
     lookup = getattr(functions, "function", None)
     if not callable(lookup):
@@ -7168,14 +7840,18 @@ def _function_named_addr_8616(project: angr.Project, name: str) -> int | None:
     return None
 
 
-def _candidate_original_target_8616(project: angr.Project, candidate: int) -> int | None:
+@cython.ccall
+def _candidate_original_target_8616(project: angr.Project, candidate: cython.longlong) -> int | None:
     candidates = _ordered_original_target_candidates_8616(project, candidate)
     return candidates[0] if candidates else None
 
 
+@cython.ccall
 def _call_name_matches_target_evidence_8616(
-    project: angr.Project, candidate: int, call_name: str | None
-) -> bool:
+    project: angr.Project, candidate: cython.longlong, call_name: object
+) -> cython.bint:
+    original_project: object
+    known_name: object
     expected = normalize_callee_name_8616(call_name)
     if not isinstance(expected, str) or not expected:
         return False
@@ -7206,6 +7882,9 @@ def _call_name_matches_target_evidence_8616(
 
 def _parse_direct_call_target_8616(insn: object) -> int | None:
     def _impl() -> int | None:
+        capstone_insn: object
+        operands: object
+        token: object
         capstone_insn = getattr(insn, "insn", insn)
         operands = getattr(capstone_insn, "operands", None)
         if operands:
@@ -7213,8 +7892,8 @@ def _parse_direct_call_target_8616(insn: object) -> int | None:
             if (
                 mnemonic == "lcall"
                 and len(operands) == 2
-                and all(getattr(operand, "type", None) == 2 for operand in operands)
-                and all(isinstance(getattr(operand, "imm", None), int) for operand in operands)
+                and all(getattr(operand, "type", None) == 2 for operand in iter(operands))
+                and all(isinstance(getattr(operand, "imm", None), int) for operand in iter(operands))
             ):
                 segment = int(operands[0].imm) & 0xFFFF
                 offset_width = 32 if getattr(operands[1], "size", 2) == 4 else 16
@@ -7224,7 +7903,7 @@ def _parse_direct_call_target_8616(insn: object) -> int | None:
             if getattr(operand, "type", None) == 2 and isinstance(getattr(operand, "imm", None), int):
                 return int(operand.imm)
         op_str = str(getattr(insn, "op_str", "") or "").strip().lower()
-        if not op_str or "[" in op_str or any(ch.isalpha() for ch in op_str if ch not in "xabcdef"):
+        if not op_str or "[" in op_str or any(ch.isalpha() for ch in iter(op_str) if ch not in "xabcdef"):
             return None
         for token in re.split(r"[\s,:]+", op_str):
             if token:
@@ -7237,12 +7916,17 @@ def _parse_direct_call_target_8616(insn: object) -> int | None:
 
 def _iter_capstone_direct_calls_8616(
     project: angr.Project, function: Any
-) -> Iterator[tuple[int, int, int | None]]:
-    def _impl() -> Iterator[tuple[int, int, int | None]]:
+) -> Iterator[tuple[cython.longlong, cython.longlong, int | None]]:
+    def _impl() -> Iterator[tuple[cython.longlong, cython.longlong, int | None]]:
+        factory: object
+        insn_addr: object
+        insn_size: object
+        block_addr: object
+        insn: object
         factory = getattr(project, "factory", None)
         if factory is None:
             return
-        for block_addr in sorted(getattr(function, "block_addrs_set", ()) or ()):
+        for block_addr in sorted(tuple(getattr(function, "block_addrs_set", ()) or ())):
             try:
                 block = factory.block(block_addr, opt_level=0)
             except Exception as ex:
@@ -7272,9 +7956,18 @@ def _iter_capstone_direct_calls_8616(
 
 
 def _iter_linear_region_direct_calls_8616(
-    project: angr.Project, regions: list[tuple[int, int]] | tuple[tuple[int, int], ...]
-) -> Iterator[tuple[int, int, int | None]]:
-    def _impl() -> Iterator[tuple[int, int, int | None]]:
+    project: angr.Project, regions: object
+) -> Iterator[tuple[cython.longlong, cython.longlong, int | None]]:
+    def _impl() -> Iterator[tuple[cython.longlong, cython.longlong, int | None]]:
+        arch: object
+        capstone: object
+        code: object
+        insn_addr: object
+        insn_size: object
+        loader_memory: object
+        end: object
+        insn: object
+        start: object
         loader_memory = getattr(getattr(project, "loader", None), "memory", None)
         arch = getattr(project, "arch", None)
         capstone = getattr(arch, "capstone", None)
@@ -7302,7 +7995,8 @@ def _iter_linear_region_direct_calls_8616(
     return _impl()
 
 
-def _linear_region_code_8616(loader_memory: Any, start: int, end: int) -> bytes | None:
+@cython.ccall
+def _linear_region_code_8616(loader_memory: Any, start: cython.longlong, end: cython.longlong) -> object:
     """Load a bounded linear region or return None when it is not decodable."""
     if not isinstance(start, int) or not isinstance(end, int) or end <= start:
         return None
@@ -7321,9 +8015,12 @@ def _linear_region_code_8616(loader_memory: Any, start: int, end: int) -> bytes 
         return None
 
 
+@cython.ccall
 def _callsite_addr_points_to_call_insn_8616(
-    project: angr.Project, function: object, callsite: int
-) -> bool:
+    project: angr.Project, function: object, callsite: cython.longlong
+) -> cython.bint:
+    factory: object
+    insn: object
     factory = getattr(project, "factory", None)
     if factory is None:
         return True
@@ -7332,14 +8029,15 @@ def _callsite_addr_points_to_call_insn_8616(
     except Exception:
         return True
     for insn in getattr(getattr(block, "capstone", None), "insns", ()) or ():
-        if getattr(insn, "address", None) != callsite:
+        if operator.ne(getattr(insn, "address", None), callsite):
             continue
         mnemonic = str(getattr(insn, "mnemonic", "") or "").lower()
         return mnemonic in {"call", "lcall"}
     return False
 
 
-def _compute_candidate_targets_8616(target: int, linked_base: int | None, image_end: int | None) -> set[int]:
+@cython.ccall
+def _compute_candidate_targets_8616(target: cython.longlong, linked_base: int | None, image_end: object) -> object:
     candidates = {target}
     if isinstance(linked_base, int):
         if target < linked_base:
@@ -7355,15 +8053,18 @@ def _compute_candidate_targets_8616(target: int, linked_base: int | None, image_
 
 def _choose_preferred_candidate_8616(
     project: angr.Project,
-    candidates: set[int],
-    local_ranges: list[tuple[int, int]],
-    original_region: tuple[int, int] | None,
+    candidates: object,
+    local_ranges: object,
+    original_region: object,
     original_delta: int | None,
-) -> tuple[int | None, str | None]:
+) -> object:
     def _impl() -> tuple[int | None, str | None]:
+        preferred_rank: object
+        slice_entry: object
+        candidate: object
         preferred_candidate: int | None = None
-        preferred_rank: tuple[int, int, int] | None = None
-        fallback_call_name: str | None = None
+        preferred_rank = None
+        fallback_call_name: object = None
         for candidate in sorted(candidates):
             original_target = candidate + original_delta if isinstance(original_delta, int) else None
             if _addr_in_ranges(candidate, local_ranges):
@@ -7392,11 +8093,13 @@ def _choose_preferred_candidate_8616(
     return _impl()
 
 
+@cython.ccall
 def _collect_callsite_direct_calls_8616(
     project: angr.Project, function: object, function_dynamic: Any
-) -> list[tuple[int | None, int, int | None]]:
+) -> object:
     """Collect (callsite, target, ret_addr) rows from angr call-site records."""
-    direct_calls: list[tuple[int | None, int, int | None]] = []
+    callsite: object
+    direct_calls: list[tuple[int | None, cython.longlong, int | None]] = []
     for callsite in getattr(function, "get_call_sites", list)() or ():
         if isinstance(callsite, int) and not _callsite_addr_points_to_call_insn_8616(project, function, callsite):
             continue
@@ -7417,14 +8120,15 @@ def _collect_callsite_direct_calls_8616(
     return direct_calls
 
 
+@cython.ccall
 def _merge_direct_call_8616(
-    direct_calls: list[tuple[int | None, int, int | None]],
-    call_index_by_site: dict[int, int],
+    direct_calls: object,
+    call_index_by_site: object,
     callsite: int | None,
-    target: int,
+    target: cython.longlong,
     ret_addr: int | None,
     *,
-    replace: bool,
+    replace: cython.bint,
 ) -> None:
     """Merge one decoded call row into the deduplicated direct-call list."""
     if isinstance(callsite, int) and callsite in call_index_by_site:
@@ -7436,14 +8140,18 @@ def _merge_direct_call_8616(
     direct_calls.append((callsite, target, ret_addr))
 
 
+@cython.ccall
 def _collect_direct_calls_8616(
     project: angr.Project, function: object
-) -> list[tuple[int | None, int, int | None]]:
+) -> object:
+    callsite: object
+    ret_addr: object
+    target: object
     function_dynamic = cast(Any, function)
     direct_calls = _collect_callsite_direct_calls_8616(project, function, function_dynamic)
     call_index_by_site = {
         callsite: index
-        for index, (callsite, _target, _ret_addr) in enumerate(direct_calls)
+        for index, (callsite, _target, _ret_addr) in builtins.iter(enumerate(direct_calls))
         if isinstance(callsite, int)
     }
     for callsite, target, ret_addr in _iter_capstone_direct_calls_8616(project, function):
@@ -7455,13 +8163,14 @@ def _collect_direct_calls_8616(
     return direct_calls
 
 
+@cython.ccall
 def _candidate_is_filtered_8616(
-    candidate: int,
+    candidate: cython.longlong,
     *,
     original_delta: int | None,
-    local_ranges: list[tuple[int, int]],
-    original_region: tuple[int, int] | None,
-) -> bool:
+    local_ranges: object,
+    original_region: object,
+) -> cython.bint:
     original_target = candidate + original_delta if isinstance(original_delta, int) else None
     if _addr_in_ranges(candidate, local_ranges):
         return True
@@ -7472,12 +8181,16 @@ def _candidate_is_filtered_8616(
     )
 
 
+@cython.ccall
 def _seed_direct_callee_prototype_from_original_project_8616(
     project: angr.Project,
     stub: object,
-    candidate: int,
-) -> bool:
+    candidate: cython.longlong,
+) -> cython.bint:
     """Seed a callee ABI from the full binary or an exact slice's source project."""
+    original_function: object
+    original_project: object
+    target: object
     # Dynamic exact-slice project extension boundary.
     original_project = getattr(project, "_inertia_original_project", None)
     if not isinstance(original_project, angr.Project):
@@ -7525,15 +8238,16 @@ def _create_or_update_direct_call_stub_8616(
     function: Any,
     callsite_addr: int | None,
     ret_addr: int | None,
-    candidate: int,
+    candidate: cython.longlong,
     preferred_candidate: int | None,
-    fallback_call_name: str | None,
-    debug_enabled: bool,
-) -> bool:
+    fallback_call_name: object,
+    debug_enabled: cython.bint,
+) -> cython.bint:
     """Register a callee in its caller's KB, preserving binary-proven identity."""
     caller_kb = function_knowledge_base_8616(project, function)
 
-    def _impl() -> bool:
+    def _impl() -> cython.bint:
+        stub: object
         try:
             helper_evidence = hook_x86_16_compiler_helper_at_8616(project, candidate)
             stub = caller_kb.functions.function(addr=candidate, create=True)
@@ -7543,7 +8257,7 @@ def _create_or_update_direct_call_stub_8616(
                 current_stub_name = stub.name
             except AttributeError:
                 current_stub_name = None
-            if preferred_candidate is None or candidate == preferred_candidate:
+            if preferred_candidate is None or operator.eq(candidate, preferred_candidate):
                 _record_direct_callsite_target_8616(function, callsite_addr, ret_addr, candidate)
             stub_name = _direct_stub_name_8616(project, candidate, helper_evidence, fallback_call_name)
             if isinstance(stub_name, str) and stub_name:
@@ -7584,9 +8298,10 @@ def _create_or_update_direct_call_stub_8616(
     return _impl()
 
 
+@cython.ccall
 def _direct_stub_name_8616(
-    project: angr.Project, candidate: int, helper_evidence: CompilerHelperEvidence8616 | None, fallback_call_name: str | None
-) -> str | None:
+    project: angr.Project, candidate: cython.longlong, helper_evidence: object, fallback_call_name: object
+) -> object:
     """Resolve the best stub name from helper evidence, original project, or fallback."""
     stub_name = helper_evidence.name if helper_evidence is not None else None
     if not isinstance(stub_name, str) or not stub_name:
@@ -7602,19 +8317,20 @@ def _direct_stub_name_8616(
     return stub_name
 
 
+@cython.ccall
 def _seed_callsite_prototype_and_trace_8616(
     project: angr.Project,
     function: object,
     stub: object,
     callsite_addr: int | None,
-    candidate: int,
-    preferred_candidate: int | None,
-    debug_enabled: bool,
+    candidate: cython.longlong,
+    preferred_candidate: object,
+    debug_enabled: cython.bint,
 ) -> None:
     """Seed the physical callsite prototype for the preferred candidate and trace."""
     if not (
         isinstance(callsite_addr, int)
-        and (preferred_candidate is None or candidate == preferred_candidate)
+        and (preferred_candidate is None or operator.eq(candidate, preferred_candidate))
     ):
         return
     seed_result = seed_physical_callsite_prototype_8616(
@@ -7632,7 +8348,8 @@ def _seed_callsite_prototype_and_trace_8616(
         )
 
 
-def _apply_stub_returning_flags_8616(stub: Any, current_stub_name: str | None) -> None:
+@cython.ccall
+def _apply_stub_returning_flags_8616(stub: Any, current_stub_name: object) -> None:
     """Mark the stub returning unless it is a known noreturn name."""
     if not _is_known_noreturn_name_8616(current_stub_name):
         with contextlib.suppress(Exception):
@@ -7642,9 +8359,10 @@ def _apply_stub_returning_flags_8616(stub: Any, current_stub_name: str | None) -
             stub.returning = True
 
 
+@cython.ccall
 def _record_direct_callsite_target_8616(
-    function: object, callsite_addr: int | None, ret_addr: int | None, candidate: int
-) -> bool:
+    function: object, callsite_addr: int | None, ret_addr: int | None, candidate: cython.longlong
+) -> cython.bint:
     if not isinstance(callsite_addr, int):
         return False
     try:
@@ -7660,8 +8378,12 @@ def _record_direct_callsite_target_8616(
 
 def _register_direct_call_target_function_stubs(
     project: angr.Project, function: Any, cod_metadata: CODProcMetadata | None = None
-) -> int:
-    def _impl() -> int:
+) -> cython.longlong:
+    def _impl() -> cython.longlong:
+        original_delta: object
+        callsite_addr: object
+        ret_addr: object
+        target: object
         if project.arch.name != "86_16":
             return 0
         measure_single_function_context = _single_function_context_measuring_enabled()
@@ -7681,7 +8403,7 @@ def _register_direct_call_target_function_stubs(
             )
 
         created = 0
-        seen: set[int] = set()
+        seen: set[cython.longlong] = set()
         direct_calls = _collect_direct_calls_8616(project, function)
         local_ranges, original_region = _direct_call_stub_filter_regions(project, function)
         original_delta = getattr(project, "_inertia_original_linear_delta", None)
@@ -7716,28 +8438,30 @@ def _register_direct_call_target_function_stubs(
     return _impl()
 
 
+@cython.ccall
 def _stub_candidates_for_direct_call_8616(
     *,
     project: angr.Project,
     function: Any,
-    seen: set[int],
+    seen: object,
     callsite_addr: int | None,
-    target: int,
+    target: cython.longlong,
     ret_addr: int | None,
     linked_base: int | None,
     image_end: int | None,
-    local_ranges: list[tuple[int, int]],
-    original_region: tuple[int, int] | None,
+    local_ranges: object,
+    original_region: object,
     original_delta: int | None,
-) -> tuple[int, int]:
+) -> tuple[cython.longlong, cython.longlong]:
     """Create stubs for one direct call's eligible targets; return (created, candidate count)."""
+    candidate: object
     candidates = _compute_candidate_targets_8616(target, linked_base, image_end)
     preferred_candidate, fallback_call_name = _choose_preferred_candidate_8616(
         project, candidates, local_ranges, original_region, original_delta
     )
     eligible_candidates = [
         candidate
-        for candidate in sorted(candidates)
+        for candidate in builtins.iter(sorted(candidates))
         if not _candidate_is_filtered_8616(
             candidate,
             original_delta=original_delta,
@@ -7766,17 +8490,19 @@ def _stub_candidates_for_direct_call_8616(
     return created, len(candidates)
 
 
-def _single_function_context_measuring_enabled() -> bool:
+@cython.ccall
+def _single_function_context_measuring_enabled() -> cython.bint:
     return os.environ.get("INERTIA_MEASURE_SINGLE_FUNCTION_CONTEXT", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+@cython.ccall
 def _emit_single_function_context_metric(
     function: object,
     *,
-    kind: str,
-    candidates: int = 0,
-    created: int = 0,
-    elapsed_ms: int = 0,
+    kind: object,
+    candidates: cython.longlong = 0,
+    created: cython.longlong = 0,
+    elapsed_ms: cython.longlong = 0,
 ) -> None:
     if not _single_function_context_measuring_enabled():
         return
@@ -7789,8 +8515,10 @@ def _emit_single_function_context_metric(
 
 
 
+@cython.ccall
 def _attach_project_context_to_function_8616(project: angr.Project, function: Any) -> None:
     """Attach CLI project context to an angr Function-like object."""
+    current_project: object
     # Dynamic angr Function compatibility boundary.
     current_project = getattr(function, "project", None)
     # Dynamic angr/project compatibility boundary.
@@ -7804,9 +8532,10 @@ def _attach_project_context_to_function_8616(project: angr.Project, function: An
         function._project = project
 
 
-def _emit_start_debug_8616(function: Any, display_addr_local: int) -> None:
+@cython.ccall
+def _emit_start_debug_8616(function: Any, display_addr_local: cython.longlong) -> None:
     """Print the start-of-decompile debug line for this function."""
-    if display_addr_local == function.addr:
+    if operator.eq(display_addr_local, function.addr):
         print(
             f"[dbg] decompile_function: addr={display_addr_local:#x} name={function.name}",
             file=sys.stderr,
@@ -7816,6 +8545,7 @@ def _emit_start_debug_8616(function: Any, display_addr_local: int) -> None:
     print(f"[dbg] decompile_function: addr={display_addr_local:#x} (slice={function.addr:#x}) name={function.name}")
 
 
+@cython.ccall
 def _maybe_normalize_function_8616(project: angr.Project, function: Any) -> None:
     """Normalize the function under a small budget when not already normalized."""
     if function.normalized:
@@ -7838,7 +8568,7 @@ def _maybe_debug_function_blocks_8616(function: Any) -> None:
     if not os.environ.get("INERTIA_DEBUG_FUNCTION_BLOCKS"):
         return
     try:
-        blocks = sorted(int(a) for a in (getattr(function, "block_addrs_set", ()) or ()) if isinstance(a, int))
+        blocks = sorted(int(a) for a in iter((getattr(function, "block_addrs_set", ()) or ())) if isinstance(a, int))
         print(
             f"[dbg] function-blocks fn={function.addr:#x} count={len(blocks)} first={blocks[:8]}",
             file=sys.stderr,
@@ -7848,16 +8578,20 @@ def _maybe_debug_function_blocks_8616(function: Any) -> None:
         pass
 
 
+@cython.ccall
 def _maybe_debug_function_graph_8616(function: Any) -> None:
     """Print graph node/edge counts when INERTIA_DEBUG_FUNCTION_GRAPH is set."""
+    graph: object
+    saddr: object
+    succ: object
     if not os.environ.get("INERTIA_DEBUG_FUNCTION_GRAPH"):
         return
     try:
         graph = getattr(function, "graph", None)
         nodes = list(getattr(graph, "nodes", list)()) if graph is not None else []
         edges = list(getattr(graph, "edges", list)()) if graph is not None else []
-        entry_nodes = [n for n in nodes if getattr(n, "addr", None) == function.addr]
-        succ_addrs: list[int] = []
+        entry_nodes = [n for n in iter(nodes) if operator.eq(getattr(n, "addr", None), function.addr)]
+        succ_addrs: list[cython.longlong] = []
         if graph is not None and entry_nodes:
             for succ in graph.successors(entry_nodes[0]):
                 saddr = getattr(succ, "addr", None)
@@ -7865,7 +8599,7 @@ def _maybe_debug_function_graph_8616(function: Any) -> None:
                     succ_addrs.append(saddr)
         print(
             f"[dbg] function-graph fn={function.addr:#x} nodes={len(nodes)} edges={len(edges)} "
-            f"entry_succ={sorted(set(succ_addrs))[:8]}",
+            f"entry_succ={sorted(tuple(set(succ_addrs)))[:8]}",
             file=sys.stderr,
             flush=True,
         )
@@ -7873,8 +8607,11 @@ def _maybe_debug_function_graph_8616(function: Any) -> None:
         pass
 
 
+@cython.ccall
 def _maybe_debug_callsite_returning_8616(project: angr.Project, function: Any) -> None:
     """Print per-callsite returning info when INERTIA_DEBUG_CALLSITE_RETURNING is set."""
+    returning: object
+    callsite: object
     if not os.environ.get("INERTIA_DEBUG_CALLSITE_RETURNING"):
         return
     try:
@@ -7916,11 +8653,12 @@ def _maybe_debug_callsite_returning_8616(project: angr.Project, function: Any) -
 
 
 
+@cython.ccall
 def _prepare_function_for_decompilation(
     project: angr.Project,
     function: Any,
     cod_metadata: CODProcMetadata | None = None,
-) -> int:
+) -> cython.longlong:
 
     display_addr = function_original_addr(function)
     _attach_project_context_to_function_8616(project, function)
@@ -7947,8 +8685,10 @@ def _function_decompilation_profile(
     function: Any,
     block_count: int | None = None,
     byte_count: int | None = None,
-) -> dict[str, int | bool]:
-    def _impl() -> dict[str, int | bool]:
+) -> object:
+    def _impl() -> object:
+        cached_profile: object
+        function_info: object
         nonlocal block_count, byte_count
         if block_count is None or byte_count is None:
             block_count, byte_count = _function_complexity(function)
@@ -7993,17 +8733,19 @@ def _function_decompilation_profile(
     return _impl()
 
 
+@cython.ccall
 def _cached_function_profile_8616(
     function_info: object, block_count: int | None, byte_count: int | None
-) -> dict[str, int | bool] | None:
+) -> object:
     """Return the cached decompilation profile when it matches the shape metrics."""
+    cached_profile: object
     if not isinstance(function_info, MutableMapping):
         return None
     cached_profile = function_info.get("_inertia_function_decompilation_profile")
     if (
         isinstance(cached_profile, dict)
-        and cached_profile.get("block_count") == block_count
-        and cached_profile.get("byte_count") == byte_count
+        and operator.eq(cached_profile.get("block_count"), block_count)
+        and operator.eq(cached_profile.get("byte_count"), byte_count)
         and isinstance(cached_profile.get("call_site_count"), int)
         and isinstance(cached_profile.get("internal_call_count"), int)
     ):
@@ -8011,6 +8753,7 @@ def _cached_function_profile_8616(
     return None
 
 
+@cython.ccall
 def _profile_call_sites_8616(function: object) -> tuple[object, ...]:
     """Enumerate call sites, recording failures as an empty result."""
     if not hasattr(function, "get_call_sites"):
@@ -8026,8 +8769,14 @@ def _profile_call_sites_8616(function: object) -> tuple[object, ...]:
         return ()
 
 
-def _profile_call_counts_8616(function: object) -> tuple[int, int, bool]:
+def _profile_call_counts_8616(function: object) -> tuple[cython.longlong, cython.longlong, cython.bint]:
     """Count stack-probe/internal calls and detect non-wrapper traffic."""
+    capstone_block: object
+    local_blocks: object
+    project: object
+    block: object
+    block_profile: object
+    insn: object
     project = getattr(function, "project", None)
     internal_call_count = 0
     stack_probe_call_count = 0
@@ -8047,7 +8796,7 @@ def _profile_call_counts_8616(function: object) -> tuple[int, int, bool]:
                         stack_probe_call_count += 1
                         continue
                     internal_call_count += 1
-                elif mnemonic.startswith("j") or ("[" in op_str and not any(marker in op_str for marker in ("[bp", "[sp", "[ss:"))):
+                elif mnemonic.startswith("j") or ("[" in op_str and not any(marker in op_str for marker in iter(("[bp", "[sp", "[ss:")))):
                     has_non_wrapper_traffic = True
     else:
         for block_profile in _function_block_profile_cache_8616(function, project).values():
@@ -8058,20 +8807,26 @@ def _profile_call_counts_8616(function: object) -> tuple[int, int, bool]:
     return stack_probe_call_count, internal_call_count, has_non_wrapper_traffic
 
 
-def _profile_int_8616(profile: Mapping[str, object], key: str) -> int:
+@cython.ccall
+def _profile_int_8616(profile: Mapping[str, object], key: object) -> cython.longlong:
     """Return an integer profile counter from the CLI decompilation profile."""
+    value: object
     value = profile.get(key, 0)
     return value if type(value) is int else 0
 
 
-def _is_compiler_stack_probe_call_insn_8616(project: angr.Project, insn: object) -> bool:
+@cython.ccall
+def _is_compiler_stack_probe_call_insn_8616(project: angr.Project, insn: object) -> cython.bint:
+    target: object
     target = _capstone_direct_target_8616(insn)
     if target is None:
         return False
     return _is_compiler_stack_probe_call_target_8616(project, target)
 
 
+@cython.ccall
 def _capstone_direct_target_8616(insn: object) -> int | None:
+    value: object
     operands = tuple(getattr(insn, "operands", ()) or ())
     if len(operands) != 1:
         return None
@@ -8082,11 +8837,15 @@ def _capstone_direct_target_8616(insn: object) -> int | None:
     return int(value) if isinstance(value, int) else None
 
 
-_STACK_PROBE_CALL_TARGET_CACHE_8616: weakref.WeakKeyDictionary[angr.Project, dict[int, bool]] = weakref.WeakKeyDictionary()
+_STACK_PROBE_CALL_TARGET_CACHE_8616: weakref.WeakKeyDictionary[angr.Project, dict[cython.longlong, cython.bint]] = weakref.WeakKeyDictionary()
 
 
-def _is_compiler_stack_probe_call_target_8616(project: angr.Project, target: int) -> bool:
+@cython.ccall
+def _is_compiler_stack_probe_call_target_8616(project: angr.Project, target: cython.longlong) -> cython.bint:
     """Memoize stack-probe helper classification per (project, target)."""
+    cache: object
+    cached: object
+    original_project: object
     if not isinstance(target, int):
         return False
     try:
@@ -8110,10 +8869,14 @@ def _is_compiler_stack_probe_call_target_8616(project: angr.Project, target: int
     return hit
 
 
+@cython.ccall
 def _stack_probe_target_evidence_8616(
-    project: angr.Project, candidates: list[int], original_project: object
-) -> bool:
+    project: angr.Project, candidates: object, original_project: object
+) -> cython.bint:
     """Identify stack-probe helper evidence for any candidate address/project."""
+    candidate_project: object
+    evidence: object
+    candidate: object
     for candidate in candidates:
         for candidate_project in (project, original_project):
             if candidate_project is None:
@@ -8124,22 +8887,26 @@ def _stack_probe_target_evidence_8616(
     return False
 
 
+@cython.ccall
 def _function_block_profile_cache_8616(
     function: Any,
     project: angr.Project,
-) -> dict[int, tuple[int, int, int, int, bool]]:
+) -> object:
     """Cache low-cost project-decoded block facts for this function.
 
     The cache stores immutable tuples keyed by block address and reused by both
     complexity and profile calculations when block decoding is needed from
     ``block_addrs_set``.
     """
+    cached_profiles: object
+    function_info: object
+    block_addr: object
     function_info = getattr(function, "info", None)
-    block_addrs: tuple[int, ...] = tuple(sorted(getattr(function, "block_addrs_set", set()) or ()))
+    block_addrs: tuple[cython.longlong, ...] = tuple(sorted(tuple(getattr(function, "block_addrs_set", set()) or ())))
     cached_profiles = _cached_block_profiles_8616(function_info, block_addrs, project)
     if cached_profiles is not None:
         return cached_profiles
-    profiles: dict[int, tuple[int, int, int, int, bool]] = {}
+    profiles: dict[cython.longlong, tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong, cython.bint]] = {}
     for block_addr in block_addrs:
         profiles[block_addr] = _block_profile_for_addr_8616(project, function, block_addr)
     if isinstance(function_info, MutableMapping):
@@ -8151,21 +8918,26 @@ def _function_block_profile_cache_8616(
     return profiles
 
 
+@cython.ccall
 def _cached_block_profiles_8616(
-    function_info: object, block_addrs: tuple[int, ...], project: angr.Project
-) -> dict[int, tuple[int, int, int, int, bool]] | None:
+    function_info: object, block_addrs: object, project: angr.Project
+) -> object:
     """Return validated cached block profiles for this project/block set, if any."""
+    cached: object
+    cached_profiles: object
+    candidate: object
+    addr: object
     if not isinstance(function_info, MutableMapping):
         return None
     cached = function_info.get("_inertia_function_block_profile_cache_8616")
     if not isinstance(cached, Mapping):
         return None
-    if cached.get("project_id", None) != id(project) or tuple(cached.get("block_addrs", ())) != block_addrs:
+    if operator.ne(cached.get("project_id", None), id(project)) or operator.ne(tuple(cached.get("block_addrs", ())), block_addrs):
         return None
     cached_profiles = cached.get("profiles")
     if not isinstance(cached_profiles, Mapping):
         return None
-    prepared_cache: dict[int, tuple[int, int, int, int, bool]] = {}
+    prepared_cache: dict[cython.longlong, tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong, cython.bint]] = {}
     for addr in block_addrs:
         candidate = cached_profiles.get(addr)
         if not (
@@ -8189,9 +8961,10 @@ def _cached_block_profiles_8616(
 
 
 def _block_profile_for_addr_8616(
-    project: angr.Project, function: object, block_addr: int
-) -> tuple[int, int, int, int, bool]:
+    project: angr.Project, function: object, block_addr: cython.longlong
+) -> tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong, cython.bint]:
     """Decode one block and count call/traffic facts for the profile cache."""
+    insn: object
     try:
         block = project.factory.block(block_addr, opt_level=0)
     except Exception as ex:
@@ -8217,7 +8990,7 @@ def _block_profile_for_addr_8616(
                 stack_probe_calls += 1
                 continue
             internal_calls += 1
-        elif mnemonic.startswith("j") or ("[" in op_str and not any(marker in op_str for marker in ("[bp", "[sp", "[ss:"))):
+        elif mnemonic.startswith("j") or ("[" in op_str and not any(marker in op_str for marker in iter(("[bp", "[sp", "[ss:")))):
             block_non_wrapper_traffic = True
     return (
         block_bytes,
@@ -8228,16 +9001,17 @@ def _block_profile_for_addr_8616(
     )
 
 
+@cython.ccall
 def _preferred_decompiler_options(
-    block_count: int,
-    byte_count: int,
+    block_count: cython.longlong,
+    byte_count: cython.longlong,
     *,
-    wrapper_like: bool = False,
-    tiny_single_call_helper: bool = False,
-    no_call_helper: bool = False,
-    disable_dead_memdefs: bool = False,
-    large_16bit_function: bool = False,
-) -> list[tuple[str, object]] | None:
+    wrapper_like: cython.bint = False,
+    tiny_single_call_helper: cython.bint = False,
+    no_call_helper: cython.bint = False,
+    disable_dead_memdefs: cython.bint = False,
+    large_16bit_function: cython.bint = False,
+) -> object:
     """Choose a cheaper decompiler structurer for true wrapper-like functions."""
     if wrapper_like or tiny_single_call_helper:
         return [("structurer_cls", "Phoenix")]
@@ -8261,13 +9035,14 @@ def _preferred_decompiler_options(
     return None
 
 
+@cython.ccall
 def _preferred_expr_collapse_depth(
-    block_count: int,
-    byte_count: int,
+    block_count: cython.longlong,
+    byte_count: cython.longlong,
     *,
-    wrapper_like: bool = False,
-    tiny_single_call_helper: bool = False,
-) -> int:
+    wrapper_like: cython.bint = False,
+    tiny_single_call_helper: cython.bint = False,
+) -> cython.longlong:
     """Disable UI-only ellipses when exporting complete, recompilable source.
 
     Keep the caller's function-profile interface, but never use complexity to
@@ -8276,7 +9051,8 @@ def _preferred_expr_collapse_depth(
     return sys.maxsize
 
 
-def _pipeline_hard_error_context_8616(ex: PipelineHardError) -> str:
+@cython.ccall
+def _pipeline_hard_error_context_8616(ex: PipelineHardError) -> object:
     """Render the typed layer/function/details context carried by a hard failure."""
     context_parts: list[str] = []
     if ex.layer:
@@ -8293,17 +9069,20 @@ def _decompile_function_with_stats(
     project: angr.Project,
     cfg: Any,
     function: Any,
-    timeout: int,
-    api_style: str,
+    timeout: cython.longlong,
+    api_style: object,
     binary_path: Path | None = None,
     cod_metadata: CODProcMetadata | None = None,
-    synthetic_globals: dict[int, tuple[str, int]] | None = None,
+    synthetic_globals: object = None,
     lst_metadata: LSTMetadata | None = None,
-    enable_structured_simplify: bool = True,
-    enable_postprocess: bool = True,
-    allow_isolated_retry: bool = True,
+    enable_structured_simplify: cython.bint = True,
+    enable_postprocess: cython.bint = True,
+    allow_isolated_retry: cython.bint = True,
     failure_family_state: FailureFamilyState | None = None,
-) -> tuple[str, str, str | None, int, int, float, TerminalDecompileFailure8616 | None]:
+) -> tuple[str, str, str | None, cython.longlong, cython.longlong, cython.double, TerminalDecompileFailure8616 | None]:
+    forced_payload: object
+    partial_payload: object
+    validated_payload_record: object
     block_count, byte_count = _function_complexity(function)
     effective_timeout = _effective_decompile_timeout_8616(
         project,
@@ -8393,21 +9172,23 @@ def _decompile_function_with_stats(
     return status, payload, partial_payload, block_count, byte_count, elapsed, terminal_failure
 
 
+@cython.ccall
 def _apply_validated_payload_replacement_8616(
     project: angr.Project,
     function: object,
-    payload: str,
+    payload: object,
     cod_metadata: CODProcMetadata | None,
     binary_path: Path | None,
     lst_metadata: LSTMetadata | None,
-) -> str:
+) -> object:
     """Replace the payload with the validated codegen artifact when evidence allows."""
+    validated_payload_record: object
     validated_payload_record = getattr(project, "_inertia_last_validated_function_payload", None)
     if not (isinstance(validated_payload_record, tuple) and len(validated_payload_record) == 2):
         return payload
     validated_addr, validated_payload = validated_payload_record
     if not (
-        validated_addr == function_original_addr(function)
+        operator.eq(validated_addr, function_original_addr(function))
         and isinstance(validated_payload, str)
         and validated_payload.strip()
     ):
@@ -8451,10 +9232,12 @@ def _apply_validated_payload_replacement_8616(
     return payload
 
 
+@cython.ccall
 def _validated_replacement_gate_8616(
-    project: angr.Project, payload: str, validated_payload: str, display_addr: object, payload_len: int
+    project: angr.Project, payload: object, validated_payload: object, display_addr: object, payload_len: cython.longlong
 ) -> tuple[str, ValidatedPayloadReplacementDecision8616]:
     """Gate the replacement on tail-validation snapshot and recompile evidence."""
+    tail_snapshot: object
     log = logging.getLogger(__name__)
     tail_snapshot = getattr(project, "_inertia_last_validated_function_payload_snapshot", None)
     if not isinstance(tail_snapshot, dict):
@@ -8487,7 +9270,10 @@ def _validated_replacement_gate_8616(
     return payload, ValidatedPayloadReplacementDecision8616.REJECT_FAILED_TAIL_SNAPSHOT
 
 
+@cython.ccall
 def _emit_grouped_structuring_stats_8616(codegen: Any, grouped_stats: Any) -> None:
+    final_graph_summary: object
+    initial_graph_summary: object
     initial_graph_summary = grouped_stats.get("initial_graph_summary", {})
     final_graph_summary = grouped_stats.get("final_graph_summary", {})
     if not isinstance(initial_graph_summary, Mapping):
@@ -8533,7 +9319,9 @@ def _emit_grouped_structuring_stats_8616(codegen: Any, grouped_stats: Any) -> No
         )
 
 
+@cython.ccall
 def _emit_pre_codegen_seqnode_probe_stats_8616(codegen: Any, pre_codegen_records: Any) -> None:
+    record: object
     latest_probe = pre_codegen_records[-1]
     if isinstance(latest_probe, Mapping):
         stage_mapping_summaries = []
@@ -8749,6 +9537,7 @@ def _emit_pre_codegen_seqnode_probe_stats_8616(codegen: Any, pre_codegen_records
         )
 
 
+@cython.ccall
 def _emit_switch_lowering_status_stats_8616(codegen: Any, lowering_payload: Any) -> None:
     print(
         "[typed-switch-lowering-status] "
@@ -8786,12 +9575,13 @@ def _emit_switch_lowering_status_stats_8616(codegen: Any, lowering_payload: Any)
 
 
 def _emit_seqnode_replacement_stats_8616(codegen: Any, seqnode_replacements: Any) -> None:
+    function_addr: object
     function_addr = getattr(getattr(codegen, "cfunc", None), "addr", None)
     relevant_seqnode_replacements = [
         record
-        for record in seqnode_replacements
+        for record in iter(seqnode_replacements)
         if isinstance(record, Mapping)
-        and (not isinstance(function_addr, int) or record.get("function_addr") == function_addr)
+        and (not isinstance(function_addr, int) or operator.eq(record.get("function_addr"), function_addr))
     ]
     if relevant_seqnode_replacements:
         latest_replacement = relevant_seqnode_replacements[-1]
@@ -8799,15 +9589,15 @@ def _emit_seqnode_replacement_stats_8616(codegen: Any, seqnode_replacements: Any
         if isinstance(refusal_reasons, Mapping):
             refusal_reason_counts = {
                 str(reason): int(count or 0)
-                for reason, count in refusal_reasons.items()
+                for reason, count in builtins.iter(refusal_reasons.items())
             }
         else:
-            refusal_reason_counts = dict(Counter(str(reason) for reason in refusal_reasons))
+            refusal_reason_counts = dict(Counter(str(reason) for reason in iter(refusal_reasons)))
         print(
             "[typed-switch-seqnode-replacement] "
             + json.dumps(
                 {
-                    "attempt_history": [dict(record) for record in relevant_seqnode_replacements],
+                    "attempt_history": [dict(record) for record in iter(relevant_seqnode_replacements)],
                     "attempted_count": int(latest_replacement.get("attempted_count", 0) or 0),
                     "case_count": int(latest_replacement.get("case_count", 0) or 0),
                     "changed": bool(latest_replacement.get("changed", False)),
@@ -8829,10 +9619,10 @@ def _emit_ast_replacement_stats_8616(codegen: Any, replacement_payload: Any) -> 
     if isinstance(replacement_refusal_reasons, Mapping):
         replacement_refusal_reason_counts = {
             str(reason): int(count or 0)
-            for reason, count in replacement_refusal_reasons.items()
+            for reason, count in builtins.iter(replacement_refusal_reasons.items())
         }
     else:
-        replacement_refusal_reason_counts = dict(Counter(str(reason) for reason in replacement_refusal_reasons))
+        replacement_refusal_reason_counts = dict(Counter(str(reason) for reason in iter(replacement_refusal_reasons)))
     replacement_report = {
         "attempted_count": int(replacement_payload.get("attempted_count", 0) or 0),
         "changed": bool(replacement_payload.get("changed", False)),
@@ -8855,7 +9645,9 @@ def _emit_ast_replacement_stats_8616(codegen: Any, replacement_payload: Any) -> 
     )
 
 
+@cython.ccall
 def _emit_switch_graph_debug_8616(codegen: object) -> None:
+    debug_payload: object
     debug_payload = getattr(codegen, "_inertia_typed_edge_switch_replacement_safety_debug_8616", None)
     if isinstance(debug_payload, Mapping):
         print(

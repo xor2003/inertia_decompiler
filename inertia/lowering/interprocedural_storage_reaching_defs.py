@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Resolve call arguments to exact typed SSA reaching definitions.
 
 Layer: Types/Lowering.
@@ -12,6 +13,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from inertia.frontend.x86_16.frontend_direct_callsite_index import DecodedDirectCallsiteIndex8616
 from inertia.ir.core import IRValue
@@ -52,6 +55,8 @@ from .interprocedural_storage_source_defs import (
 from .interprocedural_storage_trial_types import (
     logical_source_definitions_failure_8616,
 )
+import operator
+import builtins
 
 __all__ = [
     "CallArgumentDefinitionFailure8616",
@@ -63,11 +68,12 @@ __all__ = [
 ]
 
 
+@cython.ccall
 def _refusal_8616(
     failure: CallArgumentDefinitionFailure8616,
     *,
-    normalized: bool,
-    conflict: bool = False,
+    normalized: cython.bint,
+    conflict: cython.bint = False,
 ) -> CallArgumentDefinitionResolution8616:
     """Build one deterministic refusal with closed evidence counters."""
     verdict = (
@@ -94,20 +100,21 @@ def _sites_8616(
     """Return all SSA instructions in deterministic block/index order."""
     return tuple(
         SSAInstructionSite8616(block, instr_index, instr)
-        for block in sorted(function_ssa.blocks, key=lambda item: item.addr)
-        for instr_index, instr in enumerate(block.instrs)
+        for block in builtins.iter(sorted(function_ssa.blocks, key=lambda item: item.addr))
+        for instr_index, instr in builtins.iter(enumerate(block.instrs))
     )
 
 
+@cython.ccall
 def _symbolic_call_target_matches_8616(
     function_ssa: SSAFunctionArtifact,
     summary: CallsiteSummary8616,
-    expected_target: int,
+    expected_target: cython.longlong,
     *,
-    project: object | None,
+    project: object,
     callsite_index: DecodedDirectCallsiteIndex8616 | None,
     projection: CallSemanticProjection8616 | None,
-) -> bool:
+) -> cython.bint:
     """Prove a non-CONST CALL operand's target through the shared binder.
 
     The same typed proof the output gate consumes: producer integrity against
@@ -128,7 +135,7 @@ def _symbolic_call_target_matches_8616(
     if not binding.complete or binding.target_addr is None:
         return False
     if project is None:
-        return binding.target_addr == expected_target
+        return operator.eq(binding.target_addr, expected_target)
     return x86_16_call_targets_equivalent_8616(
         project,
         binding.target_addr,
@@ -137,11 +144,11 @@ def _symbolic_call_target_matches_8616(
 
 
 def _call_use_8616(
-    sites: tuple[SSAInstructionSite8616, ...],
+    sites: object,
     summary: CallsiteSummary8616,
     *,
     function_ssa: SSAFunctionArtifact,
-    project: object | None,
+    project: object,
     expected_target_addr: int | None,
     callsite_index: DecodedDirectCallsiteIndex8616 | None = None,
     projection: CallSemanticProjection8616 | None = None,
@@ -150,7 +157,7 @@ def _call_use_8616(
     CallArgumentDefinitionFailure8616 | None,
 ]:
     """Find one exact SSA CALL and verify its constant or proven target."""
-    calls = tuple(site for site in sites if site.instr.op == "CALL" and site.instr.addr == summary.callsite_addr)
+    calls = tuple(site for site in iter(sites) if site.instr.op == "CALL" and operator.eq(site.instr.addr, summary.callsite_addr))
     if not calls:
         return None, CallArgumentDefinitionFailure8616.CALLSITE_NOT_FOUND
     if len(calls) != 1:
@@ -174,7 +181,7 @@ def _call_use_8616(
             projection=projection,
         )
     elif project is None:
-        target_matches = target.const == expected_target
+        target_matches = operator.eq(target.const, expected_target)
     else:
         target_matches = x86_16_call_targets_equivalent_8616(
             project,
@@ -202,19 +209,23 @@ def _call_use_8616(
     )
 
 
+@cython.ccall
 def physical_call_argument_8616(
     summary: CallsiteSummary8616,
-    logical_index: int,
+    logical_index: cython.longlong,
 ) -> tuple[
     PhysicalCallArgument8616 | None,
     CallArgumentDefinitionFailure8616 | None,
 ]:
     """Map one source-order argument to all of its exact physical pushes."""
+    groups: object
+    projected_widths: object
+    source_order_pieces: object
     physical_count = summary.arg_count
     if not isinstance(physical_count, int) or physical_count <= 0:
         return None, CallArgumentDefinitionFailure8616.INVALID_ARGUMENT_INDEX
-    physical_widths: tuple[int, ...] = summary.arg_widths
-    logical_widths: tuple[int, ...] = summary.logical_arg_widths
+    physical_widths: object = summary.arg_widths
+    logical_widths: object = summary.logical_arg_widths
     if not logical_widths:
         projected_widths = logical_argument_widths_from_callsite_8616(
             summary,
@@ -240,26 +251,30 @@ def physical_call_argument_8616(
 
 def _incomplete_widths_8616(
     summary: CallsiteSummary8616,
-    physical_widths: tuple[int, ...],
-    logical_widths: tuple[int, ...],
-    physical_count: int,
-) -> bool:
+    physical_widths: object,
+    logical_widths: object,
+    physical_count: cython.longlong,
+) -> cython.bint:
     """Return whether the pushed widths/addr census is incomplete or unequal."""
     return bool(
-        len(physical_widths) != physical_count
-        or len(summary.push_arg_instruction_addrs) != physical_count
-        or len(summary.push_arg_sources) != physical_count
-        or any(width <= 0 for width in physical_widths)
-        or any(width <= 0 for width in logical_widths)
-        or sum(physical_widths) != sum(logical_widths)
+        operator.ne(len(physical_widths), physical_count)
+        or operator.ne(len(summary.push_arg_instruction_addrs), physical_count)
+        or operator.ne(len(summary.push_arg_sources), physical_count)
+        or any(width <= 0 for width in iter(physical_widths))
+        or any(width <= 0 for width in iter(logical_widths))
+        or operator.ne(sum(physical_widths), sum(logical_widths))
     )
 
 
+@cython.ccall
 def _source_order_pieces_8616(
     summary: CallsiteSummary8616,
-    physical_widths: tuple[int, ...],
-) -> list[PhysicalCallArgumentPiece8616] | None:
+    physical_widths: object,
+) -> object:
     """Build source-order pieces or refuse incomplete push-site evidence."""
+    push_addr: object
+    source: object
+    width: object
     source_order_pieces: list[PhysicalCallArgumentPiece8616] = []
     for width, source, push_addr in reversed(
         tuple(
@@ -283,11 +298,13 @@ def _source_order_pieces_8616(
     return source_order_pieces
 
 
+@cython.ccall
 def _grouped_arguments_8616(
-    logical_widths: tuple[int, ...],
-    source_order_pieces: list[PhysicalCallArgumentPiece8616],
-) -> list[PhysicalCallArgument8616] | None:
+    logical_widths: object,
+    source_order_pieces: object,
+) -> object:
     """Group source-order pieces into logical-width arguments."""
+    logical_width: object
     groups: list[PhysicalCallArgument8616] = []
     piece_index = 0
     for logical_width in logical_widths:
@@ -301,7 +318,7 @@ def _grouped_arguments_8616(
         if grouped_width != logical_width:
             return None
         groups.append(PhysicalCallArgument8616(width=logical_width, pieces=tuple(pieces)))
-    if piece_index != len(source_order_pieces):
+    if operator.ne(piece_index, len(source_order_pieces)):
         return None
     return groups
 
@@ -309,7 +326,7 @@ def _grouped_arguments_8616(
 def resolve_call_argument_reaching_definition_8616(
     function_ssa: SSAFunctionArtifact,
     summary: CallsiteSummary8616,
-    logical_index: int,
+    logical_index: cython.longlong,
     *,
     project: object | None = None,
     expected_target_addr: int | None = None,
@@ -317,6 +334,15 @@ def resolve_call_argument_reaching_definition_8616(
     projection: CallSemanticProjection8616 | None = None,
 ) -> CallArgumentDefinitionResolution8616:
     """Resolve one source-order call argument without inventing missing proof."""
+    call_failure: object
+    definitions: object
+    fact: object
+    logical_failure: object
+    physical_failure: object
+    piece_affine: object
+    source_failure: object
+    use: object
+    piece: object
     sites = _sites_8616(function_ssa)
     use, call_failure = _call_use_8616(
         sites,
@@ -414,7 +440,7 @@ def resolve_call_argument_reaching_definition_8616(
         if single_piece and piece_affine is not None:
             affine_expression = piece_affine
     definitions = tuple(resolved_definitions)
-    if sum(reaching_definition_width_8616(definition) for definition in definitions) != fact.width:
+    if operator.ne(sum(reaching_definition_width_8616(definition) for definition in iter(definitions)), fact.width):
         return _refusal_8616(
             CallArgumentDefinitionFailure8616.SOURCE_WIDTH_CONFLICT,
             normalized=True,

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify typed condition ownership of structured loop exits.
 
 Layer: Structuring.
@@ -12,6 +13,8 @@ work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
@@ -34,6 +37,8 @@ from inertia.lowering.c_ast_utils import (
     _structured_codegen_node_8616,
     _structured_slot_names_8616,
 )
+import dataclasses
+import operator
 
 
 class CompositeLoopExitOwnershipStatus8616(Enum):
@@ -44,27 +49,30 @@ class CompositeLoopExitOwnershipStatus8616(Enum):
     AMBIGUOUS = "ambiguous"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CompositeLoopExitOwnership8616:
     """Exact composite loop-exit matches for one instruction/block identity."""
 
-    key: tuple[int, int]
+    key: object
     status: CompositeLoopExitOwnershipStatus8616
-    matching_exit_count: int
+    matching_exit_count: cython.longlong
     owned_pretest_guard: CIfBreak | CIfElse | None
 
 
 class _TaggedExpression8616(Protocol):
     """Dynamic angr expression tag surface at the Structuring boundary."""
 
-    tags: dict[str, object]
+    tags: object
 
 
 def _iter_current_loop_scope_nodes_8616(body: object) -> Iterator[object]:
     """Iterate one loop body without descending into nested loop bodies."""
+    current: object
+    value: object
+    attr: object
     loop_types = (CForLoop, CWhileLoop, CDoWhileLoop)
     pending = [body]
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     while pending:
         current = pending.pop()
         if not _structured_codegen_node_8616(current):
@@ -76,7 +84,7 @@ def _iter_current_loop_scope_nodes_8616(body: object) -> Iterator[object]:
         yield current
         if current is not body and isinstance(current, loop_types):
             continue
-        seen_values: set[int] = set()
+        seen_values: set[cython.longlong] = set()
         for attr in _structured_slot_names_8616(current):
             try:
                 # Dynamic third-party angr C-AST boundary slots are runtime-named.
@@ -89,17 +97,19 @@ def _iter_current_loop_scope_nodes_8616(body: object) -> Iterator[object]:
                 pending.extend(_iter_c_node_children_8616(value, seen_values))
 
 
+@cython.ccall
 def _reaches_loop_header_8616(
-    successors: Mapping[int, tuple[int, ...]],
-    start: int,
-    header: int,
-) -> bool:
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
+    start: cython.longlong,
+    header: cython.longlong,
+) -> cython.bint:
     """Return whether an exact shared-body target can re-enter the loop."""
+    address: object
     pending = [start]
-    visited: set[int] = set()
+    visited: set[cython.longlong] = set()
     while pending:
         address = pending.pop()
-        if address == header:
+        if operator.eq(address, header):
             return True
         if address in visited:
             continue
@@ -108,10 +118,11 @@ def _reaches_loop_header_8616(
     return False
 
 
+@cython.ccall
 def _condition_chain_exit_8616(
     node: object,
-    key: tuple[int, int],
-    successors: Mapping[int, tuple[int, ...]],
+    key: object,
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
 ) -> CExpression | None:
     """Return one exact CFG-proven condition-chain exit expression."""
     if isinstance(node, CIfBreak):
@@ -133,26 +144,32 @@ def _condition_chain_exit_8616(
     return condition
 
 
+@cython.ccall
 def _shared_body_chain_reusable_8616(
-    tags: dict[str, object],
-    key: tuple[int, int],
-    successors: Mapping[int, tuple[int, ...]],
-) -> bool:
+    tags: object,
+    key: object,
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
+) -> cython.bint:
     """Return whether tags prove the exact materialized chain exit target."""
+    target: object
     target = tags.get("inertia_structuring_shared_body_target_8616")
     return (
         tags.get("inertia_structuring_shared_body_condition_chain_materialized_8616") is True
-        and tags.get("ins_addr") == key[0]
-        and tags.get("vex_block_addr") == key[1]
+        and operator.eq(tags.get("ins_addr"), key[0])
+        and operator.eq(tags.get("vex_block_addr"), key[1])
         and isinstance(target, int)
         and target in successors
         and not _reaches_loop_header_8616(successors, target, key[1])
     )
 
 
-def _condition_tag_pairs_8616(condition_owner: object) -> frozenset[tuple[int, int]]:
+@cython.ccall
+def _condition_tag_pairs_8616(condition_owner: object) -> frozenset[tuple[cython.longlong, cython.longlong]]:
     """Return exact JCC/block identities retained by one condition owner."""
-    pairs: set[tuple[int, int]] = set()
+    block_addr: object
+    ins_addr: object
+    node: object
+    pairs: set[tuple[cython.longlong, cython.longlong]] = set()
     for node in _iter_current_loop_scope_nodes_8616(condition_owner):
         boundary = cast(_TaggedExpression8616, node)
         try:
@@ -168,10 +185,11 @@ def _condition_tag_pairs_8616(condition_owner: object) -> frozenset[tuple[int, i
 
 def _typed_pretest_exit_8616(
     node: object,
-    key: tuple[int, int],
-    successors: Mapping[int, tuple[int, ...]],
+    key: object,
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
 ) -> CExpression | None:
     """Return one exact pretest break whose JCC has one exit edge."""
+    targets: object
     if isinstance(node, CIfBreak):
         condition = node.condition
     elif isinstance(node, CIfElse) and node.else_node is None:
@@ -188,26 +206,30 @@ def _typed_pretest_exit_8616(
         return None
     if not isinstance(condition, CExpression):
         return None
-    if _condition_tag_pairs_8616(node) != {key}:
+    if operator.ne(_condition_tag_pairs_8616(node), {key}):
         return None
     targets = successors.get(key[1], ())
     if len(targets) != 2:
         return None
     reentry_count = sum(
-        _reaches_loop_header_8616(successors, target, key[1]) for target in targets
+        _reaches_loop_header_8616(successors, target, key[1]) for target in iter(targets)
     )
     return condition if reentry_count == 1 else None
 
 
+@cython.ccall
 def classify_composite_loop_exit_ownership_8616(
     body: object,
-    key: tuple[int, int],
-    successors: Mapping[int, tuple[int, ...]],
+    key: object,
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]],
     *,
     leading_break_guard: CIfBreak | CIfElse | None = None,
 ) -> CompositeLoopExitOwnership8616:
     """Classify exact CFG-owned loop exits that consume ``key``."""
-    matched_expression_ids: set[int] = set()
+    expression: object
+    pretest_expression: object
+    node: object
+    matched_expression_ids: set[cython.longlong] = set()
     for node in _iter_current_loop_scope_nodes_8616(body):
         expression = _condition_chain_exit_8616(node, key, successors)
         if expression is not None:

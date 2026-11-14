@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Structuring-owned loop-exit return guard repair.
 
 Layer: Structuring.
@@ -11,6 +12,8 @@ rendered C text, source declarations, alias recovery, or validation policy.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -32,12 +35,13 @@ from angr.analyses.decompiler.structured_codegen.c import (
 
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 from inertia.semantics.callee_name_normalization import normalize_callee_name_8616
+import dataclasses
 
 _RUNTIME_SEGMENT_HELPERS_8616 = frozenset(
     {"SEG_U8", "SEG_U16", "SEG_U32", "MK_FP", "SEG_PTR", "MEM_U8", "MEM_U16", "MEM_U32"}
 )
 
-type LoopExitGuardStats8616 = dict[str, int]
+LoopExitGuardStats8616 = typing.TypeAliasType("LoopExitGuardStats8616", dict[str, int])
 
 
 class _LoopExitGuardCodegenLike8616(Protocol):
@@ -50,23 +54,25 @@ class _LoopExitGuardCodegenLike8616(Protocol):
 class _CFunctionStatementsLike8616(Protocol):
     """Structural view of a dynamic angr/codegen C function statement root."""
 
-    statements: list[object]
+    statements: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LoopExitReturnGuardCallbacks8616:
     """Dynamic adapters for classifying calls inside loop-exit return guards."""
 
-    is_runtime_segment_helper_call: Callable[[CFunctionCall], bool]
+    is_runtime_segment_helper_call: Callable[[CFunctionCall], cython.bint]
     call_node_name: Callable[[CFunctionCall], str | None]
 
 
-def _dynamic_attr_8616(obj: object, name: str, default: object = None) -> object:
+@cython.ccall
+def _dynamic_attr_8616(obj: object, name: object, default: object = None) -> object:
     """Dynamic boundary: read optional angr/codegen C AST attributes."""
     return getattr(obj, name, default)
 
 
-def _dynamic_sequence_8616(obj: object) -> tuple[object, ...]:
+@cython.ccall
+def _dynamic_sequence_8616(obj: object) -> object:
     """Return a tuple from a dynamic angr/codegen boundary sequence-like object."""
     if isinstance(obj, tuple):
         return obj
@@ -75,13 +81,16 @@ def _dynamic_sequence_8616(obj: object) -> tuple[object, ...]:
     return ()
 
 
-def _dynamic_int_8616(obj: object, default: int = -1) -> int:
+@cython.ccall
+def _dynamic_int_8616(obj: object, default: cython.longlong = -1) -> cython.longlong:
     """Return an int from a dynamic angr/codegen boundary value."""
     return obj if isinstance(obj, int) else default
 
 
-def call_node_name_8616(node: CFunctionCall) -> str | None:
+@cython.ccall
+def call_node_name_8616(node: CFunctionCall) -> object:
     """Return a normalized C AST call target name for loop-guard classification."""
+    raw: object
     callee_func = _dynamic_attr_8616(node, "callee_func", None)
     for raw in (
         _dynamic_attr_8616(callee_func, "name", None),
@@ -93,7 +102,8 @@ def call_node_name_8616(node: CFunctionCall) -> str | None:
     return None
 
 
-def is_runtime_segment_helper_call_8616(node: CFunctionCall) -> bool:
+@cython.ccall
+def is_runtime_segment_helper_call_8616(node: CFunctionCall) -> cython.bint:
     """Return whether a C AST call is a generated segmented-memory helper."""
     tags = _dynamic_attr_8616(node, "tags", None)
     marker_name = tags.get("inertia_x86_16_runtime_segment_helper") if isinstance(tags, dict) else None
@@ -103,6 +113,7 @@ def is_runtime_segment_helper_call_8616(node: CFunctionCall) -> bool:
     return isinstance(call_name, str) and call_name.upper() in _RUNTIME_SEGMENT_HELPERS_8616
 
 
+@cython.ccall
 def default_loop_exit_return_guard_callbacks_8616() -> LoopExitReturnGuardCallbacks8616:
     """Build default dynamic callbacks for loop-exit return guard repair."""
     return LoopExitReturnGuardCallbacks8616(
@@ -111,8 +122,10 @@ def default_loop_exit_return_guard_callbacks_8616() -> LoopExitReturnGuardCallba
     )
 
 
-def _emptyish_loop_guard_else_node_8616(node: object) -> bool:
+@cython.ccall
+def _emptyish_loop_guard_else_node_8616(node: object) -> cython.bint:
     """Return whether a dynamic C AST else-node has no control-flow semantics."""
+    child: object
     if not isinstance(node, CStatements):
         return False
     statements = list(_dynamic_sequence_8616(_dynamic_attr_8616(node, "statements", ())))
@@ -122,13 +135,14 @@ def _emptyish_loop_guard_else_node_8616(node: object) -> bool:
     return True
 
 
-def _log_guard_debug_8616(enabled: object, message: str, *args: object) -> None:
+def _log_guard_debug_8616(enabled: object, message: object, *args: object) -> None:
     """Emit one loop-guard debug line when the env flag is set."""
     if enabled:
         logging.getLogger(__name__).warning("[loop-guard-debug] " + message, *args)
 
 
-def _guard_body_statements_8616(body: object, debug: object) -> list[object] | None:
+@cython.ccall
+def _guard_body_statements_8616(body: object, debug: object) -> object:
     """Return the single return body of one guard arm, or refuse."""
     if isinstance(body, CStatements):
         return list(_dynamic_sequence_8616(_dynamic_attr_8616(body, "statements", ())))
@@ -138,7 +152,8 @@ def _guard_body_statements_8616(body: object, debug: object) -> list[object] | N
     return None
 
 
-def _else_node_rejected_8616(else_node: object, debug: object) -> bool:
+@cython.ccall
+def _else_node_rejected_8616(else_node: object, debug: object) -> cython.bint:
     """Return whether a guard else-node carries real control flow."""
     if (
         else_node is None
@@ -151,13 +166,16 @@ def _else_node_rejected_8616(else_node: object, debug: object) -> bool:
         debug,
         "extract-if-guard reject-non-empty-else len=%d kinds=%r",
         len(else_statements),
-        [type(child).__name__ for child in else_statements],
+        [type(child).__name__ for child in iter(else_statements)],
     )
     return True
 
 
+@cython.ccall
 def _extract_if_return_guard_8616(stmt: object) -> object | None:
     """Extract the condition from ``if (cond) return;`` loop-exit guard shapes."""
+    body_statements: object
+    debug: object
     debug = os.environ.get("INERTIA_DEBUG_LOOP_EXIT_GUARD")
     _log_guard_debug_8616(debug, "extract-if-guard node=%s", type(stmt).__name__)
     if not isinstance(stmt, CIfElse):
@@ -194,10 +212,13 @@ def _extract_if_return_guard_8616(stmt: object) -> object | None:
 def _loop_call_nodes_8616(
     statements: Sequence[object],
     callbacks: LoopExitReturnGuardCallbacks8616,
-    debug_all: bool,
+    debug_all: cython.bint,
     logger: logging.Logger,
-) -> Iterator[tuple[int, CFunctionCall]]:
+) -> Iterator[tuple[cython.longlong, CFunctionCall]]:
     """Yield non-runtime-helper calls with their owning statement index."""
+    node: object
+    stmt: object
+    stmt_idx: object
     for stmt_idx, stmt in enumerate(statements):
         for node in _iter_c_nodes_deep_8616(stmt):
             if not isinstance(node, CFunctionCall):
@@ -213,12 +234,15 @@ def _loop_call_nodes_8616(
             yield stmt_idx, node
 
 
+@cython.ccall
 def _has_callable_after_guard_8616(
     statements: Sequence[object],
-    start_idx: int,
+    start_idx: cython.longlong,
     callbacks: LoopExitReturnGuardCallbacks8616,
-) -> bool:
+) -> cython.bint:
     """Return whether a loop body has a non-runtime helper call after a guard."""
+    node: object
+    stmt_idx: object
     debug_all = os.environ.get("INERTIA_DEBUG_LOOP_EXIT_GUARD_DEBUG_ALL", "").strip().lower() in {
         "1",
         "true",
@@ -238,7 +262,7 @@ def _has_callable_after_guard_8616(
             )
         return True
 
-    observed_user_calls: list[tuple[int, CFunctionCall]] = []
+    observed_user_calls: list[tuple[cython.longlong, CFunctionCall]] = []
     for stmt_idx, node in _loop_call_nodes_8616(statements, callbacks, debug_all, logger):
         observed_user_calls.append((stmt_idx, node))
         if debug_all:
@@ -255,8 +279,10 @@ def _has_callable_after_guard_8616(
     return False
 
 
-def _post_loop_only_returns_8616(statements: Sequence[object], loop_idx: int) -> bool:
+@cython.ccall
+def _post_loop_only_returns_8616(statements: Sequence[object], loop_idx: cython.longlong) -> cython.bint:
     """Return whether control after a loop is only empty return/break flow."""
+    stmt: object
     for stmt in statements[loop_idx + 1 :]:
         if isinstance(stmt, CReturn) and _dynamic_attr_8616(stmt, "retval", None) is None:
             continue
@@ -266,7 +292,8 @@ def _post_loop_only_returns_8616(statements: Sequence[object], loop_idx: int) ->
     return True
 
 
-def _debug_all_guard_enabled_8616() -> bool:
+@cython.ccall
+def _debug_all_guard_enabled_8616() -> cython.bint:
     """Return whether the exhaustive loop-guard debug flag is set."""
     return os.environ.get("INERTIA_DEBUG_LOOP_EXIT_GUARD_DEBUG_ALL", "").strip().lower() in {
         "1",
@@ -276,24 +303,28 @@ def _debug_all_guard_enabled_8616() -> bool:
     }
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _LoopExitGuardRepair8616:
     """Shared state for the loop-exit return-guard repair pass."""
 
     codegen: object
     callbacks: LoopExitReturnGuardCallbacks8616
     cfunc: object
-    root_statements: list[object]
+    root_statements: object
     stats: LoopExitGuardStats8616
     debug: object
-    debug_all: bool
+    debug_all: cython.bint
 
-    def log_debug(self, message: str, *args: object) -> None:
+    def log_debug(self, message: object, *args: object) -> None:
         """Emit one loop-guard debug line when the env flag is set."""
         _log_guard_debug_8616(self.debug, message, *args)
 
-    def _dump_loop_body_8616(self, body_statements: list[object]) -> None:
+    @cython.ccall
+    def _dump_loop_body_8616(self, body_statements: object) -> None:
         """Debug-dump per-statement call kinds inside one loop body."""
+        node: object
+        stmt: object
+        stmt_idx: object
         loop_calls: list[str] = []
         for stmt_idx, stmt in enumerate(body_statements):
             stmt_calls = 0
@@ -311,12 +342,14 @@ class _LoopExitGuardRepair8616:
         if loop_calls:
             self.log_debug("loop-body-call-kinds=%r", loop_calls)
 
+    @cython.ccall
     def _log_loop_addr_8616(
         self,
         loop_node: object,
-        body_statements: list[object],
+        body_statements: object,
     ) -> None:
         """Debug-log one loop boundary address and body size."""
+        if_code_addr: object
         if_code_addr = _dynamic_attr_8616(loop_node, "addr", None)
         if if_code_addr is None:
             condition = _dynamic_attr_8616(loop_node, "condition", None)
@@ -328,15 +361,17 @@ class _LoopExitGuardRepair8616:
             len(body_statements),
         )
 
+    @cython.ccall
     def _repair_guard_8616(
         self,
         candidate: object,
-        guard_idx: int,
-        body_statements: list[object],
+        guard_idx: cython.longlong,
+        body_statements: object,
         loop_body: CStatements,
-        loop_idx: int,
-    ) -> bool:
+        loop_idx: cython.longlong,
+    ) -> cython.bint:
         """Repair one proven loop-exit return guard into a break."""
+        guard_cond: object
         guard_cond = _extract_if_return_guard_8616(candidate)
         if guard_cond is None:
             self.log_debug(
@@ -382,8 +417,11 @@ class _LoopExitGuardRepair8616:
         )
         return True
 
-    def repair_loop(self, loop_node: object, loop_idx: int) -> bool:
+    @cython.ccall
+    def repair_loop(self, loop_node: object, loop_idx: cython.longlong) -> cython.bint:
         """Repair the first proven exit-return guard inside one loop body."""
+        candidate: object
+        guard_idx: object
         loop_body = _dynamic_attr_8616(loop_node, "body", None)
         if not isinstance(loop_body, CStatements):
             return False
@@ -401,11 +439,15 @@ class _LoopExitGuardRepair8616:
         return False
 
 
+@cython.ccall
 def repair_loop_exit_return_guards_8616(
     codegen: object,
     callbacks: LoopExitReturnGuardCallbacks8616,
-) -> bool:
+) -> cython.bint:
     """Convert proven loop-local ``if (exit) return;`` guards into breaks."""
+    cfunc: object
+    idx: object
+    stmt: object
     typed_codegen = cast(_LoopExitGuardCodegenLike8616, codegen)
     cfunc = _dynamic_attr_8616(typed_codegen, "cfunc", None)
     if cfunc is None:

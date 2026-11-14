@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Structuring.
 
 Responsibility: convert dynamic angr/codegen clinic graphs into typed region graphs.
@@ -10,15 +11,17 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import cython
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import cast
 
 from inertia.structuring.structuring_region import Region, RegionGraph, RegionType
+import dataclasses
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class RegionGraphBuildResult:
     """Typed result of building a region graph from codegen/clinic state."""
 
@@ -26,8 +29,14 @@ class RegionGraphBuildResult:
     entry: Region | None
 
 
+@cython.ccall
 def resolve_clinic_from_codegen(codegen: object) -> object | None:
     """Resolve the clinic object across the dynamic third-party angr/codegen boundary."""
+    cfunc: object
+    clinic: object
+    func: object
+    func_addr: object
+    project: object
     clinic = getattr(codegen, "_clinic", None)
     if clinic is not None:
         return cast(object, clinic)
@@ -44,8 +53,12 @@ def resolve_clinic_from_codegen(codegen: object) -> object | None:
     return cast(object | None, getattr(func, "_clinic", None))
 
 
+@cython.ccall
 def _statement_addr_8616(stmt: object) -> int | None:
     """Read statement addresses across the dynamic third-party angr/codegen boundary."""
+    tags: object
+    value: object
+    attr: object
     tags = getattr(stmt, "tags", None)
     if isinstance(tags, dict) and isinstance(tags.get("ins_addr"), int):
         return int(tags["ins_addr"])
@@ -56,8 +69,15 @@ def _statement_addr_8616(stmt: object) -> int | None:
     return None
 
 
-def _statement_provenance_key_8616(stmt: object) -> tuple[str, int, int] | None:
+@cython.ccall
+def _statement_provenance_key_8616(stmt: object) -> object:
     """Read statement provenance across the dynamic third-party angr/codegen boundary."""
+    block_idx: object
+    ins_addr: object
+    stmt_idx: object
+    tags: object
+    vex_block_addr: object
+    vex_stmt_idx: object
     tags = getattr(stmt, "tags", None)
     if not isinstance(tags, dict):
         return None
@@ -75,30 +95,32 @@ def _statement_provenance_key_8616(stmt: object) -> tuple[str, int, int] | None:
     return None
 
 
-def _node_statement_addrs_8616(node: object) -> tuple[int, ...]:
+@cython.ccall
+def _node_statement_addrs_8616(node: object) -> tuple[cython.longlong, ...]:
     """Collect statement addresses across the dynamic third-party angr/codegen boundary."""
     statements = tuple(getattr(node, "statements", ()) or ())
     addrs = sorted(
         {
             addr
-            for stmt in statements
+            for stmt in iter(statements)
             if (addr := _statement_addr_8616(stmt)) is not None
         }
     )
     return tuple(addrs)
 
 
-def _node_statement_provenance_keys_8616(node: object) -> tuple[tuple[str, int, int], ...]:
+def _node_statement_provenance_keys_8616(node: object) -> tuple[tuple[str, cython.longlong, cython.longlong], ...]:
     """Collect provenance keys across the dynamic third-party angr/codegen boundary."""
     statements = tuple(getattr(node, "statements", ()) or ())
     keys = tuple(
         key
-        for stmt in statements
+        for stmt in iter(statements)
         if (key := _statement_provenance_key_8616(stmt)) is not None
     )
     return tuple(dict.fromkeys(keys))
 
 
+@cython.ccall
 def _attach_region_statement_span_metadata_8616(region: Region, node: object) -> None:
     statement_addrs = _node_statement_addrs_8616(node)
     if not statement_addrs:
@@ -112,10 +134,22 @@ def _attach_region_statement_span_metadata_8616(region: Region, node: object) ->
         region.metadata["region_statement_span_source"] = "clinic_node_statements"
 
 
+@cython.ccall
 def build_region_graph(codegen: object) -> RegionGraphBuildResult:
     """Build a deterministic RegionGraph across the dynamic third-party angr/codegen boundary."""
+    cfunc: object
+    clinic: object
+    dst_addr: object
+    edges_method: object
+    func_addr: object
+    node_addr: object
+    nodes_method: object
+    src_addr: object
+    dst: object
+    node: object
+    src: object
     graph = RegionGraph()
-    regions_by_addr: dict[int, Region] = {}
+    regions_by_addr: dict[cython.longlong, Region] = {}
     clinic = resolve_clinic_from_codegen(codegen)
 
     ail_graph = getattr(clinic, "graph", None) if clinic is not None else None

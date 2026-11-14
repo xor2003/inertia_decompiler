@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery/reporting.
 
 Responsibility: summarize typed IR readiness from already-collected IR recovery facts.
@@ -11,27 +12,30 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
 from .ir_recovery_summary import IRRecoverySource, summarize_x86_16_ir_recovery
+import dataclasses
 
 __all__ = ["IRReadinessSummary", "summarize_x86_16_ir_readiness"]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRReadinessSummary:
     """Readiness verdict derived from already-collected typed IR counters."""
 
-    level: str
-    block_count: int
-    provisional_address_count: int
-    defaulted_segment_count: int
-    proven_segment_count: int
-    unknown_segment_count: int
-    condition_count: int
-    phi_node_count: int
-    reasons: tuple[str, ...]
+    level: object
+    block_count: cython.longlong
+    provisional_address_count: cython.longlong
+    defaulted_segment_count: cython.longlong
+    proven_segment_count: cython.longlong
+    unknown_segment_count: cython.longlong
+    condition_count: cython.longlong
+    phi_node_count: cython.longlong
+    reasons: object
 
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-compatible IR readiness payload."""
@@ -48,13 +52,14 @@ class IRReadinessSummary:
         }
 
 
+@cython.ccall
 def _readiness_reasons_8616(
-    block_count: int,
-    provisional_address_count: int,
-    defaulted_segment_count: int,
-    unknown_segment_count: int,
-    condition_count: int,
-    phi_node_count: int,
+    block_count: cython.longlong,
+    provisional_address_count: cython.longlong,
+    defaulted_segment_count: cython.longlong,
+    unknown_segment_count: cython.longlong,
+    condition_count: cython.longlong,
+    phi_node_count: cython.longlong,
 ) -> tuple[str, ...]:
     """List every readiness defect proven by the recovery census."""
     reasons: list[str] = []
@@ -73,13 +78,14 @@ def _readiness_reasons_8616(
     return tuple(reasons)
 
 
+@cython.ccall
 def _readiness_level_8616(
-    block_count: int,
-    provisional_address_count: int,
-    defaulted_segment_count: int,
-    proven_segment_count: int,
-    condition_count: int,
-    phi_node_count: int,
+    block_count: cython.longlong,
+    provisional_address_count: cython.longlong,
+    defaulted_segment_count: cython.longlong,
+    proven_segment_count: cython.longlong,
+    condition_count: cython.longlong,
+    phi_node_count: cython.longlong,
 ) -> str:
     """Classify readiness from the strongest proven IR evidence downward."""
     if block_count <= 0:
@@ -96,6 +102,7 @@ def _readiness_level_8616(
     return "minimal"
 
 
+@cython.ccall
 def summarize_x86_16_ir_readiness(source: IRRecoverySource) -> IRReadinessSummary:
     """Summarize whether recovered IR is ready for later decompiler stages."""
     summary = summarize_x86_16_ir_recovery(source)

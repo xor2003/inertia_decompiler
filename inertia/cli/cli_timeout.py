@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: preserve legacy CLI helper surface while delegating semantic proof to X86_16 layers.
@@ -5,17 +6,20 @@ Forbidden: owning decompiler semantics, source-backed recovery, or postprocess s
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import math
 import sys
 
-_MEDIUM_FUNCTION_TIMEOUT_FLOOR: int = 150
-_LARGE_FUNCTION_TIMEOUT_FLOOR: int = 240
-_COLD_CLEAN_WORKER_TIMEOUT_FLOOR: int = 240
-PARALLEL_CLEAN_WORKER_TIMEOUT_CAP: int = 360
+_MEDIUM_FUNCTION_TIMEOUT_FLOOR: cython.longlong = 150
+_LARGE_FUNCTION_TIMEOUT_FLOOR: cython.longlong = 240
+_COLD_CLEAN_WORKER_TIMEOUT_FLOOR: cython.longlong = 240
+PARALLEL_CLEAN_WORKER_TIMEOUT_CAP: cython.longlong = 360
 
 
-def _default_recovery_timeout(configured_timeout: int, *, explicit_timeout: bool) -> int:
+@cython.ccall
+def _default_recovery_timeout(configured_timeout: cython.longlong, *, explicit_timeout: cython.bint) -> cython.longlong:
     """Return the recovery budget selected by CLI timeout policy."""
     if configured_timeout <= 0:
         return 5
@@ -24,17 +28,23 @@ def _default_recovery_timeout(configured_timeout: int, *, explicit_timeout: bool
     return configured_timeout
 
 
+@cython.cclass
 class _AdaptivePerByteTimeoutModel:
     """Estimate serial function budgets from size and successful run evidence."""
+    _samples = cython.declare(object, visibility = "public")
+    configured_timeout = cython.declare(object, visibility = "public")
+    explicit_timeout = cython.declare(object, visibility = "public")
+    margin = cython.declare(object, visibility = "public")
 
-    def __init__(self, configured_timeout: int, *, explicit_timeout: bool, margin: float = 1.5) -> None:
+    def __init__(self, configured_timeout: cython.longlong, *, explicit_timeout: cython.bint, margin: cython.double = 1.5) -> None:
         """Initialize a bounded timing model for one serial function sweep."""
         self.configured_timeout = max(1, configured_timeout)
         self.explicit_timeout = explicit_timeout
         self.margin = max(1.0, float(margin))
-        self._samples: list[tuple[int, float]] = []
+        self._samples: list[tuple[cython.longlong, cython.double]] = []
 
-    def observe_success(self, byte_count: int, elapsed: float) -> None:
+    @cython.ccall
+    def observe_success(self, byte_count: cython.longlong, elapsed: cython.double) -> None:
         """Record one successful recovery timing sample."""
         if byte_count <= 0 or elapsed <= 0:
             return
@@ -42,14 +52,16 @@ class _AdaptivePerByteTimeoutModel:
         if len(self._samples) > 64:
             self._samples = self._samples[-64:]
 
-    def _seed_rate(self) -> float:
+    @cython.ccall
+    def _seed_rate(self) -> cython.double:
         """Return a conservative observed seconds-per-byte rate."""
         if not self._samples:
             return 0.05
-        rates = [elapsed / max(1, byte_count) for byte_count, elapsed in self._samples]
+        rates = [elapsed / max(1, byte_count) for byte_count, elapsed in iter(self._samples)]
         return max(0.005, max(rates))
 
-    def timeout_for_byte_count(self, byte_count: int) -> int:
+    @cython.ccall
+    def timeout_for_byte_count(self, byte_count: cython.longlong) -> cython.longlong:
         """Return the timeout budget for a function with the given byte count."""
         base = max(1, int(self.configured_timeout))
         if self.explicit_timeout:
@@ -63,10 +75,11 @@ class _AdaptivePerByteTimeoutModel:
         return max(base, static_floor, observed_budget)
 
 
+@cython.ccall
 def build_parallel_clean_worker_timeout_model(
-    configured_timeout: int,
+    configured_timeout: cython.longlong,
     *,
-    explicit_timeout: bool,
+    explicit_timeout: cython.bint,
 ) -> _AdaptivePerByteTimeoutModel:
     """Build the bounded timeout model for fresh parallel worker processes.
 
@@ -87,13 +100,14 @@ def build_parallel_clean_worker_timeout_model(
     )
 
 
+@cython.ccall
 def retry_timeout_after_failed_attempt(
-    configured_timeout: int,
+    configured_timeout: cython.longlong,
     *,
-    elapsed_seconds: float | None,
-    timed_out: bool,
-    explicit_timeout: bool,
-) -> int:
+    elapsed_seconds: object,
+    timed_out: cython.bint,
+    explicit_timeout: cython.bint,
+) -> cython.longlong:
     """Return a retry budget derived from the failed attempt's measured cost."""
     configured = max(1, configured_timeout)
     if explicit_timeout:
@@ -104,8 +118,10 @@ def retry_timeout_after_failed_attempt(
     return min(retry_timeout, PARALLEL_CLEAN_WORKER_TIMEOUT_CAP)
 
 
-def _stdout_is_interactive() -> bool:
+@cython.ccall
+def _stdout_is_interactive() -> cython.bint:
     """Return whether stdout is an interactive terminal."""
+    stream: object
     stream = sys.stdout
     try:
         return bool(stream is not None and hasattr(stream, "isatty") and stream.isatty())

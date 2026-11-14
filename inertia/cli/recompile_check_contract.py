@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed contracts for emitted-C recompilation checks.
 
 Layer: CLI/fallback/reporting.
@@ -6,9 +7,12 @@ Forbidden: invoking compilers, changing generated C, or relaxing acceptance poli
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
+import dataclasses
 
 
 class RecompileCheckOutcome(StrEnum):
@@ -19,42 +23,42 @@ class RecompileCheckOutcome(StrEnum):
     TOOLCHAIN_UNAVAILABLE = "toolchain_unavailable"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RecompileCheckResult:
     """Immutable evidence produced by one recompilation target."""
 
     outcome: RecompileCheckOutcome
-    target: str
+    target: object
     exit_code: int | None
-    compiler: str | None
-    stdout: str
-    stderr: str
-    command: tuple[str, ...]
-    checked_payload: str
-    checked_payload_hash: str
-    source_path: str | None = None
-    compiler_profile: str | None = None
+    compiler: object
+    stdout: object
+    stderr: object
+    command: object
+    checked_payload: object
+    checked_payload_hash: object
+    source_path: object = None
+    compiler_profile: object = None
     launcher_signal: int | None = None
 
     @property
-    def passed(self) -> bool:
+    def passed(self) -> cython.bint:
         """Return whether the compiler accepted the emitted C."""
         return self.outcome is RecompileCheckOutcome.PASSED
 
     @property
-    def toolchain_unavailable(self) -> bool:
+    def toolchain_unavailable(self) -> cython.bint:
         """Return whether the toolchain is missing or cannot execute in this environment."""
         return self.outcome is RecompileCheckOutcome.TOOLCHAIN_UNAVAILABLE
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class RecompileCacheIdentity:
     """Current frozen selection identity and whether its evidence permits reuse."""
 
-    context: str | None
+    context: object
     outcome: RecompileCheckOutcome
 
     @property
-    def reusable(self) -> bool:
+    def reusable(self) -> cython.bint:
         """Permit cache hits only after current evidence validation."""
         return self.outcome is RecompileCheckOutcome.PASSED

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed ownership for projected stack operands used by conditions.
 
 Layer: Types/Lowering.
@@ -9,36 +10,41 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
+import dataclasses
 
 CONDITION_STACK_PROJECTION_TAG_8616: str = "inertia_x86_16_condition_stack_projection"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionStackProjectionFact8616:
     """Exact owner and view coordinates for one projected stack operand."""
 
-    base: str
-    owner_offset: int
-    owner_size: int
-    view_offset: int
-    view_size: int
+    base: object
+    owner_offset: cython.longlong
+    owner_size: cython.longlong
+    view_offset: cython.longlong
+    view_size: cython.longlong
 
 
+@cython.ccall
 def condition_stack_projection_tags_8616(
     tags: Mapping[str, object] | None,
     fact: ConditionStackProjectionFact8616,
-) -> dict[str, object]:
+) -> object:
     """Return copied AST tags carrying one immutable projection fact."""
     result = dict(tags or {})
     result[CONDITION_STACK_PROJECTION_TAG_8616] = fact
     return result
 
 
+@cython.ccall
 def condition_stack_projection_fact_8616(
     expression: structured_c.CExpression,
 ) -> ConditionStackProjectionFact8616 | None:

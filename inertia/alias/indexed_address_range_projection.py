@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Project bounded indexed-address IR ranges onto canonical Alias storage.
 
 Layer: Alias.
@@ -9,6 +10,7 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import cython
 
 from inertia.ir.indexed_address_range_contracts import (
     IndexedLoopRangeEvidence8616,
@@ -28,12 +30,14 @@ from .indexed_address_range_contracts import (
     IndexedAliasLoopRangeStats8616,
     IndexedLoopRangeAliasFailureKind8616,
 )
+import operator
 
 
+@cython.ccall
 def _refusal_8616(
     source: IndexedLoopRangeFact8616,
     failure: IndexedLoopRangeAliasFailureKind8616,
-    detail: str,
+    detail: object,
 ) -> IndexedAliasLoopRangeRefusal8616:
     """Return one typed Alias refusal for an accepted IR range."""
     return IndexedAliasLoopRangeRefusal8616(
@@ -50,16 +54,18 @@ def _matching_accesses_8616(
     """Return exact existing Alias accesses owning the IR indexed fact."""
     return tuple(
         access
-        for access in accesses.facts
-        if access.source.source == source.source
+        for access in iter(accesses.facts)
+        if operator.eq(access.source.source, source.source)
     )
 
 
+@cython.ccall
 def _project_fact_8616(
     source: IndexedLoopRangeFact8616,
     accesses: IndexedAliasAccessEvidence8616,
 ) -> IndexedAliasLoopRangeFact8616 | IndexedAliasLoopRangeRefusal8616:
     """Project one IR range while preserving the existing Alias objects."""
+    alias_identity: object
     matches = _matching_accesses_8616(source, accesses)
     if not matches:
         return _refusal_8616(
@@ -92,10 +98,10 @@ def _project_fact_8616(
     canonical = canonical_induction_source_identity_8616(source_range.addresses[0])
     if (
         alias_identity is None
-        or canonical != source.induction_source
+        or operator.ne(canonical, source.induction_source)
         or len(source_range.addresses) != 1
         or len(source_range.source_facts) != 1
-        or source_range.source_facts[0].identity != alias_identity
+        or operator.ne(source_range.source_facts[0].identity, alias_identity)
     ):
         return _refusal_8616(
             source,
@@ -117,14 +123,16 @@ def _project_fact_8616(
     return result
 
 
+@cython.ccall
 def project_indexed_loop_ranges_to_alias_8616(
     source: IndexedLoopRangeEvidence8616,
     accesses: IndexedAliasAccessEvidence8616,
 ) -> IndexedAliasLoopRangeEvidence8616:
     """Project every closed IR range outcome to one Alias fact or refusal."""
+    source_fact: object
     if not source.closed or not accesses.closed:
         raise ValueError("indexed range Alias projection requires closed inputs")
-    if source.function_addr != accesses.function_addr:
+    if operator.ne(source.function_addr, accesses.function_addr):
         raise ValueError("indexed range Alias projection function mismatch")
     facts: list[IndexedAliasLoopRangeFact8616] = []
     refusals = [
@@ -133,7 +141,7 @@ def project_indexed_loop_ranges_to_alias_8616(
             f"IR refused indexed loop range: {refusal.failure.value}",
             source_refusal=refusal,
         )
-        for refusal in source.refusals
+        for refusal in iter(source.refusals)
     ]
     for source_fact in source.facts:
         projected = _project_fact_8616(source_fact, accesses)

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Single-owner contract for the declared DOS version-service response.
 
 Layer: Frontend/runtime package surface — shared service contract.
@@ -14,6 +15,8 @@ fields into the documented response words.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 __all__ = [
     "INT21_VERSION_FUNCTION_8616",
@@ -25,25 +28,26 @@ __all__ = [
 ]
 
 # INT 21h is the DOS service vector this declared contract binds.
-INT21_VERSION_VECTOR_8616: int = 0x21
+INT21_VERSION_VECTOR_8616: cython.longlong = 0x21
 
 # AH=30h is Get DOS Version; AL=00h is the only admitted selector. Other
 # AL subfunctions are never modeled by either consumer.
-INT21_VERSION_FUNCTION_8616: int = 0x30
-INT21_VERSION_SELECTOR_8616: int = 0x00
+INT21_VERSION_FUNCTION_8616: cython.longlong = 0x30
+INT21_VERSION_SELECTOR_8616: cython.longlong = 0x00
 
 # DOS 2.0 introduced the documented return convention (minor in AH, OEM in
 # BH, 24-bit serial in BL:CX); a declared major below 2 would publish a
 # response whose meaning the contract does not define.
-INT21_VERSION_MINIMUM_MAJOR_8616: int = 2
+INT21_VERSION_MINIMUM_MAJOR_8616: cython.longlong = 2
 
 # BL:CX carries a 24-bit serial: BL holds bits 16..23, CX bits 0..15.
-INT21_VERSION_SERIAL_MASK_8616: int = 0xFFFFFF
+INT21_VERSION_SERIAL_MASK_8616: cython.longlong = 0xFFFFFF
 
 
+@cython.ccall
 def version_response_words_8616(
-    major: int, minor: int, oem: int, serial: int
-) -> tuple[int, int, int]:
+    major: cython.longlong, minor: cython.longlong, oem: cython.longlong, serial: cython.longlong
+) -> tuple[cython.longlong, cython.longlong, cython.longlong]:
     """Project the documented AH=30h response words from declared policy.
 
     ``ax`` is ``(minor << 8) | major``, ``bx`` is ``(oem << 8) |`` the

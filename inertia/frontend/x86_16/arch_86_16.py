@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/runtime.
 
 Responsibility: define the 16-bit x86 archinfo register and toolchain surface.
@@ -5,6 +6,7 @@ Forbidden: decompiler semantic recovery, alias/type ownership, or rewrite cleanu
 """
 
 from __future__ import annotations
+import cython
 
 import os
 from typing import Any, ClassVar, cast
@@ -12,6 +14,7 @@ from typing import Any, ClassVar, cast
 from archinfo import ArchError, Endness, RegisterOffset
 
 from .control_coordinates import ControlAddressDomain
+import operator
 
 try:
     import capstone as _capstone
@@ -42,6 +45,11 @@ class Arch86_16(Arch):  # type: ignore[misc, unused-ignore] # dynamic archinfo b
         control_address_domain: ControlAddressDomain = ControlAddressDomain.LOADER_LINEAR,
     ) -> None:
         """Bind the register layout and the execution adapter's PC domain."""
+        _subregister_size: object
+        alias_name: object
+        reg: object
+        subregister_name: object
+        subregister_offset: object
         import logging
 
         self.logger = logging.getLogger(__name__)
@@ -52,7 +60,7 @@ class Arch86_16(Arch):  # type: ignore[misc, unused-ignore] # dynamic archinfo b
         self_any = cast(Any, self)
         self_any.endness = "Iend_LE"
         self.reg_blacklist: list[str] = []
-        self.reg_blacklist_offsets: list[int] = []
+        self.reg_blacklist_offsets: list[cython.longlong] = []
         self.vex_archinfo = None
         self.vex_cc_regs = None
         self.vex_to_unicorn_map = None
@@ -67,7 +75,7 @@ class Arch86_16(Arch):  # type: ignore[misc, unused-ignore] # dynamic archinfo b
         for reg in self.register_list:
             self.logger.debug(f"Reg {reg.name}: size {reg.size}, vex_offset {reg.vex_offset}")
 
-        self.vex_offsets: dict[str, int] = {}
+        self.vex_offsets: dict[str, cython.longlong] = {}
         for reg in self.register_list:
             self.vex_offsets[reg.name.lower()] = reg.vex_offset
             for alias_name in reg.alias_names:
@@ -92,24 +100,24 @@ class Arch86_16(Arch):  # type: ignore[misc, unused-ignore] # dynamic archinfo b
         )
 
     name: str = "86_16"
-    bits: int = 16
-    stack_change: int = -2
+    bits: cython.longlong = 16
+    stack_change: cython.longlong = -2
     vex_arch: Any = cast(Any, pyvex.ARCH_X86)
     vex_support: Any = cast(Any, True)
-    vex_conditional_helpers: bool = False
+    vex_conditional_helpers: cython.bint = False
     sizeof: ClassVar[dict[str, int]] = {"short": 16, "int": 16, "long": 32, "long long": 32}
-    ld_linux_name: str | None = None
-    linux_name: str | None = None
+    ld_linux_name: object = None
+    linux_name: object = None
     lib_paths: list[str] = []  # noqa: RUF012
     # max_inst_bytes = 4
     # ip_offset = 0x80000000
     # sp_offset = 16
-    call_pushes_ret: bool = True
+    call_pushes_ret: cython.bint = True
     instruction_endness: Endness = Endness.LE
     # FIXME: something in angr assumes that sizeof(long) == sizeof(return address on stack)
     # initial_sp = 0x7fff
     call_sp_fix: ClassVar[int] = -2
-    instruction_alignment: int = 1
+    instruction_alignment: cython.longlong = 1
     # ioreg_offset = 0x20
     memory_endness: Endness = Endness.LE
     register_endness: Endness = Endness.LE
@@ -126,7 +134,7 @@ class Arch86_16(Arch):  # type: ignore[misc, unused-ignore] # dynamic archinfo b
     uc_arch: int | None = _unicorn.UC_ARCH_X86 if _unicorn else None  # Emulator
     uc_mode: int | None = (_unicorn.UC_MODE_16 + _unicorn.UC_MODE_LITTLE_ENDIAN) if _unicorn else None
     uc_const: Any = _unicorn.x86_const if _unicorn else None
-    uc_prefix: str | None = "UC_X86_" if _unicorn else None
+    uc_prefix: object = "UC_X86_" if _unicorn else None
     function_prologs: ClassVar[set[bytes]] = {rb"\x55\x8b\xec", rb"\xc8"}  # push bp; mov bp, sp
     function_epilogs: ClassVar[set[bytes]] = {
         rb"\xc9\xc3",
@@ -278,7 +286,7 @@ class Arch86_16(Arch):  # type: ignore[misc, unused-ignore] # dynamic archinfo b
     ]
 
     @property
-    def capstone_x86_syntax(self) -> str | None:
+    def capstone_x86_syntax(self) -> object:
         """Get the current syntax Capstone uses for x86.
 
         :return: Capstone's current x86 syntax
@@ -287,12 +295,12 @@ class Arch86_16(Arch):  # type: ignore[misc, unused-ignore] # dynamic archinfo b
         return self._cs_x86_syntax
 
     @capstone_x86_syntax.setter
-    def capstone_x86_syntax(self, new_syntax: str) -> None:
+    def capstone_x86_syntax(self, new_syntax: object) -> None:
         """Set the syntax that Capstone outputs for x86."""
         if new_syntax not in ("intel", "at&t"):
             raise ArchError('Unsupported Capstone x86 syntax. It must be either "intel" or "at&t".')
 
-        if new_syntax != self._cs_x86_syntax:
+        if operator.ne(new_syntax, self._cs_x86_syntax):
             self._cs = None
             self._cs_x86_syntax = new_syntax
 
@@ -303,7 +311,7 @@ class Arch86_16(Arch):  # type: ignore[misc, unused-ignore] # dynamic archinfo b
         )
 
     @property
-    def keystone_x86_syntax(self) -> str | None:
+    def keystone_x86_syntax(self) -> object:
         """Get the current syntax Keystone uses for x86.
 
         :return: Keystone's current x86 syntax
@@ -312,7 +320,7 @@ class Arch86_16(Arch):  # type: ignore[misc, unused-ignore] # dynamic archinfo b
         return self._ks_x86_syntax
 
     @keystone_x86_syntax.setter
-    def keystone_x86_syntax(self, new_syntax: str) -> None:
+    def keystone_x86_syntax(self, new_syntax: object) -> None:
         """Set the syntax that Keystone uses for x86."""
         if new_syntax not in ("intel", "at&t", "nasm", "masm", "gas", "radix16"):
             raise ArchError(
@@ -320,7 +328,7 @@ class Arch86_16(Arch):  # type: ignore[misc, unused-ignore] # dynamic archinfo b
                 '"intel", "at&t", "nasm", "masm", "gas" or "radix16".',
             )
 
-        if new_syntax != self._ks_x86_syntax:
+        if operator.ne(new_syntax, self._ks_x86_syntax):
             self._ks = None
             self._ks_x86_syntax = new_syntax
 

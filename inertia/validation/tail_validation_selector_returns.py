@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Fingerprint selector-return edge semantics for tail validation.
 
 Layer: Tail Validation.
@@ -14,6 +15,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import json
 from collections.abc import Callable
@@ -27,6 +30,8 @@ from inertia.ir.condition_ir import (
     normalize_condition_fingerprint_string_8616,
 )
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
+import dataclasses
+import operator
 
 __all__ = [
     "SelectorReturnFingerprint8616",
@@ -38,24 +43,24 @@ __all__ = [
     "parse_selector_return_fingerprint_8616",
 ]
 
-type FingerprintCallback8616 = Callable[[object], str]
-type NormalizeFingerprintCallback8616 = Callable[[str], str]
-type CompactObservableCallback8616 = Callable[[str, str], str]
+FingerprintCallback8616 = typing.TypeAliasType("FingerprintCallback8616", Callable[[object], str])
+NormalizeFingerprintCallback8616 = typing.TypeAliasType("NormalizeFingerprintCallback8616", Callable[[str], str])
+CompactObservableCallback8616 = typing.TypeAliasType("CompactObservableCallback8616", Callable[[str, str], str])
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SelectorReturnFingerprint8616:
     """Typed condition and return-arm fields for one selector observation."""
 
-    condition: str
-    true_returns: tuple[str, ...]
-    false_returns: tuple[str, ...]
-    inverse_condition: str | None = None
+    condition: object
+    true_returns: object
+    false_returns: object
+    inverse_condition: object = None
 
     @property
-    def arms_identical(self) -> bool:
+    def arms_identical(self) -> cython.bint:
         """Return whether both non-empty selector arms return the same values."""
-        return bool(self.true_returns and self.true_returns == self.false_returns)
+        return bool(self.true_returns and operator.eq(self.true_returns, self.false_returns))
 
     @property
     def condition_candidates(self) -> tuple[str, ...]:
@@ -63,34 +68,35 @@ class SelectorReturnFingerprint8616:
         return tuple(
             dict.fromkeys(
                 candidate
-                for candidate in (self.condition, self.inverse_condition)
+                for candidate in iter((self.condition, self.inverse_condition))
                 if candidate is not None
             )
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SelectorReturnFingerprintStats8616:
     """Closed evidence counters for selector-return validation fingerprints."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SelectorReturnFingerprintResult8616:
     """Immutable selector-return fingerprints and their evidence census."""
 
-    fingerprints: tuple[str, ...]
+    fingerprints: object
     stats: SelectorReturnFingerprintStats8616
 
 
+@cython.ccall
 def encode_selector_return_fingerprint_8616(
     fingerprint: SelectorReturnFingerprint8616,
-) -> str:
+) -> object:
     """Encode one typed selector observation in deterministic JSON form."""
     payload: dict[str, object] = {
         "condition": fingerprint.condition,
@@ -107,9 +113,13 @@ def encode_selector_return_fingerprint_8616(
 
 
 def parse_selector_return_fingerprint_8616(
-    value: str,
+    value: object,
 ) -> SelectorReturnFingerprint8616 | None:
     """Decode only the owned selector-return JSON envelope."""
+    condition: object
+    false_returns: object
+    inverse_condition: object
+    true_returns: object
     prefix = "selector-return:"
     if not isinstance(value, str) or not value.startswith(prefix):
         return None
@@ -135,7 +145,7 @@ def parse_selector_return_fingerprint_8616(
     if not isinstance(true_returns, list) or not isinstance(false_returns, list):
         return None
     if not true_returns or not false_returns or any(
-        not isinstance(item, str) for item in (*true_returns, *false_returns)
+        not isinstance(item, str) for item in iter(tuple(true_returns) + tuple(false_returns))
     ):
         return None
     return SelectorReturnFingerprint8616(
@@ -147,12 +157,15 @@ def parse_selector_return_fingerprint_8616(
 
 
 def compact_selector_return_fingerprint_8616(
-    value: str,
+    value: object,
     *,
     canonicalize_condition: NormalizeFingerprintCallback8616,
     compact_observable: CompactObservableCallback8616,
-) -> str | None:
+) -> object:
     """Compact fields independently so selector identity remains inspectable."""
+    fingerprint: object
+    inverse_condition: object
+    inverse_source: object
     fingerprint = parse_selector_return_fingerprint_8616(value)
     if fingerprint is None:
         return None
@@ -181,33 +194,35 @@ def compact_selector_return_fingerprint_8616(
             inverse_condition=compact_inverse,
             true_returns=tuple(
                 compact_observable("returns", item)
-                for item in fingerprint.true_returns
+                for item in iter(fingerprint.true_returns)
             ),
             false_returns=tuple(
                 compact_observable("returns", item)
-                for item in fingerprint.false_returns
+                for item in iter(fingerprint.false_returns)
             ),
         )
     )
 
 
+@cython.ccall
 def _terminal_return_fingerprints_8616(
     body: object,
     return_fingerprint: FingerprintCallback8616,
-) -> tuple[str, ...]:
+) -> object:
     """Fingerprint a non-void return that terminates one structured arm."""
     if isinstance(body, CReturn):
-        return () if body.retval is None else (return_fingerprint(body.retval),)
+        return tuple(()) if body.retval is None else tuple((return_fingerprint(body.retval),))
     if not isinstance(body, CStatements):
         return ()
     statements = tuple(body.statements or ())
     if not statements or not isinstance(statements[-1], CReturn):
         return ()
     terminal = statements[-1]
-    return () if terminal.retval is None else (return_fingerprint(terminal.retval),)
+    return tuple(()) if terminal.retval is None else tuple((return_fingerprint(terminal.retval),))
 
 
-def _normalize_condition_8616(condition: str) -> str:
+@cython.ccall
+def _normalize_condition_8616(condition: object) -> str:
     """Canonicalize one condition without changing branch polarity."""
     return str(
         normalize_condition_fingerprint_algebraic_8616(
@@ -217,18 +232,19 @@ def _normalize_condition_8616(condition: str) -> str:
 
 
 def _selector_return_token_8616(
-    condition: str,
-    true_returns: tuple[str, ...],
-    false_returns: tuple[str, ...],
-) -> str:
+    condition: object,
+    true_returns: object,
+    false_returns: object,
+) -> object:
     """Encode one selector, canonicalizing exact inverse-and-swapped arms."""
+    inverted: object
 
     def encode(
-        cond: str,
-        inverse_cond: str | None,
-        true_values: tuple[str, ...],
-        false_values: tuple[str, ...],
-    ) -> str:
+        cond: object,
+        inverse_cond: object,
+        true_values: object,
+        false_values: object,
+    ) -> object:
         return encode_selector_return_fingerprint_8616(
             SelectorReturnFingerprint8616(
                 condition=cond,
@@ -253,6 +269,7 @@ def _selector_return_token_8616(
     return min(candidates)
 
 
+@cython.ccall
 def collect_selector_return_fingerprints_8616(
     root: object,
     *,
@@ -260,6 +277,9 @@ def collect_selector_return_fingerprints_8616(
     return_fingerprint: FingerprintCallback8616,
 ) -> SelectorReturnFingerprintResult8616:
     """Collect exact two-outcome return selectors from structured statements."""
+    index: object
+    parent: object
+    statement: object
     raw_count = normalized_count = classified_count = materialized_count = 0
     fingerprints: set[str] = set()
     for parent in _iter_c_nodes_deep_8616(root):

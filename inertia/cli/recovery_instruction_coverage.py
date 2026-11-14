@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Build typed exact-instruction recovery coverage from frontend evidence.
 
 Layer: Recovery/reporting.
@@ -14,6 +15,8 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -22,6 +25,8 @@ from typing import Protocol, cast
 
 from inertia.frontend.x86_16.cod_extract import CODProcMetadata
 from inertia.frontend.x86_16.frontend_instruction_reachability import collect_instruction_reachability_8616
+import dataclasses
+import operator
 
 __all__ = [
     "ExactInstructionCoverageEvidence8616",
@@ -46,34 +51,33 @@ class ExactInstructionCoverageVerdict8616(StrEnum):
     UNAVAILABLE = "unavailable"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ExactInstructionCoverageEvidence8616:
     """Closed census comparing expected instructions with one CFG function."""
 
     function_addr: int | None
     source: ExactInstructionCoverageSource8616 | None
     verdict: ExactInstructionCoverageVerdict8616
-    expected_instruction_addrs: tuple[int, ...] = ()
-    recovered_instruction_addrs: tuple[int, ...] = ()
-    missing_instruction_addrs: tuple[int, ...] = ()
-    proven_unreachable_instruction_addrs: tuple[int, ...] = ()
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    excluded_unreachable_count: int = 0
-    failure_count: int = 0
+    expected_instruction_addrs: tuple[cython.longlong, ...] = ()
+    recovered_instruction_addrs: tuple[cython.longlong, ...] = ()
+    missing_instruction_addrs: tuple[cython.longlong, ...] = ()
+    proven_unreachable_instruction_addrs: tuple[cython.longlong, ...] = ()
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    excluded_unreachable_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every exact instruction belongs to the function."""
         return (
             self.verdict is ExactInstructionCoverageVerdict8616.COMPLETE
             and self.raw_fact_count > 0
-            and self.raw_fact_count == self.normalized_fact_count
-            and self.normalized_fact_count == self.classified_fact_count
-            and self.classified_fact_count
-            == self.materialized_count + self.excluded_unreachable_count + self.failure_count
+            and operator.eq(self.raw_fact_count, self.normalized_fact_count)
+            and operator.eq(self.normalized_fact_count, self.classified_fact_count)
+            and operator.eq(self.classified_fact_count, self.materialized_count + self.excluded_unreachable_count + self.failure_count)
             and self.failure_count == 0
             and not self.missing_instruction_addrs
         )
@@ -144,15 +148,15 @@ class _ProjectBoundary8616(Protocol):
 def classify_exact_instruction_coverage_8616(
     *,
     function_addr: int | None,
-    source: ExactInstructionCoverageSource8616 | None,
-    expected_instruction_addrs: Sequence[int],
-    recovered_instruction_addrs: Sequence[int],
-    proven_unreachable_instruction_addrs: Sequence[int] = (),
+    source: object,
+    expected_instruction_addrs: Sequence[cython.longlong],
+    recovered_instruction_addrs: Sequence[cython.longlong],
+    proven_unreachable_instruction_addrs: Sequence[cython.longlong] = (),
 ) -> ExactInstructionCoverageEvidence8616:
     """Classify exact instruction ownership with the required closed counters."""
     expected_raw = tuple(expected_instruction_addrs)
-    expected = tuple(sorted(set(expected_raw)))
-    recovered = tuple(sorted(set(recovered_instruction_addrs)))
+    expected = tuple(sorted(tuple(set(expected_raw))))
+    recovered = tuple(sorted(tuple(set(recovered_instruction_addrs))))
     if source is None or not expected:
         return ExactInstructionCoverageEvidence8616(
             function_addr=function_addr,
@@ -163,10 +167,10 @@ def classify_exact_instruction_coverage_8616(
     recovered_set = set(recovered)
     proven_unreachable_set = set(proven_unreachable_instruction_addrs)
     proven_unreachable = tuple(
-        addr for addr in expected if addr not in recovered_set and addr in proven_unreachable_set
+        addr for addr in iter(expected) if addr not in recovered_set and addr in proven_unreachable_set
     )
     missing = tuple(
-        addr for addr in expected if addr not in recovered_set and addr not in proven_unreachable_set
+        addr for addr in iter(expected) if addr not in recovered_set and addr not in proven_unreachable_set
     )
     materialized_count = len(expected) - len(missing) - len(proven_unreachable)
     verdict = (
@@ -191,14 +195,17 @@ def classify_exact_instruction_coverage_8616(
     )
 
 
-def _recovered_instruction_addrs_8616(function: object) -> tuple[int, ...]:
+@cython.ccall
+def _recovered_instruction_addrs_8616(function: object) -> tuple[cython.longlong, ...]:
     """Collect instruction starts from the dynamic angr function boundary."""
+    block_value: object
+    instruction_value: object
     boundary = cast(_FunctionBoundary8616, function)
     try:
         blocks = tuple(cast(Sequence[object], boundary.blocks) or ())
     except (AttributeError, TypeError):
         return ()
-    recovered: set[int] = set()
+    recovered: set[cython.longlong] = set()
     for block_value in blocks:
         block = cast(_BlockBoundary8616, block_value)
         try:
@@ -218,13 +225,17 @@ def _recovered_instruction_addrs_8616(function: object) -> tuple[int, ...]:
 
 def _exact_loaded_cod_instruction_addrs_8616(
     project: object,
-    function_addr: int | None,
-    cod_metadata: CODProcMetadata | None,
-) -> tuple[int, ...]:
+    function_addr: object,
+    cod_metadata: object,
+) -> tuple[cython.longlong, ...]:
     """Map COD rows only when they describe the complete loaded code image."""
+    data: object
+    offset: object
+    entry: object
+    size: object
     if cod_metadata is None or function_addr is None:
         return ()
-    rows: list[tuple[int, int]] = []
+    rows: list[tuple[cython.longlong, cython.longlong]] = []
     for entry in cod_metadata.cod_raw_entries:
         offset = entry.get("offset")
         data = entry.get("bytes")
@@ -236,7 +247,7 @@ def _exact_loaded_cod_instruction_addrs_8616(
     first_offset = rows[0][0]
     expected_offset = first_offset
     for offset, size in rows:
-        if offset != expected_offset:
+        if operator.ne(offset, expected_offset):
             return ()
         expected_offset = offset + size
     project_boundary = cast(_ProjectBoundary8616, project)
@@ -252,9 +263,9 @@ def _exact_loaded_cod_instruction_addrs_8616(
         else None
     )
     cod_size = expected_offset - first_offset
-    if image_size != cod_size or function_addr != image_start:
+    if image_size != cod_size or operator.ne(function_addr, image_start):
         return ()
-    return tuple(image_start + offset - first_offset for offset, _size in rows)
+    return tuple(image_start + offset - first_offset for offset, _size in iter(rows))
 
 
 def collect_exact_instruction_coverage_8616(
@@ -263,6 +274,7 @@ def collect_exact_instruction_coverage_8616(
     cod_metadata: CODProcMetadata | None,
 ) -> ExactInstructionCoverageEvidence8616:
     """Collect exact loaded-image instruction coverage without repairing CFG."""
+    function_addr: object
     boundary = cast(_FunctionBoundary8616, function)
     try:
         raw_function_addr = boundary.addr
@@ -271,7 +283,7 @@ def collect_exact_instruction_coverage_8616(
     function_addr = raw_function_addr if isinstance(raw_function_addr, int) else None
     expected = _exact_loaded_cod_instruction_addrs_8616(project, function_addr, cod_metadata)
     source = ExactInstructionCoverageSource8616.COD_EXACT_IMAGE if expected else None
-    proven_unreachable: tuple[int, ...] = ()
+    proven_unreachable: tuple[cython.longlong, ...] = ()
     if expected and function_addr is not None:
         project_boundary = cast(_ProjectBoundary8616, project)
         try:
@@ -290,7 +302,7 @@ def collect_exact_instruction_coverage_8616(
             )
             if reachability.complete:
                 reachable = set(reachability.reachable_instruction_addrs)
-                proven_unreachable = tuple(addr for addr in expected if addr not in reachable)
+                proven_unreachable = tuple(addr for addr in iter(expected) if addr not in reachable)
     return classify_exact_instruction_coverage_8616(
         function_addr=function_addr,
         source=source,

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize stack-argument signedness from proven condition evidence.
 
 Layer: Types/lowering.
@@ -12,6 +13,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 from dataclasses import dataclass
@@ -33,6 +36,8 @@ from .condition_argument_type_facts import (
 )
 from .semantic_cast import CSemanticCast8616
 from .stack_variable_coordinates import machine_bp_offset_for_stack_variable_8616
+import dataclasses
+import operator
 
 __all__ = [
     "ConditionArgumentTypeResult8616",
@@ -60,8 +65,8 @@ class _CodegenSurface8616(Protocol):
 class _CFunctionSurface8616(Protocol):
     """angr CFunction fields updated by stack-argument type materialization."""
 
-    addr: int
-    arg_list: tuple[object, ...] | list[object]
+    addr: cython.longlong
+    arg_list: object
     body: object
     statements: object
     functy: object
@@ -78,7 +83,7 @@ class _KnowledgeBaseSurface8616(Protocol):
 class _FunctionManagerSurface8616(Protocol):
     """Third-party function lookup used to synchronize prototypes."""
 
-    def function(self, *, addr: int, create: bool) -> _FunctionSurface8616 | None:
+    def function(self, *, addr: cython.longlong, create: cython.bint) -> _FunctionSurface8616 | None:
         """Return one existing function without creating it."""
 
 
@@ -88,27 +93,28 @@ class _FunctionSurface8616(Protocol):
     prototype: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionArgumentTypeStats8616:
     """Evidence accounting for condition-derived argument type materialization."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionArgumentTypeResult8616:
     """Result of one condition-derived argument type pass."""
 
-    changed: bool
-    changed_offsets: tuple[int, ...]
+    changed: cython.bint
+    changed_offsets: object
     stats: ConditionArgumentTypeStats8616
 
 
-def _scalar_width_8616(type_: object) -> int:
+@cython.ccall
+def _scalar_width_8616(type_: object) -> cython.longlong:
     """Return the byte width of one scalar angr type, or zero when unsupported."""
     if isinstance(type_, SimTypeChar):
         return 1
@@ -119,9 +125,10 @@ def _scalar_width_8616(type_: object) -> int:
     return 0
 
 
+@cython.ccall
 def _scalar_type_8616(
     arch: Arch,
-    width: int,
+    width: cython.longlong,
     signedness: StackArgumentSignedness8616,
 ) -> SimType | None:
     """Build the width-preserving scalar type represented by one proof."""
@@ -138,11 +145,13 @@ def _scalar_type_8616(
     return type_.with_arch(arch)
 
 
+@cython.ccall
 def _argument_cvars_8616(
     codegen: object,
     cfunc: _CFunctionSurface8616,
 ) -> tuple[CVariable, ...]:
     """Return canonical positive-BP argument variables in emitted order."""
+    arg: object
     try:
         args = tuple(cfunc.arg_list or ())
     except AttributeError:
@@ -157,10 +166,13 @@ def _argument_cvars_8616(
     return tuple(arguments)
 
 
+@cython.ccall
 def _preserve_argument_index_views_8616(
-    codegen: object, roots: list[object], offset: int, width: int, type_: SimType,
+    codegen: object, roots: object, offset: cython.longlong, width: cython.longlong, type_: SimType,
 ) -> None:
     """Keep existing integer index semantics before changing shared declarations."""
+    node: object
+    root: object
     for root in roots:
         for node in _iter_c_nodes_deep_8616(root):
             if not isinstance(node, CIndexedVariable) or not isinstance(node.index, CVariable):
@@ -171,22 +183,25 @@ def _preserve_argument_index_views_8616(
             if not isinstance(variable, SimStackVariable) or variable.base != "bp":
                 continue
             matching_storage = (
-                variable.size == width
-                and machine_bp_offset_for_stack_variable_8616(codegen, variable) == offset
-                and _scalar_width_8616(previous) == width
+                operator.eq(variable.size, width)
+                and operator.eq(machine_bp_offset_for_stack_variable_8616(codegen, variable), offset)
+                and operator.eq(_scalar_width_8616(previous), width)
             )
             if matching_storage and previous != type_:
                 node.index = CSemanticCast8616(type_, previous, index, codegen=index.codegen)
 
 
+@cython.ccall
 def _set_argument_surface_type_8616(
     codegen: object,
     cfunc: _CFunctionSurface8616,
-    offset: int,
-    width: int,
+    offset: cython.longlong,
+    width: cython.longlong,
     type_: SimType,
-) -> int:
+) -> cython.longlong:
     """Apply one type to matching CVariable and unified-local surfaces."""
+    node: object
+    root: object
     changed = 0
     roots: list[object] = [cfunc]
     with contextlib.suppress(AttributeError):
@@ -194,7 +209,7 @@ def _set_argument_surface_type_8616(
     with contextlib.suppress(AttributeError):
         roots.append(cfunc.body)
     _preserve_argument_index_views_8616(codegen, roots, offset, width, type_)
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     for root in roots:
         for node in _iter_c_nodes_deep_8616(root):
             if id(node) in seen or not isinstance(node, CVariable):
@@ -204,23 +219,25 @@ def _set_argument_surface_type_8616(
             if not isinstance(variable, SimStackVariable) or variable.base != "bp":
                 continue
             if (
-                machine_bp_offset_for_stack_variable_8616(codegen, variable) != offset
-                or _scalar_width_8616(node.variable_type) != width
+                operator.ne(machine_bp_offset_for_stack_variable_8616(codegen, variable), offset)
+                or operator.ne(_scalar_width_8616(node.variable_type), width)
             ):
                 continue
-            if node.variable_type != type_:
+            if operator.ne(node.variable_type, type_):
                 node.variable_type = type_
                 changed += 1
     return changed
 
 
+@cython.ccall
 def _desired_argument_signedness_8616(
     codegen: object,
-    arguments: tuple[CVariable, ...],
-    facts: tuple[StackArgumentTypeFact8616, ...],
-) -> tuple[dict[int, tuple[int, StackArgumentSignedness8616]], int]:
+    arguments: object,
+    facts: object,
+) -> tuple[dict[cython.longlong, tuple[cython.longlong, StackArgumentSignedness8616]], cython.longlong]:
     """Census one unambiguous signedness proof per BP argument offset."""
-    desired: dict[int, tuple[int, StackArgumentSignedness8616]] = {}
+    argument: object
+    desired: dict[cython.longlong, tuple[cython.longlong, StackArgumentSignedness8616]] = {}
     failures = 0
     for argument in arguments:
         variable = cast(SimStackVariable, argument.variable)
@@ -231,7 +248,7 @@ def _desired_argument_signedness_8616(
         width = _scalar_width_8616(argument.variable_type)
         matches = {
             fact.signedness
-            for fact in facts
+            for fact in iter(facts)
             if width > 0
             and base <= fact.offset
             and fact.offset + fact.size <= base + width
@@ -243,16 +260,21 @@ def _desired_argument_signedness_8616(
     return desired, failures
 
 
+@cython.ccall
 def _apply_desired_types_8616(
     codegen: object,
     cfunc: _CFunctionSurface8616,
     arch: object,
-    arguments: tuple[CVariable, ...],
-    desired: dict[int, tuple[int, StackArgumentSignedness8616]],
-    new_args: list[SimType],
-) -> tuple[list[int], int, int]:
+    arguments: object,
+    desired: object,
+    new_args: object,
+) -> tuple[list[cython.longlong], cython.longlong, cython.longlong]:
     """Apply each desired signedness to the surface and prototype args."""
-    changed_offsets: list[int] = []
+    requested: object
+    type_: object
+    argument: object
+    index: object
+    changed_offsets: list[cython.longlong] = []
     materialized = 0
     failures = 0
     for index, argument in enumerate(arguments):
@@ -277,11 +299,13 @@ def _apply_desired_types_8616(
     return changed_offsets, materialized, failures
 
 
+@cython.ccall
 def apply_condition_argument_types_8616(
     project: object,
     codegen: object,
 ) -> ConditionArgumentTypeResult8616:
     """Materialize condition-proven signedness on logical stack arguments."""
+    function: object
     project_surface = cast(_ProjectSurface8616, project)
     codegen_surface = cast(_CodegenSurface8616, codegen)
     try:
@@ -300,7 +324,7 @@ def apply_condition_argument_types_8616(
         codegen, arguments, facts
     )
     failures += census_failures
-    function: _FunctionSurface8616 | None = None
+    function = None
     try:
         knowledge_base = cast(_KnowledgeBaseSurface8616, project_surface.kb)
         function = knowledge_base.functions.function(addr=cfunc.addr, create=False)
@@ -327,7 +351,7 @@ def apply_condition_argument_types_8616(
         new_args,
     )
     failures += apply_failures
-    changed = new_args != list(prototype.args)
+    changed = operator.ne(new_args, list(prototype.args))
     if changed:
         rebuilt = SimTypeFunction(
             new_args,

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: build/runtime verification.
 
 Responsibility: own the shared exact-source/ABI verification for optional
@@ -7,6 +8,7 @@ verification path instead of growing competing cache or digest machinery.
 """
 
 from __future__ import annotations
+import cython
 
 import hashlib
 import json
@@ -14,17 +16,20 @@ import sys
 import sysconfig
 from importlib.machinery import EXTENSION_SUFFIXES
 from pathlib import Path
+import operator
 
-BUILD_SCHEMA: int = 1
+BUILD_SCHEMA: cython.longlong = 1
 
 
-def file_digest(path: Path) -> str:
+@cython.ccall
+def file_digest(path: Path) -> object:
     """Fingerprint source or extension bytes without relying on timestamps."""
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+@cython.ccall
 def verified_bundle_directory(
-    manifest_path: Path, confinement: Path, source: Path, extension_name: str,
+    manifest_path: Path, confinement: Path, source: Path, extension_name: object,
 ) -> Path | None:
     """Apply schema/ABI/source/digest/confinement checks to one manifest layout.
 
@@ -38,11 +43,11 @@ def verified_bundle_directory(
         manifest = json.loads(manifest_path.read_text())
         if not isinstance(manifest, dict):
             return None
-        if manifest["schema"] != BUILD_SCHEMA:
+        if operator.ne(manifest["schema"], BUILD_SCHEMA):
             return None
-        if manifest["cache_tag"] != sys.implementation.cache_tag or manifest["soabi"] != sysconfig.get_config_var("SOABI"):
+        if operator.ne(manifest["cache_tag"], sys.implementation.cache_tag) or operator.ne(manifest["soabi"], sysconfig.get_config_var("SOABI")):
             return None
-        if manifest["source_sha256"] != file_digest(source):
+        if operator.ne(manifest["source_sha256"], file_digest(source)):
             return None
         relative_path = manifest["extension"]
         if not isinstance(relative_path, str):
@@ -50,9 +55,9 @@ def verified_bundle_directory(
         extension = (confinement / relative_path).resolve()
         if not extension.is_relative_to(confinement.resolve()):
             return None
-        if extension.name not in {extension_name + suffix for suffix in EXTENSION_SUFFIXES}:
+        if extension.name not in {extension_name + suffix for suffix in iter(EXTENSION_SUFFIXES)}:
             return None
-        if manifest["extension_sha256"] != file_digest(extension):
+        if operator.ne(manifest["extension_sha256"], file_digest(extension)):
             return None
     except (OSError, ValueError, KeyError, TypeError):
         return None

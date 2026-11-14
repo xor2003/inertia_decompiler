@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Recover exact segmented loads through stack-resident far pointers.
 
 Layer: Types/Lowering.
@@ -11,6 +12,8 @@ Unknown register writes erase carriers. Ambiguous address terms are refused.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 from collections.abc import Sequence
@@ -38,6 +41,8 @@ from .register_constant_segmented_store import (
     OperandView8616,
     RegisterNameResolver8616,
 )
+import dataclasses
+import operator
 
 
 class FarPointerSegmentRegister8616(StrEnum):
@@ -47,36 +52,36 @@ class FarPointerSegmentRegister8616(StrEnum):
     ES = "es"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FarPointerStackValueSource8616:
     """Exact stack value copied into one component of a far-pointer pair."""
 
-    stack_offset: int
-    width: int
+    stack_offset: cython.longlong
+    width: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FarPointerStackSource8616:
     """Exact adjacent stack words holding a far offset and segment selector."""
 
-    offset_stack_offset: int
-    segment_stack_offset: int
+    offset_stack_offset: cython.longlong
+    segment_stack_offset: cython.longlong
     segment_value_source: FarPointerStackValueSource8616 | None = None
     offset_constant: int | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FarPointerSegmentedLoadEvidence8616:
     """Exact segmented load site reached through an LES/LDS stack pair."""
 
     segment_register: FarPointerSegmentRegister8616
     pointer_source: FarPointerStackSource8616
-    width: int
-    displacement: int
-    ins_addr: int
+    width: cython.longlong
+    displacement: cython.longlong
+    ins_addr: cython.longlong
     index_stack_offset: int | None = None
-    index_stack_width: int = 2
-    index_shift: int = 0
+    index_stack_width: cython.longlong = 2
+    index_shift: cython.longlong = 0
 
 
 _StackIndex8616 = tuple[int, int, int]
@@ -88,31 +93,37 @@ _REGISTER_ALIAS_GROUPS_8616 = (
 )
 
 
-def _register_aliases_8616(register_name: str) -> frozenset[str]:
+@cython.ccall
+def _register_aliases_8616(register_name: object) -> object:
     """Return the overlapping architectural names for one register."""
+    aliases: object
     for aliases in _REGISTER_ALIAS_GROUPS_8616:
         if register_name in aliases:
             return aliases
     return frozenset((register_name,))
 
 
+@cython.ccall
 def _forget_register_8616(
-    register_name: str,
-    stack_indices: dict[str, _StackIndex8616],
-    far_offsets: dict[str, FarPointerStackSource8616],
+    register_name: object,
+    stack_indices: object,
+    far_offsets: object,
 ) -> None:
     """Invalidate every tracked view overlapping one written register."""
+    alias: object
     for alias in _register_aliases_8616(register_name):
         stack_indices.pop(alias, None)
         far_offsets.pop(alias, None)
 
 
+@cython.ccall
 def _forget_stack_value_sources_8616(
-    offset: int,
-    width: int,
-    stack_value_sources: dict[int, FarPointerStackValueSource8616],
+    offset: cython.longlong,
+    width: cython.longlong,
+    stack_value_sources: object,
 ) -> None:
     """Invalidate tracked stack destinations overlapping one memory write."""
+    destination: object
     write_end = offset + width
     for destination in tuple(stack_value_sources):
         source_width = stack_value_sources[destination].width
@@ -120,16 +131,19 @@ def _forget_stack_value_sources_8616(
             stack_value_sources.pop(destination, None)
 
 
+@cython.ccall
 def _stack_slot_8616(
     instruction: InstructionView8616,
     operand: OperandView8616,
     *,
     register_name: RegisterNameResolver8616,
     segment_name: RegisterNameResolver8616,
-) -> tuple[int, int] | None:
+) -> object:
     """Return an exact BP-relative stack slot from one memory operand."""
+    index: object
+    memory: object
     memory = operand.memory
-    if operand.kind != X86_OP_MEM or memory is None or not isinstance(memory.displacement, int):
+    if operator.ne(operand.kind, X86_OP_MEM) or memory is None or not isinstance(memory.displacement, int):
         return None
     base = register_name(instruction.raw, memory.base)
     index = register_name(instruction.raw, memory.index)
@@ -142,6 +156,7 @@ def _stack_slot_8616(
     return int(memory.displacement), int(operand.size)
 
 
+@cython.ccall
 def _far_pointer_load_kind_8616(instruction_id: int | None) -> FarPointerSegmentRegister8616 | None:
     """Map LES/LDS to the segment register they load."""
     if instruction_id == X86_INS_LES:
@@ -151,14 +166,17 @@ def _far_pointer_load_kind_8616(instruction_id: int | None) -> FarPointerSegment
     return None
 
 
+@cython.ccall
 def _segmented_pointer_source_8616(
     instruction: InstructionView8616,
     memory: MemoryOperandView8616,
     source: OperandView8616,
-    segment_sources: dict[FarPointerSegmentRegister8616, FarPointerStackSource8616],
+    segment_sources: object,
     segment_name: RegisterNameResolver8616,
-) -> tuple[FarPointerSegmentRegister8616, FarPointerStackSource8616] | None:
+) -> object:
     """Resolve the segment override to a proven far-pointer stack source."""
+    pointer_source: object
+    segment_text: object
     segment_text = segment_name(instruction.raw, memory.segment)
     if segment_text is None:
         return None
@@ -176,24 +194,25 @@ def _pointer_index_parts_8616(
     instruction: InstructionView8616,
     memory: MemoryOperandView8616,
     pointer_source: FarPointerStackSource8616,
-    stack_indices: dict[str, _StackIndex8616],
-    far_offsets: dict[str, FarPointerStackSource8616],
+    stack_indices: object,
+    far_offsets: object,
     register_name: RegisterNameResolver8616,
-) -> tuple[int | None, int, int] | None:
+) -> object:
     """Resolve base/index registers to one far pointer plus an optional stack index."""
+    index: object
     address_registers = tuple(
         dict.fromkeys(
             name
-            for register in (memory.base, memory.index)
+            for register in iter((memory.base, memory.index))
             if (name := register_name(instruction.raw, register)) is not None
         )
     )
     pointer_registers = tuple(
-        name for name in address_registers if far_offsets.get(name) == pointer_source
+        name for name in iter(address_registers) if operator.eq(far_offsets.get(name), pointer_source)
     )
     if len(pointer_registers) != 1:
         return None
-    remaining = tuple(name for name in address_registers if name != pointer_registers[0])
+    remaining = tuple(name for name in iter(address_registers) if operator.ne(name, pointer_registers[0]))
     if len(remaining) > 1:
         return None
     index = stack_indices.get(remaining[0]) if remaining else None
@@ -205,24 +224,28 @@ def _pointer_index_parts_8616(
     return index_offset, index_width, index_shift
 
 
+@cython.ccall
 def _segmented_load_evidence_8616(
     instruction: InstructionView8616,
-    stack_indices: dict[str, _StackIndex8616],
-    far_offsets: dict[str, FarPointerStackSource8616],
-    segment_sources: dict[FarPointerSegmentRegister8616, FarPointerStackSource8616],
+    stack_indices: object,
+    far_offsets: object,
+    segment_sources: object,
     *,
     register_name: RegisterNameResolver8616,
     segment_name: RegisterNameResolver8616,
 ) -> FarPointerSegmentedLoadEvidence8616 | None:
     """Classify one MOV load whose segment and offset share a proven far pair."""
+    gated: object
+    memory: object
+    resolved: object
     operands = instruction.operands
-    if instruction.instruction_id != X86_INS_MOV or len(operands) != 2:
+    if operator.ne(instruction.instruction_id, X86_INS_MOV) or len(operands) != 2:
         return None
     destination, source = operands
     memory = source.memory
     if (
-        destination.kind != X86_OP_REG
-        or source.kind != X86_OP_MEM
+        operator.ne(destination.kind, X86_OP_REG)
+        or operator.ne(source.kind, X86_OP_MEM)
         or memory is None
         or not isinstance(source.size, int)
     ):
@@ -251,23 +274,24 @@ def _segmented_load_evidence_8616(
     )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _FarPointerScanState8616:
     """Mutable per-block state while scanning instructions for far loads."""
 
-    stack_indices: dict[str, _StackIndex8616] = field(default_factory=dict)
-    far_offsets: dict[str, FarPointerStackSource8616] = field(default_factory=dict)
-    segment_sources: dict[FarPointerSegmentRegister8616, FarPointerStackSource8616] = field(default_factory=dict)
-    stack_value_sources: dict[int, FarPointerStackValueSource8616] = field(default_factory=dict)
+    stack_indices: object = field(default_factory=dict)
+    far_offsets: object = field(default_factory=dict)
+    segment_sources: object = field(default_factory=dict)
+    stack_value_sources: object = field(default_factory=dict)
 
 
+@cython.ccall
 def _scan_stack_slot_8616(
     instruction: InstructionView8616,
     operand: OperandView8616,
     *,
     register_name: RegisterNameResolver8616,
     segment_name: RegisterNameResolver8616,
-) -> tuple[int, int] | None:
+) -> object:
     """Resolve one operand to a typed stack slot when it names one."""
     return _stack_slot_8616(
         instruction,
@@ -277,6 +301,7 @@ def _scan_stack_slot_8616(
     )
 
 
+@cython.ccall
 def _apply_far_pointer_load_8616(
     state: _FarPointerScanState8616,
     constant_state: FarPointerConstantState8616,
@@ -285,10 +310,13 @@ def _apply_far_pointer_load_8616(
     *,
     register_name: RegisterNameResolver8616,
     segment_name: RegisterNameResolver8616,
-) -> bool:
+) -> cython.bint:
     """Track one LES/LDS-style load; return True when it was handled."""
+    destination: object
+    far_kind: object
+    source_slot: object
     far_kind = _far_pointer_load_kind_8616(instruction.instruction_id)
-    if far_kind is None or len(operands) != 2 or operands[0].kind != X86_OP_REG:
+    if far_kind is None or len(operands) != 2 or operator.ne(operands[0].kind, X86_OP_REG):
         return False
     destination = register_name(instruction.raw, operands[0].register)
     source_slot = _scan_stack_slot_8616(
@@ -310,6 +338,7 @@ def _apply_far_pointer_load_8616(
     return True
 
 
+@cython.ccall
 def _update_stack_slot_target_8616(
     state: _FarPointerScanState8616,
     instruction: InstructionView8616,
@@ -319,6 +348,9 @@ def _update_stack_slot_target_8616(
     segment_name: RegisterNameResolver8616,
 ) -> None:
     """Invalidate a stack destination and record proven stack value copies."""
+    copied_source: object
+    destination_slot: object
+    source_name: object
     destination_slot = (
         _scan_stack_slot_8616(
             instruction, operands[0], register_name=register_name, segment_name=segment_name
@@ -334,7 +366,7 @@ def _update_stack_slot_target_8616(
         destination_width,
         state.stack_value_sources,
     )
-    if instruction.instruction_id == X86_INS_MOV and len(operands) == 2 and operands[1].kind == X86_OP_REG:
+    if operator.eq(instruction.instruction_id, X86_INS_MOV) and len(operands) == 2 and operator.eq(operands[1].kind, X86_OP_REG):
         source_name = register_name(instruction.raw, operands[1].register)
         copied_source = state.stack_indices.get(source_name) if source_name is not None else None
         if copied_source is not None:
@@ -346,6 +378,7 @@ def _update_stack_slot_target_8616(
                 )
 
 
+@cython.ccall
 def _apply_mov_register_copy_8616(
     state: _FarPointerScanState8616,
     instruction: InstructionView8616,
@@ -353,15 +386,20 @@ def _apply_mov_register_copy_8616(
     *,
     register_name: RegisterNameResolver8616,
     segment_name: RegisterNameResolver8616,
-) -> bool:
+) -> cython.bint:
     """Track one MOV into a register; return True when it was handled."""
-    if instruction.instruction_id != X86_INS_MOV or len(operands) != 2 or operands[0].kind != X86_OP_REG:
+    copied_far: object
+    copied_stack: object
+    destination: object
+    source_name: object
+    stack_slot: object
+    if operator.ne(instruction.instruction_id, X86_INS_MOV) or len(operands) != 2 or operator.ne(operands[0].kind, X86_OP_REG):
         return False
     destination = register_name(instruction.raw, operands[0].register)
     source_operand = operands[1]
     copied_stack = None
     copied_far = None
-    if source_operand.kind == X86_OP_REG:
+    if operator.eq(source_operand.kind, X86_OP_REG):
         source_name = register_name(instruction.raw, source_operand.register)
         copied_stack = state.stack_indices.get(source_name) if source_name is not None else None
         copied_far = state.far_offsets.get(source_name) if source_name is not None else None
@@ -381,16 +419,19 @@ def _apply_mov_register_copy_8616(
     return True
 
 
+@cython.ccall
 def _apply_shift_index_8616(
     state: _FarPointerScanState8616,
     instruction: InstructionView8616,
     operands: Sequence[OperandView8616],
     register_name: RegisterNameResolver8616,
-) -> bool:
+) -> cython.bint:
     """Track one SHL/SAL index update; return True when it was handled."""
+    destination: object
+    previous: object
     if instruction.instruction_id not in {X86_INS_SHL, X86_INS_SAL} or len(operands) != 2:
         return False
-    destination = register_name(instruction.raw, operands[0].register) if operands[0].kind == X86_OP_REG else None
+    destination = register_name(instruction.raw, operands[0].register) if operator.eq(operands[0].kind, X86_OP_REG) else None
     amount = operands[1].immediate
     previous = state.stack_indices.get(destination) if destination is not None else None
     if destination is not None:
@@ -402,6 +443,7 @@ def _apply_shift_index_8616(
     return True
 
 
+@cython.ccall
 def _invalidate_register_destination_8616(
     state: _FarPointerScanState8616,
     instruction: InstructionView8616,
@@ -409,7 +451,8 @@ def _invalidate_register_destination_8616(
     register_name: RegisterNameResolver8616,
 ) -> None:
     """Forget tracking for any other instruction that clobbers a register."""
-    if operands and operands[0].kind == X86_OP_REG:
+    destination: object
+    if operands and operator.eq(operands[0].kind, X86_OP_REG):
         destination = register_name(instruction.raw, operands[0].register)
         if destination is not None:
             _forget_register_8616(destination, state.stack_indices, state.far_offsets)
@@ -418,12 +461,14 @@ def _invalidate_register_destination_8616(
 
 
 def recover_far_pointer_segmented_loads_8616(
-    instructions: tuple[InstructionView8616, ...],
+    instructions: object,
     *,
     register_name: RegisterNameResolver8616,
     segment_name: RegisterNameResolver8616,
 ) -> tuple[FarPointerSegmentedLoadEvidence8616, ...]:
     """Recover exact same-block loads through LES/LDS stack far pointers."""
+    evidence: object
+    instruction: object
     state = _FarPointerScanState8616()
     constant_state = FarPointerConstantState8616()
     recovered: list[FarPointerSegmentedLoadEvidence8616] = []

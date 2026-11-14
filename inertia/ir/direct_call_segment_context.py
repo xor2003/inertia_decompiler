@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Retain callsite-bound segment equality for contextual callee analysis.
 
 Layer: IR.
@@ -11,6 +12,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -31,6 +34,8 @@ from .ir_boundary_cfg import IRBoundaryCoverageResult8616
 from .real16_invocation_domain import Real16InvocationDomain8616
 from .segment_call_preservation import SegmentCallPreservationResult8616
 from .segment_state_transfer import SegmentRestoreSource
+import dataclasses
+import operator
 
 
 class DirectCallSegmentContextFailure8616(StrEnum):
@@ -44,21 +49,21 @@ class DirectCallSegmentContextFailure8616(StrEnum):
     EQUALITY_LOST = "equality_lost"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectCallSegmentContext8616:
     """One exact caller-to-callee entry relation, not a universal callee fact."""
 
     caller: IRBoundaryCoverageResult8616
     callee: IRBoundaryCoverageResult8616
     index: DecodedDirectCallsiteIndex8616
-    restore_sources: tuple[SegmentRestoreSource, ...]
+    restore_sources: object
     proof: DirectCallSegmentEntryProof8616
     failure: DirectCallSegmentContextFailure8616 | None
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
     invocation: Real16InvocationDomain8616 | None = None
 
     @property
@@ -67,24 +72,26 @@ class DirectCallSegmentContext8616:
         return self.proof.candidate
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Re-evaluate the exact project-owned call and Alias lineage."""
+        failure: object
         counts = (self.raw_fact_count, self.normalized_fact_count,
                   self.classified_fact_count, self.materialized_count, self.failure_count)
         if self.failure is not None or counts != (1, 1, 1, 1, 0):
             return False
-        if any(type(count) is not int for count in counts):
+        if any(type(count) is not int for count in iter(counts)):
             return False
         failure, proof = _context_evidence_8616(
             self.caller, self.callee, self.index, self.restore_sources, self.proof.candidate,
             invocation=self.invocation,
         )
-        return failure is None and proof == self.proof
+        return failure is None and operator.eq(proof, self.proof)
 
 
+@cython.ccall
 def _context_evidence_8616(
     caller: IRBoundaryCoverageResult8616, callee: IRBoundaryCoverageResult8616,
-    index: DecodedDirectCallsiteIndex8616, sources: tuple[SegmentRestoreSource, ...],
+    index: DecodedDirectCallsiteIndex8616, sources: object,
     candidate: DirectCallSegmentEntryCandidate8616,
     *,
     invocation: Real16InvocationDomain8616 | None = None,
@@ -104,10 +111,11 @@ def _context_evidence_8616(
     return None, proof
 
 
+@cython.ccall
 def bind_direct_call_segment_context_8616(
     caller: IRBoundaryCoverageResult8616, callee: IRBoundaryCoverageResult8616,
-    index: DecodedDirectCallsiteIndex8616, sources: tuple[SegmentRestoreSource, ...],
-    callsite_addr: int,
+    index: DecodedDirectCallsiteIndex8616, sources: object,
+    callsite_addr: cython.longlong,
     *,
     invocation: Real16InvocationDomain8616 | None = None,
 ) -> DirectCallSegmentContext8616:
@@ -118,6 +126,7 @@ def bind_direct_call_segment_context_8616(
     retained and replayed with the context only when the target proof
     consumes it, never widened to a callee fact.
     """
+    failure: object
     candidate = DirectCallSegmentEntryCandidate8616(
         caller.artifact.function_addr, callsite_addr, callee.artifact.function_addr,
     )
@@ -131,7 +140,7 @@ def bind_direct_call_segment_context_8616(
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PropagatedSegmentContext8616:
     """Retain a replayable contextual relation at one nested direct near CALL.
 
@@ -145,22 +154,22 @@ class PropagatedSegmentContext8616:
     callee: IRBoundaryCoverageResult8616
     index: DecodedDirectCallsiteIndex8616
     candidate: DirectCallSegmentEntryCandidate8616
-    call_preservations: tuple[SegmentCallPreservationResult8616, ...]
+    call_preservations: object
     failure: DirectCallSegmentContextFailure8616 | None
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Recheck the parent, registered bodies, call identity and raw effects."""
         counts = (self.raw_fact_count, self.normalized_fact_count,
                   self.classified_fact_count, self.materialized_count, self.failure_count)
         if self.failure is not None or counts != (1, 1, 1, 1, 0):
             return False
-        if any(type(count) is not int for count in counts):
+        if any(type(count) is not int for count in iter(counts)):
             return False
         return _propagated_context_failure_8616(
             self.parent, self.caller, self.callee, self.index,
@@ -168,12 +177,12 @@ class PropagatedSegmentContext8616:
         ) is None
 
 
-type SegmentEntryContext8616 = DirectCallSegmentContext8616 | PropagatedSegmentContext8616
+SegmentEntryContext8616 = typing.TypeAliasType("SegmentEntryContext8616", DirectCallSegmentContext8616 | PropagatedSegmentContext8616)
 
 
 def _call_has_same_instruction_segment_write_8616(
-    artifact: IRFunctionArtifact, callsite_addr: int,
-) -> bool:
+    artifact: IRFunctionArtifact, callsite_addr: cython.longlong,
+) -> cython.bint:
     """Refuse segment writes hidden after the machine-instruction entry state.
 
     The solver's address-keyed entry map precedes the first IR effect sharing
@@ -181,21 +190,22 @@ def _call_has_same_instruction_segment_write_8616(
     intervening same-address effect assigns DS or SS.
     """
     return any(
-        instruction.addr == callsite_addr
+        operator.eq(instruction.addr, callsite_addr)
         and isinstance(instruction.dst, IRValue)
         and instruction.dst.space is MemSpace.REG
         and instruction.dst.name in {"ds", "ss"}
-        for block in artifact.blocks for instruction in block.instrs
+        for block in iter(artifact.blocks) for instruction in iter(block.instrs)
     )
 
 
+@cython.ccall
 def _propagated_context_failure_8616(
     parent: SegmentEntryContext8616,
     caller: IRBoundaryCoverageResult8616,
     callee: IRBoundaryCoverageResult8616,
     index: DecodedDirectCallsiteIndex8616,
     candidate: DirectCallSegmentEntryCandidate8616,
-    call_preservations: tuple[SegmentCallPreservationResult8616, ...],
+    call_preservations: object,
 ) -> DirectCallSegmentContextFailure8616 | None:
     """Replay existing segment transfer after independently binding the CALL.
 
@@ -203,6 +213,9 @@ def _propagated_context_failure_8616(
     only inherited equality, explicit raw effects and bound call preservation.
     A local save/restore may still be proved by the existing local binder.
     """
+    ds: object
+    ss: object
+    target_refusal: object
     # Runtime import avoids the state solver's type-only context dependency.
     from .segment_state import build_x86_16_segment_state_artifact
 
@@ -212,7 +225,7 @@ def _propagated_context_failure_8616(
         return DirectCallSegmentContextFailure8616.PROJECT_MISMATCH
     if not parent.complete or parent.callee is not caller:
         return DirectCallSegmentContextFailure8616.PARENT_UNBOUND
-    if candidate.caller_start != caller.artifact.function_addr or candidate.callee_addr != callee.artifact.function_addr:
+    if operator.ne(candidate.caller_start, caller.artifact.function_addr) or operator.ne(candidate.callee_addr, callee.artifact.function_addr):
         return DirectCallSegmentContextFailure8616.CALL_UNBOUND
     call = _unique_call_8616(candidate, caller.artifact)
     decoded = _decoded_entry_8616(candidate, caller.boundary, index)
@@ -235,20 +248,22 @@ def _propagated_context_failure_8616(
     if ds is None or ss is None:
         return DirectCallSegmentContextFailure8616.EQUALITY_LOST
     proven = ds.origin is SegmentOrigin.PROVEN and ss.origin is SegmentOrigin.PROVEN
-    if not proven or ds.source is None or ds.source != ss.source:
+    if not proven or ds.source is None or operator.ne(ds.source, ss.source):
         return DirectCallSegmentContextFailure8616.EQUALITY_LOST
     return None
 
 
+@cython.ccall
 def bind_propagated_segment_context_8616(
     parent: SegmentEntryContext8616,
     callee: IRBoundaryCoverageResult8616,
     index: DecodedDirectCallsiteIndex8616,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     *,
-    call_preservations: tuple[SegmentCallPreservationResult8616, ...] = (),
+    call_preservations: object = (),
 ) -> PropagatedSegmentContext8616:
     """Carry one contextual DS==SS theorem across a proved nested near call."""
+    failure: object
     caller = parent.callee
     candidate = DirectCallSegmentEntryCandidate8616(
         caller.artifact.function_addr, callsite_addr, callee.artifact.function_addr,

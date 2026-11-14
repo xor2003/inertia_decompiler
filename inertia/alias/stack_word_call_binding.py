@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bind a local word lifetime to registered coverage and a real near CALL.
 
 Layer: Alias.
@@ -10,6 +11,8 @@ work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -24,6 +27,9 @@ from inertia.semantics.direct_ret_call_effect import direct_near_call_target_is_
 
 from .entry_stack_pointer_snapshots import EntryStackPointerSnapshots8616
 from .stack_word_call_window import StackWordCallWindowReceipt8616, stack_byte_store_coordinate_8616
+import dataclasses
+import operator
+DirectNearCallTargetBinding8616 = typing.TypeVar("DirectNearCallTargetBinding8616")
 
 
 class StackWordCallBindingFailure8616(StrEnum):
@@ -39,8 +45,8 @@ class StackWordCallBindingFailure8616(StrEnum):
 class _Image8616(Protocol):
     """Third-party absolute image bounds for exact target projection."""
 
-    linked_base: int
-    max_addr: int
+    linked_base: cython.longlong
+    max_addr: cython.longlong
 
 
 class _Loader8616(Protocol):
@@ -55,9 +61,10 @@ class _Project8616(Protocol):
     loader: _Loader8616
 
 
+@cython.ccall
 def _target_matches_8616(
-    project: object, block: IRBlock, instruction: IRInstr, target_addr: int, return_addr: int,
-) -> bool:
+    project: object, block: IRBlock, instruction: IRInstr, target_addr: cython.longlong, return_addr: cython.longlong,
+) -> cython.bint:
     """Consume native symbolic proof or exact constant address identity."""
     if instruction.dst is not None or len(instruction.args) != 1:
         return False
@@ -79,7 +86,7 @@ def _target_matches_8616(
                 instruction.addr, return_addr, target_addr,
             ),
         )
-        return bool(binding.complete and binding.target_addr == target_addr)
+        return bool(binding.complete and operator.eq(binding.target_addr, target_addr))
     if type(target.const) is not int:
         return False
     plain = (target.offset == 0 and target.source_tmp is None and target.version is None
@@ -96,23 +103,28 @@ def _target_matches_8616(
     return normalized == target_addr
 
 
-def _near_frame_matches_8616(window: StackWordCallWindowReceipt8616) -> bool:
+def _near_frame_matches_8616(window: StackWordCallWindowReceipt8616) -> cython.bint:
     """Require the exact two-byte raw CALL envelope at current SP offsets0/1."""
-    blocks = tuple(block for block in window.source_ir.blocks if block.addr == window.source.access.key.block_addr)
+    before_frame: object
+    coordinate: object
+    stack: object
+    index: object
+    instruction: object
+    blocks = tuple(block for block in iter(window.source_ir.blocks) if operator.eq(block.addr, window.source.access.key.block_addr))
     if len(blocks) != 1:
         return False
     snapshots = EntryStackPointerSnapshots8616()
-    before_frame: int | None = None
-    frame_coordinates: list[int] = []
+    before_frame = None
+    frame_coordinates: list[cython.longlong] = []
     for index, instruction in enumerate(blocks[0].instrs):
-        if instruction.addr == window.callsite_addr and before_frame is None:
+        if operator.eq(instruction.addr, window.callsite_addr) and before_frame is None:
             before_frame = snapshots.current_sp
-        if instruction.op == "CALL" and instruction.addr == window.callsite_addr:
+        if instruction.op == "CALL" and operator.eq(instruction.addr, window.callsite_addr):
             stack = snapshots.current_sp
             return (stack is not None and before_frame is not None
                     and (before_frame - stack) & 0xFFFF == 2
                     and frame_coordinates == [stack, (stack + 1) & 0xFFFF])
-        if instruction.op == "STORE" and instruction.addr == window.callsite_addr:
+        if instruction.op == "STORE" and operator.eq(instruction.addr, window.callsite_addr):
             coordinate = stack_byte_store_coordinate_8616(snapshots, instruction)
             if coordinate is None or index not in window.checked_store_indices:
                 return False
@@ -123,7 +135,7 @@ def _near_frame_matches_8616(window: StackWordCallWindowReceipt8616) -> bool:
 
 def _binding_failure_8616(
     coverage: IRBoundaryCoverageResult8616, window: StackWordCallWindowReceipt8616,
-    target_addr: int, return_addr: int,
+    target_addr: cython.longlong, return_addr: cython.longlong,
 ) -> StackWordCallBindingFailure8616 | None:
     """Revalidate every authority before publishing a callee-entry input."""
     if not coverage.complete:
@@ -136,8 +148,8 @@ def _binding_failure_8616(
     bound = direct_near_call_target_is_bound_8616(
         project, window.callsite_addr, return_addr, target_addr, CallsiteMachineFrameKind8616.NEAR,
     )
-    calls = tuple((block, item) for block in coverage.artifact.blocks for item in block.instrs
-                  if item.op == "CALL" and item.addr == window.callsite_addr)
+    calls = tuple((block, item) for block in iter(coverage.artifact.blocks) for item in iter(block.instrs)
+                  if item.op == "CALL" and operator.eq(item.addr, window.callsite_addr))
     if not bound or len(calls) != 1:
         return StackWordCallBindingFailure8616.TARGET_UNPROVEN
     block, instruction = calls[0]
@@ -148,19 +160,19 @@ def _binding_failure_8616(
     return None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackWordCallBinding8616:
     """Current binary-associated contextual input, not a global callee bound."""
 
     coverage: IRBoundaryCoverageResult8616
     window: StackWordCallWindowReceipt8616
-    target_addr: int
-    return_addr: int
+    target_addr: cython.longlong
+    return_addr: cython.longlong
     failure: StackWordCallBindingFailure8616 | None
     stats: LogicalConstantWordStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Require closed counts and replayed coverage, lifetime and CALL proof."""
         return (self.failure is None and self.stats.complete
                 and _binding_failure_8616(self.coverage, self.window, self.target_addr, self.return_addr) is None)
@@ -171,16 +183,18 @@ class StackWordCallBinding8616:
         return self.window.constant if self.complete else None
 
     @property
-    def callee_entry_offsets(self) -> tuple[int, int] | None:
+    def callee_entry_offsets(self) -> object:
         """Expose the byte offsets only after the actual near frame is bound."""
         return self.window.call_boundary_offsets if self.complete else None
 
 
+@cython.ccall
 def bind_stack_word_call_window_8616(
     coverage: IRBoundaryCoverageResult8616, window: StackWordCallWindowReceipt8616,
-    target_addr: int, return_addr: int,
+    target_addr: cython.longlong, return_addr: cython.longlong,
 ) -> StackWordCallBinding8616:
     """Bind one local theorem or retain a typed contextual refusal."""
+    failure: object
     failure = _binding_failure_8616(coverage, window, target_addr, return_addr)
     accepted = int(failure is None)
     return StackWordCallBinding8616(

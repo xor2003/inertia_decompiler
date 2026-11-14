@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Preserve exact callsite segment-address provenance on generated C nodes.
 
 Layer: Types/Lowering.
@@ -11,6 +12,7 @@ values, segment identity, object layout, or call signatures.
 """
 
 from __future__ import annotations
+import cython
 
 from typing import Any, Protocol, cast
 
@@ -24,20 +26,23 @@ _SOURCE_ADDRS_TAG = "inertia_source_instruction_addrs"
 class _TaggedAstNode8616(Protocol):
     """Dynamic angr C node surface carrying mutable provenance tags."""
 
-    tags: dict[str, object]
+    tags: object
 
 
 def attach_callsite_segment_address_provenance_8616(
-    args: tuple[object, ...],
-    instruction_addrs: tuple[int, ...],
+    args: object,
+    instruction_addrs: object,
 ) -> None:
     """Attach exact PUSH sites to segmented address helpers in call arguments."""
-    exact_addrs = tuple(sorted({addr for addr in instruction_addrs if isinstance(addr, int)}))
+    prior: object
+    arg: object
+    candidate: object
+    exact_addrs = tuple(sorted({addr for addr in iter(instruction_addrs) if isinstance(addr, int)}))
     if not exact_addrs:
         return
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     for arg in args:
-        for candidate in (arg, *_iter_c_nodes_deep_8616(arg)):
+        for candidate in (arg, ) + tuple(_iter_c_nodes_deep_8616(arg)):
             if id(candidate) in seen or not isinstance(candidate, CFunctionCall):
                 continue
             seen.add(id(candidate))
@@ -50,6 +55,6 @@ def attach_callsite_segment_address_provenance_8616(
                 current_tags = {}
             tags = dict(current_tags) if isinstance(current_tags, dict) else {}
             prior = tags.get(_SOURCE_ADDRS_TAG, ())
-            prior_addrs = tuple(addr for addr in prior if isinstance(addr, int)) if isinstance(prior, tuple) else ()
-            tags[_SOURCE_ADDRS_TAG] = tuple(sorted({*prior_addrs, *exact_addrs}))
+            prior_addrs = tuple(addr for addr in iter(prior) if isinstance(addr, int)) if isinstance(prior, tuple) else ()
+            tags[_SOURCE_ADDRS_TAG] = tuple(sorted(set(prior_addrs) | set(exact_addrs)))
             boundary.tags = tags

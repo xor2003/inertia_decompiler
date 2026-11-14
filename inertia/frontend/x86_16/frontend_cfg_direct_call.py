@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Discover source-bound near CALL edges without changing execution VEX.
 
 Layer: Frontend/CFG adapter.
@@ -12,6 +13,8 @@ unresolved as typed refusals; this discovers edges, not call semantics or
 callee bodies.
 """
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
@@ -24,6 +27,12 @@ from angr.analyses.cfg.indirect_jump_resolvers.resolver import IndirectJumpResol
 
 from .arch_86_16 import Arch86_16
 from .control_coordinates import ControlAddressDomain
+import dataclasses
+import operator
+import builtins
+DirectNearCallTargetBinding8616 = typing.TypeVar("DirectNearCallTargetBinding8616")
+RelativeEdgeRefusal = typing.TypeVar("RelativeEdgeRefusal")
+block = typing.TypeVar("block")
 
 if TYPE_CHECKING:
     from inertia.semantics.direct_near_call_target_binding import (
@@ -38,10 +47,10 @@ __all__ = [
     "register_native_direct_call_resolver_8616",
 ]
 
-_MAX_NATIVE_BLOCK_BYTES_8616: int = 4096
+_MAX_NATIVE_BLOCK_BYTES_8616: cython.longlong = 4096
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class _DiscoveryIrsbBoundary8616:
     """Minimal angr-block boundary carrying the supplied discovery IRSB.
 
@@ -49,31 +58,33 @@ class _DiscoveryIrsbBoundary8616:
     ``vex`` is the discovery-time operand stream angr handed to discovery.
     """
 
-    addr: int
-    size: int
+    addr: cython.longlong
+    size: cython.longlong
     vex: object
     capstone: object
 
 
-def _imark_stream_8616(vex: object) -> tuple[tuple[int, int, int], ...]:
+def _imark_stream_8616(vex: object) -> tuple[tuple[cython.longlong, cython.longlong, cython.longlong], ...]:
     """Return the block's instruction-boundary coordinates as typed facts."""
     if not isinstance(vex, pyvex.IRSB):
         return ()
     return tuple(
         (_external_int_8616(row.addr), _external_int_8616(row.delta), _external_int_8616(row.len))
-        for row in vex.statements
+        for row in iter(vex.statements)
         if isinstance(row, pyvex.stmt.IMark)
     )
 
 
-def _external_int_8616(value: object) -> int:
+@cython.ccall
+def _external_int_8616(value: object) -> cython.longlong:
     """Coerce pyvex/angr integer-like boundary values into owned ints."""
     return int(cast(Any, value))
 
 
+@cython.ccall
 def _discovery_irsb_bound_8616(
     discovery_irsb: object, native: object,
-) -> bool:
+) -> cython.bint:
     """Bind the supplied discovery IRSB to the native re-lift it must be.
 
     The supplied operand must be the discovery-time VEX for the same decoded
@@ -85,15 +96,16 @@ def _discovery_irsb_bound_8616(
         return False
     if str(discovery_irsb.jumpkind) != "Ijk_Call":
         return False
-    if discovery_irsb.addr != native.addr or discovery_irsb.size != native.size:
+    if operator.ne(discovery_irsb.addr, native.addr) or operator.ne(discovery_irsb.size, native.size):
         return False
-    return _imark_stream_8616(discovery_irsb) == _imark_stream_8616(native)
+    return operator.eq(_imark_stream_8616(discovery_irsb), _imark_stream_8616(native))
 
 
+@cython.ccall
 def _direct_call_source_8616(
     native: angr.block.Block,
     vex: object,
-    discovery_irsb: object | None,
+    discovery_irsb: object,
 ) -> object | None:
     """Choose the operand stream the binding proof must authorize.
 
@@ -117,8 +129,8 @@ def _direct_call_source_8616(
 def native_direct_call_evidence_8616(
     project: object,
     *,
-    block_addr: int,
-    block_size: int,
+    block_addr: cython.longlong,
+    block_size: cython.longlong,
     discovery_irsb: object | None = None,
 ) -> DirectNearCallTargetBinding8616 | RelativeEdgeRefusal | None:
     """Prove one bounded native block's terminal near CALL or refuse it.
@@ -144,6 +156,10 @@ def native_direct_call_evidence_8616(
     ``binding.complete`` authorizes publishing ``binding.target_addr`` for
     CFG discovery.
     """
+    call: object
+    data: object
+    index: object
+    source_block: object
     if not (
         isinstance(project, angr.Project)
         and isinstance(project.arch, Arch86_16)
@@ -163,7 +179,7 @@ def native_direct_call_evidence_8616(
     vex = native.vex
     if not isinstance(vex, pyvex.IRSB) or str(vex.jumpkind) != "Ijk_Call":
         return None
-    marks = [row for row in vex.statements if isinstance(row, pyvex.stmt.IMark)]
+    marks = [row for row in iter(vex.statements) if isinstance(row, pyvex.stmt.IMark)]
     if not marks:
         return None
     last = marks[-1]
@@ -174,10 +190,10 @@ def native_direct_call_evidence_8616(
     offset = head - native.addr
     if (
         data is None
-        or len(data) != native.size
+        or operator.ne(len(data), native.size)
         or offset < 0
         or size <= 0
-        or offset + size != len(data)
+        or operator.ne(offset + size, len(data))
     ):
         return None
     # Defer IR/semantics imports until analysis: package bootstrap installs
@@ -197,7 +213,7 @@ def native_direct_call_evidence_8616(
         return decoded
     insns = tuple(native.capstone.insns)
     index = next(
-        (i for i, insn in enumerate(insns) if insn.address == head), None
+        (i for i, insn in builtins.iter(enumerate(insns)) if operator.eq(insn.address, head)), None
     )
     if index is None:
         return None
@@ -216,8 +232,8 @@ def native_direct_call_evidence_8616(
     call = next(
         (
             instr
-            for instr in reversed(ir_block.instrs)
-            if instr.op == "CALL" and instr.addr == head
+            for instr in builtins.iter(reversed(ir_block.instrs))
+            if instr.op == "CALL" and operator.eq(instr.addr, head)
         ),
         None,
     )
@@ -235,8 +251,8 @@ class NativeDirectCallResolver8616(IndirectJumpResolver):  # type: ignore[misc] 
         """Bind this third-party CFG adapter to one loaded project."""
         super().__init__(project, timeless=True)
 
-    def filter(self, cfg: object, addr: int, func_addr: int,
-               block: object, jumpkind: str) -> bool:
+    def filter(self, cfg: object, addr: cython.longlong, func_addr: cython.longlong,
+               block: object, jumpkind: object) -> cython.bint:
         """Keep other architectures, jump sites and return sites untouched."""
         return (
             isinstance(self.project.arch, Arch86_16)
@@ -245,10 +261,10 @@ class NativeDirectCallResolver8616(IndirectJumpResolver):  # type: ignore[misc] 
             and isinstance(block, pyvex.IRSB)
         )
 
-    def resolve(self, cfg: object, addr: int, func_addr: int,
-                block: pyvex.IRSB, jumpkind: str,
-                func_graph_complete: bool = True,
-                **kwargs: object) -> tuple[bool, list[int]]:
+    def resolve(self, cfg: object, addr: cython.longlong, func_addr: cython.longlong,
+                block: pyvex.IRSB, jumpkind: object,
+                func_graph_complete = True,
+                **kwargs: object) -> tuple[cython.bint, list[cython.longlong]]:
         """Re-lift a bounded source block and prove its terminal near CALL."""
         # angr supplies this callback argument; a native instruction theorem
         # does not depend on whether discovery has completed the CFG.
@@ -276,12 +292,14 @@ class NativeDirectCallResolver8616(IndirectJumpResolver):  # type: ignore[misc] 
         return True, [evidence.target_addr]
 
 
+@cython.ccall
 def register_native_direct_call_resolver_8616() -> None:
     """Supplement only the x86-16 default third-party resolver registry.
 
     The registry is angr's plugin boundary, not an owned semantic state.
     Preserve existing resolvers and avoid duplicates across bootstrap calls.
     """
+    existing: object
     backend_resolvers = DEFAULT_RESOLVERS.setdefault(Arch86_16.name, {})
     existing = backend_resolvers.get(cle.Backend, ())
     if NativeDirectCallResolver8616 not in existing:

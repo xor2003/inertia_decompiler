@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Locate proven structured carriers for binary call-argument joins.
 
 Layer: Structuring.
@@ -10,6 +11,8 @@ types, call signatures, or semantics from rendered text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from angr.analyses.decompiler.structured_codegen.c import (
     CAssignment,
@@ -22,10 +25,13 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616, _same_c_expression_8616
+import operator
+import builtins
 
 __all__ = ["branch_dominates_call_8616", "unique_branch_carrier_8616"]
 
 
+@cython.ccall
 def _constant_value_8616(expression: object) -> int | None:
     """Return an exact integer C constant after transparent typed casts."""
     while isinstance(expression, CTypeCast):
@@ -36,18 +42,18 @@ def _constant_value_8616(expression: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
-def _assignments_of_value_8616(node: object, value: int) -> tuple[CAssignment, ...]:
+def _assignments_of_value_8616(node: object, value: cython.longlong) -> tuple[CAssignment, ...]:
     """Collect exact constant assignments in one already structured arm."""
     return tuple(
         candidate
-        for candidate in _iter_c_nodes_deep_8616(node)
-        if isinstance(candidate, CAssignment) and _constant_value_8616(candidate.rhs) == value
+        for candidate in builtins.iter(_iter_c_nodes_deep_8616(node))
+        if isinstance(candidate, CAssignment) and operator.eq(_constant_value_8616(candidate.rhs), value)
     )
 
 
-def _branch_carrier_8616(branch: CIfElse, values: tuple[int, int]) -> CVariable | None:
+def _branch_carrier_8616(branch: CIfElse, values: object) -> CVariable | None:
     """Return the unique lvalue assigned both incoming values by distinct arms."""
-    arms = tuple(node for _condition, node in branch.condition_and_nodes if node is not None)
+    arms = tuple(node for _condition, node in iter(branch.condition_and_nodes) if node is not None)
     if branch.else_node is not None:
         arms += (branch.else_node,)
     if len(arms) < 2:
@@ -55,15 +61,15 @@ def _branch_carrier_8616(branch: CIfElse, values: tuple[int, int]) -> CVariable 
     assignments_by_value = tuple(
         tuple(
             (arm_index, assignment)
-            for arm_index, arm in enumerate(arms)
-            for assignment in _assignments_of_value_8616(arm, value)
+            for arm_index, arm in builtins.iter(enumerate(arms))
+            for assignment in builtins.iter(_assignments_of_value_8616(arm, value))
         )
-        for value in values
+        for value in iter(values)
     )
-    if any(len(assignments) != 1 for assignments in assignments_by_value):
+    if any(len(assignments) != 1 for assignments in iter(assignments_by_value)):
         return None
     (left_arm, left_assignment), (right_arm, right_assignment) = (
-        assignments[0] for assignments in assignments_by_value
+        assignments[0] for assignments in iter(assignments_by_value)
     )
     left_lhs = left_assignment.lhs
     right_lhs = right_assignment.lhs
@@ -79,28 +85,28 @@ def _branch_carrier_8616(branch: CIfElse, values: tuple[int, int]) -> CVariable 
 
 def unique_branch_carrier_8616(
     root: object,
-    values: tuple[int, int],
-) -> tuple[CIfElse, CVariable] | None:
+    values: object,
+) -> object:
     """Find one unambiguous structured binary branch carrying both values."""
     matches = tuple(
         (node, carrier)
-        for node in _iter_c_nodes_deep_8616(root)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(root))
         if isinstance(node, CIfElse)
         if (carrier := _branch_carrier_8616(node, values)) is not None
     )
     return matches[0] if len(matches) == 1 else None
 
 
-def _contains_node_8616(root: object, target: object) -> bool:
+def _contains_node_8616(root: object, target: object) -> cython.bint:
     """Return whether one AST subtree contains the exact target node."""
-    return any(node is target for node in _iter_c_nodes_deep_8616(root))
+    return any(node is target for node in builtins.iter(_iter_c_nodes_deep_8616(root)))
 
 
-def _assigns_carrier_8616(root: object, carrier: CVariable) -> bool:
+def _assigns_carrier_8616(root: object, carrier: CVariable) -> cython.bint:
     """Return whether one subtree redefines the selected branch carrier."""
     return any(
         isinstance(node, CAssignment) and _same_c_expression_8616(node.lhs, carrier)
-        for node in _iter_c_nodes_deep_8616(root)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(root))
     )
 
 
@@ -109,19 +115,20 @@ def branch_dominates_call_8616(
     branch: CIfElse,
     carrier: CVariable,
     call: CFunctionCall,
-) -> bool:
+) -> cython.bint:
     """Prove statement order and no carrier redefinition before the call."""
+    container: object
     placements = 0
     for container in _iter_c_nodes_deep_8616(root):
         if not isinstance(container, CStatements):
             continue
-        branch_indices = tuple(index for index, statement in enumerate(container.statements) if statement is branch)
+        branch_indices = tuple(index for index, statement in builtins.iter(enumerate(container.statements)) if statement is branch)
         if len(branch_indices) != 1:
             continue
         branch_index = branch_indices[0]
         call_indices = tuple(
             index
-            for index, statement in enumerate(container.statements)
+            for index, statement in builtins.iter(enumerate(container.statements))
             if index > branch_index and _contains_node_8616(statement, call)
         )
         if len(call_indices) != 1:
@@ -129,7 +136,7 @@ def branch_dominates_call_8616(
         call_index = call_indices[0]
         if any(
             _assigns_carrier_8616(statement, carrier)
-            for statement in container.statements[branch_index + 1 : call_index + 1]
+            for statement in iter(container.statements[branch_index + 1 : call_index + 1])
         ):
             continue
         placements += 1

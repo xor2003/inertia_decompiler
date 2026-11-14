@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prune register SSA carriers made obsolete by stack lowering.
 
 Layer: Types/Lowering.
@@ -18,6 +19,8 @@ without C AST reads; this local-carrier pass cannot prove them dead.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -50,6 +53,9 @@ from .register_overwrite_evidence import (
     StackMoveRegisterOverwriteFact8616,
     stack_initializer_overwrites_register_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "LoweredRegisterCarrierPruneStats8616",
@@ -59,23 +65,23 @@ __all__ = [
 log: logging.Logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RegisterSsaIdentity8616:
     """Structured identity for one angr register SSA variable."""
 
-    region: int
-    ident: int | str
-    reg_offset: int
-    width: int
+    region: cython.longlong
+    ident: object
+    reg_offset: cython.longlong
+    width: cython.longlong
     vvar_id: int | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PhysicalRegisterIdentity8616:
     """Physical register range used only for same-block overwrite proof."""
 
-    reg_offset: int
-    width: int
+    reg_offset: cython.longlong
+    width: cython.longlong
 
 
 class LoweredRegisterCarrierDecision8616(Enum):
@@ -88,19 +94,19 @@ class LoweredRegisterCarrierDecision8616(Enum):
     UNSTRUCTURED_IDENTITY = "unstructured_identity"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LoweredRegisterCarrierPruneStats8616:
     """Evidence counters for stack-lowered register-carrier pruning."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    live_use_refused_count: int
-    rhs_refused_count: int
-    no_stack_source_refused_count: int
-    unstructured_identity_refused_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    live_use_refused_count: cython.longlong
+    rhs_refused_count: cython.longlong
+    no_stack_source_refused_count: cython.longlong
+    unstructured_identity_refused_count: cython.longlong
 
 
 class _CFunctionSurface8616(Protocol):
@@ -113,10 +119,11 @@ class _CodegenSurface8616(Protocol):
     """Third-party codegen surface plus the owned result attached by this pass."""
 
     cfunc: _CFunctionSurface8616
-    _inertia_direct_stack_move_facts_8616: tuple[StackMoveRegisterOverwriteFact8616, ...]
+    _inertia_direct_stack_move_facts_8616: object
     _inertia_lowered_register_carrier_prune_8616: LoweredRegisterCarrierPruneStats8616
 
 
+@cython.ccall
 def _register_ssa_identity_8616(node: object) -> RegisterSsaIdentity8616 | None:
     """Return a register identity only when angr exposes region and SSA identity."""
     if not isinstance(node, CVariable) or not isinstance(node.variable, SimRegisterVariable):
@@ -135,6 +142,7 @@ def _register_ssa_identity_8616(node: object) -> RegisterSsaIdentity8616 | None:
     )
 
 
+@cython.ccall
 def _physical_register_identity_8616(node: object) -> PhysicalRegisterIdentity8616 | None:
     """Return an exact physical register range from an angr C variable."""
     if not isinstance(node, CVariable) or not isinstance(node.variable, SimRegisterVariable):
@@ -145,8 +153,10 @@ def _physical_register_identity_8616(node: object) -> PhysicalRegisterIdentity86
     return PhysicalRegisterIdentity8616(reg_offset=variable.reg, width=variable.size)
 
 
-def _walk_structured_values_8616(value: object, visit: object, active: set[int]) -> None:
+@cython.ccall
+def _walk_structured_values_8616(value: object, visit: object, active: object) -> None:
     """Walk shared structured-C nodes, including owned casts, without ownership cycles."""
+    child: object
     if value is None:
         return
     if isinstance(value, dict):
@@ -182,11 +192,15 @@ def _register_read_owner_ids_8616(
 ) -> dict[RegisterSsaIdentity8616, frozenset[int | None]]:
     """Map register reads to their containing direct assignment, if any."""
     mutable_reads: dict[RegisterSsaIdentity8616, set[int | None]] = {}
-    active: set[int] = set()
+    active: set[cython.longlong] = set()
     assignment_owners: list[CAssignment] = []
 
     def visit(value: object) -> None:
         """Visit one structured-C node and distinguish definitions from reads."""
+        child: object
+        identity: object
+        owner: object
+        attr: object
         if isinstance(value, CVariable):
             identity = _register_ssa_identity_8616(value)
             if identity is not None:
@@ -208,9 +222,10 @@ def _register_read_owner_ids_8616(
             _walk_structured_values_8616(child, visit, active)
 
     _walk_structured_values_8616(root, visit, active)
-    return {identity: frozenset(owners) for identity, owners in mutable_reads.items()}
+    return {identity: frozenset(owners) for identity, owners in builtins.iter(mutable_reads.items())}
 
 
+@cython.ccall
 def _register_read_identities_8616(root: object) -> frozenset[RegisterSsaIdentity8616]:
     """Collect register identities read outside direct assignment definitions."""
     return frozenset(_register_read_owner_ids_8616(root))
@@ -219,10 +234,13 @@ def _register_read_identities_8616(root: object) -> frozenset[RegisterSsaIdentit
 def _physical_register_read_identities_8616(root: object) -> frozenset[PhysicalRegisterIdentity8616]:
     """Collect physical register ranges read outside direct assignment definitions."""
     reads: set[PhysicalRegisterIdentity8616] = set()
-    active: set[int] = set()
+    active: set[cython.longlong] = set()
 
     def visit(value: object) -> None:
         """Visit one structured-C node and distinguish definitions from reads."""
+        child: object
+        identity: object
+        attr: object
         if isinstance(value, CVariable):
             identity = _physical_register_identity_8616(value)
             if identity is not None:
@@ -242,7 +260,8 @@ def _physical_register_read_identities_8616(root: object) -> frozenset[PhysicalR
     return frozenset(reads)
 
 
-def _rhs_variable_verdict_8616(node: CVariable) -> tuple[bool, tuple[object, ...], bool]:
+@cython.ccall
+def _rhs_variable_verdict_8616(node: CVariable) -> tuple[cython.bint, tuple[object, ...], cython.bint]:
     """Return the acceptance verdict for one variable node."""
     variable = node.variable
     if isinstance(variable, SimStackVariable):
@@ -254,7 +273,8 @@ def _rhs_variable_verdict_8616(node: CVariable) -> tuple[bool, tuple[object, ...
     return True, (), False
 
 
-def _rhs_node_children_8616(node: object) -> tuple[bool, tuple[object, ...], bool]:
+@cython.ccall
+def _rhs_node_children_8616(node: object) -> object:
     """Return ``(accepted, children, stack_source)`` for one value-only node."""
     if isinstance(node, CConstant):
         return True, (), False
@@ -273,11 +293,13 @@ def _rhs_node_children_8616(node: object) -> tuple[bool, tuple[object, ...], boo
     return False, (), False
 
 
-def _pure_stack_lowered_rhs_8616(rhs: object) -> tuple[bool, bool]:
+@cython.ccall
+def _pure_stack_lowered_rhs_8616(rhs: object) -> tuple[cython.bint, cython.bint]:
     """Return ``(pure, has_stack_source)`` for a bounded value-only RHS."""
+    node: object
     has_stack_source = False
     pending = [rhs]
-    active: set[int] = set()
+    active: set[cython.longlong] = set()
     while pending:
         node = pending.pop()
         if node is None:
@@ -294,30 +316,36 @@ def _pure_stack_lowered_rhs_8616(rhs: object) -> tuple[bool, bool]:
     return True, has_stack_source
 
 
+@cython.ccall
 def _first_following_register_event_8616(
     block: CStatements,
-    statement_index: int,
+    statement_index: cython.longlong,
     identity: RegisterSsaIdentity8616,
 ) -> tuple[str, int | None]:
     """Return the next same-block read or overwrite for one register identity."""
+    following_index: object
+    statement: object
     for following_index, statement in enumerate(
         block.statements[statement_index + 1 :],
         start=statement_index + 1,
     ):
         if identity in _register_read_identities_8616(statement):
             return "read", following_index
-        if isinstance(statement, CAssignment) and _register_ssa_identity_8616(statement.lhs) == identity:
+        if isinstance(statement, CAssignment) and operator.eq(_register_ssa_identity_8616(statement.lhs), identity):
             return "overwrite", following_index
     return "block_end", None
 
 
+@cython.ccall
 def _first_following_physical_register_event_8616(
     block: CStatements,
-    statement_index: int,
+    statement_index: cython.longlong,
     identity: PhysicalRegisterIdentity8616,
-    stack_move_facts: tuple[StackMoveRegisterOverwriteFact8616, ...],
+    stack_move_facts: object,
 ) -> tuple[str, int | None]:
     """Return the next same-block physical-register read or overwrite."""
+    following_index: object
+    statement: object
     for following_index, statement in enumerate(
         block.statements[statement_index + 1 :],
         start=statement_index + 1,
@@ -331,30 +359,33 @@ def _first_following_physical_register_event_8616(
             return "overwrite", following_index
         if identity in _physical_register_read_identities_8616(statement):
             return "read", following_index
-        if isinstance(statement, CAssignment) and _physical_register_identity_8616(statement.lhs) == identity:
+        if isinstance(statement, CAssignment) and operator.eq(_physical_register_identity_8616(statement.lhs), identity):
             return "overwrite", following_index
     return "block_end", None
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _CarrierPruneScan8616:
     """Mutable census of unread stack-lowered register carriers."""
 
-    stack_move_facts: tuple[StackMoveRegisterOverwriteFact8616, ...]
-    read_owner_ids: dict[RegisterSsaIdentity8616, frozenset[int | None]]
-    runtime_gp_names: frozenset[str]
-    raw: int = 0
-    normalized: int = 0
-    classified: int = 0
-    live_refused: int = 0
-    rhs_refused: int = 0
-    no_stack_refused: int = 0
-    identity_refused: int = 0
-    removable_ids: set[int] = field(default_factory=set)
-    candidate_locations: dict[int, tuple[CStatements, int]] = field(default_factory=dict)
+    stack_move_facts: object
+    read_owner_ids: object
+    runtime_gp_names: object
+    raw: cython.longlong = 0
+    normalized: cython.longlong = 0
+    classified: cython.longlong = 0
+    live_refused: cython.longlong = 0
+    rhs_refused: cython.longlong = 0
+    no_stack_refused: cython.longlong = 0
+    identity_refused: cython.longlong = 0
+    removable_ids: object = field(default_factory=set)
+    candidate_locations: object = field(default_factory=dict)
 
+    @cython.ccall
     def scan_node(self, node: object) -> None:
         """Census one node and classify register assignment candidates."""
+        statement: object
+        statement_index: object
         if isinstance(node, CStatements):
             for statement_index, statement in enumerate(node.statements):
                 self.candidate_locations[id(statement)] = (node, statement_index)
@@ -367,6 +398,10 @@ class _CarrierPruneScan8616:
 
     def classify_assignment(self, node: CAssignment) -> None:
         """Apply the full evidence ladder to one register assignment."""
+        identity: object
+        location: object
+        physical_identity: object
+        register_name: object
         identity = _register_ssa_identity_8616(node.lhs)
         location = self.candidate_locations.get(id(node))
         physical_identity = _physical_register_identity_8616(node.lhs)
@@ -402,7 +437,7 @@ class _CarrierPruneScan8616:
             self.no_stack_refused += 1
             decision = LoweredRegisterCarrierDecision8616.NO_STACK_SOURCE
         elif caller_visible_state or (
-            identity is not None and any(owner != id(node) for owner in self.read_owner_ids.get(identity, ()))
+            identity is not None and any(operator.ne(owner, id(node)) for owner in builtins.iter(self.read_owner_ids.get(identity, ())))
         ):
             self.live_refused += 1
             decision = LoweredRegisterCarrierDecision8616.LIVE_USE
@@ -420,17 +455,20 @@ class _CarrierPruneScan8616:
             )
 
 
-def _remove_removable_8616(root: CStatements, removable_ids: set[int]) -> int:
+@cython.ccall
+def _remove_removable_8616(root: CStatements, removable_ids: object) -> cython.longlong:
     """Delete all proven-dead assignments from their owning blocks."""
+    block: object
+    node: object
     materialized = 0
-    seen_blocks: set[int] = set()
+    seen_blocks: set[cython.longlong] = set()
     blocks: list[CStatements] = []
-    for node in (root, *_iter_c_nodes_deep_8616(root)):
+    for node in (root, ) + tuple(_iter_c_nodes_deep_8616(root)):
         if isinstance(node, CStatements) and id(node) not in seen_blocks:
             seen_blocks.add(id(node))
             blocks.append(node)
     for block in blocks:
-        kept = [statement for statement in block.statements if id(statement) not in removable_ids]
+        kept = [statement for statement in iter(block.statements) if id(statement) not in removable_ids]
         removed = len(block.statements) - len(kept)
         if removed:
             block.statements[:] = kept
@@ -438,13 +476,16 @@ def _remove_removable_8616(root: CStatements, removable_ids: set[int]) -> int:
     return materialized
 
 
-def prune_unread_stack_lowered_register_carriers_8616(codegen: object) -> bool:
+@cython.ccall
+def prune_unread_stack_lowered_register_carriers_8616(codegen: object) -> cython.bint:
     """Delete only globally unread register SSA assignments consumed by stack lowering.
 
     ``codegen`` and its C AST are dynamic third-party angr boundaries. The
     attached stats object is an owned typed contract and is written through a
     protocol cast.
     """
+    root: object
+    node: object
     typed_codegen = cast(_CodegenSurface8616, codegen)
     try:
         root = typed_codegen.cfunc.statements
@@ -462,7 +503,7 @@ def prune_unread_stack_lowered_register_carriers_8616(codegen: object) -> bool:
         read_owner_ids=_register_read_owner_ids_8616(root),
         runtime_gp_names=runtime_gp_state_names_8616(codegen),
     )
-    for node in (root, *_iter_c_nodes_deep_8616(root)):
+    for node in (root, ) + tuple(_iter_c_nodes_deep_8616(root)):
         scan.scan_node(node)
     materialized = _remove_removable_8616(root, scan.removable_ids)
 

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bind existing break predicates to exact natural-loop exit evidence.
 
 Layer: Structuring.
@@ -11,6 +12,8 @@ an exit from break-statement source tags or from rendered expressions.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -37,21 +40,25 @@ from .loop_break_topology import LoopBreakTopology8616
 from .loop_condition_identity import is_owned_loop_continuation_8616
 from .multi_arm_condition_ownership import first_statement_block_8616
 from .natural_loop_topology import LoopTopologyVerdict8616, NaturalLoopTopology8616
+import dataclasses
+import operator
+import builtins
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ExistingLoopExitStats8616:
     """Closed evidence counts for existing single-predicate loop exits."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    changed_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    changed_count: cython.longlong = 0
 
 
-def _sole_break_8616(body: object) -> bool:
+@cython.ccall
+def _sole_break_8616(body: object) -> cython.bint:
     """Require a plain break without executed setup or another statement."""
     while isinstance(body, CStatements) and len(body.statements) == 1:
         body = body.statements[0]
@@ -60,6 +67,9 @@ def _sole_break_8616(body: object) -> bool:
 
 def _local_guards_8616(node: object) -> Iterator[tuple[CIfBreak | CIfElse, CExpression]]:
     """Walk this loop's guards, stopping at nested loops and switch scopes."""
+    _: object
+    body: object
+    statement: object
     if isinstance(node, CStatements):
         for statement in node.statements:
             yield from _local_guards_8616(statement)
@@ -75,18 +85,20 @@ def _local_guards_8616(node: object) -> Iterator[tuple[CIfBreak | CIfElse, CExpr
         yield from _local_guards_8616(node.else_node)
 
 
+@cython.ccall
 def _posttest_loop_owner_8616(
-    node: CDoWhileLoop, block: int, topology: LoopBreakTopology8616,
+    node: CDoWhileLoop, block: cython.longlong, topology: LoopBreakTopology8616,
 ) -> NaturalLoopTopology8616 | None:
     """Bind a bottom-tested loop by body entry and exact continuation backedge."""
+    loop: object
     header = first_statement_block_8616(node.body)
-    targets = {topology.resolve_target(target) for source, target in topology.edges if source == block}
+    targets = {topology.resolve_target(target) for source, target in iter(topology.edges) if source == block}
     owners: list[NaturalLoopTopology8616] = []
     for loop in topology.loops:
-        if loop.verdict is not LoopTopologyVerdict8616.PROVEN or loop.header != header or block not in loop.body:
+        if loop.verdict is not LoopTopologyVerdict8616.PROVEN or operator.ne(loop.header, header) or block not in loop.body:
             continue
-        continuation = loop.header if block == loop.latch else loop.latch
-        exits = {target for _, target in loop.exit_edges}
+        continuation = loop.header if operator.eq(block, loop.latch) else loop.latch
+        exits = {target for _, target in iter(loop.exit_edges)}
         if targets == {continuation, *exits}:
             owners.append(loop)
     return owners[0] if len(owners) == 1 else None
@@ -102,8 +114,10 @@ def _loop_owner_8616(
     the unique proven CFG region; a copied loop tag alone cannot establish the
     break's scope.
     """
+    block: object
+    body_entry: object
     condition = node.condition
-    body_entry: int | None = None
+    body_entry = None
     if isinstance(condition, CExpression) and is_owned_loop_continuation_8616(condition):
         block = condition.tags["vex_block_addr"]
         if isinstance(node, CDoWhileLoop):
@@ -116,14 +130,14 @@ def _loop_owner_8616(
     else:
         return None
     owners = tuple(
-        loop for loop in topology.loops
-        if loop.verdict is LoopTopologyVerdict8616.PROVEN and loop.header == block
+        loop for loop in iter(topology.loops)
+        if loop.verdict is LoopTopologyVerdict8616.PROVEN and operator.eq(loop.header, block)
     )
     if len(owners) != 1:
         return None
     owner = owners[0]
     if isinstance(node, CWhileLoop) and isinstance(condition, CConstant):
-        body_entry_is_header = body_entry == owner.header
+        body_entry_is_header = operator.eq(body_entry, owner.header)
         body_entry_is_direct_successor = (
             body_entry is not None
             and body_entry in owner.body
@@ -131,9 +145,9 @@ def _loop_owner_8616(
         )
         header_guards = tuple(
             guard
-            for guard, guard_condition in _local_guards_8616(node.body)
-            if guard_condition.tags.get("vex_block_addr") == owner.header
-            and guard.tags.get("ins_addr") == guard_condition.tags.get("ins_addr")
+            for guard, guard_condition in builtins.iter(_local_guards_8616(node.body))
+            if operator.eq(guard_condition.tags.get("vex_block_addr"), owner.header)
+            and operator.eq(guard.tags.get("ins_addr"), guard_condition.tags.get("ins_addr"))
             and (
                 guard_condition.tags.get("inertia_structuring_condition_cfg_materialized_8616") is True
                 or guard_condition.tags.get("inertia_jcc_materialized_8616") is True
@@ -149,34 +163,38 @@ def _loop_owner_8616(
     return owner
 
 
+@cython.ccall
 def _exit_polarity_8616(
     fact: ConditionIR, loop: NaturalLoopTopology8616, topology: LoopBreakTopology8616,
 ) -> bool | None:
     """Prove whether taken or fallthrough reaches the loop's sole exit."""
+    exit_target: object
+    fallthrough: object
+    taken: object
     block = fact.block_addr
     taken, fallthrough = fact.taken_target, fact.fallthrough_target
-    if block not in loop.body or taken == fallthrough:
+    if block not in loop.body or operator.eq(taken, fallthrough):
         return None
-    targets = {target for source, target in topology.edges if source == block}
+    targets = {target for source, target in iter(topology.edges) if source == block}
     if targets != {taken, fallthrough}:
         return None
     if taken is None or fallthrough is None:
         return None
     taken = topology.resolve_target(taken)
     fallthrough = topology.resolve_target(fallthrough)
-    exits = {target for _, target in loop.exit_edges}
+    exits = {target for _, target in iter(loop.exit_edges)}
     if len(exits) != 1:
         return None
     exit_target = next(iter(exits))
-    if taken == exit_target and fallthrough in loop.body:
+    if operator.eq(taken, exit_target) and fallthrough in loop.body:
         return True
-    if fallthrough == exit_target and taken in loop.body:
+    if operator.eq(fallthrough, exit_target) and taken in loop.body:
         return False
     return None
 
 
 def _guard_fact_8616(
-    current: CExpression, typed_conditions: tuple[ConditionIR, ...],
+    current: CExpression, typed_conditions: object,
     condition_key: Callable[[object], tuple[int, int] | None],
 ) -> ConditionIR | None:
     """Require an effect-free single predicate with one exact typed owner."""
@@ -185,17 +203,19 @@ def _guard_fact_8616(
     if classify_condition_call_effects_8616(current).has_semantic_call:
         return None
     key = condition_key(current)
-    facts = tuple(fact for fact in typed_conditions if (fact.src_insn, fact.block_addr) == key)
+    facts = tuple(fact for fact in iter(typed_conditions) if (fact.src_insn, fact.block_addr) == key)
     return facts[0] if len(facts) == 1 else None
 
 
+@cython.ccall
 def _replace_guard_8616(
-    guard: CIfBreak | CIfElse, current: CExpression, fact: ConditionIR, polarity: bool,
+    guard: CIfBreak | CIfElse, current: CExpression, fact: ConditionIR, polarity: cython.bint,
     lower: Callable[[ConditionIR], CExpression | None],
     invert: Callable[[CExpression], CExpression],
-    record_precision: Callable[[CExpression, CExpression], bool],
-) -> bool:
+    record_precision: Callable[[CExpression, CExpression], cython.bint],
+) -> cython.bint:
     """Publish one CFG-proven replacement without altering the break body."""
+    replacement: object
     replacement = lower(fact)
     if replacement is None:
         raise PipelineHardError(f"classified loop-exit condition jcc={fact.src_insn:#x} could not be lowered")
@@ -218,17 +238,24 @@ def _replace_guard_8616(
     return True
 
 
+@cython.ccall
 def materialize_existing_loop_exit_conditions_8616(
     root: object,
-    typed_conditions: tuple[ConditionIR, ...],
-    topology: LoopBreakTopology8616 | None,
+    typed_conditions: object,
+    topology: object,
     *,
     condition_key: Callable[[object], tuple[int, int] | None],
     lower: Callable[[ConditionIR], CExpression | None],
     invert: Callable[[CExpression], CExpression],
-    record_precision: Callable[[CExpression, CExpression], bool],
+    record_precision: Callable[[CExpression, CExpression], cython.bint],
 ) -> ExistingLoopExitStats8616:
     """Materialize existing break guards without changing their bodies or CFG."""
+    fact: object
+    owner: object
+    polarity: object
+    current: object
+    guard: object
+    node: object
     if topology is None:
         return ExistingLoopExitStats8616()
     raw = normalized = materialized = changed = 0

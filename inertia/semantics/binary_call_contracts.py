@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove conservative call return and storage effects from decoded binary code.
 
 Layer: Semantics.
@@ -18,6 +19,8 @@ decoder helpers below; owned summaries and contracts use direct typed access.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from typing import Any, cast
@@ -53,47 +56,52 @@ from .call_contracts import (
     IntegerValueRange8616,
     RuntimeCallReturnContract8616,
 )
+import dataclasses
+import operator
 
 __all__ = ["binary_call_return_contract_8616"]
 
-type DynamicValue = Any
+DynamicValue = typing.TypeAliasType("DynamicValue", Any)
 
 _MAX_FUNCTION_BLOCKS_8616 = 128
 _MAX_RECURSION_DEPTH_8616 = 8
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _BinaryFunctionSummary8616:
     """Conservative effects collected from every decoded function path."""
 
-    all_returns_nonnegative_ax: bool
-    return_count: int
-    exact_memory_writes: tuple[IRAddress, ...]
-    has_unknown_memory_writes: bool
+    all_returns_nonnegative_ax: cython.bint
+    return_count: cython.longlong
+    exact_memory_writes: object
+    has_unknown_memory_writes: cython.bint
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _InstructionEffects8616:
     """Memory and AX-sign effects of one decoded instruction."""
 
-    ax_sign_clear: bool
-    exact_memory_writes: tuple[IRAddress, ...]
-    has_unknown_memory_write: bool
+    ax_sign_clear: cython.bint
+    exact_memory_writes: object
+    has_unknown_memory_write: cython.bint
 
 
+@cython.ccall
 def _instruction_from_wrapper_8616(wrapper: DynamicValue) -> DynamicValue:
     """Return the Capstone instruction at the dynamic angr boundary."""
     return cast(Any, wrapper).insn
 
 
-def _decode_block_8616(project: object, address: int) -> tuple[DynamicValue, ...]:
+@cython.ccall
+def _decode_block_8616(project: object, address: cython.longlong) -> tuple[DynamicValue, ...]:
     """Decode one basic block through the dynamic angr project boundary."""
     project_dynamic = cast(Any, project)
     block = project_dynamic.factory.block(address, opt_level=0)
     return tuple(cast(Any, block).capstone.insns or ())
 
 
-def _address_is_mapped_8616(project: object, address: int) -> bool:
+@cython.ccall
+def _address_is_mapped_8616(project: object, address: cython.longlong) -> cython.bint:
     """Return whether an instruction address belongs to a loaded object."""
     project_dynamic = cast(Any, project)
     try:
@@ -103,33 +111,35 @@ def _address_is_mapped_8616(project: object, address: int) -> bool:
     return loader.find_object_containing(address) is not None
 
 
+@cython.ccall
 def _direct_target_8616(insn: DynamicValue) -> int | None:
     """Return the exact immediate target of one direct control transfer."""
     operands = tuple(cast(Any, insn).operands or ())
-    if len(operands) != 1 or operands[0].type != X86_OP_IMM:
+    if len(operands) != 1 or operator.ne(operands[0].type, X86_OP_IMM):
         return None
     target = operands[0].imm
     return target if isinstance(target, int) else None
 
 
-def _written_registers_8616(insn: DynamicValue) -> frozenset[int]:
+def _written_registers_8616(insn: DynamicValue) -> frozenset[cython.longlong]:
     """Return Capstone's explicit and implicit written-register set."""
     try:
         _reads, writes = cast(Any, insn).regs_access()
     except (AttributeError, ValueError):
         return frozenset()
-    return frozenset(register for register in writes if isinstance(register, int))
+    return frozenset(register for register in iter(writes) if isinstance(register, int))
 
 
-def _immediate_assignment_clears_ax_sign_8616(insn: DynamicValue) -> bool:
+@cython.ccall
+def _immediate_assignment_clears_ax_sign_8616(insn: DynamicValue) -> cython.bint:
     """Prove an immediate MOV establishes a nonnegative 16-bit AX value."""
-    if cast(Any, insn).id != X86_INS_MOV:
+    if operator.ne(cast(Any, insn).id, X86_INS_MOV):
         return False
     operands = tuple(cast(Any, insn).operands or ())
     if (
         len(operands) != 2
-        or operands[0].type != X86_OP_REG
-        or operands[1].type != X86_OP_IMM
+        or operator.ne(operands[0].type, X86_OP_REG)
+        or operator.ne(operands[1].type, X86_OP_IMM)
     ):
         return False
     register = operands[0].reg
@@ -143,15 +153,16 @@ def _immediate_assignment_clears_ax_sign_8616(insn: DynamicValue) -> bool:
     return False
 
 
-def _and_clears_ax_sign_8616(insn: DynamicValue) -> bool:
+@cython.ccall
+def _and_clears_ax_sign_8616(insn: DynamicValue) -> cython.bint:
     """Prove an immediate AND clears AX's sign bit."""
-    if cast(Any, insn).id != X86_INS_AND:
+    if operator.ne(cast(Any, insn).id, X86_INS_AND):
         return False
     operands = tuple(cast(Any, insn).operands or ())
     if (
         len(operands) != 2
-        or operands[0].type != X86_OP_REG
-        or operands[1].type != X86_OP_IMM
+        or operator.ne(operands[0].type, X86_OP_REG)
+        or operator.ne(operands[1].type, X86_OP_IMM)
     ):
         return False
     register = operands[0].reg
@@ -165,32 +176,36 @@ def _and_clears_ax_sign_8616(insn: DynamicValue) -> bool:
     return False
 
 
+@cython.ccall
 def _memory_space_8616(mem: DynamicValue) -> MemSpace:
     """Return the architectural memory space selected by one x86 operand."""
-    if mem.segment == X86_REG_ES:
+    if operator.eq(mem.segment, X86_REG_ES):
         return MemSpace.ES
-    if mem.segment == X86_REG_SS or mem.base in {X86_REG_BP, X86_REG_SP}:
+    if operator.eq(mem.segment, X86_REG_SS) or mem.base in {X86_REG_BP, X86_REG_SP}:
         return MemSpace.SS
     if mem.segment in {X86_REG_INVALID, X86_REG_DS}:
         return MemSpace.DS
     return MemSpace.UNKNOWN
 
 
-def _direct_addressing_8616(mem: object) -> bool:
+@cython.ccall
+def _direct_addressing_8616(mem: object) -> cython.bint:
     """Return whether one capstone mem operand is direct [disp] addressing."""
     return (
-        cast(Any, mem).base == X86_REG_INVALID
-        and cast(Any, mem).index == X86_REG_INVALID
+        operator.eq(cast(Any, mem).base, X86_REG_INVALID)
+        and operator.eq(cast(Any, mem).index, X86_REG_INVALID)
         and isinstance(cast(Any, mem).disp, int)
     )
 
 
-def _positive_size_8616(operand: object) -> bool:
+@cython.ccall
+def _positive_size_8616(operand: object) -> cython.bint:
     """Return whether one operand has a positive integer byte size."""
     return isinstance(cast(Any, operand).size, int) and cast(Any, operand).size > 0
 
 
-def _memory_write_8616(operand: DynamicValue) -> tuple[IRAddress | None, bool]:
+@cython.ccall
+def _memory_write_8616(operand: DynamicValue) -> tuple[IRAddress | None, cython.bint]:
     """Classify one written memory operand as exact, local-stack, or unknown."""
     mem = cast(Any, operand).mem
     space = _memory_space_8616(mem)
@@ -214,15 +229,18 @@ def _memory_write_8616(operand: DynamicValue) -> tuple[IRAddress | None, bool]:
     )
 
 
+@cython.ccall
 def _instruction_effects_8616(
     insn: DynamicValue,
-    incoming_ax_sign_clear: bool,
+    incoming_ax_sign_clear: cython.bint,
 ) -> _InstructionEffects8616:
     """Apply one non-call instruction to the conservative abstract state."""
+    exact: object
+    operand: object
     exact_writes: list[IRAddress] = []
     unknown_write = False
     for operand in tuple(cast(Any, insn).operands or ()):
-        if operand.type != X86_OP_MEM or not operand.access & CS_AC_WRITE:
+        if operator.ne(operand.type, X86_OP_MEM) or not operand.access & CS_AC_WRITE:
             continue
         exact, unknown = _memory_write_8616(operand)
         if exact is not None:
@@ -245,22 +263,24 @@ def _instruction_effects_8616(
     )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _BinaryFunctionScan8616:
     """Mutable worklist state for one binary function summary scan."""
 
     project: object
-    depth: int
-    next_active: frozenset[int]
-    cache: dict[int, _BinaryFunctionSummary8616]
-    worklist: list[tuple[int, bool]]
-    visited: set[tuple[int, bool]] = field(default_factory=set)
-    exact_writes: set[IRAddress] = field(default_factory=set)
-    unknown_write: bool = False
-    return_states: list[bool] = field(default_factory=list)
+    depth: cython.longlong
+    next_active: object
+    cache: object
+    worklist: object
+    visited: object = field(default_factory=set)
+    exact_writes: object = field(default_factory=set)
+    unknown_write: cython.bint = False
+    return_states: object = field(default_factory=list)
 
-    def apply_call(self, insn: DynamicValue) -> bool:
+    @cython.ccall
+    def apply_call(self, insn: DynamicValue) -> cython.bint:
         """Transfer one direct call through the callee summary."""
+        call_target: object
         call_target = _direct_target_8616(insn)
         if call_target is None:
             self.unknown_write = True
@@ -278,13 +298,15 @@ class _BinaryFunctionScan8616:
         )
         return callee.return_count > 0 and callee.all_returns_nonnegative_ax
 
+    @cython.ccall
     def enqueue_jump(
         self,
         insn: DynamicValue,
-        next_addr: int,
-        ax_sign_clear: bool,
+        next_addr: cython.longlong,
+        ax_sign_clear: cython.bint,
     ) -> None:
         """Enqueue the proven jump target and conditional fallthrough."""
+        jump_target: object
         jump_target = _direct_target_8616(insn)
         if jump_target is None:
             self.unknown_write = True
@@ -292,11 +314,13 @@ class _BinaryFunctionScan8616:
             self.worklist.append((jump_target, ax_sign_clear))
         else:
             self.unknown_write = True
-        if insn.id != X86_INS_JMP:
+        if operator.ne(insn.id, X86_INS_JMP):
             self.worklist.append((next_addr, ax_sign_clear))
 
-    def scan_block(self, block_addr: int, ax_sign_clear: bool) -> None:
+    @cython.ccall
+    def scan_block(self, block_addr: cython.longlong, ax_sign_clear: cython.bint) -> None:
         """Decode and transfer one block onto the scan state."""
+        wrapper: object
         try:
             wrappers = _decode_block_8616(self.project, block_addr)
         except (AttributeError, KeyError, ValueError):
@@ -353,15 +377,19 @@ class _BinaryFunctionScan8616:
         )
 
 
+@cython.ccall
 def _analyze_binary_function_8616(
     project: object,
-    target: int,
+    target: cython.longlong,
     *,
-    depth: int,
-    active_targets: frozenset[int],
-    cache: dict[int, _BinaryFunctionSummary8616],
+    depth: cython.longlong,
+    active_targets: object,
+    cache: object,
 ) -> _BinaryFunctionSummary8616:
     """Summarize all decoded paths of one direct binary function."""
+    ax_sign_clear: object
+    block_addr: object
+    cached: object
     cached = cache.get(target)
     if cached is not None:
         return cached
@@ -395,9 +423,10 @@ def _analyze_binary_function_8616(
     return summary
 
 
+@cython.ccall
 def binary_call_return_contract_8616(
     project: object,
-    target: int,
+    target: cython.longlong,
 ) -> RuntimeCallReturnContract8616 | None:
     """Prove a nonnegative AX return and classified writes for a direct target."""
     summary = _analyze_binary_function_8616(

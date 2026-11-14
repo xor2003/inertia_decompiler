@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Keep binary-proven stack moves inside their owning structured branch.
 
 Layer: Structuring.
@@ -20,6 +21,8 @@ attributes. Dynamic access below is restricted to those third-party surfaces.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 import logging
@@ -45,6 +48,9 @@ from .condition_replay import (
     StructuringConditionReplayFact8616,
     condition_replay_facts_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -55,37 +61,37 @@ class DirectStackMoveBranchArm8616(Enum):
     TAKEN = "taken"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectStackMoveBranchFact8616:
     """Typed join between one stack move and one machine branch."""
 
-    move_ins_addr: int
-    condition_ins_addr: int
+    move_ins_addr: cython.longlong
+    condition_ins_addr: cython.longlong
     condition_producer_insn: int | None
     arm: DirectStackMoveBranchArm8616
-    arm_start: int
-    merge_addr: int
+    arm_start: cython.longlong
+    merge_addr: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectStackMoveBranchStats8616:
     """Closed evidence counters for one branch-placement replay."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    already_materialized_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    already_materialized_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _DirectStackMovePlacementSite8616:
     """One mutable statement sequence and its machine-taken suffix start."""
 
-    statements: list[Any]
-    start_index: int
-    bounded_owner: bool
+    statements: object
+    start_index: cython.longlong
+    bounded_owner: cython.bint
 
 
 _BRANCH_OWNED_SOURCE_KINDS_8616 = frozenset(
@@ -97,13 +103,16 @@ _BRANCH_OWNED_SOURCE_KINDS_8616 = frozenset(
 )
 
 
+@cython.ccall
 def _boundary_tuple_8616(value: object) -> tuple[Any, ...]:
     """Convert one dynamic angr collection to a stable tuple."""
     return tuple(cast(Iterable[Any], value))
 
 
-def _candidate_addresses_8616(project: object, address: int) -> frozenset[int]:
+@cython.ccall
+def _candidate_addresses_8616(project: object, address: cython.longlong) -> frozenset[cython.longlong]:
     """Return current/original address-domain candidates for one instruction."""
+    delta: object
     candidates = {address}
     delta = getattr(project, "_inertia_original_linear_delta", None)
     if isinstance(delta, int) and delta:
@@ -111,13 +120,22 @@ def _candidate_addresses_8616(project: object, address: int) -> frozenset[int]:
     return frozenset(candidates)
 
 
+@cython.ccall
 def direct_stack_move_instruction_targets_8616(
     project: object,
     function: object,
     conditions: Iterable[ConditionIR],
-) -> dict[int, int]:
+) -> object:
     """Return exact immediate targets for decoded function instructions."""
-    result: dict[int, int] = {}
+    address: object
+    capstone: object
+    factory: object
+    insn: object
+    local_blocks: object
+    block: object
+    condition: object
+    wrapper: object
+    result: dict[cython.longlong, cython.longlong] = {}
     blocks = _boundary_tuple_8616(getattr(function, "blocks", ()) or ())
     local_blocks = getattr(function, "_local_blocks", None)
     if isinstance(local_blocks, dict) and local_blocks:
@@ -131,7 +149,7 @@ def direct_stack_move_instruction_targets_8616(
             if (
                 isinstance(address, int)
                 and len(operands) == 1
-                and getattr(operands[0], "type", None) == X86_OP_IMM
+                and operator.eq(getattr(operands[0], "type", None), X86_OP_IMM)
                 and isinstance(getattr(operands[0], "imm", None), int)
             ):
                 result[address] = int(operands[0].imm)
@@ -150,9 +168,9 @@ def direct_stack_move_instruction_targets_8616(
             insn = getattr(wrappers[0], "insn", wrappers[0])
             operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
             if (
-                getattr(insn, "address", None) == fallthrough
+                operator.eq(getattr(insn, "address", None), fallthrough)
                 and len(operands) == 1
-                and getattr(operands[0], "type", None) == X86_OP_IMM
+                and operator.eq(getattr(operands[0], "type", None), X86_OP_IMM)
                 and isinstance(getattr(operands[0], "imm", None), int)
             ):
                 result[fallthrough] = int(operands[0].imm)
@@ -162,7 +180,7 @@ def direct_stack_move_instruction_targets_8616(
 def recover_direct_stack_move_branch_facts_8616(
     conditions: Iterable[ConditionIR],
     move_facts: Iterable[DirectStackMoveFact8616],
-    instruction_targets: dict[int, int],
+    instruction_targets: object,
 ) -> tuple[DirectStackMoveBranchFact8616, ...]:
     """Recover unique taken-arm ownership from ConditionIR and exact jumps.
 
@@ -170,6 +188,9 @@ def recover_direct_stack_move_branch_facts_8616(
     an unconditional jump to the merge. This is sufficient to prove the body
     interval without source, names, rendered C, or address-specific rules.
     """
+    merge_addr: object
+    condition: object
+    move: object
     recovered: list[DirectStackMoveBranchFact8616] = []
     for move in move_facts:
         if move.source_kind not in _BRANCH_OWNED_SOURCE_KINDS_8616:
@@ -201,35 +222,43 @@ def recover_direct_stack_move_branch_facts_8616(
                 )
         if not candidates:
             continue
-        smallest_span = min(candidate.merge_addr - candidate.arm_start for candidate in candidates)
+        smallest_span = min(candidate.merge_addr - candidate.arm_start for candidate in iter(candidates))
         innermost = tuple(
             candidate
-            for candidate in candidates
-            if candidate.merge_addr - candidate.arm_start == smallest_span
+            for candidate in iter(candidates)
+            if operator.eq(candidate.merge_addr - candidate.arm_start, smallest_span)
         )
         if len(innermost) == 1:
             recovered.append(innermost[0])
     return tuple(recovered)
 
 
-def _node_tag_addresses_8616(node: object) -> frozenset[int]:
+def _node_tag_addresses_8616(node: object) -> frozenset[cython.longlong]:
     """Return instruction-origin addresses attached to one angr C node."""
+    tags: object
     tags = getattr(node, "tags", None)
     if not isinstance(tags, dict):
         return frozenset()
     return frozenset(
         value
-        for value in (
+        for value in iter((
             tags.get("ins_addr"),
             tags.get("inertia_relocated_from_ins_addr"),
-        )
+        ))
         if isinstance(value, int)
     )
 
 
 def _tree_nodes_8616(root: object) -> Iterator[object]:
     """Yield each node in one dynamic angr structured-expression tree once."""
-    seen: set[int] = set()
+    child: object
+    children: object
+    node: object
+    pairs: object
+    attribute: object
+    body: object
+    condition: object
+    seen: set[cython.longlong] = set()
     stack = [root]
     while stack:
         node = stack.pop()
@@ -266,9 +295,11 @@ def _tree_nodes_8616(root: object) -> Iterator[object]:
                 stack.extend((condition, body))
 
 
-def _tree_tag_addresses_8616(root: object) -> frozenset[int]:
+@cython.ccall
+def _tree_tag_addresses_8616(root: object) -> frozenset[cython.longlong]:
     """Collect instruction-origin tags from one structured expression tree."""
-    addresses: set[int] = set()
+    node: object
+    addresses: set[cython.longlong] = set()
     for node in _tree_nodes_8616(root):
         addresses.update(_node_tag_addresses_8616(node))
     return frozenset(addresses)
@@ -277,9 +308,15 @@ def _tree_tag_addresses_8616(root: object) -> frozenset[int]:
 def _statement_lists_8616(root: object) -> tuple[list[Any], ...]:
     """Return all mutable statement lists below one structured-C root."""
     result: list[list[Any]] = []
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
 
     def visit(node: object) -> None:
+        pairs: object
+        statements: object
+        _condition: object
+        attribute: object
+        body: object
+        statement: object
         if node is None or id(node) in seen:
             return
         seen.add(id(node))
@@ -299,6 +336,7 @@ def _statement_lists_8616(root: object) -> tuple[list[Any], ...]:
     return tuple(result)
 
 
+@cython.ccall
 def _stack_variable_offset_8616(codegen: object, node: object) -> int | None:
     """Return the canonical BP-relative offset of one typed C variable."""
     while isinstance(node, structured_c.CTypeCast):
@@ -314,7 +352,8 @@ def _stack_variable_offset_8616(codegen: object, node: object) -> int | None:
     return offset - 0x10000 if offset >= 0x8000 else offset
 
 
-def _indexed_stack_offsets_8616(codegen: object, node: object) -> tuple[int, int] | None:
+@cython.ccall
+def _indexed_stack_offsets_8616(codegen: object, node: object) -> object:
     """Return the base and index BP offsets of one typed indexed stack access."""
     while isinstance(node, structured_c.CTypeCast):
         node = node.expr
@@ -327,32 +366,34 @@ def _indexed_stack_offsets_8616(codegen: object, node: object) -> tuple[int, int
     return base_offset, index_offset
 
 
+@cython.ccall
 def _assignment_destination_matches_stack_move_fact_8616(
     codegen: object,
     assignment: object,
     move_fact: DirectStackMoveFact8616,
-) -> bool:
+) -> cython.bint:
     """Return whether an assignment writes the fact's exact stack object."""
     if not isinstance(assignment, structured_c.CAssignment):
         return False
     if isinstance(move_fact.dst_index_stack_offset, int):
-        return _indexed_stack_offsets_8616(codegen, assignment.lhs) == (
+        return operator.eq(_indexed_stack_offsets_8616(codegen, assignment.lhs), (
             move_fact.dst_offset,
             move_fact.dst_index_stack_offset,
-        )
-    return bool(_stack_variable_offset_8616(codegen, assignment.lhs) == move_fact.dst_offset)
+        ))
+    return bool(operator.eq(_stack_variable_offset_8616(codegen, assignment.lhs), move_fact.dst_offset))
 
 
+@cython.ccall
 def _assignment_matches_stack_move_fact_8616(
     codegen: object,
     assignment: object,
     fact: DirectStackMoveBranchFact8616,
     move_fact: DirectStackMoveFact8616,
-) -> bool:
+) -> cython.bint:
     """Join a tagless typed assignment to one exact stack-store fact."""
     if (
         not isinstance(assignment, structured_c.CAssignment)
-        or fact.move_ins_addr != move_fact.ins_addr
+        or operator.ne(fact.move_ins_addr, move_fact.ins_addr)
         or not _assignment_destination_matches_stack_move_fact_8616(
             codegen,
             assignment,
@@ -361,38 +402,35 @@ def _assignment_matches_stack_move_fact_8616(
     ):
         return False
     if move_fact.source_kind is DirectStackMoveSourceKind8616.STACK_SLOT:
-        return isinstance(move_fact.source_offset, int) and (
-            _stack_variable_offset_8616(codegen, assignment.rhs) == move_fact.source_offset
-        )
+        return isinstance(move_fact.source_offset, int) and operator.eq(_stack_variable_offset_8616(codegen, assignment.rhs), move_fact.source_offset)
     if move_fact.source_kind is DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT:
         return (
             isinstance(move_fact.source_aggregate_base_offset, int)
             and isinstance(move_fact.source_index_offset, int)
-            and _indexed_stack_offsets_8616(codegen, assignment.rhs)
-            == (
+            and operator.eq(_indexed_stack_offsets_8616(codegen, assignment.rhs), (
                 move_fact.source_aggregate_base_offset,
                 move_fact.source_index_offset,
-            )
+            ))
         )
     return bool(
         move_fact.source_kind is DirectStackMoveSourceKind8616.IMMEDIATE
         and isinstance(move_fact.source_value, int)
         and isinstance(assignment.rhs, structured_c.CConstant)
         and isinstance(assignment.rhs.value, int)
-        and (assignment.rhs.value & ((1 << (move_fact.width * 8)) - 1)) == move_fact.source_value
+        and operator.eq((assignment.rhs.value & ((1 << (move_fact.width * 8)) - 1)), move_fact.source_value)
     )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _BranchSiteScan8616:
     """Placement-site scan state for one stack-move branch fact."""
 
     project: object
     fact: DirectStackMoveBranchFact8616
-    replay_facts: tuple[StructuringConditionReplayFact8616, ...]
-    candidates: list[_DirectStackMovePlacementSite8616] = field(default_factory=list)
-    seen: set[int] = field(default_factory=set)
-    move_addresses: frozenset[int] = field(init=False)
+    replay_facts: object
+    candidates: object = field(default_factory=list)
+    seen: object = field(default_factory=set)
+    move_addresses: object = field(init=False)
 
     def __post_init__(self) -> None:
         """Cache the candidate addresses of the move instruction."""
@@ -400,7 +438,8 @@ class _BranchSiteScan8616:
             self.project, self.fact.move_ins_addr
         )
 
-    def _branch_addresses_8616(self) -> set[int]:
+    @cython.ccall
+    def _branch_addresses_8616(self) -> object:
         """Return candidate addresses of the condition and its producer."""
         addresses = set(
             _candidate_addresses_8616(self.project, self.fact.condition_ins_addr)
@@ -413,25 +452,27 @@ class _BranchSiteScan8616:
             )
         return addresses
 
-    def has_taken_provenance(self, nodes: object) -> bool:
+    def has_taken_provenance(self, nodes: object) -> cython.bint:
         """Return whether nodes own non-target instructions in the taken interval."""
+        address: object
         for address in _tree_tag_addresses_8616(nodes):
             candidates_for_address = _candidate_addresses_8616(self.project, address)
             if candidates_for_address & self.move_addresses:
                 continue
             if any(
                 self.fact.arm_start <= candidate < self.fact.merge_addr
-                for candidate in candidates_for_address
+                for candidate in iter(candidates_for_address)
             ):
                 return True
         return False
 
-    def _replay_arm_8616(self, body: object, else_node: object) -> list[object]:
+    def _replay_arm_8616(self, body: object, else_node: object) -> object:
         """Recover the taken arm from a unique matching replay fact."""
+        replay_arm: object
         matching_replays = tuple(
             replay
-            for replay in self.replay_facts
-            if replay.root_src_insn == self.fact.condition_ins_addr
+            for replay in iter(self.replay_facts)
+            if operator.eq(replay.root_src_insn, self.fact.condition_ins_addr)
         )
         if len(matching_replays) != 1:
             return []
@@ -445,8 +486,10 @@ class _BranchSiteScan8616:
         replay_arm = body if true_is_taken else else_node
         return [] if replay_arm is None else [replay_arm]
 
+    @cython.ccall
     def _loop_site_8616(self, node: object) -> None:
         """Record a taken loop body as a bounded placement site."""
+        body_statements: object
         if not isinstance(node, (structured_c.CForLoop, structured_c.CWhileLoop)):
             return
         condition = node.condition
@@ -460,15 +503,18 @@ class _BranchSiteScan8616:
                 _DirectStackMovePlacementSite8616(body_statements, 0, True)
             )
 
+    @cython.ccall
     def _pair_site_8616(
         self,
         node: object,
         condition: object,
         body: object,
-        owner: list[Any] | None,
+        owner: object,
         owner_index: int | None,
     ) -> None:
         """Record a taken if/else arm or proven guarded fallthrough site."""
+        arm_statements: object
+        else_node: object
         addresses = _tree_tag_addresses_8616(condition)
         if not (addresses & self._branch_addresses_8616()):
             return
@@ -476,7 +522,7 @@ class _BranchSiteScan8616:
         else_node = getattr(node, "else_node", None)
         if else_node is not None:
             arms.append(else_node)
-        proven_arms = [arm for arm in arms if self.has_taken_provenance(arm)]
+        proven_arms = [arm for arm in iter(arms) if self.has_taken_provenance(arm)]
         if not proven_arms:
             proven_arms = self._replay_arm_8616(body, else_node)
         if len(proven_arms) == 1:
@@ -496,13 +542,21 @@ class _BranchSiteScan8616:
                     _DirectStackMovePlacementSite8616(owner, start_index, False)
                 )
 
+    @cython.ccall
     def visit(
         self,
         node: object,
-        owner: list[Any] | None = None,
+        owner: object = None,
         owner_index: int | None = None,
     ) -> None:
         """Walk one structured node, recording proven placement sites."""
+        pairs: object
+        statements: object
+        attribute: object
+        body: object
+        condition: object
+        index: object
+        statement: object
         if node is None or id(node) in self.seen:
             return
         self.seen.add(id(node))
@@ -520,18 +574,19 @@ class _BranchSiteScan8616:
             self.visit(getattr(node, attribute, None))
 
 
+@cython.ccall
 def _condition_branch_site_8616(
     root: object,
     project: object,
     fact: DirectStackMoveBranchFact8616,
-    replay_facts: tuple[StructuringConditionReplayFact8616, ...],
+    replay_facts: object,
 ) -> _DirectStackMovePlacementSite8616 | None:
     """Find the unique rendered arm or guarded fallthrough for a taken range."""
     scan = _BranchSiteScan8616(project, fact, replay_facts)
     scan.visit(root)
     unique = {
         (id(candidate.statements), candidate.start_index): candidate
-        for candidate in scan.candidates
+        for candidate in iter(scan.candidates)
     }
     if os.environ.get("INERTIA_DEBUG_STACK_NOISE") and len(unique) != 1:
         log.warning(
@@ -547,32 +602,33 @@ def _arm_statement_addresses_8616(
     statement: object,
     project: object,
     fact: DirectStackMoveBranchFact8616,
-) -> tuple[list[int], list[int]]:
+) -> tuple[list[cython.longlong], list[cython.longlong]]:
     """Return tagged and in-range non-move candidate addresses for one statement."""
     tagged_addresses = sorted(
         candidate
-        for tagged_addr in _tree_tag_addresses_8616(statement)
-        for candidate in _candidate_addresses_8616(project, tagged_addr)
+        for tagged_addr in builtins.iter(_tree_tag_addresses_8616(statement))
+        for candidate in builtins.iter(_candidate_addresses_8616(project, tagged_addr))
     )
     addresses = [
         candidate
-        for candidate in tagged_addresses
+        for candidate in iter(tagged_addresses)
         if fact.arm_start <= candidate < fact.merge_addr
-        and candidate != fact.move_ins_addr
+        and operator.ne(candidate, fact.move_ins_addr)
     ]
     return tagged_addresses, addresses
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _ArmInsertionScan8616:
     """Ordered insertion-index scan state within one proven arm."""
 
     project: object
     fact: DirectStackMoveBranchFact8616
     insertion_index: int | None = None
-    saw_after: bool = False
+    saw_after: cython.bint = False
 
-    def rejects(self, index: int, statement: object) -> bool:
+    @cython.ccall
+    def rejects(self, index: cython.longlong, statement: object) -> cython.bint:
         """Advance one statement; return True when the arm order is ambiguous."""
         tagged_addresses, addresses = _arm_statement_addresses_8616(
             statement, self.project, self.fact
@@ -594,19 +650,23 @@ class _ArmInsertionScan8616:
             return False
         return True
 
-    def _mark_after(self, index: int) -> None:
+    @cython.ccall
+    def _mark_after(self, index: cython.longlong) -> None:
         """Record that following statements start after the move."""
         self.saw_after = True
         if self.insertion_index is None:
             self.insertion_index = index
 
 
+@cython.ccall
 def _ordered_arm_insertion_index_8616(
     statements: Iterable[object],
     project: object,
     fact: DirectStackMoveBranchFact8616,
 ) -> int | None:
     """Return the unique instruction-ordered insertion index within one arm."""
+    index: object
+    statement: object
     ordered_statements = tuple(statements)
     scan = _ArmInsertionScan8616(project, fact)
     for index, statement in enumerate(ordered_statements):
@@ -619,22 +679,22 @@ def _ordered_arm_insertion_index_8616(
     )
 
 
-def _empty_statement_wrapper_8616(node: object) -> bool:
+def _empty_statement_wrapper_8616(node: object) -> cython.bint:
     """Return whether an angr statement wrapper is recursively empty."""
     if not isinstance(node, structured_c.CStatements):
         return False
-    return all(_empty_statement_wrapper_8616(statement) for statement in node.statements)
+    return all(_empty_statement_wrapper_8616(statement) for statement in iter(node.statements))
 
 
 def _site_suffix_owns_assignment_8616(
     site: _DirectStackMovePlacementSite8616,
     assignment: structured_c.CAssignment,
-) -> bool:
+) -> cython.bint:
     """Return whether a proven arm suffix recursively contains an assignment."""
     return any(
         node is assignment
-        for statement in site.statements[site.start_index :]
-        for node in _tree_nodes_8616(statement)
+        for statement in iter(site.statements[site.start_index :])
+        for node in builtins.iter(_tree_nodes_8616(statement))
     )
 
 
@@ -644,13 +704,16 @@ def place_direct_stack_move_assignment_8616(
     function: object,
     move_fact: DirectStackMoveFact8616,
     assignment: structured_c.CAssignment,
-) -> bool:
+) -> cython.bint:
     """Place one Lowering-built assignment at its unique CFG-proven site."""
+    cfunc: object
+    placement_site: object
+    relative_index: object
     conditions = tuple(
         condition
-        for condition in _boundary_tuple_8616(
+        for condition in builtins.iter(_boundary_tuple_8616(
             getattr(codegen, "_inertia_typed_conditions", ()) or ()
-        )
+        ))
         if isinstance(condition, ConditionIR)
     )
     branch_facts = recover_direct_stack_move_branch_facts_8616(
@@ -682,6 +745,7 @@ def place_direct_stack_move_assignment_8616(
     return True
 
 
+@cython.ccall
 def _transparent_assignment_8616(statement: object) -> structured_c.CAssignment | None:
     """Return an assignment through angr's transparent statement wrapper."""
     if isinstance(statement, structured_c.CExpressionStatement):
@@ -697,17 +761,18 @@ class _BranchPlacementOutcome8616(Enum):
     MATERIALIZED = "materialized"
 
 
+@cython.ccall
 def _tagged_fact_locations_8616(
     root: object,
     codegen: object,
     move_fact: DirectStackMoveFact8616,
-    candidate_addrs: frozenset[int],
-) -> list[tuple[list[Any], int, object]]:
+    candidate_addrs: object,
+) -> list[tuple[list[Any], cython.longlong, object]]:
     """Return rendered assignment locations proven by move-instruction tags."""
     return [
         (statements, index, statement)
-        for statements in _statement_lists_8616(root)
-        for index, statement in enumerate(tuple(statements))
+        for statements in builtins.iter(_statement_lists_8616(root))
+        for index, statement in builtins.iter(enumerate(tuple(statements)))
         if (
             (assignment := _transparent_assignment_8616(statement))
             is not None
@@ -721,17 +786,18 @@ def _tagged_fact_locations_8616(
         ]
 
 
+@cython.ccall
 def _joined_fact_locations_8616(
     root: object,
     codegen: object,
     move_fact: DirectStackMoveFact8616,
     fact: DirectStackMoveBranchFact8616,
-) -> list[tuple[list[Any], int, object]]:
+) -> list[tuple[list[Any], cython.longlong, object]]:
     """Return rendered assignment locations joined by exact shape evidence."""
     return [
         (statements, index, statement)
-        for statements in _statement_lists_8616(root)
-        for index, statement in enumerate(tuple(statements))
+        for statements in builtins.iter(_statement_lists_8616(root))
+        for index, statement in builtins.iter(enumerate(tuple(statements)))
         if (
             (assignment := _transparent_assignment_8616(statement))
             is not None
@@ -749,12 +815,12 @@ def _detached_tagged_assignments_8616(
     root: object,
     codegen: object,
     move_fact: DirectStackMoveFact8616,
-    candidate_addrs: frozenset[int],
+    candidate_addrs: object,
 ) -> tuple[structured_c.CAssignment, ...]:
     """Return proven tagged assignments no statement list still owns."""
     return tuple(
         assignment
-        for node in _tree_nodes_8616(root)
+        for node in builtins.iter(_tree_nodes_8616(root))
         if (assignment := _transparent_assignment_8616(node)) is not None
         and _assignment_destination_matches_stack_move_fact_8616(
             codegen,
@@ -762,16 +828,17 @@ def _detached_tagged_assignments_8616(
             move_fact,
         )
         and bool(_tree_tag_addresses_8616(node) & candidate_addrs)
-        and all(assignment is not statement for statements in _statement_lists_8616(root) for statement in statements)
+        and all(assignment is not statement for statements in builtins.iter(_statement_lists_8616(root)) for statement in iter(statements))
     )
 
 
+@cython.ccall
 def _insert_assignment_8616(
-    owner: list[Any],
-    index: int,
+    owner: object,
+    index: cython.longlong,
     assignment: object,
-    target_statements: list[Any],
-    insertion_index: int,
+    target_statements: object,
+    insertion_index: cython.longlong,
     fact: DirectStackMoveBranchFact8616,
 ) -> None:
     """Move one rendered assignment into its proven arm insertion slot."""
@@ -788,6 +855,7 @@ def _insert_assignment_8616(
         )
 
 
+@cython.ccall
 def _place_branch_fact_8616(
     fact: DirectStackMoveBranchFact8616,
     move_fact: DirectStackMoveFact8616,
@@ -836,16 +904,17 @@ def _place_branch_fact_8616(
 def _relocate_proven_assignment_8616(
     fact: DirectStackMoveBranchFact8616,
     placement_site: _DirectStackMovePlacementSite8616,
-    owner: list[Any],
-    index: int,
+    owner: object,
+    index: cython.longlong,
     assignment: object,
     project: object,
 ) -> _BranchPlacementOutcome8616:
     """Insert one proven assignment at its ordered arm index."""
+    relative_insertion_index: object
     target_statements = placement_site.statements
     ordered_target = tuple(
         statement
-        for statement in target_statements[placement_site.start_index :]
+        for statement in iter(target_statements[placement_site.start_index :])
         if statement is not assignment
     )
     relative_insertion_index = _ordered_arm_insertion_index_8616(
@@ -863,7 +932,7 @@ def _relocate_proven_assignment_8616(
                 index,
                 placement_site.start_index,
                 getattr(assignment, "tags", None),
-                tuple(_tree_tag_addresses_8616(statement) for statement in target_statements),
+                tuple(_tree_tag_addresses_8616(statement) for statement in iter(target_statements)),
             )
         return _BranchPlacementOutcome8616.FAILURE
     insertion_index = placement_site.start_index + relative_insertion_index
@@ -886,24 +955,28 @@ def materialize_direct_stack_move_branch_ownership_8616(
     project: object,
     codegen: object,
     function: object,
-) -> bool:
+) -> cython.bint:
     """Relocate tagged stack assignments into CFG-proven conditional arms."""
+    cfunc: object
+    placement_site: object
+    root: object
+    fact: object
     cfunc = getattr(codegen, "cfunc", None)
     if cfunc is None:
         return False
     root = getattr(cfunc, "statements", None)
     conditions = tuple(
         condition
-        for condition in _boundary_tuple_8616(
+        for condition in builtins.iter(_boundary_tuple_8616(
             getattr(codegen, "_inertia_typed_conditions", ()) or ()
-        )
+        ))
         if isinstance(condition, ConditionIR)
     )
     move_facts = tuple(
         fact
-        for fact in _boundary_tuple_8616(
+        for fact in builtins.iter(_boundary_tuple_8616(
             getattr(codegen, "_inertia_direct_stack_move_facts_8616", ()) or ()
-        )
+        ))
         if isinstance(fact, DirectStackMoveFact8616)
         and fact.source_kind in _BRANCH_OWNED_SOURCE_KINDS_8616
     )
@@ -922,8 +995,8 @@ def materialize_direct_stack_move_branch_ownership_8616(
     for fact in branch_facts:
         matching_move_facts = tuple(
             move_fact
-            for move_fact in move_facts
-            if move_fact.ins_addr == fact.move_ins_addr
+            for move_fact in iter(move_facts)
+            if operator.eq(move_fact.ins_addr, fact.move_ins_addr)
         )
         if len(matching_move_facts) != 1:
             failures += 1
@@ -977,11 +1050,12 @@ def materialize_direct_stack_move_branch_ownership_8616(
     return changed
 
 
+@cython.ccall
 def finalize_direct_stack_move_branch_ownership_8616(
     project: object,
     codegen: object,
     function: object,
-) -> bool:
+) -> cython.bint:
     """Materialize final branch writes and enforce the closed evidence contract."""
     changed = materialize_direct_stack_move_branch_ownership_8616(project, codegen, function)
     try:

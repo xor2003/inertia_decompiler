@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: preserve legacy CLI helper surface while delegating semantic proof to X86_16 layers.
@@ -7,12 +8,15 @@ This module coordinates validation and rollback; it does not recover or rewrite 
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import copy
 import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
+import dataclasses
 
 
 class FinalSemanticReport8616(Protocol):
@@ -23,18 +27,19 @@ class FinalSemanticReport8616(Protocol):
         ...
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TrustedCoreSnapshot8616:
     """Bounded C AST and tail-validation state accepted by the core pipeline."""
 
     cfunc: object
-    tail_validation_snapshot: dict[str, Any]
+    tail_validation_snapshot: object
 
 
+@cython.ccall
 def snapshot_trusted_cfunc_8616(
     cfunc: object,
     *,
-    preserve_objects: tuple[object, ...] = (),
+    preserve_objects: object = (),
 ) -> object | None:
     """Copy a bounded C AST without detaching angr's live type store.
 
@@ -42,10 +47,13 @@ def snapshot_trusted_cfunc_8616(
     manager while preparing a copy. Restore that third-party boundary and bind
     the copied manager before any later lowering pass consumes either object.
     """
+    manager: object
+    type_store: object
+    variable_manager: object
     dynamic_cfunc = cast(Any, cfunc)
-    variable_manager: Any | None = None
-    manager: Any | None = None
-    type_store: Any | None = None
+    variable_manager = None
+    manager = None
+    type_store = None
     type_store_kb: Any | None = None
     try:
         boundary_manager = cast(Any, dynamic_cfunc.variable_manager)
@@ -61,7 +69,7 @@ def snapshot_trusted_cfunc_8616(
     try:
         snapshot = copy.deepcopy(
             cfunc,
-            {id(value): value for value in preserve_objects},
+            {id(value): value for value in iter(preserve_objects)},
         )
     except Exception:
         return None
@@ -84,13 +92,13 @@ def snapshot_trusted_cfunc_8616(
 def rollback_final_semantic_drift_8616(
     project: object,
     codegen: object,
-    trusted: TrustedCoreSnapshot8616 | None,
+    trusted: object,
     *,
     refresh_validation: Callable[[object, object], FinalSemanticReport8616],
-    restore_cfunc: Callable[[object], bool],
+    restore_cfunc: Callable[[object], cython.bint],
     replay_projections: Callable[[object], bool] | None = None,
-    function_addr: int,
-) -> bool:
+    function_addr: cython.longlong,
+) -> cython.bint:
     """Restore and revalidate a trusted AST after an absolute final guard failure."""
     report = refresh_validation(project, codegen)
     if not report.semantic_failures() or trusted is None:

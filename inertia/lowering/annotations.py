@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Optional evidence/reporting.
 
 Responsibility: carry source/COD annotation metadata as optional labels and comments.
@@ -13,6 +14,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import functools
 import re
@@ -27,6 +30,8 @@ from inertia.frontend.x86_16.arch_86_16 import Arch86_16
 from inertia.frontend.x86_16.simos_86_16 import SimCC8616MSCsmall
 
 from .analysis_helpers import seed_calling_conventions
+import operator
+import builtins
 
 ANNOTATION_KEY: str = "x86_16_annotations"
 
@@ -41,9 +46,9 @@ _PROTO_EMIT_TYPEDEFS_8616 = (
 class _AnnotatedFunction(Protocol):
     """angr function record subset used by optional annotations."""
 
-    name: str
+    name: object
     prototype: SimTypeFunction | None
-    is_prototype_guessed: bool
+    is_prototype_guessed: cython.bint
     calling_convention: object
     info: MutableMapping[str, object]
 
@@ -57,11 +62,11 @@ class _FunctionInfoCarrier(Protocol):
 class _FunctionManager(Protocol):
     """angr function manager subset used by optional annotations."""
 
-    def function(self, *, addr: int, **_kwargs: object) -> object | None:
+    def function(self, *, addr: cython.longlong, **_kwargs: object) -> object | None:
         """Return or create a function record."""
         ...
 
-    def __getitem__(self, addr: int) -> object:
+    def __getitem__(self, addr: cython.longlong) -> object:
         """Return a function record by address."""
         ...
 
@@ -75,7 +80,7 @@ class _CfgFastResult(Protocol):
 class _KnowledgeBase(Protocol):
     """angr knowledge-base subset used by optional annotations."""
 
-    labels: MutableMapping[int, str]
+    labels: MutableMapping[cython.longlong, str]
     functions: _FunctionManager
 
 
@@ -104,8 +109,10 @@ class _DecompileProject(_AnnotationProject, Protocol):
     analyses: _AnalysisFactory
 
 
+@cython.ccall
 def _source_prototype_calling_convention_8616(project: object) -> SimCC8616MSCsmall | None:
     """Return the source-prototype calling convention for a third-party angr project dynamic boundary."""
+    arch: object
     arch = getattr(project, "arch", None)
     if not isinstance(arch, Arch86_16):
         return None
@@ -131,7 +138,7 @@ _C_TYPE_KEYWORDS_8616 = {
     "void",
     "volatile",
 }
-type AnnotationSpec8616 = str | dict[str, object]
+AnnotationSpec8616 = typing.TypeAliasType("AnnotationSpec8616", str | dict[str, object])
 
 
 class StackAnnotationPurpose8616(StrEnum):
@@ -141,19 +148,23 @@ class StackAnnotationPurpose8616(StrEnum):
     EXPLICIT_LAYOUT = "explicit_layout"
 
 
-def stack_layout_annotation_specs_8616(annotations: object) -> dict[int, AnnotationSpec8616]:
+@cython.ccall
+def stack_layout_annotation_specs_8616(annotations: object) -> object:
     """Return layout contracts without promoting optional names to semantic facts.
 
     Legacy explicit annotations omit purpose. COD producers must mark their
     entries NAME_ONLY; those entries remain available to naming consumers but
     cannot create, move, widen, or remove a parameter. Unknown purposes refuse.
     """
+    specs: object
+    offset: object
+    spec: object
     if not isinstance(annotations, Mapping):
         return {}
     specs = annotations.get("stack_vars")
     if not isinstance(specs, Mapping):
         return {}
-    selected: dict[int, AnnotationSpec8616] = {}
+    selected: dict[cython.longlong, AnnotationSpec8616] = {}
     for offset, spec in specs.items():
         if not isinstance(offset, int) or not isinstance(spec, (str, dict)):
             continue
@@ -170,7 +181,13 @@ _SOURCE_DECL_RE_8616 = re.compile(
 )
 
 
-def _opaque_typedef_headers_for_c_decl_8616(c_decl: str) -> tuple[str, ...]:
+def _opaque_typedef_headers_for_c_decl_8616(c_decl: object) -> tuple[str, ...]:
+    match: object
+    tokens: object
+    chunk: object
+    chunk_index: object
+    index: object
+    token: object
     match = re.match(
         r"^\s*(?P<ret>.*?)\b(?P<name>[A-Za-z_]\w*)\s*\((?P<args>[^()]*)\)\s*;?\s*$",
         c_decl,
@@ -180,7 +197,7 @@ def _opaque_typedef_headers_for_c_decl_8616(c_decl: str) -> tuple[str, ...]:
     function_name = match.group("name")
     candidate_type_names: set[str] = set()
     chunks = [match.group("ret")]
-    chunks.extend(part.strip() for part in match.group("args").split(",") if part.strip() and part.strip() != "void")
+    chunks.extend(part.strip() for part in builtins.iter(match.group("args").split(",")) if part.strip() and part.strip() != "void")
     for chunk_index, chunk in enumerate(chunks):
         cleaned = re.sub(r"\[[^\]]*\]", " ", chunk.replace("*", " "))
         tokens = re.findall(r"[A-Za-z_]\w*", cleaned)
@@ -194,17 +211,20 @@ def _opaque_typedef_headers_for_c_decl_8616(c_decl: str) -> tuple[str, ...]:
             if index > 0 and tokens[index - 1] in {"struct", "union", "enum"}:
                 continue
             candidate_type_names.add(token)
-    return tuple(f"typedef unsigned short {name};" for name in sorted(candidate_type_names))
+    return tuple(f"typedef unsigned short {name};" for name in builtins.iter(sorted(candidate_type_names)))
 
 
-def _converted_c_prototype_or_none_8616(source: str) -> tuple[str, SimTypeFunction, str] | None:
+@cython.ccall
+def _converted_c_prototype_or_none_8616(source: object) -> object:
     converted = convert_cproto_to_py(source)
     if len(converted) >= 2 and converted[1] is not None:
         return cast(tuple[str, SimTypeFunction, str], converted)
     return None
 
 
-def _c_decl_requires_opaque_typedefs_8616(c_decl: str) -> bool:
+@cython.ccall
+def _c_decl_requires_opaque_typedefs_8616(c_decl: object) -> cython.bint:
+    typedef_header: object
     normalized_decl = _normalize_c_decl_text(c_decl)
     try:
         if _converted_c_prototype_or_none_8616(normalized_decl) is not None:
@@ -220,7 +240,10 @@ def _c_decl_requires_opaque_typedefs_8616(c_decl: str) -> bool:
     return bool(_opaque_typedef_headers_for_c_decl_8616(normalized_decl))
 
 
-def _parse_c_prototype_8616(c_decl: str) -> tuple[str, SimTypeFunction, str]:
+@cython.ccall
+def _parse_c_prototype_8616(c_decl: object) -> object:
+    converted: object
+    typedef_header: object
     normalized_decl = _normalize_c_decl_text(c_decl)
     try:
         converted = _converted_c_prototype_or_none_8616(normalized_decl)
@@ -240,7 +263,7 @@ def _parse_c_prototype_8616(c_decl: str) -> tuple[str, SimTypeFunction, str]:
     opaque_headers = _opaque_typedef_headers_for_c_decl_8616(normalized_decl)
     if opaque_headers:
         try:
-            converted = _converted_c_prototype_or_none_8616("\n".join((*opaque_headers, normalized_decl)))
+            converted = _converted_c_prototype_or_none_8616("\n".join(tuple(opaque_headers) + (normalized_decl,)))
             if converted is not None:
                 return converted
         except Exception:
@@ -249,8 +272,10 @@ def _parse_c_prototype_8616(c_decl: str) -> tuple[str, SimTypeFunction, str]:
     raise
 
 
+@cython.ccall
 def _annotation_dict(function: object) -> MutableMapping[str, object]:
     """Return the optional annotation dict on a third-party angr function dynamic boundary."""
+    info: object
     info = getattr(function, "info", None)
     carrier = cast(_FunctionInfoCarrier, function)
     if not isinstance(info, MutableMapping):
@@ -270,11 +295,13 @@ def _annotation_dict(function: object) -> MutableMapping[str, object]:
     )
 
 
-def _normalize_bp_disp(offset: int) -> int:
+@cython.ccall
+def _normalize_bp_disp(offset: cython.longlong) -> cython.longlong:
     return offset - 2
 
 
-def _normalize_arg_names(arg_names: list[str] | tuple[str, ...], count: int) -> list[str]:
+@cython.ccall
+def _normalize_arg_names(arg_names: object, count: cython.longlong) -> object:
     normalized: list[str] = []
     used: set[str] = set()
     source = list(arg_names)
@@ -292,7 +319,10 @@ def _normalize_arg_names(arg_names: list[str] | tuple[str, ...], count: int) -> 
     return normalized
 
 
-def _normalize_c_decl_text(c_decl: str) -> str:
+@cython.ccall
+def _normalize_c_decl_text(c_decl: object) -> object:
+    pattern: object
+    replacement: object
     normalized = c_decl
     replacements = (
         (r"\buint8\b", "unsigned char"),
@@ -313,44 +343,48 @@ def _normalize_c_decl_text(c_decl: str) -> str:
     return normalized
 
 
+@cython.ccall
 def _source_decl_from_cod_source_lines(
-    _source_lines: tuple[str, ...], function_name: str | None = None
-) -> str | None:
+    _source_lines: object, function_name: object = None
+) -> object:
     return None
 
 
 @functools.lru_cache(maxsize=4096)
 def _source_decl_from_cod_source_lines_cached_8616(
-    _source_lines: tuple[str, ...],
-    function_name: str | None = None,
-) -> str | None:
+    _source_lines: object,
+    function_name: object = None,
+) -> object:
     return None
 
 
-def _source_args_from_cod_source_lines(_source_lines: tuple[str, ...], _func_name: str | None) -> str | None:
+@cython.ccall
+def _source_args_from_cod_source_lines(_source_lines: object, _func_name: object) -> object:
     return None
 
 
-def _source_function_pointer_local_types_8616(_project: object, _source_lines: tuple[str, ...]) -> dict[str, object]:
+@cython.ccall
+def _source_function_pointer_local_types_8616(_project: object, _source_lines: object) -> dict[str, object]:
     return {}
 
 
 def annotate_function(
     project: object,
-    func_addr: int,
+    func_addr: cython.longlong,
     *,
-    name: str | None = None,
-    c_decl: str | None = None,
+    name: object = None,
+    c_decl: object = None,
     prototype: SimTypeFunction | None = None,
     calling_convention: object | None = None,
-    arg_names: list[str] | tuple[str, ...] | None = None,
-    stack_vars: dict[int, AnnotationSpec8616] | None = None,
-    bp_stack_vars: dict[int, AnnotationSpec8616] | None = None,
-    global_vars: dict[int, AnnotationSpec8616] | None = None,
+    arg_names: object = None,
+    stack_vars: object = None,
+    bp_stack_vars: object = None,
+    global_vars: object = None,
 ) -> object:
     """Attach optional annotation labels, prototypes, and names to a function."""
 
     def _impl() -> object:
+        func: object
         annotation_project = cast(_AnnotationProject, project)
         arch = cast(Arch86_16, annotation_project.arch)
         func = cast(
@@ -361,7 +395,7 @@ def annotate_function(
             raise KeyError(func_addr)
         annotations = _annotation_dict(func)
 
-        parsed_name: str | None = None
+        parsed_name: object = None
         parsed_proto: SimTypeFunction | None = None
         if c_decl is not None:
             parsed_name, parsed_proto = _parse_decl_prototype_8616(arch, c_decl)
@@ -378,7 +412,7 @@ def annotate_function(
 
         if bp_stack_vars:
             translated = {
-                _normalize_bp_disp(bp_disp): spec for bp_disp, spec in bp_stack_vars.items()
+                _normalize_bp_disp(bp_disp): spec for bp_disp, spec in builtins.iter(bp_stack_vars.items())
             }
             annotate_function(project, func_addr, stack_vars=translated)
 
@@ -390,16 +424,19 @@ def annotate_function(
     return _impl()
 
 
+@cython.ccall
 def _assign_identity_annotations_8616(
     func: _AnnotatedFunction,
     arch: Arch86_16,
     annotations: MutableMapping[str, object],
-    name: str | None,
-    parsed_name: str | None,
-    prototype: SimTypeFunction | None,
+    name: object,
+    parsed_name: object,
+    prototype: object,
     parsed_proto: SimTypeFunction | None,
-    calling_convention: object | None,
+    calling_convention: object,
 ) -> None:
+    final_name: object
+    final_proto: object
     final_name = name if name is not None else parsed_name
     if final_name is not None:
         func.name = final_name
@@ -412,17 +449,20 @@ def _assign_identity_annotations_8616(
         func.calling_convention = calling_convention
 
 
+@cython.ccall
 def _parse_decl_prototype_8616(
-    arch: Arch86_16, c_decl: str
+    arch: Arch86_16, c_decl: object
 ) -> tuple[str | None, SimTypeFunction | None]:
+    parsed_proto: object
     parsed_name, parsed_proto, _ = _parse_c_prototype_8616(c_decl)
     if parsed_proto is None:
         raise ValueError(f"Failed to parse C declaration: {c_decl}")
     return parsed_name, cast(SimTypeFunction, parsed_proto.with_arch(arch))
 
 
+@cython.ccall
 def _annotate_arg_names_8616(
-    func: _AnnotatedFunction, arch: Arch86_16, arg_names: list[str] | tuple[str, ...]
+    func: _AnnotatedFunction, arch: Arch86_16, arg_names: object
 ) -> None:
     if func.prototype is None:
         raise ValueError("Cannot assign argument names without a prototype.")
@@ -437,9 +477,12 @@ def _annotate_arg_names_8616(
     func.is_prototype_guessed = False
 
 
+@cython.ccall
 def _annotate_stack_vars_8616(
-    annotations: MutableMapping[str, object], stack_vars: dict[int, AnnotationSpec8616]
+    annotations: MutableMapping[str, object], stack_vars: object
 ) -> None:
+    offset: object
+    spec: object
     stack_annotations = cast(MutableMapping[int, MutableMapping[str, object]], annotations["stack_vars"])
     for offset, spec in stack_vars.items():
         entry = stack_annotations.setdefault(offset, {})
@@ -449,14 +492,18 @@ def _annotate_stack_vars_8616(
             entry.update(spec)
 
 
+@cython.ccall
 def _annotate_global_vars_8616(
     annotation_project: _AnnotationProject,
     annotations: MutableMapping[str, object],
-    global_vars: dict[int, AnnotationSpec8616],
+    global_vars: object,
 ) -> None:
+    candidate_label: object
+    addr: object
+    spec: object
     global_annotations = cast(MutableMapping[int, dict[str, object]], annotations["global_vars"])
     for addr, spec in global_vars.items():
-        global_entry: dict[str, object]
+        global_entry: object
         if isinstance(spec, str):
             global_entry = {"name": spec}
             label = spec
@@ -472,8 +519,9 @@ def _annotate_global_vars_8616(
         annotation_project.kb.labels[addr] = label
 
 
+@cython.ccall
 def annotate_stack_variable(
-    project: object, func_addr: int, offset: int, name: str, type_: object | None = None
+    project: object, func_addr: cython.longlong, offset: cython.longlong, name: object, type_: object | None = None
 ) -> object:
     """Attach an optional stack-variable label to a function annotation record."""
     spec: dict[str, object] = {"name": name}
@@ -482,8 +530,9 @@ def annotate_stack_variable(
     return annotate_function(project, func_addr, stack_vars={offset: spec})
 
 
+@cython.ccall
 def annotate_bp_stack_variable(
-    project: object, func_addr: int, bp_disp: int, name: str, type_: object | None = None
+    project: object, func_addr: cython.longlong, bp_disp: cython.longlong, name: object, type_: object | None = None
 ) -> object:
     """Attach an optional BP-relative stack-variable label to a function record."""
     spec: dict[str, object] = {"name": name}
@@ -492,18 +541,22 @@ def annotate_bp_stack_variable(
     return annotate_function(project, func_addr, bp_stack_vars={bp_disp: spec})
 
 
-def annotate_global_variable(project: object, addr: int, name: str) -> str:
+@cython.ccall
+def annotate_global_variable(project: object, addr: cython.longlong, name: object) -> object:
     """Attach an optional global label without treating it as recovered semantics."""
     cast(_AnnotationProject, project).kb.labels[addr] = name
     return name
 
 
-def _apply_known_helper_signatures(_project: object, _cod_metadata: object | None = None) -> bool:
+@cython.ccall
+def _apply_known_helper_signatures(_project: object, _cod_metadata: object | None = None) -> cython.bint:
     return False
 
 
-def _split_source_arg_names_8616(source_arg_text: str | None) -> list[str]:
-    def _impl() -> list[str]:
+def _split_source_arg_names_8616(source_arg_text: object) -> object:
+    def _impl() -> object:
+        match: object
+        part: object
         if not source_arg_text:
             return []
         source_arg_names: list[str] = []
@@ -516,7 +569,8 @@ def _split_source_arg_names_8616(source_arg_text: str | None) -> list[str]:
     return _impl()
 
 
-def _iter_source_arg_parts_8616(source_arg_text: str) -> Iterator[str]:
+def _iter_source_arg_parts_8616(source_arg_text: object) -> Iterator[str]:
+    char: object
     current: list[str] = []
     depth_paren = depth_bracket = depth_brace = 0
     for char in source_arg_text:
@@ -536,9 +590,10 @@ def _iter_source_arg_parts_8616(source_arg_text: str) -> Iterator[str]:
             yield part
 
 
+@cython.ccall
 def _arg_text_depths_8616(
-    char: str, depth_paren: int, depth_bracket: int, depth_brace: int
-) -> tuple[int, int, int]:
+    char: object, depth_paren: cython.longlong, depth_bracket: cython.longlong, depth_brace: cython.longlong
+) -> tuple[cython.longlong, cython.longlong, cython.longlong]:
     if char == "(":
         depth_paren += 1
     elif char == ")" and depth_paren > 0:
@@ -554,9 +609,10 @@ def _arg_text_depths_8616(
     return depth_paren, depth_bracket, depth_brace
 
 
+@cython.ccall
 def _apply_source_prototype_annotations_8616(
-    project: object, func_addr: int, func: object, _source_lines: tuple[str, ...]
-) -> bool:
+    project: object, func_addr: cython.longlong, func: object, _source_lines: object
+) -> cython.bint:
     return False
 
 
@@ -566,11 +622,11 @@ def apply_x86_16_metadata_annotations(
     func_addr: int | None = None,
     cod_metadata: object | None = None,
     lst_metadata: object | None = None,
-    synthetic_globals: dict[int, tuple[str, int]] | None = None,
-) -> bool:
+    synthetic_globals: object = None,
+) -> cython.bint:
     """Apply optional source/listing metadata as labels only, never as semantic proof."""
 
-    def _impl() -> bool:
+    def _impl() -> cython.bint:
         """Apply metadata labels from third-party COD/LST dynamic-boundary objects."""
         changed = False
         annotation_project = cast(_AnnotationProject, project)
@@ -589,12 +645,17 @@ def apply_x86_16_metadata_annotations(
     return _impl()
 
 
+@cython.ccall
 def _apply_lst_metadata_labels_8616(
-    annotation_project: _AnnotationProject, func_addr: int | None, lst_metadata: object
-) -> bool:
+    annotation_project: _AnnotationProject, func_addr: object, lst_metadata: object
+) -> cython.bint:
+    code_name: object
+    func: object
+    name: object
+    offset: object
     changed = False
     for offset, name in getattr(lst_metadata, "data_labels", {}).items():
-        if annotation_project.kb.labels.get(offset) != name:
+        if operator.ne(annotation_project.kb.labels.get(offset), name):
             annotation_project.kb.labels[offset] = name
             changed = True
     if func_addr is None:
@@ -605,29 +666,36 @@ def _apply_lst_metadata_labels_8616(
             _AnnotatedFunction | None,
             annotation_project.kb.functions.function(addr=func_addr, create=True),
         )
-        if func is not None and getattr(func, "name", None) != code_name:
+        if func is not None and operator.ne(getattr(func, "name", None), code_name):
             func.name = code_name
             changed = True
     return changed
 
 
+@cython.ccall
 def _apply_synthetic_global_labels_8616(
-    annotation_project: _AnnotationProject, synthetic_globals: dict[int, tuple[str, int]]
-) -> bool:
+    annotation_project: _AnnotationProject, synthetic_globals: object
+) -> cython.bint:
+    _width: object
+    addr: object
+    raw_name: object
     changed = False
-    seen_addrs: set[int] = set()
+    seen_addrs: set[cython.longlong] = set()
     for addr, (raw_name, _width) in synthetic_globals.items():
         if addr in seen_addrs:
             continue
         seen_addrs.add(addr)
-        if isinstance(raw_name, str) and raw_name and annotation_project.kb.labels.get(addr) != raw_name:
+        if isinstance(raw_name, str) and raw_name and operator.ne(annotation_project.kb.labels.get(addr), raw_name):
             annotation_project.kb.labels[addr] = raw_name
             changed = True
     return changed
 
 
-def decompile_function(project: object, func_addr: int, **annotations: object) -> object:
+def decompile_function(project: object, func_addr: cython.longlong, **annotations: object) -> object:
     """Run decompilation after applying optional annotation metadata."""
+    cod_metadata: object
+    lst_metadata: object
+    synthetic_globals: object
     decompile_project = cast(_DecompileProject, project)
     cfg = decompile_project.analyses.CFGFast(normalize=True)
     cod_metadata = annotations.get("cod_metadata")
@@ -653,7 +721,7 @@ def decompile_function(project: object, func_addr: int, **annotations: object) -
         "bp_stack_vars",
         "global_vars",
     }
-    if any(key in annotations for key in direct_keys):
+    if any(key in annotations for key in iter(direct_keys)):
         annotate_function(
             project,
             func_addr,

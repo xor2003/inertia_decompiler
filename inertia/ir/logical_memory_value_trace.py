@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Trace byte-composed scalar values through closed logical-memory evidence.
 
 Layer: IR.
@@ -11,6 +12,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -32,36 +35,40 @@ from .scalar_definitions import (
     scalar_definition_key_8616,
 )
 from .scalar_value_projection import scalar_active_unary_projection_8616
+import dataclasses
+import operator
+import builtins
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LogicalMemoryValueTrace8616:
     """One logical word-read source trace or one typed refusal."""
 
     source: IRAddress | None
-    definition_path: tuple[IndexedAddressDefinitionSite8616, ...]
+    definition_path: object
     failure: IndexedAddressFailureKind8616 | None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether this trace has one source and a closed path."""
         return bool(
             self.source is not None
             and self.failure is None
             and self.definition_path
-            and all(site.complete for site in self.definition_path)
+            and all(site.complete for site in iter(self.definition_path))
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _ByteLoadTrace8616:
     """Internal path from one composition operand to one byte LOAD."""
 
     definition: ScalarDefinition8616 | None
-    path: tuple[IndexedAddressDefinitionSite8616, ...]
+    path: object
     failure: IndexedAddressFailureKind8616 | None
 
 
+@cython.ccall
 def _definition_site_8616(
     definition: ScalarDefinition8616,
 ) -> IndexedAddressDefinitionSite8616 | None:
@@ -77,17 +84,20 @@ def _definition_site_8616(
     )
 
 
+@cython.ccall
 def _trace_mov_to_byte_load_8616(
     value: IRValue,
     definitions: ScalarDefinitionIndex8616,
     *,
-    block_addr: int,
-    before_index: int,
-    path: tuple[IndexedAddressDefinitionSite8616, ...] = (),
-    seen: frozenset[tuple[str, str | None, int, int, int | None]] = frozenset(),
-    pending_depth: int = 0,
+    block_addr: cython.longlong,
+    before_index: cython.longlong,
+    path: object = (),
+    seen: object = frozenset(),
+    pending_depth: cython.longlong = 0,
 ) -> _ByteLoadTrace8616:
     """Trace one exact value through MOV definitions to one byte LOAD."""
+    projection: object
+    site: object
     key = scalar_definition_key_8616(value)
     if pending_depth > 16 or (value.active_unary is None and key in seen):
         return _ByteLoadTrace8616(None, path, IndexedAddressFailureKind8616.INDEX_DEFINITION_CONFLICT)
@@ -170,9 +180,10 @@ def _trace_mov_to_byte_load_8616(
     )
 
 
+@cython.ccall
 def _execution_site_8616(
     definition: ScalarDefinition8616,
-) -> tuple[int, int, int] | None:
+) -> object:
     """Return one exact execution-site identity for a byte LOAD definition."""
     instruction = definition.instruction
     if instruction.addr is None:
@@ -180,7 +191,8 @@ def _execution_site_8616(
     return definition.block_addr, definition.instr_index, instruction.addr
 
 
-def _slice_site_8616(execution_slice: IRMemoryExecutionSlice8616) -> tuple[int, int, int]:
+@cython.ccall
+def _slice_site_8616(execution_slice: IRMemoryExecutionSlice8616) -> tuple[cython.longlong, cython.longlong, cython.longlong]:
     """Return the exact site identity retained by one logical execution slice."""
     return (
         execution_slice.block_addr,
@@ -189,19 +201,20 @@ def _slice_site_8616(execution_slice: IRMemoryExecutionSlice8616) -> tuple[int, 
     )
 
 
+@cython.ccall
 def _slice_matches_load_8616(
     execution_slice: IRMemoryExecutionSlice8616,
     definition: ScalarDefinition8616,
-) -> bool:
+) -> cython.bint:
     """Return whether one slice and byte LOAD have the same site and address."""
     instruction = definition.instruction
     address = instruction.args[0] if instruction.args else None
     return bool(
         isinstance(address, IRAddress)
-        and _execution_site_8616(definition) == _slice_site_8616(execution_slice)
+        and operator.eq(_execution_site_8616(definition), _slice_site_8616(execution_slice))
         and address.space is execution_slice.address.space
-        and address.base == execution_slice.address.base
-        and address.offset == execution_slice.address.offset
+        and operator.eq(address.base, execution_slice.address.base)
+        and operator.eq(address.offset, execution_slice.address.offset)
         and address.size == execution_slice.address.size == 1
         and address.status is execution_slice.address.status
         and address.segment_origin is execution_slice.address.segment_origin
@@ -211,43 +224,46 @@ def _slice_matches_load_8616(
 def _matching_logical_reads_8616(
     logical_memory: IRLogicalMemoryArtifact8616,
     *,
-    function_addr: int,
+    function_addr: cython.longlong,
     low_definition: ScalarDefinition8616,
     high_definition: ScalarDefinition8616,
 ) -> tuple[IRLogicalMemoryAccess8616, ...]:
     """Return complete logical word reads owning exactly both byte LOAD sites."""
+    access: object
     definitions = (low_definition, high_definition)
     matches: list[IRLogicalMemoryAccess8616] = []
     for access in logical_memory.accesses:
         if (
             not access.complete
-            or access.key.function_addr != function_addr
+            or operator.ne(access.key.function_addr, function_addr)
             or access.kind is not IRMemoryAccessKind8616.READ
             or access.address.size != 2
-            or len(access.execution_slices) != len(definitions)
+            or operator.ne(len(access.execution_slices), len(definitions))
         ):
             continue
         if all(
             _slice_matches_load_8616(execution_slice, definition)
-            for execution_slice, definition in zip(
+            for execution_slice, definition in builtins.iter(zip(
                 access.execution_slices,
                 definitions,
                 strict=True,
-            )
+            ))
         ):
             matches.append(access)
     return tuple(matches)
 
 
+@cython.ccall
 def _proven_shift_definition_8616(
     definitions: ScalarDefinitionIndex8616,
     shifted_value: IRValue,
     *,
-    block_addr: int,
-    before_index: int,
-    low_path: tuple[IndexedAddressDefinitionSite8616, ...],
-) -> tuple[ScalarDefinition8616, IndexedAddressDefinitionSite8616] | LogicalMemoryValueTrace8616:
+    block_addr: cython.longlong,
+    before_index: cython.longlong,
+    low_path: object,
+) -> object:
     """Return the unique proven definition behind the shifted half."""
+    shift_site: object
     shift_candidates = reaching_scalar_definitions_8616(
         definitions,
         shifted_value,
@@ -277,14 +293,15 @@ def _proven_shift_definition_8616(
     return shift_definition, shift_site
 
 
+@cython.ccall
 def trace_logical_word_load_8616(
     instruction: IRInstr,
     definitions: ScalarDefinitionIndex8616,
-    logical_memory: IRLogicalMemoryArtifact8616 | None,
+    logical_memory: object,
     *,
-    function_addr: int,
-    block_addr: int,
-    before_index: int,
+    function_addr: cython.longlong,
+    block_addr: cython.longlong,
+    before_index: cython.longlong,
 ) -> LogicalMemoryValueTrace8616:
     """Prove one exact ``low | (high << 8)`` logical word-read value."""
     if instruction.op != "Iop_Or16" or instruction.size != 2 or len(instruction.args) != 2:
@@ -350,7 +367,7 @@ def trace_logical_word_load_8616(
         return LogicalMemoryValueTrace8616(None, full_path, high_trace.failure)
     if (
         logical_memory is None
-        or logical_memory.function_addr != function_addr
+        or operator.ne(logical_memory.function_addr, function_addr)
         or not logical_memory.closed
     ):
         return LogicalMemoryValueTrace8616(

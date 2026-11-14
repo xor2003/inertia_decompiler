@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Textual-based debugger for angr x86-16 simulation.
 
 Layer: CLI/fallback/reporting.
@@ -24,6 +25,8 @@ Commands:
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 import json
@@ -38,25 +41,31 @@ import angr
 import claripy
 
 from inertia.lowering.analysis_helpers import preferred_known_helper_signature_decl
+import dataclasses
+import operator
 
 
-def _dynamic_angr_attr(obj: object, name: str, default: Any = None) -> Any:  # noqa: ANN401
+@cython.ccall
+def _dynamic_angr_attr(obj: object, name: object, default: Any = None) -> Any:  # noqa: ANN401
     """Read a dynamic angr/plugin attribute at the debugger boundary."""
     # Dynamic angr boundary: project, helper, and register objects expose version-dependent fields.
     return getattr(obj, name, default)
 
 
-def _dynamic_angr_setattr(obj: object, name: str, value: object) -> None:
+@cython.ccall
+def _dynamic_angr_setattr(obj: object, name: object, value: object) -> None:
     """Write a dynamic angr register attribute at the debugger boundary."""
     # Dynamic angr boundary: RSP register numbers map to angr register attributes.
     setattr(obj, name, value)
 
 
-def _state_int(state: angr.SimState, expr: object) -> int:
+@cython.ccall
+def _state_int(state: angr.SimState, expr: object) -> cython.longlong:
     """Concretize an angr/claripy expression to an integer."""
     return int(cast(Any, state.solver).eval(expr))
 
 
+@cython.ccall
 def _state_bytes(state: angr.SimState, expr: object) -> bytes:
     """Concretize an angr/claripy expression to bytes."""
     return bytes(cast(Any, state.solver).eval(expr, cast_to=bytes))
@@ -71,19 +80,20 @@ class GDBStopReason(Enum):
     EXITED = "W00"  # Exited normally
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class Breakpoint:
     """Debugger breakpoint."""
 
-    address: int
-    enabled: bool = True
-    hit_count: int = 0
+    address: cython.longlong
+    enabled: cython.bint = True
+    hit_count: cython.longlong = 0
 
     def __repr__(self) -> str:
         """Render a compact breakpoint label."""
         return f"BP@0x{self.address:05x} (hits={self.hit_count})"
 
 
+@cython.cclass
 class GDBServer:
     """GDB RSP (Remote Serial Protocol) server wrapping angr SimState.
 
@@ -102,17 +112,30 @@ class GDBServer:
     - Execution: c (continue), s (step), ? (status)
     - Breakpoints: Z0/z0 (software), Z1/z1 (hardware)
     """
+    b_idx_counter = cython.declare(cython.longlong, visibility = "public")
+    breakpoints = cython.declare(dict, visibility = "public")
+    client = cython.declare(object, visibility = "public")
+    current_thread = cython.declare(cython.longlong, visibility = "public")
+    dos_mem_start = cython.declare(object, visibility = "public")
+    host = cython.declare(object, visibility = "public")
+    port = cython.declare(object, visibility = "public")
+    project = cython.declare(object, visibility = "public")
+    psp_segment = cython.declare(object, visibility = "public")
+    running = cython.declare(cython.bint, visibility = "public")
+    socket = cython.declare(object, visibility = "public")
+    state = cython.declare(object, visibility = "public")
+    threads = cython.declare(dict, visibility = "public")
 
     # DOSBox-compatible constants
-    DOS_MEM_START: int = 0x16F  # First segment DOS can use
-    PSP_SEGMENT: int = 0x1000  # Default PSP segment
-    PSP_SIZE: int = 0x100  # 256 bytes
-    IVT_SIZE: int = 0x400  # 256 vectors * 4 bytes
-    MCB_TYPE_LAST: int = 0x5A  # Last MCB in chain
-    MCB_TYPE_NORMAL: int = 0x4D  # Normal MCB (more follow)
-    MCB_FREE: int = 0x0000  # Free block
+    DOS_MEM_START: cython.longlong = 0x16F  # First segment DOS can use
+    PSP_SEGMENT: cython.longlong = 0x1000  # Default PSP segment
+    PSP_SIZE: cython.longlong = 0x100  # 256 bytes
+    IVT_SIZE: cython.longlong = 0x400  # 256 vectors * 4 bytes
+    MCB_TYPE_LAST: cython.longlong = 0x5A  # Last MCB in chain
+    MCB_TYPE_NORMAL: cython.longlong = 0x4D  # Normal MCB (more follow)
+    MCB_FREE: cython.longlong = 0x0000  # Free block
 
-    def __init__(self, project: angr.Project, port: int = 1234, host: str = "127.0.0.1") -> None:
+    def __init__(self, project: angr.Project, port: cython.longlong = 1234, host: object = "127.0.0.1") -> None:
         """Initialize an RSP server around an angr project."""
         self.project = project
         self.port = port
@@ -123,7 +146,7 @@ class GDBServer:
 
         # Simulation state
         self.state: angr.SimState | None = None
-        self.breakpoints: dict[int, Breakpoint] = {}
+        self.breakpoints: dict[cython.longlong, Breakpoint] = {}
         self.b_idx_counter = 0
 
         # Thread management
@@ -134,9 +157,12 @@ class GDBServer:
         self.psp_segment = self.PSP_SEGMENT
         self.dos_mem_start = self.DOS_MEM_START
 
-    def _helper_name_for_addr(self, addr: int) -> str | None:
-        def _impl() -> str | None:
+    def _helper_name_for_addr(self, addr: cython.longlong) -> object:
+        def _impl() -> object:
             """Return a best-effort helper name for a concrete address."""
+            func: object
+            functions: object
+            proc: object
             if self.project.is_hooked(addr):
                 proc = self.project.hooked_by(addr)
                 if proc is not None:
@@ -159,8 +185,11 @@ class GDBServer:
 
         return _impl()
 
-    def _build_helper_info(self) -> dict[str, object]:
+    @cython.ccall
+    def _build_helper_info(self) -> object:
         """Build helper metadata for the current execution point."""
+        helper_name: object
+        signature: object
         info: dict[str, object] = {
             "address": None,
             "symbol": None,
@@ -194,6 +223,7 @@ class GDBServer:
             info["notes"] = ["named function at current address"]
         return info
 
+    @cython.ccall
     def start(self) -> None:
         """Start listening for GDB client connections."""
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -222,13 +252,13 @@ class GDBServer:
         m = state.memory
 
         # Helper: create concrete bitvectors
-        def bv8(val: int) -> Any:  # noqa: ANN401
+        def bv8(val: cython.longlong) -> Any:  # noqa: ANN401
             return claripy.BVV(val, 8)
 
-        def bv16(val: int) -> Any:  # noqa: ANN401
+        def bv16(val: cython.longlong) -> Any:  # noqa: ANN401
             return claripy.BVV(val, 16)
 
-        def bv32(val: int) -> Any:  # noqa: ANN401
+        def bv32(val: cython.longlong) -> Any:  # noqa: ANN401
             return claripy.BVV(val, 32)
 
         # 1. IVT at 0x0000 (256 vectors, each 4 bytes: offset + segment)
@@ -309,6 +339,7 @@ class GDBServer:
     def _accept_and_serve(self) -> None:
         def _impl() -> None:
             """Accept client connections and serve GDB protocol."""
+            cmd: object
             self._initialize_state_if_needed()
             while self.running and self.socket is not None:
                 try:
@@ -340,6 +371,7 @@ class GDBServer:
 
         return _impl()
 
+    @cython.ccall
     def _initialize_state_if_needed(self) -> None:
         """Create the initial DOS execution state once."""
         if self.state is not None:
@@ -378,17 +410,17 @@ class GDBServer:
             f"(phys 0x{phys_entry:x})"
         )
 
-    def _send_packet(self, data: str) -> None:
+    def _send_packet(self, data: object) -> None:
         """Send GDB RSP packet (with checksum)."""
         if not self.client:
             return
 
-        checksum = sum(ord(c) for c in data) & 0xFF
+        checksum = sum(ord(c) for c in iter(data)) & 0xFF
         packet = f"${data}#{checksum:02x}"
         self.client.sendall(packet.encode())
 
-    def _handle_q_command(self, cmd: str) -> bool:
-        def _impl() -> bool:
+    def _handle_q_command(self, cmd: object) -> cython.bint:
+        def _impl() -> cython.bint:
             return (
                 self._handle_q_supported_and_xfer(cmd)
                 or self._handle_q_thread_status(cmd)
@@ -397,7 +429,8 @@ class GDBServer:
 
         return _impl()
 
-    def _handle_q_supported_and_xfer(self, cmd: str) -> bool:
+    @cython.ccall
+    def _handle_q_supported_and_xfer(self, cmd: object) -> cython.bint:
         """Answer qSupported and qXfer feature/memory-map queries."""
         if cmd.startswith("qSupported"):
             self._send_packet(
@@ -419,7 +452,7 @@ class GDBServer:
             return True
         return False
 
-    def _handle_q_thread_status(self, cmd: str) -> bool:
+    def _handle_q_thread_status(self, cmd: object) -> cython.bint:
         """Answer thread/attached/offsets status queries."""
         if cmd == "qAttached":
             self._send_packet("0")
@@ -428,7 +461,7 @@ class GDBServer:
             self._send_packet("")
             return True
         if cmd == "qfThreadInfo":
-            threads_hex = ",".join(f"{tid:x}" for tid in self.threads)
+            threads_hex = ",".join(f"{tid:x}" for tid in iter(self.threads))
             self._send_packet(f"m{threads_hex}")
             return True
         if cmd == "qsThreadInfo":
@@ -442,7 +475,8 @@ class GDBServer:
             return True
         return False
 
-    def _handle_q_extensions(self, cmd: str) -> bool:
+    @cython.ccall
+    def _handle_q_extensions(self, cmd: object) -> cython.bint:
         """Answer Inertia-helper and symbol-extension queries."""
         if cmd == "qInertiaHelpers":
             self._send_packet(json.dumps(self._build_helper_info(), separators=(",", ":")))
@@ -452,7 +486,8 @@ class GDBServer:
             return True
         return False
 
-    def _handle_vcont_command(self, cmd: str) -> bool:
+    @cython.ccall
+    def _handle_vcont_command(self, cmd: object) -> cython.bint:
         if cmd == "vCont?":
             self._send_packet("vCont;s;c")
             return True
@@ -466,13 +501,15 @@ class GDBServer:
             self._handle_continue()
         return True
 
-    def _handle_thread_command(self, cmd: str) -> bool:
+    @cython.ccall
+    def _handle_thread_command(self, cmd: object) -> cython.bint:
         if cmd.startswith(("Hg", "Hc")):
             self._send_packet("OK")
             return True
         return False
 
-    def _handle_register_command(self, cmd: str) -> bool:
+    @cython.ccall
+    def _handle_register_command(self, cmd: object) -> cython.bint:
         if cmd == "g":
             self._handle_read_all_registers()
             return True
@@ -484,7 +521,8 @@ class GDBServer:
             return True
         return False
 
-    def _handle_memory_command(self, cmd: str) -> bool:
+    @cython.ccall
+    def _handle_memory_command(self, cmd: object) -> cython.bint:
         if cmd.startswith("m"):
             self._handle_read_memory(cmd)
             return True
@@ -496,7 +534,8 @@ class GDBServer:
             return True
         return False
 
-    def _handle_execution_command(self, cmd: str) -> bool:
+    @cython.ccall
+    def _handle_execution_command(self, cmd: object) -> cython.bint:
         if cmd == "c":
             self._handle_continue()
             return True
@@ -511,7 +550,8 @@ class GDBServer:
             return True
         return False
 
-    def _handle_breakpoint_command(self, cmd: str) -> bool:
+    @cython.ccall
+    def _handle_breakpoint_command(self, cmd: object) -> cython.bint:
         if cmd.startswith(("Z0,", "Z1,")):
             self._handle_set_breakpoint(cmd)
             return True
@@ -523,7 +563,8 @@ class GDBServer:
             return True
         return False
 
-    def _normalize_command(self, cmd: str) -> str | None:
+    @cython.ccall
+    def _normalize_command(self, cmd: object) -> object:
         """Strip RSP packet framing; return the command payload or ``None`` to ignore."""
         print(f"[GDB] Received raw command: {cmd!r}")
         if not cmd or cmd.startswith("+"):
@@ -533,9 +574,11 @@ class GDBServer:
         print(f"[GDB] Parsed command: {cmd!r}")
         return cmd
 
-    def _handle_command(self, cmd: str) -> None:
+    def _handle_command(self, cmd: object) -> None:
         def _impl() -> None:
             """Dispatch GDB RSP command."""
+            current_cmd: object
+            handler: object
             current_cmd = self._normalize_command(cmd)
             if current_cmd is None:
                 return
@@ -585,10 +628,11 @@ class GDBServer:
         ]
 
         # GDB RSP uses little-endian byte order
-        reg_hex = "".join(struct.pack("<H", r).hex() for r in registers)
+        reg_hex = "".join(struct.pack("<H", r).hex() for r in iter(registers))
         self._send_packet(reg_hex)
 
-    def _handle_read_register(self, cmd: str) -> None:
+    @cython.ccall
+    def _handle_read_register(self, cmd: object) -> None:
         """Read single register (little-endian byte order)."""
         try:
             reg_num = int(cmd[1:], 16)
@@ -625,7 +669,8 @@ class GDBServer:
         except (ValueError, AttributeError):
             self._send_packet("ffffffff")
 
-    def _handle_read_memory(self, cmd: str) -> None:
+    @cython.ccall
+    def _handle_read_memory(self, cmd: object) -> None:
         """Read memory: m<addr>,<len>."""
         try:
             parts = cmd[1:].split(",")
@@ -644,7 +689,8 @@ class GDBServer:
         except (ValueError, IndexError, Exception):
             self._send_packet("")
 
-    def _handle_write_memory(self, cmd: str) -> None:
+    @cython.ccall
+    def _handle_write_memory(self, cmd: object) -> None:
         """Write memory: M<addr>,<len>:<data>."""
         try:
             parts = cmd[1:].split(":")
@@ -652,7 +698,7 @@ class GDBServer:
             addr = int(header[0], 16)
             length = int(header[1], 16)
             data = bytes.fromhex(parts[1])
-            if len(data) != length:
+            if operator.ne(len(data), length):
                 self._send_packet("E01")
                 return
 
@@ -662,6 +708,7 @@ class GDBServer:
         except (ValueError, IndexError):
             self._send_packet("E00")
 
+    @cython.ccall
     def _handle_continue(self) -> None:
         """Continue execution until breakpoint."""
         if not self.state:
@@ -689,6 +736,7 @@ class GDBServer:
         except Exception:
             self._send_packet("S05")
 
+    @cython.ccall
     def _handle_step(self) -> None:
         """Single step instruction (step into)."""
         if not self.state:
@@ -742,7 +790,8 @@ class GDBServer:
 
         return _impl()
 
-    def _handle_set_breakpoint(self, cmd: str) -> None:
+    @cython.ccall
+    def _handle_set_breakpoint(self, cmd: object) -> None:
         """Set breakpoint: Z0,<addr>,<kind>."""
         try:
             parts = cmd[2:].split(",")
@@ -753,7 +802,8 @@ class GDBServer:
         except (ValueError, IndexError):
             self._send_packet("E00")
 
-    def _handle_remove_breakpoint(self, cmd: str) -> None:
+    @cython.ccall
+    def _handle_remove_breakpoint(self, cmd: object) -> None:
         """Remove breakpoint: z0,<addr>,<kind>."""
         try:
             parts = cmd[2:].split(",")
@@ -764,7 +814,8 @@ class GDBServer:
         except (ValueError, IndexError):
             self._send_packet("E00")
 
-    def _handle_write_register(self, cmd: str) -> None:
+    @cython.ccall
+    def _handle_write_register(self, cmd: object) -> None:
         """Write single register: P<regnum>=<value>."""
         try:
             eq_pos = cmd.index("=")
@@ -799,7 +850,8 @@ class GDBServer:
         except (ValueError, IndexError):
             self._send_packet("E00")
 
-    def _handle_write_memory_binary(self, cmd: str) -> None:
+    @cython.ccall
+    def _handle_write_memory_binary(self, cmd: object) -> None:
         """Write memory binary: X<addr>,<len>:<data>."""
         try:
             colon_pos = cmd.index(":")
@@ -809,7 +861,7 @@ class GDBServer:
             length = int(len_str, 16)
             data = cmd[colon_pos + 1 :].encode("latin-1")
 
-            if self.state and len(data) == length:
+            if self.state and operator.eq(len(data), length):
                 self.state.memory.store(addr, data)
                 self._send_packet("OK")
             else:
@@ -817,6 +869,7 @@ class GDBServer:
         except (ValueError, IndexError):
             self._send_packet("E00")
 
+    @cython.ccall
     def _get_memory_map_xml(self) -> str:
         """Generate memory map XML for Cutter/rizin."""
         # Get memory size from project
@@ -836,6 +889,7 @@ class GDBServer:
         )
         return f"l{xml}"
 
+    @cython.ccall
     def _get_target_description_xml(self) -> str:
         """Generate target description XML for Cutter/rizin."""
         xml = (
@@ -865,6 +919,7 @@ class GDBServer:
         )
         return f"l{xml}"
 
+    @cython.ccall
     def stop(self) -> None:
         """Stop the server."""
         self.running = False
@@ -881,7 +936,8 @@ __all__ = [
 ]
 
 
-def _call_instruction_length(concrete: bytes) -> int:
+@cython.ccall
+def _call_instruction_length(concrete: object) -> cython.longlong:
     """Return the instruction length when the leading bytes form a call, else ``0``."""
     if concrete[0] == 0xE8:
         # call rel32

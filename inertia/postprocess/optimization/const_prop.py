@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Rewrite/Postprocess cleanup.
 
 Responsibility: fold constant expressions after semantics are already proven.
@@ -8,6 +9,8 @@ dynamic attribute access limited to preserving existing C AST codegen metadata.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Iterator
 
@@ -24,6 +27,8 @@ from inertia.postprocess.decompiler_postprocess_utils import _c_constant_value_8
 
 def _iter_c_statements_safe_8616(node: object) -> Iterator[object]:
     """Yield individual CStatements, descending into CStatements containers."""
+    item: object
+    stmt: object
     if isinstance(node, CStatements):
         for stmt in node.statements:
             yield from _iter_c_statements_safe_8616(stmt)
@@ -51,12 +56,14 @@ _CONST_PROP_BINARY_OPS: dict[str, Callable[[int, int], int | None]] = {
 }
 
 
-def _folded_constant_8616(value: int, *, codegen: object | None = None) -> CConstant:
+@cython.ccall
+def _folded_constant_8616(value: cython.longlong, *, codegen: object | None = None) -> CConstant:
     """Build the 16-bit default typed constant used by cleanup folding."""
     return CConstant(int(value), _CONST_DEFAULT_TYPE, codegen=codegen)
 
 
-def _is_const_expr(node: object) -> bool:
+@cython.ccall
+def _is_const_expr(node: object) -> cython.bint:
     """Return whether an already-recovered C AST expression is constant-only."""
     if isinstance(node, CConstant):
         return True
@@ -71,6 +78,10 @@ def _eval_const_expr(node: object) -> int | None:
     """Evaluate a constant-only C AST expression without inferring new facts."""
 
     def _impl() -> int | None:
+        a: object
+        b: object
+        fn: object
+        operand: object
         if isinstance(node, CConstant):
             return _c_constant_value_8616(node)
         if isinstance(node, CBinaryOp):
@@ -95,8 +106,13 @@ def _eval_const_expr(node: object) -> int | None:
     return _impl()
 
 
-def _fold_binary_op_8616(node: CBinaryOp, node_codegen: object | None) -> bool:
+@cython.ccall
+def _fold_binary_op_8616(node: CBinaryOp, node_codegen: object | None) -> cython.bint:
     """Fold a binary operator node across the dynamic third-party angr C AST boundary."""
+    a_val: object
+    b_val: object
+    fn: object
+    result: object
     a_val = _eval_const_expr(node.lhs)
     b_val = _eval_const_expr(node.rhs)
     if a_val is not None and b_val is not None:
@@ -117,8 +133,10 @@ def _fold_binary_op_8616(node: CBinaryOp, node_codegen: object | None) -> bool:
     return False
 
 
-def _fold_unary_op_8616(node: CUnaryOp, node_codegen: object | None) -> bool:
+@cython.ccall
+def _fold_unary_op_8616(node: CUnaryOp, node_codegen: object | None) -> cython.bint:
     """Fold a unary operator node across the dynamic third-party angr C AST boundary."""
+    operand_val: object
     operand_val = _eval_const_expr(node.operand)
     if operand_val is None:
         return False
@@ -131,7 +149,8 @@ def _fold_unary_op_8616(node: CUnaryOp, node_codegen: object | None) -> bool:
     return False
 
 
-def _fold_constants_in_node(node: object, *, codegen: object | None = None) -> bool:
+@cython.ccall
+def _fold_constants_in_node(node: object, *, codegen: object | None = None) -> cython.bint:
     """Fold constant sub-expressions in one C AST node."""
     node_codegen = getattr(node, "codegen", None) or codegen
     if isinstance(node, CBinaryOp):
@@ -141,8 +160,10 @@ def _fold_constants_in_node(node: object, *, codegen: object | None = None) -> b
     return False
 
 
-def _constant_propagation_8616(stmts: object, codegen: object | None = None) -> bool:
+@cython.ccall
+def _constant_propagation_8616(stmts: object, codegen: object | None = None) -> cython.bint:
     """Fold constant sub-expressions in C statements."""
+    stmt: object
     changed = False
     for stmt in _iter_c_statements_safe_8616(stmts):
         if _fold_constants_in_node(stmt, codegen=codegen):

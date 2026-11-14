@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed contracts for the four distinct register roles of one exact CALL.
 
 Layer: Semantics.
@@ -12,6 +13,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -20,6 +23,9 @@ from inertia.alias.domains import REGISTER_VIEWS as _ALIAS_REGISTER_VIEWS
 from inertia.ir.core import IRFunctionArtifact
 
 from .call_output_contracts import CallOutputFact8616, CallOutputShape8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "CALL_REGISTER_ROLE_KINDS_8616",
@@ -40,10 +46,10 @@ __all__ = [
 # DomainKey names keeps semantic masks keyed by the same storage identity the
 # Alias consumer resolves; wider 80386 parents project into these low views.
 TRACKED_REGISTER_DOMAIN_NAMES_8616: tuple[str, ...] = tuple(
-    sorted({key.name for key, _view in _ALIAS_REGISTER_VIEWS.values()})
+    sorted({key.name for key, _view in builtins.iter(_ALIAS_REGISTER_VIEWS.values())})
 )
 
-FULL_DOMAIN_MASK_8616: int = (1 << 16) - 1
+FULL_DOMAIN_MASK_8616: cython.longlong = (1 << 16) - 1
 
 
 class CallRegisterRoleKind8616(StrEnum):
@@ -84,7 +90,7 @@ class CallRegisterRoleFailure8616(StrEnum):
     OUTPUT_VIEW_UNSUPPORTED = "output_view_unsupported"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallRegisterDomainBits8616:
     """Role evidence for one canonical 16-bit register domain.
 
@@ -94,12 +100,13 @@ class CallRegisterDomainBits8616:
     remains undecided.
     """
 
-    domain: str
-    known_bits: int
-    role_bits: int
+    domain: object
+    known_bits: cython.longlong
+    role_bits: cython.longlong
 
     def __post_init__(self) -> None:
         """Reject role bits that outrun their decided mask or domain."""
+        mask: object
         if self.domain not in TRACKED_REGISTER_DOMAIN_NAMES_8616:
             raise ValueError(f"untracked register domain {self.domain!r}")
         for mask in (self.known_bits, self.role_bits):
@@ -115,7 +122,7 @@ class CallRegisterDomainBits8616:
             )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallRegisterRoleEvidence8616:
     """One role decision over the tracked register domains.
 
@@ -127,21 +134,22 @@ class CallRegisterRoleEvidence8616:
 
     kind: CallRegisterRoleKind8616
     coverage: CallRegisterRoleCoverage8616
-    domains: tuple[CallRegisterDomainBits8616, ...]
-    witnesses: tuple[int, ...]
-    failures: tuple[CallRegisterRoleFailure8616, ...]
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    domains: object
+    witnesses: object
+    failures: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     def __post_init__(self) -> None:
         """Reject unsorted evidence, bad witnesses and incoherent counters."""
-        names = tuple(entry.domain for entry in self.domains)
-        if names != tuple(sorted(names)) or len(set(names)) != len(names):
+        witness: object
+        names = tuple(entry.domain for entry in iter(self.domains))
+        if operator.ne(names, tuple(sorted(names))) or operator.ne(len(set(names)), len(names)):
             raise ValueError("domain evidence must be sorted and unique")
-        if self.witnesses != tuple(sorted(set(self.witnesses))):
+        if operator.ne(self.witnesses, tuple(sorted(tuple(set(self.witnesses))))):
             raise ValueError("witnesses must be sorted and unique")
         for witness in self.witnesses:
             if not isinstance(witness, int) or isinstance(witness, bool) or witness < 0:
@@ -151,10 +159,11 @@ class CallRegisterRoleEvidence8616:
         else:
             _decided_role_invariants_8616(self)
 
-    def domain_bits(self, domain: str) -> CallRegisterDomainBits8616 | None:
+    def domain_bits(self, domain: object) -> CallRegisterDomainBits8616 | None:
         """Return the decided evidence for one canonical domain name."""
+        entry: object
         for entry in self.domains:
-            if entry.domain == domain:
+            if operator.eq(entry.domain, domain):
                 return entry
         return None
 
@@ -166,7 +175,7 @@ def _refusal_role_invariants_8616(evidence: CallRegisterRoleEvidence8616) -> Non
         or evidence.materialized_count != 0
         or evidence.failure_count < 1
         or not evidence.failures
-        or any(entry.known_bits != 0 for entry in evidence.domains)
+        or any(entry.known_bits != 0 for entry in iter(evidence.domains))
     ):
         raise ValueError("refused role evidence cannot publish decided bits")
 
@@ -174,21 +183,20 @@ def _refusal_role_invariants_8616(evidence: CallRegisterRoleEvidence8616) -> Non
 def _decided_role_invariants_8616(evidence: CallRegisterRoleEvidence8616) -> None:
     """Require decided evidence to close per-domain and match coverage."""
     if (
-        evidence.raw_fact_count != len(TRACKED_REGISTER_DOMAIN_NAMES_8616)
-        or evidence.normalized_fact_count != evidence.raw_fact_count
-        or evidence.classified_fact_count != evidence.materialized_count
-        or evidence.classified_fact_count + evidence.failure_count
-        != evidence.normalized_fact_count
+        operator.ne(evidence.raw_fact_count, len(TRACKED_REGISTER_DOMAIN_NAMES_8616))
+        or operator.ne(evidence.normalized_fact_count, evidence.raw_fact_count)
+        or operator.ne(evidence.classified_fact_count, evidence.materialized_count)
+        or operator.ne(evidence.classified_fact_count + evidence.failure_count, evidence.normalized_fact_count)
     ):
         raise ValueError("role evidence counters must close per domain")
-    decided = sum(entry.known_bits != 0 for entry in evidence.domains)
-    if evidence.classified_fact_count != decided:
+    decided = sum(entry.known_bits != 0 for entry in iter(evidence.domains))
+    if operator.ne(evidence.classified_fact_count, decided):
         raise ValueError("classified domains must publish decided bits")
     if evidence.coverage is CallRegisterRoleCoverage8616.COMPLETE:
         expected = dict.fromkeys(
             TRACKED_REGISTER_DOMAIN_NAMES_8616, FULL_DOMAIN_MASK_8616
         )
-        actual = {entry.domain: entry.known_bits for entry in evidence.domains}
+        actual = {entry.domain: entry.known_bits for entry in iter(evidence.domains)}
         if (
             evidence.failure_count != 0
             or evidence.failures
@@ -202,16 +210,16 @@ def _decided_role_invariants_8616(evidence: CallRegisterRoleEvidence8616) -> Non
         raise ValueError("partial coverage must retain typed failure reasons")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallRegisterRoleResult8616:
     """One proven output register bound to an exact call identity."""
 
-    register: str
-    domain: str
-    bit_mask: int
-    callsite_addr: int
-    target_addr: int
-    return_block_addr: int
+    register: object
+    domain: object
+    bit_mask: cython.longlong
+    callsite_addr: cython.longlong
+    target_addr: cython.longlong
+    return_block_addr: cython.longlong
     shape: CallOutputShape8616 | None
 
     def __post_init__(self) -> None:
@@ -224,7 +232,7 @@ class CallRegisterRoleResult8616:
             raise ValueError("result bit mask must cover a 16-bit domain view")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallRegisterRolesFact8616:
     """All four register roles bound to one exact CALL identity.
 
@@ -238,63 +246,64 @@ class CallRegisterRolesFact8616:
     callsite_addr: int | None
     target_addr: int | None
     return_block_addr: int | None
-    roles: tuple[CallRegisterRoleEvidence8616, ...]
-    results: tuple[CallRegisterRoleResult8616, ...]
+    roles: object
+    results: object
 
     def __post_init__(self) -> None:
         """Require the four role evidences and identity-bound results."""
-        kinds = tuple(role.kind for role in self.roles)
+        result: object
+        kinds = tuple(role.kind for role in iter(self.roles))
         if kinds != CALL_REGISTER_ROLE_KINDS_8616:
             raise ValueError("exactly one evidence per role kind is required")
         for result in self.results:
             if not self._result_binds_identity(result):
                 raise ValueError("results must carry the exact call identity")
 
-    def _result_binds_identity(self, result: CallRegisterRoleResult8616) -> bool:
+    def _result_binds_identity(self, result: CallRegisterRoleResult8616) -> cython.bint:
         """Return whether one result carries this call's exact identity."""
         return (
             self.callsite_addr is not None
             and self.target_addr is not None
             and self.return_block_addr is not None
-            and result.callsite_addr == self.callsite_addr
-            and result.target_addr == self.target_addr
-            and result.return_block_addr == self.return_block_addr
+            and operator.eq(result.callsite_addr, self.callsite_addr)
+            and operator.eq(result.target_addr, self.target_addr)
+            and operator.eq(result.return_block_addr, self.return_block_addr)
         )
 
     def role(self, kind: CallRegisterRoleKind8616) -> CallRegisterRoleEvidence8616:
         """Return the evidence for one role kind."""
+        evidence: object
         for evidence in self.roles:
             if evidence.kind is kind:
                 return evidence
         raise ValueError(f"missing role evidence for {kind}")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallRegisterRoleStats8616:
     """Closed aggregate accounting for every role decision in one function."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every role decision has a retained typed outcome."""
         return (
-            self.raw_fact_count == self.normalized_fact_count
-            and self.classified_fact_count == self.materialized_count
-            and self.classified_fact_count + self.failure_count
-            == self.normalized_fact_count
+            operator.eq(self.raw_fact_count, self.normalized_fact_count)
+            and operator.eq(self.classified_fact_count, self.materialized_count)
+            and operator.eq(self.classified_fact_count + self.failure_count, self.normalized_fact_count)
         )
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every role decision was positively proven."""
         return self.closed and self.failure_count == 0
 
-    def to_dict(self) -> dict[str, int]:
+    def to_dict(self) -> dict[str, cython.longlong]:
         """Return deterministic closed-loop counters."""
         return {
             "raw_fact_count": self.raw_fact_count,
@@ -305,7 +314,7 @@ class CallRegisterRoleStats8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallRegisterRolesArtifact8616:
     """Per-function register-role evidence bound to exact CALL identities.
 
@@ -316,8 +325,8 @@ class CallRegisterRolesArtifact8616:
     a function address alone is not identity.
     """
 
-    function_addr: int
-    facts: tuple[CallRegisterRolesFact8616, ...]
+    function_addr: cython.longlong
+    facts: object
     stats: CallRegisterRoleStats8616
     output_facts: tuple[CallOutputFact8616, ...] = ()
     source_function: IRFunctionArtifact | None = None
@@ -327,32 +336,32 @@ class CallRegisterRolesArtifact8616:
         """Reconcile retained stats with the actual retained fact census."""
         expected = CallRegisterRoleStats8616(
             raw_fact_count=sum(
-                role.raw_fact_count for fact in self.facts for role in fact.roles
+                role.raw_fact_count for fact in iter(self.facts) for role in iter(fact.roles)
             ),
             normalized_fact_count=sum(
                 role.normalized_fact_count
-                for fact in self.facts
-                for role in fact.roles
+                for fact in iter(self.facts)
+                for role in iter(fact.roles)
             ),
             classified_fact_count=sum(
                 role.classified_fact_count
-                for fact in self.facts
-                for role in fact.roles
+                for fact in iter(self.facts)
+                for role in iter(fact.roles)
             ),
             materialized_count=sum(
-                role.materialized_count for fact in self.facts for role in fact.roles
+                role.materialized_count for fact in iter(self.facts) for role in iter(fact.roles)
             ),
             failure_count=sum(
-                role.failure_count for fact in self.facts for role in fact.roles
+                role.failure_count for fact in iter(self.facts) for role in iter(fact.roles)
             ),
         )
-        if self.stats != expected:
+        if operator.ne(self.stats, expected):
             raise ValueError(
                 "role artifact stats must equal the retained fact census"
             )
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every call's role decisions are fully proven.
 
         Closed counters are necessary but not sufficient: a coherent partial
@@ -361,16 +370,16 @@ class CallRegisterRolesArtifact8616:
         """
         return self.stats.complete and all(
             role.coverage is CallRegisterRoleCoverage8616.COMPLETE
-            for fact in self.facts
-            for role in fact.roles
+            for fact in iter(self.facts)
+            for role in iter(fact.roles)
         )
 
     def authenticates_output_facts(
         self,
-        output_facts: tuple[CallOutputFact8616, ...],
-    ) -> bool:
+        output_facts: object,
+    ) -> cython.bint:
         """Return whether this artifact consumed that exact fact census."""
-        return self.output_facts == output_facts
+        return operator.eq(self.output_facts, output_facts)
 
     def to_dict(self) -> dict[str, object]:
         """Return deterministic diagnostics without duplicating decoded IR."""
@@ -391,12 +400,12 @@ class CallRegisterRolesArtifact8616:
                                     "known_bits": entry.known_bits,
                                     "role_bits": entry.role_bits,
                                 }
-                                for entry in evidence.domains
+                                for entry in iter(evidence.domains)
                             },
                             "witnesses": list(evidence.witnesses),
-                            "failures": [failure.value for failure in evidence.failures],
+                            "failures": [failure.value for failure in iter(evidence.failures)],
                         }
-                        for evidence in fact.roles
+                        for evidence in iter(fact.roles)
                     },
                     "results": [
                         {
@@ -407,10 +416,10 @@ class CallRegisterRolesArtifact8616:
                                 None if result.shape is None else result.shape.value
                             ),
                         }
-                        for result in fact.results
+                        for result in iter(fact.results)
                     ],
                 }
-                for fact in self.facts
+                for fact in iter(self.facts)
             ],
             "stats": self.stats.to_dict(),
         }

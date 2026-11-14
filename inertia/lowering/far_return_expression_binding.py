@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bind a proven IR far DX:AX return pair to one structured C expression.
 
 Layer: Types/Lowering.
@@ -14,6 +15,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -37,6 +40,9 @@ from inertia.lowering.c_ast_utils import _clone_c_ast_tree_8616
 
 from .c_runtime_header import is_lowered_runtime_macro_8616
 from .stack_variable_coordinates import stack_cvar_for_machine_bp_range_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "FarReturnBoundInput8616",
@@ -115,7 +121,7 @@ class FarReturnRepresentationKind8616(StrEnum):
     CODEGEN_FUNCTION = "codegen_function"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FarReturnBoundInput8616:
     """One proven IR input word rebound to its canonical stack C variable."""
 
@@ -125,25 +131,25 @@ class FarReturnBoundInput8616:
     expression: structured_c.CExpression
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FarReturnExpressionBindingStats8616:
     """Closed five-stage evidence loop for one requested binding."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FarReturnExpressionBindingResult8616:
     """One bound candidate return expression or a typed atomic refusal."""
 
     verdict: FarReturnExpressionBindingVerdict8616
     failure: FarReturnExpressionBindingFailure8616 | None
     stats: FarReturnExpressionBindingStats8616
-    target: str | None = None
+    target: object = None
     expression: structured_c.CExpression | None = None
     bound_inputs: tuple[FarReturnBoundInput8616, ...] = ()
     missing_representation: FarReturnRepresentationKind8616 | None = None
@@ -151,26 +157,24 @@ class FarReturnExpressionBindingResult8616:
     upstream_failure: FarScaledReturnFailure8616 | None = None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Require one bound expression covering all three proven inputs."""
         return bool(
             self.verdict is FarReturnExpressionBindingVerdict8616.BOUND
             and self.failure is None
             and self.target in _FAR_RETURN_HELPER_BY_TARGET_8616
             and isinstance(self.expression, structured_c.CFunctionCall)
-            and self.expression.callee_target
-            == _FAR_RETURN_HELPER_BY_TARGET_8616[self.target]
+            and operator.eq(self.expression.callee_target, _FAR_RETURN_HELPER_BY_TARGET_8616[self.target])
             and len(self.bound_inputs) == 3
-            and {item.role for item in self.bound_inputs}
-            == set(FarReturnExpressionRole8616)
+            and operator.eq({item.role for item in iter(self.bound_inputs)}, set(FarReturnExpressionRole8616))
             and all(
                 isinstance(item.expression, structured_c.CExpression)
-                for item in self.bound_inputs
+                for item in iter(self.bound_inputs)
             )
             and self.missing_representation is None
             and self.missing_role is None
             and self.upstream_failure is None
-            and self.stats == FarReturnExpressionBindingStats8616(1, 1, 1, 1, 0)
+            and operator.eq(self.stats, FarReturnExpressionBindingStats8616(1, 1, 1, 1, 0))
         )
 
 
@@ -180,11 +184,12 @@ _FAR_RETURN_HELPER_BY_TARGET_8616: dict[str, str] = {
 }
 
 
+@cython.ccall
 def _refuse_8616(
     failure: FarReturnExpressionBindingFailure8616,
     *,
-    normalized: bool = False,
-    classified: bool = False,
+    normalized: cython.bint = False,
+    classified: cython.bint = False,
     missing: FarReturnRepresentationKind8616 | None = None,
     role: FarReturnExpressionRole8616 | None = None,
     upstream: FarScaledReturnFailure8616 | None = None,
@@ -202,8 +207,10 @@ def _refuse_8616(
     )
 
 
+@cython.ccall
 def _codegen_function_addr_8616(codegen: object) -> int | None:
     """Read the exact linear function identity at the codegen boundary."""
+    cfunc: object
     boundary = cast(_CodegenBoundary8616, codegen)
     cfunc = boundary.cfunc
     if cfunc is None:
@@ -212,7 +219,8 @@ def _codegen_function_addr_8616(codegen: object) -> int | None:
     return addr if isinstance(addr, int) and addr >= 0 else None
 
 
-def _codegen_c_target_8616(codegen: object) -> str:
+@cython.ccall
+def _codegen_c_target_8616(codegen: object) -> object:
     """Read the selected generated-C ABI, defaulting like every consumer."""
     boundary = cast(_CodegenBoundary8616, codegen)
     try:
@@ -228,23 +236,25 @@ def _proven_input_access_8616(
     key: IRLogicalMemoryAccessKey8616,
 ) -> IRLogicalMemoryAccess8616 | None:
     """Bind one upstream proof key to a unique complete logical word read."""
+    logical: object
     logical = artifact.logical_memory
     if logical is None or not logical.closed or logical.refusals:
         return None
-    matches = tuple(access for access in logical.accesses if access.key == key)
+    matches = tuple(access for access in iter(logical.accesses) if operator.eq(access.key, key))
     if len(matches) != 1:
         return None
     access = matches[0]
     if (
         not access.complete
         or access.kind is not IRMemoryAccessKind8616.READ
-        or key.function_addr != artifact.function_addr
+        or operator.ne(key.function_addr, artifact.function_addr)
         or not key.complete
     ):
         return None
     return access
 
 
+@cython.ccall
 def _stable_bp_word_8616(access: IRLogicalMemoryAccess8616) -> IRAddress | None:
     """Require one proven stable SS:BP two-byte storage identity."""
     address = access.address
@@ -259,6 +269,7 @@ def _stable_bp_word_8616(access: IRLogicalMemoryAccess8616) -> IRAddress | None:
     return address
 
 
+@cython.ccall
 def _projected_word_cvar_8616(codegen: object, storage: IRAddress) -> object | None:
     """Return the canonical projected C node for one exact BP word."""
     projected: object | None = stack_cvar_for_machine_bp_range_8616(
@@ -267,7 +278,8 @@ def _projected_word_cvar_8616(codegen: object, storage: IRAddress) -> object | N
     return projected
 
 
-def _is_word_variable_8616(cvar: object) -> bool:
+@cython.ccall
+def _is_word_variable_8616(cvar: object) -> cython.bint:
     """Accept only a 16-bit integer stack variable as a bound input.
 
     The IR proof is a sign-insensitive bit-pattern fact, so signedness is not
@@ -283,6 +295,7 @@ def _is_word_variable_8616(cvar: object) -> bool:
     )
 
 
+@cython.ccall
 def _unsigned_word_view_8616(
     codegen: object,
     cvar: structured_c.CVariable,
@@ -305,6 +318,7 @@ def _unsigned_word_view_8616(
     )
 
 
+@cython.ccall
 def _bound_offset_expression_8616(
     codegen: object,
     base: structured_c.CVariable,
@@ -336,11 +350,12 @@ def _bound_offset_expression_8616(
 def _resolve_proven_accesses_8616(
     artifact: SSAFunctionArtifact,
     proof: FarScaledReturnResult8616,
-) -> (
-    tuple[tuple[FarReturnExpressionRole8616, IRLogicalMemoryAccess8616], ...]
-    | FarReturnExpressionBindingResult8616
-):
+) -> object:
     """Rebind every retained proof key to a unique complete logical read."""
+    access: object
+    key: object
+    proof_offset: object
+    role: object
     proof_offset = proof.offset
     assert proof_offset is not None
     keys = (
@@ -348,7 +363,7 @@ def _resolve_proven_accesses_8616(
         (FarReturnExpressionRole8616.SEGMENT, proof.segment_access_key),
         (FarReturnExpressionRole8616.OFFSET_INDEX, proof_offset.index_access_key),
     )
-    if any(key is None for _, key in keys):
+    if any(key is None for _, key in iter(keys)):
         return _refuse_8616(
             FarReturnExpressionBindingFailure8616.INPUT_ACCESS_UNPROVEN,
             missing=FarReturnRepresentationKind8616.INPUT_ACCESS,
@@ -367,13 +382,14 @@ def _resolve_proven_accesses_8616(
     return tuple(accesses)
 
 
+@cython.ccall
 def _proven_input_storages_8616(
-    accesses: tuple[tuple[FarReturnExpressionRole8616, IRLogicalMemoryAccess8616], ...],
-) -> (
-    dict[FarReturnExpressionRole8616, IRAddress]
-    | FarReturnExpressionBindingResult8616
-):
+    accesses: object,
+) -> object:
     """Require stable proven SS:BP words in the exact far-pointer layout."""
+    storage: object
+    access: object
+    role: object
     storages: dict[FarReturnExpressionRole8616, IRAddress] = {}
     for role, access in accesses:
         storage = _stable_bp_word_8616(access)
@@ -389,7 +405,7 @@ def _proven_input_storages_8616(
     segment = storages[FarReturnExpressionRole8616.SEGMENT]
     index = storages[FarReturnExpressionRole8616.OFFSET_INDEX]
     offsets = (base.offset, segment.offset, index.offset)
-    adjacent_segment = segment.offset == base.offset + base.size
+    adjacent_segment = operator.eq(segment.offset, base.offset + base.size)
     if len(set(offsets)) != 3 or not adjacent_segment:
         return _refuse_8616(
             FarReturnExpressionBindingFailure8616.INPUT_STORAGE_MISMATCH,
@@ -399,18 +415,16 @@ def _proven_input_storages_8616(
     return storages
 
 
+@cython.ccall
 def _bind_input_variables_8616(
     codegen: object,
-    accesses: tuple[tuple[FarReturnExpressionRole8616, IRLogicalMemoryAccess8616], ...],
-    storages: dict[FarReturnExpressionRole8616, IRAddress],
-) -> (
-    tuple[
-        tuple[FarReturnBoundInput8616, ...],
-        dict[FarReturnExpressionRole8616, structured_c.CVariable],
-    ]
-    | FarReturnExpressionBindingResult8616
-):
+    accesses: object,
+    storages: object,
+) -> object:
     """Bind each proven storage to one existing canonical stack variable."""
+    cvar: object
+    access: object
+    role: object
     bound_inputs: list[FarReturnBoundInput8616] = []
     variables: dict[FarReturnExpressionRole8616, structured_c.CVariable] = {}
     for role, access in accesses:
@@ -440,8 +454,9 @@ def _bind_input_variables_8616(
 
 def _selected_far_return_helper_8616(
     codegen: object,
-) -> tuple[str, str] | FarReturnExpressionBindingResult8616:
+) -> object:
     """Require the segmented pointer constructor under both C runtimes."""
+    helper: object
     target = _codegen_c_target_8616(codegen)
     helper = _FAR_RETURN_HELPER_BY_TARGET_8616.get(target)
     if helper is None:
@@ -453,7 +468,7 @@ def _selected_far_return_helper_8616(
         )
     if not all(
         is_lowered_runtime_macro_8616(name)
-        for name in _FAR_RETURN_HELPER_BY_TARGET_8616.values()
+        for name in builtins.iter(_FAR_RETURN_HELPER_BY_TARGET_8616.values())
     ):
         return _refuse_8616(
             FarReturnExpressionBindingFailure8616.REPRESENTATION_MISSING,
@@ -467,9 +482,9 @@ def _selected_far_return_helper_8616(
 def _far_return_call_8616(
     codegen: object,
     proof: FarScaledReturnResult8616,
-    accesses: tuple[tuple[FarReturnExpressionRole8616, IRLogicalMemoryAccess8616], ...],
-    variables: dict[FarReturnExpressionRole8616, structured_c.CVariable],
-    helper: str,
+    accesses: object,
+    variables: object,
+    helper: object,
 ) -> structured_c.CFunctionCall:
     """Construct the segmented pointer candidate with exact provenance tags."""
     offset_expression = _bound_offset_expression_8616(
@@ -480,10 +495,8 @@ def _far_return_call_8616(
     assert proof.return_instruction_addr is not None
     source_addrs = tuple(
         sorted(
-            {
-                proof.return_instruction_addr,
-                *(access.key.insn_addr for _, access in accesses),
-            }
+            {proof.return_instruction_addr,
+                } | set((access.key.insn_addr for _, access in iter(accesses)))
         )
     )
     return structured_c.CFunctionCall(
@@ -503,6 +516,7 @@ def _far_return_call_8616(
     )
 
 
+@cython.ccall
 def bind_far_return_expression_8616(
     codegen: object,
     artifact: SSAFunctionArtifact,
@@ -514,6 +528,8 @@ def bind_far_return_expression_8616(
     function prototype, or callsite contracts, and it does not decide a pointee
     family. Callers still owe the atomic contract update and replay.
     """
+    function_addr: object
+    logical: object
     if not proof.complete or proof.offset is None:
         return _refuse_8616(
             FarReturnExpressionBindingFailure8616.PROOF_INCOMPLETE,
@@ -525,7 +541,7 @@ def bind_far_return_expression_8616(
             FarReturnExpressionBindingFailure8616.CODEGEN_SURFACE_UNPROVEN,
             missing=FarReturnRepresentationKind8616.CODEGEN_FUNCTION,
         )
-    if function_addr != artifact.function_addr:
+    if operator.ne(function_addr, artifact.function_addr):
         return _refuse_8616(
             FarReturnExpressionBindingFailure8616.FUNCTION_MISMATCH,
             missing=FarReturnRepresentationKind8616.CODEGEN_FUNCTION,

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Project proven terminal return expressions onto angr's render surface.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import Enum
@@ -20,6 +23,7 @@ from angr.analyses.decompiler.structured_codegen import c as structured_c
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 
 from .terminal_return_expressions import uncollapse_safe_scalar_expression_8616
+import dataclasses
 
 __all__ = [
     "TerminalReturnRenderProjectionResult8616",
@@ -36,27 +40,29 @@ class TerminalReturnRenderProjectionStatus8616(Enum):
     REFUSED = "refused"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalReturnRenderProjectionResult8616:
     """Typed evidence for one terminal return render projection pass."""
 
     status: TerminalReturnRenderProjectionStatus8616
-    candidate_count: int
-    materialized_expression_count: int
-    uncollapsed_node_count: int
-    refused_expression_count: int
+    candidate_count: cython.longlong
+    materialized_expression_count: cython.longlong
+    uncollapsed_node_count: cython.longlong
+    refused_expression_count: cython.longlong
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether any stale render-collapse hint was cleared."""
         return self.uncollapsed_node_count > 0
 
 
-def _collapsed_expression_count_8616(expression: object) -> int:
+@cython.ccall
+def _collapsed_expression_count_8616(expression: object) -> cython.longlong:
     """Count collapsed C expressions in one structured subtree."""
-    seen: set[int] = set()
+    node: object
+    seen: set[cython.longlong] = set()
     count = 0
-    for node in (expression, *_iter_c_nodes_deep_8616(expression)):
+    for node in (expression, ) + tuple(_iter_c_nodes_deep_8616(expression)):
         marker = id(node)
         if marker in seen:
             continue
@@ -66,10 +72,12 @@ def _collapsed_expression_count_8616(expression: object) -> int:
     return count
 
 
+@cython.ccall
 def project_terminal_return_renderability_8616(
     codegen: object,
 ) -> TerminalReturnRenderProjectionResult8616:
     """Expose safe terminal scalar returns after their typed lowering completes."""
+    node: object
     try:
         root = cast(Any, codegen).cfunc.statements
     except AttributeError:

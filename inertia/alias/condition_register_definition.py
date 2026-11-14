@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove exact register-definition identity at a condition boundary.
 
 Layer: Alias.
@@ -9,6 +10,8 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import cast
@@ -25,9 +28,12 @@ from .register_reaching_source import (
     RegisterReachingSourceVerdict8616,
     resolve_register_reaching_source_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionRegisterDefinition8616:
     """One exact definition address and the Alias join's evidence ledger."""
 
@@ -35,16 +41,18 @@ class ConditionRegisterDefinition8616:
     evidence: RegisterReachingSourceResult8616
 
 
+@cython.ccall
 def _transfer_kind(
     instruction: DecodedInstructionFactSurface8616,
-    register: str,
-    size: int,
-    candidate_addrs: frozenset[int],
+    register: object,
+    size: cython.longlong,
+    candidate_addrs: object,
 ) -> RegisterBlockTransferKind8616:
     """Refuse unknown/partial writes; calls need an explicit result candidate."""
+    effects: object
     effects = decoded_register_bit_effects_8616(instruction, register)
     is_call = is_x86_16_call_mnemonic_8616(instruction.mnemonic.lower())
-    full_write = effects is not None and effects[1] == (1 << (size * 8)) - 1
+    full_write = effects is not None and operator.eq(effects[1], (1 << (size * 8)) - 1)
     represented_definition = instruction.address in candidate_addrs
     if represented_definition and (full_write or is_call):
         return RegisterBlockTransferKind8616.REPLACE
@@ -53,8 +61,10 @@ def _transfer_kind(
     return RegisterBlockTransferKind8616.PRESERVE
 
 
+@cython.ccall
 def _result(evidence: RegisterReachingSourceResult8616) -> ConditionRegisterDefinition8616:
     """Expose the definition coordinate only for a proven Alias source."""
+    source: object
     source = evidence.source
     address = (
         source[1]
@@ -71,11 +81,11 @@ def _result(evidence: RegisterReachingSourceResult8616) -> ConditionRegisterDefi
 def _resolve_definition_tokens_8616(
     inventory: RegisterSourceBlockInventory8616,
     *,
-    instruction_addr: int,
-    register: str,
-    size: int,
-    candidate_addrs: frozenset[int],
-    shared_storage: bool = False,
+    instruction_addr: cython.longlong,
+    register: object,
+    size: cython.longlong,
+    candidate_addrs: object,
+    shared_storage: cython.bint = False,
 ) -> RegisterReachingSourceResult8616:
     """Resolve a represented full-register definition, never nearest address.
 
@@ -83,22 +93,25 @@ def _resolve_definition_tokens_8616(
     including writes after the query that can reach it on a later loop iteration.
     Unknown call effects and unrepresented writes conservatively kill identity.
     """
+    prefix: object
+    block: object
+    instruction: object
     refused = resolve_register_reaching_source_8616((), entry_addr=0, sink_addr=0)
     if not inventory.complete or size <= 0:
         return refused
-    sink_addr = max(block.block_addr for block in inventory.blocks) + 1
+    sink_addr = max(block.block_addr for block in iter(inventory.blocks)) + 1
     transfers: list[RegisterBlockTransfer8616] = []
-    prefix: RegisterBlockTransfer8616 | None = None
+    prefix = None
     entry_addr = inventory.function_addr
     for block in inventory.blocks:
         kind = RegisterBlockTransferKind8616.PRESERVE
-        source: tuple[object, ...] | None = None
+        source: object = None
         for instruction in cast(tuple[DecodedInstructionFactSurface8616, ...], block.instructions):
-            if instruction.address == instruction_addr:
+            if operator.eq(instruction.address, instruction_addr):
                 if prefix is not None:
                     return refused
                 prefix = RegisterBlockTransfer8616(sink_addr, block.predecessors, kind, source)
-                if block.block_addr == inventory.function_addr:
+                if operator.eq(block.block_addr, inventory.function_addr):
                     # The first entry has unknown state even when a backedge exists.
                     entry_addr = sink_addr
             effect = _transfer_kind(instruction, register, size, candidate_addrs)
@@ -108,7 +121,7 @@ def _resolve_definition_tokens_8616(
             if shared_storage and is_x86_16_call_mnemonic_8616(instruction.mnemonic.lower()):
                 kind = RegisterBlockTransferKind8616.KILL
             source = (
-                (("storage", register.lower(), size) if shared_storage else ("definition", instruction.address))
+                (tuple(("storage", register.lower(), size)) if shared_storage else tuple(("definition", instruction.address)))
                 if kind is RegisterBlockTransferKind8616.REPLACE
                 else None
             )
@@ -121,10 +134,11 @@ def _resolve_definition_tokens_8616(
     )
 
 
+@cython.ccall
 def resolve_condition_register_definition_8616(
     inventory: RegisterSourceBlockInventory8616,
-    *, instruction_addr: int, register: str, size: int,
-    candidate_addrs: frozenset[int],
+    *, instruction_addr: cython.longlong, register: object, size: cython.longlong,
+    candidate_addrs: object,
 ) -> ConditionRegisterDefinition8616:
     """Prove one unchanged value definition reaches the condition producer."""
     return _result(_resolve_definition_tokens_8616(
@@ -135,8 +149,8 @@ def resolve_condition_register_definition_8616(
 
 def resolve_condition_register_storage_8616(
     inventory: RegisterSourceBlockInventory8616,
-    *, instruction_addr: int, consumption_addr: int, register: str, size: int,
-    materialized_writes: frozenset[int],
+    *, instruction_addr: cython.longlong, consumption_addr: cython.longlong, register: object, size: cython.longlong,
+    materialized_writes: object,
 ) -> RegisterReachingSourceResult8616:
     """Prove a single retained mutable lane is current on every incoming path.
 
@@ -145,18 +159,20 @@ def resolve_condition_register_storage_8616(
     Unlike a value-definition proof, different writes to that storage may join.
     Its live read is valid only with an unchanged lane from CMP through JCC.
     """
+    effects: object
+    instruction: object
     refused = resolve_register_reaching_source_8616((), entry_addr=0, sink_addr=0)
     containing = tuple(
-        block for block in inventory.blocks
+        block for block in iter(inventory.blocks)
         if any(
-            ins.address == instruction_addr
-            for ins in cast(tuple[DecodedInstructionFactSurface8616, ...], block.instructions)
+            operator.eq(ins.address, instruction_addr)
+            for ins in builtins.iter(cast(tuple[DecodedInstructionFactSurface8616, ...], block.instructions))
         )
     )
     if not inventory.complete or len(containing) != 1:
         return refused
     instructions = cast(tuple[DecodedInstructionFactSurface8616, ...], containing[0].instructions)
-    addresses = tuple(ins.address for ins in instructions)
+    addresses = tuple(ins.address for ins in iter(instructions))
     if consumption_addr not in addresses:
         return refused
     first, last = addresses.index(instruction_addr), addresses.index(consumption_addr)

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recompilable output.
 
 Responsibility: keep storage fallback decisions explicit and currently disabled.
@@ -11,8 +12,11 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
+import dataclasses
 
 __all__ = [
     "RecompilableStorageFallbackDecision",
@@ -20,30 +24,31 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RecompilableStorageFallbackDecision:
     """Explicit result of the currently disabled storage fallback selector."""
 
-    use_fallback: bool
-    c_text_source: str | None
-    bounded_live_decompile_outcome: str | None
-    selected_text: str | None
-    live_shape_ok: bool
-    fallback_shape_ok: bool
-    shape_ok_evidence_present: bool
-    fallback_evidence_present: bool
-    storage_object_record_count: int
-    storage_object_refusal_count: int
+    use_fallback: cython.bint
+    c_text_source: object
+    bounded_live_decompile_outcome: object
+    selected_text: object
+    live_shape_ok: cython.bint
+    fallback_shape_ok: cython.bint
+    shape_ok_evidence_present: cython.bint
+    fallback_evidence_present: cython.bint
+    storage_object_record_count: cython.longlong
+    storage_object_refusal_count: cython.longlong
 
 
+@cython.ccall
 def decide_recompilable_storage_fallback(
     *,
-    live_shape_ok: bool,
-    fallback_shape_ok: bool,
-    shape_ok_evidence_text: str | None,
-    fallback_evidence_text: str | None,
-    storage_object_record_count: int,
-    storage_object_refusal_count: int,
+    live_shape_ok: cython.bint,
+    fallback_shape_ok: cython.bint,
+    shape_ok_evidence_text: object,
+    fallback_evidence_text: object,
+    storage_object_record_count: cython.longlong,
+    storage_object_refusal_count: cython.longlong,
 ) -> RecompilableStorageFallbackDecision:
     """Refuse storage fallback C while preserving live/fallback evidence inputs."""
     return RecompilableStorageFallbackDecision(

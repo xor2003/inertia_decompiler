@@ -152,3 +152,42 @@ def test_changed_geometry_uses_ordinary_fixpoint(tmp_path: Path) -> None:
         result = owner._simulate_callee_8616(ctx, proof, seed())
     assert isinstance(baseline, dict), baseline
     assert result == baseline
+
+
+@pytest.mark.parametrize("value", [0, 1])
+def test_cyclic_guard_keeps_conditional_code_write_proof(tmp_path: Path, value: int) -> None:
+    """Prune a proven unreachable code write, but refuse its live branch."""
+    code = bytes.fromhex("83f80074082ec606000090ebf3c3")
+    ctx, proof = fixture.world(tmp_path, code)
+    initial = seed()
+    initial.registers["ax"] = value
+    with segment_call_dependency_traversal_scope_8616():
+        result = owner._simulate_callee_8616(ctx, proof, initial)
+    if value == 0:
+        assert isinstance(result, dict), result
+        assert result
+        assert ctx.checked_stores == 0
+    else:
+        assert result is owner.Real16InvocationFailure8616.CODE_WRITE_VIOLATION
+
+
+def test_optional_pruning_leaves_work_for_required_simulation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An exhausted optional refinement must leave the mandatory census viable."""
+    ctx, proof = fixture.world(tmp_path, CYCLIC)
+
+    def exhaust_refinement(**kwargs: object) -> edge.Real16EdgeFeasibility8616:
+        """Model a bounded nonconverged round without publishing dead edges."""
+        limit = kwargs["work_limit"]
+        scope = kwargs["dangerous"]
+        assert isinstance(limit, int)
+        assert isinstance(scope, frozenset)
+        return edge.Real16EdgeFeasibility8616(scope, (), 0, 0, False, limit + 1)
+
+    monkeypatch.setattr(owner, "invocation_feasible_scope_8616", exhaust_refinement)
+    with segment_call_dependency_traversal_scope_8616():
+        result = owner._simulate_callee_8616(ctx, proof, seed())
+    assert isinstance(result, dict), result
+    assert result
+    assert ctx.work_units <= ctx.work_limit

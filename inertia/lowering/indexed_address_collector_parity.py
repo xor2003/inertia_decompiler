@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Measure migration parity for indexed-address evidence producers.
 
 Layer: Types/Lowering diagnostics.
@@ -11,6 +12,8 @@ Do not perform structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import Counter
 from dataclasses import dataclass
@@ -32,6 +35,9 @@ from .segmented_global_loads import (
     recover_indexed_segmented_global_load_site_evidence_8616,
     recover_indexed_segmented_global_store_evidence_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 
 class IndexedAddressCollectorParityStatus8616(StrEnum):
@@ -44,20 +50,20 @@ class IndexedAddressCollectorParityStatus8616(StrEnum):
     DIVERGED = "diverged"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAddressCollectorKey8616:
     """Common identity represented by both indexed-address collectors."""
 
     kind: IndexedAddressAccessKind8616
     space: MemSpace
-    base_offset: int
-    width: int
-    index_stack_offset: int
-    index_shift: int
-    instr_addr: int
+    base_offset: cython.longlong
+    width: cython.longlong
+    index_stack_offset: cython.longlong
+    index_shift: cython.longlong
+    instr_addr: cython.longlong
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether this key has an exact segmented machine identity."""
         return bool(
             self.space in {MemSpace.DS, MemSpace.ES}
@@ -68,42 +74,41 @@ class IndexedAddressCollectorKey8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAddressCollectorParityStats8616:
     """Closed accounting for both compared key multisets."""
 
-    raw_key_count: int
-    normalized_key_count: int
-    matched_key_count: int
-    alias_only_count: int
-    legacy_only_count: int
-    duplicate_key_count: int
+    raw_key_count: cython.longlong
+    normalized_key_count: cython.longlong
+    matched_key_count: cython.longlong
+    alias_only_count: cython.longlong
+    legacy_only_count: cython.longlong
+    duplicate_key_count: cython.longlong
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether all raw and normalized keys are accounted."""
         return bool(
-            self.raw_key_count == self.normalized_key_count + self.duplicate_key_count
-            and self.normalized_key_count
-            == self.matched_key_count * 2
+            operator.eq(self.raw_key_count, self.normalized_key_count + self.duplicate_key_count)
+            and operator.eq(self.normalized_key_count, self.matched_key_count * 2
             + self.alias_only_count
-            + self.legacy_only_count
+            + self.legacy_only_count)
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAddressCollectorParity8616:
     """Exact migration census for one function."""
 
-    function_addr: int
+    function_addr: cython.longlong
     status: IndexedAddressCollectorParityStatus8616
-    matched: tuple[IndexedAddressCollectorKey8616, ...]
-    alias_only: tuple[IndexedAddressCollectorKey8616, ...]
-    legacy_only: tuple[IndexedAddressCollectorKey8616, ...]
+    matched: object
+    alias_only: object
+    legacy_only: object
     stats: IndexedAddressCollectorParityStats8616
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether keys, counts, and status agree."""
         expected_status = _parity_status_8616(
             bool(self.matched),
@@ -112,15 +117,15 @@ class IndexedAddressCollectorParity8616:
         )
         return bool(
             self.stats.closed
-            and len(self.matched) == self.stats.matched_key_count
-            and len(self.alias_only) == self.stats.alias_only_count
-            and len(self.legacy_only) == self.stats.legacy_only_count
+            and operator.eq(len(self.matched), self.stats.matched_key_count)
+            and operator.eq(len(self.alias_only), self.stats.alias_only_count)
+            and operator.eq(len(self.legacy_only), self.stats.legacy_only_count)
             and self.status is expected_status
-            and all(key.complete for key in (*self.matched, *self.alias_only, *self.legacy_only))
+            and all(key.complete for key in iter(tuple(self.matched) + tuple(self.alias_only) + tuple(self.legacy_only)))
         )
 
     @property
-    def exact(self) -> bool:
+    def exact(self) -> cython.bint:
         """Return whether both collectors publish exactly the same unique keys."""
         return bool(
             self.status in {
@@ -145,6 +150,7 @@ class _CodegenBoundary8616(Protocol):
     _inertia_indexed_address_collector_parity_8616: IndexedAddressCollectorParity8616
 
 
+@cython.ccall
 def _alias_key_8616(fact: IndexedAddressAliasFact8616) -> IndexedAddressCollectorKey8616:
     """Normalize one Alias fact to the shared migration identity."""
     return IndexedAddressCollectorKey8616(
@@ -158,6 +164,7 @@ def _alias_key_8616(fact: IndexedAddressAliasFact8616) -> IndexedAddressCollecto
     )
 
 
+@cython.ccall
 def _load_key_8616(
     fact: IndexedSegmentedGlobalLoadSiteEvidence8616,
 ) -> IndexedAddressCollectorKey8616:
@@ -173,6 +180,7 @@ def _load_key_8616(
     )
 
 
+@cython.ccall
 def _store_key_8616(
     fact: IndexedSegmentedGlobalStoreEvidence8616,
 ) -> IndexedAddressCollectorKey8616:
@@ -188,10 +196,11 @@ def _store_key_8616(
     )
 
 
+@cython.ccall
 def _parity_status_8616(
-    matched: bool,
-    alias_only: bool,
-    legacy_only: bool,
+    matched: cython.bint,
+    alias_only: cython.bint,
+    legacy_only: cython.bint,
 ) -> IndexedAddressCollectorParityStatus8616:
     """Classify one exact set relationship without text matching."""
     if not matched and not alias_only and not legacy_only:
@@ -205,6 +214,7 @@ def _parity_status_8616(
     return IndexedAddressCollectorParityStatus8616.DIVERGED
 
 
+@cython.ccall
 def _key_sort_8616(key: IndexedAddressCollectorKey8616) -> tuple[object, ...]:
     """Return deterministic primitive fields for parity report ordering."""
     return (
@@ -220,8 +230,8 @@ def _key_sort_8616(key: IndexedAddressCollectorKey8616) -> tuple[object, ...]:
 
 def compare_indexed_address_collectors_8616(
     alias_evidence: IndexedAddressAliasEvidence8616,
-    legacy_loads: tuple[IndexedSegmentedGlobalLoadSiteEvidence8616, ...],
-    legacy_stores: tuple[IndexedSegmentedGlobalStoreEvidence8616, ...],
+    legacy_loads: object,
+    legacy_stores: object,
 ) -> IndexedAddressCollectorParity8616:
     """Compare Alias and instruction-backed keys without selecting a producer."""
     if not alias_evidence.closed:
@@ -229,8 +239,8 @@ def compare_indexed_address_collectors_8616(
             "indexed-address Alias evidence is incomplete before parity census",
             layer="lowering",
         )
-    alias_keys = tuple(_alias_key_8616(fact) for fact in alias_evidence.facts)
-    legacy_keys = (*(_load_key_8616(fact) for fact in legacy_loads), *(_store_key_8616(fact) for fact in legacy_stores))
+    alias_keys = tuple(_alias_key_8616(fact) for fact in iter(alias_evidence.facts))
+    legacy_keys = (*(_load_key_8616(fact) for fact in iter(legacy_loads)), *(_store_key_8616(fact) for fact in iter(legacy_stores)))
     alias_set = frozenset(alias_keys)
     legacy_set = frozenset(legacy_keys)
     matched = tuple(sorted(alias_set & legacy_set, key=_key_sort_8616))
@@ -238,8 +248,8 @@ def compare_indexed_address_collectors_8616(
     legacy_only = tuple(sorted(legacy_set - alias_set, key=_key_sort_8616))
     normalized = len(alias_set) + len(legacy_set)
     raw = len(alias_keys) + len(legacy_keys)
-    duplicate_count = sum(count - 1 for count in Counter(alias_keys).values()) + sum(
-        count - 1 for count in Counter(legacy_keys).values()
+    duplicate_count = sum(count - 1 for count in builtins.iter(Counter(alias_keys).values())) + sum(
+        count - 1 for count in builtins.iter(Counter(legacy_keys).values())
     )
     result = IndexedAddressCollectorParity8616(
         alias_evidence.function_addr,
@@ -264,11 +274,14 @@ def compare_indexed_address_collectors_8616(
     return result
 
 
+@cython.ccall
 def collect_indexed_address_collector_parity_8616(
     project: object,
     codegen: object,
 ) -> IndexedAddressCollectorParity8616 | None:
     """Collect legacy facts and attach the typed migration census."""
+    cfunc: object
+    resolved: object
     boundary = cast(_CodegenBoundary8616, codegen)
     try:
         cfunc = boundary.cfunc

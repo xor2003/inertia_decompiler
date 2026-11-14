@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Retain and recheck the source of projected call-stack coordinates.
 
 Layer: Semantics.
@@ -9,9 +10,18 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
+import dataclasses
+import operator
+CallsiteSummary8616 = typing.TypeVar("CallsiteSummary8616")
+IRBlock = typing.TypeVar("IRBlock")
+IRCallStackCoordinates8616 = typing.TypeVar("IRCallStackCoordinates8616")
+IRInstr = typing.TypeVar("IRInstr")
+ReturnSegmentFrame8616 = typing.TypeVar("ReturnSegmentFrame8616")
 
 if TYPE_CHECKING:
     from inertia.ir.call_stack_coordinates import IRCallStackCoordinates8616
@@ -21,7 +31,7 @@ if TYPE_CHECKING:
     from .callsite_summary import CallsiteSummary8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallStackCoordinateSource8616:
     """Exact producer inputs used to authorize a coordinate projection."""
 
@@ -31,19 +41,20 @@ class CallStackCoordinateSource8616:
     block: IRBlock | None
     return_frame: ReturnSegmentFrame8616 | None
 
-    def matches_call(self, instruction: IRInstr) -> bool:
+    def matches_call(self, instruction: IRInstr) -> cython.bint:
         """Require the same typed transfer before attaching its retained effect."""
+        original: object
         original = self.instruction
         return bool(
             original is not None
             and instruction.op == original.op == "CALL"
-            and instruction.addr == original.addr
-            and instruction.args == original.args
-            and instruction.size == original.size
-            and instruction.origin == original.origin
+            and operator.eq(instruction.addr, original.addr)
+            and operator.eq(instruction.args, original.args)
+            and operator.eq(instruction.size, original.size)
+            and operator.eq(instruction.origin, original.origin)
         )
 
-    def matches(self, coordinates: IRCallStackCoordinates8616) -> bool:
+    def matches(self, coordinates: IRCallStackCoordinates8616) -> cython.bint:
         """Reproduce source facts without trusting the offered scalar fields."""
         from .call_stack_coordinates import prove_call_stack_coordinates_8616
 

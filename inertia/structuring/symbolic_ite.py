@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Structuring.
 
 Responsibility: preserve opaque AIL conditional-value identity at the symbolic
@@ -10,36 +11,40 @@ rewrite cleanup, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from typing import Protocol, cast
 
 import claripy
 from angr import ailment
+import dataclasses
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _IteSymbols:
     """Keep source objects alive and assign deterministic per-processor names."""
 
-    by_identity: dict[int, tuple[object, str]] = field(default_factory=dict)
+    by_identity: object = field(default_factory=dict)
 
 
 class _ProcessorSurface(Protocol):
     """Third-party condition map and Inertia's typed identity table."""
 
-    _condition_mapping: dict[str, object]
+    _condition_mapping: object
     _inertia_ite_symbols_8616: _IteSymbols
 
 
 class _ExpressionSurface(Protocol):
     """Third-party AIL expression width."""
 
-    bits: int
+    bits: cython.longlong
 
 
+@cython.ccall
 def convert_symbolic_ite_8616(
-    processor: object, condition: object, *, must_bool: bool,
+    processor: object, condition: object, *, must_bool: cython.bint,
 ) -> claripy.ast.Bool | claripy.ast.BV | None:
     """Retain opaque ITEs without conflating separate effectful expressions.
 
@@ -49,6 +54,7 @@ def convert_symbolic_ite_8616(
     independent. Repeated conversion of the same object reuses its symbol.
     This preserves angr's opaque-value contract, including reverse conversion.
     """
+    entry: object
     if not isinstance(condition, ailment.Expr.ITE):
         return None
     surface = cast(_ProcessorSurface, processor)

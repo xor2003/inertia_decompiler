@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Detect structured-C mutations without rendered-text comparisons.
 
 Layer: Pipeline governance.
@@ -10,6 +11,8 @@ Dynamic boundary: generation inspects public fields on third-party angr C-AST no
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import hashlib
 from collections.abc import Mapping, Sequence, Set
@@ -18,6 +21,7 @@ from enum import Enum
 from typing import Protocol, cast
 
 from inertia.lowering.c_ast_utils import _structured_codegen_node_8616, _structured_slot_names_8616
+import dataclasses
 
 _BOUNDARY_SEMANTIC_FIELDS_8616 = (
     "addr",
@@ -38,12 +42,12 @@ _BOUNDARY_SEMANTIC_FIELDS_8616 = (
 _IGNORED_PUBLIC_FIELDS_8616 = frozenset({"arch", "codegen", "project"})
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StructuredAstGeneration8616:
     """Deterministic in-process digest of one structured-C object graph."""
 
-    digest: str
-    structured_node_count: int
+    digest: object
+    structured_node_count: cython.longlong
 
 
 class _CodegenSurface8616(Protocol):
@@ -52,22 +56,29 @@ class _CodegenSurface8616(Protocol):
     cfunc: object
 
 
+@cython.cclass
 class _StructuredAstGenerationBuilder8616:
     """Stream one dynamic structured-C graph into a SHA-256 generation."""
+    _digest = cython.declare(object, visibility = "public")
+    _seen = cython.declare(dict, visibility = "public")
+    _structured_node_count = cython.declare(cython.longlong, visibility = "public")
 
     def __init__(self) -> None:
         self._digest = hashlib.sha256()
-        self._seen: dict[int, int] = {}
+        self._seen: dict[cython.longlong, cython.longlong] = {}
         self._structured_node_count = 0
 
-    def _text(self, value: str) -> None:
+    @cython.ccall
+    def _text(self, value: object) -> None:
         """Append one length-delimited text atom to the digest."""
         encoded = value.encode("utf-8", errors="backslashreplace")
         self._digest.update(len(encoded).to_bytes(8, "little"))
         self._digest.update(encoded)
 
-    def _reference(self, value: object) -> bool:
+    @cython.ccall
+    def _reference(self, value: object) -> cython.bint:
         """Record an object identity and report an already-seen reference."""
+        previous: object
         marker = id(value)
         previous = self._seen.get(marker)
         if previous is not None:
@@ -89,7 +100,7 @@ class _StructuredAstGenerationBuilder8616:
         return tuple(
             sorted(
                 name
-                for name in value_dict
+                for name in iter(value_dict)
                 if isinstance(name, str)
                 and not name.startswith("_")
                 and name not in _IGNORED_PUBLIC_FIELDS_8616
@@ -97,7 +108,7 @@ class _StructuredAstGenerationBuilder8616:
         )
 
     @staticmethod
-    def _stored_fields(value: object) -> dict[str, object]:
+    def _stored_fields(value: object) -> object:
         """Return instance storage without invoking third-party descriptors."""
         try:
             value_dict = object.__getattribute__(value, "__dict__")
@@ -107,14 +118,17 @@ class _StructuredAstGenerationBuilder8616:
             return {}
         return value_dict
 
+    @cython.ccall
     def _fields(
         self,
         value: object,
-        names: tuple[str, ...],
+        names: object,
         *,
-        stored_only: bool,
+        stored_only: cython.bint,
     ) -> None:
         """Append dynamic boundary fields without evaluating opaque properties."""
+        field_value: object
+        name: object
         stored_fields = self._stored_fields(value)
         for name in names:
             if name in stored_fields:
@@ -130,8 +144,11 @@ class _StructuredAstGenerationBuilder8616:
             self._text(name)
             self._value(field_value)
 
-    def _container_value(self, value: object) -> bool:
+    @cython.ccall
+    def _container_value(self, value: object) -> cython.bint:
         """Append a mapping/set/sequence value; return False for objects."""
+        item: object
+        key: object
         if isinstance(value, Mapping):
             self._text("mapping")
             self._text(str(len(value)))
@@ -154,6 +171,7 @@ class _StructuredAstGenerationBuilder8616:
             return True
         return False
 
+    @cython.ccall
     def _object_value(self, value: object) -> None:
         """Append one non-container object's typed boundary fields."""
         value_type = type(value)
@@ -162,7 +180,7 @@ class _StructuredAstGenerationBuilder8616:
             self._structured_node_count += 1
             fields = tuple(
                 dict.fromkeys(
-                    (*_structured_slot_names_8616(value), *self._public_field_names(value))
+                    tuple(_structured_slot_names_8616(value)) + tuple(self._public_field_names(value))
                 )
             )
             self._fields(value, fields, stored_only=False)
@@ -170,13 +188,14 @@ class _StructuredAstGenerationBuilder8616:
 
         public_fields = self._public_field_names(value)
         boundary_fields = tuple(
-            dict.fromkeys((*_BOUNDARY_SEMANTIC_FIELDS_8616, *public_fields))
+            dict.fromkeys(tuple(_BOUNDARY_SEMANTIC_FIELDS_8616) + tuple(public_fields))
         )
         if boundary_fields:
             self._fields(value, boundary_fields, stored_only=True)
             return
         self._text("opaque")
 
+    @cython.ccall
     def _value(self, value: object) -> None:
         """Append one structured value without following known owner cycles."""
         if value is None or isinstance(value, bool | int | float | str | bytes):
@@ -194,6 +213,7 @@ class _StructuredAstGenerationBuilder8616:
             return
         self._object_value(value)
 
+    @cython.ccall
     def build(self, value: object) -> StructuredAstGeneration8616:
         """Return the completed structured-C generation for ``value``."""
         self._value(value)
@@ -203,6 +223,7 @@ class _StructuredAstGenerationBuilder8616:
         )
 
 
+@cython.ccall
 def structured_ast_generation_8616(codegen: object) -> StructuredAstGeneration8616:
     """Build an in-process generation from the dynamic structured-C surface."""
     try:

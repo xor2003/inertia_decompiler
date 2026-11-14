@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed contracts for exact indexed LOAD-to-STORE value copies.
 
 Layer: IR.
@@ -10,6 +11,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -23,6 +26,9 @@ from .indexed_address_contracts import (
 from .logical_memory_value_trace import LogicalMemoryValueTrace8616
 from .scalar_definitions import scalar_definition_key_8616
 from .scalar_value_projection import scalar_active_unary_projection_8616
+import dataclasses
+import operator
+import builtins
 
 
 class IndexedAddressCopyLane8616(StrEnum):
@@ -58,6 +64,7 @@ class IndexedAddressCopyFailureKind8616(StrEnum):
     LOGICAL_MEMORY_EVIDENCE_CONFLICT = "logical_memory_evidence_conflict"
 
 
+@cython.ccall
 def indexed_copy_source_operand_8616(value: IRValue) -> IRValue | None:
     """Return the exact source operand of an allowed copy-lane expression.
 
@@ -65,6 +72,8 @@ def indexed_copy_source_operand_8616(value: IRValue) -> IRValue | None:
     identity. Authenticate its operation and widths before exposing the operand;
     all other pending computations refuse rather than impersonate a definition.
     """
+    projection: object
+    unary: object
     unary = value.active_unary
     if unary is None:
         return value
@@ -74,14 +83,14 @@ def indexed_copy_source_operand_8616(value: IRValue) -> IRValue | None:
     return unary.operand
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAddressCopyStep8616:
     """One exact backward SSA edge from a definition to its source."""
 
-    block_addr: int
-    instr_index: int
-    instr_addr: int
-    op: str
+    block_addr: cython.longlong
+    instr_index: cython.longlong
+    instr_addr: cython.longlong
+    op: object
     kind: IndexedAddressCopyStepKind8616
     defined_value: IRValue
     source_expression: IRValue
@@ -89,18 +98,18 @@ class IndexedAddressCopyStep8616:
     constant: int | None = None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether the operation proves its declared value relation."""
+        source_operand: object
         source_operand = indexed_copy_source_operand_8616(self.source_expression)
         identity_matches = (
             source_operand is not None
-            and scalar_definition_key_8616(source_operand)
-            == scalar_definition_key_8616(self.source_definition)
+            and operator.eq(scalar_definition_key_8616(source_operand), scalar_definition_key_8616(self.source_definition))
         )
         projection_widths_match = self.source_expression.active_unary is None or (
-            self.defined_value.size == self.source_expression.size
+            operator.eq(self.defined_value.size, self.source_expression.size)
             and source_operand is not None
-            and source_operand.size == self.source_definition.size
+            and operator.eq(source_operand.size, self.source_definition.size)
         )
         common = bool(
             self.block_addr >= 0
@@ -135,21 +144,21 @@ class IndexedAddressCopyStep8616:
         return bool(common and relation)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAddressCopyValuePath8616:
     """One destination byte lane traced backward to an exact source value."""
 
-    store_instr_index: int
-    load_block_addr: int
-    load_instr_index: int
-    load_instr_addr: int
+    store_instr_index: cython.longlong
+    load_block_addr: cython.longlong
+    load_instr_index: cython.longlong
+    load_instr_addr: cython.longlong
     lane: IndexedAddressCopyLane8616
     store_value: IRValue
     load_value: IRValue
-    steps: tuple[IndexedAddressCopyStep8616, ...]
+    steps: object
     logical_source: LogicalMemoryValueTrace8616 | None = None
 
-    def _indices_ordered_8616(self) -> bool:
+    def _indices_ordered_8616(self) -> cython.bint:
         """Return whether the recorded store/load positions are sane."""
         return (
             self.store_instr_index >= 0
@@ -159,56 +168,54 @@ class IndexedAddressCopyValuePath8616:
             and self.load_instr_index < self.store_instr_index
         )
 
-    def _logical_source_proven_8616(self) -> bool:
+    def _logical_source_proven_8616(self) -> cython.bint:
         """Return whether the optional logical source is complete."""
+        source: object
         if self.logical_source is None:
             return True
         logical_loads = tuple(
             site
-            for site in self.logical_source.definition_path
+            for site in iter(self.logical_source.definition_path)
             if site.op == "LOAD"
         )
         source = self.logical_source.source
         return bool(
             self.logical_source.complete
             and source is not None
-            and source.size == self.load_value.size
+            and operator.eq(source.size, self.load_value.size)
             and len(logical_loads) == 2
         )
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether the path is contiguous and lane-preserving."""
         if not self._indices_ordered_8616():
             return False
-        if not all(step.complete for step in self.steps):
+        if not all(step.complete for step in iter(self.steps)):
             return False
         if not self._logical_source_proven_8616():
             return False
         if self.steps:
             if (
-                scalar_definition_key_8616(self.store_value)
-                != scalar_definition_key_8616(self.steps[0].defined_value)
-                or scalar_definition_key_8616(self.steps[-1].source_definition)
-                != scalar_definition_key_8616(self.load_value)
+                operator.ne(scalar_definition_key_8616(self.store_value), scalar_definition_key_8616(self.steps[0].defined_value))
+                or operator.ne(scalar_definition_key_8616(self.steps[-1].source_definition), scalar_definition_key_8616(self.load_value))
             ):
                 return False
             if any(
-                scalar_definition_key_8616(left.source_definition)
-                != scalar_definition_key_8616(right.defined_value)
-                for left, right in zip(self.steps, self.steps[1:], strict=False)
+                operator.ne(scalar_definition_key_8616(left.source_definition), scalar_definition_key_8616(right.defined_value))
+                for left, right in builtins.iter(zip(self.steps, self.steps[1:], strict=False))
             ):
                 return False
-            indices = tuple(step.instr_index for step in self.steps)
-            if indices != tuple(sorted(indices, reverse=True)) or len(indices) != len(set(indices)):
+            indices = tuple(step.instr_index for step in iter(self.steps))
+            if operator.ne(indices, tuple(sorted(indices, reverse=True))) or operator.ne(len(indices), len(set(indices))):
                 return False
-        elif scalar_definition_key_8616(self.store_value) != scalar_definition_key_8616(
+        elif operator.ne(scalar_definition_key_8616(self.store_value), scalar_definition_key_8616(
             self.load_value
-        ):
+        )):
             return False
         semantic_steps = tuple(
             step.kind
-            for step in self.steps
+            for step in iter(self.steps)
             if step.kind is not IndexedAddressCopyStepKind8616.MOVE
         )
         expected = {
@@ -223,8 +230,9 @@ class IndexedAddressCopyValuePath8616:
         }[self.lane]
         return semantic_steps == expected
 
-    def matches_source(self, source: IndexedAddressFact8616) -> bool:
+    def matches_source(self, source: IndexedAddressFact8616) -> cython.bint:
         """Return whether this path proves one exact indexed LOAD owner."""
+        logical_address: object
         if self.logical_source is None:
             return (
                 self.load_block_addr,
@@ -233,7 +241,7 @@ class IndexedAddressCopyValuePath8616:
             ) == (source.block_addr, source.instr_index, source.instr_addr)
         logical_address = self.logical_source.source
         logical_loads = tuple(
-            site for site in self.logical_source.definition_path if site.op == "LOAD"
+            site for site in iter(self.logical_source.definition_path) if site.op == "LOAD"
         )
         if logical_address is None or len(logical_loads) != 2:
             return False
@@ -242,71 +250,69 @@ class IndexedAddressCopyValuePath8616:
             (low_load.block_addr, low_load.instr_index, low_load.instr_addr)
             == (source.block_addr, source.instr_index, source.instr_addr)
             and logical_address.space is source.address.space
-            and logical_address.base == source.address.base
-            and logical_address.offset == source.address.offset
-            and logical_address.size == source.address.size
+            and operator.eq(logical_address.base, source.address.base)
+            and operator.eq(logical_address.offset, source.address.offset)
+            and operator.eq(logical_address.size, source.address.size)
             and logical_address.status is source.address.status
             and logical_address.segment_origin is source.address.segment_origin
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAddressCopyFact8616:
     """One indexed destination receiving an unchanged indexed source value."""
 
     source: IndexedAddressFact8616
     destination: IndexedAddressFact8616
-    member_instr_indices: tuple[int, ...]
-    value_paths: tuple[IndexedAddressCopyValuePath8616, ...]
+    member_instr_indices: object
+    value_paths: object
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether both endpoint and every byte-lane proof agree."""
         expected_lanes = (
-            (IndexedAddressCopyLane8616.DIRECT,)
+            tuple((IndexedAddressCopyLane8616.DIRECT,))
             if len(self.member_instr_indices) == 1
-            else (
+            else tuple((
                 IndexedAddressCopyLane8616.LOW_BYTE,
                 IndexedAddressCopyLane8616.HIGH_BYTE,
-            )
+            ))
         )
         return bool(
             self.source.complete
             and self.destination.complete
             and self.source.kind is IndexedAddressAccessKind8616.LOAD
             and self.destination.kind is IndexedAddressAccessKind8616.STORE
-            and self.source.function_addr == self.destination.function_addr
-            and self.source.block_addr == self.destination.block_addr
+            and operator.eq(self.source.function_addr, self.destination.function_addr)
+            and operator.eq(self.source.block_addr, self.destination.block_addr)
             and self.source.instr_index < self.destination.instr_index
             and self.source.address.size == self.destination.address.size > 0
             and len(self.member_instr_indices) in {1, 2}
-            and self.member_instr_indices
-            == tuple(path.store_instr_index for path in self.value_paths)
-            and tuple(path.lane for path in self.value_paths) == expected_lanes
-            and all(path.complete for path in self.value_paths)
-            and all(path.matches_source(self.source) for path in self.value_paths)
+            and operator.eq(self.member_instr_indices, tuple(path.store_instr_index for path in iter(self.value_paths)))
+            and operator.eq(tuple(path.lane for path in iter(self.value_paths)), expected_lanes)
+            and all(path.complete for path in iter(self.value_paths))
+            and all(path.matches_source(self.source) for path in iter(self.value_paths))
             and all(
-                scalar_definition_key_8616(path.load_value)
-                == scalar_definition_key_8616(self.value_paths[0].load_value)
-                for path in self.value_paths
+                operator.eq(scalar_definition_key_8616(path.load_value), scalar_definition_key_8616(self.value_paths[0].load_value))
+                for path in iter(self.value_paths)
             )
             and all(
-                path.logical_source == self.value_paths[0].logical_source
-                for path in self.value_paths
+                operator.eq(path.logical_source, self.value_paths[0].logical_source)
+                for path in iter(self.value_paths)
             )
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAddressCopyRefusal8616:
     """One retained indexed STORE and its value-copy refusal reason."""
 
     destination: IndexedAddressFact8616
     failure: IndexedAddressCopyFailureKind8616
-    detail: str
+    detail: object
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether this refusal owns one exact STORE candidate."""
         return bool(
             self.destination.complete
@@ -315,59 +321,59 @@ class IndexedAddressCopyRefusal8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAddressCopyStats8616:
     """Closed accounting for indexed STORE value-path classification."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every STORE became one copy or refusal."""
         return bool(
-            self.raw_fact_count == self.materialized_count + self.failure_count
+            operator.eq(self.raw_fact_count, self.materialized_count + self.failure_count)
             and self.normalized_fact_count
             == self.classified_fact_count
             == self.materialized_count
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAddressCopyEvidence8616:
     """Function-wide exact indexed copies with every STORE refusal retained."""
 
-    function_addr: int
-    facts: tuple[IndexedAddressCopyFact8616, ...]
-    refusals: tuple[IndexedAddressCopyRefusal8616, ...]
+    function_addr: cython.longlong
+    facts: object
+    refusals: object
     stats: IndexedAddressCopyStats8616
     source: IndexedAddressEvidence8616
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether source STORE accounting closes without loss."""
-        destinations = tuple(fact.destination for fact in self.facts) + tuple(
-            refusal.destination for refusal in self.refusals
+        destinations = tuple(fact.destination for fact in iter(self.facts)) + tuple(
+            refusal.destination for refusal in iter(self.refusals)
         )
         source_stores = tuple(
             fact
-            for fact in self.source.facts
+            for fact in iter(self.source.facts)
             if fact.kind is IndexedAddressAccessKind8616.STORE
         )
         return bool(
             self.source.closed
-            and self.function_addr == self.source.function_addr
-            and self.stats.raw_fact_count == len(source_stores)
-            and len(self.facts) == self.stats.materialized_count
-            and len(self.refusals) == self.stats.failure_count
+            and operator.eq(self.function_addr, self.source.function_addr)
+            and operator.eq(self.stats.raw_fact_count, len(source_stores))
+            and operator.eq(len(self.facts), self.stats.materialized_count)
+            and operator.eq(len(self.refusals), self.stats.failure_count)
             and self.stats.closed
-            and all(fact.complete for fact in self.facts)
-            and all(refusal.complete for refusal in self.refusals)
-            and len(destinations) == len(source_stores)
-            and all(destinations.count(source) == 1 for source in source_stores)
+            and all(fact.complete for fact in iter(self.facts))
+            and all(refusal.complete for refusal in iter(self.refusals))
+            and operator.eq(len(destinations), len(source_stores))
+            and all(destinations.count(source) == 1 for source in iter(source_stores))
         )
 
 

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Track the mutable inputs consumed by final tail-validation reports.
 
 Layer: Tail validation.
@@ -15,6 +16,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Protocol, cast
@@ -33,6 +36,8 @@ from .tail_validation_generation_atoms import (
     ValidationGenerationAtomBuilder8616,
     validation_generation_atoms_equal_8616,
 )
+import dataclasses
+import builtins
 
 _CODEGEN_EVIDENCE_FIELDS_8616 = (
     "_inertia_call_output_stack_object_facts_8616",
@@ -77,7 +82,7 @@ class _CodegenSurface8616(Protocol):
 class _FunctionCollectionSurface8616(Protocol):
     """Minimal angr function collection used for prototype lookup."""
 
-    def get(self, function_addr: int) -> object | None:
+    def get(self, function_addr: cython.longlong) -> object | None:
         """Return one function by address when present."""
         ...
 
@@ -94,7 +99,7 @@ class _ProjectSurface8616(Protocol):
     kb: _KnowledgeBaseSurface8616
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False)
 class TailValidationSummaryInputGeneration8616:
     """In-process identity of all non-observable final-validator inputs.
 
@@ -107,10 +112,10 @@ class TailValidationSummaryInputGeneration8616:
     """
 
     function_surface: ValidationGenerationAtom8616
-    codegen_evidence: tuple[tuple[str, ValidationGenerationAtom8616], ...]
+    codegen_evidence: object
     project_evidence: ValidationGenerationAtom8616
 
-    def __eq__(self, other: object) -> bool:
+    def __eq__(self, other: object) -> cython.bint:
         """Compare same-class generations by exact atom equality per field."""
         if self is other:
             return True
@@ -131,7 +136,7 @@ class TailValidationSummaryInputGeneration8616:
             )
         )
 
-    def __hash__(self) -> int:
+    def __hash__(self) -> cython.longlong:
         """Hash the field tuple exactly as frozen-dataclass generation did."""
         return hash(
             (
@@ -153,22 +158,25 @@ def _function_surface_generation_8616(
         return ("missing", "cfunc")
     return tuple(
         (field_name, builder.dynamic_field_atom(cfunc, field_name))
-        for field_name in _CFUNC_SURFACE_FIELDS_8616
+        for field_name in iter(_CFUNC_SURFACE_FIELDS_8616)
     )
 
 
+@cython.ccall
 def _target_prototype_generation_8616(
     project: object,
     codegen: object,
     builder: ValidationGenerationAtomBuilder8616,
 ) -> ValidationGenerationAtom8616:
     """Capture prototypes consulted by final call-interface validation."""
+    function: object
+    target_addr: object
     summaries = callsite_summary_inventory_8616(codegen)
     target_addresses = tuple(
         sorted(
             {
                 summary.target_addr
-                for summary in summaries.values()
+                for summary in builtins.iter(summaries.values())
                 if isinstance(summary.target_addr, int)
             }
         )
@@ -199,13 +207,14 @@ def tail_validation_summary_input_generation_8616(
     codegen: object,
 ) -> TailValidationSummaryInputGeneration8616:
     """Return the current typed evidence generation for summary validators."""
+    function_addr: object
     builder = ValidationGenerationAtomBuilder8616()
     codegen_evidence = tuple(
         (
             field_name,
             builder.dynamic_field_atom(codegen, field_name),
         )
-        for field_name in _CODEGEN_EVIDENCE_FIELDS_8616
+        for field_name in iter(_CODEGEN_EVIDENCE_FIELDS_8616)
     )
     try:
         raw_function_addr = cast(_CodegenSurface8616, codegen).cfunc.addr

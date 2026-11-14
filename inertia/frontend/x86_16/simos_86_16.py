@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/runtime.
 
 Responsibility: register the 16-bit SimOS, calling conventions, and interrupt procedures.
@@ -5,6 +6,8 @@ Forbidden: decompiler semantic recovery, source-backed signatures, or rewrite ow
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import ClassVar, Protocol, cast
 
@@ -26,6 +29,7 @@ from .interrupt_contract import (
     INTERRUPT_CORE_VECTOR_COUNT,
     interrupt_core_addr_8616,
 )
+import operator
 
 __all__ = (
     "INTERRUPT_BASE_ADDR",
@@ -43,16 +47,18 @@ __all__ = (
     "runtime_interrupt_addr",
 )
 
-INTERRUPT_BASE_ADDR: int = INTERRUPT_CORE_VECTOR_BASE
-INTERRUPT_VECTOR_COUNT: int = INTERRUPT_CORE_VECTOR_COUNT
+INTERRUPT_BASE_ADDR: cython.longlong = INTERRUPT_CORE_VECTOR_BASE
+INTERRUPT_VECTOR_COUNT: cython.longlong = INTERRUPT_CORE_VECTOR_COUNT
 
 
-def interrupt_addr(vector: int) -> int:
+@cython.ccall
+def interrupt_addr(vector: cython.longlong) -> cython.longlong:
     """Return the synthetic linear interrupt target used by the DOS SimOS."""
     return int(interrupt_core_addr_8616(vector & 0xFF))
 
 
-def runtime_interrupt_addr(vector: int) -> int:
+@cython.ccall
+def runtime_interrupt_addr(vector: cython.longlong) -> cython.longlong:
     """Return the 16-bit wrapped interrupt target used by lifted real-mode code."""
     return interrupt_addr(vector) & 0xFFFF
 
@@ -285,7 +291,8 @@ class DOSInt2FMultiplex(DOSInterruptHandler):
     INT_NAME: ClassVar[str] = "dos_int2f_multiplex"
 
 
-def _generic_interrupt_class(vector: int) -> type[InterruptHandler]:
+@cython.ccall
+def _generic_interrupt_class(vector: cython.longlong) -> type[InterruptHandler]:
     """Build a generic interrupt handler class for an unmodeled vector."""
     category = "bios" if 0x10 <= vector <= 0x1F else "dos" if 0x20 <= vector <= 0x2F else "interrupt"
     base = (
@@ -301,9 +308,9 @@ def _generic_interrupt_class(vector: int) -> type[InterruptHandler]:
     ))
 
 
-_HANDLER_CLASSES: dict[int, type[InterruptHandler]] = {
+_HANDLER_CLASSES: dict[cython.longlong, type[InterruptHandler]] = {
     cls.INT_VECTOR: cls
-    for cls in (
+    for cls in iter((
         BIOSInt10Video,
         BIOSInt11Equipment,
         BIOSInt12MemorySize,
@@ -319,11 +326,12 @@ _HANDLER_CLASSES: dict[int, type[InterruptHandler]] = {
         DOSInt26AbsoluteDiskWrite,
         DOSInt27TerminateStayResident,
         DOSInt2FMultiplex,
-    )
+    ))
 }
 
 
-def get_interrupt_handler_class(vector: int) -> type[InterruptHandler]:
+@cython.ccall
+def get_interrupt_handler_class(vector: cython.longlong) -> type[InterruptHandler]:
     """Return the concrete or generic handler class for an interrupt vector."""
     vector &= 0xFF
     return _HANDLER_CLASSES.setdefault(vector, _generic_interrupt_class(vector))
@@ -337,7 +345,7 @@ class SimDOSintcall(SimCC):  # type: ignore[misc, unused-ignore] # dynamic angr 
     ARCH: ClassVar[type[Arch86_16]] = Arch86_16
 
     @staticmethod
-    def _match(arch: object, args: list[object], sp_delta: object) -> bool:  # pylint: disable=unused-argument
+    def _match(arch: object, args: object, sp_delta: object) -> cython.bint:  # pylint: disable=unused-argument
         """Disable automatic matching; this convention is registered explicitly."""
         return False
 
@@ -361,7 +369,7 @@ class SimDOS86_16(SimOS):  # type: ignore[misc, unused-ignore] # dynamic angr Si
             handler_cls = get_interrupt_handler_class(vector)
             self.project.hook(interrupt_addr(vector), handler_cls(), replace=True)
             runtime_addr = runtime_interrupt_addr(vector)
-            if runtime_addr != interrupt_addr(vector):
+            if operator.ne(runtime_addr, interrupt_addr(vector)):
                 self.project.hook(runtime_addr, handler_cls(), replace=True)
 
 

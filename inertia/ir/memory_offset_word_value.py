@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Compose exact modular word values of canonical memory-offset terms.
 
 Layer: IR.
@@ -12,6 +13,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -20,6 +23,8 @@ from .core import AddressStatus, IRAddress, IRInstr, IRValue, MemSpace, SegmentO
 from .scalar_affine_contracts import ScalarAffineTerm8616, ScalarAffineTrace8616
 from .scalar_affine_trace import trace_scalar_affine_expression_8616
 from .ssa_function import SSAFunctionArtifact
+import dataclasses
+import operator
 
 
 class MemoryOffsetWordFailure8616(StrEnum):
@@ -30,62 +35,64 @@ class MemoryOffsetWordFailure8616(StrEnum):
     VALUE_TRACE_REFUSED = "value_trace_refused"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class MemoryOffsetWordValue8616:
     """Retained exact use, component traces and atomic word-value accounting."""
 
     artifact: SSAFunctionArtifact
-    block_addr: int
-    instr_index: int
+    block_addr: cython.longlong
+    instr_index: cython.longlong
     instruction: IRInstr | None
     address: IRAddress
-    traces: tuple[ScalarAffineTrace8616, ...]
+    traces: object
     constant: int | None
-    terms: tuple[ScalarAffineTerm8616, ...]
+    terms: object
     failure: MemoryOffsetWordFailure8616 | None
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Recheck the exact use and component evidence, never just counters."""
+        constant: object
+        current: object
         counts = (self.raw_fact_count, self.normalized_fact_count,
                   self.classified_fact_count, self.materialized_count, self.failure_count)
         if self.failure is not None or counts != (1, 1, 1, 1, 0):
             return False
-        if any(type(count) is not int for count in counts):
+        if any(type(count) is not int for count in iter(counts)):
             return False
-        if type(self.constant) is not int or any(type(term.coefficient) is not int for term in self.terms):
+        if type(self.constant) is not int or any(type(term.coefficient) is not int for term in iter(self.terms)):
             return False
         current = _memory_use_8616(self.artifact, self.block_addr, self.instr_index, self.address)
         if current is None or current is not self.instruction or not _canonical_word_bases_8616(self.address):
             return False
         traces, constant, terms = _traced_sum_8616(self.artifact, self.block_addr, self.instr_index, self.address)
-        return bool(constant is not None and self.traces == traces
-                    and self.constant == constant and self.terms == terms)
+        return bool(constant is not None and operator.eq(self.traces, traces)
+                    and operator.eq(self.constant, constant) and operator.eq(self.terms, terms))
 
 
 def _memory_use_8616(
-    artifact: SSAFunctionArtifact, block_addr: int, instr_index: int, address: IRAddress,
+    artifact: SSAFunctionArtifact, block_addr: cython.longlong, instr_index: cython.longlong, address: IRAddress,
 ) -> IRInstr | None:
     """Require the identical memory operand at one exact artifact instruction."""
     if type(block_addr) is not int or type(instr_index) is not int:
         return None
-    blocks = tuple(block for block in artifact.blocks if block.addr == block_addr)
+    blocks = tuple(block for block in iter(artifact.blocks) if operator.eq(block.addr, block_addr))
     if len(blocks) != 1 or blocks[0].refusals or not 0 <= instr_index < len(blocks[0].instrs):
         return None
     instruction = blocks[0].instrs[instr_index]
     if instruction.op not in {"LOAD", "STORE"} or not instruction.args or instruction.args[0] is not address:
         return None
-    if instruction.size != address.size:
+    if operator.ne(instruction.size, address.size):
         return None
     return instruction
 
 
-def _canonical_word_bases_8616(address: IRAddress) -> bool:
+def _canonical_word_bases_8616(address: IRAddress) -> cython.bint:
     """Consume only canonical segmented sums with exact bare word roots."""
     if address.space not in {MemSpace.SS, MemSpace.DS, MemSpace.ES}:
         return False
@@ -93,14 +100,15 @@ def _canonical_word_bases_8616(address: IRAddress) -> bool:
         return False
     if type(address.offset) is not int or address.size <= 0 or not 1 <= len(address.base_values) <= 2:
         return False
-    if address.base != tuple(value.name for value in address.base_values):
+    if operator.ne(address.base, tuple(value.name for value in iter(address.base_values))):
         return False
-    if address.expr != ("segmented_linear", address.space.value, *address.base):
+    if operator.ne(address.expr, ("segmented_linear", address.space.value, ) + tuple(address.base)):
         return False
-    return all(_bare_word_register_8616(value) for value in address.base_values)
+    return all(_bare_word_register_8616(value) for value in iter(address.base_values))
 
 
-def _bare_word_register_8616(value: IRValue) -> bool:
+@cython.ccall
+def _bare_word_register_8616(value: IRValue) -> cython.bint:
     """Reject hidden conversions/index metadata and malformed SSA identities."""
     if value.space is not MemSpace.REG or value.size != 2 or not value.name:
         return False
@@ -111,12 +119,13 @@ def _bare_word_register_8616(value: IRValue) -> bool:
 
 
 def _traced_sum_8616(
-    artifact: SSAFunctionArtifact, block_addr: int, instr_index: int, address: IRAddress,
+    artifact: SSAFunctionArtifact, block_addr: cython.longlong, instr_index: cython.longlong, address: IRAddress,
 ) -> tuple[tuple[ScalarAffineTrace8616, ...], int | None, tuple[ScalarAffineTerm8616, ...]]:
     """Compose values without merging distinct loads of the same stack storage."""
+    trace: object
     traces = tuple(trace_scalar_affine_expression_8616(
         artifact, value, block_addr=block_addr, before_index=instr_index,
-    ) for value in address.base_values)
+    ) for value in iter(address.base_values))
     constant = address.offset
     terms: list[ScalarAffineTerm8616] = []
     for trace in traces:
@@ -127,15 +136,19 @@ def _traced_sum_8616(
     return traces, constant & 0xffff, tuple(terms)
 
 
+@cython.ccall
 def trace_memory_offset_word_value_8616(
-    artifact: SSAFunctionArtifact, address: IRAddress, *, block_addr: int, instr_index: int,
+    artifact: SSAFunctionArtifact, address: IRAddress, *, block_addr: cython.longlong, instr_index: cython.longlong,
 ) -> MemoryOffsetWordValue8616:
     """Retain one complete low-word sum or one typed nonpublishing refusal."""
+    constant: object
+    failure: object
+    instruction: object
     instruction = _memory_use_8616(artifact, block_addr, instr_index, address)
     traces: tuple[ScalarAffineTrace8616, ...] = ()
     constant = None
     terms: tuple[ScalarAffineTerm8616, ...] = ()
-    failure: MemoryOffsetWordFailure8616 | None = None
+    failure = None
     if instruction is None:
         failure = MemoryOffsetWordFailure8616.USE_SITE_UNPROVEN
     elif not _canonical_word_bases_8616(address):

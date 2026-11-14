@@ -13,7 +13,7 @@ test evidence and never promotes any proof status.
 from __future__ import annotations
 
 import gc
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from tools.dosunit.runtime.real16_guest import (
@@ -316,6 +316,13 @@ class _HookCtx:
     capture: _CaptureState | None = None
     frame_top: int = 0
     sp_guard: bool = False
+    fetched_map: bytearray = field(
+        default_factory=lambda: bytearray(ONE_MIB + 0x10000))
+    last_fetch: int = 0
+    read_trace: list[tuple[int, int]] | None = None
+
+
+READ_TRACE_LIMIT: int = 200_000
 
 
 # Ret-family ids that consume the synthetic caller frame at its top; an iret
@@ -354,12 +361,19 @@ def _code_hook(uc: Uc, address: int, size: int, ctx: _HookCtx) -> None:
     if _boundary_stop(uc, address, ctx.capture):
         return
     ctx.state.instructions += 1
+    ctx.last_fetch = address
     if not any(region.contains(address, size) for region in ctx.image.code_ranges):
         ctx.state.status, ctx.state.detail = Real16ReplayStatus.CONTROL, "fetch_outside_declared_code"
         ctx.state.events.append(ReplayEvent(ReplayEventKind.CONTROL_ESCAPE, ctx.state.detail, address))
         uc.emu_stop()
         return
+    # Mark the whole block as fetched: a later write overlapping these bytes
+    # is a real self-modification hazard (the backend caches translations),
+    # while writes into declared-but-unfetched code are ordinary data writes.
+    ctx.fetched_map[address:address + size] = b"\x01" * size
     admitted, detail, raw, insn_id = _classified(uc, ctx.decoder, address, size)
+    if admitted and ctx.read_trace is not None and len(ctx.read_trace) < READ_TRACE_LIMIT:
+        _trace_reads(uc, ctx, address, raw, out=ctx.read_trace)
     if not admitted:
         kind = ReplayEventKind.DECODE_FAILED if insn_id < 0 else ReplayEventKind.UNSUPPORTED_INSTRUCTION
         ctx.state.status, ctx.state.detail = Real16ReplayStatus.UNSUPPORTED, detail
@@ -375,8 +389,8 @@ def _code_hook(uc: Uc, address: int, size: int, ctx: _HookCtx) -> None:
 
 
 def _write_hook(uc: Uc, _access: int, address: int, size: int, _value: int, ctx: _HookCtx) -> None:
-    """Record guest writes; mutation of declared code is unsupported."""
-    if any(region.overlaps(address, size) for region in ctx.image.code_ranges):
+    """Record guest writes; mutation of already-fetched code is unsupported."""
+    if any(ctx.fetched_map[address:address + size]):
         ctx.state.status, ctx.state.detail = Real16ReplayStatus.UNSUPPORTED, "instruction_memory_write"
         ctx.state.events.append(ReplayEvent(
             ReplayEventKind.INSTRUCTION_WRITE, ctx.state.detail, address,
@@ -384,7 +398,110 @@ def _write_hook(uc: Uc, _access: int, address: int, size: int, _value: int, ctx:
         ))
         uc.emu_stop()
         return
+    # A write into declared-but-unfetched code is ordinary data corruption —
+    # the backend has no stale translation for it — but stays recorded as a
+    # typed event so consumers can see code-space writes in the evidence.
+    if any(region.overlaps(address, size) for region in ctx.image.code_ranges):
+        ctx.state.events.append(ReplayEvent(
+            ReplayEventKind.INSTRUCTION_WRITE, "unfetched_code_write", address,
+            bytes(uc.mem_read(address, min(size, 16))),
+        ))
     ctx.state.writes.update(range(address, address + size))
+    if ctx.read_trace is not None and len(ctx.read_trace) < READ_TRACE_LIMIT:
+        ctx.read_trace.append((ctx.last_fetch, address))
+
+
+_REG_TO_UC = {
+    x86_ids.X86_REG_AX: registers.UC_X86_REG_AX,
+    x86_ids.X86_REG_BX: registers.UC_X86_REG_BX,
+    x86_ids.X86_REG_CX: registers.UC_X86_REG_CX,
+    x86_ids.X86_REG_DX: registers.UC_X86_REG_DX,
+    x86_ids.X86_REG_SI: registers.UC_X86_REG_SI,
+    x86_ids.X86_REG_DI: registers.UC_X86_REG_DI,
+    x86_ids.X86_REG_BP: registers.UC_X86_REG_BP,
+    x86_ids.X86_REG_SP: registers.UC_X86_REG_SP,
+    x86_ids.X86_REG_AL: registers.UC_X86_REG_AL,
+    x86_ids.X86_REG_EAX: registers.UC_X86_REG_EAX,
+    x86_ids.X86_REG_EBX: registers.UC_X86_REG_EBX,
+    x86_ids.X86_REG_ECX: registers.UC_X86_REG_ECX,
+    x86_ids.X86_REG_EDX: registers.UC_X86_REG_EDX,
+    x86_ids.X86_REG_ESI: registers.UC_X86_REG_ESI,
+    x86_ids.X86_REG_EDI: registers.UC_X86_REG_EDI,
+    x86_ids.X86_REG_EBP: registers.UC_X86_REG_EBP,
+    x86_ids.X86_REG_ESP: registers.UC_X86_REG_ESP,
+} if x86_ids is not None and registers is not None else {}
+
+_SEG_TO_UC = {
+    x86_ids.X86_REG_CS: registers.UC_X86_REG_CS,
+    x86_ids.X86_REG_DS: registers.UC_X86_REG_DS,
+    x86_ids.X86_REG_ES: registers.UC_X86_REG_ES,
+    x86_ids.X86_REG_SS: registers.UC_X86_REG_SS,
+    x86_ids.X86_REG_FS: registers.UC_X86_REG_FS,
+    x86_ids.X86_REG_GS: registers.UC_X86_REG_GS,
+} if x86_ids is not None and registers is not None else {}
+
+# Implicit data-read effective addresses for string/translate instructions,
+# expressed as (segment, base, index) register triples evaluated at fetch.
+_STRING_READS = {
+    x86_ids.X86_INS_MOVSB: ((x86_ids.X86_REG_DS, x86_ids.X86_REG_SI, None),),
+    x86_ids.X86_INS_MOVSW: ((x86_ids.X86_REG_DS, x86_ids.X86_REG_SI, None),),
+    x86_ids.X86_INS_MOVSD: ((x86_ids.X86_REG_DS, x86_ids.X86_REG_SI, None),),
+    x86_ids.X86_INS_LODSB: ((x86_ids.X86_REG_DS, x86_ids.X86_REG_SI, None),),
+    x86_ids.X86_INS_LODSW: ((x86_ids.X86_REG_DS, x86_ids.X86_REG_SI, None),),
+    x86_ids.X86_INS_LODSD: ((x86_ids.X86_REG_DS, x86_ids.X86_REG_SI, None),),
+    x86_ids.X86_INS_CMPSB: ((x86_ids.X86_REG_DS, x86_ids.X86_REG_SI, None),
+                            (x86_ids.X86_REG_ES, x86_ids.X86_REG_DI, None)),
+    x86_ids.X86_INS_CMPSW: ((x86_ids.X86_REG_DS, x86_ids.X86_REG_SI, None),
+                            (x86_ids.X86_REG_ES, x86_ids.X86_REG_DI, None)),
+    x86_ids.X86_INS_SCASB: ((x86_ids.X86_REG_ES, x86_ids.X86_REG_DI, None),),
+    x86_ids.X86_INS_SCASW: ((x86_ids.X86_REG_ES, x86_ids.X86_REG_DI, None),),
+    x86_ids.X86_INS_XLATB: ((x86_ids.X86_REG_DS, x86_ids.X86_REG_BX, x86_ids.X86_REG_AL),),
+} if x86_ids is not None else {}
+
+_BP_BASED = {x86_ids.X86_REG_BP, x86_ids.X86_REG_SP, x86_ids.X86_REG_EBP, x86_ids.X86_REG_ESP} \
+    if x86_ids is not None else set()
+
+
+def _trace_reads(
+    uc: Uc, ctx: _HookCtx, address: int, raw: bytes, *,
+    out: list[tuple[int, int]],
+) -> None:
+    """Append predicted data reads to the caller-admitted trace for one instruction.
+
+    Capstone decodes the already-read bytes; each explicit memory operand
+    marked CS_OP_READ and each implicit string-op read yields one
+    ``(fetch ip, linear)`` pair.  Deriving reads at fetch time keeps the
+    trace free of the read hook, whose mere installation perturbs guests
+    that rewrite and re-execute code regions (backend retranslation shifts
+    which bytes a stale translation sees).
+    """
+    decoded = next(ctx.decoder.disasm(raw, address), None)
+    if decoded is None:
+        return
+
+    def ea(seg_reg: int, base: int, index: int, scale: int, disp: int) -> int:
+        seg = int(uc.reg_read(_SEG_TO_UC[seg_reg])) if seg_reg else 0
+        if not seg_reg:
+            seg = int(uc.reg_read(registers.UC_X86_REG_SS if base in _BP_BASED
+                                  else registers.UC_X86_REG_DS))
+        val = int(uc.reg_read(_REG_TO_UC[base])) if base in _REG_TO_UC else 0
+        idx = int(uc.reg_read(_REG_TO_UC[index])) if index in _REG_TO_UC else 0
+        return (seg * 16 + (val + idx * scale + disp)) & 0xFFFFF
+
+    for operand in decoded.operands:
+        if operand.type != x86_ids.X86_OP_MEM:
+            continue
+        if not (operand.access & capstone.CS_AC_READ):
+            continue
+        mem = operand.mem
+        out.append((address, ea(mem.segment, mem.base, mem.index,
+                                mem.scale or 1, mem.disp)))
+        if len(out) >= READ_TRACE_LIMIT:
+            return
+    for seg_reg, base, index in _STRING_READS.get(decoded.id, ()):
+        out.append((address, ea(seg_reg, base, index, 1, 0)))
+        if len(out) >= READ_TRACE_LIMIT:
+            return
 
 
 def _intr_hook(uc: Uc, number: int, ctx: _HookCtx) -> None:
@@ -443,12 +560,16 @@ def _capture_observation(guest: Uc, request: SegOffset, size: int) -> Real16Capt
 def replay(
     image: Real16Image, entry: SegOffset, vector: Real16Vector, *,
     policy: Real16ReplayPolicy | None = None, instruction_limit: int = DEFAULT_INSTRUCTION_LIMIT,
+    read_trace: list[tuple[int, int]] | None = None,
 ) -> Real16ReplayResult:
     """Run one vector to its return trap in a fresh segmented guest.
 
     The result records status, final registers, declared observations, written
     bytes, typed events and the effective declared flag mask independently;
     instruction count is a diagnostic and is never part of agreement.
+    When ``read_trace`` is a list, every guest data read and write is appended
+    as a ``(fetch ip, address)`` pair — evidence for pairing the memory cells
+    two binaries' identical code actually touches.
     """
     mask = effective_flags_mask(vector.flags_mask)
     if not backend_available():
@@ -466,6 +587,7 @@ def replay(
         image, policy, decoder, vector.frame.target.linear(), state,
         frame_top=dict(vector.registers).get("sp", 0),
         sp_guard=vector.frame.sp_guard,
+        read_trace=read_trace,
     )
     _install_hooks(guest, ctx)
     _run_guest(guest, ctx, entry, instruction_limit)

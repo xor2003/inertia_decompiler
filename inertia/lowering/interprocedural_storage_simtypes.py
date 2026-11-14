@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Map accepted storage slots to architecture-bound angr types.
 
 Layer: Types/Lowering.
@@ -13,6 +14,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -39,6 +42,9 @@ from .interprocedural_storage_contracts import (
     StorageTrialValueClass8616,
 )
 from .near_pointer_type import near_pointer_type_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "StorageContractReturnTypeResult8616",
@@ -76,42 +82,44 @@ class StorageSimTypeFailureKind8616(StrEnum):
     POINTER_ARITHMETIC_UNPROVEN = "pointer_arithmetic_unproven"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StorageSimTypeResult8616:
     """One accepted/refused slot projection with its matching C spelling."""
 
     verdict: StorageSimTypeVerdict8616
     sim_type: SimType | None = None
-    c_type: str | None = None
+    c_type: object = None
     failures: tuple[StorageSimTypeFailureKind8616, ...] = ()
 
     @property
-    def accepted(self) -> bool:
+    def accepted(self) -> cython.bint:
         """Return whether the slot has one exact materializable type."""
         return self.verdict is StorageSimTypeVerdict8616.ACCEPTED
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StorageContractReturnTypeResult8616:
     """Projection of zero or one logical output to a function return type."""
 
     verdict: StorageSimTypeVerdict8616
     sim_type: SimType | None = None
-    c_type: str | None = None
+    c_type: object = None
     failures: tuple[StorageSimTypeFailureKind8616, ...] = ()
 
     @property
-    def accepted(self) -> bool:
+    def accepted(self) -> cython.bint:
         """Return whether one proven output has an exact return type."""
         return self.verdict is StorageSimTypeVerdict8616.ACCEPTED
 
 
+@cython.ccall
 def _normalized_pointer_c_type_8616(pointer_type: SimTypePointer) -> str:
     """Render a pointer base type without introducing a declarator name."""
     rendered = cast(str, pointer_type.c_repr(name=None))
     return " ".join(rendered.replace("*", " * ").split())
 
 
+@cython.ccall
 def _exact_existing_pointer_8616(
     existing_type: SimType | None,
     arch: Arch,
@@ -125,12 +133,15 @@ def _exact_existing_pointer_8616(
     return bound
 
 
+@cython.ccall
 def _return_pointee_type_8616(
     slot: StorageSlotContract8616,
     arch: Arch,
-    existing: SimTypePointer | None,
+    existing: object,
 ) -> tuple[SimType | None, StorageSimTypeFailureKind8616 | None]:
     """Select a bit-preserving pointee from exact caller dereference width."""
+    constructor: object
+    width: object
     width = slot.pointee_width_bytes
     if width is None:
         return None, StorageSimTypeFailureKind8616.POINTEE_WIDTH_UNKNOWN
@@ -140,13 +151,13 @@ def _return_pointee_type_8616(
     if existing is not None:
         prior = existing.pts_to
         if not isinstance(prior, SimTypeBottom):
-            if prior.size != width * 8:
+            if operator.ne(prior.size, width * 8):
                 return None, StorageSimTypeFailureKind8616.POINTEE_WIDTH_CONFLICT
             return prior, None
     return cast(SimType, constructor(signed=False).with_arch(arch)), None
 
 
-def _is_dx_ax_return_pair_8616(slot: StorageSlotContract8616) -> bool:
+def _is_dx_ax_return_pair_8616(slot: StorageSlotContract8616) -> cython.bint:
     """Return whether the slot is exactly the DX:AX far-result register pair."""
     pieces = slot.pieces
     if len(pieces) != 2:
@@ -154,14 +165,15 @@ def _is_dx_ax_return_pair_8616(slot: StorageSlotContract8616) -> bool:
     return all(
         piece.kind is StorageIdentityKind8616.REGISTER
         and piece.is_exact
-        and piece.register == register
-        and piece.width == width
-        for piece, (register, width) in zip(
+        and operator.eq(piece.register, register)
+        and operator.eq(piece.width, width)
+        for piece, (register, width) in builtins.iter(zip(
             pieces, (("ax", 2), ("dx", 2)), strict=True
-        )
+        ))
     )
 
 
+@cython.ccall
 def _pointee_size_bits_8616(pointee: SimType) -> int | None:
     """Return the declared bit size, treating callable families as unsized."""
     if isinstance(pointee, SimTypeFunction):
@@ -170,16 +182,18 @@ def _pointee_size_bits_8616(pointee: SimType) -> int | None:
     return size if isinstance(size, int) else None
 
 
-def _pointee_family_matches_8616(prior: SimType, proven: SimType) -> bool:
+@cython.ccall
+def _pointee_family_matches_8616(prior: SimType, proven: SimType) -> cython.bint:
     """Require the same structural C family, not merely the same byte size."""
     return bool(prior == proven)
 
 
+@cython.ccall
 def _far_pointer_return_simtype_8616(
     slot: StorageSlotContract8616,
     arch: Arch,
     existing_type: SimType | None,
-    proven_far_pointee: SimType | None,
+    proven_far_pointee: object,
 ) -> StorageSimTypeResult8616:
     """Project the proven DX:AX pair to a far pointer from independent proof.
 
@@ -188,6 +202,8 @@ def _far_pointer_return_simtype_8616(
     pair points at.  Publication therefore requires ``proven_far_pointee``, an
     independently proven pointee family supplied through the typed contract.
     """
+    pointee: object
+    pointee_bits: object
     pointee = None if proven_far_pointee is None else proven_far_pointee.with_arch(arch)
     if pointee is None or isinstance(pointee, SimTypeBottom):
         return StorageSimTypeResult8616(
@@ -198,7 +214,7 @@ def _far_pointer_return_simtype_8616(
     if (
         slot.pointee_width_bytes is not None
         and pointee_bits is not None
-        and pointee_bits != slot.pointee_width_bytes * 8
+        and operator.ne(pointee_bits, slot.pointee_width_bytes * 8)
     ):
         return StorageSimTypeResult8616(
             StorageSimTypeVerdict8616.REFUSED,
@@ -232,6 +248,7 @@ def _far_pointer_return_simtype_8616(
     )
 
 
+@cython.ccall
 def _pointer_slot_simtype_8616(
     slot: StorageSlotContract8616,
     arch: Arch,
@@ -239,6 +256,9 @@ def _pointer_slot_simtype_8616(
     proven_far_pointee: SimType | None,
 ) -> StorageSimTypeResult8616:
     """Project an exact pointer slot; a DX:AX result needs independent proof."""
+    failure: object
+    pointee: object
+    pointer_type: object
     is_far_result = (
         slot.role is StorageTrialRole8616.RETURN
         and _is_dx_ax_return_pair_8616(slot)
@@ -263,7 +283,7 @@ def _pointer_slot_simtype_8616(
         if pointee is None:
             return StorageSimTypeResult8616(
                 StorageSimTypeVerdict8616.REFUSED,
-                failures=(failure,) if failure is not None else (),
+                failures=tuple((failure,)) if failure is not None else tuple(()),
             )
         pointer_type = near_pointer_type_8616(pointee, arch)
     elif pointer_type is None:
@@ -277,6 +297,7 @@ def _pointer_slot_simtype_8616(
     )
 
 
+@cython.ccall
 def storage_slot_simtype_8616(
     slot: StorageSlotContract8616,
     arch: Arch,
@@ -290,6 +311,7 @@ def storage_slot_simtype_8616(
     pointer-class result; it is consumed only by that shape and never inferred
     from the slot's downstream caller-dereference width.
     """
+    constructor: object
     if slot.role not in {StorageTrialRole8616.INPUT, StorageTrialRole8616.RETURN}:
         return StorageSimTypeResult8616(
             StorageSimTypeVerdict8616.REFUSED,
@@ -352,7 +374,7 @@ def storage_contract_return_type_8616(
     before a DX:AX pointer-class result can become a far-pointer return type.
     """
     returns = tuple(
-        output for output in contract.outputs if output.role is StorageTrialRole8616.RETURN
+        output for output in iter(contract.outputs) if output.role is StorageTrialRole8616.RETURN
     )
     if not returns:
         return StorageContractReturnTypeResult8616(

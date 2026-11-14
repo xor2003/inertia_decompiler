@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Publish discovered function boundaries as Alias and Widening artifacts.
 
 Layer: CLI/fallback/reporting orchestration.
@@ -8,6 +9,8 @@ boundaries and the owning X86_16 layers classify them.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import time
 from dataclasses import dataclass
@@ -18,6 +21,7 @@ from typing import Protocol, cast
 from inertia.alias.indexed_address_program import (
     IndexedAliasProgramEvidence8616,
 )
+from inertia.ir.declared_entry_pipeline import declared_entry_pipeline_requested_8616
 from inertia.lowering.global_object_program_requirement import (
     GlobalObjectProgramRequirementEvidence8616,
     GlobalObjectProgramRequirementVerdict8616,
@@ -61,6 +65,8 @@ from .project_evidence_transport import (
     attach_project_bounded_global_object_ranges_8616,
     attach_project_global_object_layout_evidence_8616,
 )
+import dataclasses
+import operator
 
 
 class IndexedAliasProgramContextStatus8616(StrEnum):
@@ -71,11 +77,12 @@ class IndexedAliasProgramContextStatus8616(StrEnum):
     REUSED_WIDENING = "reused_widening"
     REUSED_PERSISTED_WIDENING = "reused_persisted_widening"
     DISCOVERY_INCOMPLETE = "discovery_incomplete"
+    DECLARED_ENTRY_DEFERRED = "declared_entry_deferred"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAliasProgramContextResult8616:
-    """One direct-run status; an expired pre-requirement run has no requirement evidence."""
+    """Direct-run status; expiry or scoped deferral supplies no requirement evidence."""
 
     status: IndexedAliasProgramContextStatus8616
     program: IndexedAliasProgramEvidence8616 | None
@@ -92,19 +99,21 @@ class _ProjectProgramSurface8616(Protocol):
     _inertia_global_object_program_requirement_8616: GlobalObjectProgramRequirementEvidence8616
 
 
+@cython.ccall
 def _discover_direct_indexed_alias_program_context_8616(
     source_project: object,
     target_project: object,
     requirement: GlobalObjectProgramRequirementEvidence8616,
     *,
-    timeout: int,
-    window: int,
-    cache_key: dict[str, object] | None,
-    callsite_cache_key: dict[str, object] | None,
-    direct_cache_key: dict[str, object] | None,
-    program_callsites_ready: bool = False,
+    timeout: cython.longlong,
+    window: cython.longlong,
+    cache_key: object,
+    callsite_cache_key: object,
+    direct_cache_key: object,
+    program_callsites_ready: cython.bint = False,
 ) -> IndexedAliasProgramContextResult8616:
     """Publish a complete census and optionally persist its closed projection."""
+    catalog: object
     catalog = recover_direct_indexed_alias_catalog_8616(
         source_project,
         timeout=timeout,
@@ -160,10 +169,13 @@ def _discover_direct_indexed_alias_program_context_8616(
     )
 
 
+@cython.ccall
 def _transported_widening_bundle_8616(
     target_surface: _ProjectProgramSurface8616,
-) -> tuple[GlobalObjectLayoutEvidence8616, ProjectBoundedGlobalObjectRangeEvidence8616] | None:
+) -> object:
     """Return a coherent transported Widening bundle, or None when absent."""
+    transported_layout: object
+    transported_ranges: object
     try:
         transported_layout = target_surface._inertia_project_global_object_layout_evidence_8616
     except AttributeError:
@@ -182,25 +194,27 @@ def _transported_widening_bundle_8616(
         raise TypeError("transported bounded-global Widening artifact has a wrong type")
     if not transported_layout.closed:
         raise ValueError("transported indexed-global Widening artifact is open")
-    if not transported_ranges.closed or transported_ranges.layouts != transported_layout:
+    if not transported_ranges.closed or operator.ne(transported_ranges.layouts, transported_layout):
         raise ValueError("transported indexed-global Widening bundle is incoherent")
     return transported_layout, transported_ranges
 
 
+@cython.ccall
 def _reused_persisted_context_8616(
     source_project: object,
     target_project: object,
     requirement: GlobalObjectProgramRequirementEvidence8616,
     *,
-    persisted: PersistedIndexedGlobalObjectEvidence8616 | None,
-    timeout: int,
-    window: int,
-    callsite_cache_key: dict[str, object] | None,
-    direct_cache_key: dict[str, object] | None,
-    direct_evidence_ready: bool,
-    program_callsites_ready: bool,
+    persisted: object,
+    timeout: cython.longlong,
+    window: cython.longlong,
+    callsite_cache_key: object,
+    direct_cache_key: object,
+    direct_evidence_ready: cython.bint,
+    program_callsites_ready: cython.bint,
 ) -> IndexedAliasProgramContextResult8616 | None:
     """Reuse a persisted Widening bundle when callsite evidence allows."""
+    catalog: object
     if persisted is None:
         return None
     if program_callsites_ready and direct_evidence_ready:
@@ -278,17 +292,32 @@ def _reused_persisted_context_8616(
     )
 
 
+@cython.ccall
 def prepare_direct_indexed_alias_program_context_8616(
     source_project: object,
     target_project: object,
     function: object,
     *,
-    timeout: int,
-    window: int,
+    timeout: cython.longlong,
+    window: cython.longlong,
     binary_path: Path | None = None,
     deadline: float | None = None,
 ) -> IndexedAliasProgramContextResult8616:
-    """Publish a full catalog only when the direct function needs one."""
+    """Publish a needed catalog, preserving declared intake before universal probing."""
+    cache_key: object
+    reused: object
+    transported: object
+    from .indexed_alias_program_parallel import indexed_alias_function_selection_8616
+
+    if deadline is not None and time.monotonic() >= deadline:
+        return IndexedAliasProgramContextResult8616(
+            IndexedAliasProgramContextStatus8616.DISCOVERY_INCOMPLETE, None, None,
+        )
+    selection = indexed_alias_function_selection_8616(function)
+    if declared_entry_pipeline_requested_8616(target_project, selection.function_addr):
+        return IndexedAliasProgramContextResult8616(
+            IndexedAliasProgramContextStatus8616.DECLARED_ENTRY_DEFERRED, None, None,
+        )
     local_program = build_cached_direct_indexed_alias_local_evidence_8616(
         target_project,
         function,

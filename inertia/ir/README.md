@@ -15,6 +15,21 @@ Controls: `test_native_cs_load_retains_selector_and_path_memory_authority` in
 
 ## Native feasibility row maps
 
+A selector operation's local deadline bounds nested call collection, census
+loops and native imports. `segment_call_deadline_scope_8616` keeps that cap
+separate from the shared request deadline and restores it on normal return or
+exception; charged work and the parent allowance are never renewed. A nested
+resource refusal remains typed deadline evidence rather than CALLEE_MISSING.
+Controls: `tests/ir/test_selector_nested_deadline.py`.
+
+Scoped selector collection requests the prerequisite CALLs in each missing
+callee's canonical census prefix. A callee with known native bounds can still
+need an entry-bound call proof before a later demand is reachable. Selection
+uses CFG ancestry and instruction order, not address sorting, and excludes
+calls after the target in its terminal block. These are requests only; every
+record still requires ordinary conditional authentication and resource checks.
+Controls: `tests/ir/test_scoped_selector_prerequisite_calls.py`.
+
 LOAD and interior-CALL maps may skip whole-block binding only when a scan of
 the full source block finds no eligible owned instruction. A nonempty candidate
 set still requires the existing native block/prefix binding; map rows are read
@@ -171,6 +186,11 @@ The request-local native cache retains exact raw-surface variants separately.
 Conditional return inputs remain part of the complete source key; alternating
 variants of one address do not evict each other merely for sharing an address.
 The existing four-record and 256-block limits count all variants together.
+When eviction is necessary, the resident surface with the fewest native blocks
+is discarded first; equal-size ties discard the oldest. Each new insertion is
+still admitted for its immediate consumers. Larger lifted surfaces can therefore
+survive a survey of small callees for final source revalidation, within the same
+memory limits.
 Every insertion, including reinsertion after a reentrant copy or fact callback,
 uses the same bounded retention path. Census projections select the matching
 raw variant and still authenticate their own fetch/producer key. Retention
@@ -215,7 +235,29 @@ Controls: `tests/ir/test_same_callsite_prefix_integrity.py`.
 
 ## Structural prefix work
 
-CALL-cut admission collects block and edge censuses once and supplies them to
+A requested pre-CALL snapshot still replays its prefix and captures fresh
+register and memory state. After successful capture, the snapshot walker may
+omit its terminal CALL's discarded exit only with an explicit, current
+confinement verdict. Ordinary fixpoint transfers never use this permission.
+Absent or declined verdicts retain the CALL consultation; rebound producers
+invalidate the owning verdict. The cut remains unauthenticated data until the
+prefix consumer performs its usual native and source checks.
+Controls: `tests/ir/test_call_snapshot_omission.py`.
+
+An absorbing CALL cut may exclude a suffix block's refusal even when the
+function-level inventory mirrors that exact refusal. Admission must bind its
+block address and full refusal record to a block outside the entry-reachable
+absorbing region. Unlocated, unmatched, or reachable refusals still reject the
+cut. Full-function admission remains refused, and the original artifact and
+its refusal inventories remain unchanged. This is structural prefix permission,
+not semantic or universal CFG completeness.
+Controls: `tests/ir/test_real16_prefix_cut.py`.
+
+CALL-cut admission collects block, row and edge censuses once. Its row census
+retains misplaced terminal controls, so the absorbing-region check consumes
+those results without rewalking the same instructions. CALL uniqueness and
+row types are still checked globally; pre-cut control/refusal defects still
+reject admission. It supplies the block and edge censuses to
 the shared CFG agreement owner. That owner checks the same root, exact block
 and edge membership, endpoint closure and entry reachability. An optional work
 consumer charges before allocation and traversal; unbudgeted callers retain
@@ -577,6 +619,30 @@ standalone consumers still perform their own authentication; this operation
 does not introduce reusable cached authority. Ordering, callback mutation and
 standalone behavior are covered by `tests/ir/test_fresh_near_call_scope.py`.
 
+Declared CALL-target application retains the explicitly supplied root scope
+when its records carry conditional callee proofs, even if no terminal jump
+needs refinement. Original scoped callee records keep their identities and
+full dependency checks against that root; selector projections retain their
+canonical batch checks. Jump-path CALL consumption also authenticates this
+explicit root directly against each required entry. It resolves a new callsite
+premise only when no root was offered; missing or foreign roots and changed
+native bytes retain the CALL refusal. Continuation candidates come from the bound native
+CALL census before fresh admission and final sealing. Target admission leaves
+raw CALL instructions and operands unchanged and grants no additional callee
+effects. Native corruption, foreign scopes, altered targets and exact closed
+evidence counts are covered by
+`tests/ir/test_declared_scoped_call_target_projection.py`.
+
+Scoped selector snapshots detach each shared native CALL index once per fresh
+proof graph and retain its identity at subsequent references. A synchronous
+selector batch shares its beginning scoped-record snapshot for work counting,
+the certificate and the closure mutation guard. Closures still authenticate
+freshly; the ending closure snapshot and final certificate are independently
+read from current evidence. The four remaining graph walks are charged to the
+same request budget. No snapshot or admission is retained across operations.
+`tests/ir/test_scoped_selector_seal.py` covers bounded work, shared-index
+mutation, and changes after native preparation.
+
 ## Request-local native lift reuse
 
 Native import treats a recovered function's blocks as byte witnesses, not as
@@ -588,7 +654,8 @@ authorize expansion into additional mapped bytes. The control is
 `tests/ir/test_vex_native_boundary.py`.
 
 `native_import_surface_cache.py` retains at most four raw lift surfaces and
-256 blocks during one outer IR import. Equal reconstructed boundaries may
+256 blocks during one outer IR import, evicting smaller resident surfaces first
+with oldest-first ties. Equal reconstructed boundaries may
 share lifting only when native bytes, decoded metadata, CFG, architecture,
 engine settings and producer authorities still agree. Mutable captures are
 copied; incomplete lifts and expired requests are not retained.
@@ -713,7 +780,14 @@ retains neither a positive order nor graph/effect proof. Changed geometry still
 uses the ordinary solver; native instruction authentication, shared/local work
 and deadlines remain enforced. Custom ordering callbacks remain observable,
 and advice expires with the traversal. Controls:
-`tests/ir/test_callee_order_advice.py`.
+`tests/ir/test_callee_order_advice.py`. Unordered optional callee feasibility
+is offered half the remaining local work, reserving room for the required
+simulation. Its actual work remains charged to the original local/shared
+limits, including any boundary overshoot. An incomplete refinement publishes
+no new dead-edge facts; the required native census still runs on the retained
+scope. Ordered acyclic refinement keeps its existing work allowance. Native
+cyclic controls retain useful pruning of unreachable code writes and refuse
+the same write when its branch is live.
 
 Native census projections grow within their freshly authenticated raw source
 inventory. Already-private full blocks remain private; new or widened blocks
@@ -803,3 +877,60 @@ performed by the explicit consumer accessor, not recursively inside native
 structural equality. Controls: accessor-tampering cases in
 `tests/semantics/test_scoped_call_stack_coordinates.py` and scoped native-copy
 cases in `tests/ir/test_scoped_call_stack_coordinate_transport.py`.
+
+## Immediate universal closure consumption
+
+The entry-domain CALL resolver may consume a universal closure verdict directly
+inside the synchronous window immediately after canonical production or full
+resolver revalidation. The typed result must have no invocation scope, no
+failure, exact integer accounting `(1, 1, 1, 1, 0)`, and the expected artifact
+identity where supplied. Replaced producers or foreign/scoped surfaces use
+ordinary `complete_for` revalidation. These checks are not authentication for
+arbitrary supplied closure objects; no callback or mutation may intervene in
+the private production-to-consumption window.
+
+Stored pool hits still revalidate evidence. Scoped consumption still performs
+scope authentication and evidence replay, including after callbacks. A failure
+never enters the reuse pool. Controls live in
+`tests/ir/test_fresh_universal_closure.py`; no retained validity receipt or
+mutation epoch is introduced.
+
+
+### Retained native callees in selector induction
+
+A call-preservation record may carry authenticated raw native callee coverage
+without a conditional CFG view. Selector induction must authenticate that
+record, retain the exact callee artifact and boundary, and run the ordinary
+closed-native-CFG checks. Absence of a conditional view is not itself a refusal
+and does not authorize skipping raw CFG checks. Conditional near-return views
+continue to require their own authenticated projection; unsupported view kinds
+refuse. Both routes retain the full raw native census and final source seals.
+`tests/ir/test_selector_native_callee_record.py` covers the native RET route and
+failed, foreign-artifact, and stale-native controls.
+
+
+### Selector loop-state initialization
+
+Selector dataflow distinguishes an unvisited predecessor from a visited exit
+that has no known value for a segment register. Only the latter contributes
+unknown to the meet. Propagation starts at the authenticated entry and reaches
+other blocks through visited predecessors, independent of block address order.
+No speculative loop state is accepted: bounded convergence, full final equation
+replay, native fetch checks and source seals still apply. A missing final block
+exit fails the replay. Tests in `tests/ir/test_selector_loop_entry_state.py`
+exercise both native loop layouts and unknown/conflicting visited backedges.
+
+
+### Selector consumption of invocation-proven indirect edges
+
+Selector induction may consume `ScopedIndirectTargetView8616` only through its
+fresh projection under the callee's exact invocation. The control adapter keeps
+the native indirect JMP, binds its exact raw instruction object and full fetched
+bytes, checks the invocation's selector interval and target fetch window, and
+requires the projection's single successor and constant operand to agree with
+the replayed target receipt. Both the source instruction and target must belong
+to the admitted census. This grants one scoped control edge, not context-free
+callee completeness. Changed source, receipt, scope, bytes or target geometry
+must refuse. The ordinary native and near-return routes keep their own checks.
+`tests/ir/test_selector_indirect_control_binding.py` exercises this boundary
+using a real native table-driven callee and independent corruption controls.

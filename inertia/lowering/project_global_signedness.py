@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Join project-wide direct ordering facts to proven wide global objects.
 
 Layer: Types/Lowering orchestration.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -24,37 +27,39 @@ from inertia.widening.global_object_layout import DirectGlobalObjectLayoutEviden
 from .project_global_object_layout import FunctionRangeView8616
 from .real_mode_linear import _direct_global_update_ordered_insns_8616
 from .segmented_global_loads import _capstone_instruction_view_8616
+import dataclasses
+import builtins
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ProjectGlobalOrderingView8616:
     """One direct ordering fact attributed to an exact function range."""
 
-    function_addr: int
+    function_addr: cython.longlong
     fact: DirectGlobalOrderingFact8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ProjectGlobalSignednessContract8616:
     """One conflict-free signedness contract for a proven wide DS object."""
 
-    base_offset: int
+    base_offset: cython.longlong
     ordering: DirectGlobalOrdering8616
-    proof_function_addrs: tuple[int, ...]
-    proof_compare_addrs: tuple[int, ...]
+    proof_function_addrs: object
+    proof_compare_addrs: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ProjectGlobalSignednessEvidence8616:
     """Closed census and contracts for project-wide global signedness."""
 
     contracts: tuple[ProjectGlobalSignednessContract8616, ...] = ()
-    conflicting_base_offsets: tuple[int, ...] = ()
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    conflicting_base_offsets: tuple[cython.longlong, ...] = ()
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
 class ProjectGlobalOrderingCollector8616(Protocol):
@@ -69,29 +74,34 @@ class ProjectGlobalOrderingCollector8616(Protocol):
         ...
 
 
-type ProjectGlobalOrderingCollectorTuple8616 = tuple[ProjectGlobalOrderingCollector8616, ...]
+ProjectGlobalOrderingCollectorTuple8616 = typing.TypeAliasType("ProjectGlobalOrderingCollectorTuple8616", tuple[ProjectGlobalOrderingCollector8616, ...])
 
 
 class _ProjectGlobalSignednessSurface8616(Protocol):
     """Owned metadata attached to an angr project at the dynamic boundary."""
 
-    _inertia_caller_function_ranges_8616: tuple[tuple[int, int], ...]
+    _inertia_caller_function_ranges_8616: object
     _inertia_original_project: object
     _inertia_project_direct_global_object_layout_evidence_8616: DirectGlobalObjectLayoutEvidence8616
     _inertia_project_global_signedness_evidence_8616: ProjectGlobalSignednessEvidence8616
 
 
+@cython.ccall
 def recover_project_global_signedness_evidence_8616(
     layout_evidence: DirectGlobalObjectLayoutEvidence8616,
     views: Iterable[ProjectGlobalOrderingView8616],
 ) -> ProjectGlobalSignednessEvidence8616:
     """Join direct high-word ordering facts to proven wide DS layouts."""
+    base_offset: object
+    ordering: object
+    grouped_views: object
+    view: object
     raw_views = tuple(views)
     normalized = tuple(dict.fromkeys(raw_views))
-    by_base: dict[int, list[ProjectGlobalOrderingView8616]] = {}
+    by_base: dict[cython.longlong, list[ProjectGlobalOrderingView8616]] = {}
     high_to_base = {
         ((layout.address.offset + 2) & 0xFFFF): layout.address.offset & 0xFFFF
-        for layout in layout_evidence.layouts
+        for layout in iter(layout_evidence.layouts)
         if layout.address.size >= 4
     }
     for view in normalized:
@@ -100,11 +110,11 @@ def recover_project_global_signedness_evidence_8616(
             by_base.setdefault(base_offset, []).append(view)
 
     contracts: list[ProjectGlobalSignednessContract8616] = []
-    conflicts: list[int] = []
+    conflicts: list[cython.longlong] = []
     classified_count = 0
     failure_count = 0
-    for base_offset, grouped_views in sorted(by_base.items()):
-        orderings = {view.fact.ordering for view in grouped_views}
+    for base_offset, grouped_views in sorted(tuple(by_base.items())):
+        orderings = {view.fact.ordering for view in iter(grouped_views)}
         if len(orderings) != 1:
             conflicts.append(base_offset)
             failure_count += len(grouped_views)
@@ -115,8 +125,8 @@ def recover_project_global_signedness_evidence_8616(
             ProjectGlobalSignednessContract8616(
                 base_offset=base_offset,
                 ordering=ordering,
-                proof_function_addrs=tuple(sorted({view.function_addr for view in grouped_views})),
-                proof_compare_addrs=tuple(sorted({view.fact.compare_ins_addr for view in grouped_views})),
+                proof_function_addrs=tuple(sorted({view.function_addr for view in iter(grouped_views)})),
+                proof_compare_addrs=tuple(sorted({view.fact.compare_ins_addr for view in iter(grouped_views)})),
             )
         )
     return ProjectGlobalSignednessEvidence8616(
@@ -133,11 +143,11 @@ def recover_project_global_signedness_evidence_8616(
 def collect_direct_global_ordering_facts_8616(
     project: object,
     function: object,
-) -> tuple[DirectGlobalOrderingFact8616, ...]:
+) -> object:
     """Collect typed direct ordering facts from one exact function range."""
     instructions = _direct_global_update_ordered_insns_8616(project, function)
     return recover_direct_global_ordering_facts_8616(
-        _capstone_instruction_view_8616(instruction) for instruction in instructions
+        _capstone_instruction_view_8616(instruction) for instruction in iter(instructions)
     )
 
 
@@ -146,6 +156,8 @@ def collect_project_global_signedness_evidence_8616(
     collectors: ProjectGlobalOrderingCollectorTuple8616 = (collect_direct_global_ordering_facts_8616,),
 ) -> ProjectGlobalSignednessEvidence8616:
     """Collect and cache project-wide signedness for proven wide DS objects."""
+    bounds: object
+    collector: object
     surface = cast(_ProjectGlobalSignednessSurface8616, project)
     try:
         cached = surface._inertia_project_global_signedness_evidence_8616
@@ -181,7 +193,7 @@ def collect_project_global_signedness_evidence_8616(
         for collector in collectors:
             views.extend(
                 ProjectGlobalOrderingView8616(function.addr, fact)
-                for fact in collector(evidence_project, function)
+                for fact in builtins.iter(collector(evidence_project, function))
             )
     result = recover_project_global_signedness_evidence_8616(layouts, views)
     surface._inertia_project_global_signedness_evidence_8616 = result

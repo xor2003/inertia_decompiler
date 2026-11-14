@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Collect matched block-local stack allocation and release coordinates.
 
 Layer: IR.
@@ -10,6 +11,8 @@ Read/escape closure and complete function lifetime remain separate obligations.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -21,11 +24,13 @@ from .scalar_value_projection import (
     scalar_read_projection_8616,
 )
 from .ssa import SSABlock
+import dataclasses
+import operator
 
 _WORD_BYTES = 2
 _OFFSET_MODULUS = 1 << 16
-type _RegisterKey = tuple[str, int]
-type _CapturedCoordinates = dict[int, tuple[IRInstr, int | None]]
+_RegisterKey = typing.TypeAliasType("_RegisterKey", tuple[str, int])
+_CapturedCoordinates = typing.TypeAliasType("_CapturedCoordinates", dict[int, tuple[IRInstr, int | None]])
 
 
 class StackExtentRefusal8616(StrEnum):
@@ -38,7 +43,7 @@ class StackExtentRefusal8616(StrEnum):
     UNRELEASED_ALLOCATION = "unreleased_allocation"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ReleasedStackExtent8616:
     """One allocation released in the same straight-line SSA block.
 
@@ -47,13 +52,13 @@ class ReleasedStackExtent8616:
     storage classification and must never be consumed as DCE permission.
     """
 
-    block_addr: int
-    allocation_index: int
-    release_index: int
-    lower_offset: int
-    upper_offset: int
+    block_addr: cython.longlong
+    allocation_index: cython.longlong
+    release_index: cython.longlong
+    lower_offset: cython.longlong
+    upper_offset: cython.longlong
 
-    def to_dict(self) -> dict[str, int]:
+    def to_dict(self) -> dict[str, cython.longlong]:
         """Serialize source positions and block-relative byte coordinates."""
         return {
             "block_addr": self.block_addr,
@@ -64,14 +69,14 @@ class ReleasedStackExtent8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackRegisterCoordinate8616:
     """One exact register definition relative to this block's incoming SP."""
 
-    name: str
-    version: int
-    definition_index: int
-    entry_offset: int
+    name: object
+    version: cython.longlong
+    definition_index: cython.longlong
+    entry_offset: cython.longlong
 
     def to_dict(self) -> dict[str, object]:
         """Serialize identity separately from its affine displacement."""
@@ -79,7 +84,7 @@ class StackRegisterCoordinate8616:
                 "definition_index": self.definition_index, "entry_offset": self.entry_offset}
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackExtentEvidence8616:
     """One block's coordinate census, explicitly separate from DCE proof.
 
@@ -88,17 +93,17 @@ class StackExtentEvidence8616:
     unknown results must never be interpreted as absence of allocations.
     """
 
-    block_addr: int
+    block_addr: cython.longlong
     extents: tuple[ReleasedStackExtent8616, ...] = ()
     refusal: StackExtentRefusal8616 = StackExtentRefusal8616.NONE
     coordinates: tuple[StackRegisterCoordinate8616, ...] = ()
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Report coordinate-analysis completion, not private frame lifetime."""
         return self.refusal is StackExtentRefusal8616.NONE
 
-    def address_entry_offset(self, block_addr: int, instruction_index: int, address: IRAddress) -> int | None:
+    def address_entry_offset(self, block_addr: cython.longlong, instruction_index: cython.longlong, address: IRAddress) -> int | None:
         """Resolve an exact SS access in this block without granting ownership.
 
         An SSA definition must precede the access. A matching register name
@@ -106,7 +111,8 @@ class StackExtentEvidence8616:
         Returned displacements retain their unwrapped coordinate; consumers
         must still account for circular byte overlap and the access width.
         """
-        if not self.complete or block_addr != self.block_addr:
+        coordinate: object
+        if not self.complete or operator.ne(block_addr, self.block_addr):
             return None
         if address.space is not MemSpace.SS or address.status is not AddressStatus.STABLE:
             return None
@@ -116,7 +122,7 @@ class StackExtentEvidence8616:
             return None
         base = address.base_values[0]
         plain_base = base.index is None and base.expr in {None, ()} and base.offset == 0
-        if not plain_base or _register_key(base) is None or base.name != address.base[0]:
+        if not plain_base or _register_key(base) is None or operator.ne(base.name, address.base[0]):
             return None
         for coordinate in self.coordinates:
             if (coordinate.name, coordinate.version) == (base.name, base.version):
@@ -131,8 +137,8 @@ class StackExtentEvidence8616:
         normalized = int(self.refusal is not StackExtentRefusal8616.UNKNOWN_COORDINATE)
         return {
             "block_addr": self.block_addr,
-            "extents": [extent.to_dict() for extent in self.extents],
-            "coordinates": [coordinate.to_dict() for coordinate in self.coordinates],
+            "extents": [extent.to_dict() for extent in iter(self.extents)],
+            "coordinates": [coordinate.to_dict() for coordinate in iter(self.coordinates)],
             "refusal": self.refusal.value,
             "complete": self.complete,
             "stats": {
@@ -145,20 +151,25 @@ class StackExtentEvidence8616:
         }
 
 
+@cython.ccall
 def _register_key(value: IRValue) -> _RegisterKey | None:
     """Require a whole word register with an exact SSA definition identity."""
     if value.space is not MemSpace.REG or value.name not in {"sp", "bp"}:
         return None
-    if value.size != _WORD_BYTES or value.version is None:
+    if operator.ne(value.size, _WORD_BYTES) or value.version is None:
         return None
     return value.name, value.version
 
 
+@cython.ccall
 def _value_coordinate(
-    source: IRValue, coordinates: dict[_RegisterKey, int], captures: _CapturedCoordinates,
+    source: IRValue, coordinates: object, captures: _CapturedCoordinates,
 ) -> int | None:
     """Resolve a captured result before considering a bare register descriptor."""
-    if source.active_unary is not None or source.index is not None or source.size != _WORD_BYTES:
+    captured: object
+    key: object
+    projection: object
+    if source.active_unary is not None or source.index is not None or operator.ne(source.size, _WORD_BYTES):
         return None
     if source.source_tmp is not None:
         captured = captures.get(source.source_tmp)
@@ -180,11 +191,13 @@ def _value_coordinate(
     return int(coordinates[key] + source.offset)
 
 
+@cython.ccall
 def _source_coordinate(
-    instruction: IRInstr, coordinates: dict[_RegisterKey, int], captures: _CapturedCoordinates,
+    instruction: IRInstr, coordinates: object, captures: _CapturedCoordinates,
 ) -> int | None:
     """Evaluate exact word copies and literal displacement arithmetic."""
-    if instruction.size != _WORD_BYTES or not instruction.args:
+    coordinate: object
+    if operator.ne(instruction.size, _WORD_BYTES) or not instruction.args:
         return None
     source = instruction.args[0]
     if not isinstance(source, IRValue):
@@ -198,7 +211,7 @@ def _source_coordinate(
     if not isinstance(displacement, IRValue):
         return None
     plain_literal = (
-        displacement.space is MemSpace.CONST and displacement.size == _WORD_BYTES
+        displacement.space is MemSpace.CONST and operator.eq(displacement.size, _WORD_BYTES)
         and displacement.source_tmp is None and displacement.active_unary is None
         and displacement.index is None and displacement.offset == 0
         and displacement.expr in {None, ()}
@@ -209,24 +222,30 @@ def _source_coordinate(
     return coordinate + delta
 
 
+@cython.ccall
 def _record_capture(
-    instruction: IRInstr, coordinates: dict[_RegisterKey, int], captures: _CapturedCoordinates,
+    instruction: IRInstr, coordinates: object, captures: _CapturedCoordinates,
 ) -> None:
     """Retain one producer per capture; ambiguous and nonword results stay unknown."""
+    destination: object
     destination = instruction.dst
     if destination is None or destination.source_tmp is None:
         return
     number = destination.source_tmp
     coordinate = None
-    if number not in captures and destination.size == _WORD_BYTES and destination.active_unary is None:
+    if number not in captures and operator.eq(destination.size, _WORD_BYTES) and destination.active_unary is None:
         coordinate = _source_coordinate(instruction, coordinates, captures)
     captures[number] = (instruction, coordinate)
 
 
+@cython.ccall
 def _release_extents(
-    pending: list[tuple[int, int, int]], block_addr: int, index: int, before: int, after: int,
-) -> tuple[list[tuple[int, int, int]], list[ReleasedStackExtent8616]] | None:
+    pending: object, block_addr: cython.longlong, index: cython.longlong, before: cython.longlong, after: cython.longlong,
+) -> object:
     """Consume complete releases, refusing partial byte-lifetime splitting."""
+    allocation_index: object
+    lower: object
+    upper: object
     remaining = []
     released = []
     for allocation_index, lower, upper in pending:
@@ -239,13 +258,19 @@ def _release_extents(
     return remaining, released
 
 
+@cython.ccall
 def _stack_coordinates(
     block: SSABlock,
-) -> tuple[list[tuple[int, int]], tuple[StackRegisterCoordinate8616, ...]] | None:
+) -> object:
     """Resolve whole-word SP writes through exact block-local SSA copies."""
+    coordinate: object
+    destination: object
+    key: object
+    index: object
+    instruction: object
     if block.refusals:
         return None
-    coordinates: dict[_RegisterKey, int] = {("sp", 0): 0}
+    coordinates: dict[_RegisterKey, cython.longlong] = {("sp", 0): 0}
     captures: _CapturedCoordinates = {}
     definitions = set(coordinates)
     writes = []
@@ -281,12 +306,16 @@ def build_stack_extent_evidence_8616(block: SSABlock) -> StackExtentEvidence8616
     to compute SP. Block-local input versions cannot prove relationships
     across CFG edges. No read, escape or private-storage claim is made.
     """
+    result: object
+    trace: object
+    coordinate: object
+    index: object
     trace = _stack_coordinates(block)
     if trace is None:
         return StackExtentEvidence8616(block.addr, refusal=StackExtentRefusal8616.UNKNOWN_COORDINATE)
     writes, coordinates = trace
     current_sp = 0
-    pending: list[tuple[int, int, int]] = []
+    pending: list[tuple[cython.longlong, cython.longlong, cython.longlong]] = []
     released: list[ReleasedStackExtent8616] = []
     for index, coordinate in writes:
         if abs(coordinate - current_sp) >= _OFFSET_MODULUS:
@@ -307,6 +336,7 @@ def build_stack_extent_evidence_8616(block: SSABlock) -> StackExtentEvidence8616
     )
 
 
-def collect_released_stack_extents_8616(block: SSABlock) -> tuple[ReleasedStackExtent8616, ...]:
+@cython.ccall
+def collect_released_stack_extents_8616(block: SSABlock) -> object:
     """Compatibility projection; an empty tuple does not establish completeness."""
     return build_stack_extent_evidence_8616(block).extents

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed contracts for a paired far-call result's caller use.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -16,6 +19,8 @@ from inertia.ir.core import AddressStatus, IRAddress, MemSpace, SegmentOrigin
 from inertia.ir.logical_memory_contracts import IRLogicalMemoryAccessKey8616
 
 from .interprocedural_storage_return_type_contracts import ReturnPointerAliasStep8616
+import dataclasses
+import operator
 
 __all__ = [
     "FarReturnPointerUseEvidence8616",
@@ -47,33 +52,33 @@ class FarReturnPointerUseFailure8616(StrEnum):
     DEREFERENCE_NOT_FOUND = "dereference_not_found"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FarReturnPointerUseStats8616:
     """Close one requested far-use fact through all five evidence stages."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FarReturnPointerUseEvidence8616:
     """Exact target, register-pair copies, and one segmented logical access."""
 
-    caller_addr: int
-    callee_addr: int
-    callsite_addr: int
+    caller_addr: cython.longlong
+    callee_addr: cython.longlong
+    callsite_addr: cython.longlong
     segment_copy: ReturnPointerAliasStep8616
     offset_copy: ReturnPointerAliasStep8616
-    dereference_instruction_addr: int
+    dereference_instruction_addr: cython.longlong
     access_key: IRLogicalMemoryAccessKey8616
     address: IRAddress
-    access_width_bytes: int
+    access_width_bytes: cython.longlong
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Require both independent call-result carriers and exact ES:BX use."""
         segment = self.segment_copy
         offset = self.offset_copy
@@ -95,8 +100,8 @@ class FarReturnPointerUseEvidence8616:
             segment.block_addr == offset.block_addr == self.access_key.block_addr
             and segment.instr_addr < self.dereference_instruction_addr
             and offset.instr_addr < self.dereference_instruction_addr
-            and self.access_key.function_addr == self.caller_addr
-            and self.access_key.insn_addr == self.dereference_instruction_addr
+            and operator.eq(self.access_key.function_addr, self.caller_addr)
+            and operator.eq(self.access_key.insn_addr, self.dereference_instruction_addr)
         )
         exact_address = (
             self.address.space is MemSpace.ES
@@ -115,7 +120,7 @@ class FarReturnPointerUseEvidence8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FarReturnPointerUseResult8616:
     """One complete use witness or a typed, nonpublishing refusal."""
 
@@ -125,12 +130,12 @@ class FarReturnPointerUseResult8616:
     stats: FarReturnPointerUseStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether this result contains exactly one closed witness."""
         return bool(
             self.verdict is FarReturnPointerUseVerdict8616.PROVEN
             and self.failure is None
             and self.evidence is not None
             and self.evidence.complete
-            and self.stats == FarReturnPointerUseStats8616(1, 1, 1, 1, 0)
+            and operator.eq(self.stats, FarReturnPointerUseStats8616(1, 1, 1, 1, 0))
         )

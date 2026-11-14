@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed object contracts for pointer-parameter memory outputs.
 
 Layer: Types/Lowering.
@@ -10,12 +11,16 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
 
 from .pointer_parameter_caller_target_contracts import PointerParameterCallerTarget8616
 from .pointer_parameter_output_contracts import PointerParameterOutputContract8616
+import dataclasses
+import operator
 
 
 class PointerParameterMemoryOutputFailure8616(StrEnum):
@@ -27,60 +32,60 @@ class PointerParameterMemoryOutputFailure8616(StrEnum):
     SOURCE_CONFLICT = "source_conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PointerParameterMemoryOutputView8616:
     """One exact callsite binding for a dynamic pointer output."""
 
-    caller_addr: int
-    callee_addr: int
-    callsite_addr: int
+    caller_addr: cython.longlong
+    callee_addr: cython.longlong
+    callsite_addr: cython.longlong
     effect: PointerParameterCallerTarget8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether the binding and retained target agree exactly."""
         return bool(
             self.effect.complete
-            and self.caller_addr == self.effect.caller_addr
-            and self.callee_addr == self.effect.callee_addr
-            and self.callsite_addr == self.effect.callsite_addr
+            and operator.eq(self.caller_addr, self.effect.caller_addr)
+            and operator.eq(self.callee_addr, self.effect.callee_addr)
+            and operator.eq(self.callsite_addr, self.effect.callsite_addr)
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PointerParameterMemoryOutputObject8616:
     """One callee pointer-output source and all exact caller bindings."""
 
     source: PointerParameterOutputContract8616
-    views: tuple[PointerParameterMemoryOutputView8616, ...]
+    views: object
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every unique view retains this exact source."""
         keys = tuple(
             (view.caller_addr, view.callsite_addr, view.effect.logical_index)
-            for view in self.views
+            for view in iter(self.views)
         )
         return bool(
             self.source.complete
             and self.views
-            and len(set(keys)) == len(keys)
-            and all(view.complete and view.effect.source == self.source for view in self.views)
+            and operator.eq(len(set(keys)), len(keys))
+            and all(view.complete and operator.eq(view.effect.source, self.source) for view in iter(self.views))
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PointerParameterMemoryOutputStats8616:
     """Closed evidence accounting for dynamic memory-output views."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every dynamic effect became one retained view."""
         return bool(
             self.raw_fact_count
@@ -91,23 +96,22 @@ class PointerParameterMemoryOutputStats8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PointerParameterMemoryOutputJoin8616:
     """All dynamic output objects or one atomic typed refusal."""
 
-    objects: tuple[PointerParameterMemoryOutputObject8616, ...]
+    objects: object
     failure: PointerParameterMemoryOutputFailure8616 | None
     stats: PointerParameterMemoryOutputStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every effect is grouped exactly once."""
         return bool(
             self.failure is None
             and self.stats.complete
-            and sum(len(item.views) for item in self.objects)
-            == self.stats.materialized_count
-            and all(item.complete for item in self.objects)
+            and operator.eq(sum(len(item.views) for item in iter(self.objects)), self.stats.materialized_count)
+            and all(item.complete for item in iter(self.objects))
         )
 
 

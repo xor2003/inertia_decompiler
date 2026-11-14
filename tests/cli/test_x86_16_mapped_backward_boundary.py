@@ -4,12 +4,55 @@ from __future__ import annotations
 from types import ModuleType
 
 import pytest
+
 import inertia.frontend.x86_16.frontend_boundary_transport as transport_owner
 import inertia.frontend.x86_16.frontend_direct_callsite_index as index_owner
 import inertia.frontend.x86_16.frontend_function_boundary as boundary_owner
 import inertia.frontend.x86_16.frontend_invocation_inventory as inventory_owner
-
 from inertia.cli.project_loading import _build_project_from_bytes
+
+
+@pytest.mark.parametrize("body,entry_offset,expected_size", [
+    (bytes.fromhex("b80100c3"), 0, 4),
+    (bytes.fromhex("c39090ebfb"), 3, 2),
+    (bytes.fromhex("eb7e") + b"\x90" * 126 + bytes.fromhex("c3"), 0, 129),
+], ids=["straight_line", "backward", "discontiguous"])
+def test_mapped_boundary_reproves_reachable_extent_instead_of_image_tail(
+    body: bytes, entry_offset: int, expected_size: int,
+) -> None:
+    """Padding is a search bound, while backward blocks retain their lower bound."""
+    entry = 0x1000 + entry_offset
+    project = _build_project_from_bytes(body + b"\x90" * 4096, base_addr=0x1000, entry_point=entry)
+    boundary = boundary_owner.mapped_entry_function_boundary_8616(project, entry)
+    assert boundary is not None
+    assert boundary.addr == entry
+    assert boundary.size == expected_size
+    assert boundary.decode_lower_bound == 0x1000
+    assert max(block.addr + block.size for block in boundary.blocks) == entry + expected_size
+    if entry_offset:
+        assert boundary.block_addrs_set == frozenset((0x1000, entry))
+
+
+def test_tight_mapped_boundary_requires_fresh_closure_after_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A changed terminal cannot inherit a previously closed discovery envelope."""
+    project = _build_project_from_bytes(bytes.fromhex("b80100c3") + b"\x90" * 128,
+                                        base_addr=0x1000, entry_point=0x1000)
+    original = boundary_owner.collect_instruction_reachability_8616
+    calls = 0
+
+    def discover(*args, **kwargs):
+        nonlocal calls
+        result = original(*args, **kwargs)
+        calls += 1
+        if calls == 1:
+            project.loader.memory.store(0x1003, bytes.fromhex("ffe0"))
+        return result
+
+    monkeypatch.setattr(boundary_owner, "collect_instruction_reachability_8616", discover)
+    assert boundary_owner.mapped_entry_function_boundary_8616(project, 0x1000) is None
+    assert calls >= 2
 
 
 @pytest.mark.parametrize("tail", ["c3", "ffe0"])
@@ -46,7 +89,8 @@ def test_backward_call_projections_enclose_census_and_keep_entry() -> None:
     boundary = boundary_owner.mapped_entry_function_boundary_8616(project, 0x1008)
     assert boundary is not None
     assert boundary.decode_start == 0x1000
-    assert boundary.decode_end == 0x100c
+    # The callee at100b is independently owned, beyond this caller's closed body.
+    assert boundary.decode_end == 0x100a
     for block in boundary.blocks:
         for insn in block.capstone.insns:
             assert boundary.decode_start <= insn.address
@@ -66,7 +110,7 @@ def test_backward_call_projections_enclose_census_and_keep_entry() -> None:
         assert rows[0].caller_start == 0x1008
         assert rows[0].entry_identity is None
         census = next(item for item in result.caller_censuses if item.entry_addr == 0x1008)
-        assert (census.decode_start, census.decode_end) == (0x1000, 0x100c)
+        assert (census.decode_start, census.decode_end) == (0x1000, 0x100a)
         assert all(census.decode_start <= insn.address < insn.address + insn.size <= census.decode_end for insn in census.instructions)
 
 

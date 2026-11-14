@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Function-worker selection policy for CLI orchestration.
 
 Layer: CLI/fallback/reporting.
@@ -6,15 +7,19 @@ or parallel clean-process execution without owning decompiler semantics.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
+import dataclasses
+FunctionWorkItemT8616 = typing.TypeVar("FunctionWorkItemT8616")
 
 lazy import networkx as nx
 
-CLEAN_PROCESS_WORKER_CAP_8616: int = 4
+CLEAN_PROCESS_WORKER_CAP_8616: cython.longlong = 7
 """Conservative aggregate-memory cap for isolated x86-16 workers.
 
 Each clean interpreter retains its own angr/native state, while the parent may
@@ -28,7 +33,7 @@ class _FunctionWorkItem8616(Protocol):
     """Minimal work-item surface required by clean-worker scheduling."""
 
     @property
-    def index(self) -> int:
+    def index(self) -> cython.longlong:
         """Return the stable output index."""
         ...
 
@@ -53,25 +58,27 @@ class FunctionWorkerMode8616(StrEnum):
     CLEAN_PROCESS = "clean_process"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionWorkerPolicy8616:
     """Typed worker mode and bounded concurrency for one function batch."""
 
     mode: FunctionWorkerMode8616
-    workers: int
+    workers: cython.longlong
 
 
+@cython.ccall
 def requires_isolated_function_decompilation(
     *,
-    architecture: str,
-    binary_suffix: str,
-    address_requested: bool,
-) -> bool:
+    architecture: object,
+    binary_suffix: object,
+    address_requested: cython.bint,
+) -> cython.bint:
     """Return whether a whole-file x86-16 executable needs isolated workers."""
     return not address_requested and binary_suffix.lower() == ".exe" and architecture == "86_16"
 
 
-def clean_process_override_8616(value: str | None) -> CleanProcessOverride8616:
+@cython.ccall
+def clean_process_override_8616(value: object) -> CleanProcessOverride8616:
     """Parse the legacy clean-worker switch without leaking string states."""
     if value is None or not value.strip():
         return CleanProcessOverride8616.DEFAULT
@@ -83,10 +90,10 @@ def clean_process_override_8616(value: str | None) -> CleanProcessOverride8616:
     return CleanProcessOverride8616.DEFAULT
 
 
-def prioritize_clean_function_work_8616[FunctionWorkItemT8616: _FunctionWorkItem8616](
+def prioritize_clean_function_work_8616(
     items: Sequence[FunctionWorkItemT8616],
     *,
-    function_complexity: Callable[[object], tuple[int, int]],
+    function_complexity: Callable[[object], tuple[cython.longlong, cython.longlong]],
 ) -> tuple[FunctionWorkItemT8616, ...]:
     """Submit larger clean-process jobs first while preserving output identity.
 
@@ -95,7 +102,7 @@ def prioritize_clean_function_work_8616[FunctionWorkItemT8616: _FunctionWorkItem
     still collect and emit results in their original index order.
     """
 
-    def priority(item: FunctionWorkItemT8616) -> tuple[int, int, int]:
+    def priority(item: FunctionWorkItemT8616) -> tuple[cython.longlong, cython.longlong, cython.longlong]:
         """Return descending block/byte complexity with a stable index tie."""
         block_count, byte_count = function_complexity(item.function)
         return (-max(block_count, 0), -max(byte_count, 0), item.index)
@@ -103,15 +110,16 @@ def prioritize_clean_function_work_8616[FunctionWorkItemT8616: _FunctionWorkItem
     return tuple(sorted(items, key=priority))
 
 
+@cython.ccall
 def select_function_worker_policy_8616(
     *,
-    isolation_required: bool,
-    sidecar_available: bool,
-    full_sweep: bool,
-    include_library_functions: bool,
-    posix_available: bool,
-    function_count: int,
-    shared_worker_count: int,
+    isolation_required: cython.bint,
+    sidecar_available,
+    full_sweep: cython.bint,
+    include_library_functions: cython.bint,
+    posix_available: cython.bint,
+    function_count: cython.longlong,
+    shared_worker_count: cython.longlong,
     clean_process_override: CleanProcessOverride8616,
 ) -> FunctionWorkerPolicy8616:
     """Select bounded clean interpreters where shared state is unsafe."""
@@ -141,7 +149,7 @@ def select_function_worker_policy_8616(
     )
 
 
-def dependency_ordered_function_work_8616[FunctionWorkItemT8616: _FunctionWorkItem8616](
+def dependency_ordered_function_work_8616(
     items: Sequence[FunctionWorkItemT8616],
     *,
     caller_targets: Mapping[int, Sequence[int]] | None = None,
@@ -153,9 +161,16 @@ def dependency_ordered_function_work_8616[FunctionWorkItemT8616: _FunctionWorkIt
     order and do not imply that peer interfaces are already available. This is
     execution ordering only, never authority for a call signature or effect.
     """
+    address: object
+    caller_address: object
+    candidates: object
+    caller: object
+    component: object
+    item: object
+    position: object
     graph = nx.DiGraph()
     graph.add_nodes_from(range(len(items)))
-    by_address: dict[int, list[int]] = {}
+    by_address: dict[cython.longlong, list[cython.longlong]] = {}
     for position, item in enumerate(items):
         # Dynamic third-party angr Function boundary, including placeholders.
         address = getattr(item.function, "addr", None)
@@ -169,27 +184,31 @@ def dependency_ordered_function_work_8616[FunctionWorkItemT8616: _FunctionWorkIt
             if caller_targets is not None and isinstance(caller_address, int)
             else ()
         )
-        for address in (*_existing_direct_call_targets_8616(item.function), *hints):
+        for address in tuple(_existing_direct_call_targets_8616(item.function)) + tuple(hints):
             candidates = by_address.get(address, ())
             if len(candidates) == 1:
                 graph.add_edge(candidates[0], caller)
     condensed = nx.condensation(graph)
 
-    def component_key(component: int) -> tuple[int, int]:
+    def component_key(component: cython.longlong) -> object:
         """Break independent component ties by stable output identity."""
         return min((items[position].index, position)
-                   for position in condensed.nodes[component]["members"])
+                   for position in iter(condensed.nodes[component]["members"]))
 
     result: list[FunctionWorkItemT8616] = []
     for component in nx.lexicographical_topological_sort(condensed, key=component_key):
         positions = sorted(condensed.nodes[component]["members"],
                            key=lambda position: (items[position].index, position))
-        result.extend(items[position] for position in positions)
+        result.extend(items[position] for position in iter(positions))
     return tuple(result)
 
 
-def _existing_direct_call_targets_8616(function: object) -> tuple[int, ...]:
+@cython.ccall
+def _existing_direct_call_targets_8616(function: object) -> tuple[cython.longlong, ...]:
     """Read available third-party call metadata without discovery or guessing."""
+    sites: object
+    target: object
+    callsite: object
     # Dynamic third-party angr Function boundary: metadata methods are optional.
     sites = getattr(function, "get_call_sites", None)
     # Dynamic third-party angr Function boundary: targets may be unavailable.
@@ -199,7 +218,7 @@ def _existing_direct_call_targets_8616(function: object) -> tuple[int, ...]:
     callsites = sites()
     if not isinstance(callsites, Iterable):
         return ()
-    targets: list[int] = []
+    targets: list[cython.longlong] = []
     for callsite in callsites:
         if isinstance(callsite, int):
             address = target(callsite)

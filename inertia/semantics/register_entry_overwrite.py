@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove that a decoded entry prefix overwrites an incoming register value.
 
 Layer: Semantics.
@@ -11,6 +12,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -20,6 +23,8 @@ from capstone import CsError, CsInsn
 from capstone.x86_const import X86_OP_IMM, X86_OP_MEM, X86_OP_REG
 
 from .register_value_preservation import decoded_register_bit_effects_8616, register_value_projection_8616
+import dataclasses
+import operator
 
 
 class RegisterEntryOverwriteVerdict8616(StrEnum):
@@ -46,26 +51,26 @@ class RegisterEntryOverwriteReason8616(StrEnum):
     INVALID_CALL = "invalid_call"
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class RegisterEntryOverwriteProof8616:
     """Bit-precise evidence over an entry prefix, not a function ABI guess."""
 
     verdict: RegisterEntryOverwriteVerdict8616
     reason: RegisterEntryOverwriteReason8616
-    remaining_mask: int
-    instruction_addresses: tuple[int, ...]
+    remaining_mask: cython.longlong
+    instruction_addresses: object
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class ConsumedStackAddressSetup8616:
     """Exact machine identities required by a recovered BP-address argument."""
 
-    producer_address: int
-    push_address: int
-    call_address: int
-    target_address: int
-    bp_offset: int
-    register: str
+    producer_address: cython.longlong
+    push_address: cython.longlong
+    call_address: cython.longlong
+    target_address: cython.longlong
+    bp_offset: cython.longlong
+    register: object
 
 
 # Only unconditional, ordinary fallthrough effects are admitted. Calls, jumps,
@@ -76,12 +81,13 @@ _FALLTHROUGH_MNEMONICS = frozenset({
 })
 
 
+@cython.ccall
 def prove_register_entry_overwrite_8616(
     instructions: Sequence[CsInsn],
     *,
-    entry_address: int,
-    register: str,
-    instruction_budget: int = 32,
+    entry_address: cython.longlong,
+    register: object,
+    instruction_budget: cython.longlong = 32,
 ) -> RegisterEntryOverwriteProof8616:
     """Require every incoming bit to die before its first observable use.
 
@@ -90,15 +96,18 @@ def prove_register_entry_overwrite_8616(
     Decoded instructions must come from the real callee image; this routine
     deliberately owns no loader, cache, synthetic-stub or AST policy.
     """
+    effects: object
+    projection: object
+    instruction: object
     projection = register_value_projection_8616(register, register)
     reason = RegisterEntryOverwriteReason8616.UNKNOWN_REGISTER
     remaining = (1 << projection[1]) - 1 if projection is not None else 0
-    addresses: list[int] = []
+    addresses: list[cython.longlong] = []
     next_address = entry_address
     if projection is not None:
         reason = RegisterEntryOverwriteReason8616.INCOMPLETE_PREFIX
         for instruction in instructions[:max(0, instruction_budget)]:
-            if instruction.address != next_address or instruction.size <= 0:
+            if operator.ne(instruction.address, next_address) or instruction.size <= 0:
                 reason = RegisterEntryOverwriteReason8616.NONCONTIGUOUS
                 break
             if instruction.mnemonic.lower() not in _FALLTHROUGH_MNEMONICS:
@@ -127,70 +136,76 @@ def prove_register_entry_overwrite_8616(
     )
 
 
+@cython.ccall
 def _producer_lea_shape_8616(
     producer: CsInsn,
     request: ConsumedStackAddressSetup8616,
-) -> bool:
+) -> cython.bint:
     """Return whether the producer is the exact expected LEA BP form."""
     operands = producer.operands
     return bool(
-        producer.address == request.producer_address and producer.mnemonic == "lea"
-        and len(operands) == 2 and operands[0].type == X86_OP_REG
-        and operands[0].size == 2 and producer.reg_name(operands[0].reg) == request.register
-        and operands[1].type == X86_OP_MEM and operands[1].mem.index == 0
+        operator.eq(producer.address, request.producer_address) and producer.mnemonic == "lea"
+        and len(operands) == 2 and operator.eq(operands[0].type, X86_OP_REG)
+        and operands[0].size == 2 and operator.eq(producer.reg_name(operands[0].reg), request.register)
+        and operator.eq(operands[1].type, X86_OP_MEM) and operands[1].mem.index == 0
         and producer.reg_name(operands[1].mem.base) == "bp"
-        and operands[1].mem.disp == request.bp_offset
+        and operator.eq(operands[1].mem.disp, request.bp_offset)
     )
 
 
+@cython.ccall
 def _terminal_call_shape_8616(
     instruction: CsInsn,
     request: ConsumedStackAddressSetup8616,
-    consumed: bool,
-    is_last: bool,
-) -> bool:
+    consumed: cython.bint,
+    is_last: cython.bint,
+) -> cython.bint:
     """Return whether the call site is the exact consumed terminal call."""
     operands = instruction.operands
     return bool(
         consumed and is_last and instruction.mnemonic == "call"
-        and len(operands) == 1 and operands[0].type == X86_OP_IMM
-        and operands[0].imm == request.target_address
+        and len(operands) == 1 and operator.eq(operands[0].type, X86_OP_IMM)
+        and operator.eq(operands[0].imm, request.target_address)
     )
 
 
+@cython.ccall
 def _consumed_push_shape_8616(
     instruction: CsInsn,
     request: ConsumedStackAddressSetup8616,
-    effects: tuple[int, int],
-    consumed: bool,
-) -> bool:
+    effects: object,
+    consumed: cython.bint,
+) -> cython.bint:
     """Return whether one PUSH is the exact sole consumed producer use."""
     operands = instruction.operands
     return bool(
         not consumed and instruction.mnemonic == "push" and len(operands) == 1
-        and operands[0].type == X86_OP_REG and operands[0].size == 2
-        and instruction.reg_name(operands[0].reg) == request.register
+        and operator.eq(operands[0].type, X86_OP_REG) and operands[0].size == 2
+        and operator.eq(instruction.reg_name(operands[0].reg), request.register)
         and effects == (0xFFFF, 0)
     )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _CallerSetupScan8616:
     """Sequential caller scan state for the consumed-PUSH proof."""
 
     request: ConsumedStackAddressSetup8616
     caller: Sequence[CsInsn]
-    next_address: int
-    consumed: bool = False
+    next_address: cython.longlong
+    consumed: cython.bint = False
 
+    @cython.ccall
     def step(
         self,
         instruction: CsInsn,
-    ) -> tuple[RegisterEntryOverwriteReason8616 | None, bool]:
+    ) -> tuple[RegisterEntryOverwriteReason8616 | None, cython.bint]:
         """Advance one instruction; returns ``(reason, done)``."""
-        if instruction.address != self.next_address or instruction.size <= 0:
+        effects: object
+        frame_effects: object
+        if operator.ne(instruction.address, self.next_address) or instruction.size <= 0:
             return RegisterEntryOverwriteReason8616.NONCONTIGUOUS, True
-        if instruction.address == self.request.call_address:
+        if operator.eq(instruction.address, self.request.call_address):
             if not _terminal_call_shape_8616(
                 instruction, self.request, self.consumed,
                 instruction is self.caller[-1],
@@ -205,7 +220,7 @@ class _CallerSetupScan8616:
             return RegisterEntryOverwriteReason8616.MISSING_EFFECTS, True
         if frame_effects[1]:
             return RegisterEntryOverwriteReason8616.FRAME_CHANGED, True
-        if instruction.address == self.request.push_address:
+        if operator.eq(instruction.address, self.request.push_address):
             if not _consumed_push_shape_8616(
                 instruction, self.request, effects, self.consumed,
             ):
@@ -217,10 +232,12 @@ class _CallerSetupScan8616:
         return None, False
 
 
+@cython.ccall
 def _caller_setup_refusal_8616(
     caller: Sequence[CsInsn], request: ConsumedStackAddressSetup8616,
 ) -> RegisterEntryOverwriteReason8616 | None:
     """Check the sole consumed PUSH use of a word-sized BP-address producer."""
+    instruction: object
     if not caller or request.register not in {"ax", "bx", "cx", "dx", "si", "di"}:
         return RegisterEntryOverwriteReason8616.INVALID_PRODUCER
     producer = caller[0]
@@ -238,6 +255,7 @@ def _caller_setup_refusal_8616(
     return RegisterEntryOverwriteReason8616.INCOMPLETE_PREFIX
 
 
+@cython.ccall
 def prove_consumed_stack_address_setup_8616(
     caller: Sequence[CsInsn],
     callee: Sequence[CsInsn],
@@ -250,6 +268,7 @@ def prove_consumed_stack_address_setup_8616(
     and the recovered argument's storage identity remain consumer obligations.
     No ABI caller-saved designation is used as overwrite evidence.
     """
+    reason: object
     try:
         reason = (
             RegisterEntryOverwriteReason8616.INCOMPLETE_PREFIX if len(caller) > 32

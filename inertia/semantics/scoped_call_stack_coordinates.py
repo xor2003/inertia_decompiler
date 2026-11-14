@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Produce the scoped per-call SP coordinate carrier under dual scopes.
 
 Layer: Semantics.
@@ -16,6 +17,7 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import cython
 
 from inertia.ir.core import IRBlock, IRInstr
 from inertia.ir.ir_boundary_cfg import IRBoundaryCoverageResult8616

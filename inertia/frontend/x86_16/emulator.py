@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/runtime.
 
 Responsibility: bridge processor, interrupt, stack, and VEX value operations for the lifter.
@@ -5,6 +6,8 @@ Forbidden: decompiler semantic recovery, source/COD-backed behavior, or validati
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from typing import Protocol, cast
@@ -27,10 +30,10 @@ __all__ = ("Emulator",)
 class _ArchRegister(Protocol):
     """Register metadata required from the frontend architecture."""
 
-    name: str
-    vex_offset: int
-    alias_names: tuple[str, ...]
-    subregisters: tuple[tuple[str, int, int], ...]
+    name: object
+    vex_offset: cython.longlong
+    alias_names: object
+    subregisters: object
 
 
 class _EmulatorArch(Protocol):
@@ -55,10 +58,10 @@ class _LifterInstruction(Protocol):
 
     def record_loop_counter_condition_8616(
         self,
-        counter_name: str,
-        counter_size: int,
-        displacement: int,
-        instruction_size: int,
+        counter_name: object,
+        counter_size: cython.longlong,
+        displacement: cython.longlong,
+        instruction_size: cython.longlong,
     ) -> None:
         """Publish the typed continuation condition for a plain LOOP."""
         ...
@@ -69,7 +72,7 @@ class _RuntimeHooks(Protocol):
 
     lifter_instruction: _LifterInstruction | None
 
-    def constant(self, value: int, _type: object = Type.int_8) -> object:
+    def constant(self, value: cython.longlong, _type: object = Type.int_8) -> object:
         """Build a typed frontend constant."""
         ...
 
@@ -87,13 +90,18 @@ class Emulator(Interrupt):
 
     def __init__(self, arch: _EmulatorArch, lifter: _LifterWithIrsb | None = None) -> None:
         """Initialize frontend runtime state for one architecture instance."""
+        _subregister_size: object
+        alias_name: object
+        register: object
+        subregister_name: object
+        subregister_offset: object
         Interrupt.__init__(self)
         self.arch = arch
         self.control_address_domain = arch.control_address_domain
         self.lifter = lifter
         self.irsb = lifter.irsb if lifter else None
         self.active_instruction: object | None = None
-        self.vex_offsets: dict[str, int] = {}
+        self.vex_offsets: dict[str, cython.longlong] = {}
         for register in arch.register_list:
             self.vex_offsets[register.name.lower()] = register.vex_offset
             # Dynamic third-party boundary: external ArchInfo register objects may omit aliases.
@@ -104,13 +112,13 @@ class Emulator(Interrupt):
                 self.vex_offsets[subregister_name.lower()] = register.vex_offset + subregister_offset
         self.regs: dict[str, object] = {}
 
-    def chk_ring(self, _dpl: int) -> bool:
+    def chk_ring(self, _dpl: cython.longlong) -> cython.bint:
         """Return whether the current real-mode frontend permits a ring-sensitive instruction."""
         # The current x86-16 lifter only models real-mode execution, where ring checks
         # should not block instructions like HLT inside the verification harness.
         return True
 
-    def get_crn(self, n: int) -> int | VexValue:
+    def get_crn(self, n: cython.longlong) -> int | VexValue:
         """Read an 80386 control register in concrete or VEX lifting mode."""
         if n not in (0, 2, 3):
             raise ValueError(f"Invalid 80386 CR index: {n}")
@@ -119,7 +127,7 @@ class Emulator(Interrupt):
         offset = self.vex_offsets[f"cr{n}"]
         return VexValue(self.lifter_instruction, self.lifter_instruction.rdreg(offset, Type.int_32))
 
-    def set_crn(self, n: int, value: object) -> None:
+    def set_crn(self, n: cython.longlong, value: object) -> None:
         """Write an 80386 control register in concrete or VEX lifting mode."""
         if n not in (0, 2, 3):
             raise ValueError(f"Invalid 80386 CR index: {n}")

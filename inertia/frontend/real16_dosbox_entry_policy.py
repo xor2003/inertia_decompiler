@@ -1,18 +1,23 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend / explicit DOS runtime contracts.
 
 Responsibility: bind the bounded DOSBox INT21 entry premise to one exact PSP,
 with explicit serialization and no inferred backend profile.
 """
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
+import dataclasses
+import operator
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DosBoxInt21EntryPolicy8616:
     """Explicit premise for DOSBox's version/resize register-save prologue."""
 
-    psp_segment: int
+    psp_segment: cython.longlong
 
     def __post_init__(self) -> None:
         """Require an exact nonzero real-mode PSP word."""
@@ -20,13 +25,15 @@ class DosBoxInt21EntryPolicy8616:
             raise ValueError("DOSBox entry PSP must be a nonzero unsigned word")
 
 
-def dosbox_entry_policy_document(policy: DosBoxInt21EntryPolicy8616 | None) -> dict[str, object] | None:
+@cython.ccall
+def dosbox_entry_policy_document(policy: object) -> object:
     """Serialize the explicit premise without manufacturing a default."""
     if policy is None:
         return None
     return {"kind": "dosbox_int21_register_save_v1", "psp_segment": policy.psp_segment}
 
 
+@cython.ccall
 def parse_dosbox_entry_policy(value: object) -> DosBoxInt21EntryPolicy8616 | None:
     """Parse only the bounded named premise and its exact declared PSP."""
     if value is None:
@@ -41,7 +48,8 @@ def parse_dosbox_entry_policy(value: object) -> DosBoxInt21EntryPolicy8616 | Non
     return DosBoxInt21EntryPolicy8616(psp)
 
 
-def dosbox_entry_policy_matches(policy: object, psp_segment: int) -> bool:
+@cython.ccall
+def dosbox_entry_policy_matches(policy: object, psp_segment: cython.longlong) -> cython.bint:
     """Require absent premise or one exact typed and PSP-bound declaration."""
     return policy is None or (type(policy) is DosBoxInt21EntryPolicy8616
-                              and policy.psp_segment == psp_segment)
+                              and operator.eq(policy.psp_segment, psp_segment))

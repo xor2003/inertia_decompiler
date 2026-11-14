@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Canonicalize typed REP INS/OUTS loop-carried register identities.
 
 Layer: Structuring.
@@ -14,6 +15,8 @@ objects expose version-dependent child slots and analysis attachments.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import copy
 import logging
@@ -31,6 +34,9 @@ from inertia.semantics.string_instruction_artifact import (
     StringInstructionRecord,
     build_x86_16_string_instruction_artifact,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = ["StringIOLoopCarrierStats8616", "materialize_string_io_loop_carriers_8616"]
 
@@ -40,7 +46,7 @@ _LOG = logging.getLogger(__name__)
 class _StringIOArch8616(Protocol):
     """Architecture register map consumed at the angr boundary."""
 
-    registers: Mapping[str, tuple[int, int]]
+    registers: Mapping[str, tuple[cython.longlong, cython.longlong]]
 
 
 class _StringIOProject8616(Protocol):
@@ -52,7 +58,7 @@ class _StringIOProject8616(Protocol):
 class _StringIOCFunction8616(Protocol):
     """Structured function surface mutated by string-I/O structuring."""
 
-    addr: int
+    addr: cython.longlong
     statements: object
 
 
@@ -73,19 +79,21 @@ class _StringIOCodegen8616(Protocol):
     _inertia_string_io_loop_carrier_stats_8616: StringIOLoopCarrierStats8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StringIOLoopCarrierStats8616:
     """Closed evidence counters for typed string-I/O loop repair."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-def _register_shape_8616(node: object) -> tuple[int, int] | None:
+@cython.ccall
+def _register_shape_8616(node: object) -> object:
     """Return one exact structured physical-register view."""
+    variable: object
     if not isinstance(node, structured_c.CVariable):
         return None
     for variable in (node.unified_variable, node.variable):
@@ -94,11 +102,13 @@ def _register_shape_8616(node: object) -> tuple[int, int] | None:
     return None
 
 
+@cython.ccall
 def _named_register_shape_8616(
     node: object,
-    named_shapes: Mapping[str, tuple[int, int]],
-) -> tuple[int, int] | None:
+    named_shapes: Mapping[str, tuple[cython.longlong, cython.longlong]],
+) -> object:
     """Resolve a late unified C variable through its architectural display name."""
+    shape: object
     shape = _register_shape_8616(node)
     if shape is not None or not isinstance(node, structured_c.CVariable):
         return shape
@@ -106,8 +116,11 @@ def _named_register_shape_8616(
     return named_shapes.get(variable_name.lower()) if isinstance(variable_name, str) else None
 
 
-def _call_name_8616(node: structured_c.CFunctionCall) -> str | None:
+@cython.ccall
+def _call_name_8616(node: structured_c.CFunctionCall) -> object:
     """Return a stable name from angr's dynamic call boundary."""
+    name: object
+    candidate: object
     for candidate in (node.callee_target, node.callee_func):
         if isinstance(candidate, str):
             return candidate
@@ -117,56 +130,59 @@ def _call_name_8616(node: structured_c.CFunctionCall) -> str | None:
     return None
 
 
-def _contains_io_call_8616(node: object, record: StringInstructionRecord) -> bool:
+def _contains_io_call_8616(node: object, record: StringInstructionRecord) -> cython.bint:
     """Match one loop to its typed port-I/O family and element width."""
     prefix = "inertia_io_out" if record.family == "outs" else "inertia_io_in"
     wanted = f"{prefix}{record.width * 8}"
     return any(
-        isinstance(item, structured_c.CFunctionCall) and _call_name_8616(item) == wanted
-        for item in _iter_c_nodes_deep_8616(node)
+        isinstance(item, structured_c.CFunctionCall) and operator.eq(_call_name_8616(item), wanted)
+        for item in builtins.iter(_iter_c_nodes_deep_8616(node))
     )
 
 
-def _constant_one_8616(node: object) -> bool:
+@cython.ccall
+def _constant_one_8616(node: object) -> cython.bint:
     """Return whether one C expression is the exact REP decrement constant."""
     return isinstance(node, structured_c.CConstant) and node.value == 1
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _LoopRewriteContext8616:
     """Immutable canonical bindings for one typed REP loop rewrite."""
 
-    canonical: Mapping[tuple[int, int], structured_c.CVariable]
-    named_shapes: Mapping[str, tuple[int, int]]
-    count_shape: tuple[int, int]
-    index_shape: tuple[int, int]
+    canonical: Mapping[tuple[cython.longlong, cython.longlong], structured_c.CVariable]
+    named_shapes: Mapping[str, tuple[cython.longlong, cython.longlong]]
+    count_shape: object
+    index_shape: object
     record: StringInstructionRecord
 
 
-def _rewrite_assignment_8616(node: object, ctx: _LoopRewriteContext8616) -> int:
+@cython.ccall
+def _rewrite_assignment_8616(node: object, ctx: _LoopRewriteContext8616) -> cython.longlong:
     """Rewrite an assignment lhs and canonicalize the REP decrement shape."""
     if not isinstance(node, structured_c.CAssignment):
         return 0
     node.lhs, delta = _rewrite_loop_node_8616(node.lhs, ctx)
     changed = delta
     if (
-        _named_register_shape_8616(node.lhs, ctx.named_shapes) == ctx.count_shape
+        operator.eq(_named_register_shape_8616(node.lhs, ctx.named_shapes), ctx.count_shape)
         and isinstance(node.rhs, structured_c.CBinaryOp)
         and node.rhs.op in {"Sub", "Subtract"}
         and _constant_one_8616(node.rhs.rhs)
-        and _named_register_shape_8616(node.rhs.lhs, ctx.named_shapes) != ctx.count_shape
+        and operator.ne(_named_register_shape_8616(node.rhs.lhs, ctx.named_shapes), ctx.count_shape)
     ):
         node.rhs.lhs = copy.copy(ctx.canonical[ctx.count_shape])
         changed += 1
     return changed
 
 
-def _rewrite_outs_call_arg_8616(node: object, ctx: _LoopRewriteContext8616) -> int:
+@cython.ccall
+def _rewrite_outs_call_arg_8616(node: object, ctx: _LoopRewriteContext8616) -> cython.longlong:
     """Replace the SEG_Ux source argument of a proven outs call."""
     if not isinstance(node, structured_c.CFunctionCall):
         return 0
     expected_load = f"SEG_U{ctx.record.width * 8}"
-    if ctx.record.family != "outs" or _call_name_8616(node) != expected_load or len(node.args) < 2:
+    if ctx.record.family != "outs" or operator.ne(_call_name_8616(node), expected_load) or len(node.args) < 2:
         return 0
     args = list(node.args)
     args[1] = copy.copy(ctx.canonical[ctx.index_shape])
@@ -174,8 +190,11 @@ def _rewrite_outs_call_arg_8616(node: object, ctx: _LoopRewriteContext8616) -> i
     return 1
 
 
-def _rewrite_child_attrs_8616(node: object, ctx: _LoopRewriteContext8616) -> int:
+@cython.ccall
+def _rewrite_child_attrs_8616(node: object, ctx: _LoopRewriteContext8616) -> cython.longlong:
     """Recursively rewrite every scalar child attribute of a node."""
+    child: object
+    attr: object
     changed = 0
     for attr in ("lhs", "rhs", "operand", "cond", "iftrue", "iffalse", "expr", "condition", "retval", "body", "else_node"):
         if isinstance(node, structured_c.CAssignment) and attr == "lhs":
@@ -190,8 +209,12 @@ def _rewrite_child_attrs_8616(node: object, ctx: _LoopRewriteContext8616) -> int
     return changed
 
 
-def _rewrite_child_sequences_8616(node: object, ctx: _LoopRewriteContext8616) -> int:
+@cython.ccall
+def _rewrite_child_sequences_8616(node: object, ctx: _LoopRewriteContext8616) -> cython.longlong:
     """Recursively rewrite every sequence child attribute of a node."""
+    sequence: object
+    attr: object
+    item: object
     changed = 0
     for attr in ("statements", "operands", "args"):
         sequence = getattr(node, attr, None)
@@ -209,8 +232,11 @@ def _rewrite_child_sequences_8616(node: object, ctx: _LoopRewriteContext8616) ->
     return changed
 
 
-def _rewrite_loop_node_8616(node: object, ctx: _LoopRewriteContext8616) -> tuple[object, int]:
+@cython.ccall
+def _rewrite_loop_node_8616(node: object, ctx: _LoopRewriteContext8616) -> object:
     """Rewrite one typed REP loop subtree and return its materialization count."""
+    replacement: object
+    shape: object
     if isinstance(node, structured_c.CVariable):
         shape = _named_register_shape_8616(node, ctx.named_shapes)
         replacement = ctx.canonical.get(shape) if shape is not None else None
@@ -223,10 +249,11 @@ def _rewrite_loop_node_8616(node: object, ctx: _LoopRewriteContext8616) -> tuple
     return node, changed
 
 
+@cython.ccall
 def _string_io_artifact_8616(
     boundary: _StringIOCodegen8616,
     project: object,
-    cfunc: _StringIOCFunction8616 | None,
+    cfunc: object,
 ) -> object:
     """Return the cached artifact, building it from function evidence if absent.
 
@@ -235,6 +262,9 @@ def _string_io_artifact_8616(
     while any other failure propagates. A present attribute of the wrong type
     is treated as malformed evidence and rebuilt from binary function decode.
     """
+    function: object
+    function_lookup: object
+    functions: object
     try:
         artifact = boundary._inertia_string_instruction_artifact
     except AttributeError:
@@ -257,41 +287,45 @@ def _rep_io_records_8616(artifact: object) -> tuple[StringInstructionRecord, ...
         return ()
     return tuple(
         record
-        for record in artifact.records
+        for record in iter(artifact.records)
         if record.family in {"ins", "outs"} and record.repeat_kind != "none"
     )
 
 
-def _register_name_shapes_8616(arch: _StringIOArch8616) -> dict[str, tuple[int, int]]:
+@cython.ccall
+def _register_name_shapes_8616(arch: _StringIOArch8616) -> dict[str, tuple[cython.longlong, cython.longlong]]:
     """Collect exact (offset, size) shapes for the REP carrier register names."""
     register_names = ("cx", "ecx", "si", "esi", "di", "edi", "dx", "edx", "d")
     return {
         name: shape[:2]
-        for name in register_names
+        for name in iter(register_names)
         if (shape := arch.registers.get(name)) is not None and len(shape) >= 2
     }
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _StringIOLoopScan8616:
     """Mutable census and evidence state for one REP-loop carrier traversal."""
 
-    shapes: Mapping[str, tuple[int, int]]
-    records: tuple[StringInstructionRecord, ...]
-    materialized: int = 0
-    classified: int = 0
-    loop_count: int = 0
-    matched_loop_count: int = 0
-    missing_shapes: set[tuple[int, int]] = field(default_factory=set)
+    shapes: Mapping[str, tuple[cython.longlong, cython.longlong]]
+    records: object
+    materialized: cython.longlong = 0
+    classified: cython.longlong = 0
+    loop_count: cython.longlong = 0
+    matched_loop_count: cython.longlong = 0
+    missing_shapes: object = field(default_factory=set)
 
 
+@cython.ccall
 def _rewrite_matched_loop_8616(
     scan: _StringIOLoopScan8616,
     statement: object,
     record: StringInstructionRecord,
-    prior: dict[tuple[int, int], structured_c.CVariable],
+    prior: object,
 ) -> None:
     """Rewrite one I/O-backed loop or record which carrier shapes are missing."""
+    count_shape: object
+    index_shape: object
     scan.matched_loop_count += 1
     count_shape = scan.shapes.get("cx") or scan.shapes.get("ecx")
     index_shape = (
@@ -306,9 +340,9 @@ def _rewrite_matched_loop_8616(
         if record.family == "outs"
         else ("cx", "di", "dx", "d")
     )
-    required_shapes = {scan.shapes[name] for name in required_names if name in scan.shapes}
+    required_shapes = {scan.shapes[name] for name in iter(required_names) if name in scan.shapes}
     canonical = {
-        shape: variable for shape, variable in prior.items() if shape in required_shapes
+        shape: variable for shape, variable in builtins.iter(prior.items()) if shape in required_shapes
     }
     if count_shape in canonical and index_shape in canonical:
         scan.classified += 1
@@ -330,9 +364,12 @@ def _rewrite_matched_loop_8616(
 def _process_statements_block_8616(
     scan: _StringIOLoopScan8616,
     node: structured_c.CStatements,
-    inherited: Mapping[tuple[int, int], structured_c.CVariable],
-) -> dict[tuple[int, int], structured_c.CVariable]:
+    inherited: Mapping[tuple[cython.longlong, cython.longlong], structured_c.CVariable],
+) -> object:
     """Track preheader assignments and rewrite matched loops in one block."""
+    record: object
+    shape: object
+    statement: object
     prior = dict(inherited)
     for statement in node.statements:
         if isinstance(statement, structured_c.CAssignment):
@@ -343,7 +380,7 @@ def _process_statements_block_8616(
         if isinstance(statement, (structured_c.CDoWhileLoop, structured_c.CWhileLoop, structured_c.CForLoop)):
             scan.loop_count += 1
             record = next(
-                (item for item in scan.records if _contains_io_call_8616(statement, item)),
+                (item for item in iter(scan.records) if _contains_io_call_8616(statement, item)),
                 None,
             )
             if record is not None:
@@ -354,12 +391,18 @@ def _process_statements_block_8616(
     return prior
 
 
+@cython.ccall
 def _process_string_io_node_8616(
     scan: _StringIOLoopScan8616,
     node: object,
-    inherited: Mapping[tuple[int, int], structured_c.CVariable],
-) -> dict[tuple[int, int], structured_c.CVariable]:
+    inherited: Mapping[tuple[cython.longlong, cython.longlong], structured_c.CVariable],
+) -> object:
     """Propagate preheader definitions into nested structured wrappers."""
+    child: object
+    pairs: object
+    _condition: object
+    attr: object
+    body: object
     if isinstance(node, structured_c.CStatements):
         return _process_statements_block_8616(scan, node, inherited)
     for attr in ("body", "else_node"):
@@ -373,8 +416,10 @@ def _process_string_io_node_8616(
     return dict(inherited)
 
 
-def materialize_string_io_loop_carriers_8616(project: object, codegen: object) -> bool:
+@cython.ccall
+def materialize_string_io_loop_carriers_8616(project: object, codegen: object) -> cython.bint:
     """Repair only REP port-I/O loops backed by decoded instruction evidence."""
+    cfunc: object
     boundary = cast(_StringIOCodegen8616, codegen)
     typed_project = cast(_StringIOProject8616, project)
     cfunc = boundary.cfunc

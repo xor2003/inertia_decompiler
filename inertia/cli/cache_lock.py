@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Provide crash-recoverable cache producer locks.
 
 Layer: CLI/fallback/reporting.
@@ -6,6 +7,8 @@ whose owning process has terminated, without deciding cache semantics.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 import enum
@@ -16,6 +19,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+import dataclasses
+import operator
 
 _UNKNOWN_OWNER_GRACE_SECONDS = 5.0
 
@@ -28,14 +33,14 @@ class _OwnerState(enum.Enum):
     UNKNOWN = "unknown"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _LockOwner:
     """Identify one lock owner without trusting a reusable PID alone."""
 
-    pid: int
-    process_start: str | None
+    pid: cython.longlong
+    process_start: object
 
-    def to_bytes(self) -> bytes:
+    def to_bytes(self) -> object:
         """Serialize this owner for lock contenders."""
         return (
             json.dumps(
@@ -47,8 +52,10 @@ class _LockOwner:
         ).encode("ascii")
 
     @classmethod
-    def from_bytes(cls, data: bytes) -> _LockOwner | None:
+    def from_bytes(cls, data: object) -> _LockOwner | None:
         """Parse current JSON records and legacy PID-only lock files."""
+        pid: object
+        process_start: object
         text = data.decode("ascii", errors="ignore").strip()
         if text.isdigit():
             return cls(pid=int(text), process_start=None)
@@ -67,7 +74,8 @@ class _LockOwner:
         return cls(pid=pid, process_start=process_start)
 
 
-def _process_start_token(pid: int) -> str | None:
+@cython.ccall
+def _process_start_token(pid: cython.longlong) -> object:
     """Return Linux's stable process start tick for PID-reuse detection."""
     try:
         stat = (Path("/proc") / str(pid) / "stat").read_text(encoding="ascii")
@@ -82,8 +90,10 @@ def _process_start_token(pid: int) -> str | None:
     return fields_after_name[19]
 
 
-def _owner_state(owner: _LockOwner | None) -> _OwnerState:
+@cython.ccall
+def _owner_state(owner: object) -> _OwnerState:
     """Classify one recorded owner conservatively."""
+    current_start: object
     if owner is None:
         return _OwnerState.UNKNOWN
     try:
@@ -97,11 +107,12 @@ def _owner_state(owner: _LockOwner | None) -> _OwnerState:
     current_start = _process_start_token(owner.pid)
     if current_start is None:
         return _OwnerState.LIVE
-    if current_start != owner.process_start:
+    if operator.ne(current_start, owner.process_start):
         return _OwnerState.STALE
     return _OwnerState.LIVE
 
 
+@cython.ccall
 def _read_owner(lock_path: Path) -> _LockOwner | None:
     """Read an owner record without treating partial writes as stale."""
     try:
@@ -110,7 +121,8 @@ def _read_owner(lock_path: Path) -> _LockOwner | None:
         return None
 
 
-def _write_all(descriptor: int, data: bytes) -> None:
+@cython.ccall
+def _write_all(descriptor: cython.longlong, data: object) -> None:
     """Write a complete owner record before contenders inspect it."""
     offset = 0
     while offset < len(data):
@@ -120,20 +132,22 @@ def _write_all(descriptor: int, data: bytes) -> None:
         offset += written
 
 
-def _unlink_same_inode(lock_path: Path, *, device: int, inode: int) -> bool:
+@cython.ccall
+def _unlink_same_inode(lock_path: Path, *, device: cython.longlong, inode: cython.longlong) -> cython.bint:
     """Unlink only the lock inode that was inspected by this contender."""
     try:
         current = lock_path.stat()
     except FileNotFoundError:
         return True
-    if current.st_dev != device or current.st_ino != inode:
+    if operator.ne(current.st_dev, device) or operator.ne(current.st_ino, inode):
         return False
     with contextlib.suppress(FileNotFoundError):
         lock_path.unlink()
     return True
 
 
-def _reclaim_stale_lock(lock_path: Path) -> bool:
+@cython.ccall
+def _reclaim_stale_lock(lock_path: Path) -> cython.bint:
     """Remove a dead owner's unchanged lock record."""
     try:
         stat = lock_path.stat()
@@ -149,13 +163,16 @@ def _reclaim_stale_lock(lock_path: Path) -> bool:
 
 
 @contextmanager
-def cache_path_lock(lock_path: Path, *, timeout_seconds: float = 600.0) -> Iterator[None]:
+def cache_path_lock(lock_path: Path, *, timeout_seconds: cython.double = 600.0) -> Iterator[None]:
     """Acquire one crash-recoverable exclusive cache lock."""
+    descriptor: object
+    lock_device: object
+    lock_inode: object
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + max(0.1, timeout_seconds)
-    descriptor: int | None = None
-    lock_device: int | None = None
-    lock_inode: int | None = None
+    descriptor = None
+    lock_device = None
+    lock_inode = None
     while descriptor is None:
         try:
             descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)

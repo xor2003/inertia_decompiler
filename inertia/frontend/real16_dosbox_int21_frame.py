@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend / explicit DOS runtime contracts.
 
 Responsibility: describe the guest-visible DOSBox INT21 entry writes for
@@ -9,14 +10,18 @@ inferred universal DOS behavior or proof that the handler was executed.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
+import dataclasses
+import builtins
 
-_INTERRUPT_FRAME_BYTES: int = 6
-_SAVE_BYTES: int = 18
-_PSP_STACK_OFFSET: int = 0x2E
-_REAL16_LIMIT: int = 0x100000
+_INTERRUPT_FRAME_BYTES: cython.longlong = 6
+_SAVE_BYTES: cython.longlong = 18
+_PSP_STACK_OFFSET: cython.longlong = 0x2E
+_REAL16_LIMIT: cython.longlong = 0x100000
 
 
 class DosBoxInt21FrameFailure8616(StrEnum):
@@ -29,7 +34,7 @@ class DosBoxInt21FrameFailure8616(StrEnum):
     ADDRESS_WRAP = "dosbox_int21_address_wrap_unmodeled"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DosBoxInt21Registers8616:
     """Proven low-word inputs; None retains an unknown saved word's write."""
 
@@ -49,7 +54,7 @@ class DosBoxInt21Registers8616:
                 self.di, self.bp, self.ds, self.es)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DosBoxInt21Write8616:
     """One ordered write preserving its segment and offset coordinates.
 
@@ -58,37 +63,38 @@ class DosBoxInt21Write8616:
     PSP and stack alias, and must check their image/IVT/frame boundaries.
     """
 
-    segment: int
-    offset: int
-    size: int
-    data: bytes | None
+    segment: cython.longlong
+    offset: cython.longlong
+    size: cython.longlong
+    data: object
 
     @property
-    def linear(self) -> int:
+    def linear(self) -> cython.longlong:
         """Project an already bounded declared guest coordinate for checks."""
         return (self.segment << 4) + self.offset
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DosBoxInt21FrameEffects8616:
     """Complete entry effects or an explicit refusal with no partial writes."""
 
-    writes: tuple[DosBoxInt21Write8616, ...]
+    writes: object
     failure: DosBoxInt21FrameFailure8616 | None
 
 
-def _word(value: object) -> bool:
+@cython.ccall
+def _word(value: object) -> cython.bint:
     """Accept an exact unsigned machine word, excluding Boolean values."""
     return type(value) is int and 0 <= value <= 0xFFFF
 
 
 def _input_failure(
-    psp_segment: int, ss: int, sp: int, registers: DosBoxInt21Registers8616,
+    psp_segment: cython.longlong, ss: cython.longlong, sp: cython.longlong, registers: DosBoxInt21Registers8616,
 ) -> DosBoxInt21FrameFailure8616 | None:
     """Check every prerequisite before materializing any memory effect."""
-    if not all(_word(value) for value in (psp_segment, ss, sp)) or psp_segment == 0:
+    if not all(_word(value) for value in iter((psp_segment, ss, sp))) or psp_segment == 0:
         return DosBoxInt21FrameFailure8616.COORDINATES_UNPROVED
-    if any(value is not None and not _word(value) for value in registers.saved_words()):
+    if any(value is not None and not _word(value) for value in builtins.iter(registers.saved_words())):
         return DosBoxInt21FrameFailure8616.REGISTER_UNPROVED
     if registers.ax is None or registers.ax >> 8 not in (0x30, 0x4A):
         return DosBoxInt21FrameFailure8616.SERVICE_UNPROVED
@@ -101,8 +107,9 @@ def _input_failure(
     return None
 
 
+@cython.ccall
 def dosbox_int21_frame_effects_8616(
-    *, psp_segment: int, ss: int, sp: int,
+    *, psp_segment: cython.longlong, ss: cython.longlong, sp: cython.longlong,
     registers: DosBoxInt21Registers8616,
 ) -> DosBoxInt21FrameEffects8616:
     """Compute declared entry writes from pre-INT architectural SP.
@@ -114,6 +121,9 @@ def dosbox_int21_frame_effects_8616(
     assuming an A20 policy. The architectural frame's contents remain
     explicitly unknown because this owner does not receive flags or IP.
     """
+    failure: object
+    value: object
+    index: object
     failure = _input_failure(psp_segment, ss, sp, registers)
     if failure is not None:
         return DosBoxInt21FrameEffects8616((), failure)

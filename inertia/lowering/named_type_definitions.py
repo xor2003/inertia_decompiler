@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Carry proven named C type definitions from Lowering to final rendering.
 
 Layer: Types/Lowering.
@@ -10,10 +11,13 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Protocol, cast
 
 from inertia.lowering.codegen_metadata import get_codegen_sequence_attr, set_codegen_sequence_attr
+import builtins
 
 __all__ = [
     "named_type_definitions_8616",
@@ -36,18 +40,18 @@ def named_type_definitions_8616(codegen: object) -> tuple[str, ...]:
         return ()
     return tuple(
         str(definition)
-        for definition in get_codegen_sequence_attr(
+        for definition in builtins.iter(get_codegen_sequence_attr(
             codegen,
             cfunc,
             "_inertia_named_type_definitions_8616",
-        )
+        ))
     )
 
 
 def record_named_type_definitions_8616(
     codegen: object,
-    definitions: tuple[str, ...],
-) -> bool:
+    definitions: object,
+) -> cython.bint:
     """Append complete named definitions and report whether metadata changed."""
     owner = cast(_NamedTypeDefinitionOwner8616, codegen)
     try:
@@ -55,8 +59,8 @@ def record_named_type_definitions_8616(
     except AttributeError:
         return False
     normalized = tuple(
-        "\n".join(line.rstrip() for line in definition.strip().splitlines())
-        for definition in definitions
+        "\n".join(line.rstrip() for line in builtins.iter(definition.strip().splitlines()))
+        for definition in iter(definitions)
         if isinstance(definition, str) and definition.strip()
     )
     before = get_codegen_sequence_attr(
@@ -64,7 +68,7 @@ def record_named_type_definitions_8616(
         cfunc,
         "_inertia_named_type_definitions_8616",
     )
-    after = tuple(dict.fromkeys((*before, *normalized)))
+    after = tuple(dict.fromkeys(tuple(before) + tuple(normalized)))
     if after == before:
         return False
     set_codegen_sequence_attr(

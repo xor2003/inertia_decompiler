@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Deterministic semantic tokens for already-lowered call arguments.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Unsupported expression shapes return ``None`` so callers refuse cache reuse.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Protocol, cast
 
@@ -21,18 +24,20 @@ from angr.sim_variable import (
 
 from inertia.semantics.expression_analysis import describe_virtual_value_identity_8616
 
-type CallArgumentSemanticToken8616 = tuple[object, ...]
+CallArgumentSemanticToken8616 = typing.TypeAliasType("CallArgumentSemanticToken8616", tuple[object, ...])
 
 
 class _ExternalCallee8616(Protocol):
     """Minimal third-party angr callee surface consumed by tokenization."""
 
-    addr: int
-    name: str
+    addr: cython.longlong
+    name: object
 
 
-def _call_target_token_8616(call: structured_c.CFunctionCall) -> str | int | None:
+@cython.ccall
+def _call_target_token_8616(call: structured_c.CFunctionCall) -> object:
     """Return a stable target identity across regenerated third-party call nodes."""
+    callee: object
     target = call.callee_target
     if isinstance(target, (str, int)):
         return target
@@ -53,6 +58,7 @@ def _call_target_token_8616(call: structured_c.CFunctionCall) -> str | int | Non
     return name if isinstance(name, str) and name else None
 
 
+@cython.ccall
 def _variable_token_8616(
     expression: structured_c.CVariable,
 ) -> CallArgumentSemanticToken8616 | None:
@@ -73,12 +79,15 @@ def _variable_token_8616(
     return None
 
 
+@cython.ccall
 def _indexed_variable_token_8616(
     expression: structured_c.CIndexedVariable,
-    seen: frozenset[int],
-    depth: int,
+    seen: object,
+    depth: cython.longlong,
 ) -> CallArgumentSemanticToken8616 | None:
     """Return the token for a proven indexed variable expression."""
+    index: object
+    variable: object
     variable = call_argument_semantic_token_8616(
         expression.variable,
         _seen=seen,
@@ -94,12 +103,14 @@ def _indexed_variable_token_8616(
     return ("index", variable, index)
 
 
+@cython.ccall
 def _unary_op_token_8616(
     expression: structured_c.CUnaryOp,
-    seen: frozenset[int],
-    depth: int,
+    seen: object,
+    depth: cython.longlong,
 ) -> CallArgumentSemanticToken8616 | None:
     """Return the token for a proven unary operation."""
+    operand: object
     operand = call_argument_semantic_token_8616(
         expression.operand,
         _seen=seen,
@@ -108,12 +119,15 @@ def _unary_op_token_8616(
     return ("unary", expression.op, operand) if operand is not None else None
 
 
+@cython.ccall
 def _binary_op_token_8616(
     expression: structured_c.CBinaryOp,
-    seen: frozenset[int],
-    depth: int,
+    seen: object,
+    depth: cython.longlong,
 ) -> CallArgumentSemanticToken8616 | None:
     """Return the token for a proven binary operation."""
+    lhs: object
+    rhs: object
     lhs = call_argument_semantic_token_8616(
         expression.lhs,
         _seen=seen,
@@ -131,26 +145,28 @@ def _binary_op_token_8616(
 
 def _function_call_token_8616(
     expression: structured_c.CFunctionCall,
-    seen: frozenset[int],
-    depth: int,
+    seen: object,
+    depth: cython.longlong,
 ) -> CallArgumentSemanticToken8616 | None:
     """Return the token for a proven call with stable callee identity."""
+    target: object
     target = _call_target_token_8616(expression)
     if target is None:
         return None
     arguments = tuple(
         call_argument_semantic_token_8616(argument, _seen=seen, _depth=depth + 1)
-        for argument in expression.args or ()
+        for argument in iter(expression.args or ())
     )
-    if any(argument is None for argument in arguments):
+    if any(argument is None for argument in iter(arguments)):
         return None
     return ("call", target, arguments)
 
 
+@cython.ccall
 def _node_token_8616(
     expression: object,
-    seen: frozenset[int],
-    depth: int,
+    seen: object,
+    depth: cython.longlong,
 ) -> CallArgumentSemanticToken8616 | None:
     """Dispatch one AST node kind to its typed token arm."""
     if isinstance(expression, structured_c.CConstant):
@@ -169,17 +185,19 @@ def _node_token_8616(
     return None
 
 
+@cython.ccall
 def call_argument_semantic_token_8616(
     expression: object,
     *,
-    _seen: frozenset[int] = frozenset(),
-    _depth: int = 0,
+    _seen: object = frozenset(),
+    _depth: cython.longlong = 0,
 ) -> CallArgumentSemanticToken8616 | None:
     """Return a deterministic token for one proven materialized argument.
 
     The token describes value and storage identity only. A cycle, excessive
     depth, or unsupported third-party AST node refuses comparison.
     """
+    virtual_identity: object
     if _depth > 128:
         return None
     while isinstance(expression, structured_c.CTypeCast):

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Region-based control-flow structuring algorithm.
 
 Layer: Structuring.
@@ -27,6 +28,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 from collections.abc import Callable, Iterable, Mapping
@@ -47,6 +50,9 @@ from inertia.structuring.structuring_region import (
     compute_dominators,
 )
 from inertia.structuring.structuring_sequences import merge_would_hide_cycle, sequence_merge_is_safe
+import dataclasses
+import operator
+import builtins
 
 __all__ = ["Region", "RegionBasedStructuringPass", "RegionGraph", "RegionType"]
 
@@ -60,11 +66,12 @@ logger: logging.Logger = logging.getLogger(__name__)
 class _SerializableCondition8616(Protocol):
     """Protocol for owned condition payloads that can serialize themselves."""
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> object:
         """Return a stable serializable condition payload."""
         ...
 
 
+@cython.ccall
 def _object_sequence_8616(value: object) -> tuple[object, ...]:
     """Return a tuple only for sequence-like metadata payloads."""
     if isinstance(value, str | bytes | bytearray | Mapping):
@@ -74,18 +81,22 @@ def _object_sequence_8616(value: object) -> tuple[object, ...]:
     return ()
 
 
-def _metadata_sequence_8616(region: Region, key: str) -> tuple[object, ...]:
+@cython.ccall
+def _metadata_sequence_8616(region: Region, key: object) -> object:
     """Return a typed tuple from untyped region metadata."""
     return _object_sequence_8616(region.metadata.get(key))
 
 
-def _summary_sequence_8616(summary: Mapping[str, object], key: str) -> tuple[object, ...]:
+@cython.ccall
+def _summary_sequence_8616(summary: Mapping[str, object], key: object) -> object:
     """Return a typed tuple from untyped summary metadata."""
     return _object_sequence_8616(summary.get(key))
 
 
-def _summary_int_8616(summary: Mapping[str, object], key: str, default: int = 0) -> int:
+@cython.ccall
+def _summary_int_8616(summary: Mapping[str, object], key: object, default: cython.longlong = 0) -> cython.longlong:
     """Return an integer counter from untyped summary metadata."""
+    value: object
     value = summary.get(key, default)
     if isinstance(value, bool):
         return int(value)
@@ -94,8 +105,10 @@ def _summary_int_8616(summary: Mapping[str, object], key: str, default: int = 0)
     return default
 
 
-def _region_metadata_int_8616(region: Region, key: str, default: int = 0) -> int:
+@cython.ccall
+def _region_metadata_int_8616(region: Region, key: object, default: cython.longlong = 0) -> cython.longlong:
     """Return an integer counter from untyped region metadata."""
+    value: object
     value = region.metadata.get(key, default)
     if isinstance(value, bool):
         return int(value)
@@ -104,18 +117,21 @@ def _region_metadata_int_8616(region: Region, key: str, default: int = 0) -> int
     return default
 
 
-def _summary_mapping_8616(summary: Mapping[str, object], key: str) -> dict[object, object]:
+@cython.ccall
+def _summary_mapping_8616(summary: Mapping[str, object], key: object) -> dict[object, object]:
     """Return a plain dict from untyped summary metadata."""
+    value: object
     value = summary.get(key)
     if isinstance(value, Mapping):
         return dict(value)
     return {}
 
 
+@cython.ccall
 def _condition_const_value_8616(value: object) -> int | None:
     if isinstance(value, int):
         return value
-    if isinstance(value, IRValue) and value.space == MemSpace.CONST and isinstance(value.const, int):
+    if isinstance(value, IRValue) and operator.eq(value.space, MemSpace.CONST) and isinstance(value.const, int):
         return value.const
     return None
 
@@ -123,7 +139,7 @@ def _condition_const_value_8616(value: object) -> int | None:
 def _single_eq_edge_guard_8616(region: Region) -> ConditionIR | None:
     """Project one equality guard, including an explicit unary zero test."""
     guards = _metadata_sequence_8616(region, "typed_condition_edge_guards")
-    typed_guards = tuple(guard for guard in guards if isinstance(guard, ConditionIR))
+    typed_guards = tuple(guard for guard in iter(guards) if isinstance(guard, ConditionIR))
     if len(typed_guards) != 1:
         return None
     guard = typed_guards[0]
@@ -139,16 +155,16 @@ def _single_eq_edge_guard_8616(region: Region) -> ConditionIR | None:
     return guard
 
 
-def _region_statement_ins_addrs_8616(region: Region) -> tuple[int, ...]:
+def _region_statement_ins_addrs_8616(region: Region) -> tuple[cython.longlong, ...]:
     addrs = _metadata_sequence_8616(region, "region_statement_ins_addrs")
-    return tuple(int(addr) for addr in addrs if isinstance(addr, int))
+    return tuple(int(addr) for addr in iter(addrs) if isinstance(addr, int))
 
 
-def _region_statement_provenance_keys_8616(region: Region) -> tuple[tuple[str, int, int], ...]:
+def _region_statement_provenance_keys_8616(region: Region) -> tuple[tuple[str, cython.longlong, cython.longlong], ...]:
     keys = _metadata_sequence_8616(region, "region_statement_provenance_keys")
     return tuple(
         key
-        for key in keys
+        for key in iter(keys)
         if (
             isinstance(key, tuple)
             and len(key) == 3
@@ -159,16 +175,17 @@ def _region_statement_provenance_keys_8616(region: Region) -> tuple[tuple[str, i
     )
 
 
-def _region_has_typed_edge_guard_8616(region: Region) -> bool:
+def _region_has_typed_edge_guard_8616(region: Region) -> cython.bint:
     guards = _metadata_sequence_8616(region, "typed_condition_edge_guards")
-    return any(isinstance(guard, ConditionIR) for guard in guards)
+    return any(isinstance(guard, ConditionIR) for guard in iter(guards))
 
 
 def _region_edge_producer_semantics_8616(region: Region) -> tuple[tuple[object, ...], ...]:
     semantics = _metadata_sequence_8616(region, "typed_condition_edge_producer_semantics")
-    return tuple(item for item in semantics if isinstance(item, tuple) and item)
+    return tuple(item for item in iter(semantics) if isinstance(item, tuple) and item)
 
 
+@cython.ccall
 def _region_typed_condition_summary_8616(region: Region) -> dict[str, object]:
     return {
         "typed_ir_condition_hint": region.metadata.get("typed_ir_condition_hint"),
@@ -183,13 +200,14 @@ def _region_typed_condition_summary_8616(region: Region) -> dict[str, object]:
     }
 
 
-def _region_typed_condition_summaries_8616(regions: tuple[Region, ...]) -> list[dict[str, object]]:
+@cython.ccall
+def _region_typed_condition_summaries_8616(regions: object) -> list[dict[str, object]]:
     return [
         {
             "region_id": region.region_id if isinstance(region.region_id, int) else None,
             **_region_typed_condition_summary_8616(region),
         }
-        for region in regions
+        for region in iter(regions)
     ]
 
 
@@ -217,7 +235,8 @@ _COMPLEMENT_CONDITION_OPS_8616: dict[str, str] = {
 }
 
 
-def _condition_op_matches_value_8616(op: str, value: int, rhs: int) -> bool:
+@cython.ccall
+def _condition_op_matches_value_8616(op: object, value: cython.longlong, rhs: cython.longlong) -> cython.bint:
     if op == "eq":
         return value == rhs
     if op == "ne":
@@ -235,16 +254,19 @@ def _condition_op_matches_value_8616(op: str, value: int, rhs: int) -> bool:
 
 def _single_typed_edge_condition_8616(region: Region) -> ConditionIR | None:
     guards = _metadata_sequence_8616(region, "typed_condition_edge_guards")
-    typed_guards = tuple(guard for guard in guards if isinstance(guard, ConditionIR))
+    typed_guards = tuple(guard for guard in iter(guards) if isinstance(guard, ConditionIR))
     if len(typed_guards) != 1:
         return None
     return typed_guards[0]
 
 
+@cython.ccall
 def _split_predicate_roles_8616(
-    successor_regions: tuple[Region, ...],
+    successor_regions: object,
 ) -> tuple[list[tuple[Region, ConditionIR]], list[Region]]:
     """Classify successors into explicit-predicate and implicit-complement arms."""
+    condition: object
+    region: object
     explicit: list[tuple[Region, ConditionIR]] = []
     implicit: list[Region] = []
     for region in successor_regions:
@@ -256,27 +278,34 @@ def _split_predicate_roles_8616(
     return explicit, implicit
 
 
+@cython.ccall
 def _partitioned_successor_8616(
-    item: dict[str, object],
+    item: object,
     explicit_region_id: int | None,
-    explicit_op: str,
-    implicit_op: str,
-    predicate_rhs: int | None,
+    explicit_op: object,
+    implicit_op: object,
+    predicate_rhs: object,
 ) -> dict[str, object]:
     """Partition one successor's normalized case values by the edge predicate."""
+    raw_region_ids: object
+    raw_values: object
+    region_id: object
+    value_region_id: object
+    index: object
+    value: object
     region_id = item.get("region_id")
     raw_values = item.get("normalized_case_values", ())
     raw_region_ids = item.get("normalized_case_region_ids", ())
-    normalized_values = [value for value in raw_values if isinstance(value, int)] if isinstance(raw_values, (tuple, list)) else []
+    normalized_values = [value for value in iter(raw_values) if isinstance(value, int)] if isinstance(raw_values, (tuple, list)) else []
     normalized_region_ids = [
-        region_id for region_id in raw_region_ids if isinstance(region_id, int)
+        region_id for region_id in iter(raw_region_ids) if isinstance(region_id, int)
     ] if isinstance(raw_region_ids, (tuple, list)) else [
     ]
-    predicate_op = explicit_op if region_id == explicit_region_id else implicit_op
-    matching_values: list[int] = []
-    mismatching_values: list[int] = []
-    matching_region_ids: list[int] = []
-    mismatching_region_ids: list[int] = []
+    predicate_op = explicit_op if operator.eq(region_id, explicit_region_id) else implicit_op
+    matching_values: list[cython.longlong] = []
+    mismatching_values: list[cython.longlong] = []
+    matching_region_ids: list[cython.longlong] = []
+    mismatching_region_ids: list[cython.longlong] = []
     if predicate_rhs is not None:
         for index, value in enumerate(normalized_values):
             value_region_id = normalized_region_ids[index] if index < len(normalized_region_ids) else None
@@ -299,12 +328,12 @@ def _partitioned_successor_8616(
 
 
 def _branch_split_partition_evidence_8616(
-    successor_regions: tuple[Region, ...],
-    subtree_summaries: list[dict[str, object]],
-) -> dict[str, object]:
+    successor_regions: object,
+    subtree_summaries: object,
+) -> object:
     """Summarize whether a binary split partitions switch cases by typed guards."""
     subtree_by_region_id = {
-        summary.get("child_region_id"): summary for summary in subtree_summaries if summary.get("child_region_id") is not None
+        summary.get("child_region_id"): summary for summary in iter(subtree_summaries) if summary.get("child_region_id") is not None
     }
     base_successors = [
         {
@@ -329,7 +358,7 @@ def _branch_split_partition_evidence_8616(
                 {},
             ).get("partition_status"),
         }
-        for region in successor_regions
+        for region in iter(successor_regions)
     ]
     base: dict[str, object] = {
         "ready": False,
@@ -358,13 +387,13 @@ def _branch_split_partition_evidence_8616(
     implicit_op = _COMPLEMENT_CONDITION_OPS_8616[explicit_condition.op]
     partitioned_successors = [
         _partitioned_successor_8616(item, explicit_region_id, explicit_op, implicit_op, predicate_rhs)
-        for item in base_successors
+        for item in iter(base_successors)
     ]
     subtree_partition_statuses = [
         subtree_by_region_id.get(region.region_id if isinstance(region.region_id, int) else None, {}).get(
             "partition_status"
         )
-        for region in successor_regions
+        for region in iter(successor_regions)
     ]
     base.update(
         {
@@ -377,7 +406,7 @@ def _branch_split_partition_evidence_8616(
             "successors": partitioned_successors,
         }
     )
-    if any(status != "single_default_candidate" for status in subtree_partition_statuses):
+    if any(status != "single_default_candidate" for status in iter(subtree_partition_statuses)):
         base["status"] = BranchSplitPartitionStatus8616.SubtreePartitionNotReady.value
         return base
     base["ready"] = True
@@ -385,7 +414,9 @@ def _branch_split_partition_evidence_8616(
     return base
 
 
-def _edge_guard_affine_delta_8616(semantics: tuple[object, ...]) -> int | None:
+@cython.ccall
+def _edge_guard_affine_delta_8616(semantics: object) -> int | None:
+    nested_delta: object
     if (
         len(semantics) >= 4
         and semantics[0] == "normalized_cmp_reg_imm16"
@@ -393,7 +424,7 @@ def _edge_guard_affine_delta_8616(semantics: tuple[object, ...]) -> int | None:
         and isinstance(semantics[3], tuple)
     ):
         nested_delta = _edge_guard_affine_delta_8616(semantics[3])
-        if nested_delta is not None and int(semantics[2]) == nested_delta:
+        if nested_delta is not None and operator.eq(int(semantics[2]), nested_delta):
             return nested_delta
         return None
     if len(semantics) >= 3 and semantics[0] == "sub_reg_imm16" and isinstance(semantics[2], int):
@@ -405,11 +436,13 @@ def _edge_guard_affine_delta_8616(semantics: tuple[object, ...]) -> int | None:
     return None
 
 
-def _edge_guard_cmp_value_8616(semantics: tuple[object, ...]) -> int | None:
+@cython.ccall
+def _edge_guard_cmp_value_8616(semantics: object) -> int | None:
+    nested_delta: object
     if len(semantics) >= 3 and semantics[0] == "normalized_cmp_reg_imm16" and isinstance(semantics[2], int):
         if len(semantics) >= 4 and isinstance(semantics[3], tuple):
             nested_delta = _edge_guard_affine_delta_8616(semantics[3])
-            if nested_delta is not None and int(semantics[2]) == nested_delta:
+            if nested_delta is not None and operator.eq(int(semantics[2]), nested_delta):
                 return None
         return int(semantics[2])
     if len(semantics) >= 3 and semantics[0] == "cmp_reg_imm16" and isinstance(semantics[2], int):
@@ -417,11 +450,15 @@ def _edge_guard_cmp_value_8616(semantics: tuple[object, ...]) -> int | None:
     return None
 
 
+@cython.ccall
 def _continuation_sibling_affine_delta_8616(graph: RegionGraph, current: Region, continuation: Region) -> int | None:
     """Return affine delta carried by the non-continuation sibling of a switch step."""
+    delta: object
+    semantics: object
+    sibling: object
     if not _region_reaches_eq_switch_head_8616(graph, continuation):
         return None
-    deltas: list[int] = []
+    deltas: list[cython.longlong] = []
     for sibling in graph.successors(current):
         if sibling is continuation:
             continue
@@ -434,20 +471,25 @@ def _continuation_sibling_affine_delta_8616(graph: RegionGraph, current: Region,
     return unique_deltas[0] if len(unique_deltas) == 1 else None
 
 
-def _region_has_single_eq_guarded_successor_8616(graph: RegionGraph, region: Region) -> bool:
+def _region_has_single_eq_guarded_successor_8616(graph: RegionGraph, region: Region) -> cython.bint:
     succs = graph.successors(region)
     if len(succs) != 2:
         return False
-    return sum(1 for succ in succs if _single_eq_edge_guard_8616(succ) is not None) == 1
+    return sum(1 for succ in iter(succs) if _single_eq_edge_guard_8616(succ) is not None) == 1
 
 
-def _region_is_eq_switch_head_8616(graph: RegionGraph, region: Region) -> bool:
+@cython.ccall
+def _region_is_eq_switch_head_8616(graph: RegionGraph, region: Region) -> cython.bint:
     return _region_has_single_eq_guarded_successor_8616(graph, region)
 
 
-def _region_edge_guard_cases_8616(graph: RegionGraph, region: Region) -> tuple[tuple[Region, ConditionIR, int], ...]:
+@cython.ccall
+def _region_edge_guard_cases_8616(graph: RegionGraph, region: Region) -> tuple[tuple[Region, ConditionIR, cython.longlong], ...]:
     """Return equality-guarded case successors from a decision-tree node."""
-    cases: list[tuple[Region, ConditionIR, int]] = []
+    guard: object
+    value: object
+    succ: object
+    cases: list[tuple[Region, ConditionIR, cython.longlong]] = []
     for succ in graph.successors(region):
         guard = _single_eq_edge_guard_8616(succ)
         if guard is None:
@@ -459,14 +501,18 @@ def _region_edge_guard_cases_8616(graph: RegionGraph, region: Region) -> tuple[t
     return tuple(cases)
 
 
+@cython.ccall
 def _region_reaches_eq_switch_head_8616(
     graph: RegionGraph,
     region: Region,
     *,
-    max_depth: int = 8,
-) -> bool:
+    max_depth: cython.longlong = 8,
+) -> cython.bint:
     """Return whether unguarded continuation flow reaches another eq-switch head."""
-    pending: list[tuple[Region, int]] = [(region, 0)]
+    current: object
+    depth: object
+    succ: object
+    pending: list[tuple[Region, cython.longlong]] = [(region, 0)]
     visited: set[Region] = set()
     while pending:
         current, depth = pending.pop(0)
@@ -484,15 +530,19 @@ def _region_reaches_eq_switch_head_8616(
     return False
 
 
+@cython.ccall
 def _region_reaches_region_through_continuation_8616(
     graph: RegionGraph,
     start: Region,
     target: Region,
     *,
-    max_depth: int = 8,
-) -> bool:
+    max_depth: cython.longlong = 8,
+) -> cython.bint:
     """Return whether continuation flow reaches target without entering a case edge."""
-    pending: list[tuple[Region, int]] = [(start, 0)]
+    current: object
+    depth: object
+    succ: object
+    pending: list[tuple[Region, cython.longlong]] = [(start, 0)]
     visited: set[Region] = set()
     while pending:
         current, depth = pending.pop(0)
@@ -502,7 +552,7 @@ def _region_reaches_region_through_continuation_8616(
             continue
         visited.add(current)
         current_cases = _region_edge_guard_cases_8616(graph, current)
-        case_regions = {case_region for case_region, _guard, _value in current_cases}
+        case_regions = {case_region for case_region, _guard, _value in iter(current_cases)}
         for succ in graph.successors(current):
             if succ in case_regions:
                 continue
@@ -514,12 +564,15 @@ def _expanded_edge_guard_switch_root_8616(
     graph: RegionGraph,
     region: Region,
     *,
-    max_depth: int = 8,
-) -> tuple[Region, str, tuple[int, ...]]:
+    max_depth: cython.longlong = 8,
+) -> tuple[Region, str, tuple[cython.longlong, ...]]:
     """Find an earlier unique typed switch head that reaches this candidate."""
+    current: object
     def _candidate_predecessors(target: Region) -> tuple[Region, ...]:
+        depth: object
+        pred: object
         candidates: list[Region] = []
-        pending: list[tuple[Region, int]] = [(pred, 0) for pred in graph.predecessors(target)]
+        pending: list[tuple[Region, cython.longlong]] = [(pred, 0) for pred in builtins.iter(graph.predecessors(target))]
         visited: set[Region] = set()
         while pending:
             pred, depth = pending.pop(0)
@@ -533,16 +586,16 @@ def _expanded_edge_guard_switch_root_8616(
                 continue
             if depth >= 8 or _region_has_typed_edge_guard_8616(pred):
                 continue
-            pending.extend((parent, depth + 1) for parent in graph.predecessors(pred))
+            pending.extend((parent, depth + 1) for parent in builtins.iter(graph.predecessors(pred)))
         return tuple(candidates)
 
     current = region
-    chain: list[int] = []
+    chain: list[cython.longlong] = []
     for _depth in range(max_depth):
         candidates = list(_candidate_predecessors(current))
         if not candidates:
             return current, "none" if current is region else "unique_predecessor_chain", tuple(chain)
-        unique = {id(candidate): candidate for candidate in candidates}
+        unique = {id(candidate): candidate for candidate in iter(candidates)}
         if len(unique) != 1:
             return current, "ambiguous_predecessor", tuple(chain)
         current = next(iter(unique.values()))
@@ -551,13 +604,14 @@ def _expanded_edge_guard_switch_root_8616(
     return current, "max_depth", tuple(chain)
 
 
+@cython.ccall
 def _edge_guard_partition_status_8616(
     *,
-    case_count: int,
-    default_candidate_count: int,
-    duplicate_value_count: int,
-    lhs_mismatch_count: int,
-    unresolved_continuation_count: int,
+    case_count: cython.longlong,
+    default_candidate_count: cython.longlong,
+    duplicate_value_count: cython.longlong,
+    lhs_mismatch_count: cython.longlong,
+    unresolved_continuation_count: cython.longlong,
 ) -> str:
     """Typed switch-decision partition status for diagnostics and later lowering."""
     if case_count <= 0:
@@ -573,17 +627,20 @@ def _edge_guard_partition_status_8616(
     return "single_default_candidate"
 
 
-def _edge_guard_normalization_readiness_8616(summary: dict[str, object]) -> dict[str, object]:
+@cython.ccall
+def _edge_guard_normalization_readiness_8616(summary: object) -> object:
     """Summarize whether normalized switch evidence is ready for later lowering."""
+    normalization_status: object
+    partition_status: object
     case_count = _summary_int_8616(summary, "case_count")
     normalized_case_count = _summary_int_8616(summary, "normalized_case_count")
     partition_status = summary.get("partition_status")
     normalization_status = summary.get("normalization_status")
-    branch_splits = [item for item in _summary_sequence_8616(summary, "normalization_branch_splits") if isinstance(item, dict)]
+    branch_splits = [item for item in builtins.iter(_summary_sequence_8616(summary, "normalization_branch_splits")) if isinstance(item, dict)]
     branch_split_count = len(branch_splits)
     ready_branch_splits = [
         item
-        for item in branch_splits
+        for item in iter(branch_splits)
         if isinstance(item.get("branch_partition"), dict) and item["branch_partition"].get("ready") is True
     ]
     unready_branch_splits = [
@@ -594,7 +651,7 @@ def _edge_guard_normalization_readiness_8616(summary: dict[str, object]) -> dict
             if isinstance(item.get("branch_partition"), dict)
             else None,
         }
-        for item in branch_splits
+        for item in iter(branch_splits)
         if item not in ready_branch_splits
     ]
     base: dict[str, object] = {
@@ -624,7 +681,7 @@ def _edge_guard_normalization_readiness_8616(summary: dict[str, object]) -> dict
         if branch_split_count <= 0:
             base["status"] = "branch_split_missing"
             return base
-        if len(ready_branch_splits) != branch_split_count:
+        if operator.ne(len(ready_branch_splits), branch_split_count):
             base["status"] = "branch_split_not_ready"
             return base
         base["ready"] = True
@@ -633,48 +690,55 @@ def _edge_guard_normalization_readiness_8616(summary: dict[str, object]) -> dict
     return base
 
 
-def _same_lhs_8616(lhs: object | None, guard: ConditionIR) -> object | None:
+@cython.ccall
+def _same_lhs_8616(lhs: object, guard: ConditionIR) -> object | None:
     if lhs is None:
         return cast(object, guard.lhs)
-    return lhs if guard.lhs == lhs else None
+    return lhs if operator.eq(guard.lhs, lhs) else None
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _DecisionTreeScan8616:
     """Accumulating scan state for edge-guard decision-tree case collection."""
 
     graph: RegionGraph
-    include_branch_split_subtrees: bool
-    stop_region_set: set[Region]
+    include_branch_split_subtrees: cython.bint
+    stop_region_set: object
     loopback_target: Region
-    visited: set[Region] = field(default_factory=set)
+    visited: object = field(default_factory=set)
     lhs_key: object | None = None
-    cases: list[tuple[Region, int]] = field(default_factory=list)
-    normalized_cases: list[tuple[Region, int]] = field(default_factory=list)
-    case_values: set[int] = field(default_factory=set)
-    normalized_case_values: set[int] = field(default_factory=set)
-    producer_semantics: list[tuple[object, ...]] = field(default_factory=list)
-    normalized_duplicate_value_count: int = 0
-    normalization_branch_split_count: int = 0
-    normalization_branch_splits: list[dict[str, object]] = field(default_factory=list)
-    normalization_branch_subtrees: list[dict[str, object]] = field(default_factory=list)
-    range_split_count: int = 0
-    duplicate_value_count: int = 0
-    lhs_mismatch_count: int = 0
-    default_candidates: list[Region] = field(default_factory=list)
-    loopback_default_candidates: list[Region] = field(default_factory=list)
-    nondefault_empty_regions: list[Region] = field(default_factory=list)
-    unresolved_continuation_count: int = 0
+    cases: object = field(default_factory=list)
+    normalized_cases: object = field(default_factory=list)
+    case_values: object = field(default_factory=set)
+    normalized_case_values: object = field(default_factory=set)
+    producer_semantics: object = field(default_factory=list)
+    normalized_duplicate_value_count: cython.longlong = 0
+    normalization_branch_split_count: cython.longlong = 0
+    normalization_branch_splits: object = field(default_factory=list)
+    normalization_branch_subtrees: object = field(default_factory=list)
+    range_split_count: cython.longlong = 0
+    duplicate_value_count: cython.longlong = 0
+    lhs_mismatch_count: cython.longlong = 0
+    default_candidates: object = field(default_factory=list)
+    loopback_default_candidates: object = field(default_factory=list)
+    nondefault_empty_regions: object = field(default_factory=list)
+    unresolved_continuation_count: cython.longlong = 0
 
+    @cython.ccall
     def record_case(
         self,
         case_region: Region,
         guard: ConditionIR,
-        value: int,
-        affine_offset: int,
-        last_affine_semantics: tuple[object, ...] | None,
+        value: cython.longlong,
+        affine_offset: cython.longlong,
+        last_affine_semantics: object,
     ) -> None:
         """Record one equality-guarded case successor and its normalized value."""
+        cmp_value: object
+        delta: object
+        next_lhs: object
+        normalized_value: object
+        semantics: object
         if case_region in self.stop_region_set:
             return
         next_lhs = _same_lhs_8616(self.lhs_key, guard)
@@ -706,7 +770,8 @@ class _DecisionTreeScan8616:
                 self.normalized_case_values.add(normalized_value)
                 self.normalized_cases.append((case_region, normalized_value))
 
-    def record_empty_region(self, current: Region, default_eligible_path: bool) -> bool:
+    @cython.ccall
+    def record_empty_region(self, current: Region, default_eligible_path: cython.bint) -> cython.bint:
         """Classify a case-less region; return True when the succ walk is skipped."""
         if not _region_reaches_eq_switch_head_8616(self.graph, current):
             self.default_candidates.append(current)
@@ -725,12 +790,13 @@ class _DecisionTreeScan8616:
         self,
         current: Region,
         succ: Region,
-        current_cases: tuple[tuple[Region, ConditionIR, int], ...],
-        depth: int,
-        affine_offset: int,
-        max_depth: int,
+        current_cases: object,
+        depth: cython.longlong,
+        affine_offset: cython.longlong,
+        max_depth: cython.longlong,
     ) -> None:
         """Record a normalization branch split under a non-case successor."""
+        child: object
         if not (
             current_cases
             and len(self.graph.successors(succ)) > 1
@@ -741,10 +807,10 @@ class _DecisionTreeScan8616:
         successor_regions = tuple(self.graph.successors(succ))
         current_case_region_ids = [
             case_region.region_id
-            for case_region, _guard, _value in current_cases
+            for case_region, _guard, _value in iter(current_cases)
             if isinstance(case_region.region_id, int)
         ]
-        current_case_values = [value for _case_region, _guard, value in current_cases]
+        current_case_values = [value for _case_region, _guard, value in iter(current_cases)]
         split_record: dict[str, object] = {
             "from_region_id": current.region_id if isinstance(current.region_id, int) else None,
             "split_region_id": succ.region_id if isinstance(succ.region_id, int) else None,
@@ -752,7 +818,7 @@ class _DecisionTreeScan8616:
             "current_case_values": current_case_values,
             "successor_region_ids": [
                 child.region_id
-                for child in successor_regions
+                for child in iter(successor_regions)
                 if isinstance(child.region_id, int)
             ],
             "split_condition": _region_typed_condition_summary_8616(succ),
@@ -761,10 +827,10 @@ class _DecisionTreeScan8616:
         }
         subtree_summaries: list[dict[str, object]] = []
         if self.include_branch_split_subtrees:
-            prior_case_regions = tuple(case_region for case_region, _value in self.cases)
+            prior_case_regions = tuple(case_region for case_region, _value in iter(self.cases))
             for child in successor_regions:
                 sibling_stop_regions = (
-                    *(sibling for sibling in successor_regions if sibling is not child),
+                    *(sibling for sibling in iter(successor_regions) if sibling is not child),
                     *prior_case_regions,
                 )
                 child_summary = _collect_edge_guard_decision_tree_cases_8616(
@@ -796,15 +862,19 @@ class _DecisionTreeScan8616:
                 }
             )
 
+    @cython.ccall
     def _affine_step(
         self,
         current: Region,
         succ: Region,
-        current_cases: tuple[tuple[Region, ConditionIR, int], ...],
-        affine_offset: int,
-        last_affine_semantics: tuple[object, ...] | None,
-    ) -> tuple[int, tuple[object, ...] | None]:
+        current_cases: object,
+        affine_offset: cython.longlong,
+        last_affine_semantics: object,
+    ) -> tuple[cython.longlong, tuple[object, ...] | None]:
         """Advance the affine offset carried into the ``succ`` continuation."""
+        delta: object
+        sibling_delta: object
+        semantics: object
         next_affine_offset = affine_offset
         next_last_affine_semantics = last_affine_semantics
         if current_cases:
@@ -839,17 +909,17 @@ class _DecisionTreeScan8616:
         self,
         current: Region,
         succ: Region,
-        current_cases: tuple[tuple[Region, ConditionIR, int], ...],
-        affine_offset: int,
-        last_affine_semantics: tuple[object, ...] | None,
-        default_eligible_path: bool,
-    ) -> tuple[int, tuple[object, ...] | None, bool] | None:
+        current_cases: object,
+        affine_offset: cython.longlong,
+        last_affine_semantics: object,
+        default_eligible_path: cython.bint,
+    ) -> object:
         """Advance the affine/default-eligible scan state across ``succ``."""
         next_affine_offset = affine_offset
         next_last_affine_semantics = last_affine_semantics
         if _region_has_typed_edge_guard_8616(succ):
             guards = _metadata_sequence_8616(succ, "typed_condition_edge_guards")
-            has_non_eq_guard = any(isinstance(guard, ConditionIR) and guard.op != "eq" for guard in guards)
+            has_non_eq_guard = any(isinstance(guard, ConditionIR) and guard.op != "eq" for guard in iter(guards))
             if has_non_eq_guard:
                 self.range_split_count += 1
                 if _region_reaches_eq_switch_head_8616(self.graph, succ):
@@ -868,6 +938,7 @@ class _DecisionTreeScan8616:
             next_default_eligible = False
         return (next_affine_offset, next_last_affine_semantics, next_default_eligible)
 
+    @cython.ccall
     def _normalization_status(self) -> str:
         """Classify the normalization outcome for the collected cases."""
         first_producer_kind = (
@@ -885,20 +956,20 @@ class _DecisionTreeScan8616:
             return "root_seed_missing"
         return "complete"
 
-    def summary(self, region: Region) -> dict[str, object]:
+    def summary(self, region: Region) -> object:
         """Render the collected scan state as the decision-tree record."""
         default_candidate_ids = list(
-            dict.fromkeys(candidate.region_id for candidate in self.default_candidates)
+            dict.fromkeys(candidate.region_id for candidate in iter(self.default_candidates))
         )
         loopback_default_candidate_ids = list(
-            dict.fromkeys(candidate.region_id for candidate in self.loopback_default_candidates)
+            dict.fromkeys(candidate.region_id for candidate in iter(self.loopback_default_candidates))
         )
         effective_default_candidate_ids = default_candidate_ids or loopback_default_candidate_ids
         default_candidate_successors = {
             candidate.region_id: [
-                succ.region_id for succ in self.graph.successors(candidate) if isinstance(succ.region_id, int)
+                succ.region_id for succ in builtins.iter(self.graph.successors(candidate)) if isinstance(succ.region_id, int)
             ]
-            for candidate in self.default_candidates
+            for candidate in iter(self.default_candidates)
             if isinstance(candidate.region_id, int)
         }
         effective_duplicate_value_count = self.duplicate_value_count
@@ -911,26 +982,26 @@ class _DecisionTreeScan8616:
             lhs_mismatch_count=self.lhs_mismatch_count,
             unresolved_continuation_count=self.unresolved_continuation_count,
         )
-        producer_kinds = tuple(sorted({str(item[0]) for item in self.producer_semantics if item}))
+        producer_kinds = tuple(sorted({str(item[0]) for item in iter(self.producer_semantics) if item}))
         producer_registers = tuple(
             sorted(
                 {
                     str(item[1]).lower()
-                    for item in self.producer_semantics
+                    for item in iter(self.producer_semantics)
                     if len(item) >= 3 and str(item[0]) in {"cmp_reg_imm16", "normalized_cmp_reg_imm16", "sub_reg_imm16"}
                 }
             )
         )
         affine_reg_imm_case_count = sum(
             1
-            for item in self.producer_semantics
+            for item in iter(self.producer_semantics)
             if len(item) >= 3 and str(item[0]) in {"cmp_reg_imm16", "sub_reg_imm16"} and isinstance(item[2], int)
         )
         result = {
             "affine_reg_imm_case_count": affine_reg_imm_case_count,
             "case_count": len(self.cases),
-            "case_region_ids": [case.region_id for case, _value in self.cases],
-            "case_values": [value for _case, value in self.cases],
+            "case_region_ids": [case.region_id for case, _value in iter(self.cases)],
+            "case_values": [value for _case, value in iter(self.cases)],
             "default_candidate_count": len(effective_default_candidate_ids),
             "default_candidate_region_ids": effective_default_candidate_ids,
             "default_candidate_successor_region_ids": default_candidate_successors,
@@ -940,21 +1011,21 @@ class _DecisionTreeScan8616:
             "loopback_default_candidate_region_ids": loopback_default_candidate_ids,
             "loopback_default_successor_region_ids": {
                 candidate.region_id: [
-                    succ.region_id for succ in self.graph.successors(candidate) if isinstance(succ.region_id, int)
+                    succ.region_id for succ in builtins.iter(self.graph.successors(candidate)) if isinstance(succ.region_id, int)
                 ]
-                for candidate in self.loopback_default_candidates
+                for candidate in iter(self.loopback_default_candidates)
                 if isinstance(candidate.region_id, int)
             },
             "normalized_case_count": len(self.normalized_cases),
-            "normalized_case_region_ids": [case.region_id for case, _value in self.normalized_cases],
-            "normalized_case_values": [value for _case, value in self.normalized_cases],
+            "normalized_case_region_ids": [case.region_id for case, _value in iter(self.normalized_cases)],
+            "normalized_case_values": [value for _case, value in iter(self.normalized_cases)],
             "normalized_duplicate_value_count": self.normalized_duplicate_value_count,
             "nondefault_empty_region_ids": [
-                item.region_id for item in self.nondefault_empty_regions if isinstance(item.region_id, int)
+                item.region_id for item in iter(self.nondefault_empty_regions) if isinstance(item.region_id, int)
             ],
             "nondefault_empty_successor_region_ids": {
-                item.region_id: [succ.region_id for succ in self.graph.successors(item) if isinstance(succ.region_id, int)]
-                for item in self.nondefault_empty_regions
+                item.region_id: [succ.region_id for succ in builtins.iter(self.graph.successors(item)) if isinstance(succ.region_id, int)]
+                for item in iter(self.nondefault_empty_regions)
                 if isinstance(item.region_id, int)
             },
             "normalization_branch_split_count": self.normalization_branch_split_count,
@@ -963,7 +1034,7 @@ class _DecisionTreeScan8616:
             "normalization_status": self._normalization_status(),
             "partition_status": partition_status,
             "predecessor_region_ids": [
-                pred.region_id for pred in self.graph.predecessors(region) if isinstance(pred.region_id, int)
+                pred.region_id for pred in builtins.iter(self.graph.predecessors(region)) if isinstance(pred.region_id, int)
             ],
             "producer_semantics_case_count": len(self.producer_semantics),
             "producer_semantics_kinds": list(producer_kinds),
@@ -973,7 +1044,7 @@ class _DecisionTreeScan8616:
             "visited_count": len(self.visited),
             "visited_region_ids": [
                 item.region_id
-                for item in sorted(self.visited, key=lambda region_item: region_item.region_id or 0)
+                for item in builtins.iter(sorted(self.visited, key=lambda region_item: region_item.region_id or 0))
                 if isinstance(item.region_id, int)
             ],
         }
@@ -981,7 +1052,8 @@ class _DecisionTreeScan8616:
         return result
 
 
-def _branch_split_child_summary_8616(child: Region, child_summary: dict[str, object]) -> dict[str, object]:
+@cython.ccall
+def _branch_split_child_summary_8616(child: Region, child_summary: object) -> dict[str, object]:
     """Render one branch-split subtree scan as a normalized summary record."""
     return {
         "child_region_id": child.region_id if isinstance(child.region_id, int) else None,
@@ -1026,11 +1098,12 @@ def _branch_split_child_summary_8616(child: Region, child_summary: dict[str, obj
     }
 
 
+@cython.ccall
 def _attach_expanded_root_summary_8616(
     graph: RegionGraph,
     region: Region,
-    summary: dict[str, object],
-    max_depth: int,
+    summary: object,
+    max_depth: cython.longlong,
 ) -> None:
     """Attach expanded-root scan fields when the root is a descendant head."""
     expanded_root, expanded_root_status, expanded_chain = _expanded_edge_guard_switch_root_8616(graph, region)
@@ -1071,25 +1144,35 @@ def _collect_edge_guard_decision_tree_cases_8616(
     graph: RegionGraph,
     region: Region,
     *,
-    include_expanded_root: bool = True,
-    include_branch_split_subtrees: bool = True,
-    initial_affine_offset: int = 0,
+    include_expanded_root: cython.bint = True,
+    include_branch_split_subtrees: cython.bint = True,
+    initial_affine_offset: cython.longlong = 0,
     loopback_region: Region | None = None,
-    max_depth: int = 64,
-    stop_regions: tuple[Region, ...] = (),
-) -> dict[str, object]:
+    max_depth: cython.longlong = 64,
+    stop_regions: object = (),
+) -> object:
     """Collect equality case leaves from a mixed switch decision tree.
 
     This is diagnostic-only until all branch predicates in the tree can be
     proven to partition the same switch expression.
     """
+    affine_offset: object
+    current: object
+    default_eligible_path: object
+    depth: object
+    last_affine_semantics: object
+    step: object
+    case_region: object
+    guard: object
+    succ: object
+    value: object
     scan = _DecisionTreeScan8616(
         graph,
         include_branch_split_subtrees=include_branch_split_subtrees,
         stop_region_set=set(stop_regions),
         loopback_target=loopback_region or region,
     )
-    pending: list[tuple[Region, int, int, bool, tuple[object, ...] | None]] = [
+    pending: list[tuple[Region, cython.longlong, cython.longlong, cython.bint, tuple[object, ...] | None]] = [
         (region, 0, initial_affine_offset, True, None)
     ]
 
@@ -1109,7 +1192,7 @@ def _collect_edge_guard_decision_tree_cases_8616(
             continue
 
         for succ in graph.successors(current):
-            if any(succ is case_region for case_region, _guard, _value in current_cases):
+            if any(succ is case_region for case_region, _guard, _value in iter(current_cases)):
                 continue
             scan.record_branch_split(current, succ, current_cases, depth, affine_offset, max_depth)
             step = scan.continuation_step(
@@ -1135,14 +1218,17 @@ class TypedEdgeSwitchRegionStatus8616(Enum):
     Ready = "ready"
 
 
+@cython.ccall
 def _reachable_edge_guarded_successor_count_8616(
     graph: RegionGraph,
-    start: Region | None,
+    start: object,
     *,
-    excluded: tuple[Region, ...] = (),
-    limit: int = 128,
-) -> int:
+    excluded: object = (),
+    limit: cython.longlong = 128,
+) -> cython.longlong:
     """Count remaining edge-guarded case successors below a candidate default."""
+    current: object
+    succ: object
     if start is None or start not in graph.nodes:
         return 0
     excluded_set = set(excluded)
@@ -1165,17 +1251,18 @@ def _reachable_edge_guarded_successor_count_8616(
     return count
 
 
+@cython.ccall
 def _typed_edge_switch_region_artifact_8616(
     region: Region,
     *,
-    cases: tuple[Region, ...],
-    case_values: tuple[int, ...],
-    default_target: Region | None,
-    guard_statement_addrs: tuple[int, ...],
-    guard_statement_keys: tuple[tuple[str, int, int], ...],
-    guard_span_complete: bool,
-    decision_tree_summary: dict[str, object] | None,
-    remaining_edge_guard_count: int,
+    cases: object,
+    case_values: object,
+    default_target: object,
+    guard_statement_addrs: object,
+    guard_statement_keys: object,
+    guard_span_complete: cython.bint,
+    decision_tree_summary: object,
+    remaining_edge_guard_count: cython.longlong,
     status: TypedEdgeSwitchRegionStatus8616,
     switch_condition_lhs: object | None,
 ) -> dict[str, object]:
@@ -1185,10 +1272,10 @@ def _typed_edge_switch_region_artifact_8616(
     )
     summary = dict(decision_tree_summary or {})
     decision_tree_case_region_ids = [
-        int(region_id) for region_id in _summary_sequence_8616(summary, "case_region_ids") if isinstance(region_id, int)
+        int(region_id) for region_id in builtins.iter(_summary_sequence_8616(summary, "case_region_ids")) if isinstance(region_id, int)
     ]
     decision_tree_case_values = [
-        int(value) for value in _summary_sequence_8616(summary, "case_values") if isinstance(value, int)
+        int(value) for value in builtins.iter(_summary_sequence_8616(summary, "case_values")) if isinstance(value, int)
     ]
     return {
         "status": status.value,
@@ -1198,7 +1285,7 @@ def _typed_edge_switch_region_artifact_8616(
         "decision_tree_case_values": decision_tree_case_values,
         "decision_tree_summary": summary,
         "region_id": region.region_id,
-        "case_region_ids": [case.region_id for case in cases],
+        "case_region_ids": [case.region_id for case in iter(cases)],
         "case_values": list(case_values),
         "default_region_id": default_target.region_id if default_target is not None else None,
         "guard_statement_addr_count": len(guard_statement_addrs),
@@ -1206,28 +1293,32 @@ def _typed_edge_switch_region_artifact_8616(
         "guard_span_complete": bool(guard_span_complete),
         "remaining_edge_guard_count": int(remaining_edge_guard_count),
         "status_reason": "default_subtree_contains_edge_guards"
-        if status == TypedEdgeSwitchRegionStatus8616.PartialLadder
+        if operator.eq(status, TypedEdgeSwitchRegionStatus8616.PartialLadder)
         else None,
         "switch_condition_lhs": lhs_payload,
     }
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class StructuringStats:
     """Statistics about the structuring process."""
 
-    iterations: int = 0
-    regions_reduced: int = 0
-    cycles_resolved: int = 0
-    sequences_created: int = 0
-    max_iterations_reached: bool = False
-    had_unstructured_gotos: bool = False
-    edge_guard_switches_detected: int = 0
+    iterations: cython.longlong = 0
+    regions_reduced: cython.longlong = 0
+    cycles_resolved: cython.longlong = 0
+    sequences_created: cython.longlong = 0
+    max_iterations_reached: cython.bint = False
+    had_unstructured_gotos: cython.bint = False
+    edge_guard_switches_detected: cython.longlong = 0
 
 
-def _cascade_guarded_successors_8616(succs: list[Region]) -> list[tuple[Region, ConditionIR, int]]:
+@cython.ccall
+def _cascade_guarded_successors_8616(succs: object) -> object:
     """Collect successors carrying a single constant equality edge guard."""
-    guarded_successors: list[tuple[Region, ConditionIR, int]] = []
+    guard: object
+    value: object
+    succ: object
+    guarded_successors: list[tuple[Region, ConditionIR, cython.longlong]] = []
     for succ in succs:
         guard = _single_eq_edge_guard_8616(succ)
         if guard is None:
@@ -1239,29 +1330,31 @@ def _cascade_guarded_successors_8616(succs: list[Region]) -> list[tuple[Region, 
     return guarded_successors
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _CascadeScan8616:
     """Accumulating state for the edge-guard cascade scan."""
 
-    cases: list[Region] = field(default_factory=list)
-    case_values: list[int] = field(default_factory=list)
-    guard_statement_addrs: list[int] = field(default_factory=list)
-    guard_statement_keys: list[tuple[str, int, int]] = field(default_factory=list)
-    guard_span_complete: bool = True
+    cases: object = field(default_factory=list)
+    case_values: object = field(default_factory=list)
+    guard_statement_addrs: object = field(default_factory=list)
+    guard_statement_keys: object = field(default_factory=list)
+    guard_span_complete: cython.bint = True
     lhs_key: object | None = None
 
-    def record_case_guard(self, guard: ConditionIR, value: int) -> bool:
+    @cython.ccall
+    def record_case_guard(self, guard: ConditionIR, value: cython.longlong) -> cython.bint:
         """Accept a same-LHS unique-valued case guard; return False to stop."""
         if self.lhs_key is None:
             self.lhs_key = guard.lhs
-        elif guard.lhs != self.lhs_key:
+        elif operator.ne(guard.lhs, self.lhs_key):
             return False
         return value not in self.case_values
 
+    @cython.ccall
     def record_guard_span(
         self,
-        addrs: Iterable[int],
-        keys: Iterable[tuple[str, int, int]],
+        addrs: Iterable[cython.longlong],
+        keys: Iterable[tuple[str, cython.longlong, cython.longlong]],
     ) -> None:
         """Record one condition region's guard statement span."""
         if addrs:
@@ -1271,21 +1364,29 @@ class _CascadeScan8616:
         if keys:
             self.guard_statement_keys.extend(keys)
 
+@cython.cclass
 class StructureAnalysis:
     """Main control-flow structuring algorithm.
 
     This class takes a region graph and iteratively refines it into structured
     control-flow patterns through pattern matching and selective refinement.
     """
+    dominators = cython.declare(object, visibility = "public")
+    event_listener = cython.declare(object, visibility = "public")
+    graph = cython.declare(object, visibility = "public")
+    max_iterations = cython.declare(object, visibility = "public")
+    natural_loop_topologies = cython.declare(dict, visibility = "public")
+    stats = cython.declare(object, visibility = "public")
+    unresolved_switches = cython.declare(list, visibility = "public")
 
     # Maximum iterations before giving up (matches Reko)
-    MAX_ITERATIONS: int = 1000
+    MAX_ITERATIONS: cython.longlong = 1000
 
     def __init__(
         self,
         graph: RegionGraph,
         event_listener: Callable[[str], None] | None = None,
-        max_iterations: int = MAX_ITERATIONS,
+        max_iterations: cython.longlong = MAX_ITERATIONS,
     ) -> None:
         """Initialize the structuring analyzer.
 
@@ -1299,9 +1400,10 @@ class StructureAnalysis:
         self.max_iterations = max_iterations
         self.dominators: DominatorInfo | None = None
         self.stats = StructuringStats()
-        self.natural_loop_topologies: dict[int, NaturalLoopTopology8616] = {}
+        self.natural_loop_topologies: dict[cython.longlong, NaturalLoopTopology8616] = {}
         self.unresolved_switches: list[Region] = []
 
+    @cython.ccall
     def structure(self) -> RegionGraph:
         """Perform control-flow structuring on the region graph.
 
@@ -1310,6 +1412,7 @@ class StructureAnalysis:
         """
         return self._execute()
 
+    @cython.ccall
     def _execute(self) -> RegionGraph:
         """Core structuring algorithm.
 
@@ -1344,8 +1447,9 @@ class StructureAnalysis:
 
         return self.graph
 
-    def _structure_iteration_8616(self) -> bool:
+    def _structure_iteration_8616(self) -> cython.bint:
         """Run one structuring pass; return True when the pass converged."""
+        region: object
         # Recompute dominators for this iteration
         self.dominators = compute_dominators(self.graph)
 
@@ -1390,7 +1494,8 @@ class StructureAnalysis:
         # Check convergence
         return len(self.graph.nodes) <= 1
 
-    def _reduce_acyclic(self, region: Region) -> bool:
+    @cython.ccall
+    def _reduce_acyclic(self, region: Region) -> cython.bint:
         """Try to match and reduce acyclic patterns.
 
         Acyclic patterns include:
@@ -1430,7 +1535,8 @@ class StructureAnalysis:
 
         return False
 
-    def _reduce_cyclic(self, region: Region) -> bool:
+    @cython.ccall
+    def _reduce_cyclic(self, region: Region) -> cython.bint:
         """Try to match and reduce cyclic patterns.
 
         Cyclic patterns are loops with special structure.
@@ -1451,7 +1557,8 @@ class StructureAnalysis:
 
         return False
 
-    def _try_natural_loop(self, region: Region) -> bool:
+    @cython.ccall
+    def _try_natural_loop(self, region: Region) -> cython.bint:
         """Publish exact loop topology without reducing the region graph.
 
         Args:
@@ -1460,13 +1567,15 @@ class StructureAnalysis:
         Returns:
             Always False because topology alone cannot authorize collapse
         """
+        topology: object
         topology = self._detect_natural_loop(region)
         if topology is None:
             return False
         self.natural_loop_topologies[topology.header] = topology
         return False
 
-    def _try_sequence(self, region: Region) -> bool:
+    @cython.ccall
+    def _try_sequence(self, region: Region) -> cython.bint:
         """Try to merge region into a sequence with its predecessor or successor.
 
         A sequence is two regions where one flows directly to the other.
@@ -1487,7 +1596,8 @@ class StructureAnalysis:
 
         return False
 
-    def _try_if_switch_cascade(self, region: Region) -> bool:
+    @cython.ccall
+    def _try_if_switch_cascade(self, region: Region) -> cython.bint:
         """Try to detect and reduce an if-cascade pattern as a switch statement.
 
         An if-cascade is a sequence of if-else regions comparing the same
@@ -1504,7 +1614,7 @@ class StructureAnalysis:
             return False
 
         # Skip if already marked as switch
-        if region.region_type == RegionType.IncSwitch:
+        if operator.eq(region.region_type, RegionType.IncSwitch):
             return False
 
         # Check if this region has multiple successors (branch point)
@@ -1521,11 +1631,13 @@ class StructureAnalysis:
 
         return True  # Count as processed since we marked it
 
-    def _try_edge_guard_switch_cascade(self, region: Region) -> bool:
+    @cython.ccall
+    def _try_edge_guard_switch_cascade(self, region: Region) -> cython.bint:
         """Detect binary comparison cascades whose case targets carry edge guards."""
+        next_region: object
         if region not in self.graph.nodes:
             return False
-        if region.region_type == RegionType.IncSwitch:
+        if operator.eq(region.region_type, RegionType.IncSwitch):
             return False
 
         scan = _CascadeScan8616()
@@ -1545,10 +1657,11 @@ class StructureAnalysis:
         self._publish_edge_guard_cascade_8616(region, scan, current)
         return True
 
+    @cython.ccall
     def _cascade_step_8616(
         self,
         current: Region,
-        visited: set[Region],
+        visited: object,
         scan: _CascadeScan8616,
     ) -> Region | None:
         """Advance the edge-guard cascade one condition region."""
@@ -1567,7 +1680,7 @@ class StructureAnalysis:
         scan.case_values.append(value)
         scan.record_guard_span(_region_statement_ins_addrs_8616(current), _region_statement_provenance_keys_8616(current))
 
-        next_regions = [succ for succ in succs if succ is not case_region]
+        next_regions = [succ for succ in iter(succs) if succ is not case_region]
         if len(next_regions) != 1:
             return None
         next_region, skipped_addrs, skipped_keys, skipped_complete = self._find_next_edge_guard_switch_head_8616(
@@ -1582,6 +1695,7 @@ class StructureAnalysis:
             scan.guard_span_complete = False
         return next_region
 
+    @cython.ccall
     def _publish_edge_guard_cascade_8616(
         self,
         region: Region,
@@ -1589,6 +1703,7 @@ class StructureAnalysis:
         current: Region,
     ) -> None:
         """Publish the accumulated cascade as a typed edge-guard switch."""
+        default_target: object
         region.region_type = RegionType.IncSwitch
         region.metadata["switch_candidates"] = scan.cases
         region.metadata["switch_case_values"] = tuple(scan.case_values)
@@ -1624,13 +1739,13 @@ class StructureAnalysis:
             guard_statement_addrs=tuple(dict.fromkeys(scan.guard_statement_addrs)),
             guard_statement_keys=tuple(dict.fromkeys(scan.guard_statement_keys)),
             guard_span_complete=scan.guard_span_complete,
-            decision_tree_summary={key: value for key, value in decision_tree_summary.items() if key != "lhs"},
+            decision_tree_summary={key: value for key, value in builtins.iter(decision_tree_summary.items()) if key != "lhs"},
             remaining_edge_guard_count=remaining_edge_guard_count,
             status=artifact_status,
             switch_condition_lhs=scan.lhs_key,
         )
         region.metadata["typed_edge_switch_decision_tree_summary"] = {
-            key: value for key, value in decision_tree_summary.items() if key != "lhs"
+            key: value for key, value in builtins.iter(decision_tree_summary.items()) if key != "lhs"
         }
         self.unresolved_switches.append(region)
         self.stats.edge_guard_switches_detected += 1
@@ -1640,19 +1755,27 @@ class StructureAnalysis:
             len(scan.cases),
         )
 
+    @cython.ccall
     def _find_next_edge_guard_switch_head_8616(
         self,
         region: Region,
-        visited: set[Region],
-    ) -> tuple[Region, tuple[int, ...], tuple[tuple[str, int, int], ...], bool]:
+        visited: object,
+    ) -> object:
         """Find the next unambiguous eq-guard switch head through continuation blocks."""
+        current: object
+        depth: object
+        existing: object
+        path_addrs: object
+        path_complete: object
+        path_keys: object
+        candidate: object
         if region not in self.graph.nodes or region in visited:
             return region, (), (), True
         if _region_is_eq_switch_head_8616(self.graph, region):
             return region, (), (), True
 
-        candidates: list[tuple[Region, tuple[int, ...], tuple[tuple[str, int, int], ...], bool]] = []
-        worklist: list[tuple[Region, tuple[int, ...], tuple[tuple[str, int, int], ...], bool, int]] = [
+        candidates: list[tuple[Region, tuple[cython.longlong, ...], tuple[tuple[str, cython.longlong, cython.longlong], ...], cython.bint]] = []
+        worklist: list[tuple[Region, tuple[cython.longlong, ...], tuple[tuple[str, cython.longlong, cython.longlong], ...], cython.bint, cython.longlong]] = [
             (region, (), (), True, 0)
         ]
         seen: set[Region] = set()
@@ -1664,7 +1787,7 @@ class StructureAnalysis:
             candidates.extend(found)
             worklist.extend(pushes)
 
-        unique: dict[int, tuple[Region, tuple[int, ...], tuple[tuple[str, int, int], ...], bool]] = {}
+        unique: dict[cython.longlong, tuple[Region, tuple[cython.longlong, ...], tuple[tuple[str, cython.longlong, cython.longlong], ...], cython.bint]] = {}
         for candidate, path_addrs, path_keys, path_complete in candidates:
             key = id(candidate)
             existing = unique.get(key)
@@ -1677,17 +1800,18 @@ class StructureAnalysis:
     def _next_head_walk_step_8616(
         self,
         current: Region,
-        path_addrs: tuple[int, ...],
-        path_keys: tuple[tuple[str, int, int], ...],
-        path_complete: bool,
-        depth: int,
-        seen: set[Region],
-        visited: set[Region],
+        path_addrs: object,
+        path_keys: object,
+        path_complete: cython.bint,
+        depth: cython.longlong,
+        seen: object,
+        visited: object,
     ) -> tuple[
-        list[tuple[Region, tuple[int, ...], tuple[tuple[str, int, int], ...], bool]],
-        list[tuple[Region, tuple[int, ...], tuple[tuple[str, int, int], ...], bool, int]],
+        list[tuple[Region, tuple[cython.longlong, ...], tuple[tuple[str, cython.longlong, cython.longlong], ...], cython.bint]],
+        list[tuple[Region, tuple[cython.longlong, ...], tuple[tuple[str, cython.longlong, cython.longlong], ...], cython.bint, cython.longlong]],
     ]:
         """Process one walk item; return (found head candidates, worklist pushes)."""
+        succ: object
         if current in seen or current in visited or current not in self.graph.nodes:
             return [], []
         seen.add(current)
@@ -1702,9 +1826,9 @@ class StructureAnalysis:
             return [(current, path_addrs, path_keys, path_complete)], []
         if depth >= 8:
             return [], []
-        found: list[tuple[Region, tuple[int, ...], tuple[tuple[str, int, int], ...], bool]] = []
-        pushes: list[tuple[Region, tuple[int, ...], tuple[tuple[str, int, int], ...], bool, int]] = []
-        for succ in sorted(self.graph.successors(current), key=lambda item: item.region_id or 0):
+        found: list[tuple[Region, tuple[cython.longlong, ...], tuple[tuple[str, cython.longlong, cython.longlong], ...], cython.bint]] = []
+        pushes: list[tuple[Region, tuple[cython.longlong, ...], tuple[tuple[str, cython.longlong, cython.longlong], ...], cython.bint, cython.longlong]] = []
+        for succ in sorted(tuple(self.graph.successors(current)), key=lambda item: item.region_id or 0):
             if _single_eq_edge_guard_8616(succ) is not None:
                 continue
             if _region_is_eq_switch_head_8616(self.graph, succ):
@@ -1713,7 +1837,8 @@ class StructureAnalysis:
             pushes.append((succ, next_path_addrs, next_path_keys, next_path_complete, depth + 1))
         return found, pushes
 
-    def _try_if_then(self, region: Region) -> bool:
+    @cython.ccall
+    def _try_if_then(self, region: Region) -> cython.bint:
         """Try to form an if-then pattern.
 
         If-then is: a condition region with exactly two successors where one
@@ -1726,11 +1851,13 @@ class StructureAnalysis:
         Returns:
             True if pattern found and merged, False otherwise
         """
+        _i: object
+        succ: object
         if region not in self.graph.nodes:
             return False
 
         # Don't process if already marked as switch candidate
-        if region.region_type == RegionType.IncSwitch:
+        if operator.eq(region.region_type, RegionType.IncSwitch):
             return False
         if self._is_cyclic(region):
             return False
@@ -1749,13 +1876,14 @@ class StructureAnalysis:
                 # This is a dedicated branch - merge it into region
                 self.graph.merge_regions(succ, region, transfer_edges="succ")
                 # Update region type to reflect it's now a condition structure
-                if region.region_type == RegionType.Linear:
+                if operator.eq(region.region_type, RegionType.Linear):
                     region.region_type = RegionType.Condition
                 return True
 
         return False
 
-    def _try_if_then_else(self, region: Region) -> bool:
+    @cython.ccall
+    def _try_if_then_else(self, region: Region) -> cython.bint:
         """Try to form an if-then-else pattern.
 
         If-then-else is: a condition region with exactly two branches that
@@ -1774,7 +1902,7 @@ class StructureAnalysis:
             return False
 
         # Don't process if already marked as switch candidate
-        if region.region_type == RegionType.IncSwitch:
+        if operator.eq(region.region_type, RegionType.IncSwitch):
             return False
 
         succs = self.graph.successors(region)
@@ -1796,7 +1924,8 @@ class StructureAnalysis:
 
         return self._merge_if_then_else_8616(region, branch1, branch2)
 
-    def _merge_if_then_else_8616(self, region: Region, branch1: Region, branch2: Region) -> bool:
+    @cython.ccall
+    def _merge_if_then_else_8616(self, region: Region, branch1: Region, branch2: Region) -> cython.bint:
         """Merge both branches into the condition region."""
         try:
             # Merge first branch
@@ -1814,7 +1943,7 @@ class StructureAnalysis:
             logger.debug(f"Failed to merge if-then-else branches: {e}")
             return False
 
-    def _is_cyclic(self, region: Region) -> bool:
+    def _is_cyclic(self, region: Region) -> cython.bint:
         """Check if a region is part of a cycle (back edge exists).
 
         A region is cyclic if any of its predecessors is dominated by it.
@@ -1829,8 +1958,9 @@ class StructureAnalysis:
             return False
 
         preds = self.graph.predecessors(region)
-        return any(self.dominators.strictly_dominates(region, pred) for pred in preds)
+        return any(self.dominators.strictly_dominates(region, pred) for pred in iter(preds))
 
+    @cython.ccall
     def _detect_natural_loop(self, region: Region) -> NaturalLoopTopology8616 | None:
         """Return typed topology evidence for one dominance-backed header."""
         if self.dominators is None:
@@ -1841,6 +1971,7 @@ class StructureAnalysis:
             region,
         )
 
+    @cython.ccall
     def _process_unresolved_regions(self) -> None:
         """Apply refinement strategies for unstructured regions.
 
@@ -1848,6 +1979,7 @@ class StructureAnalysis:
         refinement strategies to ensure forward progress:
         - Convert remaining multi-exit regions to explicit gotos
         """
+        region: object
         if not self.unresolved_switches:
             # No unresolved regions to process - fall back to goto refinement
             self._refine_to_gotos()
@@ -1857,15 +1989,20 @@ class StructureAnalysis:
         for region in self.unresolved_switches:
             region.region_type = RegionType.IncSwitch
 
+    @cython.ccall
     def _refine_to_gotos(self) -> None:
         """Last-resort refinement: convert unstructured regions to explicit gotos.
 
         When no structuring pattern matches, we create explicit goto metadata
         to preserve the control flow while admitting we can't structure it.
         """
+        existing_exits: object
+        i: object
+        region: object
+        succ: object
         # Find all regions with multiple successors that haven't been reduced
         unstructured = [
-            r for r in self.graph.nodes if r.region_type == RegionType.Linear and len(self.graph.successors(r)) > 1
+            r for r in iter(self.graph.nodes) if operator.eq(r.region_type, RegionType.Linear) and len(self.graph.successors(r)) > 1
         ]
 
         for region in unstructured:
@@ -1885,21 +2022,25 @@ class StructureAnalysis:
             logger.debug("No unstructured regions to refine to gotos")
 
 
+@cython.cclass
 class RegionBasedStructuringPass:
     """A decompiler pass that applies region-based structuring to codegen.
 
     This is the interface between the decompiler pass framework and the
     structuring algorithm.
     """
+    stats = cython.declare(object, visibility = "public")
 
     def __init__(self) -> None:
         """Initialize the pass."""
         self.stats = StructuringStats()
 
-    def __call__(self, codegen: object) -> bool:
+    def __call__(self, codegen: object) -> cython.bint:
         """Apply region-based structuring to codegen."""
 
-        def _impl() -> bool:
+        def _impl() -> cython.bint:
+            entry: object
+            graph: object
             codegen_dynamic = cast(Any, codegen)
             if getattr(codegen_dynamic, "cfunc", None) is None:
                 return False
@@ -1933,8 +2074,8 @@ class RegionBasedStructuringPass:
                         "type": region.region_type.value,
                         "metadata_keys": list(region.metadata.keys()),
                     }
-                    for region in structured.nodes
-                    if region.region_type != RegionType.Linear
+                    for region in iter(structured.nodes)
+                    if operator.ne(region.region_type, RegionType.Linear)
                 ]
                 cfunc._structuring_stats["structured_regions"] = structured_regions
 
@@ -1949,12 +2090,14 @@ class RegionBasedStructuringPass:
 
         return _impl()
 
+    @cython.ccall
     def _build_region_graph(self, codegen: object) -> tuple[RegionGraph | None, Region | None]:
         result = build_region_graph(codegen)
         return result.graph, result.entry
 
 
-def apply_region_based_structuring(codegen: object) -> bool:
+@cython.ccall
+def apply_region_based_structuring(codegen: object) -> cython.bint:
     """Apply region-based structuring pass to codegen.
 
     This is the entry point for the decompiler framework.

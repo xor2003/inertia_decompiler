@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Preserve comparison width and signedness independently of storage types.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ Do not change storage identity or infer a global declaration from one comparison
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from angr.analyses.decompiler.structured_codegen import c
 from angr.sim_type import SimType, SimTypeChar, SimTypeInt, SimTypeLong, SimTypeLongLong, SimTypeNum, SimTypeShort
@@ -15,15 +18,16 @@ from angr.sim_type import SimType, SimTypeChar, SimTypeInt, SimTypeLong, SimType
 from inertia.ir.condition_ir import ConditionIR
 
 from .semantic_cast import CSemanticCast8616
+import operator
 
 _INTEGER_TYPES: tuple[type[SimType], ...] = (SimTypeChar, SimTypeShort, SimTypeInt, SimTypeLong, SimTypeLongLong, SimTypeNum)
-_WIDTH_TYPES: dict[int, type[SimTypeChar] | type[SimTypeShort] | type[SimTypeLong]] = {
+_WIDTH_TYPES: dict[cython.longlong, type[SimTypeChar] | type[SimTypeShort] | type[SimTypeLong]] = {
     8: SimTypeChar, 16: SimTypeShort, 32: SimTypeLong,
 }
-_DWORD_BITS: int = 32
+_DWORD_BITS: cython.longlong = 32
 
 
-def _unsigned_mask_fits(expression: c.CExpression, width: int) -> bool:
+def _unsigned_mask_fits(expression: c.CExpression, width: cython.longlong) -> cython.bint:
     """A nonnegative bit mask proves a bounded unsigned integer result."""
     if not isinstance(expression, c.CBinaryOp) or expression.op != "And":
         return False
@@ -31,11 +35,12 @@ def _unsigned_mask_fits(expression: c.CExpression, width: int) -> bool:
         isinstance(operand, c.CConstant)
         and isinstance(operand.value, int)
         and 0 <= operand.value < (1 << width)
-        for operand in (expression.lhs, expression.rhs)
+        for operand in iter((expression.lhs, expression.rhs))
     )
 
 
-def _operand_view(expression: c.CExpression, target: SimType, width: int, signed: bool) -> c.CExpression | None:
+@cython.ccall
+def _operand_view(expression: c.CExpression, target: SimType, width: cython.longlong, signed: cython.bint) -> c.CExpression | None:
     """Convert one integer operand without changing its shared declaration."""
     if not signed and _unsigned_mask_fits(expression, width):
         return expression
@@ -47,17 +52,21 @@ def _operand_view(expression: c.CExpression, target: SimType, width: int, signed
         if signed and value & (1 << (width - 1)):
             value -= 1 << width
         return c.CConstant(value, target, codegen=expression.codegen, tags=expression.tags)
-    if isinstance(expression, CSemanticCast8616) and expression.dst_type == target:
+    if isinstance(expression, CSemanticCast8616) and operator.eq(expression.dst_type, target):
         return expression
     # The declaration can still be refined by another signed/unsigned use.
     # Retain this use's proof even when its current storage type happens to match.
     return CSemanticCast8616(source, target, expression, codegen=expression.codegen)
 
 
+@cython.ccall
 def materialize_condition_operand_views_8616(
     expression: c.CExpression, condition: ConditionIR,
 ) -> c.CExpression | None:
     """Apply exact signed/unsigned ordering views, refusing unsupported operands."""
+    lhs: object
+    rhs: object
+    type_class: object
     if not condition.is_signed and not condition.is_unsigned:
         return expression
     if not isinstance(expression, c.CBinaryOp):
@@ -66,7 +75,7 @@ def materialize_condition_operand_views_8616(
     if type_class is None:
         return None
     target = type_class(signed=condition.is_signed).with_arch(expression.codegen.project.arch)
-    if condition.width_bits == _DWORD_BITS:
+    if operator.eq(condition.width_bits, _DWORD_BITS):
         # C long is 64-bit on common portable-flat hosts, unlike the DOS ABI.
         label = "int32_t" if condition.is_signed else "uint32_t"
         target = SimTypeNum(_DWORD_BITS, signed=condition.is_signed, label=label)

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Helper boundary.
 
 Responsibility: execute x86 stack and flag stack effects through the segmented SS memory model.
@@ -5,6 +6,8 @@ Forbidden: converting stack offsets into locals/args or inferring variable ident
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import builtins
 from collections.abc import Callable
@@ -23,6 +26,7 @@ from .control_coordinates import (
     linear_continuation,
 )
 from .regs import reg16_t, reg32_t, sgreg_t
+import operator
 
 
 class StackExpr(Protocol):
@@ -63,13 +67,13 @@ class StackIrsb(Protocol):
     """Writable IRSB surface used by return helpers."""
 
     next: object
-    jumpkind: str
+    jumpkind: object
 
 
 class StackLifterInstruction(Protocol):
     """Control-flow jump surface exposed by the x86 lifter instruction."""
 
-    addr: int
+    addr: cython.longlong
 
     def jump(
         self,
@@ -173,15 +177,17 @@ class StackEmulator(Protocol):
         ...
 
 
-type StackPair = tuple[StackExpr, StackExpr]
-type StackTriple = tuple[StackExpr, StackExpr, StackExpr]
+StackPair = typing.TypeAliasType("StackPair", tuple[StackExpr, StackExpr])
+StackTriple = typing.TypeAliasType("StackTriple", tuple[StackExpr, StackExpr, StackExpr])
 
 
-def _dynamic_pyvex_expr_getattr_8616(obj: object, name: str, default: object = None) -> object:
+@cython.ccall
+def _dynamic_pyvex_expr_getattr_8616(obj: object, name: object, default: object = None) -> object:
     """Read an attribute across the dynamic third-party PyVEX expression boundary."""
     return builtins.getattr(obj, name, default)
 
 
+@cython.ccall
 def push16(emu: StackEmulator, value: object) -> None:
     """Push a 16-bit value through SS:SP without inferring variable identity."""
     emu.update_gpreg(reg16_t.SP, -2)
@@ -189,30 +195,35 @@ def push16(emu: StackEmulator, value: object) -> None:
     emu.write_mem16_seg(sgreg_t.SS, sp, value, address_bits=16)
 
 
+@cython.ccall
 def push16_register(emu: StackEmulator, reg: reg16_t) -> None:
     """Push a 16-bit register value, preserving PUSH SP original-value semantics."""
-    if reg == reg16_t.SP:
+    if operator.eq(reg, reg16_t.SP):
         sp = emu.get_gpreg(reg16_t.SP)
         push16(emu, sp)
         return
     push16(emu, emu.get_gpreg(reg))
 
 
+@cython.ccall
 def pop16_register(emu: StackEmulator, reg: reg16_t) -> None:
     """Pop a 16-bit SS:SP value into a general-purpose register."""
     emu.set_gpreg(reg, pop16(emu))
 
 
+@cython.ccall
 def push32_register(emu: StackEmulator, reg: reg32_t) -> None:
     """Push a 32-bit register value through the 16-bit SS:SP stack."""
     push32(emu, emu.get_gpreg(reg))
 
 
+@cython.ccall
 def pop32_register(emu: StackEmulator, reg: reg32_t) -> None:
     """Pop a 32-bit SS:SP value into a general-purpose register."""
     emu.set_gpreg(reg, pop32(emu))
 
 
+@cython.ccall
 def pop16(emu: StackEmulator) -> StackExpr:
     """Pop and return a 16-bit value from the segmented SS stack."""
     sp = emu.get_gpreg(reg16_t.SP)
@@ -221,34 +232,40 @@ def pop16(emu: StackEmulator) -> StackExpr:
     return value
 
 
+@cython.ccall
 def push_segment16(emu: StackEmulator, segment: sgreg_t) -> None:
     """Push a 16-bit segment register value through SS:SP."""
     push16(emu, emu.get_segment(segment))
 
 
+@cython.ccall
 def pop_segment16(emu: StackEmulator, segment: sgreg_t) -> None:
     """Pop a 16-bit value into a segment register."""
     emu.set_segment(segment, pop16(emu))
 
 
+@cython.ccall
 def push_flags16(emu: StackEmulator) -> None:
     """Push FLAGS through the 16-bit segmented stack."""
     push16(emu, emu.get_flags())
 
 
+@cython.ccall
 def _normalize_flags16(
-    emu: StackEmulator, flags: StackExpr, writable_mask: int = 0x0FD5, fixed_mask: int = 0x0002
+    emu: StackEmulator, flags: StackExpr, writable_mask: cython.longlong = 0x0FD5, fixed_mask: cython.longlong = 0x0002
 ) -> StackExpr:
     """Apply the architectural 16-bit writable and fixed FLAGS bits."""
     return (flags & emu.constant(writable_mask, Type.int_16)) | emu.constant(fixed_mask, Type.int_16)
 
 
+@cython.ccall
 def _normalize_flags32(emu: StackEmulator, flags: StackExpr) -> StackExpr:
     """Force the architecturally fixed EFLAGS bit while preserving writable state."""
     return flags | emu.constant(0x00000002, Type.int_32)
 
 
-def pop_flags16(emu: StackEmulator, writable_mask: int = 0x0FD5, fixed_mask: int = 0x0002) -> StackExpr:
+@cython.ccall
+def pop_flags16(emu: StackEmulator, writable_mask: cython.longlong = 0x0FD5, fixed_mask: cython.longlong = 0x0002) -> StackExpr:
     """Pop FLAGS and apply the 16-bit writable/fixed flag mask contract."""
     flags = pop16(emu)
     masked = _normalize_flags16(emu, flags, writable_mask, fixed_mask)
@@ -256,11 +273,13 @@ def pop_flags16(emu: StackEmulator, writable_mask: int = 0x0FD5, fixed_mask: int
     return masked
 
 
+@cython.ccall
 def push_flags32(emu: StackEmulator) -> None:
     """Push the 80386 EFLAGS image with reserved, RF, and VM bits cleared."""
     push32(emu, emu.get_eflags() & emu.constant(0xFFFF, Type.int_32))
 
 
+@cython.ccall
 def pop_flags32(emu: StackEmulator) -> StackExpr:
     """Pop EFLAGS from SS:ESP and install the resulting value."""
     flags = _normalize_flags32(emu, pop32(emu))
@@ -268,16 +287,19 @@ def pop_flags32(emu: StackEmulator) -> StackExpr:
     return flags
 
 
+@cython.ccall
 def push_immediate16(emu: StackEmulator, value: object) -> None:
     """Push a decoded 16-bit immediate through SS:SP."""
     push16(emu, value)
 
 
+@cython.ccall
 def push_immediate32(emu: StackEmulator, value: object) -> None:
     """Push a decoded 32-bit immediate through SS:ESP."""
     push32(emu, value)
 
 
+@cython.ccall
 def push_all16(emu: StackEmulator) -> None:
     """Push all 16-bit general registers in x86 PUSHA order."""
     sp = emu.get_gpreg(reg16_t.SP)
@@ -291,6 +313,7 @@ def push_all16(emu: StackEmulator) -> None:
     push16(emu, emu.get_gpreg(reg16_t.DI))
 
 
+@cython.ccall
 def pop_all16(emu: StackEmulator) -> None:
     """Pop all 16-bit general registers in x86 POPA order, skipping saved SP."""
     emu.set_gpreg(reg16_t.DI, pop16(emu))
@@ -303,6 +326,7 @@ def pop_all16(emu: StackEmulator) -> None:
     emu.set_gpreg(reg16_t.AX, pop16(emu))
 
 
+@cython.ccall
 def push32(emu: StackEmulator, value: object) -> None:
     """Push a dword through SS:SP, preserving the untouched upper ESP lane."""
     emu.update_gpreg(reg16_t.SP, -4)
@@ -310,6 +334,7 @@ def push32(emu: StackEmulator, value: object) -> None:
     emu.write_mem32_seg(sgreg_t.SS, sp, value, address_bits=16)
 
 
+@cython.ccall
 def pop32(emu: StackEmulator) -> StackExpr:
     """Pop a dword through SS:SP, preserving the untouched upper ESP lane."""
     sp = emu.get_gpreg(reg16_t.SP)
@@ -318,6 +343,7 @@ def pop32(emu: StackEmulator) -> StackExpr:
     return value
 
 
+@cython.ccall
 def push_all32(emu: StackEmulator) -> None:
     """Push all 32-bit general registers in x86 PUSHAD order."""
     esp = emu.get_gpreg(reg32_t.ESP)
@@ -331,6 +357,7 @@ def push_all32(emu: StackEmulator) -> None:
     push32(emu, emu.get_gpreg(reg32_t.EDI))
 
 
+@cython.ccall
 def pop_all32(emu: StackEmulator) -> None:
     """Pop all 32-bit general registers in x86 POPAD order."""
     emu.set_gpreg(reg32_t.EDI, pop32(emu))
@@ -348,11 +375,13 @@ def pop_all32(emu: StackEmulator) -> None:
     emu.set_gpreg(reg32_t.ESP, merged_esp)
 
 
+@cython.ccall
 def push_segment32(emu: StackEmulator, segment: sgreg_t) -> None:
     """Push a 32-bit segment value through SS:ESP."""
     push32(emu, emu.get_segment(segment))
 
 
+@cython.ccall
 def pop_segment32(emu: StackEmulator, segment: sgreg_t) -> None:
     """Pop a four-byte stack slot into a 16-bit segment selector."""
     value = pop32(emu)
@@ -360,7 +389,8 @@ def pop_segment32(emu: StackEmulator, segment: sgreg_t) -> None:
     emu.set_segment(segment, selector)
 
 
-def near_return_ip16(emu: StackEmulator, instruction_size: int) -> StackExpr:
+@cython.ccall
+def near_return_ip16(emu: StackEmulator, instruction_size: cython.longlong) -> StackExpr:
     """Save architectural IP from decoded next-address and live CS evidence."""
     return cast(StackExpr, architectural_offset(
         emu.lifter_instruction.addr + instruction_size,
@@ -370,7 +400,8 @@ def near_return_ip16(emu: StackEmulator, instruction_size: int) -> StackExpr:
     ))
 
 
-def near_return_eip32(emu: StackEmulator, instruction_size: int = 0) -> StackExpr:
+@cython.ccall
+def near_return_eip32(emu: StackEmulator, instruction_size: cython.longlong = 0) -> StackExpr:
     """Save architectural EIP from the decoded linear instruction address."""
     return cast(StackExpr, architectural_offset(
         emu.lifter_instruction.addr + instruction_size,
@@ -380,13 +411,15 @@ def near_return_eip32(emu: StackEmulator, instruction_size: int = 0) -> StackExp
     ))
 
 
-def near_relative_target16(emu: StackEmulator, displacement: object, instruction_size: int) -> StackExpr:
+@cython.ccall
+def near_relative_target16(emu: StackEmulator, displacement: object, instruction_size: cython.longlong) -> StackExpr:
     """Keep relative control in the loader domain, separate from saved IP."""
     linear_next = emu.constant((emu.lifter_instruction.addr + instruction_size) & 0xFFFF, Type.int_16)
     return linear_next + emu.constant(displacement, Type.int_16)
 
 
-def near_relative_target32(emu: StackEmulator, displacement: object, instruction_size: int = 0) -> StackExpr:
+@cython.ccall
+def near_relative_target32(emu: StackEmulator, displacement: object, instruction_size: cython.longlong = 0) -> StackExpr:
     """Compute a full-width loader control target from decoded instruction facts."""
     return (
         emu.constant(emu.lifter_instruction.addr + instruction_size, Type.int_32)
@@ -394,6 +427,7 @@ def near_relative_target32(emu: StackEmulator, displacement: object, instruction
     )
 
 
+@cython.ccall
 def push_far_return_frame16(emu: StackEmulator, return_ip: object | None = None) -> object:
     """Push the 16-bit far-call return frame and return the pushed IP."""
     push16(emu, emu.get_sgreg(sgreg_t.CS))
@@ -403,6 +437,7 @@ def push_far_return_frame16(emu: StackEmulator, return_ip: object | None = None)
     return return_ip
 
 
+@cython.ccall
 def push_far_return_frame32(emu: StackEmulator, return_ip: object | None = None) -> object:
     """Push the 32-bit far-call return frame and return the pushed EIP."""
     push32(emu, emu.get_segment(sgreg_t.CS))
@@ -412,6 +447,7 @@ def push_far_return_frame32(emu: StackEmulator, return_ip: object | None = None)
     return return_ip
 
 
+@cython.ccall
 def push_privilege_stack32(emu: StackEmulator) -> StackPair:
     """Push the current SS:ESP pair for a 32-bit privilege transition."""
     saved_ss = emu.get_segment(sgreg_t.SS)
@@ -421,6 +457,7 @@ def push_privilege_stack32(emu: StackEmulator) -> StackPair:
     return saved_ss, saved_esp
 
 
+@cython.ccall
 def pop_far_return_frame16(emu: StackEmulator) -> StackPair:
     """Pop a 16-bit far-return IP:CS frame from SS:SP."""
     ip = pop16(emu)
@@ -428,6 +465,7 @@ def pop_far_return_frame16(emu: StackEmulator) -> StackPair:
     return ip, seg
 
 
+@cython.ccall
 def pop_far_return_frame32(emu: StackEmulator) -> StackPair:
     """Pop a 32-bit far-return EIP:CS frame from SS:ESP."""
     eip = pop32(emu)
@@ -435,6 +473,7 @@ def pop_far_return_frame32(emu: StackEmulator) -> StackPair:
     return eip, seg
 
 
+@cython.ccall
 def pop_interrupt_frame16(emu: StackEmulator) -> StackTriple:
     """Pop a 16-bit interrupt return frame in IP, CS, FLAGS order."""
     ip = pop16(emu)
@@ -443,6 +482,7 @@ def pop_interrupt_frame16(emu: StackEmulator) -> StackTriple:
     return ip, cs, flags
 
 
+@cython.ccall
 def pop_interrupt_frame32(emu: StackEmulator) -> StackTriple:
     """Pop a 32-bit interrupt return frame in EIP, CS, EFLAGS order."""
     eip = pop32(emu)
@@ -451,6 +491,7 @@ def pop_interrupt_frame32(emu: StackEmulator) -> StackTriple:
     return eip, cs, flags
 
 
+@cython.ccall
 def _return_control_target(
     emu: StackEmulator, cs: object, ip: object, width: ControlWidth,
 ) -> CoordinateValue:
@@ -462,6 +503,7 @@ def _return_control_target(
     )
 
 
+@cython.ccall
 def _near_transfer_control_target(
     emu: StackEmulator, target: object, width: ControlWidth, domain: NearTargetDomain,
 ) -> object:
@@ -471,7 +513,8 @@ def _near_transfer_control_target(
     return target
 
 
-def return_near16(emu: StackEmulator, stack_adjust: int = 0) -> StackExpr:
+@cython.ccall
+def return_near16(emu: StackEmulator, stack_adjust: cython.longlong = 0) -> StackExpr:
     """Emit a 16-bit near return and apply an optional stack adjustment."""
     ip = pop16(emu)
     if stack_adjust:
@@ -482,7 +525,8 @@ def return_near16(emu: StackEmulator, stack_adjust: int = 0) -> StackExpr:
     return ip
 
 
-def return_near32(emu: StackEmulator, stack_adjust: int = 0) -> StackExpr:
+@cython.ccall
+def return_near32(emu: StackEmulator, stack_adjust: cython.longlong = 0) -> StackExpr:
     """Pop EIP and apply argument cleanup through SP, preserving upper ESP."""
     eip = pop32(emu)
     if stack_adjust:
@@ -494,6 +538,7 @@ def return_near32(emu: StackEmulator, stack_adjust: int = 0) -> StackExpr:
     return eip
 
 
+@cython.ccall
 def emit_near_call16(
     emu: StackEmulator,
     target: object,
@@ -514,6 +559,7 @@ def emit_near_call16(
     return return_ip
 
 
+@cython.ccall
 def emit_near_jump16(
     emu: StackEmulator, target: object, *,
     target_domain: NearTargetDomain = NearTargetDomain.EXECUTION_CONTROL,
@@ -525,6 +571,7 @@ def emit_near_jump16(
     return target
 
 
+@cython.ccall
 def emit_near_call32(
     emu: StackEmulator, target: object, return_ip: object | None = None, *,
     target_domain: NearTargetDomain = NearTargetDomain.EXECUTION_CONTROL,
@@ -540,6 +587,7 @@ def emit_near_call32(
     return return_ip
 
 
+@cython.ccall
 def emit_near_jump32(
     emu: StackEmulator, target: object, *,
     target_domain: NearTargetDomain = NearTargetDomain.EXECUTION_CONTROL,
@@ -551,16 +599,19 @@ def emit_near_jump32(
     return target
 
 
-def far_return_ip16(emu: StackEmulator, instruction_size: int) -> StackExpr:
+@cython.ccall
+def far_return_ip16(emu: StackEmulator, instruction_size: cython.longlong) -> StackExpr:
     """Compute the 16-bit far-call return IP from instruction size."""
     return near_return_ip16(emu, instruction_size)
 
 
-def far_return_ip32(emu: StackEmulator, instruction_size: int) -> StackExpr:
+@cython.ccall
+def far_return_ip32(emu: StackEmulator, instruction_size: cython.longlong) -> StackExpr:
     """Compute the 32-bit far-call return EIP from instruction size."""
     return near_return_eip32(emu, instruction_size)
 
 
+@cython.ccall
 def far_linear_target_8616(segment: object, offset: object) -> int | None:
     """Resolve a concrete far seg:offset pair to its flat 20-bit real-mode code address.
 
@@ -572,12 +623,14 @@ def far_linear_target_8616(segment: object, offset: object) -> int | None:
     return (((segment & 0xFFFF) << 4) + (offset & 0xFFFF)) & 0xFFFFF
 
 
+@cython.ccall
 def _far_control_flow_target_8616(emu: StackEmulator, segment: object, offset: object) -> object:
     """Return the flat control-flow target for a 16-bit far call or far jump.
 
     The native adapter uses offsets. The loader adapter composes CS even for
     symbolic pairs; it never discards the segment from a control destination.
     """
+    linear_target: object
     if emu.control_address_domain is ControlAddressDomain.ARCHITECTURAL_OFFSET:
         return offset
     linear_target = far_linear_target_8616(segment, offset)
@@ -587,6 +640,7 @@ def _far_control_flow_target_8616(emu: StackEmulator, segment: object, offset: o
     return emu.constant(linear_target, Type.int_32)
 
 
+@cython.ccall
 def emit_far_call16(emu: StackEmulator, segment: object, offset: object, return_ip: object) -> object:
     """Emit a 16-bit far call through the emulator boundary."""
     push_far_return_frame16(emu, return_ip)
@@ -596,6 +650,7 @@ def emit_far_call16(emu: StackEmulator, segment: object, offset: object, return_
     return return_ip
 
 
+@cython.ccall
 def emit_far_jump16(emu: StackEmulator, segment: object, offset: object) -> object:
     """Emit a 16-bit far jump through the emulator boundary."""
     emu.set_segment(sgreg_t.CS, segment)
@@ -604,6 +659,7 @@ def emit_far_jump16(emu: StackEmulator, segment: object, offset: object) -> obje
     return offset
 
 
+@cython.ccall
 def emit_far_call32(emu: StackEmulator, segment: object, offset: object, return_ip: object) -> object:
     """Emit a 32-bit far call through the emulator boundary."""
     push_far_return_frame32(emu, return_ip)
@@ -613,6 +669,7 @@ def emit_far_call32(emu: StackEmulator, segment: object, offset: object, return_
     return return_ip
 
 
+@cython.ccall
 def emit_far_jump32(emu: StackEmulator, segment: object, offset: object) -> object:
     """Emit a 32-bit far jump through the emulator boundary."""
     emu.set_segment(sgreg_t.CS, segment)
@@ -621,7 +678,8 @@ def emit_far_jump32(emu: StackEmulator, segment: object, offset: object) -> obje
     return offset
 
 
-def return_far16(emu: StackEmulator, stack_adjust: int = 0) -> StackPair:
+@cython.ccall
+def return_far16(emu: StackEmulator, stack_adjust: cython.longlong = 0) -> StackPair:
     """Emit a 16-bit far return and restore CS:IP."""
     ip, seg = pop_far_return_frame16(emu)
     if stack_adjust:
@@ -632,6 +690,7 @@ def return_far16(emu: StackEmulator, stack_adjust: int = 0) -> StackPair:
     return ip, seg
 
 
+@cython.ccall
 def return_interrupt16(emu: StackEmulator) -> StackTriple:
     """Emit a 16-bit interrupt return and restore CS:IP plus FLAGS."""
     ip, cs, raw_flags = pop_interrupt_frame16(emu)
@@ -643,7 +702,8 @@ def return_interrupt16(emu: StackEmulator) -> StackTriple:
     return ip, cs, raw_flags
 
 
-def return_far32(emu: StackEmulator, stack_adjust: int = 0) -> StackPair:
+@cython.ccall
+def return_far32(emu: StackEmulator, stack_adjust: cython.longlong = 0) -> StackPair:
     """Restore CS:EIP and clean arguments through SP, preserving upper ESP."""
     eip, seg = pop_far_return_frame32(emu)
     if stack_adjust:
@@ -655,6 +715,7 @@ def return_far32(emu: StackEmulator, stack_adjust: int = 0) -> StackPair:
     return eip, seg
 
 
+@cython.ccall
 def return_interrupt32(emu: StackEmulator) -> StackTriple:
     """Emit a 32-bit interrupt return and restore CS:EIP plus EFLAGS."""
     eip, cs, raw_flags = pop_interrupt_frame32(emu)
@@ -667,12 +728,13 @@ def return_interrupt32(emu: StackEmulator) -> StackTriple:
     return eip, cs, raw_flags
 
 
+@cython.ccall
 def _branch_rel(
     emu: StackEmulator,
     condition: object,
     displacement: object,
-    instruction_size: int,
-    target_width_bits: int,
+    instruction_size: cython.longlong,
+    target_width_bits: cython.longlong,
     emit_jump: Callable[[StackEmulator, object], object],
 ) -> object | None:
     if hasattr(condition, "cast_to"):
@@ -699,45 +761,50 @@ def _branch_rel(
     return target
 
 
+@cython.ccall
 def branch_rel8(
     emu: StackEmulator,
     condition: object,
     displacement: object,
-    instruction_size: int = 2,
+    instruction_size: cython.longlong = 2,
 ) -> object | None:
     """Emit or compute an 8-bit relative branch target from a 16-bit IP."""
     return _branch_rel(emu, condition, displacement, instruction_size, 16, emit_near_jump16)
 
 
+@cython.ccall
 def branch_rel16(
     emu: StackEmulator,
     condition: object,
     displacement: object,
-    instruction_size: int = 3,
+    instruction_size: cython.longlong = 3,
 ) -> object | None:
     """Emit or compute a 16-bit relative branch target from a 16-bit IP."""
     return _branch_rel(emu, condition, displacement, instruction_size, 16, emit_near_jump16)
 
 
+@cython.ccall
 def branch_rel32(
     emu: StackEmulator,
     condition: object,
     displacement: object,
-    instruction_size: int = 0,
+    instruction_size: cython.longlong = 0,
 ) -> object | None:
     """Emit or compute a 32-bit relative branch target from EIP."""
     return _branch_rel(emu, condition, displacement, instruction_size, 32, emit_near_jump32)
 
 
+@cython.ccall
 def loop_rel8(emu: StackEmulator, condition: StackExpr, displacement: object) -> object | None:
     """Decrement CX and emit an 8-bit LOOP-style branch when the condition holds."""
     cx = emu.get_gpreg(reg16_t.CX) - emu.constant(1, Type.int_16)
     emu.set_gpreg(reg16_t.CX, cx)
-    loop_continue = (cx != emu.constant(0, Type.int_16)).cast_to(Type.int_1)
+    loop_continue = operator.ne(cx, emu.constant(0, Type.int_16)).cast_to(Type.int_1)
     return branch_rel8(emu, condition.cast_to(Type.int_1) & loop_continue, displacement)
 
 
-def enter16(emu: StackEmulator, frame_size: int, nesting_level: int) -> None:
+@cython.ccall
+def enter16(emu: StackEmulator, frame_size: cython.longlong, nesting_level: cython.longlong) -> None:
     """Execute ENTER for a 16-bit frame without naming locals or arguments."""
     push16(emu, emu.get_gpreg(reg16_t.BP))
     frame_temp = emu.get_gpreg(reg16_t.SP)
@@ -756,7 +823,8 @@ def enter16(emu: StackEmulator, frame_size: int, nesting_level: int) -> None:
     emu.set_gpreg(reg16_t.SP, sp)
 
 
-def enter32(emu: StackEmulator, frame_size: int, nesting_level: int) -> None:
+@cython.ccall
+def enter32(emu: StackEmulator, frame_size: cython.longlong, nesting_level: cython.longlong) -> None:
     """Execute operand-size-32 ENTER through the real-mode 16-bit stack address."""
     push32(emu, emu.get_gpreg(reg32_t.EBP))
     frame_temp = emu.get_gpreg(reg32_t.ESP)
@@ -784,6 +852,7 @@ def enter32(emu: StackEmulator, frame_size: int, nesting_level: int) -> None:
     emu.set_gpreg(reg32_t.ESP, sp)
 
 
+@cython.ccall
 def leave16(emu: StackEmulator) -> None:
     """Execute LEAVE for a 16-bit frame through SS:BP/SP state."""
     ebp = emu.get_gpreg(reg16_t.BP)
@@ -791,6 +860,7 @@ def leave16(emu: StackEmulator) -> None:
     emu.set_gpreg(reg16_t.BP, pop16(emu))
 
 
+@cython.ccall
 def leave32(emu: StackEmulator) -> None:
     """Restore SP from BP, then pop full EBP through the 16-bit stack."""
     bp = emu.get_gpreg(reg16_t.BP)

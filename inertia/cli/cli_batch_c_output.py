@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: preserve legacy CLI helper surface while delegating semantic proof to X86_16 layers.
@@ -8,6 +9,8 @@ canonical translation unit and report typed incomplete/conflict/error outcomes.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -16,6 +19,8 @@ from enum import StrEnum
 from inertia.cli.generated_translation_unit_assembly import (
     assemble_generated_translation_unit,
 )
+import dataclasses
+import operator
 
 
 class BatchCOutputStatus8616(StrEnum):
@@ -27,18 +32,18 @@ class BatchCOutputStatus8616(StrEnum):
     ERROR = "error"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class BatchCOutputResult8616:
     """Canonical or partial C plus a typed export verdict."""
 
     status: BatchCOutputStatus8616
-    source: str
-    payload_count: int
-    function_count: int
-    detail: str | None = None
+    source: object
+    payload_count: cython.longlong
+    function_count: cython.longlong
+    detail: object = None
 
     @property
-    def failed(self) -> bool:
+    def failed(self) -> cython.bint:
         """Return whether a complete batch failed export assembly."""
         return self.status in {
             BatchCOutputStatus8616.CONFLICT,
@@ -49,15 +54,15 @@ class BatchCOutputResult8616:
 def build_batch_c_output_8616(
     payloads: Sequence[str],
     *,
-    expected_function_count: int,
-    compiler: str = "gcc",
+    expected_function_count: cython.longlong,
+    compiler: object = "gcc",
 ) -> BatchCOutputResult8616:
     """Assemble complete payloads or retain honest partial generated C."""
-    normalized = tuple(payload for payload in payloads if payload.strip())
-    partial_source = "\n".join(payload.rstrip() for payload in normalized)
+    normalized = tuple(payload for payload in iter(payloads) if payload.strip())
+    partial_source = "\n".join(payload.rstrip() for payload in iter(normalized))
     if partial_source:
         partial_source += "\n"
-    if len(normalized) != expected_function_count:
+    if operator.ne(len(normalized), expected_function_count):
         return BatchCOutputResult8616(
             status=BatchCOutputStatus8616.INCOMPLETE,
             source=partial_source,
@@ -78,7 +83,7 @@ def build_batch_c_output_8616(
             function_count=0,
             detail=str(ex),
         )
-    if assembled.function_count != expected_function_count:
+    if operator.ne(assembled.function_count, expected_function_count):
         return BatchCOutputResult8616(
             status=BatchCOutputStatus8616.ERROR,
             source="",
@@ -91,7 +96,7 @@ def build_batch_c_output_8616(
         )
     if assembled.conflicts:
         conflicts = ", ".join(
-            f"{conflict.kind.value}:{conflict.name}" for conflict in assembled.conflicts
+            f"{conflict.kind.value}:{conflict.name}" for conflict in iter(assembled.conflicts)
         )
         return BatchCOutputResult8616(
             status=BatchCOutputStatus8616.CONFLICT,

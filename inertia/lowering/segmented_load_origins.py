@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Project exact IR byte-load origins using retained C address operands.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Protocol, cast
@@ -32,14 +35,17 @@ from inertia.ir.function_ir_registry import (
 from inertia.ir.instruction_origin import IRInstructionOrigin8616
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616, _replace_c_children_8616
 from inertia.lowering.structured_tags import copy_structured_tags_8616
+import dataclasses
+import operator
+import builtins
 
-type LoadKey8616 = tuple[int, int]
+LoadKey8616 = typing.TypeAliasType("LoadKey8616", tuple[int, int])
 
 
 class _Function8616(Protocol):
     """Structured function identity and body at the third-party boundary."""
 
-    addr: int
+    addr: cython.longlong
     statements: object
 
 
@@ -50,7 +56,7 @@ class _Codegen8616(Protocol):
     cfunc: _Function8616 | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _LoadProjection8616:
     """One byte load with proven address and segment-scale statement owners."""
 
@@ -58,12 +64,15 @@ class _LoadProjection8616:
     address: IRAddress
     root: IRInstructionOrigin8616
     scale: IRInstructionOrigin8616
-    scale_side: int
+    scale_side: cython.longlong
 
 
-def _definitions_8616(block: IRBlock) -> dict[int, IRInstr]:
+@cython.ccall
+def _definitions_8616(block: IRBlock) -> object:
     """Index unambiguous source temporaries; duplicate definitions refuse the block."""
-    definitions: dict[int, IRInstr] = {}
+    destination: object
+    instruction: object
+    definitions: dict[cython.longlong, IRInstr] = {}
     for instruction in block.instrs:
         destination = instruction.dst
         if destination is None or destination.space is not MemSpace.TMP or destination.source_tmp is None:
@@ -74,7 +83,8 @@ def _definitions_8616(block: IRBlock) -> dict[int, IRInstr]:
     return definitions
 
 
-def _segment_scale_8616(instruction: IRInstr, space: MemSpace) -> bool:
+@cython.ccall
+def _segment_scale_8616(instruction: IRInstr, space: MemSpace) -> cython.bint:
     """Require the typed zero-extended segment selector shifted by four bits."""
     if instruction.op != "Iop_Shl32" or len(instruction.args) != 2:
         return False
@@ -82,14 +92,18 @@ def _segment_scale_8616(instruction: IRInstr, space: MemSpace) -> bool:
     if not isinstance(selector, IRValue) or not isinstance(shift, IRValue):
         return False
     exact_selector = (
-        selector.space is MemSpace.REG and selector.name == space.value
+        selector.space is MemSpace.REG and operator.eq(selector.name, space.value)
         and selector.size == 4 and selector.offset == 0 and selector.expr == ("Iop_16Uto32",)
     )
     return exact_selector and shift.space is MemSpace.CONST and shift.const == 4
 
 
-def _projection_8616(load: IRInstr, definitions: dict[int, IRInstr]) -> _LoadProjection8616 | None:
+@cython.ccall
+def _projection_8616(load: IRInstr, definitions: object) -> _LoadProjection8616 | None:
     """Select only a proven 16-bit segmented byte load with exact source owners."""
+    root: object
+    scale: object
+    side: object
     if load.op != "LOAD" or len(load.args) != 1 or load.origin is None:
         return None
     address = load.args[0]
@@ -122,8 +136,10 @@ def _projection_8616(load: IRInstr, definitions: dict[int, IRInstr]) -> _LoadPro
     return None
 
 
-def _node_origin_8616(node: structured_c.CBinaryOp) -> tuple[int, int, int] | None:
+@cython.ccall
+def _node_origin_8616(node: structured_c.CBinaryOp) -> object:
     """Read exact address-expression tags, never descendant or nearby tags."""
+    tags: object
     tags = copy_structured_tags_8616(node.tags)
     if tags is None:
         return None
@@ -133,8 +149,10 @@ def _node_origin_8616(node: structured_c.CBinaryOp) -> tuple[int, int, int] | No
     return None
 
 
+@cython.ccall
 def _retained_address_root_8616(node: structured_c.CUnaryOp) -> structured_c.CBinaryOp | None:
     """Expose a retained physical address through a width-preserving byte pointer cast."""
+    expression_type: object
     root = node.operand
     if type(root) is structured_c.CTypeCast:
         if not isinstance(root.dst_type, SimTypePointer) or not isinstance(root.dst_type.pts_to, SimTypeChar):
@@ -152,8 +170,11 @@ def _retained_address_root_8616(node: structured_c.CUnaryOp) -> structured_c.CBi
     return root if isinstance(root, structured_c.CBinaryOp) else None
 
 
+@cython.ccall
 def _replace_load_8616(node: object, proof: _LoadProjection8616, codegen: object) -> object:
     """Preserve the actual selector/offset expressions instead of current registers."""
+    access: object
+    root: object
     if not isinstance(node, structured_c.CUnaryOp) or node.op != "Dereference":
         return node
     if not isinstance(node.type, SimTypeChar):
@@ -167,7 +188,7 @@ def _replace_load_8616(node: object, proof: _LoadProjection8616, codegen: object
     if not isinstance(scale.rhs, structured_c.CConstant) or scale.rhs.value != 4:
         return node
     expected_scale = (proof.scale.block_addr, proof.scale.statement_index, proof.key[1])
-    if _node_origin_8616(scale) != expected_scale:
+    if operator.ne(_node_origin_8616(scale), expected_scale):
         return node
     if proof.address.space is MemSpace.SS:
         # This owner is imported lazily because the canonical stack lowering
@@ -181,8 +202,8 @@ def _replace_load_8616(node: object, proof: _LoadProjection8616, codegen: object
             proof.address.base != ("bp",)
             or access is None
             or access.entry_sp_offset is not None
-            or access.width != proof.address.size
-            or access.displacement != proof.address.offset
+            or operator.ne(access.width, proof.address.size)
+            or operator.ne(access.displacement, proof.address.offset)
         ):
             return node
     return structured_c.CFunctionCall(
@@ -195,11 +216,15 @@ def _replace_load_8616(node: object, proof: _LoadProjection8616, codegen: object
     )
 
 
+@cython.ccall
 def _projection_index_8616(
-    blocks: tuple[IRBlock, ...], accepted_loads: frozenset[LoadKey8616],
-) -> dict[tuple[int, int, int], list[_LoadProjection8616]]:
+    blocks: object, accepted_loads: object,
+) -> object:
     """Index source owners without resolving duplicate proofs by iteration order."""
-    projections: dict[tuple[int, int, int], list[_LoadProjection8616]] = {}
+    proof: object
+    block: object
+    instruction: object
+    projections: dict[tuple[cython.longlong, cython.longlong, cython.longlong], list[_LoadProjection8616]] = {}
     for block in blocks:
         definitions = _definitions_8616(block)
         for instruction in block.instrs:
@@ -210,19 +235,20 @@ def _projection_index_8616(
     return projections
 
 
-def _nonread_nodes_8616(statements: object) -> set[int]:
+def _nonread_nodes_8616(statements: object) -> object:
     """Protect lvalues and address-taking, including nodes shared with a read."""
-    protected: set[int] = set()
+    node: object
+    protected: set[cython.longlong] = set()
     for node in _iter_c_nodes_deep_8616(statements):
         if isinstance(node, structured_c.CAssignment):
-            protected.update(id(child) for child in _iter_c_nodes_deep_8616(node.lhs))
+            protected.update(id(child) for child in builtins.iter(_iter_c_nodes_deep_8616(node.lhs)))
         elif isinstance(node, structured_c.CUnaryOp) and node.op == "Reference":
-            protected.update(id(child) for child in _iter_c_nodes_deep_8616(node.operand))
+            protected.update(id(child) for child in builtins.iter(_iter_c_nodes_deep_8616(node.operand)))
     return protected
 
 
 def materialize_segmented_load_origins_8616(
-    codegen: object, accepted_loads: frozenset[LoadKey8616],
+    codegen: object, accepted_loads: object,
 ) -> frozenset[LoadKey8616]:
     """Return exact load keys materialized from proven IR and retained AST operands."""
     boundary = cast(_Codegen8616, codegen)
@@ -239,6 +265,8 @@ def materialize_segmented_load_origins_8616(
 
     def transform(node: object) -> object:
         """Replace one read only if its exact address owner has a unique proof."""
+        origin: object
+        root: object
         if id(node) in protected:
             return node
         if not isinstance(node, structured_c.CUnaryOp) or node.op != "Dereference":

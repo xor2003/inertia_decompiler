@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Render single-evaluation conversion of proven near argument offsets.
 
 Layer: Types/Lowering.
@@ -10,6 +11,7 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import cython
 
 from enum import StrEnum
 
@@ -20,7 +22,8 @@ class NearPointerArgumentHelper8616(StrEnum):
     SINGLE_EVALUATION = "NEAR_ARG_PTR"
 
 
-def render_near_pointer_argument_runtime_8616(target: str) -> str:
+@cython.ccall
+def render_near_pointer_argument_runtime_8616(target: object) -> str:
     """Render a C89-compatible DOS or C99 portable single-evaluation helper.
 
     Each argument is narrowed exactly once at the boundary. Repeated reads of

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Lower proven numeric carry/borrow uses to explicit C predicates.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Protocol, cast
 
@@ -45,8 +48,9 @@ class _CodegenBoundary8616(Protocol):
     _inertia_cfg_execution_ownership_8616: CFGOwnershipArtifact
 
 
-def lower_carry_borrow_bit_values_8616(codegen: object) -> bool:
+def lower_carry_borrow_bit_values_8616(codegen: object) -> cython.bint:
     """Consume proven Widening values and attach closed Lowering evidence."""
+    source: object
     boundary = cast(_CodegenBoundary8616, codegen)
     try:
         pipeline = boundary._inertia_carry_borrow_widening_pipeline_8616
@@ -71,26 +75,26 @@ def lower_carry_borrow_bit_values_8616(codegen: object) -> bool:
             resolutions.append(refused_carry_borrow_bit_lowering_8616(source, fact))
         else:
             resolutions.append(materialize_carry_borrow_bit_value_8616(root, source, fact, ownership))
-    materialized = sum(item.verdict is CarryBorrowBitLoweringVerdict8616.MATERIALIZED for item in resolutions)
+    materialized = sum(item.verdict is CarryBorrowBitLoweringVerdict8616.MATERIALIZED for item in iter(resolutions))
     artifact = CarryBorrowBitLoweringArtifact8616(
         function_addr=pipeline.function_addr,
         resolutions=tuple(resolutions),
         stats=CarryBorrowBitLoweringStats8616(
             raw_fact_count=len(resolutions),
-            normalized_fact_count=sum(item.fact is not None for item in resolutions),
-            classified_fact_count=sum(item.placement_classified for item in resolutions),
+            normalized_fact_count=sum(item.fact is not None for item in iter(resolutions)),
+            classified_fact_count=sum(item.placement_classified for item in iter(resolutions)),
             materialized_count=materialized,
             failure_count=len(resolutions) - materialized,
-            changed_count=sum(item.changed for item in resolutions),
-            already_materialized_count=sum(item.already_materialized for item in resolutions),
+            changed_count=sum(item.changed for item in iter(resolutions)),
+            already_materialized_count=sum(item.already_materialized for item in iter(resolutions)),
         ),
     )
     boundary._inertia_carry_borrow_bit_lowering_artifact_8616 = artifact
     if not artifact.complete:
         raise PipelineHardError("carry-bit Lowering accounting is incomplete", layer="lowering")
-    classified_failures = tuple(item for item in resolutions if item.placement_classified and item.failure)
+    classified_failures = tuple(item for item in iter(resolutions) if item.placement_classified and item.failure)
     if classified_failures:
-        diagnostics = tuple(item.failure_diagnostic for item in classified_failures)
+        diagnostics = tuple(item.failure_diagnostic for item in iter(classified_failures))
         raise PipelineHardError(
             f"carry-bit Lowering classified evidence but failed to materialize: {diagnostics}",
             layer="lowering",

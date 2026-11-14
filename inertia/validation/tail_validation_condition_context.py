@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Tail Validation.
 
 Responsibility: build contextual condition fingerprints from recovered structured C and IR evidence.
@@ -10,6 +11,7 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import cython
 
 import contextlib
 import os
@@ -53,16 +55,19 @@ from .validation_call_return_storage import (
     direct_call_return_condition_projection_8616,
     stored_call_return_condition_projection_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = ["build_x86_16_contextual_condition_fingerprints"]
 
-type FlagTestInfo8616 = tuple[object, int, bool] | tuple[object, int, int, bool]
+FlagTestInfo8616 = typing.TypeAliasType("FlagTestInfo8616", tuple[object, int, bool] | tuple[object, int, int, bool])
 
 
 class _RegisterNameProvider8616(Protocol):
     """Dynamic capstone instruction boundary that can translate register ids."""
 
-    def reg_name(self, reg_id: int) -> str:
+    def reg_name(self, reg_id: cython.longlong) -> object:
         """Return the capstone register name for a numeric register id."""
         ...
 
@@ -72,15 +77,17 @@ class _DecodedCmpGuardLike8616(Protocol):
 
     lhs: object
     rhs: object
-    op: str
+    op: object
     expr: object | None
 
 
-def _dynamic_attr_8616(obj: object, name: str, default: object = None) -> Any:  # noqa: ANN401
+@cython.ccall
+def _dynamic_attr_8616(obj: object, name: object, default: object = None) -> Any:  # noqa: ANN401
     """Dynamic angr/codegen/capstone compatibility boundary for optional attributes."""
     return getattr(obj, name, default)
 
 
+@cython.ccall
 def _last_assignment_in_stmt(stmt: object) -> object | None:
     """Return a statement when it is a direct assignment."""
     if isinstance(stmt, CAssignment):
@@ -90,6 +97,8 @@ def _last_assignment_in_stmt(stmt: object) -> object | None:
 
 def _iter_stmt_conditions(stmt: object) -> Iterator[object]:
     """Yield condition nodes owned directly by a control-flow statement."""
+    cond: object
+    _body: object
     if isinstance(stmt, CIfElse):
         for cond, _body in _dynamic_attr_8616(stmt, "condition_and_nodes", ()) or ():
             if cond is not None:
@@ -100,8 +109,11 @@ def _iter_stmt_conditions(stmt: object) -> Iterator[object]:
             yield cond
 
 
-def _contextual_condition_fingerprint(assign_stmt: object, cond: object, project: object) -> str | None:
+@cython.ccall
+def _contextual_condition_fingerprint(assign_stmt: object, cond: object, project: object) -> object:
     """Build a condition fingerprint from an adjacent flag-producing assignment."""
+    info: object
+    predicate: object
     lhs = _dynamic_attr_8616(assign_stmt, "lhs", None)
     if not isinstance(lhs, (CVariable, CDirtyExpression)):
         return None
@@ -126,7 +138,7 @@ def _contextual_condition_fingerprint(assign_stmt: object, cond: object, project
     return fingerprint if isinstance(fingerprint, str) else None
 
 
-def _owned_materialized_condition_fingerprint_8616(cond: object, project: object) -> str | None:
+def _owned_materialized_condition_fingerprint_8616(cond: object, project: object) -> object:
     """Return an explicit Lowering/Structuring condition before JCC replay.
 
     Tail validation may decode unresolved flag carriers from JCC evidence, but
@@ -134,6 +146,7 @@ def _owned_materialized_condition_fingerprint_8616(cond: object, project: object
     register-copy state. The explicit condition owns the semantic value once
     Lowering or Structuring marks it, provided no raw carrier remains.
     """
+    jcc_addr: object
     node = cond
     while isinstance(node, CUnaryOp) and node.op == "Not":
         node = node.operand
@@ -148,15 +161,15 @@ def _owned_materialized_condition_fingerprint_8616(cond: object, project: object
         "inertia_structuring_shared_body_condition_chain_materialized_8616",
         "inertia_structuring_single_branch_materialized_8616",
     )
-    if not any(tags.get(marker) is True for marker in materialized_markers):
+    if not any(tags.get(marker) is True for marker in iter(materialized_markers)):
         return None
     raw_fingerprint = _expr_fingerprint(cond, project)
     fingerprint = raw_fingerprint if isinstance(raw_fingerprint, str) else ""
-    if any(isinstance(current, CFunctionCall) for current in _iter_c_nodes_deep_8616(cond)):
+    if any(isinstance(current, CFunctionCall) for current in builtins.iter(_iter_c_nodes_deep_8616(cond))):
         return fingerprint
     if any(
         isinstance(current, CVariable) and isinstance(current.variable, SimRegisterVariable)
-        for current in _iter_c_nodes_deep_8616(cond)
+        for current in builtins.iter(_iter_c_nodes_deep_8616(cond))
     ):
         # Precision evidence is owned by Structuring and already checked at the
         # final branch boundary. Import lazily to avoid its fingerprint cycle.
@@ -172,26 +185,32 @@ def _owned_materialized_condition_fingerprint_8616(cond: object, project: object
     return fingerprint
 
 
-def _tv_condition_debug_enabled_8616() -> bool:
+@cython.ccall
+def _tv_condition_debug_enabled_8616() -> cython.bint:
     """Return whether tail-validation condition-context debug output is on."""
     return os.environ.get("INERTIA_DEBUG_TV_CONDITION_CONTEXT", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _tv_debug_8616(message: str) -> None:
+@cython.ccall
+def _tv_debug_8616(message: object) -> None:
     """Emit one tail-validation condition-context debug line."""
     import sys
 
     print(message, file=sys.stderr, flush=True)
 
 
+@cython.ccall
 def _projection_condition_fingerprint_8616(
     cond: object,
     project: object,
     codegen: object,
-    ins_addr: int,
-    block_addr: int,
-) -> str | None:
+    ins_addr: cython.longlong,
+    block_addr: cython.longlong,
+) -> object:
     """Return the first available call-return/materialized fingerprint."""
+    direct_return: object
+    materialized_fingerprint: object
+    stored_return: object
     direct_return = direct_call_return_condition_projection_8616(
         project,
         codegen,
@@ -216,15 +235,16 @@ def _projection_condition_fingerprint_8616(
     return None
 
 
+@cython.ccall
 def _decoded_condition_fingerprint_tail_8616(
     decoded: object,
     cond: object,
     project: object,
     codegen: object,
-    ins_addr: int,
-    block_addr: int,
-    direct_cmp_fingerprint: str | None,
-) -> str | None:
+    ins_addr: cython.longlong,
+    block_addr: cython.longlong,
+    direct_cmp_fingerprint: object,
+) -> object:
     """Return the decoded-condition fingerprint or a refused None."""
     guard = cast(_DecodedCmpGuardLike8616, decoded)
     lhs = _expr_fingerprint(guard.lhs, project)
@@ -239,7 +259,7 @@ def _decoded_condition_fingerprint_tail_8616(
             )
         return None
     decoded_fingerprint = f"{guard.op}({lhs},{rhs})"
-    if direct_cmp_fingerprint is not None and direct_cmp_fingerprint != decoded_fingerprint:
+    if direct_cmp_fingerprint is not None and operator.ne(direct_cmp_fingerprint, decoded_fingerprint):
         if codegen is not None:
             typing.cast(typing.Any, codegen)._inertia_tail_validation_direct_cmp_jcc_overrides_8616 = (
                 int(
@@ -271,8 +291,13 @@ def _decoded_condition_fingerprint_tail_8616(
     return decoded_fingerprint
 
 
-def _decoded_jcc_condition_fingerprint(cond: object, project: object) -> str | None:
+@cython.ccall
+def _decoded_jcc_condition_fingerprint(cond: object, project: object) -> object:
     """Build a validation fingerprint from JCC evidence owned by this node."""
+    decoded: object
+    direct_cmp_fingerprint: object
+    key: object
+    projection: object
     key = _condition_tags_8616(cond)
     if key is None:
         return None
@@ -300,20 +325,23 @@ def _decoded_jcc_condition_fingerprint(cond: object, project: object) -> str | N
     )
 
 
-def _fingerprint_contains_raw_register_8616(fingerprint: object) -> bool:
+@cython.ccall
+def _fingerprint_contains_raw_register_8616(fingerprint: object) -> cython.bint:
     """Return whether a validation fingerprint still exposes a raw register."""
     if not isinstance(fingerprint, str):
         return False
     return "reg:" in fingerprint
 
 
+@cython.ccall
 def _direct_cmp_operand_fingerprint_8616(
     operand: object,
     *,
     insn: object,
     debug_refuse: Callable[[str], None],
-) -> str | None:
+) -> object:
     """Fingerprint one narrow direct-cmp operand for validation context."""
+    mem: object
     operand_type = int(_dynamic_attr_8616(operand, "type", -1))
     if operand_type == X86_OP_IMM:
         value = _dynamic_attr_8616(operand, "imm", None)
@@ -348,13 +376,18 @@ def _direct_cmp_operand_fingerprint_8616(
     return f"global:{int(disp) & 0xFFFF:#x}"
 
 
+@cython.ccall
 def _direct_cmp_source_8616(
     project: object,
-    block_addr: int,
-    ins_addr: int,
+    block_addr: cython.longlong,
+    ins_addr: cython.longlong,
     debug_refuse: Callable[[str], None],
 ) -> tuple[object | None, str | None]:
     """Return the flag-producing cmp instruction and decoded jcc op, or refuse."""
+    cmp_insn: object
+    insns: object
+    jcc_index: object
+    op: object
     insns, jcc_index = _decode_block_and_jcc_index_8616(project, int(block_addr), int(ins_addr), False)
     if insns is None or jcc_index is None:
         debug_refuse("missing_jcc")
@@ -374,7 +407,7 @@ def _direct_cmp_source_8616(
 def _direct_cmp_operand_gate_8616(
     cmp_insn: object,
     debug_refuse: Callable[[str], None],
-) -> tuple[object, ...] | None:
+) -> object:
     """Return the two cmp operands, or refuse on unsupported shapes."""
     operands = tuple(cast(tuple[Any, ...], _dynamic_attr_8616(cmp_insn, "operands", ()) or ()))
     if len(operands) != 2:
@@ -382,7 +415,7 @@ def _direct_cmp_operand_gate_8616(
         return None
     immediate_operands = tuple(
         operand
-        for operand in operands
+        for operand in iter(operands)
         if int(_dynamic_attr_8616(operand, "type", -1)) == 2
         and isinstance(_dynamic_attr_8616(operand, "imm", None), int)
     )
@@ -392,22 +425,25 @@ def _direct_cmp_operand_gate_8616(
             + ",".join(
                 f"type={_dynamic_attr_8616(operand, 'type', None)} "
                 f"imm={_dynamic_attr_8616(operand, 'imm', None)!r}"
-                for operand in operands
+                for operand in iter(operands)
             )
         )
         return None
-    if any(int(_dynamic_attr_8616(operand, "type", -1)) == 1 for operand in operands):
+    if any(int(_dynamic_attr_8616(operand, "type", -1)) == 1 for operand in iter(operands)):
         debug_refuse("register_operand")
         return None
     return operands
 
 
+@cython.ccall
 def _direct_cmp_operand_pair_8616(
-    operands: tuple[object, ...],
+    operands: object,
     cmp_insn: object,
     debug_refuse: Callable[[str], None],
-) -> tuple[str, str] | None:
+) -> object:
     """Return the (lhs, rhs) operand fingerprints, or refuse."""
+    lhs: object
+    rhs: object
     lhs = _direct_cmp_operand_fingerprint_8616(operands[0], insn=cmp_insn, debug_refuse=debug_refuse)
     rhs = _direct_cmp_operand_fingerprint_8616(operands[1], insn=cmp_insn, debug_refuse=debug_refuse)
     if lhs is None or rhs is None:
@@ -423,9 +459,9 @@ def _direct_cmp_immediate_jcc_fingerprint(
     cond: object,
     project: object,
     codegen: object,
-    block_addr: int,
-    ins_addr: int,
-) -> str | None:
+    block_addr: cython.longlong,
+    ins_addr: cython.longlong,
+) -> object:
     """Return instruction-backed cmp-immediate condition evidence for validation.
 
     This is deliberately narrow: it only handles a direct ``cmp`` whose operand
@@ -435,10 +471,14 @@ def _direct_cmp_immediate_jcc_fingerprint(
     temporary C AST nodes may reuse Python object ids and collide with the
     expression fingerprint cache.
     """
+    cmp_insn: object
+    op: object
+    operands: object
+    pair: object
     _ = cond
     debug = _tv_condition_debug_enabled_8616()
 
-    def _debug_refuse(reason: str) -> None:
+    def _debug_refuse(reason: object) -> None:
         if not debug:
             return
         _tv_debug_8616(
@@ -466,15 +506,21 @@ def _direct_cmp_immediate_jcc_fingerprint(
     return fingerprint
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _ConditionFingerprintVisitor8616:
     """Collect owned condition fingerprints across the structured C AST."""
 
     project: object
-    mapping: dict[int, str] = field(default_factory=dict)
+    mapping: object = field(default_factory=dict)
 
+    @cython.ccall
     def visit_statements(self, node: CStatements) -> None:
         """Collect fingerprints for conditions inside one statement list."""
+        assign_stmt: object
+        fingerprint: object
+        cond: object
+        index: object
+        stmt: object
         statements = list(node.statements)
         for index, stmt in enumerate(statements[:-1]):
             assign_stmt = _last_assignment_in_stmt(stmt)
@@ -495,8 +541,12 @@ class _ConditionFingerprintVisitor8616:
         for stmt in statements:
             self.visit(stmt)
 
+    @cython.ccall
     def visit(self, node: object) -> None:
         """Walk the current C AST and collect owned condition fingerprints."""
+        body: object
+        else_node: object
+        _cond: object
         if isinstance(node, CStatements):
             self.visit_statements(node)
             return
@@ -516,7 +566,8 @@ class _ConditionFingerprintVisitor8616:
                 self.visit(body)
 
 
-def build_x86_16_contextual_condition_fingerprints(root: object, project: object) -> dict[int, str]:
+@cython.ccall
+def build_x86_16_contextual_condition_fingerprints(root: object, project: object) -> object:
     """Build contextual condition fingerprints keyed by current C AST node id."""
     visitor = _ConditionFingerprintVisitor8616(project=project)
     if root is not None:

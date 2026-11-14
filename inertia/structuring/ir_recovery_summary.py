@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery/reporting.
 
 Responsibility: summarize typed IR recovery counters from existing pipeline artifacts.
@@ -11,49 +12,57 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+import dataclasses
 
 __all__ = ["IRRecoverySummary", "summarize_x86_16_ir_recovery"]
 
-type IRRecoverySource = Mapping[str, object]
+IRRecoverySource = typing.TypeAliasType("IRRecoverySource", Mapping[str, object])
 
 
-def _value(source: IRRecoverySource, name: str, default: object = None) -> object:
+@cython.ccall
+def _value(source: IRRecoverySource, name: object, default: object = None) -> object:
     return source.get(name, default)
 
 
-def _count(value: object) -> int:
+@cython.ccall
+def _count(value: object) -> cython.longlong:
     return value if isinstance(value, int) else 0
 
 
-def _string_int_counts(value: object) -> dict[str, int]:
+@cython.ccall
+def _string_int_counts(value: object) -> object:
+    count: object
+    key: object
     if not isinstance(value, Mapping):
         return {}
-    counts: dict[str, int] = {}
+    counts: dict[str, cython.longlong] = {}
     for key, count in value.items():
         if isinstance(count, int):
             counts[str(key)] = count
     return counts
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRRecoverySummary:
     """Deterministic summary of already-collected typed IR recovery counters."""
 
-    block_count: int
-    instruction_count: int
-    refusal_count: int
-    aliasable_value_count: int
-    ssa_binding_count: int
-    phi_node_count: int
-    frame_slot_count: int
-    frame_refusal_count: int
-    space_counts: dict[str, int]
-    address_status_counts: dict[str, int]
-    segment_origin_counts: dict[str, int]
-    condition_counts: dict[str, int]
+    block_count: cython.longlong
+    instruction_count: cython.longlong
+    refusal_count: cython.longlong
+    aliasable_value_count: cython.longlong
+    ssa_binding_count: cython.longlong
+    phi_node_count: cython.longlong
+    frame_slot_count: cython.longlong
+    frame_refusal_count: cython.longlong
+    space_counts: object
+    address_status_counts: object
+    segment_origin_counts: object
+    condition_counts: object
 
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-compatible IR recovery payload."""

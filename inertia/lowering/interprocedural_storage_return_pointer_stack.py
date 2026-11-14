@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prepare and join Alias-versioned stack carriers for pointer flow.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -21,16 +24,19 @@ from inertia.widening.stack_word_register_transfers import (
 )
 
 from .interprocedural_storage_return_pointer_block import PointerCarrier8616
+import dataclasses
+import operator
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PointerStackTransferContext8616:
     """Indexed stack/register transfers and their closed-evidence status."""
 
-    by_instruction_addr: dict[int, tuple[StackWordRegisterTransfer8616, ...]]
-    complete: bool
+    by_instruction_addr: object
+    complete: cython.bint
 
 
+@cython.ccall
 def build_pointer_stack_transfer_context_8616(
     artifact: SSAFunctionArtifact,
 ) -> PointerStackTransferContext8616:
@@ -44,13 +50,14 @@ def build_pointer_stack_transfer_context_8616(
 
 
 def join_pointer_stack_carriers_8616(
-    predecessors: tuple[int, ...],
-    outputs: dict[int, dict[StackWordStorageVersion8616, PointerCarrier8616]],
-) -> tuple[dict[StackWordStorageVersion8616, PointerCarrier8616], bool]:
+    predecessors: object,
+    outputs: object,
+) -> tuple[dict[StackWordStorageVersion8616, PointerCarrier8616], cython.bint]:
     """Join only exact stack carriers present unchanged on every predecessor."""
-    if not predecessors or any(predecessor not in outputs for predecessor in predecessors):
+    key: object
+    if not predecessors or any(predecessor not in outputs for predecessor in iter(predecessors)):
         return {}, True
-    key_sets = tuple(set(outputs[predecessor]) for predecessor in predecessors)
+    key_sets = tuple(set(outputs[predecessor]) for predecessor in iter(predecessors))
     common = set.intersection(*key_sets)
     conflict = bool(set.union(*key_sets) - common)
     joined: dict[StackWordStorageVersion8616, PointerCarrier8616] = {}
@@ -58,8 +65,8 @@ def join_pointer_stack_carriers_8616(
         common,
         key=lambda item: (repr(item.storage.identity), item.versions),
     ):
-        carriers = tuple(outputs[predecessor][key] for predecessor in predecessors)
-        if any(carrier != carriers[0] for carrier in carriers[1:]):
+        carriers = tuple(outputs[predecessor][key] for predecessor in iter(predecessors))
+        if any(operator.ne(carrier, carriers[0]) for carrier in iter(carriers[1:])):
             conflict = True
             continue
         joined[key] = carriers[0]

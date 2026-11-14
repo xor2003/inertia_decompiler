@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Contracts for complete caller-observed return-type collection.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -20,6 +23,8 @@ from .interprocedural_storage_contracts import (
     StorageTrialValueClass8616,
 )
 from .interprocedural_storage_return_type_contracts import ReturnStorageTypeResult8616
+import dataclasses
+import operator
 
 __all__ = [
     "FunctionReturnStorageTypeFailure8616",
@@ -48,21 +53,21 @@ class FunctionReturnStorageTypeFailure8616(StrEnum):
     VALUE_CLASS_CONFLICT = "value_class_conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionReturnStorageTypeResult8616:
     """Function-wide return type proof and its exact per-call classifications."""
 
-    function_addr: int
+    function_addr: cython.longlong
     verdict: FunctionReturnStorageTypeVerdict8616
     signedness: StorageTrialSignedness8616 | None
     value_class: StorageTrialValueClass8616 | None
-    classifications: tuple[ReturnStorageTypeResult8616, ...]
-    neutral_fact_count: int
+    classifications: object
+    neutral_fact_count: cython.longlong
     failure: FunctionReturnStorageTypeFailure8616 | None
     stats: StorageTrialStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every caller fact supports one informative type."""
         return (
             self.verdict is FunctionReturnStorageTypeVerdict8616.PROVEN
@@ -71,5 +76,5 @@ class FunctionReturnStorageTypeResult8616:
             and self.value_class is StorageTrialValueClass8616.VALUE
             and self.failure is None
             and self.stats.complete
-            and len(self.classifications) + self.neutral_fact_count == self.stats.raw_fact_count
+            and operator.eq(len(self.classifications) + self.neutral_fact_count, self.stats.raw_fact_count)
         )

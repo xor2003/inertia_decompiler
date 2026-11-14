@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Project typed values from Alias-owned machine-BP stack storage.
 
 Layer: Types/Lowering.
@@ -14,6 +15,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, replace
 from enum import StrEnum
@@ -31,6 +34,8 @@ from .stack_variable_coordinates import (
     StackVariableCoordinateRegistry8616,
     stack_variable_coordinate_registry_8616,
 )
+import dataclasses
+import operator
 
 
 class StackValueProjectionStatus8616(StrEnum):
@@ -47,15 +52,15 @@ class StackValueProjectionStatus8616(StrEnum):
     UNSUPPORTED_WRITE_VIEW = "unsupported-write-view"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackValueOwnerHint8616:
     """Alias-proven canonical machine-BP owner for one projected subrange."""
 
-    bp_offset: int
-    size: int
+    bp_offset: cython.longlong
+    size: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackValueProjectionResult8616:
     """One projected stack expression or an evidence-backed refusal."""
 
@@ -64,20 +69,20 @@ class StackValueProjectionResult8616:
     owner: StackVariableCoordinateProjection8616 | None = None
 
     @property
-    def materialized(self) -> bool:
+    def materialized(self) -> cython.bint:
         """Return whether this result owns a usable structured expression."""
         return self.expression is not None and self.owner is not None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackValueProjectionStats8616:
     """Closed evidence loop for typed stack-value projections."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     def record(
         self,
@@ -111,10 +116,11 @@ class _CodegenBoundary8616(Protocol):
 class _CFunctionBoundary8616(Protocol):
     """Third-party function interface used to identify canonical arguments."""
 
-    arg_list: list[object] | tuple[object, ...]
+    arg_list: object
     statements: object
 
 
+@cython.ccall
 def stack_value_projection_stats_8616(
     codegen: object,
 ) -> StackValueProjectionStats8616:
@@ -127,6 +133,7 @@ def stack_value_projection_stats_8616(
     return stats if isinstance(stats, StackValueProjectionStats8616) else StackValueProjectionStats8616()
 
 
+@cython.ccall
 def _publish_result_8616(
     codegen: object,
     result: StackValueProjectionResult8616,
@@ -139,7 +146,8 @@ def _publish_result_8616(
     return result
 
 
-def _unsigned_type_for_width_8616(codegen: object, width: int) -> SimType:
+@cython.ccall
+def _unsigned_type_for_width_8616(codegen: object, width: cython.longlong) -> SimType:
     """Return an unsigned C type matching one supported runtime load width."""
     type_: SimType
     if width == 1:
@@ -156,10 +164,11 @@ def _unsigned_type_for_width_8616(codegen: object, width: int) -> SimType:
         return type_
 
 
+@cython.ccall
 def project_pointer_storage_value_8616(
     codegen: object,
     expression: structured_c.CExpression,
-    width: int,
+    width: cython.longlong,
 ) -> structured_c.CExpression | None:
     """Project a host C pointer view to its guest scalar storage value.
 
@@ -167,6 +176,7 @@ def project_pointer_storage_value_8616(
     offset bits, not the host address represented by structured C. Non-pointer
     values pass through unchanged; unsupported pointer widths refuse.
     """
+    helper_name: object
     try:
         source_type = expression.type
     except (AttributeError, ValueError):
@@ -188,7 +198,8 @@ def project_pointer_storage_value_8616(
     )
 
 
-def normalize_pointer_scalar_temporaries_8616(codegen: object) -> bool:
+@cython.ccall
+def normalize_pointer_scalar_temporaries_8616(codegen: object) -> cython.bint:
     """Keep machine scalar temporaries scalar after typed argument substitution.
 
     A pointer view recovered for a stack argument cannot change the declared
@@ -196,6 +207,9 @@ def normalize_pointer_scalar_temporaries_8616(codegen: object) -> bool:
     existing pointer-storage bridge only for matching 16/32-bit integer storage;
     pointer destinations and inconsistent or unknown widths stay untouched.
     """
+    cfunc: object
+    scalar: object
+    node: object
     boundary = cast(_CodegenBoundary8616, codegen)
     cfunc = boundary.cfunc
     root = cfunc.statements if cfunc is not None else None
@@ -216,7 +230,7 @@ def normalize_pointer_scalar_temporaries_8616(codegen: object) -> bool:
         if (
             width not in (2, 4)
             or not isinstance(lhs.type, (SimTypeShort, SimTypeInt, SimTypeLong))
-            or lhs.type.size != width * 8
+            or operator.ne(lhs.type.size, width * 8)
         ):
             continue
         scalar = project_pointer_storage_value_8616(codegen, rhs, width)
@@ -233,23 +247,23 @@ def normalize_pointer_scalar_temporaries_8616(codegen: object) -> bool:
 def _range_owners_8616(
     codegen: object,
     registry: StackVariableCoordinateRegistry8616,
-    bp_offset: int,
-    size: int,
-    owner_hint: StackValueOwnerHint8616 | None,
-) -> tuple[StackVariableCoordinateProjection8616, ...]:
+    bp_offset: cython.longlong,
+    size: cython.longlong,
+    owner_hint: object,
+) -> object:
     """Collect range-covering owners, honoring the hint and interface ties."""
     owners = tuple(
         projection
-        for projection in registry.projections
+        for projection in iter(registry.projections)
         if projection.bp_offset <= bp_offset
         and projection.bp_offset + projection.size >= bp_offset + size
     )
     if owner_hint is not None:
         owners = tuple(
             owner
-            for owner in owners
-            if owner.bp_offset == owner_hint.bp_offset
-            and owner.size == owner_hint.size
+            for owner in iter(owners)
+            if operator.eq(owner.bp_offset, owner_hint.bp_offset)
+            and operator.eq(owner.size, owner_hint.size)
         )
     if len(owners) > 1:
         try:
@@ -258,8 +272,8 @@ def _range_owners_8616(
             arguments = ()
         interface_owners = tuple(
             replace(owner, cvar=argument)
-            for owner in owners
-            for argument in arguments
+            for owner in iter(owners)
+            for argument in iter(arguments)
             if isinstance(argument, structured_c.CVariable)
             and isinstance(argument.variable, SimStackVariable)
             and registry.for_variable(argument.variable) is owner
@@ -269,17 +283,18 @@ def _range_owners_8616(
     return owners
 
 
+@cython.ccall
 def _lvalue_projection_8616(
     codegen: object,
     owner: StackVariableCoordinateProjection8616,
     expression: structured_c.CExpression,
     source_type: SimType | None,
-    relative_offset: int,
-    size: int,
+    relative_offset: cython.longlong,
+    size: cython.longlong,
 ) -> StackValueProjectionResult8616:
     """Project a proven writable byte view of a word owner."""
     status = StackValueProjectionStatus8616.EXACT_VALUE
-    if relative_offset != 0 or size != owner.value_size:
+    if relative_offset != 0 or operator.ne(size, owner.value_size):
         if size != 1 or owner.value_size != 2 or not isinstance(source_type, SimTypeShort):
             return _publish_result_8616(codegen, StackValueProjectionResult8616(
                 StackValueProjectionStatus8616.UNSUPPORTED_WRITE_VIEW, owner=owner,
@@ -297,13 +312,14 @@ def _lvalue_projection_8616(
     return _publish_result_8616(codegen, StackValueProjectionResult8616(status, expression, owner))
 
 
+@cython.ccall
 def project_stack_value_range_8616(
     codegen: object,
-    bp_offset: int,
-    size: int,
+    bp_offset: cython.longlong,
+    size: cython.longlong,
     *,
     owner_hint: StackValueOwnerHint8616 | None = None,
-    require_lvalue: bool = False,
+    require_lvalue: cython.bint = False,
 ) -> StackValueProjectionResult8616:
     """Project one proven stack value range as a typed C expression.
 
@@ -378,20 +394,22 @@ def project_stack_value_range_8616(
     )
 
 
+@cython.ccall
 def _value_projection_8616(
     codegen: object,
     owner: StackVariableCoordinateProjection8616,
     expression: structured_c.CExpression,
     source_type: SimType | None,
-    relative_offset: int,
-    size: int,
+    relative_offset: cython.longlong,
+    size: cython.longlong,
 ) -> StackValueProjectionResult8616:
     """Project the proven owner value at one contained offset and width."""
+    projected_pointer: object
     if (
         isinstance(source_type, SimTypePointer)
         and isinstance(source_type.pts_to, SimTypeFunction)
         and relative_offset == 0
-        and size == owner.value_size
+        and operator.eq(size, owner.value_size)
     ):
         return _publish_result_8616(
             codegen,
@@ -433,7 +451,7 @@ def _value_projection_8616(
     )
     status = (
         StackValueProjectionStatus8616.EXACT_VALUE
-        if relative_offset == 0 and size == owner.value_size
+        if relative_offset == 0 and operator.eq(size, owner.value_size)
         else StackValueProjectionStatus8616.CONTAINED_VALUE
     )
     return _publish_result_8616(

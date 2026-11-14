@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Finalize exact structured occurrences of machine callsites.
 
 Layer: Structuring.
@@ -15,6 +16,8 @@ rewrite cleanup, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -37,11 +40,12 @@ logger: logging.Logger = logging.getLogger(__name__)
 class _CodegenOccurrenceSurface8616(Protocol):
     """Codegen state updated after a proven structured occurrence change."""
 
-    _inertia_codegen_decl_refresh_required_8616: bool
-    _inertia_force_codegen_regeneration_8616: bool
+    _inertia_codegen_decl_refresh_required_8616: cython.bint
+    _inertia_force_codegen_regeneration_8616: cython.bint
 
 
-def finalize_shared_call_occurrences_8616(project: object, codegen: object) -> bool:
+@cython.ccall
+def finalize_shared_call_occurrences_8616(project: object, codegen: object) -> cython.bint:
     """Normalize and own exact call occurrences after an AST rebuild boundary."""
     changed = bool(_codegen.split_distinct_condition_call_occurrences_8616(codegen))
     stored_assignments = materialize_stored_call_result_assignments_8616(codegen)

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Rewrite/Postprocess cleanup.
 
 Responsibility: prune adjacent temporary or dead register copy carriers after their value has moved.
@@ -6,6 +7,8 @@ Do not recover new semantics, storage identity, types, call signatures, control 
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -17,20 +20,22 @@ from angr.analyses.decompiler.structured_codegen.c import CAssignment, CConstant
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
 
 from inertia.postprocess.decompiler_postprocess_utils import _iter_c_nodes_deep_8616
+import dataclasses
+import operator
 
 __all__ = ["prune_adjacent_temporary_copy_assignments_8616"]
 
-type TrivialCopyKey8616 = tuple[object, ...]
+TrivialCopyKey8616 = typing.TypeAliasType("TrivialCopyKey8616", tuple[object, ...])
 
 
 class TrivialCopyCodegen8616(Protocol):
     """Dynamic codegen contract for trivial-copy cleanup counters and CFunction root."""
 
     cfunc: object
-    trivial_copy_candidates_8616: int
-    trivial_copy_pruned_8616: int
-    trivial_copy_dead_temp_to_local_pruned_8616: int
-    trivial_copy_refused_live_temp_8616: int
+    trivial_copy_candidates_8616: cython.longlong
+    trivial_copy_pruned_8616: cython.longlong
+    trivial_copy_dead_temp_to_local_pruned_8616: cython.longlong
+    trivial_copy_refused_live_temp_8616: cython.longlong
 
 
 _TRIVIAL_COPY_COUNTERS_8616 = (
@@ -41,8 +46,11 @@ _TRIVIAL_COPY_COUNTERS_8616 = (
 )
 
 
+@cython.ccall
 def _ensure_trivial_copy_counters_8616(typed_codegen: TrivialCopyCodegen8616) -> None:
     """Initialize dynamic codegen boundary diagnostic counters."""
+    value: object
+    name: object
     for name in _TRIVIAL_COPY_COUNTERS_8616:
         try:
             value = getattr(typed_codegen, name)
@@ -53,28 +61,33 @@ def _ensure_trivial_copy_counters_8616(typed_codegen: TrivialCopyCodegen8616) ->
                 setattr(typed_codegen, name, 0)
 
 
-def _is_temporary_name_8616(name: str | None) -> bool:
+@cython.ccall
+def _is_temporary_name_8616(name: object) -> cython.bint:
     """Return whether a dynamic angr/codegen variable name is a generated temporary."""
     return isinstance(name, str) and name.startswith(("vvar_", "tmp_", "ir_"))
 
 
-def _is_generic_local_name_8616(name: str | None) -> bool:
+@cython.ccall
+def _is_generic_local_name_8616(name: object) -> cython.bint:
     """Return whether a dynamic angr/codegen variable name is a generic local."""
     return isinstance(name, str) and name.startswith(("local_", "arg_"))
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _TrivialCopyWalk8616:
     """State and helpers for one trivial-copy prune walk over a C AST."""
 
     typed_codegen: TrivialCopyCodegen8616
-    debug: bool
+    debug: cython.bint
     log: logging.Logger
-    changed: bool = False
-    seen_statement_lists: set[int] = field(default_factory=set)
+    changed: cython.bint = False
+    seen_statement_lists: object = field(default_factory=set)
 
+    @cython.ccall
     def _debug_expr(self, expr: object) -> tuple[str, str | None, str | None]:
         """Render one dynamic boundary: third-party angr AST node for diagnostics."""
+        c_repr: object
+        dirty: object
         c_repr = getattr(expr, "c_repr", None)
         if not callable(c_repr):
             return type(expr).__name__, None, None
@@ -89,8 +102,12 @@ class _TrivialCopyWalk8616:
             repr(dirty) if dirty is not None else None,
         )
 
-    def _variable_name(self, expr: object) -> str | None:
+    @cython.ccall
+    def _variable_name(self, expr: object) -> object:
         """Return variable names from a dynamic boundary: angr codegen C AST nodes."""
+        c_repr: object
+        idx: object
+        name: object
         if expr.__class__.__name__ == "CDirtyExpression":
             c_repr = getattr(expr, "c_repr", None)
             if callable(c_repr):
@@ -107,8 +124,10 @@ class _TrivialCopyWalk8616:
         name = getattr(variable, "name", None)
         return name if isinstance(name, str) and name else None
 
+    @cython.ccall
     def _temporary_key(self, expr: object) -> TrivialCopyKey8616 | None:
         """Return temporary identity keys from a dynamic boundary: angr codegen C AST nodes."""
+        variable: object
         if expr.__class__.__name__ == "CDirtyExpression":
             name = self._variable_name(expr)
             return ("dirty", name) if _is_temporary_name_8616(name) else None
@@ -124,7 +143,8 @@ class _TrivialCopyWalk8616:
             return ("name", name) if _is_temporary_name_8616(name) else None
         return None
 
-    def _is_generated_temporary_lvalue(self, expr: object) -> bool:
+    @cython.ccall
+    def _is_generated_temporary_lvalue(self, expr: object) -> cython.bint:
         """Return whether a dynamic angr/codegen lvalue is a generated temporary."""
         if expr.__class__.__name__ == "CDirtyExpression":
             return _is_temporary_name_8616(self._variable_name(expr))
@@ -133,8 +153,10 @@ class _TrivialCopyWalk8616:
             or isinstance(expr.variable, SimRegisterVariable)
         )
 
-    def _is_local_non_temp_lvalue(self, expr: object) -> bool:
+    @cython.ccall
+    def _is_local_non_temp_lvalue(self, expr: object) -> cython.bint:
         """Return stack-local status from a dynamic boundary: angr codegen C AST variables."""
+        variable: object
         name = self._variable_name(expr)
         if not isinstance(expr, CVariable) or _is_temporary_name_8616(name) or not _is_generic_local_name_8616(name):
             return False
@@ -145,21 +167,26 @@ class _TrivialCopyWalk8616:
             return base == "bp" and isinstance(offset, int) and offset >= 0
         return False
 
-    def _same_variable(self, left: object, right: object) -> bool:
+    @cython.ccall
+    def _same_variable(self, left: object, right: object) -> cython.bint:
         """Compare variables from a dynamic boundary: angr codegen C AST nodes."""
+        left_key: object
+        right_key: object
         left_key = self._temporary_key(left)
         right_key = self._temporary_key(right)
         if left_key is not None or right_key is not None:
-            return left_key == right_key
+            return operator.eq(left_key, right_key)
         if not isinstance(left, CVariable) or not isinstance(right, CVariable):
             return False
-        return getattr(left, "variable", None) is getattr(right, "variable", None) and getattr(
+        return getattr(left, "variable", None) is getattr(right, "variable", None) and operator.eq(getattr(
             left, "offset", None
-        ) == getattr(right, "offset", None)
+        ), getattr(right, "offset", None))
 
     @staticmethod
-    def _rhs_is_movable(expr: object) -> bool:
+    def _rhs_is_movable(expr: object) -> cython.bint:
         """Classify movable RHS expressions from a dynamic boundary: angr codegen C AST."""
+        child: object
+        attr: object
         if isinstance(expr, CFunctionCall):
             return True
         for attr in ("lhs", "rhs", "operand", "expr"):
@@ -168,8 +195,12 @@ class _TrivialCopyWalk8616:
                 return False
         return True
 
-    def _temporary_keys_in_node(self, node: object) -> set[TrivialCopyKey8616]:
+    @cython.ccall
+    def _temporary_keys_in_node(self, node: object) -> object:
         """Collect temporary keys from a dynamic boundary: angr codegen C AST subtree."""
+        child_key: object
+        key: object
+        child: object
         keys: set[TrivialCopyKey8616] = set()
         key = self._temporary_key(node)
         if key is not None:
@@ -180,7 +211,8 @@ class _TrivialCopyWalk8616:
                 keys.add(child_key)
         return keys
 
-    def _suffix_temporary_keys(self, statements: list[object]) -> list[set[TrivialCopyKey8616]]:
+    @cython.ccall
+    def _suffix_temporary_keys(self, statements: object) -> object:
         """Build suffix key sets from a dynamic boundary: angr codegen statement lists."""
         suffix: list[set[TrivialCopyKey8616]] = [set() for _ in range(len(statements) + 1)]
         running: set[TrivialCopyKey8616] = set()
@@ -189,28 +221,34 @@ class _TrivialCopyWalk8616:
             suffix[index] = running
         return suffix
 
-    def _references_temporary_key(self, node: object, key: TrivialCopyKey8616) -> bool:
+    @cython.ccall
+    def _references_temporary_key(self, node: object, key: TrivialCopyKey8616) -> cython.bint:
         """Return whether a subtree references one temporary key."""
         return key in self._temporary_keys_in_node(node)
 
-    def _pure_generated_setup_between_copy(self, stmt: CAssignment, lhs_key: TrivialCopyKey8616) -> bool:
+    @cython.ccall
+    def _pure_generated_setup_between_copy(self, stmt: CAssignment, lhs_key: TrivialCopyKey8616) -> cython.bint:
         """Classify setup statements from a dynamic boundary: angr codegen assignments."""
+        stmt_lhs: object
+        stmt_lhs_key: object
+        stmt_rhs: object
         stmt_lhs = getattr(stmt, "lhs", None)
         stmt_rhs = getattr(stmt, "rhs", None)
         stmt_lhs_key = self._temporary_key(stmt_lhs)
         return (
             stmt_lhs_key is not None
             and self._is_generated_temporary_lvalue(stmt_lhs)
-            and stmt_lhs_key != lhs_key
+            and operator.ne(stmt_lhs_key, lhs_key)
             and not self._references_temporary_key(stmt_rhs, lhs_key)
             and not isinstance(stmt_rhs, CFunctionCall)
             and self._rhs_is_movable(stmt_rhs)
         )
 
+    @cython.ccall
     def _find_consumer_index(
         self,
-        statements: list[object],
-        start_idx: int,
+        statements: object,
+        start_idx: cython.longlong,
         lhs_key: TrivialCopyKey8616,
         rhs: object,
     ) -> int | None:
@@ -226,7 +264,7 @@ class _TrivialCopyWalk8616:
             candidate_rhs = candidate.rhs
             if (
                 not _is_temporary_name_8616(self._variable_name(candidate_lhs))
-                and self._temporary_key(candidate_rhs) == lhs_key
+                and operator.eq(self._temporary_key(candidate_rhs), lhs_key)
             ):
                 return idx
             if not self._pure_generated_setup_between_copy(candidate, lhs_key):
@@ -234,14 +272,18 @@ class _TrivialCopyWalk8616:
             idx += 1
         return None
 
+    @cython.ccall
     def _dead_temp_to_local_assignment(
         self,
         stmt: CAssignment,
-        idx: int,
-        suffix_keys: list[set[TrivialCopyKey8616]],
+        idx: cython.longlong,
+        suffix_keys: object,
         live_out_keys: Set[TrivialCopyKey8616],
-    ) -> bool:
+    ) -> cython.bint:
         """Classify dead temp-to-local assignments from a dynamic boundary: angr codegen C AST."""
+        lhs: object
+        lhs_key: object
+        rhs: object
         lhs = getattr(stmt, "lhs", None)
         rhs = getattr(stmt, "rhs", None)
         lhs_key = self._temporary_key(lhs)
@@ -254,13 +296,14 @@ class _TrivialCopyWalk8616:
             and self._rhs_is_movable(rhs)
         )
 
+    @cython.ccall
     def _dead_temp_to_local(
         self,
         stmt: object,
-        idx: int,
-        suffix_keys: list[set[TrivialCopyKey8616]],
+        idx: cython.longlong,
+        suffix_keys: object,
         live_out_keys: Set[TrivialCopyKey8616],
-    ) -> bool:
+    ) -> cython.bint:
         """Delete one proven dead temp-to-local assignment."""
         if not isinstance(stmt, CAssignment) or not self._dead_temp_to_local_assignment(
             stmt, idx, suffix_keys, live_out_keys
@@ -279,6 +322,7 @@ class _TrivialCopyWalk8616:
         self.changed = True
         return True
 
+    @cython.ccall
     def _debug_copy_candidate_8616(
         self,
         stmt: CAssignment,
@@ -291,6 +335,8 @@ class _TrivialCopyWalk8616:
         and expression variants need not expose value or variable fields. Missing
         fields stay None in this diagnostic; they supply no liveness evidence.
         """
+        next_lhs: object
+        next_rhs: object
         lhs = stmt.lhs
         rhs = stmt.rhs
         next_lhs = getattr(next_stmt, "lhs", None)
@@ -315,19 +361,22 @@ class _TrivialCopyWalk8616:
             self._debug_expr(next_rhs),
         )
 
+    @cython.ccall
     def _materialize_copy_fold_8616(
         self,
-        statements: list[object],
-        idx: int,
-        consumer_idx: int,
+        statements: object,
+        idx: cython.longlong,
+        consumer_idx: cython.longlong,
         next_stmt: CAssignment,
         rhs: object,
         lhs_key: TrivialCopyKey8616,
-        suffix_keys: list[set[TrivialCopyKey8616]],
+        suffix_keys: object,
         live_out_keys: Set[TrivialCopyKey8616],
-        pruned: list[object],
-    ) -> int:
+        pruned: object,
+    ) -> cython.longlong:
         """Splice a producer value into its consumer and return the next index."""
+        skipped: object
+        skipped_idx: object
         for skipped_idx, skipped in enumerate(
             statements[idx + 1 : consumer_idx], start=idx + 1
         ):
@@ -343,16 +392,19 @@ class _TrivialCopyWalk8616:
         self.changed = True
         return consumer_idx + 1
 
+    @cython.ccall
     def _copy_pair_arm(
         self,
-        statements: list[object],
-        idx: int,
-        suffix_keys: list[set[TrivialCopyKey8616]],
+        statements: object,
+        idx: cython.longlong,
+        suffix_keys: object,
         live_out_keys: Set[TrivialCopyKey8616],
         statement_live_out: Set[TrivialCopyKey8616],
-        pruned: list[object],
+        pruned: object,
     ) -> int | None:
         """Fold a producer/consumer copy pair; return the next index or None."""
+        consumer_idx: object
+        lhs_key: object
         stmt = statements[idx]
         if idx + 1 >= len(statements) or not isinstance(stmt, CAssignment):
             return None
@@ -391,12 +443,14 @@ class _TrivialCopyWalk8616:
             statements, idx, consumer_idx, next_stmt, rhs, lhs_key, suffix_keys, live_out_keys, pruned
         )
 
+    @cython.ccall
     def _walk_statement_list(
         self,
-        statements: list[object],
+        statements: object,
         live_out_keys: Set[TrivialCopyKey8616] = frozenset(),
     ) -> None:
         """Rewrite one statement list from a dynamic boundary: angr codegen C AST."""
+        next_idx: object
         list_id = id(statements)
         if list_id in self.seen_statement_lists:
             return
@@ -420,21 +474,27 @@ class _TrivialCopyWalk8616:
             self._walk_structural_children(stmt, statement_live_out)
             pruned.append(stmt)
             idx += 1
-        if len(pruned) != len(statements):
+        if operator.ne(len(pruned), len(statements)):
             statements[:] = pruned
 
+    @cython.ccall
     def _walk_switch_cases_8616(self, node: object, live_out_keys: Set[TrivialCopyKey8616]) -> None:
         """Walk switch-case bodies from a dynamic angr/codegen boundary node."""
+        _case_value: object
+        case_body: object
         cases = cast(Iterable[tuple[object, object]], getattr(node, "cases", ()) or ())
         for _case_value, case_body in tuple(cases):
             self._walk_structural_children(case_body, live_out_keys)
 
+    @cython.ccall
     def _walk_structural_children(
         self,
         node: object,
         live_out_keys: Set[TrivialCopyKey8616] = frozenset(),
     ) -> None:
         """Walk structural children from a dynamic boundary: angr codegen C AST nodes."""
+        _condition: object
+        child: object
         if node is None:
             return
         node_type = type(node).__name__
@@ -461,8 +521,10 @@ class _TrivialCopyWalk8616:
             self._walk_structural_children(getattr(node, "body", None), loop_live_out)
 
 
-def prune_adjacent_temporary_copy_assignments_8616(codegen: object) -> bool:
+@cython.ccall
+def prune_adjacent_temporary_copy_assignments_8616(codegen: object) -> cython.bint:
     """Fold dead copy carriers across a dynamic boundary: angr codegen C AST."""
+    cfunc: object
     typed_codegen = cast(TrivialCopyCodegen8616, codegen)
     cfunc = typed_codegen.cfunc
     if cfunc is None:

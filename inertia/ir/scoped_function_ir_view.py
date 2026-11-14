@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Scoped function-IR CFG view bound to one authenticated consuming entry.
 
 Layer: IR / control-domain transport.
@@ -31,6 +32,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
@@ -83,8 +86,11 @@ from .vex_terminal_jump import (
     TerminalJumpEvidence8616,
     TerminalJumpRefusalReason8616,
 )
+import dataclasses
+import operator
+import builtins
 
-type EntryJumpConsumingScope8616 = Real16InvocationDomain8616 | NearCallJumpScope8616
+EntryJumpConsumingScope8616 = typing.TypeAliasType("EntryJumpConsumingScope8616", Real16InvocationDomain8616 | NearCallJumpScope8616)
 
 
 __all__ = [
@@ -115,16 +121,18 @@ class ScopedFunctionIRViewFailure8616(StrEnum):
     RESIDUAL_REFUSAL = "residual_refusal"
 
 
+@cython.ccall
 def _same_consuming_scope_8616(
-    offered: EntryJumpConsumingScope8616 | None,
+    offered: object,
     retained: EntryJumpConsumingScope8616 | None,
-) -> bool:
+) -> cython.bint:
     """Keep near-call identity distinct from full invocation-domain transport."""
     if isinstance(offered, NearCallJumpScope8616) or isinstance(retained, NearCallJumpScope8616):
         return offered is retained
     return offered is not None and same_real16_entry_scope_8616(offered, retained)
 
 
+@cython.ccall
 def _apply_for_scope_8616(
     artifact: IRFunctionArtifact, proof: EntryJumpDomainProof8616,
     scope: EntryJumpConsumingScope8616 | None,
@@ -143,11 +151,12 @@ def _apply_for_scope_8616(
     return apply_entry_jump_domain_8616(artifact, proof, invocation_scope=scope, projection_mode=mode)
 
 
+@cython.ccall
 def _scope_surface_bound_8616(
-    scope: EntryJumpConsumingScope8616 | None,
+    scope: object,
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
-) -> bool:
+) -> cython.bint:
     """Prove the retained entry owns the identical raw source surface.
 
     The anchor rule mirrors the domain's own discharge owner: a
@@ -160,6 +169,7 @@ def _scope_surface_bound_8616(
     was proved over, rooted at the consumed function head under the same
     project authority.
     """
+    coverage: object
     if isinstance(scope, NearCallJumpScope8616):
         # This gate binds ownership only, just like the invocation cases below.
         # Both consumers synchronously call the application owner, which
@@ -168,13 +178,13 @@ def _scope_surface_bound_8616(
             scope.context.boundary is boundary
             and scope.project is boundary.project
             and scope.artifact is artifact
-            and scope.context.target_addr == artifact.function_addr
+            and operator.eq(scope.context.target_addr, artifact.function_addr)
         )
     if scope is None or type(scope) is not Real16InvocationDomain8616:
         return False
     if scope.project is not boundary.project:
         return False
-    if boundary.addr != artifact.function_addr:
+    if operator.ne(boundary.addr, artifact.function_addr):
         return False
     coverage = scope.coverage
     if coverage is not None:
@@ -201,7 +211,7 @@ def _admitted_block_failure_8616(
     source_block: IRBlock,
     effective_block: IRBlock,
     jump: AdmittedTerminalJump8616,
-) -> str | None:
+) -> object:
     """Reconcile one admitted block against the exact proved delta.
 
     Only the proved rewrite is tolerated: the retained terminal JMP gains
@@ -212,15 +222,17 @@ def _admitted_block_failure_8616(
     identity lives on the source surface — and every non-discharged
     refusal and non-admitted edge must survive untouched.
     """
-    if len(effective_block.instrs) != len(source_block.instrs):
+    effective_instr: object
+    source_instr: object
+    if operator.ne(len(effective_block.instrs), len(source_block.instrs)):
         return "admitted block instruction census changed"
     rewritten = 0
     proven_args = (IRValue(MemSpace.CONST, const=jump.target, size=4),)
     for source_instr, effective_instr in zip(
         source_block.instrs, effective_block.instrs, strict=True
     ):
-        if source_instr.op == "JMP" and source_instr.addr == jump.head:
-            if effective_instr != replace(source_instr, args=proven_args):
+        if source_instr.op == "JMP" and operator.eq(source_instr.addr, jump.head):
+            if operator.ne(effective_instr, replace(source_instr, args=proven_args)):
                 return (
                     "admitted transfer instruction diverges from the "
                     "proved operand rewrite"
@@ -235,29 +247,30 @@ def _admitted_block_failure_8616(
         return "admitted transfer instruction is missing or ambiguous"
     expected_refusals = tuple(
         refusal
-        for refusal in source_block.refusals
+        for refusal in iter(source_block.refusals)
         if not (
-            refusal.kind == _PENDING_JUMP_REFUSAL_KIND_8616
-            and refusal.block_addr == source_block.addr
+            operator.eq(refusal.kind, _PENDING_JUMP_REFUSAL_KIND_8616)
+            and operator.eq(refusal.block_addr, source_block.addr)
         )
     )
-    if effective_block.refusals != expected_refusals:
+    if operator.ne(effective_block.refusals, expected_refusals):
         return (
             "admitted block refusal census diverges from the proved "
             "discharge"
         )
-    if effective_block.successor_addrs != tuple(
-        sorted({*source_block.successor_addrs, jump.target})
-    ):
+    if operator.ne(effective_block.successor_addrs, tuple(
+        sorted(set(source_block.successor_addrs) | {jump.target})
+    )):
         return "admitted block edge census diverges from the proved target"
     return None
 
 
+@cython.ccall
 def _transform_delta_failure_8616(
-    source_blocks: tuple[IRBlock, ...],
-    effective_blocks: tuple[IRBlock, ...],
-    applied: tuple[AdmittedTerminalJump8616, ...],
-) -> str | None:
+    source_blocks: object,
+    effective_blocks: object,
+    applied: object,
+) -> object:
     """Reconcile the effective census against the exact proved delta.
 
     Only an admitted block may differ from its source twin, and only by
@@ -268,9 +281,14 @@ def _transform_delta_failure_8616(
     extra refusal, or a reordered/foreign block is a typed mismatch,
     never a tolerated repair.
     """
-    if len(effective_blocks) != len(source_blocks):
+    admitted: object
+    failure: object
+    effective_block: object
+    jump: object
+    source_block: object
+    if operator.ne(len(effective_blocks), len(source_blocks)):
         return "effective block census differs from the proved source census"
-    admitted_by_block: dict[int, AdmittedTerminalJump8616] = {}
+    admitted_by_block: dict[cython.longlong, AdmittedTerminalJump8616] = {}
     for jump in applied:
         if jump.block_addr in admitted_by_block:
             return "two admitted edges claim the same terminal block"
@@ -278,7 +296,7 @@ def _transform_delta_failure_8616(
     for source_block, effective_block in zip(
         source_blocks, effective_blocks, strict=True
     ):
-        if effective_block.addr != source_block.addr:
+        if operator.ne(effective_block.addr, source_block.addr):
             return (
                 "effective block membership or order diverges from the "
                 "proved source census"
@@ -299,7 +317,8 @@ def _transform_delta_failure_8616(
     return None
 
 
-def _residual_refusal_failure_8616(blocks: tuple[IRBlock, ...]) -> str | None:
+@cython.ccall
+def _residual_refusal_failure_8616(blocks: object) -> object:
     """Refuse any effective refusal that is not a retained window pending.
 
     A pending selector-window refusal names an edge the proof never
@@ -308,9 +327,11 @@ def _residual_refusal_failure_8616(blocks: tuple[IRBlock, ...]) -> str | None:
     consuming entry cannot waive — the view refuses rather than carry it
     under an authenticated surface.
     """
+    block: object
+    refusal: object
     for block in blocks:
         for refusal in block.refusals:
-            if refusal.kind != _PENDING_JUMP_REFUSAL_KIND_8616:
+            if operator.ne(refusal.kind, _PENDING_JUMP_REFUSAL_KIND_8616):
                 return (
                     f"block 0x{block.addr:x} retains unrelated refusal "
                     f"{refusal.kind!r}; an authenticated entry never "
@@ -322,7 +343,7 @@ def _residual_refusal_failure_8616(blocks: tuple[IRBlock, ...]) -> str | None:
 def _application_authentic_8616(
     application: EntryJumpDomainApplication8616,
     proof: EntryJumpDomainProof8616,
-) -> bool:
+) -> cython.bint:
     """Bind one application record to the exact retained proof objects.
 
     The application owner retains the proof's own ``admitted`` objects and
@@ -345,13 +366,13 @@ def _application_authentic_8616(
         return False
     if application.refusals != ():
         return False
-    if len(application.applied) != len(proof.admitted):
+    if operator.ne(len(application.applied), len(proof.admitted)):
         return False
     if any(
         applied is not recorded
-        for applied, recorded in zip(
+        for applied, recorded in builtins.iter(zip(
             application.applied, proof.admitted, strict=True
-        )
+        ))
     ):
         return False
     return (application.invocation_scope is proof.invocation_scope
@@ -362,32 +383,32 @@ def _identity_surface_complete_8616(
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
     application: EntryJumpDomainApplication8616,
-) -> bool:
+) -> cython.bint:
     """Authenticate unchanged native control without inventing CALL authority.
 
     CONTROL_ONLY retains every raw CALL and reports no target admission.
     A semantic target request still requires the canonical admission owner;
     its missing proof cannot be promoted through an unchanged CFG.
     """
-    if any(instruction.op == "CALL" for block in artifact.blocks for instruction in block.instrs):
+    if any(instruction.op == "CALL" for block in iter(artifact.blocks) for instruction in iter(block.instrs)):
         if application.call_target_status is ScopedCallTargetStatus8616.NOT_REQUESTED:
             if application.call_targets or application.call_target_stats.materialized_count:
                 return False
         elif application.call_target_status is ScopedCallTargetStatus8616.ADMITTED:
-            calls = tuple((block, instruction) for block in artifact.blocks
-                          for instruction in block.instrs if instruction.op == "CALL")
+            calls = tuple((block, instruction) for block in iter(artifact.blocks)
+                          for instruction in iter(block.instrs) if instruction.op == "CALL")
             count = len(calls)
             stats = application.call_target_stats
             if ((stats.raw_fact_count, stats.normalized_fact_count, stats.classified_fact_count,
                  stats.materialized_count, stats.failure_count) != (count, count, count, count, 0)
-                    or len(application.call_targets) != count):
+                    or operator.ne(len(application.call_targets), count)):
                 return False
             if any(sum(target.block is block and target.instruction is instruction
-                       for target in application.call_targets) != 1 for block, instruction in calls):
+                       for target in iter(application.call_targets)) != 1 for block, instruction in iter(calls)):
                 return False
         else:
             return False
-    if artifact.refusals or any(block.refusals for block in artifact.blocks):
+    if artifact.refusals or any(block.refusals for block in iter(artifact.blocks)):
         return False
     return (
         closed_ir_boundary_cfg_8616(boundary, artifact)
@@ -396,9 +417,10 @@ def _identity_surface_complete_8616(
     )
 
 
+@cython.ccall
 def _expected_view_counts_8616(
-    proof: EntryJumpDomainProof8616, *, authenticated: bool
-) -> tuple[int, int, int, int, int]:
+    proof: EntryJumpDomainProof8616, *, authenticated: cython.bint
+) -> tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong, cython.longlong]:
     """Recompute the view's transport-admission ledger from the proof.
 
     These five counters account only for the scoped transport obligation —
@@ -418,7 +440,7 @@ def _expected_view_counts_8616(
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ScopedFunctionCFGProjection8616:
     """One bounded authenticated CFG consumption of the scoped view.
 
@@ -441,18 +463,18 @@ class ScopedFunctionCFGProjection8616:
     foreign address can never masquerade as a proved exit block.
     """
 
-    function_addr: int
+    function_addr: cython.longlong
     source_artifact: IRFunctionArtifact
     scope: EntryJumpConsumingScope8616
-    applied: tuple[AdmittedTerminalJump8616, ...]
-    blocks: tuple[IRBlock, ...]
-    successors: Mapping[int, tuple[int, ...]]
-    predecessors: Mapping[int, tuple[int, ...]]
-    pending: Mapping[int, tuple[IRRefusal, ...]]
+    applied: object
+    blocks: object
+    successors: Mapping[cython.longlong, tuple[cython.longlong, ...]]
+    predecessors: Mapping[cython.longlong, tuple[cython.longlong, ...]]
+    pending: Mapping[cython.longlong, tuple[IRRefusal, ...]]
 
     #: Raw blocks proved unreachable under this exact consuming invocation.
     #: They remain in the instruction census but grant no outgoing claim.
-    unreachable_block_addrs: frozenset[int] = frozenset()
+    unreachable_block_addrs: frozenset[cython.longlong] = frozenset()
 
     # Calls are separate conditional semantic facts; blocks stay control-only.
     call_targets: tuple[AdmittedScopedCallTarget8616, ...] = ()
@@ -461,14 +483,15 @@ class ScopedFunctionCFGProjection8616:
         default_factory=lambda: EntryJumpDomainStats8616(0, 0, 0, 0, 0),
     )
 
-    def block_for(self, block_addr: int) -> IRBlock | None:
+    def block_for(self, block_addr: cython.longlong) -> IRBlock | None:
         """Return the effective block, or ``None`` outside the census."""
+        block: object
         for block in self.blocks:
-            if block.addr == block_addr:
+            if operator.eq(block.addr, block_addr):
                 return block
         return None
 
-    def successors_for(self, block_addr: int) -> tuple[int, ...] | None:
+    def successors_for(self, block_addr: cython.longlong) -> object:
         """Return authenticated successors, or ``None``.
 
         ``None`` means the address is outside the authenticated census or
@@ -478,11 +501,11 @@ class ScopedFunctionCFGProjection8616:
         """
         return self.successors.get(block_addr)
 
-    def predecessors_for(self, block_addr: int) -> tuple[int, ...] | None:
+    def predecessors_for(self, block_addr: cython.longlong) -> object:
         """Return recorded census in-edges, or ``None`` outside census."""
         return self.predecessors.get(block_addr)
 
-    def pending_for(self, block_addr: int) -> tuple[IRRefusal, ...] | None:
+    def pending_for(self, block_addr: cython.longlong) -> object:
         """Return residual refusals for one census block, or ``None``.
 
         ``None`` means the address is outside the authenticated census; an
@@ -492,7 +515,7 @@ class ScopedFunctionCFGProjection8616:
         return self.pending.get(block_addr)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ScopedFunctionIRView8616:
     """Scoped CFG view over one raw in-flight function artifact.
 
@@ -527,12 +550,12 @@ class ScopedFunctionIRView8616:
     proof: EntryJumpDomainProof8616
     application: EntryJumpDomainApplication8616 | None
     failure: ScopedFunctionIRViewFailure8616 | None
-    detail: str
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    detail: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
     invocation_scope: Real16InvocationDomain8616 | None = field(
         default=None, compare=False, repr=False
     )
@@ -542,13 +565,13 @@ class ScopedFunctionIRView8616:
     )
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """A scoped view never completes context-free; see ``complete_for``."""
         return self.complete_for(None)
 
     def _consumption_bound_8616(
         self, consuming_scope: EntryJumpConsumingScope8616 | None
-    ) -> bool:
+    ) -> cython.bint:
         """Rebind the offered entry and retained records to the proof.
 
         The offered entry must be a typed invocation domain that
@@ -591,9 +614,9 @@ class ScopedFunctionIRView8616:
             self.materialized_count,
             self.failure_count,
         )
-        if any(type(count) is not int for count in counts) or counts != (
+        if any(type(count) is not int for count in iter(counts)) or operator.ne(counts, (
             _expected_view_counts_8616(self.proof, authenticated=True)
-        ):
+        )):
             return False
         return (
             _transform_delta_failure_8616(
@@ -617,6 +640,7 @@ class ScopedFunctionIRView8616:
         provenance — must equal the retained census, and no unrelated
         refusal may survive on the effective surface.
         """
+        retained: object
         retained = self.application
         fresh = _apply_for_scope_8616(self.source_artifact, self.proof, consuming_scope, mode)
         if not _application_authentic_8616(fresh, self.proof):
@@ -667,7 +691,7 @@ class ScopedFunctionIRView8616:
 
     def complete_for(
         self, consuming_scope: EntryJumpConsumingScope8616 | None
-    ) -> bool:
+    ) -> cython.bint:
         """Revalidate the retained chain under the offered consuming entry.
 
         This verdict certifies the scoped transport admission only: the
@@ -681,14 +705,15 @@ class ScopedFunctionIRView8616:
 
     def applied_jumps_for(
         self, consuming_scope: EntryJumpConsumingScope8616 | None
-    ) -> tuple[AdmittedTerminalJump8616, ...] | None:
+    ) -> object:
         """Return the admitted terminal edges under an authenticated entry."""
+        application: object
         application = self._validated_application_for(consuming_scope)
         return None if application is None else application.applied
 
     def effective_blocks_for(
         self, consuming_scope: EntryJumpConsumingScope8616 | None
-    ) -> tuple[IRBlock, ...] | None:
+    ) -> object:
         """Return the effective block surface under an authenticated entry.
 
         Admitted blocks are reconstructed by the application owner, so
@@ -697,14 +722,15 @@ class ScopedFunctionIRView8616:
         ``source_artifact`` instead. Residual pending-window refusals
         remain visible on this surface.
         """
+        application: object
         application = self._validated_application_for(consuming_scope)
         return None if application is None else application.blocks
 
     def effective_successors_for(
         self,
         consuming_scope: EntryJumpConsumingScope8616 | None,
-        block_addr: int,
-    ) -> tuple[int, ...] | None:
+        block_addr: cython.longlong,
+    ) -> object:
         """Return the scoped CFG successors of one block, or ``None``.
 
         ``None`` means there is no authenticated outgoing claim: the view
@@ -715,19 +741,21 @@ class ScopedFunctionIRView8616:
         A consumer walking many blocks should validate once through
         ``cfg_projection_for`` instead of revalidating per block here.
         """
+        application: object
+        block: object
         application = self._validated_application_for(consuming_scope)
         if application is None:
             return None
         for block in application.blocks:
-            if block.addr == block_addr:
+            if operator.eq(block.addr, block_addr):
                 return None if block.refusals else block.successor_addrs
         return None
 
     def effective_predecessors_for(
         self,
         consuming_scope: EntryJumpConsumingScope8616 | None,
-        block_addr: int,
-    ) -> tuple[int, ...] | None:
+        block_addr: cython.longlong,
+    ) -> object:
         """Return the scoped CFG predecessors of one block, or ``None``.
 
         ``None`` means the view refused or the address is outside the
@@ -735,22 +763,23 @@ class ScopedFunctionIRView8616:
         otherwise, including edges recorded from a block whose own
         outgoing claim remains pending.
         """
+        application: object
         application = self._validated_application_for(consuming_scope)
         if application is None:
             return None
-        census = {block.addr for block in application.blocks}
+        census = {block.addr for block in iter(application.blocks)}
         if block_addr not in census:
             return None
         return tuple(
             sorted(
                 block.addr
-                for block in application.blocks
+                for block in iter(application.blocks)
                 if block_addr in block.successor_addrs
             )
         )
 
     def cfg_projection_for(
-        self, consuming_scope: EntryJumpConsumingScope8616 | None,
+        self, consuming_scope: object,
         *, mode: EntryProjectionMode8616 = EntryProjectionMode8616.CONTROL_ONLY,
     ) -> ScopedFunctionCFGProjection8616 | None:
         """Validate once; return bounded CFG maps for one consumer operation.
@@ -764,14 +793,17 @@ class ScopedFunctionIRView8616:
         unconditional cache, and later independent consumers revalidate
         here rather than trusting a prior projection.
         """
+        application: object
+        block: object
+        target: object
         application = self._validated_application_for(consuming_scope, mode)
         if application is None or consuming_scope is None:
             return None
-        successors: dict[int, tuple[int, ...]] = {}
-        predecessor_lists: dict[int, list[int]] = {
-            block.addr: [] for block in application.blocks
+        successors: dict[cython.longlong, tuple[cython.longlong, ...]] = {}
+        predecessor_lists: dict[cython.longlong, list[cython.longlong]] = {
+            block.addr: [] for block in iter(application.blocks)
         }
-        pending: dict[int, tuple[IRRefusal, ...]] = {}
+        pending: dict[cython.longlong, tuple[IRRefusal, ...]] = {}
         for block in application.blocks:
             pending[block.addr] = block.refusals
             if not block.refusals:
@@ -792,13 +824,13 @@ class ScopedFunctionIRView8616:
             predecessors=MappingProxyType(
                 {
                     addr: tuple(sorted(preds))
-                    for addr, preds in predecessor_lists.items()
+                    for addr, preds in builtins.iter(predecessor_lists.items())
                 }
             ),
             pending=MappingProxyType(pending),
         )
 
-    def source_block(self, block_addr: int) -> IRBlock | None:
+    def source_block(self, block_addr: cython.longlong) -> IRBlock | None:
         """Return the original source block object for identity binding.
 
         Register-effect transfer and call-proof binding must consume the
@@ -806,8 +838,9 @@ class ScopedFunctionIRView8616:
         admitted blocks, so only the source surface preserves the
         identities retained evidence records point at.
         """
+        block: object
         for block in self.source_artifact.blocks:
-            if block.addr == block_addr:
+            if operator.eq(block.addr, block_addr):
                 return block
         return None
 
@@ -825,6 +858,7 @@ class ScopedFunctionIRView8616:
         distinguishable from closed coverage, and the five counters are
         recomputed from the retained proof rather than trusted.
         """
+        application: object
         application = self._validated_application_for(self.near_call_scope or self.invocation_scope)
         authenticated = application is not None
         counts = _expected_view_counts_8616(
@@ -845,10 +879,10 @@ class ScopedFunctionIRView8616:
             "applied": (
                 []
                 if application is None
-                else [jump.to_dict() for jump in application.applied]
+                else [jump.to_dict() for jump in iter(application.applied)]
             ),
             "call_targets": ([] if application is None else
-                             [call.to_dict() for call in application.call_targets]),
+                             [call.to_dict() for call in iter(application.call_targets)]),
             "call_target_stats": (None if application is None else
                                   application.call_target_stats.to_dict()),
             "call_target_status": (None if application is None else
@@ -857,7 +891,7 @@ class ScopedFunctionIRView8616:
                 0
                 if application is None
                 else sum(
-                    len(block.refusals) for block in application.blocks
+                    len(block.refusals) for block in iter(application.blocks)
                 )
             ),
             "invocation_scope": (
@@ -873,16 +907,13 @@ class ScopedFunctionIRView8616:
         }
 
 
+@cython.ccall
 def _view_evaluation_8616(
     source_artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
     proof: EntryJumpDomainProof8616,
     invocation_scope: EntryJumpConsumingScope8616,
-) -> tuple[
-    ScopedFunctionIRViewFailure8616 | None,
-    str,
-    EntryJumpDomainApplication8616 | None,
-]:
+) -> object:
     """Evaluate the scoped-view chain once for one supplied entry.
 
     The supplied entry must authenticate itself, own the identical raw
@@ -914,6 +945,7 @@ def _view_evaluation_8616(
     )
 
 
+@cython.ccall
 def _application_evaluation_8616(
     source_artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
@@ -932,6 +964,8 @@ def _application_evaluation_8616(
     rather than replayed here, so the sealed staged route shares this
     tail without a second admission.
     """
+    delta: object
+    residual: object
     if application.status is EntryJumpDomainApplicationStatus8616.STALE_INPUT:
         detail = (
             application.refusals[0].detail
@@ -973,6 +1007,7 @@ def _application_evaluation_8616(
     return None, "", application
 
 
+@cython.ccall
 def prove_scoped_function_ir_view_8616(
     source_artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
@@ -996,6 +1031,7 @@ def prove_scoped_function_ir_view_8616(
     result. Every refusal is a typed non-result view: no pending body is
     registered, published, or presented as universally complete.
     """
+    consuming_scope: object
     if type(source_artifact) is not IRFunctionArtifact:
         raise TypeError("scoped view requires a typed IRFunctionArtifact source")
     if not isinstance(boundary, ExactFunctionRangeBoundary8616):
@@ -1041,6 +1077,7 @@ def prove_scoped_function_ir_view_8616(
     )
 
 
+@cython.ccall
 def _assembled_scoped_view_8616(
     source_artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
@@ -1048,11 +1085,7 @@ def _assembled_scoped_view_8616(
     *,
     invocation_scope: Real16InvocationDomain8616 | None,
     near_call_scope: NearCallJumpScope8616 | None,
-    evaluation: tuple[
-        ScopedFunctionIRViewFailure8616 | None,
-        str,
-        EntryJumpDomainApplication8616 | None,
-    ],
+    evaluation: object,
 ) -> ScopedFunctionIRView8616:
     """Build the view receipt from one already-computed evaluation.
 
@@ -1062,6 +1095,8 @@ def _assembled_scoped_view_8616(
     certified evaluation retains the admitted application under the
     independently supplied consuming entry.
     """
+    application: object
+    failure: object
     failure, detail, application = evaluation
     authenticated = failure is None
     if authenticated:
@@ -1084,15 +1119,16 @@ def _assembled_scoped_view_8616(
     )
 
 
+@cython.ccall
 def _staged_scoped_function_ir_view_8616(
     source_artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
-    evidence_by_block: Mapping[int, TerminalJumpEvidence8616],
+    evidence_by_block: Mapping[cython.longlong, TerminalJumpEvidence8616],
     *,
     project: object,
     near_call_scope: NearCallJumpScope8616,
     budget: EntryJumpDomainBudget8616 | None = None,
-    call_preservations: tuple[EntryDomainCallPreservation8616, ...] = (),
+    call_preservations: object = (),
     invocation_resolver: Callable[
         [int], Real16InvocationDomain8616 | None
     ] | None = None,

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Transport typed project evidence into isolated clean workers.
 
 Layer: CLI/fallback/reporting.
@@ -7,6 +8,8 @@ is inferred, rebuilt, or reclassified here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import json
 import os
@@ -86,33 +89,39 @@ from .project_evidence_transport import (
     project_bounded_global_object_ranges_8616,
     project_global_object_layout_evidence_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 _SERIAL_CLEAN_WORKER_EVIDENCE_ENV_8616 = "INERTIA_SERIAL_CLEAN_WORKER_EVIDENCE"
 _SERIAL_CLEAN_WORKER_EVIDENCE_SCHEMA_8616 = 9
 _SERIAL_CLEAN_WORKER_DECODE_OWNER_8616 = SimpleNamespace()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _SerialCleanWorkerEvidence8616:
     """Typed evidence decoded from one parent-to-worker payload."""
 
-    caller_return_use_by_addr: dict[int, CallerReturnUseEvidence8616]
+    caller_return_use_by_addr: object
     global_object_layout: GlobalObjectLayoutEvidence8616 | None
     bounded_global_ranges: ProjectBoundedGlobalObjectRangeEvidence8616 | None
-    callee_pointer_by_addr: dict[int, CalleePointerArgumentEvidence8616]
+    callee_pointer_by_addr: object
     global_object_sources: GlobalObjectSourceEvidence8616 | None
-    callee_callsites_by_addr: dict[int, CalleeCallsiteCensus8616]
+    callee_callsites_by_addr: object
     program_callsite_summaries: ProgramCallsiteSummaryEvidence8616 | None
-    scalar_interfaces: tuple[ScalarInterface8616, ...]
+    scalar_interfaces: object
 
 
+@cython.ccall
 def _widening_payload_8616(source_project: object) -> tuple[object, object]:
     """Return coherent serialized layout and range records when available."""
+    layouts: object
+    ranges: object
     layouts = project_global_object_layout_evidence_8616(source_project)
     ranges = project_bounded_global_object_ranges_8616(source_project)
     if ranges is not None and layouts is None:
         raise ValueError("clean-worker bounded ranges have no layout dependency")
-    if ranges is not None and layouts is not None and ranges.layouts != layouts:
+    if ranges is not None and layouts is not None and operator.ne(ranges.layouts, layouts):
         raise ValueError("clean-worker bounded ranges disagree with project layouts")
     return (
         None if layouts is None else global_object_layout_evidence_record_8616(layouts),
@@ -124,9 +133,12 @@ def _write_serial_clean_worker_evidence_8616(
     source_project: object,
     evidence_path: Path,
     *,
-    evidence_by_addr: dict[int, CallerReturnUseEvidence8616] | None = None,
-) -> int:
+    evidence_by_addr: object = None,
+) -> cython.longlong:
     """Write typed discovery evidence needed by an isolated clean worker."""
+    program_summaries: object
+    project_layout: object
+    source_evidence: object
     if evidence_by_addr is None:
         evidence_by_addr = caller_return_use_evidence_by_addr_8616(source_project)
     layouts, ranges = _widening_payload_8616(source_project)
@@ -136,15 +148,15 @@ def _write_serial_clean_worker_evidence_8616(
     proven_targets = tuple(
         sorted(
             target_addr
-            for target_addr, evidence in pointer_evidence.items()
+            for target_addr, evidence in builtins.iter(pointer_evidence.items())
             if evidence.closes_classification
         )
     )
     if source_evidence is not None:
         project_layout = project_global_object_layout_evidence_8616(source_project)
-        if project_layout is None or source_evidence.layout_evidence != project_layout:
+        if project_layout is None or operator.ne(source_evidence.layout_evidence, project_layout):
             raise ValueError("clean-worker global sources have a mismatched layout")
-        if source_evidence.pointer_target_addrs != proven_targets:
+        if operator.ne(source_evidence.pointer_target_addrs, proven_targets):
             raise ValueError("clean-worker global sources have a mismatched pointer census")
     payload = {
         "schema": _SERIAL_CLEAN_WORKER_EVIDENCE_SCHEMA_8616,
@@ -155,7 +167,7 @@ def _write_serial_clean_worker_evidence_8616(
                 "function_addr": function_addr,
                 "evidence": caller_return_use_evidence_record_8616(evidence),
             }
-            for function_addr, evidence in sorted(evidence_by_addr.items())
+            for function_addr, evidence in builtins.iter(sorted(tuple(evidence_by_addr.items())))
         ],
         "global_object_layout": layouts,
         "bounded_global_ranges": ranges,
@@ -180,9 +192,12 @@ def _write_serial_clean_worker_evidence_8616(
     return len(evidence_by_addr)
 
 
-def _caller_return_evidence_map_8616(records: list[object]) -> dict[int, CallerReturnUseEvidence8616]:
+@cython.ccall
+def _caller_return_evidence_map_8616(records: object) -> object:
     """Decode validated caller-return records keyed by exact function address."""
-    evidence_by_addr: dict[int, CallerReturnUseEvidence8616] = {}
+    function_addr: object
+    record: object
+    evidence_by_addr: dict[cython.longlong, CallerReturnUseEvidence8616] = {}
     for record in records:
         if not isinstance(record, dict):
             raise ValueError("serial clean-worker caller-return entry must be an object")
@@ -197,27 +212,34 @@ def _caller_return_evidence_map_8616(records: list[object]) -> dict[int, CallerR
     return evidence_by_addr
 
 
+@cython.ccall
 def _decode_layout_ranges_8616(
-    payload: dict[object, object],
+    payload: object,
 ) -> tuple[GlobalObjectLayoutEvidence8616 | None, ProjectBoundedGlobalObjectRangeEvidence8616 | None]:
     """Decode bounded-range/layout artifacts and enforce their coherence."""
+    layouts: object
+    ranges: object
+    raw_layout: object
+    raw_ranges: object
     raw_layout = payload.get("global_object_layout")
     raw_ranges = payload.get("bounded_global_ranges")
     layouts = None if raw_layout is None else global_object_layout_evidence_from_record_8616(raw_layout)
     ranges = None if raw_ranges is None else project_bounded_global_ranges_from_record_8616(raw_ranges)
     if ranges is not None and layouts is None:
         raise ValueError("serial clean-worker bounded ranges have no layout dependency")
-    if ranges is not None and layouts is not None and ranges.layouts != layouts:
+    if ranges is not None and layouts is not None and operator.ne(ranges.layouts, layouts):
         raise ValueError("serial clean-worker Widening artifacts are incoherent")
     return layouts, ranges
 
 
 def _decode_source_evidence_8616(
-    payload: dict[object, object],
+    payload: object,
     layouts: object,
-    pointer_evidence: dict[int, CalleePointerArgumentEvidence8616],
+    pointer_evidence: object,
 ) -> GlobalObjectSourceEvidence8616 | None:
     """Decode global object sources and check them against pointer evidence."""
+    raw_sources: object
+    source_evidence: object
     raw_sources = payload.get("global_object_sources")
     source_evidence = (
         None
@@ -227,41 +249,45 @@ def _decode_source_evidence_8616(
     proven_targets = tuple(
         sorted(
             target_addr
-            for target_addr, evidence in pointer_evidence.items()
+            for target_addr, evidence in builtins.iter(pointer_evidence.items())
             if evidence.closes_classification
         )
     )
     if source_evidence is not None:
-        if layouts is None or source_evidence.layout_evidence != layouts:
+        if layouts is None or operator.ne(source_evidence.layout_evidence, layouts):
             raise ValueError("serial clean-worker global sources have a mismatched layout")
-        if source_evidence.pointer_target_addrs != proven_targets:
+        if operator.ne(source_evidence.pointer_target_addrs, proven_targets):
             raise ValueError("serial clean-worker global sources have a mismatched pointer census")
     return source_evidence
 
 
-def _decode_scalar_interfaces_8616(payload: dict[str, object]) -> tuple[ScalarInterface8616, ...]:
+def _decode_scalar_interfaces_8616(payload: object) -> object:
     """Legacy discovery carries no scalar authority; current records bind producers."""
+    raw_interfaces: object
     if payload.get("schema") == 8:
         if "scalar_interfaces" in payload or "scalar_interface_generation" in payload:
             raise ValueError("legacy evidence cannot assert scalar interfaces")
         return ()
-    if payload.get("scalar_interface_generation") != _cache_source_digest(DECOMPILATION_CACHE_SOURCE_FILES):
+    if operator.ne(payload.get("scalar_interface_generation"), _cache_source_digest(DECOMPILATION_CACHE_SOURCE_FILES)):
         raise ValueError("stale scalar interface producer generation")
     raw_interfaces = payload.get("scalar_interfaces")
     if not isinstance(raw_interfaces, list):
         raise ValueError("invalid scalar interface inventory")
-    interfaces = tuple(scalar_interface_from_record_8616(item) for item in raw_interfaces)
-    if len({item.target for item in interfaces}) != len(interfaces):
+    interfaces = tuple(scalar_interface_from_record_8616(item) for item in iter(raw_interfaces))
+    if operator.ne(len({item.target for item in iter(interfaces)}), len(interfaces)):
         raise ValueError("duplicate scalar interface target")
     return interfaces
 
 
+@cython.ccall
 def _read_serial_clean_worker_evidence_8616(
     evidence_path: Path,
     *,
     project: object | None = None,
 ) -> _SerialCleanWorkerEvidence8616:
     """Read and validate discovery evidence transported to a clean worker."""
+    raw_program_summaries: object
+    records: object
     try:
         payload = json.loads(evidence_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -306,8 +332,14 @@ def _read_serial_clean_worker_evidence_8616(
     )
 
 
-def _hydrate_serial_clean_worker_evidence_8616(project: object) -> int:
+@cython.ccall
+def _hydrate_serial_clean_worker_evidence_8616(project: object) -> cython.longlong:
     """Attach parent discovery evidence to a clean worker's fresh project."""
+    evidence_path_text: object
+    evidence: object
+    function_addr: object
+    interface: object
+    pointer_evidence: object
     evidence_path_text = os.environ.get(_SERIAL_CLEAN_WORKER_EVIDENCE_ENV_8616)
     if not evidence_path_text:
         return 0

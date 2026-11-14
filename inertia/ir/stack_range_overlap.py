@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Conservatively compare escaped ranges in a 16-bit stack coordinate.
 
 Layer: IR.
@@ -10,13 +11,17 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from .core import AddressStatus, IRAddress, MemSpace
+import operator
 
 _STACK_OFFSET_MODULUS = 1 << 16
 
 
-def stack_ranges_may_overlap_8616(address: IRAddress, escaped: IRAddress) -> bool:
+@cython.ccall
+def stack_ranges_may_overlap_8616(address: IRAddress, escaped: IRAddress) -> cython.bint:
     """Return false only for proved disjoint spaces or comparable byte ranges.
 
     Different BP/SP bases cannot establish disjointness without normalization.
@@ -29,9 +34,9 @@ def stack_ranges_may_overlap_8616(address: IRAddress, escaped: IRAddress) -> boo
         return False
     if address.status is not AddressStatus.STABLE or escaped.status is not AddressStatus.STABLE:
         return True
-    if not address.base or address.base != escaped.base:
+    if not address.base or operator.ne(address.base, escaped.base):
         return True
-    if address.base_values != escaped.base_values:
+    if operator.ne(address.base_values, escaped.base_values):
         return True
     if address.size <= 0 or escaped.size <= 0:
         return True

@@ -1,5 +1,14 @@
 # Real-mode x86 frontend
 
+`frontend_function_boundary.py` treats mapped image bounds as discovery limits.
+After closing native reachability, an unused image suffix is excluded only by
+a second independent native census bounded by the discovered block ends.
+The original image lower bound remains available for backward targets. Explicit
+declared ranges keep their caller-supplied extent. Conditional decoding premises
+are forwarded unchanged and never become unconditional proof. A failed second
+census refuses instead of publishing trimmed discovery records.
+Controls: `tests/cli/test_x86_16_mapped_backward_boundary.py`.
+
 `arch_86_16.py` owns archinfo register storage, overlapping subregisters,
 instruction mode and architecture registration. `control_coordinates.py` owns
 architectural offsets versus loader-linear control destinations and their

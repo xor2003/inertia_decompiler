@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Preserve an existing register SSA value when replacing a switch ladder.
 
 Layer: Structuring.
@@ -11,17 +12,21 @@ refuse binding. Never invent an unbound raw register as a replacement selector.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from angr import ailment
 from angr.analyses.decompiler.structurer_nodes import ConditionNode, MultiNode, SequenceNode
+import operator
 
 
-def _statement_clobbers_8616(statement: ailment.Stmt.Statement | ailment.Expr.Expression) -> bool:
+def _statement_clobbers_8616(statement: ailment.Stmt.Statement | ailment.Expr.Expression) -> cython.bint:
     """Observe opaque effects through the third-party AIL visitor boundary."""
+    kind: object
     clobbers = False
 
     def observe(
-        expr_idx: int, expr: ailment.Expr.Expression, stmt_idx: int,
+        expr_idx: cython.longlong, expr: ailment.Expr.Expression, stmt_idx: cython.longlong,
         stmt: ailment.Stmt.Statement | None, block: ailment.Block | None,
     ) -> None:
         """Refuse an intervening call or opaque effect without guessing its ABI."""
@@ -38,8 +43,11 @@ def _statement_clobbers_8616(statement: ailment.Stmt.Statement | ailment.Expr.Ex
     return clobbers
 
 
-def _blocks_8616(node: object) -> tuple[ailment.Block, ...] | None:
+@cython.ccall
+def _blocks_8616(node: object) -> object:
     """Flatten only third-party nodes with unconditional sequential children."""
+    blocks: object
+    child: object
     if isinstance(node, ailment.Block):
         return (node,)
     if not isinstance(node, (SequenceNode, MultiNode)):
@@ -53,10 +61,14 @@ def _blocks_8616(node: object) -> tuple[ailment.Block, ...] | None:
     return tuple(result)
 
 
+@cython.ccall
 def _prefix_blocks_8616(
-    sequence: object, path: tuple[int, ...],
-) -> tuple[ailment.Block, ...] | None:
+    sequence: object, path: object,
+) -> object:
     """Collect only predecessors guaranteed to execute before the replacement."""
+    blocks: object
+    child: object
+    index: object
     current = sequence
     prefix: list[ailment.Block] = []
     for index in path:
@@ -74,13 +86,14 @@ def _prefix_blocks_8616(
 
 
 def _selector_read_8616(
-    sequence: object, path: tuple[int, ...], definition: ailment.Expr.Expression,
+    sequence: object, path: object, definition: ailment.Expr.Expression,
 ) -> ailment.Expr.Expression | None:
     """Require the entry predicate to read the same SSA version, not just AX.
 
     CMP followed by MOV can leave flags describing an older register version.
     Reusing the latest physical register definition alone would then be wrong.
     """
+    index: object
     node = sequence
     for index in path:
         if not isinstance(node, (SequenceNode, MultiNode)):
@@ -95,12 +108,12 @@ def _selector_read_8616(
     reads: list[ailment.Expr.Expression] = []
 
     def collect(
-        expr_idx: int, expr: ailment.Expr.Expression, stmt_idx: int,
+        expr_idx: cython.longlong, expr: ailment.Expr.Expression, stmt_idx: cython.longlong,
         stmt: ailment.Stmt.Statement | None, block: ailment.Block | None,
     ) -> None:
         """Collect exact register-view reads from the existing predicate."""
         if (isinstance(expr, ailment.Expr.Register) or expr.was_reg) and (
-            expr.reg_offset == definition.reg_offset and expr.size == definition.size
+            operator.eq(expr.reg_offset, definition.reg_offset) and operator.eq(expr.size, definition.size)
         ):
             reads.append(expr)
 
@@ -109,15 +122,16 @@ def _selector_read_8616(
     walker.expr_handlers[ailment.Expr.Register] = collect
     walker.walk_expression(node.condition)
     if reads and all(
-        isinstance(read, ailment.Expr.VirtualVariable) and read.varid == definition.varid
-        for read in reads
+        isinstance(read, ailment.Expr.VirtualVariable) and operator.eq(read.varid, definition.varid)
+        for read in iter(reads)
     ):
         return reads[0]
     return None
 
 
+@cython.ccall
 def bind_switch_selector_value_8616(
-    sequence: object, path: tuple[int, ...], *, register_offset: int, size: int,
+    sequence: object, path: object, *, register_offset: cython.longlong, size: cython.longlong,
 ) -> ailment.Expr.Expression | None:
     """Return the exact reaching SSA atom, refusing ambiguous execution paths.
 
@@ -125,10 +139,14 @@ def bind_switch_selector_value_8616(
     switch. This function preserves the existing AIL atom and its variable-map
     key; it does not recover storage from names or construct a new variable.
     """
+    blocks: object
+    candidate: object
+    block: object
+    statement: object
     blocks = _prefix_blocks_8616(sequence, path)
     if blocks is None:
         return None
-    candidate: ailment.Expr.Expression | None = None
+    candidate = None
     for block in blocks:
         for statement in block.statements:
             if not isinstance(statement, (ailment.Stmt.Assignment, ailment.Stmt.Store,
@@ -147,6 +165,6 @@ def bind_switch_selector_value_8616(
             if offset < register_offset + size and register_offset < offset + dst.size:
                 candidate = (
                     dst if isinstance(dst, ailment.Expr.VirtualVariable)
-                    and offset == register_offset and dst.size == size else None
+                    and offset == register_offset and operator.eq(dst.size, size) else None
                 )
     return _selector_read_8616(sequence, path, candidate) if candidate is not None else None

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery/reporting.
 
 Responsibility: build corpus-level recovery artifacts from bounded scan results.
@@ -11,6 +12,8 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
@@ -19,6 +22,7 @@ from pathlib import Path
 from .corpus_scan import FunctionScanResult, extract_cod_functions, scan_function
 from .recovery_artifact_writer import RecoveryArtifactWriteResult, write_x86_16_corpus_recovery_artifact
 from .recovery_artifacts import build_x86_16_corpus_recovery_artifact
+import dataclasses
 
 __all__ = [
     "CorpusCodRecoveryArtifactResult",
@@ -26,23 +30,24 @@ __all__ = [
 ]
 
 
+@cython.ccall
 def _scan_result_row(result: Mapping[str, object] | FunctionScanResult) -> Mapping[str, object]:
     if isinstance(result, Mapping):
         return result
     return asdict(result)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CorpusCodRecoveryArtifactResult:
     """Result metadata for one bounded COD corpus recovery artifact."""
 
     cod_path: Path
-    proc_count: int
+    proc_count: cython.longlong
     write_result: RecoveryArtifactWriteResult
-    confidence_status_counts: dict[str, int]
-    helper_status_counts: dict[str, int]
-    low_memory_read_region_counts: dict[str, int]
-    low_memory_write_region_counts: dict[str, int]
+    confidence_status_counts: object
+    helper_status_counts: object
+    low_memory_read_region_counts: object
+    low_memory_write_region_counts: object
 
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-compatible corpus artifact result."""
@@ -58,16 +63,16 @@ class CorpusCodRecoveryArtifactResult:
 
 
 def write_x86_16_cod_corpus_recovery_artifact(
-    cod_path: str | Path,
-    output_path: str | Path,
+    cod_path: object,
+    output_path: object,
     *,
-    timeout_sec: int = 5,
-    mode: str = "scan-safe",
-    max_cfg_bytes: int = 192,
-    max_cfg_blocks: int = 8,
-    max_cfg_insns: int = 200,
-    max_decompile_bytes: int = 384,
-    max_loop_bytes: int = 128,
+    timeout_sec: cython.longlong = 5,
+    mode: object = "scan-safe",
+    max_cfg_bytes: cython.longlong = 192,
+    max_cfg_blocks: cython.longlong = 8,
+    max_cfg_insns: cython.longlong = 200,
+    max_decompile_bytes: cython.longlong = 384,
+    max_loop_bytes: cython.longlong = 128,
     limit: int | None = None,
 ) -> CorpusCodRecoveryArtifactResult:
     """Scan bounded COD procedures and write a corpus recovery artifact."""
@@ -90,9 +95,9 @@ def write_x86_16_cod_corpus_recovery_artifact(
             max_decompile_bytes=max_decompile_bytes,
             max_loop_bytes=max_loop_bytes,
         )
-        for proc_name, proc_kind, code in entries
+        for proc_name, proc_kind, code in iter(entries)
     ]
-    result_rows = tuple(_scan_result_row(result) for result in results)
+    result_rows = tuple(_scan_result_row(result) for result in iter(results))
     artifact = build_x86_16_corpus_recovery_artifact(result_rows)
     write_result = write_x86_16_corpus_recovery_artifact(result_rows, output_path)
     return CorpusCodRecoveryArtifactResult(

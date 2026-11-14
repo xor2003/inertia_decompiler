@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Consume an existing word-local binding for a proven terminal GP reload.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not rewrite expressions or infer values from source names.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from enum import Enum
 from typing import Protocol, cast
@@ -25,6 +28,8 @@ from .codegen_return_origin import return_value_origin_8616
 from .gp_stack_local_reload import _exact_local, _stores_for_local
 from .gp_stack_restore_identity import _entry_sp_byte_offset_8616, _unconditional_sequence_8616, _unique_byte_save_8616
 from .segment_access_policy import instruction_addrs_from_node_8616
+import operator
+import builtins
 
 _WORD_BYTES = 2
 _WORD_BITS = 16
@@ -52,6 +57,7 @@ class _CodegenSurface8616(Protocol):
     cfunc: _FunctionSurface8616
 
 
+@cython.ccall
 def _proven_return_path(codegen: object, fact: SegmentStackRestoreFact8616) -> RegisterReturnPath8616 | None:
     """Join the owned machine-value proof with the current word return type."""
     surface = cast(_CodegenSurface8616, codegen)
@@ -64,56 +70,65 @@ def _proven_return_path(codegen: object, fact: SegmentStackRestoreFact8616) -> R
         return None
     if not isinstance(prototype, SimTypeFunction) or not isinstance(prototype.returnty, (SimTypeInt, SimTypeNum)):
         return None
-    if prototype.returnty.size != _WORD_BITS:
+    if operator.ne(prototype.returnty.size, _WORD_BITS):
         return None
     return unchanged_register_return_path_8616(artifact, fact.restore_instruction_addr, "ax")
 
 
+@cython.ccall
 def _projection_owner(
     artifact: IRFunctionArtifact, statement: structured_c.CReturn, expected: RegisterReturnPath8616,
 ) -> _ReturnProjectionOwner8616:
     """Join per-use origin to machine flow without guessing another path's owner."""
+    actual: object
+    origin: object
     origin = return_value_origin_8616(statement)
     if origin is None:
         # Preserve the existing same-block proof, where every matching return
         # must use the saved local. Cross-block projections require provenance.
         return (_ReturnProjectionOwner8616.SAVED_VALUE if len(expected.block_addrs) == 1
                 else _ReturnProjectionOwner8616.UNKNOWN)
-    if origin.width_bits != _WORD_BITS:
+    if operator.ne(origin.width_bits, _WORD_BITS):
         return _ReturnProjectionOwner8616.UNKNOWN
     actual = unchanged_register_return_path_8616(artifact, origin.instruction_addr, expected.register)
-    if actual is None or actual.return_addr != expected.return_addr or actual.block_addrs[0] != origin.block_addr:
+    if actual is None or operator.ne(actual.return_addr, expected.return_addr) or operator.ne(actual.block_addrs[0], origin.block_addr):
         return _ReturnProjectionOwner8616.UNKNOWN
-    if actual.definition_addr == expected.definition_addr:
+    if operator.eq(actual.definition_addr, expected.definition_addr):
         return _ReturnProjectionOwner8616.SAVED_VALUE
     return _ReturnProjectionOwner8616.OTHER_DEFINITION
 
 
 def _initialized_binding(
-    codegen: object, containers: tuple[structured_c.CStatements, ...],
-    prefix: list[object], operand: object, fact: SegmentStackRestoreFact8616,
-) -> bool:
+    codegen: object, containers: object,
+    prefix: object, operand: object, fact: SegmentStackRestoreFact8616,
+) -> cython.bint:
     """Require the exact uniquely written local in one unconditional sequence."""
-    if not isinstance(operand, structured_c.CVariable) or operand.variable.size != _WORD_BYTES:
+    offset: object
+    save: object
+    if not isinstance(operand, structured_c.CVariable) or operator.ne(operand.variable.size, _WORD_BYTES):
         return False
     offset = _entry_sp_byte_offset_8616(codegen, operand)
-    if offset is None or fact.stack_offsets != (offset, offset + 1):
+    if offset is None or operator.ne(fact.stack_offsets, (offset, offset + 1)):
         return False
     save = _unique_byte_save_8616(containers, operand)
     if save is None or fact.saved_instruction_addr not in instruction_addrs_from_node_8616(save):
         return False
-    if not any(candidate is save for candidate in prefix):
+    if not any(candidate is save for candidate in iter(prefix)):
         return False
-    unconditional = all(isinstance(candidate, structured_c.CAssignment) for candidate in prefix)
+    unconditional = all(isinstance(candidate, structured_c.CAssignment) for candidate in iter(prefix))
     no_calls = not any(isinstance(node, structured_c.CFunctionCall)
-                       for statement in prefix for node in _iter_c_nodes_deep_8616(statement))
+                       for statement in iter(prefix) for node in builtins.iter(_iter_c_nodes_deep_8616(statement)))
     return unconditional and no_calls
 
 
+@cython.ccall
 def _return_prefixes(
-    root: object, target: structured_c.CReturn, prefix: tuple[object, ...] = (),
-) -> list[tuple[object, ...]]:
+    root: object, target: structured_c.CReturn, prefix: object = (),
+) -> object:
     """Collect unconditional ancestors of a return, entering only lists and ifs."""
+    _condition: object
+    branch: object
+    statement: object
     if root is target:
         return [prefix]
     prefixes: list[tuple[object, ...]] = []
@@ -129,9 +144,9 @@ def _return_prefixes(
 
 
 def _initialized_byte_binding(
-    codegen: object, containers: tuple[structured_c.CStatements, ...],
+    codegen: object, containers: object,
     returned: structured_c.CReturn, fact: SegmentStackRestoreFact8616,
-) -> bool:
+) -> cython.bint:
     """Require complete nonescaping local stores before this conditional return.
 
     Unique storage writers and no address escape let unrelated calls occur
@@ -145,7 +160,7 @@ def _initialized_byte_binding(
     assert isinstance(local, structured_c.CVariable)
     root = cast(_CodegenSurface8616, codegen).cfunc.statements
     if any(isinstance(node, (structured_c.CGoto, structured_c.CDirtyExpression, structured_c.CMultiStatementExpression))
-           for node in _iter_c_nodes_deep_8616(root)):
+           for node in builtins.iter(_iter_c_nodes_deep_8616(root))):
         return False
     stores = _stores_for_local(codegen, containers, local, fact)
     if not stores:
@@ -154,23 +169,28 @@ def _initialized_byte_binding(
     if len(prefixes) != 1:
         return False
     prefix = prefixes[0]
-    if any(isinstance(statement, structured_c.CReturn) for statement in prefix):
+    if any(isinstance(statement, structured_c.CReturn) for statement in iter(prefix)):
         return False
-    indices = [index for index, statement in enumerate(prefix)
-               if any(statement is store for store in stores)]
-    return len(indices) == len(stores) and indices[-1] - indices[0] + 1 == len(stores)
+    indices = [index for index, statement in builtins.iter(enumerate(prefix))
+               if any(statement is store for store in iter(stores))]
+    return operator.eq(len(indices), len(stores)) and operator.eq(indices[-1] - indices[0] + 1, len(stores))
 
 
+@cython.ccall
 def has_materialized_gp_local_return_8616(
-    codegen: object, containers: tuple[structured_c.CStatements, ...],
+    codegen: object, containers: object,
     fact: SegmentStackRestoreFact8616,
-) -> bool:
+) -> cython.bint:
     """Require every projection of this saved value to use its initialized local.
 
     Other proven definitions at a shared return remain independent validation
     obligations. Unknown origins refuse; tags alone never prove value flow.
     Local initialization requires an unconditional dominating store sequence.
     """
+    path: object
+    container: object
+    return_index: object
+    statement: object
     if fact.verdict is not SegmentStackRestoreVerdict8616.PROVEN:
         return False
     path = _proven_return_path(codegen, fact)

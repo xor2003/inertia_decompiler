@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Consume complete wide decision graphs at existing terminal loop breaks.
 
 Layer: Structuring.
@@ -12,6 +13,8 @@ and exact branch coverage. Never infer destinations from break-source tags.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -36,29 +39,32 @@ from .existing_loop_exit_conditions import ExistingLoopExitStats8616, _loop_owne
 from .loop_break_topology import LoopBreakTopology8616
 from .natural_loop_topology import _header_dominated_nodes_8616
 from .wide_call_condition_plan import WideCallConditionPlan8616, plan_wide_call_condition_8616
+import dataclasses
+import operator
 
 TERMINAL_WIDE_DECISION_TAG_8616: str = "inertia_terminal_wide_decision_8616"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalWideDecision8616:
     """Immutable complete decision and natural-loop owner for final validation."""
 
     comparison: WideCallConditionPlan8616
-    loop_header: int
+    loop_header: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalLoopExitPlan8616:
     """Complete typed decision and the exact terminal guard it may replace."""
 
     guard: CIfBreak | CIfElse
     current: CExpression
     comparison: WideCallConditionPlan8616
-    loop_header: int
+    loop_header: cython.longlong
 
 
-def _terminal_guard_8616(loop: CWhileLoop) -> tuple[CIfBreak | CIfElse, CExpression] | None:
+@cython.ccall
+def _terminal_guard_8616(loop: CWhileLoop) -> object:
     """Require a direct final break guard, never a nested conditional exit."""
     statements = tuple(_statements_8616(loop.body))
     if not statements:
@@ -75,12 +81,15 @@ def _terminal_guard_8616(loop: CWhileLoop) -> tuple[CIfBreak | CIfElse, CExpress
 
 def classify_terminal_loop_exit_8616(
     loop: CWhileLoop,
-    typed_conditions: tuple[ConditionIR, ...],
+    typed_conditions: object,
     topology: LoopBreakTopology8616,
-    successors: dict[int, tuple[int, ...]],
+    successors: object,
     artifact: SSAFunctionArtifact | None,
 ) -> TerminalLoopExitPlan8616 | None:
     """Require all loop branches and a unique exhaustive wide exit decision."""
+    destination: object
+    owner: object
+    surface: object
     if not isinstance(loop.condition, CConstant) or loop.condition.value != 1:
         return None
     owner = _loop_owner_8616(loop, topology)
@@ -91,24 +100,24 @@ def classify_terminal_loop_exit_8616(
     if not _effect_free_guard_8616(current):
         return None
     facts = _guard_facts_8616(guard, typed_conditions)
-    loop_facts = tuple(fact for fact in typed_conditions if fact.block_addr in owner.body)
+    loop_facts = tuple(fact for fact in iter(typed_conditions) if fact.block_addr in owner.body)
     # A complete loop decision cannot silently omit an inner or untagged branch.
-    if not facts or len(facts) != len(loop_facts) or any(fact not in loop_facts for fact in facts):
+    if not facts or operator.ne(len(facts), len(loop_facts)) or any(fact not in loop_facts for fact in iter(facts)):
         return None
-    blocks = {cast(int, fact.block_addr): fact for fact in facts}
-    destinations = {target for _, target in owner.exit_edges}
-    if len(blocks) != len(facts) or len(destinations) != 1:
+    blocks = {cast(int, fact.block_addr): fact for fact in iter(facts)}
+    destinations = {target for _, target in iter(owner.exit_edges)}
+    if operator.ne(len(blocks), len(facts)) or len(destinations) != 1:
         return None
-    if any(source not in blocks for source, _ in owner.exit_edges):
+    if any(source not in blocks for source, _ in iter(owner.exit_edges)):
         return None
     destination = next(iter(destinations))
     plans = tuple(
-        plan for fact in facts
+        plan for fact in iter(facts)
         if (plan := plan_wide_call_condition_8616(
             fact, blocks, successors, destination, owner.header, artifact=artifact,
         )) is not None
-        and len(plan.conditions) == len(facts)
-        and all(condition in facts for condition in plan.conditions)
+        and operator.eq(len(plan.conditions), len(facts))
+        and all(condition in facts for condition in iter(plan.conditions))
     )
     if len(plans) != 1:
         return None
@@ -120,16 +129,21 @@ def classify_terminal_loop_exit_8616(
     return TerminalLoopExitPlan8616(guard, current, plans[0], owner.header)
 
 
+@cython.ccall
 def materialize_terminal_loop_exit_conditions_8616(
     root: object,
-    typed_conditions: tuple[ConditionIR, ...],
-    topology: LoopBreakTopology8616 | None,
-    successors: dict[int, tuple[int, ...]],
+    typed_conditions: object,
+    topology: object,
+    successors: object,
     artifact: SSAFunctionArtifact | None,
     lower: Callable[[WideCallConditionPlan8616], CExpression | None],
-    record_precision: Callable[[CExpression, CExpression], bool],
+    record_precision: Callable[[CExpression, CExpression], cython.bint],
 ) -> ExistingLoopExitStats8616:
     """Replace only a fully proven terminal predicate, preserving every statement."""
+    plan: object
+    provenance: object
+    replacement: object
+    node: object
     if topology is None:
         return ExistingLoopExitStats8616()
     raw = classified = materialized = 0

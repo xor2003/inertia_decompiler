@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Export MZ-EXE embedded debug info (NBxx CodeView / TDINFO) as an ELF32 symbol file.
 
 Layer: CLI/fallback/reporting. Responsibility: translate parsed debug metadata into a
@@ -15,6 +16,8 @@ let ``add-symbol-file`` relocate instead.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import argparse
 import os
@@ -24,6 +27,8 @@ from enum import Enum
 
 from .codeview_nb02_nb04 import parse_codeview_nb0204_bytes
 from .turbo_debug_tdinfo import parse_tdinfo_exe_bytes
+import dataclasses
+import builtins
 
 
 class GdbSymbolKind(Enum):
@@ -33,16 +38,16 @@ class GdbSymbolKind(Enum):
     OBJECT = "object"
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class GdbSymbol:
     """One absolute-address symbol destined for the ELF ``.symtab``."""
 
-    address: int
-    name: str
+    address: cython.longlong
+    name: object
     kind: GdbSymbolKind
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class GdbSymbolTable:
     """Collected symbols plus which debug payload produced them.
 
@@ -51,24 +56,28 @@ class GdbSymbolTable:
     owning file could not be decoded.
     """
 
-    symbols: tuple[GdbSymbol, ...]
-    source: str
-    diagnostics: tuple[str, ...] = field(default_factory=tuple)
-    line_rows: tuple[tuple[int, int, int], ...] = ()
+    symbols: object
+    source: object
+    diagnostics: object = field(default_factory=tuple)
+    line_rows: tuple[tuple[cython.longlong, cython.longlong, cython.longlong], ...] = ()
     source_files: tuple[str, ...] = ()
 
 
-def _sanitise_name(name: str) -> str:
+@cython.ccall
+def _sanitise_name(name: object) -> object:
     """Strip leading underscores/control chars so names read naturally in gdb."""
     return name.lstrip("_").strip("\x00").strip()
 
 
+@cython.ccall
 def _merge_labels(
-    symbols: dict[int, GdbSymbol],
-    code_labels: dict[int, str],
-    data_labels: dict[int, str],
+    symbols: object,
+    code_labels: object,
+    data_labels: object,
 ) -> None:
     """Merge parser label maps into the symbol table, first source winning."""
+    addr: object
+    name: object
     for addr, name in code_labels.items():
         clean = _sanitise_name(name)
         if clean:
@@ -79,17 +88,19 @@ def _merge_labels(
             symbols.setdefault(addr, GdbSymbol(addr, clean, GdbSymbolKind.OBJECT))
 
 
-def collect_exe_debug_symbols(data: bytes, load_base_linear: int = 0) -> GdbSymbolTable:
+def collect_exe_debug_symbols(data: object, load_base_linear: cython.longlong = 0) -> GdbSymbolTable:
     """Parse CodeView NBxx then TDINFO payloads and merge their label maps.
 
     CodeView is preferred; TDINFO fills any gaps it leaves. Returns an empty
     table (source ``"none"``) when the image carries neither payload.
     """
-    symbols: dict[int, GdbSymbol] = {}
+    cv: object
+    td: object
+    symbols: dict[cython.longlong, GdbSymbol] = {}
     sources: list[str] = []
     diagnostics: list[str] = []
 
-    line_rows: tuple[tuple[int, int, int], ...] = ()
+    line_rows: tuple[tuple[cython.longlong, cython.longlong, cython.longlong], ...] = ()
     source_files: tuple[str, ...] = ()
 
     cv = parse_codeview_nb0204_bytes(data, load_base_linear=load_base_linear)
@@ -98,7 +109,7 @@ def collect_exe_debug_symbols(data: bytes, load_base_linear: int = 0) -> GdbSymb
         _merge_labels(symbols, cv.code_labels, cv.data_labels)
         line_rows = tuple(
             (addr, line, fidx)
-            for addr, (line, fidx) in sorted(cv.line_map.items())
+            for addr, (line, fidx) in builtins.iter(sorted(tuple(cv.line_map.items())))
         )
         source_files = cv.source_files
         diagnostics.append(
@@ -114,7 +125,7 @@ def collect_exe_debug_symbols(data: bytes, load_base_linear: int = 0) -> GdbSymb
             f"tdinfo: {len(td.code_labels)} code, {len(td.data_labels)} data"
         )
 
-    ordered = tuple(sorted(symbols.values(), key=lambda s: (s.address, s.name)))
+    ordered = tuple(sorted(tuple(symbols.values()), key=lambda s: (s.address, s.name)))
     return GdbSymbolTable(
         symbols=ordered,
         source="+".join(sources) if sources else "none",
@@ -128,7 +139,8 @@ _ST_TYPE = {GdbSymbolKind.OBJECT: 1, GdbSymbolKind.FUNC: 2}
 _TEXT_SHNDX = 1
 
 
-def _uleb128(value: int) -> bytes:
+@cython.ccall
+def _uleb128(value: cython.longlong) -> bytes:
     """Encode an unsigned LEB128 integer."""
     out = bytearray()
     while True:
@@ -141,7 +153,8 @@ def _uleb128(value: int) -> bytes:
             return bytes(out)
 
 
-def _sleb128(value: int) -> bytes:
+@cython.ccall
+def _sleb128(value: cython.longlong) -> bytes:
     """Encode a signed LEB128 integer."""
     out = bytearray()
     while True:
@@ -153,10 +166,11 @@ def _sleb128(value: int) -> bytes:
             return bytes(out)
 
 
+@cython.ccall
 def build_dwarf_debug_line(
-    line_rows: tuple[tuple[int, int, int], ...],
-    source_files: tuple[str, ...],
-) -> bytes:
+    line_rows: object,
+    source_files: object,
+) -> object:
     """Emit one DWARF v2 ``.debug_line`` compilation unit.
 
     Rows are ``(address, line, file_index)`` sorted by address; ``file_index``
@@ -164,6 +178,10 @@ def build_dwarf_debug_line(
     Explicit opcodes (set_address/set_file/advance_line/copy) are used instead
     of special opcodes for simplicity and unbounded deltas.
     """
+    addr: object
+    fidx: object
+    fname: object
+    line: object
     file_names = ("<unknown>", *source_files)
     names = b"\x00"  # empty include_directories table
     for fname in file_names:
@@ -205,8 +223,11 @@ def build_dwarf_debug_line(
     return struct.pack("<I", len(unit)) + unit
 
 
-def build_dwarf_debug_abbrev() -> bytes:
+@cython.ccall
+def build_dwarf_debug_abbrev() -> object:
     """One-abbreviation ``.debug_abbrev`` table for the skeleton CU DIE."""
+    attr: object
+    form: object
     # abbrev 1: DW_TAG_compile_unit, no children
     attrs = (
         (0x03, 0x08),  # DW_AT_name,        DW_FORM_string
@@ -222,7 +243,8 @@ def build_dwarf_debug_abbrev() -> bytes:
     return _uleb128(1) + _uleb128(0x11) + b"\x00" + body + b"\x00\x00" + b"\x00"
 
 
-def build_dwarf_debug_info(name: str, low_pc: int, high_pc: int) -> bytes:
+@cython.ccall
+def build_dwarf_debug_info(name: object, low_pc: cython.longlong, high_pc: cython.longlong) -> object:
     """Skeleton DWARF v2 ``.debug_info`` anchoring ``.debug_line`` for gdb.
 
     A single ``DW_TAG_compile_unit`` covering ``[low_pc, high_pc)`` with
@@ -247,11 +269,11 @@ def build_dwarf_debug_info(name: str, low_pc: int, high_pc: int) -> bytes:
 
 
 def build_elf32_symtab(
-    symbols: tuple[GdbSymbol, ...],
-    debug_line: bytes = b"",
-    debug_info: bytes = b"",
-    debug_abbrev: bytes = b"",
-) -> bytes:
+    symbols: object,
+    debug_line: object = b"",
+    debug_info: object = b"",
+    debug_abbrev: object = b"",
+) -> object:
     """Serialise symbols into a minimal ELF32 relocatable object.
 
     Sections: null, ``.text`` (SHT_NOBITS, allocatable), ``.symtab``,
@@ -262,8 +284,13 @@ def build_elf32_symtab(
     DWARF payloads use the same address convention so relocation is
     consistent between ``info symbol`` and ``info line``.
     """
+    name_off: object
+    part_offset: object
+    payload: object
+    sec_name: object
+    sym: object
     strtab = b"\x00"
-    name_offsets: list[int] = []
+    name_offsets: list[cython.longlong] = []
     for sym in symbols:
         name_offsets.append(len(strtab))
         strtab += sym.name.encode("ascii", errors="replace") + b"\x00"
@@ -293,8 +320,8 @@ def build_elf32_symtab(
     off_strtab = off_symtab + len(symtab)
     cursor = (off_strtab + len(strtab) + 3) & ~3
 
-    def shdr(name: int, shtype: int, flags: int, offset: int, size: int,
-             link: int = 0, info: int = 0, align: int = 4, entsize: int = 0) -> bytes:
+    def shdr(name: cython.longlong, shtype: cython.longlong, flags: cython.longlong, offset: cython.longlong, size: cython.longlong,
+             link: cython.longlong = 0, info: cython.longlong = 0, align: cython.longlong = 4, entsize: cython.longlong = 0) -> object:
         return struct.pack(
             "<IIIIIIIIII", name, shtype, flags, 0, offset, size, link, info,
             align, entsize
@@ -305,7 +332,7 @@ def build_elf32_symtab(
         (name_debug_info, debug_info),
         (name_debug_abbrev, debug_abbrev),
     ]
-    blob_parts: list[tuple[int, bytes]] = []  # (offset, data) after strtab
+    blob_parts: list[tuple[cython.longlong, bytes]] = []  # (offset, data) after strtab
     extra_shdrs: list[bytes] = []
     for sec_name, payload in debug_blobs:
         if not payload:
@@ -316,7 +343,7 @@ def build_elf32_symtab(
     off_shstrtab = cursor
     off_shoff = (off_shstrtab + len(shstrtab) + 3) & ~3
 
-    text_size = (max((s.address for s in symbols), default=0) + 1) & 0xFFFFFFFF
+    text_size = (max((s.address for s in iter(symbols)), default=0) + 1) & 0xFFFFFFFF
 
     sections = [
         b"\x00" * 40,
@@ -355,12 +382,13 @@ def build_elf32_symtab(
     return blob + section_headers
 
 
+@cython.ccall
 def write_elf32_symtab(
-    path: str,
-    symbols: tuple[GdbSymbol, ...],
-    debug_line: bytes = b"",
-    debug_info: bytes = b"",
-    debug_abbrev: bytes = b"",
+    path: object,
+    symbols: object,
+    debug_line: object = b"",
+    debug_info: object = b"",
+    debug_abbrev: object = b"",
 ) -> None:
     """Write ``build_elf32_symtab`` output to ``path``."""
     with open(path, "wb") as handle:
@@ -369,8 +397,9 @@ def write_elf32_symtab(
         )
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: object = None) -> cython.longlong:
     """CLI entry: export an MZ-EXE's embedded debug info to an ELF symbol file."""
+    line: object
     parser = argparse.ArgumentParser(
         description="Export NBxx/TDINFO debug info from an MZ EXE as an ELF32 symtab."
     )
@@ -402,7 +431,7 @@ def main(argv: list[str] | None = None) -> int:
     debug_abbrev = b""
     if not args.no_lines and table.line_rows:
         debug_line = build_dwarf_debug_line(table.line_rows, table.source_files)
-        addrs = [s.address for s in table.symbols] + [r[0] for r in table.line_rows]
+        addrs = [s.address for s in iter(table.symbols)] + [r[0] for r in iter(table.line_rows)]
         debug_info = build_dwarf_debug_info(
             os.path.basename(args.exe), min(addrs), max(addrs) + 1
         )

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Capture proven wide predicate call results without moving call execution.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import replace
 from typing import cast
@@ -33,11 +36,12 @@ from .call_output_stack_objects import _CallOutputCodegen8616, _wide_condition_c
 from .semantic_cast import CSemanticCast8616
 from .stack_variable_coordinates import machine_bp_offset_for_stack_variable_8616
 from .wide_call_condition_binding import WIDE_CALL_BINDING_TAG_8616, WideCallBinding8616, wide_call_identity_8616
+import builtins
 
 _PENDING_CAPTURE: str = "inertia_wide_condition_pending_call_capture_8616"
 _CAPTURED_CALL: str = "inertia_wide_condition_captured_call_8616"
-_WIDE_BYTES: int = 4
-_CAPTURE_CALL_OCCURRENCES: int = 2
+_WIDE_BYTES: cython.longlong = 4
+_CAPTURE_CALL_OCCURRENCES: cython.longlong = 2
 _OPERATORS: dict[ConditionOp, str] = {
     "eq": "CmpEQ", "ne": "CmpNE", "slt": "CmpLT", "sle": "CmpLE",
     "sgt": "CmpGT", "sge": "CmpGE",
@@ -46,7 +50,7 @@ _OPERATORS: dict[ConditionOp, str] = {
 
 def build_proven_wide_call_condition_8616(
     codegen: object,
-    conditions: tuple[ConditionIR, ...],
+    conditions: object,
     low_stack: IRValue,
     operator: ConditionOp,
 ) -> CExpression | None:
@@ -56,13 +60,17 @@ def build_proven_wide_call_condition_8616(
     inserting accepted predicates. Speculative predicates do not move calls or
     create declarations. No scalar return-register placeholder is introduced.
     """
+    c_operator: object
+    callee_identity: object
+    selection: object
+    wide: object
     c_operator = _OPERATORS.get(operator)
     if c_operator is None:
         return None
     boundary = cast(_CallOutputCodegen8616, codegen)
     candidates = {
         id(cvar): cvar
-        for variable, cvar in boundary.cfunc.variables_in_use.items()
+        for variable, cvar in builtins.iter(boundary.cfunc.variables_in_use.items())
         if isinstance(variable, SimStackVariable)
         and variable.size == _WIDE_BYTES
         and machine_bp_offset_for_stack_variable_8616(codegen, variable) == low_stack.offset
@@ -77,7 +85,7 @@ def build_proven_wide_call_condition_8616(
     wide = next(iter(candidates.values()))
     signed = SimTypeLong(True).with_arch(boundary.project.arch)
     captures = [
-        node.lhs for node in _iter_c_nodes_deep_8616(boundary.cfunc.statements)
+        node.lhs for node in builtins.iter(_iter_c_nodes_deep_8616(boundary.cfunc.statements))
         if isinstance(node, CAssignment) and node.rhs is call
         and node.tags.get(_CAPTURED_CALL) == summary.callsite_addr
         and isinstance(node.lhs, CVariable)
@@ -96,16 +104,20 @@ def build_proven_wide_call_condition_8616(
     if callee_identity is not None and isinstance(low_stack.offset, int):
         variable = captures[0].variable if captures else None
         expression.tags[WIDE_CALL_BINDING_TAG_8616] = WideCallBinding8616(
-            tuple(condition_sort_key_8616(condition) for condition in conditions),
+            tuple(condition_sort_key_8616(condition) for condition in iter(conditions)),
             summary.callsite_addr, callee_identity, low_stack.offset,
             variable.tmp_id if isinstance(variable, SimTemporaryVariable) else None,
         )
     return expression
 
 
-def _standalone_slots(root: object, call: CFunctionCall) -> tuple[tuple[CStatements, int], ...]:
+@cython.ccall
+def _standalone_slots(root: object, call: CFunctionCall) -> tuple[tuple[CStatements, cython.longlong], ...]:
     """Find exact standalone occurrences without moving across any effect."""
-    slots: list[tuple[CStatements, int]] = []
+    index: object
+    node: object
+    statement: object
+    slots: list[tuple[CStatements, cython.longlong]] = []
     for node in _iter_c_nodes_deep_8616(root):
         if isinstance(node, CStatements):
             for index, statement in enumerate(node.statements):
@@ -121,8 +133,10 @@ def _standalone_slots(root: object, call: CFunctionCall) -> tuple[tuple[CStateme
     return tuple(slots)
 
 
-def commit_wide_call_condition_captures_8616(codegen: object) -> int:
+def commit_wide_call_condition_captures_8616(codegen: object) -> cython.longlong:
     """Capture accepted calls once in place; fail on ambiguous AST ownership."""
+    binding: object
+    node: object
     boundary = cast(_CallOutputCodegen8616, codegen)
     root = boundary.cfunc.statements
     committed = 0
@@ -134,18 +148,18 @@ def commit_wide_call_condition_captures_8616(codegen: object) -> int:
             raise PipelineHardError(f"wide-call capture function={boundary.cfunc.addr:#x}: invalid pending predicate")
         call = node.lhs.expr
         slots = _standalone_slots(root, call)
-        occurrences = sum(child is call for child in _iter_c_node_occurrences_8616(root))
+        occurrences = sum(child is call for child in builtins.iter(_iter_c_node_occurrences_8616(root)))
         if len(slots) != 1 or occurrences != _CAPTURE_CALL_OCCURRENCES:
             raise PipelineHardError(
                 f"wide-call capture function={boundary.cfunc.addr:#x} callsite={callsite!r}: "
                 f"expected one standalone and one predicate use; slots={len(slots)} occurrences={occurrences}"
             )
         used_ids = {
-            variable.tmp_id for variable in boundary.cfunc.variables_in_use
+            variable.tmp_id for variable in iter(boundary.cfunc.variables_in_use)
             if isinstance(variable, SimTemporaryVariable)
         }
         used_ids.update(
-            child.variable.tmp_id for child in _iter_c_nodes_deep_8616(root)
+            child.variable.tmp_id for child in builtins.iter(_iter_c_nodes_deep_8616(root))
             if isinstance(child, CVariable) and isinstance(child.variable, SimTemporaryVariable)
         )
         temporary_id = max(used_ids, default=-1) + 1

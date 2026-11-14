@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Atomic publication boundary for interprocedural storage contracts.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Forbidden: partial map updates, C-AST repair, or fallback signature inference.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Protocol, cast
 
@@ -29,6 +32,8 @@ from .interprocedural_storage_contracts import (
 )
 from .interprocedural_storage_return_discard import discarded_return_publication_failure_8616
 from .interprocedural_storage_solver import resolve_program_storage_trials_8616
+import operator
+import builtins
 
 __all__ = [
     "accepted_callsite_storage_binding_8616",
@@ -51,8 +56,11 @@ def _validate_discard_publication_8616(
     contract: FunctionStorageContract8616, resolution: ProgramStorageResolution8616,
 ) -> None:
     """Reject proof loss before any function or callsite contract is replaced."""
-    trials = next(item for item in resolution.function_trials if item.function_addr == contract.function_addr)
-    recursive_callers = next((frozenset(scc) for scc in resolution.sccs if contract.function_addr in scc), frozenset())
+    failure: object
+    recursive_callers: object
+    trials: object
+    trials = next(item for item in iter(resolution.function_trials) if operator.eq(item.function_addr, contract.function_addr))
+    recursive_callers = next((frozenset(scc) for scc in iter(resolution.sccs) if contract.function_addr in scc), frozenset())
     failure = discarded_return_publication_failure_8616(contract, trials, recursive_callers)
     if failure is not None:
         raise PipelineHardError(
@@ -64,13 +72,16 @@ def _validate_discard_publication_8616(
 def apply_program_storage_resolution_8616(
     project: object,
     resolution: ProgramStorageResolution8616,
-) -> bool:
+) -> cython.bint:
     """Atomically publish callee contracts with all retained callsite bindings."""
-    trial_addresses = tuple(item.function_addr for item in resolution.function_trials)
-    resolution_addresses = tuple(item.function_addr for item in resolution.resolutions)
+    contract: object
+    failure: object
+    function_resolution: object
+    trial_addresses = tuple(item.function_addr for item in iter(resolution.function_trials))
+    resolution_addresses = tuple(item.function_addr for item in iter(resolution.resolutions))
     if (
-        len(set(trial_addresses)) != len(trial_addresses)
-        or trial_addresses != tuple(sorted(trial_addresses))
+        operator.ne(len(set(trial_addresses)), len(trial_addresses))
+        or operator.ne(trial_addresses, tuple(sorted(trial_addresses)))
         or resolution_addresses != trial_addresses
     ):
         raise PipelineHardError(
@@ -96,7 +107,7 @@ def apply_program_storage_resolution_8616(
             )
         if contract is None:
             continue
-        if contract.function_addr != function_resolution.function_addr:
+        if operator.ne(contract.function_addr, function_resolution.function_addr):
             raise PipelineHardError(
                 "storage result and function contract identities disagree",
                 layer="types/lowering",
@@ -126,6 +137,7 @@ def apply_program_storage_resolution_8616(
     return True
 
 
+@cython.ccall
 def program_storage_resolution_8616(
     project: object,
 ) -> ProgramStorageResolution8616 | None:
@@ -145,16 +157,17 @@ def program_storage_resolution_8616(
 def replace_function_storage_trials_8616(
     project: object,
     trials: FunctionStorageTrials8616,
-) -> tuple[ProgramStorageResolution8616, bool]:
+) -> tuple[ProgramStorageResolution8616, cython.bint]:
     """Replace one trial and atomically republish all retained SCC resolutions."""
+    previous: object
     previous = program_storage_resolution_8616(project)
     trials_by_addr = {
         item.function_addr: item
-        for item in (() if previous is None else previous.function_trials)
+        for item in iter((() if previous is None else previous.function_trials))
     }
     trials_by_addr[trials.function_addr] = trials
     resolution = resolve_program_storage_trials_8616(
-        trials_by_addr[address] for address in sorted(trials_by_addr)
+        trials_by_addr[address] for address in builtins.iter(sorted(trials_by_addr))
     )
     changed = apply_program_storage_resolution_8616(project, resolution)
     return resolution, changed
@@ -162,48 +175,56 @@ def replace_function_storage_trials_8616(
 
 def function_storage_resolution_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> FunctionStorageResolution8616 | None:
     """Return one accepted or refused function result from the atomic payload."""
+    resolution: object
     resolution = program_storage_resolution_8616(project)
     if resolution is None:
         return None
     return next(
-        (item for item in resolution.resolutions if item.function_addr == function_addr),
+        (item for item in iter(resolution.resolutions) if operator.eq(item.function_addr, function_addr)),
         None,
     )
 
 
+@cython.ccall
 def accepted_function_storage_contract_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> FunctionStorageContract8616 | None:
     """Read one accepted contract from the atomic project artifact."""
+    function_resolution: object
     function_resolution = function_storage_resolution_8616(project, function_addr)
     return None if function_resolution is None else function_resolution.contract
 
 
 def accepted_callsite_storage_binding_8616(
     project: object,
-    function_addr: int,
-    callsite_addr: int,
+    function_addr: cython.longlong,
+    callsite_addr: cython.longlong,
 ) -> CallsiteStorageBinding8616 | None:
     """Return a proof-bearing binding from one accepted function contract."""
+    contract: object
     contract = accepted_function_storage_contract_8616(project, function_addr)
     if contract is None:
         return None
-    return next((item for item in contract.callsites if item.callsite_addr == callsite_addr), None)
+    return next((item for item in iter(contract.callsites) if operator.eq(item.callsite_addr, callsite_addr)), None)
 
 
+@cython.ccall
 def accepted_stack_input_layout_8616(
     project: object,
-    function_addr: int,
-) -> tuple[tuple[int, int], ...] | None:
+    function_addr: cython.longlong,
+) -> object:
     """Project one accepted contract to exact source-order ``BP+offset`` widths."""
+    address: object
+    contract: object
+    slot: object
     contract = accepted_function_storage_contract_8616(project, function_addr)
     if contract is None:
         return None
-    layout: list[tuple[int, int]] = []
+    layout: list[tuple[cython.longlong, cython.longlong]] = []
     for slot in contract.inputs:
         if len(slot.pieces) != 1:
             return None

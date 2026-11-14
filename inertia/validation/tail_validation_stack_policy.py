@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Tail Validation.
 
 Responsibility: decide which recovered stack writes are observable validation effects.
@@ -10,6 +11,9 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
+import builtins
 
 __all__ = ["StackObservedLocations8616", "include_x86_16_tail_validation_stack_write"]
 
@@ -22,8 +26,8 @@ class StackObservedLocations8616(set[str]):
     This is validation evidence, not an Alias escape or lifetime proof.
     """
 
-    address_exposed_locations: set[str]
-    write_values: set[tuple[str, str]]
+    address_exposed_locations: object
+    write_values: object
 
     def __init__(self) -> None:
         """Start one summary's independent value and address observation sets."""
@@ -31,22 +35,23 @@ class StackObservedLocations8616(set[str]):
         self.address_exposed_locations = set()
         self.write_values = set()
 
-    def record_write(self, location: str, value: str) -> None:
+    def record_write(self, location: object, value: object) -> None:
         """Keep the value as well as the location for address-exposed stores."""
         if location in self.address_exposed_locations:
             self.write_values.add((location, value))
 
     def write_fingerprints(self) -> tuple[str, ...]:
         """Serialize deterministic exposed-store effects without dropping values."""
-        return tuple(f"{location}={value}" for location, value in sorted(self.write_values))
+        return tuple(f"{location}={value}" for location, value in builtins.iter(sorted(self.write_values)))
 
 
+@cython.ccall
 def include_x86_16_tail_validation_stack_write(
-    location: str,
+    location: object,
     *,
-    mode: str,
-    observed_locations: set[str],
-) -> bool:
+    mode: object,
+    observed_locations: object,
+) -> cython.bint:
     """Return whether a recovered stack write is observable for tail validation."""
     if mode == "coarse":
         return True

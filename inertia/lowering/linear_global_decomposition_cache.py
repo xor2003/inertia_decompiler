@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Cache repeated linear-carrier decomposition for one Lowering request.
 
 Layer: Types/Lowering.
@@ -9,55 +10,57 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
+import dataclasses
+import operator
 
-type LinearGlobalCarrierKey8616 = tuple[str, int | str]
-type LinearGlobalDecompositionResult8616 = tuple[
+LinearGlobalCarrierKey8616 = typing.TypeAliasType("LinearGlobalCarrierKey8616", tuple[str, int | str])
+LinearGlobalDecompositionResult8616 = typing.TypeAliasType("LinearGlobalDecompositionResult8616", tuple[
     str | None,
     int,
     tuple[tuple[int, object], ...],
-]
+])
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LinearGlobalDecompositionCacheLookup8616:
     """Result of one cache lookup where ``None`` is a valid cached refusal."""
 
-    found: bool
+    found: cython.bint
     result: LinearGlobalDecompositionResult8616 | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LinearGlobalDecompositionCacheStats8616:
     """Closed accounting for request-local carrier decomposition reuse."""
 
-    query_count: int
-    hit_count: int
-    miss_count: int
-    record_count: int
+    query_count: cython.longlong
+    hit_count: cython.longlong
+    miss_count: cython.longlong
+    record_count: cython.longlong
 
     def __post_init__(self) -> None:
         """Reject incomplete or negative cache accounting."""
-        if self.query_count != self.hit_count + self.miss_count:
+        if operator.ne(self.query_count, self.hit_count + self.miss_count):
             raise ValueError("linear-global decomposition cache accounting is not closed")
         if min(self.query_count, self.hit_count, self.miss_count, self.record_count) < 0:
             raise ValueError("linear-global decomposition cache counters must be non-negative")
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class LinearGlobalDecompositionCache8616:
     """Request-owned cache keyed by exact generated-carrier identity."""
 
-    _entries: dict[
-        LinearGlobalCarrierKey8616,
-        LinearGlobalDecompositionResult8616 | None,
-    ] = field(default_factory=dict)
-    _query_count: int = 0
-    _hit_count: int = 0
-    _miss_count: int = 0
-    _record_count: int = 0
+    _entries: object = field(default_factory=dict)
+    _query_count: cython.longlong = 0
+    _hit_count: cython.longlong = 0
+    _miss_count: cython.longlong = 0
+    _record_count: cython.longlong = 0
 
+    @cython.ccall
     def lookup(
         self,
         key: LinearGlobalCarrierKey8616,
@@ -70,6 +73,7 @@ class LinearGlobalDecompositionCache8616:
         self._miss_count += 1
         return LinearGlobalDecompositionCacheLookup8616(False, None)
 
+    @cython.ccall
     def record(
         self,
         key: LinearGlobalCarrierKey8616,
@@ -79,6 +83,7 @@ class LinearGlobalDecompositionCache8616:
         self._entries[key] = result
         self._record_count += 1
 
+    @cython.ccall
     def stats(self) -> LinearGlobalDecompositionCacheStats8616:
         """Return immutable closed accounting for this request."""
         return LinearGlobalDecompositionCacheStats8616(

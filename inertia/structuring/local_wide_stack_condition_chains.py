@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Find direct wide-comparison boundaries inside larger condition CFGs.
 
 Layer: Structuring.
@@ -10,6 +11,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -24,35 +27,40 @@ from .wide_stack_condition_chains import (
     recover_wide_stack_condition_chain_8616,
     relation_for_wide_stack_condition_8616,
 )
+import dataclasses
+import operator
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LocalWideStackConditionChainResult8616:
     """One direct wide condition and the exact local CFG surface it consumed."""
 
     condition: ConditionIR | None
-    consumed_conditions: tuple[ConditionIR, ...]
+    consumed_conditions: object
     true_target: int | None
     false_target: int | None
     stats: WideStackConditionChainStats8616
 
 
+@cython.ccall
 def _condition_uses_pair_8616(
     condition: ConditionIR,
     pair: WideStackOperandPair8616,
-) -> bool:
+) -> cython.bint:
     """Return whether one condition compares either word of a candidate pair."""
     return relation_for_wide_stack_condition_8616(condition, pair, 0, 0) is not None
 
 
+@cython.ccall
 def _external_target_8616(
     target: object,
-    local_blocks: frozenset[int],
-    conditions_by_block: dict[int, ConditionIR],
-    successors: dict[int, tuple[int, ...]],
+    local_blocks: object,
+    conditions_by_block: object,
+    successors: object,
 ) -> int | None:
     """Resolve one edge through linear bridges to a local or external owner."""
-    visited: set[int] = set()
+    next_addrs: object
+    visited: set[cython.longlong] = set()
     while isinstance(target, int) and target not in visited:
         visited.add(target)
         if target in local_blocks:
@@ -68,11 +76,12 @@ def _external_target_8616(
 
 def recover_local_wide_stack_condition_chain_8616(
     root: ConditionIR,
-    conditions_by_block: dict[int, ConditionIR],
-    successors: dict[int, tuple[int, ...]],
+    conditions_by_block: object,
+    successors: object,
     prove_pair: WideStackPairProver8616,
 ) -> LocalWideStackConditionChainResult8616:
     """Recover one direct wide comparison embedded in a larger typed CFG."""
+    pair: object
     reachable = reachable_wide_stack_conditions_8616(
         root,
         conditions_by_block,
@@ -83,22 +92,22 @@ def recover_local_wide_stack_condition_chain_8616(
     for pair in candidates:
         local_conditions = tuple(
             condition
-            for condition in reachable
+            for condition in iter(reachable)
             if _condition_uses_pair_8616(condition, pair)
         )
-        if all(condition is not root for condition in local_conditions):
+        if all(condition is not root for condition in iter(local_conditions)):
             continue
         local_blocks = frozenset(
             condition.block_addr
-            for condition in local_conditions
+            for condition in iter(local_conditions)
             if isinstance(condition.block_addr, int)
         )
-        if len(local_blocks) != len(local_conditions):
+        if operator.ne(len(local_blocks), len(local_conditions)):
             continue
         external_targets = frozenset(
             boundary
-            for condition in local_conditions
-            for target in (condition.taken_target, condition.fallthrough_target)
+            for condition in iter(local_conditions)
+            for target in iter((condition.taken_target, condition.fallthrough_target))
             if (
                 boundary := _external_target_8616(
                     target,

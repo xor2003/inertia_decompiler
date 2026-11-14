@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed condition identity bridge for final semantic validation.
 
 Layer: Tail validation.
@@ -13,6 +14,7 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import cython
 
 from collections.abc import Callable
 from copy import copy
@@ -31,6 +33,7 @@ from inertia.lowering.semantic_cast import (
 from inertia.structuring.condition_materialization import materialize_condition_ir_expression_8616
 
 from .tail_validation_fingerprint import _expr_fingerprint
+import operator
 
 
 class _IntegerTypeBoundary8616(Protocol):
@@ -40,10 +43,11 @@ class _IntegerTypeBoundary8616(Protocol):
     signed: bool | None
 
 
+@cython.ccall
 def condition_precision_view_fingerprint_8616(
     expression: object,
     fingerprint: Callable[[object], str],
-) -> str:
+) -> object:
     """Preserve integer views across explicit casts and declaration refinement.
 
     A same-width variable cast and a variable declared with that destination
@@ -64,7 +68,7 @@ def condition_precision_view_fingerprint_8616(
         if not isinstance(source, integer_types) or not isinstance(destination, integer_types):
             return fingerprint(expression)
         try:
-            if source.size != destination.size:
+            if operator.ne(source.size, destination.size):
                 return fingerprint(expression)
         except ValueError:
             return fingerprint(expression)
@@ -84,6 +88,7 @@ def condition_precision_view_fingerprint_8616(
     return f"IntegerView({width},{signedness},{fingerprint(variable)})"
 
 
+@cython.ccall
 def _typed_operand_fingerprint_8616(
     operand: object,
     expression: object,
@@ -109,11 +114,12 @@ def _typed_operand_fingerprint_8616(
     return str(_expr_fingerprint(expression, project))
 
 
+@cython.ccall
 def condition_ir_semantic_fingerprint_8616(
     project: object,
     codegen: object,
     condition: ConditionIR,
-) -> str | None:
+) -> object:
     """Fingerprint proven ConditionIR using a detached current-type view.
 
     Redundant casts may compare equal here without removing their proof from
@@ -129,6 +135,7 @@ def condition_ir_semantic_fingerprint_8616(
     return f"{expression.op}({lhs},{rhs})"
 
 
+@cython.ccall
 def project_identity_semantic_casts_8616(
     expression: object,
     *,
@@ -167,18 +174,22 @@ def project_identity_semantic_casts_8616(
     return projected
 
 
+@cython.ccall
 def condition_semantic_view_projection_fingerprint_8616(
     condition: ConditionIR,
     candidate: object,
     *,
     condition_fingerprint: Callable[[object], str],
-) -> str | None:
+) -> object:
     """Fingerprint a C predicate after proving its explicit casts match typed IR.
 
     A same-width semantic cast is a typed view of unchanged machine bits.  It
     may therefore be compared with the storage-domain ConditionIR fingerprint,
     but only when its destination signedness agrees with the proven comparison.
     """
+    required_signedness: object
+    expression: object
+    operand: object
     if not isinstance(candidate, CBinaryOp):
         return None
     if condition.op not in {
@@ -216,8 +227,8 @@ def condition_semantic_view_projection_fingerprint_8616(
         try:
             cast_matches = (
                 width_bits > 0
-                and source.size == width_bits
-                and destination.size == width_bits
+                and operator.eq(source.size, width_bits)
+                and operator.eq(destination.size, width_bits)
                 and (
                     required_signedness is None
                     or destination.signed is required_signedness

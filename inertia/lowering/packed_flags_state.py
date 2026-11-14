@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Lower proven packed-FLAGS entry dependencies to explicit runtime state.
 
 Layer: Types/Lowering.
@@ -15,6 +16,8 @@ source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import copy
 import logging
@@ -40,6 +43,9 @@ from inertia.semantics.expression_analysis import (
 
 from .global_declarations import GlobalDeclarationCType8616, record_global_declaration_spec_8616
 from .physical_registers import physical_register_view_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = ["PackedFlagsStateStats8616", "lower_packed_flags_live_in_8616"]
 
@@ -50,7 +56,7 @@ _RUNTIME_FLAGS_NAME_8616 = "inertia_flags"
 class _FlagsArch8616(Protocol):
     """Architecture register map consumed at the third-party boundary."""
 
-    registers: Mapping[str, tuple[int, int]]
+    registers: Mapping[str, tuple[cython.longlong, cython.longlong]]
 
 
 class _FlagsProject8616(Protocol):
@@ -62,7 +68,7 @@ class _FlagsProject8616(Protocol):
 class _FlagsCFunction8616(Protocol):
     """Structured function surface mutated by packed-FLAGS lowering."""
 
-    addr: int
+    addr: cython.longlong
     statements: object
 
 
@@ -72,22 +78,25 @@ class _FlagsCodegen8616(Protocol):
     project: _FlagsProject8616 | None
     cfunc: _FlagsCFunction8616 | None
     _inertia_packed_flags_state_stats_8616: PackedFlagsStateStats8616
-    _inertia_packed_flags_state_live_ins_8616: tuple[object, ...]
+    _inertia_packed_flags_state_live_ins_8616: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PackedFlagsStateStats8616:
     """Closed evidence counters for packed-FLAGS live-in materialization."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-def _identity_8616(node: object) -> tuple[int, int, int, int | str] | None:
+@cython.ccall
+def _identity_8616(node: object) -> object:
     """Return one exact structured register SSA identity."""
+    identity: object
+    view: object
     if isinstance(node, structured_c.CDirtyExpression):
         view = physical_register_view_8616(node)
         identity = describe_virtual_value_identity_8616(node)
@@ -112,15 +121,18 @@ def _identity_8616(node: object) -> tuple[int, int, int, int | str] | None:
     return variable.reg, variable.size, variable.region, variable.ident
 
 
+@cython.ccall
 def _flags_inputs_8616(
     root: object,
-    flags_shape: tuple[int, int],
-) -> dict[tuple[int, int, int, int | str], structured_c.CExpression]:
+    flags_shape: object,
+) -> object:
     """Return exact packed-FLAGS SSA identities read by one expression."""
-    inputs: dict[tuple[int, int, int, int | str], structured_c.CExpression] = {}
+    identity: object
+    node: object
+    inputs: dict[tuple[cython.longlong, cython.longlong, cython.longlong, int | str], structured_c.CExpression] = {}
     for node in _iter_c_nodes_deep_8616(root):
         identity = _identity_8616(node)
-        if identity is not None and identity[:2] == flags_shape:
+        if identity is not None and operator.eq(identity[:2], flags_shape):
             inputs.setdefault(identity, node)
     return inputs
 
@@ -131,19 +143,22 @@ _FlagsIdentity8616 = tuple[int, int, int, int | str]
 def _lift_candidates_8616(
     statements: structured_c.CStatement,
     artifact: StatusFlagLiftArtifact8616,
-    flags_shape: tuple[int, int],
-) -> dict[_FlagsIdentity8616, structured_c.CExpression]:
+    flags_shape: object,
+) -> object:
     """Collect FLAGS-input exemplars at artifact-covered instruction sites."""
+    instruction_addr: object
+    lhs_identity: object
+    node: object
     candidates: dict[_FlagsIdentity8616, structured_c.CExpression] = {}
     defined_identities: set[_FlagsIdentity8616] = set()
-    definition_counts: dict[_FlagsIdentity8616, int] = {}
+    definition_counts: dict[_FlagsIdentity8616, cython.longlong] = {}
     self_dependent_roots: dict[_FlagsIdentity8616, structured_c.CExpression] = {}
     all_inputs: dict[_FlagsIdentity8616, structured_c.CExpression] = {}
     for node in _iter_c_nodes_deep_8616(statements):
         if not isinstance(node, structured_c.CAssignment):
             continue
         lhs_identity = _identity_8616(node.lhs)
-        if lhs_identity is not None and lhs_identity[:2] == flags_shape:
+        if lhs_identity is not None and operator.eq(lhs_identity[:2], flags_shape):
             defined_identities.add(lhs_identity)
             definition_counts[lhs_identity] = definition_counts.get(lhs_identity, 0) + 1
         rhs_inputs = _flags_inputs_8616(node.rhs, flags_shape)
@@ -159,24 +174,25 @@ def _lift_candidates_8616(
         candidates.update(rhs_inputs)
     candidates.update(
         (identity, exemplar)
-        for identity, exemplar in all_inputs.items()
+        for identity, exemplar in builtins.iter(all_inputs.items())
         if identity not in defined_identities
     )
     candidates.update(
         (identity, exemplar)
-        for identity, exemplar in self_dependent_roots.items()
+        for identity, exemplar in builtins.iter(self_dependent_roots.items())
         if definition_counts.get(identity) == 1
     )
     return candidates
 
 
+@cython.ccall
 def _existing_flag_identities_8616(
     statements: structured_c.CStatement,
 ) -> set[_FlagsIdentity8616 | None]:
     """Return identities already bound to a runtime FLAGS-state variable."""
     return {
         _identity_8616(node.lhs)
-        for node in _iter_c_nodes_deep_8616(statements)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(statements))
         if isinstance(node, structured_c.CAssignment)
         and isinstance(node.rhs, structured_c.CVariable)
         and isinstance(node.rhs.variable, SimMemoryVariable)
@@ -187,13 +203,15 @@ def _existing_flag_identities_8616(
 def _materialize_flag_initializers_8616(
     codegen: object,
     cfunc: _FlagsCFunction8616,
-    candidates: dict[_FlagsIdentity8616, structured_c.CExpression],
-    existing: set[_FlagsIdentity8616 | None],
-) -> int:
+    candidates: object,
+    existing: object,
+) -> cython.longlong:
     """Insert runtime FLAGS initializers for candidates not already bound."""
+    exemplar: object
+    identity: object
     materialized = 0
     initializers: list[structured_c.CAssignment] = []
-    for identity, exemplar in sorted(candidates.items(), key=lambda item: repr(item[0])):
+    for identity, exemplar in sorted(tuple(candidates.items()), key=lambda item: repr(item[0])):
         if identity in existing:
             continue
         lhs = copy.copy(exemplar)
@@ -215,14 +233,16 @@ def _materialize_flag_initializers_8616(
             cfunc.statements.statements[0:0] = initializers
         else:
             cfunc.statements = structured_c.CStatements(
-                [*initializers, cfunc.statements],
+                list(initializers) + [cfunc.statements],
                 codegen=codegen,
             )
     return materialized
 
 
+@cython.ccall
 def _flags_live_in_owners_8616(statements: structured_c.CStatement) -> tuple[object, ...]:
     """Collect owners of every runtime FLAGS-state assignment."""
+    node: object
     live_in_owners: list[object] = []
     for node in _iter_c_nodes_deep_8616(statements):
         if not (
@@ -241,9 +261,9 @@ def _flags_live_in_owners_8616(statements: structured_c.CStatement) -> tuple[obj
 def _debug_packed_flags_8616(
     cfunc: _FlagsCFunction8616,
     artifact: StatusFlagLiftArtifact8616,
-    flags_shape: tuple[int, int],
-    candidates: dict[_FlagsIdentity8616, structured_c.CExpression],
-    existing: set[_FlagsIdentity8616 | None],
+    flags_shape: object,
+    candidates: object,
+    existing: object,
     stats: PackedFlagsStateStats8616,
 ) -> None:
     """Emit the optional packed-FLAGS census dump for debugging."""
@@ -253,23 +273,29 @@ def _debug_packed_flags_8616(
         tuple(sorted(artifact.packed_preservation_addresses)),
         artifact.candidates,
         tuple(sorted(candidates, key=repr)),
-        tuple(sorted((item for item in existing if item is not None), key=repr)),
+        tuple(sorted((item for item in iter(existing) if item is not None), key=repr)),
         stats,
         tuple(
             (
                 _identity_8616(node.lhs),
                 node.tags.get("ins_addr"),
-                tuple(sorted(_flags_inputs_8616(node.rhs, flags_shape), key=repr)),
+                tuple(sorted(tuple(_flags_inputs_8616(node.rhs, flags_shape)), key=repr)),
             )
-            for node in _iter_c_nodes_deep_8616(cfunc.statements)
+            for node in builtins.iter(_iter_c_nodes_deep_8616(cfunc.statements))
             if isinstance(node, structured_c.CAssignment)
-            and (_identity_8616(node.lhs) or (None, None))[:2] == flags_shape
+            and operator.eq((_identity_8616(node.lhs) or (None, None))[:2], flags_shape)
         ),
     )
 
 
-def lower_packed_flags_live_in_8616(codegen: object) -> bool:
+@cython.ccall
+def lower_packed_flags_live_in_8616(codegen: object) -> cython.bint:
     """Initialize proven packed-FLAGS update inputs from runtime FLAGS."""
+    artifact: object
+    cfunc: object
+    project: object
+    resolution: object
+    shape: object
     boundary = cast(_FlagsCodegen8616, codegen)
     boundary._inertia_packed_flags_state_live_ins_8616 = ()
     project = boundary.project

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Build semantic AIL values for multi-register returns.
 
 Layer: Structuring.
@@ -10,6 +11,7 @@ rewrite cleanup, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import cython
 
 from collections.abc import Callable
 
@@ -17,11 +19,12 @@ from angr import ailment
 from angr.ailment.expression import Expression
 
 
+@cython.ccall
 def combine_word_return_sources_8616(
     high_word: Expression,
     low_word: Expression,
     *,
-    next_atom: Callable[[], int],
+    next_atom: Callable[[], cython.longlong],
     ins_addr: int | None,
     wide_stack_owner: Expression | None = None,
 ) -> Expression:

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed contracts for register outputs produced by exact machine calls.
 
 Layer: Semantics.
@@ -9,12 +10,16 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
 
 from inertia.ir.core import IRCallOutputShape8616 as CallOutputShape8616
 from inertia.ir.core import IRValue, MemSpace
+import dataclasses
+import operator
 
 
 class CallOutputVerdict8616(StrEnum):
@@ -43,33 +48,33 @@ class CallOutputFailure8616(StrEnum):
     TARGET_UNRESOLVED = "target_unresolved"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallOutputFact8616:
     """One CALL and the exact register definitions on its return edge."""
 
-    call_block_addr: int
-    call_instr_index: int
+    call_block_addr: cython.longlong
+    call_instr_index: cython.longlong
     callsite_addr: int | None
     target_addr: int | None
     return_block_addr: int | None
     shape: CallOutputShape8616 | None
-    outputs: tuple[IRValue, ...]
+    outputs: object
     verdict: CallOutputVerdict8616
     failure: CallOutputFailure8616 | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallOutputStats8616:
     """Closed accounting for every CALL output decision in one function."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every CALL has one retained typed outcome."""
         return (
             self.raw_fact_count
@@ -79,11 +84,11 @@ class CallOutputStats8616:
         )
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every output decision is positively proven."""
         return self.closed and self.failure_count == 0
 
-    def to_dict(self) -> dict[str, int]:
+    def to_dict(self) -> dict[str, cython.longlong]:
         """Return deterministic closed-loop counters."""
         return {
             "raw_fact_count": self.raw_fact_count,
@@ -94,7 +99,7 @@ class CallOutputStats8616:
         }
 
 
-CALL_OUTPUT_SHAPE_REGISTERS_8616: dict[CallOutputShape8616, tuple[tuple[str, int], ...]] = {
+CALL_OUTPUT_SHAPE_REGISTERS_8616: dict[CallOutputShape8616, tuple[tuple[str, cython.longlong], ...]] = {
     CallOutputShape8616.AX: (("ax", 2),),
     CallOutputShape8616.DX_AX: (("ax", 2), ("dx", 2)),
 }
@@ -103,7 +108,7 @@ CALL_OUTPUT_SHAPE_REGISTERS_8616: dict[CallOutputShape8616, tuple[tuple[str, int
 
 def validate_call_output_fact_8616(
     fact: CallOutputFact8616,
-) -> tuple[CallOutputFailure8616, ...]:
+) -> object:
     """Authenticate one retained output fact's inner provenance and shape.
 
     An empty tuple means the fact is internally consistent. Refused facts and
@@ -112,10 +117,12 @@ def validate_call_output_fact_8616(
     every value's ``IRCallOutputProvenance8616``, architecture width and
     cardinality matching the outer fact identity.
     """
+    expected: object
+    output: object
     if fact.verdict is not CallOutputVerdict8616.PROVEN:
         return ()
     if fact.shape is None:
-        return () if not fact.outputs else (CallOutputFailure8616.OUTPUT_SHAPE_MISMATCH,)
+        return tuple(()) if not fact.outputs else tuple((CallOutputFailure8616.OUTPUT_SHAPE_MISMATCH,))
     expected = CALL_OUTPUT_SHAPE_REGISTERS_8616.get(fact.shape)
     if expected is None:
         return (CallOutputFailure8616.RETURN_SHAPE_UNKNOWN,)
@@ -129,29 +136,32 @@ def validate_call_output_fact_8616(
             failures.add(CallOutputFailure8616.OUTPUT_SHAPE_MISMATCH)
         else:
             names.append(output.name)
-    if sorted(names) != sorted(expected_widths):
+    if operator.ne(sorted(names), sorted(expected_widths)):
         failures.add(CallOutputFailure8616.OUTPUT_SHAPE_MISMATCH)
     failures |= _output_value_failures_8616(fact, expected_widths)
     return tuple(sorted(failures, key=lambda failure: failure.value))
 
 
+@cython.ccall
 def _output_value_failures_8616(
     fact: CallOutputFact8616,
-    expected_widths: dict[str, int],
-) -> set[CallOutputFailure8616]:
+    expected_widths: object,
+) -> object:
     """Check each output's space, architecture width and inner provenance."""
+    provenance: object
+    output: object
     failures: set[CallOutputFailure8616] = set()
     for output in fact.outputs:
         if output.space is not MemSpace.REG or output.name is None:
             failures.add(CallOutputFailure8616.OUTPUT_SHAPE_MISMATCH)
             continue
-        if output.size != expected_widths.get(output.name, -1):
+        if operator.ne(output.size, expected_widths.get(output.name, -1)):
             failures.add(CallOutputFailure8616.OUTPUT_WIDTH_MISMATCH)
         provenance = output.call_output
         if (
             provenance is None
-            or provenance.callsite_addr != fact.callsite_addr
-            or provenance.target_addr != fact.target_addr
+            or operator.ne(provenance.callsite_addr, fact.callsite_addr)
+            or operator.ne(provenance.target_addr, fact.target_addr)
             or provenance.shape is not fact.shape
         ):
             failures.add(CallOutputFailure8616.OUTPUT_PROVENANCE_MISMATCH)

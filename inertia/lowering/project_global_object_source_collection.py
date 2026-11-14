@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Collect complete project global-source evidence once.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -31,6 +34,9 @@ from .callee_pointer_evidence import (
 from .global_object_program_requirement import (
     GLOBAL_OBJECT_PROGRAM_CALL_TARGET_KINDS_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "ProjectGlobalObjectSourceCollection8616",
@@ -41,7 +47,7 @@ __all__ = [
 class _FunctionManager8616(Protocol):
     """Third-party exact function lookup used at the collection boundary."""
 
-    def function(self, *, addr: int, create: bool = False) -> object | None:
+    def function(self, *, addr: cython.longlong, create: cython.bint = False) -> object | None:
         """Return one existing function without inventing a boundary."""
 
 
@@ -57,17 +63,17 @@ class _Project8616(Protocol):
     kb: _KnowledgeBase8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ProjectGlobalObjectSourceCollection8616:
     """Closed call-target census and its derived project source artifact."""
 
-    call_target_addrs: tuple[int, ...]
+    call_target_addrs: object
     source_evidence: GlobalObjectSourceEvidence8616
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     def validate(self) -> None:
         """Reject an open target census or incoherent source dependency."""
@@ -78,29 +84,29 @@ class ProjectGlobalObjectSourceCollection8616:
             self.materialized_count,
             self.failure_count,
         )
-        if any(count < 0 for count in counts):
+        if any(count < 0 for count in iter(counts)):
             raise ValueError("project source collection counters must be nonnegative")
-        if self.call_target_addrs != tuple(sorted(set(self.call_target_addrs))):
+        if operator.ne(self.call_target_addrs, tuple(sorted(tuple(set(self.call_target_addrs))))):
             raise ValueError("project source call targets are not canonical")
         if self.raw_fact_count < self.normalized_fact_count:
             raise ValueError("project source normalization expands call evidence")
-        if self.normalized_fact_count != len(self.call_target_addrs):
+        if operator.ne(self.normalized_fact_count, len(self.call_target_addrs)):
             raise ValueError("project source normalized count disagrees with targets")
-        if self.classified_fact_count != self.materialized_count:
+        if operator.ne(self.classified_fact_count, self.materialized_count):
             raise ValueError("project source pointer classification is not materialized")
-        if self.normalized_fact_count != self.classified_fact_count + self.failure_count:
+        if operator.ne(self.normalized_fact_count, self.classified_fact_count + self.failure_count):
             raise ValueError("project source target accounting does not close")
         self.source_evidence.validate()
         if self.source_evidence.scope_addr is not None:
             raise ValueError("complete project source evidence has a local scope")
         proven_targets = tuple(
             target_addr
-            for target_addr in self.call_target_addrs
+            for target_addr in iter(self.call_target_addrs)
             if target_addr in self.source_evidence.pointer_target_addrs
         )
-        if proven_targets != self.source_evidence.pointer_target_addrs:
+        if operator.ne(proven_targets, self.source_evidence.pointer_target_addrs):
             raise ValueError("project source pointer targets escape the call census")
-        if len(proven_targets) != self.classified_fact_count:
+        if operator.ne(len(proven_targets), self.classified_fact_count):
             raise ValueError("project source pointer target count disagrees with census")
 
 
@@ -110,21 +116,23 @@ def collect_complete_project_global_object_sources_8616(
     layout_evidence: GlobalObjectLayoutEvidence8616,
 ) -> ProjectGlobalObjectSourceCollection8616:
     """Collect layout-bound source evidence from one complete function catalog."""
+    function: object
+    target_addr: object
     if not layout_evidence.closed:
         raise ValueError("project source collection requires closed Widening layout")
     call_targets = tuple(
         target.target_addr
-        for function in functions
-        for target in collect_neighbor_call_targets(function)
+        for function in iter(functions)
+        for target in builtins.iter(collect_neighbor_call_targets(function))
         if target.kind in GLOBAL_OBJECT_PROGRAM_CALL_TARGET_KINDS_8616
     )
     retained = callee_pointer_argument_evidence_by_addr_8616(project)
     prior_only_targets = set(retained) - set(call_targets)
     target_addrs = tuple(sorted(set(call_targets) | prior_only_targets))
     raw_fact_count = len(call_targets) + len(prior_only_targets)
-    classified_targets: set[int] = {
+    classified_targets: set[cython.longlong] = {
         target_addr
-        for target_addr, evidence in retained.items()
+        for target_addr, evidence in builtins.iter(retained.items())
         if target_addr in target_addrs and evidence.closes_classification
     }
     manager = cast(_Project8616, project).kb.functions

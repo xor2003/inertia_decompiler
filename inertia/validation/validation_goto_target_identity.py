@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Deterministic typed identity for CGoto targets in tail validation.
 
 Layer: Tail Validation.
@@ -36,6 +37,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -64,6 +67,8 @@ from angr.sim_variable import (
     SimStackVariable,
     SimTemporaryVariable,
 )
+import dataclasses
+import operator
 
 __all__ = [
     "GotoTargetIdentity8616",
@@ -74,12 +79,12 @@ __all__ = [
 ]
 
 # Recursive JSON-shaped identity value: nested tuples over scalar leaves.
-type _GotoTargetIdentity8616 = tuple["_GotoTargetIdentity8616", ...] | str | int | None
+_GotoTargetIdentity8616 = typing.TypeAliasType("_GotoTargetIdentity8616", tuple["_GotoTargetIdentity8616", ...] | str | int | None)
 
 #: Structural traversal limits; goto targets are small address expressions.
-_GOTO_TARGET_MAX_DEPTH_8616: int = 64
-_GOTO_TARGET_MAX_NODES_8616: int = 512
-_GOTO_TYPE_MAX_DEPTH_8616: int = 8
+_GOTO_TARGET_MAX_DEPTH_8616: cython.longlong = 64
+_GOTO_TARGET_MAX_NODES_8616: cython.longlong = 512
+_GOTO_TYPE_MAX_DEPTH_8616: cython.longlong = 8
 
 _ID_NONE_8616: tuple[str] = ("none",)
 _ID_MISSING_8616: tuple[str, str] = ("ty", "missing")
@@ -98,7 +103,7 @@ class GotoTargetIdentityReason8616(StrEnum):
     UNSUPPORTED_TYPE = "type"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class GotoTargetIdentity8616:
     """Typed identity verdict for one CGoto target.
 
@@ -113,16 +118,16 @@ class GotoTargetIdentity8616:
     inequality.
     """
 
-    structural: tuple[_GotoTargetIdentity8616, ...]
-    reasons: tuple[GotoTargetIdentityReason8616, ...]
+    structural: object
+    reasons: object
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every subtree resolved to supported identity."""
         return not self.reasons
 
     @property
-    def token(self) -> str:
+    def token(self) -> object:
         """Return the deterministic ``goto:`` effect-token rendering."""
         _, target_identity, idx_identity = self.structural
         token = f"goto:{_render_goto_identity_8616(target_identity)}"
@@ -130,7 +135,7 @@ class GotoTargetIdentity8616:
             token += f":idx={_render_goto_identity_8616(idx_identity)}"
         return token
 
-    def proves_equal(self, other: object) -> bool:
+    def proves_equal(self, other: object) -> cython.bint:
         """Return True only when both complete identities are equal.
 
         Incomplete verdicts never prove equality: an unproven target cannot
@@ -141,17 +146,17 @@ class GotoTargetIdentity8616:
             isinstance(other, GotoTargetIdentity8616)
             and self.complete
             and other.complete
-            and self.structural == other.structural
+            and operator.eq(self.structural, other.structural)
         )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _GotoTargetIdentityRun8616:
     """Bounded traversal state for one goto-target identity computation."""
 
-    active_ids: set[int] = field(default_factory=set)
-    reasons: set[GotoTargetIdentityReason8616] = field(default_factory=set)
-    budget: int = _GOTO_TARGET_MAX_NODES_8616
+    active_ids: object = field(default_factory=set)
+    reasons: object = field(default_factory=set)
+    budget: cython.longlong = _GOTO_TARGET_MAX_NODES_8616
 
 
 def goto_target_identity_8616(node: object) -> GotoTargetIdentity8616:
@@ -162,6 +167,7 @@ def goto_target_identity_8616(node: object) -> GotoTargetIdentity8616:
     ``goto:`` effect token so independently regenerated trees compare equal
     only when structurally equal and never when unproven.
     """
+    target: object
     run = _GotoTargetIdentityRun8616()
     target = _goto_target_attr_8616(node, "target")
     target_idx = _goto_target_attr_8616(node, "target_idx")
@@ -180,7 +186,8 @@ def goto_target_identity_8616(node: object) -> GotoTargetIdentity8616:
     return GotoTargetIdentity8616(structural=structural, reasons=reasons)
 
 
-def goto_target_boundary_identity_8616(node: object) -> tuple[_GotoTargetIdentity8616, ...]:
+@cython.ccall
+def goto_target_boundary_identity_8616(node: object) -> object:
     """Return the shared ``("goto", target, target_idx)`` structured identity.
 
     The result replaces raw target objects inside boundary fingerprint tuples
@@ -193,7 +200,8 @@ def goto_target_boundary_identity_8616(node: object) -> tuple[_GotoTargetIdentit
     return goto_target_identity_8616(node).structural
 
 
-def goto_target_effect_token_8616(node: object) -> str:
+@cython.ccall
+def goto_target_effect_token_8616(node: object) -> object:
     """Return the ``goto:`` control-flow effect token for one CGoto node.
 
     Scalar ``int`` targets with no ``target_idx`` render exactly like the
@@ -204,11 +212,13 @@ def goto_target_effect_token_8616(node: object) -> str:
     return goto_target_identity_8616(node).token
 
 
-def _goto_target_attr_8616(node: object, attr: str) -> object:
+@cython.ccall
+def _goto_target_attr_8616(node: object, attr: object) -> object:
     """Read one CGoto attribute across the dynamic angr boundary."""
     return getattr(node, attr, None)
 
 
+@cython.ccall
 def _goto_scalar_identity_8616(value: object) -> _GotoTargetIdentity8616 | None:
     """Map an exact scalar leaf type to its identity, or None otherwise."""
     if value is None:
@@ -224,10 +234,12 @@ def _goto_scalar_identity_8616(value: object) -> _GotoTargetIdentity8616 | None:
     return None
 
 
+@cython.ccall
 def _goto_scalar_or_opaque_8616(
-    value: object, kind: str, run: _GotoTargetIdentityRun8616
+    value: object, kind: object, run: _GotoTargetIdentityRun8616
 ) -> _GotoTargetIdentity8616:
     """Return a scalar identity or a deterministic opaque marker."""
+    scalar: object
     scalar = _goto_scalar_identity_8616(value)
     if scalar is not None:
         return scalar
@@ -236,8 +248,9 @@ def _goto_scalar_or_opaque_8616(
     )
 
 
+@cython.ccall
 def _goto_opaque_identity_8616(
-    tag: str,
+    tag: object,
     node: object,
     run: _GotoTargetIdentityRun8616,
     reason: GotoTargetIdentityReason8616,
@@ -252,18 +265,21 @@ def _goto_opaque_identity_8616(
     return ("opaque", tag, type(node).__name__)
 
 
+@cython.ccall
 def _goto_target_value_identity_8616(
-    value: object, run: _GotoTargetIdentityRun8616, depth: int
+    value: object, run: _GotoTargetIdentityRun8616, depth: cython.longlong
 ) -> _GotoTargetIdentity8616:
     """Identity for a scalar label or a supported structured-C subtree."""
+    scalar: object
     scalar = _goto_scalar_identity_8616(value)
     if scalar is not None:
         return scalar
     return _goto_expr_identity_8616(value, run, depth)
 
 
+@cython.ccall
 def _goto_expr_identity_8616(
-    node: object, run: _GotoTargetIdentityRun8616, depth: int
+    node: object, run: _GotoTargetIdentityRun8616, depth: cython.longlong
 ) -> _GotoTargetIdentity8616:
     """Bounded, cycle-checked dispatch over supported expression classes."""
     if depth > _GOTO_TARGET_MAX_DEPTH_8616 or run.budget <= 0:
@@ -283,13 +299,14 @@ def _goto_expr_identity_8616(
         run.active_ids.discard(node_id)
 
 
+@cython.ccall
 def _goto_expr_type_identity_8616(node: object, run: _GotoTargetIdentityRun8616) -> _GotoTargetIdentity8616:
     """Read the node's own ``type`` attribute, tolerating absent metadata."""
     return _goto_type_identity_8616(_goto_target_attr_8616(node, "type"), 0, run)
 
 
 def _goto_expr_dispatch_8616(
-    node: object, run: _GotoTargetIdentityRun8616, depth: int
+    node: object, run: _GotoTargetIdentityRun8616, depth: cython.longlong
 ) -> _GotoTargetIdentity8616:
     """Encode one supported expression node or fail closed to opaque."""
     if isinstance(node, CConstant):
@@ -373,7 +390,7 @@ def _goto_expr_dispatch_8616(
             ),
             tuple(
                 _goto_target_value_identity_8616(arg, run, depth + 1)
-                for arg in call_args
+                for arg in iter(call_args)
             )
             if isinstance(call_args, (tuple, list))
             else _ID_NONE_8616,
@@ -384,7 +401,8 @@ def _goto_expr_dispatch_8616(
     )
 
 
-def _goto_op_token_8616(op: object, run: _GotoTargetIdentityRun8616) -> str:
+@cython.ccall
+def _goto_op_token_8616(op: object, run: _GotoTargetIdentityRun8616) -> object:
     """Return the operator name for a supported op, or an opaque marker."""
     if type(op) is str:
         return op
@@ -392,6 +410,7 @@ def _goto_op_token_8616(op: object, run: _GotoTargetIdentityRun8616) -> str:
     return f"unsupported:{type(op).__name__}"
 
 
+@cython.ccall
 def _goto_variable_identity_8616(
     variable: object, run: _GotoTargetIdentityRun8616
 ) -> _GotoTargetIdentity8616:
@@ -441,6 +460,7 @@ def _goto_variable_identity_8616(
     )
 
 
+@cython.ccall
 def _goto_region_identity_8616(
     variable: object, run: _GotoTargetIdentityRun8616
 ) -> _GotoTargetIdentity8616:
@@ -451,7 +471,7 @@ def _goto_region_identity_8616(
 
 
 def _goto_type_identity_8616(
-    type_: object, depth: int, run: _GotoTargetIdentityRun8616
+    type_: object, depth: cython.longlong, run: _GotoTargetIdentityRun8616
 ) -> _GotoTargetIdentity8616:
     """Type identity keeping class, width, signedness, and nested targets."""
     if type_ is None:
@@ -490,7 +510,7 @@ def _goto_type_identity_8616(
         fields.append(
             tuple(
                 _goto_type_identity_8616(arg, depth + 1, run)
-                for arg in arg_types
+                for arg in iter(arg_types)
             )
             if isinstance(arg_types, (tuple, list))
             else _ID_NONE_8616
@@ -502,6 +522,7 @@ def _goto_type_identity_8616(
     return tuple(fields)
 
 
+@cython.ccall
 def _goto_simtype_bits_8616(type_: SimType) -> int | None:
     """Best-effort bit width; SimTypeBottom and friends honestly report none."""
     try:
@@ -514,14 +535,15 @@ def _goto_simtype_bits_8616(type_: SimType) -> int | None:
 _SAFE_TOKEN_CHARS_8616 = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.$:-")
 
 
-def _render_scalar_token_8616(value: str) -> str:
+def _render_scalar_token_8616(value: object) -> object:
     """Render a leaf string bare when simple, else repr for disambiguation."""
-    if value and all(ch in _SAFE_TOKEN_CHARS_8616 for ch in value):
+    if value and all(ch in _SAFE_TOKEN_CHARS_8616 for ch in iter(value)):
         return value
     return repr(value)
 
 
-def _render_goto_identity_leaf_8616(identity: object) -> str:
+@cython.ccall
+def _render_goto_identity_leaf_8616(identity: object) -> object:
     """Render a scalar identity leaf."""
     if identity is None:
         return "none"
@@ -530,7 +552,7 @@ def _render_goto_identity_leaf_8616(identity: object) -> str:
     return str(identity)
 
 
-def _render_goto_identity_8616(identity: _GotoTargetIdentity8616) -> str:
+def _render_goto_identity_8616(identity: _GotoTargetIdentity8616) -> object:
     """Render a structured identity as a deterministic token."""
     if not isinstance(identity, tuple):
         return _render_goto_identity_leaf_8616(identity)
@@ -538,7 +560,7 @@ def _render_goto_identity_8616(identity: _GotoTargetIdentity8616) -> str:
         return "empty"
     tag, args = identity[0], identity[1:]
     if tag == "opaque":
-        return f"opaque:{':'.join(_render_goto_identity_8616(arg) for arg in args)}"
+        return f"opaque:{':'.join(_render_goto_identity_8616(arg) for arg in iter(args))}"
     if tag == "none":
         return "none"
     if tag in {"int", "bool", "float"}:
@@ -547,5 +569,5 @@ def _render_goto_identity_8616(identity: _GotoTargetIdentity8616) -> str:
         return repr(args[0])
     return (
         f"{_render_scalar_token_8616(str(tag))}"
-        f"({','.join(_render_goto_identity_8616(arg) for arg in args)})"
+        f"({','.join(_render_goto_identity_8616(arg) for arg in iter(args))})"
     )

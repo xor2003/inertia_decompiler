@@ -7,11 +7,17 @@ import pytest
 from inertia.frontend.x86_16.frontend_direct_callsite_index import build_boundary_direct_callsite_index_8616
 from inertia.frontend.x86_16.frontend_function_boundary import mapped_entry_function_boundary_8616
 from inertia.frontend.x86_16.frontend_instruction_reachability import ConditionalIndirectEdge8616
+from inertia.ir import entry_domain_call_preservation as call_owner
 from inertia.ir import real16_invocation_domain as census
 from inertia.ir import scoped_indirect_target_view as view_owner
 from inertia.ir.core import IRRefusal, IRValue, MemSpace
+from inertia.ir.entry_domain_call_preservation import _scoped_callee_coverage_8616
+from inertia.ir.function_ir_registry import FunctionIRArtifactVerdict8616, registered_function_ir_artifact_8616
 from inertia.ir.invocation_indirect_target import discover_invocation_indirect_target_8616
+from inertia.ir.ir_boundary_cfg import prove_scoped_ir_boundary_coverage_8616
 from inertia.ir.scoped_indirect_target_view import prove_scoped_indirect_target_view_8616
+from inertia.ir.segment_effect_closure import prove_segment_effect_closure_8616
+from inertia.ir.segment_state import build_x86_16_segment_state_artifact
 from inertia.ir.vex_import import raw_x86_16_function_bundle_8616
 from inertia.lowering.analysis_helpers import resolve_direct_call_target_from_instruction_8616
 from inertia.semantics.direct_near_call_target_binding import _consume_direct_near_call_target_binding_from_decoded_8616
@@ -114,3 +120,102 @@ def test_late_declared_table_mutation_cannot_reuse_earlier_discovery(monkeypatch
     view, scope = _native_view()
     assert view.failure is not None
     assert view.cfg_projection_for(scope) is None
+
+
+def test_indirect_projection_proves_only_current_scoped_coverage():
+    """An authenticated indirect theorem reaches coverage without universalizing it."""
+    view, scope = _native_view()
+    assert view.cfg_projection_for(scope) is not None
+    result = prove_scoped_ir_boundary_coverage_8616(
+        view.project, view.boundary, view.source_artifact, view,
+    )
+    assert result.complete_for(scope), result.failure
+    assert not result.complete
+    state = build_x86_16_segment_state_artifact(
+        view.source_artifact, scoped_view=view, invocation_scope=scope,
+    )
+    closure = prove_segment_effect_closure_8616(result, state)
+    assert closure.complete_for(scope), closure.failure
+    assert not closure.complete
+    assert not result.complete_for(replace(scope, project=object()))
+    view.project.loader.memory.store(view.discovery.instruction_addr, b"\x90")
+    assert not result.complete_for(scope)
+
+
+def test_scoped_callee_coverage_consumes_indirect_theorem():
+    """Callee coverage must discover the owned theorem for pending indirect edges."""
+    view, scope = _native_view()
+    result = _scoped_callee_coverage_8616(
+        view.project, view.source_artifact, view.boundary, scope,
+    )
+    assert result is not None
+    assert result.complete_for(scope), result.failure
+    assert not result.complete
+    view.project.loader.memory.store(view.discovery.instruction_addr, b"\x90")
+    assert _scoped_callee_coverage_8616(
+        view.project, view.source_artifact, view.boundary, scope,
+    ) is None
+
+
+@pytest.mark.parametrize("known_argument", [True, False], ids=("known", "unknown"))
+@pytest.mark.parametrize("deferred", [False, True], ids=("bound", "deferred"))
+def test_raw_callee_scope_discovers_only_proven_indirect_edges(known_argument: bool, deferred: bool):
+    """On-demand intake may use a native singleton but must refuse unknown inputs."""
+    parent, decoded = _fixture(2, known_argument=known_argument)
+    project = parent.project
+    link = parent.chain
+    assert type(link) is census.DeclaredFunctionEntryLink8616
+    def resolver(instruction):
+        return resolve_direct_call_target_from_instruction_8616(project, instruction)
+    index = build_boundary_direct_callsite_index_8616(link.boundary, direct_target_resolver=resolver)
+    call_owner.install_real16_invocation_source_8616(
+        project, call_owner.Real16InvocationSource8616(
+            parent.boot, parent.boot_recompute, index, function_entries=(link.admission,),
+        ),
+    )
+    parent = census.prove_real16_declared_function_entry_domain_8616(
+        project, link, parent.callsite_addr, boot=parent.boot, boot_recompute=parent.boot_recompute,
+    )
+    assert parent.complete, parent.failure
+    decoded = index.for_target(decoded.target_addr)[0]
+    block = census._callsite_block_8616(link.artifact, parent.callsite_addr)
+    instruction = next(row for row in block.instrs if row.op == "CALL")
+    if deferred:
+        binding, route, scope = call_owner._deferred_declared_raw_callee_scope_8616(
+            project, link.artifact, link.boundary, block, instruction, decoded,
+            decoded.target_addr, (),
+        )
+    else:
+        binding = _consume_direct_near_call_target_binding_from_decoded_8616(
+            project, block=block, instruction=instruction, decoded=decoded, invocation=parent,
+            consumer=lambda current: current.complete,
+        )
+        assert binding.complete
+        route, scope = call_owner._raw_callee_call_scope_8616(
+            project, decoded.target_addr, decoded, parent, binding,
+        )
+    if known_argument:
+        assert binding is not None and binding.complete
+        assert route is call_owner._RawCalleeRoute8616.SCOPED_BODY
+        assert scope is not None and scope.complete
+        assert scope.coverage is None
+        assert scope.chain.callee_boundary.conditional_edges
+        assert scope.chain.callee_artifact.refusals
+    else:
+        assert route is call_owner._RawCalleeRoute8616.REFUSED
+        assert scope is None
+    assert registered_function_ir_artifact_8616(
+        project, decoded.target_addr,
+    ).verdict is not FunctionIRArtifactVerdict8616.PROVEN
+
+
+def test_indirect_view_diagnostics_reauthenticate_before_reporting_edges():
+    view, scope = _native_view()
+    assert view.cfg_projection_for(None) is None
+    receipt = view.to_dict()
+    assert receipt["authenticated"] is True
+    assert receipt["successors"][str(0x1317)] == [0x1323]
+    object.__setattr__(scope, "failure_count", 1)
+    stale = view.to_dict()
+    assert stale["authenticated"] is False
+    assert stale["successors"] == {}

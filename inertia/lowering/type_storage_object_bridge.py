@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Helper boundary.
 
 Responsibility: bridge recovered storage-object evidence into segmented object-lowering facts.
@@ -12,6 +13,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -27,6 +30,8 @@ from inertia.lowering.storage_objects import (
     StorageObjectRefusal,
     build_storage_object_artifact,
 )
+import dataclasses
+import builtins
 
 __all__ = (
     "SegmentedStorageFact",
@@ -36,46 +41,46 @@ __all__ = (
 )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentedStorageFact:
     """Segmented-memory permission fact for one storage-object base."""
 
-    segment_register: str | None
-    classification: str
-    associated_space: str | None
-    allow_linear_lowering: bool
-    allow_object_lowering: bool
-    reason: str
+    segment_register: object
+    classification: object
+    associated_space: object
+    allow_linear_lowering: cython.bint
+    allow_object_lowering: cython.bint
+    reason: object
 
-    def refusal_reason(self) -> str | None:
+    def refusal_reason(self) -> object:
         """Return the refusal reason when object lowering is not allowed."""
         if self.allow_object_lowering:
             return None
         return self.reason
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StorageObjectBridgeFact:
     """Storage-object fact enriched with segmented-memory lowering permission."""
 
     base_key: BaseKey
-    object_kind: str
-    candidate_offsets: tuple[int, ...]
+    object_kind: object
+    candidate_offsets: object
     primary_member_offset: int | None
     segmented_memory: SegmentedStorageFact
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StorageObjectBridge:
     """Bridge artifact exposing object-lowering facts grouped by base key."""
 
     artifact: StorageObjectArtifact
-    facts_by_base: dict[BaseKey, StorageObjectBridgeFact]
-    member_facts: dict[BaseKey, StorageObjectBridgeFact]
-    array_facts: dict[BaseKey, StorageObjectBridgeFact]
-    refusal_facts: dict[BaseKey, StorageObjectRefusal]
+    facts_by_base: object
+    member_facts: object
+    array_facts: object
+    refusal_facts: object
 
-    def stats(self) -> dict[str, int]:
+    def stats(self) -> dict[str, cython.longlong]:
         """Return deterministic bridge counters for diagnostics and tests."""
         return {
             "record_count": len(self.artifact.records),
@@ -84,13 +89,16 @@ class StorageObjectBridge:
             "refusal_fact_count": len(self.refusal_facts),
         }
 
-    def allows_object_lowering(self, base_key: BaseKey) -> bool:
+    def allows_object_lowering(self, base_key: BaseKey) -> cython.bint:
         """Return whether segmented evidence permits object lowering for a base."""
+        fact: object
         fact = self.facts_by_base.get(base_key)
         return bool(fact is not None and fact.segmented_memory.allow_object_lowering)
 
-    def lowering_refusal_reason(self, base_key: BaseKey) -> str | None:
+    def lowering_refusal_reason(self, base_key: BaseKey) -> object:
         """Return the segmented or storage-object refusal reason for a base."""
+        fact: object
+        refusal: object
         fact = self.facts_by_base.get(base_key)
         if fact is None:
             refusal = self.refusal_facts.get(base_key)
@@ -98,7 +106,8 @@ class StorageObjectBridge:
         return fact.segmented_memory.refusal_reason()
 
 
-def _segment_register_for_base_key(base_key: BaseKey) -> str | None:
+@cython.ccall
+def _segment_register_for_base_key(base_key: BaseKey) -> object:
     if not base_key:
         return None
     head = base_key[0]
@@ -111,10 +120,15 @@ def _segment_register_for_base_key(base_key: BaseKey) -> str | None:
     return None
 
 
+@cython.ccall
 def _segmented_fact_for_base_key(
     base_key: BaseKey,
-    lowering_by_segment: dict[str, dict[str, object]] | None,
+    lowering_by_segment: object,
 ) -> SegmentedStorageFact:
+    associated_space: object
+    classification: object
+    reason: object
+    segment_register: object
     segment_register = _segment_register_for_base_key(base_key)
     if segment_register is None:
         return SegmentedStorageFact(
@@ -141,9 +155,10 @@ def _segmented_fact_for_base_key(
     )
 
 
+@cython.ccall
 def _fact_from_record(
     record: StorageObjectRecord,
-    lowering_by_segment: dict[str, dict[str, object]] | None,
+    lowering_by_segment: object,
 ) -> StorageObjectBridgeFact:
     return StorageObjectBridgeFact(
         base_key=record.base_key,
@@ -154,18 +169,19 @@ def _fact_from_record(
     )
 
 
+@cython.ccall
 def _artifact_to_bridge(
     artifact: StorageObjectArtifact,
-    lowering_by_segment: dict[str, dict[str, object]] | None,
+    lowering_by_segment: object,
 ) -> StorageObjectBridge | None:
     facts_by_base = {
-        base_key: _fact_from_record(record, lowering_by_segment) for base_key, record in artifact.records.items()
+        base_key: _fact_from_record(record, lowering_by_segment) for base_key, record in builtins.iter(artifact.records.items())
     }
     refusal_facts = dict(artifact.refusals)
     if not facts_by_base and not refusal_facts:
         return None
-    member_facts = {base_key: fact for base_key, fact in facts_by_base.items() if fact.object_kind == "member"}
-    array_facts = {base_key: fact for base_key, fact in facts_by_base.items() if fact.object_kind == "array"}
+    member_facts = {base_key: fact for base_key, fact in builtins.iter(facts_by_base.items()) if fact.object_kind == "member"}
+    array_facts = {base_key: fact for base_key, fact in builtins.iter(facts_by_base.items()) if fact.object_kind == "array"}
     return StorageObjectBridge(
         artifact=artifact,
         facts_by_base=facts_by_base,
@@ -175,8 +191,9 @@ def _artifact_to_bridge(
     )
 
 
+@cython.ccall
 def _build_storage_object_hints(
-    traits: dict[str, dict[BaseKey, object]],
+    traits: object,
 ) -> StableHints:
     return cast(
         StableHints,
@@ -187,9 +204,10 @@ def _build_storage_object_hints(
     )
 
 
+@cython.ccall
 def load_storage_object_bridge(
     project: object,
-    function_addr: int | None,
+    function_addr: object,
     *,
     codegen: object | None = None,
     build_access_trait_evidence_profiles: Callable[
@@ -200,6 +218,9 @@ def load_storage_object_bridge(
     ] = _build_storage_object_hints,
 ) -> StorageObjectBridge | None:
     """Load facts from optional third-party project/codegen dynamic-boundary metadata."""
+    lowering: object
+    traits: object
+    traits_cache: object
     if function_addr is None:
         return None
     traits_cache = getattr(project, "_inertia_access_traits", None)

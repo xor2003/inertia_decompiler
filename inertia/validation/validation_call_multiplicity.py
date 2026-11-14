@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Validate exact callsite multiplicity in the final structured C AST.
 
 Layer: Tail validation.
@@ -13,6 +14,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -30,6 +33,9 @@ from inertia.lowering.c_ast_utils import (
     _structured_slot_names_8616,
 )
 from inertia.semantics.callsite_summary import CallsiteSummary8616, callsite_summary_inventory_8616
+import dataclasses
+import operator
+import builtins
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -50,15 +56,19 @@ class _CodegenCallsiteSurface8616(Protocol):
 class _CallTargetFunction8616(Protocol):
     """Dynamic third-party function target used for exact target identity."""
 
-    addr: int
+    addr: cython.longlong
 
 
 def _iter_c_node_occurrence_paths_8616(
     value: object,
-    path: str = "root",
-    active_node_ids: frozenset[int] = frozenset(),
+    path: object = "root",
+    active_node_ids: object = frozenset(),
 ) -> Iterator[tuple[object, str]]:
     """Yield render-authoritative AST occurrences with diagnostic edge paths."""
+    child: object
+    attr: object
+    index: object
+    key: object
     if isinstance(value, Mapping):
         for key, child in value.items():
             yield from _iter_c_node_occurrence_paths_8616(
@@ -102,15 +112,15 @@ class CallsiteMultiplicityIssueKind8616(StrEnum):
     DUPLICATE_FINAL_TARGET = "duplicate-final-target"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallsiteMultiplicityIssue8616:
     """One binary callsite projected more than once into final structured C."""
 
     kind: CallsiteMultiplicityIssueKind8616
     callsite_addr: int | None
     target_addr: int | None
-    actual_count: int
-    expected_count: int = 1
+    actual_count: cython.longlong
+    expected_count: cython.longlong = 1
 
     def token(self) -> str:
         """Return a deterministic token for tail-validation diagnostics."""
@@ -122,29 +132,31 @@ class CallsiteMultiplicityIssue8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallsiteMultiplicityValidationReport8616:
     """Closed evidence-loop counters for exact final callsite multiplicity."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
     issues: tuple[CallsiteMultiplicityIssue8616, ...] = ()
 
     @property
-    def passed(self) -> bool:
+    def passed(self) -> cython.bint:
         """Return whether every observed required callsite appears exactly once."""
-        return self.failure_count == 0 and self.classified_fact_count == self.materialized_count
+        return self.failure_count == 0 and operator.eq(self.classified_fact_count, self.materialized_count)
 
     def issue_tokens(self) -> tuple[str, ...]:
         """Return deterministic issue tokens for canonical tail snapshots."""
-        return tuple(issue.token() for issue in self.issues)
+        return tuple(issue.token() for issue in iter(self.issues))
 
 
-def _required_targets_by_callsite_8616(codegen: object) -> dict[int, tuple[int, ...]]:
+@cython.ccall
+def _required_targets_by_callsite_8616(codegen: object) -> dict[cython.longlong, tuple[cython.longlong, ...]]:
     """Return exact binary target evidence grouped by required callsite address."""
+    summary: object
     inventory = callsite_summary_inventory_8616(codegen)
     if inventory:
         raw_summary_source: object = inventory
@@ -155,7 +167,7 @@ def _required_targets_by_callsite_8616(codegen: object) -> dict[int, tuple[int, 
             return {}
     if not isinstance(raw_summary_source, Mapping):
         return {}
-    targets: defaultdict[int, set[int]] = defaultdict(set)
+    targets: defaultdict[cython.longlong, set[cython.longlong]] = defaultdict(set)
     for summary in raw_summary_source.values():
         if (
             isinstance(summary, CallsiteSummary8616)
@@ -165,12 +177,14 @@ def _required_targets_by_callsite_8616(codegen: object) -> dict[int, tuple[int, 
             targets[summary.callsite_addr].add(summary.target_addr)
     return {
         callsite_addr: tuple(sorted(callsite_targets))
-        for callsite_addr, callsite_targets in targets.items()
+        for callsite_addr, callsite_targets in builtins.iter(targets.items())
     }
 
 
+@cython.ccall
 def _callsite_addr_8616(call: CFunctionCall) -> int | None:
     """Return exact instruction identity retained on a third-party C call."""
+    key: object
     tags = call.tags
     try:
         get_tag = tags.get
@@ -183,8 +197,11 @@ def _callsite_addr_8616(call: CFunctionCall) -> int | None:
     return None
 
 
+@cython.ccall
 def _call_target_addr_8616(codegen: object, call: CFunctionCall) -> int | None:
     """Return exact target identity from owned summary or third-party function."""
+    callee_func: object
+    summary: object
     try:
         summaries = cast(_CodegenCallsiteSurface8616, codegen)._inertia_callsite_summaries
     except AttributeError:
@@ -209,18 +226,20 @@ def validate_required_callsite_multiplicity_8616(
     root: object,
 ) -> CallsiteMultiplicityValidationReport8616:
     """Reject duplicate final calls proven to represent one machine callsite."""
+    target_addr: object
+    node: object
     targets_by_callsite = _required_targets_by_callsite_8616(codegen)
     if not targets_by_callsite:
         return CallsiteMultiplicityValidationReport8616()
 
-    required_by_target: Counter[int] = Counter(
+    required_by_target: Counter[cython.longlong] = Counter(
         targets[0]
-        for targets in targets_by_callsite.values()
+        for targets in builtins.iter(targets_by_callsite.values())
         if len(targets) == 1
     )
-    observed: Counter[int] = Counter()
-    observed_by_target: Counter[int] = Counter()
-    debug_occurrences: defaultdict[int, list[tuple[int, int | None]]] = defaultdict(list)
+    observed: Counter[cython.longlong] = Counter()
+    observed_by_target: Counter[cython.longlong] = Counter()
+    debug_occurrences: defaultdict[cython.longlong, list[tuple[cython.longlong, int | None]]] = defaultdict(list)
     for node in _iter_c_node_occurrences_8616(root):
         if not isinstance(node, CFunctionCall):
             continue
@@ -236,18 +255,18 @@ def validate_required_callsite_multiplicity_8616(
     if os.environ.get("INERTIA_DEBUG_CALLSITE_MULTIPLICITY") == "1":
         occurrence_paths = tuple(
             (callsite_addr, id(node), path)
-            for node, path in _iter_c_node_occurrence_paths_8616(root)
+            for node, path in builtins.iter(_iter_c_node_occurrence_paths_8616(root))
             if isinstance(node, CFunctionCall)
-            for callsite_addr in (_callsite_addr_8616(node),)
+            for callsite_addr in iter((_callsite_addr_8616(node),))
             if callsite_addr in targets_by_callsite
         )
         log.warning(
             "[callsite-multiplicity] required=%r observed=%r occurrences=%r paths=%r",
             targets_by_callsite,
-            dict(sorted(observed.items())),
+            dict(sorted(tuple(observed.items()))),
             tuple(
                 (callsite_addr, tuple(occurrences))
-                for callsite_addr, occurrences in sorted(debug_occurrences.items())
+                for callsite_addr, occurrences in builtins.iter(sorted(tuple(debug_occurrences.items())))
             ),
             occurrence_paths,
         )
@@ -259,13 +278,13 @@ def validate_required_callsite_multiplicity_8616(
             target_addr=(targets[0] if len(targets) == 1 else None),
             actual_count=count,
         )
-        for callsite_addr, count in sorted(observed.items())
+        for callsite_addr, count in builtins.iter(sorted(tuple(observed.items())))
         if count > 1
-        for targets in (targets_by_callsite[callsite_addr],)
+        for targets in iter((targets_by_callsite[callsite_addr],))
     )
     callsite_issue_targets = frozenset(
         issue.target_addr
-        for issue in callsite_issues
+        for issue in iter(callsite_issues)
         if isinstance(issue.target_addr, int)
     )
     target_issues = tuple(
@@ -276,7 +295,7 @@ def validate_required_callsite_multiplicity_8616(
             actual_count=count,
             expected_count=required_by_target[target_addr],
         )
-        for target_addr, count in sorted(observed_by_target.items())
+        for target_addr, count in builtins.iter(sorted(tuple(observed_by_target.items())))
         if count > required_by_target[target_addr]
         and target_addr not in callsite_issue_targets
     )
@@ -285,7 +304,7 @@ def validate_required_callsite_multiplicity_8616(
         raw_fact_count=max(sum(observed.values()), sum(observed_by_target.values())),
         normalized_fact_count=len(observed),
         classified_fact_count=len(observed),
-        materialized_count=sum(count == 1 for count in observed.values()),
+        materialized_count=sum(count == 1 for count in builtins.iter(observed.values())),
         failure_count=len(issues),
         issues=issues,
     )

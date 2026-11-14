@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Validate results crossing skipped or dynamic Python module boundaries.
 
 Layer: Pipeline governance.
@@ -9,15 +10,19 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from .errors import PipelineHardError
+T = typing.TypeVar("T")
 
 __all__ = [
     "require_optional_result_type_8616",
     "require_result_type_8616",
 ]
 
-def require_result_type_8616[T](value: object, expected_type: type[T], *, owner: str) -> T:
+@cython.ccall
+def require_result_type_8616(value: object, expected_type: type[T], *, owner: object) -> T:
     """Return ``value`` after enforcing its owner's declared runtime type."""
     if not isinstance(value, expected_type):
         raise PipelineHardError(
@@ -27,11 +32,12 @@ def require_result_type_8616[T](value: object, expected_type: type[T], *, owner:
     return value
 
 
-def require_optional_result_type_8616[T](
+@cython.ccall
+def require_optional_result_type_8616(
     value: object,
     expected_type: type[T],
     *,
-    owner: str,
+    owner: object,
 ) -> T | None:
     """Return an optional result after enforcing its non-None runtime type."""
     if value is None:

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery metadata.
 
 Responsibility: provide helper metadata and interrupt surfaces consumed by recovery/reporting.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import builtins
 import contextlib
@@ -22,6 +25,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
+import dataclasses
+import operator
+CallingConventionSeedRevision8616 = typing.TypeVar("CallingConventionSeedRevision8616")
 
 if TYPE_CHECKING:
     from .calling_convention_seed_cache import CallingConventionSeedRevision8616
@@ -119,13 +125,16 @@ __all__ = (
 )
 
 
-def _dynamic_analysis_getattr_8616(obj: object, name: str, default: object = None) -> Any:  # noqa: ANN401
+@cython.ccall
+def _dynamic_analysis_getattr_8616(obj: object, name: object, default: object = None) -> Any:  # noqa: ANN401
     """Read an attribute across the dynamic angr/project/Capstone boundary."""
     return builtins.getattr(obj, name, default)
 
 
-def _dynamic_analysis_tuple_attr_8616(obj: object, name: str) -> tuple[object, ...]:
+@cython.ccall
+def _dynamic_analysis_tuple_attr_8616(obj: object, name: object) -> tuple[object, ...]:
     """Read tuple-like metadata from the dynamic angr/project/Capstone boundary."""
+    value: object
     value = _dynamic_analysis_getattr_8616(obj, name, ())
     if value is None:
         return ()
@@ -135,17 +144,20 @@ def _dynamic_analysis_tuple_attr_8616(obj: object, name: str) -> tuple[object, .
         return ()
 
 
-def _dynamic_analysis_int_attr_8616(obj: object, name: str) -> int | None:
+@cython.ccall
+def _dynamic_analysis_int_attr_8616(obj: object, name: object) -> int | None:
     """Read an integer attribute from the dynamic angr/project/Capstone boundary."""
     value = _dynamic_analysis_getattr_8616(obj, name, None)
     return value if isinstance(value, int) else None
 
 
-def _analysis_project_block_8616(project: object, block_addr: int) -> Any:  # noqa: ANN401
+@cython.ccall
+def _analysis_project_block_8616(project: object, block_addr: cython.longlong) -> Any:  # noqa: ANN401
     """Return typed frontend block evidence with VEX retained as fallback."""
     return collect_decoded_block_evidence_8616(project, block_addr, opt_level=0).block
 
 
+@cython.ccall
 def _analysis_function_addr_8616(function: object) -> int | None:
     """Read a function address from angr's dynamic Function boundary."""
     return _dynamic_analysis_int_attr_8616(function, "addr")
@@ -156,11 +168,12 @@ class _PrototypeFunctionBoundary8616(Protocol):
 
     prototype: object | None
     calling_convention: object | None
-    is_prototype_guessed: bool
+    is_prototype_guessed: cython.bint
     prototype_source: PrototypeSource
 
 
-def _function_has_proven_prototype_8616(function: object) -> bool:
+@cython.ccall
+def _function_has_proven_prototype_8616(function: object) -> cython.bint:
     """Return whether a function already carries a non-guessed ABI contract."""
     typed_function = cast(_PrototypeFunctionBoundary8616, function)
     try:
@@ -169,7 +182,8 @@ def _function_has_proven_prototype_8616(function: object) -> bool:
         return False
 
 
-def _apply_far_return_calling_convention_8616(project: object, function: object) -> bool:
+@cython.ccall
+def _apply_far_return_calling_convention_8616(project: object, function: object) -> cython.bint:
     """Assign the far-frame calling convention when the terminal return proves it.
 
     A function whose terminal return is ``retf``/``lret`` owns a four-byte
@@ -179,6 +193,7 @@ def _apply_far_return_calling_convention_8616(project: object, function: object)
     override only fires on proven far frames and never replaces an explicit
     non-MSC convention.
     """
+    current: object
     from inertia.frontend.x86_16.simos_86_16 import (
         SimCC8616MSClarge,
         SimCC8616MSCmedium,
@@ -220,16 +235,18 @@ def _apply_far_return_calling_convention_8616(project: object, function: object)
     return True
 
 
+@cython.ccall
 def seed_wide_stack_prototype_from_binary_address_8616(
     project: object,
     source_function: object,
     target_function: object,
-    address: int,
+    address: cython.longlong,
     *,
     target_project: object | None = None,
     target_address: int | None = None,
-) -> bool:
+) -> cython.bint:
     """Infer a wide stack ABI and copy its typed contract across project views."""
+    canonical_function: object
     from inertia.frontend.x86_16.calling_convention_compat import apply_x86_16_wide_stack_prototype_evidence_at_address
 
     from .callee_pointer_contracts import (
@@ -305,24 +322,25 @@ def seed_wide_stack_prototype_from_binary_address_8616(
     return True
 
 
-def _analysis_function_block_addrs_8616(function: object) -> tuple[int, ...]:
+def _analysis_function_block_addrs_8616(function: object) -> tuple[cython.longlong, ...]:
     """Read sorted block addresses from angr's dynamic Function boundary."""
     return tuple(
-        sorted(addr for addr in _dynamic_analysis_tuple_attr_8616(function, "block_addrs_set") if isinstance(addr, int))
+        sorted(addr for addr in builtins.iter(_dynamic_analysis_tuple_attr_8616(function, "block_addrs_set")) if isinstance(addr, int))
     )
 
 
-def _analysis_function_call_sites_8616(function: object) -> tuple[int, ...]:
+def _analysis_function_call_sites_8616(function: object) -> tuple[cython.longlong, ...]:
     """Read sorted callsite addresses from angr's dynamic Function boundary."""
     get_call_sites = _dynamic_analysis_getattr_8616(function, "get_call_sites", None)
     if not callable(get_call_sites):
         return ()
     with contextlib.suppress(Exception):
-        return tuple(sorted(addr for addr in cast(Any, get_call_sites)() if isinstance(addr, int)))
+        return tuple(sorted(addr for addr in builtins.iter(cast(Any, get_call_sites)()) if isinstance(addr, int)))
     return ()
 
 
-def _analysis_function_call_target_8616(function: object, callsite_addr: int) -> int | None:
+@cython.ccall
+def _analysis_function_call_target_8616(function: object, callsite_addr: cython.longlong) -> int | None:
     """Read a call target from angr's dynamic Function boundary."""
     get_call_target = _dynamic_analysis_getattr_8616(function, "get_call_target", None)
     if not callable(get_call_target):
@@ -333,7 +351,7 @@ def _analysis_function_call_target_8616(function: object, callsite_addr: int) ->
     return None
 
 
-def _analysis_function_call_return_8616(function: object, callsite_addr: int) -> int | None:
+def _analysis_function_call_return_8616(function: object, callsite_addr: cython.longlong) -> int | None:
     """Read and exactly linearize a CALL return from angr's Function boundary.
 
     angr may expose the architectural 16-bit IP for an indirect real-mode CALL
@@ -341,6 +359,7 @@ def _analysis_function_call_return_8616(function: object, callsite_addr: int) ->
     an exact decoded CALL whose fall-through has the same low word authorizes
     replacing that IP projection with the decoded linear fall-through.
     """
+    project: object
     get_call_return = _dynamic_analysis_getattr_8616(function, "get_call_return", None)
     if not callable(get_call_return):
         return None
@@ -358,8 +377,8 @@ def _analysis_function_call_return_8616(function: object, callsite_addr: int) ->
         )
         matches = tuple(
             instruction
-            for instruction in instructions
-            if _dynamic_analysis_getattr_8616(instruction, "address", None) == callsite_addr
+            for instruction in iter(instructions)
+            if operator.eq(_dynamic_analysis_getattr_8616(instruction, "address", None), callsite_addr)
             and str(_dynamic_analysis_getattr_8616(instruction, "mnemonic", "") or "").lower() in {"call", "lcall"}
         )
         if len(matches) != 1:
@@ -368,21 +387,21 @@ def _analysis_function_call_return_8616(function: object, callsite_addr: int) ->
         if not isinstance(size, int) or isinstance(size, bool) or size <= 0:
             return return_addr
         decoded_fallthrough = callsite_addr + size
-        if (return_addr & 0xFFFF) == (decoded_fallthrough & 0xFFFF):
+        if operator.eq((return_addr & 0xFFFF), (decoded_fallthrough & 0xFFFF)):
             return decoded_fallthrough
         return return_addr
     return None
 
 
-KNOWN_HELPER_SIGNATURE_DECLS: dict[str, str] = known_helper_signature_declarations_8616()
+KNOWN_HELPER_SIGNATURE_DECLS: object = known_helper_signature_declarations_8616()
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class FarCallTarget:
     """Recovered far-call target evidence from an x86-16 callsite."""
 
-    callsite_addr: int
-    target_addr: int
+    callsite_addr: cython.longlong
+    target_addr: cython.longlong
     return_addr: int | None
 
 
@@ -398,12 +417,12 @@ class CallTargetKind8616(StrEnum):
     STORED_NEAR_TAIL_JUMP = "stored_tail_jump"
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class CallTargetSeed:
     """Recovered neighboring call target used to seed bounded CFG recovery."""
 
-    callsite_addr: int
-    target_addr: int
+    callsite_addr: cython.longlong
+    target_addr: cython.longlong
     return_addr: int | None
     kind: CallTargetKind8616
 
@@ -413,24 +432,24 @@ class CallTargetSeed:
             object.__setattr__(self, "kind", CallTargetKind8616(cast(str, self.kind)))
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class DirectCallsiteSanitizationEvidence:
     """Evidence counters for direct-callsite pruning and materialization."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    pruned_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    pruned_count: cython.longlong = 0
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class InterruptCall:
     """Recovered interrupt instruction with register values and display expressions."""
 
-    insn_addr: int
-    vector: int = 0x21
+    insn_addr: cython.longlong
+    vector: cython.longlong = 0x21
     ah: int | None = None
     al: int | None = None
     ax: int | None = None
@@ -449,28 +468,28 @@ class InterruptCall:
     es: int | None = None
     ss: int | None = None
     cs: int | None = None
-    ah_expr: str | None = None
-    al_expr: str | None = None
-    ax_expr: str | None = None
-    bx_expr: str | None = None
-    cx_expr: str | None = None
-    dx_expr: str | None = None
-    si_expr: str | None = None
-    di_expr: str | None = None
-    bh_expr: str | None = None
-    bl_expr: str | None = None
-    ch_expr: str | None = None
-    cl_expr: str | None = None
-    dh_expr: str | None = None
-    dl_expr: str | None = None
-    ds_expr: str | None = None
-    es_expr: str | None = None
-    ss_expr: str | None = None
-    cs_expr: str | None = None
-    string_literal: str | None = None
+    ah_expr: object = None
+    al_expr: object = None
+    ax_expr: object = None
+    bx_expr: object = None
+    cx_expr: object = None
+    dx_expr: object = None
+    si_expr: object = None
+    di_expr: object = None
+    bh_expr: object = None
+    bl_expr: object = None
+    ch_expr: object = None
+    cl_expr: object = None
+    dh_expr: object = None
+    dl_expr: object = None
+    ds_expr: object = None
+    es_expr: object = None
+    ss_expr: object = None
+    cs_expr: object = None
+    string_literal: object = None
 
 
-type DOSInt21Call = InterruptCall
+DOSInt21Call = typing.TypeAliasType("DOSInt21Call", InterruptCall)
 
 
 class InterruptServiceResultKind8616(StrEnum):
@@ -480,24 +499,24 @@ class InterruptServiceResultKind8616(StrEnum):
     VALUE = "value"
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class InterruptServiceSpec:
     """Stable naming and rendering metadata for a DOS or BIOS interrupt service."""
 
-    vector: int
-    pseudo_name: str
-    dos_name: str
-    modern_name: str
+    vector: cython.longlong
+    pseudo_name: object
+    dos_name: object
+    modern_name: object
     render_kind: str = "generic"
     default_output: str = "return"
-    pseudo_decl: str | None = None
-    dos_decl: str | None = None
-    modern_decl: str | None = None
+    pseudo_decl: object = None
+    dos_decl: object = None
+    modern_decl: object = None
     result_kind: InterruptServiceResultKind8616 = InterruptServiceResultKind8616.VALUE
-    no_return: bool = False
+    no_return: cython.bint = False
 
 
-INT21_SERVICE_SPECS: dict[int, InterruptServiceSpec] = {
+INT21_SERVICE_SPECS: dict[cython.longlong, InterruptServiceSpec] = {
     0x09: InterruptServiceSpec(
         0x21,
         "dos_print_dollar_string",
@@ -685,7 +704,7 @@ INT21_SERVICE_SPECS: dict[int, InterruptServiceSpec] = {
 }
 
 
-INTERRUPT_SERVICE_SPECS: dict[int, InterruptServiceSpec] = {
+INTERRUPT_SERVICE_SPECS: dict[cython.longlong, InterruptServiceSpec] = {
     0x10: InterruptServiceSpec(
         0x10,
         "bios_int10_video",
@@ -779,11 +798,13 @@ INTERRUPT_SERVICE_SPECS: dict[int, InterruptServiceSpec] = {
 }
 
 
-def _interrupt_service_key(call: InterruptCall) -> int:
+@cython.ccall
+def _interrupt_service_key(call: InterruptCall) -> cython.longlong:
     return call.vector & 0xFF
 
 
-def interrupt_service_addr(call: InterruptCall) -> int:
+@cython.ccall
+def interrupt_service_addr(call: InterruptCall) -> cython.longlong:
     """Return the synthetic hook address for a recovered interrupt service."""
     if call.vector == 0x21:
         service = call.ah & 0xFF if call.ah is not None else 0
@@ -791,7 +812,7 @@ def interrupt_service_addr(call: InterruptCall) -> int:
     return int(INTERRUPT_SERVICE_BASE_ADDR) + _interrupt_service_key(call)
 
 
-_VECTOR_SERVICE_NAMES_8616: dict[int, tuple[str, str]] = {
+_VECTOR_SERVICE_NAMES_8616: dict[cython.longlong, tuple[str, str]] = {
     0x10: ("bios_int10_video", "_bios_int10_video"),
     0x11: ("bios_equiplist", "_bios_equiplist"),
     0x12: ("bios_memsize", "_bios_memsize"),
@@ -804,7 +825,8 @@ _VECTOR_SERVICE_NAMES_8616: dict[int, tuple[str, str]] = {
 }
 
 
-def _spec_service_name_8616(spec: InterruptServiceSpec, api_style: str) -> str:
+@cython.ccall
+def _spec_service_name_8616(spec: InterruptServiceSpec, api_style: object) -> object:
     """Pick the pseudo/dos/modern name for a service spec."""
     if api_style == "pseudo":
         return spec.pseudo_name
@@ -813,8 +835,11 @@ def _spec_service_name_8616(spec: InterruptServiceSpec, api_style: str) -> str:
     return spec.modern_name
 
 
-def interrupt_service_name(call: InterruptCall, api_style: str = "pseudo") -> str:
+@cython.ccall
+def interrupt_service_name(call: InterruptCall, api_style: object = "pseudo") -> object:
     """Return the service helper name for the selected API style."""
+    names: object
+    spec: object
     spec = _interrupt_service_spec_for_call(call)
     if spec is not None:
         return _spec_service_name_8616(spec, api_style)
@@ -826,21 +851,24 @@ def interrupt_service_name(call: InterruptCall, api_style: str = "pseudo") -> st
     names = _VECTOR_SERVICE_NAMES_8616.get(call.vector)
     if names is not None:
         return names[0] if api_style == "pseudo" else names[1]
-    name: str = get_interrupt_handler_class(call.vector).INT_NAME
+    name: object = get_interrupt_handler_class(call.vector).INT_NAME
     return name
 
 
-def dos_service_name(call: InterruptCall) -> str:
+@cython.ccall
+def dos_service_name(call: InterruptCall) -> object:
     """Return the pseudo DOS service helper name for a DOS interrupt call."""
     return interrupt_service_name(call, "pseudo")
 
 
-def _interrupt_service_name_for_helper(call: InterruptCall, api_style: str) -> str:
+@cython.ccall
+def _interrupt_service_name_for_helper(call: InterruptCall, api_style: object) -> object:
     if api_style in {"dos", "msc", "compiler"}:
         return interrupt_service_name(call, "dos")
     return interrupt_service_name(call, "pseudo")
 
 
+@cython.ccall
 def interrupt_service_spec(call: InterruptCall) -> InterruptServiceSpec | None:
     """Return metadata for non-DOS interrupt services."""
     if call.vector == 0x21:
@@ -848,10 +876,12 @@ def interrupt_service_spec(call: InterruptCall) -> InterruptServiceSpec | None:
     return INTERRUPT_SERVICE_SPECS.get(call.vector)
 
 
+@cython.ccall
 def interrupt_service_result_kind_at_addr_8616(
-    target_addr: int,
+    target_addr: cython.longlong,
 ) -> InterruptServiceResultKind8616 | None:
     """Return typed result semantics for one exact synthetic interrupt target."""
+    spec: object
     dos_selector = target_addr - int(DOS_SERVICE_BASE_ADDR)
     if 0 <= dos_selector <= 0xFF:
         spec = INT21_SERVICE_SPECS.get(dos_selector)
@@ -863,19 +893,22 @@ def interrupt_service_result_kind_at_addr_8616(
     return None
 
 
+@cython.ccall
 def _interrupt_service_spec_for_call(call: InterruptCall) -> InterruptServiceSpec | None:
     if call.vector == 0x21:
         return INT21_SERVICE_SPECS.get(call.ah or -1)
     return INTERRUPT_SERVICE_SPECS.get(call.vector)
 
 
-def dos_service_addr(call: InterruptCall) -> int:
+@cython.ccall
+def dos_service_addr(call: InterruptCall) -> cython.longlong:
     """Return the synthetic hook address for a DOS service call."""
     return interrupt_service_addr(call)
 
 
-def ensure_interrupt_service_hook(project: object, call: InterruptCall) -> tuple[int, str]:
+def ensure_interrupt_service_hook(project: object, call: InterruptCall) -> tuple[cython.longlong, str]:
     """Install the pseudo interrupt service hook for a recovered interrupt call."""
+    spec: object
     addr = interrupt_service_addr(call)
     name = _interrupt_service_name_for_helper(call, "pseudo")
 
@@ -904,7 +937,8 @@ def ensure_interrupt_service_hook(project: object, call: InterruptCall) -> tuple
     return addr, name
 
 
-def ensure_dos_service_hook(project: object, call: InterruptCall) -> tuple[int, str]:
+@cython.ccall
+def ensure_dos_service_hook(project: object, call: InterruptCall) -> object:
     """Install the pseudo DOS service hook for a recovered DOS call."""
     return ensure_interrupt_service_hook(project, call)
 
@@ -912,10 +946,13 @@ def ensure_dos_service_hook(project: object, call: InterruptCall) -> tuple[int, 
 def _remove_proven_no_return_fallthrough_8616(
     function: object,
     *,
-    insn_addr: int,
-    return_addr: int | None,
-) -> bool:
+    insn_addr: cython.longlong,
+    return_addr: object,
+) -> cython.bint:
     """Remove the exact CFG fallthrough edge for a proven no-return service."""
+    graph: object
+    source: object
+    target: object
     if return_addr is None:
         return False
     graph = _dynamic_analysis_getattr_8616(function, "transition_graph", None)
@@ -925,7 +962,7 @@ def _remove_proven_no_return_fallthrough_8616(
     source = next(
         (
             node
-            for node in nodes
+            for node in iter(nodes)
             if isinstance(_dynamic_analysis_getattr_8616(node, "addr", None), int)
             and isinstance(_dynamic_analysis_getattr_8616(node, "size", None), int)
             and node.addr <= insn_addr < node.addr + node.size
@@ -933,7 +970,7 @@ def _remove_proven_no_return_fallthrough_8616(
         None,
     )
     target = next(
-        (node for node in nodes if _dynamic_analysis_getattr_8616(node, "addr", None) == return_addr),
+        (node for node in iter(nodes) if operator.eq(_dynamic_analysis_getattr_8616(node, "addr", None), return_addr)),
         None,
     )
     if source is None or target is None or not graph.has_edge(source, target):
@@ -942,18 +979,24 @@ def _remove_proven_no_return_fallthrough_8616(
     return True
 
 
+@cython.ccall
 def patch_interrupt_service_call_sites(
     function: object,
-    binary_path: Path | str | None = None,
+    binary_path: object = None,
     *,
-    vectors: set[int] | None = None,
-) -> bool:
+    vectors: object = None,
+) -> cython.bint:
     """Rewrite Function._call_sites for recoverable DOS and BIOS interrupt services.
 
     The decompiler needs these synthetic hooks so direct interrupt callsites can
     be rendered with the service-specific helper names recovered from the
     interrupt vector and register state.
     """
+    callee: object
+    old: object
+    project: object
+    spec: object
+    call: object
     project = _dynamic_analysis_getattr_8616(function, "project", None)
     if project is None:
         return False
@@ -986,7 +1029,7 @@ def patch_interrupt_service_call_sites(
             return_addr = None
         new = (target_addr, return_addr)
         old = function_any._call_sites.get(call.insn_addr)
-        if old != new:
+        if operator.ne(old, new):
             function_any._call_sites[call.insn_addr] = new
             changed = True
         callee = caller_kb.functions.function(addr=target_addr, create=True)
@@ -997,7 +1040,8 @@ def patch_interrupt_service_call_sites(
     return changed
 
 
-def normalize_api_style(api_style: str) -> str:
+@cython.ccall
+def normalize_api_style(api_style: object) -> object:
     """Normalize user-facing API style aliases to renderer modes."""
     if api_style in {"pseudo", "service"}:
         return "pseudo"
@@ -1011,13 +1055,13 @@ def describe_x86_16_interrupt_api_surface() -> dict[str, object]:
     return {
         "dos": {
             "service_count": len(INT21_SERVICE_SPECS),
-            "service_names": tuple(spec.modern_name for spec in INT21_SERVICE_SPECS.values()),
-            "helper_names": tuple(spec.dos_name for spec in INT21_SERVICE_SPECS.values()),
+            "service_names": tuple(spec.modern_name for spec in builtins.iter(INT21_SERVICE_SPECS.values())),
+            "helper_names": tuple(spec.dos_name for spec in builtins.iter(INT21_SERVICE_SPECS.values())),
         },
         "bios": {
             "service_count": len(INTERRUPT_SERVICE_SPECS),
-            "service_names": tuple(spec.modern_name for spec in INTERRUPT_SERVICE_SPECS.values()),
-            "helper_names": tuple(spec.dos_name for spec in INTERRUPT_SERVICE_SPECS.values()),
+            "service_names": tuple(spec.modern_name for spec in builtins.iter(INTERRUPT_SERVICE_SPECS.values())),
+            "helper_names": tuple(spec.dos_name for spec in builtins.iter(INTERRUPT_SERVICE_SPECS.values())),
             "vectors": tuple(sorted(INTERRUPT_SERVICE_SPECS)),
         },
         "wrappers": {
@@ -1036,6 +1080,7 @@ def describe_x86_16_interrupt_api_surface() -> dict[str, object]:
     }
 
 
+@cython.ccall
 def describe_x86_16_interrupt_core_surface() -> dict[str, object]:
     """Describe the low-level interrupt hook surface."""
     return {
@@ -1055,6 +1100,7 @@ def describe_x86_16_interrupt_core_surface() -> dict[str, object]:
     }
 
 
+@cython.ccall
 def describe_x86_16_interrupt_lowering_boundary() -> dict[str, object]:
     """Describe the interrupt analysis/lowering ownership boundary."""
     return {
@@ -1069,28 +1115,34 @@ def describe_x86_16_interrupt_lowering_boundary() -> dict[str, object]:
     }
 
 
-def known_helper_signature_decl(name: str) -> str | None:
+@cython.ccall
+def known_helper_signature_decl(name: object) -> object:
     """Return a known helper declaration by exact helper name."""
+    abi: object
     abi = known_helper_abi_8616(name)
     return None if abi is None else abi.declaration
 
 
-def preferred_known_helper_signature_decl(name: str) -> str | None:
+@cython.ccall
+def preferred_known_helper_signature_decl(name: object) -> object:
     """Return the preferred declaration for a helper name or underscore variant."""
+    abi: object
     abi = preferred_known_helper_abi_8616(name)
     return None if abi is None else abi.declaration
 
 
+@cython.ccall
 def describe_x86_16_known_helper_signatures() -> dict[str, object]:
     """Describe the known helper signature catalog."""
     return {
         "signature_count": len(KNOWN_HELPER_SIGNATURE_DECLS),
         "helper_names": tuple(sorted(KNOWN_HELPER_SIGNATURE_DECLS)),
-        "declarations": tuple(sorted(KNOWN_HELPER_SIGNATURE_DECLS.values())),
+        "declarations": tuple(sorted(tuple(KNOWN_HELPER_SIGNATURE_DECLS.values()))),
     }
 
 
-def _track_com_ah_8616(text: str, ah: int | None) -> int | None:
+@cython.ccall
+def _track_com_ah_8616(text: object, ah: int | None) -> int | None:
     """Track the current AH value through mov ah/ax immediates."""
     if text.startswith("mov ah, "):
         return int(text.split(", ", 1)[1], 0)
@@ -1100,7 +1152,8 @@ def _track_com_ah_8616(text: str, ah: int | None) -> int | None:
     return ah
 
 
-def _com_terminator_insn_8616(insn: object, ah: int | None) -> bool:
+@cython.ccall
+def _com_terminator_insn_8616(insn: object, ah: int | None) -> cython.bint:
     """Return whether a disassembled insn terminates the .COM code region."""
     mnemonic = cast(Any, insn).mnemonic
     if mnemonic == "int":
@@ -1109,11 +1162,13 @@ def _com_terminator_insn_8616(insn: object, ah: int | None) -> bool:
     return mnemonic in {"ret", "retf", "iret", "jmp"}
 
 
-def infer_com_region(path: Path, *, base_addr: int, window: int, arch: object) -> tuple[int, int]:
+@cython.ccall
+def infer_com_region(path: Path, *, base_addr: cython.longlong, window: cython.longlong, arch: object) -> tuple[cython.longlong, cython.longlong]:
     """Infer a bounded `.COM` code region by scanning until a likely terminator.
 
     This keeps tiny DOS stubs from decompiling their trailing strings as code.
     """
+    insn: object
 
     data = path.read_bytes()
     end_limit = min(len(data), window)
@@ -1136,8 +1191,8 @@ def infer_com_region(path: Path, *, base_addr: int, window: int, arch: object) -
     return base_addr, base_addr + max(current, 1)
 
 
-def _decode_com_ascii_string(binary_path: Path | None, dx: int | None, *, terminator: int) -> str | None:
-    def _impl() -> str | None:
+def _decode_com_ascii_string(binary_path: Path | None, dx: int | None, *, terminator: cython.longlong) -> object:
+    def _impl() -> object:
         if binary_path is None or binary_path.suffix.lower() != ".com" or dx is None or dx < 0x100:
             return None
         try:
@@ -1154,7 +1209,7 @@ def _decode_com_ascii_string(binary_path: Path | None, dx: int | None, *, termin
         raw = data[start:end]
         if not raw:
             return ""
-        if any(byte < 0x20 or byte > 0x7E for byte in raw):
+        if any(byte < 0x20 or byte > 0x7E for byte in iter(raw)):
             return None
         text = raw.decode("ascii", errors="ignore")
         return text.replace("\\", "\\\\").replace('"', '\\"')
@@ -1162,32 +1217,39 @@ def _decode_com_ascii_string(binary_path: Path | None, dx: int | None, *, termin
     return _impl()
 
 
-def _coerce_path(binary_path: Path | str | None) -> Path | None:
+@cython.ccall
+def _coerce_path(binary_path: object) -> Path | None:
     if binary_path is None or isinstance(binary_path, Path):
         return binary_path
     return Path(binary_path)
 
 
-def decode_com_dollar_string(binary_path: Path | str | None, dx: int | None) -> str | None:
+@cython.ccall
+def decode_com_dollar_string(binary_path: object, dx: int | None) -> object:
     """Decode a DOS dollar-terminated string from a COM binary image."""
     binary_path = _coerce_path(binary_path)
     return _decode_com_ascii_string(binary_path, dx, terminator=ord("$"))
 
 
-def decode_com_c_string(binary_path: Path | str | None, dx: int | None) -> str | None:
+@cython.ccall
+def decode_com_c_string(binary_path: object, dx: int | None) -> object:
     """Decode a NUL-terminated string from a COM binary image."""
     binary_path = _coerce_path(binary_path)
     return _decode_com_ascii_string(binary_path, dx, terminator=0)
 
 
-def _format_imm(value: int) -> str:
+@cython.ccall
+def _format_imm(value: cython.longlong) -> str:
     if 0 <= value <= 9:
         return str(value)
     return f"0x{value:x}"
 
 
+@cython.ccall
 def _format_mem_operand(ins: object, operand: object) -> str:
     """Render one typed Capstone memory operand as a segmented C load."""
+    macro: object
+    mem: object
     mem = _dynamic_analysis_getattr_8616(operand, "mem", None)
     if mem is None:
         return "<mem>"
@@ -1228,6 +1290,7 @@ def _format_mem_operand(ins: object, operand: object) -> str:
     return f"{macro}(inertia_{segment_name}, {''.join(pieces)})"
 
 
+@cython.ccall
 def _operand_expr(ins: object, operand: object) -> tuple[int | None, str | None]:
     operand_any = cast(Any, operand)
     if operand_any.type == 1:
@@ -1241,24 +1304,24 @@ def _operand_expr(ins: object, operand: object) -> tuple[int | None, str | None]
     return None, None
 
 
-type CsOperandAny8616 = Any
+CsOperandAny8616 = typing.TypeAliasType("CsOperandAny8616", Any)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _InterruptSymbolicStackWord8616:
     """One exactly decoded PUSH value retained for interrupt-input recovery."""
 
     value: int | None
-    expr: str | None
-    source_register: str | None
+    expr: object
+    source_register: object
     fallthrough_addr: int | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _InterruptDirectCallStackEffect8616:
     """Typed caller-stack effect proven from one direct callee's terminals."""
 
-    preserves_stack: bool
+    preserves_stack: cython.bint
     return_frame_kind: TerminalReturnFrameKind8616 | None
 
 
@@ -1298,21 +1361,21 @@ _PUSHED_REG_EXPRS_8616 = {
 }
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _InterruptCallScan8616:
     """Linear symbolic-stack scan collecting recoverable interrupt calls."""
 
     project: object
     binary_path: Path | None
-    vectors: set[int] | None
-    debug: bool
-    calls: list[InterruptCall]
-    symbolic_stack: list[_InterruptSymbolicStackWord8616]
+    vectors: object
+    debug: cython.bint
+    calls: object
+    symbolic_stack: object
     expected_next_block: int | None
-    regs: dict[str, tuple[int | None, str | None]]
+    regs: object
 
     @classmethod
-    def create(cls, project: object, binary_path: Path | None, vectors: set[int] | None) -> _InterruptCallScan8616:
+    def create(cls, project: object, binary_path: Path | None, vectors: object) -> _InterruptCallScan8616:
         """Build a scan state with cleared registers and an empty stack."""
         return cls(
             project=project,
@@ -1325,12 +1388,16 @@ class _InterruptCallScan8616:
             regs=dict.fromkeys(_TRACKED_REGS_8616, (None, None)),
         )
 
-    def _dbg(self, text: str) -> None:
+    @cython.ccall
+    def _dbg(self, text: object) -> None:
         if self.debug:
             print(text, file=sys.stderr)
 
-    def set_reg(self, reg_name: str, value: int | None, expr: str | None) -> None:
+    @cython.ccall
+    def set_reg(self, reg_name: object, value: object, expr: object) -> None:
         """Set a tracked register, keeping GP word/half pairs coherent."""
+        high_byte: object
+        low_byte: object
         self.regs[reg_name] = (value, expr)
         if reg_name in _GP_WORD_REGS_8616:
             if value is not None:
@@ -1350,8 +1417,13 @@ class _InterruptCallScan8616:
             else:
                 self.regs[word] = (None, None)
 
+    @cython.ccall
     def pushed_value(self, ins: object, operand: object) -> _InterruptSymbolicStackWord8616 | None:
         """Capture one exact register/immediate PUSH source before later calls."""
+        expr: object
+        ins_addr: object
+        ins_size: object
+        value: object
         ins_addr = _dynamic_analysis_int_attr_8616(ins, "address")
         ins_size = _dynamic_analysis_int_attr_8616(ins, "size")
         fallthrough_addr = (
@@ -1377,6 +1449,7 @@ class _InterruptCallScan8616:
         operands: object,
     ) -> _InterruptDirectCallStackEffect8616:
         """Prove one direct callee's cleanup and consistent return-frame shape."""
+        original_project: object
         unknown = _InterruptDirectCallStackEffect8616(False, None)
         if not isinstance(operands, (list, tuple)) or len(operands) != 1:
             return unknown
@@ -1400,7 +1473,7 @@ class _InterruptCallScan8616:
                 candidate_addr,
                 terminal_stack_cleanup_at_address_8616(candidate_project, candidate_addr),
             )
-            for candidate_project, candidate_addr in candidates
+            for candidate_project, candidate_addr in iter(candidates)
         )
         if self.debug:
             print(
@@ -1408,16 +1481,18 @@ class _InterruptCallScan8616:
                 file=sys.stderr,
             )
         qualifying = tuple(
-            evidence for _candidate_addr, evidence in proofs if evidence.complete and evidence.consistent_cleanup == 0
+            evidence for _candidate_addr, evidence in iter(proofs) if evidence.complete and evidence.consistent_cleanup == 0
         )
         if not qualifying:
             return unknown
-        frame_kinds = frozenset(evidence.consistent_return_frame_kind for evidence in qualifying)
+        frame_kinds = frozenset(evidence.consistent_return_frame_kind for evidence in iter(qualifying))
         if len(frame_kinds) != 1:
             return unknown
         return _InterruptDirectCallStackEffect8616(True, next(iter(frame_kinds)))
 
+    @cython.ccall
     def _step_push(self, ins: CsInsn, operand: object) -> None:
+        captured: object
         captured = self.pushed_value(ins, operand)
         if captured is None:
             self.symbolic_stack.clear()
@@ -1425,7 +1500,9 @@ class _InterruptCallScan8616:
             self.symbolic_stack.append(captured)
         self._dbg(f"[interrupt-stack] push={ins.op_str!r} captured={captured!r} depth={len(self.symbolic_stack)}")
 
+    @cython.ccall
     def _step_pop(self, ins: CsInsn, operand: CsOperandAny8616) -> None:
+        restored: object
         if operand.type != 1 or not self.symbolic_stack:
             self.symbolic_stack.clear()
             return
@@ -1440,6 +1517,7 @@ class _InterruptCallScan8616:
             f"value={(restored.value, restored.expr)!r} depth={len(self.symbolic_stack)}"
         )
 
+    @cython.ccall
     def _step_call(self, ins: CsInsn, operands: object) -> None:
         effect = self.direct_call_stack_effect(ins, operands)
         call_addr = _dynamic_analysis_int_attr_8616(ins, "address")
@@ -1449,7 +1527,7 @@ class _InterruptCallScan8616:
             and ins.mnemonic == "call"
             and bool(self.symbolic_stack)
             and self.symbolic_stack[-1].source_register == "cs"
-            and self.symbolic_stack[-1].fallthrough_addr == call_addr
+            and operator.eq(self.symbolic_stack[-1].fallthrough_addr, call_addr)
         )
         if consumes_explicit_return_segment:
             self.symbolic_stack.pop()
@@ -1465,6 +1543,7 @@ class _InterruptCallScan8616:
         ):
             self.symbolic_stack.clear()
 
+    @cython.ccall
     def _step_mov(self, ins: CsInsn, operands: CsOperandAny8616) -> None:
         dst, src = operands
         if dst.type != 1:
@@ -1476,6 +1555,7 @@ class _InterruptCallScan8616:
             value, expr = _operand_expr(ins, src)
             self.set_reg(reg_name, value, expr)
 
+    @cython.ccall
     def _step_xor(self, ins: CsInsn, operands: CsOperandAny8616) -> None:
         dst_name = ins.reg_name(operands[0].reg).lower()
         src_name = ins.reg_name(operands[1].reg).lower()
@@ -1484,11 +1564,13 @@ class _InterruptCallScan8616:
         if dst_name in {"sp", "esp"}:
             self.symbolic_stack.clear()
 
+    @cython.ccall
     def _step_other_reg_write(self, ins: CsInsn, operands: CsOperandAny8616) -> None:
         destination_name = ins.reg_name(operands[0].reg).lower()
         if destination_name in {"sp", "esp"}:
             self.symbolic_stack.clear()
 
+    @cython.ccall
     def _int_vector(self, ins: CsInsn) -> int | None:
         if ins.mnemonic == "int3":
             return 3
@@ -1497,7 +1579,8 @@ class _InterruptCallScan8616:
         except ValueError:
             return None
 
-    def _interrupt_call(self, ins: CsInsn, vector: int, path_literal: str | None) -> InterruptCall:
+    @cython.ccall
+    def _interrupt_call(self, ins: CsInsn, vector: cython.longlong, path_literal: object) -> InterruptCall:
         """Build the recovered call record from the tracked register table."""
         r = self.regs
         return InterruptCall(
@@ -1542,7 +1625,10 @@ class _InterruptCallScan8616:
             string_literal=path_literal,
         )
 
+    @cython.ccall
     def _step_int(self, ins: CsInsn) -> None:
+        dx_expr: object
+        vector: object
         vector = self._int_vector(ins)
         if vector is None:
             return
@@ -1565,6 +1651,7 @@ class _InterruptCallScan8616:
         if vector == 0x21:
             self.set_reg("dx", None, None)
 
+    @cython.ccall
     def _step_insn(self, ins: CsInsn) -> None:
         ins_size = _dynamic_analysis_getattr_8616(ins, "size", None)
         self.expected_next_block = (
@@ -1588,9 +1675,14 @@ class _InterruptCallScan8616:
         if ins.mnemonic.startswith("j") or ins.mnemonic.startswith("loop") or ins.mnemonic.startswith("ret"):
             self.expected_next_block = None
 
-    def scan(self, function: object) -> list[InterruptCall]:
+    def scan(self, function: object) -> object:
         """Walk the function's blocks in order and collect interrupt calls."""
-        block_sizes: dict[int, int] = {}
+        block_size: object
+        graph: object
+        block_addr: object
+        ins: object
+        node: object
+        block_sizes: dict[cython.longlong, cython.longlong] = {}
         graph = _dynamic_analysis_getattr_8616(function, "transition_graph", None)
         if graph is not None:
             for node in tuple(_dynamic_analysis_getattr_8616(graph, "nodes", ())):
@@ -1601,7 +1693,7 @@ class _InterruptCallScan8616:
         block_addrs = {
             *(
                 addr
-                for addr in _dynamic_analysis_getattr_8616(function, "block_addrs_set", ())
+                for addr in builtins.iter(_dynamic_analysis_getattr_8616(function, "block_addrs_set", ()))
                 if isinstance(addr, int)
             ),
             *block_sizes,
@@ -1610,7 +1702,7 @@ class _InterruptCallScan8616:
             self._dbg(
                 f"[interrupt-stack] block={block_addr:#x} expected={self.expected_next_block!r} depth={len(self.symbolic_stack)}"
             )
-            if self.expected_next_block != block_addr:
+            if operator.ne(self.expected_next_block, block_addr):
                 self.symbolic_stack.clear()
             self.expected_next_block = None
             block_size = block_sizes.get(block_addr)
@@ -1625,13 +1717,15 @@ class _InterruptCallScan8616:
         return self.calls
 
 
+@cython.ccall
 def collect_interrupt_calls(
     function: object,
-    binary_path: Path | str | None = None,
+    binary_path: object = None,
     *,
-    vectors: set[int] | None = None,
-) -> list[InterruptCall]:
+    vectors: object = None,
+) -> object:
     """Collect recoverable interrupt calls from a dynamic angr Function boundary."""
+    project: object
     project = _dynamic_analysis_getattr_8616(function, "project", None)
     if project is None:
         return []
@@ -1639,22 +1733,25 @@ def collect_interrupt_calls(
     return scan.scan(function)
 
 
-def collect_dos_int21_calls(function: object, binary_path: Path | str | None = None) -> list[DOSInt21Call]:
+@cython.ccall
+def collect_dos_int21_calls(function: object, binary_path: object = None) -> list[DOSInt21Call]:
     """Collect recovered DOS int 21h service calls from an angr Function."""
-    return [call for call in collect_interrupt_calls(function, binary_path, vectors={0x21}) if call.vector == 0x21]
+    return [call for call in builtins.iter(collect_interrupt_calls(function, binary_path, vectors={0x21})) if call.vector == 0x21]
 
 
+@cython.ccall
 def collect_interrupt_service_calls(
     function: object,
-    binary_path: Path | str | None = None,
+    binary_path: object = None,
     *,
-    vectors: set[int] | None = None,
-) -> list[InterruptCall]:
+    vectors: object = None,
+) -> object:
     """Collect recovered DOS/BIOS interrupt service calls from an angr Function."""
     return collect_interrupt_calls(function, binary_path, vectors=vectors)
 
 
-def _dos_path_arg(call: DOSInt21Call, *, far_ptr: bool) -> str | None:
+@cython.ccall
+def _dos_path_arg(call: DOSInt21Call, *, far_ptr: cython.bint) -> object:
     if call.string_literal is not None:
         return f'"{call.string_literal}"'
     if call.dx is not None:
@@ -1666,13 +1763,15 @@ def _dos_path_arg(call: DOSInt21Call, *, far_ptr: bool) -> str | None:
     return None
 
 
-def _dos_arg(value: int | None, expr: str | None) -> str | None:
+@cython.ccall
+def _dos_arg(value: object, expr: object) -> object:
     if value is not None:
         return _format_imm(value)
     return expr
 
 
-def _dos_buffer_arg(call: DOSInt21Call, *, far_ptr: bool, const: bool) -> str | None:
+@cython.ccall
+def _dos_buffer_arg(call: DOSInt21Call, *, far_ptr: cython.bint, const: cython.bint) -> object:
     cast = (
         "const void far *" if far_ptr and const else "void far *" if far_ptr else "const void *" if const else "void *"
     )
@@ -1683,7 +1782,8 @@ def _dos_buffer_arg(call: DOSInt21Call, *, far_ptr: bool, const: bool) -> str | 
     return None
 
 
-def _dos_si_buffer_arg(call: DOSInt21Call, *, far_ptr: bool, const: bool) -> str | None:
+@cython.ccall
+def _dos_si_buffer_arg(call: DOSInt21Call, *, far_ptr: cython.bint, const: cython.bint) -> object:
     cast = (
         "const char far *" if far_ptr and const else "char far *" if far_ptr else "const char *" if const else "char *"
     )
@@ -1694,13 +1794,17 @@ def _dos_si_buffer_arg(call: DOSInt21Call, *, far_ptr: bool, const: bool) -> str
     return None
 
 
-def _dos_drive_arg(call: DOSInt21Call) -> str | None:
+@cython.ccall
+def _dos_drive_arg(call: DOSInt21Call) -> object:
     if call.dl is not None:
         return _format_imm(call.dl)
     return call.dl_expr
 
 
-def _dos_seek_offset_arg(call: DOSInt21Call) -> str:
+@cython.ccall
+def _dos_seek_offset_arg(call: DOSInt21Call) -> object:
+    high: object
+    low: object
     if call.cx is not None and call.dx is not None:
         return f"0x{(((call.cx & 0xFFFF) << 16) | (call.dx & 0xFFFF)):x}"
     high = _dos_arg(call.cx, call.cx_expr)
@@ -1712,13 +1816,17 @@ def _dos_seek_offset_arg(call: DOSInt21Call) -> str:
     return "0"
 
 
-def _dos_vector_arg(call: DOSInt21Call) -> str | None:
+@cython.ccall
+def _dos_vector_arg(call: DOSInt21Call) -> object:
     if call.al is not None:
         return _format_imm(call.al)
     return call.al_expr
 
 
-def _dos_far_pointer_arg(call: DOSInt21Call) -> str | None:
+@cython.ccall
+def _dos_far_pointer_arg(call: DOSInt21Call) -> object:
+    offset: object
+    segment: object
     segment = _dos_arg(call.ds, call.ds_expr)
     offset = _dos_arg(call.dx, call.dx_expr)
     if segment is not None and offset is not None:
@@ -1728,7 +1836,8 @@ def _dos_far_pointer_arg(call: DOSInt21Call) -> str | None:
     return None
 
 
-def _interrupt_service_decl(spec: InterruptServiceSpec, api_style: str) -> str:
+@cython.ccall
+def _interrupt_service_decl(spec: InterruptServiceSpec, api_style: object) -> object:
     api_style = normalize_api_style(api_style)
     if api_style == "pseudo" and spec.pseudo_decl is not None:
         return spec.pseudo_decl
@@ -1745,7 +1854,9 @@ def _interrupt_service_decl(spec: InterruptServiceSpec, api_style: str) -> str:
     return f"int {spec.modern_name.lstrip('_')}(void);"
 
 
-def _render_string_dollar_call_8616(call: DOSInt21Call, api_style: str, name: str) -> str:
+@cython.ccall
+def _render_string_dollar_call_8616(call: DOSInt21Call, api_style: object, name: object) -> object:
+    argument: object
     helper_name = (
         "_dos_print_dollar_string" if api_style == "dos" else name if api_style == "pseudo" else "print_dos_string"
     )
@@ -1755,7 +1866,8 @@ def _render_string_dollar_call_8616(call: DOSInt21Call, api_style: str, name: st
     return f"{helper_name}({argument})" if argument is not None else f"{helper_name}()"
 
 
-def _render_setvect_call_8616(call: DOSInt21Call, api_style: str, name: str) -> str:
+@cython.ccall
+def _render_setvect_call_8616(call: DOSInt21Call, api_style: object, name: object) -> str:
     vector = _dos_vector_arg(call) or "0"
     handler = _dos_far_pointer_arg(call) or "NULL"
     if api_style == "dos":
@@ -1765,7 +1877,8 @@ def _render_setvect_call_8616(call: DOSInt21Call, api_style: str, name: str) -> 
     return f"setvect({vector}, {handler})"
 
 
-def _render_getvect_call_8616(call: DOSInt21Call, api_style: str, name: str) -> str:
+@cython.ccall
+def _render_getvect_call_8616(call: DOSInt21Call, api_style: object, name: object) -> str:
     vector = _dos_vector_arg(call) or "0"
     if api_style == "dos":
         return f"_dos_getvect({vector})"
@@ -1774,37 +1887,44 @@ def _render_getvect_call_8616(call: DOSInt21Call, api_style: str, name: str) -> 
     return f"getvect({vector})"
 
 
-def _rk_drive_8616(call: DOSInt21Call, api_style: str, name: str) -> str:
+@cython.ccall
+def _rk_drive_8616(call: DOSInt21Call, api_style: object, name: object) -> str:
     """Render a drive-number int21 service call."""
     return f"{name}({_dos_drive_arg(call) or '0'})"
 
 
-def _rk_path_8616(call: DOSInt21Call, api_style: str, name: str) -> str:
+@cython.ccall
+def _rk_path_8616(call: DOSInt21Call, api_style: object, name: object) -> str:
     """Render a single-path int21 service call."""
     return f"{name}({_dos_path_arg(call, far_ptr=api_style == 'dos') or 'NULL'})"
 
 
-def _rk_path_reg_8616(call: DOSInt21Call, api_style: str, name: str, value: int | None, expr: str | None) -> str:
+@cython.ccall
+def _rk_path_reg_8616(call: DOSInt21Call, api_style: object, name: object, value: int | None, expr: object) -> str:
     """Render a ``(path, reg-arg)`` int21 service call."""
     path = _dos_path_arg(call, far_ptr=api_style == "dos") or "NULL"
     arg = _dos_arg(value, expr) or "0"
     return f"{name}({path}, {arg})"
 
 
-def _rk_path_mode_8616(call: DOSInt21Call, api_style: str, name: str) -> str:
+@cython.ccall
+def _rk_path_mode_8616(call: DOSInt21Call, api_style: object, name: object) -> object:
     return _rk_path_reg_8616(call, api_style, name, call.al, call.al_expr)
 
 
-def _rk_path_attrs_8616(call: DOSInt21Call, api_style: str, name: str) -> str:
+@cython.ccall
+def _rk_path_attrs_8616(call: DOSInt21Call, api_style: object, name: object) -> object:
     return _rk_path_reg_8616(call, api_style, name, call.cx, call.cx_expr)
 
 
-def _rk_handle_8616(call: DOSInt21Call, api_style: str, name: str) -> str:
+@cython.ccall
+def _rk_handle_8616(call: DOSInt21Call, api_style: object, name: object) -> str:
     """Render a single-handle int21 service call."""
     return f"{name}({_dos_arg(call.bx, call.bx_expr) or '0'})"
 
 
-def _rk_handle_buffer_count_8616(call: DOSInt21Call, api_style: str, name: str) -> str:
+@cython.ccall
+def _rk_handle_buffer_count_8616(call: DOSInt21Call, api_style: object, name: object) -> str:
     """Render a ``(handle, buffer, count)`` read/write int21 call."""
     handle = _dos_arg(call.bx, call.bx_expr) or "0"
     buffer = _dos_buffer_arg(call, far_ptr=api_style == "dos", const=call.ah == 0x40) or "NULL"
@@ -1812,7 +1932,8 @@ def _rk_handle_buffer_count_8616(call: DOSInt21Call, api_style: str, name: str) 
     return f"{name}({handle}, {buffer}, {count})"
 
 
-def _rk_handle_seek_8616(call: DOSInt21Call, api_style: str, name: str) -> str:
+@cython.ccall
+def _rk_handle_seek_8616(call: DOSInt21Call, api_style: object, name: object) -> str:
     """Render a ``(handle, offset, origin)`` seek int21 call."""
     handle = _dos_arg(call.bx, call.bx_expr) or "0"
     offset = _dos_seek_offset_arg(call)
@@ -1820,14 +1941,16 @@ def _rk_handle_seek_8616(call: DOSInt21Call, api_style: str, name: str) -> str:
     return f"{name}({handle}, {offset}, {origin})"
 
 
-def _rk_drive_buffer_8616(call: DOSInt21Call, api_style: str, name: str) -> str:
+@cython.ccall
+def _rk_drive_buffer_8616(call: DOSInt21Call, api_style: object, name: object) -> str:
     """Render a ``(drive, buffer)`` int21 service call."""
     drive = _dos_drive_arg(call) or "0"
     buffer = _dos_si_buffer_arg(call, far_ptr=api_style == "dos", const=False) or "NULL"
     return f"{name}({drive}, {buffer})"
 
 
-def _rk_exit_8616(call: DOSInt21Call, api_style: str, name: str) -> str:
+@cython.ccall
+def _rk_exit_8616(call: DOSInt21Call, api_style: object, name: object) -> str:
     """Render a process-exit int21 call with the low-byte exit code."""
     exit_code = call.ax & 0xFF if call.ax is not None else 0
     return f"{name}({exit_code})"
@@ -1849,15 +1972,19 @@ _DOS_RENDER_HANDLERS_8616: dict[str, Callable[[DOSInt21Call, str, str], str]] = 
 }
 
 
-def _render_dos_int21_by_kind_8616(call: DOSInt21Call, api_style: str, name: str, render_kind: str) -> str:
+@cython.ccall
+def _render_dos_int21_by_kind_8616(call: DOSInt21Call, api_style: object, name: object, render_kind: object) -> object:
+    handler: object
     handler = _DOS_RENDER_HANDLERS_8616.get(render_kind)
     if handler is not None:
         return handler(call, api_style, name)
     return f"{name}()"
 
 
-def render_dos_int21_call(call: DOSInt21Call, api_style: str) -> str:
+@cython.ccall
+def render_dos_int21_call(call: DOSInt21Call, api_style: object) -> object:
     """Render a recovered DOS int 21h call as a helper call expression."""
+    spec: object
     api_style = normalize_api_style(api_style)
 
     if api_style == "raw":
@@ -1871,18 +1998,21 @@ def render_dos_int21_call(call: DOSInt21Call, api_style: str) -> str:
     return _render_dos_int21_by_kind_8616(call, api_style, name, spec.render_kind)
 
 
-def _render_int10_wrapper_8616(call: InterruptCall, api_style: str) -> str:
+def _render_int10_wrapper_8616(call: InterruptCall, api_style: object) -> str:
     """Render the int10 wrapper form: AH selector or int86/int86x fallback."""
     if call.ah is not None:
         selector = _format_imm(call.ah)
         return f"{interrupt_service_name(call, api_style)}({selector})"
-    extended = any(value is not None for value in (call.ds, call.es, call.ss, call.cs))
+    extended = any(value is not None for value in iter((call.ds, call.es, call.ss, call.cs)))
     if extended:
         return "int86x(0x10, &inregs, &outregs, &sregs)"
     return "int86(0x10, &inregs, &outregs)"
 
 
-def _render_simple_interrupt_call(call: InterruptCall, api_style: str) -> str:
+@cython.ccall
+def _render_simple_interrupt_call(call: InterruptCall, api_style: object) -> object:
+    dos_selector: object
+    spec: object
     api_style = normalize_api_style(api_style)
     spec = interrupt_service_spec(call)
     if spec is None:
@@ -1902,16 +2032,21 @@ def _render_simple_interrupt_call(call: InterruptCall, api_style: str) -> str:
     return f"{name}()"
 
 
-def render_interrupt_call(call: InterruptCall, api_style: str) -> str:
+@cython.ccall
+def render_interrupt_call(call: InterruptCall, api_style: object) -> object:
     """Render a recovered DOS or BIOS interrupt call as a helper call expression."""
+    spec: object
     spec = interrupt_service_spec(call)
     if spec is None:
         return render_dos_int21_call(call, api_style)
     return _render_simple_interrupt_call(call, api_style)
 
 
-def dos_helper_declarations(calls: list[DOSInt21Call], api_style: str) -> list[str]:
+@cython.ccall
+def dos_helper_declarations(calls: object, api_style: object) -> object:
     """Return declarations required by rendered DOS helper calls."""
+    spec: object
+    call: object
     api_style = normalize_api_style(api_style)
     if api_style == "raw":
         return []
@@ -1934,10 +2069,13 @@ def dos_helper_declarations(calls: list[DOSInt21Call], api_style: str) -> list[s
     return declarations
 
 
-def interrupt_service_declarations(calls: list[InterruptCall], api_style: str) -> list[str]:
+def interrupt_service_declarations(calls: object, api_style: object) -> object:
     """Return declarations required by rendered interrupt service helper calls."""
 
-    def _impl() -> list[str]:
+    def _impl() -> object:
+        spec: object
+        call: object
+        decl: object
         nonlocal api_style
         api_style = normalize_api_style(api_style)
         if api_style == "raw":
@@ -1969,7 +2107,9 @@ def interrupt_service_declarations(calls: list[InterruptCall], api_style: str) -
     return _impl()
 
 
+@cython.ccall
 def _absolute_mem_disp(operand: object) -> int | None:
+    mem: object
     mem = _dynamic_analysis_getattr_8616(operand, "mem", None)
     if mem is None:
         return None
@@ -1978,7 +2118,9 @@ def _absolute_mem_disp(operand: object) -> int | None:
     return int(_dynamic_analysis_getattr_8616(mem, "disp", 0)) & 0xFFFF
 
 
+@cython.ccall
 def _initial_cs_linear_base(project: object) -> int | None:
+    cs: object
     main_object = _dynamic_analysis_getattr_8616(
         _dynamic_analysis_getattr_8616(project, "loader", None), "main_object", None
     )
@@ -1991,6 +2133,7 @@ def _initial_cs_linear_base(project: object) -> int | None:
     return (cs & 0xFFFF) << 4
 
 
+@cython.ccall
 def _x86_16_project_for_function_8616(function: object) -> object | None:
     project = _dynamic_analysis_getattr_8616(function, "project", None)
     if _dynamic_analysis_getattr_8616(_dynamic_analysis_getattr_8616(project, "arch", None), "name", None) == "86_16":
@@ -1998,7 +2141,9 @@ def _x86_16_project_for_function_8616(function: object) -> object | None:
     return None
 
 
+@cython.ccall
 def _canonical_code_linear_addr(project: object, addr: int | None) -> int | None:
+    original_project: object
     if not isinstance(addr, int):
         return None
     original_project = _dynamic_analysis_getattr_8616(project, "_inertia_original_project", None)
@@ -2025,7 +2170,8 @@ def _canonical_code_linear_addr(project: object, addr: int | None) -> int | None
     return addr
 
 
-def _project_memory_load_8616(project: object, addr: int, size: int) -> bytes | None:
+@cython.ccall
+def _project_memory_load_8616(project: object, addr: cython.longlong, size: cython.longlong) -> object:
     memory = _dynamic_analysis_getattr_8616(_dynamic_analysis_getattr_8616(project, "loader", None), "memory", None)
     load = _dynamic_analysis_getattr_8616(memory, "load", None)
     if not callable(load):
@@ -2036,15 +2182,19 @@ def _project_memory_load_8616(project: object, addr: int, size: int) -> bytes | 
     return None
 
 
-def _looks_like_x86_16_frame_prologue_8616(code: bytes, offset: int) -> bool:
+@cython.ccall
+def _looks_like_x86_16_frame_prologue_8616(code: object, offset: cython.longlong) -> cython.bint:
     return 0 <= offset <= len(code) - 3 and code[offset : offset + 3] in {b"\x55\x8b\xec", b"\x55\x89\xe5"}
 
 
+@cython.ccall
 def canonicalize_x86_16_padding_call_target_8616(
     project: object,
     addr: int | None,
 ) -> int | None:
     """Advance a public padding entry to its proven x86-16 frame prologue."""
+    candidate_project: object
+    candidate_addr: object
     if not isinstance(addr, int):
         return None
     if _dynamic_analysis_getattr_8616(_dynamic_analysis_getattr_8616(project, "arch", None), "name", None) != "86_16":
@@ -2071,7 +2221,9 @@ def canonicalize_x86_16_padding_call_target_8616(
     return addr
 
 
+@cython.ccall
 def _neighbor_image_bounds(project: object) -> tuple[int | None, int | None]:
+    candidate_project: object
     candidate_projects = [_dynamic_analysis_getattr_8616(project, "_inertia_original_project", None), project]
     for candidate_project in candidate_projects:
         main_object = _dynamic_analysis_getattr_8616(
@@ -2084,14 +2236,16 @@ def _neighbor_image_bounds(project: object) -> tuple[int | None, int | None]:
     return None, None
 
 
-def _direct_call_insn_from_block(project: object, block_addr: int) -> object | None:
+@cython.ccall
+def _direct_call_insn_from_block(project: object, block_addr: cython.longlong) -> object | None:
+    insn: object
     block = _analysis_project_block_8616(project, block_addr)
     insns = _dynamic_analysis_getattr_8616(_dynamic_analysis_getattr_8616(block, "capstone", None), "insns", ()) or ()
     if not insns:
         return None
 
     for insn in insns:
-        if _dynamic_analysis_getattr_8616(insn, "address", None) != block_addr:
+        if operator.ne(_dynamic_analysis_getattr_8616(insn, "address", None), block_addr):
             continue
         mnemonic = str(_dynamic_analysis_getattr_8616(insn, "mnemonic", "") or "").lower()
         if mnemonic in {"call", "lcall"}:
@@ -2116,7 +2270,7 @@ def _resolve_direct_call_target_from_insn(project: object, insn: object) -> int 
     if (
         mnemonic == "lcall"
         and len(operands) == 2
-        and all(_dynamic_analysis_getattr_8616(op, "type", None) == 2 for op in operands)
+        and all(_dynamic_analysis_getattr_8616(op, "type", None) == 2 for op in iter(operands))
     ):
         seg = operands[0].imm & 0xFFFF
         off = operands[1].imm & 0xFFFF
@@ -2134,6 +2288,7 @@ def _resolve_direct_call_target_from_insn(project: object, insn: object) -> int 
     return None
 
 
+@cython.ccall
 def resolve_direct_call_target_from_instruction_8616(
     project: object,
     instruction: object,
@@ -2142,19 +2297,23 @@ def resolve_direct_call_target_from_instruction_8616(
     return _resolve_direct_call_target_from_insn(project, instruction)
 
 
-def resolve_direct_call_target_from_block(project: object, block_addr: int) -> int | None:
+@cython.ccall
+def resolve_direct_call_target_from_block(project: object, block_addr: cython.longlong) -> int | None:
     """Recover a direct call target from a block-end call or a callsite inside a block.
 
     This is intentionally narrow and only handles the direct near/far forms
     that show up in our DOS samples. Indirect calls still return ``None``.
     """
+    insn: object
     insn = _direct_call_insn_from_block(project, block_addr)
     if insn is None:
         return None
     return resolve_direct_call_target_from_instruction_8616(project, insn)
 
 
-def _callsite_addr_decodes_to_direct_call_8616(project: object, callsite_addr: int) -> bool | None:
+@cython.ccall
+def _callsite_addr_decodes_to_direct_call_8616(project: object, callsite_addr: cython.longlong) -> bool | None:
+    insn: object
     try:
         block = _analysis_project_block_8616(project, callsite_addr)
     except Exception:
@@ -2162,7 +2321,7 @@ def _callsite_addr_decodes_to_direct_call_8616(project: object, callsite_addr: i
 
     insns = _dynamic_analysis_getattr_8616(_dynamic_analysis_getattr_8616(block, "capstone", None), "insns", ()) or ()
     for insn in insns:
-        if _dynamic_analysis_getattr_8616(insn, "address", None) != callsite_addr:
+        if operator.ne(_dynamic_analysis_getattr_8616(insn, "address", None), callsite_addr):
             continue
         mnemonic = str(_dynamic_analysis_getattr_8616(insn, "mnemonic", "") or "").lower()
         return mnemonic in {"call", "lcall"}
@@ -2173,6 +2332,9 @@ def sanitize_direct_call_sites_8616(function: object) -> DirectCallsiteSanitizat
     """Prune impossible direct-call entries from a recovered x86-16 function."""
 
     def _impl() -> DirectCallsiteSanitizationEvidence:
+        is_call: object
+        project: object
+        callsite_addr: object
         project = _x86_16_project_for_function_8616(function)
         if project is None:
             return DirectCallsiteSanitizationEvidence()
@@ -2212,7 +2374,7 @@ def sanitize_direct_call_sites_8616(function: object) -> DirectCallsiteSanitizat
     return _impl()
 
 
-def resolve_direct_jump_target_from_block(project: object, block_addr: int) -> int | None:
+def resolve_direct_jump_target_from_block(project: object, block_addr: cython.longlong) -> int | None:
     """Recover a direct jump target from the last instruction in a block.
 
     This is used for tail-jump thunks that should seed neighbor recovery even
@@ -2220,6 +2382,8 @@ def resolve_direct_jump_target_from_block(project: object, block_addr: int) -> i
     """
 
     def _impl() -> int | None:
+        capstone_insn: object
+        token: object
         block = _analysis_project_block_8616(project, block_addr)
         insns = _dynamic_analysis_getattr_8616(block.capstone, "insns", ())
         if not insns:
@@ -2231,7 +2395,7 @@ def resolve_direct_jump_target_from_block(project: object, block_addr: int) -> i
             _dynamic_analysis_getattr_8616(capstone_insn, "operands", ()) if capstone_insn is not None else ()
         )
 
-        if last.mnemonic == "ljmp" and len(operands) == 2 and all(op.type == 2 for op in operands):
+        if last.mnemonic == "ljmp" and len(operands) == 2 and all(op.type == 2 for op in iter(operands)):
             seg = operands[0].imm & 0xFFFF
             off = operands[1].imm & 0xFFFF
             return _canonical_code_linear_addr(project, (seg << 4) + off)
@@ -2252,8 +2416,10 @@ def resolve_direct_jump_target_from_block(project: object, block_addr: int) -> i
     return _impl()
 
 
-def _direct_call_target_kind_8616(project: object, callsite_addr: int) -> CallTargetKind8616 | None:
+@cython.ccall
+def _direct_call_target_kind_8616(project: object, callsite_addr: cython.longlong) -> CallTargetKind8616 | None:
     """Classify an exact decoded direct call without interpreting rendered assembly."""
+    insn: object
     insn = _direct_call_insn_from_block(project, callsite_addr)
     if insn is None or _resolve_direct_call_target_from_insn(project, insn) is None:
         return None
@@ -2265,7 +2431,8 @@ def _direct_call_target_kind_8616(project: object, callsite_addr: int) -> CallTa
     return None
 
 
-def _direct_tail_jump_kind_8616(project: object, block_addr: int) -> CallTargetKind8616 | None:
+@cython.ccall
+def _direct_tail_jump_kind_8616(project: object, block_addr: cython.longlong) -> CallTargetKind8616 | None:
     """Classify an exact decoded direct tail jump by architectural form."""
     block = _analysis_project_block_8616(project, block_addr)
     insns = _dynamic_analysis_tuple_attr_8616(block.capstone, "insns")
@@ -2279,7 +2446,7 @@ def _direct_tail_jump_kind_8616(project: object, block_addr: int) -> CallTargetK
     return None
 
 
-def _tail_jump_target_is_function_entry_8616(project: object, target_addr: int) -> bool:
+def _tail_jump_target_is_function_entry_8616(project: object, target_addr: cython.longlong) -> cython.bint:
     """Require exact function-entry evidence before treating a jump as a tail call."""
     metadata = _dynamic_analysis_getattr_8616(project, "_inertia_lst_metadata", None)
     function_entries = _dynamic_analysis_getattr_8616(metadata, "function_entry_addrs", ())
@@ -2288,7 +2455,7 @@ def _tail_jump_target_is_function_entry_8616(project: object, target_addr: int) 
         original_delta = _dynamic_analysis_getattr_8616(project, "_inertia_original_linear_delta", None)
         if isinstance(original_delta, int):
             candidates.update((target_addr + original_delta, target_addr - original_delta))
-        return any(candidate in function_entries for candidate in candidates)
+        return any(candidate in function_entries for candidate in iter(candidates))
 
     functions = _dynamic_analysis_getattr_8616(_dynamic_analysis_getattr_8616(project, "kb", None), "functions", None)
     lookup = _dynamic_analysis_getattr_8616(functions, "function", None)
@@ -2299,8 +2466,10 @@ def _tail_jump_target_is_function_entry_8616(project: object, target_addr: int) 
     return False
 
 
+@cython.ccall
 def _fallback_instruction_groups_8616(project: object, function: object) -> tuple[tuple[object, ...], ...]:
     """Collect per-block capstone insn tuples when the inventory is incomplete."""
+    block_addr: object
     fallback_groups: list[tuple[object, ...]] = []
     for block_addr in _analysis_function_block_addrs_8616(function):
         try:
@@ -2316,10 +2485,12 @@ def _fallback_instruction_groups_8616(project: object, function: object) -> tupl
     return tuple(fallback_groups)
 
 
+@cython.ccall
 def _patch_one_callsite_8616(
-    project: object, function: object, insn: object, call_sites: dict[int, tuple[int, int | None]]
-) -> bool:
+    project: object, function: object, insn: object, call_sites: object
+) -> cython.bint:
     """Patch one direct call insn into `_call_sites`; return whether it changed."""
+    target_addr: object
     mnemonic = str(_dynamic_analysis_getattr_8616(insn, "mnemonic", "") or "").lower()
     if mnemonic not in {"call", "lcall"}:
         return False
@@ -2338,13 +2509,14 @@ def _patch_one_callsite_8616(
     if isinstance(size, int) and size > 0:
         return_addr = callsite_addr + size
     recovered = (target_addr, return_addr)
-    if call_sites.get(callsite_addr) == recovered:
+    if operator.eq(call_sites.get(callsite_addr), recovered):
         return False
     call_sites[callsite_addr] = recovered
     return True
 
 
-def patch_direct_call_sites(function: object) -> bool:
+@cython.ccall
+def patch_direct_call_sites(function: object) -> cython.bint:
     """Recover direct near/far callsites from block ends when CFG left `_call_sites` empty.
 
     Rebased exact-region recovery for small 16-bit functions sometimes keeps the
@@ -2353,6 +2525,9 @@ def patch_direct_call_sites(function: object) -> bool:
     so patch the direct block-end calls back into `_call_sites` before later
     passes give up on call reasoning.
     """
+    project: object
+    insn: object
+    insns: object
 
     project = _x86_16_project_for_function_8616(function)
     if project is None:
@@ -2367,7 +2542,7 @@ def patch_direct_call_sites(function: object) -> bool:
         project,
         function_entry=_analysis_function_addr_8616(function),
     )
-    instruction_groups: tuple[tuple[object, ...], ...]
+    instruction_groups: object
     if instruction_inventory.complete:
         instruction_groups = (instruction_inventory.instructions,)
     else:
@@ -2378,7 +2553,8 @@ def patch_direct_call_sites(function: object) -> bool:
     return changed
 
 
-def resolve_stored_near_call_target_from_function(function: object, callsite_addr: int) -> int | None:
+@cython.ccall
+def resolve_stored_near_call_target_from_function(function: object, callsite_addr: cython.longlong) -> int | None:
     """Recover a near call target from a startup-built absolute pointer slot.
 
     This is intentionally narrow. It only handles patterns like:
@@ -2393,7 +2569,8 @@ def resolve_stored_near_call_target_from_function(function: object, callsite_add
     return _resolve_stored_near_target_8616(function, callsite_addr, "call")
 
 
-def resolve_stored_near_jump_target_from_function(function: object, jump_addr: int) -> int | None:
+@cython.ccall
+def resolve_stored_near_jump_target_from_function(function: object, jump_addr: cython.longlong) -> int | None:
     """Recover a near jump target from a startup-built absolute pointer slot.
 
     This mirrors ``resolve_stored_near_call_target_from_function`` for tail-jump
@@ -2403,8 +2580,10 @@ def resolve_stored_near_jump_target_from_function(function: object, jump_addr: i
     return _resolve_stored_near_target_8616(function, jump_addr, "jmp")
 
 
-def _last_insn_mem_slot_8616(block: Any, mnemonic: str) -> int | None:  # noqa: ANN401
+@cython.ccall
+def _last_insn_mem_slot_8616(block: Any, mnemonic: object) -> int | None:  # noqa: ANN401
     """Return the absolute mem disp of a single-operand last insn, or None."""
+    capstone_insn: object
     insns = _dynamic_analysis_getattr_8616(block.capstone, "insns", ())
     if not insns:
         return None
@@ -2413,15 +2592,18 @@ def _last_insn_mem_slot_8616(block: Any, mnemonic: str) -> int | None:  # noqa: 
     operands: tuple[Any, ...] = tuple(
         _dynamic_analysis_getattr_8616(capstone_insn, "operands", ()) if capstone_insn is not None else ()
     )
-    if last.mnemonic != mnemonic or len(operands) != 1 or operands[0].type != 3:
+    if operator.ne(last.mnemonic, mnemonic) or len(operands) != 1 or operands[0].type != 3:
         return None
     return _absolute_mem_disp(operands[0])
 
 
+@cython.ccall
 def _prior_slot_store_target_8616(
-    project: object, function: object, site_addr: int, slot_disp: int, cs_base: int
+    project: object, function: object, site_addr: cython.longlong, slot_disp: cython.longlong, cs_base: cython.longlong
 ) -> int | None:
     """Scan insns before ``site_addr`` for ``mov word ptr [slot], imm``."""
+    addr: object
+    ins: object
     prior_insns: list[object] = []
     for addr in _analysis_function_block_addrs_8616(function):
         if addr >= site_addr:
@@ -2446,8 +2628,12 @@ def _prior_slot_store_target_8616(
     return None
 
 
-def _resolve_stored_near_target_8616(function: object, site_addr: int, mnemonic: str) -> int | None:
+@cython.ccall
+def _resolve_stored_near_target_8616(function: object, site_addr: cython.longlong, mnemonic: object) -> int | None:
     """Shared slot-based near target recovery for call/jmp sites."""
+    cs_base: object
+    project: object
+    slot_disp: object
     project = _x86_16_project_for_function_8616(function)
     if project is None:
         return None
@@ -2461,7 +2647,8 @@ def _resolve_stored_near_target_8616(function: object, site_addr: int, mnemonic:
     return _prior_slot_store_target_8616(project, function, site_addr, slot_disp, cs_base)
 
 
-def collect_direct_far_call_targets(function: object) -> list[FarCallTarget]:
+@cython.ccall
+def collect_direct_far_call_targets(function: object) -> object:
     """Recover only immediate far-call targets directly from lifted blocks.
 
     angr's stock call-target recovery does not currently understand the x86-16
@@ -2470,6 +2657,9 @@ def collect_direct_far_call_targets(function: object) -> list[FarCallTarget]:
     is fully understood. This helper keeps the workaround small, explicit, and
     reusable for CLI tooling and tests.
     """
+    project: object
+    target_addr: object
+    callsite_addr: object
     project = _x86_16_project_for_function_8616(function)
     if project is None:
         return []
@@ -2496,14 +2686,19 @@ def collect_direct_far_call_targets(function: object) -> list[FarCallTarget]:
     return recovered
 
 
+@cython.ccall
 def _neighbor_callsite_seed_8616(
     project: object,
     function: object,
-    callsite_addr: int,
-    linked_base: int | None,
-    image_end: int | None,
+    callsite_addr: cython.longlong,
+    linked_base: object,
+    image_end: object,
 ) -> CallTargetSeed | None:
     """Resolve one callsite's target kind and image-bounded seed."""
+    direct_kind: object
+    direct_target: object
+    stored_target: object
+    target_addr: object
     kind = CallTargetKind8616.CFG_RESOLVED_CALL
     target_addr = _analysis_function_call_target_8616(function, callsite_addr)
     if (
@@ -2537,17 +2732,20 @@ def _neighbor_callsite_seed_8616(
     )
 
 
+@cython.ccall
 def _neighbor_tail_seed_8616(
     project: object,
     function: object,
-    block_addr: int,
-    block_addr_set: set[int],
-    linked_base: int | None,
-    image_end: int | None,
+    block_addr: cython.longlong,
+    block_addr_set: object,
+    linked_base: object,
+    image_end: object,
 ) -> CallTargetSeed | None:
     """Resolve one block-end tail jump into a target seed."""
+    jump_target: object
+    tail_kind: object
     jump_target = resolve_direct_jump_target_from_block(project, block_addr)
-    tail_kind: CallTargetKind8616 | None = _direct_tail_jump_kind_8616(project, block_addr)
+    tail_kind = _direct_tail_jump_kind_8616(project, block_addr)
     if jump_target is None:
         jump_target = resolve_stored_near_jump_target_from_function(function, block_addr)
         if jump_target is not None:
@@ -2555,7 +2753,7 @@ def _neighbor_tail_seed_8616(
     if jump_target is None or tail_kind is None:
         return None
     function_addr = _analysis_function_addr_8616(function)
-    if jump_target in block_addr_set or jump_target == function_addr:
+    if jump_target in block_addr_set or operator.eq(jump_target, function_addr):
         return None
     if not _tail_jump_target_is_function_entry_8616(project, jump_target):
         return None
@@ -2569,18 +2767,23 @@ def _neighbor_tail_seed_8616(
     )
 
 
+@cython.ccall
 def _collect_neighbor_seeds_8616(project: object, function: object) -> list[CallTargetSeed]:
     """Merge decoded callsite and tail-jump evidence into deduped seeds."""
+    existing: object
+    seed: object
+    block_addr: object
+    callsite_addr: object
     patch_direct_call_sites(function)
     linked_base, image_end = _neighbor_image_bounds(project)
 
-    recovered: dict[tuple[int, int], CallTargetSeed] = {}
+    recovered: dict[tuple[cython.longlong, cython.longlong], CallTargetSeed] = {}
     for callsite_addr in _analysis_function_call_sites_8616(function):
         seed = _neighbor_callsite_seed_8616(project, function, callsite_addr, linked_base, image_end)
         if seed is not None and (seed.callsite_addr, seed.target_addr) not in recovered:
             recovered[(seed.callsite_addr, seed.target_addr)] = seed
 
-    block_addrs = sorted(_dynamic_analysis_getattr_8616(function, "block_addrs_set", ()))
+    block_addrs = sorted(tuple(_dynamic_analysis_getattr_8616(function, "block_addrs_set", ())))
     block_addr_set = set(block_addrs)
     for block_addr in block_addrs:
         seed = _neighbor_tail_seed_8616(project, function, block_addr, block_addr_set, linked_base, image_end)
@@ -2594,7 +2797,7 @@ def _collect_neighbor_seeds_8616(project: object, function: object) -> list[Call
     return list(recovered.values())
 
 
-def collect_neighbor_call_targets(function: object) -> list[CallTargetSeed]:
+def collect_neighbor_call_targets(function: object) -> object:
     """Recover direct x86-16 call neighbors from a function's traced call sites.
 
     We prefer targets already recorded by CFG when they stay inside the loaded
@@ -2603,9 +2806,13 @@ def collect_neighbor_call_targets(function: object) -> list[CallTargetSeed]:
     Proven tail transfers refine generic CFG entries for the same site/target;
     decoded calls retain precedence and repeated evidence does not add edges.
     """
+    function_addr: object
+    function_size: object
+    project: object
 
-    def _impl() -> list[CallTargetSeed]:
+    def _impl() -> object:
         """Merge machine transfer evidence without losing its decoded origin."""
+        project: object
         project = _x86_16_project_for_function_8616(function)
         if project is None:
             return []
@@ -2614,7 +2821,7 @@ def collect_neighbor_call_targets(function: object) -> list[CallTargetSeed]:
     def _build_cached_evidence(
         _project: object | None,
         _function: object,
-    ) -> list[CallTargetSeed]:
+    ) -> object:
         """Adapt the closed collector to the shared evidence inventory."""
         return _impl()
 
@@ -2627,7 +2834,7 @@ def collect_neighbor_call_targets(function: object) -> list[CallTargetSeed]:
         return _impl()
     try:
         function_content = bytes(cast(Any, project).loader.memory.load(function_addr, function_size))
-    except AttributeError, KeyError, TypeError, ValueError:
+    except (AttributeError, KeyError, TypeError, ValueError):
         return _impl()
     return list(
         collect_function_binary_evidence_8616(
@@ -2640,7 +2847,8 @@ def collect_neighbor_call_targets(function: object) -> list[CallTargetSeed]:
     )
 
 
-def patch_far_call_sites(function: object, far_targets: list[FarCallTarget]) -> bool:
+@cython.ccall
+def patch_far_call_sites(function: object, far_targets: object) -> cython.bint:
     """Rewrite Function._call_sites for immediate far calls recovered from blocks.
 
     CFGFast currently leaves some x86-16 far callsites pointing at a bogus short
@@ -2649,20 +2857,23 @@ def patch_far_call_sites(function: object, far_targets: list[FarCallTarget]) -> 
     from `_call_sites`, so patching those entries gives downstream analyses a
     much better callee address without needing to modify site-packages angr.
     """
+    old: object
+    target: object
     changed = False
     function_any = cast(Any, function)
 
     for target in far_targets:
         old = function_any._call_sites.get(target.callsite_addr)
         new = (target.target_addr, target.return_addr)
-        if old != new:
+        if operator.ne(old, new):
             function_any._call_sites[target.callsite_addr] = new
             changed = True
 
     return changed
 
 
-def patch_dos_int21_call_sites(function: object, binary_path: Path | str | None = None) -> bool:
+@cython.ccall
+def patch_dos_int21_call_sites(function: object, binary_path: object = None) -> cython.bint:
     """Rewrite Function._call_sites for recoverable int 21h services.
 
     This gives the decompiler service-specific pseudo-callees instead of a
@@ -2671,34 +2882,36 @@ def patch_dos_int21_call_sites(function: object, binary_path: Path | str | None 
     return patch_interrupt_service_call_sites(function, binary_path, vectors={0x21})
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _SeedCounts8616:
     """Metrics census accumulated while seeding calling conventions."""
 
-    track: bool
-    start: float = 0.0
-    success_count: int = 0
-    error_count: int = 0
-    stack_probe_count: int = 0
-    stack_byte_count: int = 0
-    wide_stack_count: int = 0
-    terminal_call_return_count: int = 0
-    terminal_call_return_raw: int = 0
-    terminal_call_return_normalized: int = 0
-    terminal_call_return_classified: int = 0
-    terminal_call_return_materialized: int = 0
-    terminal_call_return_failures: int = 0
-    terminal_register_return_raw: int = 0
-    terminal_register_return_normalized: int = 0
-    terminal_register_return_classified: int = 0
-    terminal_register_return_materialized: int = 0
-    terminal_register_return_failures: int = 0
+    track: cython.bint
+    start: cython.double = 0.0
+    success_count: cython.longlong = 0
+    error_count: cython.longlong = 0
+    stack_probe_count: cython.longlong = 0
+    stack_byte_count: cython.longlong = 0
+    wide_stack_count: cython.longlong = 0
+    terminal_call_return_count: cython.longlong = 0
+    terminal_call_return_raw: cython.longlong = 0
+    terminal_call_return_normalized: cython.longlong = 0
+    terminal_call_return_classified: cython.longlong = 0
+    terminal_call_return_materialized: cython.longlong = 0
+    terminal_call_return_failures: cython.longlong = 0
+    terminal_register_return_raw: cython.longlong = 0
+    terminal_register_return_normalized: cython.longlong = 0
+    terminal_register_return_classified: cython.longlong = 0
+    terminal_register_return_materialized: cython.longlong = 0
+    terminal_register_return_failures: cython.longlong = 0
 
+    @cython.ccall
     def begin(self) -> None:
         """Start the elapsed-time baseline when seed-metric tracking is enabled."""
         if self.track:
             self.start = time.perf_counter()
 
+    @cython.ccall
     def add_terminal_register_stats(self, stats: object) -> None:
         """Accumulate one function's terminal-register evidence counters."""
         self.terminal_register_return_raw += cast(Any, stats).raw_fact_count
@@ -2707,6 +2920,7 @@ class _SeedCounts8616:
         self.terminal_register_return_materialized += cast(Any, stats).materialized_count
         self.terminal_register_return_failures += cast(Any, stats).failure_count
 
+    @cython.ccall
     def add_terminal_call_evidence(self, evidence: object) -> None:
         """Accumulate one function's terminal-call evidence counters."""
         self.terminal_call_return_raw += cast(Any, evidence).raw_fact_count
@@ -2715,7 +2929,8 @@ class _SeedCounts8616:
         self.terminal_call_return_materialized += cast(Any, evidence).materialized_count
         self.terminal_call_return_failures += cast(Any, evidence).failure_count
 
-    def finish(self, total_functions: int, candidate_count: int) -> None:
+    @cython.ccall
+    def finish(self, total_functions: cython.longlong, candidate_count: cython.longlong) -> None:
         """Emit the seed metric line when tracking is enabled."""
         if not self.track:
             return
@@ -2741,7 +2956,8 @@ class _SeedCounts8616:
         )
 
 
-def _publish_seeded_cfg_8616(cfg: object, seeded_ids: set[int], seeded_revisions: dict[int, Any]) -> None:
+@cython.ccall
+def _publish_seeded_cfg_8616(cfg: object, seeded_ids: object, seeded_revisions: object) -> None:
     """Cache the seed state on the dynamic CFG object, retrying once on failure."""
     try:
         cast(Any, cfg)._inertia_seeded_calling_conventions = seeded_ids
@@ -2752,11 +2968,12 @@ def _publish_seeded_cfg_8616(cfg: object, seeded_ids: set[int], seeded_revisions
         cast(Any, cfg)._inertia_seeded_calling_convention_revisions_8616 = seeded_revisions
 
 
+@cython.ccall
 def _seed_one_function_8616(
     function: object,
-    project: object | None,
-    apply_stack_byte: Callable[[object, object], bool] | None,
-    apply_wide: Callable[[object, object], bool] | None,
+    project: object,
+    apply_stack_byte: object,
+    apply_wide: object,
     counts: _SeedCounts8616,
 ) -> None:
     """Apply prototype/CC evidence for one function; may raise."""
@@ -2778,7 +2995,8 @@ def _seed_one_function_8616(
         counts.stack_probe_count += 1
 
 
-def _is_stack_probe_helper_name_8616(name: object) -> bool:
+@cython.ccall
+def _is_stack_probe_helper_name_8616(name: object) -> cython.bint:
     """Match the CRT stack-probe helper names that always return."""
     if not isinstance(name, str):
         return False
@@ -2786,7 +3004,8 @@ def _is_stack_probe_helper_name_8616(name: object) -> bool:
     return normalized in {"anchkstk", "analloca_probe"}
 
 
-def _function_identity_8616(function: object) -> int:
+@cython.ccall
+def _function_identity_8616(function: object) -> cython.longlong:
     """Return a stable identity for a function across CFG boundaries."""
     function_addr = _analysis_function_addr_8616(function)
     if isinstance(function_addr, int):
@@ -2794,7 +3013,8 @@ def _function_identity_8616(function: object) -> int:
     return id(function)
 
 
-def _seeded_cfg_function_ids_8616(cfg_obj: object) -> set[int]:
+@cython.ccall
+def _seeded_cfg_function_ids_8616(cfg_obj: object) -> object:
     """Read the cached seeded-function id set from a dynamic CFG object."""
     cached = _dynamic_analysis_getattr_8616(cfg_obj, "_inertia_seeded_calling_conventions", None)
     if isinstance(cached, set):
@@ -2804,20 +3024,22 @@ def _seeded_cfg_function_ids_8616(cfg_obj: object) -> set[int]:
 
 def _function_seed_revision_8616(
     project: object | None,
-    seeded_revisions: dict[int, CallingConventionSeedRevision8616],
+    seeded_revisions: object,
     function: object,
-    inspected_targets: tuple[int, ...] | None = None,
+    inspected_targets: object = None,
 ) -> CallingConventionSeedRevision8616:
     """Refresh the exact dependencies recorded by terminal-call typing."""
+    previous: object
     from .calling_convention_seed_cache import calling_convention_seed_revision_8616
 
     if inspected_targets is None:
         previous = seeded_revisions.get(_function_identity_8616(function))
-        inspected_targets = tuple(item.target_addr for item in previous.callees) if previous is not None else ()
+        inspected_targets = tuple(item.target_addr for item in iter(previous.callees)) if previous is not None else ()
     return calling_convention_seed_revision_8616(project, function, inspected_targets)
 
 
-def _seeded_cfg_revisions_8616(cfg_obj: object) -> dict[int, CallingConventionSeedRevision8616]:
+@cython.ccall
+def _seeded_cfg_revisions_8616(cfg_obj: object) -> object:
     """Read revision-aware cache state across the dynamic CFG boundary."""
     from .calling_convention_seed_cache import CallingConventionSeedRevision8616
 
@@ -2829,7 +3051,7 @@ def _seeded_cfg_revisions_8616(cfg_obj: object) -> dict[int, CallingConventionSe
     return (
         {
             key: value
-            for key, value in cached.items()
+            for key, value in builtins.iter(cached.items())
             if isinstance(key, int) and isinstance(value, CallingConventionSeedRevision8616)
         }
         if isinstance(cached, Mapping)
@@ -2840,28 +3062,28 @@ def _seeded_cfg_revisions_8616(cfg_obj: object) -> dict[int, CallingConventionSe
 def _seed_candidates_8616(
     project: object | None,
     cfg_functions: Mapping[object, object],
-    seeded_ids: set[int],
-    seeded_revisions: dict[int, CallingConventionSeedRevision8616],
+    seeded_ids: object,
+    seeded_revisions: object,
 ) -> tuple[object, ...]:
     """Select functions missing a seed or holding a stale revision."""
     return tuple(
         function
-        for function in cfg_functions.values()
+        for function in builtins.iter(cfg_functions.values())
         if (
             _function_identity_8616(function) not in seeded_ids
-            or seeded_revisions.get(_function_identity_8616(function))
-            != _function_seed_revision_8616(project, seeded_revisions, function)
+            or operator.ne(seeded_revisions.get(_function_identity_8616(function)), _function_seed_revision_8616(project, seeded_revisions, function))
         )
     )
 
 
+@cython.ccall
 def _seed_candidate_8616(
     project: object | None,
     function: object,
     apply_stack_byte: Callable[[object, object], bool] | None,
     apply_wide: Callable[[object, object], bool] | None,
     counts: _SeedCounts8616,
-) -> bool:
+) -> cython.bint:
     """Apply per-function seed evidence; False when the attempt raised."""
     try:
         _seed_one_function_8616(function, project, apply_stack_byte, apply_wide, counts)
@@ -2872,12 +3094,13 @@ def _seed_candidate_8616(
     return True
 
 
+@cython.ccall
 def _finalize_seeded_function_8616(
     cfg: object,
     project: object | None,
     function: object,
-    seeded_ids: set[int],
-    seeded_revisions: dict[int, Any],
+    seeded_ids: object,
+    seeded_revisions: object,
 ) -> None:
     """Mark stack probes returning, refresh seed cache, and publish to CFG."""
     if _is_stack_probe_helper_name_8616(_dynamic_analysis_getattr_8616(function, "name", None)):
@@ -2889,12 +3112,13 @@ def _finalize_seeded_function_8616(
     _publish_seeded_cfg_8616(cfg, seeded_ids, seeded_revisions)
 
 
+@cython.ccall
 def _seed_terminal_call_return_8616(
     project: object,
     function: object,
     counts: _SeedCounts8616,
-    seeded_ids: set[int],
-    seeded_revisions: dict[int, Any],
+    seeded_ids: object,
+    seeded_revisions: object,
 ) -> None:
     """Apply terminal-call return typing and reseed one function."""
     from .terminal_call_return_types import apply_terminal_call_return_type_evidence_8616
@@ -2911,8 +3135,11 @@ def _seed_terminal_call_return_8616(
     )
 
 
+@cython.ccall
 def seed_calling_conventions(cfg: object) -> None:
     """Initialize and refine x86-16 calling conventions for CFG functions."""
+    project: object
+    function: object
     apply_x86_16_stack_byte_prototype_evidence: Callable[[object, object], bool] | None
     apply_x86_16_wide_stack_prototype_evidence: Callable[[object, object], bool] | None
     try:
@@ -2967,8 +3194,8 @@ def extend_cfg_for_far_calls(
     project: object,
     function: object,
     *,
-    entry_window: int,
-    callee_window: int = 0x80,
+    entry_window: cython.longlong,
+    callee_window: cython.longlong = 0x80,
 ) -> object | None:
     """Re-run CFG with direct far callees seeded as extra function starts.
 
@@ -2979,6 +3206,9 @@ def extend_cfg_for_far_calls(
     reached by immediate far calls, instead of forcing a broad CFG window that
     quickly runs into unrelated unsupported instructions.
     """
+    callee: object
+    function_addr: object
+    target: object
     far_targets = collect_direct_far_call_targets(function)
     if not far_targets:
         return None
@@ -2988,14 +3218,14 @@ def extend_cfg_for_far_calls(
     function_addr = _analysis_function_addr_8616(function)
     if function_addr is None:
         return None
-    function_starts = [function_addr, *(target.target_addr for target in far_targets)]
+    function_starts = [function_addr, *(target.target_addr for target in iter(far_targets))]
     regions = [(function_addr, function_addr + entry_window)]
-    regions.extend((target.target_addr, target.target_addr + callee_window) for target in far_targets)
+    regions.extend((target.target_addr, target.target_addr + callee_window) for target in iter(far_targets))
 
     cfg = cast(Any, project).analyses.CFGFast(
         kb=KnowledgeBase(cast(Any, project)),
         start_at_entry=False,
-        function_starts=sorted(set(function_starts)),
+        function_starts=sorted(tuple(set(function_starts))),
         regions=regions,
         normalize=True,
         force_complete_scan=False,
@@ -3006,8 +3236,8 @@ def extend_cfg_for_far_calls(
     if function_addr in cfg.functions:
         recovered_function = cfg.functions[function_addr]
         recovered_targets = collect_direct_far_call_targets(recovered_function)
-        merged: dict[tuple[int, int], FarCallTarget] = {
-            (target.callsite_addr, target.target_addr): target for target in far_targets
+        merged: dict[tuple[cython.longlong, cython.longlong], FarCallTarget] = {
+            (target.callsite_addr, target.target_addr): target for target in iter(far_targets)
         }
         for target in recovered_targets:
             merged[(target.callsite_addr, target.target_addr)] = target
@@ -3024,25 +3254,26 @@ def extend_cfg_for_far_calls(
 # ── Function discovery ranking ──
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class EntryScore:
     """Deterministic entry-point confidence score for function discovery ranking."""
 
-    addr: int
-    score: int
+    addr: cython.longlong
+    score: cython.longlong
     source: str = ""
 
 
+@cython.ccall
 def score_entry_address_8616(
-    addr: int,
+    addr: cython.longlong,
     *,
-    is_explicit_entry: bool = False,
-    is_direct_call_target: bool = False,
-    is_mz_relocation_target: bool = False,
-    has_prologue_match: bool = False,
-    is_interrupt_service: bool = False,
-    is_known_wrapper: bool = False,
-    source_hint: str = "",
+    is_explicit_entry: cython.bint = False,
+    is_direct_call_target: cython.bint = False,
+    is_mz_relocation_target: cython.bint = False,
+    has_prologue_match: cython.bint = False,
+    is_interrupt_service: cython.bint = False,
+    is_known_wrapper: cython.bint = False,
+    source_hint: object = "",
 ) -> EntryScore:
     """Compute a deterministic entry score for function discovery ranking.
 
@@ -3077,8 +3308,8 @@ def score_entry_address_8616(
 
 
 def rank_entry_addresses_8616(
-    entries: list[tuple[int, dict[str, object]]],
-) -> list[EntryScore]:
+    entries: object,
+) -> object:
     """Sort entry addresses by discovery confidence score, descending.
 
     Each entry is (addr, signals_dict).  Signals dict may contain:
@@ -3098,7 +3329,7 @@ def rank_entry_addresses_8616(
             is_known_wrapper=bool(signals.get("known_wrapper")),
             source_hint=str(signals.get("source", "")),
         )
-        for addr, signals in entries
+        for addr, signals in iter(entries)
     ]
     # Higher score first; tie-break by address ascending
     scored.sort(key=lambda e: (-e.score, e.addr))
@@ -3106,11 +3337,12 @@ def rank_entry_addresses_8616(
 
 
 def _unique_neighbor_targets_8616(
-    neighbor_targets: list[CallTargetSeed], function_addr: int, max_targets: int
-) -> list[CallTargetSeed]:
+    neighbor_targets: object, function_addr: cython.longlong, max_targets: cython.longlong
+) -> object:
     """Pick nearest unique callee seeds, excluding the function itself."""
+    target: object
     unique_targets: list[CallTargetSeed] = []
-    seen_targets: set[int] = {function_addr}
+    seen_targets: set[cython.longlong] = {function_addr}
     for target in sorted(
         neighbor_targets,
         key=lambda item: (abs(item.target_addr - function_addr), item.callsite_addr, item.target_addr),
@@ -3124,8 +3356,11 @@ def _unique_neighbor_targets_8616(
     return unique_targets
 
 
-def _seed_recovered_cfg_8616(cfg: object, function_addr: int, unique_targets: list[CallTargetSeed]) -> None:
+@cython.ccall
+def _seed_recovered_cfg_8616(cfg: object, function_addr: cython.longlong, unique_targets: object) -> None:
     """Patch far sites and seed conventions on the recovered CFG."""
+    callee: object
+    target: object
     if function_addr in cast(Any, cfg).functions:
         recovered_function = cast(Any, cfg).functions[function_addr]
         recovered_far_targets = collect_direct_far_call_targets(recovered_function)
@@ -3142,9 +3377,9 @@ def extend_cfg_for_neighbor_calls(
     project: object,
     function: object,
     *,
-    entry_window: int,
-    callee_window: int = 0x80,
-    max_targets: int = 8,
+    entry_window: cython.longlong,
+    callee_window: cython.longlong = 0x80,
+    max_targets: cython.longlong = 8,
 ) -> object | None:
     """Re-run bounded CFG with nearby traced callees seeded as extra starts.
 
@@ -3155,6 +3390,7 @@ def extend_cfg_for_neighbor_calls(
     immediately reuse its traced call neighbors instead of widening into a
     broader scan of unrelated code bytes.
     """
+    function_addr: object
 
     neighbor_targets = collect_neighbor_call_targets(function)
     if not neighbor_targets:
@@ -3171,14 +3407,14 @@ def extend_cfg_for_neighbor_calls(
     if not unique_targets:
         return None
 
-    function_starts = [function_addr, *(target.target_addr for target in unique_targets)]
+    function_starts = [function_addr, *(target.target_addr for target in iter(unique_targets))]
     regions = [(function_addr, function_addr + entry_window)]
-    regions.extend((target.target_addr, target.target_addr + callee_window) for target in unique_targets)
+    regions.extend((target.target_addr, target.target_addr + callee_window) for target in iter(unique_targets))
 
     cfg = cast(Any, project).analyses.CFGFast(
         kb=KnowledgeBase(cast(Any, project)),
         start_at_entry=False,
-        function_starts=sorted(set(function_starts)),
+        function_starts=sorted(tuple(set(function_starts))),
         regions=regions,
         normalize=True,
         force_complete_scan=False,

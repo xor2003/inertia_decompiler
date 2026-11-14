@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: IR.
 
 Responsibility: describe and evaluate bounded native repeated-store effects.
@@ -8,6 +9,8 @@ Owns typed Value, Address, Condition, instruction facts, and lossless normalizat
 Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -21,6 +24,8 @@ from inertia.frontend.x86_16.frontend_repeated_store8616 import (
 )
 
 from .core import IRBlock
+import dataclasses
+import operator
 
 
 class RepeatedStoreStatus8616(Enum):
@@ -31,20 +36,20 @@ class RepeatedStoreStatus8616(Enum):
     REFUSED = "refused"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RepeatedStoreEffect8616:
     """Complete non-wrapping footprint and final index/count for one repeat."""
 
-    base: int
-    size: int
-    data: bytes | None
+    base: cython.longlong
+    size: cython.longlong
+    data: object
     final_di: int | None
 
 
-_MAX_REPEAT_BYTES_8616: int = 0x10000
+_MAX_REPEAT_BYTES_8616: cython.longlong = 0x10000
 
 
-def repeated_store_candidate_shape_8616(block: IRBlock, encoded: bytes) -> bool:
+def repeated_store_candidate_shape_8616(block: IRBlock, encoded: object) -> cython.bint:
     """Whether the structural prerequisites for a repeat decode are met.
 
     This is the single authoritative owner of the necessary conditions a
@@ -57,13 +62,14 @@ def repeated_store_candidate_shape_8616(block: IRBlock, encoded: bytes) -> bool:
     """
     if block.refusals or not block.instrs:
         return False
-    if any(row.addr != block.addr for row in block.instrs):
+    if any(operator.ne(row.addr, block.addr) for row in iter(block.instrs)):
         return False
-    continuation_differs: bool = block.successor_addrs != (block.addr + len(encoded),)
+    continuation_differs: cython.bint = operator.ne(block.successor_addrs, (block.addr + len(encoded),))
     return not continuation_differs
 
 
-def native_repeated_store_8616(project: object, block: IRBlock, encoded: bytes) -> RepeatedStore8616 | None:
+@cython.ccall
+def native_repeated_store_8616(project: object, block: IRBlock, encoded: object) -> RepeatedStore8616 | None:
     """Decode a single-instruction repeat block with its exact continuation.
 
     The full native-row comparison belongs to the caller and is mandatory
@@ -75,9 +81,10 @@ def native_repeated_store_8616(project: object, block: IRBlock, encoded: bytes) 
     return decoded_repeated_store_8616(project, block.addr, encoded)
 
 
+@cython.ccall
 def repeated_store_effect_8616(
-    instruction: RepeatedStore8616, registers: Mapping[str, int],
-    direction: bool | None,
+    instruction: RepeatedStore8616, registers: Mapping[str, cython.longlong],
+    direction: object,
 ) -> RepeatedStoreEffect8616 | None:
     """Evaluate the whole footprint without executing/unrolling iterations.
 
@@ -85,6 +92,10 @@ def repeated_store_effect_8616(
     selector/index/direction, 16-bit index wrap or physical wrap refuses. A
     zero count performs no read/write and preserves even an unknown DI.
     """
+    count: object
+    index: object
+    segment: object
+    value: object
     if instruction.width not in (1, 2):
         return None
     count = registers.get("cx")

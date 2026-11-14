@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Place standalone calls into proven adjacent return-value stores.
 
 Layer: Structuring.
@@ -10,6 +11,8 @@ rewrite cleanup, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -26,14 +29,17 @@ from inertia.lowering.call_return_stack_bindings import (
 )
 from inertia.lowering.call_return_stack_stores import CallReturnStackStoreEvidence8616
 from inertia.lowering.structured_tags import copy_structured_tags_8616
+import dataclasses
+import operator
+import builtins
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallReturnStorePlacement8616:
     """Unique structured call statement and its proven destination store."""
 
     call_container: CStatements
-    call_index: int
+    call_index: cython.longlong
     store_assignment: CAssignment
 
 __all__ = (
@@ -47,6 +53,7 @@ __all__ = (
 )
 
 
+@cython.ccall
 def _sole_nested_statement_8616(statement: object) -> object | None:
     """Unwrap only bounded singleton statement containers."""
     current = statement
@@ -60,13 +67,16 @@ def _sole_nested_statement_8616(statement: object) -> object | None:
     return None
 
 
-def _contains_identity_8616(root: object, target: object) -> bool:
+def _contains_identity_8616(root: object, target: object) -> cython.bint:
     """Return whether one structured subtree contains the exact target node."""
-    return root is target or any(node is target for node in _iter_c_nodes_deep_8616(root))
+    return root is target or any(node is target for node in builtins.iter(_iter_c_nodes_deep_8616(root)))
 
 
+@cython.ccall
 def _assignment_ins_addr_8616(assignment: CAssignment) -> int | None:
     """Return the exact source instruction tag on one structured assignment."""
+    ins_addr: object
+    tags: object
     tags = copy_structured_tags_8616(assignment.tags)
     if tags is None:
         return None
@@ -74,12 +84,13 @@ def _assignment_ins_addr_8616(assignment: CAssignment) -> int | None:
     return ins_addr if isinstance(ins_addr, int) else None
 
 
+@cython.ccall
 def _statement_containers_8616(root: object) -> tuple[CStatements, ...]:
     """Return identity-deduplicated statement containers in one AST."""
     return tuple(
         {
             id(container): container
-            for container in (root, *_iter_c_nodes_deep_8616(root))
+            for container in iter((root, ) + tuple(_iter_c_nodes_deep_8616(root)))
             if isinstance(container, CStatements)
         }.values()
     )
@@ -88,12 +99,12 @@ def _statement_containers_8616(root: object) -> tuple[CStatements, ...]:
 def _unique_direct_owner_8616(
     root: object,
     statement: object,
-) -> tuple[CStatements, int] | None:
+) -> object:
     """Return the unique container that directly owns one statement."""
     owners = tuple(
         (container, index)
-        for container in _statement_containers_8616(root)
-        for index, candidate in enumerate(tuple(container.statements or ()))
+        for container in builtins.iter(_statement_containers_8616(root))
+        for index, candidate in builtins.iter(enumerate(tuple(container.statements or ())))
         if candidate is statement
     )
     return owners[0] if len(owners) == 1 else None
@@ -103,22 +114,24 @@ def _has_unique_adjacent_order_witness_8616(
     root: object,
     call_assignment: CAssignment,
     store_assignment: CAssignment,
-) -> bool:
+) -> cython.bint:
     """Prove sequential ownership in adjacent sibling subtrees."""
+    container: object
     witnesses = 0
     for container in _statement_containers_8616(root):
         statements = tuple(container.statements or ())
         call_indices = tuple(
-            index for index, statement in enumerate(statements) if _contains_identity_8616(statement, call_assignment)
+            index for index, statement in builtins.iter(enumerate(statements)) if _contains_identity_8616(statement, call_assignment)
         )
         store_indices = tuple(
-            index for index, statement in enumerate(statements) if _contains_identity_8616(statement, store_assignment)
+            index for index, statement in builtins.iter(enumerate(statements)) if _contains_identity_8616(statement, store_assignment)
         )
-        if len(call_indices) == 1 and len(store_indices) == 1 and store_indices[0] == call_indices[0] + 1:
+        if len(call_indices) == 1 and len(store_indices) == 1 and operator.eq(store_indices[0], call_indices[0] + 1):
             witnesses += 1
     return witnesses == 1
 
 
+@cython.ccall
 def find_adjacent_assigned_call_store_8616(
     root: object,
     call_assignment: CAssignment,
@@ -128,8 +141,9 @@ def find_adjacent_assigned_call_store_8616(
     codegen: object,
 ) -> CallReturnStorePlacement8616 | None:
     """Find a tagged call assignment followed by its exact proven store."""
+    call_owner: object
     if (
-        _assignment_ins_addr_8616(call_assignment) != evidence.callsite_addr
+        operator.ne(_assignment_ins_addr_8616(call_assignment), evidence.callsite_addr)
         or not isinstance(evidence.store_ins_addr, int)
         or not _contains_identity_8616(call_assignment.rhs, call)
     ):
@@ -138,14 +152,14 @@ def find_adjacent_assigned_call_store_8616(
     if call_owner is None:
         return None
     call_container, call_index = call_owner
-    if call_index != len(tuple(call_container.statements or ())) - 1:
+    if operator.ne(call_index, len(tuple(call_container.statements or ())) - 1):
         return None
     stores = tuple(
         {
             id(node): node
-            for node in _iter_c_nodes_deep_8616(root)
+            for node in builtins.iter(_iter_c_nodes_deep_8616(root))
             if isinstance(node, CAssignment)
-            and _assignment_ins_addr_8616(node) == evidence.store_ins_addr
+            and operator.eq(_assignment_ins_addr_8616(node), evidence.store_ins_addr)
             and is_exact_call_return_stack_destination_8616(codegen, node.lhs, evidence)
         }.values()
     )
@@ -159,10 +173,15 @@ def find_adjacent_assigned_call_store_8616(
     return CallReturnStorePlacement8616(call_container, call_index, store_assignment)
 
 
+@cython.ccall
 def _assignment_source_position_8616(
     assignment: CAssignment,
-) -> tuple[int, int, int] | None:
+) -> object:
     """Return exact instruction, block, and VEX-statement identity."""
+    block_addr: object
+    ins_addr: object
+    statement_index: object
+    tags: object
     tags = copy_structured_tags_8616(assignment.tags)
     if tags is None:
         return None
@@ -186,15 +205,17 @@ def find_proven_call_result_bridge_8616(
     codegen: object,
 ) -> CallReturnStorePlacement8616 | None:
     """Find a unique call-carrier-to-stack-store chain from exact source tags."""
+    call_owner: object
+    call_position: object
     if not isinstance(evidence.store_ins_addr, int):
         return None
     call_assignments = tuple(
         node
-        for node in _iter_c_nodes_deep_8616(root)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(root))
         if isinstance(node, CAssignment)
         and node.rhs is call
         and (position := _assignment_source_position_8616(node)) is not None
-        and position[0] == evidence.store_ins_addr
+        and operator.eq(position[0], evidence.store_ins_addr)
     )
     if len(call_assignments) != 1:
         return None
@@ -204,13 +225,13 @@ def find_proven_call_result_bridge_8616(
         return None
     stores = tuple(
         node
-        for node in _iter_c_nodes_deep_8616(root)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(root))
         if isinstance(node, CAssignment)
         and is_exact_call_return_stack_destination_8616(codegen, node.lhs, evidence)
         and _same_c_expression_8616(node.rhs, call_assignment.lhs)
         and (position := _assignment_source_position_8616(node)) is not None
-        and position[0] == evidence.store_ins_addr
-        and position[1] == call_position[1]
+        and operator.eq(position[0], evidence.store_ins_addr)
+        and operator.eq(position[1], call_position[1])
         and position[2] > call_position[2]
     )
     if len(stores) != 1:
@@ -228,6 +249,9 @@ def bind_proven_call_result_bridge_8616(
     destination: CVariable,
 ) -> int | None:
     """Bind one proven store and replace only later identity-shared call uses."""
+    source_position: object
+    store_position: object
+    alias: object
     statements = list(placement.call_container.statements or ())
     if not 0 <= placement.call_index < len(statements):
         return None
@@ -239,24 +263,24 @@ def bind_proven_call_result_bridge_8616(
     if (
         source_position is None
         or store_position is None
-        or source_position[1] != store_position[1]
+        or operator.ne(source_position[1], store_position[1])
         or source_position[2] >= store_position[2]
     ):
         return None
     aliases = tuple(
         node
-        for node in _iter_c_nodes_deep_8616(root)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(root))
         if isinstance(node, CAssignment)
         and node is not source
         and node is not placement.store_assignment
         and node.rhs is call
     )
-    alias_positions = tuple(_assignment_source_position_8616(alias) for alias in aliases)
+    alias_positions = tuple(_assignment_source_position_8616(alias) for alias in iter(aliases))
     if any(
         position is None
-        or position[1] != store_position[1]
+        or operator.ne(position[1], store_position[1])
         or position[2] <= store_position[2]
-        for position in alias_positions
+        for position in iter(alias_positions)
     ):
         return None
     placement.store_assignment.rhs = call
@@ -267,6 +291,7 @@ def bind_proven_call_result_bridge_8616(
     return len(aliases)
 
 
+@cython.ccall
 def find_adjacent_standalone_call_store_8616(
     root: object,
     call: CFunctionCall,
@@ -275,10 +300,13 @@ def find_adjacent_standalone_call_store_8616(
     codegen: object,
 ) -> CallReturnStorePlacement8616 | None:
     """Find one unique adjacent call/store pair through singleton wrappers."""
-    matches: dict[tuple[int, int], CallReturnStorePlacement8616] = {}
-    containers: dict[int, CStatements] = {
+    container: object
+    index: object
+    statement: object
+    matches: dict[tuple[cython.longlong, cython.longlong], CallReturnStorePlacement8616] = {}
+    containers: dict[cython.longlong, CStatements] = {
         id(container): container
-        for container in (root, *_iter_c_nodes_deep_8616(root))
+        for container in iter((root, ) + tuple(_iter_c_nodes_deep_8616(root)))
         if isinstance(container, CStatements)
     }
     for container in containers.values():
@@ -295,6 +323,7 @@ def find_adjacent_standalone_call_store_8616(
     return next(iter(matches.values())) if len(matches) == 1 else None
 
 
+@cython.ccall
 def bind_adjacent_standalone_call_store_8616(
     placement: CallReturnStorePlacement8616,
     call: CFunctionCall,

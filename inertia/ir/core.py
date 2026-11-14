@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Core typed IR objects for values, addresses, conditions, and instructions.
 
 Layer: IR.
@@ -8,12 +9,18 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import dataclasses
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from enum import Enum, StrEnum
 from typing import TYPE_CHECKING
 
 from .instruction_origin import IRInstructionOrigin8616
+import operator
+IRCallStackCoordinates8616 = typing.TypeVar("IRCallStackCoordinates8616")
+IRScopedCallStackCoordinates8616 = typing.TypeVar("IRScopedCallStackCoordinates8616")
 
 if TYPE_CHECKING:
     from .call_stack_coordinates import IRCallStackCoordinates8616
@@ -81,12 +88,12 @@ class IRCallOutputShape8616(StrEnum):
     DX_AX = "dx_ax"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRCallOutputProvenance8616:
     """Exact call boundary that produced one retained register output."""
 
-    callsite_addr: int
-    target_addr: int
+    callsite_addr: cython.longlong
+    target_addr: cython.longlong
     shape: IRCallOutputShape8616
 
     def to_dict(self) -> dict[str, object]:
@@ -98,7 +105,7 @@ class IRCallOutputProvenance8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRActiveUnary8616:
     """One active unary computation that still produces this value.
 
@@ -115,9 +122,9 @@ class IRActiveUnary8616:
     ``IRValue.expr`` remains the compatibility/provenance projection.
     """
 
-    op: str
+    op: object
     operand: IRValue
-    result_bits: int
+    result_bits: cython.longlong
 
     def to_dict(self) -> dict[str, object]:
         """Serialize this active unary evidence for diagnostics."""
@@ -128,19 +135,19 @@ class IRActiveUnary8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRValue:
     """Typed scalar or storage value with optional exact access provenance."""
 
     space: MemSpace
-    name: str | None = None
-    offset: int = 0
+    name: object = None
+    offset: cython.longlong = 0
     const: int | None = None
-    size: int = 0
+    size: cython.longlong = 0
     version: int | None = None
-    expr: tuple[str, ...] | None = None
+    expr: object = None
     index: IRValue | IRBinaryValue | None = None
-    index_shift: int = 0
+    index_shift: cython.longlong = 0
     memory_access_size: int | None = None
     memory_access_insn: int | None = field(default=None, compare=False)
     source_tmp: int | None = field(default=None, compare=False)
@@ -170,14 +177,14 @@ class IRValue:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRBinaryValue:
     """Typed binary value expression whose operands retain storage identity."""
 
-    op: str
+    op: object
     lhs: IRValue | IRBinaryValue
     rhs: IRValue | IRBinaryValue
-    size: int = 0
+    size: cython.longlong = 0
 
     def to_dict(self) -> dict[str, object]:
         """Serialize this typed value expression for diagnostics and artifacts."""
@@ -190,17 +197,17 @@ class IRBinaryValue:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRAddress:
     """Typed segmented memory address recovered from instruction evidence."""
 
     space: MemSpace
     base: tuple[str, ...] = ()
-    offset: int = 0
-    size: int = 0
+    offset: cython.longlong = 0
+    size: cython.longlong = 0
     status: AddressStatus = AddressStatus.UNKNOWN
     segment_origin: SegmentOrigin = SegmentOrigin.UNKNOWN
-    expr: tuple[str, ...] | None = None
+    expr: object = None
     version: int | None = None
     base_values: tuple[IRValue, ...] = ()
 
@@ -216,11 +223,11 @@ class IRAddress:
             "segment_origin": self.segment_origin.value,
             "expr": self.expr,
             "version": self.version,
-            "base_values": [value.to_dict() for value in self.base_values],
+            "base_values": [value.to_dict() for value in iter(self.base_values)],
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRCallStackEffect8616:
     """Typed stack storage and frame-register effects for one call boundary.
 
@@ -236,8 +243,8 @@ class IRCallStackEffect8616:
     net_stack_delta: int | None = None
     preserved_ranges: tuple[IRAddress, ...] = ()
     escaped_ranges: tuple[IRAddress, ...] = ()
-    complete: bool = False
-    bp_preserved: bool = False
+    complete: cython.bint = False
+    bp_preserved: cython.bint = False
     stack_coordinates: IRCallStackCoordinates8616 | None = None
     scoped_coordinates: IRScopedCallStackCoordinates8616 | None = None
 
@@ -249,6 +256,7 @@ class IRCallStackEffect8616:
         The scoped carrier owns every check; this accessor adds nothing to
         ``current_net_stack_delta`` and never fabricates a universal value.
         """
+        carrier: object
         carrier = self.scoped_coordinates
         if carrier is None:
             return None
@@ -257,23 +265,25 @@ class IRCallStackEffect8616:
     @property
     def current_net_stack_delta(self) -> int | None:
         """Consume present coordinate authority without falling back to a guess."""
+        coordinates: object
         coordinates = self.stack_coordinates
         if coordinates is None:
             return self.net_stack_delta
-        if not coordinates.has_proven_sp_delta or coordinates.net_sp_delta != self.net_stack_delta:
+        if not coordinates.has_proven_sp_delta or operator.ne(coordinates.net_sp_delta, self.net_stack_delta):
             return None
         return self.net_stack_delta
 
-    def preserves(self, address: IRAddress) -> bool:
+    def preserves(self, address: IRAddress) -> cython.bint:
         """Require explicit preservation and no overlapping or unresolved escape."""
+        current_delta: object
         # Imported here because the range predicate consumes this module's types.
         from .stack_range_overlap import stack_ranges_may_overlap_8616
 
         identity = (address.space, address.base, address.offset, address.size)
         preserved = {
-            (item.space, item.base, item.offset, item.size) for item in self.preserved_ranges
+            (item.space, item.base, item.offset, item.size) for item in iter(self.preserved_ranges)
         }
-        escaped = any(stack_ranges_may_overlap_8616(address, item) for item in self.escaped_ranges)
+        escaped = any(stack_ranges_may_overlap_8616(address, item) for item in iter(self.escaped_ranges))
         current_delta = self.current_net_stack_delta
         coordinate_is_stable = address.base != ("sp",) or current_delta == 0
         return bool(
@@ -287,8 +297,8 @@ class IRCallStackEffect8616:
             "net_stack_delta": self.net_stack_delta,
             "current_net_stack_delta": self.current_net_stack_delta,
             "bp_preserved": self.bp_preserved,
-            "preserved_ranges": [item.to_dict() for item in self.preserved_ranges],
-            "escaped_ranges": [item.to_dict() for item in self.escaped_ranges],
+            "preserved_ranges": [item.to_dict() for item in iter(self.preserved_ranges)],
+            "escaped_ranges": [item.to_dict() for item in iter(self.escaped_ranges)],
             "complete": self.complete,
             "stack_coordinates": (
                 None
@@ -303,18 +313,18 @@ class IRCallStackEffect8616:
         }
 
 
-def is_stack_address_8616(addr: IRAddress) -> bool:
+def is_stack_address_8616(addr: IRAddress) -> cython.bint:
     """Return whether an address is a proven or likely SS:BP/SP stack slot."""
 
-    def _impl() -> bool:
+    def _impl() -> cython.bint:
         """Classify stack addresses without lowering them.
 
         AGENTS rule: SS:BP+offset MUST become a stack slot, never fallback to memory.
         """
-        if addr.space != MemSpace.SS:
+        if operator.ne(addr.space, MemSpace.SS):
             return False
         # Proven segment origin: explicit SS segment instruction
-        if addr.segment_origin == SegmentOrigin.PROVEN:
+        if operator.eq(addr.segment_origin, SegmentOrigin.PROVEN):
             base_set = set(addr.base)
             if {"ss"} & base_set or {"bp"} & base_set or {"sp"} & base_set:
                 return True
@@ -324,7 +334,7 @@ def is_stack_address_8616(addr: IRAddress) -> bool:
             if {"bp", "sp", "ss"} & expr_set:
                 return True
         # Defaulted segment with BP base hint
-        if addr.segment_origin == SegmentOrigin.DEFAULTED and addr.space == MemSpace.SS:
+        if operator.eq(addr.segment_origin, SegmentOrigin.DEFAULTED) and operator.eq(addr.space, MemSpace.SS):
             base_set = set(addr.base)
             if {"bp"} & base_set:
                 return True
@@ -333,17 +343,17 @@ def is_stack_address_8616(addr: IRAddress) -> bool:
     return _impl()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRCondition:
     """Typed branch or predicate condition in the IR layer."""
 
-    op: str
-    args: tuple[IRAtom, ...]
-    expr: tuple[str, ...] | None = None
+    op: object
+    args: object
+    expr: object = None
     width_bits: int | None = field(default=None, compare=False)
 
     @property
-    def is_signed(self) -> bool:
+    def is_signed(self) -> cython.bint:
         """Return whether this condition uses signed ordering semantics."""
         return self.op in {"slt", "sle", "sgt", "sge"}
 
@@ -352,21 +362,22 @@ class IRCondition:
         return {
             "kind": "condition",
             "op": self.op,
-            "args": [_atom_to_dict(arg) for arg in self.args],
+            "args": [_atom_to_dict(arg) for arg in iter(self.args)],
             "expr": self.expr,
             "width_bits": self.width_bits,
         }
 
 
-type IRAtom = IRValue | IRBinaryValue | IRAddress | IRCondition
+IRAtom = typing.TypeAliasType("IRAtom", IRValue | IRBinaryValue | IRAddress | IRCondition)
 
 
-def _atom_to_dict(atom: IRAtom) -> dict[str, object]:
+@cython.ccall
+def _atom_to_dict(atom: IRAtom) -> object:
     """Serialize one owned typed atom without losing its metadata."""
     return atom.to_dict()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRInstr:
     """Typed instruction fact with destination, arguments, size, and address.
 
@@ -375,10 +386,10 @@ class IRInstr:
     target use never proves a producer, return value or preservation effect.
     """
 
-    op: str
+    op: object
     dst: IRValue | None
-    args: tuple[IRAtom, ...]
-    size: int = 0
+    args: object
+    size: cython.longlong = 0
     addr: int | None = None
     call_stack_effect: IRCallStackEffect8616 | None = None
     origin: IRInstructionOrigin8616 | None = None
@@ -388,7 +399,7 @@ class IRInstr:
         return {
             "op": self.op,
             "dst": None if self.dst is None else self.dst.to_dict(),
-            "args": [_atom_to_dict(arg) for arg in self.args],
+            "args": [_atom_to_dict(arg) for arg in iter(self.args)],
             "size": self.size,
             "addr": self.addr,
             "call_stack_effect": (
@@ -398,12 +409,12 @@ class IRInstr:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRRefusal:
     """Structured reason why an IR fact could not be recovered."""
 
-    kind: str
-    detail: str
+    kind: object
+    detail: object
     block_addr: int | None = None
 
     def to_dict(self) -> dict[str, object]:
@@ -415,21 +426,21 @@ class IRRefusal:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRBlock:
     """Typed IR block with instructions, refusals, and successor addresses."""
 
-    addr: int
+    addr: cython.longlong
     instrs: tuple[IRInstr, ...] = ()
     refusals: tuple[IRRefusal, ...] = ()
-    successor_addrs: tuple[int, ...] = ()
+    successor_addrs: tuple[cython.longlong, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         """Serialize this typed IR block for diagnostics and artifacts."""
         return {
             "addr": self.addr,
-            "instrs": [instr.to_dict() for instr in self.instrs],
-            "refusals": [item.to_dict() for item in self.refusals],
+            "instrs": [instr.to_dict() for instr in iter(self.instrs)],
+            "refusals": [item.to_dict() for item in iter(self.refusals)],
             "successor_addrs": list(self.successor_addrs),
         }
 

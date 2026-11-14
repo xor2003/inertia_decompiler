@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed contracts for versioned indexed segmented-memory accesses.
 
 Layer: IR.
@@ -11,11 +12,15 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
 
 from .core import AddressStatus, IRAddress, IRValue, MemSpace, SegmentOrigin
+import dataclasses
+import operator
 
 
 class IndexedAddressAccessKind8616(StrEnum):
@@ -40,17 +45,17 @@ class IndexedAddressFailureKind8616(StrEnum):
     INDEX_SOURCE_UNPROVEN = "index_source_unproven"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAddressDefinitionSite8616:
     """One exact SSA instruction on the index reaching-definition path."""
 
-    block_addr: int
-    instr_index: int
-    instr_addr: int
-    op: str
+    block_addr: cython.longlong
+    instr_index: cython.longlong
+    instr_addr: cython.longlong
+    op: object
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether this path site has exact machine and SSA identity."""
         return bool(
             self.block_addr >= 0
@@ -60,23 +65,23 @@ class IndexedAddressDefinitionSite8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAddressFact8616:
     """One indexed DS/ES access with exact versioned stack index provenance."""
 
-    function_addr: int
-    block_addr: int
-    instr_index: int
-    instr_addr: int
+    function_addr: cython.longlong
+    block_addr: cython.longlong
+    instr_index: cython.longlong
+    instr_addr: cython.longlong
     kind: IndexedAddressAccessKind8616
     address: IRAddress
     index_value: IRValue
     index_source: IRAddress
-    index_shift: int
-    definition_path: tuple[IndexedAddressDefinitionSite8616, ...]
+    index_shift: cython.longlong
+    definition_path: object
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether address, index, source, width, and path agree."""
         return bool(
             self.function_addr >= 0
@@ -88,8 +93,8 @@ class IndexedAddressFact8616:
             and self.address.segment_origin is SegmentOrigin.PROVEN
             and self.address.size > 0
             and len(self.address.base) == len(self.address.base_values) == 1
-            and self.address.base == (self.index_value.name,)
-            and self.address.base_values == (self.index_value,)
+            and operator.eq(self.address.base, (self.index_value.name,))
+            and operator.eq(self.address.base_values, (self.index_value,))
             and self.index_value.space is MemSpace.REG
             and self.index_value.name is not None
             and self.index_value.version is not None
@@ -97,66 +102,65 @@ class IndexedAddressFact8616:
             and self.index_source.base == ("bp",)
             and self.index_source.status is AddressStatus.STABLE
             and self.index_source.segment_origin is SegmentOrigin.PROVEN
-            and self.index_source.size == self.index_value.size
+            and operator.eq(self.index_source.size, self.index_value.size)
             and 0 <= self.index_shift <= 4
             and self.definition_path
-            and all(site.complete for site in self.definition_path)
+            and all(site.complete for site in iter(self.definition_path))
             and self.definition_path[-1].op == "LOAD"
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAddressRefusal8616:
     """One exact candidate and its typed non-materialization reason."""
 
-    function_addr: int
-    block_addr: int
-    instr_index: int
-    instr_addr: int
+    function_addr: cython.longlong
+    block_addr: cython.longlong
+    instr_index: cython.longlong
+    instr_addr: cython.longlong
     address: IRAddress
     failure: IndexedAddressFailureKind8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAddressStats8616:
     """Closed accounting for all indexed segmented-memory candidates."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    coalesced_fact_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    coalesced_fact_count: cython.longlong = 0
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every raw candidate has one fact or refusal."""
         return bool(
-            self.raw_fact_count
-            == self.normalized_fact_count + self.coalesced_fact_count
+            operator.eq(self.raw_fact_count, self.normalized_fact_count + self.coalesced_fact_count)
             and self.normalized_fact_count
             == self.classified_fact_count
             == self.materialized_count + self.failure_count
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAddressEvidence8616:
     """Function-wide accepted indexed accesses and explicit refusals."""
 
-    function_addr: int
-    facts: tuple[IndexedAddressFact8616, ...]
-    refusals: tuple[IndexedAddressRefusal8616, ...]
+    function_addr: cython.longlong
+    facts: object
+    refusals: object
     stats: IndexedAddressStats8616
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether all retained outcomes are coherent and accounted."""
         return bool(
             self.stats.closed
-            and len(self.facts) == self.stats.materialized_count
-            and len(self.refusals) == self.stats.failure_count
-            and all(fact.complete for fact in self.facts)
+            and operator.eq(len(self.facts), self.stats.materialized_count)
+            and operator.eq(len(self.refusals), self.stats.failure_count)
+            and all(fact.complete for fact in iter(self.facts))
         )
 
 

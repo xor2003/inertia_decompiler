@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove a paired far-call result's immediate segmented caller use.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -40,6 +43,9 @@ from .interprocedural_storage_return_defs import (
     call_candidates_at_address_8616,
 )
 from .interprocedural_storage_return_type_contracts import ReturnPointerAliasStep8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "FarReturnPointerUseEvidence8616",
@@ -51,10 +57,11 @@ __all__ = [
 ]
 
 
+@cython.ccall
 def _refuse_8616(
     failure: FarReturnPointerUseFailure8616,
     *,
-    normalized: bool = False,
+    normalized: cython.bint = False,
 ) -> FarReturnPointerUseResult8616:
     """Retain one failed obligation without classifying or materializing it."""
     return FarReturnPointerUseResult8616(
@@ -65,24 +72,26 @@ def _refuse_8616(
     )
 
 
+@cython.ccall
 def _is_output_8616(
     definition: StorageReachingDefinition8616,
-    register: str,
-    callsite_addr: int,
-) -> bool:
+    register: object,
+    callsite_addr: cython.longlong,
+) -> cython.bint:
     """Check one exact full-word register output from this machine call."""
+    storage: object
     storage = definition.source_storage
     return bool(
         definition.is_complete
         and definition.definition_kind is StorageDefinitionKind8616.CALL_OUTPUT
-        and definition.instr_addr == callsite_addr
+        and operator.eq(definition.instr_addr, callsite_addr)
         and storage is not None
         and storage.is_exact
         and storage.kind is StorageIdentityKind8616.REGISTER
-        and storage.register == register
+        and operator.eq(storage.register, register)
         and storage.width == 2
         and definition.value.space is MemSpace.REG
-        and definition.value.name == register
+        and operator.eq(definition.value.name, register)
         and definition.value.size == 2
         and definition.value.version is None
     )
@@ -90,50 +99,51 @@ def _is_output_8616(
 
 def _single_successor_8616(
     artifact: SSAFunctionArtifact,
-    call_block_addr: int,
+    call_block_addr: cython.longlong,
 ) -> SSABlock | None:
     """Require one complete, exclusive straight-line post-call CFG edge."""
-    blocks = {block.addr: block for block in artifact.blocks}
-    if set(artifact.predecessor_map) != set(blocks):
+    blocks = {block.addr: block for block in iter(artifact.blocks)}
+    if operator.ne(set(artifact.predecessor_map), set(blocks)):
         return None
     if any(
         predecessor not in blocks
-        for predecessors in artifact.predecessor_map.values()
-        for predecessor in predecessors
+        for predecessors in builtins.iter(artifact.predecessor_map.values())
+        for predecessor in iter(predecessors)
     ):
         return None
     successors = tuple(
-        addr for addr, predecessors in artifact.predecessor_map.items()
+        addr for addr, predecessors in builtins.iter(artifact.predecessor_map.items())
         if call_block_addr in predecessors
     )
     if len(successors) != 1:
         return None
     successor = successors[0]
-    if artifact.predecessor_map[successor] != (call_block_addr,):
+    if operator.ne(artifact.predecessor_map[successor], (call_block_addr,)):
         return None
     return blocks[successor]
 
 
+@cython.ccall
 def _copy_step_8616(
-    block_addr: int,
-    index: int,
-    instruction_addr: int,
+    block_addr: cython.longlong,
+    index: cython.longlong,
+    instruction_addr: cython.longlong,
     source: IRValue,
     target: IRValue,
-    source_name: str,
-    target_name: str,
+    source_name: object,
+    target_name: object,
 ) -> ReturnPointerAliasStep8616 | None:
     """Accept only an exact entry-register to full-word register MOV."""
     invalid_source = (
         source.space is not MemSpace.REG
-        or source.name != source_name
+        or operator.ne(source.name, source_name)
         or source.size != 2
         or source.version != 0
         or source.expr is not None
     )
     invalid_target = (
         target.space is not MemSpace.REG
-        or target.name != target_name
+        or operator.ne(target.name, target_name)
         or target.size != 2
         or not isinstance(target.version, int)
     )
@@ -145,20 +155,21 @@ def _copy_step_8616(
 
 def _logical_access_8616(
     artifact: SSAFunctionArtifact,
-    block_addr: int,
-    instruction_addr: int,
+    block_addr: cython.longlong,
+    instruction_addr: cython.longlong,
     execution_address: IRAddress,
 ) -> IRLogicalMemoryAccess8616 | None:
     """Bind one byte-sliced ES:BX operation to its exact logical access."""
+    logical: object
     logical = artifact.logical_memory
-    if logical is None or not logical.closed or logical.function_addr != artifact.function_addr:
+    if logical is None or not logical.closed or operator.ne(logical.function_addr, artifact.function_addr):
         return None
-    if any(refusal.insn_addr == instruction_addr for refusal in logical.refusals):
+    if any(operator.eq(refusal.insn_addr, instruction_addr) for refusal in iter(logical.refusals)):
         return None
     matches = tuple(
-        access for access in logical.accesses
-        if access.key.block_addr == block_addr
-        and access.key.insn_addr == instruction_addr
+        access for access in iter(logical.accesses)
+        if operator.eq(access.key.block_addr, block_addr)
+        and operator.eq(access.key.insn_addr, instruction_addr)
         and access.kind in {IRMemoryAccessKind8616.READ, IRMemoryAccessKind8616.WRITE}
         and access.address.space is MemSpace.ES
         and access.address.base == ("bx",)
@@ -169,7 +180,7 @@ def _logical_access_8616(
                 slice_.source_byte_offset,
                 access.address_bits,
             )
-            for slice_ in access.execution_slices
+            for slice_ in iter(access.execution_slices)
         )
     )
     if len(matches) != 1 or not matches[0].complete:
@@ -177,25 +188,27 @@ def _logical_access_8616(
     return matches[0]
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _FarUseScan8616:
     """Track two independent entry-register carriers in one exact successor."""
 
     artifact: SSAFunctionArtifact
     successor: SSABlock
-    callee_addr: int
-    callsite_addr: int
+    callee_addr: cython.longlong
+    callsite_addr: cython.longlong
     segment_copy: ReturnPointerAliasStep8616 | None = None
     offset_copy: ReturnPointerAliasStep8616 | None = None
-    segment_input_live: bool = True
-    offset_input_live: bool = True
+    segment_input_live: cython.bint = True
+    offset_input_live: cython.bint = True
 
+    @cython.ccall
     def _access_result(
         self,
-        instruction_addr: int,
+        instruction_addr: cython.longlong,
         address: IRAddress,
     ) -> FarReturnPointerUseResult8616:
         """Bind a paired live carrier to one complete logical operation."""
+        access: object
         if self.segment_copy is None:
             return _refuse_8616(FarReturnPointerUseFailure8616.SEGMENT_COPY_MISSING, normalized=True)
         if self.offset_copy is None:
@@ -225,13 +238,14 @@ class _FarUseScan8616:
             FarReturnPointerUseStats8616(1, 1, 1, 1, 0),
         )
 
+    @cython.ccall
     def _apply_register_write(
         self,
-        index: int,
-        instruction_addr: int,
-        op: str,
-        destination: IRValue | None,
-        arguments: tuple[IRAtom, ...],
+        index: cython.longlong,
+        instruction_addr: cython.longlong,
+        op: object,
+        destination: object,
+        arguments: object,
     ) -> FarReturnPointerUseResult8616 | None:
         """Reject clobbers and record only exact full-word copies."""
         if destination is None or destination.space is not MemSpace.REG:
@@ -262,8 +276,13 @@ class _FarUseScan8616:
                 )
         return None
 
+    @cython.ccall
     def run(self) -> FarReturnPointerUseResult8616:
         """Scan one straight-line block, refusing every unproven pair."""
+        refused: object
+        argument: object
+        index: object
+        instruction: object
         for index, instruction in enumerate(self.successor.instrs):
             if instruction.addr is None:
                 return _refuse_8616(FarReturnPointerUseFailure8616.CALLSITE_UNPROVEN, normalized=True)
@@ -283,28 +302,31 @@ class _FarUseScan8616:
 
 def prove_far_return_pointer_use_8616(
     artifact: SSAFunctionArtifact,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     definitions: CallOutputDefinitionResult8616,
 ) -> FarReturnPointerUseResult8616:
     """Prove an immediate DX:AX -> ES:BX logical dereference, or refuse."""
+    call_block: object
+    provenance: object
+    successor: object
     if not definitions.complete or len(definitions.definitions) != 2:
         return _refuse_8616(FarReturnPointerUseFailure8616.OUTPUT_SHAPE_MISMATCH)
     provenance = definitions.provenance
     if provenance is None or (
-        provenance.definition_addr != callsite_addr
-        or provenance.token != callsite_addr
+        operator.ne(provenance.definition_addr, callsite_addr)
+        or operator.ne(provenance.token, callsite_addr)
         or provenance.function_addr < 0
     ):
         return _refuse_8616(FarReturnPointerUseFailure8616.CALL_TARGET_MISMATCH)
     by_register = {
         definition.source_storage.register: definition
-        for definition in definitions.definitions
+        for definition in iter(definitions.definitions)
         if definition.source_storage is not None
         and definition.source_storage.kind is StorageIdentityKind8616.REGISTER
     }
     if set(by_register) != {"ax", "dx"} or not all(
         _is_output_8616(by_register[name], name, callsite_addr)
-        for name in ("ax", "dx")
+        for name in iter(("ax", "dx"))
     ):
         return _refuse_8616(FarReturnPointerUseFailure8616.OUTPUT_SHAPE_MISMATCH)
     callsites = call_candidates_at_address_8616(artifact, callsite_addr)
@@ -316,15 +338,15 @@ def prove_far_return_pointer_use_8616(
         not isinstance(target, IRValue)
         or target.space is not MemSpace.CONST
         or not isinstance(target.const, int)
-        or target.const != provenance.function_addr
+        or operator.ne(target.const, provenance.function_addr)
     ):
         return _refuse_8616(FarReturnPointerUseFailure8616.CALL_TARGET_MISMATCH, normalized=True)
-    call_block = next((block for block in artifact.blocks if block.addr == call_block_addr), None)
+    call_block = next((block for block in iter(artifact.blocks) if operator.eq(block.addr, call_block_addr)), None)
     if (
         call_block is None
         or
-        call_index != len(call_block.instrs) - 1
-        or any(definition.block_addr != call_block_addr or definition.instr_index != call_index for definition in definitions.definitions)
+        operator.ne(call_index, len(call_block.instrs) - 1)
+        or any(operator.ne(definition.block_addr, call_block_addr) or operator.ne(definition.instr_index, call_index) for definition in iter(definitions.definitions))
     ):
         return _refuse_8616(FarReturnPointerUseFailure8616.CALLSITE_UNPROVEN, normalized=True)
     successor = _single_successor_8616(artifact, call_block_addr)

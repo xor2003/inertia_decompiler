@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recompilable output.
 
 Responsibility: syntax-check and shape-check generated C without changing recovered semantics.
@@ -11,6 +12,8 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import subprocess
 import tempfile
@@ -25,6 +28,7 @@ __all__ = [
 ]
 
 
+@cython.ccall
 def _compat_syntax_prelude() -> str:
     return """#include <stdbool.h>
 #include <stddef.h>
@@ -106,7 +110,8 @@ static const unsigned short _psp = 0;
 """
 
 
-def _write_c_text_tempfile(c_text: str) -> Path:
+@cython.ccall
+def _write_c_text_tempfile(c_text: object) -> Path:
     with tempfile.NamedTemporaryFile("w", suffix=".c", delete=False) as tmp:
         path = Path(tmp.name)
         tmp.write(_compat_syntax_prelude())
@@ -115,7 +120,8 @@ def _write_c_text_tempfile(c_text: str) -> Path:
     return path
 
 
-def syntax_check_recompilable_c_text(c_text: str) -> subprocess.CompletedProcess[str]:
+@cython.ccall
+def syntax_check_recompilable_c_text(c_text: object) -> subprocess.CompletedProcess[str]:
     """Run a syntax-only C compiler check over generated C text."""
     path = _write_c_text_tempfile(c_text)
     try:
@@ -129,7 +135,8 @@ def syntax_check_recompilable_c_text(c_text: str) -> subprocess.CompletedProcess
         path.unlink(missing_ok=True)
 
 
-def compile_recompilable_c_text(c_text: str) -> subprocess.CompletedProcess[str]:
+@cython.ccall
+def compile_recompilable_c_text(c_text: object) -> subprocess.CompletedProcess[str]:
     """Compile generated C text to an object file without changing the text."""
     path = _write_c_text_tempfile(c_text)
     obj_path = path.with_suffix(".o")
@@ -145,10 +152,10 @@ def compile_recompilable_c_text(c_text: str) -> subprocess.CompletedProcess[str]
         obj_path.unlink(missing_ok=True)
 
 
-def check_recompilable_c_text_shape(c_text: str, case: RecompilableSubsetCase) -> dict[str, object]:
+def check_recompilable_c_text_shape(c_text: object, case: RecompilableSubsetCase) -> dict[str, object]:
     """Compare generated C text against explicit case anchors and blockers."""
-    missing = tuple(anchor for anchor in case.expected_c_anchors if anchor not in c_text)
-    forbidden = tuple(anchor for anchor in case.forbidden_c_anchors if anchor in c_text)
+    missing = tuple(anchor for anchor in iter(case.expected_c_anchors) if anchor not in c_text)
+    forbidden = tuple(anchor for anchor in iter(case.forbidden_c_anchors) if anchor in c_text)
     return {
         "shape_ok": not missing and not forbidden,
         "shape_missing": missing,

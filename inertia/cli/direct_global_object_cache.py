@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Persist closed project-wide direct-global Widening evidence.
 
 Layer: CLI/fallback/reporting.
@@ -6,6 +7,8 @@ object-layout census without rebuilding or reclassifying Lowering evidence.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 from pathlib import Path
@@ -24,17 +27,19 @@ from inertia.widening.global_object_layout import (
 from .cache import _load_cache_json, _recovery_cache_key, _store_cache_json
 from .cache_source_manifest import RecoveryCacheSourceScope8616
 from .cli_function_discovery import _display_catalog_cache_policy_8616
+import operator
 
 DIRECT_GLOBAL_OBJECT_CACHE_NAMESPACE_8616: str = "direct_global_object_evidence"
-_DIRECT_GLOBAL_OBJECT_CACHE_SCHEMA_8616: int = 1
+_DIRECT_GLOBAL_OBJECT_CACHE_SCHEMA_8616: cython.longlong = 1
 
 log: logging.Logger = logging.getLogger(__name__)
 
 
+@cython.ccall
 def direct_global_object_cache_key_8616(
     source_project: object,
     binary_path: Path | None,
-) -> dict[str, object] | None:
+) -> object:
     """Return semantic identity for one complete direct-global census."""
     policy = _display_catalog_cache_policy_8616(cast(angr.Project, source_project))
     return _recovery_cache_key(
@@ -55,17 +60,19 @@ def direct_global_object_cache_key_8616(
     )
 
 
+@cython.ccall
 def load_direct_global_object_cache_8616(
-    cache_key: dict[str, object],
+    cache_key: object,
 ) -> DirectGlobalObjectLayoutEvidence8616 | None:
     """Restore one closed census, refusing malformed cache data."""
+    record: object
     record = _load_cache_json(DIRECT_GLOBAL_OBJECT_CACHE_NAMESPACE_8616, cache_key)
     if record is None:
         return None
     try:
         if (
             not isinstance(record, dict)
-            or record.get("schema") != _DIRECT_GLOBAL_OBJECT_CACHE_SCHEMA_8616
+            or operator.ne(record.get("schema"), _DIRECT_GLOBAL_OBJECT_CACHE_SCHEMA_8616)
         ):
             raise ValueError("direct-global cache has an unsupported schema")
         return direct_global_object_layout_evidence_from_record_8616(
@@ -76,8 +83,9 @@ def load_direct_global_object_cache_8616(
         return None
 
 
+@cython.ccall
 def store_direct_global_object_cache_8616(
-    cache_key: dict[str, object],
+    cache_key: object,
     evidence: DirectGlobalObjectLayoutEvidence8616,
 ) -> None:
     """Persist one already-classified closed direct-global census."""

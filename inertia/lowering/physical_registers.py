@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Expose exact physical-register views from angr structured expressions.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -17,18 +20,22 @@ from angr.analyses.decompiler.structured_codegen.c import CDirtyExpression, CVar
 from angr.sim_variable import SimRegisterVariable
 
 from inertia.ir.regs import REG16_OFFSET_MAP, REG32_OFFSET_MAP
+import dataclasses
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PhysicalRegisterView8616:
     """One exact byte range in the x86-16 architectural register file."""
 
-    reg_offset: int
-    width: int
+    reg_offset: cython.longlong
+    width: cython.longlong
 
 
+@cython.ccall
 def physical_register_offset_8616(value: object) -> int | None:
     """Return an explicit physical-register offset without requiring width."""
+    field_value: object
+    field_name: object
     if isinstance(value, CVariable) and isinstance(value.variable, SimRegisterVariable):
         variable = value.variable
         return variable.reg if isinstance(variable.reg, int) else None
@@ -50,8 +57,11 @@ def physical_register_offset_8616(value: object) -> int | None:
     return None
 
 
+@cython.ccall
 def physical_register_view_8616(value: object) -> PhysicalRegisterView8616 | None:
     """Return an exact register offset and width from an angr C or AIL carrier."""
+    bits: object
+    reg_offset: object
     reg_offset = physical_register_offset_8616(value)
     if reg_offset is None:
         return None
@@ -70,8 +80,11 @@ def physical_register_view_8616(value: object) -> PhysicalRegisterView8616 | Non
     return PhysicalRegisterView8616(reg_offset, bits // 8)
 
 
-def physical_register_name_8616(value: object) -> str | None:
+@cython.ccall
+def physical_register_name_8616(value: object) -> object:
     """Return the width-correct storage name for an exact physical register view."""
+    name: object
+    view: object
     view = physical_register_view_8616(value)
     if view is None:
         return None

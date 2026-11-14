@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Types/Lowering.
 
 Responsibility: keep consumed argument PUSH storage while structured reads still
@@ -7,6 +8,8 @@ Consumes alias, widening, and typed facts
 Do not recover semantics from COD, source, assembly, or rendered C text
 """
 from __future__ import annotations
+import typing
+import cython
 
 from enum import StrEnum
 
@@ -15,6 +18,7 @@ from angr.sim_variable import SimStackVariable
 
 from .c_ast_utils import _iter_c_node_children_8616, _structured_slot_names_8616
 from .stack_variable_coordinates import machine_bp_offset_for_stack_variable_8616
+import operator
 
 
 class PushStackReadVerdict8616(StrEnum):
@@ -26,14 +30,16 @@ class PushStackReadVerdict8616(StrEnum):
     UNKNOWN_REFUSE = "unknown_refuse"
 
 
+@cython.ccall
 def _read_overlap_8616(
-    node: object, variable: SimStackVariable, offset: int, *, codegen: object,
+    node: object, variable: SimStackVariable, offset: cython.longlong, *, codegen: object,
 ) -> PushStackReadVerdict8616 | None:
     """Compare independently materialized stack views using owned BP coordinates."""
+    other_offset: object
     if not isinstance(node, CVariable) or not isinstance(node.variable, SimStackVariable):
         return None
     other = node.variable
-    if other.region != variable.region:
+    if operator.ne(other.region, variable.region):
         return None
     other_offset = machine_bp_offset_for_stack_variable_8616(codegen, other)
     if other_offset is None or not isinstance(other.size, int) or other.size <= 0:
@@ -43,6 +49,7 @@ def _read_overlap_8616(
     return None
 
 
+@cython.ccall
 def consumed_push_stack_read_verdict_8616(
     root: object, assignment: CAssignment, *, codegen: object,
 ) -> PushStackReadVerdict8616:
@@ -53,6 +60,10 @@ def consumed_push_stack_read_verdict_8616(
     reads can conservatively retain a store. Other carrier kinds retain their
     existing independent proof obligations.
     """
+    node: object
+    offset: object
+    overlap: object
+    slot: object
     lhs = assignment.lhs
     if not isinstance(lhs, CVariable) or not isinstance(lhs.variable, SimStackVariable):
         return PushStackReadVerdict8616.NOT_APPLICABLE
@@ -61,7 +72,7 @@ def consumed_push_stack_read_verdict_8616(
     if offset is None or not isinstance(variable.size, int) or variable.size <= 0:
         return PushStackReadVerdict8616.UNKNOWN_REFUSE
     pending = [root]
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     while pending:
         node = pending.pop()
         if id(node) in seen:

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize exact signed conversions already proven by typed IR.
 
 Layer: Types/Lowering.
@@ -8,6 +9,7 @@ the source access, its storage identity or evaluation count.
 """
 
 from __future__ import annotations
+import cython
 
 from collections.abc import Callable
 
@@ -20,6 +22,7 @@ from .condition_stack_operands import _condition_integer_type
 from .semantic_cast import CSemanticCast8616
 
 
+@cython.ccall
 def materialize_signed_condition_value_8616(
     value: IRBinaryValue,
     codegen: object,
@@ -31,6 +34,7 @@ def materialize_signed_condition_value_8616(
     second records the destination width for outer unsigned/value consumers.
     The original source is projected once, at its unchanged access width.
     """
+    source: object
     source = signed_extension_source_8616(value)
     if source is None:
         return None

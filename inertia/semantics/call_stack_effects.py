@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize exact caller-frame effects before function memory SSA.
 
 Layer: Semantics.
@@ -11,6 +12,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import Counter
 from collections.abc import Mapping
@@ -52,18 +55,20 @@ from .direct_near_call_target_binding import (
     prove_direct_near_call_target_binding_8616,
 )
 from .direct_ret_call_effect import prove_direct_near_ret_only_effect_8616
+import dataclasses
+import operator
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallStackEffectArtifact8616:
     """Semantics-enriched IR plus one outcome for every exact CALL."""
 
     function: IRFunctionArtifact
-    facts: tuple[CallStackEffectFact8616, ...]
+    facts: object
     stats: CallStackEffectStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every CALL has a positive preservation proof."""
         return bool(self.stats.complete)
 
@@ -101,19 +106,21 @@ class CallStackEffectArtifact8616:
                         ),
                     },
                 }
-                for fact in self.facts
+                for fact in iter(self.facts)
             ],
             "stats": self.stats.to_dict(),
         }
 
 
-def _stable_bp_ranges_8616(artifact: IRFunctionArtifact) -> tuple[IRAddress, ...]:
+@cython.ccall
+def _stable_bp_ranges_8616(artifact: IRFunctionArtifact) -> object:
     """Consume both logical operands and exact execution cells from typed IR."""
     return stable_bp_memory_ranges_8616(artifact)
 
 
+@cython.ccall
 def _refused_effect_8616(
-    ranges: tuple[IRAddress, ...],
+    ranges: object,
     failure: CallStackEffectFailure8616,
 ) -> tuple[IRCallStackEffect8616, CallStackEffectFailure8616]:
     """Create one explicit non-preserving call effect."""
@@ -123,23 +130,28 @@ def _refused_effect_8616(
 
 
 
+@cython.ccall
 def _stack_address_offsets_8616(
     summary: CallsiteSummary8616,
-) -> tuple[tuple[int, ...], CallStackEffectFailure8616 | None]:
+) -> tuple[tuple[cython.longlong, ...], CallStackEffectFailure8616 | None]:
     """Classify all exact caller-frame addresses passed by physical PUSH provenance."""
-    if len(summary.push_arg_sources) != summary.arg_count:
+    address_break: object
+    failure: object
+    offset: object
+    source: object
+    index: object
+    if operator.ne(len(summary.push_arg_sources), summary.arg_count):
         return (), CallStackEffectFailure8616.ARGUMENT_SOURCES_INCOMPLETE
     address_breaks = summary.push_arg_address_break_evidence
-    if address_breaks and len(address_breaks) != summary.arg_count:
+    if address_breaks and operator.ne(len(address_breaks), summary.arg_count):
         return (), CallStackEffectFailure8616.ARGUMENT_ADDRESS_PROVENANCE_CONFLICT
-    offsets: list[int] = []
+    offsets: list[cython.longlong] = []
     for index, source in enumerate(summary.push_arg_sources):
         address_break = address_breaks[index] if address_breaks else None
         if source is None and address_break is not None:
             if not address_break.complete or (
-                len(summary.push_arg_instruction_addrs) != summary.arg_count
-                or address_break.push_instruction_addr
-                != summary.push_arg_instruction_addrs[index]
+                operator.ne(len(summary.push_arg_instruction_addrs), summary.arg_count)
+                or operator.ne(address_break.push_instruction_addr, summary.push_arg_instruction_addrs[index])
             ):
                 return (), CallStackEffectFailure8616.ARGUMENT_ADDRESS_PROVENANCE_CONFLICT
             continue
@@ -153,7 +165,8 @@ def _stack_address_offsets_8616(
     return tuple(dict.fromkeys(offsets)), None
 
 
-def _range_contains_bp_offset_8616(address: IRAddress, offset: int) -> bool:
+@cython.ccall
+def _range_contains_bp_offset_8616(address: IRAddress, offset: cython.longlong) -> cython.bint:
     """Compare a BP-derived argument against a range in the 16-bit coordinate."""
     pointed_byte = replace(address, offset=offset, size=1)
     return bool(stack_ranges_may_overlap_8616(address, pointed_byte))
@@ -161,11 +174,14 @@ def _range_contains_bp_offset_8616(address: IRAddress, offset: int) -> bool:
 
 def _effect_from_summary_8616(
     summary: CallsiteSummary8616,
-    ranges: tuple[IRAddress, ...],
+    ranges: object,
     allocation: CallStackAllocationCandidate8616 | None = None,
-) -> tuple[IRCallStackEffect8616, CallStackEffectFailure8616 | None]:
+) -> object:
     """Classify caller-frame preservation from one authoritative summary."""
-    allocation_effect: tuple[IRCallStackEffect8616, CallStackEffectFailure8616 | None] | None = (
+    allocation_effect: object
+    source_failure: object
+    stack_cleanup: object
+    allocation_effect = (
         resolve_call_stack_allocation_8616(summary, allocation)
     )
     if allocation_effect is not None:
@@ -178,13 +194,13 @@ def _effect_from_summary_8616(
         return _refused_effect_8616(ranges, CallStackEffectFailure8616.RETURN_ADDRESS_UNKNOWN)
     if summary.arg_count is None:
         return _refused_effect_8616(ranges, CallStackEffectFailure8616.ARGUMENT_COUNT_UNKNOWN)
-    if len(summary.arg_widths) != summary.arg_count or any(width <= 0 for width in summary.arg_widths):
+    if operator.ne(len(summary.arg_widths), summary.arg_count) or any(width <= 0 for width in iter(summary.arg_widths)):
         return _refused_effect_8616(ranges, CallStackEffectFailure8616.ARGUMENT_WIDTHS_INCOMPLETE)
     argument_bytes = sum(summary.arg_widths)
     stack_cleanup = 0 if summary.arg_count == 0 and summary.stack_cleanup is None else summary.stack_cleanup
     if stack_cleanup is None:
         return _refused_effect_8616(ranges, CallStackEffectFailure8616.STACK_CLEANUP_UNKNOWN)
-    if argument_bytes != stack_cleanup:
+    if operator.ne(argument_bytes, stack_cleanup):
         return _refused_effect_8616(ranges, CallStackEffectFailure8616.STACK_CLEANUP_MISMATCH)
     stack_address_offsets, source_failure = _stack_address_offsets_8616(summary)
     if source_failure is not None:
@@ -196,25 +212,25 @@ def _effect_from_summary_8616(
     )
     escaped_ranges = tuple(
         address
-        for address in ranges
+        for address in iter(ranges)
         if any(
             _range_contains_bp_offset_8616(address, offset)
-            for offset in stack_address_offsets
+            for offset in iter(stack_address_offsets)
         )
     )
     # A logical word may share independently executed byte ranges. Escape of
     # that operand forbids claiming preservation of any overlapping byte.
-    escaped_ranges = tuple(address for address in ranges
-                           if any(stack_ranges_may_overlap_8616(address, escaped) for escaped in escaped_ranges))
+    escaped_ranges = tuple(address for address in iter(ranges)
+                           if any(stack_ranges_may_overlap_8616(address, escaped) for escaped in iter(escaped_ranges)))
     escaped_identities = {
-        (item.space, item.base, item.offset, item.size) for item in escaped_ranges
+        (item.space, item.base, item.offset, item.size) for item in iter(escaped_ranges)
     }
     return (
         IRCallStackEffect8616(
             net_stack_delta=net_stack_delta,
             preserved_ranges=tuple(
                 address
-                for address in ranges
+                for address in iter(ranges)
                 if (address.space, address.base, address.offset, address.size)
                 not in escaped_identities
             ),
@@ -225,12 +241,13 @@ def _effect_from_summary_8616(
     )
 
 
+@cython.ccall
 def _bound_call_target_8616(
     project: object,
     block: IRBlock,
     summary: CallsiteSummary8616,
     instruction: IRInstr,
-) -> tuple[bool, DirectNearCallTargetBinding8616 | None]:
+) -> tuple[cython.bint, DirectNearCallTargetBinding8616 | None]:
     """Prove the CALL control operand denotes the summary target.
 
     A constant operand binds by exact address equality. A symbolic operand
@@ -238,6 +255,7 @@ def _bound_call_target_8616(
     block-``next`` origin, exact operand DAG, embedded continuation constants,
     and matching mapped bytes. Anything else refuses without guessing.
     """
+    target_addr: object
     target_addr = summary.target_addr
     target = instruction.args[0] if instruction.args else None
     if (
@@ -245,7 +263,7 @@ def _bound_call_target_8616(
         and isinstance(target, IRValue)
         and target.space is MemSpace.CONST
         and type(target.const) is int
-        and target.const == target_addr
+        and operator.eq(target.const, target_addr)
     ):
         return True, None
     binding = prove_direct_near_call_target_binding_8616(
@@ -254,9 +272,10 @@ def _bound_call_target_8616(
     return binding.complete, binding
 
 
+@cython.ccall
 def _with_proven_bp_effect_8616(
     effect: IRCallStackEffect8616,
-    project: object | None,
+    project: object,
     summary: CallsiteSummary8616,
     instruction: IRInstr,
     block: IRBlock,
@@ -266,8 +285,9 @@ def _with_proven_bp_effect_8616(
     DirectNearCallTargetBinding8616 | None,
 ]:
     """Join exact real-body or synthetic ABI proof with stack cleanup evidence."""
+    callsite_addr: object
     callsite_addr = instruction.addr
-    if callsite_addr is None or not effect.complete or project is None or summary.callsite_addr != callsite_addr:
+    if callsite_addr is None or not effect.complete or project is None or operator.ne(summary.callsite_addr, callsite_addr):
         return effect, None, None
     if summary.target_addr is None:
         return effect, None, None
@@ -293,15 +313,16 @@ def _with_proven_bp_effect_8616(
     return (replace(effect, bp_preserved=True) if body.complete else effect), body, binding
 
 
+@cython.ccall
 def _with_return_frame_and_coordinates_8616(
     effect: IRCallStackEffect8616,
-    failure: CallStackEffectFailure8616 | None,
+    failure: object,
     summary: CallsiteSummary8616,
     instruction: IRInstr,
     block: IRBlock,
     *,
-    project: object | None,
-    frame: ReturnSegmentFrame8616 | None,
+    project: object,
+    frame: object,
 ) -> IRCallStackEffect8616:
     """Apply the linked-return adjustment and attach the coordinate proof.
 
@@ -312,7 +333,8 @@ def _with_return_frame_and_coordinates_8616(
     project-bearing proof cannot leave the caller-cleanup-conflated guess in
     place: without proven callee evidence the post-call SP is unknown.
     """
-    if failure is None and frame is not None and frame.callsite_addr == instruction.addr:
+    adjustment: object
+    if failure is None and frame is not None and operator.eq(frame.callsite_addr, instruction.addr):
         adjustment = frame.additional_return_bytes
         if adjustment is not None and effect.net_stack_delta is not None:
             effect = replace(effect, net_stack_delta=effect.net_stack_delta + adjustment)
@@ -330,21 +352,26 @@ def _with_return_frame_and_coordinates_8616(
 
 def materialize_call_stack_effects_8616(
     artifact: IRFunctionArtifact,
-    summaries: Mapping[int, CallsiteSummary8616],
+    summaries: Mapping[cython.longlong, CallsiteSummary8616],
     *,
     project: object | None = None,
     allocation_candidates: Mapping[int, CallStackAllocationCandidate8616] | None = None,
     return_segment_frames: Mapping[int, ReturnSegmentFrame8616] | None = None,
 ) -> CallStackEffectArtifact8616:
     """Attach one summary-derived stack effect to every exact IR CALL."""
+    failure: object
+    summary: object
+    block: object
+    instr_index: object
+    instruction: object
     ranges = _stable_bp_ranges_8616(artifact)
     call_addresses = tuple(
         instruction.addr
-        for block in artifact.blocks
-        for instruction in block.instrs
+        for block in iter(artifact.blocks)
+        for instruction in iter(block.instrs)
         if instruction.op == "CALL"
     )
-    address_counts = Counter(address for address in call_addresses if address is not None)
+    address_counts = Counter(address for address in iter(call_addresses) if address is not None)
     facts: list[CallStackEffectFact8616] = []
     rewritten_blocks: list[IRBlock] = []
     for block in artifact.blocks:
@@ -355,7 +382,6 @@ def materialize_call_stack_effects_8616(
                 continue
             summary = summaries.get(instruction.addr) if instruction.addr is not None else None
             target_addr = None if summary is None else summary.target_addr
-            failure: CallStackEffectFailure8616 | None
             bp_preservation = None
             target_binding = None
             if instruction.addr is None:
@@ -384,7 +410,7 @@ def materialize_call_stack_effects_8616(
                     effect, failure, summary, instruction, block,
                     project=project, frame=frame,
                 )
-            if instruction.call_stack_effect is not None and instruction.call_stack_effect != effect:
+            if instruction.call_stack_effect is not None and operator.ne(instruction.call_stack_effect, effect):
                 effect, failure = _refused_effect_8616(
                     ranges,
                     CallStackEffectFailure8616.EXISTING_EFFECT_CONFLICT,
@@ -414,7 +440,7 @@ def materialize_call_stack_effects_8616(
             IRBlock(block.addr, tuple(rewritten), block.refusals, block.successor_addrs)
         )
     raw_count = len(call_addresses)
-    failure_count = sum(fact.failure is not None for fact in facts)
+    failure_count = sum(fact.failure is not None for fact in iter(facts))
     stats = CallStackEffectStats8616(
         raw_fact_count=raw_count,
         normalized_fact_count=len(facts),

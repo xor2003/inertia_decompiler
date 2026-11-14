@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Publish typed call-input outcomes for pipeline orchestration.
 
 Layer: Pipeline contracts.
@@ -9,10 +10,13 @@ Owns runtime ordering, invariant checks, hard failures, and final emission gates
 Do not recover semantic facts or perform IR, alias, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import asdict, dataclass
 from enum import StrEnum
 from typing import Protocol, cast
+import dataclasses
 
 
 class _CallInputPublication8616(Protocol):
@@ -45,21 +49,21 @@ class CallStackInputStatus8616(StrEnum):
 
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallStackInputStats8616:
     """Closed source-call census; unsupported functions keep their original tree."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    changed_count: int = 0
-    refusal_count: int = 0
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    changed_count: cython.longlong = 0
+    refusal_count: cython.longlong = 0
 
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallStackInputResult8616:
     """Inspectable outcome without embedding mutable native objects."""
 
@@ -68,7 +72,7 @@ class CallStackInputResult8616:
     failure: CallStackInputFailure8616 | None = None
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether input contexts or their entry capture changed."""
         return self.stats.changed_count > 0
 
@@ -79,12 +83,14 @@ class CallStackInputResult8616:
 
 
 
+@cython.ccall
 def call_stack_input_lowering_result_8616(codegen: object) -> CallStackInputResult8616 | None:
     """Read Types' optional publication without authorizing any semantic effect.
 
     Unsupported codegen backends may omit this extension. A malformed value
     remains an error rather than silently becoming an absent observation.
     """
+    result: object
     try:
         result = cast(_CallInputPublication8616, codegen)._inertia_call_stack_input_lowering_8616
     except AttributeError:

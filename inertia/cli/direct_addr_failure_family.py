@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Normalize repeated direct-address failure attempts into one stable family key.
 
 Layer: CLI/fallback/reporting.
@@ -9,29 +10,34 @@ verdict.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+import dataclasses
+import operator
 
 
-def _token(value: object | None, *, default: str) -> str:
+@cython.ccall
+def _token(value: object, *, default: object) -> object:
     if value is None:
         return default
     text = str(value).strip()
     return text if text else default
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FailureFamilySnapshot:
     """One normalized failure family attempt."""
 
-    status: str
-    failure_stage: str
-    sidecar_verdict: str
-    non_optimized_verdict: str
-    fallback_kind: str
-    tail_validation_verdict: str
-    artifact_path: str
+    status: object
+    failure_stage: object
+    sidecar_verdict: object
+    non_optimized_verdict: object
+    fallback_kind: object
+    tail_validation_verdict: object
+    artifact_path: object
 
     @property
     def key(self) -> tuple[str, str, str, str, str, str]:
@@ -73,6 +79,8 @@ class FailureFamilySnapshot:
     @classmethod
     def from_record(cls, record: object) -> FailureFamilySnapshot | None:
         """Deserialize a complete snapshot, refusing missing or non-text fields."""
+        value: object
+        field_name: object
         if not isinstance(record, Mapping):
             return None
         field_names = (
@@ -101,18 +109,19 @@ class FailureFamilySnapshot:
         )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class FailureFamilyState:
     """Track the last finished direct-address failure lane."""
 
     previous_snapshot: FailureFamilySnapshot | None = None
     candidate_snapshot: FailureFamilySnapshot | None = None
-    new_proof_seen: bool = False
-    repeat_detected: bool = False
-    same_family_retry_stops: int = 0
+    new_proof_seen: cython.bint = False
+    repeat_detected: cython.bint = False
+    same_family_retry_stops: cython.longlong = 0
     fallback_family_labels: tuple[str, ...] = ()
 
 
+@cython.ccall
 def build_failure_family_snapshot(
     *,
     status: object | None,
@@ -135,44 +144,50 @@ def build_failure_family_snapshot(
     )
 
 
+@cython.ccall
 def failure_family_repeat_reason(
-    previous: FailureFamilySnapshot | None,
+    previous: object,
     candidate: FailureFamilySnapshot,
-) -> str | None:
+) -> object:
     """Explain why a candidate attempt is a repeat, or return ``None``."""
     if previous is None:
         return None
-    if previous.key != candidate.key:
+    if operator.ne(previous.key, candidate.key):
         return None
-    if previous.proof_token != candidate.proof_token:
+    if operator.ne(previous.proof_token, candidate.proof_token):
         return None
     return f"same failure family ({candidate.label()})"
 
 
+@cython.ccall
 def remember_failure_family_candidate(
-    state: FailureFamilyState | None,
+    state: object,
     candidate: FailureFamilySnapshot,
-) -> str | None:
+) -> object:
     """Update one shared state holder with the latest candidate snapshot."""
+    previous: object
+    repeat_reason: object
     if state is None:
         return None
     previous = state.previous_snapshot
     state.candidate_snapshot = candidate
-    state.new_proof_seen = previous is not None and previous.proof_token != candidate.proof_token
+    state.new_proof_seen = previous is not None and operator.ne(previous.proof_token, candidate.proof_token)
     repeat_reason = failure_family_repeat_reason(previous, candidate)
     state.repeat_detected = repeat_reason is not None
     return repeat_reason
 
 
-def advance_failure_family_state(state: FailureFamilyState | None) -> None:
+@cython.ccall
+def advance_failure_family_state(state: object) -> None:
     """Promote the current candidate snapshot after one lane finishes."""
     if state is None or state.candidate_snapshot is None:
         return
     state.previous_snapshot = state.candidate_snapshot
 
 
+@cython.ccall
 def record_failure_family_retry_stop(
-    state: FailureFamilyState | None,
+    state: object,
     candidate: FailureFamilySnapshot,
 ) -> None:
     """Record one emitted same-family retry stop for later summaries."""

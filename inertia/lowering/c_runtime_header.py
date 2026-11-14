@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Render C runtime helper declarations required by lowered output.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Sequence
 
@@ -41,7 +44,7 @@ KNOWN_EXTERNAL_DECLARATIONS_8616: dict[str, str] = {
 
 LOWERED_ZERO_ARG_RUNTIME_HELPER_DECLARATIONS_8616: dict[str, str] = {
     name: LOWERED_RUNTIME_HELPER_DECLARATIONS_8616[name]
-    for name in ("clock", "rand")
+    for name in iter(("clock", "rand"))
 }
 
 LOWERED_RUNTIME_MACROS_8616: frozenset[str] = frozenset(
@@ -101,8 +104,11 @@ _RUNTIME_SEGMENT_STATE_DECLARATIONS_8616: tuple[str, ...] = (
 )
 
 
-def runtime_helper_declaration_8616(name: str, target: str | None) -> str | None:
+@cython.ccall
+def runtime_helper_declaration_8616(name: object, target: object) -> object:
     """Return an exact external declaration owned by the selected C ABI."""
+    declaration: object
+    target_declarations: object
     normalized_target = str(target or "").strip().lower()
     target_declarations = _TARGET_COMPILER_RUNTIME_HELPER_DECLARATIONS_8616.get(normalized_target, {})
     declaration = target_declarations.get(name)
@@ -114,14 +120,16 @@ def runtime_helper_declaration_8616(name: str, target: str | None) -> str | None
     return LOWERED_RUNTIME_HELPER_DECLARATIONS_8616.get(name)
 
 
+@cython.ccall
 def interrupt_helper_declarations_8616(
     calls: Sequence[InterruptCall],
-    api_style: str,
-) -> list[str]:
+    api_style: object,
+) -> object:
     """Lower typed interrupt calls to declarations for their emitted helpers."""
+    call: object
     service_calls = [
         call
-        for call in calls
+        for call in iter(calls)
         if call.vector == 0x21 or interrupt_service_spec(call) is not None
     ]
     declarations: list[str] = list(interrupt_service_declarations(service_calls, api_style))
@@ -144,12 +152,14 @@ def interrupt_helper_declarations_8616(
     return declarations
 
 
-def is_lowered_runtime_macro_8616(name: str) -> bool:
+@cython.ccall
+def is_lowered_runtime_macro_8616(name: object) -> cython.bint:
     """Return whether lowering owns ``name`` as a C macro rather than a callable."""
     return name in LOWERED_RUNTIME_MACROS_8616
 
 
-def render_pointer_storage_macros_8616(target: str) -> str:
+@cython.ccall
+def render_pointer_storage_macros_8616(target: object) -> str:
     """Render target pointer-to-storage casts for headers and rebuild harnesses."""
     if target not in {"msc-dos", "portable-flat"}:
         raise ValueError(f"Unsupported pointer-storage target: {target!r}")
@@ -160,7 +170,8 @@ def render_pointer_storage_macros_8616(target: str) -> str:
     )
 
 
-def render_near_pointer_arithmetic_macros_8616(target: str) -> str:
+@cython.ccall
+def render_near_pointer_arithmetic_macros_8616(target: object) -> object:
     """Render explicit guest-offset arithmetic, not native element arithmetic.
 
     Consumers must prove the source and result segment bindings and provide
@@ -193,11 +204,12 @@ def render_near_pointer_arithmetic_macros_8616(target: str) -> str:
     )
 
 
+@cython.ccall
 def render_c_runtime_header_8616(
-    target: str | None,
+    target: object,
     *,
     gp_runtime_abi: GPRegisterRuntimeABI8616 = GPRegisterRuntimeABI8616.SCALAR,
-) -> str:
+) -> object:
     """Return the C helper header for the requested generated-C target."""
     normalized = str(target or "").strip().lower()
     gp_header = (

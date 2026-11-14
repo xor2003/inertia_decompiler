@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/runtime.
 
 Responsibility: lift 16-bit x86 bytes into VEX/typed IR facts without later-stage repair.
@@ -7,6 +8,7 @@ emulator telemetry boundary; owned Inertia facts must be explicit typed IR.
 """
 
 from __future__ import annotations
+import typing
 
 import contextlib
 import logging
@@ -85,6 +87,9 @@ from .control_coordinates import (
     linear_continuation,
     relative_continuation,
 )
+import dataclasses
+import operator
+import builtins
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -92,19 +97,21 @@ _BPMemorySpec8616 = tuple[str, int, int]
 _BP_MEMORY_SPEC_FIELD_COUNT_8616 = 3
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class _ConditionRegisterValueState8616:
     """Carry one exact register value within a decoded basic block until clobbered."""
 
     value: IRValue | IRBinaryValue
-    next_addr: int
+    next_addr: cython.longlong
 
 
-def _affine_switch_conditions_enabled_8616() -> bool:
+@cython.ccall
+def _affine_switch_conditions_enabled_8616() -> cython.bint:
     return os.environ.get("INERTIA_ENABLE_AFFINE_SWITCH_CONDITIONS") == "1"
 
 
-def _bitstream_is_empty(bitstrm: bitstring.ConstBitStream) -> bool:
+@cython.ccall
+def _bitstream_is_empty(bitstrm: bitstring.ConstBitStream) -> cython.bint:
     try:
         bitstrm.peek(1)
         return False
@@ -130,7 +137,7 @@ class _LifterInstructionFacade:
         self._instruction = instruction
 
     @cython.locals(value=object)
-    def __getattr__(self, name: str) -> Any:
+    def __getattr__(self, name: object) -> Any:
         """Prefer instruction helpers and resolve absent ones on the customizer."""
         value = getattr(self._instruction, name, _MISSING_FACADE_ATTRIBUTE)
         if value is _MISSING_FACADE_ATTRIBUTE:
@@ -143,19 +150,19 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
 
     bitstrm: Any
     arch: Any
-    addr: int
-    start: int
+    addr: cython.longlong
+    start: cython.longlong
     cs: Any
     emu: Emulator
     irsb_c: Any
     instr: InstrData
     instr16: Instr16
     instr32: Instr32 | None
-    simple_semantics: tuple[Any, ...] | None
-    condition_value_semantics: tuple[Any, ...] | None
+    simple_semantics: object
+    condition_value_semantics: object
     _past_instructions: Any = ()
 
-    def dirty(self, ret_type: object, func_name: str, args: list[object]) -> Any:
+    def dirty(self, ret_type: object, func_name: object, args: object) -> Any:
         """Emit one Dirty helper with complete no-memory-effect metadata."""
         result = super().dirty(ret_type, func_name, args)
         statement = self.irsb_c.irsb.statements[-1]
@@ -169,10 +176,10 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
     _future_instructions: Any = ()
     _inertia_consumed_last_condition_8616: IRCondition
     _inertia_consumed_last_condition_addr_8616: int | None
-    bitwidth: int
-    is_mode32: bool
+    bitwidth: cython.longlong
+    is_mode32: cython.bint
     chsz_op: int | bool
-    reg_offsets: dict[int, int]
+    reg_offsets: object
 
     _REG8_NAMES: ClassVar[set[str]] = {"al", "ah", "bl", "bh", "cl", "ch", "dl", "dh"}
     _REG16_NAMES: ClassVar[set[str]] = {"ax", "bx", "cx", "dx", "sp", "bp", "si", "di", "ip", "flags"}
@@ -219,6 +226,8 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
 
     def lift(self, irsb_c: Any, past_instructions: Any, future_instructions: Any) -> None:
         """Lift one decoded pyvex instruction into the active IRSB customizer."""
+        actual_irsb: object
+        block_addr: object
 
         self.irsb_c = irsb_c
         self._past_instructions = past_instructions
@@ -246,7 +255,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             return
         self.compute_result()
 
-    def __init__(self, bitstrm: Any, arch: Any, addr: int) -> None:
+    def __init__(self, bitstrm: Any, arch: Any, addr: cython.longlong) -> None:
         self.bitstrm = bitstrm
         self.arch = arch
         self.addr = addr
@@ -272,14 +281,16 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             self.instr32 = Instr32(self.emu, self.instr)
         return self.instr32
 
-    def parse(self, bitstrm: Any) -> dict[str, str]:
+    def parse(self, bitstrm: Any) -> object:
         """Parse one 16-bit instruction and prepare either simple or full semantics."""
         try:
             return _parse_insn_8616(self, bitstrm)
         except AnalysisTimeout as ex:
             raise ParseError("Instruction parse timed out") from ex
 
-    def _match_simple_semantics(self) -> tuple[Any, ...] | None:
+    def _match_simple_semantics(self) -> object:
+        ops: object
+        unary: object
         ops = getattr(self.cs, "operands", ())
         unary = self._match_simple_unary_semantics_8616(ops)
         if unary is not None:
@@ -288,7 +299,8 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             return None
         return self._match_simple_binary_semantics_8616(ops)
 
-    def _match_simple_unary_semantics_8616(self, ops: Any) -> tuple[Any, ...] | None:
+    def _match_simple_unary_semantics_8616(self, ops: Any) -> object:
+        matcher: object
         matchers = {
             "nop": lambda _self, _ops: ("nop",),
             "ret": _match_ret_8616,
@@ -309,8 +321,8 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             return (self.cs.mnemonic, ops[0].imm)
         return None
 
-    def _next_instruction_is_simple_jcc_from_bytes_8616(self) -> bool:
-        def _impl() -> bool:
+    def _next_instruction_is_simple_jcc_from_bytes_8616(self) -> cython.bint:
+        def _impl() -> cython.bint:
             next_bytepos = self.start + self.cs.size
             raw = bytes(self.bitstrm[next_bytepos * 8 : next_bytepos * 8 + 2 * 8])
             if not raw:
@@ -322,8 +334,8 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
 
         return _impl()
 
-    def _next_instruction_is_incdec_reg16_from_bytes_8616(self) -> bool:
-        def _impl() -> bool:
+    def _next_instruction_is_incdec_reg16_from_bytes_8616(self) -> cython.bint:
+        def _impl() -> cython.bint:
             next_bytepos = self.start + self.cs.size
             raw = bytes(self.bitstrm[next_bytepos * 8 : next_bytepos * 8 + 8])
             if not raw:
@@ -333,7 +345,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         return _impl()
 
     @staticmethod
-    def _register_family_8616(reg_name: str) -> frozenset[str]:
+    def _register_family_8616(reg_name: object) -> object:
         """Return the x86 register names that overlap one 16-bit register."""
         families = {
             "ax": frozenset({"al", "ah", "ax", "eax"}),
@@ -347,7 +359,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         }
         return families.get(str(reg_name).lower(), frozenset({str(reg_name).lower()}))
 
-    def _same_preceding_incdec_reg16_count_8616(self, reg_name: str, *, mnemonic: str) -> int:
+    def _same_preceding_incdec_reg16_count_8616(self, reg_name: object, *, mnemonic: object) -> cython.longlong:
         if mnemonic not in {"inc", "dec"}:
             return 1
         try:
@@ -375,8 +387,9 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             bytepos -= 1
         return count
 
-    def _lift_simple_test_8616(self, kind: str) -> bool:
+    def _lift_simple_test_8616(self, kind: object) -> cython.bint:
         """Lift a direct or frame-relative TEST into typed masked-condition evidence."""
+        typed_value: object
         if kind not in {
             "test_abs_imm8",
             "test_abs_imm16",
@@ -412,19 +425,19 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         self._update_binop_flags16("and", value, mask)
         return True
 
-    def _reg8_name(self, operand: Any) -> str | None:
+    def _reg8_name(self, operand: Any) -> object:
         if operand.type != 1 or operand.size != 1:
             return None
         reg_name = self.cs.reg_name(operand.reg).lower()
         return reg_name if reg_name in self._REG8_NAMES else None
 
-    def _reg16_name(self, operand: Any) -> str | None:
+    def _reg16_name(self, operand: Any) -> object:
         if operand.type != 1 or operand.size != 2:
             return None
         reg_name = self.cs.reg_name(operand.reg).lower()
         return reg_name if reg_name in self._REG16_NAMES else None
 
-    def _reg32_name(self, operand: Any) -> str | None:
+    def _reg32_name(self, operand: Any) -> object:
         """Return one exact 32-bit GP register name from a Capstone operand."""
         if operand.type != 1 or operand.size != 4:
             return None
@@ -443,27 +456,28 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             return None
         return int(operand.imm) & 0xFFFF
 
-    def _get_reg16(self, reg_name: str) -> Any:
+    def _get_reg16(self, reg_name: object) -> Any:
         return self.get(reg_name, Type.int_16)
 
-    def _const16(self, value: int) -> Any:
+    def _const16(self, value: cython.longlong) -> Any:
         return self.constant(value & 0xFFFF, Type.int_16)
 
-    def _const32(self, value: int) -> Any:
+    def _const32(self, value: cython.longlong) -> Any:
         return self.constant(value & 0xFFFFFFFF, Type.int_32)
 
-    def _linear_near_target_8616(self, target: int) -> int:
+    def _linear_near_target_8616(self, target: cython.longlong) -> cython.longlong:
         """Project one 16-bit near target into the current linear code window."""
         if target > 0xFFFF:
             return target
         return (int(self.addr) & ~0xFFFF) | (target & 0xFFFF)
 
-    def _code_address_constant_8616(self, value: int) -> Any:
+    def _code_address_constant_8616(self, value: cython.longlong) -> Any:
         """Build a VEX code-address constant without truncating the loader base."""
         return self.constant(value, Type.int_16)
 
-    def _bp_mem(self, operand: Any, *, width_bytes: int = 2) -> _BPMemorySpec8616 | None:
-        if operand.type != 3 or operand.size != width_bytes:
+    def _bp_mem(self, operand: Any, *, width_bytes: cython.longlong = 2) -> _BPMemorySpec8616 | None:
+        index: object
+        if operand.type != 3 or operator.ne(operand.size, width_bytes):
             return None
         mem = operand.mem
         base = self.cs.reg_name(mem.base).lower() if mem.base else None
@@ -490,9 +504,10 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             return None
         return int(mem.disp) & 0xFFFF
 
-    def _indexed_mem(self, operand: Any, *, width_bytes: int) -> tuple[str, int, int] | None:
+    def _indexed_mem(self, operand: Any, *, width_bytes: cython.longlong) -> object:
         """Return one register-indexed memory operand of the requested width."""
-        if operand.type != 3 or operand.size != width_bytes:
+        index: object
+        if operand.type != 3 or operator.ne(operand.size, width_bytes):
             return None
         mem = operand.mem
         base = self.cs.reg_name(mem.base).lower() if mem.base else None
@@ -513,7 +528,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
     def _ss_addr_from_bp_mem(self, mem_spec: _BPMemorySpec8616) -> Any:
         return self._real_mode_linear("ss", self._addr_from_bp_mem(mem_spec))
 
-    def _record_bp_mem_access(self, mem_spec: _BPMemorySpec8616, mode: int, *, size: int = 2) -> None:
+    def _record_bp_mem_access(self, mem_spec: _BPMemorySpec8616, mode: cython.longlong, *, size: cython.longlong = 2) -> None:
         base, _, signed_disp = mem_spec
         self._record_mem_access(
             "ss",
@@ -540,12 +555,12 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
 
     def _record_mem_access(
         self,
-        seg: str,
-        offset: int,
-        mode: int = 0,
+        seg: object,
+        offset: cython.longlong,
+        mode: cython.longlong = 0,
         *,
-        base: tuple[str, ...] = (),
-        size: int = 2,
+        base: object = (),
+        size: cython.longlong = 2,
         segment_origin: SegmentOrigin | None = None,
         status: AddressStatus | None = None,
         address_bits: int | None = None,
@@ -563,7 +578,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             size=size,
             status=status if status is not None else AddressStatus.STABLE,
             segment_origin=segment_origin if segment_origin is not None else SegmentOrigin.PROVEN,
-            expr=(seg, *base),
+            expr=(seg, ) + tuple(base),
         )
         func_addr = get_current_function_addr()
         if isinstance(func_addr, int):
@@ -576,15 +591,15 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
                 address_bits=(self.instr.address_bits or 16) if address_bits is None else address_bits,
             )
 
-    def _load_abs16(self, offset: int) -> Any:
+    def _load_abs16(self, offset: cython.longlong) -> Any:
         self._record_mem_access("ds", offset, 0)
         return self._load_real_mode16("ds", self._const16(offset))
 
-    def _store_abs16(self, offset: int, value: Any) -> None:
+    def _store_abs16(self, offset: cython.longlong, value: Any) -> None:
         self._record_mem_access("ds", offset, 1)
         self._store_real_mode16("ds", self._const16(offset), value)
 
-    def _load_abs8(self, offset: int) -> VexValue:
+    def _load_abs8(self, offset: cython.longlong) -> VexValue:
         """Load one DS byte and publish the same logical operand width."""
         self._record_mem_access("ds", offset, 0, size=1)
         return self.load(self._real_mode_linear("ds", self._const16(offset)), Type.int_8)
@@ -596,7 +611,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             return addr
         return addr + self._const16(signed_disp)
 
-    def _load_indexed_abs(self, mem_spec: Any, *, width_bytes: int) -> Any:
+    def _load_indexed_abs(self, mem_spec: Any, *, width_bytes: cython.longlong) -> Any:
         """Load one typed DS value through an exact indexed address."""
         base, offset, _signed_disp = mem_spec
         self._record_mem_access(
@@ -612,12 +627,12 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             return self._load_real_mode16("ds", offset)
         return self.load(self._real_mode_linear("ds", offset), Type.int_8)
 
-    def _real_mode_linear(self, seg_reg: str, off16: Any) -> Any:
+    def _real_mode_linear(self, seg_reg: object, off16: Any) -> Any:
         seg = self._get_reg16(seg_reg).cast_to(Type.int_32)
         off32 = off16.cast_to(Type.int_32)
         return (seg << self.constant(4, Type.int_8)) + off32
 
-    def _load_real_mode16(self, seg_reg: str, off16: Any) -> Any:
+    def _load_real_mode16(self, seg_reg: object, off16: Any) -> Any:
         """Load a word through independently wrapped 16-bit segment offsets."""
         low_address = self._real_mode_linear(seg_reg, off16)
         high_offset = advance_segment_offset_8616(off16, 1, 16, self._const16(1))
@@ -626,7 +641,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         high = self.load(high_address, Type.int_8).cast_to(Type.int_16)
         return low | (high << self.constant(8, Type.int_8))
 
-    def _store_real_mode16(self, seg_reg: str, off16: Any, value: Any) -> None:
+    def _store_real_mode16(self, seg_reg: object, off16: Any, value: Any) -> None:
         """Store a word through independently wrapped 16-bit segment offsets."""
         low_address = self._real_mode_linear(seg_reg, off16)
         high_offset = advance_segment_offset_8616(off16, 1, 16, self._const16(1))
@@ -635,18 +650,19 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         high = (value >> self.constant(8, Type.int_8)).cast_to(Type.int_8)
         self.store(high, high_address)
 
-    def _stack_load16(self, off16: VexValue, *, offset: int, base: str = "sp") -> VexValue:
+    def _stack_load16(self, off16: VexValue, *, offset: cython.longlong, base: object = "sp") -> VexValue:
         """Read a stack word while retaining its instruction-entry coordinate."""
         self._record_mem_access("ss", offset, 0, base=(base,), size=2, address_bits=16)
         return require_vex_value_8616(self._load_real_mode16("ss", off16))
 
-    def _stack_store16(self, off16: VexValue, value: VexValue, *, offset: int) -> None:
+    def _stack_store16(self, off16: VexValue, value: VexValue, *, offset: cython.longlong) -> None:
         """Write a stack word while retaining its instruction-entry SP displacement."""
         self._record_mem_access("ss", offset, 1, base=("sp",), size=2, address_bits=16)
         self._store_real_mode16("ss", off16, value)
 
     def _eflags_value_8616(self, value: Any) -> Any:
         """Rebind one PyVEX value to the emulator's active frontend host."""
+        host: object
         if not isinstance(value, VexValue):
             return value
         host = self.emu.lifter_instruction
@@ -654,7 +670,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             raise RuntimeError("Eflags materialization requires an active frontend host")
         return VexValue(host, value.rdt)
 
-    def _update_binop_flags16(self, op_name: str, lhs: Any, rhs: Any) -> None:
+    def _update_binop_flags16(self, op_name: object, lhs: Any, rhs: Any) -> None:
         """Delegate defined arithmetic flags to the shared Eflags semantics owner."""
         lhs = self._eflags_value_8616(lhs)
         rhs = self._eflags_value_8616(rhs)
@@ -675,13 +691,13 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             return
         raise NotImplementedError(op_name)
 
-    def _flag_is_set(self, bit: int) -> Any:
-        return (self._get_reg16("flags") & self._const16(1 << bit)) != self._const16(0)
+    def _flag_is_set(self, bit: cython.longlong) -> Any:
+        return operator.ne((self._get_reg16("flags") & self._const16(1 << bit)), self._const16(0))
 
-    def _flag_is_clear(self, bit: int) -> Any:
-        return (self._get_reg16("flags") & self._const16(1 << bit)) == self._const16(0)
+    def _flag_is_clear(self, bit: cython.longlong) -> Any:
+        return operator.eq((self._get_reg16("flags") & self._const16(1 << bit)), self._const16(0))
 
-    def _binop_reg_reg(self, op_name: str, dst_reg: str, src_reg: str) -> None:
+    def _binop_reg_reg(self, op_name: object, dst_reg: object, src_reg: object) -> None:
         """Lift register arithmetic with explicit zeroing values and original flag inputs."""
         dst = self._get_reg16(dst_reg)
         src = self._get_reg16(src_reg)
@@ -715,7 +731,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             self._update_binop_flags16(op_name, dst, src)
         self.put(result, dst_reg)
 
-    def _binop_reg_imm(self, op_name: str, dst_reg: str, imm: Any) -> None:
+    def _binop_reg_imm(self, op_name: object, dst_reg: object, imm: Any) -> None:
         """Lift word/immediate arithmetic and publish every live CMP flag effect."""
         dst = self._get_reg16(dst_reg)
         src = self._const16(imm)
@@ -750,7 +766,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         if op_name == "sub" and _affine_switch_conditions_enabled_8616():
             self._update_condition_reg_affine_offset_8616(dst_reg, int(imm), width_bits=16)
 
-    def _binop_reg_mem(self, op_name: str, dst_reg: str, mem_spec: _BPMemorySpec8616) -> None:
+    def _binop_reg_mem(self, op_name: object, dst_reg: object, mem_spec: _BPMemorySpec8616) -> None:
         """Lift frame-memory arithmetic with explicit register and FLAGS effects."""
         dst = self._get_reg16(dst_reg)
         src = self._load_mem16(mem_spec)
@@ -784,15 +800,16 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             self._update_binop_flags16(op_name, dst, src)
         self.put(result, dst_reg)
 
-    def _xor_reg_mem8(self, dst_reg: str, mem_spec: _BPMemorySpec8616) -> None:
+    def _xor_reg_mem8(self, dst_reg: object, mem_spec: _BPMemorySpec8616) -> None:
         """Lift byte XOR from a proven SS frame-relative source with exact flags."""
+        dst: object
         dst = self.get(dst_reg, Type.int_8)
         src = self._load_mem8(mem_spec)
         result = dst ^ src
         self._update_binop_flags16("xor", dst, src)
         self.put(result, dst_reg)
 
-    def _binop_reg_abs(self, op_name: str, dst_reg: str, offset: int) -> None:
+    def _binop_reg_abs(self, op_name: object, dst_reg: object, offset: cython.longlong) -> None:
         """Lift a register/direct-memory ALU operation with typed JCC evidence."""
         dst = self._get_reg16(dst_reg)
         src = self._load_abs16(offset)
@@ -809,7 +826,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             self._update_binop_flags16(op_name, dst, src)
         self.put(result, dst_reg)
 
-    def _binop_abs_imm(self, op_name: str, offset: int, imm: int) -> None:
+    def _binop_abs_imm(self, op_name: object, offset: cython.longlong, imm: cython.longlong) -> None:
         dst = self._load_abs16(offset)
         src = self._const16(imm)
         result = self._binop_result16(op_name, dst, src)
@@ -817,7 +834,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             self._update_binop_flags16(op_name, dst, src)
         self._store_abs16(offset, result)
 
-    def _binop_abs_reg(self, op_name: str, offset: int, src_reg: str) -> None:
+    def _binop_abs_reg(self, op_name: object, offset: cython.longlong, src_reg: object) -> None:
         dst = self._load_abs16(offset)
         src = self._get_reg16(src_reg)
         result = self._binop_result16(op_name, dst, src)
@@ -825,7 +842,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             self._update_binop_flags16(op_name, dst, src)
         self._store_abs16(offset, result)
 
-    def _binop_result16(self, op_name: str, dst: Any, src: Any) -> Any:
+    def _binop_result16(self, op_name: object, dst: Any, src: Any) -> Any:
         if op_name == "add":
             return dst + src
         if op_name == "sub":
@@ -838,8 +855,9 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             return dst | src
         raise NotImplementedError(op_name)
 
-    def _cmp_operands_from_semantics(self, semantics: tuple[Any, ...]) -> tuple[Any, Any] | None:
+    def _cmp_operands_from_semantics(self, semantics: object) -> object:
         """Rebuild VEX operands for a previously classified CMP instruction."""
+        shape: object
         shape = _CMP_OPERAND_SHAPES_8616.get(str(semantics[0]))
         if shape is None:
             return None
@@ -850,7 +868,8 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             _cmp_lift_operand_value_8616(self, rhs_role, rhs_operand),
         )
 
-    def _next_instruction_is_simple_jcc(self) -> bool:
+    def _next_instruction_is_simple_jcc(self) -> cython.bint:
+        nxt_semantics: object
         if not self._future_instructions:
             return False
         nxt = self._future_instructions[0]
@@ -862,17 +881,20 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
     def _flags_fully_overwritten_before_use_8616(
         self,
         written: StatusFlag8616 = STATUS_FLAGS_8616,
-    ) -> bool:
+    ) -> cython.bint:
         """Prove current status-flag definitions die in this decoded block."""
         return self.status_flag_write_is_dead_8616(written)
 
-    def status_flag_write_is_dead_8616(self, written: StatusFlag8616) -> bool:
+    def status_flag_write_is_dead_8616(self, written: StatusFlag8616) -> cython.bint:
         """Return whether the active instruction may omit these status bits."""
         normalized_written = written & STATUS_FLAGS_8616
-        return bool(self.status_flag_dead_write_mask_8616(written) == normalized_written)
+        return bool(operator.eq(self.status_flag_dead_write_mask_8616(written), normalized_written))
 
     def status_flag_dead_write_mask_8616(self, written: StatusFlag8616) -> StatusFlag8616:
         """Return status bits proven dead by CFG or decoded-block evidence."""
+        cfg_dead: object
+        decoded: object
+        instruction: object
         try:
             instruction_address = int(self.addr)
         except (AttributeError, TypeError, ValueError):
@@ -890,13 +912,17 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             return written & STATUS_FLAGS_8616
         return StatusFlag8616.NONE
 
-    def _should_update_binop_flags_8616(self, op_name: str, *, logical_condition_recorded: bool) -> bool:
+    def _should_update_binop_flags_8616(self, op_name: object, *, logical_condition_recorded: cython.bint) -> cython.bint:
         """Keep live execution flags even when a logical condition was published."""
+        written: object
         written = binop_status_flag_writes_8616(op_name)
         return not (written is not None and self._flags_fully_overwritten_before_use_8616(written))
 
-    def _direct_jcc_condition(self, kind: str) -> Any | None:
+    def _direct_jcc_condition(self, kind: object) -> Any | None:
         """Prefer proven typed predicates or adjacent arithmetic result tests."""
+        cond: object
+        past_instructions: object
+        prev: object
         past_instructions = getattr(self, "_past_instructions", None)
         prev = past_instructions[-1] if past_instructions else None
         prev_emu = getattr(prev, "emu", None) if prev is not None else None
@@ -907,7 +933,8 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         _consume_last_condition_8616(self, last_condition, prev_emu, prev)
         return cond
 
-    def _condition_reg_value_8616(self, reg_name: str, *, width_bits: int = 16) -> IRValue | None:
+    def _condition_reg_value_8616(self, reg_name: object, *, width_bits: cython.longlong = 16) -> IRValue | None:
+        reg: object
         reg = getattr(self.arch, "registers", {}).get(reg_name.lower())
         if reg is None:
             return None
@@ -920,8 +947,9 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         )
 
     @staticmethod
-    def _condition_unshifted_index_reg_value_8616(reg_name: str, *, width_bits: int = 16) -> IRValue | None:
+    def _condition_unshifted_index_reg_value_8616(reg_name: object, *, width_bits: cython.longlong = 16) -> IRValue | None:
         """Return one width-matched unshifted scalar index register value."""
+        state: object
         state = Instruction_ANY._inertia_condition_index_reg_state_8616.get(str(reg_name).lower())
         if state is None:
             return None
@@ -930,17 +958,22 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             return None
         if int(shift) != 0 or value.space not in {MemSpace.SS, MemSpace.DS}:
             return None
-        if value.size != max(1, int(width_bits) // 8):
+        if operator.ne(value.size, max(1, int(width_bits) // 8)):
             return None
         return value
 
     def _condition_proven_reg_value_8616(
         self,
-        reg_name: str,
+        reg_name: object,
         *,
-        width_bits: int = 16,
+        width_bits: cython.longlong = 16,
     ) -> IRValue | IRBinaryValue | None:
         """Return exact block-local value provenance retained for one register."""
+        block_addr: object
+        emu: object
+        instruction_addr: object
+        parent: object
+        state: object
         instruction_addr = getattr(self, "addr", None)
         if not isinstance(instruction_addr, int):
             return None
@@ -971,10 +1004,10 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             return None
         value = state.value
         target_size = max(1, int(width_bits) // 8)
-        return value if value.size == target_size else None
+        return value if operator.eq(value.size, target_size) else None
 
     @staticmethod
-    def _condition_const_value_8616(value: int, *, width_bits: int = 16) -> IRValue:
+    def _condition_const_value_8616(value: cython.longlong, *, width_bits: cython.longlong = 16) -> IRValue:
         return IRValue(
             MemSpace.CONST,
             const=int(value) & ((1 << int(width_bits)) - 1),
@@ -982,8 +1015,9 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             expr=("cmp-imm",),
         )
 
-    def _condition_direct_ds_value_8616(self, offset: int, *, width_bits: int = 16) -> IRValue:
+    def _condition_direct_ds_value_8616(self, offset: cython.longlong, *, width_bits: cython.longlong = 16) -> IRValue:
         """Build a direct DS value tied to this instruction's memory access."""
+        instruction_addr: object
         instruction_addr = getattr(self, "addr", None)
         access_size = max(1, int(width_bits) // 8)
         return IRValue(
@@ -999,7 +1033,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
     def _condition_stack_value_8616(
         mem_spec: _BPMemorySpec8616,
         *,
-        width_bits: int = 16,
+        width_bits: cython.longlong = 16,
         memory_access_insn: int | None = None,
     ) -> IRValue | None:
         """Build a stack operand, retaining supplied exact memory-access evidence."""
@@ -1023,7 +1057,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         mem_spec: Any,
         index_state: Any,
         *,
-        width_bits: int = 8,
+        width_bits: cython.longlong = 8,
         memory_access_insn: int | None = None,
     ) -> IRValue | None:
         """Build an indexed DS value with optional exact access provenance."""
@@ -1059,9 +1093,10 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
 
     def _condition_operands_from_cmp_semantics_8616(
         self,
-        semantics: tuple[Any, ...] | None,
-    ) -> tuple[IRValue | IRBinaryValue, IRValue | IRBinaryValue] | None:
+        semantics: object,
+    ) -> object:
         """Normalize classified CMP operands into typed condition IR values."""
+        builder: object
         if not isinstance(semantics, tuple) or not semantics:
             return None
         kind = str(semantics[0])
@@ -1093,10 +1128,12 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
 
     def _condition_reg_affine_state_8616(
         self,
-        reg_name: str,
+        reg_name: object,
         *,
-        width_bits: int = 16,
-    ) -> tuple[IRValue, int] | None:
+        width_bits: cython.longlong = 16,
+    ) -> object:
+        base: object
+        current: object
         reg_name = reg_name.lower()
         state = Instruction_ANY._inertia_condition_reg_affine_state_8616
         if not isinstance(state, dict):
@@ -1119,11 +1156,12 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
 
     def _update_condition_reg_affine_offset_8616(
         self,
-        reg_name: str,
-        delta: int,
+        reg_name: object,
+        delta: cython.longlong,
         *,
-        width_bits: int = 16,
+        width_bits: cython.longlong = 16,
     ) -> None:
+        current: object
         state = Instruction_ANY._inertia_condition_reg_affine_state_8616
         current = self._condition_reg_affine_state_8616(reg_name, width_bits=width_bits)
         if current is None or not isinstance(state, dict):
@@ -1133,6 +1171,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         state[reg_name.lower()] = (base, (int(offset) + int(delta)) & mask)
 
     def _restore_condition_reg_affine_snapshot_8616(self) -> None:
+        snapshot: object
         if not _affine_switch_conditions_enabled_8616():
             return
         snapshot = Instruction_ANY._inertia_condition_reg_affine_state_snapshots_8616.get(int(self.addr))
@@ -1141,6 +1180,10 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
 
     @staticmethod
     def _condition_target_addr_8616(target: object) -> int | None:
+        args: object
+        con: object
+        con_value: object
+        value: object
         if isinstance(target, int):
             return int(target)
         value = getattr(target, "value", None)
@@ -1157,6 +1200,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
 
     @staticmethod
     def _snapshot_condition_reg_affine_state_8616(target: object) -> None:
+        target_addr: object
         if not _affine_switch_conditions_enabled_8616():
             return
         target_addr = Instruction_ANY._condition_target_addr_8616(target)
@@ -1166,13 +1210,15 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         if isinstance(state, dict):
             Instruction_ANY._inertia_condition_reg_affine_state_snapshots_8616[target_addr] = dict(state)
 
-    def _clear_condition_index_reg_state_8616(self, reg_name: str) -> None:
+    def _clear_condition_index_reg_state_8616(self, reg_name: object) -> None:
         state = Instruction_ANY._inertia_condition_index_reg_state_8616
         if isinstance(state, dict):
             state.pop(str(reg_name).lower(), None)
 
-    def _clear_condition_reg_value_state_8616(self, reg_name: str) -> None:
+    def _clear_condition_reg_value_state_8616(self, reg_name: object) -> None:
         """Forget transient exact-value provenance after a register write."""
+        block_addr: object
+        parent: object
         state = Instruction_ANY._inertia_condition_reg_value_state_8616
         if not isinstance(state, dict):
             return
@@ -1189,6 +1235,10 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
 
     def _reset_condition_reg_value_state_at_block_entry_8616(self) -> None:
         """Discard unproven prior-block value and index provenance on entry."""
+        block_addr: object
+        emu: object
+        instruction_addr: object
+        key: object
         state = Instruction_ANY._inertia_condition_reg_value_state_8616
         instruction_addr = getattr(self, "addr", None)
         if not isinstance(instruction_addr, int):
@@ -1202,26 +1252,28 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         if (
             not isinstance(state, dict)
             or not isinstance(block_addr, int)
-            or instruction_addr != int(block_addr)
+            or operator.ne(instruction_addr, int(block_addr))
         ):
             return
         Instruction_ANY._inertia_condition_index_reg_state_8616.clear()
         stale_keys = tuple(
             key
-            for key in state
+            for key in iter(state)
             if isinstance(key, tuple)
             and len(key) == 2
-            and key[0] == int(block_addr)
+            and operator.eq(key[0], int(block_addr))
         )
         for key in stale_keys:
             state.pop(key, None)
 
     def _set_condition_reg_value_state_8616(
         self,
-        reg_name: str,
+        reg_name: object,
         value: IRValue | IRBinaryValue,
     ) -> None:
         """Bind one exact value to a register in the current basic block."""
+        block_addr: object
+        parent: object
         state = Instruction_ANY._inertia_condition_reg_value_state_8616
         block_addr = getattr(
             self.emu,
@@ -1239,10 +1291,14 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
 
     def _copy_condition_reg_value_state_8616(
         self,
-        dst_reg: str,
-        src_reg: str,
+        dst_reg: object,
+        src_reg: object,
     ) -> None:
         """Copy exact-value provenance between equal-width register views."""
+        block_addr: object
+        dst_key: object
+        source: object
+        src_key: object
         state = Instruction_ANY._inertia_condition_reg_value_state_8616
         if not isinstance(state, dict):
             return
@@ -1276,8 +1332,12 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         else:
             state.pop((int(block_addr), dst_key), None)
 
-    def _widen_condition_reg_value_state_8616(self, reg_name: str) -> None:
+    def _widen_condition_reg_value_state_8616(self, reg_name: object) -> None:
         """Preserve signed CBW/CWDE value conversion and original load width."""
+        block_addr: object
+        destination_size: object
+        extended: object
+        source: object
         state = Instruction_ANY._inertia_condition_reg_value_state_8616
         if not isinstance(state, dict):
             return
@@ -1309,12 +1369,15 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
 
     def _set_condition_reg_indexed_value_8616(
         self,
-        reg_name: str,
+        reg_name: object,
         mem_spec: Any,
         *,
-        width_bits: int,
+        width_bits: cython.longlong,
     ) -> None:
         """Record a load whose DS address is proven from stack index state."""
+        block_addr: object
+        parent: object
+        value: object
         normalized = str(reg_name).lower()
         parent = self._LOW8_PARENT_REGS.get(normalized, normalized)
         state = Instruction_ANY._inertia_condition_reg_value_state_8616
@@ -1374,10 +1437,12 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
 
     def _set_condition_reg_direct_byte_value_8616(
         self,
-        reg_name: str,
-        offset: int,
+        reg_name: object,
+        offset: cython.longlong,
     ) -> None:
         """Record a byte load from one exact DS offset."""
+        block_addr: object
+        parent: object
         normalized = str(reg_name).lower()
         parent = self._LOW8_PARENT_REGS.get(normalized)
         state = Instruction_ANY._inertia_condition_reg_value_state_8616
@@ -1398,7 +1463,8 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             next_addr=int(self.addr) + int(self.cs.size),
         )
 
-    def _copy_condition_index_reg_state_8616(self, dst_reg: str, src_reg: str) -> None:
+    def _copy_condition_index_reg_state_8616(self, dst_reg: object, src_reg: object) -> None:
+        src_state: object
         state = Instruction_ANY._inertia_condition_index_reg_state_8616
         if not isinstance(state, dict):
             return
@@ -1408,7 +1474,8 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             return
         state[str(dst_reg).lower()] = src_state
 
-    def _set_condition_index_reg_stack_state_8616(self, reg_name: str, mem_spec: Any) -> None:
+    def _set_condition_index_reg_stack_state_8616(self, reg_name: object, mem_spec: Any) -> None:
+        stack_value: object
         state = Instruction_ANY._inertia_condition_index_reg_state_8616
         stack_value = self._condition_stack_value_8616(mem_spec, width_bits=16)
         if not isinstance(state, dict) or stack_value is None:
@@ -1416,7 +1483,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         state[str(reg_name).lower()] = (stack_value, 0)
         self._set_condition_reg_value_state_8616(reg_name, stack_value)
 
-    def _set_condition_index_reg_direct_state_8616(self, reg_name: str, offset: int) -> None:
+    def _set_condition_index_reg_direct_state_8616(self, reg_name: object, offset: cython.longlong) -> None:
         state = Instruction_ANY._inertia_condition_index_reg_state_8616
         if not isinstance(state, dict):
             return
@@ -1426,9 +1493,10 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
 
     def _arithmetic_result_value_from_semantics_8616(
         self,
-        semantics: tuple[Any, ...],
-    ) -> tuple[str, IRBinaryValue] | None:
+        semantics: object,
+    ) -> object:
         """Build one exact register arithmetic value from block-local provenance."""
+        lhs: object
         if not semantics:
             return None
         kind = str(semantics[0])
@@ -1477,7 +1545,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
 
     def _set_condition_arithmetic_result_state_8616(
         self,
-        result: tuple[str, IRBinaryValue] | None,
+        result: object,
     ) -> None:
         """Retain exact arithmetic value and index provenance after a register write."""
         if result is None:
@@ -1490,6 +1558,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
 
     def _full_lift_written_condition_registers_8616(self) -> tuple[str, ...]:
         """Return Capstone-proven written register families tracked by ConditionIR."""
+        reg_id: object
         try:
             _read_ids, write_ids = self.cs.regs_access()
         except Exception:
@@ -1498,13 +1567,17 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         for reg_id in write_ids:
             name = str(self.cs.reg_name(int(reg_id))).lower()
             names.add(self._LOW8_PARENT_REGS.get(name, name))
-        return tuple(sorted(name for name in names if name in self._REG16_NAMES))
+        return tuple(sorted(name for name in iter(names) if name in self._REG16_NAMES))
 
     def _transfer_full_lift_condition_value_semantics_8616(self) -> None:
         """Update typed value provenance after normal Instr16 machine lifting."""
+        byte_copy: object
+        result: object
+        semantics: object
+        reg_name: object
         semantics = self.condition_value_semantics
-        byte_copy: tuple[str, str] | None = None
-        preserved_shift_reg: str | None = None
+        byte_copy = None
+        preserved_shift_reg: object = None
         if semantics is None:
             semantics, byte_copy, preserved_shift_reg = _infer_full_lift_semantics_from_operands_8616(self)
         result = self._arithmetic_result_value_from_semantics_8616(semantics) if semantics is not None else None
@@ -1531,7 +1604,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         if byte_copy is not None:
             self._copy_condition_reg_value_state_8616(*byte_copy)
 
-    def _shift_condition_index_reg_state_8616(self, reg_name: str, shift: int) -> bool:
+    def _shift_condition_index_reg_state_8616(self, reg_name: object, shift: cython.longlong) -> cython.bint:
         """Apply one proven left shift to an exact typed index register."""
         state = Instruction_ANY._inertia_condition_index_reg_state_8616
         current = state.get(str(reg_name).lower()) if isinstance(state, dict) else None
@@ -1548,11 +1621,12 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
 
     def _normalized_reg_imm_condition_operands_8616(
         self,
-        reg_name: str,
-        imm: int,
+        reg_name: object,
+        imm: cython.longlong,
         *,
-        width_bits: int = 16,
-    ) -> tuple[IRValue, IRValue] | None:
+        width_bits: cython.longlong = 16,
+    ) -> object:
+        current: object
         current = self._condition_reg_affine_state_8616(reg_name, width_bits=width_bits)
         if current is None:
             return None
@@ -1567,12 +1641,15 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         lhs: Any,
         rhs: Any,
         *,
-        width_bits: int = 16,
+        width_bits: cython.longlong = 16,
         normalized_lhs: Any | None = None,
         normalized_rhs: Any | None = None,
-        producer_semantics: tuple[Any, ...] | None = None,
+        producer_semantics: object = None,
     ) -> None:
         """Record CMP operands on the emulator for downstream JCC consumption."""
+        base: object
+        block_addr: object
+        typed_operands: object
         semantics = producer_semantics if producer_semantics is not None else getattr(self, "simple_semantics", None)
         if (
             normalized_lhs is None
@@ -1617,12 +1694,13 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         self,
         value: Any,
         *,
-        width_bits: int = 16,
+        width_bits: cython.longlong = 16,
         normalized_value: IRValue | IRBinaryValue | None = None,
-        bind_operand_at_jcc: bool = False,
-        producer_semantics: tuple[Any, ...] | None = None,
+        bind_operand_at_jcc: cython.bint = False,
+        producer_semantics: object = None,
     ) -> None:
         """Record TEST/self-test operands for downstream JCC consumption."""
+        block_addr: object
         block_addr = getattr(self.emu, "_inertia_current_block_addr", self.addr)
         source = ConditionSource(
             kind="test",
@@ -1644,10 +1722,12 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
 
     def _logical_result_value_from_semantics_8616(
         self,
-        op_name: str,
-        dst_reg: str,
+        op_name: object,
+        dst_reg: object,
     ) -> IRBinaryValue | None:
         """Build the typed value computed by a logical register ALU instruction."""
+        lhs: object
+        rhs: object
         semantics = self.simple_semantics or self.condition_value_semantics
         if not isinstance(semantics, tuple) or len(semantics) < 3:
             return None
@@ -1662,7 +1742,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         )
         if lhs is None:
             return None
-        rhs: IRValue | None = None
+        rhs = None
         operand = semantics[2]
         if kind.endswith("_reg16") and isinstance(operand, str):
             rhs = self._condition_unshifted_index_reg_value_8616(
@@ -1681,11 +1761,12 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
 
     def _record_logical_result_condition_source_8616(
         self,
-        op_name: str,
-        dst_reg: str,
+        op_name: object,
+        dst_reg: object,
         result: Any,
-    ) -> bool:
+    ) -> cython.bint:
         """Record a logical ALU result consumed immediately by a JCC."""
+        result_value: object
         if op_name not in {"xor", "and", "or"} or not self._next_instruction_is_simple_jcc():
             return False
         result_value = self._logical_result_value_from_semantics_8616(op_name, dst_reg)
@@ -1703,12 +1784,13 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
     def _typed_condition_from_consumed_ir_condition_8616(
         self,
         condition: IRCondition,
-        jcc_mnemonic: str,
+        jcc_mnemonic: object,
         *,
         block_addr: int | None,
         taken_target: int | None,
         fallthrough_target: int | None,
     ) -> ConditionIR | ConditionFailure | None:
+        producer_insn: object
         args = tuple(condition.args or ())
         op = str(condition.op)
         producer_insn = getattr(self, "_inertia_consumed_last_condition_addr_8616", None)
@@ -1744,12 +1826,13 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
 
     def record_loop_counter_condition_8616(
         self,
-        counter_name: str,
-        counter_size: int,
-        displacement: int,
-        instruction_size: int,
+        counter_name: object,
+        counter_size: cython.longlong,
+        displacement: cython.longlong,
+        instruction_size: cython.longlong,
     ) -> None:
         """Record the exact post-decrement counter condition owned by plain LOOP."""
+        block_addr: object
         block_addr = getattr(self.emu, "_inertia_current_block_addr", self.addr)
         counter_offset = int(self.arch.get_register_offset(counter_name))
         self._record_typed_condition_8616(
@@ -1779,6 +1862,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         )
 
     def _emit_simple_jcc(self, taken_cond: Any, target: Any) -> None:
+        block_addr: object
         # Before emitting, record the typed ConditionIR if source available
         Instruction_ANY._snapshot_condition_reg_affine_state_8616(target)
         target_addr = Instruction_ANY._condition_target_addr_8616(target)
@@ -1837,7 +1921,9 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
 
     def _record_typed_condition_8616(self, cond: ConditionIR | ConditionFailure) -> None:
         """Bind current conditional bytes, then retain one coherent fact in both caches."""
-        if isinstance(cond, ConditionIR) and cond.src_insn == self.addr:
+        block_addr: object
+        log: object
+        if isinstance(cond, ConditionIR) and operator.eq(cond.src_insn, self.addr):
             cond = attach_relative_condition_edge(cond, self.addr, bytes(self.cs.bytes))
         log = getattr(self.emu, "_inertia_typed_conditions", None)
         if not isinstance(log, list):
@@ -1852,22 +1938,25 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             condition_key = condition_sort_key_8616(cond)
             if not any(
                 isinstance(existing, ConditionIR)
-                and condition_sort_key_8616(existing) == condition_key
-                for existing in block_conditions
+                and operator.eq(condition_sort_key_8616(existing), condition_key)
+                for existing in iter(block_conditions)
             ):
                 block_conditions.append(cond)
         elif not any(
             isinstance(existing, ConditionFailure) and existing == cond
-            for existing in block_conditions
+            for existing in iter(block_conditions)
         ):
             block_conditions.append(cond)
 
     def _lift_simple_incdec_reg16_8616(
         self,
-        kind: str,
-        semantics: tuple[Any, ...],
-    ) -> bool:
+        kind: object,
+        semantics: object,
+    ) -> cython.bint:
         """Lift one simple INC/DEC and retain exact evidence for a following JCC."""
+        next_semantics: object
+        normalized_operands: object
+        proven_value: object
         if kind not in {"inc_reg16", "dec_reg16"}:
             return False
         self.status_flag_dead_write_mask_8616(INCDEC_STATUS_FLAG_WRITES_8616)
@@ -1974,12 +2063,12 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         """Execute the parsed instruction against the emulator-backed lifter facade."""
         _compute_result_8616(self)
 
-    def disassemble(self) -> tuple[int, str, list[str]]:
+    def disassemble(self) -> tuple[cython.longlong, str, list[str]]:
         """Return the pyvex disassembly tuple for the current instruction."""
 
-        return self.start, self.cs.insn_name(), [str(i) for i in self.cs.operands]
+        return self.start, self.cs.insn_name(), [str(i) for i in iter(self.cs.operands)]
 
-    def ends_block(self) -> bool:
+    def ends_block(self) -> cython.bint:
         """Return whether this instruction terminates the current lifted block."""
 
         if self.cs.mnemonic == "int":
@@ -1987,15 +2076,15 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         return self.cs.mnemonic in self._BLOCK_TERMINATORS
 
 
-    def _match_simple_binary_semantics_8616(self, ops: Any) -> tuple[Any, ...] | None:
+    def _match_simple_binary_semantics_8616(self, ops: Any) -> object:
         """Bound facade over the module-level binary-semantics matcher."""
         return _match_simple_binary_semantics_8616(self, ops)
 
-    def _lift_simple_cmp_8616(self, kind: str) -> bool:
+    def _lift_simple_cmp_8616(self, kind: object) -> cython.bint:
         """Bound facade so tests may stub the CMP lift on instances."""
         return _lift_simple_cmp_8616(self, kind)
 
-    def _lift_simple_jcc_8616(self, kind: str) -> bool:
+    def _lift_simple_jcc_8616(self, kind: object) -> cython.bint:
         """Bound facade so tests may stub the JCC lift on instances."""
         return _lift_simple_jcc_8616(self, kind)
 
@@ -2012,21 +2101,24 @@ update_abstractmethods(Instruction_ANY)
 # Module-level lift helpers (self passed explicitly for namespace test fakes).
 # ---------------------------------------------------------------------------
 
-def _disasm_once_8616(self: Instruction_ANY, raw: bytes) -> list[Any]:
+@cython.ccall
+def _disasm_once_8616(self: Instruction_ANY, raw: object) -> list[Any]:
     """Disassemble one insn, translating capstone timeout into ParseError."""
     try:
         return list(self.arch.capstone.disasm(raw, self.addr, 1))
     except AnalysisTimeout as ex:
         raise ParseError("Instruction disassembly timed out") from ex
 
-def _disasm_sanitized_pop_8616(self: Instruction_ANY, raw: bytes, prefix_index: int) -> list[Any]:
+@cython.ccall
+def _disasm_sanitized_pop_8616(self: Instruction_ANY, raw: object, prefix_index: cython.longlong) -> object:
     """Retry disassembly with the invalid 0x8F pop extension masked out."""
     sanitized = bytearray(raw)
     sanitized[prefix_index + 1] &= 0xC7
     return _disasm_once_8616(self, bytes(sanitized))
 
+@cython.ccall
 @cython.locals(strip_len=cython.int)
-def _disasm_stripped_prefix_8616(self: Instruction_ANY, raw: bytes) -> tuple[list[Any], int]:
+def _disasm_stripped_prefix_8616(self: Instruction_ANY, raw: object) -> tuple[list[Any], cython.longlong]:
     """Strip leading prefix bytes until capstone decodes the opcode."""
     # Capstone rejects several LOCK-prefixed forms that the real 286 still
     # executes, and also segment-override + LOCK combinations.
@@ -2038,7 +2130,8 @@ def _disasm_stripped_prefix_8616(self: Instruction_ANY, raw: bytes) -> tuple[lis
             return instr, strip_len
     return [], 0
 
-def _commit_simple_parse_8616(self: Instruction_ANY, bitstrm: Any, cs_prefix_len: int) -> dict[str, str]:
+@cython.ccall
+def _commit_simple_parse_8616(self: Instruction_ANY, bitstrm: Any, cs_prefix_len: cython.longlong) -> dict[str, str]:
     """Commit a simple-semantics parse and stop at the capstone insn size."""
     bitstrm.bytepos = self.start + cs_prefix_len + self.cs.size
     self.bitwidth = (cs_prefix_len + self.cs.size) * 8
@@ -2046,7 +2139,8 @@ def _commit_simple_parse_8616(self: Instruction_ANY, bitstrm: Any, cs_prefix_len
     self.chsz_op = False
     return {"x": "00000000"}
 
-def _parse_full_insn_8616(self: Instruction_ANY, bitstrm: Any, cs_prefix_len: int) -> dict[str, str]:
+@cython.ccall
+def _parse_full_insn_8616(self: Instruction_ANY, bitstrm: Any, cs_prefix_len: cython.longlong) -> dict[str, str]:
     """Run the full 16/32-bit instruction parser and commit its size."""
     self.instr.size = cs_prefix_len + self.cs.size
     self.is_mode32 = self.emu.is_mode32()
@@ -2078,7 +2172,7 @@ def _parse_full_insn_8616(self: Instruction_ANY, bitstrm: Any, cs_prefix_len: in
     wide_memory_operand=cython.bint,
     dead_flags_wide_register_semantics=cython.bint,
 )
-def _parse_insn_8616(self: Instruction_ANY, bitstrm: Any) -> dict[str, str]:
+def _parse_insn_8616(self: Instruction_ANY, bitstrm: Any) -> object:
     """Decode one instruction and choose simple vs full semantics."""
     self.start = bitstrm.bytepos
     raw = bytes(bitstrm[self.start * 8 : self.start * 8 + 15 * 8])
@@ -2111,7 +2205,7 @@ def _parse_insn_8616(self: Instruction_ANY, bitstrm: Any) -> dict[str, str]:
         width_override |= raw[prefix_index] in {0x66, 0x67}
         segment_override |= raw[prefix_index] in {0x26, 0x2E, 0x36, 0x3E, 0x64, 0x65}
         prefix_index += 1
-    wide_memory_operand = any(operand.type == 3 and operand.size > 1 for operand in self.cs.operands)
+    wide_memory_operand = any(operand.type == 3 and operand.size > 1 for operand in iter(self.cs.operands))
     self.instr.invalid_lock = capstone_rejected_full and 0xF0 in raw[:prefix_index]
     self.instr.invalid_opcode_extension = invalid_pop_extension
     self.condition_value_semantics = _full_lift_semantics_8616(self, 
@@ -2132,13 +2226,15 @@ def _parse_insn_8616(self: Instruction_ANY, bitstrm: Any) -> dict[str, str]:
         return _commit_simple_parse_8616(self, bitstrm, cs_prefix_len)
     return _parse_full_insn_8616(self, bitstrm, cs_prefix_len)
 
+@cython.ccall
 def _match_ret_8616(self: Instruction_ANY, ops: Any) -> tuple[Any, ...]:
     """Match ``ret``/``ret imm16`` simple semantics."""
     if len(ops) == 1 and ops[0].type == 2:
         return ("ret_imm16", ops[0].imm & 0xFFFF)
     return ("ret",)
 
-def _match_cbw_8616(self: Instruction_ANY, ops: Any) -> tuple[Any, ...] | None:
+@cython.ccall
+def _match_cbw_8616(self: Instruction_ANY, ops: Any) -> object:
     """Match ``cbw``/``cwde`` sign-extension semantics by prefix bytes."""
     if ops:
         return None
@@ -2147,13 +2243,14 @@ def _match_cbw_8616(self: Instruction_ANY, ops: Any) -> tuple[Any, ...] | None:
         return ("sign_extend_ax_eax",)
     return ("sign_extend_al_ax",)
 
-def _match_enter_8616(self: Instruction_ANY, ops: Any) -> tuple[Any, ...] | None:
+def _match_enter_8616(self: Instruction_ANY, ops: Any) -> object:
     """Match ``enter imm16, imm8`` simple semantics."""
-    if len(ops) == 2 and all(op.type == 2 for op in ops):
+    if len(ops) == 2 and all(op.type == 2 for op in iter(ops)):
         return ("enter", ops[0].imm & 0xFFFF, ops[1].imm & 0xFF)
     return None
 
-def _match_push_pop_8616(self: Instruction_ANY, ops: Any) -> tuple[Any, ...] | None:
+@cython.ccall
+def _match_push_pop_8616(self: Instruction_ANY, ops: Any) -> object:
     """Match ``push``/``pop`` reg16/imm16/mem16 simple semantics."""
     if len(ops) != 1:
         return None
@@ -2167,7 +2264,8 @@ def _match_push_pop_8616(self: Instruction_ANY, ops: Any) -> tuple[Any, ...] | N
         return ("push_mem16", mem)
     return None
 
-def _match_call_8616(self: Instruction_ANY, ops: Any) -> tuple[Any, ...] | None:
+@cython.ccall
+def _match_call_8616(self: Instruction_ANY, ops: Any) -> object:
     """Match near ``call imm``/``call mem16`` simple semantics."""
     if len(ops) != 1:
         return None
@@ -2178,7 +2276,8 @@ def _match_call_8616(self: Instruction_ANY, ops: Any) -> tuple[Any, ...] | None:
         return ("call_mem16", mem)
     return None
 
-def _match_incdec_8616(self: Instruction_ANY, ops: Any) -> tuple[Any, ...] | None:
+@cython.ccall
+def _match_incdec_8616(self: Instruction_ANY, ops: Any) -> object:
     """Match ``inc``/``dec reg16`` when a condition-forming pattern follows."""
     if len(ops) != 1:
         return None
@@ -2198,7 +2297,8 @@ def _match_incdec_8616(self: Instruction_ANY, ops: Any) -> tuple[Any, ...] | Non
         return (f"{mnemonic}_reg16", reg_name)
     return None
 
-def _cmp_lift_operand_value_8616(self: Instruction_ANY, role: str, operand: Any) -> Any:
+@cython.ccall
+def _cmp_lift_operand_value_8616(self: Instruction_ANY, role: object, operand: Any) -> Any:
     """Materialize one CMP operand value by its operand-role tag."""
     if role == "mem16":
         return self._load_mem16(operand)
@@ -2218,8 +2318,12 @@ def _cmp_lift_operand_value_8616(self: Instruction_ANY, role: str, operand: Any)
         return self._const16(operand)
     return self.constant(operand, Type.int_8)
 
-def _flag_jcc_conditions_8616(self: Instruction_ANY) -> dict[str, Any]:
+@cython.ccall
+def _flag_jcc_conditions_8616(self: Instruction_ANY) -> object:
     """Build the flag-expression for every simple JCC mnemonic."""
+    kind: object
+    kinds: object
+    value: object
     zf = self._flag_is_set(6)
     cf = self._flag_is_set(0)
     sf = self._flag_is_set(7)
@@ -2254,7 +2358,8 @@ def _flag_jcc_conditions_8616(self: Instruction_ANY) -> dict[str, Any]:
             conditions[kind] = value
     return conditions
 
-def _consume_last_condition_8616(self: Instruction_ANY, last_condition: Any, prev_emu: Any, prev: Any) -> None:
+@cython.ccall
+def _consume_last_condition_8616(self: Instruction_ANY, last_condition: Any, prev_emu: object, prev: Any) -> None:
     """Record that this JCC consumed the previous instruction's last condition."""
     if not (isinstance(last_condition, IRCondition) and prev_emu is not None):
         return
@@ -2267,7 +2372,8 @@ def _consume_last_condition_8616(self: Instruction_ANY, last_condition: Any, pre
         with contextlib.suppress(Exception):
             prev_emu.clear_last_condition()
 
-def _prev_cmp_semantics_8616(self: Instruction_ANY, prev: Any) -> tuple[Any, ...] | None:
+@cython.ccall
+def _prev_cmp_semantics_8616(self: Instruction_ANY, prev: object) -> object:
     """Read CMP semantics from the actual preceding instruction in this IRSB.
 
     Pending transfer evidence is keyed only by address and can belong to a
@@ -2278,8 +2384,10 @@ def _prev_cmp_semantics_8616(self: Instruction_ANY, prev: Any) -> tuple[Any, ...
     prev_semantics = getattr(prev, "simple_semantics", None) if prev is not None else None
     return cast(tuple[Any, ...] | None, prev_semantics)
 
-def _cmp_result_jcc_condition_8616(self: Instruction_ANY, kind: str, lhs: Any, rhs: Any) -> Any | None:
+def _cmp_result_jcc_condition_8616(self: Instruction_ANY, kind: object, lhs: Any, rhs: Any) -> Any | None:
     """Build the per-kind comparison expression over CMP operands."""
+    build: object
+    kinds: object
     groups: tuple[tuple[Any, Callable[[], Any]], ...] = (
         (JCC_EQ_MNEMONICS_8616, lambda: lhs == rhs),
         (JCC_NE_MNEMONICS_8616, lambda: lhs != rhs),
@@ -2297,8 +2405,13 @@ def _cmp_result_jcc_condition_8616(self: Instruction_ANY, kind: str, lhs: Any, r
             return build()
     return None
 
-def _resolve_jcc_condition_8616(self: Instruction_ANY, kind: str, last_condition: Any, prev: Any) -> Any | None:
+@cython.ccall
+def _resolve_jcc_condition_8616(self: Instruction_ANY, kind: object, last_condition: Any, prev: Any) -> Any | None:
     """Resolve a direct JCC predicate from last-condition, result, or CMP evidence."""
+    branch_cond: object
+    operands: object
+    prev_semantics: object
+    result_condition: object
     if isinstance(last_condition, IRCondition):
         branch_cond = _direct_jcc_condition_from_last_condition_8616(cast(Any, self), kind, last_condition)
         if branch_cond is not None:
@@ -2317,8 +2430,10 @@ def _resolve_jcc_condition_8616(self: Instruction_ANY, kind: str, last_condition
     lhs, rhs = operands
     return _cmp_result_jcc_condition_8616(self, kind, lhs, rhs)
 
-def _record_sub_reg_imm_condition_8616(self: Instruction_ANY, dst: Any, src: Any, dst_reg: str, imm: Any) -> None:
+@cython.ccall
+def _record_sub_reg_imm_condition_8616(self: Instruction_ANY, dst: Any, src: Any, dst_reg: object, imm: Any) -> None:
     """Record CMP-style operands for ``sub reg16, imm`` when a JCC follows."""
+    normalized_operands: object
     if not self._next_instruction_is_simple_jcc():
         return
     normalized_operands = (
@@ -2337,38 +2452,55 @@ def _record_sub_reg_imm_condition_8616(self: Instruction_ANY, dst: Any, src: Any
         normalized_rhs=normalized_operands[1] if normalized_operands is not None else None,
     )
 
-def _cond_cmp_reg_reg16_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> tuple[Any, Any] | None:
+@cython.ccall
+def _cond_cmp_reg_reg16_8616(self: Instruction_ANY, semantics: object) -> object:
+    lhs: object
+    rhs: object
     _, lhs_reg, rhs_reg = semantics
     lhs = _cond_reg_chain_8616(self, lhs_reg, width_bits=16, proven=True, unshifted=True)
     rhs = _cond_reg_chain_8616(self, rhs_reg, width_bits=16, proven=True, unshifted=True)
     return (lhs, rhs) if lhs is not None and rhs is not None else None
 
-def _cond_cmp_reg_imm16_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> tuple[Any, Any] | None:
+@cython.ccall
+def _cond_cmp_reg_imm16_8616(self: Instruction_ANY, semantics: object) -> object:
+    lhs: object
     _, lhs_reg, imm = semantics
     lhs = _cond_reg_chain_8616(self, lhs_reg, width_bits=16, proven=True)
     rhs = self._condition_const_value_8616(imm, width_bits=16)
     return (lhs, rhs) if lhs is not None else None
 
-def _cond_cmp_reg_mem16_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> tuple[Any, Any] | None:
+@cython.ccall
+def _cond_cmp_reg_mem16_8616(self: Instruction_ANY, semantics: object) -> object:
+    lhs: object
+    rhs: object
     _, lhs_reg, mem_spec = semantics
     lhs = _cond_reg_chain_8616(self, lhs_reg, width_bits=16, proven=True)
     rhs = self._condition_stack_value_8616(mem_spec, width_bits=16, memory_access_insn=self.addr)
     return (lhs, rhs) if lhs is not None and rhs is not None else None
 
-def _cond_cmp_reg_abs16_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> tuple[Any, Any] | None:
+@cython.ccall
+def _cond_cmp_reg_abs16_8616(self: Instruction_ANY, semantics: object) -> object:
+    lhs: object
     _, lhs_reg, offset = semantics
     lhs = self._condition_reg_value_8616(lhs_reg, width_bits=16)
     rhs = self._condition_direct_ds_value_8616(offset, width_bits=16)
     return (lhs, rhs) if lhs is not None else None
 
-def _cond_cmp_mem_reg16_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> tuple[Any, Any] | None:
+@cython.ccall
+def _cond_cmp_mem_reg16_8616(self: Instruction_ANY, semantics: object) -> object:
+    lhs: object
+    rhs: object
     _, mem_spec, rhs_reg = semantics
     lhs = self._condition_stack_value_8616(mem_spec, width_bits=16, memory_access_insn=self.addr)
     rhs = _cond_reg_chain_8616(self, rhs_reg, width_bits=16, unshifted=True)
     return (lhs, rhs) if lhs is not None and rhs is not None else None
 
+@cython.ccall
 def _cond_mem_imm_indexed_lhs_8616(self: Instruction_ANY, mem_spec: Any) -> Any:
     """Build the indexed DS lhs for ``cmp [bp+..], imm`` when stack lookup fails."""
+    index_state: object
+    lhs: object
+    register_index: object
     if not (isinstance(mem_spec, tuple) and mem_spec):
         return None
     base_reg = str(mem_spec[0]).lower()
@@ -2394,7 +2526,9 @@ def _cond_mem_imm_indexed_lhs_8616(self: Instruction_ANY, mem_spec: Any) -> Any:
             )
     return lhs
 
-def _cond_cmp_mem_imm16_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> tuple[Any, Any] | None:
+@cython.ccall
+def _cond_cmp_mem_imm16_8616(self: Instruction_ANY, semantics: object) -> object:
+    lhs: object
     _, mem_spec, imm = semantics
     lhs = self._condition_stack_value_8616(mem_spec, width_bits=16, memory_access_insn=self.addr)
     if lhs is None:
@@ -2402,46 +2536,59 @@ def _cond_cmp_mem_imm16_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) 
     rhs = self._condition_const_value_8616(imm, width_bits=16)
     return (lhs, rhs) if lhs is not None else None
 
-def _cond_cmp_abs_reg16_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> tuple[Any, Any] | None:
+@cython.ccall
+def _cond_cmp_abs_reg16_8616(self: Instruction_ANY, semantics: object) -> object:
+    rhs: object
     _, offset, rhs_reg = semantics
     lhs = self._condition_direct_ds_value_8616(offset, width_bits=16)
     rhs = _cond_reg_chain_8616(self, rhs_reg, width_bits=16, unshifted=True)
     return (lhs, rhs) if rhs is not None else None
 
-def _cond_cmp_abs_imm16_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> tuple[Any, Any] | None:
+@cython.ccall
+def _cond_cmp_abs_imm16_8616(self: Instruction_ANY, semantics: object) -> object:
     _, offset, imm = semantics
     return (
         self._condition_direct_ds_value_8616(offset, width_bits=16),
         self._condition_const_value_8616(imm, width_bits=16),
     )
 
-def _cond_cmp_reg_abs8_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> tuple[Any, Any] | None:
+@cython.ccall
+def _cond_cmp_reg_abs8_8616(self: Instruction_ANY, semantics: object) -> object:
+    lhs: object
     _, lhs_reg, offset = semantics
     lhs = self._condition_reg_value_8616(lhs_reg, width_bits=8)
     rhs = self._condition_direct_ds_value_8616(offset, width_bits=8)
     return (lhs, rhs) if lhs is not None else None
 
-def _cond_cmp_reg_imm8_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> tuple[Any, Any] | None:
+@cython.ccall
+def _cond_cmp_reg_imm8_8616(self: Instruction_ANY, semantics: object) -> object:
+    lhs: object
     _, lhs_reg, imm = semantics
     lhs = _cond_reg_chain_8616(self, lhs_reg, width_bits=8, proven=True)
     rhs = self._condition_const_value_8616(imm, width_bits=8)
     return (lhs, rhs) if lhs is not None else None
 
-def _cond_cmp_abs_reg8_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> tuple[Any, Any] | None:
+@cython.ccall
+def _cond_cmp_abs_reg8_8616(self: Instruction_ANY, semantics: object) -> object:
+    rhs: object
     _, offset, rhs_reg = semantics
     lhs = self._condition_direct_ds_value_8616(offset, width_bits=8)
     rhs = self._condition_reg_value_8616(rhs_reg, width_bits=8)
     return (lhs, rhs) if rhs is not None else None
 
-def _cond_cmp_abs_imm8_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> tuple[Any, Any] | None:
+@cython.ccall
+def _cond_cmp_abs_imm8_8616(self: Instruction_ANY, semantics: object) -> object:
     _, offset, imm = semantics
     return (
         self._condition_direct_ds_value_8616(offset, width_bits=8),
         self._condition_const_value_8616(imm, width_bits=8),
     )
 
-def _cond_indexed_ds_retry_8616(self: Instruction_ANY, mem_spec: Any, index_state: Any, width_bits: int, addr: Any) -> Any:
+@cython.ccall
+def _cond_indexed_ds_retry_8616(self: Instruction_ANY, mem_spec: Any, index_state: Any, width_bits: cython.longlong, addr: Any) -> Any:
     """Retry an indexed DS value with a fresh zero-shift register index."""
+    indexed: object
+    register_index: object
     indexed = Instruction_ANY._condition_indexed_ds_value_8616(
         mem_spec,
         index_state,
@@ -2460,7 +2607,11 @@ def _cond_indexed_ds_retry_8616(self: Instruction_ANY, mem_spec: Any, index_stat
             )
     return indexed
 
-def _cond_cmp_indexed8_8616(self: Instruction_ANY, kind: str, semantics: tuple[Any, ...]) -> tuple[Any, Any] | None:
+@cython.ccall
+def _cond_cmp_indexed8_8616(self: Instruction_ANY, kind: object, semantics: object) -> object:
+    index_state: object
+    indexed: object
+    register: object
     _, first, second = semantics
     mem_spec = first if kind == "cmp_indexed_abs_reg8" else second
     reg_name = second if kind == "cmp_indexed_abs_reg8" else first
@@ -2477,7 +2628,11 @@ def _cond_cmp_indexed8_8616(self: Instruction_ANY, kind: str, semantics: tuple[A
         return None
     return (indexed, register) if kind == "cmp_indexed_abs_reg8" else (register, indexed)
 
-def _cond_cmp_indexed16_8616(self: Instruction_ANY, kind: str, semantics: tuple[Any, ...]) -> tuple[Any, Any] | None:
+@cython.ccall
+def _cond_cmp_indexed16_8616(self: Instruction_ANY, kind: object, semantics: object) -> object:
+    index_state: object
+    indexed: object
+    register: object
     _, first, second = semantics
     mem_spec = first if kind == "cmp_indexed_abs_reg16" else second
     reg_name = second if kind == "cmp_indexed_abs_reg16" else first
@@ -2489,7 +2644,10 @@ def _cond_cmp_indexed16_8616(self: Instruction_ANY, kind: str, semantics: tuple[
         return None
     return (indexed, register) if kind == "cmp_indexed_abs_reg16" else (register, indexed)
 
-def _cond_sub_reg_operands_8616(self: Instruction_ANY, kind: str, semantics: tuple[Any, ...]) -> tuple[Any, Any] | None:
+@cython.ccall
+def _cond_sub_reg_operands_8616(self: Instruction_ANY, kind: object, semantics: object) -> object:
+    lhs: object
+    rhs: object
     _, lhs_reg, rhs_operand = semantics
     lhs = self._condition_reg_value_8616(lhs_reg, width_bits=16)
     if kind == "sub_reg_reg16":
@@ -2500,7 +2658,9 @@ def _cond_sub_reg_operands_8616(self: Instruction_ANY, kind: str, semantics: tup
         rhs = self._condition_const_value_8616(rhs_operand, width_bits=16)
     return (lhs, rhs) if lhs is not None and rhs is not None else None
 
-def _cond_incdec_operands_8616(self: Instruction_ANY, kind: str, semantics: tuple[Any, ...]) -> tuple[Any, Any] | None:
+@cython.ccall
+def _cond_incdec_operands_8616(self: Instruction_ANY, kind: object, semantics: object) -> object:
+    lhs: object
     _, lhs_reg, operation_count = semantics
     lhs = _cond_reg_chain_8616(self, lhs_reg, width_bits=16, proven=True)
     boundary = (
@@ -2511,7 +2671,8 @@ def _cond_incdec_operands_8616(self: Instruction_ANY, kind: str, semantics: tupl
     rhs = self._condition_const_value_8616(boundary, width_bits=16)
     return (lhs, rhs) if lhs is not None else None
 
-def _arithmetic_rhs_value_8616(self: Instruction_ANY, kind: str, operand: Any) -> IRValue | IRBinaryValue | None:
+@cython.ccall
+def _arithmetic_rhs_value_8616(self: Instruction_ANY, kind: object, operand: Any) -> IRValue | IRBinaryValue | None:
     """Resolve the rhs typed value for one register arithmetic semantics."""
     if kind in {"add_reg_mem16", "sub_reg_mem16"}:
         return self._condition_stack_value_8616(operand, width_bits=16)
@@ -2531,11 +2692,16 @@ def _arithmetic_rhs_value_8616(self: Instruction_ANY, kind: str, operand: Any) -
         )
     return None
 
+@cython.ccall
 def _infer_full_lift_semantics_from_operands_8616(self: Instruction_ANY) -> tuple[tuple[Any, ...] | None, tuple[str, str] | None, str | None]:
     """Recover byte-copy/incdec/shift provenance when no value semantics matched."""
-    byte_copy: tuple[str, str] | None = None
-    preserved_shift_reg: str | None = None
-    semantics: tuple[Any, ...] | None = None
+    dst_reg8: object
+    reg_name: object
+    shift: object
+    src_reg8: object
+    byte_copy: object = None
+    preserved_shift_reg: object = None
+    semantics: object = None
     operands = tuple(self.cs.operands)
     if self.cs.mnemonic == "mov" and len(operands) == 2:
         dst_reg8 = self._reg8_name(operands[0])
@@ -2562,8 +2728,10 @@ def _infer_full_lift_semantics_from_operands_8616(self: Instruction_ANY) -> tupl
             preserved_shift_reg = reg_name
     return semantics, byte_copy, preserved_shift_reg
 
-def _transfer_cmp_semantics_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> None:
+@cython.ccall
+def _transfer_cmp_semantics_8616(self: Instruction_ANY, semantics: object) -> None:
     """Publish typed CMP operands as normalized condition evidence."""
+    typed_operands: object
     typed_operands = self._condition_operands_from_cmp_semantics_8616(semantics)
     if typed_operands is not None:
         self._record_cmp_condition_source(
@@ -2573,8 +2741,10 @@ def _transfer_cmp_semantics_8616(self: Instruction_ANY, semantics: tuple[Any, ..
             producer_semantics=semantics,
         )
 
-def _transfer_test_semantics_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> None:
+@cython.ccall
+def _transfer_test_semantics_8616(self: Instruction_ANY, semantics: object) -> None:
     """Publish typed TEST masked-value evidence for full-lift operands."""
+    typed_value: object
     kind, location, immediate = cast(tuple[str, object, int], semantics)
     width_bits = 8 if kind.endswith("imm8") else 16
     typed_value = (
@@ -2606,7 +2776,8 @@ def _transfer_test_semantics_8616(self: Instruction_ANY, semantics: tuple[Any, .
             producer_semantics=semantics,
         )
 
-def _transfer_mov_index_state_8616(self: Instruction_ANY, semantics: tuple[Any, ...] | None) -> None:
+@cython.ccall
+def _transfer_mov_index_state_8616(self: Instruction_ANY, semantics: object) -> None:
     """Seed index-register state for full-lift mov load semantics."""
     if semantics is None:
         return
@@ -2628,17 +2799,21 @@ def _transfer_mov_index_state_8616(self: Instruction_ANY, semantics: tuple[Any, 
             width_bits=16,
         )
 
+@cython.ccall
 def _jcc_fallthrough_addr_8616(self: Instruction_ANY) -> int | None:
     """Compute the not-taken fallthrough address for this JCC."""
     with contextlib.suppress(Exception):
         fallthrough_size = int(getattr(getattr(self, "cs", None), "size", 0) or 2)
         candidate_fallthrough = int(self.addr) + fallthrough_size
-        if candidate_fallthrough != int(self.addr):
+        if operator.ne(candidate_fallthrough, int(self.addr)):
             return candidate_fallthrough
     return None
 
+@cython.ccall
 def _jcc_condition_source_8616(self: Instruction_ANY) -> Any:
     """Recover the pending ConditionSource for this JCC."""
+    prev_emu: object
+    source: object
     source = getattr(self.emu, "_inertia_last_condition_source", None)
     if not isinstance(source, ConditionSource) and getattr(self, "_past_instructions", None):
         prev_emu = getattr(self._past_instructions[-1], "emu", None)
@@ -2647,8 +2822,10 @@ def _jcc_condition_source_8616(self: Instruction_ANY) -> Any:
         source = Instruction_ANY._inertia_pending_condition_sources_by_addr.pop(int(self.addr), None)
     return source
 
+@cython.ccall
 def _normalized_jcc_source_operands_8616(self: Instruction_ANY, source: ConditionSource) -> tuple[Any, Any]:
     """Prefer typed/normalized operands over the raw recorded source operands."""
+    typed_cmp_operands: object
     typed_cmp_operands = self._condition_operands_from_cmp_semantics_8616(source.semantics)
     lhs = source.lhs
     rhs = source.rhs
@@ -2664,6 +2841,7 @@ def _normalized_jcc_source_operands_8616(self: Instruction_ANY, source: Conditio
         source.lhs = lhs
     return lhs, rhs
 
+@cython.ccall
 def _lift_sign_extend_al_ax_8616(self: Instruction_ANY) -> None:
     self.put(
         self.get("al", Type.int_8).widen_signed(Type.int_16),
@@ -2671,6 +2849,7 @@ def _lift_sign_extend_al_ax_8616(self: Instruction_ANY) -> None:
     )
     self._widen_condition_reg_value_state_8616("ax")
 
+@cython.ccall
 def _lift_sign_extend_ax_eax_8616(self: Instruction_ANY) -> None:
     self.put(
         self.get("ax", Type.int_16).widen_signed(Type.int_32),
@@ -2678,7 +2857,9 @@ def _lift_sign_extend_ax_eax_8616(self: Instruction_ANY) -> None:
     )
     self._widen_condition_reg_value_state_8616("eax")
 
-def _lift_ror_dead_flags_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> None:
+@cython.ccall
+def _lift_ror_dead_flags_8616(self: Instruction_ANY, semantics: object) -> None:
+    value: object
     _, reg_name, count = semantics
     value = self.get(reg_name, Type.int_32)
     if count:
@@ -2689,7 +2870,8 @@ def _lift_ror_dead_flags_8616(self: Instruction_ANY, semantics: tuple[Any, ...])
     self._clear_condition_index_reg_state_8616(reg_name)
     self._clear_condition_reg_value_state_8616(reg_name)
 
-def _lift_push_reg16_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> None:
+@cython.ccall
+def _lift_push_reg16_8616(self: Instruction_ANY, semantics: object) -> None:
     _, reg_name = semantics
     value = self._get_reg16(reg_name)
     sp = self._get_reg16("sp") - self._const16(2)
@@ -2698,19 +2880,22 @@ def _lift_push_reg16_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> 
         value = sp + self._const16(2)
     self._stack_store16(sp, value, offset=-2)
 
-def _lift_push_imm16_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> None:
+@cython.ccall
+def _lift_push_imm16_8616(self: Instruction_ANY, semantics: object) -> None:
     _, imm = semantics
     sp = self._get_reg16("sp") - self._const16(2)
     self.put(sp, "sp")
     self._stack_store16(sp, self._const16(imm), offset=-2)
 
-def _lift_push_mem16_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> None:
+@cython.ccall
+def _lift_push_mem16_8616(self: Instruction_ANY, semantics: object) -> None:
     _, mem_spec = semantics
     sp = self._get_reg16("sp") - self._const16(2)
     self.put(sp, "sp")
     self._stack_store16(sp, self._load_mem16(mem_spec), offset=-2)
 
-def _lift_pop_reg16_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> None:
+@cython.ccall
+def _lift_pop_reg16_8616(self: Instruction_ANY, semantics: object) -> None:
     _, reg_name = semantics
     sp = self._get_reg16("sp")
     value = self._stack_load16(sp, offset=0)
@@ -2722,6 +2907,7 @@ def _lift_pop_reg16_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> N
         self.put(next_sp, "sp")
     self._clear_condition_reg_value_state_8616(reg_name)
 
+@cython.ccall
 def _saved_call_ip_8616(self: Instruction_ANY) -> VexValue:
     """Convert the decoded instruction's next address to an architectural IP."""
     # The typed arithmetic owner also supports concrete emulator values; this
@@ -2733,7 +2919,8 @@ def _saved_call_ip_8616(self: Instruction_ANY) -> VexValue:
     ))
 
 
-def _lift_call_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> None:
+@cython.ccall
+def _lift_call_8616(self: Instruction_ANY, semantics: object) -> None:
     """Retain the native near-call frame and selector-relative target.
 
     Recognizing a helper's bytes does not prove the selected runtime target,
@@ -2757,7 +2944,8 @@ def _lift_call_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> None:
     )
     self.jump(None, cast(VexValue, destination), JumpKind.Call)
 
-def _lift_call_mem16_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> None:
+@cython.ccall
+def _lift_call_mem16_8616(self: Instruction_ANY, semantics: object) -> None:
     """Preserve the architectural frame for an indirect near word call."""
     _, mem_spec = semantics
     target = self._load_mem16(mem_spec)
@@ -2767,7 +2955,8 @@ def _lift_call_mem16_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> 
     self._stack_store16(sp, ret_addr, offset=-2)
     self.jump(None, target, JumpKind.Call)
 
-def _lift_enter_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> None:
+@cython.ccall
+def _lift_enter_8616(self: Instruction_ANY, semantics: object) -> None:
     _, frame_size, nesting = semantics
     nesting &= 0x1F
     old_bp = self._get_reg16("bp")
@@ -2788,13 +2977,15 @@ def _lift_enter_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> None:
     self.put(frame_temp, "bp")
     self.put(sp - self._const16(frame_size), "sp")
 
+@cython.ccall
 def _lift_leave_8616(self: Instruction_ANY) -> None:
     bp = self._get_reg16("bp")
     self.put(bp, "sp")
     self.put(self._stack_load16(bp, offset=0, base="bp"), "bp")
     self.put(bp + self._const16(2), "sp")
 
-def _lift_mov_reg_imm16_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> None:
+@cython.ccall
+def _lift_mov_reg_imm16_8616(self: Instruction_ANY, semantics: object) -> None:
     _, reg_name, imm = semantics
     self.put(self._const16(imm), reg_name)
     self._clear_condition_index_reg_state_8616(reg_name)
@@ -2804,7 +2995,8 @@ def _lift_mov_reg_imm16_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) 
         self._condition_const_value_8616(int(imm), width_bits=16),
     )
 
-def _mov_lift_value_8616(self: Instruction_ANY, role: str, operand: Any) -> Any:
+@cython.ccall
+def _mov_lift_value_8616(self: Instruction_ANY, role: object, operand: Any) -> Any:
     """Materialize one mov load value by its operand-role tag."""
     if role == "reg16":
         return self._get_reg16(operand)
@@ -2818,7 +3010,8 @@ def _mov_lift_value_8616(self: Instruction_ANY, role: str, operand: Any) -> Any:
         return self._load_indexed_abs(operand, width_bytes=2)
     return self._load_abs8(operand)
 
-def _mov_lift_state_8616(self: Instruction_ANY, role: str, dst_reg: Any, operand: Any) -> None:
+@cython.ccall
+def _mov_lift_state_8616(self: Instruction_ANY, role: object, dst_reg: Any, operand: Any) -> None:
     """Apply the mov destination's typed condition-state update."""
     if role == "copy":
         self._copy_condition_index_reg_state_8616(dst_reg, operand)
@@ -2834,52 +3027,61 @@ def _mov_lift_state_8616(self: Instruction_ANY, role: str, dst_reg: Any, operand
     else:
         self._set_condition_reg_direct_byte_value_8616(dst_reg, operand)
 
-def _lift_mov_load_8616(self: Instruction_ANY, kind: str, semantics: tuple[Any, ...]) -> None:
+@cython.ccall
+def _lift_mov_load_8616(self: Instruction_ANY, kind: object, semantics: object) -> None:
     """Lift ``mov reg, <load>`` with its typed state update."""
     load_role, state_role = _MOV_LIFT_LOAD_ROLES_8616[kind]
     _, dst_reg, operand = semantics
     self.put(_mov_lift_value_8616(self, load_role, operand), dst_reg)
     _mov_lift_state_8616(self, state_role, dst_reg, operand)
 
-def _lift_mov_mem_reg16_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> None:
+@cython.ccall
+def _lift_mov_mem_reg16_8616(self: Instruction_ANY, semantics: object) -> None:
     _, mem_spec, src_reg = semantics
     self._store_mem16(mem_spec, self._get_reg16(src_reg))
 
-def _lift_mov_mem_imm16_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> None:
+@cython.ccall
+def _lift_mov_mem_imm16_8616(self: Instruction_ANY, semantics: object) -> None:
     _, mem_spec, imm = semantics
     self._store_mem16(mem_spec, self._const16(imm))
 
-def _lift_lea_reg_bpdisp16_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> None:
+@cython.ccall
+def _lift_lea_reg_bpdisp16_8616(self: Instruction_ANY, semantics: object) -> None:
     _, dst_reg, mem_spec = semantics
     self.put(self._addr_from_bp_mem(mem_spec), dst_reg)
     self._clear_condition_index_reg_state_8616(dst_reg)
     self._clear_condition_reg_value_state_8616(dst_reg)
 
-def _lift_xor_reg_mem8_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> None:
+@cython.ccall
+def _lift_xor_reg_mem8_8616(self: Instruction_ANY, semantics: object) -> None:
     _, dst_reg, mem_spec = semantics
     self._xor_reg_mem8(dst_reg, mem_spec)
     self._clear_condition_reg_value_state_8616(dst_reg)
 
-def _lift_add_reg_imm16_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> None:
+@cython.ccall
+def _lift_add_reg_imm16_8616(self: Instruction_ANY, semantics: object) -> None:
     _, reg_name, imm = semantics
     self._binop_reg_imm("add", reg_name, imm)
     self._clear_condition_index_reg_state_8616(reg_name)
     self._clear_condition_reg_value_state_8616(reg_name)
 
-def _lift_binop_reg_abs16_8616(self: Instruction_ANY, semantics: tuple[Any, ...]) -> None:
+@cython.ccall
+def _lift_binop_reg_abs16_8616(self: Instruction_ANY, semantics: object) -> None:
     op_name, dst_reg, offset = semantics
     self._binop_reg_abs(op_name[:-10], dst_reg, offset)
     self._clear_condition_index_reg_state_8616(dst_reg)
     self._clear_condition_reg_value_state_8616(dst_reg)
 
-def _lift_binop_abs_dst_8616(self: Instruction_ANY, semantics: tuple[Any, ...], *, imm: bool) -> None:
+@cython.ccall
+def _lift_binop_abs_dst_8616(self: Instruction_ANY, semantics: object, *, imm: cython.bint) -> None:
     op_name, offset, src_operand = semantics
     if imm:
         self._binop_abs_imm(op_name[:-10], offset, src_operand)
     else:
         self._binop_abs_reg(op_name[:-10], offset, src_operand)
 
-def _lift_ret_8616(self: Instruction_ANY, imm: int = 0) -> None:
+@cython.ccall
+def _lift_ret_8616(self: Instruction_ANY, imm: cython.longlong = 0) -> None:
     """Pop a word IP and retain the full loaded destination after adding CS."""
     sp = self._get_reg16("sp")
     ret_addr = self._stack_load16(sp, offset=0)
@@ -2892,8 +3094,11 @@ def _lift_ret_8616(self: Instruction_ANY, imm: int = 0) -> None:
     )
     self.jump(None, cast(VexValue, target), JumpKind.Ret)
 
-def _lift_simple_suffix_8616(self: Instruction_ANY, kind: Any, semantics: tuple[Any, ...]) -> bool:
+@cython.ccall
+def _lift_simple_suffix_8616(self: Instruction_ANY, kind: Any, semantics: object) -> cython.bint:
     """Dispatch the op-prefixed binop suffix semantics."""
+    apply_binop: object
+    suffix: object
     kind_str = str(kind)
     arith_suffixes: tuple[tuple[str, Callable[[str, Any, Any], None]], ...] = (
         ("_reg_reg16", self._binop_reg_reg),
@@ -2915,8 +3120,11 @@ def _lift_simple_suffix_8616(self: Instruction_ANY, kind: Any, semantics: tuple[
         return True
     return False
 
-def _lift_simple_kind_8616(self: Instruction_ANY, kind: Any, semantics: tuple[Any, ...]) -> bool:
+@cython.ccall
+def _lift_simple_kind_8616(self: Instruction_ANY, kind: Any, semantics: object) -> cython.bint:
     """Dispatch exact-match simple semantics to their lift handlers."""
+    handler: object
+    sem_handler: object
     kind_str = str(kind)
     handlers: dict[str, Callable[[Instruction_ANY], None]] = {
         "sign_extend_al_ax": _lift_sign_extend_al_ax_8616,
@@ -2959,8 +3167,10 @@ def _lift_simple_kind_8616(self: Instruction_ANY, kind: Any, semantics: tuple[An
         return True
     return False
 
+@cython.ccall
 def _dump_irsb_debug_8616(self: Instruction_ANY) -> None:
     """Emit the generated IRSB statement dump when DEBUG logging is on."""
+    stmt: object
     if hasattr(self.emu, "irsb") and self.emu.irsb:
         logger.debug("IRSB at %04x: %s", self.addr, self.emu.irsb)
         irsb_dynamic = cast(Any, self.emu.irsb)
@@ -2970,8 +3180,10 @@ def _dump_irsb_debug_8616(self: Instruction_ANY) -> None:
                 logger.debug("Statement: %s (type: %s)", type(stmt).__name__, type(stmt))
     logger.debug("IRSB generated successfully for %04x", self.addr)
 
+@cython.ccall
 def _exec_lifted_insn_8616(self: Instruction_ANY) -> None:
     """Execute the mode-matched instruction machine for this insn."""
+    instr32: object
     instr32 = self.instr32
     if self.is_mode32 ^ bool(self.chsz_op):
         if instr32 is None:
@@ -2980,6 +3192,7 @@ def _exec_lifted_insn_8616(self: Instruction_ANY) -> None:
     else:
         self.instr16.exec()
 
+@cython.ccall
 @cython.locals(debug_enabled=cython.bint)
 def _compute_result_8616(self: Instruction_ANY) -> None:
     """Execute instruction effects and preserve explicit failure diagnostics."""
@@ -3003,7 +3216,7 @@ def _compute_result_8616(self: Instruction_ANY) -> None:
         logger.exception("Exception during instruction execution")
         raise
 
-_CMP_LIFT_SHAPES_8616: Mapping[str, tuple[str, str, int]] = {
+_CMP_LIFT_SHAPES_8616: Mapping[str, tuple[str, str, cython.longlong]] = {
     "cmp_mem_reg16": ("mem16", "reg16", 16),
     "cmp_mem_imm16": ("mem16", "imm16", 16),
     "cmp_abs_reg16": ("abs16", "reg16", 16),
@@ -3019,10 +3232,10 @@ _CMP_LIFT_SHAPES_8616: Mapping[str, tuple[str, str, int]] = {
     "cmp_reg_indexed_abs16": ("reg16", "idx16", 16),
 }
 
-_CMP_OPERAND_SHAPES_8616: Mapping[str, tuple[str, str, int]] = {
+_CMP_OPERAND_SHAPES_8616: Mapping[str, tuple[str, str, cython.longlong]] = {
     **{
         kind: shape
-        for kind, shape in _CMP_LIFT_SHAPES_8616.items()
+        for kind, shape in builtins.iter(_CMP_LIFT_SHAPES_8616.items())
         if kind != "cmp_reg_imm8"
     },
     "cmp_reg_reg16": ("reg16", "reg16", 16),
@@ -3040,13 +3253,14 @@ _MOV_LIFT_LOAD_ROLES_8616: Mapping[str, tuple[str, str]] = {
 }
 
 
+@cython.ccall
 def _full_lift_semantics_8616(
     self: Instruction_ANY,
-    matched_semantics: tuple[Any, ...] | None,
-    wide_memory_operand: bool,
-    segment_override: bool,
-    width_override: bool,
-) -> tuple[Any, ...] | None:
+    matched_semantics: object,
+    wide_memory_operand: cython.bint,
+    segment_override: cython.bint,
+    width_override: cython.bint,
+) -> object:
     """Keep matched semantics as condition values only for clean wide-memory forms."""
     if not (
         wide_memory_operand
@@ -3060,14 +3274,15 @@ def _full_lift_semantics_8616(
         return None
     return matched_semantics
 
+@cython.ccall
 def _drop_matched_semantics_8616(
     self: Instruction_ANY,
-    matched_semantics: tuple[Any, ...] | None,
-    segment_override: bool,
-    wide_memory_operand: bool,
-    width_override: bool,
-    dead_flags_wide_register_semantics: bool,
-) -> tuple[Any, ...] | None:
+    matched_semantics: object,
+    segment_override: cython.bint,
+    wide_memory_operand: cython.bint,
+    width_override: cython.bint,
+    dead_flags_wide_register_semantics: cython.bint,
+) -> object:
     """Drop the simple-semantics match when overrides force the full parser."""
     if wide_memory_operand and not (
         matched_semantics is not None and str(matched_semantics[0]).startswith("cmp_")
@@ -3082,17 +3297,18 @@ def _drop_matched_semantics_8616(
         return None
     return matched_semantics
 
+@cython.ccall
 def _match_early_binary_semantics_8616(
     self: Instruction_ANY,
-    mnemonic: str,
+    mnemonic: object,
     dst_reg8: Any,
-    src_indexed_mem8: Any,
-    src_abs_mem8: Any,
+    src_indexed_mem8: object,
+    src_abs_mem8: object,
     dst_reg: Any,
-    src_indexed_mem16: Any,
+    src_indexed_mem16: object,
     dst_reg32: Any,
-    src_imm8: Any,
-) -> tuple[Any, ...] | None:
+    src_imm8: object,
+) -> object:
     """Match the ror/mov-load arms that precede mov/lea classification."""
     if mnemonic == "ror" and dst_reg32 and src_imm8 is not None:
         count = src_imm8 & 0x1F
@@ -3108,15 +3324,16 @@ def _match_early_binary_semantics_8616(
         return ("mov_reg_indexed_abs16", dst_reg, src_indexed_mem16)
     return None
 
+@cython.ccall
 def _match_test_semantics_8616(
     self: Instruction_ANY,
-    dst_mem8: Any,
-    src_imm8: Any,
-    dst_mem: Any,
-    src_imm: Any,
-    dst_abs_mem8: Any,
-    dst_abs_mem: Any,
-) -> tuple[Any, ...] | None:
+    dst_mem8: object,
+    src_imm8: object,
+    dst_mem: object,
+    src_imm: object,
+    dst_abs_mem8: object,
+    dst_abs_mem: object,
+) -> object:
     """Match ``test mem, imm`` shapes once a simple JCC is known to follow."""
     if dst_mem8 is not None and src_imm8 is not None:
         return ("test_mem_imm8", dst_mem8, src_imm8)
@@ -3128,15 +3345,16 @@ def _match_test_semantics_8616(
         return ("test_abs_imm16", dst_abs_mem, src_imm)
     return None
 
+@cython.ccall
 def _match_arith_dst_reg_8616(
     self: Instruction_ANY,
-    mnemonic: str,
+    mnemonic: object,
     dst_reg: Any,
     src_reg: Any,
     src_mem: Any,
-    src_abs_mem: Any,
-    src_imm: Any,
-) -> tuple[Any, ...] | None:
+    src_abs_mem: object,
+    src_imm: object,
+) -> object:
     """Match ``op reg16, src`` once the destination register is proven."""
     if src_reg:
         return (f"{mnemonic}_reg_reg16", dst_reg, src_reg)
@@ -3148,16 +3366,17 @@ def _match_arith_dst_reg_8616(
         return (f"{mnemonic}_reg_imm16", dst_reg, src_imm)
     return None
 
+@cython.ccall
 def _match_arith_binary_semantics_8616(
     self: Instruction_ANY,
-    mnemonic: str,
+    mnemonic: object,
     dst_reg: Any,
     src_reg: Any,
     src_mem: Any,
     src_abs_mem: Any,
-    src_imm: Any,
-    dst_abs_mem: Any,
-) -> tuple[Any, ...] | None:
+    src_imm: object,
+    dst_abs_mem: object,
+) -> object:
     """Match add/sub/xor/and/or destination-source operand shapes."""
     if mnemonic not in {"add", "sub", "xor", "and", "or"}:
         return None
@@ -3179,14 +3398,15 @@ def _match_arith_binary_semantics_8616(
         return (f"{mnemonic}_abs_reg16", dst_abs_mem, src_reg)
     return None
 
+@cython.ccall
 def _match_cmp_dst_reg_semantics_8616(
     self: Instruction_ANY,
     dst_reg: Any,
     src_reg: Any,
     src_mem: Any,
-    src_imm: Any,
-    src_abs_mem: Any,
-) -> tuple[Any, ...] | None:
+    src_imm: object,
+    src_abs_mem: object,
+) -> object:
     """Classify ``cmp reg16, src`` operand shapes."""
     if not dst_reg:
         return None
@@ -3200,16 +3420,17 @@ def _match_cmp_dst_reg_semantics_8616(
         return ("cmp_reg_abs16", dst_reg, src_abs_mem)
     return None
 
+@cython.ccall
 def _match_cmp_mem_semantics_8616(
     self: Instruction_ANY,
     dst_mem: Any,
     src_reg: Any,
-    src_imm: Any,
-    dst_abs_mem: Any,
-    dst_abs_mem8: Any,
-    src_imm8: Any,
+    src_imm: object,
+    dst_abs_mem: object,
+    dst_abs_mem8: object,
+    src_imm8: object,
     src_reg8: Any,
-) -> tuple[Any, ...] | None:
+) -> object:
     """Classify ``cmp mem/absmem, src`` operand shapes."""
     if dst_mem:
         if src_reg:
@@ -3228,21 +3449,23 @@ def _match_cmp_mem_semantics_8616(
             return ("cmp_abs_reg8", dst_abs_mem8, src_reg8)
     return None
 
+@cython.ccall
 def _match_cmp_byte_indexed_semantics_8616(
     self: Instruction_ANY,
     dst_reg8: Any,
-    src_imm8: Any,
-    dst_indexed_mem8: Any,
+    src_imm8: object,
+    dst_indexed_mem8: object,
     src_reg8: Any,
-    src_indexed_mem8: Any,
-    dst_indexed_mem16: Any,
-    src_imm: Any,
+    src_indexed_mem8: object,
+    dst_indexed_mem16: object,
+    src_imm: object,
     src_reg: Any,
     dst_reg: Any,
-    src_indexed_mem16: Any,
+    src_indexed_mem16: object,
     src: Any,
-) -> tuple[Any, ...] | None:
+) -> object:
     """Classify the 8-bit and indexed CMP operand shapes."""
+    src_abs_mem8: object
     if dst_reg8 and src_imm8 is not None:
         return ("cmp_reg_imm8", dst_reg8, src_imm8)
     if dst_indexed_mem8 is not None and src_reg8:
@@ -3261,15 +3484,17 @@ def _match_cmp_byte_indexed_semantics_8616(
             return ("cmp_reg_abs8", dst_reg8, src_abs_mem8)
     return None
 
+@cython.ccall
 def _cond_reg_chain_8616(
     self: Instruction_ANY,
     reg_name: Any,
     *,
-    width_bits: int,
-    proven: bool = False,
-    unshifted: bool = False,
+    width_bits: cython.longlong,
+    proven: cython.bint = False,
+    unshifted: cython.bint = False,
 ) -> Any:
     """Resolve a condition register value through the available evidence chain."""
+    value: object
     value = self._condition_proven_reg_value_8616(reg_name, width_bits=width_bits) if proven else None
     if value is None and unshifted:
         value = self._condition_unshifted_index_reg_value_8616(reg_name, width_bits=width_bits)
@@ -3277,13 +3502,14 @@ def _cond_reg_chain_8616(
         value = self._condition_reg_value_8616(reg_name, width_bits=width_bits)
     return value
 
+@cython.ccall
 def _propagate_jcc_condition_source_8616(
     self: Instruction_ANY,
     source: ConditionSource,
     lhs: Any,
     rhs: Any,
     jcc_mnemonic: Any,
-    fallthrough_addr: int | None,
+    fallthrough_addr: object,
     target_addr: Any,
 ) -> None:
     """Re-seed pending condition evidence at the JCC's taken/fallthrough targets."""
@@ -3318,6 +3544,7 @@ def _propagate_jcc_condition_source_8616(
                 register_bindings=source.register_bindings,
             )
 
+@cython.ccall
 def _build_jcc_cond_ir_8616(
     self: Instruction_ANY,
     source: ConditionSource,
@@ -3363,6 +3590,7 @@ def _build_jcc_cond_ir_8616(
         detail=f"kind={source.kind}",
     )
 
+@cython.ccall
 def _record_consumed_jcc_condition_8616(
     self: Instruction_ANY,
     jcc_mnemonic: Any,
@@ -3371,6 +3599,8 @@ def _record_consumed_jcc_condition_8616(
     fallthrough_addr: int | None,
 ) -> None:
     """Record a typed condition rebuilt from the consumed IRCondition evidence."""
+    consumed_cond_ir: object
+    consumed_condition: object
     consumed_condition = getattr(self, "_inertia_consumed_last_condition_8616", None)
     if not isinstance(consumed_condition, IRCondition):
         return
@@ -3384,9 +3614,10 @@ def _record_consumed_jcc_condition_8616(
     if consumed_cond_ir is not None:
         self._record_typed_condition_8616(consumed_cond_ir)
 
+@cython.ccall
 def _lift_binop_with_arith_state_8616(
     self: Instruction_ANY,
-    semantics: tuple[Any, ...],
+    semantics: object,
     apply_binop: Callable[[str, Any, Any], None],
 ) -> None:
     """Lift a reg-dst binop and retain its exact arithmetic condition value."""
@@ -3400,8 +3631,13 @@ def _lift_binop_with_arith_state_8616(
     self._set_condition_arithmetic_result_state_8616(arithmetic_result)
 
 
-def _match_simple_binary_semantics_8616(self: Instruction_ANY, ops: Any) -> tuple[Any, ...] | None:
+@cython.ccall
+def _match_simple_binary_semantics_8616(self: Instruction_ANY, ops: Any) -> object:
     """Classify one two-operand instruction into typed frontend semantics."""
+    cmp_sem: object
+    early_sem: object
+    mov_sem: object
+    src_mem8: object
     dst, src = ops
     mnemonic = self.cs.mnemonic
     dst_reg = self._reg16_name(dst)
@@ -3470,8 +3706,8 @@ def _match_mov_lea_binary_semantics_8616(
     src_mem: Any,
     src_abs_mem: Any,
     dst_mem: Any,
-) -> tuple[Any, ...] | None:
-    def _impl() -> tuple[Any, ...] | None:
+) -> object:
+    def _impl() -> object:
         if self.cs.mnemonic == "mov" and dst_reg and src_imm is not None:
             return ("mov_reg_imm16", dst_reg, src_imm)
         if self.cs.mnemonic == "mov" and dst_reg and src_reg:
@@ -3490,6 +3726,7 @@ def _match_mov_lea_binary_semantics_8616(
 
     return _impl()
 
+@cython.ccall
 def _match_cmp_binary_semantics_8616(
     self: Instruction_ANY,
     dst_reg: Any,
@@ -3508,8 +3745,10 @@ def _match_cmp_binary_semantics_8616(
     dst_indexed_mem16: Any,
     src_indexed_mem16: Any,
     src: Any,
-) -> tuple[Any, ...] | None:
+) -> object:
     """Classify CMP operands while preserving exact memory-address shape."""
+    mem_sem: object
+    reg_sem: object
     if self.cs.mnemonic != "cmp":
         return None
     reg_sem = _match_cmp_dst_reg_semantics_8616(self, 
@@ -3536,12 +3775,14 @@ def _match_cmp_binary_semantics_8616(
         src,
     )
 
-def _lift_simple_cmp_8616(self: Instruction_ANY, kind: str) -> bool:
+@cython.ccall
+def _lift_simple_cmp_8616(self: Instruction_ANY, kind: object) -> cython.bint:
     """Lift CMP's architectural flag effect and its typed condition operands.
 
     A direct predicate for the following Jcc does not kill FLAGS: successors
     still observe the updated status bits at the block cutpoint.
     """
+    shape: object
     shape = _CMP_LIFT_SHAPES_8616.get(kind)
     if shape is None:
         return False
@@ -3553,8 +3794,10 @@ def _lift_simple_cmp_8616(self: Instruction_ANY, kind: str) -> bool:
     self._update_binop_flags16("sub", lhs_val, rhs_val)
     return True
 
-def _lift_simple_jcc_8616(self: Instruction_ANY, kind: str) -> bool:
+@cython.ccall
+def _lift_simple_jcc_8616(self: Instruction_ANY, kind: object) -> cython.bint:
     """Emit direct control without discarding a word JMP's selector coordinate."""
+    cond: object
     if kind not in (self._SIMPLE_JCC_8616 | {"jmp"}):
         return False
     semantics = cast(tuple[Any, ...], self.simple_semantics)
@@ -3572,7 +3815,7 @@ def _lift_simple_jcc_8616(self: Instruction_ANY, kind: str) -> bool:
     linear_target = self._linear_near_target_8616(int(abs_target))
     target = self._code_address_constant_8616(linear_target)
     if kind == "jmp":
-        if linear_target == self.addr + self.cs.size:
+        if operator.eq(linear_target, self.addr + self.cs.size):
             return True
         self.jump(None, target, JumpKind.Boring)
         return True
@@ -3592,7 +3835,7 @@ class Lifter86_16(GymratLifter):  # type: ignore[misc]  # dynamic pyvex base
     instrs: ClassVar[list[type[Instruction_ANY]]] = [Instruction_ANY]
 
     @cython.locals(instructions=list)
-    def decode(self) -> list[Any]:
+    def decode(self) -> object:
         """Decode only the requested instruction window for lifting and lookahead.
 
         Gymrat passes the entire decoded suffix to each instruction even when
@@ -3602,7 +3845,7 @@ class Lifter86_16(GymratLifter):  # type: ignore[misc]  # dynamic pyvex base
 
         try:
             self.create_bitstrm()
-            instructions: list[Any] = []
+            instructions = []
             addr = self.irsb.addr
             bitstrm = cast(bitstring.ConstBitStream, self.bitstrm)
             decode_next = self._decode_next_instruction
@@ -3630,8 +3873,11 @@ class Lifter86_16(GymratLifter):  # type: ignore[misc]  # dynamic pyvex base
 register(Lifter86_16, "86_16")
 
 
+@cython.ccall
 def main() -> None:
     """Run a local manual smoke test for the 16-bit lifter."""
+    num: object
+    test: object
 
     logging.basicConfig()
     logging.getLogger().setLevel(logging.DEBUG)

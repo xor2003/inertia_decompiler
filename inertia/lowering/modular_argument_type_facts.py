@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Join callee-bound modular stack-word use proofs into input type evidence.
 
 Layer: Types/Lowering.
@@ -17,6 +18,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -50,6 +53,8 @@ from inertia.ir.stack_argument_modular_use_contracts import (
     ModularArgumentUseStats8616,
     ModularArgumentUseVerdict8616,
 )
+import dataclasses
+import operator
 
 __all__ = [
     "ModularArgumentTypeFacts8616",
@@ -92,18 +97,18 @@ class ModularInputProofFailure8616(StrEnum):
     UPSTREAM_PROOF_REFUSED = "upstream_proof_refused"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ModularInputProofStats8616:
     """Closed five-stage evidence loop for one requested input proof."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _CalleeEvidence8616:
     """Boundary and Semantics SSA resolution shared by every storage proof."""
 
@@ -113,7 +118,7 @@ class _CalleeEvidence8616:
     upstream_failure: FunctionSSAArtifactFailure8616 | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ModularInputProof8616:
     """One callee-bound modular input-use proof or a typed atomic refusal.
 
@@ -125,7 +130,7 @@ class ModularInputProof8616:
     authorizes source signedness, pointer typing, or a return expression.
     """
 
-    callee_addr: int
+    callee_addr: cython.longlong
     storage: IRAddress
     verdict: ModularInputProofVerdict8616
     failure: ModularInputProofFailure8616 | None
@@ -148,8 +153,13 @@ class ModularInputProof8616:
     ) = None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Require a fully bound proven proof, never a bare verdict flag."""
+        artifact: object
+        boundary: object
+        key: object
+        proof: object
+        proven_storage: object
         proof = self.proof
         boundary = self.boundary
         artifact = self.artifact
@@ -158,7 +168,7 @@ class ModularInputProof8616:
             self.verdict is ModularInputProofVerdict8616.PROVEN
             and self.failure is None
             and self.upstream_failure is None
-            and self.stats == ModularInputProofStats8616(1, 1, 1, 1, 0)
+            and operator.eq(self.stats, ModularInputProofStats8616(1, 1, 1, 1, 0))
             and type(self.callee_addr) is int
             and proven_storage is not None
             and boundary is not None
@@ -169,37 +179,40 @@ class ModularInputProof8616:
             return False
         key = proof.input_access_key
         return bool(
-            boundary.addr == self.callee_addr
-            and artifact.function_addr == self.callee_addr
+            operator.eq(boundary.addr, self.callee_addr)
+            and operator.eq(artifact.function_addr, self.callee_addr)
             and _same_storage_identity_8616(proven_storage, self.storage)
             and proven_storage.segment_origin is SegmentOrigin.PROVEN
             and proven_storage.status is AddressStatus.STABLE
             and proof.verdict is ModularArgumentUseVerdict8616.PROVEN
             and proof.failure is None
-            and proof.stats == ModularArgumentUseStats8616(1, 1, 1, 1, 0)
+            and operator.eq(proof.stats, ModularArgumentUseStats8616(1, 1, 1, 1, 0))
             and key is not None
-            and key == self.access_key
-            and key.function_addr == self.callee_addr
+            and operator.eq(key, self.access_key)
+            and operator.eq(key.function_addr, self.callee_addr)
             and isinstance(proof.return_instruction_addr, int)
         )
 
 
-def _same_storage_identity_8616(left: IRAddress, right: IRAddress) -> bool:
+@cython.ccall
+def _same_storage_identity_8616(left: IRAddress, right: IRAddress) -> cython.bint:
     """Compare the storage-identity fields that name one stack slice."""
     return (
         left.space is right.space
-        and left.base == right.base
-        and left.offset == right.offset
-        and left.size == right.size
+        and operator.eq(left.base, right.base)
+        and operator.eq(left.offset, right.offset)
+        and operator.eq(left.size, right.size)
     )
 
 
+@cython.ccall
 def _storage_key_8616(storage: IRAddress) -> tuple[object, ...]:
     """Dedupe proof requests by storage identity, not object identity."""
     return (storage.space, storage.base, storage.offset, storage.size)
 
 
-def _supported_census_storage_8616(storage: object) -> bool:
+@cython.ccall
+def _supported_census_storage_8616(storage: object) -> cython.bint:
     """Require a stable two-byte SS:BP census stack identity to query."""
     return bool(
         isinstance(storage, IRAddress)
@@ -210,12 +223,13 @@ def _supported_census_storage_8616(storage: object) -> bool:
     )
 
 
+@cython.ccall
 def _refuse_8616(
-    callee_addr: int,
+    callee_addr: cython.longlong,
     storage: IRAddress,
     failure: ModularInputProofFailure8616,
     *,
-    normalized: bool = False,
+    normalized: cython.bint = False,
     boundary: ExactFunctionRangeBoundary8616 | None = None,
     artifact: SSAFunctionArtifact | None = None,
     proven_storage: IRAddress | None = None,
@@ -241,7 +255,8 @@ def _refuse_8616(
     )
 
 
-def _semantic_registry_exists_8616(project: object) -> bool:
+@cython.ccall
+def _semantic_registry_exists_8616(project: object) -> cython.bint:
     """Check cache presence without letting the registry lookup create it."""
     surface = cast(_ProjectSSARegistry8616, project)
     try:
@@ -254,11 +269,13 @@ def _semantic_registry_exists_8616(project: object) -> bool:
     return True
 
 
+@cython.ccall
 def _restored_exact_boundary_8616(
     project: object,
     function: object,
 ) -> ExactFunctionRangeBoundary8616 | None:
     """Rebuild a byte-verified exact boundary from recovered block extents."""
+    witness: object
     try:
         witness = capture_function_boundary_8616(project, function)
         boundary = (
@@ -271,9 +288,10 @@ def _restored_exact_boundary_8616(
     return boundary
 
 
+@cython.ccall
 def _exact_callee_boundary_8616(
     project: object,
-    callee_addr: int,
+    callee_addr: cython.longlong,
 ) -> tuple[
     ExactFunctionRangeBoundary8616 | None,
     ModularInputProofFailure8616 | None,
@@ -283,11 +301,13 @@ def _exact_callee_boundary_8616(
     An absent boundary stays absent: without a CFG function or a registered
     exact range, no range is invented.
     """
+    boundary: object
+    resolved: object
     resolved = function_boundary_at_address_8616(project, callee_addr)
     if resolved is None:
         return None, ModularInputProofFailure8616.CALLEE_BOUNDARY_UNPROVEN
     if isinstance(resolved, ExactFunctionRangeBoundary8616):
-        if resolved.addr != callee_addr:
+        if operator.ne(resolved.addr, callee_addr):
             return None, ModularInputProofFailure8616.FUNCTION_MISMATCH
         if resolved.project is not project:
             return None, ModularInputProofFailure8616.BOUNDARY_PROJECT_MISMATCH
@@ -299,14 +319,14 @@ def _exact_callee_boundary_8616(
     if resolved_addr != callee_addr:
         return None, ModularInputProofFailure8616.FUNCTION_MISMATCH
     boundary = _restored_exact_boundary_8616(project, resolved)
-    if boundary is None or boundary.addr != callee_addr:
+    if boundary is None or operator.ne(boundary.addr, callee_addr):
         return None, ModularInputProofFailure8616.CALLEE_BOUNDARY_UNPROVEN
     return boundary, None
 
 
 def _proven_input_access_8616(
     artifact: SSAFunctionArtifact,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     storage: IRAddress,
 ) -> IRLogicalMemoryAccess8616 | None:
     """Find the artifact's unique proven read identity for one stack word.
@@ -315,24 +335,25 @@ def _proven_input_access_8616(
     identity is taken from the callee's own closed logical-memory access, so
     the upstream proof binds to binary evidence rather than an asserted flag.
     """
+    logical: object
     logical = artifact.logical_memory
     if (
         logical is None
         or not logical.closed
         or bool(logical.refusals)
-        or logical.function_addr != callee_addr
+        or operator.ne(logical.function_addr, callee_addr)
     ):
         return None
     matches = tuple(
         access
-        for access in logical.accesses
+        for access in iter(logical.accesses)
         if access.kind is IRMemoryAccessKind8616.READ
         and access.complete
-        and access.key.function_addr == callee_addr
+        and operator.eq(access.key.function_addr, callee_addr)
         and access.address.space is MemSpace.SS
-        and access.address.base == storage.base
-        and access.address.offset == storage.offset
-        and access.address.size == storage.size
+        and operator.eq(access.address.base, storage.base)
+        and operator.eq(access.address.offset, storage.offset)
+        and operator.eq(access.address.size, storage.size)
         and access.address.status is AddressStatus.STABLE
         and access.address.segment_origin is SegmentOrigin.PROVEN
     )
@@ -353,7 +374,7 @@ class ModularArgumentTypeFacts8616:
 
     __slots__ = ("_callee_addr", "_project", "_proofs", "_resolution")
 
-    def __init__(self, project: object, callee_addr: int) -> None:
+    def __init__(self, project: object, callee_addr: cython.longlong) -> None:
         """Bind one exact callee; no analysis runs until a proof is requested."""
         self._project = project
         self._callee_addr = callee_addr
@@ -361,7 +382,7 @@ class ModularArgumentTypeFacts8616:
         self._proofs: dict[tuple[object, ...], ModularInputProof8616] = {}
 
     @property
-    def callee_addr(self) -> int:
+    def callee_addr(self) -> cython.longlong:
         """Return the exact callee this owner is bound to."""
         return self._callee_addr
 
@@ -370,19 +391,20 @@ class ModularArgumentTypeFacts8616:
         """Aggregate five-stage counts across every requested proof."""
         results = tuple(self._proofs.values())
         return ModularInputProofStats8616(
-            raw_fact_count=sum(item.stats.raw_fact_count for item in results),
+            raw_fact_count=sum(item.stats.raw_fact_count for item in iter(results)),
             normalized_fact_count=sum(
-                item.stats.normalized_fact_count for item in results
+                item.stats.normalized_fact_count for item in iter(results)
             ),
             classified_fact_count=sum(
-                item.stats.classified_fact_count for item in results
+                item.stats.classified_fact_count for item in iter(results)
             ),
-            materialized_count=sum(item.stats.materialized_count for item in results),
-            failure_count=sum(item.stats.failure_count for item in results),
+            materialized_count=sum(item.stats.materialized_count for item in iter(results)),
+            failure_count=sum(item.stats.failure_count for item in iter(results)),
         )
 
     def proof_for_8616(self, storage: IRAddress) -> ModularInputProof8616:
         """Return the cached or newly proven result for one stack word."""
+        cached: object
         key = _storage_key_8616(storage)
         cached = self._proofs.get(key)
         if cached is not None:
@@ -393,6 +415,8 @@ class ModularArgumentTypeFacts8616:
 
     def _callee_evidence_8616(self) -> _CalleeEvidence8616:
         """Resolve the bound callee's boundary and SSA artifact once."""
+        artifact: object
+        boundary: object
         if self._resolution is not None:
             return self._resolution
         boundary, boundary_failure = _exact_callee_boundary_8616(
@@ -424,7 +448,7 @@ class ModularArgumentTypeFacts8616:
             resolution.verdict is not FunctionSSAArtifactVerdict8616.PROVEN
             or resolution.stage is not FunctionSSAArtifactStage8616.SEMANTIC
             or artifact is None
-            or artifact.function_addr != self._callee_addr
+            or operator.ne(artifact.function_addr, self._callee_addr)
         ):
             self._resolution = _CalleeEvidence8616(
                 boundary,
@@ -438,6 +462,7 @@ class ModularArgumentTypeFacts8616:
 
     def _prove_8616(self, storage: IRAddress) -> ModularInputProof8616:
         """Prove one census stack word through the callee's own artifacts."""
+        access: object
         callee_addr = self._callee_addr
         if not _supported_census_storage_8616(storage):
             return _refuse_8616(
@@ -474,7 +499,7 @@ class ModularArgumentTypeFacts8616:
         )
         if (
             proof.verdict is not ModularArgumentUseVerdict8616.PROVEN
-            or proof.stats != ModularArgumentUseStats8616(1, 1, 1, 1, 0)
+            or operator.ne(proof.stats, ModularArgumentUseStats8616(1, 1, 1, 1, 0))
         ):
             return _refuse_8616(
                 callee_addr,

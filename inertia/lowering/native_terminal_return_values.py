@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bind proven terminal register storage before native SSA can discard it.
 
 Layer: Types/Lowering, native AIL compatibility boundary.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -30,28 +33,31 @@ from inertia.lowering.terminal_register_return_types import (
     apply_terminal_register_return_type_evidence_8616,
 )
 from inertia.semantics.terminal_return_storage import TerminalReturnStorage8616, terminal_return_storage_8616
+import dataclasses
+import builtins
 
 _REGISTER_CARRIERS = frozenset({
     TerminalReturnStorage8616.AL, TerminalReturnStorage8616.AH, TerminalReturnStorage8616.AX,
 })
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NativeTerminalReturnBindingReport8616:
     """Closed census of empty return sites and consumed storage proofs."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
+@cython.ccall
 def bind_terminal_return_register_8616(
     block: Block,
     arch: Arch,
-    storage: TerminalReturnStorage8616 | None,
-    next_atom: Callable[[], int],
+    storage: object,
+    next_atom: Callable[[], cython.longlong],
 ) -> Block:
     """Copy one empty return with an exact independently proven register read."""
     if storage not in _REGISTER_CARRIERS or not block.statements:
@@ -66,13 +72,13 @@ def bind_terminal_return_register_8616(
                      ins_addr=terminal.tags.get("ins_addr"))
     replacement = terminal.copy()
     replacement.ret_exprs = [value]
-    return block.copy(statements=[*block.statements[:-1], replacement])
+    return block.copy(statements=list(block.statements[:-1]) + [replacement])
 
 
 class _AtomManager8616(Protocol):
     """Native allocator used to preserve expression identity ownership."""
 
-    def next_atom(self) -> int:
+    def next_atom(self) -> cython.longlong:
         """Allocate a fresh native expression index."""
         ...
 
@@ -121,7 +127,7 @@ def apply_native_terminal_return_values_8616() -> None:
             bool(block.statements)
             and isinstance(block.statements[-1], Return)
             and not block.statements[-1].ret_exprs
-            for block in cast(Iterable[Block], result)
+            for block in builtins.iter(cast(Iterable[Block], result))
         )
         classified = empty_returns if storage in _REGISTER_CARRIERS else 0
         materialized = 0

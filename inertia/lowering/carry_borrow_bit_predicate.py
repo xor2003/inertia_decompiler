@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize explicit C predicates for proven carry/borrow values.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Final, cast
 
@@ -28,11 +31,13 @@ from inertia.structuring.structuring_cfg_ownership import CFGInstructionSite8616
 from .carry_borrow_bit_contracts import CarryBorrowBitLoweringFact8616, CarryBorrowBitLoweringFailure8616
 from .carry_borrow_bit_scope import node_matches_instruction_site_8616, variable_key_8616
 from .semantic_cast import CSemanticCast8616
+import operator
 
 _WORD_BITS: Final = 16
 _WORD_MAX: Final = (1 << _WORD_BITS) - 1
 
 
+@cython.ccall
 def _constant_int_8616(node: object) -> int | None:
     """Return an integer constant through syntax-only casts."""
     while isinstance(node, CTypeCast):
@@ -40,33 +45,36 @@ def _constant_int_8616(node: object) -> int | None:
     return int(node.value) if isinstance(node, CConstant) and isinstance(node.value, int) else None
 
 
+@cython.ccall
 def _low_site_8616(fact: CarryBorrowBitLoweringFact8616) -> CFGInstructionSite8616:
     """Return the exact typed low-arithmetic site."""
     return CFGInstructionSite8616(fact.low_block_addr, fact.low_ins_addr)
 
 
 def _exact_arithmetic_representatives_8616(
-    nodes: tuple[object, ...],
+    nodes: object,
     fact: CarryBorrowBitLoweringFact8616,
     ownership: CFGOwnershipArtifact,
 ) -> tuple[CBinaryOp, ...]:
     """Return unique arithmetic projections owned by the proven low site."""
+    node: object
     operation = "Sub" if fact.kind is CarryBorrowKind8616.SUB_WITH_BORROW else "Add"
     low_site = _low_site_8616(fact)
     representatives: list[CBinaryOp] = []
     for node in nodes:
         if (
             isinstance(node, CBinaryOp)
-            and node.op == operation
+            and operator.eq(node.op, operation)
             and node_matches_instruction_site_8616(node, low_site, ownership)
-            and not any(_same_c_expression_8616(node, existing) for existing in representatives)
+            and not any(_same_c_expression_8616(node, existing) for existing in iter(representatives))
         ):
             representatives.append(node)
     return tuple(representatives)
 
 
+@cython.ccall
 def _arithmetic_refusal_8616(
-    representatives: tuple[CBinaryOp, ...],
+    representatives: object,
 ) -> CarryBorrowBitLoweringFailure8616:
     """Classify missing versus conflicting exact arithmetic projections."""
     return (
@@ -77,33 +85,33 @@ def _arithmetic_refusal_8616(
 
 
 def _direct_result_representatives_8616(
-    nodes: tuple[object, ...],
-    representatives: tuple[CBinaryOp, ...],
+    nodes: object,
+    representatives: object,
 ) -> tuple[CBinaryOp, ...]:
     """Keep exact arithmetic that directly defines a structured result."""
     return tuple(
         arithmetic
-        for arithmetic in representatives
+        for arithmetic in iter(representatives)
         if any(
             isinstance(node, CAssignment) and _same_c_expression_8616(node.rhs, arithmetic)
-            for node in nodes
+            for node in iter(nodes)
         )
     )
 
 
 def _predicate_matches_arithmetic_8616(
     predicate: CBinaryOp,
-    nodes: tuple[object, ...],
+    nodes: object,
     fact: CarryBorrowBitLoweringFact8616,
     ownership: CFGOwnershipArtifact,
-) -> bool:
+) -> cython.bint:
     """Prove that one C comparison projects the typed low operation."""
     arithmetic = _exact_arithmetic_representatives_8616(nodes, fact, ownership)
     if fact.kind is CarryBorrowKind8616.SUB_WITH_BORROW:
         return any(
             _same_c_expression_8616(predicate.lhs, node.lhs)
             and _same_c_expression_8616(predicate.rhs, node.rhs)
-            for node in arithmetic
+            for node in iter(arithmetic)
         )
     return any(
         _same_c_expression_8616(predicate.lhs, node)
@@ -111,10 +119,11 @@ def _predicate_matches_arithmetic_8616(
             _same_c_expression_8616(predicate.rhs, node.lhs)
             or _same_c_expression_8616(predicate.rhs, node.rhs)
         )
-        for node in arithmetic
+        for node in iter(arithmetic)
     )
 
 
+@cython.ccall
 def _unsigned_word_operand_8616(expression: object, arithmetic: CBinaryOp) -> CTypeCast:
     """Clone one proven 16-bit operand with explicit unsigned C semantics."""
     return CSemanticCast8616(
@@ -126,7 +135,8 @@ def _unsigned_word_operand_8616(expression: object, arithmetic: CBinaryOp) -> CT
     )
 
 
-def _static_operand_projection_8616(expression: object) -> bool:
+@cython.ccall
+def _static_operand_projection_8616(expression: object) -> cython.bint:
     """Return whether one definition RHS is a side-effect-free static C value."""
     while isinstance(expression, CTypeCast):
         expression = expression.expr
@@ -135,29 +145,30 @@ def _static_operand_projection_8616(expression: object) -> bool:
 
 def _project_unique_static_definition_8616(
     expression: object,
-    nodes: tuple[object, ...],
+    nodes: object,
 ) -> object:
     """Project one C-SSA operand through a unique static-value definition."""
     if not isinstance(expression, CVariable) or (key := variable_key_8616(expression)) is None:
         return _clone_c_ast_tree_8616(expression)
     definitions = tuple(
         node
-        for node in nodes
+        for node in iter(nodes)
         if isinstance(node, CAssignment)
         and isinstance(node.lhs, CVariable)
-        and variable_key_8616(node.lhs) == key
+        and operator.eq(variable_key_8616(node.lhs), key)
         and _static_operand_projection_8616(node.rhs)
     )
     if not definitions or any(
-        not _same_c_expression_8616(definition.rhs, definitions[0].rhs) for definition in definitions[1:]
+        not _same_c_expression_8616(definition.rhs, definitions[0].rhs) for definition in iter(definitions[1:])
     ):
         return _clone_c_ast_tree_8616(expression)
     return _clone_c_ast_tree_8616(definitions[0].rhs)
 
 
+@cython.ccall
 def _canonical_addition_carry_predicate_8616(
     addition: CBinaryOp,
-    nodes: tuple[object, ...],
+    nodes: object,
 ) -> CBinaryOp:
     """Project unsigned carry without reevaluating the low addition."""
     lhs = _project_unique_static_definition_8616(addition.lhs, nodes)
@@ -181,37 +192,40 @@ def _canonical_addition_carry_predicate_8616(
 
 
 def _equivalent_low_result_assignment_8616(
-    nodes: tuple[object, ...],
+    nodes: object,
     arithmetic: CBinaryOp,
     fact: CarryBorrowBitLoweringFact8616,
     ownership: CFGOwnershipArtifact,
 ) -> CAssignment | None:
     """Return one semantic low-result assignment across equivalent structured copies."""
+    first_key: object
     low_site = _low_site_8616(fact)
     assignments = tuple(
         node
-        for node in nodes
+        for node in iter(nodes)
         if isinstance(node, CAssignment)
         and isinstance(node.lhs, CVariable)
         and isinstance(node.rhs, CBinaryOp)
-        and node.rhs.op == arithmetic.op
+        and operator.eq(node.rhs.op, arithmetic.op)
         and node_matches_instruction_site_8616(node.rhs, low_site, ownership)
         and _same_c_expression_8616(node.rhs, arithmetic)
     )
     if not assignments:
         return None
     first_key = variable_key_8616(assignments[0].lhs)
-    if first_key is None or any(variable_key_8616(assignment.lhs) != first_key for assignment in assignments[1:]):
+    if first_key is None or any(operator.ne(variable_key_8616(assignment.lhs), first_key) for assignment in iter(assignments[1:])):
         return None
     return assignments[0]
 
 
+@cython.ccall
 def _predicate_from_exact_arithmetic_8616(
-    nodes: tuple[object, ...],
+    nodes: object,
     fact: CarryBorrowBitLoweringFact8616,
     ownership: CFGOwnershipArtifact,
 ) -> CBinaryOp | CarryBorrowBitLoweringFailure8616:
     """Build a nonduplicating predicate from one exact low arithmetic projection."""
+    result_assignment: object
     representatives = _exact_arithmetic_representatives_8616(nodes, fact, ownership)
     if len(representatives) > 1:
         representatives = _direct_result_representatives_8616(nodes, representatives)
@@ -240,8 +254,9 @@ def _predicate_from_exact_arithmetic_8616(
     )
 
 
+@cython.ccall
 def _subtraction_borrow_predicate_8616(
-    nodes: tuple[object, ...],
+    nodes: object,
     fact: CarryBorrowBitLoweringFact8616,
     ownership: CFGOwnershipArtifact,
 ) -> CBinaryOp | CarryBorrowBitLoweringFailure8616:
@@ -260,11 +275,13 @@ def _subtraction_borrow_predicate_8616(
 
 
 def _addition_carry_predicate_8616(
-    nodes: tuple[object, ...],
+    nodes: object,
     fact: CarryBorrowBitLoweringFact8616,
     ownership: CFGOwnershipArtifact,
 ) -> CBinaryOp | CarryBorrowBitLoweringFailure8616:
     """Project typed ADD_WITH_CARRY as one portable unsigned-16 comparison."""
+    node: object
+    shifted: object
     low_site = _low_site_8616(fact)
     representatives: list[CBinaryOp] = []
     for node in nodes:
@@ -274,10 +291,10 @@ def _addition_carry_predicate_8616(
         if node.op == "And":
             shifted_values.extend(
                 shifted
-                for shifted, mask in ((node.lhs, node.rhs), (node.rhs, node.lhs))
+                for shifted, mask in iter(((node.lhs, node.rhs), (node.rhs, node.lhs)))
                 if _constant_int_8616(mask) == 1
             )
-        elif node.op in {"Shr", "Sar"} and _constant_int_8616(node.rhs) == _WORD_BITS:
+        elif node.op in {"Shr", "Sar"} and operator.eq(_constant_int_8616(node.rhs), _WORD_BITS):
             shifted_values.append(node)
         for shifted in shifted_values:
             while isinstance(shifted, CTypeCast):
@@ -285,7 +302,7 @@ def _addition_carry_predicate_8616(
             if (
                 not isinstance(shifted, CBinaryOp)
                 or shifted.op not in {"Shr", "Sar"}
-                or _constant_int_8616(shifted.rhs) != _WORD_BITS
+                or operator.ne(_constant_int_8616(shifted.rhs), _WORD_BITS)
             ):
                 continue
             addition = shifted.lhs
@@ -293,7 +310,7 @@ def _addition_carry_predicate_8616(
                 isinstance(addition, CBinaryOp)
                 and addition.op == "Add"
                 and node_matches_instruction_site_8616(addition, low_site, ownership)
-                and not any(_same_c_expression_8616(addition, existing) for existing in representatives)
+                and not any(_same_c_expression_8616(addition, existing) for existing in iter(representatives))
             ):
                 representatives.append(addition)
     if len(representatives) != 1:
@@ -303,15 +320,16 @@ def _addition_carry_predicate_8616(
 
 
 def _definition_carry_predicate_8616(
-    nodes: tuple[object, ...],
+    nodes: object,
     fact: CarryBorrowBitLoweringFact8616,
     ownership: CFGOwnershipArtifact,
 ) -> CBinaryOp | CarryBorrowBitLoweringFailure8616:
     """Select one coherent carry predicate from one reaching definition."""
+    node: object
     low_site = _low_site_8616(fact)
     candidates = tuple(
         node
-        for node in nodes
+        for node in iter(nodes)
         if isinstance(node, CBinaryOp)
         and node.op == "CmpLT"
         and node_matches_instruction_site_8616(node, low_site, ownership)
@@ -321,7 +339,7 @@ def _definition_carry_predicate_8616(
             return _addition_carry_predicate_8616(nodes, fact, ownership)
         return _subtraction_borrow_predicate_8616(nodes, fact, ownership)
     coherent = tuple(
-        node for node in candidates if _predicate_matches_arithmetic_8616(node, nodes, fact, ownership)
+        node for node in iter(candidates) if _predicate_matches_arithmetic_8616(node, nodes, fact, ownership)
     )
     if not coherent:
         if fact.kind is CarryBorrowKind8616.SUB_WITH_BORROW:
@@ -333,7 +351,7 @@ def _definition_carry_predicate_8616(
             return canonical
     representatives: list[CBinaryOp] = []
     for node in coherent:
-        if not any(_same_c_expression_8616(node, existing) for existing in representatives):
+        if not any(_same_c_expression_8616(node, existing) for existing in iter(representatives)):
             representatives.append(node)
     if len(representatives) == 1:
         return representatives[0]
@@ -341,17 +359,18 @@ def _definition_carry_predicate_8616(
 
 
 def carry_bit_predicate_8616(
-    definition_nodes: tuple[tuple[object, ...], ...],
+    definition_nodes: object,
     fact: CarryBorrowBitLoweringFact8616,
     ownership: CFGOwnershipArtifact,
 ) -> CBinaryOp | CarryBorrowBitLoweringFailure8616:
     """Require every reaching definition to project one equivalent predicate."""
+    nodes: object
     predicates: list[CBinaryOp] = []
     for nodes in definition_nodes:
         predicate = _definition_carry_predicate_8616(nodes, fact, ownership)
         if isinstance(predicate, CarryBorrowBitLoweringFailure8616):
             return predicate
-        if not any(_same_c_expression_8616(predicate, existing) for existing in predicates):
+        if not any(_same_c_expression_8616(predicate, existing) for existing in iter(predicates)):
             predicates.append(predicate)
     return (
         predicates[0]
@@ -360,8 +379,9 @@ def carry_bit_predicate_8616(
     )
 
 
+@cython.ccall
 def carry_bit_predicate_from_arithmetic_8616(
-    nodes: tuple[object, ...],
+    nodes: object,
     fact: CarryBorrowBitLoweringFact8616,
     ownership: CFGOwnershipArtifact,
 ) -> CBinaryOp | CarryBorrowBitLoweringFailure8616:

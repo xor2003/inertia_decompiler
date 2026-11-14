@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove a leaf callee's returning SP transfer from its complete IR.
 
 Layer: Alias.
@@ -10,6 +11,8 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -18,6 +21,8 @@ from inertia.ir.ir_boundary_cfg import IRBoundaryCoverageResult8616
 
 from .bp_preservation import _return_blocks_8616
 from .segment_stack_restore import _solve_stack_states
+import dataclasses
+import operator
 
 
 class CalleeStackPointerFailure8616(StrEnum):
@@ -31,68 +36,73 @@ class CalleeStackPointerFailure8616(StrEnum):
     RETURN_DELTAS_DISAGREE = "return_deltas_disagree"
 
 
-def _word_delta_8616(value: int) -> int:
+@cython.ccall
+def _word_delta_8616(value: cython.longlong) -> cython.longlong:
     """Express one modular word displacement in signed affine coordinates."""
     return ((value + 0x8000) & 0xFFFF) - 0x8000
 
 
 def _return_transfers_8616(
     coverage: IRBoundaryCoverageResult8616,
-) -> tuple[CalleeStackPointerFailure8616 | None, tuple[tuple[int, int], ...]]:
+) -> tuple[CalleeStackPointerFailure8616 | None, tuple[tuple[cython.longlong, cython.longlong], ...]]:
     """Collect a common returning delta without assuming balanced bodies."""
+    delta: object
+    exits: object
+    block: object
     if not coverage.complete:
         return CalleeStackPointerFailure8616.COVERAGE_INCOMPLETE, ()
     artifact = coverage.artifact
-    if any(artifact.function_addr in block.successor_addrs for block in artifact.blocks):
+    if any(artifact.function_addr in block.successor_addrs for block in iter(artifact.blocks)):
         return CalleeStackPointerFailure8616.ENTRY_REENTERED, ()
     if any(row.op in {"CALL", "INT", "INTERRUPT", "SYSCALL", "IRET"}
-           for block in artifact.blocks for row in block.instrs):
+           for block in iter(artifact.blocks) for row in iter(block.instrs)):
         return CalleeStackPointerFailure8616.EXTERNAL_EFFECT, ()
     exits = _return_blocks_8616(artifact)
     if exits is None:
         return CalleeStackPointerFailure8616.RETURN_UNPROVEN, ()
     states = _solve_stack_states(artifact)
-    transfers: list[tuple[int, int]] = []
+    transfers: list[tuple[cython.longlong, cython.longlong]] = []
     for block in sorted(exits, key=lambda item: item.addr):
         delta = states[block.addr].sp_delta
         if delta is None:
             return CalleeStackPointerFailure8616.STACK_POINTER_UNKNOWN, ()
         transfers.append((block.addr, _word_delta_8616(delta)))
     retained = tuple(transfers)
-    if len({delta for _, delta in retained}) != 1:
+    if len({delta for _, delta in iter(retained)}) != 1:
         return CalleeStackPointerFailure8616.RETURN_DELTAS_DISAGREE, retained
     return None, retained
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CalleeStackPointerResult8616:
     """A source-bound whole-callee transfer, or one explicit refusal."""
 
     coverage: IRBoundaryCoverageResult8616
     failure: CalleeStackPointerFailure8616 | None
-    return_transfers: tuple[tuple[int, int], ...]
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    return_transfers: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
-    def _retained_transfer_is_accepted(self) -> bool:
+    def _retained_transfer_is_accepted(self) -> cython.bint:
         """Require an accepted publication, independently of its current source."""
         counts = (self.raw_fact_count, self.normalized_fact_count,
                   self.classified_fact_count, self.materialized_count, self.failure_count)
         return bool(
             self.failure is None and counts == (1, 1, 1, 1, 0)
-            and all(type(count) is int for count in counts)
+            and all(type(count) is int for count in iter(counts))
         )
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Recheck body identity and transfers before authorizing a consumer."""
+        failure: object
         if not self._retained_transfer_is_accepted():
             return False
         failure, transfers = _return_transfers_8616(self.coverage)
-        return failure is None and transfers == self.return_transfers
+        return failure is None and operator.eq(transfers, self.return_transfers)
 
     @property
     def observed_return_sp_delta(self) -> int | None:
@@ -111,10 +121,12 @@ class CalleeStackPointerResult8616:
         return self.observed_return_sp_delta if self.complete else None
 
 
+@cython.ccall
 def prove_callee_stack_pointer_8616(
     coverage: IRBoundaryCoverageResult8616,
 ) -> CalleeStackPointerResult8616:
     """Publish one retained transfer or an atomic conservative non-result."""
+    failure: object
     failure, transfers = _return_transfers_8616(coverage)
     accepted = int(failure is None)
     return CalleeStackPointerResult8616(

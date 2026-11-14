@@ -79,3 +79,4 @@ signature_catalogs/catalog_specs.pickle
 /*.whl
 /inertia-recompile-*/
 /inertia-selected-recompile-*/
+**/*.cpython-*.so

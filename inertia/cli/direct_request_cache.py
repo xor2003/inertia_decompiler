@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Validated cache for identical direct-address CLI requests.
 
 Layer: CLI/fallback/reporting.
@@ -11,6 +12,8 @@ recovery artifacts.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import copy
 import os
@@ -31,6 +34,8 @@ from inertia.cli.direct_request_identity import (
     DirectRequestCacheInputs8616,
     build_direct_request_cache_key_8616,
 )
+import dataclasses
+import operator
 
 _EXPECTED_VALIDATION_STAGES_8616: tuple[str, ...] = ("structuring", "postprocess")
 
@@ -54,39 +59,41 @@ class DirectRequestCacheReason8616(StrEnum):
     NO_KEY = "no_key"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectRequestCacheArtifact8616:
     """Accepted generated-C result independent of live angr objects."""
 
-    function_addr: int
-    function_name: str
-    arch_name: str
-    entry_point: int
-    runtime_header: str
-    startup_diagnostic_lines: tuple[str, ...]
-    payload: str
-    tail_validation: dict[str, object]
+    function_addr: cython.longlong
+    function_name: object
+    arch_name: object
+    entry_point: cython.longlong
+    runtime_header: object
+    startup_diagnostic_lines: object
+    payload: object
+    tail_validation: object
     elapsed: float | None
     block_count: int | None
     byte_count: int | None
-    validated_payload_hash: str
-    gcc_checked_payload_hash: str
+    validated_payload_hash: object
+    gcc_checked_payload_hash: object
     failure_family_snapshot: FailureFamilySnapshot
-    diagnostic_output: str
-    segment_program_function_evidence_record: dict[str, object] | None
+    diagnostic_output: object
+    segment_program_function_evidence_record: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectRequestCacheLookup8616:
     """Cache verdict, key, and accepted artifact for one request."""
 
     verdict: DirectRequestCacheVerdict8616
     reason: DirectRequestCacheReason8616
-    key: dict[str, object] | None
+    key: object
     artifact: DirectRequestCacheArtifact8616 | None
 
 
+@cython.ccall
 def _tail_stage_diagnostic_status_8616(stage: object) -> object:
+    status: object
     if not isinstance(stage, dict):
         return type(stage).__name__
     status = stage.get("status")
@@ -96,20 +103,20 @@ def _tail_stage_diagnostic_status_8616(stage: object) -> object:
 
 
 def render_direct_request_tail_snapshot_diagnostic_8616(
-    snapshot: dict[str, object] | None,
+    snapshot: object,
 ) -> str:
     """Render the stable direct-cache diagnostic from typed validation state."""
     if snapshot is None:
-        merged_stages: list[str] | str = "NOT_DICT"
-        merged_statuses: dict[str, object] | str = "N/A"
+        merged_stages: object = "NOT_DICT"
+        merged_statuses: object = "N/A"
     else:
-        merged_stages = [name for name in _EXPECTED_VALIDATION_STAGES_8616 if name in snapshot]
+        merged_stages = [name for name in iter(_EXPECTED_VALIDATION_STAGES_8616) if name in snapshot]
         merged_stages.extend(
-            sorted(name for name in snapshot if name not in _EXPECTED_VALIDATION_STAGES_8616)
+            sorted(name for name in iter(snapshot) if name not in _EXPECTED_VALIDATION_STAGES_8616)
         )
         merged_statuses = {
             name: _tail_stage_diagnostic_status_8616(snapshot[name])
-            for name in merged_stages
+            for name in iter(merged_stages)
         }
     return (
         "[dbg] direct_decompile_job snapshot: project_fb_stages=NOT_DICT "
@@ -118,18 +125,26 @@ def render_direct_request_tail_snapshot_diagnostic_8616(
     )
 
 
-def _optional_int(record: dict[str, object], name: str) -> int | None:
+@cython.ccall
+def _optional_int(record: object, name: object) -> int | None:
+    value: object
     value = record.get(name)
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
-def _optional_float(record: dict[str, object], name: str) -> float | None:
+@cython.ccall
+def _optional_float(record: object, name: object) -> float | None:
+    value: object
     value = record.get(name)
     return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
 
-def _tail_validation_record_passed_8616(snapshot: object) -> bool:
+@cython.ccall
+def _tail_validation_record_passed_8616(snapshot: object) -> cython.bint:
     """Mirror the authoritative X86 validator for lightweight cache refusal."""
+    entry: object
+    status: object
+    stage: object
     if not isinstance(snapshot, dict):
         return False
     for stage in _EXPECTED_VALIDATION_STAGES_8616:
@@ -147,9 +162,19 @@ def _tail_validation_record_passed_8616(snapshot: object) -> bool:
 
 
 def _validated_scalar_fields_8616(
-    record: dict[str, object],
-) -> tuple[int, str, str, int, str, list[str], str, str, str, object] | None:
+    record: object,
+) -> object:
     """Validate the record's scalar/header fields and return them in order."""
+    arch_name: object
+    entry_point: object
+    function_addr: object
+    function_name: object
+    gcc_hash: object
+    payload: object
+    raw_tail_validation: object
+    runtime_header: object
+    startup_diagnostic_lines: object
+    validated_hash: object
     function_addr = record.get("function_addr")
     function_name = record.get("function_name")
     arch_name = record.get("arch_name")
@@ -171,7 +196,7 @@ def _validated_scalar_fields_8616(
     if not isinstance(runtime_header, str):
         return None
     if not isinstance(startup_diagnostic_lines, list) or not all(
-        isinstance(line, str) and bool(line) for line in startup_diagnostic_lines
+        isinstance(line, str) and bool(line) for line in iter(startup_diagnostic_lines)
     ):
         return None
     if not isinstance(payload, str) or not payload.strip():
@@ -192,12 +217,13 @@ def _validated_scalar_fields_8616(
     )
 
 
+@cython.ccall
 def _payload_proof_ok_8616(
-    payload: str,
-    validated_hash: str,
-    gcc_hash: str,
+    payload: object,
+    validated_hash: object,
+    gcc_hash: object,
     raw_tail_validation: object,
-) -> bool:
+) -> cython.bint:
     """Return True when integrity, tail validation, and text review all pass."""
     integrity = verify_accepted_payload_integrity_8616(
         payload,
@@ -213,9 +239,14 @@ def _payload_proof_ok_8616(
     return not assess_final_generated_c_text(payload).reject_as_decompiled
 
 
-def _artifact_from_record_8616(record: dict[str, object]) -> DirectRequestCacheArtifact8616 | None:
+@cython.ccall
+def _artifact_from_record_8616(record: object) -> DirectRequestCacheArtifact8616 | None:
     """Decode only a record whose complete acceptance proof remains valid."""
-    if record.get("schema") != DIRECT_REQUEST_CACHE_SCHEMA_8616 or record.get("status") != "ok":
+    diagnostic_output: object
+    failure_snapshot: object
+    fields: object
+    raw_segment_evidence: object
+    if operator.ne(record.get("schema"), DIRECT_REQUEST_CACHE_SCHEMA_8616) or record.get("status") != "ok":
         return None
     fields = _validated_scalar_fields_8616(record)
     if fields is None:
@@ -269,12 +300,16 @@ def _artifact_from_record_8616(record: dict[str, object]) -> DirectRequestCacheA
     )
 
 
+@cython.ccall
 def load_direct_request_cache_8616(
     inputs: DirectRequestCacheInputs8616,
     *,
-    enabled: bool,
+    enabled: cython.bint,
 ) -> DirectRequestCacheLookup8616:
     """Load one accepted artifact or return an explicit typed miss/refusal."""
+    artifact: object
+    key: object
+    record: object
     key = build_direct_request_cache_key_8616(inputs)
     if key is None:
         return DirectRequestCacheLookup8616(
@@ -314,10 +349,11 @@ def load_direct_request_cache_8616(
     )
 
 
+@cython.ccall
 def store_direct_request_cache_8616(
     lookup: DirectRequestCacheLookup8616,
     artifact: DirectRequestCacheArtifact8616,
-) -> bool:
+) -> cython.bint:
     """Persist one artifact only after revalidating its acceptance record."""
     if lookup.key is None or lookup.verdict is DirectRequestCacheVerdict8616.DISABLED:
         return False

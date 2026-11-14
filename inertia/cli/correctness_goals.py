@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery/reporting.
 
 Responsibility: describe correctness goals and completion signals for decompiler governance.
@@ -11,21 +12,23 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import cython
 
 from dataclasses import dataclass
+import dataclasses
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CorrectnessGoalSpec:
     """Governance descriptor for one decompiler correctness goal."""
 
-    code: str
-    title: str
-    priority: str
-    status: str
-    deterministic_goal: str
-    owner_surfaces: tuple[str, ...]
-    completion_signal: str
+    code: object
+    title: object
+    priority: object
+    status: object
+    deterministic_goal: object
+    owner_surfaces: object
+    completion_signal: object
 
 
 CORRECTNESS_GOALS: tuple[CorrectnessGoalSpec, ...] = (
@@ -110,17 +113,17 @@ def describe_x86_16_correctness_goals() -> tuple[tuple[str, str, str, str, tuple
             goal.owner_surfaces,
             goal.completion_signal,
         )
-        for goal in CORRECTNESS_GOALS
+        for goal in iter(CORRECTNESS_GOALS)
     )
 
 
-def summarize_x86_16_correctness_goals() -> dict[str, object]:
+def summarize_x86_16_correctness_goals() -> object:
     """Return aggregate completion counters for correctness goals."""
 
     def _impl() -> dict[str, object]:
-        landed = sum(1 for goal in CORRECTNESS_GOALS if goal.status == "landed")
-        partial = sum(1 for goal in CORRECTNESS_GOALS if goal.status == "partial")
-        open_ = sum(1 for goal in CORRECTNESS_GOALS if goal.status == "open")
+        landed = sum(1 for goal in iter(CORRECTNESS_GOALS) if goal.status == "landed")
+        partial = sum(1 for goal in iter(CORRECTNESS_GOALS) if goal.status == "partial")
+        open_ = sum(1 for goal in iter(CORRECTNESS_GOALS) if goal.status == "open")
         strict_percent = round(landed / len(CORRECTNESS_GOALS) * 100, 2) if CORRECTNESS_GOALS else 0.0
         weighted_percent = (
             round((landed + 0.5 * partial) / len(CORRECTNESS_GOALS) * 100, 2) if CORRECTNESS_GOALS else 0.0
@@ -132,9 +135,9 @@ def summarize_x86_16_correctness_goals() -> dict[str, object]:
             "open": open_,
             "strict_percent": strict_percent,
             "weighted_percent": weighted_percent,
-            "landed_codes": tuple(goal.code for goal in CORRECTNESS_GOALS if goal.status == "landed"),
-            "partial_codes": tuple(goal.code for goal in CORRECTNESS_GOALS if goal.status == "partial"),
-            "open_codes": tuple(goal.code for goal in CORRECTNESS_GOALS if goal.status == "open"),
+            "landed_codes": tuple(goal.code for goal in iter(CORRECTNESS_GOALS) if goal.status == "landed"),
+            "partial_codes": tuple(goal.code for goal in iter(CORRECTNESS_GOALS) if goal.status == "partial"),
+            "open_codes": tuple(goal.code for goal in iter(CORRECTNESS_GOALS) if goal.status == "open"),
         }
 
     return _impl()

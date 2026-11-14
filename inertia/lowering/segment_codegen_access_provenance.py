@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Resolve exact segment-access provenance from structured-codegen tags.
 
 Layer: Types/Lowering.
@@ -9,6 +10,7 @@ This module does not infer storage identity or inspect assembly/rendered C.
 """
 
 from __future__ import annotations
+import cython
 
 from typing import Any, cast
 
@@ -18,6 +20,7 @@ from inertia.ir.segment_contract import (
 )
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 from inertia.lowering.structured_tags import copy_structured_tags_8616
+import operator
 
 __all__ = [
     "instruction_addrs_from_node_8616",
@@ -25,11 +28,16 @@ __all__ = [
 ]
 
 
-def instruction_addrs_from_node_8616(node: object) -> frozenset[int]:
+def instruction_addrs_from_node_8616(node: object) -> frozenset[cython.longlong]:
     """Collect exact instruction provenance from a dynamic angr C subtree."""
+    candidate: object
 
-    def collect_owner_tags(owner: object, addresses: set[int]) -> None:
+    def collect_owner_tags(owner: object, addresses: object) -> None:
         """Collect exact tags from one dynamic AST or wrapped dirty owner."""
+        source_addrs: object
+        tags: object
+        value: object
+        key: object
         dynamic_owner = cast(Any, owner)
         try:
             tags = copy_structured_tags_8616(dynamic_owner.tags)
@@ -43,9 +51,9 @@ def instruction_addrs_from_node_8616(node: object) -> frozenset[int]:
                 addresses.add(value)
         source_addrs = tags.get("inertia_source_instruction_addrs", ())
         if isinstance(source_addrs, tuple):
-            addresses.update(value for value in source_addrs if isinstance(value, int))
+            addresses.update(value for value in iter(source_addrs) if isinstance(value, int))
 
-    addresses: set[int] = set()
+    addresses: set[cython.longlong] = set()
     for candidate in _iter_c_nodes_deep_8616(node):
         collect_owner_tags(candidate, addresses)
         try:
@@ -56,19 +64,22 @@ def instruction_addrs_from_node_8616(node: object) -> frozenset[int]:
     return frozenset(addresses)
 
 
+@cython.ccall
 def unique_access_instruction_in_tagged_blocks_8616(
     contract: SegmentFunctionContract,
     node: object,
     *,
-    access_kind: SegmentAccessKind | None,
-    segment_register: str,
+    access_kind: object,
+    segment_register: object,
     offset: int | None,
     width: int | None,
-) -> frozenset[int]:
+) -> object:
     """Resolve one unique matching access instruction from exact block tags."""
+    tags: object
+    candidate: object
     if not isinstance(offset, int) or not isinstance(width, int) or width <= 0:
         return frozenset()
-    block_addrs: set[int] = set()
+    block_addrs: set[cython.longlong] = set()
     for candidate in _iter_c_nodes_deep_8616(node):
         dynamic_candidate = cast(Any, candidate)
         try:
@@ -86,10 +97,10 @@ def unique_access_instruction_in_tagged_blocks_8616(
     }
     instruction_addrs = {
         fact.instruction_addr
-        for fact in contract.accesses
+        for fact in iter(contract.accesses)
         if isinstance(fact.instruction_addr, int)
         and fact.block_addr in block_addrs
-        and fact.segment_register == segment_register
+        and operator.eq(fact.segment_register, segment_register)
         and (access_kind is None or fact.kind is access_kind)
         and fact.address.size > 0
         and {

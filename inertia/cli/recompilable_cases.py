@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recompilable output.
 
 Responsibility: define bounded generated-C syntax/shape cases and their expected anchors.
@@ -11,10 +12,12 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import cython
 
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
+import dataclasses
 
 __all__ = [
     "RecompilableSubsetCase",
@@ -26,16 +29,16 @@ __all__ = [
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RecompilableSubsetCase:
     """One bounded generated-C recompilation fixture and its output anchors."""
 
-    name: str
-    asm: str
-    expected_kind: str
-    note: str
+    name: object
+    asm: object
+    expected_kind: object
+    note: object
     cod_path: Path | None = None
-    proc_name: str | None = None
+    proc_name: object = None
     proc_kind: str = "NEAR"
     expected_c_anchors: tuple[str, ...] = ()
     forbidden_c_anchors: tuple[str, ...] = ()
@@ -154,7 +157,8 @@ _RECOMPILABLE_SUBSET_CASES: Final[tuple[RecompilableSubsetCase, ...]] = (
 )
 
 
-def get_x86_16_recompilable_subset_cases() -> tuple[RecompilableSubsetCase, ...]:
+@cython.ccall
+def get_x86_16_recompilable_subset_cases() -> object:
     """Return the immutable recompilable subset fixture list."""
     return _RECOMPILABLE_SUBSET_CASES
 
@@ -167,5 +171,5 @@ def describe_x86_16_recompilable_subset() -> tuple[dict[str, str], ...]:
             "expected_kind": case.expected_kind,
             "note": case.note,
         }
-        for case in _RECOMPILABLE_SUBSET_CASES
+        for case in iter(_RECOMPILABLE_SUBSET_CASES)
     )

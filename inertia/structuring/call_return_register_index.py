@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Index structured register-return assignments for one unchanged AST root.
 
 Layer: Structuring.
@@ -12,6 +13,8 @@ work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -25,44 +28,52 @@ from angr.sim_variable import SimRegisterVariable
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 from inertia.lowering.structured_tags import copy_structured_tags_8616
 from inertia.semantics.callsite_summary import structured_callsite_addr_8616
+import dataclasses
+import builtins
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedCallReturnRegisterAssignment8616:
     """One bound register assignment retained without changing the C AST."""
 
     assignment: CAssignment
     call: CFunctionCall
-    register_slice: tuple[int, int]
-    callsite_addr: int
+    register_slice: object
+    callsite_addr: cython.longlong
     assignment_ins_addr: int | None
-    rhs_is_call: bool
+    rhs_is_call: cython.bint
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class CallReturnRegisterIndex8616:
     """Assignment projection valid only while its exact root is unchanged."""
 
     root: object
-    assignments: tuple[IndexedCallReturnRegisterAssignment8616, ...]
-    bound_callsite_counts: dict[int, int]
-    valid: bool = True
+    assignments: object
+    bound_callsite_counts: object
+    valid: cython.bint = True
 
-    def matches_root(self, root: object) -> bool:
+    @cython.ccall
+    def matches_root(self, root: object) -> cython.bint:
         """Return whether this projection belongs to the supplied AST root."""
         return self.valid and self.root is root
 
-    def bound_callsite_count(self, callsite_addr: int) -> int:
+    @cython.ccall
+    def bound_callsite_count(self, callsite_addr: cython.longlong) -> cython.longlong:
         """Return the bound-call count captured for one machine callsite."""
         return self.bound_callsite_counts.get(callsite_addr, 0)
 
+    @cython.ccall
     def invalidate(self) -> None:
         """Prevent reuse after a relevant structured-AST mutation."""
         self.valid = False
 
 
+@cython.ccall
 def _assignment_ins_addr_8616(assignment: CAssignment) -> int | None:
     """Return the exact instruction tag carried by one assignment."""
+    ins_addr: object
+    tags: object
     tags = copy_structured_tags_8616(assignment.tags)
     if tags is None:
         return None
@@ -70,10 +81,12 @@ def _assignment_ins_addr_8616(assignment: CAssignment) -> int | None:
     return ins_addr if isinstance(ins_addr, int) else None
 
 
+@cython.ccall
 def build_call_return_register_index_8616(root: object) -> CallReturnRegisterIndex8616:
     """Build one deterministic read-only assignment projection."""
+    node: object
     assignments: list[IndexedCallReturnRegisterAssignment8616] = []
-    bound_callsite_counts: dict[int, int] = {}
+    bound_callsite_counts: dict[cython.longlong, cython.longlong] = {}
     for node in _iter_c_nodes_deep_8616(root):
         if isinstance(node, CFunctionCall):
             callsite_addr = structured_callsite_addr_8616(node)
@@ -92,7 +105,7 @@ def build_call_return_register_index_8616(root: object) -> CallReturnRegisterInd
         calls = tuple(
             {
                 id(call): call
-                for call in _iter_c_nodes_deep_8616(node.rhs)
+                for call in builtins.iter(_iter_c_nodes_deep_8616(node.rhs))
                 if isinstance(call, CFunctionCall)
             }.values()
         )

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Collect aggregate-pointee callee evidence from binary project state.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -33,6 +36,7 @@ from .pointer_parameter_object_type_contracts import (
 from .pointer_parameter_object_types import (
     recover_pointer_parameter_object_types_8616,
 )
+import builtins
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,6 +45,7 @@ def _project_pointer_object_types_8616(
     evidence: PointerParameterObjectTypeEvidence8616,
 ) -> CalleeGlobalObjectInterfaceEvidence8616:
     """Project authoritative typed facts to the existing codegen consumer."""
+    family_base_offset: object
     if not evidence.complete or not evidence.facts:
         return CalleeGlobalObjectInterfaceEvidence8616(
             target_addr=evidence.function_addr,
@@ -55,10 +60,10 @@ def _project_pointer_object_types_8616(
             callsite_addrs=(),
             source_facts=(),
         )
-    families = {fact.family_base_offset for fact in evidence.facts}
+    families = {fact.family_base_offset for fact in iter(evidence.facts)}
     shapes = {
         (fact.layout.element_width, fact.layout.field_offsets)
-        for fact in evidence.facts
+        for fact in iter(evidence.facts)
     }
     if len(families) != 1 or len(shapes) != 1:
         return CalleeGlobalObjectInterfaceEvidence8616(
@@ -75,8 +80,8 @@ def _project_pointer_object_types_8616(
                 sorted(
                     {
                         view.source.callsite_addr
-                        for fact in evidence.facts
-                        for view in fact.views
+                        for fact in iter(evidence.facts)
+                        for view in iter(fact.views)
                     }
                 )
             ),
@@ -93,7 +98,7 @@ def _project_pointer_object_types_8616(
             index_identity=(
                 tuple(
                     (term.source, term.coefficient)
-                    for term in view.source.effect.near_offset.terms
+                    for term in iter(view.source.effect.near_offset.terms)
                 )
                 or ("constant",)
             ),
@@ -101,21 +106,21 @@ def _project_pointer_object_types_8616(
             element_width=fact.layout.element_width,
             field_offsets=fact.layout.field_offsets,
         )
-        for fact in evidence.facts
-        for view in sorted(
+        for fact in iter(evidence.facts)
+        for view in builtins.iter(sorted(
             fact.views,
             key=lambda item: (
                 item.source.callsite_addr,
                 item.source.caller_addr,
             ),
-        )
+        ))
     )
     return CalleeGlobalObjectInterfaceEvidence8616(
         target_addr=evidence.function_addr,
         verdict=CalleeGlobalObjectInterfaceVerdict8616.COMPLETE,
         family_base_offset=family_base_offset,
         pointer_argument_indices=tuple(
-            sorted(fact.logical_index for fact in evidence.facts)
+            sorted(fact.logical_index for fact in iter(evidence.facts))
         ),
         raw_fact_count=evidence.stats.raw_fact_count,
         normalized_fact_count=evidence.stats.normalized_fact_count,
@@ -123,7 +128,7 @@ def _project_pointer_object_types_8616(
         materialized_count=0,
         failure_count=0,
         callsite_addrs=tuple(
-            sorted({fact.callsite_addr for fact in source_facts})
+            sorted({fact.callsite_addr for fact in iter(source_facts)})
         ),
         source_facts=source_facts,
     )
@@ -131,10 +136,11 @@ def _project_pointer_object_types_8616(
 
 def collect_callee_global_object_interface_evidence_8616(
     project: object,
-    target_addr: int,
+    target_addr: cython.longlong,
     layout_evidence: GlobalObjectLayoutEvidence8616,
 ) -> CalleeGlobalObjectInterfaceEvidence8616:
     """Collect one complete aggregate-pointee interface census."""
+    contract: object
     contract = accepted_function_storage_contract_8616(project, target_addr)
     if contract is not None and contract.pointer_memory_outputs:
         typed_evidence = recover_pointer_parameter_object_types_8616(
@@ -182,7 +188,7 @@ def collect_callee_global_object_interface_evidence_8616(
             count_evidence.verdict,
             tuple(
                 (summary.callsite_addr, summary.push_arg_sources)
-                for summary in count_evidence.callsite_summaries
+                for summary in iter(count_evidence.callsite_summaries)
             ),
             evidence,
         )

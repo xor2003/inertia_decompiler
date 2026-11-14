@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Structured scope contracts for proven carry/borrow bit placement.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import Counter
 from dataclasses import dataclass
@@ -24,56 +27,64 @@ from inertia.structuring.structuring_cfg_ownership import (
 )
 
 from .carry_borrow_bit_contracts import CarryBorrowBitLoweringFact8616, CarryBorrowBitLoweringFailure8616
+import dataclasses
+import operator
+import builtins
 
-type VariableKey8616 = tuple[str, int]
-type ControlArm8616 = tuple[int, str, int]
-type ControlPath8616 = tuple[ControlArm8616, ...]
+VariableKey8616 = typing.TypeAliasType("VariableKey8616", tuple[str, int])
+ControlArm8616 = typing.TypeAliasType("ControlArm8616", tuple[int, str, int])
+ControlPath8616 = typing.TypeAliasType("ControlPath8616", tuple[ControlArm8616, ...])
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class CarryBitOccurrence8616:
     """One exact high-instruction carry mask and its mutable statement owner."""
 
     root: object
     container: structured_c.CStatements
-    statement_index: int
+    statement_index: cython.longlong
     node: structured_c.CBinaryOp
     flag_variable: structured_c.CVariable
-    mask_depth: int
+    mask_depth: cython.longlong
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class InlinedCarryBitOccurrence8616:
     """One low carry projection inlined into an exact high-instruction expression."""
 
     root: object
     container: structured_c.CStatements
-    statement_index: int
+    statement_index: cython.longlong
     node: structured_c.CBinaryOp
     high_node: structured_c.CBinaryOp
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class CarryBitDefinitionSelection8616:
     """Definitions proven to reach one use directly or through exclusive arms."""
 
-    definitions: tuple[structured_c.CAssignment, ...]
-    joined_alternatives: bool
+    definitions: object
+    joined_alternatives: cython.bint
 
 
+@cython.ccall
 def variable_key_8616(variable: structured_c.CVariable) -> VariableKey8616 | None:
     """Return stable SSA identity at the third-party C-AST boundary."""
+    carrier: object
     if isinstance(variable.vvar_id, int):
         return "vvar", variable.vvar_id
     carrier = variable.unified_variable if variable.unified_variable is not None else variable.variable
     return ("variable", id(carrier)) if carrier is not None else None
 
 
+@cython.ccall
 def _tagged_instruction_site_8616(
     node: object,
     ownership: CFGOwnershipArtifact,
 ) -> CFGInstructionSite8616 | CFGInstructionReachability8616:
     """Read one exact instruction tag at the dynamic third-party C-AST boundary."""
+    block_addr: object
+    ins_addr: object
     if not hasattr(node, "tags"):
         return CFGInstructionReachability8616.OWNER_MISSING
     tags = cast(dict[str, object], node.tags)
@@ -93,6 +104,7 @@ def _tagged_instruction_site_8616(
     return site
 
 
+@cython.ccall
 def node_instruction_site_8616(
     node: object,
     ownership: CFGOwnershipArtifact,
@@ -113,11 +125,11 @@ def node_instruction_site_8616(
 
 
 def _snapshot_region_id_8616(
-    block_addr: int,
+    block_addr: cython.longlong,
     ownership: CFGOwnershipArtifact,
 ) -> int | CFGInstructionReachability8616:
     """Resolve one block address to a unique published CFG region."""
-    owners = tuple(node for node in ownership.snapshot.nodes if node.block_addr == block_addr)
+    owners = tuple(node for node in iter(ownership.snapshot.nodes) if operator.eq(node.block_addr, block_addr))
     if not owners:
         return CFGInstructionReachability8616.OWNER_MISSING
     if len(owners) != 1:
@@ -125,14 +137,17 @@ def _snapshot_region_id_8616(
     return owners[0].region_id
 
 
+@cython.ccall
 def _snapshot_region_reachability_8616(
-    source_region_id: int,
-    target_region_id: int,
+    source_region_id: cython.longlong,
+    target_region_id: cython.longlong,
     ownership: CFGOwnershipArtifact,
 ) -> CFGInstructionReachability8616:
     """Prove reachability through unique immutable CFG region identities."""
-    nodes_by_id = {node.region_id: node for node in ownership.snapshot.nodes}
-    if len(nodes_by_id) != len(ownership.snapshot.nodes):
+    region_id: object
+    successor_id: object
+    nodes_by_id = {node.region_id: node for node in iter(ownership.snapshot.nodes)}
+    if operator.ne(len(nodes_by_id), len(ownership.snapshot.nodes)):
         return CFGInstructionReachability8616.OWNER_AMBIGUOUS
     if source_region_id not in nodes_by_id or target_region_id not in nodes_by_id:
         return CFGInstructionReachability8616.OWNER_MISSING
@@ -140,7 +155,7 @@ def _snapshot_region_reachability_8616(
         return CFGInstructionReachability8616.REACHES
 
     pending = [source_region_id]
-    visited: set[int] = set()
+    visited: set[cython.longlong] = set()
     while pending:
         region_id = pending.pop()
         if region_id in visited:
@@ -154,6 +169,7 @@ def _snapshot_region_reachability_8616(
     return CFGInstructionReachability8616.DOES_NOT_REACH
 
 
+@cython.ccall
 def _instruction_reachability_8616(
     source_site: CFGInstructionSite8616,
     target_site: CFGInstructionSite8616,
@@ -178,18 +194,19 @@ def _instruction_reachability_8616(
     return _snapshot_region_reachability_8616(source_region_id, target_region_id, ownership)
 
 
+@cython.ccall
 def node_matches_instruction_site_8616(
     node: object,
     site: CFGInstructionSite8616,
     ownership: CFGOwnershipArtifact,
-) -> bool:
+) -> cython.bint:
     """Return whether one C-AST node has one exact or proven split-region owner."""
     projected = _tagged_instruction_site_8616(node, ownership)
-    if not isinstance(projected, CFGInstructionSite8616) or projected.ins_addr != site.ins_addr:
+    if not isinstance(projected, CFGInstructionSite8616) or operator.ne(projected.ins_addr, site.ins_addr):
         return False
-    if projected.block_addr == site.block_addr:
+    if operator.eq(projected.block_addr, site.block_addr):
         return not isinstance(_snapshot_region_id_8616(site.block_addr, ownership), CFGInstructionReachability8616)
-    if ownership.instruction_sites(site.ins_addr) or projected.block_addr != projected.ins_addr:
+    if ownership.instruction_sites(site.ins_addr) or operator.ne(projected.block_addr, projected.ins_addr):
         return False
     source_region_id = _snapshot_region_id_8616(site.block_addr, ownership)
     if isinstance(source_region_id, CFGInstructionReachability8616):
@@ -203,10 +220,12 @@ def node_matches_instruction_site_8616(
     )
 
 
+@cython.ccall
 def statement_containers_8616(root: object) -> tuple[structured_c.CStatements, ...]:
     """Return each unique mutable statement container in deterministic order."""
+    node: object
     containers: list[structured_c.CStatements] = []
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     for node in _iter_c_node_occurrences_8616(root):
         if isinstance(node, structured_c.CStatements) and id(node) not in seen:
             seen.add(id(node))
@@ -214,10 +233,14 @@ def statement_containers_8616(root: object) -> tuple[structured_c.CStatements, .
     return tuple(containers)
 
 
+@cython.ccall
 def assignment_map_8616(
     occurrence: CarryBitOccurrence8616,
 ) -> dict[VariableKey8616, tuple[structured_c.CAssignment, ...]]:
     """Index exact SSA definitions function-wide and legacy identities locally."""
+    container: object
+    statement: object
+    statement_index: object
     grouped: dict[VariableKey8616, list[structured_c.CAssignment]] = {}
     for container in statement_containers_8616(occurrence.root):
         for statement_index, statement in enumerate(container.statements):
@@ -230,11 +253,13 @@ def assignment_map_8616(
             local_predecessor = container is occurrence.container and statement_index < occurrence.statement_index
             if key[0] == "vvar" or local_predecessor:
                 grouped.setdefault(key, []).append(statement)
-    return {key: tuple(items) for key, items in grouped.items()}
+    return {key: tuple(items) for key, items in builtins.iter(grouped.items())}
 
 
+@cython.ccall
 def read_counts_8616(root: object) -> Counter[VariableKey8616]:
     """Count function-wide C-variable reads, excluding assignment lvalues."""
+    node: object
     counts: Counter[VariableKey8616] = Counter()
     for node in _iter_c_node_occurrences_8616(root):
         if isinstance(node, structured_c.CVariable) and (key := variable_key_8616(node)) is not None:
@@ -248,11 +273,14 @@ def read_counts_8616(root: object) -> Counter[VariableKey8616]:
     return counts
 
 
+@cython.ccall
 def _ifelse_children_8616(
     statement: structured_c.CIfElse,
     path: ControlPath8616,
 ) -> tuple[tuple[structured_c.CStatements, ControlPath8616], ...]:
     """Return typed branch containers at the dynamic angr C-AST boundary."""
+    branch_index: object
+    pair: object
     children: list[tuple[structured_c.CStatements, ControlPath8616]] = []
     marker = id(statement)
     pairs = statement.condition_and_nodes
@@ -265,11 +293,16 @@ def _ifelse_children_8616(
     return tuple(children)
 
 
+@cython.ccall
 def _child_scopes_8616(
     statement: object,
     path: ControlPath8616,
 ) -> tuple[tuple[structured_c.CStatements, ControlPath8616], ...]:
     """Return child containers, proving exclusivity only for explicit if arms."""
+    cases: object
+    child: object
+    attr: object
+    case: object
     if isinstance(statement, structured_c.CStatements):
         return ((statement, path),)
     children: list[tuple[structured_c.CStatements, ControlPath8616]] = []
@@ -287,19 +320,23 @@ def _child_scopes_8616(
     return tuple(children)
 
 
+@cython.ccall
 def _structured_control_paths_8616(
     root: object,
 ) -> tuple[
-    dict[int, tuple[ControlPath8616, ...]],
-    dict[int, tuple[ControlPath8616, ...]],
+    dict[cython.longlong, tuple[ControlPath8616, ...]],
+    dict[cython.longlong, tuple[ControlPath8616, ...]],
 ]:
     """Index container and direct-statement control paths without flattening arms."""
+    container: object
+    path: object
+    statement: object
     if not isinstance(root, structured_c.CStatements):
         return {}, {}
-    container_paths: dict[int, list[ControlPath8616]] = {}
-    statement_paths: dict[int, list[ControlPath8616]] = {}
+    container_paths: dict[cython.longlong, list[ControlPath8616]] = {}
+    statement_paths: dict[cython.longlong, list[ControlPath8616]] = {}
     pending: list[tuple[structured_c.CStatements, ControlPath8616]] = [(root, ())]
-    visited: set[tuple[int, ControlPath8616]] = set()
+    visited: set[tuple[cython.longlong, ControlPath8616]] = set()
     while pending:
         container, path = pending.pop()
         identity = id(container), path
@@ -311,29 +348,32 @@ def _structured_control_paths_8616(
             statement_paths.setdefault(id(statement), []).append(path)
             pending.extend(reversed(_child_scopes_8616(statement, path)))
     return (
-        {key: tuple(paths) for key, paths in container_paths.items()},
-        {key: tuple(paths) for key, paths in statement_paths.items()},
+        {key: tuple(paths) for key, paths in builtins.iter(container_paths.items())},
+        {key: tuple(paths) for key, paths in builtins.iter(statement_paths.items())},
     )
 
 
-def _paths_exclusive_8616(lhs: ControlPath8616, rhs: ControlPath8616) -> bool:
+def _paths_exclusive_8616(lhs: ControlPath8616, rhs: ControlPath8616) -> cython.bint:
     """Return whether two paths choose different arms of one control owner."""
-    lhs_arms = {owner: (kind, index) for owner, kind, index in lhs}
-    return any(owner in lhs_arms and lhs_arms[owner] != (kind, index) for owner, kind, index in rhs)
+    lhs_arms = {owner: (kind, index) for owner, kind, index in iter(lhs)}
+    return any(owner in lhs_arms and operator.ne(lhs_arms[owner], (kind, index)) for owner, kind, index in iter(rhs))
 
 
 def select_reaching_definitions_8616(
     occurrence: CarryBitOccurrence8616,
-    definitions: tuple[structured_c.CAssignment, ...],
+    definitions: object,
 ) -> CarryBitDefinitionSelection8616 | None:
     """Select one reaching definition or a complete mutually exclusive join."""
+    paths: object
+    use_paths: object
+    definition: object
     container_paths, statement_paths = _structured_control_paths_8616(occurrence.root)
     use_paths = container_paths.get(id(occurrence.container), ())
     if len(use_paths) != 1:
         return None
     use_path = use_paths[0]
     compatible: list[structured_c.CAssignment] = []
-    definition_paths: dict[int, ControlPath8616] = {}
+    definition_paths: dict[cython.longlong, ControlPath8616] = {}
     for definition in definitions:
         paths = statement_paths.get(id(definition), ())
         if len(paths) != 1:
@@ -346,12 +386,13 @@ def select_reaching_definitions_8616(
         return CarryBitDefinitionSelection8616((compatible[0],), False)
     if not compatible or not all(
         _paths_exclusive_8616(definition_paths[id(lhs)], definition_paths[id(rhs)])
-        for lhs, rhs in combinations(compatible, 2)
+        for lhs, rhs in builtins.iter(combinations(compatible, 2))
     ):
         return None
     return CarryBitDefinitionSelection8616(tuple(compatible), True)
 
 
+@cython.ccall
 def _ownership_failure_8616(
     reachability: CFGInstructionReachability8616,
 ) -> CarryBorrowBitLoweringFailure8616:
@@ -363,13 +404,15 @@ def _ownership_failure_8616(
     return CarryBorrowBitLoweringFailure8616.EXECUTION_OWNER_AMBIGUOUS
 
 
+@cython.ccall
 def select_cfg_reaching_definitions_8616(
     occurrence: CarryBitOccurrence8616,
-    definitions: tuple[structured_c.CAssignment, ...],
+    definitions: object,
     fact: CarryBorrowBitLoweringFact8616,
     ownership: CFGOwnershipArtifact,
 ) -> CarryBitDefinitionSelection8616 | CarryBorrowBitLoweringFailure8616:
     """Select exact low-site definitions that can execute before the high use."""
+    definition: object
     low_site = CFGInstructionSite8616(fact.low_block_addr, fact.low_ins_addr)
     typed_high_site = CFGInstructionSite8616(fact.high_block_addr, fact.high_ins_addr)
     high_site = node_instruction_site_8616(occurrence.node, ownership)

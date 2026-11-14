@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Shared C AST utilities for postprocess consumers.
 
 Layer: Rewrite/Postprocess cleanup.
@@ -40,6 +41,7 @@ rendered text, COD, source, or CLI/reporting evidence here.
 """
 
 from __future__ import annotations
+import cython
 
 import builtins
 import re
@@ -68,6 +70,8 @@ from inertia.lowering.c_ast_utils import (
 )
 from inertia.lowering.c_ast_utils import _same_c_expression_8616 as _shared_same_c_expression_8616
 from inertia.lowering.real_mode_linear import _stack_base_bp_bias_8616, _stack_pointer_carrier_offset_8616
+import dataclasses
+import operator
 
 _SEGMENT_REGISTER_NAMES_8616 = {"cs", "ds", "es", "ss"}
 _LINEAR_TEMP_NAME_RE_8616 = re.compile(r"(?:v\d+|vvar_\d+|ir_\d+|tmp_\d+)(?:\{[^}]+\})?$")
@@ -98,17 +102,20 @@ _STRUCTURED_CHILD_ATTRS_BY_CLASS_8616 = {
 }
 
 
-def _dynamic_c_ast_getattr_8616(obj: object, name: str, default: object = None) -> Any:
+@cython.ccall
+def _dynamic_c_ast_getattr_8616(obj: object, name: object, default: object = None) -> Any:
     """Read an attribute across the dynamic angr codegen/C AST boundary."""
     return builtins.getattr(obj, name, default)
 
 
-def _dynamic_c_ast_setattr_8616(obj: object, name: str, value: object) -> None:
+@cython.ccall
+def _dynamic_c_ast_setattr_8616(obj: object, name: object, value: object) -> None:
     """Set an attribute across the dynamic angr codegen/C AST boundary."""
     builtins.setattr(obj, name, value)
 
 
-def _strip_typed_name_suffix_8616(name: object) -> str | None:
+@cython.ccall
+def _strip_typed_name_suffix_8616(name: object) -> object:
     if not isinstance(name, str):
         return None
     if name.endswith("}"):
@@ -118,7 +125,8 @@ def _strip_typed_name_suffix_8616(name: object) -> str | None:
     return name
 
 
-def _is_linear_temp_name_8616(name: object) -> bool:
+@cython.ccall
+def _is_linear_temp_name_8616(name: object) -> cython.bint:
     normalized = _strip_typed_name_suffix_8616(name)
     return isinstance(normalized, str) and _LINEAR_TEMP_NAME_RE_8616.fullmatch(normalized) is not None
 
@@ -143,6 +151,7 @@ __all__ = [
 ]
 
 
+@cython.ccall
 def _unwrap_statements_8616(node: object) -> tuple[object, ...]:
     """Safely extract statement children from any C AST container node.
 
@@ -165,6 +174,9 @@ def _unwrap_statements_8616(node: object) -> tuple[object, ...]:
 
 @lru_cache(maxsize=256)
 def _structured_slot_names_for_type_8616(value_type: type) -> tuple[str, ...]:
+    attr: object
+    cls: object
+    slot: object
     attrs: list[str] = []
     if value_type is object:
         return ()
@@ -189,8 +201,10 @@ def _structured_slot_names_for_type_8616(value_type: type) -> tuple[str, ...]:
     return tuple(ordered)
 
 
-def _structured_slot_names_8616(value: object) -> tuple[str, ...]:
-    def _impl() -> tuple[str, ...]:
+def _structured_slot_names_8616(value: object) -> object:
+    def _impl() -> object:
+        child_attrs: object
+        attr: object
         child_attrs = _STRUCTURED_CHILD_ATTRS_BY_CLASS_8616.get(type(value).__name__)
         if child_attrs is not None:
             return child_attrs
@@ -208,7 +222,7 @@ def _structured_slot_names_8616(value: object) -> tuple[str, ...]:
             return base_attrs
         attrs.extend(
             attr
-            for attr in dynamic_keys
+            for attr in iter(dynamic_keys)
             if (isinstance(attr, str) and not attr.startswith("_") and attr not in _STRUCTURED_NON_CHILD_ATTRS_8616)
         )
         if not attrs:
@@ -226,7 +240,8 @@ def _structured_slot_names_8616(value: object) -> tuple[str, ...]:
     return _impl()
 
 
-def _iter_c_node_children_8616(value: object, seen_values: set[int] | None = None) -> Iterator[object]:
+def _iter_c_node_children_8616(value: object, seen_values: object = None) -> Iterator[object]:
+    current: object
     if seen_values is None:
         seen_values = set()
 
@@ -263,13 +278,16 @@ def _iter_c_node_children_8616(value: object, seen_values: set[int] | None = Non
         # body, which can leak detached nodes into analyses.
 
 
+@cython.ccall
 def _c_constant_value_8616(node: object) -> int | None:
     if isinstance(node, CConstant) and isinstance(node.value, int):
         return node.value
     return None
 
 
-def _segment_reg_name_8616(node: object, project: object) -> str | None:
+@cython.ccall
+def _segment_reg_name_8616(node: object, project: object) -> object:
+    reg_name: object
     if not isinstance(node, CVariable):
         return None
     variable = _dynamic_c_ast_getattr_8616(node, "variable", None)
@@ -282,18 +300,22 @@ def _segment_reg_name_8616(node: object, project: object) -> str | None:
     return None
 
 
+@cython.ccall
 def _segment_scale_term_8616(
     expr: object,
-    expected_op: str,
-    expected_scale: int,
+    expected_op: object,
+    expected_scale: cython.longlong,
     resolve: Callable[[object], object],
     project: object,
-) -> str | None:
+) -> object:
     """Match ``expr op scale`` shaped segment terms; first named base wins."""
-    if not isinstance(expr, CBinaryOp) or expr.op != expected_op:
+    seg_name: object
+    maybe_scale: object
+    maybe_seg: object
+    if not isinstance(expr, CBinaryOp) or operator.ne(expr.op, expected_op):
         return None
     for maybe_seg, maybe_scale in ((expr.lhs, expr.rhs), (expr.rhs, expr.lhs)):
-        if _c_constant_value_8616(maybe_scale) != expected_scale:
+        if operator.ne(_c_constant_value_8616(maybe_scale), expected_scale):
             continue
         seg_name = _segment_reg_name_8616(resolve(maybe_seg), project)
         if seg_name is not None:
@@ -301,12 +323,17 @@ def _segment_scale_term_8616(
     return None
 
 
+@cython.ccall
 def _match_linear_add_term_8616(
     node: CBinaryOp,
     resolve: Callable[[object], object],
     project: object,
 ) -> tuple[str | None, int | None]:
     """Match ``seg*16 + linear`` / ``seg<<4 + linear`` add-shaped addresses."""
+    linear: object
+    seg_name: object
+    maybe_const: object
+    maybe_mul: object
     for maybe_mul, maybe_const in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
         linear = _c_constant_value_8616(maybe_const)
         if linear is None:
@@ -324,7 +351,8 @@ def _match_linear_add_term_8616(
 
 def _match_real_mode_linear_expr_8616(
     node: object, project: object, codegen: object | None = None
-) -> tuple[str | None, int | None]:
+) -> object:
+    seg_name: object
     def resolve(term: object) -> object:
         if codegen is None:
             return term
@@ -342,6 +370,7 @@ def _match_real_mode_linear_expr_8616(
     return _match_linear_add_term_8616(node, resolve, project)
 
 
+@cython.ccall
 def _strip_c_casts_8616(expr: object) -> object:
     """Unwrap nested CTypeCast nodes to their underlying expression."""
     while isinstance(expr, CTypeCast):
@@ -349,8 +378,11 @@ def _strip_c_casts_8616(expr: object) -> object:
     return expr
 
 
-def _segment_base_name_8616(expr: object, project: object) -> str | None:
+@cython.ccall
+def _segment_base_name_8616(expr: object, project: object) -> object:
     """Name the segment register of a ``seg<<4``/``seg*16`` shaped term."""
+    maybe_scale: object
+    maybe_seg: object
     expr = _strip_c_casts_8616(expr)
     if isinstance(expr, CBinaryOp) and expr.op == "Shl":
         for maybe_seg, maybe_scale in ((expr.lhs, expr.rhs), (expr.rhs, expr.lhs)):
@@ -363,8 +395,9 @@ def _segment_base_name_8616(expr: object, project: object) -> str | None:
     return None
 
 
+@cython.ccall
 def _collect_signed_terms_8616(
-    expr: object, sign: int, out: list[tuple[int, object]]
+    expr: object, sign: cython.longlong, out: object
 ) -> None:
     """Flatten an Add/Sub tree into ``(sign, leaf-term)`` pairs."""
     expr = _strip_c_casts_8616(expr)
@@ -379,24 +412,29 @@ def _collect_signed_terms_8616(
     out.append((sign, expr))
 
 
+@cython.ccall
 def _match_real_mode_segmented_store_shape_8616(
     node: object, project: object
-) -> tuple[str | None, tuple[tuple[int, object], ...]]:
+) -> tuple[str | None, tuple[tuple[cython.longlong, object], ...]]:
     """Match a real-mode dereference shaped as one segment base plus explicit offset terms.
 
     This stays stricter than "lhs contains ss somewhere": the node must be a real
     memory dereference and its address must decompose into exactly one positive
     segment-base term plus zero or more signed offset terms.
     """
+    base_name: object
+    segment_name: object
+    sign: object
+    term: object
     node = _strip_c_casts_8616(node)
     if not isinstance(node, CUnaryOp) or node.op != "Dereference":
         return None, ()
 
-    signed_terms: list[tuple[int, object]] = []
+    signed_terms: list[tuple[cython.longlong, object]] = []
     _collect_signed_terms_8616(node.operand, 1, signed_terms)
 
-    segment_name: str | None = None
-    offset_terms: list[tuple[int, object]] = []
+    segment_name = None
+    offset_terms: list[tuple[cython.longlong, object]] = []
     for sign, term in signed_terms:
         base_name = _segment_base_name_8616(term, project)
         if base_name is None:
@@ -411,7 +449,8 @@ def _match_real_mode_segmented_store_shape_8616(
     return segment_name, tuple(offset_terms)
 
 
-def _match_segmented_dereference_8616(node: object, project: object) -> tuple[str | None, int | None]:
+@cython.ccall
+def _match_segmented_dereference_8616(node: object, project: object) -> object:
     while isinstance(node, CTypeCast):
         node = node.expr
     if not isinstance(node, CUnaryOp) or node.op != "Dereference":
@@ -445,13 +484,14 @@ _C_SCALAR_CHILD_ATTRS_8616 = (
 _C_LIST_CHILD_ATTRS_8616 = ("args", "operands", "statements")
 
 
+@cython.ccall
 def _process_scalar_c_child_8616(
     current: object,
-    attr: str,
-    node_stack: list[object],
+    attr: object,
+    node_stack: object,
     transform: Callable[[object], object],
-    should_process_child: Callable[[object, str], bool] | None,
-) -> bool:
+    should_process_child: object,
+) -> cython.bint:
     """Transform one scalar C-AST child slot and push it for traversal."""
     if should_process_child is not None and not bool(should_process_child(current, attr)):
         return False
@@ -473,13 +513,17 @@ def _process_scalar_c_child_8616(
     return changed_local
 
 
+@cython.ccall
 def _process_list_c_child_8616(
     current: object,
-    attr: str,
-    node_stack: list[object],
+    attr: object,
+    node_stack: object,
     transform: Callable[[object], object],
-) -> bool:
+) -> cython.bint:
     """Transform one list-valued C-AST child slot in place."""
+    new_items: object
+    idx: object
+    item: object
     if not hasattr(current, attr):
         return False
     try:
@@ -513,12 +557,15 @@ def _process_list_c_child_8616(
     return changed_local
 
 
+@cython.ccall
 def _process_condition_pair_children_8616(
     current: object,
-    node_stack: list[object],
+    node_stack: object,
     transform: Callable[[object], object],
-) -> bool:
+) -> cython.bint:
     """Transform CIfElse-style condition/body pairs and queue the nodes."""
+    body: object
+    cond: object
     if not hasattr(current, "condition_and_nodes"):
         return False
     try:
@@ -544,12 +591,14 @@ def _process_condition_pair_children_8616(
     return pair_changed
 
 
+@cython.ccall
 def _process_switch_case_children_8616(
     current: object,
-    node_stack: list[object],
+    node_stack: object,
     transform: Callable[[object], object],
-) -> bool:
+) -> cython.bint:
     """Transform CSwitchCase case value/body pairs and queue the nodes."""
+    item: object
     if not hasattr(current, "cases"):
         return False
     try:
@@ -581,14 +630,16 @@ def _process_switch_case_children_8616(
     return changed_local
 
 
+@cython.ccall
 def _replace_one_c_node_children_8616(
     current: object,
-    child_attrs: frozenset[str],
-    node_stack: list[object],
+    child_attrs: object,
+    node_stack: object,
     transform: Callable[[object], object],
     should_process_child: Callable[[object, str], bool] | None,
-) -> bool:
+) -> cython.bint:
     """Transform all declared child slots of one structured C node."""
+    attr: object
     changed = False
     for attr in _C_SCALAR_CHILD_ATTRS_8616:
         if attr not in child_attrs:
@@ -607,13 +658,15 @@ def _replace_one_c_node_children_8616(
     return changed
 
 
+@cython.ccall
 def _replace_c_children_8616(
     node: object,
     transform: Callable[[object], object],
-    seen: set[int] | None = None,
+    seen: object = None,
     *,
     should_process_child: Callable[[object, str], bool] | None = None,
-) -> bool:
+) -> cython.bint:
+    current: object
     if seen is None:
         seen = set()
     changed = False
@@ -637,7 +690,9 @@ def _replace_c_children_8616(
     return changed
 
 
-def _iter_c_nodes_deep_8616(node: object, seen: set[int] | None = None) -> Iterator[object]:
+def _iter_c_nodes_deep_8616(node: object, seen: object = None) -> Iterator[object]:
+    current: object
+    attr: object
     if seen is None:
         seen = set()
     if not _structured_codegen_node_8616(node):
@@ -665,6 +720,7 @@ def _iter_c_nodes_deep_8616(node: object, seen: set[int] | None = None) -> Itera
                 node_stack.extend(_iter_c_node_children_8616(value, set()))
 
 
+@cython.ccall
 def _global_memory_addr_8616(node: object) -> int | None:
     if not isinstance(node, CVariable):
         return None
@@ -675,7 +731,8 @@ def _global_memory_addr_8616(node: object) -> int | None:
     return addr if isinstance(addr, int) else None
 
 
-def _make_word_global_8616(codegen: Any, addr: int) -> CVariable:
+@cython.ccall
+def _make_word_global_8616(codegen: Any, addr: cython.longlong) -> CVariable:
     from angr.analyses.decompiler.structured_codegen.c import CVariable
     from angr.sim_type import SimTypeShort
 
@@ -686,12 +743,18 @@ def _make_word_global_8616(codegen: Any, addr: int) -> CVariable:
     )
 
 
-def _same_c_expression_8616(lhs: object, rhs: object) -> bool:
+@cython.ccall
+def _same_c_expression_8616(lhs: object, rhs: object) -> cython.bint:
     """Delegate expression identity to the shared typed boundary owner."""
     return _shared_same_c_expression_8616(lhs, rhs)
 
 
-def _same_call_target_8616(lhs: CFunctionCall, rhs: CFunctionCall) -> bool:
+@cython.ccall
+def _same_call_target_8616(lhs: CFunctionCall, rhs: CFunctionCall) -> cython.bint:
+    lhs_func: object
+    lhs_target: object
+    rhs_func: object
+    rhs_target: object
     lhs_func = _dynamic_c_ast_getattr_8616(lhs, "callee_func", None)
     rhs_func = _dynamic_c_ast_getattr_8616(rhs, "callee_func", None)
     if lhs_func is not None or rhs_func is not None:
@@ -702,8 +765,7 @@ def _same_call_target_8616(lhs: CFunctionCall, rhs: CFunctionCall) -> bool:
         if isinstance(lhs_addr, int) or isinstance(rhs_addr, int):
             return bool(lhs_addr == rhs_addr)
         return bool(
-            _dynamic_c_ast_getattr_8616(lhs_func, "name", None)
-            == _dynamic_c_ast_getattr_8616(rhs_func, "name", None)
+            operator.eq(_dynamic_c_ast_getattr_8616(lhs_func, "name", None), _dynamic_c_ast_getattr_8616(rhs_func, "name", None))
         )
     lhs_target = _dynamic_c_ast_getattr_8616(lhs, "callee_target", None)
     rhs_target = _dynamic_c_ast_getattr_8616(rhs, "callee_target", None)
@@ -712,7 +774,8 @@ def _same_call_target_8616(lhs: CFunctionCall, rhs: CFunctionCall) -> bool:
     return _same_c_expression_8616(lhs_target, rhs_target)
 
 
-def _is_shifted_high_byte_8616(high_expr: object, low_expr: object) -> bool:
+@cython.ccall
+def _is_shifted_high_byte_8616(high_expr: object, low_expr: object) -> cython.bint:
     if not isinstance(high_expr, CBinaryOp) or high_expr.op != "Shr":
         return False
     if _c_constant_value_8616(high_expr.rhs) != 8:
@@ -720,8 +783,13 @@ def _is_shifted_high_byte_8616(high_expr: object, low_expr: object) -> bool:
     return _same_c_expression_8616(high_expr.lhs, low_expr)
 
 
-def _push_statement_children_8616(current: object, stack: list[object]) -> None:
+@cython.ccall
+def _push_statement_children_8616(current: object, stack: object) -> None:
     """Queue the statement-bearing slots of one structured node."""
+    body: object
+    else_node: object
+    item: object
+    pair: object
     nested_statements = _dynamic_c_ast_getattr_8616(current, "statements", None)
     if isinstance(nested_statements, (list, tuple)):
         for item in reversed(tuple(nested_statements)):
@@ -745,8 +813,9 @@ def _push_statement_children_8616(current: object, stack: list[object]) -> None:
 
 def _iter_statement_nodes_8616(node: object) -> Iterator[object]:
     """Depth-first iteration over statement-bearing structured codegen slots."""
+    current: object
     stack = [node]
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     while stack:
         current = stack.pop()
         if not _structured_codegen_node_8616(current):
@@ -759,7 +828,10 @@ def _iter_statement_nodes_8616(node: object) -> Iterator[object]:
         _push_statement_children_8616(current, stack)
 
 
+@cython.ccall
 def _single_assignment_expr_for_variable_8616(codegen: object, target: object) -> object | None:
+    root: object
+    stmt: object
     cfunc = _dynamic_c_ast_getattr_8616(codegen, "cfunc", None)
     root = _dynamic_c_ast_getattr_8616(cfunc, "statements", None)
     if root is None:
@@ -780,13 +852,17 @@ def _single_assignment_expr_for_variable_8616(codegen: object, target: object) -
     return matches[0] if len(matches) == 1 else None
 
 
+@cython.ccall
 def _resolve_variable_bp_term_8616(
     node: CVariable,
     project: object | None,
     codegen: object,
-    seen: set[int],
+    seen: object,
 ) -> object:
     """Follow a single-assignment variable toward its defining BP term."""
+    replacement: object
+    stack_disp: object
+    variable: object
     variable = _dynamic_c_ast_getattr_8616(node, "variable", None)
     if variable is None:
         return node
@@ -808,11 +884,12 @@ def _resolve_variable_bp_term_8616(
     return resolved_replacement
 
 
+@cython.ccall
 def _resolve_stack_bp_term_8616(
     node: object,
     project: object | None = None,
     codegen: object | None = None,
-    seen: set[int] | None = None,
+    seen: object = None,
 ) -> object:
     if seen is None:
         seen = set()
@@ -830,19 +907,21 @@ def _resolve_stack_bp_term_8616(
     return _resolve_variable_bp_term_8616(node, project, codegen, seen)
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _StackBpDispCollect8616:
     """Accumulate the BP-relative displacement of one address expression."""
 
     project: object | None
     codegen: object | None
-    seen: set[int]
-    total: int = 0
-    stack_offsets: list[int] = field(default_factory=list)
-    found_stack_ref: bool = False
+    seen: object
+    total: cython.longlong = 0
+    stack_offsets: object = field(default_factory=list)
+    found_stack_ref: cython.bint = False
 
+    @cython.ccall
     def collect(self, term: object) -> None:
         """Fold one address term into the displacement total and stack-offset list."""
+        const: object
         term = _resolve_stack_bp_term_8616(term, self.project, self.codegen, self.seen)
 
         if isinstance(term, CTypeCast):
@@ -860,7 +939,8 @@ class _StackBpDispCollect8616:
             return
         self._collect_binary(term)
 
-    def _collect_reference(self, term: object) -> bool:
+    @cython.ccall
+    def _collect_reference(self, term: object) -> cython.bint:
         if isinstance(term, CVariable):
             stack_base_bias = _stack_base_bp_bias_8616(term, self.codegen)
             if isinstance(stack_base_bias, int):
@@ -885,7 +965,8 @@ class _StackBpDispCollect8616:
                     self.found_stack_ref = True
         return True
 
-    def _collect_pointer_carrier(self, term: object) -> bool:
+    @cython.ccall
+    def _collect_pointer_carrier(self, term: object) -> cython.bint:
         if self.project is None or self.codegen is None:
             return False
         pointer_offset = _stack_pointer_carrier_offset_8616(term, self.project, self.codegen, self.seen)
@@ -895,7 +976,9 @@ class _StackBpDispCollect8616:
             return True
         return False
 
+    @cython.ccall
     def _collect_binary(self, term: object) -> None:
+        rhs_const: object
         if isinstance(term, CBinaryOp) and term.op == "Add":
             self.collect(term.lhs)
             self.collect(term.rhs)
@@ -915,11 +998,12 @@ class _StackBpDispCollect8616:
             return
 
 
+@cython.ccall
 def _stack_bp_displacement_8616(
     node: object,
     project: object | None = None,
     codegen: object | None = None,
-    seen: set[int] | None = None,
+    seen: object = None,
 ) -> int | None:
     if seen is None:
         seen = set()
@@ -932,7 +1016,8 @@ def _stack_bp_displacement_8616(
     return collect.stack_offsets[0] + collect.total
 
 
-def _flatten_add_sub_terms_8616(term: object, sign: int = 1) -> list[tuple[object, int]]:
+@cython.ccall
+def _flatten_add_sub_terms_8616(term: object, sign: cython.longlong = 1) -> object:
     """Flatten an Add/Sub tree into ``(leaf-term, sign)`` pairs."""
     while isinstance(term, CTypeCast):
         term = term.expr
@@ -943,13 +1028,17 @@ def _flatten_add_sub_terms_8616(term: object, sign: int = 1) -> list[tuple[objec
     return [(term, sign)]
 
 
+@cython.ccall
 def _classify_deref_terms_8616(
-    terms: list[tuple[object, int]], project: object, codegen: object | None
-) -> tuple[int, bool, list[tuple[object, int]]]:
+    terms: object, project: object, codegen: object | None
+) -> tuple[cython.longlong, cython.bint, list[tuple[object, cython.longlong]]]:
     """Split flattened terms into constant total, ss-segment flag, and rest."""
+    value: object
+    sign: object
+    term: object
     const_total = 0
     has_ss_segment = False
-    non_segment_terms: list[tuple[object, int]] = []
+    non_segment_terms: list[tuple[object, cython.longlong]] = []
     for term, sign in terms:
         value = _c_constant_value_8616(term)
         if value is not None:
@@ -965,9 +1054,11 @@ def _classify_deref_terms_8616(
     return const_total, has_ss_segment, non_segment_terms
 
 
+@cython.ccall
 def _match_bp_stack_dereference_8616(
     node: object, project: object, codegen: object | None = None
 ) -> int | None:
+    base_disp: object
     node = _strip_c_casts_8616(node)
     if not isinstance(node, CUnaryOp) or node.op != "Dereference":
         return None
@@ -993,18 +1084,22 @@ def _match_bp_stack_dereference_8616(
     return base_disp + const_total
 
 
+@cython.ccall
 def _scaled_deref_bp_disp_8616(
     node: CBinaryOp,
-    expected_op: str,
-    expected_scale: int,
+    expected_op: object,
+    expected_scale: cython.longlong,
     project: object,
     codegen: object | None,
 ) -> int | None:
     """Match ``deref * scale`` / ``deref << bits`` shaped BP stack loads."""
-    if node.op != expected_op:
+    direct: object
+    maybe_load: object
+    maybe_scale: object
+    if operator.ne(node.op, expected_op):
         return None
     for maybe_load, maybe_scale in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
-        if _c_constant_value_8616(maybe_scale) != expected_scale:
+        if operator.ne(_c_constant_value_8616(maybe_scale), expected_scale):
             continue
         direct = _match_bp_stack_dereference_8616(maybe_load, project, codegen)
         if direct is not None:
@@ -1012,7 +1107,9 @@ def _scaled_deref_bp_disp_8616(
     return None
 
 
+@cython.ccall
 def _match_bp_stack_load_8616(node: object, project: object, codegen: object | None = None) -> int | None:
+    direct: object
     direct = _match_bp_stack_dereference_8616(node, project, codegen)
     if direct is not None:
         return direct

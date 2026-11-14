@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/angr compatibility.
 
 Responsibility: preserve numeric stack values, instruction ordering, and exact
@@ -7,6 +8,8 @@ Forbidden: stack variable recovery, alias ownership, or rewrite-stage stack repa
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, MutableMapping
 from dataclasses import dataclass
@@ -31,6 +34,9 @@ from angr.knowledge_plugins.key_definitions.live_definitions import LiveDefiniti
 from .load_propagation import LoadPropagationStats8616, refuse_reordered_loads_8616
 from .stack_tracker_allocation import apply_x86_16_stack_tracker_allocations_8616
 from .stack_value_use import StackValueUse8616, classify_stack_value_use_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "StackPointerPropagationNormalization8616",
@@ -60,15 +66,15 @@ class StackPointerPropagationVerdict8616(Enum):
     REFUSED_INSTRUCTION_ORDER = "refused_instruction_order"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackPointerPropagationStats8616:
     """Record the closed evidence loop for stack-pointer replacement widths."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     def merged(self, other: StackPointerPropagationStats8616) -> StackPointerPropagationStats8616:
         """Return the component-wise sum of two normalization reports."""
@@ -81,7 +87,7 @@ class StackPointerPropagationStats8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackPointerPropagationNormalization8616:
     """Carry one normalized AIL replacement and its evidence counters."""
 
@@ -93,7 +99,7 @@ class StackPointerPropagationNormalization8616:
 class _NamedStackOffsetToAddr(Protocol):
     """Expose the patch marker independently of the callable signature."""
 
-    __name__: str
+    __name__: object
 
 
 class _SPropagatorModelLike(Protocol):
@@ -107,13 +113,13 @@ class _SPropagatorModelLike(Protocol):
 class _NamedSPropAnalyze(Protocol):
     """Name-only patch detection; invocation is typed separately by _SPropAnalyze."""
 
-    __name__: str
+    __name__: object
 
 
 class _StackTracker8616(Protocol):
     """Instruction-boundary facts exposed by the native stack tracker."""
 
-    def offset_after(self, addr: int, reg: int) -> int | None:
+    def offset_after(self, addr: cython.longlong, reg: cython.longlong) -> int | None:
         """Return a proven final register offset, or unknown."""
         ...
 
@@ -122,11 +128,13 @@ def normalize_stack_pointer_use_order_8616(
     replaced: VirtualVariable,
     replacement: Expression,
     *,
-    block: Block | None,
+    block: object,
     location: AILCodeLocation,
-    tracker: _StackTracker8616 | None,
+    tracker: object,
 ) -> StackPointerPropagationNormalization8616:
     """Use final instruction facts only for its last dominating machine write."""
+    definition: object
+    offset: object
     unchanged = StackPointerPropagationNormalization8616(
         replacement, StackPointerPropagationVerdict8616.NOT_APPLICABLE,
         StackPointerPropagationStats8616(),
@@ -137,20 +145,20 @@ def normalize_stack_pointer_use_order_8616(
     # predecessor values; it does not execute that instruction's register write.
     writes = [
         (index, statement.dst)
-        for index, statement in enumerate(block.statements)
+        for index, statement in builtins.iter(enumerate(block.statements))
         if isinstance(statement, Assignment)
         and not isinstance(statement.src, Phi)
         and isinstance(statement.dst, VirtualVariable)
         and statement.dst.category is VirtualVariableCategory.REGISTER
-        and statement.dst.oident == replaced.oident
-        and statement.tags.get("ins_addr") == location.ins_addr
+        and operator.eq(statement.dst.oident, replaced.oident)
+        and operator.eq(statement.tags.get("ins_addr"), location.ins_addr)
     ]
-    definition = next((index for index, value in writes if value.varid == replaced.varid), None)
+    definition = next((index for index, value in iter(writes) if operator.eq(value.varid, replaced.varid)), None)
     if definition is None:
         return unchanged
     final_dominating_write = (
         location.stmt_idx is not None and definition < location.stmt_idx
-        and writes[-1][1].varid == replaced.varid
+        and operator.eq(writes[-1][1].varid, replaced.varid)
     )
     offset = (
         tracker.offset_after(location.ins_addr, replaced.oident)
@@ -171,11 +179,12 @@ def normalize_stack_pointer_use_order_8616(
     )
 
 
+@cython.ccall
 def normalize_stack_pointer_replacement_8616(
     replaced: Expression,
     replacement: Expression,
     *,
-    stack_register_offsets: frozenset[int],
+    stack_register_offsets: object,
     ail_manager: Manager,
 ) -> StackPointerPropagationNormalization8616:
     """Keep a propagated x86-16 SP/BP value at its exact register width."""
@@ -231,16 +240,25 @@ def normalize_stack_pointer_replacement_8616(
     )
 
 
-def _native_stack_blocks_8616(analysis: SPropagator) -> dict[tuple[int, int | None], Block]:
+@cython.ccall
+def _native_stack_blocks_8616(analysis: SPropagator) -> object:
     """Index the native subject without assuming whole-function propagation."""
     if analysis.func_graph is not None:
-        return {(block.addr, block.idx): block for block in analysis.func_graph if isinstance(block, Block)}
+        return {(block.addr, block.idx): block for block in iter(analysis.func_graph) if isinstance(block, Block)}
     block = analysis.block
     return {(block.addr, block.idx): block} if isinstance(block, Block) else {}
 
 
+@cython.ccall
 def _normalize_native_stack_model_8616(analysis: SPropagator) -> None:
     """Apply instruction-order, numeric-use, and width contracts to native facts."""
+    block: object
+    bp_offset: object
+    sp_offset: object
+    location: object
+    replaced: object
+    replacement: object
+    replacements_at_location: object
     model = cast(_SPropagatorModelLike, analysis.model)
     aggregate = StackPointerPropagationStats8616()
     sp_offset = analysis.project.arch.sp_offset
@@ -289,7 +307,8 @@ def _normalize_native_stack_model_8616(analysis: SPropagator) -> None:
     model._inertia_stack_pointer_propagation_stats_8616 = aggregate
 
 
-def _native_statement_at_8616(block: Block | None, location: AILCodeLocation) -> Statement | None:
+@cython.ccall
+def _native_statement_at_8616(block: object, location: AILCodeLocation) -> Statement | None:
     """Resolve an exact use statement, refusing absent or stale locations."""
     if block is None or location.stmt_idx is None or not 0 <= location.stmt_idx < len(block.statements):
         return None
@@ -301,18 +320,18 @@ def apply_x86_16_stack_compatibility() -> None:
     apply_x86_16_stack_tracker_allocations_8616()
     original_stack_offset_to_stack_addr = cast(_StackOffsetToAddr, LiveDefinitions.stack_offset_to_stack_addr)
 
-    def _stack_offset_to_stack_addr_8616(self: LiveDefinitions, offset: int) -> int:
+    def _stack_offset_to_stack_addr_8616(self: LiveDefinitions, offset: cython.longlong) -> cython.longlong:
         """Wrap word-sized stack offsets and delegate other architectures unchanged."""
-        if self.arch.bits == _WORD_BITS8616:
+        if operator.eq(self.arch.bits, _WORD_BITS8616):
             return (0x7FFE + offset) & 0xFFFF
         return original_stack_offset_to_stack_addr(self, offset)
 
     current_stack_offset_to_stack_addr = cast(_NamedStackOffsetToAddr, LiveDefinitions.stack_offset_to_stack_addr)
-    if current_stack_offset_to_stack_addr.__name__ != _PATCHED_STACK_OFFSET_TO_ADDR_NAME:
+    if operator.ne(current_stack_offset_to_stack_addr.__name__, _PATCHED_STACK_OFFSET_TO_ADDR_NAME):
         LiveDefinitions.stack_offset_to_stack_addr = _stack_offset_to_stack_addr_8616
 
     current_sprop_analyze = cast(_NamedSPropAnalyze, SPropagator._analyze)
-    if current_sprop_analyze.__name__ == _PATCHED_SPROP_ANALYZE_NAME:
+    if operator.eq(current_sprop_analyze.__name__, _PATCHED_SPROP_ANALYZE_NAME):
         return
     original_sprop_analyze = cast(_SPropAnalyze, SPropagator._analyze)
 

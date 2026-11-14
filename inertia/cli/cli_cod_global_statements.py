@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: preserve legacy CLI helper surface while delegating semantic proof to X86_16 layers.
@@ -5,6 +6,8 @@ Forbidden: owning decompiler semantics, source-backed recovery, or postprocess s
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -12,6 +15,8 @@ from typing import Protocol
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeShort
+import dataclasses
+import operator
 
 
 class _CFunctionLike(Protocol):
@@ -26,14 +31,20 @@ class _CodegenLike(Protocol):
     cfunc: _CFunctionLike | None
 
 
-def _same_expr(left: object, right: object) -> bool:
-    def _impl() -> bool:
+def _same_expr(left: object, right: object) -> cython.bint:
+    def _impl() -> cython.bint:
+        left_name: object
+        left_var: object
+        left_var_name: object
+        right_name: object
+        right_var: object
+        right_var_name: object
         if left is right:
             return True
         if type(left) is not type(right):
             return False
         if isinstance(left, structured_c.CConstant) and isinstance(right, structured_c.CConstant):
-            return bool(left.value == right.value)
+            return bool(operator.eq(left.value, right.value))
         if isinstance(left, structured_c.CVariable) and isinstance(right, structured_c.CVariable):
             # Dynamic codegen boundary: CVariable payloads are optional in angr structured C.
             left_var = getattr(left, "variable", None)
@@ -49,21 +60,22 @@ def _same_expr(left: object, right: object) -> bool:
             left_var_name = getattr(left_var, "name", None)
             # Dynamic codegen boundary: rendered codegen variable names are optional.
             right_var_name = getattr(right_var, "name", None)
-            return left_name == right_name and left_var_name == right_var_name
+            return operator.eq(left_name, right_name) and operator.eq(left_var_name, right_var_name)
         if isinstance(left, structured_c.CBinaryOp) and isinstance(right, structured_c.CBinaryOp):
             return (
-                left.op == right.op
+                operator.eq(left.op, right.op)
                 and _same_expr(left.lhs, right.lhs)
                 and _same_expr(left.rhs, right.rhs)
             )
         if isinstance(left, structured_c.CUnaryOp) and isinstance(right, structured_c.CUnaryOp):
-            return left.op == right.op and _same_expr(left.operand, right.operand)
+            return operator.eq(left.op, right.op) and _same_expr(left.operand, right.operand)
         return False
 
     return _impl()
 
 
-def _is_high_byte_projection(high_expr: object, low_expr: object) -> bool:
+@cython.ccall
+def _is_high_byte_projection(high_expr: object, low_expr: object) -> cython.bint:
     if not isinstance(high_expr, structured_c.CBinaryOp) or high_expr.op != "Shr":
         return False
     rhs = high_expr.rhs
@@ -72,7 +84,7 @@ def _is_high_byte_projection(high_expr: object, low_expr: object) -> bool:
     return rhs.value == 8 and _same_expr(high_expr.lhs, low_expr)
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _CodWordGlobalCoalescer:
     """Visitor folding adjacent byte stores into one word global assignment."""
 
@@ -82,15 +94,18 @@ class _CodWordGlobalCoalescer:
     global_memory_addr: Callable[[object], int | None]
     high_byte_store_addr: Callable[[object, object], int | None]
     synthetic_word_global_variable: Callable[[_CodegenLike, object, int], structured_c.CVariable | None]
-    changed: bool = False
+    changed: cython.bint = False
 
+    @cython.ccall
     def _fold_assignment_pair(
         self,
         stmt: structured_c.CAssignment,
         next_stmt: structured_c.CAssignment,
-        new_statements: list[object],
-    ) -> bool:
+        new_statements: object,
+    ) -> cython.bint:
         """Fold one byte-store pair into `new_statements`; True when consumed."""
+        base_addr: object
+        word_global: object
         base_addr = self.global_memory_addr(stmt.lhs)
         next_addr = self.high_byte_store_addr(next_stmt.lhs, self.project)
         word_global = (
@@ -98,7 +113,7 @@ class _CodWordGlobalCoalescer:
             if base_addr is not None
             else None
         )
-        if base_addr is None or next_addr != base_addr + 1 or word_global is None:
+        if base_addr is None or operator.ne(next_addr, base_addr + 1) or word_global is None:
             return False
         if isinstance(stmt.rhs, structured_c.CConstant) and isinstance(
             next_stmt.rhs, structured_c.CConstant
@@ -132,8 +147,11 @@ class _CodWordGlobalCoalescer:
         new_statements.append(next_stmt)
         return True
 
+    @cython.ccall
     def visit(self, node: object) -> None:
         """Walk one node, folding adjacent byte stores in statement lists."""
+        _: object
+        body: object
         if isinstance(node, structured_c.CStatements):
             new_statements: list[object] = []
             i = 0
@@ -153,7 +171,7 @@ class _CodWordGlobalCoalescer:
                 new_statements.append(stmt)
                 i += 1
 
-            if len(new_statements) != len(node.statements):
+            if operator.ne(len(new_statements), len(node.statements)):
                 node.statements = new_statements
 
         elif isinstance(node, structured_c.CIfElse):
@@ -163,6 +181,7 @@ class _CodWordGlobalCoalescer:
                 self.visit(node.else_node)
 
 
+@cython.ccall
 def _coalesce_cod_word_global_statements(
     project: object,
     codegen: _CodegenLike,
@@ -171,7 +190,8 @@ def _coalesce_cod_word_global_statements(
     global_memory_addr: Callable[[object], int | None],
     high_byte_store_addr: Callable[[object, object], int | None],
     synthetic_word_global_variable: Callable[[_CodegenLike, object, int], structured_c.CVariable | None],
-) -> bool:
+) -> cython.bint:
+    cfunc: object
     cfunc = codegen.cfunc
     if not synthetic_globals or cfunc is None:
         return False

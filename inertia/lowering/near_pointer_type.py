@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Represent fixed-width real-mode near pointers in typed interfaces.
 
 Layer: Types/Lowering.
@@ -12,6 +13,8 @@ parameters proven to be 16-bit near pointers.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from angr.sim_type import SimType, SimTypeFunction, SimTypePointer
 from archinfo import Arch
@@ -21,7 +24,7 @@ class SimTypeNearPointer16_8616(SimTypePointer):  # type: ignore[misc]
     """Angr pointer type with the fixed 16-bit width of a real-mode near pointer."""
 
     @property
-    def size(self) -> int:
+    def size(self) -> cython.longlong:
         """Return the near-pointer width in bits."""
         return 16
 
@@ -29,7 +32,7 @@ class SimTypeNearPointer16_8616(SimTypePointer):  # type: ignore[misc]
         self,
         arch: Arch,
         *,
-        memo: dict[str, SimType],
+        memo: object,
     ) -> SimTypeNearPointer16_8616:
         """Bind this near pointer through angr's recursive type memo contract."""
         out = SimTypeNearPointer16_8616(
@@ -67,6 +70,7 @@ class SimTypeNearPointer16_8616(SimTypePointer):  # type: ignore[misc]
         return out
 
 
+@cython.ccall
 def near_pointer_type_8616(
     pointee: SimType,
     arch: Arch,
@@ -78,9 +82,10 @@ def near_pointer_type_8616(
     return pointer
 
 
+@cython.ccall
 def with_near_pointer_parameter_8616(
     prototype: object,
-    parameter_index: int,
+    parameter_index: cython.longlong,
     pointer_type: SimTypeNearPointer16_8616,
     arch: Arch,
 ) -> SimTypeFunction | None:

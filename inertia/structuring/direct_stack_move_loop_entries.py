@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Place binary-proven stack moves at their owning structured loop entry.
 
 Layer: Structuring.
@@ -13,6 +14,8 @@ text, or variable names as evidence.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -53,6 +56,9 @@ from .direct_stack_move_pretest_initializers import (
     materialize_direct_stack_move_pretest_initializers_8616,
     place_direct_stack_move_pretest_initializer_assignment_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -67,21 +73,21 @@ _LOOP_ENTRY_SOURCE_KINDS_8616 = frozenset(
 )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectStackMoveLoopEntryStats8616:
     """Closed evidence counters for loop-entry placement."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    already_materialized_count: int
-    refused_no_edge_count: int
-    refused_no_site_count: int
-    refused_assignment_count: int
-    refused_branch_owner_count: int
-    refused_immediate_scope_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    already_materialized_count: cython.longlong
+    refused_no_edge_count: cython.longlong
+    refused_no_site_count: cython.longlong
+    refused_assignment_count: cython.longlong
+    refused_branch_owner_count: cython.longlong
+    refused_immediate_scope_count: cython.longlong
 
 
 def place_direct_stack_move_loop_entry_assignment_8616(
@@ -90,12 +96,14 @@ def place_direct_stack_move_loop_entry_assignment_8616(
     function: object,
     move_fact: DirectStackMoveFact8616,
     assignment: structured_c.CAssignment,
-) -> bool:
+) -> cython.bint:
     """Place one Lowering-built assignment at its unique posttest-loop entry."""
+    location: object
+    root: object
     branch_claims = tuple(
         claim
-        for claim in direct_stack_move_branch_claims_8616(project, codegen, function)
-        if claim.move_ins_addr == move_fact.ins_addr
+        for claim in builtins.iter(direct_stack_move_branch_claims_8616(project, codegen, function))
+        if operator.eq(claim.move_ins_addr, move_fact.ins_addr)
     )
     codegen_contract = cast(Any, codegen)
     root = codegen_contract.cfunc.statements
@@ -109,7 +117,7 @@ def place_direct_stack_move_loop_entry_assignment_8616(
         )
     ):
         return False
-    sites: tuple[DirectStackMoveLoopEntrySite8616, ...] = (
+    sites: object = (
         loop_entry_sites_8616(
             project,
             codegen,
@@ -161,7 +169,7 @@ def place_direct_stack_move_loop_entry_assignment_8616(
     )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _LoopEntryScan8616:
     """Mutable per-fact loop-entry placement scan state."""
 
@@ -169,22 +177,23 @@ class _LoopEntryScan8616:
     codegen: object
     function: object
     root: object
-    normalized: int = 0
-    classified: int = 0
-    materialized: int = 0
-    failures: int = 0
-    already_materialized: int = 0
-    refused_no_edge: int = 0
-    refused_no_site: int = 0
-    refused_assignment: int = 0
-    refused_branch_owner: int = 0
-    refused_immediate_scope: int = 0
-    changed: bool = False
+    normalized: cython.longlong = 0
+    classified: cython.longlong = 0
+    materialized: cython.longlong = 0
+    failures: cython.longlong = 0
+    already_materialized: cython.longlong = 0
+    refused_no_edge: cython.longlong = 0
+    refused_no_site: cython.longlong = 0
+    refused_assignment: cython.longlong = 0
+    refused_branch_owner: cython.longlong = 0
+    refused_immediate_scope: cython.longlong = 0
+    changed: cython.bint = False
 
+    @cython.ccall
     def process(
         self,
         move_fact: DirectStackMoveFact8616,
-        move_branch_claims: tuple[DirectStackMoveControlClaim8616, ...],
+        move_branch_claims: object,
     ) -> None:
         """Apply the loop-entry gate ladder to one move fact."""
         edges = repeated_sequence_edges_8616(self.project, self.function, move_fact.ins_addr)
@@ -216,11 +225,12 @@ class _LoopEntryScan8616:
             return
         self._resolve_and_place(move_fact, edges[0], debug_loop_entry)
 
+    @cython.ccall
     def _resolve_and_place(
         self,
         move_fact: DirectStackMoveFact8616,
         edge: DirectStackMoveLoopEntryEdge8616,
-        debug_loop_entry: bool,
+        debug_loop_entry: cython.bint,
     ) -> None:
         """Resolve site/location/verdict gates, then place the assignment."""
         sites = loop_entry_sites_8616(
@@ -290,8 +300,9 @@ def materialize_direct_stack_move_loop_entry_ownership_8616(
     project: object,
     codegen: object,
     function: object,
-) -> bool:
+) -> cython.bint:
     """Relocate tagged stack assignments to CFG-proven posttest-loop entries."""
+    move_fact: object
     codegen_contract = cast(Any, codegen)
     try:
         root = codegen_contract.cfunc.statements
@@ -300,7 +311,7 @@ def materialize_direct_stack_move_loop_entry_ownership_8616(
         return False
     move_facts = tuple(
         fact
-        for fact in boundary_tuple_8616(direct_move_facts or ())
+        for fact in builtins.iter(boundary_tuple_8616(direct_move_facts or ()))
         if isinstance(fact, DirectStackMoveFact8616)
         and fact.source_kind in _LOOP_ENTRY_SOURCE_KINDS_8616
     )
@@ -313,8 +324,8 @@ def materialize_direct_stack_move_loop_entry_ownership_8616(
     for move_fact in sorted(move_facts, key=lambda fact: fact.ins_addr):
         move_branch_claims = tuple(
             claim
-            for claim in branch_claims
-            if claim.move_ins_addr == move_fact.ins_addr
+            for claim in iter(branch_claims)
+            if operator.eq(claim.move_ins_addr, move_fact.ins_addr)
         )
         scan.process(move_fact, move_branch_claims)
     stats = DirectStackMoveLoopEntryStats8616(

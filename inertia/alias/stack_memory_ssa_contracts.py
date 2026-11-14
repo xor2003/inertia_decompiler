@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed contracts for the stack-memory SSA Alias projection.
 
 Layer: Alias.
@@ -9,6 +10,8 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -24,6 +27,16 @@ from inertia.ir.ssa_memory_contracts import (
 
 from .alias_model_impl import AliasStorageFacts
 from .stack_address_escape import StackAddressEscape8616
+import dataclasses
+import operator
+LogicalStackMemoryAliasAccess8616 = typing.TypeVar("LogicalStackMemoryAliasAccess8616")
+LogicalStackMemoryAliasRefusal8616 = typing.TypeVar("LogicalStackMemoryAliasRefusal8616")
+LogicalStackStorageIdentity8616 = typing.TypeVar("LogicalStackStorageIdentity8616")
+LogicalStackStorageIdentityRefusal8616 = typing.TypeVar("LogicalStackStorageIdentityRefusal8616")
+PrivateStackWriteDecision8616 = typing.TypeVar("PrivateStackWriteDecision8616")
+ReleasedStackExtent8616 = typing.TypeVar("ReleasedStackExtent8616")
+SSAFunctionArtifact = typing.TypeVar("SSAFunctionArtifact")
+StackExtentEvidence8616 = typing.TypeVar("StackExtentEvidence8616")
 
 if TYPE_CHECKING:
     from inertia.ir.ssa_function import SSAFunctionArtifact
@@ -64,19 +77,20 @@ class StackMemoryAliasRefusalKind8616(StrEnum):
     ORPHAN_UPSTREAM_REFUSAL = "orphan_upstream_refusal"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackMemorySSAAliasFact8616:
     """One exact SSA memory version bound to an Alias storage identity."""
 
     kind: StackMemoryAliasFactKind8616
-    block_addr: int
+    block_addr: cython.longlong
     instr_index: int | None
     address: IRAddress
     storage: AliasStorageFacts
-    incoming_versions: tuple[int, ...] = ()
+    incoming_versions: tuple[cython.longlong, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-friendly representation."""
+        identity: object
         identity = self.storage.identity
         return {
             "kind": self.kind.value,
@@ -88,7 +102,7 @@ class StackMemorySSAAliasFact8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackMemorySSAAliasAccessSlice8616:
     """Alias storage identity for one exact slice of a composed access."""
 
@@ -97,6 +111,7 @@ class StackMemorySSAAliasAccessSlice8616:
 
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-friendly representation."""
+        identity: object
         identity = self.storage.identity
         return {
             "source": self.source.to_dict(),
@@ -104,25 +119,26 @@ class StackMemorySSAAliasAccessSlice8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackMemorySSAAliasAccess8616:
     """One original access and the ordered Alias identities of its byte views."""
 
     source: SSAMemoryAccess8616
     storage: AliasStorageFacts
-    slices: tuple[StackMemorySSAAliasAccessSlice8616, ...]
+    slices: object
 
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-friendly representation."""
+        identity: object
         identity = self.storage.identity
         return {
             "source": self.source.to_dict(),
             "storage_kind": identity[0] if identity is not None else None,
-            "slices": [item.to_dict() for item in self.slices],
+            "slices": [item.to_dict() for item in iter(self.slices)],
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackMemorySSAAliasOverlap8616:
     """Alias projection of one byte-exact IR overlap relationship."""
 
@@ -133,6 +149,9 @@ class StackMemorySSAAliasOverlap8616:
 
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-friendly representation."""
+        intersection_identity: object
+        left_identity: object
+        right_identity: object
         left_identity = self.left_storage.identity
         right_identity = self.right_storage.identity
         intersection_identity = self.intersection_storage.identity
@@ -146,14 +165,14 @@ class StackMemorySSAAliasOverlap8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackMemoryAliasRefusal8616:
     """One honestly retained Alias projection failure."""
 
     kind: StackMemoryAliasRefusalKind8616
     block_addr: int | None
     instr_index: int | None
-    detail: str
+    detail: object
     address: IRAddress | None = None
 
     def to_dict(self) -> dict[str, object]:
@@ -167,27 +186,27 @@ class StackMemoryAliasRefusal8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackMemoryAliasStats8616:
     """Closed evidence accounting for the IR-to-Alias projection."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every input became one fact or one refusal."""
         return (
-            self.raw_fact_count == self.materialized_count + self.failure_count
+            operator.eq(self.raw_fact_count, self.materialized_count + self.failure_count)
             and self.normalized_fact_count
             == self.classified_fact_count
             == self.materialized_count
         )
 
-    def to_dict(self) -> dict[str, int]:
+    def to_dict(self) -> dict[str, cython.longlong]:
         """Return the five mandatory evidence counters."""
         return {
             "raw_fact_count": self.raw_fact_count,
@@ -198,11 +217,11 @@ class StackMemoryAliasStats8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackMemorySSAAliasArtifact8616:
     """Alias facts and refusals projected from one function SSA artifact."""
 
-    function_addr: int
+    function_addr: cython.longlong
     source_ssa: SSAFunctionArtifact
     facts: tuple[StackMemorySSAAliasFact8616, ...] = ()
     accesses: tuple[StackMemorySSAAliasAccess8616, ...] = ()
@@ -211,7 +230,7 @@ class StackMemorySSAAliasArtifact8616:
     source_refusals: tuple[IRRefusal, ...] = ()
     call_effects: tuple[SSACallStackEffectSite8616, ...] = ()
     stats: StackMemoryAliasStats8616 = StackMemoryAliasStats8616()
-    upstream_complete: bool = True
+    upstream_complete: cython.bint = True
     logical_accesses: tuple[LogicalStackMemoryAliasAccess8616, ...] = ()
     logical_refusals: tuple[LogicalStackMemoryAliasRefusal8616, ...] = ()
     logical_stats: StackMemoryAliasStats8616 = StackMemoryAliasStats8616()
@@ -223,12 +242,12 @@ class StackMemorySSAAliasArtifact8616:
     private_write_decisions: tuple[PrivateStackWriteDecision8616, ...] = ()
 
     @property
-    def private_write_census(self) -> dict[str, int]:
+    def private_write_census(self) -> dict[str, cython.longlong]:
         """Count source-group proofs, not downstream deleted C assignments."""
-        proven = sum(decision.proven for decision in self.private_write_decisions)
+        proven = sum(decision.proven for decision in iter(self.private_write_decisions))
         return {
             "raw_fact_count": len(self.private_write_decisions),
-            "normalized_fact_count": sum(decision.source_addr is not None for decision in self.private_write_decisions),
+            "normalized_fact_count": sum(decision.source_addr is not None for decision in iter(self.private_write_decisions)),
             "classified_fact_count": proven,
             "materialized_count": proven,
             "failure_count": len(self.private_write_decisions) - proven,
@@ -237,35 +256,33 @@ class StackMemorySSAAliasArtifact8616:
     @property
     def released_stack_extents(self) -> tuple[ReleasedStackExtent8616, ...]:
         """Derive coordinate spans without hiding the authoritative verdicts."""
-        return tuple(extent for evidence in self.stack_extent_evidence for extent in evidence.extents)
+        return tuple(extent for evidence in iter(self.stack_extent_evidence) for extent in iter(evidence.extents))
 
     def __post_init__(self) -> None:
         """Reject artifacts whose function identity disagrees with their source."""
-        if self.function_addr != self.source_ssa.function_addr:
+        if operator.ne(self.function_addr, self.source_ssa.function_addr):
             raise ValueError("Alias artifact function address must match its exact SSA source")
 
     @property
-    def logical_complete(self) -> bool:
+    def logical_complete(self) -> cython.bint:
         """Return whether the separate logical Alias evidence loop closes."""
         return (
             self.logical_stats.complete
-            and len(self.logical_accesses) == self.logical_stats.materialized_count
-            and len(self.logical_refusals) == self.logical_stats.failure_count
+            and operator.eq(len(self.logical_accesses), self.logical_stats.materialized_count)
+            and operator.eq(len(self.logical_refusals), self.logical_stats.failure_count)
         )
 
     @property
-    def logical_storage_complete(self) -> bool:
+    def logical_storage_complete(self) -> cython.bint:
         """Return whether unversioned logical storage identity closes."""
         return (
             self.logical_storage_stats.complete
-            and len(self.logical_storage_identities)
-            == self.logical_storage_stats.materialized_count
-            and len(self.logical_storage_refusals)
-            == self.logical_storage_stats.failure_count
+            and operator.eq(len(self.logical_storage_identities), self.logical_storage_stats.materialized_count)
+            and operator.eq(len(self.logical_storage_refusals), self.logical_storage_stats.failure_count)
         )
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether upstream and Alias evidence accounting both close."""
         return (
             self.upstream_complete
@@ -279,28 +296,28 @@ class StackMemorySSAAliasArtifact8616:
         return {
             "function_addr": self.function_addr,
             "source_ssa_function_addr": self.source_ssa.function_addr,
-            "released_stack_extents": [extent.to_dict() for extent in self.released_stack_extents],
-            "stack_extent_evidence": [evidence.to_dict() for evidence in self.stack_extent_evidence],
+            "released_stack_extents": [extent.to_dict() for extent in iter(self.released_stack_extents)],
+            "stack_extent_evidence": [evidence.to_dict() for evidence in iter(self.stack_extent_evidence)],
             "frame_address_escape": self.frame_address_escape.name,
-            "private_write_decisions": [decision.to_dict() for decision in self.private_write_decisions],
+            "private_write_decisions": [decision.to_dict() for decision in iter(self.private_write_decisions)],
             "private_write_census": self.private_write_census,
-            "facts": [fact.to_dict() for fact in self.facts],
-            "accesses": [access.to_dict() for access in self.accesses],
-            "overlaps": [overlap.to_dict() for overlap in self.overlaps],
-            "refusals": [refusal.to_dict() for refusal in self.refusals],
-            "source_refusals": [refusal.to_dict() for refusal in self.source_refusals],
-            "call_effects": [effect.to_dict() for effect in self.call_effects],
+            "facts": [fact.to_dict() for fact in iter(self.facts)],
+            "accesses": [access.to_dict() for access in iter(self.accesses)],
+            "overlaps": [overlap.to_dict() for overlap in iter(self.overlaps)],
+            "refusals": [refusal.to_dict() for refusal in iter(self.refusals)],
+            "source_refusals": [refusal.to_dict() for refusal in iter(self.source_refusals)],
+            "call_effects": [effect.to_dict() for effect in iter(self.call_effects)],
             "stats": self.stats.to_dict(),
             "upstream_complete": self.upstream_complete,
-            "logical_accesses": [access.to_dict() for access in self.logical_accesses],
-            "logical_refusals": [refusal.to_dict() for refusal in self.logical_refusals],
+            "logical_accesses": [access.to_dict() for access in iter(self.logical_accesses)],
+            "logical_refusals": [refusal.to_dict() for refusal in iter(self.logical_refusals)],
             "logical_stats": self.logical_stats.to_dict(),
             "logical_complete": self.logical_complete,
             "logical_storage_identities": [
-                identity.to_dict() for identity in self.logical_storage_identities
+                identity.to_dict() for identity in iter(self.logical_storage_identities)
             ],
             "logical_storage_refusals": [
-                refusal.to_dict() for refusal in self.logical_storage_refusals
+                refusal.to_dict() for refusal in iter(self.logical_storage_refusals)
             ],
             "logical_storage_stats": self.logical_storage_stats.to_dict(),
             "logical_storage_complete": self.logical_storage_complete,

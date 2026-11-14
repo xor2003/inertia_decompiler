@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed per-instruction register-effect classification over scalar IR.
 
 Layer: IR.
@@ -15,6 +16,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -40,6 +43,9 @@ from .scalar_value_projection import (
     ScalarBinaryOp8616,
     scalar_binary_operation_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "ScalarInstructionClobber8616",
@@ -79,7 +85,7 @@ class ScalarInstructionClobber8616(StrEnum):
     UNKNOWN = "unknown"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ScalarInstructionEffect8616:
     """One typed register-effect classification and its exact branch target.
 
@@ -113,29 +119,29 @@ class ScalarInstructionEffect8616:
 # emitted by one-bit comparisons (``Iop_CmpEQ1``/``Iop_CmpNE1`` — observed
 # in REPNE/REPE string-operation tails and single-flag tests); like the
 # predicate destination, one-bit operands occupy one byte of IR storage.
-_COMPARISON_OPS_8616: dict[str, int] = {
+_COMPARISON_OPS_8616: object = {
     f"Iop_Cmp{relation}{bits}": bits
-    for relation in ("EQ", "NE")
-    for bits in (1, 8, 16, 32, 64)
+    for relation in iter(("EQ", "NE"))
+    for bits in iter((1, 8, 16, 32, 64))
 } | {
     f"Iop_Cmp{relation}{bits}{signedness}": bits
-    for relation in ("LT", "LE", "GT", "GE")
-    for bits in (8, 16, 32, 64)
-    for signedness in ("S", "U")
+    for relation in iter(("LT", "LE", "GT", "GE"))
+    for bits in iter((8, 16, 32, 64))
+    for signedness in iter(("S", "U"))
 }
 
 # Widening products have different operand/result widths and therefore must
 # not enter the same-width scalar_binary_operation descriptor table.
-_WIDENING_PRODUCT_BYTES_8616: dict[str, int] = {
+_WIDENING_PRODUCT_BYTES_8616: dict[str, cython.longlong] = {
     f"Iop_Mull{signedness}{bits}": bits // 8
-    for signedness in ("S", "U")
-    for bits in (8, 16, 32)
+    for signedness in iter(("S", "U"))
+    for bits in iter((8, 16, 32))
 }
 
 # SELECT operands are guard, true value, false value. A guard is a one-bit
 # predicate stored in one byte; its least significant bit chooses the arm.
-_SELECT_BITS_8616: FrozenDispatch[str, int] = tuple(
-    (f"SELECT{bits}", bits) for bits in (1, 8, 16, 32, 64)
+_SELECT_BITS_8616: FrozenDispatch[str, cython.longlong] = tuple(
+    (f"SELECT{bits}", bits) for bits in iter((1, 8, 16, 32, 64))
 )
 
 
@@ -146,14 +152,16 @@ def scalar_select_result_bits_8616(instruction: IRInstr) -> int | None:
     remain dependencies, even when another consumer can resolve the guard.
     Value evaluation and purity remain separate from register-effect closure.
     """
+    bits: object
+    destination: object
     bits = frozen_dispatch_lookup(_SELECT_BITS_8616, instruction.op)
     if bits is None or len(instruction.args) != 3:
         return None
     destination = _closed_destination_8616(instruction)
     size = (bits + 7) // 8
-    if destination is None or destination.space is not MemSpace.TMP or destination.size != size:
+    if destination is None or destination.space is not MemSpace.TMP or operator.ne(destination.size, size):
         return None
-    if not all(_readable_scalar_source_8616(value) for value in instruction.args):
+    if not all(_readable_scalar_source_8616(value) for value in iter(instruction.args)):
         return None
     guard, true_value, false_value = instruction.args
     if not isinstance(guard, IRValue) or not isinstance(true_value, IRValue) or not isinstance(false_value, IRValue):
@@ -161,6 +169,7 @@ def scalar_select_result_bits_8616(instruction: IRInstr) -> int | None:
     return bits if guard.size == 1 and true_value.size == false_value.size == size else None
 
 
+@cython.ccall
 def _classify_select_8616(instruction: IRInstr) -> ScalarInstructionEffect8616 | None:
     """Close a selection's temporary write without claiming a known value."""
     if frozen_dispatch_lookup(_SELECT_BITS_8616, instruction.op) is None:
@@ -170,7 +179,8 @@ def _classify_select_8616(instruction: IRInstr) -> ScalarInstructionEffect8616 |
     return _closed_write_8616(instruction, "select")
 
 
-def _unknown_8616(detail: str) -> ScalarInstructionEffect8616:
+@cython.ccall
+def _unknown_8616(detail: object) -> ScalarInstructionEffect8616:
     """One honest non-result: no effect evidence was established."""
     return ScalarInstructionEffect8616(
         ScalarInstructionEffectKind8616.UNKNOWN,
@@ -179,6 +189,7 @@ def _unknown_8616(detail: str) -> ScalarInstructionEffect8616:
     )
 
 
+@cython.ccall
 def _readable_scalar_source_8616(value: object) -> TypeGuard[IRValue]:
     """A typed scalar operand is a read, never an implicit second write.
 
@@ -193,6 +204,7 @@ def _readable_scalar_source_8616(value: object) -> TypeGuard[IRValue]:
     )
 
 
+@cython.ccall
 def _closed_destination_8616(instruction: IRInstr) -> IRValue | None:
     """Return an explicit scalar TMP/REG destination, or refuse contradictions.
 
@@ -220,15 +232,17 @@ def _closed_destination_8616(instruction: IRInstr) -> IRValue | None:
         return None
     if destination.space is MemSpace.REG and destination.name is None:
         return None
-    if instruction.size != destination.size:
+    if operator.ne(instruction.size, destination.size):
         return None
     return destination
 
 
+@cython.ccall
 def _closed_write_8616(
-    instruction: IRInstr, detail: str,
+    instruction: IRInstr, detail: object,
 ) -> ScalarInstructionEffect8616 | None:
     """Close an instruction whose only write is its validated destination."""
+    destination: object
     destination = _closed_destination_8616(instruction)
     if destination is None:
         return None
@@ -242,6 +256,7 @@ def _closed_write_8616(
     )
 
 
+@cython.ccall
 def _const_target_8616(value: object) -> TypeGuard[IRValue]:
     """Require an exact target literal, never a conflicting projected view."""
     if not isinstance(value, IRValue) or value.space is not MemSpace.CONST:
@@ -256,8 +271,10 @@ def _const_target_8616(value: object) -> TypeGuard[IRValue]:
     )
 
 
+@cython.ccall
 def _classify_mov_8616(instruction: IRInstr) -> ScalarInstructionEffect8616:
     """A MOV writes exactly its destination when the source is a scalar read."""
+    effect: object
     if len(instruction.args) == 1 and _readable_scalar_source_8616(instruction.args[0]):
         effect = _closed_write_8616(instruction, "mov")
         if effect is not None:
@@ -265,8 +282,10 @@ def _classify_mov_8616(instruction: IRInstr) -> ScalarInstructionEffect8616:
     return _unknown_8616("mov_shape")
 
 
+@cython.ccall
 def _classify_load_8616(instruction: IRInstr) -> ScalarInstructionEffect8616:
     """A LOAD writes exactly its destination when the operand is a typed address."""
+    effect: object
     if len(instruction.args) == 1 and isinstance(instruction.args[0], IRAddress):
         effect = _closed_write_8616(instruction, "load")
         if effect is not None:
@@ -274,11 +293,13 @@ def _classify_load_8616(instruction: IRInstr) -> ScalarInstructionEffect8616:
     return _unknown_8616("load_shape")
 
 
+@cython.ccall
 def _classify_call_8616(instruction: IRInstr) -> ScalarInstructionEffect8616:
     """A CALL's register results and clobbers are never modeled here."""
     return _unknown_8616("call")
 
 
+@cython.ccall
 def _classify_cjmp_8616(instruction: IRInstr) -> ScalarInstructionEffect8616:
     """A proven conditional transfer rewrites IP and preserves data registers."""
     target = instruction.args[1] if len(instruction.args) == 2 else None
@@ -297,6 +318,7 @@ def _classify_cjmp_8616(instruction: IRInstr) -> ScalarInstructionEffect8616:
     return _unknown_8616("cjmp_shape")
 
 
+@cython.ccall
 def _classify_jmp_8616(instruction: IRInstr) -> ScalarInstructionEffect8616:
     """Close only a literal unconditional IP transfer with no data destination."""
     target = instruction.args[0] if len(instruction.args) == 1 else None
@@ -310,6 +332,7 @@ def _classify_jmp_8616(instruction: IRInstr) -> ScalarInstructionEffect8616:
     return _unknown_8616("jmp_shape")
 
 
+@cython.ccall
 def _classify_nop_8616(instruction: IRInstr) -> ScalarInstructionEffect8616:
     """A proven no-effect instruction writes no register; unproven claims refuse.
 
@@ -330,6 +353,7 @@ def _classify_nop_8616(instruction: IRInstr) -> ScalarInstructionEffect8616:
     return _unknown_8616("nop_shape")
 
 
+@cython.ccall
 def _classify_store_8616(instruction: IRInstr) -> ScalarInstructionEffect8616:
     """A STORE writes memory only: it never writes an architectural register."""
     if (
@@ -346,6 +370,7 @@ def _classify_store_8616(instruction: IRInstr) -> ScalarInstructionEffect8616:
     return _unknown_8616("store_shape")
 
 
+@cython.ccall
 def _classify_comparison_8616(
     instruction: IRInstr,
 ) -> ScalarInstructionEffect8616 | None:
@@ -356,6 +381,8 @@ def _classify_comparison_8616(
     width encoded in the exact custom-emitter operation spelling. One-bit
     operand spellings share that same one-byte storage convention.
     """
+    destination: object
+    operand_bits: object
     operand_bits = _COMPARISON_OPS_8616.get(instruction.op)
     if operand_bits is None or len(instruction.args) != 2:
         return None
@@ -381,9 +408,10 @@ def _classify_comparison_8616(
     )
 
 
+@cython.ccall
 def _binary_operands_valid_8616(
-    operation: ScalarBinaryOp8616, args: tuple[IRAtom, ...],
-) -> bool:
+    operation: ScalarBinaryOp8616, args: object,
+) -> cython.bint:
     """Both operands are typed reads whose widths match the descriptor.
 
     Data operands carry the operation width; shifts keep their right operand
@@ -392,21 +420,24 @@ def _binary_operands_valid_8616(
     left, right = args
     if not (_readable_scalar_source_8616(left) and _readable_scalar_source_8616(right)):
         return False
-    if left.size != operation.bits // 8:
+    if operator.ne(left.size, operation.bits // 8):
         return False
     if operation.kind in {ScalarBinaryKind8616.SHL, ScalarBinaryKind8616.SHR}:
         return bool(right.size > 0)
-    return bool(right.size == operation.bits // 8)
+    return bool(operator.eq(right.size, operation.bits // 8))
 
 
+@cython.ccall
 def _classify_binary_8616(
     instruction: IRInstr,
 ) -> ScalarInstructionEffect8616 | None:
     """Close a registered scalar binary op whose widths match its descriptor."""
+    effect: object
+    operation: object
     operation = scalar_binary_operation_8616(instruction.op)
     if operation is None or len(instruction.args) != 2:
         return None
-    if operation.bits // 8 != instruction.size:
+    if operator.ne(operation.bits // 8, instruction.size):
         return _unknown_8616("binary_width")
     if not _binary_operands_valid_8616(operation, instruction.args):
         return _unknown_8616("binary_shape")
@@ -420,10 +451,11 @@ def _classify_boolean_binary_8616(instruction: IRInstr) -> ScalarInstructionEffe
     These VEX one-bit operations are not eight-bit integer arithmetic. This
     closes writes only; it does not invent a Boolean value or constant theorem.
     """
+    effect: object
     if instruction.op not in {"Iop_Xor1", "Iop_And1", "Iop_Or1"}:
         return None
     operands_closed = (len(instruction.args) == 2 and all(
-        _readable_scalar_source_8616(value) and value.size == 1 for value in instruction.args
+        _readable_scalar_source_8616(value) and value.size == 1 for value in iter(instruction.args)
     ))
     if instruction.size != 1 or not operands_closed:
         return _unknown_8616("boolean_shape")
@@ -435,23 +467,23 @@ def _classify_widening_product_8616(
     instruction: IRInstr,
 ) -> ScalarInstructionEffect8616 | None:
     """Close a pure product's explicit double-width write, without proving its value."""
+    effect: object
+    operand_bytes: object
     operand_bytes = _WIDENING_PRODUCT_BYTES_8616.get(instruction.op)
     if operand_bytes is None:
         return None
-    if instruction.size != 2 * operand_bytes or len(instruction.args) != 2:
+    if operator.ne(instruction.size, 2 * operand_bytes) or len(instruction.args) != 2:
         return _unknown_8616("widening_product_shape")
     if not all(
-        _readable_scalar_source_8616(value) and value.size == operand_bytes
-        for value in instruction.args
+        _readable_scalar_source_8616(value) and operator.eq(value.size, operand_bytes)
+        for value in iter(instruction.args)
     ):
         return _unknown_8616("widening_product_shape")
     effect = _closed_write_8616(instruction, "widening_product")
     return effect if effect is not None else _unknown_8616("widening_product_shape")
 
 
-_CLASSIFIERS_8616: FrozenDispatch[str, Callable[[IRInstr], ScalarInstructionEffect8616]] | dict[
-    str, Callable[[IRInstr], ScalarInstructionEffect8616]
-] = (
+_CLASSIFIERS_8616: object = (
     ("MOV", _classify_mov_8616),
     ("LOAD", _classify_load_8616),
     ("CALL", _classify_call_8616),
@@ -462,7 +494,7 @@ _CLASSIFIERS_8616: FrozenDispatch[str, Callable[[IRInstr], ScalarInstructionEffe
 )
 
 
-def scalar_dispatch_producers_8616() -> tuple[object, ...]:
+def scalar_dispatch_producers_8616() -> object:
     """Bind immutable dispatch or every entry of foreign dictionary instrumentation.
 
     Exact tuples retain a stable membership identity. A replaced dictionary
@@ -472,10 +504,11 @@ def scalar_dispatch_producers_8616() -> tuple[object, ...]:
     registry = _CLASSIFIERS_8616
     retained: tuple[object, ...] = (frozen_dispatch_lookup, type(registry), registry)
     if type(registry) is dict:
-        return (*retained, *(item for pair in registry.items() for item in pair))
+        return (*retained, *(item for pair in builtins.iter(registry.items()) for item in iter(pair)))
     return retained
 
 
+@cython.ccall
 def scalar_instruction_effect_8616(
     instruction: IRInstr,
 ) -> ScalarInstructionEffect8616:
@@ -492,6 +525,9 @@ def scalar_instruction_effect_8616(
     unknown. CALL and
     every malformed or unsupported form remain UNKNOWN.
     """
+    classifier: object
+    effect: object
+    classify: object
     classifier = frozen_dispatch_lookup(_CLASSIFIERS_8616, instruction.op)
     if classifier is not None:
         return classifier(instruction)
@@ -506,6 +542,7 @@ def scalar_instruction_effect_8616(
     return _unknown_8616("unsupported_op")
 
 
+@cython.ccall
 def scalar_boolean_result_bits_8616(instruction: IRInstr) -> int | None:
     """Authoritative semantic result width in bits for Boolean-producing IR ops.
 
@@ -521,6 +558,8 @@ def scalar_boolean_result_bits_8616(instruction: IRInstr) -> int | None:
     products, constants 0 or 1, and unsupported operators carry no one-bit
     evidence, and no operand value, name, or detail string may supply it.
     """
+    effect: object
+    classify: object
     if scalar_select_result_bits_8616(instruction) == 1:
         return 1
     for classify in (_classify_comparison_8616, _classify_boolean_binary_8616):

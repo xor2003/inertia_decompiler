@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Named logical pair type and per-operation legality contracts.
 
 Layer: Widening.
@@ -15,12 +16,22 @@ retiring carrier statements; original code must survive it unchanged.
 """
 
 from __future__ import annotations
+import dataclasses
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from inertia.ir.core import MemSpace
+import operator
+CarryBorrowKind8616 = typing.TypeVar("CarryBorrowKind8616")
+DomainKey = typing.TypeVar("DomainKey")
+IRValue = typing.TypeVar("IRValue")
+WideCarryBorrowValue8616 = typing.TypeVar("WideCarryBorrowValue8616")
+WideRegisterSlice8616 = typing.TypeVar("WideRegisterSlice8616")
+WideValueSignedness8616 = typing.TypeVar("WideValueSignedness8616")
 
 if TYPE_CHECKING:
     from inertia.alias.domains import DomainKey
@@ -74,7 +85,7 @@ class WidePairIllegality8616(StrEnum):
     VALUE_WIDTH_MISMATCH = "value_width_mismatch"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WidePairType8616:
     """Immutable named logical pair type retained from proven halves.
 
@@ -85,14 +96,14 @@ class WidePairType8616:
     logical pair type and is never a recovered program structure name.
     """
 
-    name: str
+    name: object
     signedness: WideValueSignedness8616
-    total_size: int
-    low_size: int
-    high_size: int
+    total_size: cython.longlong
+    low_size: cython.longlong
+    high_size: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WidePairHalf8616:
     """One ordered half of a named pair retaining its exact proven slice."""
 
@@ -110,12 +121,12 @@ class WidePairHalf8616:
         return self.slice.result_domain
 
     @property
-    def size(self) -> int:
+    def size(self) -> cython.longlong:
         """Return the proven byte width of this half result."""
         return int(self.slice.result.size)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WidePairEvidence8616:
     """Named pair type plus typed transform legality for one wide operation.
 
@@ -139,7 +150,7 @@ class WidePairEvidence8616:
         return (self.low, self.high)
 
     @property
-    def combine_authorized(self) -> bool:
+    def combine_authorized(self) -> cython.bint:
         """Return whether the halves may be consumed as one wide entity."""
         return (
             self.state is WidePairState8616.PAIRED
@@ -148,7 +159,7 @@ class WidePairEvidence8616:
         )
 
     @property
-    def split_authorized(self) -> bool:
+    def split_authorized(self) -> cython.bint:
         """Return whether the halves may be consumed independently."""
         return (
             self.state is not WidePairState8616.UNPAIRED
@@ -157,11 +168,13 @@ class WidePairEvidence8616:
         )
 
 
-def wide_pair_type_name_8616(total_size: int) -> str:
+@cython.ccall
+def wide_pair_type_name_8616(total_size: cython.longlong) -> str:
     """Return the deterministic logical pair-type name from proven width."""
     return f"wide_pair{total_size * 8}"
 
 
+@cython.ccall
 def _pair_half_legality_8616(
     low: WidePairHalf8616,
     high: WidePairHalf8616,
@@ -169,40 +182,44 @@ def _pair_half_legality_8616(
     """Return the typed reason two retained halves cannot form one pair."""
     if low.result.space is not MemSpace.REG or high.result.space is not MemSpace.REG:
         return WidePairIllegality8616.HALF_STORAGE_MISMATCH
-    if low.size <= 0 or high.size <= 0 or low.size != high.size:
+    if low.size <= 0 or high.size <= 0 or operator.ne(low.size, high.size):
         return WidePairIllegality8616.HALF_WIDTH_MISMATCH
-    if low.result == high.result:
+    if operator.eq(low.result, high.result):
         return WidePairIllegality8616.HALF_IDENTITY_MISMATCH
-    if low.domain == high.domain:
+    if operator.eq(low.domain, high.domain):
         return WidePairIllegality8616.HALF_DOMAIN_COLLISION
     return None
 
 
+@cython.ccall
 def _pair_legality_8616(
     *,
-    claimed_size: int,
+    claimed_size: cython.longlong,
     low: WidePairHalf8616,
     high: WidePairHalf8616,
 ) -> WidePairIllegality8616 | None:
     """Return the typed reason proven halves cannot form one claimed pair."""
+    illegality: object
     illegality = _pair_half_legality_8616(low, high)
     if illegality is not None:
         return illegality
-    if low.size + high.size != claimed_size:
+    if operator.ne(low.size + high.size, claimed_size):
         return WidePairIllegality8616.TOTAL_WIDTH_MISMATCH
     return None
 
 
+@cython.ccall
 def materialize_wide_pair_evidence_8616(
     *,
     kind: CarryBorrowKind8616,
-    claimed_size: int,
+    claimed_size: cython.longlong,
     signedness: WideValueSignedness8616,
     address_space: MemSpace | None,
     low: WideRegisterSlice8616,
     high: WideRegisterSlice8616,
 ) -> WidePairEvidence8616:
     """Project proven result slices into one named pair with typed legality."""
+    illegality: object
     low_half = WidePairHalf8616(WidePairOrder8616.LOW, low)
     high_half = WidePairHalf8616(WidePairOrder8616.HIGH, high)
     total_size = low_half.size + high_half.size
@@ -233,10 +250,12 @@ def materialize_wide_pair_evidence_8616(
     )
 
 
+@cython.ccall
 def _pair_invariant_illegality_8616(
     pair: WidePairEvidence8616,
 ) -> WidePairIllegality8616 | None:
     """Return the typed illegality when evidence violates its own invariants."""
+    half: object
     pair_type = pair.type
     if (
         pair.low.order is not WidePairOrder8616.LOW
@@ -247,16 +266,17 @@ def _pair_invariant_illegality_8616(
     if half is not None:
         return half
     if (
-        pair_type.low_size != pair.low.size
-        or pair_type.high_size != pair.high.size
-        or pair_type.total_size != pair_type.low_size + pair_type.high_size
+        operator.ne(pair_type.low_size, pair.low.size)
+        or operator.ne(pair_type.high_size, pair.high.size)
+        or operator.ne(pair_type.total_size, pair_type.low_size + pair_type.high_size)
     ):
         return WidePairIllegality8616.TYPE_WIDTH_MISMATCH
-    if pair_type.name != wide_pair_type_name_8616(pair_type.total_size):
+    if operator.ne(pair_type.name, wide_pair_type_name_8616(pair_type.total_size)):
         return WidePairIllegality8616.TYPE_NAME_MISMATCH
     return None
 
 
+@cython.ccall
 def _pair_value_field_illegality_8616(
     value: WideCarryBorrowValue8616,
     pair: WidePairEvidence8616,
@@ -267,7 +287,7 @@ def _pair_value_field_illegality_8616(
         return WidePairIllegality8616.KIND_MISMATCH
     if value.signedness is not pair_type.signedness:
         return WidePairIllegality8616.SIGNEDNESS_MISMATCH
-    if value.size != pair_type.total_size:
+    if operator.ne(value.size, pair_type.total_size):
         return WidePairIllegality8616.VALUE_WIDTH_MISMATCH
     source_space = (
         value.source_memory.space if value.source_memory is not None else None
@@ -276,15 +296,17 @@ def _pair_value_field_illegality_8616(
         return WidePairIllegality8616.SOURCE_SPACE_MISMATCH
     if value.address_space is not pair.address_space:
         return WidePairIllegality8616.SOURCE_SPACE_MISMATCH
-    if value.low != pair.low.slice or value.high != pair.high.slice:
+    if operator.ne(value.low, pair.low.slice) or operator.ne(value.high, pair.high.slice):
         return WidePairIllegality8616.HALF_IDENTITY_MISMATCH
     return None
 
 
+@cython.ccall
 def wide_pair_value_consistent_8616(
     value: WideCarryBorrowValue8616,
 ) -> WidePairIllegality8616 | None:
     """Return the typed illegality when a live value breaks its retained pair."""
+    invariant: object
     pair = value.pair
     if not isinstance(pair, WidePairEvidence8616):
         return WidePairIllegality8616.PAIR_EVIDENCE_MISSING

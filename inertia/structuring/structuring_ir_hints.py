@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Structuring.
 
 Responsibility: expose IR-readiness hints that explain structuring limits.
@@ -10,17 +11,23 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
 
 from inertia.structuring.ir_readiness import IRReadinessSummary, summarize_x86_16_ir_readiness
 from inertia.structuring.ir_recovery_summary import IRRecoverySource
+import dataclasses
 
 __all__ = ["StructuringIRHintArtifact", "build_structuring_ir_hint_artifact"]
 
 
+@cython.ccall
 def _ir_recovery_source_from_codegen(codegen: object) -> IRRecoverySource:
+    summary: object
+    codegen_type: object
     summary = vars(codegen).get("_inertia_vex_ir_summary", {})
     if not isinstance(summary, Mapping) or not summary:
         for codegen_type in type(codegen).mro():
@@ -30,12 +37,12 @@ def _ir_recovery_source_from_codegen(codegen: object) -> IRRecoverySource:
     return {"_inertia_vex_ir_summary": summary if isinstance(summary, Mapping) else {}}
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StructuringIRHintArtifact:
     """IR-readiness hints that explain structuring limits without changing verdicts."""
 
     readiness: IRReadinessSummary
-    hints: tuple[str, ...]
+    hints: object
 
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-compatible structuring hint payload."""
@@ -46,7 +53,7 @@ class StructuringIRHintArtifact:
 
 
 def build_structuring_ir_hint_artifact(
-    codegen: object, *, succeeded: bool, iterations: int
+    codegen: object, *, succeeded: cython.bint, iterations: cython.longlong
 ) -> StructuringIRHintArtifact:
     """Build structuring diagnostics from already-collected IR readiness facts."""
 

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: preserve legacy CLI helper surface while delegating semantic proof to X86_16 layers.
@@ -5,6 +6,7 @@ Forbidden: owning decompiler semantics, source-backed recovery, or postprocess s
 """
 
 from __future__ import annotations
+import cython
 
 import logging
 import os
@@ -17,13 +19,14 @@ from angr.sim_variable import SimStackVariable
 
 from inertia.cli.cli_linear_recurrence_state import LinearRecurrenceState
 from inertia.pipeline.errors import PipelineHardError
+import operator
 
 log: logging.Logger = logging.getLogger(__name__)
 
-type CNode = object
-type LinearDeltaMatch = tuple[CNode | None, int]
-type CarryCandidate = tuple[CNode | None, int | None, structured_c.CAssignment | bool | None]
-type LoopParts = tuple[CNode | None, str, CNode | None, CNode | None]
+CNode = typing.TypeAliasType("CNode", object)
+LinearDeltaMatch = typing.TypeAliasType("LinearDeltaMatch", tuple[CNode | None, int])
+CarryCandidate = typing.TypeAliasType("CarryCandidate", tuple[CNode | None, int | None, structured_c.CAssignment | bool | None])
+LoopParts = typing.TypeAliasType("LoopParts", tuple[CNode | None, str, CNode | None, CNode | None])
 
 
 class _LinearRecurrenceRules(Protocol):
@@ -33,9 +36,9 @@ class _LinearRecurrenceRules(Protocol):
         self,
         carry_base: object,
         *,
-        expr_contains_dereference: Callable[[object], bool],
-        extract_linear_delta: Callable[[object], tuple[object | None, int]],
-    ) -> dict[str, object] | None:
+        expr_contains_dereference: Callable[[object], cython.bint],
+        extract_linear_delta: Callable[[object], tuple[object | None, cython.longlong]],
+    ) -> object:
         """Return a replacement plan for a carry-base expression."""
         ...
 
@@ -44,29 +47,33 @@ class _LinearRecurrenceRules(Protocol):
         original_expr: object,
         rewritten_expr: object,
         *,
-        expr_contains_dereference: Callable[[object], bool],
-        same_c_expression: Callable[[object, object], bool],
-    ) -> bool:
+        expr_contains_dereference: Callable[[object], cython.bint],
+        same_c_expression: Callable[[object, object], cython.bint],
+    ) -> cython.bint:
         """Return whether a linear rewrite is evidence-backed enough to commit."""
         ...
 
 
-def _dynamic_codegen_attr(obj: object, name: str, default: Any = None) -> Any:  # noqa: ANN401
+@cython.ccall
+def _dynamic_codegen_attr(obj: object, name: object, default: Any = None) -> Any:  # noqa: ANN401
     """Read a dynamic angr structured-codegen attribute at the CLI boundary."""
     # Dynamic codegen boundary: angr C-AST nodes expose version-dependent fields.
     return getattr(obj, name, default)
 
 
-def _dynamic_codegen_setattr(obj: object, name: str, value: object) -> None:
+@cython.ccall
+def _dynamic_codegen_setattr(obj: object, name: object, value: object) -> None:
     """Write a dynamic angr structured-codegen attribute at the CLI boundary."""
     # Dynamic codegen boundary: angr C-AST nodes expose version-dependent fields.
     setattr(obj, name, value)
 
 
-def _linear_recurrence_debug_enabled() -> bool:
+@cython.ccall
+def _linear_recurrence_debug_enabled() -> cython.bint:
     return bool(os.environ.get("INERTIA_DEBUG_LINEAR_RECURRENCE"))
 
 
+@cython.ccall
 def _node_summary_8616(node: object) -> str:
     if node is None:
         return "None"
@@ -84,6 +91,9 @@ def _node_summary_8616(node: object) -> str:
 
 
 def _iter_nested_statement_summaries_8616(node: object) -> Iterable[str]:
+    child: object
+    attr: object
+    stmt: object
     if node is None:
         return
     if isinstance(node, structured_c.CStatements):
@@ -97,7 +107,10 @@ def _iter_nested_statement_summaries_8616(node: object) -> Iterable[str]:
             yield from _iter_nested_statement_summaries_8616(child)
 
 
+@cython.ccall
 def _debug_loop_structure_8616(loop: object) -> None:
+    idx: object
+    summary: object
     if not _linear_recurrence_debug_enabled():
         return
     body = _dynamic_codegen_attr(loop, "body", None)
@@ -113,12 +126,13 @@ def _debug_loop_structure_8616(loop: object) -> None:
         log.warning("[linear-recurrence] body[%d]=%s", idx, summary)
 
 
+@cython.ccall
 def _rewrite_linear_condition(
     node: object,
     state: LinearRecurrenceState,
     *,
-    structured_codegen_node: Callable[[object], bool],
-    same_c_expression: Callable[[object, object], bool],
+    structured_codegen_node: Callable[[object], cython.bint],
+    same_c_expression: Callable[[object, object], cython.bint],
     rules: _LinearRecurrenceRules,
 ) -> None:
     candidate = None
@@ -136,9 +150,11 @@ def _rewrite_linear_condition(
             state.changed = True
 
 
+@cython.ccall
 def _self_delta_assignment_parts(
     stmt: object, state: LinearRecurrenceState
-) -> tuple[object, object, object, int | None] | None:
+) -> object:
+    base_expr: object
     if not isinstance(stmt, structured_c.CAssignment) or not isinstance(stmt.lhs, structured_c.CVariable):
         if _linear_recurrence_debug_enabled():
             log.warning("[linear-recurrence] low-delta reject: stmt=%s", _node_summary_8616(stmt))
@@ -159,6 +175,7 @@ def _self_delta_assignment_parts(
 
 def _match_self_delta_assignment(stmt: object, state: LinearRecurrenceState) -> int | None:
     def _impl() -> int | None:
+        parts: object
         parts = _self_delta_assignment_parts(stmt, state)
         if parts is None:
             return None
@@ -193,8 +210,9 @@ def _match_self_delta_assignment(stmt: object, state: LinearRecurrenceState) -> 
     return _impl()
 
 
-def _match_byte_carrier_high_update(expr: object, state: LinearRecurrenceState) -> tuple[object, int] | None:
-    def _impl() -> tuple[object, int] | None:
+def _match_byte_carrier_high_update(expr: object, state: LinearRecurrenceState) -> object:
+    def _impl() -> object:
+        matched: object
         nonlocal expr
         expr = state.unwrap_c_casts(expr)
         if not isinstance(expr, structured_c.CBinaryOp) or expr.op != "Shr":
@@ -223,11 +241,15 @@ def _match_byte_carrier_high_update(expr: object, state: LinearRecurrenceState) 
     return _impl()
 
 
+@cython.ccall
 def _match_carry_low_side(
     inner: structured_c.CBinaryOp,
     expr: object,
     state: LinearRecurrenceState,
-) -> tuple[object, int] | None:
+) -> object:
+    duplicate_word_base: object
+    maybe_const: object
+    maybe_low: object
     for maybe_low, maybe_const in ((inner.lhs, inner.rhs), (inner.rhs, inner.lhs)):
         const = state.c_constant_value(state.unwrap_c_casts(maybe_const))
         if const != 1:
@@ -251,7 +273,11 @@ def _match_carry_low_side(
     return None
 
 
-def _collect_body_assignments_8616(node: object) -> list[structured_c.CAssignment]:
+@cython.ccall
+def _collect_body_assignments_8616(node: object) -> object:
+    child: object
+    attr: object
+    stmt: object
     assignments: list[structured_c.CAssignment] = []
     if node is None:
         return assignments
@@ -269,12 +295,14 @@ def _collect_body_assignments_8616(node: object) -> list[structured_c.CAssignmen
     return assignments
 
 
+@cython.ccall
 def _find_low_delta_stmt_8616(
     assignments: Sequence[structured_c.CAssignment],
     state: LinearRecurrenceState,
     low_carrier: object,
     candidate_delta: object,
 ) -> structured_c.CAssignment | None:
+    stmt: object
     for stmt in reversed(assignments):
         if not isinstance(stmt, structured_c.CAssignment):
             continue
@@ -289,8 +317,11 @@ def _find_low_delta_stmt_8616(
     return None
 
 
-def _remove_statement_from_tree_8616(node: object, target_stmt: object) -> bool:
-    def _impl() -> bool:
+def _remove_statement_from_tree_8616(node: object, target_stmt: object) -> cython.bint:
+    def _impl() -> cython.bint:
+        child: object
+        attr: object
+        stmt: object
         if node is None or target_stmt is None:
             return False
         removed = False
@@ -319,8 +350,8 @@ def _remove_statement_from_tree_8616(node: object, target_stmt: object) -> bool:
 
 def _rebind_for_loop_byte_carrier_recurrence(
     loop: object, state: LinearRecurrenceState, *, rules: _LinearRecurrenceRules
-) -> bool:
-    def _impl() -> bool:
+) -> cython.bint:
+    def _impl() -> cython.bint:
         _debug_loop_structure_8616(loop)
         init, iteration_attr, iteration, body = _initial_loop_parts_8616(loop)
         if not _valid_loop_inputs_8616(state, init, iteration, iteration_attr, body):
@@ -344,11 +375,12 @@ def _rebind_for_loop_byte_carrier_recurrence(
     return _impl()
 
 
-def _loop_rebind_debug_reject(reason: str, *args: object) -> None:
+def _loop_rebind_debug_reject(reason: object, *args: object) -> None:
     if _linear_recurrence_debug_enabled():
         log.warning(f"[linear-recurrence] reject loop: {reason}", *args)
 
 
+@cython.ccall
 def _initial_loop_parts_8616(loop: object) -> LoopParts:
     init_local = _dynamic_codegen_attr(loop, "initializer", None) or _dynamic_codegen_attr(loop, "init", None)
     iteration_attr_local = "iteration" if _dynamic_codegen_attr(loop, "iteration", None) is not None else "iterator"
@@ -357,13 +389,14 @@ def _initial_loop_parts_8616(loop: object) -> LoopParts:
     return init_local, iteration_attr_local, iteration_local, body_local
 
 
+@cython.ccall
 def _valid_loop_inputs_8616(
     state: LinearRecurrenceState,
     init_local: object,
     iteration_local: object,
-    iteration_attr_local: str,
+    iteration_attr_local: object,
     body_local: object,
-) -> bool:
+) -> cython.bint:
     if not isinstance(init_local, structured_c.CAssignment):
         _loop_rebind_debug_reject("init not assignment")
         return False
@@ -386,6 +419,7 @@ def _valid_loop_inputs_8616(
     return True
 
 
+@cython.ccall
 def _candidate_from_iteration_8616(
     state: LinearRecurrenceState,
     rules: _LinearRecurrenceRules,
@@ -393,6 +427,9 @@ def _candidate_from_iteration_8616(
     iterator_local: object,
     body_assignments: Sequence[structured_c.CAssignment],
 ) -> CarryCandidate:
+    candidate_base: object
+    carry_rewrite: object
+    reduced: object
     if not isinstance(iteration_local, structured_c.CAssignment):
         return None, None, None
     carry_base = state.match_duplicate_word_increment_shift_expr(
@@ -439,10 +476,15 @@ def _candidate_from_iteration_8616(
     )
 
 
+@cython.ccall
 def _candidate_from_body_scan_8616(
     state: LinearRecurrenceState,
     body_assignments: Sequence[structured_c.CAssignment],
 ) -> CarryCandidate:
+    maybe_low_stmt: object
+    reduced: object
+    idx: object
+    stmt: object
     for idx, stmt in enumerate(body_assignments[:-1]):
         reduced = _match_byte_carrier_high_update(stmt.rhs, state)
         if reduced is None:
@@ -467,14 +509,15 @@ def _candidate_from_body_scan_8616(
     return None, None, None
 
 
+@cython.ccall
 def _coalesce_linear_recurrence_statements(
     project: object,
     codegen: object,
     *,
     unwrap_c_casts: Callable[[object], object],
-    structured_codegen_node: Callable[[object], bool],
+    structured_codegen_node: Callable[[object], cython.bint],
     iter_c_nodes_deep: Callable[[object], Iterable[object]],
-    same_c_expression: Callable[[object, object], bool],
+    same_c_expression: Callable[[object, object], cython.bint],
     c_constant_value: Callable[[object], object | None],
     canonicalize_stack_cvar_expr: Callable[..., object],
     seed_adjacent_byte_pair_aliases: Callable[..., dict[object, object]],
@@ -483,9 +526,10 @@ def _coalesce_linear_recurrence_statements(
     match_high_byte_projection_base: Callable[..., object | None],
     match_duplicate_word_base_expr: Callable[..., object | None],
     match_duplicate_word_increment_shift_expr: Callable[..., object | None],
-    same_stack_slot_identity_var: Callable[..., bool],
+    same_stack_slot_identity_var: Callable[..., cython.bint],
     rules: _LinearRecurrenceRules,
-) -> bool:
+) -> cython.bint:
+    cfunc: object
     cfunc = _dynamic_codegen_attr(codegen, "cfunc", None)
     if cfunc is None:
         return False
@@ -527,12 +571,16 @@ def _coalesce_linear_recurrence_statements(
     return bool(state.changed)
 
 
+@cython.ccall
 def _debug_body_assignments_8616(body_assignments: Sequence[structured_c.CAssignment]) -> None:
+    idx: object
+    stmt: object
     log.warning("[linear-recurrence] body_assignment_count=%d", len(body_assignments))
     for idx, stmt in enumerate(body_assignments):
         log.warning("[linear-recurrence] assignment[%d]=%s", idx, _node_summary_8616(stmt))
 
 
+@cython.ccall
 def _resolve_loop_carry_candidate_8616(
     state: LinearRecurrenceState,
     rules: _LinearRecurrenceRules,
@@ -540,6 +588,7 @@ def _resolve_loop_carry_candidate_8616(
     iterator_local: object,
     body_assignments: Sequence[structured_c.CAssignment],
 ) -> CarryCandidate:
+    low_stmt: object
     low_carrier, candidate_delta, low_stmt = _candidate_from_iteration_8616(
         state, rules, iteration, iterator_local, body_assignments
     )
@@ -548,16 +597,17 @@ def _resolve_loop_carry_candidate_8616(
     return _candidate_from_body_scan_8616(state, body_assignments)
 
 
+@cython.ccall
 def _apply_loop_byte_carrier_rebind(
     loop: object,
     state: LinearRecurrenceState,
-    iteration_attr: str,
+    iteration_attr: object,
     iterator_local: object,
     low_carrier: object,
     candidate_delta: object,
     low_stmt: object,
     body: object,
-) -> bool:
+) -> cython.bint:
     if candidate_delta not in {1, -1} or low_stmt is None:
         state._record_recurrence_reason("no_carry_pattern")
         return False
@@ -590,6 +640,7 @@ def _apply_loop_byte_carrier_rebind(
     return True
 
 
+@cython.ccall
 def _visit_linear_recurrence(
     node: object,
     state: LinearRecurrenceState,
@@ -610,6 +661,7 @@ def _visit_linear_recurrence(
         _visit_forloop_8616(node, state, codegen, rules=rules)
 
 
+@cython.ccall
 def _visit_statements_8616(
     node: structured_c.CStatements,
     state: LinearRecurrenceState,
@@ -617,6 +669,9 @@ def _visit_statements_8616(
     *,
     rules: _LinearRecurrenceRules,
 ) -> None:
+    carry_replacement: object
+    handled: object
+    stmt_var: object
     new_statements = []
     i = 0
     while i < len(node.statements):
@@ -651,10 +706,11 @@ def _visit_statements_8616(
         _visit_linear_recurrence(stmt, state, codegen, rules=rules)
         new_statements.append(stmt)
         i += 1
-    if state.changed or new_statements != node.statements:
+    if state.changed or operator.ne(new_statements, node.statements):
         node.statements = new_statements
 
 
+@cython.ccall
 def _record_or_rewrite_carry_assignment(
     stmt: structured_c.CAssignment,
     stmt_var: object,
@@ -662,6 +718,7 @@ def _record_or_rewrite_carry_assignment(
     codegen: object,
     rules: _LinearRecurrenceRules,
 ) -> object | None:
+    carry_rewrite: object
     carry_base = state.match_duplicate_word_increment_shift_expr(
         stmt.rhs, state.resolve_known_copy_alias_expr, codegen
     )
@@ -684,6 +741,7 @@ def _record_or_rewrite_carry_assignment(
     return cast(object, structured_c.CAssignment(stmt.lhs, carry_rewrite["replacement"], codegen=codegen))
 
 
+@cython.ccall
 def _coalesce_assignment_pair_8616(
     stmt: structured_c.CAssignment,
     next_stmt: structured_c.CAssignment,
@@ -691,7 +749,10 @@ def _coalesce_assignment_pair_8616(
     codegen: object,
     *,
     rules: _LinearRecurrenceRules,
-) -> tuple[list[object], int] | None:
+) -> object:
+    combined: object
+    shift_combined: object
+    temp_var: object
     temp_var = _dynamic_codegen_attr(stmt.lhs, "variable", None)
     next_var = _dynamic_codegen_attr(next_stmt.lhs, "variable", None)
     temp_use_count = state.variable_use_counts.get(id(temp_var), 0) if temp_var is not None else 0
@@ -713,30 +774,34 @@ def _coalesce_assignment_pair_8616(
     return _finish_pair_lane(stmt, state, codegen, rules=rules)
 
 
+@cython.ccall
 def _finish_pair_lane(
     stmt: structured_c.CAssignment,
     state: LinearRecurrenceState,
     codegen: object,
     *,
     rules: _LinearRecurrenceRules,
-) -> tuple[list[object], int]:
+) -> tuple[list[object], cython.longlong]:
     _visit_linear_recurrence(stmt, state, codegen, rules=rules)
     return [stmt], 1
 
 
-def _pair_var_is_protected_8616(var: object, state: LinearRecurrenceState) -> bool:
+@cython.ccall
+def _pair_var_is_protected_8616(var: object, state: LinearRecurrenceState) -> cython.bint:
     return var is not None and (
         id(var) in state.dereferenced_variable_ids or id(var) in state.protected_linear_alias_ids
     )
 
 
+@cython.ccall
 def _match_pair_linear_combine(
     stmt: structured_c.CAssignment,
     next_stmt: structured_c.CAssignment,
-    temp_use_count: int,
+    temp_use_count: cython.longlong,
     state: LinearRecurrenceState,
     codegen: object,
 ) -> object | None:
+    next_base: object
     if not (
         temp_use_count >= 2
         and state.is_linear_register_temp(stmt.lhs)
@@ -759,6 +824,7 @@ def _match_pair_linear_combine(
     )
 
 
+@cython.ccall
 def _pair_combine_parts(
     next_rhs: structured_c.CBinaryOp,
     stmt: structured_c.CAssignment,
@@ -772,13 +838,15 @@ def _pair_combine_parts(
     return None, None
 
 
+@cython.ccall
 def _match_pair_shift_combine(
     stmt: structured_c.CAssignment,
     next_stmt: structured_c.CAssignment,
-    temp_use_count: int,
+    temp_use_count: cython.longlong,
     state: LinearRecurrenceState,
     codegen: object,
 ) -> object | None:
+    shift_var: object
     if not (
         temp_use_count >= 2
         and state.is_linear_register_temp(stmt.lhs)
@@ -806,12 +874,16 @@ def _match_pair_shift_combine(
     return cast(object, shift_repl)
 
 
+@cython.ccall
 def _process_linear_temp_assignment(
     stmt: structured_c.CAssignment,
     temp_var: object,
     state: LinearRecurrenceState,
     codegen: object,
 ) -> object:
+    base_var: object
+    inlined_base: object
+    stmt_base: object
     stmt_base, stmt_delta = state.extract_linear_delta(stmt.rhs)
     if stmt_base is not None:
         resolved_stmt_base = state.resolve_known_copy_alias_expr(stmt_base)
@@ -850,6 +922,7 @@ def _process_linear_temp_assignment(
     return _apply_self_linear_combine(stmt, temp_var, rhs, state, codegen)
 
 
+@cython.ccall
 def _apply_self_linear_combine(
     stmt: structured_c.CAssignment,
     temp_var: object,
@@ -857,6 +930,8 @@ def _apply_self_linear_combine(
     state: LinearRecurrenceState,
     codegen: object,
 ) -> object:
+    current_delta: object
+    current_linear: object
     current_linear = state.linear_defs.get(id(temp_var)) if temp_var is not None else None
     if not _is_self_linear_update(rhs, stmt, current_linear, state):
         return stmt
@@ -882,12 +957,13 @@ def _apply_self_linear_combine(
     )
 
 
+@cython.ccall
 def _is_self_linear_update(
     rhs: object,
     stmt: structured_c.CAssignment,
-    current_linear: tuple[object, int] | None,
+    current_linear: object,
     state: LinearRecurrenceState,
-) -> bool:
+) -> cython.bint:
     return (
         current_linear is not None
         and isinstance(rhs, structured_c.CBinaryOp)
@@ -898,7 +974,10 @@ def _is_self_linear_update(
     )
 
 
+@cython.ccall
 def _record_copy_aliases_8616(stmt: structured_c.CAssignment, temp_var: object, state: LinearRecurrenceState) -> None:
+    alias_var: object
+    storage_key: object
     if temp_var is not None and state.is_copy_alias_candidate(stmt.rhs):
         alias = state.unwrap_c_casts(stmt.rhs)
         alias_var = _dynamic_codegen_attr(alias, "variable", None)
@@ -921,6 +1000,7 @@ def _record_copy_aliases_8616(stmt: structured_c.CAssignment, temp_var: object, 
                 state.expr_aliases[storage_key] = alias
 
 
+@cython.ccall
 def _visit_ifelse_8616(
     node: structured_c.CIfElse,
     state: LinearRecurrenceState,
@@ -928,6 +1008,8 @@ def _visit_ifelse_8616(
     *,
     rules: _LinearRecurrenceRules,
 ) -> None:
+    body: object
+    cond: object
     new_pairs = []
     pair_changed = False
     for cond, body in node.condition_and_nodes:
@@ -953,6 +1035,7 @@ def _visit_ifelse_8616(
         _visit_linear_recurrence(node.else_node, state, codegen, rules=rules)
 
 
+@cython.ccall
 def _visit_conditional_loop_8616(
     node: object,
     state: LinearRecurrenceState,
@@ -983,6 +1066,7 @@ def _visit_conditional_loop_8616(
     _visit_linear_recurrence(_dynamic_codegen_attr(node, "body", None), state, codegen, rules=rules)
 
 
+@cython.ccall
 def _visit_forloop_8616(
     node: object,
     state: LinearRecurrenceState,
@@ -990,6 +1074,7 @@ def _visit_forloop_8616(
     *,
     rules: _LinearRecurrenceRules,
 ) -> None:
+    attr: object
     if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
         log.warning(
             "[linear-recurrence] saw for-loop function=%#x",

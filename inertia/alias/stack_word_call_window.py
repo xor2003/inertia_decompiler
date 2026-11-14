@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove a block-local stack word survives until the selected CALL.
 
 Layer: Alias.
@@ -12,6 +13,8 @@ work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -37,6 +40,9 @@ from inertia.ir.scalar_instruction_effects import (
 from inertia.ir.ssa_function import build_x86_16_function_ssa
 
 from .entry_stack_pointer_snapshots import EntryStackPointerSnapshots8616
+import dataclasses
+import operator
+import builtins
 
 
 class StackWordCallWindowFailure8616(StrEnum):
@@ -50,19 +56,21 @@ class StackWordCallWindowFailure8616(StrEnum):
     OVERLAPPING_WRITE = "overlapping_write"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _WindowEvidence8616:
     """Recomputed local census and exact stack coordinates."""
 
-    offsets: tuple[int, int] | None
-    stores: tuple[int, ...]
+    offsets: object
+    stores: object
     failure: StackWordCallWindowFailure8616 | None
 
 
+@cython.ccall
 def stack_byte_store_coordinate_8616(
     snapshots: EntryStackPointerSnapshots8616, instruction: IRInstr,
 ) -> int | None:
     """Resolve an exact proven SS byte STORE using the shared frame owner."""
+    base: object
     if instruction.op != "STORE" or instruction.dst is not None or len(instruction.args) != 2:
         return None
     address, value = instruction.args
@@ -81,36 +89,43 @@ def _source_block_8616(
     source_ir: IRFunctionArtifact, receipt: LogicalConstantWordReceipt8616,
 ) -> IRBlock | None:
     """Require a current exact raw-to-SSA projection before using coordinates."""
+    memory: object
     memory = source_ir.logical_memory
-    if (not receipt.complete or source_ir.function_addr != receipt.artifact.function_addr
-            or memory is None or not memory.closed or memory.function_addr != source_ir.function_addr):
+    if (not receipt.complete or operator.ne(source_ir.function_addr, receipt.artifact.function_addr)
+            or memory is None or not memory.closed or operator.ne(memory.function_addr, source_ir.function_addr)):
         return None
     projected = build_x86_16_function_ssa(source_ir)
-    blocks = tuple(block for block in source_ir.blocks if block.addr == receipt.access.key.block_addr)
+    blocks = tuple(block for block in iter(source_ir.blocks) if operator.eq(block.addr, receipt.access.key.block_addr))
     # Plain dataclass equality deliberately omits producer identities. Compare
     # the owned structured projection so source_tmp and access provenance count.
-    projected_blocks = tuple(block.to_dict() for block in projected.blocks)
-    retained_blocks = tuple(block.to_dict() for block in receipt.artifact.blocks)
+    projected_blocks = tuple(block.to_dict() for block in iter(projected.blocks))
+    retained_blocks = tuple(block.to_dict() for block in iter(receipt.artifact.blocks))
     if projected_blocks != retained_blocks or len(blocks) != 1:
         return None
     return blocks[0]
 
 
 def _window_evidence_8616(
-    source_ir: IRFunctionArtifact, receipt: LogicalConstantWordReceipt8616, callsite_addr: int,
+    source_ir: IRFunctionArtifact, receipt: LogicalConstantWordReceipt8616, callsite_addr: cython.longlong,
 ) -> _WindowEvidence8616:
     """Replay the prefix and refuse every unclassified lifetime effect."""
+    block: object
+    coordinate: object
+    failure: object
+    stack: object
+    index: object
+    instruction: object
     block = _source_block_8616(source_ir, receipt)
     if block is None:
         return _WindowEvidence8616(None, (), StackWordCallWindowFailure8616.SOURCE_UNPROVEN)
-    calls = tuple(index for index, item in enumerate(block.instrs)
-                  if item.op == "CALL" and item.addr == callsite_addr)
-    lanes = tuple(lane.instr_index for lane in receipt.access.execution_slices)
+    calls = tuple(index for index, item in builtins.iter(enumerate(block.instrs))
+                  if item.op == "CALL" and operator.eq(item.addr, callsite_addr))
+    lanes = tuple(lane.instr_index for lane in iter(receipt.access.execution_slices))
     if len(calls) != 1 or calls[0] <= max(lanes):
         return _WindowEvidence8616(None, (), StackWordCallWindowFailure8616.CALL_UNPROVEN)
     snapshots = EntryStackPointerSnapshots8616()
-    coordinates: dict[int, int] = {}
-    stores: list[int] = []
+    coordinates: dict[cython.longlong, cython.longlong] = {}
+    stores: list[cython.longlong] = []
     for index, instruction in enumerate(block.instrs[:calls[0]]):
         # Register effects are classified by the IR owner, not by an Alias opcode table.
         failure = _instruction_failure_8616(instruction, index >= min(lanes))
@@ -130,12 +145,13 @@ def _window_evidence_8616(
     stack = snapshots.current_sp
     if stack is None or len(coordinates) != 2:
         return _WindowEvidence8616(None, tuple(stores), StackWordCallWindowFailure8616.ADDRESS_UNPROVEN)
-    offsets = tuple((coordinates[lane] - stack) & 0xFFFF for lane in lanes)
+    offsets = tuple((coordinates[lane] - stack) & 0xFFFF for lane in iter(lanes))
     return _WindowEvidence8616((offsets[0], offsets[1]), tuple(stores), None)
 
 
+@cython.ccall
 def _instruction_failure_8616(
-    instruction: IRInstr, in_lifetime: bool,
+    instruction: IRInstr, in_lifetime: cython.bint,
 ) -> StackWordCallWindowFailure8616 | None:
     """Consume the scalar-effect owner and reject live SS selector writes."""
     effect = scalar_instruction_effect_8616(instruction)
@@ -149,26 +165,26 @@ def _instruction_failure_8616(
     return None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackWordCallWindowReceipt8616:
     """Replayable local lifetime theorem, never a binary coverage certificate."""
 
     source_ir: IRFunctionArtifact
     source: LogicalConstantWordReceipt8616
-    callsite_addr: int
-    call_boundary_offsets: tuple[int, int] | None
-    checked_store_indices: tuple[int, ...]
+    callsite_addr: cython.longlong
+    call_boundary_offsets: object
+    checked_store_indices: object
     failure: StackWordCallWindowFailure8616 | None
     stats: LogicalConstantWordStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Require current source, exact census and closed proof accounting."""
         if self.failure is not None or not self.stats.complete:
             return False
         current = _window_evidence_8616(self.source_ir, self.source, self.callsite_addr)
-        return (current.failure is None and current.offsets == self.call_boundary_offsets
-                and current.stores == self.checked_store_indices)
+        return (current.failure is None and operator.eq(current.offsets, self.call_boundary_offsets)
+                and operator.eq(current.stores, self.checked_store_indices))
 
     @property
     def constant(self) -> int | None:
@@ -176,8 +192,9 @@ class StackWordCallWindowReceipt8616:
         return self.source.constant if self.complete else None
 
 
+@cython.ccall
 def prove_stack_word_call_window_8616(
-    source_ir: IRFunctionArtifact, source: LogicalConstantWordReceipt8616, callsite_addr: int,
+    source_ir: IRFunctionArtifact, source: LogicalConstantWordReceipt8616, callsite_addr: cython.longlong,
 ) -> StackWordCallWindowReceipt8616:
     """Retain a local theorem or a typed refusal without guessing preservation."""
     evidence = _window_evidence_8616(source_ir, source, callsite_addr)

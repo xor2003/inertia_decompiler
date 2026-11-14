@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Widen project object layouts from indexed-address Alias evidence.
 
 Layer: Widening.
@@ -9,6 +10,8 @@ Do not join values from rendered text, cosmetic shape, postprocess, or CLI/repor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from inertia.alias.indexed_address_access_contracts import (
     IndexedAliasAccessFact8616,
@@ -28,52 +31,58 @@ from .global_object_layout import (
     GlobalObjectLayoutFailureKind8616,
     GlobalObjectLayoutRefusal8616,
 )
+import operator
+import builtins
 
 
 def _program_inputs_8616(
     program: IndexedAliasProgramEvidence8616,
 ) -> tuple[
-    tuple[tuple[int, IndexedAliasAccessFact8616 | IndexedAliasAccessRefusal8616], ...],
-    tuple[tuple[int, IndexedAliasCopyFact8616 | IndexedAliasCopyRefusal8616], ...],
+    tuple[tuple[cython.longlong, IndexedAliasAccessFact8616 | IndexedAliasAccessRefusal8616], ...],
+    tuple[tuple[cython.longlong, IndexedAliasCopyFact8616 | IndexedAliasCopyRefusal8616], ...],
 ]:
     """Flatten every function's access and copy inputs with owning addrs."""
+    function: object
     access_input_list: list[
-        tuple[int, IndexedAliasAccessFact8616 | IndexedAliasAccessRefusal8616]
+        tuple[cython.longlong, IndexedAliasAccessFact8616 | IndexedAliasAccessRefusal8616]
     ] = []
     copy_input_list: list[
-        tuple[int, IndexedAliasCopyFact8616 | IndexedAliasCopyRefusal8616]
+        tuple[cython.longlong, IndexedAliasCopyFact8616 | IndexedAliasCopyRefusal8616]
     ] = []
     for function in program.functions:
         access_input_list.extend(
-            (function.function_addr, fact) for fact in function.accesses.facts
+            (function.function_addr, fact) for fact in iter(function.accesses.facts)
         )
         access_input_list.extend(
             (function.function_addr, refusal)
-            for refusal in function.accesses.refusals
+            for refusal in iter(function.accesses.refusals)
         )
         copy_input_list.extend(
-            (function.function_addr, fact) for fact in function.copies.facts
+            (function.function_addr, fact) for fact in iter(function.copies.facts)
         )
         copy_input_list.extend(
             (function.function_addr, refusal)
-            for refusal in function.copies.refusals
+            for refusal in iter(function.copies.refusals)
         )
     return tuple(access_input_list), tuple(copy_input_list)
 
 
+@cython.ccall
 def _candidate_bases_8616(
     program: IndexedAliasProgramEvidence8616,
-    global_accesses: tuple[tuple[int, IndexedAliasAccessFact8616], ...],
-) -> set[int]:
+    global_accesses: object,
+) -> object:
     """Return DS base offsets proven by paired byte views of a word access."""
+    fact: object
+    function_addr: object
     word_bases = {
         fact.source.storage.base_offset
-        for _function_addr, fact in global_accesses
+        for _function_addr, fact in iter(global_accesses)
         if fact.source.storage.space is MemSpace.DS
         and fact.source.storage.width == 2
         and fact.source.storage.index_shift == 1
     }
-    byte_groups: dict[tuple[int, object, int], set[int]] = {}
+    byte_groups: dict[tuple[cython.longlong, object, cython.longlong], set[cython.longlong]] = {}
     for function_addr, fact in global_accesses:
         storage = fact.source.storage
         if storage.space is not MemSpace.DS or storage.width != 1 or storage.index_shift != 1:
@@ -87,8 +96,8 @@ def _candidate_bases_8616(
     return (
         {
             base
-            for bases in byte_groups.values()
-            for base in bases
+            for bases in builtins.iter(byte_groups.values())
+            for base in iter(bases)
             if base in word_bases and ((base + 1) & 0xFFFF) in bases
         }
         if not program.refusals
@@ -97,13 +106,13 @@ def _candidate_bases_8616(
 
 
 def _accepted_copies_8616(
-    copy_inputs: tuple[tuple[int, IndexedAliasCopyFact8616 | IndexedAliasCopyRefusal8616], ...],
-    candidate_bases: set[int],
-) -> tuple[tuple[int, IndexedAliasCopyFact8616], ...]:
+    copy_inputs: object,
+    candidate_bases: object,
+) -> tuple[tuple[cython.longlong, IndexedAliasCopyFact8616], ...]:
     """Return copies whose DS word endpoints both sit inside candidate bases."""
     return tuple(
         (function_addr, fact)
-        for function_addr, fact in copy_inputs
+        for function_addr, fact in iter(copy_inputs)
         if isinstance(fact, IndexedAliasCopyFact8616)
         and fact.source.storage.space is MemSpace.DS
         and fact.destination.storage.space is MemSpace.DS
@@ -114,11 +123,15 @@ def _accepted_copies_8616(
     )
 
 
+@cython.ccall
 def _copy_families_8616(
-    candidate_bases: set[int],
-    accepted_copies: tuple[tuple[int, IndexedAliasCopyFact8616], ...],
-) -> dict[int, set[int]]:
+    candidate_bases: object,
+    accepted_copies: object,
+) -> object:
     """Union candidate bases connected by proven whole-value copies."""
+    destination_base: object
+    member: object
+    source_base: object
     copy_pairs = {
         tuple(
             sorted(
@@ -128,9 +141,9 @@ def _copy_families_8616(
                 )
             )
         )
-        for _function_addr, fact in accepted_copies
+        for _function_addr, fact in iter(accepted_copies)
     }
-    families = {base: {base} for base in candidate_bases}
+    families = {base: {base} for base in iter(candidate_bases)}
     for source_base, destination_base in sorted(copy_pairs):
         merged = families[source_base] | families[destination_base]
         for member in merged:
@@ -138,12 +151,15 @@ def _copy_families_8616(
     return families
 
 
+@cython.ccall
 def _access_refusals_8616(
-    access_inputs: tuple[tuple[int, IndexedAliasAccessFact8616 | IndexedAliasAccessRefusal8616], ...],
-    consumed_accesses: tuple[tuple[int, IndexedAliasAccessFact8616], ...],
-    incomplete: bool,
-) -> list[GlobalObjectLayoutRefusal8616]:
+    access_inputs: object,
+    consumed_accesses: object,
+    incomplete: cython.bint,
+) -> object:
     """Classify every unconsumed access input as a typed refusal."""
+    function_addr: object
+    source: object
     refusals: list[GlobalObjectLayoutRefusal8616] = []
     for function_addr, source in access_inputs:
         if (function_addr, source) in consumed_accesses:
@@ -167,12 +183,15 @@ def _access_refusals_8616(
     return refusals
 
 
+@cython.ccall
 def _copy_refusals_8616(
-    copy_inputs: tuple[tuple[int, IndexedAliasCopyFact8616 | IndexedAliasCopyRefusal8616], ...],
-    accepted_copies: tuple[tuple[int, IndexedAliasCopyFact8616], ...],
-    incomplete: bool,
-) -> list[GlobalObjectLayoutRefusal8616]:
+    copy_inputs: object,
+    accepted_copies: object,
+    incomplete: cython.bint,
+) -> object:
     """Classify every unaccepted copy input as a typed refusal."""
+    copy_source: object
+    function_addr: object
     refusals: list[GlobalObjectLayoutRefusal8616] = []
     for function_addr, copy_source in copy_inputs:
         if (function_addr, copy_source) in accepted_copies:
@@ -203,7 +222,7 @@ def recover_global_object_layout_evidence_8616(
     access_inputs, copy_inputs = _program_inputs_8616(program)
     global_accesses = tuple(
         (function_addr, fact)
-        for function_addr, fact in access_inputs
+        for function_addr, fact in iter(access_inputs)
         if isinstance(fact, IndexedAliasAccessFact8616)
         and fact.role is IndexedAliasAccessRole8616.GLOBAL_INDEXED
     )
@@ -223,22 +242,22 @@ def recover_global_object_layout_evidence_8616(
             field_offsets=(0, 1),
             family_base_offset=min(families[base]),
         )
-        for base in sorted(candidate_bases)
+        for base in builtins.iter(sorted(candidate_bases))
     )
     consumed_accesses = tuple(
         (function_addr, fact)
-        for function_addr, fact in global_accesses
+        for function_addr, fact in iter(global_accesses)
         if any(
             (
                 fact.source.storage.width == 2
-                and fact.source.storage.base_offset == base
+                and operator.eq(fact.source.storage.base_offset, base)
             )
             or (
                 fact.source.storage.width == 1
                 and fact.source.storage.base_offset
                 in {base, (base + 1) & 0xFFFF}
             )
-            for base in candidate_bases
+            for base in iter(candidate_bases)
         )
     )
     incomplete = bool(program.refusals)
@@ -249,7 +268,7 @@ def recover_global_object_layout_evidence_8616(
             "selected function has no complete Alias evidence",
             refusal,
         )
-        for refusal in program.refusals
+        for refusal in iter(program.refusals)
     ]
     refusals.extend(_access_refusals_8616(access_inputs, consumed_accesses, incomplete))
     refusals.extend(_copy_refusals_8616(copy_inputs, accepted_copies, incomplete))

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Own exact zero-argument callsite arity before C-AST materialization.
 
 Layer: Types/Lowering.
@@ -10,11 +11,14 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
 
 from inertia.semantics.callsite_summary import CallsiteSummary8616
+import dataclasses
 
 __all__ = [
     "CallsiteZeroArgumentDecision8616",
@@ -32,20 +36,20 @@ class CallsiteZeroArgumentDecision8616(StrEnum):
     REFUSE_NONZERO_CANDIDATE = "refuse-nonzero-candidate"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallsiteZeroArgumentOwnership8616:
     """Closed evidence result for one binary callsite and candidate arity."""
 
     decision: CallsiteZeroArgumentDecision8616
-    candidate_arg_count: int
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    candidate_arg_count: cython.longlong
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def enforces_zero_arguments(self) -> bool:
+    def enforces_zero_arguments(self) -> cython.bint:
         """Return whether the binary fact owns the call's empty argument list."""
         return self.decision in {
             CallsiteZeroArgumentDecision8616.PRESERVE_ZERO_ARGUMENT,
@@ -53,7 +57,7 @@ class CallsiteZeroArgumentOwnership8616:
         }
 
     @property
-    def blocks_candidate(self) -> bool:
+    def blocks_candidate(self) -> cython.bint:
         """Return whether the proposed argument materialization must be refused."""
         return self.decision in {
             CallsiteZeroArgumentDecision8616.INVALID_ZERO_ARGUMENT_FACT,
@@ -61,9 +65,10 @@ class CallsiteZeroArgumentOwnership8616:
         }
 
 
+@cython.ccall
 def classify_callsite_zero_argument_ownership_8616(
     summary: CallsiteSummary8616,
-    candidate_arg_count: int,
+    candidate_arg_count: cython.longlong,
 ) -> CallsiteZeroArgumentOwnership8616:
     """Classify whether an exact summary requires an empty C argument list."""
     if summary.arg_count != 0:

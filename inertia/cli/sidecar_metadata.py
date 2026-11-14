@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Load sidecar metadata for names, bounds, and optional debug evidence.
 
 Layer: CLI/fallback/reporting.
@@ -5,6 +6,7 @@ Responsibility: collect optional sidecar/debug metadata without making it requir
 """
 
 from __future__ import annotations
+import cython
 
 import typing
 from collections.abc import Callable, Mapping, Sequence
@@ -92,29 +94,35 @@ from inertia.cli.sidecar_parsers import (
 from inertia.cli.telemetry import trace_function
 from inertia.cli.turbo_debug_tdinfo import parse_tdinfo_exe as parse_tdinfo_exe
 from inertia.frontend.x86_16.cod_extract import CODListingMetadata as CODListingMetadata
+import operator
+import builtins
 
 _TRACE_FUNCTION: Any = cast(Any, trace_function)
 
 
-def _dynamic_attr(obj: object, name: str, default: object = None) -> object:
+@cython.ccall
+def _dynamic_attr(obj: object, name: object, default: object = None) -> object:
     """Read optional attributes from dynamic angr/debug-parser compatibility objects."""
     # Dynamic angr/third-party compatibility boundary: optional backend attributes vary by format.
     return getattr(obj, name, default)
 
 
-def _dynamic_int_attr(obj: object, name: str, default: int | None = None) -> int | None:
+@cython.ccall
+def _dynamic_int_attr(obj: object, name: object, default: int | None = None) -> int | None:
     """Read an optional integer attribute from a dynamic compatibility object."""
     value = _dynamic_attr(obj, name, default)
     return value if isinstance(value, int) else default
 
 
-def _dynamic_mapping_attr(obj: object, name: str) -> dict[object, object]:
+@cython.ccall
+def _dynamic_mapping_attr(obj: object, name: object) -> object:
     """Read an optional mapping attribute from a dynamic compatibility object."""
     value = _dynamic_attr(obj, name, {})
     return value if isinstance(value, dict) else {}
 
 
-def _find_sibling_sidecar(binary: Path, suffix: str) -> Path | None:
+@cython.ccall
+def _find_sibling_sidecar(binary: Path, suffix: object) -> Path | None:
     """Resolve a sibling sidecar file and cache results for repeated lookups.
 
     This avoids repeated directory scans during repeated per-function recovery passes
@@ -124,7 +132,8 @@ def _find_sibling_sidecar(binary: Path, suffix: str) -> Path | None:
 
 
 @lru_cache(maxsize=256)
-def _find_sibling_sidecar_cached(binary: str, suffix: str) -> Path | None:
+def _find_sibling_sidecar_cached(binary: object, suffix: object) -> Path | None:
+    sibling: object
     binary_path = Path(binary)
     direct = binary_path.with_suffix(suffix)
     if direct.exists():
@@ -133,7 +142,7 @@ def _find_sibling_sidecar_cached(binary: str, suffix: str) -> Path | None:
     if direct_appended.exists():
         return direct_appended
     try:
-        siblings = sorted(binary_path.parent.iterdir(), key=lambda path: path.name.lower())
+        siblings = sorted(tuple(binary_path.parent.iterdir()), key=lambda path: path.name.lower())
     except OSError:
         return None
     wanted_stem = binary_path.stem.lower()
@@ -141,12 +150,12 @@ def _find_sibling_sidecar_cached(binary: str, suffix: str) -> Path | None:
     for sibling in siblings:
         if sibling.name.lower() == f"{binary_path.name.lower()}{wanted_suffix}":
             return sibling
-        if sibling.stem.lower() == wanted_stem and sibling.suffix.lower() == wanted_suffix:
+        if operator.eq(sibling.stem.lower(), wanted_stem) and operator.eq(sibling.suffix.lower(), wanted_suffix):
             return sibling
     return None
 
 
-def _signature_matched_code_addrs(metadata: LSTMetadata | None) -> frozenset[int]:
+def _signature_matched_code_addrs(metadata: object) -> frozenset[cython.longlong]:
     """Keep signature boundaries outside explicit procedure bodies.
 
     A byte-pattern hit inside a procedure with an independently recorded end
@@ -158,16 +167,17 @@ def _signature_matched_code_addrs(metadata: LSTMetadata | None) -> frozenset[int
     signature_addrs = addrs if isinstance(addrs, frozenset) else frozenset(addrs)
     procedure_ranges = tuple(
         span
-        for start in metadata.cod_proc_kinds
+        for start in iter(metadata.cod_proc_kinds)
         if (span := metadata.code_ranges.get(start)) is not None and span[0] < span[1]
     )
     return frozenset(
-        addr for addr in signature_addrs
-        if not any(start < addr < end for start, end in procedure_ranges)
+        addr for addr in iter(signature_addrs)
+        if not any(start < addr < end for start, end in iter(procedure_ranges))
     )
 
 
-def _visible_code_labels(metadata: LSTMetadata | None) -> dict[int, str]:
+@cython.ccall
+def _visible_code_labels(metadata: object) -> dict[cython.longlong, str]:
     if metadata is None:
         return {}
     code_labels = metadata.code_labels
@@ -177,10 +187,11 @@ def _visible_code_labels(metadata: LSTMetadata | None) -> dict[int, str]:
     if not skipped:
         return dict(code_labels)
     cod_proc_addrs = set(metadata.cod_proc_kinds.keys())
-    return {addr: name for addr, name in code_labels.items() if addr not in skipped or addr in cod_proc_addrs}
+    return {addr: name for addr, name in builtins.iter(code_labels.items()) if addr not in skipped or addr in cod_proc_addrs}
 
 
-def _function_discovery_code_labels(metadata: LSTMetadata | None) -> dict[int, str]:
+@cython.ccall
+def _function_discovery_code_labels(metadata: object) -> object:
     """Return labels that are valid whole-binary function discovery seeds.
 
     Explicit procedure declarations are stronger evidence than permissive IDA
@@ -192,10 +203,13 @@ def _function_discovery_code_labels(metadata: LSTMetadata | None) -> dict[int, s
     if metadata is None or not metadata.function_entry_addrs:
         return labels
     entry_addrs = metadata.function_entry_addrs
-    return {addr: name for addr, name in labels.items() if addr in entry_addrs}
+    return {addr: name for addr, name in builtins.iter(labels.items()) if addr in entry_addrs}
 
 
-def _recovery_code_labels(metadata: LSTMetadata | None) -> dict[int, str]:
+@cython.ccall
+def _recovery_code_labels(metadata: object) -> object:
+    name: object
+    addr: object
     if metadata is None:
         return {}
     labels = _visible_code_labels(metadata)
@@ -216,16 +230,18 @@ def _recovery_code_labels(metadata: LSTMetadata | None) -> dict[int, str]:
     return labels
 
 
+@cython.ccall
 def _load_ida_map_sidecar(
     binary: Path,
     *,
-    load_base_linear: int,
-    code_labels: dict[int, str],
-    data_labels: dict[int, str],
-    source_formats: list[str],
-) -> dict[str, int]:
+    load_base_linear: cython.longlong,
+    code_labels: object,
+    data_labels: object,
+    source_formats: object,
+) -> object:
+    map_path: object
     map_path = _find_sibling_sidecar(binary, ".map")
-    segment_offsets: dict[str, int] = {}
+    segment_offsets: dict[str, cython.longlong] = {}
     if map_path is None:
         return segment_offsets
     try:
@@ -242,17 +258,18 @@ def _load_ida_map_sidecar(
 def _load_lst_sidecar(
     binary: Path,
     *,
-    load_base_linear: int,
-    segment_offsets: dict[str, int],
-    code_labels: dict[int, str],
-    data_labels: dict[int, str],
-    code_ranges: dict[int, tuple[int, int]],
-    source_formats: list[str],
-) -> set[int]:
+    load_base_linear: cython.longlong,
+    segment_offsets: object,
+    code_labels: object,
+    data_labels: object,
+    code_ranges: object,
+    source_formats: object,
+) -> object:
     """Load LST labels and return procedure entry addresses owned by that sidecar."""
 
-    def _impl() -> set[int]:
-        function_entry_addrs: set[int] = set()
+    def _impl() -> object:
+        lst_path: object
+        function_entry_addrs: set[cython.longlong] = set()
         lst_path = _find_sibling_sidecar(binary, ".lst")
         if lst_path is None:
             return function_entry_addrs
@@ -280,16 +297,20 @@ def _load_lst_sidecar(
     return _impl()
 
 
+@cython.ccall
 def _merge_lst_metadata_8616(
     lst_path: Path,
     *,
-    load_base_linear: int,
-    segment_offsets: dict[str, int],
-    code_labels: dict[int, str],
-    data_labels: dict[int, str],
-    code_ranges: dict[int, tuple[int, int]],
-    source_formats: list[str],
+    load_base_linear: cython.longlong,
+    segment_offsets: object,
+    code_labels: object,
+    data_labels: object,
+    code_ranges: object,
+    source_formats: object,
 ) -> None:
+    name: object
+    offset: object
+    span: object
     try:
         metadata = extract_lst_metadata(lst_path)
         if metadata.code_labels or metadata.data_labels:
@@ -316,15 +337,16 @@ def _merge_lst_metadata_8616(
         print(f"[dbg] failed to parse source listing {lst_path}: {exc}")
 
 
+@cython.ccall
 def _merge_ida_lst_proc_metadata_8616(
     lst_path: Path,
     *,
-    load_base_linear: int,
-    segment_offsets: dict[str, int],
-    code_labels: dict[int, str],
-    code_ranges: dict[int, tuple[int, int]],
-    source_formats: list[str],
-) -> set[int]:
+    load_base_linear: cython.longlong,
+    segment_offsets: object,
+    code_labels: object,
+    code_ranges: object,
+    source_formats: object,
+) -> set[cython.longlong]:
     try:
         ida_proc_labels = _parse_ida_lst_proc_metadata(
             lst_path,
@@ -348,14 +370,17 @@ def _merge_ida_lst_proc_metadata_8616(
         return set()
 
 
+@cython.ccall
 def _load_idc_inc_sidecars(
     binary: Path,
     *,
-    code_labels: dict[int, str],
-    data_labels: dict[int, str],
-    struct_names: list[str],
-    source_formats: list[str],
+    code_labels: object,
+    data_labels: object,
+    struct_names: object,
+    source_formats: object,
 ) -> None:
+    idc_path: object
+    inc_path: object
     idc_path = _find_sibling_sidecar(binary, ".idc")
     if idc_path is not None:
         try:
@@ -379,41 +404,33 @@ def _load_codeview_or_ne_metadata(
     binary: Path,
     project: angr.Project,
     *,
-    load_base_linear: int,
-) -> tuple[
-    dict[int, str],
-    dict[int, str],
-    dict[int, tuple[int, int]],
-    str | None,
-    tuple[str, ...],
-    tuple[str, ...],
-    tuple[DebugSymbolEvidence, ...],
-    tuple[DebugTypeMemberEvidence, ...],
-    tuple[str, ...],
-    dict[int, tuple[int, int]],
-]:
+    load_base_linear: cython.longlong,
+) -> object:
     def _impl() -> tuple[
-        dict[int, str],
-        dict[int, str],
-        dict[int, tuple[int, int]],
+        dict[cython.longlong, str],
+        dict[cython.longlong, str],
+        dict[cython.longlong, tuple[cython.longlong, cython.longlong]],
         str | None,
         tuple[str, ...],
         tuple[str, ...],
         tuple[DebugSymbolEvidence, ...],
         tuple[DebugTypeMemberEvidence, ...],
         tuple[str, ...],
-        dict[int, tuple[int, int]],
+        dict[cython.longlong, tuple[cython.longlong, cython.longlong]],
     ]:
-        codeview_code: dict[int, str] = {}
-        codeview_data: dict[int, str] = {}
-        codeview_ranges: dict[int, tuple[int, int]] = {}
-        codeview_format: str | None = None
+        codeview_format: object
+        parsed_nb00: object
+        parsed_nb0204: object
+        codeview_code: dict[cython.longlong, str] = {}
+        codeview_data: dict[cython.longlong, str] = {}
+        codeview_ranges: dict[cython.longlong, tuple[cython.longlong, cython.longlong]] = {}
+        codeview_format = None
         debug_source_files: tuple[str, ...] = ()
         debug_type_names: tuple[str, ...] = ()
         debug_symbols: tuple[DebugSymbolEvidence, ...] = ()
         debug_type_members: tuple[DebugTypeMemberEvidence, ...] = ()
         debug_identifiers: tuple[str, ...] = ()
-        debug_line_map: dict[int, tuple[int, int]] = {}
+        debug_line_map: dict[cython.longlong, tuple[cython.longlong, cython.longlong]] = {}
         try:
             parsed_nb00 = parse_codeview_nb00(binary, load_base_linear=load_base_linear)
             if parsed_nb00 is not None:
@@ -489,22 +506,30 @@ def _load_codeview_or_ne_metadata(
     return _impl()
 
 
+@cython.ccall
 def _load_tdinfo_sidecar(
     binary: Path,
     *,
-    load_base_linear: int,
-    code_labels: dict[int, str],
-    data_labels: dict[int, str],
-    debug_source_files: list[str],
-    debug_type_names: list[str],
-    debug_type_descriptors: list[DebugTypeDescriptorEvidence],
-    debug_type_references: list[DebugTypeReferenceEvidence],
-    debug_symbols: list[DebugSymbolEvidence],
-    debug_type_members: list[DebugTypeMemberEvidence],
-    debug_enum_members: list[DebugEnumMemberEvidence],
-    debug_identifiers: list[str],
-    source_formats: list[str],
+    load_base_linear: cython.longlong,
+    code_labels: object,
+    data_labels: object,
+    debug_source_files: object,
+    debug_type_names: object,
+    debug_type_descriptors: object,
+    debug_type_references: object,
+    debug_symbols: object,
+    debug_type_members: object,
+    debug_enum_members: object,
+    debug_identifiers: object,
+    source_formats: object,
 ) -> None:
+    tdinfo: object
+    addr: object
+    descriptor: object
+    enum_member: object
+    member: object
+    name: object
+    ref: object
     try:
         tdinfo = parse_tdinfo_exe(binary, load_base_linear=load_base_linear)
     except Exception as exc:
@@ -594,11 +619,13 @@ def _load_tdinfo_sidecar(
     source_formats.append("turbo_debug_tdinfo")
 
 
+@cython.ccall
 def _codeview_type_members_to_evidence(
-    members: tuple[object, ...],
+    members: object,
     *,
-    source: str,
+    source: object,
 ) -> tuple[DebugTypeMemberEvidence, ...]:
+    member: object
     evidence: list[DebugTypeMemberEvidence] = []
     for member in members:
         # Dynamic compatibility boundary: CodeView type-member wrappers expose optional fields.
@@ -624,16 +651,18 @@ def _codeview_type_members_to_evidence(
     return tuple(evidence)
 
 
-def _attrs_from_mapping(mapping: dict[object, object]) -> tuple[tuple[str, str], ...]:
-    return tuple((str(key), str(value)) for key, value in sorted(mapping.items(), key=lambda item: str(item[0])))
+def _attrs_from_mapping(mapping: object) -> tuple[tuple[str, str], ...]:
+    return tuple((str(key), str(value)) for key, value in builtins.iter(sorted(tuple(mapping.items()), key=lambda item: str(item[0]))))
 
 
+@cython.ccall
 def _nb00_publics_to_symbol_evidence(
-    publics: tuple[object, ...],
+    publics: object,
     *,
-    load_base_linear: int,
-    source: str,
+    load_base_linear: cython.longlong,
+    source: object,
 ) -> tuple[DebugSymbolEvidence, ...]:
+    public: object
     evidence: list[DebugSymbolEvidence] = []
     for public in publics:
         # Dynamic compatibility boundary: CodeView public-symbol wrappers expose optional fields.
@@ -664,13 +693,19 @@ def _nb00_publics_to_symbol_evidence(
     return tuple(evidence)
 
 
+@cython.ccall
 def _nb0204_symbols_to_evidence(
-    procedures: tuple[object, ...],
+    procedures: object,
     stack_variables: Mapping[str, Sequence[object]],
     *,
-    load_base_linear: int,
-    source: str,
+    load_base_linear: cython.longlong,
+    source: object,
 ) -> tuple[DebugSymbolEvidence, ...]:
+    offset: object
+    segment: object
+    owner_name: object
+    symbol: object
+    symbols: object
     evidence: list[DebugSymbolEvidence] = []
     for symbol in procedures:
         # Dynamic compatibility boundary: CodeView procedure-symbol wrappers expose optional fields.
@@ -733,12 +768,17 @@ def _nb0204_symbols_to_evidence(
     return tuple(evidence)
 
 
+@cython.ccall
 def _nb0204_procedure_ranges(
-    procedures: tuple[object, ...],
+    procedures: object,
     *,
-    load_base_linear: int,
-) -> dict[int, tuple[int, int]]:
-    ranges: dict[int, tuple[int, int]] = {}
+    load_base_linear: cython.longlong,
+) -> object:
+    length: object
+    offset: object
+    segment: object
+    symbol: object
+    ranges: dict[cython.longlong, tuple[cython.longlong, cython.longlong]] = {}
     for symbol in procedures:
         # Dynamic compatibility boundary: CodeView procedure-symbol wrappers expose optional ranges.
         segment = _dynamic_int_attr(symbol, "segment")
@@ -754,12 +794,15 @@ def _nb0204_procedure_ranges(
     return ranges
 
 
+@cython.ccall
 def _tdinfo_symbols_to_evidence(
-    named_symbols: tuple[object, ...],
+    named_symbols: object,
     *,
-    load_base_linear: int,
-    source: str,
+    load_base_linear: cython.longlong,
+    source: object,
 ) -> tuple[DebugSymbolEvidence, ...]:
+    record: object
+    named: object
     evidence: list[DebugSymbolEvidence] = []
     for named in named_symbols:
         # Dynamic compatibility boundary: Turbo Debug symbol wrappers expose optional records.
@@ -799,20 +842,20 @@ def _load_cod_mzre_flair_sidecars(
     binary: Path,
     project: angr.Project,
     *,
-    load_base_linear: int,
-    code_labels: dict[int, str],
-    data_labels: dict[int, str],
-    code_ranges: dict[int, tuple[int, int]],
-    source_formats: list[str],
-    codeview_code: dict[int, str],
-    codeview_ranges: dict[int, tuple[int, int]],
-    pat_backend: str | None,
+    load_base_linear: cython.longlong,
+    code_labels: object,
+    data_labels: object,
+    code_ranges: object,
+    source_formats: object,
+    codeview_code: object,
+    codeview_ranges: object,
+    pat_backend: object,
     signature_catalog: Path | None,
-    cod_proc_kinds: dict[int, str],
-    signature_code_ranges: dict[int, tuple[int, int]] | None = None,
-) -> tuple[Path | None, set[int]]:
+    cod_proc_kinds: object,
+    signature_code_ranges: object = None,
+) -> object:
     """Load optional labels while preserving binary-verified ranges separately."""
-    def _impl() -> tuple[Path | None, set[int]]:
+    def _impl() -> tuple[Path | None, set[cython.longlong]]:
         cod_path = _load_cod_listing_sidecar_8616(
             binary,
             project,
@@ -847,27 +890,31 @@ def _load_cod_mzre_flair_sidecars(
     return _impl()
 
 
+@cython.ccall
 def _merge_cod_label_entry_8616(
-    addr: int,
-    name: str,
+    addr: cython.longlong,
+    name: object,
     cod_listing: CODListingMetadata,
     *,
-    code_labels: dict[int, str],
-    code_ranges: dict[int, tuple[int, int]],
-    codeview_code: dict[int, str],
-    cod_proc_kinds: dict[int, str],
-    existing_by_name: dict[str, list[int]],
+    code_labels: object,
+    code_ranges: object,
+    codeview_code: object,
+    cod_proc_kinds: object,
+    existing_by_name: object,
 ) -> None:
+    existing_span: object
+    proc_kind: object
+    span: object
     normalized = name.lstrip("_")
     span = cod_listing.code_ranges.get(addr)
     matching_entries = [
         existing_addr
-        for existing_addr in existing_by_name.get(normalized, ())
+        for existing_addr in builtins.iter(existing_by_name.get(normalized, ()))
         if existing_addr <= addr
     ]
     precise_entries = [
         existing_addr
-        for existing_addr in matching_entries
+        for existing_addr in iter(matching_entries)
         if existing_addr in code_ranges or existing_addr in codeview_code
     ]
     if precise_entries and span is not None:
@@ -898,18 +945,24 @@ def _merge_cod_label_entry_8616(
         cod_proc_kinds.setdefault(addr, proc_kind)
 
 
+@cython.ccall
 def _load_cod_listing_sidecar_8616(
     binary: Path,
     project: angr.Project,
     *,
-    load_base_linear: int,
-    code_labels: dict[int, str],
-    code_ranges: dict[int, tuple[int, int]],
-    source_formats: list[str],
-    codeview_code: dict[int, str],
-    codeview_ranges: dict[int, tuple[int, int]],
-    cod_proc_kinds: dict[int, str],
+    load_base_linear: cython.longlong,
+    code_labels: object,
+    code_ranges: object,
+    source_formats: object,
+    codeview_code: object,
+    codeview_ranges: object,
+    cod_proc_kinds: object,
 ) -> Path | None:
+    sibling_cod_path: object
+    addr: object
+    existing_addr: object
+    existing_name: object
+    name: object
     sibling_cod_path = _find_sibling_sidecar(binary, ".cod")
     if sibling_cod_path is None:
         return None
@@ -925,7 +978,7 @@ def _load_cod_listing_sidecar_8616(
         cod_listing = _reconcile_cod_listing_with_codeview(cod_listing, codeview_code, codeview_ranges)
         if not (cod_listing.code_labels or cod_listing.code_ranges or cod_listing.proc_kinds):
             return None
-        existing_by_name: dict[str, list[int]] = {}
+        existing_by_name: dict[str, list[cython.longlong]] = {}
         for existing_addr, existing_name in code_labels.items():
             existing_by_name.setdefault(existing_name.lstrip("_"), []).append(existing_addr)
         for addr, name in cod_listing.code_labels.items():
@@ -946,15 +999,19 @@ def _load_cod_listing_sidecar_8616(
         return None
 
 
+@cython.ccall
 def _load_mzre_map_sidecar_8616(
     binary: Path,
     *,
-    load_base_linear: int,
-    code_labels: dict[int, str],
-    data_labels: dict[int, str],
-    code_ranges: dict[int, tuple[int, int]],
-    source_formats: list[str],
+    load_base_linear: cython.longlong,
+    code_labels: object,
+    data_labels: object,
+    code_ranges: object,
+    source_formats: object,
 ) -> None:
+    addr: object
+    name: object
+    span: object
     external_mzre_map = Path("/home/xor/games/f15se2-re/map") / f"{binary.stem}.map"
     if not external_mzre_map.exists():
         return
@@ -974,19 +1031,23 @@ def _load_mzre_map_sidecar_8616(
         print(f"[dbg] failed to parse mzretools map {external_mzre_map}: {exc}")
 
 
+@cython.ccall
 def _load_flair_sidecar_8616(
     binary: Path,
     project: angr.Project,
     *,
-    pat_backend: str | None,
+    pat_backend: object,
     signature_catalog: Path | None,
-    code_labels: dict[int, str],
-    code_ranges: dict[int, tuple[int, int]],
-    source_formats: list[str],
-    signature_code_ranges: dict[int, tuple[int, int]] | None = None,
-) -> set[int]:
+    code_labels: object,
+    code_ranges: object,
+    source_formats: object,
+    signature_code_ranges: object = None,
+) -> object:
     """Merge binary matches without deriving verified extents from debug bounds."""
-    signature_code_addrs: set[int] = set()
+    addr: object
+    name: object
+    span: object
+    signature_code_addrs: set[cython.longlong] = set()
     try:
         flair_code, flair_ranges, flair_formats = _detect_flair_metadata(
             binary,
@@ -1012,10 +1073,14 @@ def _load_lst_metadata(
     binary: Path,
     project: angr.Project,
     *,
-    pat_backend: str | None = None,
+    pat_backend: object = None,
     signature_catalog: Path | None = None,
 ) -> LSTMetadata | None:
     def _impl() -> LSTMetadata | None:
+        cached_sidecar: object
+        cod_path: object
+        addr: object
+        name: object
         cached_sidecar, sidecar_cache_key = load_cached_sidecar_metadata(
             binary_path=binary,
             pat_backend=pat_backend,
@@ -1031,12 +1096,12 @@ def _load_lst_metadata(
             binary,
             _dynamic_int_attr(project.loader.main_object, "linked_base", 0) or 0,
         )
-        code_labels: dict[int, str] = {}
-        data_labels: dict[int, str] = {}
-        code_ranges: dict[int, tuple[int, int]] = {}
-        signature_code_addrs: set[int] = set()
-        signature_code_ranges: dict[int, tuple[int, int]] = {}
-        cod_proc_kinds: dict[int, str] = {}
+        code_labels: dict[cython.longlong, str] = {}
+        data_labels: dict[cython.longlong, str] = {}
+        code_ranges: dict[cython.longlong, tuple[cython.longlong, cython.longlong]] = {}
+        signature_code_addrs: set[cython.longlong] = set()
+        signature_code_ranges: dict[cython.longlong, tuple[cython.longlong, cython.longlong]] = {}
+        cod_proc_kinds: dict[cython.longlong, str] = {}
         struct_names: list[str] = []
         debug_source_files: list[str] = []
         debug_type_names: list[str] = []
@@ -1046,9 +1111,9 @@ def _load_lst_metadata(
         debug_type_members: list[DebugTypeMemberEvidence] = []
         debug_enum_members: list[DebugEnumMemberEvidence] = []
         debug_identifiers: list[str] = []
-        debug_line_map: dict[int, tuple[int, int]] = {}
+        debug_line_map: dict[cython.longlong, tuple[cython.longlong, cython.longlong]] = {}
         source_formats: list[str] = []
-        cod_path: Path | None = None
+        cod_path = None
         segment_offsets = _load_ida_map_sidecar(
             binary,
             load_base_linear=load_base_linear,
@@ -1196,13 +1261,16 @@ _load_lst_metadata = cast(
     Callable[..., LSTMetadata | None], _TRACE_FUNCTION(name="sidecar.load_metadata")(_load_lst_metadata)
 )
 
-def attach_lst_metadata_to_project(project: angr.Project | None, metadata: LSTMetadata | None) -> bool:
+@cython.ccall
+def attach_lst_metadata_to_project(project: object, metadata: object) -> cython.bint:
     """Attach already-loaded sidecar metadata to a fresh project instance.
 
     Fresh retry/isolation projects are intentionally rebuilt without re-parsing
     sidecars. Semantic consumers still need the same metadata on the project
     object, and labels must be present in the KB label map.
     """
+    addr: object
+    name: object
     if project is None or metadata is None:
         return False
     metadata_obj = metadata
@@ -1222,20 +1290,21 @@ def attach_lst_metadata_to_project(project: angr.Project | None, metadata: LSTMe
     if not isinstance(data_labels, dict):
         return changed
     for addr, name in data_labels.items():
-        if labels.get(addr) != name:
+        if operator.ne(labels.get(addr), name):
             labels[addr] = name
             changed = True
     code_labels = metadata_obj.code_labels
     if not isinstance(code_labels, dict):
         return changed
     for addr, name in code_labels.items():
-        if labels.get(addr) != name:
+        if operator.ne(labels.get(addr), name):
             labels[addr] = name
             changed = True
     return changed
 
 
-def _lst_data_label(metadata: LSTMetadata | None, offset: int | None) -> str | None:
+@cython.ccall
+def _lst_data_label(metadata: object, offset: object) -> object:
     if metadata is None or offset is None:
         return None
     metadata_obj = metadata
@@ -1243,7 +1312,11 @@ def _lst_data_label(metadata: LSTMetadata | None, offset: int | None) -> str | N
     return data_labels.get(offset)
 
 
-def _lst_code_label(metadata: LSTMetadata | None, addr: int | None, code_base: int | None) -> str | None:
+@cython.ccall
+def _lst_code_label(metadata: object, addr: object, code_base: object) -> object:
+    label: object
+    lookup_addr: object
+    region: object
     if metadata is None or addr is None:
         return None
     metadata_obj = metadata
@@ -1263,20 +1336,21 @@ def _lst_code_label(metadata: LSTMetadata | None, addr: int | None, code_base: i
     return code_labels.get(region[0])
 
 
+@cython.ccall
 def _lst_metadata_has_evidence_8616(
-    code_labels: dict[int, str],
-    data_labels: dict[int, str],
-    struct_names: list[str],
-    debug_source_files: list[str],
-    debug_type_names: list[str],
-    debug_type_descriptors: list[DebugTypeDescriptorEvidence],
-    debug_type_references: list[DebugTypeReferenceEvidence],
-    debug_symbols: list[DebugSymbolEvidence],
-    debug_type_members: list[DebugTypeMemberEvidence],
-    debug_enum_members: list[DebugEnumMemberEvidence],
-    debug_identifiers: list[str],
-    debug_line_map: dict[int, tuple[int, int]],
-) -> bool:
+    code_labels: object,
+    data_labels: object,
+    struct_names: object,
+    debug_source_files: object,
+    debug_type_names: object,
+    debug_type_descriptors: object,
+    debug_type_references: object,
+    debug_symbols: object,
+    debug_type_members: object,
+    debug_enum_members: object,
+    debug_identifiers: object,
+    debug_line_map: object,
+) -> cython.bint:
     return bool(
         code_labels
         or data_labels
@@ -1293,16 +1367,17 @@ def _lst_metadata_has_evidence_8616(
     )
 
 
-def _lst_code_region(metadata: LSTMetadata | None, addr: int | None) -> tuple[int, int] | None:
+def _lst_code_region(metadata: LSTMetadata | None, addr: int | None) -> object:
     """Find recorded ranges without extending signature evidence into gaps."""
-    def _impl() -> tuple[int, int] | None:
+    def _impl() -> object:
+        span: object
         if metadata is None or addr is None:
             return None
         code_ranges = metadata.code_ranges
         span = code_ranges.get(addr)
         if span is not None:
             return span
-        containing_spans = [(start, span) for start, span in code_ranges.items() if start <= addr < span[1]]
+        containing_spans = [(start, span) for start, span in builtins.iter(code_ranges.items()) if start <= addr < span[1]]
         if containing_spans:
             return max(containing_spans, key=lambda item: item[0])[1]
         # Fallback: derive a bounded span from ordered code labels when explicit
@@ -1312,11 +1387,16 @@ def _lst_code_region(metadata: LSTMetadata | None, addr: int | None) -> tuple[in
     return _impl()
 
 
-def _lst_label_fallback_region_8616(metadata: LSTMetadata, addr: int) -> tuple[int, int] | None:
+def _lst_label_fallback_region_8616(metadata: LSTMetadata, addr: cython.longlong) -> object:
+    end: object
+    next_addr: object
+    start: object
+    i: object
+    label_addr: object
     code_labels = metadata.code_labels
     if not isinstance(code_labels, dict) or not code_labels:
         return None
-    ordered = sorted(int(k) for k in code_labels if isinstance(k, int))
+    ordered = sorted(int(k) for k in iter(code_labels) if isinstance(k, int))
     if not ordered:
         return None
     if not (ordered[0] <= addr <= ordered[-1]):

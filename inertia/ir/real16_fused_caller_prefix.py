@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: IR.
 Responsibility: bind native caller rows while privately transferring scalar prefixes.
 
@@ -6,6 +7,8 @@ Owns typed Value, Address, Condition, instruction facts, and lossless normalizat
 Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 from __future__ import annotations
+import typing
+import cython
 
 import time
 from dataclasses import dataclass
@@ -24,6 +27,12 @@ from .real16_fused_callee_transfer import (
 from .real16_initial_memory8616 import InvocationInitialMemory8616
 from .real16_path_memory8616 import PathMemory8616
 from .real16_persistent_bytes8616 import canonical_known_root_8616
+import dataclasses
+import operator
+Real16InvocationFailure8616 = typing.TypeVar("Real16InvocationFailure8616")
+_NativeTermMemo8616 = typing.TypeVar("_NativeTermMemo8616")
+_PathCensusContext8616 = typing.TypeVar("_PathCensusContext8616")
+_PathState8616 = typing.TypeVar("_PathState8616")
 
 if TYPE_CHECKING:
     from .real16_invocation_domain import (
@@ -34,25 +43,26 @@ if TYPE_CHECKING:
     )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class FusedCallerPrefix8616:
     """Private scalar state resumable only after every consumed row is bound."""
 
-    next_index: int
-    registers: dict[str, int]
+    next_index: cython.longlong
+    registers: object
     memory: PathMemory8616
     direction: DirectionTracker8616
-    tmps: dict[int, int]
-    dirty: set[str]
-    instruction_entry: dict[str, int]
+    tmps: object
+    dirty: object
+    instruction_entry: object
     current_addr: int | None
 
 
+@cython.ccall
 def _eligible_caller_8616(
     ctx: _PathCensusContext8616, block: IRBlock, entry: _PathState8616,
-    stop_after: int | None, operations: FusedCalleeOperations8616,
+    stop_after: object, operations: FusedCalleeOperations8616,
     expected: FusedCalleeOperations8616,
-) -> bool:
+) -> cython.bint:
     """Reject foreign authority and partial/repeat shapes before any callback."""
     if not canonical_fused_operations_match_8616(operations, expected):
         return False
@@ -70,15 +80,17 @@ def _eligible_caller_8616(
         return False
     last = block.instrs[-1]
     return (type(last) is IRInstr and last.op == "CALL" and type(last.addr) is int
-            and type(ctx.callsite_addr) is int and (stop_after is None or stop_after == last.addr))
+            and type(ctx.callsite_addr) is int and (stop_after is None or operator.eq(stop_after, last.addr)))
 
 
+@cython.ccall
 def try_fused_caller_prefix_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact, block: IRBlock,
     entry: _PathState8616, *, stop_after: int | None,
     operations: FusedCalleeOperations8616, canonical_operations: FusedCalleeOperations8616,
 ) -> FusedCallerPrefix8616 | Real16InvocationFailure8616 | None:
     """Fuse one prefix or fall back before effects; never execute a CALL here."""
+    native: object
     if not _eligible_caller_8616(ctx, block, entry, stop_after, operations, canonical_operations):
         return None
     if time.monotonic() > ctx.deadline:
@@ -104,6 +116,7 @@ def try_fused_caller_prefix_8616(
     return _bind_caller_rows_8616(ctx, artifact, block, native, entry, operations, memo)
 
 
+@cython.ccall
 def _new_prefix_8616(entry: _PathState8616) -> FusedCallerPrefix8616:
     """Copy the ordinary scalar initial state without publishing an exit."""
     registers = dict(entry.registers)
@@ -113,14 +126,16 @@ def _new_prefix_8616(entry: _PathState8616) -> FusedCallerPrefix8616:
     )
 
 
+@cython.ccall
 def _transfer_prefix_row_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact, block: IRBlock,
-    row: IRInstr, index: int, state: FusedCallerPrefix8616, ops: FusedCalleeOperations8616,
+    row: IRInstr, index: cython.longlong, state: FusedCallerPrefix8616, ops: FusedCalleeOperations8616,
 ) -> Real16InvocationFailure8616 | None:
     """Transfer one canonical non-call effect with exact instruction-entry state."""
+    failure: object
     if type(row.addr) is not int:
         return ops.decode_failure
-    if row.addr != state.current_addr:
+    if operator.ne(row.addr, state.current_addr):
         state.current_addr = row.addr
         state.instruction_entry = dict(state.registers)
         state.dirty = set()
@@ -131,15 +146,20 @@ def _transfer_prefix_row_8616(
     return failure
 
 
+@cython.ccall
 def _bind_caller_rows_8616(
     ctx: _PathCensusContext8616, artifact: IRFunctionArtifact, block: IRBlock,
     native: IRBlock, entry: _PathState8616, ops: FusedCalleeOperations8616, memo: _NativeTermMemo8616,
 ) -> FusedCallerPrefix8616 | Real16InvocationFailure8616:
     """Bind the suffix before callbacks; preserve native mismatch priority."""
+    failure: object
+    index: object
+    native_row: object
+    row: object
     state = _new_prefix_8616(entry)
     state.next_index = len(block.instrs)
     counters = ctx.checked_stores, ctx.failures, ctx.first_failure_site
-    failure: Real16InvocationFailure8616 | None = None
+    failure = None
     binding_only = False
     for index, (row, native_row) in enumerate(zip(block.instrs, native.instrs, strict=True)):
         if time.monotonic() > ctx.deadline:
@@ -161,6 +181,7 @@ def _bind_caller_rows_8616(
     return failure if failure is not None else state
 
 
+@cython.ccall
 def fused_caller_prefix_producers_8616() -> tuple[object, ...]:
     """Expose every owned fusion helper for the canonical identity inventory."""
     return (

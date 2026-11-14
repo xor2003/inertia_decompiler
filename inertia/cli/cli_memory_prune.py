@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: preserve legacy CLI helper surface while delegating semantic proof to X86_16 layers.
@@ -5,6 +6,8 @@ Forbidden: owning decompiler semantics, source-backed recovery, or postprocess s
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import re
 from collections.abc import Callable, Iterable
@@ -28,15 +31,20 @@ class _CodegenLike(Protocol):
     cfunc: _CFunctionLike | None
 
 
-def _is_prunable_generated_memory_name_8616(name: object) -> bool:
+@cython.ccall
+def _is_prunable_generated_memory_name_8616(name: object) -> cython.bint:
     return isinstance(name, str) and (name.startswith("g_") or re.fullmatch(r"mem_[0-9A-Fa-f]+", name) is not None)
 
 
+@cython.ccall
 def _collect_used_variable_ids_8616(
     cfunc: _CFunctionLike, iter_c_nodes_deep: Callable[[object], Iterable[object]]
-) -> set[int]:
+) -> object:
     """Collect ids of variables still referenced anywhere in the function body."""
-    used_variables: set[int] = set()
+    unified: object
+    variable: object
+    node: object
+    used_variables: set[cython.longlong] = set()
     for node in iter_c_nodes_deep(cfunc.statements):
         if not isinstance(node, structured_c.CVariable):
             continue
@@ -51,8 +59,12 @@ def _collect_used_variable_ids_8616(
     return used_variables
 
 
-def _prune_variables_in_use_8616(variables_in_use: object, used_variables: set[int]) -> bool:
+@cython.ccall
+def _prune_variables_in_use_8616(variables_in_use: object, used_variables: object) -> cython.bint:
     """Drop generated unused memory declarations from ``cfunc.variables_in_use``."""
+    name: object
+    unified: object
+    variable: object
     if not isinstance(variables_in_use, dict):
         return False
     changed = False
@@ -75,8 +87,10 @@ def _prune_variables_in_use_8616(variables_in_use: object, used_variables: set[i
     return changed
 
 
-def _prune_unified_locals_8616(unified_locals: object, used_variables: set[int]) -> bool:
+def _prune_unified_locals_8616(unified_locals: object, used_variables: object) -> cython.bint:
     """Drop generated unused memory declarations from ``cfunc.unified_local_vars``."""
+    name: object
+    variable: object
     if not isinstance(unified_locals, dict):
         return False
     changed = False
@@ -91,18 +105,20 @@ def _prune_unified_locals_8616(unified_locals: object, used_variables: set[int])
             continue
         entries = unified_locals[variable]
         # dynamic codegen boundary: CVariable entries are supplied by angr.
-        if any(id(getattr(cvariable, "variable", None)) in used_variables for cvariable, _vartype in entries):
+        if any(id(getattr(cvariable, "variable", None)) in used_variables for cvariable, _vartype in iter(entries)):
             continue
         del unified_locals[variable]
         changed = True
     return changed
 
 
+@cython.ccall
 def _prune_unused_unnamed_memory_declarations(
     codegen: _CodegenLike,
     *,
     iter_c_nodes_deep: Callable[[object], Iterable[object]],
-) -> bool:
+) -> cython.bint:
+    cfunc: object
     cfunc = codegen.cfunc
     if cfunc is None:
         return False

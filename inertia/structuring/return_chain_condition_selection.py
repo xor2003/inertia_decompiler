@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Select CFG return-chain conditions without losing branch polarity.
 
 Layer: Structuring.
@@ -10,6 +11,8 @@ suppression.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -24,6 +27,8 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CTypeCast,
     CUnaryOp,
 )
+import dataclasses
+import operator
 
 __all__ = (
     "ReturnChainConditionSelectionResult8616",
@@ -42,18 +47,18 @@ class ReturnChainConditionSelectionVerdict8616(StrEnum):
     DECODED_POLARITY_CONFLICT = "decoded_polarity_conflict"
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class ReturnChainConditionSelectionStats8616:
     """Closed evidence-loop counters for comparable zero-test conditions."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ReturnChainConditionSelectionResult8616:
     """Selected condition and the evidence-backed reason for that choice."""
 
@@ -97,7 +102,7 @@ def _zero_test_equal_orientation_8616(expression: object) -> bool | None:
         return None
     zero_count = sum(
         isinstance(operand, CConstant) and operand.value == 0
-        for operand in (node.lhs, node.rhs)
+        for operand in iter((node.lhs, node.rhs))
     )
     if zero_count != 1:
         return None
@@ -105,6 +110,7 @@ def _zero_test_equal_orientation_8616(expression: object) -> bool | None:
     return not equal if inverted else equal
 
 
+@cython.ccall
 def _selection_stats_8616(codegen: object) -> ReturnChainConditionSelectionStats8616:
     """Return the owned aggregate stats on a dynamic angr codegen boundary."""
     boundary = cast(_ConditionSelectionCodegen8616, codegen)
@@ -118,14 +124,17 @@ def _selection_stats_8616(codegen: object) -> ReturnChainConditionSelectionStats
     return stats
 
 
+@cython.ccall
 def select_cfg_return_condition_8616(
     codegen: object,
     structured_condition: CExpression,
     decoded_condition: CExpression,
     *,
-    same_branch_proven: bool,
+    same_branch_proven: cython.bint,
 ) -> ReturnChainConditionSelectionResult8616:
     """Prefer decoded JCC evidence only for a proven same-branch polarity conflict."""
+    decoded_equal: object
+    structured_equal: object
     stats = _selection_stats_8616(codegen)
     stats.raw_fact_count += 1
     structured_equal = _zero_test_equal_orientation_8616(structured_condition)
@@ -145,7 +154,7 @@ def select_cfg_return_condition_8616(
         stats.normalized_fact_count += 1
         stats.classified_fact_count += 1
         stats.materialized_count += 1
-        if structured_equal == decoded_equal:
+        if operator.eq(structured_equal, decoded_equal):
             result = ReturnChainConditionSelectionResult8616(
                 structured_condition,
                 ReturnChainConditionSelectionVerdict8616.STRUCTURED_POLARITY_MATCH,

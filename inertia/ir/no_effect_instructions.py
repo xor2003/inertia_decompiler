@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed no-effect instruction evidence bound to exact decoded native bytes.
 
 Layer: IR.
@@ -23,6 +24,8 @@ with any bound fact is refused; artifact claims alone are never evidence.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -37,6 +40,8 @@ from .condition_cache_relift_cache import ConditionReliftArtifactCache8616, Cond
 from .condition_lift_capture import isolated_condition_lift_session_8616
 from .core import IRInstr
 from .instruction_origin import vex_imark_origin_8616
+import dataclasses
+import operator
 
 __all__ = [
     "NO_EFFECT_INSTRUCTION_OP_8616",
@@ -56,7 +61,7 @@ __all__ = [
 # (``F3 90`` is the architected PAUSE hint, not NOP), and segment-override
 # prefixes are unsupported here: those encodings stay honest refusals rather
 # than claimed equivalences.
-_NOP_PREFIX_BYTES_8616: frozenset[int] = frozenset({0x66, 0x67})
+_NOP_PREFIX_BYTES_8616: frozenset[cython.longlong] = frozenset({0x66, 0x67})
 _NOP_OPCODE_8616 = 0x90
 
 
@@ -113,7 +118,7 @@ class _ProjectArchBoundary8616(Protocol):
 class _LoaderMemoryBoundary8616(Protocol):
     """Minimal loader-memory surface for exact current-byte reads."""
 
-    def load(self, address: int, size: int) -> object:
+    def load(self, address: cython.longlong, size: cython.longlong) -> object:
         """Read up to ``size`` current native bytes at ``address``."""
         ...
 
@@ -130,11 +135,13 @@ class _LoaderBoundarySurface8616(Protocol):
     memory: _LoaderMemoryBoundary8616
 
 
-def _external_int_8616(value: object) -> int:
+@cython.ccall
+def _external_int_8616(value: object) -> cython.longlong:
     """Coerce external angr integer-like values without owning their type."""
     return int(cast(Any, value))
 
 
+@cython.ccall
 def _block_addr_8616(block: object) -> int | None:
     """Return the loader-linear base from the angr block boundary."""
     try:
@@ -144,6 +151,7 @@ def _block_addr_8616(block: object) -> int | None:
     return addr if type(addr) is int and addr >= 0 else None
 
 
+@cython.ccall
 def _block_size_8616(block: object) -> int | None:
     """Return the decoded byte size from the angr block boundary."""
     try:
@@ -153,7 +161,8 @@ def _block_size_8616(block: object) -> int | None:
     return size if type(size) is int and size >= 0 else None
 
 
-def _block_bytes_8616(block: object) -> bytes | None:
+@cython.ccall
+def _block_bytes_8616(block: object) -> object:
     """Return the exact lifted byte string from the angr block boundary."""
     try:
         data = cast(_NativeBlockBoundary8616, block).bytes
@@ -164,23 +173,27 @@ def _block_bytes_8616(block: object) -> bytes | None:
     return None
 
 
+@cython.ccall
 def _block_instruction_encoding_8616(
     block: object,
-    instruction_addr: int,
-    instruction_size: int,
-) -> bytes | None:
+    instruction_addr: cython.longlong,
+    instruction_size: cython.longlong,
+) -> object:
     """Slice the exact native bytes the lifter decoded at one marked extent.
 
     The marked instruction must sit inside the lifted byte string at its own
     loader-linear offset. A missing or inconsistent block extent means the
     bytes cannot bind the mark, so the caller keeps refusing.
     """
+    block_addr: object
+    block_size: object
+    data: object
     block_addr = _block_addr_8616(block)
     block_size = _block_size_8616(block)
     data = _block_bytes_8616(block)
     if block_addr is None or block_size is None or data is None:
         return None
-    if len(data) != block_size:
+    if operator.ne(len(data), block_size):
         return None
     offset = instruction_addr - block_addr
     if offset < 0 or instruction_size <= 0 or offset + instruction_size > block_size:
@@ -188,12 +201,14 @@ def _block_instruction_encoding_8616(
     return data[offset : offset + instruction_size]
 
 
+@cython.ccall
 def _block_instruction_extents_8616(
     block: object,
-    block_addr: int,
-    block_size: int,
-) -> dict[int, int] | None:
+    block_addr: cython.longlong,
+    block_size: cython.longlong,
+) -> object:
     """Return decoded head→extent pairs, or no evidence when incomplete."""
+    instruction: object
     try:
         insns = cast(_CapstoneViewBoundary8616, cast(
             _CapstoneOwnerBoundary8616, block).capstone).insns
@@ -202,7 +217,7 @@ def _block_instruction_extents_8616(
         return None
     if not instructions:
         return None
-    extents: dict[int, int] = {}
+    extents: dict[cython.longlong, cython.longlong] = {}
     for instruction in instructions:
         boundary = cast(_CapstoneInsnBoundary8616, instruction)
         try:
@@ -223,7 +238,7 @@ def _block_instruction_extents_8616(
     return extents
 
 
-def _is_nop_encoding_8616(encoding: bytes) -> bool:
+def _is_nop_encoding_8616(encoding: object) -> cython.bint:
     """Return whether the exact encoding is the canonical x86 NOP family.
 
     Only a final ``0x90`` (``xchg ax,ax``/NOP) preceded exclusively by
@@ -231,12 +246,12 @@ def _is_nop_encoding_8616(encoding: bytes) -> bool:
     including HLT, WAIT, PAUSE, undefined encodings, or prefix forms that can
     fault — is not no-effect.
     """
-    if not encoding or encoding[-1] != _NOP_OPCODE_8616:
+    if not encoding or operator.ne(encoding[-1], _NOP_OPCODE_8616):
         return False
-    return all(byte in _NOP_PREFIX_BYTES_8616 for byte in encoding[:-1])
+    return all(byte in _NOP_PREFIX_BYTES_8616 for byte in iter(encoding[:-1]))
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LiftedNoEffectMark8616:
     """One observed empty VEX statement span at a decoded instruction mark.
 
@@ -247,17 +262,20 @@ class LiftedNoEffectMark8616:
     caller must prove the boring-fallthrough tail instead.
     """
 
-    statement_index: int
-    addr: int
-    size: int
+    statement_index: cython.longlong
+    addr: cython.longlong
+    size: cython.longlong
     next_addr: int | None = None
 
 
 NO_EFFECT_INSTRUCTION_OP_8616: str = "NOP"
 
 
-def _valid_mark_facts_8616(mark: LiftedNoEffectMark8616) -> bool:
+@cython.ccall
+def _valid_mark_facts_8616(mark: LiftedNoEffectMark8616) -> cython.bint:
     """Require exact integer head, width, and source coordinate for a mark."""
+    minimum: object
+    value: object
     for value, minimum in (
         (mark.statement_index, 0),
         (mark.addr, 0),
@@ -268,6 +286,7 @@ def _valid_mark_facts_8616(mark: LiftedNoEffectMark8616) -> bool:
     return True
 
 
+@cython.ccall
 def lifted_no_effect_instr_8616(
     block: object,
     mark: LiftedNoEffectMark8616,
@@ -280,10 +299,12 @@ def lifted_no_effect_instr_8616(
     emitted instruction carries IMark-statement provenance so the census can
     distinguish this evidence from a fabricated bare ``NOP`` shape.
     """
+    block_addr: object
+    encoding: object
     if not _valid_mark_facts_8616(mark):
         return None
     if mark.next_addr is not None and (
-        type(mark.next_addr) is not int or mark.next_addr != mark.addr + mark.size
+        type(mark.next_addr) is not int or operator.ne(mark.next_addr, mark.addr + mark.size)
     ):
         return None
     encoding = _block_instruction_encoding_8616(block, mark.addr, mark.size)
@@ -305,12 +326,13 @@ def lifted_no_effect_instr_8616(
     )
 
 
+@cython.ccall
 def terminal_no_effect_instr_8616(
     block: object,
     mark: LiftedNoEffectMark8616,
     *,
-    jumpkind: str,
-    next_const: int | None,
+    jumpkind: object,
+    next_const: object,
 ) -> IRInstr | None:
     """Emit tail no-effect evidence only for a proven boring fallthrough.
 
@@ -323,11 +345,12 @@ def terminal_no_effect_instr_8616(
     """
     if mark.next_addr is not None or jumpkind != "Ijk_Boring":
         return None
-    if next_const is None or next_const != mark.addr + mark.size:
+    if next_const is None or operator.ne(next_const, mark.addr + mark.size):
         return None
     return lifted_no_effect_instr_8616(block, mark)
 
 
+@cython.ccall
 def _mark_head_8616(statement: object) -> int | None:
     """Return the exact decoded head carried by a relifted IMark statement."""
     boundary = cast(_VexMarkBoundary8616, statement)
@@ -338,6 +361,7 @@ def _mark_head_8616(statement: object) -> int | None:
     return head if type(head) is int and head >= 0 else None
 
 
+@cython.ccall
 def _mark_extent_8616(statement: object) -> int | None:
     """Return the decoded byte width carried by a relifted IMark statement."""
     try:
@@ -347,6 +371,7 @@ def _mark_extent_8616(statement: object) -> int | None:
     return extent if type(extent) is int and extent > 0 else None
 
 
+@cython.ccall
 def _statement_tag_8616(statement: object) -> str:
     """Return a pyvex statement tag, or ``""`` for an unreadable boundary."""
     try:
@@ -367,8 +392,10 @@ class _VexConstValue8616(Protocol):
     value: object
 
 
-def _lifted_next_const_8616(expr: object | None) -> int | None:
+@cython.ccall
+def _lifted_next_const_8616(expr: object) -> int | None:
     """Return the literal carried by a block ``next`` expression, or none."""
+    con: object
     if expr is None:
         return None
     try:
@@ -386,11 +413,12 @@ def _lifted_next_const_8616(expr: object | None) -> int | None:
         return None
 
 
+@cython.ccall
 def _current_block_bytes_8616(
     project: object,
-    block_addr: int,
-    block_size: int,
-) -> bytes | None:
+    block_addr: cython.longlong,
+    block_size: cython.longlong,
+) -> object:
     """Return the bound project's current native bytes for one exact extent.
 
     ``None`` is the honest non-result: no loader memory surface, an
@@ -406,10 +434,10 @@ def _current_block_bytes_8616(
     if not isinstance(data, (bytes, bytearray, memoryview)):
         return None
     current = bytes(data)
-    return current if len(current) == block_size else None
+    return current if operator.eq(len(current), block_size) else None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _NativeMark8616:
     """Immutable source coordinates of one native instruction mark."""
 
@@ -417,20 +445,20 @@ class _NativeMark8616:
     extent: int | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _NativeLiftFacts8616:
     """Only immutable mark and transfer facts; never retain mutable VEX IR."""
 
-    statements: tuple[_NativeMark8616 | None, ...]
-    jumpkind: str
+    statements: object
+    jumpkind: object
     next_const: int | None
 
 
 # Whole-function censuses revisit every block; retain a bounded CFG working set
 # instead of evicting its earliest blocks before the next independent replay.
-_MAX_CACHED_RELIFT_BLOCKS_8616: int = 128
-_MAX_CACHED_CODE_BYTES_8616: int = 4096
-_MAX_CACHED_STATEMENTS_8616: int = 2048
+_MAX_CACHED_RELIFT_BLOCKS_8616: cython.longlong = 128
+_MAX_CACHED_CODE_BYTES_8616: cython.longlong = 4096
+_MAX_CACHED_STATEMENTS_8616: cython.longlong = 2048
 _NO_EFFECT_RELIFT_CACHE_8616 = ConditionReliftArtifactCache8616[_NativeLiftFacts8616](
     max_entries=_MAX_CACHED_RELIFT_BLOCKS_8616,
 )
@@ -438,8 +466,8 @@ _NO_EFFECT_RELIFT_CACHE_8616 = ConditionReliftArtifactCache8616[_NativeLiftFacts
 
 def _relift_bound_block_8616(
     arch: object,
-    block_addr: int,
-    code: bytes,
+    block_addr: cython.longlong,
+    code: object,
 ) -> _NativeLiftFacts8616 | None:
     """Relift one bound block's exact bytes for statement-level mark facts.
 
@@ -449,6 +477,7 @@ def _relift_bound_block_8616(
     observed. ``None`` is the honest non-result for a lift failure or an
     unreadable IRSB surface.
     """
+    cached: object
     request = ConditionReliftCacheRequest8616(
         ((block_addr, len(code), code),), frozenset(),
     )
@@ -476,7 +505,7 @@ def _relift_bound_block_8616(
         tuple(
             _NativeMark8616(_mark_head_8616(stmt), _mark_extent_8616(stmt))
             if _statement_tag_8616(stmt) == "Ist_IMark" else None
-            for stmt in statements
+            for stmt in iter(statements)
         ),
         jumpkind,
         _lifted_next_const_8616(next_expr),
@@ -486,7 +515,7 @@ def _relift_bound_block_8616(
     return facts
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class BoundNoEffectBlock8616:
     """Bound-project evidence authenticating census NOP claims on one block.
 
@@ -500,18 +529,18 @@ class BoundNoEffectBlock8616:
     bytes, decoded extents and outgoing edges are checked on every evaluation.
     """
 
-    block_addr: int
-    instruction_extents: dict[int, int]
-    code: bytes
-    statements: tuple[_NativeMark8616 | None, ...]
-    jumpkind: str
+    block_addr: cython.longlong
+    instruction_extents: object
+    code: object
+    statements: object
+    jumpkind: object
     next_const: int | None
-    fallthrough_targets: frozenset[int]
+    fallthrough_targets: object
 
 
 def bound_no_effect_block_8616(
     boundary: ExactFunctionRangeBoundary8616,
-    block_addr: int,
+    block_addr: cython.longlong,
 ) -> BoundNoEffectBlock8616 | None:
     """Collect bound-project authentication facts for one census block.
 
@@ -522,19 +551,23 @@ def bound_no_effect_block_8616(
     exposes no architecture, or the exact-byte relift failed. Every census
     NOP claim against a missing context refuses.
     """
+    block_size: object
+    code: object
+    current: object
+    relifted: object
     if type(block_addr) is not int or block_addr < 0:
         return None
     matches = [
         block
-        for block in boundary.blocks
-        if _block_addr_8616(block) == block_addr
+        for block in iter(boundary.blocks)
+        if operator.eq(_block_addr_8616(block), block_addr)
     ]
     if len(matches) != 1:
         return None
     block = matches[0]
     block_size = _block_size_8616(block)
     code = _block_bytes_8616(block)
-    if block_size is None or block_size <= 0 or code is None or len(code) != block_size:
+    if block_size is None or block_size <= 0 or code is None or operator.ne(len(code), block_size):
         return None
     extents = _block_instruction_extents_8616(block, block_addr, block_size)
     if not extents:
@@ -544,7 +577,7 @@ def bound_no_effect_block_8616(
     except AttributeError:
         return None
     current = _current_block_bytes_8616(boundary.project, block_addr, block_size)
-    if current is None or current != code:
+    if current is None or operator.ne(current, code):
         return None
     relifted = _relift_bound_block_8616(arch, block_addr, code)
     if relifted is None:
@@ -558,13 +591,14 @@ def bound_no_effect_block_8616(
         next_const=relifted.next_const,
         fallthrough_targets=frozenset(
             target
-            for source, target in boundary.successor_edges
+            for source, target in iter(boundary.successor_edges)
             if source == block_addr
         ),
     )
 
 
-def no_effect_claim_shape_8616(instruction: IRInstr) -> bool:
+@cython.ccall
+def no_effect_claim_shape_8616(instruction: IRInstr) -> cython.bint:
     """Return whether an instruction carries the exact no-effect claim shape.
 
     This is the single per-instruction predicate every consumer shares: the
@@ -575,9 +609,10 @@ def no_effect_claim_shape_8616(instruction: IRInstr) -> bool:
     extents, native bytes, and statement identity is owned by
     ``bound_no_effect_instr_8616``.
     """
+    origin: object
     origin = instruction.origin
     if (
-        instruction.op != NO_EFFECT_INSTRUCTION_OP_8616
+        operator.ne(instruction.op, NO_EFFECT_INSTRUCTION_OP_8616)
         or instruction.dst is not None
         or instruction.args
         or instruction.size != 0
@@ -600,10 +635,11 @@ def no_effect_claim_shape_8616(instruction: IRInstr) -> bool:
     )
 
 
+@cython.ccall
 def bound_no_effect_instr_8616(
     context: BoundNoEffectBlock8616,
     instruction: IRInstr,
-) -> bool:
+) -> cython.bint:
     """Authenticate one census NOP claim against bound-project block facts.
 
     The claim is accepted only when every bound fact agrees: the exact
@@ -616,11 +652,16 @@ def bound_no_effect_instr_8616(
     stayed ``Ijk_Boring`` with a constant ``next`` fallthrough the bound
     boundary records as a real edge.
     """
+    address: object
+    extent: object
+    follower: object
+    mark: object
+    origin: object
     address = instruction.addr
     if not no_effect_claim_shape_8616(instruction) or address is None:
         return False
     origin = instruction.origin
-    if origin is None or origin.block_addr != context.block_addr:
+    if origin is None or operator.ne(origin.block_addr, context.block_addr):
         return False
     extent = context.instruction_extents.get(address)
     if extent is None:
@@ -634,18 +675,18 @@ def bound_no_effect_instr_8616(
     mark = context.statements[index]
     if mark is None:
         return False
-    if mark.head != address or mark.extent != extent:
+    if operator.ne(mark.head, address) or operator.ne(mark.extent, extent):
         return False
     next_head = address + extent
     if index + 1 < len(context.statements):
         follower = context.statements[index + 1]
         return bool(
             follower is not None
-            and follower.head == next_head
+            and operator.eq(follower.head, next_head)
             and next_head in context.instruction_extents
         )
     return bool(
         context.jumpkind == "Ijk_Boring"
-        and context.next_const == next_head
+        and operator.eq(context.next_const, next_head)
         and next_head in context.fallthrough_targets
     )

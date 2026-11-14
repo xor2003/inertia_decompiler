@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Consume exact binary callee status summaries at structured calls.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ targets or summaries refuse it. This does not make calls pure or removable.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from angr.analyses.decompiler.structured_codegen.c import CFunctionCall, CStatement
 
@@ -19,10 +22,13 @@ from inertia.ir.status_flag_lift_context import (
 )
 from inertia.semantics.status_flag_contracts import StatusFlag8616
 from inertia.widening.segmented_load_identity import segmented_load_identity_8616
+import operator
 
 
+@cython.ccall
 def flag_artifact_for_structured_root_8616(root: object) -> StatusFlagLiftArtifact8616 | None:
     """Resolve function-owned evidence at the third-party codegen boundary."""
+    resolved: object
     if not isinstance(root, CStatement) or root.codegen is None:
         return None
     try:
@@ -34,16 +40,17 @@ def flag_artifact_for_structured_root_8616(root: object) -> StatusFlagLiftArtifa
 
 
 def call_has_no_implicit_status_inputs_8616(
-    call: CFunctionCall, artifact: StatusFlagLiftArtifact8616 | None,
-) -> bool:
+    call: CFunctionCall, artifact: object,
+) -> cython.bint:
     """Require a typed memory projection or an exact binary callee summary."""
+    attached_target: object
     if segmented_load_identity_8616(call) is not None:
         return True
     if artifact is None or call.callee_func is None:
         return False
     target = call.callee_func.addr
     attached_target = call.tags.get("inertia_target_addr_8616", target)
-    if not isinstance(target, int) or attached_target != target:
+    if not isinstance(target, int) or operator.ne(attached_target, target):
         return False
-    effects = tuple(effect for address, effect in artifact.callee_effects if address == target)
-    return len(effects) == 1 and effects[0].reads == StatusFlag8616.NONE
+    effects = tuple(effect for address, effect in iter(artifact.callee_effects) if address == target)
+    return len(effects) == 1 and operator.eq(effects[0].reads, StatusFlag8616.NONE)

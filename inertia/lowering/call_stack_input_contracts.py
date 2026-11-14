@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed architectural word-SP call-context layout and proof census.
 
 Layer: Types/Lowering.
@@ -7,6 +8,8 @@ Consumes alias, widening, and typed facts
 Do not recover semantics from COD, source, assembly, or rendered C text
 """
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Protocol, cast
@@ -26,6 +29,9 @@ from .entry_stack_pointer_capture import (
     StackPointerCaptureFunction8616,
 )
 from .gp_register_state import runtime_gp_expression_view_8616
+import dataclasses
+import operator
+import builtins
 
 CALL_STACK_INPUT_BINDING_TAG_8616: str = "inertia_call_stack_input_binding_8616"
 
@@ -41,7 +47,7 @@ class _CodegenCallSource8616(Protocol):
 class _NativeCallTarget8616(Protocol):
     """Native callee identity with its owning project scope."""
 
-    addr: int
+    addr: cython.longlong
     project: object
 
 
@@ -51,14 +57,20 @@ class _NativeProjectArchitecture8616(Protocol):
     arch: Arch
 
 
+@cython.ccall
 def current_call_stack_source_8616(codegen: object) -> IRFunctionArtifact | None:
     """Admit the current function and the project owning its CALL evidence."""
+    coordinates: object
+    effect: object
+    function: object
+    block: object
+    instruction: object
     boundary = cast(_CodegenCallSource8616, codegen)
     try:
         function, source, project = boundary.cfunc, boundary._inertia_vex_ir_artifact, boundary.project
     except AttributeError:
         return None
-    if function is None or not isinstance(source, IRFunctionArtifact) or function.addr != source.function_addr:
+    if function is None or not isinstance(source, IRFunctionArtifact) or operator.ne(function.addr, source.function_addr):
         return None
     for block in source.blocks:
         for instruction in block.instrs:
@@ -69,6 +81,7 @@ def current_call_stack_source_8616(codegen: object) -> IRFunctionArtifact | None
     return source
 
 
+@cython.ccall
 def direct_call_target_8616(codegen: object, call: c.CFunctionCall) -> int | None:
     """Read a native target bound to this project, never a rendered function name."""
     if call.callee_func is None:
@@ -81,11 +94,12 @@ def direct_call_target_8616(codegen: object, call: c.CFunctionCall) -> int | Non
     return target if type(target) is int and project is cast(_CodegenCallSource8616, codegen).project else None
 
 
-type CallStackInputAuthority8616 = (
+CallStackInputAuthority8616 = typing.TypeAliasType("CallStackInputAuthority8616", (
     CallStackPosition8616 | ScopedCallPositionAuthority8616
-)
+))
 
 
+@cython.ccall
 def call_stack_authority_position_8616(
     authority: object,
 ) -> CallStackPosition8616 | None:
@@ -102,7 +116,7 @@ def call_stack_authority_position_8616(
     return None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallStackInputBinding8616:
     """Source authority and local identities for one ordered call context.
 
@@ -117,8 +131,8 @@ class CallStackInputBinding8616:
     """
 
     authority: CallStackInputAuthority8616
-    entry_tmp_id: int
-    argument_tmp_ids: tuple[int, ...]
+    entry_tmp_id: cython.longlong
+    argument_tmp_ids: object
     result_tmp_id: int | None
 
     @property
@@ -137,12 +151,14 @@ class CallStackInputBinding8616:
 
 
 
-def call_stack_argument_is_stable_8616(expression: object) -> bool:
+@cython.ccall
+def call_stack_argument_is_stable_8616(expression: object) -> cython.bint:
     """Admit transparent argument expressions evaluated once before frame setup.
 
     Opaque operations, nested calls and assignment expressions refuse. This
     does not infer purity from a callee name or rendered expression.
     """
+    node: object
     allowed = (c.CConstant, c.CVariable, c.CBinaryOp, c.CUnaryOp, c.CTypeCast, c.CIndexedVariable)
     for node in _iter_c_nodes_deep_8616(expression):
         if not isinstance(node, allowed):
@@ -152,6 +168,7 @@ def call_stack_argument_is_stable_8616(expression: object) -> bool:
     return isinstance(expression, c.CExpression)
 
 
+@cython.ccall
 def call_stack_argument_value_type_8616(expression: object) -> SimType | None:
     """Project C argument value conversion without copying arrays or functions.
 
@@ -179,6 +196,7 @@ def call_stack_argument_value_type_8616(expression: object) -> SimType | None:
     return SimTypePointer(pointee).with_arch(arch)
 
 
+@cython.ccall
 def call_stack_value_size_8616(type_: object) -> int | None:
     """Return assignable C value storage bytes; native void has no value slot.
 
@@ -196,29 +214,31 @@ def call_stack_value_size_8616(type_: object) -> int | None:
     return bits // 8 if type(bits) is int and bits > 0 and bits % 8 == 0 else None
 
 
-def call_stack_temporary_8616(node: object, identity: int) -> bool:
+@cython.ccall
+def call_stack_temporary_8616(node: object, identity: cython.longlong) -> cython.bint:
     """Identify exact local temporary storage without unified register aliases."""
     return (isinstance(node, c.CVariable) and isinstance(node.variable, SimTemporaryVariable)
-            and node.variable.tmp_id == identity and node.unified_variable is None)
+            and operator.eq(node.variable.tmp_id, identity) and node.unified_variable is None)
 
 
-def call_stack_has_runtime_sp_8616(root: object) -> bool:
+def call_stack_has_runtime_sp_8616(root: object) -> cython.bint:
     """Detect explicit runtime ESP observations through the register owner."""
     return any(isinstance(node, c.CVariable) and (view := runtime_gp_expression_view_8616(node)) is not None
-               and view.parent_name == "esp" for node in _iter_c_nodes_deep_8616(root))
+               and view.parent_name == "esp" for node in builtins.iter(_iter_c_nodes_deep_8616(root)))
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallStackContextLayout8616:
     """Parsed ordered context; source position and SP equations remain unproved."""
 
     marker: CallStackInputBinding8616
     call: c.CFunctionCall
-    original_arguments: tuple[c.CExpression, ...]
+    original_arguments: object
     pre_write: c.CAssignment
     post_write: c.CAssignment
 
 
+@cython.ccall
 def _layout_call(wrapper: c.CMultiStatementExpression, marker: CallStackInputBinding8616,
                  invoked: object) -> c.CFunctionCall | None:
     """Preserve the call result's exact declared type and local storage."""
@@ -237,16 +257,20 @@ def _layout_call(wrapper: c.CMultiStatementExpression, marker: CallStackInputBin
         return None
     if not call_stack_temporary_8616(invoked.lhs, marker.result_tmp_id) or not call_stack_temporary_8616(wrapper.expr, marker.result_tmp_id):
         return None
-    if invoked.lhs.type != call.type or wrapper.expr.type != call.type:
+    if operator.ne(invoked.lhs.type, call.type) or operator.ne(wrapper.expr.type, call.type):
         return None
     return call
 
 
-def _layout_arguments(marker: CallStackInputBinding8616, statements: list[object],
-                      call: c.CFunctionCall) -> tuple[c.CExpression, ...] | None:
+@cython.ccall
+def _layout_arguments(marker: CallStackInputBinding8616, statements: object,
+                      call: c.CFunctionCall) -> object:
     """Require each transparent argument to be evaluated once before SP setup."""
+    converted: object
+    identity: object
+    index: object
     args = call.args or []
-    if len(args) != len(marker.argument_tmp_ids):
+    if operator.ne(len(args), len(marker.argument_tmp_ids)):
         return None
     originals: list[c.CExpression] = []
     for index, identity in enumerate(marker.argument_tmp_ids):
@@ -256,7 +280,7 @@ def _layout_arguments(marker: CallStackInputBinding8616, statements: list[object
         converted = call_stack_argument_value_type_8616(assignment.rhs)
         if converted is None or not call_stack_temporary_8616(args[index], identity):
             return None
-        if assignment.lhs.type != converted or args[index].type != converted:
+        if operator.ne(assignment.lhs.type, converted) or operator.ne(args[index].type, converted):
             return None
         if not call_stack_argument_is_stable_8616(assignment.rhs):
             return None
@@ -266,6 +290,7 @@ def _layout_arguments(marker: CallStackInputBinding8616, statements: list[object
     return tuple(originals)
 
 
+@cython.ccall
 def call_stack_context_layout_8616(
     wrapper: object, *, value_use: CallStackValueUse8616 | None = None,
 ) -> CallStackContextLayout8616 | None:
@@ -274,6 +299,9 @@ def call_stack_context_layout_8616(
     Omitting use information gives syntax inspection only, never validation
     authority. Source identity and register equations still require reproof.
     """
+    arguments: object
+    call: object
+    marker: object
     if not isinstance(wrapper, c.CMultiStatementExpression):
         return None
     marker = wrapper.tags.get(CALL_STACK_INPUT_BINDING_TAG_8616)
@@ -284,7 +312,7 @@ def call_stack_context_layout_8616(
         identities = (*identities, marker.result_tmp_id)
     count = len(marker.argument_tmp_ids)
     statements = list(wrapper.stmts.statements)
-    if len(set(identities)) != len(identities) or len(statements) != count + 3:
+    if operator.ne(len(set(identities)), len(identities)) or operator.ne(len(statements), count + 3):
         return None
     pre, post = statements[count], statements[-1]
     if not isinstance(pre, c.CAssignment) or not isinstance(post, c.CAssignment):

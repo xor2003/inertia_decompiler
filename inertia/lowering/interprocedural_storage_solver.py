@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Resolve and publish SCC-aware interprocedural storage contracts.
 
 Layer: Types/Lowering.
@@ -11,6 +12,8 @@ Forbidden: signature guessing or partial publication.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -30,43 +33,50 @@ from .interprocedural_storage_function_solver import (
     resolve_joined_function_storage_trials_8616,
 )
 from .interprocedural_storage_return_discard import discarded_return_census_proves_empty_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = ["resolve_program_storage_trials_8616"]
 
-type _OutputSeed8616 = tuple[StorageSlotContract8616, ...]
+_OutputSeed8616 = typing.TypeAliasType("_OutputSeed8616", tuple[StorageSlotContract8616, ...])
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _SCCOutputState8616:
     """One immutable fixed-point state for direct and propagated outputs."""
 
-    direct_outputs: tuple[tuple[int, _OutputSeed8616 | None], ...]
-    passthrough_outputs: tuple[tuple[int, _OutputSeed8616 | None], ...]
+    direct_outputs: object
+    passthrough_outputs: object
 
-    def direct_for(self, function_addr: int) -> _OutputSeed8616 | None:
+    def direct_for(self, function_addr: cython.longlong) -> _OutputSeed8616 | None:
         """Return the concrete direct seed for one SCC member."""
         return next(
-            (outputs for address, outputs in self.direct_outputs if address == function_addr),
+            (outputs for address, outputs in iter(self.direct_outputs) if address == function_addr),
             None,
         )
 
-    def passthrough_for(self, function_addr: int) -> _OutputSeed8616 | None:
+    def passthrough_for(self, function_addr: cython.longlong) -> _OutputSeed8616 | None:
         """Return the seed propagated through all of one member's deferred facts."""
         return next(
             (
                 outputs
-                for address, outputs in self.passthrough_outputs
+                for address, outputs in iter(self.passthrough_outputs)
                 if address == function_addr
             ),
             None,
         )
 
 
+@cython.ccall
 def _caller_callee_graph_8616(
-    trials_by_addr: dict[int, FunctionStorageTrials8616],
-) -> dict[int, set[int]]:
+    trials_by_addr: object,
+) -> object:
     """Build internal caller-to-callee edges for tracked functions only."""
-    graph: dict[int, set[int]] = {address: set() for address in trials_by_addr}
+    callee_addr: object
+    callsite: object
+    trials: object
+    graph: dict[cython.longlong, set[cython.longlong]] = {address: set() for address in iter(trials_by_addr)}
     for callee_addr, trials in trials_by_addr.items():
         for callsite in trials.callsites:
             if callsite.caller_addr in graph:
@@ -74,20 +84,23 @@ def _caller_callee_graph_8616(
     return graph
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _TarjanState8616:
     """Mutable Tarjan traversal state over the deterministic call graph."""
 
-    graph: dict[int, set[int]]
-    index: int = 0
-    indices: dict[int, int] = field(default_factory=dict)
-    lowlinks: dict[int, int] = field(default_factory=dict)
-    stack: list[int] = field(default_factory=list)
-    on_stack: set[int] = field(default_factory=set)
-    components: list[tuple[int, ...]] = field(default_factory=list)
+    graph: object
+    index: cython.longlong = 0
+    indices: object = field(default_factory=dict)
+    lowlinks: object = field(default_factory=dict)
+    stack: object = field(default_factory=list)
+    on_stack: object = field(default_factory=set)
+    components: object = field(default_factory=list)
 
-    def visit(self, node: int) -> None:
+    @cython.ccall
+    def visit(self, node: cython.longlong) -> None:
         """Visit one node and emit its component after all descendants."""
+        member: object
+        target: object
         self.indices[node] = self.index
         self.lowlinks[node] = self.index
         self.index += 1
@@ -99,22 +112,23 @@ class _TarjanState8616:
                 self.lowlinks[node] = min(self.lowlinks[node], self.lowlinks[target])
             elif target in self.on_stack:
                 self.lowlinks[node] = min(self.lowlinks[node], self.indices[target])
-        if self.lowlinks[node] != self.indices[node]:
+        if operator.ne(self.lowlinks[node], self.indices[node]):
             return
-        component: list[int] = []
+        component: list[cython.longlong] = []
         while True:
             member = self.stack.pop()
             self.on_stack.remove(member)
             component.append(member)
-            if member == node:
+            if operator.eq(member, node):
                 break
         self.components.append(tuple(sorted(component)))
 
 
 def _deterministic_sccs_8616(
-    trials_by_addr: dict[int, FunctionStorageTrials8616],
-) -> tuple[tuple[int, ...], ...]:
+    trials_by_addr: object,
+) -> tuple[tuple[cython.longlong, ...], ...]:
     """Return deterministic Tarjan SCCs for internal caller-to-callee edges."""
+    node: object
     graph = _caller_callee_graph_8616(trials_by_addr)
     state = _TarjanState8616(graph)
     for node in sorted(graph):
@@ -123,27 +137,30 @@ def _deterministic_sccs_8616(
     return tuple(sorted(state.components, key=lambda item: item[0]))
 
 
+@cython.ccall
 def _direct_output_seed_8616(
-    joined: FunctionStorageTrialJoin8616, scc: tuple[int, ...],
+    joined: FunctionStorageTrialJoin8616, scc: object,
 ) -> _OutputSeed8616 | None:
     """Add empty seeds only from a closed independent discarded-result census."""
-    seed: _OutputSeed8616 | None = joined.direct_output_seed
+    seed: object
+    seed = joined.direct_output_seed
     if seed is not None or joined.failures:
         return seed
     return () if discarded_return_census_proves_empty_8616(joined.trials, frozenset(scc)) else None
 
 
 def _next_scc_output_state_8616(
-    scc: tuple[int, ...],
-    joined_by_addr: dict[int, FunctionStorageTrialJoin8616],
-    previous: _SCCOutputState8616 | None,
+    scc: object,
+    joined_by_addr: object,
+    previous: object,
 ) -> _SCCOutputState8616:
     """Advance direct seeds through exact recursive pass-through relations once."""
+    function_addr: object
     direct_outputs = tuple(
         (function_addr, _direct_output_seed_8616(joined_by_addr[function_addr], scc))
-        for function_addr in scc
+        for function_addr in iter(scc)
     )
-    passthrough_outputs: list[tuple[int, _OutputSeed8616 | None]] = []
+    passthrough_outputs: list[tuple[cython.longlong, _OutputSeed8616 | None]] = []
     for function_addr in scc:
         joined = joined_by_addr[function_addr]
         outputs = None
@@ -156,15 +173,17 @@ def _next_scc_output_state_8616(
     )
 
 
+@cython.ccall
 def _resolve_scc_output_state_8616(
-    scc: tuple[int, ...],
-    joined_by_addr: dict[int, FunctionStorageTrialJoin8616],
-) -> tuple[_SCCOutputState8616, int]:
+    scc: object,
+    joined_by_addr: object,
+) -> tuple[_SCCOutputState8616, cython.longlong]:
     """Reach a bounded deterministic output/pass-through fixed point."""
-    previous: _SCCOutputState8616 | None = None
+    previous: object
+    previous = None
     for iteration in range(1, len(scc) + 4):
         current = _next_scc_output_state_8616(scc, joined_by_addr, previous)
-        if previous is not None and current == previous:
+        if previous is not None and operator.eq(current, previous):
             return current, iteration
         previous = current
     raise PipelineHardError(
@@ -180,11 +199,11 @@ def _sum_stats_8616(
     """Accumulate mandatory evidence counters across function resolutions."""
     items = tuple(resolutions)
     return StorageTrialStats8616(
-        raw_fact_count=sum(item.stats.raw_fact_count for item in items),
-        normalized_fact_count=sum(item.stats.normalized_fact_count for item in items),
-        classified_fact_count=sum(item.stats.classified_fact_count for item in items),
-        materialized_count=sum(item.stats.materialized_count for item in items),
-        failure_count=sum(item.stats.failure_count for item in items),
+        raw_fact_count=sum(item.stats.raw_fact_count for item in iter(items)),
+        normalized_fact_count=sum(item.stats.normalized_fact_count for item in iter(items)),
+        classified_fact_count=sum(item.stats.classified_fact_count for item in iter(items)),
+        materialized_count=sum(item.stats.materialized_count for item in iter(items)),
+        failure_count=sum(item.stats.failure_count for item in iter(items)),
     )
 
 
@@ -192,17 +211,19 @@ def resolve_program_storage_trials_8616(
     function_trials: Iterable[FunctionStorageTrials8616],
 ) -> ProgramStorageResolution8616:
     """Resolve all SCCs to a deterministic fixed point without partial mutation."""
+    address: object
+    scc: object
     supplied = tuple(function_trials)
-    trials_by_addr = {item.function_addr: item for item in supplied}
-    if len(trials_by_addr) != len(supplied):
+    trials_by_addr = {item.function_addr: item for item in iter(supplied)}
+    if operator.ne(len(trials_by_addr), len(supplied)):
         raise PipelineHardError("duplicate function storage trials", layer="types/lowering")
     joined_by_addr = {
         address: join_function_storage_trials_8616(trials)
-        for address, trials in trials_by_addr.items()
+        for address, trials in builtins.iter(trials_by_addr.items())
     }
     sccs = _deterministic_sccs_8616(trials_by_addr)
-    resolved: dict[int, FunctionStorageResolution8616] = {}
-    iterations_by_scc: list[int] = []
+    resolved: dict[cython.longlong, FunctionStorageResolution8616] = {}
+    iterations_by_scc: list[cython.longlong] = []
     for scc in sccs:
         output_state, iterations = _resolve_scc_output_state_8616(scc, joined_by_addr)
         iterations_by_scc.append(iterations)
@@ -213,9 +234,9 @@ def resolve_program_storage_trials_8616(
                 recursive_callers=frozenset(scc),
             )
             resolved[address] = resolution
-    ordered = tuple(resolved[address] for address in sorted(resolved))
+    ordered = tuple(resolved[address] for address in builtins.iter(sorted(resolved)))
     return ProgramStorageResolution8616(
-        function_trials=tuple(trials_by_addr[address] for address in sorted(trials_by_addr)),
+        function_trials=tuple(trials_by_addr[address] for address in builtins.iter(sorted(trials_by_addr))),
         resolutions=ordered,
         sccs=sccs,
         iterations_by_scc=tuple(iterations_by_scc),

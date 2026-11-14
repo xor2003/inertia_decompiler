@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Recover exact carry/borrow links from typed function SSA.
 
 Layer: Semantics.
@@ -10,6 +11,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from inertia.ir.core import IRValue, MemSpace
 from inertia.ir.ssa_function import SSAFunctionArtifact
@@ -44,8 +47,11 @@ from .carry_borrow_ssa import (
     single_source_8616,
     site_value_args_8616,
 )
+import operator
+import builtins
 
 
+@cython.ccall
 def _refusal(
     candidate: CarryBorrowDefinitionSite8616,
     failure: CarryBorrowFailure8616,
@@ -57,11 +63,13 @@ def _refusal(
     )
 
 
+@cython.ccall
 def _chain_definition_8616(
-    value: IRValue | None,
+    value: object,
     definitions: CarryBorrowDefinitions8616,
 ) -> CarryBorrowDefinitionSite8616 | CarryBorrowFailure8616:
     """Resolve one conversion source to its definition site or refusal."""
+    site: object
     if value is None:
         return CarryBorrowFailure8616.CARRY_CONVERSION_MISMATCH
     site = definition_for_8616(value, definitions)
@@ -70,6 +78,7 @@ def _chain_definition_8616(
     return site
 
 
+@cython.ccall
 def _masked_shift_value_8616(
     mask: CarryBorrowDefinitionSite8616,
 ) -> IRValue | CarryBorrowFailure8616:
@@ -84,11 +93,14 @@ def _masked_shift_value_8616(
     return CarryBorrowFailure8616.CARRY_MASK_MISMATCH
 
 
+@cython.ccall
 def _flags_read_8616(
     shift: CarryBorrowDefinitionSite8616,
     definitions: CarryBorrowDefinitions8616,
 ) -> CarryBorrowDefinitionSite8616 | CarryBorrowFailure8616:
     """Resolve the FLAGS register read feeding a proven shift site."""
+    flags_read: object
+    flags_value: object
     shift_args = site_value_args_8616(shift)
     if (
         ir_op_8616(shift.instruction) is not CarryBorrowIROp8616.SHR16
@@ -108,16 +120,11 @@ def _flags_read_8616(
     return flags_read
 
 
+@cython.ccall
 def _carry_chain(
     carry_value: IRValue,
     definitions: CarryBorrowDefinitions8616,
-) -> tuple[
-    CarryBorrowDefinitionSite8616,
-    CarryBorrowDefinitionSite8616,
-    CarryBorrowDefinitionSite8616,
-    CarryBorrowDefinitionSite8616,
-    CarryBorrowDefinitionSite8616,
-] | CarryBorrowFailure8616:
+) -> object:
     """Prove the full carry-bit link chain FLAGS→shift→mask→narrow→extend."""
     extend = _chain_definition_8616(carry_value, definitions)
     if isinstance(extend, CarryBorrowFailure8616):
@@ -150,15 +157,17 @@ def _carry_chain(
     return flags_read, shift, mask, narrow, extend
 
 
+@cython.ccall
 def _post_flags_mov_8616(
     site: CarryBorrowDefinitionSite8616,
     flags_definition: CarryBorrowDefinitionSite8616,
-) -> bool:
+) -> cython.bint:
     """Return whether the site is a post-FLAGS non-flags register MOV."""
+    dst: object
     dst = site.instruction.dst
     return (
         site.instr_index > flags_definition.instr_index
-        and site.instruction.addr == flags_definition.instruction.addr
+        and operator.eq(site.instruction.addr, flags_definition.instruction.addr)
         and ir_op_8616(site.instruction) is CarryBorrowIROp8616.MOV
         and dst is not None
         and dst.space is MemSpace.REG
@@ -168,16 +177,20 @@ def _post_flags_mov_8616(
 
 def _low_result(
     flags_definition: CarryBorrowDefinitionSite8616,
-    sites: tuple[CarryBorrowDefinitionSite8616, ...],
+    sites: object,
     definitions: CarryBorrowDefinitions8616,
     kind: CarryBorrowKind8616,
-) -> tuple[CarryBorrowDefinitionSite8616, CarryBorrowDefinitionSite8616] | None:
+) -> object:
     """Find the unique post-FLAGS register effect owned by the instruction."""
+    arithmetic: object
+    flags_source: object
+    source: object
+    site: object
     flags_source = single_source_8616(flags_definition)
     if flags_source is None:
         return None
     flag_arithmetic = dependency_arithmetic_sites_8616(flags_source, definitions, kind)
-    signatures = tuple(site_value_args_8616(site) for site in flag_arithmetic)
+    signatures = tuple(site_value_args_8616(site) for site in iter(flag_arithmetic))
     matches: list[tuple[CarryBorrowDefinitionSite8616, CarryBorrowDefinitionSite8616]] = []
     for site in sites:
         if not _post_flags_mov_8616(site, flags_definition):
@@ -188,7 +201,7 @@ def _low_result(
             continue
         if signatures and not any(
             same_operands_8616(site_value_args_8616(arithmetic), signature)
-            for signature in signatures
+            for signature in iter(signatures)
         ):
             continue
         matches.append((site, arithmetic))
@@ -198,9 +211,18 @@ def _low_result(
 def _resolve_candidate(
     candidate: CarryBorrowDefinitionSite8616,
     use_block: CarryBorrowBlockSSA8616,
-    blocks: tuple[CarryBorrowBlockSSA8616, ...],
+    blocks: object,
     artifact: SSAFunctionArtifact,
 ) -> CarryBorrowResolution8616:
+    final: object
+    flags_owner: object
+    high_lhs: object
+    high_rhs: object
+    kind: object
+    low: object
+    low_lhs: object
+    low_rhs: object
+    source: object
     definitions = use_block.definitions
     source = single_source_8616(candidate)
     final = None if source is None else definition_for_8616(source, definitions)
@@ -212,7 +234,7 @@ def _resolve_candidate(
         return _refusal(candidate, CarryBorrowFailure8616.AMBIGUOUS_BASE_OPERATION)
     base_choices = tuple(
         (index, definition)
-        for index, value in enumerate(final_args)
+        for index, value in builtins.iter(enumerate(final_args))
         if (definition := definition_for_8616(value, definitions)) is not None
         and arithmetic_kind_8616(definition.instruction) is kind
     )
@@ -256,12 +278,12 @@ def _resolve_candidate(
             flags_owner.block.definitions,
             artifact.logical_memory,
         )
-        for value in low_args
+        for value in iter(low_args)
     ) + tuple(
         operand_use_8616(value, definitions, artifact.logical_memory)
-        for value in high_args
+        for value in iter(high_args)
     )
-    if any(item is None for item in operand_uses):
+    if any(item is None for item in iter(operand_uses)):
         return _refusal(candidate, CarryBorrowFailure8616.OPERAND_DEFINITION_MISSING)
     low_lhs, low_rhs, high_lhs, high_rhs = operand_uses
     assert low_lhs is not None and low_rhs is not None
@@ -293,9 +315,13 @@ def _resolve_candidate(
 
 
 def _candidate_sites(
-    sites: tuple[CarryBorrowDefinitionSite8616, ...],
+    sites: object,
     definitions: CarryBorrowDefinitions8616,
 ) -> tuple[CarryBorrowDefinitionSite8616, ...]:
+    dst: object
+    final: object
+    source: object
+    site: object
     candidates: list[CarryBorrowDefinitionSite8616] = []
     for site in sites:
         dst = site.instruction.dst
@@ -313,7 +339,7 @@ def _candidate_sites(
         if len(args) == 2 and any(
             (base := definition_for_8616(value, definitions)) is not None
             and arithmetic_kind_8616(base.instruction) is arithmetic_kind_8616(final.instruction)
-            for value in args
+            for value in iter(args)
         ):
             candidates.append(site)
     return tuple(candidates)
@@ -321,6 +347,8 @@ def _candidate_sites(
 
 def analyze_carry_borrow_links_8616(artifact: SSAFunctionArtifact) -> CarryBorrowEvidence8616:
     """Classify carry/borrow candidates from exact SSA and CFG definitions."""
+    block: object
+    candidate: object
     resolutions: list[CarryBorrowResolution8616] = []
     blocks = build_carry_borrow_block_ssa_8616(artifact)
     for block in blocks:
@@ -328,7 +356,7 @@ def analyze_carry_borrow_links_8616(artifact: SSAFunctionArtifact) -> CarryBorro
             resolutions.append(
                 _resolve_candidate(candidate, block, blocks, artifact)
             )
-    materialized = sum(item.link is not None for item in resolutions)
+    materialized = sum(item.link is not None for item in iter(resolutions))
     failures = len(resolutions) - materialized
     stats = CarryBorrowStats8616(
         raw_fact_count=len(resolutions),

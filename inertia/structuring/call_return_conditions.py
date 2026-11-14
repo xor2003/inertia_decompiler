@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize proven call-return values used as structured conditions.
 
 Layer: Structuring.
@@ -13,6 +14,8 @@ Refuse ambiguous facts; never infer calls from rendered C, names, or samples.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from functools import partial
@@ -80,19 +83,22 @@ from .call_return_store_placement import (
 )
 from .condition_replay import bind_condition_replay_identity_8616
 from .expression_substitution import replace_exact_expression_8616
+import dataclasses
+import operator
+import builtins
 
 
 class _CallReturnFunction8616(Protocol):
     """Exact callee surface required to construct one structured call."""
 
-    addr: int
-    name: str
+    addr: cython.longlong
+    name: object
 
 
 class _CallReturnFunctionManager8616(Protocol):
     """Third-party angr function lookup boundary."""
 
-    def function(self, *, addr: int, create: bool) -> _CallReturnFunction8616 | None:
+    def function(self, *, addr: cython.longlong, create: cython.bint) -> _CallReturnFunction8616 | None:
         """Return one exact existing function."""
 
 
@@ -120,47 +126,52 @@ class _CallReturnCodegen8616(Protocol):
 
     cfunc: _CallReturnCFunction8616
     _inertia_typed_conditions: object
-    _inertia_callsite_summary_inventory_8616: dict[int, CallsiteSummary8616]
-    _inertia_callsite_summaries: dict[int, CallsiteSummary8616]
+    _inertia_callsite_summary_inventory_8616: object
+    _inertia_callsite_summaries: object
     _inertia_call_return_condition_stats_8616: CallReturnConditionStats8616
-    _inertia_call_return_store_bridges_8616: dict[int, CallReturnStoreBridgeRecord8616]
+    _inertia_call_return_store_bridges_8616: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallReturnConditionStats8616:
     """Closed evidence accounting for call-return condition materialization."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    store_bridge_materialized_count: int = 0
-    store_bridge_reused_carrier_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    store_bridge_materialized_count: cython.longlong = 0
+    store_bridge_reused_carrier_count: cython.longlong = 0
     store_bridge_return_registers: tuple[str, ...] = ()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallReturnStoreBridgeRecord8616:
     """Durable typed proof that one callsite was bound through its result store."""
 
-    callsite_addr: int
-    return_register: str
-    reused_carrier_count: int
+    callsite_addr: cython.longlong
+    return_register: object
+    reused_carrier_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _StoredCallReturnConditionResult8616:
     """One materialized value-return condition and its bridge accounting."""
 
     expression: CExpression
-    changed: bool
-    store_bridge_materialized: bool = False
-    reused_carrier_count: int = 0
+    changed: cython.bint
+    store_bridge_materialized: cython.bint = False
+    reused_carrier_count: cython.longlong = 0
 
 
-def structured_condition_key_8616(expression: object) -> tuple[int, int] | None:
+@cython.ccall
+def structured_condition_key_8616(expression: object) -> object:
     """Return one exact typed condition instruction/block identity."""
+    block_addr: object
+    ins_addr: object
+    tags: object
+    node: object
     for node in _iter_c_nodes_deep_8616(expression):
         tags = copy_structured_tags_8616(node.tags) if isinstance(node, CExpression) else None
         if tags is None:
@@ -172,12 +183,16 @@ def structured_condition_key_8616(expression: object) -> tuple[int, int] | None:
     return None
 
 
+@cython.ccall
 def _condition_from_structured_callsite_identity_8616(
     expression: object,
-    inventory: dict[int, CallsiteSummary8616],
-    conditions_by_block: dict[int, ConditionIR],
+    inventory: object,
+    conditions_by_block: object,
 ) -> ConditionIR | None:
     """Select one condition from exact structured callsite return-block identity."""
+    condition: object
+    summary: object
+    node: object
     matches: list[ConditionIR] = []
     for node in _iter_c_nodes_deep_8616(expression):
         if not isinstance(node, CFunctionCall):
@@ -194,11 +209,13 @@ def _condition_from_structured_callsite_identity_8616(
     return matches[0] if len(matches) == 1 else None
 
 
+@cython.ccall
 def _return_register_slice_8616(
     project: _CallReturnProject8616,
     summary: CallsiteSummary8616,
-) -> tuple[int, int] | None:
+) -> object:
     """Resolve the summary return register through the active architecture."""
+    register: object
     register_name = summary.return_register
     if not isinstance(register_name, str):
         return None
@@ -208,28 +225,31 @@ def _return_register_slice_8616(
     return int(register[0]), int(register[1])
 
 
-def _is_constant_value_8616(value: object) -> bool:
+@cython.ccall
+def _is_constant_value_8616(value: object) -> cython.bint:
     """Return whether one typed IR operand is an exact integer constant."""
     return isinstance(value, IRValue) and value.space is MemSpace.CONST and isinstance(value.const, int)
 
 
+@cython.ccall
 def _is_return_register_value_8616(
     value: object,
-    register_slice: tuple[int, int],
-) -> bool:
+    register_slice: object,
+) -> cython.bint:
     """Return whether one typed IR operand is the exact return register."""
     return (
         isinstance(value, IRValue)
         and value.space is MemSpace.REG
-        and int(value.offset) == register_slice[0]
-        and int(value.size or register_slice[1]) == register_slice[1]
+        and operator.eq(int(value.offset), register_slice[0])
+        and operator.eq(int(value.size or register_slice[1]), register_slice[1])
     )
 
 
+@cython.ccall
 def _condition_tests_return_register_8616(
     condition: ConditionIR,
-    register_slice: tuple[int, int],
-) -> bool:
+    register_slice: object,
+) -> cython.bint:
     """Prove an equality-family zero test of the exact return register."""
     if condition.op not in {"eq", "ne", "zero", "nonzero"}:
         return False
@@ -244,30 +264,33 @@ def _condition_tests_return_register_8616(
     )
 
 
+@cython.ccall
 def _expression_return_register_count_8616(
     expression: object,
-    register_slice: tuple[int, int],
-) -> int:
+    register_slice: object,
+) -> cython.longlong:
     """Count exact structured return-register carriers in one condition."""
+    node: object
     count = 0
     for node in _iter_c_nodes_deep_8616(expression):
         if not isinstance(node, CVariable) or not isinstance(node.variable, SimRegisterVariable):
             continue
         variable = node.variable
-        if int(variable.reg) == register_slice[0] and int(variable.size) == register_slice[1]:
+        if operator.eq(int(variable.reg), register_slice[0]) and operator.eq(int(variable.size), register_slice[1]):
             count += 1
     return count
 
 
+@cython.ccall
 def _replace_return_register_8616(
     expression: CExpression,
-    register_slice: tuple[int, int],
+    register_slice: object,
     replacement: CExpression,
 ) -> CExpression:
     """Replace the single exact return-register leaf in a condition."""
     if isinstance(expression, CVariable) and isinstance(expression.variable, SimRegisterVariable):
         variable = expression.variable
-        if int(variable.reg) == register_slice[0] and int(variable.size) == register_slice[1]:
+        if operator.eq(int(variable.reg), register_slice[0]) and operator.eq(int(variable.size), register_slice[1]):
             return replacement
         return expression
     if isinstance(expression, CBinaryOp):
@@ -278,19 +301,19 @@ def _replace_return_register_8616(
     return expression
 
 
-def _existing_callsite_count_8616(expression: object, callsite_addr: int) -> int:
+def _existing_callsite_count_8616(expression: object, callsite_addr: cython.longlong) -> cython.longlong:
     """Count already-bound calls for one exact machine callsite."""
     return sum(
         1
-        for node in _iter_c_nodes_deep_8616(expression)
-        if isinstance(node, CFunctionCall) and structured_callsite_addr_8616(node) == callsite_addr
+        for node in builtins.iter(_iter_c_nodes_deep_8616(expression))
+        if isinstance(node, CFunctionCall) and operator.eq(structured_callsite_addr_8616(node), callsite_addr)
     )
 
 
 def _target_calls_8616(
     project: object,
     expression: object,
-    target_addr: int,
+    target_addr: cython.longlong,
 ) -> tuple[CFunctionCall, ...]:
     """Match retained numeric identities, refusing conflicting call targets.
 
@@ -298,6 +321,7 @@ def _target_calls_8616(
     replace the numeric target with a label, retaining its authoritative tag.
     A label alone is not evidence and every available numeric identity must agree.
     """
+    node: object
     matches: list[CFunctionCall] = []
     for node in _iter_c_nodes_deep_8616(expression):
         if not isinstance(node, CFunctionCall):
@@ -319,7 +343,7 @@ def _target_calls_8616(
         if identities and all(
             type(identity) is int
             and x86_16_call_targets_equivalent_8616(project, identity, target_addr)
-            for identity in identities
+            for identity in iter(identities)
         ):
             matches.append(node)
     return tuple(matches)
@@ -329,11 +353,11 @@ def _stack_destination_count_8616(
     codegen: object,
     expression: object,
     evidence: CallReturnStackStoreEvidence8616,
-) -> int:
+) -> cython.longlong:
     """Count exact uses of one proven BP-relative return-store object."""
     return sum(
         1
-        for node in _iter_c_nodes_deep_8616(expression)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(expression))
         if is_exact_call_return_stack_destination_8616(codegen, node, evidence)
     )
 
@@ -346,8 +370,8 @@ def _unique_summary_call_8616(
     """Resolve one structured call by exact callsite or unique target identity."""
     bound = tuple(
         node
-        for node in _iter_c_nodes_deep_8616(root)
-        if isinstance(node, CFunctionCall) and structured_callsite_addr_8616(node) == summary.callsite_addr
+        for node in builtins.iter(_iter_c_nodes_deep_8616(root))
+        if isinstance(node, CFunctionCall) and operator.eq(structured_callsite_addr_8616(node), summary.callsite_addr)
     )
     if len(bound) == 1:
         target_addr = summary.target_addr
@@ -365,14 +389,14 @@ def _unique_call_assignment_8616(root: object, call: CFunctionCall) -> CAssignme
     """Return the unique assignment whose RHS contains the exact call node."""
     assignments = tuple(
         node
-        for node in _iter_c_nodes_deep_8616(root)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(root))
         if isinstance(node, CAssignment)
-        and any(candidate is call for candidate in _iter_c_nodes_deep_8616(node.rhs))
+        and any(candidate is call for candidate in builtins.iter(_iter_c_nodes_deep_8616(node.rhs)))
     )
     return assignments[0] if len(assignments) == 1 else None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _StoreBinding8616:
     """Resolved store assignment and its placement provenance."""
 
@@ -383,6 +407,7 @@ class _StoreBinding8616:
     bridge_placement: CallReturnStorePlacement8616 | None
 
 
+@cython.ccall
 def _resolve_store_assignment_8616(
     root: object,
     call: CFunctionCall,
@@ -390,8 +415,10 @@ def _resolve_store_assignment_8616(
     codegen: object,
 ) -> _StoreBinding8616 | None:
     """Resolve the store assignment plus any bridge/adjacent placement."""
+    assignment: object
+    store_placement: object
     assignment = _unique_call_assignment_8616(root, call)
-    store_placement: CallReturnStorePlacement8616 | None = None
+    store_placement = None
     bridge_placement: CallReturnStorePlacement8616 | None = None
     if assignment is None:
         bridge_placement = find_proven_call_result_bridge_8616(
@@ -420,12 +447,14 @@ def _resolve_store_assignment_8616(
     )
 
 
+@cython.ccall
 def _retarget_return_slice_8616(
     root: object,
-    register_slice: tuple[int, int],
+    register_slice: object,
     destination: CVariable,
-) -> bool:
+) -> cython.bint:
     """Retarget returns carrying the proven register slice to the local."""
+    node: object
     changed = False
     for node in _iter_c_nodes_deep_8616(root):
         if not isinstance(node, CReturn):
@@ -440,16 +469,18 @@ def _retarget_return_slice_8616(
     return changed
 
 
+@cython.ccall
 def _materialize_stack_destination_8616(
     codegen: object,
     root: object,
     expression: CExpression,
     summary: CallsiteSummary8616,
-    register_slice: tuple[int, int],
-    summary_map: dict[int, CallsiteSummary8616],
+    register_slice: object,
+    summary_map: object,
     binding: _StoreBinding8616,
 ) -> _StoredCallReturnConditionResult8616 | None:
     """Bind a proven stack destination store and retarget return carriers."""
+    reused_carrier_count: object
     assignment = binding.assignment
     destination = assignment.lhs
     if not isinstance(destination, CVariable):
@@ -501,23 +532,24 @@ def _materialize_stack_destination_8616(
 def _register_slice_call_definitions_8616(
     root: object,
     call: CFunctionCall,
-    register_slice: tuple[int, int],
-) -> int:
+    register_slice: object,
+) -> cython.longlong:
     """Count assignments defining the register slice from this call."""
     return sum(
         1
-        for node in _iter_c_nodes_deep_8616(root)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(root))
         if isinstance(node, CAssignment)
         and isinstance(node.lhs, CVariable)
         and isinstance(node.lhs.variable, SimRegisterVariable)
         and (int(node.lhs.variable.reg), int(node.lhs.variable.size)) == register_slice
-        and any(candidate is call for candidate in _iter_c_nodes_deep_8616(node.rhs))
+        and any(candidate is call for candidate in builtins.iter(_iter_c_nodes_deep_8616(node.rhs)))
     )
 
 
+@cython.ccall
 def _replace_return_slice_node_8616(
     node: object,
-    register_slice: tuple[int, int],
+    register_slice: object,
     destination: CVariable,
 ) -> object:
     """Replace a cloned register carrier in the condition or return branch."""
@@ -529,9 +561,10 @@ def _replace_return_slice_node_8616(
     return node
 
 
+@cython.ccall
 def _replace_return_statement_node_8616(
     node: object,
-    register_slice: tuple[int, int],
+    register_slice: object,
     destination: CVariable,
 ) -> object:
     """Replace only return statements carrying this proven call result."""
@@ -545,13 +578,14 @@ def _replace_return_statement_node_8616(
     return node
 
 
+@cython.ccall
 def _materialize_register_slice_8616(
     codegen: object,
     root: object,
     expression: CExpression,
     summary: CallsiteSummary8616,
-    register_slice: tuple[int, int],
-    summary_map: dict[int, CallsiteSummary8616],
+    register_slice: object,
+    summary_map: object,
     binding: _StoreBinding8616,
 ) -> _StoredCallReturnConditionResult8616 | None:
     """Rebind a cloned register-slice assignment to a fresh stack local."""
@@ -610,6 +644,7 @@ def _materialize_register_slice_8616(
     return _StoredCallReturnConditionResult8616(expression, True)
 
 
+@cython.ccall
 def _materialize_stored_return_condition_8616(
     project: object,
     codegen: object,
@@ -617,12 +652,15 @@ def _materialize_stored_return_condition_8616(
     expression: CExpression,
     body: object,
     summary: CallsiteSummary8616,
-    register_slice: tuple[int, int],
-    summary_map: dict[int, CallsiteSummary8616],
+    register_slice: object,
+    summary_map: object,
 ) -> _StoredCallReturnConditionResult8616 | None:
     """Bind a value-return store and its branch to one exact stack local."""
+    binding: object
+    call: object
+    evidence: object
     evidence = classify_call_return_stack_store_8616(summary)
-    if evidence is None or evidence.width != register_slice[1]:
+    if evidence is None or operator.ne(evidence.width, register_slice[1]):
         return None
     call = _unique_summary_call_8616(project, root, summary)
     if call is None:
@@ -641,17 +679,20 @@ def _materialize_stored_return_condition_8616(
     )
 
 
+@cython.ccall
 def _remove_redundant_return_bridge_8616(
     root: object,
     destination: CVariable,
-    register_slice: tuple[int, int],
+    register_slice: object,
     call_assignment: CAssignment,
 ) -> None:
     """Remove a redundant register-to-stack bridge only for a stack destination."""
+    container: object
+    statement: object
     destination_variable = destination.variable
     if not isinstance(destination_variable, SimStackVariable):
         return
-    for container in (root, *_iter_c_nodes_deep_8616(root)):
+    for container in (root, ) + tuple(_iter_c_nodes_deep_8616(root)):
         if not isinstance(container, CStatements):
             continue
         statements = list(container.statements or ())
@@ -666,9 +707,9 @@ def _remove_redundant_return_bridge_8616(
             lhs_variable = statement.lhs.variable
             if (
                 not isinstance(lhs_variable, SimStackVariable)
-                or lhs_variable.base != destination_variable.base
-                or lhs_variable.offset != destination_variable.offset
-                or lhs_variable.size != destination_variable.size
+                or operator.ne(lhs_variable.base, destination_variable.base)
+                or operator.ne(lhs_variable.offset, destination_variable.offset)
+                or operator.ne(lhs_variable.size, destination_variable.size)
             ):
                 filtered.append(statement)
                 continue
@@ -676,17 +717,18 @@ def _remove_redundant_return_bridge_8616(
             if not isinstance(variable, SimRegisterVariable) or (int(variable.reg), int(variable.size)) != register_slice:
                 filtered.append(statement)
                 continue
-        if len(filtered) != len(statements):
+        if operator.ne(len(filtered), len(statements)):
             container.statements = filtered
 
 
+@cython.ccall
 def _return_summaries_8616(
-    inventory: dict[int, CallsiteSummary8616],
-) -> dict[int, CallsiteSummary8616]:
+    inventory: object,
+) -> dict[cython.longlong, CallsiteSummary8616]:
     """Index return-used condition/value summaries by return address."""
     return {
         summary.return_addr: summary
-        for summary in inventory.values()
+        for summary in builtins.iter(inventory.values())
         if isinstance(summary, CallsiteSummary8616)
         and isinstance(summary.return_addr, int)
         and summary.return_used is True
@@ -699,28 +741,30 @@ def _return_summaries_8616(
     }
 
 
+@cython.ccall
 def _condition_indexes_8616(
-    conditions: tuple[ConditionIR, ...],
-) -> tuple[dict[tuple[int, int], ConditionIR], dict[int, ConditionIR]]:
+    conditions: object,
+) -> tuple[dict[tuple[cython.longlong, cython.longlong], ConditionIR], dict[cython.longlong, ConditionIR]]:
     """Index conditions by (src, block) key and unique block membership."""
+    recorded_condition: object
     condition_by_key = {
         (condition.src_insn, condition.block_addr): condition
-        for condition in conditions
+        for condition in iter(conditions)
         if isinstance(condition.src_insn, int) and isinstance(condition.block_addr, int)
     }
-    conditions_by_block_candidates: dict[int, list[ConditionIR]] = {}
+    conditions_by_block_candidates: dict[cython.longlong, list[ConditionIR]] = {}
     for recorded_condition in conditions:
         if isinstance(recorded_condition.block_addr, int):
             conditions_by_block_candidates.setdefault(recorded_condition.block_addr, []).append(recorded_condition)
     conditions_by_block = {
         block_addr: candidates[0]
-        for block_addr, candidates in conditions_by_block_candidates.items()
+        for block_addr, candidates in builtins.iter(conditions_by_block_candidates.items())
         if len(candidates) == 1
     }
     return condition_by_key, conditions_by_block
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _CallReturnConditionRun8616:
     """Mutable run state for the call-return condition pass."""
 
@@ -728,25 +772,30 @@ class _CallReturnConditionRun8616:
     codegen: _CallReturnCodegen8616
     typed_project: _CallReturnProject8616
     root: CStatements
-    inventory: dict[int, CallsiteSummary8616]
-    condition_by_key: dict[tuple[int, int], ConditionIR]
-    conditions_by_block: dict[int, ConditionIR]
-    summaries_by_return: dict[int, CallsiteSummary8616]
-    summary_map: dict[int, CallsiteSummary8616]
-    store_bridge_records: dict[int, CallReturnStoreBridgeRecord8616]
-    raw: int = 0
-    normalized: int = 0
-    classified: int = 0
-    materialized: int = 0
-    failed: int = 0
-    store_bridges: int = 0
-    reused_carriers: int = 0
-    store_bridge_return_registers: set[str] = field(default_factory=set)
-    changed: bool = False
+    inventory: object
+    condition_by_key: object
+    conditions_by_block: object
+    summaries_by_return: object
+    summary_map: object
+    store_bridge_records: object
+    raw: cython.longlong = 0
+    normalized: cython.longlong = 0
+    classified: cython.longlong = 0
+    materialized: cython.longlong = 0
+    failed: cython.longlong = 0
+    store_bridges: cython.longlong = 0
+    reused_carriers: cython.longlong = 0
+    store_bridge_return_registers: object = field(default_factory=set)
+    changed: cython.bint = False
     register_assignment_index: CallReturnRegisterIndex8616 | None = None
 
+    @cython.ccall
     def process_node(self, node: object) -> None:
         """Process one structured if/else node against return-used evidence."""
+        condition: object
+        key: object
+        register_slice: object
+        summary: object
         if not isinstance(node, CIfElse) or len(node.condition_and_nodes) != 1:
             return
         expression, body = node.condition_and_nodes[0]
@@ -783,15 +832,18 @@ class _CallReturnConditionRun8616:
             node, expression, body, condition, summary, register_slice, target_addr,
         )
 
+    @cython.ccall
     def _value_arm(
         self,
         node: CIfElse,
         expression: CExpression,
         body: object,
         summary: CallsiteSummary8616,
-        register_slice: tuple[int, int],
+        register_slice: object,
     ) -> None:
         """Materialize a value-return callsite store into the condition."""
+        bridge_record: object
+        stored_result: object
         stored_result = _materialize_stored_return_condition_8616(
             self.project,
             self.codegen,
@@ -823,7 +875,7 @@ class _CallReturnConditionRun8616:
         if (
             bridge_record is not None
             and isinstance(summary.return_register, str)
-            and bridge_record.return_register == summary.return_register.lower()
+            and operator.eq(bridge_record.return_register, summary.return_register.lower())
         ):
             self.store_bridges += 1
             self.reused_carriers += bridge_record.reused_carrier_count
@@ -840,19 +892,21 @@ class _CallReturnConditionRun8616:
         body: object,
         condition: ConditionIR,
         summary: CallsiteSummary8616,
-        register_slice: tuple[int, int],
-        target_addr: int,
-        existing_count: int,
+        register_slice: object,
+        target_addr: cython.longlong,
+        existing_count: cython.longlong,
         placement: CallReturnRegisterPlacement8616,
     ) -> None:
         """Retarget an exact placed register assignment to the callsite call."""
+        existing_call: object
+        replacement: object
         existing_call = placement.call
         if (
             existing_call is None
             or len(_target_calls_8616(self.project, existing_call, target_addr)) != 1
             or any(
                 len(_target_calls_8616(self.project, duplicate.call, target_addr)) != 1
-                for duplicate in placement.redundant_assignments
+                for duplicate in iter(placement.redundant_assignments)
             )
         ):
             self.failed += 1
@@ -891,11 +945,12 @@ class _CallReturnConditionRun8616:
         self.materialized += 1
         self.changed = True
 
+    @cython.ccall
     def _unbound_placement_replacement(
         self,
         expression: CExpression,
-        register_slice: tuple[int, int],
-        target_addr: int,
+        register_slice: object,
+        target_addr: cython.longlong,
         existing_call: CFunctionCall,
     ) -> CExpression | None:
         """Resolve the replacement for an exact placement with no bound call."""
@@ -913,6 +968,7 @@ class _CallReturnConditionRun8616:
             )
         return None
 
+    @cython.ccall
     def _bound_callsite_arm(
         self,
         node: CIfElse,
@@ -920,7 +976,7 @@ class _CallReturnConditionRun8616:
         body: object,
         condition: ConditionIR,
         summary: CallsiteSummary8616,
-        target_addr: int,
+        target_addr: cython.longlong,
     ) -> None:
         """Bind an already-structured callsite inside the condition."""
         exact_calls = _target_calls_8616(self.project, expression, target_addr)
@@ -937,6 +993,7 @@ class _CallReturnConditionRun8616:
         self.classified += 1
         self.materialized += 1
 
+    @cython.ccall
     def _unbound_callsite_arm(
         self,
         node: CIfElse,
@@ -944,10 +1001,12 @@ class _CallReturnConditionRun8616:
         body: object,
         condition: ConditionIR,
         summary: CallsiteSummary8616,
-        register_slice: tuple[int, int],
-        target_addr: int,
+        register_slice: object,
+        target_addr: cython.longlong,
     ) -> None:
         """Introduce the proven callsite into a condition lacking the call."""
+        callee: object
+        index: object
         index = self.register_assignment_index
         if index is None or index.bound_callsite_count(summary.callsite_addr) != 0:
             self.failed += 1
@@ -1002,13 +1061,16 @@ class _CallReturnConditionRun8616:
         index.invalidate()
         self.register_assignment_index = None
 
-    def _resolved_callee_8616(self, target_addr: int) -> _FunctionSurface8616 | None:
+    @cython.ccall
+    def _resolved_callee_8616(self, target_addr: cython.longlong) -> _FunctionSurface8616 | None:
         """Resolve the proven callee function or refuse without one."""
+        callee: object
         callee = resolve_x86_16_call_target_function_8616(self.project, target_addr)
         if callee is None or not isinstance(callee.name, str) or not callee.name:
             return None
         return callee
 
+    @cython.ccall
     def _bind_new_call(
         self,
         summary: CallsiteSummary8616,
@@ -1020,6 +1082,7 @@ class _CallReturnConditionRun8616:
         self.summary_map[id(call)] = summary
         return call
 
+    @cython.ccall
     def _condition_arm(
         self,
         node: CIfElse,
@@ -1027,10 +1090,11 @@ class _CallReturnConditionRun8616:
         body: object,
         condition: ConditionIR,
         summary: CallsiteSummary8616,
-        register_slice: tuple[int, int],
-        target_addr: int,
+        register_slice: object,
+        target_addr: cython.longlong,
     ) -> None:
         """Materialize a condition-return callsite into the if/else node."""
+        placement: object
         existing_count = _existing_callsite_count_8616(
             expression, summary.callsite_addr,
         )
@@ -1073,6 +1137,7 @@ class _CallReturnConditionRun8616:
             node, expression, body, condition, summary, register_slice, target_addr,
         )
 
+    @cython.ccall
     def _build_assignment_index(self) -> CallReturnRegisterIndex8616:
         """Build the register-assignment index on first use."""
         self.register_assignment_index = build_call_return_register_index_8616(
@@ -1081,8 +1146,9 @@ class _CallReturnConditionRun8616:
         return self.register_assignment_index
 
 
-def materialize_call_return_conditions_8616(project: object, codegen: object) -> bool:
+def materialize_call_return_conditions_8616(project: object, codegen: object) -> cython.bint:
     """Bind exact return-used callsites to their structured AX conditions."""
+    node: object
     typed_project = cast(_CallReturnProject8616, project)
     typed_codegen = cast(_CallReturnCodegen8616, codegen)
     try:
@@ -1090,7 +1156,7 @@ def materialize_call_return_conditions_8616(project: object, codegen: object) ->
         inventory = typed_codegen._inertia_callsite_summary_inventory_8616
         conditions = tuple(
             condition
-            for condition in cast(tuple[object, ...], typed_codegen._inertia_typed_conditions)
+            for condition in builtins.iter(cast(tuple[object, ...], typed_codegen._inertia_typed_conditions))
             if isinstance(condition, ConditionIR)
         )
     except (AttributeError, TypeError):
@@ -1113,7 +1179,7 @@ def materialize_call_return_conditions_8616(project: object, codegen: object) ->
         typed_codegen._inertia_call_return_store_bridges_8616 = store_bridge_records
     if not isinstance(store_bridge_records, dict) or any(
         not isinstance(callsite_addr, int) or not isinstance(record, CallReturnStoreBridgeRecord8616)
-        for callsite_addr, record in store_bridge_records.items()
+        for callsite_addr, record in builtins.iter(store_bridge_records.items())
     ):
         raise TypeError("call-return store bridge carrier must contain typed records")
     run = _CallReturnConditionRun8616(

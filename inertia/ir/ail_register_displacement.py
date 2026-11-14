@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Normalize constant displacements on native integer register values.
 
 Layer: IR/native AIL adapter.
@@ -9,6 +10,8 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -20,35 +23,37 @@ from angr.ailment.block_walker import AILBlockRewriter
 from angr.ailment.expression import BinaryOp, Const, Expression, Register, VirtualVariable, VirtualVariableCategory
 from angr.ailment.manager import Manager
 from angr.ailment.statement import Statement
+import dataclasses
 
-_MIN_FOLD_TERMS: int = 2
+_MIN_FOLD_TERMS: cython.longlong = 2
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RegisterDisplacementFact8616:
     """One bit-vector identity, including the source and fresh output atoms."""
 
-    source_indices: tuple[int | None, ...]
+    source_indices: object
     result_index: int | None
-    width_bits: int
-    displacement: int
+    width_bits: cython.longlong
+    displacement: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RegisterDisplacementReport8616:
     """Closed census of local arithmetic folds, not dead-code consumption."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    facts: tuple[RegisterDisplacementFact8616, ...]
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    facts: object
 
 
+@cython.ccall
 def _fold_8616(
     expression: BinaryOp, manager: Manager,
-) -> tuple[Expression, RegisterDisplacementFact8616] | None:
+) -> object:
     """Fold a same-width integer chain with exactly one register evaluation."""
     bits = expression.bits
     if bits not in {8, 16, 32}:
@@ -86,12 +91,18 @@ def _fold_8616(
     return result, RegisterDisplacementFact8616(tuple(indices), result.idx, bits, displacement)
 
 
+@cython.cclass
 class _DisplacementWalker8616:
     """Normalize bottom-up with the native copy-on-change expression walker."""
+    _native_binary = cython.declare(object, visibility = "public")
+    facts = cython.declare(list, visibility = "public")
+    manager = cython.declare(object, visibility = "public")
+    native = cython.declare(object, visibility = "public")
+    raw = cython.declare(cython.longlong, visibility = "public")
 
     def __init__(self, manager: Manager) -> None:
         self.manager = manager
-        self.raw: int = 0
+        self.raw: cython.longlong = 0
         self.facts: list[RegisterDisplacementFact8616] = []
         self.native = AILBlockRewriter()
         self._native_binary = cast(
@@ -100,11 +111,13 @@ class _DisplacementWalker8616:
         )
         self.native.expr_handlers[BinaryOp] = self._handle_BinaryOp
 
+    @cython.ccall
     def _handle_BinaryOp(
-        self, expr_idx: int, expr: BinaryOp, stmt_idx: int,
+        self, expr_idx: cython.longlong, expr: BinaryOp, stmt_idx: cython.longlong,
         stmt: Statement | None, block: Block | None,
     ) -> Expression:
         """Visit children, then consider only a nested Add/Sub candidate."""
+        result: object
         rewritten = self._native_binary(expr_idx, expr, stmt_idx, stmt, block)
         if not (
             isinstance(rewritten, BinaryOp) and rewritten.op in {"Add", "Sub"}
@@ -125,6 +138,7 @@ def normalize_register_displacements_8616(
     graph: nx.DiGraph[Block], manager: Manager,
 ) -> RegisterDisplacementReport8616:
     """Fold native register arithmetic without changing statements or CFG edges."""
+    block: object
     walker = _DisplacementWalker8616(manager)
     for block in sorted(graph, key=lambda node: (node.addr, -1 if node.idx is None else node.idx)):
         walker.native.walk(block)

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize terminal software-interrupt results from typed evidence.
 
 Layer: Structuring.
@@ -12,6 +13,8 @@ work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -35,6 +38,9 @@ from .return_chains import (
     TerminalCallResultReturnStatus8616,
     prove_terminal_call_result_path_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "SoftwareInterruptResultMaterializationStats8616",
@@ -55,41 +61,41 @@ class SoftwareInterruptResultStatus8616(StrEnum):
     MATERIALIZED = "materialized"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SoftwareInterruptResultMaterializationStats8616:
     """Closed evidence loop for terminal interrupt-result materialization."""
 
     status: SoftwareInterruptResultStatus8616
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
     callsite_addr: int | None = None
-    path_block_addrs: tuple[int, ...] = ()
+    path_block_addrs: tuple[cython.longlong, ...] = ()
     path_status: TerminalCallResultReturnStatus8616 | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _StaleSelectorCandidate8616:
     """One call assignment and stale selector return on the terminal path."""
 
     call_container: structured_c.CStatements
     return_container: structured_c.CStatements
-    assignment_index: int
-    return_index: int
+    assignment_index: cython.longlong
+    return_index: cython.longlong
     call: structured_c.CFunctionCall
     return_statement: structured_c.CReturn
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _SunkReturnedCallCandidate8616:
     """One interrupt call sunk into a return past a tagged condition."""
 
     ordered_container: structured_c.CStatements
     return_container: structured_c.CStatements
-    insertion_index: int
-    return_index: int
+    insertion_index: cython.longlong
+    return_index: cython.longlong
     call: structured_c.CFunctionCall
     return_statement: structured_c.CReturn
 
@@ -112,7 +118,7 @@ class _TaggedStatementSurface8616(Protocol):
 class _ArchRegisterSurface8616(Protocol):
     """Third-party architecture register table consumed by Structuring."""
 
-    registers: dict[str, tuple[int, int]]
+    registers: object
 
 
 class _ProjectRegisterSurface8616(Protocol):
@@ -127,10 +133,11 @@ class _CFunctionAddressSurface8616(Protocol):
     addr: int | None
 
 
+@cython.ccall
 def _leaf_statement_8616(statement: object) -> object | None:
     """Unwrap only transparent one-statement C containers."""
     current = statement
-    visited: set[int] = set()
+    visited: set[cython.longlong] = set()
     while isinstance(current, structured_c.CStatements):
         if id(current) in visited:
             return None
@@ -142,8 +149,11 @@ def _leaf_statement_8616(statement: object) -> object | None:
     return current
 
 
+@cython.ccall
 def _callsite_addr_8616(call: structured_c.CFunctionCall) -> int | None:
     """Read one exact callsite tag from angr's structured-C boundary."""
+    addr: object
+    tags: object
     tags = copy_structured_tags_8616(call.tags)
     if tags is None:
         return None
@@ -151,11 +161,13 @@ def _callsite_addr_8616(call: structured_c.CFunctionCall) -> int | None:
     return addr if isinstance(addr, int) else None
 
 
+@cython.ccall
 def _statement_containers_8616(root: object) -> tuple[structured_c.CStatements, ...]:
     """Collect unique mutable statement containers deterministically."""
+    node: object
     containers: list[structured_c.CStatements] = []
-    seen: set[int] = set()
-    for node in (root, *_iter_c_nodes_deep_8616(root)):
+    seen: set[cython.longlong] = set()
+    for node in (root, ) + tuple(_iter_c_nodes_deep_8616(root)):
         if not isinstance(node, structured_c.CStatements) or id(node) in seen:
             continue
         seen.add(id(node))
@@ -163,18 +175,21 @@ def _statement_containers_8616(root: object) -> tuple[structured_c.CStatements, 
     return tuple(containers)
 
 
-def _returned_call_matches_8616(root: object, fact: SoftwareInterruptInputFact8616) -> bool:
+def _returned_call_matches_8616(root: object, fact: SoftwareInterruptInputFact8616) -> cython.bint:
     """Return whether final C already returns the exact interrupt call."""
     return any(
         isinstance(node, structured_c.CReturn)
         and isinstance(node.retval, structured_c.CFunctionCall)
-        and _callsite_addr_8616(node.retval) == fact.callsite_addr
-        for node in _iter_c_nodes_deep_8616(root)
+        and operator.eq(_callsite_addr_8616(node.retval), fact.callsite_addr)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(root))
     )
 
 
+@cython.ccall
 def _statement_addr_8616(statement: object) -> int | None:
     """Read one exact instruction address from a structured statement."""
+    addr: object
+    tags: object
     try:
         raw_tags = cast(_TaggedStatementSurface8616, statement).tags
     except AttributeError:
@@ -186,11 +201,15 @@ def _statement_addr_8616(statement: object) -> int | None:
     return addr if isinstance(addr, int) else None
 
 
+@cython.ccall
 def _sunk_returned_call_candidates_8616(
     root: object,
     fact: SoftwareInterruptInputFact8616,
 ) -> tuple[_SunkReturnedCallCandidate8616, ...]:
     """Find exact calls whose structured return moved past a later condition."""
+    candidate: object
+    return_addr: object
+    container: object
     containers = _statement_containers_8616(root)
     returned_calls = _returned_call_owners_8616(containers, fact.callsite_addr)
     if len(returned_calls) != 1:
@@ -217,14 +236,15 @@ def _sunk_returned_call_candidates_8616(
 
 
 def _returned_call_owners_8616(
-    containers: tuple[structured_c.CStatements, ...],
-    callsite_addr: int,
-) -> list[
-    tuple[structured_c.CStatements, int, structured_c.CReturn, structured_c.CFunctionCall]
-]:
+    containers: object,
+    callsite_addr: cython.longlong,
+) -> object:
     """Find return statements whose retval embeds the exact callsite call."""
+    container: object
+    index: object
+    statement: object
     returned_calls: list[
-        tuple[structured_c.CStatements, int, structured_c.CReturn, structured_c.CFunctionCall]
+        tuple[structured_c.CStatements, cython.longlong, structured_c.CReturn, structured_c.CFunctionCall]
     ] = []
     for container in containers:
         statements = tuple(cast(Iterable[structured_c.CStatement], container.statements or ()))
@@ -233,12 +253,10 @@ def _returned_call_owners_8616(
                 continue
             matching_calls = tuple(
                 node
-                for node in (
-                    statement.retval,
-                    *_iter_c_nodes_deep_8616(statement.retval),
-                )
+                for node in iter((statement.retval,
+                    ) + tuple(_iter_c_nodes_deep_8616(statement.retval)))
                 if isinstance(node, structured_c.CFunctionCall)
-                and _callsite_addr_8616(node) == callsite_addr
+                and operator.eq(_callsite_addr_8616(node), callsite_addr)
             )
             if len(matching_calls) == 1:
                 returned_calls.append((container, index, statement, matching_calls[0]))
@@ -249,24 +267,27 @@ def _sunk_candidate_in_container_8616(
     container: structured_c.CStatements,
     *,
     return_container: structured_c.CStatements,
-    return_index: int,
+    return_index: cython.longlong,
     return_statement: structured_c.CReturn,
-    return_addr: int,
+    return_addr: cython.longlong,
     call: structured_c.CFunctionCall,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
 ) -> _SunkReturnedCallCandidate8616 | None:
     """Return the sunk-call candidate proven for one container."""
+    condition_addr: object
+    index: object
+    statement: object
     statements = tuple(cast(Iterable[structured_c.CStatement], container.statements or ()))
     return_owner_indexes = tuple(
         index
-        for index, statement in enumerate(statements)
+        for index, statement in builtins.iter(enumerate(statements))
         if statement is return_statement
-        or any(node is return_statement for node in _iter_c_nodes_deep_8616(statement))
+        or any(node is return_statement for node in builtins.iter(_iter_c_nodes_deep_8616(statement)))
     )
     if len(return_owner_indexes) != 1:
         return None
     return_owner_index = return_owner_indexes[0]
-    condition_indexes: list[int] = []
+    condition_indexes: list[cython.longlong] = []
     for index, statement in enumerate(statements[:return_owner_index]):
         leaf = _leaf_statement_8616(statement)
         if not isinstance(leaf, structured_c.CIfElse):
@@ -286,11 +307,15 @@ def _sunk_candidate_in_container_8616(
     )
 
 
+@cython.ccall
 def _interrupt_result_variable_8616(
     codegen: object,
     fact: SoftwareInterruptInputFact8616,
 ) -> structured_c.CVariable | None:
     """Build the exact ABI result-register carrier for one interrupt fact."""
+    cfunc: object
+    register_name: object
+    variable_type: object
     register_name = fact.result_register
     if register_name is None:
         return None
@@ -319,6 +344,7 @@ def _interrupt_result_variable_8616(
     return structured_c.CVariable(variable, variable_type=variable_type, codegen=codegen)
 
 
+@cython.ccall
 def _materialize_sunk_returned_call_8616(
     candidate: _SunkReturnedCallCandidate8616,
     result: structured_c.CVariable,
@@ -353,33 +379,42 @@ def _stale_selector_candidates_8616(
     fact: SoftwareInterruptInputFact8616,
 ) -> tuple[_StaleSelectorCandidate8616, ...]:
     """Collect exact call assignments and stale selector return candidates."""
+    assignment_index: object
+    call: object
+    call_container: object
+    container: object
+    index: object
+    leaf: object
+    return_container: object
+    return_index: object
+    return_statement: object
     candidates: list[_StaleSelectorCandidate8616] = []
-    candidate_keys: set[tuple[int, int]] = set()
+    candidate_keys: set[tuple[cython.longlong, cython.longlong]] = set()
     assigned_calls: list[
-        tuple[structured_c.CStatements, int, structured_c.CFunctionCall]
+        tuple[structured_c.CStatements, cython.longlong, structured_c.CFunctionCall]
     ] = []
     selector_returns: list[
-        tuple[structured_c.CStatements, int, structured_c.CReturn]
+        tuple[structured_c.CStatements, cython.longlong, structured_c.CReturn]
     ] = []
     for container in _statement_containers_8616(root):
         statements = tuple(cast(Iterable[structured_c.CStatement], container.statements or ()))
-        leaves = tuple(_leaf_statement_8616(statement) for statement in statements)
+        leaves = tuple(_leaf_statement_8616(statement) for statement in iter(statements))
         for index, leaf in enumerate(leaves):
             if (
                 isinstance(leaf, structured_c.CAssignment)
                 and isinstance(leaf.rhs, structured_c.CFunctionCall)
-                and _callsite_addr_8616(leaf.rhs) == fact.callsite_addr
+                and operator.eq(_callsite_addr_8616(leaf.rhs), fact.callsite_addr)
             ):
                 assigned_calls.append((container, index, leaf.rhs))
             elif (
                 isinstance(leaf, structured_c.CReturn)
                 and isinstance(leaf.retval, structured_c.CConstant)
-                and leaf.retval.value == fact.selector_value
+                and operator.eq(leaf.retval.value, fact.selector_value)
             ):
                 selector_returns.append((container, index, leaf))
     for call_container, assignment_index, call in assigned_calls:
         for return_container, return_index, return_statement in selector_returns:
-            if call_container is return_container and return_index != assignment_index + 1:
+            if call_container is return_container and operator.ne(return_index, assignment_index + 1):
                 continue
             key = (id(call), id(return_statement))
             if key in candidate_keys:
@@ -398,6 +433,7 @@ def _stale_selector_candidates_8616(
     return tuple(candidates)
 
 
+@cython.ccall
 def _materialize_fact_8616(
     root: object,
     codegen: object,
@@ -405,6 +441,7 @@ def _materialize_fact_8616(
     callbacks: TerminalCallResultReturnCallbacks8616,
 ) -> SoftwareInterruptResultMaterializationStats8616:
     """Materialize one exact terminal interrupt-result fact."""
+    result: object
     sunk_candidates = _sunk_returned_call_candidates_8616(root, fact)
     if sunk_candidates:
         if len(sunk_candidates) != 1:
@@ -533,7 +570,7 @@ def materialize_software_interrupt_terminal_results_8616(
     root: object,
     codegen: object,
     callbacks: TerminalCallResultReturnCallbacks8616,
-) -> bool:
+) -> cython.bint:
     """Return terminal interrupt results only from typed ABI and CFG proof."""
     surface = cast(_CodegenInterruptResultSurface8616, codegen)
     try:
@@ -544,7 +581,7 @@ def materialize_software_interrupt_terminal_results_8616(
         )
         surface._inertia_software_interrupt_result_stats_8616 = stats
         return False
-    facts = tuple(fact for fact in artifact.facts if fact.result_register is not None)
+    facts = tuple(fact for fact in iter(artifact.facts) if fact.result_register is not None)
     if not facts:
         stats = SoftwareInterruptResultMaterializationStats8616(
             status=SoftwareInterruptResultStatus8616.NO_RESULT_FACT,

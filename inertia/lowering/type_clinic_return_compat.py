@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Apply typed return-contract lowering after angr Clinic prototype inference.
 
 Layer: Types/lowering compatibility boundary.
@@ -13,6 +14,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -42,6 +45,7 @@ from inertia.lowering.unused_void_return_types import (
 )
 from inertia.semantics.callsite_summary import CallerReturnUseVerdict8616
 from inertia.semantics.terminal_register_returns import collect_terminal_ax_return_evidence_8616
+import dataclasses
 
 __all__ = [
     "apply_x86_16_clinic_return_type_compatibility",
@@ -67,8 +71,8 @@ class _BlockSurface8616(Protocol):
 class _FunctionSurface8616(Protocol):
     """Third-party angr function fields consumed at the Clinic boundary."""
 
-    addr: int
-    is_prototype_guessed: bool
+    addr: cython.longlong
+    is_prototype_guessed: cython.bint
     prototype: object | None
     prototype_source: PrototypeSource
 
@@ -95,7 +99,7 @@ class _DecompilerSurface8616(Protocol):
     project: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _ClinicCallingConventionScope8616:
     """Exact native Clinic analysis owner inherited by its nested CCA or CallSiteMaker request."""
 
@@ -109,6 +113,7 @@ _CLINIC_CALLING_CONVENTION_SCOPE_8616: ContextVar[_ClinicCallingConventionScope8
 _CCA_INIT_PATCHED_8616 = False
 
 
+@cython.ccall
 def _native_clinic_kb_scope_8616(clinic: _ClinicSurface8616) -> _ClinicCallingConventionScope8616 | None:
     """Return the owning native Clinic's KB scope; ``None`` leaves foreign defaults."""
     if clinic.project.arch.name != "86_16":
@@ -125,6 +130,7 @@ def _bind_clinic_calling_convention_kb_8616() -> None:
 
     def _init_8616(self: CompleteCallingConventionsAnalysis, *args: object, **kwargs: object) -> None:
         """Bind only the matching native Clinic's CCA instance before initialization."""
+        scope: object
         scope = _CLINIC_CALLING_CONVENTION_SCOPE_8616.get()
         if scope is not None and self.project is scope.project and self.project.arch.name == "86_16":
             self.kb = scope.kb
@@ -134,6 +140,7 @@ def _bind_clinic_calling_convention_kb_8616() -> None:
 
     def _callsite_init_8616(self: CallingConventionAnalysis, *args: object, **kwargs: object) -> None:
         """Bind Clinic's callsite-only convention requests to the same caller KB."""
+        scope: object
         scope = _CLINIC_CALLING_CONVENTION_SCOPE_8616.get()
         if scope is not None and self.project is scope.project and self.project.arch.name == "86_16":
             self.kb = scope.kb
@@ -158,6 +165,7 @@ def _bind_clinic_callsite_maker_kb_8616() -> None:
 
     def _callsite_maker_analyze_8616(self: CallSiteMaker) -> None:
         """Rebind only the matching native Clinic scope's KB over the default."""
+        scope: object
         maker = cast(_CallSiteMakerSurface8616, self)
         scope = _CLINIC_CALLING_CONVENTION_SCOPE_8616.get()
         if scope is not None and maker.project is scope.project and maker.project.arch.name == "86_16":
@@ -204,6 +212,7 @@ def _preserve_strong_prototype_during_cc_recovery_8616() -> None:
 
     def _recover_calling_conventions_8616(self: object, func_graph: object | None = None) -> None:
         """Adapt angr 9.3 Clinic without replacing evidence-backed prototype types."""
+        preserved_prototype: object
         clinic = cast(_ClinicSurface8616, self)
         function = clinic.function
         preserved_prototype = function.prototype
@@ -252,6 +261,7 @@ def _preserve_clinic_kb_during_callsite_making_8616() -> None:
 
 def collect_clinic_terminal_return_evidence_8616(graph: object) -> TerminalReturnValueEvidence8616:
     """Classify all AIL Return statements without interpreting their expressions."""
+    block: object
     graph_surface = cast(_GraphSurface8616, graph)
     try:
         blocks = tuple(graph_surface.nodes())
@@ -265,8 +275,8 @@ def collect_clinic_terminal_return_evidence_8616(graph: object) -> TerminalRetur
         except (AttributeError, TypeError):
             failure_count += 1
             continue
-        returns.extend(statement for statement in statements if isinstance(statement, ailment.Stmt.Return))
-    value_count = sum(bool(statement.ret_exprs) for statement in returns)
+        returns.extend(statement for statement in iter(statements) if isinstance(statement, ailment.Stmt.Return))
+    value_count = sum(bool(statement.ret_exprs) for statement in iter(returns))
     return TerminalReturnValueEvidence8616(
         len(returns),
         len(returns),
@@ -277,14 +287,16 @@ def collect_clinic_terminal_return_evidence_8616(graph: object) -> TerminalRetur
     )
 
 
+@cython.ccall
 def finalize_clinic_return_type_8616(
     project: object,
     function: object,
     graph: object,
     *,
-    prototype_was_guessed: bool,
+    prototype_was_guessed: cython.bint,
 ) -> UnusedVoidReturnTypeResult8616:
     """Materialize an unobservable empty return contract from closed typed facts."""
+    observation: object
     function_surface = cast(_FunctionSurface8616, function)
     evidence = collect_clinic_terminal_return_evidence_8616(graph)
     record_terminal_return_value_evidence_8616(project, function_surface.addr, evidence)
@@ -329,10 +341,11 @@ def apply_x86_16_clinic_return_type_compatibility() -> None:
 
     def _make_function_prototype_8616(
         self: object,
-        arg_list: list[object],
+        arg_list: object,
         variable_kb: object | None = None,
     ) -> None:
         """Run Clinic synthesis without replacing an authoritative prototype."""
+        authoritative: object
         clinic = cast(_ClinicSurface8616, self)
         function = clinic.function
         prototype_was_guessed = function.is_prototype_guessed

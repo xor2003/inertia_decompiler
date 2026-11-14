@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery/reporting.
 
 Responsibility: describe recovery artifact output surfaces and persistence formats.
@@ -11,12 +12,14 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import cython
 
 from collections.abc import Iterable
 from dataclasses import dataclass
 
 from .recovery_artifact_cache import describe_x86_16_recovery_artifact_cache_surface
 from .recovery_artifact_writer import RecoveryArtifactWriteResult
+import dataclasses
 
 __all__ = [
     "RecoveryArtifactOutputSpec",
@@ -25,14 +28,14 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RecoveryArtifactOutputSpec:
     """Persistence contract for one recovery artifact output surface."""
 
-    kind: str
-    producer: str
-    payload: str
-    persistence: str
+    kind: object
+    producer: object
+    payload: object
+    persistence: object
 
     def to_dict(self) -> dict[str, str]:
         """Return a deterministic JSON-compatible output specification."""
@@ -74,7 +77,7 @@ _RECOVERY_ARTIFACT_OUTPUTS: tuple[RecoveryArtifactOutputSpec, ...] = (
 
 def describe_x86_16_recovery_artifact_outputs() -> tuple[dict[str, str], ...]:
     """Describe all recovery artifact output surfaces in stable order."""
-    return tuple(item.to_dict() for item in _RECOVERY_ARTIFACT_OUTPUTS)
+    return tuple(item.to_dict() for item in iter(_RECOVERY_ARTIFACT_OUTPUTS))
 
 
 def build_x86_16_recovery_artifact_report(
@@ -83,7 +86,7 @@ def build_x86_16_recovery_artifact_report(
     """Build a deterministic report for recovery artifact outputs and writes."""
     write_rows = tuple(
         sorted(
-            (item.to_dict() for item in writes),
+            (item.to_dict() for item in iter(writes)),
             key=lambda row: (str(row["artifact_kind"]), str(row["path"])),
         )
     )

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Retain explicit function prototypes across angr inference replays.
 
 Layer: Types/lowering.
@@ -10,6 +11,8 @@ Do not infer types from names, assembly, rendered C, COD, or source text here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -19,9 +22,11 @@ from angr.knowledge_plugins.functions.function import PrototypeSource
 from angr.sim_type import SimTypeFunction
 
 from inertia.lowering.annotations import ANNOTATION_KEY
+import dataclasses
+import operator
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class AuthoritativeFunctionPrototype8616:
     """One explicit prototype and its original evidence precedence."""
 
@@ -32,7 +37,7 @@ class AuthoritativeFunctionPrototype8616:
 class _FunctionBoundary8616(Protocol):
     """Third-party angr fields used by the authoritative prototype owner."""
 
-    addr: int
+    addr: cython.longlong
     prototype: object
     prototype_source: PrototypeSource
     info: Mapping[str, object]
@@ -41,16 +46,13 @@ class _FunctionBoundary8616(Protocol):
 class _ProjectBoundary8616(Protocol):
     """Third-party project extension carrying typed prototype snapshots."""
 
-    _inertia_authoritative_function_prototypes_8616: dict[
-        int,
-        AuthoritativeFunctionPrototype8616,
-    ]
+    _inertia_authoritative_function_prototypes_8616: object
 
 
 class _CodegenFunctionBoundary8616(Protocol):
     """Third-party C-function fields used to publish a materialized interface."""
 
-    addr: int
+    addr: cython.longlong
     functy: object
 
 
@@ -60,9 +62,10 @@ class _CodegenBoundary8616(Protocol):
     cfunc: _CodegenFunctionBoundary8616 | None
 
 
+@cython.ccall
 def _registry_8616(
     project: object,
-) -> dict[int, AuthoritativeFunctionPrototype8616]:
+) -> object:
     """Return the project-local typed snapshot registry."""
     boundary = cast(_ProjectBoundary8616, project)
     try:
@@ -73,11 +76,14 @@ def _registry_8616(
     return registry
 
 
+@cython.ccall
 def capture_authoritative_function_prototype_8616(
     project: object,
     function: object,
 ) -> AuthoritativeFunctionPrototype8616 | None:
     """Capture one explicit prototype, never an unowned CCA inference."""
+    annotations: object
+    existing: object
     boundary = cast(_FunctionBoundary8616, function)
     prototype = boundary.prototype
     try:
@@ -121,11 +127,12 @@ def capture_authoritative_function_prototype_8616(
     return captured
 
 
+@cython.ccall
 def authoritative_function_prototype_for_address_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     *,
-    argument_count: int,
+    argument_count: cython.longlong,
     minimum_source: PrototypeSource = PrototypeSource.CCA_DECOMPILER,
 ) -> SimTypeFunction | None:
     """Read an owned snapshot without requiring a caller CFG's callee Function.
@@ -133,21 +140,24 @@ def authoritative_function_prototype_for_address_8616(
     This accessor never creates an angr function or infers a prototype. The
     registry must already contain the independently published typed interface.
     """
+    captured: object
     captured = _registry_8616(project).get(function_addr)
     if not isinstance(captured, AuthoritativeFunctionPrototype8616) or captured.source < minimum_source:
         return None
     prototype = captured.prototype
-    return prototype if len(tuple(prototype.args or ())) == argument_count else None
+    return prototype if operator.eq(len(tuple(prototype.args or ())), argument_count) else None
 
 
+@cython.ccall
 def authoritative_function_prototype_8616(
     project: object,
-    function: object | None,
+    function: object,
     *,
-    argument_count: int,
+    argument_count: cython.longlong,
     minimum_source: PrototypeSource = PrototypeSource.CCA_DECOMPILER,
 ) -> SimTypeFunction | None:
     """Return a sufficiently strong snapshot when its argument census closes."""
+    captured: object
     if function is None:
         return None
     boundary = cast(_FunctionBoundary8616, function)
@@ -161,17 +171,19 @@ def authoritative_function_prototype_8616(
     if captured is None or captured.source < minimum_source:
         return None
     prototype = captured.prototype
-    return prototype if len(tuple(prototype.args or ())) == argument_count else None
+    return prototype if operator.eq(len(tuple(prototype.args or ())), argument_count) else None
 
 
+@cython.ccall
 def publish_authoritative_function_prototype_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     prototype: SimTypeFunction,
     *,
     source: PrototypeSource,
 ) -> AuthoritativeFunctionPrototype8616:
     """Replace a snapshot after an owned typed contract is materialized."""
+    existing: object
     registry = _registry_8616(project)
     existing = registry.get(function_addr)
     if isinstance(existing, AuthoritativeFunctionPrototype8616) and existing.source > source:
@@ -184,6 +196,7 @@ def publish_authoritative_function_prototype_8616(
     return captured
 
 
+@cython.ccall
 def publish_codegen_function_prototype_8616(
     project: object,
     codegen: object,
@@ -191,6 +204,7 @@ def publish_codegen_function_prototype_8616(
     source: PrototypeSource = PrototypeSource.CCA_DECOMPILER,
 ) -> AuthoritativeFunctionPrototype8616 | None:
     """Publish the current typed codegen interface after owned materialization."""
+    cfunc: object
     try:
         cfunc = cast(_CodegenBoundary8616, codegen).cfunc
         function_addr = cfunc.addr if cfunc is not None else None

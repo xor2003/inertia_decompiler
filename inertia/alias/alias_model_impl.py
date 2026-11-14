@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Canonical alias storage facts and identity model.
 
 Layer: Alias.
@@ -9,6 +10,8 @@ through getattr when translating them into owned alias facts.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 
@@ -16,44 +19,51 @@ from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
 
 from .domains import register_pair_name
+import dataclasses
+import operator
 
 
-def _simvariable_attr_8616(variable: object, name: str, default: object = None) -> object:
+@cython.ccall
+def _simvariable_attr_8616(variable: object, name: object, default: object = None) -> object:
     """Dynamic third-party angr boundary: read optional SimVariable attributes."""
     return getattr(variable, name, default)
 
 
-def _simvariable_int_attr_8616(variable: object, name: str, default: int = 0) -> int:
+@cython.ccall
+def _simvariable_int_attr_8616(variable: object, name: object, default: cython.longlong = 0) -> cython.longlong:
     """Dynamic third-party angr boundary: read an integer SimVariable attribute."""
     value = _simvariable_attr_8616(variable, name, default)
     return value if isinstance(value, int) else default
 
 
-def _simvariable_optional_int_attr_8616(variable: object, name: str) -> int | None:
+@cython.ccall
+def _simvariable_optional_int_attr_8616(variable: object, name: object) -> int | None:
     """Dynamic third-party angr boundary: read an optional integer SimVariable attribute."""
     value = _simvariable_attr_8616(variable, name)
     return value if isinstance(value, int) else None
 
 
-def _simvariable_optional_str_attr_8616(variable: object, name: str) -> str | None:
+@cython.ccall
+def _simvariable_optional_str_attr_8616(variable: object, name: object) -> object:
     """Dynamic third-party angr boundary: read an optional string SimVariable attribute."""
     value = _simvariable_attr_8616(variable, name)
     return value if isinstance(value, str) else None
 
 
-def _canonical_stack_base(base: str | None) -> str:
+@cython.ccall
+def _canonical_stack_base(base: object) -> object:
     """Normalize stack-base spelling without inventing a frame relation."""
     if not isinstance(base, str) or not base:
         return "bp"
     return base.lower()
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class _StorageView:
-    bit_offset: int = 0
+    bit_offset: cython.longlong = 0
     bit_width: int | None = None
 
-    def is_full_width(self) -> bool:
+    def is_full_width(self) -> cython.bint:
         """Return whether this view starts at bit zero with a known width."""
         return self.bit_offset == 0 and self.bit_width is not None
 
@@ -63,14 +73,16 @@ class _StorageView:
             return None
         return self.bit_offset + self.bit_width
 
-    def can_join(self, other: _StorageView) -> bool:
+    def can_join(self, other: _StorageView) -> cython.bint:
         """Return whether two bit views are adjacent and fully bounded."""
         if self.bit_width is None or other.bit_width is None:
             return False
-        return self.end_bit() == other.bit_offset or other.end_bit() == self.bit_offset
+        return operator.eq(self.end_bit(), other.bit_offset) or operator.eq(other.end_bit(), self.bit_offset)
 
-    def contains(self, other: _StorageView) -> bool:
+    def contains(self, other: _StorageView) -> cython.bint:
         """Return whether this bounded bit view fully contains another view."""
+        end_bit: object
+        other_end_bit: object
         end_bit = self.end_bit()
         other_end_bit = other.end_bit()
         if end_bit is None or other_end_bit is None:
@@ -79,6 +91,10 @@ class _StorageView:
 
     def join(self, other: _StorageView) -> _StorageView | None:
         """Return a combined bit view when two storage views are adjacent."""
+        bit_width: object
+        first_width: object
+        other_bit_width: object
+        second_width: object
         bit_width = self.bit_width
         other_bit_width = other.bit_width
         if bit_width is None or other_bit_width is None:
@@ -87,7 +103,7 @@ class _StorageView:
             first, second = self, other
         else:
             first, second = other, self
-        if first.end_bit() != second.bit_offset:
+        if operator.ne(first.end_bit(), second.bit_offset):
             return None
         first_width = first.bit_width
         second_width = second.bit_width
@@ -96,10 +112,10 @@ class _StorageView:
         return _StorageView(first.bit_offset, first_width + second_width)
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class _StackSlotIdentity:
-    base: str
-    offset: int
+    base: object
+    offset: cython.longlong
     width: int | None = None
     region: int | None = None
 
@@ -112,21 +128,23 @@ class _StackSlotIdentity:
             return None
         return self.offset + self.width
 
-    def can_join(self, other: _StackSlotIdentity) -> bool:
+    def can_join(self, other: _StackSlotIdentity) -> cython.bint:
         """Return whether two stack slots are adjacent within one frame region."""
-        if self.base != other.base:
+        if operator.ne(self.base, other.base):
             return False
-        if self.region is not None and other.region is not None and self.region != other.region:
+        if self.region is not None and other.region is not None and operator.ne(self.region, other.region):
             return False
         if self.width is None or other.width is None:
             return False
-        return self.end_offset() == other.offset or other.end_offset() == self.offset
+        return operator.eq(self.end_offset(), other.offset) or operator.eq(other.end_offset(), self.offset)
 
-    def contains(self, other: _StackSlotIdentity) -> bool:
+    def contains(self, other: _StackSlotIdentity) -> cython.bint:
         """Return whether this stack slot fully contains another frame view."""
-        if self.base != other.base:
+        end_offset: object
+        other_end_offset: object
+        if operator.ne(self.base, other.base):
             return False
-        if self.region is not None and other.region is not None and self.region != other.region:
+        if self.region is not None and other.region is not None and operator.ne(self.region, other.region):
             return False
         end_offset = self.end_offset()
         other_end_offset = other.end_offset()
@@ -136,15 +154,17 @@ class _StackSlotIdentity:
 
     def join(self, other: _StackSlotIdentity) -> _StackSlotIdentity | None:
         """Return a combined stack slot identity when adjacent slots match."""
+        first_width: object
+        second_width: object
         if not self.can_join(other):
             return None
         if self.offset <= other.offset:
             first, second = self, other
         else:
             first, second = other, self
-        if first.end_offset() != second.offset:
+        if operator.ne(first.end_offset(), second.offset):
             return None
-        region = first.region if first.region == second.region else first.region or second.region
+        region = first.region if operator.eq(first.region, second.region) else first.region or second.region
         first_width = first.width
         second_width = second.width
         if first_width is None or second_width is None:
@@ -190,33 +210,33 @@ def _storage_view_for_variable(variable: object) -> _StorageView:
     return _impl()
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class _StorageDomainSignature:
-    space: str
+    space: object
     width: int | None = None
     view: _StorageView | None = None
     stack_slot: _StackSlotIdentity | None = field(default=None, compare=False)
 
-    def is_mixed(self) -> bool:
+    def is_mixed(self) -> cython.bint:
         """Return whether this domain combines incompatible storage identities."""
         return self.space == "mixed"
 
-    def is_unknown(self) -> bool:
+    def is_unknown(self) -> cython.bint:
         """Return whether this domain lacks a proven storage identity."""
         return self.space == "unknown"
 
-    def is_const(self) -> bool:
+    def is_const(self) -> cython.bint:
         """Return whether this domain represents a constant value."""
         return self.space == "const"
 
-    def __str__(self) -> str:
+    def __str__(self) -> object:
         if self.width is None:
             return self.space
         return f"{self.space}:{self.width}"
 
-    def can_join(self, other: _StorageDomainSignature) -> bool:
+    def can_join(self, other: _StorageDomainSignature) -> cython.bint:
         """Return whether two storage domains can join without changing identity."""
-        if self.space != other.space:
+        if operator.ne(self.space, other.space):
             return False
         if self.view is None or other.view is None:
             return False
@@ -227,9 +247,9 @@ class _StorageDomainSignature:
                 return False
         return self.view.can_join(other.view)
 
-    def contains(self, other: _StorageDomainSignature) -> bool:
+    def contains(self, other: _StorageDomainSignature) -> cython.bint:
         """Return whether this storage domain fully contains another domain."""
-        if self.space != other.space:
+        if operator.ne(self.space, other.space):
             return False
         if self.view is None or other.view is None:
             return False
@@ -242,6 +262,9 @@ class _StorageDomainSignature:
 
     def join(self, other: _StorageDomainSignature) -> _StorageDomainSignature | None:
         """Return a joined storage domain when identity and views agree."""
+        joined_view: object
+        other_view: object
+        view: object
         if not self.can_join(other):
             return None
         view = self.view
@@ -259,13 +282,13 @@ class _StorageDomainSignature:
         return _StorageDomainSignature(self.space, width + other_width, joined_view, stack_slot=stack_slot)
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class _CopyAliasState:
     domain: _StorageDomainSignature
     expr: object
-    needs_synthesis: bool = False
+    needs_synthesis: cython.bint = False
 
-    def can_inline(self) -> bool:
+    def can_inline(self) -> cython.bint:
         """Return whether this copy alias can be inlined without synthesis."""
         return not self.domain.is_mixed() and not self.needs_synthesis
 
@@ -280,26 +303,26 @@ class _CopyAliasState:
         return _CopyAliasState(merged_domain, merged_expr, needs_synthesis=merged_needs_synthesis)
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class _StackPointerAliasState:
     base: structured_c.CVariable
-    offset: int = 0
+    offset: cython.longlong = 0
 
-    def shifted(self, delta: int) -> _StackPointerAliasState:
+    def shifted(self, delta: cython.longlong) -> _StackPointerAliasState:
         """Return this stack-pointer alias state shifted by a byte delta."""
         return _StackPointerAliasState(self.base, self.offset + delta)
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class AliasStorageFacts:
     """Alias domain, identity, and view facts for one recovered storage expression."""
 
     domain: _StorageDomainSignature
-    identity: tuple[str, object] | None = None
+    identity: object = None
 
-    def same_domain(self, other: AliasStorageFacts) -> bool:
+    def same_domain(self, other: AliasStorageFacts) -> cython.bint:
         """Return whether two facts refer to the same alias storage domain."""
-        if self.domain.space != other.domain.space:
+        if operator.ne(self.domain.space, other.domain.space):
             return False
         if self.identity is None or other.identity is None:
             return True
@@ -319,13 +342,13 @@ class AliasStorageFacts:
             return value == other_value
         return value == other_value
 
-    def compatible_view(self, other: AliasStorageFacts) -> bool:
+    def compatible_view(self, other: AliasStorageFacts) -> cython.bint:
         """Return whether two facts describe adjacent or compatible storage views."""
         if self.domain.view is None or other.domain.view is None:
             return False
         return self.domain.view.can_join(other.domain.view)
 
-    def contains(self, other: AliasStorageFacts) -> bool:
+    def contains(self, other: AliasStorageFacts) -> cython.bint:
         """Return whether this proven storage identity contains another view."""
         if self.needs_synthesis() or other.needs_synthesis():
             return False
@@ -344,11 +367,11 @@ class AliasStorageFacts:
             return False
         return self.domain.contains(other.domain)
 
-    def needs_synthesis(self) -> bool:
+    def needs_synthesis(self) -> cython.bint:
         """Return whether this storage fact must remain explicitly synthesized."""
         return self.domain.is_mixed() or self.domain.is_unknown()
 
-    def can_join(self, other: AliasStorageFacts) -> bool:
+    def can_join(self, other: AliasStorageFacts) -> cython.bint:
         """Return whether two facts can be joined without guessing storage identity."""
         return (
             self.same_domain(other)
@@ -358,15 +381,16 @@ class AliasStorageFacts:
         )
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class AliasRecoveryAPISpec:
     """Documented alias recovery API surface exported to architecture checks."""
 
-    name: str
-    purpose: str
-    helpers: tuple[str, ...]
+    name: object
+    purpose: object
+    helpers: object
 
 
+@cython.ccall
 def _storage_domain_for_variable(variable: object) -> _StorageDomainSignature:
     if isinstance(variable, SimStackVariable):
         width = _simvariable_int_attr_8616(variable, "size")
@@ -388,8 +412,10 @@ def _storage_domain_for_variable(variable: object) -> _StorageDomainSignature:
     return _StorageDomainSignature("unknown")
 
 
-def _alias_identity_for_variable(variable: object) -> tuple[str, object] | None:
-    def _impl() -> tuple[str, object] | None:
+def _alias_identity_for_variable(variable: object) -> object:
+    def _impl() -> object:
+        pair_name: object
+        slot: object
         if isinstance(variable, SimStackVariable):
             slot = _stack_slot_identity_for_variable(variable)
             if slot is not None:
@@ -415,6 +441,7 @@ def _alias_identity_for_variable(variable: object) -> tuple[str, object] | None:
     return _impl()
 
 
+@cython.ccall
 def _canonical_stack_offset(offset: object) -> object:
     if not isinstance(offset, int):
         return offset
@@ -426,6 +453,7 @@ def _canonical_stack_offset(offset: object) -> object:
     return offset
 
 
+@cython.ccall
 def _stack_slot_identity_for_variable(variable: object) -> _StackSlotIdentity | None:
     """Classify an exact stack variable, refusing other boundary objects."""
     if not isinstance(variable, SimStackVariable):
@@ -440,15 +468,17 @@ def _stack_slot_identity_for_variable(variable: object) -> _StackSlotIdentity | 
     return _StackSlotIdentity(base, offset, width, region=region)
 
 
+@cython.ccall
 def _stack_storage_facts_for_segmented_address_8616(
-    segment_name: str | None,
+    segment_name: object,
     offset: int | None,
     width: int | None,
     *,
-    base: str = "bp",
+    base: object = "bp",
     region: int | None = None,
 ) -> AliasStorageFacts | None:
     """Build stack facts while preserving the evidence-proven address base."""
+    stack_width: object
     if not isinstance(segment_name, str) or segment_name.lower() != "ss":
         return None
     if not isinstance(offset, int):
@@ -466,17 +496,23 @@ def _stack_storage_facts_for_segmented_address_8616(
     return AliasStorageFacts(domain=domain, identity=("stack", stack_slot))
 
 
-def _same_stack_slot_identity(lhs: object, rhs: object) -> bool:
+@cython.ccall
+def _same_stack_slot_identity(lhs: object, rhs: object) -> cython.bint:
+    lhs_identity: object
+    rhs_identity: object
     if not isinstance(lhs, SimStackVariable) or not isinstance(rhs, SimStackVariable):
         return False
     lhs_identity = _stack_slot_identity_for_variable(lhs)
     rhs_identity = _stack_slot_identity_for_variable(rhs)
     if lhs_identity is None or rhs_identity is None:
         return False
-    return lhs_identity == rhs_identity
+    return operator.eq(lhs_identity, rhs_identity)
 
 
-def _stack_slot_identity_can_join(lhs: object, rhs: object) -> bool:
+@cython.ccall
+def _stack_slot_identity_can_join(lhs: object, rhs: object) -> cython.bint:
+    lhs_identity: object
+    rhs_identity: object
     if not isinstance(lhs, SimStackVariable) or not isinstance(rhs, SimStackVariable):
         return False
     lhs_identity = _stack_slot_identity_for_variable(lhs)
@@ -486,11 +522,12 @@ def _stack_slot_identity_can_join(lhs: object, rhs: object) -> bool:
     return lhs_identity.can_join(rhs_identity)
 
 
+@cython.ccall
 def _derived_stack_high_byte_follows_slot(
     address_base: object,
-    address_byte_offset: int,
+    address_byte_offset: cython.longlong,
     low_byte: object,
-) -> bool:
+) -> cython.bint:
     """Prove that an alias-derived stack byte immediately follows a low byte slot.
 
     Address expressions may retain an angr stack carrier such as ``&v1 - 1``
@@ -499,6 +536,8 @@ def _derived_stack_high_byte_follows_slot(
     widening may join them only when this proof establishes the exact low/high
     byte order in the same base and region.
     """
+    base_identity: object
+    low_identity: object
     if not isinstance(address_byte_offset, int):
         return False
     base_identity = _stack_slot_identity_for_variable(address_base)
@@ -511,17 +550,18 @@ def _derived_stack_high_byte_follows_slot(
         1,
         region=base_identity.region,
     )
-    if derived_high.base != low_identity.base:
+    if operator.ne(derived_high.base, low_identity.base):
         return False
     if (
         derived_high.region is not None
         and low_identity.region is not None
-        and derived_high.region != low_identity.region
+        and operator.ne(derived_high.region, low_identity.region)
     ):
         return False
-    return derived_high.offset == low_identity.offset + 1
+    return operator.eq(derived_high.offset, low_identity.offset + 1)
 
 
+@cython.ccall
 def _storage_domain_for_expr(expr: object) -> _StorageDomainSignature:
     """Delegate storage-domain classification to the typed query owner."""
     from inertia.semantics.alias_query import _storage_domain_for_expr as _impl
@@ -529,16 +569,16 @@ def _storage_domain_for_expr(expr: object) -> _StorageDomainSignature:
     return _impl(expr)
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class AliasFailure:
     """Explicit failure record when alias recovery cannot resolve a proven address.
 
     AGENTS rule: proven SS must become stack slot, never silently fallback to memory.
     """
 
-    reason: str
+    reason: object
     address: object | None = None
-    space: str | None = None
+    space: object = None
     offset: int | None = None
 
 
@@ -560,7 +600,7 @@ def alias_facts_for_ir_address_8616(addr: object) -> AliasStorageFacts | AliasFa
         if not isinstance(addr, IRAddress):
             return None
 
-        if addr.space == MemSpace.SS:
+        if operator.eq(addr.space, MemSpace.SS):
             # Only create stable stack facts when all conditions are met:
             #   1. Base contains "bp"
             #   2. Status is STABLE
@@ -573,7 +613,7 @@ def alias_facts_for_ir_address_8616(addr: object) -> AliasStorageFacts | AliasFa
             #
             # Dynamic SP traffic must remain PROVISIONAL.
             has_stack_base = addr.base in {("bp",), ("sp",)}
-            has_stable_offset = isinstance(addr.offset, int) and addr.status == AddressStatus.STABLE
+            has_stable_offset = isinstance(addr.offset, int) and operator.eq(addr.status, AddressStatus.STABLE)
 
             if is_stack_address_8616(addr) and has_stack_base and has_stable_offset:
                 stack_base = addr.base[0]
@@ -589,7 +629,7 @@ def alias_facts_for_ir_address_8616(addr: object) -> AliasStorageFacts | AliasFa
             # PROVISIONAL SS addresses (e.g. SP-relative push/pop during prologue
             # before BP is set up, or symbolic offsets not yet resolved) are expected
             # and must not block decompilation.
-            if addr.status == AddressStatus.STABLE:
+            if operator.eq(addr.status, AddressStatus.STABLE):
                 raise PipelineHardError(
                     f"unresolved SS address: base={addr.base} offset={addr.offset} status={addr.status}",
                     layer="alias",
@@ -627,6 +667,7 @@ def alias_facts_for_ir_address_8616(addr: object) -> AliasStorageFacts | AliasFa
     return _impl()
 
 
+@cython.ccall
 def describe_alias_storage(expr: object) -> AliasStorageFacts:
     """Describe alias storage for a decompiler expression."""
     from inertia.semantics.alias_query import describe_alias_storage as _impl
@@ -634,35 +675,40 @@ def describe_alias_storage(expr: object) -> AliasStorageFacts:
     return _impl(expr)
 
 
-def same_alias_storage_domain(lhs: object, rhs: object) -> bool:
+@cython.ccall
+def same_alias_storage_domain(lhs: object, rhs: object) -> cython.bint:
     """Return whether two expressions belong to the same alias storage domain."""
     from inertia.semantics.alias_query import same_alias_storage_domain as _impl
 
     return bool(_impl(lhs, rhs))
 
 
-def compatible_alias_storage_views(lhs: object, rhs: object) -> bool:
+@cython.ccall
+def compatible_alias_storage_views(lhs: object, rhs: object) -> cython.bint:
     """Return whether two expression storage views are compatible."""
     from inertia.semantics.alias_query import compatible_alias_storage_views as _impl
 
     return bool(_impl(lhs, rhs))
 
 
-def needs_alias_synthesis(expr: object) -> bool:
+@cython.ccall
+def needs_alias_synthesis(expr: object) -> cython.bint:
     """Return whether an expression requires synthesized alias storage."""
     from inertia.semantics.alias_query import needs_alias_synthesis as _impl
 
     return bool(_impl(expr))
 
 
-def can_join_alias_storage(lhs: object, rhs: object) -> bool:
+@cython.ccall
+def can_join_alias_storage(lhs: object, rhs: object) -> cython.bint:
     """Return whether two expression storage facts can be joined."""
     from inertia.semantics.alias_query import can_join_alias_storage as _impl
 
     return bool(_impl(lhs, rhs))
 
 
-def contains_alias_storage(container: object, subview: object) -> bool:
+@cython.ccall
+def contains_alias_storage(container: object, subview: object) -> cython.bint:
     """Return whether one expression's proven storage contains another view."""
     from inertia.semantics.alias_query import contains_alias_storage as _impl
 
@@ -700,15 +746,17 @@ ALIAS_RECOVERY_API: tuple[AliasRecoveryAPISpec, ...] = (
 
 def describe_x86_16_alias_recovery_api() -> tuple[tuple[str, str, tuple[str, ...]], ...]:
     """Return documented alias recovery API entries for reports and guards."""
-    return tuple((spec.name, spec.purpose, spec.helpers) for spec in ALIAS_RECOVERY_API)
+    return tuple((spec.name, spec.purpose, spec.helpers) for spec in iter(ALIAS_RECOVERY_API))
 
 
+@cython.ccall
 def _merge_storage_domains(
-    existing: _StorageDomainSignature | None, incoming: _StorageDomainSignature
+    existing: object, incoming: _StorageDomainSignature
 ) -> _StorageDomainSignature:
+    joined: object
     if existing is None:
         return incoming
-    if existing == incoming:
+    if operator.eq(existing, incoming):
         return existing
     joined = existing.join(incoming)
     if joined is not None:
@@ -716,6 +764,7 @@ def _merge_storage_domains(
     return _StorageDomainSignature("mixed")
 
 
+@cython.ccall
 def _unwrap_c_casts(expr: object) -> object:
     from inertia.semantics.expression_analysis import _unwrap_c_casts as _impl
 

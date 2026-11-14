@@ -1262,6 +1262,17 @@ def _dosbox_marker_diagnostics(
     return problems
 
 
+# Packed DOS/FAT timestamp granularity applied to files DOSBox guests write.
+# DOSBox stamps mounted-drive files with the 16-bit FAT packed time field,
+# which stores seconds as ``sec // 2``: a guest write at real time ``w``
+# yields host mtime ``floor2(w)`` with ``floor2(w) <= w < floor2(w) + 2``.
+# A genuinely fresh artifact therefore always satisfies
+# ``st_mtime > wall_start - 2.0``; only a stamp at or below
+# ``wall_start - 2.0`` proves every possible write time ``w < wall_start``,
+# i.e. the file provably predates this stage's launch.
+DOS_MTIME_QUANTUM_SECONDS: float = 2.0
+
+
 def _dosbox_artifact_diagnostics(
     out_dir: Path, required: tuple[str, ...], wall_start: float,
 ) -> list[str]:
@@ -1271,7 +1282,10 @@ def _dosbox_artifact_diagnostics(
         artifact = _dos_case_file(out_dir, name)
         if artifact is None:
             problems.append(f"missing artifact {name}")
-        elif artifact.stat().st_size == 0 or artifact.stat().st_mtime < wall_start - 1.0:
+        elif (
+            artifact.stat().st_size == 0
+            or artifact.stat().st_mtime <= wall_start - DOS_MTIME_QUANTUM_SECONDS
+        ):
             problems.append(f"stale or empty artifact {name}")
     return problems
 
@@ -1411,6 +1425,17 @@ def _clear_stage_artifacts(out_dir: Path, names: tuple[str, ...]) -> ToolStageRe
             for candidate in {out_dir / name, out_dir / name.upper(), out_dir / name.lower()}:
                 if candidate.exists():
                     candidate.unlink()
+        survivors = sorted(
+            candidate.name
+            for name in names
+            for candidate in {out_dir / name, out_dir / name.upper(), out_dir / name.lower()}
+            if candidate.exists()
+        )
     except OSError as error:
         return ToolStageReceipt(ToolStageOutcome.INCOMPLETE, None, (), "", str(error))
+    if survivors:
+        return ToolStageReceipt(
+            ToolStageOutcome.INCOMPLETE, None, (), "",
+            "stage artifact cleanup left survivors: " + ", ".join(survivors),
+        )
     return None

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bind stable stack accesses to named local variable identities.
 
 Layer: Types/Lowering.
@@ -8,11 +9,15 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 from inertia.ir.core import AddressStatus, IRAddress, IRValue, MemSpace, SegmentOrigin
+import dataclasses
+import operator
 
 __all__ = [
     "STACK_SLOT_BINDING_TAG_8616",
@@ -32,34 +37,34 @@ __all__ = [
 STACK_SLOT_BINDING_TAG_8616: str = "inertia_stack_slot_binding_8616"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackAnnotationSpec8616:
     """An inert source/debug name and type hint for one proven stack object."""
 
-    name: str | None
+    name: object
     type_spec: object | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackBaseBpBiasEvidence8616:
     """Evidence snapshot for rebasing angr's entry-SP placeholder to BP."""
 
     statement_root: object
-    stack_base_displacements: tuple[int, ...]
-    known_bp_offsets: frozenset[int]
+    stack_base_displacements: object
+    known_bp_offsets: object
     inferred_bias: int | None
 
     def matches(
         self,
         statement_root: object,
-        stack_base_displacements: tuple[int, ...],
-        known_bp_offsets: set[int],
-    ) -> bool:
+        stack_base_displacements: object,
+        known_bp_offsets: object,
+    ) -> cython.bint:
         """Return whether this snapshot still describes the current C/evidence state."""
         return (
             self.statement_root is statement_root
-            and self.stack_base_displacements == stack_base_displacements
-            and self.known_bp_offsets == frozenset(known_bp_offsets)
+            and operator.eq(self.stack_base_displacements, stack_base_displacements)
+            and operator.eq(self.known_bp_offsets, frozenset(known_bp_offsets))
         )
 
 
@@ -76,7 +81,7 @@ class StackVariableBinding:
 
     __slots__ = ("bp_offset", "is_stable", "size", "var_name")
 
-    def __init__(self, bp_offset: int, size: int, *, var_name: str | None = None, is_stable: bool = True) -> None:
+    def __init__(self, bp_offset: cython.longlong, size: cython.longlong, *, var_name: object = None, is_stable: cython.bint = True) -> None:
         """Create a proven stack binding for one SS:BP-relative slot."""
         self.bp_offset = bp_offset
         self.size = size
@@ -100,15 +105,16 @@ class StackVariableBinding:
             "is_stable": self.is_stable,
         }
 
-    def contains_offset(self, bp_offset: int) -> bool:
+    def contains_offset(self, bp_offset: cython.longlong) -> cython.bint:
         """Return whether this binding owns the byte at ``bp_offset``."""
         return self.bp_offset <= bp_offset < self.bp_offset + self.size
 
-    def contains_access(self, bp_offset: int, size: int) -> bool:
+    def contains_access(self, bp_offset: cython.longlong, size: cython.longlong) -> cython.bint:
         """Return whether a positive-width access is fully inside this binding."""
         return size > 0 and self.size > 0 and self.bp_offset <= bp_offset and bp_offset + size <= self.bp_offset + self.size
 
 
+@cython.ccall
 def stable_stack_binding_tags_8616(binding: StackVariableBinding) -> dict[str, object]:
     """Return C-AST tags carrying one alias-proven stack-slot identity."""
     if not binding.is_stable:
@@ -116,16 +122,22 @@ def stable_stack_binding_tags_8616(binding: StackVariableBinding) -> dict[str, o
     return {STACK_SLOT_BINDING_TAG_8616: binding}
 
 
+@cython.ccall
 def stack_binding_from_tags_8616(tags: object) -> StackVariableBinding | None:
     """Read exact stack-slot provenance from a dynamic C-AST tag mapping."""
+    binding: object
     if not isinstance(tags, Mapping):
         return None
     binding = tags.get(STACK_SLOT_BINDING_TAG_8616)
     return binding if isinstance(binding, StackVariableBinding) and binding.is_stable else None
 
 
+@cython.ccall
 def _coerce_stack_annotation_spec_8616(value: object) -> StackAnnotationSpec8616 | None:
     """Normalize one metadata value without deriving storage semantics from it."""
+    name: object
+    name_value: object
+    type_spec: object
     if isinstance(value, str):
         return StackAnnotationSpec8616(name=value or None, type_spec=None)
     if not isinstance(value, Mapping):
@@ -142,7 +154,7 @@ def select_stack_annotation_spec_8616(
     binding: StackVariableBinding,
     *,
     stack_specs: Mapping[object, object],
-    candidate_offsets: Iterable[int],
+    candidate_offsets: Iterable[cython.longlong],
     known_bindings: Iterable[StackVariableBinding],
 ) -> StackAnnotationSpec8616 | None:
     """Select metadata for a proven stack object without renaming interior views.
@@ -152,17 +164,19 @@ def select_stack_annotation_spec_8616(
     contains the current binding's first byte. This keeps metadata inert:
     `[bp-2]` cannot borrow the name of a four-byte object rooted at `[bp-4]`.
     """
+    spec: object
+    candidate_offset: object
     bindings = tuple(known_bindings)
-    seen_offsets: set[int] = set()
+    seen_offsets: set[cython.longlong] = set()
     for candidate_offset in candidate_offsets:
         if candidate_offset in seen_offsets:
             continue
         seen_offsets.add(candidate_offset)
-        if candidate_offset != binding.bp_offset and any(
-            owner.bp_offset == candidate_offset
-            and owner.bp_offset != binding.bp_offset
+        if operator.ne(candidate_offset, binding.bp_offset) and any(
+            operator.eq(owner.bp_offset, candidate_offset)
+            and operator.ne(owner.bp_offset, binding.bp_offset)
             and owner.contains_offset(binding.bp_offset)
-            for owner in bindings
+            for owner in iter(bindings)
         ):
             continue
         spec = _coerce_stack_annotation_spec_8616(stack_specs.get(candidate_offset))
@@ -171,11 +185,12 @@ def select_stack_annotation_spec_8616(
     return None
 
 
+@cython.ccall
 def select_normalized_stack_argument_annotation_spec_8616(
     binding: StackVariableBinding,
     *,
     stack_specs: Mapping[object, object],
-    return_address_size: int = 2,
+    return_address_size: cython.longlong = 2,
 ) -> StackAnnotationSpec8616 | None:
     """Select one argument label after its normalized coordinate map is proven.
 
@@ -191,25 +206,25 @@ def select_normalized_stack_argument_annotation_spec_8616(
 def stack_binding_inherits_containing_name_8616(
     binding: StackVariableBinding,
     *,
-    current_name: str | None,
+    current_name: object,
     known_bindings: Iterable[StackVariableBinding],
-) -> bool:
+) -> cython.bint:
     """Return whether an interior view copied its containing object's name."""
     if not current_name:
         return False
     return any(
-        owner.bp_offset != binding.bp_offset
+        operator.ne(owner.bp_offset, binding.bp_offset)
         and owner.contains_offset(binding.bp_offset)
-        and owner.var_name == current_name
-        for owner in known_bindings
+        and operator.eq(owner.var_name, current_name)
+        for owner in iter(known_bindings)
     )
 
 
 def build_stack_variable_bindings_8616(
-    addresses: list[tuple[int, int]],  # (offset, size) pairs
+    addresses: object,  # (offset, size) pairs
     *,
-    preferred_names: dict[int, str] | None = None,
-) -> list[StackVariableBinding]:
+    preferred_names: object = None,
+) -> object:
     """Build stable local variable bindings from a sorted list of stack offsets.
 
     Args:
@@ -222,6 +237,9 @@ def build_stack_variable_bindings_8616(
     Adjacent offsets with matching segment origin are NOT blindly folded;
     binding stability requires alias proof which is the caller's responsibility.
     """
+    var_name: object
+    offset: object
+    size: object
     bindings: list[StackVariableBinding] = []
     for offset, size in addresses:
         var_name = None
@@ -232,7 +250,8 @@ def build_stack_variable_bindings_8616(
     return sorted(bindings, key=lambda b: b.bp_offset)
 
 
-def stable_ss_address_to_ir_value_8616(offset: int, size: int) -> IRValue:
+@cython.ccall
+def stable_ss_address_to_ir_value_8616(offset: cython.longlong, size: cython.longlong) -> IRValue:
     """Convert a stable SS/Bp offset into an IRValue.
 
     This preserves segment identity and stability status.
@@ -245,7 +264,8 @@ def stable_ss_address_to_ir_value_8616(offset: int, size: int) -> IRValue:
     )
 
 
-def stable_ss_offset_to_ir_address_8616(offset: int, size: int) -> IRAddress:
+@cython.ccall
+def stable_ss_offset_to_ir_address_8616(offset: cython.longlong, size: cython.longlong) -> IRAddress:
     """Convert a stable SS/Bp offset into an IRAddress with proven stability."""
     return IRAddress(
         space=MemSpace.SS,

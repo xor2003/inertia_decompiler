@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Scoped near-return continuation view over one raw pending artifact.
 
 Layer: IR / control-domain transport.
@@ -28,6 +29,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -41,6 +44,13 @@ from inertia.frontend.x86_16.frontend_near_return_continuation import (
 )
 
 from .core import IRBlock, IRFunctionArtifact, IRInstr, IRRefusal
+import dataclasses
+import operator
+import builtins
+EntryJumpDomainApplication8616 = typing.TypeVar("EntryJumpDomainApplication8616")
+EntryJumpDomainProof8616 = typing.TypeVar("EntryJumpDomainProof8616")
+Real16InvocationDomain8616 = typing.TypeVar("Real16InvocationDomain8616")
+ScopedFunctionCFGProjection8616 = typing.TypeVar("ScopedFunctionCFGProjection8616")
 
 if TYPE_CHECKING:
     from .entry_jump_domain import (
@@ -90,7 +100,7 @@ def _pending_surface_failure_8616(
     ScopedNearReturnContinuationViewFailure8616 | None,
     str,
     NearCallFramePremise8616 | None,
-    frozenset[int],
+    frozenset[cython.longlong],
 ]:
     """Audit the pending surface the conditional view may discharge.
 
@@ -102,10 +112,13 @@ def _pending_surface_failure_8616(
     other refusal is an unrelated raw defect no consuming entry may
     waive.
     """
+    block_failure: object
+    continuations: object
+    refusal: object
     if (
         type(artifact) is not IRFunctionArtifact
         or not isinstance(boundary, ExactFunctionRangeBoundary8616)
-        or boundary.addr != artifact.function_addr
+        or operator.ne(boundary.addr, artifact.function_addr)
     ):
         return (
             ScopedNearReturnContinuationViewFailure8616.SURFACE_MISMATCH,
@@ -125,7 +138,7 @@ def _pending_surface_failure_8616(
     proven = frozenset() if continuations is None else (
         continuations.proven_block_addrs
     )
-    if not proven or premise.callee_addr != artifact.function_addr:
+    if not proven or operator.ne(premise.callee_addr, artifact.function_addr):
         return (
             ScopedNearReturnContinuationViewFailure8616.SURFACE_MISMATCH,
             "premise binds a foreign callee head or proves nothing",
@@ -139,8 +152,8 @@ def _pending_surface_failure_8616(
             premise,
             frozenset(),
         )
-    blocks_by_addr = {block.addr: block for block in artifact.blocks}
-    if any(addr not in blocks_by_addr for addr in proven):
+    blocks_by_addr = {block.addr: block for block in iter(artifact.blocks)}
+    if any(addr not in blocks_by_addr for addr in iter(proven)):
         return (
             ScopedNearReturnContinuationViewFailure8616.SURFACE_MISMATCH,
             "proven continuation block is absent from the raw census",
@@ -152,7 +165,7 @@ def _pending_surface_failure_8616(
         return block_failure[0], block_failure[1], premise, frozenset()
     for refusal in artifact.refusals:
         if (
-            refusal.kind != NEAR_RETURN_CONTINUATION_PENDING_KIND_8616
+            operator.ne(refusal.kind, NEAR_RETURN_CONTINUATION_PENDING_KIND_8616)
             or refusal.block_addr not in proven
         ):
             return (
@@ -167,8 +180,8 @@ def _pending_surface_failure_8616(
 
 def _pending_block_failure_8616(
     artifact: IRFunctionArtifact,
-    proven: frozenset[int],
-) -> tuple[ScopedNearReturnContinuationViewFailure8616, str] | None:
+    proven: object,
+) -> object:
     """Audit every block-level marker against the proven census.
 
     A proven block must keep its raw ``JMP`` terminal and at least one
@@ -176,6 +189,9 @@ def _pending_block_failure_8616(
     other than the pending marker itself — is a raw defect no consuming
     entry may waive.
     """
+    terminal: object
+    block: object
+    refusal: object
     for block in artifact.blocks:
         if block.addr in proven:
             terminal = block.instrs[-1] if block.instrs else None
@@ -185,8 +201,8 @@ def _pending_block_failure_8616(
                     "proven block lost its retained raw JMP terminal",
                 )
             if not any(
-                refusal.kind == NEAR_RETURN_CONTINUATION_PENDING_KIND_8616
-                for refusal in block.refusals
+                operator.eq(refusal.kind, NEAR_RETURN_CONTINUATION_PENDING_KIND_8616)
+                for refusal in iter(block.refusals)
             ):
                 return (
                     ScopedNearReturnContinuationViewFailure8616.SURFACE_MISMATCH,
@@ -194,7 +210,7 @@ def _pending_block_failure_8616(
                 )
         for refusal in block.refusals:
             if (
-                refusal.kind != NEAR_RETURN_CONTINUATION_PENDING_KIND_8616
+                operator.ne(refusal.kind, NEAR_RETURN_CONTINUATION_PENDING_KIND_8616)
                 or block.addr not in proven
             ):
                 return (
@@ -206,12 +222,13 @@ def _pending_block_failure_8616(
     return None
 
 
+@cython.ccall
 def _scope_edge_binding_matches_8616(
     scope: Real16InvocationDomain8616 | None,
     premise: NearCallFramePremise8616,
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
-) -> bool:
+) -> cython.bint:
     """Match the retained edge and raw surface without replaying entry state.
 
     This identity check grants no evidence authority. Projection consumers
@@ -240,12 +257,13 @@ def _scope_edge_binding_matches_8616(
     )
 
 
+@cython.ccall
 def _scope_binds_premise_8616(
     scope: Real16InvocationDomain8616 | None,
     premise: NearCallFramePremise8616,
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
-) -> bool:
+) -> cython.bint:
     """Authenticate a factory input and bind its exact retained call edge."""
     from .real16_invocation_domain import same_real16_entry_scope_8616
 
@@ -254,7 +272,7 @@ def _scope_binds_premise_8616(
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ScopedNearReturnContinuationView8616:
     """Scoped conditional view over one premise-derived raw artifact.
 
@@ -280,13 +298,13 @@ class ScopedNearReturnContinuationView8616:
     source_artifact: IRFunctionArtifact
     boundary: ExactFunctionRangeBoundary8616
     failure: ScopedNearReturnContinuationViewFailure8616 | None
-    detail: str
-    proven_block_addrs: frozenset[int]
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    detail: object
+    proven_block_addrs: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
     premise: NearCallFramePremise8616 | None = field(
         default=None, compare=False, repr=False
     )
@@ -305,20 +323,21 @@ class ScopedNearReturnContinuationView8616:
     )
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """A scoped view never completes context-free; see ``complete_for``."""
         return self.complete_for(None)
 
-    def source_block(self, block_addr: int) -> IRBlock | None:
+    def source_block(self, block_addr: cython.longlong) -> IRBlock | None:
         """Return the identical raw block for identity binding."""
+        block: object
         for block in self.source_artifact.blocks:
-            if block.addr == block_addr:
+            if operator.eq(block.addr, block_addr):
                 return block
         return None
 
     def complete_for(
         self, consuming_scope: Real16InvocationDomain8616 | None
-    ) -> bool:
+    ) -> cython.bint:
         """Return whether the offered entry authenticates this view."""
         return self.cfg_projection_for(consuming_scope) is not None
 
@@ -397,17 +416,17 @@ class ScopedNearReturnContinuationView8616:
                 scoped_obligations_projection_8616,
             )
 
-            if any(type(count) is not int for count in counts) or counts != (
+            if any(type(count) is not int for count in iter(counts)) or operator.ne(counts, (
                 scoped_obligations_expected_counts_8616(
                     self, authenticated=True
                 )
-            ):
+            )):
                 return None
             return scoped_obligations_projection_8616(self, consuming_scope)
         expected = len(self.proven_block_addrs)
         if (
             expected == 0
-            or any(type(count) is not int for count in counts)
+            or any(type(count) is not int for count in iter(counts))
             or counts != (expected, expected, expected, expected, 0)
         ):
             return None
@@ -417,21 +436,23 @@ class ScopedNearReturnContinuationView8616:
         self, consuming_scope: Real16InvocationDomain8616,
     ) -> ScopedFunctionCFGProjection8616 | None:
         """Build the bounded effective CFG for one authenticated entry."""
+        terminal: object
+        block: object
+        target: object
         from .scoped_function_ir_view import ScopedFunctionCFGProjection8616
 
-        census = {block.addr for block in self.source_artifact.blocks}
-        successors: dict[int, tuple[int, ...]] = {}
-        predecessors: dict[int, list[int]] = {addr: [] for addr in census}
-        pending: dict[int, tuple[IRRefusal, ...]] = {}
+        census = {block.addr for block in iter(self.source_artifact.blocks)}
+        successors: dict[cython.longlong, tuple[cython.longlong, ...]] = {}
+        predecessors: dict[cython.longlong, list[cython.longlong]] = {addr: [] for addr in iter(census)}
+        pending: dict[cython.longlong, tuple[IRRefusal, ...]] = {}
         effective: list[IRBlock] = []
         for block in self.source_artifact.blocks:
             residual = tuple(
                 refusal
-                for refusal in block.refusals
+                for refusal in iter(block.refusals)
                 if not (
                     block.addr in self.proven_block_addrs
-                    and refusal.kind
-                    == NEAR_RETURN_CONTINUATION_PENDING_KIND_8616
+                    and operator.eq(refusal.kind, NEAR_RETURN_CONTINUATION_PENDING_KIND_8616)
                 )
             )
             if block.addr in self.proven_block_addrs:
@@ -441,16 +462,13 @@ class ScopedNearReturnContinuationView8616:
                 effective.append(
                     IRBlock(
                         addr=block.addr,
-                        instrs=(
-                            *block.instrs[:-1],
-                            IRInstr(
+                        instrs=tuple(block.instrs[:-1]) + (IRInstr(
                                 op="RET",
                                 dst=None,
                                 args=(),
                                 addr=terminal.addr,
                                 origin=terminal.origin,
-                            ),
-                        ),
+                            ),),
                         refusals=(),
                         successor_addrs=block.successor_addrs,
                     )
@@ -476,7 +494,7 @@ class ScopedNearReturnContinuationView8616:
             predecessors=MappingProxyType(
                 {
                     addr: tuple(sorted(sources))
-                    for addr, sources in predecessors.items()
+                    for addr, sources in builtins.iter(predecessors.items())
                 }
             ),
             pending=MappingProxyType(pending),
@@ -518,6 +536,7 @@ class ScopedNearReturnContinuationView8616:
         }
 
 
+@cython.ccall
 def prove_scoped_near_return_continuation_view_8616(
     artifact: IRFunctionArtifact,
     boundary: ExactFunctionRangeBoundary8616,
@@ -534,6 +553,8 @@ def prove_scoped_near_return_continuation_view_8616(
     non-result; nothing here registers, publishes, or rebuilds the
     pending body.
     """
+    failure: object
+    premise: object
     failure, detail, premise, proven = _pending_surface_failure_8616(
         artifact, boundary
     )

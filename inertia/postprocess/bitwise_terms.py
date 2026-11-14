@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Flatten associative bitwise syntax without discarding typed view owners.
 
 Layer: Rewrite/Postprocess cleanup.
@@ -8,6 +9,7 @@ flow, or facts from rendered text, COD, source, or CLI/reporting evidence here.
 """
 
 from __future__ import annotations
+import cython
 
 from collections.abc import Callable
 
@@ -16,11 +18,12 @@ from angr.analyses.decompiler.structured_codegen.c import CBinaryOp
 from inertia.lowering.condition_stack_projection_contracts import condition_stack_projection_fact_8616
 
 
+@cython.ccall
 def flatten_bitwise_terms_8616(
     expression: object,
-    operator: str,
+    operator: object,
     unwrap: Callable[[object], object],
-) -> list[object]:
+) -> object:
     """Flatten syntax-only operands while retaining existing projection facts.
 
     Rebuilding a tagged projection from its leaves would erase its storage/view

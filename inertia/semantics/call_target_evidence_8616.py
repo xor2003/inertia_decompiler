@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Retain CALL-target binder evidence for project-scoped consumers.
 
 Layer: Semantics (staged candidate under
@@ -27,6 +28,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -55,6 +58,9 @@ from inertia.ir.function_ssa_registry import (
     registered_function_ssa_artifact_8616,
 )
 from inertia.ir.ssa_function import SSAFunctionArtifact
+import dataclasses
+import operator
+CallSemanticProjection8616 = typing.TypeVar("CallSemanticProjection8616")
 
 if TYPE_CHECKING:
     from .call_stack_effect_pipeline import CallSemanticProjection8616
@@ -99,18 +105,18 @@ class CallTargetEvidenceFailure8616(StrEnum):
     EVIDENCE_CONFLICT = "evidence_conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallTargetEvidenceStats8616:
     """Closed five-stage accounting for one evidence publish/resolve."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every consulted obligation became an admit or refusal."""
         counts = (
             self.raw_fact_count,
@@ -121,39 +127,38 @@ class CallTargetEvidenceStats8616:
         )
         return bool(
             min(counts) >= 0
-            and self.raw_fact_count == self.normalized_fact_count
-            and self.normalized_fact_count
-            == self.materialized_count + self.failure_count
-            and self.classified_fact_count == self.materialized_count
+            and operator.eq(self.raw_fact_count, self.normalized_fact_count)
+            and operator.eq(self.normalized_fact_count, self.materialized_count + self.failure_count)
+            and operator.eq(self.classified_fact_count, self.materialized_count)
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallTargetEvidencePublication8616:
     """Result of retaining one exact semantic projection on the project."""
 
-    caller_addr: int
+    caller_addr: cython.longlong
     verdict: CallTargetEvidenceVerdict8616
     failure: CallTargetEvidenceFailure8616 | None
     projection: CallSemanticProjection8616 | None
     stats: CallTargetEvidenceStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether the projection is retained and closed."""
         return (
             self.verdict is CallTargetEvidenceVerdict8616.PROVEN
             and self.failure is None
             and self.projection is not None
             and self.projection.complete
-            and self.projection.source_ir.function_addr == self.caller_addr
+            and operator.eq(self.projection.source_ir.function_addr, self.caller_addr)
             and self.stats.closed
             and self.stats.raw_fact_count > 0
             and self.stats.failure_count == 0
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallTargetEvidenceResolution8616:
     """One caller's retained binder evidence, or a typed refusal.
 
@@ -163,7 +168,7 @@ class CallTargetEvidenceResolution8616:
     is the once-built decoded index for this caller's proven census.
     """
 
-    caller_addr: int
+    caller_addr: cython.longlong
     verdict: CallTargetEvidenceVerdict8616
     failure: CallTargetEvidenceFailure8616 | None
     stats: CallTargetEvidenceStats8616
@@ -175,7 +180,7 @@ class CallTargetEvidenceResolution8616:
     boundary: ExactFunctionRangeBoundary8616 | None = None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether closed binder evidence is available for transport."""
         available = (
             self.verdict is CallTargetEvidenceVerdict8616.PROVEN
@@ -183,9 +188,9 @@ class CallTargetEvidenceResolution8616:
             and self.callsite_index is not None
             and self.callsite_index.stats.closed
             and self.source_ir is not None
-            and self.source_ir.function_addr == self.caller_addr
+            and operator.eq(self.source_ir.function_addr, self.caller_addr)
             and self.boundary is not None
-            and self.boundary.addr == self.caller_addr
+            and operator.eq(self.boundary.addr, self.caller_addr)
             and self.stats.closed
             and self.stats.raw_fact_count > 0
             and self.stats.failure_count == 0
@@ -227,9 +232,10 @@ class CallTargetEvidenceResolution8616:
 class _CallTargetProjectionSurface8616(Protocol):
     """Project-owned semantic-projection retention extension."""
 
-    _inertia_call_target_projections_8616: dict[int, CallSemanticProjection8616]
+    _inertia_call_target_projections_8616: object
 
 
+@cython.ccall
 def _projection_class_8616() -> type:
     """Return the owned projection contract without an import cycle.
 
@@ -241,9 +247,10 @@ def _projection_class_8616() -> type:
     return CallSemanticProjection8616
 
 
+@cython.ccall
 def _existing_projections_8616(
     project: object,
-) -> dict[int, CallSemanticProjection8616] | None:
+) -> object:
     """Return the retained projection map without creating it."""
     surface = cast(_CallTargetProjectionSurface8616, project)
     try:
@@ -255,10 +262,13 @@ def _existing_projections_8616(
     return registry
 
 
+@cython.ccall
 def _retained_projection_8616(
-    project: object, caller_addr: int
+    project: object, caller_addr: cython.longlong
 ) -> CallSemanticProjection8616 | None:
     """Return one retained projection without mutating the project."""
+    registry: object
+    retained: object
     registry = _existing_projections_8616(project)
     retained = None if registry is None else registry.get(caller_addr)
     if retained is None:
@@ -268,6 +278,7 @@ def _retained_projection_8616(
     return retained
 
 
+@cython.ccall
 def publish_call_semantic_projection_8616(
     project: object,
     projection: CallSemanticProjection8616,
@@ -278,6 +289,8 @@ def publish_call_semantic_projection_8616(
     publication of the same or equal projection is idempotent; a different
     projection for the same caller is a conflict, never a silent overwrite.
     """
+    existing: object
+    registry: object
     if type(projection) is not _projection_class_8616():
         raise TypeError("call-target evidence requires CallSemanticProjection8616")
     caller_addr = projection.source_ir.function_addr
@@ -286,9 +299,9 @@ def publish_call_semantic_projection_8616(
     if (
         type(caller_addr) is not int
         or caller_addr < 0
-        or projection.function_ssa.function_addr != caller_addr
-        or projection.effects.function.function_addr != caller_addr
-        or projection.outputs.function.function_addr != caller_addr
+        or operator.ne(projection.function_ssa.function_addr, caller_addr)
+        or operator.ne(projection.effects.function.function_addr, caller_addr)
+        or operator.ne(projection.outputs.function.function_addr, caller_addr)
     ):
         return CallTargetEvidencePublication8616(
             0 if type(caller_addr) is not int else caller_addr,
@@ -314,7 +327,7 @@ def publish_call_semantic_projection_8616(
     if existing is None:
         registry[caller_addr] = projection
         retained = projection
-    elif existing is projection or existing == projection:
+    elif existing is projection or operator.eq(existing, projection):
         retained = existing
     else:
         return CallTargetEvidencePublication8616(
@@ -333,12 +346,13 @@ def publish_call_semantic_projection_8616(
     )
 
 
+@cython.ccall
 def _resolution_8616(
-    caller_addr: int,
+    caller_addr: cython.longlong,
     verdict: CallTargetEvidenceVerdict8616,
-    failure: CallTargetEvidenceFailure8616 | None,
-    consulted: int,
-    admitted: int,
+    failure: object,
+    consulted: cython.longlong,
+    admitted: cython.longlong,
     *,
     ssa_artifact: SSAFunctionArtifact | None = None,
     ssa_stage: FunctionSSAArtifactStage8616 | None = None,
@@ -366,10 +380,11 @@ def _resolution_8616(
     )
 
 
+@cython.ccall
 def _registered_raw_identity_8616(
     project: object,
-    caller_addr: int,
-    consulted: int,
+    caller_addr: cython.longlong,
+    consulted: cython.longlong,
     *,
     not_registered: CallTargetEvidenceFailure8616,
     conflict: CallTargetEvidenceFailure8616,
@@ -395,8 +410,9 @@ def _registered_raw_identity_8616(
     )
 
 
+@cython.ccall
 def _caller_boundary_8616(
-    project: object, caller_addr: int
+    project: object, caller_addr: cython.longlong
 ) -> ExactFunctionRangeBoundary8616 | None:
     """Return an independently registered exact census boundary, if any."""
     boundary = function_boundary_at_address_8616(project, caller_addr)
@@ -405,18 +421,20 @@ def _caller_boundary_8616(
     return None
 
 
+@cython.ccall
 def _decoded_index_8616(
     project: object,
-    caller_addr: int,
-    consulted: int,
+    caller_addr: cython.longlong,
+    consulted: cython.longlong,
     *,
-    boundary: ExactFunctionRangeBoundary8616 | None,
-    direct_target_resolver: DirectCallTargetResolver8616 | None,
+    boundary: object,
+    direct_target_resolver: object,
 ) -> RetainedDecodedCallsiteIndex8616 | CallTargetEvidenceResolution8616:
     """Return the retained once-built index, decoding at most once."""
+    record: object
     record = registered_decoded_callsite_index_8616(project, caller_addr)
     if record is not None:
-        if record.boundary.project is not project or record.boundary.addr != caller_addr:
+        if record.boundary.project is not project or operator.ne(record.boundary.addr, caller_addr):
             return _resolution_8616(
                 caller_addr,
                 CallTargetEvidenceVerdict8616.CONFLICT,
@@ -424,7 +442,7 @@ def _decoded_index_8616(
                 consulted,
                 consulted - 1,
             )
-        if boundary is not None and boundary != record.boundary:
+        if boundary is not None and operator.ne(boundary, record.boundary):
             return _resolution_8616(
                 caller_addr,
                 CallTargetEvidenceVerdict8616.CONFLICT,
@@ -443,7 +461,7 @@ def _decoded_index_8616(
             consulted,
             consulted - 1,
         )
-    if boundary.addr != caller_addr or boundary.project is not project:
+    if operator.ne(boundary.addr, caller_addr) or boundary.project is not project:
         return _resolution_8616(
             caller_addr,
             CallTargetEvidenceVerdict8616.CONFLICT,
@@ -475,13 +493,14 @@ def _decoded_index_8616(
         )
 
 
+@cython.ccall
 def _semantic_source_identity_8616(
     project: object,
-    caller_addr: int,
+    caller_addr: cython.longlong,
     ssa: FunctionSSAArtifactResolution8616,
     retained: CallSemanticProjection8616,
-    admitted: int,
-) -> tuple[IRFunctionArtifact, int] | CallTargetEvidenceResolution8616:
+    admitted: cython.longlong,
+) -> object:
     """Verify the retained projection against registered SSA/raw identities.
 
     The projection must name the exact registered semantic SSA object, be
@@ -514,7 +533,7 @@ def _semantic_source_identity_8616(
     )
     if isinstance(source, CallTargetEvidenceResolution8616):
         return source
-    if source is not retained.source_ir and source != retained.source_ir:
+    if source is not retained.source_ir and operator.ne(source, retained.source_ir):
         return _resolution_8616(
             caller_addr,
             CallTargetEvidenceVerdict8616.CONFLICT,
@@ -525,6 +544,7 @@ def _semantic_source_identity_8616(
     return source, admitted + 1
 
 
+@cython.ccall
 def resolve_call_ir_projection_8616(
     project: object, artifact: IRFunctionArtifact
 ) -> CallTargetEvidencePublication8616:
@@ -534,6 +554,7 @@ def resolve_call_ir_projection_8616(
     need the projection chain without constructing a separate decoded census.
     This shares the registry authentication used by the SSA target resolver.
     """
+    projection: object
     caller_addr = artifact.function_addr
     refused = CallTargetEvidenceStats8616(1, 1, 0, 0, 1)
     ssa = registered_function_ssa_artifact_8616(project, caller_addr)
@@ -559,9 +580,10 @@ def resolve_call_ir_projection_8616(
     )
 
 
+@cython.ccall
 def resolve_call_target_evidence_8616(
     project: object,
-    caller_addr: int,
+    caller_addr: cython.longlong,
     *,
     boundary: ExactFunctionRangeBoundary8616 | None = None,
     direct_target_resolver: DirectCallTargetResolver8616 | None = None,
@@ -574,6 +596,7 @@ def resolve_call_target_evidence_8616(
     supplies the proven caller census when no index is retained yet; an
     absent or conflicting census refuses instead of fabricating coverage.
     """
+    retained: object
     if project is None or type(caller_addr) is not int or caller_addr < 0:
         return _resolution_8616(
             caller_addr if type(caller_addr) is int else 0,

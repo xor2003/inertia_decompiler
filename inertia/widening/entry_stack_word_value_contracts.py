@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed contracts for the single-entry-word value proof.
 
 Layer: Widening.
@@ -10,6 +11,8 @@ Do not join values from rendered text, cosmetic shape, postprocess, or CLI/repor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -22,6 +25,7 @@ from inertia.alias.entry_stack_byte_contracts import (
 from inertia.ir.core import IRFunctionArtifact, MemSpace
 
 from .entry_stack_word_bits import EntryStackWordBit8616
+import dataclasses
 
 
 class EntryStackWordVerdict8616(StrEnum):
@@ -57,7 +61,7 @@ class EntryStackWordRefusalKind8616(StrEnum):
     NON_ADJACENT_BYTES = "non_adjacent_bytes"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class EntryStackWord8616:
     """One proven 16-bit definition equal to two ordered adjacent entry bytes.
 
@@ -66,14 +70,14 @@ class EntryStackWord8616:
     identifies the exact defining instruction site in the entry block.
     """
 
-    block_addr: int
-    instr_index: int
+    block_addr: cython.longlong
+    instr_index: cython.longlong
     instruction_addr: int | None
     target_space: MemSpace
     target_tmp: int | None
-    target_name: str | None
+    target_name: object
     target_version: int | None
-    lane_provenance: tuple[EntryStackWordBit8616, ...]
+    lane_provenance: object
     low_byte: EntryStackByteRead8616
     high_byte: EntryStackByteRead8616
 
@@ -89,19 +93,19 @@ class EntryStackWord8616:
             "target_version": self.target_version,
             "lane_provenance": [
                 {"producer_index": bit.capture.instr_index, "bit_index": bit.bit_index}
-                for bit in self.lane_provenance
+                for bit in iter(self.lane_provenance)
             ],
             "low_byte": self.low_byte.to_dict(),
             "high_byte": self.high_byte.to_dict(),
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class EntryStackWordRefusal8616:
     """One typed refusal against the targeted word proof."""
 
     kind: EntryStackWordRefusalKind8616
-    detail: str
+    detail: object
     instr_index: int | None = None
 
     def to_dict(self) -> dict[str, object]:
@@ -113,7 +117,7 @@ class EntryStackWordRefusal8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class EntryStackWordProof8616:
     """Closed-count result of one targeted entry-word value proof.
 
@@ -127,11 +131,11 @@ class EntryStackWordProof8616:
     scope: EntryStackByteScope8616 = EntryStackByteScope8616.ENTRY_BLOCK_PREFIX
     fact: EntryStackWord8616 | None = None
     refusals: tuple[EntryStackWordRefusal8616, ...] = ()
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     def to_dict(self) -> dict[str, object]:
         """Serialize counts, fact, and refusals deterministically."""
@@ -146,5 +150,5 @@ class EntryStackWordProof8616:
             "materialized_count": self.materialized_count,
             "failure_count": self.failure_count,
             "fact": None if self.fact is None else self.fact.to_dict(),
-            "refusals": [refusal.to_dict() for refusal in self.refusals],
+            "refusals": [refusal.to_dict() for refusal in iter(self.refusals)],
         }

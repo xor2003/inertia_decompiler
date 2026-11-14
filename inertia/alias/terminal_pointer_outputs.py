@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bind terminal pointer-relative outputs to callee parameter storage.
 
 Layer: Alias.
@@ -10,6 +11,8 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from inertia.ir.core import AddressStatus, IRAddress, MemSpace, SegmentOrigin
 from inertia.semantics.callsite_register_provenance import (
@@ -30,12 +33,14 @@ from .terminal_pointer_output_contracts import (
     TerminalPointerAliasFailure8616,
     TerminalPointerAliasStats8616,
 )
+import operator
 
 
+@cython.ccall
 def _refused_8616(
     evidence: TerminalPointerOutputEvidence8616,
     failure: TerminalPointerAliasFailure8616,
-    normalized_count: int = 0,
+    normalized_count: cython.longlong = 0,
 ) -> TerminalPointerAliasEvidence8616:
     """Build one atomic Alias refusal without publishing a successful subset."""
     raw_count = max(1, evidence.stats.raw_fact_count, len(evidence.facts))
@@ -52,6 +57,7 @@ def _refused_8616(
     )
 
 
+@cython.ccall
 def _parameter_storage_8616(
     source: RegisterReachingSourceResult8616,
 ) -> IRAddress | None:
@@ -63,7 +69,7 @@ def _parameter_storage_8616(
         return None
     kind, offset, width = identity
     if (
-        kind != CallsitePushSourceKind8616.BP_VALUE.value
+        operator.ne(kind, CallsitePushSourceKind8616.BP_VALUE.value)
         or not isinstance(offset, int)
         or isinstance(offset, bool)
         or offset < 4
@@ -85,6 +91,10 @@ def classify_terminal_pointer_output_aliases_8616(
     evidence: TerminalPointerOutputEvidence8616,
 ) -> TerminalPointerAliasEvidence8616:
     """Bind every terminal pointer STORE to one exact callee argument slot."""
+    first: object
+    register: object
+    normalized_count: object
+    output: object
     if not evidence.complete:
         return _refused_8616(
             evidence,
@@ -106,19 +116,19 @@ def classify_terminal_pointer_output_aliases_8616(
                 instruction_addr=site.instr_addr,
                 register=register,
             )
-            for site in output.store_sites
+            for site in iter(output.store_sites)
         )
         if any(
             source.verdict is not RegisterReachingSourceVerdict8616.PROVEN
-            for source in sources
+            for source in iter(sources)
         ):
             return _refused_8616(
                 evidence,
                 TerminalPointerAliasFailure8616.REACHING_SOURCE_REFUSED,
                 normalized_count,
             )
-        parameters = tuple(_parameter_storage_8616(source) for source in sources)
-        if any(parameter is None for parameter in parameters):
+        parameters = tuple(_parameter_storage_8616(source) for source in iter(sources))
+        if any(parameter is None for parameter in iter(parameters)):
             return _refused_8616(
                 evidence,
                 TerminalPointerAliasFailure8616.PARAMETER_SOURCE_UNSUPPORTED,
@@ -127,7 +137,7 @@ def classify_terminal_pointer_output_aliases_8616(
         first = parameters[0]
         if first is None:
             raise RuntimeError("proven pointer source lost parameter storage")
-        if any(parameter != first for parameter in parameters[1:]):
+        if any(operator.ne(parameter, first) for parameter in iter(parameters[1:])):
             return _refused_8616(
                 evidence,
                 TerminalPointerAliasFailure8616.PARAMETER_SOURCE_CONFLICT,

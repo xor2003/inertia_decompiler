@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Connect exact call-stack Semantics to the pre-Alias function SSA path.
 
 Layer: Semantics.
@@ -11,6 +12,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import MutableMapping
 from dataclasses import dataclass, replace
@@ -57,12 +60,15 @@ from .call_target_evidence_8616 import (
     publish_call_semantic_projection_8616,
 )
 from .scoped_call_projection import ScopedCallSemanticInput8616, scoped_call_semantic_input_8616
+import dataclasses
+import operator
+import builtins
 
 
 class _CFunctionBoundary8616(Protocol):
     """Minimal generated-function identity used by this pass."""
 
-    addr: int
+    addr: cython.longlong
 
 
 class _FunctionBoundary8616(Protocol):
@@ -76,7 +82,7 @@ class _CodegenBoundary8616(Protocol):
 
     cfunc: _CFunctionBoundary8616 | None
     _inertia_vex_ir_artifact: IRFunctionArtifact
-    _inertia_vex_ir_summary: dict[str, object]
+    _inertia_vex_ir_summary: object
     _inertia_vex_ir_frame: object
     _inertia_vex_ir_source_function_8616: object
     _inertia_vex_ir_function_ssa: SSAFunctionArtifact
@@ -89,7 +95,7 @@ class _CodegenBoundary8616(Protocol):
     _inertia_call_semantic_projection_8616: CallSemanticProjection8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallSemanticProjection8616:
     """Coherent immutable IR-to-Semantics projection for one function snapshot."""
 
@@ -100,19 +106,19 @@ class CallSemanticProjection8616:
     scoped_input: ScopedCallSemanticInput8616 | None = None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every projection has closed evidence accounting."""
         function_addr = self.source_ir.function_addr
         accounting = bool(
             self.effects.stats.closed
             and self.outputs.stats.closed
-            and self.effects.function.function_addr == function_addr
-            and self.outputs.function.function_addr == function_addr
-            and self.function_ssa.function_addr == function_addr
+            and operator.eq(self.effects.function.function_addr, function_addr)
+            and operator.eq(self.outputs.function.function_addr, function_addr)
+            and operator.eq(self.function_ssa.function_addr, function_addr)
             and (
                 self.outputs.register_roles is None
                 or (
-                    self.outputs.register_roles.function_addr == function_addr
+                    operator.eq(self.outputs.register_roles.function_addr, function_addr)
                     and self.outputs.register_roles.authenticates_output_facts(
                         self.outputs.facts
                     )
@@ -130,14 +136,15 @@ class CallSemanticProjection8616:
         self,
         current_ir: IRFunctionArtifact,
         current_ssa: SSAFunctionArtifact,
-    ) -> bool:
+    ) -> cython.bint:
         """Return whether dynamic codegen fields still expose this projection."""
         return self.outputs.function is current_ir and self.function_ssa is current_ssa
 
 
+@cython.ccall
 def semantic_function_ssa_artifact_at_address_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     *,
     function: object | None = None,
 ) -> FunctionSSAArtifactResolution8616:
@@ -201,6 +208,7 @@ def semantic_function_ssa_artifact_at_address_8616(
     )
 
 
+@cython.ccall
 def _record_semantic_output_attestation_8616(
     project: object,
     outputs: CallOutputArtifact8616,
@@ -212,6 +220,8 @@ def _record_semantic_output_attestation_8616(
     artifact, so recording its build attestation here lets the semantic SSA
     verify declared lineage instead of minting a copied revision.
     """
+    digest: object
+    ssa_digest: object
     function = outputs.function
     if function.source_revision is None:
         return
@@ -238,10 +248,11 @@ def _record_semantic_output_attestation_8616(
                 ssa_digest,
                 function.source_revision,
                 "call_semantics",
-                inputs=() if digest is None else (digest,),
+                inputs=tuple(()) if digest is None else tuple((digest,)),
             )
 
 
+@cython.ccall
 def _publish_resolved_semantic_8616(
     project: object,
     raw_ir: IRFunctionArtifact,
@@ -298,8 +309,8 @@ def build_semantic_function_ssa_8616(
     )
     callsite_addrs = tuple(
         instruction.addr
-        for block in raw_ir.blocks
-        for instruction in block.instrs
+        for block in iter(raw_ir.blocks)
+        for instruction in iter(block.instrs)
         if instruction.op == "CALL" and instruction.addr is not None
     )
     summaries = build_callsite_summary_inventory_with_program_evidence_8616(
@@ -310,11 +321,11 @@ def build_semantic_function_ssa_8616(
     allocations = collect_call_stack_allocation_candidates_8616(project, raw_ir, summaries)
     return_frames = collect_return_segment_frames_8616(
         project, function,
-        {address: summary.return_addr for address, summary in summaries.items() if summary.return_addr is not None},
+        {address: summary.return_addr for address, summary in builtins.iter(summaries.items()) if summary.return_addr is not None},
     )
     effects = materialize_call_stack_effects_8616(
         raw_ir, summaries, project=project, allocation_candidates=allocations,
-        return_segment_frames={frame.callsite_addr: frame for frame in return_frames},
+        return_segment_frames={frame.callsite_addr: frame for frame in iter(return_frames)},
     )
     if not effects.stats.closed or (
         effects.stats.classified_fact_count > 0
@@ -344,10 +355,12 @@ def build_semantic_function_ssa_8616(
     return effects, outputs, build_x86_16_function_ssa(outputs.function)
 
 
+@cython.ccall
 def _proven_source_ir_8616(
     boundary: _CodegenBoundary8616,
-) -> tuple[_CFunctionBoundary8616, IRFunctionArtifact, IRFunctionArtifact] | None:
+) -> object:
     """Return the proven cfunc/raw/source IR triple, or None."""
+    cfunc: object
     try:
         cfunc = boundary.cfunc
         raw_ir = boundary._inertia_vex_ir_artifact
@@ -355,7 +368,7 @@ def _proven_source_ir_8616(
         return None
     if cfunc is None or not isinstance(cfunc.addr, int):
         return None
-    if not isinstance(raw_ir, IRFunctionArtifact) or raw_ir.function_addr != cfunc.addr:
+    if not isinstance(raw_ir, IRFunctionArtifact) or operator.ne(raw_ir.function_addr, cfunc.addr):
         return None
     try:
         source_ir = boundary._inertia_raw_vex_ir_artifact_8616
@@ -364,12 +377,12 @@ def _proven_source_ir_8616(
             source_ir = boundary._inertia_call_semantic_projection_8616.source_ir
         except AttributeError:
             source_ir = raw_ir
-    if not isinstance(source_ir, IRFunctionArtifact) or source_ir.function_addr != cfunc.addr:
+    if not isinstance(source_ir, IRFunctionArtifact) or operator.ne(source_ir.function_addr, cfunc.addr):
         return None
     return cfunc, raw_ir, source_ir
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _NativeAttachmentSeal8616:
     """Codegen Semantics attachment identities sealed around one proof run.
 
@@ -382,7 +395,7 @@ class _NativeAttachmentSeal8616:
 
     projection: CallSemanticProjection8616
     output_ir: IRFunctionArtifact
-    summary: dict[str, object]
+    summary: object
     function_ssa: SSAFunctionArtifact
     stage: FunctionSSAArtifactStage8616
     effects: CallStackEffectArtifact8616
@@ -391,10 +404,11 @@ class _NativeAttachmentSeal8616:
     source_function: object
     raw_frame: object
     raw_function_ssa: SSAFunctionArtifact
-    source_present: bool
+    source_present: cython.bint
     source: IRFunctionArtifact | None
 
 
+@cython.ccall
 def _capture_native_attachment_seal_8616(
     boundary: _CodegenBoundary8616,
 ) -> _NativeAttachmentSeal8616:
@@ -421,9 +435,10 @@ def _capture_native_attachment_seal_8616(
     )
 
 
+@cython.ccall
 def _native_attachment_seal_current_8616(
     boundary: _CodegenBoundary8616, seal: _NativeAttachmentSeal8616,
-) -> bool:
+) -> cython.bint:
     """Reverify the sealed attachment identities after the proof ran."""
     try:
         current = _capture_native_attachment_seal_8616(boundary)
@@ -442,16 +457,17 @@ def _native_attachment_seal_current_8616(
             or current.raw_frame is not seal.raw_frame):
         return False
     if (current.raw_function_ssa is not seal.raw_function_ssa
-            or current.source_present != seal.source_present):
+            or operator.ne(current.source_present, seal.source_present)):
         return False
     return not seal.source_present or current.source is seal.source
 
 
+@cython.ccall
 def _native_retained_entry_current_8616(
     boundary: _CodegenBoundary8616,
     entry: NativeNearCallPipeline8616,
     project: object,
-) -> bool:
+) -> cython.bint:
     """Revalidate the constructor's native retained-entry and source chain.
 
     Mirrors the installed-source, scope/view/bundle and retained-identity
@@ -467,15 +483,16 @@ def _native_retained_entry_current_8616(
     )
 
 
+@cython.ccall
 def _scoped_reuse_context_current_8616(
     boundary: _CodegenBoundary8616,
-    entry: DeclaredEntryInput8616 | None,
+    entry: object,
     scoped: ScopedCallSemanticInput8616,
     source_ir: IRFunctionArtifact,
     *,
     project: object,
     function: object,
-) -> bool:
+) -> cython.bint:
     """Check the admitted entry type and the recorded consuming context.
 
     Reuse admits exactly the entry types ``scoped_call_semantic_input_8616``
@@ -499,13 +516,14 @@ def _scoped_reuse_context_current_8616(
             or _native_retained_entry_current_8616(boundary, entry, project))
 
 
+@cython.ccall
 def _raw_reatach_current_8616(
     boundary: _CodegenBoundary8616,
     raw_ir: IRFunctionArtifact,
     source_ir: IRFunctionArtifact,
     function_ssa: SSAFunctionArtifact,
     function: object,
-) -> bool:
+) -> cython.bint:
     """Check current codegen attachments are the exact retained raw bundle.
 
     The raw IR pass reattaches the identical bundle surface for scoped
@@ -527,7 +545,7 @@ def _raw_reatach_current_8616(
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _RetainedSemanticsAdmission8616:
     """Pre-proof admission for one retained Semantics projection.
 
@@ -539,12 +557,13 @@ class _RetainedSemanticsAdmission8616:
 
     entry: DeclaredEntryInput8616 | None
     seal: _NativeAttachmentSeal8616 | None
-    restore: bool
+    restore: cython.bint
 
 
+@cython.ccall
 def _admit_retained_projection_8616(
     boundary: _CodegenBoundary8616,
-    entry: DeclaredEntryInput8616 | None,
+    entry: object,
     projection: CallSemanticProjection8616,
     source_ir: IRFunctionArtifact,
     raw_ir: IRFunctionArtifact,
@@ -559,6 +578,7 @@ def _admit_retained_projection_8616(
     conditional projection: declared and unscoped projections keep the
     ordinary constructor path on any attachment drift.
     """
+    scoped: object
     scoped = projection.scoped_input
     restore = not projection.matches_codegen(raw_ir, function_ssa)
     if restore and not _raw_reatach_current_8616(
@@ -582,13 +602,15 @@ def _admit_retained_projection_8616(
     return _RetainedSemanticsAdmission8616(entry, seal, restore)
 
 
+@cython.ccall
 def _reusable_projection_8616(
     boundary: _CodegenBoundary8616,
     source_ir: IRFunctionArtifact,
     raw_ir: IRFunctionArtifact,
     *, project: object, function: object,
-) -> bool:
+) -> cython.bint:
     """Reauthenticate retained Semantics only in the identical consuming context."""
+    admission: object
     try:
         existing_projection = boundary._inertia_call_semantic_projection_8616
         existing_stage = boundary._inertia_vex_ir_function_ssa_stage_8616
@@ -639,11 +661,12 @@ def _reusable_projection_8616(
     return True
 
 
+@cython.ccall
 def _published_function_ssa_8616(
     project: object,
     function_ssa: SSAFunctionArtifact,
     outputs: CallOutputArtifact8616,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> SSAFunctionArtifact:
     """Publish the SSA artifact to the project registry when unrefused."""
     if outputs.function.refusals:
@@ -679,6 +702,7 @@ def _published_function_ssa_8616(
     return publication.artifact
 
 
+@cython.ccall
 def _publish_semantic_artifacts_8616(
     project: object,
     boundary: _CodegenBoundary8616,
@@ -714,6 +738,7 @@ def _publish_semantic_artifacts_8616(
     _attach_semantic_artifacts_8616(boundary, projection)
 
 
+@cython.ccall
 def _attach_semantic_artifacts_8616(
     boundary: _CodegenBoundary8616, projection: CallSemanticProjection8616,
 ) -> None:
@@ -728,6 +753,7 @@ def _attach_semantic_artifacts_8616(
     boundary._inertia_call_semantic_projection_8616 = projection
 
 
+@cython.ccall
 def _record_function_info_8616(
     function: object,
     outputs: CallOutputArtifact8616,
@@ -751,8 +777,12 @@ def _record_function_info_8616(
         info["x86_16_call_outputs"] = outputs.to_dict()
 
 
-def apply_x86_16_call_stack_effects_8616(project: object, codegen: object) -> bool:
+@cython.ccall
+def apply_x86_16_call_stack_effects_8616(project: object, codegen: object) -> cython.bint:
     """Replace raw function SSA with the Semantics-enriched production artifact."""
+    proven: object
+    resolved: object
+    scoped_input: object
     boundary = cast(_CodegenBoundary8616, codegen)
     proven = _proven_source_ir_8616(boundary)
     if proven is None:
@@ -791,7 +821,7 @@ def apply_x86_16_call_stack_effects_8616(project: object, codegen: object) -> bo
             details={
                 "function_addr": source_ir.function_addr,
                 "failure": FunctionIRArtifactFailure8616.ARTIFACT_REFUSED.value,
-                "refusals": [refusal.to_dict() for refusal in source_ir.refusals],
+                "refusals": [refusal.to_dict() for refusal in iter(source_ir.refusals)],
             },
         )
     effects, outputs, function_ssa = build_semantic_function_ssa_8616(

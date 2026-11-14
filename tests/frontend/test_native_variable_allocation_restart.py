@@ -483,3 +483,28 @@ def test_missing_native_input_graph_refuses_before_recovery() -> None:
     assert isinstance(cause, AllocationConvergenceRefusal)
     assert cause.verdict is AllocationRestartVerdict.REFUSED
     assert session_for(project, func.addr).census().attempts == 0
+
+
+def test_phi_fingerprint_preserves_absent_incoming_values() -> None:
+    """An absent predecessor value is stable and distinct from a proven value."""
+    from inertia.frontend.x86_16.variable_allocation_convergence import _expr_key
+
+    absent = ailment.Expr.Phi(2, 16, [((0x1000, None), None)])
+    same = ailment.Expr.Phi(2, 16, [((0x1000, None), None)])
+    other_predecessor = ailment.Expr.Phi(2, 16, [((0x1010, None), None)])
+    value = ailment.Expr.VirtualVariable(4, 5, 16, ailment.Expr.VirtualVariableCategory.REGISTER)
+    present = ailment.Expr.Phi(2, 16, [((0x1000, None), value)])
+    assert _expr_key(absent) == _expr_key(same)
+    assert _expr_key(absent) != _expr_key(other_predecessor)
+    assert _expr_key(absent) != _expr_key(present)
+
+
+def test_missing_required_expression_still_refuses_fingerprinting() -> None:
+    """Optional Phi slots do not authorize a missing required expression."""
+    from inertia.frontend.x86_16.variable_allocation_convergence import (
+        AllocationFingerprintRefusal,
+        _expr_key,
+    )
+
+    with pytest.raises(AllocationFingerprintRefusal):
+        _expr_key(None)

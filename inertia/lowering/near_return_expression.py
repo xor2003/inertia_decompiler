@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Build a candidate structured-C near-pointer return expression.
 
 Layer: Types/Lowering.
@@ -17,6 +18,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -49,6 +52,8 @@ from .near_return_selector import (
 from .near_return_selector import (
     NearReturnSelectorEvidence8616 as _SelectorEvidence8616,
 )
+import dataclasses
+import operator
 
 __all__ = [
     "NearReturnPointerExpressionFailure8616",
@@ -84,17 +89,18 @@ class NearReturnPointerExpressionFailure8616(StrEnum):
 _F8616 = NearReturnPointerExpressionFailure8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NearReturnPointerExpressionStats8616:
     """Closed five-stage evidence loop for one requested construction."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
+@cython.ccall
 def _fixed16_pointer_bits_8616(pointer_type: object) -> int | None:
     """Return the owned fixed16 near-pointer width, or ``None`` when absent.
 
@@ -111,12 +117,13 @@ def _fixed16_pointer_bits_8616(pointer_type: object) -> int | None:
     return size if type(size) is int and size == 16 else None
 
 
-def _unsigned_cast_bits_8616(node: object, bits: int) -> TypeGuard[structured_c.CTypeCast]:
+@cython.ccall
+def _unsigned_cast_bits_8616(node: object, bits: cython.longlong) -> TypeGuard[structured_c.CTypeCast]:
     """Return whether ``node`` is a ``(uintN_t)`` cast of exact width."""
     return isinstance(node, structured_c.CTypeCast) and _unsigned_int_bits_8616(node.dst_type, bits)
 
 
-def _stats_bound_8616(stats: object) -> bool:
+def _stats_bound_8616(stats: object) -> cython.bint:
     """Return whether stats are the exact-int bound receipt ``(1,1,1,1,0)``."""
     if not isinstance(stats, NearReturnPointerExpressionStats8616):
         return False
@@ -127,10 +134,10 @@ def _stats_bound_8616(stats: object) -> bool:
         stats.materialized_count,
         stats.failure_count,
     )
-    return all(type(value) is int for value in fields) and fields == (1, 1, 1, 1, 0)
+    return all(type(value) is int for value in iter(fields)) and fields == (1, 1, 1, 1, 0)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NearReturnPointerExpressionResult8616:
     """One constructed candidate expression or a typed atomic refusal.
 
@@ -145,19 +152,22 @@ class NearReturnPointerExpressionResult8616:
     verdict: NearReturnPointerExpressionVerdict8616
     failure: NearReturnPointerExpressionFailure8616 | None
     stats: NearReturnPointerExpressionStats8616
-    callee_addr: int = -1
+    callee_addr: cython.longlong = -1
     expression: structured_c.CExpression | None = None
     congruence: NearReturnOperandCongruenceResult8616 | None = None
     bound_operands: tuple[NearReturnBoundOperand8616, ...] = ()
     source_selector: structured_c.CExpression | None = None
     result_selector: structured_c.CExpression | None = None
-    byte_scale: int = -1
+    byte_scale: cython.longlong = -1
     result_pointer_type: SimTypePointer | None = None
     upstream_failure: NearReturnOperandCongruenceFailure8616 | None = None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Recheck the retained candidate AST against the live congruence."""
+        base: object
+        congruence: object
+        index: object
         if (
             self.verdict is not NearReturnPointerExpressionVerdict8616.BOUND
             or self.failure is not None
@@ -170,11 +180,11 @@ class NearReturnPointerExpressionResult8616:
             congruence is None
             or not congruence.complete
             or type(self.callee_addr) is not int
-            or self.callee_addr != congruence.callee_addr
-            or self.bound_operands != congruence.bound_operands
+            or operator.ne(self.callee_addr, congruence.callee_addr)
+            or operator.ne(self.bound_operands, congruence.bound_operands)
         ):
             return False
-        operands = {operand.role: operand for operand in self.bound_operands}
+        operands = {operand.role: operand for operand in iter(self.bound_operands)}
         base = operands.get(NearReturnOperandRole8616.OFFSET_BASE)
         index = operands.get(NearReturnOperandRole8616.OFFSET_INDEX)
         if base is None or index is None:
@@ -195,7 +205,7 @@ class NearReturnPointerExpressionResult8616:
         self,
         base: NearReturnBoundOperand8616,
         index: NearReturnBoundOperand8616,
-    ) -> bool:
+    ) -> cython.bint:
         """Rewalk the retained AST against the bound operands and selectors."""
         expression = self.expression
         if not isinstance(expression, structured_c.CTypeCast):
@@ -213,10 +223,10 @@ class NearReturnPointerExpressionResult8616:
         narrowed = widened.expr if _unsigned_cast_bits_8616(widened, 32) else None
         scale_node = product.rhs if isinstance(product, structured_c.CBinaryOp) else None
         return bool(
-            expression.dst_type == self.result_pointer_type
+            operator.eq(expression.dst_type, self.result_pointer_type)
             and _fixed16_pointer_bits_8616(expression.dst_type) == 16
             and call.callee_func is None
-            and call.callee_target == _NEAR_BYTE_ADD_HELPER_8616
+            and operator.eq(call.callee_target, _NEAR_BYTE_ADD_HELPER_8616)
             and args[0] is self.source_selector
             and args[1] is self.result_selector
             and args[2] is base.cvar
@@ -224,16 +234,17 @@ class NearReturnPointerExpressionResult8616:
             and narrowed.expr is index.cvar
             and isinstance(scale_node, structured_c.CConstant)
             and type(scale_node.value) is int
-            and scale_node.value == self.byte_scale
+            and operator.eq(scale_node.value, self.byte_scale)
             and _unsigned_int_bits_8616(scale_node.type, 32)
         )
 
 
+@cython.ccall
 def _refuse_8616(
-    congruence: NearReturnOperandCongruenceResult8616 | None,
+    congruence: object,
     failure: NearReturnPointerExpressionFailure8616,
     *,
-    normalized: bool = False,
+    normalized: cython.bint = False,
     upstream: NearReturnOperandCongruenceFailure8616 | None = None,
 ) -> NearReturnPointerExpressionResult8616:
     """Keep one failed construction as an atomic refusal with closed counts.
@@ -252,7 +263,8 @@ def _refuse_8616(
     )
 
 
-def _word_coefficient_8616(coefficient: object, expected: object) -> bool:
+@cython.ccall
+def _word_coefficient_8616(coefficient: object, expected: object) -> cython.bint:
     """Return whether ``coefficient`` is an int matching ``expected mod 2^16``.
 
     The ``expected`` operand must itself be a real int; for the index scale
@@ -262,10 +274,11 @@ def _word_coefficient_8616(coefficient: object, expected: object) -> bool:
     return (
         type(coefficient) is int
         and type(expected) is int
-        and coefficient % _WORD_MODULUS_8616 == expected
+        and operator.eq(coefficient % _WORD_MODULUS_8616, expected)
     )
 
 
+@cython.ccall
 def _selector_failure_8616(node: object) -> NearReturnPointerExpressionFailure8616 | None:
     """Classify one explicit segment selector operand, or accept it."""
     evidence = classify_near_return_selector_8616(node)
@@ -276,27 +289,26 @@ def _selector_failure_8616(node: object) -> NearReturnPointerExpressionFailure86
     return None
 
 
+@cython.ccall
 def _bound_proven_operands_8616(
     codegen: object,
     congruence: NearReturnOperandCongruenceResult8616,
-) -> (
-    tuple[NearReturnBoundOperand8616, NearReturnBoundOperand8616, int]
-    | NearReturnPointerExpressionResult8616
-):
+) -> object:
     """Resolve both bound operands on the proven surface, or refuse.
 
     ``codegen.cfunc.addr`` is a third-party angr attribute boundary, so the
     reads use ``getattr`` defaults rather than owned dot access.
     """
+    function_addr: object
     # Dynamic third-party angr codegen boundary; incomplete surfaces have no cfunc.
     function_addr = getattr(getattr(codegen, "cfunc", None), "addr", None)
     if type(function_addr) is not int or function_addr < 0:
         return _refuse_8616(congruence, _F8616.CODEGEN_SURFACE_UNPROVEN)
-    if function_addr != congruence.callee_addr:
+    if operator.ne(function_addr, congruence.callee_addr):
         return _refuse_8616(congruence, _F8616.FUNCTION_MISMATCH, normalized=True)
     if stack_variable_coordinate_registry_8616(codegen) is not congruence.registry:
         return _refuse_8616(congruence, _F8616.CODEGEN_SURFACE_UNPROVEN, normalized=True)
-    operands = {operand.role: operand for operand in congruence.bound_operands}
+    operands = {operand.role: operand for operand in iter(congruence.bound_operands)}
     base = operands[NearReturnOperandRole8616.OFFSET_BASE]
     index = operands[NearReturnOperandRole8616.OFFSET_INDEX]
     # NEAR_BYTE_ADD adds the delta to the pointer argument exactly once, so a
@@ -306,6 +318,7 @@ def _bound_proven_operands_8616(
     return base, index, index.coefficient % _WORD_MODULUS_8616
 
 
+@cython.ccall
 def build_near_return_pointer_expression_8616(
     codegen: object,
     congruence: NearReturnOperandCongruenceResult8616,
@@ -321,6 +334,8 @@ def build_near_return_pointer_expression_8616(
     expression is a detached candidate pending the parent's representation
     and body-census preflight.
     """
+    refusal: object
+    selector: object
     if not congruence.complete:
         return _refuse_8616(congruence, _F8616.CONGRUENCE_INCOMPLETE, upstream=congruence.failure)
     bound = _bound_proven_operands_8616(codegen, congruence)
@@ -346,7 +361,7 @@ def build_near_return_pointer_expression_8616(
         cast(structured_c.CExpression, result_selector),
     ]
     call = structured_c.CFunctionCall(
-        _NEAR_BYTE_ADD_HELPER_8616, None, [*selectors, base.cvar, byte_term], codegen=codegen
+        _NEAR_BYTE_ADD_HELPER_8616, None, list(selectors) + [base.cvar, byte_term], codegen=codegen
     )
     expression = structured_c.CTypeCast(
         None, cast(SimTypeNearPointer16_8616, result_pointer_type), call, codegen=codegen

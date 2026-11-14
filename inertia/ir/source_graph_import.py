@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: IR import boundary.
 
 Responsibility: select the verified native source-graph binding only when its
@@ -8,6 +9,7 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import cython
 
 import os
 import sys
@@ -21,6 +23,7 @@ from pathlib import Path
 from types import ModuleType
 
 from inertia.native_bundle import verified_bundle_directory
+import dataclasses
 
 SOURCE_GRAPH_MODULE: str = "inertia.ir.source_graph_binding"
 SOURCE_GRAPH_SOURCE: str = "source_graph_binding.py"
@@ -37,16 +40,18 @@ class SourceGraphBackend(StrEnum):
     AUTO = "auto"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SourceGraphImportSelection:
     """Bind a startup backend to its verified import search paths."""
 
     backend: SourceGraphBackend
-    search_paths: tuple[str, ...]
+    search_paths: object
 
 
+@cython.ccall
 def _backend_mode() -> SourceGraphBackend:
     """Resolve the configured backend or reject unknown values loudly."""
+    value: object
     value = os.environ.get(BACKEND_ENV, SourceGraphBackend.AUTO.value)
     try:
         return SourceGraphBackend(value)
@@ -77,7 +82,7 @@ class SourceGraphImportFinder(MetaPathFinder):
             self._selection = SourceGraphImportSelection(backend, tuple(paths))
         return self._selection
 
-    def _activate(self, paths: list[str]) -> SourceGraphBackend:
+    def _activate(self, paths: object) -> SourceGraphBackend:
         """Prepend a verified extension directory before the module's first import.
 
         Staged acceleration defaults to ``auto``: a verified build is used
@@ -85,6 +90,7 @@ class SourceGraphImportFinder(MetaPathFinder):
         the verified artifact and fails loudly on a missing or stale build;
         ``python`` never loads the cached extension.
         """
+        directory: object
         mode = _backend_mode()
         if mode is SourceGraphBackend.PYTHON:
             return mode
@@ -104,9 +110,10 @@ class SourceGraphImportFinder(MetaPathFinder):
         return SourceGraphBackend.CYTHON
 
     def find_spec(
-        self, fullname: str, path: Sequence[str] | None = None, target: ModuleType | None = None,
+        self, fullname: object, path: Sequence[str] | None = None, target: ModuleType | None = None,
     ) -> ModuleSpec | None:
         """Use an extension-only lookup for native mode and exact source for Python."""
+        spec: object
         if fullname != SOURCE_GRAPH_MODULE:
             return None
         selection = self.selection()
@@ -123,10 +130,11 @@ _FINDER: SourceGraphImportFinder = SourceGraphImportFinder(Path(__file__).resolv
 
 def install_source_graph_import() -> None:
     """Register this narrow import boundary once without selecting a backend."""
-    if not any(finder is _FINDER for finder in sys.meta_path):
+    if not any(finder is _FINDER for finder in iter(sys.meta_path)):
         sys.meta_path.insert(0, _FINDER)
 
 
+@cython.ccall
 def selected_source_graph_backend() -> SourceGraphBackend:
     """Expose the verified choice to diagnostics and acceptance checks."""
     return _FINDER.selection().backend

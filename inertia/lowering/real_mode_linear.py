@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed helpers for recognizing real-mode segment:offset linearizations.
 
 Layer: Types/Lowering.
@@ -17,6 +18,8 @@ late cleanup code.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 import logging
@@ -276,31 +279,37 @@ from .storage_identity_facts import (
 from .wide_call_output_assignment_replay import (
     classify_authoritative_wide_call_output_projection_8616,
 )
+import dataclasses
+import operator
+import builtins
 
-type AngrProjectValue = Any
-type StructuredCodegenValue = Any
-type StructuredAstValue = Any
+AngrProjectValue = typing.TypeAliasType("AngrProjectValue", Any)
+StructuredCodegenValue = typing.TypeAliasType("StructuredCodegenValue", Any)
+StructuredAstValue = typing.TypeAliasType("StructuredAstValue", Any)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _BpMemoryOperandOffsetCache8616:
     """Cache immutable BP-relative disassembly facts for one function context."""
 
-    code_function_identity: int
-    function_identities: tuple[int, ...]
-    offsets: frozenset[int]
+    code_function_identity: cython.longlong
+    function_identities: object
+    offsets: object
 
 
+@cython.ccall
 def _boundary_tuple_8616(value: StructuredAstValue) -> tuple[StructuredAstValue, ...]:
     """Convert a dynamic angr/codegen iterable to a tuple without changing semantics."""
     return tuple(cast(Iterable[StructuredAstValue], value))
 
 
+@cython.ccall
 def _boundary_list_8616(value: StructuredAstValue) -> list[StructuredAstValue]:
     """Convert a dynamic angr/codegen iterable to a list without changing semantics."""
     return list(cast(Iterable[StructuredAstValue], value))
 
 
+@cython.ccall
 def _boundary_set_8616(value: StructuredAstValue) -> set[StructuredAstValue]:
     """Convert a dynamic angr/codegen iterable to a set without changing semantics."""
     return set(cast(Iterable[StructuredAstValue], value))
@@ -310,8 +319,10 @@ _SEGMENT_REGISTER_NAMES_8616 = {"cs", "ds", "es", "ss"}
 log: logging.Logger = logging.getLogger(__name__)
 
 
-def _stat_counter_8616(stats: Mapping[str, StructuredAstValue], key: str) -> int:
+@cython.ccall
+def _stat_counter_8616(stats: Mapping[str, StructuredAstValue], key: object) -> cython.longlong:
     """Return a non-throwing integer counter from lowering telemetry stats."""
+    value: object
     value = stats.get(key, 0)
     if isinstance(value, bool):
         return int(value)
@@ -330,12 +341,12 @@ def _stat_counter_8616(stats: Mapping[str, StructuredAstValue], key: str) -> int
 def _record_semantic_lane_8616(
     codegen: StructuredAstValue,
     *,
-    name: str,
-    raw: int,
-    normalized: int,
-    classified: int,
-    materialized: int,
-    failures: int,
+    name: object,
+    raw: cython.longlong,
+    normalized: cython.longlong,
+    classified: cython.longlong,
+    materialized: cython.longlong,
+    failures: cython.longlong,
 ) -> SemanticLaneState:
     """Record one semantic-lane counter snapshot on codegen."""
     lane = SemanticLaneState(
@@ -347,7 +358,7 @@ def _record_semantic_lane_8616(
         failures=failures,
     )
     lanes = _boundary_tuple_8616(getattr(codegen, "_inertia_semantic_lanes_8616", ()) or ())
-    filtered = tuple(existing for existing in lanes if existing.name != lane.name)
+    filtered = tuple(existing for existing in iter(lanes) if operator.ne(existing.name, lane.name))
     codegen._inertia_semantic_lanes_8616 = (*filtered, lane)
     return lane
 
@@ -361,7 +372,7 @@ def _record_direct_stack_move_lanes_8616(
 ) -> None:
     """Record the current direct stack MOV pass without historical failures."""
 
-    def _current_counter(name: str) -> int:
+    def _current_counter(name: object) -> cython.longlong:
         current = _stat_counter_8616(stats, name)
         if prior_stats is None:
             return current
@@ -389,6 +400,7 @@ def _record_direct_stack_move_lanes_8616(
     codegen._inertia_direct_stack_mov_lane_8616 = lane
 
 
+@cython.ccall
 def _record_direct_stack_update_lane_8616(codegen: StructuredAstValue, stats: Mapping[str, StructuredAstValue]) -> None:
     """Record direct stack update evidence counters as a semantic lane."""
     raw = _stat_counter_8616(stats, "raw_fact_count")
@@ -409,44 +421,50 @@ def _record_direct_stack_update_lane_8616(codegen: StructuredAstValue, stats: Ma
     codegen._inertia_direct_stack_update_lane_8616 = lane
 
 
+@cython.ccall
 def _dirty_reg_offset_8616(dirty: StructuredAstValue) -> int | None:
     offset = physical_register_offset_8616(dirty)
     return offset if isinstance(offset, int) else None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RealModeLinearStackAccess8616:
     """Stable SS stack access recovered from real-mode linear address math."""
 
-    displacement: int
+    displacement: cython.longlong
     width: int | None
     entry_sp_offset: int | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RealModeIndexedStackAddress8616:
     """BP-indexed stack address recovered from binary memory-operand evidence."""
 
-    base_displacement: int
-    residual_terms: tuple[tuple[int, StructuredAstValue], ...]
+    base_displacement: cython.longlong
+    residual_terms: object
     width: int | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RealModeLinearGlobalAddress8616:
     """Stable DS/ES address-valued expression recovered from real-mode linear math."""
 
-    segment_name: str
-    displacement: int
-    residual_terms: tuple[tuple[int, StructuredAstValue], ...]
+    segment_name: object
+    displacement: cython.longlong
+    residual_terms: object
     width: int | None = None
 
 
+@cython.ccall
 def _record_real_mode_global_lowering_evidence_8616(
     codegen: StructuredCodegenValue,
     project: AngrProjectValue,
     access: RealModeLinearGlobalAddress8616,
 ) -> None:
+    lowering: object
+    owner: object
+    previous: object
+    stats: object
     segment_name = access.segment_name.lower()
     if segment_name not in {"ds", "es"}:
         return
@@ -478,62 +496,62 @@ def _record_real_mode_global_lowering_evidence_8616(
     stats["materialized_count"] = int(stats.get("materialized_count", 0) or 0) + 1
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectGlobalUpdateFact8616:
     """Binary-proven direct no-base/no-index global INC/DEC side effect."""
 
-    displacement: int
-    width: int
-    delta: int
-    ins_addr: int
+    displacement: cython.longlong
+    width: cython.longlong
+    delta: cython.longlong
+    ins_addr: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConsumedCallPushCarrierPrune8616:
     """Evidence census for impossible BP-local assignments tagged to consumed PUSH effects."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    preserved_live_definition_count: int = 0
-    liveness_refusal_count: int = 0
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    preserved_live_definition_count: cython.longlong = 0
+    liveness_refusal_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class MaterializedCallPushReplay8616:
     """Evidence census for replaying exact callsite PUSH consumption."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    consumed_push_instruction_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    consumed_push_instruction_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class MaterializedCallCleanupReplay8616:
     """Evidence census for caller cleanup effects consumed by structured calls."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    consumed_cleanup_instruction_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    consumed_cleanup_instruction_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FramePrologueCarrierPrune8616:
     """Evidence census for source-invisible canonical BP-prologue assignments."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
 class _FramePrologueCarrierPruneOwner8616(Protocol):
@@ -559,14 +577,14 @@ class DirectStackUpdateOp8616(Enum):
     SHIFT_RIGHT = "shift_right"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectStackUpdateFact8616:
     """Binary-proven direct BP-relative stack arithmetic side effect."""
 
-    offset: int
-    width: int
-    delta: int
-    ins_addr: int
+    offset: cython.longlong
+    width: cython.longlong
+    delta: cython.longlong
+    ins_addr: cython.longlong
     source_kind: DirectStackUpdateSourceKind8616 = DirectStackUpdateSourceKind8616.IMMEDIATE
     source_value: int | None = 1
     source_offset: int | None = None
@@ -576,12 +594,12 @@ class DirectStackUpdateFact8616:
     source_index_scale: int | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectStackLoopIteratorMaterialization8616:
     """Result of binding one binary stack update to one structured loop iterator."""
 
-    matched: bool
-    changed: bool
+    matched: cython.bint
+    changed: cython.bint
 
 
 class DirectStackMoveSourceKind8616(Enum):
@@ -656,7 +674,7 @@ class StructuredCIntrinsic8616(Enum):
     INSERT = "INSERT"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectStackRegisterValue8616:
     """Small instruction-state fact for register values feeding BP stack stores."""
 
@@ -665,29 +683,29 @@ class DirectStackRegisterValue8616:
     width: int | None = None
     source_op: DirectStackMoveExpressionOp8616 | None = None
     source_immediate: int | None = None
-    segment_name: str | None = None
+    segment_name: object = None
     displacement: int | None = None
     index_stack_offset: int | None = None
     index_shift: int | None = None
     access_width: int | None = None
-    sign_extend: bool = False
+    sign_extend: cython.bint = False
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectStackIndexFact8616:
     """Binary-proven logical stack index and its byte-address scale."""
 
-    stack_offset: int
-    width: int
-    byte_scale: int
+    stack_offset: cython.longlong
+    width: cython.longlong
+    byte_scale: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectStackIndexedLoadFact8616:
     """Binary-proven indexed load from a BP-relative stack aggregate."""
 
-    base_offset: int
-    access_width: int
+    base_offset: cython.longlong
+    access_width: cython.longlong
     index: DirectStackIndexFact8616
 
 
@@ -708,105 +726,105 @@ class DirectGlobalLoopInsertionStatus8616(Enum):
     REFUSED_UNPROVEN_NESTED_SCOPE = "refused_unproven_nested_scope"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectStackMoveFact8616:
     """Binary-proven direct BP-relative stack MOV side effect."""
 
-    dst_offset: int
-    width: int
+    dst_offset: cython.longlong
+    width: cython.longlong
     source_kind: DirectStackMoveSourceKind8616
-    ins_addr: int
+    ins_addr: cython.longlong
     source_value: int | None = None
     source_offset: int | None = None
     source_rhs_offset: int | None = None
     source_op: DirectStackMoveExpressionOp8616 | None = None
     source_immediate: int | None = None
     source_call_target: int | None = None
-    source_call_name: str | None = None
+    source_call_name: object = None
     source_call_ins_addr: int | None = None
     source_call_return_contract: RuntimeCallReturnContract8616 | None = None
     source_low_arith_ins_addr: int | None = None
     source_high_arith_ins_addr: int | None = None
     dst_high_ins_addr: int | None = None
-    source_segment_name: str | None = None
+    source_segment_name: object = None
     source_global_displacement: int | None = None
     source_aggregate_base_offset: int | None = None
     source_displacement: int | None = None
     source_index_offset: int | None = None
     source_index_shift: int | None = None
-    source_index_byte_scale: int = 1
+    source_index_byte_scale: cython.longlong = 1
     source_access_width: int | None = None
-    source_sign_extend: bool = False
+    source_sign_extend: cython.bint = False
     dst_index_global_displacement: int | None = None
     dst_index_stack_offset: int | None = None
     dst_index_immediate: int | None = None
-    dst_index_scale: int = 1
-    dst_index_byte_scale: int = 1
+    dst_index_scale: cython.longlong = 1
+    dst_index_byte_scale: cython.longlong = 1
     source_register_offset: int | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectStackWriteSite8616:
     """One explicit binary instruction write to a BP-relative stack range."""
 
-    dst_offset: int
-    width: int
-    ins_addr: int
+    dst_offset: cython.longlong
+    width: cython.longlong
+    ins_addr: cython.longlong
 
-    def overlaps(self, offset: int, width: int) -> bool:
+    def overlaps(self, offset: cython.longlong, width: cython.longlong) -> cython.bint:
         """Return whether this write overlaps the requested BP-relative range."""
         return self.dst_offset < offset + width and offset < self.dst_offset + self.width
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectStackWriteInventory8616:
     """Typed Lowering inventory for exact binary BP-relative write provenance."""
 
-    decoded_instruction_addrs: frozenset[int]
-    write_sites: tuple[DirectStackWriteSite8616, ...]
-    unknown_write_sites: tuple[DirectStackWriteSite8616, ...]
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    decoded_instruction_addrs: object
+    write_sites: object
+    unknown_write_sites: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     def classify(
         self,
         *,
-        ins_addr: int,
-        dst_offset: int,
-        width: int,
+        ins_addr: cython.longlong,
+        dst_offset: cython.longlong,
+        width: cython.longlong,
     ) -> DirectStackWriteClassification8616:
         """Classify one tagged assignment against exact decoded instructions."""
         if ins_addr not in self.decoded_instruction_addrs:
             return DirectStackWriteClassification8616.UNKNOWN
         if any(
-            site.ins_addr == ins_addr and site.overlaps(dst_offset, width)
-            for site in self.unknown_write_sites
+            operator.eq(site.ins_addr, ins_addr) and site.overlaps(dst_offset, width)
+            for site in iter(self.unknown_write_sites)
         ):
             return DirectStackWriteClassification8616.UNKNOWN
         if any(
-            site.ins_addr == ins_addr and site.overlaps(dst_offset, width)
-            for site in self.write_sites
+            operator.eq(site.ins_addr, ins_addr) and site.overlaps(dst_offset, width)
+            for site in iter(self.write_sites)
         ):
             return DirectStackWriteClassification8616.EXACT_WRITE
         return DirectStackWriteClassification8616.PROVEN_NOT_WRITE
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectStackMoveExtentEvidence8616:
     """Closed evidence loop for an inventory-proven function decode extension."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
     function_addr: int | None
     original_end: int | None
     proven_end: int | None
-    recovered_fact_count: int
+    recovered_fact_count: cython.longlong
 
 
 class _DirectStackMoveExtentEvidenceOwner8616(Protocol):
@@ -821,25 +839,25 @@ class _DirectStackWriteInventoryOwner8616(Protocol):
     _inertia_direct_stack_write_inventory_8616: DirectStackWriteInventory8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectStackFunctionTarget8616:
     """Resolved near-code pointer target for a function-pointer stack store."""
 
-    name: str
-    addr: int
+    name: object
+    addr: cython.longlong
     evidence: DirectStackFunctionTargetEvidence8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectStackReloadFact8616:
     """Binary-proven register reload from a materialized BP-relative stack slot."""
 
-    source_offset: int
-    width: int
-    dst_reg_id: int
-    dst_reg_name: str
-    ins_addr: int
-    source_store_ins_addr: int
+    source_offset: cython.longlong
+    width: cython.longlong
+    dst_reg_id: cython.longlong
+    dst_reg_name: object
+    ins_addr: cython.longlong
+    source_store_ins_addr: cython.longlong
     source_kind: DirectStackMoveSourceKind8616
 
 
@@ -851,28 +869,28 @@ class _DirectStackReloadPlacement8616(Enum):
     MATERIALIZED = "materialized"
 
     @property
-    def present(self) -> bool:
+    def present(self) -> cython.bint:
         """Return whether the reload semantics are present after the operation."""
         return self is not _DirectStackReloadPlacement8616.NO_MATCH
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether this operation changed the structured C AST."""
         return self is _DirectStackReloadPlacement8616.MATERIALIZED
 
 
 def _materialized_store_fact_for_reload_8616(
     reload_fact: DirectStackReloadFact8616,
-    materialized_facts: tuple[DirectStackMoveFact8616, ...],
+    materialized_facts: object,
 ) -> DirectStackMoveFact8616 | None:
     """Return the unique materialized store fact that owns one exact reload."""
     candidates = tuple(
         dict.fromkeys(
             fact
-            for fact in materialized_facts
-            if fact.ins_addr == reload_fact.source_store_ins_addr
-            and fact.dst_offset == reload_fact.source_offset
-            and fact.width == reload_fact.width
+            for fact in iter(materialized_facts)
+            if operator.eq(fact.ins_addr, reload_fact.source_store_ins_addr)
+            and operator.eq(fact.dst_offset, reload_fact.source_offset)
+            and operator.eq(fact.width, reload_fact.width)
             and fact.source_kind is reload_fact.source_kind
         )
     )
@@ -897,6 +915,7 @@ _STACK_CARRIER_DELTA_SOURCE_PRIORITY_8616 = {
 _UNRESOLVED_STACK_OFFSET_8616 = object()
 
 
+@cython.ccall
 def _type_for_access_width_8616(width: int | None) -> StructuredAstValue:
     if width == 1:
         return SimTypeChar(False)
@@ -905,7 +924,9 @@ def _type_for_access_width_8616(width: int | None) -> StructuredAstValue:
     return SimTypeShort(False)
 
 
-def _bind_type_to_codegen_arch_8616(codegen: StructuredCodegenValue, type_: StructuredAstValue) -> StructuredAstValue:
+@cython.ccall
+def _bind_type_to_codegen_arch_8616(codegen: StructuredCodegenValue, type_: object) -> StructuredAstValue:
+    arch: object
     arch = getattr(getattr(codegen, "project", None), "arch", None)
     if arch is None or type_ is None or getattr(type_, "_arch", None) is not None:
         return type_
@@ -917,7 +938,9 @@ def _bind_type_to_codegen_arch_8616(codegen: StructuredCodegenValue, type_: Stru
         return type_
 
 
-def _bind_c_expr_type_to_codegen_arch_8616(codegen: StructuredCodegenValue, expr: StructuredAstValue) -> None:
+@cython.ccall
+def _bind_c_expr_type_to_codegen_arch_8616(codegen: StructuredCodegenValue, expr: object) -> None:
+    current_type: object
     if expr is None:
         return
     current_type = getattr(expr, "variable_type", None)
@@ -927,7 +950,11 @@ def _bind_c_expr_type_to_codegen_arch_8616(codegen: StructuredCodegenValue, expr
             expr.variable_type = bound_type
 
 
+@cython.ccall
 def _dereference_access_width_bytes_8616(node: StructuredAstValue) -> int | None:
+    dst_type: object
+    operand: object
+    width_bits: object
     width_bits = getattr(getattr(node, "type", None), "size", None)
     if isinstance(width_bits, int) and width_bits > 0:
         return max(width_bits // 8, 1)
@@ -941,8 +968,9 @@ def _dereference_access_width_bytes_8616(node: StructuredAstValue) -> int | None
     return None
 
 
+@cython.ccall
 def _cvar_storage_size_bytes_8616(cvar: StructuredAstValue, variable: StructuredAstValue) -> int | None:
-    candidates: list[int] = []
+    candidates: list[cython.longlong] = []
     size = variable.size if isinstance(variable, SimVariable) else None
     if isinstance(size, int) and size > 0:
         candidates.append(size)
@@ -955,8 +983,10 @@ def _cvar_storage_size_bytes_8616(cvar: StructuredAstValue, variable: Structured
     return min(candidates)
 
 
+@cython.ccall
 def _stack_bindings_from_codegen_8616(codegen: StructuredCodegenValue) -> tuple[StackVariableBinding, ...]:
     """Adapt concrete angr stack variables to the owned lowering contract once."""
+    variable: object
     try:
         cfunc = codegen.cfunc
         variables_in_use = cfunc.variables_in_use
@@ -984,10 +1014,12 @@ def _stack_bindings_from_codegen_8616(codegen: StructuredCodegenValue) -> tuple[
     return tuple(bindings)
 
 
+@cython.ccall
 def _apply_preferred_stack_cvar_name_8616(
-    cvar: StructuredAstValue, displacement: int, codegen: StructuredAstValue
+    cvar: StructuredAstValue, displacement: cython.longlong, codegen: StructuredAstValue
 ) -> None:
     """Apply the best known stack-object name to a CVariable surface."""
+    target: object
     if not isinstance(cvar, structured_c.CVariable):
         return
     variable = cvar.variable
@@ -1005,17 +1037,21 @@ def _apply_preferred_stack_cvar_name_8616(
         if target is None:
             continue
         with contextlib.suppress(Exception):
-            if target.name != preferred_name:
+            if operator.ne(target.name, preferred_name):
                 target.name = preferred_name
 
 
-def _copy_existing_arg_surface_to_stack_cvar_8616(existing_arg: StructuredAstValue, cvar: StructuredAstValue) -> bool:
+@cython.ccall
+def _copy_existing_arg_surface_to_stack_cvar_8616(existing_arg: StructuredAstValue, cvar: StructuredAstValue) -> cython.bint:
     """Preserve stronger existing argument name/type evidence on a promoted body CVariable."""
+    existing_type: object
+    existing_variable: object
+    target: object
     if existing_arg is cvar or not isinstance(cvar, structured_c.CVariable):
         return False
     changed = False
     existing_type = getattr(existing_arg, "variable_type", None)
-    if existing_type is not None and getattr(cvar, "variable_type", None) != existing_type:
+    if existing_type is not None and operator.ne(getattr(cvar, "variable_type", None), existing_type):
         cvar.variable_type = existing_type
         changed = True
     existing_variable = getattr(existing_arg, "variable", None)
@@ -1025,14 +1061,19 @@ def _copy_existing_arg_surface_to_stack_cvar_8616(existing_arg: StructuredAstVal
             if target is None:
                 continue
             with contextlib.suppress(Exception):
-                if getattr(target, "name", None) != existing_name:
+                if operator.ne(getattr(target, "name", None), existing_name):
                     target.name = existing_name
                     changed = True
     return changed
 
 
-def _prototype_arg_type_for_bp_offset_8616(codegen: StructuredCodegenValue, offset: int) -> StructuredAstValue | None:
+def _prototype_arg_type_for_bp_offset_8616(codegen: StructuredCodegenValue, offset: cython.longlong) -> StructuredAstValue | None:
     """Resolve a parameter type by its exact materialized BP coordinate."""
+    cfunc: object
+    variable: object
+    arg_type: object
+    argument: object
+    proto: object
     if not isinstance(offset, int) or offset < 4:
         return None
     cfunc = getattr(codegen, "cfunc", None)
@@ -1043,10 +1084,10 @@ def _prototype_arg_type_for_bp_offset_8616(codegen: StructuredCodegenValue, offs
         prototype_arguments = _boundary_tuple_8616(
             getattr(proto, "args", ()) or ()
         )
-        if prototype_arguments and len(physical_arguments) == len(
+        if prototype_arguments and operator.eq(len(physical_arguments), len(
             prototype_arguments
-        ):
-            physical_types: list[tuple[int, StructuredAstValue]] = []
+        )):
+            physical_types: list[tuple[cython.longlong, StructuredAstValue]] = []
             for argument, arg_type in zip(
                 physical_arguments,
                 prototype_arguments,
@@ -1064,7 +1105,7 @@ def _prototype_arg_type_for_bp_offset_8616(codegen: StructuredCodegenValue, offs
             else:
                 matches = tuple(
                     arg_type
-                    for bp_offset, arg_type in physical_types
+                    for bp_offset, arg_type in iter(physical_types)
                     if bp_offset == offset
                 )
                 return matches[0] if len(matches) == 1 else None
@@ -1076,8 +1117,10 @@ def _prototype_arg_type_for_bp_offset_8616(codegen: StructuredCodegenValue, offs
     return None
 
 
+@cython.ccall
 def _canonical_arg_offset_8616(codegen: StructuredAstValue, arg: StructuredAstValue) -> int | None:
     """Return a canonical BP offset for an arg's backing stack variable."""
+    arg_var: object
     arg_var = getattr(arg, "variable", None)
     if not isinstance(arg_var, SimStackVariable):
         return None
@@ -1089,9 +1132,12 @@ def _canonical_arg_offset_8616(codegen: StructuredAstValue, arg: StructuredAstVa
     )
 
 
-def _bp_arg_offset_map_8616(codegen: StructuredAstValue, cfunc: StructuredAstValue) -> dict[int, StructuredAstValue]:
+@cython.ccall
+def _bp_arg_offset_map_8616(codegen: StructuredAstValue, cfunc: StructuredAstValue) -> object:
     """Map positive BP argument offsets to their arg cvars."""
-    arg_by_offset: dict[int, StructuredAstValue] = {}
+    arg_var: object
+    arg: object
+    arg_by_offset: dict[cython.longlong, StructuredAstValue] = {}
     for arg in _boundary_tuple_8616(getattr(cfunc, "arg_list", ()) or ()):
         arg_var = getattr(arg, "variable", None)
         arg_offset = _canonical_arg_offset_8616(codegen, arg)
@@ -1100,10 +1146,13 @@ def _bp_arg_offset_map_8616(codegen: StructuredAstValue, cfunc: StructuredAstVal
     return arg_by_offset
 
 
+@cython.ccall
 def _prune_unified_stack_vars_at_offset_8616(
-    codegen: StructuredAstValue, cfunc: StructuredAstValue, offset: int
+    codegen: StructuredAstValue, cfunc: StructuredAstValue, offset: cython.longlong
 ) -> None:
     """Drop stale unified-local entries aliasing the proven BP offset."""
+    unified: object
+    existing: object
     unified = getattr(cfunc, "unified_local_vars", None)
     if not isinstance(unified, dict):
         return
@@ -1119,8 +1168,14 @@ def _prune_unified_stack_vars_at_offset_8616(
             del unified[existing]
 
 
+@cython.ccall
 def _rebuild_cfunc_prototype_8616(codegen: StructuredAstValue, cfunc: StructuredAstValue) -> None:
     """Rebuild the function prototype from the reconciled arg list."""
+    arch: object
+    arg_var: object
+    proto_arg_type: object
+    prototype: object
+    arg: object
     prototype = getattr(cfunc, "functy", None) or getattr(cfunc, "prototype", None)
     return_type = getattr(prototype, "returnty", None) if prototype is not None else SimTypeShort(False)
     arg_types = []
@@ -1138,12 +1193,12 @@ def _rebuild_cfunc_prototype_8616(codegen: StructuredAstValue, cfunc: Structured
         ):
             proto_arg_type = None
         arg_type = proto_arg_type or getattr(arg, "variable_type", None) or SimTypeShort(False)
-        if proto_arg_type is not None and getattr(arg, "variable_type", None) != proto_arg_type:
+        if proto_arg_type is not None and operator.ne(getattr(arg, "variable_type", None), proto_arg_type):
             arg.variable_type = proto_arg_type
         arg_types.append(arg_type)
     arg_names = [
         getattr(getattr(arg, "variable", None), "name", None) or getattr(arg, "name", None) or f"arg_{idx}"
-        for idx, arg in enumerate(cfunc.arg_list)
+        for idx, arg in builtins.iter(enumerate(cfunc.arg_list))
     ]
     new_proto = SimTypeFunction(arg_types, return_type, arg_names=arg_names)
     arch = getattr(getattr(codegen, "project", None), "arch", None)
@@ -1155,10 +1210,16 @@ def _rebuild_cfunc_prototype_8616(codegen: StructuredAstValue, cfunc: Structured
         cfunc.prototype = new_proto
 
 
+@cython.ccall
 def _ensure_positive_bp_stack_arg_8616(
     codegen: StructuredAstValue, cvar: StructuredAstValue, target_type: StructuredAstValue
 ) -> None:
     """Register a proven positive-BP stack CVariable without weakening argument evidence."""
+    cfunc: object
+    existing_arg: object
+    prototype_type: object
+    variable: object
+    variables_in_use: object
     cfunc = getattr(codegen, "cfunc", None)
     variable = getattr(cvar, "variable", None)
     if cfunc is None or not isinstance(variable, SimStackVariable):
@@ -1178,7 +1239,7 @@ def _ensure_positive_bp_stack_arg_8616(
         and _type_size_bytes_8616(prototype_type, default=0) >= target_width
         else target_type
     )
-    if getattr(cvar, "variable_type", None) != effective_type:
+    if operator.ne(getattr(cvar, "variable_type", None), effective_type):
         cvar.variable_type = effective_type
         if prototype_type is not None:
             codegen._inertia_stack_arg_source_prototype_type_materialized_8616 = (
@@ -1192,7 +1253,7 @@ def _ensure_positive_bp_stack_arg_8616(
     required_width = max(target_width, variable.size if isinstance(variable.size, int) else 0)
     _ensure_stack_cvar_min_width_8616(codegen, cvar, required_width)
     arg_by_offset[offset] = cvar
-    cfunc.arg_list = [arg_by_offset[key] for key in sorted(arg_by_offset)]
+    cfunc.arg_list = [arg_by_offset[key] for key in builtins.iter(sorted(arg_by_offset))]
 
     variables_in_use = getattr(cfunc, "variables_in_use", None)
     if isinstance(variables_in_use, dict):
@@ -1201,6 +1262,7 @@ def _ensure_positive_bp_stack_arg_8616(
     _rebuild_cfunc_prototype_8616(codegen, cfunc)
 
 
+@cython.ccall
 def _projected_materialized_owner_8616(
     projected_value: StructuredAstValue,
     owner_projection: StructuredAstValue,
@@ -1224,13 +1286,15 @@ def _projected_materialized_owner_8616(
 _NO_STACK_PROJECTION_8616 = object()
 
 
+@cython.ccall
 def _projected_stack_cvar_8616(
-    projected_value: StructuredAstValue,
+    projected_value: object,
     target_type: StructuredAstValue,
     variables_in_use: StructuredAstValue,
     codegen: StructuredAstValue,
 ) -> StructuredAstValue:
     """Resolve the projection outcome: owner cvar, refusal, or no projection."""
+    owner_projection: object
     if projected_value is None:
         return _NO_STACK_PROJECTION_8616
     owner_projection = projected_value.owner
@@ -1253,16 +1317,18 @@ def _projected_stack_cvar_8616(
     return _NO_STACK_PROJECTION_8616
 
 
+@cython.ccall
 def _existing_stack_cvar_8616(
     codegen: StructuredAstValue,
     cfunc: StructuredAstValue,
-    displacement: int,
+    displacement: cython.longlong,
     requested_size: int | None,
-    require_lvalue: bool,
+    require_lvalue: cython.bint,
     target_type: StructuredAstValue,
     variables_in_use: StructuredAstValue,
 ) -> StructuredAstValue:
     """Reuse an existing arg-list or variables_in_use cvar for the displacement."""
+    existing: object
     existing = _existing_arg_stack_cvar_8616(
         codegen, cfunc, displacement, requested_size, require_lvalue, target_type, variables_in_use
     )
@@ -1275,44 +1341,47 @@ def _existing_stack_cvar_8616(
     return None
 
 
+@cython.ccall
 def _existing_stack_cvar_size_ok_8616(
     existing_size: int | None,
-    requested_size: int | None,
-    require_lvalue: bool,
-    displacement: int,
-) -> bool:
+    requested_size: object,
+    require_lvalue: cython.bint,
+    displacement: cython.longlong,
+) -> cython.bint:
     """Check the stored size of an existing cvar against the request."""
     return not (
         (requested_size is not None and isinstance(existing_size, int) and existing_size < requested_size)
-        or (require_lvalue and requested_size is not None and existing_size != requested_size)
+        or (require_lvalue and requested_size is not None and operator.ne(existing_size, requested_size))
         or (
             displacement < 0
             and requested_size is not None
             and isinstance(existing_size, int)
-            and existing_size != requested_size
+            and operator.ne(existing_size, requested_size)
         )
     )
 
 
+@cython.ccall
 def _existing_arg_stack_cvar_8616(
     codegen: StructuredAstValue,
     cfunc: StructuredAstValue,
-    displacement: int,
+    displacement: cython.longlong,
     requested_size: int | None,
-    require_lvalue: bool,
+    require_lvalue: cython.bint,
     target_type: StructuredAstValue,
     variables_in_use: StructuredAstValue,
 ) -> StructuredAstValue:
     """Reuse an argument-list cvar already bound to the stack displacement."""
+    variable: object
+    arg: object
     for arg in getattr(cfunc, "arg_list", ()) or ():
         variable = getattr(arg, "variable", None)
         if not (
             isinstance(arg, structured_c.CVariable)
             and isinstance(variable, SimStackVariable)
-            and _canonical_stack_offset_8616(
+            and operator.eq(_canonical_stack_offset_8616(
                 machine_bp_offset_for_stack_variable_8616(codegen, variable)
-            )
-            == displacement
+            ), displacement)
         ):
             continue
         existing_size = _cvar_storage_size_bytes_8616(arg, variable)
@@ -1336,22 +1405,24 @@ def _existing_arg_stack_cvar_8616(
     return None
 
 
+@cython.ccall
 def _existing_variables_in_use_stack_cvar_8616(
     codegen: StructuredAstValue,
-    displacement: int,
+    displacement: cython.longlong,
     requested_size: int | None,
-    require_lvalue: bool,
+    require_lvalue: cython.bint,
     target_type: StructuredAstValue,
-    variables_in_use: dict[StructuredAstValue, StructuredAstValue],
+    variables_in_use: object,
 ) -> StructuredAstValue:
     """Reuse a variables_in_use cvar already bound to the stack displacement."""
+    cvar: object
+    variable: object
     for variable, cvar in variables_in_use.items():
         if not (
             isinstance(variable, SimStackVariable)
-            and _canonical_stack_offset_8616(
+            and operator.eq(_canonical_stack_offset_8616(
                 machine_bp_offset_for_stack_variable_8616(codegen, variable)
-            )
-            == displacement
+            ), displacement)
         ):
             continue
         existing_size = _cvar_storage_size_bytes_8616(cvar, variable)
@@ -1373,18 +1444,19 @@ def _existing_variables_in_use_stack_cvar_8616(
     return None
 
 
+@cython.ccall
 def _entry_sp_fallback_cvar_8616(
     codegen: StructuredAstValue,
-    displacement: int,
-    storage_size: int,
-    instruction_access: InstructionBpStackAccess8616 | None,
+    displacement: cython.longlong,
+    storage_size: cython.longlong,
+    instruction_access: object,
     target_type: StructuredAstValue,
 ) -> StructuredAstValue:
     """Materialize from instruction evidence when entry-SP mapping fails."""
     if (
         instruction_access is None
-        or instruction_access.displacement != displacement
-        or instruction_access.size != storage_size
+        or operator.ne(instruction_access.displacement, displacement)
+        or operator.ne(instruction_access.size, storage_size)
     ):
         return None
     cvar = _resolve_direct_stack_update_cvar_8616(
@@ -1399,15 +1471,20 @@ def _entry_sp_fallback_cvar_8616(
     return cvar
 
 
+@cython.ccall
 def stack_cvar_for_stable_ss_linear_access_8616(
     codegen: StructuredAstValue,
     access: RealModeLinearStackAccess8616,
     *,
     instruction_access: InstructionBpStackAccess8616 | None = None,
     owner_hint: StackValueOwnerHint8616 | None = None,
-    require_lvalue: bool = False,
+    require_lvalue: cython.bint = False,
 ) -> StructuredAstValue | None:
     """Materialize a proven SS access, retaining exact instruction evidence."""
+    cfunc: object
+    existing: object
+    requested_size: object
+    variables_in_use: object
     if access.entry_sp_offset is not None:
         if access.width is None or access.width <= 0:
             return None
@@ -1454,14 +1531,16 @@ def stack_cvar_for_stable_ss_linear_access_8616(
     )
 
 
+@cython.ccall
 def _materialize_ss_access_cvar_8616(
     codegen: StructuredAstValue,
-    displacement: int,
+    displacement: cython.longlong,
     requested_size: int | None,
     instruction_access: InstructionBpStackAccess8616 | None,
     target_type: StructuredAstValue,
 ) -> StructuredAstValue | None:
     """Materialize the access cvar from facts or the entry-SP fallback."""
+    entry_sp_offset: object
     storage_size = requested_size or 1
     entry_sp_offset = entry_sp_offset_for_machine_bp_range_8616(
         codegen,
@@ -1492,8 +1571,9 @@ def _materialize_ss_access_cvar_8616(
     return cvar
 
 
-def _positive_stack_spec_lookup_bias_8616(stack_specs: dict[StructuredAstValue, StructuredAstValue]) -> int:
-    positive_offsets = {int(key) for key in stack_specs if isinstance(key, int) and key > 0}
+@cython.ccall
+def _positive_stack_spec_lookup_bias_8616(stack_specs: object) -> cython.longlong:
+    positive_offsets = {int(key) for key in iter(stack_specs) if isinstance(key, int) and key > 0}
     # Some debug/object-file stack maps are biased by the near return address:
     # source arg0 is recorded at +2 while the linked binary uses BP+4. Pick one
     # bias for all positive argument slots; probing offset and offset-2 per slot
@@ -1503,8 +1583,11 @@ def _positive_stack_spec_lookup_bias_8616(stack_specs: dict[StructuredAstValue, 
     return 0
 
 
-def _stack_object_func_8616(codegen: StructuredCodegenValue, cfunc: StructuredAstValue) -> StructuredAstValue:
+@cython.ccall
+def _stack_object_func_8616(codegen: object, cfunc: object) -> StructuredAstValue:
     """Resolve the angr function backing the active cfunc."""
+    func: object
+    funcs: object
     try:
         func = codegen._func if codegen is not None else None
     except AttributeError:
@@ -1524,11 +1607,12 @@ def _stack_object_func_8616(codegen: StructuredCodegenValue, cfunc: StructuredAs
     return func
 
 
+@cython.ccall
 def _stack_spec_candidate_offsets_8616(
-    offset: int,
-    codegen: StructuredCodegenValue,
-    stack_specs: dict[StructuredAstValue, StructuredAstValue],
-) -> list[int]:
+    offset: cython.longlong,
+    codegen: object,
+    stack_specs: object,
+) -> object:
     """Build the ordered BP-offset candidates including stack-base biases."""
     candidate_offsets = [offset]
     stack_base_bias = None
@@ -1551,27 +1635,31 @@ def _stack_spec_candidate_offsets_8616(
     return candidate_offsets
 
 
+@cython.ccall
 def _resolved_stack_spec_size_8616(
-    offset: int,
+    offset: cython.longlong,
     byte_size: int | None,
-    bindings: tuple[StackVariableBinding, ...],
-) -> int:
+    bindings: object,
+) -> cython.longlong:
     """Pick the size for the stack annotation binding."""
     resolved_size = byte_size
     if not isinstance(resolved_size, int) or resolved_size <= 0:
-        matching_sizes = [binding.size for binding in bindings if binding.bp_offset == offset]
+        matching_sizes = [binding.size for binding in iter(bindings) if operator.eq(binding.bp_offset, offset)]
         resolved_size = max(matching_sizes, default=1)
     return resolved_size
 
 
+@cython.ccall
 def _preferred_stack_object_name_8616(
-    offset: int,
+    offset: cython.longlong,
     codegen: StructuredCodegenValue = None,
     *,
     byte_size: int | None = None,
-    known_bindings: tuple[StackVariableBinding, ...] | None = None,
-) -> str:
+    known_bindings: object = None,
+) -> object:
     """Return an annotation name only for the matching proven stack object."""
+    func: object
+    selected: object
     default_name = machine_bp_stack_object_name_8616(offset, codegen=codegen)
     cfunc = codegen.cfunc if codegen is not None else None
     func = _stack_object_func_8616(codegen, cfunc)
@@ -1603,12 +1691,14 @@ def _preferred_stack_object_name_8616(
     return default_name
 
 
+@cython.ccall
 def _strip_casts_8616(node: StructuredAstValue) -> StructuredAstValue:
     while isinstance(node, structured_c.CTypeCast):
         node = node.expr
     return node
 
 
+@cython.ccall
 def _constant_value_8616(node: StructuredAstValue) -> int | None:
     node = _strip_casts_8616(node)
     if isinstance(node, structured_c.CConstant) and isinstance(node.value, int):
@@ -1616,6 +1706,7 @@ def _constant_value_8616(node: StructuredAstValue) -> int | None:
     return None
 
 
+@cython.ccall
 def _sim_variable_global_address_8616(variable: StructuredAstValue) -> int | None:
     if isinstance(variable, SimMemoryVariable):
         addr = variable.addr
@@ -1632,13 +1723,15 @@ def _sim_variable_global_address_8616(variable: StructuredAstValue) -> int | Non
     return None
 
 
-def _address_label_value_8616(node: StructuredAstValue, *, allow_sp_anchor: bool = False) -> int | None:
+@cython.ccall
+def _address_label_value_8616(node: StructuredAstValue, *, allow_sp_anchor: cython.bint = False) -> int | None:
     """Return an address literal carried by an address-label C expression.
 
     This is intentionally narrower than `_constant_value_8616`: it only applies
     inside real-mode effective-address decomposition, where a materialized
     `&global` label is evidence for an offset, not a pointer-valued data use.
     """
+    addr: object
     node = _strip_casts_8616(node)
     if not isinstance(node, structured_c.CUnaryOp) or node.op != "Reference":
         return None
@@ -1657,9 +1750,14 @@ def _address_label_value_8616(node: StructuredAstValue, *, allow_sp_anchor: bool
     return None
 
 
-def _term_contains_memory_address_label_8616(node: StructuredAstValue) -> bool:
+def _term_contains_memory_address_label_8616(node: StructuredAstValue) -> cython.bint:
+    child: object
+    children: object
+    expr: object
+    variable: object
+    attr: object
     pending: list[StructuredAstValue] = [_strip_casts_8616(node)]
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     while pending:
         expr = _strip_casts_8616(pending.pop())
         if expr is None:
@@ -1682,17 +1780,19 @@ def _term_contains_memory_address_label_8616(node: StructuredAstValue) -> bool:
         for attr in ("args", "operands"):
             children = getattr(expr, attr, None)
             if isinstance(children, (list, tuple)):
-                pending.extend(child for child in children if child is not None)
+                pending.extend(child for child in iter(children) if child is not None)
     return False
 
 
+@cython.ccall
 def _normalize_address_label_terms_8616(
     node: StructuredAstValue,
     codegen: StructuredCodegenValue = None,
     *,
-    allow_sp_anchor: bool = False,
-) -> tuple[StructuredAstValue, int]:
+    allow_sp_anchor: cython.bint = False,
+) -> tuple[StructuredAstValue, cython.longlong]:
     """Fold address-label references to integer offsets inside EA arithmetic."""
+    folded_value: object
     if isinstance(node, CSemanticCast8616):
         expression, count = _normalize_address_label_terms_8616(
             node.expr, codegen=codegen, allow_sp_anchor=allow_sp_anchor,
@@ -1742,7 +1842,12 @@ def _normalize_address_label_terms_8616(
     return node, 0
 
 
-def _has_bp_stack_alias_evidence_8616(codegen: StructuredAstValue) -> bool:
+@cython.ccall
+def _has_bp_stack_alias_evidence_8616(codegen: StructuredAstValue) -> cython.bint:
+    facts: object
+    variables_in_use: object
+    fact: object
+    variable: object
     facts = getattr(codegen, "_inertia_semantic_alias_facts", None)
     if isinstance(facts, list):
         for fact in facts:
@@ -1763,9 +1868,11 @@ def _has_bp_stack_alias_evidence_8616(codegen: StructuredAstValue) -> bool:
     return False
 
 
-def _bp_offsets_from_alias_facts_8616(facts: StructuredAstValue) -> set[int]:
+@cython.ccall
+def _bp_offsets_from_alias_facts_8616(facts: StructuredAstValue) -> object:
     """Collect canonical BP offsets from stack-alias storage facts."""
-    offsets: set[int] = set()
+    fact: object
+    offsets: set[cython.longlong] = set()
     if not isinstance(facts, list):
         return offsets
     for fact in facts:
@@ -1783,9 +1890,11 @@ def _bp_offsets_from_alias_facts_8616(facts: StructuredAstValue) -> set[int]:
     return offsets
 
 
-def _bp_offsets_from_bindings_8616(bindings: StructuredAstValue) -> set[int]:
+@cython.ccall
+def _bp_offsets_from_bindings_8616(bindings: StructuredAstValue) -> object:
     """Collect canonical BP offsets from stack-variable bindings."""
-    offsets: set[int] = set()
+    binding: object
+    offsets: set[cython.longlong] = set()
     if not isinstance(bindings, tuple):
         return offsets
     for binding in bindings:
@@ -1797,6 +1906,7 @@ def _bp_offsets_from_bindings_8616(bindings: StructuredAstValue) -> set[int]:
     return offsets
 
 
+@cython.ccall
 def _bp_offset_of_stack_variable_8616(
     codegen: StructuredAstValue, variable: StructuredAstValue
 ) -> int | None:
@@ -1806,12 +1916,17 @@ def _bp_offset_of_stack_variable_8616(
     return cast("int | None", _canonical_stack_offset_8616(machine_bp_offset_for_stack_variable_8616(codegen, variable)))
 
 
-def _known_bp_stack_offsets_8616(codegen: StructuredAstValue) -> set[int]:
+@cython.ccall
+def _known_bp_stack_offsets_8616(codegen: StructuredAstValue) -> object:
+    cfunc: object
+    variables_in_use: object
+    arg: object
+    variable: object
     cfunc = getattr(codegen, "cfunc", None)
     variables_in_use = getattr(cfunc, "variables_in_use", None)
     arg_list = getattr(cfunc, "arg_list", ()) or ()
 
-    offsets: set[int] = set()
+    offsets: set[cython.longlong] = set()
     offsets.update(_bp_offsets_from_alias_facts_8616(getattr(codegen, "_inertia_semantic_alias_facts", None)))
     offsets.update(_bp_offsets_from_bindings_8616(getattr(codegen, "_inertia_stack_variable_bindings", None)))
 
@@ -1844,11 +1959,14 @@ def _typed_stack_probe_return_facts_8616(codegen: StructuredAstValue) -> tuple[T
     facts = getattr(codegen, "_inertia_typed_stack_probe_return_facts", {}) or {}
     if not isinstance(facts, dict):
         return ()
-    return tuple(fact for fact in facts.values() if isinstance(fact, TypedStackProbeReturnFact8616))
+    return tuple(fact for fact in builtins.iter(facts.values()) if isinstance(fact, TypedStackProbeReturnFact8616))
 
 
-def _bp_stack_arg_offsets_8616(codegen: StructuredCodegenValue) -> set[int]:
-    offsets: set[int] = set()
+@cython.ccall
+def _bp_stack_arg_offsets_8616(codegen: StructuredCodegenValue) -> object:
+    variable: object
+    arg: object
+    offsets: set[cython.longlong] = set()
     for arg in getattr(getattr(codegen, "cfunc", None), "arg_list", ()) or ():
         variable = getattr(arg, "variable", None)
         if not isinstance(variable, SimStackVariable) or getattr(variable, "base", None) != "bp":
@@ -1863,9 +1981,10 @@ def _bp_stack_arg_offsets_8616(codegen: StructuredCodegenValue) -> set[int]:
     return offsets
 
 
+@cython.ccall
 def _positive_bp_stack_access_has_arg_evidence_8616(
-    codegen: StructuredAstValue, offset: int, width: int | None
-) -> bool:
+    codegen: StructuredAstValue, offset: cython.longlong, width: int | None
+) -> cython.bint:
     """Return whether a positive BP offset is proven as an argument slot."""
     if not isinstance(offset, int) or offset <= 2:
         return True
@@ -1876,14 +1995,17 @@ def _positive_bp_stack_access_has_arg_evidence_8616(
     )
 
 
-def _bp_stack_abi_argument_region_offsets_8616(offsets: set[int]) -> set[int]:
+@cython.ccall
+def _bp_stack_abi_argument_region_offsets_8616(offsets: object) -> set[cython.longlong]:
     # In near BP-framed 16-bit C functions, BP+0 is saved BP and BP+2 is the
     # return address. Positive data arguments begin at BP+4. If this filtered
     # set is still ambiguous, carrier inference refuses instead of guessing.
-    return {offset for offset in offsets if offset >= 4}
+    return {offset for offset in iter(offsets) if offset >= 4}
 
 
-def _type_size_bytes_8616(type_: StructuredAstValue, *, default: int = 2) -> int:
+@cython.ccall
+def _type_size_bytes_8616(type_: StructuredAstValue, *, default: cython.longlong = 2) -> cython.longlong:
+    bits: object
     if isinstance(type_, SimTypeChar):
         return 1
     if isinstance(type_, SimTypeShort):
@@ -1897,10 +2019,16 @@ def _type_size_bytes_8616(type_: StructuredAstValue, *, default: int = 2) -> int
     return default
 
 
+@cython.ccall
 def _owner_candidate_prototypes_8616(
     codegen: StructuredAstValue, cfunc: StructuredAstValue
 ) -> tuple[list[StructuredAstValue], list[StructuredAstValue]]:
     """Return (proven, deferred) prototypes collected from function owners."""
+    func_addr: object
+    kb: object
+    owner: object
+    project: object
+    proto: object
     proven: list[StructuredAstValue] = []
     deferred: list[StructuredAstValue] = []
     project = getattr(codegen, "project", None)
@@ -1932,7 +2060,11 @@ def _owner_candidate_prototypes_8616(
     return proven, deferred
 
 
+@cython.ccall
 def _candidate_function_prototypes_8616(codegen: StructuredCodegenValue) -> tuple[StructuredAstValue, ...]:
+    cfunc: object
+    proto: object
+    attr: object
     cfunc = getattr(codegen, "cfunc", None)
     prototypes, deferred_owner_prototypes = _owner_candidate_prototypes_8616(codegen, cfunc)
     for attr in ("functy", "prototype"):
@@ -1945,11 +2077,16 @@ def _candidate_function_prototypes_8616(codegen: StructuredCodegenValue) -> tupl
     return tuple(prototypes)
 
 
-def _prototype_bp_stack_offsets_8616(codegen: StructuredAstValue) -> set[int]:
+@cython.ccall
+def _prototype_bp_stack_offsets_8616(codegen: StructuredAstValue) -> object:
     """Return BP argument offsets implied by known function prototypes."""
+    cached: object
+    cfunc: object
+    arg_type: object
+    proto: object
     cfunc = getattr(codegen, "cfunc", None)
     cached = getattr(codegen, "_inertia_preserved_prototype_bp_stack_offsets_8616", None)
-    offsets: set[int] = (
+    offsets: object = (
         set(cached[1]) if isinstance(cached, tuple) and len(cached) == 2 and cached[0] is cfunc else set()
     )
     for proto in _candidate_function_prototypes_8616(codegen):
@@ -1969,21 +2106,27 @@ def _prototype_bp_stack_offsets_8616(codegen: StructuredAstValue) -> set[int]:
     return offsets
 
 
+@cython.ccall
 def _candidate_functions_for_stack_facts_8616(
     codegen: StructuredCodegenValue,
     project: StructuredAstValue | None = None,
 ) -> tuple[StructuredAstValue, ...]:
     """Return deduplicated function owners available at the angr boundary."""
+    candidate: object
+    cfunc: object
+    func_addr: object
+    kb: object
+    addr: object
     if project is None:
         project = getattr(codegen, "project", None)
     candidates = [
         candidate
-        for candidate in (
+        for candidate in iter((
             getattr(codegen, "_inertia_current_function_8616", None),
             getattr(codegen, "function", None),
             getattr(codegen, "_func", None),
             getattr(getattr(codegen, "cfunc", None), "function", None),
-        )
+        ))
         if candidate is not None
     ]
     cfunc = getattr(codegen, "cfunc", None)
@@ -1997,7 +2140,7 @@ def _candidate_functions_for_stack_facts_8616(
                 if candidate is not None:
                     candidates.append(candidate)
     deduped: list[StructuredAstValue] = []
-    seen_ids: set[int] = set()
+    seen_ids: set[cython.longlong] = set()
     for candidate in candidates:
         if id(candidate) in seen_ids:
             continue
@@ -2006,30 +2149,39 @@ def _candidate_functions_for_stack_facts_8616(
     return tuple(deduped)
 
 
-def _bp_memory_operand_offsets_from_function_blocks_8616(codegen: StructuredCodegenValue) -> set[int]:
+def _bp_memory_operand_offsets_from_function_blocks_8616(codegen: StructuredCodegenValue) -> object:
     """Return BP-relative displacements from one cached scan of function blocks."""
+    cached: object
+    capstone: object
+    cfunc: object
+    disp: object
+    mem: object
+    block: object
+    function: object
+    insn: object
+    operand: object
     functions = _candidate_functions_for_stack_facts_8616(codegen)
     cfunc = getattr(codegen, "cfunc", None)
     code_function_identity = id(cfunc)
-    function_identities = tuple(id(function) for function in functions)
+    function_identities = tuple(id(function) for function in iter(functions))
     cached = getattr(codegen, "_inertia_bp_memory_operand_offset_cache_8616", None)
     if (
         isinstance(cached, _BpMemoryOperandOffsetCache8616)
-        and cached.code_function_identity == code_function_identity
-        and cached.function_identities == function_identities
+        and operator.eq(cached.code_function_identity, code_function_identity)
+        and operator.eq(cached.function_identities, function_identities)
     ):
         return set(cached.offsets)
 
-    offsets: set[int] = set()
+    offsets: set[cython.longlong] = set()
     for function in functions:
         for block in getattr(function, "blocks", ()) or ():
             capstone = getattr(block, "capstone", None)
             for insn in getattr(capstone, "insns", ()) or ():
                 for operand in getattr(insn, "operands", ()) or ():
-                    if getattr(operand, "type", None) != X86_OP_MEM:
+                    if operator.ne(getattr(operand, "type", None), X86_OP_MEM):
                         continue
                     mem = getattr(operand, "mem", None)
-                    if getattr(mem, "base", None) != X86_REG_BP:
+                    if operator.ne(getattr(mem, "base", None), X86_REG_BP):
                         continue
                     disp = getattr(mem, "disp", None)
                     if isinstance(disp, int):
@@ -2044,8 +2196,11 @@ def _bp_memory_operand_offsets_from_function_blocks_8616(codegen: StructuredCode
     return offsets
 
 
+@cython.ccall
 def _stack_base_displacement_8616(node: StructuredAstValue) -> int | None:
     """Fold a ``stack_base [+/- const]`` expression into a displacement."""
+    lhs: object
+    rhs: object
     node = _strip_casts_8616(node)
     if _is_stack_base_placeholder_8616(node):
         return 0
@@ -2084,8 +2239,12 @@ _STACK_BASE_CHILD_ATTRS_8616 = (
 )
 
 
-def _push_stack_base_children_8616(node: StructuredAstValue, stack: list[StructuredAstValue]) -> None:
+@cython.ccall
+def _push_stack_base_children_8616(node: StructuredAstValue, stack: object) -> None:
     """Push all structured-codegen child nodes for the displacement walk."""
+    value: object
+    attr: object
+    item: object
     for attr in _STACK_BASE_CHILD_ATTRS_8616:
         if not hasattr(node, attr):
             continue
@@ -2105,8 +2264,9 @@ def _push_stack_base_children_8616(node: StructuredAstValue, stack: list[Structu
             stack.append(value)
 
 
+@cython.ccall
 def _record_stack_base_subexpr_displacements_8616(
-    node: StructuredAstValue, displacements: set[int]
+    node: StructuredAstValue, displacements: object
 ) -> None:
     """Record displacements from indexed/dereferenced stack_base subexpressions."""
     if isinstance(node, structured_c.CIndexedVariable):
@@ -2121,11 +2281,13 @@ def _record_stack_base_subexpr_displacements_8616(
             displacements.add(disp)
 
 
-def _iter_stack_base_displacements_8616(root: StructuredAstValue) -> tuple[int, ...]:
+@cython.ccall
+def _iter_stack_base_displacements_8616(root: StructuredAstValue) -> tuple[cython.longlong, ...]:
     """Collect all ``stack_base`` displacement observations under a statement root."""
+    node: object
     stack = [root]
-    seen: set[int] = set()
-    displacements: set[int] = set()
+    seen: set[cython.longlong] = set()
+    displacements: set[cython.longlong] = set()
     while stack:
         node = stack.pop()
         if node is None:
@@ -2150,17 +2312,20 @@ def _iter_stack_base_displacements_8616(root: StructuredAstValue) -> tuple[int, 
 
 
 
+@cython.ccall
 def _infer_bp_bias_from_multi_displacements_8616(
-    displacements: tuple[int, ...], known_offsets: set[int]
+    displacements: object, known_offsets: object
 ) -> int | None:
     """Vote on one BP bias when two or more stack_base displacements exist."""
+    disp: object
+    offset: object
     best_bias = None
     best_score = 0
     tied = False
     for disp in displacements:
         for offset in known_offsets:
             bias = offset - disp
-            score = len({candidate + bias for candidate in displacements if candidate + bias in known_offsets})
+            score = len({candidate + bias for candidate in iter(displacements) if candidate + bias in known_offsets})
             if score > best_score:
                 best_bias = bias
                 best_score = score
@@ -2172,6 +2337,7 @@ def _infer_bp_bias_from_multi_displacements_8616(
     return None
 
 
+@cython.ccall
 def _infer_stack_base_bp_bias_8616(codegen: StructuredCodegenValue) -> int | None:
     """Infer a BP bias from one exact structured-C and stack-evidence snapshot."""
     root = codegen.cfunc.statements
@@ -2217,6 +2383,7 @@ def _infer_stack_base_bp_bias_8616(codegen: StructuredCodegenValue) -> int | Non
     return inferred
 
 
+@cython.ccall
 def _stack_base_bp_bias_8616(node: StructuredAstValue, codegen: StructuredCodegenValue = None) -> int | None:
     node = _strip_casts_8616(node)
     if isinstance(node, structured_c.CFakeVariable) and getattr(node, "name", None) == "stack_base":
@@ -2232,14 +2399,16 @@ def _stack_base_bp_bias_8616(node: StructuredAstValue, codegen: StructuredCodege
     return None
 
 
-def _is_stack_base_placeholder_8616(node: StructuredAstValue) -> bool:
+@cython.ccall
+def _is_stack_base_placeholder_8616(node: StructuredAstValue) -> cython.bint:
     node = _strip_casts_8616(node)
     return isinstance(node, structured_c.CFakeVariable) and getattr(node, "name", None) == "stack_base"
 
 
+@cython.ccall
 def _segment_base_name_8616(
     node: StructuredAstValue, project: AngrProjectValue, codegen: StructuredCodegenValue = None
-) -> str | None:
+) -> object:
     """Return the segment register name for ``seg << 4`` or ``seg * 16``.
 
     If the segment term is a temporary name (for example ``vvar_*``), resolve
@@ -2249,13 +2418,18 @@ def _segment_base_name_8616(
     return _segment_base_name_8616_impl(node, project, codegen, set())
 
 
+@cython.ccall
 def _segment_base_name_from_dirty_8616(
     dirty: StructuredAstValue,
     project: AngrProjectValue,
-    codegen: StructuredCodegenValue,
-    seen: set[int],
-) -> str | None:
+    codegen: object,
+    seen: object,
+) -> object:
     """Resolve a segment name from an angr dirty-temp leaf."""
+    dirty_name: object
+    reg_name: object
+    rhs: object
+    varid: object
     reg = _dirty_reg_offset_8616(dirty)
     if isinstance(reg, int):
         reg_name = getattr(project.arch, "register_names", {}).get(reg)
@@ -2272,13 +2446,18 @@ def _segment_base_name_from_dirty_8616(
     return None
 
 
+@cython.ccall
 def _segment_base_name_from_leaf_8616(
     node: StructuredAstValue,
     project: AngrProjectValue,
-    codegen: StructuredCodegenValue,
-    seen: set[int],
-) -> str | None:
+    codegen: object,
+    seen: object,
+) -> object:
     """Resolve a segment name from a non-binary-op leaf node."""
+    dirty: object
+    dirty_name: object
+    reg_name: object
+    rhs: object
     dirty = getattr(node, "dirty", None)
     if dirty is not None:
         dirty_name = _segment_base_name_from_dirty_8616(dirty, project, codegen, seen)
@@ -2306,14 +2485,18 @@ def _segment_base_name_from_leaf_8616(
     return None
 
 
+@cython.ccall
 def _segment_base_name_from_scale_pairs_8616(
     node: StructuredAstValue,
-    expected_scale: int,
+    expected_scale: cython.longlong,
     project: AngrProjectValue,
     codegen: StructuredCodegenValue,
-    seen: set[int],
-) -> str | None:
+    seen: object,
+) -> object:
     """Try both operand orders of ``seg << 4`` / ``seg * 16``."""
+    segment_name: object
+    maybe_scale: object
+    maybe_seg: object
     for maybe_seg, maybe_scale in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
         scale_value = _constant_value_8616(maybe_scale)
         if scale_value != expected_scale:
@@ -2335,12 +2518,14 @@ def _segment_base_name_from_scale_pairs_8616(
     return None
 
 
+@cython.ccall
 def _segment_base_name_8616_impl(
     node: StructuredAstValue,
     project: AngrProjectValue,
     codegen: StructuredCodegenValue,
-    seen: set[int],
-) -> str | None:
+    seen: object,
+) -> object:
+    expected_scale: object
     node = _strip_casts_8616(node)
     node_id = id(node)
     if node_id in seen:
@@ -2363,22 +2548,27 @@ def _segment_base_name_8616_impl(
 
 
 
+@cython.ccall
 def _flatten_signed_terms_8616(
     node: StructuredAstValue,
-    sign: int = 1,
-) -> tuple[tuple[int, StructuredAstValue], ...] | None:
+    sign: cython.longlong = 1,
+) -> object:
     return cast(tuple[tuple[int, Any], ...], _flatten_signed_terms_impl_8616(node, sign))
 
 
+@cython.ccall
 def _flatten_signed_terms_impl_8616(
-    node: StructuredAstValue, sign: int
-) -> tuple[tuple[int, StructuredAstValue], ...] | None:
+    node: StructuredAstValue, sign: cython.longlong
+) -> object:
     """Iteratively flatten Add/Sub trees into signed leaf terms."""
-    terms: list[tuple[int, StructuredAstValue]] = []
+    current: object
+    current_sign: object
+    exiting: object
+    terms: list[tuple[cython.longlong, StructuredAstValue]] = []
     # We use an explicit stack to avoid recursion depth crashes on very deep trees.
     # active path markers prevent infinite loops from cyclic expressions.
-    pending: list[tuple[StructuredAstValue, int, bool]] = [(node, sign, False)]
-    active: set[int] = set()
+    pending: list[tuple[StructuredAstValue, cython.longlong, cython.bint]] = [(node, sign, False)]
+    active: set[cython.longlong] = set()
 
     while pending:
         current, current_sign, exiting = pending.pop()
@@ -2416,8 +2606,12 @@ def _flatten_signed_terms_impl_8616(
     return tuple(terms)
 
 
+@cython.ccall
 def _linear_carrier_key_8616(term: StructuredAstValue) -> LinearGlobalCarrierKey8616 | None:
     """Return the stable carrier key for a vvar/tmp/ir term."""
+    dirty: object
+    name: object
+    varid: object
     term = _strip_casts_8616(term)
     dirty = getattr(term, "dirty", None)
     if dirty is not None:
@@ -2436,20 +2630,23 @@ def _linear_carrier_key_8616(term: StructuredAstValue) -> LinearGlobalCarrierKey
     return None
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _LinearGlobalDecomposer8616:
     """Decompose one signed-term expression into segment + displacement + residuals."""
 
     project: AngrProjectValue
     codegen: StructuredCodegenValue
-    seen_carriers: set[StructuredAstValue]
+    seen_carriers: object
     carrier_cache: LinearGlobalDecompositionCache8616 | None
-    segment_name: str | None = None
-    displacement: int = 0
-    residual_terms: list[tuple[int, StructuredAstValue]] = field(default_factory=list)
+    segment_name: object = None
+    displacement: cython.longlong = 0
+    residual_terms: object = field(default_factory=list)
 
+    @cython.ccall
     def _single_assignment_linear_carrier_rhs(self, term: StructuredAstValue) -> StructuredAstValue:
         """Resolve a carrier term to its single assignment RHS."""
+        key: object
+        rhs: object
         if self.codegen is None:
             return None
         key = _linear_carrier_key_8616(term)
@@ -2466,17 +2663,21 @@ class _LinearGlobalDecomposer8616:
             )
         return rhs
 
-    def _record_label_constants_8616(self, count: int) -> None:
+    @cython.ccall
+    def _record_label_constants_8616(self, count: cython.longlong) -> None:
         """Bump the folded address-label constant counter."""
         if count and self.codegen is not None:
             self.codegen._inertia_real_mode_global_address_label_constants = (
                 int(getattr(self.codegen, "_inertia_real_mode_global_address_label_constants", 0) or 0) + count
             )
 
+    @cython.ccall
     def _carrier_decomposition_8616(
-        self, term: StructuredAstValue, carrier_key: LinearGlobalCarrierKey8616 | None
+        self, term: StructuredAstValue, carrier_key: object
     ) -> StructuredAstValue:
         """Decompose a carrier term through its defining assignment, with caching."""
+        carrier_rhs: object
+        decomposed_carrier: object
         decomposed_carrier = None
         if carrier_key is not None and carrier_key not in self.seen_carriers and self.carrier_cache is not None:
             cached = self.carrier_cache.lookup(carrier_key)
@@ -2497,8 +2698,9 @@ class _LinearGlobalDecomposer8616:
                 self.carrier_cache.record(carrier_key, decomposed_carrier)
         return decomposed_carrier
 
-    def _absorb_carrier_8616(self, sign: int, decomposed_carrier: StructuredAstValue) -> bool:
+    def _absorb_carrier_8616(self, sign: cython.longlong, decomposed_carrier: StructuredAstValue) -> cython.bint:
         """Merge a decomposed carrier into this term list; False on conflict."""
+        carrier_segment: object
         carrier_segment, carrier_displacement, carrier_residual_terms = decomposed_carrier
         if carrier_segment is not None:
             if sign != 1 or self.segment_name is not None:
@@ -2506,12 +2708,17 @@ class _LinearGlobalDecomposer8616:
             self.segment_name = carrier_segment
         self.displacement += sign * carrier_displacement
         self.residual_terms.extend(
-            (sign * carrier_sign, carrier_term) for carrier_sign, carrier_term in carrier_residual_terms
+            (sign * carrier_sign, carrier_term) for carrier_sign, carrier_term in iter(carrier_residual_terms)
         )
         return True
 
-    def _classify_term_8616(self, sign: int, term: StructuredAstValue, allow_sp_anchor: bool) -> bool:
+    @cython.ccall
+    def _classify_term_8616(self, sign: cython.longlong, term: StructuredAstValue, allow_sp_anchor: cython.bint) -> cython.bint:
         """Fold one signed term into segment, displacement, or residuals."""
+        const: object
+        decomposed_carrier: object
+        label_value: object
+        seg: object
         seg = _segment_base_name_8616(term, self.project, codegen=self.codegen)
         if seg is not None:
             if sign != 1 or self.segment_name is not None:
@@ -2542,25 +2749,29 @@ class _LinearGlobalDecomposer8616:
         self.residual_terms.append((sign, term))
         return True
 
-    def decompose_8616(self, node: StructuredAstValue) -> tuple[str | None, int, tuple[tuple[int, StructuredAstValue], ...]] | None:
+    def decompose_8616(self, node: StructuredAstValue) -> object:
         """Run the term classification; None when any term is unsafe."""
+        terms: object
+        sign: object
+        term: object
         terms = _flatten_signed_terms_8616(node)
         if terms is None:
             return None
-        allow_sp_anchor = any(_term_contains_memory_address_label_8616(term) for _sign, term in terms)
+        allow_sp_anchor = any(_term_contains_memory_address_label_8616(term) for _sign, term in iter(terms))
         for sign, term in terms:
             if not self._classify_term_8616(sign, term, allow_sp_anchor):
                 return None
         return self.segment_name, self.displacement, tuple(self.residual_terms)
 
 
+@cython.ccall
 def _decompose_linear_global_terms_8616(
     node: StructuredAstValue,
     project: AngrProjectValue,
     codegen: StructuredCodegenValue = None,
-    _seen_carriers: set[StructuredAstValue] | None = None,
+    _seen_carriers: object = None,
     _carrier_cache: LinearGlobalDecompositionCache8616 | None = None,
-) -> tuple[str | None, int, tuple[tuple[int, StructuredAstValue], ...]] | None:
+) -> object:
     """Decompose a signed-term expression into segment, displacement, residuals."""
     return _LinearGlobalDecomposer8616(
         project=project,
@@ -2570,7 +2781,10 @@ def _decompose_linear_global_terms_8616(
     ).decompose_8616(node)
 
 
-def _global_displacement_known_8616(codegen: StructuredCodegenValue, displacement: int) -> bool:
+@cython.ccall
+def _global_displacement_known_8616(codegen: StructuredCodegenValue, displacement: cython.longlong) -> cython.bint:
+    variables_in_use: object
+    variable: object
     variables_in_use = getattr(getattr(codegen, "cfunc", None), "variables_in_use", None)
     if not isinstance(variables_in_use, dict):
         return False
@@ -2580,24 +2794,27 @@ def _global_displacement_known_8616(codegen: StructuredCodegenValue, displacemen
         variable_addr = _sim_variable_global_address_8616(variable)
         if variable_addr == addr:
             return True
-        if isinstance(variable, SimVariable) and getattr(variable, "name", None) == global_name:
+        if isinstance(variable, SimVariable) and operator.eq(getattr(variable, "name", None), global_name):
             return True
     return False
 
 
-def _global_size_from_displacement_8616(codegen: StructuredCodegenValue, displacement: int) -> int | None:
+def _global_size_from_displacement_8616(codegen: StructuredCodegenValue, displacement: cython.longlong) -> int | None:
     def _impl() -> StructuredAstValue:
+        declared: object
+        variables_in_use: object
+        variable: object
         variables_in_use = getattr(getattr(codegen, "cfunc", None), "variables_in_use", None)
         if not isinstance(variables_in_use, dict):
             return None
         addr = displacement & 0xFFFF
         global_name = f"g_{addr:04X}"
         for variable in variables_in_use:
-            if isinstance(variable, SimMemoryVariable) and getattr(variable, "addr", None) == addr:
+            if isinstance(variable, SimMemoryVariable) and operator.eq(getattr(variable, "addr", None), addr):
                 size = variable.size
                 if isinstance(size, int) and size > 0:
                     return size
-            if isinstance(variable, SimVariable) and getattr(variable, "name", None) == global_name:
+            if isinstance(variable, SimVariable) and operator.eq(getattr(variable, "name", None), global_name):
                 cvar = variables_in_use[variable]
                 declared = getattr(cvar, "variable", None)
                 if isinstance(declared, SimMemoryVariable):
@@ -2612,13 +2829,15 @@ def _global_size_from_displacement_8616(codegen: StructuredCodegenValue, displac
     return cast(int | None, _impl())
 
 
-def _cvar_has_array_type_8616(cvar: StructuredAstValue) -> bool:
+@cython.ccall
+def _cvar_has_array_type_8616(cvar: StructuredAstValue) -> cython.bint:
     type_name = type(getattr(cvar, "variable_type", None)).__name__
     return "Array" in type_name
 
 
 def _iter_structured_c_nodes_8616(root: StructuredAstValue) -> Iterator[StructuredAstValue]:
     """Yield every structured-C node through the shared angr-boundary walker."""
+    node: object
     for node in _iter_c_nodes_deep_8616(root):
         yield cast(StructuredAstValue, node)
 
@@ -2626,22 +2845,24 @@ def _iter_structured_c_nodes_8616(root: StructuredAstValue) -> Iterator[Structur
 def _direct_stack_move_fallback_decision_8616(root: StructuredAstValue) -> DirectStackMoveFallbackDecision8616:
     control_types = _boundary_tuple_8616(
         candidate
-        for candidate in (
+        for candidate in iter((
             getattr(structured_c, "CIfElse", None),
             getattr(structured_c, "CIfBreak", None),
             getattr(structured_c, "CForLoop", None),
             getattr(structured_c, "CWhileLoop", None),
             getattr(structured_c, "CDoWhileLoop", None),
-        )
+        ))
         if isinstance(candidate, type)
     )
-    if control_types and any(isinstance(node, control_types) for node in _iter_structured_c_nodes_8616(root)):
+    if control_types and any(isinstance(node, control_types) for node in builtins.iter(_iter_structured_c_nodes_8616(root))):
         return DirectStackMoveFallbackDecision8616.REFUSE_STRUCTURED_CONTROL_SCOPE
     return DirectStackMoveFallbackDecision8616.SAFE_TO_INSERT
 
 
-def _same_variable_storage_8616(lhs: StructuredAstValue, rhs: StructuredAstValue) -> bool:
+def _same_variable_storage_8616(lhs: StructuredAstValue, rhs: StructuredAstValue) -> cython.bint:
     def _impl() -> StructuredAstValue:
+        lhs_var: object
+        rhs_var: object
         if not isinstance(lhs, structured_c.CVariable) or not isinstance(rhs, structured_c.CVariable):
             return False
         lhs_var = getattr(lhs, "variable", None)
@@ -2655,8 +2876,8 @@ def _same_variable_storage_8616(lhs: StructuredAstValue, rhs: StructuredAstValue
         return (
             isinstance(lhs_var, SimRegisterVariable)
             and isinstance(rhs_var, SimRegisterVariable)
-            and getattr(lhs_var, "reg", None) == getattr(rhs_var, "reg", None)
-            and getattr(lhs_var, "size", None) == getattr(rhs_var, "size", None)
+            and operator.eq(getattr(lhs_var, "reg", None), getattr(rhs_var, "reg", None))
+            and operator.eq(getattr(lhs_var, "size", None), getattr(rhs_var, "size", None))
         )
 
     return bool(_impl())
@@ -2665,10 +2886,11 @@ def _same_variable_storage_8616(lhs: StructuredAstValue, rhs: StructuredAstValue
 # ── Precomputed maps (built once per lowering pass) ──
 
 
+@cython.ccall
 def _record_assignment_key_8616(
-    key_map: dict[StructuredAstValue, StructuredAstValue],
-    multi: set[StructuredAstValue],
-    first_map: dict[StructuredAstValue, StructuredAstValue] | None,
+    key_map: object,
+    multi: object,
+    first_map: object,
     key: StructuredAstValue,
     rhs: StructuredAstValue,
 ) -> None:
@@ -2682,14 +2904,19 @@ def _record_assignment_key_8616(
         key_map[key] = rhs
 
 
+@cython.ccall
 def _record_dirty_lhs_8616(
-    lhs: StructuredAstValue,
+    lhs: object,
     rhs: StructuredAstValue,
-    name_map: dict[str, StructuredAstValue],
-    multi_name: set[str],
-    first_name_map: dict[str, StructuredAstValue],
+    name_map: object,
+    multi_name: object,
+    first_name_map: object,
 ) -> None:
     """Record a CDirtyExpression lhs through name and vvar keys."""
+    dirty_lhs: object
+    dirty_name: object
+    dirty_varid: object
+    dirty_key: object
     dirty_lhs = getattr(lhs, "dirty", None) if lhs is not None else None
     if dirty_lhs is not None and os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
         log.warning(
@@ -2716,19 +2943,22 @@ def _record_dirty_lhs_8616(
         _record_assignment_key_8616(name_map, multi_name, first_name_map, dirty_key, rhs)
 
 
+@cython.ccall
 def _record_cvar_lhs_8616(
     lhs: structured_c.CVariable,
     rhs: StructuredAstValue,
-    var_id_map: dict[int, StructuredAstValue],
-    name_map: dict[str, StructuredAstValue],
-    reg_map: dict[tuple[Any, ...], StructuredAstValue],
-    multi_var: set[int],
-    multi_name: set[str],
-    multi_reg: set[tuple[Any, ...]],
-    first_name_map: dict[str, StructuredAstValue],
-    first_reg_map: dict[tuple[Any, ...], StructuredAstValue],
+    var_id_map: object,
+    name_map: object,
+    reg_map: object,
+    multi_var: object,
+    multi_name: object,
+    multi_reg: object,
+    first_name_map: object,
+    first_reg_map: object,
 ) -> None:
     """Record a CVariable lhs under its variable id, name, and register keys."""
+    var: object
+    var_id: object
     var = lhs.variable
     var_id = id(var) if var is not None else None
     if var_id is not None:
@@ -2743,16 +2973,19 @@ def _record_cvar_lhs_8616(
             _record_assignment_key_8616(reg_map, multi_reg, first_reg_map, (reg, size), rhs)
 
 
+@cython.ccall
 def _build_assignment_maps_8616(codegen: StructuredCodegenValue) -> StructuredAstValue:
     """Precompute assignment maps used by lowering and validation fingerprinting."""
+    root: object
+    stmt: object
     root = getattr(getattr(codegen, "cfunc", None), "statements", None)
     if root is None:
         return ({}, {}, {}, set(), set(), set(), {}, {})
 
-    var_id_map: dict[int, StructuredAstValue] = {}
+    var_id_map: dict[cython.longlong, StructuredAstValue] = {}
     name_map: dict[str, StructuredAstValue] = {}
     reg_map: dict[tuple[Any, ...], StructuredAstValue] = {}
-    multi_var: set[int] = set()
+    multi_var: set[cython.longlong] = set()
     multi_name: set[str] = set()
     multi_reg: set[tuple[Any, ...]] = set()
     first_name_map: dict[str, StructuredAstValue] = {}
@@ -2774,8 +3007,10 @@ def _build_assignment_maps_8616(codegen: StructuredCodegenValue) -> StructuredAs
     return (var_id_map, name_map, reg_map, multi_var, multi_name, multi_reg, first_name_map, first_reg_map)
 
 
-def _ensure_assignment_maps_8616(codegen: StructuredCodegenValue) -> tuple[Any, ...]:
+@cython.ccall
+def _ensure_assignment_maps_8616(codegen: StructuredCodegenValue) -> object:
     """Return cached maps or build and cache them on codegen."""
+    cached: object
     cached = getattr(codegen, "_inertia_assignment_maps", None)
     if cached is not None:
         return cast(tuple[Any, ...], cached)
@@ -2784,11 +3019,16 @@ def _ensure_assignment_maps_8616(codegen: StructuredCodegenValue) -> tuple[Any, 
     return cast(tuple[Any, ...], maps)
 
 
-def _single_virtual_carrier_offset_observation_8616(expr: StructuredAstValue) -> tuple[int, int] | None:
+@cython.ccall
+def _single_virtual_carrier_offset_observation_8616(expr: StructuredAstValue) -> object:
+    const: object
+    terms: object
+    sign: object
+    term: object
     terms = _flatten_signed_terms_8616(expr)
     if terms is None:
         return None
-    base_ids: list[tuple[int, int]] = []
+    base_ids: list[tuple[cython.longlong, cython.longlong]] = []
     const_total = 0
     for sign, term in terms:
         base_id = _extract_vvar_id_8616(term)
@@ -2808,10 +3048,19 @@ def _single_virtual_carrier_offset_observation_8616(expr: StructuredAstValue) ->
     return base_id, const_total
 
 
+@cython.ccall
 def _ss_virtual_carrier_offset_observations_8616(
     root: StructuredAstValue, project: AngrProjectValue, codegen: StructuredCodegenValue
-) -> dict[int, set[int]]:
-    observations: dict[int, set[int]] = {}
+) -> object:
+    const: object
+    observation: object
+    seg: object
+    segment_name: object
+    terms: object
+    node: object
+    sign: object
+    term: object
+    observations: dict[cython.longlong, set[cython.longlong]] = {}
     for node in _iter_structured_c_nodes_8616(root):
         node = _strip_casts_8616(node)
         if not isinstance(node, structured_c.CUnaryOp) or node.op != "Dereference":
@@ -2820,7 +3069,7 @@ def _ss_virtual_carrier_offset_observations_8616(
         if terms is None:
             continue
 
-        segment_name: str | None = None
+        segment_name = None
         const_total = 0
         offset_terms: list[StructuredAstValue] = []
         malformed = False
@@ -2857,8 +3106,11 @@ def _ss_virtual_carrier_offset_observations_8616(
     return observations
 
 
-def _infer_carrier_delta_8616(constants: set[int], offsets: set[int]) -> int | None:
+@cython.ccall
+def _infer_carrier_delta_8616(constants: object, offsets: object) -> int | None:
     """Vote on one carrier delta that maps all constants onto known offsets."""
+    const: object
+    offset: object
     if len(constants) < 2 or len(offsets) < 2:
         return None
     best_delta: int | None = None
@@ -2867,24 +3119,25 @@ def _infer_carrier_delta_8616(constants: set[int], offsets: set[int]) -> int | N
     for const in constants:
         for offset in offsets:
             delta = offset - const
-            score = len({candidate for candidate in constants if candidate + delta in offsets})
+            score = len({candidate for candidate in iter(constants) if candidate + delta in offsets})
             if score > best_score:
                 best_delta = delta
                 best_score = score
                 tied = False
             elif score == best_score and score > 0 and delta != best_delta:
                 tied = True
-    if isinstance(best_delta, int) and best_score == len(constants) and best_score >= 2 and not tied:
+    if isinstance(best_delta, int) and operator.eq(best_score, len(constants)) and best_score >= 2 and not tied:
         return best_delta
     return None
 
 
+@cython.ccall
 def _infer_varid_carrier_delta_8616(
     codegen: StructuredCodegenValue,
-    constants: set[int],
-    strong_arg_offsets: set[int],
-    abi_arg_region_offsets: set[int],
-    known_offsets: set[int],
+    constants: object,
+    strong_arg_offsets: object,
+    abi_arg_region_offsets: object,
+    known_offsets: object,
 ) -> int | None:
     """Infer one vvar's carrier delta, preferring stronger offset evidence."""
     strong_delta = _infer_carrier_delta_8616(constants, strong_arg_offsets)
@@ -2903,16 +3156,19 @@ def _infer_varid_carrier_delta_8616(
     return _infer_carrier_delta_8616(constants, known_offsets)
 
 
+@cython.ccall
 def _infer_vvar_carrier_deltas_from_ss_alias_observations_8616(
     root: StructuredAstValue, project: AngrProjectValue, codegen: StructuredCodegenValue
-) -> dict[int, int]:
+) -> object:
+    constants: object
+    varid: object
     known_offsets = _known_bp_stack_offsets_8616(codegen)
     if not known_offsets:
         return {}
     strong_arg_offsets = _bp_stack_arg_offsets_8616(codegen)
     abi_arg_region_offsets = _bp_stack_abi_argument_region_offsets_8616(known_offsets)
     observations = _ss_virtual_carrier_offset_observations_8616(root, project, codegen)
-    inferred: dict[int, int] = {}
+    inferred: dict[cython.longlong, cython.longlong] = {}
 
     for varid, constants in observations.items():
         delta = _infer_varid_carrier_delta_8616(
@@ -2927,30 +3183,33 @@ def _infer_vvar_carrier_deltas_from_ss_alias_observations_8616(
     return inferred
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _VvarCarrierDeltaRun8616:
     """Precompute vvar_id → carrier_delta in a single pass."""
 
     codegen: StructuredAstValue
     project: StructuredAstValue
     sp_reg: StructuredAstValue
-    has_ss_facts: bool
+    has_ss_facts: cython.bint
     root: StructuredAstValue
-    deltas: dict[int, int] = field(default_factory=dict)
-    delta_sources: dict[int, StackCarrierDeltaSource8616] = field(default_factory=dict)
+    deltas: object = field(default_factory=dict)
+    delta_sources: object = field(default_factory=dict)
 
     @staticmethod
-    def _delta_source_priority(source: StackCarrierDeltaSource8616) -> int:
+    def _delta_source_priority(source: StackCarrierDeltaSource8616) -> cython.longlong:
         return _STACK_CARRIER_DELTA_SOURCE_PRIORITY_8616[source]
 
-    def _record_delta(self, lhs_id: int, delta: int, source: StackCarrierDeltaSource8616) -> bool:
+    @cython.ccall
+    def _record_delta(self, lhs_id: cython.longlong, delta: cython.longlong, source: StackCarrierDeltaSource8616) -> cython.bint:
+        old_delta: object
+        old_source: object
         old_delta = self.deltas.get(lhs_id)
         old_source = self.delta_sources.get(lhs_id)
         if old_source is None:
             self.deltas[lhs_id] = delta
             self.delta_sources[lhs_id] = source
             return True
-        if old_delta == delta:
+        if operator.eq(old_delta, delta):
             if self._delta_source_priority(source) > self._delta_source_priority(old_source):
                 self.delta_sources[lhs_id] = source
             return False
@@ -2963,11 +3222,15 @@ class _VvarCarrierDeltaRun8616:
         )
         return True
 
+    @cython.ccall
     def _seed_ref_operands_8616(
         self, rhs_stripped: structured_c.CBinaryOp
-    ) -> tuple[StructuredAstValue, int]:
+    ) -> tuple[StructuredAstValue, cython.longlong]:
         """Find the Reference operand and constant delta inside an Add/Sub."""
-        ref_node: StructuredAstValue = None
+        lhs_const: object
+        ref_node: object
+        rhs_const: object
+        ref_node = None
         const_delta = 0
         if isinstance(_strip_casts_8616(rhs_stripped.lhs), structured_c.CUnaryOp):
             lhs_u = _strip_casts_8616(rhs_stripped.lhs)
@@ -2985,9 +3248,10 @@ class _VvarCarrierDeltaRun8616:
                     const_delta = lhs_const
         return ref_node, const_delta
 
+    @cython.ccall
     def _record_stack_ref_seed_8616(
-        self, ref_node: StructuredAstValue, const_delta: int, lhs_id: StructuredAstValue
-    ) -> bool:
+        self, ref_node: object, const_delta: cython.longlong, lhs_id: StructuredAstValue
+    ) -> cython.bint:
         """Record the seed delta when the Reference targets a stack variable."""
         if ref_node is None:
             return False
@@ -3007,7 +3271,8 @@ class _VvarCarrierDeltaRun8616:
         )
         return True
 
-    def _seed_from_init(self, expr: StructuredAstValue, lhs_id: StructuredAstValue) -> StructuredAstValue:
+    @cython.ccall
+    def _seed_from_init(self, expr: object, lhs_id: StructuredAstValue) -> StructuredAstValue:
         if expr is None:
             return None
         rhs_stripped = _strip_casts_8616(expr)
@@ -3020,13 +3285,15 @@ class _VvarCarrierDeltaRun8616:
                 return True
         if isinstance(rhs_stripped, structured_c.CVariable):
             var = rhs_stripped.variable
-            if isinstance(var, SimRegisterVariable) and getattr(var, "reg", None) == self.sp_reg and self.has_ss_facts:
+            if isinstance(var, SimRegisterVariable) and operator.eq(getattr(var, "reg", None), self.sp_reg) and self.has_ss_facts:
                 self._record_delta(lhs_id, 0, StackCarrierDeltaSource8616.SP_REGISTER_SEED)
                 return True
         return None
 
+    @cython.ccall
     def _seed_pass_8616(self) -> None:
         """Seed carrier deltas from direct stack-reference initializers."""
+        stmt: object
         for stmt in _iter_c_statement_nodes_8616(self.root):
             if not isinstance(stmt, structured_c.CAssignment):
                 continue
@@ -3035,8 +3302,11 @@ class _VvarCarrierDeltaRun8616:
                 continue
             self._seed_from_init(stmt.rhs, lhs_id)
 
+    @cython.ccall
     def _alias_observation_pass_8616(self) -> None:
         """Record deltas proven by SS-alias observations."""
+        delta: object
+        lhs_id: object
         if self.project is None:
             return
         for lhs_id, delta in _infer_vvar_carrier_deltas_from_ss_alias_observations_8616(
@@ -3044,14 +3314,19 @@ class _VvarCarrierDeltaRun8616:
         ).items():
             self._record_delta(lhs_id, delta, StackCarrierDeltaSource8616.ALIAS_OBSERVATION)
 
-    def _propagate_stmt_8616(self, stmt: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _propagate_stmt_8616(self, stmt: StructuredAstValue) -> cython.bint:
         """Record a derived delta for one assignment, returning whether it changed."""
+        const: object
+        terms: object
+        sign: object
+        term: object
         if not isinstance(stmt, structured_c.CAssignment):
             return False
         lhs_id = _extract_vvar_id_8616(stmt.lhs)
         if not isinstance(lhs_id, int) or lhs_id in self.deltas:
             return False
-        base_ids: list[tuple[int, int]] = []
+        base_ids: list[tuple[cython.longlong, cython.longlong]] = []
         const_total = 0
         unknown = False
         terms = _flatten_signed_terms_8616(stmt.rhs)
@@ -3074,8 +3349,10 @@ class _VvarCarrierDeltaRun8616:
             return False
         return self._record_delta(lhs_id, self.deltas[base_id] + const_total, self.delta_sources[base_id])
 
+    @cython.ccall
     def _propagate_pass_8616(self) -> None:
         """Propagate deltas through single-base copy expressions to fixpoint."""
+        stmt: object
         changed = True
         while changed:
             changed = False
@@ -3083,6 +3360,7 @@ class _VvarCarrierDeltaRun8616:
                 if self._propagate_stmt_8616(stmt):
                     changed = True
 
+    @cython.ccall
     def _report_8616(self) -> None:
         """Publish delta sources and emit the optional debug summary."""
         self.codegen._inertia_stack_carrier_delta_sources_8616 = dict(self.delta_sources)
@@ -3094,7 +3372,8 @@ class _VvarCarrierDeltaRun8616:
                 self.delta_sources,
             )
 
-    def run_8616(self) -> dict[int, int]:
+    @cython.ccall
+    def run_8616(self) -> object:
         """Run seed, alias-observation, and propagation passes."""
         self._seed_pass_8616()
         self._alias_observation_pass_8616()
@@ -3103,11 +3382,15 @@ class _VvarCarrierDeltaRun8616:
         return self.deltas
 
 
-def _build_vvar_carrier_delta_map_8616(codegen: StructuredAstValue) -> dict[int, int]:
+def _build_vvar_carrier_delta_map_8616(codegen: StructuredAstValue) -> object:
     """Precompute vvar_id → carrier_delta in a single pass, caching on codegen."""
+    _sp_size: object
+    project: object
+    root: object
+    sp_reg: object
     project = getattr(codegen, "project", None)
     sp_reg, _sp_size = getattr(getattr(project, "arch", None), "registers", {}).get("sp", (None, None))
-    has_ss_facts = any(fact.segment_space == "ss" for fact in _typed_stack_probe_return_facts_8616(codegen))
+    has_ss_facts = any(fact.segment_space == "ss" for fact in builtins.iter(_typed_stack_probe_return_facts_8616(codegen)))
     root = getattr(getattr(codegen, "cfunc", None), "statements", None)
     if root is None:
         return {}
@@ -3120,8 +3403,12 @@ def _build_vvar_carrier_delta_map_8616(codegen: StructuredAstValue) -> dict[int,
     ).run_8616()
 
 
-def _ensure_vvar_carrier_delta_map_8616(codegen: StructuredCodegenValue) -> dict[int, int]:
+@cython.ccall
+def _ensure_vvar_carrier_delta_map_8616(codegen: StructuredCodegenValue) -> object:
     """Return carrier deltas cached for the current structured-C root."""
+    cached: object
+    cached_root: object
+    root: object
     root = getattr(getattr(codegen, "cfunc", None), "statements", None)
     cached = getattr(codegen, "_inertia_vvar_carrier_deltas", None)
     cached_root = getattr(codegen, "_inertia_vvar_carrier_delta_root_8616", None)
@@ -3138,6 +3425,8 @@ def _ensure_vvar_carrier_delta_map_8616(codegen: StructuredCodegenValue) -> dict
 
 def _single_assignment_rhs_8616(codegen: StructuredCodegenValue, target: StructuredAstValue) -> StructuredAstValue:
     def _impl() -> StructuredAstValue:
+        var: object
+        var_id: object
         if not isinstance(target, structured_c.CVariable):
             return None
         var_id_map, name_map, reg_map, multi_var, multi_name, multi_reg, _first_name_map, _first_reg_map = (
@@ -3162,17 +3451,23 @@ def _single_assignment_rhs_8616(codegen: StructuredCodegenValue, target: Structu
     return _impl()
 
 
+@cython.ccall
 def _carrier_reg_and_early_offset_8616(
     node: StructuredAstValue,
     codegen: StructuredAstValue,
     project: StructuredAstValue,
-    seen: set[int],
-) -> tuple[StructuredAstValue, StructuredAstValue, tuple[bool, int | None]]:
+    seen: object,
+) -> tuple[StructuredAstValue, StructuredAstValue, tuple[cython.bint, int | None]]:
     """Identify the carrier register/size; resolve vvar indirections eagerly.
 
     The third element is (handled, offset): when handled is True the caller
     must return offset (which may legitimately be None) immediately.
     """
+    bits: object
+    delta: object
+    dirty: object
+    resolved: object
+    varid: object
     variable = getattr(node, "variable", None) if isinstance(node, structured_c.CVariable) else None
     dirty = getattr(node, "dirty", None)
     if isinstance(variable, SimRegisterVariable):
@@ -3192,15 +3487,19 @@ def _carrier_reg_and_early_offset_8616(
     return reg, size, (False, None)
 
 
+@cython.ccall
 def _sp_carrier_offset_8616(
     codegen: StructuredAstValue,
     project: StructuredAstValue,
     reg: StructuredAstValue,
-    size: StructuredAstValue,
+    size: object,
 ) -> int | None:
     """Accept an SP carrier only under proven SS-fact evidence."""
+    sp_reg: object
+    sp_size: object
+    fact: object
     sp_reg, sp_size = getattr(getattr(project, "arch", None), "registers", {}).get("sp", (None, None))
-    if not (isinstance(sp_reg, int) and reg == sp_reg and (size is None or size == sp_size)):
+    if not (isinstance(sp_reg, int) and operator.eq(reg, sp_reg) and (size is None or operator.eq(size, sp_size))):
         return None
     if getattr(codegen, "_inertia_allow_runtime_helper_sp_segment_proof_8616", False):
         codegen._inertia_runtime_helper_sp_segment_proof_count_8616 = (
@@ -3220,13 +3519,17 @@ def _sp_carrier_offset_8616(
     return None
 
 
+@cython.ccall
 def _stack_pointer_carrier_offset_8616(
     node: StructuredAstValue,
     project: StructuredAstValue,
     codegen: StructuredAstValue,
-    seen: set[int] | None = None,
+    seen: object = None,
 ) -> int | None:
     """Recover the BP-relative offset represented by a stack-pointer carrier."""
+    bp_reg: object
+    bp_size: object
+    size: object
     if seen is None:
         seen = set()
     reg, size, early = _carrier_reg_and_early_offset_8616(node, codegen, project, seen)
@@ -3234,13 +3537,17 @@ def _stack_pointer_carrier_offset_8616(
         return early[1]
 
     bp_reg, bp_size = getattr(getattr(project, "arch", None), "registers", {}).get("bp", (None, None))
-    if isinstance(bp_reg, int) and reg == bp_reg and (size is None or size == bp_size):
+    if isinstance(bp_reg, int) and operator.eq(reg, bp_reg) and (size is None or operator.eq(size, bp_size)):
         return 0
     return _sp_carrier_offset_8616(codegen, project, reg, size)
 
 
-def _lhs_name_8616(lhs: StructuredAstValue) -> str | None:
+@cython.ccall
+def _lhs_name_8616(lhs: StructuredAstValue) -> object:
     """Extract variable name from CVariable or CDirtyExpression LHS."""
+    dirty: object
+    name: object
+    varid: object
     if isinstance(lhs, structured_c.CVariable):
         return lhs.name or getattr(lhs.variable, "name", None)
     dirty = getattr(lhs, "dirty", None)
@@ -3254,8 +3561,9 @@ def _lhs_name_8616(lhs: StructuredAstValue) -> str | None:
     return None
 
 
+@cython.ccall
 def _single_assignment_rhs_for_virtual_name_8616(
-    codegen: StructuredCodegenValue, target_name: str, *, allow_multi: bool = False
+    codegen: StructuredCodegenValue, target_name: object, *, allow_multi: cython.bint = False
 ) -> StructuredAstValue:
     (
         _unused_var_id_map,
@@ -3275,7 +3583,11 @@ def _single_assignment_rhs_for_virtual_name_8616(
     return None
 
 
-def _virtual_carrier_name_8616(node: StructuredAstValue) -> str | None:
+@cython.ccall
+def _virtual_carrier_name_8616(node: StructuredAstValue) -> object:
+    dirty: object
+    dirty_name: object
+    varid: object
     dirty = getattr(node, "dirty", None)
     if dirty is not None:
         varid = getattr(dirty, "varid", None)
@@ -3292,9 +3604,12 @@ def _virtual_carrier_name_8616(node: StructuredAstValue) -> str | None:
     return None
 
 
+@cython.ccall
 def _rhs_terms_contain_segment_scale_8616(
-    terms: tuple[tuple[int, StructuredAstValue], ...], project: AngrProjectValue, codegen: StructuredCodegenValue
-) -> bool:
+    terms: object, project: AngrProjectValue, codegen: StructuredCodegenValue
+) -> cython.bint:
+    sign: object
+    term: object
     for sign, term in terms:
         if sign != 1:
             continue
@@ -3305,12 +3620,20 @@ def _rhs_terms_contain_segment_scale_8616(
     return False
 
 
+@cython.ccall
 def _expand_virtual_linear_address_carrier_terms_8616(
-    terms: tuple[tuple[int, StructuredAstValue], ...],
+    terms: object,
     project: AngrProjectValue,
     codegen: StructuredCodegenValue,
-) -> tuple[tuple[int, StructuredAstValue], ...]:
-    expanded: list[tuple[int, StructuredAstValue]] = []
+) -> tuple[tuple[cython.longlong, StructuredAstValue], ...]:
+    carrier_name: object
+    rhs: object
+    rhs_terms: object
+    rhs_sign: object
+    rhs_term: object
+    sign: object
+    term: object
+    expanded: list[tuple[cython.longlong, StructuredAstValue]] = []
     changed = False
     for sign, term in terms:
         carrier_name = _virtual_carrier_name_8616(_strip_casts_8616(term))
@@ -3335,7 +3658,11 @@ def _expand_virtual_linear_address_carrier_terms_8616(
     return tuple(expanded)
 
 
+@cython.ccall
 def _extract_vvar_id_8616(node: StructuredAstValue) -> int | None:
+    dirty: object
+    varid: object
+    candidate: object
     dirty = getattr(node, "dirty", None)
     varid = getattr(dirty, "varid", None)
     if isinstance(varid, int):
@@ -3351,14 +3678,19 @@ def _extract_vvar_id_8616(node: StructuredAstValue) -> int | None:
     return None
 
 
+@cython.ccall
 def _stack_probe_carrier_delta_8616(node: StructuredAstValue, codegen: StructuredCodegenValue) -> int | None:
+    carrier: object
     carrier = _stack_probe_carrier_delta_with_source_8616(node, codegen)
     return carrier[0] if carrier is not None else None
 
 
+@cython.ccall
 def _stack_probe_carrier_delta_with_source_8616(
     node: StructuredAstValue, codegen: StructuredCodegenValue
-) -> tuple[int, StackCarrierDeltaSource8616 | None] | None:
+) -> object:
+    delta: object
+    sources: object
     varid = _extract_vvar_id_8616(node)
     if not isinstance(varid, int):
         return None
@@ -3372,10 +3704,13 @@ def _stack_probe_carrier_delta_with_source_8616(
     return delta, source
 
 
+@cython.ccall
 def _vvar_carrier_delta_from_name_8616(
-    node_name: str,
+    node_name: object,
     codegen: StructuredCodegenValue,
-) -> tuple[int, StackCarrierDeltaSource8616 | None] | None:
+) -> object:
+    delta: object
+    sources: object
     if not node_name.startswith("vvar_"):
         return None
     suffix = node_name.removeprefix("vvar_")
@@ -3392,9 +3727,13 @@ def _vvar_carrier_delta_from_name_8616(
     return delta, source
 
 
+@cython.ccall
 def _resolve_virtual_name_offset_8616(
-    node_name: str, project: AngrProjectValue, codegen: StructuredCodegenValue, seen: set[int]
+    node_name: object, project: AngrProjectValue, codegen: StructuredCodegenValue, seen: object
 ) -> int | None:
+    carrier_delta: object
+    resolved: object
+    rhs: object
     if not (node_name.startswith(("vvar_", "tmp_", "ir_"))):
         return None
     carrier_delta = _vvar_carrier_delta_from_name_8616(node_name, codegen)
@@ -3409,9 +3748,14 @@ def _resolve_virtual_name_offset_8616(
     return carrier_delta[0] if carrier_delta is not None else None
 
 
+@cython.ccall
 def _resolve_stack_offset_from_variable_8616(
-    node: StructuredAstValue, project: AngrProjectValue, codegen: StructuredCodegenValue, seen: set[int]
+    node: StructuredAstValue, project: AngrProjectValue, codegen: StructuredCodegenValue, seen: object
 ) -> int | None:
+    carrier_offset: object
+    resolved: object
+    rhs: object
+    variable: object
     variable = getattr(node, "variable", None)
     if isinstance(variable, SimStackVariable):
         stack_offset = machine_bp_offset_for_stack_variable_8616(codegen, variable)
@@ -3433,14 +3777,18 @@ def _resolve_stack_offset_from_variable_8616(
     return None
 
 
+@cython.ccall
 def _dirty_varid_offset_8616(
-    varid: int,
+    varid: cython.longlong,
     node: StructuredAstValue,
     project: AngrProjectValue,
     codegen: StructuredCodegenValue,
-    seen: set[int],
-    diag: dict[str, StructuredAstValue],
+    seen: object,
+    diag: object,
 ) -> int | None:
+    carrier: object
+    resolved: object
+    rhs: object
     diag["varid"] = varid
     carrier = _stack_probe_carrier_delta_with_source_8616(node, codegen)
     if carrier is not None and carrier[1] is StackCarrierDeltaSource8616.ALIAS_OBSERVATION:
@@ -3460,13 +3808,16 @@ def _dirty_varid_offset_8616(
     return None
 
 
+@cython.ccall
 def _dirty_name_offset_8616(
-    dirty_name: str,
+    dirty_name: object,
     project: AngrProjectValue,
     codegen: StructuredCodegenValue,
-    seen: set[int],
-    diag: dict[str, StructuredAstValue],
+    seen: object,
+    diag: object,
 ) -> int | None:
+    resolved: object
+    rhs: object
     diag["dirty_name"] = dirty_name
     resolved = _resolve_virtual_name_offset_8616(dirty_name, project, codegen, seen)
     if resolved is not None:
@@ -3480,9 +3831,17 @@ def _dirty_name_offset_8616(
     return None
 
 
+@cython.ccall
 def _resolve_stack_offset_from_dirty_8616(
-    node: StructuredAstValue, project: AngrProjectValue, codegen: StructuredCodegenValue, seen: set[int]
+    node: StructuredAstValue, project: AngrProjectValue, codegen: StructuredCodegenValue, seen: object
 ) -> int | None:
+    _bp_size: object
+    bp_reg: object
+    carrier_offset: object
+    dirty: object
+    dirty_name: object
+    resolved: object
+    varid: object
     dirty = getattr(node, "dirty", None)
     if dirty is None:
         return None
@@ -3491,7 +3850,7 @@ def _resolve_stack_offset_from_dirty_8616(
     diag: dict[str, StructuredAstValue] = {}
     dirty_reg = _dirty_reg_offset_8616(dirty)
     bp_reg, _bp_size = getattr(getattr(project, "arch", None), "registers", {}).get("bp", (None, None))
-    if isinstance(dirty_reg, int) and isinstance(bp_reg, int) and dirty_reg == bp_reg:
+    if isinstance(dirty_reg, int) and isinstance(bp_reg, int) and operator.eq(dirty_reg, bp_reg):
         return 0
     if isinstance(varid, int):
         resolved = _dirty_varid_offset_8616(varid, node, project, codegen, seen, diag)
@@ -3511,7 +3870,11 @@ def _resolve_stack_offset_from_dirty_8616(
     return None
 
 
+@cython.ccall
 def _resolve_binary_stack_base_shortcuts_8616(node: StructuredAstValue, codegen: StructuredCodegenValue) -> int | None:
+    base: object
+    lhs_const: object
+    rhs_const: object
     if _is_stack_base_placeholder_8616(node.lhs):
         rhs_const = _constant_value_8616(node.rhs)
         if rhs_const is not None:
@@ -3527,7 +3890,10 @@ def _resolve_binary_stack_base_shortcuts_8616(node: StructuredAstValue, codegen:
     return None
 
 
-def _is_unresolved_segment_scale_candidate_8616(node: StructuredAstValue) -> bool:
+@cython.ccall
+def _is_unresolved_segment_scale_candidate_8616(node: StructuredAstValue) -> cython.bint:
+    maybe_scale: object
+    maybe_segment: object
     node = _strip_casts_8616(node)
     if not isinstance(node, structured_c.CBinaryOp):
         return False
@@ -3540,12 +3906,14 @@ def _is_unresolved_segment_scale_candidate_8616(node: StructuredAstValue) -> boo
     else:
         return False
     for maybe_segment, maybe_scale in pairs:
-        if _constant_value_8616(maybe_scale) == expected_scale and _constant_value_8616(maybe_segment) is None:
+        if operator.eq(_constant_value_8616(maybe_scale), expected_scale) and _constant_value_8616(maybe_segment) is None:
             return True
     return False
 
 
-def _is_stack_offset_term_direct_8616(node: StructuredAstValue) -> bool:
+@cython.ccall
+def _is_stack_offset_term_direct_8616(node: StructuredAstValue) -> cython.bint:
+    variable: object
     node = _strip_casts_8616(node)
     if isinstance(node, structured_c.CUnaryOp) and node.op == "Reference":
         variable = getattr(node.operand, "variable", None)
@@ -3568,24 +3936,26 @@ def _is_stack_offset_term_direct_8616(node: StructuredAstValue) -> bool:
     return _constant_value_8616(node) is not None
 
 
+@cython.ccall
 def _stack_offset_term_stackish_8616(
     node: StructuredAstValue, project: AngrProjectValue, codegen: StructuredCodegenValue
-) -> bool:
+) -> cython.bint:
     if _is_stack_offset_term_direct_8616(node):
         return True
     return _stack_offset_from_expr_8616(node, project, codegen) is not None
 
 
-def _ss_probe_enabled_8616(codegen: StructuredAstValue) -> bool:
-    return any(fact.segment_space == "ss" for fact in _typed_stack_probe_return_facts_8616(codegen))
+def _ss_probe_enabled_8616(codegen: StructuredAstValue) -> cython.bint:
+    return any(fact.segment_space == "ss" for fact in builtins.iter(_typed_stack_probe_return_facts_8616(codegen)))
 
 
+@cython.ccall
 def _slot_range_contains_access_8616(
     slot_offset: StructuredAstValue,
     slot_width: StructuredAstValue,
-    displacement: int,
+    displacement: cython.longlong,
     width: int | None,
-) -> bool:
+) -> cython.bint:
     """Check whether a proven stack slot fully contains the access range."""
     return (
         isinstance(width, int)
@@ -3598,14 +3968,16 @@ def _slot_range_contains_access_8616(
 
 
 def _has_stack_storage_evidence_for_displacement_8616(
-    codegen: StructuredAstValue, displacement: int, width: int | None
-) -> bool:
+    codegen: StructuredAstValue, displacement: cython.longlong, width: int | None
+) -> cython.bint:
+    facts: object
+    fact: object
     displacement = _canonical_stack_offset_8616(displacement)
     if alias_proves_stack_range_8616(codegen, displacement, width):
         return True
     if isinstance(width, int) and width > 0 and any(
         binding.is_stable and binding.contains_access(displacement, width)
-        for binding in _stack_bindings_from_codegen_8616(codegen)
+        for binding in builtins.iter(_stack_bindings_from_codegen_8616(codegen))
     ):
         return True
     facts = getattr(codegen, "_inertia_semantic_alias_facts", None)
@@ -3631,8 +4003,9 @@ def _has_stack_storage_evidence_for_displacement_8616(
     return False
 
 
+@cython.ccall
 def _resolve_binary_stack_probe_fallback_8616(
-    node: StructuredAstValue, lhs: StructuredAstValue, rhs: StructuredAstValue, codegen: StructuredCodegenValue
+    node: StructuredAstValue, lhs: object, rhs: object, codegen: StructuredCodegenValue
 ) -> int | None:
     if lhs is None:
         rhs_const = _constant_value_8616(node.rhs)
@@ -3648,9 +4021,13 @@ def _resolve_binary_stack_probe_fallback_8616(
 
 
 def _resolve_stack_offset_from_binary_8616(
-    node: StructuredAstValue, project: AngrProjectValue, codegen: StructuredCodegenValue, seen: set[int]
+    node: StructuredAstValue, project: AngrProjectValue, codegen: StructuredCodegenValue, seen: object
 ) -> int | None:
     def _impl() -> StructuredAstValue:
+        fallback: object
+        lhs: object
+        rhs: object
+        shortcut: object
         shortcut = _resolve_binary_stack_base_shortcuts_8616(node, codegen)
         if shortcut is not None:
             return shortcut
@@ -3670,13 +4047,15 @@ def _resolve_stack_offset_from_binary_8616(
     return cast(int | None, _impl())
 
 
+@cython.ccall
 def _stack_offset_cache_entry_8616(
     codegen: StructuredCodegenValue,
-    node_id: int,
-    seen: set[int],
-    offset_cache: dict[int, StructuredAstValue],
-) -> tuple[bool, int | None]:
+    node_id: cython.longlong,
+    seen: object,
+    offset_cache: object,
+) -> tuple[cython.bint, int | None]:
     """Return (True, cached) on a cache/seen hit, else record the visit and continue."""
+    cached: object
     if node_id in offset_cache:
         cached = offset_cache.get(node_id)
         if cached is _UNRESOLVED_STACK_OFFSET_8616:
@@ -3689,18 +4068,23 @@ def _stack_offset_cache_entry_8616(
     return False, None
 
 
+@cython.ccall
 def _stack_offset_cache_record_8616(
-    offset_cache: dict[int, StructuredAstValue], node_id: int, resolved: int | None
+    offset_cache: object, node_id: cython.longlong, resolved: object
 ) -> int | None:
     """Cache a resolution result, marking unresolvable nodes explicitly."""
     offset_cache[node_id] = resolved if resolved is not None else _UNRESOLVED_STACK_OFFSET_8616
     return resolved
 
 
+@cython.ccall
 def _stack_offset_leaf_value_8616(
     codegen: StructuredCodegenValue, node: StructuredAstValue
 ) -> int | None:
     """Resolve trivial leaf offsets: native anchor, constant, BP/stack_base bases."""
+    const: object
+    native_anchor: object
+    runtime_gp_view: object
     native_anchor = machine_bp_offset_for_native_anchor_8616(codegen, node)
     if native_anchor is not None:
         return native_anchor
@@ -3713,12 +4097,13 @@ def _stack_offset_leaf_value_8616(
     return _stack_base_bp_bias_8616(node, codegen)
 
 
+@cython.ccall
 def _stack_offset_reference_value_8616(
     codegen: StructuredCodegenValue,
     node: StructuredAstValue,
-    offset_cache: dict[int, StructuredAstValue],
-    node_id: int,
-) -> tuple[bool, int | None]:
+    offset_cache: object,
+    node_id: cython.longlong,
+) -> tuple[cython.bint, int | None]:
     """Handle the ``Reference`` arm; returns (handled, offset)."""
     if not (isinstance(node, structured_c.CUnaryOp) and node.op == "Reference"):
         return False, None
@@ -3733,13 +4118,15 @@ def _stack_offset_reference_value_8616(
     return True, None
 
 
+@cython.ccall
 def _stack_offset_nonleaf_value_8616(
     node: StructuredAstValue,
     project: AngrProjectValue,
     codegen: StructuredCodegenValue,
-    seen: set[int],
+    seen: object,
 ) -> int | None:
     """Resolve an offset from variable/dirty/binary nodes; None when unsupported."""
+    resolved: object
     if isinstance(node, structured_c.CVariable):
         return _resolve_stack_offset_from_variable_8616(node, project, codegen, seen)
     resolved = _resolve_stack_offset_from_dirty_8616(node, project, codegen, seen)
@@ -3753,10 +4140,13 @@ def _stack_offset_nonleaf_value_8616(
     return None
 
 
+@cython.ccall
 def _stack_offset_from_expr_8616(
-    node: StructuredAstValue, project: AngrProjectValue, codegen: StructuredCodegenValue, seen: set[int] | None = None
+    node: StructuredAstValue, project: AngrProjectValue, codegen: StructuredCodegenValue, seen: object = None
 ) -> int | None:
     """Resolve stack-address expressions using their proven coordinate domain."""
+    leaf: object
+    offset_cache: object
     if seen is None:
         seen = set()
     node = _strip_casts_8616(node)
@@ -3782,49 +4172,56 @@ def _stack_offset_from_expr_8616(
     return _stack_offset_cache_record_8616(offset_cache, node_id, resolved)
 
 
-def _log_refusal_8616(codegen: StructuredCodegenValue, kind: str, /, **details: StructuredAstValue) -> None:
+def _log_refusal_8616(codegen: StructuredCodegenValue, kind: object, /, **details: StructuredAstValue) -> None:
+    refusals: object
     refusals = getattr(codegen, "_inertia_ss_lowering_refusal_log", None)
-    normalized = {k: str(v) for k, v in details.items()}
+    normalized = {k: str(v) for k, v in builtins.iter(details.items())}
     if isinstance(refusals, list):
         refusals.append({"kind": kind, **normalized})
     if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
         log.warning("[ss-linear-lowering] refusal kind=%s details=%r", kind, normalized)
 
 
-def _debug_c_repr_8616(node: StructuredAstValue) -> str:
+def _debug_c_repr_8616(node: StructuredAstValue) -> object:
     try:
         chunks = node.c_repr_chunks(asexpr=True)
-        return "".join(str(text) for text, _obj in chunks)
+        return "".join(str(text) for text, _obj in iter(chunks))
     except Exception:
         return repr(node)
 
 
-def _safe_debug_attr_8616(obj: StructuredAstValue, attr: str) -> StructuredAstValue:
+@cython.ccall
+def _safe_debug_attr_8616(obj: StructuredAstValue, attr: object) -> StructuredAstValue:
     try:
         return getattr(obj, attr, None)
     except (AttributeError, TypeError, ValueError):
         return None
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _SsLinearMatch8616:
     """Match a dereference of ``(ss << 4) + stack_offset`` with stack proof."""
 
     node: StructuredAstValue
     project: AngrProjectValue
     codegen: StructuredCodegenValue
-    segment_name: str | None = None
-    offset_total: int = 0
-    offset_terms: list[StructuredAstValue] = field(default_factory=list)
-    unresolved_segment_terms: list[StructuredAstValue] = field(default_factory=list)
-    inferred_ss_from_stack_fact: bool = False
+    segment_name: object = None
+    offset_total: cython.longlong = 0
+    offset_terms: object = field(default_factory=list)
+    unresolved_segment_terms: object = field(default_factory=list)
+    inferred_ss_from_stack_fact: cython.bint = False
     base_offset: int | None = None
     width: StructuredAstValue = None
-    displacement: int = 0
+    displacement: cython.longlong = 0
     known_offsets: StructuredAstValue = ()
 
-    def _classify_terms_8616(self, terms: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _classify_terms_8616(self, terms: StructuredAstValue) -> cython.bint:
         """Fold each signed term into segment, const, or offset evidence."""
+        const: object
+        seg: object
+        sign: object
+        term: object
         for sign, term in terms:
             seg = _segment_base_name_8616(term, self.project, codegen=self.codegen)
             if seg is not None:
@@ -3851,8 +4248,10 @@ class _SsLinearMatch8616:
             )
         return True
 
+    @cython.ccall
     def _infer_ss_segment_8616(self) -> None:
         """Infer an SS segment when one stack-offset term carries proof."""
+        candidate_base_offset: object
         if self.segment_name is None and len(self.unresolved_segment_terms) == 1 and len(self.offset_terms) == 1:
             candidate_base_offset = _stack_offset_from_expr_8616(self.offset_terms[0], self.project, self.codegen)
             if candidate_base_offset is not None:
@@ -3865,7 +4264,7 @@ class _SsLinearMatch8616:
                         int(getattr(self.codegen, "_inertia_ss_segment_inferred_from_stack_offset_count", 0) or 0) + 1
                     )
 
-    def _refused_on_segment_shape_8616(self) -> bool:
+    def _refused_on_segment_shape_8616(self) -> cython.bint:
         """Refuse when the segment or term shape is not a proven stack access."""
         if not (
             self.segment_name != "ss"
@@ -3881,14 +4280,15 @@ class _SsLinearMatch8616:
                 terms=len(self.offset_terms),
                 unresolved_segments=len(self.unresolved_segment_terms),
                 operand=repr(self.node.operand),
-                offset_term_types=tuple(type(term).__name__ for term in self.offset_terms),
-                offset_terms=tuple(_debug_c_repr_8616(term) for term in self.offset_terms),
+                offset_term_types=tuple(type(term).__name__ for term in iter(self.offset_terms)),
+                offset_terms=tuple(_debug_c_repr_8616(term) for term in iter(self.offset_terms)),
             )
         else:
             _log_refusal_8616(self.codegen, "segment_or_terms", segment=self.segment_name, terms=len(self.offset_terms))
         return True
 
-    def _resolve_base_offset_8616(self) -> bool:
+    @cython.ccall
+    def _resolve_base_offset_8616(self) -> cython.bint:
         """Resolve the base BP offset; False when unresolvable."""
         self.known_offsets = _known_bp_stack_offsets_8616(self.codegen)
         if self.base_offset is None and len(self.offset_terms) == 0:
@@ -3908,6 +4308,7 @@ class _SsLinearMatch8616:
             return False
         return True
 
+    @cython.ccall
     def _rebase_absolute_anchor_8616(self) -> None:
         """Rebase onto the wrapped anchor when the computed offset lacks proof."""
         assert self.base_offset is not None
@@ -3931,21 +4332,21 @@ class _SsLinearMatch8616:
             self.base_offset = 0
             self.offset_total = absolute_displacement
 
-    def _ss_offset_alias_ok_8616(self) -> bool:
+    def _ss_offset_alias_ok_8616(self) -> cython.bint:
         """Require stack-alias evidence for non-direct SS offset terms."""
         assert self.base_offset is not None
         if self.segment_name != "ss" or all(
-            _is_stack_offset_term_direct_8616(term) for term in self.offset_terms
+            _is_stack_offset_term_direct_8616(term) for term in iter(self.offset_terms)
         ):
             return True
         if _has_stack_storage_evidence_for_displacement_8616(
             self.codegen, self.base_offset + self.offset_total, self.width
         ) or all(
-            _stack_offset_term_stackish_8616(term, self.project, self.codegen) for term in self.offset_terms
+            _stack_offset_term_stackish_8616(term, self.project, self.codegen) for term in iter(self.offset_terms)
         ) or self.base_offset + self.offset_total in self.known_offsets or (
             _ss_probe_enabled_8616(self.codegen)
             and all(
-                _stack_offset_term_stackish_8616(term, self.project, self.codegen) for term in self.offset_terms
+                _stack_offset_term_stackish_8616(term, self.project, self.codegen) for term in iter(self.offset_terms)
             )
         ):
             self.codegen._inertia_ss_segment_inferred_from_stack_offset_count += 1
@@ -3959,6 +4360,7 @@ class _SsLinearMatch8616:
         )
         return False
 
+    @cython.ccall
     def _resolve_displacement_8616(self) -> None:
         """Resolve displacement, rebasing through the entry-SP anchor if needed."""
         assert self.base_offset is not None
@@ -3988,8 +4390,11 @@ class _SsLinearMatch8616:
                     + 1
                 )
 
-    def _final_gate_8616(self) -> bool:
+    @cython.ccall
+    def _final_gate_8616(self) -> cython.bint:
         """Refuse when no stack fact or inferred alias evidence backs the access."""
+        facts: object
+        region: object
         region = getattr(getattr(self.codegen, "cfunc", None), "addr", None)
         facts = _stack_storage_facts_for_segmented_address_8616("ss", self.displacement, self.width, region=region)
         try:
@@ -4011,8 +4416,11 @@ class _SsLinearMatch8616:
             return False
         return True
 
+    @cython.ccall
     def match_8616(self) -> RealModeLinearStackAccess8616 | None:
         """Run the SS-linear access match, refusing without proof."""
+        native_offset: object
+        terms: object
         if not hasattr(self.codegen, "_inertia_ss_segment_inferred_from_stack_offset_count"):
             self.codegen._inertia_ss_segment_inferred_from_stack_offset_count = 0
 
@@ -4049,6 +4457,7 @@ class _SsLinearMatch8616:
         return RealModeLinearStackAccess8616(self.displacement, self.width, entry_sp_offset=entry_sp_offset)
 
 
+@cython.ccall
 def match_stable_ss_linear_stack_access_8616(
     node: StructuredAstValue, project: AngrProjectValue, codegen: StructuredCodegenValue
 ) -> RealModeLinearStackAccess8616 | None:
@@ -4062,6 +4471,10 @@ def match_stable_ds_es_linear_global_access_8616(
     """Match a dereference of ``(ds << 4) + addr`` or ``(es << 4) + addr``."""
 
     def _impl() -> StructuredAstValue:
+        decomposed: object
+        segment_name: object
+        width: object
+        width_bits: object
         nonlocal node
         node = _strip_casts_8616(node)
         if not isinstance(node, structured_c.CUnaryOp) or node.op != "Dereference":
@@ -4105,11 +4518,13 @@ def match_stable_ds_es_linear_global_access_8616(
     return cast(RealModeLinearGlobalAddress8616 | None, _impl())
 
 
-def _address_projection_term_is_safe_8616(node: StructuredAstValue) -> bool:
+@cython.ccall
+def _address_projection_term_is_safe_8616(node: StructuredAstValue) -> cython.bint:
+    expr: object
     allowed_unary = {"Neg", "BitNot", "Reference"}
     allowed_binary = {"Add", "Sub", "Mul", "Shl", "Shr", "And", "Or", "Xor"}
     pending: list[StructuredAstValue] = [_strip_casts_8616(node)]
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     while pending:
         expr = _strip_casts_8616(pending.pop())
         if expr is None:
@@ -4133,9 +4548,14 @@ def _address_projection_term_is_safe_8616(node: StructuredAstValue) -> bool:
     return True
 
 
-def _contains_materialized_global_reference_8616(node: StructuredAstValue) -> bool:
+def _contains_materialized_global_reference_8616(node: StructuredAstValue) -> cython.bint:
+    child: object
+    children: object
+    expr: object
+    variable: object
+    attr: object
     pending: list[StructuredAstValue] = [_strip_casts_8616(node)]
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     while pending:
         expr = _strip_casts_8616(pending.pop())
         if expr is None:
@@ -4157,14 +4577,21 @@ def _contains_materialized_global_reference_8616(node: StructuredAstValue) -> bo
         for attr in ("args", "operands"):
             children = getattr(expr, attr, None)
             if isinstance(children, (list, tuple)):
-                pending.extend(child for child in children if child is not None)
+                pending.extend(child for child in iter(children) if child is not None)
     return False
 
 
-def _return_register_virtual_name_8616(node: StructuredAstValue, project: AngrProjectValue) -> str | None:
+def _return_register_virtual_name_8616(node: StructuredAstValue, project: AngrProjectValue) -> object:
+    _ax_size: object
+    ax_reg: object
+    child: object
+    current: object
+    name: object
+    seq: object
+    attr: object
     ax_reg, _ax_size = getattr(getattr(project, "arch", None), "registers", {}).get("ax", (None, None))
     pending = [_strip_casts_8616(node)]
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     while pending:
         current = _strip_casts_8616(pending.pop())
         if current is None:
@@ -4183,12 +4610,15 @@ def _return_register_virtual_name_8616(node: StructuredAstValue, project: AngrPr
         for attr in ("operands", "args"):
             seq = getattr(current, attr, None)
             if seq:
-                pending.extend(item for item in seq if item is not None)
+                pending.extend(item for item in iter(seq) if item is not None)
     return None
 
 
-def _return_ax_name_8616(current: StructuredAstValue, ax_reg: StructuredAstValue) -> str | None:
+@cython.ccall
+def _return_ax_name_8616(current: StructuredAstValue, ax_reg: StructuredAstValue) -> object:
     """Return the vvar name for an ax-carrier node, else None."""
+    dirty: object
+    varid: object
     dirty = getattr(current, "dirty", None)
     if dirty is not None:
         reg = _dirty_reg_offset_8616(dirty)
@@ -4205,7 +4635,8 @@ def _return_ax_name_8616(current: StructuredAstValue, ax_reg: StructuredAstValue
     return None
 
 
-def _return_rhs_is_safe_8616(expr: StructuredAstValue) -> bool:
+@cython.ccall
+def _return_rhs_is_safe_8616(expr: StructuredAstValue) -> cython.bint:
     expr = _strip_casts_8616(expr)
     if isinstance(expr, (structured_c.CConstant, structured_c.CVariable, structured_c.CDirtyExpression)):
         return True
@@ -4218,10 +4649,13 @@ def _return_rhs_is_safe_8616(expr: StructuredAstValue) -> bool:
     return False
 
 
+@cython.ccall
 def _materialize_return_retval_8616(
     node: structured_c.CReturn, codegen: StructuredCodegenValue, project: AngrProjectValue
-) -> bool:
+) -> cython.bint:
     """Substitute a proven ax-carrier return value with its safe assignment RHS."""
+    rhs: object
+    virtual_name: object
     virtual_name = _return_register_virtual_name_8616(node.retval, project)
     if virtual_name is None:
         return False
@@ -4235,13 +4669,16 @@ def _materialize_return_retval_8616(
     return True
 
 
-def _materialize_return_register_assignments_8616(codegen: StructuredCodegenValue, project: AngrProjectValue) -> bool:
+@cython.ccall
+def _materialize_return_register_assignments_8616(codegen: StructuredCodegenValue, project: AngrProjectValue) -> cython.bint:
+    node: object
+    root: object
     root = getattr(getattr(codegen, "cfunc", None), "statements", None)
     if root is None:
         return False
     changed = False
     stack = [root]
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     while stack:
         node = stack.pop()
         if node is None:
@@ -4262,8 +4699,12 @@ def _materialize_return_register_assignments_8616(codegen: StructuredCodegenValu
 _RETURN_WALK_CHILD_ATTRS_8616 = ("statements", "body", "else_node", "condition_and_nodes", "condition", "init", "iteration")
 
 
-def _push_return_walk_children_8616(node: StructuredAstValue, stack: list[StructuredAstValue]) -> None:
+@cython.ccall
+def _push_return_walk_children_8616(node: StructuredAstValue, stack: object) -> None:
     """Push statement/child nodes for the return-assignment walk."""
+    value: object
+    attr: object
+    item: object
     for attr in _RETURN_WALK_CHILD_ATTRS_8616:
         value = getattr(node, attr, None)
         if value is None:
@@ -4278,7 +4719,10 @@ def _push_return_walk_children_8616(node: StructuredAstValue, stack: list[Struct
             stack.append(value)
 
 
-def _op_reg_id_8616(insn: StructuredAstValue, index: int) -> int | None:
+@cython.ccall
+def _op_reg_id_8616(insn: StructuredAstValue, index: cython.longlong) -> int | None:
+    operands: object
+    reg: object
     operands = getattr(insn, "operands", None)
     if operands is None or len(operands) <= index:
         return None
@@ -4289,42 +4733,49 @@ def _op_reg_id_8616(insn: StructuredAstValue, index: int) -> int | None:
     return int(reg) if isinstance(reg, int) else None
 
 
-def _is_mov_sp_bp_8616(insn: StructuredAstValue) -> bool:
-    if getattr(insn, "id", None) != X86_INS_MOV:
+@cython.ccall
+def _is_mov_sp_bp_8616(insn: StructuredAstValue) -> cython.bint:
+    if operator.ne(getattr(insn, "id", None), X86_INS_MOV):
         return False
-    return bool(_op_reg_id_8616(insn, 0) == X86_REG_SP and _op_reg_id_8616(insn, 1) == X86_REG_BP)
+    return bool(operator.eq(_op_reg_id_8616(insn, 0), X86_REG_SP) and operator.eq(_op_reg_id_8616(insn, 1), X86_REG_BP))
 
 
-def _is_function_return_instruction_8616(insn: StructuredAstValue) -> bool:
+@cython.ccall
+def _is_function_return_instruction_8616(insn: StructuredAstValue) -> cython.bint:
     """Recognize decoded near and far returns through Capstone semantics."""
     return bool(
-        getattr(insn, "id", None) == X86_INS_RET
+        operator.eq(getattr(insn, "id", None), X86_INS_RET)
         or X86_GRP_RET in frozenset(getattr(insn, "groups", ()) or ())
     )
 
 
+@cython.ccall
 def _decode_insn_cache_entry_8616(
-    project: AngrProjectValue, function_addr: int, limit: int, function: StructuredAstValue | None
+    project: AngrProjectValue, function_addr: cython.longlong, limit: cython.longlong, function: object
 ) -> tuple[dict[StructuredAstValue, StructuredAstValue], StructuredAstValue, StructuredAstValue]:
     """Return (cache, key, hit) for the RET-terminated decode cache."""
+    cache: object
+    cached: object
     cache = getattr(project, "_inertia_decode_function_insns_cache_8616", None)
     if not isinstance(cache, dict):
         cache = {}
         with contextlib.suppress(Exception):
             project._inertia_decode_function_insns_cache_8616 = cache
     key = (
-        (int(function_addr), int(limit), id(function))
+        tuple((int(function_addr), int(limit), id(function)))
         if function is not None
-        else (int(function_addr), int(limit))
+        else tuple((int(function_addr), int(limit)))
     )
     cached = cache.get(key)
     return cache, key, cached if isinstance(cached, tuple) else None
 
 
+@cython.ccall
 def _resolve_decode_function_8616(
-    project: AngrProjectValue, function_addr: int, function: StructuredAstValue | None
+    project: AngrProjectValue, function_addr: cython.longlong, function: object
 ) -> StructuredAstValue | None:
     """Resolve function metadata from the knowledge base when absent."""
+    funcs: object
     if function is None:
         funcs = getattr(getattr(project, "kb", None), "functions", None)
         if funcs is not None:
@@ -4341,6 +4792,9 @@ def _ordered_ret_terminated_insns_8616(
     project: AngrProjectValue, function: StructuredAstValue
 ) -> tuple[tuple[StructuredAstValue, ...], list[StructuredAstValue]]:
     """Return (all decoded insns, insns through the first RET)."""
+    insn: object
+    block: object
+    wrapper: object
     blocks = _direct_global_update_blocks_8616(project, function)
     insns = []
     for block in blocks:
@@ -4358,12 +4812,13 @@ def _ordered_ret_terminated_insns_8616(
 
 def _decode_function_insns_at_8616(
     project: AngrProjectValue,
-    function_addr: int,
+    function_addr: cython.longlong,
     *,
-    limit: int = 0x100,
+    limit: cython.longlong = 0x100,
     function: StructuredAstValue | None = None,
-) -> tuple[StructuredAstValue, ...]:
+) -> object:
     """Return a complete function decode, caching only RET-terminated evidence."""
+    cached: object
     debug = os.environ.get("INERTIA_DEBUG_CALLEE_SAVE_PRUNE") == "1"
     cache, key, cached = _decode_insn_cache_entry_8616(project, function_addr, limit, function)
     if cached is not None:
@@ -4374,7 +4829,7 @@ def _decode_function_insns_at_8616(
         return ()
 
     blocks, ordered = _ordered_ret_terminated_insns_8616(project, function)
-    if not any(_is_function_return_instruction_8616(insn) for insn in ordered):
+    if not any(_is_function_return_instruction_8616(insn) for insn in iter(ordered)):
         if debug:
             log.warning(
                 "[callee-save-prune] incomplete decode addr=%#x blocks=%d insns=%d first=%r last=%r",
@@ -4390,14 +4845,16 @@ def _decode_function_insns_at_8616(
     return result
 
 
+@cython.ccall
 def _decode_function_insns_8616(
     project: AngrProjectValue,
-    function_addr: int,
+    function_addr: cython.longlong,
     *,
-    limit: int = 0x100,
+    limit: cython.longlong = 0x100,
     function: StructuredAstValue | None = None,
-) -> tuple[StructuredAstValue, ...]:
+) -> object:
     """Decode one function through its current and original linear addresses."""
+    delta: object
     insns = _decode_function_insns_at_8616(
         project,
         function_addr,
@@ -4416,8 +4873,10 @@ def _decode_function_insns_8616(
     return ()
 
 
-def _callee_save_cache_8616(project: AngrProjectValue) -> dict[StructuredAstValue, frozenset[str]]:
+@cython.ccall
+def _callee_save_cache_8616(project: AngrProjectValue) -> object:
     """Return the project-owned callee-save name cache, creating it once."""
+    cache: object
     cache = getattr(project, "_inertia_callee_saved_register_names_cache_8616", None)
     if not isinstance(cache, dict):
         cache = {}
@@ -4426,12 +4885,16 @@ def _callee_save_cache_8616(project: AngrProjectValue) -> dict[StructuredAstValu
     return cache
 
 
+@cython.ccall
 def _normalized_function_insns_8616(
     decoded_insns: StructuredAstValue,
 ) -> tuple[StructuredAstValue, ...]:
     """Dedup decoded instructions by (address, id), preserving order."""
+    address: object
+    instruction_id: object
+    insn: object
     normalized_insns: list[StructuredAstValue] = []
-    seen_instruction_keys: set[tuple[int, int]] = set()
+    seen_instruction_keys: set[tuple[cython.longlong, cython.longlong]] = set()
     for insn in decoded_insns:
         address = getattr(insn, "address", None)
         instruction_id = getattr(insn, "id", None)
@@ -4445,13 +4908,15 @@ def _normalized_function_insns_8616(
     return tuple(normalized_insns)
 
 
+@cython.ccall
 def _callee_save_pushes_8616(
-    insns: tuple[StructuredAstValue, ...], preservable: frozenset[str]
-) -> list[str]:
+    insns: object, preservable: object
+) -> object:
     """Collect pushed preservable registers before the first return."""
+    insn: object
     pushed: list[str] = []
     for insn in insns:
-        if getattr(insn, "id", None) == X86_INS_PUSH:
+        if operator.eq(getattr(insn, "id", None), X86_INS_PUSH):
             reg_id = _op_reg_id_8616(insn, 0)
             if isinstance(reg_id, int):
                 reg_name = insn.reg_name(reg_id)
@@ -4462,12 +4927,17 @@ def _callee_save_pushes_8616(
     return pushed
 
 
+@cython.ccall
 def _callee_save_restores_8616(
-    insns: tuple[StructuredAstValue, ...],
-    ret_index: int,
-    preservable: frozenset[str],
-) -> list[str]:
+    insns: object,
+    ret_index: cython.longlong,
+    preservable: object,
+) -> object:
     """Collect restored registers whose values stay live until the return."""
+    canonical_name: object
+    insn_id: object
+    insn: object
+    written_register_id: object
     canonical_register_names = {
         "al": "ax",
         "ah": "ax",
@@ -4482,7 +4952,7 @@ def _callee_save_restores_8616(
     registers_written_after: set[str] = set()
     for insn in reversed(insns[:ret_index]):
         insn_id = getattr(insn, "id", None)
-        if insn_id == X86_INS_POP:
+        if operator.eq(insn_id, X86_INS_POP):
             reg_id = _op_reg_id_8616(insn, 0)
             if isinstance(reg_id, int) and reg_id != X86_REG_BP:
                 reg_name = insn.reg_name(reg_id)
@@ -4508,15 +4978,17 @@ def _callee_save_restores_8616(
 
 def _callee_saved_register_names_from_frame_evidence_8616(
     project: AngrProjectValue,
-    function_addr: int,
+    function_addr: cython.longlong,
     *,
     function: StructuredAstValue | None = None,
-) -> frozenset[str]:
+) -> object:
     """Return exact push/pop-proven explicitly preserved general registers.
 
     Negative results remain uncached because function discovery may still be
     extending the CFG and instruction extent during Structuring retries.
     """
+    cached: object
+    ret_index: object
     debug = os.environ.get("INERTIA_DEBUG_CALLEE_SAVE_PRUNE") == "1"
     cache = _callee_save_cache_8616(project)
     cache_key = (int(function_addr), id(function)) if function is not None else int(function_addr)
@@ -4549,7 +5021,7 @@ def _callee_saved_register_names_from_frame_evidence_8616(
     ret_index = next(
         (
             idx
-            for idx, insn in enumerate(insns)
+            for idx, insn in builtins.iter(enumerate(insns))
             if _is_function_return_instruction_8616(insn)
         ),
         None,
@@ -4567,13 +5039,17 @@ def _callee_saved_register_names_from_frame_evidence_8616(
     return result
 
 
-def _expr_register_name_8616(node: StructuredAstValue, project: AngrProjectValue) -> str | None:
+@cython.ccall
+def _expr_register_name_8616(node: StructuredAstValue, project) -> object:
     del project
     register_name = physical_register_name_8616(_strip_casts_8616(node))
     return register_name if isinstance(register_name, str) else None
 
 
+@cython.ccall
 def _statement_ins_addr_8616(stmt: StructuredAstValue) -> int | None:
+    ins_addr: object
+    tags: object
     tags = copy_structured_tags_8616(getattr(stmt, "tags", None))
     if tags is not None:
         ins_addr = tags.get("ins_addr")
@@ -4583,8 +5059,11 @@ def _statement_ins_addr_8616(stmt: StructuredAstValue) -> int | None:
     return ins_addr if isinstance(ins_addr, int) else None
 
 
+@cython.ccall
 def _round_trip_callee_saved_regs_8616(decoded_insns: StructuredAstValue) -> frozenset[str]:
     """Return registers with both a PUSH and a POP in the function prologue."""
+    instruction_id: object
+    insn: object
     preservable = frozenset({"ax", "bx", "cx", "dx", "si", "di", "ds", "es"})
     pushed: set[str] = set()
     popped: set[str] = set()
@@ -4598,16 +5077,18 @@ def _round_trip_callee_saved_regs_8616(decoded_insns: StructuredAstValue) -> fro
         register_name = insn.reg_name(reg_id)
         if register_name not in preservable:
             continue
-        (pushed if instruction_id == X86_INS_PUSH else popped).add(register_name)
+        (pushed if operator.eq(instruction_id, X86_INS_PUSH) else popped).add(register_name)
     return frozenset(pushed & popped)
 
 
+@cython.ccall
 def _frame_instruction_roles_8616(
     frame_pairs: StructuredAstValue,
     runtime_gp_names: StructuredAstValue,
-) -> dict[int, tuple[CalleeSavedFramePair8616, CalleeSavedFrameInstructionRole8616]]:
+) -> object:
     """Map frame push/pop instruction addresses to their owning pairs."""
-    roles: dict[int, tuple[CalleeSavedFramePair8616, CalleeSavedFrameInstructionRole8616]] = {}
+    pair: object
+    roles: dict[cython.longlong, tuple[CalleeSavedFramePair8616, CalleeSavedFrameInstructionRole8616]] = {}
     for pair in frame_pairs:
         runtime_owned = (
             pair.register_name in {"ds", "es"}
@@ -4626,8 +5107,10 @@ def _frame_instruction_roles_8616(
     return roles
 
 
-def _callee_saved_prune_stats_8616(codegen: StructuredCodegenValue) -> dict[str, int]:
+@cython.ccall
+def _callee_saved_prune_stats_8616(codegen: StructuredCodegenValue) -> object:
     """Return the codegen-owned spill-prune stats bucket, creating it once."""
+    stats: object
     stats = getattr(codegen, "_inertia_callee_saved_spill_prune_stats", None)
     if not isinstance(stats, dict):
         stats = {
@@ -4644,22 +5127,21 @@ def _callee_saved_prune_stats_8616(codegen: StructuredCodegenValue) -> dict[str,
     return stats
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _CalleeSavedSpillPrune8616:
     """Remove exact push/pop-proven callee-save spill assignments."""
 
     codegen: StructuredCodegenValue
     project: AngrProjectValue
     saved_regs: StructuredAstValue
-    frame_instruction_roles: dict[
-        int, tuple[CalleeSavedFramePair8616, CalleeSavedFrameInstructionRole8616]
-    ]
-    stats: dict[str, int]
-    pruned_facts: list[CalleeSavedFramePruneFact8616]
+    frame_instruction_roles: object
+    stats: object
+    pruned_facts: object
     prior_facts: StructuredAstValue
-    function_addr: int
-    changed: bool = False
+    function_addr: cython.longlong
+    changed: cython.bint = False
 
+    @cython.ccall
     def carrier_storage(
         self,
         stmt: StructuredAstValue,
@@ -4667,10 +5149,13 @@ class _CalleeSavedSpillPrune8616:
         role: CalleeSavedFrameInstructionRole8616,
     ) -> tuple[CalleeSavedFrameCarrierKind8616, int | None, int | None]:
         """Classify the observable storage carried by one frame assignment."""
+        access: object
+        previous_allow_sp: object
+        previous_offset_cache: object
         if role is not CalleeSavedFrameInstructionRole8616.PUSH:
             return CalleeSavedFrameCarrierKind8616.FRAME_BOOKKEEPING, None, None
         lhs = _strip_casts_8616(stmt.lhs)
-        if _expr_register_name_8616(stmt.rhs, self.project) != pair.register_name:
+        if operator.ne(_expr_register_name_8616(stmt.rhs, self.project), pair.register_name):
             return CalleeSavedFrameCarrierKind8616.FRAME_BOOKKEEPING, None, None
         if isinstance(lhs, structured_c.CVariable):
             variable = lhs.variable
@@ -4700,8 +5185,10 @@ class _CalleeSavedSpillPrune8616:
             access.width,
         )
 
-    def is_prunable(self, stmt: StructuredAstValue) -> bool:
+    @cython.ccall
+    def is_prunable(self, stmt: StructuredAstValue) -> cython.bint:
         """Check whether a statement is a proven frame spill to drop."""
+        frame_owner: object
         if not isinstance(stmt, structured_c.CAssignment):
             return False
         ins_addr = _statement_ins_addr_8616(stmt)
@@ -4738,8 +5225,10 @@ class _CalleeSavedSpillPrune8616:
             return True
         return False
 
-    def rewrite_statement_list(self, statements: list[Any]) -> None:
+    @cython.ccall
+    def rewrite_statement_list(self, statements: object) -> None:
         """Drop prunable assignments and recurse into statement containers."""
+        stmt: object
         kept = []
         for stmt in statements:
             if self.is_prunable(stmt):
@@ -4748,13 +5237,18 @@ class _CalleeSavedSpillPrune8616:
                 self.changed = True
                 continue
             kept.append(stmt)
-        if len(kept) != len(statements):
+        if operator.ne(len(kept), len(statements)):
             statements[:] = kept
         for stmt in tuple(kept):
             self._rewrite_stmt_children_8616(stmt)
 
+    @cython.ccall
     def _rewrite_stmt_children_8616(self, stmt: StructuredAstValue) -> None:
         """Recurse the rewrite into a statement's child containers."""
+        condition_nodes: object
+        value: object
+        attr: object
+        item: object
         for attr in ("statements", "body", "else_node"):
             value = getattr(stmt, attr, None)
             if isinstance(value, structured_c.CStatements):
@@ -4770,13 +5264,16 @@ class _CalleeSavedSpillPrune8616:
                         self.rewrite_statement_list(body.statements)
 
 
+@cython.ccall
 def _remove_callee_saved_stack_spills_8616(
     codegen: StructuredCodegenValue,
     project: AngrProjectValue,
     *,
     function: StructuredAstValue | None = None,
-) -> bool:
+) -> cython.bint:
     """Remove exact push/pop-proven callee-save spill assignments."""
+    function_addr: object
+    root: object
     function_addr = getattr(getattr(codegen, "cfunc", None), "addr", None)
     if not isinstance(function_addr, int):
         return False
@@ -4833,17 +5330,18 @@ def _remove_callee_saved_stack_spills_8616(
         prune.rewrite_statement_list(root)
     if pruned_facts:
         codegen._inertia_callee_saved_frame_prune_record_8616 = (
-            CalleeSavedFramePruneRecord8616.closed((*prior_facts, *pruned_facts))
+            CalleeSavedFramePruneRecord8616.closed(tuple(prior_facts) + tuple(pruned_facts))
         )
     return prune.changed
 
 
+@cython.ccall
 def prune_callee_saved_stack_spills_8616(
     codegen: StructuredCodegenValue,
     project: AngrProjectValue,
     *,
     function: StructuredAstValue | None = None,
-) -> bool:
+) -> cython.bint:
     """Replay binary frame-evidence pruning after structured AST regeneration."""
     return _remove_callee_saved_stack_spills_8616(
         codegen,
@@ -4852,13 +5350,16 @@ def prune_callee_saved_stack_spills_8616(
     )
 
 
+@cython.ccall
 def materialize_proven_control_stack_escape_8616(
     codegen: StructuredCodegenValue,
     project: AngrProjectValue,
     *,
     function: StructuredAstValue | None = None,
-) -> bool:
+) -> cython.bint:
     """Materialize an exact entry-POP/terminal-RET non-local escape."""
+    fact: object
+    function_addr: object
     function_addr = getattr(getattr(codegen, "cfunc", None), "addr", None)
     if not isinstance(function_addr, int):
         return False
@@ -4873,10 +5374,13 @@ def materialize_proven_control_stack_escape_8616(
     return bool(fact is not None and materialize_control_stack_escape_8616(codegen, fact))
 
 
+@cython.ccall
 def match_stable_ds_es_linear_global_address_8616(
     node: StructuredAstValue, project: AngrProjectValue, codegen: StructuredCodegenValue
 ) -> RealModeLinearGlobalAddress8616 | None:
     """Match an address-valued ``(ds << 4) + base + projection`` expression."""
+    decomposed: object
+    segment_name: object
     node = _strip_casts_8616(node)
     if isinstance(node, structured_c.CUnaryOp) and node.op == "Dereference":
         return None
@@ -4906,12 +5410,15 @@ def match_stable_ds_es_linear_global_address_8616(
     )
 
 
+@cython.ccall
 def _walk_dses_list_children_8616(
-    value: list[StructuredAstValue],
-    node_stack: list[StructuredAstValue],
+    value: object,
+    node_stack: object,
     transform: Callable[[StructuredAstValue], StructuredAstValue],
-) -> bool:
+) -> cython.bint:
     """Transform each element of a child list in place."""
+    index: object
+    item: object
     local_changed = False
     for index, item in enumerate(tuple(value)):
         if not type(item).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
@@ -4927,12 +5434,15 @@ def _walk_dses_list_children_8616(
     return local_changed
 
 
+@cython.ccall
 def _walk_dses_attr_children_8616(
     node: StructuredAstValue,
-    node_stack: list[StructuredAstValue],
+    node_stack: object,
     transform: Callable[[StructuredAstValue], StructuredAstValue],
-) -> bool:
+) -> cython.bint:
     """Transform each child-bearing attribute of one node in place."""
+    value: object
+    attr: object
     local_changed = False
     for attr in (
         "statements",
@@ -4965,12 +5475,16 @@ def _walk_dses_attr_children_8616(
     return local_changed
 
 
+@cython.ccall
 def _walk_dses_pair_children_8616(
     node: StructuredAstValue,
-    node_stack: list[StructuredAstValue],
+    node_stack: object,
     transform: Callable[[StructuredAstValue], StructuredAstValue],
-) -> bool:
+) -> cython.bint:
     """Transform condition/body pairs of one node in place."""
+    condition_and_nodes: object
+    body: object
+    cond: object
     condition_and_nodes = getattr(node, "condition_and_nodes", None)
     if not condition_and_nodes:
         return False
@@ -5005,12 +5519,14 @@ def _walk_dses_pair_children_8616(
     return local_changed
 
 
+@cython.ccall
 def _replace_children_walk_8616(
-    root_node: StructuredAstValue,
-    seen: set[int],
+    root_node: object,
+    seen: object,
     transform: Callable[[StructuredAstValue], StructuredAstValue],
-) -> bool:
+) -> cython.bint:
     """Walk a structured tree once, transforming children in place."""
+    node: object
     if root_node is None:
         return False
     node_stack: list[StructuredAstValue] = [root_node]
@@ -5030,26 +5546,28 @@ def _replace_children_walk_8616(
     return local_changed
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _DsEsGlobalDerefRun8616:
     """One DS/ES-linear global dereference lowering walk over a structured tree."""
 
     codegen: StructuredAstValue
     project: StructuredAstValue
-    changed: bool = False
-    seen: set[int] = field(default_factory=set)
+    changed: cython.bint = False
+    seen: object = field(default_factory=set)
 
+    @cython.ccall
     def _rebind_stack_entry_to_global_8616(
         self,
-        variables_in_use: dict[StructuredAstValue, StructuredAstValue],
+        variables_in_use: object,
         variable: StructuredAstValue,
         cvar: StructuredAstValue,
-        addr: int,
-        name: str,
-        scalar_width: int,
+        addr: cython.longlong,
+        name: object,
+        scalar_width: cython.longlong,
         target_type: StructuredAstValue,
     ) -> StructuredAstValue:
         """Replace a same-displacement stack entry with a global memory cvar."""
+        unified: object
         replacement = SimMemoryVariable(
             addr,
             scalar_width,
@@ -5068,28 +5586,29 @@ class _DsEsGlobalDerefRun8616:
             unified[replacement] = {(replacement_cvar, getattr(replacement_cvar, "variable_type", None))}
         return replacement_cvar
 
+    @cython.ccall
     def _reuse_one_global_cvar_8616(
         self,
-        variables_in_use: dict[StructuredAstValue, StructuredAstValue],
+        variables_in_use: object,
         access: RealModeLinearGlobalAddress8616,
         variable: StructuredAstValue,
         cvar: StructuredAstValue,
-        addr: int,
-        name: str,
-        scalar_width: int,
+        addr: cython.longlong,
+        name: object,
+        scalar_width: cython.longlong,
         target_type: StructuredAstValue,
     ) -> StructuredAstValue:
         """Return a reusable cvar for one registry entry, or None."""
-        if isinstance(variable, SimMemoryVariable) and getattr(variable, "addr", None) == addr:
+        if isinstance(variable, SimMemoryVariable) and operator.eq(getattr(variable, "addr", None), addr):
             existing_size = variable.size
             if _cvar_has_array_type_8616(cvar) or (isinstance(existing_size, int) and existing_size > 2):
                 return None
-            if variable.size != scalar_width:
+            if operator.ne(variable.size, scalar_width):
                 variable.size = scalar_width
             if getattr(cvar, "variable_type", None) is None:
                 cvar.variable_type = target_type
             return cvar
-        if isinstance(variable, SimVariable) and getattr(variable, "name", None) == name:
+        if isinstance(variable, SimVariable) and operator.eq(getattr(variable, "name", None), name):
             if _cvar_has_array_type_8616(cvar):
                 return None
             if getattr(cvar, "variable_type", None) is None:
@@ -5097,24 +5616,27 @@ class _DsEsGlobalDerefRun8616:
             return cvar
         if (
             isinstance(variable, SimStackVariable)
-            and machine_bp_offset_for_stack_variable_8616(self.codegen, variable)
-            == access.displacement
+            and operator.eq(machine_bp_offset_for_stack_variable_8616(self.codegen, variable), access.displacement)
         ):
             return self._rebind_stack_entry_to_global_8616(
                 variables_in_use, variable, cvar, addr, name, scalar_width, target_type
             )
         return None
 
+    @cython.ccall
     def _reuse_global_cvar_8616(
         self,
-        variables_in_use: dict[StructuredAstValue, StructuredAstValue],
+        variables_in_use: object,
         access: RealModeLinearGlobalAddress8616,
-        addr: int,
-        name: str,
-        scalar_width: int,
+        addr: cython.longlong,
+        name: object,
+        scalar_width: cython.longlong,
         target_type: StructuredAstValue,
     ) -> StructuredAstValue:
         """Reuse or rebind an existing cvar covering the global displacement."""
+        reused: object
+        cvar: object
+        variable: object
         for variable, cvar in tuple(variables_in_use.items()):
             reused = self._reuse_one_global_cvar_8616(
                 variables_in_use, access, variable, cvar, addr, name, scalar_width, target_type
@@ -5123,8 +5645,12 @@ class _DsEsGlobalDerefRun8616:
                 return reused
         return None
 
+    @cython.ccall
     def global_cvar_8616(self, access: RealModeLinearGlobalAddress8616) -> StructuredAstValue:
         """Return a reused or fresh global memory cvar for the access displacement."""
+        reused: object
+        unified: object
+        variables_in_use: object
         addr = access.displacement & 0xFFFF
         name = f"g_{addr:04X}"
         scalar_width = min(access.width or 1, 2)
@@ -5146,8 +5672,11 @@ class _DsEsGlobalDerefRun8616:
         if isinstance(unified, dict):
             unified[variable] = {(cvar, getattr(cvar, "variable_type", None))}
         return cvar
+    @cython.ccall
     def global_expr_8616(self, access: RealModeLinearGlobalAddress8616) -> StructuredAstValue:
         """Build the global dereference expression, including residual index terms."""
+        sign: object
+        term: object
         if not access.residual_terms:
             return self.global_cvar_8616(access)
         target_type = _type_for_access_width_8616(access.width)
@@ -5169,8 +5698,10 @@ class _DsEsGlobalDerefRun8616:
             structured_c.CTypeCast(ptr_type, ptr_type, rebuilt, codegen=self.codegen),
             codegen=self.codegen,
         )
+    @cython.ccall
     def transform(self, node: StructuredAstValue) -> StructuredAstValue:
         """Lower a stable DS/ES linear dereference to a global; node when refused."""
+        access: object
         access = match_stable_ds_es_linear_global_access_8616(node, self.project, self.codegen)
         if access is not None:
             if not may_lower_codegen_access_to_entry_ds_object_8616(
@@ -5185,13 +5716,17 @@ class _DsEsGlobalDerefRun8616:
             _record_real_mode_global_lowering_evidence_8616(self.codegen, self.project, access)
             return self.global_expr_8616(access)
         return node
-    def replace_children(self, root_node: StructuredAstValue) -> bool:
+    @cython.ccall
+    def replace_children(self, root_node: StructuredAstValue) -> cython.bint:
         """Walk the structured tree applying the transform; True when any node changed."""
         return _replace_children_walk_8616(root_node, self.seen, self.transform)
+@cython.ccall
 def lower_stable_ds_es_linear_global_dereferences_8616(
     codegen: StructuredAstValue, project: StructuredAstValue | None = None
-) -> bool:
+) -> cython.bint:
     """Replace stable DS/ES real-mode linear dereferences with global variable references."""
+    previous_active_bias: object
+    root: object
     if project is None:
         project = getattr(codegen, "project", None)
     root = getattr(getattr(codegen, "cfunc", None), "statements", None)
@@ -5230,17 +5765,22 @@ def lower_stable_ds_es_linear_global_dereferences_8616(
     return run.changed
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _DsEsGlobalAddrRun8616:
     """One DS/ES-linear global address lowering walk over a structured tree."""
 
     codegen: StructuredAstValue
     project: StructuredAstValue
-    changed: bool = False
-    seen: set[int] = field(default_factory=set)
+    changed: cython.bint = False
+    seen: object = field(default_factory=set)
 
-    def global_address_cvar_8616(self, displacement: int) -> StructuredAstValue:
+    @cython.ccall
+    def global_address_cvar_8616(self, displacement: cython.longlong) -> StructuredAstValue:
         """Return a reused or fresh byte global cvar for the displacement."""
+        unified: object
+        variables_in_use: object
+        cvar: object
+        variable: object
         addr = displacement & 0xFFFF
         name = f"g_{addr:04X}"
         target_type = SimTypeChar(False)
@@ -5249,7 +5789,7 @@ class _DsEsGlobalAddrRun8616:
             for variable, cvar in tuple(variables_in_use.items()):
                 if (
                     isinstance(variable, SimMemoryVariable)
-                    and getattr(variable, "addr", None) == addr
+                    and operator.eq(getattr(variable, "addr", None), addr)
                     and getattr(variable, "size", None) == 1
                 ):
                     if getattr(cvar, "variable_type", None) is None:
@@ -5257,7 +5797,7 @@ class _DsEsGlobalAddrRun8616:
                     return cvar
                 if (
                     isinstance(variable, SimVariable)
-                    and getattr(variable, "name", None) == name
+                    and operator.eq(getattr(variable, "name", None), name)
                     and getattr(variable, "size", None) == 1
                 ):
                     if getattr(cvar, "variable_type", None) is None:
@@ -5272,7 +5812,8 @@ class _DsEsGlobalAddrRun8616:
             unified[variable] = {(cvar, getattr(cvar, "variable_type", None))}
         return cvar
 
-    def reference_expr_8616(self, displacement: int) -> StructuredAstValue:
+    @cython.ccall
+    def reference_expr_8616(self, displacement: cython.longlong) -> StructuredAstValue:
         """Build a Reference expression over the displacement's global cvar."""
         base_cvar = self.global_address_cvar_8616(displacement)
         return structured_c.CUnaryOp(
@@ -5281,8 +5822,12 @@ class _DsEsGlobalAddrRun8616:
             codegen=self.codegen,
         )
 
+    @cython.ccall
     def transform(self, node: StructuredAstValue) -> StructuredAstValue:
         """Lower a stable DS/ES linear address to a typed global reference; node when refused."""
+        access: object
+        sign: object
+        term: object
         access = match_stable_ds_es_linear_global_address_8616(node, self.project, self.codegen)
         if access is None:
             return node
@@ -5304,13 +5849,16 @@ class _DsEsGlobalAddrRun8616:
         ptr_type = SimTypePointer(SimTypeChar(False)).with_arch(self.project.arch)
         self.changed = True
         return structured_c.CTypeCast(ptr_type, ptr_type, rebuilt, codegen=self.codegen)
-    def replace_children(self, root_node: StructuredAstValue) -> bool:
+    @cython.ccall
+    def replace_children(self, root_node: StructuredAstValue) -> cython.bint:
         """Walk the structured tree applying the transform; True when any node changed."""
         return _replace_children_walk_8616(root_node, self.seen, self.transform)
+@cython.ccall
 def lower_stable_ds_es_linear_global_addresses_8616(
     codegen: StructuredCodegenValue, project: AngrProjectValue = None
-) -> bool:
+) -> cython.bint:
     """Replace stable DS/ES address-valued expressions with data-space object references."""
+    root: object
     if project is None:
         project = getattr(codegen, "project", None)
     root = getattr(getattr(codegen, "cfunc", None), "statements", None)
@@ -5332,7 +5880,10 @@ def lower_stable_ds_es_linear_global_addresses_8616(
 
 
 
-def _direct_global_update_name_8616(project: AngrProjectValue, func_addr: int | None, displacement: int) -> str:
+@cython.ccall
+def _direct_global_update_name_8616(project: AngrProjectValue, func_addr: int | None, displacement: cython.longlong) -> object:
+    label: object
+    labels: object
     labels = getattr(getattr(project, "kb", None), "labels", None)
     if isinstance(labels, dict):
         label = labels.get(displacement & 0xFFFF)
@@ -5342,20 +5893,23 @@ def _direct_global_update_name_8616(project: AngrProjectValue, func_addr: int | 
 
 
 def _linear_block_covered_8616(
-    blocks: tuple[StructuredAstValue, ...],
+    blocks: object,
     linear_addr: StructuredAstValue,
     linear_size: StructuredAstValue,
     linear_insns: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Check whether an existing block already covers the linear block."""
+    block_addr: object
+    block_size: object
+    block: object
     for block in blocks:
         block_addr = getattr(block, "addr", None)
         block_size = getattr(block, "size", None)
         block_insns = _boundary_tuple_8616(getattr(getattr(block, "capstone", None), "insns", ()) or ())
-        if not all(isinstance(value, int) for value in (linear_addr, linear_size, block_addr, block_size)):
+        if not all(isinstance(value, int) for value in iter((linear_addr, linear_size, block_addr, block_size))):
             continue
         if (
-            block_addr == linear_addr
+            operator.eq(block_addr, linear_addr)
             and block_size >= linear_size
             and block_insns
             and len(block_insns) >= len(linear_insns)
@@ -5364,12 +5918,15 @@ def _linear_block_covered_8616(
     return False
 
 
+@cython.ccall
 def _append_linear_block_8616(
-    blocks: tuple[StructuredAstValue, ...],
+    blocks: object,
     project: StructuredAstValue,
     function: StructuredAstValue,
-) -> tuple[StructuredAstValue, ...]:
+) -> object:
     """Append the fallback linear block unless an existing block covers it."""
+    linear_addr: object
+    linear_size: object
     linear = _linear_capstone_function_block_8616(project, function)
     if not linear:
         return blocks
@@ -5381,17 +5938,19 @@ def _append_linear_block_8616(
     return blocks + linear
 
 
+@cython.ccall
 def _direct_global_update_blocks_8616(
-    project: StructuredAstValue, function: StructuredAstValue
-) -> tuple[StructuredAstValue, ...]:
+    project: object, function: StructuredAstValue
+) -> object:
     """Return candidate blocks for direct stack/global instruction facts."""
+    block_addr: object
     local_blocks = _boundary_tuple_8616((getattr(function, "_local_blocks", {}) or {}).values())
     if local_blocks:
         return _append_linear_block_8616(local_blocks, project, function)
     blocks = _boundary_tuple_8616(getattr(function, "blocks", ()) or ())
     if blocks:
         return _append_linear_block_8616(blocks, project, function)
-    block_addrs = _boundary_tuple_8616(sorted(getattr(function, "block_addrs_set", ()) or ()))
+    block_addrs = _boundary_tuple_8616(sorted(tuple(getattr(function, "block_addrs_set", ()) or ())))
     if project is None:
         return ()
     if not block_addrs:
@@ -5407,15 +5966,18 @@ def _direct_global_update_blocks_8616(
     return _linear_capstone_function_block_8616(project, function)
 
 
+@cython.ccall
 def _capstone_candidate_code_8616(
     candidate_project: StructuredAstValue,
-    load_addr: int,
-    size: int,
-    addr: int,
-    disasm_addr: int,
+    load_addr: cython.longlong,
+    size: cython.longlong,
+    addr: cython.longlong,
+    disasm_addr: cython.longlong,
     original_project: StructuredAstValue,
-) -> bytes | None:
+) -> object:
     """Load the candidate byte window, returning None on any boundary miss."""
+    loader: object
+    memory: object
     loader = getattr(candidate_project, "loader", None)
     memory = getattr(loader, "memory", None)
     debug = bool(os.environ.get("INERTIA_DEBUG_STACK_NOISE"))
@@ -5457,13 +6019,14 @@ def _capstone_candidate_code_8616(
 
 def _capstone_candidate_insns_8616(
     candidate_project: StructuredAstValue,
-    code: bytes,
-    load_addr: int,
-    disasm_addr: int,
-    addr: int,
+    code: object,
+    load_addr: cython.longlong,
+    disasm_addr: cython.longlong,
+    addr: cython.longlong,
     original_project: StructuredAstValue,
-) -> tuple[StructuredAstValue, ...] | None:
+) -> object:
     """Disassemble the candidate window, returning None on any boundary miss."""
+    capstone: object
     capstone = getattr(getattr(candidate_project, "arch", None), "capstone", None)
     if capstone is None:
         return None
@@ -5501,7 +6064,7 @@ def _capstone_candidate_insns_8616(
                 getattr(insn, "mnemonic", None),
                 getattr(insn, "op_str", None),
             )
-            for insn in insns[:8]
+            for insn in iter(insns[:8])
         )
         log.warning(
             "[linear-capstone] decoded function=%#x load=%#x disasm=%#x original=%s bytes=%d insns=%d preview=%r",
@@ -5516,8 +6079,9 @@ def _capstone_candidate_insns_8616(
     return insns
 
 
+@cython.ccall
 def _linear_capstone_function_block_8616(
-    project: StructuredAstValue, function: StructuredAstValue
+    project: object, function: object
 ) -> tuple[StructuredAstValue, ...]:
     """Return a lightweight full-function Capstone block when CFG blocks are absent.
 
@@ -5525,6 +6089,15 @@ def _linear_capstone_function_block_8616(
     metadata is unavailable for a recovered function, decode the function byte
     window directly instead of silently producing no evidence.
     """
+    addr: object
+    code: object
+    delta: object
+    insns: object
+    original_project: object
+    size: object
+    candidate_project: object
+    disasm_addr: object
+    load_addr: object
     if project is None or function is None:
         return ()
     addr = getattr(function, "addr", None)
@@ -5534,13 +6107,13 @@ def _linear_capstone_function_block_8616(
     if not isinstance(size, int) or size <= 0:
         size = 0x300
     size = max(1, min(int(size), 0x600))
-    candidates: list[tuple[StructuredAstValue, int, int]] = [(project, addr, addr)]
+    candidates: list[tuple[StructuredAstValue, cython.longlong, cython.longlong]] = [(project, addr, addr)]
     delta = getattr(project, "_inertia_original_linear_delta", None)
     original_project = getattr(project, "_inertia_original_project", None)
     if original_project is not None and isinstance(delta, int) and delta:
         candidates.append((original_project, addr + delta, addr))
 
-    seen: set[tuple[int, int, int]] = set()
+    seen: set[tuple[cython.longlong, cython.longlong, cython.longlong]] = set()
     for candidate_project, load_addr, disasm_addr in candidates:
         key = (id(candidate_project), int(load_addr), int(disasm_addr))
         if key in seen:
@@ -5560,9 +6133,15 @@ def _linear_capstone_function_block_8616(
     return ()
 
 
+@cython.ccall
 def _capstone_insns_for_direct_global_update_8616(
-    project: AngrProjectValue, block: StructuredAstValue
-) -> tuple[StructuredAstValue, ...]:
+    project: object, block: StructuredAstValue
+) -> object:
+    block_addr: object
+    block_bytes: object
+    block_size: object
+    cached: object
+    capstone: object
     cached = getattr(block, "_inertia_capstone_insns_8616", None)
     if isinstance(cached, tuple):
         return cached
@@ -5593,12 +6172,15 @@ def _capstone_insns_for_direct_global_update_8616(
 
 def _dedup_sorted_capstone_insns_by_addr_8616(wrappers: StructuredAstValue) -> tuple[StructuredAstValue, ...]:
     """Return a deterministic instruction stream from overlapping evidence blocks."""
+    ins_addr: object
+    insn: object
+    wrapper: object
     ordered = sorted(
         wrappers,
         key=lambda wrapper: int(getattr(getattr(wrapper, "insn", wrapper), "address", 0) or 0),
     )
     deduped: list[StructuredAstValue] = []
-    seen_addrs: set[int] = set()
+    seen_addrs: set[cython.longlong] = set()
     for wrapper in ordered:
         insn = getattr(wrapper, "insn", wrapper)
         ins_addr = getattr(insn, "address", None)
@@ -5610,18 +6192,21 @@ def _dedup_sorted_capstone_insns_by_addr_8616(wrappers: StructuredAstValue) -> t
     return tuple(deduped)
 
 
+@cython.ccall
 def _global_update_insn_delta_8616(
     insn: StructuredAstValue,
-) -> tuple[StructuredAstValue, int] | None:
+) -> object:
     """Decode INC/DEC/ADD/SUB update targets into (operand, signed delta)."""
+    insn_id: object
+    width: object
     insn_id = getattr(insn, "id", None)
     operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
     if insn_id in {X86_INS_INC, X86_INS_DEC}:
         if len(operands) != 1:
             return None
-        return operands[0], 1 if insn_id == X86_INS_INC else -1
+        return operands[0], 1 if operator.eq(insn_id, X86_INS_INC) else -1
     if insn_id in {X86_INS_ADD, X86_INS_SUB}:
-        if len(operands) != 2 or getattr(operands[1], "type", None) != X86_OP_IMM:
+        if len(operands) != 2 or operator.ne(getattr(operands[1], "type", None), X86_OP_IMM):
             return None
         operand = operands[0]
         width = getattr(operand, "size", None)
@@ -5634,16 +6219,23 @@ def _global_update_insn_delta_8616(
             imm &= 0xFFFF
             if imm & 0x8000:
                 imm -= 0x10000
-        return operand, imm if insn_id == X86_INS_ADD else -imm
+        return operand, imm if operator.eq(insn_id, X86_INS_ADD) else -imm
     return None
 
 
+@cython.ccall
 def _global_update_mem_target_8616(
     operand: StructuredAstValue, insn: StructuredAstValue
-) -> tuple[int, int, int] | None:
+) -> object:
     """Validate a bare-displacement memory target and return (disp, width, addr)."""
+    base: object
+    displacement: object
+    index: object
+    ins_addr: object
+    mem: object
+    width: object
     width = getattr(operand, "size", None)
-    if getattr(operand, "type", None) != X86_OP_MEM or width not in {1, 2}:
+    if operator.ne(getattr(operand, "type", None), X86_OP_MEM) or width not in {1, 2}:
         return None
     mem = getattr(operand, "mem", None)
     if mem is None:
@@ -5659,9 +6251,16 @@ def _global_update_mem_target_8616(
     return displacement, int(width), ins_addr
 
 
+@cython.ccall
 def _direct_global_update_instruction_facts_8616(
     project: AngrProjectValue, function: StructuredAstValue
-) -> tuple[DirectGlobalUpdateFact8616, ...]:
+) -> object:
+    cached: object
+    decoded: object
+    insn: object
+    mem_target: object
+    block: object
+    wrapper: object
     cached = getattr(function, "_inertia_direct_global_update_instruction_facts_8616", None)
     if isinstance(cached, tuple):
         return cached
@@ -5691,14 +6290,19 @@ def _direct_global_update_instruction_facts_8616(
     return result
 
 
+@cython.ccall
 def _mov_stack_update_fact_8616(
-    insns: StructuredAstValue, index: int, insn: StructuredAstValue, operands: StructuredAstValue
+    insns: StructuredAstValue, index: cython.longlong, insn: StructuredAstValue, operands: StructuredAstValue
 ) -> DirectStackUpdateFact8616 | None:
     """Recover a read-modify-write update stored through a register MOV."""
-    if getattr(insn, "id", None) != X86_INS_MOV or len(operands) != 2:
+    ins_addr: object
+    reg_id: object
+    slot: object
+    update: object
+    if operator.ne(getattr(insn, "id", None), X86_INS_MOV) or len(operands) != 2:
         return None
     slot = _stack_mem_operand_offset_width_8616(operands[0])
-    if slot is None or getattr(operands[1], "type", None) != X86_OP_REG:
+    if slot is None or operator.ne(getattr(operands[1], "type", None), X86_OP_REG):
         return None
     offset, width = slot
     reg_id = getattr(operands[1], "reg", None)
@@ -5729,10 +6333,14 @@ def _mov_stack_update_fact_8616(
     )
 
 
+@cython.ccall
 def _incdec_stack_update_fact_8616(
     insn: StructuredAstValue, operands: StructuredAstValue
 ) -> DirectStackUpdateFact8616 | None:
     """Recover a direct stack INC/DEC update."""
+    ins_addr: object
+    insn_id: object
+    slot: object
     insn_id = getattr(insn, "id", None)
     if insn_id not in {X86_INS_INC, X86_INS_DEC}:
         return None
@@ -5745,18 +6353,20 @@ def _incdec_stack_update_fact_8616(
     ins_addr = getattr(insn, "address", None)
     if not isinstance(ins_addr, int):
         return None
-    return DirectStackUpdateFact8616(offset, int(width), 1 if insn_id == X86_INS_INC else -1, ins_addr)
+    return DirectStackUpdateFact8616(offset, int(width), 1 if operator.eq(insn_id, X86_INS_INC) else -1, ins_addr)
 
 
+@cython.ccall
 def _arith_immediate_update_fact_8616(
     source: StructuredAstValue,
     offset: StructuredAstValue,
     width: StructuredAstValue,
-    sign: int,
-    ins_addr: int,
+    sign: cython.longlong,
+    ins_addr: cython.longlong,
     operation: StructuredAstValue,
 ) -> DirectStackUpdateFact8616 | None:
     """Recover an immediate-operand stack arithmetic update."""
+    value: object
     value = getattr(source, "imm", None)
     if not isinstance(value, int):
         return None
@@ -5779,17 +6389,21 @@ def _arith_immediate_update_fact_8616(
     )
 
 
+@cython.ccall
 def _arith_reg_update_fact_8616(
     insns: StructuredAstValue,
-    index: int,
-    reg_id: int,
+    index: cython.longlong,
+    reg_id: cython.longlong,
     offset: StructuredAstValue,
     width: StructuredAstValue,
-    sign: int,
-    ins_addr: int,
+    sign: cython.longlong,
+    ins_addr: cython.longlong,
     operation: StructuredAstValue,
 ) -> DirectStackUpdateFact8616 | None:
     """Recover a register-operand stack arithmetic update."""
+    immediate: object
+    indexed_source: object
+    source_slot: object
     if operation in {
         DirectStackUpdateOp8616.SHIFT_LEFT,
         DirectStackUpdateOp8616.SHIFT_RIGHT,
@@ -5848,10 +6462,17 @@ def _arith_reg_update_fact_8616(
     )
 
 
+@cython.ccall
 def _arith_stack_update_fact_8616(
-    insns: StructuredAstValue, index: int, insn: StructuredAstValue, operands: StructuredAstValue
+    insns: StructuredAstValue, index: cython.longlong, insn: StructuredAstValue, operands: StructuredAstValue
 ) -> DirectStackUpdateFact8616 | None:
     """Recover an ADD/SUB/OR/SAL/SHL/SHR stack arithmetic update."""
+    ins_addr: object
+    insn_id: object
+    operation: object
+    reg_id: object
+    slot: object
+    source_type: object
     insn_id = getattr(insn, "id", None)
     if insn_id not in {
         X86_INS_ADD,
@@ -5875,12 +6496,12 @@ def _arith_stack_update_fact_8616(
         X86_INS_SHL: DirectStackUpdateOp8616.SHIFT_LEFT,
         X86_INS_SHR: DirectStackUpdateOp8616.SHIFT_RIGHT,
     }.get(insn_id, DirectStackUpdateOp8616.ARITHMETIC)
-    sign = -1 if insn_id == X86_INS_SUB else 1
+    sign = -1 if operator.eq(insn_id, X86_INS_SUB) else 1
     source = operands[1]
     source_type = getattr(source, "type", None)
-    if source_type == X86_OP_IMM:
+    if operator.eq(source_type, X86_OP_IMM):
         return _arith_immediate_update_fact_8616(source, offset, width, sign, ins_addr, operation)
-    if source_type != X86_OP_REG:
+    if operator.ne(source_type, X86_OP_REG):
         return None
     reg_id = getattr(source, "reg", None)
     if not isinstance(reg_id, int):
@@ -5888,10 +6509,12 @@ def _arith_stack_update_fact_8616(
     return _arith_reg_update_fact_8616(insns, index, reg_id, offset, width, sign, ins_addr, operation)
 
 
+@cython.ccall
 def _stack_update_fact_at_8616(
-    insns: StructuredAstValue, index: int, insn: StructuredAstValue
+    insns: StructuredAstValue, index: cython.longlong, insn: StructuredAstValue
 ) -> DirectStackUpdateFact8616 | None:
     """Collect the stack-update fact for one instruction, if any."""
+    fact: object
     operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
     fact = _mov_stack_update_fact_8616(insns, index, insn, operands)
     if fact is None:
@@ -5901,11 +6524,18 @@ def _stack_update_fact_at_8616(
     return fact
 
 
+@cython.ccall
 def _direct_stack_update_instruction_facts_8616(
     project: StructuredAstValue,
     function: StructuredAstValue,
-) -> tuple[DirectStackUpdateFact8616, ...]:
+) -> object:
     """Collect binary-proven BP-relative stack update facts."""
+    cached: object
+    fact: object
+    insn: object
+    block: object
+    index: object
+    wrapper: object
     cached = getattr(function, "_inertia_direct_stack_update_instruction_facts_8616", None)
     if isinstance(cached, tuple) and cached:
         return cached
@@ -5926,36 +6556,41 @@ def _direct_stack_update_instruction_facts_8616(
 def _filter_direct_stack_update_facts_for_active_function_8616(
     project: StructuredAstValue,
     function: StructuredAstValue,
-    facts: tuple[DirectStackUpdateFact8616, ...],
-) -> tuple[DirectStackUpdateFact8616, ...]:
+    facts: object,
+) -> object:
     """Filter broad-slice stack update facts to the active focused function."""
+    active_addr: object
+    function_addr: object
+    original_delta: object
     # Dynamic project boundary: direct PROC fallback can decompile a broad
     # synthetic slice while accepting one focused function from that slice.
     active_addr = getattr(project, "_inertia_tv_active_function_addr", None)
     function_addr = getattr(function, "addr", None)
-    if not isinstance(active_addr, int) or not isinstance(function_addr, int) or function_addr == active_addr:
+    if not isinstance(active_addr, int) or not isinstance(function_addr, int) or operator.eq(function_addr, active_addr):
         return facts
     original_delta = getattr(project, "_inertia_original_linear_delta", None)
-    if isinstance(original_delta, int) and function_addr + original_delta == active_addr:
+    if isinstance(original_delta, int) and operator.eq(function_addr + original_delta, active_addr):
         return facts
     if function_addr > active_addr:
         return facts
-    return tuple(fact for fact in facts if fact.ins_addr >= active_addr)
+    return tuple(fact for fact in iter(facts) if fact.ins_addr >= active_addr)
 
 
+@cython.ccall
 def _previous_incdec_stack_update_8616(
-    insns: tuple[StructuredAstValue, ...],
-    index: int,
-    reg_id: int,
-    width: int,
+    insns: object,
+    index: cython.longlong,
+    reg_id: cython.longlong,
+    width: cython.longlong,
     update_operands: StructuredAstValue,
     update_id: StructuredAstValue,
-) -> tuple[int, int] | None:
+) -> object:
     """Recover the loaded-slot offset carried through a register INC/DEC."""
+    loaded: object
     if len(update_operands) != 1:
         return None
     target = update_operands[0]
-    if getattr(target, "type", None) != X86_OP_REG or getattr(target, "reg", None) != reg_id:
+    if operator.ne(getattr(target, "type", None), X86_OP_REG) or operator.ne(getattr(target, "reg", None), reg_id):
         return None
     loaded = _previous_stack_load_for_register_8616(insns, index - 1, reg_id)
     if loaded is None:
@@ -5966,13 +6601,18 @@ def _previous_incdec_stack_update_8616(
     return source_offset, 1 if update_id == X86_INS_INC else -1
 
 
+@cython.ccall
 def _previous_register_stack_update_8616(
-    insns: tuple[StructuredAstValue, ...],
-    index: int,
-    reg_id: int,
-    width: int,
-) -> tuple[int, int] | None:
+    insns: object,
+    index: cython.longlong,
+    reg_id: cython.longlong,
+    width: cython.longlong,
+) -> object:
     """Recover stack-slot arithmetic carried through a register before a store."""
+    loaded: object
+    update: object
+    update_id: object
+    value: object
     if index < 2 or width not in {1, 2}:
         return None
     update = getattr(insns[index - 1], "insn", insns[index - 1])
@@ -5983,9 +6623,9 @@ def _previous_register_stack_update_8616(
     if update_id not in {X86_INS_ADD, X86_INS_SUB} or len(update_operands) != 2:
         return None
     target, source = update_operands
-    if getattr(target, "type", None) != X86_OP_REG or getattr(target, "reg", None) != reg_id:
+    if operator.ne(getattr(target, "type", None), X86_OP_REG) or operator.ne(getattr(target, "reg", None), reg_id):
         return None
-    if getattr(source, "type", None) != X86_OP_IMM:
+    if operator.ne(getattr(source, "type", None), X86_OP_IMM):
         return None
     value = getattr(source, "imm", None)
     if not isinstance(value, int):
@@ -5997,21 +6637,26 @@ def _previous_register_stack_update_8616(
     if source_width != width:
         return None
     delta = abs(int(value))
-    if update_id == X86_INS_SUB:
+    if operator.eq(update_id, X86_INS_SUB):
         delta = -delta
     return source_offset, delta
 
 
-def _stack_mem_operand_offset_width_8616(operand: StructuredAstValue) -> tuple[int, int] | None:
+@cython.ccall
+def _stack_mem_operand_offset_width_8616(operand: StructuredAstValue) -> object:
+    base: object
+    index: object
+    mem: object
+    width: object
     width = getattr(operand, "size", None)
-    if getattr(operand, "type", None) != X86_OP_MEM or width not in {1, 2}:
+    if operator.ne(getattr(operand, "type", None), X86_OP_MEM) or width not in {1, 2}:
         return None
     mem = getattr(operand, "mem", None)
     if mem is None:
         return None
     base = getattr(mem, "base", X86_REG_INVALID)
     index = getattr(mem, "index", X86_REG_INVALID)
-    if base != X86_REG_BP or index not in {0, X86_REG_INVALID}:
+    if operator.ne(base, X86_REG_BP) or index not in {0, X86_REG_INVALID}:
         return None
     offset = _canonical_stack_offset_8616(getattr(mem, "disp", None))
     if not isinstance(offset, int):
@@ -6024,12 +6669,18 @@ def _direct_stack_write_inventory_8616(
     function: StructuredAstValue,
 ) -> DirectStackWriteInventory8616:
     """Inventory exact decoded instructions and their explicit BP writes."""
+    access: object
+    ins_addr: object
+    insn: object
+    slot: object
+    operand: object
+    wrapper: object
     wrappers = _dedup_sorted_capstone_insns_by_addr_8616(
         wrapper
-        for block in _direct_global_update_blocks_8616(project, function)
-        for wrapper in _capstone_insns_for_direct_global_update_8616(project, block)
+        for block in builtins.iter(_direct_global_update_blocks_8616(project, function))
+        for wrapper in builtins.iter(_capstone_insns_for_direct_global_update_8616(project, block))
     )
-    decoded_instruction_addrs: set[int] = set()
+    decoded_instruction_addrs: set[cython.longlong] = set()
     write_sites: list[DirectStackWriteSite8616] = []
     unknown_write_sites: list[DirectStackWriteSite8616] = []
     classified = 0
@@ -6054,13 +6705,13 @@ def _direct_stack_write_inventory_8616(
                 unknown_write_sites.append(site)
     normalized_write_sites = tuple(
         sorted(
-            set(write_sites),
+            tuple(set(write_sites)),
             key=lambda site: (site.ins_addr, site.dst_offset, site.width),
         )
     )
     normalized_unknown_sites = tuple(
         sorted(
-            set(unknown_write_sites),
+            tuple(set(unknown_write_sites)),
             key=lambda site: (site.ins_addr, site.dst_offset, site.width),
         )
     )
@@ -6076,15 +6727,19 @@ def _direct_stack_write_inventory_8616(
     )
 
 
+@cython.ccall
 def _indexed_stack_mem_operand_8616(
     operand: StructuredAstValue,
-) -> tuple[int, int, int, int] | None:
+) -> object:
     """Return an exact BP+index stack destination from a Capstone operand."""
+    index: object
+    mem: object
+    width: object
     width = getattr(operand, "size", None)
-    if getattr(operand, "type", None) != X86_OP_MEM or width not in {1, 2}:
+    if operator.ne(getattr(operand, "type", None), X86_OP_MEM) or width not in {1, 2}:
         return None
     mem = getattr(operand, "mem", None)
-    if mem is None or getattr(mem, "base", X86_REG_INVALID) != X86_REG_BP:
+    if mem is None or operator.ne(getattr(mem, "base", X86_REG_INVALID), X86_REG_BP):
         return None
     index = getattr(mem, "index", X86_REG_INVALID)
     scale = int(getattr(mem, "scale", 1) or 1)
@@ -6096,9 +6751,12 @@ def _indexed_stack_mem_operand_8616(
     return offset, int(width), index, scale
 
 
-def _index_mem_source_kind_8616(src: StructuredAstValue) -> tuple[str, int] | None:
+@cython.ccall
+def _index_mem_source_kind_8616(src: StructuredAstValue) -> object:
     """Classify a MOV memory source as a BP-stack or bare-global load."""
-    if getattr(src, "type", None) != X86_OP_MEM or int(getattr(src, "size", 0) or 0) != 2:
+    base: object
+    mem: object
+    if operator.ne(getattr(src, "type", None), X86_OP_MEM) or int(getattr(src, "size", 0) or 0) != 2:
         return None
     mem = getattr(src, "mem", None)
     if mem is None or getattr(mem, "index", X86_REG_INVALID) not in {0, X86_REG_INVALID}:
@@ -6107,29 +6765,32 @@ def _index_mem_source_kind_8616(src: StructuredAstValue) -> tuple[str, int] | No
     if not isinstance(displacement, int):
         return None
     base = getattr(mem, "base", X86_REG_INVALID)
-    if base == X86_REG_BP:
+    if operator.eq(base, X86_REG_BP):
         return "stack", displacement
     if base in {0, X86_REG_INVALID}:
         return "global", displacement & 0xFFFF
     return None
 
 
+@cython.ccall
 def _immediate_predecessor_index_source_8616(
-    insns: tuple[StructuredAstValue, ...], index: int, reg_id: int
-) -> tuple[str, int] | None:
+    insns: object, index: cython.longlong, reg_id: cython.longlong
+) -> object:
     """Classify an index register from the immediately preceding MOV only."""
+    previous: object
+    value: object
     if index <= 0:
         return None
     previous = getattr(insns[index - 1], "insn", insns[index - 1])
-    if getattr(previous, "id", None) != X86_INS_MOV:
+    if operator.ne(getattr(previous, "id", None), X86_INS_MOV):
         return None
     operands = _boundary_tuple_8616(getattr(previous, "operands", ()) or ())
     if len(operands) != 2:
         return None
     dst, src = operands
-    if getattr(dst, "type", None) != X86_OP_REG or getattr(dst, "reg", None) != reg_id:
+    if operator.ne(getattr(dst, "type", None), X86_OP_REG) or operator.ne(getattr(dst, "reg", None), reg_id):
         return None
-    if getattr(src, "type", None) == X86_OP_IMM:
+    if operator.eq(getattr(src, "type", None), X86_OP_IMM):
         value = getattr(src, "imm", None)
         return ("immediate", int(value)) if isinstance(value, int) else None
     return _index_mem_source_kind_8616(src)
@@ -6153,7 +6814,8 @@ _DIRECT_STACK_MOVE_REGISTER_NAMES_8616 = {
 }
 
 
-def _direct_stack_move_register_name_8616(insn: StructuredAstValue, reg_id: int | None) -> str | None:
+@cython.ccall
+def _direct_stack_move_register_name_8616(insn: StructuredAstValue, reg_id: int | None) -> object:
     if not isinstance(reg_id, int) or reg_id == X86_REG_INVALID:
         return None
     with contextlib.suppress(Exception):
@@ -6163,7 +6825,8 @@ def _direct_stack_move_register_name_8616(insn: StructuredAstValue, reg_id: int 
     return _DIRECT_STACK_MOVE_REGISTER_NAMES_8616.get(int(reg_id))
 
 
-def _direct_stack_move_segment_name_8616(insn: StructuredAstValue, reg_id: int | None) -> str | None:
+@cython.ccall
+def _direct_stack_move_segment_name_8616(insn: StructuredAstValue, reg_id: int | None) -> object:
     if not isinstance(reg_id, int) or reg_id in {0, X86_REG_INVALID}:
         return "ds"
     name = _direct_stack_move_register_name_8616(insn, reg_id)
@@ -6172,6 +6835,7 @@ def _direct_stack_move_segment_name_8616(insn: StructuredAstValue, reg_id: int |
     return None
 
 
+@cython.ccall
 def proven_wide_stack_pair_low_offset_8616(high_expr: object, low_expr: object) -> int | None:
     """Return the low stack offset only when widening proves one logical pair."""
     if not isinstance(high_expr, structured_c.CVariable) or not isinstance(low_expr, structured_c.CVariable):
@@ -6187,9 +6851,10 @@ def proven_wide_stack_pair_low_offset_8616(high_expr: object, low_expr: object) 
     return low_offset if proof.ok else None
 
 
+@cython.ccall
 def _direct_stack_move_forget_register_8616(
-    reg_state: dict[str, DirectStackRegisterValue8616],
-    reg_name: str | None,
+    reg_state: object,
+    reg_name: object,
 ) -> None:
     if not isinstance(reg_name, str) or not reg_name:
         return
@@ -6201,20 +6866,24 @@ def _direct_stack_move_forget_register_8616(
         reg_state.pop("al", None)
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _SegmentedRegTrace8616:
     """Replay one block's register provenance for segmented-memory sources."""
 
-    insns: tuple[StructuredAstValue, ...]
-    index: int
-    reg_id: int
-    reg_state: dict[str, DirectStackRegisterValue8616] = field(default_factory=dict)
-    target_reg_name: str | None = None
+    insns: object
+    index: cython.longlong
+    reg_id: cython.longlong
+    reg_state: object = field(default_factory=dict)
+    target_reg_name: object = None
 
+    @cython.ccall
     def _mov_mem_base_value_8616(
-        self, insn: StructuredAstValue, src: StructuredAstValue, dst_name: str
-    ) -> tuple[StructuredAstValue, StructuredAstValue] | None:
+        self, insn: StructuredAstValue, src: StructuredAstValue, dst_name: object
+    ) -> object:
         """Resolve the index offset/shift proven by the memory base register."""
+        base_name: object
+        base_value: object
+        mem: object
         mem = getattr(src, "mem", None)
         if mem is None:
             return None
@@ -6235,10 +6904,17 @@ class _SegmentedRegTrace8616:
             return base_value.stack_offset, base_value.source_immediate
         return None
 
+    @cython.ccall
     def _mov_mem_src_8616(
-        self, insn: StructuredAstValue, dst: StructuredAstValue, src: StructuredAstValue, dst_name: str
+        self, insn: StructuredAstValue, dst: StructuredAstValue, src: StructuredAstValue, dst_name: object
     ) -> None:
         """Track a memory load into a register: stack slot or segmented access."""
+        access_width: object
+        base_ref: object
+        displacement: object
+        mem: object
+        segment_name: object
+        stack_slot: object
         stack_slot = _stack_mem_operand_offset_width_8616(src)
         if stack_slot is not None:
             source_offset, source_width = stack_slot
@@ -6276,22 +6952,26 @@ class _SegmentedRegTrace8616:
             access_width=int(access_width),
         )
 
-    def _mov_insn_8616(self, pos: int, insn: StructuredAstValue, operands: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _mov_insn_8616(self, pos: cython.longlong, insn: StructuredAstValue, operands: StructuredAstValue) -> cython.bint:
         """Track one MOV's register destination; False when not a reg-dst MOV."""
-        if getattr(insn, "id", None) != X86_INS_MOV or len(operands) != 2:
+        dst_name: object
+        src_name: object
+        src_value: object
+        if operator.ne(getattr(insn, "id", None), X86_INS_MOV) or len(operands) != 2:
             return False
         dst, src = operands
-        if getattr(dst, "type", None) != X86_OP_REG:
+        if operator.ne(getattr(dst, "type", None), X86_OP_REG):
             return True
         dst_name = _direct_stack_move_register_name_8616(insn, getattr(dst, "reg", None))
         if dst_name is None:
             return True
-        if pos == self.index - 1 and getattr(dst, "reg", None) == self.reg_id:
+        if operator.eq(pos, self.index - 1) and operator.eq(getattr(dst, "reg", None), self.reg_id):
             self.target_reg_name = dst_name
-        if getattr(src, "type", None) == X86_OP_MEM:
+        if operator.eq(getattr(src, "type", None), X86_OP_MEM):
             self._mov_mem_src_8616(insn, dst, src, dst_name)
             return True
-        if getattr(src, "type", None) == X86_OP_REG:
+        if operator.eq(getattr(src, "type", None), X86_OP_REG):
             src_name = _direct_stack_move_register_name_8616(insn, getattr(src, "reg", None))
             if src_name is None:
                 _direct_stack_move_forget_register_8616(self.reg_state, dst_name)
@@ -6305,12 +6985,16 @@ class _SegmentedRegTrace8616:
         _direct_stack_move_forget_register_8616(self.reg_state, dst_name)
         return True
 
-    def _shift_insn_8616(self, insn: StructuredAstValue, operands: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _shift_insn_8616(self, insn: StructuredAstValue, operands: StructuredAstValue) -> cython.bint:
         """Track a SHL/SAL applied to a stack-slot-proven register."""
+        immediate: object
+        previous: object
+        reg_name: object
         if getattr(insn, "id", None) not in {X86_INS_SHL, X86_INS_SAL} or len(operands) != 2:
             return False
         dst, amount = operands
-        if getattr(dst, "type", None) != X86_OP_REG or getattr(amount, "type", None) != X86_OP_IMM:
+        if operator.ne(getattr(dst, "type", None), X86_OP_REG) or operator.ne(getattr(amount, "type", None), X86_OP_IMM):
             return True
         reg_name = _direct_stack_move_register_name_8616(insn, getattr(dst, "reg", None))
         if reg_name is None:
@@ -6334,8 +7018,10 @@ class _SegmentedRegTrace8616:
             _direct_stack_move_forget_register_8616(self.reg_state, reg_name)
         return True
 
-    def _cbw_insn_8616(self, insn: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _cbw_insn_8616(self, insn: StructuredAstValue) -> cython.bint:
         """Promote a segmented al value through CBW/CWDE sign extension."""
+        al_value: object
         if getattr(insn, "id", None) not in {X86_INS_CBW, X86_INS_CWDE}:
             return False
         al_value = self.reg_state.get("al")
@@ -6357,8 +7043,12 @@ class _SegmentedRegTrace8616:
             self.reg_state.pop("eax", None)
         return True
 
+    @cython.ccall
     def scan_8616(self) -> DirectStackRegisterValue8616 | None:
         """Replay the block prefix and return the segmented source value."""
+        insn: object
+        last: object
+        value: object
         for pos in range(self.index):
             insn = getattr(self.insns[pos], "insn", self.insns[pos])
             operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
@@ -6368,7 +7058,7 @@ class _SegmentedRegTrace8616:
                 continue
             if self._cbw_insn_8616(insn):
                 continue
-            if operands and getattr(operands[0], "type", None) == X86_OP_REG:
+            if operands and operator.eq(getattr(operands[0], "type", None), X86_OP_REG):
                 reg_name = _direct_stack_move_register_name_8616(insn, getattr(operands[0], "reg", None))
                 _direct_stack_move_forget_register_8616(self.reg_state, reg_name)
         if self.target_reg_name is None:
@@ -6382,10 +7072,11 @@ class _SegmentedRegTrace8616:
         return value
 
 
+@cython.ccall
 def _direct_stack_move_segmented_source_for_register_8616(
-    insns: tuple[StructuredAstValue, ...],
-    index: int,
-    reg_id: int,
+    insns: object,
+    index: cython.longlong,
+    reg_id: cython.longlong,
 ) -> DirectStackRegisterValue8616 | None:
     """Recover a register value proven by prior instructions in the same block.
 
@@ -6400,9 +7091,15 @@ def _direct_stack_move_segmented_source_for_register_8616(
     return _SegmentedRegTrace8616(insns=insns, index=index, reg_id=reg_id).scan_8616()
 
 
-def _direct_global_mem_operand_offset_width_8616(operand: StructuredAstValue) -> tuple[int, int] | None:
+@cython.ccall
+def _direct_global_mem_operand_offset_width_8616(operand: StructuredAstValue) -> object:
     """Return global displacement/width for a direct memory operand."""
-    if getattr(operand, "type", None) != X86_OP_MEM:
+    base: object
+    displacement: object
+    index: object
+    mem: object
+    width: object
+    if operator.ne(getattr(operand, "type", None), X86_OP_MEM):
         return None
     mem = getattr(operand, "mem", None)
     if mem is None:
@@ -6418,18 +7115,20 @@ def _direct_global_mem_operand_offset_width_8616(operand: StructuredAstValue) ->
     return displacement & 0xFFFF, int(width)
 
 
+@cython.ccall
 def _neg_sub_ax_global_displacement_8616(
     neg_insn: StructuredAstValue, sub_insn: StructuredAstValue
 ) -> int | None:
     """Return the global displacement for a ``sub ax, [global]; neg ax`` pair."""
-    if getattr(neg_insn, "id", None) != X86_INS_NEG:
+    global_slot: object
+    if operator.ne(getattr(neg_insn, "id", None), X86_INS_NEG):
         return None
     neg_operands = _boundary_tuple_8616(getattr(neg_insn, "operands", ()) or ())
     if len(neg_operands) != 1 or _direct_stack_move_register_name_8616(
         neg_insn, getattr(neg_operands[0], "reg", None)
     ) not in {"ax", "eax"}:
         return None
-    if getattr(sub_insn, "id", None) != X86_INS_SUB:
+    if operator.ne(getattr(sub_insn, "id", None), X86_INS_SUB):
         return None
     sub_operands = _boundary_tuple_8616(getattr(sub_insn, "operands", ()) or ())
     if len(sub_operands) != 2:
@@ -6443,12 +7142,19 @@ def _neg_sub_ax_global_displacement_8616(
     return global_displacement if global_width == 2 else None
 
 
+@cython.ccall
 def _previous_global_minus_segmented_source_for_register_8616(
-    insns: tuple[StructuredAstValue, ...],
-    index: int,
-    reg_id: int,
-) -> tuple[int, DirectStackRegisterValue8616] | None:
+    insns: object,
+    index: cython.longlong,
+    reg_id: cython.longlong,
+) -> object:
     """Recover AX = global - signext(indexed byte global) before a BP store."""
+    cbw_insn: object
+    global_displacement: object
+    neg_insn: object
+    segmented_source: object
+    store: object
+    sub_insn: object
     if index < 4:
         return None
     store = getattr(insns[index], "insn", insns[index])
@@ -6471,49 +7177,58 @@ def _previous_global_minus_segmented_source_for_register_8616(
     return global_displacement, segmented_source
 
 
+@cython.ccall
 def _previous_stack_load_for_register_8616(
-    insns: tuple[StructuredAstValue, ...], index: int, reg_id: int
-) -> tuple[int, int] | None:
+    insns: object, index: cython.longlong, reg_id: cython.longlong
+) -> object:
+    prev: object
     if index <= 0:
         return None
     prev = getattr(insns[index - 1], "insn", insns[index - 1])
-    if getattr(prev, "id", None) != X86_INS_MOV:
+    if operator.ne(getattr(prev, "id", None), X86_INS_MOV):
         return None
     operands = _boundary_tuple_8616(getattr(prev, "operands", ()) or ())
     if len(operands) != 2:
         return None
     dst, src = operands
-    if getattr(dst, "type", None) != X86_OP_REG or getattr(dst, "reg", None) != reg_id:
+    if operator.ne(getattr(dst, "type", None), X86_OP_REG) or operator.ne(getattr(dst, "reg", None), reg_id):
         return None
     return _stack_mem_operand_offset_width_8616(src)
 
 
+@cython.ccall
 def _previous_register_immediate_8616(
-    insns: tuple[StructuredAstValue, ...], index: int, reg_id: int
+    insns: object, index: cython.longlong, reg_id: cython.longlong
 ) -> int | None:
     """Return an immediate moved into ``reg_id`` immediately before ``index``."""
+    previous: object
     if index <= 0:
         return None
     previous = getattr(insns[index - 1], "insn", insns[index - 1])
-    if getattr(previous, "id", None) != X86_INS_MOV:
+    if operator.ne(getattr(previous, "id", None), X86_INS_MOV):
         return None
     operands = _boundary_tuple_8616(getattr(previous, "operands", ()) or ())
     if len(operands) != 2:
         return None
     destination, source = operands
-    if getattr(destination, "type", None) != X86_OP_REG or getattr(destination, "reg", None) != reg_id:
+    if operator.ne(getattr(destination, "type", None), X86_OP_REG) or operator.ne(getattr(destination, "reg", None), reg_id):
         return None
-    immediate = getattr(source, "imm", None) if getattr(source, "type", None) == X86_OP_IMM else None
+    immediate = getattr(source, "imm", None) if operator.eq(getattr(source, "type", None), X86_OP_IMM) else None
     return int(immediate) if isinstance(immediate, int) else None
 
 
+@cython.ccall
 def _previous_binary_stack_expr_for_register_8616(
-    insns: tuple[StructuredAstValue, ...],
-    index: int,
-    reg_id: int,
-    width: int,
-) -> tuple[int, int, DirectStackMoveExpressionOp8616] | None:
+    insns: object,
+    index: cython.longlong,
+    reg_id: cython.longlong,
+    width: cython.longlong,
+) -> object:
     """Recover a directly preceding stack-load plus stack arithmetic value."""
+    arithmetic: object
+    arithmetic_id: object
+    lhs_slot: object
+    rhs_slot: object
     if index < 2:
         return None
     arithmetic = getattr(insns[index - 1], "insn", insns[index - 1])
@@ -6533,22 +7248,26 @@ def _previous_binary_stack_expr_for_register_8616(
         return None
     operation = (
         DirectStackMoveExpressionOp8616.ADD
-        if arithmetic_id == X86_INS_ADD
+        if operator.eq(arithmetic_id, X86_INS_ADD)
         else DirectStackMoveExpressionOp8616.SUB
     )
     return lhs_offset, rhs_offset, operation
 
 
+@cython.ccall
 def _previous_signed_byte_stack_load_for_register_8616(
-    insns: tuple[StructuredAstValue, ...], index: int, reg_id: int, width: int
-) -> tuple[int, int] | None:
+    insns: object, index: cython.longlong, reg_id: cython.longlong, width: cython.longlong
+) -> object:
+    load: object
+    loaded: object
+    sign_extend: object
     if reg_id != X86_REG_AX or width != 2 or index <= 1:
         return None
     sign_extend = getattr(insns[index - 1], "insn", insns[index - 1])
     if getattr(sign_extend, "id", None) not in {X86_INS_CBW, X86_INS_CWDE}:
         return None
     load = getattr(insns[index - 2], "insn", insns[index - 2])
-    if getattr(load, "id", None) != X86_INS_MOV:
+    if operator.ne(getattr(load, "id", None), X86_INS_MOV):
         return None
     operands = _boundary_tuple_8616(getattr(load, "operands", ()) or ())
     if len(operands) != 2:
@@ -6565,12 +7284,17 @@ def _previous_signed_byte_stack_load_for_register_8616(
     return source_offset, source_width
 
 
+@cython.ccall
 def _previous_stack_index_for_register_8616(
-    insns: tuple[StructuredAstValue, ...],
-    index: int,
-    reg_id: int,
+    insns: object,
+    index: cython.longlong,
+    reg_id: cython.longlong,
 ) -> DirectStackIndexFact8616 | None:
     """Recover a stack-backed logical index and its proven byte scale."""
+    insn: object
+    insn_id: object
+    loaded: object
+    previous_loaded: object
     cursor = index - 1
     while cursor >= 0:
         insn = getattr(insns[cursor], "insn", insns[cursor])
@@ -6579,11 +7303,11 @@ def _previous_stack_index_for_register_8616(
             cursor -= 1
             continue
         dst = operands[0]
-        if getattr(dst, "type", None) != X86_OP_REG or getattr(dst, "reg", None) != reg_id:
+        if operator.ne(getattr(dst, "type", None), X86_OP_REG) or operator.ne(getattr(dst, "reg", None), reg_id):
             cursor -= 1
             continue
         insn_id = getattr(insn, "id", None)
-        if insn_id == X86_INS_MOV and len(operands) == 2:
+        if operator.eq(insn_id, X86_INS_MOV) and len(operands) == 2:
             loaded = _stack_mem_operand_offset_width_8616(operands[1])
             if loaded is None:
                 return None
@@ -6591,7 +7315,7 @@ def _previous_stack_index_for_register_8616(
             return DirectStackIndexFact8616(offset, width, 1)
         if insn_id in {X86_INS_SAL, X86_INS_SHL} and len(operands) == 2:
             amount = operands[1]
-            if getattr(amount, "type", None) != X86_OP_IMM or getattr(amount, "imm", None) != 1:
+            if operator.ne(getattr(amount, "type", None), X86_OP_IMM) or getattr(amount, "imm", None) != 1:
                 return None
             previous_loaded = _previous_stack_index_for_register_8616(insns, cursor, reg_id)
             if previous_loaded is None:
@@ -6601,12 +7325,16 @@ def _previous_stack_index_for_register_8616(
     return None
 
 
+@cython.ccall
 def _previous_indexed_stack_load_for_register_8616(
-    insns: tuple[StructuredAstValue, ...],
-    index: int,
-    reg_id: int,
+    insns: object,
+    index: cython.longlong,
+    reg_id: cython.longlong,
 ) -> DirectStackIndexedLoadFact8616 | None:
     """Recover the nearest unmodified register load from a BP-indexed stack object."""
+    index_fact: object
+    indexed_load: object
+    insn: object
     cursor = index - 1
     while cursor >= 0:
         insn = getattr(insns[cursor], "insn", insns[cursor])
@@ -6614,7 +7342,7 @@ def _previous_indexed_stack_load_for_register_8616(
         if not operands or not _register_operand_is_8616(operands[0], reg_id):
             cursor -= 1
             continue
-        if getattr(insn, "id", None) != X86_INS_MOV or len(operands) != 2:
+        if operator.ne(getattr(insn, "id", None), X86_INS_MOV) or len(operands) != 2:
             return None
         indexed_load = _indexed_stack_mem_operand_8616(operands[1])
         if indexed_load is None:
@@ -6634,13 +7362,14 @@ def _previous_indexed_stack_load_for_register_8616(
     return None
 
 
+@cython.ccall
 def _signed_halving_insns_match_8616(
     sign_extend: StructuredAstValue, subtract: StructuredAstValue, shift: StructuredAstValue
-) -> bool:
+) -> cython.bint:
     """Check the ``cwd; sub ax,dx; sar ax,1`` signed-halving idiom."""
     if getattr(sign_extend, "id", None) not in {X86_INS_CWD, X86_INS_CDQ}:
         return False
-    if getattr(subtract, "id", None) != X86_INS_SUB:
+    if operator.ne(getattr(subtract, "id", None), X86_INS_SUB):
         return False
     sub_operands = _boundary_tuple_8616(getattr(subtract, "operands", ()) or ())
     if len(sub_operands) != 2:
@@ -6649,7 +7378,7 @@ def _signed_halving_insns_match_8616(
         return False
     if not _register_operand_is_8616(sub_operands[1], X86_REG_DX):
         return False
-    if getattr(shift, "id", None) != X86_INS_SAR:
+    if operator.ne(getattr(shift, "id", None), X86_INS_SAR):
         return False
     shift_operands = _boundary_tuple_8616(getattr(shift, "operands", ()) or ())
     if len(shift_operands) != 2:
@@ -6657,17 +7386,18 @@ def _signed_halving_insns_match_8616(
     dst, amount = shift_operands
     if not _register_operand_is_8616(dst, X86_REG_AX):
         return False
-    return getattr(amount, "type", None) == X86_OP_IMM and getattr(amount, "imm", None) == 1
+    return operator.eq(getattr(amount, "type", None), X86_OP_IMM) and getattr(amount, "imm", None) == 1
 
 
-def _indexed_mem_base_index_regs_8616(src: StructuredAstValue) -> tuple[int, int] | None:
+def _indexed_mem_base_index_regs_8616(src: StructuredAstValue) -> object:
     """Return (base, index) register ids for a disp-less ``[base+index]`` operand."""
+    mem: object
     mem = getattr(src, "mem", None)
     if mem is None:
         return None
     regs = _boundary_tuple_8616(
         reg
-        for reg in (getattr(mem, "base", X86_REG_INVALID), getattr(mem, "index", X86_REG_INVALID))
+        for reg in iter((getattr(mem, "base", X86_REG_INVALID), getattr(mem, "index", X86_REG_INVALID)))
         if isinstance(reg, int) and reg not in {0, X86_REG_INVALID}
     )
     if len(regs) != 2 or getattr(mem, "disp", 0) not in {0, None}:
@@ -6675,22 +7405,26 @@ def _indexed_mem_base_index_regs_8616(src: StructuredAstValue) -> tuple[int, int
     return regs
 
 
+@cython.ccall
 def _mov_cx_immediate_8616(insn: StructuredAstValue) -> int | None:
     """Return the nonzero immediate loaded into CX, or None."""
-    if getattr(insn, "id", None) != X86_INS_MOV:
+    imm: object
+    if operator.ne(getattr(insn, "id", None), X86_INS_MOV):
         return None
     operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
     if len(operands) != 2 or not _register_operand_is_8616(operands[0], X86_REG_CX):
         return None
-    if getattr(operands[1], "type", None) != X86_OP_IMM:
+    if operator.ne(getattr(operands[1], "type", None), X86_OP_IMM):
         return None
     imm = getattr(operands[1], "imm", None)
     return imm if isinstance(imm, int) and imm != 0 else None
 
 
-def _mov_ax_stack_source_8616(insn: StructuredAstValue, width: int) -> int | None:
+@cython.ccall
+def _mov_ax_stack_source_8616(insn: StructuredAstValue, width: cython.longlong) -> int | None:
     """Return the BP stack source offset for ``mov ax, [bp+off]``, or None."""
-    if getattr(insn, "id", None) != X86_INS_MOV:
+    source: object
+    if operator.ne(getattr(insn, "id", None), X86_INS_MOV):
         return None
     operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
     if len(operands) != 2 or not _register_operand_is_8616(operands[0], X86_REG_AX):
@@ -6702,11 +7436,14 @@ def _mov_ax_stack_source_8616(insn: StructuredAstValue, width: int) -> int | Non
     return source_offset if source_width == width else None
 
 
+@cython.ccall
 def _indexed_pointer_reg_facts_8616(
-    insns: tuple[StructuredAstValue, ...], index: int, regs: StructuredAstValue
-) -> list[tuple[int, int, int, int]] | None:
+    insns: object, index: cython.longlong, regs: StructuredAstValue
+) -> object:
     """Resolve stack-index facts for both [base+index] registers."""
-    reg_facts: list[tuple[int, int, int, int]] = []
+    fact: object
+    mem_reg: object
+    reg_facts: list[tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong]] = []
     for mem_reg in regs:
         fact = _previous_stack_index_for_register_8616(insns, index - 1, mem_reg)
         if fact is None:
@@ -6715,23 +7452,28 @@ def _indexed_pointer_reg_facts_8616(
     return reg_facts
 
 
+@cython.ccall
 def _previous_indexed_pointer_load_for_register_8616(
-    insns: tuple[StructuredAstValue, ...],
-    index: int,
-    reg_id: int,
-) -> tuple[int, int, int, int] | None:
+    insns: object,
+    index: cython.longlong,
+    reg_id: cython.longlong,
+) -> object:
+    access_width: object
+    prev: object
+    reg_facts: object
+    regs: object
     if index <= 0:
         return None
     prev = getattr(insns[index - 1], "insn", insns[index - 1])
-    if getattr(prev, "id", None) != X86_INS_MOV:
+    if operator.ne(getattr(prev, "id", None), X86_INS_MOV):
         return None
     operands = _boundary_tuple_8616(getattr(prev, "operands", ()) or ())
     if len(operands) != 2:
         return None
     dst, src = operands
-    if getattr(dst, "type", None) != X86_OP_REG or getattr(dst, "reg", None) != reg_id:
+    if operator.ne(getattr(dst, "type", None), X86_OP_REG) or operator.ne(getattr(dst, "reg", None), reg_id):
         return None
-    if getattr(src, "type", None) != X86_OP_MEM:
+    if operator.ne(getattr(src, "type", None), X86_OP_MEM):
         return None
     access_width = getattr(src, "size", None)
     if access_width not in {1, 2}:
@@ -6742,8 +7484,8 @@ def _previous_indexed_pointer_load_for_register_8616(
     reg_facts = _indexed_pointer_reg_facts_8616(insns, index, regs)
     if reg_facts is None:
         return None
-    pointer_candidates = [item for item in reg_facts if item[1] > 0 and item[3] == 1]
-    index_candidates = [item for item in reg_facts if item[1] < 0 and item[3] == access_width]
+    pointer_candidates = [item for item in iter(reg_facts) if item[1] > 0 and item[3] == 1]
+    index_candidates = [item for item in iter(reg_facts) if item[1] < 0 and operator.eq(item[3], access_width)]
     if len(pointer_candidates) != 1 or len(index_candidates) != 1:
         return None
     _ptr_reg, pointer_offset, _pointer_width, _pointer_scale = pointer_candidates[0]
@@ -6751,9 +7493,13 @@ def _previous_indexed_pointer_load_for_register_8616(
     return pointer_offset, index_offset, int(index_scale), int(access_width)
 
 
+@cython.ccall
 def _previous_shifted_stack_load_for_register_8616(
-    insns: tuple[StructuredAstValue, ...], index: int, reg_id: int, width: int
-) -> tuple[int, int, DirectStackMoveExpressionOp8616] | None:
+    insns: object, index: cython.longlong, reg_id: cython.longlong, width: cython.longlong
+) -> object:
+    immediate: object
+    shift: object
+    source: object
     if index <= 1:
         return None
     shift = getattr(insns[index - 1], "insn", insns[index - 1])
@@ -6763,9 +7509,9 @@ def _previous_shifted_stack_load_for_register_8616(
     if len(operands) != 2:
         return None
     dst, amount = operands
-    if getattr(dst, "type", None) != X86_OP_REG or getattr(dst, "reg", None) != reg_id:
+    if operator.ne(getattr(dst, "type", None), X86_OP_REG) or operator.ne(getattr(dst, "reg", None), reg_id):
         return None
-    if getattr(amount, "type", None) != X86_OP_IMM:
+    if operator.ne(getattr(amount, "type", None), X86_OP_IMM):
         return None
     immediate = getattr(amount, "imm", None)
     if not isinstance(immediate, int) or immediate < 0 or immediate >= width * 8:
@@ -6779,9 +7525,10 @@ def _previous_shifted_stack_load_for_register_8616(
     return source_offset, immediate, DirectStackMoveExpressionOp8616.SHL
 
 
+@cython.ccall
 def _previous_signed_half_stack_load_for_register_8616(
-    insns: tuple[StructuredAstValue, ...], index: int, reg_id: int, width: int
-) -> tuple[int, int, DirectStackMoveExpressionOp8616] | None:
+    insns: object, index: cython.longlong, reg_id: cython.longlong, width: cython.longlong
+) -> object:
     """Recover MS C signed /2 lowering feeding a direct stack store.
 
     MS C emits signed division by two as:
@@ -6789,6 +7536,7 @@ def _previous_signed_half_stack_load_for_register_8616(
     The store is a semantic stack-slot assignment and must be materialized
     before later uses of the destination local.
     """
+    source: object
     if reg_id != X86_REG_AX or width != 2 or index <= 3:
         return None
     if not _signed_halving_insns_match_8616(
@@ -6806,10 +7554,17 @@ def _previous_signed_half_stack_load_for_register_8616(
     return source_offset, 2, DirectStackMoveExpressionOp8616.SIGNED_DIV2
 
 
+@cython.ccall
 def _previous_stack_signed_idiv_const_for_register_8616(
-    insns: tuple[StructuredAstValue, ...], index: int, reg_id: int, width: int
-) -> tuple[int, int, DirectStackMoveExpressionOp8616] | None:
+    insns: object, index: cython.longlong, reg_id: cython.longlong, width: cython.longlong
+) -> object:
     """Recover ``mov cx,K; mov ax,[bp+off]; cwd; idiv cx`` before a BP store."""
+    const_load: object
+    divide: object
+    divisor: object
+    sign_extend: object
+    source_offset: object
+    stack_load: object
     if reg_id != X86_REG_AX or width != 2 or index <= 3:
         return None
     const_load = getattr(insns[index - 4], "insn", insns[index - 4])
@@ -6824,7 +7579,7 @@ def _previous_stack_signed_idiv_const_for_register_8616(
         return None
     if getattr(sign_extend, "id", None) not in {X86_INS_CWD, X86_INS_CDQ}:
         return None
-    if getattr(divide, "id", None) != X86_INS_IDIV:
+    if operator.ne(getattr(divide, "id", None), X86_INS_IDIV):
         return None
     divide_operands = _boundary_tuple_8616(getattr(divide, "operands", ()) or ())
     if len(divide_operands) != 1 or not _register_operand_is_8616(divide_operands[0], X86_REG_CX):
@@ -6832,17 +7587,23 @@ def _previous_stack_signed_idiv_const_for_register_8616(
     return source_offset, int(divisor), DirectStackMoveExpressionOp8616.SIGNED_DIV2
 
 
+@cython.ccall
 def _previous_global_signed_half_for_register_8616(
-    insns: tuple[StructuredAstValue, ...], index: int, reg_id: int, width: int
-) -> tuple[int, int, DirectStackMoveExpressionOp8616] | None:
+    insns: object, index: cython.longlong, reg_id: cython.longlong, width: cython.longlong
+) -> object:
     """Recover ``mov ax, global; cwd; sub ax,dx; sar ax,1`` before a BP store."""
+    global_slot: object
+    load: object
+    shift: object
+    sign_extend: object
+    subtract: object
     if reg_id != X86_REG_AX or width != 2 or index <= 3:
         return None
     load = getattr(insns[index - 4], "insn", insns[index - 4])
     sign_extend = getattr(insns[index - 3], "insn", insns[index - 3])
     subtract = getattr(insns[index - 2], "insn", insns[index - 2])
     shift = getattr(insns[index - 1], "insn", insns[index - 1])
-    if getattr(load, "id", None) != X86_INS_MOV:
+    if operator.ne(getattr(load, "id", None), X86_INS_MOV):
         return None
     load_operands = _boundary_tuple_8616(getattr(load, "operands", ()) or ())
     if len(load_operands) != 2 or not _register_operand_is_8616(load_operands[0], X86_REG_AX):
@@ -6858,15 +7619,20 @@ def _previous_global_signed_half_for_register_8616(
     return global_displacement, 2, DirectStackMoveExpressionOp8616.SIGNED_DIV2
 
 
+@cython.ccall
 def _previous_global_minus_stack_for_register_8616(
-    insns: tuple[StructuredAstValue, ...], index: int, reg_id: int, width: int
-) -> tuple[int, int] | None:
+    insns: object, index: cython.longlong, reg_id: cython.longlong, width: cython.longlong
+) -> object:
     """Recover ``mov ax, global; sub ax, [bp+off]`` before a BP store."""
+    global_slot: object
+    load: object
+    source_slot: object
+    subtract: object
     if reg_id != X86_REG_AX or width != 2 or index <= 1:
         return None
     subtract = getattr(insns[index - 1], "insn", insns[index - 1])
     load = getattr(insns[index - 2], "insn", insns[index - 2])
-    if getattr(subtract, "id", None) != X86_INS_SUB:
+    if operator.ne(getattr(subtract, "id", None), X86_INS_SUB):
         return None
     sub_operands = _boundary_tuple_8616(getattr(subtract, "operands", ()) or ())
     if len(sub_operands) != 2 or not _register_operand_is_8616(sub_operands[0], X86_REG_AX):
@@ -6877,7 +7643,7 @@ def _previous_global_minus_stack_for_register_8616(
     source_offset, source_width = source_slot
     if source_width != width:
         return None
-    if getattr(load, "id", None) != X86_INS_MOV:
+    if operator.ne(getattr(load, "id", None), X86_INS_MOV):
         return None
     load_operands = _boundary_tuple_8616(getattr(load, "operands", ()) or ())
     if len(load_operands) != 2 or not _register_operand_is_8616(load_operands[0], X86_REG_AX):
@@ -6891,29 +7657,38 @@ def _previous_global_minus_stack_for_register_8616(
     return global_displacement, source_offset
 
 
-def _register_adjustment_before_8616(insn: StructuredAstValue, reg_id: int) -> int | None:
+@cython.ccall
+def _register_adjustment_before_8616(insn: StructuredAstValue, reg_id: cython.longlong) -> int | None:
+    immediate: object
+    insn_id: object
     insn_id = getattr(insn, "id", None)
     operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
-    if insn_id == X86_INS_INC and len(operands) == 1 and _register_operand_is_8616(operands[0], reg_id):
+    if operator.eq(insn_id, X86_INS_INC) and len(operands) == 1 and _register_operand_is_8616(operands[0], reg_id):
         return 1
-    if insn_id == X86_INS_DEC and len(operands) == 1 and _register_operand_is_8616(operands[0], reg_id):
+    if operator.eq(insn_id, X86_INS_DEC) and len(operands) == 1 and _register_operand_is_8616(operands[0], reg_id):
         return -1
     if insn_id not in {X86_INS_ADD, X86_INS_SUB} or len(operands) != 2:
         return None
     if not _register_operand_is_8616(operands[0], reg_id):
         return None
-    if getattr(operands[1], "type", None) != X86_OP_IMM:
+    if operator.ne(getattr(operands[1], "type", None), X86_OP_IMM):
         return None
     immediate = getattr(operands[1], "imm", None)
     if not isinstance(immediate, int):
         return None
-    return immediate if insn_id == X86_INS_ADD else -immediate
+    return immediate if operator.eq(insn_id, X86_INS_ADD) else -immediate
 
 
+@cython.ccall
 def _previous_stack_load_with_adjust_for_register_8616(
-    insns: tuple[StructuredAstValue, ...], index: int, reg_id: int, width: int
-) -> tuple[int, int, int] | None:
+    insns: object, index: cython.longlong, reg_id: cython.longlong, width: cython.longlong
+) -> object:
     """Recover a stack load plus one adjustment across unrelated register setup."""
+    adjusted: object
+    adjustment: object
+    direct: object
+    insn: object
+    insn_id: object
     if index <= 0:
         return None
     for cursor in range(index - 1, max(index - 9, -1), -1):
@@ -6937,7 +7712,7 @@ def _previous_stack_load_with_adjust_for_register_8616(
         adjustment = _register_adjustment_before_8616(insn, reg_id)
         if adjustment is None:
             direct = _stack_mem_operand_offset_width_8616(operands[1]) if len(operands) == 2 else None
-            if insn_id != X86_INS_MOV or direct is None:
+            if operator.ne(insn_id, X86_INS_MOV) or direct is None:
                 return None
             source_offset, source_width = direct
             return (source_offset, 0, cursor) if source_width == width else None
@@ -6951,13 +7726,18 @@ def _previous_stack_load_with_adjust_for_register_8616(
     return None
 
 
+@cython.ccall
 def _previous_global_load_with_adjust_for_register_8616(
-    insns: tuple[StructuredAstValue, ...],
-    index: int,
-    reg_id: int,
-    width: int,
-) -> tuple[int, int] | None:
+    insns: object,
+    index: cython.longlong,
+    reg_id: cython.longlong,
+    width: cython.longlong,
+) -> object:
     """Recover a direct global load with an optional register adjustment."""
+    adjust_insn: object
+    global_slot: object
+    load_insn: object
+    proven_adjustment: object
     if index <= 0:
         return None
     load_index = index - 1
@@ -6971,7 +7751,7 @@ def _previous_global_load_with_adjust_for_register_8616(
     load_insn = getattr(insns[load_index], "insn", insns[load_index])
     operands = _boundary_tuple_8616(getattr(load_insn, "operands", ()) or ())
     if (
-        getattr(load_insn, "id", None) != X86_INS_MOV
+        operator.ne(getattr(load_insn, "id", None), X86_INS_MOV)
         or len(operands) != 2
         or not _register_operand_is_8616(operands[0], reg_id)
     ):
@@ -6983,29 +7763,40 @@ def _previous_global_load_with_adjust_for_register_8616(
     return (displacement, adjustment) if source_width == width else None
 
 
-def _register_operand_is_8616(operand: StructuredAstValue, reg_id: int) -> bool:
-    return getattr(operand, "type", None) == X86_OP_REG and getattr(operand, "reg", None) == reg_id
+@cython.ccall
+def _register_operand_is_8616(operand: StructuredAstValue, reg_id: cython.longlong) -> cython.bint:
+    return operator.eq(getattr(operand, "type", None), X86_OP_REG) and operator.eq(getattr(operand, "reg", None), reg_id)
 
 
+@cython.ccall
 def _direct_call_target_from_operand_8616(operand: StructuredAstValue) -> int | None:
-    if getattr(operand, "type", None) != X86_OP_IMM:
+    target: object
+    if operator.ne(getattr(operand, "type", None), X86_OP_IMM):
         return None
     target = getattr(operand, "imm", None)
     return target if isinstance(target, int) else None
 
 
+@cython.ccall
 def _project_main_object_min_addr_8616(project: StructuredAstValue) -> int | None:
+    loader: object
+    main_object: object
+    min_addr: object
     loader = getattr(project, "loader", None)
     main_object = getattr(loader, "main_object", None)
     min_addr = getattr(main_object, "min_addr", None)
     return int(min_addr) if isinstance(min_addr, int) else None
 
 
+@cython.ccall
 def _raw_call_target_candidates_8616(
-    project: StructuredAstValue, target: int
-) -> list[tuple[StructuredAstValue, int]]:
+    project: StructuredAstValue, target: cython.longlong
+) -> object:
     """Build raw (project, address) candidates across coordinate spaces."""
-    candidates: list[tuple[StructuredAstValue, int]] = [(project, target)]
+    delta: object
+    original_project: object
+    candidate_project: object
+    candidates: list[tuple[StructuredAstValue, cython.longlong]] = [(project, target)]
     delta = getattr(project, "_inertia_original_linear_delta", None)
     original_project = getattr(project, "_inertia_original_project", None)
     projects: list[StructuredAstValue] = [project]
@@ -7025,11 +7816,14 @@ def _raw_call_target_candidates_8616(
     return candidates
 
 
+@cython.ccall
 def _dedup_call_target_candidates_8616(
-    candidates: list[tuple[StructuredAstValue, int]], include_padding_aliases: bool
-) -> tuple[tuple[StructuredAstValue, int], ...]:
+    candidates: object, include_padding_aliases: cython.bint
+) -> tuple[tuple[StructuredAstValue, cython.longlong], ...]:
     """Canonicalize padding aliases and deduplicate by (project, address)."""
-    canonicalized_candidates: list[tuple[StructuredAstValue, int]] = []
+    candidate_project: object
+    candidate_target: object
+    canonicalized_candidates: list[tuple[StructuredAstValue, cython.longlong]] = []
     for candidate_project, candidate_target in candidates:
         if include_padding_aliases:
             canonical_target = canonicalize_x86_16_padding_call_target_8616(
@@ -7042,8 +7836,8 @@ def _dedup_call_target_candidates_8616(
             ):
                 canonicalized_candidates.append((candidate_project, canonical_target))
         canonicalized_candidates.append((candidate_project, candidate_target))
-    deduped: list[tuple[StructuredAstValue, int]] = []
-    seen: set[tuple[int, int]] = set()
+    deduped: list[tuple[StructuredAstValue, cython.longlong]] = []
+    seen: set[tuple[cython.longlong, cython.longlong]] = set()
     for candidate_project, candidate_target in canonicalized_candidates:
         key = (id(candidate_project), int(candidate_target))
         if key in seen:
@@ -7053,18 +7847,20 @@ def _dedup_call_target_candidates_8616(
     return tuple(deduped)
 
 
+@cython.ccall
 def _direct_stack_move_call_target_candidates_8616(
     project: StructuredAstValue,
-    target: int,
+    target: cython.longlong,
     *,
-    include_padding_aliases: bool = True,
-) -> tuple[tuple[StructuredAstValue, int], ...]:
+    include_padding_aliases: cython.bint = True,
+) -> object:
     """Return coordinate-space candidates for a direct stack code offset."""
     candidates = _raw_call_target_candidates_8616(project, int(target))
     return _dedup_call_target_candidates_8616(candidates, include_padding_aliases)
 
 
-def _normalize_direct_stack_function_name_8616(raw_name: str | None) -> str | None:
+@cython.ccall
+def _normalize_direct_stack_function_name_8616(raw_name: object) -> object:
     if not isinstance(raw_name, str):
         return None
     stripped = raw_name.strip()
@@ -7074,13 +7870,21 @@ def _normalize_direct_stack_function_name_8616(raw_name: str | None) -> str | No
     return normalized or stripped.lstrip("_")
 
 
+@cython.ccall
 def _direct_stack_function_target_8616(
     project: AngrProjectValue,
-    target: int,
+    target: cython.longlong,
     *,
-    include_padding_aliases: bool = True,
+    include_padding_aliases: cython.bint = True,
 ) -> DirectStackFunctionTarget8616 | None:
     """Resolve a direct stack code offset to typed function identity evidence."""
+    functions: object
+    label: object
+    labels: object
+    synthetic: object
+    synthetic_globals: object
+    candidate_project: object
+    candidate_target: object
     for candidate_project, candidate_target in _direct_stack_move_call_target_candidates_8616(
         project,
         target,
@@ -7132,9 +7936,17 @@ def _direct_stack_function_target_8616(
     return None
 
 
+@cython.ccall
 def _callee_name_for_direct_stack_move_8616(
-    project: AngrProjectValue, target: int
-) -> tuple[str, StructuredAstValue | None, int]:
+    project: AngrProjectValue, target: cython.longlong
+) -> tuple[str, StructuredAstValue | None, cython.longlong]:
+    functions: object
+    label: object
+    labels: object
+    name: object
+    resolved: object
+    candidate_project: object
+    candidate_target: object
     resolved = _direct_stack_function_target_8616(project, target)
     if resolved is not None:
         return resolved.name, None, resolved.addr
@@ -7160,15 +7972,19 @@ def _callee_name_for_direct_stack_move_8616(
     return f"sub_{int(target):x}", None, int(target)
 
 
-def _is_stack_probe_helper_name_for_linear_lowering_8616(name: str | None) -> bool:
+@cython.ccall
+def _is_stack_probe_helper_name_for_linear_lowering_8616(name: object) -> cython.bint:
     if not isinstance(name, str):
         return False
     lowered = name.strip().lower().lstrip("_")
     return lowered in {"anchkstk", "chkstk"}
 
 
-def _callee_has_zero_args_8616(callee: StructuredAstValue, callee_name: str) -> bool:
+@cython.ccall
+def _callee_has_zero_args_8616(callee: StructuredAstValue, callee_name: object) -> cython.bint:
     """Return whether typed callee evidence proves an empty argument list."""
+    args: object
+    prototype: object
     prototype = getattr(callee, "prototype", None)
     args = getattr(prototype, "args", None)
     if isinstance(args, (list, tuple)):
@@ -7176,17 +7992,23 @@ def _callee_has_zero_args_8616(callee: StructuredAstValue, callee_name: str) -> 
     return callee_name.lstrip("_") in LOWERED_ZERO_ARG_RUNTIME_HELPER_DECLARATIONS_8616
 
 
-def _call_has_nearby_stack_arg_setup_8616(insns: tuple[StructuredAstValue, ...], call_index: int) -> bool:
+@cython.ccall
+def _call_has_nearby_stack_arg_setup_8616(insns: object, call_index: cython.longlong) -> cython.bint:
+    insn: object
     for scan_index in range(max(0, call_index - 8), call_index):
         insn = getattr(insns[scan_index], "insn", insns[scan_index])
-        if getattr(insn, "id", None) == X86_INS_PUSH:
+        if operator.eq(getattr(insn, "id", None), X86_INS_PUSH):
             return True
     return False
 
 
+@cython.ccall
 def _direct_zero_arg_call_before_8616(
-    project: AngrProjectValue, insns: tuple[StructuredAstValue, ...], index: int
+    project: AngrProjectValue, insns: object, index: cython.longlong
 ) -> StructuredAstValue:
+    call_addr: object
+    call_insn: object
+    call_target: object
     if index <= 0:
         return None
     call_index = index - 1
@@ -7211,8 +8033,10 @@ def _direct_zero_arg_call_before_8616(
     return callee_name, resolved_call_target, call_addr
 
 
+@cython.ccall
 def _dx_stack_store_offset_8616(store: StructuredAstValue) -> int | None:
     """Return the destination offset of a ``mov [bp+dst], dx`` store."""
+    dst_slot: object
     store_operands = _boundary_tuple_8616(getattr(store, "operands", ()) or ())
     if len(store_operands) != 2:
         return None
@@ -7223,25 +8047,35 @@ def _dx_stack_store_offset_8616(store: StructuredAstValue) -> int | None:
     return dst_offset if dst_width == 2 else None
 
 
+@cython.ccall
 def _idiv_divisor_reg_8616(idiv_insn: StructuredAstValue, sign_extend: StructuredAstValue) -> int | None:
     """Return the divisor register of a ``cwd; idiv r`` pair, or None."""
-    if getattr(idiv_insn, "id", None) != X86_INS_IDIV or getattr(sign_extend, "id", None) not in {
+    divisor_reg: object
+    if operator.ne(getattr(idiv_insn, "id", None), X86_INS_IDIV) or getattr(sign_extend, "id", None) not in {
         X86_INS_CWD,
         X86_INS_CDQ,
     }:
         return None
     idiv_operands = _boundary_tuple_8616(getattr(idiv_insn, "operands", ()) or ())
-    if len(idiv_operands) != 1 or getattr(idiv_operands[0], "type", None) != X86_OP_REG:
+    if len(idiv_operands) != 1 or operator.ne(getattr(idiv_operands[0], "type", None), X86_OP_REG):
         return None
     divisor_reg = getattr(idiv_operands[0], "reg", None)
     return divisor_reg if isinstance(divisor_reg, int) else None
 
 
+@cython.ccall
 def _signed_idiv_remainder_stack_store_fact_at_8616(
     project: AngrProjectValue,
-    insns: tuple[StructuredAstValue, ...],
-    index: int,
+    insns: object,
+    index: cython.longlong,
 ) -> DirectStackMoveFact8616 | None:
+    call: object
+    call_return_contract: object
+    divisor: object
+    divisor_reg: object
+    dst_offset: object
+    ins_addr: object
+    store: object
     if index <= 3:
         return None
     store = getattr(insns[index], "insn", insns[index])
@@ -7287,11 +8121,12 @@ def _signed_idiv_remainder_stack_store_fact_at_8616(
     )
 
 
+@cython.ccall
 def _callsite_proves_zero_args_8616(
-    callsite_inventory: Mapping[int, CallsiteSummary8616] | None,
+    callsite_inventory: object,
     call_ins_addr: StructuredAstValue,
     resolved_call_target: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Check whether the callsite summary proves a zero-argument callee."""
     callsite_summary = (
         callsite_inventory.get(call_ins_addr)
@@ -7300,21 +8135,25 @@ def _callsite_proves_zero_args_8616(
     )
     return (
         isinstance(callsite_summary, CallsiteSummary8616)
-        and callsite_summary.callsite_addr == call_ins_addr
-        and callsite_summary.target_addr == resolved_call_target
+        and operator.eq(callsite_summary.callsite_addr, call_ins_addr)
+        and operator.eq(callsite_summary.target_addr, resolved_call_target)
         and callsite_summary.arg_count == 0
         and not callsite_summary.arg_widths
         and callsite_summary.stack_cleanup == 0
     )
 
 
+@cython.ccall
 def _wide_call_arith_call_gate_8616(
     project: StructuredAstValue,
-    insns: tuple[StructuredAstValue, ...],
-    index: int,
+    insns: object,
+    index: cython.longlong,
     callsite_inventory: Mapping[int, CallsiteSummary8616] | None,
-) -> tuple[StructuredAstValue, ...] | str | None:
+) -> object:
     """Validate the call arm, returning (callee_name, call_target, call_addr) or a reason."""
+    call_ins_addr: object
+    call_insn: object
+    call_target: object
     if index + 4 >= len(insns):
         return None
     call_insn = getattr(insns[index], "insn", insns[index])
@@ -7335,13 +8174,18 @@ def _wide_call_arith_call_gate_8616(
     return (callee_name, resolved_call_target, call_ins_addr)
 
 
+@cython.ccall
 def _wide_call_arith_gate_8616(
-    insns: tuple[StructuredAstValue, ...], index: int
-) -> tuple[StructuredAstValue, ...] | str:
+    insns: object, index: cython.longlong
+) -> object:
     """Validate the ADD/ADC arm, returning (arg_offset, add_addr, adc_addr) or a reason."""
+    adc_insn: object
+    add_insn: object
+    arg_hi: object
+    arg_lo: object
     add_insn = getattr(insns[index + 1], "insn", insns[index + 1])
     adc_insn = getattr(insns[index + 2], "insn", insns[index + 2])
-    if getattr(add_insn, "id", None) != X86_INS_ADD or getattr(adc_insn, "id", None) != X86_INS_ADC:
+    if operator.ne(getattr(add_insn, "id", None), X86_INS_ADD) or operator.ne(getattr(adc_insn, "id", None), X86_INS_ADC):
         return "not_add_adc"
     add_operands = _boundary_tuple_8616(getattr(add_insn, "operands", ()) or ())
     adc_operands = _boundary_tuple_8616(getattr(adc_insn, "operands", ()) or ())
@@ -7357,18 +8201,23 @@ def _wide_call_arith_gate_8616(
         return "arg_not_stack"
     arg_offset, arg_width = arg_lo
     arg_hi_offset, arg_hi_width = arg_hi
-    if arg_width != 2 or arg_hi_width != 2 or arg_hi_offset != arg_offset + 2:
+    if arg_width != 2 or arg_hi_width != 2 or operator.ne(arg_hi_offset, arg_offset + 2):
         return "arg_not_wide_pair"
     return (arg_offset, getattr(add_insn, "address", None), getattr(adc_insn, "address", None))
 
 
+@cython.ccall
 def _wide_call_mov_gate_8616(
-    insns: tuple[StructuredAstValue, ...], index: int
-) -> tuple[StructuredAstValue, ...] | str:
+    insns: object, index: cython.longlong
+) -> object:
     """Validate the MOV pair arm, returning (dst_offset, lo_addr, hi_addr) or a reason."""
+    dst_hi: object
+    dst_lo: object
+    mov_hi: object
+    mov_lo: object
     mov_lo = getattr(insns[index + 3], "insn", insns[index + 3])
     mov_hi = getattr(insns[index + 4], "insn", insns[index + 4])
-    if getattr(mov_lo, "id", None) != X86_INS_MOV or getattr(mov_hi, "id", None) != X86_INS_MOV:
+    if operator.ne(getattr(mov_lo, "id", None), X86_INS_MOV) or operator.ne(getattr(mov_hi, "id", None), X86_INS_MOV):
         return "not_mov_pair"
     mov_lo_operands = _boundary_tuple_8616(getattr(mov_lo, "operands", ()) or ())
     mov_hi_operands = _boundary_tuple_8616(getattr(mov_hi, "operands", ()) or ())
@@ -7384,21 +8233,24 @@ def _wide_call_mov_gate_8616(
         return "dst_not_stack"
     dst_offset, dst_width = dst_lo
     dst_hi_offset, dst_hi_width = dst_hi
-    if dst_width != 2 or dst_hi_width != 2 or dst_hi_offset != dst_offset + 2:
+    if dst_width != 2 or dst_hi_width != 2 or operator.ne(dst_hi_offset, dst_offset + 2):
         return "dst_not_wide_pair"
     return (dst_offset, getattr(mov_lo, "address", None), getattr(mov_hi, "address", None))
 
 
 def _wide_call_return_stack_arith_fact_at_8616(
     project: StructuredAstValue,
-    insns: tuple[StructuredAstValue, ...],
-    index: int,
+    insns: object,
+    index: cython.longlong,
     callsite_inventory: Mapping[int, CallsiteSummary8616] | None = None,
 ) -> DirectStackMoveFact8616 | None:
     """Recover a stack-store fact for wide call-return arithmetic."""
+    call_gate: object
     debug_stack_noise = bool(os.environ.get("INERTIA_DEBUG_STACK_NOISE"))
 
-    def _debug_reject(reason: str) -> None:
+    def _debug_reject(reason: object) -> None:
+        insn: object
+        wrapper: object
         if not debug_stack_noise:
             return
         window = []
@@ -7431,7 +8283,7 @@ def _wide_call_return_stack_arith_fact_at_8616(
     dst_offset, ins_addr, dst_high_ins_addr = mov
     if not all(
         isinstance(value, int)
-        for value in (ins_addr, call_ins_addr, add_ins_addr, adc_ins_addr, dst_high_ins_addr)
+        for value in iter((ins_addr, call_ins_addr, add_ins_addr, adc_ins_addr, dst_high_ins_addr))
     ):
         return None
     return DirectStackMoveFact8616(
@@ -7452,28 +8304,29 @@ def _wide_call_return_stack_arith_fact_at_8616(
 
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _DirectStackMoveFactCollector8616:
     """Classify one MOV-to-stack instruction into a typed source fact."""
 
     project: StructuredAstValue
     callsite_inventory: StructuredAstValue
     insns: StructuredAstValue
-    index: int
+    index: cython.longlong
     insn: StructuredAstValue
     operands: StructuredAstValue
-    facts: list[DirectStackMoveFact8616]
+    facts: object
     dst_offset: StructuredAstValue = None
     width: StructuredAstValue = None
     ins_addr: StructuredAstValue = None
     dst_index_global_displacement: StructuredAstValue = None
     dst_index_stack_offset: StructuredAstValue = None
     dst_index_immediate: StructuredAstValue = None
-    dst_index_scale: int = 1
-    dst_index_byte_scale: int = 1
+    dst_index_scale: cython.longlong = 1
+    dst_index_byte_scale: cython.longlong = 1
     source_register_offset: int | None = None
     reg_id: StructuredAstValue = None
 
+    @cython.ccall
     def append_destination_fact(self, fact: DirectStackMoveFact8616) -> None:
         """Attach the current MOV destination's typed index evidence."""
         self.facts.append(
@@ -7488,8 +8341,14 @@ class _DirectStackMoveFactCollector8616:
             )
         )
 
-    def classify_destination_8616(self) -> bool:
+    @cython.ccall
+    def classify_destination_8616(self) -> cython.bint:
         """Resolve the destination offset/width and typed index evidence."""
+        dst_slot: object
+        index_source: object
+        indexed_dst: object
+        ins_addr: object
+        stack_index: object
         dst_slot = _stack_mem_operand_offset_width_8616(self.operands[0])
         indexed_dst = _indexed_stack_mem_operand_8616(self.operands[0])
         if dst_slot is None and indexed_dst is None:
@@ -7521,8 +8380,10 @@ class _DirectStackMoveFactCollector8616:
         self.ins_addr = ins_addr
         return True
 
-    def _emit_immediate_source_8616(self, src: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _emit_immediate_source_8616(self, src: StructuredAstValue) -> cython.bint:
         """Emit an IMMEDIATE fact for a constant source operand."""
+        value: object
         value = getattr(src, "imm", None)
         if not isinstance(value, int):
             return True
@@ -7537,8 +8398,10 @@ class _DirectStackMoveFactCollector8616:
         )
         return True
 
-    def _try_call_return_store_8616(self, register_name: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _try_call_return_store_8616(self, register_name: StructuredAstValue) -> cython.bint:
         """Emit a ZERO_ARG_CALL_RETURN fact when the source is a call result."""
+        call_return_store: object
         call_return_store = recover_zero_arg_call_return_stack_store_8616(
             self.callsite_inventory,
             store_ins_addr=self.ins_addr,
@@ -7565,8 +8428,10 @@ class _DirectStackMoveFactCollector8616:
         )
         return True
 
-    def _try_binary_stack_expr_8616(self) -> bool:
+    @cython.ccall
+    def _try_binary_stack_expr_8616(self) -> cython.bint:
         """Emit a STACK_SLOT_BINARY_EXPR fact for a proven register binop."""
+        binary_stack_expr: object
         binary_stack_expr = _previous_binary_stack_expr_for_register_8616(
             self.insns, self.index, self.reg_id, self.width
         )
@@ -7586,13 +8451,15 @@ class _DirectStackMoveFactCollector8616:
         )
         return True
 
-    def _try_prev_load_8616(self) -> bool:
+    @cython.ccall
+    def _try_prev_load_8616(self) -> cython.bint:
         """Emit a STACK_SLOT fact for a same-width proven stack load."""
+        prev_load: object
         prev_load = _previous_stack_load_for_register_8616(self.insns, self.index, self.reg_id)
         if prev_load is None:
             return False
         source_offset, source_width = prev_load
-        if source_width != self.width:
+        if operator.ne(source_width, self.width):
             return True
         self.append_destination_fact(
             DirectStackMoveFact8616(
@@ -7605,8 +8472,10 @@ class _DirectStackMoveFactCollector8616:
         )
         return True
 
-    def _try_signed_byte_load_8616(self) -> bool:
+    @cython.ccall
+    def _try_signed_byte_load_8616(self) -> cython.bint:
         """Emit a sign-extended STACK_SLOT fact for a proven byte load."""
+        signed_byte_load: object
         signed_byte_load = _previous_signed_byte_stack_load_for_register_8616(
             self.insns, self.index, self.reg_id, self.width
         )
@@ -7626,12 +8495,14 @@ class _DirectStackMoveFactCollector8616:
         )
         return True
 
-    def _try_indexed_stack_load_8616(self) -> bool:
+    @cython.ccall
+    def _try_indexed_stack_load_8616(self) -> cython.bint:
         """Emit a STACK_AGGREGATE_ELEMENT fact for a proven indexed load."""
+        indexed_stack_load: object
         indexed_stack_load = _previous_indexed_stack_load_for_register_8616(
             self.insns, self.index, self.reg_id
         )
-        if indexed_stack_load is None or indexed_stack_load.access_width != self.width:
+        if indexed_stack_load is None or operator.ne(indexed_stack_load.access_width, self.width):
             return False
         self.append_destination_fact(
             DirectStackMoveFact8616(
@@ -7647,8 +8518,11 @@ class _DirectStackMoveFactCollector8616:
         )
         return True
 
+    @cython.ccall
     def _expr_load_8616(self) -> StructuredAstValue:
         """Resolve the stack-derived expression load evidence for the register."""
+        adjusted_load: object
+        expr_load: object
         expr_load = _previous_shifted_stack_load_for_register_8616(
             self.insns, self.index, self.reg_id, self.width
         )
@@ -7670,8 +8544,11 @@ class _DirectStackMoveFactCollector8616:
             )
         return expr_load
 
-    def _try_global_adjusted_8616(self) -> bool:
+    @cython.ccall
+    def _try_global_adjusted_8616(self) -> cython.bint:
         """Emit a GLOBAL_EXPR fact for an adjusted proven global load."""
+        global_adjusted_load: object
+        global_expr_load: object
         global_adjusted_load = _previous_global_load_with_adjust_for_register_8616(
             self.insns,
             self.index,
@@ -7711,8 +8588,11 @@ class _DirectStackMoveFactCollector8616:
         )
         return True
 
-    def _try_global_minus_8616(self) -> bool:
+    @cython.ccall
+    def _try_global_minus_8616(self) -> cython.bint:
         """Emit GLOBAL_MINUS_* facts for proven difference loads."""
+        global_minus_segmented: object
+        global_minus_stack: object
         global_minus_stack = _previous_global_minus_stack_for_register_8616(
             self.insns, self.index, self.reg_id, self.width
         )
@@ -7754,8 +8634,10 @@ class _DirectStackMoveFactCollector8616:
         )
         return True
 
-    def _try_segmented_source_8616(self) -> bool:
+    @cython.ccall
+    def _try_segmented_source_8616(self) -> cython.bint:
         """Emit a SEGMENTED_MEMORY fact for a proven segmented register source."""
+        register_segmented_source: object
         register_segmented_source = _direct_stack_move_segmented_source_for_register_8616(
             self.insns, self.index, self.reg_id
         )
@@ -7777,7 +8659,8 @@ class _DirectStackMoveFactCollector8616:
         )
         return True
 
-    def _try_register_source_arms_8616(self, register_name: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _try_register_source_arms_8616(self, register_name: StructuredAstValue) -> cython.bint:
         """Run the ordered register-source arm sequence."""
         if self._try_call_return_store_8616(register_name):
             return True
@@ -7789,14 +8672,19 @@ class _DirectStackMoveFactCollector8616:
             return True
         return self._try_indexed_stack_load_8616()
 
+    @cython.ccall
     def collect_source_8616(self) -> None:
         """Classify the register source and emit the first matching fact."""
+        expr_load: object
+        reg_id: object
+        register_name: object
+        src_type: object
         src = self.operands[1]
         src_type = getattr(src, "type", None)
-        if src_type == X86_OP_IMM:
+        if operator.eq(src_type, X86_OP_IMM):
             self._emit_immediate_source_8616(src)
             return
-        if src_type != X86_OP_REG:
+        if operator.ne(src_type, X86_OP_REG):
             return
         reg_id = getattr(src, "reg", None)
         if not isinstance(reg_id, int):
@@ -7830,17 +8718,22 @@ class _DirectStackMoveFactCollector8616:
         )
 
 
+@cython.ccall
 def _collect_block_mov_facts_8616(
     project: StructuredAstValue,
     block: StructuredAstValue,
     callsite_inventory: StructuredAstValue,
-    facts: list[DirectStackMoveFact8616],
+    facts: object,
 ) -> None:
     """Collect every MOV-to-stack fact in one block."""
+    idiv_remainder_fact: object
+    insn: object
+    index: object
+    wrapper: object
     insns = _capstone_insns_for_direct_global_update_8616(project, block)
     for index, wrapper in enumerate(insns):
         insn = getattr(wrapper, "insn", wrapper)
-        if getattr(insn, "id", None) != X86_INS_MOV:
+        if operator.ne(getattr(insn, "id", None), X86_INS_MOV):
             continue
         idiv_remainder_fact = _signed_idiv_remainder_stack_store_fact_at_8616(project, insns, index)
         if idiv_remainder_fact is not None:
@@ -7866,15 +8759,19 @@ def _direct_stack_move_instruction_facts_8616(
     project: StructuredAstValue,
     function: StructuredAstValue,
     callsite_inventory: Mapping[int, CallsiteSummary8616] | None = None,
-) -> tuple[DirectStackMoveFact8616, ...]:
+) -> object:
     """Collect binary-proven BP-relative stack MOV facts."""
+    cached: object
+    idiv_remainder_fact: object
+    wide_fact: object
+    block: object
     cached = getattr(function, "_inertia_direct_stack_move_instruction_facts_8616", None)
     if isinstance(cached, tuple) and not callsite_inventory:
         return cached
     facts: list[DirectStackMoveFact8616] = []
     blocks = tuple(_direct_global_update_blocks_8616(project, function))
     merged_insns = _dedup_sorted_capstone_insns_by_addr_8616(
-        wrapper for block in blocks for wrapper in _capstone_insns_for_direct_global_update_8616(project, block)
+        wrapper for block in iter(blocks) for wrapper in builtins.iter(_capstone_insns_for_direct_global_update_8616(project, block))
     )
     for index in range(len(merged_insns)):
         wide_fact = _wide_call_return_stack_arith_fact_at_8616(
@@ -7901,7 +8798,7 @@ def _direct_stack_move_instruction_facts_for_codegen_8616(
     codegen: StructuredAstValue,
     project: StructuredAstValue,
     function: StructuredAstValue,
-) -> tuple[DirectStackMoveFact8616, ...]:
+) -> object:
     """Collect stack MOV facts through the exact extent proven by callsites.
 
     angr can expose a partial function size while Structuring is still
@@ -7910,6 +8807,8 @@ def _direct_stack_move_instruction_facts_for_codegen_8616(
     The bounded extension changes evidence collection only; it does not mutate
     CFG ownership or guess a function end.
     """
+    function_addr: object
+    function_size: object
     inventory = _direct_stack_write_inventory_8616(project, function)
     cast(
         _DirectStackWriteInventoryOwner8616,
@@ -7946,7 +8845,7 @@ def _direct_stack_move_instruction_facts_for_codegen_8616(
     maximum_end = function_addr + 0x600
     exact_returns = tuple(
         summary.return_addr
-        for summary in callsite_inventory.values()
+        for summary in builtins.iter(callsite_inventory.values())
         if function_addr <= summary.callsite_addr < maximum_end
         and isinstance(summary.return_addr, int)
         and summary.callsite_addr < summary.return_addr <= maximum_end
@@ -8011,7 +8910,7 @@ def _direct_stack_move_instruction_facts_for_codegen_8616(
         extended_function,
         callsite_inventory,
     )
-    merged_facts = tuple(dict.fromkeys((*primary_facts, *extended_facts)))
+    merged_facts = tuple(dict.fromkeys(tuple(primary_facts) + tuple(extended_facts)))
     recovered_fact_count = len(merged_facts) - len(primary_facts)
     evidence = DirectStackMoveExtentEvidence8616(
         raw_fact_count=len(callsite_inventory),
@@ -8031,12 +8930,17 @@ def _direct_stack_move_instruction_facts_for_codegen_8616(
     return merged_facts
 
 
+@cython.ccall
 def _reload_fact_for_mov_insn_8616(
     insn: StructuredAstValue,
-    source_by_slot: dict[tuple[int, int], list[DirectStackMoveFact8616]],
+    source_by_slot: object,
 ) -> DirectStackReloadFact8616 | None:
     """Classify one instruction as a register reload of a materialized slot."""
-    if getattr(insn, "id", None) != X86_INS_MOV:
+    ins_addr: object
+    reg_id: object
+    reg_name: object
+    src_slot: object
+    if operator.ne(getattr(insn, "id", None), X86_INS_MOV):
         return None
     ins_addr = getattr(insn, "address", None)
     if not isinstance(ins_addr, int):
@@ -8045,7 +8949,7 @@ def _reload_fact_for_mov_insn_8616(
     if len(operands) != 2:
         return None
     dst, src = operands
-    if getattr(dst, "type", None) != X86_OP_REG:
+    if operator.ne(getattr(dst, "type", None), X86_OP_REG):
         return None
     src_slot = _stack_mem_operand_offset_width_8616(src)
     if src_slot is None:
@@ -8058,7 +8962,7 @@ def _reload_fact_for_mov_insn_8616(
     if reg_name is None:
         return None
     prior_sources = [
-        fact for fact in source_by_slot.get((source_offset, width), ()) if int(fact.ins_addr) < int(ins_addr)
+        fact for fact in builtins.iter(source_by_slot.get((source_offset, width), ())) if int(fact.ins_addr) < int(ins_addr)
     ]
     if not prior_sources:
         return None
@@ -8077,10 +8981,14 @@ def _reload_fact_for_mov_insn_8616(
 def _direct_stack_reload_instruction_facts_8616(
     project: StructuredAstValue,
     function: StructuredAstValue,
-    materialized_move_facts: tuple[DirectStackMoveFact8616, ...],
+    materialized_move_facts: object,
 ) -> tuple[DirectStackReloadFact8616, ...]:
     """Collect register reloads from previously materialized stack slots."""
-    source_by_slot: dict[tuple[int, int], list[DirectStackMoveFact8616]] = {}
+    fact: object
+    facts: object
+    move_fact: object
+    wrapper: object
+    source_by_slot: dict[tuple[cython.longlong, cython.longlong], list[DirectStackMoveFact8616]] = {}
     for move_fact in materialized_move_facts:
         source_by_slot.setdefault((move_fact.dst_offset, move_fact.width), []).append(move_fact)
     if not source_by_slot:
@@ -8091,7 +8999,7 @@ def _direct_stack_reload_instruction_facts_8616(
 
     blocks = tuple(_direct_global_update_blocks_8616(project, function))
     merged_insns = _dedup_sorted_capstone_insns_by_addr_8616(
-        wrapper for block in blocks for wrapper in _capstone_insns_for_direct_global_update_8616(project, block)
+        wrapper for block in iter(blocks) for wrapper in builtins.iter(_capstone_insns_for_direct_global_update_8616(project, block))
     )
 
     reload_facts: list[DirectStackReloadFact8616] = []
@@ -8102,21 +9010,25 @@ def _direct_stack_reload_instruction_facts_8616(
     return tuple(dict.fromkeys(reload_facts))
 
 
+@cython.ccall
 def _stack_slot_has_intervening_direct_update_8616(
     project: StructuredAstValue,
     function: StructuredAstValue,
     *,
-    offset: int,
-    width: int,
-    start_ins_addr: int,
-    end_ins_addr: int,
-) -> bool:
+    offset: cython.longlong,
+    width: cython.longlong,
+    start_ins_addr: cython.longlong,
+    end_ins_addr: cython.longlong,
+) -> cython.bint:
     """Return whether direct update evidence modifies a stack slot in a range."""
+    update_addr: object
+    update_width: object
+    update_fact: object
     for update_fact in _direct_stack_update_instruction_facts_8616(project, function):
-        if getattr(update_fact, "offset", None) != offset:
+        if operator.ne(getattr(update_fact, "offset", None), offset):
             continue
         update_width = getattr(update_fact, "width", None)
-        if isinstance(update_width, int) and update_width != width:
+        if isinstance(update_width, int) and operator.ne(update_width, width):
             continue
         update_addr = getattr(update_fact, "ins_addr", None)
         if isinstance(update_addr, int) and start_ins_addr < update_addr < end_ins_addr:
@@ -8124,18 +9036,21 @@ def _stack_slot_has_intervening_direct_update_8616(
     return False
 
 
-def _has_direct_global_update_assignment_8616(root: StructuredAstValue, addr: int) -> bool:
+@cython.ccall
+def _has_direct_global_update_assignment_8616(root: StructuredAstValue, addr: cython.longlong) -> cython.bint:
+    stmt: object
     for stmt in _boundary_tuple_8616(getattr(root, "statements", ()) or ()):
         if not isinstance(stmt, structured_c.CAssignment):
             continue
         lhs = _strip_casts_8616(stmt.lhs)
         variable = getattr(lhs, "variable", None) if isinstance(lhs, structured_c.CVariable) else None
-        if isinstance(variable, SimMemoryVariable) and getattr(variable, "addr", None) == addr:
+        if isinstance(variable, SimMemoryVariable) and operator.eq(getattr(variable, "addr", None), addr):
             return True
     return False
 
 
-def _global_cvar_identity_8616(cvar: StructuredAstValue) -> tuple[int, int | None] | None:
+@cython.ccall
+def _global_cvar_identity_8616(cvar: StructuredAstValue) -> object:
     cvar = _strip_casts_8616(cvar)
     if not isinstance(cvar, structured_c.CVariable):
         return None
@@ -8149,7 +9064,9 @@ def _global_cvar_identity_8616(cvar: StructuredAstValue) -> tuple[int, int | Non
     return addr, size if isinstance(size, int) else None
 
 
-def _global_cvar_name_8616(cvar: StructuredAstValue) -> str | None:
+@cython.ccall
+def _global_cvar_name_8616(cvar: StructuredAstValue) -> object:
+    candidate: object
     cvar = _strip_casts_8616(cvar)
     if not isinstance(cvar, structured_c.CVariable):
         return None
@@ -8159,7 +9076,7 @@ def _global_cvar_name_8616(cvar: StructuredAstValue) -> str | None:
     return None
 
 
-def _is_generated_global_name_8616(name: str | None) -> bool:
+def _is_generated_global_name_8616(name: object) -> cython.bint:
     if not isinstance(name, str):
         return False
     stripped = name.lstrip("_")
@@ -8168,10 +9085,14 @@ def _is_generated_global_name_8616(name: str | None) -> bool:
     suffix = stripped[2:]
     if not suffix:
         return False
-    return all(ch in "0123456789abcdefABCDEF" for ch in suffix)
+    return all(ch in "0123456789abcdefABCDEF" for ch in iter(suffix))
 
 
-def _preferred_same_addr_global_name_8616(root: StructuredAstValue, addr: int, width: int, fallback: str) -> str:
+@cython.ccall
+def _preferred_same_addr_global_name_8616(root: StructuredAstValue, addr: cython.longlong, width: cython.longlong, fallback: object) -> object:
+    identity: object
+    node_size: object
+    node: object
     if _valid_c_identifier_8616(fallback) and not _is_generated_global_name_8616(fallback):
         return fallback
     for node in _iter_structured_c_nodes_8616(root):
@@ -8181,9 +9102,9 @@ def _preferred_same_addr_global_name_8616(root: StructuredAstValue, addr: int, w
         if identity is None:
             continue
         node_addr, node_size = identity
-        if (node_addr & 0xFFFF) != (addr & 0xFFFF):
+        if operator.ne((node_addr & 0xFFFF), (addr & 0xFFFF)):
             continue
-        if node_size is not None and node_size != width:
+        if node_size is not None and operator.ne(node_size, width):
             continue
         name = _global_cvar_name_8616(node)
         if isinstance(name, str) and _valid_c_identifier_8616(name) and not _is_generated_global_name_8616(name):
@@ -8191,9 +9112,14 @@ def _preferred_same_addr_global_name_8616(root: StructuredAstValue, addr: int, w
     return fallback
 
 
+@cython.ccall
 def _rename_generated_same_addr_global_cvars_8616(
-    root: StructuredAstValue, addr: int, width: int, preferred_name: str
-) -> int:
+    root: StructuredAstValue, addr: cython.longlong, width: cython.longlong, preferred_name: object
+) -> cython.longlong:
+    identity: object
+    node_size: object
+    unified: object
+    node: object
     if not _valid_c_identifier_8616(preferred_name) or _is_generated_global_name_8616(preferred_name):
         return 0
     renamed = 0
@@ -8204,9 +9130,9 @@ def _rename_generated_same_addr_global_cvars_8616(
         if identity is None:
             continue
         node_addr, node_size = identity
-        if (node_addr & 0xFFFF) != (addr & 0xFFFF):
+        if operator.ne((node_addr & 0xFFFF), (addr & 0xFFFF)):
             continue
-        if node_size is not None and node_size != width:
+        if node_size is not None and operator.ne(node_size, width):
             continue
         current_name = _global_cvar_name_8616(node)
         if current_name == preferred_name or not _is_generated_global_name_8616(current_name):
@@ -8221,19 +9147,25 @@ def _rename_generated_same_addr_global_cvars_8616(
     return renamed
 
 
-def _same_global_cvar_8616(lhs: StructuredAstValue, rhs: StructuredAstValue) -> bool:
+@cython.ccall
+def _same_global_cvar_8616(lhs: StructuredAstValue, rhs: StructuredAstValue) -> cython.bint:
+    lhs_id: object
+    lhs_size: object
+    rhs_id: object
+    rhs_size: object
     lhs_id = _global_cvar_identity_8616(lhs)
     rhs_id = _global_cvar_identity_8616(rhs)
     if lhs_id is None or rhs_id is None:
         return False
     lhs_addr, lhs_size = lhs_id
     rhs_addr, rhs_size = rhs_id
-    if (lhs_addr & 0xFFFF) != (rhs_addr & 0xFFFF):
+    if operator.ne((lhs_addr & 0xFFFF), (rhs_addr & 0xFFFF)):
         return False
-    return lhs_size is None or rhs_size is None or lhs_size == rhs_size
+    return lhs_size is None or rhs_size is None or operator.eq(lhs_size, rhs_size)
 
 
-def _is_same_global_update_assignment_8616(stmt: StructuredAstValue, dst_cvar: StructuredAstValue, delta: int) -> bool:
+@cython.ccall
+def _is_same_global_update_assignment_8616(stmt: StructuredAstValue, dst_cvar: StructuredAstValue, delta: cython.longlong) -> cython.bint:
     if not isinstance(stmt, structured_c.CAssignment):
         return False
     if not _same_global_cvar_8616(stmt.lhs, dst_cvar):
@@ -8242,30 +9174,34 @@ def _is_same_global_update_assignment_8616(stmt: StructuredAstValue, dst_cvar: S
     if not isinstance(rhs, structured_c.CBinaryOp):
         return False
     expected_op = "Add" if delta > 0 else "Sub"
-    if rhs.op != expected_op:
+    if operator.ne(rhs.op, expected_op):
         return False
     if not _same_global_cvar_8616(rhs.lhs, dst_cvar):
         return False
     rhs_const = _strip_casts_8616(rhs.rhs)
-    return isinstance(rhs_const, structured_c.CConstant) and getattr(rhs_const, "value", None) == abs(int(delta))
+    return isinstance(rhs_const, structured_c.CConstant) and operator.eq(getattr(rhs_const, "value", None), abs(int(delta)))
 
 
 def _list_has_global_update_assignment_8616(
-    statements: list[StructuredAstValue], dst_cvar: StructuredAstValue, delta: int
-) -> bool:
-    return any(_is_same_global_update_assignment_8616(stmt, dst_cvar, delta) for stmt in statements)
+    statements: object, dst_cvar: StructuredAstValue, delta: cython.longlong
+) -> cython.bint:
+    return any(_is_same_global_update_assignment_8616(stmt, dst_cvar, delta) for stmt in iter(statements))
 
 
-def _tree_has_global_update_assignment_8616(root: StructuredAstValue, dst_cvar: StructuredAstValue, delta: int) -> bool:
+@cython.ccall
+def _tree_has_global_update_assignment_8616(root: StructuredAstValue, dst_cvar: StructuredAstValue, delta: cython.longlong) -> cython.bint:
+    node: object
     for node in _iter_structured_c_nodes_8616(root):
         if _is_same_global_update_assignment_8616(node, dst_cvar, delta):
             return True
     return False
 
 
+@cython.ccall
 def _tree_has_global_update_assignment_for_insn_8616(
-    root: StructuredAstValue, project: AngrProjectValue, dst_cvar: StructuredAstValue, delta: int, ins_addr: int
-) -> bool:
+    root: StructuredAstValue, project: AngrProjectValue, dst_cvar: StructuredAstValue, delta: cython.longlong, ins_addr: cython.longlong
+) -> cython.bint:
+    node: object
     for node in _iter_structured_c_nodes_8616(root):
         if not _node_has_instruction_address_8616(node, project, ins_addr):
             continue
@@ -8274,15 +9210,17 @@ def _tree_has_global_update_assignment_for_insn_8616(
     return False
 
 
+@cython.ccall
 def _tree_has_covering_dword_update_assignment_for_insn_8616(
     root: StructuredAstValue,
     project: AngrProjectValue,
     *,
-    addr: int,
-    delta: int,
-    ins_addr: int,
-) -> bool:
+    addr: cython.longlong,
+    delta: cython.longlong,
+    ins_addr: cython.longlong,
+) -> cython.bint:
     """Find an exact tagged dword update covering one proven low-word update."""
+    node: object
     expected_op = "Add" if delta > 0 else "Sub"
     for node in _iter_structured_c_nodes_8616(root):
         if not isinstance(node, structured_c.CAssignment):
@@ -8293,22 +9231,25 @@ def _tree_has_covering_dword_update_assignment_for_insn_8616(
         if lhs_identity != (addr & 0xFFFF, 4):
             continue
         rhs = _strip_casts_8616(node.rhs)
-        if not isinstance(rhs, structured_c.CBinaryOp) or rhs.op != expected_op:
+        if not isinstance(rhs, structured_c.CBinaryOp) or operator.ne(rhs.op, expected_op):
             continue
         rhs_identity = _global_cvar_identity_8616(_strip_casts_8616(rhs.lhs))
         rhs_delta = _strip_casts_8616(rhs.rhs)
         if (
             rhs_identity == lhs_identity
             and isinstance(rhs_delta, structured_c.CConstant)
-            and rhs_delta.value == abs(int(delta))
+            and operator.eq(rhs_delta.value, abs(int(delta)))
         ):
             return True
     return False
 
 
+@cython.ccall
 def _tree_has_untagged_global_update_assignment_8616(
-    root: StructuredAstValue, dst_cvar: StructuredAstValue, delta: int
-) -> bool:
+    root: StructuredAstValue, dst_cvar: StructuredAstValue, delta: cython.longlong
+) -> cython.bint:
+    tags: object
+    node: object
     for node in _iter_structured_c_nodes_8616(root):
         tags = copy_structured_tags_8616(getattr(node, "tags", None))
         if tags is not None and isinstance(tags.get("ins_addr"), int):
@@ -8318,13 +9259,15 @@ def _tree_has_untagged_global_update_assignment_8616(
     return False
 
 
+@cython.ccall
 def _list_has_global_update_assignment_for_insn_8616(
-    statements: list[StructuredAstValue],
+    statements: object,
     project: AngrProjectValue,
     dst_cvar: StructuredAstValue,
-    delta: int,
-    ins_addr: int,
-) -> bool:
+    delta: cython.longlong,
+    ins_addr: cython.longlong,
+) -> cython.bint:
+    stmt: object
     for stmt in statements:
         if not _node_has_instruction_address_8616(stmt, project, ins_addr):
             continue
@@ -8333,14 +9276,15 @@ def _list_has_global_update_assignment_for_insn_8616(
     return False
 
 
+@cython.ccall
 def _insertion_point_has_global_update_assignment_8616(
-    statements: list[StructuredAstValue],
-    insert_index: int,
+    statements: object,
+    insert_index: cython.longlong,
     project: AngrProjectValue,
     dst_cvar: StructuredAstValue,
-    delta: int,
-    ins_addr: int,
-) -> bool:
+    delta: cython.longlong,
+    ins_addr: cython.longlong,
+) -> cython.bint:
     if insert_index > 0:
         previous_assignment = _last_transparent_assignment_8616(statements[insert_index - 1])
         if _node_has_instruction_address_8616(
@@ -8356,7 +9300,9 @@ def _insertion_point_has_global_update_assignment_8616(
     return False
 
 
-def _candidate_ins_addrs_8616(project: AngrProjectValue, ins_addr: int) -> frozenset[int]:
+@cython.ccall
+def _candidate_ins_addrs_8616(project: AngrProjectValue, ins_addr: cython.longlong) -> frozenset[cython.longlong]:
+    delta: object
     candidates = {ins_addr}
     delta = getattr(project, "_inertia_original_linear_delta", None)
     if isinstance(delta, int) and delta:
@@ -8368,8 +9314,8 @@ def _candidate_ins_addrs_8616(project: AngrProjectValue, ins_addr: int) -> froze
 def _candidate_function_ins_addrs_8616(
     project: AngrProjectValue,
     function: StructuredAstValue,
-    ins_addr: int,
-) -> frozenset[int]:
+    ins_addr: cython.longlong,
+) -> object:
     """Return address candidates proven to belong to the current function.
 
     Equality matching may consider translated and original address domains.
@@ -8378,14 +9324,15 @@ def _candidate_function_ins_addrs_8616(
     """
     decoded_addrs = frozenset(
         address
-        for insn in _direct_global_update_ordered_insns_8616(project, function)
+        for insn in builtins.iter(_direct_global_update_ordered_insns_8616(project, function))
         if isinstance(address := getattr(insn, "address", None), int)
     )
     return _candidate_ins_addrs_8616(project, ins_addr) & decoded_addrs
 
 
-def _node_has_instruction_address_8616(node: StructuredAstValue, project: AngrProjectValue, ins_addr: int) -> bool:
+def _node_has_instruction_address_8616(node: StructuredAstValue, project: AngrProjectValue, ins_addr: cython.longlong) -> cython.bint:
     """Return whether a C node carries the instruction's current or relocated origin tag."""
+    tags: object
     try:
         tags = copy_structured_tags_8616(node.tags)
     except AttributeError:
@@ -8395,24 +9342,25 @@ def _node_has_instruction_address_8616(node: StructuredAstValue, project: AngrPr
     candidate_addrs = _candidate_ins_addrs_8616(project, ins_addr)
     return any(
         isinstance(tagged_addr, int) and tagged_addr in candidate_addrs
-        for tagged_addr in (
+        for tagged_addr in iter((
             tags.get("ins_addr"),
             tags.get("inertia_relocated_from_ins_addr"),
-        )
+        ))
     )
 
 
-def _valid_c_identifier_8616(name: StructuredAstValue) -> bool:
+def _valid_c_identifier_8616(name: StructuredAstValue) -> cython.bint:
     if not isinstance(name, str) or not name:
         return False
     first = name[0]
     if not (first == "_" or first.isalpha()):
         return False
-    return all(ch == "_" or ch.isalnum() for ch in name)
+    return all(ch == "_" or ch.isalnum() for ch in iter(name))
 
 
+@cython.ccall
 def _ensure_stack_cvar_has_identifier_8616(
-    codegen: StructuredCodegenValue, cvar: StructuredAstValue, offset: int
+    codegen: StructuredCodegenValue, cvar: StructuredAstValue, offset: cython.longlong
 ) -> None:
     """Ensure a concrete angr stack CVariable has a valid owned identifier."""
     if not isinstance(cvar, structured_c.CVariable):
@@ -8438,7 +9386,8 @@ def _ensure_stack_cvar_has_identifier_8616(
         unified.name = preferred_name
 
 
-def _is_generated_stack_cvar_name_8616(name: StructuredAstValue) -> bool:
+@cython.ccall
+def _is_generated_stack_cvar_name_8616(name: StructuredAstValue) -> cython.bint:
     if not isinstance(name, str) or not name:
         return True
     return bool(re.fullmatch(r"(?:local|arg|stack|s)_[0-9a-fA-F]+", name))
@@ -8449,7 +9398,7 @@ def _apply_annotation_name_to_stack_cvar_8616(
     cvar: StructuredAstValue,
     variable_hint: StructuredAstValue | None,
     known_bindings: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Reconcile one stack cvar's name against proven storage identity."""
     if not isinstance(cvar, structured_c.CVariable):
         return False
@@ -8491,19 +9440,19 @@ def _apply_annotation_name_to_stack_cvar_8616(
         )
         and _valid_c_identifier_8616(name)
         and not _is_generated_stack_cvar_name_8616(name)
-        for name in current_names
+        for name in iter(current_names)
     )
     has_owned_name = any(
-        _valid_c_identifier_8616(name) and not _is_generated_stack_cvar_name_8616(name) for name in current_names
+        _valid_c_identifier_8616(name) and not _is_generated_stack_cvar_name_8616(name) for name in iter(current_names)
     )
     if has_owned_name and not inherited_container_name:
         return False
     if preferred_name == default_name and not inherited_container_name:
         return False
     before = current_names
-    if variable.name != preferred_name:
+    if operator.ne(variable.name, preferred_name):
         variable.name = preferred_name
-    if isinstance(unified, SimVariable) and unified.name != preferred_name:
+    if isinstance(unified, SimVariable) and operator.ne(unified.name, preferred_name):
         unified.name = preferred_name
     after = (
         variable.name,
@@ -8513,11 +9462,16 @@ def _apply_annotation_name_to_stack_cvar_8616(
     return after != before
 
 
-def _apply_annotation_names_to_existing_stack_cvars_8616(codegen: StructuredAstValue) -> bool:
+@cython.ccall
+def _apply_annotation_names_to_existing_stack_cvars_8616(codegen: StructuredAstValue) -> cython.bint:
     """Reconcile inert metadata names with proven stack storage identities."""
+    root: object
+    cvar: object
+    node: object
+    variable: object
     cfunc = codegen.cfunc
     changed = False
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     known_bindings = _stack_bindings_from_codegen_8616(codegen)
 
     try:
@@ -8544,18 +9498,26 @@ def _apply_annotation_names_to_existing_stack_cvars_8616(codegen: StructuredAstV
     return changed
 
 
-def _stack_cvar_size_matches_8616(node_size: StructuredAstValue, target_size: StructuredAstValue) -> bool:
+@cython.ccall
+def _stack_cvar_size_matches_8616(node_size: object, target_size: object) -> cython.bint:
     """Check size compatibility for stack-cvar usage counting."""
     return (
         target_size is None
         or node_size is None
-        or node_size == target_size
+        or operator.eq(node_size, target_size)
         or (isinstance(node_size, int) and isinstance(target_size, int) and node_size >= target_size)
     )
 
 
-def _stack_cvar_ast_usage_count_8616(codegen: StructuredAstValue, cvar: StructuredAstValue) -> int:
+@cython.ccall
+def _stack_cvar_ast_usage_count_8616(codegen: StructuredAstValue, cvar: StructuredAstValue) -> cython.longlong:
     """Count uses of a stack C variable in the current AST."""
+    cache: object
+    cached: object
+    node_id: object
+    root: object
+    target_id: object
+    node: object
     target_id = _stack_cvar_identity_8616(cvar)
     if target_id is None:
         return 0
@@ -8586,7 +9548,9 @@ def _stack_cvar_ast_usage_count_8616(codegen: StructuredAstValue, cvar: Structur
     return count
 
 
-def _stack_cvar_matches_offset_width_8616(cvar: StructuredAstValue, offset: int, width: int) -> bool:
+@cython.ccall
+def _stack_cvar_matches_offset_width_8616(cvar: StructuredAstValue, offset: cython.longlong, width: cython.longlong) -> cython.bint:
+    stack_id: object
     stack_id = _stack_cvar_identity_8616(cvar)
     if stack_id is None:
         return False
@@ -8596,14 +9560,16 @@ def _stack_cvar_matches_offset_width_8616(cvar: StructuredAstValue, offset: int,
     return not isinstance(stack_size, int) or stack_size <= 0 or stack_size >= width
 
 
+@cython.ccall
 def _stack_variable_min_width_ok_8616(
     codegen: StructuredAstValue,
     cvar: StructuredAstValue,
     variable: StructuredAstValue,
     offset: StructuredAstValue,
-    width: int,
-) -> bool:
+    width: cython.longlong,
+) -> cython.bint:
     """Fix the backing SimStackVariable size and prototype type; True when done."""
+    prototype_type: object
     size = variable.size
     if not isinstance(size, int) or size < width:
         with contextlib.suppress(Exception):
@@ -8612,11 +9578,12 @@ def _stack_variable_min_width_ok_8616(
     if prototype_type is None or _type_size_bytes_8616(prototype_type, default=0) < width:
         return False
     bound_type = _bind_type_to_codegen_arch_8616(codegen, prototype_type)
-    if getattr(cvar, "variable_type", None) != bound_type:
+    if operator.ne(getattr(cvar, "variable_type", None), bound_type):
         cvar.variable_type = bound_type
     return True
 
 
+@cython.ccall
 def _prune_bp_alias_keys_8616(
     codegen: StructuredAstValue,
     mapping: StructuredAstValue,
@@ -8624,6 +9591,7 @@ def _prune_bp_alias_keys_8616(
     offset: StructuredAstValue,
 ) -> None:
     """Remove stale same-offset BP stack variables from a cvar mapping."""
+    existing: object
     if not isinstance(mapping, dict) or not isinstance(offset, int):
         return
     for existing in tuple(mapping):
@@ -8631,12 +9599,17 @@ def _prune_bp_alias_keys_8616(
             continue
         if getattr(existing, "base", None) != "bp":
             continue
-        if _canonical_stack_offset_8616(machine_bp_offset_for_stack_variable_8616(codegen, existing)) == offset:
+        if operator.eq(_canonical_stack_offset_8616(machine_bp_offset_for_stack_variable_8616(codegen, existing)), offset):
             del mapping[existing]
 
 
-def _ensure_stack_cvar_min_width_8616(codegen: StructuredAstValue, cvar: StructuredAstValue, width: int) -> None:
+@cython.ccall
+def _ensure_stack_cvar_min_width_8616(codegen: StructuredAstValue, cvar: StructuredAstValue, width: cython.longlong) -> None:
     """Ensure a stack C variable is wide enough for a materialized fact."""
+    cfunc: object
+    unified: object
+    variable: object
+    variables_in_use: object
     if not isinstance(cvar, structured_c.CVariable) or width <= 0:
         return
     variable = getattr(cvar, "variable", None)
@@ -8665,42 +9638,50 @@ def _ensure_stack_cvar_min_width_8616(codegen: StructuredAstValue, cvar: Structu
         unified[variable] = {(cvar, getattr(cvar, "variable_type", None))}
 
 
+@cython.ccall
 def _stack_update_cvar_candidates_from_registry_8616(
     codegen: StructuredAstValue,
-    offset: int,
-    width: int,
-    seen_candidate_ids: set[int],
-    candidates: list[tuple[int, int, StructuredAstValue]],
+    offset: cython.longlong,
+    width: cython.longlong,
+    seen_candidate_ids: object,
+    candidates: object,
 ) -> None:
     """Collect same-offset/width cvar candidates from variables_in_use."""
+    size: object
+    variables_in_use: object
+    cvar: object
+    variable: object
     variables_in_use = getattr(getattr(codegen, "cfunc", None), "variables_in_use", None)
     if not isinstance(variables_in_use, dict):
         return
     for variable, cvar in tuple(variables_in_use.items()):
         if not isinstance(variable, SimStackVariable) or getattr(variable, "base", None) != "bp":
             continue
-        if _canonical_stack_offset_8616(machine_bp_offset_for_stack_variable_8616(codegen, variable)) != offset:
+        if operator.ne(_canonical_stack_offset_8616(machine_bp_offset_for_stack_variable_8616(codegen, variable)), offset):
             continue
         size = getattr(variable, "size", None)
-        if not isinstance(size, int) or size != width:
+        if not isinstance(size, int) or operator.ne(size, width):
             continue
         if isinstance(cvar, structured_c.CVariable):
             _apply_preferred_stack_cvar_name_8616(cvar, offset, codegen)
             _ensure_stack_cvar_has_identifier_8616(codegen, cvar, offset)
             usage_count = _stack_cvar_ast_usage_count_8616(codegen, cvar)
-            exact_size = int(isinstance(size, int) and size == width)
+            exact_size = int(isinstance(size, int) and operator.eq(size, width))
             seen_candidate_ids.add(id(cvar))
             candidates.append((usage_count, exact_size, cvar))
 
 
+@cython.ccall
 def _stack_update_cvar_candidates_from_ast_8616(
     codegen: StructuredAstValue,
-    offset: int,
-    width: int,
-    seen_candidate_ids: set[int],
-    candidates: list[tuple[int, int, StructuredAstValue]],
+    offset: cython.longlong,
+    width: cython.longlong,
+    seen_candidate_ids: object,
+    candidates: object,
 ) -> None:
     """Collect same-offset/width cvar candidates still present in the AST."""
+    root: object
+    node: object
     root = getattr(getattr(codegen, "cfunc", None), "statements", None)
     if root is None:
         return
@@ -8712,7 +9693,7 @@ def _stack_update_cvar_candidates_from_ast_8616(
             continue
         stack_size = variable.size
         bp_offset = machine_bp_offset_for_stack_variable_8616(codegen, variable)
-        if _canonical_stack_offset_8616(bp_offset) != offset or stack_size != width:
+        if operator.ne(_canonical_stack_offset_8616(bp_offset), offset) or stack_size != width:
             continue
         _apply_preferred_stack_cvar_name_8616(node, offset, codegen)
         _ensure_stack_cvar_has_identifier_8616(codegen, node, offset)
@@ -8722,8 +9703,9 @@ def _stack_update_cvar_candidates_from_ast_8616(
         candidates.append((usage_count, exact_size, node))
 
 
+@cython.ccall
 def _materialize_stack_update_cvar_8616(
-    codegen: StructuredAstValue, offset: int, width: int
+    codegen: StructuredAstValue, offset: cython.longlong, width: cython.longlong
 ) -> StructuredAstValue | None:
     """Materialize a stack cvar from facts when no live candidate exists."""
     entry_sp_offset = entry_sp_offset_for_machine_bp_range_8616(
@@ -8751,17 +9733,19 @@ def _materialize_stack_update_cvar_8616(
 
 
 def _resolve_direct_stack_update_cvar_8616(
-    codegen: StructuredAstValue, offset: int, width: int
+    codegen: StructuredAstValue, offset: cython.longlong, width: cython.longlong
 ) -> StructuredAstValue | None:
     """Resolve a stack update through the active registry, including old AST clones."""
+    unified: object
+    variables_in_use: object
     projected = stack_cvar_for_machine_bp_range_8616(codegen, offset, width)
     if isinstance(projected, structured_c.CVariable):
         _apply_preferred_stack_cvar_name_8616(projected, offset, codegen)
         _ensure_stack_cvar_has_identifier_8616(codegen, projected, offset)
         _ensure_stack_cvar_min_width_8616(codegen, projected, width)
         return projected
-    candidates: list[tuple[int, int, StructuredAstValue]] = []
-    seen_candidate_ids: set[int] = set()
+    candidates: list[tuple[cython.longlong, cython.longlong, StructuredAstValue]] = []
+    seen_candidate_ids: set[cython.longlong] = set()
     _stack_update_cvar_candidates_from_registry_8616(codegen, offset, width, seen_candidate_ids, candidates)
     _stack_update_cvar_candidates_from_ast_8616(codegen, offset, width, seen_candidate_ids, candidates)
     if candidates:
@@ -8800,15 +9784,16 @@ def _resolve_direct_stack_update_cvar_8616(
     return cvar
 
 
+@cython.ccall
 def _record_stack_owner_candidate_8616(
     codegen: StructuredAstValue,
-    offset: int,
-    width: int,
-    require_wider_owner: bool,
+    offset: cython.longlong,
+    width: cython.longlong,
+    require_wider_owner: cython.bint,
     candidate: StructuredAstValue,
     stack_size: StructuredAstValue,
-    seen_candidate_ids: set[int],
-    candidates: list[tuple[int, int, int, StructuredAstValue]],
+    seen_candidate_ids: object,
+    candidates: object,
 ) -> None:
     """Score and record one same-base owner cvar candidate."""
     if not isinstance(candidate, structured_c.CVariable) or not isinstance(stack_size, int):
@@ -8830,22 +9815,29 @@ def _record_stack_owner_candidate_8616(
     )
 
 
+@cython.ccall
 def _stack_owner_candidates_8616(
     codegen: StructuredAstValue,
-    offset: int,
-    width: int,
-    require_wider_owner: bool,
-) -> list[tuple[int, int, int, StructuredAstValue]]:
+    offset: cython.longlong,
+    width: cython.longlong,
+    require_wider_owner: cython.bint,
+) -> object:
     """Collect ranked owner candidates from the registry and the live AST."""
-    candidates: list[tuple[int, int, int, StructuredAstValue]] = []
-    seen_candidate_ids: set[int] = set()
+    root: object
+    stack_identity: object
+    variables_in_use: object
+    cvar: object
+    node: object
+    variable: object
+    candidates: list[tuple[cython.longlong, cython.longlong, cython.longlong, StructuredAstValue]] = []
+    seen_candidate_ids: set[cython.longlong] = set()
 
     variables_in_use = getattr(getattr(codegen, "cfunc", None), "variables_in_use", None)
     if isinstance(variables_in_use, dict):
         for variable, cvar in tuple(variables_in_use.items()):
             if not isinstance(variable, SimStackVariable) or variable.base != "bp":
                 continue
-            if _canonical_stack_offset_8616(machine_bp_offset_for_stack_variable_8616(codegen, variable)) != offset:
+            if operator.ne(_canonical_stack_offset_8616(machine_bp_offset_for_stack_variable_8616(codegen, variable)), offset):
                 continue
             _record_stack_owner_candidate_8616(
                 codegen, offset, width, require_wider_owner,
@@ -8858,7 +9850,7 @@ def _stack_owner_candidates_8616(
             if not isinstance(node, structured_c.CVariable):
                 continue
             stack_identity = _stack_cvar_identity_8616(node)
-            if stack_identity is None or stack_identity[0] != offset:
+            if stack_identity is None or operator.ne(stack_identity[0], offset):
                 continue
             _record_stack_owner_candidate_8616(
                 codegen, offset, width, require_wider_owner,
@@ -8869,10 +9861,10 @@ def _stack_owner_candidates_8616(
 
 def _resolve_existing_direct_stack_owner_cvar_8616(
     codegen: StructuredAstValue,
-    offset: int,
-    width: int,
+    offset: cython.longlong,
+    width: cython.longlong,
     *,
-    require_wider_owner: bool = False,
+    require_wider_owner: cython.bint = False,
 ) -> StructuredAstValue | None:
     """Resolve an existing stack object that owns a same-base access range."""
     candidates = _stack_owner_candidates_8616(codegen, offset, width, require_wider_owner)
@@ -8882,12 +9874,14 @@ def _resolve_existing_direct_stack_owner_cvar_8616(
     return candidates[0][3]
 
 
+@cython.ccall
 def _resolve_direct_stack_read_cvar_8616(
     codegen: StructuredAstValue,
-    offset: int,
-    width: int,
+    offset: cython.longlong,
+    width: cython.longlong,
 ) -> StructuredAstValue | None:
     """Resolve an exact stack read or its existing same-base storage owner."""
+    owner: object
     projected = stack_cvar_for_machine_bp_range_8616(codegen, offset, width)
     if isinstance(projected, structured_c.CVariable):
         return projected
@@ -8897,11 +9891,15 @@ def _resolve_direct_stack_read_cvar_8616(
     return _resolve_direct_stack_update_cvar_8616(codegen, offset, width)
 
 
+@cython.ccall
 def _direct_stack_update_source_expr_8616(
     codegen: StructuredCodegenValue, fact: DirectStackUpdateFact8616
 ) -> StructuredAstValue:
+    base: object
+    index: object
+    source_expr: object
     target_type = _bind_type_to_codegen_arch_8616(codegen, _type_for_access_width_8616(fact.width))
-    source_expr: StructuredAstValue = None
+    source_expr = None
     if fact.source_kind is DirectStackUpdateSourceKind8616.IMMEDIATE:
         value = fact.source_value if isinstance(fact.source_value, int) else abs(int(fact.delta))
         source_expr = structured_c.CConstant(abs(int(value)), target_type, codegen=codegen)
@@ -8912,7 +9910,7 @@ def _direct_stack_update_source_expr_8616(
     elif fact.source_kind is DirectStackUpdateSourceKind8616.INDEXED_POINTER:
         if not isinstance(fact.source_base_offset, int) or not isinstance(fact.source_index_offset, int):
             return None
-        if fact.source_index_scale != fact.width:
+        if operator.ne(fact.source_index_scale, fact.width):
             return None
         base = _resolve_direct_stack_update_cvar_8616(codegen, fact.source_base_offset, 2)
         index = _resolve_direct_stack_update_cvar_8616(codegen, fact.source_index_offset, 2)
@@ -8943,7 +9941,8 @@ def _direct_stack_update_source_expr_8616(
     return source_expr
 
 
-def _direct_stack_update_op_name_8616(operation: DirectStackUpdateOp8616, delta: int) -> str:
+@cython.ccall
+def _direct_stack_update_op_name_8616(operation: DirectStackUpdateOp8616, delta: cython.longlong) -> object:
     """Map one typed direct-stack operation to its structured-C binary operator."""
     if operation is DirectStackUpdateOp8616.OR:
         return "Or"
@@ -8954,11 +9953,12 @@ def _direct_stack_update_op_name_8616(operation: DirectStackUpdateOp8616, delta:
     return "Add" if delta > 0 else "Sub"
 
 
+@cython.ccall
 def _direct_stack_update_assignment_8616(
     codegen: StructuredCodegenValue,
     cvar: StructuredAstValue,
-    width: int,
-    delta: int,
+    width: cython.longlong,
+    delta: cython.longlong,
     tags: StructuredAstValue = None,
     source_expr: StructuredAstValue = None,
     operation: DirectStackUpdateOp8616 = DirectStackUpdateOp8616.ARITHMETIC,
@@ -8979,13 +9979,14 @@ def _direct_stack_update_assignment_8616(
     return structured_c.CAssignment(cvar, rhs, codegen=codegen, tags=tags)
 
 
+@cython.ccall
 def _is_same_stack_update_assignment_8616(
     stmt: StructuredAstValue,
     cvar: StructuredAstValue,
-    delta: int,
+    delta: cython.longlong,
     source_expr: StructuredAstValue,
     operation: DirectStackUpdateOp8616 = DirectStackUpdateOp8616.ARITHMETIC,
-) -> bool:
+) -> cython.bint:
     if not isinstance(stmt, structured_c.CAssignment):
         return False
     if not _same_stack_cvar_8616(stmt.lhs, cvar):
@@ -8994,7 +9995,7 @@ def _is_same_stack_update_assignment_8616(
     if not isinstance(rhs, structured_c.CBinaryOp):
         return False
     op_name = _direct_stack_update_op_name_8616(operation, delta)
-    if rhs.op != op_name:
+    if operator.ne(rhs.op, op_name):
         return False
     if not _same_stack_cvar_8616(rhs.lhs, cvar):
         return False
@@ -9003,12 +10004,15 @@ def _is_same_stack_update_assignment_8616(
 
 def _rendered_stack_update_assignment_ids_8616(
     nodes: Iterable[StructuredAstValue],
-) -> frozenset[int]:
+) -> frozenset[cython.longlong]:
     """Index updates occupying structured-C positions rendered as code."""
-    rendered_ids: set[int] = set()
+    assignment: object
+    attr: object
+    owner: object
+    rendered_ids: set[cython.longlong] = set()
     for owner in nodes:
         if isinstance(owner, structured_c.CStatements):
-            rendered_ids.update(id(statement) for statement in tuple(owner.statements or ()))
+            rendered_ids.update(id(statement) for statement in builtins.iter(tuple(owner.statements or ())))
             continue
         if not isinstance(owner, structured_c.CForLoop):
             continue
@@ -9020,6 +10024,7 @@ def _rendered_stack_update_assignment_ids_8616(
     return frozenset(rendered_ids)
 
 
+@cython.ccall
 def _has_existing_stack_update_assignment_8616(
     root: StructuredAstValue,
     project: StructuredAstValue,
@@ -9027,12 +10032,13 @@ def _has_existing_stack_update_assignment_8616(
     cvar: StructuredAstValue,
     source_expr: StructuredAstValue,
     *,
-    expected_semantic_count: int,
+    expected_semantic_count: cython.longlong,
     query_index: StructuredAstQueryIndex8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """Return whether structured C has an exact update or the proven group count."""
-    matching_assignment_ids: set[int] = set()
-    tagged_destination_ids: set[int] = set()
+    node: object
+    matching_assignment_ids: set[cython.longlong] = set()
+    tagged_destination_ids: set[cython.longlong] = set()
     tagged_match = False
     if query_index is not None:
         query_index.require_root(root)
@@ -9045,7 +10051,7 @@ def _has_existing_stack_update_assignment_8616(
     for node in nodes:
         if (
             isinstance(node, structured_c.CAssignment)
-            and _assignment_lhs_stack_offset_8616(node) == fact.offset
+            and operator.eq(_assignment_lhs_stack_offset_8616(node), fact.offset)
             and id(node) in rendered_assignment_ids
             and _node_has_instruction_address_8616(node, project, fact.ins_addr)
         ):
@@ -9065,18 +10071,22 @@ def _has_existing_stack_update_assignment_8616(
             tagged_match = True
     if tagged_match:
         return len(tagged_destination_ids) == 1
-    return len(matching_assignment_ids) == expected_semantic_count
+    return operator.eq(len(matching_assignment_ids), expected_semantic_count)
 
 
+@cython.ccall
 def _same_direct_stack_update_semantics_8616(
     lhs: DirectStackUpdateFact8616,
     rhs: DirectStackUpdateFact8616,
-) -> bool:
+) -> cython.bint:
     """Compare direct stack-update facts while excluding instruction identity."""
-    return replace(lhs, ins_addr=rhs.ins_addr) == rhs
+    return operator.eq(replace(lhs, ins_addr=rhs.ins_addr), rhs)
 
 
-def _function_call_name_8616(expr: StructuredAstValue) -> str | None:
+@cython.ccall
+def _function_call_name_8616(expr: StructuredAstValue) -> object:
+    callee_func: object
+    candidate: object
     expr = _strip_casts_8616(expr)
     if not isinstance(expr, structured_c.CFunctionCall):
         return None
@@ -9087,8 +10097,10 @@ def _function_call_name_8616(expr: StructuredAstValue) -> str | None:
     return None
 
 
+@cython.ccall
 def _function_call_target_addr_8616(expr: StructuredAstValue) -> int | None:
     """Return a binary target address from one structured call expression."""
+    callee_addr: object
     expr = _strip_casts_8616(expr)
     if not isinstance(expr, structured_c.CFunctionCall):
         return None
@@ -9105,12 +10117,14 @@ def _function_call_target_addr_8616(expr: StructuredAstValue) -> int | None:
     return callee_addr if isinstance(callee_addr, int) else None
 
 
+@cython.ccall
 def _function_call_target_matches_8616(
     expr: StructuredAstValue,
     project: StructuredAstValue,
     expected_target: int | None,
-) -> bool:
+) -> cython.bint:
     """Match original and exact-slice addresses for one binary call target."""
+    original_delta: object
     if not isinstance(expected_target, int):
         return False
     observed_target = _function_call_target_addr_8616(expr)
@@ -9129,12 +10143,15 @@ def _function_call_target_matches_8616(
     return observed_target in expected_variants
 
 
-def _expr_contains_function_call_8616(expr: StructuredAstValue) -> bool:
+def _expr_contains_function_call_8616(expr: StructuredAstValue) -> cython.bint:
     """Return whether a structured-C expression contains a function call."""
-    return any(isinstance(node, structured_c.CFunctionCall) for node in _iter_structured_c_nodes_8616(expr))
+    return any(isinstance(node, structured_c.CFunctionCall) for node in builtins.iter(_iter_structured_c_nodes_8616(expr)))
 
 
+@cython.ccall
 def _structured_c_intrinsic_8616(expr: StructuredAstValue) -> StructuredCIntrinsic8616 | None:
+    name: object
+    candidate: object
     expr = _strip_casts_8616(expr)
     if not isinstance(expr, structured_c.CFunctionCall):
         return None
@@ -9148,23 +10165,24 @@ def _structured_c_intrinsic_8616(expr: StructuredAstValue) -> StructuredCIntrins
         if not isinstance(name, str) or not name:
             continue
         normalized = name.rsplit(".", 1)[-1].lstrip("_")
-        if normalized == StructuredCIntrinsic8616.INSERT.value:
+        if operator.eq(normalized, StructuredCIntrinsic8616.INSERT.value):
             return StructuredCIntrinsic8616.INSERT
     return None
 
 
-def _expr_has_structured_c_intrinsic_8616(expr: StructuredAstValue, intrinsic: StructuredCIntrinsic8616) -> bool:
-    return any(_structured_c_intrinsic_8616(node) is intrinsic for node in _iter_structured_c_nodes_8616(expr))
+def _expr_has_structured_c_intrinsic_8616(expr: StructuredAstValue, intrinsic: StructuredCIntrinsic8616) -> cython.bint:
+    return any(_structured_c_intrinsic_8616(node) is intrinsic for node in builtins.iter(_iter_structured_c_nodes_8616(expr)))
 
 
-def _expr_has_binary_op_8616(expr: StructuredAstValue, op: DirectStackMoveExpressionOp8616) -> bool:
+def _expr_has_binary_op_8616(expr: StructuredAstValue, op: DirectStackMoveExpressionOp8616) -> cython.bint:
     return any(
-        isinstance(node, structured_c.CBinaryOp) and node.op == op.value
-        for node in _iter_structured_c_nodes_8616(expr)
+        isinstance(node, structured_c.CBinaryOp) and operator.eq(node.op, op.value)
+        for node in builtins.iter(_iter_structured_c_nodes_8616(expr))
     )
 
 
-def _rhs_is_signed_idiv_remainder_artifact_8616(rhs: StructuredAstValue) -> bool:
+@cython.ccall
+def _rhs_is_signed_idiv_remainder_artifact_8616(rhs: StructuredAstValue) -> cython.bint:
     return _expr_has_binary_op_8616(rhs, DirectStackMoveExpressionOp8616.MOD) and _expr_has_structured_c_intrinsic_8616(
         rhs,
         StructuredCIntrinsic8616.INSERT,
@@ -9191,18 +10209,20 @@ _CALL_RESULT_CHILD_ATTRS_8616 = (
 )
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _CallResultCvarFinder8616:
     """Find the cvar receiving AX at a tagged call instruction."""
 
     project: AngrProjectValue
-    call_ins_addr: int
-    normalized_call_name: str | None
+    call_ins_addr: cython.longlong
+    normalized_call_name: object
     found: StructuredAstValue = None
-    seen: set[int] = field(default_factory=set)
+    seen: object = field(default_factory=set)
 
-    def _visit_child_value_8616(self, value: StructuredAstValue) -> None:
+    @cython.ccall
+    def _visit_child_value_8616(self, value: object) -> None:
         """Visit one child attribute value (scalar or sequence)."""
+        item: object
         if isinstance(value, (list, tuple)):
             for item in tuple(value):
                 self.visit(item)
@@ -9211,8 +10231,14 @@ class _CallResultCvarFinder8616:
         elif value is not None:
             self.visit(value)
 
+    @cython.ccall
     def _visit_children_8616(self, node: StructuredAstValue) -> None:
         """Recursively visit child attributes until a match is found."""
+        condition_and_nodes: object
+        value: object
+        attr: object
+        body: object
+        condition: object
         for attr in _CALL_RESULT_CHILD_ATTRS_8616:
             if not hasattr(node, attr):
                 continue
@@ -9231,7 +10257,8 @@ class _CallResultCvarFinder8616:
                 if self.found is not None:
                     return
 
-    def visit(self, node: StructuredAstValue) -> None:
+    @cython.ccall
+    def visit(self, node: object) -> None:
         """Visit one node, recording the first AX-writing call assignment."""
         if self.found is not None or node is None or id(node) in self.seen:
             return
@@ -9246,16 +10273,18 @@ class _CallResultCvarFinder8616:
             if (
                 isinstance(lhs, structured_c.CVariable)
                 and _cvar_register_name_8616(lhs) == "ax"
-                and (self.normalized_call_name is None or callee_name == self.normalized_call_name)
+                and (self.normalized_call_name is None or operator.eq(callee_name, self.normalized_call_name))
             ):
                 self.found = lhs
                 return
         self._visit_children_8616(node)
 
 
+@cython.ccall
 def _call_result_cvar_at_instruction_8616(
-    codegen: StructuredCodegenValue, project: AngrProjectValue, call_ins_addr: int | None, call_name: str | None
+    codegen: StructuredCodegenValue, project: AngrProjectValue, call_ins_addr: int | None, call_name: object
 ) -> StructuredAstValue:
+    root: object
     if not isinstance(call_ins_addr, int):
         return None
     normalized_call_name = call_name.lstrip("_") if isinstance(call_name, str) else None
@@ -9267,6 +10296,7 @@ def _call_result_cvar_at_instruction_8616(
     return finder.found
 
 
+@cython.ccall
 def _function_pointer_stack_slot_type_8616(cvar: StructuredAstValue) -> SimTypePointer | None:
     if not isinstance(cvar, structured_c.CVariable):
         return None
@@ -9283,8 +10313,11 @@ def _function_pointer_stack_slot_type_8616(cvar: StructuredAstValue) -> SimTypeP
     return variable_type if isinstance(pointee, SimTypeFunction) else None
 
 
-def _default_near_function_pointer_type_8616(codegen: StructuredCodegenValue, width: int) -> SimTypePointer:
+@cython.ccall
+def _default_near_function_pointer_type_8616(codegen: StructuredCodegenValue, width: cython.longlong) -> SimTypePointer:
     """Build an architecture-bound near pointer while preserving its concrete type."""
+    arch: object
+    project: object
     word_type = _type_for_access_width_8616(width)
     prototype = SimTypeFunction([word_type], word_type, variadic=False)
     project = getattr(codegen, "project", None)
@@ -9295,7 +10328,8 @@ def _default_near_function_pointer_type_8616(codegen: StructuredCodegenValue, wi
     return cast(SimTypePointer, pointer_type.with_arch(arch)) if arch is not None else pointer_type
 
 
-def _c_decl_type_for_function_pointer_target_8616(type_: StructuredAstValue) -> str | None:
+@cython.ccall
+def _c_decl_type_for_function_pointer_target_8616(type_: StructuredAstValue) -> object:
     """Render a conservative C declaration type from a recovered function-pointer prototype."""
     if isinstance(type_, SimTypeChar):
         return "char" if bool(type_.signed) else "unsigned char"
@@ -9308,8 +10342,14 @@ def _c_decl_type_for_function_pointer_target_8616(type_: StructuredAstValue) -> 
     return None
 
 
-def _function_pointer_target_prototype_decl_8616(name: str, pointer_type: SimTypePointer) -> str | None:
+@cython.ccall
+def _function_pointer_target_prototype_decl_8616(name: object, pointer_type: SimTypePointer) -> object:
     """Build a target declaration only from the recovered function-pointer type."""
+    arg_decl_type: object
+    prototype: object
+    return_type: object
+    arg_type: object
+    idx: object
     if re.fullmatch(r"[A-Za-z_]\w*", name) is None:
         return None
     prototype = getattr(pointer_type, "pts_to", None)
@@ -9327,10 +10367,12 @@ def _function_pointer_target_prototype_decl_8616(name: str, pointer_type: SimTyp
     return f"{return_type} {name}({', '.join(args) if args else 'void'});"
 
 
+@cython.ccall
 def _record_function_pointer_target_prototype_decl_8616(
     codegen: StructuredAstValue, resolved: DirectStackFunctionTarget8616, pointer_type: SimTypePointer
 ) -> None:
     """Record a binary-proven function-designator declaration for final rendering."""
+    decl: object
     decl = _function_pointer_target_prototype_decl_8616(resolved.name, pointer_type)
     if decl is None:
         return
@@ -9343,12 +10385,13 @@ def _record_function_pointer_target_prototype_decl_8616(
     )
 
 
+@cython.ccall
 def _binary_direct_stack_callback_binding_8616(
     codegen: StructuredCodegenValue,
     project: AngrProjectValue,
     fact: DirectStackMoveFact8616,
-    target: int,
-) -> tuple[DirectStackFunctionTarget8616, SimTypePointer] | None:
+    target: cython.longlong,
+) -> object:
     """Bind a code offset only when binary caller and callee prove its ABI."""
     if fact.width != 2:
         return None
@@ -9373,9 +10416,14 @@ def _binary_direct_stack_callback_binding_8616(
     return resolved, pointer_type
 
 
+@cython.ccall
 def _direct_stack_near_function_pointer_expr_8616(
     codegen: StructuredAstValue, fact: DirectStackMoveFact8616, dst_cvar: StructuredAstValue
 ) -> StructuredAstValue | None:
+    binary_binding: object
+    pointer_type: object
+    project: object
+    resolved: object
     if fact.source_kind is not DirectStackMoveSourceKind8616.IMMEDIATE:
         return None
     if not isinstance(fact.source_value, int):
@@ -9410,6 +10458,7 @@ def _direct_stack_near_function_pointer_expr_8616(
     return structured_c.CVariable(variable, variable_type=pointer_type, codegen=codegen)
 
 
+@cython.ccall
 def _low_byte_field_for_two_byte_aggregate_8616(
     codegen: StructuredAstValue,
     source: StructuredAstValue,
@@ -9431,15 +10480,17 @@ def _low_byte_field_for_two_byte_aggregate_8616(
     )
 
 
+@cython.ccall
 def _stack_move_source_immediate_8616(
     codegen: StructuredAstValue,
     fact: DirectStackMoveFact8616,
     dst_cvar: StructuredAstValue | None,
     target_type: StructuredAstValue,
     *,
-    reuse_call_result: bool = True,
+    reuse_call_result: cython.bint = True,
 ) -> StructuredAstValue | None:
     """Build the MOV source expression for immediate facts."""
+    function_pointer_expr: object
     if not isinstance(fact.source_value, int):
         return None
     function_pointer_expr = _direct_stack_near_function_pointer_expr_8616(codegen, fact, dst_cvar)
@@ -9449,15 +10500,17 @@ def _stack_move_source_immediate_8616(
     return structured_c.CConstant(fact.source_value & mask, target_type, codegen=codegen)
 
 
+@cython.ccall
 def _stack_move_source_stack_slot_8616(
     codegen: StructuredAstValue,
     fact: DirectStackMoveFact8616,
     dst_cvar: StructuredAstValue | None,
     target_type: StructuredAstValue,
     *,
-    reuse_call_result: bool = True,
+    reuse_call_result: cython.bint = True,
 ) -> StructuredAstValue | None:
     """Build the MOV source expression for stack_slot facts."""
+    source: object
     if not isinstance(fact.source_offset, int):
         return None
     source_width = fact.source_access_width if isinstance(fact.source_access_width, int) else fact.width
@@ -9484,23 +10537,25 @@ def _stack_move_source_stack_aggregate_element_8616(
     dst_cvar: StructuredAstValue | None,
     target_type: StructuredAstValue,
     *,
-    reuse_call_result: bool = True,
+    reuse_call_result: cython.bint = True,
 ) -> StructuredAstValue | None:
     """Build the MOV source expression for stack_aggregate_element facts."""
+    aggregate_cvar: object
+    index_cvar: object
     if (
         not isinstance(fact.source_aggregate_base_offset, int)
         or not isinstance(fact.source_index_offset, int)
-        or fact.source_access_width != fact.width
+        or operator.ne(fact.source_access_width, fact.width)
     ):
         return None
     raw_facts = getattr(codegen, "_inertia_stack_aggregate_object_facts_8616", ()) or ()
     candidates = tuple(
         aggregate
-        for aggregate in raw_facts
+        for aggregate in iter(raw_facts)
         if isinstance(aggregate, StackAggregateObjectFact8616)
-        and aggregate.base_offset == fact.source_aggregate_base_offset
-        and aggregate.element_width == fact.source_access_width
-        and fact.source_index_byte_scale == aggregate.element_width
+        and operator.eq(aggregate.base_offset, fact.source_aggregate_base_offset)
+        and operator.eq(aggregate.element_width, fact.source_access_width)
+        and operator.eq(fact.source_index_byte_scale, aggregate.element_width)
     )
     if len(candidates) != 1:
         return None
@@ -9518,15 +10573,17 @@ def _stack_move_source_stack_aggregate_element_8616(
     return structured_c.CIndexedVariable(aggregate_cvar, index_cvar, codegen=codegen)
 
 
+@cython.ccall
 def _stack_move_source_stack_slot_expr_8616(
     codegen: StructuredAstValue,
     fact: DirectStackMoveFact8616,
     dst_cvar: StructuredAstValue | None,
     target_type: StructuredAstValue,
     *,
-    reuse_call_result: bool = True,
+    reuse_call_result: cython.bint = True,
 ) -> StructuredAstValue | None:
     """Build the MOV source expression for stack_slot_expr facts."""
+    source: object
     if (
         not isinstance(fact.source_offset, int)
         or not isinstance(fact.source_immediate, int)
@@ -9573,15 +10630,18 @@ def _stack_move_source_stack_slot_expr_8616(
     )
 
 
+@cython.ccall
 def _stack_move_source_stack_slot_binary_expr_8616(
     codegen: StructuredAstValue,
     fact: DirectStackMoveFact8616,
     dst_cvar: StructuredAstValue | None,
     target_type: StructuredAstValue,
     *,
-    reuse_call_result: bool = True,
+    reuse_call_result: cython.bint = True,
 ) -> StructuredAstValue | None:
     """Build the MOV source expression for stack_slot_binary_expr facts."""
+    lhs: object
+    rhs: object
     if (
         not isinstance(fact.source_offset, int)
         or not isinstance(fact.source_rhs_offset, int)
@@ -9604,15 +10664,18 @@ def _stack_move_source_stack_slot_binary_expr_8616(
     return structured_c.CBinaryOp(fact.source_op.value, lhs, rhs, codegen=codegen)
 
 
+@cython.ccall
 def _stack_move_source_global_expr_8616(
     codegen: StructuredAstValue,
     fact: DirectStackMoveFact8616,
     dst_cvar: StructuredAstValue | None,
     target_type: StructuredAstValue,
     *,
-    reuse_call_result: bool = True,
+    reuse_call_result: cython.bint = True,
 ) -> StructuredAstValue | None:
     """Build the MOV source expression for global_expr facts."""
+    project: object
+    source: object
     if not isinstance(fact.source_global_displacement, int):
         return None
     project = getattr(codegen, "project", None)
@@ -9668,15 +10731,18 @@ def _stack_move_source_global_expr_8616(
 
 
 
+@cython.ccall
 def _stack_move_source_global_minus_segmented_8616(
     codegen: StructuredAstValue,
     fact: DirectStackMoveFact8616,
     dst_cvar: StructuredAstValue | None,
     target_type: StructuredAstValue,
     *,
-    reuse_call_result: bool = True,
+    reuse_call_result: cython.bint = True,
 ) -> StructuredAstValue | None:
     """Build the MOV source expression for global_minus_segmented facts."""
+    project: object
+    right_expr: object
     if not isinstance(fact.source_global_displacement, int):
         return None
     right_expr = _segmented_memory_source_expr_8616(codegen, fact)
@@ -9706,13 +10772,14 @@ def _stack_move_source_global_minus_segmented_8616(
     return structured_c.CBinaryOp("Sub", left_expr, right_expr, codegen=codegen)
 
 
+@cython.ccall
 def _stack_move_source_zero_arg_call_return_8616(
     codegen: StructuredAstValue,
     fact: DirectStackMoveFact8616,
     dst_cvar: StructuredAstValue | None,
     target_type: StructuredAstValue,
     *,
-    reuse_call_result: bool = True,
+    reuse_call_result: cython.bint = True,
 ) -> StructuredAstValue | None:
     """Build the MOV source expression for zero_arg_call_return facts."""
     if not isinstance(fact.source_call_name, str) or not isinstance(fact.source_call_ins_addr, int):
@@ -9726,15 +10793,20 @@ def _stack_move_source_zero_arg_call_return_8616(
     )
 
 
+@cython.ccall
 def _stack_move_source_signed_idiv_remainder_8616(
     codegen: StructuredAstValue,
     fact: DirectStackMoveFact8616,
     dst_cvar: StructuredAstValue | None,
     target_type: StructuredAstValue,
     *,
-    reuse_call_result: bool = True,
+    reuse_call_result: cython.bint = True,
 ) -> StructuredAstValue | None:
     """Build the MOV source expression for signed_idiv_remainder facts."""
+    dividend: object
+    divisor: object
+    project: object
+    stats: object
     if (
         not isinstance(fact.source_offset, int)
         or fact.source_op is not DirectStackMoveExpressionOp8616.MOD
@@ -9796,15 +10868,18 @@ def _stack_move_source_signed_idiv_remainder_8616(
     )
 
 
+@cython.ccall
 def _stack_move_source_wide_call_return_stack_arith_8616(
     codegen: StructuredAstValue,
     fact: DirectStackMoveFact8616,
     dst_cvar: StructuredAstValue | None,
     target_type: StructuredAstValue,
     *,
-    reuse_call_result: bool = True,
+    reuse_call_result: cython.bint = True,
 ) -> StructuredAstValue | None:
     """Build the MOV source expression for wide_call_return_stack_arith facts."""
+    project: object
+    stack_expr: object
     if (
         not isinstance(fact.source_offset, int)
         or fact.source_op is not DirectStackMoveExpressionOp8616.ADD
@@ -9844,10 +10919,14 @@ def _stack_move_source_wide_call_return_stack_arith_8616(
     )
 
 
+@cython.ccall
 def _segmented_memory_source_expr_8616(
     codegen: StructuredAstValue,
     fact: DirectStackMoveFact8616,
 ) -> StructuredAstValue | None:
+    arch: object
+    index_expr: object
+    project: object
     if (
         not isinstance(fact.source_segment_name, str)
         or not isinstance(fact.source_displacement, int)
@@ -9893,26 +10972,29 @@ def _segmented_memory_source_expr_8616(
 
 
 
+@cython.ccall
 def _stack_move_source_segmented_memory_8616(
     codegen: StructuredAstValue,
     fact: DirectStackMoveFact8616,
     dst_cvar: StructuredAstValue | None,
     target_type: StructuredAstValue,
     *,
-    reuse_call_result: bool = True,
+    reuse_call_result: cython.bint = True,
 ) -> StructuredAstValue | None:
     """Build the MOV source expression for segmented-memory facts."""
     return _segmented_memory_source_expr_8616(codegen, fact)
 
 
+@cython.ccall
 def _direct_stack_move_source_expr_8616(
     codegen: StructuredAstValue,
     fact: DirectStackMoveFact8616,
     dst_cvar: StructuredAstValue | None = None,
     *,
-    reuse_call_result: bool = True,
+    reuse_call_result: cython.bint = True,
 ) -> StructuredAstValue | None:
     """Build a C expression for a binary-proven direct stack MOV source."""
+    handler: object
     target_type = _type_for_access_width_8616(fact.width)
     dispatch = {
         DirectStackMoveSourceKind8616.IMMEDIATE: _stack_move_source_immediate_8616,
@@ -9951,6 +11033,7 @@ def _direct_stack_move_source_expr_8616(
 
 
 
+@cython.ccall
 def _direct_stack_move_assignment_8616(
     codegen: StructuredCodegenValue,
     dst_cvar: StructuredAstValue,
@@ -9960,10 +11043,14 @@ def _direct_stack_move_assignment_8616(
     return structured_c.CAssignment(dst_cvar, source_expr, codegen=codegen, tags=tags)
 
 
+@cython.ccall
 def _direct_stack_move_global_index_cvar_8616(
-    codegen: StructuredCodegenValue, displacement: int
+    codegen: StructuredCodegenValue, displacement: cython.longlong
 ) -> StructuredAstValue:
     """Resolve or materialize the direct global feeding an indexed stack store."""
+    root: object
+    variables_in_use: object
+    node: object
     name = _direct_global_update_name_8616(
         getattr(codegen, "project", None),
         getattr(getattr(codegen, "cfunc", None), "addr", None),
@@ -9979,7 +11066,7 @@ def _direct_stack_move_global_index_cvar_8616(
         if not isinstance(node, structured_c.CVariable):
             continue
         variable = node.variable
-        if isinstance(variable, SimMemoryVariable) and getattr(variable, "addr", None) == (displacement & 0xFFFF):
+        if isinstance(variable, SimMemoryVariable) and operator.eq(getattr(variable, "addr", None), (displacement & 0xFFFF)):
             return node
     variable = SimMemoryVariable(
         displacement & 0xFFFF,
@@ -9997,25 +11084,26 @@ def _direct_stack_move_global_index_cvar_8616(
 def _stack_aggregate_destination_8616(
     codegen: StructuredCodegenValue,
     fact: DirectStackMoveFact8616,
-    index_expr: StructuredAstValue | None,
+    index_expr: object,
 ) -> StructuredAstValue | None:
     """Project a direct or indexed store through its proven aggregate object."""
+    aggregate_cvar: object
     has_index_evidence = any(
         isinstance(value, int)
-        for value in (
+        for value in iter((
             fact.dst_index_global_displacement,
             fact.dst_index_stack_offset,
             fact.dst_index_immediate,
-        )
+        ))
     )
     raw_facts = getattr(codegen, "_inertia_stack_aggregate_object_facts_8616", ()) or ()
     candidates = tuple(
         aggregate
-        for aggregate in raw_facts
+        for aggregate in iter(raw_facts)
         if isinstance(aggregate, StackAggregateObjectFact8616)
-        and fact.width == aggregate.element_width
+        and operator.eq(fact.width, aggregate.element_width)
         and fact.dst_offset in aggregate.indexed_offsets
-        and (not has_index_evidence or fact.dst_index_byte_scale == aggregate.element_width)
+        and (not has_index_evidence or operator.eq(fact.dst_index_byte_scale, aggregate.element_width))
     )
     if len(candidates) != 1:
         return None
@@ -10027,7 +11115,7 @@ def _stack_aggregate_destination_8616(
     if not isinstance(aggregate_cvar, structured_c.CVariable):
         return None
     if index_expr is None:
-        if fact.dst_offset != aggregate.base_offset:
+        if operator.ne(fact.dst_offset, aggregate.base_offset):
             return None
         index_expr = structured_c.CConstant(
             0,
@@ -10053,9 +11141,10 @@ def _stack_aggregate_destination_8616(
     return structured_c.CIndexedVariable(aggregate_cvar, index_expr, codegen=codegen)
 
 
+@cython.ccall
 def _direct_stack_move_index_expr_8616(
     codegen: StructuredCodegenValue, fact: DirectStackMoveFact8616
-) -> tuple[StructuredAstValue, bool]:
+) -> tuple[StructuredAstValue, cython.bint]:
     """Resolve the destination index expression; (expr, supported)."""
     if isinstance(fact.dst_index_global_displacement, int):
         return _direct_stack_move_global_index_cvar_8616(codegen, fact.dst_index_global_displacement), True
@@ -10072,17 +11161,18 @@ def _direct_stack_move_index_expr_8616(
     return None, True
 
 
-def _stack_aggregate_covers_fact_8616(codegen: StructuredCodegenValue, fact: DirectStackMoveFact8616) -> bool:
+def _stack_aggregate_covers_fact_8616(codegen: StructuredCodegenValue, fact: DirectStackMoveFact8616) -> cython.bint:
     """Check whether proven aggregate facts already cover this destination."""
     raw_aggregate_facts = getattr(codegen, "_inertia_stack_aggregate_object_facts_8616", ()) or ()
     return any(
         isinstance(aggregate, StackAggregateObjectFact8616)
-        and fact.width == aggregate.element_width
+        and operator.eq(fact.width, aggregate.element_width)
         and fact.dst_offset in aggregate.indexed_offsets
-        for aggregate in raw_aggregate_facts
+        for aggregate in iter(raw_aggregate_facts)
     )
 
 
+@cython.ccall
 def _promote_dst_cvar_to_array_8616(
     codegen: StructuredCodegenValue, dst_cvar: StructuredAstValue, width: StructuredAstValue
 ) -> None:
@@ -10105,12 +11195,15 @@ def _promote_dst_cvar_to_array_8616(
     codegen._inertia_codegen_decl_refresh_required_8616 = True
 
 
+@cython.ccall
 def _direct_stack_move_destination_expr_8616(
     codegen: StructuredCodegenValue,
     fact: DirectStackMoveFact8616,
     dst_cvar: StructuredAstValue,
 ) -> StructuredAstValue | None:
     """Build a scalar or binary-proven indexed BP stack destination."""
+    aggregate_destination: object
+    index_expr: object
     index_expr, index_supported = _direct_stack_move_index_expr_8616(codegen, fact)
     if not index_supported:
         return None
@@ -10144,19 +11237,19 @@ class _TaggedAssignmentReplacer8616:
 
     root: StructuredAstValue
     project: AngrProjectValue
-    ins_addr: int
+    ins_addr: cython.longlong
     replacement_factory: StructuredAstValue
-    allow_tagged_iterator_expression: bool
-    replace_all_matches: bool
-    remove_duplicate_tagged_assignments: bool
+    allow_tagged_iterator_expression: cython.bint
+    replace_all_matches: cython.bint
+    remove_duplicate_tagged_assignments: cython.bint
     already_materialized_predicate: StructuredAstValue
-    already_materialized_attr: str | None
+    already_materialized_attr: object
     candidate_position_predicate: Callable[[StructuredAstValue], bool] | None
-    seen: set[int] = field(default_factory=set)
-    changed: bool = False
-    materialized: bool = False
+    seen: object = field(default_factory=set)
+    changed: cython.bint = False
+    materialized: cython.bint = False
 
-    def _already_materialized_8616(self, node: StructuredAstValue) -> bool:
+    def _already_materialized_8616(self, node: StructuredAstValue) -> cython.bint:
         """Record an already-materialized match without replacing it."""
         if callable(self.already_materialized_predicate) and self.already_materialized_predicate(node):
             if self.already_materialized_attr:
@@ -10193,7 +11286,7 @@ class _TaggedAssignmentReplacer8616:
             return self._replace_matching_8616(node, node.tags)
         return node
 
-    def transform_iterator(self, node: StructuredAstValue) -> StructuredAstValue:
+    def transform_iterator(self, node: object) -> StructuredAstValue:
         """Replace a tagged iterator expression when the pass allows it."""
         if not self.allow_tagged_iterator_expression:
             return node
@@ -10205,7 +11298,7 @@ class _TaggedAssignmentReplacer8616:
             return self._replace_matching_8616(node, getattr(node, "tags", None))
         return node
 
-    def is_duplicate_tagged_assignment(self, node: StructuredAstValue) -> bool:
+    def is_duplicate_tagged_assignment(self, node: StructuredAstValue) -> cython.bint:
         """Return whether the node is a later duplicate tagged assignment to drop."""
         return (
             self.remove_duplicate_tagged_assignments
@@ -10216,7 +11309,7 @@ class _TaggedAssignmentReplacer8616:
             and (self.candidate_position_predicate is None or self.candidate_position_predicate(node))
         )
 
-    def replace_children(self, node: StructuredAstValue) -> None:
+    def replace_children(self, node: object) -> None:
         """Apply the transform to every child of a structured node."""
         if node is None or not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
             return
@@ -10228,8 +11321,9 @@ class _TaggedAssignmentReplacer8616:
         self._replace_case_children_8616(node)
         self._replace_pair_children_8616(node)
 
-    def _replace_list_items_8616(self, value: list[StructuredAstValue]) -> None:
+    def _replace_list_items_8616(self, value: object) -> None:
         """Transform list children, dropping duplicate tagged assignments."""
+        item: object
         new_items = []
         list_changed = False
         for item in tuple(value):
@@ -10247,6 +11341,8 @@ class _TaggedAssignmentReplacer8616:
 
     def _replace_attr_children_8616(self, node: StructuredAstValue) -> None:
         """Transform each child-bearing attribute in place."""
+        value: object
+        attr: object
         for attr in (
             "statements",
             "lhs",
@@ -10278,6 +11374,8 @@ class _TaggedAssignmentReplacer8616:
 
     def _replace_case_children_8616(self, node: StructuredAstValue) -> None:
         """Transform switch-case bodies in place."""
+        cases: object
+        item: object
         cases = getattr(node, "cases", None)
         if isinstance(cases, (list, tuple)):
             new_cases = []
@@ -10297,6 +11395,9 @@ class _TaggedAssignmentReplacer8616:
 
     def _replace_pair_children_8616(self, node: StructuredAstValue) -> None:
         """Transform condition/body pair bodies in place."""
+        condition_and_nodes: object
+        body: object
+        condition: object
         condition_and_nodes = getattr(node, "condition_and_nodes", None)
         if condition_and_nodes:
             new_pairs = []
@@ -10316,16 +11417,16 @@ class _TaggedAssignmentReplacer8616:
 def _replace_tagged_assignment_8616(
     root: StructuredAstValue,
     project: AngrProjectValue,
-    ins_addr: int,
+    ins_addr: cython.longlong,
     replacement_factory: StructuredAstValue,
     *,
-    allow_tagged_iterator_expression: bool = False,
-    replace_all_matches: bool = False,
-    remove_duplicate_tagged_assignments: bool = False,
+    allow_tagged_iterator_expression: cython.bint = False,
+    replace_all_matches: cython.bint = False,
+    remove_duplicate_tagged_assignments: cython.bint = False,
     already_materialized_predicate: StructuredAstValue = None,
-    already_materialized_attr: str | None = None,
+    already_materialized_attr: object = None,
     candidate_position_predicate: Callable[[StructuredAstValue], bool] | None = None,
-) -> bool:
+) -> cython.bint:
     """Replace tagged fragments only when their execution scopes can agree."""
     from .stack_update_scope_guard import require_stack_update_scope_8616
 
@@ -10353,20 +11454,22 @@ def _replace_tagged_assignment_8616(
     return replacer.changed
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _TaggedStatementReplacer8616:
     """Replace a machine-tagged assignment in lists or control attributes."""
 
     project: StructuredAstValue
-    ins_addr: int
+    ins_addr: cython.longlong
     replacement_factory: StructuredAstValue
-    remove_duplicate_tagged_assignments: bool = False
-    changed: bool = False
-    materialized: bool = False
-    seen: set[int] = field(default_factory=set)
+    remove_duplicate_tagged_assignments: cython.bint = False
+    changed: cython.bint = False
+    materialized: cython.bint = False
+    seen: object = field(default_factory=set)
 
-    def _visit_statement_list_8616(self, statements: list[StructuredAstValue]) -> None:
+    @cython.ccall
+    def _visit_statement_list_8616(self, statements: object) -> None:
         """Replace or drop tagged assignments inside a statement list."""
+        stmt: object
         new_statements = []
         list_changed = False
         for stmt in tuple(statements):
@@ -10400,8 +11503,10 @@ class _TaggedStatementReplacer8616:
         if list_changed:
             statements[:] = new_statements
 
-    def _visit_control_attr_8616(self, node: StructuredAstValue, attr: str) -> None:
+    @cython.ccall
+    def _visit_control_attr_8616(self, node: StructuredAstValue, attr: object) -> None:
         """Replace or drop a tagged assignment held in a control attribute."""
+        child: object
         child = None
         with contextlib.suppress(Exception):
             child = getattr(node, attr, None)
@@ -10432,8 +11537,14 @@ class _TaggedStatementReplacer8616:
             return
         self.visit(child)
 
-    def visit(self, node: StructuredAstValue) -> None:
+    @cython.ccall
+    def visit(self, node: object) -> None:
         """Replace the first assignment carrying the requested instruction tag."""
+        pairs: object
+        statements: object
+        _condition: object
+        attr: object
+        body: object
         if node is None or id(node) in self.seen:
             return
         if not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
@@ -10455,14 +11566,15 @@ class _TaggedStatementReplacer8616:
                 self.visit(body)
 
 
+@cython.ccall
 def _replace_tagged_statement_assignment_8616(
     root: StructuredAstValue,
     project: StructuredAstValue,
-    ins_addr: int,
+    ins_addr: cython.longlong,
     replacement_factory: StructuredAstValue,
     *,
-    remove_duplicate_tagged_assignments: bool = False,
-) -> bool:
+    remove_duplicate_tagged_assignments: cython.bint = False,
+) -> cython.bint:
     """Replace a machine-tagged assignment in statement lists or structured control attributes."""
     replacer = _TaggedStatementReplacer8616(
         project,
@@ -10474,18 +11586,22 @@ def _replace_tagged_statement_assignment_8616(
     return replacer.changed
 
 
+@cython.ccall
 def _dirty_stack_update_candidates_8616(
     root: StructuredAstValue,
     project: AngrProjectValue,
     fact: DirectStackUpdateFact8616,
     cvar: StructuredAstValue,
-    query_index: StructuredAstQueryIndex8616 | None,
-) -> tuple[list[tuple[list[StructuredAstValue], int, StructuredAstValue, StructuredAstValue]], list[tuple[object, object, object, object]]]:
+    query_index: object,
+) -> tuple[list[tuple[list[StructuredAstValue], cython.longlong, StructuredAstValue, StructuredAstValue]], list[tuple[object, object, object, object]]]:
     """Collect exact dirty-RHS stack-update candidates and observed diagnostics."""
+    index: object
+    owner: object
+    statement: object
     if query_index is not None:
         query_index.require_root(root)
     candidates: list[
-        tuple[list[StructuredAstValue], int, structured_c.CAssignment, structured_c.CDirtyExpression]
+        tuple[list[StructuredAstValue], cython.longlong, structured_c.CAssignment, structured_c.CDirtyExpression]
     ] = []
     observed: list[tuple[object, object, object, object]] = []
     nodes = query_index.nodes if query_index is not None else _iter_structured_c_nodes_8616(root)
@@ -10519,6 +11635,7 @@ def _dirty_stack_update_candidates_8616(
     return candidates, observed
 
 
+@cython.ccall
 def _replace_unique_tagged_dirty_stack_update_8616(
     root: StructuredAstValue,
     project: AngrProjectValue,
@@ -10527,7 +11644,7 @@ def _replace_unique_tagged_dirty_stack_update_8616(
     replacement_factory: Callable[[StructuredAstValue], StructuredAstValue],
     *,
     query_index: StructuredAstQueryIndex8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """Replace one rendered dirty RHS carrying an exact stack-update tag.
 
     angr may preserve a direct BP-relative update as ``stack_slot = dirty``
@@ -10557,7 +11674,7 @@ def _replace_unique_tagged_dirty_stack_update_8616(
     return True
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _TaggedCallReplacer8616:
     """Project an owned call result to stack storage while retaining word carriers."""
 
@@ -10567,19 +11684,22 @@ class _TaggedCallReplacer8616:
     call_target: StructuredAstValue
     accepted_call_names: StructuredAstValue
     replacement_factory: StructuredAstValue
-    seen: set[int] = field(default_factory=set)
+    seen: object = field(default_factory=set)
     materialized_assignment: StructuredAstValue = None
-    untagged_candidates: list[tuple[list[StructuredAstValue], int]] = field(default_factory=list)
-    call_stmt_summaries: list[StructuredAstValue] = field(default_factory=list)
+    untagged_candidates: object = field(default_factory=list)
+    call_stmt_summaries: object = field(default_factory=list)
 
+    @cython.ccall
     def call_statement_identity_8616(
         self,
         stmt: StructuredAstValue,
-    ) -> tuple[str | None, bool, bool, bool]:
+    ) -> tuple[str | None, cython.bint, cython.bint, cython.bint]:
         """Return name, target match, tag state, and direct-call shape."""
+        call_expr: object
+        observed_name: object
         tagged = _node_has_instruction_address_8616(stmt, self.project, self.call_ins_addr)
         observed_name = _function_call_name_8616(stmt)
-        call_expr: StructuredAstValue = None
+        call_expr = None
         if isinstance(stmt, structured_c.CAssignment):
             rhs = stmt.rhs
             if (
@@ -10606,8 +11726,10 @@ class _TaggedCallReplacer8616:
         )
         return observed_name, target_matches, tagged, call_expr is not None
 
-    def is_target_call_statement(self, stmt: StructuredAstValue) -> bool:
+    @cython.ccall
+    def is_target_call_statement(self, stmt: StructuredAstValue) -> cython.bint:
         """Check whether a tagged statement is the call being materialized."""
+        observed_name: object
         if (
             isinstance(stmt, structured_c.CAssignment)
             and isinstance(_c_expr_stack_offset_8616(stmt.lhs), int)
@@ -10627,8 +11749,10 @@ class _TaggedCallReplacer8616:
         )
         return target_matches or name_matches or isinstance(self.call_target, int)
 
-    def is_unique_untagged_target_call_statement(self, stmt: StructuredAstValue) -> bool:
+    @cython.ccall
+    def is_unique_untagged_target_call_statement(self, stmt: StructuredAstValue) -> cython.bint:
         """Check whether an untagged call statement uniquely matches the requested call."""
+        observed_name: object
         if (
             isinstance(stmt, structured_c.CAssignment)
             and _cvar_register_name_8616(_strip_casts_8616(stmt.lhs)) != "ax"
@@ -10644,8 +11768,10 @@ class _TaggedCallReplacer8616:
         )
         return target_matches or name_matches
 
-    def visit(self, node: StructuredAstValue) -> None:
+    @cython.ccall
+    def visit(self, node: object) -> None:
         """Replace the tagged call statement with the stack assignment."""
+        statements: object
         if node is None or id(node) in self.seen:
             return
         if not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
@@ -10656,13 +11782,15 @@ class _TaggedCallReplacer8616:
             self._visit_statements_8616(statements)
         self._visit_child_links_8616(node)
 
-    def _visit_statements_8616(self, statements: list[StructuredAstValue]) -> None:
+    def _visit_statements_8616(self, statements: object) -> None:
         """Replace the matching tagged call in one statement list."""
+        index: object
+        stmt: object
         for index, stmt in enumerate(tuple(statements)):
             prefer_later_non_assignment = isinstance(stmt, structured_c.CAssignment) and any(
                 not isinstance(candidate_stmt, structured_c.CAssignment)
                 and self.is_target_call_statement(candidate_stmt)
-                for candidate_stmt in tuple(statements)[index + 1 :]
+                for candidate_stmt in iter(tuple(statements)[index + 1 :])
             )
             if (
                 self.materialized_assignment is None
@@ -10678,8 +11806,14 @@ class _TaggedCallReplacer8616:
                 continue
             self.visit(stmt)
 
+    @cython.ccall
     def _visit_child_links_8616(self, node: StructuredAstValue) -> None:
         """Recurse into loop fields and condition/body pairs."""
+        child: object
+        pairs: object
+        _condition: object
+        attr: object
+        body: object
         for attr in ("body", "else_node", "initializer", "init", "iteration", "iterator"):
             child = None
             with contextlib.suppress(Exception):
@@ -10693,8 +11827,12 @@ class _TaggedCallReplacer8616:
             for _condition, body in tuple(pairs):
                 self.visit(body)
 
-    def collect_untagged(self, node: StructuredAstValue) -> None:
+    @cython.ccall
+    def collect_untagged(self, node: object) -> None:
         """Collect fallback untagged call statements matching the same call name."""
+        statements: object
+        index: object
+        stmt: object
         if node is None or id(node) in self.seen:
             return
         if not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
@@ -10708,8 +11846,14 @@ class _TaggedCallReplacer8616:
                 self.collect_untagged(stmt)
         self._collect_untagged_children_8616(node)
 
+    @cython.ccall
     def _collect_untagged_children_8616(self, node: StructuredAstValue) -> None:
         """Recurse the untagged collector into child links and pairs."""
+        child: object
+        pairs: object
+        _condition: object
+        attr: object
+        body: object
         for attr in ("body", "else_node", "initializer", "init", "iteration", "iterator"):
             child = None
             with contextlib.suppress(Exception):
@@ -10723,8 +11867,11 @@ class _TaggedCallReplacer8616:
             for _condition, body in tuple(pairs):
                 self.collect_untagged(body)
 
-    def collect_call_stmt_summaries(self, node: StructuredAstValue) -> None:
+    @cython.ccall
+    def collect_call_stmt_summaries(self, node: object) -> None:
         """Collect debug summaries for call statements when no fallback matched."""
+        statements: object
+        stmt: object
         if node is None or id(node) in self.seen:
             return
         if not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
@@ -10740,11 +11887,11 @@ class _TaggedCallReplacer8616:
         """Record one statement's call names and shape for the debug dump."""
         call_names = tuple(
             name
-            for name in (
+            for name in iter((
                 _function_call_name_8616(call_node)
-                for call_node in _iter_structured_c_nodes_8616(stmt)
+                for call_node in builtins.iter(_iter_structured_c_nodes_8616(stmt))
                 if isinstance(call_node, structured_c.CFunctionCall)
-            )
+            ))
             if isinstance(name, str)
         )
         if call_names:
@@ -10755,15 +11902,21 @@ class _TaggedCallReplacer8616:
                     getattr(stmt, "tags", None),
                     tuple(
                         attr
-                        for attr in ("expr", "retval", "body", "statements", "stmts", "condition")
+                        for attr in iter(("expr", "retval", "body", "statements", "stmts", "condition"))
                         if hasattr(stmt, attr)
                     ),
                 )
             )
         self.collect_call_stmt_summaries(stmt)
 
+    @cython.ccall
     def _collect_summary_children_8616(self, node: StructuredAstValue) -> None:
         """Recurse the summary collector into child links and pairs."""
+        child: object
+        pairs: object
+        _condition: object
+        attr: object
+        body: object
         for attr in ("body", "else_node", "initializer", "init", "iteration", "iterator", "stmts"):
             with contextlib.suppress(Exception):
                 child = getattr(node, attr, None)
@@ -10774,6 +11927,7 @@ class _TaggedCallReplacer8616:
             for _condition, body in tuple(pairs):
                 self.collect_call_stmt_summaries(body)
 
+    @cython.ccall
     def _debug_untagged_mismatch_8616(self) -> None:
         """Emit call-statement summaries when the untagged fallback is ambiguous."""
         if not (
@@ -10791,7 +11945,8 @@ class _TaggedCallReplacer8616:
             tuple(self.call_stmt_summaries[:16]),
         )
 
-    def _untagged_fallback_8616(self, exact_callsite_present: bool) -> None:
+    @cython.ccall
+    def _untagged_fallback_8616(self, exact_callsite_present: cython.bint) -> None:
         """Replace the unique untagged matching call statement if present."""
         if self.materialized_assignment is not None or exact_callsite_present:
             return
@@ -10808,9 +11963,9 @@ class _TaggedCallReplacer8616:
 
 def _replace_tagged_call_statement_with_stack_assignment_8616(
     root: StructuredAstValue,
-    project: StructuredAstValue,
+    project: object,
     call_ins_addr: int | None,
-    call_name: str | None,
+    call_name: object,
     replacement_factory: Callable[[StructuredAstValue], StructuredAstValue],
     *,
     call_target: int | None = None,
@@ -10838,13 +11993,13 @@ def _replace_tagged_call_statement_with_stack_assignment_8616(
     exact_callsite_present = any(
         isinstance(node, structured_c.CFunctionCall)
         and _node_has_instruction_address_8616(node, project, call_ins_addr)
-        for node in _iter_structured_c_nodes_8616(root)
+        for node in builtins.iter(_iter_structured_c_nodes_8616(root))
     )
     replacer._untagged_fallback_8616(exact_callsite_present)
     return replacer.materialized_assignment
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _TaggedReloadReplacer8616:
     """Replace one tagged reload, distinguishing an idempotent existing value."""
 
@@ -10852,9 +12007,10 @@ class _TaggedReloadReplacer8616:
     ins_addr: StructuredAstValue
     dst_reg_name: StructuredAstValue
     source_cvar: StructuredAstValue
-    seen: set[int]
+    seen: object
     placement: StructuredAstValue = _DirectStackReloadPlacement8616.NO_MATCH
 
+    @cython.ccall
     def transform(self, node: StructuredAstValue) -> StructuredAstValue:
         """Replace the matching tagged reload's RHS with the stack source."""
         if not isinstance(node, structured_c.CAssignment):
@@ -10862,7 +12018,7 @@ class _TaggedReloadReplacer8616:
         if not _node_has_instruction_address_8616(node, self.project, self.ins_addr):
             return node
         lhs = _strip_casts_8616(node.lhs)
-        if _cvar_register_name_8616(lhs) != self.dst_reg_name:
+        if operator.ne(_cvar_register_name_8616(lhs), self.dst_reg_name):
             return node
         if self.placement.present:
             return node
@@ -10877,7 +12033,8 @@ class _TaggedReloadReplacer8616:
             tags=node.tags,
         )
 
-    def replace_children(self, node: StructuredAstValue) -> None:
+    @cython.ccall
+    def replace_children(self, node: object) -> None:
         """Apply the transform to every child, stopping once placed."""
         if self.placement.present or node is None or not type(node).__module__.startswith(
             "angr.analyses.decompiler.structured_codegen"
@@ -10890,8 +12047,13 @@ class _TaggedReloadReplacer8616:
         self._replace_attr_children_8616(node)
         self._replace_pair_children_8616(node)
 
+    @cython.ccall
     def _replace_attr_children_8616(self, node: StructuredAstValue) -> None:
         """Transform each child-bearing attribute in place."""
+        value: object
+        attr: object
+        index: object
+        item: object
         for attr in (
             "statements",
             "lhs",
@@ -10930,8 +12092,12 @@ class _TaggedReloadReplacer8616:
                         value = replacement
                     self.replace_children(value)
 
+    @cython.ccall
     def _replace_pair_children_8616(self, node: StructuredAstValue) -> None:
         """Transform condition/body pairs in place."""
+        condition_and_nodes: object
+        body: object
+        condition: object
         condition_and_nodes = getattr(node, "condition_and_nodes", None)
         if condition_and_nodes:
             new_pairs = []
@@ -10949,6 +12115,7 @@ class _TaggedReloadReplacer8616:
                     node.condition_and_nodes = new_pairs
 
 
+@cython.ccall
 def _indexed_reload_candidate_8616(
     indexed_candidates: StructuredAstValue,
     project: StructuredAstValue,
@@ -10956,6 +12123,7 @@ def _indexed_reload_candidate_8616(
     source_cvar: StructuredAstValue,
 ) -> _DirectStackReloadPlacement8616:
     """Match or replace a reload through the tagged-assignment index."""
+    candidate: object
     for candidate in indexed_candidates:
         if not _node_has_instruction_address_8616(
             candidate,
@@ -10964,7 +12132,7 @@ def _indexed_reload_candidate_8616(
         ):
             continue
         lhs = _strip_casts_8616(candidate.lhs)
-        if _cvar_register_name_8616(lhs) != fact.dst_reg_name:
+        if operator.ne(_cvar_register_name_8616(lhs), fact.dst_reg_name):
             continue
         if _same_stack_cvar_8616(candidate.rhs, source_cvar):
             return _DirectStackReloadPlacement8616.ALREADY_PRESENT
@@ -10973,6 +12141,7 @@ def _indexed_reload_candidate_8616(
     return _DirectStackReloadPlacement8616.NO_MATCH
 
 
+@cython.ccall
 def _replace_tagged_register_reload_assignment_8616(
     root: StructuredAstValue,
     project: StructuredAstValue,
@@ -10982,6 +12151,7 @@ def _replace_tagged_register_reload_assignment_8616(
     candidate_index: TaggedAssignmentAddressIndex8616 | None = None,
 ) -> _DirectStackReloadPlacement8616:
     """Replace one tagged reload, distinguishing an idempotent existing value."""
+    indexed_candidates: object
     candidate_addresses = _candidate_ins_addrs_8616(project, fact.ins_addr)
     if candidate_index is not None:
         indexed_candidates = candidate_index.candidate_assignments(candidate_addresses)
@@ -11003,6 +12173,7 @@ def _replace_tagged_register_reload_assignment_8616(
     return cast("_DirectStackReloadPlacement8616", replacer.placement)
 
 
+@cython.ccall
 def _c_expr_stack_offset_8616(node: StructuredAstValue) -> int | None:
     if isinstance(node, structured_c.CVariable):
         variable = node.variable
@@ -11012,19 +12183,20 @@ def _c_expr_stack_offset_8616(node: StructuredAstValue) -> int | None:
     return None
 
 
-def _expr_reads_stack_offset_8616(node: StructuredAstValue, offset: int) -> bool:
-    seen: set[int] = set()
+def _expr_reads_stack_offset_8616(node: StructuredAstValue, offset: cython.longlong) -> cython.bint:
+    seen: set[cython.longlong] = set()
 
-    def walk(current: StructuredAstValue) -> bool:
+    def walk(current: object) -> cython.bint:
+        attr: object
         if current is None:
             return False
         if isinstance(current, (list, tuple)):
-            return any(walk(item) for item in current)
+            return any(walk(item) for item in iter(current))
         marker = id(current)
         if marker in seen:
             return False
         seen.add(marker)
-        if _c_expr_stack_offset_8616(current) == offset:
+        if operator.eq(_c_expr_stack_offset_8616(current), offset):
             return True
         if not type(current).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
             return False
@@ -11055,6 +12227,7 @@ def _expr_reads_stack_offset_8616(node: StructuredAstValue, offset: int) -> bool
     return walk(node)
 
 
+@cython.ccall
 def _assignment_lhs_stack_offset_8616(node: StructuredAstValue) -> int | None:
     if not isinstance(node, structured_c.CAssignment):
         return None
@@ -11065,13 +12238,20 @@ def _stack_update_falls_through_to_loop_guard_8616(
     project: AngrProjectValue,
     function: StructuredAstValue,
     fact: DirectStackUpdateFact8616,
-    loop_guard_addr: int,
-) -> bool:
+    loop_guard_addr: cython.longlong,
+) -> cython.bint:
     """Prove that a stack update falls through to a guard read of the same slot."""
+    guard_addr: object
+    guard_insn: object
+    ins_addr: object
+    update_addr: object
+    update_insn: object
+    update_size: object
+    insn: object
     fact_addrs = frozenset(_candidate_ins_addrs_8616(project, fact.ins_addr))
     guard_addrs = frozenset(_candidate_ins_addrs_8616(project, loop_guard_addr))
-    update_insn: StructuredAstValue | None = None
-    guard_insn: StructuredAstValue | None = None
+    update_insn = None
+    guard_insn = None
     for insn in _direct_global_update_ordered_insns_8616(project, function):
         # Capstone instructions are a third-party dynamic boundary.
         ins_addr = getattr(insn, "address", None)
@@ -11091,22 +12271,26 @@ def _stack_update_falls_through_to_loop_guard_8616(
         or not isinstance(update_size, int)
         or update_size <= 0
         or not isinstance(guard_addr, int)
-        or update_addr + update_size != guard_addr
+        or operator.ne(update_addr + update_size, guard_addr)
     ):
         return False
     operands = _boundary_tuple_8616(getattr(guard_insn, "operands", ()) or ())
     return any(
-        _stack_mem_operand_offset_width_8616(operand) == (fact.offset, fact.width)
-        for operand in operands
+        operator.eq(_stack_mem_operand_offset_width_8616(operand), (fact.offset, fact.width))
+        for operand in iter(operands)
     )
 
 
+@cython.ccall
 def _stack_update_fallthrough_guard_addr_8616(
     project: AngrProjectValue,
     function: StructuredAstValue,
     fact: DirectStackUpdateFact8616,
 ) -> int | None:
     """Return the exact adjacent guard address proven for one stack update."""
+    update_addr: object
+    update_size: object
+    insn: object
     fact_addrs = _candidate_ins_addrs_8616(project, fact.ins_addr)
     for insn in _direct_global_update_ordered_insns_8616(project, function):
         # Capstone instructions are a third-party dynamic boundary.
@@ -11133,22 +12317,25 @@ def _stack_update_fallthrough_guard_addr_8616(
 def _node_contains_instruction_address_8616(
     node: StructuredAstValue,
     project: AngrProjectValue,
-    ins_addr: int,
-) -> bool:
+    ins_addr: cython.longlong,
+) -> cython.bint:
     """Return whether an exact instruction tag occurs within one C subtree."""
     return any(
         _node_has_instruction_address_8616(candidate, project, ins_addr)
-        for candidate in _iter_structured_c_nodes_8616(node)
+        for candidate in builtins.iter(_iter_structured_c_nodes_8616(node))
     )
 
 
+@cython.ccall
 def _transparent_statement_slots_8616(
     body: StructuredAstValue,
-) -> tuple[tuple[list[StructuredAstValue], int, StructuredAstValue], ...]:
+) -> tuple[tuple[list[StructuredAstValue], cython.longlong, StructuredAstValue], ...]:
     """Flatten only sequencing containers while retaining replacement slots."""
+    index: object
+    statement: object
     if not isinstance(body, structured_c.CStatements):
         return ()
-    slots: list[tuple[list[StructuredAstValue], int, StructuredAstValue]] = []
+    slots: list[tuple[list[StructuredAstValue], cython.longlong, StructuredAstValue]] = []
     for index, statement in enumerate(tuple(body.statements or ())):
         if isinstance(statement, structured_c.CStatements):
             slots.extend(_transparent_statement_slots_8616(statement))
@@ -11160,14 +12347,18 @@ def _transparent_statement_slots_8616(
 def _while_loop_update_candidates_8616(
     loop: StructuredAstValue,
     project: AngrProjectValue,
-    guard_addr: int,
+    guard_addr: cython.longlong,
     cvar: StructuredAstValue,
-) -> list[tuple[list[StructuredAstValue], int, StructuredAstValue]]:
+) -> object:
     """Return the unique post-guard dirty update inside one while loop."""
+    index: object
+    owner: object
+    slot: object
+    statement: object
     slots = _transparent_statement_slots_8616(loop.body)
     guard_indexes = tuple(
         index
-        for index, (_owner, _slot, statement) in enumerate(slots)
+        for index, (_owner, _slot, statement) in builtins.iter(enumerate(slots))
         if _node_contains_instruction_address_8616(
             statement,
             project,
@@ -11178,7 +12369,7 @@ def _while_loop_update_candidates_8616(
         return []
     guard_index = guard_indexes[0]
     loop_candidates: list[
-        tuple[list[StructuredAstValue], int, structured_c.CAssignment]
+        tuple[list[StructuredAstValue], cython.longlong, structured_c.CAssignment]
     ] = []
     for index, (owner, slot, statement) in enumerate(slots):
         if index <= guard_index or not isinstance(
@@ -11199,6 +12390,7 @@ def _while_loop_update_candidates_8616(
     return []
 
 
+@cython.ccall
 def _replace_proven_while_stack_update_8616(
     root: StructuredAstValue,
     project: AngrProjectValue,
@@ -11208,8 +12400,9 @@ def _replace_proven_while_stack_update_8616(
     replacement_factory: Callable[[StructuredAstValue], StructuredAstValue],
     *,
     query_index: StructuredAstQueryIndex8616 | None = None,
-) -> bool:
+) -> cython.bint:
     """Replace one dirty while latch anchored by an adjacent binary guard."""
+    loop: object
     if query_index is not None:
         query_index.require_root(root)
     guard_addr = _stack_update_fallthrough_guard_addr_8616(
@@ -11220,7 +12413,7 @@ def _replace_proven_while_stack_update_8616(
     if not isinstance(guard_addr, int):
         return False
     candidates: list[
-        tuple[list[StructuredAstValue], int, structured_c.CAssignment]
+        tuple[list[StructuredAstValue], cython.longlong, structured_c.CAssignment]
     ] = []
     nodes = query_index.nodes if query_index is not None else _iter_structured_c_nodes_8616(root)
     for loop in nodes:
@@ -11237,6 +12430,7 @@ def _replace_proven_while_stack_update_8616(
     return True
 
 
+@cython.ccall
 def _materialize_proven_stack_update_loop_iterator_8616(
     root: StructuredAstValue,
     project: AngrProjectValue,
@@ -11249,6 +12443,8 @@ def _materialize_proven_stack_update_loop_iterator_8616(
     query_index: StructuredAstQueryIndex8616 | None = None,
 ) -> DirectStackLoopIteratorMaterialization8616:
     """Bind an adjacent binary latch update to exactly one structured ``for`` loop."""
+    condition_range: object
+    node: object
     if query_index is not None:
         query_index.require_root(root)
     guard_addr = _stack_update_fallthrough_guard_addr_8616(
@@ -11263,7 +12459,7 @@ def _materialize_proven_stack_update_loop_iterator_8616(
     for node in nodes:
         if not isinstance(node, structured_c.CForLoop):
             continue
-        if _assignment_lhs_stack_offset_8616(node.initializer) != fact.offset:
+        if operator.ne(_assignment_lhs_stack_offset_8616(node.initializer), fact.offset):
             continue
         condition = node.condition
         condition_range = _instruction_addr_range_in_node_8616(
@@ -11294,14 +12490,18 @@ def _materialize_proven_stack_update_loop_iterator_8616(
     return DirectStackLoopIteratorMaterialization8616(True, True)
 
 
+@cython.ccall
 def _remove_conflicting_tagged_stack_update_assignments_8616(
     root: StructuredAstValue,
     project: AngrProjectValue,
     fact: DirectStackUpdateFact8616,
     *,
     query_index: StructuredAstQueryIndex8616 | None = None,
-) -> int:
+) -> cython.longlong:
     """Remove statement-list stack aliases disproven by a preserved loop update."""
+    statements: object
+    node: object
+    statement: object
     if query_index is not None:
         query_index.require_root(root)
     removed_count = 0
@@ -11316,7 +12516,7 @@ def _remove_conflicting_tagged_stack_update_assignments_8616(
             lhs_offset = _assignment_lhs_stack_offset_8616(statement)
             conflicts_with_fact = (
                 isinstance(lhs_offset, int)
-                and lhs_offset != fact.offset
+                and operator.ne(lhs_offset, fact.offset)
                 and _node_has_instruction_address_8616(
                     statement,
                     project,
@@ -11327,13 +12527,16 @@ def _remove_conflicting_tagged_stack_update_assignments_8616(
                 removed_count += 1
                 continue
             kept_statements.append(statement)
-        if len(kept_statements) != len(statements):
+        if operator.ne(len(kept_statements), len(statements)):
             statements[:] = kept_statements
     return removed_count
 
 
+@cython.ccall
 def _loop_initializer_8616(loop: StructuredAstValue) -> StructuredAstValue:
     """Return the first present loop initializer field."""
+    value: object
+    attr: object
     for attr in ("initializer", "init"):
         if hasattr(loop, attr):
             with contextlib.suppress(Exception):
@@ -11343,10 +12546,13 @@ def _loop_initializer_8616(loop: StructuredAstValue) -> StructuredAstValue:
     return None
 
 
+@cython.ccall
 def _loop_iterator_8616(
     loop: StructuredAstValue,
 ) -> tuple[str | None, StructuredAstValue]:
     """Return the first present loop iterator field and its attribute name."""
+    value: object
+    attr: object
     for attr in ("iterator", "iteration"):
         if hasattr(loop, attr):
             with contextlib.suppress(Exception):
@@ -11356,7 +12562,7 @@ def _loop_iterator_8616(
     return None, None
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _LoopIteratorRewriter8616:
     """Rewrite placeholder loop iterators for a proven stack update."""
 
@@ -11366,21 +12572,25 @@ class _LoopIteratorRewriter8616:
     delta: StructuredAstValue
     replacement_factory: StructuredAstValue
     source_expr: StructuredAstValue
-    seen: set[int]
-    changed: bool = False
+    seen: object
+    changed: cython.bint = False
 
-    def _is_placeholder_iterator_8616(self, iterator: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_placeholder_iterator_8616(self, iterator: object) -> cython.bint:
         """Return whether the iterator does not own the target stack offset."""
         if iterator is None:
             return False
         if isinstance(iterator, structured_c.CAssignment):
-            return bool(_assignment_lhs_stack_offset_8616(iterator) != self.target_offset)
+            return bool(operator.ne(_assignment_lhs_stack_offset_8616(iterator), self.target_offset))
         return True
 
+    @cython.ccall
     def maybe_rewrite_loop(self, loop: StructuredAstValue) -> None:
         """Rewrite the loop iterator when it is a placeholder for this update."""
+        condition: object
+        iterator_attr: object
         initializer = _loop_initializer_8616(loop)
-        if _assignment_lhs_stack_offset_8616(initializer) != self.target_offset:
+        if operator.ne(_assignment_lhs_stack_offset_8616(initializer), self.target_offset):
             return
         condition = getattr(loop, "condition", None) or getattr(loop, "cond", None)
         if condition is not None and not _expr_reads_stack_offset_8616(
@@ -11401,8 +12611,10 @@ class _LoopIteratorRewriter8616:
         setattr(loop, iterator_attr, replacement)
         self.changed = True
 
-    def walk(self, node: StructuredAstValue) -> None:
+    @cython.ccall
+    def walk(self, node: object) -> None:
         """Walk the structured-C tree and rewrite matching loop iterators."""
+        item: object
         if node is None:
             return
         if isinstance(node, (list, tuple)):
@@ -11419,8 +12631,13 @@ class _LoopIteratorRewriter8616:
             return
         self._walk_children_8616(node)
 
+    @cython.ccall
     def _walk_children_8616(self, node: StructuredAstValue) -> None:
         """Recurse into loop-bearing attributes and condition/body pairs."""
+        condition_and_nodes: object
+        attr: object
+        body: object
+        condition: object
         for attr in (
             "statements",
             "body",
@@ -11440,16 +12657,18 @@ class _LoopIteratorRewriter8616:
                 self.walk(body)
 
 
+@cython.ccall
 def _replace_stack_update_loop_iterator_8616(
     root: StructuredAstValue,
     cvar: StructuredAstValue,
-    width: int,
-    delta: int,
+    width: cython.longlong,
+    delta: cython.longlong,
     replacement_factory: StructuredAstValue,
     source_expr: StructuredAstValue = None,
     *,
     query_index: StructuredAstQueryIndex8616 | None = None,
-) -> bool:
+) -> cython.bint:
+    node: object
     target_offset = _c_expr_stack_offset_8616(cvar)
     if not isinstance(target_offset, int):
         return False
@@ -11472,8 +12691,11 @@ def _replace_stack_update_loop_iterator_8616(
     return rewriter.changed
 
 
-def _stack_cvar_identity_8616(cvar: StructuredAstValue) -> tuple[int, int | None] | None:
+@cython.ccall
+def _stack_cvar_identity_8616(cvar: StructuredAstValue) -> object:
     """Return one CVariable's machine-BP identity and storage width."""
+    size: object
+    variable_codegen: object
     if not isinstance(cvar, structured_c.CVariable):
         return None
     variable = cvar.variable
@@ -11497,7 +12719,10 @@ def _stack_cvar_identity_8616(cvar: StructuredAstValue) -> tuple[int, int | None
     return offset, size if isinstance(size, int) else None
 
 
+@cython.ccall
 def _structured_cvar_names_8616(cvar: StructuredAstValue) -> frozenset[str]:
+    name: object
+    obj: object
     names: set[str] = set()
     for obj in (
         cvar,
@@ -11511,6 +12736,7 @@ def _structured_cvar_names_8616(cvar: StructuredAstValue) -> frozenset[str]:
 
 
 def _generated_stack_cvar_names_8616(cvar: StructuredAstValue) -> frozenset[str]:
+    stack_id: object
     stack_id = _stack_cvar_identity_8616(cvar)
     if stack_id is None:
         return frozenset()
@@ -11518,10 +12744,13 @@ def _generated_stack_cvar_names_8616(cvar: StructuredAstValue) -> frozenset[str]
     names = set(_structured_cvar_names_8616(cvar))
     with contextlib.suppress(Exception):
         names.add(_stack_object_name(offset))
-    return frozenset(name for name in names if isinstance(name, str) and name)
+    return frozenset(name for name in iter(names) if isinstance(name, str) and name)
 
 
-def _same_stack_cvar_8616(lhs: StructuredAstValue, rhs: StructuredAstValue) -> bool:
+@cython.ccall
+def _same_stack_cvar_8616(lhs: StructuredAstValue, rhs: StructuredAstValue) -> cython.bint:
+    lhs_id: object
+    rhs_id: object
     lhs = _strip_casts_8616(lhs)
     rhs = _strip_casts_8616(rhs)
     if isinstance(lhs, structured_c.CIndexedVariable) and isinstance(rhs, structured_c.CIndexedVariable):
@@ -11533,7 +12762,7 @@ def _same_stack_cvar_8616(lhs: StructuredAstValue, rhs: StructuredAstValue) -> b
     lhs_id = _stack_cvar_identity_8616(lhs)
     rhs_id = _stack_cvar_identity_8616(rhs)
     if lhs_id is not None and rhs_id is not None:
-        return lhs_id == rhs_id
+        return operator.eq(lhs_id, rhs_id)
     if lhs_id is None and rhs_id is None:
         return False
 
@@ -11545,7 +12774,10 @@ def _same_stack_cvar_8616(lhs: StructuredAstValue, rhs: StructuredAstValue) -> b
     return bool(generated_names & _structured_cvar_names_8616(other_cvar))
 
 
-def _same_stack_low_half_cvar_8616(lhs: StructuredAstValue, rhs: StructuredAstValue) -> bool:
+@cython.ccall
+def _same_stack_low_half_cvar_8616(lhs: StructuredAstValue, rhs: StructuredAstValue) -> cython.bint:
+    lhs_id: object
+    rhs_id: object
     lhs_id = _stack_cvar_identity_8616(_strip_casts_8616(lhs))
     rhs_id = _stack_cvar_identity_8616(_strip_casts_8616(rhs))
     if lhs_id is None or rhs_id is None:
@@ -11557,16 +12789,18 @@ def _same_stack_low_half_cvar_8616(lhs: StructuredAstValue, rhs: StructuredAstVa
     )
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _LowHalfRebinder8616:
     """Rebind proven low-half reads of a widened stack object to the wide object."""
 
     wide_cvar: StructuredAstValue
-    seen: set[int]
-    changed_count: int = 0
+    seen: object
+    changed_count: cython.longlong = 0
 
+    @cython.ccall
     def transform(self, node: StructuredAstValue) -> StructuredAstValue:
         """Replace matching low-half reads with a typed wide-owner projection."""
+        projected: object
         if node is self.wide_cvar:
             return node
         if isinstance(node, structured_c.CVariable) and _same_stack_low_half_cvar_8616(
@@ -11587,7 +12821,8 @@ class _LowHalfRebinder8616:
                 return projected
         return node
 
-    def visit(self, node: StructuredAstValue) -> None:
+    @cython.ccall
+    def visit(self, node: object) -> None:
         """Walk structured-C nodes and apply low-half rebinding."""
         if node is None or not type(node).__module__.startswith(
             "angr.analyses.decompiler.structured_codegen"
@@ -11600,8 +12835,13 @@ class _LowHalfRebinder8616:
         self._visit_attr_children_8616(node)
         self._visit_condition_pairs_8616(node)
 
+    @cython.ccall
     def _visit_attr_children_8616(self, node: StructuredAstValue) -> None:
         """Transform and recurse into each child-bearing attribute."""
+        value: object
+        attr: object
+        index: object
+        item: object
         for attr in (
             "statements",
             "rhs",
@@ -11637,8 +12877,12 @@ class _LowHalfRebinder8616:
                         value = replacement
                     self.visit(value)
 
+    @cython.ccall
     def _visit_condition_pairs_8616(self, node: StructuredAstValue) -> None:
         """Transform and recurse into condition/body pairs."""
+        condition_and_nodes: object
+        body: object
+        condition: object
         condition_and_nodes = getattr(node, "condition_and_nodes", None)
         if condition_and_nodes:
             new_pairs = []
@@ -11656,7 +12900,8 @@ class _LowHalfRebinder8616:
                     node.condition_and_nodes = new_pairs
 
 
-def _rebind_low_half_stack_reads_to_wide_cvar_8616(root: StructuredAstValue, wide_cvar: StructuredAstValue) -> int:
+@cython.ccall
+def _rebind_low_half_stack_reads_to_wide_cvar_8616(root: object, wide_cvar: object) -> cython.longlong:
     """Rebind proven low-half reads of a widened stack object to the wide object."""
     if root is None or wide_cvar is None:
         return 0
@@ -11668,7 +12913,8 @@ def _rebind_low_half_stack_reads_to_wide_cvar_8616(root: StructuredAstValue, wid
     return rebinder.changed_count
 
 
-def _sim_memory_identity_8616(variable: StructuredAstValue) -> tuple[str, StructuredAstValue] | None:
+@cython.ccall
+def _sim_memory_identity_8616(variable: StructuredAstValue) -> object:
     """Return the memory-space identity for a SimMemoryVariable."""
     if isinstance(variable, SimMemoryVariable):
         addr = variable.addr
@@ -11677,7 +12923,8 @@ def _sim_memory_identity_8616(variable: StructuredAstValue) -> tuple[str, Struct
     return None
 
 
-def _sim_register_identity_8616(variable: StructuredAstValue) -> tuple[str, StructuredAstValue] | None:
+@cython.ccall
+def _sim_register_identity_8616(variable: StructuredAstValue) -> object:
     """Return the register-space identity for a SimRegisterVariable."""
     if isinstance(variable, SimRegisterVariable):
         reg = variable.reg
@@ -11690,7 +12937,8 @@ def _sim_register_identity_8616(variable: StructuredAstValue) -> tuple[str, Stru
     return None
 
 
-def _sim_stack_identity_8616(variable: StructuredAstValue) -> tuple[str, StructuredAstValue] | None:
+@cython.ccall
+def _sim_stack_identity_8616(variable: StructuredAstValue) -> object:
     """Return the stack-space identity for a SimStackVariable."""
     if isinstance(variable, SimStackVariable):
         offset = variable.offset
@@ -11703,9 +12951,10 @@ def _sim_stack_identity_8616(variable: StructuredAstValue) -> tuple[str, Structu
     return None
 
 
+@cython.ccall
 def _generic_name_identity_8616(
     variable: StructuredAstValue, node: StructuredAstValue
-) -> tuple[str, StructuredAstValue] | None:
+) -> object:
     """Return the name identity for a variable or its carrier node."""
     name = getattr(variable, "name", None) or node.name
     if isinstance(name, str) and name and not name.startswith(("vvar_", "tmp_", "ir_")):
@@ -11713,7 +12962,10 @@ def _generic_name_identity_8616(
     return None
 
 
-def _semantic_cvar_identity_8616(node: StructuredAstValue) -> tuple[str, StructuredAstValue] | None:
+@cython.ccall
+def _semantic_cvar_identity_8616(node: StructuredAstValue) -> object:
+    identity: object
+    variable: object
     node = _strip_casts_8616(node)
     identity = (
         _sim_memory_identity_8616(node)
@@ -11735,15 +12987,19 @@ def _semantic_cvar_identity_8616(node: StructuredAstValue) -> tuple[str, Structu
 
 def _same_function_call_rhs_8616(
     lhs: StructuredAstValue, rhs: StructuredAstValue
-) -> bool:
+) -> cython.bint:
     """Return whether two call expressions share callee and arguments."""
+    lhs_name: object
+    lhs_target: object
+    rhs_name: object
+    rhs_target: object
     lhs_target = _function_call_target_addr_8616(lhs)
     rhs_target = _function_call_target_addr_8616(rhs)
     if lhs_target is not None or rhs_target is not None:
         same_callee = (
             lhs_target is not None
             and rhs_target is not None
-            and lhs_target == rhs_target
+            and operator.eq(lhs_target, rhs_target)
         )
     else:
         lhs_name = _function_call_name_8616(lhs)
@@ -11751,19 +13007,20 @@ def _same_function_call_rhs_8616(
         same_callee = (
             lhs_name is not None
             and rhs_name is not None
-            and lhs_name == rhs_name
+            and operator.eq(lhs_name, rhs_name)
         )
     return (
         same_callee
-        and len(lhs.args) == len(rhs.args)
+        and operator.eq(len(lhs.args), len(rhs.args))
         and all(
             _same_stack_move_rhs_8616(lhs_arg, rhs_arg)
-            for lhs_arg, rhs_arg in zip(lhs.args, rhs.args, strict=True)
+            for lhs_arg, rhs_arg in builtins.iter(zip(lhs.args, rhs.args, strict=True))
         )
     )
 
 
-def _same_stack_move_rhs_8616(lhs: StructuredAstValue, rhs: StructuredAstValue) -> bool:
+@cython.ccall
+def _same_stack_move_rhs_8616(lhs: StructuredAstValue, rhs: StructuredAstValue) -> cython.bint:
     if isinstance(lhs, CSemanticCast8616) or isinstance(
         rhs,
         CSemanticCast8616,
@@ -11777,9 +13034,8 @@ def _same_stack_move_rhs_8616(lhs: StructuredAstValue, rhs: StructuredAstValue) 
         rhs_type = rhs.dst_type
         return (
             type(lhs_type) is type(rhs_type)
-            and getattr(lhs_type, "size", None) == getattr(rhs_type, "size", None)
-            and getattr(lhs_type, "signed", None)
-            == getattr(rhs_type, "signed", None)
+            and operator.eq(getattr(lhs_type, "size", None), getattr(rhs_type, "size", None))
+            and operator.eq(getattr(lhs_type, "signed", None), getattr(rhs_type, "signed", None))
             and _same_stack_move_rhs_8616(lhs.expr, rhs.expr)
         )
     lhs = _strip_casts_8616(lhs)
@@ -11795,49 +13051,58 @@ def _same_stack_move_rhs_8616(lhs: StructuredAstValue, rhs: StructuredAstValue) 
         )
     if isinstance(lhs, structured_c.CBinaryOp) and isinstance(rhs, structured_c.CBinaryOp):
         return (
-            lhs.op == rhs.op
+            operator.eq(lhs.op, rhs.op)
             and _same_stack_move_rhs_8616(lhs.lhs, rhs.lhs)
             and _same_stack_move_rhs_8616(lhs.rhs, rhs.rhs)
         )
     if isinstance(lhs, structured_c.CUnaryOp) and isinstance(rhs, structured_c.CUnaryOp):
-        return lhs.op == rhs.op and _same_stack_move_rhs_8616(
+        return operator.eq(lhs.op, rhs.op) and _same_stack_move_rhs_8616(
             lhs.operand, rhs.operand
         )
     if isinstance(lhs, structured_c.CVariableField) and isinstance(rhs, structured_c.CVariableField):
         return (
-            lhs.field.field == rhs.field.field
-            and lhs.field.offset == rhs.field.offset
+            operator.eq(lhs.field.field, rhs.field.field)
+            and operator.eq(lhs.field.offset, rhs.field.offset)
             and _same_stack_move_rhs_8616(lhs.variable, rhs.variable)
         )
     return _same_scalar_move_rhs_8616(lhs, rhs)
 
 
-def _same_scalar_move_rhs_8616(lhs: StructuredAstValue, rhs: StructuredAstValue) -> bool:
+@cython.ccall
+def _same_scalar_move_rhs_8616(lhs: StructuredAstValue, rhs: StructuredAstValue) -> cython.bint:
     """Return whether two leaf expressions carry the same scalar identity."""
+    lhs_identity: object
+    lhs_stack_id: object
+    rhs_identity: object
+    rhs_stack_id: object
     lhs_stack_id = _stack_cvar_identity_8616(lhs)
     rhs_stack_id = _stack_cvar_identity_8616(rhs)
     if lhs_stack_id is not None or rhs_stack_id is not None:
-        return lhs_stack_id is not None and lhs_stack_id == rhs_stack_id
+        return lhs_stack_id is not None and operator.eq(lhs_stack_id, rhs_stack_id)
     lhs_identity = _semantic_cvar_identity_8616(lhs)
     rhs_identity = _semantic_cvar_identity_8616(rhs)
     if lhs_identity is not None or rhs_identity is not None:
-        return lhs_identity is not None and lhs_identity == rhs_identity
+        return lhs_identity is not None and operator.eq(lhs_identity, rhs_identity)
     if isinstance(lhs, structured_c.CConstant) and isinstance(rhs, structured_c.CConstant):
-        return bool(lhs.value == rhs.value)
+        return bool(operator.eq(lhs.value, rhs.value))
     return lhs is rhs
 
 
-def _is_control_statement_8616(stmt: StructuredAstValue) -> bool:
-    return any(hasattr(stmt, attr) for attr in ("condition_and_nodes", "body", "else_node", "iterator", "iteration"))
+def _is_control_statement_8616(stmt: StructuredAstValue) -> cython.bint:
+    return any(hasattr(stmt, attr) for attr in iter(("condition_and_nodes", "body", "else_node", "iterator", "iteration")))
 
 
+@cython.ccall
 def _direct_stack_move_first_control_addr_8616(root: StructuredAstValue, project: StructuredAstValue) -> int | None:
+    cached: object
+    first_control_addr: object
+    node: object
     cached = getattr(root, "_inertia_direct_stack_move_first_control_addr_8616", None)
     if isinstance(cached, int):
         return cached
     if cached is False:
         return None
-    first_control_addr: int | None = None
+    first_control_addr = None
     for node in _iter_structured_c_nodes_8616(root):
         if not _is_control_statement_8616(node):
             continue
@@ -11849,30 +13114,40 @@ def _direct_stack_move_first_control_addr_8616(root: StructuredAstValue, project
     return first_control_addr
 
 
+@cython.ccall
 def _direct_stack_move_is_before_first_control_8616(
-    root: StructuredAstValue, project: StructuredAstValue, ins_addr: int
-) -> bool:
+    root: StructuredAstValue, project: StructuredAstValue, ins_addr: cython.longlong
+) -> cython.bint:
+    first_control_addr: object
     first_control_addr = _direct_stack_move_first_control_addr_8616(root, project)
     return first_control_addr is None or int(ins_addr) < first_control_addr
 
 
+@cython.ccall
 def _direct_stack_move_is_before_known_first_control_8616(
-    root: StructuredAstValue, project: StructuredAstValue, ins_addr: int
-) -> bool:
+    root: StructuredAstValue, project: StructuredAstValue, ins_addr: cython.longlong
+) -> cython.bint:
     first_control_addr = _direct_stack_move_first_control_addr_8616(root, project)
     return isinstance(first_control_addr, int) and int(ins_addr) < first_control_addr
 
 
+@cython.ccall
 def _direct_stack_move_first_machine_control_addr_8616(
-    function: StructuredAstValue, project: StructuredAstValue, ins_addr: int
+    function: StructuredAstValue, project: StructuredAstValue, ins_addr: cython.longlong
 ) -> int | None:
-    first_control_addr: int | None = None
+    address: object
+    capstone: object
+    first_control_addr: object
+    insn: object
+    block: object
+    wrapped: object
+    first_control_addr = None
     for block in _boundary_tuple_8616(getattr(function, "blocks", ()) or ()):
         capstone = getattr(block, "capstone", None)
         for wrapped in _boundary_tuple_8616(getattr(capstone, "insns", ()) or ()):
             insn = getattr(wrapped, "insn", wrapped)
             groups = frozenset(getattr(insn, "groups", ()) or ())
-            if X86_GRP_JUMP not in groups and X86_GRP_RET not in groups and getattr(insn, "id", None) != X86_INS_RET:
+            if X86_GRP_JUMP not in groups and X86_GRP_RET not in groups and operator.ne(getattr(insn, "id", None), X86_INS_RET):
                 continue
             address = getattr(insn, "address", None)
             if not isinstance(address, int):
@@ -11883,17 +13158,20 @@ def _direct_stack_move_first_machine_control_addr_8616(
     return first_control_addr
 
 
+@cython.ccall
 def _direct_stack_move_is_before_known_precontrol_8616(
-    root: StructuredAstValue, project: StructuredAstValue, function: StructuredAstValue, ins_addr: int
-) -> bool:
+    root: StructuredAstValue, project: StructuredAstValue, function: StructuredAstValue, ins_addr: cython.longlong
+) -> cython.bint:
     machine_control_addr = _direct_stack_move_first_machine_control_addr_8616(function, project, ins_addr)
     if isinstance(machine_control_addr, int):
         return int(ins_addr) < machine_control_addr
     return _direct_stack_move_is_before_known_first_control_8616(root, project, ins_addr)
 
 
-def _call_name_from_expr_8616(expr: StructuredAstValue) -> str | None:
+@cython.ccall
+def _call_name_from_expr_8616(expr: StructuredAstValue) -> object:
     """Return the normalized helper name of a direct structured-C call."""
+    callee: object
     expr = _strip_casts_8616(expr)
     if not isinstance(expr, structured_c.CFunctionCall):
         return None
@@ -11905,7 +13183,7 @@ def _call_name_from_expr_8616(expr: StructuredAstValue) -> str | None:
     return name.lstrip("_") if isinstance(name, str) and name.strip() else None
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _PrecontrolReplacer8616:
     """Replace the first proven pre-control assignment to one stack object."""
 
@@ -11914,10 +13192,15 @@ class _PrecontrolReplacer8616:
     replacement: StructuredAstValue
     allow_low_half_lhs: StructuredAstValue
     insert_before_control_when_no_match: StructuredAstValue
-    refused: list[str] = field(default_factory=list)
+    refused: object = field(default_factory=list)
 
-    def scan_container(self, container: StructuredAstValue, path: str) -> bool:
+    @cython.ccall
+    def scan_container(self, container: StructuredAstValue, path: object) -> cython.bint:
         """Scan one statement container for the replaceable pre-control store."""
+        result: object
+        statements: object
+        index: object
+        stmt: object
         statements = getattr(container, "statements", None)
         if not isinstance(statements, list):
             self.refused.append(f"no-statements:path={path}:type={type(container).__name__}")
@@ -11928,14 +13211,16 @@ class _PrecontrolReplacer8616:
                 return result
         return False
 
+    @cython.ccall
     def _process_statement_8616(
         self,
-        statements: list[StructuredAstValue],
-        index: int,
+        statements: object,
+        index: cython.longlong,
         stmt: StructuredAstValue,
-        item_path: str,
+        item_path: object,
     ) -> bool | None:
         """Dispatch one statement; None means keep scanning this container."""
+        nested: object
         if _is_control_statement_8616(stmt):
             return self._control_gate_8616(statements, index, stmt, item_path)
         nested = getattr(stmt, "statements", None)
@@ -11968,13 +13253,14 @@ class _PrecontrolReplacer8616:
         statements[index] = self.replacement
         return True
 
+    @cython.ccall
     def _control_gate_8616(
         self,
-        statements: list[StructuredAstValue],
-        index: int,
+        statements: object,
+        index: cython.longlong,
         stmt: StructuredAstValue,
-        item_path: str,
-    ) -> bool:
+        item_path: object,
+    ) -> cython.bint:
         """Stop at control flow, optionally inserting just before it."""
         self.refused.append(
             f"control-before-match:path={item_path}:type={type(stmt).__name__}"
@@ -11994,14 +13280,15 @@ class _PrecontrolReplacer8616:
         return False
 
 
+@cython.ccall
 def _replace_precontrol_stack_assignment_8616(
     root: StructuredAstValue,
     dst_cvar: StructuredAstValue,
     replacement: StructuredAstValue,
     *,
-    allow_low_half_lhs: bool = False,
-    insert_before_control_when_no_match: bool = False,
-) -> bool:
+    allow_low_half_lhs: cython.bint = False,
+    insert_before_control_when_no_match: cython.bint = False,
+) -> cython.bint:
     """Replace the first proven pre-control assignment to one stack object."""
     replacer = _PrecontrolReplacer8616(
         root=root,
@@ -12016,13 +13303,16 @@ def _replace_precontrol_stack_assignment_8616(
     return False
 
 
+@cython.ccall
 def _prune_wide_call_return_carriers_8616(
     root: StructuredAstValue,
     project: AngrProjectValue,
     fact: DirectStackMoveFact8616,
     dst_cvar: StructuredAstValue,
-) -> int:
+) -> cython.longlong:
     """Remove exact low-half call carriers consumed by a proven wide assignment."""
+    node: object
+    stmt: object
     if (
         fact.source_kind is not DirectStackMoveSourceKind8616.WIDE_CALL_RETURN_STACK_ARITH
         or not isinstance(fact.source_call_ins_addr, int)
@@ -12047,13 +13337,13 @@ def _prune_wide_call_return_carriers_8616(
                     _same_stack_cvar_8616(stmt.lhs, dst_cvar)
                     or _same_stack_low_half_cvar_8616(stmt.lhs, dst_cvar)
                 )
-                and _call_name_from_expr_8616(stmt.rhs) == expected_call_name
+                and operator.eq(_call_name_from_expr_8616(stmt.rhs), expected_call_name)
             )
             if is_exact_carrier:
                 removed += 1
             else:
                 retained.append(stmt)
-        if len(retained) != len(node.statements):
+        if operator.ne(len(retained), len(node.statements)):
             node.statements[:] = retained
     return removed
 
@@ -12062,8 +13352,10 @@ def _prune_wide_call_return_decomposition_8616(
     root: StructuredAstValue,
     project: AngrProjectValue,
     fact: DirectStackMoveFact8616,
-) -> int:
+) -> cython.longlong:
     """Remove pure split-word assignments consumed by one proven wide operation."""
+    node: object
+    stmt: object
     if fact.source_kind is not DirectStackMoveSourceKind8616.WIDE_CALL_RETURN_STACK_ARITH:
         return 0
     low_arith_addr = fact.source_low_arith_ins_addr
@@ -12095,24 +13387,25 @@ def _prune_wide_call_return_decomposition_8616(
                     isinstance(lhs_variable, SimRegisterVariable)
                     and any(
                         _node_has_instruction_address_8616(stmt, project, address)
-                        for address in register_assignment_addrs
+                        for address in iter(register_assignment_addrs)
                     )
                 ) or (
                     isinstance(lhs_variable, SimStackVariable)
                     and any(
                         _node_has_instruction_address_8616(stmt, project, address)
-                        for address in (low_store_addr, high_store_addr)
+                        for address in iter((low_store_addr, high_store_addr))
                     )
                 )
             if remove_assignment:
                 removed += 1
             else:
                 retained.append(stmt)
-        if len(retained) != len(node.statements):
+        if operator.ne(len(retained), len(node.statements)):
             node.statements[:] = retained
     return removed
 
 
+@cython.ccall
 def _wide_call_return_direct_call_8616(node: StructuredAstValue) -> StructuredAstValue | None:
     """Return the direct call carried by one expression or statement."""
     current = _strip_casts_8616(node)
@@ -12125,12 +13418,14 @@ def _wide_call_return_direct_call_8616(node: StructuredAstValue) -> StructuredAs
     return None
 
 
+@cython.ccall
 def _call_return_call_matches_fact_8616(
     node: StructuredAstValue,
     project: AngrProjectValue,
     fact: DirectStackMoveFact8616,
-) -> bool:
+) -> cython.bint:
     """Match one call against the exact binary callsite and target evidence."""
+    call: object
     if not isinstance(fact.source_call_ins_addr, int):
         return False
     call = _wide_call_return_direct_call_8616(node)
@@ -12155,13 +13450,17 @@ def _call_return_call_matches_fact_8616(
     return name_matches or target_matches
 
 
+@cython.ccall
 def _wide_call_return_assignment_matches_fact_8616(
     node: StructuredAstValue,
     project: AngrProjectValue,
     fact: DirectStackMoveFact8616,
     dst_cvar: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Match one already-materialized wide assignment to its binary fact."""
+    stack_identity: object
+    call_candidate: object
+    stack_candidate: object
     if (
         not isinstance(node, structured_c.CAssignment)
         or not _same_stack_cvar_8616(node.lhs, dst_cvar)
@@ -12169,7 +13468,7 @@ def _wide_call_return_assignment_matches_fact_8616(
     ):
         return False
     rhs = _strip_casts_8616(node.rhs)
-    if not isinstance(rhs, structured_c.CBinaryOp) or rhs.op != DirectStackMoveExpressionOp8616.ADD.value:
+    if not isinstance(rhs, structured_c.CBinaryOp) or operator.ne(rhs.op, DirectStackMoveExpressionOp8616.ADD.value):
         return False
     for call_candidate, stack_candidate in ((rhs.lhs, rhs.rhs), (rhs.rhs, rhs.lhs)):
         if not _call_return_call_matches_fact_8616(
@@ -12183,20 +13482,22 @@ def _wide_call_return_assignment_matches_fact_8616(
             continue
         stack_offset, stack_size = stack_identity
         if (
-            stack_offset == _canonical_stack_offset_8616(fact.source_offset)
+            operator.eq(stack_offset, _canonical_stack_offset_8616(fact.source_offset))
             and (not isinstance(stack_size, int) or stack_size >= fact.width)
         ):
             return True
     return False
 
 
+@cython.ccall
 def _zero_arg_call_return_assignment_matches_fact_8616(
     node: StructuredAstValue,
     project: AngrProjectValue,
     fact: DirectStackMoveFact8616,
     dst_cvar: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Match a direct assignment or its preserved call-carrier bridge."""
+    bridge: object
     bridge = word_call_bridge_projection_8616(node)
     carrier, node = bridge if bridge is not None else (node, node)
     if not isinstance(node, structured_c.CAssignment) or not _same_stack_cvar_8616(
@@ -12217,7 +13518,7 @@ def _tree_has_zero_arg_call_return_assignment_8616(
     project: AngrProjectValue,
     fact: DirectStackMoveFact8616,
     dst_cvar: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Return whether the exact callsite-to-local assignment remains materialized."""
     return any(
         _zero_arg_call_return_assignment_matches_fact_8616(
@@ -12226,23 +13527,24 @@ def _tree_has_zero_arg_call_return_assignment_8616(
             fact,
             dst_cvar,
         )
-        for node in _iter_structured_c_nodes_8616(root)
+        for node in builtins.iter(_iter_structured_c_nodes_8616(root))
     )
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _WideCallReturnReconciler8616:
     """Remove replay artifacts while retaining the proven wide assignment."""
 
     project: AngrProjectValue
     fact: DirectStackMoveFact8616
     dst_cvar: StructuredAstValue
-    matching_assignment_ids: tuple[int, ...]
-    retained_assignment_id: int
-    removed: int = 0
-    seen: set[int] = field(default_factory=set)
+    matching_assignment_ids: object
+    retained_assignment_id: cython.longlong
+    removed: cython.longlong = 0
+    seen: object = field(default_factory=set)
 
-    def _is_replayed_call_carrier_8616(self, statement: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _is_replayed_call_carrier_8616(self, statement: StructuredAstValue) -> cython.bint:
         """Return whether one statement duplicates the consumed call result."""
         if not _call_return_call_matches_fact_8616(statement, self.project, self.fact):
             return False
@@ -12258,8 +13560,15 @@ class _WideCallReturnReconciler8616:
             (structured_c.CExpressionStatement, structured_c.CFunctionCall),
         )
 
-    def visit(self, node: StructuredAstValue) -> None:
+    @cython.ccall
+    def visit(self, node: object) -> None:
         """Remove replay artifacts from mutable structured statement lists."""
+        pairs: object
+        statements: object
+        _condition: object
+        attr: object
+        body: object
+        statement: object
         if node is None or id(node) in self.seen:
             return
         self.seen.add(id(node))
@@ -12269,7 +13578,7 @@ class _WideCallReturnReconciler8616:
             for statement in tuple(statements):
                 duplicate_assignment = (
                     id(statement) in self.matching_assignment_ids
-                    and id(statement) != self.retained_assignment_id
+                    and operator.ne(id(statement), self.retained_assignment_id)
                 )
                 if duplicate_assignment or self._is_replayed_call_carrier_8616(statement):
                     self.removed += 1
@@ -12290,12 +13599,12 @@ def _reconcile_materialized_wide_call_return_assignment_8616(
     project: AngrProjectValue,
     fact: DirectStackMoveFact8616,
     dst_cvar: StructuredAstValue,
-) -> tuple[bool, int]:
+) -> tuple[cython.bint, cython.longlong]:
     """Keep one proven wide assignment and remove exact replay artifacts."""
     matching_assignment_ids = tuple(
         dict.fromkeys(
             id(node)
-            for node in _iter_structured_c_nodes_8616(root)
+            for node in builtins.iter(_iter_structured_c_nodes_8616(root))
             if _wide_call_return_assignment_matches_fact_8616(
                 node,
                 project,
@@ -12317,9 +13626,12 @@ def _reconcile_materialized_wide_call_return_assignment_8616(
     return True, reconciler.removed
 
 
-def _direct_stack_move_materialized_ins_addrs_8616(codegen: StructuredCodegenValue) -> frozenset[int]:
+@cython.ccall
+def _direct_stack_move_materialized_ins_addrs_8616(codegen: StructuredCodegenValue) -> frozenset[cython.longlong]:
+    value: object
+    record: object
     evidence = getattr(codegen, "_inertia_direct_stack_move_evidence_8616", ()) or ()
-    materialized: set[int] = set()
+    materialized: set[cython.longlong] = set()
     for record in evidence:
         if isinstance(record, Mapping):
             value = record.get("ins_addr")
@@ -12333,18 +13645,22 @@ def _direct_stack_move_materialized_ins_addrs_8616(codegen: StructuredCodegenVal
     return frozenset(materialized)
 
 
+@cython.ccall
 def _tree_has_assignment_for_instruction_addr_8616(
-    root: StructuredAstValue, project: AngrProjectValue, ins_addr: int
-) -> bool:
+    root: StructuredAstValue, project: AngrProjectValue, ins_addr: cython.longlong
+) -> cython.bint:
+    node: object
     for node in _iter_structured_c_nodes_8616(root):
         if isinstance(node, structured_c.CAssignment) and _node_has_instruction_address_8616(node, project, ins_addr):
             return True
     return False
 
 
+@cython.ccall
 def _tree_has_stack_assignment_for_instruction_addr_8616(
-    root: StructuredAstValue, project: StructuredAstValue, ins_addr: int, dst_cvar: StructuredAstValue
-) -> bool:
+    root: StructuredAstValue, project: StructuredAstValue, ins_addr: cython.longlong, dst_cvar: StructuredAstValue
+) -> cython.bint:
+    node: object
     for node in _iter_structured_c_nodes_8616(root):
         if not isinstance(node, structured_c.CAssignment):
             continue
@@ -12355,6 +13671,7 @@ def _tree_has_stack_assignment_for_instruction_addr_8616(
     return False
 
 
+@cython.ccall
 def _direct_stack_move_fact_key_8616(fact: DirectStackMoveFact8616) -> tuple[StructuredAstValue, ...]:
     return (
         fact.dst_offset,
@@ -12391,7 +13708,8 @@ def _direct_stack_move_fact_key_8616(fact: DirectStackMoveFact8616) -> tuple[Str
     )
 
 
-def _direct_stack_move_evidence_key_8616(record: StructuredAstValue) -> tuple[StructuredAstValue, ...] | None:
+@cython.ccall
+def _direct_stack_move_evidence_key_8616(record: StructuredAstValue) -> object:
     if isinstance(record, Mapping):
         values = record
     else:
@@ -12436,9 +13754,12 @@ def _direct_stack_move_evidence_key_8616(record: StructuredAstValue) -> tuple[St
     )
 
 
+@cython.ccall
 def _direct_stack_move_materialized_fact_keys_8616(
     codegen: StructuredCodegenValue,
 ) -> frozenset[tuple[StructuredAstValue, ...]]:
+    key: object
+    record: object
     evidence = getattr(codegen, "_inertia_direct_stack_move_evidence_8616", ()) or ()
     materialized: set[tuple[StructuredAstValue, ...]] = set()
     for record in evidence:
@@ -12448,6 +13769,7 @@ def _direct_stack_move_materialized_fact_keys_8616(
     return frozenset(materialized)
 
 
+@cython.ccall
 def _record_direct_stack_move_evidence_8616(
     codegen: StructuredCodegenValue,
     fact: DirectStackMoveFact8616,
@@ -12490,21 +13812,23 @@ def _record_direct_stack_move_evidence_8616(
         getattr(codegen, "_inertia_direct_stack_move_evidence_8616", ()) or ()
     )
     codegen._inertia_direct_stack_move_evidence_8616 = tuple(
-        dict.fromkeys((*evidence, record))
+        dict.fromkeys(tuple(evidence) + (record,))
     )
 
 
+@cython.ccall
 def _tree_has_materialized_signed_idiv_remainder_8616(
     root: StructuredAstValue,
     fact: DirectStackMoveFact8616,
     dst_cvar: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Recognize an evidence-backed signed-IDIV assignment after carrier use."""
+    node: object
     if fact.source_kind is not DirectStackMoveSourceKind8616.SIGNED_IDIV_REMAINDER:
         return False
     instruction_addrs = {
         address
-        for address in (fact.source_call_ins_addr, fact.ins_addr)
+        for address in iter((fact.source_call_ins_addr, fact.ins_addr))
         if isinstance(address, int)
     }
     if not instruction_addrs:
@@ -12515,27 +13839,28 @@ def _tree_has_materialized_signed_idiv_remainder_8616(
             continue
         if _statement_ins_addr_8616(node) not in instruction_addrs:
             continue
-        if _stack_cvar_identity_8616(node.lhs) != destination_identity:
+        if operator.ne(_stack_cvar_identity_8616(node.lhs), destination_identity):
             continue
         if _expr_has_binary_op_8616(node.rhs, DirectStackMoveExpressionOp8616.MOD):
             return True
     return False
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _SignedIdivArtifactCollector8616:
     """Collect exact signed-remainder artifact assignments with reject counters."""
 
     root: StructuredAstValue
     dst_cvar: StructuredAstValue
-    candidate_stmt_ids: set[int] = field(default_factory=set)
-    candidates: list[tuple[StructuredAstValue, bool]] = field(default_factory=list)
-    artifact_seen_count: int = 0
-    artifact_reject_dst_read_count: int = 0
-    artifact_reject_memory_lhs_count: int = 0
-    artifact_reject_used_lhs_count: int = 0
-    artifact_reject_no_lhs_key_count: int = 0
+    candidate_stmt_ids: object = field(default_factory=set)
+    candidates: object = field(default_factory=list)
+    artifact_seen_count: cython.longlong = 0
+    artifact_reject_dst_read_count: cython.longlong = 0
+    artifact_reject_memory_lhs_count: cython.longlong = 0
+    artifact_reject_used_lhs_count: cython.longlong = 0
+    artifact_reject_no_lhs_key_count: cython.longlong = 0
 
+    @cython.ccall
     def collect_candidate(self, stmt: StructuredAstValue) -> None:
         """Collect one candidate when its artifact is provably dead."""
         if not isinstance(stmt, structured_c.CAssignment):
@@ -12555,8 +13880,10 @@ class _SignedIdivArtifactCollector8616:
         self.candidate_stmt_ids.add(stmt_id)
         self.candidates.append((stmt, exact))
 
-    def _nonexact_lhs_dead_8616(self, stmt: StructuredAstValue, stmt_id: int) -> bool:
+    @cython.ccall
+    def _nonexact_lhs_dead_8616(self, stmt: StructuredAstValue, stmt_id: cython.longlong) -> cython.bint:
         """Return whether a non-exact LHS is provably unused elsewhere."""
+        lhs_key: object
         lhs = _strip_casts_8616(stmt.lhs)
         lhs_key = _c_lvalue_key_8616(lhs)
         lhs_variable = lhs.variable if isinstance(lhs, structured_c.CVariable) else None
@@ -12579,8 +13906,11 @@ def _replace_signed_idiv_remainder_artifact_assignment_8616(
     dst_cvar: StructuredAstValue,
     replacement_factory: StructuredAstValue,
     *,
-    allow_unique_stack_lhs_bridge: bool = False,
+    allow_unique_stack_lhs_bridge: cython.bint = False,
 ) -> DirectStackMoveArtifactReplacementKind8616 | None:
+    _exact: object
+    node: object
+    stmt: object
     collector = _SignedIdivArtifactCollector8616(root=root, dst_cvar=dst_cvar)
     for node in _iter_structured_c_nodes_8616(root):
         collector.collect_candidate(node)
@@ -12589,7 +13919,7 @@ def _replace_signed_idiv_remainder_artifact_assignment_8616(
     root._inertia_signed_idiv_artifact_seen_count_8616 = collector.artifact_seen_count
     root._inertia_signed_idiv_artifact_candidate_count_8616 = len(candidates)
     root._inertia_signed_idiv_artifact_exact_candidate_count_8616 = sum(
-        1 for candidate in candidates if candidate[1]
+        1 for candidate in iter(candidates) if candidate[1]
     )
     root._inertia_signed_idiv_artifact_reject_dst_read_count_8616 = (
         collector.artifact_reject_dst_read_count
@@ -12603,7 +13933,7 @@ def _replace_signed_idiv_remainder_artifact_assignment_8616(
     root._inertia_signed_idiv_artifact_reject_no_lhs_key_count_8616 = (
         collector.artifact_reject_no_lhs_key_count
     )
-    exact_candidates = [candidate for candidate in candidates if candidate[1]]
+    exact_candidates = [candidate for candidate in iter(candidates) if candidate[1]]
     if exact_candidates:
         selected = exact_candidates
         decision = DirectStackMoveArtifactReplacementKind8616.EXACT_DESTINATION_STACK_SLOT
@@ -12635,8 +13965,9 @@ def _replace_signed_idiv_remainder_artifact_assignment_8616(
 
 def _signed_idiv_insert_expression_8616(
     stmt: StructuredAstValue,
-) -> tuple[StructuredAstValue | None, StructuredAstValue] | None:
+) -> object:
     """Return (assignment, expression) when the statement is an INSERT artifact."""
+    assignment: object
     assignment = stmt if isinstance(stmt, structured_c.CAssignment) else None
     if assignment is not None:
         expression = assignment.rhs
@@ -12660,19 +13991,21 @@ def _signed_idiv_insert_expression_8616(
         isinstance(candidate, structured_c.CFunctionCall)
         and _structured_c_intrinsic_8616(candidate)
         is not StructuredCIntrinsic8616.INSERT
-        for candidate in _iter_structured_c_nodes_8616(expression)
+        for candidate in builtins.iter(_iter_structured_c_nodes_8616(expression))
     ):
         return None
     return assignment, expression
 
 
+@cython.ccall
 def _signed_idiv_insert_statement_addr_8616(
     stmt: StructuredAstValue,
     project: AngrProjectValue,
     fact: DirectStackMoveFact8616,
-    call_addr: int,
+    call_addr: cython.longlong,
 ) -> int | None:
     """Resolve the statement address inside the call-to-remainder window."""
+    instruction_range: object
     statement_addr = _statement_instruction_addr_8616(stmt, project, fact.ins_addr)
     if not isinstance(statement_addr, int):
         instruction_range = _instruction_addr_range_in_node_8616(
@@ -12694,12 +14027,14 @@ def _signed_idiv_insert_statement_addr_8616(
     return statement_addr
 
 
+@cython.ccall
 def _signed_idiv_aux_lhs_live_8616(
     root: StructuredAstValue,
     stmt: StructuredAstValue,
     assignment: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Return whether the artifact assignment LHS is still live elsewhere."""
+    lhs_key: object
     lhs = _strip_casts_8616(assignment.lhs)
     lhs_key = _c_lvalue_key_8616(lhs)
     if lhs_key is None:
@@ -12718,14 +14053,17 @@ def _signed_idiv_aux_lhs_live_8616(
     )
 
 
+@cython.ccall
 def _signed_idiv_aux_is_candidate_8616(
     root: StructuredAstValue,
     stmt: StructuredAstValue,
     project: AngrProjectValue,
     fact: DirectStackMoveFact8616,
-    call_addr: int,
-) -> bool:
+    call_addr: cython.longlong,
+) -> cython.bint:
     """Return whether a statement is a removable signed-IDIV INSERT artifact."""
+    assignment: object
+    pair: object
     pair = _signed_idiv_insert_expression_8616(stmt)
     if pair is None:
         return False
@@ -12737,11 +14075,12 @@ def _signed_idiv_aux_is_candidate_8616(
     return not _signed_idiv_aux_lhs_live_8616(root, stmt, assignment)
 
 
+@cython.ccall
 def _prune_signed_idiv_auxiliary_insert_8616(
     root: StructuredAstValue,
     project: AngrProjectValue,
     fact: DirectStackMoveFact8616,
-) -> int:
+) -> cython.longlong:
     """Remove one unused INSERT artifact inside a proven signed-IDIV window.
 
     AIL may emit the widened dividend setup either as an assignment to an
@@ -12749,9 +14088,12 @@ def _prune_signed_idiv_auxiliary_insert_8616(
     Both forms are removable only inside the exact call-to-remainder-store
     instruction window and only after signed-remainder materialization.
     """
+    index: object
+    node: object
+    stmt: object
     if not isinstance(fact.source_call_ins_addr, int):
         return 0
-    candidates: list[tuple[list[StructuredAstValue], int]] = []
+    candidates: list[tuple[list[StructuredAstValue], cython.longlong]] = []
     call_addr = _comparable_instruction_addr_8616(
         project,
         fact.source_call_ins_addr,
@@ -12776,8 +14118,10 @@ def _reconcile_materialized_signed_idiv_call_order_8616(
     codegen: StructuredCodegenValue,
     fact: DirectStackMoveFact8616,
     dst_cvar: StructuredAstValue,
-) -> tuple[bool, int]:
+) -> tuple[cython.bint, cython.longlong]:
     """Move a replayed remainder assignment back to its exact call carrier."""
+    assignment: object
+    call_source_expr: object
     if fact.source_kind is not DirectStackMoveSourceKind8616.SIGNED_IDIV_REMAINDER:
         return False, 0
     call_source_expr = _direct_stack_move_source_expr_8616(
@@ -12835,7 +14179,8 @@ def _reconcile_materialized_signed_idiv_call_order_8616(
     return True, duplicate_count
 
 
-def _comparable_instruction_addr_8616(project: AngrProjectValue, tagged_addr: int, ins_addr: int) -> int:
+def _comparable_instruction_addr_8616(project: AngrProjectValue, tagged_addr: cython.longlong, ins_addr: cython.longlong) -> cython.longlong:
+    delta: object
     variants = [tagged_addr]
     delta = getattr(project, "_inertia_original_linear_delta", None)
     if isinstance(delta, int) and delta:
@@ -12843,7 +14188,10 @@ def _comparable_instruction_addr_8616(project: AngrProjectValue, tagged_addr: in
     return min(variants, key=lambda candidate: abs(candidate - ins_addr))
 
 
-def _statement_instruction_addr_8616(stmt: StructuredAstValue, project: AngrProjectValue, ins_addr: int) -> int | None:
+@cython.ccall
+def _statement_instruction_addr_8616(stmt: StructuredAstValue, project: AngrProjectValue, ins_addr: cython.longlong) -> int | None:
+    tagged_addr: object
+    tags: object
     tags = copy_structured_tags_8616(getattr(stmt, "tags", None))
     if tags is None:
         return None
@@ -12875,14 +14223,17 @@ _NODE_RANGE_CHILD_ATTRS_8616 = (
 )
 
 
+@cython.ccall
 def _extend_child_ranges_8616(
     node: StructuredAstValue,
     project: AngrProjectValue,
-    ins_addr: int,
-    seen: set[int],
-    candidates: list[int],
+    ins_addr: cython.longlong,
+    seen: object,
+    candidates: object,
 ) -> None:
     """Extend candidates with instruction ranges from child attributes."""
+    child_range: object
+    attr: object
     for attr in _NODE_RANGE_CHILD_ATTRS_8616:
         if not hasattr(node, attr):
             continue
@@ -12895,8 +14246,10 @@ def _extend_child_ranges_8616(
 
 
 def _instruction_addr_range_in_node_8616(
-    node: StructuredAstValue, project: AngrProjectValue, ins_addr: int, seen: set[int] | None = None
-) -> tuple[int, int] | None:
+    node: object, project: AngrProjectValue, ins_addr: cython.longlong, seen: object = None
+) -> object:
+    child_range: object
+    condition_and_nodes: object
     if node is None:
         return None
     if seen is None:
@@ -12904,18 +14257,18 @@ def _instruction_addr_range_in_node_8616(
     if isinstance(node, (list, tuple)):
         ranges = [
             item_range
-            for item in tuple(node)
+            for item in builtins.iter(tuple(node))
             if (item_range := _instruction_addr_range_in_node_8616(item, project, ins_addr, seen)) is not None
         ]
         if not ranges:
             return None
-        return min(item[0] for item in ranges), max(item[1] for item in ranges)
+        return min(item[0] for item in iter(ranges)), max(item[1] for item in iter(ranges))
     node_id = id(node)
     if node_id in seen:
         return None
     seen.add(node_id)
 
-    candidates: list[int] = []
+    candidates: list[cython.longlong] = []
     direct_addr = _statement_instruction_addr_8616(node, project, ins_addr)
     if isinstance(direct_addr, int):
         candidates.append(direct_addr)
@@ -12931,14 +14284,16 @@ def _instruction_addr_range_in_node_8616(
     return (min(candidates), max(candidates)) if candidates else None
 
 
+@cython.ccall
 def _extend_child_preceding_addrs_8616(
     node: StructuredAstValue,
     project: AngrProjectValue,
-    ins_addr: int,
-    seen: set[int],
-    candidates: list[int],
+    ins_addr: cython.longlong,
+    seen: object,
+    candidates: object,
 ) -> None:
     """Extend candidates with preceding addresses from child attributes."""
+    attr: object
     for attr in _NODE_RANGE_CHILD_ATTRS_8616:
         if not hasattr(node, attr):
             continue
@@ -12950,9 +14305,11 @@ def _extend_child_preceding_addrs_8616(
             candidates.append(candidate)
 
 
+@cython.ccall
 def _preceding_instruction_addr_in_node_8616(
-    node: StructuredAstValue, project: AngrProjectValue, ins_addr: int, seen: set[int] | None = None
+    node: object, project: AngrProjectValue, ins_addr: cython.longlong, seen: object = None
 ) -> int | None:
+    condition_and_nodes: object
     if node is None:
         return None
     if seen is None:
@@ -12960,7 +14317,7 @@ def _preceding_instruction_addr_in_node_8616(
     if isinstance(node, (list, tuple)):
         nested_candidates = [
             candidate
-            for item in tuple(node)
+            for item in builtins.iter(tuple(node))
             if (candidate := _preceding_instruction_addr_in_node_8616(item, project, ins_addr, seen)) is not None
         ]
         return max(nested_candidates) if nested_candidates else None
@@ -12969,7 +14326,7 @@ def _preceding_instruction_addr_in_node_8616(
         return None
     seen.add(node_id)
 
-    candidates: list[int] = []
+    candidates: list[cython.longlong] = []
     direct_addr = _statement_instruction_addr_8616(node, project, ins_addr)
     if isinstance(direct_addr, int) and direct_addr < ins_addr:
         candidates.append(direct_addr)
@@ -12986,7 +14343,14 @@ def _preceding_instruction_addr_in_node_8616(
 
 
 
-def _instruction_block_addr_map_8616(project: StructuredAstValue, function: StructuredAstValue) -> dict[int, int]:
+def _instruction_block_addr_map_8616(project: StructuredAstValue, function: StructuredAstValue) -> object:
+    block_addr: object
+    cached: object
+    ins_addr: object
+    insn: object
+    project_cache: object
+    block: object
+    wrapper: object
     cached = getattr(function, "_inertia_instruction_block_addr_map_8616", None)
     if isinstance(cached, dict):
         return cached
@@ -12994,7 +14358,7 @@ def _instruction_block_addr_map_8616(project: StructuredAstValue, function: Stru
     cache_key = (
         int(getattr(function, "addr", 0) or 0),
         _boundary_tuple_8616(
-            (int(getattr(block, "addr", 0) or 0), int(getattr(block, "size", 0) or 0)) for block in blocks
+            (int(getattr(block, "addr", 0) or 0), int(getattr(block, "size", 0) or 0)) for block in iter(blocks)
         ),
     )
     project_cache = getattr(project, "_inertia_instruction_block_addr_map_cache_8616", None)
@@ -13005,7 +14369,7 @@ def _instruction_block_addr_map_8616(project: StructuredAstValue, function: Stru
     cached = project_cache.get(cache_key)
     if isinstance(cached, dict):
         return cached
-    block_by_insn: dict[int, int] = {}
+    block_by_insn: dict[cython.longlong, cython.longlong] = {}
     for block in blocks:
         block_addr = getattr(block, "addr", None)
         if not isinstance(block_addr, int):
@@ -13023,7 +14387,13 @@ def _instruction_block_addr_map_8616(project: StructuredAstValue, function: Stru
 
 def _instruction_by_addr_map_8616(
     project: StructuredAstValue, function: StructuredAstValue
-) -> dict[int, StructuredAstValue]:
+) -> object:
+    cached: object
+    ins_addr: object
+    insn: object
+    project_cache: object
+    block: object
+    wrapper: object
     cached = getattr(function, "_inertia_instruction_by_addr_map_8616", None)
     if isinstance(cached, dict):
         return cached
@@ -13031,7 +14401,7 @@ def _instruction_by_addr_map_8616(
     cache_key = (
         int(getattr(function, "addr", 0) or 0),
         _boundary_tuple_8616(
-            (int(getattr(block, "addr", 0) or 0), int(getattr(block, "size", 0) or 0)) for block in blocks
+            (int(getattr(block, "addr", 0) or 0), int(getattr(block, "size", 0) or 0)) for block in iter(blocks)
         ),
     )
     project_cache = getattr(project, "_inertia_instruction_by_addr_map_cache_8616", None)
@@ -13042,7 +14412,7 @@ def _instruction_by_addr_map_8616(
     cached = project_cache.get(cache_key)
     if isinstance(cached, dict):
         return cached
-    insn_by_addr: dict[int, StructuredAstValue] = {}
+    insn_by_addr: dict[cython.longlong, StructuredAstValue] = {}
     for block in blocks:
         for wrapper in _capstone_insns_for_direct_global_update_8616(project, block):
             insn = getattr(wrapper, "insn", wrapper)
@@ -13055,12 +14425,17 @@ def _instruction_by_addr_map_8616(
     return insn_by_addr
 
 
+@cython.ccall
 def _instruction_at_or_decode_8616(
     project: AngrProjectValue,
-    ins_addr: int,
-    insn_by_addr: Mapping[int, StructuredAstValue],
+    ins_addr: cython.longlong,
+    insn_by_addr: Mapping[cython.longlong, StructuredAstValue],
 ) -> StructuredAstValue:
     """Return one exact instruction, decoding beyond incomplete CFG block inventories."""
+    candidate: object
+    decoded_addr: object
+    insn: object
+    candidate_addr: object
     insn = insn_by_addr.get(ins_addr)
     if insn is not None:
         return insn
@@ -13072,13 +14447,14 @@ def _instruction_at_or_decode_8616(
                 continue
             candidate = getattr(wrappers[0], "insn", wrappers[0])
             decoded_addr = getattr(candidate, "address", None)
-            if decoded_addr == candidate_addr:
+            if operator.eq(decoded_addr, candidate_addr):
                 return candidate
     return None
 
 
-def _pure_consumed_push_carrier_expression_8616(node: StructuredAstValue) -> bool:
+def _pure_consumed_push_carrier_expression_8616(node: StructuredAstValue) -> cython.bint:
     """Return whether removing a false PUSH carrier drops no C-level side effect."""
+    helper: object
     if isinstance(node, (structured_c.CConstant, structured_c.CVariable, structured_c.CDirtyExpression)):
         return True
     if isinstance(node, structured_c.CBinaryOp):
@@ -13093,13 +14469,15 @@ def _pure_consumed_push_carrier_expression_8616(node: StructuredAstValue) -> boo
         helper = memory_pointer_helper_8616(node) or segmented_memory_read_helper_8616(node)
         return helper is not None and all(
             _pure_consumed_push_carrier_expression_8616(argument)
-            for argument in _boundary_tuple_8616(node.args or ())
+            for argument in builtins.iter(_boundary_tuple_8616(node.args or ()))
         )
     return False
 
 
-def _call_target_name_8616(call: structured_c.CFunctionCall) -> str | None:
+@cython.ccall
+def _call_target_name_8616(call: structured_c.CFunctionCall) -> object:
     """Return a target name from the third-party angr call boundary."""
+    callee: object
     if isinstance(call.callee_target, str) and call.callee_target:
         return call.callee_target
     callee = call.callee_func
@@ -13107,10 +14485,11 @@ def _call_target_name_8616(call: structured_c.CFunctionCall) -> str | None:
     return name if isinstance(name, str) and name else None
 
 
+@cython.ccall
 def _is_indexed_ss_stack_store_lhs_8616(
     project: AngrProjectValue,
     lhs: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Recognize ``(&BP-slot)[SS * 16]`` as a lowered SS stack lvalue."""
     if not isinstance(lhs, structured_c.CIndexedVariable):
         return False
@@ -13128,11 +14507,12 @@ def _is_indexed_ss_stack_store_lhs_8616(
     )
 
 
+@cython.ccall
 def _is_consumed_push_ss_store_lhs_8616(
     project: AngrProjectValue,
     codegen: StructuredCodegenValue,
     lhs: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Recognize a helper or indexed SS stack-store lvalue for one PUSH effect."""
     if isinstance(lhs, structured_c.CUnaryOp) and lhs.op == "Dereference":
         # Exact decoded PUSH provenance proves the unresolved dereference is
@@ -13147,11 +14527,13 @@ def _is_consumed_push_ss_store_lhs_8616(
     ) is MemSpace.SS
 
 
+@cython.ccall
 def _is_consumed_push_stack_carrier_lhs_8616(
     project: AngrProjectValue,
     lhs: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Recognize a side-effect-free stack carrier produced by a PUSH lift."""
+    sp_register: object
     lhs = _strip_casts_8616(lhs)
     if isinstance(lhs, structured_c.CBinaryOp) and lhs.op == "Shr":
         shift = _strip_casts_8616(lhs.rhs)
@@ -13170,7 +14552,7 @@ def _is_consumed_push_stack_carrier_lhs_8616(
     return (
         isinstance(sp_register, tuple)
         and len(sp_register) >= 1
-        and variable.reg == sp_register[0]
+        and operator.eq(variable.reg, sp_register[0])
     )
 
 
@@ -13179,24 +14561,25 @@ def prune_materialized_call_push_stack_assignments_8616(
     codegen: StructuredCodegenValue,
     *,
     function: StructuredAstValue | None = None,
-) -> bool:
+) -> cython.bint:
     """Replay exact consumed-PUSH lowering for current materialized calls.
 
     The authoritative callsite inventory owns physical PUSH provenance. A
     structured call participates only when its exact machine callsite identity
     survives AST cloning and it currently has materialized arguments.
     """
+    node: object
     cfunc = codegen.cfunc
     root = cfunc.statements
     inventory = callsite_summary_inventory_8616(codegen)
     cleanup_summaries = {
         callsite_addr: summary
-        for callsite_addr, summary in inventory.items()
+        for callsite_addr, summary in builtins.iter(inventory.items())
         if summary.stack_cleanup_instruction_addr is not None
     }
     normalized_cleanup_summaries = {
         callsite_addr: summary
-        for callsite_addr, summary in cleanup_summaries.items()
+        for callsite_addr, summary in builtins.iter(cleanup_summaries.items())
         if isinstance(summary.stack_cleanup_instruction_addr, int)
         and not isinstance(summary.stack_cleanup_instruction_addr, bool)
         and isinstance(summary.stack_cleanup, int)
@@ -13205,25 +14588,25 @@ def prune_materialized_call_push_stack_assignments_8616(
     }
     push_summaries = {
         callsite_addr: summary
-        for callsite_addr, summary in inventory.items()
+        for callsite_addr, summary in builtins.iter(inventory.items())
         if summary.push_arg_instruction_addrs
     }
     raw_count = len(push_summaries)
     push_evidence_by_callsite = {
         callsite_addr: normalize_consumed_call_push_evidence_8616(summary)
-        for callsite_addr, summary in push_summaries.items()
+        for callsite_addr, summary in builtins.iter(push_summaries.items())
     }
     normalized_summaries = {
         callsite_addr: summary
-        for callsite_addr, summary in push_summaries.items()
+        for callsite_addr, summary in builtins.iter(push_summaries.items())
         if push_evidence_by_callsite[callsite_addr].status
         is ConsumedCallPushEvidenceStatus8616.NORMALIZED
     }
     normalized_count = len(normalized_summaries)
-    classified_callsite_addrs: set[int] = set()
-    classified_cleanup_callsite_addrs: set[int] = set()
-    materialized_args_by_callsite: dict[int, tuple[StructuredAstValue, ...]] = {}
-    observed_calls: list[tuple[str | None, int | None, int]] = []
+    classified_callsite_addrs: set[cython.longlong] = set()
+    classified_cleanup_callsite_addrs: set[cython.longlong] = set()
+    materialized_args_by_callsite: dict[cython.longlong, tuple[StructuredAstValue, ...]] = {}
+    observed_calls: list[tuple[str | None, int | None, cython.longlong]] = []
     for node in _iter_structured_c_nodes_8616(root):
         if not isinstance(node, structured_c.CFunctionCall):
             continue
@@ -13244,18 +14627,18 @@ def prune_materialized_call_push_stack_assignments_8616(
         log.warning(
             "[materialized-call-push] observed_calls=%r classified_callsites=%r",
             tuple(observed_calls),
-            tuple(hex(address) for address in sorted(classified_callsite_addrs)),
+            tuple(hex(address) for address in builtins.iter(sorted(classified_callsite_addrs))),
         )
 
     consumed_push_instruction_addrs = frozenset(
         address
-        for callsite_addr in classified_callsite_addrs
-        for address in push_evidence_by_callsite[callsite_addr].instruction_addrs
+        for callsite_addr in iter(classified_callsite_addrs)
+        for address in iter(push_evidence_by_callsite[callsite_addr].instruction_addrs)
     )
     materialized_args_by_push_instruction_addr = {
         address: materialized_args_by_callsite[callsite_addr]
-        for callsite_addr in classified_callsite_addrs
-        for address in push_evidence_by_callsite[callsite_addr].instruction_addrs
+        for callsite_addr in iter(classified_callsite_addrs)
+        for address in iter(push_evidence_by_callsite[callsite_addr].instruction_addrs)
     }
     consumed_cleanup_instruction_addrs = frozenset(
         cast(
@@ -13264,7 +14647,7 @@ def prune_materialized_call_push_stack_assignments_8616(
                 callsite_addr
             ].stack_cleanup_instruction_addr,
         )
-        for callsite_addr in classified_cleanup_callsite_addrs
+        for callsite_addr in iter(classified_cleanup_callsite_addrs)
     )
     cleanup_result = MaterializedCallCleanupReplay8616(
         raw_fact_count=len(cleanup_summaries),
@@ -13291,7 +14674,7 @@ def prune_materialized_call_push_stack_assignments_8616(
             "normalized=%d classified=%d materialized=%d failures=%d",
             tuple(
                 hex(address)
-                for address in sorted(consumed_cleanup_instruction_addrs)
+                for address in builtins.iter(sorted(consumed_cleanup_instruction_addrs))
             ),
             cleanup_result.raw_fact_count,
             cleanup_result.normalized_fact_count,
@@ -13335,7 +14718,7 @@ def prune_materialized_call_push_stack_assignments_8616(
         codegen,
         (
             (node, inventory[callsite_addr])
-            for node in _iter_structured_c_nodes_8616(root)
+            for node in builtins.iter(_iter_structured_c_nodes_8616(root))
             if isinstance(node, structured_c.CFunctionCall)
             and (callsite_addr := structured_callsite_addr_8616(node)) in inventory
         ),
@@ -13343,7 +14726,7 @@ def prune_materialized_call_push_stack_assignments_8616(
     return push_changed or execution_frame_changed
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _PushCarrierClassifier8616:
     """Classify assignments against exact consumed PUSH evidence."""
 
@@ -13354,14 +14737,16 @@ class _PushCarrierClassifier8616:
     materialized_args_by_push_instruction_addr: StructuredAstValue
     insn_by_addr: StructuredAstValue
     debug: StructuredAstValue
-    raw_count: int = 0
-    normalized_count: int = 0
-    classified_count: int = 0
-    preserved_live_definition_count: int = 0
-    liveness_refusal_count: int = 0
+    raw_count: cython.longlong = 0
+    normalized_count: cython.longlong = 0
+    classified_count: cython.longlong = 0
+    preserved_live_definition_count: cython.longlong = 0
+    liveness_refusal_count: cython.longlong = 0
 
-    def is_false_push_carrier(self, statement: StructuredAstValue) -> bool:
+    def is_false_push_carrier(self, statement: StructuredAstValue) -> cython.bint:
         """Classify one assignment against exact consumed PUSH evidence."""
+        ins_addr: object
+        tags: object
         if not isinstance(statement, structured_c.CAssignment):
             return False
         tags = copy_structured_tags_8616(statement.tags)
@@ -13376,7 +14761,7 @@ class _PushCarrierClassifier8616:
         self.normalized_count += 1
         ins_addr = next(iter(candidate_addrs))
         insn = _instruction_at_or_decode_8616(self.project, ins_addr, self.insn_by_addr)
-        if getattr(insn, "id", None) != X86_INS_PUSH:
+        if operator.ne(getattr(insn, "id", None), X86_INS_PUSH):
             return False
         materialized_args = (
             self.materialized_args_by_push_instruction_addr.get(ins_addr, ())
@@ -13389,7 +14774,7 @@ class _PushCarrierClassifier8616:
             statement.rhs
         ) and not any(
             _same_stack_move_rhs_8616(statement.rhs, argument)
-            for argument in materialized_args
+            for argument in iter(materialized_args)
         ):
             return False
         self.classified_count += 1
@@ -13420,7 +14805,7 @@ class _PushCarrierClassifier8616:
                 "[consumed-call-push] statement_ins_addr=%r candidate_addrs=%s lhs_type=%s "
                 "lhs_helper=%r rhs_type=%s rhs_pure=%s",
                 None if not isinstance(statement_ins_addr, int) else hex(statement_ins_addr),
-                tuple(hex(address) for address in sorted(candidate_addrs)),
+                tuple(hex(address) for address in builtins.iter(sorted(candidate_addrs))),
                 type(lhs).__name__,
                 lhs_helper,
                 type(statement.rhs).__name__,
@@ -13428,13 +14813,15 @@ class _PushCarrierClassifier8616:
             )
         return candidate_addrs
 
+    @cython.ccall
     def _carrier_lhs_gate_8616(
         self,
         statement: StructuredAstValue,
         lhs: StructuredAstValue,
         materialized_args: StructuredAstValue,
-    ) -> bool:
+    ) -> cython.bint:
         """Return whether the assignment's LHS is a proven consumed carrier."""
+        dirty_verdict: object
         from .consumed_push_stack_liveness import (
             PushStackReadVerdict8616,
             consumed_push_stack_read_verdict_8616,
@@ -13465,6 +14852,7 @@ class _PushCarrierClassifier8616:
         dirty_verdict = self._dirty_carrier_liveness_8616(lhs, materialized_args)
         return dirty_verdict if dirty_verdict is not None else True
 
+    @cython.ccall
     def _dirty_carrier_liveness_8616(
         self,
         lhs: StructuredAstValue,
@@ -13491,20 +14879,23 @@ class _PushCarrierClassifier8616:
 def prune_consumed_call_push_stack_assignments_8616(
     project: AngrProjectValue,
     codegen: StructuredCodegenValue,
-    consumed_push_instruction_addrs: frozenset[int],
+    consumed_push_instruction_addrs: object,
     *,
     materialized_args_by_push_instruction_addr: Mapping[
         int, tuple[StructuredAstValue, ...]
     ]
     | None = None,
     function: StructuredAstValue | None = None,
-) -> bool:
+) -> cython.bint:
     """Prune lowered stack effects for PUSH instructions consumed as call arguments.
 
     Exact machine instruction provenance is mandatory. The pass removes only
     BP-local aliases, SP/dirty carriers, and segmented SS stores whose PUSH
     value has already been materialized in the typed call argument.
     """
+    cfunc: object
+    func_addr: object
+    root: object
     cfunc = getattr(codegen, "cfunc", None)
     root = getattr(cfunc, "statements", None)
     debug = bool(os.environ.get("INERTIA_DEBUG_CONSUMED_CALL_PUSH"))
@@ -13542,7 +14933,7 @@ def prune_consumed_call_push_stack_assignments_8616(
         log.warning(
             "[consumed-call-push] consumed_addrs=%s raw=%d normalized=%d "
             "classified=%d materialized=%d failures=%d",
-            tuple(hex(address) for address in sorted(consumed_push_instruction_addrs)),
+            tuple(hex(address) for address in builtins.iter(sorted(consumed_push_instruction_addrs))),
             result.raw_fact_count,
             result.normalized_fact_count,
             result.classified_fact_count,
@@ -13553,10 +14944,11 @@ def prune_consumed_call_push_stack_assignments_8616(
 
 
 
+@cython.ccall
 def _is_far_call_cs_frame_value_8616(
     node: StructuredAstValue,
     project: AngrProjectValue,
-) -> bool:
+) -> cython.bint:
     """Recognize the low or high byte of the current CS register."""
     node = _strip_casts_8616(node)
     if _expr_register_name_8616(node, project) == "cs":
@@ -13571,17 +14963,19 @@ def _is_far_call_cs_frame_value_8616(
     )
 
 
+@cython.ccall
 def _callsite_after_push_cs_8616(
     project: AngrProjectValue,
-    push_ins_addr: int,
-    insn_by_addr: Mapping[int, StructuredAstValue],
-    return_addr_by_callsite: Mapping[int, int],
+    push_ins_addr: cython.longlong,
+    insn_by_addr: Mapping[cython.longlong, StructuredAstValue],
+    return_addr_by_callsite: Mapping[cython.longlong, cython.longlong],
 ) -> int | None:
     """Prove a linked far-call ``PUSH CS; CALL`` return-segment prefix."""
+    push_size: object
     push_insn = _instruction_at_or_decode_8616(project, push_ins_addr, insn_by_addr)
     if (
-        getattr(push_insn, "id", None) != X86_INS_PUSH
-        or _op_reg_id_8616(push_insn, 0) != X86_REG_CS
+        operator.ne(getattr(push_insn, "id", None), X86_INS_PUSH)
+        or operator.ne(_op_reg_id_8616(push_insn, 0), X86_REG_CS)
     ):
         return None
     push_size = getattr(push_insn, "size", None)
@@ -13596,11 +14990,14 @@ def _callsite_after_push_cs_8616(
     return callsite_addr
 
 
+@cython.ccall
 def _prune_c_statement_lists_8616(
     root: StructuredAstValue,
-    drop: Callable[[StructuredAstValue], bool],
-) -> int:
+    drop: Callable[[StructuredAstValue], cython.bint],
+) -> cython.longlong:
     """Drop statements matching the predicate from every CStatements list."""
+    node: object
+    statement: object
     materialized_count = 0
     for node in _iter_c_nodes_deep_8616(root):
         if isinstance(node, structured_c.CStatements):
@@ -13615,7 +15012,7 @@ def _prune_c_statement_lists_8616(
     return materialized_count
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _CallReturnFrameClassifier8616:
     """Classify assignments against exact callsite return-frame evidence."""
 
@@ -13624,12 +15021,14 @@ class _CallReturnFrameClassifier8616:
     return_addr_by_callsite: StructuredAstValue
     insn_by_addr: StructuredAstValue
     debug_return_frame: StructuredAstValue
-    raw_count: int = 0
-    normalized_count: int = 0
-    classified_count: int = 0
+    raw_count: cython.longlong = 0
+    normalized_count: cython.longlong = 0
+    classified_count: cython.longlong = 0
 
-    def is_call_return_frame_carrier(self, statement: StructuredAstValue) -> bool:
+    @cython.ccall
+    def is_call_return_frame_carrier(self, statement: StructuredAstValue) -> cython.bint:
         """Classify one assignment against exact callsite return-frame evidence."""
+        tags: object
         if not isinstance(statement, structured_c.CAssignment):
             return False
         lhs = statement.lhs
@@ -13653,6 +15052,7 @@ class _CallReturnFrameClassifier8616:
             rhs, ins_addr, constant_return_value, cs_frame_value
         )
 
+    @cython.ccall
     def _debug_candidate_8616(
         self,
         ins_addr: StructuredAstValue,
@@ -13673,11 +15073,12 @@ class _CallReturnFrameClassifier8616:
                 _is_indexed_ss_stack_store_lhs_8616(self.project, lhs),
             )
 
+    @cython.ccall
     def _debug_reject_8616(
         self,
-        ins_addr: int,
-        constant_return_value: bool,
-        cs_frame_value: bool,
+        ins_addr: cython.longlong,
+        constant_return_value: cython.bint,
+        cs_frame_value: cython.bint,
     ) -> None:
         """Emit optional debug noise for a rejected callsite."""
         if self.debug_return_frame:
@@ -13697,14 +15098,17 @@ class _CallReturnFrameClassifier8616:
                 cs_frame_value,
             )
 
+    @cython.ccall
     def _classify_callsite_evidence_8616(
         self,
         rhs: StructuredAstValue,
-        ins_addr: int,
-        constant_return_value: bool,
-        cs_frame_value: bool,
-    ) -> bool:
+        ins_addr: cython.longlong,
+        constant_return_value: cython.bint,
+        cs_frame_value: cython.bint,
+    ) -> cython.bint:
         """Resolve the callsite and check the RHS against its return frame."""
+        exact_callsite_addr: object
+        prefixed_callsite_addr: object
         exact_callsite_addr = (
             ins_addr if ins_addr in self.return_addr_by_callsite else None
         )
@@ -13751,16 +15155,18 @@ class _CallReturnFrameClassifier8616:
         self.classified_count += 1
         return True
 
+    @cython.ccall
     def _matches_return_frame_8616(
         self,
         rhs: StructuredAstValue,
         insn: StructuredAstValue,
-        exact_callsite_addr: int | None,
-        prefixed_callsite_addr: int | None,
-        constant_return_value: bool,
-        cs_frame_value: bool,
-    ) -> bool:
+        exact_callsite_addr: object,
+        prefixed_callsite_addr: object,
+        constant_return_value: cython.bint,
+        cs_frame_value: cython.bint,
+    ) -> cython.bint:
         """Return whether the RHS is the callsite's return IP or CS part."""
+        expected_return_addr: object
         expected_return_addr = (
             self.return_addr_by_callsite[exact_callsite_addr]
             if exact_callsite_addr is not None
@@ -13769,11 +15175,11 @@ class _CallReturnFrameClassifier8616:
         is_return_ip = (
             expected_return_addr is not None
             and constant_return_value
-            and (int(rhs.value) & 0xFFFF) == (int(expected_return_addr) & 0xFFFF)
+            and operator.eq((int(rhs.value) & 0xFFFF), (int(expected_return_addr) & 0xFFFF))
         )
         is_return_cs = (
             cs_frame_value
-            and getattr(insn, "id", None) == X86_INS_LCALL
+            and operator.eq(getattr(insn, "id", None), X86_INS_LCALL)
         )
         is_return_cs |= prefixed_callsite_addr is not None
         return is_return_ip or is_return_cs
@@ -13782,10 +15188,10 @@ class _CallReturnFrameClassifier8616:
 def prune_call_return_frame_stack_assignments_8616(
     project: AngrProjectValue,
     codegen: StructuredCodegenValue,
-    return_addr_by_callsite: Mapping[int, int],
+    return_addr_by_callsite: Mapping[cython.longlong, cython.longlong],
     *,
     function: StructuredAstValue | None = None,
-) -> bool:
+) -> cython.bint:
     """Prune stack writes proven to model a CALL's machine return frame.
 
     A candidate is removable only when its statement tag names an actual CALL
@@ -13794,6 +15200,9 @@ def prune_call_return_frame_stack_assignments_8616(
     for a far call. Source-level writes that merely resemble return-frame
     values remain.
     """
+    cfunc: object
+    func_addr: object
+    root: object
     cfunc = getattr(codegen, "cfunc", None)
     root = getattr(cfunc, "statements", None)
     if root is None or not return_addr_by_callsite:
@@ -13802,7 +15211,7 @@ def prune_call_return_frame_stack_assignments_8616(
     if debug_return_frame:
         log.warning(
             "[call-return-frame] callsites=%s",
-            tuple(hex(address) for address in sorted(return_addr_by_callsite)),
+            tuple(hex(address) for address in builtins.iter(sorted(return_addr_by_callsite))),
         )
     if function is None:
         func_addr = getattr(cfunc, "addr", None)
@@ -13855,12 +15264,16 @@ def prune_call_return_frame_stack_assignments_8616(
     return bool(materialized_count > 0 or restore_changed)
 
 
+@cython.ccall
 def _frame_setup_addr_8616(
     project: AngrProjectValue,
-    function_addr: int,
+    function_addr: cython.longlong,
     insn_by_addr: StructuredAstValue,
 ) -> int | None:
     """Decode the ``push bp`` / ``mov bp, sp`` entry pair addresses."""
+    push_bp: object
+    push_size: object
+    setup: object
     setup_addr: int | None = None
     push_bp = _instruction_at_or_decode_8616(project, function_addr, insn_by_addr)
     if push_bp is not None:
@@ -13878,11 +15291,11 @@ def _prove_frame_entry_carrier_8616(
     root: StructuredAstValue,
     project: AngrProjectValue,
     codegen: StructuredCodegenValue,
-    function_addr: int,
-    setup_addr: int | None,
+    function_addr: cython.longlong,
+    setup_addr: object,
     frame_instruction_addresses: StructuredAstValue,
     register_carriers: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Prove the canonical BP frame entry carrier exists and its uses complete."""
     entry_carrier_proven = any(
         is_exact_push_bp_carrier_8616(
@@ -13894,7 +15307,7 @@ def _prove_frame_entry_carrier_8616(
             codegen=codegen,
             register_carriers=register_carriers,
         )
-        for node in _iter_c_nodes_deep_8616(root)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(root))
     )
     if (
         not entry_carrier_proven
@@ -13908,7 +15321,7 @@ def _prove_frame_entry_carrier_8616(
                 setup_addr,
                 register_carriers=register_carriers,
             )
-            for node in _iter_c_nodes_deep_8616(root)
+            for node in builtins.iter(_iter_c_nodes_deep_8616(root))
         )
     return entry_carrier_proven and prove_frame_carrier_uses_8616(
         root, frozenset(frame_instruction_addresses),
@@ -13920,7 +15333,7 @@ def prune_frame_prologue_stack_assignments_8616(
     codegen: StructuredCodegenValue,
     *,
     function: StructuredAstValue | None = None,
-) -> bool:
+) -> cython.bint:
     """Consume exact C carriers for a canonical BP frame and its teardown.
 
     A matching structured carrier for ``push bp`` or ``mov bp, sp`` proves that
@@ -13929,6 +15342,11 @@ def prune_frame_prologue_stack_assignments_8616(
     ``mov sp, bp; pop bp; ret`` sequences consumed, and only if their scalar
     definitions have no surviving uses outside the complete frame group.
     """
+    cfunc: object
+    func_addr: object
+    function_addr: object
+    previous_result: object
+    root: object
     cfunc = getattr(codegen, "cfunc", None)
     root = getattr(cfunc, "statements", None)
     if root is None:
@@ -13973,8 +15391,9 @@ def prune_frame_prologue_stack_assignments_8616(
     normalized_count = 0
     classified_count = 0
 
-    def is_prologue_carrier(statement: StructuredAstValue) -> bool:
+    def is_prologue_carrier(statement: StructuredAstValue) -> cython.bint:
         """Classify one assignment owned by the proven canonical BP frame."""
+        tags: object
         nonlocal raw_count, normalized_count, classified_count
         if not entry_carrier_proven or not isinstance(statement, structured_c.CAssignment):
             return False
@@ -14024,13 +15443,16 @@ def prune_frame_prologue_stack_assignments_8616(
     return materialized_count > 0
 
 
+@cython.ccall
 def _instruction_block_addr_8616(
-    project: StructuredAstValue, function: StructuredAstValue, ins_addr: int
+    project: StructuredAstValue, function: object, ins_addr: cython.longlong
 ) -> int | None:
+    block_addr: object
+    candidate: object
     if function is None:
         return None
     block_by_insn = _instruction_block_addr_map_8616(project, function)
-    block_addrs = {int(block_addr) for block_addr in block_by_insn.values() if isinstance(block_addr, int)}
+    block_addrs = {int(block_addr) for block_addr in builtins.iter(block_by_insn.values()) if isinstance(block_addr, int)}
     for candidate in _candidate_ins_addrs_8616(project, ins_addr):
         block_addr = block_by_insn.get(int(candidate))
         if isinstance(block_addr, int):
@@ -14040,9 +15462,12 @@ def _instruction_block_addr_8616(
     return None
 
 
+@cython.ccall
 def _instruction_at_addr_8616(
-    project: AngrProjectValue, function: StructuredAstValue, ins_addr: int
+    project: AngrProjectValue, function: object, ins_addr: cython.longlong
 ) -> StructuredAstValue:
+    insn: object
+    candidate: object
     if function is None:
         return None
     insn_by_addr = _instruction_by_addr_map_8616(project, function)
@@ -14053,9 +15478,11 @@ def _instruction_at_addr_8616(
     return None
 
 
+@cython.ccall
 def _is_direct_call_fallthrough_predecessor_8616(
-    project: AngrProjectValue, function: StructuredAstValue, left_addr: int, right_addr: int
-) -> bool:
+    project: AngrProjectValue, function: StructuredAstValue, left_addr: cython.longlong, right_addr: cython.longlong
+) -> cython.bint:
+    call_size: object
     call_insn = _instruction_at_addr_8616(project, function, left_addr)
     if getattr(call_insn, "id", None) not in {X86_INS_CALL, X86_INS_LCALL}:
         return False
@@ -14065,12 +15492,14 @@ def _is_direct_call_fallthrough_predecessor_8616(
     right_block = _instruction_block_addr_8616(project, function, right_addr)
     if not isinstance(right_block, int):
         return False
-    return int(left_addr) + int(call_size) == right_block
+    return operator.eq(int(left_addr) + int(call_size), right_block)
 
 
+@cython.ccall
 def _has_callsite_fallthrough_between_8616(
-    project: AngrProjectValue, function: StructuredAstValue, left_addr: int, right_addr: int
-) -> bool:
+    project: AngrProjectValue, function: StructuredAstValue, left_addr: cython.longlong, right_addr: cython.longlong
+) -> cython.bint:
+    call_addr: object
     insn_by_addr = _instruction_by_addr_map_8616(project, function)
     if not insn_by_addr:
         return False
@@ -14085,9 +15514,12 @@ def _has_callsite_fallthrough_between_8616(
     return False
 
 
+@cython.ccall
 def _same_instruction_block_8616(
-    project: AngrProjectValue, function: StructuredAstValue, left_addr: int, right_addr: int
-) -> bool:
+    project: AngrProjectValue, function: object, left_addr: cython.longlong, right_addr: cython.longlong
+) -> cython.bint:
+    left_block: object
+    right_block: object
     if function is None:
         return True
     if not _instruction_block_addr_map_8616(project, function):
@@ -14096,16 +15528,19 @@ def _same_instruction_block_8616(
     right_block = _instruction_block_addr_8616(project, function, right_addr)
     if left_block is None or right_block is None:
         return True
-    if left_block == right_block:
+    if operator.eq(left_block, right_block):
         return True
     return _is_direct_call_fallthrough_predecessor_8616(
         project, function, left_addr, right_addr
     ) or _has_callsite_fallthrough_between_8616(project, function, left_addr, right_addr)
 
 
+@cython.ccall
 def _strict_same_instruction_block_8616(
-    project: StructuredAstValue, function: StructuredAstValue, left_addr: int, right_addr: int
-) -> bool:
+    project: StructuredAstValue, function: object, left_addr: cython.longlong, right_addr: cython.longlong
+) -> cython.bint:
+    left_block: object
+    right_block: object
     if function is None:
         if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
             log.warning("[direct-stack-update] function unavailable")
@@ -14116,7 +15551,7 @@ def _strict_same_instruction_block_8616(
     right_block = _instruction_block_addr_8616(project, function, right_addr)
     if left_block is None or right_block is None:
         return False
-    if left_block == right_block:
+    if operator.eq(left_block, right_block):
         return True
     return _is_direct_call_fallthrough_predecessor_8616(
         project, function, left_addr, right_addr
@@ -14124,14 +15559,18 @@ def _strict_same_instruction_block_8616(
 
 
 def _list_has_stack_move_assignment_8616(
-    statements: list[StructuredAstValue], dst_cvar: StructuredAstValue, source_expr: StructuredAstValue
-) -> bool:
-    return any(_is_same_stack_move_assignment_8616(stmt, dst_cvar, source_expr) for stmt in statements)
+    statements: object, dst_cvar: StructuredAstValue, source_expr: StructuredAstValue
+) -> cython.bint:
+    return any(_is_same_stack_move_assignment_8616(stmt, dst_cvar, source_expr) for stmt in iter(statements))
 
 
+@cython.ccall
 def _tree_has_stack_move_assignment_8616(
     root: StructuredAstValue, dst_cvar: StructuredAstValue, source_expr: StructuredAstValue
-) -> bool:
+) -> cython.bint:
+    child: object
+    attr: object
+    node: object
     if _is_same_stack_move_assignment_8616(root, dst_cvar, source_expr):
         return True
     for node in _iter_structured_c_nodes_8616(root):
@@ -14150,31 +15589,34 @@ def _tree_has_stack_move_assignment_8616(
 
 def _prune_inverse_stack_move_artifacts_8616(
     root: StructuredAstValue,
-    facts: tuple[DirectStackMoveFact8616, ...],
+    facts: object,
     fact: DirectStackMoveFact8616,
     dst_cvar: StructuredAstValue,
     source_expr: StructuredAstValue,
-) -> int:
+) -> cython.longlong:
     """Remove stack-copy assignments contradicted by a binary-proven MOV direction."""
+    source_offset: object
     if fact.source_kind is not DirectStackMoveSourceKind8616.STACK_SLOT:
         return 0
     dst_offset = _c_expr_stack_offset_8616(dst_cvar)
     source_offset = _c_expr_stack_offset_8616(source_expr)
     if source_offset is None and isinstance(fact.source_offset, int):
         source_offset = _canonical_stack_offset_8616(fact.source_offset)
-    if not isinstance(dst_offset, int) or not isinstance(source_offset, int) or dst_offset == source_offset:
+    if not isinstance(dst_offset, int) or not isinstance(source_offset, int) or operator.eq(dst_offset, source_offset):
         return 0
     has_inverse_fact = any(
         candidate.source_kind is DirectStackMoveSourceKind8616.STACK_SLOT
-        and _canonical_stack_offset_8616(candidate.dst_offset) == source_offset
-        and _canonical_stack_offset_8616(candidate.source_offset) == dst_offset
-        for candidate in facts
+        and operator.eq(_canonical_stack_offset_8616(candidate.dst_offset), source_offset)
+        and operator.eq(_canonical_stack_offset_8616(candidate.source_offset), dst_offset)
+        for candidate in iter(facts)
     )
     if has_inverse_fact:
         return 0
 
-    def is_inverse_assignment(node: StructuredAstValue) -> bool:
+    def is_inverse_assignment(node: StructuredAstValue) -> cython.bint:
         """Return whether a node is an exact inverse stack-copy assignment."""
+        lhs: object
+        rhs: object
         lhs = getattr(node, "lhs", None)
         rhs = getattr(node, "rhs", None)
         lhs_offset = _c_expr_stack_offset_8616(_strip_casts_8616(lhs))
@@ -14185,8 +15627,9 @@ def _prune_inverse_stack_move_artifacts_8616(
             and (rhs_offset == dst_offset or _same_stack_move_rhs_8616(rhs, dst_cvar))
         )
 
-    def statement_is_inverse_assignment(node: StructuredAstValue) -> bool:
+    def statement_is_inverse_assignment(node: StructuredAstValue) -> cython.bint:
         """Return whether a statement or its expr is an inverse assignment."""
+        expr: object
         if is_inverse_assignment(node):
             return True
         expr = getattr(node, "expr", None)
@@ -14201,16 +15644,20 @@ def _prune_inverse_stack_move_artifacts_8616(
     return pruner.removed
 
 
+@cython.ccall
 def _collect_function_pointer_allowed_sources_8616(
     codegen: StructuredAstValue,
-    facts: tuple[DirectStackMoveFact8616, ...],
+    facts: object,
 ) -> tuple[
-    dict[tuple[int, int | None], list[StructuredAstValue]],
-    dict[tuple[int, int | None], set[int]],
+    dict[tuple[cython.longlong, int | None], list[StructuredAstValue]],
+    dict[tuple[cython.longlong, int | None], set[cython.longlong]],
 ]:
     """Collect proven function-pointer stack writes per destination identity."""
-    allowed_sources: dict[tuple[int, int | None], list[StructuredAstValue]] = {}
-    direct_write_addrs: dict[tuple[int, int | None], set[int]] = {}
+    dst_identity: object
+    source_identity: object
+    fact: object
+    allowed_sources: dict[tuple[cython.longlong, int | None], list[StructuredAstValue]] = {}
+    direct_write_addrs: dict[tuple[cython.longlong, int | None], set[cython.longlong]] = {}
     for fact in facts:
         if fact.source_kind is not DirectStackMoveSourceKind8616.IMMEDIATE:
             continue
@@ -14232,8 +15679,8 @@ def _collect_function_pointer_allowed_sources_8616(
 def _prune_unsupported_function_pointer_stack_move_assignments_8616(
     root: StructuredAstValue,
     codegen: StructuredAstValue,
-    facts: tuple[DirectStackMoveFact8616, ...],
-) -> int:
+    facts: object,
+) -> cython.longlong:
     """Drop untagged stack writes contradicted by direct function-pointer MOV facts."""
     allowed_sources, direct_write_addrs = _collect_function_pointer_allowed_sources_8616(
         codegen, facts
@@ -14241,8 +15688,10 @@ def _prune_unsupported_function_pointer_stack_move_assignments_8616(
     if not allowed_sources:
         return 0
 
-    def assignment_is_unsupported(stmt: StructuredAstValue) -> bool:
+    def assignment_is_unsupported(stmt: StructuredAstValue) -> cython.bint:
         """Return whether an untagged stack write contradicts direct MOV evidence."""
+        tags: object
+        allowed_source: object
         if not isinstance(stmt, structured_c.CAssignment):
             return False
         dst_identity = _stack_cvar_identity_8616(stmt.lhs)
@@ -14274,8 +15723,11 @@ def prune_unsupported_function_pointer_stack_move_assignments_8616(
     codegen: StructuredAstValue,
     project: StructuredAstValue | None = None,
     function: StructuredAstValue | None = None,
-) -> bool:
+) -> cython.bint:
     """Prune function-pointer stack writes only when contradicted by direct MOV facts."""
+    func_addr: object
+    root: object
+    stats: object
     if project is None:
         project = getattr(codegen, "project", None)
     root = getattr(getattr(codegen, "cfunc", None), "statements", None)
@@ -14323,7 +15775,7 @@ def prune_unsupported_function_pointer_stack_move_assignments_8616(
             ("source_offset", fact.source_offset),
             ("ins_addr", fact.ins_addr),
         )
-        for fact in facts
+        for fact in iter(facts)
     )
     codegen._inertia_direct_stack_move_evidence_8616 = tuple(dict.fromkeys(evidence + evidence_items))
     with contextlib.suppress(Exception):
@@ -14331,9 +15783,10 @@ def prune_unsupported_function_pointer_stack_move_assignments_8616(
     return True
 
 
+@cython.ccall
 def _is_same_stack_move_assignment_8616(
     stmt: StructuredAstValue, dst_cvar: StructuredAstValue, source_expr: StructuredAstValue
-) -> bool:
+) -> cython.bint:
     return (
         isinstance(stmt, structured_c.CAssignment)
         and _same_stack_cvar_8616(getattr(stmt, "lhs", None), dst_cvar)
@@ -14341,10 +15794,11 @@ def _is_same_stack_move_assignment_8616(
     )
 
 
+@cython.ccall
 def _is_same_stack_move_assignment_surface_8616(
     actual: StructuredAstValue,
     expected: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Return whether equivalent assignments already use the canonical storage surface."""
     if not isinstance(expected, structured_c.CAssignment) or not _is_same_stack_move_assignment_8616(
         actual,
@@ -14366,16 +15820,22 @@ def _is_same_stack_move_assignment_surface_8616(
 def _removable_tagged_stack_move_assignment_count_8616(
     root: StructuredAstValue,
     project: AngrProjectValue,
-    ins_addr: int,
+    ins_addr: cython.longlong,
     dst_cvar: StructuredAstValue,
     source_expr: StructuredAstValue,
-) -> int:
+) -> cython.longlong:
     """Count exact tagged stack assignments stored in mutable statement lists."""
     count = 0
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
 
-    def visit(node: StructuredAstValue) -> None:
+    def visit(node: object) -> None:
         """Count matches reachable through the same mutable lists as removal."""
+        pairs: object
+        statements: object
+        _condition: object
+        attr: object
+        body: object
+        stmt: object
         nonlocal count
         if node is None or id(node) in seen:
             return
@@ -14405,16 +15865,22 @@ def _removable_tagged_stack_move_assignment_count_8616(
 def _remove_tagged_stack_move_assignments_8616(
     root: StructuredAstValue,
     project: AngrProjectValue,
-    ins_addr: int,
+    ins_addr: cython.longlong,
     dst_cvar: StructuredAstValue,
     source_expr: StructuredAstValue,
-) -> int:
+) -> cython.longlong:
     """Remove exact late tagged assignments after a proven relocation."""
     removed = 0
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
 
-    def visit(node: StructuredAstValue) -> None:
+    def visit(node: object) -> None:
         """Prune matching assignments from mutable structured statement lists."""
+        pairs: object
+        statements: object
+        _condition: object
+        attr: object
+        body: object
+        stmt: object
         nonlocal removed
         if node is None or id(node) in seen:
             return
@@ -14444,17 +15910,20 @@ def _remove_tagged_stack_move_assignments_8616(
     return removed
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _StatementListPruner8616:
     """Prune matching assignments from executable structured statement lists."""
 
-    drop: Callable[[StructuredAstValue], bool]
-    seen: set[int]
+    drop: Callable[[StructuredAstValue], cython.bint]
+    seen: object
     child_attrs: tuple[str, ...] = ("body", "else_node")
-    removed: int = 0
+    removed: cython.longlong = 0
 
-    def visit(self, node: StructuredAstValue) -> None:
+    @cython.ccall
+    def visit(self, node: object) -> None:
         """Prune matching statements, then recurse into nested containers."""
+        statements: object
+        stmt: object
         if node is None or id(node) in self.seen:
             return
         if not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
@@ -14472,8 +15941,14 @@ class _StatementListPruner8616:
             statements[:] = kept
         self._visit_children_8616(node)
 
+    @cython.ccall
     def _visit_children_8616(self, node: StructuredAstValue) -> None:
         """Recurse into the configured child links and condition/body pairs."""
+        child: object
+        pairs: object
+        _condition: object
+        attr: object
+        body: object
         for attr in self.child_attrs:
             with contextlib.suppress(Exception):
                 child = getattr(node, attr, None)
@@ -14488,11 +15963,11 @@ class _StatementListPruner8616:
 def _remove_duplicate_stack_move_assignments_8616(
     root: StructuredAstValue,
     project: AngrProjectValue,
-    ins_addr: int,
+    ins_addr: cython.longlong,
     dst_cvar: StructuredAstValue,
     source_expr: StructuredAstValue,
     preserved_assignment: StructuredAstValue,
-) -> int:
+) -> cython.longlong:
     """Remove exact stale copies after a binary-proven loop-entry relocation.
 
     Regeneration may discard the original instruction tag while retaining the
@@ -14501,8 +15976,10 @@ def _remove_duplicate_stack_move_assignments_8616(
     """
     candidate_addrs = _candidate_ins_addrs_8616(project, ins_addr)
 
-    def is_duplicate(stmt: StructuredAstValue) -> bool:
+    def is_duplicate(stmt: StructuredAstValue) -> cython.bint:
         """Return whether a statement is the relocated store's stale carrier."""
+        tagged_addr: object
+        tags: object
         if stmt is preserved_assignment or not _is_same_stack_move_assignment_8616(
             stmt, dst_cvar, source_expr
         ):
@@ -14526,7 +16003,7 @@ def _remove_consumed_signed_idiv_store_assignments_8616(
     fact: DirectStackMoveFact8616,
     dst_cvar: StructuredAstValue,
     preserved_assignment: StructuredAstValue,
-) -> int:
+) -> cython.longlong:
     """Remove the exact remainder store consumed by a callsite assignment.
 
     Lowering may first rewrite the binary remainder-store instruction through
@@ -14543,7 +16020,7 @@ def _remove_consumed_signed_idiv_store_assignments_8616(
     ):
         return 0
 
-    def is_consumed_store(statement: StructuredAstValue) -> bool:
+    def is_consumed_store(statement: StructuredAstValue) -> cython.bint:
         """Return whether the statement is the consumed tagged remainder store."""
         return (
             statement is not preserved_assignment
@@ -14569,10 +16046,10 @@ def _remove_consumed_signed_idiv_store_assignments_8616(
 def _structured_loopback_edges_covering_instruction_8616(
     function: StructuredAstValue,
     project: AngrProjectValue,
-    ins_addr: int,
-    loop_range: tuple[int, int] | None,
-    condition_range: tuple[int, int] | None,
-) -> tuple[tuple[int, int], ...]:
+    ins_addr: cython.longlong,
+    loop_range: object,
+    condition_range: object,
+) -> tuple[tuple[cython.longlong, cython.longlong], ...]:
     """Return binary backedges that contain the store and cover the structured loop."""
     if loop_range is None:
         return ()
@@ -14587,25 +16064,30 @@ def _structured_loopback_edges_covering_instruction_8616(
     )
     return tuple(
         (entry, jump)
-        for entry, jump in _function_backward_jump_edges_8616(function, project, ins_addr)
+        for entry, jump in builtins.iter(_function_backward_jump_edges_8616(function, project, ins_addr))
         if entry <= repeated_region_start
         and jump >= loop_end
-        and any(entry <= candidate <= jump for candidate in store_candidates)
+        and any(entry <= candidate <= jump for candidate in iter(store_candidates))
     )
 
 
+@cython.ccall
 def _loop_body_insertion_index_before_tagged_stack_move_8616(
     loop: StructuredAstValue,
     project: AngrProjectValue,
-    ins_addr: int,
+    ins_addr: cython.longlong,
     dst_cvar: StructuredAstValue,
     source_expr: StructuredAstValue,
 ) -> int | None:
     """Return the first sibling read that must follow the tagged stack definition."""
+    body_statements: object
+    first_read_index: object
+    index: object
+    stmt: object
     body_statements = getattr(getattr(loop, "body", None), "statements", None)
     if not isinstance(body_statements, list):
         return None
-    first_read_index: int | None = None
+    first_read_index = None
     for index, stmt in enumerate(tuple(body_statements)):
         direct_tagged_move = (
             isinstance(stmt, structured_c.CAssignment)
@@ -14626,7 +16108,7 @@ def _loop_body_insertion_index_before_tagged_stack_move_8616(
     return None
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _TaggedLoopMoveRelocater8616:
     """Restore an exact tagged stack definition at its binary-proven loop scope."""
 
@@ -14639,8 +16121,10 @@ class _TaggedLoopMoveRelocater8616:
     backward_edges: StructuredAstValue
     seen: StructuredAstValue
 
-    def visit(self, node: StructuredAstValue) -> int:
+    @cython.ccall
+    def visit(self, node: object) -> cython.longlong:
         """Prefer the deepest loop with sufficient binary placement evidence."""
+        statements: object
         if node is None or id(node) in self.seen:
             return 0
         self.seen.add(id(node))
@@ -14651,8 +16135,11 @@ class _TaggedLoopMoveRelocater8616:
                 return result
         return self._visit_control_links_8616(node)
 
-    def _visit_statements_8616(self, statements: list[StructuredAstValue]) -> int:
+    @cython.ccall
+    def _visit_statements_8616(self, statements: object) -> cython.longlong:
         """Scan each statement; loop containers get the relocation arms."""
+        index: object
+        stmt: object
         for index, stmt in enumerate(tuple(statements)):
             if isinstance(
                 stmt, (structured_c.CForLoop, structured_c.CWhileLoop, structured_c.CDoWhileLoop)
@@ -14668,11 +16155,13 @@ class _TaggedLoopMoveRelocater8616:
 
     def _visit_loop_statement_8616(
         self,
-        statements: list[StructuredAstValue],
-        index: int,
+        statements: object,
+        index: cython.longlong,
         stmt: StructuredAstValue,
-    ) -> int:
+    ) -> cython.longlong:
         """Try the in-loop and before-loop relocation arms for one loop."""
+        condition_range: object
+        loop_range: object
         nested = self.visit(getattr(stmt, "body", None))
         if nested:
             return nested
@@ -14725,7 +16214,7 @@ class _TaggedLoopMoveRelocater8616:
         machine_loop_after_store = bool(
             loop_range is not None
             and any(
-                any(candidate < entry for candidate in store_candidates)
+                any(candidate < entry for candidate in iter(store_candidates))
                 and (
                     entry <= loop_range[0]
                     or (
@@ -14735,7 +16224,7 @@ class _TaggedLoopMoveRelocater8616:
                     )
                 )
                 and jump >= loop_range[1]
-                for entry, jump in self.backward_edges
+                for entry, jump in iter(self.backward_edges)
             )
         )
         self._debug_loop_relocate_8616(
@@ -14765,15 +16254,16 @@ class _TaggedLoopMoveRelocater8616:
             machine_loop_after_store,
         )
 
+    @cython.ccall
     def _debug_loop_relocate_8616(
         self,
         stmt: StructuredAstValue,
-        tagged_count: int,
-        condition_range: tuple[int, int] | None,
-        loop_range: tuple[int, int] | None,
-        machine_loop_after_store: bool,
+        tagged_count: cython.longlong,
+        condition_range: object,
+        loop_range: object,
+        machine_loop_after_store: cython.bint,
         covering_loopback_edges: StructuredAstValue,
-        in_loop_insertion_index: int | None,
+        in_loop_insertion_index: object,
     ) -> None:
         """Emit optional debug noise for the loop relocation decision."""
         if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
@@ -14790,14 +16280,16 @@ class _TaggedLoopMoveRelocater8616:
                 _node_reads_stack_cvar_8616(stmt, self.dst_cvar),
             )
 
+    @cython.ccall
     def _try_in_loop_relocate_8616(
         self,
         stmt: StructuredAstValue,
-        tagged_count: int,
+        tagged_count: cython.longlong,
         covering_loopback_edges: StructuredAstValue,
-        in_loop_insertion_index: int | None,
-    ) -> int:
+        in_loop_insertion_index: object,
+    ) -> cython.longlong:
         """Insert inside the loop when a covering loopback edge proves it."""
+        loop_body_statements: object
         if not (
             tagged_count > 0 and covering_loopback_edges and in_loop_insertion_index is not None
         ):
@@ -14824,17 +16316,17 @@ class _TaggedLoopMoveRelocater8616:
 
     def _try_before_loop_relocate_8616(
         self,
-        statements: list[StructuredAstValue],
-        index: int,
+        statements: object,
+        index: cython.longlong,
         stmt: StructuredAstValue,
-        tagged_count: int,
-        condition_range: tuple[int, int] | None,
+        tagged_count: cython.longlong,
+        condition_range: object,
         store_candidates: StructuredAstValue,
-        machine_loop_after_store: bool,
-    ) -> int:
+        machine_loop_after_store: cython.bint,
+    ) -> cython.longlong:
         """Relocate the tagged copy just before the loop when proven safe."""
         condition_store_before = condition_range is not None and any(
-            candidate < condition_range[0] for candidate in store_candidates
+            candidate < condition_range[0] for candidate in iter(store_candidates)
         )
         if not (
             tagged_count > 0
@@ -14861,10 +16353,13 @@ class _TaggedLoopMoveRelocater8616:
         statements.insert(insertion_index, self.assignment)
         return removed
 
+    @cython.ccall
     def _relocated_insertion_index_8616(
-        self, statements: list[StructuredAstValue], index: int
-    ) -> int:
+        self, statements: object, index: cython.longlong
+    ) -> cython.longlong:
         """Walk back over previously relocated stores of a later origin."""
+        previous_origin: object
+        previous_tags: object
         insertion_index = index
         while insertion_index > 0:
             previous_tags = copy_structured_tags_8616(
@@ -14880,8 +16375,13 @@ class _TaggedLoopMoveRelocater8616:
             insertion_index -= 1
         return insertion_index
 
-    def _visit_control_links_8616(self, node: StructuredAstValue) -> int:
+    @cython.ccall
+    def _visit_control_links_8616(self, node: StructuredAstValue) -> cython.longlong:
         """Recurse into bodies, else branches, and condition/body pairs."""
+        pairs: object
+        _condition: object
+        attr: object
+        body: object
         for attr in ("body", "else_node"):
             nested = self.visit(getattr(node, attr, None))
             if nested:
@@ -14895,15 +16395,16 @@ class _TaggedLoopMoveRelocater8616:
         return 0
 
 
+@cython.ccall
 def _relocate_tagged_stack_move_before_proven_loop_8616(
     root: StructuredAstValue,
     project: AngrProjectValue,
     function: StructuredAstValue,
-    ins_addr: int,
+    ins_addr: cython.longlong,
     dst_cvar: StructuredAstValue,
     source_expr: StructuredAstValue,
     assignment: StructuredAstValue,
-) -> int:
+) -> cython.longlong:
     """Restore an exact tagged stack definition at its binary-proven loop scope."""
     relocater = _TaggedLoopMoveRelocater8616(
         project=project,
@@ -14919,13 +16420,17 @@ def _relocate_tagged_stack_move_before_proven_loop_8616(
 
 
 
+@cython.ccall
 def _collect_later_stack_update_candidates_8616(
     codegen: StructuredCodegenValue,
     project: AngrProjectValue,
     function: StructuredAstValue,
     fact: DirectStackMoveFact8616,
-) -> list[tuple[StructuredAstValue, StructuredAstValue, StructuredAstValue]]:
+) -> object:
     """Collect same-block stack updates that follow the move instruction."""
+    update_cvar: object
+    update_source: object
+    update_fact: object
     update_candidates: list[
         tuple[DirectStackUpdateFact8616, StructuredAstValue, StructuredAstValue]
     ] = []
@@ -14946,7 +16451,7 @@ def _collect_later_stack_update_candidates_8616(
         if (
             update_cvar is None
             or not isinstance(fact.source_index_offset, int)
-            or fact.source_index_offset != update_fact.offset
+            or operator.ne(fact.source_index_offset, update_fact.offset)
         ):
             continue
         update_source = _direct_stack_update_source_expr_8616(
@@ -14967,12 +16472,15 @@ def _locate_move_update_positions_8616(
     update_fact: StructuredAstValue,
     update_source: StructuredAstValue,
 ) -> tuple[
-    list[tuple[int, list[StructuredAstValue], int]],
-    list[tuple[int, list[StructuredAstValue], int]],
+    list[tuple[cython.longlong, list[StructuredAstValue], cython.longlong]],
+    list[tuple[cython.longlong, list[StructuredAstValue], cython.longlong]],
 ]:
     """Return render-order locations of the move and update assignments."""
-    move_locations: list[tuple[int, list[StructuredAstValue], int]] = []
-    update_locations: list[tuple[int, list[StructuredAstValue], int]] = []
+    index: object
+    node: object
+    statement: object
+    move_locations: list[tuple[cython.longlong, list[StructuredAstValue], cython.longlong]] = []
+    update_locations: list[tuple[cython.longlong, list[StructuredAstValue], cython.longlong]] = []
     render_order = 0
     for node in _iter_structured_c_nodes_8616(root):
         if not isinstance(node, structured_c.CStatements):
@@ -14995,8 +16503,8 @@ def _locate_move_update_positions_8616(
                 update_locations.append((render_order, statements, index))
             render_order += 1
         if os.environ.get("INERTIA_DEBUG_STACK_NOISE") and (
-            any(location[1] is statements for location in move_locations)
-            or any(location[1] is statements for location in update_locations)
+            any(location[1] is statements for location in iter(move_locations))
+            or any(location[1] is statements for location in iter(update_locations))
         ):
             log.warning(
                 "[direct-stack-move-order] move=%#x container=%#x",
@@ -15014,8 +16522,9 @@ def _restore_same_block_stack_move_order_8616(
     fact: DirectStackMoveFact8616,
     dst_expr: StructuredAstValue,
     source_expr: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Restore a same-block aggregate read before its later stack-slot update."""
+    moved: object
     update_candidates = _collect_later_stack_update_candidates_8616(
         codegen, project, function, fact
     )
@@ -15025,7 +16534,7 @@ def _restore_same_block_stack_move_order_8616(
             fact.ins_addr,
             tuple(
                 (candidate.ins_addr, candidate.offset, candidate.delta)
-                for candidate, _cvar, _source in update_candidates
+                for candidate, _cvar, _source in iter(update_candidates)
             ),
         )
     if len(update_candidates) != 1:
@@ -15057,7 +16566,11 @@ def _restore_same_block_stack_move_order_8616(
 
 
 
-def _first_transparent_assignment_8616(stmt: StructuredAstValue, seen: set[int] | None = None) -> StructuredAstValue:
+@cython.ccall
+def _first_transparent_assignment_8616(stmt: object, seen: object = None) -> StructuredAstValue:
+    found: object
+    attr: object
+    child: object
     if seen is None:
         seen = set()
     if stmt is None or id(stmt) in seen:
@@ -15080,7 +16593,11 @@ def _first_transparent_assignment_8616(stmt: StructuredAstValue, seen: set[int] 
     return None
 
 
-def _last_transparent_assignment_8616(stmt: StructuredAstValue, seen: set[int] | None = None) -> StructuredAstValue:
+@cython.ccall
+def _last_transparent_assignment_8616(stmt: object, seen: object = None) -> StructuredAstValue:
+    found: object
+    attr: object
+    child: object
     if seen is None:
         seen = set()
     if stmt is None or id(stmt) in seen:
@@ -15103,12 +16620,13 @@ def _last_transparent_assignment_8616(stmt: StructuredAstValue, seen: set[int] |
     return None
 
 
+@cython.ccall
 def _insertion_point_has_stack_move_assignment_8616(
-    statements: list[StructuredAstValue],
-    insert_index: int,
+    statements: object,
+    insert_index: cython.longlong,
     dst_cvar: StructuredAstValue,
     source_expr: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     if insert_index > 0:
         previous_assignment = _last_transparent_assignment_8616(statements[insert_index - 1])
         if _is_same_stack_move_assignment_8616(previous_assignment, dst_cvar, source_expr):
@@ -15120,7 +16638,7 @@ def _insertion_point_has_stack_move_assignment_8616(
     return False
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _InsertAfterNearestPreceding8616:
     """Find and use the nearest preceding tagged statement eligible for insertion."""
 
@@ -15134,8 +16652,10 @@ class _InsertAfterNearestPreceding8616:
     seen: StructuredAstValue
     best: StructuredAstValue = None
 
-    def visit(self, node: StructuredAstValue, depth: int) -> None:
+    @cython.ccall
+    def visit(self, node: object, depth: cython.longlong) -> None:
         """Find the nearest preceding tagged statement eligible for insertion."""
+        statements: object
         if node is None or id(node) in self.seen:
             return
         self.seen.add(id(node))
@@ -15144,7 +16664,8 @@ class _InsertAfterNearestPreceding8616:
             return
         self._visit_control_links_8616(node, depth)
 
-    def _same_block_8616(self, stmt_addr: int) -> bool:
+    @cython.ccall
+    def _same_block_8616(self, stmt_addr: cython.longlong) -> cython.bint:
         """Return whether the candidate predecessor shares the target block."""
         if self.function is None:
             return not self.require_known_block
@@ -15154,8 +16675,11 @@ class _InsertAfterNearestPreceding8616:
             )
         return _same_instruction_block_8616(self.project, self.function, stmt_addr, self.ins_addr)
 
-    def _visit_statements_8616(self, statements: list[StructuredAstValue], depth: int) -> bool:
+    @cython.ccall
+    def _visit_statements_8616(self, statements: object, depth: cython.longlong) -> cython.bint:
         """Score each preceding tagged statement; True aborts on existing update."""
+        index: object
+        stmt: object
         if _list_has_stack_move_assignment_8616(statements, self.dst_cvar, self.source_expr):
             self.root._inertia_stack_mov_assignment_already_present_8616 = True
             return True
@@ -15164,12 +16688,13 @@ class _InsertAfterNearestPreceding8616:
             self.visit(stmt, depth + 1)
         return False
 
+    @cython.ccall
     def _score_statement_8616(
         self,
-        statements: list[StructuredAstValue],
-        index: int,
+        statements: object,
+        index: cython.longlong,
         stmt: StructuredAstValue,
-        depth: int,
+        depth: cython.longlong,
     ) -> None:
         """Update the best insertion point when this predecessor is nearer."""
         stmt_addr = _preceding_instruction_addr_in_node_8616(stmt, self.project, self.ins_addr, set())
@@ -15186,7 +16711,7 @@ class _InsertAfterNearestPreceding8616:
         if same_block and (
             self.best is None
             or stmt_addr > self.best[0]
-            or (stmt_addr == self.best[0] and depth > self.best[1])
+            or (operator.eq(stmt_addr, self.best[0]) and depth > self.best[1])
         ):
             self.best = (
                 stmt_addr,
@@ -15198,8 +16723,14 @@ class _InsertAfterNearestPreceding8616:
                 ),
             )
 
-    def _visit_control_links_8616(self, node: StructuredAstValue, depth: int) -> None:
+    @cython.ccall
+    def _visit_control_links_8616(self, node: StructuredAstValue, depth: cython.longlong) -> None:
         """Recurse into loop bodies, else branches, and condition/body pairs."""
+        child: object
+        pairs: object
+        _condition: object
+        attr: object
+        body: object
         for attr in ("body", "else_node", "initializer", "iterator", "iteration"):
             with contextlib.suppress(Exception):
                 child = getattr(node, attr, None)
@@ -15214,16 +16745,17 @@ class _InsertAfterNearestPreceding8616:
                 self.visit(body, depth + 1)
 
 
+@cython.ccall
 def _insert_after_nearest_preceding_tagged_statement_8616(
     root: StructuredAstValue,
     project: StructuredAstValue,
-    ins_addr: int,
+    ins_addr: cython.longlong,
     assignment: StructuredAstValue,
     *,
     function: StructuredAstValue | None = None,
-    require_known_block: bool = False,
-    refuse_loop_container_predecessor: bool = False,
-) -> bool:
+    require_known_block: cython.bint = False,
+    refuse_loop_container_predecessor: cython.bint = False,
+) -> cython.bint:
     inserter = _InsertAfterNearestPreceding8616(
         root=root,
         project=project,
@@ -15266,16 +16798,20 @@ def _insert_after_nearest_preceding_tagged_statement_8616(
 
 
 
+@cython.ccall
 def _insert_between_structured_siblings_8616(
     root: StructuredAstValue,
     project: AngrProjectValue,
-    ins_addr: int,
+    ins_addr: cython.longlong,
     assignment: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Insert only when one unique structured sibling boundary encloses the instruction."""
+    left_range: object
+    right_range: object
+    node: object
     if not isinstance(assignment, structured_c.CAssignment):
         return False
-    candidates: list[tuple[list[StructuredAstValue], int]] = []
+    candidates: list[tuple[list[StructuredAstValue], cython.longlong]] = []
     for node in _iter_structured_c_nodes_8616(root):
         if not isinstance(node, structured_c.CStatements):
             continue
@@ -15312,13 +16848,17 @@ def _insert_between_structured_siblings_8616(
     return True
 
 
+@cython.ccall
 def _direct_call_addr_before_stack_store_8616(
-    project: AngrProjectValue, function: StructuredAstValue, stmt_addr: int, store_addr: int
+    project: AngrProjectValue, function: object, stmt_addr: cython.longlong, store_addr: cython.longlong
 ) -> int | None:
+    best: object
+    addr: object
+    insn: object
     if function is None or stmt_addr >= store_addr:
         return None
     insn_by_addr = _instruction_by_addr_map_8616(project, function)
-    best: int | None = None
+    best = None
     for addr, insn in insn_by_addr.items():
         if not (addr < store_addr):
             continue
@@ -15333,7 +16873,12 @@ def _direct_call_addr_before_stack_store_8616(
     return best
 
 
-def _dirty_expr_key_8616(node: StructuredAstValue) -> tuple[str, int | str] | None:
+@cython.ccall
+def _dirty_expr_key_8616(node: StructuredAstValue) -> object:
+    dirty: object
+    expr_idx: object
+    value: object
+    attr: object
     if node.__class__.__name__ != "CDirtyExpression":
         return None
     dirty = getattr(node, "dirty", None)
@@ -15347,7 +16892,9 @@ def _dirty_expr_key_8616(node: StructuredAstValue) -> tuple[str, int | str] | No
     return None
 
 
-def _c_lvalue_key_8616(node: StructuredAstValue) -> tuple[str, int | str] | None:
+@cython.ccall
+def _c_lvalue_key_8616(node: StructuredAstValue) -> object:
+    name: object
     node = _strip_casts_8616(node)
     if isinstance(node, structured_c.CVariable):
         variable = node.variable
@@ -15397,25 +16944,28 @@ _LVALUE_KEY_CHILD_ATTRS_8616 = (
 
 def _scan_lvalue_key_value_8616(
     value: StructuredAstValue,
-    key: tuple[str, int | str],
-    seen: set[int],
+    key: object,
+    seen: object,
     exclude_node_id: int | None,
-) -> bool:
+) -> cython.bint:
     """Scan a child attribute value for an lvalue-key read."""
     if isinstance(value, (list, tuple)):
         return any(
-            _scan_lvalue_key_value_8616(item, key, seen, exclude_node_id) for item in tuple(value)
+            _scan_lvalue_key_value_8616(item, key, seen, exclude_node_id) for item in builtins.iter(tuple(value))
         )
     return _c_node_reads_lvalue_key_8616(value, key, seen=seen, exclude_node_id=exclude_node_id)
 
 
+@cython.ccall
 def _lvalue_key_attrs_read_8616(
     node: StructuredAstValue,
-    key: tuple[str, int | str],
-    seen: set[int],
+    key: object,
+    seen: object,
     exclude_node_id: int | None,
-) -> bool:
+) -> cython.bint:
     """Scan the lvalue-reader child attributes for a key read."""
+    value: object
+    attr: object
     for attr in _LVALUE_KEY_CHILD_ATTRS_8616:
         value = getattr(node, attr, None)
         if _scan_lvalue_key_value_8616(value, key, seen, exclude_node_id):
@@ -15423,13 +16973,17 @@ def _lvalue_key_attrs_read_8616(
     return False
 
 
+@cython.ccall
 def _lvalue_key_pairs_read_8616(
     node: StructuredAstValue,
-    key: tuple[str, int | str],
-    seen: set[int],
+    key: object,
+    seen: object,
     exclude_node_id: int | None,
-) -> bool:
+) -> cython.bint:
     """Scan condition/body pairs for an lvalue-key read."""
+    pairs: object
+    body: object
+    condition: object
     pairs = getattr(node, "condition_and_nodes", None)
     if not pairs:
         return False
@@ -15451,13 +17005,14 @@ def _lvalue_key_pairs_read_8616(
     return False
 
 
+@cython.ccall
 def _c_node_reads_lvalue_key_8616(
-    node: StructuredAstValue,
-    key: tuple[str, int | str],
+    node: object,
+    key: object,
     *,
-    seen: set[int] | None = None,
+    seen: object = None,
     exclude_node_id: int | None = None,
-) -> bool:
+) -> cython.bint:
     if node is None:
         return False
     if seen is None:
@@ -15468,9 +17023,9 @@ def _c_node_reads_lvalue_key_8616(
     if node_id in seen:
         return False
     seen.add(node_id)
-    if isinstance(node, structured_c.CVariable) and _c_lvalue_key_8616(node) == key:
+    if isinstance(node, structured_c.CVariable) and operator.eq(_c_lvalue_key_8616(node), key):
         return True
-    if _dirty_expr_key_8616(node) == key:
+    if operator.eq(_dirty_expr_key_8616(node), key):
         return True
     if not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
         return False
@@ -15480,7 +17035,9 @@ def _c_node_reads_lvalue_key_8616(
 
 
 
-def _rhs_is_pure_register_artifact_expr_8616(rhs: StructuredAstValue) -> bool:
+@cython.ccall
+def _rhs_is_pure_register_artifact_expr_8616(rhs: StructuredAstValue) -> cython.bint:
+    node: object
     for node in _iter_structured_c_nodes_8616(rhs):
         if isinstance(node, structured_c.CFunctionCall):
             return False
@@ -15492,8 +17049,9 @@ def _rhs_is_pure_register_artifact_expr_8616(rhs: StructuredAstValue) -> bool:
 
 
 def _assignment_is_disposable_call_cleanup_artifact_8616(
-    stmt: StructuredAstValue, following_statements: tuple[StructuredAstValue, ...]
-) -> bool:
+    stmt: StructuredAstValue, following_statements: object
+) -> cython.bint:
+    lhs_key: object
     if not isinstance(stmt, structured_c.CAssignment):
         return False
     lhs = _strip_casts_8616(stmt.lhs)
@@ -15508,10 +17066,10 @@ def _assignment_is_disposable_call_cleanup_artifact_8616(
     rhs = stmt.rhs
     if not _rhs_is_pure_register_artifact_expr_8616(rhs):
         return False
-    return not any(_c_node_reads_lvalue_key_8616(candidate, lhs_key) for candidate in following_statements)
+    return not any(_c_node_reads_lvalue_key_8616(candidate, lhs_key) for candidate in iter(following_statements))
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _PostCallCleanupReplacer8616:
     """Replace the best disposable call-cleanup artifact before a stack move."""
 
@@ -15522,8 +17080,10 @@ class _PostCallCleanupReplacer8616:
     seen: StructuredAstValue
     best: StructuredAstValue = None
 
-    def visit(self, node: StructuredAstValue, depth: int) -> None:
+    @cython.ccall
+    def visit(self, node: object, depth: cython.longlong) -> None:
         """Find the nearest disposable cleanup artifact in the same block."""
+        statements: object
         if node is None or id(node) in self.seen:
             return
         self.seen.add(id(node))
@@ -15532,11 +17092,12 @@ class _PostCallCleanupReplacer8616:
             self._visit_statements_8616(statements, depth)
         self._visit_control_links_8616(node, depth)
 
+    @cython.ccall
     def _cleanup_candidate_addr_8616(
         self,
         stmt: StructuredAstValue,
-        statements: list[StructuredAstValue],
-        index: int,
+        statements: object,
+        index: cython.longlong,
     ) -> int | None:
         """Return the statement address when it is a disposable artifact."""
         stmt_addr = _statement_instruction_addr_8616(stmt, self.project, self.ins_addr)
@@ -15556,20 +17117,30 @@ class _PostCallCleanupReplacer8616:
             return None
         return stmt_addr
 
-    def _visit_statements_8616(self, statements: list[StructuredAstValue], depth: int) -> None:
+    @cython.ccall
+    def _visit_statements_8616(self, statements: object, depth: cython.longlong) -> None:
         """Score each cleanup-artifact candidate and recurse."""
+        stmt_addr: object
+        index: object
+        stmt: object
         for index, stmt in enumerate(tuple(statements)):
             stmt_addr = self._cleanup_candidate_addr_8616(stmt, statements, index)
             if stmt_addr is not None and (
                 self.best is None
                 or stmt_addr > self.best[0]
-                or (stmt_addr == self.best[0] and depth > self.best[1])
+                or (operator.eq(stmt_addr, self.best[0]) and depth > self.best[1])
             ):
                 self.best = (stmt_addr, depth, statements, index)
             self.visit(stmt, depth + 1)
 
-    def _visit_control_links_8616(self, node: StructuredAstValue, depth: int) -> None:
+    @cython.ccall
+    def _visit_control_links_8616(self, node: StructuredAstValue, depth: cython.longlong) -> None:
         """Recurse into loop bodies, else branches, and condition/body pairs."""
+        child: object
+        pairs: object
+        _condition: object
+        attr: object
+        body: object
         for attr in ("body", "else_node", "initializer", "iterator", "iteration"):
             child = getattr(node, attr, None)
             if child is not None:
@@ -15580,13 +17151,16 @@ class _PostCallCleanupReplacer8616:
                 self.visit(body, depth + 1)
 
 
+@cython.ccall
 def _replace_post_call_cleanup_artifact_before_stack_move_8616(
     root: StructuredAstValue,
     project: AngrProjectValue,
     function: StructuredAstValue,
-    ins_addr: int,
+    ins_addr: cython.longlong,
     assignment: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
+    dst_cvar: object
+    source_expr: object
     replacer = _PostCallCleanupReplacer8616(
         root=root,
         project=project,
@@ -15616,7 +17190,7 @@ def _replace_post_call_cleanup_artifact_before_stack_move_8616(
 
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _DoWhileConditionInserter8616:
     """Insert a stack move before a proven do-while condition."""
 
@@ -15628,8 +17202,10 @@ class _DoWhileConditionInserter8616:
     source_expr: StructuredAstValue
     seen: StructuredAstValue
 
-    def visit(self, node: StructuredAstValue) -> bool:
+    @cython.ccall
+    def visit(self, node: object) -> cython.bint:
         """Walk the tree, appending at a matching do-while body tail."""
+        result: object
         if node is None or id(node) in self.seen:
             return False
         self.seen.add(id(node))
@@ -15638,8 +17214,14 @@ class _DoWhileConditionInserter8616:
             return result
         return self._visit_children_8616(node)
 
+    @cython.ccall
     def _try_do_while_append_8616(self, node: StructuredAstValue) -> bool | None:
         """Append to the body when the update sits between body and condition."""
+        body: object
+        body_range: object
+        body_statements: object
+        condition: object
+        condition_range: object
         body = getattr(node, "body", None)
         condition = getattr(node, "condition", None)
         if not (
@@ -15681,8 +17263,16 @@ class _DoWhileConditionInserter8616:
         body_statements.append(self.assignment)
         return True
 
-    def _visit_children_8616(self, node: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _visit_children_8616(self, node: StructuredAstValue) -> cython.bint:
         """Recurse into statements, loop bodies, else branches, and pairs."""
+        child: object
+        pairs: object
+        statements: object
+        _condition: object
+        attr: object
+        body: object
+        stmt: object
         statements = getattr(node, "statements", None)
         if isinstance(statements, list):
             for stmt in tuple(statements):
@@ -15701,9 +17291,10 @@ class _DoWhileConditionInserter8616:
         return False
 
 
+@cython.ccall
 def _insert_before_do_while_condition_8616(
-    root: StructuredAstValue, project: AngrProjectValue, ins_addr: int, assignment: StructuredAstValue
-) -> bool:
+    root: StructuredAstValue, project: AngrProjectValue, ins_addr: cython.longlong, assignment: StructuredAstValue
+) -> cython.bint:
     inserter = _DoWhileConditionInserter8616(
         root=root,
         project=project,
@@ -15717,7 +17308,7 @@ def _insert_before_do_while_condition_8616(
 
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _GuardedBodyStartInserter8616:
     """Insert a stack move at a proven guarded-body start for the target."""
 
@@ -15729,8 +17320,10 @@ class _GuardedBodyStartInserter8616:
     source_expr: StructuredAstValue
     seen: StructuredAstValue
 
-    def visit(self, node: StructuredAstValue) -> bool:
+    @cython.ccall
+    def visit(self, node: object) -> cython.bint:
         """Walk the tree, inserting at a proven guarded body start."""
+        result: object
         if node is None or id(node) in self.seen:
             return False
         self.seen.add(id(node))
@@ -15739,8 +17332,13 @@ class _GuardedBodyStartInserter8616:
             return result
         return self._visit_children_8616(node)
 
+    @cython.ccall
     def _visit_pairs_8616(self, node: StructuredAstValue) -> bool | None:
         """Try each condition/body pair; None means fall through to children."""
+        pairs: object
+        result: object
+        body: object
+        condition: object
         pairs = getattr(node, "condition_and_nodes", None)
         if not pairs:
             return None
@@ -15750,13 +17348,14 @@ class _GuardedBodyStartInserter8616:
                 return result
         return None
 
+    @cython.ccall
     def _guard_match_8616(
         self,
         condition: StructuredAstValue,
         body_statements: StructuredAstValue,
-        condition_range: tuple[int, int] | None,
-        body_range: tuple[int, int] | None,
-    ) -> bool:
+        condition_range: object,
+        body_range: object,
+    ) -> cython.bint:
         """Return whether the guarded body range covers the target update."""
         if not isinstance(body_statements, list) or body_range is None:
             return False
@@ -15769,12 +17368,16 @@ class _GuardedBodyStartInserter8616:
             return False
         return _node_reads_stack_cvar_8616(condition, self.dst_cvar)
 
+    @cython.ccall
     def _try_guarded_pair_8616(
         self,
         condition: StructuredAstValue,
         body: StructuredAstValue,
     ) -> bool | None:
         """Insert at a matching guarded body start or recurse into the body."""
+        body_range: object
+        body_statements: object
+        condition_range: object
         body_statements = getattr(body, "statements", None)
         condition_range = _instruction_addr_range_in_node_8616(condition, self.project, self.ins_addr, set())
         body_range = _instruction_addr_range_in_node_8616(body, self.project, self.ins_addr, set())
@@ -15799,8 +17402,13 @@ class _GuardedBodyStartInserter8616:
         body_statements.insert(0, self.assignment)
         return True
 
-    def _visit_children_8616(self, node: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _visit_children_8616(self, node: StructuredAstValue) -> cython.bint:
         """Recurse into statements, loop bodies, and else branches."""
+        child: object
+        statements: object
+        attr: object
+        stmt: object
         statements = getattr(node, "statements", None)
         if isinstance(statements, list):
             for stmt in tuple(statements):
@@ -15814,9 +17422,10 @@ class _GuardedBodyStartInserter8616:
         return False
 
 
+@cython.ccall
 def _insert_at_guarded_body_start_for_target_stack_move_8616(
-    root: StructuredAstValue, project: AngrProjectValue, ins_addr: int, assignment: StructuredAstValue
-) -> bool:
+    root: StructuredAstValue, project: AngrProjectValue, ins_addr: cython.longlong, assignment: StructuredAstValue
+) -> cython.bint:
     inserter = _GuardedBodyStartInserter8616(
         root=root,
         project=project,
@@ -15830,17 +17439,18 @@ def _insert_at_guarded_body_start_for_target_stack_move_8616(
 
 
 
-def _is_conditional_jcc_insn_8616(insn: StructuredAstValue) -> bool:
+@cython.ccall
+def _is_conditional_jcc_insn_8616(insn: StructuredAstValue) -> cython.bint:
     """Check for a conditional jump mnemonic (not jmp)."""
     mnemonic = str(getattr(insn, "mnemonic", "") or "").lower()
     return mnemonic.startswith("j") and mnemonic != "jmp"
 
 
-def _jcc_branch_indexes_8616(insns: tuple[StructuredAstValue, ...], jcc_addr: int) -> tuple[int, ...]:
+def _jcc_branch_indexes_8616(insns: object, jcc_addr: cython.longlong) -> tuple[cython.longlong, ...]:
     """Find instruction indexes that could carry the requested jcc address."""
     return tuple(
         index
-        for index, wrapper in enumerate(insns)
+        for index, wrapper in builtins.iter(enumerate(insns))
         if (
             isinstance(getattr(getattr(wrapper, "insn", wrapper), "address", None), int)
             and abs(int(getattr(wrapper, "insn", wrapper).address) - jcc_addr) <= 8
@@ -15849,17 +17459,24 @@ def _jcc_branch_indexes_8616(insns: tuple[StructuredAstValue, ...], jcc_addr: in
     )
 
 
+@cython.ccall
 def _single_imm_operand_8616(insn: StructuredAstValue) -> int | None:
     """Return the immediate of a single-operand instruction, or None."""
+    imm: object
     operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
-    if len(operands) != 1 or getattr(operands[0], "type", None) != X86_OP_IMM:
+    if len(operands) != 1 or operator.ne(getattr(operands[0], "type", None), X86_OP_IMM):
         return None
     imm = getattr(operands[0], "imm", None)
     return imm if isinstance(imm, int) else None
 
 
-def _jcc_merge_addr_8616(insns: tuple[StructuredAstValue, ...], index: int, else_start: int) -> int | None:
+@cython.ccall
+def _jcc_merge_addr_8616(insns: object, index: cython.longlong, else_start: cython.longlong) -> int | None:
     """Scan past else_start for the first unconditional-jump merge target."""
+    candidate: object
+    candidate_addr: object
+    target: object
+    candidate_wrapper: object
     for candidate_wrapper in insns[index + 2 :]:
         candidate = getattr(candidate_wrapper, "insn", candidate_wrapper)
         candidate_addr = getattr(candidate, "address", None)
@@ -15876,11 +17493,14 @@ def _jcc_merge_addr_8616(insns: tuple[StructuredAstValue, ...], index: int, else
 
 
 def _conditional_branch_ranges_for_jcc_8616(
-    project: StructuredAstValue, function: StructuredAstValue, jcc_addr: int
-) -> tuple[int, int, int | None] | None:
+    project: StructuredAstValue, function: object, jcc_addr: cython.longlong
+) -> object:
+    insn: object
+    next_insn: object
+    index: object
     blocks = tuple(_direct_global_update_blocks_8616(project, function)) if function is not None else ()
     insns = _dedup_sorted_capstone_insns_by_addr_8616(
-        wrapper for block in blocks for wrapper in _capstone_insns_for_direct_global_update_8616(project, block)
+        wrapper for block in iter(blocks) for wrapper in builtins.iter(_capstone_insns_for_direct_global_update_8616(project, block))
     )
     jcc_indexes = _jcc_branch_indexes_8616(insns, jcc_addr)
     if len(jcc_indexes) != 1:
@@ -15903,7 +17523,7 @@ def _conditional_branch_ranges_for_jcc_8616(
     return None
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _CondBranchMoveInserter8616:
     """Insert a decoded stack move into the innermost CFG-proven branch."""
 
@@ -15917,7 +17537,8 @@ class _CondBranchMoveInserter8616:
     relocate_tagged_assignment: StructuredAstValue
     seen: StructuredAstValue
 
-    def _maybe_insert_8616(self, branch: StructuredAstValue, statements: list[StructuredAstValue]) -> bool:
+    @cython.ccall
+    def _maybe_insert_8616(self, branch: StructuredAstValue, statements: object) -> cython.bint:
         """Insert at branch start unless the same assignment is already present."""
         if self.relocate_tagged_assignment and not self._relocate_tagged_8616(branch, statements):
             return False
@@ -15938,7 +17559,8 @@ class _CondBranchMoveInserter8616:
             )
         return True
 
-    def _relocate_tagged_8616(self, branch: StructuredAstValue, statements: list[StructuredAstValue]) -> bool:
+    @cython.ccall
+    def _relocate_tagged_8616(self, branch: StructuredAstValue, statements: object) -> cython.bint:
         """Remove the unique tagged copy so the branch insert relocates it."""
         tagged_count = _removable_tagged_stack_move_assignment_count_8616(
             self.root,
@@ -15984,7 +17606,8 @@ class _CondBranchMoveInserter8616:
             raise AssertionError("tagged branch stack-move count changed during relocation")
         return True
 
-    def visit(self, node: StructuredAstValue) -> bool:
+    @cython.ccall
+    def visit(self, node: object) -> cython.bint:
         """Walk conditionals and insert into the machine-proven branch range."""
         if node is None or id(node) in self.seen:
             return False
@@ -15993,8 +17616,12 @@ class _CondBranchMoveInserter8616:
             return True
         return self._visit_children_8616(node)
 
-    def _visit_conditional_pairs_8616(self, node: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _visit_conditional_pairs_8616(self, node: StructuredAstValue) -> cython.bint:
         """Handle each condition/body pair of a conditional node."""
+        pairs: object
+        body: object
+        condition: object
         pairs = getattr(node, "condition_and_nodes", None)
         if not pairs:
             return False
@@ -16003,15 +17630,19 @@ class _CondBranchMoveInserter8616:
                 return True
         return False
 
+    @cython.ccall
     def _branch_target_8616(
         self,
         node: StructuredAstValue,
         body: StructuredAstValue,
-        then_start: int,
-        else_start: int,
-        merge_addr: int | None,
-    ) -> tuple[StructuredAstValue, list[StructuredAstValue]] | None:
+        then_start: cython.longlong,
+        else_start: cython.longlong,
+        merge_addr: object,
+    ) -> object:
         """Pick the proven branch arm containing this instruction."""
+        body_statements: object
+        else_node: object
+        else_statements: object
         body_statements = getattr(body, "statements", None)
         else_node = getattr(node, "else_node", None)
         else_statements = getattr(else_node, "statements", None)
@@ -16025,13 +17656,16 @@ class _CondBranchMoveInserter8616:
             return else_node, else_statements
         return None
 
+    @cython.ccall
     def _visit_branch_pair_8616(
         self,
         node: StructuredAstValue,
         condition: StructuredAstValue,
         body: StructuredAstValue,
-    ) -> bool:
+    ) -> cython.bint:
         """Resolve the jcc range for one pair and insert into its target arm."""
+        ranges: object
+        target: object
         jcc_addr = _preceding_instruction_addr_in_node_8616(condition, self.project, self.ins_addr, set())
         if not isinstance(jcc_addr, int):
             return False
@@ -16049,8 +17683,13 @@ class _CondBranchMoveInserter8616:
             return True
         return self.visit(getattr(node, "else_node", None))
 
-    def _visit_children_8616(self, node: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _visit_children_8616(self, node: StructuredAstValue) -> cython.bint:
         """Recurse into statements, loop bodies, and else branches."""
+        child: object
+        statements: object
+        attr: object
+        stmt: object
         statements = getattr(node, "statements", None)
         if isinstance(statements, list):
             for stmt in tuple(statements):
@@ -16063,15 +17702,16 @@ class _CondBranchMoveInserter8616:
         return False
 
 
+@cython.ccall
 def _insert_into_conditional_branch_for_direct_stack_move_8616(
     root: StructuredAstValue,
     project: StructuredAstValue,
     function: StructuredAstValue,
-    ins_addr: int,
+    ins_addr: cython.longlong,
     assignment: StructuredAstValue,
     *,
-    relocate_tagged_assignment: bool = False,
-) -> bool:
+    relocate_tagged_assignment: cython.bint = False,
+) -> cython.bint:
     """Insert a decoded stack move into the innermost CFG-proven branch."""
     inserter = _CondBranchMoveInserter8616(
         root=root,
@@ -16088,23 +17728,28 @@ def _insert_into_conditional_branch_for_direct_stack_move_8616(
 
 
 
-def _sequence_has_control_flow_8616(sequence: tuple[StructuredAstValue, ...]) -> bool:
+def _sequence_has_control_flow_8616(sequence: object) -> cython.bint:
     """Check whether a candidate sequence contains a control-flow instruction."""
     return any(
         X86_GRP_JUMP in frozenset(getattr(item, "groups", ()) or ())
         or X86_GRP_RET in frozenset(getattr(item, "groups", ()) or ())
         or getattr(item, "id", None) in {X86_INS_CALL, X86_INS_LCALL, X86_INS_RET}
-        for item in sequence
+        for item in iter(sequence)
     )
 
 
+@cython.ccall
 def _sequence_starts_in_block_8616(
-    block_insns: tuple[StructuredAstValue, ...],
+    block_insns: object,
     project: AngrProjectValue,
-    ins_addr: int,
-    sequence_starts: set[int],
+    ins_addr: cython.longlong,
+    sequence_starts: object,
 ) -> None:
     """Record backward-reachable sequence starts for one block."""
+    tagged_addr: object
+    comparable_addr: object
+    fact_index: object
+    insn: object
     comparable_addrs_list: list[int | None] = []
     for insn in block_insns:
         tagged_addr = getattr(insn, "address", None)
@@ -16115,7 +17760,7 @@ def _sequence_starts_in_block_8616(
         )
     comparable_addrs = tuple(comparable_addrs_list)
     for fact_index, comparable_addr in enumerate(comparable_addrs):
-        if comparable_addr != int(ins_addr):
+        if operator.ne(comparable_addr, int(ins_addr)):
             continue
         sequence_starts.add(int(ins_addr))
         for start_index in range(fact_index - 1, -1, -1):
@@ -16128,20 +17773,23 @@ def _sequence_starts_in_block_8616(
             sequence_starts.add(start_addr)
 
 
+@cython.ccall
 def _loopback_edge_for_jump_8616(
     insn: StructuredAstValue,
     project: AngrProjectValue,
-    ins_addr: int,
-    sequence_starts: set[int],
-) -> tuple[int, int] | None:
+    ins_addr: cython.longlong,
+    sequence_starts: object,
+) -> object:
     """Return the proven (sequence entry, backedge jump) edge for one jump."""
+    jump_addr: object
+    target: object
     jump_addr = getattr(insn, "address", None)
     operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
     if not isinstance(jump_addr, int) or len(operands) != 1:
         return None
     operand = operands[0]
     target = getattr(operand, "imm", None)
-    if int(getattr(operand, "type", -1)) != X86_OP_IMM or not isinstance(target, int):
+    if operator.ne(int(getattr(operand, "type", -1)), X86_OP_IMM) or not isinstance(target, int):
         return None
     comparable_jump = _comparable_instruction_addr_8616(project, jump_addr, ins_addr)
     comparable_target = _comparable_instruction_addr_8616(project, target, ins_addr)
@@ -16157,23 +17805,27 @@ def _loopback_edge_for_jump_8616(
 def _instruction_sequence_loopback_edges_8616(
     function: StructuredAstValue,
     project: AngrProjectValue,
-    ins_addr: int,
-) -> tuple[tuple[int, int], ...]:
+    ins_addr: cython.longlong,
+) -> object:
     """Return proven ``(sequence entry, backedge jump)`` pairs for an instruction fact."""
-    sequence_starts: set[int] = set()
+    capstone: object
+    edge: object
+    block: object
+    insn: object
+    sequence_starts: set[cython.longlong] = set()
     jump_insns: list[StructuredAstValue] = []
     for block in _boundary_tuple_8616(getattr(function, "blocks", ()) or ()):
         capstone = getattr(block, "capstone", None)
         block_insns = tuple(
             getattr(wrapped, "insn", wrapped)
-            for wrapped in _boundary_tuple_8616(getattr(capstone, "insns", ()) or ())
+            for wrapped in builtins.iter(_boundary_tuple_8616(getattr(capstone, "insns", ()) or ()))
         )
         _sequence_starts_in_block_8616(block_insns, project, ins_addr, sequence_starts)
         for insn in block_insns:
             if X86_GRP_JUMP not in frozenset(getattr(insn, "groups", ()) or ()):
                 continue
             jump_insns.append(insn)
-    edges: list[tuple[int, int]] = []
+    edges: list[tuple[cython.longlong, cython.longlong]] = []
     for insn in jump_insns:
         edge = _loopback_edge_for_jump_8616(insn, project, ins_addr, sequence_starts)
         if edge is not None:
@@ -16189,13 +17841,20 @@ def _instruction_sequence_loopback_edges_8616(
     return proven_edges
 
 
+@cython.ccall
 def _function_backward_jump_edges_8616(
     function: StructuredAstValue,
     project: AngrProjectValue,
-    reference_addr: int,
-) -> tuple[tuple[int, int], ...]:
+    reference_addr: cython.longlong,
+) -> tuple[tuple[cython.longlong, cython.longlong], ...]:
     """Return immediate backward-jump edges in coordinates comparable to a fact address."""
-    edges: list[tuple[int, int]] = []
+    capstone: object
+    insn: object
+    jump_addr: object
+    target: object
+    block: object
+    wrapped: object
+    edges: list[tuple[cython.longlong, cython.longlong]] = []
     for block in _boundary_tuple_8616(getattr(function, "blocks", ()) or ()):
         capstone = getattr(block, "capstone", None)
         for wrapped in _boundary_tuple_8616(getattr(capstone, "insns", ()) or ()):
@@ -16208,7 +17867,7 @@ def _function_backward_jump_edges_8616(
                 continue
             operand = operands[0]
             target = getattr(operand, "imm", None)
-            if int(getattr(operand, "type", -1)) != X86_OP_IMM or not isinstance(target, int):
+            if operator.ne(int(getattr(operand, "type", -1)), X86_OP_IMM) or not isinstance(target, int):
                 continue
             comparable_jump = _comparable_instruction_addr_8616(project, jump_addr, reference_addr)
             comparable_target = _comparable_instruction_addr_8616(project, target, reference_addr)
@@ -16221,16 +17880,17 @@ def _function_backward_jump_edges_8616(
     return tuple(dict.fromkeys(edges))
 
 
+@cython.ccall
 def _function_has_loopback_to_instruction_8616(
     function: StructuredAstValue,
     project: AngrProjectValue,
-    ins_addr: int,
-) -> bool:
+    ins_addr: cython.longlong,
+) -> cython.bint:
     """Return whether binary control flow repeats a straight-line sequence ending at a fact."""
     return bool(_instruction_sequence_loopback_edges_8616(function, project, ins_addr))
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _DoWhileBodyStartInserter8616:
     """Insert a proven loop-entry move when a binary backedge repeats it."""
 
@@ -16246,8 +17906,17 @@ class _DoWhileBodyStartInserter8616:
     rendered_seen: StructuredAstValue
     seen: StructuredAstValue
 
-    def collect_rendered_do_loops(self, node: StructuredAstValue) -> None:
+    @cython.ccall
+    def collect_rendered_do_loops(self, node: object) -> None:
         """Collect executable do loops without following compatibility fields."""
+        cases: object
+        pairs: object
+        statements: object
+        _case_value: object
+        _condition: object
+        attr: object
+        body: object
+        statement: object
         if node is None or id(node) in self.rendered_seen:
             return
         self.rendered_seen.add(id(node))
@@ -16271,8 +17940,10 @@ class _DoWhileBodyStartInserter8616:
                 self.collect_rendered_do_loops(body)
         self.collect_rendered_do_loops(getattr(node, "default", None))
 
-    def visit(self, node: StructuredAstValue) -> bool:
+    @cython.ccall
+    def visit(self, node: object) -> cython.bint:
         """Walk the tree; a CDoWhileLoop match inserts, aborts, or recurses."""
+        result: object
         if node is None or id(node) in self.seen:
             return False
         self.seen.add(id(node))
@@ -16281,8 +17952,12 @@ class _DoWhileBodyStartInserter8616:
             return result
         return self._visit_children_8616(node)
 
-    def _repeated_prefix_count_8616(self, body_statements: StructuredAstValue) -> int:
+    @cython.ccall
+    def _repeated_prefix_count_8616(self, body_statements: StructuredAstValue) -> cython.longlong:
         """Count leading body statements already emitted for this update."""
+        statement_addr: object
+        tags: object
+        statement: object
         repeated_prefix_count = 0
         if isinstance(body_statements, list):
             for statement in body_statements:
@@ -16305,14 +17980,14 @@ class _DoWhileBodyStartInserter8616:
     def _post_prefix_body_range_8616(
         self,
         body_statements: StructuredAstValue,
-        repeated_prefix_count: int,
-    ) -> tuple[int, int] | None:
+        repeated_prefix_count: cython.longlong,
+    ) -> object:
         """Merge instruction ranges of the body tail after the repeated prefix."""
         body_ranges = tuple(
             candidate_range
-            for statement in (
+            for statement in iter((
                 body_statements[repeated_prefix_count:] if isinstance(body_statements, list) else ()
-            )
+            ))
             if (
                 candidate_range := _instruction_addr_range_in_node_8616(
                     statement,
@@ -16324,20 +17999,20 @@ class _DoWhileBodyStartInserter8616:
             is not None
         )
         return (
-            (min(item[0] for item in body_ranges), max(item[1] for item in body_ranges))
+            (min(item[0] for item in iter(body_ranges)), max(item[1] for item in iter(body_ranges)))
             if body_ranges
             else None
         )
 
     def _ordered_condition_8616(
         self,
-        body_range: tuple[int, int] | None,
-        condition_range: tuple[int, int] | None,
-    ) -> bool:
+        body_range: object,
+        condition_range: object,
+    ) -> cython.bint:
         """Return whether the body provably precedes the tagged condition."""
         exact_edge_covers_boundary = condition_range is not None and any(
             entry <= int(self.ins_addr) < condition_range[0] and jump >= condition_range[1]
-            for entry, jump in self.proven_loopback_edges
+            for entry, jump in iter(self.proven_loopback_edges)
         )
         return (
             body_range is not None
@@ -16347,22 +18022,28 @@ class _DoWhileBodyStartInserter8616:
             and exact_edge_covers_boundary
         )
 
+    @cython.ccall
     def _unique_unmapped_condition_8616(
         self,
         node: StructuredAstValue,
-        body_range: tuple[int, int] | None,
-        condition_range: tuple[int, int] | None,
-    ) -> bool:
+        body_range: object,
+        condition_range: object,
+    ) -> cython.bint:
         """Return whether this is the unique do loop with an unmapped condition."""
         return (
             body_range is not None
             and condition_range is None
-            and self.condition_reading_do_loop_ids == frozenset({id(node)})
+            and operator.eq(self.condition_reading_do_loop_ids, frozenset({id(node)}))
             and self.ins_addr <= body_range[1]
         )
 
+    @cython.ccall
     def _try_do_while_insert_8616(self, node: StructuredAstValue) -> bool | None:
         """Try inserting at a do-while body start; None means keep walking."""
+        body: object
+        body_range: object
+        body_statements: object
+        condition: object
         body = getattr(node, "body", None)
         condition = getattr(node, "condition", None)
         if not (body is not None and condition is not None and node.__class__.__name__ == "CDoWhileLoop"):
@@ -16400,14 +18081,15 @@ class _DoWhileBodyStartInserter8616:
         body_statements.insert(insertion_index, self.assignment)
         return True
 
+    @cython.ccall
     def _debug_do_while_refusal_8616(
         self,
         node: StructuredAstValue,
         condition: StructuredAstValue,
-        body_range: tuple[int, int] | None,
-        condition_range: tuple[int, int] | None,
-        ordered_condition: bool,
-        unique_unmapped_condition: bool,
+        body_range: object,
+        condition_range: object,
+        ordered_condition: cython.bint,
+        unique_unmapped_condition: cython.bint,
     ) -> None:
         """Emit optional debug noise when a do-while match is refused."""
         if os.environ.get("INERTIA_DEBUG_STACK_NOISE") and not (
@@ -16424,10 +18106,11 @@ class _DoWhileBodyStartInserter8616:
                 _node_reads_stack_cvar_8616(condition, self.dst_cvar),
             )
 
+    @cython.ccall
     def _debug_do_while_insert_8616(
         self,
-        body_range: tuple[int, int] | None,
-        condition_range: tuple[int, int] | None,
+        body_range: object,
+        condition_range: object,
     ) -> None:
         """Emit optional debug noise for a do-while insertion."""
         if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
@@ -16442,8 +18125,16 @@ class _DoWhileBodyStartInserter8616:
                 _stack_cvar_identity_8616(self.source_expr),
             )
 
-    def _visit_children_8616(self, node: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _visit_children_8616(self, node: StructuredAstValue) -> cython.bint:
         """Recurse into statements, loop bodies, else branches, and pairs."""
+        child: object
+        pairs: object
+        statements: object
+        _condition: object
+        attr: object
+        body: object
+        stmt: object
         statements = getattr(node, "statements", None)
         if isinstance(statements, list):
             for stmt in tuple(statements):
@@ -16462,16 +18153,18 @@ class _DoWhileBodyStartInserter8616:
         return False
 
 
+@cython.ccall
 def _insert_at_do_while_body_start_8616(
     root: StructuredAstValue,
     project: AngrProjectValue,
     function: StructuredAstValue,
-    ins_addr: int,
+    ins_addr: cython.longlong,
     assignment: StructuredAstValue,
     *,
-    proven_loopback_edges: tuple[tuple[int, int], ...] = (),
-) -> bool:
+    proven_loopback_edges: object = (),
+) -> cython.bint:
     """Insert a proven loop-entry move when a binary backedge repeats it."""
+    dst_cvar: object
     dst_cvar = getattr(assignment, "lhs", None)
     if not proven_loopback_edges:
         proven_loopback_edges = _instruction_sequence_loopback_edges_8616(
@@ -16500,7 +18193,7 @@ def _insert_at_do_while_body_start_8616(
 
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _LoopBodyStartInserter8616:
     """Insert a proven stack effect at the matching structured loop boundary."""
 
@@ -16515,7 +18208,7 @@ class _LoopBodyStartInserter8616:
     seen: StructuredAstValue
     best_untagged_tail: StructuredAstValue = None
 
-    def _body_has_loopback_to_update_8616(self, body_range: tuple[int, int]) -> bool:
+    def _body_has_loopback_to_update_8616(self, body_range: object) -> cython.bint:
         """Return whether the loop body provably jumps back to the update."""
         start, end = body_range
         if not isinstance(start, int) or not isinstance(end, int) or end < start:
@@ -16523,12 +18216,14 @@ class _LoopBodyStartInserter8616:
         if self.proven_loopback_edges:
             return any(
                 entry <= int(self.ins_addr) < start and jump >= end
-                for entry, jump in self.proven_loopback_edges
+                for entry, jump in iter(self.proven_loopback_edges)
             )
         return self._bytes_jump_back_to_update_8616(start, end)
 
-    def _bytes_jump_back_to_update_8616(self, start: int, end: int) -> bool:
+    @cython.ccall
+    def _bytes_jump_back_to_update_8616(self, start: cython.longlong, end: cython.longlong) -> cython.bint:
         """Disassemble the body range looking for a jump back to the update."""
+        item: object
         try:
             code = bytes(self.project.loader.memory.load(start, min(max(end - start + 8, 1), 0x200)))
             capstone = self.project.arch.capstone
@@ -16546,32 +18241,36 @@ class _LoopBodyStartInserter8616:
 
     @staticmethod
     def _insn_jumps_to_update_8616(
-        item: StructuredAstValue, start: int, end: int, target_addrs: StructuredAstValue
-    ) -> bool:
+        item: StructuredAstValue, start: cython.longlong, end: cython.longlong, target_addrs: StructuredAstValue
+    ) -> cython.bint:
         """Return whether one disassembled instruction jumps to the update."""
+        addr: object
+        target: object
         addr = getattr(item, "address", None)
         if not isinstance(addr, int) or addr < start or addr > end + 8:
             return False
         if str(getattr(item, "mnemonic", "") or "").lower() not in {"jmp", "ljmp"}:
             return False
         operands = _boundary_tuple_8616(getattr(item, "operands", ()) or ())
-        if len(operands) != 1 or int(getattr(operands[0], "type", -1)) != X86_OP_IMM:
+        if len(operands) != 1 or operator.ne(int(getattr(operands[0], "type", -1)), X86_OP_IMM):
             return False
         target = getattr(operands[0], "imm", None)
         return isinstance(target, int) and int(target) in target_addrs
 
-    def _mark_already_present_8616(self) -> bool:
+    @cython.ccall
+    def _mark_already_present_8616(self) -> cython.bint:
         """Record that an equivalent update already exists at the point."""
         self.root._inertia_stack_update_assignment_already_present_8616 = True
         return False
 
+    @cython.ccall
     def _insert_body_start_8616(
         self,
-        body_statements: list[StructuredAstValue],
-        insert_index: int,
-        debug_message: str,
-        debug_values: tuple[StructuredAstValue, ...],
-    ) -> bool:
+        body_statements: object,
+        insert_index: cython.longlong,
+        debug_message: object,
+        debug_values: object,
+    ) -> cython.bint:
         """Insert at a proven body position after checking for an existing update."""
         if _insertion_point_has_stack_move_assignment_8616(
             body_statements,
@@ -16589,8 +18288,13 @@ class _LoopBodyStartInserter8616:
         body_statements.insert(insert_index, self.assignment)
         return True
 
-    def visit(self, node: StructuredAstValue, depth: int = 0) -> bool:
+    @cython.ccall
+    def visit(self, node: object, depth: cython.longlong = 0) -> cython.bint:
         """Find a loop body start or tail insertion point for a proven stack update."""
+        body: object
+        body_statements: object
+        condition: object
+        result: object
         if node is None or id(node) in self.seen:
             return False
         self.seen.add(id(node))
@@ -16614,11 +18318,12 @@ class _LoopBodyStartInserter8616:
                 return result
         return self._visit_children_8616(node, depth)
 
+    @cython.ccall
     def _debug_loop_ranges_8616(
         self,
         node: StructuredAstValue,
-        condition_range: tuple[int, int] | None,
-        body_range: tuple[int, int] | None,
+        condition_range: object,
+        body_range: object,
     ) -> None:
         """Emit optional debug noise for loop range matching."""
         if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
@@ -16631,11 +18336,12 @@ class _LoopBodyStartInserter8616:
                 _stack_cvar_identity_8616(self.dst_cvar),
             )
 
+    @cython.ccall
     def _try_tagged_loop_body_8616(
         self,
         body_statements: StructuredAstValue,
-        body_range: tuple[int, int] | None,
-        condition_range: tuple[int, int] | None,
+        body_range: object,
+        condition_range: object,
     ) -> bool | None:
         """Insert at the start/tail of a tagged loop body spanning the update."""
         if not (
@@ -16658,13 +18364,14 @@ class _LoopBodyStartInserter8616:
             (self.ins_addr, insert_index, condition_range[1], body_range[0]),
         )
 
+    @cython.ccall
     def _try_untagged_while_tail_8616(
         self,
         node: StructuredAstValue,
         body_statements: StructuredAstValue,
-        body_range: tuple[int, int] | None,
-        condition_range: tuple[int, int] | None,
-        depth: int,
+        body_range: object,
+        condition_range: object,
+        depth: cython.longlong,
     ) -> bool | None:
         """Handle while(true)-style loops without a tagged condition range."""
         if not (
@@ -16694,18 +18401,21 @@ class _LoopBodyStartInserter8616:
             if (
                 self.best_untagged_tail is None
                 or gap < self.best_untagged_tail[0]
-                or (gap == self.best_untagged_tail[0] and depth > self.best_untagged_tail[1])
+                or (operator.eq(gap, self.best_untagged_tail[0]) and depth > self.best_untagged_tail[1])
             ):
                 self.best_untagged_tail = candidate
         return None
 
+    @cython.ccall
     def _try_repeated_sequence_8616(
         self,
         node: StructuredAstValue,
         body_statements: StructuredAstValue,
-        depth: int,
+        depth: cython.longlong,
     ) -> bool | None:
         """Prefer the deepest matching loop for repeated sequence entries."""
+        read_before_definition_index: object
+        stmt: object
         if not (
             self.repeated_sequence_entry
             and self.proven_loopback_edges
@@ -16733,13 +18443,16 @@ class _LoopBodyStartInserter8616:
             (self.ins_addr, read_before_definition_index),
         )
 
+    @cython.ccall
     def _try_contained_insert_8616(
         self,
         body_statements: StructuredAstValue,
-        body_range: tuple[int, int] | None,
-        depth: int,
+        body_range: object,
+        depth: cython.longlong,
     ) -> bool | None:
         """Insert before the next tagged statement inside the containing loop."""
+        index: object
+        stmt: object
         if not (
             isinstance(body_statements, list)
             and body_range is not None
@@ -16760,8 +18473,16 @@ class _LoopBodyStartInserter8616:
                 )
         return None
 
-    def _visit_children_8616(self, node: StructuredAstValue, depth: int) -> bool:
+    @cython.ccall
+    def _visit_children_8616(self, node: StructuredAstValue, depth: cython.longlong) -> cython.bint:
         """Recurse into statements, loop bodies, else branches, and pairs."""
+        child: object
+        pairs: object
+        statements: object
+        _condition: object
+        attr: object
+        guarded_body: object
+        stmt: object
         statements = getattr(node, "statements", None)
         if isinstance(statements, list):
             for stmt in tuple(statements):
@@ -16780,15 +18501,16 @@ class _LoopBodyStartInserter8616:
         return False
 
 
+@cython.ccall
 def _insert_at_loop_body_start_after_condition_8616(
     root: StructuredAstValue,
     project: StructuredAstValue,
-    ins_addr: int,
+    ins_addr: cython.longlong,
     assignment: StructuredAstValue,
     *,
-    proven_loopback_edges: tuple[tuple[int, int], ...] = (),
-    repeated_sequence_entry: bool = False,
-) -> bool:
+    proven_loopback_edges: object = (),
+    repeated_sequence_entry: cython.bint = False,
+) -> cython.bint:
     """Insert a proven stack effect at the matching structured loop boundary."""
     inserter = _LoopBodyStartInserter8616(
         root=root,
@@ -16836,12 +18558,13 @@ _FOLLOWING_ADDR_CHILD_ATTRS_8616 = (
 )
 
 
+@cython.ccall
 def _consider_following_addr_8616(
     value: StructuredAstValue,
-    best: int | None,
+    best: object,
     project: AngrProjectValue,
-    ins_addr: int,
-    seen: set[int],
+    ins_addr: cython.longlong,
+    seen: object,
 ) -> int | None:
     """Fold one child candidate into the current best following address."""
     candidate = _following_instruction_addr_in_node_8616(value, project, ins_addr, seen)
@@ -16850,14 +18573,18 @@ def _consider_following_addr_8616(
     return best
 
 
+@cython.ccall
 def _following_addr_in_attrs_8616(
     node: StructuredAstValue,
     project: AngrProjectValue,
-    ins_addr: int,
-    seen: set[int],
+    ins_addr: cython.longlong,
+    seen: object,
     best: int | None,
 ) -> int | None:
     """Scan child-bearing attributes for nearer following addresses."""
+    value: object
+    attr: object
+    item: object
     for attr in _FOLLOWING_ADDR_CHILD_ATTRS_8616:
         if not hasattr(node, attr):
             continue
@@ -16871,9 +18598,13 @@ def _following_addr_in_attrs_8616(
     return best
 
 
+@cython.ccall
 def _following_instruction_addr_in_node_8616(
-    node: StructuredAstValue, project: AngrProjectValue, ins_addr: int, seen: set[int]
+    node: object, project: AngrProjectValue, ins_addr: cython.longlong, seen: object
 ) -> int | None:
+    condition_and_nodes: object
+    body: object
+    condition: object
     if node is None or id(node) in seen:
         return None
     seen.add(id(node))
@@ -16890,7 +18621,7 @@ def _following_instruction_addr_in_node_8616(
 
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _InsertBeforeNearestFollowingTagged8616:
     """Find and use the nearest following tagged statement eligible for insertion."""
 
@@ -16904,8 +18635,10 @@ class _InsertBeforeNearestFollowingTagged8616:
     seen: StructuredAstValue
     best: StructuredAstValue = None
 
-    def visit(self, node: StructuredAstValue, depth: int) -> None:
+    @cython.ccall
+    def visit(self, node: object, depth: cython.longlong) -> None:
         """Find the nearest following tagged statement eligible for insertion."""
+        statements: object
         if node is None or id(node) in self.seen:
             return
         self.seen.add(id(node))
@@ -16914,8 +18647,11 @@ class _InsertBeforeNearestFollowingTagged8616:
             return
         self._visit_control_links_8616(node, depth)
 
-    def _visit_statements_8616(self, statements: list[StructuredAstValue], depth: int) -> bool:
+    @cython.ccall
+    def _visit_statements_8616(self, statements: object, depth: cython.longlong) -> cython.bint:
         """Score each statement and stop early when the update already exists."""
+        index: object
+        stmt: object
         if not self.ignore_existing_assignment and _list_has_stack_move_assignment_8616(
             statements, self.dst_cvar, self.source_expr
         ):
@@ -16934,17 +18670,18 @@ class _InsertBeforeNearestFollowingTagged8616:
             self.visit(stmt, depth + 1)
         return False
 
+    @cython.ccall
     def _update_best_8616(
         self,
-        distance: int,
-        depth: int,
-        statements: list[StructuredAstValue],
-        index: int,
-        stmt_is_loop: bool,
+        distance: cython.longlong,
+        depth: cython.longlong,
+        statements: object,
+        index: cython.longlong,
+        stmt_is_loop: cython.bint,
     ) -> None:
         """Replace the best insertion point when this candidate is nearer."""
         replace_best = self.best is None or distance < self.best[0]
-        if self.best is not None and distance == self.best[0]:
+        if self.best is not None and operator.eq(distance, self.best[0]):
             best_is_loop = self.best[4]
             replace_best = depth > self.best[1]
             if self.prefer_loop_container and best_is_loop and not stmt_is_loop:
@@ -16954,8 +18691,14 @@ class _InsertBeforeNearestFollowingTagged8616:
         if replace_best:
             self.best = (distance, depth, statements, index, stmt_is_loop)
 
-    def _visit_control_links_8616(self, node: StructuredAstValue, depth: int) -> None:
+    @cython.ccall
+    def _visit_control_links_8616(self, node: StructuredAstValue, depth: cython.longlong) -> None:
         """Recurse into loop bodies, else branches, and condition/body pairs."""
+        child: object
+        pairs: object
+        _condition: object
+        attr: object
+        body: object
         for attr in ("body", "else_node", "initializer", "iterator", "iteration"):
             with contextlib.suppress(Exception):
                 child = getattr(node, attr, None)
@@ -16970,15 +18713,16 @@ class _InsertBeforeNearestFollowingTagged8616:
                 self.visit(body, depth + 1)
 
 
+@cython.ccall
 def _insert_before_nearest_following_tagged_statement_8616(
     root: StructuredAstValue,
     project: StructuredAstValue,
-    ins_addr: int,
+    ins_addr: cython.longlong,
     assignment: StructuredAstValue,
     *,
-    ignore_existing_assignment: bool = False,
-    prefer_loop_container: bool = False,
-) -> bool:
+    ignore_existing_assignment: cython.bint = False,
+    prefer_loop_container: cython.bint = False,
+) -> cython.bint:
     visitor = _InsertBeforeNearestFollowingTagged8616(
         root=root,
         project=project,
@@ -17023,22 +18767,25 @@ _NODE_READ_CHILD_ATTRS_8616 = (
 def _scan_node_value_reads_leaf_8616(
     value: StructuredAstValue,
     leaf_pred: StructuredAstValue,
-    seen: set[int],
-) -> bool:
+    seen: object,
+) -> cython.bint:
     """Scan a child attribute value (scalar, list, or nested tuple) for a leaf read."""
     if isinstance(value, (list, tuple)):
         return any(
-            _scan_node_value_reads_leaf_8616(item, leaf_pred, seen) for item in tuple(value)
+            _scan_node_value_reads_leaf_8616(item, leaf_pred, seen) for item in builtins.iter(tuple(value))
         )
     return _node_reads_leaf_8616(value, leaf_pred, seen=seen)
 
 
+@cython.ccall
 def _node_attrs_read_leaf_8616(
     node: StructuredAstValue,
     leaf_pred: StructuredAstValue,
-    seen: set[int],
-) -> bool:
+    seen: object,
+) -> cython.bint:
     """Scan the known child-bearing attributes for a leaf read."""
+    value: object
+    attr: object
     for attr in _NODE_READ_CHILD_ATTRS_8616:
         value = None
         with contextlib.suppress(Exception):
@@ -17048,12 +18795,13 @@ def _node_attrs_read_leaf_8616(
     return False
 
 
+@cython.ccall
 def _node_reads_leaf_8616(
-    node: StructuredAstValue,
+    node: object,
     leaf_pred: StructuredAstValue,
     *,
-    seen: set[int] | None = None,
-) -> bool:
+    seen: object = None,
+) -> cython.bint:
     """Return whether a structured-C node reads a leaf matching the predicate."""
     if node is None:
         return False
@@ -17074,12 +18822,16 @@ def _node_reads_leaf_8616(
     return _node_pairs_read_leaf_8616(node, leaf_pred, seen)
 
 
+@cython.ccall
 def _node_pairs_read_leaf_8616(
     node: StructuredAstValue,
     leaf_pred: StructuredAstValue,
-    seen: set[int],
-) -> bool:
+    seen: object,
+) -> cython.bint:
     """Scan condition/body pairs for a leaf read."""
+    pairs: object
+    body: object
+    condition: object
     pairs = None
     with contextlib.suppress(Exception):
         pairs = getattr(node, "condition_and_nodes", None)
@@ -17096,16 +18848,16 @@ def _node_pairs_read_leaf_8616(
 
 
 def _node_reads_stack_cvar_8616(
-    node: StructuredAstValue, target_cvar: StructuredAstValue, *, seen: set[int] | None = None
-) -> bool:
+    node: StructuredAstValue, target_cvar: StructuredAstValue, *, seen: object = None
+) -> cython.bint:
     return _node_reads_leaf_8616(
         node, lambda leaf: _same_stack_cvar_8616(leaf, target_cvar), seen=seen
     )
 
 
 def _node_reads_generated_stack_cvar_name_8616(
-    node: StructuredAstValue, target_cvar: StructuredAstValue, *, seen: set[int] | None = None
-) -> bool:
+    node: StructuredAstValue, target_cvar: StructuredAstValue, *, seen: object = None
+) -> cython.bint:
     target_names = _generated_stack_cvar_names_8616(target_cvar)
     if not target_names:
         return False
@@ -17115,8 +18867,9 @@ def _node_reads_generated_stack_cvar_name_8616(
 
 
 
-def _same_register_cvar_name_8616(node: StructuredAstValue, reg_name: str) -> bool:
-    return bool(_cvar_register_name_8616(node) == reg_name)
+@cython.ccall
+def _same_register_cvar_name_8616(node: StructuredAstValue, reg_name: object) -> cython.bint:
+    return bool(operator.eq(_cvar_register_name_8616(node), reg_name))
 
 
 _REGISTER_READ_CHILD_ATTRS_8616 = (
@@ -17138,25 +18891,28 @@ _REGISTER_READ_CHILD_ATTRS_8616 = (
 
 def _scan_register_name_value_8616(
     value: StructuredAstValue,
-    reg_name: str,
-    seen: set[int],
-    memo: dict[int, bool] | None,
-) -> bool:
+    reg_name: object,
+    seen: object,
+    memo: object,
+) -> cython.bint:
     """Scan a child attribute value for a register read, memoizing shared subtrees."""
     if isinstance(value, (list, tuple)):
         return any(
-            _scan_register_name_value_8616(item, reg_name, seen, memo) for item in tuple(value)
+            _scan_register_name_value_8616(item, reg_name, seen, memo) for item in builtins.iter(tuple(value))
         )
     return _node_reads_register_name_8616(value, reg_name, seen=seen, memo=memo)
 
 
+@cython.ccall
 def _register_name_attrs_read_8616(
     node: StructuredAstValue,
-    reg_name: str,
-    seen: set[int],
-    memo: dict[int, bool] | None,
-) -> bool:
+    reg_name: object,
+    seen: object,
+    memo: object,
+) -> cython.bint:
     """Scan the register-reader child attributes for a register read."""
+    value: object
+    attr: object
     for attr in _REGISTER_READ_CHILD_ATTRS_8616:
         value = None
         with contextlib.suppress(Exception):
@@ -17168,11 +18924,12 @@ def _register_name_attrs_read_8616(
 
 def _register_name_pairs_read_8616(
     node: StructuredAstValue,
-    reg_name: str,
-    seen: set[int],
-    memo: dict[int, bool] | None,
-) -> bool:
+    reg_name: object,
+    seen: object,
+    memo: object,
+) -> cython.bint:
     """Scan condition/body pairs for a register read."""
+    pairs: object
     pairs = None
     with contextlib.suppress(Exception):
         pairs = getattr(node, "condition_and_nodes", None)
@@ -17181,17 +18938,18 @@ def _register_name_pairs_read_8616(
     return any(
         _node_reads_register_name_8616(condition, reg_name, seen=seen, memo=memo)
         or _node_reads_register_name_8616(body, reg_name, seen=seen, memo=memo)
-        for condition, body in tuple(pairs)
+        for condition, body in builtins.iter(tuple(pairs))
     )
 
 
+@cython.ccall
 def _node_reads_register_name_8616(
-    node: StructuredAstValue,
-    reg_name: str,
+    node: object,
+    reg_name: object,
     *,
-    seen: set[int] | None = None,
-    memo: dict[int, bool] | None = None,
-) -> bool:
+    seen: object = None,
+    memo: object = None,
+) -> cython.bint:
     """Return whether one C-AST node reads a register, memoizing shared subtrees."""
     if node is None:
         return False
@@ -17218,9 +18976,10 @@ def _node_reads_register_name_8616(
     return result
 
 
+@cython.ccall
 def _is_same_register_move_assignment_8616(
-    stmt: StructuredAstValue, reg_name: str, source_expr: StructuredAstValue
-) -> bool:
+    stmt: StructuredAstValue, reg_name: object, source_expr: StructuredAstValue
+) -> cython.bint:
     return (
         isinstance(stmt, structured_c.CAssignment)
         and _same_register_cvar_name_8616(getattr(stmt, "lhs", None), reg_name)
@@ -17228,18 +18987,19 @@ def _is_same_register_move_assignment_8616(
     )
 
 
+@cython.ccall
 def _insertion_point_has_register_move_assignment_8616(
-    statements: list[StructuredAstValue],
-    insert_index: int,
-    reg_name: str,
+    statements: object,
+    insert_index: cython.longlong,
+    reg_name: object,
     source_expr: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     if insert_index > 0 and _is_same_register_move_assignment_8616(statements[insert_index - 1], reg_name, source_expr):
         return True
     return bool(insert_index < len(statements) and _is_same_register_move_assignment_8616(statements[insert_index], reg_name, source_expr))
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _InsertBeforeFirstRegisterUse8616:
     """Place a proven reload only at a consumer carrying its instruction origin."""
 
@@ -17252,8 +19012,10 @@ class _InsertBeforeFirstRegisterUse8616:
     codegen: StructuredAstValue
     seen: StructuredAstValue
 
-    def visit(self, node: StructuredAstValue) -> bool:
+    @cython.ccall
+    def visit(self, node: object) -> cython.bint:
         """Keep unrelated earlier reads intact when a register name is reused."""
+        statements: object
         if node is None or id(node) in self.seen:
             return False
         self.seen.add(id(node))
@@ -17262,8 +19024,13 @@ class _InsertBeforeFirstRegisterUse8616:
             return True
         return self._visit_control_links_8616(node)
 
-    def _visit_statements_8616(self, statements: list[StructuredAstValue]) -> bool:
+    @cython.ccall
+    def _visit_statements_8616(self, statements: object) -> cython.bint:
         """Insert before the first statement that reads the register at this instruction."""
+        cvar: object
+        nested_statements: object
+        index: object
+        stmt: object
         for index, stmt in enumerate(tuple(statements)):
             nested_statements = getattr(stmt, "statements", None)
             if (
@@ -17291,8 +19058,14 @@ class _InsertBeforeFirstRegisterUse8616:
                 return True
         return False
 
-    def _visit_control_links_8616(self, node: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _visit_control_links_8616(self, node: StructuredAstValue) -> cython.bint:
         """Recurse into bodies, else branches, and condition/body pairs."""
+        child: object
+        pairs: object
+        _condition: object
+        attr: object
+        body: object
         for attr in ("body", "else_node"):
             child = None
             with contextlib.suppress(Exception):
@@ -17309,10 +19082,11 @@ class _InsertBeforeFirstRegisterUse8616:
         return False
 
 
+@cython.ccall
 def _insert_before_first_register_cvar_use_8616(
-    root: StructuredAstValue, reg_name: str, source_expr: StructuredAstValue, codegen: StructuredAstValue,
-    *, project: AngrProjectValue, ins_addr: int, register_width: int,
-) -> bool:
+    root: StructuredAstValue, reg_name: object, source_expr: StructuredAstValue, codegen: StructuredAstValue,
+    *, project: AngrProjectValue, ins_addr: cython.longlong, register_width: cython.longlong,
+) -> cython.bint:
     """Place a proven reload only at a consumer carrying its instruction origin."""
     visitor = _InsertBeforeFirstRegisterUse8616(
         reg_name=reg_name,
@@ -17328,7 +19102,7 @@ def _insert_before_first_register_cvar_use_8616(
 
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _InsertBeforeFirstStackUse8616:
     """Closure-state walker extracted from a nested `visit`-style def."""
 
@@ -17340,8 +19114,10 @@ class _InsertBeforeFirstStackUse8616:
     seen: StructuredAstValue
     source_expr: StructuredAstValue
 
-    def visit(self, node: StructuredAstValue, path: str = "root") -> bool:
+    @cython.ccall
+    def visit(self, node: object, path: object = "root") -> cython.bint:
         """Insert a stack assignment before the first visible stack read."""
+        statements: object
         if node is None or id(node) in self.seen:
             return False
         self.seen.add(id(node))
@@ -17350,13 +19126,18 @@ class _InsertBeforeFirstStackUse8616:
             return True
         return self._visit_control_links_8616(node, path)
 
+    @cython.ccall
     def _visit_statements_8616(
         self,
         node: StructuredAstValue,
-        statements: list[StructuredAstValue],
-        path: str,
-    ) -> bool:
+        statements: object,
+        path: object,
+    ) -> cython.bint:
         """Scan a statement list for the first readable stack-cvar use point."""
+        condition_and_nodes: object
+        nested_statements: object
+        index: object
+        stmt: object
         if not self.ignore_existing_assignment and _list_has_stack_move_assignment_8616(
             statements, self.dst_cvar, self.source_expr
         ):
@@ -17386,25 +19167,26 @@ class _InsertBeforeFirstStackUse8616:
                 return True
         return False
 
+    @cython.ccall
     def _visit_condition_stmt_8616(
         self,
-        statements: list[StructuredAstValue],
-        index: int,
-        item_path: str,
+        statements: object,
+        index: cython.longlong,
+        item_path: object,
         stmt: StructuredAstValue,
         condition_and_nodes: StructuredAstValue,
-    ) -> bool:
+    ) -> cython.bint:
         """Handle a condition-paired statement: insert before a reading condition or recurse."""
         if self._condition_reads_dst_8616(stmt, condition_and_nodes):
             return self._try_insert_at_index_8616(statements, index, item_path, stmt)
         return self.visit(stmt, item_path)
 
-    def _condition_reads_dst_8616(self, stmt: StructuredAstValue, condition_and_nodes: StructuredAstValue) -> bool:
+    def _condition_reads_dst_8616(self, stmt: StructuredAstValue, condition_and_nodes: StructuredAstValue) -> cython.bint:
         """Check whether the paired conditions or the statement read the target cvar."""
         return any(
             _node_reads_stack_cvar_8616(condition, self.dst_cvar)
             or _node_reads_generated_stack_cvar_name_8616(condition, self.dst_cvar)
-            for condition, _body in tuple(condition_and_nodes)
+            for condition, _body in builtins.iter(tuple(condition_and_nodes))
             if condition is not None
         ) or (
             self.prefer_outer_control_read
@@ -17414,13 +19196,14 @@ class _InsertBeforeFirstStackUse8616:
             )
         )
 
+    @cython.ccall
     def _try_insert_at_index_8616(
         self,
-        statements: list[StructuredAstValue],
-        index: int,
-        item_path: str,
+        statements: object,
+        index: cython.longlong,
+        item_path: object,
         stmt: StructuredAstValue,
-    ) -> bool:
+    ) -> cython.bint:
         """Insert the assignment at ``index`` unless an identical store already sits there."""
         if _insertion_point_has_stack_move_assignment_8616(statements, index, self.dst_cvar, self.source_expr):
             self.root._inertia_stack_mov_assignment_already_present_8616 = True
@@ -17435,8 +19218,15 @@ class _InsertBeforeFirstStackUse8616:
         statements.insert(index, self.assignment)
         return True
 
-    def _visit_control_links_8616(self, node: StructuredAstValue, path: str) -> bool:
+    @cython.ccall
+    def _visit_control_links_8616(self, node: StructuredAstValue, path: object) -> cython.bint:
         """Recurse into loop bodies, else branches, and condition/body pairs."""
+        child: object
+        pairs: object
+        _condition: object
+        attr: object
+        body: object
+        pair_index: object
         for attr in ("body", "else_node"):
             child = None
             with contextlib.suppress(Exception):
@@ -17455,16 +19245,19 @@ class _InsertBeforeFirstStackUse8616:
 
 
 
+@cython.ccall
 def _insert_before_first_stack_cvar_use_8616(
     root: StructuredAstValue,
     assignment: StructuredAstValue,
     *,
-    prefer_outer_control_read: bool = False,
-    ignore_existing_assignment: bool = False,
-) -> bool:
+    prefer_outer_control_read: cython.bint = False,
+    ignore_existing_assignment: cython.bint = False,
+) -> cython.bint:
+    dst_cvar: object
+    source_expr: object
     dst_cvar = getattr(assignment, "lhs", None)
     source_expr = getattr(assignment, "rhs", None)
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
 
     visitor = _InsertBeforeFirstStackUse8616(
         assignment=assignment,
@@ -17479,7 +19272,7 @@ def _insert_before_first_stack_cvar_use_8616(
 
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _InsertBeforeFirstStackOffsetUse8616:
     """Closure-state walker extracted from a nested `visit`-style def."""
 
@@ -17490,8 +19283,10 @@ class _InsertBeforeFirstStackOffsetUse8616:
     source_expr: StructuredAstValue
     target_offset: StructuredAstValue
 
-    def visit(self, node: StructuredAstValue) -> bool:
+    @cython.ccall
+    def visit(self, node: object) -> cython.bint:
         """Insert a stack assignment before the first read of a raw stack offset."""
+        statements: object
         if node is None or id(node) in self.seen:
             return False
         self.seen.add(id(node))
@@ -17500,8 +19295,12 @@ class _InsertBeforeFirstStackOffsetUse8616:
             return True
         return self._visit_control_links_8616(node)
 
-    def _visit_statements_8616(self, statements: list[StructuredAstValue]) -> bool:
+    @cython.ccall
+    def _visit_statements_8616(self, statements: object) -> cython.bint:
         """Scan a statement list for the first offset-reading statement."""
+        nested_statements: object
+        index: object
+        stmt: object
         if _list_has_stack_move_assignment_8616(statements, self.dst_cvar, self.source_expr):
             self.root._inertia_stack_mov_assignment_already_present_8616 = True
             return True
@@ -17523,8 +19322,14 @@ class _InsertBeforeFirstStackOffsetUse8616:
                 return True
         return False
 
-    def _visit_control_links_8616(self, node: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _visit_control_links_8616(self, node: StructuredAstValue) -> cython.bint:
         """Recurse into loop bodies, else branches, and condition/body pairs."""
+        child: object
+        pairs: object
+        _condition: object
+        attr: object
+        body: object
         for attr in ("body", "else_node"):
             child = None
             with contextlib.suppress(Exception):
@@ -17542,12 +19347,15 @@ class _InsertBeforeFirstStackOffsetUse8616:
 
 
 
+@cython.ccall
 def _insert_before_first_stack_offset_use_8616(
-    root: StructuredAstValue, assignment: StructuredAstValue, target_offset: int
-) -> bool:
+    root: StructuredAstValue, assignment: StructuredAstValue, target_offset: cython.longlong
+) -> cython.bint:
+    dst_cvar: object
+    source_expr: object
     dst_cvar = getattr(assignment, "lhs", None)
     source_expr = getattr(assignment, "rhs", None)
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
 
     visitor = _InsertBeforeFirstStackOffsetUse8616(
         assignment=assignment,
@@ -17561,7 +19369,7 @@ def _insert_before_first_stack_offset_use_8616(
 
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _InsertGlobalUpdateBeforeNearest8616:
     """Closure-state walker extracted from a nested `visit`-style def."""
 
@@ -17573,8 +19381,10 @@ class _InsertGlobalUpdateBeforeNearest8616:
     root: StructuredAstValue
     seen: StructuredAstValue
 
-    def visit(self, node: StructuredAstValue, depth: int) -> None:
+    @cython.ccall
+    def visit(self, node: object, depth: cython.longlong) -> None:
         """Record the closest following tagged insertion point."""
+        statements: object
         if node is None or id(node) in self.seen:
             return
         self.seen.add(id(node))
@@ -17583,8 +19393,11 @@ class _InsertGlobalUpdateBeforeNearest8616:
             return
         self._visit_control_links_8616(node, depth)
 
-    def _visit_statements_8616(self, statements: list[StructuredAstValue], depth: int) -> bool:
+    @cython.ccall
+    def _visit_statements_8616(self, statements: object, depth: cython.longlong) -> cython.bint:
         """Score each statement position as a candidate insertion point."""
+        index: object
+        stmt: object
         if _list_has_global_update_assignment_for_insn_8616(statements, self.project, self.dst_cvar, self.delta, self.ins_addr):
             self.root._inertia_global_update_assignment_already_present_8616 = True
             return True
@@ -17593,14 +19406,20 @@ class _InsertGlobalUpdateBeforeNearest8616:
             if isinstance(stmt_addr, int):
                 distance = stmt_addr - self.ins_addr
                 if distance > 0 and (
-                    self.best is None or distance < self.best[0] or (distance == self.best[0] and depth > self.best[1])
+                    self.best is None or distance < self.best[0] or (operator.eq(distance, self.best[0]) and depth > self.best[1])
                 ):
                     self.best = (distance, depth, statements, index)
             self.visit(stmt, depth + 1)
         return False
 
-    def _visit_control_links_8616(self, node: StructuredAstValue, depth: int) -> None:
+    @cython.ccall
+    def _visit_control_links_8616(self, node: StructuredAstValue, depth: cython.longlong) -> None:
         """Recurse into loop bodies, else branches, and condition/body pairs."""
+        child: object
+        pairs: object
+        _condition: object
+        attr: object
+        body: object
         for attr in ("body", "else_node", "initializer", "iterator", "iteration"):
             with contextlib.suppress(Exception):
                 child = getattr(node, attr, None)
@@ -17614,17 +19433,19 @@ class _InsertGlobalUpdateBeforeNearest8616:
 
 
 
+@cython.ccall
 def _insert_global_update_before_nearest_following_tagged_statement_8616(
     root: StructuredAstValue,
     project: AngrProjectValue,
-    ins_addr: int,
+    ins_addr: cython.longlong,
     assignment: StructuredAstValue,
     *,
-    delta: int,
-) -> bool:
-    best: tuple[int, int, list[StructuredAstValue], int] | None = None
+    delta: cython.longlong,
+) -> cython.bint:
+    dst_cvar: object
+    best: object = None
     dst_cvar = getattr(assignment, "lhs", None)
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
 
     visitor = _InsertGlobalUpdateBeforeNearest8616(
         best=best,
@@ -17647,12 +19468,12 @@ def _insert_global_update_before_nearest_following_tagged_statement_8616(
 
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _GlobalLoopCollector8616:
     """Collect loops that contain the target instruction, tracking ancestor ranges."""
 
     project: StructuredAstValue
-    ins_addr: int
+    ins_addr: cython.longlong
     fact_candidates: StructuredAstValue
     loops: StructuredAstValue
     seen: StructuredAstValue
@@ -17660,11 +19481,15 @@ class _GlobalLoopCollector8616:
 
     def collect(
         self,
-        node: StructuredAstValue,
-        depth: int,
-        ancestors: tuple[tuple[tuple[int, int], tuple[int, int] | None], ...],
+        node: object,
+        depth: cython.longlong,
+        ancestors: object,
     ) -> None:
         """Collect loops through the dynamic third-party structured-C boundary."""
+        loop_range: object
+        _condition: object
+        body: object
+        statement: object
         if node is None or id(node) in self.seen:
             return
         self.seen.add(id(node))
@@ -17673,7 +19498,7 @@ class _GlobalLoopCollector8616:
             loop_range = _instruction_addr_range_in_node_8616(node, self.project, self.ins_addr)
             condition_range = _instruction_addr_range_in_node_8616(node.condition, self.project, self.ins_addr)
             if loop_range is not None and any(
-                loop_range[0] <= candidate <= loop_range[1] for candidate in self.fact_candidates
+                loop_range[0] <= candidate <= loop_range[1] for candidate in iter(self.fact_candidates)
             ):
                 self.loops.append((depth, node, loop_range, condition_range, ancestors))
             if loop_range is not None:
@@ -17692,11 +19517,13 @@ class _GlobalLoopCollector8616:
             self.collect(node.else_node, depth + 1, next_ancestors)
 
 
+@cython.ccall
 def _edge_covers_ancestor_8616(
-    edge: tuple[int, int],
-    ancestor: tuple[tuple[int, int], tuple[int, int] | None],
-) -> bool:
+    edge: object,
+    ancestor: object,
+) -> cython.bint:
     """Return whether an edge proves an ancestor rather than this loop."""
+    ancestor_condition: object
     ancestor_range, ancestor_condition = ancestor
     repeated_start = ancestor_condition[0] if ancestor_condition is not None else ancestor_range[0]
     entry, jump = edge
@@ -17705,39 +19532,42 @@ def _edge_covers_ancestor_8616(
 
 def _loop_body_insertion_candidates_8616(
     body: StructuredAstValue,
-    body_statements: list[StructuredAstValue] | None,
+    body_statements: object,
     project: AngrProjectValue,
-    ins_addr: int,
-    local_edges: tuple[tuple[int, int], ...],
-) -> list[tuple[int, int]]:
+    ins_addr: cython.longlong,
+    local_edges: object,
+) -> object:
     """Collect (distance, index) insertion candidates inside the loop body."""
-    insertion_candidates: list[tuple[int, int]] = []
+    index: object
+    statement: object
+    insertion_candidates: list[tuple[cython.longlong, cython.longlong]] = []
     if isinstance(body_statements, list):
         for index, statement in enumerate(tuple(body_statements)):
             following_addr = _following_instruction_addr_in_node_8616(statement, project, ins_addr, set())
             if not isinstance(following_addr, int):
                 continue
-            if any(entry <= following_addr <= jump for entry, jump in local_edges):
+            if any(entry <= following_addr <= jump for entry, jump in iter(local_edges)):
                 insertion_candidates.append((following_addr - ins_addr, index))
     else:
         following_addr = _following_instruction_addr_in_node_8616(body, project, ins_addr, set())
         if isinstance(following_addr, int) and any(
-            entry <= following_addr <= jump for entry, jump in local_edges
+            entry <= following_addr <= jump for entry, jump in iter(local_edges)
         ):
             insertion_candidates.append((following_addr - ins_addr, 0))
     return insertion_candidates
 
 
+@cython.ccall
 def _insert_assignment_into_loop_body_8616(
     root: StructuredAstValue,
     loop: StructuredAstValue,
     body: StructuredAstValue,
-    body_statements: list[StructuredAstValue] | None,
-    insertion_index: int,
+    body_statements: object,
+    insertion_index: cython.longlong,
     assignment: StructuredAstValue,
     project: AngrProjectValue,
-    ins_addr: int,
-    delta: int,
+    ins_addr: cython.longlong,
+    delta: cython.longlong,
 ) -> DirectGlobalLoopInsertionStatus8616:
     """Insert the assignment at the proven in-body position."""
     dst_cvar = assignment.lhs
@@ -17761,10 +19591,10 @@ def _insert_global_update_in_proven_loop_8616(
     root: StructuredAstValue,
     project: AngrProjectValue,
     function: StructuredAstValue,
-    ins_addr: int,
+    ins_addr: cython.longlong,
     assignment: StructuredAstValue,
     *,
-    delta: int,
+    delta: cython.longlong,
 ) -> DirectGlobalLoopInsertionStatus8616:
     """Insert a repeated global effect only in its deepest binary-proven loop."""
     loop_types = (structured_c.CForLoop, structured_c.CWhileLoop, structured_c.CDoWhileLoop)
@@ -17775,14 +19605,14 @@ def _insert_global_update_in_proven_loop_8616(
     )
     loops: list[
         tuple[
-            int,
+            cython.longlong,
             StructuredAstValue,
-            tuple[int, int],
+            tuple[cython.longlong, cython.longlong],
             tuple[int, int] | None,
-            tuple[tuple[tuple[int, int], tuple[int, int] | None], ...],
+            tuple[tuple[tuple[cython.longlong, cython.longlong], tuple[int, int] | None], ...],
         ]
     ] = []
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     collector = _GlobalLoopCollector8616(
         project=project,
         ins_addr=ins_addr,
@@ -17805,8 +19635,8 @@ def _insert_global_update_in_proven_loop_8616(
     )
     local_edges = tuple(
         edge
-        for edge in covering_edges
-        if not any(_edge_covers_ancestor_8616(edge, ancestor) for ancestor in ancestors)
+        for edge in iter(covering_edges)
+        if not any(_edge_covers_ancestor_8616(edge, ancestor) for ancestor in iter(ancestors))
     )
     if not local_edges:
         return DirectGlobalLoopInsertionStatus8616.REFUSED_UNPROVEN_NESTED_SCOPE
@@ -17820,7 +19650,7 @@ def _insert_global_update_in_proven_loop_8616(
         ins_addr,
         local_edges,
     )
-    insertion_candidates = [candidate for candidate in insertion_candidates if candidate[0] > 0]
+    insertion_candidates = [candidate for candidate in iter(insertion_candidates) if candidate[0] > 0]
     if not insertion_candidates:
         return DirectGlobalLoopInsertionStatus8616.REFUSED_UNPROVEN_NESTED_SCOPE
 
@@ -17841,32 +19671,42 @@ def _insert_global_update_in_proven_loop_8616(
 
 def _direct_global_update_ordered_insns_8616(
     project: AngrProjectValue, function: StructuredAstValue
-) -> tuple[StructuredAstValue, ...]:
+) -> object:
     """Return one deterministic instruction per address from dynamic angr blocks.
 
     ``_direct_global_update_blocks_8616`` may combine CFG blocks with a linear
     decode of the same function.  Consumers reason about adjacent machine
     instructions, so duplicate addresses must be collapsed before ordering.
     """
-    by_address: dict[int, StructuredAstValue] = {}
+    address: object
+    insn: object
+    block: object
+    wrapper: object
+    by_address: dict[cython.longlong, StructuredAstValue] = {}
     for block in _direct_global_update_blocks_8616(project, function):
         for wrapper in _capstone_insns_for_direct_global_update_8616(project, block):
             insn = getattr(wrapper, "insn", wrapper)
             address = getattr(insn, "address", None)
             if isinstance(address, int):
                 by_address.setdefault(address, insn)
-    return _boundary_tuple_8616(by_address[address] for address in sorted(by_address))
+    return _boundary_tuple_8616(by_address[address] for address in builtins.iter(sorted(by_address)))
 
 
+@cython.ccall
 def _direct_global_update_has_adjacent_high_carry_8616(
     project: AngrProjectValue,
     function: StructuredAstValue,
     fact: DirectGlobalUpdateFact8616,
-) -> bool:
+) -> cython.bint:
     """Prove that a low-word update continues into its adjacent high word."""
+    expected_high_id: object
+    low_id: object
+    low_size: object
+    index: object
+    low_insn: object
     insns = _direct_global_update_ordered_insns_8616(project, function)
     for index, low_insn in enumerate(insns[:-1]):
-        if getattr(low_insn, "address", None) != fact.ins_addr:
+        if operator.ne(getattr(low_insn, "address", None), fact.ins_addr):
             continue
         low_id = getattr(low_insn, "id", None)
         if not isinstance(low_id, int):
@@ -17882,8 +19722,8 @@ def _direct_global_update_has_adjacent_high_carry_8616(
         if (
             not isinstance(low_size, int)
             or low_size <= 0
-            or getattr(high_insn, "address", None) != fact.ins_addr + low_size
-            or getattr(high_insn, "id", None) != expected_high_id
+            or operator.ne(getattr(high_insn, "address", None), fact.ins_addr + low_size)
+            or operator.ne(getattr(high_insn, "id", None), expected_high_id)
         ):
             return False
         high_operands = _boundary_tuple_8616(
@@ -17896,14 +19736,18 @@ def _direct_global_update_has_adjacent_high_carry_8616(
         )
         return (
             high_slot == (((fact.displacement & 0xFFFF) + 2) & 0xFFFF, 2)
-            and getattr(high_operands[1], "type", None) == X86_OP_IMM
+            and operator.eq(getattr(high_operands[1], "type", None), X86_OP_IMM)
             and int(getattr(high_operands[1], "imm", 1) or 0) == 0
         )
     return False
 
 
-def _operand_is_stack_memory_8616(operand: StructuredAstValue) -> bool:
-    if getattr(operand, "type", None) != X86_OP_MEM:
+@cython.ccall
+def _operand_is_stack_memory_8616(operand: StructuredAstValue) -> cython.bint:
+    base: object
+    index: object
+    mem: object
+    if operator.ne(getattr(operand, "type", None), X86_OP_MEM):
         return False
     mem = getattr(operand, "mem", None)
     if mem is None:
@@ -17913,18 +19757,20 @@ def _operand_is_stack_memory_8616(operand: StructuredAstValue) -> bool:
     return base in {X86_REG_BP, X86_REG_SP} and index in {0, X86_REG_INVALID}
 
 
-def _setup_prefix_instruction_is_nonsemantic_8616(project: AngrProjectValue, insn: StructuredAstValue) -> bool:
+def _setup_prefix_instruction_is_nonsemantic_8616(project: AngrProjectValue, insn: StructuredAstValue) -> cython.bint:
+    insn_id: object
+    target: object
     insn_id = getattr(insn, "id", None)
     operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
     if insn_id in {X86_INS_PUSH, X86_INS_POP}:
-        return all(getattr(operand, "type", None) in {X86_OP_REG, X86_OP_IMM} for operand in operands)
-    if insn_id == X86_INS_MOV:
+        return all(getattr(operand, "type", None) in {X86_OP_REG, X86_OP_IMM} for operand in iter(operands))
+    if operator.eq(insn_id, X86_INS_MOV):
         return all(
-            getattr(operand, "type", None) != X86_OP_MEM or _operand_is_stack_memory_8616(operand)
-            for operand in operands
+            operator.ne(getattr(operand, "type", None), X86_OP_MEM) or _operand_is_stack_memory_8616(operand)
+            for operand in iter(operands)
         )
     if insn_id in {X86_INS_ADD, X86_INS_SUB}:
-        if len(operands) != 2 or getattr(operands[0], "type", None) != X86_OP_REG:
+        if len(operands) != 2 or operator.ne(getattr(operands[0], "type", None), X86_OP_REG):
             return False
         return getattr(operands[0], "reg", None) in {X86_REG_SP, X86_REG_BP}
     if insn_id in {X86_INS_CALL, X86_INS_LCALL}:
@@ -17938,9 +19784,12 @@ def _setup_prefix_instruction_is_nonsemantic_8616(project: AngrProjectValue, ins
     return False
 
 
+@cython.ccall
 def _direct_global_update_can_insert_at_body_start_8616(
     project: AngrProjectValue, function: StructuredAstValue, fact: DirectGlobalUpdateFact8616
-) -> bool:
+) -> cython.bint:
+    ins_addr: object
+    insn: object
     insns = _direct_global_update_ordered_insns_8616(project, function)
     if not insns:
         return False
@@ -17949,7 +19798,7 @@ def _direct_global_update_can_insert_at_body_start_8616(
         ins_addr = getattr(insn, "address", None)
         if not isinstance(ins_addr, int):
             continue
-        if ins_addr == fact.ins_addr:
+        if operator.eq(ins_addr, fact.ins_addr):
             found_fact = True
             break
         if ins_addr > fact.ins_addr:
@@ -17959,9 +19808,12 @@ def _direct_global_update_can_insert_at_body_start_8616(
     return found_fact
 
 
+@cython.ccall
 def _insert_global_update_at_body_start_8616(
-    root: StructuredAstValue, project: AngrProjectValue, assignment: StructuredAstValue, *, delta: int, ins_addr: int
-) -> bool:
+    root: StructuredAstValue, project: AngrProjectValue, assignment: StructuredAstValue, *, delta: cython.longlong, ins_addr: cython.longlong
+) -> cython.bint:
+    dst_cvar: object
+    statements: object
     statements = getattr(root, "statements", None)
     if not isinstance(statements, list):
         return False
@@ -17983,6 +19835,9 @@ def _debug_global_update_insn_dump_8616(
     facts: StructuredAstValue,
 ) -> None:
     """Emit the optional INERTIA_DEBUG_GLOBAL_UPDATE instruction summary."""
+    insn: object
+    block: object
+    wrapper: object
     blocks = _direct_global_update_blocks_8616(project, function)
     insn_debug = []
     for block in blocks:
@@ -18000,7 +19855,7 @@ def _debug_global_update_insn_dump_8616(
         "[dbg-global-update] "
         f"func={getattr(function, 'addr', None)!r} "
         f"cfunc={getattr(getattr(codegen, 'cfunc', None), 'addr', None)!r} "
-        f"blocks={_boundary_tuple_8616(getattr(block, 'addr', None) for block in blocks)!r} "
+        f"blocks={_boundary_tuple_8616(getattr(block, 'addr', None) for block in iter(blocks))!r} "
         f"insns={tuple(insn_debug)!r} "
         f"facts={facts!r}",
         file=sys.stderr,
@@ -18008,6 +19863,7 @@ def _debug_global_update_insn_dump_8616(
     )
 
 
+@cython.ccall
 def _republish_codegen_root_8616(codegen: StructuredAstValue, root: StructuredAstValue) -> None:
     """Publish the rewritten root on every cfunc projection."""
     with contextlib.suppress(Exception):
@@ -18022,7 +19878,7 @@ def _republish_codegen_root_8616(codegen: StructuredAstValue, root: StructuredAs
         codegen.cfunc.stmt = root
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _GlobalIncdecRun8616:
     """Materialize direct no-base/no-index real-mode global INC/DEC effects."""
 
@@ -18030,15 +19886,16 @@ class _GlobalIncdecRun8616:
     project: StructuredAstValue
     function: StructuredAstValue
     root: StructuredAstValue
-    stats: dict[str, int]
-    changed: bool = False
-    addr: int = 0
-    width: int = 0
-    delta: int = 0
+    stats: object
+    changed: cython.bint = False
+    addr: cython.longlong = 0
+    width: cython.longlong = 0
+    delta: cython.longlong = 0
     name: str = ""
     cvar: StructuredAstValue = None
 
-    def _record_storage_identity_8616(self, ins_addr: int) -> None:
+    @cython.ccall
+    def _record_storage_identity_8616(self, ins_addr: cython.longlong) -> None:
         """Retain the exact DS object after new or prior materialization."""
         record_global_storage_identity_fact_8616(
             self.codegen,
@@ -18052,8 +19909,11 @@ class _GlobalIncdecRun8616:
             ),
         )
 
+    @cython.ccall
     def _build_fact_cvar_8616(self, fact: DirectGlobalUpdateFact8616) -> StructuredAstValue:
         """Name the global, rename generated cvars, and build the carrier cvar."""
+        unified: object
+        variables_in_use: object
         self.addr = fact.displacement & 0xFFFF
         self.width = fact.width if fact.width in {1, 2} else 2
         self.delta = fact.delta
@@ -18083,6 +19943,7 @@ class _GlobalIncdecRun8616:
             unified[variable] = {(cvar, getattr(cvar, "variable_type", None))}
         return cvar
 
+    @cython.ccall
     def _replacement_factory_8616(self, tags: StructuredAstValue) -> StructuredAstValue:
         """Build the update assignment for a tagged node."""
         rhs = structured_c.CBinaryOp(
@@ -18093,6 +19954,7 @@ class _GlobalIncdecRun8616:
         )
         return structured_c.CAssignment(self.cvar, rhs, codegen=self.codegen, tags=tags)
 
+    @cython.ccall
     def _count_already_materialized_8616(self) -> None:
         """Count one already-materialized consumed fact."""
         self.stats["already_materialized_count"] = int(
@@ -18102,12 +19964,13 @@ class _GlobalIncdecRun8616:
             self.stats.get("consumed_fact_count", 0) or 0
         ) + 1
 
+    @cython.ccall
     def _already_materialized_8616(
         self,
         fact: DirectGlobalUpdateFact8616,
         fact_key: DirectGlobalUpdateFact8616,
-        consumed_facts: set[DirectGlobalUpdateFact8616],
-    ) -> bool:
+        consumed_facts: object,
+    ) -> cython.bint:
         """Handle facts whose update already exists in the structured tree."""
         if (
             _direct_global_update_has_adjacent_high_carry_8616(
@@ -18152,9 +20015,10 @@ class _GlobalIncdecRun8616:
             return True
         return False
 
+    @cython.ccall
     def _insert_fallback_8616(
         self, fact: DirectGlobalUpdateFact8616, inserted_assignment: StructuredAstValue
-    ) -> tuple[bool, StructuredAstValue]:
+    ) -> tuple[cython.bint, StructuredAstValue]:
         """Try loop, tagged-statement, and body-start insertion in order."""
         loop_status = _insert_global_update_in_proven_loop_8616(
             self.root,
@@ -18196,6 +20060,7 @@ class _GlobalIncdecRun8616:
                 self.stats["body_start_inserted_count"] = int(self.stats.get("body_start_inserted_count", 0) or 0) + 1
         return materialized, materialized_by
 
+    @cython.ccall
     def _fail_materialization_8616(self, fact: DirectGlobalUpdateFact8616) -> None:
         """Count the failure or mark the update as already present."""
         if bool(getattr(self.root, "_inertia_global_update_assignment_already_present_8616", False)):
@@ -18217,8 +20082,9 @@ class _GlobalIncdecRun8616:
                 flush=True,
             )
 
+    @cython.ccall
     def _publish_materialized_8616(
-        self, fact: DirectGlobalUpdateFact8616, materialized_by: StructuredAstValue
+        self, fact: DirectGlobalUpdateFact8616, materialized_by: object
     ) -> None:
         """Record declarations, evidence, and identity for a materialized fact."""
         record_global_declaration_spec_8616(
@@ -18230,7 +20096,7 @@ class _GlobalIncdecRun8616:
         evidence = _boundary_tuple_8616(getattr(self.codegen, "_inertia_direct_global_update_evidence_8616", ()) or ())
         self.codegen._inertia_direct_global_update_evidence_8616 = tuple(
             dict.fromkeys(
-                (*evidence, (("displacement", self.addr), ("width", self.width), ("delta", self.delta), ("ins_addr", fact.ins_addr), ("name", self.name)))
+                tuple(evidence) + ((("displacement", self.addr), ("width", self.width), ("delta", self.delta), ("ins_addr", fact.ins_addr), ("name", self.name)),)
             )
         )
         self._record_storage_identity_8616(fact.ins_addr)
@@ -18247,9 +20113,10 @@ class _GlobalIncdecRun8616:
     def _materialize_fact_8616(
         self,
         fact: DirectGlobalUpdateFact8616,
-        consumed_facts: set[DirectGlobalUpdateFact8616],
+        consumed_facts: object,
     ) -> None:
         """Materialize one INC/DEC fact through replace-then-insert ordering."""
+        materialized_by: object
         self.cvar = self._build_fact_cvar_8616(fact)
         fact_key = DirectGlobalUpdateFact8616(self.addr, self.width, int(self.delta), int(fact.ins_addr))
         if self._already_materialized_8616(fact, fact_key, consumed_facts):
@@ -18284,10 +20151,12 @@ class _GlobalIncdecRun8616:
         self.changed = True
 
 
+@cython.ccall
 def _resolve_update_function_8616(
-    codegen: StructuredAstValue, project: StructuredAstValue, function: StructuredAstValue | None
+    codegen: StructuredAstValue, project: StructuredAstValue, function: object
 ) -> StructuredAstValue:
     """Resolve the angr function for the active cfunc when not supplied."""
+    func_addr: object
     if function is None:
         func_addr = getattr(getattr(codegen, "cfunc", None), "addr", None)
         with contextlib.suppress(Exception):
@@ -18295,8 +20164,10 @@ def _resolve_update_function_8616(
     return function
 
 
-def _global_update_stats_8616(codegen: StructuredAstValue) -> dict[str, int]:
+@cython.ccall
+def _global_update_stats_8616(codegen: StructuredAstValue) -> object:
     """Return the codegen-owned global-update stats bucket, creating it once."""
+    stats: object
     stats = getattr(codegen, "_inertia_direct_global_update_lowering_8616", None)
     if not isinstance(stats, dict):
         stats = {
@@ -18315,8 +20186,10 @@ def _global_update_stats_8616(codegen: StructuredAstValue) -> dict[str, int]:
     return stats
 
 
-def _consumed_global_update_facts_8616(codegen: StructuredAstValue) -> set[DirectGlobalUpdateFact8616]:
+@cython.ccall
+def _consumed_global_update_facts_8616(codegen: StructuredAstValue) -> object:
     """Return the codegen-owned consumed-fact set, creating it once."""
+    consumed_facts: object
     consumed_facts = getattr(codegen, "_inertia_consumed_direct_global_update_facts_8616", None)
     if not isinstance(consumed_facts, set):
         consumed_facts = set()
@@ -18324,10 +20197,13 @@ def _consumed_global_update_facts_8616(codegen: StructuredAstValue) -> set[Direc
     return consumed_facts
 
 
+@cython.ccall
 def materialize_direct_global_incdec_instructions_8616(
     codegen: StructuredAstValue, project: StructuredAstValue | None = None, function: StructuredAstValue | None = None
-) -> bool:
+) -> cython.bint:
     """Materialize direct no-base/no-index real-mode global INC/DEC effects."""
+    root: object
+    fact: object
     if project is None:
         project = getattr(codegen, "project", None)
     root = getattr(getattr(codegen, "cfunc", None), "statements", None)
@@ -18372,8 +20248,10 @@ def materialize_direct_global_incdec_instructions_8616(
     return run.changed
 
 
-def _stack_update_stats_8616(codegen: StructuredAstValue) -> dict[str, int]:
+@cython.ccall
+def _stack_update_stats_8616(codegen: StructuredAstValue) -> object:
     """Return the codegen-owned stack-update stats bucket, creating it once."""
+    stats: object
     stats = getattr(codegen, "_inertia_direct_stack_update_lowering_8616", None)
     if not isinstance(stats, dict):
         stats = {
@@ -18388,7 +20266,7 @@ def _stack_update_stats_8616(codegen: StructuredAstValue) -> dict[str, int]:
     return stats
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _StackIncdecRun8616:
     """Materialize direct BP-relative stack INC/DEC effects at their tagged C node."""
 
@@ -18396,16 +20274,17 @@ class _StackIncdecRun8616:
     project: StructuredAstValue
     function: StructuredAstValue
     root: StructuredAstValue
-    stats: dict[str, int]
-    debug_stack_noise: bool
-    changed: bool = False
+    stats: object
+    debug_stack_noise: cython.bint
+    changed: cython.bint = False
     query_index: StructuredAstValue = None
     fact: StructuredAstValue = None
-    width: int = 2
+    width: cython.longlong = 2
     cvar: StructuredAstValue = None
     source_expr: StructuredAstValue = None
-    rendered_assignment_ids: frozenset[int] | None = None
+    rendered_assignment_ids: object = None
 
+    @cython.ccall
     def _replacement_factory_8616(self, tags: StructuredAstValue) -> StructuredAstValue:
         """Build the stack-update assignment for a tagged node."""
         return _direct_stack_update_assignment_8616(
@@ -18418,7 +20297,8 @@ class _StackIncdecRun8616:
             operation=self.fact.operation,
         )
 
-    def _has_rendered_owner_8616(self, node: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _has_rendered_owner_8616(self, node: StructuredAstValue) -> cython.bint:
         """Use one ownership index for this mutable replacement attempt."""
         if self.rendered_assignment_ids is None:
             self.rendered_assignment_ids = _rendered_stack_update_assignment_ids_8616(
@@ -18426,16 +20306,17 @@ class _StackIncdecRun8616:
             )
         return id(node) in self.rendered_assignment_ids
 
-    def _already_materialized_predicate_8616(self, node: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _already_materialized_predicate_8616(self, node: StructuredAstValue) -> cython.bint:
         return self._has_rendered_owner_8616(node) and _is_same_stack_update_assignment_8616(
             node, self.cvar, self.fact.delta, self.source_expr, operation=self.fact.operation
         )
 
-    def _try_existing_assignment_8616(self, facts: StructuredAstValue) -> bool:
+    def _try_existing_assignment_8616(self, facts: StructuredAstValue) -> cython.bint:
         """Accept an existing equivalent update assignment with matching semantics."""
         semantic_fact_count = sum(
             1
-            for candidate in facts
+            for candidate in iter(facts)
             if _same_direct_stack_update_semantics_8616(candidate, self.fact)
         )
         materialized = _has_existing_stack_update_assignment_8616(
@@ -18456,7 +20337,8 @@ class _StackIncdecRun8616:
             )
         return materialized
 
-    def _try_materialize_8616(self, facts: StructuredAstValue) -> tuple[bool, bool]:
+    @cython.ccall
+    def _try_materialize_8616(self, facts: StructuredAstValue) -> tuple[cython.bint, cython.bint]:
         """Run the ordered materialization chain for one fact."""
         self.root._inertia_stack_update_assignment_already_present_8616 = False
         loop_iterator_result = _materialize_proven_stack_update_loop_iterator_8616(
@@ -18496,7 +20378,8 @@ class _StackIncdecRun8616:
         materialized, fact_changed = self._replacement_chain_8616(materialized, fact_changed)
         return materialized, fact_changed
 
-    def _remove_conflicting_8616(self) -> bool:
+    @cython.ccall
+    def _remove_conflicting_8616(self) -> cython.bint:
         """Drop conflicting tagged duplicates after materialization."""
         removed_count = _remove_conflicting_tagged_stack_update_assignments_8616(
             self.root,
@@ -18509,7 +20392,8 @@ class _StackIncdecRun8616:
         ) + removed_count
         return removed_count > 0
 
-    def _replacement_chain_8616(self, materialized: bool, fact_changed: bool) -> tuple[bool, bool]:
+    @cython.ccall
+    def _replacement_chain_8616(self, materialized: cython.bint, fact_changed: cython.bint) -> object:
         """Continue the ordered replacement chain after loop/existing arms."""
         if not materialized and self.fact.operation is DirectStackUpdateOp8616.ARITHMETIC:
             materialized = _replace_stack_update_loop_iterator_8616(
@@ -18551,7 +20435,8 @@ class _StackIncdecRun8616:
             materialized = True
         return self._insert_chain_8616(materialized, fact_changed)
 
-    def _insert_chain_8616(self, materialized: bool, fact_changed: bool) -> tuple[bool, bool]:
+    @cython.ccall
+    def _insert_chain_8616(self, materialized: cython.bint, fact_changed: cython.bint) -> tuple[cython.bint, cython.bint]:
         """Run the insertion arms for arithmetic facts that did not replace."""
         if not materialized and self.fact.operation is DirectStackUpdateOp8616.ARITHMETIC:
             inserted_assignment = self._replacement_factory_8616({"ins_addr": self.fact.ins_addr})
@@ -18575,6 +20460,7 @@ class _StackIncdecRun8616:
             self.stats["refused_count"] = int(self.stats.get("refused_count", 0) or 0) + 1
         return materialized, fact_changed
 
+    @cython.ccall
     def _record_materialized_8616(self) -> None:
         """Publish the materialization evidence entry for one fact."""
         self.stats["materialized_count"] = int(self.stats.get("materialized_count", 0) or 0) + 1
@@ -18582,10 +20468,11 @@ class _StackIncdecRun8616:
         fact = self.fact
         self.codegen._inertia_direct_stack_update_evidence_8616 = _boundary_tuple_8616(
             dict.fromkeys(
-                (*evidence, (("offset", fact.offset), ("width", self.width), ("delta", fact.delta), ("source_kind", fact.source_kind), ("source_value", fact.source_value), ("source_offset", fact.source_offset), ("source_base_offset", fact.source_base_offset), ("source_index_offset", fact.source_index_offset), ("source_index_scale", fact.source_index_scale), ("operation", fact.operation), ("ins_addr", fact.ins_addr), ("name", getattr(getattr(self.cvar, "variable", None), "name", None))))
+                tuple(evidence) + ((("offset", fact.offset), ("width", self.width), ("delta", fact.delta), ("source_kind", fact.source_kind), ("source_value", fact.source_value), ("source_offset", fact.source_offset), ("source_base_offset", fact.source_base_offset), ("source_index_offset", fact.source_index_offset), ("source_index_scale", fact.source_index_scale), ("operation", fact.operation), ("ins_addr", fact.ins_addr), ("name", getattr(getattr(self.cvar, "variable", None), "name", None))),)
             )
         )
 
+    @cython.ccall
     def materialize_fact_8616(self, fact: StructuredAstValue, facts: StructuredAstValue) -> None:
         """Materialize one stack-update fact, tracking per-fact change."""
         self.fact = fact
@@ -18617,12 +20504,13 @@ class _StackIncdecRun8616:
             self.query_index = StructuredAstQueryIndex8616.build(self.root)
 
 
+@cython.ccall
 def _filtered_stack_update_facts_8616(
     codegen: StructuredAstValue,
     project: StructuredAstValue,
     function: StructuredAstValue,
-    stats: dict[str, int],
-    debug_stack_noise: bool,
+    stats: object,
+    debug_stack_noise: cython.bint,
     root: StructuredAstValue,
 ) -> StructuredAstValue:
     """Collect the stack-update facts filtered for the active function."""
@@ -18641,10 +20529,13 @@ def _filtered_stack_update_facts_8616(
     return facts
 
 
+@cython.ccall
 def materialize_direct_stack_incdec_instructions_8616(
     codegen: StructuredAstValue, project: StructuredAstValue | None = None, function: StructuredAstValue | None = None
-) -> bool:
+) -> cython.bint:
     """Materialize direct BP-relative stack INC/DEC effects at their tagged C node."""
+    root: object
+    fact: object
     debug_stack_noise = bool(os.environ.get("INERTIA_DEBUG_STACK_NOISE"))
     if project is None:
         project = getattr(codegen, "project", None)
@@ -18699,17 +20590,17 @@ def materialize_direct_stack_mov_instructions_8616(
     project: StructuredAstValue | None = None,
     function: StructuredAstValue | None = None,
     *,
-    allow_stack_slot_fallback: bool = True,
-    source_kinds: frozenset[DirectStackMoveSourceKind8616] | None = None,
-    materialize_reloads: bool = True,
-) -> bool:
+    allow_stack_slot_fallback: cython.bint = True,
+    source_kinds: object = None,
+    materialize_reloads: cython.bint = True,
+) -> cython.bint:
     """Execute direct stack MOV lowering through its exact replay contract."""
     options = DirectStackReplayOptions8616(
         allow_stack_slot_fallback=allow_stack_slot_fallback,
         source_kind_values=(
             None
             if source_kinds is None
-            else tuple(sorted(source_kind.value for source_kind in source_kinds))
+            else tuple(sorted(source_kind.value for source_kind in iter(source_kinds)))
         ),
         materialize_reloads=materialize_reloads,
     )
@@ -18733,15 +20624,15 @@ def materialize_direct_stack_mov_instructions_8616(
     )
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _DirectStackReloadFrame8616:
     """Shared per-pass state for register-reload materialization."""
 
-    register_use_missing: set[str] = field(default_factory=set)
+    register_use_missing: object = field(default_factory=set)
     query_index: StructuredAstValue = None
     candidate_index: StructuredAstValue = None
     register_names: frozenset[str] = frozenset()
-    timers: dict[str, float] = field(
+    timers: object = field(
         default_factory=lambda: {
             "tagged_reload_match": 0.0,
             "register_use_insert": 0.0,
@@ -18750,7 +20641,7 @@ class _DirectStackReloadFrame8616:
     )
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _DirectStackMovRun8616:
     """One direct-stack-MOV materialization pass over a structured function.
 
@@ -18763,29 +20654,29 @@ class _DirectStackMovRun8616:
     project: StructuredAstValue
     function: StructuredAstValue
     root: StructuredAstValue
-    stats: dict[str, StructuredAstValue]
-    debug_stack_noise: bool
-    facts: tuple[DirectStackMoveFact8616, ...]
-    allow_stack_slot_fallback: bool
-    materialize_reloads: bool
-    allow_unscoped_fallback_insert: bool
-    signed_idiv_remainder_fact_count: int
-    materialized_fact_keys: set[StructuredAstValue]
-    materialized_facts: list[DirectStackMoveFact8616]
-    source_expr_by_store_ins_addr: dict[int, StructuredAstValue]
-    changed: bool = False
-    lane_stats_before: dict[str, int] = field(default_factory=dict)
-    timers: dict[str, float] = field(default_factory=dict)
+    stats: object
+    debug_stack_noise: cython.bint
+    facts: object
+    allow_stack_slot_fallback: cython.bint
+    materialize_reloads: cython.bint
+    allow_unscoped_fallback_insert: cython.bint
+    signed_idiv_remainder_fact_count: cython.longlong
+    materialized_fact_keys: object
+    materialized_facts: object
+    source_expr_by_store_ins_addr: object
+    changed: cython.bint = False
+    lane_stats_before: object = field(default_factory=dict)
+    timers: object = field(default_factory=dict)
     # Per-fact frame fields (assigned each iteration; not reset).
     fact: DirectStackMoveFact8616 | None = None
     fact_key: StructuredAstValue = None
-    indexed_destination: bool = False
+    indexed_destination: cython.bint = False
     dst_cvar: StructuredAstValue = None
     dst_expr: StructuredAstValue = None
     source_expr: StructuredAstValue = None
-    authoritative_wide_materialized: bool = False
-    materialized: bool = False
-    idiv_visible_guard_inserted: bool = False
+    authoritative_wide_materialized: cython.bint = False
+    materialized: cython.bint = False
+    idiv_visible_guard_inserted: cython.bint = False
     inverse_pruned: StructuredAstValue = None
     call_statement_source_expr: StructuredAstValue = None
     call_order_reconciled: StructuredAstValue = None
@@ -18795,29 +20686,29 @@ class _DirectStackMovRun8616:
     dst_variable: StructuredAstValue = None
     fallback_assignment: StructuredAstValue = None
     relocated_assignment: StructuredAstValue = None
-    relocated_count: int = 0
+    relocated_count: cython.longlong = 0
     replay_pruned: StructuredAstValue = None
     source_type: StructuredAstValue = None
     tags: StructuredAstValue = None
     unified: StructuredAstValue = None
     visible_assignment: StructuredAstValue = None
-    auxiliary_insert_count: int = 0
-    signed_idiv_assignment_present: bool = False
-    projected_segmented_source_present: bool = False
-    idiv_call_statement_materialized: bool = False
+    auxiliary_insert_count: cython.longlong = 0
+    signed_idiv_assignment_present: cython.bint = False
+    projected_segmented_source_present: cython.bint = False
+    idiv_call_statement_materialized: cython.bint = False
 
-    def _fact_begin_8616(self) -> bool:
+    def _fact_begin_8616(self) -> cython.bint:
         """Prepare destination/source expressions for one direct-stack-MOV fact."""
         assert self.fact is not None
         self.root._inertia_stack_mov_assignment_already_present_8616 = False
         self.fact_key = _direct_stack_move_fact_key_8616(self.fact)
         self.indexed_destination = any(
             isinstance(index, int)
-            for index in (
+            for index in iter((
                 self.fact.dst_index_global_displacement,
                 self.fact.dst_index_stack_offset,
                 self.fact.dst_index_immediate,
-            )
+            ))
         )
         self.dst_cvar = (
             _resolve_existing_direct_stack_owner_cvar_8616(
@@ -18841,7 +20732,7 @@ class _DirectStackMovRun8616:
         self.authoritative_wide_materialized = False
         return False
 
-    def _fact_wide_call_return_arm_8616(self) -> bool:
+    def _fact_wide_call_return_arm_8616(self) -> cython.bint:
         """Materialize the authoritative wide call-return stack-arith arm."""
         assert self.fact is not None
         if self.fact.source_kind is DirectStackMoveSourceKind8616.WIDE_CALL_RETURN_STACK_ARITH:
@@ -18853,7 +20744,7 @@ class _DirectStackMovRun8616:
                 self.fact.dst_high_ins_addr,
                 self.fact.source_offset,
             )
-            if not all(isinstance(address, int) for address in required_addresses):
+            if not all(isinstance(address, int) for address in iter(required_addresses)):
                 self.stats["failure_count"] = int(self.stats.get("failure_count", 0) or 0) + 1
                 return True
             ownership = classify_authoritative_wide_call_output_projection_8616(
@@ -18879,7 +20770,8 @@ class _DirectStackMovRun8616:
                 self.authoritative_wide_materialized = True
         return False
 
-    def _stack_slot_type_rebind_allowed_8616(self) -> bool:
+    @cython.ccall
+    def _stack_slot_type_rebind_allowed_8616(self) -> cython.bint:
         """Shared width/destination gate for short-signed stack-slot type rebinding."""
         assert self.fact is not None
         return (
@@ -18888,6 +20780,7 @@ class _DirectStackMovRun8616:
             and _prototype_arg_type_for_bp_offset_8616(self.codegen, self.fact.dst_offset) is None
         )
 
+    @cython.ccall
     def _fact_stack_slot_sub_type_rebind_8616(self) -> None:
         """Rebind short-signed types for proven stack-slot subtraction stores."""
         assert self.fact is not None
@@ -18912,6 +20805,7 @@ class _DirectStackMovRun8616:
                     if self.dst_variable is not None:
                         self.unified[self.dst_variable] = {(self.dst_expr, self.dst_expr.variable_type)}
 
+    @cython.ccall
     def _fact_stack_slot_type_rebind_8616(self) -> None:
         """Rebind short-signed types for proven stack-slot stores."""
         assert self.fact is not None
@@ -18935,6 +20829,7 @@ class _DirectStackMovRun8616:
                     if self.dst_variable is not None:
                         self.unified[self.dst_variable] = {(self.dst_expr, self.dst_expr.variable_type)}
 
+    @cython.ccall
     def _fact_inverse_prune_8616(self) -> None:
         """Prune inverse stack-move artifacts produced by this definition."""
         assert self.fact is not None
@@ -18945,7 +20840,8 @@ class _DirectStackMovRun8616:
             )
             self.changed = True
 
-    def _fact_already_materialized_8616(self) -> bool:
+    @cython.ccall
+    def _fact_already_materialized_8616(self) -> cython.bint:
         """Skip or reconcile facts whose materialized form is already present."""
         if not (self.fact_key in self.materialized_fact_keys and not self.authoritative_wide_materialized):
             return False
@@ -18964,7 +20860,8 @@ class _DirectStackMovRun8616:
         )
         return False
 
-    def _fact_zero_arg_call_return_arm_8616(self) -> bool:
+    @cython.ccall
+    def _fact_zero_arg_call_return_arm_8616(self) -> cython.bint:
         """Consume a zero-arg call-return fact already present in the tree."""
         assert self.fact is not None
         if (
@@ -18985,7 +20882,8 @@ class _DirectStackMovRun8616:
             return True
         return False
 
-    def _fact_wide_return_reconcile_8616(self) -> bool:
+    @cython.ccall
+    def _fact_wide_return_reconcile_8616(self) -> cython.bint:
         """Reconcile an already-materialized wide call-return assignment."""
         assert self.fact is not None
         if self.fact.source_kind is DirectStackMoveSourceKind8616.WIDE_CALL_RETURN_STACK_ARITH:
@@ -19010,7 +20908,8 @@ class _DirectStackMovRun8616:
                 return True
         return False
 
-    def _fact_signed_idiv_reconcile_8616(self) -> bool:
+    @cython.ccall
+    def _fact_signed_idiv_reconcile_8616(self) -> cython.bint:
         """Reconcile an already-materialized signed-idiv call order."""
         assert self.fact is not None
         if self.fact.source_kind is DirectStackMoveSourceKind8616.SIGNED_IDIV_REMAINDER:
@@ -19048,6 +20947,7 @@ class _DirectStackMovRun8616:
                 self.changed = True
         return False
 
+    @cython.ccall
     def _fact_replay_reconcile_8616(self) -> None:
         """Decide whether to replay reconciliation for idiv or segmented sources."""
         assert self.fact is not None
@@ -19154,7 +21054,8 @@ class _DirectStackMovRun8616:
                     + 1
                 )
 
-    def _fact_stale_evidence_recheck_8616(self) -> bool:
+    @cython.ccall
+    def _fact_stale_evidence_recheck_8616(self) -> cython.bint:
         """Recheck stale evidence and rematerialize when the write vanished."""
         assert self.fact is not None
         if _tree_has_stack_move_assignment_8616(
@@ -19230,6 +21131,7 @@ class _DirectStackMovRun8616:
             return True
         return False
 
+    @cython.ccall
     def _fact_classified_8616(self) -> None:
         """Record the fact as classified and seed materialization state."""
         self.stats["classified_fact_count"] = int(self.stats.get("classified_fact_count", 0) or 0) + 1
@@ -19237,8 +21139,11 @@ class _DirectStackMovRun8616:
 
         self.idiv_visible_guard_inserted = False
 
+    @cython.ccall
     def _fact_stack_slot_expr_arm_8616(self) -> None:
         """Materialize STACK_SLOT_EXPR facts into structured stack stores."""
+        call_assignment: object
+        placement_service: object
         assert self.fact is not None
         if self.fact.source_kind is DirectStackMoveSourceKind8616.STACK_SLOT_EXPR:
             if self.allow_stack_slot_fallback:
@@ -19354,7 +21259,8 @@ class _DirectStackMovRun8616:
                 )
                 self.changed = True
 
-    def _fact_signed_idiv_arm_8616(self) -> bool:
+    @cython.ccall
+    def _fact_signed_idiv_arm_8616(self) -> cython.bint:
         """Materialize SIGNED_IDIV_REMAINDER facts with call-statement bridging."""
         assert self.fact is not None
         if self.fact.source_kind is not DirectStackMoveSourceKind8616.SIGNED_IDIV_REMAINDER:
@@ -19375,8 +21281,10 @@ class _DirectStackMovRun8616:
         self._idiv_finalize_8616()
         return False
 
+    @cython.ccall
     def _idiv_call_statement_materialize_8616(self) -> None:
         """Bridge the signed-idiv call statement into a stack assignment."""
+        idiv_call_assignment: object
         assert self.fact is not None
         if self.call_statement_source_expr is not None and _expr_contains_function_call_8616(self.call_statement_source_expr):
             idiv_call_assignment = _replace_tagged_call_statement_with_stack_assignment_8616(
@@ -19417,8 +21325,10 @@ class _DirectStackMovRun8616:
                 self.materialized = True
                 self.changed = True
 
+    @cython.ccall
     def _idiv_direct_materialize_8616(self) -> None:
         """Materialize the signed-idiv remainder when no call statement was bridged."""
+        artifact_materialized: object
         if not self.idiv_call_statement_materialized:
             artifact_materialized = _replace_signed_idiv_remainder_artifact_assignment_8616(
                 self.root,
@@ -19439,6 +21349,7 @@ class _DirectStackMovRun8616:
                     )
                 self.materialized = True
 
+    @cython.ccall
     def _idiv_guard_or_recheck_8616(self) -> None:
         """Apply the visible-guard placement for the signed-idiv remainder."""
         assert self.fact is not None
@@ -19461,6 +21372,7 @@ class _DirectStackMovRun8616:
                 self.materialized = True
                 self.changed = True
 
+    @cython.ccall
     def _idiv_artifact_tail_8616(self) -> None:
         """Record signed-idiv artifact counters for the materialization arm."""
         assert self.fact is not None
@@ -19486,6 +21398,7 @@ class _DirectStackMovRun8616:
                 )
                 self.changed = True
 
+    @cython.ccall
     def _idiv_finalize_8616(self) -> None:
         """Finalize the signed-idiv arm bookkeeping."""
         assert self.fact is not None
@@ -19502,7 +21415,8 @@ class _DirectStackMovRun8616:
                 )
                 self.changed = True
 
-    def _fact_generic_materialize_8616(self) -> bool:
+    @cython.ccall
+    def _fact_generic_materialize_8616(self) -> cython.bint:
         """Materialize facts that still need a direct assignment."""
         if not self.materialized:
             if self._fact_reconcile_existing_assignment_8616():
@@ -19512,7 +21426,8 @@ class _DirectStackMovRun8616:
             self._fact_kind_fallback_chain_8616()
         return False
 
-    def _fact_reconcile_existing_assignment_8616(self) -> bool:
+    @cython.ccall
+    def _fact_reconcile_existing_assignment_8616(self) -> cython.bint:
         """Consume a fact whose stack-move assignment already exists in the tree."""
         assert self.fact is not None
         if _tree_has_stack_move_assignment_8616(self.root, self.dst_expr, self.source_expr) or (
@@ -19633,6 +21548,7 @@ class _DirectStackMovRun8616:
             return True
         return False
 
+    @cython.ccall
     def _fact_tagged_fallback_gate_8616(self) -> None:
         """Apply the tagged-statement placement gate before direct insertion."""
         assert self.fact is not None
@@ -19647,8 +21563,10 @@ class _DirectStackMovRun8616:
             tags={"ins_addr": self.fact.ins_addr},
         )
 
+    @cython.ccall
     def _fact_immediate_source_arm_8616(self) -> None:
         """Place IMMEDIATE-source stores around proven loop/precontrol positions."""
+        branch_placement_service: object
         assert self.fact is not None
         if self.fact.source_kind in {
             DirectStackMoveSourceKind8616.STACK_SLOT,
@@ -19668,6 +21586,7 @@ class _DirectStackMovRun8616:
                     branch_placement_service(self.fact, self.fallback_assignment)
                 )
 
+    @cython.ccall
     def _fact_kind_fallback_chain_8616(self) -> None:
         """Run the per-source-kind fallback placement chain."""
         assert self.fact is not None
@@ -19684,6 +21603,7 @@ class _DirectStackMovRun8616:
         elif self.fact.source_kind is DirectStackMoveSourceKind8616.SEGMENTED_MEMORY:
             self._fallback_segmented_refusal_8616()
 
+    @cython.ccall
     def _fallback_immediate_arm_8616(self) -> None:
         """Run the IMMEDIATE fallback placement chain."""
         assert self.fact is not None
@@ -19744,6 +21664,7 @@ class _DirectStackMovRun8616:
                 self.fallback_assignment,
             )
 
+    @cython.ccall
     def _fallback_wide_call_arm_8616(self) -> None:
         """Run the WIDE_CALL_RETURN_STACK_ARITH fallback placement."""
         self.materialized = _replace_precontrol_stack_assignment_8616(
@@ -19753,6 +21674,7 @@ class _DirectStackMovRun8616:
             allow_low_half_lhs=True,
         )
 
+    @cython.ccall
     def _fallback_stack_slot_arm_8616(self) -> None:
         """Run the STACK_SLOT/STACK_AGGREGATE_ELEMENT fallback chain."""
         assert self.fact is not None
@@ -19819,6 +21741,7 @@ class _DirectStackMovRun8616:
                 function=self.function,
             )
 
+    @cython.ccall
     def _fallback_stack_slot_expr_arm_8616(self) -> None:
         """Run the STACK_SLOT_EXPR fallback placement chain."""
         assert self.fact is not None
@@ -19839,6 +21762,7 @@ class _DirectStackMovRun8616:
                 self.fallback_assignment,
             )
 
+    @cython.ccall
     def _fallback_global_expr_arm_8616(self) -> None:
         """Run the GLOBAL_* fallback placement chain."""
         assert self.fact is not None
@@ -19873,6 +21797,7 @@ class _DirectStackMovRun8616:
                 self.fallback_assignment,
             )
 
+    @cython.ccall
     def _fallback_segmented_refusal_8616(self) -> None:
         """Refuse unscoped segmented-memory placement."""
         # Structuring owns CFG scope through the placement service above.
@@ -19882,7 +21807,8 @@ class _DirectStackMovRun8616:
             + int(not self.materialized)
         )
 
-    def _fact_materialize_fallback_8616(self) -> bool:
+    @cython.ccall
+    def _fact_materialize_fallback_8616(self) -> cython.bint:
         """Apply the last-resort materialization fallback for a fact."""
         assert self.fact is not None
         if not self.materialized:
@@ -19907,6 +21833,7 @@ class _DirectStackMovRun8616:
             return True
         return False
 
+    @cython.ccall
     def _fact_aggregate_order_restore_8616(self) -> None:
         """Restore same-block stack-move ordering for aggregate elements."""
         assert self.fact is not None
@@ -19927,6 +21854,7 @@ class _DirectStackMovRun8616:
             )
             self.changed = True
 
+    @cython.ccall
     def _fact_immediate_group_arm_8616(self) -> None:
         """Handle immediate and aggregate source-kind materialization details."""
         assert self.fact is not None
@@ -19958,6 +21886,7 @@ class _DirectStackMovRun8616:
                 )
                 self.changed = True
 
+    @cython.ccall
     def _fact_sign_extend_guard_8616(self) -> None:
         """Insert visible-use guards for sign-extended stack-slot stores."""
         assert self.fact is not None
@@ -19984,6 +21913,7 @@ class _DirectStackMovRun8616:
                 self.stats["visible_use_guard_count"] = int(self.stats.get("visible_use_guard_count", 0) or 0) + 1
                 self.changed = True
 
+    @cython.ccall
     def _fact_wide_arith_carrier_prune_8616(self) -> None:
         """Prune obsolete wide call-return carriers after materialization."""
         assert self.fact is not None
@@ -20017,6 +21947,7 @@ class _DirectStackMovRun8616:
                 )
                 self.changed = True
 
+    @cython.ccall
     def _fact_finalize_8616(self) -> None:
         """Commit materialization counters and evidence for one fact."""
         assert self.fact is not None
@@ -20027,6 +21958,7 @@ class _DirectStackMovRun8616:
         _record_direct_stack_move_evidence_8616(self.codegen, self.fact)
         self.changed = True
 
+    @cython.ccall
     def replacement_factory_8616(
         self,
         tags: StructuredAstValue,
@@ -20042,6 +21974,7 @@ class _DirectStackMovRun8616:
             tags=tags,
         )
 
+    @cython.ccall
     def call_statement_replacement_factory_8616(
         self,
         tags: StructuredAstValue,
@@ -20057,8 +21990,10 @@ class _DirectStackMovRun8616:
             tags=tags,
         )
 
+    @cython.ccall
     def process_facts_8616(self) -> None:
         """Advance each recovered fact through the materialization arms."""
+        fact: object
         self.timers["fact_loop_started"] = time.perf_counter()
         for fact in self.facts:
             self.fact = fact
@@ -20085,12 +22020,14 @@ class _DirectStackMovRun8616:
             self._fact_finalize_8616()
         self.timers["fact_loop"] = time.perf_counter() - self.timers["fact_loop_started"]
 
+    @cython.ccall
     def _reload_fact_head_8616(
         self,
         reload_fact: DirectStackReloadFact8616,
         frame: _DirectStackReloadFrame8616,
-    ) -> tuple[StructuredAstValue, StructuredAstValue, bool, StructuredAstValue] | None:
+    ) -> object:
         """Classify one reload fact and resolve its source cvar."""
+        source_cvar: object
         self.stats["reload_classified_fact_count"] = int(self.stats.get("reload_classified_fact_count", 0) or 0) + 1
         source_fact = _materialized_store_fact_for_reload_8616(
             reload_fact,
@@ -20112,16 +22049,19 @@ class _DirectStackMovRun8616:
         materialized_reload = reload_placement.present
         return source_fact, source_cvar, materialized_reload, reload_placement
 
+    @cython.ccall
     def _reload_stack_slot_attempt_8616(
         self,
         reload_fact: DirectStackReloadFact8616,
-        source_fact: StructuredAstValue,
+        source_fact: object,
         source_cvar: StructuredAstValue,
-        materialized_reload: bool,
+        materialized_reload: cython.bint,
         reload_placement: StructuredAstValue,
         frame: _DirectStackReloadFrame8616,
-    ) -> tuple[bool, StructuredAstValue]:
+    ) -> tuple[cython.bint, StructuredAstValue]:
         """Attempt register-use insertion and visible-guard fallback for a stack-slot reload."""
+        reload_expr: object
+        source_expr: object
         source_expr = self.source_expr_by_store_ins_addr.get(int(reload_fact.source_store_ins_addr))
         stale_source_expr = _stack_slot_has_intervening_direct_update_8616(
             self.project,
@@ -20240,7 +22180,7 @@ class _DirectStackMovRun8616:
                         _cvar_register_name_8616(node),
                         _stack_cvar_identity_8616(node),
                     )
-                    for node in _iter_structured_c_nodes_8616(self.root)
+                    for node in builtins.iter(_iter_structured_c_nodes_8616(self.root))
                     if isinstance(node, structured_c.CVariable)
                 )
             )[:16]
@@ -20255,10 +22195,11 @@ class _DirectStackMovRun8616:
                 candidates,
             )
 
+    @cython.ccall
     def _reload_commit_8616(
         self,
         reload_fact: DirectStackReloadFact8616,
-        materialized_reload: bool,
+        materialized_reload: cython.bint,
         reload_placement: StructuredAstValue,
         frame: _DirectStackReloadFrame8616,
     ) -> None:
@@ -20277,6 +22218,7 @@ class _DirectStackMovRun8616:
             self.stats["reload_failure_count"] = int(self.stats.get("reload_failure_count", 0) or 0) + 1
             self._reload_debug_refusal_8616(reload_fact)
 
+    @cython.ccall
     def _recover_reload_facts_8616(
         self,
     ) -> tuple[tuple[DirectStackReloadFact8616, ...], _DirectStackReloadFrame8616]:
@@ -20305,12 +22247,15 @@ class _DirectStackMovRun8616:
         )
         return reload_facts, frame
 
+    @cython.ccall
     def _process_reload_facts_8616(
         self,
-        reload_facts: tuple[DirectStackReloadFact8616, ...],
+        reload_facts: object,
         frame: _DirectStackReloadFrame8616,
     ) -> None:
         """Materialize each recovered register-reload fact."""
+        head: object
+        reload_fact: object
         reload_loop_started = time.perf_counter()
         for reload_fact in reload_facts:
             head = self._reload_fact_head_8616(reload_fact, frame)
@@ -20339,8 +22284,10 @@ class _DirectStackMovRun8616:
             # Dynamic angr/codegen boundary: publish immutable optimization accounting.
             self.codegen._inertia_direct_stack_reload_query_index_stats_8616 = frame.candidate_index.stats()
 
+    @cython.ccall
     def _epilogue_publish_8616(self) -> None:
         """Replay pending branch-ownership edits and publish the rewritten root."""
+        branch_ownership_replay: object
         # Dynamic angr/codegen boundary: Structuring binds this replay so Lowering
         # can preserve value facts without owning conditional AST placement.
         branch_ownership_replay = getattr(
@@ -20373,7 +22320,7 @@ class _DirectStackMovRun8616:
                     fact.source_sign_extend,
                     fact.ins_addr,
                 )
-                for fact in self.facts
+                for fact in iter(self.facts)
             )
             log.warning(
                 "[direct-stack-mov] function=%#x codegen=%#x facts=%d materialized=%d failures=%d "
@@ -20419,7 +22366,8 @@ class _DirectStackMovRun8616:
                 fact_summary,
             )
 
-    def _epilogue_finish_8616(self, reload_fact_count: int) -> None:
+    @cython.ccall
+    def _epilogue_finish_8616(self, reload_fact_count: cython.longlong) -> None:
         """Record semantic lanes and emit the optional timing breakdown."""
         _record_direct_stack_move_lanes_8616(
             self.codegen,
@@ -20445,6 +22393,7 @@ class _DirectStackMovRun8616:
                 flush=True,
             )
 
+    @cython.ccall
     def epilogue_8616(self) -> None:
         """Prune unsupported stores, recover reloads, and publish results."""
         cleanup_started = time.perf_counter()
@@ -20465,8 +22414,10 @@ class _DirectStackMovRun8616:
         self._epilogue_finish_8616(len(reload_facts))
 
 
-def _direct_stack_move_stats_8616(codegen: StructuredAstValue) -> dict[str, StructuredAstValue]:
+@cython.ccall
+def _direct_stack_move_stats_8616(codegen: StructuredAstValue) -> object:
     """Return (creating when absent) the direct-stack-MOV counter surface."""
+    stats: object
     stats = getattr(codegen, "_inertia_direct_stack_move_lowering_8616", None)
     if not isinstance(stats, dict):
         stats = {
@@ -20487,11 +22438,12 @@ def _direct_stack_move_stats_8616(codegen: StructuredAstValue) -> dict[str, Stru
     return stats
 
 
+@cython.ccall
 def _prepare_direct_stack_mov_8616(
     codegen: StructuredAstValue,
     project: StructuredAstValue,
     function: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Prune prologue writes and materialize stack aggregate objects."""
     frame_prologue_changed = prune_frame_prologue_stack_assignments_8616(
         project,
@@ -20511,9 +22463,9 @@ def _recover_direct_stack_move_facts_8616(
     codegen: StructuredAstValue,
     project: StructuredAstValue,
     function: StructuredAstValue,
-    stats: dict[str, StructuredAstValue],
-    source_kinds: frozenset[DirectStackMoveSourceKind8616] | None,
-) -> tuple[tuple[DirectStackMoveFact8616, ...], float]:
+    stats: object,
+    source_kinds: object,
+) -> tuple[tuple[DirectStackMoveFact8616, ...], cython.double]:
     """Recover, merge, and private-source-filter direct-stack-MOV facts."""
     fact_recovery_started = time.perf_counter()
     facts = _direct_stack_move_instruction_facts_for_codegen_8616(
@@ -20522,31 +22474,32 @@ def _recover_direct_stack_move_facts_8616(
         function,
     )
     if source_kinds is not None:
-        facts = tuple(fact for fact in facts if fact.source_kind in source_kinds)
+        facts = tuple(fact for fact in iter(facts) if fact.source_kind in source_kinds)
     fact_recovery_elapsed = time.perf_counter() - fact_recovery_started
     existing_typed_facts = tuple(
         fact
-        for fact in _boundary_tuple_8616(
+        for fact in builtins.iter(_boundary_tuple_8616(
             getattr(codegen, "_inertia_direct_stack_move_facts_8616", ()) or ()
-        )
+        ))
         if isinstance(fact, DirectStackMoveFact8616)
     )
     codegen._inertia_direct_stack_move_facts_8616 = tuple(
         dict.fromkeys(existing_typed_facts + facts)
     )
     stats["raw_fact_count"] = int(stats.get("raw_fact_count", 0) or 0) + len(facts)
-    required_facts = tuple(fact for fact in facts if not alias_proves_private_stack_source_8616(codegen, fact.ins_addr))
+    required_facts = tuple(fact for fact in iter(facts) if not alias_proves_private_stack_source_8616(codegen, fact.ins_addr))
     stats["private_write_elided_count"] = int(stats.get("private_write_elided_count", 0) or 0) + len(facts) - len(required_facts)
     return required_facts, fact_recovery_elapsed
 
 
+@cython.ccall
 def _direct_stack_mov_empty_facts_8616(
     codegen: StructuredAstValue,
     function: StructuredAstValue,
-    stats: dict[str, StructuredAstValue],
-    aggregate_changed: bool,
-    debug_stack_noise: bool,
-) -> bool:
+    stats: object,
+    aggregate_changed: cython.bint,
+    debug_stack_noise: cython.bint,
+) -> cython.bint:
     """Handle the no-recovered-facts early return with lane accounting."""
     if debug_stack_noise:
         log.warning(
@@ -20563,11 +22516,13 @@ def _materialize_direct_stack_mov_instructions_impl_8616(
     project: StructuredAstValue | None = None,
     function: StructuredAstValue | None = None,
     *,
-    allow_stack_slot_fallback: bool = True,
-    source_kinds: frozenset[DirectStackMoveSourceKind8616] | None = None,
-    materialize_reloads: bool = True,
-) -> bool:
+    allow_stack_slot_fallback: cython.bint = True,
+    source_kinds: object = None,
+    materialize_reloads: cython.bint = True,
+) -> cython.bint:
     """Materialize direct BP-relative MOV stores and optional register reloads."""
+    func_addr: object
+    root: object
     started = time.perf_counter()
     debug_stack_noise = bool(os.environ.get("INERTIA_DEBUG_STACK_NOISE"))
     if project is None:
@@ -20592,13 +22547,13 @@ def _materialize_direct_stack_mov_instructions_impl_8616(
     stats = _direct_stack_move_stats_8616(codegen)
     lane_stats_before = {
         name: _stat_counter_8616(stats, name)
-        for name in (
+        for name in iter((
             "raw_fact_count",
             "classified_fact_count",
             "materialized_count",
             "already_materialized_count",
             "failure_count",
-        )
+        ))
     }
 
     if debug_stack_noise:
@@ -20630,7 +22585,7 @@ def _materialize_direct_stack_mov_instructions_impl_8616(
             int(stats.get("structured_scope_fallback_refused_count", 0) or 0) + 1
         )
     signed_idiv_remainder_fact_count = sum(
-        1 for candidate in facts if candidate.source_kind is DirectStackMoveSourceKind8616.SIGNED_IDIV_REMAINDER
+        1 for candidate in iter(facts) if candidate.source_kind is DirectStackMoveSourceKind8616.SIGNED_IDIV_REMAINDER
     )
     run = _DirectStackMovRun8616(
         codegen=codegen,
@@ -20660,18 +22615,21 @@ def _materialize_direct_stack_mov_instructions_impl_8616(
     return run.changed
 
 
+@cython.ccall
 def _candidate_functions_for_indexed_stack_facts_8616(codegen: StructuredAstValue, project: StructuredAstValue) -> StructuredAstValue:
     return _candidate_functions_for_stack_facts_8616(codegen, project)
 
 
-def _indexed_bp_operand_stack_slot_8616(operand: StructuredAstValue) -> tuple[int, int] | None:
+@cython.ccall
+def _indexed_bp_operand_stack_slot_8616(operand: StructuredAstValue) -> object:
     """Return ``(displacement, access size)`` for a ``[bp+index+disp]`` operand."""
-    if int(getattr(operand, "type", -1)) != X86_OP_MEM:
+    mem: object
+    if operator.ne(int(getattr(operand, "type", -1)), X86_OP_MEM):
         return None
     mem = getattr(operand, "mem", None)
     if mem is None:
         return None
-    if int(getattr(mem, "base", 0) or 0) != X86_REG_BP:
+    if operator.ne(int(getattr(mem, "base", 0) or 0), X86_REG_BP):
         return None
     index_reg = int(getattr(mem, "index", 0) or 0)
     if index_reg in {0, X86_REG_INVALID}:
@@ -20683,12 +22641,20 @@ def _indexed_bp_operand_stack_slot_8616(operand: StructuredAstValue) -> tuple[in
     return displacement, size if size > 0 else 0
 
 
-def _indexed_bp_stack_fact_sizes_8616(codegen: StructuredAstValue, project: StructuredAstValue) -> dict[int, frozenset[int]]:
+@cython.ccall
+def _indexed_bp_stack_fact_sizes_8616(codegen: StructuredAstValue, project: StructuredAstValue) -> object:
+    cached: object
+    capstone: object
+    slot: object
+    block: object
+    function: object
+    insn: object
+    operand: object
     cached = getattr(codegen, "_inertia_indexed_bp_stack_access_facts_8616", None)
     if isinstance(cached, dict):
         return cached
 
-    collected: dict[int, set[int]] = {}
+    collected: dict[cython.longlong, set[cython.longlong]] = {}
     for function in _candidate_functions_for_indexed_stack_facts_8616(codegen, project):
         for block in _boundary_tuple_8616(getattr(function, "blocks", ()) or ()):
             capstone = getattr(block, "capstone", None)
@@ -20700,18 +22666,22 @@ def _indexed_bp_stack_fact_sizes_8616(codegen: StructuredAstValue, project: Stru
                     displacement, size = slot
                     collected.setdefault(displacement, set()).add(size)
 
-    facts = {disp: frozenset(sizes) for disp, sizes in sorted(collected.items())}
+    facts = {disp: frozenset(sizes) for disp, sizes in builtins.iter(sorted(tuple(collected.items())))}
     codegen._inertia_indexed_bp_stack_access_facts_8616 = facts
     codegen._inertia_indexed_bp_stack_address_raw_fact_count_8616 = len(facts)
     return facts
 
 
+@cython.ccall
 def _flatten_indexed_stack_address_terms_8616(
     node: StructuredAstValue,
-) -> tuple[tuple[int, StructuredAstValue], ...] | None:
-    terms: list[tuple[int, StructuredAstValue]] = []
-    pending: list[tuple[StructuredAstValue, int, bool]] = [(node, 1, False)]
-    active: set[int] = set()
+) -> object:
+    current: object
+    exiting: object
+    sign: object
+    terms: list[tuple[cython.longlong, StructuredAstValue]] = []
+    pending: list[tuple[StructuredAstValue, cython.longlong, cython.bint]] = [(node, 1, False)]
+    active: set[cython.longlong] = set()
     while pending:
         current, sign, exiting = pending.pop()
         current = _strip_casts_8616(current)
@@ -20744,10 +22714,12 @@ def _flatten_indexed_stack_address_terms_8616(
     return tuple(terms)
 
 
-def _signed_16bit_term_value_8616(sign: int, value: int) -> int:
+@cython.ccall
+def _signed_16bit_term_value_8616(sign: cython.longlong, value: cython.longlong) -> cython.longlong:
     return int(_canonical_stack_offset_8616((int(sign) * int(value)) & 0xFFFF))
 
 
+@cython.ccall
 def _stack_cvar_displacement_8616(codegen: StructuredAstValue, node: StructuredAstValue) -> int | None:
     node = _strip_casts_8616(node)
     if not isinstance(node, structured_c.CVariable):
@@ -20759,10 +22731,12 @@ def _stack_cvar_displacement_8616(codegen: StructuredAstValue, node: StructuredA
     return _canonical_stack_offset_8616(offset) if isinstance(offset, int) else None
 
 
+@cython.ccall
 def _indexed_bp_term_displacement_8616(
-    codegen: StructuredAstValue, sign: int, term: StructuredAstValue
+    codegen: StructuredAstValue, sign: cython.longlong, term: StructuredAstValue
 ) -> int | None:
     """Resolve one signed term to a canonical BP-stack displacement."""
+    value: object
     value = _constant_value_8616(term)
     if value is not None:
         return _signed_16bit_term_value_8616(sign, value)
@@ -20771,11 +22745,15 @@ def _indexed_bp_term_displacement_8616(
     return None
 
 
+@cython.ccall
 def _infer_indexed_access_width_8616(
-    residual_terms: tuple[tuple[int, StructuredAstValue], ...],
-    sizes: frozenset[int],
+    residual_terms: object,
+    sizes: object,
 ) -> int | None:
     """Infer the indexed access width from residual constants and fact sizes."""
+    value: object
+    sign: object
+    term: object
     constant_residual = 0
     for sign, term in residual_terms:
         value = _constant_value_8616(term)
@@ -20789,14 +22767,20 @@ def _infer_indexed_access_width_8616(
 def _match_indexed_bp_stack_address_terms_8616(
     codegen: StructuredAstValue,
     project: StructuredAstValue,
-    terms: tuple[tuple[int, StructuredAstValue], ...],
+    terms: object,
     *,
-    width: int | None,
+    width: object,
 ) -> RealModeIndexedStackAddress8616 | None:
+    displacement: object
+    matched_index: object
+    normalized_terms: object
+    index: object
+    sign: object
+    term: object
     fact_sizes = _indexed_bp_stack_fact_sizes_8616(codegen, project)
     if not fact_sizes:
         return None
-    matched_index: int | None = None
+    matched_index = None
     matched_displacement: int | None = None
     for index, (sign, term) in enumerate(terms):
         displacement = _indexed_bp_term_displacement_8616(codegen, sign, term)
@@ -20808,7 +22792,7 @@ def _match_indexed_bp_stack_address_terms_8616(
     if matched_index is None or not isinstance(matched_displacement, int):
         return None
 
-    residual_terms = tuple(term for index, term in enumerate(terms) if index != matched_index)
+    residual_terms = tuple(term for index, term in builtins.iter(enumerate(terms)) if operator.ne(index, matched_index))
     normalized_terms = consume_indexed_stack_frame_terms_8616(
         codegen, residual_terms,
         segment_name=lambda term: _segment_base_name_8616(term, project, codegen),
@@ -20827,6 +22811,7 @@ def _match_indexed_bp_stack_address_terms_8616(
     )
 
 
+@cython.ccall
 def _match_indexed_bp_stack_address_8616(project: StructuredAstValue, codegen: StructuredAstValue, node: StructuredAstValue) -> RealModeIndexedStackAddress8616 | None:
     node = _strip_casts_8616(node)
     if not isinstance(node, structured_c.CUnaryOp) or node.op != "Dereference":
@@ -20838,6 +22823,7 @@ def _match_indexed_bp_stack_address_8616(project: StructuredAstValue, codegen: S
     return _match_indexed_bp_stack_address_terms_8616(codegen, project, terms, width=width)
 
 
+@cython.ccall
 def _match_indexed_bp_stack_pointer_8616(project: StructuredAstValue, codegen: StructuredAstValue, node: StructuredAstValue) -> RealModeIndexedStackAddress8616 | None:
     node = _strip_casts_8616(node)
     if not isinstance(node, structured_c.CFunctionCall):
@@ -20857,7 +22843,9 @@ def _match_indexed_bp_stack_pointer_8616(project: StructuredAstValue, codegen: S
     return _match_indexed_bp_stack_address_terms_8616(codegen, project, terms, width=1)
 
 
-def _term_expr_with_sign_8616(codegen: StructuredAstValue, sign: int, term: StructuredAstValue) -> StructuredAstValue:
+@cython.ccall
+def _term_expr_with_sign_8616(codegen: StructuredAstValue, sign: cython.longlong, term: StructuredAstValue) -> StructuredAstValue:
+    value: object
     value = _constant_value_8616(term)
     if value is not None:
         signed_value = int(sign) * int(value)
@@ -20876,7 +22864,11 @@ def _term_expr_with_sign_8616(codegen: StructuredAstValue, sign: int, term: Stru
     )
 
 
-def _residual_terms_expr_8616(codegen: StructuredAstValue, terms: tuple[tuple[int, StructuredAstValue], ...]) -> StructuredAstValue:
+@cython.ccall
+def _residual_terms_expr_8616(codegen: StructuredAstValue, terms: object) -> StructuredAstValue:
+    expr: object
+    sign: object
+    term: object
     expr = None
     for sign, term in terms:
         term_expr = _term_expr_with_sign_8616(codegen, sign, term)
@@ -20884,8 +22876,11 @@ def _residual_terms_expr_8616(codegen: StructuredAstValue, terms: tuple[tuple[in
     return expr
 
 
+@cython.ccall
 def _materialize_indexed_bp_stack_pointer_8616(project: StructuredAstValue, codegen: StructuredAstValue, access: RealModeIndexedStackAddress8616) -> StructuredAstValue:
     """Build an addressable stack pointer whose arithmetic stays byte-scaled."""
+    base_cvar: object
+    residual: object
     base_cvar = stack_cvar_for_stable_ss_linear_access_8616(
         codegen,
         RealModeLinearStackAccess8616(access.base_displacement, 1),
@@ -20909,8 +22904,10 @@ def _materialize_indexed_bp_stack_pointer_8616(project: StructuredAstValue, code
     return addr_expr
 
 
+@cython.ccall
 def _materialize_indexed_bp_stack_address_8616(project: StructuredAstValue, codegen: StructuredAstValue, access: RealModeIndexedStackAddress8616) -> StructuredAstValue:
     """Preserve the proven load width even when cosmetic casts are hidden."""
+    addr_expr: object
     width = access.width if isinstance(access.width, int) and access.width > 0 else 1
     addr_expr = _materialize_indexed_bp_stack_pointer_8616(project, codegen, access)
     if addr_expr is None:
@@ -20923,7 +22920,7 @@ def _materialize_indexed_bp_stack_address_8616(project: StructuredAstValue, code
         cast(Any, deref).type = access_type
     return deref
 
-@dataclass
+@cython.dataclasses.dataclass
 class _SSLinearLowerRun8616:
     """One SS-linear stack-dereference lowering pass over a structured tree.
 
@@ -20935,20 +22932,23 @@ class _SSLinearLowerRun8616:
     project: StructuredAstValue
     instruction_bp_access_lane: SemanticLaneState
     instruction_bp_access_index: InstructionBpStackAccessIndex8616 | None = None
-    changed: bool = False
-    candidate_count: int = 0
-    materialized_count: int = 0
-    refused_count: int = 0
-    node_count_cell: int = 0
-    seen: set[int] = field(default_factory=set)
+    changed: cython.bint = False
+    candidate_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    refused_count: cython.longlong = 0
+    node_count_cell: cython.longlong = 0
+    seen: object = field(default_factory=set)
 
 
+    @cython.ccall
     def _instruction_bp_stack_access_8616(self, 
         node: StructuredAstValue,
         shaped_access: RealModeLinearStackAccess8616,
-        *, require_lvalue: bool,
-    ) -> tuple[InstructionBpStackAccess8616, StackValueOwnerHint8616 | None] | None:
+        *, require_lvalue: cython.bint,
+    ) -> object:
         """Bind one SS-shaped access to its exact direct BP instruction operand."""
+        access_index: object
+        exact: object
         source_addrs = instruction_addrs_from_node_8616(node)
         if not source_addrs:
             return None
@@ -20982,6 +22982,7 @@ class _SSLinearLowerRun8616:
         self.instruction_bp_access_lane.classified += 1
         return exact, owner_hint
 
+    @cython.ccall
     def _bp_access_index_8616(self) -> StructuredAstValue | None:
         """Lazily build the instruction-level BP access index, or None."""
         if self.instruction_bp_access_index is None:
@@ -20997,22 +22998,23 @@ class _SSLinearLowerRun8616:
             )
         return self.instruction_bp_access_index
 
+    @cython.ccall
     def _logical_owner_hint_8616(
         self,
         source_addrs: StructuredAstValue,
         shaped_access: RealModeLinearStackAccess8616,
-        shaped_width: int,
+        shaped_width: cython.longlong,
         exact: StructuredAstValue,
     ) -> StackValueOwnerHint8616 | None:
         """Derive the owner-range hint from logical-access candidates."""
         assert self.instruction_bp_access_index is not None
         logical_owner_ranges = {
             StackValueOwnerHint8616(candidate.displacement, candidate.size)
-            for source_addr in source_addrs
-            for candidate in self.instruction_bp_access_index.by_instruction_addr.get(
+            for source_addr in iter(source_addrs)
+            for candidate in builtins.iter(self.instruction_bp_access_index.by_instruction_addr.get(
                 source_addr,
                 (),
-            )
+            ))
             if candidate.evidence
             is InstructionBpStackAccessEvidence8616.LOGICAL_ACCESS
             and candidate.kind is exact.kind
@@ -21026,18 +23028,19 @@ class _SSLinearLowerRun8616:
             return StackValueOwnerHint8616(exact.displacement, exact.size)
         return None
 
+    @cython.ccall
     def _projected_exact_access_8616(
         self,
         source_addrs: StructuredAstValue,
         shaped_access: RealModeLinearStackAccess8616,
-        shaped_width: int,
+        shaped_width: cython.longlong,
         exact: StructuredAstValue,
     ) -> StructuredAstValue | None:
         """Refine a logical access to the projected execution slice, or None to refuse."""
         assert self.instruction_bp_access_index is not None
         if not (
             exact.evidence is InstructionBpStackAccessEvidence8616.LOGICAL_ACCESS
-            and exact.displacement != shaped_access.displacement
+            and operator.ne(exact.displacement, shaped_access.displacement)
             and shaped_width > 0
         ):
             return exact
@@ -21058,23 +23061,25 @@ class _SSLinearLowerRun8616:
             return exact
         projected = {
             candidate
-            for source_addr in source_addrs
-            for candidate in self.instruction_bp_access_index.by_instruction_addr.get(
+            for source_addr in iter(source_addrs)
+            for candidate in builtins.iter(self.instruction_bp_access_index.by_instruction_addr.get(
                 source_addr,
                 (),
-            )
+            ))
             if candidate.evidence
             is InstructionBpStackAccessEvidence8616.EXECUTION_SLICE
-            and candidate.displacement == projected_displacement
-            and candidate.size == shaped_width
+            and operator.eq(candidate.displacement, projected_displacement)
+            and operator.eq(candidate.size, shaped_width)
             and candidate.kind is exact.kind
         }
         if len(projected) != 1:
             return None
         return next(iter(projected))
 
-    def transform(self, node: StructuredAstValue, *, require_lvalue: bool = False) -> StructuredAstValue:
+    @cython.ccall
+    def transform(self, node: StructuredAstValue, *, require_lvalue: cython.bint = False) -> StructuredAstValue:
         """Materialize proven SS accesses without substituting read projections for writes."""
+        out: object
         stripped_node = _strip_casts_8616(node)
         if isinstance(stripped_node, structured_c.CFunctionCall):
             self._transform_call_args_8616(stripped_node)
@@ -21095,8 +23100,11 @@ class _SSLinearLowerRun8616:
         self.refused_count += 1
         return node
 
+    @cython.ccall
     def _transform_call_args_8616(self, stripped_node: StructuredAstValue) -> None:
         """Rewrite non-pointer intrinsic call arguments in place."""
+        arg: object
+        index: object
         if isinstance(stripped_node, structured_c.CFunctionCall):
             call_name = _call_name_from_expr_8616(stripped_node)
             if call_name not in {"SEG_PTR", "MK_FP"}:
@@ -21119,14 +23127,20 @@ class _SSLinearLowerRun8616:
                         stripped_node.args = tuple(new_args)
                         self.changed = True
 
+    @cython.ccall
     def _transform_deref_8616(
         self,
         node: StructuredAstValue,
         stripped_node: StructuredAstValue,
         *,
-        require_lvalue: bool,
+        require_lvalue: cython.bint,
     ) -> StructuredAstValue | None:
         """Materialize a proven ``Dereference`` SS access; ``None`` means fall through."""
+        access: object
+        cvar: object
+        instruction_access: object
+        instruction_selection: object
+        materialized: object
         access = match_stable_ss_linear_stack_access_8616(stripped_node, self.project, self.codegen)
         if access is not None:
             if not _has_stack_storage_evidence_for_displacement_8616(
@@ -21176,8 +23190,11 @@ class _SSLinearLowerRun8616:
             return cvar
         return self._materialize_indexed_deref_8616(stripped_node)
 
+    @cython.ccall
     def _materialize_indexed_deref_8616(self, stripped_node: StructuredAstValue) -> StructuredAstValue | None:
         """Materialize a proven indexed BP stack address; ``None`` means fall through."""
+        indexed_access: object
+        materialized: object
         indexed_access = _match_indexed_bp_stack_address_8616(self.project, self.codegen, stripped_node)
         if indexed_access is None:
             return None
@@ -21188,8 +23205,11 @@ class _SSLinearLowerRun8616:
         self.materialized_count += 1
         return materialized
 
+    @cython.ccall
     def _transform_indexed_pointer_8616(self, stripped_node: StructuredAstValue) -> StructuredAstValue | None:
         """Materialize a proven indexed BP stack pointer call; ``None`` means fall through."""
+        indexed_pointer: object
+        materialized: object
         indexed_pointer = _match_indexed_bp_stack_pointer_8616(self.project, self.codegen, stripped_node)
         if indexed_pointer is not None:
             materialized = _materialize_indexed_bp_stack_pointer_8616(self.project, self.codegen, indexed_pointer)
@@ -21200,8 +23220,10 @@ class _SSLinearLowerRun8616:
         return None
 
 
-    def replace_children(self, node: StructuredAstValue) -> bool:
+    @cython.ccall
+    def replace_children(self, node: StructuredAstValue) -> cython.bint:
         """Visit expression-bearing fields, including loads returned directly."""
+        attr: object
         if not _structured_codegen_node_8616(node):
             return False
         self.node_count_cell += 1
@@ -21222,8 +23244,10 @@ class _SSLinearLowerRun8616:
             local_changed = True
         return local_changed
 
-    def _replace_named_child_8616(self, node: StructuredAstValue, attr: str) -> bool:
+    @cython.ccall
+    def _replace_named_child_8616(self, node: StructuredAstValue, attr: object) -> cython.bint:
         """Transform one named child field (dict, sequence, or scalar)."""
+        value: object
         if not hasattr(node, attr):
             return False
         value = getattr(node, attr)
@@ -21233,8 +23257,11 @@ class _SSLinearLowerRun8616:
             return self._replace_seq_children_8616(node, attr, value)
         return value is not None and self._replace_scalar_child_8616(node, attr, value)
 
-    def _replace_dict_children_8616(self, value: dict[StructuredAstValue, StructuredAstValue]) -> bool:
+    @cython.ccall
+    def _replace_dict_children_8616(self, value: object) -> cython.bint:
         """Transform each dict-valued child in place."""
+        item: object
+        key: object
         local_changed = False
         for key, item in tuple(value.items()):
             replacement = self.transform(item)
@@ -21245,8 +23272,11 @@ class _SSLinearLowerRun8616:
                 local_changed = True
         return local_changed
 
-    def _replace_seq_children_8616(self, node: StructuredAstValue, attr: str, value: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _replace_seq_children_8616(self, node: StructuredAstValue, attr: object, value: StructuredAstValue) -> cython.bint:
         """Transform list/tuple-valued children, writing back tuples."""
+        index: object
+        item: object
         local_changed = False
         if isinstance(value, list):
             for index, item in enumerate(tuple(value)):
@@ -21271,7 +23301,8 @@ class _SSLinearLowerRun8616:
                 local_changed = True
         return local_changed
 
-    def _replace_scalar_child_8616(self, node: StructuredAstValue, attr: str, value: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _replace_scalar_child_8616(self, node: StructuredAstValue, attr: object, value: StructuredAstValue) -> cython.bint:
         """Transform a scalar child field and recurse into it."""
         replacement = self.transform(
             value, require_lvalue=isinstance(node, structured_c.CAssignment) and attr == "lhs",
@@ -21285,8 +23316,12 @@ class _SSLinearLowerRun8616:
             local_changed = True
         return local_changed
 
-    def _replace_condition_pairs_8616(self, node: StructuredAstValue) -> bool:
+    @cython.ccall
+    def _replace_condition_pairs_8616(self, node: StructuredAstValue) -> cython.bint:
         """Transform structured condition/body pairs on the node."""
+        condition_and_nodes: object
+        body: object
+        cond: object
         local_changed = False
         condition_and_nodes = getattr(node, "condition_and_nodes", None)
         if condition_and_nodes:
@@ -21319,8 +23354,10 @@ class _SSLinearLowerRun8616:
         return local_changed
 
 
+    @cython.ccall
     def _publish_counters_8616(self) -> None:
         """Publish pass counters to the codegen surface and debug stats."""
+        debug_stats: object
         codegen = self.codegen
         codegen._inertia_ss_linear_candidate_count = (
             int(getattr(codegen, "_inertia_ss_linear_candidate_count", 0) or 0) + self.candidate_count
@@ -21349,12 +23386,14 @@ class _SSLinearLowerRun8616:
             )
 
 
+@cython.ccall
 def lower_stable_ss_linear_stack_dereferences_8616(
     codegen: StructuredAstValue,
     project: StructuredAstValue | None = None,
     function: StructuredAstValue | None = None,
-) -> bool:
+) -> cython.bint:
     """Replace stable SS real-mode linear dereferences with stack variables."""
+    root: object
     if project is None:
         project = getattr(codegen, "project", None)
     root = getattr(getattr(codegen, "cfunc", None), "statements", None)

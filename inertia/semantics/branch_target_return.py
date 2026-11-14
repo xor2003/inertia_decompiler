@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Branch-target and terminal-return instruction classification.
 
 Layer: Semantics.
@@ -10,6 +11,7 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import cython
 
 from collections.abc import Callable
 
@@ -30,25 +32,28 @@ from .return_effect_operands import (
     _self_cleared_register_8616,
     _terminal_value_arithmetic_effect_8616,
 )
+import operator
 
 _FULL_WORD_COPY_SOURCES_8616: frozenset[str] = frozenset(
     {"ax", "bx", "cx", "dx", "si", "di", "bp", "sp"}
 )
 
 
+@cython.ccall
 def _branch_move_effect_8616(
-    insn: object, mnemonic: str, operands: tuple[object, ...],
+    insn: object, mnemonic: object, operands: object,
 ) -> BranchTargetReturnEffect8616 | None:
     """Classify a branch-return register move from decoded operands."""
+    mem: object
     if (
         mnemonic == "mov"
-        and len(operands) == _BINARY_OPERAND_COUNT_8616
-        and _operand_kind_8616(operands[0]) == X86_OP_REG
+        and operator.eq(len(operands), _BINARY_OPERAND_COUNT_8616)
+        and operator.eq(_operand_kind_8616(operands[0]), X86_OP_REG)
         and _register_name_8616(insn, operands[0]) in {"ax", "dx"}
     ):
         dst_reg = _register_name_8616(insn, operands[0])
         rhs = operands[1]
-        if _operand_kind_8616(rhs) == X86_OP_IMM:
+        if operator.eq(_operand_kind_8616(rhs), X86_OP_IMM):
             # Dynamic third-party capstone boundary: immediate payload is decoded by capstone.
             imm = int(getattr(rhs, "imm", 0) or 0)
             return BranchTargetReturnEffect8616(
@@ -56,7 +61,7 @@ def _branch_move_effect_8616(
                 dst_reg=dst_reg,
                 imm=imm,
             )
-        if _operand_kind_8616(rhs) == X86_OP_MEM:
+        if operator.eq(_operand_kind_8616(rhs), X86_OP_MEM):
             # Dynamic third-party capstone boundary: memory operand payload is decoded by capstone.
             mem = getattr(rhs, "mem", None)
             if mem is None:
@@ -80,7 +85,7 @@ def _branch_move_effect_8616(
                     mem_disp=disp,
                     mem_size=size,
                 )
-        if _operand_kind_8616(rhs) == X86_OP_REG:
+        if operator.eq(_operand_kind_8616(rhs), X86_OP_REG):
             src_reg = _register_name_8616(insn, rhs)
             if src_reg not in _FULL_WORD_COPY_SOURCES_8616:
                 return BranchTargetReturnEffect8616(
@@ -95,19 +100,21 @@ def _branch_move_effect_8616(
     return None
 
 
+@cython.ccall
 def _terminal_move_effect_8616(
-    insn: object, mnemonic: str, operands: tuple[object, ...],
+    insn: object, mnemonic: object, operands: object,
 ) -> TerminalAxReturnEffect8616 | None:
     """Classify immediate and memory moves into terminal return carriers."""
+    mem: object
     if (
         mnemonic == "mov"
-        and len(operands) == _BINARY_OPERAND_COUNT_8616
-        and _operand_kind_8616(operands[0]) == X86_OP_REG
+        and operator.eq(len(operands), _BINARY_OPERAND_COUNT_8616)
+        and operator.eq(_operand_kind_8616(operands[0]), X86_OP_REG)
         and _register_name_8616(insn, operands[0]) in {"al", "ah", "cl", "cx", "ax", "dx"}
     ):
         dst_reg = _register_name_8616(insn, operands[0])
         rhs = operands[1]
-        if _operand_kind_8616(rhs) == X86_OP_IMM:
+        if operator.eq(_operand_kind_8616(rhs), X86_OP_IMM):
             # Dynamic third-party capstone boundary: immediate payload is decoded by capstone.
             imm = int(getattr(rhs, "imm", 0) or 0)
             return TerminalAxReturnEffect8616(
@@ -115,7 +122,7 @@ def _terminal_move_effect_8616(
                 dst_reg=dst_reg,
                 imm=imm,
             )
-        if _operand_kind_8616(rhs) == X86_OP_MEM:
+        if operator.eq(_operand_kind_8616(rhs), X86_OP_MEM):
             # Dynamic third-party capstone boundary: memory operand payload is decoded by capstone.
             mem = getattr(rhs, "mem", None)
             if mem is None:
@@ -142,16 +149,17 @@ def _terminal_move_effect_8616(
     return None
 
 
+@cython.ccall
 def _terminal_fixed_arithmetic_effect_8616(
-    insn: object, mnemonic: str, operands: tuple[object, ...],
+    insn: object, mnemonic: object, operands: object,
 ) -> TerminalAxReturnEffect8616 | None:
     """Classify fixed-register arithmetic and split-value shift operations."""
     if (
         mnemonic in {"add", "sub", "shl"}
-        and len(operands) == _BINARY_OPERAND_COUNT_8616
-        and _operand_kind_8616(operands[0]) == X86_OP_REG
+        and operator.eq(len(operands), _BINARY_OPERAND_COUNT_8616)
+        and operator.eq(_operand_kind_8616(operands[0]), X86_OP_REG)
         and _register_name_8616(insn, operands[0]) == "ax"
-        and _operand_kind_8616(operands[1]) == X86_OP_IMM
+        and operator.eq(_operand_kind_8616(operands[1]), X86_OP_IMM)
     ):
         # Dynamic third-party capstone boundary: immediate payload is decoded by capstone.
         imm = int(getattr(operands[1], "imm", 0) or 0)
@@ -163,7 +171,7 @@ def _terminal_fixed_arithmetic_effect_8616(
     if (
         mnemonic in {"inc", "dec"}
         and len(operands) == 1
-        and _operand_kind_8616(operands[0]) == X86_OP_REG
+        and operator.eq(_operand_kind_8616(operands[0]), X86_OP_REG)
         and _register_name_8616(insn, operands[0]) == "ax"
     ):
         return TerminalAxReturnEffect8616(
@@ -172,19 +180,19 @@ def _terminal_fixed_arithmetic_effect_8616(
         )
     if (
         mnemonic == "shl"
-        and len(operands) == _BINARY_OPERAND_COUNT_8616
-        and _operand_kind_8616(operands[0]) == X86_OP_REG
+        and operator.eq(len(operands), _BINARY_OPERAND_COUNT_8616)
+        and operator.eq(_operand_kind_8616(operands[0]), X86_OP_REG)
         and _register_name_8616(insn, operands[0]) == "al"
-        and _operand_kind_8616(operands[1]) == X86_OP_IMM
+        and operator.eq(_operand_kind_8616(operands[1]), X86_OP_IMM)
     ):
         # Dynamic third-party capstone boundary: immediate payload is decoded by capstone.
         imm = int(getattr(operands[1], "imm", 0) or 0)
         return TerminalAxReturnEffect8616(TerminalAxReturnEffectKind8616.AL_SHL_IMM, imm=imm, op="Shl")
     is_ax_shift_by_cl = (
         mnemonic == "shr"
-        and len(operands) == _BINARY_OPERAND_COUNT_8616
-        and _operand_kind_8616(operands[0]) == X86_OP_REG
-        and _operand_kind_8616(operands[1]) == X86_OP_REG
+        and operator.eq(len(operands), _BINARY_OPERAND_COUNT_8616)
+        and operator.eq(_operand_kind_8616(operands[0]), X86_OP_REG)
+        and operator.eq(_operand_kind_8616(operands[1]), X86_OP_REG)
         and _register_name_8616(insn, operands[0]) == "ax"
         and _register_name_8616(insn, operands[1]) == "cl"
     )
@@ -192,19 +200,19 @@ def _terminal_fixed_arithmetic_effect_8616(
         return TerminalAxReturnEffect8616(TerminalAxReturnEffectKind8616.AX_SHR_CL, op="Shr")
     if (
         mnemonic == "shl"
-        and len(operands) == _BINARY_OPERAND_COUNT_8616
-        and _operand_kind_8616(operands[0]) == X86_OP_REG
+        and operator.eq(len(operands), _BINARY_OPERAND_COUNT_8616)
+        and operator.eq(_operand_kind_8616(operands[0]), X86_OP_REG)
         and _register_name_8616(insn, operands[0]) == "cx"
-        and _operand_kind_8616(operands[1]) == X86_OP_IMM
+        and operator.eq(_operand_kind_8616(operands[1]), X86_OP_IMM)
     ):
         # Dynamic third-party capstone boundary: immediate payload is decoded by capstone.
         imm = int(getattr(operands[1], "imm", 0) or 0)
         return TerminalAxReturnEffect8616(TerminalAxReturnEffectKind8616.CX_SHL_IMM, imm=imm, op="Shl")
     is_ax_or_cx = (
         mnemonic == "or"
-        and len(operands) == _BINARY_OPERAND_COUNT_8616
-        and _operand_kind_8616(operands[0]) == X86_OP_REG
-        and _operand_kind_8616(operands[1]) == X86_OP_REG
+        and operator.eq(len(operands), _BINARY_OPERAND_COUNT_8616)
+        and operator.eq(_operand_kind_8616(operands[0]), X86_OP_REG)
+        and operator.eq(_operand_kind_8616(operands[1]), X86_OP_REG)
         and _register_name_8616(insn, operands[0]) == "ax"
         and _register_name_8616(insn, operands[1]) == "cx"
     )
@@ -213,11 +221,14 @@ def _terminal_fixed_arithmetic_effect_8616(
     return None
 
 
+@cython.ccall
 def branch_target_return_effect_8616(
     insn: object,
     branch_target_imm: Callable[[object], int | None],
 ) -> BranchTargetReturnEffect8616:
     """Classify one capstone instruction for branch-target return recovery."""
+    effect: object
+    target: object
     # Dynamic third-party capstone boundary: instruction mnemonic is decoded by capstone wrappers.
     mnemonic = str(getattr(insn, "mnemonic", "")).lower()
     # Dynamic third-party capstone boundary: operands are decoded by capstone wrappers.
@@ -232,10 +243,10 @@ def branch_target_return_effect_8616(
         return effect
     if (
         mnemonic in {"add", "sub", "shl"}
-        and len(operands) == _BINARY_OPERAND_COUNT_8616
-        and _operand_kind_8616(operands[0]) == X86_OP_REG
+        and operator.eq(len(operands), _BINARY_OPERAND_COUNT_8616)
+        and operator.eq(_operand_kind_8616(operands[0]), X86_OP_REG)
         and _register_name_8616(insn, operands[0]) == "ax"
-        and _operand_kind_8616(operands[1]) == X86_OP_IMM
+        and operator.eq(_operand_kind_8616(operands[1]), X86_OP_IMM)
     ):
         # Dynamic third-party capstone boundary: immediate payload is decoded by capstone.
         imm = int(getattr(operands[1], "imm", 0) or 0)
@@ -247,7 +258,7 @@ def branch_target_return_effect_8616(
     if (
         mnemonic in {"inc", "dec"}
         and len(operands) == 1
-        and _operand_kind_8616(operands[0]) == X86_OP_REG
+        and operator.eq(_operand_kind_8616(operands[0]), X86_OP_REG)
         and _register_name_8616(insn, operands[0]) == "ax"
     ):
         return BranchTargetReturnEffect8616(
@@ -275,8 +286,10 @@ def branch_target_return_effect_8616(
     return BranchTargetReturnEffect8616(BranchTargetReturnEffectKind8616.OTHER)
 
 
+@cython.ccall
 def terminal_ax_return_effect_8616(insn: object) -> TerminalAxReturnEffect8616:
     """Classify one capstone instruction for terminal AX-return recovery."""
+    effect: object
     # Dynamic third-party capstone boundary: instruction mnemonic is decoded by capstone wrappers.
     mnemonic = str(getattr(insn, "mnemonic", "")).lower()
     # Dynamic third-party capstone boundary: operands are decoded by capstone wrappers.
@@ -304,7 +317,7 @@ def terminal_ax_return_effect_8616(insn: object) -> TerminalAxReturnEffect8616:
         return effect
     fallback_dst_reg = (
         _register_name_8616(insn, operands[0])
-        if operands and _operand_kind_8616(operands[0]) == X86_OP_REG
+        if operands and operator.eq(_operand_kind_8616(operands[0]), X86_OP_REG)
         else None
     )
     return TerminalAxReturnEffect8616(

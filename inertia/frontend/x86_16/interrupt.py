@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/runtime.
 
 Responsibility: model interrupt dispatch state for the 16-bit emulator surface.
@@ -5,14 +6,16 @@ Forbidden: DOS API semantic recovery, helper signature repair, or postprocess cl
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Never
 
 from inertia.frontend.x86_16.access import DataAccess
 
 # Constants for descriptor table registers
-IDTR: int = 1
-TR: int = 3
+IDTR: cython.longlong = 1
+TR: cython.longlong = 3
 
 __all__ = ("IDTR", "TR", "Interrupt")
 
@@ -20,11 +23,11 @@ __all__ = ("IDTR", "TR", "Interrupt")
 class Interrupt(DataAccess):
     """Provide the interrupt-related frontend runtime surface."""
 
-    def __init__(self, size: int = 0) -> None:
+    def __init__(self, size: cython.longlong = 0) -> None:
         """Initialize the interrupt bridge without enabling dispatch support."""
         super().__init__(size)
 
-    def set_pic(self, _pic: object, _master: bool) -> Never:
+    def set_pic(self, _pic: object, _master: cython.bint) -> Never:
         """Reject PIC installation until interrupt dispatch is implemented."""
         raise NotImplementedError
 

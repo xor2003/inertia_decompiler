@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed indirect-site placeholder classification over CFG ownership artifacts.
 
 Layer: Structuring.
@@ -14,29 +15,32 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
 from inertia.structuring.structuring_cfg_ownership import CFGOwnershipArtifact, build_cfg_ownership_artifact
+import dataclasses
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CFGIndirectSiteRecord:
     """One indirect-site candidate or refusal."""
 
-    region_id: int
-    classification: str
-    refusal_reason: str | None
-    successor_count: int
+    region_id: cython.longlong
+    classification: object
+    refusal_reason: object
+    successor_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CFGIndirectSiteArtifact:
     """Deterministic indirect-site placeholder surface."""
 
     ownership: CFGOwnershipArtifact
-    records: tuple[CFGIndirectSiteRecord, ...]
-    candidate_region_ids: tuple[int, ...]
+    records: object
+    candidate_region_ids: object
 
     def summary_line(self) -> str:
         """Compact summary for diagnostics."""
@@ -46,7 +50,7 @@ class CFGIndirectSiteArtifact:
         """Stable serialization for reports and artifacts."""
         return {
             "ownership": self.ownership.to_dict(),
-            "candidate_region_ids": [hex(region_id) for region_id in self.candidate_region_ids],
+            "candidate_region_ids": [hex(region_id) for region_id in iter(self.candidate_region_ids)],
             "records": [
                 {
                     "region_id": hex(record.region_id),
@@ -54,20 +58,24 @@ class CFGIndirectSiteArtifact:
                     "refusal_reason": record.refusal_reason,
                     "successor_count": record.successor_count,
                 }
-                for record in self.records
+                for record in iter(self.records)
             ],
         }
 
 
+@cython.ccall
 def build_cfg_indirect_site_artifact(codegen: object) -> CFGIndirectSiteArtifact | None:
     """Build conservative indirect-site placeholders from CFG shape."""
+    ownership: object
+    successor_count: object
+    record: object
     ownership = build_cfg_ownership_artifact(codegen)
     if ownership is None:
         return None
 
     records: list[CFGIndirectSiteRecord] = []
-    candidate_region_ids: list[int] = []
-    successor_counts = {node.region_id: len(node.successor_ids) for node in ownership.snapshot.nodes}
+    candidate_region_ids: list[cython.longlong] = []
+    successor_counts = {node.region_id: len(node.successor_ids) for node in iter(ownership.snapshot.nodes)}
 
     for record in ownership.records:
         successor_count = successor_counts.get(record.region_id, 0)

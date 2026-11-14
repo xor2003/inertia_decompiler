@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Widen exact Alias-projected carry/borrow links into typed split values.
 
 Layer: Widening.
@@ -10,6 +11,8 @@ Do not join values from rendered text, cosmetic shape, postprocess, or CLI/repor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -38,6 +41,8 @@ from .pair_type_contracts import (
     WidePairEvidence8616,
     materialize_wide_pair_evidence_8616,
 )
+import dataclasses
+import operator
 
 
 class WideCarryBorrowVerdict8616(StrEnum):
@@ -63,7 +68,7 @@ class WideValueSignedness8616(StrEnum):
     UNKNOWN = "unknown"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideRegisterSlice8616:
     """One exact 16-bit result slice of a proven wide arithmetic value."""
 
@@ -79,7 +84,7 @@ class WideRegisterSlice8616:
     result_write: CarryBorrowDefinitionSite8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideCarryBorrowValue8616:
     """Typed 32-bit value retaining exact slices and carry/borrow provenance.
 
@@ -89,7 +94,7 @@ class WideCarryBorrowValue8616:
     """
 
     kind: CarryBorrowKind8616
-    size: int
+    size: cython.longlong
     signedness: WideValueSignedness8616
     address_space: MemSpace | None
     source_memory: SegmentedAliasRange8616 | None
@@ -101,7 +106,7 @@ class WideCarryBorrowValue8616:
     pair: WidePairEvidence8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideCarryBorrowResolution8616:
     """Materialized wide value or typed refusal for one Alias outcome."""
 
@@ -111,49 +116,51 @@ class WideCarryBorrowResolution8616:
     failure: WideCarryBorrowFailure8616 | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideCarryBorrowStats8616:
     """Closed evidence accounting for carry-linked Widening candidates."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether each Alias outcome has one Widening result."""
         return (
-            self.raw_fact_count == self.normalized_fact_count
-            and self.raw_fact_count == self.materialized_count + self.failure_count
-            and self.classified_fact_count == self.materialized_count
+            operator.eq(self.raw_fact_count, self.normalized_fact_count)
+            and operator.eq(self.raw_fact_count, self.materialized_count + self.failure_count)
+            and operator.eq(self.classified_fact_count, self.materialized_count)
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideCarryBorrowEvidence8616:
     """Function-level wide values and refusals derived from Alias evidence."""
 
-    function_addr: int
-    resolutions: tuple[WideCarryBorrowResolution8616, ...]
+    function_addr: cython.longlong
+    resolutions: object
     stats: WideCarryBorrowStats8616
 
     @property
     def values(self) -> tuple[WideCarryBorrowValue8616, ...]:
         """Return materialized wide values in deterministic order."""
-        return tuple(item.value for item in self.resolutions if item.value is not None)
+        return tuple(item.value for item in iter(self.resolutions) if item.value is not None)
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether Widening outcomes and counters are closed."""
-        return self.stats.complete and len(self.resolutions) == self.stats.raw_fact_count
+        return self.stats.complete and operator.eq(len(self.resolutions), self.stats.raw_fact_count)
 
 
+@cython.ccall
 def _operation_source_matches(
     result_write: CarryBorrowDefinitionSite8616,
     arithmetic: CarryBorrowDefinitionSite8616,
-) -> bool:
+) -> cython.bint:
+    destination: object
     args = result_write.instruction.args
     destination = arithmetic.instruction.dst
     return (
@@ -161,10 +168,11 @@ def _operation_source_matches(
         and isinstance(args[0], IRValue)
         and destination is not None
         and args[0].source_tmp is not None
-        and args[0].source_tmp == destination.source_tmp
+        and operator.eq(args[0].source_tmp, destination.source_tmp)
     )
 
 
+@cython.ccall
 def _refusal(
     alias: CarryBorrowAliasResolution8616 | None,
     failure: WideCarryBorrowFailure8616,
@@ -176,14 +184,21 @@ def _refusal(
     )
 
 
-def _source_alias_matches(fact: CarryBorrowAliasFact8616) -> bool:
+@cython.ccall
+def _source_alias_matches(fact: CarryBorrowAliasFact8616) -> cython.bint:
+    high_constant: object
+    high_memory: object
+    low_constant: object
+    low_memory: object
+    source_constant: object
+    source_memory: object
     source_memory = fact.source_memory
     source_constant = fact.source_constant
     if source_memory is None and source_constant is None:
         return (
             fact.low_rhs.register_domain is not None
             and fact.high_rhs.register_domain is not None
-            and fact.low_rhs.register_domain != fact.high_rhs.register_domain
+            and operator.ne(fact.low_rhs.register_domain, fact.high_rhs.register_domain)
             and fact.low_rhs.memory is None
             and fact.high_rhs.memory is None
             and fact.low_rhs.constant is None
@@ -202,8 +217,7 @@ def _source_alias_matches(fact: CarryBorrowAliasFact8616) -> bool:
             and high_constant is not None
             and isinstance(low_constant.const, int)
             and isinstance(high_constant.const, int)
-            and source_constant
-            == ((high_constant.const & 0xFFFF) << 16) | (low_constant.const & 0xFFFF)
+            and operator.eq(source_constant, ((high_constant.const & 0xFFFF) << 16) | (low_constant.const & 0xFFFF))
         )
     if source_memory is None:
         return False
@@ -217,20 +231,22 @@ def _source_alias_matches(fact: CarryBorrowAliasFact8616) -> bool:
         and low_memory is not None
         and high_memory is not None
         and source_memory.space is low_memory.space is high_memory.space
-        and source_memory.addresses == low_memory.addresses + high_memory.addresses
-        and source_memory.source_facts == low_memory.source_facts + high_memory.source_facts
+        and operator.eq(source_memory.addresses, low_memory.addresses + high_memory.addresses)
+        and operator.eq(source_memory.source_facts, low_memory.source_facts + high_memory.source_facts)
         and source_memory.size == 4
     )
 
 
-def _operand_carrier_bound_8616(operand: CarryBorrowOperandAlias8616) -> bool:
+@cython.ccall
+def _operand_carrier_bound_8616(operand: CarryBorrowOperandAlias8616) -> cython.bint:
     """Bind one claimed carrier identity to its exact proven source value."""
+    proven_domain: object
     if not operand.complete:
         return False
     if operand.register_domain is None:
         return True
     proven_domain = register_domain_for_value_8616(operand.source)
-    return proven_domain is not None and operand.register_domain == proven_domain
+    return proven_domain is not None and operator.eq(operand.register_domain, proven_domain)
 
 
 def _fact_gate_8616(
@@ -238,6 +254,8 @@ def _fact_gate_8616(
     fact: CarryBorrowAliasFact8616,
 ) -> WideCarryBorrowResolution8616 | None:
     """Refuse when the alias fact and arithmetic link do not close."""
+    high_result: object
+    low_result: object
     link = fact.link
     low_result = link.low_result_write.instruction.dst
     high_result = link.high_result_write.instruction.dst
@@ -245,28 +263,28 @@ def _fact_gate_8616(
         return _refusal(alias, WideCarryBorrowFailure8616.ALIAS_EVIDENCE_MISMATCH)
     if low_result.space is not MemSpace.REG or high_result.space is not MemSpace.REG:
         return _refusal(alias, WideCarryBorrowFailure8616.ALIAS_EVIDENCE_MISMATCH)
-    if fact.low_result_domain == fact.high_result_domain:
+    if operator.eq(fact.low_result_domain, fact.high_result_domain):
         return _refusal(alias, WideCarryBorrowFailure8616.ALIAS_EVIDENCE_MISMATCH)
     if (
-        fact.low_result_domain != register_domain_for_value_8616(low_result)
-        or fact.high_result_domain != register_domain_for_value_8616(high_result)
+        operator.ne(fact.low_result_domain, register_domain_for_value_8616(low_result))
+        or operator.ne(fact.high_result_domain, register_domain_for_value_8616(high_result))
     ):
         return _refusal(alias, WideCarryBorrowFailure8616.ALIAS_EVIDENCE_MISMATCH)
     if (
-        fact.low_lhs.use != link.low_lhs
-        or fact.low_rhs.use != link.low_rhs
-        or fact.high_lhs.use != link.high_lhs
-        or fact.high_rhs.use != link.high_rhs
+        operator.ne(fact.low_lhs.use, link.low_lhs)
+        or operator.ne(fact.low_rhs.use, link.low_rhs)
+        or operator.ne(fact.high_lhs.use, link.high_lhs)
+        or operator.ne(fact.high_rhs.use, link.high_rhs)
     ):
         return _refusal(alias, WideCarryBorrowFailure8616.ALIAS_EVIDENCE_MISMATCH)
     if not all(
         _operand_carrier_bound_8616(operand)
-        for operand in (fact.low_lhs, fact.low_rhs, fact.high_lhs, fact.high_rhs)
+        for operand in iter((fact.low_lhs, fact.low_rhs, fact.high_lhs, fact.high_rhs))
     ):
         return _refusal(alias, WideCarryBorrowFailure8616.ALIAS_EVIDENCE_MISMATCH)
     if (
-        fact.low_lhs.register_domain != fact.low_result_domain
-        or fact.high_lhs.register_domain != fact.high_result_domain
+        operator.ne(fact.low_lhs.register_domain, fact.low_result_domain)
+        or operator.ne(fact.high_lhs.register_domain, fact.high_result_domain)
         or fact.low_lhs.memory is not None
         or fact.high_lhs.memory is not None
     ):
@@ -278,16 +296,17 @@ def _fact_gate_8616(
     return None
 
 
-def _arithmetic_link_proven_8616(link: CarryBorrowLink8616) -> bool:
+def _arithmetic_link_proven_8616(link: CarryBorrowLink8616) -> cython.bint:
     """Return whether the three arithmetic sites and operands chain exactly."""
+    base_dst: object
     expected_op = (
         CarryBorrowIROp8616.ADD16
         if link.kind is CarryBorrowKind8616.ADD_WITH_CARRY
         else CarryBorrowIROp8616.SUB16
     )
     if any(
-        site.instruction.op != expected_op.value
-        for site in (link.low_arithmetic, link.high_base_arithmetic, link.high_final_arithmetic)
+        operator.ne(site.instruction.op, expected_op.value)
+        for site in iter((link.low_arithmetic, link.high_base_arithmetic, link.high_final_arithmetic))
     ):
         return False
     if not _operation_source_matches(link.low_result_write, link.low_arithmetic):
@@ -297,15 +316,19 @@ def _arithmetic_link_proven_8616(link: CarryBorrowLink8616) -> bool:
     final_args = link.high_final_arithmetic.instruction.args
     base_dst = link.high_base_arithmetic.instruction.dst
     return base_dst is not None and any(
-        isinstance(arg, IRValue) and arg.source_tmp == base_dst.source_tmp for arg in final_args
+        isinstance(arg, IRValue) and operator.eq(arg.source_tmp, base_dst.source_tmp) for arg in iter(final_args)
     )
 
 
+@cython.ccall
 def _materialize_fact(
     alias: CarryBorrowAliasResolution8616,
     fact: CarryBorrowAliasFact8616,
 ) -> WideCarryBorrowResolution8616:
     """Materialize one proven carry/borrow alias fact as a wide register pair."""
+    gate: object
+    high_result: object
+    low_result: object
     link = fact.link
     gate = _fact_gate_8616(alias, fact)
     if gate is not None:
@@ -387,9 +410,9 @@ def widen_carry_borrow_values_8616(
         _materialize_fact(item, item.fact)
         if item.verdict is CarryBorrowAliasVerdict8616.PROVEN and item.fact is not None
         else _refusal(item, WideCarryBorrowFailure8616.ALIAS_REFUSED)
-        for item in evidence.resolutions
+        for item in iter(evidence.resolutions)
     )
-    materialized = sum(item.value is not None for item in resolutions)
+    materialized = sum(item.value is not None for item in iter(resolutions))
     stats = WideCarryBorrowStats8616(
         raw_fact_count=len(resolutions),
         normalized_fact_count=len(resolutions),

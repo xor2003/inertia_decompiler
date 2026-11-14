@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed contracts for wide call-output assignment Lowering.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -19,6 +22,8 @@ from inertia.widening.pair_type_contracts import (
     WidePairEvidence8616,
     wide_pair_value_consistent_8616,
 )
+import dataclasses
+import operator
 
 
 class WideCallOutputAssignmentVerdict8616(StrEnum):
@@ -46,7 +51,7 @@ class WideCallOutputAssignmentFailure8616(StrEnum):
     UNSUPPORTED_OPERATION = "unsupported_operation"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideCallOutputAssignmentFact8616:
     """Exact typed evidence needed to replace one split wide operation.
 
@@ -58,14 +63,14 @@ class WideCallOutputAssignmentFact8616:
 
     call_output: IRCallOutputProvenance8616
     kind: CarryBorrowKind8616
-    source_offset: int
-    destination_offset: int
-    carrier_ins_addrs: tuple[int, ...]
-    store_ins_addrs: tuple[int, int]
+    source_offset: cython.longlong
+    destination_offset: cython.longlong
+    carrier_ins_addrs: object
+    store_ins_addrs: object
     pair: WidePairEvidence8616 | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideCallOutputAssignmentResolution8616:
     """One materialized assignment or one conservative Types/Lowering refusal."""
 
@@ -73,55 +78,55 @@ class WideCallOutputAssignmentResolution8616:
     verdict: WideCallOutputAssignmentVerdict8616
     fact: WideCallOutputAssignmentFact8616 | None = None
     failure: WideCallOutputAssignmentFailure8616 | None = None
-    placement_classified: bool = False
-    changed: bool = False
-    already_materialized: bool = False
+    placement_classified: cython.bint = False
+    changed: cython.bint = False
+    already_materialized: cython.bint = False
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideCallOutputAssignmentStats8616:
     """Closed evidence counters for wide call-output assignment Lowering."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    changed_count: int = 0
-    already_materialized_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    changed_count: cython.longlong = 0
+    already_materialized_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every input closes without a lost classified placement."""
         return (
-            self.raw_fact_count == self.materialized_count + self.failure_count
+            operator.eq(self.raw_fact_count, self.materialized_count + self.failure_count)
             and 0
             <= self.materialized_count
             <= self.classified_fact_count
             <= self.normalized_fact_count
             <= self.raw_fact_count
-            and self.classified_fact_count == self.materialized_count
+            and operator.eq(self.classified_fact_count, self.materialized_count)
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideCallOutputAssignmentArtifact8616:
     """Function-level results for typed wide call-output assignment Lowering."""
 
-    function_addr: int
-    resolutions: tuple[WideCallOutputAssignmentResolution8616, ...]
+    function_addr: cython.longlong
+    resolutions: object
     stats: WideCallOutputAssignmentStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether outcome count and closed counters agree."""
-        return self.stats.complete and len(self.resolutions) == self.stats.raw_fact_count
+        return self.stats.complete and operator.eq(len(self.resolutions), self.stats.raw_fact_count)
 
 
 def wide_call_output_pair_authenticated_8616(
     source: object,
     fact: WideCallOutputAssignmentFact8616,
-) -> bool:
+) -> cython.bint:
     """Return whether retained source, value, and pair prove this fact.
 
     The fact's retained pair must be combine-authorized, identical to the
@@ -134,12 +139,13 @@ def wide_call_output_pair_authenticated_8616(
     Callsite identity is deliberately excluded here; each consumer binds it
     to its own provenance tolerance.
     """
+    source_memory: object
     if not isinstance(source, WideCarryBorrowStorage8616):
         return False
     pair = fact.pair
     if not isinstance(pair, WidePairEvidence8616):
         return False
-    if not pair.combine_authorized or pair != source.pair:
+    if not pair.combine_authorized or operator.ne(pair, source.pair):
         return False
     if fact.kind is not source.value.kind:
         return False
@@ -154,31 +160,32 @@ def wide_call_output_pair_authenticated_8616(
         source.value.lhs_call_output is not None
         and source_memory is not None
         and source_memory.space is MemSpace.SS
-        and all(address.base == ("bp",) for address in source_memory.addresses)
-        and source_memory.size == pair.type.total_size
-        and fact.source_offset == source_memory.offset
-        and source.source_versions == low_store.versions + high_store.versions
-        and fact.destination_offset == source.address.offset
+        and all(address.base == ("bp",) for address in iter(source_memory.addresses))
+        and operator.eq(source_memory.size, pair.type.total_size)
+        and operator.eq(fact.source_offset, source_memory.offset)
+        and operator.eq(source.source_versions, low_store.versions + high_store.versions)
+        and operator.eq(fact.destination_offset, source.address.offset)
         and source.address.space is MemSpace.SS
         and source.address.base == ("bp",)
-        and source.address.size == pair.type.total_size
-        and source.address.offset == low_address.offset
+        and operator.eq(source.address.size, pair.type.total_size)
+        and operator.eq(source.address.offset, low_address.offset)
         and low_address.space is MemSpace.SS
         and high_address.space is MemSpace.SS
         and low_address.base == ("bp",)
         and high_address.base == ("bp",)
-        and low_address.size == pair.low.size
-        and high_address.size == pair.high.size
-        and high_address.offset == low_address.offset + low_address.size
+        and operator.eq(low_address.size, pair.low.size)
+        and operator.eq(high_address.size, pair.high.size)
+        and operator.eq(high_address.offset, low_address.offset + low_address.size)
     )
 
 
+@cython.ccall
 def refused_wide_call_output_assignment_8616(
     source: WideCarryBorrowStorage8616,
     failure: WideCallOutputAssignmentFailure8616,
     *,
     fact: WideCallOutputAssignmentFact8616 | None = None,
-    placement_classified: bool = False,
+    placement_classified: cython.bint = False,
 ) -> WideCallOutputAssignmentResolution8616:
     """Return one conservative Types/Lowering refusal."""
     return WideCallOutputAssignmentResolution8616(

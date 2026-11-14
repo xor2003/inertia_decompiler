@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed Types/Lowering contracts for pointer-parameter output bindings.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -22,6 +25,8 @@ from inertia.widening.terminal_pointer_output_contracts import (
     TerminalPointerOutputViewEvidence8616,
     TerminalPointerOutputViewFact8616,
 )
+import dataclasses
+import operator
 
 
 class PointerParameterOutputFailure8616(StrEnum):
@@ -37,16 +42,16 @@ class PointerParameterOutputFailure8616(StrEnum):
     PARAMETER_STORAGE_CONFLICT = "parameter_storage_conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PointerParameterOutputContract8616:
     """One output view bound to one exact logical pointer input."""
 
-    logical_index: int
+    logical_index: cython.longlong
     argument_storage: IRAddress
     output_view: TerminalPointerOutputViewFact8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether the logical input and Alias owner agree exactly."""
         parameter = self.output_view.parameter_storage
         return bool(
@@ -55,23 +60,23 @@ class PointerParameterOutputContract8616:
             and self.argument_storage.space is MemSpace.SS
             and self.argument_storage.base == ("bp",)
             and self.argument_storage.status is AddressStatus.STABLE
-            and self.argument_storage.offset == parameter.offset
-            and self.argument_storage.size == parameter.size
+            and operator.eq(self.argument_storage.offset, parameter.offset)
+            and operator.eq(self.argument_storage.size, parameter.size)
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PointerParameterOutputStats8616:
     """Closed accounting for pointer-output Types/Lowering materialization."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every Widening view became one retained contract."""
         return bool(
             self.raw_fact_count
@@ -82,12 +87,12 @@ class PointerParameterOutputStats8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PointerParameterOutputEvidence8616:
     """Published logical input bindings or one atomic typed refusal."""
 
-    function_addr: int
-    facts: tuple[PointerParameterOutputContract8616, ...]
+    function_addr: cython.longlong
+    facts: object
     failure: PointerParameterOutputFailure8616 | None
     stats: PointerParameterOutputStats8616
     ssa_failure: FunctionSSAArtifactFailure8616 | None = None
@@ -96,8 +101,9 @@ class PointerParameterOutputEvidence8616:
     views: TerminalPointerOutputViewEvidence8616 | None = None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether all upstream and materialized evidence closes."""
+        views: object
         views = self.views
         return bool(
             self.failure is None
@@ -110,8 +116,8 @@ class PointerParameterOutputEvidence8616:
             and views.complete
             and self.stats.complete
             and len(self.facts) == len(views.facts) == self.stats.materialized_count
-            and all(fact.complete for fact in self.facts)
-            and tuple(fact.output_view for fact in self.facts) == views.facts
+            and all(fact.complete for fact in iter(self.facts))
+            and operator.eq(tuple(fact.output_view for fact in iter(self.facts)), views.facts)
         )
 
 

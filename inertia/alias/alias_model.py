@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Compatibility export for the canonical alias model implementation.
 
 Layer: Alias.
@@ -9,6 +10,7 @@ work here.
 """
 
 from __future__ import annotations
+import cython
 
 from .alias_model_impl import *  # noqa: F403
 from .alias_model_impl import __all__ as __all__

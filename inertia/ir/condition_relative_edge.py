@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: IR (frontend condition IR provenance).
 
 Responsibility: attach complete decoded conditional-control bytes before facts
@@ -8,6 +9,8 @@ Do not perform alias-state ownership, widening, lowering/materialization,
 structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import replace
 from enum import StrEnum
@@ -15,6 +18,7 @@ from enum import StrEnum
 from inertia.frontend.x86_16.relative_control_edge import DecodedRelativeEdge, decode_relative_edge
 
 from .condition_ir import ConditionFailure, ConditionIR
+import operator
 
 
 class RelativeConditionReason(StrEnum):
@@ -23,23 +27,25 @@ class RelativeConditionReason(StrEnum):
     SOURCE = "relative_condition_source_mismatch"
 
 
-def attach_relative_condition_edge(condition: ConditionIR, head: int,
-                                   encoding: bytes) -> ConditionIR | ConditionFailure:
+@cython.ccall
+def attach_relative_condition_edge(condition: ConditionIR, head: cython.longlong,
+                                   encoding: object) -> ConditionIR | ConditionFailure:
     """Retain exact conditional bytes without granting concrete target evidence.
 
     Unsupported encodings leave an existing guard unchanged and contribute no
     relative-edge proof. An already retained edge must match the current source;
     its opaque provenance label is preserved without interpreting it.
     """
+    retained: object
     retained = condition.relative_edge
     source = retained.source if retained is not None else None
     decoded = decode_relative_edge(head, encoding, source=source)
-    if retained is not None and retained != decoded:
+    if retained is not None and operator.ne(retained, decoded):
         return ConditionFailure(RelativeConditionReason.SOURCE, source=condition.source,
                                 detail="retained relative edge differs from current instruction bytes")
     if not isinstance(decoded, DecodedRelativeEdge) or not decoded.is_conditional:
         return condition
-    if condition.src_insn != head:
+    if operator.ne(condition.src_insn, head):
         return ConditionFailure(RelativeConditionReason.SOURCE, source=condition.source,
                                 detail="condition instruction does not own the decoded relative edge")
     return replace(condition, relative_edge=decoded)

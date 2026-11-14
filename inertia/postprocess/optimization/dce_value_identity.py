@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Rewrite/Postprocess cleanup.
 
 Responsibility: distinguish local C values from reused physical registers when
@@ -8,15 +9,20 @@ or CLI/reporting evidence here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from angr.analyses.decompiler.structured_codegen.c import CConstant, CTypeCast, CVariable
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
 
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616, _same_c_expression_8616
+import operator
 
 
+@cython.ccall
 def _value_views_8616(root: object) -> tuple[tuple[object, ...], ...]:
     """Retain version identity and type views omitted by storage comparison."""
+    node: object
     views: list[tuple[object, ...]] = []
     for node in _iter_c_nodes_deep_8616(root):
         if isinstance(node, CVariable) and isinstance(node.variable, SimRegisterVariable):
@@ -28,7 +34,8 @@ def _value_views_8616(root: object) -> tuple[tuple[object, ...], ...]:
     return tuple(views)
 
 
-def same_local_value_expression_8616(first: object, second: object) -> bool:
+@cython.ccall
+def same_local_value_expression_8616(first: object, second: object) -> cython.bint:
     """Require value identity, not merely equal machine-storage coordinates.
 
     Distinct register objects conservatively refuse even if their printed names
@@ -36,11 +43,12 @@ def same_local_value_expression_8616(first: object, second: object) -> bool:
     """
     return bool(
         _same_c_expression_8616(first, second)
-        and _value_views_8616(first) == _value_views_8616(second)
+        and operator.eq(_value_views_8616(first), _value_views_8616(second))
     )
 
 
-def _stack_read_overlaps_8616(destination: object, source: object) -> bool:
+@cython.ccall
+def _stack_read_overlaps_8616(destination: object, source: object) -> cython.bint:
     """Consume exact stack ranges; unresolved frame relationships refuse."""
     if not isinstance(destination, SimStackVariable) or not isinstance(source, SimStackVariable):
         return False
@@ -52,8 +60,10 @@ def _stack_read_overlaps_8616(destination: object, source: object) -> bool:
     )
 
 
-def assignment_reads_destination_8616(lhs: object, rhs: object) -> bool:
+@cython.ccall
+def assignment_reads_destination_8616(lhs: object, rhs: object) -> cython.bint:
     """Refuse repeated updates whose first write can change the second RHS."""
+    node: object
     if not isinstance(lhs, CVariable):
         return True
     for node in _iter_c_nodes_deep_8616(rhs):

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Recover boolean graphs from complete wide-stack condition chains.
 
 Layer: Structuring.
@@ -10,6 +11,8 @@ Every word condition must have one exact wide-pair owner or recovery refuses.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -27,8 +30,11 @@ from .wide_stack_condition_chains import (
     relation_for_wide_stack_condition_8616,
     wide_stack_operator_result_8616,
 )
+import dataclasses
+import operator
+import builtins
 
-type WidePredicateExitClassifier8616 = Callable[[int], bool | None]
+WidePredicateExitClassifier8616 = typing.TypeAliasType("WidePredicateExitClassifier8616", Callable[[int], bool | None])
 
 
 class WidePredicateGraphStatus8616(Enum):
@@ -40,21 +46,21 @@ class WidePredicateGraphStatus8616(Enum):
     EXIT_PROOF_FAILED = "exit_proof_failed"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WidePredicateLeaf8616:
     """One proven wide comparison in a boolean predicate."""
 
     condition: ConditionIR
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WidePredicateNot8616:
     """One boolean negation that could not be folded into a leaf."""
 
     operand: WidePredicateExpr8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WidePredicateBinary8616:
     """One short-circuit boolean combination."""
 
@@ -63,28 +69,28 @@ class WidePredicateBinary8616:
     rhs: WidePredicateExpr8616
 
 
-type WidePredicateExpr8616 = (
+WidePredicateExpr8616 = typing.TypeAliasType("WidePredicateExpr8616", (
     WidePredicateLeaf8616 | WidePredicateNot8616 | WidePredicateBinary8616
-)
+))
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WidePredicateGraphResult8616:
     """Return a complete predicate or one structured refusal."""
 
     status: WidePredicateGraphStatus8616
     expression: WidePredicateExpr8616 | None = None
-    raw_condition_count: int = 0
-    wide_condition_count: int = 0
+    raw_condition_count: cython.longlong = 0
+    wide_condition_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _CollapsedWideCondition8616:
     """One complete word-comparison subgraph and its two exits."""
 
     condition: ConditionIR
-    true_target: int
-    false_target: int
+    true_target: cython.longlong
+    false_target: cython.longlong
 
 
 _INVERT_OP_8616: dict[ConditionOp, ConditionOp] = {
@@ -114,46 +120,51 @@ _SWAP_OP_8616: dict[ConditionOp, ConditionOp] = {
 
 
 def wide_predicate_exit_targets_8616(
-    conditions: tuple[ConditionIR, ...],
-) -> tuple[int, ...]:
+    conditions: object,
+) -> tuple[cython.longlong, ...]:
     """Return deterministic CFG targets outside the typed condition blocks."""
     blocks = frozenset(
         condition.block_addr
-        for condition in conditions
+        for condition in iter(conditions)
         if isinstance(condition.block_addr, int)
     )
     return tuple(
         sorted(
             {
                 int(target)
-                for condition in conditions
-                for target in (condition.taken_target, condition.fallthrough_target)
+                for condition in iter(conditions)
+                for target in iter((condition.taken_target, condition.fallthrough_target))
                 if isinstance(target, int) and target not in blocks
             }
         )
     )
 
 
+@cython.ccall
 def _matches_pair_8616(
     condition: ConditionIR,
     pair: WideStackOperandPair8616,
-) -> bool:
+) -> cython.bint:
     """Return whether a word condition uses either side of one wide pair."""
     return relation_for_wide_stack_condition_8616(condition, pair, 1, 1) is not None
 
 
+@cython.ccall
 def _pair_path_outcome_8616(
     root: ConditionIR,
     pair: WideStackOperandPair8616,
-    conditions_by_block: dict[int, ConditionIR],
-    true_target: int,
-    false_target: int,
-    high_relation: int,
-    low_relation: int,
+    conditions_by_block: object,
+    true_target: cython.longlong,
+    false_target: cython.longlong,
+    high_relation: cython.longlong,
+    low_relation: cython.longlong,
 ) -> bool | None:
     """Evaluate one pair-local decision graph for an abstract ordering."""
+    decision: object
+    next_condition: object
+    relation: object
     condition = root
-    visited: set[int] = set()
+    visited: set[cython.longlong] = set()
     while len(visited) < 12:
         relation = relation_for_wide_stack_condition_8616(
             condition, pair, high_relation, low_relation
@@ -178,7 +189,8 @@ def _pair_path_outcome_8616(
     return None
 
 
-def _swappable_bp_offsets_8616(lhs: object, rhs: object) -> bool:
+@cython.ccall
+def _swappable_bp_offsets_8616(lhs: object, rhs: object) -> cython.bint:
     """Return whether both operands are int-offset ``bp`` values in descending order."""
     return (
         isinstance(lhs, IRValue)
@@ -190,6 +202,7 @@ def _swappable_bp_offsets_8616(lhs: object, rhs: object) -> bool:
     )
 
 
+@cython.ccall
 def _canonical_condition_8616(condition: ConditionIR) -> ConditionIR:
     """Prefer ascending stack offsets while preserving comparison meaning."""
     lhs = condition.lhs
@@ -201,28 +214,31 @@ def _canonical_condition_8616(condition: ConditionIR) -> ConditionIR:
 
 def _collapse_pair_8616(
     pair: WideStackOperandPair8616,
-    conditions: tuple[ConditionIR, ...],
+    conditions: object,
 ) -> _CollapsedWideCondition8616 | None:
     """Collapse one complete high/low decision subgraph by exhaustive proof."""
+    outcome: object
+    high_relation: object
+    low_relation: object
     by_block = {
         condition.block_addr: condition
-        for condition in conditions
+        for condition in iter(conditions)
         if isinstance(condition.block_addr, int)
     }
     blocks = frozenset(by_block)
     incoming = {
         target
-        for condition in conditions
-        for target in (condition.taken_target, condition.fallthrough_target)
+        for condition in iter(conditions)
+        for target in iter((condition.taken_target, condition.fallthrough_target))
         if target in blocks
     }
-    entries = tuple(condition for condition in conditions if condition.block_addr not in incoming)
+    entries = tuple(condition for condition in iter(conditions) if condition.block_addr not in incoming)
     exits = tuple(
         sorted(
             {
                 int(target)
-                for condition in conditions
-                for target in (condition.taken_target, condition.fallthrough_target)
+                for condition in iter(conditions)
+                for target in iter((condition.taken_target, condition.fallthrough_target))
                 if isinstance(target, int) and target not in blocks
             }
         )
@@ -239,8 +255,8 @@ def _collapse_pair_8616(
     )
     if not isinstance(preferred_target, int):
         return None
-    other_target = exits[1] if exits[0] == preferred_target else exits[0]
-    outcomes: dict[tuple[int, int], bool] = {}
+    other_target = exits[1] if operator.eq(exits[0], preferred_target) else exits[0]
+    outcomes: dict[tuple[cython.longlong, cython.longlong], cython.bint] = {}
     for high_relation in (-1, 0, 1):
         for low_relation in (-1, 0, 1):
             outcome = _pair_path_outcome_8616(
@@ -257,13 +273,12 @@ def _collapse_pair_8616(
             outcomes[(high_relation, low_relation)] = outcome
     matching = tuple(
         op
-        for op in candidate_wide_stack_ops_8616(pair.signed)
+        for op in builtins.iter(candidate_wide_stack_ops_8616(pair.signed))
         if all(
-            wide_stack_operator_result_8616(
+            operator.eq(wide_stack_operator_result_8616(
                 op, high_relation if high_relation != 0 else low_relation
-            )
-            == outcome
-            for (high_relation, low_relation), outcome in outcomes.items()
+            ), outcome)
+            for (high_relation, low_relation), outcome in builtins.iter(outcomes.items())
         )
     )
     if len(matching) != 1:
@@ -280,12 +295,13 @@ def _collapse_pair_8616(
             register_bindings=(),
             taken_target=preferred_target,
             fallthrough_target=other_target,
-            source=(*root.source, "wide-stack-predicate-graph"),
+            source=tuple(root.source) + ("wide-stack-predicate-graph",),
         )
     )
     return _CollapsedWideCondition8616(condition, preferred_target, other_target)
 
 
+@cython.ccall
 def _negate_8616(expression: WidePredicateExpr8616) -> WidePredicateExpr8616:
     """Fold a boolean negation into a comparison whenever possible."""
     if isinstance(expression, WidePredicateLeaf8616):
@@ -297,6 +313,7 @@ def _negate_8616(expression: WidePredicateExpr8616) -> WidePredicateExpr8616:
     return WidePredicateNot8616(expression)
 
 
+@cython.ccall
 def _combine_8616(
     condition: WidePredicateLeaf8616,
     taken: WidePredicateExpr8616 | bool,
@@ -329,14 +346,15 @@ def _combine_8616(
 
 
 def _collapsed_pair_conditions_8616(
-    conditions: tuple[ConditionIR, ...],
-    pairs: tuple[WideStackOperandPair8616, ...],
-    raw_count: int,
-) -> tuple[_CollapsedWideCondition8616, ...] | WidePredicateGraphResult8616:
+    conditions: object,
+    pairs: object,
+    raw_count: cython.longlong,
+) -> object:
     """Group conditions under their unique proven pair, or refuse."""
-    grouped: list[list[ConditionIR]] = [[] for _pair in pairs]
+    condition: object
+    grouped: list[list[ConditionIR]] = [[] for _pair in iter(pairs)]
     for condition in conditions:
-        owners = tuple(index for index, pair in enumerate(pairs) if _matches_pair_8616(condition, pair))
+        owners = tuple(index for index, pair in builtins.iter(enumerate(pairs)) if _matches_pair_8616(condition, pair))
         if len(owners) != 1:
             return WidePredicateGraphResult8616(
                 WidePredicateGraphStatus8616.PAIR_PROOF_FAILED,
@@ -346,9 +364,9 @@ def _collapsed_pair_conditions_8616(
         grouped[owners[0]].append(condition)
     collapsed = tuple(
         _collapse_pair_8616(pair, tuple(group))
-        for pair, group in zip(pairs, grouped, strict=True)
+        for pair, group in builtins.iter(zip(pairs, grouped, strict=True))
     )
-    if not collapsed or any(item is None for item in collapsed):
+    if not collapsed or any(item is None for item in iter(collapsed)):
         return WidePredicateGraphResult8616(
             WidePredicateGraphStatus8616.PAIR_PROOF_FAILED,
             raw_condition_count=raw_count,
@@ -358,38 +376,39 @@ def _collapsed_pair_conditions_8616(
 
 
 def _single_graph_root_8616(
-    proven: tuple[_CollapsedWideCondition8616, ...],
+    proven: object,
 ) -> int | None:
     """Return the unique predicate-graph entry block, or None."""
     by_entry = {
         item.condition.block_addr: item
-        for item in proven
+        for item in iter(proven)
         if isinstance(item.condition.block_addr, int)
     }
     incoming_entries = {
         target
-        for item in proven
-        for target in (item.true_target, item.false_target)
+        for item in iter(proven)
+        for target in iter((item.true_target, item.false_target))
         if target in by_entry
     }
-    roots = tuple(entry for entry in by_entry if entry not in incoming_entries)
+    roots = tuple(entry for entry in iter(by_entry) if entry not in incoming_entries)
     return roots[0] if len(roots) == 1 else None
 
 
 def recover_wide_stack_predicate_graph_8616(
-    conditions: tuple[ConditionIR, ...],
-    successors: dict[int, tuple[int, ...]],
+    conditions: object,
+    successors: object,
     prove_pair: WideStackPairProver8616,
     classify_exit: WidePredicateExitClassifier8616,
 ) -> WidePredicateGraphResult8616:
     """Recover one complete boolean predicate over all typed condition blocks."""
+    root_entry: object
     raw_count = len(conditions)
     by_block = {
         condition.block_addr: condition
-        for condition in conditions
+        for condition in iter(conditions)
         if isinstance(condition.block_addr, int)
     }
-    if raw_count < 2 or len(by_block) != raw_count:
+    if raw_count < 2 or operator.ne(len(by_block), raw_count):
         return WidePredicateGraphResult8616(
             WidePredicateGraphStatus8616.INCOMPLETE_CFG,
             raw_condition_count=raw_count,
@@ -407,13 +426,18 @@ def recover_wide_stack_predicate_graph_8616(
         )
     by_entry = {
         item.condition.block_addr: item
-        for item in proven
+        for item in iter(proven)
         if isinstance(item.condition.block_addr, int)
     }
-    visited_entries: set[int] = set()
+    visited_entries: set[cython.longlong] = set()
 
-    def build(address: int, active: frozenset[int]) -> WidePredicateExpr8616 | bool | None:
+    def build(address: cython.longlong, active: object) -> WidePredicateExpr8616 | bool | None:
         """Build a predicate from the collapsed acyclic CFG."""
+        fallthrough: object
+        item: object
+        next_addrs: object
+        outcome: object
+        taken: object
         outcome = classify_exit(address)
         if outcome is not None:
             return outcome
@@ -432,7 +456,7 @@ def recover_wide_stack_predicate_graph_8616(
     if not isinstance(
         expression,
         (WidePredicateLeaf8616, WidePredicateNot8616, WidePredicateBinary8616),
-    ) or visited_entries != set(by_entry):
+    ) or operator.ne(visited_entries, set(by_entry)):
         return WidePredicateGraphResult8616(
             WidePredicateGraphStatus8616.EXIT_PROOF_FAILED,
             raw_condition_count=raw_count,

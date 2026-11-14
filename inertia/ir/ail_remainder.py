@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Preserve division semantics while normalizing native AIL remainders.
 
 Layer: IR/native AIL adapter.
@@ -8,11 +9,14 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from angr.ailment.expression import BinaryOp, Const, Convert, Expression, Register, UnaryOp, VirtualVariable
+import operator
 
 
-def _pure_integer_8616(expression: Expression) -> bool:
+def _pure_integer_8616(expression: Expression) -> cython.bint:
     """Refuse loads, calls and dirty expressions whose repeated evaluation matters."""
     if isinstance(expression, (Const, Register, VirtualVariable)):
         return True
@@ -23,7 +27,7 @@ def _pure_integer_8616(expression: Expression) -> bool:
     if isinstance(expression, BinaryOp):
         scalar = not expression.floating_point and expression.vector_count is None and expression.vector_size is None
         total_operation = expression.op in {"Add", "Sub", "Mul", "And", "Or", "Xor", "Shl", "Shr", "Sar"}
-        return scalar and total_operation and all(_pure_integer_8616(part) for part in expression.operands)
+        return scalar and total_operation and all(_pure_integer_8616(part) for part in iter(expression.operands))
     return False
 
 
@@ -46,12 +50,12 @@ def fold_integer_remainder_8616(expression: BinaryOp) -> BinaryOp | None:
     if not isinstance(divisor, Const) or not isinstance(multiplier, Const):
         return None
     nodes = (expression, product, quotient, value, dividend, divisor, multiplier)
-    if any(node.bits != expression.bits for node in nodes):
+    if any(operator.ne(node.bits, expression.bits) for node in iter(nodes)):
         return None
     if not value.likes(dividend) or not divisor.likes(multiplier) or not _pure_integer_8616(value):
         return None
     operations = (expression, product, quotient)
-    if any(op.floating_point or op.vector_count is not None or op.vector_size is not None for op in operations):
+    if any(op.floating_point or op.vector_count is not None or op.vector_size is not None for op in iter(operations)):
         return None
     unsafe_divisors = {0, -1, (1 << expression.bits) - 1} if quotient.signed else {0}
     if divisor.value in unsafe_divisors:

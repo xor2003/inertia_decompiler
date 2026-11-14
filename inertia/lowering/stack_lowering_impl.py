@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Implement stack-slot and C-variable lowering from typed alias evidence.
 
 Layer: Types/Lowering.
@@ -11,6 +12,7 @@ getattr/setattr is cleanup debt and must be removed when touching nearby code.
 """
 
 from __future__ import annotations
+import cython
 
 import contextlib
 import logging
@@ -48,6 +50,7 @@ from .stack_variable_coordinates import (
     machine_bp_offset_for_stack_variable_8616,
     stack_cvar_for_machine_bp_range_8616,
 )
+import operator
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -57,7 +60,8 @@ _LINEAR_TEMP_NAME_RE_8616 = re.compile(r"(?:v\d+|vvar_\d+|ir_\d+|tmp_\d+)")
 _STACK_POINTER_ALIAS_MAX_SWEEPS_8616 = 3
 
 
-def _strip_typed_suffix_8616(name: object) -> str | None:
+@cython.ccall
+def _strip_typed_suffix_8616(name: object) -> object:
     if not isinstance(name, str):
         return None
     if name.endswith("}"):
@@ -67,18 +71,22 @@ def _strip_typed_suffix_8616(name: object) -> str | None:
     return name
 
 
-def _is_linear_temp_name_8616(name: object) -> bool:
+@cython.ccall
+def _is_linear_temp_name_8616(name: object) -> cython.bint:
     base = _strip_typed_suffix_8616(name)
     return isinstance(base, str) and _LINEAR_TEMP_NAME_RE_8616.fullmatch(base) is not None
 
 
-def _is_generic_stack_name_text_8616(name: object) -> bool:
+@cython.ccall
+def _is_generic_stack_name_text_8616(name: object) -> cython.bint:
+    base: object
     base = _strip_typed_suffix_8616(name)
     if base is None:
         return False
     return re.fullmatch(r"(?:arg_\d+|local_\d+|s_[0-9a-fA-F]+|v\d+|vvar_\d+|ir_\d+)", base) is not None
 
 
+@cython.ccall
 def _canonical_stack_offset_8616(offset: object) -> object:
     if not isinstance(offset, int):
         return offset
@@ -87,11 +95,13 @@ def _canonical_stack_offset_8616(offset: object) -> object:
     return offset
 
 
-def _typed_alias_fact_bp_offsets_8616(facts: object) -> set[int]:
+@cython.ccall
+def _typed_alias_fact_bp_offsets_8616(facts: object) -> object:
     """Return BP-relative stack offsets from typed alias facts."""
+    fact: object
     if not isinstance(facts, list):
         return set()
-    offsets: set[int] = set()
+    offsets: set[cython.longlong] = set()
     for fact in facts:
         if not isinstance(fact, AliasStorageFacts):
             continue
@@ -109,7 +119,10 @@ def _typed_alias_fact_bp_offsets_8616(facts: object) -> set[int]:
     return offsets
 
 
+@cython.ccall
 def _safe_sim_type_size_bits(type_obj: object) -> int | None:
+    arch: object
+    raw_size: object
     if type_obj is None:
         return None
 
@@ -128,6 +141,7 @@ def _safe_sim_type_size_bits(type_obj: object) -> int | None:
     return size if isinstance(size, int) else None
 
 
+@cython.ccall
 def _structured_c_codegen_owner_8616(node: object) -> object | None:
     """Return the dynamic structured-C codegen owner carried by an angr C AST node."""
     # dynamic-boundary: angr structured-C expression nodes expose ``codegen``
@@ -135,19 +149,24 @@ def _structured_c_codegen_owner_8616(node: object) -> object | None:
     return getattr(node, "codegen", None)
 
 
-def _dynamic_int_counter_8616(owner: object, name: str) -> int:
+@cython.ccall
+def _dynamic_int_counter_8616(owner: object, name: object) -> cython.longlong:
     """Read a runtime compatibility counter from an angr-owned object."""
     # dynamic-boundary: compatibility counters are attached to angr codegen
     # objects by optional passes and are absent before the pass runs.
     return int(getattr(cast(Any, owner), name, 0) or 0)
 
 
+@cython.ccall
 def _bind_expr_types_to_project_arch_8616(
     node: object,
     codegen: object,
-    seen: set[int] | None = None,
+    seen: object = None,
 ) -> None:
     """Bind live structured-expression types before current angr combines them."""
+    arch: object
+    expression_type: object
+    variable_type: object
     arch = getattr(getattr(codegen, "project", None), "arch", None)
     if arch is None or node is None:
         return
@@ -178,8 +197,13 @@ def _bind_expr_types_to_project_arch_8616(
 
     _bind_expr_child_types_8616(node, codegen, seen)
 
-def _bind_expr_child_types_8616(node: object, codegen: object, seen: set[int]) -> None:
+@cython.ccall
+def _bind_expr_child_types_8616(node: object, codegen: object, seen: object) -> None:
     """Recurse into a structured-C node's child expressions and sequences."""
+    child: object
+    seq: object
+    attr: object
+    item: object
     for attr in (
         "lhs",
         "rhs",
@@ -210,9 +234,12 @@ def _debug_stack_condition_rebind_8616(
     before: object,
     after: object,
     *,
-    note: str,
+    note: object,
 ) -> None:
     def _impl() -> None:
+        cfunc: object
+        delta: object
+        target_text: object
         before_dynamic = cast(Any, before)
         after_dynamic = cast(Any, after)
         if not os.environ.get("INERTIA_DEBUG_STACK_CONDITION_CANON"):
@@ -244,14 +271,17 @@ def _debug_stack_condition_rebind_8616(
     return _impl()
 
 
-def _is_generic_stack_name_8616(name: object) -> bool:
+@cython.ccall
+def _is_generic_stack_name_8616(name: object) -> cython.bint:
     return _is_generic_stack_name_text_8616(name)
 
 
+@cython.ccall
 def _sole_bound_stack_cvar_8616(
     codegen: object,
     resolve_stack_cvar_at_offset: Callable[[object, int], object],
 ) -> object | None:
+    bindings: object
     bindings = getattr(codegen, "_inertia_stack_variable_bindings", None)
     if not isinstance(bindings, tuple) or len(bindings) != 1:
         return None
@@ -271,13 +301,17 @@ def _sole_bound_stack_cvar_8616(
 
 def _sole_named_stack_cvar_8616(codegen: object) -> object | None:
     def _impl() -> object | None:
+        cfunc: object
+        variables_in_use: object
+        cvar: object
+        variable: object
         cfunc = getattr(codegen, "cfunc", None)
         variables_in_use = getattr(cfunc, "variables_in_use", None)
         if not isinstance(variables_in_use, dict):
             return None
         arg_variable_ids = {
             id(getattr(arg, "variable", None))
-            for arg in getattr(cfunc, "arg_list", ()) or ()
+            for arg in iter(getattr(cfunc, "arg_list", ()) or ())
             if getattr(arg, "variable", None) is not None
         }
         candidates = []
@@ -295,12 +329,16 @@ def _sole_named_stack_cvar_8616(codegen: object) -> object | None:
     return _impl()
 
 
+@cython.ccall
 def _prefer_bound_stack_cvar_8616(
     codegen: object,
     resolved: object,
     resolve_stack_cvar_at_offset: Callable[[object, int], object],
 ) -> object:
     """Prefer a named binding only when it identifies the same stack slot."""
+    bound: object
+    fallback: object
+    fallback_var: object
     if not isinstance(resolved, structured_c.CVariable):
         return resolved
     variable = resolved.variable
@@ -321,9 +359,9 @@ def _prefer_bound_stack_cvar_8616(
     if not isinstance(fallback_var, SimStackVariable):
         return resolved
     if (
-        fallback_var.base != variable.base
-        or _canonical_stack_offset_8616(fallback_var.offset) != _canonical_stack_offset_8616(variable.offset)
-        or fallback_var.size != variable.size
+        operator.ne(fallback_var.base, variable.base)
+        or operator.ne(_canonical_stack_offset_8616(fallback_var.offset), _canonical_stack_offset_8616(variable.offset))
+        or operator.ne(fallback_var.size, variable.size)
     ):
         return resolved
     fallback_name = getattr(fallback, "name", None) or fallback_var.name
@@ -331,8 +369,13 @@ def _prefer_bound_stack_cvar_8616(
         return resolved
     return fallback
 
+@cython.ccall
 def _bound_cvar_for_stack_var_8616(codegen: object, variable: Any) -> object | None:
     """Return the bound cvar identifying the same stack slot as `variable`, if any."""
+    bound: object
+    variables_in_use: object
+    candidate_cvar: object
+    candidate_var: object
     variables_in_use = getattr(getattr(codegen, "cfunc", None), "variables_in_use", None)
     if isinstance(variables_in_use, dict):
         bound = variables_in_use.get(variable)
@@ -348,22 +391,27 @@ def _bound_cvar_for_stack_var_8616(codegen: object, variable: Any) -> object | N
                 ):
                     continue
                 if (
-                    getattr(candidate_var, "base", None) == var_base
-                    and getattr(candidate_var, "offset", None) == var_offset
-                    and getattr(candidate_var, "size", None) == var_size
+                    operator.eq(getattr(candidate_var, "base", None), var_base)
+                    and operator.eq(getattr(candidate_var, "offset", None), var_offset)
+                    and operator.eq(getattr(candidate_var, "size", None), var_size)
                 ):
                     return cast(object, candidate_cvar)
     return None
 
 
 
+@cython.ccall
 def _record_stack_canonicalization_bridge_8616(
     codegen: object,
     *,
     expr: object,
-    resolved_offset: int,
-    kind: str,
+    resolved_offset: cython.longlong,
+    kind: object,
 ) -> None:
+    base_var: object
+    bridges: object
+    index_value: object
+    indexed: object
     if codegen is None or not isinstance(resolved_offset, int):
         return
     codegen_dynamic = cast(Any, codegen)
@@ -387,13 +435,15 @@ def _record_stack_canonicalization_bridge_8616(
         return
     bridges[(kind, id(base_var), index_value)] = resolved_offset
 
+@cython.ccall
 def _local_unwrap_casts_8616(node: object) -> object:
     """Strip CTypeCast wrappers without touching semantic casts."""
     while isinstance(node, structured_c.CTypeCast):
         node = node.expr
     return node
 
-def _indexed_bridge_operand_8616(unwrapped_expr: object, kind: str) -> object | None:
+@cython.ccall
+def _indexed_bridge_operand_8616(unwrapped_expr: object, kind: object) -> object | None:
     """Return the indexed operand carrying the bridge for a supported kind."""
     if kind == "indexed_deref":
         if not (
@@ -411,33 +461,39 @@ def _indexed_bridge_operand_8616(unwrapped_expr: object, kind: str) -> object | 
 
 
 
-def _preferred_stack_name_8616(variable: object, cvar: object) -> str | None:
+def _preferred_stack_name_8616(variable: object, cvar: object) -> object:
+    cvar_name: object
+    unified_name: object
+    variable_name: object
     variable_name = getattr(variable, "name", None)
     cvar_name = getattr(cvar, "name", None)
     unified_name = getattr(getattr(cvar, "unified_variable", None), "name", None)
     return next(
         (
             name
-            for name in (variable_name, cvar_name, unified_name)
+            for name in iter((variable_name, cvar_name, unified_name))
             if isinstance(name, str) and name and not _is_generic_stack_name_8616(name)
         ),
         None,
     )
 
 
+@cython.ccall
 def _build_stack_resolution_context_8616(
     codegen: object,
     stack_slot_identity_for_variable: Callable[[object], object],
-) -> tuple[list[tuple[object, object]], set[int], set[object]]:
+) -> tuple[list[tuple[object, object]], set[cython.longlong], set[object]]:
+    variable: object
+    arg: object
     codegen_dynamic = cast(Any, codegen)
     arg_list = tuple(getattr(codegen_dynamic.cfunc, "arg_list", ()) or ())
     arg_candidates: list[tuple[object, object]] = []
     arg_variable_ids = {
-        id(getattr(arg, "variable", None)) for arg in arg_list if getattr(arg, "variable", None) is not None
+        id(getattr(arg, "variable", None)) for arg in iter(arg_list) if getattr(arg, "variable", None) is not None
     }
     arg_slot_identities = {
         stack_slot_identity_for_variable(getattr(arg, "variable", None))
-        for arg in arg_list
+        for arg in iter(arg_list)
         if isinstance(getattr(arg, "variable", None), SimStackVariable)
     }
     arg_slot_identities.discard(None)
@@ -452,13 +508,16 @@ def _stack_candidate_score_8616(
     variable: object,
     cvar: object,
     *,
-    exact: bool,
+    exact: cython.bint,
     preferred_size: int | None,
     stack_slot_identity_for_variable: Callable[[object], object],
-    arg_variable_ids: set[int],
-    arg_slot_identities: set[object],
-) -> tuple[int, int, int, int, int, int]:
-    def _impl() -> tuple[int, int, int, int, int, int]:
+    arg_variable_ids: object,
+    arg_slot_identities: object,
+) -> object:
+    def _impl() -> tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong, cython.longlong, cython.longlong]:
+        identity: object
+        preferred_name: object
+        size: object
         identity = stack_slot_identity_for_variable(variable)
         if identity is None:
             return (-1, -1, -1, -1, -1, -1)
@@ -470,7 +529,7 @@ def _stack_candidate_score_8616(
         type_size = _safe_sim_type_size_bits(getattr(cvar, "variable_type", None))
         if isinstance(preferred_size, int) and preferred_size > 0 and isinstance(size, int):
             preferred_bits = preferred_size * 8
-            if size == preferred_size:
+            if operator.eq(size, preferred_size):
                 size_rank = 3
             elif size > preferred_size:
                 size_rank = 2
@@ -498,13 +557,16 @@ def _stack_candidate_score_8616(
     return _impl()
 
 
+@cython.ccall
 def _resolve_stack_cvar_at_offset(
     codegen: object,
-    offset: int,
+    offset: cython.longlong,
     *,
     stack_slot_identity_for_variable: Callable[[object], object],
     preferred_size: int | None = None,
 ) -> object | None:
+    best_covering: object
+    best_exact: object
     codegen_dynamic = cast(Any, codegen)
     if getattr(codegen_dynamic, "cfunc", None) is None:
         return None
@@ -530,16 +592,22 @@ def _resolve_stack_cvar_at_offset(
         return cast(object, best_exact[1])
     return cast(object | None, best_covering[1] if best_covering is not None else None)
 
+@cython.ccall
 def _best_stack_cvar_candidates_8616(
-    candidates: list[tuple[Any, Any]],
-    offset: int,
+    candidates: object,
+    offset: cython.longlong,
     *,
     preferred_size: int | None,
     stack_slot_identity_for_variable: Callable[[object], object],
-    arg_variable_ids: set[int],
-    arg_slot_identities: set[object],
+    arg_variable_ids: object,
+    arg_slot_identities: object,
 ) -> tuple[tuple[Any, Any] | None, tuple[Any, Any] | None]:
     """Score candidates and return (best_exact, best_covering) (variable, cvar) pairs."""
+    best_covering_score: object
+    best_exact_score: object
+    identity: object
+    cvar: object
+    variable: object
     best_exact = None
     best_exact_score = None
     best_covering = None
@@ -587,13 +655,18 @@ def _best_stack_cvar_candidates_8616(
 
 def _materialize_stack_cvar_at_offset(
     codegen: object,
-    offset: int,
-    size: int = 2,
+    offset: cython.longlong,
+    size: cython.longlong = 2,
     *,
     resolve_stack_cvar_at_offset: Callable[..., object],
     promote_direct_stack_cvariable: Callable[..., object],
     stack_type_for_size: Callable[[int], object],
 ) -> object | None:
+    resolved_variable: object
+    sort_local_vars: object
+    stack_local_candidates: object
+    unified_locals: object
+    variables_in_use: object
     codegen_dynamic = cast(Any, codegen)
     if getattr(codegen_dynamic, "cfunc", None) is None:
         return None
@@ -606,7 +679,7 @@ def _materialize_stack_cvar_at_offset(
     resolved_variable = getattr(resolved, "variable", None)
     if (
         isinstance(resolved_variable, SimStackVariable)
-        and _canonical_stack_offset_8616(getattr(resolved_variable, "offset", None)) == offset
+        and operator.eq(_canonical_stack_offset_8616(getattr(resolved_variable, "offset", None)), offset)
     ):
         target_type = stack_type_for_size(size)
         promote_direct_stack_cvariable(codegen, resolved, size, target_type)
@@ -660,8 +733,8 @@ class _StackCvarCanonicalize8616:
         unwrap_c_casts: Callable[[object], object],
         resolve_stack_cvar_at_offset: Callable[..., object],
         materialize_stack_cvar_at_offset: Callable[..., object] | None,
-        active_expr_ids: set[int] | None,
-        analysis_context: dict[str, object] | None,
+        active_expr_ids: object,
+        analysis_context: object,
     ) -> None:
         self.expr: Any = expr
         self.codegen: Any = codegen
@@ -750,7 +823,7 @@ class _StackCvarCanonicalize8616:
             return result
         return None
 
-    def run_8616_part0(self) -> tuple[bool, object]:
+    def run_8616_part0(self) -> tuple[cython.bint, object]:
         """Phase 0: strip casts, seed run state, and apply cycle/depth refusals."""
         while isinstance(self.expr, structured_c.CTypeCast) and not isinstance(
             self.expr, CSemanticCast8616
@@ -787,7 +860,7 @@ class _StackCvarCanonicalize8616:
         self.synthetic_bp_anchor = None
         self.inferred_stack_base_alias = ...
         return False, None
-    def _part0_dirty_cycle_refusal_8616(self) -> bool:
+    def _part0_dirty_cycle_refusal_8616(self) -> cython.bint:
         if self.expr_id in self.active_expr_ids:
             self.dirty_expr_cls = getattr(structured_c, "CDirtyExpression", None)
             self.dirty = getattr(self.expr, "dirty", None)
@@ -809,7 +882,7 @@ class _StackCvarCanonicalize8616:
             return True
         return False
 
-    def _part0_depth_refusal_8616(self) -> bool:
+    def _part0_depth_refusal_8616(self) -> cython.bint:
         if len(self.active_expr_ids) >= self.max_depth:
             self.codegen_dynamic._inertia_stack_lowering_canonicalize_depth_refused_8616 = (
                 _dynamic_int_counter_8616(
@@ -828,8 +901,9 @@ class _StackCvarCanonicalize8616:
 
 
     def _iter_statement_nodes(self, root: object) -> Iterator[object]:
+        node: object
         stack = [root]
-        seen_nodes: set[int] = set()
+        seen_nodes: set[cython.longlong] = set()
         while stack:
             node = stack.pop()
             if node is None:
@@ -841,8 +915,12 @@ class _StackCvarCanonicalize8616:
             yield node
             self._push_node_children_8616(node, stack)
 
-    def _push_node_children_8616(self, node: object, stack: list[object]) -> None:
+    def _push_node_children_8616(self, node: object, stack: object) -> None:
         """Queue a structured-C node's child statements and expressions for traversal."""
+        value: object
+        attr: object
+        item: object
+        nested: object
         for attr in (
             "statements",
             "condition_and_nodes",
@@ -878,6 +956,9 @@ class _StackCvarCanonicalize8616:
 
 
     def _synthetic_sp_anchor_cvar(self) -> object:
+        cfunc: object
+        unified_local_vars: object
+        variables_in_use: object
         if self.synthetic_sp_anchor is not None:
             return self.synthetic_sp_anchor
         cfunc = getattr(self.codegen, "cfunc", None)
@@ -895,6 +976,9 @@ class _StackCvarCanonicalize8616:
         return self.synthetic_sp_anchor
 
     def _synthetic_bp_anchor_cvar(self) -> object:
+        cfunc: object
+        unified_local_vars: object
+        variables_in_use: object
         if self.synthetic_bp_anchor is not None:
             return self.synthetic_bp_anchor
         cfunc = getattr(self.codegen, "cfunc", None)
@@ -911,7 +995,9 @@ class _StackCvarCanonicalize8616:
             )
         return self.synthetic_bp_anchor
 
-    def _infer_stack_base_alias_from_bp_slots(self) -> tuple[object, int] | None:
+    def _infer_stack_base_alias_from_bp_slots(self) -> object:
+        best_bias: object
+        root: object
         if self.inferred_stack_base_alias is not ...:
             return cast(tuple[object, int] | None, self.inferred_stack_base_alias)
 
@@ -938,9 +1024,11 @@ class _StackCvarCanonicalize8616:
         self.inferred_stack_base_alias = (self._synthetic_bp_anchor_cvar(), best_bias)
         return cast(tuple[object, int] | None, self.inferred_stack_base_alias)
 
-    def _known_bp_offsets_8616(self) -> set[int]:
+    def _known_bp_offsets_8616(self) -> object:
         """Collect negative bp-relative stack offsets from cfunc variables_in_use."""
-        known_bp_offsets: set[int] = set()
+        variables_in_use: object
+        variable: object
+        known_bp_offsets: set[cython.longlong] = set()
         variables_in_use = getattr(getattr(self.codegen, "cfunc", None), "variables_in_use", None)
         if isinstance(variables_in_use, dict):
             for variable in variables_in_use:
@@ -953,9 +1041,11 @@ class _StackCvarCanonicalize8616:
                     known_bp_offsets.add(offset)
         return known_bp_offsets
 
-    def _stack_base_displacements_8616(self, root: object) -> set[int]:
+    def _stack_base_displacements_8616(self, root: object) -> object:
         """Collect absolute displacements of stack_base-derived accesses in the function."""
-        stack_base_displacements: set[int] = set()
+        index_value: object
+        node: object
+        stack_base_displacements: set[cython.longlong] = set()
         for node in self._iter_statement_nodes(root):
             if isinstance(node, structured_c.CIndexedVariable):
                 base_disp = self._stack_base_displacement_expr_8616(node.variable)
@@ -970,10 +1060,14 @@ class _StackCvarCanonicalize8616:
         return stack_base_displacements
 
     def _best_stack_base_bias_8616(
-        self, stack_base_displacements: set[int], known_bp_offsets: set[int]
+        self, stack_base_displacements: object, known_bp_offsets: object
     ) -> int | None:
         """Return the most-evidenced bp bias mapping stack_base displacements onto bp slots."""
-        bias_scores: dict[int, int] = {}
+        _: object
+        bias: object
+        disp: object
+        offset: object
+        bias_scores: dict[cython.longlong, cython.longlong] = {}
         for disp in stack_base_displacements:
             for offset in known_bp_offsets:
                 bias = offset - disp
@@ -982,9 +1076,9 @@ class _StackCvarCanonicalize8616:
         best_bias = None
         best_score = 0
         tied = False
-        for bias, _ in sorted(bias_scores.items()):
+        for bias, _ in sorted(tuple(bias_scores.items())):
             matched_offsets = {
-                disp + bias for disp in stack_base_displacements if (disp + bias) in known_bp_offsets
+                disp + bias for disp in iter(stack_base_displacements) if (disp + bias) in known_bp_offsets
             }
             score = len(matched_offsets)
             if score > best_score:
@@ -999,10 +1093,14 @@ class _StackCvarCanonicalize8616:
         return best_bias
 
 
-    def _is_stack_base_fake_variable(self, node: object) -> bool:
+    def _is_stack_base_fake_variable(self, node: object) -> cython.bint:
         return isinstance(node, structured_c.CFakeVariable) and getattr(node, "name", None) == "stack_base"
 
     def _stack_base_displacement_expr_8616(self, node: object) -> int | None:
+        lhs: object
+        lhs_value: object
+        rhs: object
+        rhs_value: object
         node = self.unwrap_c_casts(node)
         if self._is_stack_base_fake_variable(node):
             return 0
@@ -1017,7 +1115,10 @@ class _StackCvarCanonicalize8616:
                 return rhs + lhs_value
         return None
 
-    def _is_ss_segment_scale_expr(self, node: object) -> bool:
+    def _is_ss_segment_scale_expr(self, node: object) -> cython.bint:
+        scale: object
+        maybe_scale: object
+        maybe_seg: object
         node = self.unwrap_c_casts(node)
         if not isinstance(node, structured_c.CBinaryOp):
             return False
@@ -1025,14 +1126,15 @@ class _StackCvarCanonicalize8616:
         if scale is None:
             return False
         for maybe_seg, maybe_scale in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
-            if getattr(self.unwrap_c_casts(maybe_scale), "value", None) != scale:
+            if operator.ne(getattr(self.unwrap_c_casts(maybe_scale), "value", None), scale):
                 continue
             if self._expr_is_ss_segment_8616(maybe_seg):
                 return True
         return False
 
-    def _expr_is_ss_segment_8616(self, expr: object, *, depth: int = 0) -> bool:
+    def _expr_is_ss_segment_8616(self, expr: object, *, depth: cython.longlong = 0) -> cython.bint:
         """Return whether an expression carries the SS segment, following temp assignments."""
+        rhs: object
         if depth > 4:
             return False
         seg_expr = self.unwrap_c_casts(expr)
@@ -1051,6 +1153,9 @@ class _StackCvarCanonicalize8616:
 
 
     def _ss_linear_stack_base_displacement_expr_8616(self, node: object) -> int | None:
+        direct: object
+        lhs_disp: object
+        rhs_disp: object
         node = self.unwrap_c_casts(node)
         direct = self._stack_base_displacement_expr_8616(node)
         if direct is not None:
@@ -1065,13 +1170,14 @@ class _StackCvarCanonicalize8616:
             return rhs_disp
         return None
 
-    def _is_sp_virtual_register(self, variable: object) -> bool:
+    def _is_sp_virtual_register(self, variable: object) -> cython.bint:
         sp_offset = getattr(getattr(getattr(self.codegen, "project", None), "arch", None), "registers", {}).get(
             "sp", (None, None)
         )[0]
-        return isinstance(sp_offset, int) and getattr(variable, "reg", None) == sp_offset
+        return isinstance(sp_offset, int) and operator.eq(getattr(variable, "reg", None), sp_offset)
 
-    def _is_linear_temp_cvar(self, node: object) -> bool:
+    def _is_linear_temp_cvar(self, node: object) -> cython.bint:
+        name: object
         if not isinstance(node, structured_c.CVariable):
             return False
         variable = node.variable
@@ -1082,7 +1188,7 @@ class _StackCvarCanonicalize8616:
             return True
         return _is_linear_temp_name_8616(name)
 
-    def run_8616_part1(self) -> tuple[bool, object]:
+    def run_8616_part1(self) -> tuple[cython.bint, object]:
         """Phase 1: initialize the single-assignment caches in the analysis context."""
         self._UNRESOLVED_SINGLE_ASSIGNMENT = self.analysis_context.setdefault("unresolved_single_assignment_sentinel", object())
         self.dirty_expr_single_assignment_cache = self.analysis_context.setdefault("dirty_expr_single_assignment_cache", {})
@@ -1095,13 +1201,18 @@ class _StackCvarCanonicalize8616:
             self.analysis_context["cvar_single_assignment_cache"] = self.cvar_single_assignment_cache
         return False, None
 
-    def _safe_dirty_attr_8616(self, obj: object, attr: str) -> object:
+    def _safe_dirty_attr_8616(self, obj: object, attr: object) -> object:
         try:
             return getattr(obj, attr, None)
         except (AttributeError, TypeError, ValueError):
             return None
 
     def _single_assignment_expr_for_cvar(self, node_cvar: object) -> object | None:
+        node_reg: object
+        node_size: object
+        node_var: object
+        root: object
+        stmt: object
         cache_key = id(node_cvar)
         if cache_key in self.cvar_single_assignment_cache:
             return cast(object | None, self.cvar_single_assignment_cache[cache_key])
@@ -1140,9 +1251,11 @@ class _StackCvarCanonicalize8616:
 
     def _same_lhs_8616(
         self, lhs: object, *, node_var: object, node_name: object, node_reg: object, node_size: object,
-        node_linear_temp: bool,
-    ) -> bool:
+        node_linear_temp: cython.bint,
+    ) -> cython.bint:
         """Return whether an assignment lhs refers to the same cvar identity as the probe node."""
+        lhs_reg: object
+        lhs_size: object
         if not isinstance(lhs, structured_c.CVariable):
             return False
         lhs_var = lhs.variable
@@ -1163,12 +1276,17 @@ class _StackCvarCanonicalize8616:
             and isinstance(node_size, int)
             and isinstance(lhs_reg, int)
             and isinstance(lhs_size, int)
-            and lhs_reg == node_reg
-            and lhs_size == node_size
+            and operator.eq(lhs_reg, node_reg)
+            and operator.eq(lhs_size, node_size)
         )
 
 
-    def _single_assignment_expr_for_virtual_name(self, name: str) -> object | None:
+    def _single_assignment_expr_for_virtual_name(self, name: object) -> object | None:
+        cached: object
+        dirty_expr_single_assignment_index: object
+        normalized_name: object
+        resolved: object
+        root: object
         normalized_name = _strip_typed_suffix_8616(name)
         if normalized_name is None:
             return None
@@ -1208,8 +1326,10 @@ class _StackCvarCanonicalize8616:
                 + 1
             )
         return cast(object | None, resolved)
-    def _virtual_assignment_index_8616(self, root: object) -> dict[str, object | None]:
+    def _virtual_assignment_index_8616(self, root: object) -> object:
         """Build the name->rhs single-assignment index for virtual register names."""
+        lhs_key: object
+        stmt: object
         index: dict[str, object | None] = {}
         scanned = 0
         for stmt in self._iter_statement_nodes(root):
@@ -1252,6 +1372,8 @@ class _StackCvarCanonicalize8616:
 
 
     def _top_level_statements(self) -> list[object]:
+        root: object
+        statements: object
         root = getattr(getattr(self.codegen, "cfunc", None), "statements", None)
         statements = getattr(root, "statements", None)
         if isinstance(statements, list | tuple):
@@ -1259,6 +1381,9 @@ class _StackCvarCanonicalize8616:
         return []
 
     def _statement_index_containing(self, node: object) -> int | None:
+        idx: object
+        nested: object
+        stmt: object
         if node is None:
             return None
         for idx, stmt in enumerate(self._top_level_statements()):
@@ -1268,6 +1393,15 @@ class _StackCvarCanonicalize8616:
         return None
 
     def _nearest_preceding_assignment_expr_for_cvar(self, node_cvar: object) -> object | None:
+        lhs: object
+        lhs_reg: object
+        lhs_size: object
+        nearest_rhs: object
+        node_reg: object
+        node_size: object
+        stmt_idx: object
+        idx: object
+        stmt: object
         if not isinstance(node_cvar, structured_c.CVariable):
             return None
         node_var = node_cvar.variable
@@ -1289,15 +1423,17 @@ class _StackCvarCanonicalize8616:
             lhs_var = lhs.variable
             lhs_reg = getattr(lhs_var, "reg", None)
             lhs_size = getattr(lhs_var, "size", None)
-            if lhs_reg == node_reg and lhs_size == node_size:
+            if operator.eq(lhs_reg, node_reg) and operator.eq(lhs_size, node_size):
                 nearest_rhs = getattr(stmt, "rhs", None)
         return nearest_rhs
 
     def _resolve_dirty_virtual_expr(self, 
         node: object,
         *,
-        seen_varids: set[int] | None = None,
+        seen_varids: object = None,
     ) -> object | None:
+        dirty: object
+        resolved: object
         dirty = getattr(node, "dirty", None)
         if dirty is None:
             return None
@@ -1325,6 +1461,10 @@ class _StackCvarCanonicalize8616:
         return None
 
     def _canonicalize_dirty_expression(self, node: object) -> object:
+        active_dirty_varids: object
+        dirty: object
+        dirty_expr_cls: object
+        resolved: object
         dirty_expr_cls = getattr(structured_c, "CDirtyExpression", None)
         if dirty_expr_cls is None or not isinstance(node, dirty_expr_cls):
             return node
@@ -1358,7 +1498,7 @@ class _StackCvarCanonicalize8616:
             if isinstance(varid, int):
                 active_dirty_varids.discard(varid)
 
-    def run_8616_part2(self) -> tuple[bool, object]:
+    def run_8616_part2(self) -> tuple[cython.bint, object]:
         """Phase 2: canonicalize a dirty expression; done when it changes."""
         self.dirtyized = self._canonicalize_dirty_expression(self.expr)
         if self.dirtyized is not self.expr:
@@ -1366,7 +1506,8 @@ class _StackCvarCanonicalize8616:
             return True, self.dirtyized
         return False, None
 
-    def _is_pointer_capable_stack_variable(self, var: object, cvar: object | None = None) -> bool:
+    def _is_pointer_capable_stack_variable(self, var: object, cvar: object | None = None) -> cython.bint:
+        var_type: object
         if not isinstance(var, SimStackVariable):
             return False
         if var.base != "bp":
@@ -1377,7 +1518,7 @@ class _StackCvarCanonicalize8616:
         var_type = getattr(cvar, "variable_type", None)
         return isinstance(var_type, SimTypePointer)
 
-    def _is_synthetic_stack_anchor_cvar_8616(self, node: object) -> bool:
+    def _is_synthetic_stack_anchor_cvar_8616(self, node: object) -> cython.bint:
         if not isinstance(node, structured_c.CVariable):
             return False
         var = node.variable
@@ -1388,7 +1529,7 @@ class _StackCvarCanonicalize8616:
         name = node.name or var.name
         return base in {"sp", "bp"} and offset == 0 and name in {"sp_0", "bp_0"}
 
-    def _stack_pointer_aliases(self) -> typing.Mapping[int, tuple[object, int]]:
+    def _stack_pointer_aliases(self) -> typing.Mapping[cython.longlong, tuple[object, cython.longlong]]:
         # dynamic-boundary: the shared alias result lives on angr codegen
         # objects; owned Inertia contracts use dot access.
         result = self._stack_alias_result_8616()
@@ -1402,6 +1543,8 @@ class _StackCvarCanonicalize8616:
         The Alias layer owns the propagation: this pass only reads or fills the
         shared typed result. An incomplete result never drives lowering.
         """
+        cached: object
+        root: object
         cached = read_stack_pointer_alias_map_8616(self.codegen)
         if cached is not None:
             return cached
@@ -1429,9 +1572,11 @@ class _StackCvarCanonicalize8616:
     def _resolve_stack_pointer_alias_expr(self, 
         base_expr: object,
         *,
-        seen_expr_ids: set[int] | None = None,
-        seen_varids: set[int] | None = None,
-    ) -> tuple[object, int] | None:
+        seen_expr_ids: object = None,
+        seen_varids: object = None,
+    ) -> object:
+        base_ref: object
+        resolved_dirty: object
         base_ref = self.unwrap_c_casts(base_expr)
         if base_ref is None:
             return None
@@ -1467,7 +1612,7 @@ class _StackCvarCanonicalize8616:
             )
         return None
 
-    def _lookup_alias_keys_8616(self, node: Any) -> tuple[object, int] | None:
+    def _lookup_alias_keys_8616(self, node: Any) -> object:
         """Return the proven stack-pointer alias for a cvar's exact identity.
 
         Only the shared exact-identity map resolves here; names and registers
@@ -1475,6 +1620,7 @@ class _StackCvarCanonicalize8616:
         collected read is ordered after its definition, so no per-use position
         check is needed here.
         """
+        variable: object
         if not isinstance(node, structured_c.CVariable):
             return None
         variable = node.variable
@@ -1485,7 +1631,7 @@ class _StackCvarCanonicalize8616:
             return None
         return result.aliases.get(id(variable))
 
-    def _reference_alias_expr_8616(self, base_ref: Any) -> tuple[object, int] | None:
+    def _reference_alias_expr_8616(self, base_ref: Any) -> object:
         """Resolve a ``&var`` reference to the operand's own bp slot only.
 
         Address-of never projects through the operand's value alias: after
@@ -1500,8 +1646,10 @@ class _StackCvarCanonicalize8616:
             # projected through address-of, and non-bp operands have none.
         return None
 
-    def _stack_base_alias_expr_8616(self) -> tuple[object, int] | None:
+    def _stack_base_alias_expr_8616(self) -> object:
         """Resolve angr's entry-SP `stack_base` placeholder to a stack alias."""
+        alias_state: object
+        inferred_alias: object
         sp_anchor = self._synthetic_sp_anchor_cvar()
         alias_state = self._lookup_alias_keys_8616(sp_anchor)
         if alias_state is not None:
@@ -1515,9 +1663,12 @@ class _StackCvarCanonicalize8616:
         return self._synthetic_bp_anchor_cvar(), 2
 
     def _cvar_alias_expr_8616(
-        self, base_ref: Any, *, seen_expr_ids: set[int] | None = None, seen_varids: set[int] | None = None
-    ) -> tuple[object, int] | None:
+        self, base_ref: Any, *, seen_expr_ids: object = None, seen_varids: object = None
+    ) -> object:
         """Resolve a CVariable through alias keys, bp/sp evidence, or assignment chains."""
+        alias_state: object
+        base_var: object
+        nearest_assignment_rhs: object
         base_var = base_ref.variable
         alias_state = self._lookup_alias_keys_8616(base_ref)
         if alias_state is not None:
@@ -1538,9 +1689,13 @@ class _StackCvarCanonicalize8616:
         return None
 
     def _binop_alias_expr_8616(
-        self, base_ref: Any, *, seen_expr_ids: set[int] | None = None, seen_varids: set[int] | None = None
-    ) -> tuple[object, int] | None:
+        self, base_ref: Any, *, seen_expr_ids: object = None, seen_varids: object = None
+    ) -> object:
         """Resolve an Add/Sub expression through per-side aliases, SS scaling, and constants."""
+        lhs: object
+        lhs_value: object
+        rhs: object
+        rhs_value: object
         lhs = self._resolve_stack_pointer_alias_expr(
             base_ref.lhs,
             seen_expr_ids=seen_expr_ids,
@@ -1567,10 +1722,12 @@ class _StackCvarCanonicalize8616:
         return None
 
 
-    def _resolve_base_stack_pointer_alias(self, base_expr: object) -> tuple[object, int] | None:
+    def _resolve_base_stack_pointer_alias(self, base_expr: object) -> object:
         return self._resolve_stack_pointer_alias_expr(base_expr)
 
-    def _fact_backed_stack_size_for_offset(self, offset: int) -> int | None:
+    def _fact_backed_stack_size_for_offset(self, offset: cython.longlong) -> int | None:
+        bindings: object
+        binding: object
         bindings = getattr(self.codegen, "_inertia_stack_variable_bindings", None)
         if not isinstance(bindings, tuple):
             return None
@@ -1584,11 +1741,15 @@ class _StackCvarCanonicalize8616:
                 return cast(int | None, binding.size)
         return None
 
-    def _alias_fact_bp_offsets_8616(self) -> set[int]:
+    def _alias_fact_bp_offsets_8616(self) -> object:
+        facts: object
         facts = getattr(self.codegen, "_inertia_semantic_alias_facts", None)
         return _typed_alias_fact_bp_offsets_8616(facts)
 
     def _cached_stack_base_bp_bias_8616(self) -> int | None:
+        active_bias: object
+        cache_key: object
+        cached: object
         active_bias = getattr(self.codegen, "_inertia_active_stack_base_bp_bias_8616", None)
         if isinstance(active_bias, int):
             return active_bias
@@ -1599,7 +1760,7 @@ class _StackCvarCanonicalize8616:
                 return inferred_bias if isinstance(inferred_bias, int) else None
         return None
 
-    def _alias_rebased_stack_offset_8616(self, offset: int) -> int | None:
+    def _alias_rebased_stack_offset_8616(self, offset: cython.longlong) -> int | None:
         alias_offsets = self._alias_fact_bp_offsets_8616()
         if not alias_offsets or offset in alias_offsets:
             return None
@@ -1611,7 +1772,10 @@ class _StackCvarCanonicalize8616:
             return rebased
         return None
 
-    def _resolve_rebased_stack_cvar_8616(self, offset: int, size: int | None) -> object | None:
+    def _resolve_rebased_stack_cvar_8616(self, offset: cython.longlong, size: int | None) -> object | None:
+        materialized_var: object
+        preferred_size: object
+        resolved_var: object
         rebased_offset = self._alias_rebased_stack_offset_8616(offset)
         if not isinstance(rebased_offset, int):
             return None
@@ -1627,7 +1791,7 @@ class _StackCvarCanonicalize8616:
         if (
             isinstance(resolved, structured_c.CVariable)
             and isinstance(resolved_var, SimStackVariable)
-            and _canonical_stack_offset_8616(getattr(resolved_var, "offset", None)) == rebased_offset
+            and operator.eq(_canonical_stack_offset_8616(getattr(resolved_var, "offset", None)), rebased_offset)
         ):
             self.debug_stats["candidate_ast_match_count"] += 1
             self.debug_stats["lowering_replacements"] += 1
@@ -1646,7 +1810,7 @@ class _StackCvarCanonicalize8616:
         if (
             isinstance(materialized, structured_c.CVariable)
             and isinstance(materialized_var, SimStackVariable)
-            and _canonical_stack_offset_8616(getattr(materialized_var, "offset", None)) == rebased_offset
+            and operator.eq(_canonical_stack_offset_8616(getattr(materialized_var, "offset", None)), rebased_offset)
         ):
             self.debug_stats["candidate_ast_match_count"] += 1
             self.debug_stats["lowering_replacements"] += 1
@@ -1659,7 +1823,7 @@ class _StackCvarCanonicalize8616:
             return cast(object | None, materialized)
         return None
 
-    def run_8616_part3(self) -> tuple[bool, object]:
+    def run_8616_part3(self) -> tuple[cython.bint, object]:
         """Phase 3: run the cvar/indexed/deref/stack-addr lanes, then the tail lane."""
         done, result = self._part3_cvar_lane_8616()
         if done:
@@ -1678,7 +1842,7 @@ class _StackCvarCanonicalize8616:
             return True, result
         self.active_expr_ids.discard(self.expr_id)
         return True, self.expr
-    def _part3_cvar_lane_8616(self) -> tuple[bool, object]:
+    def _part3_cvar_lane_8616(self) -> tuple[cython.bint, object]:
         if isinstance(self.expr, structured_c.CVariable):
             self.variable = self.expr.variable
             done, result = self._part3_cvar_stackvar_8616()
@@ -1687,7 +1851,7 @@ class _StackCvarCanonicalize8616:
             self.active_expr_ids.discard(self.expr_id)
             return True, self.expr
         return False, None
-    def _part3_cvar_stackvar_8616(self) -> tuple[bool, object]:
+    def _part3_cvar_stackvar_8616(self) -> tuple[cython.bint, object]:
         if isinstance(self.variable, SimStackVariable):
             if self._is_synthetic_stack_anchor_cvar_8616(self.expr):
                 self.active_expr_ids.discard(self.expr_id)
@@ -1700,7 +1864,7 @@ class _StackCvarCanonicalize8616:
                 self.active_expr_ids.discard(self.expr_id)
                 return True, self.expr
         return False, None
-    def _part3_cvar_stackvar_body_8616(self) -> tuple[bool, object]:
+    def _part3_cvar_stackvar_body_8616(self) -> tuple[cython.bint, object]:
         if isinstance(self.offset, int):
             self.canonical_offset = _canonical_stack_offset_8616(self.offset)
             self.exact_binding = stack_binding_from_tags_8616(self.expr.tags)
@@ -1726,7 +1890,7 @@ class _StackCvarCanonicalize8616:
                 self.active_expr_ids.discard(self.expr_id)
                 return True, structured_c.CVariable(self.resolved_variable, variable_type=self.variable_type, codegen=self.codegen)
         return False, None
-    def _part3_cvar_rebind_8616(self) -> tuple[bool, object]:
+    def _part3_cvar_rebind_8616(self) -> tuple[cython.bint, object]:
         if isinstance(self.machine_bp_offset, int) and isinstance(self.variable.size, int):
             self.projected = stack_cvar_for_machine_bp_range_8616(
                 self.codegen,
@@ -1761,7 +1925,7 @@ class _StackCvarCanonicalize8616:
 
 
 
-    def _part3_indexed_lane_8616(self) -> tuple[bool, object]:
+    def _part3_indexed_lane_8616(self) -> tuple[cython.bint, object]:
         if isinstance(self.expr, structured_c.CIndexedVariable):
             self.base_expr = _canonicalize_stack_cvar_expr(
                 self.expr.variable,
@@ -1819,7 +1983,9 @@ class _StackCvarCanonicalize8616:
             self.active_expr_ids.discard(self.expr_id)
             return True, self.expr
         return False, None
-    def _part3_indexed_materialize_8616(self) -> tuple[bool, object]:
+    def _part3_indexed_materialize_8616(self) -> tuple[cython.bint, object]:
+        alias_base_var_l: object
+        resolved_offset_l: object
         for resolved_offset_l, alias_base_var_l in self.resolution_candidates:
             self.resolved_offset, self.alias_base_var = resolved_offset_l, alias_base_var_l
             self.resolved = self.resolve_stack_cvar_at_offset(self.codegen, self.resolved_offset, preferred_size=self.requested_size)
@@ -1828,7 +1994,7 @@ class _StackCvarCanonicalize8616:
             if (
                 isinstance(self.resolved, structured_c.CVariable)
                 and isinstance(self.resolved_var, SimStackVariable)
-                and getattr(self.resolved_var, "offset", None) == self.resolved_offset
+                and operator.eq(getattr(self.resolved_var, "offset", None), self.resolved_offset)
             ):
                 _record_stack_canonicalization_bridge_8616(
                     self.codegen,
@@ -1854,7 +2020,7 @@ class _StackCvarCanonicalize8616:
                 if (
                     isinstance(self.materialized, structured_c.CVariable)
                     and isinstance(self.materialized_var, SimStackVariable)
-                    and getattr(self.materialized_var, "offset", None) == self.resolved_offset
+                    and operator.eq(getattr(self.materialized_var, "offset", None), self.resolved_offset)
                 ):
                     self.materialized = _prefer_bound_stack_cvar_8616(
                         self.codegen, self.materialized, self.resolve_stack_cvar_at_offset
@@ -1879,7 +2045,7 @@ class _StackCvarCanonicalize8616:
                 if (
                     isinstance(self.materialized, structured_c.CVariable)
                     and isinstance(self.materialized_var, SimStackVariable)
-                    and getattr(self.materialized_var, "offset", None) == self.resolved_offset
+                    and operator.eq(getattr(self.materialized_var, "offset", None), self.resolved_offset)
                 ):
                     self.materialized = _prefer_bound_stack_cvar_8616(
                         self.codegen, self.materialized, self.resolve_stack_cvar_at_offset
@@ -1897,7 +2063,7 @@ class _StackCvarCanonicalize8616:
         return False, None
 
 
-    def _part3_deref_lane_8616(self) -> tuple[bool, object]:
+    def _part3_deref_lane_8616(self) -> tuple[cython.bint, object]:
         if isinstance(self.expr, structured_c.CUnaryOp):
             self.operand = _canonicalize_stack_cvar_expr(
                 self.expr.operand,
@@ -1915,7 +2081,7 @@ class _StackCvarCanonicalize8616:
             self.active_expr_ids.discard(self.expr_id)
             return True, self.expr
         return False, None
-    def _part3_deref_resolve_8616(self) -> tuple[bool, object]:
+    def _part3_deref_resolve_8616(self) -> tuple[cython.bint, object]:
         done, result = self._part3_deref_addr_8616()
         if done:
             return True, result
@@ -1927,7 +2093,7 @@ class _StackCvarCanonicalize8616:
             return True, result
         return False, None
 
-    def _part3_deref_chain_8616(self) -> tuple[bool, object]:
+    def _part3_deref_chain_8616(self) -> tuple[cython.bint, object]:
         if (
             self.expr.op == "Dereference"
             and isinstance(self.deref_operand, structured_c.CUnaryOp)
@@ -1940,7 +2106,7 @@ class _StackCvarCanonicalize8616:
                 return True, self.referenced
         return False, None
 
-    def _part3_deref_operand_8616(self) -> tuple[bool, object]:
+    def _part3_deref_operand_8616(self) -> tuple[cython.bint, object]:
         if self.operand is not self.expr.operand:
             self.active_expr_ids.discard(self.expr_id)
             return True, structured_c.CUnaryOp(
@@ -1952,7 +2118,7 @@ class _StackCvarCanonicalize8616:
         return False, None
 
 
-    def _part3_deref_addr_8616(self) -> tuple[bool, object]:
+    def _part3_deref_addr_8616(self) -> tuple[cython.bint, object]:
         if self.expr.op == "Dereference":
             # dynamic-boundary: project is owned by the surrounding angr
             # codegen object, not an Inertia dataclass contract.
@@ -1980,7 +2146,7 @@ class _StackCvarCanonicalize8616:
             if done:
                 return True, result
         return False, None
-    def _part3_deref_apply_8616(self) -> tuple[bool, object]:
+    def _part3_deref_apply_8616(self) -> tuple[cython.bint, object]:
         if isinstance(self.deref_operand, structured_c.CIndexedVariable):
             self.base_ref = self.unwrap_c_casts(self.deref_operand.variable)
             self.index_expr = self.unwrap_c_casts(self.deref_operand.index)
@@ -2014,7 +2180,7 @@ class _StackCvarCanonicalize8616:
                     if (
                         isinstance(self.resolved, structured_c.CVariable)
                         and isinstance(self.resolved_var, SimStackVariable)
-                        and getattr(self.resolved_var, "offset", None) == self.indexed_resolved_offset
+                        and operator.eq(getattr(self.resolved_var, "offset", None), self.indexed_resolved_offset)
                     ):
                         _record_stack_canonicalization_bridge_8616(
                             self.codegen,
@@ -2035,7 +2201,7 @@ class _StackCvarCanonicalize8616:
                         if (
                             isinstance(self.materialized, structured_c.CVariable)
                             and isinstance(self.materialized_var, SimStackVariable)
-                            and getattr(self.materialized_var, "offset", None) == self.indexed_resolved_offset
+                            and operator.eq(getattr(self.materialized_var, "offset", None), self.indexed_resolved_offset)
                         ):
                             self.materialized = _prefer_bound_stack_cvar_8616(
                                 self.codegen, self.materialized, self.resolve_stack_cvar_at_offset
@@ -2055,7 +2221,7 @@ class _StackCvarCanonicalize8616:
                             return True, self.materialized
         return False, None
 
-    def _part3_deref_offset_8616(self) -> tuple[bool, object]:
+    def _part3_deref_offset_8616(self) -> tuple[cython.bint, object]:
         if isinstance(self.displacement, int):
             self.type_bits = _safe_sim_type_size_bits(self.expr.type)
             self.arch = getattr(getattr(self.codegen, "project", None), "arch", None)
@@ -2074,7 +2240,7 @@ class _StackCvarCanonicalize8616:
             if (
                 isinstance(self.resolved, structured_c.CVariable)
                 and isinstance(self.resolved_var, SimStackVariable)
-                and getattr(self.resolved_var, "offset", None) == self.displacement
+                and operator.eq(getattr(self.resolved_var, "offset", None), self.displacement)
             ):
                 self.debug_stats["candidate_ast_match_count"] += 1
                 self.debug_stats["lowering_replacements"] += 1
@@ -2087,7 +2253,7 @@ class _StackCvarCanonicalize8616:
                 if (
                     isinstance(self.materialized, structured_c.CVariable)
                     and isinstance(self.materialized_var, SimStackVariable)
-                    and getattr(self.materialized_var, "offset", None) == self.displacement
+                    and operator.eq(getattr(self.materialized_var, "offset", None), self.displacement)
                 ):
                     self.materialized = _prefer_bound_stack_cvar_8616(
                         self.codegen, self.materialized, self.resolve_stack_cvar_at_offset
@@ -2104,7 +2270,7 @@ class _StackCvarCanonicalize8616:
 
 
 
-    def _part3_stackaddr_lane_8616(self) -> tuple[bool, object]:
+    def _part3_stackaddr_lane_8616(self) -> tuple[cython.bint, object]:
         if isinstance(self.expr, structured_c.CBinaryOp):
             if self._stack_base_displacement_expr_8616(self.expr) is not None:
                 self.active_expr_ids.discard(self.expr_id)
@@ -2142,7 +2308,7 @@ class _StackCvarCanonicalize8616:
             return True, self.expr
         return False, None
 
-    def _part3_tail_lane_8616(self) -> tuple[bool, object]:
+    def _part3_tail_lane_8616(self) -> tuple[cython.bint, object]:
         if isinstance(self.expr, structured_c.CTypeCast):
             self.inner = _canonicalize_stack_cvar_expr(
                 self.expr.expr,
@@ -2167,6 +2333,7 @@ class _StackCvarCanonicalize8616:
         return False, None
 
 
+@cython.ccall
 def _canonicalize_stack_cvar_expr(
     expr: object,
     codegen: object,
@@ -2174,8 +2341,8 @@ def _canonicalize_stack_cvar_expr(
     unwrap_c_casts: Callable[[object], object],
     resolve_stack_cvar_at_offset: Callable[..., object],
     materialize_stack_cvar_at_offset: Callable[..., object] | None = None,
-    active_expr_ids: set[int] | None = None,
-    analysis_context: dict[str, object] | None = None,
+    active_expr_ids: object = None,
+    analysis_context: object = None,
 ) -> object:
     return _StackCvarCanonicalize8616(
         expr,
@@ -2191,9 +2358,10 @@ def _canonicalize_stack_cvar_expr(
 def _canonicalize_stack_cvars(
     codegen: object,
     *,
-    replace_c_children: Callable[..., bool],
+    replace_c_children: Callable[..., cython.bint],
     canonicalize_stack_cvar_expr: Callable[..., object],
-) -> bool:
+) -> cython.bint:
+    debug_stats: object
     codegen_dynamic = cast(Any, codegen)
     if getattr(codegen_dynamic, "cfunc", None) is None:
         return False
@@ -2231,7 +2399,8 @@ def _canonicalize_stack_cvars(
         )
     return changed
 
-def _safe_child_update_eligible_8616(current: object, attr: str) -> bool:
+@cython.ccall
+def _safe_child_update_eligible_8616(current: object, attr: object) -> cython.bint:
     """Return whether a child attribute is safe for the canonicalize rewrite to update."""
     if not isinstance(current, structured_c.CAssignment):
         return True
@@ -2248,6 +2417,7 @@ def _safe_child_update_eligible_8616(current: object, attr: str) -> bool:
 
 
 
+@cython.ccall
 def _resolve_stack_cvar_from_addr_expr(
     project: object,
     codegen: object,
@@ -2259,6 +2429,9 @@ def _resolve_stack_cvar_from_addr_expr(
     materialize_stack_cvar_at_offset: Callable[..., object],
     stack_type_for_size: Callable[[int], object],
 ) -> object | None:
+    classified: object
+    resolved_variable: object
+    variable: object
     classified = classify_segmented_addr_expr(addr_expr, project)
     if classified is None or classified.kind != "stack" or classified.cvar is None:
         return None
@@ -2276,20 +2449,24 @@ def _resolve_stack_cvar_from_addr_expr(
     resolved_variable = getattr(resolved, "variable", None)
     if (
         isinstance(resolved_variable, SimStackVariable)
-        and _canonical_stack_offset_8616(getattr(resolved_variable, "offset", None)) == resolved_offset
+        and operator.eq(_canonical_stack_offset_8616(getattr(resolved_variable, "offset", None)), resolved_offset)
     ):
         promote_direct_stack_cvariable(codegen, resolved, 2, stack_type_for_size(2))
         return resolved
     return materialize_stack_cvar_at_offset(codegen, resolved_offset, 2)
 
 
-def _stack_object_name(offset: int, *, codegen: object | None = None) -> str:
+@cython.ccall
+def _stack_object_name(offset: cython.longlong, *, codegen: object | None = None) -> str:
+    arg_var: object
+    cfunc: object
+    arg: object
     canonical_offset = _canonical_stack_offset_8616(offset)
     if not isinstance(canonical_offset, int):
         return "arg_0"
     offset = canonical_offset
 
-    arg_offsets: set[int] = set()
+    arg_offsets: set[cython.longlong] = set()
     cfunc = getattr(codegen, "cfunc", None) if codegen is not None else None
     if cfunc is not None:
         for arg in getattr(cfunc, "arg_list", ()) or ():

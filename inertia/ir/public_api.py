@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """IR-layer package exports.
 
 Layer: IR.
@@ -8,6 +9,7 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import cython
 
 # isort: off
 # Publish core contracts before platform registration imports their consumers.

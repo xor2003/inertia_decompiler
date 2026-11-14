@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: preserve legacy CLI helper surface while delegating semantic proof to X86_16 layers.
@@ -5,14 +6,17 @@ Forbidden: owning decompiler semantics, source-backed recovery, or postprocess s
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
+import dataclasses
 
-type ReplaceCChildren = Callable[[object, Callable[[object], object]], bool]
+ReplaceCChildren = typing.TypeAliasType("ReplaceCChildren", Callable[[object, Callable[[object], object]], bool])
 
 
 class _CFunctionLike(Protocol):
@@ -27,16 +31,17 @@ class _CodegenLike(Protocol):
     cfunc: _CFunctionLike | None
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _MkFpFold8616:
     """Mutable fold state for the MK_FP cleanup transform."""
 
     codegen: _CodegenLike
     unwrap_c_casts: Callable[[object], object]
     c_constant_value: Callable[[object], int | None]
-    changed: bool = False
+    changed: cython.bint = False
 
-    def _is_zero_offset_mk_fp(self, expr: object) -> bool:
+    @cython.ccall
+    def _is_zero_offset_mk_fp(self, expr: object) -> cython.bint:
         """Return True when an expression is a two-arg MK_FP with zero offset."""
         expr = self.unwrap_c_casts(expr)
         # dynamic codegen boundary: structured C nodes come from angr's codegen classes.
@@ -48,6 +53,7 @@ class _MkFpFold8616:
             return False
         return self.c_constant_value(self.unwrap_c_casts(args[1])) == 0
 
+    @cython.ccall
     def transform(self, node: object) -> object:
         """Fold one nested or zero-offset MK_FP node, tracking change."""
         # dynamic codegen boundary: structured C nodes come from angr's codegen classes.
@@ -87,13 +93,15 @@ class _MkFpFold8616:
         return node
 
 
+@cython.ccall
 def _simplify_nested_mk_fp_calls(
     codegen: _CodegenLike,
     *,
     unwrap_c_casts: Callable[[object], object],
     c_constant_value: Callable[[object], int | None],
     replace_c_children: ReplaceCChildren,
-) -> bool:
+) -> cython.bint:
+    cfunc: object
     cfunc = codegen.cfunc
     if cfunc is None:
         return False

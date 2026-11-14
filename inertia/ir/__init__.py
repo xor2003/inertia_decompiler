@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """IR-layer public exports.
 
 Layer: IR.
@@ -11,6 +12,7 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import cython
 
 from .source_graph_import import install_source_graph_import
 lazy from .public_api import (

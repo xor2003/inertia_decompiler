@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: preserve legacy CLI helper surface while delegating semantic proof to X86_16 layers.
@@ -5,6 +6,8 @@ Forbidden: owning decompiler semantics, source-backed recovery, or postprocess s
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Protocol, cast
@@ -16,6 +19,7 @@ from inertia.semantics.string_instruction_artifact import (
     build_x86_16_string_instruction_artifact_from_linear_range,
 )
 from inertia.structuring.string_codegen_override import render_complete_string_function_8616
+import dataclasses
 
 __all__ = ["StringTimeoutFallback", "try_render_x86_16_string_timeout_fallback"]
 
@@ -23,7 +27,7 @@ __all__ = ["StringTimeoutFallback", "try_render_x86_16_string_timeout_fallback"]
 class _ProjectArchLike(Protocol):
     """Architecture identity at the third-party project boundary."""
 
-    name: str | None
+    name: object
 
 
 class _ProjectLike(Protocol):
@@ -32,18 +36,20 @@ class _ProjectLike(Protocol):
     arch: _ProjectArchLike | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StringTimeoutFallback:
     """Rendered string-instruction timeout fallback for one function."""
 
-    family: str
-    c_text: str
+    family: object
+    c_text: object
 
 
 def try_render_x86_16_string_timeout_fallback(
-    project: object, *, start: int, end: int, name: str
+    project: object, *, start: cython.longlong, end: cython.longlong, name: object
 ) -> StringTimeoutFallback | None:
     """Render a bounded x86-16 string-instruction fallback when applicable."""
+    arch: object
+    rendered: object
     try:
         arch = cast(_ProjectLike, project).arch
     except AttributeError:
@@ -55,5 +61,5 @@ def try_render_x86_16_string_timeout_fallback(
     rendered = render_complete_string_function_8616(name, lowered)
     if rendered is None:
         return None
-    family = ",".join(item.family for item in lowered.records)
+    family = ",".join(item.family for item in iter(lowered.records))
     return StringTimeoutFallback(family=family or "string_intrinsic", c_text=rendered)

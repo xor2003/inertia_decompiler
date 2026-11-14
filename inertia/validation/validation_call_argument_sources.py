@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Validate exact stack dependencies of materialized call arguments.
 
 Layer: Tail validation.
@@ -14,6 +15,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -26,6 +29,9 @@ from inertia.lowering.stack_function_coordinates import final_c_function_machine
 from inertia.semantics.callsite_summary import CallsitePushSourceKind8616, CallsiteSummary8616
 
 from .validation_stack_projection import validated_stack_projection_fact_8616
+import dataclasses
+import operator
+import builtins
 
 
 class CallArgumentSourceIssueKind8616(StrEnum):
@@ -34,30 +40,30 @@ class CallArgumentSourceIssueKind8616(StrEnum):
     STACK_DEPENDENCY_MISMATCH = "stack-dependency-mismatch"
 
 
-@dataclass(frozen=True, order=True, slots=True)
+@dataclasses.dataclass(frozen=True, order=True, )
 class CallArgumentSourceDependencyFact8616:
     """One exact binary-to-C stack dependency comparison."""
 
-    argument_index: int
-    expected_stack_offsets: tuple[int, ...]
-    actual_stack_offsets: tuple[int, ...]
+    argument_index: cython.longlong
+    expected_stack_offsets: object
+    actual_stack_offsets: object
 
     @property
-    def materialized(self) -> bool:
+    def materialized(self) -> cython.bint:
         """Return whether every proven source dependency survives in C."""
         return set(self.expected_stack_offsets).issubset(self.actual_stack_offsets)
 
 
-@dataclass(frozen=True, order=True, slots=True)
+@dataclasses.dataclass(frozen=True, order=True, )
 class CallArgumentSourceIssue8616:
     """One final call argument that lost a binary-proven stack dependency."""
 
     kind: CallArgumentSourceIssueKind8616
-    callsite_addr: int
-    target_addr: int
-    argument_index: int
-    expected_stack_offsets: tuple[int, ...]
-    actual_stack_offsets: tuple[int, ...]
+    callsite_addr: cython.longlong
+    target_addr: cython.longlong
+    argument_index: cython.longlong
+    expected_stack_offsets: object
+    actual_stack_offsets: object
 
     def token(self) -> str:
         """Return a deterministic failure token for tail-validation reports."""
@@ -70,16 +76,17 @@ class CallArgumentSourceIssue8616:
         )
 
 
-def _stack_offsets_token_8616(offsets: tuple[int, ...]) -> str:
+def _stack_offsets_token_8616(offsets: object) -> object:
     """Render sorted BP-relative offsets for a stable issue token."""
-    return ",".join(f"{offset:+#x}" for offset in offsets) if offsets else "none"
+    return ",".join(f"{offset:+#x}" for offset in iter(offsets)) if offsets else "none"
 
 
-def _stack_offsets_from_push_source_8616(source: object) -> tuple[int, ...]:
+def _stack_offsets_from_push_source_8616(source: object) -> tuple[cython.longlong, ...]:
     """Collect exact BP-relative leaves from one structured push source."""
-    offsets: set[int] = set()
+    offsets: set[cython.longlong] = set()
 
     def visit(value: object) -> None:
+        child: object
         if not isinstance(value, (tuple, list)):
             return
         if (
@@ -101,16 +108,19 @@ def _stack_offsets_from_push_source_8616(source: object) -> tuple[int, ...]:
     return tuple(sorted(offsets))
 
 
+@cython.ccall
 def _stack_offsets_from_c_argument_8616(
     codegen: object,
     argument: object,
-) -> tuple[int, ...]:
+) -> tuple[cython.longlong, ...]:
     """Collect direct BP-relative storage identities from a final C argument."""
+    projected_offset: object
+    node: object
     projected_offset = _stack_byte_projection_offset_8616(codegen, argument)
     if projected_offset is not None:
         return (projected_offset,)
 
-    offsets: set[int] = set()
+    offsets: set[cython.longlong] = set()
     for node in _iter_c_nodes_deep_8616(argument):
         if not isinstance(node, CVariable):
             continue
@@ -122,11 +132,13 @@ def _stack_offsets_from_c_argument_8616(
     return tuple(sorted(offsets))
 
 
+@cython.ccall
 def _stack_byte_projection_offset_8616(
     codegen: object,
     argument: object,
 ) -> int | None:
     """Return the exact BP view selected by typed evidence or a right shift."""
+    projection: object
     projection = validated_stack_projection_fact_8616(argument)
     if projection is not None:
         return int(projection.view_offset)
@@ -161,32 +173,33 @@ def _stack_byte_projection_offset_8616(
 
 def call_argument_source_stack_dependencies_8616(
     summary: CallsiteSummary8616,
-) -> tuple[tuple[int, ...], ...] | None:
+) -> object:
     """Return C-order stack dependencies for an exact one-push interface."""
     sources = summary.push_arg_sources
     widths = summary.arg_widths
     if (
         not isinstance(summary.arg_count, int)
         or summary.arg_count <= 0
-        or summary.arg_count != len(sources)
-        or len(widths) != len(sources)
-        or any(source is None for source in sources)
+        or operator.ne(summary.arg_count, len(sources))
+        or operator.ne(len(widths), len(sources))
+        or any(source is None for source in iter(sources))
     ):
         return None
     return tuple(
         _stack_offsets_from_push_source_8616(source)
-        for source in reversed(sources)
+        for source in builtins.iter(reversed(sources))
     )
 
 
 def call_argument_source_dependency_facts_8616(
     codegen: object,
     summary: CallsiteSummary8616,
-    arguments: tuple[object, ...],
+    arguments: object,
 ) -> tuple[CallArgumentSourceDependencyFact8616, ...]:
     """Compare every classified source dependency with final C arguments."""
+    dependencies: object
     dependencies = call_argument_source_stack_dependencies_8616(summary)
-    if dependencies is None or len(arguments) != len(dependencies):
+    if dependencies is None or operator.ne(len(arguments), len(dependencies)):
         return ()
     return tuple(
         CallArgumentSourceDependencyFact8616(
@@ -194,7 +207,7 @@ def call_argument_source_dependency_facts_8616(
             expected_stack_offsets=expected,
             actual_stack_offsets=_stack_offsets_from_c_argument_8616(codegen, arguments[index]),
         )
-        for index, expected in enumerate(dependencies)
+        for index, expected in builtins.iter(enumerate(dependencies))
         if expected
     )
 

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize saved BP-argument pointer versions in structured C.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ facts. Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 from collections.abc import Sequence
@@ -24,6 +27,8 @@ from archinfo import Arch
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 
 from .near_pointer_argument import NearPointerArgumentFact8616
+import dataclasses
+import operator
 
 _SNAPSHOT_TAG_8616 = "inertia_x86_16_stack_pointer_snapshot"
 _SOURCE_INSTRUCTION_ADDRS_TAG_8616 = "inertia_source_instruction_addrs"
@@ -52,7 +57,7 @@ class StackPointerSnapshotStatus8616(StrEnum):
     STACK_SLOT_NOT_PRESENT = "stack_slot_not_present"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackPointerSnapshotResult8616:
     """Result of applying exact saved-value evidence to one address expression."""
 
@@ -61,31 +66,34 @@ class StackPointerSnapshotResult8616:
     matched_facts: tuple[NearPointerArgumentFact8616, ...] = ()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackPointerSnapshotStats8616:
     """Closed evidence counters for saved stack-pointer versions."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
 class StackPointerSnapshotMaterializationError8616(RuntimeError):
     """Raised when classified saved-value evidence reaches no C expression."""
 
 
-def _stack_offsets_in_expression_8616(expression: object) -> frozenset[int]:
+@cython.ccall
+def _stack_offsets_in_expression_8616(expression: object) -> frozenset[cython.longlong]:
     """Return explicit BP stack offsets used by one structured C expression."""
-    offsets: set[int] = set()
+    node: object
+    offsets: set[cython.longlong] = set()
     for node in _iter_c_nodes_deep_8616(expression):
         if isinstance(node, structured_c.CVariable) and isinstance(node.variable, SimStackVariable):
             offsets.add(int(node.variable.offset))
     return frozenset(offsets)
 
 
-def _snapshot_fact_key_8616(fact: NearPointerArgumentFact8616) -> tuple[int, int, int, int]:
+@cython.ccall
+def _snapshot_fact_key_8616(fact: NearPointerArgumentFact8616) -> tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong]:
     """Return the stable C-AST marker for one saved-value fact."""
     return (
         fact.stack_offset,
@@ -95,6 +103,7 @@ def _snapshot_fact_key_8616(fact: NearPointerArgumentFact8616) -> tuple[int, int
     )
 
 
+@cython.ccall
 def _runtime_helper_width_8616(node: object) -> int | None:
     """Return the width of one typed segmented helper call."""
     if not isinstance(node, structured_c.CFunctionCall) or not isinstance(node.callee_target, str):
@@ -102,11 +111,14 @@ def _runtime_helper_width_8616(node: object) -> int | None:
     return _HELPER_WIDTHS_8616.get(node.callee_target.upper())
 
 
+@cython.ccall
 def _runtime_helper_candidates_8616(
     root: object,
-) -> dict[tuple[int, int], list[structured_c.CFunctionCall]]:
+) -> object:
     """Group untagged helper accesses by exact stack identity and width."""
-    candidates: dict[tuple[int, int], list[structured_c.CFunctionCall]] = {}
+    width: object
+    node: object
+    candidates: dict[tuple[cython.longlong, cython.longlong], list[structured_c.CFunctionCall]] = {}
     for node in _iter_c_nodes_deep_8616(root):
         width = _runtime_helper_width_8616(node)
         if width is None or not isinstance(node, structured_c.CFunctionCall) or len(node.args) < 2:
@@ -119,19 +131,24 @@ def _runtime_helper_candidates_8616(
     return candidates
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class StackPointerSnapshotTracker8616:
     """Track and enforce saved stack-pointer materialization for one function."""
 
-    facts: tuple[NearPointerArgumentFact8616, ...]
-    classified_facts: set[NearPointerArgumentFact8616] = field(default_factory=set)
-    materialized_facts: set[NearPointerArgumentFact8616] = field(default_factory=set)
-    failed_facts: set[NearPointerArgumentFact8616] = field(default_factory=set)
-    bound_facts_by_node_id: dict[int, NearPointerArgumentFact8616] = field(default_factory=dict)
+    facts: object
+    classified_facts: object = field(default_factory=set)
+    materialized_facts: object = field(default_factory=set)
+    failed_facts: object = field(default_factory=set)
+    bound_facts_by_node_id: object = field(default_factory=dict)
 
+    @cython.ccall
     def bind_unique_untagged_helpers(self, root: object) -> None:
         """Attach provenance only for one-to-one binary-fact/AST-helper joins."""
-        facts_by_key: dict[tuple[int, int], list[NearPointerArgumentFact8616]] = {}
+        facts: object
+        candidates: object
+        fact: object
+        key: object
+        facts_by_key: dict[tuple[cython.longlong, cython.longlong], list[NearPointerArgumentFact8616]] = {}
         for fact in self.facts:
             if fact.source_version_delta == 0:
                 continue
@@ -149,15 +166,17 @@ class StackPointerSnapshotTracker8616:
                     _SOURCE_INSTRUCTION_ADDRS_TAG_8616: (fact.dereference_ins_addr,),
                 }
 
+    @cython.ccall
     def materialize(
         self,
         expression: object,
         *,
-        source_instruction_addrs: frozenset[int],
-        provenance_node: object | None,
+        source_instruction_addrs: object,
+        provenance_node: object,
         codegen: object | None,
     ) -> object:
         """Apply and account for an exact saved-value fact at one dereference."""
+        bound_fact: object
         bound_fact = self.bound_facts_by_node_id.get(id(provenance_node)) if provenance_node is not None else None
         result = materialize_stack_pointer_snapshot_8616(
             expression,
@@ -185,13 +204,13 @@ class StackPointerSnapshotTracker8616:
         self,
         access: structured_c.CIndexedVariable,
         *,
-        source_instruction_addrs: frozenset[int],
+        source_instruction_addrs: object,
         codegen: object | None,
     ) -> object:
         """Apply a saved pointer version to one typed pointer index."""
         matching = tuple(
             fact
-            for fact in self.facts
+            for fact in iter(self.facts)
             if fact.source_version_delta != 0
             and fact.dereference_ins_addr in source_instruction_addrs
         )
@@ -202,7 +221,7 @@ class StackPointerSnapshotTracker8616:
             self.failed_facts.update(matching)
             return access
         fact = matching[0]
-        if access.tags.get(_SNAPSHOT_TAG_8616) == _snapshot_fact_key_8616(fact):
+        if operator.eq(access.tags.get(_SNAPSHOT_TAG_8616), _snapshot_fact_key_8616(fact)):
             self.materialized_facts.add(fact)
             return access
         if fact.stack_offset not in _stack_offsets_in_expression_8616(access.variable):
@@ -233,7 +252,7 @@ class StackPointerSnapshotTracker8616:
     @property
     def stats(self) -> StackPointerSnapshotStats8616:
         """Return closed counters for this function's versioned pointer facts."""
-        versioned = {fact for fact in self.facts if fact.source_version_delta != 0}
+        versioned = {fact for fact in iter(self.facts) if fact.source_version_delta != 0}
         return StackPointerSnapshotStats8616(
             raw_fact_count=len(versioned),
             normalized_fact_count=len(versioned),
@@ -242,6 +261,7 @@ class StackPointerSnapshotTracker8616:
             failure_count=len(self.failed_facts - self.materialized_facts),
         )
 
+    @cython.ccall
     def assert_closed(self) -> None:
         """Fail when classified snapshot evidence was never materialized."""
         stats = self.stats
@@ -251,7 +271,8 @@ class StackPointerSnapshotTracker8616:
             )
 
 
-def _unsigned_short_type_8616(codegen: object | None) -> SimTypeShort:
+@cython.ccall
+def _unsigned_short_type_8616(codegen: object) -> SimTypeShort:
     """Return an architecture-bound unsigned short for pointer deltas."""
     value_type = SimTypeShort(False)
     if codegen is not None:
@@ -264,13 +285,13 @@ def materialize_stack_pointer_snapshot_8616(
     expression: object,
     *,
     facts: Sequence[NearPointerArgumentFact8616],
-    source_instruction_addrs: frozenset[int],
+    source_instruction_addrs: object,
     codegen: object | None,
 ) -> StackPointerSnapshotResult8616:
     """Rebind one current stack argument expression to its saved binary version."""
     matching = tuple(
         fact
-        for fact in facts
+        for fact in iter(facts)
         if fact.source_version_delta != 0 and fact.dereference_ins_addr in source_instruction_addrs
     )
     if not matching:
@@ -282,7 +303,7 @@ def materialize_stack_pointer_snapshot_8616(
             matching,
         )
     fact = matching[0]
-    if isinstance(expression, structured_c.CBinaryOp) and expression.tags.get(_SNAPSHOT_TAG_8616) == _snapshot_fact_key_8616(fact):
+    if isinstance(expression, structured_c.CBinaryOp) and operator.eq(expression.tags.get(_SNAPSHOT_TAG_8616), _snapshot_fact_key_8616(fact)):
         return StackPointerSnapshotResult8616(
             expression,
             StackPointerSnapshotStatus8616.ALREADY_MATERIALIZED,

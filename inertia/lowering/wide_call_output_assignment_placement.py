@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Place proven wide call-result assignments in the dynamic angr C AST.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Protocol, cast
@@ -60,6 +63,9 @@ from .wide_call_output_assignment_replay import (
     WideCallOutputReplayStatus8616,
     reconcile_materialized_wide_call_output_assignment_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 _EVIDENCE_TAG_8616 = "inertia_x86_16_wide_call_output_assignment"
 
@@ -68,8 +74,8 @@ class _CFunctionBoundary8616(Protocol):
     """Dynamic angr C-function surface consumed by placement."""
 
     statements: object
-    variables_in_use: dict[SimVariable, CVariable]
-    arg_list: tuple[CVariable, ...]
+    variables_in_use: object
+    arg_list: object
 
 
 class _CodegenProjectBoundary8616(Protocol):
@@ -78,35 +84,39 @@ class _CodegenProjectBoundary8616(Protocol):
     project: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _CarrierScan8616:
     """Carrier references and addresses from one conservative AST scan."""
 
     refs: tuple[_CarrierStatementRef8616, ...] = ()
-    observed: frozenset[int] = frozenset()
+    observed: frozenset[cython.longlong] = frozenset()
     failure: WideCallOutputAssignmentFailure8616 | None = None
 
 
+@cython.ccall
 def _exact_stack_cvar_8616(
     codegen: object,
     cfunc: _CFunctionBoundary8616,
-    bp_offset: int,
-    size: int,
+    bp_offset: cython.longlong,
+    size: cython.longlong,
 ) -> CVariable | None:
     """Return one C variable through its exact machine-BP projection."""
+    projection: object
+    cvar: object
+    variable: object
     registry = stack_variable_coordinate_registry_8616(codegen)
     projection = registry.for_bp_range(bp_offset, size)
     if projection is not None:
         return projection.cvar if isinstance(projection.cvar, CVariable) else None
     if registry.projections:
         return None
-    candidates: dict[int, CVariable] = {}
+    candidates: dict[cython.longlong, CVariable] = {}
     for variable, cvar in cfunc.variables_in_use.items():
         if (
             isinstance(variable, SimStackVariable)
             and variable.base == "bp"
-            and variable.offset == bp_offset
-            and variable.size == size
+            and operator.eq(variable.offset, bp_offset)
+            and operator.eq(variable.size, size)
         ):
             candidates[id(variable)] = cvar
     try:
@@ -118,29 +128,31 @@ def _exact_stack_cvar_8616(
         if (
             isinstance(variable, SimStackVariable)
             and variable.base == "bp"
-            and variable.offset == bp_offset
-            and variable.size == size
+            and operator.eq(variable.offset, bp_offset)
+            and operator.eq(variable.size, size)
         ):
             candidates[id(variable)] = cvar
     return next(iter(candidates.values())) if len(candidates) == 1 else None
 
 
-def _has_call_8616(statement: object) -> bool:
+def _has_call_8616(statement: object) -> cython.bint:
     """Return whether a candidate carrier statement contains any semantic call."""
     return any(
-        isinstance(node, CFunctionCall) for node in _iter_c_nodes_deep_8616(statement)
+        isinstance(node, CFunctionCall) for node in builtins.iter(_iter_c_nodes_deep_8616(statement))
     )
 
 
 def _scan_same_group_8616(
     call_site: WideCallOutputCallSite8616,
-    required: frozenset[int],
+    required: object,
 ) -> _CarrierScan8616:
     """Collect a contiguous carrier suffix from the call's immediate group."""
+    index: object
+    statement: object
     refs: list[_CarrierStatementRef8616] = []
-    observed: set[int] = set()
+    observed: set[cython.longlong] = set()
     for index, statement in enumerate(call_site.statements.statements):
-        if index == call_site.index:
+        if operator.eq(index, call_site.index):
             continue
         addresses = c_node_instruction_addrs_8616(statement)
         touched = addresses & required
@@ -159,8 +171,8 @@ def _scan_same_group_8616(
         refs.append(_CarrierStatementRef8616(call_site.statements, index, statement))
         observed.update(touched)
     if refs:
-        last_index = max(ref.index for ref in refs)
-        owned_indices = {ref.index for ref in refs}
+        last_index = max(ref.index for ref in iter(refs))
+        owned_indices = {ref.index for ref in iter(refs)}
         if any(
             index not in owned_indices
             for index in range(call_site.index + 1, last_index + 1)
@@ -171,13 +183,17 @@ def _scan_same_group_8616(
     return _CarrierScan8616(tuple(refs), frozenset(observed))
 
 
+@cython.ccall
 def _scan_nested_group_8616(
     group: CStatements,
-    required: frozenset[int],
+    required: object,
 ) -> _CarrierScan8616:
     """Collect a nested carrier-only group without crossing control flow."""
+    current: object
+    index: object
+    statement: object
     refs: list[_CarrierStatementRef8616] = []
-    observed: set[int] = set()
+    observed: set[cython.longlong] = set()
     pending = [group]
     while pending:
         current = pending.pop()
@@ -200,10 +216,11 @@ def _scan_nested_group_8616(
     return _CarrierScan8616(tuple(refs), frozenset(observed))
 
 
+@cython.ccall
 def _carrier_placement_8616(
     root: object,
     call_site: WideCallOutputCallSite8616,
-    required: frozenset[int],
+    required: object,
 ) -> _CarrierScan8616:
     """Resolve one same-group or exact adjacent nested carrier placement."""
     immediate = _scan_same_group_8616(call_site, required)
@@ -239,26 +256,28 @@ def _carrier_placement_8616(
     observed = immediate.observed | nested.observed
     if not required <= observed:
         return _CarrierScan8616(
-            refs=(*immediate.refs, *nested.refs),
+            refs=tuple(immediate.refs) + tuple(nested.refs),
             observed=observed,
             failure=WideCallOutputAssignmentFailure8616.CARRIER_COVERAGE_MISSING,
         )
     return _CarrierScan8616(
-        refs=(*immediate.refs, *nested.refs),
+        refs=tuple(immediate.refs) + tuple(nested.refs),
         observed=observed,
     )
 
 
+@cython.ccall
 def _pair_legality_refusal_8616(
     source: WideCarryBorrowStorage8616,
     fact: WideCallOutputAssignmentFact8616,
 ) -> WideCallOutputAssignmentResolution8616 | None:
     """Refuse facts whose retained pair cannot authorize this combine."""
+    call_output: object
     call_output = source.value.lhs_call_output
     if (
         not wide_call_output_pair_authenticated_8616(source, fact)
         or call_output is None
-        or fact.call_output != call_output.provenance
+        or operator.ne(fact.call_output, call_output.provenance)
     ):
         return refused_wide_call_output_assignment_8616(
             source,
@@ -268,6 +287,7 @@ def _pair_legality_refusal_8616(
     return None
 
 
+@cython.ccall
 def _source_stack_cvar_8616(
     codegen: object,
     boundary: _CFunctionBoundary8616,
@@ -275,6 +295,8 @@ def _source_stack_cvar_8616(
     pair: WidePairEvidence8616,
 ) -> CVariable | None:
     """Return or materialize the exact retained-width source stack variable."""
+    entry_sp_offset: object
+    source_cvar: object
     source_cvar = _exact_stack_cvar_8616(
         codegen,
         boundary,
@@ -303,6 +325,7 @@ def _source_stack_cvar_8616(
     return source_cvar
 
 
+@cython.ccall
 def materialize_wide_call_output_assignment_8616(
     codegen: object,
     cfunc: object,
@@ -310,6 +333,9 @@ def materialize_wide_call_output_assignment_8616(
     fact: WideCallOutputAssignmentFact8616,
 ) -> WideCallOutputAssignmentResolution8616:
     """Materialize one exact assignment and retire only its owned carriers."""
+    destination: object
+    pair_refusal: object
+    source_cvar: object
     boundary = cast(_CFunctionBoundary8616, cfunc)
     root = boundary.statements
     pair_refusal = _pair_legality_refusal_8616(source, fact)

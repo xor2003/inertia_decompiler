@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Decide whether one direct run needs project-wide global object evidence.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -31,6 +34,9 @@ from .callee_global_object_evidence import (
 from .callee_pointer_evidence import (
     recover_callee_pointer_argument_evidence_at_address_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 
 class GlobalObjectProgramRequirementVerdict8616(StrEnum):
@@ -49,25 +55,25 @@ class GlobalObjectProgramRequirementReason8616(StrEnum):
     CALLEE_GLOBAL_POINTER_SOURCE = "callee_global_pointer_source"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class GlobalObjectProgramRequirementEvidence8616:
     """Closed evidence loop for one whole-program object-context decision."""
 
     verdict: GlobalObjectProgramRequirementVerdict8616
-    reasons: tuple[GlobalObjectProgramRequirementReason8616, ...]
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    local_fact_count: int
-    global_pointer_source_count: int
-    stack_pointer_source_count: int
-    pointer_target_addrs: tuple[int, ...]
-    callsite_addrs: tuple[int, ...]
+    reasons: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    local_fact_count: cython.longlong
+    global_pointer_source_count: cython.longlong
+    stack_pointer_source_count: cython.longlong
+    pointer_target_addrs: object
+    callsite_addrs: object
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every input fact became a decision or refusal."""
         counts = (
             self.raw_fact_count,
@@ -77,21 +83,18 @@ class GlobalObjectProgramRequirementEvidence8616:
             self.failure_count,
         )
         return bool(
-            all(count >= 0 for count in counts)
-            and self.raw_fact_count
-            == self.classified_fact_count + self.failure_count
+            all(count >= 0 for count in iter(counts))
+            and operator.eq(self.raw_fact_count, self.classified_fact_count + self.failure_count)
             and self.raw_fact_count >= self.normalized_fact_count
             >= self.classified_fact_count
             == self.materialized_count
-            and self.local_fact_count + self.global_pointer_source_count
-            + self.stack_pointer_source_count
-            == self.classified_fact_count
-            and (self.verdict is GlobalObjectProgramRequirementVerdict8616.REQUIRED)
-            == bool(self.reasons)
+            and operator.eq(self.local_fact_count + self.global_pointer_source_count
+            + self.stack_pointer_source_count, self.classified_fact_count)
+            and operator.eq((self.verdict is GlobalObjectProgramRequirementVerdict8616.REQUIRED), bool(self.reasons))
         )
 
     @property
-    def requires_program(self) -> bool:
+    def requires_program(self) -> cython.bint:
         """Return whether proven facts require the complete program catalog."""
         return self.verdict is GlobalObjectProgramRequirementVerdict8616.REQUIRED
 
@@ -106,25 +109,29 @@ GLOBAL_OBJECT_PROGRAM_CALL_TARGET_KINDS_8616: frozenset[CallTargetKind8616] = fr
 )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _RequirementCensus8616:
     """Mutable census state for one catalog-requirement decision."""
 
-    reasons: set[GlobalObjectProgramRequirementReason8616] = field(default_factory=set)
-    local_fact_count: int = 0
-    global_source_count: int = 0
-    stack_source_count: int = 0
-    raw_count: int = 0
-    normalized_count: int = 0
-    classified_count: int = 0
-    pointer_targets: set[int] = field(default_factory=set)
-    relevant_callsites: set[int] = field(default_factory=set)
+    reasons: object = field(default_factory=set)
+    local_fact_count: cython.longlong = 0
+    global_source_count: cython.longlong = 0
+    stack_source_count: cython.longlong = 0
+    raw_count: cython.longlong = 0
+    normalized_count: cython.longlong = 0
+    classified_count: cython.longlong = 0
+    pointer_targets: object = field(default_factory=set)
+    relevant_callsites: object = field(default_factory=set)
 
+    @cython.ccall
     def scan_local_program(
         self,
         local_program: IndexedAliasProgramEvidence8616,
     ) -> None:
         """Count local facts that alone require the catalog."""
+        reason: object
+        fact: object
+        function_evidence: object
         for function_evidence in local_program.functions:
             # Access classification already projects upstream address refusals
             # exactly once. Retain that census here without double-counting
@@ -149,12 +156,18 @@ class _RequirementCensus8616:
         # facts, nothing required".
         self.raw_count += len(local_program.refusals)
 
+    @cython.ccall
     def scan_callsites(
         self,
         summaries: Sequence[CallsiteSummary8616],
-        pointer_argument_indices_by_target: Mapping[int, tuple[int, ...]],
+        pointer_argument_indices_by_target: Mapping[cython.longlong, tuple[cython.longlong, ...]],
     ) -> None:
         """Classify outgoing pointer-argument sources by provenance."""
+        pointer_indices: object
+        projected: object
+        source: object
+        _argument_index: object
+        summary: object
         for summary in summaries:
             target_addr = summary.target_addr
             if not isinstance(target_addr, int):
@@ -190,7 +203,7 @@ class _RequirementCensus8616:
 def recover_global_object_program_requirement_8616(
     local_program: IndexedAliasProgramEvidence8616,
     summaries: Sequence[CallsiteSummary8616],
-    pointer_argument_indices_by_target: Mapping[int, tuple[int, ...]],
+    pointer_argument_indices_by_target: Mapping[cython.longlong, tuple[cython.longlong, ...]],
 ) -> GlobalObjectProgramRequirementEvidence8616:
     """Join local and outgoing-call facts into one typed catalog decision."""
     if not local_program.closed:
@@ -240,22 +253,23 @@ def collect_global_object_program_requirement_8616(
     local_program: IndexedAliasProgramEvidence8616,
 ) -> GlobalObjectProgramRequirementEvidence8616:
     """Collect exact callsite and callee facts before deciding catalog need."""
+    target_addr: object
     call_targets = tuple(
         target
-        for target in collect_neighbor_call_targets(function)
+        for target in builtins.iter(collect_neighbor_call_targets(function))
         if target.kind in GLOBAL_OBJECT_PROGRAM_CALL_TARGET_KINDS_8616
     )
     summaries = tuple(
         build_callsite_summary_inventory_8616(
             function,
-            (target.callsite_addr for target in call_targets),
+            (target.callsite_addr for target in iter(call_targets)),
         ).values()
     )
-    pointer_indices_by_target: dict[int, tuple[int, ...]] = {}
+    pointer_indices_by_target: dict[cython.longlong, tuple[cython.longlong, ...]] = {}
     for target_addr in sorted(
         {
             summary.target_addr
-            for summary in summaries
+            for summary in iter(summaries)
             if isinstance(summary.target_addr, int)
         }
     ):

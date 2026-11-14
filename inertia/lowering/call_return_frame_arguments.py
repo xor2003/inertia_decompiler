@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Consume exact C arguments projected from machine CALL return frames.
 
 Layer: Types/Lowering.
@@ -15,6 +16,8 @@ exact semantic key. Address-only matches are explicit refusal cases.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -37,6 +40,9 @@ from inertia.semantics.call_return_frame_projections import (
     CallReturnFrameProjectionRole8616,
 )
 from inertia.semantics.callsite_summary import CallsiteSummary8616, structured_callsite_addr_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = (
     "CallReturnFrameArgumentPruneResult8616",
@@ -45,7 +51,7 @@ __all__ = (
     "prune_exact_call_return_frame_arguments_8616",
 )
 
-type StructuredAstValue = Any
+StructuredAstValue = typing.TypeAliasType("StructuredAstValue", Any)
 
 
 class CallReturnFrameArgumentPruneStatus8616(StrEnum):
@@ -57,28 +63,28 @@ class CallReturnFrameArgumentPruneStatus8616(StrEnum):
     UNKNOWN_REFUSE = "unknown_refuse"
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class CallReturnFrameArgumentPruneStats8616:
     """Closed evidence counters for CALL-frame arguments consumed by Lowering."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every observed projection was consumed or refused."""
         return (
             self.materialized_count <= self.classified_fact_count
             <= self.normalized_fact_count
             <= self.raw_fact_count
-            and self.materialized_count + self.failure_count == self.raw_fact_count
+            and operator.eq(self.materialized_count + self.failure_count, self.raw_fact_count)
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallReturnFrameArgumentPruneResult8616:
     """Typed outcome published after exact CALL-frame argument lowering."""
 
@@ -86,7 +92,7 @@ class CallReturnFrameArgumentPruneResult8616:
     stats: CallReturnFrameArgumentPruneStats8616
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether at least one source-invisible argument was removed."""
         return self.stats.materialized_count > 0
 
@@ -94,7 +100,7 @@ class CallReturnFrameArgumentPruneResult8616:
 class _CFunctionSurface8616(Protocol):
     """Third-party generated function fields consumed by this owner."""
 
-    addr: int
+    addr: cython.longlong
     statements: StructuredAstValue
     variables_in_use: object
     unified_local_vars: object
@@ -103,7 +109,7 @@ class _CFunctionSurface8616(Protocol):
 class _StructuredTagsSurface8616(Protocol):
     """Third-party dict/AIL Tags lookup surface at the structured-C boundary."""
 
-    def get(self, key: str) -> object | None:
+    def get(self, key: object) -> object | None:
         """Return one structured provenance tag when present."""
 
 
@@ -111,7 +117,7 @@ class _CodegenSurface8616(Protocol):
     """Owned codegen contracts consumed and published by this owner."""
 
     cfunc: _CFunctionSurface8616
-    _inertia_callsite_summaries: dict[int, CallsiteSummary8616]
+    _inertia_callsite_summaries: object
     _inertia_call_return_frame_argument_prune_8616: CallReturnFrameArgumentPruneResult8616
     _inertia_call_return_frame_effect_collection_8616: CallReturnFrameEffectCollection8616
 
@@ -133,11 +139,12 @@ def _expression_effect_key_8616(
         )
     except (AttributeError, TypeError):
         return None
-    if not all(isinstance(value, int) and not isinstance(value, bool) for value in values):
+    if not all(isinstance(value, int) and not isinstance(value, bool) for value in iter(values)):
         return None
-    return CallReturnFrameEffectKey8616(*(cast(int, value) for value in values))
+    return CallReturnFrameEffectKey8616(*(cast(int, value) for value in iter(values)))
 
 
+@cython.ccall
 def _function_for_codegen_8616(project: object, cfunc: _CFunctionSurface8616) -> object | None:
     """Resolve the current function at the dynamic angr project boundary."""
     project_dynamic = cast(Any, project)
@@ -147,21 +154,24 @@ def _function_for_codegen_8616(project: object, cfunc: _CFunctionSurface8616) ->
         return None
 
 
+@cython.ccall
 def _return_addresses_by_callsite_8616(
-    summaries: Mapping[int, CallsiteSummary8616],
-) -> dict[int, int]:
+    summaries: Mapping[cython.longlong, CallsiteSummary8616],
+) -> dict[cython.longlong, cython.longlong]:
     """Retain only callsites whose cloned summaries agree on return identity."""
-    candidates: dict[int, set[int]] = {}
+    summary: object
+    candidates: dict[cython.longlong, set[cython.longlong]] = {}
     for summary in summaries.values():
         if isinstance(summary.return_addr, int):
             candidates.setdefault(summary.callsite_addr, set()).add(summary.return_addr)
     return {
         callsite_addr: next(iter(return_addrs))
-        for callsite_addr, return_addrs in candidates.items()
+        for callsite_addr, return_addrs in builtins.iter(candidates.items())
         if len(return_addrs) == 1
     }
 
 
+@cython.ccall
 def _status_8616(
     stats: CallReturnFrameArgumentPruneStats8616,
 ) -> CallReturnFrameArgumentPruneStatus8616:
@@ -175,6 +185,7 @@ def _status_8616(
     return CallReturnFrameArgumentPruneStatus8616.NOT_APPLICABLE
 
 
+@cython.ccall
 def _empty_result_8616(
     surface: _CodegenSurface8616,
     stats: CallReturnFrameArgumentPruneStats8616,
@@ -193,9 +204,11 @@ def _retire_declaration_only_frame_locals_8616(
     root: StructuredAstValue,
 ) -> None:
     """Retire dead negative-BP declarations after exact frame consumption."""
+    mapping: object
+    variable: object
     referenced = tuple(
         node.variable
-        for node in _iter_c_nodes_deep_8616(root)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(root))
         if isinstance(node, structured_c.CVariable)
         and isinstance(node.variable, SimStackVariable)
     )
@@ -211,29 +224,27 @@ def _retire_declaration_only_frame_locals_8616(
                 isinstance(variable, SimStackVariable)
                 and variable.base == "bp"
                 and variable.offset < 0
-                and not any(variable is item or variable == item for item in referenced)
+                and not any(variable is item or variable == item for item in iter(referenced))
             ):
                 mapping.pop(variable, None)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _CallReturnFrameIndex8616:
     """By-key effect/projection groupings plus refused producer keys."""
 
-    effects_by_key: dict[CallReturnFrameEffectKey8616, list[CallReturnFrameEffectRole8616]]
-    projections_by_key: dict[
-        CallReturnFrameEffectKey8616,
-        list[CallReturnFrameProjectionFact8616],
-    ]
-    refused_keys: set[CallReturnFrameEffectKey8616]
+    effects_by_key: object
+    projections_by_key: object
+    refused_keys: object
 
 
 def _prune_inputs_8616(
     project: object,
     surface: _CodegenSurface8616,
     function: object | None,
-) -> tuple[object, dict[int, CallsiteSummary8616], object, dict[int, int]] | None:
+) -> object:
     """Return validated (root, summaries, function, return_addrs) or None."""
+    active_function: object
     try:
         root = surface.cfunc.statements
         summaries = surface._inertia_callsite_summaries
@@ -241,7 +252,7 @@ def _prune_inputs_8616(
         return None
     if not isinstance(summaries, dict) or any(
         not isinstance(key, int) or not isinstance(summary, CallsiteSummary8616)
-        for key, summary in summaries.items()
+        for key, summary in builtins.iter(summaries.items())
     ):
         raise TypeError("callsite summary carrier contains an invalid owned contract")
     active_function = function or _function_for_codegen_8616(project, surface.cfunc)
@@ -251,10 +262,13 @@ def _prune_inputs_8616(
     return root, summaries, active_function, return_addrs
 
 
+@cython.ccall
 def _effect_index_8616(
     collection: CallReturnFrameEffectCollection8616,
 ) -> _CallReturnFrameIndex8616:
     """Group effects and projections by key plus refused producer keys."""
+    effect: object
+    projection: object
     effects_by_key: dict[CallReturnFrameEffectKey8616, list[CallReturnFrameEffectRole8616]] = {}
     for effect in collection.effects:
         effects_by_key.setdefault(effect.key, []).append(effect.role)
@@ -266,22 +280,23 @@ def _effect_index_8616(
         projections_by_key.setdefault(projection.projection_key, []).append(projection)
     refused_keys = {
         producer_key
-        for refusal in collection.projection_collection.refusals
-        for producer_key in refusal.producer_keys
+        for refusal in iter(collection.projection_collection.refusals)
+        for producer_key in iter(refusal.producer_keys)
     }
     return _CallReturnFrameIndex8616(effects_by_key, projections_by_key, refused_keys)
 
 
+@cython.ccall
 def _relation_exact_8616(
     key: CallReturnFrameEffectKey8616,
     projection: CallReturnFrameProjectionFact8616,
-    effects_by_key: dict[CallReturnFrameEffectKey8616, list[CallReturnFrameEffectRole8616]],
-) -> bool:
+    effects_by_key: object,
+) -> cython.bint:
     """Return whether the projection joins the argument to one stack store."""
     store_roles = tuple(effects_by_key.get(projection.store_key, ()))
     if (
-        projection.projection_key != key
-        or projection.store_key.callsite_addr != key.callsite_addr
+        operator.ne(projection.projection_key, key)
+        or operator.ne(projection.store_key.callsite_addr, key.callsite_addr)
         or len(store_roles) != 1
         or store_roles[0] is not CallReturnFrameEffectRole8616.STACK_STORE
     ):
@@ -289,27 +304,29 @@ def _relation_exact_8616(
     return (
         (
             projection.role is CallReturnFrameProjectionRole8616.STORE_STATEMENT
-            and projection.projection_key == projection.store_key
+            and operator.eq(projection.projection_key, projection.store_key)
         )
         or (
             projection.role is CallReturnFrameProjectionRole8616.VALUE_PRODUCER
-            and projection.projection_key != projection.store_key
+            and operator.ne(projection.projection_key, projection.store_key)
         )
     )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _CallReturnFramePruneScan8616:
     """Per-node prune state: grouped evidence plus the owning stats."""
 
     stats: CallReturnFrameArgumentPruneStats8616
     index: _CallReturnFrameIndex8616
-    return_addrs: dict[int, int]
+    return_addrs: object
     callsite_addr: object
     summary: CallsiteSummary8616 | None
 
-    def keep_argument(self, argument: StructuredAstValue) -> bool:
+    @cython.ccall
+    def keep_argument(self, argument: StructuredAstValue) -> cython.bint:
         """Return whether one argument survives the exact-store join."""
+        key: object
         key = _expression_effect_key_8616(argument)
         if key is None:
             return True
@@ -336,23 +353,25 @@ class _CallReturnFramePruneScan8616:
         self.stats.materialized_count += 1
         return False
 
+    @cython.ccall
     def _callsite_consistent_8616(
         self,
         key: CallReturnFrameEffectKey8616,
         projection: CallReturnFrameProjectionFact8616,
-    ) -> bool:
+    ) -> cython.bint:
         """Return whether the node callsite and summary agree exactly."""
         return (
             self.summary is not None
             and isinstance(self.callsite_addr, int)
-            and key.callsite_addr == self.callsite_addr
-            and projection.store_key.callsite_addr == self.callsite_addr
-            and self.summary.callsite_addr == self.callsite_addr
+            and operator.eq(key.callsite_addr, self.callsite_addr)
+            and operator.eq(projection.store_key.callsite_addr, self.callsite_addr)
+            and operator.eq(self.summary.callsite_addr, self.callsite_addr)
             and isinstance(self.summary.return_addr, int)
-            and self.return_addrs.get(self.callsite_addr) == self.summary.return_addr
+            and operator.eq(self.return_addrs.get(self.callsite_addr), self.summary.return_addr)
         )
 
 
+@cython.ccall
 def prune_exact_call_return_frame_arguments_8616(
     project: object,
     codegen: object,
@@ -360,6 +379,8 @@ def prune_exact_call_return_frame_arguments_8616(
     function: object | None = None,
 ) -> CallReturnFrameArgumentPruneResult8616:
     """Remove C arguments joined to exact Semantics-owned CALL-frame stores."""
+    inputs: object
+    node: object
     surface = cast(_CodegenSurface8616, codegen)
     stats = CallReturnFrameArgumentPruneStats8616()
     inputs = _prune_inputs_8616(project, surface, function)
@@ -386,9 +407,9 @@ def prune_exact_call_return_frame_arguments_8616(
             summary=summaries.get(id(node)),
         )
         retained = [
-            argument for argument in tuple(node.args) if scan.keep_argument(argument)
+            argument for argument in builtins.iter(tuple(node.args)) if scan.keep_argument(argument)
         ]
-        if len(retained) != len(node.args):
+        if operator.ne(len(retained), len(node.args)):
             node.args = retained
     if stats.classified_fact_count > 0 and stats.materialized_count == 0:
         raise PipelineHardError(

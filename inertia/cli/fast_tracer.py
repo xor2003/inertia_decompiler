@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Optional evidence/reporting.
 
 Responsibility: find fast candidate entry points from direct 16-bit trace evidence.
@@ -11,52 +12,58 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Protocol
+import dataclasses
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class FastTraceResult:
     """Optional trace-derived entry candidates that still require validation."""
 
-    entries: tuple[int, ...]
-    call_targets: tuple[int, ...]
-    jump_targets: tuple[int, ...]
-    returns: tuple[int, ...]
-    scores: dict[int, int]
+    entries: object
+    call_targets: object
+    jump_targets: object
+    returns: object
+    scores: object
 
 
 class _DecodedInsn8616(Protocol):
     """Capstone instruction fields consumed at the dynamic arch boundary."""
 
-    size: int
-    address: int
-    mnemonic: str
+    size: cython.longlong
+    address: cython.longlong
+    mnemonic: object
 
 
 class _CapstoneDisasm8616(Protocol):
     """Capstone disassembler reached through the dynamic angr arch object."""
 
-    def disasm(self, code: bytes, addr: int, count: int) -> Iterator[_DecodedInsn8616]:
+    def disasm(self, code: object, addr: cython.longlong, count: cython.longlong) -> Iterator[_DecodedInsn8616]:
         """Yield up to ``count`` decoded instructions starting at ``addr``."""
         ...
 
 
-def _looks_like_16bit_function_prologue(code: bytes, offset: int) -> bool:
+@cython.ccall
+def _looks_like_16bit_function_prologue(code: object, offset: cython.longlong) -> cython.bint:
     window = code[offset : offset + 4]
     return window.startswith(b"\x55\x8b\xec")
 
 
-def _looks_like_16bit_entry_byte(code: bytes, offset: int) -> bool:
+@cython.ccall
+def _looks_like_16bit_entry_byte(code: object, offset: cython.longlong) -> cython.bint:
     if offset < 0 or offset >= len(code):
         return False
     byte = code[offset]
     return byte not in {0x00, 0x90, 0xCC}
 
 
-def _resolve_16bit_function_start(code: bytes, offset: int, *, max_padding: int = 0x10) -> int | None:
+@cython.ccall
+def _resolve_16bit_function_start(code: object, offset: cython.longlong, *, max_padding: cython.longlong = 0x10) -> int | None:
     if offset < 0 or offset >= len(code):
         return None
     if _looks_like_16bit_function_prologue(code, offset):
@@ -70,7 +77,9 @@ def _resolve_16bit_function_start(code: bytes, offset: int, *, max_padding: int 
     return None
 
 
-def _resolve_16bit_call_target(code: bytes, offset: int) -> int | None:
+@cython.ccall
+def _resolve_16bit_call_target(code: object, offset: cython.longlong) -> int | None:
+    canonical: object
     canonical = _resolve_16bit_function_start(code, offset)
     if canonical is not None:
         return canonical
@@ -79,13 +88,15 @@ def _resolve_16bit_call_target(code: bytes, offset: int) -> int | None:
     return None
 
 
+@cython.ccall
 def _branch_target_event_8616(
-    code: bytes,
-    offset: int,
-    insn_addr: int,
-    linked_base: int,
-) -> tuple[int, int, str] | None:
+    code: object,
+    offset: cython.longlong,
+    insn_addr: cython.longlong,
+    linked_base: cython.longlong,
+) -> object:
     """Return one scored call/jump event for a direct branch instruction."""
+    canonical: object
     opcode = code[offset]
     if opcode == 0xE8 and offset + 2 < len(code):
         rel = int.from_bytes(code[offset + 1 : offset + 3], "little", signed=True)
@@ -107,16 +118,19 @@ def _branch_target_event_8616(
     return None
 
 
+@cython.ccall
 def _trace_window_8616(
-    code: bytes,
-    window_start: int,
-    window_end: int,
-    linked_base: int,
+    code: object,
+    window_start: cython.longlong,
+    window_end: cython.longlong,
+    linked_base: cython.longlong,
     disasm: _CapstoneDisasm8616,
-) -> tuple[list[tuple[int, int, str]], set[int]]:
+) -> tuple[list[tuple[cython.longlong, cython.longlong, str]], set[cython.longlong]]:
     """Return scored candidate events and return sites for one trace window."""
-    events: list[tuple[int, int, str]] = []
-    returns: set[int] = set()
+    event: object
+    insn: object
+    events: list[tuple[cython.longlong, cython.longlong, str]] = []
+    returns: set[cython.longlong] = set()
     align_bytes = {0x00, 0x90, 0xCC}
     offset = max(0, window_start - linked_base)
     stop = min(len(code), window_end - linked_base)
@@ -144,10 +158,10 @@ def _trace_window_8616(
 
 def trace_16bit_seed_candidates(
     project: object,
-    code: bytes,
+    code: object,
     *,
-    linked_base: int,
-    windows: list[tuple[int, int]],
+    linked_base: cython.longlong,
+    windows: object,
 ) -> FastTraceResult:
     """Find optional 16-bit entry candidates from direct trace evidence.
 
@@ -155,16 +169,22 @@ def trace_16bit_seed_candidates(
     objects. Results are candidates only and must not be treated as proven
     function boundaries without later validation.
     """
+    disasm: object
+    addr: object
+    bucket_name: object
+    weight: object
+    window_end: object
+    window_start: object
     image_end = linked_base + len(code)
-    call_targets: set[int] = set()
-    jump_targets: set[int] = set()
-    returns: set[int] = set()
-    scores: dict[int, int] = {}
+    call_targets: set[cython.longlong] = set()
+    jump_targets: set[cython.longlong] = set()
+    returns: set[cython.longlong] = set()
+    scores: dict[cython.longlong, cython.longlong] = {}
 
-    def _in_windows(addr: int) -> bool:
-        return any(start <= addr < end for start, end in windows)
+    def _in_windows(addr: cython.longlong) -> cython.bint:
+        return any(start <= addr < end for start, end in iter(windows))
 
-    def _add(addr: int, weight: int, bucket: set[int]) -> None:
+    def _add(addr: cython.longlong, weight: cython.longlong, bucket: object) -> None:
         if not (linked_base <= addr < image_end):
             return
         if not _in_windows(addr):

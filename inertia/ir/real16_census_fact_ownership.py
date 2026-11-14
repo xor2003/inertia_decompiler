@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Constant-size receipts for ordinary, closed census stage sets.
 
 Layer: IR.
@@ -12,27 +13,33 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable, Set
 from dataclasses import dataclass, field
 from typing import Self, cast
+import dataclasses
+import operator
+import builtins
 
-type CensusFact8616 = tuple[int, int]
+CensusFact8616 = typing.TypeAliasType("CensusFact8616", tuple[int, int])
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _FactOwner8616:
     """Track nested rows independently; callbacks may interleave row completion."""
 
-    pending: dict[CensusFact8616, int] = field(default_factory=dict)
-    dirty: bool = False
+    pending: object = field(default_factory=dict)
+    dirty: cython.bint = False
     sets: tuple[_OwnedFacts8616, ...] = ()
 
-    def advance(self, stage: int, row: CensusFact8616) -> None:
+    @cython.ccall
+    def advance(self, stage: cython.longlong, row: CensusFact8616) -> None:
         """Accept only the canonical four additions for each completed row."""
         if self.dirty:
             return
-        if self.pending.get(row, 0) != stage:
+        if operator.ne(self.pending.get(row, 0), stage):
             self.dirty = True
         elif stage == 3:
             del self.pending[row]
@@ -44,10 +51,11 @@ class _OwnedFacts8616(set[CensusFact8616]):
     """A genuine set with mutation accounting; bulk edits decline receipts."""
 
     owner: _FactOwner8616
-    stage: int
-    version: int
+    stage: cython.longlong
+    version: cython.longlong
 
-    def __init__(self, owner: _FactOwner8616, stage: int) -> None:
+    def __init__(self, owner: _FactOwner8616, stage: cython.longlong) -> None:
+        prior_owner: object
         try:
             prior_owner = self.owner
         except AttributeError:
@@ -147,6 +155,7 @@ class _OwnedFacts8616(set[CensusFact8616]):
         return self
 
 
+@cython.ccall
 def _fact_producers_8616() -> tuple[object, ...]:
     """Pin the owned transition and every supported mutation entry point."""
     return (
@@ -161,15 +170,15 @@ def _fact_producers_8616() -> tuple[object, ...]:
     )
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False)
 class CensusFactOwnership8616:
     """A bounded ownership receipt, not native or semantic proof authority."""
 
-    sets: tuple[set[CensusFact8616], ...]
-    versions: tuple[int, ...]
+    sets: object
+    versions: object
 
 
-def new_census_fact_sets_8616() -> tuple[set[CensusFact8616], ...]:
+def new_census_fact_sets_8616() -> object:
     """Create four empty, distinct ordinary sets sharing transition ownership."""
     owner = _FactOwner8616()
     owner.sets = tuple(_OwnedFacts8616(owner, stage) for stage in range(4))
@@ -177,13 +186,15 @@ def new_census_fact_sets_8616() -> tuple[set[CensusFact8616], ...]:
 
 
 def census_fact_ownership_8616(
-    sets: tuple[set[CensusFact8616], ...],
+    sets: object,
 ) -> CensusFactOwnership8616 | None:
     """Certify complete owned additions in constant work; plain sets decline."""
-    if len(sets) != 4 or any(type(item) is not _OwnedFacts8616 for item in sets):
+    index: object
+    item: object
+    if len(sets) != 4 or any(type(item) is not _OwnedFacts8616 for item in iter(sets)):
         return None
     actual = _fact_producers_8616()
-    if any(a is not b for a, b in zip(actual, _CANONICAL_FACT_PRODUCERS_8616, strict=True)):
+    if any(a is not b for a, b in builtins.iter(zip(actual, _CANONICAL_FACT_PRODUCERS_8616, strict=True))):
         return None
     raw = sets[0]
     assert isinstance(raw, _OwnedFacts8616)
@@ -192,20 +203,21 @@ def census_fact_ownership_8616(
         return None
     for index, item in enumerate(sets):
         assert isinstance(item, _OwnedFacts8616)
-        if item.owner is not owner or item.stage != index or owner.sets[index] is not item:
+        if item.owner is not owner or operator.ne(item.stage, index) or owner.sets[index] is not item:
             return None
-    return CensusFactOwnership8616(sets, tuple(item.version for item in owner.sets))
+    return CensusFactOwnership8616(sets, tuple(item.version for item in iter(owner.sets)))
 
 
 def census_fact_ownership_current_8616(
-    receipt: CensusFactOwnership8616, sets: tuple[set[CensusFact8616], ...],
-) -> bool:
+    receipt: CensusFactOwnership8616, sets: object,
+) -> cython.bint:
     """Reject replacement, partial rows and same-cardinality in-place changes."""
+    current: object
     current = census_fact_ownership_8616(sets)
     return (
-        current is not None and current.versions == receipt.versions
-        and all(a is b for a, b in zip(current.sets, receipt.sets, strict=True))
+        current is not None and operator.eq(current.versions, receipt.versions)
+        and all(a is b for a, b in builtins.iter(zip(current.sets, receipt.sets, strict=True)))
     )
 
 
-_CANONICAL_FACT_PRODUCERS_8616: tuple[object, ...] = _fact_producers_8616()
+_CANONICAL_FACT_PRODUCERS_8616: object = _fact_producers_8616()

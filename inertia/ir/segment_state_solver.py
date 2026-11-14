@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Solve typed segment-register state across a function CFG.
 
 Layer: IR.
@@ -9,11 +10,24 @@ work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING, cast
+import dataclasses
+import operator
+DeclaredCallAdmission8616 = typing.TypeVar("DeclaredCallAdmission8616")
+NearCallJumpScope8616 = typing.TypeVar("NearCallJumpScope8616")
+Real16InvocationDomain8616 = typing.TypeVar("Real16InvocationDomain8616")
+ScopedFunctionCFGProjection8616 = typing.TypeVar("ScopedFunctionCFGProjection8616")
+ScopedFunctionIRView8616 = typing.TypeVar("ScopedFunctionIRView8616")
+ScopedIndirectTargetView8616 = typing.TypeVar("ScopedIndirectTargetView8616")
+ScopedNearReturnContinuationView8616 = typing.TypeVar("ScopedNearReturnContinuationView8616")
+SegmentCallPreservationResult8616 = typing.TypeVar("SegmentCallPreservationResult8616")
+SegmentEntryContext8616 = typing.TypeVar("SegmentEntryContext8616")
 
 if TYPE_CHECKING:
     from inertia.frontend.x86_16.declared_external_call_evidence import DeclaredCallAdmission8616
@@ -28,6 +42,7 @@ if TYPE_CHECKING:
         ScopedFunctionCFGProjection8616,
         ScopedFunctionIRView8616,
     )
+    from .scoped_indirect_target_view import ScopedIndirectTargetView8616
     from .segment_call_preservation import SegmentCallPreservationResult8616
 
 from .core import IRFunctionArtifact
@@ -48,7 +63,7 @@ from .ssa_function import SSAFunctionArtifact, build_x86_16_ir_predecessor_map
 __all__ = ["SegmentStateSolution8616", "solve_segment_state_8616"]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentStateSolution8616:
     """Raw block and instruction state maps from the IR fixed point.
 
@@ -59,43 +74,46 @@ class SegmentStateSolution8616:
     view itself.
     """
 
-    entry_states: dict[int, dict[str, SegmentRegisterState]]
-    exit_states: dict[int, dict[str, SegmentRegisterState]]
-    instruction_entry_states: dict[InstructionStateKey, dict[str, SegmentRegisterState]]
-    instruction_exit_states: dict[InstructionStateKey, dict[str, SegmentRegisterState]]
+    entry_states: object
+    exit_states: object
+    instruction_entry_states: object
+    instruction_exit_states: object
     scoped_projection: ScopedFunctionCFGProjection8616 | None = field(
         default=None, repr=False, compare=False
     )
 
 
 def _predecessor_register_states(
-    predecessors: tuple[int, ...],
-    exit_states: dict[int, dict[str, SegmentRegisterState]],
-    register: str,
+    predecessors: object,
+    exit_states: object,
+    register: object,
 ) -> tuple[SegmentRegisterState, ...]:
     """Return initialized predecessor facts, treating absent maps as dataflow bottom."""
     return tuple(
         state
-        for predecessor in predecessors
+        for predecessor in iter(predecessors)
         if (state := exit_states.get(predecessor, {}).get(register)) is not None
     )
 
 
+@cython.ccall
 def _join_entry_state(
-    predecessor_map: dict[int, tuple[int, ...]],
-    exit_states: dict[int, dict[str, SegmentRegisterState]],
-    block_addr: int,
-    function_addr: int,
+    predecessor_map: object,
+    exit_states: object,
+    block_addr: cython.longlong,
+    function_addr: cython.longlong,
     entry_context: SegmentEntryContext8616 | None,
-) -> dict[str, SegmentRegisterState]:
+) -> object:
     """Join predecessor segment identities as must-state."""
+    predecessors: object
+    register: object
     predecessors = predecessor_map.get(block_addr, ())
     if not predecessors and block_addr != function_addr:
-        return {register: unknown_segment_state(register) for register in SEGMENT_REGISTERS}
+        return {register: unknown_segment_state(register) for register in iter(SEGMENT_REGISTERS)}
     result: dict[str, SegmentRegisterState] = {}
     for register in SEGMENT_REGISTERS:
         states = (
-            ((_contextual_live_in_8616(register, entry_context),) if block_addr == function_addr else ())
+            (tuple((_contextual_live_in_8616(register, entry_context),)) if block_addr == function_addr else tuple(()))
             + _predecessor_register_states(predecessors, exit_states, register)
         )
         if states:
@@ -103,8 +121,9 @@ def _join_entry_state(
     return result
 
 
+@cython.ccall
 def _contextual_live_in_8616(
-    register: str, entry_context: SegmentEntryContext8616 | None,
+    register: object, entry_context: object,
 ) -> SegmentRegisterState:
     """Name a proved equality relative to this callee's SS live-in value."""
     state = architectural_live_in_state("ss" if entry_context is not None and register == "ds" else register)
@@ -115,11 +134,11 @@ def _contextual_live_in_8616(
 def _scoped_predecessor_map_8616(
     artifact: IRFunctionArtifact,
     scoped_view: (
-        ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616
+        ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | ScopedIndirectTargetView8616
     ),
-    invocation_scope: Real16InvocationDomain8616 | None,
-    near_call_scope: NearCallJumpScope8616 | None,
-) -> tuple[dict[int, tuple[int, ...]], ScopedFunctionCFGProjection8616]:
+    invocation_scope: object,
+    near_call_scope: object,
+) -> tuple[dict[cython.longlong, tuple[cython.longlong, ...]], ScopedFunctionCFGProjection8616]:
     """Authenticate the scoped view once and return its effective CFG.
 
     The consuming entry is independently supplied — never read back from
@@ -137,6 +156,9 @@ def _scoped_predecessor_map_8616(
     predecessor tuple and join to honest unknowns exactly like the
     universal route.
     """
+    projection: object
+    retained_scope: object
+    block_addr: object
     from .near_call_jump_scope import NearCallJumpScope8616
     from .real16_invocation_domain import Real16InvocationDomain8616
     from .scoped_function_ir_view import ScopedFunctionIRView8616
@@ -169,15 +191,15 @@ def _scoped_predecessor_map_8616(
         projection is None
         or projection.source_artifact is not artifact
         or projection.scope is not scope
-        or projection.function_addr != artifact.function_addr
+        or operator.ne(projection.function_addr, artifact.function_addr)
     ):
         raise ValueError(
             "scoped view refused its CFG projection under the supplied entry"
         )
-    census = {block.addr for block in artifact.blocks}
+    census = {block.addr for block in iter(artifact.blocks)}
     if (
-        set(projection.predecessors) != census
-        or set(projection.pending) != census
+        operator.ne(set(projection.predecessors), census)
+        or operator.ne(set(projection.pending), census)
     ):
         raise ValueError(
             "scoped projection census diverges from the raw IR census"
@@ -189,10 +211,10 @@ def _scoped_predecessor_map_8616(
             raise ValueError(
                 "a pending block must not publish an outgoing-edge claim"
             )
-    predecessor_map: dict[int, tuple[int, ...]] = {}
+    predecessor_map: dict[cython.longlong, tuple[cython.longlong, ...]] = {}
     for block_addr in sorted(census):
         predecessors = projection.predecessors[block_addr]
-        if any(predecessor not in census for predecessor in predecessors):
+        if any(predecessor not in census for predecessor in iter(predecessors)):
             raise ValueError(
                 "scoped projection records a foreign predecessor edge"
             )
@@ -202,8 +224,8 @@ def _scoped_predecessor_map_8616(
 
 def _require_supplied_predecessor_map_8616(
     function_ssa: SSAFunctionArtifact,
-    census: set[int],
-    predecessor_map: dict[int, tuple[int, ...]],
+    census: object,
+    predecessor_map: object,
 ) -> None:
     """Reject a supplied SSA map that conflicts with the effective CFG.
 
@@ -214,17 +236,19 @@ def _require_supplied_predecessor_map_8616(
     recorded predecessor, or any edge disagreement refuses the solve;
     the scoped route never falls back to either graph alone.
     """
+    block_addr: object
+    predecessors: object
     supplied = function_ssa.predecessor_map
     for block_addr, predecessors in supplied.items():
         if block_addr not in census or any(
-            predecessor not in census for predecessor in predecessors
+            predecessor not in census for predecessor in iter(predecessors)
         ):
             raise ValueError(
                 "supplied SSA predecessor map names a foreign CFG address"
             )
     completed = {
-        block_addr: tuple(sorted(supplied.get(block_addr, ())))
-        for block_addr in census
+        block_addr: tuple(sorted(tuple(supplied.get(block_addr, ()))))
+        for block_addr in iter(census)
     }
     if completed != predecessor_map:
         raise ValueError(
@@ -233,22 +257,24 @@ def _require_supplied_predecessor_map_8616(
         )
 
 
+@cython.ccall
 def _solve_once(
     artifact: IRFunctionArtifact,
-    predecessor_map: dict[int, tuple[int, ...]],
-    restore_sources: tuple[SegmentRestoreSource, ...],
-    saved_instruction_entries: dict[InstructionStateKey, dict[str, SegmentRegisterState]],
-    call_preservations: tuple[SegmentCallPreservationResult8616, ...],
+    predecessor_map: object,
+    restore_sources: object,
+    saved_instruction_entries: object,
+    call_preservations: object,
     entry_context: SegmentEntryContext8616 | None,
     invocation_scope: Real16InvocationDomain8616 | None,
-    declared_call_effects: tuple[DeclaredCallAdmission8616, ...] = (),
+    declared_call_effects: object = (),
     near_call_effects: Mapping[int, frozenset[str]] | None = None,
 ) -> SegmentStateSolution8616:
     """Solve one CFG fixed point using the prior restore-source state surface."""
-    blocks_by_addr = {block.addr: block for block in artifact.blocks}
+    block_addr: object
+    blocks_by_addr = {block.addr: block for block in iter(artifact.blocks)}
     ordered_blocks = sorted(blocks_by_addr)
-    entry_states: dict[int, dict[str, SegmentRegisterState]] = {addr: {} for addr in blocks_by_addr}
-    exit_states: dict[int, dict[str, SegmentRegisterState]] = {addr: {} for addr in blocks_by_addr}
+    entry_states: dict[cython.longlong, dict[str, SegmentRegisterState]] = {addr: {} for addr in iter(blocks_by_addr)}
+    exit_states: dict[cython.longlong, dict[str, SegmentRegisterState]] = {addr: {} for addr in iter(blocks_by_addr)}
     instruction_entries: dict[InstructionStateKey, dict[str, SegmentRegisterState]] = {}
     instruction_exits: dict[InstructionStateKey, dict[str, SegmentRegisterState]] = {}
     changed = True
@@ -280,10 +306,10 @@ def _solve_once(
             )
             sweep_entries.update(block_entries)
             sweep_exits.update(block_exits)
-            if new_entry != entry_states[block_addr]:
+            if operator.ne(new_entry, entry_states[block_addr]):
                 entry_states[block_addr] = new_entry
                 changed = True
-            if new_exit != exit_states[block_addr]:
+            if operator.ne(new_exit, exit_states[block_addr]):
                 exit_states[block_addr] = new_exit
                 changed = True
         instruction_entries = sweep_entries
@@ -316,13 +342,15 @@ def _solve_once(
     )
 
 
+@cython.ccall
 def _prepare_near_call_effects(
-    artifact: IRFunctionArtifact, near_call_scope: NearCallJumpScope8616 | None,
-) -> tuple[Mapping[int, frozenset[str]], str | None, str | None]:
+    artifact: IRFunctionArtifact, near_call_scope: object,
+) -> tuple[Mapping[cython.longlong, frozenset[str]], str | None, str | None]:
     """Authenticate and prepare operation-local conditional CALL effects."""
-    source_before: str | None = None
-    dependencies_before: str | None = None
-    near_call_effects: dict[int, frozenset[str]] = {}
+    step: object
+    source_before: object = None
+    dependencies_before: object = None
+    near_call_effects: dict[cython.longlong, frozenset[str]] = {}
     if near_call_scope is not None:
         from .entry_domain_call_preservation import _callee_preserved_registers_8616
         from .near_call_jump_scope import _dependency_facts_8616, authenticate_near_call_jump_scope_8616
@@ -339,9 +367,10 @@ def _prepare_near_call_effects(
     return MappingProxyType(near_call_effects), source_before, dependencies_before
 
 
+@cython.ccall
 def _reconcile_near_call_effects(
-    artifact: IRFunctionArtifact, near_call_scope: NearCallJumpScope8616 | None,
-    source_before: str | None, dependencies_before: str | None,
+    artifact: IRFunctionArtifact, near_call_scope: object,
+    source_before: object, dependencies_before: object,
 ) -> None:
     """Revalidate bytes and frozen dependencies before publishing solved state."""
     from .near_call_jump_scope import _dependency_facts_8616, authenticate_near_call_jump_scope_8616
@@ -349,20 +378,21 @@ def _reconcile_near_call_effects(
 
     if near_call_scope is not None and (
         not authenticate_near_call_jump_scope_8616(near_call_scope, project=near_call_scope.project, artifact=artifact)
-        or source_before != canonical_source_graph_8616(artifact.function_addr, artifact.blocks)
-        or dependencies_before != _dependency_facts_8616(near_call_scope)
+        or operator.ne(source_before, canonical_source_graph_8616(artifact.function_addr, artifact.blocks))
+        or operator.ne(dependencies_before, _dependency_facts_8616(near_call_scope))
     ):
         raise ValueError("near-call segment dependencies changed during solve")
 
 
+@cython.ccall
 def _restore_chain_fixed_point_8616(
     artifact: IRFunctionArtifact,
-    predecessor_map: dict[int, tuple[int, ...]],
-    restore_sources: tuple[SegmentRestoreSource, ...],
-    call_preservations: tuple[SegmentCallPreservationResult8616, ...],
+    predecessor_map: object,
+    restore_sources: object,
+    call_preservations: object,
     entry_context: SegmentEntryContext8616 | None,
     invocation_scope: Real16InvocationDomain8616 | None,
-    declared_call_effects: tuple[DeclaredCallAdmission8616, ...],
+    declared_call_effects: object,
     near_call_effects: Mapping[int, frozenset[str]] | None,
 ) -> SegmentStateSolution8616:
     """Re-solve while prior instruction entries still feed restore chains.
@@ -381,7 +411,7 @@ def _restore_chain_fixed_point_8616(
     )
     if restore_sources or call_preservations or declared_call_effects:
         for _ in range(len(restore_sources) + 2):
-            if solution.instruction_entry_states == saved_entries:
+            if operator.eq(solution.instruction_entry_states, saved_entries):
                 break
             saved_entries = solution.instruction_entry_states
             solution = _solve_once(
@@ -392,9 +422,10 @@ def _restore_chain_fixed_point_8616(
     return solution
 
 
+@cython.ccall
 def _require_distinct_near_scope(
-    scope: NearCallJumpScope8616 | None, view: object,
-    invocation: Real16InvocationDomain8616 | None, entry: SegmentEntryContext8616 | None,
+    scope: object, view: object,
+    invocation: object, entry: object,
 ) -> None:
     """Require independently supplied near scope with no competing entry domain."""
     if scope is not None and (view is None or invocation is not None or entry is not None):
@@ -405,6 +436,7 @@ def _require_native_invocation_surface_8616(
     artifact: IRFunctionArtifact, scope: Real16InvocationDomain8616,
 ) -> None:
     """Authenticate ordinary coverage or an identical refusal-free chained body."""
+    retained: object
     from .real16_invocation_domain import (
         Real16InvocationKind8616,
         _retained_parent_census_surface_8616,
@@ -418,24 +450,25 @@ def _require_native_invocation_surface_8616(
     retained = _retained_parent_census_surface_8616(scope)
     if (scope.kind is Real16InvocationKind8616.CALL_CHAINED and retained is not None
             and retained[0] is artifact and not artifact.refusals
-            and not any(block.refusals for block in artifact.blocks)):
+            and not any(block.refusals for block in iter(artifact.blocks))):
         return
     raise ValueError("invocation scope is not bound to this registered IR")
 
 
+@cython.ccall
 def solve_segment_state_8616(
     artifact: IRFunctionArtifact,
-    function_ssa: SSAFunctionArtifact | None,
-    restore_sources: tuple[SegmentRestoreSource, ...],
-    call_preservations: tuple[SegmentCallPreservationResult8616, ...] = (),
+    function_ssa: object,
+    restore_sources: object,
+    call_preservations: object = (),
     *,
     entry_context: SegmentEntryContext8616 | None = None,
     invocation_scope: Real16InvocationDomain8616 | None = None,
     near_call_scope: NearCallJumpScope8616 | None = None,
     scoped_view: (
-        ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None
+        ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | ScopedIndirectTargetView8616 | None
     ) = None,
-    declared_call_effects: tuple[DeclaredCallAdmission8616, ...] = (),
+    declared_call_effects: object = (),
 ) -> SegmentStateSolution8616:
     """Solve local restore chains with an optional exact-callsite entry relation.
 
@@ -457,11 +490,12 @@ def solve_segment_state_8616(
     conditional view is retained as scoped evidence, never published as
     universal function state.
     """
+    scoped_projection: object
     if entry_context is not None and (
         not entry_context.complete or entry_context.callee.artifact is not artifact
     ):
         raise ValueError("segment entry context is not bound to this callee IR")
-    scoped_projection: ScopedFunctionCFGProjection8616 | None = None
+    scoped_projection = None
     _require_distinct_near_scope(near_call_scope, scoped_view, invocation_scope, entry_context)
     if scoped_view is None:
         if invocation_scope is not None:
@@ -476,10 +510,13 @@ def solve_segment_state_8616(
             ScopedNearReturnContinuationView8616,
         )
         from .scoped_function_ir_view import ScopedFunctionIRView8616
+        from .scoped_indirect_target_view import ScopedIndirectTargetView8616
 
-        if type(scoped_view) is not ScopedFunctionIRView8616 and type(
-            scoped_view
-        ) is not ScopedNearReturnContinuationView8616:
+        if (
+            type(scoped_view) is not ScopedFunctionIRView8616
+            and type(scoped_view) is not ScopedNearReturnContinuationView8616
+            and type(scoped_view) is not ScopedIndirectTargetView8616
+        ):
             raise TypeError(
                 "scoped segment state requires a typed scoped view owner"
             )
@@ -501,21 +538,24 @@ def solve_segment_state_8616(
     return solution
 
 
+@cython.ccall
 def _solve_identity_segment_survey_8616(
     artifact: IRFunctionArtifact, survey: NativeEffectSurvey8616,
-) -> tuple[SegmentStateSolution8616, int]:
+) -> tuple[SegmentStateSolution8616, cython.longlong]:
     """Solve identity transfers from the caller's freshly classified native survey.
 
     Only the canonical paired builder calls this private operation. No input
     CALL, segment write, unknown effect, or opaque instruction key is eligible.
     Ordinary predecessor joins preserve disconnected and loop behavior.
     """
+    address: object
+    row: object
     if not survey.segment_identity_transfer or survey.census_covered is not True:
         raise ValueError("identity transfer requires the complete fresh native survey")
     predecessors = build_x86_16_ir_predecessor_map(artifact)
-    blocks = {item.block.addr: item for item in survey.selector_blocks}
-    entries: dict[int, dict[str, SegmentRegisterState]] = {address: {} for address in blocks}
-    exits: dict[int, dict[str, SegmentRegisterState]] = {address: {} for address in blocks}
+    blocks = {item.block.addr: item for item in iter(survey.selector_blocks)}
+    entries: dict[cython.longlong, dict[str, SegmentRegisterState]] = {address: {} for address in iter(blocks)}
+    exits: dict[cython.longlong, dict[str, SegmentRegisterState]] = {address: {} for address in iter(blocks)}
     work = len(blocks)
     changed = True
     while changed:
@@ -523,7 +563,7 @@ def _solve_identity_segment_survey_8616(
         for address in sorted(blocks):
             work += 1
             incoming = _join_entry_state(predecessors, exits, address, artifact.function_addr, None)
-            if incoming != entries[address] or incoming != exits[address]:
+            if operator.ne(incoming, entries[address]) or operator.ne(incoming, exits[address]):
                 entries[address] = incoming
                 exits[address] = dict(incoming)
                 changed = True

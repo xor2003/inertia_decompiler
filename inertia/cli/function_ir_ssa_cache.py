@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Persist exact raw IR and IR-stage SSA artifacts by function identity.
 
 Layer: CLI/fallback/reporting orchestration.
@@ -6,6 +7,8 @@ rebuilding VEX or SSA. This module does not recover or alter semantics.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import binascii
 import pickle
@@ -44,6 +47,8 @@ from .function_ir_ssa_cache_identity import (
     function_addr_from_boundary_8616,
     function_ir_ssa_cache_key_8616,
 )
+import dataclasses
+import operator
 
 FUNCTION_IR_SSA_CACHE_NAMESPACE_8616: str = "function_ir_ssa"
 
@@ -69,50 +74,51 @@ class FunctionIRSSACacheFailure8616(StrEnum):
     REGISTRY_CONFLICT = "registry_conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionIRSSACacheResult8616:
     """One function cache outcome with optional restored artifacts."""
 
-    function_addr: int
+    function_addr: cython.longlong
     verdict: FunctionIRSSACacheVerdict8616
     bundle: FunctionIRSSABundle8616 | None = None
     failure: FunctionIRSSACacheFailure8616 | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionIRSSACacheStats8616:
     """Closed cache evidence accounting for one function catalog."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every classified entry became a hit or refusal."""
         return bool(
             self.raw_fact_count >= self.normalized_fact_count
             and self.normalized_fact_count >= self.classified_fact_count
-            and self.classified_fact_count
-            == self.materialized_count + self.failure_count
+            and operator.eq(self.classified_fact_count, self.materialized_count + self.failure_count)
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionIRSSACatalogResult8616:
     """Deterministic per-function outcomes and their closed counters."""
 
-    results: tuple[FunctionIRSSACacheResult8616, ...]
+    results: object
     stats: FunctionIRSSACacheStats8616
 
 
+@cython.ccall
 def load_function_ir_ssa_cache_8616(
-    cache_key: dict[str, object],
-    function_addr: int,
+    cache_key: object,
+    function_addr: cython.longlong,
 ) -> FunctionIRSSACacheResult8616:
     """Restore one coherent pair, refusing malformed or unsafe payloads."""
+    record: object
     record = _load_cache_json(FUNCTION_IR_SSA_CACHE_NAMESPACE_8616, cache_key)
     if record is None:
         return FunctionIRSSACacheResult8616(
@@ -135,8 +141,9 @@ def load_function_ir_ssa_cache_8616(
     )
 
 
+@cython.ccall
 def store_function_ir_ssa_cache_8616(
-    cache_key: dict[str, object],
+    cache_key: object,
     bundle: FunctionIRSSABundle8616,
 ) -> FunctionIRSSACacheResult8616:
     """Persist one already-proven coherent raw IR/SSA pair."""
@@ -169,11 +176,11 @@ def _catalog_result_8616(
     normalized = sum(
         result.failure
         is not FunctionIRSSACacheFailure8616.FUNCTION_IDENTITY_INCOMPLETE
-        for result in ordered
+        for result in iter(ordered)
     )
     classified = sum(
         result.verdict is not FunctionIRSSACacheVerdict8616.MISS
-        for result in ordered
+        for result in iter(ordered)
     )
     materialized = sum(
         result.verdict
@@ -181,11 +188,11 @@ def _catalog_result_8616(
             FunctionIRSSACacheVerdict8616.HIT,
             FunctionIRSSACacheVerdict8616.STORED,
         }
-        for result in ordered
+        for result in iter(ordered)
     )
     failures = sum(
         result.verdict is FunctionIRSSACacheVerdict8616.REFUSED
-        for result in ordered
+        for result in iter(ordered)
     )
     return FunctionIRSSACatalogResult8616(
         ordered,
@@ -199,11 +206,12 @@ def _catalog_result_8616(
     )
 
 
+@cython.ccall
 def _restore_bundle_authority_8616(
     project: object,
     function: object,
     bundle: FunctionIRSSABundle8616,
-) -> bool:
+) -> cython.bint:
     """Reacquire canonical authority for one persisted pair at restoration.
 
     The persisted bundle proves itself only when its exact restored bodies
@@ -215,12 +223,17 @@ def _restore_bundle_authority_8616(
     the exact bodies so publication sees owned-build evidence, not copied
     metadata. Anything else is a typed refusal.
     """
-    if bundle.ir.function_addr != bundle.ssa.function_addr:
+    ir_digest: object
+    ir_revision: object
+    observed: object
+    ssa_digest: object
+    ssa_revision: object
+    if operator.ne(bundle.ir.function_addr, bundle.ssa.function_addr):
         return False
     function_addr = bundle.ir.function_addr
     ir_digest = function_artifact_body_digest_8616(bundle.ir)
     ssa_digest = function_artifact_body_digest_8616(bundle.ssa)
-    if ir_digest is None or ssa_digest is None or bundle.ssa.parent_digest != ir_digest:
+    if ir_digest is None or ssa_digest is None or operator.ne(bundle.ssa.parent_digest, ir_digest):
         return False
     ir_revision = bundle.ir.source_revision
     observed = observed_function_source_revision_8616(
@@ -234,9 +247,9 @@ def _restore_bundle_authority_8616(
     ssa_revision = bundle.ssa.source_revision
     if (
         ir_revision is None
-        or ir_revision != observed
+        or operator.ne(ir_revision, observed)
         or ssa_revision is None
-        or ssa_revision != observed
+        or operator.ne(ssa_revision, observed)
     ):
         return False
     record_function_build_attestation_8616(
@@ -253,11 +266,14 @@ def _restore_bundle_authority_8616(
     return True
 
 
+@cython.ccall
 def hydrate_function_ir_ssa_catalog_8616(
     project: object,
     functions: Sequence[object],
 ) -> FunctionIRSSACatalogResult8616:
     """Publish every valid persisted pair into the owning IR registries."""
+    cache_key: object
+    function: object
     results: list[FunctionIRSSACacheResult8616] = []
     for function in functions:
         function_addr = function_addr_from_boundary_8616(function)
@@ -306,23 +322,25 @@ def hydrate_function_ir_ssa_catalog_8616(
     return _catalog_result_8616(results)
 
 
+@cython.ccall
 def _hydrated_hit_matches_8616(
-    hydrated: FunctionIRSSACacheResult8616 | None,
+    hydrated: object,
     ir_result: FunctionIRArtifactResolution8616,
     ssa_result: FunctionSSAArtifactResolution8616,
-) -> bool:
+) -> cython.bint:
     """Return True when a retained hydrated hit matches fresh artifacts."""
     return (
         hydrated is not None
         and hydrated.bundle is not None
         and ir_result.verdict is FunctionIRArtifactVerdict8616.PROVEN
         and ssa_result.verdict is FunctionSSAArtifactVerdict8616.PROVEN
-        and ir_result.artifact == hydrated.bundle.ir
-        and ssa_result.artifact == hydrated.bundle.ssa
+        and operator.eq(ir_result.artifact, hydrated.bundle.ir)
+        and operator.eq(ssa_result.artifact, hydrated.bundle.ssa)
         and ssa_result.stage is FunctionSSAArtifactStage8616.IR
     )
 
 
+@cython.ccall
 def store_function_ir_ssa_catalog_8616(
     project: object,
     functions: Sequence[object],
@@ -330,11 +348,14 @@ def store_function_ir_ssa_catalog_8616(
     already_hydrated: FunctionIRSSACatalogResult8616 | None = None,
 ) -> FunctionIRSSACatalogResult8616:
     """Persist rebuilt pairs while retaining exact pairs hydrated this run."""
+    cache_key: object
+    hydrated: object
+    function: object
     if already_hydrated is not None and not already_hydrated.stats.closed:
         raise ValueError("cannot retain hydrated IR/SSA cache with open accounting")
     hydrated_hits = {
         result.function_addr: result
-        for result in (() if already_hydrated is None else already_hydrated.results)
+        for result in iter((() if already_hydrated is None else already_hydrated.results))
         if result.verdict is FunctionIRSSACacheVerdict8616.HIT
         and result.bundle is not None
     }

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Validate binary-proven control-flow obligations against the final C AST.
 
 Layer: Tail validation.
@@ -12,6 +13,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
@@ -27,8 +30,11 @@ from angr.analyses.decompiler.structured_codegen.c import (
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 from inertia.structuring.loop_body_repair import SwitchLoopExitReturnEvidence8616
 from inertia.structuring.shared_loop_exit import SharedLoopExitBinding8616, matching_shared_loop_exits_8616
+import dataclasses
+import operator
+import builtins
 
-_CASE_ENTRY_ARITY: int = 2
+_CASE_ENTRY_ARITY: cython.longlong = 2
 
 __all__ = [
     "ControlFlowObligationIssue8616",
@@ -50,16 +56,16 @@ class ControlFlowObligationIssueKind8616(StrEnum):
     WRONG_EXIT_SHAPE = "wrong-exit-shape"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ControlFlowObligationIssue8616:
     """One binary-proven exit that the final structured AST did not satisfy."""
 
     kind: ControlFlowObligationIssueKind8616
-    evidence_index: int
+    evidence_index: cython.longlong
     case_value: int | None = None
     case_target: int | None = None
     exit_target: int | None = None
-    match_count: int = 0
+    match_count: cython.longlong = 0
 
     def token(self) -> str:
         """Return a deterministic binary-evidence failure fingerprint."""
@@ -73,32 +79,32 @@ class ControlFlowObligationIssue8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ControlFlowObligationValidationReport8616:
     """Closed evidence-loop report for final structured exit obligations."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
     issues: tuple[ControlFlowObligationIssue8616, ...] = ()
 
     @property
-    def failure_count(self) -> int:
+    def failure_count(self) -> cython.longlong:
         """Return the number of unsatisfied or malformed obligations."""
         return len(self.issues)
 
     @property
-    def passed(self) -> bool:
+    def passed(self) -> cython.bint:
         """Return whether every classified obligation has one exact exit."""
         return (
             self.failure_count == 0
-            and self.classified_fact_count == self.materialized_count
+            and operator.eq(self.classified_fact_count, self.materialized_count)
         )
 
     def issue_tokens(self) -> tuple[str, ...]:
         """Return stable issue fingerprints for tail-validation summaries."""
-        return tuple(issue.token() for issue in self.issues)
+        return tuple(issue.token() for issue in iter(self.issues))
 
 
 class _SwitchExitEvidenceCarrier8616(Protocol):
@@ -113,7 +119,8 @@ class _TaggedNode8616(Protocol):
     tags: Mapping[str, object] | None
 
 
-def switch_exit_obligations_from_codegen_8616(codegen: object) -> tuple[object, ...]:
+@cython.ccall
+def switch_exit_obligations_from_codegen_8616(codegen: object) -> object:
     """Read the exact Structuring evidence tuple from a dynamic codegen object."""
     surface = cast(_SwitchExitEvidenceCarrier8616, codegen)
     try:
@@ -125,6 +132,7 @@ def switch_exit_obligations_from_codegen_8616(codegen: object) -> tuple[object, 
     return (raw_evidence,)
 
 
+@cython.ccall
 def _node_tags_8616(node: object) -> Mapping[str, object]:
     """Read optional tags at the third-party C AST boundary."""
     tagged = cast(_TaggedNode8616, node)
@@ -135,17 +143,18 @@ def _node_tags_8616(node: object) -> Mapping[str, object]:
     return tags if isinstance(tags, Mapping) else {}
 
 
-def _body_has_target_anchor_8616(body: object, target: int) -> bool:
+def _body_has_target_anchor_8616(body: object, target: cython.longlong) -> cython.bint:
     """Return whether a case body retains the exact binary case target."""
-    if isinstance(body, CStatements) and body.addr == target:
+    if isinstance(body, CStatements) and operator.eq(body.addr, target):
         return True
     return any(
-        _node_tags_8616(node).get("ins_addr") == target
-        for node in (body, *_iter_c_nodes_deep_8616(body))
+        operator.eq(_node_tags_8616(node).get("ins_addr"), target)
+        for node in iter((body, ) + tuple(_iter_c_nodes_deep_8616(body)))
     )
 
 
-def _body_is_unconditional_return_8616(body: object) -> bool:
+@cython.ccall
+def _body_is_unconditional_return_8616(body: object) -> cython.bint:
     """Return whether a case body consists solely of a function return."""
     if isinstance(body, CReturn):
         return True
@@ -155,17 +164,19 @@ def _body_is_unconditional_return_8616(body: object) -> bool:
     return len(statements) == 1 and _body_is_unconditional_return_8616(statements[0])
 
 
-def _case_values_8616(raw_value: object) -> tuple[int, ...]:
+def _case_values_8616(raw_value: object) -> tuple[cython.longlong, ...]:
     """Normalize one third-party switch case key to explicit integer values."""
     if isinstance(raw_value, int):
         return (raw_value,)
     if isinstance(raw_value, tuple):
-        return tuple(value for value in raw_value if isinstance(value, int))
+        return tuple(value for value in iter(raw_value) if isinstance(value, int))
     return ()
 
 
-def _switch_case_entries_8616(switch: CSwitchCase) -> tuple[tuple[int, object], ...]:
+def _switch_case_entries_8616(switch: CSwitchCase) -> tuple[tuple[cython.longlong, object], ...]:
     """Return normalized value/body pairs from supported angr switch surfaces."""
+    body: object
+    raw_value: object
     raw_cases = switch.cases
     items: Iterable[tuple[object, object]]
     if isinstance(raw_cases, Mapping):
@@ -173,20 +184,24 @@ def _switch_case_entries_8616(switch: CSwitchCase) -> tuple[tuple[int, object], 
     else:
         items = (
             item
-            for item in cast(Iterable[object], raw_cases)
-            if isinstance(item, tuple) and len(item) == _CASE_ENTRY_ARITY
+            for item in builtins.iter(cast(Iterable[object], raw_cases))
+            if isinstance(item, tuple) and operator.eq(len(item), _CASE_ENTRY_ARITY)
         )
-    entries: list[tuple[int, object]] = []
+    entries: list[tuple[cython.longlong, object]] = []
     for raw_value, body in items:
-        entries.extend((value, body) for value in _case_values_8616(raw_value))
+        entries.extend((value, body) for value in builtins.iter(_case_values_8616(raw_value)))
     return tuple(entries)
 
 
-def _case_bodies_8616(root: object, case_value: int) -> tuple[object, ...]:
+@cython.ccall
+def _case_bodies_8616(root: object, case_value: cython.longlong) -> tuple[object, ...]:
     """Find all final switch bodies for one proven selector value."""
+    body: object
+    node: object
+    value: object
     bodies: list[object] = []
-    seen: set[int] = set()
-    for node in (root, *_iter_c_nodes_deep_8616(root)):
+    seen: set[cython.longlong] = set()
+    for node in (root, ) + tuple(_iter_c_nodes_deep_8616(root)):
         if not isinstance(node, CSwitchCase):
             continue
         for value, body in _switch_case_entries_8616(node):
@@ -197,17 +212,19 @@ def _case_bodies_8616(root: object, case_value: int) -> tuple[object, ...]:
     return tuple(bodies)
 
 
-def _valid_evidence_8616(evidence: SwitchLoopExitReturnEvidence8616) -> bool:
+@cython.ccall
+def _valid_evidence_8616(evidence: SwitchLoopExitReturnEvidence8616) -> cython.bint:
     """Return whether one owned evidence record has valid binary addresses."""
     return evidence.case_target >= 0 and evidence.exit_target >= 0
 
 
+@cython.ccall
 def _issue_8616(
     kind: ControlFlowObligationIssueKind8616,
-    index: int,
-    evidence: SwitchLoopExitReturnEvidence8616 | None,
+    index: cython.longlong,
+    evidence: object,
     *,
-    match_count: int = 0,
+    match_count: cython.longlong = 0,
 ) -> ControlFlowObligationIssue8616:
     """Build one deterministic issue from optional typed evidence."""
     return ControlFlowObligationIssue8616(
@@ -221,13 +238,13 @@ def _issue_8616(
 
 
 def _literal_case_issue_8616(
-    bodies: tuple[object, ...],
-    index: int,
+    bodies: object,
+    index: cython.longlong,
     evidence: SwitchLoopExitReturnEvidence8616,
 ) -> ControlFlowObligationIssue8616 | None:
     """Check target ownership and unconditional return shape of existing cases."""
     anchored = tuple(
-        body for body in bodies if _body_has_target_anchor_8616(body, evidence.case_target)
+        body for body in iter(bodies) if _body_has_target_anchor_8616(body, evidence.case_target)
     )
     if not anchored:
         return _issue_8616(
@@ -249,13 +266,17 @@ def _literal_case_issue_8616(
 
 def validate_switch_exit_obligations_8616(
     root: object,
-    evidence_items: tuple[object, ...],
+    evidence_items: object,
     *,
-    shared_bindings: tuple[SharedLoopExitBinding8616, ...] = (),
+    shared_bindings: object = (),
     fingerprint: Callable[[object], str] | None = None,
 ) -> ControlFlowObligationValidationReport8616:
     """Require an exact case return or an unchanged proven shared-epilogue exit."""
-    normalized: list[tuple[int, SwitchLoopExitReturnEvidence8616]] = []
+    case_issue: object
+    evidence: object
+    index: object
+    item: object
+    normalized: list[tuple[cython.longlong, SwitchLoopExitReturnEvidence8616]] = []
     issues: list[ControlFlowObligationIssue8616] = []
     seen: set[SwitchLoopExitReturnEvidence8616] = set()
     for index, item in enumerate(evidence_items):
@@ -269,13 +290,13 @@ def validate_switch_exit_obligations_8616(
 
     conflicting_keys = {
         (item.case_value, item.case_target)
-        for _, item in normalized
+        for _, item in iter(normalized)
         if len(
             {
                 other.exit_target
-                for _, other in normalized
-                if other.case_value == item.case_value
-                and other.case_target == item.case_target
+                for _, other in iter(normalized)
+                if operator.eq(other.case_value, item.case_value)
+                and operator.eq(other.case_target, item.case_target)
             }
         )
         > 1
@@ -306,7 +327,7 @@ def validate_switch_exit_obligations_8616(
 
     normalized_count = len(normalized) + sum(
         issue.kind is ControlFlowObligationIssueKind8616.INVALID_EVIDENCE
-        for issue in issues
+        for issue in iter(issues)
     )
     return ControlFlowObligationValidationReport8616(
         raw_fact_count=len(evidence_items),

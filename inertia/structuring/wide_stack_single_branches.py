@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Recover wide comparisons for structured single-return branches.
 
 Layer: Structuring.
@@ -13,6 +14,8 @@ Branch exits are classified by recovered return expressions, not by a shared
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from dataclasses import replace
@@ -30,17 +33,23 @@ from .wide_stack_condition_chains import (
     relation_for_wide_stack_condition_8616,
     wide_stack_operator_result_8616,
 )
+import operator
+import builtins
 
-type WideStackExitClassifier8616 = Callable[[int], bool | None]
+WideStackExitClassifier8616 = typing.TypeAliasType("WideStackExitClassifier8616", Callable[[int], bool | None])
 
 
+@cython.ccall
 def _candidate_implies_root_outcome_8616(
     op: ConditionOp,
     root: ConditionIR,
     pair: WideStackOperandPair8616,
-    required_root_outcome: bool | None,
-) -> bool:
+    required_root_outcome: object,
+) -> cython.bint:
     """Require every true wide outcome to enter the structured root side."""
+    root_relation: object
+    high_relation: object
+    low_relation: object
     if required_root_outcome is None:
         return True
     for high_relation in (-1, 0, 1):
@@ -59,19 +68,25 @@ def _candidate_implies_root_outcome_8616(
     return True
 
 
+@cython.ccall
 def _single_body_outcome_8616(
     root: ConditionIR,
     pair: WideStackOperandPair8616,
-    conditions_by_block: dict[int, ConditionIR],
-    successors: dict[int, tuple[int, ...]],
+    conditions_by_block: object,
+    successors: object,
     classify_exit: WideStackExitClassifier8616,
-    predecessor_counts: dict[int, int],
-    high_relation: int,
-    low_relation: int,
+    predecessor_counts: object,
+    high_relation: cython.longlong,
+    low_relation: cython.longlong,
 ) -> bool | None:
     """Evaluate whether one abstract operand ordering reaches the owned body."""
+    decision: object
+    exit_outcome: object
+    next_addrs: object
+    next_condition: object
+    relation: object
     condition = root
-    visited: set[int] = set()
+    visited: set[cython.longlong] = set()
     while len(visited) < 24:
         relation = relation_for_wide_stack_condition_8616(
             condition, pair, high_relation, low_relation
@@ -111,14 +126,20 @@ def _single_body_outcome_8616(
 
 def recover_wide_stack_single_body_condition_8616(
     root: ConditionIR,
-    conditions_by_block: dict[int, ConditionIR],
-    successors: dict[int, tuple[int, ...]],
+    conditions_by_block: object,
+    successors: object,
     prove_pair: WideStackPairProver8616,
     classify_exit: WideStackExitClassifier8616,
     *,
     required_root_outcome: bool | None = None,
 ) -> WideStackConditionChainResult8616:
     """Recover one direct wide condition whose true side owns one return body."""
+    outcome: object
+    high_relation: object
+    low_relation: object
+    op: object
+    target: object
+    targets: object
     conditions = reachable_wide_stack_conditions_8616(root, conditions_by_block, successors)
     pairs = candidate_wide_stack_operand_pairs_8616(conditions, prove_pair)
     if len(pairs) != 1:
@@ -127,11 +148,11 @@ def recover_wide_stack_single_body_condition_8616(
             WideStackConditionChainStats8616(len(conditions), len(conditions), 0, 0, 0),
         )
     pair = pairs[0]
-    predecessor_counts: dict[int, int] = {}
+    predecessor_counts: dict[cython.longlong, cython.longlong] = {}
     for targets in successors.values():
         for target in targets:
             predecessor_counts[target] = predecessor_counts.get(target, 0) + 1
-    outcomes: dict[tuple[int, int], bool] = {}
+    outcomes: dict[tuple[cython.longlong, cython.longlong], cython.bint] = {}
     for high_relation in (-1, 0, 1):
         for low_relation in (-1, 0, 1):
             outcome = _single_body_outcome_8616(
@@ -156,11 +177,10 @@ def recover_wide_stack_single_body_condition_8616(
     matching_ops: list[ConditionOp] = []
     for op in candidate_wide_stack_ops_8616(pair.signed):
         exact_match = all(
-            wide_stack_operator_result_8616(
+            operator.eq(wide_stack_operator_result_8616(
                 op, high_relation if high_relation != 0 else low_relation
-            )
-            == outcome
-            for (high_relation, low_relation), outcome in outcomes.items()
+            ), outcome)
+            for (high_relation, low_relation), outcome in builtins.iter(outcomes.items())
         )
         root_orientation_match = _candidate_implies_root_outcome_8616(
             op,
@@ -184,7 +204,7 @@ def recover_wide_stack_single_body_condition_8616(
         # Keep source addresses, but not obsolete word-register operand bindings.
         producer_semantics=None,
         register_bindings=(),
-        source=(*root.source, "wide-stack-single-body"),
+        source=tuple(root.source) + ("wide-stack-single-body",),
     )
     return WideStackConditionChainResult8616(
         condition,

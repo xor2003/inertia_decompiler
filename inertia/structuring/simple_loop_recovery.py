@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Recover conservative simple loop evidence from decoded instructions.
 
 Layer: Structuring.
@@ -8,6 +9,8 @@ rewrite cleanup, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 from collections.abc import Iterable
@@ -21,36 +24,38 @@ from inertia.semantics.function_evidence_inventory import (
     FunctionEvidenceKind8616,
     collect_function_binary_evidence_8616,
 )
+import dataclasses
+import builtins
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class InsnSummary8616:
     """Decoded instruction summary used by the counted-loop recognizer."""
 
-    mnemonic: str
-    op0_kind: str | None = None
-    op0_value: int | str | None = None
-    op1_kind: str | None = None
-    op1_value: int | str | None = None
+    mnemonic: object
+    op0_kind: object = None
+    op0_value: object = None
+    op1_kind: object = None
+    op1_value: object = None
     op0_size: int | None = None
     op1_size: int | None = None
     address: int | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CountedStackLoop8616:
     """Evidence for a conservative counted stack-local loop."""
 
-    induction_disp: int
-    accumulator_disp: int
-    limit_disp: int
-    parity_mask: int
+    induction_disp: cython.longlong
+    accumulator_disp: cython.longlong
+    limit_disp: cython.longlong
+    parity_mask: cython.longlong
 
 
 class _CapstoneInsnLike8616(Protocol):
     """Structural view of dynamic Capstone instruction APIs used by this recognizer."""
 
-    def reg_name(self, reg_id: int) -> str | None:
+    def reg_name(self, reg_id: cython.longlong) -> object:
         """Return a register name for a Capstone register id."""
         ...
 
@@ -58,9 +63,9 @@ class _CapstoneInsnLike8616(Protocol):
 class _CapstoneEngineLike8616(Protocol):
     """Structural view of Capstone engine APIs used by this recognizer."""
 
-    detail: bool
+    detail: cython.bint
 
-    def disasm(self, code: bytes, addr: int) -> object:
+    def disasm(self, code: object, addr: cython.longlong) -> object:
         """Disassemble bytes at an address."""
         ...
 
@@ -68,7 +73,7 @@ class _CapstoneEngineLike8616(Protocol):
 class _MemoryLike8616(Protocol):
     """Structural view of project loader memory needed for byte reads."""
 
-    def load(self, addr: int, size: int) -> bytes:
+    def load(self, addr: cython.longlong, size: cython.longlong) -> object:
         """Read bytes from loader memory."""
         ...
 
@@ -85,12 +90,14 @@ class _ProjectLoaderLike8616(Protocol):
     loader: _LoaderLike8616
 
 
-def _dynamic_attr_8616(obj: object, name: str, default: object = None) -> object:
+@cython.ccall
+def _dynamic_attr_8616(obj: object, name: object, default: object = None) -> object:
     """Dynamic third-party boundary: read optional Capstone/project/function attributes."""
     return getattr(obj, name, default)
 
 
-def _dynamic_sequence_8616(obj: object) -> tuple[object, ...]:
+@cython.ccall
+def _dynamic_sequence_8616(obj: object) -> object:
     """Return a tuple from a dynamic Capstone sequence-like object."""
     if isinstance(obj, tuple):
         return obj
@@ -101,7 +108,8 @@ def _dynamic_sequence_8616(obj: object) -> tuple[object, ...]:
     return ()
 
 
-def _dynamic_int_8616(obj: object, default: int = 0) -> int:
+@cython.ccall
+def _dynamic_int_8616(obj: object, default: cython.longlong = 0) -> cython.longlong:
     """Return an integer from a dynamic Capstone/project value."""
     if isinstance(obj, int):
         return int(obj)
@@ -113,39 +121,45 @@ def _dynamic_int_8616(obj: object, default: int = 0) -> int:
     return default
 
 
-def _summary_int_8616(value: int | str | None, default: int = 0) -> int:
+@cython.ccall
+def _summary_int_8616(value: object, default: cython.longlong = 0) -> cython.longlong:
     """Return an integer from an owned instruction summary operand value."""
     return _dynamic_int_8616(value, default)
 
 
-def _capstone_reg_name_8616(insn: object, reg_id: int) -> str:
+@cython.ccall
+def _capstone_reg_name_8616(insn: object, reg_id: cython.longlong) -> object:
     """Return a lowercase register name from the dynamic Capstone boundary."""
     typed_insn = cast(_CapstoneInsnLike8616, insn)
     return str(typed_insn.reg_name(reg_id) or "").lower()
 
 
+@cython.ccall
 def _capstone_engine_8616(project: object) -> _CapstoneEngineLike8616 | None:
     """Return the dynamic project Capstone engine when present."""
+    capstone: object
     arch = _dynamic_attr_8616(project, "arch", None)
     capstone = _dynamic_attr_8616(arch, "capstone", None)
     return cast(_CapstoneEngineLike8616, capstone) if capstone is not None else None
 
 
-def _sanitize_c_identifier_8616(name: str) -> str:
-    cleaned = "".join(ch if (ch.isalnum() or ch == "_") else "_" for ch in str(name or ""))
+def _sanitize_c_identifier_8616(name: object) -> object:
+    cleaned = "".join(ch if (ch.isalnum() or ch == "_") else "_" for ch in builtins.iter(str(name or "")))
     if not cleaned or cleaned[0].isdigit():
         cleaned = f"sub_{cleaned}" if cleaned else "sub_func"
     return cleaned
 
 
-def _local_name_8616(disp: int) -> str:
+@cython.ccall
+def _local_name_8616(disp: cython.longlong) -> str:
     if disp < 0:
         return f"local_{abs(disp):x}"
     return f"arg_{disp:x}"
 
 
+@cython.ccall
 def recover_counted_stack_loop_from_summaries_8616(
-    summaries: list[InsnSummary8616],
+    summaries: object,
 ) -> CountedStackLoop8616 | None:
     """Recover a simple MS C counted stack-local loop from binary operands.
 
@@ -153,25 +167,27 @@ def recover_counted_stack_loop_from_summaries_8616(
     repeated BP-relative instruction evidence. Unknown or partial patterns are
     refused rather than guessed.
     """
+    insn: object
     census = _LoopCensus8616()
     for insn in summaries:
         census.collect(insn)
     return _match_counted_loop_8616(census)
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _LoopCensus8616:
     """Mutable per-instruction census for the counted-stack-loop recognizer."""
 
-    zero_inits: set[int] = field(default_factory=set)
-    inc_slots: set[int] = field(default_factory=set)
-    cmp_pairs: list[tuple[int, int]] = field(default_factory=list)
-    test_pairs: list[tuple[int, int]] = field(default_factory=list)
-    add_pairs: list[tuple[int, int]] = field(default_factory=list)
-    dec_slots: set[int] = field(default_factory=set)
-    ax_loads: list[int] = field(default_factory=list)
+    zero_inits: object = field(default_factory=set)
+    inc_slots: object = field(default_factory=set)
+    cmp_pairs: object = field(default_factory=list)
+    test_pairs: object = field(default_factory=list)
+    add_pairs: object = field(default_factory=list)
+    dec_slots: object = field(default_factory=set)
+    ax_loads: object = field(default_factory=list)
     previous_ax_load: int | None = None
 
+    @cython.ccall
     def collect(self, insn: InsnSummary8616) -> None:
         """Fold one instruction summary into the census."""
         mnemonic = insn.mnemonic.lower()
@@ -192,7 +208,8 @@ class _LoopCensus8616:
         if mnemonic not in {"mov", "cmp", "test", "add"}:
             self.previous_ax_load = None
 
-    def _zero_init(self, insn: InsnSummary8616, mnemonic: str) -> bool:
+    @cython.ccall
+    def _zero_init(self, insn: InsnSummary8616, mnemonic: object) -> cython.bint:
         """Record a `mov word [bp+disp], 0` slot initialization."""
         if (
             mnemonic == "mov"
@@ -205,14 +222,16 @@ class _LoopCensus8616:
             return True
         return False
 
-    def _inc_slot(self, insn: InsnSummary8616, mnemonic: str) -> bool:
+    @cython.ccall
+    def _inc_slot(self, insn: InsnSummary8616, mnemonic: object) -> cython.bint:
         """Record an `inc word [bp+disp]` induction step."""
         if mnemonic == "inc" and insn.op0_kind == "bp_mem" and (insn.op0_size in {None, 2}):
             self.inc_slots.add(_summary_int_8616(insn.op0_value))
             return True
         return False
 
-    def _ax_load(self, insn: InsnSummary8616, mnemonic: str) -> bool:
+    @cython.ccall
+    def _ax_load(self, insn: InsnSummary8616, mnemonic: object) -> cython.bint:
         """Record a `mov ax, [bp+disp]` induction-source load."""
         if mnemonic == "mov" and insn.op0_kind == "reg" and insn.op0_value == "ax" and insn.op1_kind == "bp_mem":
             self.previous_ax_load = _summary_int_8616(insn.op1_value)
@@ -220,7 +239,8 @@ class _LoopCensus8616:
             return True
         return False
 
-    def _cmp_pair(self, insn: InsnSummary8616, mnemonic: str) -> bool:
+    @cython.ccall
+    def _cmp_pair(self, insn: InsnSummary8616, mnemonic: object) -> cython.bint:
         """Record a `cmp [bp+disp], ax` induction-limit comparison."""
         if (
             mnemonic == "cmp"
@@ -233,14 +253,16 @@ class _LoopCensus8616:
             return True
         return False
 
-    def _test_pair(self, insn: InsnSummary8616, mnemonic: str) -> bool:
+    @cython.ccall
+    def _test_pair(self, insn: InsnSummary8616, mnemonic: object) -> cython.bint:
         """Record a `test [bp+disp], mask` parity check."""
         if mnemonic == "test" and insn.op0_kind == "bp_mem" and insn.op1_kind == "imm":
             self.test_pairs.append((_summary_int_8616(insn.op0_value), _summary_int_8616(insn.op1_value)))
             return True
         return False
 
-    def _add_pair(self, insn: InsnSummary8616, mnemonic: str) -> bool:
+    @cython.ccall
+    def _add_pair(self, insn: InsnSummary8616, mnemonic: object) -> cython.bint:
         """Record an `add [bp+disp], ax` accumulator step."""
         if (
             mnemonic == "add"
@@ -253,7 +275,8 @@ class _LoopCensus8616:
             return True
         return False
 
-    def _dec_slot(self, insn: InsnSummary8616, mnemonic: str) -> bool:
+    @cython.ccall
+    def _dec_slot(self, insn: InsnSummary8616, mnemonic: object) -> cython.bint:
         """Record a `dec word [bp+disp]` accumulator drain."""
         if mnemonic == "dec" and insn.op0_kind == "bp_mem" and (insn.op0_size in {None, 2}):
             self.dec_slots.add(_summary_int_8616(insn.op0_value))
@@ -261,8 +284,12 @@ class _LoopCensus8616:
         return False
 
 
+@cython.ccall
 def _match_counted_loop_8616(census: _LoopCensus8616) -> CountedStackLoop8616 | None:
     """Match the census against the counted-loop shape."""
+    loop: object
+    induction_disp: object
+    limit_disp: object
     for induction_disp, limit_disp in census.cmp_pairs:
         if induction_disp >= 0 or limit_disp <= 0:
             continue
@@ -270,7 +297,7 @@ def _match_counted_loop_8616(census: _LoopCensus8616) -> CountedStackLoop8616 | 
             continue
         parity_masks = [
             mask
-            for disp, mask in census.test_pairs
+            for disp, mask in iter(census.test_pairs)
             if disp == induction_disp and mask > 0
         ]
         if not parity_masks:
@@ -281,13 +308,16 @@ def _match_counted_loop_8616(census: _LoopCensus8616) -> CountedStackLoop8616 | 
     return None
 
 
+@cython.ccall
 def _match_accumulator_8616(
     census: _LoopCensus8616,
-    induction_disp: int,
-    limit_disp: int,
-    parity_masks: list[int],
+    induction_disp: cython.longlong,
+    limit_disp: cython.longlong,
+    parity_masks: object,
 ) -> CountedStackLoop8616 | None:
     """Match the accumulator step for one induction/limit candidate."""
+    accumulator_disp: object
+    add_source_disp: object
     for accumulator_disp, add_source_disp in census.add_pairs:
         if accumulator_disp >= 0 or add_source_disp != induction_disp:
             continue
@@ -308,8 +338,9 @@ def _summarize_capstone_insn_8616(insn: object) -> InsnSummary8616:
     """Project decoded operands with frontend-normalized memory extents."""
     operands = _dynamic_sequence_8616(_dynamic_attr_8616(insn, "operands", ()))
 
-    def _operand(index: int) -> tuple[str | None, int | str | None, int | None]:
+    def _operand(index: cython.longlong) -> tuple[str | None, int | str | None, int | None]:
         """Project one operand without confusing offset width with memory extent."""
+        mem: object
         if index >= len(operands):
             return None, None, None
         operand = operands[index]
@@ -372,9 +403,11 @@ def _function_instruction_summaries_8616(project: object, function: object) -> l
     )
 
 
+@cython.ccall
 def _capstone_instruction_summaries_from_bytes_8616(
-    project: object, addr: int, code: bytes
+    project: object, addr: cython.longlong, code: object
 ) -> list[InsnSummary8616]:
+    capstone: object
     if not code:
         return []
     capstone = _capstone_engine_8616(project)
@@ -386,12 +419,13 @@ def _capstone_instruction_summaries_from_bytes_8616(
         insns = _dynamic_sequence_8616(capstone.disasm(code, addr))
     except Exception:
         return []
-    return [_summarize_capstone_insn_8616(insn) for insn in insns]
+    return [_summarize_capstone_insn_8616(insn) for insn in iter(insns)]
 
 
+@cython.ccall
 def _linear_instruction_summaries_8616(
-    project: object, function: object, *, max_size: int = 0x180
-) -> list[InsnSummary8616]:
+    project: object, function: object, *, max_size: cython.longlong = 0x180
+) -> object:
     addr = _dynamic_attr_8616(function, "addr", None)
     if not isinstance(addr, int):
         return []
@@ -407,8 +441,10 @@ def _linear_instruction_summaries_8616(
     return _capstone_instruction_summaries_from_bytes_8616(project, addr, code)
 
 
-def recover_counted_stack_loop_c_8616(project: object, function: object) -> str | None:
+@cython.ccall
+def recover_counted_stack_loop_c_8616(project: object, function: object) -> object:
     """Recover a source-shaped counted stack loop from a project function."""
+    evidence: object
     summaries = _function_instruction_summaries_8616(project, function)
     evidence = recover_counted_stack_loop_from_summaries_8616(summaries)
     if evidence is None:

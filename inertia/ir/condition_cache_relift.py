@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Rebuild typed condition evidence without angr block-cache side effects.
 
 Layer: IR.
@@ -16,6 +17,8 @@ of treating an empty process-global cache entry as authoritative evidence.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from typing import Any, Protocol, cast
@@ -32,6 +35,8 @@ from .condition_cache_relift_contracts import (
 )
 from .condition_ir import ConditionFailure, ConditionIR, ConditionSource
 from .condition_lift_capture import isolated_condition_lift_session_8616
+import operator
+import builtins
 
 __all__ = (
     "ConditionCacheReliftArtifact8616",
@@ -49,7 +54,7 @@ __all__ = (
 class _LoaderMemoryBoundary8616(Protocol):
     """Minimal third-party loader-memory surface needed for exact-byte relift."""
 
-    def load(self, address: int, size: int) -> object:
+    def load(self, address: cython.longlong, size: cython.longlong) -> object:
         """Read one exact guest-memory range."""
 
 
@@ -69,7 +74,7 @@ class _ProjectBoundary8616(Protocol):
 class _FactoryBoundary8616(Protocol):
     """Minimal third-party block factory used by narrow fallback fixtures."""
 
-    def block(self, address: int, **kwargs: object) -> object:
+    def block(self, address: cython.longlong, **kwargs: object) -> object:
         """Return or lift one third-party block boundary."""
 
 
@@ -83,21 +88,23 @@ _EXACT_RELIFT_CACHE_8616 = ConditionReliftArtifactCache8616[ConditionCacheRelift
 
 
 def has_typed_condition_cache_evidence_8616(
-    condition_cache: Mapping[int, object],
-    pending_sources: Mapping[int, object],
-    block_addr: int,
-) -> bool:
+    condition_cache: Mapping[cython.longlong, object],
+    pending_sources: Mapping[cython.longlong, object],
+    block_addr: cython.longlong,
+) -> cython.bint:
     """Return whether a block has a typed condition or pending source fact."""
+    block_evidence: object
     block_evidence = condition_cache.get(block_addr)
     return bool(
         (
             isinstance(block_evidence, list)
-            and any(isinstance(item, (ConditionIR, ConditionFailure)) for item in block_evidence)
+            and any(isinstance(item, (ConditionIR, ConditionFailure)) for item in iter(block_evidence))
         )
         or isinstance(pending_sources.get(block_addr), ConditionSource)
     )
 
 
+@cython.ccall
 def reset_lifter_condition_state_8616() -> None:
     """Reset path-sensitive custom-lifter state before a deterministic relift."""
     from inertia.frontend.x86_16.lift_86_16 import Instruction_ANY
@@ -108,8 +115,10 @@ def reset_lifter_condition_state_8616() -> None:
     Instruction_ANY._inertia_condition_reg_value_state_8616.clear()
 
 
-def relift_cached_project_blocks_8616(project: object, block_addrs: tuple[int, ...]) -> None:
+@cython.ccall
+def relift_cached_project_blocks_8616(project: object, block_addrs: object) -> None:
     """Relift blocks through a project factory when no loader boundary exists."""
+    block_addr: object
     try:
         block_lifter = cast(_FactoryProjectBoundary8616, project).factory.block
     except AttributeError:
@@ -126,13 +135,15 @@ def relift_cached_project_blocks_8616(project: object, block_addrs: tuple[int, .
             continue
 
 
-def _failure_detail_8616(error: BaseException) -> str:
+@cython.ccall
+def _failure_detail_8616(error: BaseException) -> object:
     """Return deterministic diagnostic detail for a third-party boundary error."""
     text = str(error).strip()
     return f"{type(error).__name__}: {text}" if text else type(error).__name__
 
 
-def _direct_lift_8616(data: bytes, address: int, arch: object) -> None:
+@cython.ccall
+def _direct_lift_8616(data: object, address: cython.longlong, arch: object) -> None:
     """Invoke pyvex directly so angr's IRSB cache cannot skip lifter effects."""
     cast(Any, pyvex).lift(
         data,
@@ -143,12 +154,14 @@ def _direct_lift_8616(data: bytes, address: int, arch: object) -> None:
     )
 
 
+@cython.ccall
 def _load_exact_block_bytes_8616(
     memory: _LoaderMemoryBoundary8616,
-    blocks: tuple[ConditionReliftBlock8616, ...],
-    failures: list[ConditionCacheReliftFailure8616],
+    blocks: object,
+    failures: object,
 ) -> tuple[tuple[ConditionReliftBlock8616, bytes], ...]:
     """Read valid exact block bytes while retaining every typed refusal."""
+    block: object
     loaded: list[tuple[ConditionReliftBlock8616, bytes]] = []
     for block in blocks:
         if block.address < 0 or block.size <= 0:
@@ -171,7 +184,7 @@ def _load_exact_block_bytes_8616(
                 )
             )
             continue
-        if len(data) != block.size:
+        if operator.ne(len(data), block.size):
             failures.append(
                 ConditionCacheReliftFailure8616(
                     block_addr=block.address,
@@ -186,8 +199,8 @@ def _load_exact_block_bytes_8616(
 
 def relift_function_condition_cache_8616(
     project: object,
-    blocks: tuple[ConditionReliftBlock8616, ...],
-    expected_condition_blocks: frozenset[int],
+    blocks: object,
+    expected_condition_blocks: object,
 ) -> ConditionCacheReliftArtifact8616 | None:
     """Return isolated condition evidence from exact bytes, or no boundary.
 
@@ -196,6 +209,9 @@ def relift_function_condition_cache_8616(
     loader and architecture are available, every decode/lift/missing-evidence
     problem is retained as a typed refusal and must not fall back silently.
     """
+    cached: object
+    block: object
+    data: object
     try:
         boundary = cast(_ProjectBoundary8616, project)
         memory = boundary.loader.memory
@@ -203,8 +219,8 @@ def relift_function_condition_cache_8616(
     except AttributeError:
         return None
 
-    ordered_blocks = tuple(sorted(set(blocks)))
-    block_addresses = frozenset(block.address for block in ordered_blocks)
+    ordered_blocks = tuple(sorted(tuple(set(blocks))))
+    block_addresses = frozenset(block.address for block in iter(ordered_blocks))
     normalized_expected = expected_condition_blocks & block_addresses
     failures: list[ConditionCacheReliftFailure8616] = [
         ConditionCacheReliftFailure8616(
@@ -212,14 +228,14 @@ def relift_function_condition_cache_8616(
             reason=ConditionCacheReliftFailureReason8616.INVALID_BLOCK_RANGE,
             detail="expected condition owner is outside the exact function block inventory",
         )
-        for address in sorted(expected_condition_blocks - block_addresses)
+        for address in builtins.iter(sorted(expected_condition_blocks - block_addresses))
     ]
     if not expected_condition_blocks and all(
-        block.address >= 0 and block.size > 0 for block in ordered_blocks
+        block.address >= 0 and block.size > 0 for block in iter(ordered_blocks)
     ):
         return ConditionCacheReliftArtifact8616(
             conditions_by_block=tuple(
-                (address, ()) for address in sorted(block_addresses)
+                (address, ()) for address in builtins.iter(sorted(block_addresses))
             ),
             pending_sources_by_addr=(),
             failures=(),
@@ -227,10 +243,10 @@ def relift_function_condition_cache_8616(
         )
     loaded_blocks = _load_exact_block_bytes_8616(memory, ordered_blocks, failures)
     cache_request = ConditionReliftCacheRequest8616(
-        block_bytes=tuple((block.address, block.size, data) for block, data in loaded_blocks),
+        block_bytes=tuple((block.address, block.size, data) for block, data in iter(loaded_blocks)),
         expected_condition_blocks=expected_condition_blocks,
     )
-    lifted_blocks: set[int] = set()
+    lifted_blocks: set[cython.longlong] = set()
 
     if not failures:
         cached = _EXACT_RELIFT_CACHE_8616.lookup(arch, cache_request)
@@ -256,20 +272,20 @@ def relift_function_condition_cache_8616(
         failures.extend(capture.failures_by_block(block_addresses))
         materialized_blocks = {
             address
-            for address, conditions in conditions_by_block
+            for address, conditions in iter(conditions_by_block)
             if address in expected_condition_blocks and conditions
         }
-        failed_block_addresses = {failure.block_addr for failure in failures}
+        failed_block_addresses = {failure.block_addr for failure in iter(failures)}
         failures.extend(
             ConditionCacheReliftFailure8616(
                 block_addr=address,
                 reason=ConditionCacheReliftFailureReason8616.EXPECTED_CONDITION_MISSING,
             )
-            for address in sorted(
+            for address in builtins.iter(sorted(
                 expected_condition_blocks
                 - materialized_blocks
                 - failed_block_addresses
-            )
+            ))
         )
         pending_sources = capture.pending_source_items()
     stats = ConditionCacheReliftStats8616(
@@ -287,7 +303,7 @@ def relift_function_condition_cache_8616(
     )
     if all(
         failure.reason is ConditionCacheReliftFailureReason8616.EXPECTED_CONDITION_MISSING
-        for failure in artifact.failures
+        for failure in iter(artifact.failures)
     ):
         _EXACT_RELIFT_CACHE_8616.publish(arch, cache_request, artifact)
     return artifact

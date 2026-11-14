@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recompilable output.
 
 Responsibility: orchestrate bounded generated-C syntax checks over the recompilable subset.
@@ -11,6 +12,7 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import cython
 
 from .recompilable_cases import (
     describe_x86_16_recompilable_subset,
@@ -29,8 +31,10 @@ __all__ = [
 ]
 
 
+@cython.ccall
 def run_x86_16_recompilable_subset_syntax_checks() -> tuple[dict[str, object], ...]:
     """Run syntax, compile, and shape checks for every recompilable subset case."""
+    case: object
     results: list[dict[str, object]] = []
     for case in get_x86_16_recompilable_subset_cases():
         c_text, decompile_meta = decompile_recompilable_subset_case(case)

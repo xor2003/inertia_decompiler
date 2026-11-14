@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Validate final global and stack-object storage without repairing output.
 
 Layer: Tail validation.
@@ -15,6 +16,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -59,6 +62,9 @@ from inertia.lowering.storage_identity_facts import (
     global_storage_identity_facts_8616,
 )
 from inertia.pipeline.structured_ast_query_index import StructuredAstQueryIndex8616
+import dataclasses
+import operator
+import builtins
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -119,22 +125,22 @@ class IndexedGlobalStackAggregateCopyIssueKind8616(StrEnum):
     STRUCT_TYPE_MISMATCH = "struct-type-mismatch"
 
 
-@dataclass(frozen=True, order=True, slots=True)
+@dataclasses.dataclass(frozen=True, order=True, )
 class StorageIdentityIssue8616:
     """One contradiction between proven storage and the final C variable surface."""
 
     kind: StorageIdentityIssueKind8616
     space: MemSpace
-    offset: int
-    expected_width: int
-    name: str
-    evidence_addrs: tuple[int, ...]
-    actual_widths: tuple[int, ...] = ()
+    offset: cython.longlong
+    expected_width: cython.longlong
+    name: object
+    evidence_addrs: object
+    actual_widths: tuple[cython.longlong, ...] = ()
     shadow_locations: tuple[str, ...] = ()
 
-    def token(self) -> str:
+    def token(self) -> object:
         """Return a deterministic storage-identity failure fingerprint."""
-        evidence = ",".join(f"{addr:#x}" for addr in self.evidence_addrs)
+        evidence = ",".join(f"{addr:#x}" for addr in iter(self.evidence_addrs))
         token = (
             f"storage-identity:{self.kind.value}:space={self.space.value}:"
             f"offset={self.offset:#x}:width={self.expected_width}:"
@@ -142,29 +148,29 @@ class StorageIdentityIssue8616:
         )
         if self.actual_widths:
             token += ":actual-widths=" + ",".join(
-                str(width) for width in self.actual_widths
+                str(width) for width in iter(self.actual_widths)
             )
         if self.shadow_locations:
             token += ":shadows=" + ",".join(self.shadow_locations)
         return token
 
 
-@dataclass(frozen=True, order=True, slots=True)
+@dataclasses.dataclass(frozen=True, order=True, )
 class StackAggregateObjectIssue8616:
     """One contradiction between a proven frame object and final C array shape."""
 
     kind: StackAggregateObjectIssueKind8616
-    base_offset: int
-    expected_byte_size: int
-    expected_element_width: int
+    base_offset: cython.longlong
+    expected_byte_size: cython.longlong
+    expected_element_width: cython.longlong
     evidence_kind: StackAggregateEvidenceKind8616
-    indexed_offsets: tuple[int, ...]
-    evidence_shapes: tuple[tuple[int, int], ...] = ()
-    actual_shapes: tuple[tuple[int, int, int], ...] = ()
+    indexed_offsets: object
+    evidence_shapes: tuple[tuple[cython.longlong, cython.longlong], ...] = ()
+    actual_shapes: tuple[tuple[cython.longlong, cython.longlong, cython.longlong], ...] = ()
 
-    def token(self) -> str:
+    def token(self) -> object:
         """Return a deterministic stack-object validation fingerprint."""
-        indexed = ",".join(f"{offset:+#x}" for offset in self.indexed_offsets)
+        indexed = ",".join(f"{offset:+#x}" for offset in iter(self.indexed_offsets))
         token = (
             f"storage-object:{self.kind.value}:space=ss:"
             f"base=BP{self.base_offset:+#x}:bytes={self.expected_byte_size}:"
@@ -174,31 +180,31 @@ class StackAggregateObjectIssue8616:
         if self.actual_shapes:
             token += ":actual-shapes=" + ",".join(
                 f"{storage_width}/{declared_width}/{element_width}"
-                for storage_width, declared_width, element_width in self.actual_shapes
+                for storage_width, declared_width, element_width in iter(self.actual_shapes)
             )
         if self.evidence_shapes:
             token += ":evidence-shapes=" + ",".join(
                 f"{byte_size}/{element_width}"
-                for byte_size, element_width in self.evidence_shapes
+                for byte_size, element_width in iter(self.evidence_shapes)
             )
         return token
 
 
-@dataclass(frozen=True, order=True, slots=True)
+@dataclasses.dataclass(frozen=True, order=True, )
 class StackFieldProjectionIssue8616:
     """One contradiction between a proven and final stack field projection."""
 
     kind: StackFieldProjectionIssueKind8616
-    source_base: str
-    source_offset: int
-    destination_base: str
-    destination_offset: int
-    expected_field_offset: int
-    expected_struct_name: str
-    evidence_projections: tuple[tuple[int, str], ...] = ()
-    actual_projections: tuple[tuple[str, int, int, str], ...] = ()
+    source_base: object
+    source_offset: cython.longlong
+    destination_base: object
+    destination_offset: cython.longlong
+    expected_field_offset: cython.longlong
+    expected_struct_name: object
+    evidence_projections: tuple[tuple[cython.longlong, str], ...] = ()
+    actual_projections: tuple[tuple[str, cython.longlong, cython.longlong, str], ...] = ()
 
-    def token(self) -> str:
+    def token(self) -> object:
         """Return a deterministic stack field-projection failure fingerprint."""
         token = (
             f"storage-field:{self.kind.value}:"
@@ -210,38 +216,38 @@ class StackFieldProjectionIssue8616:
         if self.evidence_projections:
             token += ":evidence-projections=" + ",".join(
                 f"{field_offset:#x}/{struct_name}"
-                for field_offset, struct_name in self.evidence_projections
+                for field_offset, struct_name in iter(self.evidence_projections)
             )
         if self.actual_projections:
             token += ":actual-projections=" + ",".join(
                 f"{base}:{offset:+#x}/{field_offset:#x}/{struct_name}"
-                for base, offset, field_offset, struct_name in self.actual_projections
+                for base, offset, field_offset, struct_name in iter(self.actual_projections)
             )
         return token
 
 
-@dataclass(frozen=True, order=True, slots=True)
+@dataclasses.dataclass(frozen=True, order=True, )
 class IndexedGlobalStackAggregateCopyIssue8616:
     """One contradiction between a proven and final whole aggregate copy."""
 
     kind: IndexedGlobalStackAggregateCopyIssueKind8616
-    source_global_offset: int
-    source_index_base: str
-    source_index_offset: int
-    source_index_adjustment: int
-    destination_base: str
-    destination_offset: int
-    expected_width: int
-    expected_struct_name: str
-    load_ins_addr: int
-    store_ins_addr: int
-    evidence_variants: tuple[tuple[int, int, int, int, str], ...] = ()
+    source_global_offset: cython.longlong
+    source_index_base: object
+    source_index_offset: cython.longlong
+    source_index_adjustment: cython.longlong
+    destination_base: object
+    destination_offset: cython.longlong
+    expected_width: cython.longlong
+    expected_struct_name: object
+    load_ins_addr: cython.longlong
+    store_ins_addr: cython.longlong
+    evidence_variants: tuple[tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong, str], ...] = ()
     actual_copies: tuple[
-        tuple[int, str, int, int, int, int, str, str],
+        tuple[cython.longlong, str, cython.longlong, cython.longlong, cython.longlong, cython.longlong, str, str],
         ...,
     ] = ()
 
-    def token(self) -> str:
+    def token(self) -> object:
         """Return a deterministic whole aggregate-copy failure fingerprint."""
         token = (
             f"storage-copy:{self.kind.value}:"
@@ -262,7 +268,7 @@ class IndexedGlobalStackAggregateCopyIssue8616:
                     adjustment,
                     destination,
                     struct_name,
-                ) in self.evidence_variants
+                ) in iter(self.evidence_variants)
             )
         if self.actual_copies:
             token += ":actual-copies=" + ",".join(
@@ -278,45 +284,45 @@ class IndexedGlobalStackAggregateCopyIssue8616:
                     destination_width,
                     source_struct,
                     destination_struct,
-                ) in self.actual_copies
+                ) in iter(self.actual_copies)
             )
         return token
 
 
-type StorageValidationIssue8616 = (
+StorageValidationIssue8616 = typing.TypeAliasType("StorageValidationIssue8616", (
     StorageIdentityIssue8616
     | StackAggregateObjectIssue8616
     | StackFieldProjectionIssue8616
     | IndexedGlobalStackAggregateCopyIssue8616
-)
+))
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StorageIdentityValidationReport8616:
     """Closed evidence-loop counters and final storage identity failures."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
     issues: tuple[StorageValidationIssue8616, ...] = ()
 
     @property
-    def failure_count(self) -> int:
+    def failure_count(self) -> cython.longlong:
         """Return the number of final storage contradictions."""
         return len(self.issues)
 
     @property
-    def passed(self) -> bool:
+    def passed(self) -> cython.bint:
         """Return whether every classified identity exists without contradiction."""
         return (
             self.failure_count == 0
-            and self.classified_fact_count == self.materialized_count
+            and operator.eq(self.classified_fact_count, self.materialized_count)
         )
 
     def issue_tokens(self) -> tuple[str, ...]:
         """Return stable issue fingerprints for tail-validation summaries."""
-        return tuple(issue.token() for issue in self.issues)
+        return tuple(issue.token() for issue in iter(self.issues))
 
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-compatible closed-loop evidence report."""
@@ -333,7 +339,7 @@ class StorageIdentityValidationReport8616:
 class _StorageValidationTypeStore8616(Protocol):
     """Third-party angr type store used to validate named aggregate bindings."""
 
-    def __getitem__(self, name: str) -> object:
+    def __getitem__(self, name: object) -> object:
         """Return one registered function-local type."""
         ...
 
@@ -362,45 +368,46 @@ class _StorageValidationCodegen8616(Protocol):
 class _NamedStorage8616(Protocol):
     """Third-party SimVariable name field used only for emitted-name diagnostics."""
 
-    name: str | None
+    name: object
 
 
 class _SizedType8616(Protocol):
     """Third-party SimType size field used for final declaration validation."""
 
-    size: int
+    size: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _FinalStackFieldProjection8616:
     """One field projection observed in the final structured C AST."""
 
-    source_base: str
-    source_offset: int
-    field_offset: int
-    struct_name: str
+    source_base: object
+    source_offset: cython.longlong
+    field_offset: cython.longlong
+    struct_name: object
     struct_type: SimStruct
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _FinalIndexedGlobalStackAggregateCopy8616:
     """One whole indexed-global-to-stack copy observed in final structured C."""
 
-    source_global_offset: int
-    source_global_name: str
-    source_index_base: str
-    source_index_offset: int
-    source_index_adjustment: int
-    source_width: int
-    destination_width: int
-    source_struct_name: str
-    destination_struct_name: str
+    source_global_offset: cython.longlong
+    source_global_name: object
+    source_index_base: object
+    source_index_offset: cython.longlong
+    source_index_adjustment: cython.longlong
+    source_width: cython.longlong
+    destination_width: cython.longlong
+    source_struct_name: object
+    destination_struct_name: object
     source_struct_type: SimStruct | None
     destination_struct_type: SimStruct | None
 
 
 def _iter_container_cvariables_8616(value: object) -> Iterator[CVariable]:
     """Yield C variables from known third-party declaration containers."""
+    item: object
     if isinstance(value, CVariable):
         yield value
         return
@@ -413,26 +420,32 @@ def _iter_container_cvariables_8616(value: object) -> Iterator[CVariable]:
             yield from _iter_container_cvariables_8616(item)
 
 
+@cython.ccall
 def _root_cvariables_8616(
     root: object,
     query_index: StructuredAstQueryIndex8616 | None = None,
 ) -> tuple[CVariable, ...]:
     """Collect variables that are referenced by the actual final statement tree."""
+    variable: object
     nodes = query_index.nodes if query_index is not None else _iter_c_nodes_deep_8616(root)
     variables = [
-        node for node in nodes if isinstance(node, CVariable)
+        node for node in iter(nodes) if isinstance(node, CVariable)
     ]
-    unique: dict[int, CVariable] = {}
+    unique: dict[cython.longlong, CVariable] = {}
     for variable in variables:
         unique.setdefault(id(variable), variable)
     return tuple(unique.values())
 
 
+@cython.ccall
 def _declaration_cvariables_8616(
     codegen: object,
-    root_variables: tuple[CVariable, ...],
+    root_variables: object,
 ) -> tuple[CVariable, ...]:
     """Collect root variables plus declaration-producing CFunction containers."""
+    cfunc: object
+    field_name: object
+    variable: object
     variables = list(root_variables)
     surface = cast(_StorageValidationCodegen8616, codegen)
     try:
@@ -452,14 +465,16 @@ def _declaration_cvariables_8616(
             except AttributeError:
                 continue
             variables.extend(_iter_container_cvariables_8616(value))
-    unique: dict[int, CVariable] = {}
+    unique: dict[cython.longlong, CVariable] = {}
     for variable in variables:
         unique.setdefault(id(variable), variable)
     return tuple(unique.values())
 
 
+@cython.ccall
 def _cvariable_storage_views_8616(node: CVariable) -> tuple[object, ...]:
     """Return direct and unified storage views from an angr C variable."""
+    unified: object
     views: list[object] = [node.variable]
     try:
         unified = node.unified_variable
@@ -470,8 +485,10 @@ def _cvariable_storage_views_8616(node: CVariable) -> tuple[object, ...]:
     return tuple(views)
 
 
-def _cvariable_name_8616(node: CVariable) -> str | None:
+@cython.ccall
+def _cvariable_name_8616(node: CVariable) -> object:
     """Return the emitted variable name from the third-party C AST boundary."""
+    storage: object
     try:
         name = node.name
     except AttributeError:
@@ -488,12 +505,15 @@ def _cvariable_name_8616(node: CVariable) -> str | None:
     return None
 
 
+@cython.ccall
 def _covering_global_cvariables_8616(
-    variables: tuple[CVariable, ...],
-    offset: int,
-    width: int,
+    variables: object,
+    offset: cython.longlong,
+    width: cython.longlong,
 ) -> tuple[CVariable, ...]:
     """Return final globals whose byte span covers one proven access."""
+    storage: object
+    variable: object
     access_end = offset + width
     if access_end > 0x10000:
         return ()
@@ -516,15 +536,16 @@ def _covering_global_cvariables_8616(
     return tuple(covering)
 
 
+@cython.ccall
 def _global_storage_candidate_widths_8616(
-    variables: tuple[CVariable, ...],
-    offset: int,
-) -> tuple[int, ...]:
+    variables: object,
+    offset: cython.longlong,
+) -> tuple[cython.longlong, ...]:
     """Return widths of final globals that contain the access start byte."""
     widths = {
         storage.size
-        for variable in variables
-        for storage in _cvariable_storage_views_8616(variable)
+        for variable in iter(variables)
+        for storage in builtins.iter(_cvariable_storage_views_8616(variable))
         if isinstance(storage, SimMemoryVariable)
         and isinstance(storage.addr, int)
         and isinstance(storage.size, int)
@@ -534,23 +555,26 @@ def _global_storage_candidate_widths_8616(
     return tuple(sorted(widths))
 
 
+@cython.ccall
 def _covering_global_names_8616(
-    variables: tuple[CVariable, ...],
+    variables: object,
 ) -> tuple[str, ...]:
     """Return emitted names for final globals that cover one access."""
     return tuple(
         sorted(
             {
                 name
-                for variable in variables
+                for variable in iter(variables)
                 if (name := _cvariable_name_8616(variable)) is not None
             }
         )
     )
 
 
-def _local_storage_location_8616(node: CVariable) -> str | None:
+@cython.ccall
+def _local_storage_location_8616(node: CVariable) -> object:
     """Return a stable local-storage token for shadow diagnostics."""
+    storage: object
     for storage in _cvariable_storage_views_8616(node):
         if isinstance(storage, SimStackVariable):
             return f"SS:BP{storage.offset:+#x}:size{storage.size}"
@@ -563,43 +587,48 @@ def _local_storage_location_8616(node: CVariable) -> str | None:
     return None
 
 
+@cython.ccall
 def _shadow_locations_8616(
-    variables: tuple[CVariable, ...],
-    name: str,
+    variables: object,
+    name: object,
 ) -> tuple[str, ...]:
     """Return local storage declarations that shadow one proven global name."""
     locations = {
         location
-        for variable in variables
-        if _cvariable_name_8616(variable) == name
+        for variable in iter(variables)
+        if operator.eq(_cvariable_name_8616(variable), name)
         if (location := _local_storage_location_8616(variable)) is not None
     }
     return tuple(sorted(locations))
 
 
+@cython.ccall
 def _normalized_facts_8616(
-    facts: tuple[GlobalStorageIdentityFact8616, ...],
+    facts: object,
 ) -> tuple[GlobalStorageIdentityFact8616, ...]:
     """Deduplicate exact facts while preserving deterministic order."""
     return tuple(dict.fromkeys(facts))
 
 
+@cython.ccall
 def _normalized_stack_aggregate_facts_8616(
-    facts: tuple[StackAggregateObjectFact8616, ...],
+    facts: object,
 ) -> tuple[StackAggregateObjectFact8616, ...]:
     """Deduplicate exact stack-object facts while preserving deterministic order."""
     return tuple(dict.fromkeys(facts))
 
 
+@cython.ccall
 def _normalized_stack_field_projection_facts_8616(
-    facts: tuple[StackAggregateFieldProjectionFact8616, ...],
+    facts: object,
 ) -> tuple[StackAggregateFieldProjectionFact8616, ...]:
     """Deduplicate exact stack field facts while preserving deterministic order."""
     return tuple(dict.fromkeys(facts))
 
 
+@cython.ccall
 def _normalized_indexed_global_stack_copy_facts_8616(
-    facts: tuple[IndexedGlobalStackAggregateCopyFact8616, ...],
+    facts: object,
 ) -> tuple[IndexedGlobalStackAggregateCopyFact8616, ...]:
     """Deduplicate exact whole-copy facts while preserving deterministic order."""
     return tuple(dict.fromkeys(facts))
@@ -609,18 +638,19 @@ def _stack_storage_matches_8616(
     codegen: object,
     variable: CVariable,
     *,
-    base: str,
-    offset: int,
-) -> bool:
+    base: object,
+    offset: cython.longlong,
+) -> cython.bint:
     """Return whether one final C variable has the exact stack identity."""
     return any(
         isinstance(storage, SimStackVariable)
-        and storage.base == base
-        and machine_bp_offset_for_stack_variable_8616(codegen, storage) == offset
-        for storage in _cvariable_storage_views_8616(variable)
+        and operator.eq(storage.base, base)
+        and operator.eq(machine_bp_offset_for_stack_variable_8616(codegen, storage), offset)
+        for storage in builtins.iter(_cvariable_storage_views_8616(variable))
     )
 
 
+@cython.ccall
 def _strip_type_casts_8616(expression: object) -> object:
     """Return the value under any final structured type casts."""
     while isinstance(expression, CTypeCast):
@@ -628,7 +658,8 @@ def _strip_type_casts_8616(expression: object) -> object:
     return expression
 
 
-def _struct_name_8616(struct_type: object) -> str:
+@cython.ccall
+def _struct_name_8616(struct_type: object) -> object:
     """Return a stable diagnostic name for one typed struct."""
     if not isinstance(struct_type, SimStruct):
         return f"<invalid-{type(struct_type).__name__}>"
@@ -645,6 +676,8 @@ def _final_stack_field_projections_8616(
     fact: StackAggregateFieldProjectionFact8616,
 ) -> tuple[_FinalStackFieldProjection8616, ...]:
     """Return final field projections assigned to the fact destination."""
+    source_storage: object
+    node: object
     projections: set[_FinalStackFieldProjection8616] = set()
     for node in nodes:
         if (
@@ -667,7 +700,7 @@ def _final_stack_field_projections_8616(
         source_storage = next(
             (
                 storage
-                for storage in _cvariable_storage_views_8616(rhs.variable)
+                for storage in builtins.iter(_cvariable_storage_views_8616(rhs.variable))
                 if isinstance(storage, SimStackVariable)
                 and isinstance(storage.base, str)
                 and isinstance(storage.offset, int)
@@ -706,9 +739,10 @@ def _final_stack_field_projections_8616(
     )
 
 
+@cython.ccall
 def _stack_field_projection_fact_is_valid_8616(
     fact: StackAggregateFieldProjectionFact8616,
-) -> bool:
+) -> cython.bint:
     """Return whether one lowering fact has exact BP-local identities."""
     return (
         fact.source_base == "bp"
@@ -724,8 +758,8 @@ def _stack_field_projection_issue_8616(
     fact: StackAggregateFieldProjectionFact8616,
     kind: StackFieldProjectionIssueKind8616,
     *,
-    evidence_projections: tuple[tuple[int, str], ...] = (),
-    actual: tuple[_FinalStackFieldProjection8616, ...] = (),
+    evidence_projections: object = (),
+    actual: object = (),
 ) -> StackFieldProjectionIssue8616:
     """Build one stable field-projection validation issue."""
     return StackFieldProjectionIssue8616(
@@ -744,11 +778,12 @@ def _stack_field_projection_issue_8616(
                 projection.field_offset,
                 projection.struct_name,
             )
-            for projection in actual
+            for projection in iter(actual)
         ),
     )
 
 
+@cython.ccall
 def _resolved_struct_type_8616(type_value: object) -> SimStruct | None:
     """Resolve a final direct or named-reference struct type."""
     resolved = type_value.type if isinstance(type_value, TypeRef) else type_value
@@ -759,14 +794,14 @@ def _registered_named_global_copy_type_matches_8616(
     codegen: object,
     fact: IndexedGlobalStackAggregateCopyFact8616,
     copy: _FinalIndexedGlobalStackAggregateCopy8616,
-    named_global_facts: tuple[NamedGlobalAggregateTypeFact8616, ...],
-) -> bool:
+    named_global_facts: object,
+) -> cython.bint:
     """Validate an untyped indexed node through its exact registered global type."""
     matching_facts = tuple(
         named_fact
-        for named_fact in named_global_facts
-        if named_fact.global_name == copy.source_global_name
-        and named_fact.struct_type == fact.struct_type
+        for named_fact in iter(named_global_facts)
+        if operator.eq(named_fact.global_name, copy.source_global_name)
+        and operator.eq(named_fact.struct_type, fact.struct_type)
         and isinstance(named_fact.array_len, int)
         and named_fact.array_len > 0
     )
@@ -809,15 +844,17 @@ def _registered_named_global_copy_type_matches_8616(
 def _final_stack_index_identity_8616(
     codegen: object,
     expression: object,
-) -> tuple[str, int, int] | None:
+) -> object:
     """Return one final BP-stack index identity and logical adjustment."""
+    base: object
+    storage: object
     if isinstance(expression, CTypeCast):
         return _final_stack_index_identity_8616(codegen, expression.expr)
     if isinstance(expression, CVariable):
         storage = next(
             (
                 candidate
-                for candidate in _cvariable_storage_views_8616(expression)
+                for candidate in builtins.iter(_cvariable_storage_views_8616(expression))
                 if isinstance(candidate, SimStackVariable)
                 and isinstance(candidate.base, str)
                 and isinstance(candidate.offset, int)
@@ -857,6 +894,10 @@ def _final_indexed_global_stack_copies_8616(
     fact: IndexedGlobalStackAggregateCopyFact8616,
 ) -> tuple[_FinalIndexedGlobalStackAggregateCopy8616, ...]:
     """Return final whole copies assigned to the exact fact destination."""
+    destination_storage: object
+    index_identity: object
+    source_storage: object
+    node: object
     copies: set[_FinalIndexedGlobalStackAggregateCopy8616] = set()
     for node in nodes:
         if (
@@ -879,7 +920,7 @@ def _final_indexed_global_stack_copies_8616(
         source_storage = next(
             (
                 storage
-                for storage in _cvariable_storage_views_8616(rhs.variable)
+                for storage in builtins.iter(_cvariable_storage_views_8616(rhs.variable))
                 if isinstance(storage, SimMemoryVariable)
                 and isinstance(storage.addr, int)
                 and isinstance(storage.size, int)
@@ -889,11 +930,10 @@ def _final_indexed_global_stack_copies_8616(
         destination_storage = next(
             (
                 storage
-                for storage in _cvariable_storage_views_8616(node.lhs)
+                for storage in builtins.iter(_cvariable_storage_views_8616(node.lhs))
                 if isinstance(storage, SimStackVariable)
-                and storage.base == fact.destination_base
-                and machine_bp_offset_for_stack_variable_8616(codegen, storage)
-                == fact.destination_offset
+                and operator.eq(storage.base, fact.destination_base)
+                and operator.eq(machine_bp_offset_for_stack_variable_8616(codegen, storage), fact.destination_offset)
                 and isinstance(storage.size, int)
             ),
             None,
@@ -958,9 +998,10 @@ def _final_indexed_global_stack_copies_8616(
     )
 
 
+@cython.ccall
 def _indexed_global_stack_copy_fact_is_valid_8616(
     fact: IndexedGlobalStackAggregateCopyFact8616,
-) -> bool:
+) -> cython.bint:
     """Return whether one whole-copy fact has exact representable identities."""
     return (
         0 <= fact.source_global_offset <= 0xFFFF
@@ -979,8 +1020,8 @@ def _indexed_global_stack_copy_issue_8616(
     fact: IndexedGlobalStackAggregateCopyFact8616,
     kind: IndexedGlobalStackAggregateCopyIssueKind8616,
     *,
-    evidence_variants: tuple[tuple[int, int, int, int, str], ...] = (),
-    actual: tuple[_FinalIndexedGlobalStackAggregateCopy8616, ...] = (),
+    evidence_variants: object = (),
+    actual: object = (),
 ) -> IndexedGlobalStackAggregateCopyIssue8616:
     """Build one stable whole aggregate-copy validation issue."""
     return IndexedGlobalStackAggregateCopyIssue8616(
@@ -1007,12 +1048,13 @@ def _indexed_global_stack_copy_issue_8616(
                 copy.source_struct_name,
                 copy.destination_struct_name,
             )
-            for copy in actual
+            for copy in iter(actual)
         ),
     )
 
 
-def _type_width_bytes_8616(type_value: object) -> int:
+@cython.ccall
+def _type_width_bytes_8616(type_value: object) -> cython.longlong:
     """Return a final third-party C type width in bytes, or zero if unavailable."""
     try:
         bits = cast(_SizedType8616, type_value).size
@@ -1025,19 +1067,20 @@ def _type_width_bytes_8616(type_value: object) -> int:
 
 def _stack_aggregate_candidate_shapes_8616(
     codegen: object,
-    variables: tuple[CVariable, ...],
-    base_offset: int,
-) -> tuple[tuple[int, int, int], ...]:
+    variables: object,
+    base_offset: cython.longlong,
+) -> tuple[tuple[cython.longlong, cython.longlong, cython.longlong], ...]:
     """Return final ``storage/declared/element`` widths at one BP-local base."""
-    shapes: set[tuple[int, int, int]] = set()
+    storage: object
+    variable: object
+    shapes: set[tuple[cython.longlong, cython.longlong, cython.longlong]] = set()
     for variable in variables:
         stack_views = tuple(
             storage
-            for storage in _cvariable_storage_views_8616(variable)
+            for storage in builtins.iter(_cvariable_storage_views_8616(variable))
             if isinstance(storage, SimStackVariable)
             and storage.base == "bp"
-            and machine_bp_offset_for_stack_variable_8616(codegen, storage)
-            == base_offset
+            and operator.eq(machine_bp_offset_for_stack_variable_8616(codegen, storage), base_offset)
             and isinstance(storage.size, int)
             and storage.size > 0
         )
@@ -1056,9 +1099,10 @@ def _stack_aggregate_candidate_shapes_8616(
     return tuple(sorted(shapes))
 
 
+@cython.ccall
 def _stack_aggregate_fact_is_valid_8616(
     fact: StackAggregateObjectFact8616,
-) -> bool:
+) -> cython.bint:
     """Return whether an owned stack-object fact has a representable array shape."""
     return (
         fact.base_offset < 0
@@ -1130,7 +1174,7 @@ def validate_storage_identities_8616(
             copy_facts,
             tuple(
                 (fact, _final_indexed_global_stack_copies_8616(codegen, run.nodes, fact))
-                for fact in copy_facts
+                for fact in iter(copy_facts)
             ),
             named_global_facts,
             report.issue_tokens(),
@@ -1139,34 +1183,37 @@ def validate_storage_identities_8616(
     return report
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _StorageValidationRun8616:
     """Shared context and issue counters for storage-identity validation."""
 
     codegen: object
-    nodes: tuple[object, ...]
-    root_variables: tuple[CVariable, ...]
-    declaration_variables: tuple[CVariable, ...]
-    named_global_facts: tuple[NamedGlobalAggregateTypeFact8616, ...]
-    issues: list[StorageValidationIssue8616] = field(default_factory=list)
-    classified_fact_count: int = 0
-    materialized_count: int = 0
+    nodes: object
+    root_variables: object
+    declaration_variables: object
+    named_global_facts: object
+    issues: object = field(default_factory=list)
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
 
     def global_facts_phase(
         self,
-        global_facts: tuple[GlobalStorageIdentityFact8616, ...],
+        global_facts: object,
     ) -> None:
         """Compare normalized global facts against final DS globals."""
+        evidence_facts: object
+        evidence_key: object
+        fact: object
         conflicting_keys: set[tuple[object, ...]] = set()
         facts_by_evidence: dict[
-            tuple[MemSpace, int, int, object], list[GlobalStorageIdentityFact8616]
+            tuple[MemSpace, cython.longlong, cython.longlong, object], list[GlobalStorageIdentityFact8616]
         ] = {}
         for fact in global_facts:
             facts_by_evidence.setdefault(
                 (fact.space, fact.offset, fact.evidence_addr, fact.kind), []
             ).append(fact)
         for evidence_key, evidence_facts in facts_by_evidence.items():
-            widths = tuple(sorted({fact.width for fact in evidence_facts}))
+            widths = tuple(sorted({fact.width for fact in iter(evidence_facts)}))
             if len(widths) <= 1:
                 continue
             conflicting_keys.add(evidence_key)
@@ -1186,10 +1233,11 @@ class _StorageValidationRun8616:
         for fact in global_facts:
             self._global_fact(fact, conflicting_keys)
 
+    @cython.ccall
     def _global_fact(
         self,
         fact: GlobalStorageIdentityFact8616,
-        conflicting_keys: set[tuple[object, ...]],
+        conflicting_keys: object,
     ) -> None:
         """Classify one global storage fact against the final globals."""
         evidence_key = (fact.space, fact.offset, fact.evidence_addr, fact.kind)
@@ -1253,11 +1301,11 @@ class _StorageValidationRun8616:
             sorted(
                 {
                     location
-                    for shadow_name in shadow_names
-                    for location in _shadow_locations_8616(
+                    for shadow_name in iter(shadow_names)
+                    for location in builtins.iter(_shadow_locations_8616(
                         self.declaration_variables,
                         shadow_name,
-                    )
+                    ))
                 }
             )
         )
@@ -1276,17 +1324,20 @@ class _StorageValidationRun8616:
 
     def stack_facts_phase(
         self,
-        stack_facts: tuple[StackAggregateObjectFact8616, ...],
+        stack_facts: object,
     ) -> None:
         """Compare normalized stack-aggregate facts against final locals."""
-        conflicting_stack_bases: set[int] = set()
-        stack_facts_by_base: dict[int, list[StackAggregateObjectFact8616]] = {}
+        base_facts: object
+        base_offset: object
+        stack_fact: object
+        conflicting_stack_bases: set[cython.longlong] = set()
+        stack_facts_by_base: dict[cython.longlong, list[StackAggregateObjectFact8616]] = {}
         for stack_fact in stack_facts:
             stack_facts_by_base.setdefault(stack_fact.base_offset, []).append(stack_fact)
         for base_offset, base_facts in stack_facts_by_base.items():
             shapes = {
                 (stack_fact.byte_size, stack_fact.element_width)
-                for stack_fact in base_facts
+                for stack_fact in iter(base_facts)
             }
             if len(shapes) <= 1:
                 continue
@@ -1318,7 +1369,7 @@ class _StorageValidationRun8616:
     def _stack_fact(
         self,
         stack_fact: StackAggregateObjectFact8616,
-        conflicting_stack_bases: set[int],
+        conflicting_stack_bases: object,
     ) -> None:
         """Classify one stack-aggregate fact against the final locals."""
         if stack_fact.base_offset in conflicting_stack_bases:
@@ -1343,12 +1394,12 @@ class _StorageValidationRun8616:
         )
         matching_width_shapes = tuple(
             shape
-            for shape in actual_shapes
-            if shape[1] == stack_fact.byte_size
+            for shape in iter(actual_shapes)
+            if operator.eq(shape[1], stack_fact.byte_size)
         )
         if any(
-            shape[2] == stack_fact.element_width
-            for shape in matching_width_shapes
+            operator.eq(shape[2], stack_fact.element_width)
+            for shape in iter(matching_width_shapes)
         ):
             self.materialized_count += 1
             return
@@ -1372,12 +1423,15 @@ class _StorageValidationRun8616:
 
     def field_facts_phase(
         self,
-        field_facts: tuple[StackAggregateFieldProjectionFact8616, ...],
+        field_facts: object,
     ) -> None:
         """Compare normalized field-projection facts against final locals."""
-        conflicting_field_identities: set[tuple[str, int, str, int]] = set()
+        field_fact: object
+        identity: object
+        identity_facts: object
+        conflicting_field_identities: set[tuple[str, cython.longlong, str, cython.longlong]] = set()
         field_facts_by_identity: dict[
-            tuple[str, int, str, int],
+            tuple[str, cython.longlong, str, cython.longlong],
             list[StackAggregateFieldProjectionFact8616],
         ] = {}
         for field_fact in field_facts:
@@ -1396,7 +1450,7 @@ class _StorageValidationRun8616:
                     fact.cast_source_type,
                     fact.cast_destination_type,
                 )
-                for fact in identity_facts
+                for fact in iter(identity_facts)
             }
             if len(field_variants) <= 1:
                 continue
@@ -1420,7 +1474,7 @@ class _StorageValidationRun8616:
                                     fact.field_offset,
                                     _struct_name_8616(fact.struct_type),
                                 )
-                                for fact in identity_facts
+                                for fact in iter(identity_facts)
                             }
                         )
                     ),
@@ -1432,7 +1486,7 @@ class _StorageValidationRun8616:
     def _field_fact(
         self,
         field_fact: StackAggregateFieldProjectionFact8616,
-        conflicting_field_identities: set[tuple[str, int, str, int]],
+        conflicting_field_identities: object,
     ) -> None:
         """Classify one field-projection fact against final locals."""
         identity = (
@@ -1463,9 +1517,9 @@ class _StorageValidationRun8616:
             return
         source_matches = tuple(
             projection
-            for projection in actual
-            if projection.source_base == field_fact.source_base
-            and projection.source_offset == field_fact.source_offset
+            for projection in iter(actual)
+            if operator.eq(projection.source_base, field_fact.source_base)
+            and operator.eq(projection.source_offset, field_fact.source_offset)
         )
         if not source_matches:
             self.issues.append(
@@ -1478,8 +1532,8 @@ class _StorageValidationRun8616:
             return
         field_matches = tuple(
             projection
-            for projection in source_matches
-            if projection.field_offset == field_fact.field_offset
+            for projection in iter(source_matches)
+            if operator.eq(projection.field_offset, field_fact.field_offset)
         )
         if not field_matches:
             self.issues.append(
@@ -1491,8 +1545,8 @@ class _StorageValidationRun8616:
             )
             return
         if not any(
-            projection.struct_type == field_fact.struct_type
-            for projection in field_matches
+            operator.eq(projection.struct_type, field_fact.struct_type)
+            for projection in iter(field_matches)
         ):
             self.issues.append(
                 _stack_field_projection_issue_8616(
@@ -1506,12 +1560,15 @@ class _StorageValidationRun8616:
 
     def copy_facts_phase(
         self,
-        copy_facts: tuple[IndexedGlobalStackAggregateCopyFact8616, ...],
+        copy_facts: object,
     ) -> None:
         """Compare normalized whole-copy facts against final copies."""
-        conflicting_copy_evidence: set[tuple[int, int]] = set()
+        copy_evidence_facts: object
+        copy_fact: object
+        evidence_identity: object
+        conflicting_copy_evidence: set[tuple[cython.longlong, cython.longlong]] = set()
         copy_facts_by_evidence: dict[
-            tuple[int, int],
+            tuple[cython.longlong, cython.longlong],
             list[IndexedGlobalStackAggregateCopyFact8616],
         ] = {}
         for copy_fact in copy_facts:
@@ -1531,7 +1588,7 @@ class _StorageValidationRun8616:
                     copy_evidence_fact.width,
                     copy_evidence_fact.struct_type,
                 )
-                for copy_evidence_fact in copy_evidence_facts
+                for copy_evidence_fact in iter(copy_evidence_facts)
             }
             if len(copy_variants) <= 1:
                 continue
@@ -1562,7 +1619,7 @@ class _StorageValidationRun8616:
                                     copy_evidence_fact.destination_offset,
                                     _struct_name_8616(copy_evidence_fact.struct_type),
                                 )
-                                for copy_evidence_fact in copy_evidence_facts
+                                for copy_evidence_fact in iter(copy_evidence_facts)
                             }
                         )
                     ),
@@ -1574,7 +1631,7 @@ class _StorageValidationRun8616:
     def _copy_fact(
         self,
         copy_fact: IndexedGlobalStackAggregateCopyFact8616,
-        conflicting_copy_evidence: set[tuple[int, int]],
+        conflicting_copy_evidence: object,
     ) -> None:
         """Classify one indexed whole-copy fact against final copies."""
         evidence_identity = (copy_fact.load_ins_addr, copy_fact.store_ins_addr)
@@ -1602,8 +1659,8 @@ class _StorageValidationRun8616:
             return
         copy_source_matches = tuple(
             copy
-            for copy in copy_actual
-            if copy.source_global_offset == copy_fact.source_global_offset
+            for copy in iter(copy_actual)
+            if operator.eq(copy.source_global_offset, copy_fact.source_global_offset)
         )
         if not copy_source_matches:
             self.issues.append(
@@ -1616,11 +1673,10 @@ class _StorageValidationRun8616:
             return
         copy_index_matches = tuple(
             copy
-            for copy in copy_source_matches
-            if copy.source_index_base == copy_fact.source_index_base
-            and copy.source_index_offset == copy_fact.source_index_offset
-            and copy.source_index_adjustment
-            == copy_fact.source_index_adjustment
+            for copy in iter(copy_source_matches)
+            if operator.eq(copy.source_index_base, copy_fact.source_index_base)
+            and operator.eq(copy.source_index_offset, copy_fact.source_index_offset)
+            and operator.eq(copy.source_index_adjustment, copy_fact.source_index_adjustment)
         )
         if not copy_index_matches:
             self.issues.append(
@@ -1633,9 +1689,9 @@ class _StorageValidationRun8616:
             return
         copy_width_matches = tuple(
             copy
-            for copy in copy_index_matches
-            if copy.source_width == copy_fact.width
-            and copy.destination_width == copy_fact.width
+            for copy in iter(copy_index_matches)
+            if operator.eq(copy.source_width, copy_fact.width)
+            and operator.eq(copy.destination_width, copy_fact.width)
         )
         if not copy_width_matches:
             self.issues.append(
@@ -1648,7 +1704,7 @@ class _StorageValidationRun8616:
             return
         if not any(
             (
-                copy.source_struct_type == copy_fact.struct_type
+                operator.eq(copy.source_struct_type, copy_fact.struct_type)
                 or (
                     copy.source_struct_type is None
                     and _registered_named_global_copy_type_matches_8616(
@@ -1659,8 +1715,8 @@ class _StorageValidationRun8616:
                     )
                 )
             )
-            and copy.destination_struct_type == copy_fact.struct_type
-            for copy in copy_width_matches
+            and operator.eq(copy.destination_struct_type, copy_fact.struct_type)
+            for copy in iter(copy_width_matches)
         ):
             self.issues.append(
                 _indexed_global_stack_copy_issue_8616(

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bind proven scalar call returns to structured switch selectors.
 
 Layer: Types/Lowering.
@@ -17,6 +18,8 @@ Owned callsite summaries and result contracts use typed dot access.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Any, cast
@@ -29,8 +32,11 @@ from inertia.pipeline.errors import PipelineHardError
 from inertia.semantics.callsite_summary import CallsiteReturnShape8616, CallsiteSummary8616
 
 from .register_local_declarations import register_typed_register_local_8616
+import dataclasses
+import operator
+import builtins
 
-_WORD_RETURN_BYTES: int = 2
+_WORD_RETURN_BYTES: cython.longlong = 2
 
 __all__ = [
     "CallReturnSelectorBindingResult8616",
@@ -40,40 +46,42 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallReturnSelectorBindingResult8616:
     """Closed evidence counters for scalar call-return selector binding."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    changed_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    changed_count: cython.longlong = 0
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether this invocation changed a structured identity."""
         return self.changed_count > 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _RegisterView8616:
     """One physical register byte range exposed by structured codegen."""
 
     expression: structured_c.CExpression
-    offset: int
-    size: int
+    offset: cython.longlong
+    size: cython.longlong
 
 
-def is_scalar_ax_call_return_8616(summary: CallsiteSummary8616 | None) -> bool:
+@cython.ccall
+def is_scalar_ax_call_return_8616(summary: object) -> cython.bint:
     """Require a used, proven scalar AX result; never narrow DX:AX or unknown returns."""
     return bool(
         summary is not None and summary.return_register == "ax"
-        and summary.return_used is True and summary.return_shape == CallsiteReturnShape8616.AX.value
+        and summary.return_used is True and operator.eq(summary.return_shape, CallsiteReturnShape8616.AX.value)
     )
 
 
+@cython.ccall
 def _register_cvar_8616(node: object) -> structured_c.CVariable | None:
     """Return a register-backed C variable through harmless C casts."""
     current = node
@@ -86,8 +94,11 @@ def _register_cvar_8616(node: object) -> structured_c.CVariable | None:
     return current
 
 
+@cython.ccall
 def _register_view_8616(node: object) -> _RegisterView8616 | None:
     """Return a register view across variable-backed and raw AIL surfaces."""
+    offset: object
+    size: object
     current = node
     while isinstance(current, structured_c.CTypeCast):
         current = current.expr
@@ -106,13 +117,16 @@ def _register_view_8616(node: object) -> _RegisterView8616 | None:
     return None
 
 
-def _same_register_view_8616(left: _RegisterView8616, right: _RegisterView8616) -> bool:
+@cython.ccall
+def _same_register_view_8616(left: _RegisterView8616, right: _RegisterView8616) -> cython.bint:
     """Return whether two C variables are the same physical register view."""
-    return left.offset == right.offset and left.size == right.size
+    return operator.eq(left.offset, right.offset) and operator.eq(left.size, right.size)
 
 
+@cython.ccall
 def _flatten_sequential_statements_8616(root: structured_c.CStatements) -> tuple[object, ...]:
     """Flatten only transparent nested statement lists in execution order."""
+    statement: object
     flattened: list[object] = []
     for statement in root.statements:
         if isinstance(statement, structured_c.CStatements):
@@ -122,31 +136,36 @@ def _flatten_sequential_statements_8616(root: structured_c.CStatements) -> tuple
     return tuple(flattened)
 
 
+@cython.ccall
 def _statement_writes_register_view_8616(
     statement: object,
     register: _RegisterView8616,
-) -> bool:
+) -> cython.bint:
     """Return whether a statement overwrites the candidate register view."""
+    lhs: object
     if not isinstance(statement, structured_c.CAssignment):
         return False
     lhs = _register_view_8616(statement.lhs)
     return lhs is not None and _same_register_view_8616(lhs, register)
 
 
-def _statement_contains_call_8616(statement: object) -> bool:
+def _statement_contains_call_8616(statement: object) -> cython.bint:
     """Return whether a structured statement contains any call."""
     return any(
         isinstance(node, structured_c.CFunctionCall)
-        for node in _iter_c_nodes_deep_8616(statement)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(statement))
     )
 
 
+@cython.ccall
 def _selector_after_call_8616(
-    statements: tuple[object, ...],
-    call_index: int,
+    statements: object,
+    call_index: cython.longlong,
     register: _RegisterView8616,
-) -> tuple[structured_c.CSwitchCase, _RegisterView8616] | None:
+) -> object:
     """Find the first uninterrupted switch read of one call-return register."""
+    selector: object
+    statement: object
     for statement in statements[call_index + 1 :]:
         if isinstance(statement, structured_c.CSwitchCase):
             selector = _register_view_8616(statement.switch)
@@ -165,13 +184,15 @@ def _selector_after_call_8616(
     return None
 
 
+@cython.ccall
 def _structured_return_variable_8616(
     summary: CallsiteSummary8616,
     register: structured_c.CVariable,
     selector: _RegisterView8616,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> SimRegisterVariable:
     """Reuse or build deterministic register-SSA identity from one exact callsite fact."""
+    candidate: object
     variable = register.variable
     assert isinstance(variable, SimRegisterVariable)
     name = (
@@ -187,12 +208,12 @@ def _structured_return_variable_8616(
     for candidate in (variable, selector_variable):
         if not isinstance(candidate, SimRegisterVariable):
             continue
-        same_storage = candidate.reg == variable.reg and candidate.size == variable.size
+        same_storage = operator.eq(candidate.reg, variable.reg) and operator.eq(candidate.size, variable.size)
         if (
             same_storage
             and candidate.ident == f"call-return-{summary.callsite_addr:x}"
-            and candidate.name == name
-            and candidate.region == function_addr
+            and operator.eq(candidate.name, name)
+            and operator.eq(candidate.region, function_addr)
         ):
             return candidate
     return SimRegisterVariable(
@@ -204,10 +225,11 @@ def _structured_return_variable_8616(
     )
 
 
+@cython.ccall
 def _bind_cvar_identity_8616(
     cvar: structured_c.CVariable,
     variable: SimRegisterVariable,
-) -> bool:
+) -> cython.bint:
     """Bind both C-variable views and report only a fresh identity mutation."""
     changed = False
     if cvar.variable is not variable:
@@ -219,12 +241,13 @@ def _bind_cvar_identity_8616(
     return changed
 
 
+@cython.ccall
 def _bind_switch_selector_identity_8616(
     switch: structured_c.CSwitchCase,
     selector: _RegisterView8616,
     register: structured_c.CVariable,
     variable: SimRegisterVariable,
-) -> bool:
+) -> cython.bint:
     """Bind or replace the switch selector with one call-return identity."""
     if isinstance(selector.expression, structured_c.CVariable):
         return _bind_cvar_identity_8616(selector.expression, variable)
@@ -240,6 +263,7 @@ def _bind_switch_selector_identity_8616(
     return True
 
 
+@cython.ccall
 def bind_call_return_switch_selectors_8616(
     codegen: object,
 ) -> CallReturnSelectorBindingResult8616:
@@ -249,6 +273,17 @@ def bind_call_return_switch_selectors_8616(
     shape must be the 16-bit AX view, and assignment-to-switch flow must contain
     no AX clobber, nested call, or control-flow boundary.
     """
+    cfunc: object
+    function_addr: object
+    raw_summaries: object
+    register: object
+    register_view: object
+    root: object
+    selector_match: object
+    summary: object
+    index: object
+    node: object
+    statement: object
     # Dynamic boundary: regenerated angr codegen trees need to call back into
     # this Lowering owner without importing its semantics into CLI.
     cast(Any, codegen)._inertia_call_return_selector_replayer_8616 = (
@@ -267,7 +302,7 @@ def bind_call_return_switch_selectors_8616(
 
     summaries = {
         call_id: summary
-        for call_id, summary in raw_summaries.items()
+        for call_id, summary in builtins.iter(raw_summaries.items())
         if isinstance(call_id, int) and isinstance(summary, CallsiteSummary8616)
     }
     raw_fact_count = 0
@@ -276,7 +311,7 @@ def bind_call_return_switch_selectors_8616(
     materialized_count = 0
     failure_count = 0
     changed_count = 0
-    visited_calls: set[int] = set()
+    visited_calls: set[cython.longlong] = set()
 
     for node in _iter_c_nodes_deep_8616(root):
         if not isinstance(node, structured_c.CStatements):
@@ -295,7 +330,7 @@ def bind_call_return_switch_selectors_8616(
             assert summary is not None
             raw_fact_count += 1
             register = _register_cvar_8616(statement.lhs)
-            if register is None or register.variable.size != _WORD_RETURN_BYTES:
+            if register is None or operator.ne(register.variable.size, _WORD_RETURN_BYTES):
                 failure_count += 1
                 continue
             normalized_fact_count += 1
@@ -335,7 +370,8 @@ def bind_call_return_switch_selectors_8616(
     )
 
 
-def replay_call_return_switch_selectors_8616(codegen: object) -> bool:
+@cython.ccall
+def replay_call_return_switch_selectors_8616(codegen: object) -> cython.bint:
     """Replay selector identity at its Lowering owner after AST regeneration."""
     result = bind_call_return_switch_selectors_8616(codegen)
     if result.classified_fact_count > 0 and result.materialized_count == 0:

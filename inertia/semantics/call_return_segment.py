@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove separately pushed return segments for linked near calls.
 
 Layer: Semantics.
@@ -14,6 +15,8 @@ operand width and explicit cleanup must agree on every terminal path.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -33,6 +36,9 @@ from .terminal_stack_cleanup import (
     TerminalStackCleanupEvidence8616,
     terminal_stack_cleanup_at_address_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 
 class ReturnSegmentRefusal8616(StrEnum):
@@ -45,21 +51,21 @@ class ReturnSegmentRefusal8616(StrEnum):
     AMBIGUOUS_EFFECTS = "ambiguous_effects"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ReturnSegmentEffect8616:
     """One exact instruction-owned projection of the separately pushed CS."""
 
-    source_addr: int
-    vex_block_addr: int
-    vex_stmt_idx: int
+    source_addr: cython.longlong
+    vex_block_addr: cython.longlong
+    vex_stmt_idx: cython.longlong
     role: CallReturnFrameEffectRole8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ReturnSegmentFrame8616:
     """Call owner, exact prefix effects and a closed outcome for one candidate."""
 
-    callsite_addr: int
+    callsite_addr: cython.longlong
     effects: tuple[ReturnSegmentEffect8616, ...] = ()
     refusal: ReturnSegmentRefusal8616 | None = None
 
@@ -72,27 +78,29 @@ class ReturnSegmentFrame8616:
         return 16 // 8
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ReturnFrame8616:
     """Decoded machine return frame, distinct from optional argument cleanup."""
 
-    source_addr: int
-    operand_bits: int
-    far: bool
-    cleanup_bytes: int
+    source_addr: cython.longlong
+    operand_bits: cython.longlong
+    far: cython.bint
+    cleanup_bytes: cython.longlong
 
     @property
-    def frame_bytes(self) -> int:
+    def frame_bytes(self) -> cython.longlong:
         """Return the IP/EIP and optional segment slots consumed by RET."""
         return (self.operand_bits // 8) * (2 if self.far else 1)
 
 
-def _real_function_8616(function: Function) -> bool:
+@cython.ccall
+def _real_function_8616(function: Function) -> cython.bint:
     """Return whether the node is a real function, not a simprocedure/PLT."""
     return not function.is_simprocedure and not function.is_plt
 
 
-def _resolved_exits_8616(function: Function) -> bool:
+@cython.ccall
+def _resolved_exits_8616(function: Function) -> cython.bint:
     """Return whether the function graph has no unresolved exits."""
     return (
         not function.has_unresolved_jumps
@@ -102,13 +110,15 @@ def _resolved_exits_8616(function: Function) -> bool:
     )
 
 
-def _closed_return_graph_8616(function: Function, returns: set[object]) -> bool:
+@cython.ccall
+def _closed_return_graph_8616(function: Function, returns: object) -> cython.bint:
     """Return whether every endpoint is a known return site."""
-    return bool(returns) and set(function.endpoints) == returns and _resolved_exits_8616(function)
+    return bool(returns) and operator.eq(set(function.endpoints), returns) and _resolved_exits_8616(function)
 
 
-def collect_function_return_frames_8616(project: Project, function: Function) -> tuple[ReturnFrame8616, ...] | None:
+def collect_function_return_frames_8616(project: Project, function: Function) -> object:
     """Decode every closed function endpoint, refusing unknown control exits."""
+    site: object
     returns = set(function.ret_sites)
     if not _real_function_8616(function) or not _closed_return_graph_8616(function, returns):
         return None
@@ -118,10 +128,10 @@ def collect_function_return_frames_8616(project: Project, function: Function) ->
         if not instructions or instructions[-1].insn.id not in {X86_INS_RET, X86_INS_RETF}:
             return None
         ret = instructions[-1].insn
-        if ret.operands and (len(ret.operands) != 1 or ret.operands[0].type != X86_OP_IMM):
+        if ret.operands and (len(ret.operands) != 1 or operator.ne(ret.operands[0].type, X86_OP_IMM)):
             return None
         result.append(ReturnFrame8616(
-            ret.address, 32 if 0x66 in ret.prefix else 16, ret.id == X86_INS_RETF,
+            ret.address, 32 if 0x66 in ret.prefix else 16, operator.eq(ret.id, X86_INS_RETF),
             int(ret.operands[0].imm) if ret.operands else 0,
         ))
     return tuple(result)
@@ -131,10 +141,11 @@ class _OriginalProjectBoundary8616(Protocol):
     """Exact source mapping published by the rebased analysis-image loader."""
 
     _inertia_original_project: Project
-    _inertia_original_linear_delta: int
+    _inertia_original_linear_delta: cython.longlong
 
 
-def callee_return_evidence_8616(project: Project, target: int) -> TerminalStackCleanupEvidence8616:
+@cython.ccall
+def callee_return_evidence_8616(project: Project, target: cython.longlong) -> TerminalStackCleanupEvidence8616:
     """Use mapped bytes or the exact original location of an out-of-slice callee."""
     if project.loader.find_object_containing(target) is None:
         boundary = cast(_OriginalProjectBoundary8616, project)
@@ -149,8 +160,10 @@ def callee_return_evidence_8616(project: Project, target: int) -> TerminalStackC
     return terminal_stack_cleanup_at_address_8616(project, target)
 
 
-def _callee_refusal_8616(project: Project, target: int) -> ReturnSegmentRefusal8616 | None:
+def _callee_refusal_8616(project: Project, target: cython.longlong) -> ReturnSegmentRefusal8616 | None:
     """Require all known callee endpoints to be compatible plain far returns."""
+    callee: object
+    frames: object
     callee = project.kb.functions.get(target)
     if not isinstance(callee, Function):
         return ReturnSegmentRefusal8616.UNKNOWN_CALLEE
@@ -166,26 +179,29 @@ def _callee_refusal_8616(project: Project, target: int) -> ReturnSegmentRefusal8
     frames = collect_function_return_frames_8616(project, callee)
     if frames is None:
         return ReturnSegmentRefusal8616.UNKNOWN_CALLEE
-    if any(not frame.far for frame in frames):
+    if any(not frame.far for frame in iter(frames)):
         return ReturnSegmentRefusal8616.RETURN_MISMATCH
-    if any(frame.operand_bits != 16 or frame.cleanup_bytes != 0 for frame in frames):
+    if any(frame.operand_bits != 16 or frame.cleanup_bytes != 0 for frame in iter(frames)):
         return ReturnSegmentRefusal8616.UNSUPPORTED_WIDTH_OR_CLEANUP
     return None
 
 
-def _is_cs_push_8616(instruction: CsInsn) -> bool:
+@cython.ccall
+def _is_cs_push_8616(instruction: CsInsn) -> cython.bint:
     """Recognize the architectural register operand, not its printed spelling."""
     return bool(
-        instruction.id == X86_INS_PUSH and len(instruction.operands) == 1
-        and instruction.operands[0].type == X86_OP_REG
-        and instruction.operands[0].reg == X86_REG_CS
+        operator.eq(instruction.id, X86_INS_PUSH) and len(instruction.operands) == 1
+        and operator.eq(instruction.operands[0].type, X86_OP_REG)
+        and operator.eq(instruction.operands[0].reg, X86_REG_CS)
     )
 
 
 def _push_effects_8616(
-    project: Project, block_addr: int, block_size: int, push_addr: int,
+    project: Project, block_addr: cython.longlong, block_size: cython.longlong, push_addr: cython.longlong,
 ) -> tuple[ReturnSegmentEffect8616, ...]:
     """Publish the complete unoptimized VEX effect sequence of one PUSH CS."""
+    index: object
+    statement: object
     vex = project.factory.block(block_addr, size=block_size, opt_level=0).vex
     current_addr: int | None = None
     effects: list[ReturnSegmentEffect8616] = []
@@ -193,7 +209,7 @@ def _push_effects_8616(
         if isinstance(statement, IMark):
             current_addr = statement.addr
         elif current_addr == push_addr:
-            if isinstance(statement, Put) and statement.offset == project.arch.sp_offset:
+            if isinstance(statement, Put) and operator.eq(statement.offset, project.arch.sp_offset):
                 role = CallReturnFrameEffectRole8616.STACK_POINTER_UPDATE
             elif isinstance(statement, Store):
                 role = CallReturnFrameEffectRole8616.STACK_STORE
@@ -202,47 +218,52 @@ def _push_effects_8616(
             effects.append(ReturnSegmentEffect8616(push_addr, block_addr, index, role))
     sp = CallReturnFrameEffectRole8616.STACK_POINTER_UPDATE
     store = CallReturnFrameEffectRole8616.STACK_STORE
-    if tuple(item.role for item in effects) not in {(sp, store), (sp, store, store)}:
+    if tuple(item.role for item in iter(effects)) not in {(sp, store), (sp, store, store)}:
         return ()
     return tuple(effects)
 
 
 def _push_call_candidates_8616(
     function: Function,
-    return_addrs: Mapping[int, int],
-    block_addr: int | None,
-) -> dict[int, list[tuple[int, int, CsInsn, CsInsn]]]:
+    return_addrs: Mapping[cython.longlong, cython.longlong],
+    block_addr: object,
+) -> object:
     """Census every push+immediate-call pair feeding a known return address."""
-    candidates: dict[int, list[tuple[int, int, CsInsn, CsInsn]]] = {}
+    block: object
+    call: object
+    push: object
+    candidates: dict[cython.longlong, list[tuple[cython.longlong, cython.longlong, CsInsn, CsInsn]]] = {}
     blocks = function.blocks if block_addr is None else (
-        (function.get_block(block_addr),) if block_addr in function.block_addrs_set else ()
+        tuple((function.get_block(block_addr),)) if block_addr in function.block_addrs_set else tuple(())
     )
     for block in blocks:
         if not isinstance(block.size, int) or block.size <= 0:
             continue
-        instructions = tuple(wrapper.insn for wrapper in block.capstone.insns)
+        instructions = tuple(wrapper.insn for wrapper in iter(block.capstone.insns))
         for push, call in pairwise(instructions):
             if call.address in return_addrs and _is_cs_push_8616(push):
                 candidates.setdefault(call.address, []).append((block.addr, block.size, push, call))
     return candidates
 
 
+@cython.ccall
 def _call_frame_outcome_8616(
     project: Project,
-    address: int,
-    return_addr: int,
-    matches: list[tuple[int, int, CsInsn, CsInsn]],
+    address: cython.longlong,
+    return_addr: cython.longlong,
+    matches: object,
 ) -> tuple[ReturnSegmentRefusal8616 | None, tuple[ReturnSegmentEffect8616, ...]]:
     """Classify one call's prefix candidates into a refusal or effects."""
+    refusal: object
     if not matches:
         return ReturnSegmentRefusal8616.NO_PREFIX, ()
     if len(matches) != 1:
         return ReturnSegmentRefusal8616.AMBIGUOUS_EFFECTS, ()
     block_addr, block_size, push, call = matches[0]
     if (
-        call.id != X86_INS_CALL or len(call.operands) != 1
-        or call.operands[0].type != X86_OP_IMM
-        or push.address + push.size != address or address + call.size != return_addr
+        operator.ne(call.id, X86_INS_CALL) or len(call.operands) != 1
+        or operator.ne(call.operands[0].type, X86_OP_IMM)
+        or operator.ne(push.address + push.size, address) or operator.ne(address + call.size, return_addr)
     ):
         return ReturnSegmentRefusal8616.UNKNOWN_CALLEE, ()
     if 0x66 in push.prefix or 0x66 in call.prefix:
@@ -257,16 +278,18 @@ def _call_frame_outcome_8616(
 
 
 def collect_return_segment_frames_8616(
-    project: object, function: object, return_addrs: Mapping[int, int],
+    project: object, function: object, return_addrs: Mapping[cython.longlong, cython.longlong],
     *, block_addr: int | None = None,
 ) -> tuple[ReturnSegmentFrame8616, ...]:
     """Return one explicit outcome per call using decoded prefix and exit proof."""
+    address: object
+    return_addr: object
     if not isinstance(project, Project) or not isinstance(function, Function):
         return tuple(ReturnSegmentFrame8616(addr, refusal=ReturnSegmentRefusal8616.UNKNOWN_CALLEE)
-                     for addr in sorted(return_addrs))
+                     for addr in builtins.iter(sorted(return_addrs)))
     candidates = _push_call_candidates_8616(function, return_addrs, block_addr)
     result: list[ReturnSegmentFrame8616] = []
-    for address, return_addr in sorted(return_addrs.items()):
+    for address, return_addr in sorted(tuple(return_addrs.items())):
         refusal, effects = _call_frame_outcome_8616(
             project, address, return_addr, candidates.get(address, [])
         )

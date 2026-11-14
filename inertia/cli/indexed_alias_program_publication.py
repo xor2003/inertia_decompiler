@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Publish a complete indexed Alias program and its Widening projections.
 
 Layer: CLI/fallback/reporting orchestration.
@@ -6,6 +7,7 @@ closed artifacts, and collect dependent project evidence without reclassifying i
 """
 
 from __future__ import annotations
+import cython
 
 from collections.abc import Sequence
 from typing import Protocol, cast
@@ -41,6 +43,7 @@ class _ProjectProgramSurface8616(Protocol):
     _inertia_project_bounded_global_object_ranges_8616: ProjectBoundedGlobalObjectRangeEvidence8616
 
 
+@cython.ccall
 def publish_discovered_indexed_alias_program_8616(
     evidence_project: object,
     functions: Sequence[object],

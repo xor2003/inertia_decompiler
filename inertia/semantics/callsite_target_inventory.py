@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery metadata.
 
 Responsibility: collect immutable CFG-derived call targets once per summary request.
@@ -10,6 +11,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -21,6 +24,8 @@ from inertia.lowering.analysis_helpers import (
     collect_neighbor_call_targets,
     resolve_direct_call_target_from_block,
 )
+import dataclasses
+import operator
 
 __all__ = ["CallsiteTargetInventory8616"]
 
@@ -28,9 +33,9 @@ __all__ = ["CallsiteTargetInventory8616"]
 class _InstructionSurface8616(Protocol):
     """Decoded instruction fields used at the third-party Capstone boundary."""
 
-    address: int
-    mnemonic: str
-    size: int
+    address: cython.longlong
+    mnemonic: object
+    size: cython.longlong
 
 
 class _CapstoneSurface8616(Protocol):
@@ -48,7 +53,7 @@ class _BlockSurface8616(Protocol):
 class _FactorySurface8616(Protocol):
     """Dynamic angr factory boundary used for exact instruction decoding."""
 
-    def block(self, addr: int, *, opt_level: int = 0) -> _BlockSurface8616:
+    def block(self, addr: cython.longlong, *, opt_level: cython.longlong = 0) -> _BlockSurface8616:
         """Decode one block beginning at an exact machine address."""
         ...
 
@@ -67,7 +72,7 @@ class _FunctionSurface8616(Protocol):
 
 def _decoded_direct_call_seed_8616(
     function: object,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
 ) -> CallTargetSeed | None:
     """Recover one binary-proven direct target absent from CFG target edges."""
     try:
@@ -76,7 +81,7 @@ def _decoded_direct_call_seed_8616(
         instructions = tuple(project.factory.block(callsite_addr, opt_level=0).capstone.insns)
     except (AttributeError, KeyError, TypeError, ValueError):
         return None
-    matches = tuple(instruction for instruction in instructions if instruction.address == callsite_addr)
+    matches = tuple(instruction for instruction in iter(instructions) if operator.eq(instruction.address, callsite_addr))
     if len(matches) != 1 or not isinstance(target_addr, int):
         return None
     instruction = matches[0]
@@ -96,22 +101,24 @@ def _decoded_direct_call_seed_8616(
     return CallTargetSeed(callsite_addr, target_addr, return_addr, kind)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallsiteTargetInventory8616:
     """Immutable direct-call and tail-jump targets for one recovered function."""
 
-    seeds: tuple[CallTargetSeed, ...]
+    seeds: object
 
     @classmethod
     def collect(
         cls,
         function: object,
-        callsite_addrs: Iterable[int] = (),
+        callsite_addrs: Iterable[cython.longlong] = (),
     ) -> CallsiteTargetInventory8616:
         """Collect CFG targets plus exact decoded direct calls missing CFG edges."""
+        seed: object
+        callsite_addr: object
         seeds = list(collect_neighbor_call_targets(function))
-        retained_callsites = {seed.callsite_addr for seed in seeds}
-        for callsite_addr in sorted(set(callsite_addrs)):
+        retained_callsites = {seed.callsite_addr for seed in iter(seeds)}
+        for callsite_addr in sorted(tuple(set(callsite_addrs))):
             if callsite_addr in retained_callsites:
                 continue
             seed = _decoded_direct_call_seed_8616(function, callsite_addr)
@@ -120,6 +127,6 @@ class CallsiteTargetInventory8616:
                 retained_callsites.add(callsite_addr)
         return cls(tuple(seeds))
 
-    def seed_for_callsite(self, callsite_addr: int) -> CallTargetSeed | None:
+    def seed_for_callsite(self, callsite_addr: cython.longlong) -> CallTargetSeed | None:
         """Return the first recovered target fact for an exact callsite."""
-        return next((seed for seed in self.seeds if seed.callsite_addr == callsite_addr), None)
+        return next((seed for seed in iter(self.seeds) if operator.eq(seed.callsite_addr, callsite_addr)), None)

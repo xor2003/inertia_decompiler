@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Gate data-object lowering on exact function-local segment evidence.
 
 Layer: Types/Lowering.
@@ -13,6 +14,8 @@ must-evidence.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -36,6 +39,8 @@ from .segment_codegen_access_provenance import (
     instruction_addrs_from_node_8616,
     unique_access_instruction_in_tagged_blocks_8616,
 )
+import dataclasses
+import operator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -69,18 +74,18 @@ class SegmentAccessLoweringDecision8616(StrEnum):
     UNKNOWN_REFUSE = "unknown_refuse"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentAccessLoweringStats8616:
     """Closed evidence census accumulated by segment-access consumers."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentAccessLoweringResult8616:
     """Decision and exact local facts supporting one lowering query."""
 
@@ -88,10 +93,11 @@ class SegmentAccessLoweringResult8616:
     facts: tuple[SegmentAccessFact, ...] = ()
     instruction_states: tuple[SegmentInstructionStateFact, ...] = ()
     stats: SegmentAccessLoweringStats8616 = SegmentAccessLoweringStats8616()
-    contract_available: bool = True
+    contract_available: cython.bint = True
 
 
-def _normalized_segment_register_8616(segment_register: str | None) -> str | None:
+@cython.ccall
+def _normalized_segment_register_8616(segment_register: object) -> object:
     """Normalize one real segment register and reject synthetic labels."""
     if not isinstance(segment_register, str):
         return None
@@ -99,12 +105,13 @@ def _normalized_segment_register_8616(segment_register: str | None) -> str | Non
     return normalized if normalized in {"cs", "ds", "es", "ss", "fs", "gs"} else None
 
 
+@cython.ccall
 def _unknown_result_8616(
-    facts: tuple[SegmentAccessFact, ...] = (),
+    facts: object = (),
     *,
-    instruction_states: tuple[SegmentInstructionStateFact, ...] = (),
-    raw_fact_count: int = 0,
-    contract_available: bool = True,
+    instruction_states: object = (),
+    raw_fact_count: cython.longlong = 0,
+    contract_available: cython.bint = True,
 ) -> SegmentAccessLoweringResult8616:
     """Build one explicit refusal with a closed per-query census."""
     return SegmentAccessLoweringResult8616(
@@ -123,17 +130,19 @@ def _unknown_result_8616(
 def classify_local_segment_access_8616(
     contract: SegmentFunctionContract,
     *,
-    instruction_addrs: frozenset[int] = frozenset(),
+    instruction_addrs: object = frozenset(),
     access_kind: SegmentAccessKind | None = None,
-    segment_register: str | None,
+    segment_register: object,
     offset: int | None,
     width: int | None,
 ) -> SegmentAccessLoweringResult8616:
     """Classify one access from exact local must-facts, refusing ambiguity."""
+    physical_sources: object
+    register: object
     register = _normalized_segment_register_8616(segment_register)
     candidates = tuple(
         fact
-        for fact in contract.accesses
+        for fact in iter(contract.accesses)
         if segment_access_matches_query_8616(
             fact,
             access_kind=access_kind,
@@ -147,8 +156,8 @@ def classify_local_segment_access_8616(
     if not candidates and isinstance(width, int) and width > 1 and register is not None:
         split_facts = tuple(
             fact
-            for fact in contract.accesses
-            if fact.segment_register == register
+            for fact in iter(contract.accesses)
+            if operator.eq(fact.segment_register, register)
             and (access_kind is None or fact.kind is access_kind)
         )
         candidates = select_contiguous_segment_access_facts_8616(
@@ -162,9 +171,9 @@ def classify_local_segment_access_8616(
         return _unknown_result_8616(raw_fact_count=len(contract.accesses))
     if not instruction_addrs and (register is None or (len(candidates) != 1 and not used_split_coverage)):
         return _unknown_result_8616(candidates, raw_fact_count=len(contract.accesses))
-    if any(fact.verdict is not SegmentFactVerdict.PROVEN for fact in candidates):
+    if any(fact.verdict is not SegmentFactVerdict.PROVEN for fact in iter(candidates)):
         return _unknown_result_8616(candidates, raw_fact_count=len(contract.accesses))
-    physical_sources = {fact.physical_source for fact in candidates}
+    physical_sources = {fact.physical_source for fact in iter(candidates)}
     if len(physical_sources) != 1 or None in physical_sources:
         return _unknown_result_8616(candidates, raw_fact_count=len(contract.accesses))
     decision = (
@@ -187,24 +196,26 @@ def classify_local_segment_access_8616(
 def classify_local_segment_address_8616(
     contract: SegmentFunctionContract,
     *,
-    instruction_addrs: frozenset[int],
-    segment_register: str | None,
+    instruction_addrs: object,
+    segment_register: object,
 ) -> SegmentAccessLoweringResult8616:
     """Classify address formation from exact pre-instruction segment state."""
+    physical_sources: object
+    register: object
     register = _normalized_segment_register_8616(segment_register)
     candidates = tuple(
         fact
-        for fact in contract.instruction_states
-        if fact.register == register and fact.instruction_addr in instruction_addrs
+        for fact in iter(contract.instruction_states)
+        if operator.eq(fact.register, register) and fact.instruction_addr in instruction_addrs
     )
     raw_count = len(contract.instruction_states)
     if register is None or not instruction_addrs:
         return _unknown_result_8616(raw_fact_count=raw_count)
-    if {fact.instruction_addr for fact in candidates} != set(instruction_addrs):
+    if operator.ne({fact.instruction_addr for fact in iter(candidates)}, set(instruction_addrs)):
         return _unknown_result_8616(instruction_states=candidates, raw_fact_count=raw_count)
-    if any(fact.verdict is not SegmentFactVerdict.PROVEN for fact in candidates):
+    if any(fact.verdict is not SegmentFactVerdict.PROVEN for fact in iter(candidates)):
         return _unknown_result_8616(instruction_states=candidates, raw_fact_count=raw_count)
-    physical_sources = {fact.physical_source for fact in candidates}
+    physical_sources = {fact.physical_source for fact in iter(candidates)}
     if len(physical_sources) != 1 or None in physical_sources:
         return _unknown_result_8616(instruction_states=candidates, raw_fact_count=raw_count)
     decision = (
@@ -228,13 +239,14 @@ def classify_codegen_segment_access_8616(
     codegen: object,
     node: object,
     *,
-    instruction_addrs: frozenset[int] = frozenset(),
+    instruction_addrs: object = frozenset(),
     access_kind: SegmentAccessKind | None = None,
-    segment_register: str | None,
+    segment_register: object,
     offset: int | None,
     width: int | None,
 ) -> SegmentAccessLoweringResult8616:
     """Read the owned local contract at the dynamic codegen boundary."""
+    register: object
     boundary = cast(_CodegenBoundary8616, codegen)
     try:
         contract = boundary._inertia_segment_function_contract
@@ -280,8 +292,8 @@ def classify_codegen_segment_address_8616(
     codegen: object,
     node: object,
     *,
-    instruction_addrs: frozenset[int] = frozenset(),
-    segment_register: str | None,
+    instruction_addrs: object = frozenset(),
+    segment_register: object,
 ) -> SegmentAccessLoweringResult8616:
     """Read exact address-formation state at the dynamic codegen boundary."""
     boundary = cast(_CodegenBoundary8616, codegen)
@@ -298,6 +310,7 @@ def classify_codegen_segment_address_8616(
     )
 
 
+@cython.ccall
 def record_segment_access_lowering_result_8616(
     codegen: object,
     result: SegmentAccessLoweringResult8616,
@@ -324,12 +337,12 @@ def may_lower_codegen_access_to_entry_ds_object_8616(
     codegen: object,
     node: object,
     *,
-    instruction_addrs: frozenset[int] = frozenset(),
+    instruction_addrs: object = frozenset(),
     access_kind: SegmentAccessKind | None = None,
-    segment_register: str | None,
+    segment_register: object,
     offset: int | None,
     width: int | None,
-) -> bool:
+) -> cython.bint:
     """Record local evidence and allow only proven entry-DS object identity.
 
     Isolated legacy consumers without an attached contract keep their prior
@@ -367,9 +380,9 @@ def may_lower_codegen_address_to_entry_ds_object_8616(
     codegen: object,
     node: object,
     *,
-    instruction_addrs: frozenset[int] = frozenset(),
-    segment_register: str | None,
-) -> bool:
+    instruction_addrs: object = frozenset(),
+    segment_register: object,
+) -> cython.bint:
     """Record exact address-state evidence and allow only entry-DS identity."""
     result = classify_codegen_segment_address_8616(
         codegen,

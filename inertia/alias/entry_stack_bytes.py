@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove exact entry-frame SS byte reads inside one entry-block prefix.
 
 Layer: Alias.
@@ -23,6 +24,8 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 
@@ -50,6 +53,9 @@ from .entry_stack_byte_contracts import (
     EntryStackByteVerdict8616,
 )
 from .entry_stack_pointer_snapshots import EntryStackPointerSnapshots8616
+import dataclasses
+import operator
+import builtins
 
 _WORD_BYTES = 2
 _MOD16 = 1 << 16
@@ -65,7 +71,7 @@ _SS_FAMILY = register_value_family_8616("ss")
 _CONTROL_REGISTER_FAMILY = register_value_family_8616("ip") | frozenset({"cs"})
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _EntryPrefixState8616:
     """Scan state: the single snapshot owner plus consumer-side effect state.
 
@@ -77,16 +83,18 @@ class _EntryPrefixState8616:
     engine: EntryStackPointerSnapshots8616 = field(
         default_factory=EntryStackPointerSnapshots8616
     )
-    ss_identity: bool = True
+    ss_identity: cython.bint = True
     closed_by: EntryStackByteRefusalKind8616 | None = None
 
 
-def _scalar_operand_8616(atom: object) -> bool:
+@cython.ccall
+def _scalar_operand_8616(atom: object) -> cython.bint:
     """Return whether an instruction operand is a scalar REG/TMP/CONST value."""
     return isinstance(atom, IRValue) and atom.space in _SCALAR_ARG_SPACES
 
 
-def _coherent_word_transfer_8616(instr: IRInstr, destination: IRValue) -> bool:
+@cython.ccall
+def _coherent_word_transfer_8616(instr: IRInstr, destination: IRValue) -> cython.bint:
     """Return whether a MOV has one scalar source and agreeing widths."""
     if len(instr.args) != 1:
         return False
@@ -94,8 +102,8 @@ def _coherent_word_transfer_8616(instr: IRInstr, destination: IRValue) -> bool:
     return (
         isinstance(source, IRValue)
         and _scalar_operand_8616(source)
-        and destination.size == instr.size
-        and source.size == instr.size
+        and operator.eq(destination.size, instr.size)
+        and operator.eq(source.size, instr.size)
     )
 
 
@@ -139,9 +147,9 @@ def _side_effect_kind_8616(instr: IRInstr) -> EntryStackByteRefusalKind8616 | No
             not is_registered_vex_operation_8616(instr.op)
             or not isinstance(destination, IRValue)
             or destination.space not in _SCALAR_MOV_SPACES
-            or destination.size != instr.size
+            or operator.ne(destination.size, instr.size)
             or not all(
-                _scalar_operand_8616(arg) for arg in instr.args
+                _scalar_operand_8616(arg) for arg in iter(instr.args)
             )
         ):
             return EntryStackByteRefusalKind8616.PRIOR_UNKNOWN_OPERATION
@@ -149,8 +157,9 @@ def _side_effect_kind_8616(instr: IRInstr) -> EntryStackByteRefusalKind8616 | No
     return EntryStackByteRefusalKind8616.PRIOR_UNKNOWN_OPERATION
 
 
+@cython.ccall
 def _load_shape_refusal_8616(
-    state: _EntryPrefixState8616, instr: IRInstr, block_addr: int, instr_index: int,
+    state: _EntryPrefixState8616, instr: IRInstr, block_addr: cython.longlong, instr_index: cython.longlong,
 ) -> EntryStackByteRefusal8616 | None:
     """Refuse a LOAD closed by a prior side effect or of malformed shape."""
     if state.closed_by is not None:
@@ -173,11 +182,11 @@ def _load_shape_refusal_8616(
 
 def _load_address_refusal_8616(
     state: _EntryPrefixState8616, instr: IRInstr, dst: IRValue, address: IRAddress,
-    block_addr: int, instr_index: int,
+    block_addr: cython.longlong, instr_index: cython.longlong,
 ) -> EntryStackByteRefusal8616 | None:
     """Refuse a LOAD whose typed address or width evidence is not entry-SS-exact."""
 
-    def refuse(kind: EntryStackByteRefusalKind8616, detail: str) -> EntryStackByteRefusal8616:
+    def refuse(kind: EntryStackByteRefusalKind8616, detail: object) -> EntryStackByteRefusal8616:
         return EntryStackByteRefusal8616(kind, detail, block_addr, instr_index)
 
     if address.space is not MemSpace.SS:
@@ -195,17 +204,22 @@ def _load_address_refusal_8616(
         return refuse(
             EntryStackByteRefusalKind8616.UNSUPPORTED_WIDTH,
             "only 1- or 2-byte loads are supported")
-    if address.size != instr.size or dst.size != instr.size:
+    if operator.ne(address.size, instr.size) or operator.ne(dst.size, instr.size):
         return refuse(
             EntryStackByteRefusalKind8616.WIDTH_DISAGREEMENT,
             "address, instruction, and destination widths disagree")
     return None
 
 
+@cython.ccall
 def _classify_load_8616(
-    state: _EntryPrefixState8616, instr: IRInstr, block_addr: int, instr_index: int,
+    state: _EntryPrefixState8616, instr: IRInstr, block_addr: cython.longlong, instr_index: cython.longlong,
 ) -> EntryStackByteRead8616 | EntryStackByteRefusal8616:
     """Materialize one LOAD fact or return its first typed refusal."""
+    base: object
+    base_producer: object
+    base_value: object
+    refusal: object
     refusal = _load_shape_refusal_8616(state, instr, block_addr, instr_index)
     if refusal is not None:
         return refusal
@@ -247,7 +261,8 @@ def _classify_load_8616(
     )
 
 
-def _is_normalized_load_8616(instr: IRInstr) -> bool:
+@cython.ccall
+def _is_normalized_load_8616(instr: IRInstr) -> cython.bint:
     """Return whether a LOAD has the typed TMP dst and single-address shape."""
     return (
         isinstance(instr.dst, IRValue)
@@ -258,12 +273,13 @@ def _is_normalized_load_8616(instr: IRInstr) -> bool:
     )
 
 
+@cython.ccall
 def _refused_proof(
     artifact: IRFunctionArtifact,
-    refusals: list[EntryStackByteRefusal8616],
+    refusals: object,
     *,
-    raw: int = 0,
-    normalized: int = 0,
+    raw: cython.longlong = 0,
+    normalized: cython.longlong = 0,
     closed_by: EntryStackByteRefusalKind8616 | None = None,
 ) -> EntryStackByteProof8616:
     """Assemble a REFUSED result with closed counts and no materialized facts."""
@@ -279,7 +295,8 @@ def _refused_proof(
     )
 
 
-def _observe_8616(state: _EntryPrefixState8616, instr: IRInstr, index: int) -> None:
+@cython.ccall
+def _observe_8616(state: _EntryPrefixState8616, instr: IRInstr, index: cython.longlong) -> None:
     """Advance the snapshot owner and consumer-side effects across one instr."""
     state.engine.observe_entry_instruction(instr, index)
     dst = instr.dst
@@ -292,7 +309,7 @@ def _observe_8616(state: _EntryPrefixState8616, instr: IRInstr, index: int) -> N
 
 
 def _structural_proof_refusal_8616(
-    artifact: IRFunctionArtifact, block: IRBlock, raw: int, normalized: int,
+    artifact: IRFunctionArtifact, block: IRBlock, raw: cython.longlong, normalized: cython.longlong,
 ) -> EntryStackByteProof8616 | None:
     """Return a refused proof when entry scope or raw-IR trust fails.
 
@@ -303,7 +320,7 @@ def _structural_proof_refusal_8616(
     per candidate to keep classified accounting closed.
     """
     if any(
-        artifact.function_addr in other.successor_addrs for other in artifact.blocks
+        artifact.function_addr in other.successor_addrs for other in iter(artifact.blocks)
     ):
         return _refused_proof(
             artifact,
@@ -336,7 +353,7 @@ def _structural_proof_refusal_8616(
             block.addr,
             index,
         )
-        for index, instr in enumerate(block.instrs)
+        for index, instr in builtins.iter(enumerate(block.instrs))
         if instr.op == "LOAD"
     ]
     return _refused_proof(
@@ -347,7 +364,10 @@ def _structural_proof_refusal_8616(
 
 def prove_entry_stack_bytes_8616(artifact: IRFunctionArtifact) -> EntryStackByteProof8616:
     """Prove exact entry-SS byte reads in the unique entry block's prefix."""
-    entries = [block for block in artifact.blocks if block.addr == artifact.function_addr]
+    structural: object
+    index: object
+    instr: object
+    entries = [block for block in iter(artifact.blocks) if operator.eq(block.addr, artifact.function_addr)]
     if len(entries) != 1:
         kind = (
             EntryStackByteRefusalKind8616.MISSING_ENTRY_BLOCK
@@ -359,9 +379,9 @@ def prove_entry_stack_bytes_8616(artifact: IRFunctionArtifact) -> EntryStackByte
         )
         return _refused_proof(artifact, [refusal])
     block = entries[0]
-    raw = sum(1 for instr in block.instrs if instr.op == "LOAD")
+    raw = sum(1 for instr in iter(block.instrs) if instr.op == "LOAD")
     normalized = sum(
-        1 for instr in block.instrs if instr.op == "LOAD" and _is_normalized_load_8616(instr)
+        1 for instr in iter(block.instrs) if instr.op == "LOAD" and _is_normalized_load_8616(instr)
     )
     structural = _structural_proof_refusal_8616(artifact, block, raw, normalized)
     if structural is not None:

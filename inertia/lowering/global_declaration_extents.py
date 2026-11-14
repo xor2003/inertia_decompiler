@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Apply proven array extents to existing typed global declarations.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -19,6 +22,8 @@ from .global_declarations import (
     initialize_global_declaration_specs_8616,
     replace_global_declaration_spec_from_stronger_typed_evidence_8616,
 )
+import dataclasses
+import operator
 
 
 class GlobalDeclarationExtentApplicationStatus8616(StrEnum):
@@ -30,17 +35,17 @@ class GlobalDeclarationExtentApplicationStatus8616(StrEnum):
     DECLARATION_CONFLICT = "declaration_conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class GlobalDeclarationExtentApplication8616:
     """One declaration name, extent, retained type, and application outcome."""
 
     status: GlobalDeclarationExtentApplicationStatus8616
-    name: str
-    array_len: int
-    ctype: str | None
+    name: object
+    array_len: cython.longlong
+    ctype: object
 
     @property
-    def materialized(self) -> bool:
+    def materialized(self) -> cython.bint:
         """Return whether the exact extent is present after this application."""
         return self.status in {
             GlobalDeclarationExtentApplicationStatus8616.APPLIED,
@@ -51,8 +56,8 @@ class GlobalDeclarationExtentApplication8616:
 def apply_existing_global_array_extent_8616(
     codegen: object,
     *,
-    name: str,
-    array_len: int,
+    name: object,
+    array_len: cython.longlong,
 ) -> GlobalDeclarationExtentApplication8616:
     """Strengthen one exact existing declaration without changing its C type."""
     if not name or array_len <= 0:
@@ -61,8 +66,8 @@ def apply_existing_global_array_extent_8616(
     typed_codegen = cast(GlobalDeclarationCodegen8616, codegen)
     matches = tuple(
         spec
-        for spec in typed_codegen._inertia_global_declaration_specs_8616
-        if spec[1] == name
+        for spec in iter(typed_codegen._inertia_global_declaration_specs_8616)
+        if operator.eq(spec[1], name)
     )
     if not matches:
         return GlobalDeclarationExtentApplication8616(

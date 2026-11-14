@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bind one direct-call segment-entry candidate to its registered IR lineage.
 
 Layer: IR.
@@ -15,6 +16,7 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import cython
 
 from enum import StrEnum
 
@@ -42,6 +44,7 @@ class DirectCallSegmentEntryBindingFailure8616(StrEnum):
     ALIAS_SOURCE_FOREIGN = "alias_source_foreign"
 
 
+@cython.ccall
 def segment_entry_lineage_refusal_8616(
     project: object,
     artifact: IRFunctionArtifact,
@@ -56,6 +59,7 @@ def segment_entry_lineage_refusal_8616(
     ``TypeError``; an absent or refused registration refuses without creating
     registry state.
     """
+    owner: object
     resolution = registered_function_ir_artifact_8616(project, artifact.function_addr)
     if resolution.verdict is not FunctionIRArtifactVerdict8616.PROVEN:
         if resolution.failure is FunctionIRArtifactFailure8616.NOT_REGISTERED:

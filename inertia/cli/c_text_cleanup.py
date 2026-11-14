@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Final C-text hygiene for unresolved output.
 
 Layer: CLI/fallback/reporting.
@@ -9,15 +10,20 @@ structuring, or validated postprocess layers.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import re
+import builtins
 
 _RAW_REGISTER_FRAGMENT_RE = re.compile(r"\b(?P<name>[A-Za-z_]\w*)\{r\d+\|\d+b\}")
 _CALLEE_NAMESPACE_RE = re.compile(r"::0x[0-9a-fA-F]+::(?P<name>[A-Za-z_]\w*)")
 _PLACEHOLDER_RE = re.compile(r"<(?P<body>0x[^>\n]+)>")
 
 
-def _placeholder_name(body: str, ordinal: int) -> str:
+@cython.ccall
+def _placeholder_name(body: object, ordinal: cython.longlong) -> str:
+    stack_match: object
     stack_match = re.search(
         r"Stack bp(?P<sign>[+-])0x(?P<offset>[0-9A-Fa-f]+),\s*(?P<size>\d+)\s*B",
         body,
@@ -30,10 +36,11 @@ def _placeholder_name(body: str, ordinal: int) -> str:
     return f"tmp_slot_{ordinal}"
 
 
-def _sanitize_placeholder_names(c_text: str) -> str:
+def _sanitize_placeholder_names(c_text: object) -> object:
     mapping: dict[str, str] = {}
 
-    def _replace(match: re.Match[str]) -> str:
+    def _replace(match: re.Match[str]) -> object:
+        existing: object
         token = match.group(0)
         existing = mapping.get(token)
         if existing is not None:
@@ -53,8 +60,10 @@ _DECL_LOCAL_RE_8616 = re.compile(
 )
 
 
-def _decl_body_bounds_8616(lines: list[str], index: int) -> tuple[int | None, int, int]:
+@cython.ccall
+def _decl_body_bounds_8616(lines: object, index: cython.longlong) -> tuple[int | None, cython.longlong, cython.longlong]:
     """Locate the opening brace and closing line for a function starting at index."""
+    brace_index: object
     brace_index = None
     scan_index = index
     while scan_index < len(lines):
@@ -76,9 +85,13 @@ def _decl_body_bounds_8616(lines: list[str], index: int) -> tuple[int | None, in
     return brace_index, body_start, body_end
 
 
-def _duplicate_decl_lines_8616(lines: list[str], body_start: int, body_end: int) -> set[int]:
+def _duplicate_decl_lines_8616(lines: object, body_start: cython.longlong, body_end: cython.longlong) -> object:
     """Collect line indices of duplicate local declarations inside one body."""
-    decls_by_name: dict[str, list[tuple[int, bool]]] = {}
+    decl_match: object
+    _: object
+    decls: object
+    line_index: object
+    decls_by_name: dict[str, list[tuple[cython.longlong, cython.bint]]] = {}
     for line_index in range(body_start, body_end):
         decl_match = _DECL_LOCAL_RE_8616.match(lines[line_index])
         if decl_match is None:
@@ -86,7 +99,7 @@ def _duplicate_decl_lines_8616(lines: list[str], body_start: int, body_end: int)
         name = decl_match.group("name")
         decls_by_name.setdefault(name, []).append((line_index, decl_match.group("comment") is not None))
 
-    remove_lines: set[int] = set()
+    remove_lines: set[cython.longlong] = set()
     for decls in decls_by_name.values():
         if len(decls) < 2:
             continue
@@ -97,8 +110,11 @@ def _duplicate_decl_lines_8616(lines: list[str], body_start: int, body_end: int)
     return remove_lines
 
 
-def _dedupe_local_declarations(c_text: str) -> str:
+@cython.ccall
+def _dedupe_local_declarations(c_text: object) -> object:
     """Remove duplicate same-name local declarations inside each function body."""
+    brace_index: object
+    match: object
     trailing_newline = c_text.endswith("\n")
     lines = c_text.splitlines()
 
@@ -115,8 +131,8 @@ def _dedupe_local_declarations(c_text: str) -> str:
 
         remove_lines = _duplicate_decl_lines_8616(lines, body_start, body_end)
         if remove_lines:
-            lines = [line for i, line in enumerate(lines) if i not in remove_lines]
-            index = max(index - len([i for i in remove_lines if i < index]), 0)
+            lines = [line for i, line in builtins.iter(enumerate(lines)) if i not in remove_lines]
+            index = max(index - len([i for i in iter(remove_lines) if i < index]), 0)
             continue
         index = body_end
 
@@ -126,7 +142,7 @@ def _dedupe_local_declarations(c_text: str) -> str:
     return normalized
 
 
-def normalize_unresolved_c_text(c_text: str) -> str:
+def normalize_unresolved_c_text(c_text: object) -> object:
     """Normalize still-structured decompiler output without inventing semantics."""
     normalized = _CALLEE_NAMESPACE_RE.sub(lambda match: match.group("name"), c_text)
     normalized = _RAW_REGISTER_FRAGMENT_RE.sub(lambda match: match.group("name"), normalized)
@@ -138,7 +154,8 @@ def normalize_unresolved_c_text(c_text: str) -> str:
     return normalized
 
 
-def _normalize_concat_insert_artifacts(c_text: str) -> str:
+@cython.ccall
+def _normalize_concat_insert_artifacts(c_text: object) -> object:
     # Normalize textual CONCAT/_INSERT artifacts emitted by upstream IR printer.
     normalized = re.sub(r"\(\s*([A-Za-z_]\w*)\s+CONCAT\s+0\s*\)", r"\1", c_text)
     normalized = re.sub(r"(?<![A-Za-z_])([A-Za-z_]\w*)\s+CONCAT\s+0(?![A-Za-z_])", r"\1", normalized)
@@ -151,6 +168,6 @@ def _normalize_concat_insert_artifacts(c_text: str) -> str:
     return normalized
 
 
-def _normalize_numeric_call_targets(c_text: str) -> str:
+def _normalize_numeric_call_targets(c_text: object) -> object:
     # Rewrite numeric call targets like `1169()` into stable identifiers.
     return re.sub(r"(?<![A-Za-z0-9_])(?P<num>\d+)\s*\(", lambda m: f"sub_{m.group('num')}(", c_text)

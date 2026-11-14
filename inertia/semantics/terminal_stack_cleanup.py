@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Recover callee stack cleanup from complete binary terminal paths.
 
 Layer: Semantics.
@@ -10,6 +11,8 @@ Forbidden: source/COD/name evidence, rendered-text recovery, or prototype repair
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Collection
 from dataclasses import dataclass, field
@@ -29,6 +32,7 @@ from inertia.semantics.terminal_return_contract import (
     TerminalStackCleanupEvidence8616,
     decoded_return_operand_bits_8616,
 )
+import dataclasses
 
 __all__ = [
     "TerminalReturnFrameKind8616",
@@ -41,21 +45,21 @@ __all__ = [
 class _FunctionSurface8616(Protocol):
     """angr function fields consumed by terminal cleanup semantics."""
 
-    addr: int
-    block_addrs_set: Collection[int]
+    addr: cython.longlong
+    block_addrs_set: Collection[cython.longlong]
 
 
 class _LoadedObjectSurface8616(Protocol):
     """Loaded-object bounds used for bounded callee reachability."""
 
-    min_addr: int
-    max_addr: int
+    min_addr: cython.longlong
+    max_addr: cython.longlong
 
 
 class _LoaderSurface8616(Protocol):
     """Third-party loader lookup needed for bodyless callee recovery."""
 
-    def find_object_containing(self, address: int) -> _LoadedObjectSurface8616 | None:
+    def find_object_containing(self, address: cython.longlong) -> _LoadedObjectSurface8616 | None:
         """Return the loaded object containing ``address``."""
         ...
 
@@ -69,23 +73,21 @@ class _ProjectLoaderSurface8616(Protocol):
 class _ProjectCleanupCacheSurface8616(Protocol):
     """Owned project extension retaining complete immutable cleanup proofs."""
 
-    _inertia_terminal_stack_cleanup_cache_8616: dict[
-        int,
-        TerminalStackCleanupEvidence8616,
-    ]
+    _inertia_terminal_stack_cleanup_cache_8616: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _ReachableFunctionSurface8616:
     """Request-local function boundary proven by frontend reachability."""
 
-    addr: int
-    block_addrs_set: frozenset[int]
+    addr: cython.longlong
+    block_addrs_set: object
 
 
+@cython.ccall
 def _terminal_cleanup_cache_8616(
     project: object,
-) -> dict[int, TerminalStackCleanupEvidence8616]:
+) -> object:
     """Return the project-owned cache of complete callee cleanup proofs."""
     surface = cast(_ProjectCleanupCacheSurface8616, project)
     try:
@@ -98,6 +100,7 @@ def _terminal_cleanup_cache_8616(
     return cache
 
 
+@cython.ccall
 def _inner_instruction_8616(insn: object) -> object:
     """Return a dynamic Capstone instruction beneath an optional angr wrapper."""
     try:
@@ -106,7 +109,8 @@ def _inner_instruction_8616(insn: object) -> object:
         return cast(Any, insn)
 
 
-def _mnemonic_8616(insn: object) -> str:
+@cython.ccall
+def _mnemonic_8616(insn: object) -> object:
     """Return a normalized mnemonic across the dynamic Capstone boundary."""
     try:
         return str(cast(Any, insn).mnemonic or "").lower()
@@ -117,6 +121,7 @@ def _mnemonic_8616(insn: object) -> str:
             return ""
 
 
+@cython.ccall
 def _fallthrough_8616(insn: object) -> int | None:
     """Return the next instruction address across the Capstone boundary."""
     try:
@@ -130,6 +135,7 @@ def _fallthrough_8616(insn: object) -> int | None:
     return address + size if isinstance(address, int) and isinstance(size, int) and size > 0 else None
 
 
+@cython.ccall
 def _direct_target_8616(insn: object) -> int | None:
     """Return one direct branch target across the Capstone boundary."""
     inner = cast(Any, _inner_instruction_8616(insn))
@@ -143,9 +149,10 @@ def _direct_target_8616(insn: object) -> int | None:
     return operand.imm if operand.type == 2 and isinstance(operand.imm, int) else None
 
 
-_RETURN_CLEANUP_IMM16_LIMIT_8616: int = 0x10000
+_RETURN_CLEANUP_IMM16_LIMIT_8616: cython.longlong = 0x10000
 
 
+@cython.ccall
 def _return_cleanup_8616(insn: object) -> int | None:
     """Return the decoded near/far return imm16 byte count, including plain zero."""
     inner = cast(Any, _inner_instruction_8616(insn))
@@ -162,6 +169,7 @@ def _return_cleanup_8616(insn: object) -> int | None:
     return cleanup if isinstance(cleanup, int) and 0 <= cleanup < _RETURN_CLEANUP_IMM16_LIMIT_8616 else None
 
 
+@cython.ccall
 def _return_frame_kind_8616(insn: object) -> TerminalReturnFrameKind8616 | None:
     """Classify the decoded machine return-frame shape without text rendering."""
     mnemonic = _mnemonic_8616(insn)
@@ -174,7 +182,8 @@ def _return_frame_kind_8616(insn: object) -> TerminalReturnFrameKind8616 | None:
     return None
 
 
-def _is_conditional_branch_8616(mnemonic: str) -> bool:
+@cython.ccall
+def _is_conditional_branch_8616(mnemonic: object) -> cython.bint:
     """Return whether a decoded mnemonic has two control-flow successors."""
     return (mnemonic.startswith("j") and mnemonic not in {"jmp", "jmpw"}) or mnemonic.startswith("loop")
 
@@ -189,7 +198,7 @@ def collect_terminal_stack_cleanup_evidence_8616(
     if is_synthetic_call_stub_8616(project, entry):
         return TerminalStackCleanupEvidence8616(frozenset(), 1, 0, 0, 0, 1)
     try:
-        block_addrs = frozenset(int(addr) for addr in function_surface.block_addrs_set)
+        block_addrs = frozenset(int(addr) for addr in iter(function_surface.block_addrs_set))
         entry_addr = function_surface.addr
     except AttributeError:
         block_addrs, entry_addr = frozenset(), None
@@ -210,20 +219,21 @@ def collect_terminal_stack_cleanup_evidence_8616(
     )
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _CleanupScan8616:
     """Bounded entry-reachable CFG walker collecting unique terminal facts."""
 
     project: object
-    block_addrs: frozenset[int]
-    amounts: set[int] = field(default_factory=set)
-    frame_kinds: set[TerminalReturnFrameKind8616] = field(default_factory=set)
-    operand_bits: set[int | None] = field(default_factory=set)
-    counts: list[int] = field(default_factory=lambda: [0, 0, 0, 0, 0])
+    block_addrs: object
+    amounts: object = field(default_factory=set)
+    frame_kinds: object = field(default_factory=set)
+    operand_bits: object = field(default_factory=set)
+    counts: object = field(default_factory=lambda: [0, 0, 0, 0, 0])
 
+    @cython.ccall
     def record_cleanup(
         self,
-        cleanup: int,
+        cleanup: cython.longlong,
         frame_kind: TerminalReturnFrameKind8616,
         width: int | None,
     ) -> None:
@@ -234,15 +244,17 @@ class _CleanupScan8616:
         self.frame_kinds.add(frame_kind)
         self.operand_bits.add(width)
 
+    @cython.ccall
     def record_failure(self) -> None:
         """Record one terminal/control fact that cannot be classified."""
         self.counts[0] += 1
         self.counts[4] += 1
 
-    def follow(self, entry_addr: int) -> None:
+    def follow(self, entry_addr: cython.longlong) -> None:
         """Visit each reachable block once, including every distinct exit edge."""
+        block_addr: object
         pending = [entry_addr]
-        visited: set[int] = set()
+        visited: set[cython.longlong] = set()
         while pending:
             block_addr = pending.pop()
             if block_addr in visited:
@@ -258,19 +270,23 @@ class _CleanupScan8616:
             if not insns:
                 self.record_failure()
                 continue
-            if any(self._follow_insn(insn, pending) for insn in insns):
+            if any(self._follow_insn(insn, pending) for insn in iter(insns)):
                 continue
             self._enqueue_successor(_fallthrough_8616(insns[-1]), pending)
 
-    def _enqueue_successor(self, successor: int | None, pending: list[int]) -> None:
+    @cython.ccall
+    def _enqueue_successor(self, successor: int | None, pending: object) -> None:
         """Queue a mapped successor or retain an incomplete-edge refusal."""
         if isinstance(successor, int) and successor in self.block_addrs:
             pending.append(successor)
         else:
             self.record_failure()
 
-    def _follow_insn(self, insn: object, pending: list[int]) -> bool:
+    @cython.ccall
+    def _follow_insn(self, insn: object, pending: object) -> cython.bint:
         """Handle one instruction; return True when its control edge was consumed."""
+        frame_kind: object
+        successor: object
         mnemonic = _mnemonic_8616(insn)
         if mnemonic.startswith("ret") or mnemonic == "iret":
             cleanup = _return_cleanup_8616(insn)
@@ -295,9 +311,10 @@ class _CleanupScan8616:
         return False
 
 
+@cython.ccall
 def terminal_stack_cleanup_at_address_8616(
     project: object,
-    address: int,
+    address: cython.longlong,
 ) -> TerminalStackCleanupEvidence8616:
     """Collect cleanup from a known or bounded binary-reachable callee body.
 
@@ -306,6 +323,11 @@ def terminal_stack_cleanup_at_address_8616(
     before the cache so a proof collected before registration cannot survive
     the registry change.
     """
+    cached: object
+    direct: object
+    function: object
+    known: object
+    reachable: object
     if is_synthetic_call_stub_8616(project, address):
         return TerminalStackCleanupEvidence8616(frozenset(), 1, 0, 0, 0, 1)
     cache = _terminal_cleanup_cache_8616(project)
@@ -337,9 +359,11 @@ def terminal_stack_cleanup_at_address_8616(
 
 
 def _direct_body_cleanup_evidence_8616(
-    project: object, address: int
+    project: object, address: cython.longlong
 ) -> TerminalStackCleanupEvidence8616 | None:
     """Classify cleanup when the callee body is a single unbranched block."""
+    frame_kind: object
+    terminal: object
     try:
         insns = decoded_block_instructions_8616(cast(Any, project), address, opt_level=0)
     except (KeyError, SimEngineError, SimTranslationError, ValueError):
@@ -347,7 +371,7 @@ def _direct_body_cleanup_evidence_8616(
     direct_body_is_branched = any(
         _is_conditional_branch_8616(_mnemonic_8616(insn))
         or _mnemonic_8616(insn) in {"jmp", "jmpw", "ljmp"}
-        for insn in insns
+        for insn in iter(insns)
     )
     terminal = None if not insns or direct_body_is_branched else insns[-1]
     cleanup = (
@@ -370,10 +394,12 @@ def _direct_body_cleanup_evidence_8616(
     )
 
 
+@cython.ccall
 def _reachable_body_cleanup_evidence_8616(
-    project: object, address: int
+    project: object, address: cython.longlong
 ) -> TerminalStackCleanupEvidence8616 | None:
     """Classify cleanup over bounded reachable blocks in the containing object."""
+    loaded: object
     try:
         loaded = cast(_ProjectLoaderSurface8616, project).loader.find_object_containing(address)
     except (AttributeError, KeyError, TypeError):

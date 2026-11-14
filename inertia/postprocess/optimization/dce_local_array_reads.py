@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify reads from already-materialized local C array objects.
 
 Layer: Rewrite/Postprocess cleanup.
@@ -13,6 +14,8 @@ flow, or facts from rendered text, COD, source, or CLI/reporting evidence here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from enum import Enum
@@ -30,6 +33,7 @@ from angr.sim_variable import SimRegisterVariable, SimStackVariable, SimTemporar
 from inertia.lowering.gp_register_state import runtime_gp_name_for_variable_8616
 
 from .dce_purity import PURE_LOCAL_BINARY_OPS_8616, PURE_LOCAL_UNARY_OPS_8616
+import dataclasses
 
 
 class _AddressKind8616(Enum):
@@ -40,11 +44,13 @@ class _AddressKind8616(Enum):
     ARRAY = "array"
 
 
-def _scalar_type_8616(type_: SimType | None) -> bool:
+@cython.ccall
+def _scalar_type_8616(type_: SimType | None) -> cython.bint:
     """Reject pointers masquerading as scalar offset carriers."""
     return isinstance(type_, SimTypeReg) and not isinstance(type_, SimTypePointer)
 
 
+@cython.ccall
 def _variable_kind_8616(node: CVariable) -> _AddressKind8616:
     """Consume an existing stack array or scalar/register-state value."""
     variable = node.variable
@@ -57,6 +63,7 @@ def _variable_kind_8616(node: CVariable) -> _AddressKind8616:
     return _AddressKind8616.UNKNOWN
 
 
+@cython.ccall
 def _cast_kind_8616(kind: _AddressKind8616, target: SimType) -> _AddressKind8616:
     """Allow pointer views of an array, never scalar-to-pointer recovery."""
     if kind is _AddressKind8616.ARRAY and isinstance(target, SimTypePointer):
@@ -66,8 +73,9 @@ def _cast_kind_8616(kind: _AddressKind8616, target: SimType) -> _AddressKind8616
     return _AddressKind8616.UNKNOWN
 
 
+@cython.ccall
 def _binary_kind_8616(
-    op: str, left: _AddressKind8616, right: _AddressKind8616,
+    op: object, left: _AddressKind8616, right: _AddressKind8616,
 ) -> _AddressKind8616:
     """Keep exactly one array anchor under pointer addition/subtraction."""
     if op in PURE_LOCAL_BINARY_OPS_8616 and left is right is _AddressKind8616.OFFSET:
@@ -79,12 +87,13 @@ def _binary_kind_8616(
     return _AddressKind8616.UNKNOWN
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _AddressClassifier8616:
     """Bound recursive classification and reject malformed cyclic ASTs."""
 
-    active: set[int] = field(default_factory=set)
+    active: object = field(default_factory=set)
 
+    @cython.ccall
     def classify(self, node: object) -> _AddressKind8616:
         """Visit an existing expression without retaining or mutating it."""
         marker = id(node)
@@ -96,6 +105,7 @@ class _AddressClassifier8616:
         finally:
             self.active.remove(marker)
 
+    @cython.ccall
     def _classify(self, node: object) -> _AddressKind8616:
         if isinstance(node, CConstant) and isinstance(node.value, int):
             return _AddressKind8616.OFFSET
@@ -109,6 +119,7 @@ class _AddressClassifier8616:
             return self._unary_kind(node)
         return _AddressKind8616.UNKNOWN
 
+    @cython.ccall
     def _unary_kind(self, node: CUnaryOp) -> _AddressKind8616:
         operand = self.classify(node.operand)
         if node.op in {"Reference", "AddressOf"} and operand is _AddressKind8616.ARRAY:
@@ -118,7 +129,8 @@ class _AddressClassifier8616:
         return _AddressKind8616.UNKNOWN
 
 
-def is_pure_local_array_read_8616(node: object) -> bool:
+@cython.ccall
+def is_pure_local_array_read_8616(node: object) -> cython.bint:
     """Recognize an unused-value candidate, not a liveness/deletion proof."""
     if not isinstance(node, CUnaryOp) or node.op != "Dereference":
         return False

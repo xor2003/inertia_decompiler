@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Compose structured expressions from already-proven binary IR values.
 
 Layer: Structuring.
@@ -9,6 +10,7 @@ rewrite cleanup, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import cython
 
 from collections.abc import Callable
 
@@ -18,12 +20,15 @@ from inertia.ir.core import IRBinaryValue, IRValue
 from inertia.lowering.condition_value_casts import materialize_signed_condition_value_8616
 
 
+@cython.ccall
 def materialize_binary_ir_value_8616(
     value: IRBinaryValue,
     codegen: object,
     lower_operand: Callable[[IRValue | IRBinaryValue], object | None],
 ) -> CExpression | None:
     """Compose supported operands without manufacturing missing value evidence."""
+    operator: object
+    signed_value: object
     signed_value = materialize_signed_condition_value_8616(value, codegen, lower_operand)
     if signed_value is not None:
         return signed_value

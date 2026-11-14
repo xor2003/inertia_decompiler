@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Helper boundary.
 
 Responsibility: attach a codegen-boundary render override for fully proven string intrinsic artifacts.
@@ -13,6 +14,7 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import cython
 
 import typing
 
@@ -22,11 +24,13 @@ from inertia.lowering.string_instruction_lowering import (
     render_x86_16_string_intrinsic_c,
 )
 from inertia.pipeline.render_authority import CodegenRenderAuthority8616
+import operator
 
 __all__ = ["apply_x86_16_string_codegen_override", "render_complete_string_function_8616"]
 
 
-def render_complete_string_function_8616(name: str, artifact: StringIntrinsicArtifact) -> str | None:
+@cython.ccall
+def render_complete_string_function_8616(name: object, artifact: StringIntrinsicArtifact) -> object:
     """Admit whole-body rendering only under the shared typed coverage contract.
 
     Diagnostic intrinsic rendering alone does not authorize replacing a function.
@@ -41,12 +45,15 @@ def render_complete_string_function_8616(name: str, artifact: StringIntrinsicArt
     return render_x86_16_string_intrinsic_c(name, artifact)
 
 
-def _render_override_text(codegen: object) -> str | None:
+@cython.ccall
+def _render_override_text(codegen: object) -> object:
     """Return proven string-intrinsic replacement text for a codegen object.
 
     Dynamic attribute boundary: codegen/cfunc are third-party angr/codegen
     compatibility objects that intentionally carry optional diagnostic metadata.
     """
+    artifact: object
+    cfunc: object
     cfunc = getattr(codegen, "cfunc", None)
     if cfunc is None:
         return None
@@ -57,22 +64,24 @@ def _render_override_text(codegen: object) -> str | None:
     return render_complete_string_function_8616(name, artifact)
 
 
-def apply_x86_16_string_codegen_override(project: object, codegen: object) -> bool:
+def apply_x86_16_string_codegen_override(project: object, codegen: object) -> cython.bint:
     """Install the string-intrinsic render override when the artifact is proven.
 
     Dynamic attribute boundary: codegen is a third-party angr/codegen
     compatibility object whose render hook is patched at this helper boundary.
     """
+    original: object
+    rendered: object
     rendered = _render_override_text(codegen)
     if rendered is None:
         return False
-    if getattr(codegen, "_inertia_string_codegen_override_text", None) == rendered:
+    if operator.eq(getattr(codegen, "_inertia_string_codegen_override_text", None), rendered):
         return False
     original = getattr(codegen, "render_text", None)
     if not callable(original):
         return False
 
-    def _render_text_override(_cfunc: object) -> str:
+    def _render_text_override(_cfunc: object) -> object:
         return rendered
 
     typing.cast(typing.Any, codegen)._inertia_original_render_text = original

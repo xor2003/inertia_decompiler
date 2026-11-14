@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Identify explicit byte views of addressed scalar storage in generated C.
 
 Layer: Tail validation.
@@ -12,6 +13,7 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import cython
 
 from angr.analyses.decompiler.structured_codegen.c import (
     CConstant,
@@ -23,7 +25,8 @@ from angr.analyses.decompiler.structured_codegen.c import (
 from angr.sim_type import SimTypeChar, SimTypePointer
 
 
-def indexed_scalar_byte_view_8616(node: object) -> tuple[CVariable, int] | None:
+@cython.ccall
+def indexed_scalar_byte_view_8616(node: object) -> object:
     """Return a scalar owner and exact byte index, refusing indirect pointers."""
     if not isinstance(node, CIndexedVariable) or not isinstance(node.type, SimTypeChar):
         return None

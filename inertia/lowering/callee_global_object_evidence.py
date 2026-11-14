@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify caller pointer sources against proven global object layouts.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ This module does not mutate codegen state.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -22,6 +25,9 @@ from inertia.widening.global_object_layout import (
     GlobalObjectLayout8616,
     GlobalObjectLayoutEvidence8616,
 )
+import dataclasses
+import operator
+import builtins
 
 
 class CalleeGlobalObjectInterfaceVerdict8616(StrEnum):
@@ -41,44 +47,44 @@ class CalleePointerSourceKind8616(StrEnum):
     UNKNOWN = "unknown"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class AffineGlobalPointerSource8616:
     """Normalized near-pointer source with its nonconstant index identity."""
 
-    base_offset: int
-    index_identity: tuple[object, ...]
+    base_offset: cython.longlong
+    index_identity: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CalleeGlobalObjectInterfaceEvidence8616:
     """Closed census for one aggregate-pointee callee interface decision."""
 
-    target_addr: int
+    target_addr: cython.longlong
     verdict: CalleeGlobalObjectInterfaceVerdict8616
     family_base_offset: int | None
-    pointer_argument_indices: tuple[int, ...]
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    callsite_addrs: tuple[int, ...]
-    source_facts: tuple[CalleeGlobalObjectSourceFamilyFact8616, ...]
+    pointer_argument_indices: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    callsite_addrs: object
+    source_facts: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CalleeGlobalObjectSourceFamilyFact8616:
     """One normalized call argument proven to belong to an object family."""
 
-    target_addr: int
-    callsite_addr: int
-    argument_index: int
-    base_offset: int
-    canonical_base_offset: int
-    index_identity: tuple[object, ...]
-    family_base_offset: int
-    element_width: int
-    field_offsets: tuple[int, ...]
+    target_addr: cython.longlong
+    callsite_addr: cython.longlong
+    argument_index: cython.longlong
+    base_offset: cython.longlong
+    canonical_base_offset: cython.longlong
+    index_identity: object
+    family_base_offset: cython.longlong
+    element_width: cython.longlong
+    field_offsets: object
 
 
 def affine_global_pointer_source_8616(
@@ -97,7 +103,7 @@ def affine_global_pointer_source_8616(
         return None
     additive = tuple(
         operation
-        for operation in operations
+        for operation in iter(operations)
         if isinstance(operation, tuple)
         and len(operation) == 2
         and operation[0] == "add"
@@ -106,14 +112,15 @@ def affine_global_pointer_source_8616(
     if len(additive) != 1:
         return None
     index_operations = tuple(
-        operation for operation in operations if operation is not additive[0]
+        operation for operation in iter(operations) if operation is not additive[0]
     )
     return AffineGlobalPointerSource8616(
         additive[0][1] & 0xFFFF,
-        (origin, *index_operations),
+        (origin, ) + tuple(index_operations),
     )
 
 
+@cython.ccall
 def classify_callee_pointer_source_8616(
     source: object,
 ) -> CalleePointerSourceKind8616:
@@ -135,40 +142,46 @@ def classify_callee_pointer_source_8616(
 
 def logical_pointer_argument_sources_8616(
     summary: CallsiteSummary8616,
-    pointer_argument_indices: tuple[int, ...],
-) -> tuple[tuple[int, object], ...] | None:
+    pointer_argument_indices: object,
+) -> object:
     """Project physical pushes to exact near-pointer sources in C argument order."""
     if (
-        len(set(pointer_argument_indices)) != len(pointer_argument_indices)
-        or any(index < 0 for index in pointer_argument_indices)
-        or len(summary.arg_widths) != len(summary.push_arg_sources)
-        or any(width != 2 for width in summary.arg_widths)
+        operator.ne(len(set(pointer_argument_indices)), len(pointer_argument_indices))
+        or any(index < 0 for index in iter(pointer_argument_indices))
+        or operator.ne(len(summary.arg_widths), len(summary.push_arg_sources))
+        or any(width != 2 for width in iter(summary.arg_widths))
     ):
         return None
     if summary.logical_arg_widths and (
-        len(summary.logical_arg_widths) != len(summary.push_arg_sources)
-        or any(width != 2 for width in summary.logical_arg_widths)
+        operator.ne(len(summary.logical_arg_widths), len(summary.push_arg_sources))
+        or any(width != 2 for width in iter(summary.logical_arg_widths))
     ):
         return None
     logical_sources = tuple(reversed(summary.push_arg_sources))
-    if any(index >= len(logical_sources) for index in pointer_argument_indices):
+    if any(index >= len(logical_sources) for index in iter(pointer_argument_indices)):
         return None
     return tuple(
         (argument_index, logical_sources[argument_index])
-        for argument_index in pointer_argument_indices
+        for argument_index in iter(pointer_argument_indices)
     )
 
 
+@cython.ccall
 def _classify_summary_sources_8616(
-    sources: tuple[AffineGlobalPointerSource8616 | None, ...],
-    layouts_by_base: dict[int, GlobalObjectLayout8616],
+    sources: object,
+    layouts_by_base: object,
 ) -> tuple[int | None, tuple[GlobalObjectLayout8616 | None, ...]]:
     """Classify exact or one-element-adjacent sources within one callsite."""
+    anchor: object
+    anchor_layout: object
+    source: object
+    anchor_index: object
+    index: object
     source_layouts: list[GlobalObjectLayout8616 | None] = [
         None
         if source is None or source.base_offset not in layouts_by_base
         else layouts_by_base[source.base_offset]
-        for source in sources
+        for source in iter(sources)
     ]
     changed = True
     while changed:
@@ -181,43 +194,45 @@ def _classify_summary_sources_8616(
                 if anchor is None or anchor_layout is None:
                     continue
                 if (
-                    source.index_identity == anchor.index_identity
-                    and abs(source.base_offset - anchor.base_offset)
-                    == anchor_layout.element_width
+                    operator.eq(source.index_identity, anchor.index_identity)
+                    and operator.eq(abs(source.base_offset - anchor.base_offset), anchor_layout.element_width)
                 ):
                     source_layouts[index] = anchor_layout
                     changed = True
                     break
     distinct = {
-        layout.family_base_offset for layout in source_layouts if layout is not None
+        layout.family_base_offset for layout in iter(source_layouts) if layout is not None
     }
     family = next(iter(distinct)) if len(distinct) == 1 else None
     return family, tuple(source_layouts)
 
 
 def recover_callee_global_object_interface_evidence_8616(
-    target_addr: int,
+    target_addr: cython.longlong,
     summaries: Sequence[CallsiteSummary8616],
     layout_evidence: GlobalObjectLayoutEvidence8616,
-    pointer_argument_indices: tuple[int, ...],
+    pointer_argument_indices: object,
 ) -> CalleeGlobalObjectInterfaceEvidence8616:
     """Join all direct caller sources to one proven aggregate family."""
+    family: object
+    projected_sources: object
+    summary: object
     expected_arg_count = len(pointer_argument_indices)
     raw_count = len(summaries) * expected_arg_count
     normalized_count = 0
     classified_source_count = 0
-    families: set[int] = set()
+    families: set[cython.longlong] = set()
     invalid_callsites = 0
     classified_summaries: list[
         tuple[
             CallsiteSummary8616,
-            tuple[tuple[int, object], ...],
+            tuple[tuple[cython.longlong, object], ...],
             tuple[AffineGlobalPointerSource8616 | None, ...],
             tuple[GlobalObjectLayout8616 | None, ...],
         ]
     ] = []
     layouts_by_base = {
-        layout.address.offset & 0xFFFF: layout for layout in layout_evidence.layouts
+        layout.address.offset & 0xFFFF: layout for layout in iter(layout_evidence.layouts)
     }
     for summary in summaries:
         projected_sources = logical_pointer_argument_sources_8616(
@@ -229,19 +244,19 @@ def recover_callee_global_object_interface_evidence_8616(
             continue
         sources = tuple(
             affine_global_pointer_source_8616(source)
-            for _argument_index, source in projected_sources
+            for _argument_index, source in iter(projected_sources)
         )
-        normalized_count += sum(source is not None for source in sources)
+        normalized_count += sum(source is not None for source in iter(sources))
         family, source_layouts = _classify_summary_sources_8616(
             sources,
             layouts_by_base,
         )
-        classified = sum(layout is not None for layout in source_layouts)
+        classified = sum(layout is not None for layout in iter(source_layouts))
         classified_source_count += classified
         if (
             expected_arg_count == 0
             or family is None
-            or classified != len(sources)
+            or operator.ne(classified, len(sources))
         ):
             invalid_callsites += 1
             continue
@@ -282,10 +297,10 @@ def recover_callee_global_object_interface_evidence_8616(
                 element_width=layout.element_width,
                 field_offsets=layout.field_offsets,
             )
-            for summary, projected_sources, sources, source_layouts in classified_summaries
-            for source_index, (source, layout) in enumerate(
+            for summary, projected_sources, sources, source_layouts in iter(classified_summaries)
+            for source_index, (source, layout) in builtins.iter(enumerate(
                 zip(sources, source_layouts, strict=True)
-            )
+            ))
             if source is not None and layout is not None
         )
         if anchored
@@ -302,7 +317,7 @@ def recover_callee_global_object_interface_evidence_8616(
         materialized_count=0,
         failure_count=(raw_count - classified_source_count)
         + int(len(families) > 1),
-        callsite_addrs=tuple(sorted(summary.callsite_addr for summary in summaries)),
+        callsite_addrs=tuple(sorted(summary.callsite_addr for summary in iter(summaries))),
         source_facts=source_facts,
     )
 

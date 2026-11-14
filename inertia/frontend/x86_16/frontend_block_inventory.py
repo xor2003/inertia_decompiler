@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Retain request-local decoded x86-16 block evidence.
 
 Layer: Frontend.
@@ -6,6 +7,8 @@ decoding, and preserve the legacy VEX-backed factory as a fail-closed fallback.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -17,13 +20,15 @@ from cle.backends.externs import ExternObject
 
 from .frontend_capstone_decode import decode_bounded_capstone_block_8616
 from .frontend_instruction_kinds import is_x86_16_call_mnemonic_8616
+import dataclasses
+import builtins
 
 
 class _InstructionBoundary8616(Protocol):
     """angr wrapper fields for one decoded Capstone instruction."""
 
-    address: int
-    mnemonic: str
+    address: cython.longlong
+    mnemonic: object
 
 
 class _CapstoneBoundary8616(Protocol):
@@ -43,9 +48,9 @@ class _FactoryBoundary8616(Protocol):
 
     def block(
         self,
-        addr: int,
+        addr: cython.longlong,
         *,
-        opt_level: int,
+        opt_level: cython.longlong,
         num_inst: int | None = None,
     ) -> _BlockBoundary8616:
         """Decode one block at ``addr``."""
@@ -55,7 +60,7 @@ class _FactoryBoundary8616(Protocol):
 class _MainObjectBoundary8616(Protocol):
     """Loaded-image upper bound required by direct decoding."""
 
-    max_addr: int
+    max_addr: cython.longlong
 
 
 class _LoaderBoundary8616(Protocol):
@@ -69,27 +74,24 @@ class _ProjectBoundary8616(Protocol):
 
     factory: _FactoryBoundary8616
     loader: _LoaderBoundary8616
-    _inertia_decoded_block_inventories_8616: dict[
-        DecodedBlockRequest8616,
-        DecodedBlockEvidence8616,
-    ]
+    _inertia_decoded_block_inventories_8616: object
 
 
 class _FunctionBoundary8616(Protocol):
     """Third-party recovered-function fields used for CFG instruction inventory."""
 
     blocks: Iterable[_BlockBoundary8616]
-    block_addrs_set: Iterable[int]
+    block_addrs_set: Iterable[cython.longlong]
     project: _ProjectBoundary8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DecodedBlockRequest8616:
     """Exact request identity for one request-local frontend block decode."""
 
-    address: int
+    address: cython.longlong
     instruction_limit: int | None
-    optimization_level: int
+    optimization_level: cython.longlong
 
 
 class DecodedBlockStatus8616(Enum):
@@ -99,18 +101,19 @@ class DecodedBlockStatus8616(Enum):
     REFUSED = "refused"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DecodedBlockEvidence8616:
     """Cached instructions or a deterministic decode refusal."""
 
     request: DecodedBlockRequest8616
     status: DecodedBlockStatus8616
-    instructions: tuple[Any, ...]
+    instructions: object
     block: object | None
     failure_type: type[Exception] | None
-    failure_message: str | None
+    failure_message: object
 
 
+@cython.ccall
 def _raise_cached_decode_failure_8616(evidence: DecodedBlockEvidence8616) -> None:
     """Re-raise a cached refusal without retaining a traceback object."""
     failure_type = evidence.failure_type or RuntimeError
@@ -122,7 +125,8 @@ def _raise_cached_decode_failure_8616(evidence: DecodedBlockEvidence8616) -> Non
     raise failure
 
 
-def _refuse_synthetic_memory_8616(project: object, address: int) -> None:
+@cython.ccall
+def _refuse_synthetic_memory_8616(project: object, address: cython.longlong) -> None:
     """Reject CLE external stubs before any cache, direct decode or VEX fallback."""
     # CLE's external object contains synthetic stubs, not input-program bytes.
     # Limit this adapter check to actual angr projects; standalone byte decoders
@@ -131,14 +135,17 @@ def _refuse_synthetic_memory_8616(project: object, address: int) -> None:
         raise ValueError("synthetic external memory is not binary instruction evidence")
 
 
+@cython.ccall
 def collect_decoded_block_evidence_8616(
     project: object,
-    address: int,
+    address: cython.longlong,
     *,
     num_inst: int | None = None,
-    opt_level: int = 0,
+    opt_level: cython.longlong = 0,
 ) -> DecodedBlockEvidence8616:
     """Collect one exact request, using VEX only when direct decode refuses."""
+    block: object
+    cached: object
     _refuse_synthetic_memory_8616(project, address)
     boundary = cast(_ProjectBoundary8616, project)
     request = DecodedBlockRequest8616(int(address), num_inst, int(opt_level))
@@ -153,7 +160,7 @@ def collect_decoded_block_evidence_8616(
             return cached
         _raise_cached_decode_failure_8616(cached)
 
-    block: object | None = None
+    block = None
     instructions: tuple[Any, ...] = ()
     if num_inst is None and opt_level == 0:
         try:
@@ -198,13 +205,14 @@ def collect_decoded_block_evidence_8616(
     return evidence
 
 
+@cython.ccall
 def decoded_block_instructions_8616(
     project: object,
-    address: int,
+    address: cython.longlong,
     *,
     num_inst: int | None = None,
-    opt_level: int = 0,
-) -> tuple[Any, ...]:
+    opt_level: cython.longlong = 0,
+) -> object:
     """Return instructions from one exact typed frontend decode request."""
     return collect_decoded_block_evidence_8616(
         project,
@@ -214,10 +222,12 @@ def decoded_block_instructions_8616(
     ).instructions
 
 
+@cython.ccall
 def _fold_instructions_by_address_8616(
-    by_address: dict[int, Any], instructions: tuple[Any, ...]
+    by_address: object, instructions: object
 ) -> None:
     """Fold decoded instructions into one address-ordered inventory."""
+    instruction: object
     for instruction in instructions:
         try:
             address = instruction.address
@@ -229,13 +239,15 @@ def _fold_instructions_by_address_8616(
 
 def decoded_function_instructions_8616(function: object) -> tuple[Any, ...]:
     """Return one address-ordered instruction inventory for a recovered function."""
+    block: object
+    block_addr: object
     boundary = cast(_FunctionBoundary8616, function)
     try:
         blocks = tuple(boundary.blocks)
     except Exception:
         blocks = ()
 
-    by_address: dict[int, Any] = {}
+    by_address: dict[cython.longlong, Any] = {}
     if blocks:
         for block in blocks:
             try:
@@ -243,12 +255,12 @@ def decoded_function_instructions_8616(function: object) -> tuple[Any, ...]:
             except (AttributeError, TypeError):
                 continue
             _fold_instructions_by_address_8616(by_address, instructions)
-        return tuple(by_address[address] for address in sorted(by_address))
+        return tuple(by_address[address] for address in builtins.iter(sorted(by_address)))
 
     try:
         project = boundary.project
         block_addrs = tuple(
-            sorted(address for address in boundary.block_addrs_set if isinstance(address, int))
+            sorted(address for address in iter(boundary.block_addrs_set) if isinstance(address, int))
         )
     except (AttributeError, TypeError):
         return ()
@@ -258,12 +270,14 @@ def decoded_function_instructions_8616(function: object) -> tuple[Any, ...]:
         except Exception:
             continue
         _fold_instructions_by_address_8616(by_address, instructions)
-    return tuple(by_address[address] for address in sorted(by_address))
+    return tuple(by_address[address] for address in builtins.iter(sorted(by_address)))
 
 
-def decoded_function_callsite_addresses_8616(function: object) -> tuple[int, ...]:
+@cython.ccall
+def decoded_function_callsite_addresses_8616(function: object) -> tuple[cython.longlong, ...]:
     """Return every exact near or far call address decoded from one function CFG."""
-    callsites: list[int] = []
+    instruction: object
+    callsites: list[cython.longlong] = []
     for instruction in decoded_function_instructions_8616(function):
         try:
             address = instruction.address

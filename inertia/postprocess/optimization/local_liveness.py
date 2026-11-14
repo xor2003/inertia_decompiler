@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Rewrite/Postprocess cleanup.
 
 Responsibility: identify already-proven local storage for conservative liveness consumers.
@@ -7,13 +8,15 @@ Unknown identity must make callers preserve code.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Hashable
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
 
-type LocalLivenessKey8616 = tuple[str, Hashable]
+LocalLivenessKey8616 = typing.TypeAliasType("LocalLivenessKey8616", tuple[str, Hashable])
 
 __all__ = [
     "LocalLivenessKey8616",
@@ -23,6 +26,7 @@ __all__ = [
 ]
 
 
+@cython.ccall
 def stack_storage_liveness_key_8616(
     node: structured_c.CVariable,
 ) -> LocalLivenessKey8616 | None:
@@ -35,6 +39,7 @@ def stack_storage_liveness_key_8616(
     return ("stack_storage", (variable.base, variable.offset, variable.size))
 
 
+@cython.ccall
 def local_liveness_key_8616(
     node: structured_c.CVariable,
 ) -> LocalLivenessKey8616 | None:
@@ -67,7 +72,8 @@ def local_liveness_key_8616(
     )
 
 
-def has_architectural_register_storage_8616(node: object) -> bool:
+@cython.ccall
+def has_architectural_register_storage_8616(node: object) -> cython.bint:
     """Identify direct or unified register storage, without claiming deadness.
 
     A register-backed C local can carry an architectural boundary effect.

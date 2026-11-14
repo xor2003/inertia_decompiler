@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed IR contracts for bounded indexed-address loop ranges.
 
 Layer: IR.
@@ -12,6 +13,8 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -31,6 +34,8 @@ from .logical_memory_write_value import (
     LogicalWordWriteValueFact8616,
     LogicalWordWriteValueKind8616,
 )
+import dataclasses
+import operator
 
 
 class IndexedLoopRangeFailureKind8616(StrEnum):
@@ -65,7 +70,7 @@ class IndexedLoopRangeFailureKind8616(StrEnum):
     PROOF_SITE_CONFLICT = "proof_site_conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedLoopRangeCandidate8616:
     """Explicit typed SSA/CFG adapter input; absent proof is never inferred."""
 
@@ -74,7 +79,7 @@ class IndexedLoopRangeCandidate8616:
     init: int | None = None
     step: int | None = None
     upper_bound: int | None = None
-    upper_bound_is_constant: bool = False
+    upper_bound_is_constant: cython.bint = False
     init_site: IndexedLoopProofSite8616 | None = None
     step_site: IndexedLoopProofSite8616 | None = None
     guard_site: IndexedLoopProofSite8616 | None = None
@@ -88,15 +93,15 @@ class IndexedLoopRangeCandidate8616:
     generation_detail: str = ""
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedLoopRangeFact8616:
     """One indexed access proven to execute for the exact range ``[0, N)``."""
 
     source: IndexedAddressFact8616
     induction_source: IndexedInductionSourceIdentity8616
-    init: int
-    step: int
-    upper_bound: int
+    init: cython.longlong
+    step: cython.longlong
+    upper_bound: cython.longlong
     init_site: IndexedLoopProofSite8616
     step_site: IndexedLoopProofSite8616
     guard_site: IndexedLoopProofSite8616
@@ -113,8 +118,9 @@ class IndexedLoopRangeFact8616:
         return self.init_site, self.step_site, self.guard_site, self.access_site
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every retained range and control-flow witness agrees."""
+        census: object
         canonical = canonical_induction_source_identity_8616(self.source.index_source)
         max_value = (1 << (self.source.index_value.size * 8)) - 1
         access_matches = (
@@ -131,10 +137,10 @@ class IndexedLoopRangeFact8616:
             self.step_write.access.address
         )
         init_slice_indexes = {
-            lane.execution_slice.instr_index for lane in self.init_write.lanes
+            lane.execution_slice.instr_index for lane in iter(self.init_write.lanes)
         }
         step_slice_indexes = {
-            lane.execution_slice.instr_index for lane in self.step_write.lanes
+            lane.execution_slice.instr_index for lane in iter(self.step_write.lanes)
         }
         census = self.induction_write_census
         if census is None or not census.matches_lifetime(
@@ -144,45 +150,45 @@ class IndexedLoopRangeFact8616:
             return False
         return bool(
             self.source.complete
-            and canonical == self.induction_source
+            and operator.eq(canonical, self.induction_source)
             and self.induction_source.complete
             and self.init == 0
             and self.step == 1
             and self.init_write.complete
             and self.init_write.proves_constant_zero
-            and self.init_write.constant == self.init
-            and init_identity == self.induction_source
+            and operator.eq(self.init_write.constant, self.init)
+            and operator.eq(init_identity, self.induction_source)
             and self.step_write.complete
             and self.step_write.kind
             is LogicalWordWriteValueKind8616.OLD_LOGICAL_WORD_PLUS_ONE
-            and self.step_write.constant == self.step
-            and step_identity == self.induction_source
+            and operator.eq(self.step_write.constant, self.step)
+            and operator.eq(step_identity, self.induction_source)
             and not isinstance(self.upper_bound, bool)
             and 0 < self.upper_bound <= max_value
-            and all(site.complete for site in self.proof_sites)
+            and all(site.complete for site in iter(self.proof_sites))
             and access_matches
             and loop.complete
             and self.init_site.block_addr not in loop.blocks
-            and self.init_site.block_addr == self.init_write.access.key.block_addr
-            and self.init_site.instr_addr == self.init_write.access.key.insn_addr
+            and operator.eq(self.init_site.block_addr, self.init_write.access.key.block_addr)
+            and operator.eq(self.init_site.instr_addr, self.init_write.access.key.insn_addr)
             and self.init_site.instr_index in init_slice_indexes
             and any(
-                source == self.init_site.block_addr
-                for source, _target in loop.entry_edges
+                operator.eq(source, self.init_site.block_addr)
+                for source, _target in iter(loop.entry_edges)
             )
-            and self.step_site.block_addr == loop.latch_block_addr
-            and self.step_site.block_addr == self.step_write.access.key.block_addr
-            and self.step_site.instr_addr == self.step_write.access.key.insn_addr
+            and operator.eq(self.step_site.block_addr, loop.latch_block_addr)
+            and operator.eq(self.step_site.block_addr, self.step_write.access.key.block_addr)
+            and operator.eq(self.step_site.instr_addr, self.step_write.access.key.insn_addr)
             and self.step_site.instr_index in step_slice_indexes
-            and self.guard_site.block_addr == loop.header_block_addr
+            and operator.eq(self.guard_site.block_addr, loop.header_block_addr)
             and self.access_site.block_addr in loop.blocks
-            and self.access_site.block_addr != loop.header_block_addr
+            and operator.ne(self.access_site.block_addr, loop.header_block_addr)
             and all(
-                site.block_addr != self.step_site.block_addr
+                operator.ne(site.block_addr, self.step_site.block_addr)
                 or site.instr_index < min(step_slice_indexes)
-                for site in self.source.definition_path if site.op == "LOAD"
+                for site in iter(self.source.definition_path) if site.op == "LOAD"
             )
-            and guard.guard_block_addr == loop.header_block_addr
+            and operator.eq(guard.guard_block_addr, loop.header_block_addr)
             and guard.continue_block_addr in loop.blocks
             and guard.exit_block_addr not in loop.blocks
             and guard.complete
@@ -194,32 +200,32 @@ class IndexedLoopRangeFact8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedLoopRangeRefusal8616:
     """One candidate retained with its exact typed refusal reason."""
 
     candidate: IndexedLoopRangeCandidate8616
     failure: IndexedLoopRangeFailureKind8616
-    detail: str
+    detail: object
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether the refusal retains a non-empty diagnostic."""
         return bool(self.detail)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedLoopRangeStats8616:
     """Closed accounting for explicit loop-range witness candidates."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every candidate has exactly one final outcome."""
         counts = (
             self.raw_fact_count,
@@ -229,7 +235,7 @@ class IndexedLoopRangeStats8616:
             self.failure_count,
         )
         return bool(
-            all(count >= 0 for count in counts)
+            all(count >= 0 for count in iter(counts))
             and self.raw_fact_count
             == self.normalized_fact_count
             == self.classified_fact_count
@@ -237,25 +243,25 @@ class IndexedLoopRangeStats8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedLoopRangeEvidence8616:
     """Function-local accepted ranges and all explicit refusals."""
 
-    function_addr: int
-    facts: tuple[IndexedLoopRangeFact8616, ...]
-    refusals: tuple[IndexedLoopRangeRefusal8616, ...]
+    function_addr: cython.longlong
+    facts: object
+    refusals: object
     stats: IndexedLoopRangeStats8616
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether facts, refusals, and counters are coherent."""
         return bool(
             self.function_addr >= 0
             and self.stats.closed
-            and len(self.facts) == self.stats.materialized_count
-            and len(self.refusals) == self.stats.failure_count
-            and all(fact.complete for fact in self.facts)
-            and all(refusal.complete for refusal in self.refusals)
+            and operator.eq(len(self.facts), self.stats.materialized_count)
+            and operator.eq(len(self.refusals), self.stats.failure_count)
+            and all(fact.complete for fact in iter(self.facts))
+            and all(refusal.complete for refusal in iter(self.refusals))
         )
 
 

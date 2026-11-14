@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Parse and relocate source-backed DOS MZ load modules.
 
 Layer: Frontend.
@@ -8,15 +9,18 @@ solver, program environment, inferred selector or success verdict.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
+import dataclasses
 
-MAX_MZ_RELOCATIONS: int = 0x4000
+MAX_MZ_RELOCATIONS: cython.longlong = 0x4000
 
 __all__ = ["MAX_MZ_RELOCATIONS", "MzExe", "parse_mz", "relocate_mz_load_module"]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class MzExe:
     """Parsed MZ header fields, the load-module bytes and relocation records.
 
@@ -25,18 +29,19 @@ class MzExe:
     segment)`` pairs whose stored words are relative to the image start.
     """
 
-    image: bytes
-    relocations: tuple[tuple[int, int], ...]
-    minalloc: int
-    maxalloc: int
-    entry_cs: int
-    entry_ip: int
-    stack_ss: int
-    stack_sp: int
-    checksum: int
+    image: object
+    relocations: object
+    minalloc: cython.longlong
+    maxalloc: cython.longlong
+    entry_cs: cython.longlong
+    entry_ip: cython.longlong
+    stack_ss: cython.longlong
+    stack_sp: cython.longlong
+    checksum: cython.longlong
 
 
-def parse_mz(data: bytes) -> MzExe:
+@cython.ccall
+def parse_mz(data: object) -> MzExe:
     """Parse and validate a DOS MZ executable's load image and relocations."""
     if len(data) < 0x1C or data[:2] not in {b"MZ", b"ZM"}:
         raise ValueError("real16 replay requires a DOS MZ executable")
@@ -60,7 +65,7 @@ def parse_mz(data: bytes) -> MzExe:
         raise ValueError("bad MZ image/header sizes")
     if nreloc > MAX_MZ_RELOCATIONS or (nreloc and (reloc_pos < 0x1C or reloc_pos + nreloc * 4 > header_size)):
         raise ValueError("truncated or excessive MZ relocation table")
-    relocs: list[tuple[int, int]] = []
+    relocs: list[tuple[cython.longlong, cython.longlong]] = []
     for index in range(nreloc):
         at = reloc_pos + index * 4
         relocs.append(
@@ -75,8 +80,11 @@ def parse_mz(data: bytes) -> MzExe:
     )
 
 
-def relocate_mz_load_module(exe: MzExe, load_segment: int) -> bytes:
+@cython.ccall
+def relocate_mz_load_module(exe: MzExe, load_segment: cython.longlong) -> bytes:
     """Apply MZ relocations by adding the load paragraph to each stored word."""
+    offset: object
+    segment: object
     image = bytearray(exe.image)
     for offset, segment in exe.relocations:
         target = segment * 16 + offset

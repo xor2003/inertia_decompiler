@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Coordinate proven segmented-global materializers after C-AST regeneration.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Dynamic boundary: project and codegen are third-party angr plugin objects.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import os
 import sys
@@ -35,9 +38,11 @@ from .segmented_global_loads import (
     materialize_named_segmented_global_loads_8616,
 )
 from .segmented_memory_lowering import apply_runtime_segment_lowering_8616
+import dataclasses
+import builtins
 
-type ProjectBoundary8616 = Any
-type CodegenBoundary8616 = Any
+ProjectBoundary8616 = typing.TypeAliasType("ProjectBoundary8616", Any)
+CodegenBoundary8616 = typing.TypeAliasType("CodegenBoundary8616", Any)
 
 __all__ = [
     "SegmentGlobalMaterializationResult8616",
@@ -47,20 +52,20 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentGlobalMaterializationTiming8616:
     """Inclusive component timings for one Lowering replay request."""
 
-    named_global_seconds: float
-    compare_register_seconds: float
-    indexed_global_seconds: float
-    direct_global_store_seconds: float
-    dos_interrupt_aggregate_seconds: float
-    segmented_load_widening_seconds: float
-    runtime_segment_seconds: float
+    named_global_seconds: cython.double
+    compare_register_seconds: cython.double
+    indexed_global_seconds: cython.double
+    direct_global_store_seconds: cython.double
+    dos_interrupt_aggregate_seconds: cython.double
+    segmented_load_widening_seconds: cython.double
+    runtime_segment_seconds: cython.double
 
     @property
-    def total_seconds(self) -> float:
+    def total_seconds(self) -> cython.double:
         """Return the sum of all component timings."""
         return sum(
             (
@@ -75,21 +80,21 @@ class SegmentGlobalMaterializationTiming8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentGlobalMaterializationResult8616:
     """Result of one complete segmented-global materialization replay."""
 
     query_stats: StructuredAstQuerySessionStats8616 | None
-    runtime_segment_changed: bool
-    segmented_load_widening_changed: bool
-    named_global_changed: bool
-    compare_register_global_changed: bool
-    direct_global_store_changed: bool
-    indexed_global_changed: bool
-    dos_interrupt_aggregate_changed: bool
+    runtime_segment_changed: cython.bint
+    segmented_load_widening_changed: cython.bint
+    named_global_changed: cython.bint
+    compare_register_global_changed: cython.bint
+    direct_global_store_changed: cython.bint
+    indexed_global_changed: cython.bint
+    dos_interrupt_aggregate_changed: cython.bint
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return True when any owning materializer changed the C AST."""
         return (
             self.runtime_segment_changed
@@ -102,11 +107,18 @@ class SegmentGlobalMaterializationResult8616:
         )
 
 
+@cython.ccall
 def cod_metadata_for_codegen_8616(
     project: ProjectBoundary8616,
     codegen: CodegenBoundary8616,
 ) -> object | None:
     """Return optional sidecar metadata for the active dynamic angr codegen."""
+    delta: object
+    func_addr: object
+    metadata: object
+    metadata_by_addr: object
+    candidate_addr: object
+    candidate_project: object
     func_addr = getattr(getattr(codegen, "cfunc", None), "addr", None)
     if not isinstance(func_addr, int):
         return None
@@ -123,21 +135,25 @@ def cod_metadata_for_codegen_8616(
             metadata = metadata_by_addr.get(candidate_addr)
             if metadata is not None:
                 return cast(object, metadata)
-        unique_metadata = {id(metadata): metadata for metadata in metadata_by_addr.values()}
+        unique_metadata = {id(metadata): metadata for metadata in builtins.iter(metadata_by_addr.values())}
         if len(unique_metadata) == 1:
             return cast(object, next(iter(unique_metadata.values())))
     return None
 
 
+@cython.ccall
 def run_segment_global_materialization_8616(
     project: ProjectBoundary8616,
     codegen: CodegenBoundary8616,
     synthetic_globals: object,
     *,
     cod_metadata: object | None = None,
-    include_runtime_segment: bool = False,
+    include_runtime_segment: cython.bint = False,
 ) -> SegmentGlobalMaterializationResult8616:
     """Run proven segment/global materializers in Types/Lowering-owned order."""
+    cfunc: object
+    query_root: object
+    query_session: object
     component_started = time.perf_counter()
     named_global_changed = bool(
         materialize_named_segmented_global_loads_8616(

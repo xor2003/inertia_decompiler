@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Validation.
 
 Responsibility: owns canonical equivalence checking and validation diagnostics.
@@ -10,10 +11,14 @@ Rules:
 """  # noqa: RUF002
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Protocol, cast, runtime_checkable
+import dataclasses
+import operator
 
 __all__ = [
     "EquivalenceResult",
@@ -32,12 +37,12 @@ class EquivalenceResult(Enum):
     TIMEOUT = "timeout"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CanonicalDiagnostic:
     """Diagnostic record for validation canonicalization visibility."""
 
     path: str = ""
-    changed: bool = False
+    changed: cython.bint = False
     note: str = ""
     before: str = ""
     after: str = ""
@@ -128,7 +133,7 @@ class _ExpressionAttributeAccessor(Protocol):
     def __call__(self, expr: object) -> object: ...
 
 
-def canonicalize_expr_for_validation_8616(expr: object, *, max_depth: int = 8) -> object:
+def canonicalize_expr_for_validation_8616(expr: object, *, max_depth: cython.longlong = 8) -> object:
     """Apply identity-preserving algebraic normalization to one expression."""
 
     def _impl() -> object:
@@ -154,7 +159,8 @@ def canonicalize_expr_for_validation_8616(expr: object, *, max_depth: int = 8) -
     return _impl()
 
 
-def _canonicalize_binary_expr(expr: _BinaryExpr, max_depth: int) -> object:
+@cython.ccall
+def _canonicalize_binary_expr(expr: _BinaryExpr, max_depth: cython.longlong) -> object:
     """Canonicalize a binary expression after recursing into both operands."""
     lhs = canonicalize_expr_for_validation_8616(expr.lhs, max_depth=max_depth - 1)
     rhs = canonicalize_expr_for_validation_8616(expr.rhs, max_depth=max_depth - 1)
@@ -175,7 +181,8 @@ def _canonicalize_binary_expr(expr: _BinaryExpr, max_depth: int) -> object:
     return _rebuild_binary(expr, lhs, rhs)
 
 
-def equivalent_expr_8616(lhs: object, rhs: object, *, timeout_ms: int = 500) -> EquivalenceResult:
+@cython.ccall
+def equivalent_expr_8616(lhs: object, rhs: object, *, timeout_ms: cython.longlong = 500) -> EquivalenceResult:
     """Check if two expressions are semantically equivalent after canonicalization.
 
     Uses:
@@ -206,6 +213,7 @@ def equivalent_expr_8616(lhs: object, rhs: object, *, timeout_ms: int = 500) -> 
     return EquivalenceResult.DIFFERENT
 
 
+@cython.ccall
 def canonical_diagnostic_8616(expr: object) -> CanonicalDiagnostic:
     """Return a diagnostic describing what canonicalization changed."""
     before = str(expr) if not isinstance(expr, str) else expr
@@ -225,7 +233,8 @@ def canonical_diagnostic_8616(expr: object) -> CanonicalDiagnostic:
 # ── internal helpers ──
 
 
-def _is_zero_value(expr: object) -> bool:
+@cython.ccall
+def _is_zero_value(expr: object) -> cython.bint:
     """Check if an expression represents the value 0."""
     if isinstance(expr, int):
         return expr == 0
@@ -240,7 +249,8 @@ def _is_zero_value(expr: object) -> bool:
     return False
 
 
-def _is_one_value(expr: object) -> bool:
+@cython.ccall
+def _is_one_value(expr: object) -> cython.bint:
     """Check if an expression represents the value 1."""
     if isinstance(expr, int):
         return expr == 1
@@ -251,9 +261,11 @@ def _is_one_value(expr: object) -> bool:
     return False
 
 
-def _same_value(lhs: object, rhs: object) -> bool:
-    def _impl() -> bool:
+def _same_value(lhs: object, rhs: object) -> cython.bint:
+    def _impl() -> cython.bint:
         """Check if two expressions represent the same value."""
+        lhs_var: object
+        rhs_var: object
         if type(lhs) is not type(rhs):
             return False
         lhs_value = lhs.value if isinstance(lhs, _HasValue) else lhs
@@ -274,8 +286,8 @@ def _same_value(lhs: object, rhs: object) -> bool:
             return (
                 isinstance(lhs_var, _HasStackIdentity)
                 and isinstance(rhs_var, _HasStackIdentity)
-                and lhs_var.offset == rhs_var.offset
-                and lhs_var.base == rhs_var.base
+                and operator.eq(lhs_var.offset, rhs_var.offset)
+                and operator.eq(lhs_var.base, rhs_var.base)
             )
 
         return False
@@ -283,13 +295,15 @@ def _same_value(lhs: object, rhs: object) -> bool:
     return _impl()
 
 
+@cython.ccall
 def _zero_for_expr(expr: object) -> object:
     """Produce a zero constant matching the type of expr."""
     width = expr.size if isinstance(expr, _HasSize) and isinstance(expr.size, int) else 4
     return _make_constant(0, width, codegen=_codegen_for_expr(expr))
 
 
-def _make_constant(value: int, size: int = 4, *, codegen: object | None = None) -> object:
+@cython.ccall
+def _make_constant(value: cython.longlong, size: cython.longlong = 4, *, codegen: object | None = None) -> object:
     """Create a constant node matching the given value and size."""
     if codegen is None:
         return value
@@ -306,6 +320,7 @@ def _make_constant(value: int, size: int = 4, *, codegen: object | None = None) 
         return value
 
 
+@cython.ccall
 def _rebuild_binary(original: object, lhs: object, rhs: object) -> object:
     """Rebuild a binary expression with canonicalized children."""
     if not isinstance(original, _BinaryExpr):
@@ -317,6 +332,7 @@ def _rebuild_binary(original: object, lhs: object, rhs: object) -> object:
         return original
 
 
+@cython.ccall
 def _rebuild_unary(original: object, operand: object) -> object:
     """Rebuild a unary expression with a canonicalized operand."""
     if not isinstance(original, _UnaryExpr):
@@ -328,9 +344,10 @@ def _rebuild_unary(original: object, operand: object) -> object:
         return original
 
 
-def _structural_equal(lhs: object, rhs: object, depth: int = 0, max_depth: int = 16) -> bool:
-    def _impl() -> bool:
+def _structural_equal(lhs: object, rhs: object, depth: cython.longlong = 0, max_depth: cython.longlong = 16) -> cython.bint:
+    def _impl() -> cython.bint:
         """Structural equality check with cycle detection."""
+        accessor: object
         if depth > max_depth:
             return True  # conservative: treat too-deep as equal
 
@@ -351,7 +368,8 @@ def _structural_equal(lhs: object, rhs: object, depth: int = 0, max_depth: int =
     return _impl()
 
 
-def _binary_shape_equal(lhs: object, rhs: object, depth: int, max_depth: int) -> bool:
+@cython.ccall
+def _binary_shape_equal(lhs: object, rhs: object, depth: cython.longlong, max_depth: cython.longlong) -> cython.bint:
     """Return False when only one side is a binary expression or its fields differ."""
     if not isinstance(lhs, _BinaryExpr) and not isinstance(rhs, _BinaryExpr):
         return True
@@ -364,7 +382,8 @@ def _binary_shape_equal(lhs: object, rhs: object, depth: int, max_depth: int) ->
     )
 
 
-def _unary_shape_equal(lhs: object, rhs: object, depth: int, max_depth: int) -> bool:
+@cython.ccall
+def _unary_shape_equal(lhs: object, rhs: object, depth: cython.longlong, max_depth: cython.longlong) -> cython.bint:
     """Return False when only one side is a unary expression or its fields differ."""
     if not isinstance(lhs, _UnaryExpr) and not isinstance(rhs, _UnaryExpr):
         return True
@@ -379,46 +398,55 @@ def _unary_shape_equal(lhs: object, rhs: object, depth: int, max_depth: int) -> 
 _sentinel = object()
 
 
+@cython.ccall
 def _codegen_for_expr(expr: object) -> object | None:
     """Return optional codegen metadata from a dynamic codegen expression."""
     return expr.codegen if isinstance(expr, _HasCodegen) else None
 
 
+@cython.ccall
 def _value_for_expr(expr: object) -> object:
     """Return value metadata when a dynamic expression exposes it."""
     return expr.value if isinstance(expr, _HasValue) else _sentinel
 
 
+@cython.ccall
 def _name_for_expr(expr: object) -> object:
     """Return name metadata when a dynamic expression exposes it."""
     return expr.name if isinstance(expr, _HasName) else _sentinel
 
 
+@cython.ccall
 def _kind_for_expr(expr: object) -> object:
     """Return kind metadata when a dynamic expression exposes it."""
     return expr.kind if isinstance(expr, _HasKind) else _sentinel
 
 
+@cython.ccall
 def _type_for_expr(expr: object) -> object:
     """Return type metadata when a dynamic expression exposes it."""
     return expr.type if isinstance(expr, _HasTypeAttr) else _sentinel
 
 
+@cython.ccall
 def _variable_for_expr(expr: object) -> object:
     """Return variable metadata when a dynamic expression exposes it."""
     return expr.variable if isinstance(expr, _HasVariable) else _sentinel
 
 
+@cython.ccall
 def _expr_for_expr(expr: object) -> object:
     """Return nested expression metadata when a dynamic expression exposes it."""
     return expr.expr if isinstance(expr, _HasExpr) else _sentinel
 
 
+@cython.ccall
 def _index_for_expr(expr: object) -> object:
     """Return index metadata when a dynamic expression exposes it."""
     return expr.index if isinstance(expr, _HasIndex) else _sentinel
 
 
+@cython.ccall
 def _reg_for_expr(expr: object) -> object | None:
     """Return register metadata from an expression or its variable."""
     if isinstance(expr, _HasReg):
@@ -439,13 +467,14 @@ _STRUCTURAL_ATTR_ACCESSORS: tuple[_ExpressionAttributeAccessor, ...] = (
 )
 
 
+@cython.ccall
 def _compare_optional_attr(
     lhs: object,
     rhs: object,
     accessor: _ExpressionAttributeAccessor,
-    depth: int,
-    max_depth: int,
-) -> bool:
+    depth: cython.longlong,
+    max_depth: cython.longlong,
+) -> cython.bint:
     """Compare a dynamic expression attribute only when either side exposes it."""
     lhs_value = accessor(lhs)
     rhs_value = accessor(rhs)
@@ -456,7 +485,8 @@ def _compare_optional_attr(
     return _structural_equal(lhs_value, rhs_value, depth + 1, max_depth)
 
 
-def _fingerprint_equal(lhs: object, rhs: object) -> bool:
+@cython.ccall
+def _fingerprint_equal(lhs: object, rhs: object) -> cython.bint:
     """String-based fingerprint comparison using condition IR normalization."""
     from inertia.ir.condition_ir import (
         normalize_condition_fingerprint_algebraic_8616,
@@ -482,8 +512,11 @@ def _fingerprint_equal(lhs: object, rhs: object) -> bool:
     return lhs_compact == rhs_compact
 
 
-def _smt_equivalent(lhs: object, rhs: object, *, timeout_ms: int = 500) -> bool:
+@cython.ccall
+def _smt_equivalent(lhs: object, rhs: object, *, timeout_ms: cython.longlong = 500) -> cython.bint:
     """Try SMT (Z3) equivalence as fallback.  Returns False if Z3 unavailable."""
+    lhs_smt: object
+    rhs_smt: object
     try:
         import z3
     except ImportError:
@@ -497,14 +530,14 @@ def _smt_equivalent(lhs: object, rhs: object, *, timeout_ms: int = 500) -> bool:
 
         s = z3.Solver()
         s.set("timeout", timeout_ms)
-        s.add(lhs_smt != rhs_smt)
+        s.add(operator.ne(lhs_smt, rhs_smt))
         result = s.check()
-        return bool(result == z3.unsat)
+        return bool(operator.eq(result, z3.unsat))
     except Exception:
         return False
 
 
-def _to_z3_expr(expr: object, _depth: int = 0) -> object | None:
+def _to_z3_expr(expr: object, _depth: cython.longlong = 0) -> object | None:
     def _impl() -> object | None:
         """Best-effort conversion of an expression to Z3."""
         if _depth > 16:
@@ -527,6 +560,7 @@ def _to_z3_expr(expr: object, _depth: int = 0) -> object | None:
     return _impl()
 
 
+@cython.ccall
 def _leaf_z3_expr(expr: object, z3: Any) -> object:  # noqa: ANN401
     """Convert primitive/name/register leaves to Z3, or ``_sentinel`` when not a leaf."""
     if isinstance(expr, int):
@@ -549,8 +583,11 @@ def _leaf_z3_expr(expr: object, z3: Any) -> object:  # noqa: ANN401
     return _sentinel
 
 
-def _binary_z3_expr(expr: _BinaryExpr, z3: Any, _depth: int) -> object | None:  # noqa: ANN401
+@cython.ccall
+def _binary_z3_expr(expr: _BinaryExpr, z3: Any, _depth: cython.longlong) -> object | None:  # noqa: ANN401
     """Convert a binary expression tree to Z3, or ``None`` when unsupported."""
+    lhs_z3: object
+    rhs_z3: object
     lhs_z3 = _to_z3_expr(expr.lhs, _depth + 1)
     rhs_z3 = _to_z3_expr(expr.rhs, _depth + 1)
     if lhs_z3 is None or rhs_z3 is None:
@@ -563,7 +600,7 @@ def _binary_z3_expr(expr: _BinaryExpr, z3: Any, _depth: int) -> object | None:  
     if op in {"Mul", "*"}:
         return cast(_Z3ArithmeticExpr, lhs_z3) * rhs_z3
     if op in {"CmpEQ", "==", "eq"}:
-        return lhs_z3 == rhs_z3
+        return operator.eq(lhs_z3, rhs_z3)
     if op in {"CmpNE", "!=", "ne"}:
-        return lhs_z3 != rhs_z3
+        return operator.ne(lhs_z3, rhs_z3)
     return None

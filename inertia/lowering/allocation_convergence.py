@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed convergence contracts and policy for restartable native variable allocation.
 
 Layer: Types/Lowering.
@@ -12,13 +13,17 @@ Do not recover semantics from COD, source, assembly, or rendered C text
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import enum
 from dataclasses import dataclass
+import dataclasses
+import operator
 
-type AllocationStructuralKey = tuple[object, ...]
-type AllocationGraphNodes = tuple[tuple[int, object, tuple[AllocationStructuralKey, ...]], ...]
-type AllocationGraphEdges = tuple[tuple[tuple[int, object], tuple[int, object], AllocationStructuralKey], ...]
+AllocationStructuralKey = typing.TypeAliasType("AllocationStructuralKey", tuple[object, ...])
+AllocationGraphNodes = typing.TypeAliasType("AllocationGraphNodes", tuple[tuple[int, object, tuple[AllocationStructuralKey, ...]], ...])
+AllocationGraphEdges = typing.TypeAliasType("AllocationGraphEdges", tuple[tuple[tuple[int, object], tuple[int, object], AllocationStructuralKey], ...])
 
 
 class AllocationFingerprintRefusal(Exception):
@@ -33,7 +38,7 @@ class AllocationConvergenceRefusal(Exception):
     bindings.
     """
 
-    def __init__(self, verdict: AllocationRestartVerdict, function_addr: int, detail: str) -> None:
+    def __init__(self, verdict: AllocationRestartVerdict, function_addr: cython.longlong, detail: object) -> None:
         """Create a typed refusal carrying the verdict, function and cause."""
         self.verdict = verdict
         self.function_addr = function_addr
@@ -60,18 +65,18 @@ class AllocationDecisionKind(enum.Enum):
     CYCLE = "cycle"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NativeVariableKey:
     """Structural identity of one native decompilation variable."""
 
-    kind: str
-    ident: str | None
+    kind: object
+    ident: object
     location: object  # int offset/reg, tuple for combo regs, None otherwise
     size: int | None
-    name: str | None
+    name: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class AllocationInputFingerprint:
     """Typed structural inputs the native allocator consumes for one function.
 
@@ -81,13 +86,13 @@ class AllocationInputFingerprint:
     an allocator input revision.
     """
 
-    function_addr: int
-    argument_variables: tuple[NativeVariableKey, ...]
-    argument_vvars: tuple[tuple[int, NativeVariableKey, object, object], ...]
-    vvar_to_vvar: tuple[tuple[int, int], ...]
-    type_hints: tuple[tuple[str, str], ...]
-    manual_types: tuple[tuple[NativeVariableKey, AllocationStructuralKey], ...]
-    stack_items: tuple[tuple[int, str, int, str], ...]
+    function_addr: cython.longlong
+    argument_variables: object
+    argument_vvars: object
+    vvar_to_vvar: object
+    type_hints: object
+    manual_types: object
+    stack_items: object
     prototype: AllocationStructuralKey | None
     calling_convention: AllocationStructuralKey | None
     entry_node: object
@@ -117,48 +122,48 @@ class AllocationInputFingerprint:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class AllocationCensus:
     """One commensurable attempt/publication ledger for a session.
 
     All four counters count stage-level decisions in the same unit.
     """
 
-    attempts: int = 0
-    published: int = 0
-    skipped: int = 0
-    refused: int = 0
-    failures: int = 0
+    attempts: cython.longlong = 0
+    published: cython.longlong = 0
+    skipped: cython.longlong = 0
+    refused: cython.longlong = 0
+    failures: cython.longlong = 0
 
     @property
-    def raw_fact_count(self) -> int:
+    def raw_fact_count(self) -> cython.longlong:
         """Count completed stage decisions, including reuse and refusal."""
         return self.attempts + self.skipped + self.refused
 
     @property
-    def normalized_fact_count(self) -> int:
+    def normalized_fact_count(self) -> cython.longlong:
         """Every completed decision has one normalized typed outcome."""
         return self.raw_fact_count
 
     @property
-    def classified_fact_count(self) -> int:
+    def classified_fact_count(self) -> cython.longlong:
         """Every normalized decision is classified exactly once."""
         return self.normalized_fact_count
 
     @property
-    def materialized_count(self) -> int:
+    def materialized_count(self) -> cython.longlong:
         """Count accepted publications and authenticated publication reuse."""
         return self.published + self.skipped
 
     @property
-    def failure_count(self) -> int:
+    def failure_count(self) -> cython.longlong:
         """Count unsuccessful native attempts and explicit typed refusals."""
         return self.failures + self.refused
 
     def validate(self) -> tuple[str, ...]:
         """Typed invariant checks on the census."""
         problems = []
-        if self.classified_fact_count != self.materialized_count + self.failure_count:
+        if operator.ne(self.classified_fact_count, self.materialized_count + self.failure_count):
             problems.append("completed decisions are not fully materialized or refused")
         if self.published > self.attempts:
             problems.append("published exceeds attempts")
@@ -169,37 +174,37 @@ class AllocationCensus:
         return tuple(problems)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class AllocationDiagnostics:
     """Native surface sizes observed at one decision (diagnostic, not proof)."""
 
-    input_variables: int = 0
-    output_variables: int = 0
-    input_links: int = 0
-    output_links: int = 0
-    preserved_manual_types: int = 0
-    dropped_stale_facts: int = 0
+    input_variables: cython.longlong = 0
+    output_variables: cython.longlong = 0
+    input_links: cython.longlong = 0
+    output_links: cython.longlong = 0
+    preserved_manual_types: cython.longlong = 0
+    dropped_stale_facts: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class AllocationRestartResult:
     """Typed outcome of an allocation restart decision."""
 
     verdict: AllocationRestartVerdict
-    function_addr: int
+    function_addr: cython.longlong
     fingerprint: AllocationInputFingerprint | None
     census: AllocationCensus
     diagnostics: AllocationDiagnostics
     detail: str = ""
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class AllocationDecision:
     """Controller decision handed to the native boundary."""
 
     kind: AllocationDecisionKind
-    validate_accepted: bool
-    detail: str
+    validate_accepted: cython.bint
+    detail: object
 
 
 class AllocationConvergenceSession:
@@ -230,7 +235,7 @@ class AllocationConvergenceSession:
         "last_verdict",
     )
 
-    def __init__(self, *, max_rounds: int = 2) -> None:
+    def __init__(self, *, max_rounds: cython.longlong = 2) -> None:
         """Create a session bounding rounds within one convergence transaction."""
         self._max_rounds = max_rounds
         self._accepted_fingerprint: AllocationInputFingerprint | None = None
@@ -263,11 +268,11 @@ class AllocationConvergenceSession:
         return self._accepted_handle
 
     @property
-    def rounds_used(self) -> int:
+    def rounds_used(self) -> cython.longlong:
         """Extra rounds consumed inside the current/finished transaction."""
         return self._rounds
 
-    def decide(self, fingerprint: AllocationInputFingerprint, bound: bool) -> AllocationDecision:
+    def decide(self, fingerprint: AllocationInputFingerprint, bound: cython.bint) -> AllocationDecision:
         """Decide what to do when the recovery stage is entered.
 
         ``bound`` reports whether the clinic's live manager/link-map/graph are
@@ -348,7 +353,7 @@ class AllocationConvergenceSession:
         self.last_verdict = AllocationRestartVerdict.REFUSED
         self.last_detail = "native recovery raised; checkpoint restored, cause propagated"
 
-    def record_refusal(self, verdict: AllocationRestartVerdict, detail: str) -> None:
+    def record_refusal(self, verdict: AllocationRestartVerdict, detail: object) -> None:
         """Record a typed non-decision refusal (exhaustion, cycle, unsupported)."""
         self._refused += 1
         self.last_result = None

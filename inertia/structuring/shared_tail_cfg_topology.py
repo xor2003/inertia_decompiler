@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """CFG topology evidence for calls placed at shared structured tails.
 
 Layer: Structuring.
@@ -9,12 +10,16 @@ rewrite cleanup, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
 from inertia.semantics.callsite_summary import CallsiteSummary8616
+import dataclasses
+import builtins
 
 __all__ = (
     "SharedTailCfgTopology8616",
@@ -23,13 +28,13 @@ __all__ = (
 )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SharedTailCfgTopology8616:
     """Exact in-function block topology used by shared-tail ownership."""
 
-    block_addrs: tuple[int, ...]
-    successors: dict[int, tuple[int, ...]]
-    predecessors: dict[int, tuple[int, ...]]
+    block_addrs: object
+    successors: object
+    predecessors: object
 
 
 class _GraphSurface8616(Protocol):
@@ -44,14 +49,14 @@ class _GraphSurface8616(Protocol):
 class _FunctionSurface8616(Protocol):
     """Third-party function topology consumed by this pass."""
 
-    block_addrs_set: set[int]
+    block_addrs_set: object
     transition_graph: _GraphSurface8616
 
 
 class _FunctionManagerSurface8616(Protocol):
     """Third-party function lookup boundary."""
 
-    def function(self, *, addr: int, create: bool) -> _FunctionSurface8616:
+    def function(self, *, addr: cython.longlong, create: cython.bint) -> _FunctionSurface8616:
         """Return the function at one exact entry address."""
 
 
@@ -67,6 +72,7 @@ class _ProjectSurface8616(Protocol):
     kb: _KnowledgeBaseSurface8616
 
 
+@cython.ccall
 def _cfg_node_addr_8616(node: object) -> int | None:
     """Return an address from an integer or dynamic angr graph node."""
     if isinstance(node, int):
@@ -80,9 +86,14 @@ def _cfg_node_addr_8616(node: object) -> int | None:
 
 def recover_shared_tail_cfg_topology_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> SharedTailCfgTopology8616 | None:
     """Return exact in-function block, successor, and predecessor topology."""
+    node: object
+    block_addr: object
+    source: object
+    target: object
+    targets: object
     try:
         function = cast(_ProjectSurface8616, project).kb.functions.function(
             addr=function_addr,
@@ -96,10 +107,10 @@ def recover_shared_tail_cfg_topology_8616(
     block_set = set(block_addrs)
     node_by_addr = {
         addr: node
-        for node in nodes
+        for node in iter(nodes)
         if (addr := _cfg_node_addr_8616(node)) in block_set
     }
-    successors: dict[int, tuple[int, ...]] = {}
+    successors: dict[cython.longlong, tuple[cython.longlong, ...]] = {}
     for block_addr in block_addrs:
         node = node_by_addr.get(block_addr)
         if node is None:
@@ -107,19 +118,19 @@ def recover_shared_tail_cfg_topology_8616(
         try:
             targets = tuple(
                 target_addr
-                for successor in graph.successors(node)
+                for successor in builtins.iter(graph.successors(node))
                 if (target_addr := _cfg_node_addr_8616(successor)) in block_set
             )
         except (AttributeError, TypeError):
             return None
         successors[block_addr] = tuple(dict.fromkeys(targets))
-    predecessor_lists: dict[int, list[int]] = {addr: [] for addr in block_addrs}
+    predecessor_lists: dict[cython.longlong, list[cython.longlong]] = {addr: [] for addr in iter(block_addrs)}
     for source, targets in successors.items():
         for target in targets:
             predecessor_lists[target].append(source)
     predecessors = {
         target: tuple(dict.fromkeys(sources))
-        for target, sources in predecessor_lists.items()
+        for target, sources in builtins.iter(predecessor_lists.items())
     }
     return SharedTailCfgTopology8616(block_addrs, successors, predecessors)
 
@@ -127,10 +138,10 @@ def recover_shared_tail_cfg_topology_8616(
 def shared_callsite_tail_is_proven_8616(
     summary: CallsiteSummary8616,
     topology: SharedTailCfgTopology8616,
-) -> bool:
+) -> cython.bint:
     """Prove a call lies in a multi-predecessor block with an exact return edge."""
     candidates = tuple(
-        addr for addr in topology.block_addrs if addr <= summary.callsite_addr
+        addr for addr in iter(topology.block_addrs) if addr <= summary.callsite_addr
     )
     if not candidates or not isinstance(summary.return_addr, int):
         return False

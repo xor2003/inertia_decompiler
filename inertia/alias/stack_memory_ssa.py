@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Project exact stack-memory SSA facts into Alias storage identities.
 
 Layer: Alias.
@@ -9,6 +10,8 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import replace
 from typing import Protocol, cast
@@ -43,6 +46,7 @@ from .stack_memory_ssa_contracts import (
     StackMemorySSAAliasFact8616,
     StackMemorySSAAliasOverlap8616,
 )
+import builtins
 
 __all__ = [
     "StackMemoryAliasFactKind8616",
@@ -66,6 +70,7 @@ class _CodegenBoundary8616(Protocol):
     _inertia_stack_memory_ssa_alias_artifact: StackMemorySSAAliasArtifact8616
 
 
+@cython.ccall
 def _stack_access_8616(instruction: IRInstr) -> IRAddress | None:
     """Return one typed SS load/store address."""
     if instruction.op not in {"LOAD", "STORE"} or not instruction.args:
@@ -78,8 +83,10 @@ def _alias_overlap_8616(
     overlap: SSAMemoryOverlap8616,
 ) -> StackMemorySSAAliasOverlap8616 | StackMemoryAliasRefusal8616:
     """Project and verify one IR byte-overlap relation through Alias."""
+    address: object
+    storage: object
     addresses = (overlap.left, overlap.right, overlap.intersection)
-    storages = tuple(alias_stack_memory_storage_8616(address) for address in addresses)
+    storages = tuple(alias_stack_memory_storage_8616(address) for address in iter(addresses))
     accepted: list[AliasStorageFacts] = []
     for address, storage in zip(addresses, storages, strict=True):
         if isinstance(storage, tuple):
@@ -107,7 +114,7 @@ def _alias_overlap_8616(
 
 def _incomplete_upstream_artifact_8616(
     function_ssa: SSAFunctionArtifact,
-    accesses: tuple[tuple[int, int, IRAddress], ...],
+    accesses: object,
 ) -> StackMemorySSAAliasArtifact8616:
     """Refuse every candidate when upstream memory-SSA accounting is open."""
     access_refusals = tuple(
@@ -118,7 +125,7 @@ def _incomplete_upstream_artifact_8616(
             "stack-memory SSA evidence accounting is incomplete",
             address,
         )
-        for block_addr, instr_index, address in accesses
+        for block_addr, instr_index, address in iter(accesses)
     )
     phi_refusals = tuple(
         StackMemoryAliasRefusal8616(
@@ -128,7 +135,7 @@ def _incomplete_upstream_artifact_8616(
             "stack-memory SSA evidence accounting is incomplete",
             phi.target,
         )
-        for phi in function_ssa.memory_phi_nodes
+        for phi in iter(function_ssa.memory_phi_nodes)
     )
     overlap_refusals = tuple(
         StackMemoryAliasRefusal8616(
@@ -138,7 +145,7 @@ def _incomplete_upstream_artifact_8616(
             "stack-memory SSA evidence accounting is incomplete",
             overlap.intersection,
         )
-        for overlap in function_ssa.memory_overlaps
+        for overlap in iter(function_ssa.memory_overlaps)
     )
     refusals = access_refusals + phi_refusals + overlap_refusals
     logical = project_logical_stack_memory_alias_8616(function_ssa, (), ())
@@ -167,20 +174,28 @@ def _incomplete_upstream_artifact_8616(
     )
 
 
-def _upstream_refusals_by_block_8616(refusals: tuple[IRRefusal, ...]) -> dict[int | None, list[IRRefusal]]:
+@cython.ccall
+def _upstream_refusals_by_block_8616(refusals: object) -> object:
     """Index mutable refusal queues without changing source order or ownership."""
+    refusal: object
     grouped: dict[int | None, list[IRRefusal]] = {}
     for refusal in refusals:
         grouped.setdefault(refusal.block_addr, []).append(refusal)
     return grouped
 
 
+@cython.ccall
 def _unprojected_access_refusals_8616(
-    raw_accesses: tuple[tuple[int, int, IRAddress], ...],
-    accepted_positions: set[tuple[int, int]],
-    upstream_by_block: dict[int | None, list[IRRefusal]],
-) -> list[StackMemoryAliasRefusal8616]:
+    raw_accesses: object,
+    accepted_positions: object,
+    upstream_by_block: object,
+) -> object:
     """Pair unmatched accesses with ordered refusals, retaining orphan evidence."""
+    source: object
+    upstream: object
+    address: object
+    block_addr: object
+    instr_index: object
     refusals: list[StackMemoryAliasRefusal8616] = []
     for block_addr, instr_index, address in raw_accesses:
         if (block_addr, instr_index) in accepted_positions:
@@ -207,10 +222,14 @@ def build_x86_16_stack_memory_ssa_alias_artifact(
     function_ssa: SSAFunctionArtifact,
 ) -> StackMemorySSAAliasArtifact8616:
     """Project all function stack-memory SSA inputs into exact Alias facts."""
+    access: object
+    overlap: object
+    phi: object
+    source_refusals: object
     raw_accesses = tuple(
         (block.addr, instr_index, address)
-        for block in sorted(function_ssa.blocks, key=lambda item: item.addr)
-        for instr_index, instruction in enumerate(block.instrs)
+        for block in builtins.iter(sorted(function_ssa.blocks, key=lambda item: item.addr))
+        for instr_index, instruction in builtins.iter(enumerate(block.instrs))
         if (address := _stack_access_8616(instruction)) is not None
     )
     if not function_ssa.memory_stats.complete:
@@ -223,7 +242,7 @@ def build_x86_16_stack_memory_ssa_alias_artifact(
     refusals: list[StackMemoryAliasRefusal8616] = []
 
     accepted_positions = {
-        (access.block_addr, access.instr_index) for access in function_ssa.memory_accesses
+        (access.block_addr, access.instr_index) for access in iter(function_ssa.memory_accesses)
     }
     for access in function_ssa.memory_accesses:
         projected_access = project_stack_memory_access_8616(access)
@@ -258,7 +277,7 @@ def build_x86_16_stack_memory_ssa_alias_artifact(
                 None,
                 source.detail,
             )
-            for source in source_refusals
+            for source in iter(source_refusals)
         )
     materialized_count = len(facts) + len(composed_accesses) + len(overlaps)
     raw_count = materialized_count + len(refusals)
@@ -297,7 +316,7 @@ def build_x86_16_stack_memory_ssa_alias_artifact(
         logical_storage_stats=logical_storage.stats,
         stack_extent_evidence=tuple(
             build_stack_extent_evidence_8616(block)
-            for block in sorted(function_ssa.blocks, key=lambda item: item.addr)
+            for block in builtins.iter(sorted(function_ssa.blocks, key=lambda item: item.addr))
         ),
     )
     artifact = replace(artifact, frame_address_escape=classify_function_stack_address_escape_8616(
@@ -306,7 +325,8 @@ def build_x86_16_stack_memory_ssa_alias_artifact(
     return replace(artifact, private_write_decisions=classify_private_stack_writes_8616(artifact))
 
 
-def apply_x86_16_stack_memory_ssa_alias_artifact(_project: object, codegen: object) -> bool:
+@cython.ccall
+def apply_x86_16_stack_memory_ssa_alias_artifact(_project: object, codegen: object) -> cython.bint:
     """Attach the Alias projection immediately after typed function SSA exists."""
     boundary = cast(_CodegenBoundary8616, codegen)
     try:

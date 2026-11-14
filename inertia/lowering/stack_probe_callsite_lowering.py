@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Order exact CALL-frame consumption before fixed stack-probe removal.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ source, COD, assembly text, or rendered C.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Protocol, cast
 
@@ -17,6 +20,7 @@ from inertia.semantics.callsite_summary import callsite_summary_inventory_8616
 
 from .fixed_stack_probe_frames import lower_fixed_stack_probe_frames_8616
 from .real_mode_linear import prune_call_return_frame_stack_assignments_8616
+import builtins
 
 __all__ = ["lower_fixed_stack_probe_callsite_artifacts_8616", "replay_fixed_stack_probe_callsite_artifacts_8616"]
 
@@ -27,22 +31,24 @@ class _CodegenProject8616(Protocol):
     project: object
 
 
-def replay_fixed_stack_probe_callsite_artifacts_8616(codegen: object) -> bool:
+@cython.ccall
+def replay_fixed_stack_probe_callsite_artifacts_8616(codegen: object) -> cython.bint:
     """Replay the owner using the supplied codegen's current project."""
     return lower_fixed_stack_probe_callsite_artifacts_8616(cast(_CodegenProject8616, codegen).project, codegen)
 
 
+@cython.ccall
 def lower_fixed_stack_probe_callsite_artifacts_8616(
     project: object,
     codegen: object,
     *,
     function: object | None = None,
-) -> bool:
+) -> cython.bint:
     """Consume exact probe CALL-frame projections before removing probe calls."""
     inventory = callsite_summary_inventory_8616(codegen)
     return_addresses = {
         summary.callsite_addr: summary.return_addr
-        for summary in inventory.values()
+        for summary in builtins.iter(inventory.values())
         if summary.stack_probe_helper and isinstance(summary.return_addr, int)
     }
     frame_changed = prune_call_return_frame_stack_assignments_8616(

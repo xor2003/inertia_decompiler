@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove register values transferred by logical word memory operands.
 
 Layer: IR.
@@ -11,6 +12,8 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -32,20 +35,22 @@ from .scalar_definitions import (
 )
 from .scalar_value_projection import scalar_active_unary_projection_8616
 from .ssa_function import SSAFunctionArtifact
+import dataclasses
+import operator
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _LaneTrace8616:
     """Internal byte-lane path to one full-word register root."""
 
     register: IRValue | None
-    path: tuple[IndexedAddressDefinitionSite8616, ...]
-    saw_extract: bool
-    saw_shift: bool
+    path: object
+    saw_extract: cython.bint
+    saw_shift: cython.bint
     failure: LogicalMemoryRegisterTransferFailure8616 | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _ReloadMovCandidate8616:
     """Internal word-register MOV proven to sit at one logical read site."""
 
@@ -53,6 +58,7 @@ class _ReloadMovCandidate8616:
     destination: IRValue
 
 
+@cython.ccall
 def _site_8616(definition: ScalarDefinition8616) -> IndexedAddressDefinitionSite8616 | None:
     """Return the exact site for one scalar definition."""
     instruction = definition.instruction
@@ -66,12 +72,13 @@ def _site_8616(definition: ScalarDefinition8616) -> IndexedAddressDefinitionSite
     )
 
 
+@cython.ccall
 def _unique_definition_8616(
     definitions: ScalarDefinitionIndex8616,
     value: IRValue,
     *,
-    block_addr: int,
-    before_index: int,
+    block_addr: cython.longlong,
+    before_index: cython.longlong,
 ) -> tuple[ScalarDefinition8616 | None, LogicalMemoryRegisterTransferFailure8616 | None]:
     """Resolve one exact preceding same-block scalar definition."""
     candidates = reaching_scalar_definitions_8616(
@@ -87,18 +94,21 @@ def _unique_definition_8616(
     return candidates[0], None
 
 
+@cython.ccall
 def _trace_store_projection_8616(
     value: IRValue,
     definitions: ScalarDefinitionIndex8616,
     *,
-    block_addr: int,
-    before_index: int,
-    saw_extract: bool,
-    saw_shift: bool,
-    path: tuple[IndexedAddressDefinitionSite8616, ...],
-    depth: int,
+    block_addr: cython.longlong,
+    before_index: cython.longlong,
+    saw_extract: cython.bint,
+    saw_shift: cython.bint,
+    path: object,
+    depth: cython.longlong,
 ) -> _LaneTrace8616:
     """Consume only an exact pending word-to-byte extraction at this use site."""
+    projection: object
+    unary: object
     unary = value.active_unary
     projection = scalar_active_unary_projection_8616(value)
     if unary is None or projection is None or (projection.source_bits, projection.target_bits) != (16, 8):
@@ -118,18 +128,23 @@ def _trace_store_projection_8616(
     )
 
 
+@cython.ccall
 def _trace_store_lane_8616(
     value: IRValue,
     definitions: ScalarDefinitionIndex8616,
     *,
-    block_addr: int,
-    before_index: int,
-    saw_extract: bool = False,
-    saw_shift: bool = False,
-    path: tuple[IndexedAddressDefinitionSite8616, ...] = (),
-    depth: int = 0,
+    block_addr: cython.longlong,
+    before_index: cython.longlong,
+    saw_extract: cython.bint = False,
+    saw_shift: cython.bint = False,
+    path: object = (),
+    depth: cython.longlong = 0,
 ) -> _LaneTrace8616:
     """Trace one stored byte through exact truncation and high-byte shift."""
+    definition: object
+    destination: object
+    shifted_source: object
+    site: object
     if depth > 16:
         return _LaneTrace8616(
             None,
@@ -181,7 +196,7 @@ def _trace_store_lane_8616(
         ):
             return _LaneTrace8616(source, next_path, saw_extract, saw_shift)
         extracts_low = destination.size == 1 and source.size == 1 and source.expr == ("Iop_16to8",)
-        if destination.size != source.size or (source.expr == ("Iop_16to8",) and not extracts_low):
+        if operator.ne(destination.size, source.size) or (source.expr == ("Iop_16to8",) and not extracts_low):
             return _LaneTrace8616(
                 None,
                 next_path,
@@ -220,6 +235,7 @@ def _trace_store_lane_8616(
     )
 
 
+@cython.ccall
 def _shr16_high_byte_source_8616(instruction: IRInstr) -> IRValue | None:
     """Return the shifted source for one exact ``word >> 8`` step."""
     if len(instruction.args) != 2:
@@ -236,13 +252,14 @@ def _shr16_high_byte_source_8616(instruction: IRInstr) -> IRValue | None:
     return None
 
 
-def _same_address_8616(left: IRAddress, right: IRAddress) -> bool:
+@cython.ccall
+def _same_address_8616(left: IRAddress, right: IRAddress) -> cython.bint:
     """Compare canonical logical addresses without SSA versions."""
     return (
         left.space is right.space
-        and left.base == right.base
-        and left.offset == right.offset
-        and left.size == right.size
+        and operator.eq(left.base, right.base)
+        and operator.eq(left.offset, right.offset)
+        and operator.eq(left.size, right.size)
         and left.status is right.status
         and left.segment_origin is right.segment_origin
     )
@@ -254,7 +271,10 @@ def _trace_spill_8616(
     definitions: ScalarDefinitionIndex8616,
 ) -> LogicalMemoryRegisterTransfer8616 | LogicalMemoryRegisterTransferRefusal8616:
     """Prove both stored byte lanes originate from one full register."""
-    block = next((item for item in artifact.blocks if item.addr == access.key.block_addr), None)
+    block: object
+    execution: object
+    lane: object
+    block = next((item for item in iter(artifact.blocks) if operator.eq(item.addr, access.key.block_addr)), None)
     if block is None:
         return LogicalMemoryRegisterTransferRefusal8616(
             access,
@@ -268,7 +288,7 @@ def _trace_spill_8616(
             return LogicalMemoryRegisterTransferRefusal8616(access, failure, "write slice index is outside its block")
         instruction = block.instrs[execution.instr_index]
         value = instruction.args[1] if instruction.op == "STORE" and len(instruction.args) == 2 else None
-        if instruction.addr != access.key.insn_addr or not isinstance(value, IRValue):
+        if operator.ne(instruction.addr, access.key.insn_addr) or not isinstance(value, IRValue):
             failure = LogicalMemoryRegisterTransferFailure8616.EXECUTION_SITE_CONFLICT
             return LogicalMemoryRegisterTransferRefusal8616(access, failure, "write slice does not identify one STORE value")
         trace = _trace_store_lane_8616(
@@ -278,19 +298,19 @@ def _trace_spill_8616(
             before_index=execution.instr_index,
         )
         expected_shift = lane == 1
-        if trace.failure is not None or trace.register is None or not trace.saw_extract or trace.saw_shift != expected_shift:
+        if trace.failure is not None or trace.register is None or not trace.saw_extract or operator.ne(trace.saw_shift, expected_shift):
             failure = trace.failure or LogicalMemoryRegisterTransferFailure8616.VALUE_OPERATION_UNSUPPORTED
             return LogicalMemoryRegisterTransferRefusal8616(access, failure, f"stored byte lane {lane} lacks exact word projection")
         traces.append(trace)
-    registers = tuple(trace.register for trace in traces)
-    if len(registers) != 2 or registers[0] != registers[1] or registers[0] is None:
+    registers = tuple(trace.register for trace in iter(traces))
+    if len(registers) != 2 or operator.ne(registers[0], registers[1]) or registers[0] is None:
         return LogicalMemoryRegisterTransferRefusal8616(
             access,
             LogicalMemoryRegisterTransferFailure8616.REGISTER_CONFLICT,
             "stored byte lanes do not share one full-register source",
         )
-    register_sites = tuple(trace.path[-1] for trace in traces if trace.path)
-    if len(register_sites) != 2 or register_sites[0] != register_sites[1]:
+    register_sites = tuple(trace.path[-1] for trace in iter(traces) if trace.path)
+    if len(register_sites) != 2 or operator.ne(register_sites[0], register_sites[1]):
         return LogicalMemoryRegisterTransferRefusal8616(
             access,
             LogicalMemoryRegisterTransferFailure8616.REGISTER_CONFLICT,
@@ -301,12 +321,14 @@ def _trace_spill_8616(
         access,
         registers[0],
         register_sites[0],
-        tuple(site for trace in traces for site in trace.path),
+        tuple(site for trace in iter(traces) for site in iter(trace.path)),
     )
 
 
-def _word_register_destination_8616(instruction: IRInstr) -> bool:
+@cython.ccall
+def _word_register_destination_8616(instruction: IRInstr) -> cython.bint:
     """Return whether the MOV writes a named 16-bit register."""
+    destination: object
     destination = instruction.dst
     return (
         destination is not None
@@ -316,13 +338,15 @@ def _word_register_destination_8616(instruction: IRInstr) -> bool:
     )
 
 
+@cython.ccall
 def _reload_mov_candidate_8616(
     instruction: IRInstr,
-    insn_addr: int,
+    insn_addr: cython.longlong,
 ) -> _ReloadMovCandidate8616 | None:
     """Return the typed candidate when the instruction is a word-register MOV at the read site."""
+    destination: object
     if not (
-        instruction.addr == insn_addr
+        operator.eq(instruction.addr, insn_addr)
         and instruction.op == "MOV"
         and _word_register_destination_8616(instruction)
         and len(instruction.args) == 1
@@ -341,7 +365,13 @@ def _trace_reload_8616(
     definitions: ScalarDefinitionIndex8616,
 ) -> LogicalMemoryRegisterTransfer8616 | LogicalMemoryRegisterTransferRefusal8616:
     """Prove one full register receives exactly this logical word read."""
-    block = next((item for item in artifact.blocks if item.addr == access.key.block_addr), None)
+    block: object
+    candidate: object
+    site: object
+    source_definition: object
+    instr_index: object
+    instruction: object
+    block = next((item for item in iter(artifact.blocks) if operator.eq(item.addr, access.key.block_addr)), None)
     if block is None:
         return LogicalMemoryRegisterTransferRefusal8616(
             access,
@@ -378,7 +408,7 @@ def _trace_reload_8616(
                     access,
                     candidate.destination,
                     move_site,
-                    (*trace.definition_path, site, move_site),
+                    tuple(trace.definition_path) + (site, move_site),
                 )
             )
     if len(candidates) == 1 and candidates[0].complete:
@@ -391,6 +421,7 @@ def _trace_reload_8616(
     return LogicalMemoryRegisterTransferRefusal8616(access, failure, "logical read lacks one exact full-register destination")
 
 
+@cython.ccall
 def trace_logical_word_register_transfer_8616(
     artifact: SSAFunctionArtifact,
     access: IRLogicalMemoryAccess8616,
@@ -421,7 +452,7 @@ def trace_logical_word_register_transfer_8616(
 
 def trace_logical_word_register_transfers_8616(
     artifact: SSAFunctionArtifact,
-    accesses: tuple[IRLogicalMemoryAccess8616, ...],
+    accesses: object,
 ) -> tuple[
     LogicalMemoryRegisterTransfer8616 | LogicalMemoryRegisterTransferRefusal8616,
     ...,
@@ -436,7 +467,7 @@ def trace_logical_word_register_transfers_8616(
             access,
             definitions,
         )
-        for access in accesses
+        for access in iter(accesses)
     )
 
 

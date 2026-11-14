@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed contracts for the entry-block-prefix SS byte-read proof.
 
 Layer: Alias.
@@ -12,6 +13,8 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -19,6 +22,7 @@ from enum import StrEnum
 from inertia.ir.core import IRFunctionArtifact
 
 from .stack_pointer_snapshots import FrameRegister8616
+import dataclasses
 
 
 class EntryStackByteScope8616(StrEnum):
@@ -64,7 +68,7 @@ class EntryStackByteRefusalKind8616(StrEnum):
     BAD_ADDRESS_ARGUMENT = "bad_address_argument"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class EntryStackByteRead8616:
     """One proven LOAD of immutable SS bytes at exact entry-SP offsets.
 
@@ -73,17 +77,17 @@ class EntryStackByteRead8616:
     instruction whose exact production earned the captured frame coordinate.
     """
 
-    block_addr: int
-    instr_index: int
+    block_addr: cython.longlong
+    instr_index: cython.longlong
     instruction_addr: int | None
-    producer_tmp: int
+    producer_tmp: cython.longlong
     base_producer_tmp: int | None
     base_producer_index: int | None
     base_register: FrameRegister8616
-    base_entry_sp_offset: int
-    address_offset: int
-    byte_offsets: tuple[int, ...]
-    width: int
+    base_entry_sp_offset: cython.longlong
+    address_offset: cython.longlong
+    byte_offsets: object
+    width: cython.longlong
 
     def to_dict(self) -> dict[str, object]:
         """Serialize this fact for diagnostics; identity stays object-bound."""
@@ -102,17 +106,17 @@ class EntryStackByteRead8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class EntryStackByteRefusal8616:
     """One typed refusal against a candidate or the whole prefix proof."""
 
     kind: EntryStackByteRefusalKind8616
-    detail: str
+    detail: object
     block_addr: int | None = None
     instr_index: int | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class EntryStackByteProof8616:
     """Closed-count result of the entry-block-prefix byte proof.
 
@@ -130,11 +134,11 @@ class EntryStackByteProof8616:
     facts: tuple[EntryStackByteRead8616, ...] = ()
     refusals: tuple[EntryStackByteRefusal8616, ...] = ()
     prefix_closed_by: EntryStackByteRefusalKind8616 | None = None
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     def to_dict(self) -> dict[str, object]:
         """Serialize counts, facts, and refusals deterministically."""
@@ -151,7 +155,7 @@ class EntryStackByteProof8616:
             "classified_fact_count": self.classified_fact_count,
             "materialized_count": self.materialized_count,
             "failure_count": self.failure_count,
-            "facts": [fact.to_dict() for fact in self.facts],
+            "facts": [fact.to_dict() for fact in iter(self.facts)],
             "refusals": [
                 {
                     "kind": refusal.kind.value,
@@ -159,6 +163,6 @@ class EntryStackByteProof8616:
                     "block_addr": refusal.block_addr,
                     "instr_index": refusal.instr_index,
                 }
-                for refusal in self.refusals
+                for refusal in iter(self.refusals)
             ],
         }

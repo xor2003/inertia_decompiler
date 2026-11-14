@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Plan positive-BP arguments without mutating the generated C interface.
 
 Layer: Types/Lowering.
@@ -8,6 +9,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Collection
 from dataclasses import dataclass, field, replace
@@ -20,6 +23,8 @@ from angr.sim_type import SimType
 from inertia.semantics.callsite_summary import CallsiteSummary8616
 
 from .callee_argument_width_evidence import CalleeArgumentWidthEvidence8616
+import dataclasses
+import operator
 
 _FIRST_ARGUMENT_OFFSET = 4
 _WORD_BYTES = 2
@@ -35,7 +40,7 @@ class PositiveBpArgumentPlanDecision8616(StrEnum):
     REFUSE = "refuse"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PositiveBpArgumentPlanEntry8616:
     """Physical ABI slot plus an optional narrower, already typed value view.
 
@@ -43,35 +48,35 @@ class PositiveBpArgumentPlanEntry8616:
     body-owned value inside that slot; ABI padding is not part of the value.
     """
 
-    bp_offset: int
-    width: int
-    name: str
+    bp_offset: cython.longlong
+    width: cython.longlong
+    name: object
     argument_type: SimType
     cvar: CVariable | None = field(default=None, compare=False)
     value_width: int | None = None
 
     @property
-    def materialized_width(self) -> int:
+    def materialized_width(self) -> cython.longlong:
         """Return the value size without changing the physical slot stride."""
         return self.width if self.value_width is None else self.value_width
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PositiveBpArgumentPlan8616:
     """Mutation-free positive-BP interface decision with retained evidence."""
 
     decision: PositiveBpArgumentPlanDecision8616
-    entries: tuple[PositiveBpArgumentPlanEntry8616, ...]
+    entries: object
     evidence: CalleeArgumentWidthEvidence8616 = field(compare=False)
 
 
 def complete_positive_bp_body_word_access_plan_8616(
-    body_entries: tuple[PositiveBpArgumentPlanEntry8616, ...],
-    word_access_offsets: Collection[int],
+    body_entries: object,
+    word_access_offsets: Collection[cython.longlong],
     *,
     default_argument_type: SimType,
-    wide_access_offsets: Collection[int] = (),
-    first_argument_offset: int = _FIRST_ARGUMENT_OFFSET,
+    wide_access_offsets: Collection[cython.longlong] = (),
+    first_argument_offset: cython.longlong = _FIRST_ARGUMENT_OFFSET,
 ) -> tuple[PositiveBpArgumentPlanEntry8616, ...]:
     """Complete one contiguous body plan from decoded word and wide accesses.
 
@@ -81,10 +86,11 @@ def complete_positive_bp_body_word_access_plan_8616(
     gap ends recovery. ``first_argument_offset`` is the proven frame argument
     base: 4 for a near frame and 6 for a far frame.
     """
-    entries_by_offset = {entry.bp_offset: entry for entry in body_entries}
-    accesses = frozenset(offset for offset in word_access_offsets if offset >= first_argument_offset)
+    entry: object
+    entries_by_offset = {entry.bp_offset: entry for entry in iter(body_entries)}
+    accesses = frozenset(offset for offset in iter(word_access_offsets) if offset >= first_argument_offset)
     wide_accesses = frozenset(
-        offset for offset in wide_access_offsets if offset >= first_argument_offset
+        offset for offset in iter(wide_access_offsets) if offset >= first_argument_offset
     )
     completed: list[PositiveBpArgumentPlanEntry8616] = []
     cursor = first_argument_offset
@@ -112,37 +118,38 @@ def complete_positive_bp_body_word_access_plan_8616(
     return tuple(completed)
 
 
-def _physical_call_covers_body_8616(widths: tuple[int, ...], summary: CallsiteSummary8616) -> bool:
+def _physical_call_covers_body_8616(widths: object, summary: CallsiteSummary8616) -> cython.bint:
     """Check physical coverage without inventing or splitting logical operands."""
     physical = tuple(reversed(summary.arg_widths))
-    if not physical or summary.arg_count != len(physical):
+    if not physical or operator.ne(summary.arg_count, len(physical)):
         return False
-    if any(width <= 0 for width in (*widths, *physical)):
+    if any(width <= 0 for width in iter(tuple(widths) + tuple(physical))):
         return False
-    if summary.logical_arg_widths and summary.logical_arg_widths != widths:
+    if summary.logical_arg_widths and operator.ne(summary.logical_arg_widths, widths):
         return False
     # PUSH order is opposite to BP argument order. A body-proven wide operand
     # may consume several complete pushes, never part of a caller-owned slot.
-    return sum(widths) == sum(physical) and set(accumulate(widths)) <= set(accumulate(physical))
+    return operator.eq(sum(widths), sum(physical)) and set(accumulate(widths)) <= set(accumulate(physical))
 
 
 def _body_layout_matches_all_physical_calls_8616(
-    body_entries: tuple[PositiveBpArgumentPlanEntry8616, ...],
+    body_entries: object,
     evidence: CalleeArgumentWidthEvidence8616,
-) -> bool:
+) -> cython.bint:
     """Accept an unknown logical grouping only when every footprint matches."""
+    count_evidence: object
     count_evidence = evidence.count_evidence
     if count_evidence is None or count_evidence.raw_fact_count <= 0:
         return False
     summaries = count_evidence.callsite_summaries
-    if len(summaries) != count_evidence.raw_fact_count:
+    if operator.ne(len(summaries), count_evidence.raw_fact_count):
         return False
-    widths = tuple(entry.width for entry in body_entries)
-    return all(_physical_call_covers_body_8616(widths, summary) for summary in summaries)
+    widths = tuple(entry.width for entry in iter(body_entries))
+    return all(_physical_call_covers_body_8616(widths, summary) for summary in iter(summaries))
 
 
 def complete_positive_bp_argument_plan_8616(
-    body_entries: tuple[PositiveBpArgumentPlanEntry8616, ...],
+    body_entries: object,
     evidence: CalleeArgumentWidthEvidence8616,
     *,
     default_argument_type: SimType,
@@ -154,7 +161,7 @@ def complete_positive_bp_argument_plan_8616(
     Unused trailing arguments are materialized only from the exact remaining
     slots in a closed logical-width layout.
     """
-    if any(not 0 < entry.materialized_width <= entry.width for entry in body_entries):
+    if any(not 0 < entry.materialized_width <= entry.width for entry in iter(body_entries)):
         return PositiveBpArgumentPlan8616(
             PositiveBpArgumentPlanDecision8616.REFUSE, body_entries, evidence,
         )
@@ -177,8 +184,8 @@ def complete_positive_bp_argument_plan_8616(
         )
 
     evidence_layout = evidence.widths_by_offset
-    body_layout = tuple((entry.bp_offset, entry.width) for entry in body_entries)
-    if len(body_layout) > len(evidence_layout) or body_layout != evidence_layout[: len(body_layout)]:
+    body_layout = tuple((entry.bp_offset, entry.width) for entry in iter(body_entries))
+    if len(body_layout) > len(evidence_layout) or operator.ne(body_layout, evidence_layout[: len(body_layout)]):
         return PositiveBpArgumentPlan8616(
             PositiveBpArgumentPlanDecision8616.REFUSE,
             body_entries,
@@ -193,7 +200,7 @@ def complete_positive_bp_argument_plan_8616(
             name=f"arg_{offset:x}",
             argument_type=default_argument_type,
         )
-        for offset, width in evidence_layout[len(body_layout) :]
+        for offset, width in iter(evidence_layout[len(body_layout) :])
     )
     return PositiveBpArgumentPlan8616(
         PositiveBpArgumentPlanDecision8616.CALLER_COMPLETE,

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery metadata.
 
 Responsibility: count stack-probe fact flow through existing recovery stages.
@@ -11,6 +12,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from typing import Any
@@ -64,15 +67,19 @@ STACK_PROBE_FACT_STAT_KEYS: tuple[str, ...] = (
 )
 
 
-def callsite_stack_probe_evidence_8616(summary: object) -> tuple[bool, int | None]:
+@cython.ccall
+def callsite_stack_probe_evidence_8616(summary: object) -> tuple[cython.bint, int | None]:
     """Return typed stack-probe classification and target from a callsite summary."""
     if not isinstance(summary, CallsiteSummary8616):
         return False, None
     return summary.stack_probe_helper, summary.target_addr
 
 
-def ensure_stack_probe_fact_stats_8616(codegen: Any) -> dict[str, int]:
+@cython.ccall
+def ensure_stack_probe_fact_stats_8616(codegen: Any) -> object:
     """Return the per-codegen stack-probe fact trace counters."""
+    value: object
+    key: object
     stats = codegen._inertia_stack_probe_fact_stats if hasattr(codegen, "_inertia_stack_probe_fact_stats") else None
     if not isinstance(stats, dict):
         stats = dict.fromkeys(STACK_PROBE_FACT_STAT_KEYS, 0)
@@ -84,7 +91,8 @@ def ensure_stack_probe_fact_stats_8616(codegen: Any) -> dict[str, int]:
     return stats
 
 
-def _seen_tokens(codegen: Any) -> set[tuple[object, ...]]:
+@cython.ccall
+def _seen_tokens(codegen: Any) -> object:
     seen = codegen._inertia_stack_probe_fact_seen if hasattr(codegen, "_inertia_stack_probe_fact_seen") else None
     if not isinstance(seen, set):
         seen = set()
@@ -92,12 +100,13 @@ def _seen_tokens(codegen: Any) -> set[tuple[object, ...]]:
     return seen
 
 
+@cython.ccall
 def record_callsite_summary_fact_8616(
     codegen: Any,
     summary: CallsiteSummary8616,
     *,
     node_id: int | None = None,
-    attached: bool = False,
+    attached: cython.bint = False,
 ) -> None:
     """Count callsite facts once per summary identity without changing C output."""
     stats = ensure_stack_probe_fact_stats_8616(codegen)
@@ -121,8 +130,11 @@ def record_callsite_summary_fact_8616(
             stats["ss_stack_address_returns"] += 1
 
 
+@cython.ccall
 def record_callsite_summary_map_facts_8616(codegen: Any, summary_map: Mapping[object, object] | None) -> None:
     """Record already-attached summary facts for focused diagnostics."""
+    node_id: object
+    summary: object
     if not isinstance(summary_map, Mapping):
         return
     for node_id, summary in summary_map.items():
@@ -130,26 +142,29 @@ def record_callsite_summary_map_facts_8616(codegen: Any, summary_map: Mapping[ob
             record_callsite_summary_fact_8616(codegen, summary, node_id=node_id if isinstance(node_id, int) else None)
 
 
-def record_stack_arg_materialization_8616(codegen: Any, count: int) -> None:
+@cython.ccall
+def record_stack_arg_materialization_8616(codegen: Any, count: cython.longlong) -> None:
     """Count stack arguments converted into call arguments."""
     if count <= 0:
         return
     ensure_stack_probe_fact_stats_8616(codegen)["stack_arg_materializations"] += count
 
 
+@cython.ccall
 def record_stable_ss_lowering_replacement_8616(codegen: Any) -> None:
     """Count a successful stable-SS lowering callback pass."""
     ensure_stack_probe_fact_stats_8616(codegen)["stable_ss_lowering_replacements"] += 1
 
 
+@cython.ccall
 def record_stable_ss_lowering_refusal_8616(codegen: Any) -> None:
     """Count a lowering pass that saw typed SS facts but could not lower them."""
     ensure_stack_probe_fact_stats_8616(codegen)["stable_ss_lowering_refusals"] += 1
 
 
-def format_stack_probe_fact_stats_8616(codegen: Any) -> str | None:
+def format_stack_probe_fact_stats_8616(codegen: Any) -> object:
     """Return a deterministic compact trace string for debug logs."""
     stats = codegen._inertia_stack_probe_fact_stats if hasattr(codegen, "_inertia_stack_probe_fact_stats") else None
     if not isinstance(stats, dict):
         return None
-    return " ".join(f"{key}={int(stats.get(key, 0) or 0)}" for key in STACK_PROBE_FACT_STAT_KEYS)
+    return " ".join(f"{key}={int(stats.get(key, 0) or 0)}" for key in iter(STACK_PROBE_FACT_STAT_KEYS))

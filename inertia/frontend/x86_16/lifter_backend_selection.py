@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Frontend/runtime package initialization.
 
 Responsibility: activate the required default lifter backend before transitive imports.
@@ -6,6 +7,7 @@ lifter_backend and instruction semantics remain in the authoritative .py source.
 """
 
 from __future__ import annotations
+import cython
 
 from inertia.frontend.x86_16.lifter_backend import LifterBackend
 from inertia.frontend.x86_16.lifter_import import selected_lifter_backend

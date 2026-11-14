@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Join direct-memory facts with explicit function global annotations.
 
 Layer: Types/Lowering.
@@ -8,22 +9,26 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol, cast
+import dataclasses
+import builtins
 
 
 class DirectOperandSummaryBoundary8616(Protocol):
     """Decoded instruction fields consumed at the lowering boundary."""
 
     @property
-    def op0_kind(self) -> str | None:
+    def op0_kind(self) -> object:
         """Return the decoded first-operand kind."""
         ...
 
     @property
-    def op0_value(self) -> int | str | None:
+    def op0_value(self) -> object:
         """Return the decoded first-operand value."""
         ...
 
@@ -33,12 +38,12 @@ class DirectOperandSummaryBoundary8616(Protocol):
         ...
 
     @property
-    def op1_kind(self) -> str | None:
+    def op1_kind(self) -> object:
         """Return the decoded second-operand kind."""
         ...
 
     @property
-    def op1_value(self) -> int | str | None:
+    def op1_value(self) -> object:
         """Return the decoded second-operand value."""
         ...
 
@@ -54,20 +59,25 @@ class AnnotatedFunctionBoundary8616(Protocol):
     info: Mapping[str, object]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class AnnotatedDirectGlobalRef8616:
     """A name-only annotation joined to binary-proven direct storage."""
 
-    offset: int
-    width: int
-    name: str
+    offset: cython.longlong
+    width: cython.longlong
+    name: object
 
 
+@cython.ccall
 def _direct_operands_8616(
     summaries: Sequence[DirectOperandSummaryBoundary8616],
-) -> frozenset[tuple[int, int]]:
+) -> frozenset[tuple[cython.longlong, cython.longlong]]:
     """Collect exact direct-memory offsets and widths from decoded facts."""
-    result: set[tuple[int, int]] = set()
+    kind: object
+    size: object
+    summary: object
+    value: object
+    result: set[tuple[cython.longlong, cython.longlong]] = set()
     for summary in summaries:
         for kind, value, size in (
             (summary.op0_kind, summary.op0_value, summary.op0_size),
@@ -79,10 +89,15 @@ def _direct_operands_8616(
 
 
 def collect_annotated_direct_global_refs_8616(
-    function: object | None,
+    function: object,
     summaries: Sequence[DirectOperandSummaryBoundary8616],
 ) -> tuple[AnnotatedDirectGlobalRef8616, ...]:
     """Return exact direct-memory facts named by explicit annotations."""
+    annotations: object
+    global_vars: object
+    name: object
+    raw_offset: object
+    raw_spec: object
     if function is None:
         return ()
     try:
@@ -107,7 +122,7 @@ def collect_annotated_direct_global_refs_8616(
         offset = raw_offset & 0xFFFF
         refs.extend(
             AnnotatedDirectGlobalRef8616(offset, width, name)
-            for operand_offset, width in sorted(direct_operands)
+            for operand_offset, width in builtins.iter(sorted(direct_operands))
             if operand_offset == offset
         )
     return tuple(refs)

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify register preservation across analysis-only CALL targets.
 
 Layer: Semantics.
@@ -17,6 +18,8 @@ this contract never overrides an observed implementation.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -26,6 +29,7 @@ from angr.calling_conventions import default_cc
 
 from inertia.frontend.x86_16.simos_86_16 import SimCC8616MSCmedium, SimCC8616MSCsmall
 from inertia.frontend.x86_16.synthetic_call_stub_evidence import is_synthetic_call_stub_8616
+import dataclasses
 
 __all__ = (
     "MSC16_CALLEE_SAVED_GENERAL_REGISTERS_8616",
@@ -49,22 +53,22 @@ class SyntheticCallRegisterEffectVerdict8616(StrEnum):
     UNKNOWN_REFUSE = "unknown_refuse"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SyntheticCallRegisterEffect8616:
     """One CALL/register verdict with a closed semantic evidence census."""
 
-    callsite_addr: int
+    callsite_addr: cython.longlong
     target_addr: int | None
-    register: str
+    register: object
     verdict: SyntheticCallRegisterEffectVerdict8616
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def closes_evidence(self) -> bool:
+    def closes_evidence(self) -> cython.bint:
         """Return whether the exact input produced one materialized verdict."""
         return (
             self.raw_fact_count
@@ -79,13 +83,13 @@ class SyntheticCallRegisterEffect8616:
 class _ArchSurface8616(Protocol):
     """Architecture name exposed at the dynamic angr boundary."""
 
-    name: str
+    name: object
 
 
 class _SimOsSurface8616(Protocol):
     """Platform name exposed at the dynamic angr boundary."""
 
-    name: str
+    name: object
 
 
 class _ProjectSurface8616(Protocol):
@@ -95,12 +99,13 @@ class _ProjectSurface8616(Protocol):
     simos: _SimOsSurface8616
 
 
+@cython.ccall
 def _unknown_effect_8616(
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     target_addr: int | None,
-    register: str,
+    register: object,
     *,
-    normalized: bool,
+    normalized: cython.bint,
 ) -> SyntheticCallRegisterEffect8616:
     """Build one explicit refusal for incomplete or unsupported evidence."""
     return SyntheticCallRegisterEffect8616(
@@ -116,12 +121,13 @@ def _unknown_effect_8616(
     )
 
 
+@cython.ccall
 def classify_synthetic_call_register_effect_8616(
     project: object,
     *,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     target_addr: int | None,
-    register: str,
+    register: object,
 ) -> SyntheticCallRegisterEffect8616:
     """Classify one exact synthetic CALL through the registered MS C ABI."""
     normalized_register = register.lower()

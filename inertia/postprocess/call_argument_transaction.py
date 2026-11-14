@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Describe atomic C-AST call-argument mutation outcomes.
 
 Layer: Rewrite/Postprocess cleanup.
@@ -13,9 +14,12 @@ flow, or facts from rendered text, COD, source, or CLI/reporting evidence here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
+import dataclasses
 
 __all__ = [
     "CallArgumentMutationResult8616",
@@ -33,29 +37,30 @@ class CallArgumentMutationVerdict8616(StrEnum):
     REFUSED = "refused"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallArgumentMutationResult8616:
     """Atomic result for argument and call-target mutations at one callsite."""
 
     verdict: CallArgumentMutationVerdict8616
-    arguments_changed: bool = False
-    target_changed: bool = False
+    arguments_changed: cython.bint = False
+    target_changed: cython.bint = False
 
     @property
-    def arguments_accepted(self) -> bool:
+    def arguments_accepted(self) -> cython.bint:
         """Return whether cleanup may consume the candidate's setup evidence."""
         return self.verdict is not CallArgumentMutationVerdict8616.REFUSED
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether any accepted call-node state changed."""
         return self.arguments_changed or self.target_changed
 
 
+@cython.ccall
 def accepted_call_argument_mutation_8616(
     *,
-    arguments_changed: bool,
-    target_changed: bool,
+    arguments_changed: cython.bint,
+    target_changed: cython.bint,
 ) -> CallArgumentMutationResult8616:
     """Build an accepted applied-or-unchanged mutation result."""
     return CallArgumentMutationResult8616(
@@ -69,10 +74,11 @@ def accepted_call_argument_mutation_8616(
     )
 
 
+@cython.ccall
 def refused_call_argument_mutation_8616(
     *,
-    arguments_changed: bool = False,
-    target_changed: bool = False,
+    arguments_changed: cython.bint = False,
+    target_changed: cython.bint = False,
 ) -> CallArgumentMutationResult8616:
     """Build a refusal while retaining any independent accepted mutation."""
     return CallArgumentMutationResult8616(

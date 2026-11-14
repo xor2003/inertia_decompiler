@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Canonical register-relative displacements at the VEX-to-IR boundary.
 
 Layer: IR adapter.
@@ -11,9 +12,12 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 
-def canonical_vex_integer_displacement_8616(operation: str, offset: int, size: int) -> int:
+@cython.ccall
+def canonical_vex_integer_displacement_8616(operation: object, offset: cython.longlong, size: cython.longlong) -> cython.longlong:
     """Canonicalize an affine offset only for an exact matching integer width."""
     bits = size * 8
     if bits <= 0 or operation not in {f"Iop_Add{bits}", f"Iop_Sub{bits}"}:

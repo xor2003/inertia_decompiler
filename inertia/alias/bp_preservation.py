@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove incoming BP survives every return of a closed leaf body.
 
 Layer: Alias.
@@ -10,6 +11,8 @@ work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import Counter
 from dataclasses import dataclass
@@ -25,6 +28,8 @@ from .segment_stack_restore import (
     SegmentStackRestoreVerdict8616,
     build_x86_16_stack_register_restore_artifact_8616,
 )
+import dataclasses
+import operator
 
 
 class BPPreservationFailure8616(StrEnum):
@@ -38,49 +43,54 @@ class BPPreservationFailure8616(StrEnum):
     STORE_ALIAS_UNPROVEN = "store_alias_unproven"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class BPPreservationResult8616:
     """Exact retained body coverage and closed one-function proof accounting."""
 
     coverage: IRBoundaryCoverageResult8616
     failure: BPPreservationFailure8616 | None
-    return_block_addrs: tuple[int, ...]
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    return_block_addrs: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Recheck retained evidence; counters alone never authorize an effect."""
+        failure: object
         counts = (self.raw_fact_count, self.normalized_fact_count,
                   self.classified_fact_count, self.materialized_count, self.failure_count)
         if self.failure is not None or counts != (1, 1, 1, 1, 0):
             return False
-        if any(type(count) is not int for count in counts):
+        if any(type(count) is not int for count in iter(counts)):
             return False
         failure, returns = _preservation_evidence_8616(self.coverage)
-        return failure is None and returns == self.return_block_addrs
+        return failure is None and operator.eq(returns, self.return_block_addrs)
 
 
-def _return_blocks_8616(artifact: IRFunctionArtifact) -> tuple[IRBlock, ...] | None:
+def _return_blocks_8616(artifact: IRFunctionArtifact) -> object:
     """Require every terminal block to end with exactly one final RET."""
-    exits = tuple(block for block in artifact.blocks if not block.successor_addrs)
-    if not exits or any(not block.instrs or block.instrs[-1].op != "RET" for block in exits):
+    block: object
+    exits = tuple(block for block in iter(artifact.blocks) if not block.successor_addrs)
+    if not exits or any(not block.instrs or block.instrs[-1].op != "RET" for block in iter(exits)):
         return None
     for block in artifact.blocks:
-        if any(item.op == "RET" for item in block.instrs[:-1]):
+        if any(item.op == "RET" for item in iter(block.instrs[:-1])):
             return None
         if block.successor_addrs and block.instrs and block.instrs[-1].op == "RET":
             return None
     return exits
 
 
+@cython.ccall
 def _block_preserves_8616(
-    block: IRBlock, incoming: bool, restores: frozenset[tuple[int, int]],
-) -> bool:
+    block: IRBlock, incoming: cython.bint, restores: object,
+) -> cython.bint:
     """Transfer exact whole/partial BP writes, consuming proved entry restores."""
+    destination: object
+    instruction: object
     preserved = incoming
     family = frame_register_family_8616("bp")
     for instruction in block.instrs:
@@ -94,10 +104,13 @@ def _block_preserves_8616(
     return preserved
 
 
-def _incoming_bp_save_sites_8616(artifact: IRFunctionArtifact) -> frozenset[int]:
+def _incoming_bp_save_sites_8616(artifact: IRFunctionArtifact) -> frozenset[cython.longlong]:
     """Keep entry-prefix sites strictly before any overlapping BP write."""
-    entry = next(block for block in artifact.blocks if block.addr == artifact.function_addr)
-    sites: set[int] = set()
+    destination: object
+    entry: object
+    instruction: object
+    entry = next(block for block in iter(artifact.blocks) if operator.eq(block.addr, artifact.function_addr))
+    sites: set[cython.longlong] = set()
     family = frame_register_family_8616("bp")
     for instruction in entry.instrs:
         destination = instruction.dst
@@ -110,9 +123,10 @@ def _incoming_bp_save_sites_8616(artifact: IRFunctionArtifact) -> frozenset[int]
     return frozenset(sites)
 
 
+@cython.ccall
 def _cross_segment_store_reaches_restore_8616(
     artifact: IRFunctionArtifact, fact: SegmentStackRestoreFact8616,
-) -> bool:
+) -> cython.bint:
     """Consume the shared Alias lifetime guard for an incoming-BP restore."""
     if fact.saved_instruction_addr is None:
         return True
@@ -124,15 +138,17 @@ def _cross_segment_store_reaches_restore_8616(
 
 def _preservation_evidence_8616(
     coverage: IRBoundaryCoverageResult8616,
-) -> tuple[BPPreservationFailure8616 | None, tuple[int, ...]]:
+) -> tuple[BPPreservationFailure8616 | None, tuple[cython.longlong, ...]]:
     """Close all reachable leaf paths using Alias-owned restore identity."""
+    exits: object
+    block: object
     if not coverage.complete:
         return BPPreservationFailure8616.COVERAGE_INCOMPLETE, ()
     artifact = coverage.artifact
-    if any(artifact.function_addr in block.successor_addrs for block in artifact.blocks):
+    if any(artifact.function_addr in block.successor_addrs for block in iter(artifact.blocks)):
         return BPPreservationFailure8616.ENTRY_REENTERED, ()
     if any(item.op in {"CALL", "INT", "INTERRUPT", "SYSCALL", "IRET"}
-           for block in artifact.blocks for item in block.instrs):
+           for block in iter(artifact.blocks) for item in iter(block.instrs)):
         return BPPreservationFailure8616.EXTERNAL_EFFECT, ()
     exits = _return_blocks_8616(artifact)
     if exits is None:
@@ -141,25 +157,25 @@ def _preservation_evidence_8616(
     assert alias.is_bound_to(artifact)
     incoming_save_sites = _incoming_bp_save_sites_8616(artifact)
     write_counts = Counter(
-        (block.addr, item.addr) for block in artifact.blocks for item in block.instrs
+        (block.addr, item.addr) for block in iter(artifact.blocks) for item in iter(block.instrs)
         if item.dst is not None and item.dst.space is MemSpace.REG
         and item.dst.name in frame_register_family_8616("bp")
     )
     candidates = tuple(
-        fact for fact in alias.facts
+        fact for fact in iter(alias.facts)
         if fact.verdict is SegmentStackRestoreVerdict8616.PROVEN
         and fact.saved_register == fact.restore_register == "bp"
         and fact.saved_instruction_addr in incoming_save_sites
         and fact.constant_value is None
         and write_counts[(fact.block_addr, fact.restore_instruction_addr)] == 1
     )
-    refused = tuple(fact for fact in candidates if _cross_segment_store_reaches_restore_8616(artifact, fact))
+    refused = tuple(fact for fact in iter(candidates) if _cross_segment_store_reaches_restore_8616(artifact, fact))
     restores = frozenset(
-        (fact.block_addr, fact.restore_instruction_addr) for fact in candidates if fact not in refused
+        (fact.block_addr, fact.restore_instruction_addr) for fact in iter(candidates) if fact not in refused
     )
-    predecessors = {block.addr: tuple(source.addr for source in artifact.blocks
+    predecessors = {block.addr: tuple(source.addr for source in iter(artifact.blocks)
                                      if block.addr in source.successor_addrs)
-                    for block in artifact.blocks}
+                    for block in iter(artifact.blocks)}
     # The complete coverage owner proves all blocks entry-reachable. Starting
     # from true gives a descending finite fixed point: each clobber propagates
     # through loops, while only an independently proved entry restore resets it.
@@ -168,20 +184,22 @@ def _preservation_evidence_8616(
     while changed:
         changed = False
         for block in artifact.blocks:
-            incoming = all(states[address] for address in predecessors[block.addr])
+            incoming = all(states[address] for address in iter(predecessors[block.addr]))
             next_state = _block_preserves_8616(block, incoming, restores)
-            if next_state != states[block.addr]:
+            if operator.ne(next_state, states[block.addr]):
                 states[block.addr] = next_state
                 changed = True
-    returns = tuple(sorted(block.addr for block in exits))
+    returns = tuple(sorted(block.addr for block in iter(exits)))
     failure = None
-    if not all(states[block.addr] for block in exits):
+    if not all(states[block.addr] for block in iter(exits)):
         failure = BPPreservationFailure8616.STORE_ALIAS_UNPROVEN if refused else BPPreservationFailure8616.BP_CLOBBERED
     return failure, returns
 
 
+@cython.ccall
 def prove_bp_preservation_8616(coverage: IRBoundaryCoverageResult8616) -> BPPreservationResult8616:
     """Return exact incoming-BP preservation or one atomic typed refusal."""
+    failure: object
     failure, returns = _preservation_evidence_8616(coverage)
     accepted = int(failure is None)
     return BPPreservationResult8616(coverage, failure, returns, 1, 1, accepted, accepted, 1 - accepted)

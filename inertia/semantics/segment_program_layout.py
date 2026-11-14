@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Join function segment summaries into conservative whole-program evidence.
 
 Layer: function/program summaries.
@@ -12,6 +13,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from inertia.ir.segment_contract import SegmentFactVerdict
 from inertia.pipeline.errors import PipelineHardError
@@ -30,32 +33,34 @@ from .segment_program_layout_contract import (
     SegmentProgramSupplementalEvidence8616,
     validated_segment_program_counts_8616,
 )
+import operator
 
 
 def _fact_8616(
     aspect: SegmentProgramLayoutAspect8616,
-    proven: bool,
+    proven: cython.bint,
     *,
-    sites: tuple[int, ...] = (),
-    detail: str,
+    sites: object = (),
+    detail: object,
 ) -> SegmentProgramLayoutFact8616:
     """Build a binary proven/refused fact with deterministic sites."""
     return SegmentProgramLayoutFact8616(
         aspect,
         SegmentProgramLayoutVerdict8616.PROVEN if proven else SegmentProgramLayoutVerdict8616.UNKNOWN_REFUSE,
-        tuple(sorted(set(sites))),
+        tuple(sorted(tuple(set(sites)))),
         detail,
     )
 
 
+@cython.ccall
 def _presence_fact_8616(
     aspect: SegmentProgramLayoutAspect8616,
     *,
     coverage: SegmentProgramEvidenceCoverage8616,
-    sites: tuple[int, ...],
+    sites: object,
 ) -> SegmentProgramLayoutFact8616:
     """Prove presence from a witness and absence only from complete coverage."""
-    ordered_sites = tuple(sorted(set(sites)))
+    ordered_sites = tuple(sorted(tuple(set(sites))))
     if ordered_sites:
         verdict = SegmentProgramLayoutVerdict8616.PROVEN_PRESENT
     elif coverage is SegmentProgramEvidenceCoverage8616.COMPLETE:
@@ -67,14 +72,15 @@ def _presence_fact_8616(
 
 def build_x86_16_segment_program_layout(
     discovery: SegmentProgramDiscoveryEvidence8616,
-    functions: tuple[SegmentProgramFunctionEvidence8616, ...],
+    functions: object,
     supplemental: SegmentProgramSupplementalEvidence8616 | None = None,
 ) -> SegmentProgramLayoutContract8616:
     """Join exact function facts and refuse every unsupported program default."""
+    function: object
     supplemental = supplemental or SegmentProgramSupplementalEvidence8616()
     ordered = tuple(sorted(functions, key=lambda fact: fact.function_addr))
-    function_addrs = tuple(fact.function_addr for fact in ordered)
-    if len(set(function_addrs)) != len(function_addrs):
+    function_addrs = tuple(fact.function_addr for fact in iter(ordered))
+    if operator.ne(len(set(function_addrs)), len(function_addrs)):
         raise PipelineHardError("segment program layout received duplicate function evidence")
     for function in ordered:
         validated_segment_program_counts_8616(
@@ -84,10 +90,10 @@ def build_x86_16_segment_program_layout(
     expected = tuple(sorted(discovery.expected_function_addrs))
     discovery_ok = discovery.complete
     functions_ok = discovery_ok and function_addrs == expected
-    transfers = tuple(fact for function in ordered for fact in function.control_transfers)
+    transfers = tuple(fact for function in iter(ordered) for fact in iter(function.control_transfers))
     unresolved_transfer_sites = tuple(
         fact.instruction_addr
-        for fact in transfers
+        for fact in iter(transfers)
         if fact.verdict is SegmentFactVerdict.UNKNOWN_REFUSE or fact.target_addr is None
     )
     control_ok = (
@@ -98,12 +104,12 @@ def build_x86_16_segment_program_layout(
     )
     unknown_access_sites = tuple(
         fact.instruction_addr if fact.instruction_addr is not None else fact.block_addr
-        for function in ordered
-        for fact in function.accesses
+        for function in iter(ordered)
+        for fact in iter(function.accesses)
         if fact.verdict is SegmentFactVerdict.UNKNOWN_REFUSE
     )
     external_effect_sites = tuple(
-        fact.instruction_addr for fact in transfers if fact.target_addr not in function_addrs
+        fact.instruction_addr for fact in iter(transfers) if fact.target_addr not in function_addrs
     )
     segment_effects_ok = functions_ok and not unknown_access_sites and not external_effect_sites
     overlay_free = (
@@ -118,7 +124,7 @@ def build_x86_16_segment_program_layout(
     )
     far_code_sites = tuple(
         fact.instruction_addr
-        for fact in transfers
+        for fact in iter(transfers)
         if fact.verdict is SegmentFactVerdict.PROVEN
         and fact.distance is SegmentControlTransferDistance8616.FAR
     )
@@ -133,13 +139,13 @@ def build_x86_16_segment_program_layout(
         _fact_8616(
             SegmentProgramLayoutAspect8616.CONTROL_FLOW,
             control_ok,
-            sites=(*unresolved_transfer_sites, *supplemental.unresolved_indirect_control_sites),
+            sites=tuple(unresolved_transfer_sites) + tuple(supplemental.unresolved_indirect_control_sites),
             detail="resolved direct and indirect program control",
         ),
         _fact_8616(
             SegmentProgramLayoutAspect8616.SEGMENT_EFFECTS,
             segment_effects_ok,
-            sites=(*unknown_access_sites, *external_effect_sites),
+            sites=tuple(unknown_access_sites) + tuple(external_effect_sites),
             detail="local accesses and transitive clobbers are closed",
         ),
         _fact_8616(
@@ -185,7 +191,7 @@ def build_x86_16_segment_program_layout(
             detail=supplemental.ss_ds_entry_relation or "entry relation unavailable",
         ),
     )
-    classified = sum(fact.verdict is not SegmentProgramLayoutVerdict8616.UNKNOWN_REFUSE for fact in facts)
+    classified = sum(fact.verdict is not SegmentProgramLayoutVerdict8616.UNKNOWN_REFUSE for fact in iter(facts))
     materialized = classified
     if classified > 0 and materialized == 0:
         raise PipelineHardError("segment program layout classified evidence without materializing its contract")

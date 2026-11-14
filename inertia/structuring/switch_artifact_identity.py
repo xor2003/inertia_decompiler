@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Canonicalize typed switch artifacts by normalized decision-tree identity.
 
 Layer: Structuring.
@@ -13,39 +14,47 @@ work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+import dataclasses
 
-type SwitchArtifactRecord8616 = Mapping[str, object]
+SwitchArtifactRecord8616 = typing.TypeAliasType("SwitchArtifactRecord8616", Mapping[str, object])
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CanonicalSwitchArtifactResult8616:
     """Closed evidence result for normalized switch-artifact identity."""
 
-    artifacts: tuple[SwitchArtifactRecord8616, ...]
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    duplicate_fact_count: int
+    artifacts: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    duplicate_fact_count: cython.longlong
 
 
-def _int_sequence_8616(value: object) -> tuple[int, ...] | None:
+def _int_sequence_8616(value: object) -> object:
     """Return a non-empty integer sequence from structured artifact data."""
     if not isinstance(value, list | tuple) or not value:
         return None
-    if not all(isinstance(item, int) for item in value):
+    if not all(isinstance(item, int) for item in iter(value)):
         return None
     return tuple(value)
 
 
+@cython.ccall
 def _normalized_switch_identity_8616(
     artifact: SwitchArtifactRecord8616,
-) -> tuple[int, tuple[int, ...]] | None:
+) -> object:
     """Return the proven expanded-root identity for one typed artifact."""
+    normalized_values: object
+    readiness: object
+    root_region_id: object
+    summary: object
     summary = artifact.get("decision_tree_summary")
     if not isinstance(summary, Mapping):
         return None
@@ -64,12 +73,15 @@ def _normalized_switch_identity_8616(
     return root_region_id, normalized_values
 
 
+@cython.ccall
 def canonicalize_switch_artifacts_8616(
-    artifacts: tuple[SwitchArtifactRecord8616, ...],
+    artifacts: object,
 ) -> CanonicalSwitchArtifactResult8616:
     """Keep one artifact per proven normalized switch and refuse unknown merges."""
+    identity: object
+    artifact: object
     canonical: list[SwitchArtifactRecord8616] = []
-    identities: set[tuple[int, tuple[int, ...]]] = set()
+    identities: set[tuple[cython.longlong, tuple[cython.longlong, ...]]] = set()
     normalized_count = 0
     classified_count = 0
     failure_count = 0

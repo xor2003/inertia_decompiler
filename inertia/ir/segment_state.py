@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Track proven segment-register state across IR blocks.
 
 Layer: IR.
@@ -8,9 +9,22 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol, cast
+import dataclasses
+import operator
+import builtins
+DeclaredCallAdmission8616 = typing.TypeVar("DeclaredCallAdmission8616")
+DeclaredCallEffectConsumption8616 = typing.TypeVar("DeclaredCallEffectConsumption8616")
+NearCallJumpScope8616 = typing.TypeVar("NearCallJumpScope8616")
+Real16InvocationDomain8616 = typing.TypeVar("Real16InvocationDomain8616")
+ScopedFunctionIRView8616 = typing.TypeVar("ScopedFunctionIRView8616")
+ScopedIndirectTargetView8616 = typing.TypeVar("ScopedIndirectTargetView8616")
+ScopedNearReturnContinuationView8616 = typing.TypeVar("ScopedNearReturnContinuationView8616")
+SegmentEntryContext8616 = typing.TypeVar("SegmentEntryContext8616")
 
 if TYPE_CHECKING:
     from inertia.frontend.x86_16.declared_external_call_evidence import (
@@ -25,6 +39,7 @@ if TYPE_CHECKING:
     )
     from .real16_invocation_domain import Real16InvocationDomain8616
     from .scoped_function_ir_view import ScopedFunctionIRView8616
+    from .scoped_indirect_target_view import ScopedIndirectTargetView8616
 
 from .core import IRFunctionArtifact, IRValue, MemSpace, SegmentOrigin
 from .declared_selector_native_effects import NativeEffectSurvey8616, survey_native_effects_8616
@@ -64,7 +79,7 @@ class _SegmentStateCodegenBoundary(Protocol):
     _inertia_vex_ir_function_ssa: object
     _inertia_segment_stack_restore_artifact: object
     _inertia_segment_state_artifact: object
-    _inertia_segment_call_preservations_8616: tuple[SegmentCallPreservationResult8616, ...]
+    _inertia_segment_call_preservations_8616: object
     _inertia_segment_function_summary_8616: object
     _inertia_call_semantic_projection_8616: object
 
@@ -72,16 +87,16 @@ class _SegmentStateCodegenBoundary(Protocol):
 class _SegmentStateProjectBoundary(Protocol):
     """Project registry field the apply path refreshes for receipts."""
 
-    _inertia_segment_function_summaries_8616: dict[int, object]
+    _inertia_segment_function_summaries_8616: object
 
 
 class _SegmentRestoreEvidenceSurface(Protocol):
     """Alias-owned restore evidence consumed through a typed IR relation."""
 
-    restore_sources: tuple[SegmentRestoreSource, ...]
+    restore_sources: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentStateArtifact:
     """Entry/exit state retaining the identical analyzed IR artifact.
 
@@ -89,8 +104,8 @@ class SegmentStateArtifact:
     is diagnostic only and cannot reconstruct in-process artifact identity.
 
     ``scoped_view`` retains the exact conditional CFG view the predecessor
-    relation was taken from — a retained application view or a
-    premise-derived near-return continuation view — alongside the
+    relation was taken from — a retained application, near-return
+    continuation, or invocation-proven indirect-target view — alongside the
     still-raw ``source_artifact`` and the supplied ``invocation_scope``
     consuming entry. Its presence marks the state as scoped evidence for
     that entry only — never universal function proof. Builder/codegen paths
@@ -100,11 +115,11 @@ class SegmentStateArtifact:
     and this premise; the result cannot close a universal callee summary.
     """
 
-    entry_states: dict[int, dict[str, SegmentRegisterState]]
-    exit_states: dict[int, dict[str, SegmentRegisterState]]
-    summary: dict[str, object]
-    instruction_entry_states: dict[InstructionStateKey, dict[str, SegmentRegisterState]] = field(default_factory=dict)
-    instruction_exit_states: dict[InstructionStateKey, dict[str, SegmentRegisterState]] = field(default_factory=dict)
+    entry_states: object
+    exit_states: object
+    summary: object
+    instruction_entry_states: object = field(default_factory=dict)
+    instruction_exit_states: object = field(default_factory=dict)
     source_artifact: IRFunctionArtifact | None = field(default=None, repr=False, compare=False)
     call_preservations: tuple[SegmentCallPreservationResult8616, ...] = ()
     declared_call_consumptions: tuple[DeclaredCallEffectConsumption8616, ...] = ()
@@ -112,44 +127,39 @@ class SegmentStateArtifact:
     near_call_scope: NearCallJumpScope8616 | None = field(default=None, repr=False, compare=False)
     invocation_scope: Real16InvocationDomain8616 | None = field(default=None, repr=False, compare=False)
     scoped_view: (
-        ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None
+        ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | ScopedIndirectTargetView8616 | None
     ) = field(default=None, repr=False, compare=False)
 
-    def state_for_register(self, register: str) -> SegmentRegisterState | None:
+    def state_for_register(self, register: object) -> SegmentRegisterState | None:
         """Return the one proven identity held throughout the function."""
         observed = tuple(
             state
-            for state_map in (
-                *self.entry_states.values(),
-                *self.exit_states.values(),
-                *self.instruction_entry_states.values(),
-                *self.instruction_exit_states.values(),
-            )
+            for state_map in iter(tuple(self.entry_states.values()) + tuple(self.exit_states.values()) + tuple(self.instruction_entry_states.values()) + tuple(self.instruction_exit_states.values()))
             if (state := state_map.get(register)) is not None
         )
         joined = join_register_states(observed, register)
         return joined if joined.origin is SegmentOrigin.PROVEN else None
 
-    def state_at_block_entry(self, block_addr: int, register: str) -> SegmentRegisterState | None:
+    def state_at_block_entry(self, block_addr: cython.longlong, register: object) -> SegmentRegisterState | None:
         """Return the exact state before one IR block when available."""
         return self.entry_states.get(block_addr, {}).get(register)
 
-    def state_at_block_exit(self, block_addr: int, register: str) -> SegmentRegisterState | None:
+    def state_at_block_exit(self, block_addr: cython.longlong, register: object) -> SegmentRegisterState | None:
         """Return the exact state after one IR block when available."""
         return self.exit_states.get(block_addr, {}).get(register)
 
     def state_before_instruction(
         self,
-        instruction_addr: int,
-        register: str,
+        instruction_addr: cython.longlong,
+        register: object,
     ) -> SegmentRegisterState | None:
         """Return the exact state immediately before one typed IR instruction."""
         return self.instruction_entry_states.get(instruction_addr, {}).get(register)
 
     def state_after_instruction(
         self,
-        instruction_addr: int,
-        register: str,
+        instruction_addr: cython.longlong,
+        register: object,
     ) -> SegmentRegisterState | None:
         """Return the exact state immediately after one typed IR instruction."""
         return self.instruction_exit_states.get(instruction_addr, {}).get(register)
@@ -163,31 +173,32 @@ class SegmentStateArtifact:
             "entry_context_callsite": None if self.entry_context is None else self.entry_context.candidate.callsite_addr,
             "entry_context_complete": None if self.entry_context is None else self.entry_context.complete,
             "source_function_addr": None if self.source_artifact is None else self.source_artifact.function_addr,
-            "call_preservation_sites": [proof.callsite_addr for proof in self.call_preservations],
+            "call_preservation_sites": [proof.callsite_addr for proof in iter(self.call_preservations)],
             "declared_call_consumptions": [
-                consumption.to_record() for consumption in self.declared_call_consumptions
+                consumption.to_record() for consumption in iter(self.declared_call_consumptions)
             ],
             "entry_states": {
-                hex(addr): {name: state.to_dict() for name, state in sorted(states.items())}
-                for addr, states in sorted(self.entry_states.items())
+                hex(addr): {name: state.to_dict() for name, state in builtins.iter(sorted(tuple(states.items())))}
+                for addr, states in builtins.iter(sorted(tuple(self.entry_states.items())))
             },
             "exit_states": {
-                hex(addr): {name: state.to_dict() for name, state in sorted(states.items())}
-                for addr, states in sorted(self.exit_states.items())
+                hex(addr): {name: state.to_dict() for name, state in builtins.iter(sorted(tuple(states.items())))}
+                for addr, states in builtins.iter(sorted(tuple(self.exit_states.items())))
             },
             "instruction_entry_states": {
-                _instruction_state_key_text(key): {name: state.to_dict() for name, state in sorted(states.items())}
-                for key, states in sorted(self.instruction_entry_states.items(), key=lambda item: str(item[0]))
+                _instruction_state_key_text(key): {name: state.to_dict() for name, state in builtins.iter(sorted(tuple(states.items())))}
+                for key, states in builtins.iter(sorted(tuple(self.instruction_entry_states.items()), key=lambda item: str(item[0])))
             },
             "instruction_exit_states": {
-                _instruction_state_key_text(key): {name: state.to_dict() for name, state in sorted(states.items())}
-                for key, states in sorted(self.instruction_exit_states.items(), key=lambda item: str(item[0]))
+                _instruction_state_key_text(key): {name: state.to_dict() for name, state in builtins.iter(sorted(tuple(states.items())))}
+                for key, states in builtins.iter(sorted(tuple(self.instruction_exit_states.items()), key=lambda item: str(item[0])))
             },
             "summary": dict(self.summary),
         }
 
 
-def _instruction_state_key_text(key: InstructionStateKey) -> str:
+@cython.ccall
+def _instruction_state_key_text(key: InstructionStateKey) -> object:
     """Format an exact instruction coordinate for diagnostic serialization."""
     return hex(key) if isinstance(key, int) else f"{key[0]:#x}:{key[1]}"
 
@@ -195,16 +206,16 @@ def _instruction_state_key_text(key: InstructionStateKey) -> str:
 def build_x86_16_segment_state_artifact(
     artifact: IRFunctionArtifact,
     function_ssa: SSAFunctionArtifact | None = None,
-    restore_sources: tuple[SegmentRestoreSource, ...] = (),
+    restore_sources: object = (),
     *,
-    call_preservations: tuple[SegmentCallPreservationResult8616, ...] = (),
+    call_preservations: object = (),
     entry_context: SegmentEntryContext8616 | None = None,
     invocation_scope: Real16InvocationDomain8616 | None = None,
     near_call_scope: NearCallJumpScope8616 | None = None,
     scoped_view: (
-        ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None
+        ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | ScopedIndirectTargetView8616 | None
     ) = None,
-    declared_call_effects: tuple[DeclaredCallAdmission8616, ...] = (),
+    declared_call_effects: object = (),
 ) -> SegmentStateArtifact:
     """Build forward segment-register state from typed IR and SSA predecessors.
 
@@ -229,6 +240,9 @@ def build_x86_16_segment_state_artifact(
     one retained immutable consumption receipt, never a universal callee
     summary.
     """
+    admission: object
+    block: object
+    instruction: object
     declared_consumptions: list[DeclaredCallEffectConsumption8616] = []
     if declared_call_effects:
         from inertia.frontend.x86_16.declared_external_call_evidence import DeclaredCallEffectConsumption8616
@@ -249,14 +263,14 @@ def build_x86_16_segment_state_artifact(
     )
     call_boundary_count = sum(
         1
-        for block in artifact.blocks
-        for instruction in block.instrs
+        for block in iter(artifact.blocks)
+        for instruction in iter(block.instrs)
         if instruction.op == "CALL"
     )
     explicit_write_count = sum(
         1
-        for block in artifact.blocks
-        for instruction in block.instrs
+        for block in iter(artifact.blocks)
+        for instruction in iter(block.instrs)
         if instruction.op != "CALL"
         and isinstance(instruction.dst, IRValue)
         and instruction.dst.space is MemSpace.REG
@@ -264,8 +278,8 @@ def build_x86_16_segment_state_artifact(
     )
     classified_write_count = sum(
         1
-        for block in artifact.blocks
-        for instruction_index, instruction in enumerate(block.instrs)
+        for block in iter(artifact.blocks)
+        for instruction_index, instruction in builtins.iter(enumerate(block.instrs))
         if instruction.op != "CALL"
         and isinstance(instruction.dst, IRValue)
         and instruction.dst.space is MemSpace.REG
@@ -280,8 +294,8 @@ def build_x86_16_segment_state_artifact(
         or declared_call_effect_at_instruction_8616(artifact, block, instruction, declared_call_effects) is not None
         or (near_call_scope is not None
             and isinstance(instruction.addr, int)
-            and solution.instruction_entry_states.get(instruction.addr, {}).get("cs") == architectural_live_in_state("cs"))
-        for block in artifact.blocks for instruction in block.instrs if instruction.op == "CALL"
+            and operator.eq(solution.instruction_entry_states.get(instruction.addr, {}).get("cs"), architectural_live_in_state("cs")))
+        for block in iter(artifact.blocks) for instruction in iter(block.instrs) if instruction.op == "CALL"
     )
     return _assemble_segment_state_8616(
         artifact, solution, explicit_write_count, call_boundary_count,
@@ -291,16 +305,17 @@ def build_x86_16_segment_state_artifact(
 
 def _assemble_segment_state_8616(
     artifact: IRFunctionArtifact, solution: SegmentStateSolution8616,
-    explicit_write_count: int, call_boundary_count: int,
-    classified_write_count: int, classified_call_count: int,
-    declared_consumptions: list[DeclaredCallEffectConsumption8616],
-    call_preservations: tuple[SegmentCallPreservationResult8616, ...],
-    entry_context: SegmentEntryContext8616 | None,
+    explicit_write_count: cython.longlong, call_boundary_count: cython.longlong,
+    classified_write_count: cython.longlong, classified_call_count: cython.longlong,
+    declared_consumptions: object,
+    call_preservations: object,
+    entry_context: object,
     invocation_scope: Real16InvocationDomain8616 | None,
     near_call_scope: NearCallJumpScope8616 | None,
-    scoped_view: ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None,
+    scoped_view: object,
 ) -> SegmentStateArtifact:
     """Assemble one authoritative summary from a solved state and classified counts."""
+    scoped_projection: object
     entry_context_count = int(entry_context is not None)
     raw_fact_count = explicit_write_count + call_boundary_count + entry_context_count
     scoped_projection = solution.scoped_projection
@@ -314,7 +329,7 @@ def _assemble_segment_state_8616(
             0
             if scoped_projection is None
             else sum(
-                1 for refusals in scoped_projection.pending.values() if refusals
+                1 for refusals in builtins.iter(scoped_projection.pending.values()) if refusals
             )
         ),
         "explicit_write_count": explicit_write_count,
@@ -329,17 +344,17 @@ def _assemble_segment_state_8616(
         "failure_count": raw_fact_count - classified_write_count - classified_call_count - entry_context_count,
         "architectural_live_in_count": sum(
             state.value_kind is SegmentValueKind8616.ARCHITECTURAL_LIVE_IN
-            for state in solution.entry_states.get(artifact.function_addr, {}).values()
+            for state in builtins.iter(solution.entry_states.get(artifact.function_addr, {}).values())
         ),
         "proven_register_count": sum(
             state.origin is SegmentOrigin.PROVEN
-            for states in solution.exit_states.values()
-            for state in states.values()
+            for states in builtins.iter(solution.exit_states.values())
+            for state in builtins.iter(states.values())
         ),
         "unknown_register_count": sum(
             state.origin is SegmentOrigin.UNKNOWN
-            for states in solution.exit_states.values()
-            for state in states.values()
+            for states in builtins.iter(solution.exit_states.values())
+            for state in builtins.iter(states.values())
         ),
     }
     return SegmentStateArtifact(
@@ -356,9 +371,10 @@ def _assemble_segment_state_8616(
     )
 
 
+@cython.ccall
 def build_segment_state_with_native_survey_8616(
-    artifact: IRFunctionArtifact, expected_addrs: frozenset[int],
-) -> tuple[SegmentStateArtifact, NativeEffectSurvey8616, int]:
+    artifact: IRFunctionArtifact, expected_addrs: object,
+) -> tuple[SegmentStateArtifact, NativeEffectSurvey8616, cython.longlong]:
     """Classify once for universal segment solving and later selector induction.
 
     The sparse identity solve is limited to a complete freshly produced survey
@@ -374,6 +390,7 @@ def build_segment_state_with_native_survey_8616(
     return build_x86_16_segment_state_artifact(artifact), survey, work + survey.raw + len(artifact.blocks)
 
 
+@cython.ccall
 def _retained_refresh_context_8616(
     boundary: _SegmentStateCodegenBoundary,
     project: object,
@@ -381,9 +398,13 @@ def _retained_refresh_context_8616(
 ) -> tuple[
     Real16InvocationDomain8616 | None,
     NearCallJumpScope8616 | None,
-    ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None,
+    ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | ScopedIndirectTargetView8616 | None,
 ]:
     """Retain a consumed scoped context; never infer one from the project."""
+    active_scope: object
+    near_scope: object
+    previous: object
+    view: object
     try:
         previous = boundary._inertia_segment_state_artifact
     except AttributeError:
@@ -407,10 +428,11 @@ def _retained_refresh_context_8616(
     return scope, near_scope, view
 
 
+@cython.ccall
 def _scoped_semantic_source_8616(
     boundary: _SegmentStateCodegenBoundary, project: object, artifact: object,
-    scope: Real16InvocationDomain8616 | NearCallJumpScope8616 | None,
-    view: ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None,
+    scope: object,
+    view: object,
 ) -> object:
     """Authenticate a retained conditional Semantics projection back to raw IR."""
     from inertia.semantics.call_stack_effect_pipeline import CallSemanticProjection8616
@@ -442,6 +464,7 @@ def _scoped_semantic_source_8616(
     return projection.source_ir
 
 
+@cython.ccall
 def apply_x86_16_segment_state_artifact(
     project: object,
     codegen: object,
@@ -449,9 +472,9 @@ def apply_x86_16_segment_state_artifact(
     invocation_scope: Real16InvocationDomain8616 | None = None,
     near_call_scope: NearCallJumpScope8616 | None = None,
     scoped_view: (
-        ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | None
+        ScopedFunctionIRView8616 | ScopedNearReturnContinuationView8616 | ScopedIndirectTargetView8616 | None
     ) = None,
-) -> bool:
+) -> cython.bint:
     """Attach state retaining the consuming caller's explicit conditional inputs.
 
     The existing builder/solver authenticates a supplied scope and view against
@@ -460,6 +483,7 @@ def apply_x86_16_segment_state_artifact(
     explicit inputs, a previously consumed conditional scope is retained and
     reauthenticated over the identical source. Fresh codegen remains unscoped.
     """
+    declared_registry: object
     if near_call_scope is not None and near_call_scope.project is not project:
         raise ValueError("near-call segment scope belongs to another project")
     boundary = cast(_SegmentStateCodegenBoundary, codegen)
@@ -521,8 +545,9 @@ def apply_x86_16_segment_state_artifact(
     return False
 
 
+@cython.ccall
 def republish_declared_call_consumptions_8616(
-    project: object, codegen: object, function_addr: int,
+    project: object, codegen: object, function_addr: cython.longlong,
 ) -> None:
     """Rebind consumed assumptions after the later function-summary stage.
 
@@ -530,6 +555,10 @@ def republish_declared_call_consumptions_8616(
     state has run. Reauthenticate only receipts actually consumed by that
     state; an admission alone cannot manufacture a consumption receipt.
     """
+    admission: object
+    registry: object
+    block: object
+    instruction: object
     from inertia.frontend.x86_16.declared_external_call_evidence import (
         DeclaredCallEffectConsumption8616,
         declared_external_call_registry_8616,
@@ -543,7 +572,7 @@ def republish_declared_call_consumptions_8616(
     if not isinstance(state, SegmentStateArtifact) or state.source_artifact is None:
         return
     source = state.source_artifact
-    if source.function_addr != function_addr:
+    if operator.ne(source.function_addr, function_addr):
         return
     registry = declared_external_call_registry_8616(project)
     admissions = (
@@ -563,11 +592,12 @@ def republish_declared_call_consumptions_8616(
     _publish_declared_consumption_receipts_8616(project, boundary, source.function_addr, tuple(verified))
 
 
+@cython.ccall
 def _publish_declared_consumption_receipts_8616(
     project: object,
     boundary: _SegmentStateCodegenBoundary,
-    function_addr: int,
-    consumptions: tuple[DeclaredCallEffectConsumption8616, ...],
+    function_addr: cython.longlong,
+    consumptions: object,
 ) -> None:
     """Attach immutable consumption receipts to the retained summary surfaces.
 
@@ -575,6 +605,7 @@ def _publish_declared_consumption_receipts_8616(
     owner. Empty current receipts clear prior consumption after revocation;
     summary reconstruction must not discard freshly consumed assumptions.
     """
+    prior: object
     from dataclasses import replace
 
     from inertia.semantics.segment_function_summary import SegmentFunctionSummary8616
@@ -583,7 +614,7 @@ def _publish_declared_consumption_receipts_8616(
         summary = boundary._inertia_segment_function_summary_8616
     except AttributeError:
         summary = None
-    if isinstance(summary, SegmentFunctionSummary8616) and summary.function_addr == function_addr:
+    if isinstance(summary, SegmentFunctionSummary8616) and operator.eq(summary.function_addr, function_addr):
         summary = replace(summary, declared_call_consumptions=consumptions)
         boundary._inertia_segment_function_summary_8616 = summary
     try:
@@ -595,7 +626,7 @@ def _publish_declared_consumption_receipts_8616(
     if not isinstance(summaries, dict):
         return
     prior = summaries.get(function_addr)
-    if isinstance(prior, SegmentFunctionSummary8616) and prior.function_addr == function_addr:
+    if isinstance(prior, SegmentFunctionSummary8616) and operator.eq(prior.function_addr, function_addr):
         summaries[function_addr] = replace(
             prior, declared_call_consumptions=consumptions
         )

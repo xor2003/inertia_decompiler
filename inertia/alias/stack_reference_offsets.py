@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Preserve contained stack byte ranges when publishing variable associations.
 
 Layer: Alias.
@@ -9,9 +10,11 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import cython
 
 from angr.ailment.expression import Atom, VirtualVariable
 from angr.sim_variable import SimStackVariable, SimVariable
+import operator
 
 
 class StackReferenceInvariantError8616(ValueError):
@@ -28,8 +31,9 @@ class StackReferenceInvariantError8616(ValueError):
         )
 
 
+@cython.ccall
 def validate_stack_reference_displacement_8616(
-    atom: Atom | None, variable: SimVariable, offset: int | None,
+    atom: object, variable: SimVariable, offset: int | None,
 ) -> None:
     """Reject contradictory exact associations; leave unproven ranges refused."""
     if atom is None or not isinstance(atom, VirtualVariable) or not isinstance(variable, SimStackVariable):
@@ -41,12 +45,13 @@ def validate_stack_reference_displacement_8616(
     if not isinstance(start, int) or not isinstance(owner_start, int) or atom.size <= 0:
         return
     contained = owner_start <= start and start + atom.size <= owner_start + variable.size
-    if contained and owner_start + (offset or 0) != start:
+    if contained and operator.ne(owner_start + (offset or 0), start):
         raise StackReferenceInvariantError8616(atom, variable, offset)
 
 
+@cython.ccall
 def stack_reference_displacement_8616(
-    atom: Atom | None,
+    atom: object,
     variable: SimVariable,
     offset: int | None,
 ) -> int | None:

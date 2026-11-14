@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Enforce exact frontend recovery-coverage evidence.
 
 Layer: Pipeline governance.
@@ -10,6 +11,7 @@ work here.
 """
 
 from __future__ import annotations
+import cython
 
 from inertia.cli.recovery_instruction_coverage import (
     ExactInstructionCoverageEvidence8616,
@@ -17,21 +19,22 @@ from inertia.cli.recovery_instruction_coverage import (
 )
 
 from .errors import PipelineHardError
+import operator
 
 __all__ = ["assert_exact_instruction_coverage_8616"]
 
 
+@cython.ccall
 def assert_exact_instruction_coverage_8616(evidence: ExactInstructionCoverageEvidence8616) -> None:
     """Raise when exact frontend evidence proves incomplete CFG ownership."""
     if evidence.verdict is ExactInstructionCoverageVerdict8616.UNAVAILABLE:
         return
     counts_are_closed = (
         evidence.raw_fact_count > 0
-        and evidence.raw_fact_count == evidence.normalized_fact_count
-        and evidence.normalized_fact_count == evidence.classified_fact_count
-        and evidence.classified_fact_count
-        == evidence.materialized_count + evidence.excluded_unreachable_count + evidence.failure_count
-        and evidence.failure_count == len(evidence.missing_instruction_addrs)
+        and operator.eq(evidence.raw_fact_count, evidence.normalized_fact_count)
+        and operator.eq(evidence.normalized_fact_count, evidence.classified_fact_count)
+        and operator.eq(evidence.classified_fact_count, evidence.materialized_count + evidence.excluded_unreachable_count + evidence.failure_count)
+        and operator.eq(evidence.failure_count, len(evidence.missing_instruction_addrs))
     )
     if not counts_are_closed:
         raise PipelineHardError(

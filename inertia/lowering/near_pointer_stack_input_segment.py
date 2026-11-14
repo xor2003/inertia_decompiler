@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Bind a pushed stack address to the actual near callee's data segment.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, replace
 from enum import StrEnum
@@ -31,6 +34,8 @@ from .interprocedural_storage_reaching_defs import (
     resolve_call_argument_reaching_definition_8616,
 )
 from .near_return_segment_use import NearReturnSegmentUse8616
+import dataclasses
+import operator
 
 
 class NearPointerStackInputFailure8616(StrEnum):
@@ -44,39 +49,42 @@ class NearPointerStackInputFailure8616(StrEnum):
     SELECTOR_EQUALITY_UNPROVEN = "selector_equality_unproven"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NearPointerStackInputSegment8616:
     """Replayable near-call stack-address transport, not native-pointer proof."""
 
     project: object
     caller_ssa: SSAFunctionArtifact
     summary: CallsiteSummary8616
-    logical_index: int
+    logical_index: cython.longlong
     return_use: NearReturnSegmentUse8616
     address: IRAddress | None
     failure: NearPointerStackInputFailure8616 | None
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Replay SSA address provenance and raw selector equality before use."""
+        address: object
+        failure: object
         counts = (self.raw_fact_count, self.normalized_fact_count,
                   self.classified_fact_count, self.materialized_count, self.failure_count)
         if self.failure is not None or counts != (1, 1, 1, 1, 0):
             return False
-        if any(type(count) is not int for count in counts):
+        if any(type(count) is not int for count in iter(counts)):
             return False
         address, failure = _stack_input_segment_proof_8616(
             self.project, self.caller_ssa, self.summary, self.logical_index, self.return_use,
         )
-        return failure is None and address is not None and address == self.address
+        return failure is None and address is not None and operator.eq(address, self.address)
 
 
-def _bp_address_offset_8616(source: tuple[object, ...]) -> int | None:
+@cython.ccall
+def _bp_address_offset_8616(source: object) -> int | None:
     """Normalize only the legacy typed summary tuple at its boundary."""
     if len(source) != 2 or type(source[1]) is not int:
         return None
@@ -86,14 +94,19 @@ def _bp_address_offset_8616(source: tuple[object, ...]) -> int | None:
     return source[1]
 
 
+@cython.ccall
 def _stack_input_segment_proof_8616(
     project: object,
     caller_ssa: SSAFunctionArtifact,
     summary: CallsiteSummary8616,
-    logical_index: int,
+    logical_index: cython.longlong,
     return_use: NearReturnSegmentUse8616,
 ) -> tuple[IRAddress | None, NearPointerStackInputFailure8616 | None]:
     """Reprove one exact stack-address push and its selector at the near call."""
+    address: object
+    failure: object
+    offset: object
+    physical: object
     if not return_use.complete:
         return None, NearPointerStackInputFailure8616.RETURN_USE_UNBOUND
     preservation = return_use.call_preservation
@@ -101,7 +114,7 @@ def _stack_input_segment_proof_8616(
     registered = registered_function_ssa_artifact_8616(project, caller.function_addr)
     if registered.artifact is not caller_ssa or registered.stage is not FunctionSSAArtifactStage8616.SEMANTIC:
         return None, NearPointerStackInputFailure8616.CALLER_SSA_UNBOUND
-    if summary.callsite_addr != preservation.callsite_addr or type(logical_index) is not int:
+    if operator.ne(summary.callsite_addr, preservation.callsite_addr) or type(logical_index) is not int:
         return None, NearPointerStackInputFailure8616.CALLSITE_UNBOUND
     physical, failure = physical_call_argument_8616(summary, logical_index)
     if failure is not None or physical is None or physical.width != 2 or len(physical.pieces) != 1:
@@ -132,8 +145,11 @@ def _stack_input_segment_proof_8616(
     return address, None
 
 
-def _logical_stack_address_8616(definitions: tuple[StorageReachingDefinition8616, ...], offset: int) -> IRAddress | None:
+def _logical_stack_address_8616(definitions: object, offset: cython.longlong) -> IRAddress | None:
     """Join exact source-byte slices of the pushed word, not a pointee extent."""
+    storage: object
+    address: object
+    definition: object
     addresses: list[IRAddress] = []
     for definition in definitions:
         storage = definition.source_storage
@@ -143,7 +159,7 @@ def _logical_stack_address_8616(definitions: tuple[StorageReachingDefinition8616
         exact = address.status is AddressStatus.STABLE and address.segment_origin is SegmentOrigin.PROVEN
         if not exact or address.space is not MemSpace.SS or address.base != ("bp",):
             return None
-        if address.size != storage.width or address.size not in {1, 2}:
+        if operator.ne(address.size, storage.width) or address.size not in {1, 2}:
             return None
         addresses.append(address)
     if not addresses:
@@ -151,16 +167,19 @@ def _logical_stack_address_8616(definitions: tuple[StorageReachingDefinition8616
     ordered = sorted(addresses, key=lambda address: address.offset)
     cursor = offset
     for address in ordered:
-        if address.offset != cursor:
+        if operator.ne(address.offset, cursor):
             return None
         cursor += address.size
-    if cursor != offset + 2:
+    if operator.ne(cursor, offset + 2):
         return None
     return replace(ordered[0], size=2)
 
 
-def _stack_selector_matches_entry_ds_8616(return_use: NearReturnSegmentUse8616, push_addr: int) -> bool:
+@cython.ccall
+def _stack_selector_matches_entry_ds_8616(return_use: NearReturnSegmentUse8616, push_addr: cython.longlong) -> cython.bint:
     """Require must-equality between the pushed address selector and entry DS."""
+    destination: object
+    source: object
     caller = return_use.call_preservation.caller.artifact
     state = build_x86_16_segment_state_artifact(caller,
         call_preservations=return_use.caller_preservations, entry_context=return_use.caller_entry_context)
@@ -169,17 +188,19 @@ def _stack_selector_matches_entry_ds_8616(return_use: NearReturnSegmentUse8616, 
     if source is None or destination is None:
         return False
     proven = source.origin is SegmentOrigin.PROVEN and destination.origin is SegmentOrigin.PROVEN
-    return proven and source.source is not None and source.source == destination.source
+    return proven and source.source is not None and operator.eq(source.source, destination.source)
 
 
+@cython.ccall
 def bind_near_pointer_stack_input_segment_8616(
     project: object,
     caller_ssa: SSAFunctionArtifact,
     summary: CallsiteSummary8616,
-    logical_index: int,
+    logical_index: cython.longlong,
     return_use: NearReturnSegmentUse8616,
 ) -> NearPointerStackInputSegment8616:
     """Bind one SSA-proven stack-address input or preserve a typed refusal."""
+    failure: object
     address, failure = _stack_input_segment_proof_8616(project, caller_ssa, summary, logical_index, return_use)
     accepted = int(failure is None)
     return NearPointerStackInputSegment8616(project, caller_ssa, summary, logical_index,

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Retain exact native arithmetic-producer links to stack-register writes.
 
 Layer: IR.
@@ -9,6 +10,8 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -19,8 +22,10 @@ import networkx as nx
 from angr.ailment.block import Block
 from angr.ailment.expression import BinaryOp, Const, Register
 from angr.ailment.statement import Assignment
+import dataclasses
+import operator
 
-_BINARY_OPERAND_COUNT: int = 2
+_BINARY_OPERAND_COUNT: cython.longlong = 2
 
 
 class StackPointerArithmetic8616(StrEnum):
@@ -30,24 +35,24 @@ class StackPointerArithmetic8616(StrEnum):
     SUB = "Sub"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackPointerProducer8616:
     """One source producer consumed by one physical SP-write occurrence."""
 
-    instruction_addr: int
-    vex_block_addr: int
-    producer_index: int
-    write_index: int
-    register_offset: int
-    width_bits: int
+    instruction_addr: cython.longlong
+    vex_block_addr: cython.longlong
+    producer_index: cython.longlong
+    write_index: cython.longlong
+    register_offset: cython.longlong
+    width_bits: cython.longlong
     operation: StackPointerArithmetic8616
-    amount: int
-    block_addr: int
+    amount: cython.longlong
+    block_addr: cython.longlong
     block_index: int | None
-    statement_index: int
+    statement_index: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackPointerProvenance8616:
     """Closed census of published links; failures leave native code unchanged.
 
@@ -55,30 +60,33 @@ class StackPointerProvenance8616:
     A downstream consumer must independently prove ownership and safe use closure.
     """
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    projections: tuple[StackPointerProducer8616, ...]
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    projections: object
 
 
-def _source_key_8616(tags: Mapping[str, object]) -> tuple[int, int, int] | None:
+def _source_key_8616(tags: Mapping[str, object]) -> object:
     """Read an exact non-negative native instruction/block/statement key."""
-    values = tuple(tags.get(name) for name in ("ins_addr", "vex_block_addr", "vex_stmt_idx"))
-    if any(type(value) is not int or value < 0 for value in values):
+    values = tuple(tags.get(name) for name in iter(("ins_addr", "vex_block_addr", "vex_stmt_idx")))
+    if any(type(value) is not int or value < 0 for value in iter(values)):
         return None
     return cast(tuple[int, int, int], values)
 
 
+@cython.ccall
 def _projection_8616(
-    block: Block, position: int, statement: Assignment,
+    block: Block, position: cython.longlong, statement: Assignment,
 ) -> StackPointerProducer8616 | None:
     """Link a directly consumed tagged arithmetic value, never nearby indices."""
+    producer: object
+    write: object
     source = statement.src
     if not isinstance(source, BinaryOp) or source.op not in {"Add", "Sub"}:
         return None
-    if not isinstance(statement.dst, Register) or len(source.operands) != _BINARY_OPERAND_COUNT:
+    if not isinstance(statement.dst, Register) or operator.ne(len(source.operands), _BINARY_OPERAND_COUNT):
         return None
     amount = source.operands[1]
     if not (
@@ -88,7 +96,7 @@ def _projection_8616(
     ):
         return None
     producer, write = _source_key_8616(source.tags), _source_key_8616(statement.tags)
-    if producer is None or write is None or producer[:2] != write[:2]:
+    if producer is None or write is None or operator.ne(producer[:2], write[:2]):
         return None
     return StackPointerProducer8616(
         instruction_addr=write[0], vex_block_addr=write[1],
@@ -100,16 +108,20 @@ def _projection_8616(
 
 
 def collect_stack_pointer_provenance_8616(
-    graph: nx.DiGraph[Block], *, sp_offset: int,
+    graph: nx.DiGraph[Block], *, sp_offset: cython.longlong,
 ) -> StackPointerProvenance8616:
     """Publish SP arithmetic links without changing the graph or merging paths."""
+    projection: object
+    block: object
+    position: object
+    statement: object
     raw = 0
     projections: list[StackPointerProducer8616] = []
     for block in sorted(graph, key=lambda node: (node.addr, -1 if node.idx is None else node.idx)):
         for position, statement in enumerate(block.statements):
             if not (
                 isinstance(statement, Assignment) and isinstance(statement.dst, Register)
-                and statement.dst.reg_offset == sp_offset
+                and operator.eq(statement.dst.reg_offset, sp_offset)
             ):
                 continue
             raw += 1

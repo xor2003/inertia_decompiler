@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Project wide carry-result storage into stack-object Lowering candidates.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -17,6 +20,8 @@ from inertia.alias.alias_model_impl import AliasStorageFacts
 from inertia.ir.core import IRAddress, MemSpace
 from inertia.widening.carry_borrow_pipeline import CarryBorrowWideningPipeline8616
 from inertia.widening.carry_borrow_storage import WideCarryBorrowStorage8616
+import dataclasses
+import operator
 
 
 class WideCarryBorrowStackRole8616(StrEnum):
@@ -35,13 +40,13 @@ class WideCarryBorrowStackFailure8616(StrEnum):
     STORAGE_IDENTITY_MISMATCH = "storage_identity_mismatch"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideCarryBorrowStackCandidate8616:
     """One exact wide stack range ready for canonical C-variable Lowering."""
 
     role: WideCarryBorrowStackRole8616
     address: IRAddress
-    entry_sp_offset: int
+    entry_sp_offset: cython.longlong
     storage: AliasStorageFacts
     source: WideCarryBorrowStorage8616
 
@@ -52,61 +57,63 @@ class WideCarryBorrowStackCandidate8616:
         return (destination.low_store.address, destination.high_store.address)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideCarryBorrowStackRefusal8616:
     """One retained refusal that leaves narrow storage available."""
 
     kind: WideCarryBorrowStackFailure8616
-    detail: str
+    detail: object
     address: IRAddress | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideCarryBorrowStackStats8616:
     """Closed evidence accounting for wide stack Lowering projection."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether each Widening outcome has one Lowering outcome."""
         return (
-            self.raw_fact_count == self.materialized_count + self.failure_count
-            and self.normalized_fact_count == self.classified_fact_count
-            and self.classified_fact_count == self.materialized_count
+            operator.eq(self.raw_fact_count, self.materialized_count + self.failure_count)
+            and operator.eq(self.normalized_fact_count, self.classified_fact_count)
+            and operator.eq(self.classified_fact_count, self.materialized_count)
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideCarryBorrowStackArtifact8616:
     """Function-level wide stack candidates and refusals."""
 
-    function_addr: int
-    candidates: tuple[WideCarryBorrowStackCandidate8616, ...]
-    refusals: tuple[WideCarryBorrowStackRefusal8616, ...]
+    function_addr: cython.longlong
+    candidates: object
+    refusals: object
     stats: WideCarryBorrowStackStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether projection count and evidence accounting are closed."""
         return self.stats.complete
 
 
+@cython.ccall
 def _refusal(
     kind: WideCarryBorrowStackFailure8616,
-    detail: str,
+    detail: object,
     address: IRAddress | None = None,
 ) -> WideCarryBorrowStackRefusal8616:
     return WideCarryBorrowStackRefusal8616(kind, detail, address)
 
 
+@cython.ccall
 def _candidate_or_refusal(
     source: WideCarryBorrowStorage8616,
-    bp_entry_sp_delta: int | None,
+    bp_entry_sp_delta: object,
 ) -> WideCarryBorrowStackCandidate8616 | WideCarryBorrowStackRefusal8616:
     address = source.address
     if (
@@ -152,6 +159,7 @@ def project_wide_carry_borrow_stack_storage_8616(
     bp_entry_sp_delta: int | None,
 ) -> WideCarryBorrowStackArtifact8616:
     """Project every wide destination into a local candidate or typed refusal."""
+    resolution: object
     outcomes: list[WideCarryBorrowStackCandidate8616 | WideCarryBorrowStackRefusal8616] = []
     for resolution in pipeline.storage_widening.resolutions:
         if resolution.value is None:
@@ -163,8 +171,8 @@ def project_wide_carry_borrow_stack_storage_8616(
             )
         else:
             outcomes.append(_candidate_or_refusal(resolution.value, bp_entry_sp_delta))
-    candidates = tuple(item for item in outcomes if isinstance(item, WideCarryBorrowStackCandidate8616))
-    refusals = tuple(item for item in outcomes if isinstance(item, WideCarryBorrowStackRefusal8616))
+    candidates = tuple(item for item in iter(outcomes) if isinstance(item, WideCarryBorrowStackCandidate8616))
+    refusals = tuple(item for item in iter(outcomes) if isinstance(item, WideCarryBorrowStackRefusal8616))
     return WideCarryBorrowStackArtifact8616(
         function_addr=pipeline.function_addr,
         candidates=candidates,

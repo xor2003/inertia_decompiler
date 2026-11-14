@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Select proven stack objects for call-argument source materialization.
 
 Layer: Types/Lowering.
@@ -12,6 +13,8 @@ from rendered C, assembly text, symbol names, or compiler-specific shapes.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterator, Mapping, MutableMapping
 from enum import Enum
@@ -43,12 +46,14 @@ class PushStoreWidthVerdict8616(Enum):
     UNKNOWN_REFUSE = "unknown_refuse"
 
 
+@cython.ccall
 def classify_push_store_width_8616(lvalue: object) -> PushStoreWidthVerdict8616:
     """Refuse partial/unknown stores without changing their memory effects.
 
     Width is necessary, not sufficient: PUSH identity, alias storage and reaching
     definitions must independently establish ownership by a call argument.
     """
+    store_type: object
     if not isinstance(lvalue, CExpression):
         return PushStoreWidthVerdict8616.UNKNOWN_REFUSE
     try:
@@ -69,7 +74,7 @@ def classify_push_store_width_8616(lvalue: object) -> PushStoreWidthVerdict8616:
 class _CallArgumentCFunction8616(Protocol):
     """Third-party C function surface needed for stack-object selection."""
 
-    arg_list: list[object] | tuple[object, ...]
+    arg_list: object
     statements: object
     variables_in_use: Mapping[object, object]
 
@@ -80,7 +85,8 @@ class _CallArgumentCodegen8616(Protocol):
     cfunc: _CallArgumentCFunction8616
 
 
-def _stack_name_preference_8616(name: str | None) -> int:
+@cython.ccall
+def _stack_name_preference_8616(name: object) -> cython.longlong:
     """Rank evidence-bearing names above anonymous temporary carriers."""
     if not name:
         return 0
@@ -93,16 +99,18 @@ def _stack_name_preference_8616(name: str | None) -> int:
 
 def iter_stack_cvariable_candidates_8616(
     codegen: object,
-    synthetic_stack_cvars: Mapping[int, CVariable],
+    synthetic_stack_cvars: Mapping[cython.longlong, CVariable],
 ) -> Iterator[CVariable]:
     """Yield lowering-created and angr-owned stack variables once, in stable order."""
+    candidate: object
+    cvar: object
     boundary = cast(_CallArgumentCodegen8616, codegen)
     try:
         cfunc = boundary.cfunc
     except AttributeError:
         return
 
-    yielded: set[int] = set()
+    yielded: set[cython.longlong] = set()
 
     def _yield_candidate(value: object) -> Iterator[CVariable]:
         if not isinstance(value, CVariable) or not isinstance(value.variable, SimStackVariable):
@@ -122,6 +130,7 @@ def iter_stack_cvariable_candidates_8616(
 
 def _native_stack_candidates_8616(cfunc: _CallArgumentCFunction8616) -> Iterator[object]:
     """Read native declaration and body inventories without assuming completeness."""
+    root: object
     try:
         arguments = cfunc.arg_list
     except AttributeError:
@@ -143,18 +152,22 @@ def _native_stack_candidates_8616(cfunc: _CallArgumentCFunction8616) -> Iterator
         yield from _iter_c_nodes_deep_8616(root)
 
 
+@cython.ccall
 def containing_stack_cvariable_8616(
     codegen: object,
-    synthetic_stack_cvars: Mapping[int, CVariable],
+    synthetic_stack_cvars: Mapping[cython.longlong, CVariable],
     *,
-    offset: int,
-    size_hint: int = 1,
+    offset: cython.longlong,
+    size_hint: cython.longlong = 1,
 ) -> CVariable | None:
     """Select a proven object extent, not merely its angr backing allocation.
 
     ``size_hint`` bounds the containing object's size; it is not a read width
     starting at ``offset``. Callers may request addresses inside that object.
     """
+    best_score: object
+    owner: object
+    cvar: object
     minimum_size = max(size_hint, 1)
     canonical = stack_cvar_for_machine_bp_range_8616(codegen, offset, minimum_size)
     if isinstance(canonical, CVariable) and isinstance(canonical.variable, SimStackVariable):
@@ -166,7 +179,7 @@ def containing_stack_cvariable_8616(
     ):
         return owner.cvar
     best: CVariable | None = None
-    best_score: tuple[int, int, int, int, int] | None = None
+    best_score = None
     for cvar in iter_stack_cvariable_candidates_8616(codegen, synthetic_stack_cvars):
         variable = cvar.variable
         if not isinstance(variable, SimStackVariable):
@@ -194,7 +207,8 @@ def containing_stack_cvariable_8616(
     return best
 
 
-def call_argument_source_requires_exact_address_identity_8616(source: object) -> bool:
+@cython.ccall
+def call_argument_source_requires_exact_address_identity_8616(source: object) -> cython.bint:
     """Return whether one typed push source requires exact stack-address identity."""
     if not isinstance(source, tuple) or not source or not isinstance(source[0], str):
         return False
@@ -208,13 +222,14 @@ def call_argument_source_requires_exact_address_identity_8616(source: object) ->
     }
 
 
+@cython.ccall
 def materialize_call_argument_stack_cvariable_8616(
     codegen: object,
-    synthetic_stack_cvars: MutableMapping[int, CVariable],
+    synthetic_stack_cvars: MutableMapping[cython.longlong, CVariable],
     *,
-    machine_bp_offset: int,
-    size_hint: int = 1,
-    preferred_name: str | None = None,
+    machine_bp_offset: cython.longlong,
+    size_hint: cython.longlong = 1,
+    preferred_name: object = None,
 ) -> CVariable | None:
     """Resolve or materialize one call source through a proven stack coordinate.
 
@@ -223,6 +238,8 @@ def materialize_call_argument_stack_cvariable_8616(
     therefore refuses materialization instead of treating equal integers from
     those two domains as the same storage slot.
     """
+    entry_sp_offset: object
+    existing: object
     minimum_size = max(size_hint, 1)
     existing = containing_stack_cvariable_8616(
         codegen,
@@ -255,6 +272,7 @@ def materialize_call_argument_stack_cvariable_8616(
     return materialized
 
 
+@cython.ccall
 def outgoing_call_stack_carrier_offset_8616(
     codegen: object,
     expression: object,
@@ -264,6 +282,7 @@ def outgoing_call_stack_carrier_offset_8616(
     return bp_offset if isinstance(bp_offset, int) and 0 <= bp_offset <= _OUTGOING_CARRIER_MAX_BP_OFFSET else None
 
 
+@cython.ccall
 def call_argument_stack_variable_offset_8616(
     codegen: object,
     expression: object,

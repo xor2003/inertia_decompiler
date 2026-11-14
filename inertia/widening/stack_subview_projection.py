@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize Widening-proven structured-C stack object views.
 
 Layer: Widening.
@@ -14,6 +15,8 @@ move this work to postprocess or infer it from rendered C or assembly text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import Enum
@@ -43,20 +46,21 @@ from inertia.widening.stack_subview_proof import (
     resolve_widened_stack_object_read_8616,
     stack_variable_range_8616,
 )
+import dataclasses
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class StackSubviewProjectionStats8616:
     """Closed evidence counters for contained stack-subview materialization."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _StackSubviewCandidate8616:
     """One syntax-normalized stack subview recomposition candidate."""
 
@@ -65,11 +69,13 @@ class _StackSubviewCandidate8616:
     projection_bits: int | None
 
 
-def _dynamic_attr_8616(obj: object, name: str, default: object = None) -> Any:  # noqa: ANN401
+@cython.ccall
+def _dynamic_attr_8616(obj: object, name: object, default: object = None) -> Any:  # noqa: ANN401
     """Read optional third-party codegen state at the dynamic AST boundary."""
     return getattr(obj, name, default)
 
 
+@cython.ccall
 def _unwrap_casts_8616(node: object) -> object:
     """Remove syntax-only C casts while matching a structured expression."""
     while isinstance(node, structured_c.CTypeCast):
@@ -77,6 +83,7 @@ def _unwrap_casts_8616(node: object) -> object:
     return node
 
 
+@cython.ccall
 def _constant_int_8616(node: object) -> int | None:
     """Return an integer C constant value without parsing rendered text."""
     node = _unwrap_casts_8616(node)
@@ -85,8 +92,13 @@ def _constant_int_8616(node: object) -> int | None:
     return None
 
 
-def _projection_candidate_8616(node: object) -> tuple[structured_c.CVariable, int | None] | None:
+@cython.ccall
+def _projection_candidate_8616(node: object) -> object:
     """Match a byte projection multiplied or shifted into a wider value."""
+    scale: object
+    shift: object
+    scale_node: object
+    subview_node: object
     node = _unwrap_casts_8616(node)
     if not isinstance(node, structured_c.CBinaryOp):
         return None
@@ -108,8 +120,12 @@ def _projection_candidate_8616(node: object) -> tuple[structured_c.CVariable, in
     return None
 
 
+@cython.ccall
 def _stack_subview_candidate_8616(node: object) -> _StackSubviewCandidate8616 | None:
     """Match an OR recomposition with one direct container and one projected view."""
+    projection: object
+    container_node: object
+    projection_node: object
     node = _unwrap_casts_8616(node)
     if not isinstance(node, structured_c.CBinaryOp) or node.op != "Or":
         return None
@@ -122,14 +138,16 @@ def _stack_subview_candidate_8616(node: object) -> _StackSubviewCandidate8616 | 
     return None
 
 
-def _word_byte_proof_8616(proof: StackObjectViewProof8616 | None) -> StackObjectViewProof8616 | None:
+@cython.ccall
+def _word_byte_proof_8616(proof: object) -> StackObjectViewProof8616 | None:
     """Accept the currently supported exact byte view of a word owner."""
     if proof is None or proof.owner_size != 2 or proof.view_size != 1:
         return None
     return proof if proof.relative_offset in {0, 1} else None
 
 
-def _increment_codegen_counter_8616(codegen: object, name: str, amount: int) -> None:
+@cython.ccall
+def _increment_codegen_counter_8616(codegen: object, name: object, amount: cython.longlong) -> None:
     """Accumulate evidence on the dynamic third-party codegen boundary."""
     current = _dynamic_attr_8616(codegen, name, 0)
     current_value = current if isinstance(current, int) else 0
@@ -144,7 +162,7 @@ class _StackSubviewPlanKind8616(Enum):
     READ = "read"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _StackSubviewPlan8616:
     """One proven materialization deferred until the pass commits a write."""
 
@@ -152,7 +170,7 @@ class _StackSubviewPlan8616:
     proof: StackObjectViewProof8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SubviewApplicabilityProbe8616:
     """Read-only evidence that subview materialization is a proven no-op.
 
@@ -164,7 +182,8 @@ class SubviewApplicabilityProbe8616:
     stats: StackSubviewProjectionStats8616 | None
 
 
-def _subview_child_policy_8616(parent: object, attr: str) -> bool:
+@cython.ccall
+def _subview_child_policy_8616(parent: object, attr: object) -> cython.bint:
     """Keep assignment lvalues and address operands outside value projection."""
     if isinstance(parent, structured_c.CAssignment) and attr == "lhs":
         return False
@@ -175,10 +194,13 @@ def _subview_child_policy_8616(parent: object, attr: str) -> bool:
     )
 
 
+@cython.ccall
 def _finish_stack_subview_stats_8616(
     codegen: object, stats: StackSubviewProjectionStats8616
 ) -> None:
     """Publish subview diagnostics and enforce the closed evidence loop."""
+    counter: object
+    value: object
     for counter, value in (
         ("_inertia_stack_subview_raw_fact_count", stats.raw_fact_count),
         ("_inertia_stack_subview_normalized_fact_count", stats.normalized_fact_count),
@@ -195,8 +217,9 @@ def _finish_stack_subview_stats_8616(
         )
 
 
-def materialize_contained_stack_subviews_8616(codegen: object) -> bool:
+def materialize_contained_stack_subviews_8616(codegen: object) -> cython.bint:
     """Project proven word-owned byte views from the current Widening decision."""
+    root: object
     cfunc = _dynamic_attr_8616(codegen, "cfunc", None)
     root = _dynamic_attr_8616(cfunc, "statements", None)
     if root is None:
@@ -207,6 +230,7 @@ def materialize_contained_stack_subviews_8616(codegen: object) -> bool:
 
     def transform(node: object) -> object:
         """Materialize one proven recomposition, direct read, or direct write."""
+        plan: object
         plan = _subview_materialization_plan_8616(codegen, cfunc, artifact, stats, node)
         if plan is None:
             return node
@@ -239,6 +263,7 @@ def stack_subview_projection_probe_8616(codegen: object) -> SubviewApplicability
     contract errors) propagate identically; unexpected boundary type failures
     are treated as unknown.
     """
+    root: object
     cfunc = _dynamic_attr_8616(codegen, "cfunc", None)
     root = _dynamic_attr_8616(cfunc, "statements", None)
     if root is None:
@@ -264,6 +289,7 @@ def stack_subview_projection_probe_8616(codegen: object) -> SubviewApplicability
     return SubviewApplicabilityProbe8616(stats=stats)
 
 
+@cython.ccall
 def _subview_materialization_plan_8616(
     codegen: object,
     cfunc: object,
@@ -272,6 +298,7 @@ def _subview_materialization_plan_8616(
     node: object,
 ) -> _StackSubviewPlan8616 | None:
     """Decide one node's materialization; shared by transform and probe."""
+    plan: object
     plan = _write_assignment_subview_plan_8616(codegen, cfunc, artifact, stats, node)
     if plan is not None:
         return plan
@@ -281,6 +308,7 @@ def _subview_materialization_plan_8616(
     return _read_subview_plan_8616(codegen, cfunc, artifact, stats, node)
 
 
+@cython.ccall
 def _materialize_subview_plan_8616(
     codegen: object, node: object, plan: _StackSubviewPlan8616
 ) -> object:
@@ -297,6 +325,7 @@ def _materialize_subview_plan_8616(
     return make_scalar_subview_read_expr_8616(codegen, plan.proof)
 
 
+@cython.ccall
 def _write_assignment_subview_plan_8616(
     codegen: object,
     cfunc: object,
@@ -305,6 +334,7 @@ def _write_assignment_subview_plan_8616(
     node: object,
 ) -> _StackSubviewPlan8616 | None:
     """Plan a proven scalar-subview write assignment, or None."""
+    proof: object
     if not (
         isinstance(node, structured_c.CAssignment) and isinstance(node.lhs, structured_c.CVariable)
     ):
@@ -330,12 +360,13 @@ def _write_assignment_subview_plan_8616(
     return _StackSubviewPlan8616(_StackSubviewPlanKind8616.WRITE_ASSIGNMENT, proof)
 
 
+@cython.ccall
 def _write_rhs_supported_8616(
     resolution: StackObjectViewResolution8616,
-    proof: StackObjectViewProof8616 | None,
+    proof: object,
     rhs: object,
     rhs_effect: StackSubviewRhsEffect8616,
-) -> bool:
+) -> cython.bint:
     """Check the resolution, proof, and RHS effect all support the write."""
     return (
         resolution.kind is StackObjectViewResolutionKind8616.ACCEPTED
@@ -345,9 +376,10 @@ def _write_rhs_supported_8616(
     )
 
 
+@cython.ccall
 def _rhs_effect_supported_8616(
     rhs_effect: StackSubviewRhsEffect8616, proof: StackObjectViewProof8616
-) -> bool:
+) -> cython.bint:
     """Check the RHS effect kind is proven safe for owner writes."""
     if rhs_effect.kind is StackSubviewRhsEffectKind8616.UNSUPPORTED:
         return False
@@ -357,6 +389,7 @@ def _rhs_effect_supported_8616(
     )
 
 
+@cython.ccall
 def _projection_candidate_subview_plan_8616(
     codegen: object,
     cfunc: object,
@@ -365,6 +398,8 @@ def _projection_candidate_subview_plan_8616(
     node: object,
 ) -> _StackSubviewPlan8616 | None:
     """Plan a proven contained byte projection, or None."""
+    candidate: object
+    proof: object
     candidate = _stack_subview_candidate_8616(node)
     if candidate is None:
         return None
@@ -385,13 +420,14 @@ def _projection_candidate_subview_plan_8616(
     return _StackSubviewPlan8616(_StackSubviewPlanKind8616.PROJECTION, proof)
 
 
+@cython.ccall
 def _candidate_projection_proven_8616(
     candidate: _StackSubviewCandidate8616,
     resolution: StackObjectViewResolution8616,
     proof: StackObjectViewProof8616,
     codegen: object,
     artifact: StackMemoryObjectWideningArtifact8616 | None,
-) -> bool:
+) -> cython.bint:
     """Check the projection shape, proof, and owner range all agree."""
     return (
         candidate.projection_bits == 8
@@ -401,12 +437,13 @@ def _candidate_projection_proven_8616(
     )
 
 
+@cython.ccall
 def _owner_range_matches_8616(
     proof: StackObjectViewProof8616,
     candidate: _StackSubviewCandidate8616,
-    artifact: StackMemoryObjectWideningArtifact8616 | None,
+    artifact: object,
     codegen: object,
-) -> bool:
+) -> cython.bint:
     """Check the proven owner range covers the projected container byte."""
     container_range = (
         stack_variable_range_8616(candidate.container.variable, artifact.function_addr, codegen=codegen)
@@ -417,6 +454,7 @@ def _owner_range_matches_8616(
     return container_range in {(owner_range[0], 1), owner_range}
 
 
+@cython.ccall
 def _read_subview_plan_8616(
     codegen: object,
     cfunc: object,
@@ -425,6 +463,7 @@ def _read_subview_plan_8616(
     node: object,
 ) -> _StackSubviewPlan8616 | None:
     """Plan a proven scalar-subview read of a stack variable, or None."""
+    proof: object
     if not isinstance(node, structured_c.CVariable):
         return None
     resolution = resolve_stack_object_view_8616(codegen, cfunc, artifact, node)

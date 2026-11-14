@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed Alias contracts for exact indexed value-copy relationships.
 
 Layer: Alias.
@@ -11,6 +12,8 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -30,6 +33,8 @@ from .indexed_address_contracts import (
     IndexedAddressAliasEvidence8616,
     IndexedAddressAliasFact8616,
 )
+import dataclasses
+import operator
 
 
 class IndexedAliasCopyFailureKind8616(StrEnum):
@@ -47,7 +52,7 @@ class IndexedAliasCopyFailureKind8616(StrEnum):
     WIDTH_CONFLICT = "width_conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAliasCopyFact8616:
     """One IR copy whose endpoints share an exact global index identity."""
 
@@ -58,7 +63,7 @@ class IndexedAliasCopyFact8616:
     destination_access: IndexedAliasAccessFact8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether value, storage, role, width, and index proofs agree."""
         source_range = self.source.storage.index_source_range
         destination_range = self.destination.storage.index_source_range
@@ -68,33 +73,32 @@ class IndexedAliasCopyFact8616:
             and self.destination.complete
             and self.source_access.complete
             and self.destination_access.complete
-            and self.source.source == self.source_copy.source
-            and self.destination.source == self.source_copy.destination
-            and self.source_access.source == self.source
-            and self.destination_access.source == self.destination
+            and operator.eq(self.source.source, self.source_copy.source)
+            and operator.eq(self.destination.source, self.source_copy.destination)
+            and operator.eq(self.source_access.source, self.source)
+            and operator.eq(self.destination_access.source, self.destination)
             and self.source_access.role is IndexedAliasAccessRole8616.GLOBAL_INDEXED
             and self.destination_access.role
             is IndexedAliasAccessRole8616.GLOBAL_INDEXED
             and self.source.storage.width == self.destination.storage.width > 0
-            and self.source.storage.index_shift
-            == self.destination.storage.index_shift
+            and operator.eq(self.source.storage.index_shift, self.destination.storage.index_shift)
             and source_range.space is destination_range.space
-            and source_range.addresses == destination_range.addresses
-            and source_range.storage.identity == destination_range.storage.identity
+            and operator.eq(source_range.addresses, destination_range.addresses)
+            and operator.eq(source_range.storage.identity, destination_range.storage.identity)
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAliasCopyRefusal8616:
     """One retained IR copy input and its Alias refusal reason."""
 
     failure: IndexedAliasCopyFailureKind8616
-    detail: str
+    detail: object
     source_copy: IndexedAddressCopyFact8616 | None = None
     source_refusal: IndexedAddressCopyRefusal8616 | None = None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether this refusal identifies exactly one IR input."""
         return bool(
             self.detail
@@ -102,50 +106,50 @@ class IndexedAliasCopyRefusal8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAliasCopyStats8616:
     """Closed accounting for IR-copy to Alias-copy projection."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every IR input became one Alias copy or refusal."""
         return bool(
-            self.raw_fact_count == self.materialized_count + self.failure_count
+            operator.eq(self.raw_fact_count, self.materialized_count + self.failure_count)
             and self.normalized_fact_count
             == self.classified_fact_count
             == self.materialized_count
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IndexedAliasCopyEvidence8616:
     """Function-wide Alias copy facts with all IR outcomes retained."""
 
-    function_addr: int
-    facts: tuple[IndexedAliasCopyFact8616, ...]
-    refusals: tuple[IndexedAliasCopyRefusal8616, ...]
+    function_addr: cython.longlong
+    facts: object
+    refusals: object
     stats: IndexedAliasCopyStats8616
     source: IndexedAddressCopyEvidence8616
     aliases: IndexedAddressAliasEvidence8616
     accesses: IndexedAliasAccessEvidence8616
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether IR, Alias, and access-role accounting is coherent."""
-        projected_copies = tuple(fact.source_copy for fact in self.facts) + tuple(
+        projected_copies = tuple(fact.source_copy for fact in iter(self.facts)) + tuple(
             refusal.source_copy
-            for refusal in self.refusals
+            for refusal in iter(self.refusals)
             if refusal.source_copy is not None
         )
         projected_refusals = tuple(
             refusal.source_refusal
-            for refusal in self.refusals
+            for refusal in iter(self.refusals)
             if refusal.source_refusal is not None
         )
         return bool(
@@ -156,20 +160,20 @@ class IndexedAliasCopyEvidence8616:
             == self.source.function_addr
             == self.aliases.function_addr
             == self.accesses.function_addr
-            and self.aliases.source == self.source.source
-            and self.accesses.source == self.aliases
-            and self.stats.raw_fact_count == self.source.stats.raw_fact_count
-            and len(self.facts) == self.stats.materialized_count
-            and len(self.refusals) == self.stats.failure_count
+            and operator.eq(self.aliases.source, self.source.source)
+            and operator.eq(self.accesses.source, self.aliases)
+            and operator.eq(self.stats.raw_fact_count, self.source.stats.raw_fact_count)
+            and operator.eq(len(self.facts), self.stats.materialized_count)
+            and operator.eq(len(self.refusals), self.stats.failure_count)
             and self.stats.closed
-            and all(fact.complete for fact in self.facts)
-            and all(refusal.complete for refusal in self.refusals)
-            and len(projected_copies) == len(self.source.facts)
-            and all(projected_copies.count(source) == 1 for source in self.source.facts)
-            and len(projected_refusals) == len(self.source.refusals)
+            and all(fact.complete for fact in iter(self.facts))
+            and all(refusal.complete for refusal in iter(self.refusals))
+            and operator.eq(len(projected_copies), len(self.source.facts))
+            and all(projected_copies.count(source) == 1 for source in iter(self.source.facts))
+            and operator.eq(len(projected_refusals), len(self.source.refusals))
             and all(
                 projected_refusals.count(source) == 1
-                for source in self.source.refusals
+                for source in iter(self.source.refusals)
             )
         )
 

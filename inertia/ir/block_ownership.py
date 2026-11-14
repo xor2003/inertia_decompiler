@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Canonicalize overlapping recovered blocks without losing IR instructions.
 
 Layer: IR.
@@ -10,12 +11,16 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
 
 from .block_successor_chain import proven_suffix_owner_chain_8616
 from .core import IRBlock
+import dataclasses
+import operator
 
 __all__ = [
     "IRBlockOwnershipArtifact8616",
@@ -45,47 +50,46 @@ class IRBlockSuccessorRewriteFailure8616(StrEnum):
     SUCCESSOR_CONFLICT = "successor_conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRBlockOwnershipRemoval8616:
     """One duplicate IR instruction removed in favor of its canonical block."""
 
-    source_block_addr: int
-    canonical_block_addr: int
-    instr_index: int
-    instr_addr: int
+    source_block_addr: cython.longlong
+    canonical_block_addr: cython.longlong
+    instr_index: cython.longlong
+    instr_addr: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRBlockOwnershipRefusal8616:
     """One ambiguous overlap retained without changing the input IR."""
 
-    source_block_addr: int
-    proposed_owner_addr: int
-    instr_index: int
-    instr_addr: int
+    source_block_addr: cython.longlong
+    proposed_owner_addr: cython.longlong
+    instr_index: cython.longlong
+    instr_addr: cython.longlong
     failure: IRBlockOwnershipFailure8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRBlockOwnershipStats8616:
     """Closed evidence accounting for overlapping instruction ownership."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every overlap candidate has one retained outcome."""
         return (
-            self.raw_fact_count == self.normalized_fact_count
-            and self.classified_fact_count
-            == self.materialized_count + self.failure_count
+            operator.eq(self.raw_fact_count, self.normalized_fact_count)
+            and operator.eq(self.classified_fact_count, self.materialized_count + self.failure_count)
         )
 
-    def to_summary(self) -> dict[str, int]:
+    def to_summary(self) -> dict[str, cython.longlong]:
         """Return stable flat counters for the function IR summary."""
         return {
             "block_ownership_raw_fact_count": self.raw_fact_count,
@@ -96,51 +100,51 @@ class IRBlockOwnershipStats8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRBlockSuccessorRewrite8616:
     """One overlap prefix rewired to its canonical suffix owner."""
 
-    source_block_addr: int
-    canonical_block_addr: int
-    original_successors: tuple[int, ...]
-    canonical_successors: tuple[int, ...]
+    source_block_addr: cython.longlong
+    canonical_block_addr: cython.longlong
+    original_successors: object
+    canonical_successors: object
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether one exact duplicated branch became a suffix edge."""
         return bool(
-            self.source_block_addr != self.canonical_block_addr
-            and self.original_successors == self.canonical_successors
+            operator.ne(self.source_block_addr, self.canonical_block_addr)
+            and operator.eq(self.original_successors, self.canonical_successors)
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRBlockSuccessorRewriteRefusal8616:
     """One overlap prefix whose successor ownership remained ambiguous."""
 
-    source_block_addr: int
-    proposed_owner_addrs: tuple[int, ...]
-    source_successors: tuple[int, ...]
+    source_block_addr: cython.longlong
+    proposed_owner_addrs: object
+    source_successors: object
     failure: IRBlockSuccessorRewriteFailure8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether the refusal retains an exact source and owner set."""
         return self.source_block_addr >= 0 and bool(self.proposed_owner_addrs)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRBlockSuccessorRewriteStats8616:
     """Closed accounting for overlap-prefix CFG successor candidates."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every candidate was rewritten or refused."""
         return bool(
             self.raw_fact_count
@@ -149,7 +153,7 @@ class IRBlockSuccessorRewriteStats8616:
             == self.materialized_count + self.failure_count
         )
 
-    def to_summary(self) -> dict[str, int]:
+    def to_summary(self) -> dict[str, cython.longlong]:
         """Return stable flat CFG-rewrite counters for IR diagnostics."""
         return {
             "block_successor_rewrite_raw_fact_count": self.raw_fact_count,
@@ -160,13 +164,13 @@ class IRBlockSuccessorRewriteStats8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRBlockOwnershipArtifact8616:
     """Canonical blocks plus every duplicate removal and overlap refusal."""
 
-    blocks: tuple[IRBlock, ...]
-    removals: tuple[IRBlockOwnershipRemoval8616, ...]
-    refusals: tuple[IRBlockOwnershipRefusal8616, ...]
+    blocks: object
+    removals: object
+    refusals: object
     stats: IRBlockOwnershipStats8616
     successor_rewrites: tuple[IRBlockSuccessorRewrite8616, ...] = ()
     successor_refusals: tuple[IRBlockSuccessorRewriteRefusal8616, ...] = ()
@@ -175,35 +179,38 @@ class IRBlockOwnershipArtifact8616:
     )
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether all input instructions remain owned or canonicalized."""
-        retained_count = sum(len(block.instrs) for block in self.blocks)
+        retained_count = sum(len(block.instrs) for block in iter(self.blocks))
         return (
             self.stats.complete
             and self.successor_stats.closed
-            and retained_count + self.stats.materialized_count
-            == self.stats.raw_fact_count
-            and len(self.successor_rewrites)
-            == self.successor_stats.materialized_count
-            and len(self.successor_refusals) == self.successor_stats.failure_count
-            and all(item.complete for item in self.successor_rewrites)
-            and all(item.complete for item in self.successor_refusals)
+            and operator.eq(retained_count + self.stats.materialized_count, self.stats.raw_fact_count)
+            and operator.eq(len(self.successor_rewrites), self.successor_stats.materialized_count)
+            and operator.eq(len(self.successor_refusals), self.successor_stats.failure_count)
+            and all(item.complete for item in iter(self.successor_rewrites))
+            and all(item.complete for item in iter(self.successor_refusals))
         )
 
 
 def canonicalize_ir_block_ownership_8616(
-    blocks: tuple[IRBlock, ...],
+    blocks: object,
 ) -> IRBlockOwnershipArtifact8616:
     """Remove only overlap instructions exactly decoded by a later block."""
+    instr_addr: object
+    next_start: object
+    block_index: object
+    instr_index: object
+    instruction: object
     ordered = tuple(sorted(blocks, key=lambda block: block.addr))
-    starts = tuple(block.addr for block in ordered)
-    by_addr = {block.addr: block for block in ordered}
+    starts = tuple(block.addr for block in iter(ordered))
+    by_addr = {block.addr: block for block in iter(ordered)}
     removals: list[IRBlockOwnershipRemoval8616] = []
     refusals: list[IRBlockOwnershipRefusal8616] = []
     successor_rewrites: list[IRBlockSuccessorRewrite8616] = []
     successor_refusals: list[IRBlockSuccessorRewriteRefusal8616] = []
     canonical_blocks: list[IRBlock] = []
-    canonical_by_addr: dict[int, IRBlock] = {}
+    canonical_by_addr: dict[cython.longlong, IRBlock] = {}
 
     # Canonicalize suffixes first so prefix CFG edges can consume their proof.
     for block_index in reversed(range(len(ordered))):
@@ -217,9 +224,9 @@ def canonicalize_ir_block_ownership_8616(
             if next_start is None or instr_addr is None or instr_addr < next_start:
                 retained.append(instruction)
                 continue
-            owner_addr = max(start for start in later_starts if start <= instr_addr)
+            owner_addr = max(start for start in iter(later_starts) if start <= instr_addr)
             owner = by_addr[owner_addr]
-            if any(candidate.addr == instr_addr for candidate in owner.instrs):
+            if any(operator.eq(candidate.addr, instr_addr) for candidate in iter(owner.instrs)):
                 removals.append(
                     IRBlockOwnershipRemoval8616(
                         block.addr,
@@ -243,7 +250,7 @@ def canonicalize_ir_block_ownership_8616(
         successors = block.successor_addrs
         if block_removals:
             owner_addrs = tuple(
-                sorted({removal.canonical_block_addr for removal in block_removals})
+                sorted({removal.canonical_block_addr for removal in iter(block_removals)})
             )
             if successors == owner_addrs:
                 pass
@@ -269,7 +276,7 @@ def canonicalize_ir_block_ownership_8616(
                 )
             else:
                 owner = by_addr[owner_addrs[0]]
-                if successors == owner.successor_addrs:
+                if operator.eq(successors, owner.successor_addrs):
                     successor_rewrites.append(
                         IRBlockSuccessorRewrite8616(
                             block.addr,
@@ -298,7 +305,7 @@ def canonicalize_ir_block_ownership_8616(
         )
         canonical_by_addr[block.addr] = canonical_blocks[-1]
 
-    raw_count = sum(len(block.instrs) for block in ordered)
+    raw_count = sum(len(block.instrs) for block in iter(ordered))
     stats = IRBlockOwnershipStats8616(
         raw_fact_count=raw_count,
         normalized_fact_count=raw_count,

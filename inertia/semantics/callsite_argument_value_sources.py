@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Normalize exact BP-relative value sources from callsite summaries.
 
 Layer: Semantics/Callsite summary.
@@ -13,10 +14,14 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
 from .callsite_summary import CallsitePushSourceKind8616
+import dataclasses
+import operator
 
 __all__ = [
     "CallArgumentStackValueSource8616",
@@ -24,14 +29,15 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallArgumentStackValueSource8616:
     """Exact BP-relative storage read that feeds one physical argument PUSH."""
 
-    offset: int
-    width: int
+    offset: cython.longlong
+    width: cython.longlong
 
 
+@cython.ccall
 def call_argument_stack_value_source_8616(
     source: object,
 ) -> CallArgumentStackValueSource8616 | None:
@@ -40,7 +46,7 @@ def call_argument_stack_value_source_8616(
         return None
     source_kind, offset, width = source
     if (
-        source_kind != CallsitePushSourceKind8616.BP_VALUE.value
+        operator.ne(source_kind, CallsitePushSourceKind8616.BP_VALUE.value)
         or type(offset) is not int
         or type(width) is not int
         or width not in {1, 2, 4}

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: CLI/fallback/reporting.
 
 Responsibility: expose the command entrypoint and compatibility imports.
@@ -5,11 +6,13 @@ Forbidden: owning decompiler semantics, source-backed recovery, or postprocess s
 """
 
 from __future__ import annotations
+import cython
 
 import sys
 from importlib import import_module
 from types import ModuleType
 from typing import cast
+import operator
 
 # Native PEP 810 lazy exports; every name binds its canonical module owner.
 lazy from angr.analyses.decompiler.structured_codegen import (
@@ -6534,8 +6537,11 @@ lazy from inertia.widening.widening_model import (
 )
 
 
+@cython.ccall
 def _normalized_high_slice_expr(current_high_expr: object) -> object:
     """Unwrap one Mul/Shl high-byte scale wrapper into its inner view."""
+    maybe_inner: object
+    maybe_scale: object
     from angr.analyses.decompiler.structured_codegen.c import CBinaryOp
 
     from .cli_c_ast_rewrites import _c_constant_value, _unwrap_c_casts
@@ -6552,8 +6558,10 @@ def _normalized_high_slice_expr(current_high_expr: object) -> object:
     return current_high_expr
 
 
+@cython.ccall
 def _joinable_register_pair_proof(analysis: object) -> object | None:
     """Return the widening proof when its register-pair versions agree."""
+    proof: object
     # Dynamic codegen boundary: widening proof shape comes from X86_16 analysis helpers.
     proof = getattr(analysis, "proof", None)
     if proof is None:
@@ -6565,18 +6573,23 @@ def _joinable_register_pair_proof(analysis: object) -> object | None:
     if getattr(proof, "left_version", None) is None or getattr(proof, "right_version", None) is None:
         return None
     # Dynamic codegen boundary: widening proof fields are analysis-owned evidence.
-    if getattr(proof, "left_version", None) != getattr(proof, "right_version", None):
+    if operator.ne(getattr(proof, "left_version", None), getattr(proof, "right_version", None)):
         return None
     # Dynamic boundary: proof is an analysis-owned object read through getattr.
     return cast(object, proof)
 
 
+@cython.ccall
 def _match_adjacent_register_pair_impl(
     low_expr: object,
     high_expr: object,
     codegen: object,
 ) -> object | None:
     """Join two proven adjacent byte slices into one widened expression."""
+    alias_state: object
+    high_var: object
+    low_var: object
+    proof: object
     from angr.analyses.decompiler.structured_codegen.c import CVariable
     from angr.sim_variable import SimRegisterVariable
 
@@ -6615,6 +6628,7 @@ def _match_adjacent_register_pair_impl(
     )
 
 
+@cython.ccall
 def _match_adjacent_register_pair_var_expr(low_expr: object, high_expr: object, codegen: object) -> object | None:
     # Compatibility surface for legacy tests and callers importing from decompile/cli.
     return _match_adjacent_register_pair_impl(low_expr, high_expr, codegen)
@@ -6652,8 +6666,9 @@ class _CompatModule(ModuleType):
 
     __slots__ = ()
 
-    def __setattr__(self, name: str, value: object) -> None:
+    def __setattr__(self, name: object, value: object) -> None:
         """Mirror a known compatibility export write into every canonical owner."""
+        owner_name: object
         known = name in self.__dict__
         ModuleType.__setattr__(self, name, value)
         if not known or name.startswith("__") or name == "main":

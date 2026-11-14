@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Recover aggregate stack objects from binary frame-layout evidence.
 
 Layer: Types/Lowering.
@@ -17,6 +18,7 @@ plugin-defined compatibility fields are not available through owned protocols.
 """
 
 from __future__ import annotations
+import cython
 
 import contextlib
 import logging
@@ -68,6 +70,9 @@ from .stack_frame_projection import entry_sp_offset_for_machine_bp_range_8616
 from .stack_variable_coordinates import (
     machine_bp_offset_for_stack_variable_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "StackAggregateCallDecay8616",
@@ -103,17 +108,17 @@ class StackAggregateEvidenceKind8616(StrEnum):
     ADDRESSED_PARTITION = "addressed_partition"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackAggregateObjectFact8616:
     """Proof that one BP-local byte range is one aggregate object."""
 
-    base_offset: int
-    byte_size: int
-    element_width: int
-    frame_allocation_size: int
-    address_taken_count: int
-    indexed_access_count: int
-    indexed_offsets: tuple[int, ...]
+    base_offset: cython.longlong
+    byte_size: cython.longlong
+    element_width: cython.longlong
+    frame_allocation_size: cython.longlong
+    address_taken_count: cython.longlong
+    indexed_access_count: cython.longlong
+    indexed_offsets: object
     scalar_boundary_offset: int | None
     scalar_boundary_width: int | None
     evidence_kind: StackAggregateEvidenceKind8616 = (
@@ -124,9 +129,7 @@ class StackAggregateObjectFact8616:
 class _StackAggregateFactCarrier8616(Protocol):
     """Third-party codegen field retaining owned stack-aggregate facts."""
 
-    _inertia_stack_aggregate_object_facts_8616: tuple[
-        StackAggregateObjectFact8616, ...
-    ]
+    _inertia_stack_aggregate_object_facts_8616: object
 
 
 class _VariableManagerTypeBoundary8616(Protocol):
@@ -137,8 +140,8 @@ class _VariableManagerTypeBoundary8616(Protocol):
         variable: SimVariable,
         type_: SimType,
         *,
-        override_bot: bool = True,
-        all_unified: bool = False,
+        override_bot: cython.bint = True,
+        all_unified: cython.bint = False,
     ) -> None:
         """Assign a recovered type to one variable storage identity."""
         ...
@@ -152,7 +155,7 @@ class _AggregateCFunctionBoundary8616(Protocol):
 
 def stack_aggregate_object_facts_8616(
     codegen: object,
-) -> tuple[StackAggregateObjectFact8616, ...]:
+) -> object:
     """Read typed stack-aggregate facts from the dynamic codegen boundary."""
     carrier = typing.cast(_StackAggregateFactCarrier8616, codegen)
     try:
@@ -160,7 +163,7 @@ def stack_aggregate_object_facts_8616(
     except AttributeError:
         return ()
     if not isinstance(facts, tuple) or not all(
-        isinstance(fact, StackAggregateObjectFact8616) for fact in facts
+        isinstance(fact, StackAggregateObjectFact8616) for fact in iter(facts)
     ):
         raise TypeError(
             "_inertia_stack_aggregate_object_facts_8616 must be a tuple "
@@ -169,71 +172,74 @@ def stack_aggregate_object_facts_8616(
     return facts
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackAggregateRecovery8616:
     """Closed evidence loop for aggregate stack-object recovery."""
 
     status: StackAggregateRecoveryStatus8616
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
     facts: tuple[StackAggregateObjectFact8616, ...] = ()
     refusals: tuple[str, ...] = ()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackAggregateCarrierPrune8616:
     """Closed evidence loop for outgoing-stack artifacts aliased to an aggregate."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackAggregateCallDecay8616:
     """Closed evidence loop for typed stack-array call-argument decay."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StackAggregateObjectReplay8616:
     """Closed evidence loop for replaying proven aggregate frame objects."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
 class _InstructionLike8616(Protocol):
     """Capstone instruction fields consumed at the dynamic decode boundary."""
 
-    id: int
-    operands: tuple[object, ...]
+    id: cython.longlong
+    operands: object
 
-    def reg_name(self, reg_id: int) -> str:
+    def reg_name(self, reg_id: cython.longlong) -> object:
         """Return the architecture register name for an operand id."""
         ...
 
 
+@cython.ccall
 def _instruction(wrapper: object) -> object:
     """Unwrap an angr CapstoneInsn wrapper when present."""
     return getattr(wrapper, "insn", wrapper)
 
 
-def _reg_name(insn: object, reg_id: object) -> str | None:
+@cython.ccall
+def _reg_name(insn: object, reg_id: object) -> object:
     """Return a normalized register name across the Capstone boundary."""
+    reg_name: object
     if not isinstance(reg_id, int):
         return None
     reg_name = getattr(insn, "reg_name", None)
@@ -248,13 +254,17 @@ def _reg_name(insn: object, reg_id: object) -> str | None:
 
 def _direct_call_target(insn: object) -> int | None:
     """Return one decoded near or far direct call's mapped code address."""
+    instruction_id: object
+    offset: object
+    segment: object
+    target: object
     instruction_id = getattr(insn, "id", None)
     if instruction_id not in {X86_INS_CALL, X86_INS_LCALL}:
         return None
     operands = tuple(getattr(insn, "operands", ()) or ())
-    if instruction_id == X86_INS_LCALL:
+    if operator.eq(instruction_id, X86_INS_LCALL):
         if len(operands) != 2 or any(
-            getattr(operand, "type", None) != X86_OP_IMM for operand in operands
+            operator.ne(getattr(operand, "type", None), X86_OP_IMM) for operand in iter(operands)
         ):
             return None
         segment = getattr(operands[0], "imm", None)
@@ -267,23 +277,25 @@ def _direct_call_target(insn: object) -> int | None:
         ):
             return None
         return (segment << 4) + offset
-    if len(operands) != 1 or getattr(operands[0], "type", None) != X86_OP_IMM:
+    if len(operands) != 1 or operator.ne(getattr(operands[0], "type", None), X86_OP_IMM):
         return None
     target = getattr(operands[0], "imm", None)
     return target if isinstance(target, int) else None
 
 
-def _stack_probe_allocation_before_call(insns: tuple[object, ...], call_index: int) -> int | None:
+@cython.ccall
+def _stack_probe_allocation_before_call(insns: object, call_index: cython.longlong) -> int | None:
     """Recover a bounded ``mov ax, imm`` allocation input before a probe call."""
+    value: object
     for index in range(call_index - 1, max(-1, call_index - 5), -1):
         insn = _instruction(insns[index])
         operands = tuple(getattr(insn, "operands", ()) or ())
-        if getattr(insn, "id", None) == X86_INS_MOV and len(operands) == 2:
-            if getattr(operands[0], "type", None) != X86_OP_REG:
+        if operator.eq(getattr(insn, "id", None), X86_INS_MOV) and len(operands) == 2:
+            if operator.ne(getattr(operands[0], "type", None), X86_OP_REG):
                 continue
             if _reg_name(insn, getattr(operands[0], "reg", None)) != "ax":
                 continue
-            if getattr(operands[1], "type", None) != X86_OP_IMM:
+            if operator.ne(getattr(operands[1], "type", None), X86_OP_IMM):
                 return None
             value = getattr(operands[1], "imm", None)
             return value if isinstance(value, int) and 0 < value <= 0x7FFF else None
@@ -293,9 +305,13 @@ def _stack_probe_allocation_before_call(insns: tuple[object, ...], call_index: i
     return None
 
 
-def _bp_memory_access(insn: object, operand: object) -> tuple[int, int, str | None] | None:
+@cython.ccall
+def _bp_memory_access(insn: object, operand: object) -> object:
     """Return ``(displacement, width, index-name)`` for one BP memory operand."""
-    if getattr(operand, "type", None) != X86_OP_MEM:
+    displacement: object
+    memory: object
+    width: object
+    if operator.ne(getattr(operand, "type", None), X86_OP_MEM):
         return None
     memory = getattr(operand, "mem", None)
     if _reg_name(insn, getattr(memory, "base", None)) != "bp":
@@ -308,13 +324,15 @@ def _bp_memory_access(insn: object, operand: object) -> tuple[int, int, str | No
     return displacement, width, index_name
 
 
+@cython.ccall
 def _index_scale_matches_width_8616(
-    insns: tuple[object, ...],
-    access_index: int,
-    index_name: str,
-    width: int,
-) -> bool:
+    insns: object,
+    access_index: cython.longlong,
+    index_name: object,
+    width: cython.longlong,
+) -> cython.bint:
     """Prove an indexed access uses byte offsets scaled to its element width."""
+    expected_shift: object
     expected_shift = {1: 0, 2: 1, 4: 2}.get(width)
     if expected_shift is None:
         return False
@@ -328,30 +346,36 @@ def _index_scale_matches_width_8616(
     operands = tuple(getattr(previous, "operands", ()) or ())
     if len(operands) != 2:
         return False
-    if getattr(operands[0], "type", None) != X86_OP_REG:
+    if operator.ne(getattr(operands[0], "type", None), X86_OP_REG):
         return False
-    if _reg_name(previous, getattr(operands[0], "reg", None)) != index_name:
+    if operator.ne(_reg_name(previous, getattr(operands[0], "reg", None)), index_name):
         return False
-    if getattr(operands[1], "type", None) != X86_OP_IMM:
+    if operator.ne(getattr(operands[1], "type", None), X86_OP_IMM):
         return False
-    return getattr(operands[1], "imm", None) == expected_shift
+    return operator.eq(getattr(operands[1], "imm", None), expected_shift)
 
 
+@cython.ccall
 def _recover_interior_scaled_aggregate_8616(
     *,
-    frame_size: int,
-    fixed_accesses: tuple[tuple[int, int], ...],
-    indexed_accesses: tuple[tuple[int, int], ...],
-    scaled_indexed_accesses: tuple[tuple[int, int], ...],
-    raw_count: int,
+    frame_size: cython.longlong,
+    fixed_accesses: object,
+    indexed_accesses: object,
+    scaled_indexed_accesses: object,
+    raw_count: cython.longlong,
 ) -> StackAggregateRecovery8616:
     """Recover one interior array from repeated scaled accesses and its next scalar."""
-    indexed_counts: dict[tuple[int, int], int] = {}
+    candidate: object
+    access: object
+    base_offset: object
+    element_width: object
+    indexed_count: object
+    indexed_counts: dict[tuple[cython.longlong, cython.longlong], cython.longlong] = {}
     for access in scaled_indexed_accesses:
         indexed_counts[access] = indexed_counts.get(access, 0) + 1
 
     candidates: list[StackAggregateObjectFact8616] = []
-    for (base_offset, element_width), indexed_count in sorted(indexed_counts.items()):
+    for (base_offset, element_width), indexed_count in sorted(tuple(indexed_counts.items())):
         if indexed_count < 2 or element_width not in {2, 4}:
             continue
         candidate = _interior_scaled_candidate_8616(
@@ -396,15 +420,17 @@ def _recover_interior_scaled_aggregate_8616(
 
 def _recover_bottom_addressed_partition_8616(
     *,
-    frame_size: int,
-    fixed_accesses: tuple[tuple[int, int], ...],
-    address_taken: tuple[tuple[int, int], ...],
-    raw_count: int,
+    frame_size: cython.longlong,
+    fixed_accesses: object,
+    address_taken: object,
+    raw_count: cython.longlong,
 ) -> StackAggregateRecovery8616:
     """Recover a bottom byte object separated from one repeated top scalar."""
+    boundary_offset: object
+    boundary_width: object
     base_offset = -frame_size
     base_address_count = sum(
-        displacement == base_offset for displacement, _width in address_taken
+        displacement == base_offset for displacement, _width in iter(address_taken)
     )
     if base_address_count < 2:
         return StackAggregateRecovery8616(
@@ -416,7 +442,7 @@ def _recover_bottom_addressed_partition_8616(
             0,
             refusals=("insufficient_base_address_evidence",),
         )
-    if base_address_count != len(address_taken):
+    if operator.ne(base_address_count, len(address_taken)):
         return StackAggregateRecovery8616(
             StackAggregateRecoveryStatus8616.REFUSED,
             raw_count,
@@ -499,15 +525,17 @@ def _recover_bottom_addressed_partition_8616(
     )
 
 
+@cython.ccall
 def _recover_top_addressed_partition_8616(
     *,
-    frame_size: int,
-    fixed_accesses: tuple[tuple[int, int], ...],
-    indexed_accesses: tuple[tuple[int, int], ...],
-    address_taken: tuple[tuple[int, int], ...],
-    raw_count: int,
+    frame_size: cython.longlong,
+    fixed_accesses: object,
+    indexed_accesses: object,
+    address_taken: object,
+    raw_count: cython.longlong,
 ) -> StackAggregateRecovery8616:
     """Recover a top byte object separated from one exact bottom scalar."""
+    aggregate_base: object
     if len(address_taken) < 2:
         return StackAggregateRecovery8616(
             StackAggregateRecoveryStatus8616.NO_EVIDENCE,
@@ -518,7 +546,7 @@ def _recover_top_addressed_partition_8616(
             0,
             refusals=("insufficient_top_object_address_evidence",),
         )
-    addressed_offsets = {displacement for displacement, _width in address_taken}
+    addressed_offsets = {displacement for displacement, _width in iter(address_taken)}
     if len(addressed_offsets) != 1:
         return StackAggregateRecovery8616(
             StackAggregateRecoveryStatus8616.REFUSED,
@@ -555,7 +583,7 @@ def _recover_top_addressed_partition_8616(
             0,
             refusals=("missing_bottom_scalar_boundary_evidence",),
         )
-    if scalar_width not in {2, 4} or set(fixed_accesses) != {expected_scalar_access}:
+    if scalar_width not in {2, 4} or operator.ne(set(fixed_accesses), {expected_scalar_access}):
         return StackAggregateRecovery8616(
             StackAggregateRecoveryStatus8616.REFUSED,
             raw_count,
@@ -577,7 +605,7 @@ def _recover_top_addressed_partition_8616(
             0,
             refusals=("missing_top_object_indexed_evidence",),
         )
-    if set(indexed_accesses) != {expected_indexed_access}:
+    if operator.ne(set(indexed_accesses), {expected_indexed_access}):
         return StackAggregateRecovery8616(
             StackAggregateRecoveryStatus8616.REFUSED,
             raw_count,
@@ -624,11 +652,11 @@ def _recover_top_addressed_partition_8616(
 
 def _interior_scaled_candidate_8616(
     *,
-    base_offset: int,
-    element_width: int,
-    frame_size: int,
-    fixed_accesses: tuple[tuple[int, int], ...],
-    indexed_accesses: tuple[tuple[int, int], ...],
+    base_offset: cython.longlong,
+    element_width: cython.longlong,
+    frame_size: cython.longlong,
+    fixed_accesses: object,
+    indexed_accesses: object,
 ) -> StackAggregateObjectFact8616 | None:
     """Build one interior-array fact when its scalar boundary is proven."""
     if not -frame_size <= base_offset < 0:
@@ -636,7 +664,7 @@ def _interior_scaled_candidate_8616(
     boundary_offsets = sorted(
         {
             offset
-            for offset, width in fixed_accesses
+            for offset, width in iter(fixed_accesses)
             if base_offset < offset < 0 and width > 0
         }
     )
@@ -645,7 +673,7 @@ def _interior_scaled_candidate_8616(
     boundary_offset = boundary_offsets[0]
     boundary_widths = {
         width
-        for offset, width in fixed_accesses
+        for offset, width in iter(fixed_accesses)
         if offset == boundary_offset and width > 0
     }
     if len(boundary_widths) != 1:
@@ -655,7 +683,7 @@ def _interior_scaled_candidate_8616(
         return None
     if any(
         base_offset <= offset < boundary_offset
-        for offset, _width in fixed_accesses
+        for offset, _width in iter(fixed_accesses)
     ):
         return None
     return StackAggregateObjectFact8616(
@@ -666,7 +694,7 @@ def _interior_scaled_candidate_8616(
         address_taken_count=0,
         indexed_access_count=sum(
             displacement == base_offset and width == element_width
-            for displacement, width in indexed_accesses
+            for displacement, width in iter(indexed_accesses)
         ),
         indexed_offsets=(base_offset,),
         scalar_boundary_offset=boundary_offset,
@@ -675,12 +703,14 @@ def _interior_scaled_candidate_8616(
 
 
 def recover_stack_aggregate_object_facts_from_instructions_8616(
-    instructions: tuple[object, ...],
+    instructions: object,
     *,
-    stack_probe_targets: frozenset[int],
+    stack_probe_targets: object,
 ) -> StackAggregateRecovery8616:
     """Classify bottom-of-frame aggregates from decoded binary instructions."""
-    insns = tuple(_instruction(item) for item in instructions)
+    frame_size: object
+    full_frame: object
+    insns = tuple(_instruction(item) for item in iter(instructions))
     (
         allocations,
         fixed_accesses,
@@ -715,7 +745,7 @@ def recover_stack_aggregate_object_facts_from_instructions_8616(
     frame_size = next(iter(unique_allocations))
     base_offset = -frame_size
     base_address_count = sum(
-        displacement == base_offset for displacement, _width in address_taken
+        displacement == base_offset for displacement, _width in iter(address_taken)
     )
     full_frame = _full_frame_address_recovery_8616(
         frame_size=frame_size,
@@ -775,19 +805,20 @@ def recover_stack_aggregate_object_facts_from_instructions_8616(
     )
 
 
+@cython.ccall
 def _full_frame_address_recovery_8616(
     *,
-    frame_size: int,
-    base_address_count: int,
-    address_taken: tuple[tuple[int, int], ...],
-    fixed_accesses: tuple[tuple[int, int], ...],
-    indexed_accesses: tuple[tuple[int, int], ...],
-    raw_count: int,
+    frame_size: cython.longlong,
+    base_address_count: cython.longlong,
+    address_taken: object,
+    fixed_accesses: object,
+    indexed_accesses: object,
+    raw_count: cython.longlong,
 ) -> StackAggregateRecovery8616 | None:
     """Materialize a full-frame addressed aggregate, or None when unproven."""
     if not (
         base_address_count > 0
-        and base_address_count == len(address_taken)
+        and operator.eq(base_address_count, len(address_taken))
         and not fixed_accesses
         and not indexed_accesses
     ):
@@ -815,15 +846,16 @@ def _full_frame_address_recovery_8616(
     )
 
 
+@cython.ccall
 def _recover_bottom_indexed_aggregate_8616(
     *,
-    frame_size: int,
-    base_offset: int,
-    base_address_count: int,
-    fixed_accesses: tuple[tuple[int, int], ...],
-    indexed_accesses: tuple[tuple[int, int], ...],
-    address_taken: tuple[tuple[int, int], ...],
-    raw_count: int,
+    frame_size: cython.longlong,
+    base_offset: cython.longlong,
+    base_address_count: cython.longlong,
+    fixed_accesses: object,
+    indexed_accesses: object,
+    address_taken: object,
+    raw_count: cython.longlong,
     interior_recovery: StackAggregateRecovery8616,
 ) -> StackAggregateRecovery8616:
     """Resolve the bottom-of-frame indexed aggregate lane."""
@@ -841,15 +873,16 @@ def _recover_bottom_indexed_aggregate_8616(
 
 def _bottom_indexed_aggregate_tail_8616(
     *,
-    frame_size: int,
-    base_offset: int,
-    base_address_count: int,
-    fixed_accesses: tuple[tuple[int, int], ...],
-    indexed_accesses: tuple[tuple[int, int], ...],
-    raw_count: int,
+    frame_size: cython.longlong,
+    base_offset: cython.longlong,
+    base_address_count: cython.longlong,
+    fixed_accesses: object,
+    indexed_accesses: object,
+    raw_count: cython.longlong,
 ) -> StackAggregateRecovery8616:
     """Materialize or refuse the bottom-of-frame indexed aggregate evidence."""
-    indexed_widths = {width for displacement, width in indexed_accesses if displacement in {base_offset - width, base_offset}}
+    element_width: object
+    indexed_widths = {width for displacement, width in iter(indexed_accesses) if displacement in {base_offset - width, base_offset}}
     if len(indexed_widths) != 1 or base_address_count == 0:
         return StackAggregateRecovery8616(
             StackAggregateRecoveryStatus8616.REFUSED,
@@ -873,7 +906,7 @@ def _bottom_indexed_aggregate_tail_8616(
         )
     boundaries = sorted(
         (offset, width)
-        for offset, width in set(fixed_accesses)
+        for offset, width in builtins.iter(set(fixed_accesses))
         if base_offset < offset < 0 and width > element_width and offset + width == 0
     )
     if len(boundaries) != 1:
@@ -899,15 +932,15 @@ def _bottom_indexed_aggregate_tail_8616(
             refusals=("aggregate_extent_invalid",),
         )
     indexed_count = sum(
-        width == element_width and displacement in {base_offset - element_width, base_offset}
-        for displacement, width in indexed_accesses
+        operator.eq(width, element_width) and displacement in {base_offset - element_width, base_offset}
+        for displacement, width in iter(indexed_accesses)
     )
     indexed_offsets = tuple(
         sorted(
             {
                 displacement
-                for displacement, width in indexed_accesses
-                if width == element_width and displacement in {base_offset - element_width, base_offset}
+                for displacement, width in iter(indexed_accesses)
+                if operator.eq(width, element_width) and displacement in {base_offset - element_width, base_offset}
             }
         )
     )
@@ -935,7 +968,11 @@ def _bottom_indexed_aggregate_tail_8616(
 
 def _function_instructions(function: object) -> tuple[object, ...]:
     """Collect deterministic decoded instructions from an angr function boundary."""
-    by_address: dict[int, object] = {}
+    address: object
+    capstone: object
+    block: object
+    wrapper: object
+    by_address: dict[cython.longlong, object] = {}
     with contextlib.suppress(Exception):
         for block in tuple(getattr(function, "blocks", ()) or ()):
             capstone = getattr(block, "capstone", None)
@@ -944,21 +981,24 @@ def _function_instructions(function: object) -> tuple[object, ...]:
                 address = getattr(insn, "address", None)
                 if isinstance(address, int):
                     by_address.setdefault(address, wrapper)
-    return tuple(by_address[address] for address in sorted(by_address))
+    return tuple(by_address[address] for address in builtins.iter(sorted(by_address)))
 
 
+@cython.ccall
 def collect_stack_aggregate_object_facts_8616(
     project: object,
     function: object,
     *,
-    instructions: tuple[object, ...] | None = None,
+    instructions: object = None,
 ) -> StackAggregateRecovery8616:
     """Collect aggregate frame-object facts from a live function and helper registry."""
+    evidence: object
+    wrapper: object
     decoded = instructions if instructions is not None else _function_instructions(function)
     registered_targets = (
         getattr(getattr(project, "arch", None), "_inertia_stack_probe_helper_targets_8616", ()) or ()
     )
-    targets: set[int] = {target for target in registered_targets if isinstance(target, int)}
+    targets: set[cython.longlong] = {target for target in iter(registered_targets) if isinstance(target, int)}
     for wrapper in decoded:
         insn = _instruction(wrapper)
         target = _direct_call_target(insn)
@@ -973,22 +1013,27 @@ def collect_stack_aggregate_object_facts_8616(
     )
 
 
+@cython.ccall
 def _classify_instruction_stack_accesses_8616(
-    insns: tuple[object, ...],
-    stack_probe_targets: frozenset[int],
+    insns: object,
+    stack_probe_targets: object,
 ) -> tuple[
-    list[int],
-    list[tuple[int, int]],
-    list[tuple[int, int]],
-    list[tuple[int, int]],
-    list[tuple[int, int]],
+    list[cython.longlong],
+    list[tuple[cython.longlong, cython.longlong]],
+    list[tuple[cython.longlong, cython.longlong]],
+    list[tuple[cython.longlong, cython.longlong]],
+    list[tuple[cython.longlong, cython.longlong]],
 ]:
     """Scan decoded instructions into allocation and access buckets."""
-    allocations: list[int] = []
-    fixed_accesses: list[tuple[int, int]] = []
-    indexed_accesses: list[tuple[int, int]] = []
-    scaled_indexed_accesses: list[tuple[int, int]] = []
-    address_taken: list[tuple[int, int]] = []
+    access: object
+    index: object
+    insn: object
+    operand: object
+    allocations: list[cython.longlong] = []
+    fixed_accesses: list[tuple[cython.longlong, cython.longlong]] = []
+    indexed_accesses: list[tuple[cython.longlong, cython.longlong]] = []
+    scaled_indexed_accesses: list[tuple[cython.longlong, cython.longlong]] = []
+    address_taken: list[tuple[cython.longlong, cython.longlong]] = []
 
     for index, insn in enumerate(insns):
         target = _direct_call_target(insn)
@@ -1005,24 +1050,21 @@ def _classify_instruction_stack_accesses_8616(
     return allocations, fixed_accesses, indexed_accesses, scaled_indexed_accesses, address_taken
 
 
+@cython.ccall
 def _record_bp_stack_access_8616(
-    insns: tuple[object, ...],
-    index: int,
+    insns: object,
+    index: cython.longlong,
     insn: object,
-    access: tuple[int, int, str | None],
-    buckets: tuple[
-        list[tuple[int, int]],
-        list[tuple[int, int]],
-        list[tuple[int, int]],
-        list[tuple[int, int]],
-    ],
+    access: object,
+    buckets: object,
 ) -> None:
     """Bucket one BP-relative memory access as fixed/indexed/scaled/address-taken."""
+    index_name: object
     fixed_accesses, indexed_accesses, scaled_indexed_accesses, address_taken = buckets
     displacement, width, index_name = access
     if displacement >= 0:
         return
-    if getattr(insn, "id", None) == X86_INS_LEA:
+    if operator.eq(getattr(insn, "id", None), X86_INS_LEA):
         if index_name is None:
             address_taken.append((displacement, width))
         return
@@ -1039,8 +1081,14 @@ def _record_bp_stack_access_8616(
         scaled_indexed_accesses.append((displacement, width))
 
 
-def _materialize_fact(codegen: object, fact: StackAggregateObjectFact8616) -> tuple[bool, bool]:
+@cython.ccall
+def _materialize_fact(codegen: object, fact: StackAggregateObjectFact8616) -> tuple[cython.bint, cython.bint]:
     """Return ``(materialized, changed)`` for one exact aggregate frame partition."""
+    arch: object
+    cfunc: object
+    tracked_cvar: object
+    unified_local_vars: object
+    variables_in_use: object
     cfunc = getattr(codegen, "cfunc", None)
     variables_in_use = getattr(cfunc, "variables_in_use", None)
     if not isinstance(variables_in_use, dict):
@@ -1053,12 +1101,12 @@ def _materialize_fact(codegen: object, fact: StackAggregateObjectFact8616) -> tu
     restored = restore_live_stack_aggregate_declaration_8616(
         codegen, tracked_cvar, bp_offset=fact.base_offset, entry_sp_offset=entry_sp_offset, size=fact.byte_size,
     )
-    candidates_by_offset: dict[int, list[structured_c.CVariable]] = {
+    candidates_by_offset: dict[cython.longlong, list[structured_c.CVariable]] = {
         fact.base_offset: [],
     }
     if isinstance(fact.scalar_boundary_offset, int):
         candidates_by_offset[fact.scalar_boundary_offset] = []
-    seen_candidates: set[int] = set()
+    seen_candidates: set[cython.longlong] = set()
 
     unified_local_vars = getattr(cfunc, "unified_local_vars", None)
     _collect_partition_candidates_8616(
@@ -1071,9 +1119,9 @@ def _materialize_fact(codegen: object, fact: StackAggregateObjectFact8616) -> tu
     current_tracked_cvar = tracked_cvar if id(tracked_cvar) in seen_candidates else None
     aggregate_candidates = candidates_by_offset[fact.base_offset]
     exact_width_candidates = [
-        candidate for candidate in aggregate_candidates
+        candidate for candidate in iter(aggregate_candidates)
         if isinstance(candidate.variable, SimStackVariable)
-        and candidate.variable.size == fact.byte_size
+        and operator.eq(candidate.variable.size, fact.byte_size)
     ]
     if exact_width_candidates:
         # An entry-SP coordinate can be shared by a full aggregate and a
@@ -1141,12 +1189,16 @@ def _materialize_fact(codegen: object, fact: StackAggregateObjectFact8616) -> tu
 
 def _collect_partition_candidates_8616(
     codegen: object,
-    variables_in_use: dict[object, object],
+    variables_in_use: object,
     unified_local_vars: object,
-    candidates_by_offset: dict[int, list[structured_c.CVariable]],
-    seen_candidates: set[int],
+    candidates_by_offset: object,
+    seen_candidates: object,
 ) -> None:
     """Collect current-codegen CVariable views for each partition offset."""
+    candidate_cvar: object
+    candidate_variable: object
+    entries: object
+    entry: object
 
     def add_candidate(variable: object, cvar: object) -> None:
         """Record one current-codegen view in the proven frame partition."""
@@ -1169,8 +1221,9 @@ def _collect_partition_candidates_8616(
                     add_candidate(candidate_variable, entry[0])
 
 
+@cython.ccall
 def _persist_partition_type_8616(
-    variable_manager: _VariableManagerTypeBoundary8616 | None, variable: object, variable_type: SimType
+    variable_manager: object, variable: object, variable_type: SimType
 ) -> None:
     """Persist one exact frame-partition type across CFunction.refresh()."""
     if variable_manager is None or not isinstance(variable, SimVariable):
@@ -1183,18 +1236,19 @@ def _persist_partition_type_8616(
     )
 
 
+@cython.ccall
 def _materialize_missing_aggregate_8616(
     codegen: object,
     cfunc: object,
     fact: StackAggregateObjectFact8616,
-    entry_sp_offset: int | None,
+    entry_sp_offset: object,
     array_type: SimType,
-    variables_in_use: dict[object, object],
+    variables_in_use: object,
     unified_local_vars: object,
-    aggregate_candidates: list[structured_c.CVariable],
-    seen_candidates: set[int],
+    aggregate_candidates: object,
+    seen_candidates: object,
     variable_manager: _VariableManagerTypeBoundary8616 | None,
-) -> bool:
+) -> cython.bint:
     """Create the aggregate frame variable when no declaration exists."""
     aggregate_variable = SimStackVariable(
         fact.base_offset if entry_sp_offset is None else entry_sp_offset,
@@ -1217,41 +1271,46 @@ def _materialize_missing_aggregate_8616(
     return True
 
 
+@cython.ccall
 def _persist_aggregate_frame_types_8616(
     codegen: object,
-    variables_in_use: dict[object, object],
-    aggregate_candidates: list[structured_c.CVariable],
+    variables_in_use: object,
+    aggregate_candidates: object,
     fact: StackAggregateObjectFact8616,
     array_type: SimType,
     variable_manager: _VariableManagerTypeBoundary8616 | None,
-) -> bool:
+) -> cython.bint:
     """Persist the array type on the partition and its candidate views."""
+    candidate_cvar: object
+    candidate_variable: object
     changed = False
-    aggregate_variable_ids = {id(candidate.variable) for candidate in aggregate_candidates}
+    aggregate_variable_ids = {id(candidate.variable) for candidate in iter(aggregate_candidates)}
     for candidate_variable, candidate_cvar in variables_in_use.items():  # noqa: B007
         if (
             isinstance(candidate_variable, SimStackVariable)
             and candidate_variable.base == "bp"
             and id(candidate_variable) in aggregate_variable_ids
-            and machine_bp_offset_for_stack_variable_8616(codegen, candidate_variable)
-            == fact.base_offset
+            and operator.eq(machine_bp_offset_for_stack_variable_8616(codegen, candidate_variable), fact.base_offset)
         ):
             _persist_partition_type_8616(variable_manager, candidate_variable, array_type)
     for candidate_cvar in aggregate_candidates:
-        if candidate_cvar.variable_type != array_type:
+        if operator.ne(candidate_cvar.variable_type, array_type):
             candidate_cvar.variable_type = array_type
             changed = True
     return changed
 
 
+@cython.ccall
 def _persist_boundary_scalar_types_8616(
     fact: StackAggregateObjectFact8616,
-    candidates_by_offset: dict[int, list[structured_c.CVariable]],
+    candidates_by_offset: object,
     arch: object,
     variable_manager: _VariableManagerTypeBoundary8616 | None,
-) -> tuple[dict[int, SimType], bool]:
+) -> tuple[dict[cython.longlong, SimType], cython.bint]:
     """Persist proven scalar boundary types; returns (id(cvar)->type, changed)."""
-    boundary_types: dict[int, SimType] = {}
+    boundary_type: object
+    candidate_cvar: object
+    boundary_types: dict[cython.longlong, SimType] = {}
     changed = False
     if isinstance(fact.scalar_boundary_offset, int) and isinstance(
         fact.scalar_boundary_width,
@@ -1267,21 +1326,26 @@ def _persist_boundary_scalar_types_8616(
                 continue
             _persist_partition_type_8616(variable_manager, candidate_cvar.variable, boundary_type)
             boundary_types[id(candidate_cvar)] = boundary_type
-            if candidate_cvar.variable_type != boundary_type:
+            if operator.ne(candidate_cvar.variable_type, boundary_type):
                 candidate_cvar.variable_type = boundary_type
                 changed = True
     return boundary_types, changed
 
 
+@cython.ccall
 def _rewrite_unified_partition_entries_8616(
     codegen: object,
     unified_local_vars: object,
-    candidates_by_offset: dict[int, list[structured_c.CVariable]],
+    candidates_by_offset: object,
     fact: StackAggregateObjectFact8616,
     array_type: SimType,
-    boundary_types: dict[int, SimType],
-) -> bool:
+    boundary_types: object,
+) -> cython.bint:
     """Rewrite unified-local-var entries to the proven partition types."""
+    replacement_type: object
+    entries: object
+    entry: object
+    unified_variable: object
     changed = False
     if not isinstance(unified_local_vars, dict):
         return False
@@ -1306,7 +1370,7 @@ def _rewrite_unified_partition_entries_8616(
                     continue
                 replacement_type = (
                     array_type
-                    if bp_offset == fact.base_offset
+                    if operator.eq(bp_offset, fact.base_offset)
                     and entry_cvar in candidates_by_offset[fact.base_offset]
                     else boundary_types.get(id(entry_cvar))
                 )
@@ -1315,8 +1379,8 @@ def _rewrite_unified_partition_entries_8616(
                     continue
                 changed = (
                     changed
-                    or entry_type != replacement_type
-                    or entry_cvar.variable_type != replacement_type
+                    or operator.ne(entry_type, replacement_type)
+                    or operator.ne(entry_cvar.variable_type, replacement_type)
                 )
                 entry_cvar.variable_type = replacement_type
                 updated_entries.add((entry_cvar, replacement_type))
@@ -1336,6 +1400,9 @@ def _decay_stack_aggregate_call_arguments(
     distinguish those source-level spellings and therefore are not evidence
     against normal C array decay.
     """
+    cfunc: object
+    root: object
+    node: object
     cfunc = getattr(codegen, "cfunc", None)
     root = getattr(cfunc, "statements", None)
     tracked_cvars = getattr(codegen, "_inertia_stack_aggregate_cvars_8616", {}) or {}
@@ -1360,8 +1427,7 @@ def _decay_stack_aggregate_call_arguments(
         if (
             not isinstance(variable, SimStackVariable)
             or variable.base != "bp"
-            or machine_bp_offset_for_stack_variable_8616(codegen, variable)
-            != fact.base_offset
+            or operator.ne(machine_bp_offset_for_stack_variable_8616(codegen, variable), fact.base_offset)
             or not isinstance(aggregate_cvar, structured_c.CVariable)
             or not isinstance(aggregate_cvar.type, (SimTypeArray, SimTypeFixedSizeArray))
         ):
@@ -1383,6 +1449,7 @@ def _decay_stack_aggregate_call_arguments(
     )
 
 
+@cython.ccall
 def _log_stack_aggregate_decay_debug_8616(
     operand: object, variable: object, aggregate_cvar: object
 ) -> None:
@@ -1401,10 +1468,13 @@ def _log_stack_aggregate_decay_debug_8616(
     )
 
 
+@cython.ccall
 def _decay_call_arguments_8616(
     node: structured_c.CFunctionCall, decay_reference: typing.Callable[[object], object]
 ) -> None:
     """Apply the decay rewrite to one call's argument list in place."""
+    arg: object
+    index: object
     args = list(node.args)
     call_changed = False
     for index, arg in enumerate(args):
@@ -1419,7 +1489,7 @@ def _decay_call_arguments_8616(
         node.args = args
 
 
-def decay_stack_aggregate_call_arguments_8616(codegen: object) -> bool:
+def decay_stack_aggregate_call_arguments_8616(codegen: object) -> cython.bint:
     """Replay typed array decay after a later pass regenerates call arguments.
 
     Stack-object classification remains owned by this Types/Lowering module.
@@ -1429,28 +1499,30 @@ def decay_stack_aggregate_call_arguments_8616(codegen: object) -> bool:
     facts_value = getattr(codegen, "_inertia_stack_aggregate_object_facts_8616", ()) or ()
     facts = tuple(
         fact
-        for fact in facts_value
+        for fact in iter(facts_value)
         if isinstance(fact, StackAggregateObjectFact8616)
     )
-    results = tuple(_decay_stack_aggregate_call_arguments(codegen, fact) for fact in facts)
+    results = tuple(_decay_stack_aggregate_call_arguments(codegen, fact) for fact in iter(facts))
     result = StackAggregateCallDecay8616(
-        raw_fact_count=sum(item.raw_fact_count for item in results),
-        normalized_fact_count=sum(item.normalized_fact_count for item in results),
-        classified_fact_count=sum(item.classified_fact_count for item in results),
-        materialized_count=sum(item.materialized_count for item in results),
-        failure_count=sum(item.failure_count for item in results),
+        raw_fact_count=sum(item.raw_fact_count for item in iter(results)),
+        normalized_fact_count=sum(item.normalized_fact_count for item in iter(results)),
+        classified_fact_count=sum(item.classified_fact_count for item in iter(results)),
+        materialized_count=sum(item.materialized_count for item in iter(results)),
+        failure_count=sum(item.failure_count for item in iter(results)),
     )
     typing.cast(Any, codegen)._inertia_stack_aggregate_call_decay_8616 = result
     return result.materialized_count > 0
 
 
-def reapply_stack_aggregate_object_facts_8616(codegen: object) -> bool:
+@cython.ccall
+def reapply_stack_aggregate_object_facts_8616(codegen: object) -> cython.bint:
     """Replay proven frame-object types after a CFunction lifecycle rebuild.
 
     This bounded consumer performs no recovery. It applies only facts already
     classified from binary frame allocation, address-taking, indexed access,
     and scalar-boundary evidence.
     """
+    fact: object
     facts = stack_aggregate_object_facts_8616(codegen)
     materialized = 0
     changed = False
@@ -1476,15 +1548,18 @@ def reapply_stack_aggregate_object_facts_8616(codegen: object) -> bool:
     return reapply_call_output_stack_object_types_8616(codegen) or changed
 
 
+@cython.ccall
 def _integer_type_for_width(
-    width: int,
+    width: cython.longlong,
     existing_type: object,
     arch: object,
 ) -> SimType | None:
     """Build an integer type at an exact binary access width, preserving signedness."""
+    signed: object
+    type_class: object
     signed = getattr(existing_type, "signed", False)
     signed = signed if isinstance(signed, bool) else False
-    type_class: type[SimType] | None = {
+    type_class = {
         1: SimTypeChar,
         2: SimTypeShort,
         4: SimTypeLong,
@@ -1494,7 +1569,8 @@ def _integer_type_for_width(
     return type_class(signed).with_arch(arch)
 
 
-def _pure_carrier_expression(node: object) -> bool:
+@cython.ccall
+def _pure_carrier_expression(node: object) -> cython.bint:
     """Return whether a C expression is pure enough to delete with proven non-memory effect."""
     if isinstance(node, structured_c.CConstant | structured_c.CVariable):
         return True
@@ -1507,12 +1583,16 @@ def _pure_carrier_expression(node: object) -> bool:
     return False
 
 
+@cython.ccall
 def _instruction_covering_tag(
-    instructions: tuple[object, ...],
-    tag_addr: int,
+    instructions: object,
+    tag_addr: cython.longlong,
 ) -> object | None:
     """Return the decoded instruction whose byte interval owns a C-node tag."""
-    by_address: dict[int, object] = {}
+    address: object
+    size: object
+    wrapper: object
+    by_address: dict[cython.longlong, object] = {}
     for wrapper in instructions:
         insn = _instruction(wrapper)
         address = getattr(insn, "address", None)
@@ -1525,27 +1605,30 @@ def _instruction_covering_tag(
         size = getattr(insn, "size", None)
         if isinstance(size, int) and size > 0 and tag_addr < address + size:
             return insn
-        return insn if address == tag_addr else None
+        return insn if operator.eq(address, tag_addr) else None
     return None
 
 
+@cython.ccall
 def prune_nonmemory_stack_aggregate_carriers_8616(
     codegen: object,
-    instructions: tuple[object, ...],
-) -> bool:
+    instructions: object,
+) -> cython.bint:
     """Prune pure aggregate assignments proven to represent PUSH/CALL stack effects."""
+    cfunc: object
+    root: object
     cfunc = getattr(codegen, "cfunc", None)
     root = getattr(cfunc, "statements", None)
     facts = getattr(codegen, "_inertia_stack_aggregate_object_facts_8616", ()) or ()
     base_offsets = {
         fact.base_offset
-        for fact in facts
+        for fact in iter(facts)
         if isinstance(fact, StackAggregateObjectFact8616)
     }
     raw_count = 0
     classified_count = 0
     materialized_count = 0
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
 
     counts = {"raw": 0, "classified": 0, "materialized": 0}
     _visit_carrier_nodes_8616(
@@ -1565,13 +1648,16 @@ def prune_nonmemory_stack_aggregate_carriers_8616(
     return materialized_count > 0
 
 
+@cython.ccall
 def _prune_carrier_statements_8616(
     node: object,
-    candidate: typing.Callable[[object], bool],
+    candidate: typing.Callable[[object], cython.bint],
     visit: typing.Callable[[object], None],
-    counts: dict[str, int],
+    counts: object,
 ) -> None:
     """Filter one node's statement list, pruning proven carrier assignments."""
+    statements: object
+    statement: object
     statements = getattr(node, "statements", None)
     if not isinstance(statements, list):
         return
@@ -1582,18 +1668,20 @@ def _prune_carrier_statements_8616(
             continue
         retained.append(statement)
         visit(statement)
-    if len(retained) != len(statements):
+    if operator.ne(len(retained), len(statements)):
         statements[:] = retained
 
 
+@cython.ccall
 def _carrier_candidate_8616(
     codegen: object,
-    base_offsets: frozenset[int] | set[int],
-    instructions: tuple[object, ...],
-    counts: dict[str, int],
+    base_offsets: object,
+    instructions: object,
+    counts: object,
     statement: object,
-) -> bool:
+) -> cython.bint:
     """Classify one statement as a proven push/call carrier candidate."""
+    tags: object
     if not isinstance(statement, structured_c.CAssignment):
         return False
     lhs = statement.lhs
@@ -1622,12 +1710,16 @@ def _carrier_candidate_8616(
 def _visit_carrier_nodes_8616(
     node: object,
     codegen: object,
-    base_offsets: frozenset[int] | set[int],
-    instructions: tuple[object, ...],
-    counts: dict[str, int],
-    seen: set[int],
+    base_offsets: object,
+    instructions: object,
+    counts: object,
+    seen: object,
 ) -> None:
     """Walk C nodes depth-first, pruning proven carrier statements."""
+    pairs: object
+    _condition: object
+    attr: object
+    body: object
     if node is None or id(node) in seen:
         return
     seen.add(id(node))
@@ -1647,14 +1739,16 @@ def _visit_carrier_nodes_8616(
             _visit_carrier_nodes_8616(body, codegen, base_offsets, instructions, counts, seen)
 
 
+@cython.ccall
 def materialize_stack_aggregate_objects_8616(
     codegen: object,
     project: object,
     function: object,
     *,
-    instructions: tuple[object, ...] | None = None,
-) -> bool:
+    instructions: object = None,
+) -> cython.bint:
     """Collect and materialize binary-proven stack aggregate objects."""
+    fact: object
     if function is None or getattr(codegen, "cfunc", None) is None:
         return False
     decoded = instructions if instructions is not None else _function_instructions(function)

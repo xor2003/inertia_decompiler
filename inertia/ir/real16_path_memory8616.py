@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Per-path proven-write byte overlay for the real-mode invocation census.
 
 Layer: IR (invocation/control proof).
@@ -23,6 +24,8 @@ boundary.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable, Mapping, MutableMapping
 from dataclasses import dataclass, field
@@ -34,9 +37,11 @@ from .real16_persistent_bytes8616 import (
     PersistentBytes8616,
     canonical_known_root_8616,
 )
+import dataclasses
+import operator
 
 #: Linear-address formation from a proven 16-bit segment base.
-SEGMENT_SHIFT_8616: int = 4
+SEGMENT_SHIFT_8616: cython.longlong = 4
 
 # The effective-address segment bases this domain can resolve: CS, SS, DS and
 # ES are proven from their named register lanes. CS identity grants no constant
@@ -53,7 +58,7 @@ SEGMENT_BASE_NAME_8616: dict[MemSpace, str] = {
 }
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class PathMemory8616:
     """One path position's proven memory-write overlay.
 
@@ -84,11 +89,11 @@ class PathMemory8616:
     is large enough to need structural sharing.
     """
 
-    known: MutableMapping[int, int] = field(
+    known: MutableMapping[cython.longlong, cython.longlong] = field(
         default_factory=PersistentBytes8616
     )
-    unknown: set[int] = field(default_factory=set)
-    tainted: bool = False
+    unknown: object = field(default_factory=set)
+    tainted: cython.bint = False
 
     def __post_init__(self) -> None:
         """Normalize containers so no external alias can reach the state.
@@ -110,6 +115,7 @@ class PathMemory8616:
         """``copy.copy`` takes the same isolated-snapshot route."""
         return self.copy()
 
+    @cython.ccall
     def copy(self) -> PathMemory8616:
         """Return an independent overlay with the same contents.
 
@@ -123,7 +129,8 @@ class PathMemory8616:
             tainted=self.tainted,
         )
 
-    def copy_work_units_8616(self) -> int:
+    @cython.ccall
+    def copy_work_units_8616(self) -> cython.longlong:
         """Return the actual work ``copy()`` performs for this overlay.
 
         Constant terms cover the instance allocation, the ``__post_init__``
@@ -138,6 +145,7 @@ class PathMemory8616:
         )
         return len(self.unknown) + known_cost + 8
 
+    @cython.ccall
     def assign(self, other: PathMemory8616) -> None:
         """Overwrite this overlay's contents with ``other``'s.
 
@@ -161,6 +169,7 @@ class PathMemory8616:
         self.unknown.update(other.unknown)
         self.tainted = other.tainted
 
+    @cython.ccall
     def taint(self) -> None:
         """Collapse to the fully unproven canonical state.
 
@@ -172,7 +181,8 @@ class PathMemory8616:
         self.unknown.clear()
         self.tainted = True
 
-    def apply_write(self, base: int, size: int, data: bytes | None) -> None:
+    @cython.ccall
+    def apply_write(self, base: cython.longlong, size: cython.longlong, data: object) -> None:
         """Commit one proven-span write of ``size`` bytes at ``base``.
 
         ``data`` carries the exact written bytes when the store's value
@@ -180,7 +190,7 @@ class PathMemory8616:
         ``None`` records the span's bytes as modified with unproven
         contents — each byte leaves ``known`` and enters ``unknown``.
         """
-        if data is not None and len(data) != size:
+        if data is not None and operator.ne(len(data), size):
             raise ValueError(
                 "apply_write data must cover exactly the proven span"
             )
@@ -194,17 +204,19 @@ class PathMemory8616:
                 self.unknown.discard(byte_addr)
 
 
+@cython.ccall
 def path_memory_initial_8616() -> PathMemory8616:
     """Return the empty overlay — every byte is unmodified initial memory."""
     return PathMemory8616()
 
 
+@cython.ccall
 def path_memory_tainted_8616() -> PathMemory8616:
     """Return the canonical fully-unproven overlay."""
     return PathMemory8616(tainted=True)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PathMemorySnapshot8616:
     """Frozen, equality-comparable image of one ``PathMemory8616`` overlay.
 
@@ -215,22 +227,24 @@ class PathMemorySnapshot8616:
     register lanes.
     """
 
-    known: tuple[tuple[int, int], ...]
-    unknown: tuple[int, ...]
-    tainted: bool
+    known: object
+    unknown: object
+    tainted: cython.bint
 
 
+@cython.ccall
 def snapshot_path_memory_8616(
     memory: PathMemory8616,
 ) -> PathMemorySnapshot8616:
     """Freeze one overlay into its retained, replayable image."""
     return PathMemorySnapshot8616(
-        known=tuple(sorted(memory.known.items())),
+        known=tuple(sorted(tuple(memory.known.items()))),
         unknown=tuple(sorted(memory.unknown)),
         tainted=memory.tainted,
     )
 
 
+@cython.ccall
 def restore_path_memory_8616(
     snapshot: PathMemorySnapshot8616,
 ) -> PathMemory8616:
@@ -242,6 +256,7 @@ def restore_path_memory_8616(
     )
 
 
+@cython.ccall
 def meet_path_memory_8616(
     states: Iterable[PathMemory8616],
 ) -> PathMemory8616:
@@ -258,6 +273,8 @@ def meet_path_memory_8616(
     must-meet's empty-state rule; callers always pass the seed or at least
     one predecessor exit.
     """
+    byte_addr: object
+    state: object
     iterator = iter(states)
     try:
         result = next(iterator).copy()
@@ -265,7 +282,7 @@ def meet_path_memory_8616(
         return PathMemory8616()
     for state in iterator:
         for byte_addr in tuple(result.known):
-            if state.known.get(byte_addr) != result.known[byte_addr]:
+            if operator.ne(state.known.get(byte_addr), result.known[byte_addr]):
                 del result.known[byte_addr]
                 result.unknown.add(byte_addr)
         result.unknown.update(state.unknown)
@@ -281,9 +298,10 @@ def meet_path_memory_8616(
     return result
 
 
+@cython.ccall
 def store_atom_clean_8616(
-    atom: object, dirty: set[str] | frozenset[str]
-) -> bool:
+    atom: object, dirty: object
+) -> cython.bint:
     """Return whether one store-data atom reads no dirty register.
 
     A register written earlier inside the same machine instruction cannot
@@ -310,8 +328,9 @@ def store_atom_clean_8616(
     return True
 
 
+@cython.ccall
 def _path_byte_8616(
-    address: int,
+    address: cython.longlong,
     memory: PathMemory8616,
     initial: InvocationInitialMemory8616,
 ) -> int | None:
@@ -325,11 +344,12 @@ def _path_byte_8616(
     return initial.byte_at(address)
 
 
+@cython.ccall
 def path_load_value_8616(
     instruction: IRInstr,
-    span: tuple[int, int] | None,
+    span: object,
     memory: PathMemory8616,
-    initial: InvocationInitialMemory8616 | None,
+    initial: object,
 ) -> int | None:
     """Read an authenticated LOAD span through the path's must-meet overlay.
 
@@ -361,8 +381,8 @@ def path_load_value_8616(
     ):
         return None
     if (
-        type(dst.size) is not int or dst.size != size
-        or type(address.size) is not int or address.size != size
+        type(dst.size) is not int or operator.ne(dst.size, size)
+        or type(address.size) is not int or operator.ne(address.size, size)
     ):
         return None
     value = 0
@@ -383,11 +403,11 @@ class _PersistentBytesFacadeLike8616(Protocol):
     names only the facade methods ``PathMemory8616`` consumes.
     """
 
-    def share_8616(self) -> MutableMapping[int, int]:
+    def share_8616(self) -> MutableMapping[cython.longlong, cython.longlong]:
         """Return an independent facade over the identical immutable root."""
         ...
 
-    def adopt_8616(self, other: Mapping[int, int]) -> None:
+    def adopt_8616(self, other: Mapping[cython.longlong, cython.longlong]) -> None:
         """Point this facade at another map's contents in place."""
         ...
 

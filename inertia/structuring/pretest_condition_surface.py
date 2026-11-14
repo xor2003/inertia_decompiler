@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Expose exact structured condition carriers for pretest loops.
 
 Layer: Structuring.
@@ -13,6 +14,8 @@ work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -25,18 +28,22 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CStatements,
     CWhileLoop,
 )
+import dataclasses
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PretestConditionSurface8616:
     """Typed condition carriers owned by one structured pretest loop."""
 
-    conditions: tuple[CExpression, ...]
+    conditions: object
     leading_break_guard: CIfBreak | CIfElse | None
 
 
+@cython.ccall
 def _first_executable_statement_8616(node: object) -> object | None:
     """Return the first node reached through statement-list wrappers only."""
+    candidate: object
+    statement: object
     if not isinstance(node, CStatements):
         return node
     for statement in node.statements:
@@ -46,7 +53,8 @@ def _first_executable_statement_8616(node: object) -> object | None:
     return None
 
 
-def _break_only_8616(node: object) -> bool:
+@cython.ccall
+def _break_only_8616(node: object) -> cython.bint:
     """Return whether ``node`` contains exactly one unconditional break."""
     if isinstance(node, CBreak):
         return True
@@ -57,9 +65,10 @@ def _break_only_8616(node: object) -> bool:
     )
 
 
+@cython.ccall
 def _leading_break_condition_8616(
     node: object,
-) -> tuple[CExpression, CIfBreak | CIfElse] | None:
+) -> object:
     """Return one exact leading break condition and its structured owner."""
     if isinstance(node, CIfBreak):
         return (node.condition, node) if isinstance(node.condition, CExpression) else None
@@ -78,6 +87,7 @@ def pretest_condition_surface_8616(
     loop: CForLoop | CWhileLoop,
 ) -> PretestConditionSurface8616:
     """Project exact header and leading-break expressions without semantics."""
+    leading: object
     conditions: list[CExpression] = []
     if isinstance(loop.condition, CExpression):
         conditions.append(loop.condition)
@@ -86,6 +96,6 @@ def pretest_condition_surface_8616(
         _first_executable_statement_8616(loop.body)
     )
     guard = leading[1] if leading is not None else None
-    if leading is not None and all(leading[0] is not item for item in conditions):
+    if leading is not None and all(leading[0] is not item for item in iter(conditions)):
         conditions.append(leading[0])
     return PretestConditionSurface8616(tuple(conditions), guard)

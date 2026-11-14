@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify optional metadata for honest recovery diagnostics.
 
 Layer: CLI/fallback/reporting.
@@ -6,11 +7,14 @@ evidence using the owned metadata contract, without inferring semantics.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from inertia.cli.lst_extract import LSTMetadata
 
 
-def has_only_binary_signatures(metadata: object) -> bool:
+@cython.ccall
+def has_only_binary_signatures(metadata: object) -> cython.bint:
     """Prove that a populated metadata record contains only signature evidence."""
     if not isinstance(metadata, LSTMetadata) or not metadata.signature_code_addrs:
         return False

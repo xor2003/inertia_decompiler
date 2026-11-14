@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Normalize proven register carriers across decrement dispatch chains.
 
 Layer: Alias.
@@ -9,6 +10,8 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, replace
 
@@ -19,8 +22,11 @@ from .condition_register_bindings import (
     condition_self_test_register_binding_8616,
     condition_self_test_storage_bindings_8616,
 )
+import dataclasses
+import operator
+import builtins
 
-type _BranchIdentity8616 = tuple[
+_BranchIdentity8616 = typing.TypeAliasType("_BranchIdentity8616", tuple[
     object,
     int,
     tuple[str, ...],
@@ -30,38 +36,39 @@ type _BranchIdentity8616 = tuple[
     int | None,
     int | None,
     int | None,
-]
+])
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionRegisterCarrierStats8616:
     """Closed evidence counters for register-carrier normalization."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionRegisterCarrierResult8616:
     """Return normalized conditions and their evidence accounting."""
 
-    conditions: tuple[ConditionIR, ...]
+    conditions: object
     stats: ConditionRegisterCarrierStats8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _CarrierSeed8616:
     """Proven concrete identity for one register at a selected branch successor."""
 
-    next_block: int
-    register_name: str
+    next_block: cython.longlong
+    register_name: object
     value: IRValue
-    width_bits: int
+    width_bits: cython.longlong
 
 
+@cython.ccall
 def _branch_identity_8616(condition: ConditionIR) -> _BranchIdentity8616:
     """Return one operand-independent branch identity."""
     return (
@@ -77,8 +84,10 @@ def _branch_identity_8616(condition: ConditionIR) -> _BranchIdentity8616:
     )
 
 
-def _unique_values_8616(values: list[IRValue]) -> tuple[IRValue, ...]:
+@cython.ccall
+def _unique_values_8616(values: object) -> tuple[IRValue, ...]:
     """Deduplicate owned IR values while preserving deterministic order."""
+    value: object
     unique: list[IRValue] = []
     for value in values:
         if value not in unique:
@@ -86,12 +95,13 @@ def _unique_values_8616(values: list[IRValue]) -> tuple[IRValue, ...]:
     return tuple(unique)
 
 
-def _register_lhs_values_8616(group: list[ConditionIR]) -> tuple[IRValue, ...]:
+@cython.ccall
+def _register_lhs_values_8616(group: object) -> object:
     """Return the unique named-register lhs values of one branch group."""
     return _unique_values_8616(
         [
             condition.lhs
-            for condition in group
+            for condition in iter(group)
             if isinstance(condition.lhs, IRValue)
             and condition.lhs.space is MemSpace.REG
             and isinstance(condition.lhs.name, str)
@@ -99,29 +109,36 @@ def _register_lhs_values_8616(group: list[ConditionIR]) -> tuple[IRValue, ...]:
     )
 
 
-def _storage_lhs_values_8616(group: list[ConditionIR]) -> tuple[IRValue, ...]:
+@cython.ccall
+def _storage_lhs_values_8616(group: object) -> object:
     """Return the unique segmented-memory lhs values of one branch group."""
     return _unique_values_8616(
         [
             condition.lhs
-            for condition in group
+            for condition in iter(group)
             if isinstance(condition.lhs, IRValue)
             and condition.lhs.space in {MemSpace.SS, MemSpace.DS, MemSpace.ES}
         ]
     )
 
 
-def _memory_lhs_width_8616(operand: object, width_bits: int) -> bool:
+@cython.ccall
+def _memory_lhs_width_8616(operand: object, width_bits: cython.longlong) -> cython.bint:
     """Return whether one bound operand is a width-exact segmented memory lhs."""
     return (
         isinstance(operand, IRValue)
         and operand.space in {MemSpace.SS, MemSpace.DS, MemSpace.ES}
-        and operand.size == max(1, width_bits // 8)
+        and operator.eq(operand.size, max(1, width_bits // 8))
     )
 
 
-def _binding_proofs_8616(group: list[ConditionIR]) -> list[tuple[str, IRValue]]:
+@cython.ccall
+def _binding_proofs_8616(group: object) -> object:
     """Collect proven register→storage bindings from self-test facts."""
+    binding: object
+    bound_operand: object
+    bound_register: object
+    condition: object
     proofs: list[tuple[str, IRValue]] = []
     for condition in group:
         binding = condition_self_test_register_binding_8616(condition)
@@ -137,17 +154,18 @@ def _binding_proofs_8616(group: list[ConditionIR]) -> list[tuple[str, IRValue]]:
     return proofs
 
 
+@cython.ccall
 def _group_unique_proof_8616(
-    group: list[ConditionIR],
-    register_values: tuple[IRValue, ...],
-    storage_values: tuple[IRValue, ...],
-) -> tuple[tuple[str, IRValue] | None, bool]:
+    group: object,
+    register_values: object,
+    storage_values: object,
+) -> tuple[tuple[str, IRValue] | None, cython.bint]:
     """Return the unique proven register→storage pair, or a counted refusal."""
     proofs: list[tuple[str, IRValue]] = []
     if register_values and storage_values:
         register = register_values[0]
         register_name = register.name
-        if not isinstance(register_name, str) or register.size != storage_values[0].size:
+        if not isinstance(register_name, str) or operator.ne(register.size, storage_values[0].size):
             return None, True
         proofs.append((register_name.lower(), storage_values[0]))
     proofs.extend(_binding_proofs_8616(group))
@@ -157,17 +175,18 @@ def _group_unique_proof_8616(
     if len(unique_proofs) != 1:
         return None, True
     register_name, storage = unique_proofs[0]
-    if storage_values and storage_values[0] != storage:
+    if storage_values and operator.ne(storage_values[0], storage):
         return None, True
     return (register_name, storage), False
 
 
 def _group_carrier_seed_8616(
-    group: list[ConditionIR],
-    proof: tuple[str, IRValue],
-    by_block: dict[int, list[tuple[int, ConditionIR]]],
+    group: object,
+    proof: object,
+    by_block: object,
 ) -> _CarrierSeed8616 | None:
     """Return the seed when the DEC successor and rhs consensus are proven."""
+    next_block: object
     register_name, storage = proof
     representative = group[0]
     next_block, ambiguous = _next_dec_block_8616(
@@ -180,7 +199,7 @@ def _group_carrier_seed_8616(
         next_block = representative.fallthrough_target
     if not isinstance(next_block, int):
         return None
-    if any(condition.rhs != representative.rhs for condition in group):
+    if any(operator.ne(condition.rhs, representative.rhs) for condition in iter(group)):
         return None
     return _CarrierSeed8616(
         next_block=next_block,
@@ -190,11 +209,14 @@ def _group_carrier_seed_8616(
     )
 
 
+@cython.ccall
 def _group_seed_8616(
-    group: list[ConditionIR],
-    by_block: dict[int, list[tuple[int, ConditionIR]]],
-) -> tuple[_CarrierSeed8616 | None, bool]:
+    group: object,
+    by_block: object,
+) -> tuple[_CarrierSeed8616 | None, cython.bint]:
     """Return the proven seed for one branch group, or a counted refusal."""
+    proof: object
+    seed: object
     register_values = _register_lhs_values_8616(group)
     storage_values = _storage_lhs_values_8616(group)
     if len(register_values) > 1 or len(storage_values) > 1:
@@ -214,9 +236,11 @@ def _group_seed_8616(
     return seed, False
 
 
-def _dedupe_seeds_8616(candidates: list[_CarrierSeed8616]) -> tuple[list[_CarrierSeed8616], int]:
+def _dedupe_seeds_8616(candidates: object) -> tuple[list[_CarrierSeed8616], cython.longlong]:
     """Return unique seeds keyed by (next_block, register_name) plus refusals."""
-    by_key: dict[tuple[int, str], list[_CarrierSeed8616]] = {}
+    grouped_seeds: object
+    seed: object
+    by_key: dict[tuple[cython.longlong, str], list[_CarrierSeed8616]] = {}
     for seed in candidates:
         by_key.setdefault((seed.next_block, seed.register_name), []).append(seed)
     seeds: list[_CarrierSeed8616] = []
@@ -234,11 +258,15 @@ def _dedupe_seeds_8616(candidates: list[_CarrierSeed8616]) -> tuple[list[_Carrie
     return seeds, failures
 
 
+@cython.ccall
 def _carrier_seeds_8616(
-    conditions: tuple[ConditionIR, ...],
-    by_block: dict[int, list[tuple[int, ConditionIR]]],
-) -> tuple[tuple[_CarrierSeed8616, ...], int]:
+    conditions: object,
+    by_block: object,
+) -> tuple[tuple[_CarrierSeed8616, ...], cython.longlong]:
     """Collect unambiguous register-to-storage proofs and unique DEC edges."""
+    seed: object
+    condition: object
+    group: object
     grouped: dict[_BranchIdentity8616, list[ConditionIR]] = {}
     for condition in conditions:
         grouped.setdefault(_branch_identity_8616(condition), []).append(condition)
@@ -256,7 +284,8 @@ def _carrier_seeds_8616(
     return tuple(seeds), failures + dedup_failures
 
 
-def _dec_semantics_8616(condition: ConditionIR) -> tuple[str, int] | None:
+@cython.ccall
+def _dec_semantics_8616(condition: ConditionIR) -> object:
     """Return a validated ``DEC reg`` producer description."""
     semantics = condition.producer_semantics
     if (
@@ -272,11 +301,11 @@ def _dec_semantics_8616(condition: ConditionIR) -> tuple[str, int] | None:
 
 def _next_dec_block_8616(
     condition: ConditionIR,
-    by_block: dict[int, list[tuple[int, ConditionIR]]],
+    by_block: object,
     *,
-    register_name: str,
-    width_bits: int,
-) -> tuple[int | None, bool]:
+    register_name: object,
+    width_bits: cython.longlong,
+) -> tuple[int | None, cython.bint]:
     """Return the unique successor with a compatible typed ``DEC`` fact.
 
     Compiler dispatch chains may continue on either edge: ``JE`` commonly
@@ -284,15 +313,16 @@ def _next_dec_block_8616(
     edge.  Follow only an exact successor carrying the same register/width
     evidence and refuse when both edges could continue the chain.
     """
-    candidates: list[int] = []
+    target: object
+    candidates: list[cython.longlong] = []
     for target in (condition.fallthrough_target, condition.taken_target):
         if not isinstance(target, int) or target in candidates:
             continue
         if any(
-            candidate.width_bits == width_bits
+            operator.eq(candidate.width_bits, width_bits)
             and (semantics := _dec_semantics_8616(candidate)) is not None
-            and semantics[0] == register_name
-            for _index, candidate in by_block.get(target, ())
+            and operator.eq(semantics[0], register_name)
+            for _index, candidate in builtins.iter(by_block.get(target, ()))
         ):
             candidates.append(target)
     if len(candidates) > 1:
@@ -301,34 +331,41 @@ def _next_dec_block_8616(
 
 
 def normalize_condition_register_carriers_8616(
-    conditions: list[ConditionIR] | tuple[ConditionIR, ...],
+    conditions: object,
 ) -> ConditionRegisterCarrierResult8616:
     """Bind pre-input comparisons or JCC-bound result tests to proven storage."""
+    existing: object
+    next_block: object
+    rhs: object
+    candidate_semantics: object
+    condition: object
+    index: object
+    seed: object
     comparison_ops: dict[ConditionOp, ConditionOp] = {"zero": "eq", "nonzero": "ne"}
     ordered = tuple(sorted(conditions, key=condition_sort_key_8616))
-    by_block: dict[int, list[tuple[int, ConditionIR]]] = {}
+    by_block: dict[cython.longlong, list[tuple[cython.longlong, ConditionIR]]] = {}
     for index, condition in enumerate(ordered):
         if isinstance(condition.block_addr, int):
             by_block.setdefault(condition.block_addr, []).append((index, condition))
     seeds, failures = _carrier_seeds_8616(ordered, by_block)
 
-    replacements: dict[int, ConditionIR] = {}
+    replacements: dict[cython.longlong, ConditionIR] = {}
     classified = 0
     materialized = 0
     for seed in seeds:
         block_addr = seed.next_block
         delta = 0
-        visited: set[int] = set()
+        visited: set[cython.longlong] = set()
         while block_addr not in visited:
             visited.add(block_addr)
             dec_candidates = [
                 (index, condition, semantics)
-                for index, condition in by_block.get(block_addr, ())
+                for index, condition in builtins.iter(by_block.get(block_addr, ()))
                 if (semantics := _dec_semantics_8616(condition)) is not None
             ]
             identities = {
                 _branch_identity_8616(condition)
-                for _index, condition, _semantics in dec_candidates
+                for _index, condition, _semantics in iter(dec_candidates)
             }
             if len(identities) != 1:
                 # No DEC ends the chain; competing branch identities refuse it.
@@ -340,20 +377,20 @@ def normalize_condition_register_carriers_8616(
             rhs = representative.rhs
             post_update_test = (
                 representative.is_zero_test and rhs is None
-                and representative.operand_bind_insn == representative.src_insn
+                and operator.eq(representative.operand_bind_insn, representative.src_insn)
                 and representative.src_insn is not None
             )
             boundary_matches = post_update_test or (
-                isinstance(rhs, IRValue) and rhs.space is MemSpace.CONST and rhs.const == dec_count
+                isinstance(rhs, IRValue) and rhs.space is MemSpace.CONST and operator.eq(rhs.const, dec_count)
             )
             register_matches = (
                 isinstance(representative.lhs, IRValue)
                 and representative.lhs.space is MemSpace.REG
-                and representative.lhs.name == register_name
+                and operator.eq(representative.lhs.name, register_name)
             )
             if (
-                register_name != seed.register_name
-                or representative.width_bits != seed.width_bits
+                operator.ne(register_name, seed.register_name)
+                or operator.ne(representative.width_bits, seed.width_bits)
                 or not register_matches
                 or not boundary_matches
             ):
@@ -373,7 +410,7 @@ def normalize_condition_register_carriers_8616(
                     operand_bind_insn=None if post_update_test else condition.operand_bind_insn,
                 )
                 existing = replacements.get(index)
-                conflicting_replacement = existing is not None and existing != replacement
+                conflicting_replacement = existing is not None and operator.ne(existing, replacement)
                 if candidate_semantics != semantics or conflicting_replacement:
                     failures += 1
                     continue
@@ -392,7 +429,7 @@ def normalize_condition_register_carriers_8616(
 
     normalized = tuple(
         replacements.get(index, condition)
-        for index, condition in enumerate(ordered)
+        for index, condition in builtins.iter(enumerate(ordered))
     )
     return ConditionRegisterCarrierResult8616(
         conditions=normalized,

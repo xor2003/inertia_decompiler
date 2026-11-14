@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Validate condition-only Structuring deltas from closed typed evidence.
 
 Layer: Tail Validation.
@@ -13,6 +14,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import Counter
 from collections.abc import Mapping
@@ -20,6 +23,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from inertia.structuring.condition_evidence_closure import ConditionEvidenceClosure8616
+import dataclasses
+import operator
 
 __all__ = [
     "ConditionClosureDeltaResult8616",
@@ -39,18 +44,18 @@ class ConditionClosureDeltaStatus8616(StrEnum):
     REFUSED_GUARD_MISMATCH = "refused_guard_mismatch"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionClosureDeltaStats8616:
     """Closed accounting for one condition-only validation attempt."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionClosureDeltaResult8616:
     """Typed result of validating one Structuring condition-only delta."""
 
@@ -58,15 +63,20 @@ class ConditionClosureDeltaResult8616:
     stats: ConditionClosureDeltaStats8616
 
     @property
-    def accepted(self) -> bool:
+    def accepted(self) -> cython.bint:
         """Return whether the exact closed-evidence contract passed."""
         return self.status is ConditionClosureDeltaStatus8616.ACCEPTED
 
 
+@cython.ccall
 def _changed_delta_fields_8616(
     delta: Mapping[str, object],
-) -> frozenset[str] | None:
+) -> object:
     """Return fields with typed added/removed tuple surfaces, or refuse."""
+    added: object
+    removed: object
+    field_delta: object
+    field_name: object
     changed: set[str] = set()
     for field_name, field_delta in delta.items():
         if not isinstance(field_delta, Mapping):
@@ -82,9 +92,12 @@ def _changed_delta_fields_8616(
 
 def _string_delta_8616(
     delta: Mapping[str, object],
-    field_name: str,
-) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+    field_name: object,
+) -> object:
     """Read one exact string-valued validation delta field."""
+    added: object
+    field_delta: object
+    removed: object
     field_delta = delta.get(field_name)
     if not isinstance(field_delta, Mapping):
         return None
@@ -92,12 +105,13 @@ def _string_delta_8616(
     removed = field_delta.get("removed")
     if not isinstance(added, tuple) or not isinstance(removed, tuple):
         return None
-    if not all(isinstance(item, str) for item in (*added, *removed)):
+    if not all(isinstance(item, str) for item in iter(tuple(added) + tuple(removed))):
         return None
     return added, removed
 
 
-def _guard_condition_8616(effect: str) -> str | None:
+@cython.ccall
+def _guard_condition_8616(effect: object) -> object:
     """Extract one plain if guard without accepting body-effect tokens."""
     prefix = "if:"
     if not effect.startswith(prefix):
@@ -106,13 +120,14 @@ def _guard_condition_8616(effect: str) -> str | None:
     return condition if condition and not condition.startswith("else") else None
 
 
+@cython.ccall
 def _result_8616(
     status: ConditionClosureDeltaStatus8616,
     *,
-    raw_count: int,
-    normalized_count: int = 0,
-    classified_count: int = 0,
-    materialized_count: int = 0,
+    raw_count: cython.longlong,
+    normalized_count: cython.longlong = 0,
+    classified_count: cython.longlong = 0,
+    materialized_count: cython.longlong = 0,
 ) -> ConditionClosureDeltaResult8616:
     """Build one result while keeping failure accounting closed."""
     return ConditionClosureDeltaResult8616(
@@ -128,7 +143,7 @@ def _result_8616(
 
 
 def validate_condition_closure_delta_8616(
-    closure: ConditionEvidenceClosure8616 | None,
+    closure: object,
     validation: Mapping[str, object],
 ) -> ConditionClosureDeltaResult8616:
     """Validate a condition-only delta against complete final ConditionIR owners.
@@ -138,12 +153,16 @@ def validate_condition_closure_delta_8616(
     every required binary condition has exactly one typed final owner, and the
     compared stage changed no calls, writes, returns, or body effects.
     """
+    conditions: object
+    controls: object
+    delta: object
+    semantic_failures: object
     raw_count = len(closure.required_keys) if closure is not None else 0
     if (
         closure is None
         or not closure.complete
         or not closure.required_keys
-        or closure.materialized_keys != closure.required_keys
+        or operator.ne(closure.materialized_keys, closure.required_keys)
     ):
         return _result_8616(
             ConditionClosureDeltaStatus8616.REFUSED_INCOMPLETE_CLOSURE,
@@ -162,7 +181,7 @@ def validate_condition_closure_delta_8616(
             raw_count=raw_count,
         )
     changed_fields = _changed_delta_fields_8616(delta)
-    if changed_fields != frozenset({"conditions", "control_flow_effects"}):
+    if operator.ne(changed_fields, frozenset({"conditions", "control_flow_effects"})):
         return _result_8616(
             ConditionClosureDeltaStatus8616.REFUSED_EFFECT_SURFACE,
             raw_count=raw_count,
@@ -179,20 +198,20 @@ def validate_condition_closure_delta_8616(
     normalized_count = len(condition_added) + len(condition_removed)
     if (
         not condition_added
-        or len(condition_added) != len(condition_removed)
-        or len(control_added) != len(control_removed)
+        or operator.ne(len(condition_added), len(condition_removed))
+        or operator.ne(len(control_added), len(control_removed))
     ):
         return _result_8616(
             ConditionClosureDeltaStatus8616.REFUSED_GUARD_MISMATCH,
             raw_count=raw_count,
             normalized_count=normalized_count,
         )
-    added_guards = tuple(_guard_condition_8616(effect) for effect in control_added)
-    removed_guards = tuple(_guard_condition_8616(effect) for effect in control_removed)
+    added_guards = tuple(_guard_condition_8616(effect) for effect in iter(control_added))
+    removed_guards = tuple(_guard_condition_8616(effect) for effect in iter(control_removed))
     if (
         None in (*added_guards, *removed_guards)
-        or Counter(condition_added) != Counter(added_guards)
-        or Counter(condition_removed) != Counter(removed_guards)
+        or operator.ne(Counter(condition_added), Counter(added_guards))
+        or operator.ne(Counter(condition_removed), Counter(removed_guards))
     ):
         return _result_8616(
             ConditionClosureDeltaStatus8616.REFUSED_GUARD_MISMATCH,

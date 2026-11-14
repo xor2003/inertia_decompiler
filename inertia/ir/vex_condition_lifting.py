@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Lift VEX condition and flag expressions into typed IR conditions.
 
 Layer: IR.
@@ -8,6 +9,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import re
 from collections.abc import Callable, Iterable
@@ -18,6 +21,8 @@ from typing import Any, Protocol, cast
 from .condition_ir import build_condition_ir_8616, harmonize_condition_args_8616, normalize_condition_op_8616
 from .core import IRCondition, IRValue
 from .regs import register_name_from_offset
+import dataclasses
+import operator
 
 __all__ = (
     "build_condition_from_binop",
@@ -58,7 +63,8 @@ class _VexExprBoundary(Protocol):
     ty: object
 
 
-def _expr_tag(expr: object | None) -> str:
+@cython.ccall
+def _expr_tag(expr: object) -> str:
     """Return a VEX expression tag from the pyvex boundary."""
     if expr is None:
         return ""
@@ -68,12 +74,14 @@ def _expr_tag(expr: object | None) -> str:
         return ""
 
 
-def _expr_tmp(expr: object) -> int:
+@cython.ccall
+def _expr_tmp(expr: object) -> cython.longlong:
     """Return a VEX temporary id from the pyvex boundary."""
     return _external_int(cast(_VexExprBoundary, expr).tmp)
 
 
-def _expr_offset(expr: object, default: int = -1) -> int:
+@cython.ccall
+def _expr_offset(expr: object, default: cython.longlong = -1) -> cython.longlong:
     """Return a VEX register offset from the pyvex boundary."""
     try:
         return _external_int(cast(_VexExprBoundary, expr).offset)
@@ -81,7 +89,8 @@ def _expr_offset(expr: object, default: int = -1) -> int:
         return default
 
 
-def _expr_op(expr: object | None, default: str = "") -> str:
+@cython.ccall
+def _expr_op(expr: object, default: object = "") -> object:
     """Return a VEX expression operation name from the pyvex boundary."""
     if expr is None:
         return default
@@ -91,8 +100,10 @@ def _expr_op(expr: object | None, default: str = "") -> str:
         return default
 
 
-def _expr_args(expr: object | None) -> tuple[object, ...]:
+@cython.ccall
+def _expr_args(expr: object) -> tuple[object, ...]:
     """Return VEX expression arguments as a stable tuple."""
+    args: object
     if expr is None:
         return ()
     try:
@@ -104,7 +115,8 @@ def _expr_args(expr: object | None) -> tuple[object, ...]:
     return tuple(cast(Iterable[object], args))
 
 
-def _expr_const(expr: object | None) -> _VexConstBoundary | None:
+@cython.ccall
+def _expr_const(expr: object) -> _VexConstBoundary | None:
     """Return a VEX constant boundary object when present."""
     if expr is None:
         return None
@@ -114,6 +126,7 @@ def _expr_const(expr: object | None) -> _VexConstBoundary | None:
         return None
 
 
+@cython.ccall
 def _expr_cond(expr: object) -> object | None:
     """Return the condition expression from a VEX ITE boundary."""
     try:
@@ -122,6 +135,7 @@ def _expr_cond(expr: object) -> object | None:
         return None
 
 
+@cython.ccall
 def _expr_iftrue(expr: object) -> object | None:
     """Return the true expression from a VEX ITE boundary."""
     try:
@@ -130,6 +144,7 @@ def _expr_iftrue(expr: object) -> object | None:
         return None
 
 
+@cython.ccall
 def _expr_iffalse(expr: object) -> object | None:
     """Return the false expression from a VEX ITE boundary."""
     try:
@@ -138,7 +153,8 @@ def _expr_iffalse(expr: object) -> object | None:
         return None
 
 
-def _external_int(value: object) -> int:
+@cython.ccall
+def _external_int(value: object) -> cython.longlong:
     """Coerce pyvex integer-like boundary values without owning their type."""
     return int(cast(Any, value))
 
@@ -163,7 +179,7 @@ class _FlagPredicateKind(Enum):
     OR = "or"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _FlagPredicate:
     """Structured predicate over one or more x86 flag bits."""
 
@@ -191,7 +207,8 @@ _INVERT_CONDITION_OPS = {
 }
 
 
-def _zero_fold(cond_op: str, left: IRValue, right: IRValue) -> IRCondition | None:
+@cython.ccall
+def _zero_fold(cond_op: object, left: IRValue, right: IRValue) -> IRCondition | None:
     if cond_op not in {"eq", "ne"}:
         return None
     if right.const == 0:
@@ -201,7 +218,9 @@ def _zero_fold(cond_op: str, left: IRValue, right: IRValue) -> IRCondition | Non
     return None
 
 
-def _compare_size_bytes(op: str) -> int:
+@cython.ccall
+def _compare_size_bytes(op: object) -> cython.longlong:
+    match: object
     match = re.search(r"(\d+)(?:[SU])?$", op)
     if match is None:
         return 0
@@ -209,8 +228,12 @@ def _compare_size_bytes(op: str) -> int:
     return 0 if bits <= 0 else max(1, bits // 8)
 
 
-def build_condition_from_binop(op: str, left: IRValue, right: IRValue) -> IRCondition | None:
+@cython.ccall
+def build_condition_from_binop(op: object, left: IRValue, right: IRValue) -> IRCondition | None:
     """Recover a typed IR condition from a two-argument VEX comparison op."""
+    zero_fold: object
+    cond_op: object
+    needle: object
     folded = op.lower()
     left, right = harmonize_condition_args_8616(left, right, size=_compare_size_bytes(op))
     variants = {
@@ -236,15 +259,20 @@ def build_condition_from_binop(op: str, left: IRValue, right: IRValue) -> IRCond
     return None
 
 
-def _nonzero_condition(value: IRValue, *, source: str) -> IRCondition:
+@cython.ccall
+def _nonzero_condition(value: IRValue, *, source: object) -> IRCondition:
     return build_condition_ir_8616("nonzero", value, expr=(source,))
 
 
-def _masked_nonzero_condition(left: IRValue, right: IRValue, *, source: str) -> IRCondition:
+@cython.ccall
+def _masked_nonzero_condition(left: IRValue, right: IRValue, *, source: object) -> IRCondition:
     return IRCondition(op="masked_nonzero", args=(left, right), expr=(source,))
 
 
+@cython.ccall
 def _const_value(expr: object | None) -> int | None:
+    con: object
+    value: object
     con = _expr_const(expr)
     if con is None:
         return None
@@ -254,19 +282,20 @@ def _const_value(expr: object | None) -> int | None:
 
 def _invert_condition(cond: IRCondition) -> IRCondition:
     def _impl() -> IRCondition:
+        inverted_op: object
         inverted_op = _INVERT_CONDITION_OPS.get(cond.op)
         if inverted_op is not None:
             args = cond.args
-            if all(isinstance(arg, IRValue) for arg in args):
+            if all(isinstance(arg, IRValue) for arg in iter(args)):
                 value_args = cast(tuple[IRValue, ...], args)
                 return build_condition_ir_8616(normalize_condition_op_8616(inverted_op), *value_args, expr=cond.expr)
         if cond.op == "not" and len(cond.args) == 1 and isinstance(cond.args[0], IRCondition):
             return cond.args[0]
-        if cond.op == "and" and len(cond.args) == 2 and all(isinstance(arg, IRCondition) for arg in cond.args):
+        if cond.op == "and" and len(cond.args) == 2 and all(isinstance(arg, IRCondition) for arg in iter(cond.args)):
             left = _invert_condition(cast(IRCondition, cond.args[0]))
             right = _invert_condition(cast(IRCondition, cond.args[1]))
             return IRCondition(op="or", args=(left, right), expr=cond.expr)
-        if cond.op == "or" and len(cond.args) == 2 and all(isinstance(arg, IRCondition) for arg in cond.args):
+        if cond.op == "or" and len(cond.args) == 2 and all(isinstance(arg, IRCondition) for arg in iter(cond.args)):
             left = _invert_condition(cast(IRCondition, cond.args[0]))
             right = _invert_condition(cast(IRCondition, cond.args[1]))
             return IRCondition(op="and", args=(left, right), expr=cond.expr)
@@ -275,7 +304,9 @@ def _invert_condition(cond: IRCondition) -> IRCondition:
     return _impl()
 
 
-def _resolve_tmp_expr(expr: object, tmp_exprs: _TmpExprs | None, seen: set[int] | None = None) -> object:
+@cython.ccall
+def _resolve_tmp_expr(expr: object, tmp_exprs: object, seen: object = None) -> object:
+    resolved: object
     if _expr_tag(expr) != "Iex_RdTmp" or tmp_exprs is None:
         return expr
     tmp_id = _expr_tmp(expr)
@@ -290,7 +321,8 @@ def _resolve_tmp_expr(expr: object, tmp_exprs: _TmpExprs | None, seen: set[int] 
     return _resolve_tmp_expr(resolved, tmp_exprs, seen)
 
 
-def _is_flags_expr(expr: object, tmp_exprs: _TmpExprs | None) -> bool:
+@cython.ccall
+def _is_flags_expr(expr: object, tmp_exprs: _TmpExprs | None) -> cython.bint:
     resolved = _resolve_tmp_expr(expr, tmp_exprs)
     tag = _expr_tag(resolved)
     if tag == "Iex_Get":
@@ -301,7 +333,8 @@ def _is_flags_expr(expr: object, tmp_exprs: _TmpExprs | None) -> bool:
     return False
 
 
-def _flag_bit_from_mask(mask: int | None) -> _FlagBit | None:
+@cython.ccall
+def _flag_bit_from_mask(mask: object) -> _FlagBit | None:
     if mask is None:
         return None
     try:
@@ -310,6 +343,7 @@ def _flag_bit_from_mask(mask: int | None) -> _FlagBit | None:
         return None
 
 
+@cython.ccall
 def _extract_flag_bit_expr(expr: object, tmp_exprs: _TmpExprs | None) -> _FlagBit | None:
     resolved = _resolve_tmp_expr(expr, tmp_exprs)
     if _expr_tag(resolved) != "Iex_Binop":
@@ -328,7 +362,10 @@ def _extract_flag_bit_expr(expr: object, tmp_exprs: _TmpExprs | None) -> _FlagBi
     return None
 
 
-def _extract_boolean_flag_test(expr: object, tmp_exprs: _TmpExprs | None) -> tuple[_FlagBit, bool] | None:
+@cython.ccall
+def _extract_boolean_flag_test(expr: object, tmp_exprs: _TmpExprs | None) -> object:
+    left_bit: object
+    right_bit: object
     resolved = _resolve_tmp_expr(expr, tmp_exprs)
     if _expr_tag(resolved) != "Iex_Binop":
         return None
@@ -348,11 +385,14 @@ def _extract_boolean_flag_test(expr: object, tmp_exprs: _TmpExprs | None) -> tup
     return None
 
 
+@cython.ccall
 def _extract_masked_flag_pair_test(
     lhs: object,
     rhs: object,
     tmp_exprs: _TmpExprs | None,
-) -> tuple[_FlagBit, _FlagBit] | None:
+) -> object:
+    left_bit: object
+    right_bit: object
     left_bit = _extract_flag_bit_expr(lhs, tmp_exprs)
     right_bit = _extract_flag_bit_expr(rhs, tmp_exprs)
     if left_bit is None or right_bit is None:
@@ -362,29 +402,31 @@ def _extract_masked_flag_pair_test(
 
 def _invert_flag_predicate_8616(pred: _FlagPredicate) -> _FlagPredicate | None:
     def _impl() -> _FlagPredicate | None:
-        if pred.kind == _FlagPredicateKind.BIT_SET:
+        left_pred: object
+        right_pred: object
+        if operator.eq(pred.kind, _FlagPredicateKind.BIT_SET):
             return _FlagPredicate(_FlagPredicateKind.BIT_CLEAR, bit=pred.bit)
-        if pred.kind == _FlagPredicateKind.BIT_CLEAR:
+        if operator.eq(pred.kind, _FlagPredicateKind.BIT_CLEAR):
             return _FlagPredicate(_FlagPredicateKind.BIT_SET, bit=pred.bit)
-        if pred.kind == _FlagPredicateKind.BITS_EQUAL:
+        if operator.eq(pred.kind, _FlagPredicateKind.BITS_EQUAL):
             return _FlagPredicate(
                 _FlagPredicateKind.BITS_NOT_EQUAL,
                 left_bit=pred.left_bit,
                 right_bit=pred.right_bit,
             )
-        if pred.kind == _FlagPredicateKind.BITS_NOT_EQUAL:
+        if operator.eq(pred.kind, _FlagPredicateKind.BITS_NOT_EQUAL):
             return _FlagPredicate(
                 _FlagPredicateKind.BITS_EQUAL,
                 left_bit=pred.left_bit,
                 right_bit=pred.right_bit,
             )
-        if pred.kind == _FlagPredicateKind.AND and pred.left is not None and pred.right is not None:
+        if operator.eq(pred.kind, _FlagPredicateKind.AND) and pred.left is not None and pred.right is not None:
             left_pred = _invert_flag_predicate_8616(pred.left)
             right_pred = _invert_flag_predicate_8616(pred.right)
             if left_pred is None or right_pred is None:
                 return None
             return _FlagPredicate(_FlagPredicateKind.OR, left=left_pred, right=right_pred)
-        if pred.kind == _FlagPredicateKind.OR and pred.left is not None and pred.right is not None:
+        if operator.eq(pred.kind, _FlagPredicateKind.OR) and pred.left is not None and pred.right is not None:
             left_pred = _invert_flag_predicate_8616(pred.left)
             right_pred = _invert_flag_predicate_8616(pred.right)
             if left_pred is None or right_pred is None:
@@ -395,17 +437,22 @@ def _invert_flag_predicate_8616(pred: _FlagPredicate) -> _FlagPredicate | None:
     return _impl()
 
 
+@cython.ccall
 def _flag_predicate_from_expr(expr: object, tmp_exprs: _TmpExprs | None) -> _FlagPredicate | None:
     return _flag_predicate_impl_8616(expr, tmp_exprs)
 
 
+@cython.ccall
 def _flag_predicate_cmp_8616(
-    op: str,
+    op: object,
     left: object,
     right: object,
     tmp_exprs: _TmpExprs | None,
 ) -> _FlagPredicate | None:
     """Lift one flag-compare Binop arm to a bit-equality predicate."""
+    left_test: object
+    masked_bits: object
+    right_test: object
     if "cmpeq" not in op and "cmpne" not in op:
         return None
     left_test = _extract_boolean_flag_test(left, tmp_exprs)
@@ -443,14 +490,18 @@ def _flag_predicate_cmp_8616(
     )
 
 
+@cython.ccall
 def _flag_predicate_binop_8616(
     resolved: object,
-    op: str,
+    op: object,
     left: object,
     right: object,
     tmp_exprs: _TmpExprs | None,
 ) -> _FlagPredicate | None:
     """Lift one Binop expression to a flag predicate."""
+    flag_test: object
+    left_pred: object
+    right_pred: object
     flag_test = _extract_boolean_flag_test(resolved, tmp_exprs)
     if flag_test is not None:
         bit, is_set = flag_test
@@ -468,7 +519,9 @@ def _flag_predicate_binop_8616(
     return _flag_predicate_cmp_8616(op, left, right, tmp_exprs)
 
 
+@cython.ccall
 def _flag_predicate_impl_8616(expr: object, tmp_exprs: _TmpExprs | None) -> _FlagPredicate | None:
+    inner: object
     resolved = _resolve_tmp_expr(expr, tmp_exprs)
     tag = _expr_tag(resolved)
     if tag == "Iex_Unop":
@@ -492,7 +545,9 @@ def _flag_predicate_impl_8616(expr: object, tmp_exprs: _TmpExprs | None) -> _Fla
     return None
 
 
-def _looks_like_flag_compare(cond: IRCondition) -> bool:
+@cython.ccall
+def _looks_like_flag_compare(cond: IRCondition) -> cython.bint:
+    arg: object
     for arg in cond.args:
         if not isinstance(arg, IRValue):
             continue
@@ -503,7 +558,9 @@ def _looks_like_flag_compare(cond: IRCondition) -> bool:
     return False
 
 
-def _latest_nonflag_compare(conditions: dict[int, IRCondition]) -> IRCondition | None:
+@cython.ccall
+def _latest_nonflag_compare(conditions: object) -> IRCondition | None:
+    cond: object
     for cond in reversed(tuple(conditions.values())):
         if cond.op not in {"eq", "ne", "ult", "ule", "ugt", "uge", "slt", "sle", "sgt", "sge"}:
             continue
@@ -515,29 +572,31 @@ def _latest_nonflag_compare(conditions: dict[int, IRCondition]) -> IRCondition |
     return None
 
 
-def _simple_flag_ops_8616(pred: _FlagPredicate) -> str | None:
+@cython.ccall
+def _simple_flag_ops_8616(pred: _FlagPredicate) -> object:
     """Map single-bit and bit-pair predicates to their condition op."""
-    if pred.kind == _FlagPredicateKind.BIT_SET and pred.bit == _FlagBit.ZF:
+    if operator.eq(pred.kind, _FlagPredicateKind.BIT_SET) and operator.eq(pred.bit, _FlagBit.ZF):
         return "eq"
-    if pred.kind == _FlagPredicateKind.BIT_CLEAR and pred.bit == _FlagBit.ZF:
+    if operator.eq(pred.kind, _FlagPredicateKind.BIT_CLEAR) and operator.eq(pred.bit, _FlagBit.ZF):
         return "ne"
-    if pred.kind == _FlagPredicateKind.BIT_SET and pred.bit == _FlagBit.CF:
+    if operator.eq(pred.kind, _FlagPredicateKind.BIT_SET) and operator.eq(pred.bit, _FlagBit.CF):
         return "ult"
-    if pred.kind == _FlagPredicateKind.BIT_CLEAR and pred.bit == _FlagBit.CF:
+    if operator.eq(pred.kind, _FlagPredicateKind.BIT_CLEAR) and operator.eq(pred.bit, _FlagBit.CF):
         return "uge"
-    if pred.kind == _FlagPredicateKind.BITS_NOT_EQUAL and {pred.left_bit, pred.right_bit} == {
+    if operator.eq(pred.kind, _FlagPredicateKind.BITS_NOT_EQUAL) and {pred.left_bit, pred.right_bit} == {
         _FlagBit.SF,
         _FlagBit.OF,
     }:
         return "slt"
-    if pred.kind == _FlagPredicateKind.BITS_EQUAL and {pred.left_bit, pred.right_bit} == {_FlagBit.SF, _FlagBit.OF}:
+    if operator.eq(pred.kind, _FlagPredicateKind.BITS_EQUAL) and {pred.left_bit, pred.right_bit} == {_FlagBit.SF, _FlagBit.OF}:
         return "sge"
     return None
 
 
-def _compound_flag_ops_8616(pred: _FlagPredicate) -> str | None:
+@cython.ccall
+def _compound_flag_ops_8616(pred: _FlagPredicate) -> object:
     """Map compound AND/OR flag predicates to their condition op."""
-    if pred.kind == _FlagPredicateKind.OR and pred.left is not None and pred.right is not None:
+    if operator.eq(pred.kind, _FlagPredicateKind.OR) and pred.left is not None and pred.right is not None:
         if {
             (pred.left.kind, pred.left.bit),
             (pred.right.kind, pred.right.bit),
@@ -547,14 +606,14 @@ def _compound_flag_ops_8616(pred: _FlagPredicate) -> str | None:
         }:
             return "ule"
         if {pred.left.kind, pred.right.kind} == {_FlagPredicateKind.BIT_SET, _FlagPredicateKind.BITS_NOT_EQUAL}:
-            bit_pred = pred.left if pred.left.kind == _FlagPredicateKind.BIT_SET else pred.right
+            bit_pred = pred.left if operator.eq(pred.left.kind, _FlagPredicateKind.BIT_SET) else pred.right
             cmp_pred = pred.right if bit_pred is pred.left else pred.left
-            if bit_pred.bit == _FlagBit.ZF and {cmp_pred.left_bit, cmp_pred.right_bit} == {
+            if operator.eq(bit_pred.bit, _FlagBit.ZF) and {cmp_pred.left_bit, cmp_pred.right_bit} == {
                 _FlagBit.SF,
                 _FlagBit.OF,
             }:
                 return "sle"
-    if pred.kind == _FlagPredicateKind.AND and pred.left is not None and pred.right is not None:
+    if operator.eq(pred.kind, _FlagPredicateKind.AND) and pred.left is not None and pred.right is not None:
         if {
             (pred.left.kind, pred.left.bit),
             (pred.right.kind, pred.right.bit),
@@ -564,9 +623,9 @@ def _compound_flag_ops_8616(pred: _FlagPredicate) -> str | None:
         }:
             return "ugt"
         if {pred.left.kind, pred.right.kind} == {_FlagPredicateKind.BIT_CLEAR, _FlagPredicateKind.BITS_EQUAL}:
-            bit_pred = pred.left if pred.left.kind == _FlagPredicateKind.BIT_CLEAR else pred.right
+            bit_pred = pred.left if operator.eq(pred.left.kind, _FlagPredicateKind.BIT_CLEAR) else pred.right
             cmp_pred = pred.right if bit_pred is pred.left else pred.left
-            if bit_pred.bit == _FlagBit.ZF and {cmp_pred.left_bit, cmp_pred.right_bit} == {
+            if operator.eq(bit_pred.bit, _FlagBit.ZF) and {cmp_pred.left_bit, cmp_pred.right_bit} == {
                 _FlagBit.SF,
                 _FlagBit.OF,
             }:
@@ -574,14 +633,20 @@ def _compound_flag_ops_8616(pred: _FlagPredicate) -> str | None:
     return None
 
 
-def _condition_op_from_flag_predicate(pred: _FlagPredicate) -> str | None:
+@cython.ccall
+def _condition_op_from_flag_predicate(pred: _FlagPredicate) -> object:
+    simple: object
     simple = _simple_flag_ops_8616(pred)
     if simple is not None:
         return simple
     return _compound_flag_ops_8616(pred)
 
 
+@cython.ccall
 def _flag_formula_condition(expr: object, conditions: _TmpConditions, tmp_exprs: _TmpExprs | None) -> IRCondition | None:
+    compare: object
+    cond_op: object
+    pred: object
     pred = _flag_predicate_from_expr(expr, tmp_exprs)
     if pred is None:
         return None
@@ -597,6 +662,7 @@ def _flag_formula_condition(expr: object, conditions: _TmpConditions, tmp_exprs:
     return build_condition_ir_8616(normalize_condition_op_8616(cond_op), lhs, rhs, expr=("flag_jcc_formula", cond_op))
 
 
+@cython.ccall
 def _try_expr_to_condition(
     expr: object,
     tmps: _TmpValues,
@@ -610,6 +676,7 @@ def _try_expr_to_condition(
     )
 
 
+@cython.ccall
 def _try_binop_condition_8616(
     expr: object,
     tmps: _TmpValues,
@@ -619,6 +686,7 @@ def _try_binop_condition_8616(
     tmp_exprs: _TmpExprs | None,
 ) -> IRCondition | None:
     """Lift one Binop expression to a logical or comparison condition."""
+    formula_cond: object
     formula_cond = _flag_formula_condition(expr, conditions, tmp_exprs)
     if formula_cond is not None:
         return formula_cond
@@ -654,6 +722,7 @@ def _try_binop_condition_8616(
     return build_condition_from_binop(op, left, right)
 
 
+@cython.ccall
 def _try_ite_condition_8616(
     expr: object,
     tmps: _TmpValues,
@@ -669,6 +738,7 @@ def _try_ite_condition_8616(
     converter retains the guard as a typed scalar predicate, including its
     captured temporary and conversion metadata.
     """
+    cond: object
     cond_expr = _expr_cond(expr)
     iftrue = _expr_iftrue(expr)
     iffalse = _expr_iffalse(expr)
@@ -688,14 +758,16 @@ def _try_ite_condition_8616(
     return None
 
 
+@cython.ccall
 def _try_expr_to_condition_impl_8616(
     expr: object,
     tmps: _TmpValues,
     conditions: _TmpConditions,
     *,
     expr_to_value: _ExprToValue,
-    tmp_exprs: _TmpExprs | None,
+    tmp_exprs: object,
 ) -> IRCondition | None:
+    cond: object
     tag = _expr_tag(expr)
     if tag == "Iex_RdTmp":
         tmp_id = _expr_tmp(expr)
@@ -718,17 +790,20 @@ def _try_expr_to_condition_impl_8616(
     return None
 
 
+@cython.ccall
 def _logical_condition(
-    op: str,
+    op: object,
     lhs: object,
     rhs: object,
     tmps: _TmpValues,
     conditions: _TmpConditions,
     *,
     expr_to_value: _ExprToValue,
-    source: str,
+    source: object,
     tmp_exprs: _TmpExprs | None = None,
 ) -> IRCondition | None:
+    lhs_cond: object
+    rhs_cond: object
     lhs_cond = _try_expr_to_condition(lhs, tmps, conditions, expr_to_value=expr_to_value, tmp_exprs=tmp_exprs)
     rhs_cond = _try_expr_to_condition(rhs, tmps, conditions, expr_to_value=expr_to_value, tmp_exprs=tmp_exprs)
     if lhs_cond is None or rhs_cond is None:
@@ -736,6 +811,7 @@ def _logical_condition(
     return IRCondition(op=op, args=(lhs_cond, rhs_cond), expr=(source,))
 
 
+@cython.ccall
 def expr_to_condition(
     expr: object,
     tmps: _TmpValues,
@@ -750,6 +826,7 @@ def expr_to_condition(
     )
 
 
+@cython.ccall
 def _binop_expr_condition_8616(
     expr: object,
     tmps: _TmpValues,
@@ -759,6 +836,9 @@ def _binop_expr_condition_8616(
     tmp_exprs: _TmpExprs | None,
 ) -> IRCondition | None:
     """Recover a formula, comparison, logical, or masked condition from a Binop."""
+    cond: object
+    formula_cond: object
+    logical: object
     op = _expr_op(expr)
     args = _expr_args(expr)
     if len(args) != 2:
@@ -781,6 +861,7 @@ def _binop_expr_condition_8616(
     return None
 
 
+@cython.ccall
 def _expr_to_condition_impl_8616(
     expr: object,
     tmps: _TmpValues,
@@ -789,6 +870,8 @@ def _expr_to_condition_impl_8616(
     expr_to_value: _ExprToValue,
     tmp_exprs: _TmpExprs | None,
 ) -> IRCondition:
+    binop_cond: object
+    cond: object
     tag = _expr_tag(expr)
     if tag == "Iex_RdTmp":
         tmp_id = _expr_tmp(expr)

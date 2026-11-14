@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Verify selector-return projections on the structured C AST.
 
 Layer: Structuring.
@@ -15,6 +16,8 @@ third-party codegen objects, so boundary reads are isolated and typed here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -33,6 +36,8 @@ from angr.sim_variable import SimRegisterVariable
 
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 from inertia.pipeline.errors import PipelineHardError
+import dataclasses
+import operator
 
 __all__ = [
     "SelectorReturnProjectionFingerprint8616",
@@ -50,6 +55,7 @@ __all__ = [
 _MINIMUM_SELECTOR_STATEMENTS = 2
 
 
+@cython.ccall
 def selector_return_storage_write_obligations_8616(root: object) -> tuple[CAssignment, ...]:
     """Collect storage writes a return-only replacement cannot silently discard.
 
@@ -59,8 +65,9 @@ def selector_return_storage_write_obligations_8616(root: object) -> tuple[CAssig
     dead or a replacement explicitly preserves them. Do not infer dead storage
     from variable names, balanced PUSH/POP syntax or return-value equivalence.
     """
-    obligations: dict[int, CAssignment] = {}
-    for node in (root, *_iter_c_nodes_deep_8616(root)):
+    node: object
+    obligations: dict[cython.longlong, CAssignment] = {}
+    for node in (root, ) + tuple(_iter_c_nodes_deep_8616(root)):
         if not isinstance(node, CAssignment):
             continue
         lhs = node.lhs
@@ -70,7 +77,8 @@ def selector_return_storage_write_obligations_8616(root: object) -> tuple[CAssig
     return tuple(obligations.values())
 
 
-def mask_accumulator_has_unconsumed_effects_8616(root: object, mask: object) -> bool:
+@cython.ccall
+def mask_accumulator_has_unconsumed_effects_8616(root: object, mask: object) -> cython.bint:
     """Refuse body replacement unless all storage writes belong to its mask.
 
     The mask callback supplies the already recovered C storage object. Equal
@@ -80,28 +88,30 @@ def mask_accumulator_has_unconsumed_effects_8616(root: object, mask: object) -> 
     return storage_reconstruction_has_unconsumed_effects_8616(root, (mask,))
 
 
-def storage_reconstruction_has_unconsumed_effects_8616(root: object, consumed: tuple[object, ...]) -> bool:
+def storage_reconstruction_has_unconsumed_effects_8616(root: object, consumed: object) -> cython.bint:
     """Refuse reconstruction that has no proof for existing calls or other writes.
 
     Consumers supply exact recovered storage objects whose updates they rebuild.
     This is an exclusion check, not proof of the reconstructed values or control
     flow. Equal names and offsets do not identify the same storage object.
     """
-    if any(isinstance(node, CFunctionCall) for node in (root, *_iter_c_nodes_deep_8616(root))):
+    assignment: object
+    if any(isinstance(node, CFunctionCall) for node in iter((root, ) + tuple(_iter_c_nodes_deep_8616(root)))):
         return True
     for assignment in selector_return_storage_write_obligations_8616(root):
         lhs = assignment.lhs
         known_storage = isinstance(lhs, CVariable) and lhs.variable is not None
         consumed_storage = known_storage and any(
-            isinstance(storage, CVariable) and lhs.variable is storage.variable for storage in consumed
+            isinstance(storage, CVariable) and lhs.variable is storage.variable for storage in iter(consumed)
         )
         if not consumed_storage:
             return True
     return False
 
 
+@cython.ccall
 def require_storage_reconstruction_effects_8616(
-    root: object, consumed: tuple[object, ...], *, function_addr: int
+    root: object, consumed: object, *, function_addr: cython.longlong
 ) -> None:
     """Stop a required reconstruction before it discards unconsumed effects.
 
@@ -132,7 +142,7 @@ class SelectorReturnProjectionVerdict8616(StrEnum):
     STALE_FINGERPRINTS = "stale_fingerprints"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SelectorReturnProjectionFingerprint8616:
     """Ordered condition and return fingerprints for a flat selector chain."""
 
@@ -140,7 +150,7 @@ class SelectorReturnProjectionFingerprint8616:
     returns: tuple[str, ...] = ()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SelectorReturnProjectionIntegrity8616:
     """Closed evidence result for the authoritative selector-return projection."""
 
@@ -149,7 +159,7 @@ class SelectorReturnProjectionIntegrity8616:
     observed: SelectorReturnProjectionFingerprint8616 = SelectorReturnProjectionFingerprint8616()
 
     @property
-    def accepted(self) -> bool:
+    def accepted(self) -> cython.bint:
         """Return whether no active selector-return projection is stale."""
         return self.verdict in {
             SelectorReturnProjectionVerdict8616.NOT_APPLICABLE,
@@ -157,22 +167,22 @@ class SelectorReturnProjectionIntegrity8616:
         }
 
     @property
-    def active(self) -> bool:
+    def active(self) -> cython.bint:
         """Return whether Structuring claims an authoritative selector projection."""
         return self.verdict is not SelectorReturnProjectionVerdict8616.NOT_APPLICABLE
 
     @property
-    def raw_fact_count(self) -> int:
+    def raw_fact_count(self) -> cython.longlong:
         """Count the materialized-projection marker consumed by this check."""
         return int(self.active)
 
     @property
-    def normalized_fact_count(self) -> int:
+    def normalized_fact_count(self) -> cython.longlong:
         """Count the complete expected fingerprint contract."""
         return int(bool(self.expected.conditions and self.expected.returns))
 
     @property
-    def classified_fact_count(self) -> int:
+    def classified_fact_count(self) -> cython.longlong:
         """Count projections classified against a live AST surface."""
         return int(
             self.verdict
@@ -184,12 +194,12 @@ class SelectorReturnProjectionIntegrity8616:
         )
 
     @property
-    def materialized_count(self) -> int:
+    def materialized_count(self) -> cython.longlong:
         """Count live AST projections matching their authoritative evidence."""
         return int(self.verdict is SelectorReturnProjectionVerdict8616.PASSED)
 
     @property
-    def failure_count(self) -> int:
+    def failure_count(self) -> cython.longlong:
         """Count active projections that are incomplete or stale."""
         return int(self.active and not self.accepted)
 
@@ -205,20 +215,22 @@ class _SelectorReturnCFunctionBoundary8616(Protocol):
     """Minimum third-party angr C-function surface consumed by this guard."""
 
     statements: object
-    addr: int
+    addr: cython.longlong
 
 
 class _SelectorReturnCodegenBoundary8616(Protocol):
     """Initialized selector-return metadata carried by an angr codegen object."""
 
     cfunc: _SelectorReturnCFunctionBoundary8616
-    _inertia_return_selector_materialized_8616: bool
-    _inertia_return_chain_materialized_condition_fingerprints_8616: tuple[str, ...]
-    _inertia_return_expr_chain_materialized_return_fingerprints_8616: tuple[str, ...]
+    _inertia_return_selector_materialized_8616: cython.bint
+    _inertia_return_chain_materialized_condition_fingerprints_8616: object
+    _inertia_return_expr_chain_materialized_return_fingerprints_8616: object
 
 
-def _selector_branch_values_8616(statement: object) -> tuple[object, object] | None:
+@cython.ccall
+def _selector_branch_values_8616(statement: object) -> object:
     """Read one condition and its sole valued return without guessing a shape."""
+    returned: object
     if not isinstance(statement, CIfElse) or statement.else_node is not None:
         return None
     condition_nodes = tuple(statement.condition_and_nodes)
@@ -234,12 +246,15 @@ def _selector_branch_values_8616(statement: object) -> tuple[object, object] | N
     return None if returned is None else (condition, returned)
 
 
+@cython.ccall
 def collect_selector_return_projection_8616(
     root: object,
     project: object,
     expr_fingerprint: Callable[[object, object], str],
 ) -> SelectorReturnProjectionFingerprint8616 | None:
     """Collect one exact flat selector-return projection from an angr C AST."""
+    values: object
+    statement: object
     if not isinstance(root, CStatements):
         return None
     statements = tuple(cast(Iterable[object], root.statements or ()))
@@ -264,12 +279,15 @@ def collect_selector_return_projection_8616(
     return SelectorReturnProjectionFingerprint8616(tuple(conditions), tuple(returns))
 
 
+@cython.ccall
 def assess_selector_return_projection_8616(
     codegen: object,
     project: object,
     expr_fingerprint: Callable[[object, object], str],
 ) -> SelectorReturnProjectionIntegrity8616:
     """Compare the live flat selector-return AST with its exact proof metadata."""
+    marker: object
+    observed: object
     marker_missing = object()
     marker = getattr(codegen, "_inertia_return_selector_materialized_8616", marker_missing)
     if marker is marker_missing:
@@ -304,18 +322,19 @@ def assess_selector_return_projection_8616(
         )
     verdict = (
         SelectorReturnProjectionVerdict8616.PASSED
-        if observed == expected
+        if operator.eq(observed, expected)
         else SelectorReturnProjectionVerdict8616.STALE_FINGERPRINTS
     )
     return SelectorReturnProjectionIntegrity8616(verdict, expected=expected, observed=observed)
 
 
+@cython.ccall
 def require_selector_return_projection_8616(
     codegen: object,
     project: object,
     expr_fingerprint: Callable[[object, object], str],
     *,
-    context: str,
+    context: object,
 ) -> SelectorReturnProjectionIntegrity8616:
     """Hard-fail when a claimed selector-return projection is not live."""
     integrity = assess_selector_return_projection_8616(codegen, project, expr_fingerprint)

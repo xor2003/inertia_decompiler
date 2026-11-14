@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Retain proven native terminal direct jumps for boring VEX block exits.
 
 Layer: IR.
@@ -19,6 +20,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -35,6 +38,8 @@ from inertia.frontend.x86_16.relative_control_edge import (
 from .core import IRRefusal
 from .regs import register_name_from_offset
 from .vex_types import vex_expr_size_bytes
+import dataclasses
+import operator
 
 __all__ = (
     "NativeRelativeCallEvidence8616",
@@ -76,7 +81,7 @@ class TerminalJumpRefusalReason8616(StrEnum):
     CONSTANT_CONFLICT = "terminal_jump_constant_conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalJumpEvidenceStats8616:
     """Closed five-stage accounting for one evaluated block terminal.
 
@@ -87,14 +92,14 @@ class TerminalJumpEvidenceStats8616:
     silent drop.
     """
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Every classified candidate either materialized or was refused."""
         counts = (
             self.raw_fact_count,
@@ -103,16 +108,15 @@ class TerminalJumpEvidenceStats8616:
             self.materialized_count,
             self.failure_count,
         )
-        if not all(type(count) is int and count >= 0 for count in counts):
+        if not all(type(count) is int and count >= 0 for count in iter(counts)):
             return False
         return bool(
             self.raw_fact_count == 1
             and self.normalized_fact_count == 1
-            and self.classified_fact_count
-            == self.materialized_count + self.failure_count
+            and operator.eq(self.classified_fact_count, self.materialized_count + self.failure_count)
         )
 
-    def to_dict(self) -> dict[str, int]:
+    def to_dict(self) -> dict[str, cython.longlong]:
         """Serialize the evidence ledger for diagnostics and workers."""
         return {
             "raw_fact_count": self.raw_fact_count,
@@ -123,7 +127,7 @@ class TerminalJumpEvidenceStats8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _NextShape8616:
     """Facts recovered from a matched ``next`` operand composition.
 
@@ -134,14 +138,14 @@ class _NextShape8616:
     ``None`` for the flat dword composition used by rel32 encodings.
     """
 
-    next_linear_addr: int
-    displacement: int
-    segment_register: str | None
-    second_segment_register: str | None
-    control_bits: int
+    next_linear_addr: cython.longlong
+    displacement: cython.longlong
+    segment_register: object
+    second_segment_register: object
+    control_bits: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalJumpEvidence8616:
     """Closed evidence decision for one ``Ijk_Boring`` block terminal.
 
@@ -157,9 +161,9 @@ class TerminalJumpEvidence8616:
     selector-window obligation later without re-reading raw bytes.
     """
 
-    retain: bool
+    retain: cython.bint
     proven_target: int | None
-    refusals: tuple[IRRefusal, ...]
+    refusals: object
     failure: TerminalJumpRefusalReason8616 | None
     stats: TerminalJumpEvidenceStats8616
     decoded: DecodedRelativeEdge | None = None
@@ -170,7 +174,7 @@ class TerminalJumpEvidence8616:
             "retain": self.retain,
             "proven_target": self.proven_target,
             "failure": None if self.failure is None else self.failure.value,
-            "refusals": tuple(refusal.to_dict() for refusal in self.refusals),
+            "refusals": tuple(refusal.to_dict() for refusal in iter(self.refusals)),
             "stats": self.stats.to_dict(),
             "decoded": (
                 None
@@ -217,12 +221,14 @@ class _NativeBlockBoundary8616(Protocol):
     bytes: object
 
 
-def _external_int_8616(value: object) -> int:
+@cython.ccall
+def _external_int_8616(value: object) -> cython.longlong:
     """Coerce external pyvex/angr integer-like values without owning them."""
     return int(cast(Any, value))
 
 
-def _expr_tag_8616(expr: object | None) -> str:
+@cython.ccall
+def _expr_tag_8616(expr: object) -> str:
     """Return a VEX expression tag from the pyvex boundary."""
     if expr is None:
         return ""
@@ -232,8 +238,10 @@ def _expr_tag_8616(expr: object | None) -> str:
         return ""
 
 
-def _expr_args_8616(expr: object | None) -> tuple[object, ...]:
+@cython.ccall
+def _expr_args_8616(expr: object) -> tuple[object, ...]:
     """Return VEX expression args from the pyvex boundary."""
+    args: object
     if expr is None:
         return ()
     try:
@@ -245,7 +253,8 @@ def _expr_args_8616(expr: object | None) -> tuple[object, ...]:
     return tuple(cast(Any, args))
 
 
-def _expr_op_8616(expr: object | None) -> str:
+@cython.ccall
+def _expr_op_8616(expr: object) -> str:
     """Return a VEX expression op token from the pyvex boundary."""
     if expr is None:
         return ""
@@ -255,6 +264,7 @@ def _expr_op_8616(expr: object | None) -> str:
         return ""
 
 
+@cython.ccall
 def _expr_offset_8616(expr: object) -> int | None:
     """Return a VEX register offset from the pyvex boundary."""
     try:
@@ -263,6 +273,7 @@ def _expr_offset_8616(expr: object) -> int | None:
         return None
 
 
+@cython.ccall
 def _expr_tmp_8616(expr: object) -> int | None:
     """Return a VEX temporary id from the pyvex boundary."""
     try:
@@ -271,8 +282,10 @@ def _expr_tmp_8616(expr: object) -> int | None:
         return None
 
 
-def _const_value_8616(expr: object | None) -> int | None:
+@cython.ccall
+def _const_value_8616(expr: object) -> int | None:
     """Return a wrapped or bare VEX constant value from the boundary."""
+    wrapped: object
     if expr is None:
         return None
     try:
@@ -290,13 +303,16 @@ def _const_value_8616(expr: object | None) -> int | None:
         return None
 
 
+@cython.ccall
 def _resolve_tmp_8616(
     expr: object | None,
-    tmp_exprs: Mapping[int, object],
+    tmp_exprs: Mapping[cython.longlong, object],
     *,
-    depth: int = 0,
+    depth: cython.longlong = 0,
 ) -> object | None:
     """Resolve a VEX temporary read to its recorded producer expression."""
+    producer: object
+    tmp_id: object
     node = expr
     while _expr_tag_8616(node) == "Iex_RdTmp" and depth < _MAX_NEXT_ALIAS_DEPTH_8616:
         tmp_id = _expr_tmp_8616(node)
@@ -310,14 +326,15 @@ def _resolve_tmp_8616(
     return node
 
 
+@cython.ccall
 def _match_unop_operand_8616(
     node: object | None,
-    op: str,
-    tmp_exprs: Mapping[int, object],
+    op: object,
+    tmp_exprs: Mapping[cython.longlong, object],
 ) -> object | None:
     """Match one ``Iex_Unop`` node and return its resolved sole operand."""
     node = _resolve_tmp_8616(node, tmp_exprs)
-    if _expr_tag_8616(node) != "Iex_Unop" or _expr_op_8616(node) != op:
+    if _expr_tag_8616(node) != "Iex_Unop" or operator.ne(_expr_op_8616(node), op):
         return None
     args = _expr_args_8616(node)
     if len(args) != 1:
@@ -325,14 +342,15 @@ def _match_unop_operand_8616(
     return _resolve_tmp_8616(args[0], tmp_exprs)
 
 
+@cython.ccall
 def _match_binop_operands_8616(
     node: object | None,
-    op: str,
-    tmp_exprs: Mapping[int, object],
-) -> tuple[object | None, object | None] | None:
+    op: object,
+    tmp_exprs: Mapping[cython.longlong, object],
+) -> object:
     """Match one ``Iex_Binop`` node and return its resolved operand pair."""
     node = _resolve_tmp_8616(node, tmp_exprs)
-    if _expr_tag_8616(node) != "Iex_Binop" or _expr_op_8616(node) != op:
+    if _expr_tag_8616(node) != "Iex_Binop" or operator.ne(_expr_op_8616(node), op):
         return None
     args = _expr_args_8616(node)
     if len(args) != 2:
@@ -343,12 +361,15 @@ def _match_binop_operands_8616(
     )
 
 
+@cython.ccall
 def _segment_base_register_8616(
     expr: object | None,
-    tmp_exprs: Mapping[int, object],
+    tmp_exprs: Mapping[cython.longlong, object],
     type_environment: object | None,
-) -> str | None:
+) -> object:
     """Match ``Shl32(16Uto32(GET:I16(seg)), 4)`` and return the register name."""
+    offset: object
+    operands: object
     operands = _match_binop_operands_8616(expr, "Iop_Shl32", tmp_exprs)
     if operands is None or _const_value_8616(operands[1]) != 4:
         return None
@@ -363,11 +384,12 @@ def _segment_base_register_8616(
     return register_name_from_offset(offset, size=2)
 
 
+@cython.ccall
 def _match_word_continuation_8616(
     widened: object | None,
-    tmp_exprs: Mapping[int, object],
+    tmp_exprs: Mapping[cython.longlong, object],
     type_environment: object | None,
-) -> tuple[int, int, str] | None:
+) -> object:
     """Match ``16Uto32(Add16(32to16(Sub32(next_linear, cs<<4)), disp16))``.
 
     Returns ``(next_linear, masked_displacement, segment)`` for the inner
@@ -375,6 +397,11 @@ def _match_word_continuation_8616(
     composition. The CS composition site is returned for the caller's
     second-site equality check.
     """
+    displacement: object
+    next_linear: object
+    operands: object
+    second_segment: object
+    sub: object
     add16 = _match_unop_operand_8616(widened, "Iop_16Uto32", tmp_exprs)
     operands = _match_binop_operands_8616(add16, "Iop_Add16", tmp_exprs)
     if operands is None:
@@ -396,9 +423,10 @@ def _match_word_continuation_8616(
     return next_linear, displacement, second_segment
 
 
+@cython.ccall
 def _match_next_shape_8616(
     next_expr: object | None,
-    tmp_exprs: Mapping[int, object],
+    tmp_exprs: Mapping[cython.longlong, object],
     type_environment: object | None,
 ) -> _NextShape8616 | None:
     """Match the lifter's control destination composition for ``next``.
@@ -410,6 +438,10 @@ def _match_next_shape_8616(
     composition wraps exactly at the dword width, so no selector window is
     involved. Anything else is not a recognized composition.
     """
+    inner: object
+    left_const: object
+    right_const: object
+    segment: object
     node = _resolve_tmp_8616(next_expr, tmp_exprs)
     if _expr_tag_8616(node) != "Iex_Binop" or _expr_op_8616(node) != "Iop_Add32":
         return None
@@ -447,13 +479,15 @@ def _match_next_shape_8616(
     )
 
 
-def _signed_8616(value: int, bits: int) -> int:
+@cython.ccall
+def _signed_8616(value: cython.longlong, bits: cython.longlong) -> cython.longlong:
     """Interpret a masked operand with its explicit sign, never modulo."""
     sign = 1 << (bits - 1)
     return value - (1 << bits) if value & sign else value
 
 
-def _block_bytes_8616(block: object) -> bytes | None:
+@cython.ccall
+def _block_bytes_8616(block: object) -> object:
     """Return the exact lifted byte string from the angr block boundary."""
     try:
         data = cast(_NativeBlockBoundary8616, block).bytes
@@ -464,6 +498,7 @@ def _block_bytes_8616(block: object) -> bytes | None:
     return None
 
 
+@cython.ccall
 def _block_size_8616(block: object) -> int | None:
     """Return the decoded byte size from the angr block boundary."""
     try:
@@ -473,6 +508,7 @@ def _block_size_8616(block: object) -> int | None:
     return size if type(size) is int and size >= 0 else None
 
 
+@cython.ccall
 def _block_addr_8616(block: object) -> int | None:
     """Return the loader-linear base from the angr block boundary."""
     try:
@@ -482,40 +518,45 @@ def _block_addr_8616(block: object) -> int | None:
     return addr if type(addr) is int and addr >= 0 else None
 
 
+@cython.ccall
 def _terminal_encoding_8616(
     block: object,
-    instruction_addr: int,
-    instruction_size: int,
-) -> bytes | None:
+    instruction_addr: cython.longlong,
+    instruction_size: cython.longlong,
+) -> object:
     """Slice the exact terminal instruction bytes the lifter decoded.
 
     The marked instruction must sit at the block tail: its offset within the
     lifted bytes must be exact, and its end must be the block end. Anything
     else means the bytes cannot prove a terminal transfer.
     """
+    block_addr: object
+    block_size: object
+    data: object
     block_addr = _block_addr_8616(block)
     block_size = _block_size_8616(block)
     data = _block_bytes_8616(block)
     if block_addr is None or block_size is None or data is None:
         return None
-    if len(data) != block_size:
+    if operator.ne(len(data), block_size):
         return None
     offset = instruction_addr - block_addr
     if offset < 0 or instruction_size <= 0 or offset + instruction_size > block_size:
         return None
-    if offset + instruction_size != block_size:
+    if operator.ne(offset + instruction_size, block_size):
         return None
     return data[offset : offset + instruction_size]
 
 
+@cython.ccall
 def _evidence_8616(
     *,
-    retain: bool,
-    proven_target: int | None,
-    failure: TerminalJumpRefusalReason8616 | None,
+    retain: cython.bint,
+    proven_target: object,
+    failure: object,
     block_addr: int | None,
-    classified: bool,
-    detail: str,
+    classified: cython.bint,
+    detail: object,
     decoded: DecodedRelativeEdge | None = None,
 ) -> TerminalJumpEvidence8616:
     """Close the evidence decision with counts matching its typed outcome."""
@@ -540,13 +581,14 @@ def _evidence_8616(
     )
 
 
+@cython.ccall
 def terminal_direct_jump_evidence_8616(
     block: object,
     vex: object,
     *,
     instruction_addr: int | None,
     instruction_size: int | None,
-    tmp_exprs: Mapping[int, object],
+    tmp_exprs: Mapping[cython.longlong, object],
     type_environment: object | None = None,
 ) -> TerminalJumpEvidence8616:
     """Evaluate one ``Ijk_Boring`` block tail as a native direct jump.
@@ -560,6 +602,7 @@ def terminal_direct_jump_evidence_8616(
     with a closed zero classification; the instruction's IR effects already
     carry its semantics, so absence of the marker is not a dropped fact.
     """
+    encoding: object
     try:
         jumpkind = str(cast(_VexBlockBoundary8616, vex).jumpkind)
         next_expr = cast(_VexBlockBoundary8616, vex).next
@@ -606,14 +649,18 @@ def terminal_direct_jump_evidence_8616(
     )
 
 
+@cython.ccall
 def _proven_terminal_target_8616(
     decoded: DecodedRelativeEdge,
     next_expr: object | None,
-    tmp_exprs: Mapping[int, object],
+    tmp_exprs: Mapping[cython.longlong, object],
     type_environment: object | None,
     block_addr: int | None,
 ) -> TerminalJumpEvidence8616:
     """Prove the decoded jump's loader-linear destination or refuse it."""
+    constant_next: object
+    linear_target: object
+    shape: object
     destination = invariant_relative_destination(decoded)
     linear_target = destination.target
     if linear_target is None:
@@ -626,7 +673,7 @@ def _proven_terminal_target_8616(
         )
     constant_next = _const_value_8616(next_expr)
     if constant_next is not None:
-        if constant_next == linear_target:
+        if operator.eq(constant_next, linear_target):
             return _evidence_8616(
                 retain=True,
                 proven_target=constant_next,
@@ -671,8 +718,8 @@ def _proven_terminal_target_8616(
         )
     word_form = decoded.form in _WORD_JUMP_FORMS_8616
     segment_matches_width = (
-        shape.segment_register == _CS_SEGMENT_REGISTER_8616
-        and shape.second_segment_register == shape.segment_register
+        operator.eq(shape.segment_register, _CS_SEGMENT_REGISTER_8616)
+        and operator.eq(shape.second_segment_register, shape.segment_register)
     ) if word_form else shape.segment_register is None
     if not segment_matches_width:
         return _evidence_8616(
@@ -684,7 +731,7 @@ def _proven_terminal_target_8616(
             detail=f"control segment is {shape.segment_register!r}, not cs",
             decoded=decoded,
         )
-    if shape.next_linear_addr != decoded.next_head:
+    if operator.ne(shape.next_linear_addr, decoded.next_head):
         return _evidence_8616(
             retain=True,
             proven_target=None,
@@ -702,9 +749,9 @@ def _proven_terminal_target_8616(
         if decoded.form in _WORD_JUMP_FORMS_8616
         else _DWORD_OPERAND_BITS_8616
     )
-    if _signed_8616(
+    if operator.ne(_signed_8616(
         shape.displacement & ((1 << displacement_bits) - 1), displacement_bits
-    ) != decoded.displacement:
+    ), decoded.displacement):
         return _evidence_8616(
             retain=True,
             proven_target=None,
@@ -729,7 +776,7 @@ def _proven_terminal_target_8616(
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class NativeRelativeCallEvidence8616:
     """Full CALL destination bound to exact bytes and native control expression."""
 
@@ -738,10 +785,11 @@ class NativeRelativeCallEvidence8616:
     stats: TerminalJumpEvidenceStats8616
 
 
+@cython.ccall
 def native_relative_call_evidence_8616(
     decoded: DecodedRelativeEdge,
     next_expr: object | None,
-    tmp_exprs: Mapping[int, object],
+    tmp_exprs: Mapping[cython.longlong, object],
     type_environment: object | None,
 ) -> NativeRelativeCallEvidence8616:
     """Reuse the exact native relative composition proof without emitting a JMP.

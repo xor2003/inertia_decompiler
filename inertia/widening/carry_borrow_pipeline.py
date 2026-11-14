@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Run carry/borrow Semantics, Alias, and Widening before Lowering.
 
 Layer: Widening orchestration.
@@ -9,6 +10,8 @@ Do not join values from rendered text, cosmetic shape, postprocess, or CLI/repor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -33,9 +36,11 @@ from .carry_borrow_storage import (
     widen_carry_borrow_storage_8616,
 )
 from .carry_borrow_values import WideCarryBorrowEvidence8616, widen_carry_borrow_values_8616
+import dataclasses
+import operator
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CarryBorrowWideningPipeline8616:
     """Coherent per-function projection from SSA through Widening."""
 
@@ -48,12 +53,12 @@ class CarryBorrowWideningPipeline8616:
     storage_widening: WideCarryBorrowStorageEvidence8616
 
     @property
-    def function_addr(self) -> int:
+    def function_addr(self) -> cython.longlong:
         """Return the exact source function address."""
         return int(self.source_ssa.function_addr)
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every owned projection has closed accounting."""
         return bool(
             self.semantics.complete
@@ -63,13 +68,13 @@ class CarryBorrowWideningPipeline8616:
             and self.storage_widening.complete
             and (
                 self.source_stack_alias is None
-                or self.function_addr == self.source_stack_alias.function_addr
+                or operator.eq(self.function_addr, self.source_stack_alias.function_addr)
             )
-            and self.function_addr == self.semantics.function_addr
-            and self.function_addr == self.aliases.function_addr
-            and self.function_addr == self.widening.function_addr
-            and self.function_addr == self.destination_aliases.function_addr
-            and self.function_addr == self.storage_widening.function_addr
+            and operator.eq(self.function_addr, self.semantics.function_addr)
+            and operator.eq(self.function_addr, self.aliases.function_addr)
+            and operator.eq(self.function_addr, self.widening.function_addr)
+            and operator.eq(self.function_addr, self.destination_aliases.function_addr)
+            and operator.eq(self.function_addr, self.storage_widening.function_addr)
         )
 
 
@@ -91,18 +96,18 @@ class CarryBorrowProjection8616(StrEnum):
 
 def _require_materialization_8616(
     *,
-    classified_fact_count: int,
-    materialized_count: int,
-    layer: str,
+    classified_fact_count: cython.longlong,
+    materialized_count: cython.longlong,
+    layer: object,
     projection: CarryBorrowProjection8616,
-    failure_contexts: tuple[tuple[StrEnum, StrEnum | None], ...] = (),
+    failure_contexts: object = (),
 ) -> None:
     """Fail with the exact projection and counts when classified facts vanish."""
     if classified_fact_count > 0 and materialized_count == 0:
         reasons = (
             ",".join(
                 f"{reason.value}@{operand.value if operand is not None else 'projection'}"
-                for reason, operand in failure_contexts
+                for reason, operand in iter(failure_contexts)
             )
             or "none"
         )
@@ -127,7 +132,7 @@ def build_carry_borrow_widening_pipeline_8616(
 ) -> CarryBorrowWideningPipeline8616:
     """Build one closed Semantics-to-Widening artifact from exact function SSA."""
     if stack_alias is not None and (
-        not stack_alias.complete or stack_alias.function_addr != function_ssa.function_addr
+        not stack_alias.complete or operator.ne(stack_alias.function_addr, function_ssa.function_addr)
     ):
         raise PipelineHardError(
             "stack-memory Alias evidence is incoherent before carry Widening",
@@ -152,7 +157,7 @@ def build_carry_borrow_widening_pipeline_8616(
         projection=CarryBorrowProjection8616.SEMANTICS_TO_ALIAS,
         failure_contexts=tuple(
             (item.failure, item.failure_operand)
-            for item in aliases.resolutions
+            for item in iter(aliases.resolutions)
             if item.failure is not None
         ),
     )
@@ -169,7 +174,7 @@ def build_carry_borrow_widening_pipeline_8616(
         projection=CarryBorrowProjection8616.ALIAS_TO_WIDENING,
         failure_contexts=tuple(
             (item.failure, None)
-            for item in widening.resolutions
+            for item in iter(widening.resolutions)
             if item.failure is not None
         ),
     )
@@ -196,7 +201,7 @@ def build_carry_borrow_widening_pipeline_8616(
         projection=CarryBorrowProjection8616.DESTINATION_ALIAS_TO_WIDENING,
         failure_contexts=tuple(
             (item.failure, None)
-            for item in storage_widening.resolutions
+            for item in iter(storage_widening.resolutions)
             if item.failure is not None
         ),
     )
@@ -217,11 +222,13 @@ def build_carry_borrow_widening_pipeline_8616(
     return artifact
 
 
+@cython.ccall
 def apply_carry_borrow_widening_pipeline_8616(
     _project: object,
     codegen: object,
-) -> bool:
+) -> cython.bint:
     """Attach fresh carry/borrow Widening evidence before Lowering runs."""
+    raw_stack_alias: object
     boundary = cast(_CarryBorrowCodegenBoundary8616, codegen)
     try:
         function_ssa = boundary._inertia_vex_ir_function_ssa

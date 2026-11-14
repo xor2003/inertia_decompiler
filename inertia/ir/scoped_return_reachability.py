@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: IR.
 Responsibility: consume a native invocation proof as a conditional CFG partition.
 
@@ -8,6 +9,8 @@ Owns typed Value, Address, Condition, instruction facts, and lossless normalizat
 Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 from __future__ import annotations
+import typing
+import cython
 
 from types import MappingProxyType
 
@@ -24,17 +27,19 @@ from .real16_invocation_domain import (
 from .scoped_control_obligations import _continuation_effective_blocks_8616, _obligation_surface_failure_8616
 from .scoped_function_ir_view import ScopedFunctionCFGProjection8616
 from .segment_call_preservation import segment_call_dependency_traversal_scope_8616
+import operator
+import builtins
 
 _MAX_BLOCKS = 4096
 
 
 def _return_address(
-    artifact: IRFunctionArtifact, proven: frozenset[int],
+    artifact: IRFunctionArtifact, proven: object,
 ) -> int | None:
     """Select the single native terminal covered by this bounded return rule."""
     if len(proven) != 1:
         return None
-    matches = tuple(block for block in artifact.blocks if block.addr in proven)
+    matches = tuple(block for block in iter(artifact.blocks) if block.addr in proven)
     if len(matches) != 1 or not matches[0].instrs:
         return None
     address = matches[0].instrs[-1].addr
@@ -43,8 +48,10 @@ def _return_address(
 
 def _domain_bound(
     view: ScopedNearReturnContinuationView8616, scope: Real16InvocationDomain8616,
-) -> bool:
+) -> cython.bint:
     """Reauthenticate the same native entry, return target, and closed ledger."""
+    failure: object
+    premise: object
     domain = view.reachability_domain
     if (type(domain) is not Real16InvocationDomain8616
             or type(scope.chain) is not Real16CallChainLink8616
@@ -58,13 +65,13 @@ def _domain_bound(
             or domain.coverage is not None):
         return False
     failure, _detail, premise, proven = _obligation_surface_failure_8616(view.source_artifact, view.boundary)
-    if (failure is not None or premise is not view.premise or proven != view.proven_block_addrs
-            or domain.callsite_addr != _return_address(view.source_artifact, proven)):
+    if (failure is not None or premise is not view.premise or operator.ne(proven, view.proven_block_addrs)
+            or operator.ne(domain.callsite_addr, _return_address(view.source_artifact, proven))):
         return False
     counts = (view.raw_fact_count, view.normalized_fact_count, view.classified_fact_count,
               view.materialized_count, view.failure_count)
     count = len(proven) + len(domain.infeasible_edges)
-    if any(type(value) is not int for value in counts) or counts != (count, count, count, count, 0):
+    if any(type(value) is not int for value in iter(counts)) or counts != (count, count, count, count, 0):
         return False
     with segment_call_dependency_traversal_scope_8616():
         return (premise is not None
@@ -74,18 +81,19 @@ def _domain_bound(
 
 def _reachable_successors(
     artifact: IRFunctionArtifact, domain: Real16InvocationDomain8616,
-) -> dict[int, tuple[int, ...]] | None:
+) -> object:
     """Walk the full native graph, never equating a backward cone with liveness."""
+    addr: object
     if len(artifact.blocks) > _MAX_BLOCKS:
         return None
-    blocks = {block.addr: block for block in artifact.blocks}
-    if len(blocks) != len(artifact.blocks) or artifact.function_addr not in blocks:
+    blocks = {block.addr: block for block in iter(artifact.blocks)}
+    if operator.ne(len(blocks), len(artifact.blocks)) or artifact.function_addr not in blocks:
         return None
-    edges = frozenset((block.addr, target) for block in artifact.blocks for target in block.successor_addrs)
+    edges = frozenset((block.addr, target) for block in iter(artifact.blocks) for target in iter(block.successor_addrs))
     dead = frozenset(domain.infeasible_edges)
-    if len(dead) != len(domain.infeasible_edges) or not dead <= edges:
+    if operator.ne(len(dead), len(domain.infeasible_edges)) or not dead <= edges:
         return None
-    successors: dict[int, tuple[int, ...]] = {}
+    successors: dict[cython.longlong, tuple[cython.longlong, ...]] = {}
     pending = [artifact.function_addr]
     while pending:
         if direct_evidence_deadline_expired_8616(domain.project):
@@ -95,27 +103,30 @@ def _reachable_successors(
             continue
         if addr not in blocks:
             return None
-        targets = tuple(target for target in blocks[addr].successor_addrs if (addr, target) not in dead)
-        if len(targets) != len(set(targets)):
+        targets = tuple(target for target in iter(blocks[addr].successor_addrs) if (addr, target) not in dead)
+        if operator.ne(len(targets), len(set(targets))):
             return None
         successors[addr] = targets
         pending.extend(targets)
-    if set(successors) != set(domain.path_block_addrs):
+    if operator.ne(set(successors), set(domain.path_block_addrs)):
         return None
     return successors
 
 
+@cython.ccall
 def _live_effective_blocks(
-    view: ScopedNearReturnContinuationView8616, successors: dict[int, tuple[int, ...]],
-) -> tuple[IRBlock, ...] | None:
+    view: ScopedNearReturnContinuationView8616, successors: object,
+) -> object:
     """Keep the raw census, refusing every residual obligation on a live block."""
-    blocks: tuple[IRBlock, ...] | None = _continuation_effective_blocks_8616(
+    blocks: object
+    block: object
+    blocks = _continuation_effective_blocks_8616(
         view.source_artifact.blocks, view.proven_block_addrs,
     )
     if blocks is None:
         return None
-    exits = {addr for addr, targets in successors.items() if not targets}
-    if exits != view.proven_block_addrs:
+    exits = {addr for addr, targets in builtins.iter(successors.items()) if not targets}
+    if operator.ne(exits, view.proven_block_addrs):
         return None
     for block in blocks:
         if block.addr not in successors:
@@ -127,11 +138,18 @@ def _live_effective_blocks(
     return blocks
 
 
+@cython.ccall
 def scoped_reachable_return_projection_8616(
     view: ScopedNearReturnContinuationView8616,
-    consuming_scope: Real16InvocationDomain8616 | None,
+    consuming_scope: object,
 ) -> ScopedFunctionCFGProjection8616 | None:
     """Replay the proof and expose only its entry-reachable conditional edges."""
+    blocks: object
+    domain: object
+    successors: object
+    source: object
+    target: object
+    targets: object
     if (consuming_scope is None or type(consuming_scope) is not Real16InvocationDomain8616
             or direct_evidence_deadline_expired_8616(consuming_scope.project)
             or not _domain_bound(view, consuming_scope)):
@@ -144,7 +162,7 @@ def scoped_reachable_return_projection_8616(
     blocks = _live_effective_blocks(view, successors)
     if blocks is None:
         return None
-    predecessors: dict[int, list[int]] = {block.addr: [] for block in blocks}
+    predecessors: dict[cython.longlong, list[cython.longlong]] = {block.addr: [] for block in iter(blocks)}
     for source, targets in successors.items():
         for target in targets:
             predecessors[target].append(source)
@@ -152,17 +170,23 @@ def scoped_reachable_return_projection_8616(
         function_addr=view.source_artifact.function_addr,
         source_artifact=view.source_artifact, scope=consuming_scope, applied=(), blocks=blocks,
         successors=MappingProxyType(successors),
-        predecessors=MappingProxyType({addr: tuple(sorted(rows)) for addr, rows in predecessors.items()}),
-        pending=MappingProxyType({block.addr: block.refusals for block in blocks}),
+        predecessors=MappingProxyType({addr: tuple(sorted(rows)) for addr, rows in builtins.iter(predecessors.items())}),
+        pending=MappingProxyType({block.addr: block.refusals for block in iter(blocks)}),
         unreachable_block_addrs=frozenset(predecessors) - frozenset(successors),
     )
 
 
+@cython.ccall
 def prove_scoped_reachable_return_view_8616(
     project: object, artifact: IRFunctionArtifact, boundary: ExactFunctionRangeBoundary8616,
     *, invocation_scope: Real16InvocationDomain8616 | None,
 ) -> ScopedNearReturnContinuationView8616 | None:
     """Construct a conditional return view without accepting a merely returning cone."""
+    domain: object
+    failure: object
+    premise: object
+    scope: object
+    terminal: object
     scope = invocation_scope
     if (scope is None or type(scope) is not Real16InvocationDomain8616 or scope.project is not project
             or type(scope.chain) is not Real16CallChainLink8616

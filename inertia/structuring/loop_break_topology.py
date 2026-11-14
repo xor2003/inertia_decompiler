@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove CFG exits before introducing structured loop-break guards.
 
 Layer: Structuring.
@@ -9,6 +10,8 @@ No rendered-text recovery belongs here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -25,23 +28,26 @@ from .natural_loop_topology import (
     NaturalLoopTopology8616,
     classify_natural_loop_topology_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LoopBreakTopology8616:
     """Exact natural-loop regions and their source CFG edges."""
 
-    loops: tuple[NaturalLoopTopology8616, ...]
-    edges: frozenset[tuple[int, int]]
-    resolved_targets: tuple[tuple[int, int], ...] = ()
+    loops: object
+    edges: object
+    resolved_targets: tuple[tuple[cython.longlong, cython.longlong], ...] = ()
 
-    def resolve_target(self, target: int) -> int:
+    def resolve_target(self, target: cython.longlong) -> cython.longlong:
         """Project a physical target through SSA-proven empty connectors."""
-        return next((resolved for source, resolved in self.resolved_targets if source == target), target)
+        return next((resolved for source, resolved in iter(self.resolved_targets) if source == target), target)
 
-    def proves_exit(self, branch: int, taken: int, fallthrough: int, destination: int) -> bool:
+    def proves_exit(self, branch: cython.longlong, taken: cython.longlong, fallthrough: cython.longlong, destination: cython.longlong) -> cython.bint:
         """Require one unambiguous loop and its actual fallthrough exit edge."""
-        owners = tuple(loop for loop in self.loops if branch in loop.body)
+        owners = tuple(loop for loop in iter(self.loops) if branch in loop.body)
         if len(owners) != 1:
             return False
         loop = owners[0]
@@ -54,13 +60,15 @@ class LoopBreakTopology8616:
         )
 
 
-def _back_edges(graph: nx.DiGraph, entry: int) -> tuple[tuple[int, int], ...]:
+@cython.ccall
+def _back_edges(graph: nx.DiGraph, entry: cython.longlong) -> tuple[tuple[cython.longlong, cython.longlong], ...]:
     """Find latch/header edges using NetworkX's authoritative dominator tree."""
-    dominators: dict[int, int] = nx.immediate_dominators(graph, entry)
+    latch: object
+    dominators: object = nx.immediate_dominators(graph, entry)
     # NetworkX omits the root, which has no immediate dominator. Terminate
     # ancestor walks at a local self-parent and retain entry self-loops.
     dominators[entry] = entry
-    edges: list[tuple[int, int]] = []
+    edges: list[tuple[cython.longlong, cython.longlong]] = []
     for latch in sorted(dominators):
         header = latch
         while True:
@@ -74,32 +82,34 @@ def _back_edges(graph: nx.DiGraph, entry: int) -> tuple[tuple[int, int], ...]:
 
 
 def _transparent_topology_8616(
-    graph: nx.DiGraph, entry: int, artifact: SSAFunctionArtifact,
-) -> tuple[nx.DiGraph, tuple[tuple[int, int], ...]]:
+    graph: nx.DiGraph, entry: cython.longlong, artifact: SSAFunctionArtifact,
+) -> tuple[nx.DiGraph, tuple[tuple[cython.longlong, cython.longlong], ...]]:
     """Collapse only proven empty connectors in a detached classification view.
 
     Headers and latches retain their physical identities so loop ownership and
     backedge proofs cannot be manufactured by collapsing an empty loop body.
     The original graph remains authoritative for branch-edge identity.
     """
-    retained = frozenset({entry} | {node for pair in _back_edges(graph, entry) for node in pair})
-    successors = {node: tuple(sorted(graph.successors(node))) for node in graph}
+    retained = frozenset({entry} | {node for pair in builtins.iter(_back_edges(graph, entry)) for node in iter(pair)})
+    successors = {node: tuple(sorted(tuple(graph.successors(node)))) for node in iter(graph)}
     targets = {
         node: transparent_condition_exit_8616(
             artifact, node, successors, stop_at=None, retained_targets=retained,
         )
-        for node in graph
+        for node in iter(graph)
     }
     projected = nx.DiGraph()
-    projected.add_nodes_from(node for node in graph if targets[node] == node)
-    projected.add_edges_from((source, targets[target]) for source, target in graph.edges if targets[source] == source)
+    projected.add_nodes_from(node for node in iter(graph) if operator.eq(targets[node], node))
+    projected.add_edges_from((source, targets[target]) for source, target in iter(graph.edges) if operator.eq(targets[source], source))
     reachable = nx.descendants(projected, entry) | {entry}
-    resolutions = tuple(sorted((node, target) for node, target in targets.items() if node != target))
+    resolutions = tuple(sorted((node, target) for node, target in builtins.iter(targets.items()) if node != target))
     return projected.subgraph(reachable).copy(), resolutions
 
 
 def collect_loop_break_topology_8616(project: object, codegen: object) -> LoopBreakTopology8616 | None:
     """Collect exact topology, refusing incomplete or unsupported loop regions."""
+    artifact: object
+    resolved: object
     try:
         resolved = codegen_function_8616(project, codegen)
     except (AttributeError, TypeError):
@@ -111,27 +121,27 @@ def collect_loop_break_topology_8616(project: object, codegen: object) -> LoopBr
     if not inventory.complete:
         return None
     graph = nx.DiGraph()
-    graph.add_nodes_from(block.block_addr for block in inventory.blocks)
-    graph.add_edges_from((pred, block.block_addr) for block in inventory.blocks for pred in block.predecessors)
+    graph.add_nodes_from(block.block_addr for block in iter(inventory.blocks))
+    graph.add_edges_from((pred, block.block_addr) for block in iter(inventory.blocks) for pred in iter(block.predecessors))
     if inventory.function_addr not in graph:
         return None
     reachable = nx.descendants(graph, inventory.function_addr) | {inventory.function_addr}
     graph = graph.subgraph(reachable).copy()
     loops = tuple(
         classify_natural_loop_topology_8616(graph, header=header, latch=latch, entry=inventory.function_addr)
-        for header, latch in _back_edges(graph, inventory.function_addr)
+        for header, latch in builtins.iter(_back_edges(graph, inventory.function_addr))
     )
-    resolved_targets: tuple[tuple[int, int], ...] = ()
+    resolved_targets: tuple[tuple[cython.longlong, cython.longlong], ...] = ()
     physical_edges = frozenset(graph.edges)
-    if any(loop.verdict is not LoopTopologyVerdict8616.PROVEN for loop in loops):
+    if any(loop.verdict is not LoopTopologyVerdict8616.PROVEN for loop in iter(loops)):
         artifact = registered_function_ssa_artifact_8616(project, inventory.function_addr).artifact
         if artifact is None:
             return None
         graph, resolved_targets = _transparent_topology_8616(graph, inventory.function_addr, artifact)
         loops = tuple(
             classify_natural_loop_topology_8616(graph, header=header, latch=latch, entry=inventory.function_addr)
-            for header, latch in _back_edges(graph, inventory.function_addr)
+            for header, latch in builtins.iter(_back_edges(graph, inventory.function_addr))
         )
-    if any(loop.verdict is not LoopTopologyVerdict8616.PROVEN for loop in loops):
+    if any(loop.verdict is not LoopTopologyVerdict8616.PROVEN for loop in iter(loops)):
         return None
     return LoopBreakTopology8616(loops, physical_edges, resolved_targets)

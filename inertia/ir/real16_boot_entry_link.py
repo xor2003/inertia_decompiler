@@ -1,18 +1,23 @@
+# cython: language_level=3, infer_types=True
 """Layer: IR.
 Responsibility: retain raw boot census identity without claiming proven CFG edges.
 Owns typed Value, Address, Condition, instruction facts, and lossless normalization
 Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here
 """
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
 from inertia.frontend.x86_16.frontend_function_boundary import ExactFunctionRangeBoundary8616
 
 from .core import IRFunctionArtifact
+import dataclasses
+import operator
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RawBootEntrySurface8616:
     """Exact raw startup facts; only an authenticated path census can prove them.
 
@@ -24,7 +29,7 @@ class RawBootEntrySurface8616:
     boundary: ExactFunctionRangeBoundary8616
 
 
-def raw_boot_entry_surface_pending_8616(surface: RawBootEntrySurface8616) -> bool:
+def raw_boot_entry_surface_pending_8616(surface: RawBootEntrySurface8616) -> cython.bint:
     """Return whether a raw surface's only refusals are pending window gates.
 
     Raw census geometry is not edge proof: the sole refusal a raw boot
@@ -44,10 +49,10 @@ def raw_boot_entry_surface_pending_8616(surface: RawBootEntrySurface8616) -> boo
         *surface.artifact.refusals,
         *(
             row
-            for block in surface.artifact.blocks
-            for row in block.refusals
+            for block in iter(surface.artifact.blocks)
+            for row in iter(block.refusals)
         ),
     )
     return bool(refusals) and all(
-        refusal.kind == allowed for refusal in refusals
+        operator.eq(refusal.kind, allowed) for refusal in iter(refusals)
     )

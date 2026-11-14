@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Consume alias-proven terminal far-return CS frame carriers.
 
 Layer: Types/Lowering.
@@ -16,6 +17,8 @@ expose version-dependent tags and child containers.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -37,6 +40,9 @@ from inertia.semantics.terminal_return_contract import TerminalReturnFrameKind86
 from inertia.semantics.terminal_stack_cleanup import terminal_stack_cleanup_at_address_8616
 
 from .segment_register_state import runtime_segment_name_for_variable_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "FarReturnBoundaryCarrierStats8616",
@@ -64,7 +70,7 @@ class _FarReturnBoundaryCodegen8616(Protocol):
     cfunc: _FarReturnBoundaryCFunction8616
     _inertia_vex_ir_artifact: object
     _inertia_segment_stack_restore_artifact: SegmentStackRestoreArtifact8616
-    _inertia_far_return_boundary_consumed_restores_8616: frozenset[int]
+    _inertia_far_return_boundary_consumed_restores_8616: object
     _inertia_far_return_boundary_carrier_stats_8616: FarReturnBoundaryCarrierStats8616
 
 
@@ -74,38 +80,39 @@ class _FarReturnBoundaryCFunction8616(Protocol):
     statements: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FarReturnBoundaryCarrierStats8616:
     """Closed accounting for terminal far-return CS carrier consumption."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    already_materialized_count: int
-    failure_count: int
-    removed_assignment_count: int
-    refusals: tuple[tuple[int, FarReturnBoundaryRefusal8616], ...] = ()
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    already_materialized_count: cython.longlong
+    failure_count: cython.longlong
+    removed_assignment_count: cython.longlong
+    refusals: tuple[tuple[cython.longlong, FarReturnBoundaryRefusal8616], ...] = ()
 
     @property
-    def refused_candidate_count(self) -> int:
+    def refused_candidate_count(self) -> cython.longlong:
         """Return candidates retained because boundary evidence is incomplete."""
         return len(self.refusals)
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every candidate reached one terminal lane."""
         return bool(
-            self.raw_fact_count == self.normalized_fact_count + self.failure_count
-            and self.normalized_fact_count
-            == self.classified_fact_count + self.refused_candidate_count
-            and self.classified_fact_count
-            == self.materialized_count + self.already_materialized_count
+            operator.eq(self.raw_fact_count, self.normalized_fact_count + self.failure_count)
+            and operator.eq(self.normalized_fact_count, self.classified_fact_count + self.refused_candidate_count)
+            and operator.eq(self.classified_fact_count, self.materialized_count + self.already_materialized_count)
         )
 
 
+@cython.ccall
 def _statement_instruction_addr_8616(statement: object) -> int | None:
     """Return one exact structured assignment instruction address."""
+    instruction_addr: object
+    tags: object
     tags = copy_structured_tags_8616(getattr(statement, "tags", None))
     if tags is not None:
         instruction_addr = tags.get("ins_addr")
@@ -117,60 +124,65 @@ def _statement_instruction_addr_8616(statement: object) -> int | None:
 
 def _statement_lists_8616(root: object) -> tuple[list[object], ...]:
     """Collect mutable statement lists using the shared child schema once."""
+    candidate: object
     lists = [root] if isinstance(root, list) else []
     roots = tuple(root) if isinstance(root, list) else (root,)
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     for candidate in roots:
         lists.extend(
             node.statements
-            for node in _iter_c_nodes_deep_8616(candidate, seen)
+            for node in builtins.iter(_iter_c_nodes_deep_8616(candidate, seen))
             if isinstance(node, structured_c.CStatements) and isinstance(node.statements, list)
         )
     return tuple(lists)
 
 
-def _physical_cs_carrier_8616(variable: object, project: object) -> bool:
+@cython.ccall
+def _physical_cs_carrier_8616(variable: object, project: object) -> cython.bint:
     """Return whether one physical register variable is the architectural CS."""
+    register_names: object
     if not isinstance(variable, SimRegisterVariable) or not isinstance(variable.reg, int):
         return False
     register_names = getattr(getattr(project, "arch", None), "register_names", None)
     register_name = register_names.get(variable.reg) if isinstance(register_names, dict) else None
-    return isinstance(register_name, str) and (
-        register_name.lower() == _FAR_RETURN_BOUNDARY_RESTORE_REGISTER_8616
-    )
+    return isinstance(register_name, str) and operator.eq(register_name.lower(), _FAR_RETURN_BOUNDARY_RESTORE_REGISTER_8616)
 
 
-def _cs_carrier_lhs_8616(lhs: object, project: object) -> bool:
+@cython.ccall
+def _cs_carrier_lhs_8616(lhs: object, project: object) -> cython.bint:
     """Return whether one assignment LHS carries the architectural CS state."""
+    variable: object
     if not isinstance(lhs, structured_c.CVariable):
         return False
     for variable in (lhs.unified_variable, lhs.variable):
-        if runtime_segment_name_for_variable_8616(variable) == (
+        if operator.eq(runtime_segment_name_for_variable_8616(variable), (
             _FAR_RETURN_BOUNDARY_RESTORE_REGISTER_8616
-        ):
+        )):
             return True
         if _physical_cs_carrier_8616(variable, project):
             return True
     return False
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _FarReturnClassification8616:
     """Terminal decision lanes for every candidate address of one function."""
 
-    refusals: dict[int, FarReturnBoundaryRefusal8616]
-    removals_by_addr: dict[int, tuple[structured_c.CAssignment, ...]]
-    already: frozenset[int]
+    refusals: object
+    removals_by_addr: object
+    already: object
 
 
+@cython.ccall
 def _far_return_candidate_addrs_8616(
     artifact: SegmentStackRestoreArtifact8616,
-) -> dict[int, None]:
+) -> object:
     """Collect deduplicated far-return candidate restore addresses."""
-    candidates: dict[int, None] = {}
+    fact: object
+    candidates: dict[cython.longlong, None] = {}
     for fact in artifact.facts:
         if (
-            fact.restore_register == _FAR_RETURN_BOUNDARY_RESTORE_REGISTER_8616
+            operator.eq(fact.restore_register, _FAR_RETURN_BOUNDARY_RESTORE_REGISTER_8616)
             and fact.saved_instruction_addr is None
             and fact.verdict is SegmentStackRestoreVerdict8616.UNKNOWN_REFUSE
         ):
@@ -178,11 +190,15 @@ def _far_return_candidate_addrs_8616(
     return candidates
 
 
+@cython.ccall
 def _assignments_by_address_8616(
-    statement_lists: tuple[list[object], ...],
-) -> dict[int, list[structured_c.CAssignment]]:
+    statement_lists: object,
+) -> object:
     """Index every structured assignment by its exact instruction address."""
-    assignments_by_addr: dict[int, list[structured_c.CAssignment]] = {}
+    address: object
+    statement: object
+    statements: object
+    assignments_by_addr: dict[cython.longlong, list[structured_c.CAssignment]] = {}
     for statements in statement_lists:
         for statement in statements:
             if not isinstance(statement, structured_c.CAssignment):
@@ -193,10 +209,11 @@ def _assignments_by_address_8616(
     return assignments_by_addr
 
 
+@cython.ccall
 def _far_return_evidence_refusal_8616(
     project: object,
-    address: int,
-    terminal_rets: frozenset[int],
+    address: cython.longlong,
+    terminal_rets: object,
 ) -> FarReturnBoundaryRefusal8616 | None:
     """Refuse when terminal evidence is not a complete 16-bit zero-cleanup far frame."""
     if address not in terminal_rets:
@@ -208,8 +225,8 @@ def _far_return_evidence_refusal_8616(
     ):
         return FarReturnBoundaryRefusal8616.NOT_FAR_RETURN_FRAME
     if (
-        evidence.consistent_return_operand_bits != _FAR_RETURN_BOUNDARY_OPERAND_BITS_8616
-        or evidence.consistent_cleanup != _FAR_RETURN_BOUNDARY_CLEANUP_8616
+        operator.ne(evidence.consistent_return_operand_bits, _FAR_RETURN_BOUNDARY_OPERAND_BITS_8616)
+        or operator.ne(evidence.consistent_cleanup, _FAR_RETURN_BOUNDARY_CLEANUP_8616)
     ):
         return FarReturnBoundaryRefusal8616.UNSUPPORTED_WIDTH_OR_CLEANUP
     return None
@@ -217,15 +234,18 @@ def _far_return_evidence_refusal_8616(
 
 def _classify_far_return_candidates_8616(
     project: object,
-    candidates: dict[int, None],
-    terminal_rets: frozenset[int],
-    assignments_by_addr: dict[int, list[structured_c.CAssignment]],
-    typed_prior: frozenset[int],
+    candidates: object,
+    terminal_rets: object,
+    assignments_by_addr: object,
+    typed_prior: object,
 ) -> _FarReturnClassification8616:
     """Send every candidate to exactly one terminal decision lane."""
-    refusals: dict[int, FarReturnBoundaryRefusal8616] = {}
-    removals_by_addr: dict[int, tuple[structured_c.CAssignment, ...]] = {}
-    already: set[int] = set()
+    assignments: object
+    refusal: object
+    address: object
+    refusals: dict[cython.longlong, FarReturnBoundaryRefusal8616] = {}
+    removals_by_addr: dict[cython.longlong, tuple[structured_c.CAssignment, ...]] = {}
+    already: set[cython.longlong] = set()
     for address in candidates:
         refusal = _far_return_evidence_refusal_8616(project, address, terminal_rets)
         if refusal is not None:
@@ -239,9 +259,9 @@ def _classify_far_return_candidates_8616(
                 refusals[address] = FarReturnBoundaryRefusal8616.CARRIER_ABSENT
             continue
         cs_assignments = tuple(
-            assignment for assignment in assignments if _cs_carrier_lhs_8616(assignment.lhs, project)
+            assignment for assignment in iter(assignments) if _cs_carrier_lhs_8616(assignment.lhs, project)
         )
-        if len(cs_assignments) != len(assignments):
+        if operator.ne(len(cs_assignments), len(assignments)):
             refusals[address] = FarReturnBoundaryRefusal8616.NOT_CS_STATE_CARRIER
             continue
         removals_by_addr[address] = cs_assignments
@@ -249,24 +269,25 @@ def _classify_far_return_candidates_8616(
 
 
 def _remove_proven_cs_carriers_8616(
-    statement_lists: tuple[list[object], ...],
-    removals_by_addr: dict[int, tuple[structured_c.CAssignment, ...]],
-) -> int:
+    statement_lists: object,
+    removals_by_addr: object,
+) -> cython.longlong:
     """Remove proven carriers in place; return how many assignments were removed."""
+    statements: object
     removed_assignment_count = 0
     if not removals_by_addr:
         return removed_assignment_count
     removal_ids = {
         id(carrier)
-        for carriers in removals_by_addr.values()
-        for carrier in carriers
+        for carriers in builtins.iter(removals_by_addr.values())
+        for carrier in iter(carriers)
     }
     for statements in statement_lists:
-        if not any(id(statement) in removal_ids for statement in statements):
+        if not any(id(statement) in removal_ids for statement in iter(statements)):
             continue
         kept: list[object] = [
             statement
-            for statement in statements
+            for statement in iter(statements)
             if id(statement) not in removal_ids
         ]
         removed_assignment_count += len(statements) - len(kept)
@@ -274,7 +295,8 @@ def _remove_proven_cs_carriers_8616(
     return removed_assignment_count
 
 
-def consume_terminal_far_return_boundary_carriers_8616(project: object, codegen: object) -> bool:
+@cython.ccall
+def consume_terminal_far_return_boundary_carriers_8616(project: object, codegen: object) -> cython.bint:
     """Remove exact terminal far-return CS carriers proven by complete evidence.
 
     A candidate is one Alias-refused CS stack restore with no in-function save
@@ -284,6 +306,7 @@ def consume_terminal_far_return_boundary_carriers_8616(project: object, codegen:
     assignment at that instruction carries exactly the CS state. Anything less
     refuses and keeps the carrier.
     """
+    prior: object
     boundary = cast(_FarReturnBoundaryCodegen8616, codegen)
     try:
         artifact = boundary._inertia_segment_stack_restore_artifact
@@ -295,12 +318,12 @@ def consume_terminal_far_return_boundary_carriers_8616(project: object, codegen:
         return False
     candidates = _far_return_candidate_addrs_8616(artifact)
     terminal_rets = terminal_ret_instruction_addrs_8616(ir_artifact)
-    prior: object = getattr(
+    prior = getattr(
         boundary,
         "_inertia_far_return_boundary_consumed_restores_8616",
         frozenset(),
     )
-    typed_prior: frozenset[int] = prior if isinstance(prior, frozenset) else frozenset()
+    typed_prior: object = prior if isinstance(prior, frozenset) else frozenset()
     statement_lists = _statement_lists_8616(root)
     classification = _classify_far_return_candidates_8616(
         project,
@@ -325,7 +348,7 @@ def consume_terminal_far_return_boundary_carriers_8616(project: object, codegen:
         already_materialized_count=len(classification.already),
         failure_count=0,
         removed_assignment_count=removed_assignment_count,
-        refusals=tuple(sorted(classification.refusals.items())),
+        refusals=tuple(sorted(tuple(classification.refusals.items()))),
     )
     boundary._inertia_far_return_boundary_consumed_restores_8616 = consumed
     boundary._inertia_far_return_boundary_carrier_stats_8616 = stats

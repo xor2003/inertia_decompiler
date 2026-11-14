@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Collect instruction reachability from loaded x86-16 bytes.
 
 Layer: Frontend.
@@ -6,6 +7,8 @@ binary reachability census without assigning higher-level semantics.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import deque
 from collections.abc import Sequence
@@ -28,6 +31,9 @@ from .frontend_block_partition import (
 )
 from .frontend_capstone_decode import DirectCapstoneBlock8616
 from .frontend_instruction_kinds import is_x86_16_call_mnemonic_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "DecodedBlockRequest8616",
@@ -43,23 +49,23 @@ __all__ = [
 class _OperandBoundary8616(Protocol):
     """Capstone operand fields consumed at the third-party decode boundary."""
 
-    type: int
+    type: cython.longlong
     imm: object
 
 
 class _DecodedInstructionBoundary8616(Protocol):
     """Capstone instruction fields consumed by bounded CFG traversal."""
 
-    address: int
-    mnemonic: str
+    address: cython.longlong
+    mnemonic: object
     operands: Sequence[_OperandBoundary8616]
 
 
 class _InstructionBoundary8616(Protocol):
     """angr wrapper fields for one decoded Capstone instruction."""
 
-    address: int
-    mnemonic: str
+    address: cython.longlong
+    mnemonic: object
     insn: _DecodedInstructionBoundary8616
 
 
@@ -72,69 +78,67 @@ class _CapstoneBoundary8616(Protocol):
 class _BlockBoundary8616(Protocol):
     """angr block fields consumed by the frontend traversal."""
 
-    addr: int
-    size: int
+    addr: cython.longlong
+    size: cython.longlong
     capstone: _CapstoneBoundary8616
 
 
 class _ProjectBoundary8616(Protocol):
     """Dynamic angr project boundary used by frontend traversal."""
 
-    _inertia_instruction_reachability_cache_8616: dict[
-        tuple[int, int, int, frozenset[int], tuple[ConditionalIndirectEdge8616, ...]],
-        InstructionReachabilityEvidence8616,
-    ]
+    _inertia_instruction_reachability_cache_8616: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionalIndirectEdge8616:
     """Inventory assumption only; IR must independently prove its destination."""
 
-    block_addr: int
-    instruction_addr: int
-    target_addr: int
+    block_addr: cython.longlong
+    instruction_addr: cython.longlong
+    target_addr: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class InstructionReachabilityEvidence8616:
     """Closed census of bounded binary basic-block reachability."""
 
-    reachable_block_addrs: tuple[int, ...]
-    reachable_instruction_addrs: tuple[int, ...]
-    unresolved_block_addrs: tuple[int, ...]
-    successor_edges: tuple[tuple[int, int], ...]
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    blocks: tuple[object, ...] = dataclass_field(default=(), compare=False, repr=False)
+    reachable_block_addrs: object
+    reachable_instruction_addrs: object
+    unresolved_block_addrs: object
+    successor_edges: object
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    blocks: object = dataclass_field(default=(), compare=False, repr=False)
     block_partition: FrontendBlockPartitionArtifact8616 | None = dataclass_field(
         default=None, compare=False, repr=False,
     )
     conditional_edges: tuple[ConditionalIndirectEdge8616, ...] = ()
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Require a closed census without unproved indirect-edge assumptions."""
         return not self.conditional_edges and self.inventory_complete
 
     @property
-    def inventory_complete(self) -> bool:
+    def inventory_complete(self) -> cython.bint:
         """Close decoding only; conditional edges still need semantic proof."""
         return (
             self.raw_fact_count > 0
-            and self.raw_fact_count == self.normalized_fact_count
-            and self.normalized_fact_count == self.classified_fact_count
-            and self.classified_fact_count == self.materialized_count + self.failure_count
+            and operator.eq(self.raw_fact_count, self.normalized_fact_count)
+            and operator.eq(self.normalized_fact_count, self.classified_fact_count)
+            and operator.eq(self.classified_fact_count, self.materialized_count + self.failure_count)
             and self.failure_count == 0
             and not self.unresolved_block_addrs
         )
 
 
+@cython.ccall
 def _reachability_cache_8616(
     project: object,
-) -> dict[tuple[int, int, int, frozenset[int], tuple[ConditionalIndirectEdge8616, ...]], InstructionReachabilityEvidence8616]:
+) -> object:
     """Return immutable byte-reachability evidence cached on one project."""
     boundary = cast(_ProjectBoundary8616, project)
     try:
@@ -147,8 +151,10 @@ def _reachability_cache_8616(
     return cache
 
 
+@cython.ccall
 def _direct_target_8616(instruction: object) -> int | None:
     """Return one direct Capstone branch target, if present."""
+    operand: object
     boundary = cast(_InstructionBoundary8616, instruction)
     try:
         inner = boundary.insn
@@ -167,14 +173,15 @@ def _direct_target_8616(instruction: object) -> int | None:
     return None
 
 
+@cython.ccall
 def x86_16_block_successors_from_capstone_8616(
     block: object,
-    region_start: int,
-    region_end: int,
+    region_start: cython.longlong,
+    region_end: cython.longlong,
     *,
-    proven_return_block_addrs: frozenset[int] = frozenset(),
-    conditional_edges: tuple[ConditionalIndirectEdge8616, ...] = (),
-) -> tuple[set[int], bool]:
+    proven_return_block_addrs: object = frozenset(),
+    conditional_edges: object = (),
+) -> object:
     """Return bounded successors, refusing unknown or out-of-region edges.
 
     Excluding an edge from this inventory does not prove a function return.
@@ -211,19 +218,20 @@ def x86_16_block_successors_from_capstone_8616(
 
 def _terminal_successors_8616(
     boundary: _BlockBoundary8616,
-    mnemonic: str,
+    mnemonic: object,
     last: object,
-    block_end: int,
-    region_start: int,
-    region_end: int,
-    proven_return_block_addrs: frozenset[int],
-    conditional_edges: tuple[ConditionalIndirectEdge8616, ...] = (),
-) -> tuple[set[int], bool]:
+    block_end: cython.longlong,
+    region_start: cython.longlong,
+    region_end: cython.longlong,
+    proven_return_block_addrs: object,
+    conditional_edges: object = (),
+) -> tuple[set[cython.longlong], cython.bint]:
     """Classify the decoded terminal into bounded edges or refusals."""
-    successors: set[int] = set()
+    target: object
+    successors: set[cython.longlong] = set()
     unresolved = False
 
-    def add_target(target: int | None) -> None:
+    def add_target(target: object) -> None:
         """Record a bounded edge or preserve its missing-evidence status."""
         nonlocal unresolved
         if isinstance(target, int) and region_start <= target < region_end:
@@ -246,9 +254,9 @@ def _terminal_successors_8616(
         target = _direct_target_8616(last)
         if target is None and mnemonic == "jmp":
             terminal = cast(_InstructionBoundary8616, last)
-            matches = tuple(edge for edge in conditional_edges
-                            if edge.block_addr == boundary.addr
-                            and edge.instruction_addr == terminal.address)
+            matches = tuple(edge for edge in iter(conditional_edges)
+                            if operator.eq(edge.block_addr, boundary.addr)
+                            and operator.eq(edge.instruction_addr, terminal.address))
             if len(matches) == 1:
                 target = matches[0].target_addr
         add_target(target)
@@ -264,17 +272,18 @@ def _terminal_successors_8616(
 
 def _visit_reachable_block_8616(
     project: object,
-    block_addr: int,
-    region_start: int,
-    region_end: int,
-    reachable_instructions: set[int],
-    reachable_blocks: dict[int, object],
-    unresolved: set[int],
-    successor_edges: set[tuple[int, int]],
-    proven_return_block_addrs: frozenset[int] = frozenset(),
-    conditional_edges: tuple[ConditionalIndirectEdge8616, ...] = (),
-) -> tuple[int, ...]:
+    block_addr: cython.longlong,
+    region_start: cython.longlong,
+    region_end: cython.longlong,
+    reachable_instructions: object,
+    reachable_blocks: object,
+    unresolved: object,
+    successor_edges: object,
+    proven_return_block_addrs: object = frozenset(),
+    conditional_edges: object = (),
+) -> tuple[cython.longlong, ...]:
     """Decode one block and fold its proven successors into the traversal."""
+    block: object
     try:
         decoded = collect_decoded_block_evidence_8616(
             project,
@@ -298,7 +307,7 @@ def _visit_reachable_block_8616(
     reachable_blocks[block_addr] = block
     reachable_instructions.update(
         instruction.address
-        for instruction in instructions
+        for instruction in iter(instructions)
         if region_start <= instruction.address < region_end
     )
     successors, successor_unresolved = x86_16_block_successors_from_capstone_8616(
@@ -310,18 +319,18 @@ def _visit_reachable_block_8616(
     )
     if successor_unresolved:
         unresolved.add(block_addr)
-    successor_edges.update((block_addr, successor) for successor in successors)
+    successor_edges.update((block_addr, successor) for successor in iter(successors))
     return tuple(sorted(successors))
 
 
 def collect_instruction_reachability_8616(
     project: object,
     *,
-    entry: int,
-    region_start: int,
-    region_end: int,
-    proven_return_block_addrs: frozenset[int] = frozenset(),
-    conditional_edges: tuple[ConditionalIndirectEdge8616, ...] = (),
+    entry: cython.longlong,
+    region_start: cython.longlong,
+    region_end: cython.longlong,
+    proven_return_block_addrs: object = frozenset(),
+    conditional_edges: object = (),
 ) -> InstructionReachabilityEvidence8616:
     """Traverse binary-proven successors inside one bounded loaded image.
 
@@ -331,6 +340,8 @@ def collect_instruction_reachability_8616(
     Conditional edges also belong to the cache identity; they can complete
     the decoding inventory but never make ``complete`` true.
     """
+    cached: object
+    successor: object
     if not (region_start <= entry < region_end):
         return InstructionReachabilityEvidence8616((), (), (), (), 0, 0, 0, 0, 0)
 
@@ -339,12 +350,12 @@ def collect_instruction_reachability_8616(
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
-    queue: deque[int] = deque((entry,))
-    visited: set[int] = set()
-    reachable_instructions: set[int] = set()
-    reachable_blocks: dict[int, object] = {}
-    unresolved: set[int] = set()
-    successor_edges: set[tuple[int, int]] = set()
+    queue: deque[cython.longlong] = deque((entry,))
+    visited: set[cython.longlong] = set()
+    reachable_instructions: set[cython.longlong] = set()
+    reachable_blocks: dict[cython.longlong, object] = {}
+    unresolved: set[cython.longlong] = set()
+    successor_edges: set[tuple[cython.longlong, cython.longlong]] = set()
     while queue:
         block_addr = queue.popleft()
         if block_addr in visited or not (region_start <= block_addr < region_end):
@@ -367,13 +378,13 @@ def collect_instruction_reachability_8616(
                 queue.append(successor)
 
     partition = partition_decoded_blocks_8616(
-        tuple(reachable_blocks[address] for address in sorted(reachable_blocks)),
+        tuple(reachable_blocks[address] for address in builtins.iter(sorted(reachable_blocks))),
         tuple(sorted(successor_edges)),
         region_start=region_start,
         region_end=region_end,
     )
-    unresolved.update(fact.block_addr for fact in partition.facts if fact.failure is not None)
-    if any((edge.block_addr, edge.target_addr) not in successor_edges for edge in conditional_edges):
+    unresolved.update(fact.block_addr for fact in iter(partition.facts) if fact.failure is not None)
+    if any((edge.block_addr, edge.target_addr) not in successor_edges for edge in iter(conditional_edges)):
         # An unused assumption cannot silently disappear from its inventory.
         unresolved.add(entry)
     failure_count = len(unresolved)

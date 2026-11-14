@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize exact byte and word views of proven scalar stack arguments.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Protocol, cast
@@ -23,33 +26,36 @@ from inertia.pipeline.errors import PipelineHardError
 
 from .condition_stack_operands import project_contained_stack_integer_view_8616
 from .stack_variable_coordinates import machine_bp_offset_for_stack_variable_8616
+import dataclasses
+import operator
+import builtins
 
 _WORD_BYTES = 2
 _WIDE_BYTES = 4
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideStackArgumentOwner8616:
     """One authoritative wide argument and its machine-BP range."""
 
-    bp_offset: int
-    width: int
+    bp_offset: cython.longlong
+    width: cython.longlong
     cvar: structured_c.CVariable
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideStackArgumentSubviewResult8616:
     """Closed evidence and variables that unsafe projections must retain."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    retained_variables: tuple[SimStackVariable, ...]
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    retained_variables: object
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether at least one proven subview was materialized."""
         return self.materialized_count > 0
 
@@ -67,7 +73,8 @@ class _Codegen8616(Protocol):
     _inertia_wide_stack_argument_subview_result_8616: WideStackArgumentSubviewResult8616
 
 
-def _signed_view_8616(cvar: structured_c.CVariable) -> bool:
+@cython.ccall
+def _signed_view_8616(cvar: structured_c.CVariable) -> cython.bint:
     """Return signedness from supported integer views only."""
     type_ = cvar.variable_type
     if isinstance(type_, (SimTypeChar, SimTypeShort, SimTypeInt, SimTypeLong)):
@@ -76,31 +83,34 @@ def _signed_view_8616(cvar: structured_c.CVariable) -> bool:
 
 
 def _matching_view_8616(
-    codegen: object, active_owners: tuple[WideStackArgumentOwner8616, ...], node: object,
-) -> tuple[int, SimStackVariable, tuple[WideStackArgumentOwner8616, ...]] | None:
+    codegen: object, active_owners: object, node: object,
+) -> object:
     """Return exact owner candidates for one structured stack variable."""
     if not isinstance(node, structured_c.CVariable):
         return None
     variable = node.variable
     if not isinstance(variable, SimStackVariable) or not isinstance(variable.size, int):
         return None
-    if any(variable is owner.cvar.variable for owner in active_owners):
+    if any(variable is owner.cvar.variable for owner in iter(active_owners)):
         return None
     offset = machine_bp_offset_for_stack_variable_8616(codegen, variable)
     if not isinstance(offset, int):
         return None
     candidates = tuple(
-        owner for owner in active_owners
+        owner for owner in iter(active_owners)
         if owner.bp_offset <= offset and offset + variable.size <= owner.bp_offset + owner.width
     )
     return (offset, variable, candidates) if candidates else None
 
 
+@cython.ccall
 def _protected_view_nodes_8616(
-    codegen: object, owners: tuple[WideStackArgumentOwner8616, ...], root: object,
-) -> set[int]:
+    codegen: object, owners: object, root: object,
+) -> object:
     """Keep storage locations and escaped addresses outside value projection."""
-    protected_ids: set[int] = set()
+    child: object
+    node: object
+    protected_ids: set[cython.longlong] = set()
     for node in _iter_c_nodes_deep_8616(root):
         if isinstance(node, structured_c.CAssignment):
             protected = node.lhs
@@ -116,11 +126,13 @@ def _protected_view_nodes_8616(
 
 def materialize_wide_stack_argument_subviews_8616(
     codegen: object,
-    owners: tuple[WideStackArgumentOwner8616, ...],
+    owners: object,
 ) -> WideStackArgumentSubviewResult8616:
     """Project exact contained scalar reads and retain every unproven variable."""
+    cfunc: object
+    root: object
     typed_codegen = cast(_Codegen8616, codegen)
-    active_owners = tuple(owner for owner in owners if owner.width >= _WORD_BYTES)
+    active_owners = tuple(owner for owner in iter(owners) if owner.width >= _WORD_BYTES)
     if not active_owners:
         result = WideStackArgumentSubviewResult8616(0, 0, 0, 0, 0, ())
         typed_codegen._inertia_wide_stack_argument_subview_result_8616 = result
@@ -137,6 +149,8 @@ def materialize_wide_stack_argument_subviews_8616(
 
     def transform(node: object) -> object:
         """Replace one exact read while preserving unproven C AST nodes."""
+        match: object
+        projected: object
         nonlocal classified_count, failure_count, materialized_count
         nonlocal normalized_count, raw_count
         match = _matching_view_8616(codegen, active_owners, node)
@@ -151,8 +165,8 @@ def materialize_wide_stack_argument_subviews_8616(
         owner = candidates[0]
         supported_size = variable.size in {1, _WORD_BYTES}
         aligned_view = supported_size and (offset - owner.bp_offset) % variable.size == 0
-        supported_owner = owner.width == _WIDE_BYTES or (
-            owner.width == _WORD_BYTES
+        supported_owner = operator.eq(owner.width, _WIDE_BYTES) or (
+            operator.eq(owner.width, _WORD_BYTES)
             and isinstance(owner.cvar.variable_type, (SimTypeShort, SimTypeInt))
         )
         if not aligned_view or not supported_owner:
@@ -179,7 +193,7 @@ def materialize_wide_stack_argument_subviews_8616(
         _replace_c_children_8616(root, transform)
     retained = {
         match[1]
-        for node in _iter_c_nodes_deep_8616(root)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(root))
         if (match := _matching_view_8616(codegen, active_owners, node)) is not None
     } if root is not None else set()
     result = WideStackArgumentSubviewResult8616(

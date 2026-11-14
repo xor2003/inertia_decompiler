@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Refuse frame consumption when a scalar carrier remains externally observed.
 
 Layer: Types/Lowering.
@@ -11,6 +12,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -24,6 +27,8 @@ from inertia.lowering.structured_tags import copy_structured_tags_8616
 
 from .gp_register_state import runtime_gp_name_for_variable_8616
 from .physical_registers import PhysicalRegisterView8616, physical_register_view_8616
+import dataclasses
+import builtins
 
 
 class FrameCarrierUseVerdict8616(StrEnum):
@@ -34,19 +39,20 @@ class FrameCarrierUseVerdict8616(StrEnum):
     UNKNOWN_IDENTITY = "unknown_identity"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FrameCarrierUseProof8616:
     """One atomic group-consumption decision without partial removal."""
 
     verdict: FrameCarrierUseVerdict8616
-    candidate_count: int
+    candidate_count: cython.longlong
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return true only when no scalar definition has an external use."""
         return self.verdict is FrameCarrierUseVerdict8616.CLOSED
 
 
+@cython.ccall
 def _scalar_identity_8616(value: object) -> int | SimVariable | None:
     """Join dirty and recovered SSA views without merging distinct versions."""
     while isinstance(value, CTypeCast):
@@ -61,10 +67,14 @@ def _scalar_identity_8616(value: object) -> int | SimVariable | None:
     return None
 
 
-def prove_frame_carrier_uses_8616(root: object, frame_addresses: frozenset[int]) -> FrameCarrierUseProof8616:
+def prove_frame_carrier_uses_8616(root: object, frame_addresses: object) -> FrameCarrierUseProof8616:
     """Require every scalar use to disappear with the entire frame group."""
+    identity: object
+    register: object
+    candidate: object
+    node: object
     candidates = tuple(
-        node for node in _iter_c_nodes_deep_8616(root)
+        node for node in builtins.iter(_iter_c_nodes_deep_8616(root))
         if isinstance(node, CAssignment)
         and (tags := copy_structured_tags_8616(node.tags)) is not None
         and tags.get("ins_addr") in frame_addresses
@@ -88,7 +98,7 @@ def prove_frame_carrier_uses_8616(root: object, frame_addresses: frozenset[int])
             register = physical_register_view_8616(lhs)
             if register is not None:
                 register_definitions.append((identity, register))
-    excluded = {id(candidate) for candidate in candidates}
+    excluded = {id(candidate) for candidate in iter(candidates)}
     for node in _iter_c_nodes_deep_8616(root, seen=excluded):
         identity = _scalar_identity_8616(node)
         if identity in definitions:
@@ -98,7 +108,7 @@ def prove_frame_carrier_uses_8616(root: object, frame_addresses: frozenset[int])
             not (isinstance(identity, int) and isinstance(defined, int))
             and register.reg_offset < source.reg_offset + source.width
             and source.reg_offset < register.reg_offset + register.width
-            for defined, source in register_definitions
+            for defined, source in iter(register_definitions)
         ):
             return FrameCarrierUseProof8616(FrameCarrierUseVerdict8616.UNKNOWN_IDENTITY, len(candidates))
     return FrameCarrierUseProof8616(FrameCarrierUseVerdict8616.CLOSED, len(candidates))

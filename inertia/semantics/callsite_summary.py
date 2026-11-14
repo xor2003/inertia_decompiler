@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery metadata.
 
 Responsibility: summarize recovered callsite targets, pushes, and return-shape facts.
@@ -11,6 +12,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import builtins
 import contextlib
@@ -105,6 +108,8 @@ from .helper_abi import (
 from .helper_abi import (
     known_helper_logical_argument_widths_8616,
 )
+import dataclasses
+import operator
 
 __all__ = [
     "CallerReturnUseEvidence8616",
@@ -136,28 +141,32 @@ __all__ = [
 ]
 
 log: logging.Logger = logging.getLogger(__name__)
-type _DynamicCallsiteValue8616 = Any
-type _CallsiteTuple8616 = tuple[object, ...]
+_DynamicCallsiteValue8616 = typing.TypeAliasType("_DynamicCallsiteValue8616", Any)
+_CallsiteTuple8616 = typing.TypeAliasType("_CallsiteTuple8616", tuple[object, ...])
 
-def known_helper_abi_widths_8616(symbol_name: str | None) -> tuple[int, ...] | None:
+def known_helper_abi_widths_8616(symbol_name: object) -> object:
     """Return explicit logical ABI widths for a known runtime helper."""
+    widths: object
     normalized = normalize_callee_name_8616(symbol_name)
     widths = known_helper_logical_argument_widths_8616(normalized)
-    return None if widths is None else tuple(int(width) for width in widths)
+    return None if widths is None else tuple(int(width) for width in iter(widths))
 
 
-def known_helper_is_variadic_8616(symbol_name: str | None) -> bool:
+@cython.ccall
+def known_helper_is_variadic_8616(symbol_name: object) -> cython.bint:
     """Return whether a known runtime helper has an open-ended argument list."""
     normalized = normalize_callee_name_8616(symbol_name)
     return bool(_catalog_helper_is_variadic_8616(normalized))
 
 
-def _dynamic_callsite_getattr_8616(obj: object, name: str, default: object = None) -> Any:  # noqa: ANN401
+@cython.ccall
+def _dynamic_callsite_getattr_8616(obj: object, name: object, default: object = None) -> Any:  # noqa: ANN401
     """Read an attribute across the dynamic third-party angr/Capstone callsite boundary."""
     return builtins.getattr(obj, name, default)
 
 
-def _dynamic_callsite_setattr_8616(obj: object, name: str, value: object) -> None:
+@cython.ccall
+def _dynamic_callsite_setattr_8616(obj: object, name: object, value: object) -> None:
     """Write an attribute across the dynamic third-party angr/Capstone callsite boundary."""
     builtins.setattr(obj, name, value)
 
@@ -165,18 +174,18 @@ def _dynamic_callsite_setattr_8616(obj: object, name: str, value: object) -> Non
 class _CapstoneInstructionSurface8616(Protocol):
     """Typed fields used from a third-party Capstone instruction."""
 
-    address: int
-    id: int
-    size: int
-    mnemonic: str
-    op_str: str
-    operands: tuple[object, ...]
+    address: cython.longlong
+    id: cython.longlong
+    size: cython.longlong
+    mnemonic: object
+    op_str: object
+    operands: object
 
-    def reg_name(self, reg_id: int) -> str:
+    def reg_name(self, reg_id: cython.longlong) -> object:
         """Return the backend register name for an operand register id."""
         ...
 
-    def regs_access(self) -> tuple[list[int], list[int]]:
+    def regs_access(self) -> object:
         """Return the registers read and written by this instruction."""
         ...
 
@@ -191,16 +200,16 @@ class _AngrFunctionPrototypeSurface8616(Protocol):
     """Typed angr function fields used to rank recovered ABI prototypes."""
 
     prototype: object | None
-    is_prototype_guessed: bool
+    is_prototype_guessed: cython.bint
 
 
 class _CapstoneOperandSurface8616(Protocol):
     """Typed fields used from a third-party Capstone operand."""
 
-    type: int
-    reg: int
-    imm: int
-    size: int
+    type: cython.longlong
+    reg: cython.longlong
+    imm: cython.longlong
+    size: cython.longlong
     mem: object
 
 
@@ -235,13 +244,15 @@ class CallsiteMachineFrameKind8616(StrEnum):
     FAR = "far"
 
     @property
-    def return_frame_width(self) -> int:
+    def return_frame_width(self) -> cython.longlong:
         """Return the number of bytes pushed by the machine call itself."""
         return 2 if self is CallsiteMachineFrameKind8616.NEAR else 4
 
 
+@cython.ccall
 def structured_call_kind_8616(call: object) -> StructuredCallKind8616:
     """Classify a structured call without treating codegen intrinsics as calls."""
+    candidate: object
     callee_target = _dynamic_callsite_getattr_8616(call, "callee_target", None)
     callee_func = _dynamic_callsite_getattr_8616(call, "callee_func", None)
     callee_name = _dynamic_callsite_getattr_8616(callee_func, "name", None)
@@ -254,12 +265,13 @@ def structured_call_kind_8616(call: object) -> StructuredCallKind8616:
 class _CallerReturnUseEvidenceOwner8616(Protocol):
     """Typed Inertia evidence field carried by a third-party project object."""
 
-    _inertia_caller_return_use_evidence_by_addr_8616: dict[int, CallerReturnUseEvidence8616]
+    _inertia_caller_return_use_evidence_by_addr_8616: object
 
 
+@cython.ccall
 def caller_return_use_evidence_by_addr_8616(
-    owner: object | None,
-) -> dict[int, CallerReturnUseEvidence8616]:
+    owner: object,
+) -> object:
     """Read the owned caller-use evidence contract from a project carrier."""
     if owner is None:
         return {}
@@ -273,9 +285,10 @@ def caller_return_use_evidence_by_addr_8616(
     return evidence_by_addr
 
 
+@cython.ccall
 def record_caller_return_use_evidence_8616(
     owner: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     evidence: CallerReturnUseEvidence8616,
 ) -> None:
     """Record typed caller-use evidence on a project carrier."""
@@ -329,48 +342,46 @@ class CallsiteArgumentClass8616(StrEnum):
     POINTER = "pointer"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallsiteStackCleanupEvidence8616:
     """Exact caller-side stack cleanup instruction recovered after one call."""
 
-    amount: int
-    instruction_addr: int
+    amount: cython.longlong
+    instruction_addr: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallsiteSummary8616:
     """Structured 16-bit x86 callsite facts consumed by lowering/postprocess."""
 
-    callsite_addr: int
+    callsite_addr: cython.longlong
     target_addr: int | None
     return_addr: int | None
-    kind: str | None
+    kind: object
     arg_count: int | None
-    arg_widths: tuple[int, ...]
+    arg_widths: object
     stack_cleanup: int | None
-    return_register: str | None
+    return_register: object
     return_used: bool | None
-    stack_probe_helper: bool = False
+    stack_probe_helper: cython.bint = False
     stack_probe_allocation_size: int | None = None
     helper_return_state: str = "none"
-    helper_return_space: str | None = None
+    helper_return_space: object = None
     helper_return_width: int | None = None
     helper_return_address_kind: str = "none"
-    return_shape: str | None = None
-    push_arg_sources: tuple[_CallsiteTuple8616 | None, ...] = field(default=(), compare=False)
-    push_arg_instruction_addrs: tuple[int, ...] = field(default=(), compare=False)
-    return_store_destination: tuple[str, int] | None = None
+    return_shape: object = None
+    push_arg_sources: object = field(default=(), compare=False)
+    push_arg_instruction_addrs: object = field(default=(), compare=False)
+    return_store_destination: object = None
     return_store_width: int | None = None
     target_source: _CallsiteTuple8616 | None = None
     return_use_kind: CallsiteReturnUseKind8616 | None = None
-    logical_arg_widths: tuple[int, ...] = field(default=(), compare=False)
-    logical_arg_classes: tuple[CallsiteArgumentClass8616, ...] = field(default=(), compare=False)
+    logical_arg_widths: object = field(default=(), compare=False)
+    logical_arg_classes: object = field(default=(), compare=False)
     stack_cleanup_instruction_addr: int | None = None
     predecessor_stack_merge: CallsitePredecessorStackMerge8616 | None = field(default=None, compare=False)
     return_store_instruction_addr: int | None = None
-    push_arg_address_break_evidence: tuple[
-        PartialRegisterAddressBreakEvidence8616 | None, ...
-    ] = field(default=(), compare=False)
+    push_arg_address_break_evidence: object = field(default=(), compare=False)
 
     def brief(self) -> str:
         """Return a compact diagnostic rendering of the callsite summary."""
@@ -386,11 +397,12 @@ class CallsiteSummary8616:
             f"helper_addr_kind={self.helper_return_address_kind}"
         )
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> object:
         """Return a JSON-friendly representation of the summary contract."""
         return asdict(self)
 
 
+@cython.ccall
 def callsite_machine_frame_kind_8616(
     summary: CallsiteSummary8616,
 ) -> CallsiteMachineFrameKind8616 | None:
@@ -416,12 +428,13 @@ class _StructuredCallsiteTagMap8616(Protocol):
 class _StructuredCallsiteTagCarrier8616(Protocol):
     """Third-party structured-call tag field carrying exact recovery metadata."""
 
-    tags: _StructuredCallsiteTagMap8616 | dict[str, object]
+    tags: object
 
 
+@cython.ccall
 def _structured_callsite_tags_8616(
     call: _StructuredCallsiteTagCarrier8616,
-) -> dict[str, object] | None:
+) -> object:
     """Copy Python or Rust-backed AIL tags into an owned dictionary."""
     try:
         return dict(call.tags.items())
@@ -429,10 +442,13 @@ def _structured_callsite_tags_8616(
         return None
 
 
+@cython.ccall
 def structured_callsite_addr_8616(
     call: _StructuredCallsiteTagCarrier8616,
 ) -> int | None:
     """Return the exact machine callsite identity attached to a structured call."""
+    callsite_addr: object
+    tags: object
     tags = _structured_callsite_tags_8616(call)
     if tags is None:
         return None
@@ -440,10 +456,13 @@ def structured_callsite_addr_8616(
     return callsite_addr if isinstance(callsite_addr, int) else None
 
 
+@cython.ccall
 def structured_callsite_target_addr_8616(
     call: _StructuredCallsiteTagCarrier8616,
 ) -> int | None:
     """Return the typed callee address persisted with one structured call."""
+    tags: object
+    target_addr: object
     tags = _structured_callsite_tags_8616(call)
     if tags is None:
         return None
@@ -451,6 +470,7 @@ def structured_callsite_target_addr_8616(
     return target_addr if isinstance(target_addr, int) else None
 
 
+@cython.ccall
 def bind_structured_callsite_identity_8616(
     call: _StructuredCallsiteTagCarrier8616,
     summary: CallsiteSummary8616,
@@ -460,11 +480,14 @@ def bind_structured_callsite_identity_8616(
     A conflicting instruction tag is evidence corruption and must stop the
     pipeline rather than silently rebinding a structured call.
     """
+    existing_callsite_addr: object
+    existing_target_addr: object
+    tags: object
     tags = _structured_callsite_tags_8616(call)
     if tags is None:
         raise PipelineHardError("structured call has no writable tag mapping")
     existing_callsite_addr = tags.get("ins_addr")
-    if isinstance(existing_callsite_addr, int) and existing_callsite_addr != summary.callsite_addr:
+    if isinstance(existing_callsite_addr, int) and operator.ne(existing_callsite_addr, summary.callsite_addr):
         raise PipelineHardError(
             "structured callsite identity conflicts with typed summary: "
             f"tag={existing_callsite_addr:#x} summary={summary.callsite_addr:#x}"
@@ -473,7 +496,7 @@ def bind_structured_callsite_identity_8616(
     if (
         isinstance(existing_target_addr, int)
         and isinstance(summary.target_addr, int)
-        and existing_target_addr != summary.target_addr
+        and operator.ne(existing_target_addr, summary.target_addr)
     ):
         raise PipelineHardError(
             "structured callee identity conflicts with typed summary: "
@@ -487,6 +510,7 @@ def bind_structured_callsite_identity_8616(
     call.tags = {**tags, "ins_addr": summary.callsite_addr, **target_tags}
 
 
+@cython.ccall
 def rebind_cloned_structured_callsite_identity_8616(
     call: _StructuredCallsiteTagCarrier8616,
     inherited_summary: CallsiteSummary8616,
@@ -499,7 +523,9 @@ def rebind_cloned_structured_callsite_identity_8616(
     that inherited identity. The clone must still carry the source summary's
     exact tag and both summaries must identify the same callee.
     """
-    if inherited_summary.target_addr != replacement_summary.target_addr:
+    inherited_callsite_addr: object
+    tags: object
+    if operator.ne(inherited_summary.target_addr, replacement_summary.target_addr):
         raise PipelineHardError(
             "cloned structured callsite cannot change typed callee identity: "
             f"source={inherited_summary.target_addr!r} "
@@ -509,7 +535,7 @@ def rebind_cloned_structured_callsite_identity_8616(
     if tags is None:
         raise PipelineHardError("cloned structured call has no writable tag mapping")
     inherited_callsite_addr = tags.get("ins_addr")
-    if inherited_callsite_addr != inherited_summary.callsite_addr:
+    if operator.ne(inherited_callsite_addr, inherited_summary.callsite_addr):
         raise PipelineHardError(
             "cloned structured callsite does not carry its proven source identity: "
             f"tag={inherited_callsite_addr!r} "
@@ -530,11 +556,14 @@ def rebind_cloned_structured_callsite_identity_8616(
 class _CallsiteSummaryInventoryOwner8616(Protocol):
     """Typed Inertia callsite inventory carried by an angr codegen object."""
 
-    _inertia_callsite_summary_inventory_8616: dict[int, CallsiteSummary8616]
+    _inertia_callsite_summary_inventory_8616: object
 
 
-def callsite_summary_inventory_8616(owner: object | None) -> dict[int, CallsiteSummary8616]:
+@cython.ccall
+def callsite_summary_inventory_8616(owner: object) -> object:
     """Return the authoritative owned callsite inventory or fail its contract."""
+    callsite_addr: object
+    summary: object
     if owner is None:
         return {}
     carrier = cast(_CallsiteSummaryInventoryOwner8616, owner)
@@ -549,20 +578,23 @@ def callsite_summary_inventory_8616(owner: object | None) -> dict[int, CallsiteS
             raise TypeError("callsite summary inventory keys must be integers")
         if not isinstance(summary, CallsiteSummary8616):
             raise TypeError("callsite summary inventory values must be CallsiteSummary8616")
-        if summary.callsite_addr != callsite_addr:
+        if operator.ne(summary.callsite_addr, callsite_addr):
             raise ValueError("callsite summary inventory key must match summary.callsite_addr")
     return inventory
 
 
+@cython.ccall
 def build_callsite_summary_inventory_8616(
     function: object,
-    callsite_addrs: Iterable[int],
-) -> dict[int, CallsiteSummary8616]:
+    callsite_addrs: Iterable[cython.longlong],
+) -> object:
     """Build the authoritative typed summary inventory for exact callsites."""
+    summary: object
+    callsite_addr: object
     typed_function = cast(SimpleNamespace, function)
-    callsite_addrs = tuple(sorted(set(callsite_addrs)))
+    callsite_addrs = tuple(sorted(tuple(set(callsite_addrs))))
     target_inventory = CallsiteTargetInventory8616.collect(function, callsite_addrs)
-    inventory: dict[int, CallsiteSummary8616] = {}
+    inventory: dict[cython.longlong, CallsiteSummary8616] = {}
     for callsite_addr in callsite_addrs:
         if not isinstance(callsite_addr, int):
             raise TypeError("callsite summary inventory addresses must be integers")
@@ -577,10 +609,10 @@ def build_callsite_summary_inventory_8616(
 
 
 def logical_argument_widths_from_callsite_8616(
-    summary: CallsiteSummary8616 | None,
+    summary: object,
     *,
     expected_arg_count: int | None,
-) -> tuple[int, ...] | None:
+) -> object:
     """Return logical argument widths when each argument has one proven push.
 
     Callsite widths and sources are stored in execution push order. The result
@@ -592,11 +624,11 @@ def logical_argument_widths_from_callsite_8616(
         return None
     widths = summary.arg_widths
     sources = summary.push_arg_sources
-    if len(widths) != expected_arg_count or len(sources) != expected_arg_count:
+    if operator.ne(len(widths), expected_arg_count) or operator.ne(len(sources), expected_arg_count):
         return None
-    if any(not isinstance(width, int) or width <= 0 for width in widths):
+    if any(not isinstance(width, int) or width <= 0 for width in iter(widths)):
         return None
-    if any(source is None for source in sources):
+    if any(source is None for source in iter(sources)):
         return None
     return tuple(reversed(widths))
 
@@ -604,7 +636,7 @@ def logical_argument_widths_from_callsite_8616(
 def _logical_arg_interface_for_target_8616(
     function: object,
     target_addr: int | None,
-) -> tuple[tuple[int, ...], tuple[CallsiteArgumentClass8616, ...]]:
+) -> tuple[tuple[cython.longlong, ...], tuple[CallsiteArgumentClass8616, ...]]:
     """Return prototype-backed widths without guessing pointer/value classes.
 
     An angr scalar prototype may be synthesized from physical stack width
@@ -613,17 +645,20 @@ def _logical_arg_interface_for_target_8616(
     the logical argument class. Class evidence is therefore populated only by
     owning reconciliation paths such as exact far-pointer grouping.
     """
+    candidate: object
+    candidate_addr: object
+    candidate_project: object
     if not isinstance(target_addr, int):
         return (), ()
     try:
         project = cast(Any, function).project
     except AttributeError:
         return (), ()
-    candidates: list[tuple[bool, int, tuple[int, ...]]] = []
+    candidates: list[tuple[cython.bint, cython.longlong, tuple[cython.longlong, ...]]] = []
     candidate_order = 0
     for candidate_project in _prototype_candidate_projects_8616(project):
         for candidate_addr in dict.fromkeys(
-            addr for addr in _prototype_candidate_addrs_8616(project, target_addr)
+            addr for addr in builtins.iter(_prototype_candidate_addrs_8616(project, target_addr))
             if addr >= 0
         ):
             candidate_order += 1
@@ -641,9 +676,10 @@ def _logical_arg_interface_for_target_8616(
     return (), ()
 
 
-def _prototype_candidate_addrs_8616(project: object, target_addr: int) -> list[int]:
+@cython.ccall
+def _prototype_candidate_addrs_8616(project: object, target_addr: cython.longlong) -> object:
     """Return the target plus any original-delta rebased addresses."""
-    candidate_addrs: list[int] = [target_addr]
+    candidate_addrs: list[cython.longlong] = [target_addr]
     original_delta = _dynamic_callsite_getattr_8616(
         project, "_inertia_original_linear_delta", None
     )
@@ -652,8 +688,10 @@ def _prototype_candidate_addrs_8616(project: object, target_addr: int) -> list[i
     return candidate_addrs
 
 
-def _prototype_candidate_projects_8616(project: object) -> list[object]:
+@cython.ccall
+def _prototype_candidate_projects_8616(project: object) -> object:
     """Return the active project plus the pre-rebase project when present."""
+    original_project: object
     candidate_projects: list[object] = [project]
     original_project = _dynamic_callsite_getattr_8616(
         project, "_inertia_original_project", None
@@ -663,12 +701,14 @@ def _prototype_candidate_projects_8616(project: object) -> list[object]:
     return candidate_projects
 
 
+@cython.ccall
 def _prototype_widths_for_addr_8616(
     candidate_project: object,
-    candidate_addr: int,
-    candidate_order: int,
-) -> tuple[bool, int, tuple[int, ...]] | None:
+    candidate_addr: cython.longlong,
+    candidate_order: cython.longlong,
+) -> object:
     """Return (is_guessed, order, widths) for one candidate callee prototype."""
+    callee: object
     try:
         callee = cast(Any, candidate_project).kb.functions.function(addr=candidate_addr, create=False)
     except (AttributeError, KeyError):
@@ -692,9 +732,11 @@ def _prototype_widths_for_addr_8616(
     return is_guessed, candidate_order, widths
 
 
-def _prototype_arg_widths_8616(prototype: SimTypeFunction) -> tuple[int, ...]:
+@cython.ccall
+def _prototype_arg_widths_8616(prototype: SimTypeFunction) -> tuple[cython.longlong, ...]:
     """Convert prototype argument bit sizes into at least 2-byte widths."""
-    widths: list[int] = []
+    arg_type: object
+    widths: list[cython.longlong] = []
     for arg_type in tuple(prototype.args or ()):
         if isinstance(arg_type, SimTypeBottom):
             return ()
@@ -708,26 +750,32 @@ def _prototype_arg_widths_8616(prototype: SimTypeFunction) -> tuple[int, ...]:
     return tuple(widths)
 
 
-def _logical_arg_widths_for_target_8616(function: object, target_addr: int | None) -> tuple[int, ...]:
+@cython.ccall
+def _logical_arg_widths_for_target_8616(function: object, target_addr: int | None) -> object:
     """Return logical ABI widths from a binary-seeded target prototype."""
     widths, _classes = _logical_arg_interface_for_target_8616(function, target_addr)
     return widths
 
 
-def _is_stack_probe_target_name_8616(name: str | None) -> bool:
+@cython.ccall
+def _is_stack_probe_target_name_8616(name: object) -> cython.bint:
     return bool(is_x86_16_stack_probe_name_8616(name))
 
 
-def _evidence_name_8616(evidence: object) -> str | None:
+@cython.ccall
+def _evidence_name_8616(evidence: object) -> object:
     """Read a typed helper-evidence name from the dynamic compiler-helper boundary."""
     name = _dynamic_callsite_getattr_8616(evidence, "name", None)
     return name if isinstance(name, str) else None
 
 
+@cython.ccall
 def _lookup_label_at_addr_8616(
-    candidate_project: object, candidate_addr: int, evidence: object
-) -> str | None:
+    candidate_project: object, candidate_addr: cython.longlong, evidence: object
+) -> object:
     """Return a label-backed target name for one project/address, or None."""
+    label: object
+    labels: object
     for labels in (
         _dynamic_callsite_getattr_8616(_dynamic_callsite_getattr_8616(candidate_project, "kb", None), "labels", None),
         _dynamic_callsite_getattr_8616(_dynamic_callsite_getattr_8616(candidate_project, "_inertia_lst_metadata", None), "code_labels", None),
@@ -755,12 +803,16 @@ def _lookup_label_at_addr_8616(
     return None
 
 
+@cython.ccall
 def _lookup_name_at_addr_8616(
-    candidate_project: object, lookup: object, candidate_addr: int
-) -> str | None:
+    candidate_project: object, lookup: object, candidate_addr: cython.longlong
+) -> object:
     """Resolve a target name for one project/address, or None to keep looking."""
+    evidence: object
+    generic_name: object
+    label: object
     evidence = identify_x86_16_compiler_helper_at_8616(candidate_project, candidate_addr)
-    generic_name: str | None = None
+    generic_name = None
     if callable(lookup):
         try:
             callee = lookup(addr=candidate_addr, create=False)
@@ -792,7 +844,12 @@ def _lookup_name_at_addr_8616(
     return None
 
 
-def _lookup_target_name_8616(function: object, target_addr: int | None) -> str | None:
+@cython.ccall
+def _lookup_target_name_8616(function: object, target_addr: int | None) -> object:
+    name: object
+    addr: object
+    candidate_addr: object
+    candidate_project: object
     if not isinstance(target_addr, int):
         return None
     project = _dynamic_callsite_getattr_8616(function, "project", None)
@@ -803,7 +860,7 @@ def _lookup_target_name_8616(function: object, target_addr: int | None) -> str |
         rebased = target_addr - original_delta
         if rebased >= 0:
             lookup_addrs.append(rebased)
-    deduped_addrs: list[int] = []
+    deduped_addrs: list[cython.longlong] = []
     for addr in lookup_addrs:
         if addr not in deduped_addrs:
             deduped_addrs.append(addr)
@@ -818,12 +875,14 @@ def _lookup_target_name_8616(function: object, target_addr: int | None) -> str |
     return None
 
 
-def callsite_target_name_for_project_8616(project: object, target_addr: int | None) -> str | None:
+@cython.ccall
+def callsite_target_name_for_project_8616(project: object, target_addr: int | None) -> object:
     """Resolve a call target name from the project metadata and address evidence."""
     return _lookup_target_name_8616(SimpleNamespace(project=project), target_addr)
 
 
-def _mnemonic(insn: object) -> str:
+@cython.ccall
+def _mnemonic(insn: object) -> object:
     """Return a normalized mnemonic from the typed Capstone boundary."""
 
     try:
@@ -833,6 +892,7 @@ def _mnemonic(insn: object) -> str:
     return str(mnemonic or "").strip().lower()
 
 
+@cython.ccall
 def _capstone_insn(insn: object) -> _CapstoneInstructionSurface8616:
     """Return a typed Capstone instruction from an optional angr wrapper."""
 
@@ -842,13 +902,16 @@ def _capstone_insn(insn: object) -> _CapstoneInstructionSurface8616:
         return cast(_CapstoneInstructionSurface8616, insn)
 
 
-def _operand_reg_name(insn: object, operand: object) -> str | None:
+@cython.ccall
+def _operand_reg_name(insn: object, operand: object) -> object:
+    memory: object
+    operand_type: object
     surface = cast(_CapstoneOperandSurface8616, operand)
     try:
         operand_type = surface.type
     except AttributeError:
         operand_type = None
-    if operand_type is not None and operand_type != X86_OP_REG:
+    if operand_type is not None and operator.ne(operand_type, X86_OP_REG):
         return None
     if operand_type is None:
         try:
@@ -874,6 +937,7 @@ def _operand_reg_name(insn: object, operand: object) -> str | None:
     return None
 
 
+@cython.ccall
 def _operand_imm_value(operand: object) -> int | None:
     surface = cast(_CapstoneOperandSurface8616, operand)
     try:
@@ -889,6 +953,7 @@ def _operand_imm_value(operand: object) -> int | None:
     return imm if isinstance(imm, int) else None
 
 
+@cython.ccall
 def _operand_mem_value_8616(operand: object) -> _DynamicCallsiteValue8616:
     """Return memory metadata from the typed Capstone operand boundary."""
 
@@ -905,11 +970,14 @@ def _operand_mem_value_8616(operand: object) -> _DynamicCallsiteValue8616:
         return None
 
 
-def _operand_is_reg(insn: object, operand: object, names: Collection[str]) -> bool:
+@cython.ccall
+def _operand_is_reg(insn: object, operand: object, names: Collection[str]) -> cython.bint:
+    reg_name: object
     reg_name = _operand_reg_name(insn, operand)
     return reg_name in names if reg_name is not None else False
 
 
+@cython.ccall
 def _instruction_operands(insn: object) -> tuple[object, ...]:
     """Return operands from the typed Capstone instruction boundary."""
 
@@ -919,9 +987,10 @@ def _instruction_operands(insn: object) -> tuple[object, ...]:
         return ()
 
 
+@cython.ccall
 def _fixed_stack_probe_allocation_before_call_8616(
-    insns: tuple[object, ...],
-    call_index: int,
+    insns: object,
+    call_index: cython.longlong,
 ) -> int | None:
     """Return a bounded immediate AX allocation immediately preceding a probe."""
     for index in range(call_index - 1, max(-1, call_index - 5), -1):
@@ -938,6 +1007,7 @@ def _fixed_stack_probe_allocation_before_call_8616(
     return None
 
 
+@cython.ccall
 def _instruction_address_8616(insn: object) -> int | None:
     """Return the typed Capstone instruction address when available."""
 
@@ -948,6 +1018,7 @@ def _instruction_address_8616(insn: object) -> int | None:
     return address if isinstance(address, int) else None
 
 
+@cython.ccall
 def _instruction_size_8616(insn: object) -> int | None:
     """Return the typed Capstone instruction size when available."""
 
@@ -958,6 +1029,7 @@ def _instruction_size_8616(insn: object) -> int | None:
     return size if isinstance(size, int) else None
 
 
+@cython.ccall
 def _instruction_op_str_8616(insn: object) -> str:
     """Return the typed Capstone instruction operand rendering."""
 
@@ -968,7 +1040,10 @@ def _instruction_op_str_8616(insn: object) -> str:
     return str(op_str or "")
 
 
-def _find_call_index(insns: tuple[object, ...], callsite_addr: int) -> int | None:
+@cython.ccall
+def _find_call_index(insns: object, callsite_addr: cython.longlong) -> int | None:
+    idx: object
+    insn: object
     for idx, insn in enumerate(insns):
         insn_addr = _instruction_address_8616(insn)
         if insn_addr == callsite_addr and is_x86_16_call_mnemonic_8616(_mnemonic(insn)):
@@ -986,22 +1061,26 @@ def _find_call_index(insns: tuple[object, ...], callsite_addr: int) -> int | Non
 
 
 def _callsite_debug_insns_8616(
-    debug: bool, callsite_addr: int, label: str, insns: tuple[object, ...]
+    debug: cython.bint, callsite_addr: cython.longlong, label: object, insns: object
 ) -> None:
     """Emit the callsite-window debug line when the env flag is enabled."""
     if not debug:
         return
     rendered = ", ".join(
         f"{_instruction_address_8616(insn):#x}:{_mnemonic(insn)} {_instruction_op_str_8616(insn)}"
-        for insn in insns[:12]
+        for insn in iter(insns[:12])
     )
     log.warning("[callsite-window] callsite=%#x %s count=%d %s", callsite_addr, label, len(insns), rendered)
 
 
+@cython.ccall
 def _decode_linear_window_8616(
-    project: object, callsite_addr: int, start_addr: int, debug: bool
-) -> tuple[object, ...]:
+    project: object, callsite_addr: cython.longlong, start_addr: cython.longlong, debug: cython.bint
+) -> object:
     """Decode a linear instruction window ending after the callsite."""
+    block: object
+    capstone_engine: object
+    memory: object
     if not isinstance(start_addr, int) or start_addr > callsite_addr:
         return ()
     size = max(callsite_addr - start_addr + 16, 16)
@@ -1038,7 +1117,12 @@ def _decode_linear_window_8616(
         return insns
 
 
-def _block_insns_for_callsite(function: object, callsite_addr: int) -> tuple[object, ...]:
+@cython.ccall
+def _block_insns_for_callsite(function: object, callsite_addr: cython.longlong) -> object:
+    call_idx: object
+    project: object
+    window: object
+    block_addr: object
     project = _dynamic_callsite_getattr_8616(function, "project", None)
     if project is None:
         return ()
@@ -1066,13 +1150,15 @@ def _block_insns_for_callsite(function: object, callsite_addr: int) -> tuple[obj
     return ()
 
 
-def _callsite_candidate_block_addrs_8616(function: object, callsite_addr: int) -> list[int]:
+@cython.ccall
+def _callsite_candidate_block_addrs_8616(function: object, callsite_addr: cython.longlong) -> object:
     """Return block-start candidates at or before the callsite, ascending."""
+    block_addr: object
     candidate_addrs = [callsite_addr]
     func_addr = _dynamic_callsite_getattr_8616(function, "addr", None)
     if isinstance(func_addr, int) and func_addr <= callsite_addr:
         candidate_addrs.append(func_addr)
-    for block_addr in tuple(sorted(_dynamic_callsite_getattr_8616(function, "block_addrs_set", ()) or ())):
+    for block_addr in tuple(sorted(tuple(_dynamic_callsite_getattr_8616(function, "block_addrs_set", ()) or ()))):
         if block_addr == callsite_addr:
             continue
         if block_addr > callsite_addr:
@@ -1081,13 +1167,16 @@ def _callsite_candidate_block_addrs_8616(function: object, callsite_addr: int) -
     return candidate_addrs
 
 
+@cython.ccall
 def _linear_window_for_callsite_8616(
     project: object,
-    candidate_addrs: list[int],
-    callsite_addr: int,
-    debug: bool,
-) -> tuple[object, ...] | None:
+    candidate_addrs: object,
+    callsite_addr: cython.longlong,
+    debug: cython.bint,
+) -> object:
     """Return the first linear window containing a preceded callsite."""
+    window_idx: object
+    start_addr: object
     for start_addr in reversed(candidate_addrs):
         window_insns = _decode_linear_window_8616(project, callsite_addr, start_addr, debug)
         window_idx = _find_call_index(window_insns, callsite_addr)
@@ -1096,11 +1185,13 @@ def _linear_window_for_callsite_8616(
     return None
 
 
-def _next_linear_block_insns(function: object, callsite_addr: int) -> tuple[object, ...]:
+def _next_linear_block_insns(function: object, callsite_addr: cython.longlong) -> object:
+    project: object
+    block_addr: object
     project = _dynamic_callsite_getattr_8616(function, "project", None)
     if project is None:
         return ()
-    candidate_addrs = sorted(addr for addr in (_dynamic_callsite_getattr_8616(function, "block_addrs_set", ()) or ()) if addr > callsite_addr)
+    candidate_addrs = sorted(addr for addr in iter((_dynamic_callsite_getattr_8616(function, "block_addrs_set", ()) or ())) if addr > callsite_addr)
     for block_addr in candidate_addrs:
         try:
             insns = tuple(
@@ -1114,6 +1205,7 @@ def _next_linear_block_insns(function: object, callsite_addr: int) -> tuple[obje
     return ()
 
 
+@cython.ccall
 def _call_return_addr_from_insn_8616(insn: object) -> int | None:
     """Return the linear fall-through address after a call instruction.
 
@@ -1127,11 +1219,12 @@ def _call_return_addr_from_insn_8616(insn: object) -> int | None:
     return None
 
 
-def _decode_linear_insns_at_8616(function: object, addr: int, *, limit: int) -> tuple[object, ...]:
+def _decode_linear_insns_at_8616(function: object, addr: cython.longlong, *, limit: cython.longlong) -> object:
     """Decode a bounded instruction window starting at a linear address.
 
     Dynamic boundary: angr project/block objects expose Capstone instruction wrappers.
     """
+    project: object
 
     project = _dynamic_callsite_getattr_8616(function, "project", None)
     if project is None or not isinstance(addr, int) or limit <= 0:
@@ -1162,7 +1255,7 @@ def _decode_linear_insns_at_8616(function: object, addr: int, *, limit: int) -> 
     if os.environ.get("INERTIA_DEBUG_CALLSITE_SUMMARY"):
         rendered = ", ".join(
             f"{_instruction_address_8616(insn):#x}:{_mnemonic(insn)} {_instruction_op_str_8616(insn)}"
-            for insn in insns[:limit]
+            for insn in iter(insns[:limit])
         )
         log.warning("[callsite-follow] addr=%#x count=%d %s", addr, len(insns), rendered)
     return insns[:limit]
@@ -1170,12 +1263,12 @@ def _decode_linear_insns_at_8616(function: object, addr: int, *, limit: int) -> 
 
 def _follow_insns_after_call_8616(
     function: object,
-    insns: tuple[object, ...],
-    idx: int,
-    callsite_addr: int,
+    insns: object,
+    idx: cython.longlong,
+    callsite_addr: cython.longlong,
     *,
-    limit: int,
-) -> list[object]:
+    limit: cython.longlong,
+) -> object:
     """Collect the bounded instruction window that immediately follows a call.
 
     Dynamic boundary: third-party Capstone instruction wrappers expose addresses.
@@ -1189,19 +1282,20 @@ def _follow_insns_after_call_8616(
     decoded: tuple[object, ...] = ()
     if isinstance(return_addr, int):
         decoded = _decode_linear_insns_at_8616(function, return_addr, limit=limit - len(follow_insns))
-        existing_addrs = {_instruction_address_8616(insn) for insn in follow_insns}
-        follow_insns.extend(insn for insn in decoded if _instruction_address_8616(insn) not in existing_addrs)
+        existing_addrs = {_instruction_address_8616(insn) for insn in iter(follow_insns)}
+        follow_insns.extend(insn for insn in iter(decoded) if _instruction_address_8616(insn) not in existing_addrs)
     if len(follow_insns) < limit:
-        existing_addrs = {_instruction_address_8616(insn) for insn in follow_insns}
+        existing_addrs = {_instruction_address_8616(insn) for insn in iter(follow_insns)}
         follow_insns.extend(
             insn
-            for insn in _next_linear_block_insns(function, callsite_addr)
+            for insn in builtins.iter(_next_linear_block_insns(function, callsite_addr))
             if _instruction_address_8616(insn) not in existing_addrs
         )
     return follow_insns[:limit]
 
 
-def _push_arg_width(insn: object) -> int:
+@cython.ccall
+def _push_arg_width(insn: object) -> cython.longlong:
     operands = _instruction_operands(insn)
     if operands:
         try:
@@ -1213,7 +1307,9 @@ def _push_arg_width(insn: object) -> int:
     return 2
 
 
+@cython.ccall
 def _direct_call_target_for_insn_8616(function: object, insn: object) -> int | None:
+    project: object
     project = _dynamic_callsite_getattr_8616(function, "project", None)
     callsite_addr = _instruction_address_8616(insn)
     if project is None or not isinstance(callsite_addr, int):
@@ -1227,9 +1323,10 @@ def _direct_call_target_for_insn_8616(function: object, insn: object) -> int | N
 
 def _callee_location_candidates_8616(
     function: object,
-    target: int,
-) -> tuple[tuple[CallsiteCleanupProjectRole8616, object, int], ...]:
+    target: cython.longlong,
+) -> tuple[tuple[CallsiteCleanupProjectRole8616, object, cython.longlong], ...]:
     """Return deduplicated current/original locations for one direct callee."""
+    project: object
     project = _dynamic_callsite_getattr_8616(function, "project", None)
     if project is None:
         return ()
@@ -1239,7 +1336,7 @@ def _callee_location_candidates_8616(
         candidate_addrs.append(target + original_delta)
         if target >= original_delta:
             candidate_addrs.append(target - original_delta)
-    deduped_addrs = tuple(dict.fromkeys(addr for addr in candidate_addrs if addr >= 0))
+    deduped_addrs = tuple(dict.fromkeys(addr for addr in iter(candidate_addrs) if addr >= 0))
     candidate_projects = (
         (CallsiteCleanupProjectRole8616.CURRENT, project),
         (
@@ -1249,12 +1346,13 @@ def _callee_location_candidates_8616(
     )
     return tuple(
         (project_role, candidate_project, candidate_addr)
-        for project_role, candidate_project in candidate_projects
+        for project_role, candidate_project in iter(candidate_projects)
         if candidate_project is not None
-        for candidate_addr in deduped_addrs
+        for candidate_addr in iter(deduped_addrs)
     )
 
 
+@cython.ccall
 def _callee_stack_cleanup_bytes_8616(
     function: object,
     insn: object,
@@ -1262,6 +1360,7 @@ def _callee_stack_cleanup_bytes_8616(
     request_cache: CallsiteSummaryRequestCache8616 | None = None,
 ) -> int | None:
     """Return consistent callee cleanup from complete terminal evidence."""
+    evidence: object
     evidence = _callee_terminal_stack_evidence_8616(
         function,
         insn,
@@ -1280,6 +1379,9 @@ def _callee_terminal_stack_evidence_8616(
     request_cache: CallsiteSummaryRequestCache8616 | None = None,
 ) -> TerminalStackCleanupEvidence8616 | None:
     """Return complete terminal stack and return-frame evidence for one call."""
+    candidate_addr: object
+    candidate_project: object
+    project_role: object
     target = _direct_call_target_for_insn_8616(function, insn)
     if not isinstance(target, int):
         return None
@@ -1289,7 +1391,7 @@ def _callee_terminal_stack_evidence_8616(
     ):
         def collect_candidate_cleanup(
             cleanup_project: object = candidate_project,
-            cleanup_address: int = candidate_addr,
+            cleanup_address: cython.longlong = candidate_addr,
         ) -> TerminalStackCleanupEvidence8616:
             """Collect one exact project-role/address cleanup result."""
             return terminal_stack_cleanup_at_address_8616(
@@ -1311,21 +1413,26 @@ def _callee_terminal_stack_evidence_8616(
     return None
 
 
-def _is_segment_register_push_8616(insn: object) -> bool:
+@cython.ccall
+def _is_segment_register_push_8616(insn: object) -> cython.bint:
     if not _mnemonic(insn).startswith("push"):
         return False
     operands = _instruction_operands(insn)
     return len(operands) == 1 and _operand_reg_name(insn, operands[0]) in {"cs", "ds", "es", "ss"}
 
 
-def _dest_reg_not_frame_8616(insn: object, operands: tuple[object, ...]) -> bool:
+@cython.ccall
+def _dest_reg_not_frame_8616(insn: object, operands: object) -> cython.bint:
     """Return whether the destination operand is a non-frame register."""
+    dest_name: object
     dest_name = _operand_reg_name(insn, operands[0])
     return dest_name not in {"sp", "bp", "ss", "ds", "es", "cs"} if dest_name is not None else False
 
 
-def _transparent_between_push_args_8616(insn: object) -> bool:
+@cython.ccall
+def _transparent_between_push_args_8616(insn: object) -> cython.bint:
     """Allow register calculations between pushes without crossing frame writes."""
+    expected: object
     mnemonic = _mnemonic(insn)
     if mnemonic in {"cbw", "cwd", "cwde", "cdq", "nop"}:
         return True
@@ -1342,14 +1449,19 @@ def _transparent_between_push_args_8616(insn: object) -> bool:
         "and": 2, "or": 2, "xor": 2,
     }
     expected = expected_operands.get(mnemonic)
-    return expected is not None and len(operands) == expected and _dest_reg_not_frame_8616(insn, operands)
+    return expected is not None and operator.eq(len(operands), expected) and _dest_reg_not_frame_8616(insn, operands)
 
 
+@cython.ccall
 def _nested_call_argument_window_8616(
-    function: object, insns: tuple[object, ...], call_idx: int,
-) -> tuple[int, int] | None:
+    function: object, insns: object, call_idx: cython.longlong,
+) -> object:
     """Prove which call and byte count an argument-scan barrier consumes."""
-    caller_cleanup: int | None = None
+    call_addr: object
+    caller_cleanup: object
+    cleanup: object
+    helper_widths: object
+    caller_cleanup = None
     if _mnemonic(insns[call_idx]) == "add":
         if call_idx == 0 or not is_x86_16_call_mnemonic_8616(_mnemonic(insns[call_idx - 1])):
             return None
@@ -1377,8 +1489,10 @@ def _nested_call_argument_window_8616(
     return call_idx, argument_bytes
 
 
-def _rewind_nested_call_args_8616(function: object, insns: tuple[object, ...], call_idx: int) -> int | None:
+@cython.ccall
+def _rewind_nested_call_args_8616(function: object, insns: object, call_idx: cython.longlong) -> int | None:
     """Rewind nested arguments using exact caller/callee cleanup or helper ABI."""
+    window: object
     window = _nested_call_argument_window_8616(function, insns, call_idx)
     if window is None:
         return None
@@ -1426,14 +1540,16 @@ def _rewind_nested_call_args_8616(function: object, insns: tuple[object, ...], c
     return None
 
 
-def _linear_window_insns_for_callsite_8616(function: object, callsite_addr: int) -> tuple[object, ...]:
+def _linear_window_insns_for_callsite_8616(function: object, callsite_addr: cython.longlong) -> object:
+    call_idx: object
+    project: object
     project = _dynamic_callsite_getattr_8616(function, "project", None)
     if project is None:
         return ()
     start = _dynamic_callsite_getattr_8616(function, "addr", None)
-    block_addrs = tuple(sorted(_dynamic_callsite_getattr_8616(function, "block_addrs_set", ()) or ()))
+    block_addrs = tuple(sorted(tuple(_dynamic_callsite_getattr_8616(function, "block_addrs_set", ()) or ())))
     if not isinstance(start, int) or start > callsite_addr:
-        starts = [addr for addr in block_addrs if isinstance(addr, int) and addr <= callsite_addr]
+        starts = [addr for addr in iter(block_addrs) if isinstance(addr, int) and addr <= callsite_addr]
         start = starts[0] if starts else None
     if not isinstance(start, int) or start > callsite_addr:
         if os.environ.get("INERTIA_DEBUG_CALLSITE_SUMMARY"):
@@ -1441,7 +1557,7 @@ def _linear_window_insns_for_callsite_8616(function: object, callsite_addr: int)
                 "[callsite-window] callsite=%#x cleanup-linear refused start=%r blocks=%r",
                 callsite_addr,
                 start,
-                tuple(hex(addr) for addr in block_addrs[:12]),
+                tuple(hex(addr) for addr in iter(block_addrs[:12])),
             )
         return ()
     size = max(callsite_addr - start + 16, 16)
@@ -1471,13 +1587,16 @@ def _linear_window_insns_for_callsite_8616(function: object, callsite_addr: int)
     return insns
 
 
+@cython.ccall
 def _function_cfg_instruction_inventory_8616(function: object) -> tuple[object, ...]:
     """Return the address-ordered Capstone instructions owned by one function CFG."""
     return tuple(decoded_function_instructions_8616(function))
 
 
-def _callee_saved_frame_push_addresses_8616(function: object) -> frozenset[int]:
+def _callee_saved_frame_push_addresses_8616(function: object) -> object:
     """Return exact prologue PUSH addresses restored by every decoded epilogue."""
+    insn: object
+    ret_index: object
     insns = _function_cfg_instruction_inventory_8616(function)
     if not insns:
         return frozenset()
@@ -1496,7 +1615,7 @@ def _callee_saved_frame_push_addresses_8616(function: object) -> frozenset[int]:
             _restored_registers_before_ret_8616(insns, ret_index, callee_saved)
         )
 
-    if not restored_by_return or any(not restored for restored in restored_by_return):
+    if not restored_by_return or any(not restored for restored in iter(restored_by_return)):
         return frozenset()
     restored_on_all_paths = set.intersection(*restored_by_return)
     if not restored_on_all_paths:
@@ -1504,10 +1623,12 @@ def _callee_saved_frame_push_addresses_8616(function: object) -> frozenset[int]:
     return _restored_push_addresses_8616(insns, restored_on_all_paths)
 
 
+@cython.ccall
 def _restored_registers_before_ret_8616(
-    insns: tuple[object, ...], ret_index: int, callee_saved: frozenset[str] | set[str]
-) -> set[str]:
+    insns: object, ret_index: cython.longlong, callee_saved: object
+) -> object:
     """Census callee-saved registers restored immediately before one RET."""
+    reg_name: object
     restored: set[str] = set()
     scan = ret_index - 1
     while scan >= 0:
@@ -1539,11 +1660,14 @@ def _restored_registers_before_ret_8616(
     return restored
 
 
+@cython.ccall
 def _restored_push_addresses_8616(
-    insns: tuple[object, ...], restored_on_all_paths: set[str]
-) -> frozenset[int]:
+    insns: object, restored_on_all_paths: object
+) -> frozenset[cython.longlong]:
     """Return the first PUSH address per register restored on every path."""
-    push_by_register: dict[str, int] = {}
+    reg_name: object
+    insn: object
+    push_by_register: dict[str, cython.longlong] = {}
     for insn in insns:
         if _mnemonic(insn) != "push":
             continue
@@ -1559,11 +1683,16 @@ def _restored_push_addresses_8616(
 
 def _cross_call_saved_push_addresses_8616(
     function: object,
-    callsite_addr: int,
-    candidate_push_addrs: frozenset[int],
+    callsite_addr: cython.longlong,
+    candidate_push_addrs: object,
     request_cache: CallsiteSummaryRequestCache8616 | None,
-) -> frozenset[int]:
+) -> frozenset[cython.longlong]:
     """Return register pushes restored after a second proven returning call."""
+    call_evidence: object
+    call_idx: object
+    push_idx: object
+    register: object
+    push_addr: object
     if not candidate_push_addrs:
         return frozenset()
     insns = _function_cfg_instruction_inventory_8616(function)
@@ -1591,13 +1720,13 @@ def _cross_call_saved_push_addresses_8616(
     ):
         return frozenset()
 
-    saved: set[int] = set()
+    saved: set[cython.longlong] = set()
     for push_addr in candidate_push_addrs:
         push_idx = next(
             (
                 index
-                for index, insn in enumerate(insns[:call_idx])
-                if _instruction_address_8616(insn) == push_addr
+                for index, insn in builtins.iter(enumerate(insns[:call_idx]))
+                if operator.eq(_instruction_address_8616(insn), push_addr)
             ),
             None,
         )
@@ -1618,13 +1747,15 @@ def _cross_call_saved_push_addresses_8616(
     return frozenset(saved)
 
 
+@cython.ccall
 def _nested_far_call_crossed_8616(
     function: object,
-    insns: tuple[object, ...],
-    scan: int,
+    insns: object,
+    scan: cython.longlong,
     request_cache: CallsiteSummaryRequestCache8616 | None,
-) -> bool:
+) -> cython.bint:
     """Return whether insn[scan+1] is a proven zero-cleanup far call."""
+    nested_evidence: object
     nested_evidence = _callee_terminal_stack_evidence_8616(
         function,
         insns[scan + 1],
@@ -1638,14 +1769,16 @@ def _nested_far_call_crossed_8616(
     )
 
 
+@cython.ccall
 def _push_crossed_call_restored_8616(
     function: object,
-    insns: tuple[object, ...],
-    call_idx: int,
-    register: str,
+    insns: object,
+    call_idx: cython.longlong,
+    register: object,
     request_cache: CallsiteSummaryRequestCache8616 | None,
-) -> bool:
+) -> cython.bint:
     """Return whether a pushed register is restored after a proven nested call."""
+    nested_evidence: object
     scan = call_idx + 1
     crossed_call = False
     while scan < len(insns):
@@ -1676,7 +1809,7 @@ def _push_crossed_call_restored_8616(
             scan += 1
             continue
         if mnemonic == "pop" and len(operands) == 1:
-            return crossed_call and _operand_reg_name(insn, operands[0]) == register
+            return crossed_call and operator.eq(_operand_reg_name(insn, operands[0]), register)
         if (
             mnemonic.startswith(("push", "pop", "ret", "j", "loop"))
             or mnemonic in {"enter", "leave", "iret"}
@@ -1692,14 +1825,14 @@ def _push_crossed_call_restored_8616(
 
 def _filter_callee_saved_frame_pushes_8616(
     function: object,
-    callsite_addr: int,
-    widths: tuple[int, ...],
-    sources: tuple[_CallsiteTuple8616 | None, ...],
-    instruction_addrs: tuple[int, ...],
-    request_cache: CallsiteSummaryRequestCache8616 | None,
-) -> tuple[tuple[int, ...], tuple[_CallsiteTuple8616 | None, ...], tuple[int, ...]]:
+    callsite_addr: cython.longlong,
+    widths: object,
+    sources: object,
+    instruction_addrs: object,
+    request_cache: object,
+) -> tuple[tuple[cython.longlong, ...], tuple[_CallsiteTuple8616 | None, ...], tuple[cython.longlong, ...]]:
     """Remove only push/pop-proven frame saves from physical call arguments."""
-    if not widths or len(widths) != len(sources) or len(widths) != len(instruction_addrs):
+    if not widths or operator.ne(len(widths), len(sources)) or operator.ne(len(widths), len(instruction_addrs)):
         return widths, sources, instruction_addrs
     frame_push_addrs = (
         _callee_saved_frame_push_addresses_8616(function)
@@ -1718,22 +1851,24 @@ def _filter_callee_saved_frame_pushes_8616(
     saved_push_addrs = frame_push_addrs | cross_call_saved_push_addrs
     if not saved_push_addrs:
         return widths, sources, instruction_addrs
-    kept = tuple(index for index, address in enumerate(instruction_addrs) if address not in saved_push_addrs)
+    kept = tuple(index for index, address in builtins.iter(enumerate(instruction_addrs)) if address not in saved_push_addrs)
     return (
-        tuple(widths[index] for index in kept),
-        tuple(sources[index] for index in kept),
-        tuple(instruction_addrs[index] for index in kept),
+        tuple(widths[index] for index in iter(kept)),
+        tuple(sources[index] for index in iter(kept)),
+        tuple(instruction_addrs[index] for index in iter(kept)),
     )
 
 
 def _collect_push_args_before_call(
     function: object,
-    insns: tuple[object, ...],
-    idx: int,
+    insns: object,
+    idx: cython.longlong,
     cleanup: int | None = None,
-) -> tuple[int, ...]:
-    def _impl() -> tuple[int, ...]:
-        widths: list[int] = []
+) -> object:
+    def _impl() -> tuple[cython.longlong, ...]:
+        rewound: object
+        target_total: object
+        widths: list[cython.longlong] = []
         scan = idx - 1
         skipped_transparents = 0
         skipped_call_segment = False
@@ -1775,7 +1910,9 @@ def _collect_push_args_before_call(
     return _impl()
 
 
+@cython.ccall
 def _push_arg_source(insn: object) -> _CallsiteTuple8616 | None:
+    mem: object
     operands = _instruction_operands(insn)
     if len(operands) != 1:
         return None
@@ -1805,7 +1942,9 @@ def _push_arg_source(insn: object) -> _CallsiteTuple8616 | None:
     return None
 
 
+@cython.ccall
 def _call_target_source_8616(insn: object) -> _CallsiteTuple8616 | None:
+    mem: object
     operands = _instruction_operands(insn)
     if len(operands) != 1:
         return None
@@ -1830,7 +1969,9 @@ def _call_target_source_8616(insn: object) -> _CallsiteTuple8616 | None:
     return None
 
 
-def _source_from_bp_mem_operand_8616(insn: object, operand: object, *, address: bool) -> _CallsiteTuple8616 | None:
+@cython.ccall
+def _source_from_bp_mem_operand_8616(insn: object, operand: object, *, address: cython.bint) -> _CallsiteTuple8616 | None:
+    mem: object
     mem = _operand_mem_value_8616(operand)
     if mem is None:
         return None
@@ -1853,7 +1994,10 @@ def _source_from_bp_mem_operand_8616(insn: object, operand: object, *, address: 
     return None
 
 
+@cython.ccall
 def _source_from_mov_operand(insn: object, operand: object) -> _CallsiteTuple8616 | None:
+    bp_source: object
+    mem: object
     imm = _operand_imm_value(operand)
     if isinstance(imm, int):
         return (CallsitePushSourceKind8616.IMMEDIATE.value, imm)
@@ -1878,7 +2022,8 @@ def _source_from_mov_operand(insn: object, operand: object) -> _CallsiteTuple861
     return None
 
 
-def _ax_immediate_before_one_operand_mul_8616(insns: tuple[object, ...], mul_idx: int) -> int | None:
+@cython.ccall
+def _ax_immediate_before_one_operand_mul_8616(insns: object, mul_idx: cython.longlong) -> int | None:
     scan = mul_idx - 1
     skipped = 0
     while scan >= 0 and skipped < 4:
@@ -1896,11 +2041,14 @@ def _ax_immediate_before_one_operand_mul_8616(insns: tuple[object, ...], mul_idx
     return None
 
 
+@cython.ccall
 def _source_from_lea_operand_8616(insn: object, operand: object) -> _CallsiteTuple8616 | None:
     return _source_from_bp_mem_operand_8616(insn, operand, address=True)
 
 
-def _indexed_global_source_from_mov_operand_8616(insns: tuple[object, ...], mov_idx: int, insn: object, operand: object) -> _CallsiteTuple8616 | None:
+@cython.ccall
+def _indexed_global_source_from_mov_operand_8616(insns: object, mov_idx: cython.longlong, insn: object, operand: object) -> _CallsiteTuple8616 | None:
+    mem: object
     mem = _operand_mem_value_8616(operand)
     if mem is None:
         return None
@@ -1915,14 +2063,16 @@ def _indexed_global_source_from_mov_operand_8616(insns: tuple[object, ...], mov_
     return _indexed_global_base_scan_8616(insns, mov_idx, operand, base_name, int(disp))
 
 
+@cython.ccall
 def _indexed_global_base_scan_8616(
-    insns: tuple[object, ...],
-    mov_idx: int,
+    insns: object,
+    mov_idx: cython.longlong,
     operand: object,
-    base_name: str,
-    disp: int,
+    base_name: object,
+    disp: cython.longlong,
 ) -> _CallsiteTuple8616 | None:
     """Scan backward for the base-register MOV while collecting index ops."""
+    base_source: object
     scan = mov_idx - 1
     skipped = 0
     ops: list[tuple[str, object]] = []
@@ -1930,7 +2080,7 @@ def _indexed_global_base_scan_8616(
         prev = insns[scan]
         mnemonic = _mnemonic(prev)
         operands = _instruction_operands(prev)
-        if mnemonic == "mov" and len(operands) == 2 and _operand_reg_name(prev, operands[0]) == base_name:
+        if mnemonic == "mov" and len(operands) == 2 and operator.eq(_operand_reg_name(prev, operands[0]), base_name):
             base_source = _source_from_mov_operand(prev, operands[1])
             if base_source is None:
                 return None
@@ -1945,7 +2095,7 @@ def _indexed_global_base_scan_8616(
         if (
             mnemonic in {"add", "sub", "shl", "shr"}
             and len(operands) == 2
-            and _operand_reg_name(prev, operands[0]) == base_name
+            and operator.eq(_operand_reg_name(prev, operands[0]), base_name)
         ):
             value = _operand_imm_value(operands[1])
             if not isinstance(value, int):
@@ -1974,9 +2124,10 @@ def _indexed_global_base_scan_8616(
     return None
 
 
+@cython.ccall
 def _segmented_indirect_source_from_operand_8616(
-    insns: tuple[object, ...],
-    operand_idx: int,
+    insns: object,
+    operand_idx: cython.longlong,
     insn: object,
     operand: object,
 ) -> _CallsiteTuple8616 | None:
@@ -1985,6 +2136,8 @@ def _segmented_indirect_source_from_operand_8616(
     The returned source preserves segmented-memory identity instead of
     misclassifying argument- or local-derived addresses as globals.
     """
+    address_source: object
+    mem: object
     mem = _operand_mem_value_8616(operand)
     if mem is None:
         return None
@@ -2027,40 +2180,43 @@ def _segmented_indirect_source_from_operand_8616(
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _RegisterScanStep8616:
     """One matched backward register-scan arm outcome."""
 
-    advance: bool
+    advance: cython.bint
     result: _CallsiteTuple8616 | None = None
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _RegisterSourceScan8616:
     """Backward scan state for decoded register-source tracing."""
 
     max_skips: ClassVar[int] = 8
 
-    insns: tuple[object, ...]
-    reg_name: str
-    depth: int
-    scan: int
-    skipped: int = 0
-    ops: list[tuple[str, object]] = field(default_factory=list)
-    source_regs: set[str] = field(init=False)
+    insns: object
+    reg_name: object
+    depth: cython.longlong
+    scan: cython.longlong
+    skipped: cython.longlong = 0
+    ops: object = field(default_factory=list)
+    source_regs: object = field(init=False)
 
     def __post_init__(self) -> None:
         self.source_regs = {self.reg_name}
 
+    @cython.ccall
     def _folded(self, source: _CallsiteTuple8616) -> _RegisterScanStep8616:
         folded = source if not self.ops else (
             CallsitePushSourceKind8616.EXPR.value, source, tuple(reversed(self.ops)),
         )
         return _RegisterScanStep8616(advance=False, result=folded)
 
+    @cython.ccall
     def _cwd_high_word_arm(
-        self, insn: object, mnemonic: str, operands: tuple[object, ...],
+        self, insn, mnemonic: object, operands,
     ) -> _RegisterScanStep8616 | None:
+        ax_source: object
         del insn, operands
         if self.reg_name != "dx" or mnemonic not in {"cwd", "cdq"}:
             return None
@@ -2076,8 +2232,9 @@ class _RegisterSourceScan8616:
         )
         return self._folded(high_source)
 
+    @cython.ccall
     def _cbw_low_byte_arm(
-        self, insn: object, mnemonic: str, operands: tuple[object, ...],
+        self, insn, mnemonic: object, operands,
     ) -> _RegisterScanStep8616 | None:
         del insn, operands
         if self.reg_name != "ax" or mnemonic not in {"cbw", "cwde"}:
@@ -2085,9 +2242,11 @@ class _RegisterSourceScan8616:
         self.source_regs.add("al")
         return _RegisterScanStep8616(advance=True)
 
+    @cython.ccall
     def _mov_dest_arm(
-        self, insn: object, mnemonic: str, operands: tuple[object, ...],
+        self, insn: object, mnemonic: object, operands: object,
     ) -> _RegisterScanStep8616 | None:
+        base_source: object
         if (
             mnemonic != "mov" or len(operands) != 2
             or _operand_reg_name(insn, operands[0]) not in self.source_regs
@@ -2101,26 +2260,29 @@ class _RegisterSourceScan8616:
         if (
             "al" in self.source_regs
             and len(base_source) == 2
-            and base_source[0] == CallsitePushSourceKind8616.BP_VALUE.value
+            and operator.eq(base_source[0], CallsitePushSourceKind8616.BP_VALUE.value)
         ):
             base_source = (*base_source, 1)
         return self._folded(base_source)
 
+    @cython.ccall
     def _zero_source_arm(
-        self, insn: object, mnemonic: str, operands: tuple[object, ...],
+        self, insn: object, mnemonic, operands,
     ) -> _RegisterScanStep8616 | None:
+        zero_source: object
         del mnemonic, operands
         zero_source = _zeroing_register_source_8616(insn, self.source_regs)
         if zero_source is None:
             return None
         return self._folded(zero_source)
 
+    @cython.ccall
     def _accumulating_op_arm(
-        self, insn: object, mnemonic: str, operands: tuple[object, ...],
+        self, insn: object, mnemonic: object, operands: object,
     ) -> _RegisterScanStep8616 | None:
         if (
             len(operands) != 2
-            or _operand_reg_name(insn, operands[0]) != self.reg_name
+            or operator.ne(_operand_reg_name(insn, operands[0]), self.reg_name)
         ):
             return None
         if mnemonic in {"adc", "add", "sbb", "sub"}:
@@ -2145,9 +2307,11 @@ class _RegisterSourceScan8616:
             )
         return None
 
+    @cython.ccall
     def _arith_op_step(
-        self, insn: object, mnemonic: str, rhs: object,
+        self, insn: object, mnemonic: object, rhs: object,
     ) -> _RegisterScanStep8616:
+        rhs_source: object
         value = _operand_imm_value(rhs)
         if isinstance(value, int):
             op = {
@@ -2172,8 +2336,9 @@ class _RegisterSourceScan8616:
         self.ops.append((op.value, rhs_source))
         return _RegisterScanStep8616(advance=True)
 
+    @cython.ccall
     def _imm_op_step(
-        self, mnemonic: str, rhs: object, op_map: dict[str, CallsitePushExprOp8616],
+        self, mnemonic: object, rhs: object, op_map: object,
     ) -> _RegisterScanStep8616:
         value = _operand_imm_value(rhs)
         if not isinstance(value, int):
@@ -2181,12 +2346,13 @@ class _RegisterSourceScan8616:
         self.ops.append((op_map[mnemonic].value, value))
         return _RegisterScanStep8616(advance=True)
 
+    @cython.ccall
     def _neg_not_arm(
-        self, insn: object, mnemonic: str, operands: tuple[object, ...],
+        self, insn: object, mnemonic: object, operands: object,
     ) -> _RegisterScanStep8616 | None:
         if (
             mnemonic not in {"neg", "not"} or len(operands) != 1
-            or _operand_reg_name(insn, operands[0]) != self.reg_name
+            or operator.ne(_operand_reg_name(insn, operands[0]), self.reg_name)
         ):
             return None
         width = cast(_CapstoneOperandSurface8616, operands[0]).size
@@ -2198,6 +2364,7 @@ class _RegisterSourceScan8616:
         self.ops.append(operation)
         return _RegisterScanStep8616(advance=True)
 
+    @cython.ccall
     def _arms(
         self,
     ) -> tuple[
@@ -2213,8 +2380,9 @@ class _RegisterSourceScan8616:
             self._neg_not_arm,
         )
 
+    @cython.ccall
     def _fallback_step(
-        self, insn: object, mnemonic: str, operands: tuple[object, ...],
+        self, insn: object, mnemonic: object, operands,
     ) -> _RegisterScanStep8616:
         """Resolve a scan step for instructions matched by no arm."""
         del operands
@@ -2231,8 +2399,11 @@ class _RegisterSourceScan8616:
             return _RegisterScanStep8616(advance=False)
         return _RegisterScanStep8616(advance=True)
 
+    @cython.ccall
     def _step(self, insn: object) -> _RegisterScanStep8616:
         """Match one instruction against the scan arms in priority order."""
+        step: object
+        arm: object
         mnemonic = _mnemonic(insn)
         operands = _instruction_operands(insn)
         for arm in self._arms():
@@ -2241,6 +2412,7 @@ class _RegisterSourceScan8616:
                 return step
         return self._fallback_step(insn, mnemonic, operands)
 
+    @cython.ccall
     def run(self) -> _CallsiteTuple8616 | None:
         """Scan backward until a source is proven or evidence runs out."""
         while self.scan >= 0 and self.skipped < self.max_skips:
@@ -2252,15 +2424,16 @@ class _RegisterSourceScan8616:
         return None
 
 
-@dataclass(slots=True)
+@dataclasses.dataclass()
 class _PushArgSourceScan8616(_RegisterSourceScan8616):
     """Backward scan for a pushed register, with push/call-aware barriers."""
 
     max_skips: ClassVar[int] = 6
 
     def _mov_dest_arm(
-        self, insn: object, mnemonic: str, operands: tuple[object, ...],
+        self, insn: object, mnemonic: object, operands: object,
     ) -> _RegisterScanStep8616 | None:
+        base_source: object
         if (
             mnemonic != "mov" or len(operands) != 2
             or _operand_reg_name(insn, operands[0]) not in self.source_regs
@@ -2276,17 +2449,19 @@ class _PushArgSourceScan8616(_RegisterSourceScan8616):
         if (
             "al" in self.source_regs
             and len(base_source) == 2
-            and base_source[0] == CallsitePushSourceKind8616.BP_VALUE.value
+            and operator.eq(base_source[0], CallsitePushSourceKind8616.BP_VALUE.value)
         ):
             base_source = (*base_source, 1)
         return self._folded(base_source)
 
     def _lea_arm(
-        self, insn: object, mnemonic: str, operands: tuple[object, ...],
+        self, insn: object, mnemonic: object, operands: object,
     ) -> _RegisterScanStep8616 | None:
+        base_source: object
+        index_source: object
         if (
             mnemonic != "lea" or len(operands) != 2
-            or _operand_reg_name(insn, operands[0]) != self.reg_name
+            or operator.ne(_operand_reg_name(insn, operands[0]), self.reg_name)
         ):
             return None
         base_source = _source_from_lea_operand_8616(insn, operands[1])
@@ -2295,7 +2470,7 @@ class _PushArgSourceScan8616(_RegisterSourceScan8616):
         if (
             isinstance(base_source, tuple)
             and len(base_source) >= 4
-            and base_source[0] == CallsitePushSourceKind8616.BP_INDEX_ADDRESS.value
+            and operator.eq(base_source[0], CallsitePushSourceKind8616.BP_INDEX_ADDRESS.value)
             and isinstance(base_source[2], str)
         ):
             index_source = _register_source_from_context_8616(
@@ -2306,21 +2481,22 @@ class _PushArgSourceScan8616(_RegisterSourceScan8616):
         return self._folded(base_source)
 
     def _accumulating_op_arm(
-        self, insn: object, mnemonic: str, operands: tuple[object, ...],
+        self, insn: object, mnemonic: object, operands: object,
     ) -> _RegisterScanStep8616 | None:
+        step: object
         step = super()._accumulating_op_arm(insn, mnemonic, operands)
         if step is not None:
             return step
-        if len(operands) == 2 and _operand_reg_name(insn, operands[0]) == self.reg_name:
+        if len(operands) == 2 and operator.eq(_operand_reg_name(insn, operands[0]), self.reg_name):
             return _RegisterScanStep8616(advance=False)
         return None
 
     def _inc_dec_arm(
-        self, insn: object, mnemonic: str, operands: tuple[object, ...],
+        self, insn: object, mnemonic: object, operands: object,
     ) -> _RegisterScanStep8616 | None:
         if (
             mnemonic not in {"inc", "dec"} or len(operands) != 1
-            or _operand_reg_name(insn, operands[0]) != self.reg_name
+            or operator.ne(_operand_reg_name(insn, operands[0]), self.reg_name)
         ):
             return None
         self.ops.append(
@@ -2333,8 +2509,9 @@ class _PushArgSourceScan8616(_RegisterSourceScan8616):
         return _RegisterScanStep8616(advance=True)
 
     def _mul_arm(
-        self, insn: object, mnemonic: str, operands: tuple[object, ...],
+        self, insn: object, mnemonic: object, operands: object,
     ) -> _RegisterScanStep8616 | None:
+        source: object
         if mnemonic not in {"mul", "imul"}:
             return None
         if len(operands) == 1 and self.reg_name == "ax":
@@ -2352,7 +2529,7 @@ class _PushArgSourceScan8616(_RegisterSourceScan8616):
             return _RegisterScanStep8616(advance=False)
         if self.reg_name in {"ax", "dx"}:
             return _RegisterScanStep8616(advance=False)
-        if len(operands) in {2, 3} and _operand_reg_name(insn, operands[0]) == self.reg_name:
+        if len(operands) in {2, 3} and operator.eq(_operand_reg_name(insn, operands[0]), self.reg_name):
             return _RegisterScanStep8616(advance=False)
         return None
 
@@ -2374,7 +2551,7 @@ class _PushArgSourceScan8616(_RegisterSourceScan8616):
         )
 
     def _fallback_step(
-        self, insn: object, mnemonic: str, operands: tuple[object, ...],
+        self, insn: object, mnemonic: object, operands: object,
     ) -> _RegisterScanStep8616:
         if mnemonic.startswith("push"):
             sibling_reg = (
@@ -2383,7 +2560,7 @@ class _PushArgSourceScan8616(_RegisterSourceScan8616):
             if _is_segment_register_push_8616(insn) or (
                 isinstance(sibling_reg, str)
                 and (
-                    sibling_reg == self.reg_name
+                    operator.eq(sibling_reg, self.reg_name)
                     or (self.reg_name in {"ax", "dx"} and sibling_reg in {"ax", "dx"})
                 )
             ):
@@ -2398,15 +2575,17 @@ class _PushArgSourceScan8616(_RegisterSourceScan8616):
         return _RegisterScanStep8616(advance=True)
 
 
+@cython.ccall
 def _mov_rhs_source_8616(
-    insns: tuple[object, ...],
-    scan: int,
+    insns: object,
+    scan: cython.longlong,
     insn: object,
     rhs: object,
-    source_regs: set[str],
-    depth: int,
+    source_regs: object,
+    depth: cython.longlong,
 ) -> _CallsiteTuple8616 | None:
     """Resolve a non-immediate MOV/arith right operand to a push source."""
+    source: object
     rhs_reg = _operand_reg_name(insn, rhs)
     if isinstance(rhs_reg, str) and rhs_reg and rhs_reg not in source_regs:
         return _register_source_from_context_8616(insns, scan, rhs_reg, depth=depth + 1)
@@ -2416,7 +2595,8 @@ def _mov_rhs_source_8616(
     return source
 
 
-def _register_source_from_context_8616(insns: tuple[object, ...], idx: int, reg_name: str, *, depth: int = 0) -> _CallsiteTuple8616 | None:
+@cython.ccall
+def _register_source_from_context_8616(insns: object, idx: cython.longlong, reg_name: object, *, depth: cython.longlong = 0) -> _CallsiteTuple8616 | None:
     """Trace a decoded register value through supported width-aware operations."""
     if depth > 4 or reg_name in {"sp", "bp", "ss", "ds", "es", "cs"}:
         return None
@@ -2425,7 +2605,9 @@ def _register_source_from_context_8616(insns: tuple[object, ...], idx: int, reg_
     ).run()
 
 
-def _zeroing_register_source_8616(insn: object, source_regs: set[str]) -> _CallsiteTuple8616 | None:
+@cython.ccall
+def _zeroing_register_source_8616(insn: object, source_regs: object) -> _CallsiteTuple8616 | None:
+    lhs: object
     operands = _instruction_operands(insn)
     if len(operands) != 2:
         return None
@@ -2436,12 +2618,13 @@ def _zeroing_register_source_8616(insn: object, source_regs: set[str]) -> _Calls
     if mnemonic not in {"sub", "xor"}:
         return None
     rhs = _operand_reg_name(insn, operands[1])
-    if lhs is None or lhs != rhs or lhs not in source_regs:
+    if lhs is None or operator.ne(lhs, rhs) or lhs not in source_regs:
         return None
     return (CallsitePushSourceKind8616.IMMEDIATE.value, 0)
 
 
-def _instruction_preserves_return_carrier_8616(insn: object, reg_name: str) -> bool:
+@cython.ccall
+def _instruction_preserves_return_carrier_8616(insn: object, reg_name: object) -> cython.bint:
     """Prove that one instruction does not overwrite a return-value carrier."""
     mnemonic = _mnemonic(insn)
     if is_x86_16_call_mnemonic_8616(mnemonic) or mnemonic.startswith(("ret", "int")) or mnemonic in {
@@ -2461,7 +2644,7 @@ def _instruction_preserves_return_carrier_8616(insn: object, reg_name: str) -> b
     capstone_insn = _capstone_insn(insn)
     try:
         _read_ids, written_ids = capstone_insn.regs_access()
-        written_names = {capstone_insn.reg_name(reg_id).lower() for reg_id in written_ids}
+        written_names = {capstone_insn.reg_name(reg_id).lower() for reg_id in iter(written_ids)}
     except Exception:
         # Dynamic Capstone boundary: reduced test doubles may not expose regs_access().
         written_names = set()
@@ -2475,7 +2658,8 @@ def _instruction_preserves_return_carrier_8616(insn: object, reg_name: str) -> b
     return not _instruction_writes_return_reg(insn, family)
 
 
-def _transparent_return_arg_carrier_insn_8616(insn: object) -> bool:
+@cython.ccall
+def _transparent_return_arg_carrier_insn_8616(insn: object) -> cython.bint:
     """Recognize ABI cleanup that preserves an immediately forwarded return pair."""
     mnemonic = _mnemonic(insn)
     operands = _instruction_operands(insn)
@@ -2486,6 +2670,7 @@ def _transparent_return_arg_carrier_insn_8616(insn: object) -> bool:
     return False
 
 
+@cython.ccall
 def _cfg_node_addr_8616(node: object) -> int | None:
     """Return a basic-block address across the third-party CFG boundary."""
     if isinstance(node, int) and not isinstance(node, bool):
@@ -2494,18 +2679,22 @@ def _cfg_node_addr_8616(node: object) -> int | None:
     return address if isinstance(address, int) and not isinstance(address, bool) else None
 
 
-def _cfg_node_for_instruction_8616(graph: _DirectedGraphSurface8616, instruction_addr: int) -> object | None:
+def _cfg_node_for_instruction_8616(graph: _DirectedGraphSurface8616, instruction_addr: cython.longlong) -> object | None:
     """Find the latest CFG block start that contains an instruction address."""
     candidates = [
         (node_addr, node)
-        for node in graph.nodes
+        for node in iter(graph.nodes)
         if (node_addr := _cfg_node_addr_8616(node)) is not None and node_addr <= instruction_addr
     ]
     return max(candidates, key=lambda item: item[0])[1] if candidates else None
 
 
-def _unique_cfg_predecessor_chain_8616(function: object, source_addr: int, sink_addr: int) -> bool:
+@cython.ccall
+def _unique_cfg_predecessor_chain_8616(function: object, source_addr: cython.longlong, sink_addr: cython.longlong) -> cython.bint:
     """Prove that every path into the sink block passes through the source block."""
+    graph_value: object
+    sink: object
+    source: object
     graph_value = _dynamic_callsite_getattr_8616(function, "graph", None)
     if graph_value is None:
         return False
@@ -2514,11 +2703,11 @@ def _unique_cfg_predecessor_chain_8616(function: object, source_addr: int, sink_
     sink = _cfg_node_for_instruction_8616(graph, sink_addr)
     if source is None or sink is None:
         return False
-    if source == sink:
+    if operator.eq(source, sink):
         return source_addr < sink_addr
     visited = {sink}
     current = sink
-    while current != source:
+    while operator.ne(current, source):
         try:
             predecessors = tuple(graph.predecessors(current))
         except Exception:
@@ -2531,14 +2720,16 @@ def _unique_cfg_predecessor_chain_8616(function: object, source_addr: int, sink_
     return True
 
 
+@cython.ccall
 def _return_carrier_path_is_proven_8616(
     function: object,
-    insns: tuple[object, ...],
-    call_idx: int,
-    push_idx: int,
-    pushed_reg: str,
-) -> bool:
+    insns: object,
+    call_idx: cython.longlong,
+    push_idx: cython.longlong,
+    pushed_reg: object,
+) -> cython.bint:
     """Prove a no-clobber, unique-CFG path from a call return to a push."""
+    insn: object
     call_addr = _instruction_address_8616(insns[call_idx])
     push_addr = _instruction_address_8616(insns[push_idx])
     if not isinstance(call_addr, int) or not isinstance(push_addr, int):
@@ -2568,14 +2759,17 @@ def _return_carrier_path_is_proven_8616(
     return _unique_cfg_predecessor_chain_8616(function, call_addr, push_addr)
 
 
+@cython.ccall
 def _stable_stack_return_store_source_8616(
     function: object,
-    insns: tuple[object, ...],
-    call_idx: int,
-    push_idx: int,
-    callsite_addr: int,
-) -> tuple[str, int, int] | None:
+    insns: object,
+    call_idx: cython.longlong,
+    push_idx: cython.longlong,
+    callsite_addr: cython.longlong,
+) -> object:
     """Resolve unchanged AX provenance through its exact BP-local return store."""
+    return_store: object
+    insn: object
     return_store = _return_store_after_call(function, insns, call_idx, callsite_addr)
     if return_store is None or return_store[0] != "bp" or return_store[2] != 2:
         return None
@@ -2593,8 +2787,9 @@ def _stable_stack_return_store_source_8616(
     return (CallsitePushSourceKind8616.BP_VALUE.value, destination, 2)
 
 
+@cython.ccall
 def _preceding_proven_call_idx_8616(
-    insns: tuple[object, ...], idx: int, pushed_reg: str
+    insns: object, idx: cython.longlong, pushed_reg: object
 ) -> int | None:
     """Scan backward for the call whose return feeds the pushed register."""
     call_idx = idx - 1
@@ -2619,9 +2814,10 @@ def _preceding_proven_call_idx_8616(
     return call_idx
 
 
+@cython.ccall
 def _observed_ax_dx_push_regs_8616(
-    insns: tuple[object, ...], call_idx: int, idx: int
-) -> set[str]:
+    insns: object, call_idx: cython.longlong, idx: cython.longlong
+) -> object:
     """Census AX/DX pushes between the proven call and the push index."""
     observed_regs: set[str] = set()
     scan = call_idx + 1
@@ -2642,7 +2838,10 @@ def _observed_ax_dx_push_regs_8616(
     return observed_regs
 
 
-def _return_register_push_source_from_context_8616(function: object, insns: tuple[object, ...], idx: int, pushed_reg: str) -> _CallsiteTuple8616 | None:
+@cython.ccall
+def _return_register_push_source_from_context_8616(function: object, insns: object, idx: cython.longlong, pushed_reg: object) -> _CallsiteTuple8616 | None:
+    call_idx: object
+    stack_source: object
     if pushed_reg not in {"ax", "dx"}:
         return None
     call_idx = _preceding_proven_call_idx_8616(insns, idx, pushed_reg)
@@ -2669,10 +2868,12 @@ def _return_register_push_source_from_context_8616(function: object, insns: tupl
     return None
 
 
+@cython.ccall
 def _low_byte_mov_source_8616(
-    insns: tuple[object, ...], scan: int, insn: object, operands: tuple[object, ...]
-) -> tuple[object, ...] | None:
+    insns: object, scan: cython.longlong, insn: object, operands: object
+) -> object:
     """Resolve a byte MOV right operand, widening BP sources to byte width."""
+    low_source: object
     if _mnemonic(insn) != "mov" or len(operands) != 2:
         return None
     rhs_reg = _operand_reg_name(insn, operands[1])
@@ -2685,15 +2886,18 @@ def _low_byte_mov_source_8616(
         low_source = _indexed_global_source_from_mov_operand_8616(insns, scan, insn, operands[1])
     if low_source is None:
         return None
-    if len(low_source) == 2 and low_source[0] == CallsitePushSourceKind8616.BP_VALUE.value:
+    if len(low_source) == 2 and operator.eq(low_source[0], CallsitePushSourceKind8616.BP_VALUE.value):
         low_source = (*low_source, 1)
     return low_source
 
 
+@cython.ccall
 def _zero_extended_byte_push_source_8616(
-    insns: tuple[object, ...], idx: int, pushed_reg: str
-) -> tuple[object, ...] | None:
+    insns: object, idx: cython.longlong, pushed_reg: object
+) -> object:
     """Recover a word PUSH composed from a byte source and a proven-zero high byte."""
+    byte_parts: object
+    low_source: object
     byte_parts = {
         "ax": ("al", "ah"),
         "bx": ("bl", "bh"),
@@ -2703,7 +2907,7 @@ def _zero_extended_byte_push_source_8616(
     if byte_parts is None:
         return None
     low_reg, high_reg = byte_parts
-    low_source: tuple[object, ...] | None = None
+    low_source = None
     high_zeroed = False
     scan = idx - 1
     skipped = 0
@@ -2740,10 +2944,17 @@ def _zero_extended_byte_push_source_8616(
     return None
 
 
+@cython.ccall
 def _local_push_arg_source_8616(
-    function: object, insns: tuple[object, ...], idx: int
+    function: object, insns: object, idx: cython.longlong
 ) -> _CallsiteTuple8616 | None:
     """Recover a PUSH value from same-block decoded provenance."""
+    byte_source: object
+    indexed_global_source: object
+    pushed_reg: object
+    return_source: object
+    segmented_indirect_source: object
+    source: object
     source = _push_arg_source(insns[idx])
     if source is not None:
         return source
@@ -2772,10 +2983,13 @@ def _local_push_arg_source_8616(
     ).run()
 
 
+@cython.ccall
 def _push_arg_source_from_context(
-    function: object, insns: tuple[object, ...], idx: int
+    function: object, insns: object, idx: cython.longlong
 ) -> _CallsiteTuple8616 | None:
     """Recover a PUSH value from decoded local and cross-block provenance."""
+    local_source: object
+    pushed_reg: object
     local_source = _local_push_arg_source_8616(function, insns, idx)
     if local_source is not None:
         return local_source
@@ -2801,11 +3015,13 @@ def _push_arg_source_from_context(
 
 def _collect_push_arg_sources_before_call(
     function: object,
-    insns: tuple[object, ...],
-    idx: int,
+    insns: object,
+    idx: cython.longlong,
     cleanup: int | None = None,
-) -> tuple[_CallsiteTuple8616 | None, ...]:
+) -> object:
     def _impl() -> tuple[_CallsiteTuple8616 | None, ...]:
+        rewound: object
+        target_total: object
         sources: list[_CallsiteTuple8616 | None] = []
         scan = idx - 1
         skipped_transparents = 0
@@ -2850,14 +3066,17 @@ def _collect_push_arg_sources_before_call(
     return _impl()
 
 
+@cython.ccall
 def _collect_push_arg_instruction_addrs_before_call(
     function: object,
-    insns: tuple[object, ...],
-    idx: int,
+    insns: object,
+    idx: cython.longlong,
     cleanup: int | None = None,
-) -> tuple[int, ...]:
+) -> tuple[cython.longlong, ...]:
     """Collect exact physical push addresses in execution order."""
-    addresses: list[int] = []
+    rewound: object
+    target_total: object
+    addresses: list[cython.longlong] = []
     scan = idx - 1
     skipped_transparents = 0
     skipped_call_segment = False
@@ -2903,34 +3122,37 @@ def _collect_push_arg_instruction_addrs_before_call(
 
 
 def _push_scan_reaches_block_entry_8616(
-    insns: tuple[object, ...],
-    call_idx: int,
-    push_instruction_addrs: tuple[int, ...],
-) -> bool:
+    insns: object,
+    call_idx: cython.longlong,
+    push_instruction_addrs: object,
+) -> cython.bint:
     """Return whether backward argument scanning reaches this block's entry."""
+    first_push_idx: object
     if not push_instruction_addrs:
         return False
     first_push_addr = push_instruction_addrs[0]
     first_push_idx = next(
-        (idx for idx, insn in enumerate(insns[:call_idx]) if _instruction_address_8616(insn) == first_push_addr),
+        (idx for idx, insn in builtins.iter(enumerate(insns[:call_idx])) if operator.eq(_instruction_address_8616(insn), first_push_addr)),
         None,
     )
     return isinstance(first_push_idx, int) and all(
-        _transparent_between_push_args_8616(insn) for insn in insns[:first_push_idx]
+        _transparent_between_push_args_8616(insn) for insn in iter(insns[:first_push_idx])
     )
 
 
 def _unresolved_entry_push_register_8616(
-    insns: tuple[object, ...],
-    sources: tuple[_CallsiteTuple8616 | None, ...],
-    instruction_addrs: tuple[int, ...],
-) -> tuple[str, int] | None:
+    insns: object,
+    sources: object,
+    instruction_addrs: object,
+) -> object:
     """Return a block-entry register PUSH whose source needs CFG joining."""
+    push: object
+    register: object
     if not sources or not instruction_addrs or sources[0] is not None:
         return None
     push_addr = instruction_addrs[0]
     push = next(
-        (insn for insn in insns if _instruction_address_8616(insn) == push_addr),
+        (insn for insn in iter(insns) if operator.eq(_instruction_address_8616(insn), push_addr)),
         None,
     )
     if push is None:
@@ -2942,7 +3164,7 @@ def _unresolved_entry_push_register_8616(
     return register, push_addr
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _PredecessorTraces8616:
     """Push and optional register-join trace collected from one predecessor."""
 
@@ -2954,9 +3176,9 @@ def _predecessor_traces_8616(
     function: object,
     project: object,
     predecessor: object,
-    sink_addr: int,
-    join_register: str | None,
-    debug: bool,
+    sink_addr: cython.longlong,
+    join_register: object,
+    debug: cython.bint,
 ) -> _PredecessorTraces8616 | None:
     """Decode one predecessor block and collect its push/register traces."""
     predecessor_addr = _cfg_node_addr_8616(predecessor)
@@ -2976,7 +3198,7 @@ def _predecessor_traces_8616(
     )
     predecessor_insns = tuple(
         insn
-        for insn in predecessor_insns
+        for insn in iter(predecessor_insns)
         if (address := _instruction_address_8616(insn)) is not None
         and (predecessor_addr >= sink_addr or address < sink_addr)
     )
@@ -2986,7 +3208,7 @@ def _predecessor_traces_8616(
             predecessor_addr,
             tuple(
                 (_instruction_address_8616(insn), _mnemonic(insn), _instruction_op_str_8616(insn))
-                for insn in predecessor_insns
+                for insn in iter(predecessor_insns)
             ),
         )
     while predecessor_insns and _mnemonic(predecessor_insns[-1]).startswith("j"):
@@ -3027,10 +3249,12 @@ def _predecessor_traces_8616(
     )
 
 
+@cython.ccall
 def _callsite_sink_predecessors_8616(
-    graph: _DirectedGraphSurface8616, callsite_addr: int
-) -> tuple[int, tuple[object, ...]] | None:
+    graph: _DirectedGraphSurface8616, callsite_addr: cython.longlong
+) -> object:
     """Resolve the callsite sink block and its direct CFG predecessors."""
+    sink: object
     sink = _cfg_node_for_instruction_8616(graph, callsite_addr)
     if sink is None:
         return None
@@ -3046,12 +3270,17 @@ def _callsite_sink_predecessors_8616(
 
 def _predecessor_stack_merge_8616(
     function: object,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     *,
-    join_register: str | None = None,
+    join_register: object = None,
     join_push_addr: int | None = None,
 ) -> CallsitePredecessorStackMerge8616 | None:
     """Collect and merge physical pushes from every direct predecessor block."""
+    collected: object
+    graph_value: object
+    project: object
+    resolved: object
+    predecessor: object
     graph_value = _dynamic_callsite_getattr_8616(function, "graph", None)
     project = _dynamic_callsite_getattr_8616(function, "project", None)
     if graph_value is None or project is None:
@@ -3067,7 +3296,7 @@ def _predecessor_stack_merge_8616(
             "[callsite-predecessor-stack] callsite=%#x sink=%r predecessors=%r",
             callsite_addr,
             sink_addr,
-            tuple(_cfg_node_addr_8616(node) for node in predecessors),
+            tuple(_cfg_node_addr_8616(node) for node in iter(predecessors)),
         )
     if not predecessors:
         return None
@@ -3104,11 +3333,13 @@ def _predecessor_stack_merge_8616(
     return merged
 
 
-def _trim_push_args_to_stack_cleanup(arg_widths: tuple[int, ...], cleanup: int | None) -> tuple[int, ...]:
+@cython.ccall
+def _trim_push_args_to_stack_cleanup(arg_widths: object, cleanup: int | None) -> object:
+    width: object
     if not isinstance(cleanup, int) or cleanup <= 0 or not arg_widths:
         return arg_widths
     total = 0
-    kept: list[int] = []
+    kept: list[cython.longlong] = []
     for width in reversed(arg_widths):
         if total + width > cleanup:
             break
@@ -3119,14 +3350,17 @@ def _trim_push_args_to_stack_cleanup(arg_widths: tuple[int, ...], cleanup: int |
     return arg_widths
 
 
+@cython.ccall
 def _trim_push_arg_sources_to_stack_cleanup(
-    arg_widths: tuple[int, ...],
-    arg_sources: tuple[_CallsiteTuple8616 | None, ...],
+    arg_widths: object,
+    arg_sources: object,
     cleanup: int | None,
-) -> tuple[_CallsiteTuple8616 | None, ...]:
+) -> object:
+    source: object
+    width: object
     if not isinstance(cleanup, int) or cleanup <= 0 or not arg_widths or not arg_sources:
         return arg_sources
-    if len(arg_widths) != len(arg_sources):
+    if operator.ne(len(arg_widths), len(arg_sources)):
         return arg_sources
     total = 0
     kept: list[_CallsiteTuple8616 | None] = []
@@ -3140,18 +3374,21 @@ def _trim_push_arg_sources_to_stack_cleanup(
     return arg_sources
 
 
+@cython.ccall
 def _trim_push_arg_instruction_addrs_to_stack_cleanup(
-    arg_widths: tuple[int, ...],
-    instruction_addrs: tuple[int, ...],
+    arg_widths: object,
+    instruction_addrs: object,
     cleanup: int | None,
-) -> tuple[int, ...]:
+) -> object:
     """Trim physical push addresses with the same ABI cleanup proof as sources."""
+    address: object
+    width: object
     if not isinstance(cleanup, int) or cleanup <= 0 or not arg_widths or not instruction_addrs:
         return instruction_addrs
-    if len(arg_widths) != len(instruction_addrs):
+    if operator.ne(len(arg_widths), len(instruction_addrs)):
         return instruction_addrs
     total = 0
-    kept: list[int] = []
+    kept: list[cython.longlong] = []
     for width, address in reversed(tuple(zip(arg_widths, instruction_addrs, strict=True))):
         if total + width > cleanup:
             break
@@ -3162,19 +3399,20 @@ def _trim_push_arg_instruction_addrs_to_stack_cleanup(
     return instruction_addrs
 
 
-def _push_arg_source_known_count_8616(arg_sources: tuple[_CallsiteTuple8616 | None, ...]) -> int:
-    return sum(1 for source in arg_sources if source is not None)
+def _push_arg_source_known_count_8616(arg_sources: object) -> cython.longlong:
+    return sum(1 for source in iter(arg_sources) if source is not None)
 
 
-def _push_arg_sources_have_unknown_8616(arg_sources: tuple[_CallsiteTuple8616 | None, ...]) -> bool:
-    return any(source is None for source in arg_sources)
+def _push_arg_sources_have_unknown_8616(arg_sources: object) -> cython.bint:
+    return any(source is None for source in iter(arg_sources))
 
 
+@cython.ccall
 def _stack_cleanup_after_call(
     function: object,
-    insns: tuple[object, ...],
-    idx: int,
-    callsite_addr: int,
+    insns: object,
+    idx: cython.longlong,
+    callsite_addr: cython.longlong,
 ) -> CallsiteStackCleanupEvidence8616 | None:
     """Recover an exact positive caller-side ``ADD SP, imm`` cleanup."""
     follow_insns = _follow_insns_after_call_8616(function, insns, idx, callsite_addr, limit=1)
@@ -3200,22 +3438,23 @@ def _stack_cleanup_after_call(
     )
 
 
-def _instruction_reads_return_reg(insn: object, reg_names: Collection[str]) -> bool:
+def _instruction_reads_return_reg(insn: object, reg_names: Collection[str]) -> cython.bint:
     """Return whether Capstone proves that an instruction reads a carrier."""
     capstone_insn = _capstone_insn(insn)
     try:
         read_ids, _written_ids = capstone_insn.regs_access()
-        return any(capstone_insn.reg_name(reg_id).lower() in reg_names for reg_id in read_ids)
+        return any(capstone_insn.reg_name(reg_id).lower() in reg_names for reg_id in iter(read_ids))
     except Exception:
         # Dynamic Capstone boundary: reduced test doubles may not expose regs_access().
         pass
     operands = _instruction_operands(insn)
     if not operands:
         return False
-    return any(_operand_is_reg(insn, operand, reg_names) for operand in operands)
+    return any(_operand_is_reg(insn, operand, reg_names) for operand in iter(operands))
 
 
-def _instruction_writes_return_reg(insn: object, reg_names: Collection[str]) -> bool:
+@cython.ccall
+def _instruction_writes_return_reg(insn: object, reg_names: Collection[str]) -> cython.bint:
     operands = _instruction_operands(insn)
     if not operands:
         return False
@@ -3225,7 +3464,8 @@ def _instruction_writes_return_reg(insn: object, reg_names: Collection[str]) -> 
     return _operand_is_reg(insn, operands[0], reg_names)
 
 
-def _wide_return_condition_use_8616(follow_insns: tuple[object, ...] | list[object], index: int) -> bool:
+@cython.ccall
+def _wide_return_condition_use_8616(follow_insns: object, index: cython.longlong) -> cython.bint:
     """Recognize a guarded DX-high then AX-low comparison of one wide return value."""
 
     if index < 0 or index >= len(follow_insns):
@@ -3238,10 +3478,12 @@ def _wide_return_condition_use_8616(follow_insns: tuple[object, ...] | list[obje
     return _wide_low_compare_with_branch_8616(follow_insns, index)
 
 
+@cython.ccall
 def _wide_low_compare_with_branch_8616(
-    follow_insns: tuple[object, ...] | list[object], index: int
-) -> bool:
+    follow_insns: object, index: cython.longlong
+) -> cython.bint:
     """Scan forward for a guarded AX-low compare after the DX-high compare."""
+    candidate: object
     saw_conditional_branch = False
     for candidate in follow_insns[index + 1 : index + 9]:
         mnemonic = _mnemonic(candidate)
@@ -3265,7 +3507,8 @@ def _wide_low_compare_with_branch_8616(
     return False
 
 
-def _transparent_return_epilogue_insn_8616(insn: object) -> bool:
+@cython.ccall
+def _transparent_return_epilogue_insn_8616(insn: object) -> cython.bint:
     mnemonic = _mnemonic(insn)
     operands = _instruction_operands(insn)
     if mnemonic == "add" and len(operands) == 2 and _operand_is_reg(insn, operands[0], {"sp", "esp"}):
@@ -3277,6 +3520,7 @@ def _transparent_return_epilogue_insn_8616(insn: object) -> bool:
     return bool(mnemonic.startswith("j"))
 
 
+@cython.ccall
 def _direct_jump_target_8616(insn: object) -> int | None:
     mnemonic = _mnemonic(insn)
     if mnemonic not in {"jmp", "jmpw", "ljmp"}:
@@ -3287,19 +3531,21 @@ def _direct_jump_target_8616(insn: object) -> int | None:
     return _operand_imm_value(operands[0])
 
 
+@cython.ccall
 def _extend_follow_insns_through_direct_jumps_8616(
-    function: object, follow_insns: list[object], *, limit: int = 16
-) -> list[object]:
+    function: object, follow_insns: object, *, limit: cython.longlong = 16
+) -> object:
     """Append bounded direct-jump target instructions for return-use scans.
 
     Dynamic boundary: angr project/block objects expose Capstone instruction wrappers.
     """
+    project: object
 
     project = _dynamic_callsite_getattr_8616(function, "project", None)
     if project is None:
         return follow_insns
     expanded = list(follow_insns)
-    decoded_targets: set[int] = set()
+    decoded_targets: set[cython.longlong] = set()
     idx = 0
     while idx < len(expanded) and idx < limit:
         target = _direct_jump_target_8616(expanded[idx])
@@ -3316,8 +3562,8 @@ def _extend_follow_insns_through_direct_jumps_8616(
             continue
         if not target_insns:
             continue
-        existing_addrs = {_instruction_address_8616(insn) for insn in expanded}
-        insert = [insn for insn in target_insns if _instruction_address_8616(insn) not in existing_addrs]
+        existing_addrs = {_instruction_address_8616(insn) for insn in iter(expanded)}
+        insert = [insn for insn in iter(target_insns) if _instruction_address_8616(insn) not in existing_addrs]
         if not insert:
             continue
         expanded[idx:idx] = insert[:limit]
@@ -3326,7 +3572,9 @@ def _extend_follow_insns_through_direct_jumps_8616(
     return expanded[:limit]
 
 
+@cython.ccall
 def _operand_mem_base_disp(insn: object, operand: object) -> tuple[str | None, int | None]:
+    mem: object
     mem = _operand_mem_value_8616(operand)
     if mem is None:
         return None, None
@@ -3343,13 +3591,17 @@ def _operand_mem_base_disp(insn: object, operand: object) -> tuple[str | None, i
     return (name.lower() if isinstance(name, str) and name else None), disp if isinstance(disp, int) else None
 
 
+@cython.ccall
 def _return_store_after_call(
     function: object,
-    insns: tuple[object, ...],
-    idx: int,
-    callsite_addr: int,
-) -> tuple[str, int, int, int | None] | None:
+    insns: object,
+    idx: cython.longlong,
+    callsite_addr: cython.longlong,
+) -> object:
     """Recover a direct stack/global store of AX/AL/AH immediately after a call."""
+    base: object
+    insn: object
+    insn_idx: object
 
     follow_insns = _follow_insns_after_call_8616(function, insns, idx, callsite_addr, limit=3)
     for insn_idx, insn in enumerate(follow_insns[:3]):
@@ -3378,8 +3630,11 @@ def _return_store_after_call(
     return None
 
 
-def _global_dx_high_store_follows_8616(follow_insns: tuple[object, ...], low_idx: int, low_disp: int) -> bool:
+@cython.ccall
+def _global_dx_high_store_follows_8616(follow_insns: object, low_idx: cython.longlong, low_disp: cython.longlong) -> cython.bint:
     """Return whether a direct global AX store is paired with a following DX high-word store."""
+    base: object
+    insn: object
 
     for insn in follow_insns[low_idx + 1 : low_idx + 3]:
         mnemonic = _mnemonic(insn)
@@ -3393,18 +3648,20 @@ def _global_dx_high_store_follows_8616(follow_insns: tuple[object, ...], low_idx
         if not _operand_is_reg(insn, operands[1], {"dx"}):
             return False
         base, disp = _operand_mem_base_disp(insn, operands[0])
-        return base is None and isinstance(disp, int) and ((low_disp + 2) & 0xFFFF) == (disp & 0xFFFF)
+        return base is None and isinstance(disp, int) and operator.eq(((low_disp + 2) & 0xFFFF), (disp & 0xFFFF))
     return False
 
 
-def _return_value_divide_witness_8616(insns: tuple[object, ...]) -> int | None:
+def _return_value_divide_witness_8616(insns: object) -> int | None:
     """Return the exact CWD/CDQ witness for a bounded return-value divide use."""
+    index: object
+    insn: object
     for index, insn in enumerate(insns[:8]):
         mnemonic = _mnemonic(insn)
         if mnemonic in {"cwd", "cdq"}:
             if any(
                 _mnemonic(candidate) in {"div", "idiv"}
-                for candidate in insns[index + 1 : index + 3]
+                for candidate in iter(insns[index + 1 : index + 3])
             ):
                 address = _instruction_address_8616(insn)
                 return address if isinstance(address, int) else None
@@ -3423,13 +3680,16 @@ def _return_value_divide_witness_8616(insns: tuple[object, ...]) -> int | None:
     return None
 
 
-def _return_value_feeds_divide_8616(insns: tuple[object, ...]) -> bool:
+@cython.ccall
+def _return_value_feeds_divide_8616(insns: object) -> cython.bint:
     """Recognize a bounded AX-to-CWD-to-DIV value-use chain."""
     return _return_value_divide_witness_8616(insns) is not None
 
 
-def _caller_has_explicit_void_return_8616(function: object) -> bool:
+@cython.ccall
+def _caller_has_explicit_void_return_8616(function: object) -> cython.bint:
     """Accept only strong upstream provenance as a void-result override."""
+    source: object
     prototype = _dynamic_callsite_getattr_8616(function, "prototype", None)
     return_type = _dynamic_callsite_getattr_8616(prototype, "returnty", None)
     if not isinstance(return_type, SimTypeBottom) or return_type.label != "void":
@@ -3442,11 +3702,14 @@ def _caller_has_explicit_void_return_8616(function: object) -> bool:
 
 def _return_use_after_call(
     function: object,
-    insns: tuple[object, ...],
-    idx: int,
-    callsite_addr: int,
-) -> tuple[str | None, bool | None, CallsiteReturnUseKind8616 | None]:
+    insns: object,
+    idx: cython.longlong,
+    callsite_addr: cython.longlong,
+) -> object:
     """Classify the first bounded AX-family use after a call."""
+    verdict: object
+    follow_index: object
+    insn: object
 
     caller_returns_explicit_void = _caller_has_explicit_void_return_8616(function)
     follow_insns = _follow_insns_after_call_8616(function, insns, idx, callsite_addr, limit=8)
@@ -3467,12 +3730,13 @@ def _return_use_after_call(
     return None, False, None
 
 
+@cython.ccall
 def _return_use_insn_verdict_8616(
     insn: object,
-    bounded_follow_insns: list[object],
-    follow_index: int,
-    caller_returns_explicit_void: bool,
-) -> tuple[str | None, bool | None, CallsiteReturnUseKind8616 | None] | None:
+    bounded_follow_insns: object,
+    follow_index: cython.longlong,
+    caller_returns_explicit_void: cython.bint,
+) -> object:
     """Classify one post-call instruction, or None to keep scanning."""
     operands = _instruction_operands(insn)
     mnemonic = _mnemonic(insn)
@@ -3508,8 +3772,10 @@ def _return_use_insn_verdict_8616(
     return None, False, None
 
 
+@cython.ccall
 def _linear_call_target_8616(insn: object) -> int | DecodedFarCallTarget8616 | None:
     """Return a near target or exact 20-bit immediate far-call target."""
+    target: object
     if not is_x86_16_call_mnemonic_8616(_mnemonic(insn)):
         return None
     operands = _instruction_operands(insn)
@@ -3530,20 +3796,21 @@ def _linear_call_target_8616(insn: object) -> int | DecodedFarCallTarget8616 | N
     return None if target is None else DecodedFarCallTarget8616(target)
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _LinearReturnUseScan8616:
     """Bounded forward scan state for one caller return-use observation."""
 
-    insns: tuple[object, ...]
-    caller_addr: int
-    callsite_addr: int
-    addr_to_index: dict[int, int]
-    pending: list[int]
-    visited: set[int] = field(default_factory=set)
-    examined: int = 0
+    insns: object
+    caller_addr: cython.longlong
+    callsite_addr: cython.longlong
+    addr_to_index: object
+    pending: object
+    visited: object = field(default_factory=set)
+    examined: cython.longlong = 0
     byte_extension: ByteReturnExtensionKind8616 | None = None
     byte_extension_instruction_addr: int | None = None
 
+    @cython.ccall
     def _fact(
         self,
         verdict: CallerReturnUseVerdict8616,
@@ -3565,9 +3832,11 @@ class _LinearReturnUseScan8616:
             observed_value_view=observed_value_view,
         )
 
+    @cython.ccall
     def _byte_extension_step(
-        self, insn: object, index: int, witness_addr: int | None
-    ) -> tuple[bool, CallerReturnUseFact8616 | None]:
+        self, insn: object, index: cython.longlong, witness_addr: int | None
+    ) -> tuple[cython.bint, CallerReturnUseFact8616 | None]:
+        current_extension: object
         current_extension = decoded_byte_return_extension_8616(insn)
         if current_extension is None:
             return False, None
@@ -3580,7 +3849,8 @@ class _LinearReturnUseScan8616:
         self.pending.append(index + 1)
         return True, None
 
-    def _step(self, index: int) -> CallerReturnUseFact8616 | None:
+    @cython.ccall
+    def _step(self, index: cython.longlong) -> CallerReturnUseFact8616 | None:
         """Classify one scanned instruction; None keeps the scan running."""
         insn = self.insns[index]
         operands = _instruction_operands(insn)
@@ -3642,9 +3912,11 @@ class _LinearReturnUseScan8616:
             return None
         return self._fact(CallerReturnUseVerdict8616.UNUSED, None, witness_addr)
 
+    @cython.ccall
     def _jump_step(
         self, insn: object, witness_addr: int | None
     ) -> CallerReturnUseFact8616 | None:
+        target_index: object
         target = _direct_jump_target_8616(insn)
         target_index = self.addr_to_index.get(target) if isinstance(target, int) else None
         if target_index is None:
@@ -3654,8 +3926,11 @@ class _LinearReturnUseScan8616:
         self.pending.append(target_index)
         return None
 
+    @cython.ccall
     def run(self) -> CallerReturnUseFact8616:
         """Walk pending blocks until a verdict or the bounded budget ends."""
+        fact: object
+        index: object
         while self.pending and self.examined < 24:
             index = self.pending.pop()
             if index in self.visited or index < 0 or index >= len(self.insns):
@@ -3668,13 +3943,15 @@ class _LinearReturnUseScan8616:
         return self._fact(CallerReturnUseVerdict8616.UNKNOWN, None, None)
 
 
+@cython.ccall
 def _linear_return_use_after_call_8616(
-    insns: tuple[object, ...],
-    call_idx: int,
-    caller_addr: int,
-    callsite_addr: int,
+    insns: object,
+    call_idx: cython.longlong,
+    caller_addr: cython.longlong,
+    callsite_addr: cython.longlong,
 ) -> CallerReturnUseFact8616:
     """Retain one exact AX-use observation after a direct machine call."""
+    divide_witness: object
     if call_idx < 0 or call_idx >= len(insns):
         return CallerReturnUseFact8616(
             caller_addr,
@@ -3685,7 +3962,7 @@ def _linear_return_use_after_call_8616(
         )
     addr_to_index = {
         int(addr): index
-        for index, insn in enumerate(insns)
+        for index, insn in builtins.iter(enumerate(insns))
         if isinstance((addr := _instruction_address_8616(insn)), int)
     }
     divide_witness = _return_value_divide_witness_8616(
@@ -3711,7 +3988,7 @@ def _linear_return_use_after_call_8616(
 @contextlib.contextmanager
 def caller_return_use_program_scope_8616(
     project: object,
-    function_ranges: tuple[tuple[int, int], ...],
+    function_ranges: object,
 ) -> Iterator[None]:
     """Decode one exact caller corpus for repeated semantic target queries."""
     evidence = build_caller_return_use_program_evidence_8616(
@@ -3724,27 +4001,30 @@ def caller_return_use_program_scope_8616(
         yield
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _CallerReturnUseResolver8616:
     """Cached resolver for direct and transitive caller return-use verdicts."""
 
     direct_callsite_index: DecodedDirectCallsiteIndex8616
-    callsite_cache: dict[int, dict[int, CallerReturnUseFact8616]] = field(
+    callsite_cache: object = field(
         default_factory=dict
     )
-    transitive_cache: dict[int, CallerReturnUseVerdict8616] = field(
+    transitive_cache: object = field(
         default_factory=dict
     )
 
+    @cython.ccall
     def callsites_for_target(
-        self, candidate_target: int
-    ) -> dict[int, CallerReturnUseFact8616]:
+        self, candidate_target: cython.longlong
+    ) -> object:
         """Return decoded direct-call use facts keyed by callsite address."""
+        cached: object
+        callsite: object
         normalized_target = self.direct_callsite_index.target_identity(candidate_target)
         cached = self.callsite_cache.get(normalized_target)
         if cached is not None:
             return cached
-        facts: dict[int, CallerReturnUseFact8616] = {}
+        facts: dict[cython.longlong, CallerReturnUseFact8616] = {}
         for callsite in self.direct_callsite_index.for_target(normalized_target):
             facts[callsite.callsite_addr] = _linear_return_use_after_call_8616(
                 callsite.instructions,
@@ -3757,10 +4037,12 @@ class _CallerReturnUseResolver8616:
 
     def return_observed_transitively(
         self,
-        candidate_target: int,
-        active_targets: frozenset[int],
+        candidate_target: cython.longlong,
+        active_targets: object,
     ) -> CallerReturnUseVerdict8616:
         """Resolve terminal return pass-throughs only through independent callers."""
+        cached: object
+        fact: object
         normalized_target = self.direct_callsite_index.target_identity(candidate_target)
         cached = self.transitive_cache.get(normalized_target)
         if cached is not None:
@@ -3789,7 +4071,7 @@ class _CallerReturnUseResolver8616:
             result = CallerReturnUseVerdict8616.USED
         elif resolutions and all(
             resolution is CallerReturnUseVerdict8616.UNUSED
-            for resolution in resolutions
+            for resolution in iter(resolutions)
         ):
             result = CallerReturnUseVerdict8616.UNUSED
         else:
@@ -3800,16 +4082,18 @@ class _CallerReturnUseResolver8616:
 
 def collect_caller_return_use_evidence_8616(
     project: object,
-    target_addr: int,
-    function_ranges: tuple[tuple[int, int], ...],
+    target_addr: cython.longlong,
+    function_ranges: object,
     *,
-    target_aliases: tuple[int, ...] = (),
+    target_aliases: object = (),
 ) -> CallerReturnUseEvidence8616:
     """Collect binary caller-use facts from independently proven function ranges.
 
     Proven target aliases form one call-target census and identify recursive
     terminal pass-throughs whose caller entry differs from the direct target.
     """
+    program: object
+    fact: object
     program = current_caller_return_use_program_evidence_8616(
         project,
         function_ranges,
@@ -3836,12 +4120,12 @@ def collect_caller_return_use_evidence_8616(
         )
     resolver = _CallerReturnUseResolver8616(direct_callsite_index=program.callsites)
 
-    normalized_target_aliases = frozenset(program.callsites.target_identity(addr) for addr in target_aliases)
+    normalized_target_aliases = frozenset(program.callsites.target_identity(addr) for addr in iter(target_aliases))
     census_targets = normalized_target_aliases | {program.callsites.target_identity(target_addr)}
     direct_facts = {
         callsite_addr: fact
-        for candidate_target in census_targets
-        for callsite_addr, fact in resolver.callsites_for_target(candidate_target).items()
+        for candidate_target in iter(census_targets)
+        for callsite_addr, fact in builtins.iter(resolver.callsites_for_target(candidate_target).items())
     }
     resolved_facts: list[CallerReturnUseFact8616] = []
     for fact in direct_facts.values():
@@ -3863,20 +4147,20 @@ def collect_caller_return_use_evidence_8616(
         resolved_facts.append(fact)
     ordered_facts = tuple(sorted(resolved_facts, key=lambda fact: fact.callsite_addr))
     included_facts = tuple(
-        fact for fact in ordered_facts if not fact.excluded_recursive_passthrough
+        fact for fact in iter(ordered_facts) if not fact.excluded_recursive_passthrough
     )
     excluded_count = len(ordered_facts) - len(included_facts)
     used_count = sum(
-        fact.verdict is CallerReturnUseVerdict8616.USED for fact in included_facts
+        fact.verdict is CallerReturnUseVerdict8616.USED for fact in iter(included_facts)
     )
     unused_count = sum(
-        fact.verdict is CallerReturnUseVerdict8616.UNUSED for fact in included_facts
+        fact.verdict is CallerReturnUseVerdict8616.UNUSED for fact in iter(included_facts)
     )
     classified_count = used_count + unused_count
     failure_count = len(included_facts) - classified_count
     if used_count:
         verdict = CallerReturnUseVerdict8616.USED
-    elif included_facts and classified_count == len(included_facts):
+    elif included_facts and operator.eq(classified_count, len(included_facts)):
         verdict = CallerReturnUseVerdict8616.UNUSED
     else:
         verdict = CallerReturnUseVerdict8616.UNKNOWN
@@ -3890,31 +4174,33 @@ def collect_caller_return_use_evidence_8616(
         failure_count=failure_count,
         used_callsite_count=used_count,
         unused_callsite_count=unused_count,
-        callsite_addrs=tuple(fact.callsite_addr for fact in ordered_facts),
+        callsite_addrs=tuple(fact.callsite_addr for fact in iter(ordered_facts)),
         excluded_callsite_count=excluded_count,
         facts=ordered_facts,
     )
 
 
-def _has_adjacent_word_pair_8616(ax_offsets: set[int], dx_offsets: set[int]) -> bool:
+def _has_adjacent_word_pair_8616(ax_offsets: object, dx_offsets: object) -> cython.bint:
     """Return whether AX/DX stores form an adjacent word pair."""
+    offset: object
     for offset in dx_offsets:
         if (offset + 2 in ax_offsets) or (offset - 2 in ax_offsets):
             return True
-    return any(offset + 2 in dx_offsets or offset - 2 in dx_offsets for offset in ax_offsets)
+    return any(offset + 2 in dx_offsets or offset - 2 in dx_offsets for offset in iter(ax_offsets))
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _ReturnShapeScan8616:
     """Forward scan state for DX:AX return-shape classification."""
 
-    store_dx_offsets: set[int] = field(default_factory=set)
-    store_ax_offsets: set[int] = field(default_factory=set)
-    forwarded_return_regs: set[str] = field(default_factory=set)
-    forwarding_window_open: bool = True
-    saw_ax: bool = False
-    done: bool = False
+    store_dx_offsets: object = field(default_factory=set)
+    store_ax_offsets: object = field(default_factory=set)
+    forwarded_return_regs: object = field(default_factory=set)
+    forwarding_window_open: cython.bint = True
+    saw_ax: cython.bint = False
+    done: cython.bint = False
 
+    @cython.ccall
     def _forwarded_push_step(self, insn: object) -> CallsiteReturnShape8616 | None:
         """Track AX/DX pushes while the forwarding window stays open."""
         if not self.forwarding_window_open:
@@ -3933,6 +4219,7 @@ class _ReturnShapeScan8616:
             self.forwarding_window_open = False
         return None
 
+    @cython.ccall
     def _record_store(self, insn: object) -> None:
         """Record BP/global AX/DX word stores for pair matching."""
         if _mnemonic(insn) != "mov" or len(_instruction_operands(insn)) != 2:
@@ -3946,10 +4233,12 @@ class _ReturnShapeScan8616:
                 self.store_ax_offsets.add(disp)
                 self.saw_ax = True
 
+    @cython.ccall
     def _step(
-        self, insn: object, bounded_follow_insns: list[object], follow_index: int
+        self, insn: object, bounded_follow_insns: object, follow_index: cython.longlong
     ) -> CallsiteReturnShape8616 | None:
         """Process one post-call insn; DX_AX ends the scan, done ends the loop."""
+        forwarded: object
         if _mnemonic(insn) in {"ret", "retf", "retw", "iret"}:
             self.done = True
             return None
@@ -3974,17 +4263,20 @@ class _ReturnShapeScan8616:
 
         return None
 
-    def run(self, bounded_follow_insns: list[object]) -> CallsiteReturnShape8616 | None:
+    def run(self, bounded_follow_insns: object) -> CallsiteReturnShape8616 | None:
         """Scan until a proven DX_AX shape, a barrier, or the tail census."""
+        shape: object
+        follow_index: object
+        insn: object
         for follow_index, insn in enumerate(bounded_follow_insns):
             shape = self._step(insn, bounded_follow_insns, follow_index)
             if shape is not None:
                 return shape
             if self.done:
                 break
-        if any(off + 2 in self.store_ax_offsets for off in self.store_dx_offsets):
+        if any(off + 2 in self.store_ax_offsets for off in iter(self.store_dx_offsets)):
             return CallsiteReturnShape8616.DX_AX
-        if any(off - 2 in self.store_ax_offsets for off in self.store_dx_offsets):
+        if any(off - 2 in self.store_ax_offsets for off in iter(self.store_dx_offsets)):
             return CallsiteReturnShape8616.DX_AX
         if self.saw_ax:
             return CallsiteReturnShape8616.AX
@@ -3992,7 +4284,7 @@ class _ReturnShapeScan8616:
 
 
 def _return_shape_after_call(
-    function: object, insns: tuple[object, ...], idx: int, callsite_addr: int
+    function: object, insns: object, idx: cython.longlong, callsite_addr: cython.longlong
 ) -> CallsiteReturnShape8616 | None:
     follow_insns = _follow_insns_after_call_8616(function, insns, idx, callsite_addr, limit=8)
     if any(_wide_return_condition_use_8616(follow_insns, follow_index) for follow_index in range(len(follow_insns))):
@@ -4003,18 +4295,19 @@ def _return_shape_after_call(
 
 def _callsite_seed_8616(
     function: object,
-    callsite_addr: int,
-    target_inventory: CallsiteTargetInventory8616 | None,
+    callsite_addr: cython.longlong,
+    target_inventory: object,
 ) -> CallTargetSeed | None:
     """Resolve the callsite seed from inventory, neighbors, or a fresh census."""
+    seed: object
     seed = (
         target_inventory.seed_for_callsite(callsite_addr)
         if target_inventory is not None
         else next(
             (
                 candidate
-                for candidate in collect_neighbor_call_targets(function)
-                if candidate.callsite_addr == callsite_addr
+                for candidate in builtins.iter(collect_neighbor_call_targets(function))
+                if operator.eq(candidate.callsite_addr, callsite_addr)
             ),
             None,
         )
@@ -4027,12 +4320,13 @@ def _callsite_seed_8616(
     return seed
 
 
+@cython.ccall
 def _helper_only_summary_8616(
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     target_addr: int | None,
     return_addr: int | None,
-    kind: str | None,
-    stack_probe_helper: bool,
+    kind: object,
+    stack_probe_helper: cython.bint,
 ) -> CallsiteSummary8616:
     """Build the evidence-free summary for helper-only or undecodable callsites."""
     return CallsiteSummary8616(
@@ -4053,7 +4347,8 @@ def _helper_only_summary_8616(
     )
 
 
-def _linear_fallthrough_return_addr_8616(insns: tuple[object, ...], call_idx: int) -> int | None:
+@cython.ccall
+def _linear_fallthrough_return_addr_8616(insns: object, call_idx: cython.longlong) -> int | None:
     """Return the linear fall-through address of the call instruction."""
     call_insn = insns[call_idx]
     insn_addr = _instruction_address_8616(call_insn)
@@ -4065,14 +4360,17 @@ def _linear_fallthrough_return_addr_8616(insns: tuple[object, ...], call_idx: in
     return None
 
 
+@cython.ccall
 def _callsite_cleanup_8616(
     function: object,
-    insns: tuple[object, ...],
-    call_idx: int,
-    callsite_addr: int,
+    insns: object,
+    call_idx: cython.longlong,
+    callsite_addr: cython.longlong,
     request_cache: CallsiteSummaryRequestCache8616 | None,
 ) -> tuple[int | None, int | None]:
     """Return (cleanup bytes, cleanup instruction addr) for one callsite."""
+    cleanup: object
+    cleanup_evidence: object
     cleanup_evidence = _stack_cleanup_after_call(
         function,
         insns,
@@ -4094,24 +4392,26 @@ def _callsite_cleanup_8616(
     return cleanup, cleanup_instruction_addr
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _RawPushArgEvidence8616:
     """Pre-trim push evidence plus any proven predecessor-stack merge."""
 
-    widths: tuple[int, ...]
-    sources: tuple[_CallsiteTuple8616 | None, ...]
-    instruction_addrs: tuple[int, ...]
+    widths: object
+    sources: object
+    instruction_addrs: object
     predecessor_stack_merge: CallsitePredecessorStackMerge8616 | None
 
 
+@cython.ccall
 def _better_window_arg_evidence_8616(
     function: object,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     argument_byte_limit: int | None,
-    raw_arg_widths: tuple[int, ...],
-    raw_arg_sources: tuple[_CallsiteTuple8616 | None, ...],
-) -> tuple[tuple[int, ...], tuple[_CallsiteTuple8616 | None, ...], tuple[int, ...]] | None:
+    raw_arg_widths: object,
+    raw_arg_sources: object,
+) -> object:
     """Retry the push scan across a linear window when block evidence is weaker."""
+    window_idx: object
     window_insns = _linear_window_insns_for_callsite_8616(function, callsite_addr)
     window_idx = _find_call_index(window_insns, callsite_addr) if window_insns else None
     if window_idx is None:
@@ -4130,8 +4430,8 @@ def _better_window_arg_evidence_8616(
     )
     window_has_better_widths = sum(window_widths) > sum(raw_arg_widths)
     window_has_same_widths_better_sources = (
-        sum(window_widths) == sum(raw_arg_widths)
-        and len(window_widths) == len(raw_arg_widths)
+        operator.eq(sum(window_widths), sum(raw_arg_widths))
+        and operator.eq(len(window_widths), len(raw_arg_widths))
         and _push_arg_source_known_count_8616(window_sources)
         > _push_arg_source_known_count_8616(raw_arg_sources)
     )
@@ -4140,15 +4440,19 @@ def _better_window_arg_evidence_8616(
     return None
 
 
+@cython.ccall
 def _raw_push_arg_evidence_8616(
     function: object,
-    insns: tuple[object, ...],
-    call_idx: int,
-    callsite_addr: int,
+    insns: object,
+    call_idx: cython.longlong,
+    callsite_addr: cython.longlong,
     argument_byte_limit: int | None,
     request_cache: CallsiteSummaryRequestCache8616 | None,
 ) -> _RawPushArgEvidence8616:
     """Collect, predecessor-merge, callee-filter, and window-retry push evidence."""
+    predecessor_stack_merge: object
+    unresolved_entry_push: object
+    window_evidence: object
     raw_arg_widths = _collect_push_args_before_call(function, insns, call_idx, argument_byte_limit)
     raw_arg_sources = _collect_push_arg_sources_before_call(function, insns, call_idx, argument_byte_limit)
     raw_push_instruction_addrs = _collect_push_arg_instruction_addrs_before_call(
@@ -4212,19 +4516,19 @@ def _raw_push_arg_evidence_8616(
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _TrimmedArgEvidence8616:
     """Cleanup-bounded argument evidence with address-break fallback."""
 
-    arg_widths: tuple[int, ...]
-    push_arg_sources: tuple[_CallsiteTuple8616 | None, ...]
-    push_arg_instruction_addrs: tuple[int, ...]
-    push_arg_address_break_evidence: tuple[PartialRegisterAddressBreakEvidence8616 | None, ...]
+    arg_widths: object
+    push_arg_sources: object
+    push_arg_instruction_addrs: object
+    push_arg_address_break_evidence: object
 
 
 def _trimmed_arg_evidence_8616(
     raw: _RawPushArgEvidence8616,
-    insns: tuple[object, ...],
+    insns: object,
     argument_byte_limit: int | None,
 ) -> _TrimmedArgEvidence8616:
     """Trim raw push evidence to the proven cleanup byte budget."""
@@ -4242,13 +4546,13 @@ def _trimmed_arg_evidence_8616(
             None
             if source is not None
             else collect_partial_register_address_break_8616(insns, push_addr)
-            for source, push_addr in zip(
+            for source, push_addr in builtins.iter(zip(
                 push_arg_sources,
                 push_arg_instruction_addrs,
                 strict=True,
-            )
+            ))
         )
-        if len(push_arg_sources) == len(push_arg_instruction_addrs)
+        if operator.eq(len(push_arg_sources), len(push_arg_instruction_addrs))
         else ()
     )
     return _TrimmedArgEvidence8616(
@@ -4259,12 +4563,13 @@ def _trimmed_arg_evidence_8616(
     )
 
 
+@cython.ccall
 def _logical_arg_interface_evidence_8616(
     function: object,
     target_addr: int | None,
-    helper_abi_widths: tuple[int, ...] | None,
-    arg_widths: tuple[int, ...],
-) -> tuple[tuple[int, ...], tuple[CallsiteArgumentClass8616, ...]]:
+    helper_abi_widths: object,
+    arg_widths: object,
+) -> tuple[tuple[cython.longlong, ...], tuple[CallsiteArgumentClass8616, ...]]:
     """Return logical widths/classes only when they match observed evidence."""
     if helper_abi_widths is not None:
         logical_arg_widths = helper_abi_widths
@@ -4274,16 +4579,17 @@ def _logical_arg_interface_evidence_8616(
             function,
             target_addr,
         )
-    if sum(logical_arg_widths) != sum(arg_widths):
+    if operator.ne(sum(logical_arg_widths), sum(arg_widths)):
         return (), ()
     return logical_arg_widths, logical_arg_classes
 
 
+@cython.ccall
 def _helper_return_fields_8616(
-    stack_probe_helper: bool,
-    return_register: str | None,
+    stack_probe_helper: cython.bint,
+    return_register: object,
     return_used: bool | None,
-    has_followup_insns: bool,
+    has_followup_insns: cython.bint,
 ) -> tuple[str, str | None, int | None, str]:
     """Return (state, space, width, address_kind) for stack-probe returns."""
     helper_return_state = "none"
@@ -4302,21 +4608,28 @@ def _helper_return_fields_8616(
     return helper_return_state, helper_return_space, helper_return_width, helper_return_address_kind
 
 
+@cython.ccall
 def _summarize_callsite_impl_8616(
     function: object,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     target_inventory: CallsiteTargetInventory8616 | None,
     request_cache: CallsiteSummaryRequestCache8616 | None,
 ) -> CallsiteSummary8616 | None:
     """Summarize one callsite from decoded blocks and proven evidence."""
+    call_idx: object
+    helper_abi_widths: object
+    project: object
+    return_addr: object
+    return_store: object
+    seed: object
     project = _dynamic_callsite_getattr_8616(function, "project", None)
     if project is None or _dynamic_callsite_getattr_8616(_dynamic_callsite_getattr_8616(project, "arch", None), "name", None) != "86_16":
         return None
 
     seed = _callsite_seed_8616(function, callsite_addr, target_inventory)
     target_addr: int | None = None
-    return_addr: int | None = None
-    kind: str | None = None
+    return_addr = None
+    kind: object = None
     if seed is not None:
         target_addr = seed.target_addr
         return_addr = seed.return_addr
@@ -4445,9 +4758,10 @@ def _summarize_callsite_impl_8616(
     )
 
 
+@cython.ccall
 def summarize_x86_16_callsite(
     function: object,
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     *,
     target_inventory: CallsiteTargetInventory8616 | None = None,
     request_cache: CallsiteSummaryRequestCache8616 | None = None,

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Consume proven machine CALL frames at the source-call boundary.
 
 Layer: Frontend/IR adapter.
@@ -13,6 +14,8 @@ Do not infer effects from names, source, assembly text or generated C.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections import Counter, defaultdict
 from collections.abc import Callable
@@ -41,31 +44,34 @@ from inertia.semantics.call_return_segment import (
 )
 
 from .call_cleanup_compat import CalleeCleanupReport8616, materialize_callee_cleanup_8616
+import dataclasses
+import operator
+import builtins
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallFrameBoundaryStats8616:
     """Call census and exact effect materialization counts for one graph."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
     return_segment_frames: tuple[ReturnSegmentFrame8616, ...] = ()
-    accepted_calls: tuple[int, ...] = ()
+    accepted_calls: tuple[cython.longlong, ...] = ()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ReturnCleanupEvidence8616:
     """Closed endpoint census consumed by native argument-cleanup inference."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    frames: tuple[ReturnFrame8616, ...]
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    frames: object
     cleanup_bytes: int | None
 
 
@@ -77,10 +83,13 @@ class _FactCollectorBoundary8616(Protocol):
 
 def _effect_key_8616(statement: Statement) -> CallReturnFrameEffectKey8616 | None:
     """Read exact source identity without using an expression's apparent shape."""
+    address: object
+    block: object
+    index: object
     address = statement.tags.get("ins_addr")
     block = statement.tags.get("vex_block_addr")
     index = statement.tags.get("vex_stmt_idx")
-    if not all(isinstance(value, int) for value in (address, block, index)):
+    if not all(isinstance(value, int) for value in iter((address, block, index))):
         return None
     return CallReturnFrameEffectKey8616(address, block, index)
 
@@ -88,15 +97,19 @@ def _effect_key_8616(statement: Statement) -> CallReturnFrameEffectKey8616 | Non
 def _scan_returning_calls_8616(
     graph: nx.DiGraph[Block],
 ) -> tuple[
-    dict[int, int],
+    dict[cython.longlong, cython.longlong],
     dict[CallReturnFrameEffectKey8616, list[tuple[Block, Statement]]],
-    int,
+    cython.longlong,
 ]:
     """Index tagged statements and census unique CALL sites with return edges."""
-    calls: dict[int, int] = {}
+    address: object
+    key: object
+    block: object
+    statement: object
+    calls: dict[cython.longlong, cython.longlong] = {}
     raw_count = 0
-    occurrences: Counter[int] = Counter()
-    locations: dict[CallReturnFrameEffectKey8616, list[tuple[Block, Statement]]] = defaultdict(list)
+    occurrences: Counter[cython.longlong] = Counter()
+    locations: object = defaultdict(list)
     for block in graph:
         for statement in block.statements:
             key = _effect_key_8616(statement)
@@ -110,17 +123,18 @@ def _scan_returning_calls_8616(
                 continue
             occurrences[address] += 1
             return_addr = block.addr + block.original_size
-            if any(successor.addr == return_addr for successor in graph.successors(block)):
+            if any(operator.eq(successor.addr, return_addr) for successor in builtins.iter(graph.successors(block))):
                 calls[address] = return_addr
-    unique_calls = {address: target for address, target in calls.items() if occurrences[address] == 1}
+    unique_calls = {address: target for address, target in builtins.iter(calls.items()) if occurrences[address] == 1}
     return unique_calls, locations, raw_count
 
 
+@cython.ccall
 def _effect_role_matches_8616(
     role: CallReturnFrameEffectRole8616,
     statement: Statement,
-    sp_offset: int,
-) -> bool:
+    sp_offset: cython.longlong,
+) -> cython.bint:
     """Return whether one uniquely located statement plays the proven role."""
     if role is CallReturnFrameEffectRole8616.STACK_STORE:
         return isinstance(statement, Store)
@@ -128,18 +142,22 @@ def _effect_role_matches_8616(
         role is CallReturnFrameEffectRole8616.STACK_POINTER_UPDATE
         and isinstance(statement, Assignment)
         and isinstance(statement.dst, Register)
-        and statement.dst.reg_offset == sp_offset
+        and operator.eq(statement.dst.reg_offset, sp_offset)
     )
 
 
+@cython.ccall
 def _match_segment_frame_effects_8616(
-    segment_frames: tuple[ReturnSegmentFrame8616, ...],
-    locations: dict[CallReturnFrameEffectKey8616, list[tuple[Block, Statement]]],
-    by_call: dict[int, list[tuple[Block, Statement]]],
-    refused: set[int],
-    sp_offset: int,
+    segment_frames: object,
+    locations: object,
+    by_call: object,
+    refused: object,
+    sp_offset: cython.longlong,
 ) -> None:
     """Bind segment-frame effects to located statements or refuse the call."""
+    matches: object
+    effect: object
+    frame: object
     for frame in segment_frames:
         if frame.refusal is not None or frame.callsite_addr not in by_call:
             continue
@@ -157,16 +175,20 @@ def _match_segment_frame_effects_8616(
                 refused.add(frame.callsite_addr)
 
 
+@cython.ccall
 def consume_returning_call_frames_8616(
-    project: object, function: object, graph: nx.DiGraph[Block], *, sp_offset: int,
+    project: object, function: object, graph: nx.DiGraph[Block], *, sp_offset: cython.longlong,
 ) -> CallFrameBoundaryStats8616:
     """Consume complete, uniquely projected frames for calls with return edges."""
+    matches: object
+    block: object
+    fact: object
     calls, locations, raw_count = _scan_returning_calls_8616(graph)
     if not calls:
         return CallFrameBoundaryStats8616(raw_fact_count=raw_count, failure_count=raw_count)
     collection = collect_call_return_frame_effects_8616(project, function, calls)
-    by_call: dict[int, list[tuple[Block, Statement]]] = defaultdict(list)
-    refused: set[int] = set()
+    by_call: object = defaultdict(list)
+    refused: set[cython.longlong] = set()
     for fact in collection.effects:
         matches = locations.get(fact.key, [])
         if len(matches) != 1:
@@ -179,10 +201,10 @@ def consume_returning_call_frames_8616(
         by_call[fact.key.callsite_addr].append((block, statement))
     segment_frames = collect_return_segment_frames_8616(project, function, calls)
     _match_segment_frame_effects_8616(segment_frames, locations, by_call, refused, sp_offset)
-    accepted = {address: items for address, items in by_call.items() if address not in refused}
-    removal_ids = {id(statement) for items in accepted.values() for _block, statement in items}
+    accepted = {address: items for address, items in builtins.iter(by_call.items()) if address not in refused}
+    removal_ids = {id(statement) for items in builtins.iter(accepted.values()) for _block, statement in iter(items)}
     for block in graph:
-        block.statements = [statement for statement in block.statements if id(statement) not in removal_ids]
+        block.statements = [statement for statement in iter(block.statements) if id(statement) not in removal_ids]
     return CallFrameBoundaryStats8616(
         raw_fact_count=raw_count, normalized_fact_count=len(calls),
         classified_fact_count=len(removal_ids), materialized_count=len(removal_ids),
@@ -195,7 +217,7 @@ def consume_returning_call_frames_8616(
 class _ArchitectureBoundary8616(Protocol):
     """Native architecture fields needed at the AIL adapter boundary."""
 
-    name: str
+    name: object
     sp_offset: int | None
 
 
@@ -251,11 +273,12 @@ def _apply_return_cleanup_compatibility_8616() -> None:
     if original.__name__ == "_return_cleanup_8616":
         return
 
-    def _return_cleanup_8616(self: FactCollector) -> int:
+    def _return_cleanup_8616(self: FactCollector) -> cython.longlong:
         """Use decoded RET cleanup only when all function endpoints agree."""
+        selected: object
         if self.project.arch.name == "86_16":
             frames = collect_function_return_frames_8616(self.project, self.function)
-            cleanup: set[int] = {frame.cleanup_bytes for frame in frames or ()}
+            cleanup: set[cython.longlong] = {frame.cleanup_bytes for frame in iter(frames or ())}
             selected = next(iter(cleanup)) if len(cleanup) == 1 else None
             raw = len(self.function.endpoints)
             normalized = len(frames or ())

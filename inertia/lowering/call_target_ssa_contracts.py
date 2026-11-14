@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed contracts for the shared SSA CALL-target binder.
 
 Layer: Types/Lowering (staged candidate under
@@ -12,6 +13,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -23,6 +26,8 @@ from inertia.semantics.call_stack_effect_contracts import (
 from inertia.semantics.direct_near_call_target_binding import (
     DirectNearCallTargetBinding8616,
 )
+import dataclasses
+import operator
 
 __all__ = [
     "CallTargetBindResult8616",
@@ -93,18 +98,18 @@ class CallTargetBindStage8616(StrEnum):
     TARGET_NOT_ADMITTED = "target_not_admitted"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallTargetBindStats8616:
     """Closed five-stage accounting for one shared binding obligation."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether the obligation resolved to one proof or refusal."""
         counts = (
             self.raw_fact_count,
@@ -113,17 +118,16 @@ class CallTargetBindStats8616:
             self.materialized_count,
             self.failure_count,
         )
-        if not all(type(count) is int and count >= 0 for count in counts):
+        if not all(type(count) is int and count >= 0 for count in iter(counts)):
             return False
         return bool(
             self.raw_fact_count == 1
             and self.normalized_fact_count <= self.raw_fact_count
             and self.classified_fact_count <= self.normalized_fact_count
-            and self.normalized_fact_count
-            == self.materialized_count + self.failure_count
+            and operator.eq(self.normalized_fact_count, self.materialized_count + self.failure_count)
         )
 
-    def to_dict(self) -> dict[str, int]:
+    def to_dict(self) -> dict[str, cython.longlong]:
         """Serialize the evidence ledger for diagnostics and workers."""
         return {
             "raw_fact_count": self.raw_fact_count,
@@ -134,7 +138,7 @@ class CallTargetBindStats8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallTargetBindResult8616:
     """Proven full-width target or typed refusal for one symbolic SSA CALL.
 
@@ -145,7 +149,7 @@ class CallTargetBindResult8616:
     coordinates so consumers need not rescan the artifact.
     """
 
-    callsite_addr: int
+    callsite_addr: cython.longlong
     verdict: CallTargetBindVerdict8616
     stage: CallTargetBindStage8616
     stats: CallTargetBindStats8616
@@ -156,7 +160,7 @@ class CallTargetBindResult8616:
     retained_binding: DirectNearCallTargetBinding8616 | None = None
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether the binding closed on one admitted proven target."""
         return bool(
             self.verdict is CallTargetBindVerdict8616.PROVEN
@@ -165,9 +169,9 @@ class CallTargetBindResult8616:
             and self.target_addr >= 0
             and self.binding is not None
             and self.binding.complete
-            and self.binding.callsite_addr == self.callsite_addr
-            and self.binding.target_addr == self.target_addr
-            and self.stats == CallTargetBindStats8616(1, 1, 1, 1, 0)
+            and operator.eq(self.binding.callsite_addr, self.callsite_addr)
+            and operator.eq(self.binding.target_addr, self.target_addr)
+            and operator.eq(self.stats, CallTargetBindStats8616(1, 1, 1, 1, 0))
             and self.stats.closed
         )
 
@@ -190,13 +194,14 @@ class CallTargetBindResult8616:
         }
 
 
+@cython.ccall
 def _refuse_8616(
-    callsite_addr: int,
+    callsite_addr: cython.longlong,
     verdict: CallTargetBindVerdict8616,
     stage: CallTargetBindStage8616,
     *,
-    normalized: bool = False,
-    classified: bool = False,
+    normalized: cython.bint = False,
+    classified: cython.bint = False,
     binding: DirectNearCallTargetBinding8616 | None = None,
 ) -> CallTargetBindResult8616:
     """Retain one refused binding obligation in the five-stage count.
@@ -214,7 +219,7 @@ def _refuse_8616(
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _BoundProducer8616:
     """The raw CALL producer and corroborating evidence one route bound."""
 

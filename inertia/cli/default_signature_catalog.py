@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Locate and build optional helper signature catalogs for CLI runs.
 
 Layer: CLI/fallback/reporting.
@@ -5,6 +6,8 @@ Responsibility: prepare optional signature catalogs without making signatures re
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import os
 from functools import lru_cache
@@ -12,20 +15,25 @@ from pathlib import Path
 
 from tools.signatures.signature_catalog import build_signature_catalog, discover_signature_inputs
 from tools.signatures.signature_matching_policy import signature_matching_disabled
+import builtins
 
 
+@cython.ccall
 def _catalog_manifest_path(output_path: Path) -> Path:
     """Locate the input fingerprint manifest beside the generated catalog."""
     return output_path.parent / "repo_signature_catalog.sources.txt"
 
 
+@cython.ccall
 def _catalog_tool_manifest_path(output_path: Path) -> Path:
     """Locate the builder fingerprint manifest used for policy invalidation."""
     return output_path.parent / "repo_signature_catalog.tools.txt"
 
 
+@cython.ccall
 def _catalog_source_lines(catalog_root: Path) -> tuple[str, ...]:
     """Fingerprint source inputs, excluding generated catalog caches."""
+    path: object
     lines: list[str] = []
     for path in discover_signature_inputs((catalog_root,), recursive=True):
         if ".signature_catalog_cache" in path.parts:
@@ -38,8 +46,10 @@ def _catalog_source_lines(catalog_root: Path) -> tuple[str, ...]:
     return tuple(lines)
 
 
+@cython.ccall
 def _catalog_tool_lines(root: Path) -> tuple[str, ...]:
     """Fingerprint every implementation that controls the generated catalog."""
+    path: object
     tool_paths = (
         Path(__file__).resolve(),
         root / "tools/signatures/signature_catalog.py",
@@ -58,20 +68,20 @@ def _catalog_tool_lines(root: Path) -> tuple[str, ...]:
     return tuple(lines)
 
 
-def _manifest_matches(manifest_path: Path, source_lines: tuple[str, ...]) -> bool:
+def _manifest_matches(manifest_path: Path, source_lines: object) -> cython.bint:
     """Check whether a stored fingerprint set matches the current inputs."""
     if not manifest_path.exists():
         return False
     try:
-        existing = tuple(line.strip() for line in manifest_path.read_text().splitlines() if line.strip())
+        existing = tuple(line.strip() for line in builtins.iter(manifest_path.read_text().splitlines()) if line.strip())
     except OSError:
         return False
     return existing == source_lines
 
 
-def _write_manifest(manifest_path: Path, source_lines: tuple[str, ...]) -> None:
+def _write_manifest(manifest_path: Path, source_lines: object) -> None:
     """Persist catalog fingerprints after successful generation."""
-    manifest_path.write_text("".join(f"{line}\n" for line in source_lines))
+    manifest_path.write_text("".join(f"{line}\n" for line in iter(source_lines)))
 
 
 @lru_cache(maxsize=2)

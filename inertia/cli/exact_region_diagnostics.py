@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery/reporting.
 
 Responsibility: exact-region recovery coverage diagnostics and region_split classification.
@@ -11,9 +12,12 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+import dataclasses
 
 __all__ = [
     "ExactRegionDiagnostics",
@@ -24,24 +28,25 @@ __all__ = [
 ]
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class ExactRegionDiagnostics:
     """Coverage diagnostics for a sidecar exact-region recovery."""
 
     function_name: str = "unknown"
     proc_identity: str = ""
-    requested_start: int = 0
-    requested_end: int = 0
-    rebased_start: int = 0
-    rebased_end: int = 0
-    covered_block_addrs: tuple[int, ...] = ()
-    covered_byte_count: int = 0
-    cfg_function_count_in_region: int = 1
-    actual_cfg_entries: tuple[int, ...] = ()
-    region_size: int = 0
-    coverage_fraction: float = 1.0
-    split_detected: bool = False
+    requested_start: cython.longlong = 0
+    requested_end: cython.longlong = 0
+    rebased_start: cython.longlong = 0
+    rebased_end: cython.longlong = 0
+    covered_block_addrs: tuple[cython.longlong, ...] = ()
+    covered_byte_count: cython.longlong = 0
+    cfg_function_count_in_region: cython.longlong = 1
+    actual_cfg_entries: tuple[cython.longlong, ...] = ()
+    region_size: cython.longlong = 0
+    coverage_fraction: cython.double = 1.0
+    split_detected: cython.bint = False
 
+    @cython.ccall
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-compatible exact-region diagnostic row."""
         return {
@@ -56,36 +61,36 @@ class ExactRegionDiagnostics:
             "coverage_fraction": round(self.coverage_fraction, 4),
             "cfg_function_count_in_region": self.cfg_function_count_in_region,
             "split_detected": self.split_detected,
-            "covered_block_addrs": [f"0x{a:x}" for a in self.covered_block_addrs],
-            "actual_cfg_entries": [f"0x{a:x}" for a in self.actual_cfg_entries],
+            "covered_block_addrs": [f"0x{a:x}" for a in iter(self.covered_block_addrs)],
+            "actual_cfg_entries": [f"0x{a:x}" for a in iter(self.actual_cfg_entries)],
         }
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class RegionSplitDiagnostics:
     """Classification result when an exact region recovery splits across multiple CFG functions."""
 
-    split_detected: bool = False
-    cfg_entry_count: int = 1
-    entries: tuple[int, ...] = ()
+    split_detected: cython.bint = False
+    cfg_entry_count: cython.longlong = 1
+    entries: tuple[cython.longlong, ...] = ()
     note: str = ""
 
     @property
-    def is_split(self) -> bool:
+    def is_split(self) -> cython.bint:
         """Return whether this diagnostic represents a real multi-entry split."""
         return self.split_detected and self.cfg_entry_count > 1
 
 
 def build_exact_region_diagnostics_8616(
-    function_name: str,
+    function_name: object,
     *,
-    requested_start: int = 0,
-    requested_end: int = 0,
-    rebased_start: int = 0,
-    rebased_end: int = 0,
-    covered_block_addrs: Sequence[int] = (),
+    requested_start: cython.longlong = 0,
+    requested_end: cython.longlong = 0,
+    rebased_start: cython.longlong = 0,
+    rebased_end: cython.longlong = 0,
+    covered_block_addrs: Sequence[cython.longlong] = (),
     cfg_functions: Mapping[int, object] | None = None,
-    proc_identity: str = "",
+    proc_identity: object = "",
 ) -> ExactRegionDiagnostics:
     """Build exact-region diagnostics from sidecar recovery inputs.
 
@@ -99,22 +104,23 @@ def build_exact_region_diagnostics_8616(
         cfg_functions: CFG function mapping for counting entries in region
         proc_identity: PROC identity label from sidecar metadata
     """
+    addr: object
     region_size = max(0, requested_end - requested_start)
     covered_byte_count = sum(
         # Heuristic: each block covers ~6 bytes on average for 16-bit code
         min(max(abs(b - requested_start) + 6, 0), region_size)
-        for b in covered_block_addrs
+        for b in iter(covered_block_addrs)
         if requested_start <= b < requested_end
     )
     covered_byte_count = min(covered_byte_count, region_size)
     coverage_fraction = 1.0 if region_size <= 0 else min(covered_byte_count / region_size, 1.0)
 
     # Count CFG functions whose entries fall within the requested region
-    actual_entries: tuple[int, ...] = ()
+    actual_entries: tuple[cython.longlong, ...] = ()
     cfg_function_count = 1
     if isinstance(cfg_functions, Mapping):
-        entries: list[int] = []
-        for addr in sorted(cfg_functions.keys()):
+        entries: list[cython.longlong] = []
+        for addr in sorted(tuple(cfg_functions.keys())):
             if isinstance(addr, int) and requested_start <= addr < requested_end:
                 entries.append(addr)
         actual_entries = tuple(entries)
@@ -154,13 +160,14 @@ def format_exact_region_diagnostics_8616(d: ExactRegionDiagnostics) -> str:
     parts.append(f"coverage={d.coverage_fraction:.1%}")
     parts.append(f"cfg_entries={d.cfg_function_count_in_region}")
     if d.split_detected:
-        entries_str = ",".join(f"{a:#x}" for a in d.actual_cfg_entries)
+        entries_str = ",".join(f"{a:#x}" for a in iter(d.actual_cfg_entries))
         parts.append(f"SPLIT entries=[{entries_str}]")
     else:
         parts.append("ok")
     return " ".join(parts)
 
 
+@cython.ccall
 def classify_region_split_8616(
     diagnostics: ExactRegionDiagnostics,
 ) -> RegionSplitDiagnostics:

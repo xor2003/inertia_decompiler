@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Decode evidence-backed Microsoft EXEPACK DOS MZ executables.
 
 Layer: frontend (loader).
@@ -9,11 +10,15 @@ https://github.com/viiri/exepack (revision a42f2c8fb1018feeb2c32fc7f7b1f01240d82
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
 from .mz_image import MZHeaderView, UnpackedMZImage, paragraph_count
 from .packed_mz import PackedMZError, PackedMZErrorKind
+import dataclasses
+import operator
 
 __all__ = ("unpack_exepack",)
 
@@ -22,32 +27,34 @@ _STUB_SUFFIX = b"\xcd\x21\xb8\xff\x4c\xcd\x21"
 _ERROR_MESSAGE_LENGTH = 22
 
 
-def _malformed(detail: str) -> PackedMZError:
+@cython.ccall
+def _malformed(detail: object) -> PackedMZError:
     """Build a typed EXEPACK format error."""
     return PackedMZError(PackedMZErrorKind.MALFORMED_EXEPACK, detail)
 
 
-def _read_word(data: bytes | bytearray, offset: int, detail: str) -> int:
+@cython.ccall
+def _read_word(data: object, offset: cython.longlong, detail: object) -> cython.longlong:
     """Read a bounded little-endian word from an EXEPACK structure."""
     if offset < 0 or offset + 2 > len(data):
         raise _malformed(detail)
     return int.from_bytes(data[offset : offset + 2], "little")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _EXEPACKHeader:
     """Fields stored between the compressed image and decompression stub."""
 
-    real_ip: int
-    real_cs: int
-    exepack_size: int
-    real_sp: int
-    real_ss: int
-    destination_paragraphs: int
-    skip_paragraphs_plus_one: int
+    real_ip: cython.longlong
+    real_cs: cython.longlong
+    exepack_size: cython.longlong
+    real_sp: cython.longlong
+    real_ss: cython.longlong
+    destination_paragraphs: cython.longlong
+    skip_paragraphs_plus_one: cython.longlong
 
     @classmethod
-    def parse(cls, data: bytes) -> _EXEPACKHeader:
+    def parse(cls, data: object) -> _EXEPACKHeader:
         """Parse one of the two documented EXEPACK header layouts."""
         if len(data) not in {16, 18}:
             raise _malformed(f"unsupported EXEPACK header length {len(data)}")
@@ -67,10 +74,11 @@ class _EXEPACKHeader:
         )
 
 
-def _locate_relocation_table(stub: bytes) -> int:
+@cython.ccall
+def _locate_relocation_table(stub: object) -> cython.longlong:
     """Locate the packed relocation table after a recognized common stub suffix."""
     for position in range(len(stub) - len(_STUB_SUFFIX) + 1):
-        if stub[position : position + len(_STUB_SUFFIX)] != _STUB_SUFFIX:
+        if operator.ne(stub[position : position + len(_STUB_SUFFIX)], _STUB_SUFFIX):
             continue
         table_offset = position + len(_STUB_SUFFIX) + _ERROR_MESSAGE_LENGTH
         if table_offset <= len(stub):
@@ -78,10 +86,11 @@ def _locate_relocation_table(stub: bytes) -> int:
     raise _malformed("EXEPACK decompression stub has no recognized terminal sequence")
 
 
-def _parse_relocations(data: bytes) -> tuple[tuple[int, int], ...]:
+@cython.ccall
+def _parse_relocations(data: object) -> tuple[tuple[cython.longlong, cython.longlong], ...]:
     """Decode all 16 segment groups in the packed relocation table."""
     cursor = 0
-    relocations: list[tuple[int, int]] = []
+    relocations: list[tuple[cython.longlong, cython.longlong]] = []
     for segment_index in range(16):
         count = _read_word(data, cursor, "EXEPACK relocation group count is truncated")
         cursor += 2
@@ -89,12 +98,13 @@ def _parse_relocations(data: bytes) -> tuple[tuple[int, int], ...]:
             offset = _read_word(data, cursor, "EXEPACK relocation offset is truncated")
             cursor += 2
             relocations.append((segment_index << 12, offset))
-    if cursor != len(data):
+    if operator.ne(cursor, len(data)):
         raise _malformed("EXEPACK relocation table has trailing bytes")
     return tuple(relocations)
 
 
-def _decompress(data: bytearray, compressed_length: int, output_length: int) -> None:
+@cython.ccall
+def _decompress(data: object, compressed_length: cython.longlong, output_length: cython.longlong) -> None:
     """Run the bounded backwards EXEPACK fill/copy command stream."""
     if compressed_length < 0 or compressed_length > len(data):
         raise _malformed("EXEPACK compressed length lies outside the image")
@@ -120,7 +130,8 @@ def _decompress(data: bytearray, compressed_length: int, output_length: int) -> 
     del data[output_length:]
 
 
-def _exepack_command_step(data: bytearray, source: int, destination: int) -> tuple[int, int, bool]:
+@cython.ccall
+def _exepack_command_step(data: object, source: cython.longlong, destination: cython.longlong) -> tuple[cython.longlong, cython.longlong, cython.bint]:
     """Apply one EXEPACK fill/copy command and report stream completion."""
     if source < 3:
         raise _malformed("EXEPACK command stream is truncated")
@@ -152,9 +163,10 @@ def _exepack_command_step(data: bytearray, source: int, destination: int) -> tup
     return source, destination, bool(command & 1)
 
 
+@cython.ccall
 def _exepack_header_block(
-    mz: MZHeaderView, packed_body: bytes
-) -> tuple[_EXEPACKHeader, int, int, int]:
+    mz: MZHeaderView, packed_body: object
+) -> tuple[_EXEPACKHeader, cython.longlong, cython.longlong, cython.longlong]:
     """Parse the EXEPACK metadata block inside the packed image."""
     header_offset = mz.entry_cs << 4
     header_length = mz.entry_ip
@@ -168,9 +180,10 @@ def _exepack_header_block(
     return header, header_offset, header_end, block_end
 
 
+@cython.ccall
 def _exepack_stream_window(
-    header: _EXEPACKHeader, packed_body: bytes, header_offset: int
-) -> tuple[bytearray, int, int]:
+    header: _EXEPACKHeader, packed_body: object, header_offset: cython.longlong
+) -> tuple[bytearray, cython.longlong, cython.longlong]:
     """Compute the bounded compressed stream and decoded output extents."""
     skip_value = header.skip_paragraphs_plus_one
     if skip_value == 0:
@@ -186,8 +199,11 @@ def _exepack_stream_window(
     return compressed, compressed_length, output_length
 
 
-def unpack_exepack(data: bytes) -> UnpackedMZImage:
+@cython.ccall
+def unpack_exepack(data: object) -> UnpackedMZImage:
     """Decode a recognized EXEPACK MZ file without executing its unpacking stub."""
+    declared_size: object
+    mz: object
     mz = MZHeaderView.parse(data)
     if mz is None:
         raise PackedMZError(PackedMZErrorKind.NOT_MZ, "missing MZ signature or fixed header")

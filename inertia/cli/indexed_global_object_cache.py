@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Persist final indexed-global Widening artifacts for clean workers.
 
 Layer: CLI/fallback/reporting.
@@ -6,6 +7,8 @@ bundle without rebuilding or reclassifying IR, Alias, Widening, or Types facts.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 from dataclasses import dataclass
@@ -32,14 +35,16 @@ from inertia.widening.indexed_global_object_program_ranges import (
 from .cache import _load_cache_json, _recovery_cache_key, _store_cache_json
 from .cache_source_manifest import RecoveryCacheSourceScope8616
 from .cli_function_discovery import _display_catalog_cache_policy_8616
+import dataclasses
+import operator
 
 INDEXED_GLOBAL_OBJECT_CACHE_NAMESPACE_8616: str = "indexed_global_object_evidence"
-_INDEXED_GLOBAL_OBJECT_CACHE_SCHEMA_8616: int = 1
+_INDEXED_GLOBAL_OBJECT_CACHE_SCHEMA_8616: cython.longlong = 1
 
 log: logging.Logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class PersistedIndexedGlobalObjectEvidence8616:
     """Closed layout and bounded-range Widening artifacts from one census."""
 
@@ -47,19 +52,20 @@ class PersistedIndexedGlobalObjectEvidence8616:
     ranges: ProjectBoundedGlobalObjectRangeEvidence8616
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether both artifacts are closed and share one layout."""
         return bool(
             self.layouts.closed
             and self.ranges.closed
-            and self.ranges.layouts == self.layouts
+            and operator.eq(self.ranges.layouts, self.layouts)
         )
 
 
+@cython.ccall
 def indexed_global_object_cache_key_8616(
     source_project: object,
     binary_path: Path | None,
-) -> dict[str, object] | None:
+) -> object:
     """Return semantic identity for one closed indexed-global bundle."""
     policy = _display_catalog_cache_policy_8616(cast(angr.Project, source_project))
     return _recovery_cache_key(
@@ -80,15 +86,17 @@ def indexed_global_object_cache_key_8616(
     )
 
 
+@cython.ccall
 def load_indexed_global_object_cache_8616(
-    cache_key: dict[str, object],
+    cache_key: object,
 ) -> PersistedIndexedGlobalObjectEvidence8616 | None:
     """Restore one closed Widening bundle, refusing malformed cache data."""
+    record: object
     record = _load_cache_json(INDEXED_GLOBAL_OBJECT_CACHE_NAMESPACE_8616, cache_key)
     if record is None:
         return None
     try:
-        if not isinstance(record, dict) or record.get("schema") != _INDEXED_GLOBAL_OBJECT_CACHE_SCHEMA_8616:
+        if not isinstance(record, dict) or operator.ne(record.get("schema"), _INDEXED_GLOBAL_OBJECT_CACHE_SCHEMA_8616):
             raise ValueError("indexed-global cache has an unsupported schema")
         result = PersistedIndexedGlobalObjectEvidence8616(
             global_object_layout_evidence_from_record_8616(record.get("layouts")),
@@ -102,8 +110,9 @@ def load_indexed_global_object_cache_8616(
         return None
 
 
+@cython.ccall
 def store_indexed_global_object_cache_8616(
-    cache_key: dict[str, object],
+    cache_key: object,
     evidence: PersistedIndexedGlobalObjectEvidence8616,
 ) -> None:
     """Persist one already-classified closed Widening bundle."""

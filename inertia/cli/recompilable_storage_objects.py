@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recompilable output.
 
 Responsibility: summarize already-proven storage object artifacts for recompilation diagnostics.
@@ -11,6 +12,8 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -22,6 +25,8 @@ from inertia.lowering.storage_objects import (
     StorageObjectArtifact,
     build_storage_object_artifact,
 )
+import dataclasses
+import builtins
 
 __all__ = [
     "AccessTraitCache",
@@ -31,8 +36,8 @@ __all__ = [
     "summarize_recompilable_storage_object_artifact",
 ]
 
-type AccessTraitTraits = dict[str, dict[BaseKey, object]]
-type AccessTraitCache = Mapping[int | None, AccessTraitTraits]
+AccessTraitTraits = typing.TypeAliasType("AccessTraitTraits", dict[str, dict[BaseKey, object]])
+AccessTraitCache = typing.TypeAliasType("AccessTraitCache", Mapping[int | None, AccessTraitTraits])
 
 
 @runtime_checkable
@@ -42,14 +47,14 @@ class RecompilableStorageTraitSurface(Protocol):
     _inertia_access_traits: AccessTraitCache
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class RecompilableStorageObjectSummary:
     """Counts and categories from recompilable storage object diagnostics."""
 
-    record_count: int
-    refusal_count: int
-    object_kinds: tuple[str, ...]
-    refusal_reasons: tuple[str, ...]
+    record_count: cython.longlong
+    refusal_count: cython.longlong
+    object_kinds: object
+    refusal_reasons: object
 
 
 def build_recompilable_storage_object_artifact(
@@ -57,6 +62,7 @@ def build_recompilable_storage_object_artifact(
     function_addr: int | None,
 ) -> StorageObjectArtifact | None:
     """Build a storage-object artifact from a typed project access-trait surface."""
+    traits: object
     if not isinstance(project, RecompilableStorageTraitSurface):
         return None
     traits_cache = project._inertia_access_traits
@@ -73,8 +79,9 @@ def build_recompilable_storage_object_artifact(
     )
 
 
+@cython.ccall
 def summarize_recompilable_storage_object_artifact(
-    artifact: StorageObjectArtifact | None,
+    artifact: object,
 ) -> RecompilableStorageObjectSummary:
     """Summarize accepted and refused recompilable storage object evidence."""
     if artifact is None:
@@ -87,6 +94,6 @@ def summarize_recompilable_storage_object_artifact(
     return RecompilableStorageObjectSummary(
         record_count=len(artifact.records),
         refusal_count=len(artifact.refusals),
-        object_kinds=tuple(sorted({record.object_kind for record in artifact.records.values()})),
-        refusal_reasons=tuple(sorted({refusal.reason for refusal in artifact.refusals.values()})),
+        object_kinds=tuple(sorted({record.object_kind for record in builtins.iter(artifact.records.values())})),
+        refusal_reasons=tuple(sorted({refusal.reason for refusal in builtins.iter(artifact.refusals.values())})),
     )

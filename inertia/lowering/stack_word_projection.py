@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Recognize Alias-owned word values rebuilt from byte stack projections.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_variable import SimStackVariable
@@ -19,13 +22,17 @@ from .stack_variable_coordinates import (
     stack_variable_coordinate_registry_8616,
 )
 from .stack_word_recomposition import recognize_stack_word_recomposition_8616
+import operator
 
 
+@cython.ccall
 def stack_word_projection_owner_8616(
     codegen: object,
     node: object,
 ) -> structured_c.CVariable | None:
     """Return the exact Alias-owned word represented by two byte projections."""
+    projection: object
+    recomposition: object
     recomposition = recognize_stack_word_recomposition_8616(node)
     if recomposition is None or not isinstance(
         recomposition.low,
@@ -55,16 +62,17 @@ def stack_word_projection_owner_8616(
     return None
 
 
+@cython.ccall
 def _word_pair_shape_8616(
     projection: StackVariableCoordinateProjection8616,
     low_variable: SimStackVariable,
     high_variable: SimStackVariable,
-) -> bool:
+) -> cython.bint:
     """Return whether one projection covers the proven byte pair exactly."""
     return (
         projection.size == 2
-        and low_variable.offset == projection.entry_sp_offset
-        and high_variable.offset == projection.entry_sp_offset + 1
+        and operator.eq(low_variable.offset, projection.entry_sp_offset)
+        and operator.eq(high_variable.offset, projection.entry_sp_offset + 1)
         and high_variable.size == 1
     )
 

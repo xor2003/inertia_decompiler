@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Compare straight-line 80386 real-mode execution with hardware MOO states.
 
 Layer: Frontend verification.
@@ -6,6 +7,8 @@ and memory effects with hardware-captured before/after state.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Any, cast
 
@@ -23,6 +26,8 @@ from inertia.frontend.x86_16.verification_80286 import (
     _state_reg_set_8616,
     _step_with_lock_retry,
 )
+import operator
+import builtins
 
 _UNMODELED_DEBUG_REGISTERS: frozenset[str] = frozenset({"dr6", "dr7"})
 _DEFINED_REAL_MODE_EFLAGS_MASK = 0x00000FD5
@@ -40,7 +45,8 @@ _UNDEFINED_MUL_FLAGS = _ARITHMETIC_FLAG_PF | _ARITHMETIC_FLAG_AF | _ARITHMETIC_F
 _UNDEFINED_AAD_FLAGS = _ARITHMETIC_FLAG_CF | _ARITHMETIC_FLAG_AF | _ARITHMETIC_FLAG_OF
 
 
-def _repeat_count_80386(case: dict[str, Any], instruction: bytes) -> int | None:
+@cython.ccall
+def _repeat_count_80386(case: object, instruction: object) -> int | None:
     """Return the address-size-selected count for a repeated string instruction."""
     prefix_end = 0
     has_repeat = False
@@ -72,11 +78,13 @@ def _repeat_count_80386(case: dict[str, Any], instruction: bytes) -> int | None:
     return ecx & (0xFFFFFFFF if address_bits == 32 else 0xFFFF)
 
 
-def _repeat_should_continue_80386(state: _AngrState, instruction: bytes) -> bool:
+@cython.ccall
+def _repeat_should_continue_80386(state: _AngrState, instruction: object) -> cython.bint:
     """Return whether an address-size-selected 80386 REP iteration should continue."""
+    repeat_prefix: object
     index = 0
     address32 = False
-    repeat_prefix: int | None = None
+    repeat_prefix = None
     prefix_bytes = {0x26, 0x2E, 0x36, 0x3E, 0x64, 0x65, 0x66, 0x67, 0xF0, 0xF2, 0xF3}
     while index < len(instruction) and instruction[index] in prefix_bytes:
         if instruction[index] == 0x67:
@@ -94,10 +102,11 @@ def _repeat_should_continue_80386(state: _AngrState, instruction: bytes) -> bool
     if opcode not in {0xA6, 0xA7, 0xAE, 0xAF}:
         return True
     zero = (_solver_eval_int_8616(state, state.regs.eflags) >> 6) & 1
-    return bool(zero == (1 if repeat_prefix == 0xF3 else 0))
+    return bool(operator.eq(zero, (1 if repeat_prefix == 0xF3 else 0)))
 
 
-def _shift_count_80386(case: dict[str, Any]) -> int | None:
+@cython.ccall
+def _shift_count_80386(case: object) -> int | None:
     """Return the 80386-masked shift count encoded by one hardware case."""
     name = str(case["name"])
     if "," not in name:
@@ -111,7 +120,8 @@ def _shift_count_80386(case: dict[str, Any]) -> int | None:
         return None
 
 
-def _shift_width_80386(case: dict[str, Any]) -> int:
+@cython.ccall
+def _shift_width_80386(case: object) -> cython.longlong:
     """Infer the explicit hardware-test destination width from its decoded name."""
     destination = str(case["name"]).split(maxsplit=1)[1].split(",", maxsplit=1)[0].lower()
     if "dword" in destination or destination in {"eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp"}:
@@ -121,7 +131,8 @@ def _shift_width_80386(case: dict[str, Any]) -> int:
     return 16
 
 
-def _defined_eflags_mask_80386(case: dict[str, Any]) -> int:
+@cython.ccall
+def _defined_eflags_mask_80386(case: object) -> cython.longlong:
     """Return the architectural EFLAGS comparison mask for one hardware case."""
     name_parts = str(case["name"]).lower().split()
     mnemonic = name_parts[1] if name_parts and name_parts[0] == "lock" else name_parts[0]
@@ -141,7 +152,8 @@ def _defined_eflags_mask_80386(case: dict[str, Any]) -> int:
     return _shift_eflags_mask_80386(case, mnemonic, count)
 
 
-def _shift_eflags_mask_80386(case: dict[str, Any], mnemonic: str, count: int | None) -> int:
+@cython.ccall
+def _shift_eflags_mask_80386(case: object, mnemonic: object, count: object) -> cython.longlong:
     """Return the EFLAGS comparison mask for one shift/rotate case."""
     if mnemonic in {"rol", "ror", "rcl", "rcr"} and count is not None:
         return (
@@ -166,7 +178,7 @@ def _shift_eflags_mask_80386(case: dict[str, Any], mnemonic: str, count: int | N
     return _DEFINED_REAL_MODE_EFLAGS_MASK
 
 
-def _instruction_bytes_80386(case: dict[str, Any], project: angr.Project) -> bytes:
+def _instruction_bytes_80386(case: object, project: angr.Project) -> object:
     """Return exactly the first hardware-test instruction, excluding its terminating HLT."""
     regs = case["initial"]["regs"]
     linear_ip = ((int(regs["cs"]) & 0xFFFF) << 4) + (int(regs["eip"]) & 0xFFFF)
@@ -180,7 +192,7 @@ def _instruction_bytes_80386(case: dict[str, Any], project: angr.Project) -> byt
         prefix_end += 1
     lock_count = raw[:prefix_end].count(0xF0)
     if lock_count:
-        without_lock = bytes(byte for index, byte in enumerate(raw) if index >= prefix_end or byte != 0xF0)
+        without_lock = bytes(byte for index, byte in builtins.iter(enumerate(raw)) if index >= prefix_end or byte != 0xF0)
         decoded = tuple(project.arch.capstone.disasm(without_lock, linear_ip, 1))
         if len(decoded) == 1 and decoded[0].size > 0:
             return raw[: decoded[0].size + lock_count]
@@ -193,7 +205,8 @@ def _instruction_bytes_80386(case: dict[str, Any], project: angr.Project) -> byt
     raise ValueError("80386 hardware case does not decode exactly one instruction")
 
 
-def _instruction_is_hlt_80386(instruction: bytes) -> bool:
+@cython.ccall
+def _instruction_is_hlt_80386(instruction: object) -> cython.bint:
     """Return whether the decoded test instruction itself is HLT."""
     prefix_bytes = {0x26, 0x2E, 0x36, 0x3E, 0x64, 0x65, 0x66, 0x67, 0xF0, 0xF2, 0xF3}
     opcode_index = 0
@@ -203,9 +216,10 @@ def _instruction_is_hlt_80386(instruction: bytes) -> bool:
 
 
 def _verified_invalid_lock_fault_80386(
-    case: dict[str, Any], instruction: bytes, project: angr.Project
+    case: object, instruction: object, project: angr.Project
 ) -> bool | None:
     """Verify an invalid LOCK encoding and its hardware vector-6 entry."""
+    final_regs: object
     prefix_end = 0
     prefix_bytes = {0x26, 0x2E, 0x36, 0x3E, 0x64, 0x65, 0x66, 0x67, 0xF0, 0xF2, 0xF3}
     while prefix_end < len(instruction) and instruction[prefix_end] in prefix_bytes:
@@ -236,18 +250,20 @@ def _verified_invalid_lock_fault_80386(
         int(initial_regs["cs"]) & 0xFFFF,
         int(initial_regs["eflags"]) & 0xFFFF,
     )
-    expected_frame = [byte for value in frame_values for byte in value.to_bytes(2, "little")]
+    expected_frame = [byte for value in iter(frame_values) for byte in builtins.iter(value.to_bytes(2, "little"))]
     final_ram = dict(case["final"].get("ram", []))
     return (
-        ((int(final_regs.get("eip", -1)) - 1) & 0xFFFF) == vector_ip
-        and int(final_regs.get("cs", -1)) == vector_cs
-        and final_sp == ((int(initial_regs["esp"]) - 6) & 0xFFFF)
-        and all(final_ram.get(stack_base + offset) == byte for offset, byte in enumerate(expected_frame))
+        operator.eq(((int(final_regs.get("eip", -1)) - 1) & 0xFFFF), vector_ip)
+        and operator.eq(int(final_regs.get("cs", -1)), vector_cs)
+        and operator.eq(final_sp, ((int(initial_regs["esp"]) - 6) & 0xFFFF))
+        and all(operator.eq(final_ram.get(stack_base + offset), byte) for offset, byte in builtins.iter(enumerate(expected_frame)))
     )
 
 
-def _verified_divide_error_80386(case: dict[str, Any], instruction: bytes) -> bool | None:
+def _verified_divide_error_80386(case: object, instruction: object) -> bool | None:
     """Verify an explicit hardware vector-0 witness for DIV or IDIV."""
+    exception: object
+    final_regs: object
     index = 0
     while index < len(instruction) and instruction[index] in {0x26, 0x2E, 0x36, 0x3E, 0x64, 0x65, 0x66, 0x67, 0xF0}:
         index += 1
@@ -268,25 +284,27 @@ def _verified_divide_error_80386(case: dict[str, Any], instruction: bytes) -> bo
     vector_ip = int(initial_ram[0]) | (int(initial_ram[1]) << 8)
     vector_cs = int(initial_ram[2]) | (int(initial_ram[3]) << 8)
     hardware_fault = (
-        ((int(final_regs.get("eip", -1)) - 1) & 0xFFFFFFFF) == vector_ip
-        and int(final_regs.get("cs", -1)) == vector_cs
-        and (int(final_regs.get("esp", -1)) & 0xFFFF) == ((int(initial_regs["esp"]) - 6) & 0xFFFF)
-        and int(final_regs.get("eax", initial_regs["eax"])) == int(initial_regs["eax"])
-        and int(final_regs.get("edx", initial_regs["edx"])) == int(initial_regs["edx"])
+        operator.eq(((int(final_regs.get("eip", -1)) - 1) & 0xFFFFFFFF), vector_ip)
+        and operator.eq(int(final_regs.get("cs", -1)), vector_cs)
+        and operator.eq((int(final_regs.get("esp", -1)) & 0xFFFF), ((int(initial_regs["esp"]) - 6) & 0xFFFF))
+        and operator.eq(int(final_regs.get("eax", initial_regs["eax"])), int(initial_regs["eax"]))
+        and operator.eq(int(final_regs.get("edx", initial_regs["edx"])), int(initial_regs["edx"]))
     )
     return hardware_fault
 
 
 def _verified_real_mode_segment_limit_fault_80386(
-    case: dict[str, Any], instruction: bytes, project: angr.Project
+    case: object, instruction: object, project: angr.Project
 ) -> bool | None:
     """Verify a hardware #SS/#GP witness for any explicit address32 memory operand."""
+    exception: object
+    final_regs: object
     exception = case.get("exception")
     if not isinstance(exception, dict) or int(exception.get("number", -1)) not in {12, 13}:
         return None
     address_bits = _instruction_address_bits_80386(instruction)
     decoded = list(project.arch.capstone.disasm(instruction, int(case["initial"]["regs"]["eip"]) & 0xFFFF, 1))
-    if len(decoded) != 1 or decoded[0].size != len(instruction):
+    if len(decoded) != 1 or operator.ne(decoded[0].size, len(instruction)):
         return None
     if decoded[0].mnemonic == "lea":
         return None
@@ -305,16 +323,17 @@ def _verified_real_mode_segment_limit_fault_80386(
         int(initial_regs["cs"]) & 0xFFFF,
         int(initial_regs["eflags"]) & 0xFFFF,
     )
-    expected_frame = [byte for value in frame_values for byte in value.to_bytes(2, "little")]
+    expected_frame = [byte for value in iter(frame_values) for byte in builtins.iter(value.to_bytes(2, "little"))]
     final_ram = dict(case["final"].get("ram", []))
     return (
-        final_sp == ((int(initial_regs["esp"]) - 6) & 0xFFFF)
-        and int(final_regs.get("ss", initial_regs["ss"])) == int(initial_regs["ss"])
-        and all(final_ram.get(stack_base + offset) == byte for offset, byte in enumerate(expected_frame))
+        operator.eq(final_sp, ((int(initial_regs["esp"]) - 6) & 0xFFFF))
+        and operator.eq(int(final_regs.get("ss", initial_regs["ss"])), int(initial_regs["ss"]))
+        and all(operator.eq(final_ram.get(stack_base + offset), byte) for offset, byte in builtins.iter(enumerate(expected_frame)))
     )
 
 
-def _instruction_address_bits_80386(instruction: bytes) -> int:
+@cython.ccall
+def _instruction_address_bits_80386(instruction: object) -> cython.longlong:
     """Return 32 when the instruction carries an address-size prefix."""
     prefix_index = 0
     address_bits = 16
@@ -338,12 +357,13 @@ def _instruction_address_bits_80386(instruction: bytes) -> int:
 
 
 def _modeled_segment_limit_fault_80386(
-    insn: object, initial_regs: dict[str, Any], address_bits: int
-) -> bool:
+    insn: object, initial_regs: object, address_bits: cython.longlong
+) -> cython.bint:
     """Model whether any memory operand breaches the 64KiB segment limit."""
+    operand: object
     decoded = cast(Any, insn)
 
-    def address_register_value(name: str) -> int:
+    def address_register_value(name: object) -> cython.longlong:
         """Read a Capstone address-register name from the hardware register state."""
         if name in initial_regs:
             return int(initial_regs[name])
@@ -368,9 +388,10 @@ def _modeled_segment_limit_fault_80386(
 
 
 def _matching_fault_vector_80386(
-    initial_ram: dict[int, int], final_regs: dict[str, Any]
+    initial_ram: object, final_regs: object
 ) -> int | None:
     """Return the hardware exception vector (#SS=12/#GP=13) observed in finals."""
+    vector: object
     for vector in (12, 13):
         vector_base = vector * 4
         if not all(vector_base + offset in initial_ram for offset in range(4)):
@@ -378,17 +399,18 @@ def _matching_fault_vector_80386(
         vector_ip = initial_ram[vector_base] | initial_ram[vector_base + 1] << 8
         vector_cs = initial_ram[vector_base + 2] | initial_ram[vector_base + 3] << 8
         if (
-            ((int(final_regs.get("eip", -1)) - 1) & 0xFFFF) == vector_ip
-            and int(final_regs.get("cs", -1)) == vector_cs
+            operator.eq(((int(final_regs.get("eip", -1)) - 1) & 0xFFFF), vector_ip)
+            and operator.eq(int(final_regs.get("cs", -1)), vector_cs)
         ):
             return vector
     return None
 
 
 def _verified_bound_fault_80386(
-    case: dict[str, Any], instruction: bytes, project: angr.Project, state: angr.SimState
+    case: object, instruction: object, project: angr.Project, state: angr.SimState
 ) -> bool | None:
     """Verify a selected BOUND exit and its hardware vector-5 exception frame."""
+    final_regs: object
     initial_regs = case["initial"]["regs"]
     linear_ip = ((int(initial_regs["cs"]) & 0xFFFF) << 4) + (int(initial_regs["eip"]) & 0xFFFF)
     decoded = tuple(project.arch.capstone.disasm(instruction, linear_ip, 1))
@@ -404,8 +426,8 @@ def _verified_bound_fault_80386(
     vector_ip = initial_ram[vector_base] | initial_ram[vector_base + 1] << 8
     vector_cs = initial_ram[vector_base + 2] | initial_ram[vector_base + 3] << 8
     hardware_fault = (
-        ((int(final_regs.get("eip", -1)) - 1) & 0xFFFF) == vector_ip
-        and int(final_regs.get("cs", -1)) == vector_cs
+        operator.eq(((int(final_regs.get("eip", -1)) - 1) & 0xFFFF), vector_ip)
+        and operator.eq(int(final_regs.get("cs", -1)), vector_cs)
     )
     if not hardware_fault:
         return None
@@ -416,8 +438,10 @@ def _verified_bound_fault_80386(
     expected_sp = (int(initial_regs["esp"]) - 6) & 0xFFFF
     stack_base = (int(initial_regs["ss"]) << 4) + final_sp
 
-    def frame_word(offset: int) -> int:
+    def frame_word(offset: cython.longlong) -> cython.longlong:
         """Read one captured little-endian exception-frame word."""
+        high: object
+        low: object
         low_addr = stack_base + offset
         high_addr = stack_base + offset + 1
         low = final_ram.get(low_addr, initial_ram.get(low_addr, -1))
@@ -428,17 +452,18 @@ def _verified_bound_fault_80386(
 
     frame_matches = (
         final_sp == expected_sp
-        and frame_word(0) == (int(initial_regs["eip"]) & 0xFFFF)
-        and frame_word(2) == (int(initial_regs["cs"]) & 0xFFFF)
-        and frame_word(4) == (int(initial_regs["eflags"]) & 0xFFFF)
+        and operator.eq(frame_word(0), (int(initial_regs["eip"]) & 0xFFFF))
+        and operator.eq(frame_word(2), (int(initial_regs["cs"]) & 0xFFFF))
+        and operator.eq(frame_word(4), (int(initial_regs["eflags"]) & 0xFFFF))
     )
     return modeled_fault and frame_matches
 
 
 def _verified_software_interrupt_80386(
-    case: dict[str, Any], instruction: bytes, project: angr.Project, state: angr.SimState
+    case: object, instruction: object, project: angr.Project, state: angr.SimState
 ) -> bool | None:
     """Verify an INT/INT3 synthetic exit against its hardware IVT entry and frame."""
+    final_regs: object
     prefix_index = 0
     prefix_bytes = {0x26, 0x2E, 0x36, 0x3E, 0x64, 0x65, 0x66, 0x67, 0xF0, 0xF2, 0xF3}
     while prefix_index < len(instruction) and instruction[prefix_index] in prefix_bytes:
@@ -460,16 +485,18 @@ def _verified_software_interrupt_80386(
     vector_ip = initial_ram[vector_base] | initial_ram[vector_base + 1] << 8
     vector_cs = initial_ram[vector_base + 2] | initial_ram[vector_base + 3] << 8
     hardware_entry = (
-        ((int(final_regs.get("eip", -1)) - 1) & 0xFFFF) == vector_ip
-        and int(final_regs.get("cs", -1)) == vector_cs
+        operator.eq(((int(final_regs.get("eip", -1)) - 1) & 0xFFFF), vector_ip)
+        and operator.eq(int(final_regs.get("cs", -1)), vector_cs)
     )
     selected = _step_with_lock_retry(project, state, instruction, advance_ip_for_stripped_lock=True)
-    modeled_entry = selected.addr == (0xF000 | vector) and selected.history.jumpkind == "Ijk_Call"
+    modeled_entry = operator.eq(selected.addr, (0xF000 | vector)) and selected.history.jumpkind == "Ijk_Call"
     final_sp = int(final_regs.get("esp", -1)) & 0xFFFF
     stack_base = (int(initial_regs["ss"]) << 4) + final_sp
 
-    def frame_word(offset: int) -> int:
+    def frame_word(offset: cython.longlong) -> cython.longlong:
         """Read one captured little-endian software-interrupt frame word."""
+        high: object
+        low: object
         low_addr = stack_base + offset
         high_addr = stack_base + offset + 1
         low = final_ram.get(low_addr, initial_ram.get(low_addr, -1))
@@ -479,21 +506,27 @@ def _verified_software_interrupt_80386(
         return int(low) | int(high) << 8
 
     frame_matches = (
-        final_sp == ((int(initial_regs["esp"]) - 6) & 0xFFFF)
-        and frame_word(0) == ((int(initial_regs["eip"]) + len(instruction)) & 0xFFFF)
-        and frame_word(2) == (int(initial_regs["cs"]) & 0xFFFF)
-        and frame_word(4) == (int(initial_regs["eflags"]) & 0xFFFF)
+        operator.eq(final_sp, ((int(initial_regs["esp"]) - 6) & 0xFFFF))
+        and operator.eq(frame_word(0), ((int(initial_regs["eip"]) + len(instruction)) & 0xFFFF))
+        and operator.eq(frame_word(2), (int(initial_regs["cs"]) & 0xFFFF))
+        and operator.eq(frame_word(4), (int(initial_regs["eflags"]) & 0xFFFF))
     )
     return modeled_entry and hardware_entry and frame_matches
 
 
+@cython.ccall
 def verify_straightline_case_80386(
-    case: dict[str, Any],
+    case: object,
     *,
-    opcode: str,
+    opcode: object,
     project: angr.Project | None = None,
 ) -> CaseResult:
     """Verify one non-faulting, non-control-flow 80386 case against hardware state."""
+    fault: object
+    address: object
+    byte: object
+    register: object
+    value: object
     local_project = _make_project() if project is None else project
     result = CaseResult(opcode=opcode, idx=case["idx"], name=case["name"], hash=case.get("hash"), passed=False)
     try:
@@ -529,13 +562,15 @@ def verify_straightline_case_80386(
     return result
 
 
+@cython.ccall
 def _fault_verdict_80386(
-    case: dict[str, Any],
-    instruction: bytes,
+    case: object,
+    instruction: object,
     project: angr.Project,
     state: angr.SimState,
-) -> tuple[bool, str] | None:
+) -> object:
     """Return (passed, error) when a hardware fault witness governs the case."""
+    verdict: object
     verdict = _verified_invalid_lock_fault_80386(case, instruction, project)
     if verdict is not None:
         return verdict, "Invalid LOCK fault did not match the hardware vector-6 witness"
@@ -554,13 +589,15 @@ def _fault_verdict_80386(
     return None
 
 
+@cython.ccall
 def _execute_straightline_case_80386(
-    case: dict[str, Any],
-    instruction: bytes,
+    case: object,
+    instruction: object,
     project: angr.Project,
     state: angr.SimState,
 ) -> angr.SimState:
     """Step the case instruction with REP-aware retries."""
+    repeat_count: object
     start_addr = state.addr
     repeat_count = _repeat_count_80386(case, instruction)
     if repeat_count == 0:
@@ -570,33 +607,37 @@ def _execute_straightline_case_80386(
     iterations = 1
     while (
         repeat_count is not None
-        and state.addr == start_addr
+        and operator.eq(state.addr, start_addr)
         and iterations < repeat_count
         and _repeat_should_continue_80386(state, instruction)
     ):
         state = _step_with_lock_retry(project, state, instruction, advance_ip_for_stripped_lock=True)
         iterations += 1
-    if repeat_count is not None and state.addr == start_addr and (
+    if repeat_count is not None and operator.eq(state.addr, start_addr) and (
         iterations >= repeat_count or not _repeat_should_continue_80386(state, instruction)
     ):
         state.regs.ip = (_solver_eval_int_8616(state, state.regs.ip) + len(instruction)) & 0xFFFF
     return state
 
 
+@cython.ccall
 def _case_register_mismatches_80386(
-    case: dict[str, Any],
-    instruction: bytes,
+    case: object,
+    instruction: object,
     project: angr.Project,
     state: angr.SimState,
-    eflags_mask: int,
-) -> list[CaseMismatch]:
+    eflags_mask: cython.longlong,
+) -> object:
     """Compare every modeled register against the hardware final state."""
+    final_regs: object
+    initial_value: object
+    register: object
     initial_regs = case["initial"]["regs"]
     final_regs = case["final"].get("regs", {})
     mismatches: list[CaseMismatch] = []
     for register, initial_value in initial_regs.items():
         if register in _UNMODELED_DEBUG_REGISTERS:
-            if register in final_regs and int(final_regs[register]) != int(initial_value):
+            if register in final_regs and operator.ne(int(final_regs[register]), int(initial_value)):
                 mismatches.append(
                     CaseMismatch("unsupported_reg", register, int(final_regs[register]), int(initial_value))
                 )
@@ -616,8 +657,10 @@ def _case_register_mismatches_80386(
     return mismatches
 
 
-def _case_ram_mismatches_80386(case: dict[str, Any], state: angr.SimState) -> list[CaseMismatch]:
+@cython.ccall
+def _case_ram_mismatches_80386(case: object, state: angr.SimState) -> object:
     """Compare every touched RAM byte against the hardware final state."""
+    address: object
     initial_ram = dict(case["initial"].get("ram", []))
     final_ram = dict(case["final"].get("ram", []))
     mismatches: list[CaseMismatch] = []

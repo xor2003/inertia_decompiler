@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed contracts for logical segmented-memory accesses and execution slices.
 
 Layer: IR.
@@ -9,11 +10,15 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
 
 from .core import IRAddress, MemSpace
+import dataclasses
+import operator
 
 
 class IRMemoryAccessKind8616(StrEnum):
@@ -25,11 +30,12 @@ class IRMemoryAccessKind8616(StrEnum):
     UNKNOWN = "unknown"
 
 
+@cython.ccall
 def logical_memory_byte_offset_8616(
     address: IRAddress,
-    source_byte_offset: int,
-    address_bits: int,
-) -> int:
+    source_byte_offset: cython.longlong,
+    address_bits: cython.longlong,
+) -> cython.longlong:
     """Return one byte displacement with direct segment-offset wrap."""
     offset = int(address.offset) + source_byte_offset
     if address.base:
@@ -37,22 +43,22 @@ def logical_memory_byte_offset_8616(
     return offset & ((1 << address_bits) - 1)
 
 
+@cython.ccall
 def logical_memory_execution_address_matches_8616(
     actual: IRAddress,
     logical: IRAddress,
-    source_byte_offset: int,
-    address_bits: int,
-) -> bool:
+    source_byte_offset: cython.longlong,
+    address_bits: cython.longlong,
+) -> cython.bint:
     """Match one raw execution address to its logical segmented byte."""
     return bool(
         actual.space is logical.space
-        and actual.base == logical.base
-        and logical_memory_byte_offset_8616(actual, 0, address_bits)
-        == logical_memory_byte_offset_8616(
+        and operator.eq(actual.base, logical.base)
+        and operator.eq(logical_memory_byte_offset_8616(actual, 0, address_bits), logical_memory_byte_offset_8616(
             logical,
             source_byte_offset,
             address_bits,
-        )
+        ))
         and actual.status is logical.status
         and actual.segment_origin is logical.segment_origin
     )
@@ -74,17 +80,17 @@ class IRLogicalMemoryFailureKind8616(StrEnum):
     BYTE_COVERAGE_CONFLICT = "byte_coverage_conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRLogicalMemoryAccessKey8616:
     """Durable identity of one memory operand independent of mutable IR indexes."""
 
-    function_addr: int
-    block_addr: int
-    insn_addr: int
-    access_ordinal: int
+    function_addr: cython.longlong
+    block_addr: cython.longlong
+    insn_addr: cython.longlong
+    access_ordinal: cython.longlong
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every stable identity component is available."""
         return bool(
             self.function_addr >= 0
@@ -93,7 +99,7 @@ class IRLogicalMemoryAccessKey8616:
             and self.access_ordinal >= 0
         )
 
-    def to_dict(self) -> dict[str, int]:
+    def to_dict(self) -> dict[str, cython.longlong]:
         """Return a deterministic JSON-friendly identity record."""
         return {
             "function_addr": self.function_addr,
@@ -103,18 +109,18 @@ class IRLogicalMemoryAccessKey8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRMemoryExecutionSlice8616:
     """One exact byte operation that executes part of a logical memory access."""
 
-    block_addr: int
-    instr_index: int
-    insn_addr: int
-    source_byte_offset: int
+    block_addr: cython.longlong
+    instr_index: cython.longlong
+    insn_addr: cython.longlong
+    source_byte_offset: cython.longlong
     address: IRAddress
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether this slice has exact site and one-byte address identity."""
         return bool(
             self.block_addr >= 0
@@ -136,31 +142,31 @@ class IRMemoryExecutionSlice8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRLogicalMemoryAccess8616:
     """One typed machine operand retained across byte-oriented execution IR."""
 
     key: IRLogicalMemoryAccessKey8616
     kind: IRMemoryAccessKind8616
     address: IRAddress
-    address_bits: int
-    execution_slices: tuple[IRMemoryExecutionSlice8616, ...]
+    address_bits: cython.longlong
+    execution_slices: object
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether logical width and exact execution-byte coverage agree."""
-        offsets = tuple(item.source_byte_offset for item in self.execution_slices)
+        offsets = tuple(item.source_byte_offset for item in iter(self.execution_slices))
         return bool(
             self.key.complete
             and self.kind in {IRMemoryAccessKind8616.READ, IRMemoryAccessKind8616.WRITE}
             and self.address.space in {MemSpace.DS, MemSpace.ES, MemSpace.SS}
             and self.address.size > 0
             and self.address_bits in {16, 32}
-            and len(self.execution_slices) == self.address.size
-            and offsets == tuple(range(self.address.size))
-            and all(item.complete for item in self.execution_slices)
-            and all(item.block_addr == self.key.block_addr for item in self.execution_slices)
-            and all(item.insn_addr == self.key.insn_addr for item in self.execution_slices)
+            and operator.eq(len(self.execution_slices), self.address.size)
+            and operator.eq(offsets, tuple(range(self.address.size)))
+            and all(item.complete for item in iter(self.execution_slices))
+            and all(operator.eq(item.block_addr, self.key.block_addr) for item in iter(self.execution_slices))
+            and all(operator.eq(item.insn_addr, self.key.insn_addr) for item in iter(self.execution_slices))
             and all(
                 logical_memory_execution_address_matches_8616(
                     item.address,
@@ -168,7 +174,7 @@ class IRLogicalMemoryAccess8616:
                     item.source_byte_offset,
                     self.address_bits,
                 )
-                for item in self.execution_slices
+                for item in iter(self.execution_slices)
             )
         )
 
@@ -179,20 +185,20 @@ class IRLogicalMemoryAccess8616:
             "kind": self.kind.value,
             "address": self.address.to_dict(),
             "address_bits": self.address_bits,
-            "execution_slices": [item.to_dict() for item in self.execution_slices],
+            "execution_slices": [item.to_dict() for item in iter(self.execution_slices)],
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRLogicalMemoryRefusal8616:
     """One captured operand and its typed non-materialization outcome."""
 
-    function_addr: int
+    function_addr: cython.longlong
     block_addr: int | None
     insn_addr: int | None
     access_ordinal: int | None
     failure: IRLogicalMemoryFailureKind8616
-    detail: str
+    detail: object
 
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-friendly refusal record."""
@@ -206,18 +212,18 @@ class IRLogicalMemoryRefusal8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRLogicalMemoryStats8616:
     """Closed accounting for captured logical-memory candidates."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every raw candidate became one access or refusal."""
         return bool(
             self.raw_fact_count
@@ -226,7 +232,7 @@ class IRLogicalMemoryStats8616:
             == self.materialized_count + self.failure_count
         )
 
-    def to_dict(self) -> dict[str, int]:
+    def to_dict(self) -> dict[str, cython.longlong]:
         """Return deterministic evidence counters for diagnostics."""
         return {
             "raw_fact_count": self.raw_fact_count,
@@ -237,37 +243,38 @@ class IRLogicalMemoryStats8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRLogicalMemoryArtifact8616:
     """Function-wide accepted logical accesses and explicit typed refusals."""
 
-    function_addr: int
-    accesses: tuple[IRLogicalMemoryAccess8616, ...]
-    refusals: tuple[IRLogicalMemoryRefusal8616, ...]
+    function_addr: cython.longlong
+    accesses: object
+    refusals: object
     stats: IRLogicalMemoryStats8616
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether outcomes, counters, and accepted contracts agree."""
         return bool(
             self.stats.closed
-            and len(self.accesses) == self.stats.materialized_count
-            and len(self.refusals) == self.stats.failure_count
-            and all(item.complete for item in self.accesses)
+            and operator.eq(len(self.accesses), self.stats.materialized_count)
+            and operator.eq(len(self.refusals), self.stats.failure_count)
+            and all(item.complete for item in iter(self.accesses))
         )
 
     def to_dict(self) -> dict[str, object]:
         """Return a deterministic JSON-friendly function artifact."""
         return {
             "function_addr": self.function_addr,
-            "accesses": [item.to_dict() for item in self.accesses],
-            "refusals": [item.to_dict() for item in self.refusals],
+            "accesses": [item.to_dict() for item in iter(self.accesses)],
+            "refusals": [item.to_dict() for item in iter(self.refusals)],
             "stats": self.stats.to_dict(),
             "closed": self.closed,
         }
 
 
-def empty_ir_logical_memory_artifact_8616(function_addr: int) -> IRLogicalMemoryArtifact8616:
+@cython.ccall
+def empty_ir_logical_memory_artifact_8616(function_addr: cython.longlong) -> IRLogicalMemoryArtifact8616:
     """Return a closed empty artifact for a function with no captured operands."""
     return IRLogicalMemoryArtifact8616(function_addr, (), (), IRLogicalMemoryStats8616())
 

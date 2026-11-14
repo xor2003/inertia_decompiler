@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Explicit conditional function-entry declarations bound to exact MZ source.
 
 Layer: Frontend.
@@ -14,6 +15,8 @@ evidence, or treating overlay bytes as observed truth.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import hashlib
 import json
@@ -22,6 +25,9 @@ from enum import StrEnum
 from itertools import pairwise
 
 from inertia.frontend.x86_16.mz_invocation_source import mz_invocation_source_8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "DeclaredEntryFailure8616",
@@ -36,10 +42,10 @@ __all__ = [
     "revalidate_declared_function_entry_8616",
 ]
 
-_SPEC_VERSION_8616: int = 1
-_WORD_MAX_8616: int = 0xFFFF
-_REAL_MODE_LIMIT_8616: int = 0x100000
-_DIGEST_HEX_8616: int = 64
+_SPEC_VERSION_8616: cython.longlong = 1
+_WORD_MAX_8616: cython.longlong = 0xFFFF
+_REAL_MODE_LIMIT_8616: cython.longlong = 0x100000
+_DIGEST_HEX_8616: cython.longlong = 64
 _MANDATORY_REGISTERS_8616: frozenset[str] = frozenset({"ss", "sp"})
 _OPTIONAL_REGISTERS_8616: frozenset[str] = frozenset(
     {"ax", "bx", "cx", "dx", "bp", "si", "di", "ds", "es", "fs", "gs", "flags"}
@@ -83,24 +89,24 @@ class DeclaredEntryFailure8616(StrEnum):
 _Failure8616 = DeclaredEntryFailure8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DeclaredEntryMemory8616:
     """One declared overlay span: immutable bytes at a real-mode address."""
 
-    address: int
-    data: bytes
+    address: cython.longlong
+    data: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DeclaredEntryReturn8616:
     """The declared return-target boundary shape for the conditional entry."""
 
     kind: DeclaredEntryReturnKind8616
-    segment: int
-    offset: int
+    segment: cython.longlong
+    offset: cython.longlong
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DeclaredFunctionEntrySpec8616:
     """One parsed declaration before it binds to the exact current source.
 
@@ -114,35 +120,35 @@ class DeclaredFunctionEntrySpec8616:
     Source bytes authenticate instruction decoding separately.
     """
 
-    version: int
-    source_sha256: str
-    relocated_sha256: str
-    load_segment: int
-    entry_segment: int
-    entry_offset: int
-    range_start: int
-    range_end: int
-    native_sha256: str
-    environment_sha256: str
-    use_environment_memory: bool
-    registers: tuple[tuple[str, int], ...]
-    memory: tuple[DeclaredEntryMemory8616, ...]
+    version: cython.longlong
+    source_sha256: object
+    relocated_sha256: object
+    load_segment: cython.longlong
+    entry_segment: cython.longlong
+    entry_offset: cython.longlong
+    range_start: cython.longlong
+    range_end: cython.longlong
+    native_sha256: object
+    environment_sha256: object
+    use_environment_memory: cython.bint
+    registers: object
+    memory: object
     return_boundary: DeclaredEntryReturn8616
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> object:
         """Serialize the complete conditional premise deterministically."""
         return _declaration_document_8616(self)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DeclaredFunctionEntryRefusal8616:
     """Typed refusal result: an enumerated reason plus human detail."""
 
     reason: DeclaredEntryFailure8616
-    detail: str
+    detail: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DeclaredFunctionEntryAdmission8616:
     """A declaration bound to the exact source, module, and environment.
 
@@ -155,13 +161,13 @@ class DeclaredFunctionEntryAdmission8616:
     """
 
     spec: DeclaredFunctionEntrySpec8616
-    source: bytes
-    loaded_module: bytes
-    environment_sha256: str
-    declaration_sha256: str
+    source: object
+    loaded_module: object
+    environment_sha256: object
+    declaration_sha256: object
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Require exact agreement with a fresh admission of the inputs."""
         if type(self) is not DeclaredFunctionEntryAdmission8616:
             return False
@@ -174,7 +180,7 @@ class DeclaredFunctionEntryAdmission8616:
         return result == self
 
     @property
-    def entry_linear(self) -> int:
+    def entry_linear(self) -> cython.longlong:
         """Return the declared entry's physical address."""
         return self.spec.entry_segment * 16 + self.spec.entry_offset
 
@@ -187,39 +193,42 @@ class DeclaredFunctionEntryAdmission8616:
         }
 
 
+@cython.ccall
 def _refuse_8616(
-    reason: DeclaredEntryFailure8616, detail: str
+    reason: DeclaredEntryFailure8616, detail: object
 ) -> DeclaredFunctionEntryRefusal8616:
     """Return the typed refusal without weakening the contract."""
     return DeclaredFunctionEntryRefusal8616(reason, detail)
 
 
-def _word_8616(value: object) -> bool:
+@cython.ccall
+def _word_8616(value: object) -> cython.bint:
     """Return whether ``value`` is a strict 16-bit word, bool excluded."""
     return type(value) is int and 0 <= value <= _WORD_MAX_8616
 
 
-def _digest_8616(value: object) -> bool:
+def _digest_8616(value: object) -> cython.bint:
     """Return whether ``value`` is a lowercase SHA-256 hex digest string."""
     return (
         isinstance(value, str)
-        and len(value) == _DIGEST_HEX_8616
-        and value == value.lower()
-        and all(char in "0123456789abcdef" for char in value)
+        and operator.eq(len(value), _DIGEST_HEX_8616)
+        and operator.eq(value, value.lower())
+        and all(char in "0123456789abcdef" for char in iter(value))
     )
 
 
 def _register_map_8616(
     spec: DeclaredFunctionEntrySpec8616,
-) -> dict[str, int] | DeclaredFunctionEntryRefusal8616:
+) -> object:
     """Validate the fixed-register constraint set into a lookup map."""
-    registers: dict[str, int] = {}
+    item: object
+    registers: dict[str, cython.longlong] = {}
     for item in spec.registers:
         if (
             type(item) is not tuple
             or len(item) != 2
             or type(item[0]) is not str
-            or item[0] != item[0].lower()
+            or operator.ne(item[0], item[0].lower())
         ):
             return _refuse_8616(
                 _Failure8616.REGISTER_INVALID, "register constraints must be lowercase name/value pairs"
@@ -236,7 +245,7 @@ def _register_map_8616(
                 _Failure8616.REGISTER_INVALID, f"register {name!r} is duplicated or out of word bounds"
             )
         registers[name] = value
-    if any(name not in registers for name in _MANDATORY_REGISTERS_8616):
+    if any(name not in registers for name in iter(_MANDATORY_REGISTERS_8616)):
         return _refuse_8616(
             _Failure8616.REGISTER_INVALID, "ss/sp constraints are mandatory for the declared return frame"
         )
@@ -244,10 +253,11 @@ def _register_map_8616(
 
 
 def _memory_check_8616(
-    spec: DeclaredFunctionEntrySpec8616, native: bytes
+    spec: DeclaredFunctionEntrySpec8616, native: object
 ) -> DeclaredFunctionEntryRefusal8616 | None:
     """Validate overlay spans: bounded, nonempty, disjoint, non-altering."""
-    spans: list[tuple[int, int]] = []
+    span: object
+    spans: list[tuple[cython.longlong, cython.longlong]] = []
     for span in spec.memory:
         well_formed = (
             type(span) is DeclaredEntryMemory8616
@@ -271,20 +281,22 @@ def _memory_check_8616(
         overlap_end = min(span.address + len(span.data), spec.range_end)
         if overlap_start < overlap_end:
             native_offset = overlap_start - spec.range_start
-            if span.data[overlap_start - span.address : overlap_end - span.address] != native[
+            if operator.ne(span.data[overlap_start - span.address : overlap_end - span.address], native[
                 native_offset : native_offset + overlap_end - overlap_start
-            ]:
+            ]):
                 return _refuse_8616(
                     _Failure8616.MEMORY_ALTERS_NATIVE, "an overlay span would alter declared native function bytes"
                 )
     spans.sort()
-    if any(earlier[1] > later[0] for earlier, later in pairwise(spans)):
+    if any(earlier[1] > later[0] for earlier, later in builtins.iter(pairwise(spans))):
         return _refuse_8616(_Failure8616.MEMORY_INVALID, "declared memory spans must not overlap")
     return None
 
 
-def _declared_byte_8616(spec: DeclaredFunctionEntrySpec8616, address: int) -> int | None:
+@cython.ccall
+def _declared_byte_8616(spec: DeclaredFunctionEntrySpec8616, address: cython.longlong) -> int | None:
     """Return the declared byte at ``address`` or ``None`` when unspecified."""
+    span: object
     for span in spec.memory:
         if span.address <= address < span.address + len(span.data):
             return span.data[address - span.address]
@@ -292,7 +304,7 @@ def _declared_byte_8616(spec: DeclaredFunctionEntrySpec8616, address: int) -> in
 
 
 def _frame_check_8616(
-    spec: DeclaredFunctionEntrySpec8616, registers: dict[str, int]
+    spec: DeclaredFunctionEntrySpec8616, registers: object
 ) -> DeclaredFunctionEntryRefusal8616 | None:
     """Bind the declared return frame at SS:SP against declared memory."""
     boundary = spec.return_boundary
@@ -312,7 +324,7 @@ def _frame_check_8616(
     if boundary.kind is DeclaredEntryReturnKind8616.FAR:
         expected += boundary.segment.to_bytes(2, "little")
     if any(
-        _declared_byte_8616(spec, frame_linear + index) != expected[index]
+        operator.ne(_declared_byte_8616(spec, frame_linear + index), expected[index])
         for index in range(size)
     ):
         return _refuse_8616(
@@ -321,6 +333,7 @@ def _frame_check_8616(
     return None
 
 
+@cython.ccall
 def _declaration_document_8616(spec: DeclaredFunctionEntrySpec8616) -> dict[str, object]:
     """Project every declared field into the one canonical digest document."""
     return {
@@ -335,10 +348,10 @@ def _declaration_document_8616(spec: DeclaredFunctionEntrySpec8616) -> dict[str,
         "native_sha256": spec.native_sha256,
         "environment_sha256": spec.environment_sha256,
         "use_environment_memory": spec.use_environment_memory,
-        "registers": [list(item) for item in spec.registers],
+        "registers": [list(item) for item in iter(spec.registers)],
         "memory": [
             {"address": span.address, "data": span.data.hex()}
-            for span in spec.memory
+            for span in iter(spec.memory)
         ],
         "return_boundary": {
             "kind": spec.return_boundary.kind.value,
@@ -348,7 +361,8 @@ def _declaration_document_8616(spec: DeclaredFunctionEntrySpec8616) -> dict[str,
     }
 
 
-def _declaration_digest_8616(spec: DeclaredFunctionEntrySpec8616) -> str:
+@cython.ccall
+def _declaration_digest_8616(spec: DeclaredFunctionEntrySpec8616) -> object:
     """Digest the same complete document exposed to receipt consumers."""
     return hashlib.sha256(
         json.dumps(spec.to_dict(), sort_keys=True, separators=(",", ":")).encode()
@@ -357,27 +371,27 @@ def _declaration_digest_8616(spec: DeclaredFunctionEntrySpec8616) -> str:
 
 def _preflight_8616(
     spec: DeclaredFunctionEntrySpec8616,
-    source: bytes,
-    loaded_module: bytes,
-    environment_sha256: str,
+    source: object,
+    loaded_module: object,
+    environment_sha256: object,
 ) -> DeclaredFunctionEntryRefusal8616 | None:
     """Bind schema, digests, environment identity, and raw input shapes."""
-    if type(spec.version) is not int or spec.version != _SPEC_VERSION_8616:
+    if type(spec.version) is not int or operator.ne(spec.version, _SPEC_VERSION_8616):
         return _refuse_8616(_Failure8616.VERSION_UNSUPPORTED, "only version 1 is admitted")
     if not all(
         _digest_8616(value)
-        for value in (
+        for value in iter((
             spec.source_sha256,
             spec.relocated_sha256,
             spec.native_sha256,
             spec.environment_sha256,
             environment_sha256,
-        )
+        ))
     ):
         return _refuse_8616(
             _Failure8616.DIGEST_MALFORMED, "digest fields must be lowercase sha256 hex"
         )
-    if environment_sha256 != spec.environment_sha256:
+    if operator.ne(environment_sha256, spec.environment_sha256):
         return _refuse_8616(
             _Failure8616.ENVIRONMENT_MISMATCH, "caller environment digest does not match the declaration"
         )
@@ -393,7 +407,7 @@ def _preflight_8616(
     if (
         type(source) is not bytes
         or type(loaded_module) is not bytes
-        or hashlib.sha256(source).hexdigest() != spec.source_sha256
+        or operator.ne(hashlib.sha256(source).hexdigest(), spec.source_sha256)
     ):
         return _refuse_8616(
             _Failure8616.SOURCE_MISMATCH, "source bytes do not match the declared digest"
@@ -401,17 +415,18 @@ def _preflight_8616(
     return None
 
 
+@cython.ccall
 def _native_bytes_8616(
-    spec: DeclaredFunctionEntrySpec8616, source: bytes, loaded_module: bytes
-) -> bytes | DeclaredFunctionEntryRefusal8616:
+    spec: DeclaredFunctionEntrySpec8616, source: object, loaded_module: object
+) -> object:
     """Recompute the relocated module and slice the digest-bound range."""
     try:
         projection = mz_invocation_source_8616(source, spec.load_segment)
     except (TypeError, ValueError) as error:
         return _refuse_8616(_Failure8616.SOURCE_MISMATCH, f"MZ source refused: {error}")
     if (
-        hashlib.sha256(projection.module).hexdigest() != spec.relocated_sha256
-        or loaded_module != projection.module
+        operator.ne(hashlib.sha256(projection.module).hexdigest(), spec.relocated_sha256)
+        or operator.ne(loaded_module, projection.module)
     ):
         return _refuse_8616(
             _Failure8616.MODULE_MISMATCH, "loaded module does not equal the declared relocated module"
@@ -425,15 +440,16 @@ def _native_bytes_8616(
         return _refuse_8616(
             _Failure8616.RANGE_INVALID, "native range must lie inside the relocated module"
         )
-    native: bytes = projection.module[spec.range_start - base : spec.range_end - base]
-    if hashlib.sha256(native).hexdigest() != spec.native_sha256:
+    native: object = projection.module[spec.range_start - base : spec.range_end - base]
+    if operator.ne(hashlib.sha256(native).hexdigest(), spec.native_sha256):
         return _refuse_8616(
             _Failure8616.NATIVE_DIGEST_MISMATCH, "declared range bytes differ from the native digest"
         )
     return native
 
 
-def _entry_check_8616(spec: DeclaredFunctionEntrySpec8616) -> bool:
+@cython.ccall
+def _entry_check_8616(spec: DeclaredFunctionEntrySpec8616) -> cython.bint:
     """Return whether entry coordinates are words inside the native range."""
     if not _word_8616(spec.entry_segment) or not _word_8616(spec.entry_offset):
         return False
@@ -444,7 +460,8 @@ def _entry_check_8616(spec: DeclaredFunctionEntrySpec8616) -> bool:
     )
 
 
-def _return_boundary_valid_8616(spec: DeclaredFunctionEntrySpec8616) -> bool:
+@cython.ccall
+def _return_boundary_valid_8616(spec: DeclaredFunctionEntrySpec8616) -> cython.bint:
     """Return whether the declared boundary is typed, word-bounded, same-CS."""
     boundary = spec.return_boundary
     well_formed = (
@@ -455,14 +472,16 @@ def _return_boundary_valid_8616(spec: DeclaredFunctionEntrySpec8616) -> bool:
     )
     return well_formed and boundary.segment * 16 + boundary.offset < _REAL_MODE_LIMIT_8616 and (
         boundary.kind is not DeclaredEntryReturnKind8616.NEAR
-        or boundary.segment == spec.entry_segment
+        or operator.eq(boundary.segment, spec.entry_segment)
     )
 
 
+@cython.ccall
 def _state_check_8616(
-    spec: DeclaredFunctionEntrySpec8616, native: bytes
+    spec: DeclaredFunctionEntrySpec8616, native: object
 ) -> DeclaredFunctionEntryRefusal8616 | None:
     """Bind entry, registers, overlay spans, return boundary, and frame."""
+    memory_failure: object
     if not _entry_check_8616(spec):
         return _refuse_8616(
             _Failure8616.ENTRY_INVALID, "entry coordinates must be words inside the declared native range"
@@ -480,12 +499,13 @@ def _state_check_8616(
     return _frame_check_8616(spec, registers)
 
 
+@cython.ccall
 def admit_declared_function_entry_8616(
     spec: DeclaredFunctionEntrySpec8616,
     *,
-    source: bytes,
-    loaded_module: bytes,
-    environment_sha256: str,
+    source: object,
+    loaded_module: object,
+    environment_sha256: object,
 ) -> DeclaredFunctionEntryAdmission8616 | DeclaredFunctionEntryRefusal8616:
     """Admit one explicit conditional function-entry declaration.
 
@@ -495,6 +515,7 @@ def admit_declared_function_entry_8616(
     overlay spans, and the declared return frame. An admission asserts only
     the declared premise — no reachability, ABI, or handler-body proof.
     """
+    failure: object
     if type(spec) is not DeclaredFunctionEntrySpec8616:
         return _refuse_8616(_Failure8616.SPEC_MALFORMED, "spec must be the owned dataclass")
     failure = _preflight_8616(spec, source, loaded_module, environment_sha256)
@@ -515,13 +536,14 @@ def admit_declared_function_entry_8616(
     )
 
 
+@cython.ccall
 def revalidate_declared_function_entry_8616(
     admission: DeclaredFunctionEntryAdmission8616,
     *,
-    source: bytes,
-    loaded_module: bytes,
-    environment_sha256: str,
-) -> bool:
+    source: object,
+    loaded_module: object,
+    environment_sha256: object,
+) -> cython.bint:
     """Rebind retained premise to current consumer-authenticated input bytes.
 
     This function reads no project and proves no execution path. Its caller

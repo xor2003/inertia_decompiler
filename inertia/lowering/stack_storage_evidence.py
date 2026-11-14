@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Query Alias-owned stack storage ranges from Lowering.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from typing import Protocol, cast
 
@@ -19,6 +22,7 @@ from inertia.ir.analysis.stack_frame_ir import (
 )
 from inertia.ir.core import AddressStatus, IRAddress, MemSpace
 from inertia.ir.ssa_function import SSAFunctionArtifact
+import operator
 
 
 class _CodegenBoundary8616(Protocol):
@@ -36,7 +40,7 @@ class _FrameCodegenBoundary8616(Protocol):
 class _FunctionBoundary8616(Protocol):
     """Identity exposed by the third-party C function."""
 
-    addr: int
+    addr: cython.longlong
 
 
 class _PrivateWriteBoundary8616(_CodegenBoundary8616, Protocol):
@@ -49,16 +53,18 @@ class _PrivateWriteBoundary8616(_CodegenBoundary8616, Protocol):
 class _SourceStatementBoundary8616(Protocol):
     """Root source provenance exposed by an angr statement."""
 
-    tags: dict[str, object]
+    tags: object
 
 
-def alias_proves_private_stack_write_8616(codegen: object, statement: object) -> bool:
+@cython.ccall
+def alias_proves_private_stack_write_8616(codegen: object, statement: object) -> cython.bint:
     """Consume a current Alias proof, never infer privacy from C expressions.
 
     The caller must independently prove the assignment's exact stack identity,
     deadness and RHS purity. Nested expression tags cannot authorize a parent
     write: their source instruction may describe a different memory effect.
     """
+    source_addr: object
     try:
         tags = cast(_SourceStatementBoundary8616, statement).tags
     except AttributeError:
@@ -69,7 +75,7 @@ def alias_proves_private_stack_write_8616(codegen: object, statement: object) ->
     return type(source_addr) is int and alias_proves_private_stack_source_8616(codegen, source_addr)
 
 
-def alias_proves_private_stack_source_8616(codegen: object, source_addr: int) -> bool:
+def alias_proves_private_stack_source_8616(codegen: object, source_addr: cython.longlong) -> cython.bint:
     """Reject reconstruction of source stores already proved unobservable.
 
     This applies to storage projection only, not other register or flag effects
@@ -85,14 +91,15 @@ def alias_proves_private_stack_source_8616(codegen: object, source_addr: int) ->
         return False
     if not isinstance(artifact, StackMemorySSAAliasArtifact8616):
         return False
-    current = artifact.source_ssa is source and artifact.function_addr == function_addr
+    current = artifact.source_ssa is source and operator.eq(artifact.function_addr, function_addr)
     if not current or not artifact.complete:
         return False
-    decisions = tuple(decision for decision in artifact.private_write_decisions if decision.source_addr == source_addr)
-    return bool(decisions) and all(decision.proven for decision in decisions)
+    decisions = tuple(decision for decision in iter(artifact.private_write_decisions) if operator.eq(decision.source_addr, source_addr))
+    return bool(decisions) and all(decision.proven for decision in iter(decisions))
 
 
-def _contains_bp_range_8616(address: IRAddress, offset: int, size: int) -> bool:
+@cython.ccall
+def _contains_bp_range_8616(address: IRAddress, offset: cython.longlong, size: cython.longlong) -> cython.bint:
     """Return whether one stable BP address contains the requested range."""
     return (
         address.space is MemSpace.SS
@@ -105,9 +112,9 @@ def _contains_bp_range_8616(address: IRAddress, offset: int, size: int) -> bool:
 
 def alias_proves_stack_range_8616(
     codegen: object,
-    offset: int,
+    offset: cython.longlong,
     size: int | None,
-) -> bool:
+) -> cython.bint:
     """Return whether complete Alias evidence contains one exact byte range."""
     if not isinstance(size, int) or size <= 0:
         return False
@@ -120,18 +127,19 @@ def alias_proves_stack_range_8616(
         return False
     return any(
         _contains_bp_range_8616(fact.address, offset, size)
-        for fact in artifact.facts
+        for fact in iter(artifact.facts)
     ) or any(
         _contains_bp_range_8616(access.source.address, offset, size)
-        for access in artifact.logical_accesses
+        for access in iter(artifact.logical_accesses)
     )
 
 
+@cython.ccall
 def alias_excludes_stack_range_8616(
     codegen: object,
-    offset: int,
-    size: int,
-) -> bool:
+    offset: cython.longlong,
+    size: cython.longlong,
+) -> cython.bint:
     """Return whether complete refusal-free Alias evidence excludes a BP range."""
     boundary = cast(_CodegenBoundary8616, codegen)
     try:
@@ -149,6 +157,7 @@ def alias_excludes_stack_range_8616(
     return not alias_proves_stack_range_8616(codegen, offset, size)
 
 
+@cython.ccall
 def proven_bp_entry_sp_delta_8616(codegen: object) -> int | None:
     """Return the typed BP-to-entry-SP delta, refusing absent frame proof."""
     try:
@@ -166,9 +175,9 @@ def proven_bp_entry_sp_delta_8616(codegen: object) -> int | None:
 
 def typed_frame_excludes_stack_range_8616(
     codegen: object,
-    offset: int,
-    size: int,
-) -> bool:
+    offset: cython.longlong,
+    size: cython.longlong,
+) -> cython.bint:
     """Return whether refusal-free typed frame evidence excludes a BP range."""
     try:
         artifact = cast(_FrameCodegenBoundary8616, codegen)._inertia_vex_ir_frame
@@ -185,7 +194,7 @@ def typed_frame_excludes_stack_range_8616(
         slot.base == "bp"
         and slot.offset <= offset
         and slot.offset + slot.size >= offset + size
-        for slot in artifact.slots
+        for slot in iter(artifact.slots)
     )
 
 

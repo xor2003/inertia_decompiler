@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Canonical Alias decision for CALL register preservation.
 
 Layer: Alias.
@@ -14,6 +15,8 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -30,6 +33,7 @@ from .domains import (
     register_domain_for_name,
     register_view_for_name,
 )
+import dataclasses
 
 __all__ = (
     "CallRegisterPreservationDecision8616",
@@ -47,7 +51,7 @@ class CallRegisterPreservationVerdict8616(StrEnum):
     UNKNOWN_REFUSE = "unknown_refuse"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallRegisterPreservationDecision8616:
     """One preservation verdict for a register view across an exact CALL.
 
@@ -58,31 +62,32 @@ class CallRegisterPreservationDecision8616:
     classification for a refused view.
     """
 
-    register: str
+    register: object
     domain: DomainKey | None
     view: View | None
     verdict: CallRegisterPreservationVerdict8616
-    preserved_bits: int
-    spoiled_bits: int
-    undecided_bits: int
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    preserved_bits: cython.longlong
+    spoiled_bits: cython.longlong
+    undecided_bits: cython.longlong
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def preserves(self) -> bool:
+    def preserves(self) -> cython.bint:
         """Return whether the full view is proven unwritten by the call."""
         return self.verdict is CallRegisterPreservationVerdict8616.PRESERVED
 
 
+@cython.ccall
 def _refused_decision_8616(
-    register: str,
+    register: object,
     domain: DomainKey | None,
     view: View | None,
     *,
-    undecided_bits: int,
+    undecided_bits: cython.longlong,
 ) -> CallRegisterPreservationDecision8616:
     """Return one closed refusal for an unsupported or undecided view."""
     return CallRegisterPreservationDecision8616(
@@ -101,9 +106,10 @@ def _refused_decision_8616(
     )
 
 
+@cython.ccall
 def decide_call_register_preservation_8616(
     fact: CallRegisterRolesFact8616,
-    register: str,
+    register: object,
 ) -> CallRegisterPreservationDecision8616:
     """Decide whether one exact CALL preserves every bit of ``register``.
 
@@ -111,6 +117,9 @@ def decide_call_register_preservation_8616(
     domain view: any spoiled or undecided bit inside the view refuses the
     proof. Caller-dead, input and result roles are never consulted here.
     """
+    domain: object
+    entry: object
+    view: object
     normalized = register.lower() if isinstance(register, str) else ""
     view = register_view_for_name(normalized)
     domain = register_domain_for_name(normalized)
@@ -154,9 +163,10 @@ def decide_call_register_preservation_8616(
     )
 
 
+@cython.ccall
 def call_role_preserves_register_8616(
     fact: CallRegisterRolesFact8616,
-    register: str,
-) -> bool:
+    register: object,
+) -> cython.bint:
     """Return whether the call's may-clobber evidence preserves ``register``."""
     return decide_call_register_preservation_8616(fact, register).preserves

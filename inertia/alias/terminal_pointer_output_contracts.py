@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed Alias contracts for terminal pointer-parameter outputs.
 
 Layer: Alias.
@@ -10,6 +11,8 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -22,6 +25,8 @@ from inertia.semantics.terminal_pointer_output_contracts import (
 )
 
 from .register_reaching_source import RegisterReachingSourceResult8616
+import dataclasses
+import operator
 
 
 class TerminalPointerAliasFailure8616(StrEnum):
@@ -34,16 +39,16 @@ class TerminalPointerAliasFailure8616(StrEnum):
     PARAMETER_SOURCE_CONFLICT = "parameter_source_conflict"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalPointerAliasFact8616:
     """One pointer output bound to one exact callee parameter storage."""
 
     terminal_output: TerminalPointerOutputFact8616
     parameter_storage: IRAddress
-    reaching_sources: tuple[RegisterReachingSourceResult8616, ...]
+    reaching_sources: object
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every STORE site proves the same pointer parameter."""
         parameter = self.parameter_storage
         expected_source = (
@@ -59,29 +64,29 @@ class TerminalPointerAliasFact8616:
             and parameter.size == 2
             and parameter.status is AddressStatus.STABLE
             and parameter.segment_origin is SegmentOrigin.PROVEN
-            and len(self.reaching_sources) == len(self.terminal_output.store_sites)
+            and operator.eq(len(self.reaching_sources), len(self.terminal_output.store_sites))
             and self.reaching_sources
             and all(
-                source.source == expected_source
+                operator.eq(source.source, expected_source)
                 and source.failure_count == 0
                 and source.classified_fact_count == source.materialized_count == 1
-                for source in self.reaching_sources
+                for source in iter(self.reaching_sources)
             )
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalPointerAliasStats8616:
     """Closed accounting for Semantics pointer-output parameter binding."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every Semantics fact has one retained Alias fact."""
         return bool(
             self.raw_fact_count
@@ -92,27 +97,27 @@ class TerminalPointerAliasStats8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalPointerAliasEvidence8616:
     """Complete parameter bindings or one atomic Alias refusal."""
 
-    function_addr: int
-    facts: tuple[TerminalPointerAliasFact8616, ...]
+    function_addr: cython.longlong
+    facts: object
     failure: TerminalPointerAliasFailure8616 | None
     stats: TerminalPointerAliasStats8616
     source: TerminalPointerOutputEvidence8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether source identity and every Alias outcome close."""
         return bool(
             self.source.complete
-            and self.function_addr == self.source.function_addr
+            and operator.eq(self.function_addr, self.source.function_addr)
             and self.failure is None
             and self.stats.complete
             and len(self.facts) == len(self.source.facts) == self.stats.materialized_count
-            and all(fact.complete for fact in self.facts)
-            and tuple(fact.terminal_output for fact in self.facts) == self.source.facts
+            and all(fact.complete for fact in iter(self.facts))
+            and operator.eq(tuple(fact.terminal_output for fact in iter(self.facts)), self.source.facts)
         )
 
 

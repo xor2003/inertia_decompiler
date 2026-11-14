@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify callsite storage inputs before constructing caller SSA.
 
 Layer: Types/Lowering.
@@ -12,6 +13,8 @@ source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -33,6 +36,8 @@ from .interprocedural_storage_reaching_contracts import PhysicalCallArgument8616
 from .interprocedural_storage_reaching_defs import physical_call_argument_8616
 from .interprocedural_storage_trial_types import classify_input_argument_8616
 from .modular_argument_type_facts import ModularArgumentTypeFacts8616
+import dataclasses
+import operator
 
 __all__ = [
     "CallsiteInputPreflightResult8616",
@@ -42,29 +47,29 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ClassifiedCallsiteInput8616:
     """One logical input whose physical shape and type class are proven."""
 
-    logical_index: int
+    logical_index: cython.longlong
     storage: IRAddress
     physical: PhysicalCallArgument8616
     signedness: StorageTrialSignedness8616
     value_class: StorageTrialValueClass8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallsiteInputPreflightStats8616:
     """Closed evidence accounting before caller SSA construction."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every logical input was selected or refused once."""
         counts = (
             self.raw_fact_count,
@@ -75,37 +80,38 @@ class CallsiteInputPreflightStats8616:
         )
         return bool(
             min(counts) >= 0
-            and self.raw_fact_count == self.materialized_count + self.failure_count
-            and self.classified_fact_count == self.materialized_count
+            and operator.eq(self.raw_fact_count, self.materialized_count + self.failure_count)
+            and operator.eq(self.classified_fact_count, self.materialized_count)
             and self.classified_fact_count
             <= self.normalized_fact_count
             <= self.raw_fact_count
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallsiteInputPreflightResult8616:
     """Typed selections or fail-closed reasons for one exact callsite."""
 
-    inputs: tuple[ClassifiedCallsiteInput8616, ...]
-    failures: tuple[StorageTrialCollectionFailure8616, ...]
+    inputs: object
+    failures: object
     stats: CallsiteInputPreflightStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every logical input is ready for caller SSA lookup."""
         return bool(
             self.stats.closed
             and self.stats.failure_count == 0
-            and self.stats.materialized_count == self.stats.raw_fact_count
+            and operator.eq(self.stats.materialized_count, self.stats.raw_fact_count)
         )
 
 
+@cython.ccall
 def _failure_8616(
     kind: StorageTrialCollectionFailureKind8616,
-    callee_addr: int,
+    callee_addr: cython.longlong,
     fact: CalleeCallsiteFact8616,
-    logical_index: int,
+    logical_index: cython.longlong,
 ) -> StorageTrialCollectionFailure8616:
     """Build one exact preflight refusal."""
     return StorageTrialCollectionFailure8616(
@@ -117,11 +123,12 @@ def _failure_8616(
     )
 
 
+@cython.ccall
 def classify_callsite_inputs_before_ssa_8616(
-    callee_addr: int,
+    callee_addr: cython.longlong,
     fact: CalleeCallsiteFact8616,
     summary: CallsiteSummary8616,
-    argument_storage: tuple[IRAddress, ...],
+    argument_storage: object,
     signedness_facts: ConditionArgumentFactsResult8616,
     pointer_evidence: CalleePointerArgumentEvidence8616 | None,
     modular_facts: ModularArgumentTypeFacts8616 | None = None,
@@ -131,7 +138,11 @@ def classify_callsite_inputs_before_ssa_8616(
     Modular facts must name this exact callee in the collection's namespace;
     a proof for the same BP slot in another function is not input evidence.
     """
-    if modular_facts is not None and modular_facts.callee_addr != callee_addr:
+    physical: object
+    physical_failure: object
+    logical_index: object
+    storage: object
+    if modular_facts is not None and operator.ne(modular_facts.callee_addr, callee_addr):
         modular_facts = None
     inputs: list[ClassifiedCallsiteInput8616] = []
     failures: list[StorageTrialCollectionFailure8616] = []

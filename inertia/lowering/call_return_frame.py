@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Consume exact structured-C projections of machine CALL return frames.
 
 Layer: Types/Lowering.
@@ -14,6 +15,8 @@ stack expressions are refusal cases rather than ownership evidence.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
@@ -37,24 +40,26 @@ from inertia.semantics.call_return_frame_projections import (
 )
 
 from .runtime_segment_access import runtime_segment_access_space_8616
+import dataclasses
+import operator
 
 __all__ = [
     "CallReturnFrameCarrierPrune8616",
     "prune_exact_call_return_frame_projections_8616",
 ]
 
-type StructuredAstValue = Any
+StructuredAstValue = typing.TypeAliasType("StructuredAstValue", Any)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallReturnFrameCarrierPrune8616:
     """Closed evidence census for consumed CALL-frame C projections."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
 
 class _CodegenCallReturnFrameSurface8616(Protocol):
@@ -67,13 +72,16 @@ class _CodegenCallReturnFrameSurface8616(Protocol):
 class _RebasedProjectSurface8616(Protocol):
     """Owned slice-project contract for mapping original addresses to active ones."""
 
-    _inertia_original_linear_delta: int
+    _inertia_original_linear_delta: cython.longlong
 
 
 def _assignment_effect_key_8616(
     statement: structured_c.CAssignment,
 ) -> CallReturnFrameEffectKey8616 | None:
     """Read one exact semantic join key from third-party structured-C tags."""
+    block_addr: object
+    callsite_addr: object
+    statement_index: object
     tags = statement.tags
     if not isinstance(tags, dict):
         return None
@@ -82,7 +90,7 @@ def _assignment_effect_key_8616(
     statement_index = tags.get("vex_stmt_idx")
     if not all(
         isinstance(value, int) and not isinstance(value, bool)
-        for value in (callsite_addr, block_addr, statement_index)
+        for value in iter((callsite_addr, block_addr, statement_index))
     ):
         return None
     return CallReturnFrameEffectKey8616(
@@ -95,7 +103,7 @@ def _assignment_effect_key_8616(
 def _semantic_key_candidates_8616(
     project: object,
     structured_key: CallReturnFrameEffectKey8616,
-    semantic_keys: frozenset[CallReturnFrameEffectKey8616],
+    semantic_keys: object,
 ) -> tuple[CallReturnFrameEffectKey8616, ...]:
     """Resolve current/original address domains through the exact slice contract.
 
@@ -120,10 +128,11 @@ def _semantic_key_candidates_8616(
                     structured_key.vex_stmt_idx,
                 )
             )
-    return tuple(dict.fromkeys(key for key in candidates if key in semantic_keys))
+    return tuple(dict.fromkeys(key for key in iter(candidates) if key in semantic_keys))
 
 
-def _is_exact_sp_projection_lhs_8616(project: object, lhs: StructuredAstValue) -> bool:
+@cython.ccall
+def _is_exact_sp_projection_lhs_8616(project: object, lhs: StructuredAstValue) -> cython.bint:
     """Recognize an exact SP register projection at the angr AST boundary."""
     project_dynamic = cast(Any, project)
     try:
@@ -134,21 +143,22 @@ def _is_exact_sp_projection_lhs_8616(project: object, lhs: StructuredAstValue) -
         return False
     if isinstance(lhs, structured_c.CVariable):
         variable = lhs.variable
-        return isinstance(variable, SimRegisterVariable) and variable.reg == sp_offset
+        return isinstance(variable, SimRegisterVariable) and operator.eq(variable.reg, sp_offset)
     if not isinstance(lhs, structured_c.CDirtyExpression):
         return False
     dirty = cast(Any, lhs.dirty)
     try:
-        return dirty.oident == sp_offset and dirty.was_reg is True
+        return operator.eq(dirty.oident, sp_offset) and dirty.was_reg is True
     except AttributeError:
         return False
 
 
+@cython.ccall
 def _is_exact_ss_store_projection_lhs_8616(
     project: object,
     codegen: StructuredAstValue,
     lhs: StructuredAstValue,
-) -> bool:
+) -> cython.bint:
     """Recognize a memory lvalue for one exact Semantics-owned SS store."""
     if isinstance(lhs, structured_c.CVariable):
         variable = lhs.variable
@@ -161,52 +171,54 @@ def _is_exact_ss_store_projection_lhs_8616(
     return runtime_segment_access_space_8616(project, codegen, lhs) is MemSpace.SS
 
 
+@cython.ccall
 def _lvalue_matches_role_8616(
     project: object,
     codegen: StructuredAstValue,
     lhs: StructuredAstValue,
     role: CallReturnFrameEffectRole8616,
-) -> bool:
+) -> cython.bint:
     """Require the C lvalue class implied by one exact semantic effect role."""
     if role is CallReturnFrameEffectRole8616.STACK_POINTER_UPDATE:
         return _is_exact_sp_projection_lhs_8616(project, lhs)
     return _is_exact_ss_store_projection_lhs_8616(project, codegen, lhs)
 
 
-def _is_exact_value_producer_lhs_8616(lhs: StructuredAstValue) -> bool:
+@cython.ccall
+def _is_exact_value_producer_lhs_8616(lhs: StructuredAstValue) -> cython.bint:
     """Recognize a side-effect-free C carrier for one exclusive VEX producer."""
     return isinstance(lhs, (structured_c.CVariable, structured_c.CDirtyExpression))
 
 
 def _producer_relations_are_exact_8616(
     key: CallReturnFrameEffectKey8616,
-    relations: tuple[CallReturnFrameProjectionFact8616, ...],
+    relations: object,
     effects: Mapping[CallReturnFrameEffectKey8616, CallReturnFrameEffectRole8616],
-) -> bool:
+) -> cython.bint:
     """Require every projection of one producer to belong to exact frame stores."""
     return bool(relations) and all(
-        relation.projection_key == key
+        operator.eq(relation.projection_key, key)
         and relation.role is CallReturnFrameProjectionRole8616.VALUE_PRODUCER
-        and relation.store_key.callsite_addr == key.callsite_addr
-        and relation.store_key.vex_block_addr == key.vex_block_addr
+        and operator.eq(relation.store_key.callsite_addr, key.callsite_addr)
+        and operator.eq(relation.store_key.vex_block_addr, key.vex_block_addr)
         and effects.get(relation.store_key) is CallReturnFrameEffectRole8616.STACK_STORE
-        for relation in relations
+        for relation in iter(relations)
     )
 
 
+@cython.ccall
 def _assignment_prune_verdict_8616(
     project: object,
     codegen: object,
     statement: structured_c.CAssignment,
-    semantic_keys: frozenset[CallReturnFrameEffectKey8616],
-    producer_relations: dict[
-        CallReturnFrameEffectKey8616,
-        list[CallReturnFrameProjectionFact8616],
-    ],
+    semantic_keys: object,
+    producer_relations: object,
     refused_producer_keys: Collection[CallReturnFrameEffectKey8616],
-    effects: dict[CallReturnFrameEffectKey8616, CallReturnFrameEffectRole8616],
-) -> tuple[int, int, int]:
+    effects: object,
+) -> tuple[cython.longlong, cython.longlong, cython.longlong]:
     """Classify one assignment; return ``(raw, normalized, drop)`` flags."""
+    exact_effect: object
+    key: object
     key = _assignment_effect_key_8616(statement)
     semantic_matches = (
         _semantic_key_candidates_8616(project, key, semantic_keys)
@@ -243,13 +255,17 @@ def _assignment_prune_verdict_8616(
     return 1, 1, 1
 
 
+@cython.ccall
 def prune_exact_call_return_frame_projections_8616(
     project: object,
     codegen: StructuredAstValue,
     function: object,
-    return_addr_by_callsite: Mapping[int, int],
+    return_addr_by_callsite: Mapping[cython.longlong, cython.longlong],
 ) -> CallReturnFrameCarrierPrune8616:
     """Remove only C assignments joined to complete Semantics-owned CALL effects."""
+    node: object
+    relation: object
+    statement: object
     surface = cast(_CodegenCallReturnFrameSurface8616, codegen)
     collection = collect_call_return_frame_effects_8616(
         project,
@@ -257,7 +273,7 @@ def prune_exact_call_return_frame_projections_8616(
         return_addr_by_callsite,
     )
     surface._inertia_call_return_frame_effect_collection_8616 = collection
-    effects = {effect.key: effect.role for effect in collection.effects}
+    effects = {effect.key: effect.role for effect in iter(collection.effects)}
     producer_relations: dict[
         CallReturnFrameEffectKey8616,
         list[CallReturnFrameProjectionFact8616],
@@ -267,10 +283,10 @@ def prune_exact_call_return_frame_projections_8616(
             producer_relations.setdefault(relation.projection_key, []).append(relation)
     refused_producer_keys = {
         producer_key
-        for refusal in collection.projection_collection.refusals
-        for producer_key in refusal.producer_keys
+        for refusal in iter(collection.projection_collection.refusals)
+        for producer_key in iter(refusal.producer_keys)
     }
-    semantic_keys = frozenset((*effects, *producer_relations, *refused_producer_keys))
+    semantic_keys = frozenset(tuple(effects) + tuple(producer_relations) + tuple(refused_producer_keys))
     root = surface.cfunc.statements
     if not effects:
         return CallReturnFrameCarrierPrune8616(0, 0, 0, 0, 0)

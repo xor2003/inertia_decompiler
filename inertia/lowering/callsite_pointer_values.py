@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed service boundary for replaying proven pointer argument values.
 
 Layer: Pipeline contracts.
@@ -11,6 +12,7 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import cython
 
 from typing import Protocol, cast
 
@@ -21,8 +23,8 @@ class NearPointerArgumentValueLowerer8616(Protocol):
     """Lowering service for an already-classified near-pointer argument."""
 
     def __call__(
-        self, expression: object, segment: object, *, codegen: object, c_target: str,
-    ) -> tuple[object, bool]:
+        self, expression: object, segment: object, *, codegen: object, c_target: object,
+    ) -> object:
         """Return the C value and whether a segmented wrapper was materialized."""
         ...
 
@@ -33,6 +35,7 @@ class _PointerValueCarrier8616(Protocol):
     _inertia_near_pointer_argument_value_lowerer_8616: NearPointerArgumentValueLowerer8616
 
 
+@cython.ccall
 def bind_near_pointer_argument_value_lowerer_8616(
     codegen: object, lowerer: NearPointerArgumentValueLowerer8616,
 ) -> None:
@@ -40,9 +43,10 @@ def bind_near_pointer_argument_value_lowerer_8616(
     cast(_PointerValueCarrier8616, codegen)._inertia_near_pointer_argument_value_lowerer_8616 = lowerer
 
 
+@cython.ccall
 def consume_near_pointer_argument_value_8616(
-    expression: object, segment: object, *, codegen: object, c_target: str,
-) -> tuple[object, bool]:
+    expression: object, segment: object, *, codegen: object, c_target: object,
+) -> object:
     """Replay the bound service, refusing missing ownership before emission."""
     try:
         lowerer = cast(_PointerValueCarrier8616, codegen)._inertia_near_pointer_argument_value_lowerer_8616

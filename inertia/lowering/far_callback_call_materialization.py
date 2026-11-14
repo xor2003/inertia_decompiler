@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize only binary-proven far callback Values at direct DOS callsites.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, replace
 from enum import StrEnum
@@ -45,12 +48,15 @@ from .far_callback_call_value import FarCallbackPathValue8616, prove_far_callbac
 from .far_pointer_type import SimTypeFarPointer16_8616
 from .function_pointer_parameter_evidence import FunctionPointerParameterFact8616
 from .function_pointer_parameters import _function_pointer_type_8616
+import dataclasses
+import operator
+import builtins
 
 
 class _CFunction8616(Protocol):
     """Structured function root carried by the third-party code generator."""
 
-    addr: int
+    addr: cython.longlong
     statements: object
 
 
@@ -59,17 +65,17 @@ class _Codegen8616(Protocol):
 
     cfunc: _CFunction8616
     _inertia_raw_vex_ir_function_ssa_8616: SSAFunctionArtifact
-    _inertia_callsite_summaries: dict[int, CallsiteSummary8616]
-    _inertia_callsite_summary_inventory_8616: dict[int, CallsiteSummary8616]
-    _inertia_callsite_prototype_decls: tuple[str, ...]
-    _inertia_codegen_decl_refresh_required_8616: bool
+    _inertia_callsite_summaries: object
+    _inertia_callsite_summary_inventory_8616: object
+    _inertia_callsite_prototype_decls: object
+    _inertia_codegen_decl_refresh_required_8616: cython.bint
     _inertia_far_callback_call_materialization_result_8616: FarCallbackCallMaterializationResult8616
 
 
 class _MutableCallee8616(Protocol):
     """Writable guessed-prototype state on the third-party angr Function."""
 
-    is_prototype_guessed: bool
+    is_prototype_guessed: cython.bint
 
 
 class FarCallbackCallMaterializationDecision8616(StrEnum):
@@ -84,31 +90,31 @@ class FarCallbackCallMaterializationDecision8616(StrEnum):
     CONDITION_NOT_PROVEN = "condition-not-proven"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FarCallbackCallMaterializationResult8616:
     """Closed five-counter census of attempted far callback C calls."""
 
     decisions: tuple[FarCallbackCallMaterializationDecision8616, ...] = ()
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    changed: bool = False
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    changed: cython.bint = False
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Reject unaccounted facts or classified-but-unmaterialized effects."""
         return bool(
-            len(self.decisions) == self.raw_fact_count
-            and self.raw_fact_count == self.materialized_count + self.failure_count
+            operator.eq(len(self.decisions), self.raw_fact_count)
+            and operator.eq(self.raw_fact_count, self.materialized_count + self.failure_count)
             and self.raw_fact_count >= self.normalized_fact_count >= self.classified_fact_count
-            and self.classified_fact_count == self.materialized_count
-            and self.changed == (FarCallbackCallMaterializationDecision8616.MATERIALIZED in self.decisions)
+            and operator.eq(self.classified_fact_count, self.materialized_count)
+            and operator.eq(self.changed, (FarCallbackCallMaterializationDecision8616.MATERIALIZED in self.decisions))
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _PreparedCall8616:
     """All mutations staged only after the complete binary and CFG proof."""
 
@@ -117,10 +123,11 @@ class _PreparedCall8616:
     callback: CExpression
     scalar: CExpression
     prototype: SimTypeFunction
-    target_declarations: tuple[str, ...]
+    target_declarations: object
 
 
-def _candidate_8616(summary: CallsiteSummary8616) -> bool:
+@cython.ccall
+def _candidate_8616(summary: CallsiteSummary8616) -> cython.bint:
     """Count only the exact physical layout potentially carrying a far callback."""
     return bool(
         summary.kind is CallTargetKind8616.DIRECT_FAR_CALL
@@ -132,21 +139,23 @@ def _candidate_8616(summary: CallsiteSummary8616) -> bool:
 
 def _unique_call_8616(codegen: _Codegen8616, summary: CallsiteSummary8616) -> CFunctionCall | None:
     """Select a unique typed AST call by exact instruction identity, never by name."""
+    arguments: object
+    callee: object
     calls = tuple(
-        node for node in _iter_c_nodes_deep_8616(codegen.cfunc.statements)
+        node for node in builtins.iter(_iter_c_nodes_deep_8616(codegen.cfunc.statements))
         if isinstance(node, CFunctionCall)
-        and structured_callsite_addr_8616(node) == summary.callsite_addr
+        and operator.eq(structured_callsite_addr_8616(node), summary.callsite_addr)
     )
     if len(calls) != 1:
         return None
     call = calls[0]
     callee = call.callee_func
     arguments = call.args
-    if callee is None or callee.addr != summary.target_addr:
+    if callee is None or operator.ne(callee.addr, summary.target_addr):
         return None
     if arguments is None or len(arguments) not in (2, 3):
         return None
-    return call if all(isinstance(argument, CExpression) for argument in arguments) else None
+    return call if all(isinstance(argument, CExpression) for argument in iter(arguments)) else None
 
 
 def _compatible_prototype_8616(
@@ -154,6 +163,9 @@ def _compatible_prototype_8616(
     pointer_type: SimTypeFarPointer16_8616,
 ) -> SimTypeFunction | None:
     """Replace only a guessed physical signature or preserve an exact logical one."""
+    callee: object
+    returnty: object
+    seed: object
     callee = call.callee_func
     if callee is None:
         return None
@@ -168,11 +180,11 @@ def _compatible_prototype_8616(
         if args[0].size != 32 or args[1].size != 16:
             return None
         # Width alone does not prove the callback's pointee argument/return ABI.
-        return current if type(args[0]) is type(pointer_type) and args[0] == pointer_type else None
+        return current if type(args[0]) is type(pointer_type) and operator.eq(args[0], pointer_type) else None
     seed = physical_callsite_prototype_seed_8616(callee)
     if (
         len(args) != 3
-        or any(arg.size != 16 for arg in args)
+        or any(arg.size != 16 for arg in iter(args))
         or not (callee.is_prototype_guessed or (seed is not None and seed.matches(summary, current)))
     ):
         return None
@@ -183,11 +195,13 @@ def _compatible_prototype_8616(
     return cast(SimTypeFunction, logical_prototype.with_arch(arch))
 
 
+@cython.ccall
 def _compatible_far_interface_8616(
     project: object, call: CFunctionCall, summary: CallsiteSummary8616,
     callee_fact: FunctionPointerParameterFact8616,
-) -> tuple[SimTypeFarPointer16_8616, SimTypeFunction] | None:
+) -> object:
     """Require both the proven far pointer type and a compatible callee ABI."""
+    prototype: object
     pointer_type = _function_pointer_type_8616(callee_fact, cast(Any, project).arch)
     if not isinstance(pointer_type, SimTypeFarPointer16_8616):
         return None
@@ -199,27 +213,31 @@ def _compatible_far_interface_8616(
 
 def _prove_targets_8616(
     project: object,
-    paths: tuple[FarCallbackPathValue8616, ...],
+    paths: object,
     callee_fact: FunctionPointerParameterFact8616,
-) -> tuple[BinaryFarCallbackTargetResult8616, ...] | None:
+) -> object:
     """Require closed code-entry evidence for every proven callback Value."""
     targets = tuple(
         prove_binary_far_callback_target_8616(
             project, segment=path.segment, offset=path.offset, parameter_fact=callee_fact,
         )
-        for path in paths
+        for path in iter(paths)
     )
-    return targets if all(target.complete and target.proof is not None for target in targets) else None
+    return targets if all(target.complete and target.proof is not None for target in iter(targets)) else None
 
 
+@cython.ccall
 def _target_leaves_8616(
     codegen: _Codegen8616,
-    paths: tuple[FarCallbackPathValue8616, ...],
-    targets: tuple[BinaryFarCallbackTargetResult8616, ...],
+    paths: object,
+    targets: object,
     pointer_type: SimTypeFarPointer16_8616,
-) -> tuple[dict[int, CExpression], tuple[str, ...]] | None:
+) -> object:
     """Create typed function-symbol leaves only for distinct proven paths."""
-    leaves: dict[int, CExpression] = {}
+    target_proof: object
+    path: object
+    target: object
+    leaves: dict[cython.longlong, CExpression] = {}
     names: set[str] = set()
     for path, target in zip(paths, targets, strict=True):
         target_proof = target.proof
@@ -237,11 +255,13 @@ def _target_leaves_8616(
     return leaves, tuple(sorted(names))
 
 
+@cython.ccall
 def _callback_expression_8616(
     project: object, codegen: _Codegen8616, summary: CallsiteSummary8616,
-    leaves: dict[int, CExpression],
+    leaves: object,
 ) -> CExpression | None:
     """Select one proven Value on every call-executing predecessor path."""
+    callback: object
     if len(leaves) == 1:
         callback = next(iter(leaves.values()))
     else:
@@ -254,24 +274,24 @@ def _callback_expression_8616(
     return callback if callback.type is not None and callback.type.size == 32 else None
 
 
-def _target_function_declaration_8616(prototype: SimTypeFunction, name: str) -> str:
+def _target_function_declaration_8616(prototype: SimTypeFunction, name: object) -> str:
     """Render a direct forward declaration from the proven pointee type."""
     if prototype.returnty is None or prototype.variadic:
         raise PipelineHardError("far callback target declaration lacks a fixed return ABI")
-    arguments = ", ".join(arg.c_repr() for arg in prototype.args or ()) or "void"
+    arguments = ", ".join(arg.c_repr() for arg in iter(prototype.args or ())) or "void"
     return f"{prototype.returnty.c_repr()} {name}({arguments});"
 
 
 def _prepared_decision_8616(
     codegen: _Codegen8616, call: CFunctionCall, summary: CallsiteSummary8616,
-    callback: CExpression, declarations: tuple[str, ...],
+    callback: CExpression, declarations: object,
 ) -> FarCallbackCallMaterializationDecision8616:
     """Identify an exact prior publication without weakening current proofs."""
     already = bool(
         len(call.args) == 2
         and _same_c_expression_8616(call.args[0], callback)
         and summary.logical_arg_widths == (4, 2)
-        and all(decl in codegen._inertia_callsite_prototype_decls for decl in declarations)
+        and all(decl in codegen._inertia_callsite_prototype_decls for decl in iter(declarations))
     )
     if already:
         return FarCallbackCallMaterializationDecision8616.ALREADY_MATERIALIZED
@@ -281,8 +301,15 @@ def _prepared_decision_8616(
 def _prepare_call_8616(
     project: object, codegen: _Codegen8616, summary: CallsiteSummary8616,
     writes: LogicalWordWriteValueArtifact8616,
-) -> tuple[_PreparedCall8616 | None, FarCallbackCallMaterializationDecision8616, int]:
+) -> tuple[_PreparedCall8616 | None, FarCallbackCallMaterializationDecision8616, cython.longlong]:
     """Stage one call without mutating it until every independent proof closes."""
+    call: object
+    callback: object
+    callee_addr: object
+    classified: object
+    compatible: object
+    target_leaves: object
+    target_proofs: object
     callee_addr = summary.target_addr
     assert callee_addr is not None
     classified = binary_function_pointer_parameter_evidence_8616(project, callee_addr)
@@ -320,14 +347,18 @@ def _prepare_call_8616(
     if not isinstance(pointee, SimTypeFunction):
         raise PipelineHardError("far callback pointer has no function prototype")
     declarations = tuple(
-        _target_function_declaration_8616(pointee, name) for name in target_names
+        _target_function_declaration_8616(pointee, name) for name in iter(target_names)
     )
     decision = _prepared_decision_8616(codegen, call, summary, callback, declarations)
     return _PreparedCall8616(call, summary, callback, scalar, prototype, declarations), decision, 1
 
 
+@cython.ccall
 def _publish_prepared_call_8616(codegen: _Codegen8616, prepared: _PreparedCall8616) -> None:
     """Commit all coherent C and typed-callsite projections after proof closure."""
+    callee: object
+    current: object
+    node_id: object
     summary = prepared.summary
     updated = replace(
         summary, logical_arg_widths=(4, 2),
@@ -343,7 +374,7 @@ def _publish_prepared_call_8616(codegen: _Codegen8616, prepared: _PreparedCall86
     cast(_MutableCallee8616, callee).is_prototype_guessed = False
     codegen._inertia_callsite_summary_inventory_8616[summary.callsite_addr] = updated
     for node_id, current in tuple(codegen._inertia_callsite_summaries.items()):
-        if current.callsite_addr == summary.callsite_addr:
+        if operator.eq(current.callsite_addr, summary.callsite_addr):
             codegen._inertia_callsite_summaries[node_id] = updated
     append_codegen_sequence_attr(
         codegen, codegen.cfunc, "_inertia_callsite_prototype_decls",
@@ -361,6 +392,8 @@ def materialize_binary_far_callback_calls_8616(
     removal must independently prove that no live read or validation effect is
     lost. Refused candidates leave arguments, prototypes, and summaries intact.
     """
+    prepared: object
+    summary: object
     codegen = cast(_Codegen8616, codegen_raw)
     inventory = callsite_summary_inventory_8616(codegen)
     try:
@@ -371,7 +404,7 @@ def materialize_binary_far_callback_calls_8616(
         return result
     if not isinstance(artifact, SSAFunctionArtifact):
         raise TypeError("far callback materialization requires typed caller SSA")
-    candidates = tuple(summary for summary in inventory.values() if _candidate_8616(summary))
+    candidates = tuple(summary for summary in builtins.iter(inventory.values()) if _candidate_8616(summary))
     if not candidates:
         result = FarCallbackCallMaterializationResult8616()
         codegen._inertia_far_callback_call_materialization_result_8616 = result

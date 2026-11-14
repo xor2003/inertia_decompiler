@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Validate one exact identical-return guard collapse delta.
 
 Layer: Tail validation.
@@ -16,6 +17,8 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
@@ -29,6 +32,8 @@ from inertia.structuring.identical_return_guards import (
 from .tail_validation_selector_returns import (
     parse_selector_return_fingerprint_8616,
 )
+import dataclasses
+import operator
 
 
 class IdenticalReturnGuardValidationStatus8616(StrEnum):
@@ -41,31 +46,34 @@ class IdenticalReturnGuardValidationStatus8616(StrEnum):
     REFUSED_UNEXPECTED_EFFECT = "refused_unexpected_effect"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IdenticalReturnGuardValidationResult8616:
     """Validation outcome, consumed observations, and residual-delta state."""
 
     status: IdenticalReturnGuardValidationStatus8616
-    consumed_condition_count: int = 0
-    consumed_control_effect_count: int = 0
-    consumed_selector_return_count: int = 0
-    residual_changed: bool = False
+    consumed_condition_count: cython.longlong = 0
+    consumed_control_effect_count: cython.longlong = 0
+    consumed_selector_return_count: cython.longlong = 0
+    residual_changed: cython.bint = False
 
     @property
-    def accepted(self) -> bool:
+    def accepted(self) -> cython.bint:
         """Return whether this owner's exact typed observations were consumed."""
         return self.status is IdenticalReturnGuardValidationStatus8616.ACCEPTED
 
 
-def _tokens_8616(field_delta: object, direction: str) -> tuple[object, ...] | None:
+@cython.ccall
+def _tokens_8616(field_delta: object, direction: object) -> object:
     """Read one established tail-validation delta channel."""
+    value: object
     if not isinstance(field_delta, Mapping):
         return None
     value = field_delta.get(direction, ())
     return tuple(value) if isinstance(value, (tuple, list, set, frozenset)) else None
 
 
-def _evidence_is_closed_8616(result: IdenticalReturnGuardCollapseResult8616) -> bool:
+@cython.ccall
+def _evidence_is_closed_8616(result: IdenticalReturnGuardCollapseResult8616) -> cython.bint:
     """Require one fully classified identical-return collapse."""
     stats = result.stats
     return bool(
@@ -78,14 +86,19 @@ def _evidence_is_closed_8616(result: IdenticalReturnGuardCollapseResult8616) -> 
             IdenticalReturnGuardShape8616.ELSE_RETURN,
             IdenticalReturnGuardShape8616.FALLTHROUGH_RETURN,
         }
-        and len(result.refusals) == stats.failure_count
+        and operator.eq(len(result.refusals), stats.failure_count)
     )
 
 
+@cython.ccall
 def _delta_channels_8616(
     delta: MutableMapping[str, object],
-) -> dict[str, tuple[tuple[object, ...], tuple[object, ...]]] | IdenticalReturnGuardValidationResult8616:
+) -> object:
     """Return per-field added/removed channels or a malformed-delta refusal."""
+    added: object
+    removed: object
+    field_delta: object
+    field_name: object
     channels: dict[str, tuple[tuple[object, ...], tuple[object, ...]]] = {}
     for field_name, field_delta in delta.items():
         added = _tokens_8616(field_delta, "added")
@@ -101,13 +114,13 @@ def _delta_channels_8616(
 
 def _consume_removed_guard_effects_8616(
     shape: IdenticalReturnGuardShape8616,
-    condition_removed: tuple[object, ...],
-    control_removed: tuple[object, ...],
-) -> tuple[tuple[object, ...], tuple[object, ...], int, int] | IdenticalReturnGuardValidationResult8616:
+    condition_removed: object,
+    control_removed: object,
+) -> object:
     """Match the one collapsed guard against removed condition/control effects."""
     matched_conditions = tuple(
         condition
-        for condition in condition_removed
+        for condition in iter(condition_removed)
         if f"if:{condition}" in control_removed
     )
     if len(matched_conditions) != 1:
@@ -117,22 +130,22 @@ def _consume_removed_guard_effects_8616(
     consumed_condition = matched_conditions[0]
     consumed_control = f"if:{consumed_condition}"
     remaining_conditions = tuple(
-        condition for condition in condition_removed if condition != consumed_condition
+        condition for condition in iter(condition_removed) if condition != consumed_condition
     )
     remaining_control = tuple(
-        effect for effect in control_removed if effect != consumed_control
+        effect for effect in iter(control_removed) if effect != consumed_control
     )
     consumed_control_count = 1
     if (
         shape is IdenticalReturnGuardShape8616.ELSE_RETURN
         and "if:else" in remaining_control
     ):
-        remaining_control = tuple(effect for effect in remaining_control if effect != "if:else")
+        remaining_control = tuple(effect for effect in iter(remaining_control) if effect != "if:else")
         consumed_control_count += 1
 
     matching_selectors = tuple(
         effect
-        for effect in remaining_control
+        for effect in iter(remaining_control)
         if (
             isinstance(effect, str)
             and (selector := parse_selector_return_fingerprint_8616(effect))
@@ -145,7 +158,7 @@ def _consume_removed_guard_effects_8616(
     if len(matching_selectors) == 1:
         consumed_selector = matching_selectors[0]
         remaining_control = tuple(
-            effect for effect in remaining_control if effect != consumed_selector
+            effect for effect in iter(remaining_control) if effect != consumed_selector
         )
         consumed_control_count += 1
         consumed_selector_return_count = 1
@@ -157,15 +170,18 @@ def _consume_removed_guard_effects_8616(
     )
 
 
+@cython.ccall
 def _apply_residual_guard_delta_8616(
     validation: MutableMapping[str, object],
     delta: MutableMapping[str, object],
-    condition_added: tuple[object, ...],
-    remaining_conditions: tuple[object, ...],
-    control_added: tuple[object, ...],
-    remaining_control: tuple[object, ...],
+    condition_added: object,
+    remaining_conditions: object,
+    control_added: object,
+    remaining_control: object,
 ) -> bool | IdenticalReturnGuardValidationResult8616:
     """Write the balanced residual delta or refuse an unbalanced one."""
+    condition_delta: object
+    control_delta: object
     residual_changed = bool(
         condition_added
         or remaining_conditions
@@ -198,10 +214,15 @@ def _apply_residual_guard_delta_8616(
 
 
 def consume_identical_return_guard_validation_delta_8616(
-    result: IdenticalReturnGuardCollapseResult8616 | None,
+    result: object,
     validation: MutableMapping[str, object],
 ) -> IdenticalReturnGuardValidationResult8616:
     """Consume one proved guard collapse and preserve a balanced residual delta."""
+    condition_added: object
+    condition_removed: object
+    control_added: object
+    control_removed: object
+    delta: object
     if result is None:
         return IdenticalReturnGuardValidationResult8616(
             IdenticalReturnGuardValidationStatus8616.REFUSED_NO_RESULT
@@ -226,7 +247,7 @@ def consume_identical_return_guard_validation_delta_8616(
     control_added, control_removed = channels.get("control_flow_effects", ((), ()))
     if any(
         not isinstance(item, str)
-        for item in condition_added + condition_removed + control_added + control_removed
+        for item in iter(condition_added + condition_removed + control_added + control_removed)
     ):
         return IdenticalReturnGuardValidationResult8616(
             IdenticalReturnGuardValidationStatus8616.REFUSED_UNEXPECTED_EFFECT

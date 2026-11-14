@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed condition-domain representation and constructors.
 
 Layer: IR.
@@ -9,6 +10,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import re
 from dataclasses import dataclass, replace
@@ -17,6 +20,10 @@ from typing import TYPE_CHECKING, Any, Literal
 from .condition_fingerprint_masks import normalize_condition_full_width_masks_8616
 from .condition_fingerprint_syntax import split_condition_fingerprint_arguments_8616
 from .core import IRBinaryValue, IRCondition, IRValue
+import dataclasses
+import operator
+import builtins
+DecodedRelativeEdge = typing.TypeVar("DecodedRelativeEdge")
 
 if TYPE_CHECKING:
     from inertia.frontend.x86_16.relative_control_edge import DecodedRelativeEdge
@@ -67,7 +74,7 @@ _STACK_ARG_STORAGE_FINGERPRINT_RE_8616 = re.compile(
     r"(?::size(?P<size>\d+))?:bp(?P<offset>[+-]0x[0-9a-fA-F]+)"
 )
 
-type ConditionOp = Literal[
+ConditionOp = typing.TypeAliasType("ConditionOp", Literal[
     "and",
     "carry_compare",
     "compare",
@@ -85,7 +92,7 @@ type ConditionOp = Literal[
     "uge",
     "zero",
     "nonzero",
-]
+])
 
 _COMPARE_SYMBOLS_8616: dict[str, str] = {
     "eq": "==",
@@ -115,7 +122,7 @@ JCC_SGT_MNEMONICS_8616: frozenset[str] = frozenset({"jg", "jnle"})
 
 _JCC_COMPARISON_MNEMONICS_8616: frozenset[str] = frozenset({"jo", "jno", "js", "jns", "jp", "jpe", "jpo", "jnp"})
 
-JCC_TO_COND_8616: dict[str, ConditionOp] = dict.fromkeys(JCC_EQ_MNEMONICS_8616, "eq")
+JCC_TO_COND_8616: object = dict.fromkeys(JCC_EQ_MNEMONICS_8616, "eq")
 JCC_TO_COND_8616.update(dict.fromkeys(JCC_NE_MNEMONICS_8616, "ne"))
 JCC_TO_COND_8616.update(dict.fromkeys(JCC_ULT_MNEMONICS_8616, "ult"))
 JCC_TO_COND_8616.update(dict.fromkeys(JCC_UGE_MNEMONICS_8616, "uge"))
@@ -134,13 +141,15 @@ _SUPPORTED_JCC_MNEMONICS_8616: frozenset[str] = frozenset(JCC_TO_COND_8616.keys(
 # ── Condition builders from CMP/TEST sources ──
 
 
-def _condition_width_size_8616(width_bits: int) -> int:
+@cython.ccall
+def _condition_width_size_8616(width_bits: cython.longlong) -> cython.longlong:
     if not isinstance(width_bits, int) or width_bits <= 0:
         return 0
     return max(1, (width_bits + 7) // 8)
 
 
-def _harmonize_condition_pair_8616(lhs: Any, rhs: Any, width_bits: int) -> tuple[Any, Any]:
+@cython.ccall
+def _harmonize_condition_pair_8616(lhs: Any, rhs: Any, width_bits: cython.longlong) -> tuple[Any, Any]:
     """Normalize typed condition operand sizes in the IR layer.
 
     Mixed-width condition operands are a semantic input issue, not a rewrite
@@ -159,26 +168,26 @@ def _harmonize_condition_pair_8616(lhs: Any, rhs: Any, width_bits: int) -> tuple
     return normalized[0], normalized[1]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionRegisterUpdateIR:
     """Describe one exact full-register update feeding a condition view."""
 
-    instruction_addr: int
-    target_register: str
-    op: str
+    instruction_addr: cython.longlong
+    target_register: object
+    op: object
     rhs: IRValue | IRBinaryValue
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionRegisterBindingIR:
     """Bind one register to an exact typed value at a condition producer."""
 
-    register_name: str
+    register_name: object
     value: IRValue | IRBinaryValue
     update: ConditionRegisterUpdateIR | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionIR:
     """Typed condition IR object — the canonical form for branches.
 
@@ -191,7 +200,7 @@ class ConditionIR:
     op: ConditionOp
     lhs: Any
     rhs: Any | None = None
-    width_bits: int = 16
+    width_bits: cython.longlong = 16
     source: tuple[str, ...] = ()
     src_insn: int | None = None
     block_addr: int | None = None
@@ -199,12 +208,12 @@ class ConditionIR:
     taken_target: int | None = None
     fallthrough_target: int | None = None
     operand_bind_insn: int | None = None
-    producer_semantics: tuple[Any, ...] | None = None
+    producer_semantics: object = None
     register_bindings: tuple[ConditionRegisterBindingIR, ...] = ()
     relative_edge: DecodedRelativeEdge | None = None
 
     @property
-    def is_comparison(self) -> bool:
+    def is_comparison(self) -> cython.bint:
         """Return whether this condition has two comparison operands."""
         return self.op in {
             "eq",
@@ -220,53 +229,54 @@ class ConditionIR:
         }
 
     @property
-    def is_zero_test(self) -> bool:
+    def is_zero_test(self) -> cython.bint:
         """Return whether this condition tests one value against zero."""
         return self.op in {"zero", "nonzero"}
 
     @property
-    def is_signed(self) -> bool:
+    def is_signed(self) -> cython.bint:
         """Return whether this condition uses signed ordering semantics."""
         return self.op in {"slt", "sle", "sgt", "sge"}
 
     @property
-    def is_unsigned(self) -> bool:
+    def is_unsigned(self) -> cython.bint:
         """Return whether this condition uses unsigned ordering semantics."""
         return self.op in {"ult", "ule", "ugt", "uge"}
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionFailure:
     """Typed refusal for unsupported condition recovery in the IR layer."""
 
-    reason: str
+    reason: object
     source: tuple[str, ...] = ()
     detail: str = ""
 
     @property
-    def is_failure(self) -> bool:
+    def is_failure(self) -> cython.bint:
         """Return True so callers can branch on condition/failure results."""
         return True
 
 
 # Type alias for condition-or-failure returns
-type ConditionResult = ConditionIR | ConditionFailure
+ConditionResult = typing.TypeAliasType("ConditionResult", ConditionIR | ConditionFailure)
 
 
+@cython.ccall
 def build_condition_from_cmp_8616(
     lhs: Any,
     rhs: Any,
-    jcc: str,
+    jcc: object,
     *,
-    width_bits: int = 16,
+    width_bits: cython.longlong = 16,
     src_insn: int | None = None,
     block_addr: int | None = None,
     producer_insn: int | None = None,
     taken_target: int | None = None,
     fallthrough_target: int | None = None,
     operand_bind_insn: int | None = None,
-    producer_semantics: tuple[Any, ...] | None = None,
-    register_bindings: tuple[ConditionRegisterBindingIR, ...] = (),
+    producer_semantics: object = None,
+    register_bindings: object = (),
     relative_edge: DecodedRelativeEdge | None = None,
 ) -> ConditionResult:
     """Build a ConditionIR from CMP operands + JCC mnemonic.
@@ -274,6 +284,7 @@ def build_condition_from_cmp_8616(
     CMP lhs, rhs
     JCC label  →  ConditionIR(op, lhs, rhs)
     """
+    op: object
     normalized_jcc = jcc.lower()
     op = JCC_TO_COND_8616.get(normalized_jcc)
     if producer_semantics and producer_semantics[0] == "dec_reg16":
@@ -306,19 +317,20 @@ def build_condition_from_cmp_8616(
     )
 
 
+@cython.ccall
 def build_condition_from_test_8616(
     value: Any,
-    jcc: str,
+    jcc: object,
     *,
-    width_bits: int = 16,
+    width_bits: cython.longlong = 16,
     src_insn: int | None = None,
     block_addr: int | None = None,
     producer_insn: int | None = None,
     taken_target: int | None = None,
     fallthrough_target: int | None = None,
     operand_bind_insn: int | None = None,
-    producer_semantics: tuple[Any, ...] | None = None,
-    register_bindings: tuple[ConditionRegisterBindingIR, ...] = (),
+    producer_semantics: object = None,
+    register_bindings: object = (),
     relative_edge: DecodedRelativeEdge | None = None,
 ) -> ConditionResult:
     """Build a ConditionIR from TEST/OR/AND self-test + JCC mnemonic.
@@ -329,7 +341,7 @@ def build_condition_from_test_8616(
     if (
         isinstance(value, IRBinaryValue)
         and value.op in {"and", "or"}
-        and value.lhs == value.rhs
+        and operator.eq(value.lhs, value.rhs)
     ):
         value = value.lhs
     jcc = jcc.lower()
@@ -372,21 +384,22 @@ def build_condition_from_test_8616(
     )
 
 
+@cython.ccall
 def build_condition_from_compare_8616(
     op: ConditionOp,
     lhs: Any,
     rhs: Any,
     *,
-    width_bits: int = 16,
-    source: tuple[str, ...] = (),
+    width_bits: cython.longlong = 16,
+    source: object = (),
     src_insn: int | None = None,
     block_addr: int | None = None,
     producer_insn: int | None = None,
     taken_target: int | None = None,
     fallthrough_target: int | None = None,
     operand_bind_insn: int | None = None,
-    producer_semantics: tuple[Any, ...] | None = None,
-    register_bindings: tuple[ConditionRegisterBindingIR, ...] = (),
+    producer_semantics: object = None,
+    register_bindings: object = (),
     relative_edge: DecodedRelativeEdge | None = None,
 ) -> ConditionIR:
     """Direct ConditionIR constructor from known op and operands."""
@@ -412,43 +425,45 @@ def build_condition_from_compare_8616(
 # ── Condition source tracking (on emulator) ──
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class ConditionSource:
     """Lightweight record of last CMP/TEST for JCC consumption."""
 
-    kind: str  # "cmp" or "test"
+    kind: object  # "cmp" or "test"
     lhs: Any | None = None
     rhs: Any | None = None
     normalized_lhs: Any | None = None
     normalized_rhs: Any | None = None
-    semantics: tuple[Any, ...] | None = None
-    fallthrough_from_jcc: str | None = None
-    width_bits: int = 16
+    semantics: object = None
+    fallthrough_from_jcc: object = None
+    width_bits: cython.longlong = 16
     addr: int | None = None
     block_addr: int | None = None
-    bind_operand_at_jcc: bool = False
+    bind_operand_at_jcc: cython.bint = False
     register_bindings: tuple[ConditionRegisterBindingIR, ...] = ()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ConditionEdgeEvidence:
     """Typed condition evidence for a control-flow edge, not an AST guard yet."""
 
-    edge_block_addr: int
+    edge_block_addr: cython.longlong
     condition: ConditionIR
-    edge_kind: str
-    source_jcc: str
+    edge_kind: object
+    source_jcc: object
     producer_insn: int | None = None
-    producer_semantics: tuple[Any, ...] | None = None
+    producer_semantics: object = None
 
 
 # ── Condition sorting/deduplication ──
 
 
+@cython.ccall
 def condition_sort_key_8616(
     cond: ConditionIR,
-) -> tuple[int, int, int, int, int, int, str, str, int, str, str, str, int, tuple[int, str, int, str]]:
+) -> tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong, cython.longlong, cython.longlong, str, str, cython.longlong, str, str, str, cython.longlong, tuple[cython.longlong, str, cython.longlong, str]]:
     """Preserve distinct binary edges while deterministically ordering conditions."""
+    edge: object
     edge = cond.relative_edge
     edge_key = (-1, "", 1, "") if edge is None else (
         edge.head, edge.encoding.hex(), int(edge.source is None), edge.source or "",
@@ -471,10 +486,12 @@ def condition_sort_key_8616(
     )
 
 
-def deduplicate_conditions_8616(conditions: list[ConditionIR]) -> list[ConditionIR]:
+@cython.ccall
+def deduplicate_conditions_8616(conditions: object) -> object:
     """Return deduplicated, deterministically sorted conditions."""
+    cond: object
     seen: set[
-        tuple[int, int, int, int, int, int, str, str, int, str, str, str, int, tuple[int, str, int, str]]
+        tuple[cython.longlong, cython.longlong, cython.longlong, cython.longlong, cython.longlong, cython.longlong, str, str, cython.longlong, str, str, str, cython.longlong, tuple[cython.longlong, str, cython.longlong, str]]
     ] = set()
     unique: list[ConditionIR] = []
     for cond in sorted(conditions, key=condition_sort_key_8616):
@@ -491,7 +508,7 @@ def deduplicate_conditions_8616(conditions: list[ConditionIR]) -> list[Condition
 def build_condition_ir_8616(
     op: ConditionOp,
     *args: IRValue,
-    expr: tuple[str, ...] | None = None,
+    expr: object = None,
     width_bits: int | None = None,
 ) -> IRCondition:
     """Build an IRCondition from typed op and value args.
@@ -500,28 +517,30 @@ def build_condition_ir_8616(
     Preference: use ConditionIR and its builders above for semantic recovery.
     """
     if width_bits is None:
-        width_bits = max((int(arg.size or 0) for arg in args), default=0) * 8 or None
+        width_bits = max((int(arg.size or 0) for arg in iter(args)), default=0) * 8 or None
     return IRCondition(op=op, args=tuple(args), expr=expr, width_bits=width_bits)
 
 
-def coerce_condition_value_size_8616(value: IRValue, size: int) -> IRValue:
+@cython.ccall
+def coerce_condition_value_size_8616(value: IRValue, size: cython.longlong) -> IRValue:
     """Return an IRValue with a proven condition width, preserving identity otherwise."""
-    if size <= 0 or value.size == size:
+    if size <= 0 or operator.eq(value.size, size):
         return value
     return replace(value, size=size)
 
 
-def harmonize_condition_args_8616(*args: IRValue, size: int = 0) -> tuple[IRValue, ...]:
+def harmonize_condition_args_8616(*args: IRValue, size: cython.longlong = 0) -> tuple[IRValue, ...]:
     """Coerce condition operands to a shared byte width before semantic use."""
     target_size = int(size or 0)
     if target_size <= 0:
-        target_size = max((int(arg.size or 0) for arg in args), default=0)
+        target_size = max((int(arg.size or 0) for arg in iter(args)), default=0)
     if target_size <= 0:
         return tuple(args)
-    return tuple(coerce_condition_value_size_8616(arg, target_size) for arg in args)
+    return tuple(coerce_condition_value_size_8616(arg, target_size) for arg in iter(args))
 
 
-def normalize_condition_op_8616(op: str) -> ConditionOp:
+@cython.ccall
+def normalize_condition_op_8616(op: object) -> ConditionOp:
     """Normalize condition spellings into the IR condition operator vocabulary."""
     if op in {"and", "or", "not"}:
         return op  # type: ignore[return-value]
@@ -550,12 +569,14 @@ def normalize_condition_op_8616(op: str) -> ConditionOp:
     return "compare"
 
 
-def is_condition_truth_test_8616(op: str) -> bool:
+@cython.ccall
+def is_condition_truth_test_8616(op: object) -> cython.bint:
     """Return whether an operator is a truth/zero-style condition test."""
     return normalize_condition_op_8616(op) in {"zero", "nonzero", "and", "or", "not"}
 
 
-def is_condition_compare_family_8616(op: str) -> bool:
+@cython.ccall
+def is_condition_compare_family_8616(op: object) -> cython.bint:
     """Return whether an operator belongs to the explicit comparison family."""
     return normalize_condition_op_8616(op) in {
         "compare",
@@ -572,17 +593,20 @@ def is_condition_compare_family_8616(op: str) -> bool:
     }
 
 
-def condition_compare_symbol_8616(op: str) -> str | None:
+@cython.ccall
+def condition_compare_symbol_8616(op: object) -> object:
     """Return the C comparison symbol for normalized compare operators."""
     return _COMPARE_SYMBOLS_8616.get(normalize_condition_op_8616(op))
 
 
-def is_signed_condition_8616(op: str) -> bool:
+@cython.ccall
+def is_signed_condition_8616(op: object) -> cython.bint:
     """Return whether an operator represents signed ordering."""
     return normalize_condition_op_8616(op) in {"slt", "sle", "sgt", "sge"}
 
 
-def is_unsigned_condition_8616(op: str) -> bool:
+@cython.ccall
+def is_unsigned_condition_8616(op: object) -> cython.bint:
     """Return whether an operator represents unsigned ordering."""
     return normalize_condition_op_8616(op) in {"ult", "ule", "ugt", "uge"}
 
@@ -597,7 +621,8 @@ _INVERTED_COMPARISON_OPS_8616: dict[str, str] = {
 }
 
 
-def inverted_comparison_op_8616(op: str) -> str | None:
+@cython.ccall
+def inverted_comparison_op_8616(op: object) -> object:
     """Return the inverted comparison op name, e.g. ``CmpEQ`` → ``CmpNE``.
 
     This lives in the IR layer because condition-op inversion is a semantic
@@ -607,7 +632,7 @@ def inverted_comparison_op_8616(op: str) -> str | None:
     return _INVERTED_COMPARISON_OPS_8616.get(op)
 
 
-def canonicalize_condition_storage_fingerprint_8616(value: str) -> str:
+def canonicalize_condition_storage_fingerprint_8616(value: object) -> object:
     """Canonicalize explicitly proven BP and DS storage identities.
 
     Input tokens already carry exact BP offsets or a DS-relative linear
@@ -631,12 +656,15 @@ def canonicalize_condition_storage_fingerprint_8616(value: str) -> str:
     return _canonicalize_ds_storage_fingerprint_8616(stack_normalized)
 
 
+@cython.ccall
 def _canonicalize_ds_storage_fingerprint_8616(
-    value: str,
+    value: object,
     *,
-    preserve_global_address: bool = False,
-) -> str:
+    preserve_global_address: cython.bint = False,
+) -> object:
     """Project exact DS-relative values onto one segmented storage token."""
+    call: object
+    parsed: object
     call = _split_fingerprint_call_8616(value)
     if call is None:
         if not preserve_global_address and value.startswith("global:"):
@@ -653,7 +681,7 @@ def _canonicalize_ds_storage_fingerprint_8616(
             arg,
             preserve_global_address=op == "Reference",
         )
-        for arg in args
+        for arg in iter(args)
     ]
     if op == "Or":
         normalized = list(dict.fromkeys(normalized))
@@ -664,17 +692,22 @@ def _canonicalize_ds_storage_fingerprint_8616(
     return f"{op}({','.join(normalized)})"
 
 
+@cython.ccall
 def normalize_condition_fingerprint_string_8616(
-    value: str,
+    value: object,
     *,
-    control_flow_prefixes: tuple[str, ...] | None = None,
-) -> str:
+    control_flow_prefixes: object = None,
+) -> object:
     """Canonicalize a condition fingerprint string by inverting ``Not(CmpEQ(...))`` → ``CmpNE(...)``.
 
     This operates on fingerprint-string representations of conditions.
     The normalization is driven by the IR-layer ``inverted_comparison_op_8616``
     mapping, but the string parsing is fingerprint-format specific.
     """
+    call: object
+    inner_call: object
+    inverted: object
+    prefix: object
     if not isinstance(value, str) or not value:
         return value
 
@@ -710,8 +743,11 @@ def normalize_condition_fingerprint_string_8616(
     return value
 
 
-def invert_condition_fingerprint_string_8616(value: str) -> str | None:
+@cython.ccall
+def invert_condition_fingerprint_string_8616(value: object) -> object:
     """Invert a comparison fingerprint while preserving its arguments."""
+    call: object
+    inverted: object
     call = _split_fingerprint_call_8616(value)
     if call is None:
         return None
@@ -724,7 +760,8 @@ def invert_condition_fingerprint_string_8616(value: str) -> str | None:
     return f"{inverted}({inner})"
 
 
-def _split_fingerprint_call_8616(value: str) -> tuple[str, str] | None:
+@cython.ccall
+def _split_fingerprint_call_8616(value: object) -> object:
     """Split ``CmpEQ(reg:ax,#0x0)`` into (``CmpEQ``, ``reg:ax,#0x0``)."""
     if not isinstance(value, str) or not value.endswith(")"):
         return None
@@ -734,24 +771,30 @@ def _split_fingerprint_call_8616(value: str) -> tuple[str, str] | None:
     return value[:open_idx], value[open_idx + 1 : -1]
 
 
-def _split_fingerprint_args_8616(args_str: str) -> list[str]:
+@cython.ccall
+def _split_fingerprint_args_8616(args_str: object) -> object:
     """Keep the condition parser's keyword contract over the shared syntax owner."""
     return split_condition_fingerprint_arguments_8616(args_str)
 
 
-def _normalize_segmented_index_duplicate_displacement_8616(value: str) -> str:
+@cython.ccall
+def _normalize_segmented_index_duplicate_displacement_8616(value: object) -> object:
+    call: object
+    merged: object
+    arg: object
+    idx: object
     call = _split_fingerprint_call_8616(value)
     if call is None:
         return value
     op, args_str = call
     args = [
-        _normalize_segmented_index_duplicate_displacement_8616(arg) for arg in _split_fingerprint_args_8616(args_str)
+        _normalize_segmented_index_duplicate_displacement_8616(arg) for arg in builtins.iter(_split_fingerprint_args_8616(args_str))
     ]
     if op != "Add" or len(args) < 3 or args[0] not in {"Mul(reg:ds,const:16)", "Mul(reg:es,const:16)"}:
         return f"{op}({','.join(args)})"
 
     const_positions = {
-        arg: idx for idx, arg in enumerate(args[1:], start=1) if isinstance(arg, str) and arg.startswith("const:")
+        arg: idx for idx, arg in builtins.iter(enumerate(args[1:], start=1)) if isinstance(arg, str) and arg.startswith("const:")
     }
     for idx, arg in enumerate(args[1:], start=1):
         merged = _merged_duplicate_displacement_args_8616(args, const_positions, idx, arg)
@@ -760,13 +803,18 @@ def _normalize_segmented_index_duplicate_displacement_8616(value: str) -> str:
     return f"{op}({','.join(args)})"
 
 
+@cython.ccall
 def _merged_duplicate_displacement_args_8616(
-    args: list[str],
-    const_positions: dict[str, int],
-    idx: int,
-    arg: str,
-) -> list[str] | None:
+    args: object,
+    const_positions: object,
+    idx: cython.longlong,
+    arg: object,
+) -> object:
     """Merge one inner Add's duplicated const displacement into the outer args."""
+    duplicate_idx: object
+    inner: object
+    part: object
+    pos: object
     inner = _split_fingerprint_call_8616(arg)
     if inner is None:
         return None
@@ -774,15 +822,15 @@ def _merged_duplicate_displacement_args_8616(
     if inner_op != "Add":
         return None
     inner_args = _split_fingerprint_args_8616(inner_args_str)
-    inner_consts = [part for part in inner_args if part.startswith("const:")]
+    inner_consts = [part for part in iter(inner_args) if part.startswith("const:")]
     if len(inner_consts) != 1:
         return None
     duplicate_idx = const_positions.get(inner_consts[0])
-    if duplicate_idx is None or duplicate_idx == idx:
+    if duplicate_idx is None or operator.eq(duplicate_idx, idx):
         return None
     merged_args = [args[0]]
     for pos, part in enumerate(args[1:], start=1):
-        if pos == duplicate_idx:
+        if operator.eq(pos, duplicate_idx):
             continue
         if pos == idx:
             merged_args.extend(inner_args)
@@ -791,7 +839,8 @@ def _merged_duplicate_displacement_args_8616(
     return merged_args
 
 
-def normalize_condition_fingerprint_algebraic_8616(value: str) -> str:
+@cython.ccall
+def normalize_condition_fingerprint_algebraic_8616(value: object) -> object:
     """Apply deterministic algebraic normalization to a condition fingerprint string.
 
     Rules (validation-only, deterministic, side-effect-free):
@@ -814,9 +863,13 @@ def normalize_condition_fingerprint_algebraic_8616(value: str) -> str:
     return _normalize_algebraic_impl_8616(value)
 
 
-def _algebraic_zero_cancellation_8616(op: str, args: list[str]) -> str | None:
+@cython.ccall
+def _algebraic_zero_cancellation_8616(op: object, args: object) -> object:
     """Fold ``x - x`` and ``x + (-x)`` to the exact zero constant."""
-    if op == "Sub" and len(args) == 2 and args[0] == args[1]:
+    negated_call: object
+    negated_arg: object
+    value_arg: object
+    if op == "Sub" and len(args) == 2 and operator.eq(args[0], args[1]):
         return "const:0"
     if op == "Add" and len(args) == 2:
         for value_arg, negated_arg in ((args[0], args[1]), (args[1], args[0])):
@@ -828,12 +881,15 @@ def _algebraic_zero_cancellation_8616(op: str, args: list[str]) -> str | None:
     return None
 
 
+@cython.ccall
 def _cmp_sub_zero_rewrite_8616(
-    op: str,
-    args: list[str],
-    normalized_value: str,
-) -> str | None:
+    op: object,
+    args: object,
+    normalized_value: object,
+) -> object:
     """Rewrite ``Cmp(Sub(x, y), const:0)`` to a direct operand comparison."""
+    inner_call: object
+    lhs_call: object
     if op not in ("CmpEQ", "CmpNE") or len(args) != 2 or args[1] != "const:0":
         return None
     lhs_call = _split_fingerprint_call_8616(_normalize_arg_fingerprint_8616(args[0]))
@@ -875,8 +931,14 @@ def _cmp_sub_zero_rewrite_8616(
     return None
 
 
-def _normalize_algebraic_impl_8616(value: str) -> str:
+@cython.ccall
+def _normalize_algebraic_impl_8616(value: object) -> object:
     """Apply the algebraic fingerprint rules to one normalized value string."""
+    call: object
+    canonical: object
+    rewritten: object
+    zero: object
+    prefix: object
     if not isinstance(value, str) or not value:
         return value
 
@@ -905,7 +967,7 @@ def _normalize_algebraic_impl_8616(value: str) -> str:
         return rewritten
 
     # Recurse into args for nested normalization
-    normalized_args = [_normalize_arg_fingerprint_8616(a) for a in args]
+    normalized_args = [_normalize_arg_fingerprint_8616(a) for a in iter(args)]
     canonical = _canonicalize_add_neg_fingerprint_8616(op, normalized_args)
     if canonical is not None:
         return canonical
@@ -915,8 +977,12 @@ def _normalize_algebraic_impl_8616(value: str) -> str:
     return normalized_value
 
 
-def _normalize_arg_fingerprint_8616(arg: str) -> str:
+@cython.ccall
+def _normalize_arg_fingerprint_8616(arg: object) -> object:
     """Recursively normalize a fingerprint arg, handling nested calls."""
+    call: object
+    canonical: object
+    word_pair: object
     word_pair = _normalize_global_word_pair_arg_fingerprint_8616(arg)
     if word_pair is not None:
         return word_pair
@@ -925,18 +991,22 @@ def _normalize_arg_fingerprint_8616(arg: str) -> str:
         return arg
     op, args_str = call
     args = _split_fingerprint_args_8616(args_str)
-    normalized_args = [_normalize_arg_fingerprint_8616(a) for a in args]
+    normalized_args = [_normalize_arg_fingerprint_8616(a) for a in iter(args)]
     canonical = _canonicalize_add_neg_fingerprint_8616(op, normalized_args)
     if canonical is not None:
         return canonical
     return f"{op}({','.join(normalized_args)})"
 
 
+@cython.ccall
 def _canonicalize_add_neg_fingerprint_8616(
-    op: str,
-    args: list[str],
-) -> str | None:
+    op: object,
+    args: object,
+) -> object:
     """Return canonical subtraction for one exact addition of a negation."""
+    negated_call: object
+    negated: object
+    value: object
     if op != "Add" or len(args) != 2:
         return None
     for value, negated in ((args[0], args[1]), (args[1], args[0])):
@@ -952,7 +1022,9 @@ def _canonicalize_add_neg_fingerprint_8616(
     return None
 
 
-def _normalize_global_word_pair_arg_fingerprint_8616(arg: str) -> str | None:
+@cython.ccall
+def _normalize_global_word_pair_arg_fingerprint_8616(arg: object) -> object:
+    call: object
     call = _split_fingerprint_call_8616(arg)
     if call is None or call[0] != "Or":
         return None
@@ -966,12 +1038,13 @@ def _normalize_global_word_pair_arg_fingerprint_8616(arg: str) -> str | None:
         high = _shifted_ds_byte_offset_fingerprint_8616(args[0])
     if not isinstance(low, int) or not isinstance(high, int):
         return None
-    if high != low + 1:
+    if operator.ne(high, low + 1):
         return None
     return f"global:{low:#x}"
 
 
-def _global_offset_fingerprint_8616(value: str) -> int | None:
+@cython.ccall
+def _global_offset_fingerprint_8616(value: object) -> int | None:
     if not isinstance(value, str) or not value.startswith("global:"):
         return None
     try:
@@ -980,7 +1053,9 @@ def _global_offset_fingerprint_8616(value: str) -> int | None:
         return None
 
 
-def _shifted_ds_byte_offset_fingerprint_8616(value: str) -> int | None:
+@cython.ccall
+def _shifted_ds_byte_offset_fingerprint_8616(value: object) -> int | None:
+    call: object
     call = _split_fingerprint_call_8616(value)
     if call is None:
         return None
@@ -996,7 +1071,10 @@ def _shifted_ds_byte_offset_fingerprint_8616(value: str) -> int | None:
     return None
 
 
-def _ds_byte_deref_offset_fingerprint_8616(value: str) -> int | None:
+@cython.ccall
+def _ds_byte_deref_offset_fingerprint_8616(value: object) -> int | None:
+    call: object
+    parsed: object
     call = _split_fingerprint_call_8616(value)
     if call is None or call[0] != "Dereference":
         return None
@@ -1007,7 +1085,9 @@ def _ds_byte_deref_offset_fingerprint_8616(value: str) -> int | None:
     return offset if has_ds else None
 
 
-def _linear_ds_offset_fingerprint_8616(value: str) -> tuple[bool, int] | None:
+@cython.ccall
+def _linear_ds_offset_fingerprint_8616(value: object) -> object:
+    call: object
     if value.startswith("const:"):
         try:
             return False, int(value[len("const:") :], 0)
@@ -1029,8 +1109,12 @@ def _linear_ds_offset_fingerprint_8616(value: str) -> tuple[bool, int] | None:
     return _fold_linear_ds_args_8616(op, args)
 
 
-def _fold_linear_ds_args_8616(op: str, args: list[str]) -> tuple[bool, int] | None:
+@cython.ccall
+def _fold_linear_ds_args_8616(op: object, args: object) -> object:
     """Fold Add/Sub argument offsets into one linear ds+offset result."""
+    parsed: object
+    arg: object
+    index: object
     has_ds = False
     offset = 0
     for index, arg in enumerate(args):

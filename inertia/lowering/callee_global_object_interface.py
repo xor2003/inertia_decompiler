@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Join binary caller pointer sources with project-proven global object types.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -45,15 +48,16 @@ from .callee_global_object_type_surface import (
 )
 from .callee_pointer_evidence import CalleePointerArgumentEvidence8616
 from .near_pointer_type import near_pointer_type_8616
+import operator
 
-type GlobalStructFactory8616 = Callable[[str], SimStruct]
+GlobalStructFactory8616 = typing.TypeAliasType("GlobalStructFactory8616", Callable[[str], SimStruct])
 _LOGGER = logging.getLogger(__name__)
 
 
 class _TypeStore8616(Protocol):
     """angr named-type store used at the third-party codegen boundary."""
 
-    def __setitem__(self, name: str, value: TypeRef) -> None:
+    def __setitem__(self, name: object, value: TypeRef) -> None:
         """Register one named type reference."""
 
 
@@ -67,9 +71,9 @@ class _VariableManager8616(Protocol):
         variable: object,
         type_: SimType,
         *,
-        name: str | None = None,
-        override_bot: bool = True,
-        all_unified: bool = False,
+        name: object = None,
+        override_bot: cython.bint = True,
+        all_unified: cython.bint = False,
     ) -> None:
         """Assign one proven type to an exact variable identity."""
 
@@ -77,7 +81,7 @@ class _VariableManager8616(Protocol):
 class _CFunction8616(Protocol):
     """angr CFunction fields used to materialize the interface."""
 
-    addr: int
+    addr: cython.longlong
     arg_list: Sequence[object]
     body: object
     functy: SimTypeFunction
@@ -94,7 +98,7 @@ class _Function8616(Protocol):
 class _FunctionManager8616(Protocol):
     """angr function-manager lookup surface."""
 
-    def function(self, *, addr: int, create: bool = False) -> _Function8616 | None:
+    def function(self, *, addr: cython.longlong, create: cython.bint = False) -> _Function8616 | None:
         """Return one function without creating a guessed contract."""
 
 
@@ -114,10 +118,7 @@ class _Project8616(Protocol):
 class _PointerEvidenceCarrier8616(Protocol):
     """Owned project extension carrying binary pointer evidence by address."""
 
-    _inertia_callee_pointer_argument_evidence_8616: dict[
-        int,
-        CalleePointerArgumentEvidence8616,
-    ]
+    _inertia_callee_pointer_argument_evidence_8616: object
 
 
 class _Codegen8616(Protocol):
@@ -125,17 +126,20 @@ class _Codegen8616(Protocol):
 
     cfunc: _CFunction8616 | None
     project: _Project8616
-    show_local_types: bool
-    _inertia_codegen_decl_refresh_required_8616: bool
+    show_local_types: cython.bint
+    _inertia_codegen_decl_refresh_required_8616: cython.bint
     _inertia_callee_global_object_interface_evidence_8616: CalleeGlobalObjectInterfaceEvidence8616
 
 
+@cython.ccall
 def _materialize_aggregate_interface_8616(
     codegen: _Codegen8616,
     evidence: CalleeGlobalObjectInterfaceEvidence8616,
     struct_type: SimStruct,
-) -> tuple[int, bool]:
+) -> tuple[cython.longlong, cython.bint]:
     """Apply one closed aggregate-interface fact to args, uses, and copies."""
+    argument_nodes: object
+    cfunc: object
     cfunc = codegen.cfunc
     if cfunc is None:
         return 0, False
@@ -147,7 +151,7 @@ def _materialize_aggregate_interface_8616(
     if argument_nodes is None:
         return 0, False
     argument_variables = [
-        cast(SimStackVariable, argument.variable) for argument in argument_nodes
+        cast(SimStackVariable, argument.variable) for argument in iter(argument_nodes)
     ]
     changed = _retarget_argument_types_8616(
         codegen,
@@ -179,13 +183,14 @@ def _materialize_aggregate_interface_8616(
 def _pointer_argument_nodes_8616(
     cfunc: _CFunction8616,
     evidence: CalleeGlobalObjectInterfaceEvidence8616,
-) -> list[CVariable] | None:
+) -> object:
     """Return the proven stack-variable argument nodes or None."""
+    index: object
     function_type = cfunc.functy
     function_argument_types = list(function_type.args or ())
     if any(
         index >= len(cfunc.arg_list) or index >= len(function_argument_types)
-        for index in evidence.pointer_argument_indices
+        for index in iter(evidence.pointer_argument_indices)
     ):
         return None
     argument_nodes: list[CVariable] = []
@@ -200,14 +205,17 @@ def _pointer_argument_nodes_8616(
     return argument_nodes
 
 
+@cython.ccall
 def _retarget_argument_types_8616(
     codegen: _Codegen8616,
     cfunc: _CFunction8616,
     evidence: CalleeGlobalObjectInterfaceEvidence8616,
-    argument_nodes: list[CVariable],
+    argument_nodes: object,
     pointer_type: SimType,
-) -> bool:
+) -> cython.bint:
     """Rewrite each pointer argument's C and function-signature type."""
+    argument: object
+    index: object
     function_type = cfunc.functy
     function_argument_types = list(function_type.args or ())
     changed = False
@@ -216,7 +224,7 @@ def _retarget_argument_types_8616(
         argument_nodes,
         strict=True,
     ):
-        if argument.variable_type != pointer_type:
+        if operator.ne(argument.variable_type, pointer_type):
             argument.variable_type = pointer_type
             changed = True
         cfunc.variable_manager.set_variable_type(
@@ -225,7 +233,7 @@ def _retarget_argument_types_8616(
             override_bot=True,
             all_unified=True,
         )
-        if function_argument_types[index] != pointer_type:
+        if operator.ne(function_argument_types[index], pointer_type):
             function_argument_types[index] = pointer_type
             changed = True
     cfunc.functy = SimTypeFunction(
@@ -238,20 +246,22 @@ def _retarget_argument_types_8616(
 
 
 def _retarget_use_sites_8616(
-    roots: tuple[object, ...],
-    argument_variables: list[SimStackVariable],
+    roots: object,
+    argument_variables: object,
     pointer_type: SimType,
     registered_type: TypeRef,
     struct_type: SimStruct,
-) -> bool:
+) -> cython.bint:
     """Retype variable uses and indexed views of the pointer arguments."""
+    node: object
+    root: object
     changed = False
     for root in roots:
         for node in _iter_c_nodes_deep_8616(root):
             if isinstance(node, CVariable) and any(
                 same_stack_variable_8616(node.variable, argument)
-                for argument in argument_variables
-            ) and node.variable_type != pointer_type:
+                for argument in iter(argument_variables)
+            ) and operator.ne(node.variable_type, pointer_type):
                 node.variable_type = pointer_type
                 changed = True
             if (
@@ -259,7 +269,7 @@ def _retarget_use_sites_8616(
                 and isinstance(node.variable, CVariable)
                 and any(
                     same_stack_variable_8616(node.variable.variable, argument)
-                    for argument in argument_variables
+                    for argument in iter(argument_variables)
                 )
                 and not is_named_struct_type_8616(node.type, struct_type)
             ):
@@ -268,7 +278,8 @@ def _retarget_use_sites_8616(
     return changed
 
 
-def _aggregate_local_assignment_8616(node: object, struct_type: SimStruct) -> bool:
+@cython.ccall
+def _aggregate_local_assignment_8616(node: object, struct_type: SimStruct) -> cython.bint:
     """Return whether one statement copies a struct view into a BP-local."""
     return bool(
         isinstance(node, CAssignment)
@@ -282,11 +293,14 @@ def _aggregate_local_assignment_8616(node: object, struct_type: SimStruct) -> bo
 
 def _retype_aggregate_locals_8616(
     cfunc: _CFunction8616,
-    roots: tuple[object, ...],
+    roots: object,
     struct_type: SimStruct,
     registered_type: TypeRef,
-) -> bool:
+) -> cython.bint:
     """Declare and retype locals materialized from the struct view."""
+    local: object
+    node: object
+    root: object
     aggregate_locals: list[SimStackVariable] = []
     for root in roots:
         for node in _iter_c_nodes_deep_8616(root):
@@ -310,19 +324,22 @@ def _retype_aggregate_locals_8616(
         for node in _iter_c_nodes_deep_8616(root):
             if isinstance(node, CVariable) and any(
                 same_stack_variable_8616(node.variable, local)
-                for local in aggregate_locals
+                for local in iter(aggregate_locals)
             ) and not is_named_struct_type_8616(node.variable_type, struct_type):
                 node.variable_type = registered_type
                 changed = True
     return changed
 
 
+@cython.ccall
 def _retarget_callee_prototype_8616(
     codegen: _Codegen8616,
     evidence: CalleeGlobalObjectInterfaceEvidence8616,
     pointer_type: SimType,
 ) -> None:
     """Rewrite the callee-side prototype argument types when present."""
+    function: object
+    index: object
     try:
         function = codegen.project.kb.functions.function(
             addr=evidence.target_addr,
@@ -348,8 +365,10 @@ def materialize_callee_global_object_interface_8616(
     codegen_raw: object,
     layout_evidence: GlobalObjectLayoutEvidence8616,
     struct_factory: GlobalStructFactory8616,
-) -> bool:
+) -> cython.bint:
     """Collect and materialize one all-callers aggregate pointer contract."""
+    cfunc: object
+    pointer_evidence: object
     codegen = cast(_Codegen8616, codegen_raw)
     try:
         cfunc = codegen.cfunc
@@ -382,7 +401,7 @@ def materialize_callee_global_object_interface_8616(
                     fact.base_offset,
                     fact.family_base_offset,
                 )
-                for fact in evidence.source_facts
+                for fact in iter(evidence.source_facts)
             ),
             pointer_evidence,
             evidence.family_base_offset,
@@ -396,7 +415,7 @@ def materialize_callee_global_object_interface_8616(
             (
                 len(cfunc.arg_list),
                 len(cfunc.functy.args or ()),
-                tuple(type(argument).__name__ for argument in cfunc.arg_list),
+                tuple(type(argument).__name__ for argument in iter(cfunc.arg_list)),
             ),
         )
     if evidence.family_base_offset is None:

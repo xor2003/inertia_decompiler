@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Static policy for guarded postprocess-pass validation.
 
 Layer: Rewrite/Postprocess cleanup.
@@ -10,6 +11,7 @@ text, COD, source, or CLI/reporting evidence here.
 """
 
 from __future__ import annotations
+import cython
 
 from inertia.lowering.real_mode_linear import DirectStackMoveSourceKind8616
 
@@ -102,11 +104,11 @@ DIRECT_STACK_MOVE_VALIDATION_PASS_NAMES_8616: frozenset[str] = frozenset(
 
 NON_IDIV_DIRECT_STACK_MOVE_SOURCE_KINDS_8616: frozenset[DirectStackMoveSourceKind8616] = frozenset(
     kind
-    for kind in DirectStackMoveSourceKind8616
+    for kind in iter(DirectStackMoveSourceKind8616)
     if kind is not DirectStackMoveSourceKind8616.SIGNED_IDIV_REMAINDER
 )
 
-HELPER_NAME_ONLY_VALIDATION_PASS_NAMES_8616: frozenset[str] = JCC_REWRITE_VALIDATION_PASS_NAMES_8616 | frozenset(
+HELPER_NAME_ONLY_VALIDATION_PASS_NAMES_8616: object = JCC_REWRITE_VALIDATION_PASS_NAMES_8616 | frozenset(
     {
         "_materialize_callsite_stack_arguments_8616",
         "_materialize_callsite_stack_arguments_after_ss_lowering_8616",
@@ -143,10 +145,10 @@ CALL_RECOVERY_VALIDATION_PASS_NAMES_8616: frozenset[str] = frozenset(
 )
 
 OPTIMIZATION_VALIDATION_PASS_NAMES_8616: frozenset[str] = frozenset(
-    f"optimization:{spec.name}" for spec in OPTIMIZATION_PASSES
+    f"optimization:{spec.name}" for spec in iter(OPTIMIZATION_PASSES)
 )
 
-LOCAL_PROOF_REQUIRED_POSTPROCESS_PASS_NAMES_8616: frozenset[str] = (
+LOCAL_PROOF_REQUIRED_POSTPROCESS_PASS_NAMES_8616: object = (
     frozenset(
         {
             "optimization",
@@ -306,7 +308,7 @@ PASS_LOCAL_REJECT_CONTINUE_PASS_NAMES_8616: frozenset[str] = frozenset(
     | OPTIMIZATION_VALIDATION_PASS_NAMES_8616
 )
 
-PASS_REJECT_BUDGET_ELIGIBLE_NAMES_8616: frozenset[str] = (
+PASS_REJECT_BUDGET_ELIGIBLE_NAMES_8616: object = (
     PASS_LOCAL_REJECT_CONTINUE_PASS_NAMES_8616
     - CALL_RECOVERY_VALIDATION_PASS_NAMES_8616
     - DIRECT_GLOBAL_UPDATE_VALIDATION_PASS_NAMES_8616
@@ -325,5 +327,5 @@ PASS_REJECT_BUDGET_ELIGIBLE_NAMES_8616: frozenset[str] = (
     )
 )
 
-PASS_REJECT_BUDGET_DEFAULT_8616: int = 6
-POSTPROCESS_EXPENSIVE_VALIDATION_BASELINE_MS_8616: int = 2000
+PASS_REJECT_BUDGET_DEFAULT_8616: cython.longlong = 6
+POSTPROCESS_EXPENSIVE_VALIDATION_BASELINE_MS_8616: cython.longlong = 2000

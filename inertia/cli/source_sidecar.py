@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Read source sidecars as optional labels and display-only evidence.
 
 Layer: CLI/fallback/reporting.
@@ -5,6 +6,8 @@ Responsibility: read local source sidecars for display-only labels, never semant
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import re
 from functools import lru_cache
@@ -13,7 +16,8 @@ from pathlib import Path
 _COMMENT_PREFIXES = ("/*", "*", "*/", "//")
 
 
-def _strip_c_comments_and_strings(line: str) -> str:
+@cython.ccall
+def _strip_c_comments_and_strings(line: object) -> object:
     line = re.sub(r'"(?:\\.|[^"\\])*"', '""', line)
     line = re.sub(r"'(?:\\.|[^'\\])*'", "''", line)
     line = re.sub(r"/\*.*?\*/", "", line)
@@ -26,7 +30,9 @@ def _read_lines(path: Path) -> tuple[str, ...]:
     return tuple(path.read_text(errors="ignore").splitlines())
 
 
-def _candidate_source_paths(binary_path: Path | None) -> tuple[Path, ...]:
+@cython.ccall
+def _candidate_source_paths(binary_path: object) -> tuple[Path, ...]:
+    suffix: object
     if binary_path is None:
         return ()
     stem = binary_path.with_suffix("")
@@ -48,7 +54,8 @@ _FUNCTION_HEADER_KEYWORDS = frozenset(
 )
 
 
-def _looks_like_function_header(line: str, function_name: str) -> bool:
+@cython.ccall
+def _looks_like_function_header(line: object, function_name: object) -> cython.bint:
     stripped = line.strip()
     if not stripped or stripped.startswith(_COMMENT_PREFIXES):
         return False
@@ -59,8 +66,11 @@ def _looks_like_function_header(line: str, function_name: str) -> bool:
     return bool(re.match(rf"^\s*(?:[A-Za-z_][\w\s\*\[\]]+\s+)?{re.escape(function_name)}\s*\(", stripped))
 
 
-def _function_header_span_8616(lines: tuple[str, ...], function_name: str) -> tuple[int, int] | None:
+@cython.ccall
+def _function_header_span_8616(lines: object, function_name: object) -> object:
     """Locate the header line and opening-brace line for a function definition."""
+    idx: object
+    raw: object
     for idx, raw in enumerate(lines):
         line = _strip_c_comments_and_strings(raw)
         if not _looks_like_function_header(line, function_name):
@@ -75,7 +85,8 @@ def _function_header_span_8616(lines: tuple[str, ...], function_name: str) -> tu
     return None
 
 
-def _leading_comment_start_8616(lines: tuple[str, ...], start_idx: int) -> int:
+@cython.ccall
+def _leading_comment_start_8616(lines: object, start_idx: cython.longlong) -> cython.longlong:
     """Walk backwards over blank and comment lines belonging to the function."""
     comment_start = start_idx
     while comment_start > 0:
@@ -90,7 +101,8 @@ def _leading_comment_start_8616(lines: tuple[str, ...], start_idx: int) -> int:
     return comment_start
 
 
-def _function_body_end_8616(lines: tuple[str, ...], open_idx: int) -> int | None:
+@cython.ccall
+def _function_body_end_8616(lines: object, open_idx: cython.longlong) -> int | None:
     """Find the line where the brace depth first returns to zero."""
     depth = 0
     for idx in range(open_idx, len(lines)):
@@ -102,7 +114,10 @@ def _function_body_end_8616(lines: tuple[str, ...], open_idx: int) -> int | None
     return None
 
 
-def _extract_function_from_lines(lines: tuple[str, ...], function_name: str) -> str | None:
+@cython.ccall
+def _extract_function_from_lines(lines: object, function_name: object) -> object:
+    end_idx: object
+    span: object
     span = _function_header_span_8616(lines, function_name)
     if span is None or span[1] is None:
         return None
@@ -118,7 +133,9 @@ def _extract_function_from_lines(lines: tuple[str, ...], function_name: str) -> 
     return "\n".join(selected).rstrip() + "\n"
 
 
-def _source_function_header_match(line: str) -> re.Match[str] | None:
+@cython.ccall
+def _source_function_header_match(line: object) -> re.Match[str] | None:
+    match: object
     stripped = _strip_c_comments_and_strings(line).strip()
     if not stripped or stripped.startswith("#") or ";" in stripped or "}" in stripped:
         return None
@@ -134,7 +151,8 @@ def _source_function_header_match(line: str) -> re.Match[str] | None:
     return match
 
 
-def _source_header_has_body(lines: tuple[str, ...], header_index: int) -> bool:
+@cython.ccall
+def _source_header_has_body(lines: object, header_index: cython.longlong) -> cython.bint:
     if "{" in _strip_c_comments_and_strings(lines[header_index]):
         return True
     for probe in range(header_index + 1, min(header_index + 12, len(lines))):
@@ -149,7 +167,12 @@ def _source_header_has_body(lines: tuple[str, ...], header_index: int) -> bool:
 
 
 @lru_cache(maxsize=16)
-def _collect_source_return_types_for_path(path: Path) -> dict[str, str]:
+def _collect_source_return_types_for_path(path: Path) -> object:
+    match: object
+    index: object
+    line: object
+    name: object
+    return_type: object
     lines = _read_lines(path)
     result: dict[str, str] = {}
     for index, line in enumerate(lines):
@@ -167,8 +190,12 @@ def _collect_source_return_types_for_path(path: Path) -> dict[str, str]:
     return result
 
 
-def collect_local_source_sidecar_return_types(binary_path: Path | None) -> dict[str, str]:
+@cython.ccall
+def collect_local_source_sidecar_return_types(binary_path: object) -> object:
     """Collect display-only source return-type labels from local sidecars."""
+    name: object
+    path: object
+    return_type: object
     if binary_path is None:
         return {}
     merged: dict[str, str] = {}
@@ -178,8 +205,11 @@ def collect_local_source_sidecar_return_types(binary_path: Path | None) -> dict[
     return merged
 
 
-def render_local_source_sidecar_function(binary_path: Path | None, function_name: str | None) -> str | None:
+@cython.ccall
+def render_local_source_sidecar_function(binary_path: object, function_name: object) -> object:
     """Render a display-only local source function body when a sidecar exists."""
+    rendered: object
+    path: object
     if binary_path is None or not isinstance(function_name, str) or not function_name:
         return None
     source_name = function_name.lstrip("_")

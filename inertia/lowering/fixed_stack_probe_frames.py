@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Lower binary-proven fixed stack probes into recovered BP-local frame objects.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ removing dynamic probes and used helper return values.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Any, cast
@@ -26,6 +29,9 @@ from angr.sim_variable import SimStackVariable
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616
 from inertia.pipeline.errors import PipelineHardError
 from inertia.semantics.callsite_summary import CallsiteSummary8616
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "FixedStackProbeFrameLoweringStats8616",
@@ -33,41 +39,45 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FixedStackProbeFrameLoweringStats8616:
     """Closed evidence census for fixed stack-probe frame lowering."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    refused_fact_count: int
-    recovered_frame_extent: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
+    refused_fact_count: cython.longlong
+    recovered_frame_extent: cython.longlong
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether at least one compiler probe statement was removed."""
         return self.materialized_count > 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _FixedStackProbeSurface8616:
     """One request-local census of the structured surfaces used by this owner."""
 
-    frame_extent: int
-    containers: tuple[CStatements, ...]
-    live_call_ids: frozenset[int]
-    statement_occurrences: tuple[tuple[int, int], ...]
+    frame_extent: cython.longlong
+    containers: object
+    live_call_ids: object
+    statement_occurrences: object
 
 
-def _dynamic_codegen_attr_8616(obj: object, name: str, default: object = None) -> Any:  # noqa: ANN401
+@cython.ccall
+def _dynamic_codegen_attr_8616(obj: object, name: object, default: object = None) -> Any:  # noqa: ANN401
     """Read optional metadata across the dynamic third-party angr codegen boundary."""
     return getattr(obj, name, default)
 
 
+@cython.ccall
 def _structured_root_8616(codegen: object) -> object | None:
     """Return the live structured C root across supported angr codegen shapes."""
+    cfunc: object
+    statements: object
     cfunc = _dynamic_codegen_attr_8616(codegen, "cfunc", None)
     if cfunc is None:
         return None
@@ -77,14 +87,18 @@ def _structured_root_8616(codegen: object) -> object | None:
     return cast(object, _dynamic_codegen_attr_8616(cfunc, "body", None))
 
 
+@cython.ccall
 def _collect_fixed_stack_probe_surface_8616(
     root: object,
 ) -> _FixedStackProbeSurface8616:
     """Collect every read-only AST projection needed by fixed-probe lowering."""
+    call: object
+    node: object
+    statement: object
     extent = 0
     containers: list[CStatements] = []
-    live_call_ids: set[int] = set()
-    statement_occurrences: dict[int, int] = {}
+    live_call_ids: set[cython.longlong] = set()
+    statement_occurrences: dict[cython.longlong, cython.longlong] = {}
     for node in _iter_c_nodes_deep_8616(root):
         if isinstance(node, CVariable):
             variable = node.variable
@@ -106,10 +120,11 @@ def _collect_fixed_stack_probe_surface_8616(
         frame_extent=extent,
         containers=tuple(containers),
         live_call_ids=frozenset(live_call_ids),
-        statement_occurrences=tuple(sorted(statement_occurrences.items())),
+        statement_occurrences=tuple(sorted(tuple(statement_occurrences.items()))),
     )
 
 
+@cython.ccall
 def _probe_call_statement_8616(statement: object) -> CFunctionCall | None:
     """Return a direct call statement without interpreting its rendered name."""
     if isinstance(statement, CExpressionStatement):
@@ -120,27 +135,31 @@ def _probe_call_statement_8616(statement: object) -> CFunctionCall | None:
     return None
 
 
-def _probe_summary_map_8616(codegen: object) -> dict[int, CallsiteSummary8616]:
+@cython.ccall
+def _probe_summary_map_8616(codegen: object) -> dict[cython.longlong, CallsiteSummary8616]:
     """Return only stack-probe callsite summaries published on the codegen."""
     summary_map_raw = _dynamic_codegen_attr_8616(codegen, "_inertia_callsite_summaries", None)
     if not isinstance(summary_map_raw, dict):
         return {}
     return {
         node_id: summary
-        for node_id, summary in summary_map_raw.items()
+        for node_id, summary in builtins.iter(summary_map_raw.items())
         if isinstance(node_id, int)
         and isinstance(summary, CallsiteSummary8616)
         and summary.stack_probe_helper
     }
 
 
+@cython.ccall
 def _classified_probe_ids_8616(
-    probe_summaries: dict[int, CallsiteSummary8616],
-    statement_occurrences: dict[int, int],
-    frame_extent: int,
-) -> set[int]:
+    probe_summaries: object,
+    statement_occurrences: object,
+    frame_extent: cython.longlong,
+) -> object:
     """Classify probe calls proven fixed, unused, and covered by BP locals."""
-    classified_ids: set[int] = set()
+    node_id: object
+    summary: object
+    classified_ids: set[cython.longlong] = set()
     for node_id, summary in probe_summaries.items():
         allocation_size = summary.stack_probe_allocation_size
         if statement_occurrences.get(node_id) != 1:
@@ -157,12 +176,16 @@ def _classified_probe_ids_8616(
     return classified_ids
 
 
+@cython.ccall
 def _remove_classified_probes_8616(
-    containers: tuple[CStatements, ...],
-    classified_ids: set[int],
-) -> set[int]:
+    containers: object,
+    classified_ids: object,
+) -> object:
     """Remove each classified arg-less probe statement from its container."""
-    removed_ids: set[int] = set()
+    call: object
+    container: object
+    statement: object
+    removed_ids: set[cython.longlong] = set()
     for container in containers:
         statements = list(container.statements or ())
         retained: list[object] = []
@@ -175,13 +198,14 @@ def _remove_classified_probes_8616(
                 removed_ids.add(id(call))
                 continue
             retained.append(statement)
-        if len(retained) != len(statements):
+        if operator.ne(len(retained), len(statements)):
             cast(Any, container).statements = retained
     return removed_ids
 
 
 def lower_fixed_stack_probe_frames_8616(codegen: object) -> FixedStackProbeFrameLoweringStats8616:
     """Remove only fixed, unused probe calls represented by recovered BP locals."""
+    root: object
     root = _structured_root_8616(codegen)
     probe_summaries = _probe_summary_map_8616(codegen)
     raw_fact_count = len(probe_summaries)
@@ -198,7 +222,7 @@ def lower_fixed_stack_probe_frames_8616(codegen: object) -> FixedStackProbeFrame
     statement_occurrences = dict(surface.statement_occurrences)
 
     normalized_fact_count = sum(
-        node_id in surface.live_call_ids for node_id in probe_summaries
+        node_id in surface.live_call_ids for node_id in iter(probe_summaries)
     )
     classified_ids = _classified_probe_ids_8616(
         probe_summaries, statement_occurrences, frame_extent

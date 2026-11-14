@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Join exact caller observations into one return-only type proof.
 
 Layer: Types/Lowering.
@@ -11,6 +12,8 @@ source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -37,6 +40,8 @@ from .interprocedural_storage_return_type_collection_contracts import (
 )
 from .interprocedural_storage_return_type_contracts import ReturnStorageTypeResult8616
 from .interprocedural_storage_return_types import classify_return_storage_type_8616
+import dataclasses
+import operator
 
 __all__ = [
     "FunctionReturnStorageTypeFailure8616",
@@ -46,16 +51,17 @@ __all__ = [
 ]
 
 
+@cython.ccall
 def _refused_result_8616(
-    function_addr: int,
+    function_addr: cython.longlong,
     failure: FunctionReturnStorageTypeFailure8616,
     *,
-    raw_fact_count: int = 0,
-    normalized_fact_count: int = 0,
-    classified_fact_count: int = 0,
-    materialized_count: int = 0,
-    classifications: tuple[ReturnStorageTypeResult8616, ...] = (),
-    neutral_fact_count: int = 0,
+    raw_fact_count: cython.longlong = 0,
+    normalized_fact_count: cython.longlong = 0,
+    classified_fact_count: cython.longlong = 0,
+    materialized_count: cython.longlong = 0,
+    classifications: object = (),
+    neutral_fact_count: cython.longlong = 0,
     verdict: FunctionReturnStorageTypeVerdict8616 = FunctionReturnStorageTypeVerdict8616.UNKNOWN_REFUSE,
 ) -> FunctionReturnStorageTypeResult8616:
     """Build one typed refusal while retaining the closed-loop counters."""
@@ -77,22 +83,24 @@ def _refused_result_8616(
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _FactClassificationCensus8616:
     """Classified caller facts plus neutral and processed counters."""
 
-    classifications: tuple[ReturnStorageTypeResult8616, ...]
-    neutral_fact_count: int
-    processed_fact_count: int
+    classifications: object
+    neutral_fact_count: cython.longlong
+    processed_fact_count: cython.longlong
 
 
+@cython.ccall
 def _classify_caller_facts_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     evidence: CallerReturnUseEvidence8616,
-    output_storages: tuple[StorageIdentity8616, ...],
+    output_storages: object,
 ) -> _FactClassificationCensus8616 | FunctionReturnStorageTypeResult8616:
     """Classify each non-neutral caller fact or return a typed refusal."""
+    fact: object
     classifications: list[ReturnStorageTypeResult8616] = []
     neutral_fact_count = 0
     processed_fact_count = 0
@@ -134,7 +142,7 @@ def _classify_caller_facts_8616(
                 normalized_fact_count=evidence.normalized_fact_count,
                 classified_fact_count=processed_fact_count + 1,
                 materialized_count=processed_fact_count,
-                classifications=(*classifications, classification),
+                classifications=tuple(classifications) + (classification,),
                 neutral_fact_count=neutral_fact_count,
             )
         classifications.append(classification)
@@ -146,14 +154,16 @@ def _classify_caller_facts_8616(
     )
 
 
+@cython.ccall
 def collect_function_return_storage_type_8616(
     project: object,
-    function_addr: int,
-    output_storages: tuple[StorageIdentity8616, ...],
+    function_addr: cython.longlong,
+    output_storages: object,
 ) -> FunctionReturnStorageTypeResult8616:
     """Prove one scalar return type from every fact in its caller census."""
+    evidence: object
     evidence = caller_return_use_evidence_by_addr_8616(project).get(function_addr)
-    if evidence is None or evidence.target_addr != function_addr:
+    if evidence is None or operator.ne(evidence.target_addr, function_addr):
         return _refused_result_8616(
             function_addr,
             FunctionReturnStorageTypeFailure8616.EVIDENCE_UNAVAILABLE,
@@ -188,7 +198,7 @@ def collect_function_return_storage_type_8616(
             materialized_count=processed_fact_count,
             neutral_fact_count=neutral_fact_count,
         )
-    value_classes = {item.value_class for item in classifications}
+    value_classes = {item.value_class for item in iter(classifications)}
     if value_classes != {StorageTrialValueClass8616.VALUE}:
         return _refused_result_8616(
             function_addr,
@@ -203,7 +213,7 @@ def collect_function_return_storage_type_8616(
         )
     informative_signedness = {
         item.signedness
-        for item in classifications
+        for item in iter(classifications)
         if item.signedness
         in {StorageTrialSignedness8616.SIGNED, StorageTrialSignedness8616.UNSIGNED}
     }

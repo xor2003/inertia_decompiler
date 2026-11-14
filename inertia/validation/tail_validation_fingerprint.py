@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Tail Validation.
 
 Responsibility: fingerprint recovered calls, expressions, locations, and control effects for comparison.
@@ -13,6 +14,7 @@ Do not mutate IR, rewrite emitted C, recover semantics, or accept source/COD-bac
 
 
 from __future__ import annotations
+import cython
 
 import builtins
 import contextlib
@@ -83,6 +85,8 @@ from inertia.validation.typed_constant_values import fold_typed_constant_binary_
 from .validation_additive_terms import flatten_additive_terms_8616 as _flatten_additive_terms_8616
 from .validation_aggregate_storage import aggregate_field_storage_8616
 from .validation_stack_projection import proven_stack_projection_fingerprint_8616
+import dataclasses
+import operator
 
 __all__ = [
     "TAIL_VALIDATION_FINGERPRINT_VERSION",
@@ -103,7 +107,7 @@ __all__ = [
 ]
 
 
-TAIL_VALIDATION_FINGERPRINT_VERSION: int = 40
+TAIL_VALIDATION_FINGERPRINT_VERSION: cython.longlong = 40
 _SUB_TARGET_RE = re.compile(r"^(?:sub_|0x)(?P<addr>[0-9a-fA-F]+)$")
 log: logging.Logger = logging.getLogger(__name__)
 _EXPR_FINGERPRINT_CACHE_LIMIT_8616 = 500000
@@ -113,7 +117,8 @@ _TEMPORARY_FINGERPRINT_NODES_8616: contextvars.ContextVar[dict[int, object] | No
 _ExprFingerprintCacheKey8616 = tuple[object, int, str]
 
 
-def _dynamic_tail_validation_getattr_8616(obj: object, name: str, default: object = None) -> Any:
+@cython.ccall
+def _dynamic_tail_validation_getattr_8616(obj: object, name: object, default: object = None) -> Any:
     """Read an attribute across the dynamic angr structured-C/codegen boundary."""
     return builtins.getattr(obj, name, default)
 
@@ -124,7 +129,9 @@ class TailValidationStructuredIntrinsic8616(Enum):
     INSERT = "INSERT"
 
 
+@cython.ccall
 def _structured_c_intrinsic_kind_8616(node: object) -> TailValidationStructuredIntrinsic8616 | None:
+    candidate: object
     if not isinstance(node, CFunctionCall):
         return None
     candidates = (
@@ -137,18 +144,20 @@ def _structured_c_intrinsic_kind_8616(node: object) -> TailValidationStructuredI
         if not isinstance(name, str) or not name:
             continue
         normalized = name.rsplit(".", 1)[-1].lstrip("_")
-        if normalized == TailValidationStructuredIntrinsic8616.INSERT.value:
+        if operator.eq(normalized, TailValidationStructuredIntrinsic8616.INSERT.value):
             return TailValidationStructuredIntrinsic8616.INSERT
     return None
 
 
-def _is_structured_c_intrinsic_call_8616(node: object) -> bool:
+@cython.ccall
+def _is_structured_c_intrinsic_call_8616(node: object) -> cython.bint:
     return _structured_c_intrinsic_kind_8616(node) is not None
 
 
+@cython.ccall
 def _expr_fingerprint_cache_8616(
     project: Any,
-) -> dict[_ExprFingerprintCacheKey8616, str]:
+) -> object:
     """Return the bounded expression fingerprint cache at the angr boundary."""
     cache = _dynamic_tail_validation_getattr_8616(project, "_inertia_tail_validation_expr_fingerprint_cache_8616", None)
     if not isinstance(cache, dict) or len(cache) > _EXPR_FINGERPRINT_CACHE_LIMIT_8616:
@@ -159,9 +168,10 @@ def _expr_fingerprint_cache_8616(
     return cache
 
 
+@cython.ccall
 def _expr_fingerprint_cache_nodes_8616(
     project: Any,
-) -> dict[_ExprFingerprintCacheKey8616, object]:
+) -> object:
     """Retain cached AST nodes so Python cannot reuse their identity keys."""
     nodes = _dynamic_tail_validation_getattr_8616(
         project,
@@ -179,6 +189,8 @@ def _expr_fingerprint_cache_nodes_8616(
 
 
 def _first_codegen_8616(*nodes: Any) -> object | None:
+    codegen: object
+    node: object
     for node in nodes:
         codegen = _dynamic_tail_validation_getattr_8616(node, "codegen", None)
         if codegen is not None:
@@ -186,15 +198,18 @@ def _first_codegen_8616(*nodes: Any) -> object | None:
     return None
 
 
+@cython.ccall
 def _remember_temporary_fingerprint_node_8616(node: object) -> None:
     """Retain a temporary AST node within the current fingerprint operation."""
+    temporary_nodes: object
 
     temporary_nodes = _TEMPORARY_FINGERPRINT_NODES_8616.get()
     if temporary_nodes is not None:
         temporary_nodes[id(node)] = node
 
 
-def _safe_rebuild_binary_8616(op: str, lhs: object, rhs: object, template: object) -> object:
+@cython.ccall
+def _safe_rebuild_binary_8616(op: object, lhs: object, rhs: object, template: object) -> object:
     """Project simplified children without rerunning angr type inference."""
     if lhs is _dynamic_tail_validation_getattr_8616(template, "lhs", None) and rhs is _dynamic_tail_validation_getattr_8616(template, "rhs", None):
         return template
@@ -211,7 +226,9 @@ def _safe_rebuild_binary_8616(op: str, lhs: object, rhs: object, template: objec
     return rebuilt
 
 
-def _safe_rebuild_unary_8616(op: str, operand: object, template: object) -> object:
+@cython.ccall
+def _safe_rebuild_unary_8616(op: object, operand: object, template: object) -> object:
+    codegen: object
     if operand is _dynamic_tail_validation_getattr_8616(template, "operand", None):
         return template
     codegen = _first_codegen_8616(template, operand)
@@ -222,7 +239,10 @@ def _safe_rebuild_unary_8616(op: str, operand: object, template: object) -> obje
     return rebuilt
 
 
-def _segment_linear_lowering_allowed(node: Any, segment_reg: str, project: Any = None) -> bool:
+@cython.ccall
+def _segment_linear_lowering_allowed(node: Any, segment_reg: object, project: Any = None) -> cython.bint:
+    entry: object
+    owner: object
     codegen = _dynamic_tail_validation_getattr_8616(node, "codegen", None)
     for owner in (codegen, project):
         lowering = _dynamic_tail_validation_getattr_8616(owner, "_inertia_segmented_memory_lowering", None)
@@ -234,7 +254,8 @@ def _segment_linear_lowering_allowed(node: Any, segment_reg: str, project: Any =
     return False
 
 
-def _register_name(project: object, reg_offset: int, size_bytes: int | None = None) -> str:
+@cython.ccall
+def _register_name(project: object, reg_offset: cython.longlong, size_bytes: int | None = None) -> object:
     """Return the exact overlapping register name when width is available."""
     arch = _dynamic_tail_validation_getattr_8616(project, "arch", None)
     translate = _dynamic_tail_validation_getattr_8616(arch, "translate_register_name", None)
@@ -250,14 +271,17 @@ def _register_name(project: object, reg_offset: int, size_bytes: int | None = No
     return name if isinstance(name, str) else f"reg@{reg_offset}"
 
 
-def _dirty_attr_8616(obj: Any, attr: str) -> Any:
+@cython.ccall
+def _dirty_attr_8616(obj: Any, attr: object) -> Any:
     try:
         return _dynamic_tail_validation_getattr_8616(obj, attr, None)
     except (AttributeError, TypeError, ValueError):
         return None
 
 
-def _dirty_register_fingerprint_8616(node: Any, project: Any) -> str | None:
+def _dirty_register_fingerprint_8616(node: Any, project: Any) -> object:
+    dirty: object
+    attr: object
     dirty = _dynamic_tail_validation_getattr_8616(node, "dirty", None)
     if dirty is None:
         return None
@@ -276,13 +300,13 @@ def _dirty_register_fingerprint_8616(node: Any, project: Any) -> str | None:
     if isinstance(registers, dict) and isinstance(size_bytes, int) and size_bytes > 0:
         exact_names = sorted(
             name
-            for name, reg_info in registers.items()
+            for name, reg_info in builtins.iter(registers.items())
             if (
                 isinstance(name, str)
                 and isinstance(reg_info, tuple)
                 and len(reg_info) >= 2
-                and reg_info[0] == reg_offset
-                and reg_info[1] == size_bytes
+                and operator.eq(reg_info[0], reg_offset)
+                and operator.eq(reg_info[1], size_bytes)
             )
         )
         if exact_names:
@@ -294,6 +318,7 @@ def _dirty_register_fingerprint_8616(node: Any, project: Any) -> str | None:
     return f"reg:{_register_name(project, reg_offset)}"
 
 
+@cython.ccall
 def _c_constant_int_value(node: object) -> int | None:
     value = _dynamic_tail_validation_getattr_8616(node, "value", None) if isinstance(node, CConstant) else None
     if isinstance(value, int):
@@ -301,13 +326,15 @@ def _c_constant_int_value(node: object) -> int | None:
     return None
 
 
+@cython.ccall
 def _constant_type_8616(node: object) -> SimType:
     """Return a concrete C constant type for synthetic fingerprint-only nodes."""
     type_ = _dynamic_tail_validation_getattr_8616(node, "type", None)
     return type_ if isinstance(type_, SimType) else SimTypeShort(False)
 
 
-def _tail_validation_stack_alias_refusal_stats_8616(codegen: Any) -> dict[str, int]:
+@cython.ccall
+def _tail_validation_stack_alias_refusal_stats_8616(codegen: Any) -> object:
     stats = _dynamic_tail_validation_getattr_8616(codegen, "_inertia_tail_validation_stack_alias_refusals", None)
     if not isinstance(stats, dict):
         stats = {}
@@ -315,24 +342,28 @@ def _tail_validation_stack_alias_refusal_stats_8616(codegen: Any) -> dict[str, i
     return stats
 
 
-def _record_stack_alias_refusal_8616(codegen: object, reason: str) -> None:
+@cython.ccall
+def _record_stack_alias_refusal_8616(codegen: object, reason: object) -> None:
     if codegen is None or not isinstance(reason, str) or not reason:
         return
     stats = _tail_validation_stack_alias_refusal_stats_8616(codegen)
     stats[reason] = int(stats.get(reason, 0) or 0) + 1
 
 
-def _stack_slot_fingerprint_from_slot_8616(offset: int, size: int | None = None) -> str:
+@cython.ccall
+def _stack_slot_fingerprint_from_slot_8616(offset: cython.longlong, size: int | None = None) -> str:
     size_text = f":size{size}" if isinstance(size, int) and size > 0 else ""
     return f"stack_slot:SS:BP{offset:+#x}{size_text}"
 
 
-def _source_arg_fingerprint_from_slot_8616(name: str, offset: int, size: int | None = None) -> str:
+@cython.ccall
+def _source_arg_fingerprint_from_slot_8616(name: object, offset: cython.longlong, size: int | None = None) -> str:
     size_text = f":size{size}" if isinstance(size, int) and size > 0 else ""
     return f"stack_arg:{name}{size_text}:bp{offset:+#x}"
 
 
-def _type_size_bytes_8616(type_: Any, *, default: int = 2) -> int:
+@cython.ccall
+def _type_size_bytes_8616(type_: Any, *, default: cython.longlong = 2) -> cython.longlong:
     try:
         bits = _dynamic_tail_validation_getattr_8616(type_, "size", None)
     except ValueError:
@@ -342,7 +373,8 @@ def _type_size_bytes_8616(type_: Any, *, default: int = 2) -> int:
     return default
 
 
-def _target_abi_type_size_bytes_8616(type_: Any, project: Any, *, default: int = 2) -> int:
+@cython.ccall
+def _target_abi_type_size_bytes_8616(type_: Any, project: Any, *, default: cython.longlong = 2) -> cython.longlong:
     arch_name = _dynamic_tail_validation_getattr_8616(_dynamic_tail_validation_getattr_8616(project, "arch", None), "name", None)
     if arch_name == "86_16":
         type_name = type(type_).__name__
@@ -359,28 +391,32 @@ def _target_abi_type_size_bytes_8616(type_: Any, project: Any, *, default: int =
     return _type_size_bytes_8616(type_, default=default)
 
 
-def _source_arg_names_by_offset_8616(function: Any) -> dict[int, str]:
+def _source_arg_names_by_offset_8616(function: object) -> object:
+    arg_name: object
+    arg_type: object
     prototype = _dynamic_tail_validation_getattr_8616(function, "prototype", None) if function is not None else None
-    arg_names = tuple(arg_name for arg_name in (_dynamic_tail_validation_getattr_8616(prototype, "arg_names", ()) or ()) if isinstance(arg_name, str))
+    arg_names = tuple(arg_name for arg_name in iter((_dynamic_tail_validation_getattr_8616(prototype, "arg_names", ()) or ())) if isinstance(arg_name, str))
     arg_types = tuple(_dynamic_tail_validation_getattr_8616(prototype, "args", ()) or ())
-    if not arg_names or len(arg_names) != len(arg_types):
+    if not arg_names or operator.ne(len(arg_names), len(arg_types)):
         return {}
     offset = 4
-    names_by_offset: dict[int, str] = {}
+    names_by_offset: dict[cython.longlong, str] = {}
     for arg_name, arg_type in zip(arg_names, arg_types, strict=False):
         names_by_offset[offset] = arg_name
         offset += max(2, _type_size_bytes_8616(arg_type))
     return names_by_offset
 
 
-def _source_arg_sizes_by_offset_8616(function: Any, project: Any) -> dict[int, int]:
+def _source_arg_sizes_by_offset_8616(function: object, project: Any) -> object:
+    _arg_name: object
+    arg_type: object
     prototype = _dynamic_tail_validation_getattr_8616(function, "prototype", None) if function is not None else None
-    arg_names = tuple(arg_name for arg_name in (_dynamic_tail_validation_getattr_8616(prototype, "arg_names", ()) or ()) if isinstance(arg_name, str))
+    arg_names = tuple(arg_name for arg_name in iter((_dynamic_tail_validation_getattr_8616(prototype, "arg_names", ()) or ())) if isinstance(arg_name, str))
     arg_types = tuple(_dynamic_tail_validation_getattr_8616(prototype, "args", ()) or ())
-    if not arg_names or len(arg_names) != len(arg_types):
+    if not arg_names or operator.ne(len(arg_names), len(arg_types)):
         return {}
     offset = 4
-    sizes_by_offset: dict[int, int] = {}
+    sizes_by_offset: dict[cython.longlong, cython.longlong] = {}
     for _arg_name, arg_type in zip(arg_names, arg_types, strict=False):
         size = _target_abi_type_size_bytes_8616(arg_type, project)
         sizes_by_offset[offset] = size
@@ -388,9 +424,11 @@ def _source_arg_sizes_by_offset_8616(function: Any, project: Any) -> dict[int, i
     return sizes_by_offset
 
 
-def _cfunc_source_arg_names_by_offset_8616(cfunc: object, codegen: object | None = None) -> dict[int, str]:
+@cython.ccall
+def _cfunc_source_arg_names_by_offset_8616(cfunc: object, codegen: object | None = None) -> object:
     """Map argument labels in machine BP coordinates, never rendered offsets."""
-    names_by_offset: dict[int, str] = {}
+    arg: object
+    names_by_offset: dict[cython.longlong, str] = {}
     for arg in tuple(_dynamic_tail_validation_getattr_8616(cfunc, "arg_list", ()) or ()):
         if not isinstance(arg, CVariable):
             continue
@@ -407,9 +445,11 @@ def _cfunc_source_arg_names_by_offset_8616(cfunc: object, codegen: object | None
     return names_by_offset
 
 
-def _cfunc_source_arg_sizes_by_offset_8616(cfunc: object, codegen: object | None = None) -> dict[int, int]:
+@cython.ccall
+def _cfunc_source_arg_sizes_by_offset_8616(cfunc: object, codegen: object | None = None) -> object:
     """Map storage widths using the same projected identity as argument labels."""
-    sizes_by_offset: dict[int, int] = {}
+    arg: object
+    sizes_by_offset: dict[cython.longlong, cython.longlong] = {}
     for arg in tuple(_dynamic_tail_validation_getattr_8616(cfunc, "arg_list", ()) or ()):
         if not isinstance(arg, CVariable):
             continue
@@ -423,13 +463,16 @@ def _cfunc_source_arg_sizes_by_offset_8616(cfunc: object, codegen: object | None
     return sizes_by_offset
 
 
+@cython.ccall
 def _source_arg_match_by_offset_8616(
     function: object,
     project: object,
-    offset: int,
+    offset: cython.longlong,
     *,
     size: int | None,
-) -> tuple[str, int, int | None] | None:
+) -> object:
+    source_name: object
+    source_size: object
     source_names_by_offset = _source_arg_names_by_offset_8616(function)
     source_sizes_by_offset = _source_arg_sizes_by_offset_8616(function, project)
     source_name = source_names_by_offset.get(offset)
@@ -441,7 +484,7 @@ def _source_arg_match_by_offset_8616(
     source_size = source_sizes_by_offset.get(only_offset)
     if not isinstance(only_name, str) or not only_name:
         return None
-    if isinstance(size, int) and isinstance(source_size, int) and size != source_size:
+    if isinstance(size, int) and isinstance(source_size, int) and operator.ne(size, source_size):
         return None
     # Some MSC switch-helper lowering snapshots expose the sole source argument
     # through a transient positive-BP helper slot. In one-argument functions the
@@ -449,7 +492,10 @@ def _source_arg_match_by_offset_8616(
     return only_name, only_offset, source_size if isinstance(source_size, int) else size
 
 
-def _source_arg_location_fingerprint_8616(node: Any, project: Any) -> str | None:
+@cython.ccall
+def _source_arg_location_fingerprint_8616(node: Any, project: Any) -> object:
+    context: object
+    slot: object
     context = _source_arg_cfunc_context_8616(node, project)
     if context is None:
         return None
@@ -482,8 +528,10 @@ def _source_arg_location_fingerprint_8616(node: Any, project: Any) -> str | None
     return _source_arg_fingerprint_from_slot_8616(source_name, offset, size)
 
 
-def _source_arg_cfunc_context_8616(node: Any, project: Any) -> tuple[Any, Any, int] | None:
+@cython.ccall
+def _source_arg_cfunc_context_8616(node: Any, project: Any) -> object:
     """Resolve the codegen/cfunc/func-addr context for a source arg node."""
+    cfunc: object
     codegen = _dynamic_tail_validation_getattr_8616(node, "codegen", None)
     active_codegen = _dynamic_tail_validation_getattr_8616(project, "_inertia_tail_validation_active_codegen", None)
     cfunc = _dynamic_tail_validation_getattr_8616(codegen, "cfunc", None)
@@ -505,16 +553,20 @@ def _source_arg_cfunc_context_8616(node: Any, project: Any) -> tuple[Any, Any, i
     return codegen, cfunc, func_addr
 
 
+@cython.ccall
 def _resolve_source_arg_slot_8616(
     function: Any,
     project: Any,
     cfunc: Any,
     codegen: Any,
-    offset: int,
+    offset: cython.longlong,
     variable_size: Any,
     cfunc_abi_offset: Any,
-) -> tuple[str, int | None] | None:
+) -> object:
     """Resolve the source arg name and size for a machine bp offset."""
+    size: object
+    source_name: object
+    source_size: object
     source_names_by_offset = _source_arg_names_by_offset_8616(function)
     source_name = source_names_by_offset.get(offset)
     if isinstance(source_name, str) and source_name:
@@ -531,6 +583,8 @@ def _resolve_source_arg_slot_8616(
 
 def _lookup_widened_carrier_proof_8616(value: Any, codegen: Any) -> Any:
     def _impl() -> Any:
+        key: object
+        variable: object
         mapping = _dynamic_tail_validation_getattr_8616(codegen, "_inertia_tail_validation_widened_carriers", None)
         if not isinstance(mapping, dict):
             return None
@@ -554,30 +608,35 @@ def _lookup_widened_carrier_proof_8616(value: Any, codegen: Any) -> Any:
 
 
 def _candidate_widened_keys_8616(value: Any) -> tuple[object, ...]:
+    variable: object
     variable = _dynamic_tail_validation_getattr_8616(value, "variable", None)
     name = _dynamic_tail_validation_getattr_8616(value, "name", None) or _dynamic_tail_validation_getattr_8616(variable, "name", None)
     size = _dynamic_tail_validation_getattr_8616(variable, "size", None)
     offset = _dynamic_tail_validation_getattr_8616(variable, "offset", None)
     return tuple(
         key
-        for key in (
+        for key in iter((
             id(value),
             id(variable) if variable is not None else None,
             name,
             (name, size) if isinstance(name, str) and isinstance(size, int) else None,
             (offset, size) if isinstance(offset, int) and isinstance(size, int) else None,
-        )
+        ))
         if key is not None
     )
 
 
 def _widened_carrier_slot_fingerprint_8616(
-    var_name: str | None,
+    var_name: object,
     *,
     value: object = None,
     variable: object = None,
     codegen: object,
-) -> str | None:
+) -> object:
+    carrier_size: object
+    offset: object
+    proof: object
+    size: object
     proof = _lookup_widened_carrier_proof_8616(value, codegen) if value is not None else None
     if proof is None and isinstance(var_name, str):
         mapping = _dynamic_tail_validation_getattr_8616(codegen, "_inertia_tail_validation_widened_carriers", None)
@@ -603,8 +662,10 @@ def _widened_carrier_slot_fingerprint_8616(
     return _stack_slot_fingerprint_from_slot_8616(offset, size)
 
 
-def _first_assignment_stack_slot_fingerprint_8616(value: object, variable: object, codegen: object) -> str | None:
+@cython.ccall
+def _first_assignment_stack_slot_fingerprint_8616(value: object, variable: object, codegen: object) -> object:
     """Return a widened stack slot when a generic carrier is first assigned from one."""
+    assignment_maps: object
 
     if not isinstance(value, CVariable) or not isinstance(variable, SimStackVariable):
         return None
@@ -635,7 +696,8 @@ def _first_assignment_stack_slot_fingerprint_8616(value: object, variable: objec
     return _stack_slot_fingerprint_from_slot_8616(rhs_offset, rhs_size)
 
 
-def _stack_name_is_generic_for_validation_8616(name: object) -> bool:
+@cython.ccall
+def _stack_name_is_generic_for_validation_8616(name: object) -> cython.bint:
     return (
         isinstance(name, str)
         and re.fullmatch(
@@ -650,11 +712,13 @@ def _resolve_validation_copy_alias_expr_8616(
     node: Any,
     project: Any = None,
     *,
-    seen_var_ids: set[int] | None = None,
+    seen_var_ids: object = None,
 ) -> Any:
     """Resolve a proven value alias without rewriting segment-register identity."""
 
     def _impl() -> Any:
+        assignment_maps: object
+        context: object
         nonlocal node, seen_var_ids
         node = _strip_validation_casts(node)
         context = _validation_alias_node_context_8616(node, project)
@@ -700,8 +764,11 @@ def _resolve_validation_copy_alias_expr_8616(
     return _impl()
 
 
-def _validation_alias_node_context_8616(node: Any, project: Any) -> tuple[Any, Any, Any] | None:
+@cython.ccall
+def _validation_alias_node_context_8616(node: Any, project: Any) -> object:
     """Resolve variable/codegen/name gates for copy-alias resolution."""
+    codegen: object
+    variable: object
     if not isinstance(node, CVariable):
         return None
     variable = _dynamic_tail_validation_getattr_8616(node, "variable", None)
@@ -727,7 +794,8 @@ def _validation_alias_node_context_8616(node: Any, project: Any) -> tuple[Any, A
     return variable, codegen, name
 
 
-def _fresh_alias_rhs_8616(rhs: Any, node: Any, variable: Any) -> bool:
+@cython.ccall
+def _fresh_alias_rhs_8616(rhs: object, node: Any, variable: Any) -> cython.bint:
     """Check a candidate rhs is usable and does not self-reference the variable."""
     return (
         rhs is not None
@@ -736,15 +804,10 @@ def _fresh_alias_rhs_8616(rhs: Any, node: Any, variable: Any) -> bool:
     )
 
 
+@cython.ccall
 def _validation_assignment_maps_8616(
     codegen: object,
-) -> tuple[
-    dict[int, object],
-    dict[str, object],
-    dict[tuple[object, ...], object],
-    dict[str, object],
-    dict[tuple[object, ...], object],
-] | None:
+) -> object:
     try:
         from inertia.lowering.real_mode_linear import _ensure_assignment_maps_8616
     except Exception as ex:
@@ -759,7 +822,9 @@ def _validation_assignment_maps_8616(
     return var_id_map, name_map, reg_map, first_name_map, first_reg_map
 
 
-def _validation_alias_rhs_lookup_8616(*, variable: Any, variable_id: int, name: Any, var_id_map: Any, name_map: Any, reg_map: Any) -> Any:
+@cython.ccall
+def _validation_alias_rhs_lookup_8616(*, variable: Any, variable_id: cython.longlong, name: Any, var_id_map: Any, name_map: Any, reg_map: Any) -> Any:
+    rhs: object
     rhs = var_id_map.get(variable_id)
     if rhs is None and isinstance(name, str):
         rhs = name_map.get(name)
@@ -771,6 +836,7 @@ def _validation_alias_rhs_lookup_8616(*, variable: Any, variable_id: int, name: 
     return rhs
 
 
+@cython.ccall
 def _acceptable_stack_alias_rhs_8616(value: object) -> object | None:
     value = _strip_validation_casts(value)
     if isinstance(value, (CVariable, CIndexedVariable)):
@@ -780,7 +846,8 @@ def _acceptable_stack_alias_rhs_8616(value: object) -> object | None:
     return None
 
 
-def _dirty_virtual_name_8616(node: Any) -> str | None:
+@cython.ccall
+def _dirty_virtual_name_8616(node: Any) -> object:
     dirty = _dynamic_tail_validation_getattr_8616(node, "dirty", None)
     varid = _dynamic_tail_validation_getattr_8616(dirty, "varid", None)
     if isinstance(varid, int):
@@ -791,7 +858,14 @@ def _dirty_virtual_name_8616(node: Any) -> str | None:
     return None
 
 
+@cython.ccall
 def _acceptable_validation_expr_rhs_8616(value: object) -> object | None:
+    cond: object
+    iffalse: object
+    iftrue: object
+    lhs: object
+    operand: object
+    rhs: object
     value = _strip_validation_casts(value)
     if isinstance(value, (CConstant, CVariable, CIndexedVariable, CDirtyExpression)):
         return cast(object | None, value)
@@ -812,7 +886,13 @@ def _acceptable_validation_expr_rhs_8616(value: object) -> object | None:
     return None
 
 
+@cython.ccall
 def _resolve_validation_dirty_alias_expr_8616(node: Any) -> Any:
+    assignment_maps: object
+    codegen: object
+    first_rhs: object
+    resolved: object
+    rhs: object
     codegen = _dynamic_tail_validation_getattr_8616(node, "codegen", None)
     if codegen is None:
         return None
@@ -842,9 +922,12 @@ def _resolve_validation_dirty_alias_expr_8616(node: Any) -> Any:
     return None
 
 
-def _rhs_references_same_variable_8616(value: Any, variable: Any) -> bool:
+@cython.ccall
+def _rhs_references_same_variable_8616(value: Any, variable: Any) -> cython.bint:
+    current: object
+    attr: object
     pending = [_strip_validation_casts(value)]
-    seen_nodes: set[int] = set()
+    seen_nodes: set[cython.longlong] = set()
     while pending:
         current = _strip_validation_casts(pending.pop())
         if current is None:
@@ -865,12 +948,14 @@ def _debug_tail_stack_alias_8616(
     codegen: Any,
     *,
     node: Any = None,
-    candidate: str | None = None,
-    alias_keys: tuple[str, ...] = (),
-    binding: str | None = None,
-    final: str | None = None,
+    candidate: object = None,
+    alias_keys: object = (),
+    binding: object = None,
+    final: object = None,
 ) -> None:
     def _impl() -> None:
+        cfunc: object
+        target_text: object
         if not os.environ.get("INERTIA_DEBUG_TAIL_STACK_ALIAS"):
             return
         cfunc = _dynamic_tail_validation_getattr_8616(codegen, "cfunc", None) if codegen is not None else None
@@ -910,9 +995,11 @@ def _debug_tail_stack_alias_indexed_8616(
     alias_base_offset: Any = None,
     fallback_offset: Any = None,
     selected: Any = None,
-    note: str,
+    note: object,
 ) -> None:
     def _impl() -> None:
+        cfunc: object
+        target_text: object
         if not os.environ.get("INERTIA_DEBUG_TAIL_STACK_ALIAS"):
             return
         cfunc = _dynamic_tail_validation_getattr_8616(codegen, "cfunc", None) if codegen is not None else None
@@ -947,6 +1034,7 @@ def _debug_tail_stack_alias_indexed_8616(
     return _impl()
 
 
+@cython.ccall
 def _refresh_stack_alias_diagnostics_8616(
     codegen: object, result: StackPointerAliasResult8616
 ) -> None:
@@ -968,8 +1056,10 @@ def _refresh_stack_alias_diagnostics_8616(
     )
 
 
-def _stack_alias_map_8616(codegen: object) -> Mapping[int, tuple[object, int]]:
-    def _impl() -> Mapping[int, tuple[object, int]]:
+def _stack_alias_map_8616(codegen: object) -> Mapping[cython.longlong, tuple[object, cython.longlong]]:
+    def _impl() -> Mapping[cython.longlong, tuple[object, cython.longlong]]:
+        cached: object
+        root: object
         cached = read_stack_pointer_alias_map_8616(codegen)
         if cached is not None:
             _refresh_stack_alias_diagnostics_8616(codegen, cached)
@@ -995,9 +1085,10 @@ def _stack_alias_map_8616(codegen: object) -> Mapping[int, tuple[object, int]]:
 
 
 
-def _materialized_local_map_8616(codegen: object) -> dict[int, tuple[int | None, str | None]]:
-    def _impl() -> dict[int, tuple[int | None, str | None]]:
-        materialized: dict[int, tuple[int | None, str | None]] = {}
+def _materialized_local_map_8616(codegen: object) -> object:
+    def _impl() -> object:
+        binding: object
+        materialized: dict[cython.longlong, tuple[int | None, str | None]] = {}
 
         _collect_materialized_variables_in_use_8616(codegen, materialized)
         bindings = _dynamic_tail_validation_getattr_8616(codegen, "_inertia_stack_variable_bindings", None)
@@ -1016,13 +1107,15 @@ def _materialized_local_map_8616(codegen: object) -> dict[int, tuple[int | None,
     return _impl()
 
 
+@cython.ccall
 def _record_materialized_local_8616(
-    materialized: dict[int, tuple[int | None, str | None]],
-    offset: int,
+    materialized: object,
+    offset: cython.longlong,
     size: int | None,
-    name: str | None,
+    name: object,
 ) -> None:
     """Record the widest materialized size seen for one bp offset."""
+    current: object
     current = materialized.get(offset)
     if current is None:
         materialized[offset] = (size, name)
@@ -1032,11 +1125,14 @@ def _record_materialized_local_8616(
         materialized[offset] = (size, name if name is not None else current_name)
 
 
+@cython.ccall
 def _collect_materialized_variables_in_use_8616(
     codegen: object,
-    materialized: dict[int, tuple[int | None, str | None]],
+    materialized: object,
 ) -> None:
     """Collect bp stack slots from cfunc variables_in_use into the local map."""
+    cvar: object
+    variable: object
     cfunc = _dynamic_tail_validation_getattr_8616(codegen, "cfunc", None)
     variables_in_use = _dynamic_tail_validation_getattr_8616(cfunc, "variables_in_use", None)
     if not isinstance(variables_in_use, dict):
@@ -1057,18 +1153,21 @@ def _collect_materialized_variables_in_use_8616(
         )
 
 
-def _stack_canonicalization_bridges_8616(codegen: Any) -> dict[tuple[str, int, int], int]:
+@cython.ccall
+def _stack_canonicalization_bridges_8616(codegen: Any) -> object:
     bridges = _dynamic_tail_validation_getattr_8616(codegen, "_inertia_stack_canonicalization_bridges", None)
     return bridges if isinstance(bridges, dict) else {}
 
 
+@cython.ccall
 def canonicalize_stack_alias_fingerprint_8616(
     value: object,
     *,
-    stack_alias_map: Mapping[int, tuple[object, int]],
-    materialized_local_map: Mapping[int, tuple[int | None, str | None]],
-) -> str | None:
+    stack_alias_map: Mapping[cython.longlong, tuple[object, cython.longlong]],
+    materialized_local_map: Mapping[cython.longlong, tuple[int | None, str | None]],
+) -> object:
     """Canonicalize a materialized local stack alias into a stable fingerprint."""
+    entry: object
     if not isinstance(value, int):
         return None
     entry = materialized_local_map.get(value)
@@ -1078,7 +1177,13 @@ def canonicalize_stack_alias_fingerprint_8616(
     return _stack_slot_fingerprint_from_slot_8616(value, size)
 
 
-def _source_arg_stack_slot_fingerprint_8616(offset: int, codegen: Any, *, size: int | None = None) -> str | None:
+@cython.ccall
+def _source_arg_stack_slot_fingerprint_8616(offset: cython.longlong, codegen: object, *, size: int | None = None) -> object:
+    active_codegen: object
+    cfunc: object
+    project: object
+    source_match: object
+    source_size: object
     if not isinstance(offset, int) or offset <= 0 or codegen is None:
         return None
     cfunc = _dynamic_tail_validation_getattr_8616(codegen, "cfunc", None)
@@ -1142,14 +1247,17 @@ def _source_arg_stack_slot_fingerprint_8616(offset: int, codegen: Any, *, size: 
     return final
 
 
+@cython.ccall
 def _debug_source_arg_stack_slot_8616(
-    codegen: Any,
+    codegen: object,
     *,
-    offset: int,
+    offset: cython.longlong,
     size: int | None,
-    reason: str,
-    final: str | None,
+    reason: object,
+    final: object,
 ) -> None:
+    cfunc: object
+    target_text: object
     if not os.environ.get("INERTIA_DEBUG_TAIL_STACK_ALIAS"):
         return
     cfunc = _dynamic_tail_validation_getattr_8616(codegen, "cfunc", None) if codegen is not None else None
@@ -1171,9 +1279,12 @@ def _debug_source_arg_stack_slot_8616(
     sys.stderr.flush()
 
 
-def _canonical_or_unresolved_stack_fingerprint_8616(offset: int, codegen: Any, *, source: str, node: Any = None) -> str:
+def _canonical_or_unresolved_stack_fingerprint_8616(offset: cython.longlong, codegen: Any, *, source: object, node: Any = None) -> object:
     """Preserve exact typed storage ranges before considering legacy carriers."""
-    def _impl() -> str:
+    def _impl() -> object:
+        normalized: object
+        source_arg: object
+        stack_var_fp: object
         stack_var_fp = _stack_var_source_fingerprint_8616(offset, codegen, source, node)
         if stack_var_fp is not None:
             return stack_var_fp
@@ -1208,10 +1319,12 @@ def _canonical_or_unresolved_stack_fingerprint_8616(offset: int, codegen: Any, *
     return _impl()
 
 
+@cython.ccall
 def _stack_var_source_fingerprint_8616(
-    offset: int, codegen: Any, source: str, node: Any
-) -> str | None:
+    offset: cython.longlong, codegen: Any, source: object, node: Any
+) -> object:
     """Fingerprint a stack_var-source slot by machine bp offset."""
+    machine_offset: object
     if source != "stack_var":
         return None
     variable = _dynamic_tail_validation_getattr_8616(node, "variable", None)
@@ -1228,12 +1341,12 @@ def _stack_var_source_fingerprint_8616(
 
 
 def _unresolved_stack_fingerprint_8616(
-    codegen: Any,
-    offset: int,
-    source: str,
+    codegen: object,
+    offset: cython.longlong,
+    source: object,
     node: Any,
-    materialized_local_map: Mapping[int, tuple[int | None, str | None]],
-) -> str:
+    materialized_local_map: Mapping[cython.longlong, tuple[int | None, str | None]],
+) -> object:
     """Emit the unresolved-carrier fingerprint with alias-context diagnostics."""
     stack_alias_map = _stack_alias_map_8616(codegen) if codegen is not None else {}
     if codegen is None:
@@ -1247,7 +1360,7 @@ def _unresolved_stack_fingerprint_8616(
             codegen,
             node=node,
             candidate=f"stack:{offset:+#x}",
-            alias_keys=tuple(sorted(str(key) for key in stack_alias_map)),
+            alias_keys=tuple(sorted(str(key) for key in iter(stack_alias_map))),
             binding=None,
             final=unresolved,
         )
@@ -1255,8 +1368,9 @@ def _unresolved_stack_fingerprint_8616(
     return f"stack:{offset:+#x}"
 
 
-def _resolve_stack_alias_base_offset_8616(base_expr: Any, codegen: Any, *, seen: set[int] | None = None) -> int | None:
+def _resolve_stack_alias_base_offset_8616(base_expr: Any, codegen: Any, *, seen: object = None) -> int | None:
     def _impl() -> int | None:
+        alias_entry: object
         nonlocal base_expr, seen
         if seen is None:
             seen = set()
@@ -1283,8 +1397,10 @@ def _resolve_stack_alias_base_offset_8616(base_expr: Any, codegen: Any, *, seen:
     return _impl()
 
 
-def _unproven_carrier_offset_8616(variable: Any, variable_id: int, codegen: Any) -> int | None:
+@cython.ccall
+def _unproven_carrier_offset_8616(variable: Any, variable_id: cython.longlong, codegen: Any) -> int | None:
     """Resolve a non-carrier variable to its own slot; refused carriers refuse."""
+    entry: object
     entry = read_stack_pointer_alias_map_8616(codegen)
     if entry is not None and variable_id in entry.refused:
         _record_stack_alias_refusal_8616(codegen, "stack_alias_refused_carrier")
@@ -1293,8 +1409,9 @@ def _unproven_carrier_offset_8616(variable: Any, variable_id: int, codegen: Any)
     return offset if isinstance(offset, int) else None
 
 
+@cython.ccall
 def _resolve_alias_entry_base_offset_8616(
-    codegen: Any, alias_entry: tuple[object, int], seen: set[int]
+    codegen: Any, alias_entry: object, seen: object
 ) -> int | None:
     """Resolve the base offset through one recorded alias entry."""
     alias_base_expr, alias_offset = alias_entry
@@ -1307,6 +1424,7 @@ def _resolve_alias_entry_base_offset_8616(
 
 def _resolve_stack_offset_from_indexed_8616(node: object, project: object | None = None) -> int | None:
     def _impl() -> int | None:
+        codegen: object
         nonlocal node
         node = _strip_validation_casts(node)
         if isinstance(node, CUnaryOp) and node.op == "Reference":
@@ -1350,8 +1468,9 @@ def _resolve_stack_offset_from_indexed_8616(node: object, project: object | None
     return _impl()
 
 
+@cython.ccall
 def _indexed_fallback_offset_8616(
-    node: Any, base: Any, index_value: int, codegen: Any
+    node: Any, base: Any, index_value: cython.longlong, codegen: Any
 ) -> int | None:
     """Resolve the fallback stack offset for an indexed base variable."""
     if not isinstance(base, CVariable):
@@ -1372,10 +1491,12 @@ def _indexed_fallback_offset_8616(
     return offset + index_value
 
 
+@cython.ccall
 def _indexed_bridge_offset_8616(
-    node: Any, base: Any, index_value: int, codegen: Any
+    node: Any, base: Any, index_value: cython.longlong, codegen: object
 ) -> int | None:
     """Resolve a bridged canonical offset for an indexed stack value."""
+    bridged: object
     if not isinstance(base, CVariable):
         return None
     base_var = _dynamic_tail_validation_getattr_8616(base, "variable", None)
@@ -1395,12 +1516,14 @@ def _indexed_bridge_offset_8616(
     return bridged if isinstance(bridged, int) else None
 
 
+@cython.ccall
 def _strip_validation_casts(node: object) -> object:
     while isinstance(node, CTypeCast):
         node = node.expr
     return node
 
 
+@cython.ccall
 def _strip_cosmetic_validation_casts_8616(node: object) -> object:
     """Strip ordinary codegen casts while retaining proven semantic casts."""
     while isinstance(node, CTypeCast) and not isinstance(node, CSemanticCast8616):
@@ -1408,6 +1531,7 @@ def _strip_cosmetic_validation_casts_8616(node: object) -> object:
     return node
 
 
+@cython.ccall
 def _semantic_cast_type_fingerprint_8616(type_: object) -> str:
     """Fingerprint the observable width and signedness of one angr C type."""
     size = _dynamic_tail_validation_getattr_8616(type_, "size", None)
@@ -1417,7 +1541,9 @@ def _semantic_cast_type_fingerprint_8616(type_: object) -> str:
     return f"{type(type_).__name__}:bits={size_token}:signed={signed_token}"
 
 
+@cython.ccall
 def _strip_validation_casts_and_dirty_aliases_8616(node: object) -> object:
+    resolved: object
     node = _strip_validation_casts(node)
     if isinstance(node, CDirtyExpression):
         resolved = _resolve_validation_dirty_alias_expr_8616(node)
@@ -1426,13 +1552,15 @@ def _strip_validation_casts_and_dirty_aliases_8616(node: object) -> object:
     return node
 
 
-def _wrap_not_fingerprint(fingerprint: str) -> str:
+@cython.ccall
+def _wrap_not_fingerprint(fingerprint: object) -> object:
     if fingerprint.startswith("Not(") and fingerprint.endswith(")"):
         return fingerprint[4:-1]
     return f"Not({fingerprint})"
 
 
-def _invert_cmp_op_8616(op: str) -> str | None:
+@cython.ccall
+def _invert_cmp_op_8616(op: object) -> object:
     return {
         "CmpGT": "CmpLE",
         "CmpGE": "CmpLT",
@@ -1443,7 +1571,8 @@ def _invert_cmp_op_8616(op: str) -> str | None:
     }.get(op)
 
 
-def _stack_word_pair_fingerprint(node: Any, project: Any) -> str | None:
+@cython.ccall
+def _stack_word_pair_fingerprint(node: Any, project: Any) -> object:
     if not isinstance(node, CBinaryOp) or node.op != "Or":
         return None
     left, right = node.lhs, node.rhs
@@ -1454,7 +1583,7 @@ def _stack_word_pair_fingerprint(node: Any, project: Any) -> str | None:
         high_offset = _stack_byte_offset_from_scaled_expr_8616(left, project, scale=256)
     if not isinstance(low_offset, int) or not isinstance(high_offset, int):
         return None
-    if high_offset != low_offset + 1:
+    if operator.ne(high_offset, low_offset + 1):
         return None
     return _canonical_or_unresolved_stack_fingerprint_8616(
         low_offset,
@@ -1464,7 +1593,8 @@ def _stack_word_pair_fingerprint(node: Any, project: Any) -> str | None:
     )
 
 
-def _global_word_pair_fingerprint_8616(node: object, project: object) -> str | None:
+@cython.ccall
+def _global_word_pair_fingerprint_8616(node: object, project: object) -> object:
     if not isinstance(node, CBinaryOp) or node.op != "Or":
         return None
     left, right = node.lhs, node.rhs
@@ -1475,12 +1605,13 @@ def _global_word_pair_fingerprint_8616(node: object, project: object) -> str | N
         high_offset = _global_byte_offset_from_scaled_expr_8616(left, project)
     if not isinstance(low_offset, int) or not isinstance(high_offset, int):
         return None
-    if high_offset != low_offset + 1:
+    if operator.ne(high_offset, low_offset + 1):
         return None
     return f"global:{low_offset:#x}"
 
 
-def _global_word_pair_from_proven_byte_8616(node: object, project: object) -> str | None:
+@cython.ccall
+def _global_word_pair_from_proven_byte_8616(node: object, project: object) -> object:
     if not isinstance(node, CBinaryOp) or node.op != "Or":
         return None
     left, right = node.lhs, node.rhs
@@ -1491,11 +1622,12 @@ def _global_word_pair_from_proven_byte_8616(node: object, project: object) -> st
         high_offset = _ds_linear_byte_offset_from_scaled_expr_8616(left, project)
     if not isinstance(low_offset, int) or not isinstance(high_offset, int):
         return None
-    if high_offset != low_offset + 1:
+    if operator.ne(high_offset, low_offset + 1):
         return None
     return f"global:{low_offset:#x}"
 
 
+@cython.ccall
 def _proven_global_byte_offset_8616(node: object, project: object) -> int | None:
     """Return only directly proven global-byte storage, never recurse via a fingerprint."""
     offset = _materialized_global_byte_offset_8616(node)
@@ -1507,6 +1639,7 @@ def _proven_global_byte_offset_8616(node: object, project: object) -> int | None
     return None
 
 
+@cython.ccall
 def _materialized_global_byte_offset_8616(node: Any) -> int | None:
     node = _strip_validation_casts_and_dirty_aliases_8616(node)
     if not isinstance(node, CVariable):
@@ -1518,6 +1651,7 @@ def _materialized_global_byte_offset_8616(node: Any) -> int | None:
     return addr if isinstance(addr, int) and addr >= 0 else None
 
 
+@cython.ccall
 def _global_byte_offset_from_expr_8616(node: Any, project: Any) -> int | None:
     node = _strip_validation_casts_and_dirty_aliases_8616(node)
     if isinstance(node, CVariable):
@@ -1539,7 +1673,9 @@ def _global_byte_offset_from_expr_8616(node: Any, project: Any) -> int | None:
     return None
 
 
+@cython.ccall
 def _ds_linear_byte_offset_from_expr_8616(node: object, project: object) -> int | None:
+    matched: object
     node = _strip_validation_casts_and_dirty_aliases_8616(node)
     if not isinstance(node, CUnaryOp) or node.op != "Dereference":
         return None
@@ -1550,6 +1686,7 @@ def _ds_linear_byte_offset_from_expr_8616(node: object, project: object) -> int 
     return offset if segment_name == "ds" else None
 
 
+@cython.ccall
 def _ds_linear_byte_offset_from_scaled_expr_8616(node: object, project: object) -> int | None:
     node = _strip_validation_casts_and_dirty_aliases_8616(node)
     if not isinstance(node, CBinaryOp):
@@ -1564,7 +1701,9 @@ def _ds_linear_byte_offset_from_scaled_expr_8616(node: object, project: object) 
     return None
 
 
+@cython.ccall
 def _global_offset_from_segmented_deref_operand_8616(node: object, project: object) -> int | None:
+    matched: object
     if not isinstance(node, CUnaryOp) or node.op != "Dereference":
         return None
     matched = _segment_linear_offset_from_deref_operand_8616(node, project)
@@ -1578,10 +1717,15 @@ def _global_offset_from_segmented_deref_operand_8616(node: object, project: obje
     return offset
 
 
+@cython.ccall
 def _segment_linear_offset_from_deref_operand_8616(
     node: CUnaryOp, project: object
-) -> tuple[str, int] | None:
-    segment_name: str | None = None
+) -> object:
+    segment_name: object
+    term_segment: object
+    sign: object
+    term: object
+    segment_name = None
     offset = 0
     for sign, term in _flatten_additive_terms_8616(node.operand):
         term_segment = _linear_segment_term_name_8616(term, project)
@@ -1599,7 +1743,8 @@ def _segment_linear_offset_from_deref_operand_8616(
     return segment_name, offset
 
 
-def _linear_segment_term_name_8616(node: object, project: object) -> str | None:
+@cython.ccall
+def _linear_segment_term_name_8616(node: object, project: object) -> object:
     node = _strip_validation_casts(node)
     if not isinstance(node, CBinaryOp):
         return None
@@ -1618,7 +1763,9 @@ def _linear_segment_term_name_8616(node: object, project: object) -> str | None:
     return None
 
 
-def _segment_register_expr_name_8616(node: Any, project: Any) -> str | None:
+@cython.ccall
+def _segment_register_expr_name_8616(node: Any, project: Any) -> object:
+    name: object
     node = _strip_validation_casts(node)
     dirty_fingerprint = _dirty_register_fingerprint_8616(node, project) if isinstance(node, CDirtyExpression) else None
     if isinstance(dirty_fingerprint, str) and dirty_fingerprint.startswith("reg:"):
@@ -1639,6 +1786,7 @@ def _segment_register_expr_name_8616(node: Any, project: Any) -> str | None:
     return name if name in {"cs", "ds", "es", "ss"} else None
 
 
+@cython.ccall
 def _global_byte_offset_from_scaled_expr_8616(node: object, project: object) -> int | None:
     while isinstance(node, CTypeCast):
         node = node.expr
@@ -1688,8 +1836,11 @@ def _stack_byte_offset_from_expr_8616(node: Any, project: Any) -> int | None:
     return _impl()
 
 
+@cython.ccall
 def _indexed_deref_bridge_offset_8616(node: Any, operand: Any) -> int | None:
     """Resolve the canonicalization-bridge offset for an indexed dereference."""
+    bridged: object
+    codegen: object
     if not isinstance(operand, CIndexedVariable):
         return None
     base = _strip_validation_casts(_dynamic_tail_validation_getattr_8616(operand, "variable", None))
@@ -1707,8 +1858,9 @@ def _indexed_deref_bridge_offset_8616(node: Any, operand: Any) -> int | None:
     return bridged if isinstance(bridged, int) else None
 
 
-def _stack_indexed_location_fingerprint_8616(node: object, project: object | None = None) -> str | None:
-    def _impl() -> str | None:
+def _stack_indexed_location_fingerprint_8616(node: object, project: object | None = None) -> object:
+    def _impl() -> object:
+        dynamic_near_pointer: object
         nonlocal node
         node = _strip_validation_casts_and_dirty_aliases_8616(node)
         if isinstance(node, CUnaryOp) and node.op == "Reference":
@@ -1739,6 +1891,7 @@ def _stack_indexed_location_fingerprint_8616(node: object, project: object | Non
     return _impl()
 
 
+@cython.ccall
 def _indexed_base_index_normalized_8616(node: CIndexedVariable) -> tuple[Any, Any]:
     """Normalize an indexed node's base and index through cast/reference peels."""
     base = _dynamic_tail_validation_getattr_8616(node, "variable", None)
@@ -1754,15 +1907,17 @@ def _indexed_base_index_normalized_8616(node: CIndexedVariable) -> tuple[Any, An
     return base, index
 
 
+@cython.ccall
 def _indexed_location_fingerprint_tail_8616(
     node: Any,
     base: Any,
     index: Any,
-    index_value: int,
-    codegen: Any,
+    index_value: cython.longlong,
+    codegen: object,
     project: object | None,
-) -> str | None:
+) -> object:
     """Resolve bridged, displacement, or alias fingerprints for an indexed location."""
+    bridged: object
     bridged = _indexed_location_bridge_8616(node=node, base=base, index_value=index_value, codegen=codegen)
     if bridged is not None:
         return bridged
@@ -1787,6 +1942,7 @@ def _indexed_location_fingerprint_tail_8616(
     )
 
 
+@cython.ccall
 def _dynamic_near_pointer_indexed_location_fingerprint_8616(
     node: CIndexedVariable,
     *,
@@ -1795,8 +1951,9 @@ def _dynamic_near_pointer_indexed_location_fingerprint_8616(
     index_value: int | None,
     codegen: object,
     project: object | None,
-) -> str | None:
+) -> object:
     """Fingerprint a dynamic indexed write through a proven near-pointer argument."""
+    element_type: object
     if isinstance(index_value, int) or codegen is None or not isinstance(base, CVariable):
         return None
     if not _is_validation_near_pointer_arg_cvar_8616(base, codegen):
@@ -1827,7 +1984,10 @@ def _dynamic_near_pointer_indexed_location_fingerprint_8616(
     return f"deref:Add({','.join(address_parts)})"
 
 
-def _indexed_location_bridge_8616(*, node: object, base: object, index_value: int, codegen: object) -> str | None:
+@cython.ccall
+def _indexed_location_bridge_8616(*, node: object, base: object, index_value: cython.longlong, codegen: object) -> object:
+    bridged: object
+    pointer_arg_location: object
     if not (isinstance(base, CVariable) and codegen is not None):
         return None
     pointer_arg_location = _near_pointer_arg_location_fingerprint_8616(base, index_value, codegen)
@@ -1852,7 +2012,8 @@ def _indexed_location_bridge_8616(*, node: object, base: object, index_value: in
     return _canonical_or_unresolved_stack_fingerprint_8616(bridged, codegen, source="indexed_bridge", node=node)
 
 
-def _near_pointer_arg_location_fingerprint_8616(base: object, index_value: int, codegen: object) -> str | None:
+@cython.ccall
+def _near_pointer_arg_location_fingerprint_8616(base: object, index_value: cython.longlong, codegen: object) -> object:
     if not isinstance(base, CVariable) or index_value != 0:
         return None
     if not _is_validation_near_pointer_arg_cvar_8616(base, codegen):
@@ -1861,7 +2022,10 @@ def _near_pointer_arg_location_fingerprint_8616(base: object, index_value: int, 
     return f"deref:Add(Mul(reg:ds,const:16),{_expr_fingerprint(base, project)})"
 
 
-def _is_validation_near_pointer_arg_cvar_8616(cvar: object, codegen: object) -> bool:
+@cython.ccall
+def _is_validation_near_pointer_arg_cvar_8616(cvar: object, codegen: object) -> cython.bint:
+    arg: object
+    index: object
     if isinstance(_dynamic_tail_validation_getattr_8616(cvar, "variable_type", None), SimTypePointer):
         return True
     cfunc = _dynamic_tail_validation_getattr_8616(codegen, "cfunc", None)
@@ -1872,7 +2036,7 @@ def _is_validation_near_pointer_arg_cvar_8616(cvar: object, codegen: object) -> 
         if not isinstance(arg, CVariable):
             continue
         same_object = arg is cvar
-        same_offset = isinstance(cvar_offset, int) and _validation_stack_cvar_offset_8616(arg) == cvar_offset
+        same_offset = isinstance(cvar_offset, int) and operator.eq(_validation_stack_cvar_offset_8616(arg), cvar_offset)
         if not same_object and not same_offset:
             continue
         proto_type = prototype_args[index] if index < len(prototype_args) else None
@@ -1881,7 +2045,9 @@ def _is_validation_near_pointer_arg_cvar_8616(cvar: object, codegen: object) -> 
     return False
 
 
+@cython.ccall
 def _validation_stack_cvar_offset_8616(cvar: object) -> int | None:
+    variable: object
     if not isinstance(cvar, CVariable):
         return None
     for variable in (_dynamic_tail_validation_getattr_8616(cvar, "variable", None), _dynamic_tail_validation_getattr_8616(cvar, "unified_variable", None)):
@@ -1891,8 +2057,10 @@ def _validation_stack_cvar_offset_8616(cvar: object) -> int | None:
     return None
 
 
-def _indexed_location_alias_or_fallback_8616(*, node: Any, base: Any, index_value: int, codegen: Any) -> str | None:
-    def _impl() -> str | None:
+def _indexed_location_alias_or_fallback_8616(*, node: Any, base: Any, index_value: cython.longlong, codegen: Any) -> object:
+    def _impl() -> object:
+        direct_slot: object
+        normalized: object
         canonical_offset = _resolve_stack_alias_base_offset_8616(base, codegen) if codegen is not None else None
         if isinstance(canonical_offset, int):
             _debug_tail_stack_alias_indexed_8616(
@@ -1943,16 +2111,17 @@ def _indexed_location_alias_or_fallback_8616(*, node: Any, base: Any, index_valu
     return _impl()
 
 
+@cython.ccall
 def _stack_byte_offset_from_scaled_expr_8616(
-    node: object, project: object, *, scale: int
+    node: object, project: object, *, scale: cython.longlong
 ) -> int | None:
     node = _strip_validation_casts_and_dirty_aliases_8616(node)
     if not isinstance(node, CBinaryOp):
         return None
     if node.op == "Mul":
-        if _c_constant_int_value(node.lhs) == scale:
+        if operator.eq(_c_constant_int_value(node.lhs), scale):
             return _stack_byte_offset_from_expr_8616(node.rhs, project)
-        if _c_constant_int_value(node.rhs) == scale:
+        if operator.eq(_c_constant_int_value(node.rhs), scale):
             return _stack_byte_offset_from_expr_8616(node.lhs, project)
     if node.op == "Shl":
         shift_bits = _c_constant_int_value(node.rhs)
@@ -1961,6 +2130,7 @@ def _stack_byte_offset_from_scaled_expr_8616(
     return None
 
 
+@cython.ccall
 def _extract_deref_node(node: object) -> CUnaryOp | None:
     while isinstance(node, CTypeCast):
         node = node.expr
@@ -1969,20 +2139,22 @@ def _extract_deref_node(node: object) -> CUnaryOp | None:
     return None
 
 
-def _extract_deref_scaled_node(node: object, *, scale: int) -> CUnaryOp | None:
+@cython.ccall
+def _extract_deref_scaled_node(node: object, *, scale: cython.longlong) -> CUnaryOp | None:
     while isinstance(node, CTypeCast):
         node = node.expr
     if not isinstance(node, CBinaryOp) or node.op != "Mul":
         return None
-    if _c_constant_int_value(node.lhs) == scale:
+    if operator.eq(_c_constant_int_value(node.lhs), scale):
         return _extract_deref_node(node.rhs)
-    if _c_constant_int_value(node.rhs) == scale:
+    if operator.eq(_c_constant_int_value(node.rhs), scale):
         return _extract_deref_node(node.lhs)
     return None
 
 
-def _bool_projection_fingerprint(node: Any, project: Any) -> str | None:
-    def _impl() -> str | None:
+def _bool_projection_fingerprint(node: Any, project: Any) -> object:
+    def _impl() -> object:
+        inner: object
         nonlocal node
         while isinstance(node, CTypeCast):
             node = node.expr
@@ -2014,6 +2186,7 @@ def _bool_projection_fingerprint(node: Any, project: Any) -> str | None:
     return _impl()
 
 
+@cython.ccall
 def _extract_same_zero_compare_expr_8616(node: object) -> object | None:
     if not isinstance(node, CBinaryOp) or node.op != "CmpEQ":
         return None
@@ -2026,6 +2199,9 @@ def _extract_same_zero_compare_expr_8616(node: object) -> object | None:
 
 def _extract_zero_flag_source_expr_8616(node: Any) -> Any:
     def _impl() -> Any:
+        extracted: object
+        mul_source: object
+        child: object
         if isinstance(node, CBinaryOp):
             mul_source = _zero_flag_source_from_mul_8616(node)
             if mul_source is not None:
@@ -2041,8 +2217,14 @@ def _extract_zero_flag_source_expr_8616(node: Any) -> Any:
     return _impl()
 
 
+@cython.ccall
 def _zero_flag_source_from_mul_8616(node: CBinaryOp) -> Any:
     """Extract a zero-flag source from a Mul-by-64 compare chain."""
+    lhs_expr: object
+    rhs_expr: object
+    source_expr: object
+    maybe_logic: object
+    maybe_scale: object
     if node.op != "Mul":
         return None
     for maybe_logic, maybe_scale in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
@@ -2060,6 +2242,7 @@ def _zero_flag_source_from_mul_8616(node: CBinaryOp) -> Any:
     return None
 
 
+@cython.ccall
 def _zero_flag_source_from_child_8616(node: Any) -> Any:
     """Recurse into a unary/cast node's child for a zero-flag source."""
     if isinstance(node, CUnaryOp):
@@ -2073,7 +2256,9 @@ def _zero_flag_source_from_child_8616(node: Any) -> Any:
     return None
 
 
+@cython.ccall
 def _normalize_zero_flag_comparison_8616(node: object) -> object:
+    source_expr: object
     if not isinstance(node, CBinaryOp) or node.op not in {"CmpEQ", "CmpNE"}:
         return node
 
@@ -2094,6 +2279,8 @@ def _normalize_zero_flag_comparison_8616(node: object) -> object:
 
 def _simplify_expr_for_fingerprint_8616(node: Any) -> Any:
     def _impl() -> Any:
+        captured: object
+        folded: object
         nonlocal node
         node = _strip_cosmetic_validation_casts_8616(node)
         if isinstance(node, CVariable) and isinstance(node.variable, SimTemporaryVariable):
@@ -2118,8 +2305,10 @@ def _simplify_expr_for_fingerprint_8616(node: Any) -> Any:
     return _impl()
 
 
+@cython.ccall
 def _fold_const_binary_8616(node: CBinaryOp, lhs: Any, rhs: Any) -> Any:
     """Fold proven typed constants, then existing zero-operand identities."""
+    constant: object
     constant = fold_typed_constant_binary_8616(node, lhs, rhs)
     if constant is not None:
         return constant
@@ -2137,12 +2326,13 @@ def _fold_const_binary_8616(node: CBinaryOp, lhs: Any, rhs: Any) -> Any:
     return None
 
 
-def _is_register_expr_8616(node: Any, project: Any, reg_name: str) -> bool:
+@cython.ccall
+def _is_register_expr_8616(node: Any, project: Any, reg_name: object) -> cython.bint:
     node = _strip_validation_casts(node)
     if not isinstance(node, CVariable):
         return False
     variable = _dynamic_tail_validation_getattr_8616(node, "variable", None)
-    if runtime_segment_name_for_variable_8616(variable) == reg_name:
+    if operator.eq(runtime_segment_name_for_variable_8616(variable), reg_name):
         return True
     if not isinstance(variable, SimRegisterVariable):
         return False
@@ -2156,10 +2346,11 @@ def _is_register_expr_8616(node: Any, project: Any, reg_name: str) -> bool:
     if isinstance(expected, int) and reg == expected:
         return True
     name = _dynamic_tail_validation_getattr_8616(node, "name", None) or _dynamic_tail_validation_getattr_8616(variable, "name", None)
-    return isinstance(name, str) and name.lower() == reg_name
+    return isinstance(name, str) and operator.eq(name.lower(), reg_name)
 
 
-def _is_ss_linear_segment_term_8616(node: object, project: object) -> bool:
+@cython.ccall
+def _is_ss_linear_segment_term_8616(node: object, project: object) -> cython.bint:
     node = _strip_validation_casts(node)
     if not isinstance(node, CBinaryOp):
         return False
@@ -2172,13 +2363,16 @@ def _is_ss_linear_segment_term_8616(node: object, project: object) -> bool:
     )
 
 
-def _linear_segment_term_fingerprint_8616(node: object, project: object) -> str | None:
+@cython.ccall
+def _linear_segment_term_fingerprint_8616(node: object, project: object) -> object:
     """Fingerprint a structural real-mode segment-base term before value aliases."""
+    segment_expr: object
+    segment_name: object
 
     node = _strip_validation_casts(node)
     if not isinstance(node, CBinaryOp):
         return None
-    segment_expr: object | None = None
+    segment_expr = None
     if node.op == "Shl" and _c_constant_int_value(node.rhs) == 4:
         segment_expr = node.lhs
     elif node.op == "Mul":
@@ -2194,7 +2388,8 @@ def _linear_segment_term_fingerprint_8616(node: object, project: object) -> str 
     return None
 
 
-def _contains_bp_stack_location_expr_8616(node: Any, *, seen: set[int] | None = None) -> bool:
+@cython.ccall
+def _contains_bp_stack_location_expr_8616(node: object, *, seen: object = None) -> cython.bint:
     node = _strip_validation_casts(node)
     if node is None:
         return False
@@ -2218,10 +2413,14 @@ def _contains_bp_stack_location_expr_8616(node: Any, *, seen: set[int] | None = 
     return False
 
 
+@cython.ccall
 def _additive_term_parts_8616(
-    terms: tuple[tuple[int, object], ...], project: object
+    terms: object, project: object
 ) -> tuple[str, ...]:
     """Build canonical additive address terms, including distributed scaled offsets."""
+    segment_term: object
+    sign: object
+    term: object
     parts: list[str] = []
     const_total = 0
     for sign, term in terms:
@@ -2262,15 +2461,18 @@ def _additive_term_parts_8616(
     return tuple(parts)
 
 
+@cython.ccall
 def _scaled_additive_expr_parts_8616(
     expr: object,
-    scale: int,
+    scale: cython.longlong,
     project: object,
-    child_seen: set[int],
+    child_seen: object,
     *,
-    outer_sign: int = 1,
-) -> tuple[tuple[str, ...], int]:
+    outer_sign: cython.longlong = 1,
+) -> tuple[tuple[str, ...], cython.longlong]:
     """Scale an additive address expression while keeping constants separate."""
+    inner_sign: object
+    inner_term: object
     stripped_expr = _strip_cosmetic_validation_casts_8616(expr)
     terms = (
         _flatten_additive_terms_8616(stripped_expr)
@@ -2298,31 +2500,34 @@ def _scaled_additive_expr_parts_8616(
     return tuple(parts), const_total
 
 
+@cython.ccall
 def _additive_terms_fingerprint_8616(
-    terms: tuple[tuple[int, object], ...], project: object
+    terms: object, project: object
 ) -> str:
     """Canonicalize additive segmented-address terms."""
     return f"Add({','.join(_additive_term_parts_8616(terms, project))})"
 
 
-def _deref_operand_fingerprint_8616(operand: object, project: object) -> str:
+def _deref_operand_fingerprint_8616(operand: object, project: object) -> object:
     operand = _strip_validation_casts(operand)
     if not isinstance(operand, CBinaryOp) or operand.op not in {"Add", "Sub"}:
         return _expr_fingerprint(operand, project)
     terms = _flatten_additive_terms_8616(operand)
-    has_bp_stack_location = any(_contains_bp_stack_location_expr_8616(term) for _sign, term in terms)
+    has_bp_stack_location = any(_contains_bp_stack_location_expr_8616(term) for _sign, term in iter(terms))
     if not has_bp_stack_location:
         return _additive_terms_fingerprint_8616(terms, project)
     filtered_terms = tuple(
-        (sign, term) for sign, term in terms if not (sign > 0 and _is_ss_linear_segment_term_8616(term, project))
+        (sign, term) for sign, term in iter(terms) if not (sign > 0 and _is_ss_linear_segment_term_8616(term, project))
     )
-    if len(filtered_terms) == len(terms):
+    if operator.eq(len(filtered_terms), len(terms)):
         return _additive_terms_fingerprint_8616(terms, project)
     return _additive_terms_fingerprint_8616(filtered_terms, project)
 
 
-def _expr_fingerprint(node: object, project: object, _seen: set[int] | None = None) -> str:
+@cython.ccall
+def _expr_fingerprint(node: object, project: object, _seen: object = None) -> object:
     """Fingerprint expression semantics while retaining proven storage coordinates."""
+    temporary_scope_token: object
     owns_temporary_scope = _seen is None
     temporary_scope_token = (
         _TEMPORARY_FINGERPRINT_NODES_8616.set({})
@@ -2336,8 +2541,10 @@ def _expr_fingerprint(node: object, project: object, _seen: set[int] | None = No
             _TEMPORARY_FINGERPRINT_NODES_8616.reset(temporary_scope_token)
 
 
-def _expr_fingerprint_impl_8616(node: object, project: object, seen: set[int] | None) -> str:
+@cython.ccall
+def _expr_fingerprint_impl_8616(node: object, project: object, seen: object) -> object:
     """Run one fingerprint pass under the caller's temporary-scope ownership."""
+    projection: object
     if seen is None:
         seen = set()
     if node is None:
@@ -2364,7 +2571,8 @@ def _expr_fingerprint_impl_8616(node: object, project: object, seen: set[int] | 
     return _normalized_expr_fingerprint_8616(node, project, seen, cache_ctx)
 
 
-def _semantic_cast_fingerprint_8616(node: CSemanticCast8616, project: object, seen: set[int]) -> str:
+@cython.ccall
+def _semantic_cast_fingerprint_8616(node: CSemanticCast8616, project: object, seen: object) -> str:
     """Fingerprint a semantic cast through its proven source expression."""
     source_type = _semantic_cast_type_fingerprint_8616(node.src_type)
     destination_type = _semantic_cast_type_fingerprint_8616(node.dst_type)
@@ -2372,10 +2580,13 @@ def _semantic_cast_fingerprint_8616(node: CSemanticCast8616, project: object, se
     return f"SemanticCast({source_type}->{destination_type},{expression})"
 
 
+@cython.ccall
 def _normalized_expr_fingerprint_8616(
-    node: object, project: object, seen: set[int], cache_ctx: _FpCacheCtx8616
-) -> str:
+    node: object, project: object, seen: object, cache_ctx: _FpCacheCtx8616
+) -> object:
     """Fingerprint a normalized expression and store it under its final identity."""
+    arm: object
+    probe: object
     probe = _fingerprint_probe_lanes_8616(node, project)
     if probe is not None:
         cache_ctx.store(probe, node)
@@ -2387,32 +2598,37 @@ def _normalized_expr_fingerprint_8616(
     return result
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _FpCacheCtx8616:
     """Cache state for one expression-fingerprint computation."""
 
     node: object
-    cacheable: bool
-    cache_key: tuple[object, int, str]
-    cache: MutableMapping[tuple[object, int, str], str]
-    cache_nodes: MutableMapping[tuple[object, int, str], object]
+    cacheable: cython.bint
+    cache_key: object
+    cache: MutableMapping[tuple[object, cython.longlong, str], str]
+    cache_nodes: MutableMapping[tuple[object, cython.longlong, str], object]
 
-    def lookup(self) -> str | None:
+    @cython.ccall
+    def lookup(self) -> object:
         """Return the cached fingerprint when the node identity matches."""
+        cached: object
         if self.cacheable and self.cache_nodes.get(self.cache_key) is self.node:
             cached = self.cache.get(self.cache_key)
             return cached if isinstance(cached, str) else None
         return None
 
-    def store(self, result: str, node: object) -> None:
+    @cython.ccall
+    def store(self, result: object, node: object) -> None:
         """Persist a fingerprint result under the cache budget."""
         if self.cacheable and len(self.cache) <= _EXPR_FINGERPRINT_CACHE_LIMIT_8616:
             self.cache[self.cache_key] = result
             self.cache_nodes[self.cache_key] = node
 
 
+@cython.ccall
 def _fingerprint_cache_ctx_8616(node: object, project: object) -> _FpCacheCtx8616:
     """Resolve the cache maps and cacheability for one expression node."""
+    temporary_nodes: object
     cache_key = (
         _dynamic_tail_validation_getattr_8616(project, "_inertia_tv_active_function_addr", None),
         id(node),
@@ -2436,8 +2652,11 @@ def _fingerprint_cache_ctx_8616(node: object, project: object) -> _FpCacheCtx861
     )
 
 
-def _fingerprint_probe_lanes_8616(node: object, project: object) -> str | None:
+@cython.ccall
+def _fingerprint_probe_lanes_8616(node: object, project: object) -> object:
     """Run the non-recursive storage/projection probe lanes in order."""
+    result: object
+    probe: object
     for probe in (
         _stack_word_pair_fingerprint,
         _global_word_pair_fingerprint_8616,
@@ -2450,10 +2669,14 @@ def _fingerprint_probe_lanes_8616(node: object, project: object) -> str | None:
     return None
 
 
+@cython.ccall
 def _indexed_fingerprint_probes_8616(
-    node: object, project: object, seen: set[int] | None
-) -> str | None:
+    node: object, project: object, seen: object
+) -> object:
     """Run the indexed global/stack location probe lanes in order."""
+    indexed_global_deref: object
+    indexed_global_field_deref: object
+    indexed_global_location: object
     indexed_global_field_deref = _global_indexed_field_ds_deref_fingerprint_8616(
         node, project, set(seen or ())
     )
@@ -2468,10 +2691,13 @@ def _indexed_fingerprint_probes_8616(
     return _stack_indexed_location_fingerprint_8616(node, project)
 
 
+@cython.ccall
 def _fingerprint_dirtied_arm_8616(
-    node: object, project: object, seen: set[int] | None
-) -> str | None:
+    node: object, project: object, seen: object
+) -> object:
     """Fingerprint a dirty-expression node through register or virtual names."""
+    dirty_register: object
+    resolved_dirty: object
     if not isinstance(node, CDirtyExpression):
         return None
     dirty_register = _dirty_register_fingerprint_8616(node, project)
@@ -2488,10 +2714,13 @@ def _fingerprint_dirtied_arm_8616(
     return "virtual:unknown"
 
 
+@cython.ccall
 def _fingerprint_unary_arm_8616(
-    node: object, project: object, seen: set[int] | None
-) -> str | None:
+    node: object, project: object, seen: object
+) -> object:
     """Fingerprint a unary-op node through deref, not, and indexed lanes."""
+    indexed_stack_location: object
+    inverted: object
     if not isinstance(node, CUnaryOp):
         return None
     indexed_stack_location = _stack_indexed_location_fingerprint_8616(node, project)
@@ -2509,9 +2738,10 @@ def _fingerprint_unary_arm_8616(
     return f"{node.op}({_expr_fingerprint(node.operand, project, set(seen or ()))})"
 
 
+@cython.ccall
 def _fingerprint_deref_arm_8616(
-    node: CUnaryOp, project: object, seen: set[int] | None
-) -> str:
+    node: CUnaryOp, project: object, seen: object
+) -> object:
     """Fingerprint a dereference through reference-collapse and operand lanes."""
     child_seen = set(seen or ())
     referenced = _dynamic_tail_validation_getattr_8616(node, "operand", None)
@@ -2545,10 +2775,13 @@ _REG_VIEW_NAMES_8616 = {
 }
 
 
+@cython.ccall
 def _fingerprint_add_sub_arm_8616(
-    node: CBinaryOp, project: object, seen: set[int] | None
+    node: CBinaryOp, project: object, seen: object
 ) -> str:
     """Fingerprint an Add/Sub node through flattened additive terms."""
+    sign: object
+    term: object
     parts: list[str] = []
     const_total = 0
     for sign, term in _flatten_additive_terms_8616(
@@ -2568,10 +2801,12 @@ def _fingerprint_add_sub_arm_8616(
     return f"Add({','.join(parts)})"
 
 
+@cython.ccall
 def _fingerprint_and_arm_8616(
-    node: CBinaryOp, project: object, seen: set[int] | None
+    node: CBinaryOp, project: object, seen: object
 ) -> str:
     """Fingerprint an And node through the register-view table."""
+    view_name: object
     mask = _c_constant_int_value(node.rhs)
     parent = _expr_fingerprint(node.lhs, project, set(seen or ()))
     view_name = _REG_VIEW_NAMES_8616.get((parent, mask)) if isinstance(mask, int) else None
@@ -2580,9 +2815,10 @@ def _fingerprint_and_arm_8616(
     return f"And({parent},{_expr_fingerprint(node.rhs, project, set(seen or ()))})"
 
 
+@cython.ccall
 def _fingerprint_binary_arm_8616(
-    node: object, project: object, seen: set[int] | None
-) -> str | None:
+    node: object, project: object, seen: object
+) -> object:
     """Fingerprint a binary-op node through additive, shift, and view lanes."""
     if not isinstance(node, CBinaryOp):
         return None
@@ -2598,9 +2834,12 @@ def _fingerprint_binary_arm_8616(
 
 
 def _fingerprint_call_arm_8616(
-    node: object, project: object, seen: set[int] | None
-) -> str | None:
+    node: object, project: object, seen: object
+) -> object:
     """Fingerprint a call node through helper, intrinsic, and callee lanes."""
+    intrinsic: object
+    lowered_insert: object
+    runtime_helper: object
     if not isinstance(node, CFunctionCall):
         return None
     runtime_helper = _runtime_segment_helper_fingerprint_8616(node, project)
@@ -2612,18 +2851,23 @@ def _fingerprint_call_arm_8616(
         if lowered_insert is not None:
             return _expr_fingerprint(lowered_insert, project, set(seen or ()))
         args = ",".join(
-            _expr_fingerprint(arg, project, set(seen or ())) for arg in _dynamic_tail_validation_getattr_8616(node, "args", ()) or ()
+            _expr_fingerprint(arg, project, set(seen or ())) for arg in iter(_dynamic_tail_validation_getattr_8616(node, "args", ()) or ())
         )
         return f"intrinsic:{intrinsic.value}({args})"
     callee = _call_target_name(node, project)
-    args = ",".join(_expr_fingerprint(arg, project, set(seen or ())) for arg in _dynamic_tail_validation_getattr_8616(node, "args", ()) or ())
+    args = ",".join(_expr_fingerprint(arg, project, set(seen or ())) for arg in iter(_dynamic_tail_validation_getattr_8616(node, "args", ()) or ()))
     return f"call:{callee}({args})"
 
 
+@cython.ccall
 def _typed_fingerprint_arm_8616(
-    node: object, project: object, seen: set[int] | None
-) -> str | None:
+    node: object, project: object, seen: object
+) -> object:
     """Dispatch the typed-node fingerprint arms in precedence order."""
+    aggregate_storage: object
+    binary: object
+    indexed: object
+    unary: object
     if isinstance(node, CDirtyExpression):
         return _fingerprint_dirtied_arm_8616(node, project, seen)
     if isinstance(node, CConstant):
@@ -2645,8 +2889,9 @@ def _typed_fingerprint_arm_8616(
     return _fingerprint_call_arm_8616(node, project, seen)
 
 
-def _call_target_name(node: CFunctionCall, project: object) -> str:
-    def _addr_token(addr: int) -> str:
+def _call_target_name(node: CFunctionCall, project: object) -> object:
+    target_token: object
+    def _addr_token(addr: cython.longlong) -> object:
         canonical = normalize_x86_16_call_target_addr_8616(project, addr)
         return f"addr:{canonical:#x}" if isinstance(canonical, int) else f"addr:{addr:#x}"
 
@@ -2672,8 +2917,10 @@ def _call_target_name(node: CFunctionCall, project: object) -> str:
     return "<indirect>"
 
 
-def _callee_target_token_8616(project: object, normalized_callee: str) -> str | None:
+@cython.ccall
+def _callee_target_token_8616(project: object, normalized_callee: object) -> object:
     """Resolve a normalized callee name to an address token when provable."""
+    match: object
     match = _SUB_TARGET_RE.match(normalized_callee)
     if match is not None:
         try:
@@ -2686,13 +2933,16 @@ def _callee_target_token_8616(project: object, normalized_callee: str) -> str | 
     return None
 
 
-def _addr_token_8616(project: object, addr: int) -> str:
+@cython.ccall
+def _addr_token_8616(project: object, addr: cython.longlong) -> object:
     """Format a call target address token through canonical normalization."""
     canonical = normalize_x86_16_call_target_addr_8616(project, addr)
     return f"addr:{canonical:#x}" if isinstance(canonical, int) else f"addr:{addr:#x}"
 
 
-def _resolve_call_symbol_addr_8616(project: object, name: str) -> int | None:
+@cython.ccall
+def _resolve_call_symbol_addr_8616(project: object, name: object) -> int | None:
+    candidate_project: object
     for candidate_project in _call_symbol_lookup_projects_8616(project):
         resolved_addr = _resolve_call_symbol_addr_in_project_8616(candidate_project, name)
         if isinstance(resolved_addr, int):
@@ -2701,14 +2951,18 @@ def _resolve_call_symbol_addr_8616(project: object, name: str) -> int | None:
 
 
 def _call_symbol_lookup_projects_8616(project: Any) -> tuple[object, ...]:
+    candidate: object
     projects: list[object] = []
     for candidate in (project, _dynamic_tail_validation_getattr_8616(project, "_inertia_original_project", None)):
-        if candidate is not None and all(candidate is not existing for existing in projects):
+        if candidate is not None and all(candidate is not existing for existing in iter(projects)):
             projects.append(candidate)
     return tuple(projects)
 
 
-def _resolve_call_symbol_addr_in_project_8616(project: Any, name: str) -> int | None:
+@cython.ccall
+def _resolve_call_symbol_addr_in_project_8616(project: Any, name: object) -> int | None:
+    addr: object
+    label: object
     function_addr = _function_addr_by_name_8616(project, name)
     if isinstance(function_addr, int):
         return function_addr
@@ -2724,7 +2978,9 @@ def _resolve_call_symbol_addr_in_project_8616(project: Any, name: str) -> int | 
     return None
 
 
-def _function_addr_by_name_8616(project: Any, name: str) -> int | None:
+@cython.ccall
+def _function_addr_by_name_8616(project: Any, name: object) -> int | None:
+    lookup_name: object
     functions = _dynamic_tail_validation_getattr_8616(_dynamic_tail_validation_getattr_8616(project, "kb", None), "functions", None)
     lookup = _dynamic_tail_validation_getattr_8616(functions, "function", None)
     if not callable(lookup):
@@ -2740,7 +2996,9 @@ def _function_addr_by_name_8616(project: Any, name: str) -> int | None:
     return None
 
 
-def _call_symbol_lookup_names_8616(name: str) -> tuple[str, ...]:
+@cython.ccall
+def _call_symbol_lookup_names_8616(name: object) -> tuple[str, ...]:
+    decorated: object
     normalized = normalize_callee_name_8616(name)
     if not isinstance(normalized, str):
         return ()
@@ -2754,15 +3012,18 @@ def _call_symbol_lookup_names_8616(name: str) -> tuple[str, ...]:
     return tuple(names)
 
 
-def _call_symbol_names_equivalent_8616(left: str | None, right: str | None) -> bool:
+@cython.ccall
+def _call_symbol_names_equivalent_8616(left: object, right: object) -> cython.bint:
     left_name = normalize_callee_name_8616(left)
     right_name = normalize_callee_name_8616(right)
     if not isinstance(left_name, str) or not isinstance(right_name, str):
         return False
-    return left_name == right_name or left_name.lstrip("_") == right_name.lstrip("_")
+    return left_name == right_name or operator.eq(left_name.lstrip("_"), right_name.lstrip("_"))
 
 
-def _call_symbol_name_8616(node: CFunctionCall) -> str | None:
+@cython.ccall
+def _call_symbol_name_8616(node: CFunctionCall) -> object:
+    raw: object
     callee_func = _dynamic_tail_validation_getattr_8616(node, "callee_func", None)
     for raw in (
         _dynamic_tail_validation_getattr_8616(callee_func, "name", None),
@@ -2774,7 +3035,9 @@ def _call_symbol_name_8616(node: CFunctionCall) -> str | None:
     return None
 
 
+@cython.ccall
 def _fingerprint_target_addr_from_summary_8616(summary: Any) -> int | None:
+    target_addr: object
     if isinstance(summary, dict):
         target_addr = summary.get("target_addr")
     else:
@@ -2782,7 +3045,9 @@ def _fingerprint_target_addr_from_summary_8616(summary: Any) -> int | None:
     return target_addr if isinstance(target_addr, int) else None
 
 
-def _summarize_x86_16_callsite_for_fingerprint_8616(function: Any, callsite_addr: int) -> Any:
+@cython.ccall
+def _summarize_x86_16_callsite_for_fingerprint_8616(function: Any, callsite_addr: cython.longlong) -> Any:
+    tail_validation_module: object
     tail_validation_module = sys.modules.get("inertia.validation.tail_validation")
     summarize = _dynamic_tail_validation_getattr_8616(tail_validation_module, "summarize_x86_16_callsite", None)
     if callable(summarize):
@@ -2790,12 +3055,13 @@ def _summarize_x86_16_callsite_for_fingerprint_8616(function: Any, callsite_addr
     return _summarize_x86_16_callsite_fallback(function, callsite_addr)
 
 
+@cython.ccall
 def build_x86_16_contextual_call_fingerprints(
     root: object,
     project: object,
     *,
     summary_inventory: Mapping[int, CallsiteSummary8616] | None = None,
-) -> dict[int, str]:
+) -> object:
     """Build evidence-matched callsite fingerprints keyed by C call identity.
 
     Structured-C traversal order is not machine instruction order after
@@ -2812,14 +3078,18 @@ def _contextual_call_fingerprints_run_8616(
     root: object,
     project: object,
     summary_inventory: Mapping[int, CallsiteSummary8616] | None,
-) -> dict[int, str]:
+) -> object:
     """Run evidence-matched callsite fingerprinting for one structured root."""
+    function: object
+    fingerprint: object
+    node: object
+    node_id: object
     if root is None:
         return {}
     call_nodes = list(_iter_observable_call_nodes_8616(root))
     if not call_nodes:
         return {}
-    fingerprints: dict[int, str] = {}
+    fingerprints: dict[cython.longlong, str] = {}
     function = _function_for_call_context_8616(root, project)
     if function is not None:
         contextual_calls = _contextual_calls_for_function_8616(
@@ -2851,16 +3121,18 @@ def _contextual_call_fingerprints_run_8616(
     return fingerprints
 
 
+@cython.ccall
 def _contextual_calls_for_function_8616(
     function: Any,
     project: object,
-    summary_inventory: Mapping[int, CallsiteSummary8616] | None,
-) -> list[tuple[int, int | None]]:
+    summary_inventory: object,
+) -> object:
     """Collect (callsite_addr, canonical_target) pairs for one function."""
-    callsite_addrs = tuple(sorted(_dynamic_tail_validation_getattr_8616(function, "get_call_sites", list)() or ()))
+    callsite_addr: object
+    callsite_addrs = tuple(sorted(tuple(_dynamic_tail_validation_getattr_8616(function, "get_call_sites", list)() or ())))
     if not callsite_addrs:
         callsite_addrs = _collect_direct_capstone_callsite_addrs_8616(function)
-    contextual_calls: list[tuple[int, int | None]] = []
+    contextual_calls: list[tuple[cython.longlong, int | None]] = []
     for callsite_addr in callsite_addrs:
         summary = (
             summary_inventory.get(callsite_addr)
@@ -2873,18 +3145,20 @@ def _contextual_calls_for_function_8616(
 
 
 def _match_contextual_calls_8616(
-    unmatched_nodes: list[CFunctionCall],
-    unmatched_calls: list[tuple[int, int | None]],
-    fingerprints: dict[int, str],
+    unmatched_nodes: object,
+    unmatched_calls: object,
+    fingerprints: object,
     node_key: Callable[[CFunctionCall], int | None],
     call_key: Callable[[tuple[int, int | None]], int | None],
 ) -> None:
     """Match call nodes to contextual calls by a shared key extraction."""
+    match: object
+    node: object
     for node in tuple(unmatched_nodes):
         key = node_key(node)
         if not isinstance(key, int):
             continue
-        match = next((item for item in unmatched_calls if call_key(item) == key), None)
+        match = next((item for item in iter(unmatched_calls) if operator.eq(call_key(item), key)), None)
         if match is None:
             continue
         _record_contextual_call_fingerprint_8616(fingerprints, node, match)
@@ -2892,6 +3166,7 @@ def _match_contextual_calls_8616(
         unmatched_calls.remove(match)
 
 
+@cython.ccall
 def _canonical_contextual_call_target_8616(project: object, target_addr: int | None) -> int | None:
     """Canonicalize one summary target for contextual identity matching."""
     if not isinstance(target_addr, int):
@@ -2900,6 +3175,7 @@ def _canonical_contextual_call_target_8616(project: object, target_addr: int | N
     return canonical if isinstance(canonical, int) else target_addr
 
 
+@cython.ccall
 def _call_node_target_addr_for_context_8616(node: CFunctionCall, project: object) -> int | None:
     """Return a call node's canonical address only when target evidence exists."""
     token = _call_target_name(node, project)
@@ -2911,10 +3187,11 @@ def _call_node_target_addr_for_context_8616(node: CFunctionCall, project: object
         return None
 
 
+@cython.ccall
 def _record_contextual_call_fingerprint_8616(
-    fingerprints: dict[int, str],
+    fingerprints: object,
     node: CFunctionCall,
-    contextual_call: tuple[int, int | None],
+    contextual_call: object,
 ) -> None:
     """Record a proven contextual target, or its explicit callsite fallback."""
     callsite_addr, target_addr = contextual_call
@@ -2923,7 +3200,10 @@ def _record_contextual_call_fingerprint_8616(
     )
 
 
+@cython.ccall
 def _function_for_call_context_8616(root: Any, project: Any) -> Any:
+    cfunc: object
+    function: object
     codegen = _dynamic_tail_validation_getattr_8616(root, "codegen", None)
     cfunc = _dynamic_tail_validation_getattr_8616(codegen, "cfunc", None)
     func_addr = _dynamic_tail_validation_getattr_8616(cfunc, "addr", None)
@@ -2938,14 +3218,18 @@ def _function_for_call_context_8616(root: Any, project: Any) -> Any:
     return None
 
 
-def _collect_direct_capstone_callsite_addrs_8616(function: Any) -> tuple[int, ...]:
-    def _impl() -> tuple[int, ...]:
+def _collect_direct_capstone_callsite_addrs_8616(function: Any) -> object:
+    def _impl() -> tuple[cython.longlong, ...]:
+        factory: object
+        project: object
+        block_addr: object
+        insn: object
         project = _dynamic_tail_validation_getattr_8616(function, "project", None)
         factory = _dynamic_tail_validation_getattr_8616(project, "factory", None)
         if project is None or factory is None:
             return ()
-        callsites: list[int] = []
-        for block_addr in sorted(_dynamic_tail_validation_getattr_8616(function, "block_addrs_set", ()) or ()):
+        callsites: list[cython.longlong] = []
+        for block_addr in sorted(tuple(_dynamic_tail_validation_getattr_8616(function, "block_addrs_set", ()) or ())):
             try:
                 block = factory.block(block_addr, opt_level=0)
             except Exception:
@@ -2961,7 +3245,9 @@ def _collect_direct_capstone_callsite_addrs_8616(function: Any) -> tuple[int, ..
     return _impl()
 
 
+@cython.ccall
 def _call_node_addr_8616(node: Any) -> int | None:
+    attr: object
     for attr in ("ins_addr", "addr"):
         value = _dynamic_tail_validation_getattr_8616(node, attr, None)
         if isinstance(value, int):
@@ -2969,11 +3255,16 @@ def _call_node_addr_8616(node: Any) -> int | None:
     return None
 
 
-def _build_cod_call_name_fingerprints_8616(root: object, project: object, call_nodes: object) -> dict[int, str]:
+@cython.ccall
+def _build_cod_call_name_fingerprints_8616(root: object, project: object, call_nodes: object) -> dict[cython.longlong, str]:
     return {}
 
 
-def _lookup_function_for_call_context_8616(project: Any, func_addr: int) -> Any:
+def _lookup_function_for_call_context_8616(project: Any, func_addr: cython.longlong) -> Any:
+    function: object
+    candidate_addr: object
+    candidate_addrs: object
+    candidate_project: object
     project_variants = _call_context_addr_variants_8616(project, func_addr)
 
     for candidate_project, candidate_addrs in project_variants:
@@ -2986,10 +3277,13 @@ def _lookup_function_for_call_context_8616(project: Any, func_addr: int) -> Any:
     return None
 
 
+@cython.ccall
 def _call_context_addr_variants_8616(
-    project: Any, func_addr: int
-) -> list[tuple[object, tuple[int, ...]]]:
+    project: Any, func_addr: cython.longlong
+) -> object:
     """Build (project, candidate-addrs) lookup variants across rebase deltas."""
+    original_project: object
+    addr: object
     addr_candidates = []
     original_delta = _dynamic_tail_validation_getattr_8616(project, "_inertia_original_linear_delta", None)
     if isinstance(original_delta, int):
@@ -2998,18 +3292,18 @@ def _call_context_addr_variants_8616(
         if rebased >= 0:
             addr_candidates.append(rebased)
     addr_candidates.append(func_addr)
-    deduped_addrs: list[int] = []
+    deduped_addrs: list[cython.longlong] = []
     for addr in addr_candidates:
         if addr not in deduped_addrs:
             deduped_addrs.append(addr)
 
-    project_variants: list[tuple[object, tuple[int, ...]]] = [(project, tuple(deduped_addrs))]
+    project_variants: list[tuple[object, tuple[cython.longlong, ...]]] = [(project, tuple(deduped_addrs))]
     original_project = _dynamic_tail_validation_getattr_8616(project, "_inertia_original_project", None)
     if original_project is not None:
         original_addrs = [func_addr]
         if isinstance(original_delta, int):
             original_addrs = [func_addr + original_delta]
-        deduped_original_addrs: list[int] = []
+        deduped_original_addrs: list[cython.longlong] = []
         for addr in original_addrs:
             if addr >= 0 and addr not in deduped_original_addrs:
                 deduped_original_addrs.append(addr)
@@ -3017,7 +3311,8 @@ def _call_context_addr_variants_8616(
     return project_variants
 
 
-def _call_walkable_8616(child: object) -> bool:
+@cython.ccall
+def _call_walkable_8616(child: object) -> cython.bint:
     """Check whether a child node is present and walkable for call discovery."""
     if child is None:
         return False
@@ -3026,12 +3321,13 @@ def _call_walkable_8616(child: object) -> bool:
     return True
 
 
-def _iter_observable_call_nodes_8616(node: object, _seen: set[int] | None = None) -> Iterator[CFunctionCall]:
+def _iter_observable_call_nodes_8616(node: object, _seen: object = None) -> Iterator[CFunctionCall]:
     yield from _iter_call_nodes_impl_8616(node, _seen)
 
 
-def _iter_call_nodes_impl_8616(node: object, seen: set[int] | None) -> Iterator[CFunctionCall]:
+def _iter_call_nodes_impl_8616(node: object, seen: object) -> Iterator[CFunctionCall]:
     """Yield observable calls for one node, guarding against shared subnodes."""
+    stmt: object
     if node is None:
         return
     if seen is None:
@@ -3056,8 +3352,14 @@ def _iter_call_nodes_impl_8616(node: object, seen: set[int] | None) -> Iterator[
     yield from _iter_generic_child_call_nodes_8616(node, seen)
 
 
-def _iter_generic_child_call_nodes_8616(node: object, seen: set[int]) -> Iterator[CFunctionCall]:
+def _iter_generic_child_call_nodes_8616(node: object, seen: object) -> Iterator[CFunctionCall]:
     """Walk every generic structured-C child slot for observable calls."""
+    child: object
+    else_node: object
+    arg: object
+    attr: object
+    body: object
+    cond: object
     for attr in ("retval", "condition", "cond", "expr", "lhs", "rhs", "operand"):
         child = _dynamic_tail_validation_getattr_8616(node, attr, None)
         if _call_walkable_8616(child):
@@ -3078,24 +3380,29 @@ def _iter_generic_child_call_nodes_8616(node: object, seen: set[int]) -> Iterato
             yield from _iter_call_nodes_impl_8616(child, seen)
 
 
+@cython.ccall
 def _location_fingerprint(
     node: object,
     project: object,
-    _seen: set[int] | None = None,
+    _seen: object = None,
     *,
-    resolve_copy_alias: bool = True,
-) -> str:
+    resolve_copy_alias: cython.bint = True,
+) -> object:
     return _location_fingerprint_impl_8616(node, project, _seen, resolve_copy_alias=resolve_copy_alias)
 
 
+@cython.ccall
 def _location_fingerprint_impl_8616(
     node: object,
     project: object,
-    seen: set[int] | None,
+    seen: object,
     *,
-    resolve_copy_alias: bool,
-) -> str:
+    resolve_copy_alias: cython.bint,
+) -> object:
     """Resolve one storage location under cycle-guarded alias tracking."""
+    early: object
+    indexed_global_location: object
+    indexed_stack_location: object
     if seen is None:
         seen = set()
     node_id = id(node)
@@ -3125,13 +3432,17 @@ def _location_fingerprint_impl_8616(
     return _expr_fingerprint(node, project, child_seen)
 
 
+@cython.ccall
 def _location_fingerprint_early_arms_8616(
     node: object,
     project: object,
-    seen: set[int],
-    resolve_copy_alias: bool,
-) -> str | None:
+    seen: object,
+    resolve_copy_alias: cython.bint,
+) -> object:
     """Resolve the typed early location arms before generic expression fallback."""
+    dirty_name: object
+    dirty_register: object
+    runtime_location: object
     if isinstance(node, CFunctionCall):
         runtime_location = _runtime_segment_helper_location_8616(node, project)
         if runtime_location is not None:
@@ -3154,7 +3465,8 @@ def _location_fingerprint_early_arms_8616(
     return None
 
 
-def _cvariable_location_fingerprint_8616(node: Any, project: Any, *, _seen: set[int], resolve_copy_alias: bool) -> str | None:
+@cython.ccall
+def _cvariable_location_fingerprint_8616(node: Any, project: Any, *, _seen: object, resolve_copy_alias: cython.bint) -> object:
     """Return a terminating storage identity for an angr structured-C variable."""
 
     return _cvariable_location_fingerprint_impl_8616(
@@ -3162,14 +3474,18 @@ def _cvariable_location_fingerprint_8616(node: Any, project: Any, *, _seen: set[
     )
 
 
+@cython.ccall
 def _cvariable_location_fingerprint_impl_8616(
     node: Any,
     project: Any,
     *,
-    seen: set[int],
-    resolve_copy_alias: bool,
-) -> str | None:
+    seen: object,
+    resolve_copy_alias: cython.bint,
+) -> object:
     """Resolve the terminating storage identity for one structured-C variable."""
+    resolved_alias: object
+    source_arg_fingerprint: object
+    widened: object
     variable = _dynamic_tail_validation_getattr_8616(node, "variable", None)
     codegen = _dynamic_tail_validation_getattr_8616(node, "codegen", None)
     name = _dynamic_tail_validation_getattr_8616(node, "name", None) or _dynamic_tail_validation_getattr_8616(variable, "name", None)
@@ -3196,9 +3512,10 @@ def _cvariable_location_fingerprint_impl_8616(
     return _terminal_cvar_location_fingerprint_8616(variable, name, project)
 
 
+@cython.ccall
 def _widened_cvar_fingerprint_8616(
-    node: Any, variable: Any, codegen: Any, name: Any
-) -> str | None:
+    node: Any, variable: Any, codegen: object, name: Any
+) -> object:
     """Resolve a proven widened-carrier slot fingerprint for a named variable."""
     if codegen is None or not isinstance(name, str):
         return None
@@ -3216,8 +3533,11 @@ def _widened_cvar_fingerprint_8616(
     return _widened_carrier_slot_fingerprint_8616(name, value=node, variable=variable, codegen=codegen)
 
 
-def _terminal_cvar_location_fingerprint_8616(variable: Any, name: Any, project: Any) -> str:
+@cython.ccall
+def _terminal_cvar_location_fingerprint_8616(variable: Any, name: Any, project: Any) -> object:
     """Resolve the terminal storage identity for register, memory, and virtual variables."""
+    runtime_gp_name: object
+    runtime_segment_name: object
     if isinstance(variable, SimRegisterVariable) and _dynamic_tail_validation_getattr_8616(variable, "reg", None) is not None:
         return f"reg:{_register_name(project, variable.reg, variable.size)}"
     if isinstance(variable, SimMemoryVariable):
@@ -3238,7 +3558,8 @@ def _terminal_cvar_location_fingerprint_8616(variable: Any, name: Any, project: 
     return f"virtual:{type(variable).__name__}:unknown"
 
 
-def _global_indexed_location_fingerprint_8616(node: Any) -> str | None:
+@cython.ccall
+def _global_indexed_location_fingerprint_8616(node: Any) -> object:
     node = _strip_validation_casts(node)
     if not isinstance(node, CIndexedVariable):
         return None
@@ -3261,8 +3582,11 @@ def _global_indexed_location_fingerprint_8616(node: Any) -> str | None:
     return f"global:{(addr + index_value * elem_size) & 0xFFFF:#x}"
 
 
-def _indexed_global_write_location_fingerprints_8616(node: object, project: object) -> tuple[str, ...]:
+def _indexed_global_write_location_fingerprints_8616(node: object, project: object) -> object:
     """Return byte-precise locations for a proven indexed global lvalue."""
+    access_size: object
+    codegen: object
+    subject: object
 
     subject = _indexed_global_write_subject_8616(node)
     if subject is None:
@@ -3297,12 +3621,13 @@ def _indexed_global_write_location_fingerprints_8616(node: object, project: obje
     return _scaled_indexed_global_locations_8616(index, elem_size, addr, field_offset, write_size, project)
 
 
+@cython.ccall
 def _scaled_indexed_global_locations_8616(
     index: Any,
-    elem_size: int,
-    addr: int,
-    field_offset: int,
-    write_size: int,
+    elem_size: cython.longlong,
+    addr: cython.longlong,
+    field_offset: cython.longlong,
+    write_size: cython.longlong,
     project: object,
 ) -> tuple[str, ...]:
     """Return byte-precise locations for a scaled non-constant global index."""
@@ -3317,14 +3642,18 @@ def _scaled_indexed_global_locations_8616(
     return tuple(locations)
 
 
+@cython.ccall
 def _indexed_global_write_subject_8616(
     node: object,
-) -> tuple[CIndexedVariable, int, int | None] | None:
+) -> object:
     """Unwrap an indexed global lvalue and its proven memory-helper access width."""
+    access_size: object
+    candidate: object
+    displacement: object
 
     node = _strip_validation_casts(node)
     field_offset = 0
-    access_size: int | None = None
+    access_size = None
     if isinstance(node, CFunctionCall):
         helper_widths = {"MEM_U8": 1, "MEM_U16": 2, "MEM_U32": 4}
         access_size = helper_widths.get(node.callee_target)
@@ -3348,13 +3677,14 @@ def _indexed_global_write_subject_8616(
     return node, field_offset, access_size
 
 
+@cython.ccall
 def _global_indexed_ds_deref_fingerprint_8616(
     node: Any,
     project: Any,
-    child_seen: set[int],
+    child_seen: object,
     *,
-    field_offset: int = 0,
-) -> str | None:
+    field_offset: cython.longlong = 0,
+) -> object:
     """Canonicalize a proven indexed DS global to its segmented byte address."""
     node = _strip_validation_casts(node)
     if not isinstance(node, CIndexedVariable):
@@ -3387,11 +3717,12 @@ def _global_indexed_ds_deref_fingerprint_8616(
     return f"Dereference(Add(Mul(reg:ds,const:16),{','.join(address_parts)}))"
 
 
+@cython.ccall
 def _global_indexed_field_ds_deref_fingerprint_8616(
     node: object,
     project: object,
-    child_seen: set[int],
-) -> str | None:
+    child_seen: object,
+) -> object:
     """Canonicalize a non-pointer indexed global field to its segmented byte address."""
     node = _strip_validation_casts(node)
     if not isinstance(node, CVariableField) or node.var_is_ptr:
@@ -3407,7 +3738,12 @@ def _global_indexed_field_ds_deref_fingerprint_8616(
     )
 
 
-def _deref_location_fingerprint_8616(node: Any, project: Any) -> str | None:
+@cython.ccall
+def _deref_location_fingerprint_8616(node: Any, project: Any) -> object:
+    evidenced_indexed_store: object
+    indexed_stack_location: object
+    seg_name: object
+    stable_ss_location: object
     evidenced_indexed_store = _indexed_store_evidence_location_fingerprint_8616(node)
     if evidenced_indexed_store is not None:
         return evidenced_indexed_store
@@ -3438,8 +3774,10 @@ def _deref_location_fingerprint_8616(node: Any, project: Any) -> str | None:
     return f"deref:{_deref_operand_fingerprint_8616(node.operand, project)}"
 
 
-def _stable_ss_deref_fingerprint_8616(node: Any, project: Any, codegen: Any) -> str | None:
+@cython.ccall
+def _stable_ss_deref_fingerprint_8616(node: Any, project: Any, codegen: object) -> object:
     """Resolve a stable SS-linear stack dereference to its canonical slot."""
+    stable_ss_access: object
     if codegen is None:
         return None
     try:
@@ -3458,8 +3796,13 @@ def _stable_ss_deref_fingerprint_8616(node: Any, project: Any, codegen: Any) -> 
     return None
 
 
-def _indexed_store_evidence_location_fingerprint_8616(node: object) -> str | None:
+@cython.ccall
+def _indexed_store_evidence_location_fingerprint_8616(node: object) -> object:
     """Canonicalize a raw indexed store only from unique decoded store evidence."""
+    index_shift: object
+    index_stack_offset: object
+    sign: object
+    term: object
 
     if not isinstance(node, CUnaryOp) or node.op != "Dereference":
         return None
@@ -3474,7 +3817,7 @@ def _indexed_store_evidence_location_fingerprint_8616(node: object) -> str | Non
     operand = _strip_validation_casts(node.operand)
     if not isinstance(operand, CBinaryOp) or operand.op not in {"Add", "Sub"}:
         return None
-    base_offsets: list[int] = []
+    base_offsets: list[cython.longlong] = []
     non_base_term_count = 0
     for sign, term in _flatten_additive_terms_8616(operand):
         stripped_term = _strip_validation_casts(term)
@@ -3499,7 +3842,7 @@ def _indexed_store_evidence_location_fingerprint_8616(node: object) -> str | Non
     byte_addr = base_offsets[0]
     candidates = {
         (fact.index_stack_offset, fact.index_shift)
-        for fact in evidence
+        for fact in iter(evidence)
         if isinstance(fact, IndexedSegmentedGlobalStoreEvidence8616)
         and 0 < fact.width <= 8
         and byte_addr in {((fact.base_offset + byte_offset) & 0xFFFF) for byte_offset in range(fact.width)}
@@ -3518,7 +3861,10 @@ def _indexed_store_evidence_location_fingerprint_8616(node: object) -> str | Non
     return f"deref:Add(Reference(global:{byte_addr:#x}),{scaled_index})"
 
 
-def _indexed_deref_bridge_fingerprint_8616(node: Any, operand: Any) -> str | None:
+@cython.ccall
+def _indexed_deref_bridge_fingerprint_8616(node: Any, operand: Any) -> object:
+    bridged: object
+    codegen: object
     if not isinstance(operand, CIndexedVariable):
         return None
     base = _strip_validation_casts(_dynamic_tail_validation_getattr_8616(operand, "variable", None))
@@ -3541,7 +3887,8 @@ def _indexed_deref_bridge_fingerprint_8616(node: Any, operand: Any) -> str | Non
     )
 
 
-def _runtime_segment_helper_name_8616(node: CFunctionCall) -> str | None:
+@cython.ccall
+def _runtime_segment_helper_name_8616(node: CFunctionCall) -> object:
     tags = _dynamic_tail_validation_getattr_8616(node, "tags", None)
     marker_name = tags.get("inertia_x86_16_runtime_segment_helper") if isinstance(tags, dict) else None
     if isinstance(marker_name, str):
@@ -3556,7 +3903,8 @@ def _runtime_segment_helper_name_8616(node: CFunctionCall) -> str | None:
     return None
 
 
-def _runtime_segment_helper_args_8616(node: CFunctionCall) -> tuple[object, ...] | None:
+@cython.ccall
+def _runtime_segment_helper_args_8616(node: CFunctionCall) -> object:
     args = tuple(_dynamic_tail_validation_getattr_8616(node, "args", ()) or ())
     name = _runtime_segment_helper_name_8616(node)
     if name in {"MEM_U8", "MEM_U16", "MEM_U32"}:
@@ -3566,7 +3914,8 @@ def _runtime_segment_helper_args_8616(node: CFunctionCall) -> tuple[object, ...]
     return args[0], args[1]
 
 
-def _is_runtime_segment_helper_call_8616(node: CFunctionCall) -> bool:
+@cython.ccall
+def _is_runtime_segment_helper_call_8616(node: CFunctionCall) -> cython.bint:
     name = _runtime_segment_helper_name_8616(node)
     return name in {"SEG_U8", "SEG_U16", "SEG_U32", "MK_FP", "SEG_PTR", "MEM_U8", "MEM_U16", "MEM_U32"}
 
@@ -3575,10 +3924,11 @@ def _runtime_segment_linear_fingerprint_8616(
     seg_expr: object, off_expr: object, project: object
 ) -> str:
     """Canonicalize a segmented runtime-helper address as a linear fingerprint."""
+    seg_fp: object
     seg_fp = next(
         (
             f"reg:{segment_name}"
-            for segment_name in ("cs", "ds", "es", "ss")
+            for segment_name in iter(("cs", "ds", "es", "ss"))
             if _is_register_expr_8616(seg_expr, project, segment_name)
         ),
         None,
@@ -3596,7 +3946,10 @@ def _runtime_segment_linear_fingerprint_8616(
     return f"Add(Mul({seg_fp},const:16),{off_fp})"
 
 
-def _runtime_segment_helper_fingerprint_8616(node: CFunctionCall, project: object) -> str | None:
+@cython.ccall
+def _runtime_segment_helper_fingerprint_8616(node: CFunctionCall, project: object) -> object:
+    args: object
+    name: object
     name = _runtime_segment_helper_name_8616(node)
     args = _runtime_segment_helper_args_8616(node)
     if name is None or args is None:
@@ -3615,7 +3968,12 @@ def _runtime_segment_helper_fingerprint_8616(node: CFunctionCall, project: objec
     return None
 
 
-def _runtime_segment_helper_location_8616(node: CFunctionCall, project: object) -> str | None:
+@cython.ccall
+def _runtime_segment_helper_location_8616(node: CFunctionCall, project: object) -> object:
+    args: object
+    near_pointer: object
+    pointer_location: object
+    runtime_segment_name: object
     name = _runtime_segment_helper_name_8616(node)
     args = _runtime_segment_helper_args_8616(node)
     if name in {"MEM_U8", "MEM_U16", "MEM_U32"} and args is not None and len(args) == 1:
@@ -3644,6 +4002,7 @@ def _runtime_segment_helper_location_8616(node: CFunctionCall, project: object) 
     return f"deref:{_runtime_segment_linear_fingerprint_8616(seg_expr, off_expr, project)}"
 
 
+@cython.ccall
 def _near_pointer_arg_from_offset_expr_8616(expr: object) -> CVariable | None:
     expr = _strip_validation_casts(expr)
     if isinstance(expr, CVariable):

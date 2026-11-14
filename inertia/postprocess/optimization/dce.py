@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Rewrite/Postprocess cleanup.
 
 Responsibility: perform conservative dead-code elimination only after liveness evidence is available.
@@ -10,6 +11,7 @@ Unknown cases are refused and preserved.
 """
 
 from __future__ import annotations
+import cython
 
 import contextlib
 import os
@@ -62,6 +64,7 @@ from .dce_walk import (
 )
 from .local_declarations import prune_dce_proven_declarations_8616
 from .local_liveness import has_architectural_register_storage_8616
+import builtins
 
 __all__ = ["_dead_code_elimination_8616"]
 
@@ -147,7 +150,7 @@ class _DeadCodeEliminationRun8616:
             return result
         return None
 
-    def run_8616_part0(self) -> tuple[bool, object]:
+    def run_8616_part0(self) -> tuple[cython.bint, object]:
         """Set up per-run state snapshots before the elimination pass."""
         self.cfunc = _dynamic_dce_getattr_8616(self.codegen, "cfunc", None)
         if self.cfunc is None:
@@ -208,19 +211,19 @@ class _DeadCodeEliminationRun8616:
                 _dynamic_dce_setattr_8616(self.codegen, self.counter, 0)
         return False, None
 
-    def _bump_codegen_counter_8616(self, name: str) -> None:
+    def _bump_codegen_counter_8616(self, name: object) -> None:
         """Increment a dynamic codegen diagnostic counter."""
         # Dynamic codegen compatibility boundary.
         _dynamic_dce_setattr_8616(self.codegen, name, int(_dynamic_dce_getattr_8616(self.codegen, name, 0)) + 1)
 
-    def run_8616_part1(self) -> tuple[bool, object]:
+    def run_8616_part1(self) -> tuple[cython.bint, object]:
         """Initialize run counters and protected-key containers."""
         self.changed = False
         self.pruned_decl_keys = set()
         self.pruned_decl_names = set()
         return False, None
 
-    def _safe_attr(self, node: object, attr: str, default: object | None = None) -> object | None:
+    def _safe_attr(self, node: object, attr: object, default: object | None = None) -> object | None:
         try:
             return typing.cast(object | None, _dynamic_dce_getattr_8616(node, attr, default))
         except (TypeError, ValueError):
@@ -228,6 +231,7 @@ class _DeadCodeEliminationRun8616:
 
     def _var_key(self, node: CVariable) -> tuple[str, int | str]:
         """Return a liveness key in the Alias-owned machine-BP coordinate."""
+        var: object
         var = _dynamic_dce_getattr_8616(node, "variable", None)
         if var is None:
             return ("node", id(node))
@@ -246,7 +250,7 @@ class _DeadCodeEliminationRun8616:
             return ("ident", ident)
         return ("var", id(var))
 
-    def _dirty_key(self, node: object) -> tuple[str, int | str] | None:
+    def _dirty_key(self, node: object) -> object:
         if type(node).__name__ != "CDirtyExpression":
             return None
         dirty = self._safe_attr(node, "dirty", None)
@@ -272,7 +276,8 @@ class _DeadCodeEliminationRun8616:
             return ("dirty_expr", expr_idx)
         return None
 
-    def _dirty_has_storage_provenance_8616(self, node: object) -> bool:
+    def _dirty_has_storage_provenance_8616(self, node: object) -> cython.bint:
+        attr: object
         if type(node).__name__ != "CDirtyExpression":
             return False
         dirty = self._safe_attr(node, "dirty", None)
@@ -288,23 +293,23 @@ class _DeadCodeEliminationRun8616:
                 return True
         return False
 
-    def _dirty_is_storage_free_temp_8616(self, node: object) -> bool:
+    def _dirty_is_storage_free_temp_8616(self, node: object) -> cython.bint:
         return (
             type(node).__name__ == "CDirtyExpression"
             and bool(_dynamic_dce_getattr_8616(self.codegen, "_inertia_dce_allow_storage_free_dirty_8616", False))
             and not self._dirty_has_storage_provenance_8616(node)
         )
 
-    def _dirty_is_storage_free_carrier_8616(self, node: object) -> bool:
+    def _dirty_is_storage_free_carrier_8616(self, node: object) -> cython.bint:
         return type(node).__name__ == "CDirtyExpression" and not self._dirty_has_storage_provenance_8616(node)
 
-    def _dirty_temp_cleanup_mode_8616(self, node: object) -> bool:
+    def _dirty_temp_cleanup_mode_8616(self, node: object) -> cython.bint:
         return type(node).__name__ == "CDirtyExpression" and bool(
             # Dynamic codegen compatibility boundary.
             _dynamic_dce_getattr_8616(self.codegen, "_inertia_dce_allow_storage_free_dirty_8616", False)
         )
 
-    def _node_key(self, node: object) -> tuple[str, int | str] | None:
+    def _node_key(self, node: object) -> object:
         if isinstance(node, CVariable):
             return self._var_key(node)
         return self._dirty_key(node)
@@ -315,6 +320,7 @@ class _DeadCodeEliminationRun8616:
         yield from _iter_c_nodes_deep_8616(node)
 
     def _lhs_variable_8616(self, lhs: object) -> CVariable | None:
+        child: object
         if isinstance(lhs, CVariable):
             return lhs
         for child in _iter_c_nodes_deep_8616(lhs):
@@ -328,7 +334,7 @@ class _DeadCodeEliminationRun8616:
                 return None
         return None
 
-    def _var_name(self, node: CVariable) -> str:
+    def _var_name(self, node: CVariable) -> object:
         var = _dynamic_dce_getattr_8616(node, "variable", None)
         name = _dynamic_dce_getattr_8616(var, "name", None)
         if isinstance(name, str) and name:
@@ -336,7 +342,7 @@ class _DeadCodeEliminationRun8616:
         node_name = _dynamic_dce_getattr_8616(node, "name", None)
         return node_name if isinstance(node_name, str) else ""
 
-    def _is_observable_lvalue(self, lhs: object) -> bool:
+    def _is_observable_lvalue(self, lhs: object) -> cython.bint:
         """Return whether a write may be observable; unknown effects stay live."""
         if has_architectural_register_storage_8616(lhs):
             return True
@@ -355,7 +361,8 @@ class _DeadCodeEliminationRun8616:
                 return True
         return False
 
-    def _rhs_has_side_effects(self, rhs: object) -> bool:
+    def _rhs_has_side_effects(self, rhs: object) -> cython.bint:
+        node: object
         if rhs is None:
             return False
         for node in _iter_c_nodes_deep_8616(rhs):
@@ -363,7 +370,7 @@ class _DeadCodeEliminationRun8616:
                 return True
         return False
 
-    def _call_name_8616(self, call: CFunctionCall) -> str | None:
+    def _call_name_8616(self, call: CFunctionCall) -> object:
         target = _dynamic_dce_getattr_8616(call, "callee_target", None)
         if isinstance(target, str) and target:
             return target
@@ -379,16 +386,17 @@ class _DeadCodeEliminationRun8616:
         name = _dynamic_dce_getattr_8616(callee, "name", None)
         return name if isinstance(name, str) and name else None
 
-    def _is_pure_address_helper_call_8616(self, call: CFunctionCall) -> bool:
+    def _is_pure_address_helper_call_8616(self, call: CFunctionCall) -> cython.bint:
         return self._call_name_8616(call) in {"MK_FP", "SEG_PTR"}
 
-    def _is_pure_memory_read_helper_call_8616(self, call: CFunctionCall) -> bool:
+    def _is_pure_memory_read_helper_call_8616(self, call: CFunctionCall) -> cython.bint:
         return self._call_name_8616(call) in {"MEM_U8", "MEM_U16", "MEM_U32", "SEG_U8", "SEG_U16", "SEG_U32"}
 
-    def _is_pure_generated_helper_call_8616(self, call: CFunctionCall) -> bool:
+    def _is_pure_generated_helper_call_8616(self, call: CFunctionCall) -> cython.bint:
         return self._is_pure_address_helper_call_8616(call) or self._is_pure_memory_read_helper_call_8616(call)
 
-    def _standalone_expression_is_definitely_dead_8616(self, stmt: object) -> bool:
+    def _standalone_expression_is_definitely_dead_8616(self, stmt: object) -> cython.bint:
+        node: object
         if not isinstance(stmt, CUnaryOp) or _dynamic_dce_getattr_8616(stmt, "op", None) != "Dereference":
             return False
 
@@ -427,7 +435,8 @@ class _DeadCodeEliminationRun8616:
             return _dynamic_dce_getattr_8616(stmt, "expr", None)
         return stmt
 
-    def _is_structured_or_control_statement_8616(self, stmt: object) -> bool:
+    def _is_structured_or_control_statement_8616(self, stmt: object) -> cython.bint:
+        attr: object
         if type(stmt).__name__ in {
             "CBreak",
             "CContinue",
@@ -460,8 +469,9 @@ class _DeadCodeEliminationRun8616:
                 return True
         return False
 
-    def _expr_is_discardable_dead_value_8616(self, expr: object) -> bool:
+    def _expr_is_discardable_dead_value_8616(self, expr: object) -> cython.bint:
         """True when evaluating expr has no observable effect if its value is unused."""
+        node: object
         if expr is None:
             return False
         if (
@@ -477,26 +487,27 @@ class _DeadCodeEliminationRun8616:
             saw_discardable_artifact = saw_discardable_artifact or artifact
         return saw_discardable_artifact
 
-    def _is_plain_local_lvalue_8616(self, lhs: object) -> bool:
+    def _is_plain_local_lvalue_8616(self, lhs: object) -> cython.bint:
         """Exclude architectural effects lacking an owned dead-effect proof."""
         if not isinstance(lhs, CVariable) or has_architectural_register_storage_8616(lhs):
             return False
         return isinstance(lhs.variable, (SimStackVariable, SimTemporaryVariable))
 
-    def _is_frame_anchor_stack_lvalue_8616(self, lhs: object) -> bool:
+    def _is_frame_anchor_stack_lvalue_8616(self, lhs: object) -> cython.bint:
         if not isinstance(lhs, CVariable):
             return False
         var = lhs.variable
         return isinstance(var, SimStackVariable) and var.base == "bp" and var.offset == 0
 
-    def _expr_is_pure_local_value_8616(self, expr: object) -> bool:
+    def _expr_is_pure_local_value_8616(self, expr: object) -> cython.bint:
+        node: object
         if expr is None or self._rhs_has_side_effects(expr):
             return False
         for node in self._iter_with_root(expr):
             if self._pure_local_node_gate_8616(node):
                 return False
         return True
-    def _discardable_dead_node_gate_8616(self, node: object) -> tuple[bool, bool]:
+    def _discardable_dead_node_gate_8616(self, node: object) -> object:
         """Return (reject, discardable_artifact) for one scanned expression node."""
         if isinstance(node, CAssignment):
             return True, False
@@ -524,7 +535,7 @@ class _DeadCodeEliminationRun8616:
             and _dynamic_dce_getattr_8616(node, "op", None) not in PURE_LOCAL_BINARY_OPS_8616
         ), False
 
-    def _discardable_dead_unary_gate_8616(self, node: object) -> tuple[bool, bool]:
+    def _discardable_dead_unary_gate_8616(self, node: object) -> tuple[cython.bint, cython.bint]:
         """Return (reject, discardable_artifact) for a unary scanned node."""
         if _dynamic_dce_getattr_8616(node, "op", None) in (
             PURE_LOCAL_UNARY_OPS_8616 | {"Dereference", "Reference", "AddressOf"}
@@ -533,7 +544,7 @@ class _DeadCodeEliminationRun8616:
         return True, False
 
 
-    def _pure_local_node_gate_8616(self, node: object) -> bool:
+    def _pure_local_node_gate_8616(self, node: object) -> cython.bint:
         """Return True when one scanned node disqualifies pure-local value status."""
         if isinstance(node, CFunctionCall):
             return True
@@ -561,18 +572,18 @@ class _DeadCodeEliminationRun8616:
 
 
     def _merge_value_purity_8616(self, *items: DceValuePurity8616) -> DceValuePurity8616:
-        if any(item is DceValuePurity8616.UNKNOWN for item in items):
+        if any(item is DceValuePurity8616.UNKNOWN for item in iter(items)):
             return DceValuePurity8616.UNKNOWN
-        if any(item is DceValuePurity8616.GLOBAL_MEMORY_READ for item in items):
+        if any(item is DceValuePurity8616.GLOBAL_MEMORY_READ for item in iter(items)):
             return DceValuePurity8616.GLOBAL_MEMORY_READ
         return DceValuePurity8616.LOCAL_VALUE
 
-    def _is_direct_memory_variable_8616(self, node: object) -> bool:
+    def _is_direct_memory_variable_8616(self, node: object) -> cython.bint:
         if not isinstance(node, CVariable):
             return False
         return isinstance(_dynamic_dce_getattr_8616(node, "variable", None), SimMemoryVariable)
 
-    def _is_global_indexed_read_8616(self, node: object) -> bool:
+    def _is_global_indexed_read_8616(self, node: object) -> cython.bint:
         if not isinstance(node, CIndexedVariable):
             return False
         base = _dynamic_dce_getattr_8616(node, "variable", None)
@@ -581,7 +592,7 @@ class _DeadCodeEliminationRun8616:
         index = _dynamic_dce_getattr_8616(node, "index", None)
         return self._expr_value_purity_8616(index) is DceValuePurity8616.LOCAL_VALUE
 
-    def _address_expr_is_pure_global_read_address_8616(self, expr: object) -> bool:
+    def _address_expr_is_pure_global_read_address_8616(self, expr: object) -> cython.bint:
         if expr is None:
             return False
         if isinstance(expr, CTypeCast):
@@ -612,7 +623,7 @@ class _DeadCodeEliminationRun8616:
             ) and self._address_expr_is_pure_global_read_address_8616(_dynamic_dce_getattr_8616(expr, "rhs", None))
         return False
 
-    def _global_read_address_unary_8616(self, expr: object) -> bool:
+    def _global_read_address_unary_8616(self, expr: object) -> cython.bint:
         """Check whether a unary address expression keeps a proven global read."""
         op = _dynamic_dce_getattr_8616(expr, "op", None)
         operand = _dynamic_dce_getattr_8616(expr, "operand", None)
@@ -622,7 +633,7 @@ class _DeadCodeEliminationRun8616:
             return self._address_expr_is_pure_global_read_address_8616(operand)
         return False
 
-    def _address_expr_has_global_read_anchor_8616(self, expr: object) -> bool:
+    def _address_expr_has_global_read_anchor_8616(self, expr: object) -> cython.bint:
         if expr is None:
             return False
         if isinstance(expr, CTypeCast):
@@ -647,7 +658,7 @@ class _DeadCodeEliminationRun8616:
 
     def _expr_value_purity_8616(self, 
         expr: object,
-        visiting: set[int] | None = None,
+        visiting: object = None,
     ) -> DceValuePurity8616:
         """Classify RHS purity, refusing cyclic C-AST expression graphs."""
         if expr is None or self._rhs_has_side_effects(expr):
@@ -662,7 +673,7 @@ class _DeadCodeEliminationRun8616:
         finally:
             active.remove(marker)
 
-    def _expr_value_purity_dispatch_8616(self, expr: object, active: set[int]) -> DceValuePurity8616:
+    def _expr_value_purity_dispatch_8616(self, expr: object, active: object) -> DceValuePurity8616:
         """Dispatch one expression node to its shape-specific purity arm."""
         if isinstance(expr, CConstant):
             return DceValuePurity8616.LOCAL_VALUE
@@ -682,7 +693,7 @@ class _DeadCodeEliminationRun8616:
             return self._unary_value_purity_8616(expr, active)
         return self._binary_value_purity_8616(expr, active)
 
-    def _typecast_value_purity_8616(self, expr: object, active: set[int]) -> DceValuePurity8616:
+    def _typecast_value_purity_8616(self, expr: object, active: object) -> DceValuePurity8616:
         """Classify purity for a type-cast wrapper by unwrapping its operand."""
         return self._expr_value_purity_8616(_dynamic_dce_getattr_8616(expr, "expr", None), active)
 
@@ -694,7 +705,7 @@ class _DeadCodeEliminationRun8616:
             else DceValuePurity8616.UNKNOWN
         )
 
-    def _binary_value_purity_8616(self, expr: object, active: set[int]) -> DceValuePurity8616:
+    def _binary_value_purity_8616(self, expr: object, active: object) -> DceValuePurity8616:
         """Classify purity for a pure binary-op by merging operand purities."""
         if not (
             isinstance(expr, CBinaryOp)
@@ -736,7 +747,7 @@ class _DeadCodeEliminationRun8616:
             else DceValuePurity8616.UNKNOWN
         )
 
-    def _variable_field_purity_8616(self, expr: object, active: set[int]) -> DceValuePurity8616:
+    def _variable_field_purity_8616(self, expr: object, active: object) -> DceValuePurity8616:
         """Classify purity for a struct/union field read against the active visit set."""
         base_purity = self._expr_value_purity_8616(
             _dynamic_dce_getattr_8616(expr, "variable", None),
@@ -756,7 +767,7 @@ class _DeadCodeEliminationRun8616:
             else DceValuePurity8616.UNKNOWN
         )
 
-    def _unary_value_purity_8616(self, expr: object, active: set[int]) -> DceValuePurity8616:
+    def _unary_value_purity_8616(self, expr: object, active: object) -> DceValuePurity8616:
         """Classify purity for a unary-op expression against the active visit set."""
         op = _dynamic_dce_getattr_8616(expr, "op", None)
         operand = _dynamic_dce_getattr_8616(expr, "operand", None)
@@ -779,13 +790,14 @@ class _DeadCodeEliminationRun8616:
             return self._expr_value_purity_8616(operand, active)
         return DceValuePurity8616.UNKNOWN
 
-    def _expr_is_discardable_value_8616(self, expr: object) -> bool:
+    def _expr_is_discardable_value_8616(self, expr: object) -> cython.bint:
         return self._expr_value_purity_8616(expr) in {
             DceValuePurity8616.LOCAL_VALUE,
             DceValuePurity8616.GLOBAL_MEMORY_READ,
         }
 
-    def _expr_contains_memory_read_shape_8616(self, expr: object) -> bool:
+    def _expr_contains_memory_read_shape_8616(self, expr: object) -> cython.bint:
+        node: object
         for node in self._iter_with_root(expr):
             if isinstance(node, CUnaryOp) and _dynamic_dce_getattr_8616(node, "op", None) == "Dereference":
                 return True
@@ -797,8 +809,9 @@ class _DeadCodeEliminationRun8616:
                 return True
         return False
 
-    def _rhs_evaluation_is_proven_unobservable_8616(self, expr: object) -> bool:
+    def _rhs_evaluation_is_proven_unobservable_8616(self, expr: object) -> cython.bint:
         """True when evaluating an overwritten RHS cannot affect program state."""
+        node: object
         if expr is None or self._rhs_has_side_effects(expr):
             return False
         if self._expr_contains_memory_read_shape_8616(expr):
@@ -808,7 +821,7 @@ class _DeadCodeEliminationRun8616:
                 return False
         return True
 
-    def _unobservable_node_gate_8616(self, node: object) -> bool:
+    def _unobservable_node_gate_8616(self, node: object) -> cython.bint:
         """Return True when one scanned node makes an overwritten RHS observable."""
         if isinstance(node, CAssignment):
             return True
@@ -830,7 +843,7 @@ class _DeadCodeEliminationRun8616:
             return node.op not in (PURE_LOCAL_UNARY_OPS_8616 | {"Reference", "AddressOf"})
         return bool(isinstance(node, CBinaryOp) and node.op not in PURE_LOCAL_BINARY_OPS_8616)
 
-    def _dirty_lhs_delete_proven_8616(self, lhs: object, rhs: object) -> bool:
+    def _dirty_lhs_delete_proven_8616(self, lhs: object, rhs: object) -> cython.bint:
         if self._dirty_is_storage_free_temp_8616(lhs):
             return (
                 self._expr_is_discardable_dead_value_8616(rhs)
@@ -843,10 +856,10 @@ class _DeadCodeEliminationRun8616:
             and self._expr_contains_memory_read_shape_8616(rhs)
         )
 
-    def _transparent_empty_8616(self, stmt: object) -> bool:
+    def _transparent_empty_8616(self, stmt: object) -> cython.bint:
         if not isinstance(stmt, CStatements):
             return False
-        return all(self._transparent_empty_8616(child) for child in list(_dynamic_dce_getattr_8616(stmt, "statements", ()) or ()))
+        return all(self._transparent_empty_8616(child) for child in builtins.iter(list(_dynamic_dce_getattr_8616(stmt, "statements", ()) or ())))
 
     def _transparent_single_assignment_8616(self, stmt: object) -> CAssignment | None:
         if isinstance(stmt, CAssignment):
@@ -860,6 +873,7 @@ class _DeadCodeEliminationRun8616:
         return self._transparent_single_assignment_8616(nested[0])
 
     def _transparent_first_assignment_8616(self, stmt: object) -> CAssignment | None:
+        child: object
         if isinstance(stmt, CAssignment):
             return stmt
         if not isinstance(stmt, CStatements):
@@ -871,6 +885,7 @@ class _DeadCodeEliminationRun8616:
         return None
 
     def _transparent_last_assignment_8616(self, stmt: object) -> CAssignment | None:
+        child: object
         if isinstance(stmt, CAssignment):
             return stmt
         if not isinstance(stmt, CStatements):
@@ -884,7 +899,7 @@ class _DeadCodeEliminationRun8616:
     def _duplicate_assignment_pair_is_definitely_dead_8616(self, 
         first_assignment: object,
         second_assignment: object,
-    ) -> bool:
+    ) -> cython.bint:
         if not isinstance(first_assignment, CAssignment) or not isinstance(second_assignment, CAssignment):
             return False
         if not same_local_value_expression_8616(first_assignment.lhs, second_assignment.lhs):
@@ -899,7 +914,7 @@ class _DeadCodeEliminationRun8616:
             and not assignment_reads_destination_8616(lhs, rhs)
         )
 
-    def _adjacent_duplicate_assignment_is_definitely_dead_8616(self, first: object, second: object) -> bool:
+    def _adjacent_duplicate_assignment_is_definitely_dead_8616(self, first: object, second: object) -> cython.bint:
         first_assignment = self._transparent_last_assignment_8616(first)
         second_assignment = self._transparent_first_assignment_8616(second)
         return self._duplicate_assignment_pair_is_definitely_dead_8616(first_assignment, second_assignment)
@@ -907,7 +922,11 @@ class _DeadCodeEliminationRun8616:
     def _remove_first_transparent_assignment_8616(self, 
         stmt: object,
         assignment: CAssignment,
-    ) -> tuple[object | None, bool]:
+    ) -> tuple[object | None, cython.bint]:
+        first_assignment: object
+        new_child: object
+        child: object
+        index: object
         if isinstance(stmt, CAssignment):
             if stmt is assignment:
                 return None, True
@@ -928,14 +947,15 @@ class _DeadCodeEliminationRun8616:
             if new_child is None or self._transparent_empty_8616(new_child):
                 del nested[index]
             else:
-                nested = [new_child if nested_index == index else nested_item for nested_index, nested_item in enumerate(nested)]
+                nested = [new_child if nested_index == index else nested_item for nested_index, nested_item in builtins.iter(enumerate(nested))]
             stmt.statements = nested
             if not nested:
                 return None, True
             return stmt, True
         return stmt, False
 
-    def _prune_adjacent_duplicate_assignments_8616(self, statements: object) -> bool:
+    def _prune_adjacent_duplicate_assignments_8616(self, statements: object) -> cython.bint:
+        pruned_next_stmt: object
         stmts = list(_dynamic_dce_getattr_8616(statements, "statements", ()) or ())
         if len(stmts) < 2:
             return False
@@ -985,7 +1005,8 @@ class _DeadCodeEliminationRun8616:
             typing.cast(typing.Any, statements).statements = new_stmts
         return block_changed
 
-    def _rhs_is_pure_stack_base_carrier_8616(self, rhs: object) -> bool:
+    def _rhs_is_pure_stack_base_carrier_8616(self, rhs: object) -> cython.bint:
+        node: object
         if rhs is None or self._rhs_has_side_effects(rhs):
             return False
         saw_stack_base = isinstance(rhs, CFakeVariable) and _dynamic_dce_getattr_8616(rhs, "name", None) == "stack_base"
@@ -1001,7 +1022,8 @@ class _DeadCodeEliminationRun8616:
                 return False
         return saw_stack_base
 
-    def _callsite_materialization_complete_or_no_calls_8616(self) -> bool:
+    def _callsite_materialization_complete_or_no_calls_8616(self) -> cython.bint:
+        node: object
         if hasattr(self.codegen, "_inertia_callsite_materialization_stats"):
             try:
                 from inertia.postprocess.callsite_stack_metadata import _callsite_materialization_complete_8616
@@ -1014,7 +1036,7 @@ class _DeadCodeEliminationRun8616:
                 return False
         return True
 
-    def _callsite_materialization_proven_complete_8616(self) -> bool:
+    def _callsite_materialization_proven_complete_8616(self) -> cython.bint:
         if not hasattr(self.codegen, "_inertia_callsite_materialization_stats"):
             return False
         try:
@@ -1025,7 +1047,8 @@ class _DeadCodeEliminationRun8616:
             return False
 
     def _debug_node_shape_8616(self, node: object) -> str:
-        def _expr_shape(expr: object, depth: int = 0) -> str:
+        statements: object
+        def _expr_shape(expr: object, depth: cython.longlong = 0) -> object:
             if expr is None:
                 return "None"
             name = type(expr).__name__
@@ -1051,7 +1074,7 @@ class _DeadCodeEliminationRun8616:
             items = list(statements or ())
             parts.append(
                 "statements=["
-                + ",".join(type(item).__name__ for item in items[:8])
+                + ",".join(type(item).__name__ for item in iter(items[:8]))
                 + (",..." if len(items) > 8 else "")
                 + "]"
             )
@@ -1061,8 +1084,10 @@ class _DeadCodeEliminationRun8616:
             parts.append("condition_and_nodes=[" + ",".join(self._debug_pair_shapes_8616(pairs, _expr_shape)) + "]")
         return " ".join(parts)
 
-    def _debug_node_attr_shapes_8616(self, node: object) -> list[str]:
+    def _debug_node_attr_shapes_8616(self, node: object) -> object:
         """Collect `attr=type` shape strings for the node's child attributes."""
+        child: object
+        attr: object
         parts: list[str] = []
         for attr in (
             "condition",
@@ -1081,8 +1106,9 @@ class _DeadCodeEliminationRun8616:
                 parts.append(f"{attr}={type(child).__name__}")
         return parts
 
-    def _debug_pair_shapes_8616(self, pairs: Iterable[object], expr_shape: Callable[[object], str]) -> list[str]:
+    def _debug_pair_shapes_8616(self, pairs: Iterable[object], expr_shape: Callable[[object], str]) -> object:
         """Format up to four condition->body pair shapes."""
+        pair: object
         pair_shapes: list[str] = []
         for pair in tuple(pairs)[:4]:
             if not isinstance(pair, (tuple, list)) or len(pair) < 2:
@@ -1093,6 +1119,7 @@ class _DeadCodeEliminationRun8616:
         return pair_shapes
 
     def _iter_switch_case_bodies_8616(self, cases: object) -> Iterator[object]:
+        item: object
         if isinstance(cases, dict):
             yield from cases.values()
             return
@@ -1105,7 +1132,9 @@ class _DeadCodeEliminationRun8616:
             yield item
 
     def _iter_statement_blocks(self, root: object) -> Iterator[object]:
-        seen: set[int] = set()
+        node: object
+        stmt: object
+        seen: set[cython.longlong] = set()
         stack = [root]
         while stack:
             node = stack.pop()
@@ -1121,17 +1150,22 @@ class _DeadCodeEliminationRun8616:
                     stack.append(stmt)  # noqa: PERF402
             self._push_block_children_8616(node, stack)
 
-    def _push_block_children_8616(self, node: object, stack: list[object]) -> None:
+    def _push_block_children_8616(self, node: object, stack: object) -> None:
         """Visit canonical structured children, including statement-valued headers."""
+        attr: object
         for attr in _structured_slot_names_8616(node):
             value = _dynamic_dce_getattr_8616(node, attr, None)
             stack.extend(_iter_c_node_children_8616(value))
 
-    def _collect_stmt_reads(self, stmt: object) -> set[tuple[str, int | str]]:
+    def _collect_stmt_reads(self, stmt: object) -> object:
         """Consume typed reads in one statement and its non-body loop headers."""
+        attr: object
+        child: object
         reads = self._collect_for_header_reads_8616(stmt)
 
         def _collect_expr(expr: object) -> None:
+            key: object
+            node: object
             for node in self._iter_with_root(expr):
                 key = self._node_key(node)
                 if key is not None:
@@ -1171,8 +1205,10 @@ class _DeadCodeEliminationRun8616:
         _collect_expr(stmt)
         return reads
 
-    def _collect_for_header_reads_8616(self, stmt: object) -> set[tuple[str, int | str]]:
+    def _collect_for_header_reads_8616(self, stmt: object) -> object:
         """Read loop headers as statements, excluding plain write destinations."""
+        header: object
+        header_statement: object
         reads: set[tuple[str, int | str]] = set()
         if not isinstance(stmt, CForLoop):
             return reads
@@ -1184,7 +1220,7 @@ class _DeadCodeEliminationRun8616:
                 reads.update(self._collect_stmt_reads(header_statement))
         return reads
 
-    def _lhs_needs_read_scan_8616(self, lhs: object) -> bool:
+    def _lhs_needs_read_scan_8616(self, lhs: object) -> cython.bint:
         """Return True when an assignment LHS shape contributes read keys."""
         return (
             (isinstance(lhs, CUnaryOp)
@@ -1192,8 +1228,11 @@ class _DeadCodeEliminationRun8616:
             or isinstance(lhs, (CFunctionCall, CIndexedVariable, CStructField, CTypeCast, CVariableField))
         )
 
-    def _stmt_condition_roots_8616(self, stmt: object) -> list[object]:
+    def _stmt_condition_roots_8616(self, stmt: object) -> object:
         """Collect the guard/condition expression roots of one statement."""
+        child: object
+        attr: object
+        pair: object
         condition_roots: list[object] = []
         for attr in ("condition", "cond", "expr", "retval"):
             child = _dynamic_dce_getattr_8616(stmt, attr, None)
@@ -1206,10 +1245,15 @@ class _DeadCodeEliminationRun8616:
                     condition_roots.append(pair[0])
         return condition_roots
 
-    def _collect_nested_stmt_reads(self, stmt: object) -> set[tuple[str, int | str]]:
+    def _collect_nested_stmt_reads(self, stmt: object) -> object:
+        child: object
+        node: object
+        attr: object
+        child_stmt: object
+        pair: object
         reads = set(self._collect_stmt_reads(stmt))
         work: list[object] = []
-        seen: set[int] = set()
+        seen: set[cython.longlong] = set()
         for attr in (
             "body",
             "initializer",
@@ -1248,11 +1292,14 @@ class _DeadCodeEliminationRun8616:
 
     def _collect_read_counts_by_block(self, 
         root: object,
-    ) -> tuple[dict[tuple[str, int | str], int], dict[int, dict[tuple[str, int | str], int]]]:
-        total_reads: dict[tuple[str, int | str], int] = {}
-        block_reads: dict[int, dict[tuple[str, int | str], int]] = {}
+    ) -> tuple[dict[tuple[str, int | str], cython.longlong], dict[cython.longlong, dict[tuple[str, int | str], cython.longlong]]]:
+        block: object
+        key: object
+        stmt: object
+        total_reads: dict[tuple[str, int | str], cython.longlong] = {}
+        block_reads: dict[cython.longlong, dict[tuple[str, int | str], cython.longlong]] = {}
         for block in self._iter_statement_blocks(root):
-            local_reads: dict[tuple[str, int | str], int] = {}
+            local_reads: dict[tuple[str, int | str], cython.longlong] = {}
             for stmt in list(_dynamic_dce_getattr_8616(block, "statements", ()) or ()):
                 for key in self._collect_stmt_reads(stmt):
                     total_reads[key] = total_reads.get(key, 0) + 1
@@ -1263,7 +1310,7 @@ class _DeadCodeEliminationRun8616:
 
     def _collect_loop_backedge_reads_by_block_8616(self, 
         root: object,
-    ) -> dict[int, frozenset[tuple[str, int | str]]]:
+    ) -> dict[cython.longlong, frozenset[tuple[str, int | str]]]:
         """Return reads that remain live across each structured loop backedge.
 
         A source variable written near the end of a loop body may feed a read
@@ -1272,7 +1319,12 @@ class _DeadCodeEliminationRun8616:
         however, and cannot be loop-carried through a same-identity backedge;
         preserving them here retains dead post-materialization carrier cycles.
         """
-        mutable_reads: dict[int, set[tuple[str, int | str]]] = {}
+        body: object
+        body_block: object
+        body_stmt: object
+        container: object
+        stmt: object
+        mutable_reads: dict[cython.longlong, set[tuple[str, int | str]]] = {}
         for container in self._iter_statement_blocks(root):
             statements = tuple(_dynamic_dce_getattr_8616(container, "statements", ()) or ())
             for stmt in statements:
@@ -1288,12 +1340,15 @@ class _DeadCodeEliminationRun8616:
                         loop_reads.update(self._collect_stmt_reads(body_stmt))
                 for body_block in body_blocks:
                     mutable_reads.setdefault(id(body_block), set()).update(
-                        key for key in loop_reads if not key[0].startswith("dirty")
+                        key for key in iter(loop_reads) if not key[0].startswith("dirty")
                     )
-        return {block_id: frozenset(reads) for block_id, reads in mutable_reads.items()}
+        return {block_id: frozenset(reads) for block_id, reads in builtins.iter(mutable_reads.items())}
 
-    def _collect_observable_read_counts_8616(self, root: object) -> dict[tuple[str, int | str], int]:
-        reads: dict[tuple[str, int | str], int] = {}
+    def _collect_observable_read_counts_8616(self, root: object) -> object:
+        block: object
+        key: object
+        stmt: object
+        reads: dict[tuple[str, int | str], cython.longlong] = {}
         for block in self._iter_statement_blocks(root):
             # Dynamic angr/codegen statement-block compatibility boundary.
             for stmt in list(_dynamic_dce_getattr_8616(block, "statements", ()) or ()):
@@ -1310,8 +1365,11 @@ class _DeadCodeEliminationRun8616:
                     reads[key] = reads.get(key, 0) + 1
         return reads
 
-    def _collect_storage_free_dirty_carrier_read_counts_8616(self, root: object) -> dict[tuple[str, int | str], int]:
-        reads: dict[tuple[str, int | str], int] = {}
+    def _collect_storage_free_dirty_carrier_read_counts_8616(self, root: object) -> object:
+        block: object
+        key: object
+        stmt: object
+        reads: dict[tuple[str, int | str], cython.longlong] = {}
         for block in self._iter_statement_blocks(root):
             # Dynamic angr/codegen statement-block compatibility boundary.
             for stmt in list(_dynamic_dce_getattr_8616(block, "statements", ()) or ()):
@@ -1326,8 +1384,11 @@ class _DeadCodeEliminationRun8616:
                     reads[key] = reads.get(key, 0) + 1
         return reads
 
-    def _collect_dirty_carrier_read_counts_8616(self, root: object) -> dict[tuple[str, int | str], int]:
-        reads: dict[tuple[str, int | str], int] = {}
+    def _collect_dirty_carrier_read_counts_8616(self, root: object) -> object:
+        block: object
+        key: object
+        stmt: object
+        reads: dict[tuple[str, int | str], cython.longlong] = {}
         for block in self._iter_statement_blocks(root):
             # Dynamic angr/codegen statement-block compatibility boundary.
             for stmt in list(_dynamic_dce_getattr_8616(block, "statements", ()) or ()):
@@ -1340,13 +1401,15 @@ class _DeadCodeEliminationRun8616:
                     reads[key] = reads.get(key, 0) + 1
         return reads
 
-    def _is_temp_like_var(self, var_node: CVariable) -> bool:
+    def _is_temp_like_var(self, var_node: CVariable) -> cython.bint:
         name = self._var_name(var_node)
         if not name:
             return False
         return name.startswith(("vvar_", "tmp_", "ir_"))
 
-    def _lhs_key_and_name_8616(self, lhs: object) -> tuple[tuple[str, int | str] | None, tuple[str, str] | None, bool]:
+    def _lhs_key_and_name_8616(self, lhs: object) -> tuple[tuple[str, int | str] | None, tuple[str, str] | None, cython.bint]:
+        dirty_key: object
+        lhs_var: object
         dirty_key = self._dirty_key(lhs)
         if dirty_key is not None:
             # Dirty expressions carry VEX/AIL virtual register and flag
@@ -1364,6 +1427,8 @@ class _DeadCodeEliminationRun8616:
         return self._var_key(lhs_var), ("name", self._var_name(lhs_var)), self._is_temp_like_var(lhs_var)
 
     def _argument_keys_8616(self) -> tuple[set[tuple[str, int | str]], set[tuple[str, str]]]:
+        arg: object
+        name: object
         # Dynamic codegen compatibility boundary.
         cfunc_obj = _dynamic_dce_getattr_8616(self.codegen, "cfunc", None)
         keys: set[tuple[str, int | str]] = set()
@@ -1383,6 +1448,7 @@ class _DeadCodeEliminationRun8616:
 
     def _stack_offset_from_plain_lvalue_8616(self, lhs: object) -> int | None:
         """Return the proven machine-BP offset for a plain stack lvalue."""
+        lhs_var: object
         lhs_var = self._lhs_variable_8616(lhs)
         if lhs_var is None:
             return None
@@ -1392,7 +1458,11 @@ class _DeadCodeEliminationRun8616:
         offset = machine_bp_offset_for_stack_variable_8616(self.codegen, variable)
         return int(offset) if isinstance(offset, int) else None
 
-    def _has_direct_stack_write_evidence_for_offset_8616(self, offset: int | None) -> bool:
+    def _has_direct_stack_write_evidence_for_offset_8616(self, offset: int | None) -> cython.bint:
+        attr: object
+        item: object
+        offset_key: object
+        pair: object
         if not isinstance(offset, int):
             return False
         for attr, offset_key in (
@@ -1416,52 +1486,53 @@ class _DeadCodeEliminationRun8616:
                         return True
         return False
 
-    def _node_has_instruction_evidence_8616(self, node: object) -> bool:
+    def _node_has_instruction_evidence_8616(self, node: object) -> cython.bint:
+        item: object
         for item in self._iter_with_root(node):
             tags = _dynamic_dce_getattr_8616(item, "tags", None)
             if isinstance(tags, dict) and isinstance(tags.get("ins_addr"), int):
                 return True
         return False
 
-    def run_8616_part2(self) -> tuple[bool, object]:
+    def run_8616_part2(self) -> tuple[cython.bint, object]:
         """Collect statement and expression evidence for the pass."""
         self.consumed_boolean_carrier_addrs = frozenset(
             address
-            for address in (
+            for address in iter((
                 _dynamic_dce_getattr_8616(
                     self.codegen,
                     "_inertia_consumed_direct_global_boolean_carrier_ins_addrs_8616",
                     (),
                 )
                 or ()
-            )
+            ))
             if isinstance(address, int)
         )
         return False, None
 
-    def _stmt_is_consumed_boolean_carrier_8616(self, stmt: object) -> bool:
+    def _stmt_is_consumed_boolean_carrier_8616(self, stmt: object) -> cython.bint:
         """Return whether semantic lowering consumed this exact instruction."""
         tags = _dynamic_dce_getattr_8616(stmt, "tags", None)
         ins_addr = tags.get("ins_addr") if isinstance(tags, dict) else None
         return isinstance(ins_addr, int) and ins_addr in self.consumed_boolean_carrier_addrs
 
-    def run_8616_part3(self) -> tuple[bool, object]:
+    def run_8616_part3(self) -> tuple[cython.bint, object]:
         """Collect liveness, alias, and carrier evidence for the pass."""
         self.consumed_call_cleanup_carrier_addrs = frozenset(
             address
-            for address in (
+            for address in iter((
                 _dynamic_dce_getattr_8616(
                     self.codegen,
                     "_inertia_consumed_call_cleanup_carrier_ins_addrs_8616",
                     (),
                 )
                 or ()
-            )
+            ))
             if isinstance(address, int)
         )
         return False, None
 
-    def _stmt_is_consumed_call_cleanup_carrier_8616(self, stmt: object) -> bool:
+    def _stmt_is_consumed_call_cleanup_carrier_8616(self, stmt: object) -> cython.bint:
         """Return whether call lowering consumed this exact cleanup instruction."""
         tags = _dynamic_dce_getattr_8616(stmt, "tags", None)
         ins_addr = tags.get("ins_addr") if isinstance(tags, dict) else None
@@ -1472,27 +1543,29 @@ class _DeadCodeEliminationRun8616:
 
     def _is_function_argument_lvalue_8616(self, 
         lhs: object,
-        key: tuple[str, int | str],
-        name_key: tuple[str, str] | None,
-    ) -> bool:
+        key: object,
+        name_key: object,
+    ) -> cython.bint:
         argument_keys, argument_name_keys = self._argument_keys_8616()
         if key in argument_keys or (name_key is not None and name_key in argument_name_keys):
             return True
         offset = self._stack_offset_from_plain_lvalue_8616(lhs)
         return isinstance(offset, int) and offset >= 4
 
-    def _drop_pruned_codegen_declarations_8616(self) -> bool:
+    def _drop_pruned_codegen_declarations_8616(self) -> cython.bint:
         """Remove declaration table entries whose generated assignments were eliminated."""
         if not self.pruned_decl_keys:
             return False
-        referenced_keys = {self._var_key(node) for node in self._iter_with_root(self.root) if isinstance(node, CVariable)}
+        referenced_keys = {self._var_key(node) for node in builtins.iter(self._iter_with_root(self.root)) if isinstance(node, CVariable)}
         argument_keys, _argument_names = self._argument_keys_8616()
         dead_keys = frozenset(self.pruned_decl_keys - referenced_keys - argument_keys)
         return bool(prune_dce_proven_declarations_8616(
             self.codegen, dead_keys=dead_keys, key_of=self._var_key,
         ))
 
-    def _collect_defined_keys_8616(self, root_node: object) -> set[tuple[str, int | str]]:
+    def _collect_defined_keys_8616(self, root_node: object) -> object:
+        lhs_key: object
+        node: object
         defined: set[tuple[str, int | str]] = set()
         for node in self._iter_with_root(root_node):
             if not isinstance(node, CAssignment):
@@ -1504,8 +1577,9 @@ class _DeadCodeEliminationRun8616:
 
     def _rhs_is_unproven_dirty_register_carrier_8616(self, 
         rhs: object,
-        defined_keys: set[tuple[str, int | str]],
-    ) -> bool:
+        defined_keys: object,
+    ) -> cython.bint:
+        key: object
         while isinstance(rhs, CTypeCast):
             rhs = _dynamic_dce_getattr_8616(rhs, "expr", None)
         if type(rhs).__name__ != "CDirtyExpression":
@@ -1515,10 +1589,10 @@ class _DeadCodeEliminationRun8616:
             return False
         dirty = self._safe_attr(rhs, "dirty", None)
         has_register_provenance = any(
-            isinstance(self._safe_attr(dirty, attr, None), int) for attr in ("reg", "reg_offset", "parameter_reg_offset")
+            isinstance(self._safe_attr(dirty, attr, None), int) for attr in iter(("reg", "reg_offset", "parameter_reg_offset"))
         )
         has_stack_provenance = any(
-            isinstance(self._safe_attr(dirty, attr, None), int) for attr in ("stack_offset", "parameter_stack_offset")
+            isinstance(self._safe_attr(dirty, attr, None), int) for attr in iter(("stack_offset", "parameter_stack_offset"))
         )
         return has_register_provenance and not has_stack_provenance
 
@@ -1526,10 +1600,10 @@ class _DeadCodeEliminationRun8616:
         stmt: object,
         lhs: object,
         rhs: object,
-        key: tuple[str, int | str],
-        name_key: tuple[str, str] | None,
-        defined_keys: set[tuple[str, int | str]],
-    ) -> bool:
+        key: object,
+        name_key: object,
+        defined_keys: object,
+    ) -> cython.bint:
         if not self._is_plain_local_lvalue_8616(lhs):
             return False
         if not self._is_function_argument_lvalue_8616(lhs, key, name_key):
@@ -1540,8 +1614,11 @@ class _DeadCodeEliminationRun8616:
             return False
         return self._rhs_is_unproven_dirty_register_carrier_8616(rhs, defined_keys)
 
-    def _protected_var_keys(self) -> set[tuple[str, int | str]]:
+    def _protected_var_keys(self) -> object:
         """Keep Lowering's live save definitions even after AST rebinding."""
+        obj: object
+        attr: object
+        node: object
         protected: set[tuple[str, int | str]] = set()
         # Earlier passes can clone/rebind locals independently of side metadata.
         for node in _iter_c_nodes_deep_8616(self.root):
@@ -1563,11 +1640,12 @@ class _DeadCodeEliminationRun8616:
             protected |= self._protected_keys_from_object_8616(obj)
         return protected
 
-    def _protected_keys_from_object_8616(self, obj: object) -> set[tuple[str, int | str]]:
+    def _protected_keys_from_object_8616(self, obj: object) -> object:
         """Collect protected var/name keys reachable from one codegen attribute object."""
+        cur: object
         protected: set[tuple[str, int | str]] = set()
         work = [obj]
-        seen: set[int] = set()
+        seen: set[cython.longlong] = set()
         while work:
             cur = work.pop()
             cur_id = id(cur)
@@ -1589,9 +1667,12 @@ class _DeadCodeEliminationRun8616:
                 protected.add(("name", name))
         return protected
 
-    def _direct_stack_move_evidence_pairs_8616(self) -> frozenset[tuple[int, int]]:
+    def _direct_stack_move_evidence_pairs_8616(self) -> frozenset[tuple[cython.longlong, cython.longlong]]:
         """Return exact machine-BP and instruction identities for proven moves."""
-        pairs: set[tuple[int, int]] = set()
+        ins_addr: object
+        offset: object
+        item: object
+        pairs: set[tuple[cython.longlong, cython.longlong]] = set()
         evidence = _dynamic_dce_getattr_8616(
             self.codegen,
             "_inertia_direct_stack_move_evidence_8616",
@@ -1611,8 +1692,11 @@ class _DeadCodeEliminationRun8616:
                 pairs.add((offset, ins_addr))
         return frozenset(pairs)
 
-    def _direct_stack_update_evidence_pairs_8616(self) -> frozenset[tuple[int, int]]:
-        pairs: set[tuple[int, int]] = set()
+    def _direct_stack_update_evidence_pairs_8616(self) -> frozenset[tuple[cython.longlong, cython.longlong]]:
+        ins_addr: object
+        offset: object
+        item: object
+        pairs: set[tuple[cython.longlong, cython.longlong]] = set()
         # Dynamic codegen evidence compatibility boundary.
         evidence = _dynamic_dce_getattr_8616(self.codegen, "_inertia_direct_stack_update_evidence_8616", ()) or ()
         for item in evidence:
@@ -1623,14 +1707,15 @@ class _DeadCodeEliminationRun8616:
                 pairs.add((offset, ins_addr))
         return frozenset(pairs)
 
-    def run_8616_part4(self) -> tuple[bool, object]:
+    def run_8616_part4(self) -> tuple[cython.bint, object]:
         """Build protected/evidence pairs before the fixpoint sweep."""
         self.direct_stack_move_evidence_pairs = self._direct_stack_move_evidence_pairs_8616()
         self.direct_stack_update_evidence_pairs = self._direct_stack_update_evidence_pairs_8616()
         return False, None
 
-    def _stmt_is_direct_stack_move_evidence_8616(self, stmt: object, lhs: object) -> bool:
+    def _stmt_is_direct_stack_move_evidence_8616(self, stmt: object, lhs: object) -> cython.bint:
         """Return whether a statement materializes one exact proven stack move."""
+        node: object
         offset = self._stack_offset_from_plain_lvalue_8616(lhs)
         if not isinstance(offset, int):
             return False
@@ -1640,7 +1725,8 @@ class _DeadCodeEliminationRun8616:
                 return True
         return False
 
-    def _stmt_is_direct_stack_update_evidence_8616(self, stmt: object, lhs: object) -> bool:
+    def _stmt_is_direct_stack_update_evidence_8616(self, stmt: object, lhs: object) -> cython.bint:
+        node: object
         offset = self._stack_offset_from_plain_lvalue_8616(lhs)
         if not isinstance(offset, int):
             return False
@@ -1651,7 +1737,7 @@ class _DeadCodeEliminationRun8616:
                 return True
         return False
 
-    def run_8616_part5(self) -> tuple[bool, object]:
+    def run_8616_part5(self) -> tuple[cython.bint, object]:
         """Run the fixed-point elimination sweep and emit the result."""
         self.protected = self._protected_var_keys()
         self.debug_optimization = os.environ.get("INERTIA_DEBUG_OPTIMIZATION", "").strip().lower() in {"1", "true", "yes", "on"}
@@ -1725,7 +1811,7 @@ class _DeadCodeEliminationRun8616:
         return True, self.changed
 
 
-    def _expr_debug_label_8616(self, expr: object) -> str:
+    def _expr_debug_label_8616(self, expr: object) -> object:
         if isinstance(expr, CVariable):
             return self._var_name(expr)
         if isinstance(expr, CBinaryOp):
@@ -1736,7 +1822,14 @@ class _DeadCodeEliminationRun8616:
         if isinstance(value, (int, str)):
             return str(value)
         return type(expr).__name__
-    def _dump_assignment_paths_8616(self, node: object, path: str, seen_paths: set[int]) -> None:
+    def _dump_assignment_paths_8616(self, node: object, path: object, seen_paths: object) -> None:
+        child: object
+        default: object
+        attr: object
+        body: object
+        case_index: object
+        pair: object
+        pair_index: object
         if node is None or id(node) in seen_paths:
             return
         seen_paths.add(id(node))
@@ -1758,8 +1851,10 @@ class _DeadCodeEliminationRun8616:
         if default is not None:
             self._dump_assignment_paths_8616(default, f"{path}.default", seen_paths)
 
-    def _dump_block_statement_paths_8616(self, node: object, path: str, seen_paths: set[int]) -> None:
+    def _dump_block_statement_paths_8616(self, node: object, path: object, seen_paths: object) -> None:
         """Dump per-statement assignment paths for one structured block (debug only)."""
+        index: object
+        stmt: object
         statements = list(_dynamic_dce_getattr_8616(node, "statements", ()) or ())
         for index, stmt in enumerate(statements):
             stmt_path = f"{path}.{index}"
@@ -1777,6 +1872,8 @@ class _DeadCodeEliminationRun8616:
 
     def _debug_stats_dump_8616(self) -> None:
         """Dump per-shape DCE walk statistics (debug only)."""
+        dbg_block: object
+        dbg_stmt: object
         self.block_count = 0
         self.stmt_count = 0
         self.assign_count = 0
@@ -1802,7 +1899,7 @@ class _DeadCodeEliminationRun8616:
                             else:
                                 self.attrs = [
                                     attr
-                                    for attr in (
+                                    for attr in iter((
                                         "variable",
                                         "expr",
                                         "expression",
@@ -1811,12 +1908,12 @@ class _DeadCodeEliminationRun8616:
                                         "operands",
                                         "cvariable",
                                         "variable_node",
-                                    )
+                                    ))
                                     if hasattr(self.lhs, attr)
                                 ]
                                 self.public = [
                                     attr
-                                    for attr in dir(self.lhs)
+                                    for attr in builtins.iter(dir(self.lhs))
                                     if not attr.startswith("_")
                                     and attr
                                     not in {
@@ -1830,7 +1927,7 @@ class _DeadCodeEliminationRun8616:
                                 self.idx = _dynamic_dce_getattr_8616(self.lhs, "idx", None)
                                 self.dirty_attrs = [
                                     attr
-                                    for attr in dir(self.dirty)
+                                    for attr in builtins.iter(dir(self.dirty))
                                     if not attr.startswith("_")
                                     and attr not in {"copy", "likes", "matches", "replace", "tag"}
                                 ][:12]
@@ -1839,8 +1936,8 @@ class _DeadCodeEliminationRun8616:
                                     f"dirty={type(self.dirty).__name__} dirty_public={self.dirty_attrs}"
                                 )
                         self.lhs_samples.append(f"{self.lhs_name}:{self.name}")
-        self.top_classes = ",".join(f"{name}:{count}" for name, count in sorted(self.class_counts.items())[:8])
-        self.top_lhs = ",".join(f"{name}:{count}" for name, count in sorted(self.lhs_counts.items())[:8])
+        self.top_classes = ",".join(f"{name}:{count}" for name, count in iter(sorted(tuple(self.class_counts.items()))[:8]))
+        self.top_lhs = ",".join(f"{name}:{count}" for name, count in iter(sorted(tuple(self.lhs_counts.items()))[:8]))
         print(
             "[optimization] dce_walk "
             f"blocks={self.block_count} stmts={self.stmt_count} assignments={self.assign_count} "
@@ -1851,8 +1948,9 @@ class _DeadCodeEliminationRun8616:
         if os.environ.get("INERTIA_DEBUG_OPTIMIZATION_PATHS", "").strip().lower() in {"1", "true", "yes", "on"}:
             self._dump_assignment_paths_8616(self.root, "root", set())
 
-    def _dce_fixpoint_iteration_8616(self) -> bool:
+    def _dce_fixpoint_iteration_8616(self) -> cython.bint:
         """Run one fixed-point DCE sweep; return True when it changed anything."""
+        block: object
         self.total_reads, self.block_reads = self._collect_read_counts_by_block(self.root)
         self.loop_backedge_reads = self._collect_loop_backedge_reads_by_block_8616(self.root)
         self.observable_reads = self._collect_observable_read_counts_8616(self.root)
@@ -1914,7 +2012,8 @@ class _DeadCodeEliminationRun8616:
             flush=True,
         )
 
-def _dead_code_elimination_8616(codegen: object) -> bool:
+@cython.ccall
+def _dead_code_elimination_8616(codegen: object) -> cython.bint:
     """Eliminate only definitely-dead assignments within each statement block.
 
     Dynamic boundary: this pass traverses third-party angr structured-C nodes

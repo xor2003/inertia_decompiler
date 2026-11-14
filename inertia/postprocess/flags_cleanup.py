@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Cleanup-only normalization of already-recovered flag conditions.
 
 Layer: Rewrite/Postprocess cleanup.
@@ -11,6 +12,8 @@ flow, or facts from rendered text, COD, source, or CLI/reporting evidence here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Any, cast
@@ -40,6 +43,8 @@ from inertia.postprocess.decompiler_postprocess_utils import (
 )
 
 from .flag_dead_definitions import prune_unread_flag_definitions_8616
+import dataclasses
+import operator
 
 __all__ = [
     "_bool_cite_values_8616",
@@ -69,24 +74,27 @@ _ZF_MASK_8616 = 0x40
 _SF_MASK_8616 = 0x80
 _OF_MASK_8616 = 0x800
 
-type FlagTestInfo8616 = tuple[object, int, bool] | tuple[object, int, int, bool]
-type FlagBitValueInfo8616 = tuple[object, int]
-type FlagMaskValueInfo8616 = tuple[int, object]
-type NestedFlagBitInfo8616 = tuple[object, int]
-type FlagPairInfo8616 = tuple[object, int, int, bool]
-type CompareInfo8616 = tuple[str, object, object]
-type BoolCompareTerm8616 = tuple[CBinaryOp, bool, CITE]
-type AssignmentInfo8616 = tuple[CAssignment | None, CStatements | None]
-type Assignments8616 = list[tuple[CAssignment, CStatements | None]]
+FlagTestInfo8616 = typing.TypeAliasType("FlagTestInfo8616", tuple[object, int, bool] | tuple[object, int, int, bool])
+FlagBitValueInfo8616 = typing.TypeAliasType("FlagBitValueInfo8616", tuple[object, int])
+FlagMaskValueInfo8616 = typing.TypeAliasType("FlagMaskValueInfo8616", tuple[int, object])
+NestedFlagBitInfo8616 = typing.TypeAliasType("NestedFlagBitInfo8616", tuple[object, int])
+FlagPairInfo8616 = typing.TypeAliasType("FlagPairInfo8616", tuple[object, int, int, bool])
+CompareInfo8616 = typing.TypeAliasType("CompareInfo8616", tuple[str, object, object])
+BoolCompareTerm8616 = typing.TypeAliasType("BoolCompareTerm8616", tuple[CBinaryOp, bool, CITE])
+AssignmentInfo8616 = typing.TypeAliasType("AssignmentInfo8616", tuple[CAssignment | None, CStatements | None])
+Assignments8616 = typing.TypeAliasType("Assignments8616", list[tuple[CAssignment, CStatements | None]])
 
 
-def _dynamic_attr_8616(obj: object, name: str, default: object = None) -> Any:  # noqa: ANN401
+@cython.ccall
+def _dynamic_attr_8616(obj: object, name: object, default: object = None) -> Any:  # noqa: ANN401
     """Dynamic angr/codegen boundary: read optional C AST/codegen attributes."""
     return getattr(obj, name, default)
 
 
-def _condition_body_pairs_8616(obj: object) -> list[tuple[CExpression, CStatement | None]]:
+@cython.ccall
+def _condition_body_pairs_8616(obj: object) -> object:
     """Return typed CIfElse condition/body pairs from a dynamic codegen boundary."""
+    item: object
     if not isinstance(obj, list):
         return []
     pairs: list[tuple[CExpression, CStatement | None]] = []
@@ -100,6 +108,7 @@ def _condition_body_pairs_8616(obj: object) -> list[tuple[CExpression, CStatemen
 
 def _switch_case_children_8616(node: object) -> tuple[object, ...]:
     """Return structured case values, bodies, and default from angr switches."""
+    item: object
     cases = _dynamic_attr_8616(node, "cases", None)
     children: list[object] = []
     if isinstance(cases, dict):
@@ -113,10 +122,12 @@ def _switch_case_children_8616(node: object) -> tuple[object, ...]:
     default = _dynamic_attr_8616(node, "default", None)
     if _structured_codegen_node_8616(default):
         children.append(default)
-    return tuple(child for child in children if _structured_codegen_node_8616(child))
+    return tuple(child for child in iter(children) if _structured_codegen_node_8616(child))
 
 
+@cython.ccall
 def _c_variable_register_offset_8616(node: object) -> int | None:
+    attr: object
     if not isinstance(node, CVariable):
         return None
     for attr in ("variable", "unified_variable"):
@@ -126,14 +137,19 @@ def _c_variable_register_offset_8616(node: object) -> int | None:
     return None
 
 
+@cython.ccall
 def _c_register_offset_8616(node: object) -> int | None:
+    variable_offset: object
     variable_offset = _c_variable_register_offset_8616(node)
     if variable_offset is not None:
         return variable_offset
     return physical_register_offset_8616(node)
 
 
+@cython.ccall
 def _flags_register_offset_8616(codegen: object) -> int | None:
+    arch: object
+    reg: object
     project = _dynamic_attr_8616(codegen, "project", None)
     arch = _dynamic_attr_8616(project, "arch", None)
     if arch is None:
@@ -142,14 +158,18 @@ def _flags_register_offset_8616(codegen: object) -> int | None:
     return None if reg is None else int(reg[0])
 
 
-def _expr_uses_raw_flags_register_8616(expr: object, codegen: object) -> bool:
+@cython.ccall
+def _expr_uses_raw_flags_register_8616(expr: object, codegen: object) -> cython.bint:
+    flags_offset: object
     flags_offset = _flags_register_offset_8616(codegen)
     if flags_offset is None:
         return False
     return _c_expr_uses_register_8616(expr, flags_offset)
 
 
+@cython.ccall
 def _extract_flag_test_info_8616(node: object) -> FlagTestInfo8616 | None:
+    direct_and_match: object
     node, invert = _unwrap_inverted_flag_test_node_8616(node)
     direct_and_match = _extract_direct_flag_and_match_8616(node, invert)
     if direct_and_match is not None:
@@ -157,7 +177,8 @@ def _extract_flag_test_info_8616(node: object) -> FlagTestInfo8616 | None:
     return _extract_cmp_flag_test_match_8616(node, invert)
 
 
-def _unwrap_inverted_flag_test_node_8616(node: object) -> tuple[object, bool]:
+@cython.ccall
+def _unwrap_inverted_flag_test_node_8616(node: object) -> tuple[object, cython.bint]:
     invert = False
     while True:
         if isinstance(node, CUnaryOp) and node.op == "Not":
@@ -177,7 +198,9 @@ def _unwrap_inverted_flag_test_node_8616(node: object) -> tuple[object, bool]:
     return node, invert
 
 
-def _extract_direct_flag_and_match_8616(node: object, invert: bool) -> FlagTestInfo8616 | None:
+def _extract_direct_flag_and_match_8616(node: object, invert: cython.bint) -> FlagTestInfo8616 | None:
+    lhs_flag: object
+    rhs_flag: object
     def _flag_operand_candidate_8616(value: object) -> object | None:
         if isinstance(value, CVariable):
             return cast(object | None, value)
@@ -195,6 +218,7 @@ def _extract_direct_flag_and_match_8616(node: object, invert: bool) -> FlagTestI
     return None
 
 
+@cython.ccall
 def _extract_mask_and_zero_8616(lhs: object, rhs: object) -> CBinaryOp | None:
     if isinstance(lhs, CBinaryOp) and lhs.op == "And" and isinstance(rhs, CConstant) and rhs.value == 0:
         return lhs
@@ -204,6 +228,8 @@ def _extract_mask_and_zero_8616(lhs: object, rhs: object) -> CBinaryOp | None:
 
 
 def _extract_and_bit_and_var_8616(expr: object) -> FlagMaskValueInfo8616 | None:
+    lhs_flag: object
+    rhs_flag: object
     def _flag_operand_candidate_8616(value: object) -> object | None:
         if isinstance(value, CVariable):
             return cast(object | None, value)
@@ -222,12 +248,17 @@ def _extract_and_bit_and_var_8616(expr: object) -> FlagMaskValueInfo8616 | None:
     return None
 
 
-def _cmp_negated_by_op_8616(op: str, invert: bool) -> bool:
+@cython.ccall
+def _cmp_negated_by_op_8616(op: object, invert: cython.bint) -> cython.bint:
     return not invert if op == "CmpEQ" else invert
 
 
-def _extract_cmp_flag_test_match_8616(node: object, invert: bool) -> FlagTestInfo8616 | None:
+def _extract_cmp_flag_test_match_8616(node: object, invert: cython.bint) -> FlagTestInfo8616 | None:
     def _impl() -> FlagTestInfo8616 | None:
+        bit_and_var: object
+        lhs_info: object
+        masked: object
+        rhs_info: object
         if not isinstance(node, CBinaryOp) or node.op not in {"CmpEQ", "CmpNE"}:
             return None
 
@@ -257,7 +288,8 @@ def _extract_cmp_flag_test_match_8616(node: object, invert: bool) -> FlagTestInf
     return _impl()
 
 
-def _bit1_and_flag_predicate_8616(node: object, bit: int) -> object | None:
+@cython.ccall
+def _bit1_and_flag_predicate_8616(node: object, bit: cython.longlong) -> object | None:
     """Unmask ``expr & 1`` predicates for the bit-1 arm."""
     if bit != 1 or not isinstance(node, CBinaryOp) or node.op != "And":
         return None
@@ -270,14 +302,17 @@ def _bit1_and_flag_predicate_8616(node: object, bit: int) -> object | None:
     return None
 
 
-def _shl_flag_predicate_8616(node: CBinaryOp, bit: int) -> object | None:
+@cython.ccall
+def _shl_flag_predicate_8616(node: CBinaryOp, bit: cython.longlong) -> object | None:
     """Unmask ``expr << log2(bit)`` predicates."""
+    predicate: object
+    shift: object
     if node.op != "Shl":
         return None
     lhs = _unwrap_c_casts_8616(node.lhs)
     rhs = _unwrap_c_casts_8616(node.rhs)
     shift = _c_constant_value_8616(rhs)
-    if shift is None or shift < 0 or (1 << shift) != bit:
+    if shift is None or shift < 0 or operator.ne((1 << shift), bit):
         return None
     if bit == 1:
         predicate = _extract_flag_predicate_from_expr_8616(lhs, 1)
@@ -285,18 +320,23 @@ def _shl_flag_predicate_8616(node: CBinaryOp, bit: int) -> object | None:
     return lhs
 
 
-def _mul_flag_predicate_8616(node: CBinaryOp, bit: int) -> object | None:
+@cython.ccall
+def _mul_flag_predicate_8616(node: CBinaryOp, bit: cython.longlong) -> object | None:
     """Unmask ``expr * bit`` predicates."""
     if node.op != "Mul":
         return None
-    if isinstance(node.lhs, CConstant) and node.lhs.value == bit:
+    if isinstance(node.lhs, CConstant) and operator.eq(node.lhs.value, bit):
         return cast(object | None, node.rhs)
-    if isinstance(node.rhs, CConstant) and node.rhs.value == bit:
+    if isinstance(node.rhs, CConstant) and operator.eq(node.rhs.value, bit):
         return cast(object | None, node.lhs)
     return None
 
 
-def _extract_flag_predicate_from_expr_8616(node: object, bit: int) -> object | None:
+@cython.ccall
+def _extract_flag_predicate_from_expr_8616(node: object, bit: cython.longlong) -> object | None:
+    lhs: object
+    matched: object
+    rhs: object
     node = _unwrap_c_casts_8616(node)
 
     matched = _bit1_and_flag_predicate_8616(node, bit)
@@ -320,7 +360,9 @@ def _extract_flag_predicate_from_expr_8616(node: object, bit: int) -> object | N
     return None
 
 
+@cython.ccall
 def _unwrap_c_casts_8616(node: object) -> object:
+    expr: object
     while type(node).__name__ == "CTypeCast":
         expr = _dynamic_attr_8616(node, "expr", None)
         if expr is None:
@@ -329,8 +371,10 @@ def _unwrap_c_casts_8616(node: object) -> object:
     return node
 
 
-def _shifted_flag_value_8616(expr: object) -> tuple[CVariable, int] | None:
+@cython.ccall
+def _shifted_flag_value_8616(expr: object) -> object:
     """Return ``(flag_var, shift)`` for a masked-then-shifted flag value."""
+    shift: object
     expr = _unwrap_c_casts_8616(expr)
     while isinstance(expr, CBinaryOp) and expr.op == "And":
         lhs = _unwrap_c_casts_8616(expr.lhs)
@@ -355,7 +399,11 @@ def _shifted_flag_value_8616(expr: object) -> tuple[CVariable, int] | None:
     return lhs, shift
 
 
+@cython.ccall
 def _extract_flag_bit_value_info_8616(node: object) -> FlagBitValueInfo8616 | None:
+    shifted: object
+    mask: object
+    masked: object
     node = _unwrap_c_casts_8616(node)
     if not isinstance(node, CBinaryOp) or node.op != "And":
         return None
@@ -374,11 +422,15 @@ def _extract_flag_bit_value_info_8616(node: object) -> FlagBitValueInfo8616 | No
 
 def _rewrite_flag_bit_value_expr_8616(
     node: object, assignments: Assignments8616, codegen: object
-) -> tuple[object, bool]:
+) -> tuple[object, cython.bint]:
     changed = False
 
     def transform(expr: object) -> object | None:
         """Replace a masked flag-bit read with its assigned predicate, when safe."""
+        info: object
+        predicate: object
+        _assign_container: object
+        assign_stmt: object
         nonlocal changed
         info = _extract_flag_bit_value_info_8616(expr)
         if info is None:
@@ -404,6 +456,7 @@ def _rewrite_flag_bit_value_expr_8616(
     return new_node, changed
 
 
+@cython.ccall
 def _last_assignment_in_stmt_8616(stmt: object) -> AssignmentInfo8616:
     """Return the trailing assignment in a statement or statement list."""
     if isinstance(stmt, CAssignment):
@@ -415,26 +468,30 @@ def _last_assignment_in_stmt_8616(stmt: object) -> AssignmentInfo8616:
     return None, None
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _FlagBitValueWalk8616:
     """Block walk rewriting flag-bit masked reads against seen assignments."""
 
     codegen: object
     flags_offset: object
-    changed: bool = False
+    changed: cython.bint = False
 
-    def _is_flags_assignment(self, stmt: object) -> bool:
+    @cython.ccall
+    def _is_flags_assignment(self, stmt: object) -> cython.bint:
         if self.flags_offset is None or not isinstance(stmt, CAssignment) or not isinstance(stmt.lhs, CVariable):
             return False
-        return bool(_c_variable_register_offset_8616(stmt.lhs) == self.flags_offset)
+        return bool(operator.eq(_c_variable_register_offset_8616(stmt.lhs), self.flags_offset))
 
+    @cython.ccall
     def _rewrite_expr(self, node: object, assignments: Assignments8616) -> object:
         rewritten, expr_changed = _rewrite_flag_bit_value_expr_8616(node, assignments, self.codegen)
         self.changed = self.changed or expr_changed
         return rewritten
 
+    @cython.ccall
     def visit_stmt(self, stmt: object, assignments: Assignments8616) -> None:
         """Rewrite flag-bit reads in one statement against the seen assignments."""
+        condition: object
         if isinstance(stmt, CStatements):
             self.visit_block(stmt, assignments)
             return
@@ -451,7 +508,10 @@ class _FlagBitValueWalk8616:
             self.visit_block(body, list(assignments))
         self._rewrite_expr(stmt, assignments)
 
+    @cython.ccall
     def _visit_if_else(self, stmt: CIfElse, assignments: Assignments8616) -> None:
+        body: object
+        cond: object
         new_pairs = []
         pair_changed = False
         for cond, body in _dynamic_attr_8616(stmt, "condition_and_nodes", ()) or ():
@@ -466,8 +526,10 @@ class _FlagBitValueWalk8616:
         if isinstance(else_node, CStatements):
             self.visit_block(else_node, list(assignments))
 
+    @cython.ccall
     def visit_block(self, node: object, incoming_assignments: Assignments8616) -> None:
         """Walk a block's statements, threading the flag-assignment history forward."""
+        stmt: object
         local_assignments = list(incoming_assignments)
         for stmt in _unwrap_statements_8616(node):
             self.visit_stmt(stmt, local_assignments)
@@ -476,7 +538,10 @@ class _FlagBitValueWalk8616:
                 local_assignments.append((assign_stmt, assign_container))
 
 
-def _rewrite_flag_bit_value_uses_8616(codegen: object) -> bool:
+@cython.ccall
+def _rewrite_flag_bit_value_uses_8616(codegen: object) -> cython.bint:
+    cfunc: object
+    project_arch: object
     cfunc = _dynamic_attr_8616(codegen, "cfunc", None)
     if cfunc is None or _dynamic_attr_8616(cfunc, "statements", None) is None:
         return False
@@ -491,13 +556,17 @@ def _rewrite_flag_bit_value_uses_8616(codegen: object) -> bool:
     return walk.changed
 
 
-def _recover_unsigned_condition_8616(expr: object, bit: int, codegen: object) -> object | None:
+@cython.ccall
+def _recover_unsigned_condition_8616(expr: object, bit: cython.longlong, codegen: object) -> object | None:
     if bit not in {_CF_MASK_8616, _ZF_MASK_8616}:
         return None
     return _extract_flag_predicate_from_expr_8616(expr, bit)
 
 
-def _recover_signed_condition_8616(expr: object, bit1: int, bit2: int, codegen: object) -> object | None:
+@cython.ccall
+def _recover_signed_condition_8616(expr: object, bit1: cython.longlong, bit2: cython.longlong, codegen: object) -> object | None:
+    of_predicate: object
+    sf_predicate: object
     if {bit1, bit2} != {_SF_MASK_8616, _OF_MASK_8616}:
         return None
 
@@ -517,9 +586,11 @@ def _recover_signed_condition_8616(expr: object, bit1: int, bit2: int, codegen: 
     )
 
 
+@cython.ccall
 def _recover_ordering_condition_from_flag_mask_8616(
-    expr: object, flag_test_info: tuple[object, ...], codegen: object
+    expr: object, flag_test_info: object, codegen: object
 ) -> object | None:
+    predicate: object
     if flag_test_info is None:
         return None
 
@@ -543,7 +614,8 @@ def _recover_ordering_condition_from_flag_mask_8616(
     return predicate
 
 
-def _invert_compare_op_8616(op: str) -> str | None:
+@cython.ccall
+def _invert_compare_op_8616(op: object) -> object:
     return {
         "CmpEQ": "CmpNE",
         "CmpNE": "CmpEQ",
@@ -554,7 +626,9 @@ def _invert_compare_op_8616(op: str) -> str | None:
     }.get(op)
 
 
+@cython.ccall
 def _normalize_effective_compare_8616(node: object) -> CompareInfo8616 | None:
+    inverted: object
     if isinstance(node, CBinaryOp) and node.op in {"CmpEQ", "CmpNE", "CmpLT", "CmpLE", "CmpGT", "CmpGE"}:
         return node.op, node.lhs, node.rhs
     if isinstance(node, CUnaryOp) and node.op == "Not" and isinstance(node.operand, CBinaryOp):
@@ -568,6 +642,8 @@ def _flag_component_compare_kind_8616(
     node: object, flag_var: object, flag_expr: object, codegen: object
 ) -> CompareInfo8616 | None:
     def _impl() -> CompareInfo8616 | None:
+        info: object
+        normalized: object
         info = _extract_flag_test_info_8616(node)
         if info is None or not _same_c_expression_8616(info[0], flag_var):
             return None
@@ -595,7 +671,8 @@ def _flag_component_compare_kind_8616(
     return _impl()
 
 
-def _signed_flag_replacement_op_8616(node_op: str, ordered_ops: set[str]) -> str | None:
+@cython.ccall
+def _signed_flag_replacement_op_8616(node_op: object, ordered_ops: object) -> object:
     """Map a matched compare-op pair to its combined replacement op."""
     if node_op in {"And", "LogicalAnd"}:
         return {
@@ -610,9 +687,13 @@ def _signed_flag_replacement_op_8616(node_op: str, ordered_ops: set[str]) -> str
     }.get(frozenset(ordered_ops))
 
 
+@cython.ccall
 def _recover_combined_signed_flag_condition_8616(
     node: object, flag_var: object, flag_expr: object, codegen: object
 ) -> object | None:
+    lhs_info: object
+    replacement_op: object
+    rhs_info: object
     if not isinstance(node, CBinaryOp) or node.op not in {"And", "LogicalAnd", "Or", "LogicalOr"}:
         return None
 
@@ -640,7 +721,9 @@ def _recover_combined_signed_flag_condition_8616(
     )
 
 
+@cython.ccall
 def _canonical_compare_guard_8616(node: object) -> CompareInfo8616 | None:
+    inverted: object
     if isinstance(node, CUnaryOp) and node.op == "Not" and isinstance(node.operand, CBinaryOp):
         operand = node.operand
         inverted = {
@@ -656,7 +739,9 @@ def _canonical_compare_guard_8616(node: object) -> CompareInfo8616 | None:
     return None
 
 
-def _compare_matches_or_swapped_8616(compare_info: CompareInfo8616 | None, other_info: CompareInfo8616 | None) -> bool:
+@cython.ccall
+def _compare_matches_or_swapped_8616(compare_info: object, other_info: object) -> cython.bint:
+    swapped: object
     if compare_info is None or other_info is None:
         return False
     op, lhs, rhs = compare_info
@@ -669,13 +754,18 @@ def _compare_matches_or_swapped_8616(compare_info: CompareInfo8616 | None, other
         "CmpLT": "CmpGT",
         "CmpLE": "CmpGE",
     }.get(op)
-    return swapped == other_op and _same_c_expression_8616(lhs, other_rhs) and _same_c_expression_8616(rhs, other_lhs)
+    return operator.eq(swapped, other_op) and _same_c_expression_8616(lhs, other_rhs) and _same_c_expression_8616(rhs, other_lhs)
 
 
+@cython.ccall
 def _strip_redundant_sf_of_guard_8616(
     flag_guard: object, other_guard: object, flag_var: object, flag_expr: object
 ) -> object | None:
     """Strip a redundant SF/OF pair guard matching the other compare."""
+    info: object
+    other_compare: object
+    sf_compare: object
+    sf_predicate: object
     info = _extract_flag_test_info_8616(flag_guard)
     if info is None or len(info) != 4 or not _same_c_expression_8616(info[0], flag_var):
         return None
@@ -699,9 +789,11 @@ def _strip_redundant_sf_of_guard_8616(
     return None
 
 
+@cython.ccall
 def _maybe_strip_redundant_signed_flag_pair_guard_8616(
     node: object, flag_var: object, flag_expr: object
 ) -> object | None:
+    simplified: object
     if not isinstance(node, CBinaryOp) or node.op != "LogicalAnd":
         return None
 
@@ -712,10 +804,13 @@ def _maybe_strip_redundant_signed_flag_pair_guard_8616(
 
 
 def _maybe_strip_standalone_signed_flag_pair_guard_8616(node: object) -> object | None:
+    simplified: object
     if not isinstance(node, CBinaryOp) or node.op != "LogicalAnd":
         return None
 
     def _strip(flag_guard: object, other_guard: object) -> object | None:
+        info: object
+        other_compare: object
         info = _extract_flag_test_info_8616(flag_guard)
         if info is None or len(info) != 4:
             return None
@@ -736,6 +831,7 @@ def _maybe_strip_standalone_signed_flag_pair_guard_8616(node: object) -> object 
     return _strip(node.rhs, node.lhs)
 
 
+@cython.ccall
 def _masked_flag_var_bit_8616(masked: CBinaryOp) -> NestedFlagBitInfo8616 | None:
     """Return ``(flag_var, bit)`` for a ``var & const`` masked operand."""
     if isinstance(masked.lhs, CVariable) and isinstance(masked.rhs, CConstant) and isinstance(masked.rhs.value, int):
@@ -745,7 +841,10 @@ def _masked_flag_var_bit_8616(masked: CBinaryOp) -> NestedFlagBitInfo8616 | None
     return None
 
 
+@cython.ccall
 def _extract_nested_flag_bit_predicate_8616(node: object) -> NestedFlagBitInfo8616 | None:
+    masked: object
+    zero: object
     while isinstance(node, CUnaryOp) and node.op == "Not":
         node = node.operand
     while isinstance(node, CITE):
@@ -782,7 +881,8 @@ def _extract_nested_flag_bit_predicate_8616(node: object) -> NestedFlagBitInfo86
     return _masked_flag_var_bit_8616(masked)
 
 
-def _unwrap_not_bool_cite_8616(node: object) -> tuple[object, bool]:
+@cython.ccall
+def _unwrap_not_bool_cite_8616(node: object) -> tuple[object, cython.bint]:
     """Unwrap ``Not``/bool-CITE layers, returning ``(node, invert)``."""
     invert = False
     while True:
@@ -803,7 +903,10 @@ def _unwrap_not_bool_cite_8616(node: object) -> tuple[object, bool]:
     return node, invert
 
 
+@cython.ccall
 def _extract_flag_pair_compare_info_8616(node: object) -> FlagPairInfo8616 | None:
+    lhs_info: object
+    rhs_info: object
     node, invert = _unwrap_not_bool_cite_8616(node)
     if not isinstance(node, CBinaryOp) or node.op not in {"CmpEQ", "CmpNE"}:
         return None
@@ -821,7 +924,10 @@ def _extract_flag_pair_compare_info_8616(node: object) -> FlagPairInfo8616 | Non
     return lhs_var, lhs_bit, rhs_bit, equality
 
 
+@cython.ccall
 def _normalize_bool_compare_guard_8616(node: object, codegen: object) -> object | None:
+    info: object
+    inverted: object
     info = _extract_bool_compare_term_8616(node)
     if info is None:
         if isinstance(node, CBinaryOp) and node.op in {"CmpGT", "CmpGE", "CmpLT", "CmpLE"}:
@@ -844,16 +950,19 @@ def _normalize_bool_compare_guard_8616(node: object, codegen: object) -> object 
     return cast(object | None, _make_bool_expr_from_compare_8616(compare, negated, codegen))
 
 
-def _same_compare_direction_family_8616(lhs: CBinaryOp, rhs: CBinaryOp) -> bool:
+@cython.ccall
+def _same_compare_direction_family_8616(lhs: CBinaryOp, rhs: CBinaryOp) -> cython.bint:
     if lhs.op in {"CmpGT", "CmpGE"} and rhs.op in {"CmpGT", "CmpGE"}:
         return True
     return bool(lhs.op in {"CmpLT", "CmpLE"} and rhs.op in {"CmpLT", "CmpLE"})
 
 
+@cython.ccall
 def _strip_split_flag_guard_8616(
     flag_guard: object, low_guard: object, prev_compare: CBinaryOp, codegen: object
 ) -> object | None:
     """Strip the flag pair from a split ordering guard, returning the low guard."""
+    pair_info: object
     pair_info = _extract_flag_pair_compare_info_8616(flag_guard)
     if pair_info is None:
         return None
@@ -873,9 +982,11 @@ def _strip_split_flag_guard_8616(
     return low_guard
 
 
+@cython.ccall
 def _split_ordering_if_chain_replacement_condition_8616(
     prev_cond: object, curr_cond: object, codegen: object
 ) -> object | None:
+    replacement: object
     prev_compare = _normalize_bool_compare_guard_8616(prev_cond, codegen)
     if not isinstance(prev_compare, CBinaryOp) or prev_compare.op not in {"CmpGT", "CmpLT"}:
         return None
@@ -888,7 +999,9 @@ def _split_ordering_if_chain_replacement_condition_8616(
     return _strip_split_flag_guard_8616(curr_cond.rhs, curr_cond.lhs, prev_compare, codegen)
 
 
-def _simplify_split_ordering_if_chain_8616(node: CIfElse, codegen: object) -> bool:
+@cython.ccall
+def _simplify_split_ordering_if_chain_8616(node: CIfElse, codegen: object) -> cython.bint:
+    replacement: object
     pairs = _condition_body_pairs_8616(_dynamic_attr_8616(node, "condition_and_nodes", None))
     if len(pairs) < 2:
         return False
@@ -910,11 +1023,15 @@ def _simplify_split_ordering_if_chain_8616(node: CIfElse, codegen: object) -> bo
 
 def _rewrite_flag_condition_expr_8616(
     node: object, flag_var: object, flag_expr: object, codegen: object
-) -> tuple[object, bool]:
+) -> tuple[object, cython.bint]:
     changed = False
 
     def transform(expr: object) -> object:
         """Rewrite a flag-mask test to a recovered ordering condition, when safe."""
+        combined: object
+        info: object
+        rewritten: object
+        simplified: object
         nonlocal changed
         combined = _recover_combined_signed_flag_condition_8616(expr, flag_var, flag_expr, codegen)
         if combined is not None:
@@ -943,13 +1060,18 @@ def _rewrite_flag_condition_expr_8616(
     return new_node, changed
 
 
-def _c_named_node_8616(child: object) -> bool:
+@cython.ccall
+def _c_named_node_8616(child: object) -> cython.bint:
     """Return whether a value is a structured C-node by class-name prefix."""
     return hasattr(child, "__class__") and child.__class__.__name__.startswith("C")
 
 
-def _list_child_uses_var_8616(node: object, target: object) -> bool:
+@cython.ccall
+def _list_child_uses_var_8616(node: object, target: object) -> cython.bint:
     """Scan list-valued child slots for a target variable use."""
+    attr: object
+    item: object
+    sub: object
     for attr in ("statements", "operands", "condition_and_nodes"):
         child = _dynamic_attr_8616(node, attr, None)
         if not isinstance(child, list):
@@ -962,7 +1084,9 @@ def _list_child_uses_var_8616(node: object, target: object) -> bool:
     return False
 
 
-def _c_expr_uses_var_8616(node: object, target: object) -> bool:
+@cython.ccall
+def _c_expr_uses_var_8616(node: object, target: object) -> cython.bint:
+    attr: object
     if node is None:
         return False
     if isinstance(node, CVariable):
@@ -984,20 +1108,24 @@ def _c_expr_uses_var_8616(node: object, target: object) -> bool:
     return _list_child_uses_var_8616(node, target)
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _FlagConditionWalk8616:
     """Statement walk rewriting flag-test conditions against seen assignments."""
 
     codegen: object
     flags_offset: object
-    changed: bool = False
+    changed: cython.bint = False
 
-    def _is_flags_assignment(self, stmt: object) -> bool:
+    @cython.ccall
+    def _is_flags_assignment(self, stmt: object) -> cython.bint:
         if self.flags_offset is None or not isinstance(stmt, CAssignment) or not isinstance(stmt.lhs, CVariable):
             return False
-        return bool(_c_variable_register_offset_8616(stmt.lhs) == self.flags_offset)
+        return bool(operator.eq(_c_variable_register_offset_8616(stmt.lhs), self.flags_offset))
 
+    @cython.ccall
     def _rewrite_condition_with_assignments(self, cond: object, assignments: Assignments8616) -> object:
+        _assign_container: object
+        assign_stmt: object
         if not isinstance(cond, (CBinaryOp, CUnaryOp, CITE, CVariable, CConstant)):
             return cond
         for assign_stmt, _assign_container in reversed(assignments):
@@ -1014,7 +1142,10 @@ class _FlagConditionWalk8616:
                 return new_cond
         return cond
 
+    @cython.ccall
     def _transform_if_else(self, stmt: CIfElse, scope_assignments: Assignments8616) -> None:
+        body: object
+        cond: object
         new_pairs: list[tuple[CExpression, CStatement | None]] = []
         pair_changed = False
         for cond, body in stmt.condition_and_nodes:
@@ -1028,7 +1159,10 @@ class _FlagConditionWalk8616:
             stmt.condition_and_nodes = new_pairs
             self.changed = True
 
-    def _rewrite_next_if_else(self, next_stmt: CIfElse, assign_stmt: CAssignment) -> bool:
+    @cython.ccall
+    def _rewrite_next_if_else(self, next_stmt: CIfElse, assign_stmt: CAssignment) -> cython.bint:
+        body: object
+        cond: object
         cond_nodes = _condition_body_pairs_8616(_dynamic_attr_8616(next_stmt, "condition_and_nodes", None))
         if not cond_nodes:
             return False
@@ -1052,10 +1186,10 @@ class _FlagConditionWalk8616:
     def _transform_assign_pair(
         self,
         next_stmt: object,
-        rest: list[object],
+        rest: object,
         assign_stmt: CAssignment | None,
-        assign_container: CStatements | None,
-    ) -> bool:
+        assign_container: object,
+    ) -> cython.bint:
         """Rewrite conditions of a following CIfElse; True if stmt was consumed."""
         if (
             not isinstance(assign_stmt, CAssignment)
@@ -1066,7 +1200,7 @@ class _FlagConditionWalk8616:
         if not self._rewrite_next_if_else(next_stmt, assign_stmt):
             return False
         later_uses = _c_expr_uses_var_8616(next_stmt, assign_stmt.lhs) or any(
-            _c_expr_uses_var_8616(rest_stmt, assign_stmt.lhs) for rest_stmt in rest
+            _c_expr_uses_var_8616(rest_stmt, assign_stmt.lhs) for rest_stmt in iter(rest)
         )
         if later_uses:
             return False
@@ -1075,8 +1209,9 @@ class _FlagConditionWalk8616:
         assign_container.statements = assign_container.statements[:-1]
         return False
 
+    @cython.ccall
     def transform(
-        self, node: object, prior_assignments: list[tuple[CAssignment, CStatements | None]] | None = None
+        self, node: object, prior_assignments: object = None
     ) -> object:
         """Rewrite flag-test conditions across one statement block; return the block."""
         if not isinstance(node, CStatements):
@@ -1114,12 +1249,15 @@ class _FlagConditionWalk8616:
                 scope_assignments.append((assign_stmt, assign_container))
             i += 1
 
-        if len(new_statements) != len(node.statements):
+        if operator.ne(len(new_statements), len(node.statements)):
             node.statements = new_statements
         return node
 
 
-def _rewrite_flag_condition_pairs_8616(codegen: object) -> bool:
+@cython.ccall
+def _rewrite_flag_condition_pairs_8616(codegen: object) -> cython.bint:
+    cfunc: object
+    with_context_arch: object
     cfunc = _dynamic_attr_8616(codegen, "cfunc", None)
     if cfunc is None or _dynamic_attr_8616(cfunc, "statements", None) is None:
         return False
@@ -1134,7 +1272,8 @@ def _rewrite_flag_condition_pairs_8616(codegen: object) -> bool:
     return walk.changed
 
 
-def _bool_cite_values_8616(node: object) -> tuple[int, int] | None:
+@cython.ccall
+def _bool_cite_values_8616(node: object) -> object:
     if not isinstance(node, CITE):
         return None
     iftrue = _c_constant_value_8616(node.iftrue)
@@ -1144,7 +1283,9 @@ def _bool_cite_values_8616(node: object) -> tuple[int, int] | None:
     return None
 
 
+@cython.ccall
 def _extract_bool_compare_term_8616(node: object) -> BoolCompareTerm8616 | None:
+    values: object
     negated = False
     if isinstance(node, CUnaryOp) and node.op == "Not":
         negated = True
@@ -1168,7 +1309,9 @@ def _extract_bool_compare_term_8616(node: object) -> BoolCompareTerm8616 | None:
     return compare, effective_negated, node
 
 
-def _make_bool_cite_8616(template: CITE, negated: bool, codegen: object) -> CITE:
+@cython.ccall
+def _make_bool_cite_8616(template: CITE, negated: cython.bint, codegen: object) -> CITE:
+    values: object
     values = _bool_cite_values_8616(template)
     if values is None:
         return template
@@ -1179,7 +1322,8 @@ def _make_bool_cite_8616(template: CITE, negated: bool, codegen: object) -> CITE
     return CITE(template.cond, one, zero, tags=_dynamic_attr_8616(template, "tags", None), codegen=codegen)
 
 
-def _invert_cmp_op_8616(op: str) -> str | None:
+@cython.ccall
+def _invert_cmp_op_8616(op: object) -> object:
     return {
         "CmpGT": "CmpLE",
         "CmpGE": "CmpLT",
@@ -1188,7 +1332,9 @@ def _invert_cmp_op_8616(op: str) -> str | None:
     }.get(op)
 
 
-def _make_bool_expr_from_compare_8616(compare: CBinaryOp, negated: bool, codegen: object) -> CBinaryOp:
+@cython.ccall
+def _make_bool_expr_from_compare_8616(compare: CBinaryOp, negated: cython.bint, codegen: object) -> CBinaryOp:
+    inverted: object
     if negated:
         inverted = _invert_cmp_op_8616(compare.op)
         if inverted is not None:
@@ -1210,6 +1356,9 @@ def _make_bool_expr_from_compare_8616(compare: CBinaryOp, negated: bool, codegen
 
 def _fix_impossible_interval_guard_expr_8616(node: object, codegen: object) -> object:
     def _impl() -> object:
+        left_info: object
+        right_info: object
+        simplified_signed: object
         simplified_signed = _maybe_strip_standalone_signed_flag_pair_guard_8616(node)
         if simplified_signed is not None:
             return simplified_signed
@@ -1250,7 +1399,8 @@ def _fix_impossible_interval_guard_expr_8616(node: object, codegen: object) -> o
     return _impl()
 
 
-def _fix_interval_guard_conditions_8616(codegen: object) -> bool:
+def _fix_interval_guard_conditions_8616(codegen: object) -> cython.bint:
+    cfunc: object
     if _dynamic_attr_8616(codegen, "cfunc", None) is None:
         return False
     changed = False
@@ -1281,14 +1431,14 @@ def _fix_interval_guard_conditions_8616(codegen: object) -> bool:
     return changed
 
 
-@dataclass
+@cython.dataclasses.dataclass
 class _FlagReadCensus8616:
     """Traverse the C-AST collecting read register offsets and variable ids."""
 
-    used_registers: set[int]
-    used_variables: set[int]
-    traversal_stack: list[tuple[object, bool]]
-    seen: set[tuple[int, bool]]
+    used_registers: object
+    used_variables: object
+    traversal_stack: object
+    seen: object
 
     @classmethod
     def run(cls, root: object) -> _FlagReadCensus8616:
@@ -1297,8 +1447,12 @@ class _FlagReadCensus8616:
         census.collect()
         return census
 
-    def _record_read(self, node: object) -> bool:
+    @cython.ccall
+    def _record_read(self, node: object) -> cython.bint:
         """Record a read use; True if traversal should stop at this node."""
+        reg_offset: object
+        unified: object
+        variable: object
         reg_offset = _c_register_offset_8616(node)
         if reg_offset is not None:
             self.used_registers.add(reg_offset)
@@ -1312,16 +1466,22 @@ class _FlagReadCensus8616:
             self.used_variables.add(id(unified))
         return True
 
+    @cython.ccall
     def _push_children(self, node: object) -> None:
         """Consume the canonical syntax schema, including both for-loop headers."""
+        attr: object
+        child: object
         for attr in _structured_slot_names_8616(node):
             assignment_lhs = isinstance(node, CAssignment) and attr == "lhs"
             value = _dynamic_attr_8616(node, attr, None)
             for child in _iter_c_node_children_8616(value):
                 self.traversal_stack.append((child, assignment_lhs))
 
+    @cython.ccall
     def collect(self) -> None:
         """Census reads without mistaking a shared write occurrence for a read."""
+        assignment_lhs: object
+        node: object
         while self.traversal_stack:
             node, assignment_lhs = self.traversal_stack.pop()
             if not _structured_codegen_node_8616(node):
@@ -1338,21 +1498,25 @@ class _FlagReadCensus8616:
 
 
 def _dead_flag_assignment_8616(
-    stmt: object, flags_offset: int, used_variables: set[int], used_registers: set[int]
-) -> bool:
+    stmt: object, flags_offset: cython.longlong, used_variables: object, used_registers: object
+) -> cython.bint:
     """Return whether a flag-register assignment has no observed reads."""
-    if not (isinstance(stmt, CAssignment) and _c_register_offset_8616(stmt.lhs) == flags_offset):
+    if not (isinstance(stmt, CAssignment) and operator.eq(_c_register_offset_8616(stmt.lhs), flags_offset)):
         return False
     variable = _dynamic_attr_8616(stmt.lhs, "variable", None)
     unified = _dynamic_attr_8616(stmt.lhs, "unified_variable", None)
     return (
-        all(id(candidate) not in used_variables for candidate in (variable, unified) if candidate is not None)
+        all(id(candidate) not in used_variables for candidate in iter((variable, unified)) if candidate is not None)
         and flags_offset not in used_registers
     )
 
 
-def _push_prune_children_8616(node: object, stack: list[object]) -> None:
+@cython.ccall
+def _push_prune_children_8616(node: object, stack: object) -> None:
     """Queue body/else/switch children for the dead-flag prune walk."""
+    _cond: object
+    attr: object
+    body: object
     for attr in ("body", "else_node"):
         child = _dynamic_attr_8616(node, attr, None)
         if _structured_codegen_node_8616(child):
@@ -1365,13 +1529,16 @@ def _push_prune_children_8616(node: object, stack: list[object]) -> None:
     stack.extend(_switch_case_children_8616(node))
 
 
+@cython.ccall
 def _prune_dead_flag_stmts_8616(
-    root: object, flags_offset: int, used_variables: set[int], used_registers: set[int]
-) -> bool:
+    root: object, flags_offset: cython.longlong, used_variables: object, used_registers: object
+) -> cython.bint:
     """Remove flag-register assignments whose lhs is never read."""
+    node: object
+    stmt: object
     changed = False
     stack = [root]
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     while stack:
         node = stack.pop()
         if not _structured_codegen_node_8616(node):
@@ -1396,7 +1563,10 @@ def _prune_dead_flag_stmts_8616(
     return changed
 
 
-def _prune_unused_flag_assignments_8616(project: object, codegen: object) -> bool:
+@cython.ccall
+def _prune_unused_flag_assignments_8616(project: object, codegen: object) -> cython.bint:
+    cfunc: object
+    flags_offset: object
     cfunc = _dynamic_attr_8616(codegen, "cfunc", None)
     registers = _dynamic_attr_8616(_dynamic_attr_8616(project, "arch", None), "registers", None)
     if cfunc is None or _dynamic_attr_8616(cfunc, "statements", None) is None or not isinstance(registers, dict):
@@ -1410,18 +1580,23 @@ def _prune_unused_flag_assignments_8616(project: object, codegen: object) -> boo
     return _prune_dead_flag_stmts_8616(cfunc.statements, flags_offset, census.used_variables, census.used_registers)
 
 
-def _push_uses_children_8616(stack: list[object], node: object) -> None:
+@cython.ccall
+def _push_uses_children_8616(stack: object, node: object) -> None:
     """Queue register-use children from the same canonical structured schema."""
+    attr: object
     for attr in _structured_slot_names_8616(node):
         stack.extend(_iter_c_node_children_8616(_dynamic_attr_8616(node, attr, None)))
 
 
-def _c_expr_uses_register_8616(node: object, reg_offset: int) -> bool:
+@cython.ccall
+def _c_expr_uses_register_8616(node: object, reg_offset: cython.longlong) -> cython.bint:
+    current: object
+    current_reg_offset: object
     if not _structured_codegen_node_8616(node):
         return False
 
     traversal_stack = [node]
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     while traversal_stack:
         current = traversal_stack.pop()
         if not _structured_codegen_node_8616(current):
@@ -1433,7 +1608,7 @@ def _c_expr_uses_register_8616(node: object, reg_offset: int) -> bool:
 
         current_reg_offset = _c_register_offset_8616(current)
         if current_reg_offset is not None:
-            if current_reg_offset == reg_offset:
+            if operator.eq(current_reg_offset, reg_offset):
                 return True
             if isinstance(current, CVariable):
                 continue
@@ -1443,8 +1618,10 @@ def _c_expr_uses_register_8616(node: object, reg_offset: int) -> bool:
     return False
 
 
-def _stmts_reads_reg_before_write_8616(statements: list[object], reg_offset: int) -> tuple[bool, bool]:
+@cython.ccall
+def _stmts_reads_reg_before_write_8616(statements: object, reg_offset: cython.longlong) -> tuple[cython.bint, cython.bint]:
     """Scan a statement list, short-circuiting on the first read or write."""
+    substmt: object
     for substmt in statements:
         reads, writes = _stmt_reads_reg_before_write_8616(substmt, reg_offset)
         if reads:
@@ -1454,8 +1631,12 @@ def _stmts_reads_reg_before_write_8616(statements: list[object], reg_offset: int
     return False, False
 
 
-def _if_else_reads_reg_before_write_8616(stmt: object, reg_offset: int) -> tuple[bool, bool]:
+@cython.ccall
+def _if_else_reads_reg_before_write_8616(stmt: object, reg_offset: cython.longlong) -> tuple[cython.bint, cython.bint]:
     """Scan an if/else chain's conditions, bodies, and else node."""
+    else_node: object
+    body: object
+    cond: object
     cond_nodes = _dynamic_attr_8616(stmt, "condition_and_nodes", None) or ()
     for cond, body in cond_nodes:
         if _c_expr_uses_register_8616(cond, reg_offset):
@@ -1471,8 +1652,10 @@ def _if_else_reads_reg_before_write_8616(stmt: object, reg_offset: int) -> tuple
     return False, False
 
 
-def _while_reads_reg_before_write_8616(stmt: object, reg_offset: int) -> tuple[bool, bool]:
+@cython.ccall
+def _while_reads_reg_before_write_8616(stmt: object, reg_offset: cython.longlong) -> object:
     """Scan a while loop's condition then body."""
+    body: object
     cond = _dynamic_attr_8616(stmt, "condition", None)
     if _structured_codegen_node_8616(cond) and _c_expr_uses_register_8616(cond, reg_offset):
         return True, False
@@ -1482,13 +1665,14 @@ def _while_reads_reg_before_write_8616(stmt: object, reg_offset: int) -> tuple[b
     return False, False
 
 
-def _stmt_reads_reg_before_write_8616(stmt: object, reg_offset: int) -> tuple[bool, bool]:
+@cython.ccall
+def _stmt_reads_reg_before_write_8616(stmt: object, reg_offset: cython.longlong) -> object:
     if not _structured_codegen_node_8616(stmt):
         return False, False
 
     if isinstance(stmt, CAssignment):
         lhs = stmt.lhs
-        writes = _c_register_offset_8616(lhs) == reg_offset
+        writes = operator.eq(_c_register_offset_8616(lhs), reg_offset)
         reads = _c_expr_uses_register_8616(stmt.rhs, reg_offset)
         return reads, writes
     if isinstance(stmt, CStatements):
@@ -1500,8 +1684,10 @@ def _stmt_reads_reg_before_write_8616(stmt: object, reg_offset: int) -> tuple[bo
     return _c_expr_uses_register_8616(stmt, reg_offset), False
 
 
-def _prune_overwritten_flag_assignments_8616(project: object, codegen: object) -> bool:
+@cython.ccall
+def _prune_overwritten_flag_assignments_8616(project: object, codegen: object) -> cython.bint:
     """Compatibility entry for whole-function, exact-value dead-FLAGS cleanup."""
+    root: object
     cfunc = _dynamic_attr_8616(codegen, "cfunc", None)
     root = _dynamic_attr_8616(cfunc, "statements", None)
     registers = _dynamic_attr_8616(_dynamic_attr_8616(project, "arch", None), "registers", None)

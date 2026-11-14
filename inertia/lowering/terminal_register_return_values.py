@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize one proven terminal AX expression as a structured C return.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -41,6 +44,9 @@ from .terminal_return_expressions import (
     return_expression_has_wide_word_composition_8616,
     return_expression_requires_materialization_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "TerminalRegisterReturnValueEvidence8616",
@@ -76,22 +82,22 @@ class TerminalRegisterReturnValueRefusal8616(Enum):
     INTERVENING_DEFINITION = "intervening_definition"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalRegisterReturnValueEvidence8616:
     """Closed evidence accounting for terminal return-value lowering."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class TerminalRegisterReturnValueResult8616:
     """Result of materializing one structured terminal AX value."""
 
-    changed: bool
+    changed: cython.bint
     status: TerminalRegisterReturnValueStatus8616
     refusal: TerminalRegisterReturnValueRefusal8616
     evidence: TerminalRegisterReturnValueEvidence8616
@@ -100,14 +106,14 @@ class TerminalRegisterReturnValueResult8616:
 class _FunctionSurface8616(Protocol):
     """angr function fields consumed by terminal semantics."""
 
-    addr: int
-    block_addrs_set: set[int]
+    addr: cython.longlong
+    block_addrs_set: object
 
 
 class _FunctionManagerSurface8616(Protocol):
     """angr function-manager lookup used at the project boundary."""
 
-    def function(self, *, addr: int, create: bool) -> _FunctionSurface8616 | None:
+    def function(self, *, addr: cython.longlong, create: cython.bint) -> _FunctionSurface8616 | None:
         """Return one existing function without creating it."""
 
 
@@ -127,7 +133,7 @@ class _ProjectSurface8616(Protocol):
 class _CFunctionSurface8616(Protocol):
     """Structured C function fields consumed by this lowering pass."""
 
-    addr: int
+    addr: cython.longlong
     functy: object
     statements: object
 
@@ -139,6 +145,7 @@ class _CodegenSurface8616(Protocol):
     _inertia_terminal_register_return_value_result_8616: TerminalRegisterReturnValueResult8616
 
 
+@cython.ccall
 def _result_8616(
     codegen: _CodegenSurface8616,
     status: TerminalRegisterReturnValueStatus8616,
@@ -163,6 +170,7 @@ def _result_8616(
     return result
 
 
+@cython.ccall
 def _variable_storage_key_8616(node: CVariable) -> tuple[object, ...]:
     """Return one stable storage key at the third-party C-variable boundary."""
     variable = node.unified_variable if node.unified_variable is not None else node.variable
@@ -177,21 +185,21 @@ def _expression_variable_keys_8616(expression: object) -> frozenset[tuple[object
     """Collect exact C-variable storage read by one scalar expression."""
     nodes = (expression, *_iter_c_nodes_deep_8616(expression))
     return frozenset(
-        _variable_storage_key_8616(node) for node in nodes if isinstance(node, CVariable)
+        _variable_storage_key_8616(node) for node in iter(nodes) if isinstance(node, CVariable)
     )
 
 
 def _defines_any_variable_8616(
     node: object,
-    variable_keys: frozenset[tuple[object, ...]],
-) -> bool:
+    variable_keys: object,
+) -> cython.bint:
     """Return whether one subtree assigns any exact return-expression variable."""
     nodes = (node, *_iter_c_nodes_deep_8616(node))
     return any(
         isinstance(candidate, CAssignment)
         and isinstance(candidate.lhs, CVariable)
         and _variable_storage_key_8616(candidate.lhs) in variable_keys
-        for candidate in nodes
+        for candidate in iter(nodes)
     )
 
 
@@ -202,9 +210,11 @@ def _terminal_linear_suffix_8616(root: CStatements) -> tuple[object, ...]:
     AX definition overwrites the carrier. Control flow after that definition
     clears the candidate suffix and therefore still forces refusal.
     """
+    statement: object
     suffix: list[object] = []
 
     def _append(statement: object) -> None:
+        nested: object
         if isinstance(statement, CStatements):
             for nested in tuple(statement.statements or ()):
                 _append(nested)
@@ -219,12 +229,15 @@ def _terminal_linear_suffix_8616(root: CStatements) -> tuple[object, ...]:
     return tuple(suffix)
 
 
+@cython.ccall
 def _return_value_context_8616(
     project_surface: _ProjectSurface8616,
     codegen_surface: _CodegenSurface8616,
-    function_addr: int,
-) -> tuple[_FunctionSurface8616, int, int] | TerminalRegisterReturnValueResult8616:
+    function_addr: cython.longlong,
+) -> object:
     """Resolve the proven function and AX register geometry or refuse."""
+    ax_register: object
+    function: object
     functions = project_surface.kb.functions
     function = functions.function(addr=function_addr, create=False)
     if function is None:
@@ -242,7 +255,7 @@ def _return_value_context_8616(
             TerminalRegisterReturnValueEvidence8616(failure_count=1),
             TerminalRegisterReturnValueRefusal8616.MISSING_AX_REGISTER,
         )
-    ax_offset, ax_width = ax_register[:2]
+    ax_offset, ax_width = tuple(ax_register[:2])
     if not isinstance(ax_offset, int) or not isinstance(ax_width, int):
         return _result_8616(
             codegen_surface,
@@ -254,9 +267,9 @@ def _return_value_context_8616(
 
 
 def _debug_linear_order_8616(
-    statements: tuple[CStatement, ...],
-    assignment_index: int,
-    return_index: int,
+    statements: object,
+    assignment_index: cython.longlong,
+    return_index: cython.longlong,
 ) -> None:
     """Emit the opt-in linear AX-definition ordering dump."""
     _LOGGER.warning(
@@ -265,7 +278,7 @@ def _debug_linear_order_8616(
         return_index,
         tuple(
             (index, type(statement).__name__, contains_effectful_call_8616(statement))
-            for index, statement in enumerate(statements)
+            for index, statement in builtins.iter(enumerate(statements))
         ),
         tuple(
             (
@@ -284,16 +297,17 @@ def _debug_linear_order_8616(
                             else None
                         ),
                     )
-                    for call in _iter_c_nodes_deep_8616(statement)
+                    for call in builtins.iter(_iter_c_nodes_deep_8616(statement))
                     if isinstance(call, CFunctionCall)
                 ),
             )
-            for index, statement in enumerate(statements)
+            for index, statement in builtins.iter(enumerate(statements))
             if contains_effectful_call_8616(statement)
         ),
     )
 
 
+@cython.ccall
 def materialize_terminal_register_return_value_8616(
     project: object,
     codegen: object,
@@ -335,42 +349,42 @@ def materialize_terminal_register_return_value_8616(
     return _materialize_linear_ax_return_8616(codegen_surface, census)
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _AxReturnCensus8616:
     """Terminal AX-definition census for one structured function."""
 
-    raw_count: int
-    terminal_shape: bool
-    statements: tuple[object, ...]
-    all_assignments: tuple[CAssignment, ...]
-    assignments: tuple[CAssignment, ...]
-    returns: tuple[CReturn, ...]
+    raw_count: cython.longlong
+    terminal_shape: cython.bint
+    statements: object
+    all_assignments: object
+    assignments: object
+    returns: object
 
 
 def _ax_return_census_8616(
     project: object,
     function: _FunctionSurface8616,
     root: CStatements,
-    ax_offset: int,
-    ax_width: int,
+    ax_offset: cython.longlong,
+    ax_width: cython.longlong,
 ) -> _AxReturnCensus8616:
     """Collect terminal AX assignments, returns, and the linear suffix."""
     nodes = tuple(_iter_c_nodes_deep_8616(root))
     all_assignments = tuple(
         node
-        for node in nodes
+        for node in iter(nodes)
         if isinstance(node, CAssignment)
         and (view := physical_register_view_8616(node.lhs)) is not None
-        and view.reg_offset == ax_offset
-        and view.width == ax_width
+        and operator.eq(view.reg_offset, ax_offset)
+        and operator.eq(view.width, ax_width)
     )
-    returns = tuple(node for node in nodes if isinstance(node, CReturn))
+    returns = tuple(node for node in iter(nodes) if isinstance(node, CReturn))
     statements = _terminal_linear_suffix_8616(root)
     assignments = tuple(
         statement
-        for statement in statements
+        for statement in iter(statements)
         if isinstance(statement, CAssignment)
-        and any(statement is assignment for assignment in all_assignments)
+        and any(statement is assignment for assignment in iter(all_assignments))
     )
     return _AxReturnCensus8616(
         raw_count=len(all_assignments),
@@ -390,6 +404,9 @@ def _materialize_linear_ax_return_8616(
     census: _AxReturnCensus8616,
 ) -> TerminalRegisterReturnValueResult8616:
     """Prove linear AX-definition ordering and rewrite the sole return."""
+    assignment_index: object
+    return_expression: object
+    return_index: object
     raw_count = census.raw_count
     statements = census.statements
     assignments = census.assignments
@@ -401,7 +418,7 @@ def _materialize_linear_ax_return_8616(
             TerminalRegisterReturnValueRefusal8616.NONLINEAR_AX_DEFINITION,
         )
     return_node = census.returns[0]
-    if not any(statement is return_node for statement in statements):
+    if not any(statement is return_node for statement in iter(statements)):
         return _result_8616(
             codegen_surface,
             TerminalRegisterReturnValueStatus8616.REFUSED,
@@ -410,10 +427,10 @@ def _materialize_linear_ax_return_8616(
         )
     assignment = assignments[-1]
     assignment_index = next(
-        index for index, statement in enumerate(statements) if statement is assignment
+        index for index, statement in builtins.iter(enumerate(statements)) if statement is assignment
     )
     return_index = next(
-        index for index, statement in enumerate(statements) if statement is return_node
+        index for index, statement in builtins.iter(enumerate(statements)) if statement is return_node
     )
     if return_expression_has_wide_word_composition_8616(return_node.retval) or not return_expression_requires_materialization_8616(
         statements[:return_index],
@@ -445,14 +462,14 @@ def _materialize_linear_ax_return_8616(
             TerminalRegisterReturnValueRefusal8616.UNSAFE_EXPRESSION,
         )
     return_variable_keys = _expression_variable_keys_8616(return_expression)
-    if any(_defines_any_variable_8616(statement, return_variable_keys) for statement in intervening):
+    if any(_defines_any_variable_8616(statement, return_variable_keys) for statement in iter(intervening)):
         return _result_8616(
             codegen_surface,
             TerminalRegisterReturnValueStatus8616.REFUSED,
             TerminalRegisterReturnValueEvidence8616(raw_count, 1, 0, 0, 0),
             TerminalRegisterReturnValueRefusal8616.INTERVENING_DEFINITION,
         )
-    if any(contains_effectful_call_8616(statement) for statement in intervening):
+    if any(contains_effectful_call_8616(statement) for statement in iter(intervening)):
         if os.environ.get("INERTIA_DEBUG_TERMINAL_RETURN_VALUES") == "1":
             _debug_linear_order_8616(statements, assignment_index, return_index)
         return _result_8616(

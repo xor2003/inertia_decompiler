@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize proven stack-word to direct-global copies in structured C.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -31,6 +34,9 @@ from .stack_variable_coordinates import (
     machine_bp_offset_for_stack_variable_8616,
     stack_cvar_for_machine_bp_range_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 
 class LogicalWordMemoryCopyLoweringFailure8616(StrEnum):
@@ -41,50 +47,50 @@ class LogicalWordMemoryCopyLoweringFailure8616(StrEnum):
     SOURCE_VARIABLE_AMBIGUOUS = "source_variable_ambiguous"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LogicalWordMemoryCopyLoweringRefusal8616:
     """One exact assignment that could not consume its Widening fact."""
 
     fact: LogicalWordMemoryCopy8616 | None
     failure: LogicalWordMemoryCopyLoweringFailure8616
-    detail: str
+    detail: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LogicalWordMemoryCopyLoweringStats8616:
     """Closed evidence counters for C materialization."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every matched assignment was changed or refused."""
         return bool(
-            self.raw_fact_count == self.materialized_count + self.failure_count
+            operator.eq(self.raw_fact_count, self.materialized_count + self.failure_count)
             and self.normalized_fact_count
             == self.classified_fact_count
             == self.materialized_count
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LogicalWordMemoryCopyLoweringArtifact8616:
     """Closed Lowering outcomes tied to one Widening artifact."""
 
     source_widening: LogicalWordMemoryCopyArtifact8616 | None
-    refusals: tuple[LogicalWordMemoryCopyLoweringRefusal8616, ...]
+    refusals: object
     stats: LogicalWordMemoryCopyLoweringStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether source and Lowering accounting agree."""
         return bool(
             self.stats.complete
-            and len(self.refusals) == self.stats.failure_count
+            and operator.eq(len(self.refusals), self.stats.failure_count)
             and (
                 self.source_widening is None
                 or self.source_widening.complete
@@ -92,11 +98,11 @@ class LogicalWordMemoryCopyLoweringArtifact8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LogicalWordMemoryCopyLoweringResult8616:
     """Changed state and durable evidence from one replay."""
 
-    changed: bool
+    changed: cython.bint
     artifact: LogicalWordMemoryCopyLoweringArtifact8616
 
 
@@ -113,9 +119,10 @@ class _CodegenBoundary8616(Protocol):
     )
 
 
+@cython.ccall
 def _direct_global_identity_8616(
     assignment: structured_c.CAssignment,
-) -> tuple[int, int] | None:
+) -> object:
     """Return one exact direct global lvalue identity."""
     lhs = assignment.lhs
     if not isinstance(lhs, structured_c.CVariable):
@@ -128,11 +135,13 @@ def _direct_global_identity_8616(
     return variable.addr & 0xFFFF, variable.size
 
 
+@cython.ccall
 def _fact_index_8616(
     artifact: LogicalWordMemoryCopyArtifact8616,
-) -> dict[tuple[int, int, int], tuple[LogicalWordMemoryCopy8616, ...]]:
+) -> dict[tuple[cython.longlong, cython.longlong, cython.longlong], tuple[LogicalWordMemoryCopy8616, ...]]:
     """Index Widening facts by destination instruction and DS word range."""
-    grouped: dict[tuple[int, int, int], list[LogicalWordMemoryCopy8616]] = {}
+    fact: object
+    grouped: dict[tuple[cython.longlong, cython.longlong, cython.longlong], list[LogicalWordMemoryCopy8616]] = {}
     for fact in artifact.facts:
         destination = fact.destination_transfer.access
         key = (
@@ -143,16 +152,18 @@ def _fact_index_8616(
         grouped.setdefault(key, []).append(fact)
     return {
         key: tuple(value)
-        for key, value in sorted(grouped.items())
+        for key, value in builtins.iter(sorted(tuple(grouped.items())))
     }
 
 
+@cython.ccall
 def _source_cvar_8616(
     codegen: object,
     assignment: structured_c.CAssignment,
     fact: LogicalWordMemoryCopy8616,
 ) -> structured_c.CVariable | bool | None:
     """Resolve one canonical source variable; ``False`` means ambiguous."""
+    node: object
     address = fact.source_transfer.access.address
     canonical = stack_cvar_for_machine_bp_range_8616(
         codegen,
@@ -168,12 +179,11 @@ def _source_cvar_8616(
         variable = node.variable
         if (
             isinstance(variable, SimStackVariable)
-            and variable.size == address.size
-            and machine_bp_offset_for_stack_variable_8616(codegen, variable)
-            == address.offset
+            and operator.eq(variable.size, address.size)
+            and operator.eq(machine_bp_offset_for_stack_variable_8616(codegen, variable), address.offset)
         ):
             candidates.append(node)
-    unique = {id(candidate): candidate for candidate in candidates}
+    unique = {id(candidate): candidate for candidate in iter(candidates)}
     if len(unique) == 1:
         return next(iter(unique.values()))
     if len(unique) > 1:
@@ -184,14 +194,16 @@ def _source_cvar_8616(
 def _apply_copy_fact_8616(
     codegen: object,
     node: object,
-    fact_index: dict[tuple[int, int, int], tuple[LogicalWordMemoryCopy8616, ...]],
-    refusals: list[LogicalWordMemoryCopyLoweringRefusal8616],
+    fact_index: object,
+    refusals: object,
 ) -> int | None:
     """Apply one matched copy fact to one global assignment RHS.
 
     Returns ``None`` when the node is not a matching global assignment,
     ``0`` when a match refused, and ``1`` when the RHS was replaced.
     """
+    identity: object
+    source_cvar: object
     if not isinstance(node, structured_c.CAssignment):
         return None
     identity = _direct_global_identity_8616(node)
@@ -201,11 +213,11 @@ def _apply_copy_fact_8616(
     instruction_addrs = instruction_addrs_from_node_8616(node)
     matches = tuple(
         fact
-        for instruction_addr in instruction_addrs
-        for fact in fact_index.get(
+        for instruction_addr in iter(instruction_addrs)
+        for fact in builtins.iter(fact_index.get(
             (instruction_addr, destination_offset, destination_size),
             (),
-        )
+        ))
     )
     if not matches:
         return None
@@ -242,6 +254,7 @@ def _apply_copy_fact_8616(
     return 1
 
 
+@cython.ccall
 def materialize_logical_word_memory_copies_8616(
     codegen: object,
     *,
@@ -253,6 +266,12 @@ def materialize_logical_word_memory_copies_8616(
     This pass changes RHS children only, so its copied assignment projection
     remains complete for the duration of this request.
     """
+    delta: object
+    query_index: object
+    root: object
+    source_alias: object
+    widening: object
+    node: object
     boundary = cast(_CodegenBoundary8616, codegen)
     try:
         source = boundary._inertia_stack_memory_ssa_alias_artifact

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Retain typed storage identity on materialized segmented-load expressions.
 
 Layer: Widening.
@@ -9,6 +10,8 @@ CLI/reporting evidence. Untagged expressions remain unknown.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -21,6 +24,7 @@ from inertia.ir.core import (
     MemSpace,
     SegmentOrigin,
 )
+import dataclasses
 
 __all__ = [
     "SegmentedLoadIdentity8616",
@@ -31,13 +35,13 @@ __all__ = [
 _SEGMENTED_LOAD_IDENTITY_TAG_8616 = "inertia_x86_16_segmented_load_identity"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentedLoadIdentity8616:
     """Exact segmented scalar storage represented by one C load expression."""
 
     space: MemSpace
-    offset: int
-    width: int
+    offset: cython.longlong
+    width: cython.longlong
     region: int | None
 
     def __post_init__(self) -> None:
@@ -52,11 +56,12 @@ class SegmentedLoadIdentity8616:
             raise ValueError("segmented load region must be nonnegative")
 
 
+@cython.ccall
 def segmented_load_tags_8616(
     identity: SegmentedLoadIdentity8616,
     *,
-    existing: dict[str, object] | None = None,
-) -> dict[str, object]:
+    existing: object = None,
+) -> object:
     """Return C-node tags carrying one exact widening-owned identity."""
     if not isinstance(identity, SegmentedLoadIdentity8616):
         raise TypeError("identity must be SegmentedLoadIdentity8616")
@@ -65,10 +70,13 @@ def segmented_load_tags_8616(
     return tags
 
 
+@cython.ccall
 def segmented_load_identity_8616(
     node: object,
 ) -> SegmentedLoadIdentity8616 | None:
     """Return an exact tagged identity without parsing the helper expression."""
+    address: object
+    identity: object
     if not isinstance(node, CFunctionCall) or not isinstance(node.tags, dict):
         return None
     address = node.tags.get(SEGMENTED_LOAD_ADDRESS_TAG_8616)

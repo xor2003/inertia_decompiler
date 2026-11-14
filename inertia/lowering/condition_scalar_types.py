@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Apply scalar type evidence exposed by structured conditions and returns.
 
 Layer: Types/lowering.
@@ -8,6 +9,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from .condition_argument_types import apply_condition_argument_types_8616
 from .scalar_return_types import materialize_scalar_return_type_8616
@@ -17,7 +20,8 @@ from .terminal_register_return_values import materialize_terminal_register_retur
 __all__ = ["apply_condition_scalar_types_8616"]
 
 
-def apply_condition_scalar_types_8616(project: object, codegen: object) -> bool:
+@cython.ccall
+def apply_condition_scalar_types_8616(project: object, codegen: object) -> cython.bint:
     """Apply condition-derived argument types and typed return expressions."""
     argument_result = apply_condition_argument_types_8616(project, codegen)
     terminal_result = materialize_terminal_register_return_type_8616(project, codegen)

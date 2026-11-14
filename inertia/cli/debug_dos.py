@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Debug a DOS MZ executable via angr + GDB RSP + Textual TUI.
 
 Layer: CLI/fallback/reporting.
@@ -8,6 +9,7 @@ Usage:
 """
 
 from __future__ import annotations
+import cython
 
 import argparse
 import sys
@@ -15,6 +17,7 @@ import time
 from pathlib import Path
 
 
+@cython.ccall
 def main() -> None:
     """Start a GDB RSP server for one DOS executable."""
     try:

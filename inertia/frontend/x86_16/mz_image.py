@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Represent the DOS MZ container fields needed by frontend decoders.
 
 Layer: frontend (loader).
@@ -6,9 +7,12 @@ Forbidden: packer detection, decompression, relocation application, or semantic 
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import struct
 from dataclasses import dataclass
+import dataclasses
 
 __all__ = ("MZHeaderView", "UnpackedMZImage", "paragraph_count")
 
@@ -16,33 +20,34 @@ _MZ_FIXED_HEADER_SIZE = 0x1C
 _MZ_RELOCATION_TABLE_OFFSET = _MZ_FIXED_HEADER_SIZE
 
 
-def paragraph_count(size: int) -> int:
+@cython.ccall
+def paragraph_count(size: cython.longlong) -> cython.longlong:
     """Return the number of 16-byte paragraphs required for ``size`` bytes."""
     if size < 0:
         raise ValueError("MZ size must be non-negative")
     return (size + 15) // 16
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class MZHeaderView:
     """Typed view of the conventional 28-byte DOS MZ header."""
 
-    bytes_in_last_page: int
-    page_count: int
-    relocation_count: int
-    header_paragraphs: int
-    min_alloc: int
-    max_alloc: int
-    stack_ss: int
-    stack_sp: int
-    checksum: int
-    entry_ip: int
-    entry_cs: int
-    relocation_offset: int
-    overlay_number: int
+    bytes_in_last_page: cython.longlong
+    page_count: cython.longlong
+    relocation_count: cython.longlong
+    header_paragraphs: cython.longlong
+    min_alloc: cython.longlong
+    max_alloc: cython.longlong
+    stack_ss: cython.longlong
+    stack_sp: cython.longlong
+    checksum: cython.longlong
+    entry_ip: cython.longlong
+    entry_cs: cython.longlong
+    relocation_offset: cython.longlong
+    overlay_number: cython.longlong
 
     @classmethod
-    def parse(cls, data: bytes) -> MZHeaderView | None:
+    def parse(cls, data: object) -> MZHeaderView | None:
         """Return a header view, or ``None`` for a non-MZ or truncated input."""
         if len(data) < _MZ_FIXED_HEADER_SIZE or data[:2] not in {b"MZ", b"ZM"}:
             return None
@@ -50,7 +55,7 @@ class MZHeaderView:
         return cls(*fields)
 
     @property
-    def header_size(self) -> int:
+    def header_size(self) -> cython.longlong:
         """Return the declared MZ header size in bytes."""
         return self.header_paragraphs * 16
 
@@ -66,27 +71,30 @@ class MZHeaderView:
         return (self.page_count - 1) * 512 + self.bytes_in_last_page
 
     @property
-    def entry_file_offset(self) -> int:
+    def entry_file_offset(self) -> cython.longlong:
         """Return the entry-stub file offset relative to the executable file."""
         return self.header_size + (self.entry_cs << 4) + self.entry_ip
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class UnpackedMZImage:
     """A decoded MZ load image with unapplied relocation and register evidence."""
 
-    image: bytes
-    relocations: tuple[tuple[int, int], ...]
-    entry_cs: int
-    entry_ip: int
-    stack_ss: int
-    stack_sp: int
-    min_alloc: int = 0
-    max_alloc: int = 0xFFFF
-    overlay_number: int = 0
+    image: object
+    relocations: object
+    entry_cs: cython.longlong
+    entry_ip: cython.longlong
+    stack_ss: cython.longlong
+    stack_sp: cython.longlong
+    min_alloc: cython.longlong = 0
+    max_alloc: cython.longlong = 0xFFFF
+    overlay_number: cython.longlong = 0
 
-    def to_mz_bytes(self) -> bytes:
+    def to_mz_bytes(self) -> object:
         """Serialize the recovered evidence as a conventional DOS MZ executable."""
+        index: object
+        offset: object
+        segment: object
         relocation_bytes = len(self.relocations) * 4
         header_size = paragraph_count(_MZ_RELOCATION_TABLE_OFFSET + relocation_bytes) * 16
         total_size = header_size + len(self.image)

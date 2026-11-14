@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Optional evidence/reporting.
 
 Responsibility: parse CodeView NB00 debug records into optional labels and diagnostics.
@@ -11,11 +12,16 @@ postprocess, or validation work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import struct
 from dataclasses import dataclass, field
 from enum import IntEnum
 from pathlib import Path
+import dataclasses
+import operator
+import builtins
 
 
 class CodeViewSubsectionType(IntEnum):
@@ -31,98 +37,99 @@ class CodeViewSubsectionType(IntEnum):
     SRCLNSEG = 0x109
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class CodeViewDirectoryEntry:
     """Directory entry pointing at one NB00 debug subsection payload."""
 
-    subsection_type: int
-    module_index: int
-    data_offset: int
-    data_size: int
+    subsection_type: cython.longlong
+    module_index: cython.longlong
+    data_offset: cython.longlong
+    data_size: cython.longlong
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class CodeViewNB00Module:
     """NB00 module span used to classify optional labels and source lines."""
 
-    module_index: int
-    cs_base: int
-    cs_offset: int
-    cs_length: int
-    overlay_number: int
-    library_index: int
-    segment_count: int
-    name: str
+    module_index: cython.longlong
+    cs_base: cython.longlong
+    cs_offset: cython.longlong
+    cs_length: cython.longlong
+    overlay_number: cython.longlong
+    library_index: cython.longlong
+    segment_count: cython.longlong
+    name: object
 
-    def linear_range(self, *, load_base_linear: int) -> tuple[int, int]:
+    def linear_range(self, *, load_base_linear: cython.longlong) -> tuple[cython.longlong, cython.longlong]:
         """Return the display-only linear range covered by this module."""
         start = load_base_linear + (self.cs_base << 4) + self.cs_offset
         return start, start + self.cs_length
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class CodeViewNB00PublicSymbol:
     """Public symbol recovered from NB00 debug data as optional label evidence."""
 
-    module_index: int
-    offset: int
-    segment: int
-    type_index: int
-    name: str
+    module_index: cython.longlong
+    offset: cython.longlong
+    segment: cython.longlong
+    type_index: cython.longlong
+    name: object
 
-    def linear_addr(self, *, load_base_linear: int) -> int:
+    def linear_addr(self, *, load_base_linear: cython.longlong) -> cython.longlong:
         """Return a display-only linear address for this public symbol."""
         return load_base_linear + (self.segment << 4) + self.offset
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class CodeViewNB00Info:
     """Parsed NB00 debug metadata exposed as optional labels and diagnostics."""
 
-    version: str
-    debug_base: int
-    subsection_directory_offset: int
-    modules: tuple[CodeViewNB00Module, ...]
-    publics: tuple[CodeViewNB00PublicSymbol, ...]
+    version: object
+    debug_base: cython.longlong
+    subsection_directory_offset: cython.longlong
+    modules: object
+    publics: object
     type_definitions: tuple[CodeViewNB00TypeDefinition, ...] = ()
     type_record_names: tuple[str, ...] = ()
     type_members: tuple[CodeViewNB00TypeMember, ...] = ()
     source_files: tuple[str, ...] = ()
-    line_map: dict[int, tuple[int, int]] = field(default_factory=dict)
+    line_map: object = field(default_factory=dict)
     debug_identifiers: tuple[str, ...] = ()
-    code_labels: dict[int, str] = field(default_factory=dict)
-    data_labels: dict[int, str] = field(default_factory=dict)
-    code_ranges: dict[int, tuple[int, int]] = field(default_factory=dict)
+    code_labels: object = field(default_factory=dict)
+    data_labels: object = field(default_factory=dict)
+    code_ranges: object = field(default_factory=dict)
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class CodeViewNB00TypeLeaf:
     """Raw NB00 type-record leaf preserved for debug-schema reporting."""
 
-    kind: str
+    kind: object
     value: object
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class CodeViewNB00TypeMember:
     """Member name and offset decoded from an NB00 type record."""
 
-    name: str
-    offset: int
-    owner_type_index: int
-    leaf_index: int
+    name: object
+    offset: cython.longlong
+    owner_type_index: cython.longlong
+    leaf_index: cython.longlong
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class CodeViewNB00TypeDefinition:
     """NB00 type record retained as optional debug type evidence."""
 
-    index: int
-    linkage: int
-    leaves: tuple[CodeViewNB00TypeLeaf, ...]
+    index: cython.longlong
+    linkage: cython.longlong
+    leaves: object
 
 
-def find_codeview_nb00(data: bytes) -> tuple[str, int, int] | None:
+@cython.ccall
+def find_codeview_nb00(data: object) -> object:
     """Locate an NB00 trailer and subsection directory in executable bytes."""
     for trailer_offset in range(len(data) - 8, max(-1, len(data) - 256), -1):
         signature, debug_offset = struct.unpack_from("<4sI", data, trailer_offset)
@@ -138,35 +145,39 @@ def find_codeview_nb00(data: bytes) -> tuple[str, int, int] | None:
     return None
 
 
-def parse_codeview_nb00(path: Path, *, load_base_linear: int = 0) -> CodeViewNB00Info | None:
+@cython.ccall
+def parse_codeview_nb00(path: Path, *, load_base_linear: cython.longlong = 0) -> CodeViewNB00Info | None:
     """Parse optional NB00 debug metadata from an executable path."""
     return parse_codeview_nb00_bytes(path.read_bytes(), load_base_linear=load_base_linear)
 
 
-def parse_codeview_nb00_bytes(data: bytes, *, load_base_linear: int = 0) -> CodeViewNB00Info | None:
+def parse_codeview_nb00_bytes(data: object, *, load_base_linear: cython.longlong = 0) -> CodeViewNB00Info | None:
     """Parse optional NB00 debug metadata from executable bytes."""
+    located: object
+    entry: object
+    symbol: object
     located = find_codeview_nb00(data)
     if located is None:
         return None
     version, debug_base, subsection_directory_offset = located
     directory_entries = _read_subsection_directory(data, subsection_directory_offset)
 
-    modules: dict[int, CodeViewNB00Module] = {}
+    modules: dict[cython.longlong, CodeViewNB00Module] = {}
     publics: list[CodeViewNB00PublicSymbol] = []
     type_definitions: list[CodeViewNB00TypeDefinition] = []
     source_files: list[str] = []
-    line_map: dict[int, tuple[int, int]] = {}
+    line_map: dict[cython.longlong, tuple[cython.longlong, cython.longlong]] = {}
     debug_identifiers: list[str] = []
     for entry in directory_entries:
         blob = data[debug_base + entry.data_offset : debug_base + entry.data_offset + entry.data_size]
-        if entry.subsection_type == CodeViewSubsectionType.MODULES:
+        if operator.eq(entry.subsection_type, CodeViewSubsectionType.MODULES):
             module = _parse_module_subsection(entry.module_index, blob)
             modules[module.module_index] = module
-        elif entry.subsection_type == CodeViewSubsectionType.PUBLICS:
+        elif operator.eq(entry.subsection_type, CodeViewSubsectionType.PUBLICS):
             publics.extend(_parse_publics_subsection(entry.module_index, blob))
-        elif entry.subsection_type == CodeViewSubsectionType.TYPE:
+        elif operator.eq(entry.subsection_type, CodeViewSubsectionType.TYPE):
             type_definitions.extend(_parse_type_subsection(blob))
-        elif entry.subsection_type == CodeViewSubsectionType.SYMBOLS:
+        elif operator.eq(entry.subsection_type, CodeViewSubsectionType.SYMBOLS):
             debug_identifiers.extend(_parse_symbol_names_subsection(blob))
         elif entry.subsection_type in {CodeViewSubsectionType.SRCLINES, CodeViewSubsectionType.SRCLNSEG}:
             parsed_files, parsed_lines = _parse_source_lines_subsection(
@@ -178,10 +189,10 @@ def parse_codeview_nb00_bytes(data: bytes, *, load_base_linear: int = 0) -> Code
             line_map.update(parsed_lines)
 
     code_ranges = _synthesize_code_ranges(tuple(modules.values()), tuple(publics), load_base_linear=load_base_linear)
-    code_labels: dict[int, str] = {}
-    data_labels: dict[int, str] = {}
+    code_labels: dict[cython.longlong, str] = {}
+    data_labels: dict[cython.longlong, str] = {}
     module_ranges = tuple(
-        (module.linear_range(load_base_linear=load_base_linear), module.module_index) for module in modules.values()
+        (module.linear_range(load_base_linear=load_base_linear), module.module_index) for module in builtins.iter(modules.values())
     )
 
     for symbol in publics:
@@ -196,7 +207,7 @@ def parse_codeview_nb00_bytes(data: bytes, *, load_base_linear: int = 0) -> Code
         version=version,
         debug_base=debug_base,
         subsection_directory_offset=subsection_directory_offset,
-        modules=tuple(sorted(modules.values(), key=lambda item: item.module_index)),
+        modules=tuple(sorted(tuple(modules.values()), key=lambda item: item.module_index)),
         publics=tuple(publics),
         type_definitions=tuple(type_definitions),
         type_record_names=_collect_type_record_names(tuple(type_definitions)),
@@ -210,7 +221,8 @@ def parse_codeview_nb00_bytes(data: bytes, *, load_base_linear: int = 0) -> Code
     )
 
 
-def _read_subsection_directory(data: bytes, subsection_directory_offset: int) -> tuple[CodeViewDirectoryEntry, ...]:
+@cython.ccall
+def _read_subsection_directory(data: object, subsection_directory_offset: cython.longlong) -> tuple[CodeViewDirectoryEntry, ...]:
     if subsection_directory_offset < 0 or subsection_directory_offset + 2 > len(data):
         raise ValueError("invalid CodeView subsection directory offset")
     count = struct.unpack_from("<H", data, subsection_directory_offset)[0]
@@ -232,7 +244,8 @@ def _read_subsection_directory(data: bytes, subsection_directory_offset: int) ->
     return tuple(entries)
 
 
-def _parse_module_subsection(module_index: int, blob: bytes) -> CodeViewNB00Module:
+@cython.ccall
+def _parse_module_subsection(module_index: cython.longlong, blob: object) -> CodeViewNB00Module:
     if len(blob) < 9:
         raise ValueError("short NB00 module subsection")
     cs_base, cs_offset, cs_length, overlay_number, library_index, segment_count, _, name_length = struct.unpack_from(
@@ -251,7 +264,8 @@ def _parse_module_subsection(module_index: int, blob: bytes) -> CodeViewNB00Modu
     )
 
 
-def _parse_publics_subsection(module_index: int, blob: bytes) -> tuple[CodeViewNB00PublicSymbol, ...]:
+@cython.ccall
+def _parse_publics_subsection(module_index: cython.longlong, blob: object) -> tuple[CodeViewNB00PublicSymbol, ...]:
     publics: list[CodeViewNB00PublicSymbol] = []
     offset = 0
     while offset + 7 <= len(blob):
@@ -271,7 +285,8 @@ def _parse_publics_subsection(module_index: int, blob: bytes) -> tuple[CodeViewN
     return tuple(publics)
 
 
-def _parse_type_subsection(blob: bytes) -> tuple[CodeViewNB00TypeDefinition, ...]:
+@cython.ccall
+def _parse_type_subsection(blob: object) -> tuple[CodeViewNB00TypeDefinition, ...]:
     definitions: list[CodeViewNB00TypeDefinition] = []
     offset = 0
     type_index = 0x200
@@ -294,7 +309,8 @@ def _parse_type_subsection(blob: bytes) -> tuple[CodeViewNB00TypeDefinition, ...
     return tuple(definitions)
 
 
-def _parse_type_record(record: bytes) -> tuple[CodeViewNB00TypeLeaf, ...]:
+@cython.ccall
+def _parse_type_record(record: object) -> tuple[CodeViewNB00TypeLeaf, ...]:
     leaves: list[CodeViewNB00TypeLeaf] = []
     offset = 0
     while offset < len(record):
@@ -306,9 +322,10 @@ def _parse_type_record(record: bytes) -> tuple[CodeViewNB00TypeLeaf, ...]:
     return tuple(leaves)
 
 
+@cython.ccall
 def _fixed_width_leaf(
-    record: bytes, offset: int, tag: int
-) -> tuple[CodeViewNB00TypeLeaf, int] | None:
+    record: object, offset: cython.longlong, tag: cython.longlong
+) -> object:
     """Decode one fixed-width integer leaf when the full extent fits."""
     if tag == 0x89 and offset + 3 <= len(record):
         return CodeViewNB00TypeLeaf("uint16", struct.unpack_from("<H", record, offset + 1)[0]), 3
@@ -321,9 +338,10 @@ def _fixed_width_leaf(
     return None
 
 
+@cython.ccall
 def _length_prefixed_string_leaf(
-    record: bytes, offset: int
-) -> tuple[CodeViewNB00TypeLeaf, int] | None:
+    record: object, offset: cython.longlong
+) -> object:
     """Decode one length-prefixed string leaf when the full extent fits."""
     strlen = record[offset + 1]
     end = offset + 2 + strlen
@@ -334,8 +352,11 @@ def _length_prefixed_string_leaf(
     ), 2 + strlen
 
 
-def _read_leaf(record: bytes, offset: int) -> tuple[CodeViewNB00TypeLeaf, int]:
+@cython.ccall
+def _read_leaf(record: object, offset: cython.longlong) -> object:
     """Decode one CodeView leaf record at ``offset``."""
+    fixed: object
+    string_leaf: object
     if offset >= len(record):
         return CodeViewNB00TypeLeaf("invalid", None), 0
     tag = record[offset]
@@ -357,9 +378,12 @@ def _read_leaf(record: bytes, offset: int) -> tuple[CodeViewNB00TypeLeaf, int]:
     return CodeViewNB00TypeLeaf(f"unknown_{tag:02x}", None), 1
 
 
+@cython.ccall
 def _collect_type_record_names(
-    type_definitions: tuple[CodeViewNB00TypeDefinition, ...],
+    type_definitions: object,
 ) -> tuple[str, ...]:
+    definition: object
+    leaf: object
     names: list[str] = []
     for definition in type_definitions:
         for leaf in definition.leaves:
@@ -368,11 +392,15 @@ def _collect_type_record_names(
     return tuple(dict.fromkeys(names))
 
 
+@cython.ccall
 def _collect_type_members(
-    type_definitions: tuple[CodeViewNB00TypeDefinition, ...],
+    type_definitions: object,
 ) -> tuple[CodeViewNB00TypeMember, ...]:
+    definition: object
+    leaf: object
+    leaf_index: object
     members: list[CodeViewNB00TypeMember] = []
-    seen: set[tuple[int, str, int]] = set()
+    seen: set[tuple[cython.longlong, str, cython.longlong]] = set()
     for definition in type_definitions:
         leaves = definition.leaves
         for leaf_index, leaf in enumerate(leaves[:-1]):
@@ -397,14 +425,16 @@ def _collect_type_members(
     return tuple(members)
 
 
+@cython.ccall
 def _parse_source_lines_subsection(
-    blob: bytes,
-    module: CodeViewNB00Module | None,
+    blob: object,
+    module: object,
     *,
-    load_base_linear: int,
-) -> tuple[list[str], dict[int, tuple[int, int]]]:
+    load_base_linear: cython.longlong,
+) -> tuple[list[str], dict[cython.longlong, tuple[cython.longlong, cython.longlong]]]:
+    count_offset: object
     source_files: list[str] = []
-    line_map: dict[int, tuple[int, int]] = {}
+    line_map: dict[cython.longlong, tuple[cython.longlong, cython.longlong]] = {}
     if not blob:
         return source_files, line_map
 
@@ -440,7 +470,8 @@ def _parse_source_lines_subsection(
     return source_files, line_map
 
 
-def _find_source_line_count_offset(blob: bytes, search_start: int) -> int | None:
+@cython.ccall
+def _find_source_line_count_offset(blob: object, search_start: cython.longlong) -> int | None:
     for candidate in range(search_start, min(len(blob) - 1, search_start + 16)):
         pair_count = struct.unpack_from("<H", blob, candidate)[0]
         if pair_count == 0 or pair_count > 0x4000:
@@ -450,7 +481,10 @@ def _find_source_line_count_offset(blob: bytes, search_start: int) -> int | None
     return None
 
 
-def _parse_symbol_names_subsection(blob: bytes) -> tuple[str, ...]:
+@cython.ccall
+def _parse_symbol_names_subsection(blob: object) -> tuple[str, ...]:
+    name_length: object
+    offset: object
     names: list[str] = []
     for offset, name_length in enumerate(blob):
         if name_length == 0 or name_length > 80:
@@ -468,39 +502,45 @@ def _parse_symbol_names_subsection(blob: bytes) -> tuple[str, ...]:
     return tuple(dict.fromkeys(names))
 
 
-def _is_debug_identifier_name(name: str) -> bool:
+def _is_debug_identifier_name(name: object) -> cython.bint:
     if not name:
         return False
     allowed_extra = "_$?@"
-    if not all(ch.isalnum() or ch in allowed_extra for ch in name):
+    if not all(ch.isalnum() or ch in allowed_extra for ch in iter(name)):
         return False
-    return any(ch.isalpha() or ch == "_" for ch in name)
+    return any(ch.isalpha() or ch == "_" for ch in iter(name))
 
 
 def _public_is_code_symbol(
     symbol: CodeViewNB00PublicSymbol,
     *,
-    linear: int,
-    module_ranges: tuple[tuple[tuple[int, int], int], ...],
-) -> bool:
+    linear: cython.longlong,
+    module_ranges: object,
+) -> cython.bint:
     if symbol.segment == 0:
         return True
-    return any(start <= linear < end for (start, end), _module_index in module_ranges)
+    return any(start <= linear < end for (start, end), _module_index in iter(module_ranges))
 
 
 def _synthesize_code_ranges(
-    modules: tuple[CodeViewNB00Module, ...],
-    publics: tuple[CodeViewNB00PublicSymbol, ...],
+    modules: object,
+    publics: object,
     *,
-    load_base_linear: int,
-) -> dict[int, tuple[int, int]]:
-    def _impl() -> dict[int, tuple[int, int]]:
+    load_base_linear: cython.longlong,
+) -> object:
+    def _impl() -> object:
+        module_range: object
+        index: object
+        module_index: object
+        start: object
+        starts: object
+        symbol: object
         module_ranges = {
             module.module_index: module.linear_range(load_base_linear=load_base_linear)
-            for module in modules
+            for module in iter(modules)
             if module.cs_length > 0
         }
-        by_module: dict[int, list[int]] = {}
+        by_module: dict[cython.longlong, list[cython.longlong]] = {}
         for symbol in publics:
             if symbol.segment != 0 and symbol.module_index not in module_ranges:
                 continue
@@ -510,10 +550,10 @@ def _synthesize_code_ranges(
                 continue
             by_module.setdefault(symbol.module_index, []).append(linear)
 
-        ranges: dict[int, tuple[int, int]] = {}
+        ranges: dict[cython.longlong, tuple[cython.longlong, cython.longlong]] = {}
         for module_index, starts in by_module.items():
             start_end = module_ranges[module_index][1]
-            ordered = sorted(set(starts))
+            ordered = sorted(tuple(set(starts)))
             for index, start in enumerate(ordered):
                 end = ordered[index + 1] if index + 1 < len(ordered) else start_end
                 if start < end:

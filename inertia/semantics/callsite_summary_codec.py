@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Encode complete typed callsite summaries for process transport.
 
 Layer: Recovery metadata.
@@ -13,6 +14,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import fields
 
@@ -28,6 +31,8 @@ from inertia.alias.partial_register_address_break import (
 
 from .caller_return_use_contracts import CallsiteReturnUseKind8616
 from .callsite_summary import CallsiteArgumentClass8616, CallsiteSummary8616
+import operator
+import builtins
 
 __all__ = [
     "callsite_summary_from_record_8616",
@@ -35,54 +40,58 @@ __all__ = [
 ]
 
 
-def _record_8616(value: object, label: str) -> dict[str, object]:
+def _record_8616(value: object, label: object) -> object:
     """Return one string-keyed record or reject malformed transport data."""
-    if not isinstance(value, dict) or any(not isinstance(key, str) for key in value):
+    if not isinstance(value, dict) or any(not isinstance(key, str) for key in iter(value)):
         raise ValueError(f"{label} must be an object")
     return value
 
 
-def _int_8616(value: object, label: str) -> int:
+@cython.ccall
+def _int_8616(value: object, label: object) -> cython.longlong:
     """Return one exact integer, excluding JSON booleans."""
     if not isinstance(value, int) or isinstance(value, bool):
         raise ValueError(f"{label} must be an integer")
     return value
 
 
-def _optional_int_8616(value: object, label: str) -> int | None:
+@cython.ccall
+def _optional_int_8616(value: object, label: object) -> int | None:
     """Return one optional exact integer."""
     return None if value is None else _int_8616(value, label)
 
 
-def _optional_str_8616(value: object, label: str) -> str | None:
+@cython.ccall
+def _optional_str_8616(value: object, label: object) -> object:
     """Return one optional string."""
     if value is not None and not isinstance(value, str):
         raise ValueError(f"{label} must be a string or null")
     return value
 
 
-def _tuple_value_from_record_8616(value: object, label: str) -> object:
+def _tuple_value_from_record_8616(value: object, label: object) -> object:
     """Restore nested tuple facts while refusing foreign object shapes."""
     if isinstance(value, list | tuple):
         return tuple(
-            _tuple_value_from_record_8616(item, f"{label}[]") for item in value
+            _tuple_value_from_record_8616(item, f"{label}[]") for item in iter(value)
         )
     if value is None or isinstance(value, bool | int | str):
         return value
     raise ValueError(f"{label} contains a non-transportable value")
 
 
-def _int_tuple_8616(value: object, label: str) -> tuple[int, ...]:
+def _int_tuple_8616(value: object, label: object) -> object:
     """Decode one integer tuple."""
     restored = _tuple_value_from_record_8616(value, label)
     if not isinstance(restored, tuple) or any(
-        not isinstance(item, int) or isinstance(item, bool) for item in restored
+        not isinstance(item, int) or isinstance(item, bool) for item in iter(restored)
     ):
         raise ValueError(f"{label} must contain only integers")
     return restored
 
 
-def _source_tuple_8616(value: object, label: str) -> tuple[object, ...] | None:
+@cython.ccall
+def _source_tuple_8616(value: object, label: object) -> object:
     """Decode one optional nested callsite source tuple."""
     if value is None:
         return None
@@ -94,6 +103,7 @@ def _source_tuple_8616(value: object, label: str) -> tuple[object, ...] | None:
 
 def _push_trace_from_record_8616(value: object) -> CallsitePushTrace8616:
     """Decode one predecessor push trace."""
+    sources_raw: object
     record = _record_8616(value, "callsite push trace")
     sources_raw = record.get("sources")
     if not isinstance(sources_raw, list | tuple):
@@ -102,7 +112,7 @@ def _push_trace_from_record_8616(value: object) -> CallsitePushTrace8616:
         widths=_int_tuple_8616(record.get("widths"), "callsite push trace widths"),
         sources=tuple(
             _source_tuple_8616(source, "callsite push trace source")
-            for source in sources_raw
+            for source in iter(sources_raw)
         ),
         instruction_addrs=_int_tuple_8616(
             record.get("instruction_addrs"),
@@ -117,6 +127,7 @@ def _push_trace_from_record_8616(value: object) -> CallsitePushTrace8616:
 
 def _register_join_from_record_8616(value: object) -> CallsiteRegisterJoin8616 | None:
     """Decode one optional predecessor register join."""
+    traces_raw: object
     if value is None:
         return None
     record = _record_8616(value, "callsite register join")
@@ -135,11 +146,11 @@ def _register_join_from_record_8616(value: object) -> CallsiteRegisterJoin8616 |
                 "callsite register join source",
             ),
         )
-        for item in traces_raw
-        for trace in (_record_8616(item, "callsite register join trace"),)
+        for item in iter(traces_raw)
+        for trace in iter((_record_8616(item, "callsite register join trace"),))
         if isinstance(trace.get("register"), str)
     )
-    if len(traces) != len(traces_raw):
+    if operator.ne(len(traces), len(traces_raw)):
         raise ValueError("callsite register join trace register must be a string")
     return CallsiteRegisterJoin8616(
         register=str(record.get("register")),
@@ -168,6 +179,9 @@ def _predecessor_merge_from_record_8616(
     value: object,
 ) -> CallsitePredecessorStackMerge8616 | None:
     """Decode one optional closed predecessor stack merge."""
+    alternatives_raw: object
+    sources_raw: object
+    traces_raw: object
     if value is None:
         return None
     record = _record_8616(value, "callsite predecessor merge")
@@ -184,7 +198,7 @@ def _predecessor_merge_from_record_8616(
         widths=_int_tuple_8616(record.get("widths"), "predecessor widths"),
         sources=tuple(
             _source_tuple_8616(source, "predecessor source")
-            for source in sources_raw
+            for source in iter(sources_raw)
         ),
         representative_instruction_addrs=_int_tuple_8616(
             record.get("representative_instruction_addrs"),
@@ -192,7 +206,7 @@ def _predecessor_merge_from_record_8616(
         ),
         alternative_instruction_addrs=tuple(
             _int_tuple_8616(addresses, "predecessor alternative addresses")
-            for addresses in alternatives_raw
+            for addresses in iter(alternatives_raw)
         ),
         raw_fact_count=_int_8616(record.get("raw_fact_count"), "predecessor raw count"),
         normalized_fact_count=_int_8616(
@@ -208,14 +222,17 @@ def _predecessor_merge_from_record_8616(
             record.get("failure_count"), "predecessor failure count"
         ),
         register_join=_register_join_from_record_8616(record.get("register_join")),
-        traces=tuple(_push_trace_from_record_8616(trace) for trace in traces_raw),
+        traces=tuple(_push_trace_from_record_8616(trace) for trace in iter(traces_raw)),
     )
 
 
+@cython.ccall
 def _address_break_from_record_8616(
     value: object,
 ) -> PartialRegisterAddressBreakEvidence8616 | None:
     """Decode one optional partial-register provenance break."""
+    carrier: object
+    written: object
     if value is None:
         return None
     record = _record_8616(value, "partial-register address break")
@@ -237,7 +254,8 @@ def _address_break_from_record_8616(
     return evidence
 
 
-def callsite_summary_record_8616(summary: CallsiteSummary8616) -> dict[str, object]:
+@cython.ccall
+def callsite_summary_record_8616(summary: CallsiteSummary8616) -> object:
     """Return a complete JSON-friendly record for one callsite summary."""
     if not isinstance(summary, CallsiteSummary8616):
         raise TypeError("callsite summary transport requires CallsiteSummary8616")
@@ -246,9 +264,11 @@ def callsite_summary_record_8616(summary: CallsiteSummary8616) -> dict[str, obje
 
 def callsite_summary_from_record_8616(value: object) -> CallsiteSummary8616:
     """Decode one complete callsite summary without semantic reconstruction."""
+    destination_raw: object
+    return_use_raw: object
     record = _record_8616(value, "callsite summary")
-    expected_keys = {item.name for item in fields(CallsiteSummary8616)}
-    if set(record) != expected_keys:
+    expected_keys = {item.name for item in builtins.iter(fields(CallsiteSummary8616))}
+    if operator.ne(set(record), expected_keys):
         raise ValueError("callsite summary record has an incompatible field set")
     sources_raw = record["push_arg_sources"]
     classes_raw = record["logical_arg_classes"]
@@ -260,7 +280,7 @@ def callsite_summary_from_record_8616(value: object) -> CallsiteSummary8616:
         raise ValueError("callsite logical argument classes must be an array")
     if not isinstance(breaks_raw, list | tuple):
         raise ValueError("callsite address-break evidence must be an array")
-    destination: tuple[str, int] | None = None
+    destination: object = None
     if destination_raw is not None:
         restored_destination = _tuple_value_from_record_8616(
             destination_raw, "callsite return-store destination"
@@ -310,7 +330,7 @@ def callsite_summary_from_record_8616(value: object) -> CallsiteSummary8616:
         helper_return_address_kind=str(record["helper_return_address_kind"]),
         return_shape=_optional_str_8616(record["return_shape"], "return shape"),
         push_arg_sources=tuple(
-            _source_tuple_8616(source, "callsite push source") for source in sources_raw
+            _source_tuple_8616(source, "callsite push source") for source in iter(sources_raw)
         ),
         push_arg_instruction_addrs=_int_tuple_8616(
             record["push_arg_instruction_addrs"], "push instruction addresses"
@@ -320,7 +340,7 @@ def callsite_summary_from_record_8616(value: object) -> CallsiteSummary8616:
         target_source=_source_tuple_8616(record["target_source"], "callsite target source"),
         return_use_kind=return_use,
         logical_arg_widths=_int_tuple_8616(record["logical_arg_widths"], "logical argument widths"),
-        logical_arg_classes=tuple(CallsiteArgumentClass8616(str(item)) for item in classes_raw),
+        logical_arg_classes=tuple(CallsiteArgumentClass8616(str(item)) for item in iter(classes_raw)),
         stack_cleanup_instruction_addr=_optional_int_8616(
             record["stack_cleanup_instruction_addr"], "cleanup instruction address"
         ),
@@ -331,11 +351,12 @@ def callsite_summary_from_record_8616(value: object) -> CallsiteSummary8616:
             record["return_store_instruction_addr"], "return-store instruction address"
         ),
         push_arg_address_break_evidence=tuple(
-            _address_break_from_record_8616(item) for item in breaks_raw
+            _address_break_from_record_8616(item) for item in iter(breaks_raw)
         ),
     )
 
 
-def _raise_bool_8616(label: str) -> bool:
+@cython.ccall
+def _raise_bool_8616(label: object) -> cython.bint:
     """Raise a consistent malformed-boolean error in expression contexts."""
     raise ValueError(f"{label} must be a boolean or null")

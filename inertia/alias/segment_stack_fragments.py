@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Propagate exact segment-byte identities through stack-backed IR values.
 
 Layer: Alias.
@@ -8,6 +9,8 @@ rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, replace
 
@@ -15,6 +18,8 @@ from inertia.ir.core import AddressStatus, IRAddress, IRAtom, IRInstr, IRValue, 
 from inertia.ir.segment_state_transfer import SEGMENT_REGISTER_SET
 
 from .stack_pointer_snapshots import StackFrameBase8616
+import dataclasses
+import operator
 
 __all__ = [
     "SegmentStackByteOrigin8616",
@@ -31,30 +36,31 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class SegmentStackByteOrigin8616:
     """One exact source byte as it moves through stack storage."""
 
-    saved_register: str | None
-    saved_instruction_addr: int
-    origin_byte: int
-    value_byte: int
+    saved_register: object
+    saved_instruction_addr: cython.longlong
+    origin_byte: cython.longlong
+    value_byte: cython.longlong
     stack_offset: int | None = None
     constant_byte: int | None = None
 
 
-type SegmentStackFragments8616 = frozenset[SegmentStackByteOrigin8616]
+SegmentStackFragments8616 = typing.TypeAliasType("SegmentStackFragments8616", frozenset[SegmentStackByteOrigin8616])
 
 
-def _expr_narrows_to_byte(value: IRValue) -> bool:
+def _expr_narrows_to_byte(value: IRValue) -> cython.bint:
     """Return whether typed conversion metadata keeps only value byte zero."""
-    return any(token.endswith("to8") for token in (value.expr or ()))
+    return any(token.endswith("to8") for token in iter((value.expr or ())))
 
 
+@cython.ccall
 def segment_value_fragments_8616(
     value: IRAtom | None,
-    instruction_addr: int,
-    values: dict[str | int, SegmentStackFragments8616],
+    instruction_addr: cython.longlong,
+    values: object,
 ) -> SegmentStackFragments8616:
     """Read symbolic segment-byte provenance for one typed value."""
     return register_value_fragments_8616(
@@ -67,13 +73,14 @@ def segment_value_fragments_8616(
 
 def register_value_fragments_8616(
     value: IRAtom | None,
-    instruction_addr: int,
-    values: dict[str | int, SegmentStackFragments8616],
+    instruction_addr: cython.longlong,
+    values: object,
     *,
-    tracked_registers: frozenset[str],
+    tracked_registers: object,
     constant_value: int | None = None,
 ) -> SegmentStackFragments8616:
     """Read exact byte provenance for one tracked 16-bit register value."""
+    fragments: object
     if not isinstance(value, IRValue):
         return frozenset()
     if value.space is MemSpace.CONST and value.const is not None and value.size in {1, 2}:
@@ -102,20 +109,22 @@ def register_value_fragments_8616(
     else:
         fragments = frozenset()
     if _expr_narrows_to_byte(value):
-        fragments = frozenset(fragment for fragment in fragments if fragment.value_byte == 0)
+        fragments = frozenset(fragment for fragment in iter(fragments) if fragment.value_byte == 0)
     if constant_value is not None:
         fragments = frozenset(replace(fragment, constant_byte=(constant_value >> (8 * fragment.value_byte)) & 0xFF)
-                              for fragment in fragments)
+                              for fragment in iter(fragments))
     return fragments
 
 
+@cython.ccall
 def _shift_fragments(
     fragments: SegmentStackFragments8616,
-    bits: int,
+    bits: cython.longlong,
     *,
-    left: bool,
+    left: cython.bint,
 ) -> SegmentStackFragments8616:
     """Shift byte-aligned symbolic fragments without inventing partial bytes."""
+    fragment: object
     if bits < 0 or bits % 8:
         return frozenset()
     byte_delta = bits // 8
@@ -127,22 +136,26 @@ def _shift_fragments(
     return frozenset(shifted)
 
 
+@cython.ccall
 def _merge_fragments(
     lhs: SegmentStackFragments8616,
     rhs: SegmentStackFragments8616,
 ) -> SegmentStackFragments8616:
     """Union non-conflicting byte positions for a typed OR composition."""
+    existing: object
+    fragment: object
     merged = lhs | rhs
-    positions: dict[int, SegmentStackByteOrigin8616] = {}
+    positions: dict[cython.longlong, SegmentStackByteOrigin8616] = {}
     for fragment in merged:
         existing = positions.get(fragment.value_byte)
-        if existing is not None and existing != fragment:
+        if existing is not None and operator.ne(existing, fragment):
             return frozenset()
         positions[fragment.value_byte] = fragment
     return merged
 
 
-def _stack_offset(address: IRAddress, sp_delta: int | StackFrameBase8616 | None) -> int | None:
+@cython.ccall
+def _stack_offset(address: IRAddress, sp_delta: object) -> int | None:
     """Resolve an SS frame byte from its proven SP/BP base coordinate."""
     if (
         sp_delta is None
@@ -152,7 +165,7 @@ def _stack_offset(address: IRAddress, sp_delta: int | StackFrameBase8616 | None)
     ):
         return None
     if isinstance(sp_delta, StackFrameBase8616):
-        if address.base != (sp_delta.register,):
+        if operator.ne(address.base, (sp_delta.register,)):
             return None
         return int(sp_delta.entry_sp_offset) + int(address.offset)
     if address.base != ("sp",):
@@ -162,13 +175,16 @@ def _stack_offset(address: IRAddress, sp_delta: int | StackFrameBase8616 | None)
     return int(sp_delta) + int(address.offset)
 
 
+@cython.ccall
 def stack_load_fragments_8616(
     address: IRAddress,
-    width: int,
+    width: cython.longlong,
     sp_delta: int | StackFrameBase8616 | None,
-    stack_bytes: dict[int, SegmentStackByteOrigin8616],
+    stack_bytes: object,
 ) -> SegmentStackFragments8616:
     """Load only when every requested stack byte has proven identity."""
+    fragment: object
+    offset: object
     offset = _stack_offset(address, sp_delta)
     if offset is None or width <= 0:
         return frozenset()
@@ -186,15 +202,17 @@ def store_stack_fragments_8616(
     value: IRValue,
     fragments: SegmentStackFragments8616,
     sp_delta: int | StackFrameBase8616 | None,
-    stack_bytes: dict[int, SegmentStackByteOrigin8616],
+    stack_bytes: object,
 ) -> None:
     """Overwrite exact stack bytes, retaining only fully proved fragments."""
+    offset: object
+    fragment: object
     offset = _stack_offset(address, sp_delta)
     if offset is None:
         if address.space in {MemSpace.SS, MemSpace.UNKNOWN}:
             stack_bytes.clear()
         return
-    fragment_width = max((fragment.value_byte + 1 for fragment in fragments), default=1)
+    fragment_width = max((fragment.value_byte + 1 for fragment in iter(fragments)), default=1)
     width = max(1, value.size, fragment_width)
     for byte in range(width):
         stack_bytes.pop(offset + byte, None)
@@ -203,7 +221,8 @@ def store_stack_fragments_8616(
         stack_bytes[slot] = replace(fragment, stack_offset=slot)
 
 
-def _constant_arg(instruction: IRInstr, index: int) -> int | None:
+@cython.ccall
+def _constant_arg(instruction: IRInstr, index: cython.longlong) -> int | None:
     """Read one exact integer operand from a typed IR instruction."""
     if index >= len(instruction.args):
         return None
@@ -211,9 +230,10 @@ def _constant_arg(instruction: IRInstr, index: int) -> int | None:
     return value.const if isinstance(value, IRValue) and value.space is MemSpace.CONST else None
 
 
+@cython.ccall
 def computed_segment_fragments_8616(
     instruction: IRInstr,
-    values: dict[str | int, SegmentStackFragments8616],
+    values: object,
 ) -> SegmentStackFragments8616:
     """Transfer byte provenance through lossless MOV, shift, and OR operations."""
     return computed_stack_register_fragments_8616(
@@ -223,13 +243,15 @@ def computed_segment_fragments_8616(
     )
 
 
+@cython.ccall
 def computed_stack_register_fragments_8616(
     instruction: IRInstr,
-    values: dict[str | int, SegmentStackFragments8616],
+    values: object,
     *,
-    tracked_registers: frozenset[str],
+    tracked_registers: object,
 ) -> SegmentStackFragments8616:
     """Transfer tracked register bytes through lossless typed operations."""
+    bits: object
     if instruction.addr is None or not instruction.args:
         return frozenset()
     lhs = register_value_fragments_8616(
@@ -257,26 +279,28 @@ def computed_stack_register_fragments_8616(
     return frozenset()
 
 
+@cython.ccall
 def complete_segment_restore_8616(
     fragments: SegmentStackFragments8616,
-) -> tuple[str, int, tuple[int, ...]] | None:
+) -> object:
     """Return one complete two-byte source only when every identity agrees."""
     return complete_stack_register_restore_8616(fragments)
 
 
 def complete_stack_register_restore_8616(
     fragments: SegmentStackFragments8616,
-) -> tuple[str, int, tuple[int, ...]] | None:
+) -> object:
     """Return one exact 16-bit saved-register identity from two stack bytes."""
+    saved_register: object
     if len(fragments) != 2:
         return None
-    registers = {fragment.saved_register for fragment in fragments}
-    save_sites = {fragment.saved_instruction_addr for fragment in fragments}
-    origin_bytes = {fragment.origin_byte for fragment in fragments}
-    value_bytes = {fragment.value_byte for fragment in fragments}
+    registers = {fragment.saved_register for fragment in iter(fragments)}
+    save_sites = {fragment.saved_instruction_addr for fragment in iter(fragments)}
+    origin_bytes = {fragment.origin_byte for fragment in iter(fragments)}
+    value_bytes = {fragment.value_byte for fragment in iter(fragments)}
     stack_offsets = sorted(
         fragment.stack_offset
-        for fragment in fragments
+        for fragment in iter(fragments)
         if fragment.stack_offset is not None
     )
     single_save_identity = len(registers) == 1 and len(save_sites) == 1
@@ -292,31 +316,33 @@ def complete_stack_register_restore_8616(
 
 def complete_stack_constant_8616(
     fragments: SegmentStackFragments8616,
-) -> tuple[int, int, tuple[int, ...]] | None:
+) -> object:
     """Return one exact 16-bit constant reconstructed from adjacent stack bytes."""
+    high: object
+    low: object
     if len(fragments) != 2:
         return None
-    save_sites = {fragment.saved_instruction_addr for fragment in fragments}
-    value_bytes = {fragment.value_byte for fragment in fragments}
+    save_sites = {fragment.saved_instruction_addr for fragment in iter(fragments)}
+    value_bytes = {fragment.value_byte for fragment in iter(fragments)}
     stack_offsets = sorted(
         fragment.stack_offset
-        for fragment in fragments
+        for fragment in iter(fragments)
         if fragment.stack_offset is not None
     )
     if (
         len(save_sites) != 1
         or value_bytes != {0, 1}
-        or any(fragment.constant_byte is None for fragment in fragments)
+        or any(fragment.constant_byte is None for fragment in iter(fragments))
         or len(stack_offsets) != 2
         or stack_offsets[1] - stack_offsets[0] != 1
     ):
         return None
     # Native word materialization requires low-address/low-byte agreement.
-    if any(fragment.stack_offset != stack_offsets[fragment.value_byte] for fragment in fragments):
+    if any(operator.ne(fragment.stack_offset, stack_offsets[fragment.value_byte]) for fragment in iter(fragments)):
         return None
     bytes_by_position = {
         fragment.value_byte: fragment.constant_byte
-        for fragment in fragments
+        for fragment in iter(fragments)
     }
     low = bytes_by_position[0]
     high = bytes_by_position[1]

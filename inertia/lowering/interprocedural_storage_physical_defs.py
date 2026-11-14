@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prove logical call sources from byte-executed outgoing stack stores.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import replace
 
@@ -34,6 +37,8 @@ from .interprocedural_storage_reaching_contracts import (
     PhysicalPushStoreSlice8616,
     SSAInstructionSite8616,
 )
+import operator
+import builtins
 
 __all__ = [
     "logical_push_value_8616",
@@ -42,10 +47,12 @@ __all__ = [
 ]
 
 
+@cython.ccall
 def reaching_definition_width_8616(
     definition: StorageReachingDefinition8616,
-) -> int:
+) -> cython.longlong:
     """Return one exact source-piece width from the owned definition contract."""
+    source_storage: object
     source_storage = definition.source_storage
     if source_storage is not None:
         source_width = source_storage.width
@@ -61,34 +68,39 @@ def _prior_value_definition_8616(
     """Return one prior instruction defining an exact SSA value or VEX tmp."""
     candidates = tuple(
         instr
-        for instr in site.block.instrs[: site.instr_index]
+        for instr in iter(site.block.instrs[: site.instr_index])
         if instr.dst is not None
         and (
             (
                 isinstance(value.source_tmp, int)
-                and instr.dst.source_tmp == value.source_tmp
+                and operator.eq(instr.dst.source_tmp, value.source_tmp)
             )
             or (
                 value.source_tmp is None
                 and instr.dst.space is value.space
-                and instr.dst.name == value.name
-                and instr.dst.version == value.version
-                and instr.dst.size == value.size
+                and operator.eq(instr.dst.name, value.name)
+                and operator.eq(instr.dst.version, value.version)
+                and operator.eq(instr.dst.size, value.size)
             )
         )
     )
     return candidates[0] if len(candidates) == 1 else None
 
 
+@cython.ccall
 def _logical_source_slice_8616(
     site: SSAInstructionSite8616,
     value: IRValue,
-    logical_width: int,
-    seen: frozenset[tuple[object, ...]] = frozenset(),
+    logical_width: cython.longlong,
+    seen: object = frozenset(),
     *,
-    follow_register_definitions: bool = False,
-) -> tuple[IRValue, int] | None:
+    follow_register_definitions: cython.bint = False,
+) -> object:
     """Trace one physical store value to its logical source and byte offset."""
+    definition: object
+    projection: object
+    traced: object
+    unary: object
     key = (value.space, value.name, value.version, value.source_tmp, value.size)
     if key in seen:
         return None
@@ -148,12 +160,16 @@ def _logical_source_slice_8616(
     return None
 
 
+@cython.ccall
 def _bp_affine_8616(
     site: SSAInstructionSite8616,
     value: IRValue,
-    seen: frozenset[tuple[object, ...]] = frozenset(),
-) -> tuple[int, int] | None:
+    seen: object = frozenset(),
+) -> object:
     """Resolve one structured SSA value to ``BP * coefficient + offset``."""
+    definition: object
+    left_affine: object
+    right_affine: object
     if value.space is MemSpace.REG and value.name == "bp":
         return 1, value.offset
     if isinstance(value.const, int):
@@ -187,14 +203,17 @@ def _bp_affine_8616(
     return None
 
 
+@cython.ccall
 def _captured_root_producer_8616(
     site: SSAInstructionSite8616, value: IRValue,
 ) -> IRInstr | None:
     """Authenticate an unchanged capture against its exact prior producer."""
+    definition: object
+    projection: object
     definition = _prior_value_definition_8616(site, value)
     if definition is None or definition.dst is None or value.active_unary is not None:
         return None
-    if value.size != definition.dst.size or definition.size != value.size:
+    if operator.ne(value.size, definition.dst.size) or operator.ne(definition.size, value.size):
         return None
     projection = scalar_read_projection_8616(
         read_expr=value.expr, read_bits=value.size * 8,
@@ -206,44 +225,51 @@ def _captured_root_producer_8616(
     return definition
 
 
+@cython.ccall
 def _same_logical_root_8616(
-    left: IRValue, right: IRValue, width: int,
+    left: IRValue, right: IRValue, width: cython.longlong,
     left_site: SSAInstructionSite8616, right_site: SSAInstructionSite8616,
-) -> bool:
+) -> cython.bint:
     """Bind captures to the same actual producer; compare bare roots exactly."""
+    producer: object
     if left.active_unary is not None or right.active_unary is not None:
         return False
     if left.const is not None or right.const is not None:
         mask = (1 << (width * 8)) - 1
         return bool(
             isinstance(left.const, int) and isinstance(right.const, int)
-            and left.const & mask == right.const & mask
+            and operator.eq(left.const & mask, right.const & mask)
         )
     if left.source_tmp is not None or right.source_tmp is not None:
-        if left.source_tmp is None or left.source_tmp != right.source_tmp:
+        if left.source_tmp is None or operator.ne(left.source_tmp, right.source_tmp):
             return False
         producer = _captured_root_producer_8616(left_site, left)
         return bool(
             producer is not None
             and producer is _captured_root_producer_8616(right_site, right)
-            and replace(left, version=right.version) == right
-            and left.memory_access_insn == right.memory_access_insn
+            and operator.eq(replace(left, version=right.version), right)
+            and operator.eq(left.memory_access_insn, right.memory_access_insn)
         )
-    return bool(left == right and left.memory_access_insn == right.memory_access_insn)
+    return bool(left == right and operator.eq(left.memory_access_insn, right.memory_access_insn))
 
 
 def logical_push_value_8616(
-    sites: tuple[SSAInstructionSite8616, ...],
+    sites: object,
     piece: PhysicalCallArgumentPiece8616,
     *,
-    follow_register_definitions: bool = False,
+    follow_register_definitions: cython.bint = False,
 ) -> tuple[LogicalPushValue8616 | None, CallArgumentDefinitionFailure8616 | None]:
     """Reconstruct one logical pushed value from exact physical stores."""
+    root: object
+    traced: object
+    address: object
+    site: object
+    value: object
     candidates = tuple(
         (site, site.instr.args[0], site.instr.args[1])
-        for site in sites
+        for site in iter(sites)
         if site.instr.op == "STORE"
-        and site.instr.addr == piece.push_addr
+        and operator.eq(site.instr.addr, piece.push_addr)
         and len(site.instr.args) == 2
         and isinstance(site.instr.args[0], IRAddress)
         and site.instr.args[0].space is MemSpace.SS
@@ -251,7 +277,7 @@ def logical_push_value_8616(
         and site.instr.args[0].status is AddressStatus.STABLE
         and site.instr.args[0].segment_origin is SegmentOrigin.PROVEN
         and isinstance(site.instr.args[1], IRValue)
-        and site.instr.args[0].size == site.instr.args[1].size
+        and operator.eq(site.instr.args[0].size, site.instr.args[1].size)
     )
     if not candidates:
         return None, CallArgumentDefinitionFailure8616.SOURCE_DEFINITION_NOT_FOUND
@@ -262,7 +288,7 @@ def logical_push_value_8616(
     slices: list[PhysicalPushStoreSlice8616] = []
     roots: list[IRValue] = []
     for site, address, value in ordered:
-        if address.offset != cursor or address.base_values != first_address.base_values:
+        if operator.ne(address.offset, cursor) or operator.ne(address.base_values, first_address.base_values):
             return None, CallArgumentDefinitionFailure8616.SOURCE_DEFINITION_CONFLICT
         traced = _logical_source_slice_8616(
             site,
@@ -270,20 +296,20 @@ def logical_push_value_8616(
             piece.width,
             follow_register_definitions=follow_register_definitions,
         )
-        if traced is None or traced[1] != source_offset:
+        if traced is None or operator.ne(traced[1], source_offset):
             return None, CallArgumentDefinitionFailure8616.SOURCE_DEFINITION_NOT_FOUND
         slices.append(PhysicalPushStoreSlice8616(site, address, value, source_offset))
         roots.append(traced[0])
         cursor += address.size
         source_offset += address.size
-    if source_offset != piece.width:
+    if operator.ne(source_offset, piece.width):
         return None, CallArgumentDefinitionFailure8616.SOURCE_WIDTH_CONFLICT
     if any(
         not _same_logical_root_8616(roots[0], root, piece.width, slices[0].site, item.site)
-        for root, item in zip(roots[1:], slices[1:], strict=True)
+        for root, item in builtins.iter(zip(roots[1:], slices[1:], strict=True))
     ):
         return None, CallArgumentDefinitionFailure8616.SOURCE_DEFINITION_CONFLICT
-    root = next((item for item in roots if item.size == piece.width), roots[0])
+    root = next((item for item in iter(roots) if operator.eq(item.size, piece.width)), roots[0])
     result = LogicalPushValue8616(root, piece.width, tuple(slices))
     if not result.complete:
         return None, CallArgumentDefinitionFailure8616.SOURCE_WIDTH_CONFLICT
@@ -291,13 +317,16 @@ def logical_push_value_8616(
 
 
 def resolve_physical_store_definitions_8616(
-    sites: tuple[SSAInstructionSite8616, ...],
+    sites: object,
     piece: PhysicalCallArgumentPiece8616,
 ) -> tuple[
     tuple[StorageReachingDefinition8616, ...] | None,
     CallArgumentDefinitionFailure8616 | None,
 ]:
     """Bind one logical pushed value to its exact outgoing stack-store pieces."""
+    affine: object
+    logical: object
+    logical_failure: object
     source = piece.source
     kind = source[0] if source else None
     logical, logical_failure = logical_push_value_8616(
@@ -316,7 +345,7 @@ def resolve_physical_store_definitions_8616(
             or CallArgumentDefinitionFailure8616.SOURCE_DEFINITION_NOT_FOUND,
         )
     root = logical.root
-    source_storages: tuple[StorageIdentity8616 | None, ...]
+    source_storages: object
     if kind in {
         CallsitePushSourceKind8616.IMMEDIATE,
         CallsitePushSourceKind8616.IMMEDIATE.value,
@@ -324,7 +353,7 @@ def resolve_physical_store_definitions_8616(
         if len(source) != 2 or not isinstance(source[1], int):
             return None, CallArgumentDefinitionFailure8616.SOURCE_SHAPE_CONFLICT
         mask = (1 << (piece.width * 8)) - 1
-        if root.const is None or root.const & mask != source[1] & mask:
+        if root.const is None or operator.ne(root.const & mask, source[1] & mask):
             return None, CallArgumentDefinitionFailure8616.SOURCE_DEFINITION_NOT_FOUND
         source_storages = (None,) * len(logical.slices)
     elif kind in {
@@ -337,7 +366,7 @@ def resolve_physical_store_definitions_8616(
         if (
             affine is None
             or affine[0] != 1
-            or affine[1] & 0xFFFF != source[1] & 0xFFFF
+            or operator.ne(affine[1] & 0xFFFF, source[1] & 0xFFFF)
         ):
             return None, CallArgumentDefinitionFailure8616.SOURCE_DEFINITION_NOT_FOUND
         source_storages = tuple(
@@ -353,8 +382,8 @@ def resolve_physical_store_definitions_8616(
                     segment_origin=SegmentOrigin.PROVEN,
                 ),
             )
-            for item in logical.slices
-            for address, offset in ((item.address, item.source_offset),)
+            for item in iter(logical.slices)
+            for address, offset in iter(((item.address, item.source_offset),))
         )
     elif kind in {
         CallsitePushSourceKind8616.EXPR,
@@ -372,13 +401,13 @@ def resolve_physical_store_definitions_8616(
             source_storage=source_storage,
             logical_push=logical,
         )
-        for item, source_storage in zip(
+        for item, source_storage in builtins.iter(zip(
             logical.slices,
             source_storages,
             strict=True,
-        )
-        for site, value in ((item.site, item.value),)
+        ))
+        for site, value in iter(((item.site, item.value),))
     )
-    if any(not definition.is_complete for definition in definitions):
+    if any(not definition.is_complete for definition in iter(definitions)):
         return None, CallArgumentDefinitionFailure8616.SOURCE_DEFINITION_NOT_FOUND
     return definitions, None

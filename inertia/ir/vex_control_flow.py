@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Import terminal VEX control flow into typed x86-16 IR instructions.
 
 Layer: IR.
@@ -10,6 +11,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable, Iterable
 from typing import Any, Protocol, cast
@@ -54,10 +57,11 @@ class _IRArtifactBlock8616(Protocol):
 class _IRArtifactInstruction8616(Protocol):
     """Typed IR instruction fields read for terminal return classification."""
 
-    op: str
+    op: object
     addr: int | None
 
 
+@cython.ccall
 def _constant_target_8616(expr: object) -> int | None:
     """Return an exact integer target from a VEX constant expression."""
     try:
@@ -67,12 +71,13 @@ def _constant_target_8616(expr: object) -> int | None:
         return None
 
 
+@cython.ccall
 def terminal_control_flow_instr_8616(
     vex: object,
     instruction_addr: int | None,
     *,
     resolve_target: Callable[[object], IRValue] | None = None,
-    retain_boring_transfer: bool = False,
+    retain_boring_transfer: cython.bint = False,
     proven_target: int | None = None,
     block_addr: int | None = None,
     statement_count: int | None = None,
@@ -96,6 +101,7 @@ def terminal_control_flow_instr_8616(
     consumers can bind a symbolic control operand to this exact block's
     imported ``next`` expression.
     """
+    target: object
     try:
         boundary = cast(_VexBlock8616, vex)
         jumpkind = str(boundary.jumpkind)
@@ -133,7 +139,8 @@ def terminal_control_flow_instr_8616(
     )
 
 
-def terminal_ret_instruction_addrs_8616(artifact: object) -> frozenset[int]:
+@cython.ccall
+def terminal_ret_instruction_addrs_8616(artifact: object) -> frozenset[cython.longlong]:
     """Return addresses of block-terminal RET instructions in one IR artifact.
 
     A block-terminal RET instruction is the control-flow owner of that block's
@@ -141,11 +148,12 @@ def terminal_ret_instruction_addrs_8616(artifact: object) -> frozenset[int]:
     without integer instruction addresses contribute no addresses; callers must
     treat that absence as absence of proof, never as an empty machine return.
     """
+    block: object
     try:
         blocks = tuple(cast(_IRArtifactBlocks8616, artifact).blocks)
     except AttributeError:
         return frozenset()
-    addresses: set[int] = set()
+    addresses: set[cython.longlong] = set()
     for block in blocks:
         try:
             instructions = tuple(block.instrs)

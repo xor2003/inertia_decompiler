@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Store-to-load forwarding within proven alias storage domains.
 
 Layer: Widening.
@@ -9,6 +10,8 @@ CLI/reporting evidence.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -16,12 +19,16 @@ from inertia.alias.alias_model_impl import AliasStorageFacts
 from inertia.lowering.c_ast_utils import _unwrap_statements_8616
 from inertia.semantics.alias_query import describe_alias_storage
 from inertia.semantics.expression_analysis import _unwrap_c_casts
+import dataclasses
+import operator
 
 __all__ = ["_widening_store_to_load_forwarding_8616"]
 
 
+@cython.ccall
 def _iter_switch_case_bodies_8616(cases: object) -> tuple[object, ...]:
     """Read switch cases through the dynamic third-party angr C AST boundary."""
+    case: object
     if cases is None:
         return ()
     if isinstance(cases, dict):
@@ -36,6 +43,7 @@ def _iter_switch_case_bodies_8616(cases: object) -> tuple[object, ...]:
     return tuple(bodies)
 
 
+@cython.ccall
 def _addr_expr_from_deref(expr: object) -> object:
     """Extract address expressions through the dynamic third-party angr C AST boundary."""
     from angr.analyses.decompiler.structured_codegen import c as structured_c
@@ -49,8 +57,10 @@ def _addr_expr_from_deref(expr: object) -> object:
     return expr
 
 
-def _is_deref_write(stmt: object) -> bool:
+@cython.ccall
+def _is_deref_write(stmt: object) -> cython.bint:
     """Check pointer stores through the dynamic third-party angr C AST boundary."""
+    lhs: object
     from angr.analyses.decompiler.structured_codegen import c as structured_c
 
     if not isinstance(stmt, structured_c.CAssignment):
@@ -60,15 +70,19 @@ def _is_deref_write(stmt: object) -> bool:
     return bool(isinstance(lhs, structured_c.CUnaryOp))
 
 
-def _is_deref_read(rhs: object) -> bool:
+@cython.ccall
+def _is_deref_read(rhs: object) -> cython.bint:
     """Check pointer loads through the dynamic third-party angr C AST boundary."""
     from angr.analyses.decompiler.structured_codegen import c as structured_c
 
     return bool(isinstance(rhs, structured_c.CUnaryOp))
 
 
+@cython.ccall
 def _structural_hash(expr: object) -> str:
     """Create a structural hash across the dynamic third-party angr C AST boundary."""
+    off: object
+    var: object
     from angr.analyses.decompiler.structured_codegen import c as structured_c
 
     if isinstance(expr, structured_c.CVariable):
@@ -84,8 +98,11 @@ def _structural_hash(expr: object) -> str:
     return str(id(expr))
 
 
-def _addr_key(addr_expr: object) -> str | None:
+@cython.ccall
+def _addr_key(addr_expr: object) -> object:
     """Create an alias key across a dynamic compatibility boundary."""
+    domain: object
+    identity: object
     facts: AliasStorageFacts = describe_alias_storage(addr_expr)
     domain = facts.domain
     identity = facts.identity
@@ -98,14 +115,16 @@ def _addr_key(addr_expr: object) -> str | None:
     return f"{domain_repr}:{identity_repr}:{structural}"
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class _ForwardingScan8616:
     """Mutable store-to-load forwarding state across one structured AST walk."""
 
-    changed: bool = False
+    changed: cython.bint = False
 
+    @cython.ccall
     def walk_statements(self, statements_obj: object) -> None:
         """Walk statements through the dynamic third-party angr C AST boundary."""
+        stmt: object
         stmts = _unwrap_statements_8616(statements_obj)
         # Map addr_key → stored_value for pending stores
         pending_stores: dict[str, object] = {}
@@ -119,12 +138,17 @@ class _ForwardingScan8616:
 
             self.walk_node(stmt)
 
+    @cython.ccall
     def _forward_assignment(
         self,
         stmt: object,
-        pending_stores: dict[str, object],
+        pending_stores: object,
     ) -> None:
         """Forward proven stores into reads and record new pointer stores."""
+        key: object
+        lhs: object
+        replacement: object
+        rhs: object
         from angr.analyses.decompiler.structured_codegen import c as structured_c
 
         if not isinstance(stmt, structured_c.CAssignment):
@@ -149,8 +173,12 @@ class _ForwardingScan8616:
             if key is not None and rhs is not None:
                 pending_stores[key] = _unwrap_c_casts(rhs)
 
+    @cython.ccall
     def walk_node(self, node: object) -> None:
         """Walk nested nodes through the dynamic third-party angr C AST boundary."""
+        body: object
+        case_body: object
+        cond: object
         if node is None:
             return
         if hasattr(node, "statements"):
@@ -166,6 +194,7 @@ class _ForwardingScan8616:
         if hasattr(node, "default"):
             self.walk_node(getattr(node, "default", None))
 
+    @cython.ccall
     def _walk_attr_children(self, node: object) -> None:
         """Recurse into the node's named structural child attributes.
 
@@ -173,6 +202,8 @@ class _ForwardingScan8616:
         expose different child slots. Missing slots have no child to visit;
         no storage identity or forwarding evidence is inferred from absence.
         """
+        child: object
+        attr: object
         for attr in (
             "condition",
             "cond",
@@ -191,7 +222,8 @@ class _ForwardingScan8616:
                 self.walk_node(child)
 
 
-def _widening_store_to_load_forwarding_8616(codegen: object) -> bool:
+@cython.ccall
+def _widening_store_to_load_forwarding_8616(codegen: object) -> cython.bint:
     """Forward stored values to subsequent loads within the same block.
 
     Pattern:
@@ -205,6 +237,7 @@ def _widening_store_to_load_forwarding_8616(codegen: object) -> bool:
     Returns True if any load was forwarded.
     The codegen and C AST nodes cross a dynamic third-party angr boundary.
     """
+    cfunc: object
     cfunc = getattr(codegen, "cfunc", None)
     if cfunc is None:
         return False
@@ -214,7 +247,8 @@ def _widening_store_to_load_forwarding_8616(codegen: object) -> bool:
     return scan.changed
 
 
-def _has_side_effects_stmt(stmt: object) -> bool:
+@cython.ccall
+def _has_side_effects_stmt(stmt: object) -> cython.bint:
     """Check if a statement has side effects that invalidate memory forwarding."""
     from angr.analyses.decompiler.structured_codegen import c as structured_c
 
@@ -223,28 +257,29 @@ def _has_side_effects_stmt(stmt: object) -> bool:
     return bool(isinstance(stmt, structured_c.CReturn))
 
 
-def _is_same_expr(a: object, b: object) -> bool:
+@cython.ccall
+def _is_same_expr(a: object, b: object) -> cython.bint:
     """Check if two expressions are structurally identical across the dynamic third-party angr boundary."""
     from angr.analyses.decompiler.structured_codegen import c as structured_c
 
     if type(a) is not type(b):
         return False
     if isinstance(a, structured_c.CVariable):
-        return getattr(a, "variable", None) is getattr(b, "variable", None) and getattr(a, "offset", None) == getattr(
+        return getattr(a, "variable", None) is getattr(b, "variable", None) and operator.eq(getattr(a, "offset", None), getattr(
             b, "offset", None
-        )
+        ))
     if isinstance(a, structured_c.CConstant):
-        return getattr(a, "value", None) == getattr(b, "value", None)
+        return operator.eq(getattr(a, "value", None), getattr(b, "value", None))
     if isinstance(a, structured_c.CBinaryOp):
         rhs_binary = b
         return (
-            a.op == getattr(rhs_binary, "op", None)
+            operator.eq(a.op, getattr(rhs_binary, "op", None))
             and _is_same_expr(a.lhs, getattr(rhs_binary, "lhs", None))
             and _is_same_expr(a.rhs, getattr(rhs_binary, "rhs", None))
         )
     if isinstance(a, structured_c.CUnaryOp):
         rhs_unary = b
-        return a.op == getattr(rhs_unary, "op", None) and _is_same_expr(
+        return operator.eq(a.op, getattr(rhs_unary, "op", None)) and _is_same_expr(
             a.operand, getattr(rhs_unary, "operand", None)
         )
     return a is b

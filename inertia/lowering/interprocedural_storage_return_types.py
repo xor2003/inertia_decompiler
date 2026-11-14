@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify interprocedural return storage from exact typed conditions.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -47,6 +50,8 @@ from .interprocedural_storage_return_type_contracts import (
     ReturnStorageTypeResult8616,
     ReturnStorageTypeVerdict8616,
 )
+import dataclasses
+import operator
 
 __all__ = [
     "ReturnPointerAliasStep8616",
@@ -58,21 +63,22 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _RegisterRange8616:
     """Canonical byte range and alias identity for one register storage."""
 
-    offset: int
-    width: int
+    offset: cython.longlong
+    width: cython.longlong
     domain: DomainKey
     view: View
 
 
+@cython.ccall
 def _refused_result_8616(
     failure: ReturnStorageTypeFailure8616,
     *,
     verdict: ReturnStorageTypeVerdict8616 = ReturnStorageTypeVerdict8616.UNKNOWN_REFUSE,
-    normalized: bool = False,
+    normalized: cython.bint = False,
     signedness: StorageTrialSignedness8616 | None = None,
     condition: ConditionIR | None = None,
 ) -> ReturnStorageTypeResult8616:
@@ -91,8 +97,12 @@ def _refused_result_8616(
     )
 
 
+@cython.ccall
 def _register_range_8616(storage: StorageIdentity8616) -> _RegisterRange8616 | None:
     """Resolve one exact register identity through the Alias-owned domain map."""
+    base_offset: object
+    domain: object
+    view: object
     if not storage.is_exact or storage.kind is not StorageIdentityKind8616.REGISTER:
         return None
     domain = register_domain_for_name(storage.register)
@@ -111,57 +121,62 @@ def _register_range_8616(storage: StorageIdentity8616) -> _RegisterRange8616 | N
     )
 
 
-def _byte_aligned_view_8616(view: View, storage: StorageIdentity8616) -> bool:
+@cython.ccall
+def _byte_aligned_view_8616(view: View, storage: StorageIdentity8616) -> cython.bint:
     """Return whether one register view is a byte-aligned exact-width piece."""
     return bool(
         view.bit_offset % 8 == 0
         and view.bit_width % 8 == 0
-        and storage.width == view.bit_width // 8
+        and operator.eq(storage.width, view.bit_width // 8)
     )
 
 
+@cython.ccall
 def _is_exact_register_value_8616(
     value: object,
     register_range: _RegisterRange8616,
-) -> bool:
+) -> cython.bint:
     """Return whether a typed operand names exactly the output register view."""
     if (
         not isinstance(value, IRValue)
         or value.space is not MemSpace.REG
-        or value.offset != register_range.offset
-        or value.size != register_range.width
+        or operator.ne(value.offset, register_range.offset)
+        or operator.ne(value.size, register_range.width)
     ):
         return False
     if value.name is None:
         return True
     return bool(
-        register_domain_for_name(value.name) == register_range.domain
-        and register_view_for_name(value.name) == register_range.view
+        operator.eq(register_domain_for_name(value.name), register_range.domain)
+        and operator.eq(register_view_for_name(value.name), register_range.view)
     )
 
 
 def _condition_uses_output_8616(
     condition: ConditionIR,
     register_range: _RegisterRange8616,
-) -> bool:
+) -> cython.bint:
     """Return whether exactly one canonical condition operand is the output."""
-    operands = (condition.lhs,) if condition.is_zero_test else (condition.lhs, condition.rhs)
+    operands = tuple((condition.lhs,)) if condition.is_zero_test else tuple((condition.lhs, condition.rhs))
     return sum(
         _is_exact_register_value_8616(operand, register_range)
-        for operand in operands
+        for operand in iter(operands)
     ) == 1
 
 
-def _condition_matches_witness_8616(condition: ConditionIR, witness: int) -> bool:
+@cython.ccall
+def _condition_matches_witness_8616(condition: ConditionIR, witness: cython.longlong) -> cython.bint:
     """Return whether a condition retains the exact observed use instruction."""
     return bool(
-        condition.producer_insn == witness
-        or condition.operand_bind_insn == witness
+        operator.eq(condition.producer_insn, witness)
+        or operator.eq(condition.operand_bind_insn, witness)
     )
 
 
+@cython.ccall
 def _unique_conditions_8616(conditions: Sequence[ConditionIR]) -> tuple[ConditionIR, ...]:
     """Deduplicate equivalent cached projections while preserving source order."""
+    condition: object
     unique: list[ConditionIR] = []
     for condition in conditions:
         if condition not in unique:
@@ -169,6 +184,7 @@ def _unique_conditions_8616(conditions: Sequence[ConditionIR]) -> tuple[Conditio
     return tuple(unique)
 
 
+@cython.ccall
 def _proven_scalar_result_8616(
     signedness: StorageTrialSignedness8616,
     *,
@@ -192,11 +208,15 @@ def _proven_scalar_result_8616(
     )
 
 
+@cython.ccall
 def _classify_byte_extension_8616(
     fact: CallerReturnUseFact8616,
-    output_storages: tuple[StorageIdentity8616, ...],
+    output_storages: object,
 ) -> ReturnStorageTypeResult8616:
     """Classify an exact AL result promoted to AX before its scalar use."""
+    extension: object
+    register_range: object
+    signedness: object
     if len(output_storages) != 1:
         return _refused_result_8616(
             ReturnStorageTypeFailure8616.SPLIT_OUTPUT_UNSUPPORTED,
@@ -205,7 +225,7 @@ def _classify_byte_extension_8616(
     register_range = _register_range_8616(output_storages[0])
     if (
         register_range is None
-        or register_range.domain != AX
+        or operator.ne(register_range.domain, AX)
         or register_range.width != 1
         or register_range.view.bit_offset != 0
         or fact.observed_value_view is not AxValueView8616.AX
@@ -235,12 +255,18 @@ def _classify_byte_extension_8616(
     )
 
 
+@cython.ccall
 def classify_return_storage_type_8616(
     fact: CallerReturnUseFact8616,
-    output_storages: tuple[StorageIdentity8616, ...],
+    output_storages: object,
     conditions: Sequence[ConditionIR],
 ) -> ReturnStorageTypeResult8616:
     """Prove a return type only from an exact typed caller condition witness."""
+    condition: object
+    condition_refusal: object
+    range_refusal: object
+    register_range: object
+    witness: object
     if not fact.classified:
         return _refused_result_8616(ReturnStorageTypeFailure8616.RETURN_USE_UNKNOWN)
     if fact.verdict is not CallerReturnUseVerdict8616.USED:
@@ -274,10 +300,12 @@ def classify_return_storage_type_8616(
     return _signedness_result_8616(condition, register_range)
 
 
+@cython.ccall
 def _output_register_range_8616(
-    output_storages: tuple[StorageIdentity8616, ...],
+    output_storages: object,
 ) -> tuple[_RegisterRange8616 | None, ReturnStorageTypeResult8616 | None]:
     """Resolve the single exact AX output register range or its refusal."""
+    register_range: object
     if not output_storages:
         return None, _refused_result_8616(
             ReturnStorageTypeFailure8616.OUTPUT_STORAGE_UNKNOWN,
@@ -295,7 +323,7 @@ def _output_register_range_8616(
             verdict=ReturnStorageTypeVerdict8616.CONFLICT,
             normalized=True,
         )
-    if register_range.domain != AX:
+    if operator.ne(register_range.domain, AX):
         return None, _refused_result_8616(
             ReturnStorageTypeFailure8616.OUTPUT_CARRIER_UNSUPPORTED,
             normalized=True,
@@ -305,17 +333,17 @@ def _output_register_range_8616(
 
 def _witness_condition_8616(
     conditions: Sequence[ConditionIR],
-    witness: int,
+    witness: cython.longlong,
     register_range: _RegisterRange8616,
 ) -> tuple[ConditionIR | None, ReturnStorageTypeResult8616 | None]:
     """Select the unique condition matching the witness and output range."""
     matching = _unique_conditions_8616(
         tuple(
             condition
-            for condition in conditions
+            for condition in iter(conditions)
             if _condition_matches_witness_8616(condition, witness)
             and _condition_uses_output_8616(condition, register_range)
-            and condition.width_bits == register_range.width * 8
+            and operator.eq(condition.width_bits, register_range.width * 8)
         )
     )
     if not matching:
@@ -332,6 +360,7 @@ def _witness_condition_8616(
     return matching[0], None
 
 
+@cython.ccall
 def _signedness_result_8616(
     condition: ConditionIR,
     register_range: _RegisterRange8616,

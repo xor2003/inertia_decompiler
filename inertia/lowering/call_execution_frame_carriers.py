@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Prune SP execution carriers consumed by a materialized machine call.
 
 Layer: Types/Lowering.
@@ -13,6 +14,8 @@ Runtime SP consumption refuses any external parent-register view, including call
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -37,6 +40,9 @@ from inertia.semantics.expression_analysis import (
 from .call_execution_frame_runtime import is_runtime_sp_call_decrement_8616
 from .gp_register_state import runtime_gp_expression_view_8616
 from .physical_registers import PhysicalRegisterView8616, physical_register_view_8616
+import dataclasses
+import operator
+import builtins
 
 
 class CallExecutionFrameCarrierStatus8616(StrEnum):
@@ -47,16 +53,16 @@ class CallExecutionFrameCarrierStatus8616(StrEnum):
     MATERIALIZED = "materialized"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallExecutionFrameCarrierStats8616:
     """Closed evidence counts for consumed-call SP carrier pruning."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
-    removed_statement_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
+    removed_statement_count: cython.longlong = 0
 
     def merged(
         self,
@@ -75,7 +81,7 @@ class CallExecutionFrameCarrierStats8616:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class CallExecutionFrameCarrierResult8616:
     """Outcome and evidence report for one consumed machine call."""
 
@@ -83,7 +89,7 @@ class CallExecutionFrameCarrierResult8616:
     stats: CallExecutionFrameCarrierStats8616
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class _AssignmentLocation8616:
     """One direct assignment child and its mutable statement container."""
 
@@ -95,7 +101,7 @@ class _AssignmentLocation8616:
 class _ArchitectureSurface8616(Protocol):
     """Architecture register map consumed at the dynamic angr boundary."""
 
-    registers: dict[str, tuple[int, int]]
+    registers: object
 
 
 class _ProjectSurface8616(Protocol):
@@ -117,6 +123,7 @@ class _CodegenSurface8616(Protocol):
     cfunc: _CFunctionSurface8616
 
 
+@cython.ccall
 def _assignment_8616(statement: object) -> CAssignment | None:
     """Unwrap one standard angr expression-statement assignment container."""
     if isinstance(statement, CAssignment):
@@ -128,10 +135,14 @@ def _assignment_8616(statement: object) -> CAssignment | None:
     return None
 
 
+@cython.ccall
 def _locations_8616(root: object) -> tuple[_AssignmentLocation8616, ...]:
     """Collect unique direct assignment locations from the structured tree."""
+    assignment: object
+    node: object
+    statement: object
     locations: list[_AssignmentLocation8616] = []
-    seen_statements: set[int] = set()
+    seen_statements: set[cython.longlong] = set()
     for node in _iter_c_nodes_deep_8616(root):
         if not isinstance(node, CStatements):
             continue
@@ -146,18 +157,20 @@ def _locations_8616(root: object) -> tuple[_AssignmentLocation8616, ...]:
     return tuple(locations)
 
 
+@cython.ccall
 def _identity_count_8616(
     root: object,
     expected: VirtualValueIdentity8616,
-) -> int:
+) -> cython.longlong:
     """Count unique virtual-value occurrences with one structured identity."""
-    seen: set[int] = set()
+    node: object
+    seen: set[cython.longlong] = set()
     count = 0
     for node in _iter_c_nodes_deep_8616(root):
         if id(node) in seen:
             continue
         seen.add(id(node))
-        if describe_virtual_value_identity_8616(node) == expected:
+        if operator.eq(describe_virtual_value_identity_8616(node), expected):
             count += 1
     return count
 
@@ -165,12 +178,13 @@ def _identity_count_8616(
 def _direct_successor_contains_call_8616(
     location: _AssignmentLocation8616,
     call: CFunctionCall,
-) -> bool:
+) -> cython.bint:
     """Prove that one consumed call immediately follows its SP carrier."""
+    index: object
     statements = location.container.statements
     try:
         index = next(
-            idx for idx, statement in enumerate(statements) if statement is location.statement
+            idx for idx, statement in builtins.iter(enumerate(statements)) if statement is location.statement
         )
     except StopIteration:
         return False
@@ -178,18 +192,19 @@ def _direct_successor_contains_call_8616(
         return False
     successor = statements[index + 1]
     return successor is call or any(
-        node is call for node in _iter_c_nodes_deep_8616(successor)
+        node is call for node in builtins.iter(_iter_c_nodes_deep_8616(successor))
     )
 
 
+@cython.ccall
 def _result_8616(
     status: CallExecutionFrameCarrierStatus8616,
     *,
-    raw: int = 0,
-    normalized: int = 0,
-    classified: int = 0,
-    materialized: int = 0,
-    removed: int = 0,
+    raw: cython.longlong = 0,
+    normalized: cython.longlong = 0,
+    classified: cython.longlong = 0,
+    materialized: cython.longlong = 0,
+    removed: cython.longlong = 0,
 ) -> CallExecutionFrameCarrierResult8616:
     """Build one fail-closed evidence result."""
     stats = CallExecutionFrameCarrierStats8616(
@@ -211,10 +226,13 @@ def prune_consumed_call_execution_frame_carriers_8616(
     codegen: object,
     call: CFunctionCall,
     *,
-    callsite_addr: int,
-    return_frame_width: int,
+    callsite_addr: cython.longlong,
+    return_frame_width: cython.longlong,
 ) -> CallExecutionFrameCarrierResult8616:
     """Delete one exact virtual or runtime-GP SP carrier for ``call``."""
+    base_identity: object
+    decremented_identity: object
+    location: object
     boundary = cast(_CodegenSurface8616, codegen)
     try:
         root = boundary.cfunc.statements
@@ -225,15 +243,15 @@ def prune_consumed_call_execution_frame_carriers_8616(
     locations = _locations_8616(root)
     virtual_raw_locations = tuple(
         location
-        for location in locations
-        if location.assignment.tags.get("ins_addr") == callsite_addr
+        for location in iter(locations)
+        if operator.eq(location.assignment.tags.get("ins_addr"), callsite_addr)
         and isinstance(location.assignment.rhs, CBinaryOp)
         and location.assignment.rhs.op == "Sub"
     )
     runtime_raw_locations = tuple(
         location
-        for location in locations
-        if location.assignment.tags.get("ins_addr") == callsite_addr
+        for location in iter(locations)
+        if operator.eq(location.assignment.tags.get("ins_addr"), callsite_addr)
         and (view := runtime_gp_expression_view_8616(location.assignment.lhs))
         is not None
         and view.parent_name == "esp"
@@ -246,7 +264,7 @@ def prune_consumed_call_execution_frame_carriers_8616(
     if runtime_raw_locations:
         normalized_runtime = tuple(
             location
-            for location in runtime_raw_locations
+            for location in iter(runtime_raw_locations)
             if is_runtime_sp_call_decrement_8616(
                 location.assignment,
                 return_frame_width,
@@ -256,11 +274,11 @@ def prune_consumed_call_execution_frame_carriers_8616(
             len(runtime_raw_locations) == 1
             and not virtual_raw_locations
             and len(normalized_runtime) == 1
-            and sum(1 for node in _iter_c_nodes_deep_8616(root) if node is call) == 1
+            and sum(1 for node in builtins.iter(_iter_c_nodes_deep_8616(root)) if node is call) == 1
             and _direct_successor_contains_call_8616(normalized_runtime[0], call)
             and not any(
                 (view := runtime_gp_expression_view_8616(node)) is not None and view.parent_name == "esp"
-                for node in _iter_c_nodes_deep_8616(root, seen={id(normalized_runtime[0].statement)})
+                for node in builtins.iter(_iter_c_nodes_deep_8616(root, seen={id(normalized_runtime[0].statement)}))
             )
         ):
             return _result_8616(
@@ -294,12 +312,12 @@ def prune_consumed_call_execution_frame_carriers_8616(
         decremented_identity = describe_virtual_value_identity_8616(assignment.lhs)
         if not (
             isinstance(decrement, CConstant)
-            and decrement.value == return_frame_width
-            and physical_register_view_8616(rhs.lhs) == sp_view
-            and physical_register_view_8616(assignment.lhs) == sp_view
+            and operator.eq(decrement.value, return_frame_width)
+            and operator.eq(physical_register_view_8616(rhs.lhs), sp_view)
+            and operator.eq(physical_register_view_8616(assignment.lhs), sp_view)
             and base_identity is not None
             and decremented_identity is not None
-            and base_identity != decremented_identity
+            and operator.ne(base_identity, decremented_identity)
         ):
             continue
         normalized.append((location, base_identity, decremented_identity))
@@ -313,18 +331,16 @@ def prune_consumed_call_execution_frame_carriers_8616(
     pre_location, base_identity, decremented_identity = normalized[0]
     restore_locations = tuple(
         location
-        for location in locations
+        for location in iter(locations)
         if location is not pre_location
         and location.assignment.tags.get("dephi") is True
-        and describe_virtual_value_identity_8616(location.assignment.lhs)
-        == base_identity
-        and describe_virtual_value_identity_8616(location.assignment.rhs)
-        == decremented_identity
-        and physical_register_view_8616(location.assignment.lhs) == sp_view
-        and physical_register_view_8616(location.assignment.rhs) == sp_view
+        and operator.eq(describe_virtual_value_identity_8616(location.assignment.lhs), base_identity)
+        and operator.eq(describe_virtual_value_identity_8616(location.assignment.rhs), decremented_identity)
+        and operator.eq(physical_register_view_8616(location.assignment.lhs), sp_view)
+        and operator.eq(physical_register_view_8616(location.assignment.rhs), sp_view)
     )
     call_occurrences = sum(
-        1 for node in _iter_c_nodes_deep_8616(root) if node is call
+        1 for node in builtins.iter(_iter_c_nodes_deep_8616(root)) if node is call
     )
     if not (
         len(restore_locations) == 1

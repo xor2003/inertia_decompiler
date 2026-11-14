@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Project resolved CFG evidence for direct stack move linear prefixes.
 
 Layer: Structuring.
@@ -15,6 +16,8 @@ work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -24,14 +27,17 @@ from .direct_stack_move_loop_evidence import (
     boundary_tuple_8616,
     comparable_address_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class DirectStackMoveLinearCfgSnapshot8616:
     """Complete in-function block membership and successor projection."""
 
-    instructions_by_block: dict[int, tuple[int, ...]]
-    successors_by_block: dict[int, tuple[int, ...]]
+    instructions_by_block: object
+    successors_by_block: object
 
 
 class _GraphBoundary8616(Protocol):
@@ -46,28 +52,35 @@ class _GraphBoundary8616(Protocol):
 class _FunctionBoundary8616(Protocol):
     """Typed subset of the dynamic angr Function contract consumed here."""
 
-    has_unresolved_jumps: bool
+    has_unresolved_jumps: cython.bint
     block_addrs_set: Iterable[object]
     blocks: Iterable[object]
     transition_graph: _GraphBoundary8616
 
 
+@cython.ccall
 def _node_address_8616(node: object) -> int | None:
     """Read one address from a dynamic angr graph or block node."""
+    address: object
     # Dynamic boundary: angr graph nodes and blocks use optional address fields.
     address = getattr(node, "addr", None)
     return address if isinstance(address, int) and not isinstance(address, bool) else None
 
 
+@cython.ccall
 def _instruction_addresses_8616(
     project: object,
     block: object,
-    reference_addr: int,
-) -> tuple[int, ...]:
+    reference_addr: cython.longlong,
+) -> tuple[cython.longlong, ...]:
     """Return normalized decoded instruction addresses for one angr block."""
+    address: object
+    capstone: object
+    instruction: object
+    wrapper: object
     # Dynamic boundary: angr blocks expose Capstone wrappers dynamically.
     capstone = getattr(block, "capstone", None)
-    addresses: list[int] = []
+    addresses: list[cython.longlong] = []
     for wrapper in boundary_tuple_8616(getattr(capstone, "insns", ()) or ()):
         instruction = getattr(wrapper, "insn", wrapper)
         address = getattr(instruction, "address", None)
@@ -76,12 +89,18 @@ def _instruction_addresses_8616(
     return tuple(dict.fromkeys(addresses))
 
 
+@cython.ccall
 def direct_stack_move_linear_cfg_snapshot_8616(
     project: object,
     function: object,
-    reference_addr: int,
+    reference_addr: cython.longlong,
 ) -> DirectStackMoveLinearCfgSnapshot8616 | None:
     """Project a complete resolved in-function CFG for one move fact."""
+    block_set: object
+    instructions_by_block: object
+    node_by_addr: object
+    successors_by_block: object
+    surface: object
     # Dynamic boundary: this cast documents the angr Function fields consumed.
     boundary = cast(_FunctionBoundary8616, function)
     try:
@@ -116,12 +135,10 @@ def direct_stack_move_linear_cfg_snapshot_8616(
     )
 
 
+@cython.ccall
 def _cfg_surface_8616(
     boundary: _FunctionBoundary8616,
-) -> (
-    tuple[tuple[object, ...], tuple[object, ...], _GraphBoundary8616, tuple[object, ...]]
-    | None
-):
+) -> object:
     """Fetch the raw block/instruction/graph surfaces from the function."""
     try:
         return (
@@ -136,32 +153,35 @@ def _cfg_surface_8616(
 
 def _proven_block_set_8616(
     project: object,
-    raw_block_addrs: tuple[object, ...],
-    reference_addr: int,
-) -> frozenset[int] | None:
+    raw_block_addrs: object,
+    reference_addr: cython.longlong,
+) -> object:
     """Return the unique comparable block set or refuse."""
     if not raw_block_addrs or any(
         not isinstance(address, int) or isinstance(address, bool)
-        for address in raw_block_addrs
+        for address in iter(raw_block_addrs)
     ):
         return None
     block_addrs = tuple(
         comparable_address_8616(project, cast(int, address), reference_addr)
-        for address in raw_block_addrs
+        for address in iter(raw_block_addrs)
     )
-    if len(set(block_addrs)) != len(block_addrs):
+    if operator.ne(len(set(block_addrs)), len(block_addrs)):
         return None
     return frozenset(block_addrs)
 
 
+@cython.ccall
 def _node_map_8616(
     project: object,
-    graph_nodes: tuple[object, ...],
-    block_set: frozenset[int],
-    reference_addr: int,
-) -> dict[int, object] | None:
+    graph_nodes: object,
+    block_set: object,
+    reference_addr: cython.longlong,
+) -> object:
     """Map each proven block address to its unique graph node."""
-    node_by_addr: dict[int, object] = {}
+    address: object
+    node: object
+    node_by_addr: dict[cython.longlong, object] = {}
     for node in graph_nodes:
         address = _node_address_8616(node)
         if address is None:
@@ -171,7 +191,7 @@ def _node_map_8616(
             if comparable in node_by_addr:
                 return None
             node_by_addr[comparable] = node
-    if frozenset(node_by_addr) != block_set:
+    if operator.ne(frozenset(node_by_addr), block_set):
         return None
     return node_by_addr
 
@@ -179,17 +199,19 @@ def _node_map_8616(
 def _successor_map_8616(
     project: object,
     source_graph: _GraphBoundary8616,
-    node_by_addr: dict[int, object],
-    block_set: frozenset[int],
-    reference_addr: int,
-) -> dict[int, tuple[int, ...]] | None:
+    node_by_addr: object,
+    block_set: object,
+    reference_addr: cython.longlong,
+) -> object:
     """Project exact in-set CFG successors per block."""
-    successors_by_block: dict[int, tuple[int, ...]] = {}
+    source_addr: object
+    source_node: object
+    successors_by_block: dict[cython.longlong, tuple[cython.longlong, ...]] = {}
     try:
         for source_addr, source_node in node_by_addr.items():
             successors = tuple(
                 comparable_address_8616(project, target_addr, reference_addr)
-                for target in source_graph.successors(source_node)
+                for target in builtins.iter(source_graph.successors(source_node))
                 if (target_addr := _node_address_8616(target)) is not None
                 and comparable_address_8616(project, target_addr, reference_addr)
                 in block_set
@@ -200,14 +222,17 @@ def _successor_map_8616(
     return successors_by_block
 
 
+@cython.ccall
 def _instruction_map_8616(
     project: object,
-    blocks: tuple[object, ...],
-    block_set: frozenset[int],
-    reference_addr: int,
-) -> dict[int, tuple[int, ...]] | None:
+    blocks: object,
+    block_set: object,
+    reference_addr: cython.longlong,
+) -> object:
     """Project decoded instruction addresses per proven block."""
-    instructions_by_block: dict[int, tuple[int, ...]] = {}
+    raw_addr: object
+    block: object
+    instructions_by_block: dict[cython.longlong, tuple[cython.longlong, ...]] = {}
     for block in blocks:
         raw_addr = _node_address_8616(block)
         if raw_addr is None:
@@ -220,34 +245,37 @@ def _instruction_map_8616(
             block,
             reference_addr,
         )
-    if frozenset(instructions_by_block) != block_set:
+    if operator.ne(frozenset(instructions_by_block), block_set):
         return None
     return instructions_by_block
 
 
 def _instruction_block_8616(
     snapshot: DirectStackMoveLinearCfgSnapshot8616,
-    instruction_addr: int,
+    instruction_addr: cython.longlong,
 ) -> int | None:
     """Return the unique block containing one decoded instruction."""
     owners = tuple(
         block_addr
-        for block_addr, instructions in snapshot.instructions_by_block.items()
+        for block_addr, instructions in builtins.iter(snapshot.instructions_by_block.items())
         if instruction_addr in instructions
     )
     return owners[0] if len(owners) == 1 else None
 
 
+@cython.ccall
 def linear_cfg_successor_proven_8616(
     snapshot: DirectStackMoveLinearCfgSnapshot8616,
-    move_addr: int,
-    following_addr: int,
-) -> bool:
+    move_addr: cython.longlong,
+    following_addr: cython.longlong,
+) -> cython.bint:
     """Return whether one statement follows in the same or sole successor block."""
+    following_block: object
+    move_block: object
     move_block = _instruction_block_8616(snapshot, move_addr)
     following_block = _instruction_block_8616(snapshot, following_addr)
     if move_block is None or following_block is None:
         return False
-    if move_block == following_block:
+    if operator.eq(move_block, following_block):
         return move_addr < following_addr
-    return snapshot.successors_by_block.get(move_block, ()) == (following_block,)
+    return operator.eq(snapshot.successors_by_block.get(move_block, ()), (following_block,))

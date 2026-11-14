@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed decisions for evidence-backed structured control-flow guards.
 
 Layer: Structuring.
@@ -11,6 +12,7 @@ rewrite cleanup, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import cython
 
 from enum import Enum
 

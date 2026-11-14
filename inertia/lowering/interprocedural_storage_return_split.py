@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify split DX:AX returns from exact typed condition chains.
 
 Layer: Types/Lowering.
@@ -9,6 +10,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Sequence
 
@@ -49,17 +52,20 @@ from .interprocedural_storage_return_type_contracts import (
     ReturnStorageTypeVerdict8616,
 )
 from .return_witness_source import distinct_return_witness_sources_8616
+import operator
+import builtins
 
 __all__ = ["classify_split_return_storage_8616"]
 
 
+@cython.ccall
 def _refused_result_8616(
     failure: ReturnStorageTypeFailure8616,
     *,
     verdict: ReturnStorageTypeVerdict8616 = (
         ReturnStorageTypeVerdict8616.UNKNOWN_REFUSE
     ),
-    normalized: bool = False,
+    normalized: cython.bint = False,
 ) -> ReturnStorageTypeResult8616:
     """Build one atomic split-return refusal with closed counters."""
     return ReturnStorageTypeResult8616(
@@ -76,10 +82,13 @@ def _refused_result_8616(
     )
 
 
+@cython.ccall
 def _output_pieces_8616(
-    storages: tuple[StorageIdentity8616, ...],
-) -> dict[DomainKey, StorageIdentity8616] | None:
+    storages: object,
+) -> object:
     """Resolve exactly one full-word AX piece and one full-word DX piece."""
+    domain: object
+    storage: object
     if len(storages) != 2:
         return None
     pieces: dict[DomainKey, StorageIdentity8616] = {}
@@ -88,10 +97,11 @@ def _output_pieces_8616(
         if domain is None:
             return None
         pieces[domain] = storage
-    return pieces if set(pieces) == {AX, DX} else None
+    return pieces if operator.eq(set(pieces), {AX, DX}) else None
 
 
-def _exact_word_register_8616(storage: StorageIdentity8616) -> bool:
+@cython.ccall
+def _exact_word_register_8616(storage: StorageIdentity8616) -> cython.bint:
     """Return whether one storage is an exact full-word register piece."""
     return bool(
         storage.is_exact
@@ -100,11 +110,13 @@ def _exact_word_register_8616(storage: StorageIdentity8616) -> bool:
     )
 
 
+@cython.ccall
 def _full_word_ax_dx_domain_8616(
     storage: StorageIdentity8616,
-    pieces: dict[DomainKey, StorageIdentity8616],
+    pieces: object,
 ) -> DomainKey | None:
     """Return the exact AX/DX domain for one full-word register piece."""
+    domain: object
     domain = register_domain_for_name(storage.register)
     view = register_view_for_name(storage.register)
     if (
@@ -122,30 +134,30 @@ def _piece_use_8616(
     artifact: SSAFunctionArtifact,
     storage: StorageIdentity8616,
     condition: ConditionIR,
-    callsite_addr: int,
-) -> tuple[StorageUseEvidence8616 | None, bool]:
+    callsite_addr: cython.longlong,
+) -> tuple[StorageUseEvidence8616 | None, cython.bint]:
     """Resolve exact direct reads of one SSA value at one physical condition site."""
     producer = condition.producer_insn
     if not isinstance(producer, int):
         return None, False
     candidates = tuple(
         (block.addr, index, producer)
-        for block in artifact.blocks
-        for index, instruction in enumerate(block.instrs)
-        if instruction.addr == producer
+        for block in iter(artifact.blocks)
+        for index, instruction in builtins.iter(enumerate(block.instrs))
+        if operator.eq(instruction.addr, producer)
         and any(
             split_return_register_matches_8616(argument, storage)
             and isinstance(argument, IRValue) and argument.expr is None
-            for argument in instruction.args
+            for argument in iter(instruction.args)
         )
     )
     if len(candidates) != 1:
-        sites = {(block_addr, instr_addr) for block_addr, _, instr_addr in candidates}
+        sites = {(block_addr, instr_addr) for block_addr, _, instr_addr in iter(candidates)}
         values = tuple(
             argument
-            for block in artifact.blocks
-            for instruction in block.instrs if instruction.addr == producer
-            for argument in instruction.args
+            for block in iter(artifact.blocks)
+            for instruction in iter(block.instrs) if operator.eq(instruction.addr, producer)
+            for argument in iter(instruction.args)
             if isinstance(argument, IRValue) and argument.expr is None
             and split_return_register_matches_8616(argument, storage)
         )
@@ -153,7 +165,7 @@ def _piece_use_8616(
             len(sites) != 1
             or not distinct_return_witness_sources_8616(artifact, candidates)
             or not values or values[0].version is None
-            or any(value != values[0] for value in values)
+            or any(operator.ne(value, values[0]) for value in iter(values))
         ):
             return None, bool(candidates)
     block_addr, instr_index, instr_addr = candidates[0]
@@ -168,10 +180,13 @@ def _piece_use_8616(
     )
 
 
+@cython.ccall
 def _definition_source_keys_8616(
     definitions: CallOutputDefinitionResult8616,
-) -> tuple[tuple[object, ...], ...] | None:
+) -> object:
     """Return exact source-storage keys or refuse an absent output source."""
+    source_storage: object
+    definition: object
     keys: list[tuple[object, ...]] = []
     for definition in definitions.definitions:
         source_storage = definition.source_storage
@@ -183,23 +198,24 @@ def _definition_source_keys_8616(
 
 def _definitions_match_outputs_8616(
     definitions: CallOutputDefinitionResult8616,
-    output_storages: tuple[StorageIdentity8616, ...],
-) -> bool:
+    output_storages: object,
+) -> cython.bint:
     """Return whether complete definitions name every output storage exactly."""
     definition_source_keys = _definition_source_keys_8616(definitions)
     return bool(
         definitions.complete
-        and len(definitions.definitions) == len(output_storages)
-        and definition_source_keys == tuple(storage.key for storage in output_storages)
+        and operator.eq(len(definitions.definitions), len(output_storages))
+        and operator.eq(definition_source_keys, tuple(storage.key for storage in iter(output_storages)))
     )
 
 
+@cython.ccall
 def _split_return_prelude_8616(
     artifact: SSAFunctionArtifact,
     fact: CallerReturnUseFact8616,
 ) -> ReturnStorageTypeResult8616 | None:
     """Return the refusal when caller identity or return use is unproven."""
-    if artifact.function_addr != fact.caller_addr:
+    if operator.ne(artifact.function_addr, fact.caller_addr):
         return _refused_result_8616(
             ReturnStorageTypeFailure8616.CALLER_IDENTITY_CONFLICT,
             verdict=ReturnStorageTypeVerdict8616.CONFLICT,
@@ -219,14 +235,22 @@ def _split_return_prelude_8616(
     return None
 
 
+@cython.ccall
 def classify_split_return_storage_8616(
     artifact: SSAFunctionArtifact,
     fact: CallerReturnUseFact8616,
     definitions: CallOutputDefinitionResult8616,
-    output_storages: tuple[StorageIdentity8616, ...],
+    output_storages: object,
     conditions: Sequence[ConditionIR],
 ) -> ReturnStorageTypeResult8616:
     """Prove a split scalar return from one exact wide condition chain."""
+    candidate: object
+    pieces: object
+    prelude: object
+    use: object
+    witness: object
+    domain: object
+    storage: object
     prelude = _split_return_prelude_8616(artifact, fact)
     if prelude is not None:
         return prelude

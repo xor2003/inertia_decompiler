@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Types/lowering.
 
 Responsibility: materialize typed storage-object records from accepted hints and retained access evidence.
@@ -8,17 +9,21 @@ Do not recover semantics from COD, source, assembly, or rendered C text
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+import dataclasses
+import builtins
 
-type BaseKey = tuple[object, ...]
-type AccessTraitObjectHint = Any
-type AccessTraitEvidenceProfile = Any
+BaseKey = typing.TypeAliasType("BaseKey", tuple[object, ...])
+AccessTraitObjectHint = typing.TypeAliasType("AccessTraitObjectHint", Any)
+AccessTraitEvidenceProfile = typing.TypeAliasType("AccessTraitEvidenceProfile", Any)
 
-type StableHints = dict[BaseKey, AccessTraitObjectHint]
-type EvidenceProfiles = dict[BaseKey, AccessTraitEvidenceProfile]
+StableHints = typing.TypeAliasType("StableHints", dict[BaseKey, AccessTraitObjectHint])
+EvidenceProfiles = typing.TypeAliasType("EvidenceProfiles", dict[BaseKey, AccessTraitEvidenceProfile])
 
 __all__ = [
     "StorageObjectArtifact",
@@ -30,31 +35,31 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class StorageObjectRecord:
     """Stable storage-object classification derived from access evidence."""
 
     base_key: BaseKey
-    object_kind: str
-    candidate_offsets: tuple[int, ...]
+    object_kind: object
+    candidate_offsets: object
 
-    def is_member_like(self) -> bool:
+    def is_member_like(self) -> cython.bint:
         """Return whether this record represents a field/member access."""
         return self.object_kind == "member"
 
-    def is_array_like(self) -> bool:
+    def is_array_like(self) -> cython.bint:
         """Return whether this record represents indexed array-like access."""
         return self.object_kind == "array"
 
-    def is_stack_like(self) -> bool:
+    def is_stack_like(self) -> cython.bint:
         """Return whether this record represents stack-object access."""
         return self.object_kind == "stack"
 
-    def is_structural(self) -> bool:
+    def is_structural(self) -> cython.bint:
         """Return whether this record can guide structural cleanup."""
         return self.object_kind in {"member", "array", "stack"}
 
-    def should_rename_stack(self) -> bool:
+    def should_rename_stack(self) -> cython.bint:
         """Return whether stack naming may follow this structural record."""
         return self.is_structural()
 
@@ -65,25 +70,29 @@ class StorageObjectRecord:
         return self.candidate_offsets[0]
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class StorageObjectRefusal:
     """Reason storage-object evidence was refused for one base key."""
 
     base_key: BaseKey
-    reason: str
+    reason: object
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class StorageObjectArtifact:
     """Storage-object records plus explicit refusal reasons."""
 
-    records: dict[BaseKey, StorageObjectRecord]
-    refusals: dict[BaseKey, StorageObjectRefusal]
+    records: object
+    refusals: object
 
 
+@cython.ccall
 def _record_from_hint(hint: AccessTraitObjectHint) -> StorageObjectRecord:
-    offsets: list[int] = []
-    seen: set[int] = set()
+    _count: object
+    _size: object
+    offset: object
+    offsets: list[cython.longlong] = []
+    seen: set[cython.longlong] = set()
     for offset, _size, _count in hint.candidates:
         if offset in seen:
             continue
@@ -96,18 +105,22 @@ def _record_from_hint(hint: AccessTraitObjectHint) -> StorageObjectRecord:
     )
 
 
+@cython.ccall
 def build_storage_object_records_from_hints(hints: StableHints) -> dict[BaseKey, StorageObjectRecord]:
     """Build stable storage-object records from accepted access hints."""
-    return {base_key: _record_from_hint(hint) for base_key, hint in hints.items()}
+    return {base_key: _record_from_hint(hint) for base_key, hint in builtins.iter(hints.items())}
 
 
+@cython.ccall
 def build_storage_object_artifact(
-    traits: dict[str, dict[BaseKey, object]],
+    traits: object,
     *,
     build_access_trait_evidence_profiles: Callable[[dict[str, dict[BaseKey, object]]], EvidenceProfiles],
     build_stable_access_object_hints: Callable[[dict[str, dict[BaseKey, object]]], StableHints],
 ) -> StorageObjectArtifact:
     """Build storage-object records and refusal reasons from access traits."""
+    base_key: object
+    profile: object
     profiles = build_access_trait_evidence_profiles(traits)
     hints = build_stable_access_object_hints(traits)
     records = build_storage_object_records_from_hints(hints)
@@ -124,11 +137,13 @@ def build_storage_object_artifact(
     return StorageObjectArtifact(records=records, refusals=refusals)
 
 
+@cython.ccall
 def storage_object_record_for_key(
-    records: dict[BaseKey, StorageObjectRecord] | StorageObjectArtifact,
-    base_key: BaseKey | None,
+    records: object,
+    base_key: object,
 ) -> StorageObjectRecord | None:
     """Return a storage-object record for a full or stack-shortened base key."""
+    record: object
     record_map = records.records if isinstance(records, StorageObjectArtifact) else records
     if base_key is None:
         return None

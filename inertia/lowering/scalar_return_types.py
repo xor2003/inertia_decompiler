@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Materialize scalar function return types from typed return expressions.
 
 Layer: Types/lowering.
@@ -12,6 +13,8 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import contextlib
 from collections.abc import Mapping, Sequence
@@ -25,6 +28,8 @@ from archinfo import Arch
 
 from inertia.lowering.annotations import ANNOTATION_KEY
 from inertia.lowering.c_ast_utils import _iter_c_nodes_deep_8616, _same_c_expression_8616
+import dataclasses
+import operator
 
 __all__ = [
     "ScalarReturnTypeEvidenceStatus8616",
@@ -38,7 +43,7 @@ __all__ = [
 class _ProjectSurface8616(Protocol):
     """Third-party project fields used by return type materialization."""
 
-    _inertia_scalar_return_type_evidence_8616: dict[int, ScalarReturnTypeEvidence8616]
+    _inertia_scalar_return_type_evidence_8616: object
     arch: Arch
     kb: object
 
@@ -53,7 +58,7 @@ class _CodegenSurface8616(Protocol):
 class _CFunctionSurface8616(Protocol):
     """angr CFunction fields synchronized with typed return evidence."""
 
-    addr: int
+    addr: cython.longlong
     body: object
     statements: object
     functy: object
@@ -68,7 +73,7 @@ class _KnowledgeBaseSurface8616(Protocol):
 class _FunctionManagerSurface8616(Protocol):
     """Third-party function lookup used to synchronize prototypes."""
 
-    def function(self, *, addr: int, create: bool) -> _FunctionSurface8616 | None:
+    def function(self, *, addr: cython.longlong, create: cython.bint) -> _FunctionSurface8616 | None:
         """Return one existing function without creating it."""
 
 
@@ -79,22 +84,22 @@ class _FunctionSurface8616(Protocol):
     prototype: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ScalarReturnTypeStats8616:
     """Evidence accounting for scalar return type materialization."""
 
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ScalarReturnTypeResult8616:
     """Result of joining typed return expressions into one prototype."""
 
-    changed: bool
+    changed: cython.bint
     stats: ScalarReturnTypeStats8616
 
 
@@ -106,32 +111,35 @@ class ScalarReturnTypeEvidenceStatus8616(Enum):
     REFUSED = "refused"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class ScalarReturnTypeEvidence8616:
     """Durable signed-return evidence keyed by one exact function address."""
 
-    function_addr: int
-    expressions: tuple[CExpression, ...]
+    function_addr: cython.longlong
+    expressions: object
     stats: ScalarReturnTypeStats8616
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every collected fact was classified and materialized."""
         count = len(self.expressions)
         return (
             count > 0
-            and self.stats.raw_fact_count == count
-            and self.stats.normalized_fact_count == count
-            and self.stats.classified_fact_count == count
-            and self.stats.materialized_count == count
+            and operator.eq(self.stats.raw_fact_count, count)
+            and operator.eq(self.stats.normalized_fact_count, count)
+            and operator.eq(self.stats.classified_fact_count, count)
+            and operator.eq(self.stats.materialized_count, count)
             and self.stats.failure_count == 0
         )
 
 
+@cython.ccall
 def _return_expressions_8616(cfunc: _CFunctionSurface8616) -> tuple[object, ...]:
     """Return each unique emitted return expression, including missing values."""
+    node: object
+    root: object
     expressions: list[object] = []
-    seen: set[int] = set()
+    seen: set[cython.longlong] = set()
     roots: list[object] = []
     with contextlib.suppress(AttributeError):
         roots.append(cfunc.statements)
@@ -146,7 +154,8 @@ def _return_expressions_8616(cfunc: _CFunctionSurface8616) -> tuple[object, ...]
     return tuple(expressions)
 
 
-def _is_signed_word_expression_8616(expression: object) -> bool:
+@cython.ccall
+def _is_signed_word_expression_8616(expression: object) -> cython.bint:
     """Return whether one expression has explicit signed 16-bit scalar type."""
     if not isinstance(expression, CExpression):
         return False
@@ -160,14 +169,16 @@ def _is_signed_word_expression_8616(expression: object) -> bool:
 
 def record_scalar_return_type_evidence_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
     expressions: Sequence[object],
 ) -> ScalarReturnTypeEvidenceStatus8616:
     """Publish complete signed return facts across Structuring codegen rebuilds."""
-    normalized = tuple(expression for expression in expressions if isinstance(expression, CExpression))
+    existing: object
+    expression: object
+    normalized = tuple(expression for expression in iter(expressions) if isinstance(expression, CExpression))
     count = len(expressions)
-    if count == 0 or len(normalized) != count or not all(
-        _is_signed_word_expression_8616(expression) for expression in normalized
+    if count == 0 or operator.ne(len(normalized), count) or not all(
+        _is_signed_word_expression_8616(expression) for expression in iter(normalized)
     ):
         return ScalarReturnTypeEvidenceStatus8616.REFUSED
     stats = ScalarReturnTypeStats8616(count, count, count, count, 0)
@@ -183,10 +194,10 @@ def record_scalar_return_type_evidence_8616(
         for expression in evidence.expressions:
             if not any(
                 _same_c_expression_8616(expression, prior)
-                for prior in merged
+                for prior in iter(merged)
             ):
                 merged.append(expression)
-        if len(merged) == len(existing.expressions):
+        if operator.eq(len(merged), len(existing.expressions)):
             return ScalarReturnTypeEvidenceStatus8616.UNCHANGED
         count = len(merged)
         evidence = ScalarReturnTypeEvidence8616(
@@ -203,10 +214,11 @@ def record_scalar_return_type_evidence_8616(
 
 def _matching_recorded_return_evidence_8616(
     project: _ProjectSurface8616,
-    function_addr: int,
+    function_addr: cython.longlong,
     expressions: Sequence[CExpression],
 ) -> ScalarReturnTypeEvidence8616 | None:
     """Select complete durable evidence matching every current return value."""
+    evidence: object
     try:
         evidence = project._inertia_scalar_return_type_evidence_8616.get(function_addr)
     except AttributeError:
@@ -218,15 +230,17 @@ def _matching_recorded_return_evidence_8616(
     covered = all(
         any(
             _same_c_expression_8616(expression, proven)
-            for proven in evidence.expressions
+            for proven in iter(evidence.expressions)
         )
-        for expression in expressions
+        for expression in iter(expressions)
     )
     return evidence if covered else None
 
 
-def _has_explicit_prototype_8616(function: _FunctionSurface8616 | None) -> bool:
+@cython.ccall
+def _has_explicit_prototype_8616(function: object) -> cython.bint:
     """Return whether source/debug annotations own the function prototype."""
+    annotations: object
     if function is None or not isinstance(function.info, Mapping):
         return False
     annotations = function.info.get(ANNOTATION_KEY)
@@ -238,6 +252,8 @@ def materialize_scalar_return_type_8616(
     codegen: object,
 ) -> ScalarReturnTypeResult8616:
     """Promote a guessed unsigned word result from complete signed evidence."""
+    function: object
+    recorded_evidence: object
     project_surface = cast(_ProjectSurface8616, project)
     codegen_surface = cast(_CodegenSurface8616, codegen)
     try:
@@ -249,15 +265,15 @@ def materialize_scalar_return_type_8616(
         codegen_surface._inertia_scalar_return_type_result_8616 = result
         return result
     raw_count = len(expressions)
-    normalized_count = sum(isinstance(expression, CExpression) for expression in expressions)
-    direct_classified_count = sum(_is_signed_word_expression_8616(expression) for expression in expressions)
+    normalized_count = sum(isinstance(expression, CExpression) for expression in iter(expressions))
+    direct_classified_count = sum(_is_signed_word_expression_8616(expression) for expression in iter(expressions))
     try:
         knowledge_base = cast(_KnowledgeBaseSurface8616, project_surface.kb)
         function = knowledge_base.functions.function(addr=cfunc.addr, create=False)
     except AttributeError:
         function = None
     normalized_expressions = tuple(
-        expression for expression in expressions if isinstance(expression, CExpression)
+        expression for expression in iter(expressions) if isinstance(expression, CExpression)
     )
     recorded_evidence = _matching_recorded_return_evidence_8616(
         project_surface,

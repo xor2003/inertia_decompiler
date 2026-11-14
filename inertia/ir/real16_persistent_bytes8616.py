@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Mutable facade over an immutable ``immutables.Map`` root for path memory.
 
 Layer: IR (invocation/control proof).
@@ -21,11 +22,15 @@ boundaries — never a cached proof of anything about the bytes themselves.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import ItemsView, Iterator, KeysView, Mapping, MutableMapping, ValuesView
 from typing import cast
 
 from immutables import Map as _ImmutableMap
+import operator
+import builtins
 
 #: Sentinel for cross-type mapping equality — a missing key must never
 #: compare equal to a stored value, even a malformed ``None``.
@@ -72,7 +77,7 @@ class PersistentBytes8616(MutableMapping[int, int]):
         """
         # An external Mapping is folded into a fresh immutable root, so
         # the caller can never mutate this facade through its own dict.
-        self._root: _ImmutableMap[int, int] = (
+        self._root: _ImmutableMap[cython.longlong, cython.longlong] = (
             _ImmutableMap()
             if root is None
             else root if type(root) is _ImmutableMap else _ImmutableMap(root)
@@ -83,11 +88,11 @@ class PersistentBytes8616(MutableMapping[int, int]):
         self._bounds_low: int | None = None
         self._bounds_high: int | None = None
 
-    def __getitem__(self, key: int) -> int:
+    def __getitem__(self, key: cython.longlong) -> cython.longlong:
         """Return the byte value stored at ``key``."""
         return cast(int, self._root[key])
 
-    def __setitem__(self, key: int, value: int) -> None:
+    def __setitem__(self, key: cython.longlong, value: cython.longlong) -> None:
         """Store ``value`` at ``key``, replacing only this facade's root.
 
         Envelope maintenance is folded into the per-key write the mapping
@@ -98,6 +103,8 @@ class PersistentBytes8616(MutableMapping[int, int]):
         one integer store re-anchors the envelope on that single key. A
         failed store raises before any metadata or root changes.
         """
+        high: object
+        low: object
         new_root = self._root.set(key, value)
         if self._bounds_root is self._root:
             if type(key) is int:
@@ -118,7 +125,7 @@ class PersistentBytes8616(MutableMapping[int, int]):
             self._bounds_root = new_root
         self._root = new_root
 
-    def __delitem__(self, key: int) -> None:
+    def __delitem__(self, key: cython.longlong) -> None:
         """Drop ``key``; ``KeyError`` on absence matches ``dict``.
 
         Deletion keeps the tracked endpoints loose — a removed endpoint
@@ -137,19 +144,19 @@ class PersistentBytes8616(MutableMapping[int, int]):
             self._bounds_high = None
         self._root = new_root
 
-    def __iter__(self) -> Iterator[int]:
+    def __iter__(self) -> Iterator[cython.longlong]:
         """Iterate stored byte addresses via the root's native iterator."""
         return iter(self._root)
 
-    def __len__(self) -> int:
+    def __len__(self) -> cython.longlong:
         """Return the number of stored bytes."""
         return len(self._root)
 
-    def __contains__(self, key: object) -> bool:
+    def __contains__(self, key: object) -> cython.bint:
         """Return whether ``key`` holds a stored byte."""
         return key in self._root
 
-    def items(self) -> ItemsView[int, int]:
+    def items(self) -> ItemsView[cython.longlong, cython.longlong]:
         """Return a live ``(key, value)`` view bound to this facade.
 
         The view re-reads the facade's current root at iteration, so a
@@ -157,7 +164,7 @@ class PersistentBytes8616(MutableMapping[int, int]):
         """
         return _LiveItemsView8616(self)
 
-    def keys(self) -> KeysView[int]:
+    def keys(self) -> KeysView[cython.longlong]:
         """Return a live key view bound to this facade.
 
         ``KeysView`` already iterates the facade itself, so the view is
@@ -165,7 +172,7 @@ class PersistentBytes8616(MutableMapping[int, int]):
         """
         return KeysView(self)
 
-    def values(self) -> ValuesView[int]:
+    def values(self) -> ValuesView[cython.longlong]:
         """Return a live value view bound to this facade."""
         return _LiveValuesView8616(self)
 
@@ -180,7 +187,7 @@ class PersistentBytes8616(MutableMapping[int, int]):
         self._bounds_low = None
         self._bounds_high = None
 
-    def address_envelope_8616(self) -> tuple[int, int] | None:
+    def address_envelope_8616(self) -> object:
         """Return a conservative half-open ``(low, high)`` covering keys.
 
         When the metadata is anchored to the CURRENT root identity and at
@@ -221,7 +228,7 @@ class PersistentBytes8616(MutableMapping[int, int]):
         clone._bounds_high = self._bounds_high
         return clone
 
-    def adopt_8616(self, other: Mapping[int, int]) -> None:
+    def adopt_8616(self, other: Mapping[cython.longlong, cython.longlong]) -> None:
         """Point this facade at ``other``'s root (in-place ``assign``).
 
         Adopting a canonical facade adopts its envelope metadata verbatim —
@@ -242,7 +249,7 @@ class PersistentBytes8616(MutableMapping[int, int]):
         self._bounds_low = None
         self._bounds_high = None
 
-    def __eq__(self, other: object) -> bool:
+    def __eq__(self, other: object) -> cython.bint:
         """Compare stored bytes; content equality with any Mapping.
 
         Identical immutable roots are trivially equal; foreign mappings
@@ -250,21 +257,21 @@ class PersistentBytes8616(MutableMapping[int, int]):
         ``None``-shaped value can never fake presence.
         """
         if type(other) is PersistentBytes8616:
-            return self._root is other._root or self._root == other._root
+            return self._root is other._root or operator.eq(self._root, other._root)
         if type(other) is _ImmutableMap:
-            return cast(bool, self._root == other)
+            return cast(bool, operator.eq(self._root, other))
         if isinstance(other, Mapping):
-            if len(self._root) != len(other):
+            if operator.ne(len(self._root), len(other)):
                 return False
             return all(
-                self._root.get(key, _MISSING_8616) == value
-                for key, value in other.items()
+                operator.eq(self._root.get(key, _MISSING_8616), value)
+                for key, value in builtins.iter(other.items())
             )
         return NotImplemented
 
     __hash__ = None  # type: ignore[assignment]
 
-    def __repr__(self) -> str:
+    def __repr__(self) -> object:
         """Render like the equivalent ``dict`` for diagnostics."""
         return repr(dict(self._root.items()))
 
@@ -284,7 +291,7 @@ class _LiveItemsView8616(ItemsView[int, int]):
         super().__init__(owner)
         self._owner = owner
 
-    def __iter__(self) -> Iterator[tuple[int, int]]:
+    def __iter__(self) -> Iterator[tuple[cython.longlong, cython.longlong]]:
         """Iterate pairs of the owner's current root."""
         return iter(self._owner._root.items())
 
@@ -299,12 +306,13 @@ class _LiveValuesView8616(ValuesView[int]):
         super().__init__(owner)
         self._owner = owner
 
-    def __iter__(self) -> Iterator[int]:
+    def __iter__(self) -> Iterator[cython.longlong]:
         """Iterate values of the owner's current root."""
         return iter(self._owner._root.values())
 
 
-def canonical_known_root_8616(candidate: object) -> bool:
+@cython.ccall
+def canonical_known_root_8616(candidate: object) -> cython.bint:
     """Return whether ``candidate`` is a canonical facade on a native root.
 
     Strict admission predicate for fused-eligibility guards: only the
@@ -318,6 +326,7 @@ def canonical_known_root_8616(candidate: object) -> bool:
     )
 
 
+@cython.ccall
 def persistent_bytes_producers_8616() -> tuple[object, ...]:
     """Every helper-owned identity fused walks must authenticate.
 

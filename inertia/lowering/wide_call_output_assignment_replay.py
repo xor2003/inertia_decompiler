@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Reconcile regenerated carriers for proven wide call-output assignments.
 
 Layer: Types/Lowering.
@@ -10,6 +11,8 @@ Do not infer semantics from symbols, source names, or untagged shape.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 import logging
 import os
@@ -42,6 +45,9 @@ from .wide_call_output_assignment_contracts import (
     WideCallOutputAssignmentVerdict8616,
     wide_call_output_pair_authenticated_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 _EVIDENCE_TAG_8616 = "inertia_x86_16_wide_call_output_assignment"
 _LOGGER = logging.getLogger(__name__)
@@ -80,21 +86,21 @@ class WideCallOutputAuthoritativeOwnershipStatus8616(StrEnum):
     INVALID_ARTIFACT = "invalid_artifact"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideCallOutputReplayResult8616:
     """Result of checking one canonical assignment and any raw duplicates."""
 
     status: WideCallOutputReplayStatus8616
-    duplicate_count: int = 0
+    duplicate_count: cython.longlong = 0
     failure: WideCallOutputReplayFailure8616 | None = None
 
     @property
-    def changed(self) -> bool:
+    def changed(self) -> cython.bint:
         """Return whether exact regenerated duplicate statements were removed."""
         return self.status is WideCallOutputReplayStatus8616.PRUNED
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class WideCallOutputAuthoritativeOwnership8616:
     """Typed ownership result for a duplicate direct-stack projection."""
 
@@ -102,7 +108,7 @@ class WideCallOutputAuthoritativeOwnership8616:
     fact: WideCallOutputAssignmentFact8616
 
     @property
-    def blocks_legacy_materialization(self) -> bool:
+    def blocks_legacy_materialization(self) -> cython.bint:
         """Return whether the dedicated owner published a conclusive outcome."""
         return self.status not in {
             WideCallOutputAuthoritativeOwnershipStatus8616.NOT_PUBLISHED,
@@ -110,7 +116,7 @@ class WideCallOutputAuthoritativeOwnership8616:
         }
 
     @property
-    def materialized(self) -> bool:
+    def materialized(self) -> cython.bint:
         """Return whether the dedicated owner already emitted the assignment."""
         return self.status is WideCallOutputAuthoritativeOwnershipStatus8616.MATERIALIZED
 
@@ -119,7 +125,7 @@ class _ProjectCodegenBoundary8616(Protocol):
     """Owned callsite inventory used to prove regenerated call identity."""
 
     project: object
-    _inertia_callsite_summary_inventory_8616: dict[int, CallsiteSummary8616]
+    _inertia_callsite_summary_inventory_8616: object
 
 
 class _WideCallOutputArtifactBoundary8616(Protocol):
@@ -131,15 +137,15 @@ class _WideCallOutputArtifactBoundary8616(Protocol):
 def classify_authoritative_wide_call_output_projection_8616(
     codegen: object,
     *,
-    callsite_addr: int,
-    target_addr: int,
+    callsite_addr: cython.longlong,
+    target_addr: cython.longlong,
     kind: CarryBorrowKind8616,
-    source_offset: int,
-    destination_offset: int,
-    low_arithmetic_addr: int,
-    high_arithmetic_addr: int,
-    low_store_addr: int,
-    high_store_addr: int,
+    source_offset: cython.longlong,
+    destination_offset: cython.longlong,
+    low_arithmetic_addr: cython.longlong,
+    high_arithmetic_addr: cython.longlong,
+    low_store_addr: cython.longlong,
+    high_store_addr: cython.longlong,
 ) -> WideCallOutputAuthoritativeOwnership8616:
     """Match one legacy stack projection to its exact dedicated-owner fact."""
     expected = WideCallOutputAssignmentFact8616(
@@ -183,12 +189,12 @@ def classify_authoritative_wide_call_output_projection_8616(
     project = cast(_ProjectCodegenBoundary8616, codegen).project
     targets = _call_target_variants_8616(target_addr, project)
     matches = tuple(
-        resolution for resolution in artifact.resolutions
+        resolution for resolution in iter(artifact.resolutions)
         if resolution.fact is not None
         and resolution.fact.call_output.target_addr in targets
-        and replace(resolution.fact, call_output=replace(
+        and operator.eq(replace(resolution.fact, call_output=replace(
             resolution.fact.call_output, target_addr=expected.call_output.target_addr,
-        ), pair=None) == expected
+        ), pair=None), expected)
     )
     if not matches:
         status = WideCallOutputAuthoritativeOwnershipStatus8616.FACT_ABSENT
@@ -205,9 +211,10 @@ def classify_authoritative_wide_call_output_projection_8616(
     return WideCallOutputAuthoritativeOwnership8616(status, matched_fact)
 
 
+@cython.ccall
 def _refused_replay_8616(
     failure: WideCallOutputReplayFailure8616,
-    duplicate_count: int = 0,
+    duplicate_count: cython.longlong = 0,
 ) -> WideCallOutputReplayResult8616:
     """Build one typed refusal and optionally emit focused diagnostics."""
     if os.environ.get("INERTIA_DEBUG_WIDE_CALL_OUTPUT_REPLAY") == "1":
@@ -230,30 +237,36 @@ def _canonical_assignments_8616(
     """Return assignments carrying the exact immutable Lowering fact."""
     return tuple(
         node
-        for node in _iter_c_nodes_deep_8616(root)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(root))
         if isinstance(node, CAssignment)
         and isinstance(node.tags, dict)
-        and node.tags.get(_EVIDENCE_TAG_8616) == fact
+        and operator.eq(node.tags.get(_EVIDENCE_TAG_8616), fact)
     )
 
 
+@cython.ccall
 def _delete_statement_owners_8616(
-    owners: tuple[WideCallOutputCallSite8616, ...],
+    owners: object,
 ) -> None:
     """Delete exact duplicate statement slots in descending group order."""
-    grouped: dict[int, tuple[CStatements, list[int]]] = {}
+    group: object
+    index: object
+    indices: object
+    owner: object
+    grouped: dict[cython.longlong, tuple[CStatements, list[cython.longlong]]] = {}
     for owner in owners:
         entry = grouped.setdefault(id(owner.statements), (owner.statements, []))
         entry[1].append(owner.index)
     for group, indices in grouped.values():
-        for index in sorted(set(indices), reverse=True):
+        for index in sorted(tuple(set(indices)), reverse=True):
             del group.statements[index]
 
 
+@cython.ccall
 def _duplicate_summary_failure_8616(
     boundary: _ProjectCodegenBoundary8616,
     fact: WideCallOutputAssignmentFact8616,
-    duplicate_count: int,
+    duplicate_count: cython.longlong,
 ) -> WideCallOutputReplayFailure8616 | None:
     """Require exact published call identity before deleting duplicate effects."""
     if not duplicate_count:
@@ -262,13 +275,15 @@ def _duplicate_summary_failure_8616(
         summary = boundary._inertia_callsite_summary_inventory_8616[fact.call_output.callsite_addr]
     except (AttributeError, KeyError):
         return WideCallOutputReplayFailure8616.SUMMARY_MISSING
-    if summary.target_addr != fact.call_output.target_addr:
+    if operator.ne(summary.target_addr, fact.call_output.target_addr):
         return WideCallOutputReplayFailure8616.TARGET_CONFLICT
     return None
 
 
-def _fact_combine_authorized_8616(fact: WideCallOutputAssignmentFact8616) -> bool:
+@cython.ccall
+def _fact_combine_authorized_8616(fact: WideCallOutputAssignmentFact8616) -> cython.bint:
     """Return whether the fact's retained pair still authorizes this combine."""
+    pair: object
     pair = fact.pair
     return (
         pair is not None
@@ -277,11 +292,14 @@ def _fact_combine_authorized_8616(fact: WideCallOutputAssignmentFact8616) -> boo
     )
 
 
+@cython.ccall
 def _authenticated_materialized_8616(
     resolution: WideCallOutputAssignmentResolution8616,
     project: object,
-) -> bool:
+) -> cython.bint:
     """Authenticate a matched fact's retained pair against its owned source."""
+    call_output: object
+    fact: object
     fact = resolution.fact
     source = resolution.source
     if fact is None or not wide_call_output_pair_authenticated_8616(source, fact):
@@ -291,7 +309,7 @@ def _authenticated_materialized_8616(
         return False
     provenance = call_output.provenance
     if (
-        fact.call_output.callsite_addr != provenance.callsite_addr
+        operator.ne(fact.call_output.callsite_addr, provenance.callsite_addr)
         or fact.call_output.shape is not provenance.shape
     ):
         return False
@@ -302,12 +320,12 @@ def _authenticated_materialized_8616(
 
 def _duplicate_owner_failure_8616(
     owner: WideCallOutputCallSite8616,
-    required: frozenset[int],
+    required: object,
 ) -> WideCallOutputReplayFailure8616 | None:
     """Return the typed reason one duplicate statement may not be pruned."""
     statement_calls = tuple(
         node
-        for node in _iter_c_nodes_deep_8616(owner.statement)
+        for node in builtins.iter(_iter_c_nodes_deep_8616(owner.statement))
         if isinstance(node, CFunctionCall)
     )
     if len(statement_calls) != 1:
@@ -324,6 +342,8 @@ def reconcile_materialized_wide_call_output_assignment_8616(
     fact: WideCallOutputAssignmentFact8616,
 ) -> WideCallOutputReplayResult8616:
     """Prune only fully fact-owned duplicates of one canonical assignment."""
+    failure: object
+    owner: object
     canonical = _canonical_assignments_8616(root, fact)
     if not canonical:
         return WideCallOutputReplayResult8616(WideCallOutputReplayStatus8616.ABSENT)
@@ -342,7 +362,7 @@ def reconcile_materialized_wide_call_output_assignment_8616(
     )
     canonical_calls = tuple(
         node
-        for node in _iter_c_nodes_deep_8616(canonical[0])
+        for node in builtins.iter(_iter_c_nodes_deep_8616(canonical[0]))
         if isinstance(node, CFunctionCall)
     )
     if len(canonical_calls) != 1:
@@ -350,19 +370,19 @@ def reconcile_materialized_wide_call_output_assignment_8616(
             WideCallOutputReplayFailure8616.CANONICAL_CALL_AMBIGUOUS
         )
     canonical_call = canonical_calls[0]
-    duplicates = tuple(owner for owner in owners if owner.call is not canonical_call)
-    owned_call_ids = {id(owner.call) for owner in owners}
+    duplicates = tuple(owner for owner in iter(owners) if owner.call is not canonical_call)
+    owned_call_ids = {id(owner.call) for owner in iter(owners)}
     all_tagged_call_ids = {
         id(call)
-        for call in callsite_tagged_calls_in_node_8616(
+        for call in builtins.iter(callsite_tagged_calls_in_node_8616(
             root,
             fact.call_output.callsite_addr,
-        )
+        ))
     }
     canonical_call_id = id(canonical_call)
-    if all_tagged_call_ids - {canonical_call_id} != owned_call_ids - {
+    if operator.ne(all_tagged_call_ids - {canonical_call_id}, owned_call_ids - {
         canonical_call_id
-    }:
+    }):
         return _refused_replay_8616(
             WideCallOutputReplayFailure8616.UNOWNED_CALL_OCCURRENCE,
             len(duplicates),

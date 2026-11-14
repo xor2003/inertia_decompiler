@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Classify whether recovered callers consume a function result.
 
 Layer: Types/lowering.
@@ -10,6 +11,8 @@ Do not inspect function names or postprocess output.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -26,6 +29,9 @@ from inertia.semantics.terminal_return_storage import (
     TerminalReturnStorage8616,
     terminal_return_storage_8616,
 )
+import dataclasses
+import operator
+import builtins
 
 __all__ = [
     "FunctionReturnClass8616",
@@ -41,7 +47,7 @@ __all__ = [
 class _ProjectReturnTypeSurface8616(Protocol):
     """Third-party project fields required for address-domain resolution."""
 
-    _inertia_original_linear_delta: int
+    _inertia_original_linear_delta: cython.longlong
 
 
 class _FunctionProjectSurface8616(Protocol):
@@ -59,7 +65,7 @@ class _FunctionBlocksSurface8616(Protocol):
 class _ProjectFunctionRangesSurface8616(Protocol):
     """Owned Frontend range inventory carried by the project boundary."""
 
-    _inertia_caller_function_ranges_8616: tuple[tuple[int, int], ...]
+    _inertia_caller_function_ranges_8616: object
 
 
 class FunctionReturnClass8616(StrEnum):
@@ -69,68 +75,69 @@ class FunctionReturnClass8616(StrEnum):
     VALUE = "value"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class UnobservedCalleeVoidEvidence8616:
     """Closed join of caller observation and terminal return storage."""
 
-    target_addr: int
+    target_addr: cython.longlong
     caller_observation: CallerReturnUseVerdict8616 | None
     terminal_storage: TerminalReturnStorage8616 | None
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def proves_void(self) -> bool:
+    def proves_void(self) -> cython.bint:
         """Return whether both complete facts prove an empty C result."""
         return (
             self.caller_observation is CallerReturnUseVerdict8616.UNUSED
             and self.terminal_storage
             in {TerminalReturnStorage8616.NONE, TerminalReturnStorage8616.CALL_OUTPUT}
             and self.raw_fact_count == 2
-            and self.normalized_fact_count == self.raw_fact_count
-            and self.classified_fact_count == self.raw_fact_count
-            and self.materialized_count == self.classified_fact_count
+            and operator.eq(self.normalized_fact_count, self.raw_fact_count)
+            and operator.eq(self.classified_fact_count, self.raw_fact_count)
+            and operator.eq(self.materialized_count, self.classified_fact_count)
             and self.failure_count == 0
         )
 
 
+@cython.ccall
 def caller_return_use_evidence_proves_used_8616(
     evidence: CallerReturnUseEvidence8616,
-) -> bool:
+) -> cython.bint:
     """Return whether at least one classified caller provably consumes the result."""
     return (
         evidence.verdict is CallerReturnUseVerdict8616.USED
         and evidence.raw_fact_count > 0
-        and evidence.normalized_fact_count == evidence.raw_fact_count
+        and operator.eq(evidence.normalized_fact_count, evidence.raw_fact_count)
         and evidence.classified_fact_count > 0
-        and evidence.materialized_count == evidence.classified_fact_count
+        and operator.eq(evidence.materialized_count, evidence.classified_fact_count)
         and evidence.used_callsite_count > 0
         and evidence.used_callsite_count <= evidence.classified_fact_count
     )
 
 
+@cython.ccall
 def caller_return_use_evidence_proves_unused_8616(
     evidence: CallerReturnUseEvidence8616,
-) -> bool:
+) -> cython.bint:
     """Return whether caller-use evidence proves an unused result without gaps."""
     return (
         evidence.verdict is CallerReturnUseVerdict8616.UNUSED
         and evidence.raw_fact_count > 0
-        and evidence.normalized_fact_count == evidence.raw_fact_count
+        and operator.eq(evidence.normalized_fact_count, evidence.raw_fact_count)
         and evidence.classified_fact_count > 0
-        and evidence.classified_fact_count + evidence.excluded_callsite_count
-        == evidence.normalized_fact_count
-        and evidence.materialized_count == evidence.classified_fact_count
+        and operator.eq(evidence.classified_fact_count + evidence.excluded_callsite_count, evidence.normalized_fact_count)
+        and operator.eq(evidence.materialized_count, evidence.classified_fact_count)
         and evidence.failure_count == 0
         and evidence.used_callsite_count == 0
-        and evidence.unused_callsite_count == evidence.classified_fact_count
+        and operator.eq(evidence.unused_callsite_count, evidence.classified_fact_count)
     )
 
 
-def _candidate_return_evidence_addrs_8616(project: object, function_addr: int) -> tuple[int, ...]:
+def _candidate_return_evidence_addrs_8616(project: object, function_addr: cython.longlong) -> tuple[cython.longlong, ...]:
     """Return current and exact-slice original addresses for caller-use evidence."""
     project_surface = cast(_ProjectReturnTypeSurface8616, project)
     try:
@@ -140,18 +147,18 @@ def _candidate_return_evidence_addrs_8616(project: object, function_addr: int) -
     candidates = [function_addr]
     if isinstance(original_delta, int) and original_delta:
         candidates.extend((function_addr + original_delta, function_addr - original_delta))
-    return tuple(dict.fromkeys(candidate for candidate in candidates if candidate >= 0))
+    return tuple(dict.fromkeys(candidate for candidate in iter(candidates) if candidate >= 0))
 
 
 def _caller_return_use_evidence_for_function_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> CallerReturnUseEvidence8616 | None:
     """Resolve one non-conflicting caller-use proof across address domains."""
     evidence_by_addr = caller_return_use_evidence_by_addr_8616(project)
     matches = tuple(
         evidence
-        for candidate in _candidate_return_evidence_addrs_8616(project, function_addr)
+        for candidate in builtins.iter(_candidate_return_evidence_addrs_8616(project, function_addr))
         if isinstance((evidence := evidence_by_addr.get(candidate)), CallerReturnUseEvidence8616)
     )
     if not matches:
@@ -162,14 +169,15 @@ def _caller_return_use_evidence_for_function_8616(
             caller_return_use_evidence_proves_used_8616(evidence),
             caller_return_use_evidence_proves_unused_8616(evidence),
         )
-        for evidence in matches
+        for evidence in iter(matches)
     }
     return matches[0] if len(proof_states) == 1 else None
 
 
+@cython.ccall
 def proven_function_return_class_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> FunctionReturnClass8616 | None:
     """Prove only the value-returning class from closed caller-use evidence."""
     if proven_function_result_observation_8616(project, function_addr) is CallerReturnUseVerdict8616.USED:
@@ -177,9 +185,10 @@ def proven_function_return_class_8616(
     return None
 
 
+@cython.ccall
 def proven_function_result_observation_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> CallerReturnUseVerdict8616 | None:
     """Return a closed proof that callers observe or ignore the function result."""
     evidence = _caller_return_use_evidence_for_function_8616(project, function_addr)
@@ -192,11 +201,15 @@ def proven_function_result_observation_8616(
     return None
 
 
+@cython.ccall
 def collect_unobserved_callee_void_evidence_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> UnobservedCalleeVoidEvidence8616:
     """Join closed caller-use and terminal-storage facts for one callee."""
+    evidence_function: object
+    observation: object
+    terminal_storage: object
     observation = proven_function_result_observation_8616(project, function_addr)
     function = resolve_x86_16_canonical_call_target_function_8616(project, function_addr)
     try:
@@ -233,10 +246,11 @@ def collect_unobserved_callee_void_evidence_8616(
     )
 
 
+@cython.ccall
 def function_result_is_proven_unobserved_8616(
     project: object,
-    function_addr: int,
-) -> bool:
+    function_addr: cython.longlong,
+) -> cython.bint:
     """Prove that a closed caller census never observes this function result.
 
     This evidence may narrow validation liveness, but it does not prove a void

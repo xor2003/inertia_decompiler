@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Structuring.
 
 Responsibility: publish grouped-entry CFG artifacts before region structuring/codegen.
@@ -10,13 +11,15 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import cython
 
 import typing
 
 from inertia.structuring.structuring_grouped_graph_builder import build_grouped_region_graph
 
 
-def apply_x86_16_cross_entry_grouping(codegen: object) -> bool:
+@cython.ccall
+def apply_x86_16_cross_entry_grouping(codegen: object) -> cython.bint:
     """Publish grouped-entry CFG artifacts without marking structuring changed.
 
     The real grouped structuring pass rebuilds and consumes its own grouped
@@ -25,6 +28,7 @@ def apply_x86_16_cross_entry_grouping(codegen: object) -> bool:
     Dynamic attribute boundary: codegen is a third-party angr/codegen
     compatibility object that intentionally carries optional diagnostic metadata.
     """
+    artifact: object
     grouped_graph = build_grouped_region_graph(codegen)
     artifact = grouped_graph.grouped_units.grouping if grouped_graph.grouped_units is not None else None
     typing.cast(typing.Any, codegen)._inertia_cfg_grouping_artifact = artifact
@@ -41,7 +45,7 @@ def apply_x86_16_cross_entry_grouping(codegen: object) -> bool:
     typing.cast(typing.Any, codegen)._inertia_entry_fragment_ids = entry_fragment_ids
     typing.cast(typing.Any, codegen)._inertia_cross_entry_grouped_units = grouped_graph.grouped_units
     member_region_ids = (
-        tuple(sorted({region_id for unit in grouped_graph.grouped_units.units for region_id in unit.member_region_ids}))
+        tuple(sorted({region_id for unit in iter(grouped_graph.grouped_units.units) for region_id in iter(unit.member_region_ids)}))
         if grouped_graph.grouped_units is not None
         else ()
     )
@@ -49,6 +53,7 @@ def apply_x86_16_cross_entry_grouping(codegen: object) -> bool:
     return False
 
 
+@cython.ccall
 def describe_x86_16_cross_entry_grouping_surface() -> dict[str, object]:
     """Describe the grouped-entry CFG artifact publication surface."""
     return {

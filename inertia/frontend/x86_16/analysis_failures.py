@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Pass owned terminal failures through the installed angr resilience policy.
 
 Layer: Frontend/runtime.
@@ -6,6 +7,7 @@ ordinary exceptions or enabling its general fail-fast mode.
 """
 
 from __future__ import annotations
+import cython
 
 import contextlib
 from collections.abc import Iterator
@@ -33,11 +35,12 @@ def guard_angr_analysis_hard_failure_passthrough() -> Iterator[None]:
     @contextlib.contextmanager
     def preserving_hard_failures(
         analysis: object,
-        name: str | None = None,
-        exception: type[BaseException] | tuple[type[BaseException], ...] = Exception,
+        name: object = None,
+        exception: object = Exception,
     ) -> Iterator[None]:
         """Reraise the identical owned exception after upstream handling exits."""
-        terminal: PipelineHardError | None = None
+        terminal: object
+        terminal = None
         with original_resilience(analysis, name=name, exception=exception):
             try:
                 yield

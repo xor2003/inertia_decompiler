@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Layer: Recovery metadata.
 
 Responsibility: summarize recovered function effects from existing structured artifacts.
@@ -11,9 +12,12 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+import dataclasses
 
 __all__ = [
     "FunctionEffectSummary",
@@ -21,32 +25,32 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionEffectSummary:
     """Deterministic summary of recovered function-level effects."""
 
     register_inputs: tuple[str, ...] = ()
     register_outputs: tuple[str, ...] = ()
     register_clobbers: tuple[str, ...] = ()
-    frame_stack_reads: tuple[int, ...] = ()
-    frame_stack_writes: tuple[int, ...] = ()
+    frame_stack_reads: tuple[cython.longlong, ...] = ()
+    frame_stack_writes: tuple[cython.longlong, ...] = ()
     memory_reads: tuple[str, ...] = ()
     memory_writes: tuple[str, ...] = ()
-    direct_call_count: int = 0
-    indirect_call_count: int = 0
-    direct_branch_count: int = 0
-    indirect_branch_count: int = 0
+    direct_call_count: cython.longlong = 0
+    indirect_call_count: cython.longlong = 0
+    direct_branch_count: cython.longlong = 0
+    indirect_branch_count: cython.longlong = 0
     return_kind: str = "unknown"
     helper_return_state: str = "none"
-    helper_return_space: str | None = None
+    helper_return_space: object = None
     helper_return_width: int | None = None
     helper_return_address_kind: str = "none"
 
-    def frame_only_stack(self) -> bool:
+    def frame_only_stack(self) -> cython.bint:
         """Return whether memory effects are limited to frame stack slots."""
         return bool(self.frame_stack_reads or self.frame_stack_writes) and not (self.memory_reads or self.memory_writes)
 
-    def has_indirect_control(self) -> bool:
+    def has_indirect_control(self) -> cython.bint:
         """Return whether recovered effects include indirect calls or branches."""
         return self.indirect_call_count > 0 or self.indirect_branch_count > 0
 
@@ -92,31 +96,35 @@ class FunctionEffectSummary:
         }
 
 
-type FunctionEffectSource = Mapping[str, object]
+FunctionEffectSource = typing.TypeAliasType("FunctionEffectSource", Mapping[str, object])
 
 
-def _value(source: FunctionEffectSource, name: str, default: object) -> object:
+@cython.ccall
+def _value(source: FunctionEffectSource, name: object, default: object) -> object:
     return source.get(name, default)
 
 
 def _sorted_str_tuple(value: object) -> tuple[str, ...]:
     if not isinstance(value, (tuple, list, set)):
         return ()
-    return tuple(sorted(str(item) for item in value))
+    return tuple(sorted(str(item) for item in iter(value)))
 
 
-def _sorted_int_tuple(value: object) -> tuple[int, ...]:
+@cython.ccall
+def _sorted_int_tuple(value: object) -> tuple[cython.longlong, ...]:
     if not isinstance(value, (tuple, list, set)):
         return ()
-    ints = [item for item in value if isinstance(item, int)]
+    ints = [item for item in iter(value) if isinstance(item, int)]
     return tuple(sorted(ints))
 
 
-def _count(source: FunctionEffectSource, name: str) -> int:
+@cython.ccall
+def _count(source: FunctionEffectSource, name: object) -> cython.longlong:
     value = _value(source, name, 0)
     return value if isinstance(value, int) else 0
 
 
+@cython.ccall
 def summarize_x86_16_function_effects(source: FunctionEffectSource) -> FunctionEffectSummary:
     """Summarize recovered function effects from an existing structured mapping."""
     helper_return_space = _value(source, "helper_return_space", None)

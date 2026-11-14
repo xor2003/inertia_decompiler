@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Retain exact raw function IR artifacts for downstream IR consumers.
 
 Layer: IR.
@@ -11,6 +12,8 @@ work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -32,6 +35,8 @@ from .function_readiness_contracts import (
     observed_function_artifact_source_revision_8616,
     requires_function_source_observation_8616,
 )
+import dataclasses
+import operator
 
 __all__ = [
     "FunctionIRArtifactFailure8616",
@@ -62,11 +67,11 @@ class FunctionIRArtifactFailure8616(StrEnum):
     SOURCE_UNAVAILABLE = "source_unavailable"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class FunctionIRArtifactResolution8616:
     """One exact raw artifact or a typed registry refusal."""
 
-    function_addr: int
+    function_addr: cython.longlong
     verdict: FunctionIRArtifactVerdict8616
     artifact: IRFunctionArtifact | None
     failure: FunctionIRArtifactFailure8616 | None
@@ -75,13 +80,14 @@ class FunctionIRArtifactResolution8616:
 class _FunctionIRRegistrySurface8616(Protocol):
     """Project-owned immutable raw-IR registry extension."""
 
-    _inertia_function_ir_artifacts_8616: dict[int, IRFunctionArtifact]
-    _inertia_function_ir_source_bindings_8616: dict[int, FunctionSourceBinding8616]
+    _inertia_function_ir_artifacts_8616: object
+    _inertia_function_ir_source_bindings_8616: object
 
 
+@cython.ccall
 def _existing_registry_8616(
     project: object,
-) -> dict[int, IRFunctionArtifact] | None:
+) -> object:
     """Return the validated project-owned registry without creating it.
 
     Resolving must not mutate the project: an absent attribute yields ``None``
@@ -97,8 +103,10 @@ def _existing_registry_8616(
     return registry
 
 
-def _registry_8616(project: object) -> dict[int, IRFunctionArtifact]:
+@cython.ccall
+def _registry_8616(project: object) -> object:
     """Return the validated registry, creating it for publication only."""
+    registry: object
     surface = cast(_FunctionIRRegistrySurface8616, project)
     registry = _existing_registry_8616(project)
     if registry is None:
@@ -107,9 +115,10 @@ def _registry_8616(project: object) -> dict[int, IRFunctionArtifact]:
     return registry
 
 
+@cython.ccall
 def _existing_source_bindings_8616(
     project: object,
-) -> dict[int, FunctionSourceBinding8616] | None:
+) -> object:
     """Return the validated binding ledger without creating it on lookup."""
     surface = cast(_FunctionIRRegistrySurface8616, project)
     try:
@@ -121,8 +130,10 @@ def _existing_source_bindings_8616(
     return bindings
 
 
-def _source_bindings_8616(project: object) -> dict[int, FunctionSourceBinding8616]:
+@cython.ccall
+def _source_bindings_8616(project: object) -> object:
     """Return the validated binding ledger, creating it for publication only."""
+    bindings: object
     surface = cast(_FunctionIRRegistrySurface8616, project)
     bindings = _existing_source_bindings_8616(project)
     if bindings is None:
@@ -131,20 +142,22 @@ def _source_bindings_8616(project: object) -> dict[int, FunctionSourceBinding861
     return bindings
 
 
+@cython.ccall
 def _binding_stale_8616(
-    binding: FunctionSourceBinding8616 | None,
-    observed: FunctionSourceRevision8616 | None,
-) -> bool:
+    binding: object,
+    observed: object,
+) -> cython.bint:
     """Return whether a recorded binding is provably older than current source."""
     return (
         binding is not None
         and observed is not None
-        and binding.revision != observed
+        and operator.ne(binding.revision, observed)
     )
 
 
+@cython.ccall
 def _refuse_8616(
-    function_addr: int,
+    function_addr: cython.longlong,
     failure: FunctionIRArtifactFailure8616,
 ) -> FunctionIRArtifactResolution8616:
     """Build one typed refusal without leaking the stale artifact."""
@@ -156,11 +169,17 @@ def _refuse_8616(
     )
 
 
+@cython.ccall
 def registered_function_ir_artifact_8616(
     project: object,
-    function_addr: int,
+    function_addr: cython.longlong,
 ) -> FunctionIRArtifactResolution8616:
     """Return one exact registered raw artifact without creating state."""
+    artifact: object
+    binding: object
+    bindings: object
+    observed: object
+    registry: object
     registry = _existing_registry_8616(project)
     artifact = registry.get(function_addr) if registry is not None else None
     if artifact is None:
@@ -172,7 +191,7 @@ def registered_function_ir_artifact_8616(
         )
     if (
         not isinstance(artifact, IRFunctionArtifact)
-        or artifact.function_addr != function_addr
+        or operator.ne(artifact.function_addr, function_addr)
         or artifact.refusals
     ):
         return FunctionIRArtifactResolution8616(
@@ -223,10 +242,12 @@ def registered_function_ir_artifact_8616(
     )
 
 
+@cython.ccall
 def _bind_accepted_ir_lifecycle_8616(
     project: object, artifact: IRFunctionArtifact, revision: FunctionSourceRevision8616 | None,
 ) -> None:
     """Attach accepted raw IR to canonical state and revoke older generations."""
+    digest: object
     digest = function_artifact_body_digest_8616(artifact)
     if digest is None:
         bind_function_lifecycle_8616(project, artifact.function_addr, artifact.lifecycle)
@@ -236,6 +257,7 @@ def _bind_accepted_ir_lifecycle_8616(
         )
 
 
+@cython.ccall
 def publish_function_ir_artifact_8616(
     project: object,
     artifact: IRFunctionArtifact,
@@ -248,6 +270,11 @@ def publish_function_ir_artifact_8616(
     provably stale may be superseded only by different content bound to the
     current generation; republishing the identical stale artifact refuses.
     """
+    attested: object
+    body_digest: object
+    existing: object
+    observed: object
+    record: object
     function_addr = artifact.function_addr
     if function_addr < 0 or artifact.refusals:
         return _refuse_8616(
@@ -273,8 +300,8 @@ def publish_function_ir_artifact_8616(
         # an unstamped foreign body, mints nothing.
         if (
             record is None
-            or record.revision != observed
-            or (attested is not None and attested != observed)
+            or operator.ne(record.revision, observed)
+            or (attested is not None and operator.ne(attested, observed))
         ):
             return _refuse_8616(
                 function_addr,
@@ -285,7 +312,7 @@ def publish_function_ir_artifact_8616(
     existing = registry.get(function_addr)
     if existing is not None:
         stale = _binding_stale_8616(bindings.get(function_addr), observed)
-        if existing == artifact:
+        if operator.eq(existing, artifact):
             if stale:
                 return _refuse_8616(
                     function_addr,

@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Fail-closed abnormal-loop eligibility for region structuring.
 
 Layer: Structuring.
@@ -11,6 +12,8 @@ postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 
@@ -20,9 +23,11 @@ from inertia.structuring.natural_loop_topology import (
 )
 from inertia.structuring.structuring_analysis import StructureAnalysis
 from inertia.structuring.structuring_region import DominatorInfo, Region, RegionGraph
+import dataclasses
+import operator
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class LoopEdgeRef:
     """Stable metadata reference for an edge between two region ids."""
 
@@ -37,31 +42,31 @@ class LoopEdgeRef:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class AbnormalLoopNormalizationPlan:
     """Typed eligibility result for a future abnormal-loop normalization slice."""
 
     verdict: LoopTopologyVerdict8616
-    header_region_id: int
-    body_region_ids: tuple[int, ...]
-    abnormal_entries: tuple[LoopEdgeRef, ...]
-    abnormal_exits: tuple[LoopEdgeRef, ...]
-    entry_variable_name: str | None
-    exit_variable_name: str | None
-    refusal_reason: str | None = None
+    header_region_id: cython.longlong
+    body_region_ids: object
+    abnormal_entries: object
+    abnormal_exits: object
+    entry_variable_name: object
+    exit_variable_name: object
+    refusal_reason: object = None
 
     @property
-    def needs_entry_variable(self) -> bool:
+    def needs_entry_variable(self) -> cython.bint:
         """Return whether abnormal entries require a selector variable."""
         return bool(self.abnormal_entries)
 
     @property
-    def needs_exit_variable(self) -> bool:
+    def needs_exit_variable(self) -> cython.bint:
         """Return whether multiple exits require a selector variable."""
         return bool(self.abnormal_exits)
 
     @property
-    def can_normalize(self) -> bool:
+    def can_normalize(self) -> cython.bint:
         """Return whether exact proof authorizes a selector materialization."""
         return self.verdict is LoopTopologyVerdict8616.PROVEN and bool(
             self.entry_variable_name or self.exit_variable_name
@@ -73,8 +78,8 @@ class AbnormalLoopNormalizationPlan:
             "verdict": self.verdict.value,
             "header_region_id": self.header_region_id,
             "body_region_ids": list(self.body_region_ids),
-            "abnormal_entries": [edge.to_dict() for edge in self.abnormal_entries],
-            "abnormal_exits": [edge.to_dict() for edge in self.abnormal_exits],
+            "abnormal_entries": [edge.to_dict() for edge in iter(self.abnormal_entries)],
+            "abnormal_exits": [edge.to_dict() for edge in iter(self.abnormal_exits)],
             "entry_variable_name": self.entry_variable_name,
             "exit_variable_name": self.exit_variable_name,
             "refusal_reason": self.refusal_reason,
@@ -84,13 +89,13 @@ class AbnormalLoopNormalizationPlan:
 
 def build_abnormal_loop_normalization_plan(
     graph: RegionGraph,
-    dominators: DominatorInfo | None,
+    dominators,
     topology: NaturalLoopTopology8616,
 ) -> AbnormalLoopNormalizationPlan:
     """Default-deny abnormal normalization without exact typed eligibility."""
     del dominators
-    matching_headers = tuple(region for region in graph.nodes if region.region_id == topology.header)
-    reason: str | None
+    matching_headers = tuple(region for region in iter(graph.nodes) if operator.eq(region.region_id, topology.header))
+    reason: object
     if len(matching_headers) != 1:
         verdict = LoopTopologyVerdict8616.UNKNOWN_REFUSE
         reason = "missing-topology-header"
@@ -119,12 +124,13 @@ def build_abnormal_loop_normalization_plan(
     )
 
 
+@cython.ccall
 def apply_abnormal_loop_normalization(
-    graph: RegionGraph,
-    header: Region,
-    topology: NaturalLoopTopology8616,
-    plan: AbnormalLoopNormalizationPlan,
-) -> bool:
+    graph,
+    header,
+    topology,
+    plan,
+) -> cython.bint:
     """Refuse mutation until a later slice proves abnormal topology and conditions."""
     del graph, header, topology, plan
     return False

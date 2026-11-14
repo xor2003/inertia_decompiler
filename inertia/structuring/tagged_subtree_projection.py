@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Project immutable entry-address tags from one structured-C subtree.
 
 Layer: Structuring.
@@ -9,6 +10,8 @@ Do not perform alias-state ownership, widening, type/materialization recovery, r
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass
 from typing import Protocol, cast
@@ -20,6 +23,9 @@ from inertia.lowering.c_ast_utils import (
     _structured_slot_names_8616,
 )
 from inertia.lowering.structured_tags import copy_structured_tags_8616
+import dataclasses
+import operator
+import builtins
 
 
 class _TaggedStructuredNode8616(Protocol):
@@ -28,12 +34,12 @@ class _TaggedStructuredNode8616(Protocol):
     tags: object
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StructuredSubtreeEntryTags8616:
     """Immutable instruction and block entry tags for one subtree."""
 
     first_instruction_addr: int | None
-    block_addrs: tuple[int, ...]
+    block_addrs: object
 
     @property
     def first_block_addr(self) -> int | None:
@@ -41,67 +47,68 @@ class StructuredSubtreeEntryTags8616:
         return self.block_addrs[0] if self.block_addrs else None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StructuredSubtreeEntryTagIndexStats8616:
     """Closed accounting for one bottom-up subtree-tag index build."""
 
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
+    raw_fact_count: cython.longlong
+    normalized_fact_count: cython.longlong
+    classified_fact_count: cython.longlong
+    materialized_count: cython.longlong
+    failure_count: cython.longlong
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether every current structured node was indexed."""
         return bool(
             self.raw_fact_count
             == self.normalized_fact_count
             == self.classified_fact_count + self.failure_count
-            and self.classified_fact_count == self.materialized_count
+            and operator.eq(self.classified_fact_count, self.materialized_count)
             and self.failure_count == 0
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StructuredSubtreeEntryTagIndex8616:
     """Exact entry-tag projections for every acyclic subtree in one C-AST."""
 
     root: object
-    _entries: dict[int, tuple[object, StructuredSubtreeEntryTags8616]]
+    _entries: object
     stats: StructuredSubtreeEntryTagIndexStats8616
 
     @classmethod
     def build(cls, root: object) -> StructuredSubtreeEntryTagIndex8616:
         """Build bottom-up projections and refuse cyclic unresolved subtrees."""
+        node: object
         nodes = tuple(_iter_c_nodes_deep_8616(root))
-        node_ids = frozenset(id(node) for node in nodes)
+        node_ids = frozenset(id(node) for node in iter(nodes))
         children_by_id = {
             id(node): tuple(
                 child
-                for child in _direct_structured_children_8616(node)
+                for child in builtins.iter(_direct_structured_children_8616(node))
                 if id(child) in node_ids
             )
-            for node in nodes
+            for node in iter(nodes)
         }
-        entries: dict[int, tuple[object, StructuredSubtreeEntryTags8616]] = {}
+        entries: dict[cython.longlong, tuple[object, StructuredSubtreeEntryTags8616]] = {}
         remaining = list(reversed(nodes))
         while remaining:
             unresolved: list[object] = []
             materialized_before = len(entries)
             for node in remaining:
                 children = children_by_id[id(node)]
-                if any(id(child) not in entries for child in children):
+                if any(id(child) not in entries for child in iter(children)):
                     unresolved.append(node)
                     continue
                 entries[id(node)] = (
                     node,
                     _merge_structured_entry_tags_8616(
                         node,
-                        tuple(entries[id(child)][1] for child in children),
+                        tuple(entries[id(child)][1] for child in iter(children)),
                     ),
                 )
-            if len(entries) == materialized_before:
+            if operator.eq(len(entries), materialized_before):
                 break
             remaining = unresolved
         materialized_count = len(entries)
@@ -116,25 +123,26 @@ class StructuredSubtreeEntryTagIndex8616:
 
     def for_node(self, node: object) -> StructuredSubtreeEntryTags8616 | None:
         """Return one exact indexed projection by identity, if classified."""
+        entry: object
         entry = self._entries.get(id(node))
         return entry[1] if entry is not None and entry[0] is node else None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class StructuredSubtreeEntryTagQueryStats8616:
     """Closed accounting for one mutation-aware indexed query session."""
 
-    request_count: int
-    index_build_count: int
-    indexed_hit_count: int
-    fallback_count: int
-    invalidation_count: int
+    request_count: cython.longlong
+    index_build_count: cython.longlong
+    indexed_hit_count: cython.longlong
+    fallback_count: cython.longlong
+    invalidation_count: cython.longlong
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every request hit the index or exact fallback."""
         return bool(
-            self.request_count == self.indexed_hit_count + self.fallback_count
+            operator.eq(self.request_count, self.indexed_hit_count + self.fallback_count)
             and min(
                 self.request_count,
                 self.index_build_count,
@@ -146,20 +154,22 @@ class StructuredSubtreeEntryTagQueryStats8616:
         )
 
 
-@dataclass(slots=True)
+@cython.dataclasses.dataclass()
 class StructuredSubtreeEntryTagQuerySession8616:
     """Reuse one bottom-up index until its caller reports an AST mutation."""
 
     root: object
     _index: StructuredSubtreeEntryTagIndex8616 | None = None
-    _request_count: int = 0
-    _index_build_count: int = 0
-    _indexed_hit_count: int = 0
-    _fallback_count: int = 0
-    _invalidation_count: int = 0
+    _request_count: cython.longlong = 0
+    _index_build_count: cython.longlong = 0
+    _indexed_hit_count: cython.longlong = 0
+    _fallback_count: cython.longlong = 0
+    _invalidation_count: cython.longlong = 0
 
+    @cython.ccall
     def current(self, node: object) -> StructuredSubtreeEntryTags8616:
         """Return an indexed projection or the exact cycle-safe fallback."""
+        projection: object
         self._request_count += 1
         if self._index is None:
             self._index = StructuredSubtreeEntryTagIndex8616.build(self.root)
@@ -171,11 +181,13 @@ class StructuredSubtreeEntryTagQuerySession8616:
         self._fallback_count += 1
         return collect_structured_subtree_entry_tags_8616(node)
 
+    @cython.ccall
     def record_mutation(self) -> None:
         """Discard the entire index after one accepted AST mutation."""
         self._index = None
         self._invalidation_count += 1
 
+    @cython.ccall
     def stats(self) -> StructuredSubtreeEntryTagQueryStats8616:
         """Return closed immutable accounting for this query session."""
         result = StructuredSubtreeEntryTagQueryStats8616(
@@ -190,11 +202,15 @@ class StructuredSubtreeEntryTagQuerySession8616:
         return result
 
 
+@cython.ccall
 def _direct_structured_children_8616(node: object) -> tuple[object, ...]:
     """Return deterministic direct structured children across container fields."""
+    value: object
+    child: object
+    field_name: object
     children: list[object] = []
-    seen_children: set[int] = set()
-    seen_values: set[int] = set()
+    seen_children: set[cython.longlong] = set()
+    seen_values: set[cython.longlong] = set()
     for field_name in _structured_slot_names_8616(node):
         try:
             value = getattr(node, field_name)
@@ -214,13 +230,20 @@ def _direct_structured_children_8616(node: object) -> tuple[object, ...]:
     return tuple(children)
 
 
+@cython.ccall
 def _merge_structured_entry_tags_8616(
     node: object,
-    child_projections: tuple[StructuredSubtreeEntryTags8616, ...],
+    child_projections: object,
 ) -> StructuredSubtreeEntryTags8616:
     """Merge own exact tags with already-classified direct child projections."""
-    first_instruction_addr: int | None = None
-    block_addrs: set[int] = set()
+    block_addr: object
+    child_instruction_addr: object
+    first_instruction_addr: object
+    instruction_addr: object
+    tags: object
+    projection: object
+    first_instruction_addr = None
+    block_addrs: set[cython.longlong] = set()
     boundary = cast(_TaggedStructuredNode8616, node)
     try:
         tags = copy_structured_tags_8616(boundary.tags)
@@ -247,12 +270,18 @@ def _merge_structured_entry_tags_8616(
     )
 
 
+@cython.ccall
 def collect_structured_subtree_entry_tags_8616(
     node: object,
 ) -> StructuredSubtreeEntryTags8616:
     """Collect instruction and block tags in one deterministic subtree walk."""
-    first_instruction_addr: int | None = None
-    block_addrs: set[int] = set()
+    block_addr: object
+    copied_tags: object
+    first_instruction_addr: object
+    instruction_addr: object
+    current: object
+    first_instruction_addr = None
+    block_addrs: set[cython.longlong] = set()
     for current in _iter_c_nodes_deep_8616(node):
         boundary = cast(_TaggedStructuredNode8616, current)
         try:

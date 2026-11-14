@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Project proven reaching register sources into condition storage values.
 
 Layer: Alias.
@@ -9,6 +10,8 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from inertia.ir.core import IRBinaryValue, IRValue, MemSpace
 from inertia.semantics.callsite_register_provenance import recover_register_source_before_instruction_8616
@@ -18,15 +21,18 @@ from inertia.semantics.register_value_preservation import (
 )
 
 from .register_reaching_source import RegisterReachingSourceVerdict8616
+import operator
+import builtins
 
-_BYTE_BITS: int = 8
-_WORD_BYTES: int = 2
+_BYTE_BITS: cython.longlong = 8
+_WORD_BYTES: cython.longlong = 2
 
 
+@cython.ccall
 def storage_from_reaching_source_8616(
-    source: tuple[object, ...] | None,
+    source: object,
     *,
-    width_bits: int,
+    width_bits: cython.longlong,
 ) -> IRValue | None:
     """Map one exact reaching source to a typed value without flattening."""
     width = max(1, (width_bits + _BYTE_BITS - 1) // _BYTE_BITS)
@@ -43,12 +49,13 @@ def storage_from_reaching_source_8616(
     return None
 
 
+@cython.ccall
 def zero_extended_register_storage_8616(
     function: object,
     *,
-    instruction_addr: int,
-    register: str,
-    width_bits: int,
+    instruction_addr: cython.longlong,
+    register: object,
+    width_bits: cython.longlong,
 ) -> IRBinaryValue | None:
     """Compose byte storage only when every remaining register bit is zero.
 
@@ -56,11 +63,14 @@ def zero_extended_register_storage_8616(
     Unknown paths, intervening memory writes and calls therefore remain refusal
     cases. Architectural views, not register-name patterns, establish coverage.
     """
-    if width_bits <= _BYTE_BITS or register_value_projection_8616(register, register) != (0, width_bits):
+    high_name: object
+    low_name: object
+    storage: object
+    if width_bits <= _BYTE_BITS or operator.ne(register_value_projection_8616(register, register), (0, width_bits)):
         return None
     views = {
         register_value_projection_8616(register, member): member
-        for member in sorted(register_value_family_8616(register))
+        for member in builtins.iter(sorted(tuple(register_value_family_8616(register))))
     }
     low_name = views.get((0, _BYTE_BITS))
     high_name = views.get((_BYTE_BITS, width_bits - _BYTE_BITS))

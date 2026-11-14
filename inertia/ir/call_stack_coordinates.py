@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed per-call machine-SP coordinate decomposition.
 
 Layer: IR.
@@ -15,12 +16,19 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 """
 
 from __future__ import annotations
+import typing
+import cython
 
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from .core import MemSpace
+import dataclasses
+import operator
+import builtins
+CallStackCoordinateSource8616 = typing.TypeVar("CallStackCoordinateSource8616")
+CalleeStackCallResult8616 = typing.TypeVar("CalleeStackCallResult8616")
 
 if TYPE_CHECKING:
     from inertia.semantics.call_stack_coordinate_source import CallStackCoordinateSource8616
@@ -37,10 +45,10 @@ __all__ = [
 
 #: Coordinate slots each proof evaluates: return frame width, callee purge,
 #: caller cleanup, linked-return extra, net boundary delta, argument top, body SP transfer.
-CALL_STACK_COORDINATE_SLOTS_8616: int = 7
+CALL_STACK_COORDINATE_SLOTS_8616: cython.longlong = 7
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRCallStackCoordinateObservation8616:
     """One immediate source observation shared by coordinate projections.
 
@@ -51,11 +59,11 @@ class IRCallStackCoordinateObservation8616:
     coordinates: IRCallStackCoordinates8616 = field(compare=False, repr=False)
     callee_return_sp_delta: int | None
     proven_net_sp_delta: int | None
-    sp_delta_proven: bool
-    closed: bool
-    complete: bool
+    sp_delta_proven: cython.bint
+    closed: cython.bint
+    complete: cython.bint
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> object:
         """Serialize the immediate immutable coordinate view without rechecking."""
         return self.coordinates._observation_payload(
             self.callee_return_sp_delta, self.sp_delta_proven,
@@ -96,7 +104,7 @@ class CallStackCoordinateRefusal8616(StrEnum):
     ARGUMENT_WINDOW_DECODE_REFUSED = "argument_window_decode_refused"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRCallArgumentTop8616:
     """Proven top of the contiguous argument region for one exact CALL.
 
@@ -109,12 +117,12 @@ class IRCallArgumentTop8616:
 
     space: MemSpace
     anchor: CallArgumentAnchorKind8616
-    top_offset_bytes: int
-    extent_bytes: int
-    push_instruction_addrs: tuple[int, ...]
+    top_offset_bytes: cython.longlong
+    extent_bytes: cython.longlong
+    push_instruction_addrs: object
 
     @property
-    def valid(self) -> bool:
+    def valid(self) -> cython.bint:
         """Require a word-sized, segmented region with ordered source heads."""
         addresses = self.push_instruction_addrs
         return bool(
@@ -125,8 +133,8 @@ class IRCallArgumentTop8616:
             and type(self.extent_bytes) is int
             and 0 <= self.extent_bytes <= 0xFFFF
             and self.extent_bytes % 2 == 0
-            and all(type(address) is int and address >= 0 for address in addresses)
-            and tuple(sorted(set(addresses))) == addresses
+            and all(type(address) is int and address >= 0 for address in iter(addresses))
+            and operator.eq(tuple(sorted(tuple(set(addresses)))), addresses)
             and 2 * len(addresses) <= self.extent_bytes <= 4 * len(addresses)
         )
 
@@ -142,7 +150,7 @@ class IRCallArgumentTop8616:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, )
 class IRCallStackCoordinates8616:
     """Independently evidenced SP decomposition for one exact CALL boundary.
 
@@ -159,7 +167,7 @@ class IRCallStackCoordinates8616:
     of them proven.
     """
 
-    callsite_addr: int
+    callsite_addr: cython.longlong
     target_addr: int | None = None
     return_addr: int | None = None
     return_frame_bytes: int | None = None
@@ -171,12 +179,12 @@ class IRCallStackCoordinates8616:
     argument_top: IRCallArgumentTop8616 | None = None
     callee_sp_proof: CalleeStackCallResult8616 | None = None
     source: CallStackCoordinateSource8616 | None = field(default=None, compare=False, repr=False)
-    refusals: tuple[CallStackCoordinateRefusal8616, ...] = field(default=(), compare=True)
-    raw_fact_count: int = 0
-    normalized_fact_count: int = 0
-    classified_fact_count: int = 0
-    materialized_count: int = 0
-    failure_count: int = 0
+    refusals: object = field(default=(), compare=True)
+    raw_fact_count: cython.longlong = 0
+    normalized_fact_count: cython.longlong = 0
+    classified_fact_count: cython.longlong = 0
+    materialized_count: cython.longlong = 0
+    failure_count: cython.longlong = 0
 
     def _slot_values(self) -> tuple[object, ...]:
         """Return the coordinate slots in census order, including body transfer."""
@@ -191,18 +199,18 @@ class IRCallStackCoordinates8616:
              else self.callee_sp_proof.observed_return_sp_delta),
         )
 
-    def _layout_valid(self) -> bool:
+    def _layout_valid(self) -> cython.bint:
         """Reject contradictory types, machine widths and segmented layout."""
         addresses = (self.callsite_addr, self.target_addr, self.return_addr,
                      self.caller_cleanup_instruction_addr)
-        if any(value is not None and (type(value) is not int or value < 0) for value in addresses):
+        if any(value is not None and (type(value) is not int or value < 0) for value in iter(addresses)):
             return False
         if self.return_frame_bytes is not None and (
             type(self.return_frame_bytes) is not int or self.return_frame_bytes not in {2, 4}
         ):
             return False
         counts = (self.callee_purged_bytes, self.caller_cleanup_bytes)
-        if any(value is not None and (type(value) is not int or not 0 <= value <= 0xFFFF) for value in counts):
+        if any(value is not None and (type(value) is not int or not 0 <= value <= 0xFFFF) for value in iter(counts)):
             return False
         if self.additional_return_bytes is not None and (
             type(self.additional_return_bytes) is not int or self.additional_return_bytes not in {0, 2}
@@ -222,28 +230,28 @@ class IRCallStackCoordinates8616:
         return self.callee_sp_proof.return_sp_delta if self.callee_sp_proof is not None else None
 
     @property
-    def has_proven_sp_delta(self) -> bool:
+    def has_proven_sp_delta(self) -> cython.bint:
         """Authorize only the source-bound, consistent partial SP projection."""
         return self.observe().sp_delta_proven
 
     @property
-    def closed(self) -> bool:
+    def closed(self) -> cython.bint:
         """Return whether every evaluated slot has a durable typed outcome."""
         counts = (self.raw_fact_count, self.normalized_fact_count,
                   self.classified_fact_count, self.materialized_count, self.failure_count)
-        if not self._layout_valid() or any(type(count) is not int or count < 0 for count in counts):
+        if not self._layout_valid() or any(type(count) is not int or count < 0 for count in iter(counts)):
             return False
-        known = sum(slot is not None for slot in self._slot_values())
+        known = sum(slot is not None for slot in builtins.iter(self._slot_values()))
         return bool(
             self.raw_fact_count == self.normalized_fact_count == CALL_STACK_COORDINATE_SLOTS_8616
             and self.classified_fact_count == self.materialized_count == known
-            and self.failure_count == self.raw_fact_count - known
+            and operator.eq(self.failure_count, self.raw_fact_count - known)
             and self.source is not None
             and self.source.matches(self)
         )
 
     @property
-    def complete(self) -> bool:
+    def complete(self) -> cython.bint:
         """Return whether all seven coordinate slots carry proven evidence."""
         return self.observe().complete
 
@@ -254,6 +262,8 @@ class IRCallStackCoordinates8616:
         their source, and the independent call/body proof remains mandatory.
         Do not retain this observation across mutations or later admissions.
         """
+        delta: object
+        proof: object
         closed = self.closed
         proof = self.callee_sp_proof
         # Source.matches reproduces every scalar field using return_sp_delta's
@@ -270,27 +280,27 @@ class IRCallStackCoordinates8616:
         ):
             expected = ((delta - self.return_frame_bytes + 0x8000) & 0xFFFF) - 0x8000
             proven = bool(
-                proof.callsite_addr == self.callsite_addr
-                and proof.return_addr == self.return_addr
-                and proof.target_addr == self.target_addr
-                and proof.frame_kind.return_frame_width == self.return_frame_bytes
-                and self.net_sp_delta == expected
+                operator.eq(proof.callsite_addr, self.callsite_addr)
+                and operator.eq(proof.return_addr, self.return_addr)
+                and operator.eq(proof.target_addr, self.target_addr)
+                and operator.eq(proof.frame_kind.return_frame_width, self.return_frame_bytes)
+                and operator.eq(self.net_sp_delta, expected)
             )
         complete = bool(
-            proven and self.raw_fact_count == CALL_STACK_COORDINATE_SLOTS_8616
-            and self.materialized_count == self.raw_fact_count
+            proven and operator.eq(self.raw_fact_count, CALL_STACK_COORDINATE_SLOTS_8616)
+            and operator.eq(self.materialized_count, self.raw_fact_count)
             and not self.refusals
-            and all(slot is not None for slot in self._slot_values())
+            and all(slot is not None for slot in builtins.iter(self._slot_values()))
         )
         return IRCallStackCoordinateObservation8616(
             self, delta, self.net_sp_delta if proven else None, proven, closed, complete,
         )
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> object:
         """Serialize this coordinate decomposition for diagnostics."""
         return self.observe().to_dict()
 
-    def _observation_payload(self, delta: int | None, proven: bool) -> dict[str, object]:
+    def _observation_payload(self, delta: int | None, proven: cython.bint) -> dict[str, object]:
         """Project already-observed flags without starting a new proof walk."""
         return {
             "kind": "call_stack_coordinates",
@@ -310,7 +320,7 @@ class IRCallStackCoordinates8616:
             "argument_top": (
                 None if self.argument_top is None else self.argument_top.to_dict()
             ),
-            "refusals": [refusal.value for refusal in self.refusals],
+            "refusals": [refusal.value for refusal in iter(self.refusals)],
             "raw_fact_count": self.raw_fact_count,
             "normalized_fact_count": self.normalized_fact_count,
             "classified_fact_count": self.classified_fact_count,

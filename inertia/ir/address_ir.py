@@ -1,3 +1,4 @@
+# cython: language_level=3, infer_types=True
 """Typed address-domain exports for x86-16 IR.
 
 Layer: IR.
@@ -9,6 +10,7 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
+import cython
 
 from inertia.ir.address_ir_8616 import AddressIR8616, build_address_ir_8616, resolved_operand_to_address_ir_8616
 
